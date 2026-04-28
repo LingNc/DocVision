@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-[v4 final] Image-to-Text Converter - Incremental context expansion
-- Initial context: N-up to N+down (default up=3, down=10)
-- Maintains upper/lower edge, AI requests ADDITIONAL lines each time
-- Each tool_call returns ONLY the new (delta) lines, not the full window
-- Max cap per direction: configurable (default 50)
-- Test mode: max 10 images
+[v5] Image-to-Text Converter - Incremental context + CLI test mode
+Usage:
+  python img2text.py                          # full batch run
+  python img2text.py --test                   # test: random 10 images (default)
+  python img2text.py --test --number 5        # test: random 5 images
+  python img2text.py --test --seed 42         # test: random with fixed seed 42
+  python img2text.py --test --seed random     # test: random with random seed (logged)
 """
 
-import os, re, json, base64, time, traceback
+import os, re, json, base64, time, traceback, random, argparse
 from pathlib import Path
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -70,67 +71,76 @@ def get_delta_lines(lines, img_idx, old_up, old_down, new_up, new_down):
             parts.append(f"[L{i}] {lines[i]}")
     return parts
 
-# ─── Tool: INCREMENTAL mode ────────────────────────────────────────
-TOOLS = [{
-    "type": "function",
-    "function": {
-        "name": "get_more_context",
-        "description": (
-            "Request ADDITIONAL lines above or below the image. "
-            "You will receive ONLY the NEW lines (not previously seen content). "
-            "Use this when the current context is insufficient to understand the image."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "more_above": {
-                    "type": "integer",
-                    "description": "How many ADDITIONAL lines to expand UPWARD beyond your current view (0-50).",
-                    "minimum": 0, "maximum": 50
+# ─── Tool builder: max per-request from config ──────────────────────
+def build_tools(max_per_request_up, max_per_request_down):
+    return [{
+        "type": "function",
+        "function": {
+            "name": "get_more_context",
+            "description": (
+                "Request ADDITIONAL lines above or below the image. "
+                "You will receive ONLY the NEW lines (not previously seen content). "
+                "Use this when the current context is insufficient to understand the image."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "more_above": {
+                        "type": "integer",
+                        "description": f"How many ADDITIONAL lines to expand UPWARD beyond your current view (0-{max_per_request_up}).",
+                        "minimum": 0, "maximum": max_per_request_up
+                    },
+                    "more_below": {
+                        "type": "integer",
+                        "description": f"How many ADDITIONAL lines to expand DOWNWARD beyond your current view (0-{max_per_request_down}).",
+                        "minimum": 0, "maximum": max_per_request_down
+                    }
                 },
-                "more_below": {
-                    "type": "integer",
-                    "description": "How many ADDITIONAL lines to expand DOWNWARD beyond your current view (0-50).",
-                    "minimum": 0, "maximum": 50
-                }
-            },
-            "required": ["more_above", "more_below"]
+                "required": ["more_above", "more_below"]
+            }
         }
-    }
-}]
+    }]
 
 # ─── System Prompt ─────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are a professional document analyst. Convert images in a technical Chinese markdown document into lossless text descriptions.
+SYSTEM_PROMPT = """You are a document image analyst. Describe images from  technical Chinese textbook as structured, machine-readable content.
+
+## Core rule: describe WHAT is visible, never WHY or HOW it works
+- If arrows show A→C, B→C, describe that. Do NOT add "A and B execute in parallel."
+- If the image is ambiguous, mark uncertain parts with [?], do not guess.
+
+## Priority: Completeness > Conciseness
+Be exhaustive first (every label, number, arrow, cell), then trim redundancy.
 
 ## Rules:
-1. **Identify image type first**: Table, Flowchart, Gantt Chart, Architecture/Network Diagram, Graph/Chart (bar, line, pie), Formula, Code screenshot, or Simple text/illustration.
-2. **Mermaid** for: flowcharts, gantt charts, sequence diagrams, class diagrams, state diagrams, ER diagrams, mind maps, timeline, Sankey. Output as ```mermaid code block.
-3. **Markdown table** for tabular data: include ALL rows/columns.
-4. **LaTeX** for formulas: $$...$$ for block, $...$ for inline.
-5. **Structured text** for diagrams that cannot be Mermaid: preserve ALL labels, arrows, relationships.
+1. **Identify image type**: Table, Flowchart, Gantt Chart, Architecture/Network Diagram, Graph/Chart, Formula, Code screenshot, or Simple illustration.
+2. **Mermaid** for flowcharts, Gantt charts, sequence diagrams, class diagrams, state diagrams, ER diagrams, mind maps, timeline, Sankey, pie charts, quadrant charts, requirement diagrams. Use ```mermaid code block.
+3. **Markdown table** for tabular data: ALL rows and columns exactly as shown.
+4. **LaTeX** for formulas: $$...$$ block or $...$ inline.
+5. **Structured text** for diagrams not suitable for Mermaid: preserve ALL labels, arrows, relationships shown.
 6. **Code block** for code screenshots.
 7. **Graph description**: key data points, max/min, trends for charts.
 8. **Be EXHAUSTIVE**: every visible text, number, label. No summary.
 
-## Output:
+## Output format:
 [IMG_TYPE: <type>]
 <description / mermaid / table / latex>
 
 ## Tool: get_more_context
-You start with a limited window of surrounding text. If you need MORE context to understand the image, call get_more_context(more_above=N, more_below=M) where N and M are ADDITIONAL lines you want (not totals). You will receive ONLY the new delta lines. You may call this up to 3 times.
+You start with a small window of surrounding text. If you need MORE context to understand the image, call get_more_context(more_above=N, more_below=M) — N and M are ADDITIONAL lines. You receive only the delta. Max 3 calls.
 """
 
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
 def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens, max_tool_rounds=3, max_api_retries=5):
     """
     Call AI API with incremental context expansion.
-    - Starts with default up/down window
-    - AI can request ADDITIONAL lines via get_more_context(more_above=N, more_below=M)
-    - Returns only delta (new) lines each time
-    - Caps at configured max_up / max_down
+    Uses per-request cap from global config (_g_max_up, _g_max_down).
+    No cumulative cap across rounds — AI can keep expanding 3 times.
     """
     cur_up, cur_down = _g_up, _g_down
-    max_up, max_down = _g_max_up, _g_max_down
+    max_per_up, max_per_down = _g_max_up, _g_max_down
+
+    # Build tools dynamically from current config
+    tools = build_tools(max_per_up, max_per_down)
 
     # Initial context
     parts, start, end = get_context_lines(lines, img_line_idx, cur_up, cur_down)
@@ -140,12 +150,13 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens, 
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": [
             {"type": "text", "text": (
-                f"Analyze this image from a technical textbook. "
-                f"You currently see {cur_up} lines above and {cur_down} lines below the image "
+                f"Describe this image. "
+                f"You currently have {cur_up} lines above and {cur_down} lines below the image "
                 f"(window: [{img_line_idx - cur_up} to {img_line_idx + cur_down}]).\n\n"
                 f"Context:\n```\n{ctx_text}\n```\n\n"
                 f"If you need MORE context, call get_more_context(more_above=N, more_below=M) "
-                f"to request ADDITIONAL lines. You will receive only the new delta lines."
+                f"to request ADDITIONAL lines (max {max_per_up} above, {max_per_down} below per request). "
+                f"You will receive only the new delta lines."
             )},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
         ]}
@@ -157,7 +168,7 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens, 
                 response = client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    tools=TOOLS if round_num < max_tool_rounds else None,
+                    tools=tools if round_num < max_tool_rounds else None,
                     tool_choice="auto" if round_num < max_tool_rounds else "none",
                     temperature=0.3, max_tokens=max_tokens
                 )
@@ -184,23 +195,22 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens, 
                     more_up = args.get("more_above", 0)
                     more_down = args.get("more_below", 0)
 
-                    # Calculate new window, capped
-                    new_up = min(cur_up + more_up, max_up)
-                    new_down = min(cur_down + more_down, max_down)
+                    # Clamp each REQUEST to per-request max; no cumulative cap
+                    actual_up = min(more_up, max_per_up)
+                    actual_down = min(more_down, max_per_down)
+                    new_up = cur_up + actual_up
+                    new_down = cur_down + actual_down
 
-                    actual_added_up = new_up - cur_up
-                    actual_added_down = new_down - cur_down
-
-                    log(f"    [ToolCall] AI wants +{more_up}up/+{more_down}down → "
-                        f"window {cur_up}/{cur_down}→{new_up}/{new_down} "
-                        f"(capped: max={max_up}/{max_down})")
+                    log(f"    [ToolCall] AI wants +{more_up}up/+{more_down}down -> "
+                        f"window {cur_up}/{cur_down}>{new_up}/{new_down} "
+                        f"(per-request max={max_per_up}/{max_per_down})")
 
                     # Get ONLY delta (new) lines
                     delta = get_delta_lines(lines, img_line_idx, cur_up, cur_down, new_up, new_down)
 
                     if delta:
                         result_text = (
-                            f"Added {actual_added_up} lines above and {actual_added_down} lines below. "
+                            f"Added {actual_up} lines above and {actual_down} lines below. "
                             f"Window is now [{img_line_idx - new_up} to {img_line_idx + new_down}].\n\n"
                             f"NEW content (delta only):\n\n" + "\n".join(delta)
                         )
@@ -243,9 +253,18 @@ def load_progress(pf):
 def save_progress(pf, data):
     with open(pf, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ─── Main (test mode: max 10) ─────────────────────────────────────
+# ─── Main ────────────────────────────────────────────────────────
+def parse_args():
+    p = argparse.ArgumentParser(description="Image-to-Text Converter")
+    p.add_argument("--test", action="store_true", help="Enable test mode (random sample)")
+    p.add_argument("--number", type=int, default=10, help="Number of test images (default: 10)")
+    p.add_argument("--seed", type=str, default=None, help="Random seed: 'random' or a number (for reproducibility)")
+    return p.parse_args()
+
 def main():
     global _g_up, _g_down, _g_max_up, _g_max_down
+    args = parse_args()
+
     config = load_config()
     base_url = config["api"]["base_url"]
     api_key  = config["api"]["api_key"]
@@ -268,10 +287,13 @@ def main():
     client = OpenAI(base_url=base_url, api_key=api_key)
 
     md_files = sorted(indir.glob("*.md"))
+
+    mode_str = f"TEST MODE (random sample, n={args.number})" if args.test else "FULL BATCH MODE"
     log(f"Found {len(md_files)} file(s) | Model: {model} | Default ctx: up={_g_up} down={_g_down}")
-    log(f"Max tool rounds: {max_ret} | TEST MODE: max 10 images")
+    log(f"Max tool rounds: {max_ret} | Max window: up={_g_max_up} down={_g_max_down} | {mode_str}")
     log("=" * 60)
 
+    # Collect ALL tasks
     all_tasks = []
     md_cache = {}
     for mdf in md_files:
@@ -289,9 +311,30 @@ def main():
                 if i < len(lines) and s <= pos < lstarts[i + 1]: il = i; break
             all_tasks.append((f"{mdf.name}::{m.group(1)}", mdf.name, m.group(1), il, m.start(), m.end()))
 
-    log(f"Total available: {len(all_tasks)}")
-    pending = [t for t in all_tasks if t[0] not in progress][:10]
-    log(f"Done: {len(all_tasks)-len(pending)} | Test: {len(pending)}")
+    log(f"Total images available: {len(all_tasks)}")
+
+    if args.test:
+        # ── TEST MODE: random sample ──
+        if args.seed:
+            if args.seed.lower() == "random":
+                seed = random.randint(0, 2**31 - 1)
+            else:
+                seed = int(args.seed)
+        else:
+            seed = 42  # default fixed seed for reproducibility
+        random.seed(seed)
+        log(f"Test seed: {seed}  (use --seed {seed} to reproduce this run)")
+
+        # Remove already done and sample
+        remaining = [t for t in all_tasks if t[0] not in progress]
+        n = min(args.number, len(remaining))
+        pending = random.sample(remaining, n) if n > 0 else []
+        log(f"Randomly selected: {n} images (seed={seed})")
+    else:
+        # ── FULL MODE ──
+        pending = [t for t in all_tasks if t[0] not in progress]
+
+    log(f"Already done: {len(all_tasks) - len(pending)} | To process: {len(pending)}")
     log("=" * 60)
 
     if not pending:
@@ -312,12 +355,13 @@ def main():
                     progress[key] = {"result": result, "start": ms, "end": me, "img_path": ip}
                     done += 1; save_progress(pf, progress)
                     log("-" * 50)
-                    log(f"[{done}/{len(pending)}] {ip}")
+                    log(f"[{done}/{len(pending)}] {ip} (from {key.split('::')[0]})")
                     log(f"RESULT:\n{result[:500]}")
                     log("-" * 50)
                 except Exception as e:
                     log(f"  ERROR: {e}"); traceback.print_exc()
 
+    # ─── Write output ──────────────────────────────────────────
     log("\nWriting final files...")
     for mdf in md_files:
         content, lines = md_cache[mdf.name]
