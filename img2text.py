@@ -14,7 +14,8 @@ import os, re, json, base64, time, traceback, random, argparse
 from pathlib import Path
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
+from threading import Lock, Thread
+from queue import Queue
 
 import httpx
 import yaml
@@ -313,6 +314,7 @@ def main():
     api_connect_timeout = config["options"].get("api_connect_timeout", 60)
     api_max_retries = config["options"].get("api_max_retries", 3)
     rate_limit_retries = config["options"].get("rate_limit_retries", 0)
+    concurrency = config["options"].get("concurrency", 3)
     indir   = Path(config["paths"]["input_dir"])
     imgdir  = Path(config["paths"]["images_dir"])
     outdir  = Path(config["paths"]["output_dir"])
@@ -337,7 +339,7 @@ def main():
 
     mode_str = f"TEST MODE (random sample, n={args.number})" if args.test else "FULL BATCH MODE"
     log(f"Found {len(md_files)} file(s) | Model: {model} | Default ctx: up={_g_up} down={_g_down}")
-    log(f"Max tool rounds: {max_ret} | Max window: up={_g_max_up} down={_g_max_down} | {mode_str}")
+    log(f"Max tool rounds: {max_ret} | Max window: up={_g_max_up} down={_g_max_down} | Concurrency: {concurrency} | {mode_str}")
     log("=" * 60)
 
     # Collect ALL tasks
@@ -407,20 +409,46 @@ def main():
             except Exception as e:
                 return t[0], f"[IMG_WORKER_FATAL: {e}]", t[4], t[5], t[2]
 
-        done = 0
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            fs = {ex.submit(worker, t): t for t in pending}
-            for f in as_completed(fs):
+        # Use a producer-consumer pattern: workers put results into a queue,
+        # a single writer thread takes results and writes progress/logs.
+        result_queue = Queue()
+        total = len(pending)
+
+        def writer_thread():
+            done_count = 0
+            while done_count < total:
+                key, result, ms, me, ip = result_queue.get()
                 try:
-                    key, result, ms, me, ip = f.result()
                     progress[key] = {"result": result, "start": ms, "end": me, "img_path": ip}
-                    done += 1; save_progress(pf, progress)
+                    done_count += 1
+                    save_progress(pf, progress)
                     log("-" * 50)
-                    log(f"[{done}/{len(pending)}] {ip} (from {key.split('::')[0]})")
+                    log(f"[{done_count}/{total}] {ip} (from {key.split('::')[0]})")
                     log(f"RESULT:\n{result[:500]}")
                     log("-" * 50)
                 except Exception as e:
-                    log(f"  ERROR: {e}"); traceback.print_exc()
+                    log(f"  Writer error: {e}"); traceback.print_exc()
+                finally:
+                    result_queue.task_done()
+
+        writer = Thread(target=writer_thread)
+        writer.start()
+
+        with ThreadPoolExecutor(max_workers=concurrency) as ex:
+            fs = {ex.submit(worker, t): t for t in pending}
+            for f in as_completed(fs):
+                t = fs[f]
+                try:
+                    res = f.result()
+                    result_queue.put(res)
+                except Exception as e:
+                    log(f"  Worker fatal: {e}"); traceback.print_exc()
+                    # ensure writer can finish
+                    result_queue.put((t[0], f"[IMG_SUBMIT_ERROR: {e}]", t[4], t[5], t[2]))
+
+        # wait until writer processed all results
+        result_queue.join()
+        writer.join()
 
     # ─── Write output ──────────────────────────────────────────
     log("\nWriting final files...")
