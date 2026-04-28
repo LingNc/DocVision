@@ -130,7 +130,10 @@ If ambiguous or overly complex, call get_more_context to resolve; if still uncle
 Start your response DIRECTLY with "[IMG_TYPE:" (no extra text before).
 
 ## Tool: get_more_context
-Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines. You receive only the delta. Max 3 calls.If uncertain how many lines you need, request half of the maximum ({half_up} for upward, {half_down} for downward). Never request 0.
+Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines.
+- more_above: additional lines to fetch above current view.
+- more_below: additional lines to fetch below current view.
+You receive only the delta. Max 3 calls.If uncertain how many lines you need, request half of the maximum ({half_up} for upward, {half_down} for downward). Never request 0.
 """
 
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
@@ -231,13 +234,13 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
                     more_up = args.get("more_above", 0)
                     more_down = args.get("more_below", 0)
 
-                    if more_up == 0 and more_down == 0:
-                        log(f"    [ToolCall] AI requested 0 expansion, ignoring")
-                        result_text = (
-                            "Invalid: must request >=1 line. Please proceed directly."
-                        )
-                        messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
-                        continue
+                    # if more_up == 0 and more_down == 0:
+                    #     log(f"    [ToolCall] AI requested 0 expansion, ignoring")
+                    #     result_text = (
+                    #         "Invalid: must request >=1 line. Please proceed directly."
+                    #     )
+                    #     messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
+                    #     continue
 
                     # Clamp each REQUEST to per-request max; no cumulative cap
                     actual_up = min(more_up, max_per_up)
