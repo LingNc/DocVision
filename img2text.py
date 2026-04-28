@@ -104,12 +104,11 @@ def build_tools(max_per_request_up, max_per_request_down):
 # ─── System Prompt ─────────────────────────────────────────────────
 SYSTEM_PROMPT = """You are a document image analyst. Describe images from  technical Chinese textbook as structured, machine-readable content.
 
-## Core rule: describe WHAT is visible, never WHY or HOW it works
-- If arrows show A→C, B→C, describe that. Do NOT add "A and B execute in parallel."
-- If the image is ambiguous, mark uncertain parts with [?], do not guess.
+## Priority: Correctness > Completeness > Conciseness
+Ensure correctness by verifying image content (labels, arrows, values) against surrounding text. If window insufficient, call get_more_context. Then be exhaustive (every visible element). Finally trim redundancy.
 
-## Priority: Completeness > Conciseness
-Be exhaustive first (every label, number, arrow, cell), then trim redundancy.
+## Core rule: describe WHAT is visible, never WHY/HOW.
+If ambiguous or overly complex, use context to resolve; if still unclear, mark [?] and describe only what is certain. No guessing.
 
 ## Rules:
 1. **Identify image type**: Table, Flowchart, Gantt Chart, Architecture/Network Diagram, Graph/Chart, Formula, Code screenshot, or Simple illustration.
@@ -126,7 +125,7 @@ Be exhaustive first (every label, number, arrow, cell), then trim redundancy.
 <description / mermaid / table / latex>
 
 ## Tool: get_more_context
-You start with a small window of surrounding text. If you need MORE context to understand the image, call get_more_context(more_above=N, more_below=M) — N and M are ADDITIONAL lines. You receive only the delta. Max 3 calls.
+Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines. You receive only the delta. Max 3 calls.
 """
 
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
@@ -373,7 +372,7 @@ def main():
             continue
         nc = content
         for s, e, result, ip in sorted(reps, key=lambda x: -x[0]):
-            nc = nc[:s] + f"\n\n<!-- IMG: {ip} -->\n**[AI Analysis]**\n\n{result}\n\n<!-- /IMG -->\n\n" + nc[e:]
+            nc = nc[:s] + f"\n\n<!-- IMG: {ip} -->\n[AI] {result}\n\n<!-- /IMG -->\n\n" + nc[e:]
         (outdir / mdf.name).write_text(nc, encoding="utf-8")
         log(f"  Saved: {mdf.name} ({len(reps)} replacements)")
 
