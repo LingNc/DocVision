@@ -126,8 +126,11 @@ If ambiguous or overly complex, call get_more_context to resolve; if still uncle
 [IMG_TYPE: <type>]
 <description / mermaid / table / latex>
 
+## CRITICAL
+Start your response DIRECTLY with "[IMG_TYPE:" (no extra text before).
+
 ## Tool: get_more_context
-Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines. You receive only the delta. Max 3 calls.
+Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines. You receive only the delta. Max 3 calls.If uncertain how many lines you need, request half of the maximum ({half_up} for upward, {half_down} for downward). Never request 0.
 """
 
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
@@ -142,6 +145,11 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
     cur_up, cur_down = _g_up, _g_down
     max_per_up, max_per_down = _g_max_up, _g_max_down
 
+    # 动态计算一半的最大值
+    half_up = max_per_up // 2
+    half_down = max_per_down // 2
+    dynamic_prompt = SYSTEM_PROMPT.format(half_up=half_up, half_down=half_down)
+
     # Build tools dynamically from current config
     tools = build_tools(max_per_up, max_per_down)
 
@@ -150,13 +158,13 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
     ctx_text = "\n".join(parts)
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": dynamic_prompt},
         {"role": "user", "content": [
             {"type": "text", "text": (
                 f"The image to describe is at line {img_line_idx}. "
                 f"Context: [{img_line_idx - cur_up} to {img_line_idx + cur_down}] ({cur_up}↑, {cur_down}↓).\n"
                 f"```\n{ctx_text}\n```\n"
-                f"Need more? Call get_more_context(↑N, ↓M) — max per call: ↑{max_per_up}, ↓{max_per_down}."
+                f"Understand image before output. If confused, call get_more_context(↑N, ↓M) — max per call: ↑{max_per_up}, ↓{max_per_down}."
             )},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
         ]}
@@ -222,6 +230,14 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
                     args = json.loads(tc.function.arguments)
                     more_up = args.get("more_above", 0)
                     more_down = args.get("more_below", 0)
+
+                    if more_up == 0 and more_down == 0:
+                        log(f"    [ToolCall] AI requested 0 expansion, ignoring")
+                        result_text = (
+                            "Invalid: must request >=1 line. Please proceed directly."
+                        )
+                        messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
+                        continue
 
                     # Clamp each REQUEST to per-request max; no cumulative cap
                     actual_up = min(more_up, max_per_up)
