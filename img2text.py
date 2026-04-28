@@ -132,7 +132,8 @@ Start with a small context window. To get more, call get_more_context(more_above
 
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
 def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
-                       max_tool_rounds=3, max_api_retries=3, rate_limit_retries=0):
+                       max_tool_rounds=3, max_api_retries=3, rate_limit_retries=0,
+                       enable_thinking=None):
     """
     Call AI API with incremental context expansion.
     Uses per-request cap from global config (_g_max_up, _g_max_down).
@@ -173,7 +174,8 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
                     messages=messages,
                     tools=tools if round_num < max_tool_rounds else None,
                     tool_choice="auto" if round_num < max_tool_rounds else "none",
-                    temperature=0.3, max_tokens=max_tokens
+                    temperature=0.3, max_tokens=max_tokens,
+                    enable_thinking=enable_thinking,
                 )
                 break
             except Exception as e:
@@ -252,14 +254,21 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
     # Forced final
     messages.append({"role": "user", "content": "Provide your best analysis now."})
     try:
-        r = client.chat.completions.create(model=model, messages=messages, temperature=0.3, max_tokens=max_tokens)
+        r = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=max_tokens,
+            enable_thinking=enable_thinking,
+        )
         return r.choices[0].message.content or "[IMG_EMPTY_RESPONSE]"
     except:
         return "[IMG_ERROR]"
 
 # ─── Process one image ─────────────────────────────────────────────
 def process_one_image(client, model, images_dir, img_path_str, lines, img_line_idx,
-                       max_tool_rounds=3, max_tokens=65536, max_api_retries=3, rate_limit_retries=0):
+                       max_tool_rounds=3, max_tokens=65536, max_api_retries=3,
+                       rate_limit_retries=0, enable_thinking=None):
     img_file = images_dir / Path(img_path_str).name
     if not img_file.exists(): return f"[IMG_MISSING: {img_path_str}]"
     try: img_b64 = image_to_base64(img_file)
@@ -275,6 +284,7 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
             max_tool_rounds,
             max_api_retries,
             rate_limit_retries,
+            enable_thinking,
         ) or "").strip()
     except Exception as e:
         return f"[IMG_PROCESS_ERROR: {e}]"
@@ -304,6 +314,7 @@ def main():
     base_url = config["api"]["base_url"]
     api_key  = config["api"]["api_key"]
     model    = config["api"]["model"]
+    enable_thinking = config["api"].get("enable_thinking", False)
     max_ret = config["options"]["max_retries"]
     _g_up    = config["options"]["max_context_lines_up"]
     _g_down  = config["options"]["max_context_lines_down"]
@@ -404,6 +415,7 @@ def main():
                     max_tok,
                     api_max_retries,
                     rate_limit_retries,
+                    enable_thinking,
                 )
                 return key, r, ms, me, ip
             except Exception as e:
