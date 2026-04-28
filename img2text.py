@@ -24,6 +24,8 @@ from openai import OpenAI
 from PIL import Image
 
 print_lock = Lock()
+_log_file_path = None          # 全局日志文件路径
+_error_log_path = None         # 错误日志文件路径
 # Width (digits) used to format thread ids in logs; set in main() based on concurrency
 _thread_id_width = 2
 _g_up, _g_down, _g_max_up, _g_max_down = 3, 10, 50, 50
@@ -43,8 +45,41 @@ def log(*args):
     else:
         tid = 0
     tid_str = str(tid).zfill(_thread_id_width)
+    msg = f"[{ts()}][T{tid_str}] " + " ".join(str(a) for a in args)
+
     with print_lock:
-        print(f"[{ts()}][T{tid_str}]", *args, flush=True)
+        print(msg, flush=True)
+        # 如果日志文件路径已设置，则写入文件
+        if _log_file_path:
+            try:
+                with open(_log_file_path, "a", encoding="utf-8") as f:
+                    f.write(msg + "\n")
+            except Exception:
+                pass   # 避免因日志写入失败影响主流程
+
+def log_error(*args):
+    """记录错误到控制台和错误日志文件"""
+    msg = " ".join(str(a) for a in args)
+    log(f"  [ERROR] {msg}")
+    if _error_log_path:
+        with print_lock:
+            try:
+                with open(_error_log_path, "a", encoding="utf-8") as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [ERROR] {msg}\n")
+            except Exception:
+                pass
+
+def log_warning(*args):
+    """记录警告到控制台和错误日志文件"""
+    msg = " ".join(str(a) for a in args)
+    log(f"  [WARNING] {msg}")
+    if _error_log_path:
+        with print_lock:
+            try:
+                with open(_error_log_path, "a", encoding="utf-8") as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [WARNING] {msg}\n")
+            except Exception:
+                pass
 
 def load_config(path="config.yaml"):
     with open(path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
@@ -335,10 +370,10 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
             if idx > 0:
                 # 前面有内容，输出警告
                 prefix = result[:idx].strip()
-                log(f"  [Warning] ⚠ Unexpected prefix before '[IMG_TYPE:' in {img_path_str}: {prefix[:80]}")
+                log_warning(f"Unexpected prefix before '[IMG_TYPE:' in {img_path_str}: {prefix[:80]}")
             result = result[idx:]
         else:
-            log(f"  [Warning] ⚠ No '[IMG_TYPE:' found in result from {img_path_str}: {result[:100]}")
+            log_error(f"No '[IMG_TYPE:' found in result from {img_path_str}: {result[:100]}")
 
         return result.strip()
     except Exception as e:
@@ -390,6 +425,18 @@ def main():
     outdir  = Path(config["paths"]["output_dir"])
 
     outdir.mkdir(parents=True, exist_ok=True)
+
+    # 设置全局日志文件路径
+    global _log_file_path, _error_log_path
+    _log_file_path = outdir / "img2text.log"
+    # 清空旧日志
+    if _log_file_path.exists():
+        _log_file_path.unlink()
+
+    # 设置错误日志文件路径
+    _error_log_path = outdir / "img2text_errors.log"
+    if _error_log_path.exists():
+        _error_log_path.unlink()
 
     pf = str(outdir / "_progress.json")
     progress = load_progress(pf)
