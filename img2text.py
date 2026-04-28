@@ -14,6 +14,7 @@ import os, re, json, base64, time, traceback, random, argparse
 from pathlib import Path
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 from threading import Lock, Thread
 from queue import Queue
 
@@ -23,11 +24,27 @@ from openai import OpenAI
 from PIL import Image
 
 print_lock = Lock()
+# Width (digits) used to format thread ids in logs; set in main() based on concurrency
+_thread_id_width = 2
 _g_up, _g_down, _g_max_up, _g_max_down = 3, 10, 50, 50
 
 def ts(): return time.strftime("%H:%M:%S")
+
 def log(*args):
-    with print_lock: print(f"[{ts()}]", *args, flush=True)
+    # 获取当前线程短编号用于日志（工作线程从1开始，主线程/其他使用0）
+    tname = threading.current_thread().name
+    tid = None
+    if "ThreadPoolExecutor" in tname and "_" in tname:
+        try:
+            num_str = tname.split("_")[-1]
+            tid = int(num_str) + 1
+        except Exception:
+            tid = 0
+    else:
+        tid = 0
+    tid_str = str(tid).zfill(_thread_id_width)
+    with print_lock:
+        print(f"[{ts()}][T{tid_str}]", *args, flush=True)
 
 def load_config(path="config.yaml"):
     with open(path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
@@ -352,6 +369,9 @@ def main():
     api_max_retries = config["options"].get("api_max_retries", 3)
     rate_limit_retries = config["options"].get("rate_limit_retries", 0)
     concurrency = config["options"].get("concurrency", 3)
+    # 设置日志线程ID宽度（根据并发数自动对齐）
+    global _thread_id_width
+    _thread_id_width = len(str(concurrency))
     indir   = Path(config["paths"]["input_dir"])
     imgdir  = Path(config["paths"]["images_dir"])
     outdir  = Path(config["paths"]["output_dir"])
