@@ -133,7 +133,7 @@ Start with a small context window. To get more, call get_more_context(more_above
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
 def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
                        max_tool_rounds=3, max_api_retries=3, rate_limit_retries=0,
-                       enable_thinking=None):
+                       enable_thinking=None, temperature=0.3):
     """
     Call AI API with incremental context expansion.
     Uses per-request cap from global config (_g_max_up, _g_max_down).
@@ -169,13 +169,17 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
         rate_limit_retry = 0
         while True:
             try:
+                extra_body = {}
+                if enable_thinking is not None:
+                    extra_body["enable_thinking"] = enable_thinking
                 response = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     tools=tools if round_num < max_tool_rounds else None,
                     tool_choice="auto" if round_num < max_tool_rounds else "none",
-                    temperature=0.3, max_tokens=max_tokens,
-                    enable_thinking=enable_thinking,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body
                 )
                 break
             except Exception as e:
@@ -254,12 +258,15 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
     # Forced final
     messages.append({"role": "user", "content": "Provide your best analysis now."})
     try:
+        extra_body = {}
+        if enable_thinking is not None:
+            extra_body["enable_thinking"] = enable_thinking
         r = client.chat.completions.create(
             model=model,
             messages=messages,
-            temperature=0.3,
+            temperature=temperature,
             max_tokens=max_tokens,
-            enable_thinking=enable_thinking,
+            extra_body=extra_body
         )
         return r.choices[0].message.content or "[IMG_EMPTY_RESPONSE]"
     except:
@@ -268,7 +275,7 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
 # ─── Process one image ─────────────────────────────────────────────
 def process_one_image(client, model, images_dir, img_path_str, lines, img_line_idx,
                        max_tool_rounds=3, max_tokens=65536, max_api_retries=3,
-                       rate_limit_retries=0, enable_thinking=None):
+                       rate_limit_retries=0, enable_thinking=None, temperature=0.3):
     img_file = images_dir / Path(img_path_str).name
     if not img_file.exists(): return f"[IMG_MISSING: {img_path_str}]"
     try: img_b64 = image_to_base64(img_file)
@@ -285,6 +292,7 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
             max_api_retries,
             rate_limit_retries,
             enable_thinking,
+            temperature,
         ) or "").strip()
     except Exception as e:
         return f"[IMG_PROCESS_ERROR: {e}]"
@@ -321,6 +329,7 @@ def main():
     _g_max_up  = config["options"].get("max_window_up", 50)
     _g_max_down = config["options"].get("max_window_down", 50)
     max_tok  = config["options"]["max_tokens"]
+    temperature = config["options"].get("temperature", 0.3)
     api_timeout = config["options"].get("api_timeout", 400)
     api_connect_timeout = config["options"].get("api_connect_timeout", 60)
     api_max_retries = config["options"].get("api_max_retries", 3)
@@ -416,6 +425,7 @@ def main():
                     api_max_retries,
                     rate_limit_retries,
                     enable_thinking,
+                    temperature,
                 )
                 return key, r, ms, me, ip
             except Exception as e:
