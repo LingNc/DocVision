@@ -1,0 +1,19 @@
+# AI Image-to-Text config (example - copy to config.yaml and fill in your keys)
+api:
+  base_url: "https://your-api-proxy.com/v1"
+  api_key: "sk-YOUR-API-KEY-HERE"
+  model: "qwen3.6-plus"
+
+# Processing options
+options:
+  max_context_lines_up: 3      # default: look up 3 lines above the image
+  max_context_lines_down: 10    # default: look down 10 lines below the image
+  max_retries: 3               # max retries for AI to request more context
+  temperature: 0.3
+  max_tokens: 65536
+
+# Paths
+paths:
+  input_dir: "./output"        # dir with merged .md files
+  images_dir: "./output/images"
+  output_dir: "./finally"
