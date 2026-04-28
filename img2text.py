@@ -131,9 +131,7 @@ Start your response DIRECTLY with "[IMG_TYPE:" (no extra text before).
 
 ## Tool: get_more_context
 Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines.
-- more_above: additional lines to fetch above current view.
-- more_below: additional lines to fetch below current view.
-You receive only the delta. Max 3 calls.If uncertain how many lines you need, request half of the maximum ({half_up} for upward, {half_down} for downward). Never request 0.
+You receive only the delta. Max 3 calls.
 """
 
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
@@ -149,9 +147,9 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
     max_per_up, max_per_down = _g_max_up, _g_max_down
 
     # 动态计算一半的最大值
-    half_up = max_per_up // 2
-    half_down = max_per_down // 2
-    dynamic_prompt = SYSTEM_PROMPT.format(half_up=half_up, half_down=half_down)
+    # half_up = max_per_up // 2
+    # half_down = max_per_down // 2
+    # dynamic_prompt = SYSTEM_PROMPT.format(half_up=half_up, half_down=half_down)
 
     # Build tools dynamically from current config
     tools = build_tools(max_per_up, max_per_down)
@@ -161,7 +159,7 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
     ctx_text = "\n".join(parts)
 
     messages = [
-        {"role": "system", "content": dynamic_prompt},
+        {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": [
             {"type": "text", "text": (
                 f"The image to describe is at line {img_line_idx}. "

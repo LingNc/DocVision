@@ -7,8 +7,8 @@ api:
 
 # Processing options
 options:
-  max_context_lines_up: 3      # initial lines above image
-  max_context_lines_down: 10   # initial lines below image
+  max_context_lines_up: 10      # initial lines above image
+  max_context_lines_down: 5   # initial lines below image
   max_window_up: 50            # maximum total lines above (cap)
   max_window_down: 50          # maximum total lines below (cap)
   max_retries: 3               # max AI tool_call rounds for more context
