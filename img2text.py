@@ -88,12 +88,12 @@ def build_tools(max_per_request_up, max_per_request_down):
                     "more_above": {
                         "type": "integer",
                         "description": f"How many ADDITIONAL lines to expand UPWARD beyond your current view (0-{max_per_request_up}).",
-                        "minimum": 0, "maximum": max_per_request_up
+                        "minimum": 1, "maximum": max_per_request_up
                     },
                     "more_below": {
                         "type": "integer",
                         "description": f"How many ADDITIONAL lines to expand DOWNWARD beyond your current view (0-{max_per_request_down}).",
-                        "minimum": 0, "maximum": max_per_request_down
+                        "minimum": 1, "maximum": max_per_request_down
                     }
                 },
                 "required": ["more_above", "more_below"]
@@ -105,10 +105,10 @@ def build_tools(max_per_request_up, max_per_request_down):
 SYSTEM_PROMPT = """You are a document image analyst. Describe images from  technical Chinese textbook as structured, machine-readable content.
 
 ## Priority: Correctness > Completeness > Conciseness
-Ensure correctness by verifying image content (labels, arrows, values) against surrounding text. If window insufficient, call get_more_context. Then be exhaustive (every visible element). Finally trim redundancy.
+First ensure you understand the image content. Then ensure correctness by verifying image content (labels, arrows, values) against surrounding text. If window insufficient or content is unclear, call get_more_context. Then be exhaustive (every visible element). Finally trim redundancy.
 
 ## Core rule: describe WHAT is visible, never WHY/HOW.
-If ambiguous or overly complex, use context to resolve; if still unclear, mark [?] and describe only what is certain. No guessing.
+If ambiguous or overly complex, call get_more_context to resolve; if still unclear, mark [?] and describe only what is certain. No guessing.
 
 ## Rules:
 1. **Identify image type**: Table, Flowchart, Gantt Chart, Architecture/Network Diagram, Graph/Chart, Formula, Code screenshot, or Simple illustration.
@@ -279,7 +279,6 @@ def main():
     outdir  = Path(config["paths"]["output_dir"])
 
     outdir.mkdir(parents=True, exist_ok=True)
-    (outdir / "images").mkdir(parents=True, exist_ok=True)
 
     pf = str(outdir / "_progress.json")
     progress = load_progress(pf)
