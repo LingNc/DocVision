@@ -10,7 +10,7 @@ Usage:
   python img2text.py --test --seed random     # test: random with random seed (logged)
 """
 
-import os, re, json, base64, time, traceback, random, argparse
+import os, re, json, base64, time, traceback, random, argparse, signal, sys
 from pathlib import Path
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -490,10 +490,11 @@ def main():
                 finally:
                     result_queue.task_done()
 
-        writer = Thread(target=writer_thread)
+        writer = Thread(target=writer_thread, daemon=True)
         writer.start()
 
-        with ThreadPoolExecutor(max_workers=concurrency) as ex:
+        ex = ThreadPoolExecutor(max_workers=concurrency)
+        try:
             fs = {ex.submit(worker, t): t for t in pending}
             for f in as_completed(fs):
                 t = fs[f]
@@ -504,10 +505,9 @@ def main():
                     log(f"  Worker fatal: {e}"); traceback.print_exc()
                     # ensure writer can finish
                     result_queue.put((t[0], f"[IMG_SUBMIT_ERROR: {e}]", t[4], t[5], t[2]))
-
-        # wait until writer processed all results
-        result_queue.join()
-        writer.join()
+        except KeyboardInterrupt:
+            log("\nCtrl+C received, exiting...")
+            sys.exit(1)   # 立即退出进程
 
     # ─── Write output ──────────────────────────────────────────
     log("\nWriting final files...")
