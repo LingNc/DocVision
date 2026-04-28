@@ -151,13 +151,10 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": [
             {"type": "text", "text": (
-                f"Describe this image. "
-                f"You currently have {cur_up} lines above and {cur_down} lines below the image "
-                f"(window: [{img_line_idx - cur_up} to {img_line_idx + cur_down}]).\n\n"
-                f"Context:\n```\n{ctx_text}\n```\n\n"
-                f"If you need MORE context, call get_more_context(more_above=N, more_below=M) "
-                f"to request ADDITIONAL lines (max {max_per_up} above, {max_per_down} below per request). "
-                f"You will receive only the new delta lines."
+                f"The image to describe is at line {img_line_idx}. "
+                f"Context: [{img_line_idx - cur_up} to {img_line_idx + cur_down}] ({cur_up}↑, {cur_down}↓).\n"
+                f"```\n{ctx_text}\n```\n"
+                f"Need more? Call get_more_context(↑N, ↓M) — max per call: ↑{max_per_up}, ↓{max_per_down}."
             )},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
         ]}
@@ -225,7 +222,7 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
                     new_up = cur_up + actual_up
                     new_down = cur_down + actual_down
 
-                    log(f"    [ToolCall] AI wants +{more_up}up/+{more_down}down -> "
+                    log(f"    [ToolCall] AI wants +{more_up}up/-{more_down}down -> "
                         f"window {cur_up}/{cur_down}>{new_up}/{new_down} "
                         f"(per-request max={max_per_up}/{max_per_down})")
 
