@@ -144,7 +144,7 @@ If ambiguous or overly complex, call get_more_context to resolve; if still uncle
 <description / mermaid / table / latex>
 
 ## CRITICAL
-Start your response DIRECTLY with "[IMG_TYPE:" (no extra text before).
+Start your response DIRECTLY with "[IMG_TYPE:" (no extra text before). Do NOT include any introductory phrases, conversational text, meta-commentary, or analysis before "[IMG_TYPE:". Wrong: "Based on the image...".
 
 ## Tool: get_more_context
 Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines.
@@ -315,7 +315,7 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
     try: img_b64 = image_to_base64(img_file)
     except Exception as e: return f"[IMG_ERROR: {img_path_str} - {e}]"
     try:
-        return (call_ai_with_tools(
+        result = (call_ai_with_tools(
             client,
             model,
             img_b64,
@@ -328,6 +328,19 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
             enable_thinking,
             temperature,
         ) or "").strip()
+
+        # 强制清理：移除 [IMG_TYPE: 之前的所有前缀内容，并在有前缀时警告
+        idx = result.find("[IMG_TYPE:")
+        if idx != -1:
+            if idx > 0:
+                # 前面有内容，输出警告
+                prefix = result[:idx].strip()
+                log(f"  [Warning] ⚠ Unexpected prefix before '[IMG_TYPE:' in {img_path_str}: {prefix[:80]}")
+            result = result[idx:]
+        else:
+            log(f"  [Warning] ⚠ No '[IMG_TYPE:' found in result from {img_path_str}: {result[:100]}")
+
+        return result.strip()
     except Exception as e:
         return f"[IMG_PROCESS_ERROR: {e}]"
 
