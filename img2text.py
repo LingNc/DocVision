@@ -16,6 +16,7 @@ from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
+import httpx
 import yaml
 from openai import OpenAI
 from PIL import Image
@@ -129,7 +130,8 @@ Start with a small context window. To get more, call get_more_context(more_above
 """
 
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
-def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens, max_tool_rounds=3, max_api_retries=5):
+def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
+                       max_tool_rounds=3, max_api_retries=3, rate_limit_retries=0):
     """
     Call AI API with incremental context expansion.
     Uses per-request cap from global config (_g_max_up, _g_max_down).
@@ -161,8 +163,12 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens, 
         ]}
     ]
 
+    rate_limit_limit = 100 if rate_limit_retries == 0 else rate_limit_retries
+
     for round_num in range(max_tool_rounds + 1):
-        for retry in range(max_api_retries):
+        retry = 0
+        rate_limit_retry = 0
+        while True:
             try:
                 response = client.chat.completions.create(
                     model=model,
@@ -174,11 +180,30 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens, 
                 break
             except Exception as e:
                 err = str(e)
-                if "429" in err or "rate" in err.lower():
-                    time.sleep(min(2**retry * 2, 30))
-                elif retry < max_api_retries - 1:
+                err_lower = err.lower()
+
+                if "429" in err or "rate" in err_lower:
+                    if rate_limit_retry < rate_limit_limit:
+                        wait = min(2 ** rate_limit_retry * 2, 60)
+                        time.sleep(wait)
+                        rate_limit_retry += 1
+                        continue
+                    return "[IMG_RATE_LIMIT_EXCEEDED]"
+
+                if any(kw in err_lower for kw in ("connect", "timeout", "handshake", "timed out")):
+                    if retry < max_api_retries:
+                        wait = min(2 ** retry * 5, 60)
+                        time.sleep(wait)
+                        retry += 1
+                        continue
+                    return "[IMG_CONNECTION_TIMEOUT]"
+
+                if retry < max_api_retries:
                     time.sleep(2)
-                else: raise
+                    retry += 1
+                    continue
+
+                return f"[IMG_API_ERROR: {err[:200]}]"
 
         choice = response.choices[0]
 
@@ -236,12 +261,25 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens, 
 
 # ─── Process one image ─────────────────────────────────────────────
 def process_one_image(client, model, images_dir, img_path_str, lines, img_line_idx,
-                       max_tool_rounds=3, max_tokens=65536):
+                       max_tool_rounds=3, max_tokens=65536, max_api_retries=3, rate_limit_retries=0):
     img_file = images_dir / Path(img_path_str).name
     if not img_file.exists(): return f"[IMG_MISSING: {img_path_str}]"
     try: img_b64 = image_to_base64(img_file)
     except Exception as e: return f"[IMG_ERROR: {img_path_str} - {e}]"
-    return (call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens, max_tool_rounds) or "").strip()
+    try:
+        return (call_ai_with_tools(
+            client,
+            model,
+            img_b64,
+            lines,
+            img_line_idx,
+            max_tokens,
+            max_tool_rounds,
+            max_api_retries,
+            rate_limit_retries,
+        ) or "").strip()
+    except Exception as e:
+        return f"[IMG_PROCESS_ERROR: {e}]"
 
 # ─── Progress ──────────────────────────────────────────────────────
 def load_progress(pf):
@@ -274,6 +312,10 @@ def main():
     _g_max_up  = config["options"].get("max_window_up", 50)
     _g_max_down = config["options"].get("max_window_down", 50)
     max_tok  = config["options"]["max_tokens"]
+    api_timeout = config["options"].get("api_timeout", 400)
+    api_connect_timeout = config["options"].get("api_connect_timeout", 60)
+    api_max_retries = config["options"].get("api_max_retries", 3)
+    rate_limit_retries = config["options"].get("rate_limit_retries", 0)
     indir   = Path(config["paths"]["input_dir"])
     imgdir  = Path(config["paths"]["images_dir"])
     outdir  = Path(config["paths"]["output_dir"])
@@ -282,7 +324,17 @@ def main():
 
     pf = str(outdir / "_progress.json")
     progress = load_progress(pf)
-    client = OpenAI(base_url=base_url, api_key=api_key)
+    client = OpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        timeout=httpx.Timeout(
+            connect=api_connect_timeout,
+            read=api_timeout,
+            write=api_connect_timeout,
+            pool=10.0,
+        ),
+        max_retries=0,
+    )
 
     md_files = sorted(indir.glob("*.md"))
 
@@ -339,10 +391,24 @@ def main():
         log("All done! Clear _progress.json to re-run.")
     else:
         def worker(t):
-            key, mn, ip, il, ms, me = t
-            lines = md_cache[mn][1]
-            r = process_one_image(client, model, imgdir, ip, lines, il, max_ret, max_tok)
-            return key, r, ms, me, ip
+            try:
+                key, mn, ip, il, ms, me = t
+                lines = md_cache[mn][1]
+                r = process_one_image(
+                    client,
+                    model,
+                    imgdir,
+                    ip,
+                    lines,
+                    il,
+                    max_ret,
+                    max_tok,
+                    api_max_retries,
+                    rate_limit_retries,
+                )
+                return key, r, ms, me, ip
+            except Exception as e:
+                return t[0], f"[IMG_WORKER_FATAL: {e}]", t[4], t[5], t[2]
 
         done = 0
         with ThreadPoolExecutor(max_workers=3) as ex:
