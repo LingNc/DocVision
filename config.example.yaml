@@ -17,7 +17,7 @@ options:
   api_max_retries: 3           # API retry count for non-rate-limit errors
   rate_limit_retries: 0        # 0 means unlimited with a safety cap in code
   concurrency: 10              # number of concurrent worker threads
-  temperature: 0.3
+  temperature: 0.1
   output_language: "Chinese"   # "Chinese" or "English"
   max_tokens: 65536
 

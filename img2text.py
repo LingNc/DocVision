@@ -398,9 +398,9 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
                        max_tool_rounds=3, max_tokens=65536, max_api_retries=3,
                        rate_limit_retries=0, enable_thinking=None, temperature=0.3):
     img_file = images_dir / Path(img_path_str).name
-    if not img_file.exists(): return f"[IMG_MISSING: {img_path_str}]"
+    if not img_file.exists(): return f"[IMG_MISSING: {img_path_str}]", "error"
     try: img_b64 = image_to_base64(img_file)
-    except Exception as e: return f"[IMG_ERROR: {img_path_str} - {e}]"
+    except Exception as e: return f"[IMG_ERROR: {img_path_str} - {e}]", "error"
     try:
         result = (call_ai_with_tools(
             client,
@@ -425,12 +425,19 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
                 log_warning(f"Unexpected prefix before '[IMG_TYPE:' in {img_path_str}: {prefix[:80]}")
             result = result[idx:]
         else:
-            log_error(f"No '[IMG_TYPE:' found in result from {img_path_str}: {result[:100]}")
-            return "__INVALID_RESPONSE__"
+            log_warning(f"No '[IMG_TYPE:' found in result from {img_path_str}")
 
-        return result.strip()
+        result = result.strip()
+        # 状态判断
+        if result.startswith("[IMG_TYPE:"):
+            status = "ok"
+        elif result.startswith("[IMG_"):
+            status = "error"      # 系统错误标记，保存但标记失败
+        else:
+            status = "retry"      # 格式异常，不保存，下次重试
+        return result, status
     except Exception as e:
-        return f"[IMG_PROCESS_ERROR: {e}]"
+        return f"[IMG_PROCESS_ERROR: {e}]", "error"
 
 # ─── Progress ──────────────────────────────────────────────────────
 def load_progress(progress_root):
@@ -581,7 +588,7 @@ def main():
             log(f"▶ START {key}")
             try:
                 lines = md_cache[mn][1]
-                r = process_one_image(
+                r, status = process_one_image(
                     client,
                     model,
                     imgdir,
@@ -596,7 +603,13 @@ def main():
                     temperature,
                 )
                 elapsed = time.time() - start_time
-                log(f"✓ [{elapsed:.2f}s] DONE")
+                if status == "ok":
+                    log(f"✓ [{elapsed:.2f}s] DONE")
+                elif status == "retry":
+                    log_error(f"✗ [{elapsed:.2f}s] INVALID FORMAT (will retry) {r[:120]}")
+                    r = "__INVALID_RESPONSE__"
+                else:  # error
+                    log_error(f"✗ [{elapsed:.2f}s] PERMANENT ERROR {r[:120]}")
                 return key, r, ms, me, ip
             except Exception as e:
                 elapsed = time.time() - start_time

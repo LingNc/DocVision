@@ -442,12 +442,26 @@ def compute_statistics(sessions: List[Session], percentiles: List[int] = None) -
     stats['thread_stats'] = dict(thread_stats)
     stats['thread_count'] = len(thread_stats)
 
-    # 吞吐量估算（总成功图片 / 总耗时）
-    if elapsed_list:
-        total_wall_time = sum(elapsed_list)
-        stats['throughput'] = len(success_sessions) / total_wall_time if total_wall_time > 0 else 0
-    else:
-        stats['throughput'] = 0
+    # 吞吐量：基于实际墙钟时间（最早 START 到最晚 DONE/FAILED）
+    wall_clock = 0.0
+    if sessions:
+        earliest = None
+        latest = None
+        for s in sessions:
+            try:
+                st = parse_timestamp(s.start_ts)
+            except Exception:
+                continue
+            if earliest is None or st < earliest:
+                earliest = st
+            if s.elapsed is not None:
+                end = st + timedelta(seconds=s.elapsed)
+                if latest is None or end > latest:
+                    latest = end
+        if earliest and latest and latest > earliest:
+            wall_clock = (latest - earliest).total_seconds()
+    stats['wall_clock'] = wall_clock
+    stats['throughput'] = len(success_sessions) / wall_clock if wall_clock > 0 else 0
 
     return stats
 
@@ -490,7 +504,9 @@ def print_report(stats: Dict[str, Any], log_path: Path, args: argparse.Namespace
     if stats['elapsed']:
         el = stats['elapsed']
         print(f"\n【耗时统计】（仅成功）")
-        print(f"  总耗时:        {el['total']:.1f}s")
+        print(f"  累计耗时:      {el['total']:.1f}s")
+        if stats.get('wall_clock', 0) > 0:
+            print(f"  实际耗时:      {stats['wall_clock']:.1f}s")
         print(f"  平均耗时:      {el['avg']:.2f}s")
         print(f"  中位数:        {el['median']:.2f}s")
         print(f"  最小/最大:     {el['min']:.2f}s / {el['max']:.2f}s")
