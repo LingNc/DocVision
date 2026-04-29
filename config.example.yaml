@@ -3,12 +3,12 @@ api:
   base_url: "https://your-api-proxy.com/v1"
   api_key: "sk-YOUR-API-KEY-HERE"
   model: "qwen3.6-plus"
-  enable_thinking: false      # pass as top-level param to disable thinking mode (Qwen3.6+)
+  enable_thinking: false       # pass as top-level param to disable thinking mode (Qwen3.6+)
 
 # Processing options
 options:
-  max_context_lines_up: 10      # initial lines above image
-  max_context_lines_down: 5   # initial lines below image
+  max_context_lines_up: 10     # initial lines above image
+  max_context_lines_down: 5    # initial lines below image
   max_window_up: 50            # maximum total lines above (cap)
   max_window_down: 50          # maximum total lines below (cap)
   max_retries: 3               # max AI tool_call rounds for more context
@@ -16,8 +16,9 @@ options:
   api_connect_timeout: 60      # connect timeout in seconds
   api_max_retries: 3           # API retry count for non-rate-limit errors
   rate_limit_retries: 0        # 0 means unlimited with a safety cap in code
-  concurrency: 10               # number of concurrent worker threads
+  concurrency: 10              # number of concurrent worker threads
   temperature: 0.3
+  output_language: "Chinese"   # "Chinese" or "English"
   max_tokens: 65536
 
 # Paths

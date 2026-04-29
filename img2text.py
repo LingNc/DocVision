@@ -184,6 +184,9 @@ Start your response DIRECTLY with "[IMG_TYPE:" (no extra text before). Do NOT in
 ## Tool: get_more_context
 Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines.
 You receive only the delta. Max 3 calls.
+
+## LANGUAGE
+Respond in {OUTPUT_LANG}.
 """
 
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
@@ -472,6 +475,15 @@ def main():
     _g_max_down = config["options"].get("max_window_down", 50)
     max_tok  = config["options"]["max_tokens"]
     temperature = config["options"].get("temperature", 0.3)
+    # 读取语言配置并注入系统提示词
+    global SYSTEM_PROMPT
+    lang = config["options"].get("output_language", "Chinese")
+    lang_str = str(lang).strip()
+    if lang_str.lower() in ("en", "english", "英文"):
+        output_lang = "English"
+    else:
+        output_lang = "Chinese"
+    SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{OUTPUT_LANG}", output_lang)
     api_timeout = config["options"].get("api_timeout", 400)
     api_connect_timeout = config["options"].get("api_connect_timeout", 60)
     api_max_retries = config["options"].get("api_max_retries", 3)
