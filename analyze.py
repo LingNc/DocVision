@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-日志分析脚本：统计图片处理期间的工具调用次数、耗时、成功率等指标。
+日志分析 + 进度检查脚本：统计工具调用、耗时、成功率，核对 progress_items 进度。
 支持并发日志（按线程ID分组状态机解析）。
 
 用法:
     python analyze.py                    # 分析最新日志
-    python analyze.py --all                # 汇总所有历史日志
-    python analyze.py --logfile <path>     # 指定日志文件
-    python analyze.py --threads            # 显示线程详细统计
+    python analyze.py --all              # 汇总所有历史日志
+    python analyze.py --logfile <path>   # 指定日志文件
+    python analyze.py --threads          # 显示线程详细统计
     python analyze.py --percentiles 90,95,99  # 自定义百分位数
-    python analyze.py --output report.csv  # 导出CSV
+    python analyze.py --output report.csv    # 导出CSV
+    python analyze.py --progress         # 仅显示进度摘要（完成率/良品率）
 """
 
+import os
 import re
 import sys
 import csv
+import json
 import argparse
 from collections import defaultdict
 from pathlib import Path
 from datetime import datetime, timedelta
 from statistics import mean, median, stdev
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 import yaml
 
@@ -73,6 +76,130 @@ def find_all_logs(log_dir: Path) -> List[Path]:
     """查找所有 img2text_*.log 文件，按时间排序"""
     log_files = list(log_dir.glob("img2text_*.log"))
     return sorted(log_files, key=lambda p: p.stat().st_mtime)
+
+
+# =============================================================================
+# 进度检查（原 check_progress.py 功能）
+# =============================================================================
+IMAGE_RE = re.compile(r'!\[.*?\]\((images/[^)]+\.(?:jpg|jpeg|png|gif|webp))\)')
+
+def count_images_in_md_files(input_dir: Path) -> int:
+    """计算所有 md 文件中的图片总数"""
+    total = 0
+    for md_file in input_dir.glob("*.md"):
+        content = md_file.read_text(encoding="utf-8")
+        total += len(IMAGE_RE.findall(content))
+    return total
+
+def count_images_per_md(input_dir: Path) -> Dict[str, int]:
+    """计算每个 md 文件的图片数"""
+    result = {}
+    for md_file in input_dir.glob("*.md"):
+        content = md_file.read_text(encoding="utf-8")
+        result[md_file.name] = len(IMAGE_RE.findall(content))
+    return result
+
+def check_progress_items(progress_root: Path) -> Tuple[int, int, List[str], Set[str]]:
+    """检查进度文件夹，返回 (completed, invalid, invalid_files, completed_img_paths)"""
+    completed = 0
+    invalid = 0
+    invalid_files = []
+    completed_img_paths: Set[str] = set()
+    if not progress_root.exists():
+        return completed, invalid, invalid_files, completed_img_paths
+    for json_file in progress_root.glob("**/*.json"):
+        try:
+            with open(json_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            result = data.get("result", "")
+            if "[IMG_TYPE:" in result and result != "__INVALID_RESPONSE__":
+                completed += 1
+                completed_img_paths.add(data.get("img_path", ""))
+            else:
+                invalid += 1
+                invalid_files.append(str(json_file))
+        except Exception:
+            invalid += 1
+            invalid_files.append(str(json_file))
+    return completed, invalid, invalid_files, completed_img_paths
+
+def get_problematic_images_from_log(log_path: Path) -> Set[str]:
+    """从日志中提取出现过 ERROR 或 WARNING 的图片路径集合"""
+    problematic: Set[str] = set()
+    if not log_path.exists():
+        return problematic
+    with open(log_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.search(r'\[\d+/\d+\]\s+(\S+\.(?:jpg|jpeg|png|gif|webp))', line, re.IGNORECASE)
+        if m:
+            current_img = m.group(1)
+            has_error = False
+            j = i + 1
+            while j < len(lines) and not re.search(r'\[\d+/\d+\]\s+\S+\.(?:jpg|jpeg|png|gif|webp)', lines[j], re.IGNORECASE):
+                if "[ERROR]" in lines[j] or "[WARNING]" in lines[j]:
+                    has_error = True
+                j += 1
+            if has_error:
+                problematic.add(current_img)
+            i = j
+        else:
+            i += 1
+    return problematic
+
+def print_progress_report(input_dir: Path, output_dir: Path, progress_root: Path,
+                          log_paths: List[Path], args: argparse.Namespace):
+    """打印进度摘要报告（完成率、良品率）"""
+    print("=" * 70)
+    print("进度检查报告")
+    print("=" * 70)
+
+    # 1. 总图片数
+    total_images = count_images_in_md_files(input_dir)
+    per_md = count_images_per_md(input_dir)
+    print(f"\n【源文件统计】")
+    print(f"  总图片数: {total_images}")
+    for name, cnt in sorted(per_md.items()):
+        print(f"    {name}: {cnt}")
+
+    # 2. progress_items 检查
+    completed, invalid, invalid_files, completed_img_paths = check_progress_items(progress_root)
+    remaining = total_images - completed - invalid
+
+    print(f"\n【进度统计】")
+    print(f"  已完成有效: {completed}")
+    print(f"  无效条目:   {invalid}")
+    if invalid > 0 and len(invalid_files) <= 10:
+        for f in invalid_files:
+            print(f"    - {f}")
+    elif invalid > 10:
+        for f in invalid_files[:10]:
+            print(f"    - {f}")
+        print(f"    ... 共 {len(invalid_files)} 个")
+    print(f"  未完成:     {remaining}")
+    if total_images > 0:
+        print(f"  完成率:     {completed / total_images * 100:.2f}%")
+
+    # 3. 良品率（基于日志中的 ERROR/WARNING）
+    if log_paths and completed > 0:
+        problematic_images: Set[str] = set()
+        for lf in log_paths:
+            problematic_images.update(get_problematic_images_from_log(lf))
+        problematic_in_completed = completed_img_paths.intersection(problematic_images)
+        good_images = completed - len(problematic_in_completed)
+        good_rate = good_images / completed * 100
+        print(f"\n【良品率】")
+        print(f"  无错误/警告: {good_images}/{completed} ({good_rate:.2f}%)")
+        if problematic_in_completed:
+            print(f"  有问题图片:  {len(problematic_in_completed)}")
+
+    # 4. 建议
+    if invalid > 0:
+        print(f"\n⚠ 发现 {invalid} 个无效进度条目，下次运行会自动重试")
+    if remaining > 0:
+        print(f"  剩余 {remaining} 张图片未完成")
 
 
 # =============================================================================
@@ -428,6 +555,8 @@ def main():
                        help="自定义百分位数，逗号分隔 (默认: 90,95,99)")
     parser.add_argument("--output", type=str,
                        help="导出CSV文件路径")
+    parser.add_argument("--progress", action="store_true",
+                       help="仅显示进度摘要（完成率/良品率）")
     args = parser.parse_args()
 
     # 解析百分位数
@@ -442,9 +571,21 @@ def main():
     try:
         config = load_config(args.config)
         outdir = Path(config["paths"]["output_dir"])
+        input_dir = Path(config["paths"]["input_dir"])
     except Exception as e:
         print(f"加载配置失败: {e}")
         sys.exit(1)
+
+    progress_root = outdir / "progress_items"
+
+    # --progress 模式：仅显示进度摘要
+    if args.progress:
+        log_paths_for_progress = find_all_logs(outdir) if args.all else (
+            [find_latest_log(outdir)] if find_latest_log(outdir) else []
+        )
+        print_progress_report(input_dir, outdir, progress_root,
+                              log_paths_for_progress, args)
+        return
 
     # 确定要分析的日志文件
     log_paths: List[Path] = []
@@ -480,6 +621,22 @@ def main():
 
     # 打印报告
     print_report(stats, log_paths[-1] if len(log_paths) == 1 else log_paths[0], args)
+
+    # 简要进度摘要
+    total_images = count_images_in_md_files(input_dir)
+    completed, invalid, _, completed_img_paths = check_progress_items(progress_root)
+    remaining = total_images - completed - invalid
+    print(f"\n{'=' * 70}")
+    print(f"【进度摘要】 总计 {total_images} | 已完成 {completed} | 无效 {invalid} | 剩余 {remaining}")
+    if total_images > 0:
+        print(f"  完成率: {completed / total_images * 100:.2f}%")
+    # 良品率
+    if completed > 0:
+        problematic: Set[str] = set()
+        for lf in log_paths:
+            problematic.update(get_problematic_images_from_log(lf))
+        good = completed - len(completed_img_paths.intersection(problematic))
+        print(f"  良品率: {good / completed * 100:.2f}% ({good}/{completed})")
 
     # 导出CSV
     if args.output:
