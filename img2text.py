@@ -436,7 +436,13 @@ def load_progress(pf):
     return {}
 
 def save_progress(pf, data):
-    with open(pf, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
+    tmp_pf = pf + ".tmp"
+    try:
+        with open(tmp_pf, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_pf, pf)   # 原子替换（Unix/Windows 均支持）
+    except Exception as e:
+        log_error(f"Failed to save progress: {e}")
 
 # ─── Main ────────────────────────────────────────────────────────
 def parse_args():
@@ -603,7 +609,7 @@ def main():
                 finally:
                     result_queue.task_done()
 
-        writer = Thread(target=writer_thread, daemon=True)
+        writer = Thread(target=writer_thread, daemon=False)
         writer.start()
 
         ex = ThreadPoolExecutor(max_workers=concurrency)
