@@ -430,19 +430,23 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
         return f"[IMG_PROCESS_ERROR: {e}]"
 
 # ─── Progress ──────────────────────────────────────────────────────
-def load_progress(pf):
-    if Path(pf).exists():
-        with open(pf, "r", encoding="utf-8") as f: return json.load(f)
-    return {}
-
-def save_progress(pf, data):
-    tmp_pf = pf + ".tmp"
-    try:
-        with open(tmp_pf, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_pf, pf)   # 原子替换（Unix/Windows 均支持）
-    except Exception as e:
-        log_error(f"Failed to save progress: {e}")
+def load_progress(progress_root):
+    """从子目录加载进度，每个 MD 文件一个子目录"""
+    progress = {}
+    if not progress_root.exists():
+        return progress
+    for md_dir in progress_root.iterdir():
+        if not md_dir.is_dir():
+            continue
+        for item_file in md_dir.glob("*.json"):
+            try:
+                with open(item_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                key = data["key"]
+                progress[key] = {k: v for k, v in data.items() if k != "key"}
+            except Exception:
+                continue
+    return progress
 
 # ─── Main ────────────────────────────────────────────────────────
 def parse_args():
@@ -494,8 +498,10 @@ def main():
     if _error_log_path.exists():
         _error_log_path.unlink()
 
-    pf = str(outdir / "_progress.json")
-    progress = load_progress(pf)
+    # 创建进度存储根目录（按 MD 文件分子目录）
+    progress_root = outdir / "progress_items"
+    progress_root.mkdir(exist_ok=True)
+    progress = load_progress(progress_root)
     client = OpenAI(
         base_url=base_url,
         api_key=api_key,
@@ -560,7 +566,7 @@ def main():
     log("=" * 60)
 
     if not pending:
-        log("All done! Clear _progress.json to re-run.")
+        log("All done! Clear progress_items/ directory to re-run.")
     else:
         def worker(t):
             try:
@@ -597,10 +603,40 @@ def main():
                     if result == "__INVALID_RESPONSE__":
                         log_warning(f"Skipped invalid response for {ip}, will retry next run.")
                     else:
+                        # 解析 key: "2027操作系统.md::images/xxx.jpg"
+                        parts = key.split("::")
+                        if len(parts) != 2:
+                            log_error(f"Invalid key format: {key}")
+                            done_count += 1
+                            continue
+                        md_filename = parts[0]          # "2027操作系统.md"
+                        img_rel_path = parts[1]         # "images/xxx.jpg"
+                        # 去掉 .md 后缀作为子目录名
+                        subdir_name = md_filename.replace(".md", "")
+                        subdir = progress_root / subdir_name
+                        subdir.mkdir(exist_ok=True)
+                        # 生成安全的文件名：将图片路径中的 '/' 替换为 '_'，并保留扩展名
+                        safe_img_name = img_rel_path.replace("/", "_").replace("\\", "_")
+                        item_file = subdir / f"{safe_img_name}.json"
+
+                        item_data = {
+                            "key": key,
+                            "result": result,
+                            "start": ms,
+                            "end": me,
+                            "img_path": ip
+                        }
+                        # 原子写入
+                        tmp_file = item_file.with_suffix(".tmp")
+                        with open(tmp_file, "w", encoding="utf-8") as f:
+                            json.dump(item_data, f, ensure_ascii=False, indent=2)
+                        os.replace(tmp_file, item_file)
+
+                        # 更新内存 progress
                         progress[key] = {"result": result, "start": ms, "end": me, "img_path": ip}
-                        save_progress(pf, progress)
+
                         log("-" * 50)
-                        log(f"[{done_count}/{total}] {ip} (from {key.split('::')[0]})")
+                        log(f"[{done_count+1}/{total}] {ip} (from {md_filename})")
                         log(f"RESULT:\n{result[:500]}")
                         log("-" * 50)
                     done_count += 1
