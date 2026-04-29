@@ -322,7 +322,56 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
 
             continue  # next round
         else:
-            return choice.message.content or "[IMG_EMPTY_RESPONSE]"
+            content = choice.message.content or ""
+            # 检测是否包含 XML 格式的工具调用
+            if "<tool_call>" in content or "<function=" in content:
+                # 尝试解析 XML 格式的工具调用
+                func_match = re.search(r"<function=([^>]+)>", content)
+                if func_match and func_match.group(1) == "get_more_context":
+                    # 提取参数
+                    above_match = re.search(r"<parameter=more_above>([^<]+)</parameter>", content)
+                    below_match = re.search(r"<parameter=more_below>([^<]+)</parameter>", content)
+                    if above_match and below_match:
+                        try:
+                            more_up = int(above_match.group(1))
+                            more_down = int(below_match.group(1))
+                            # 模拟一个标准的 tool_calls 消息
+                            tool_call_obj = {
+                                "id": f"call_{int(time.time())}",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_more_context",
+                                    "arguments": json.dumps({"more_above": more_up, "more_below": more_down})
+                                }
+                            }
+                            # 将 assistant 消息带上 tool_calls 加入 messages
+                            messages.append({
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [tool_call_obj]
+                            })
+                            # 手动执行工具调用（复用现有逻辑）
+                            actual_up = min(more_up, max_per_up)
+                            actual_down = min(more_down, max_per_down)
+                            new_up = cur_up + actual_up
+                            new_down = cur_down + actual_down
+                            log(f"    [ToolCall] (XML) AI wants +{more_up}up/-{more_down}down -> window {cur_up}/{cur_down}>{new_up}/{new_down}")
+                            delta = get_delta_lines(lines, img_line_idx, cur_up, cur_down, new_up, new_down)
+                            if delta:
+                                result_text = (
+                                    f"Added {actual_up} lines above and {actual_down} lines below. "
+                                    f"Window is now [{img_line_idx - new_up} to {img_line_idx + new_down}].\n\n"
+                                    f"NEW content (delta only):\n\n" + "\n".join(delta)
+                                )
+                            else:
+                                result_text = f"No new lines could be added. Window remains [{img_line_idx - cur_up} to {img_line_idx + cur_down}]. Please proceed."
+                            cur_up, cur_down = new_up, new_down
+                            messages.append({"role": "tool", "tool_call_id": tool_call_obj["id"], "content": result_text})
+                            continue  # 继续下一轮对话，模型会基于新上下文继续
+                        except ValueError:
+                            pass  # 参数解析失败，忽略，走下面的普通返回
+            # 没有 XML 工具调用或解析失败，正常返回内容
+            return content
 
     # Forced final
     messages.append({"role": "user", "content": "Provide your best analysis now."})
@@ -374,6 +423,7 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
             result = result[idx:]
         else:
             log_error(f"No '[IMG_TYPE:' found in result from {img_path_str}: {result[:100]}")
+            return "__INVALID_RESPONSE__"
 
         return result.strip()
     except Exception as e:
@@ -538,15 +588,18 @@ def main():
             while done_count < total:
                 key, result, ms, me, ip = result_queue.get()
                 try:
-                    progress[key] = {"result": result, "start": ms, "end": me, "img_path": ip}
+                    if result == "__INVALID_RESPONSE__":
+                        log_warning(f"Skipped invalid response for {ip}, will retry next run.")
+                    else:
+                        progress[key] = {"result": result, "start": ms, "end": me, "img_path": ip}
+                        save_progress(pf, progress)
+                        log("-" * 50)
+                        log(f"[{done_count}/{total}] {ip} (from {key.split('::')[0]})")
+                        log(f"RESULT:\n{result[:500]}")
+                        log("-" * 50)
                     done_count += 1
-                    save_progress(pf, progress)
-                    log("-" * 50)
-                    log(f"[{done_count}/{total}] {ip} (from {key.split('::')[0]})")
-                    log(f"RESULT:\n{result[:500]}")
-                    log("-" * 50)
                 except Exception as e:
-                    log(f"  Writer error: {e}"); traceback.print_exc()
+                    log_error(f"Writer error: {e}"); traceback.print_exc()
                 finally:
                     result_queue.task_done()
 
@@ -562,7 +615,7 @@ def main():
                     res = f.result()
                     result_queue.put(res)
                 except Exception as e:
-                    log(f"  Worker fatal: {e}"); traceback.print_exc()
+                    log_error(f"Worker fatal: {e}"); traceback.print_exc()
                     # ensure writer can finish
                     result_queue.put((t[0], f"[IMG_SUBMIT_ERROR: {e}]", t[4], t[5], t[2]))
         except KeyboardInterrupt:
