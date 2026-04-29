@@ -35,10 +35,11 @@ def count_images_in_md_files(input_dir: Path):
     return total
 
 def check_progress_items(progress_root: Path):
-    """检查进度文件夹，返回 (completed_count, invalid_count, invalid_files)"""
+    """检查进度文件夹，返回 (completed_count, invalid_count, invalid_files, completed_images)"""
     completed = 0
     invalid = 0
     invalid_files = []
+    completed_images = set()   # 新增：存储有效图片的 img_path
     # 遍历所有子目录下的 .json 文件
     for json_file in progress_root.glob("**/*.json"):
         try:
@@ -48,13 +49,42 @@ def check_progress_items(progress_root: Path):
             # 检查是否有效：包含 "[IMG_TYPE:" 且不包含 "__INVALID_RESPONSE__"
             if "[IMG_TYPE:" in result and result != "__INVALID_RESPONSE__":
                 completed += 1
+                completed_images.add(data.get("img_path", ""))
             else:
                 invalid += 1
                 invalid_files.append(str(json_file))
         except Exception:
             invalid += 1
             invalid_files.append(str(json_file))
-    return completed, invalid, invalid_files
+    return completed, invalid, invalid_files, completed_images
+
+def get_problematic_images_from_log(log_path: Path) -> set:
+    """从日志中提取出现过 ERROR 或 WARNING 的图片路径集合"""
+    problematic = set()
+    if not log_path.exists():
+        return problematic
+    with open(log_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        # 匹配 "[1/10] images/xxx.jpg" 或类似格式
+        m = re.search(r'\[\d+/\d+\]\s+(\S+\.(?:jpg|jpeg|png|gif|webp))', line, re.IGNORECASE)
+        if m:
+            current_img = m.group(1)
+            has_error = False
+            j = i + 1
+            # 检查直到下一个图片处理行或文件结束
+            while j < len(lines) and not re.search(r'\[\d+/\d+\]\s+\S+\.(?:jpg|jpeg|png|gif|webp)', lines[j], re.IGNORECASE):
+                if "[ERROR]" in lines[j] or "[WARNING]" in lines[j]:
+                    has_error = True
+                j += 1
+            if has_error:
+                problematic.add(current_img)
+            i = j
+        else:
+            i += 1
+    return problematic
 
 def find_log_files(log_dir: Path, only_latest=False):
     """查找所有 img2text_*.log 文件（排除 errors 日志）"""
@@ -98,8 +128,8 @@ def main():
 
     # 2. 检查进度文件夹
     if progress_root.exists():
-        completed, invalid, invalid_files = check_progress_items(progress_root)
-        print(f"已完成 (有效): {completed}")
+        completed, invalid, invalid_files, completed_images = check_progress_items(progress_root)
+        print(f"已完成有效图片数: {completed}")
         print(f"无效进度条目: {invalid}")
         if invalid > 0 and len(invalid_files) <= 10:
             for f in invalid_files:
@@ -107,7 +137,7 @@ def main():
         elif invalid > 10:
             print(f"  显示前10个无效文件: {invalid_files[:10]} ...")
         remaining = total_images - completed - invalid
-        print(f"未完成: {remaining} (包括未处理 + 无效)")
+        print(f"未完成图片数: {remaining} (包括未处理 + 无效)")
         if total_images > 0:
             pct = completed / total_images * 100
             print(f"完成率: {pct:.2f}%")
@@ -115,11 +145,12 @@ def main():
         print("进度文件夹不存在，尚未开始处理。")
         completed = 0
         invalid = 0
+        completed_images = set()
 
-    # 3. 分析日志
+    # 3. 分析日志并计算良品率
     log_files = find_log_files(output_dir, only_latest=not args.all)
     if not log_files:
-        print("未找到日志文件。")
+        print("\n未找到日志文件。")
         return
 
     print("\n日志分析:")
@@ -128,25 +159,40 @@ def main():
         total_lines = 0
         total_errors = 0
         total_warnings = 0
+        problematic_images = set()
         for lf in log_files:
             lines, err, warn = analyze_log_file(lf)
             total_lines += lines
             total_errors += err
             total_warnings += warn
+            problematic_images.update(get_problematic_images_from_log(lf))
         normal = total_lines - total_errors - total_warnings
         print(f"总日志行数: {total_lines}")
         print(f"ERROR 数量: {total_errors} ({total_errors/total_lines*100:.2f}%)" if total_lines>0 else "0")
         print(f"WARNING 数量: {total_warnings} ({total_warnings/total_lines*100:.2f}%)" if total_lines>0 else "0")
         print(f"正常行: {normal} ({normal/total_lines*100:.2f}%)" if total_lines>0 else "0")
+        # 显示良品率
+        if completed > 0:
+            problematic_in_completed = completed_images.intersection(problematic_images)
+            good_images = completed - len(problematic_in_completed)
+            good_rate = good_images / completed * 100
+            print(f"\n已完成图片中无错误/警告的良品率: {good_rate:.2f}% ({good_images}/{completed})")
     else:
         latest = log_files[0]
         lines, err, warn = analyze_log_file(latest)
+        problematic_images = get_problematic_images_from_log(latest)
         normal = lines - err - warn
         print(f"最近日志: {latest.name}")
         print(f"总行数: {lines}")
         print(f"ERROR: {err} ({err/lines*100:.2f}%)" if lines>0 else "0")
         print(f"WARNING: {warn} ({warn/lines*100:.2f}%)" if lines>0 else "0")
         print(f"正常: {normal} ({normal/lines*100:.2f}%)" if lines>0 else "0")
+        # 显示良品率
+        if completed > 0:
+            problematic_in_completed = completed_images.intersection(problematic_images)
+            good_images = completed - len(problematic_in_completed)
+            good_rate = good_images / completed * 100
+            print(f"\n本次运行良品率: {good_rate:.2f}% ({good_images}/{completed})")
 
     # 4. 额外建议
     if invalid > 0:

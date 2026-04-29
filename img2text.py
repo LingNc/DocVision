@@ -564,8 +564,10 @@ def main():
         log("All done! Clear progress_items/ directory to re-run.")
     else:
         def worker(t):
+            key, mn, ip, il, ms, me = t
+            start_time = time.time()
+            log(f"▶ START {key}")
             try:
-                key, mn, ip, il, ms, me = t
                 lines = md_cache[mn][1]
                 r = process_one_image(
                     client,
@@ -581,8 +583,12 @@ def main():
                     enable_thinking,
                     temperature,
                 )
+                elapsed = time.time() - start_time
+                log(f"✓ [{elapsed:.2f}s] DONE")
                 return key, r, ms, me, ip
             except Exception as e:
+                elapsed = time.time() - start_time
+                log_error(f"✗ [{elapsed:.2f}s] FAILED {e}")
                 return t[0], f"[IMG_WORKER_FATAL: {e}]", t[4], t[5], t[2]
 
         # Use a producer-consumer pattern: workers put results into a queue,
