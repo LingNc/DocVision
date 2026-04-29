@@ -486,17 +486,12 @@ def main():
 
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # 设置全局日志文件路径
+    # 设置全局日志文件路径（每次运行生成带时间戳的独立日志）
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     global _log_file_path, _error_log_path
-    _log_file_path = outdir / "img2text.log"
-    # 清空旧日志
-    if _log_file_path.exists():
-        _log_file_path.unlink()
-
-    # 设置错误日志文件路径
-    _error_log_path = outdir / "img2text_errors.log"
-    if _error_log_path.exists():
-        _error_log_path.unlink()
+    _log_file_path = outdir / f"img2text_{timestamp}.log"
+    _error_log_path = outdir / f"img2text_errors_{timestamp}.log"
 
     # 创建进度存储根目录（按 MD 文件分子目录）
     progress_root = outdir / "progress_items"
