@@ -11,7 +11,7 @@ options:
   max_context_lines_down: 5    # initial lines below image
   max_window_up: 50            # maximum total lines above (cap)
   max_window_down: 50          # maximum total lines below (cap)
-  max_retries: 3               # max AI tool_call rounds for more context
+  max_retries: 5               # max AI tool_call rounds for more context
   api_timeout: 400             # request timeout in seconds for the OpenAI call
   api_connect_timeout: 60      # connect timeout in seconds
   api_max_retries: 3           # API retry count for non-rate-limit errors

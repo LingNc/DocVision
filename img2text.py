@@ -134,20 +134,21 @@ def build_tools(max_per_request_up, max_per_request_down):
             "description": (
                 "Request ADDITIONAL lines above or below the image. "
                 "You will receive ONLY the NEW lines (not previously seen content). "
-                "Use this when the current context is insufficient to understand the image."
+                "Use this when the current context is insufficient to understand the image. "
+                "IMPORTANT: Each subsequent call must request MORE lines than the previous call "
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "more_above": {
                         "type": "integer",
-                        "description": f"How many ADDITIONAL lines to expand UPWARD beyond your current view (0-{max_per_request_up}).",
-                        "minimum": 0, "maximum": max_per_request_up
+                        "description": f"How many ADDITIONAL lines to expand UPWARD beyond your current view (1-{max_per_request_up}). Must increase each call.",
+                        "minimum": 1, "maximum": max_per_request_up
                     },
                     "more_below": {
                         "type": "integer",
-                        "description": f"How many ADDITIONAL lines to expand DOWNWARD beyond your current view (0-{max_per_request_down}).",
-                        "minimum": 0, "maximum": max_per_request_down
+                        "description": f"How many ADDITIONAL lines to expand DOWNWARD beyond your current view (1-{max_per_request_down}). Must increase each call.",
+                        "minimum": 1, "maximum": max_per_request_down
                     }
                 },
                 "required": ["more_above", "more_below"]
@@ -183,7 +184,8 @@ Start your response DIRECTLY with "[IMG_TYPE:" (no extra text before). Do NOT in
 
 ## Tool: get_more_context
 Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines.
-You receive only the delta. Max 3 calls.
+You receive only the delta. Max {MAX_TOOL_CALLS} calls.
+When making multiple calls, each new call must request STRICTLY MORE lines in at least one direction (above or below) than you have requested in any previous call. This helps you gather enough context quickly and avoid unnecessary extra calls.
 
 ## LANGUAGE
 Respond in {OUTPUT_LANG}.
@@ -301,7 +303,7 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
                     new_up = cur_up + actual_up
                     new_down = cur_down + actual_down
 
-                    log(f"    [ToolCall] AI wants +{more_up}up/-{more_down}down -> "
+                    log(f"  [ToolCall] AI wants +{more_up}up/-{more_down}down -> "
                         f"window {cur_up}/{cur_down}>{new_up}/{new_down} "
                         f"(per-request max={max_per_up}/{max_per_down})")
 
@@ -326,54 +328,6 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
             continue  # next round
         else:
             content = choice.message.content or ""
-            # 检测是否包含 XML 格式的工具调用
-            if "<tool_call>" in content or "<function=" in content:
-                # 尝试解析 XML 格式的工具调用
-                func_match = re.search(r"<function=([^>]+)>", content)
-                if func_match and func_match.group(1) == "get_more_context":
-                    # 提取参数
-                    above_match = re.search(r"<parameter=more_above>([^<]+)</parameter>", content)
-                    below_match = re.search(r"<parameter=more_below>([^<]+)</parameter>", content)
-                    if above_match and below_match:
-                        try:
-                            more_up = int(above_match.group(1))
-                            more_down = int(below_match.group(1))
-                            # 模拟一个标准的 tool_calls 消息
-                            tool_call_obj = {
-                                "id": f"call_{int(time.time())}",
-                                "type": "function",
-                                "function": {
-                                    "name": "get_more_context",
-                                    "arguments": json.dumps({"more_above": more_up, "more_below": more_down})
-                                }
-                            }
-                            # 将 assistant 消息带上 tool_calls 加入 messages
-                            messages.append({
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": [tool_call_obj]
-                            })
-                            # 手动执行工具调用（复用现有逻辑）
-                            actual_up = min(more_up, max_per_up)
-                            actual_down = min(more_down, max_per_down)
-                            new_up = cur_up + actual_up
-                            new_down = cur_down + actual_down
-                            log(f"    [ToolCall] (XML) AI wants +{more_up}up/-{more_down}down -> window {cur_up}/{cur_down}>{new_up}/{new_down}")
-                            delta = get_delta_lines(lines, img_line_idx, cur_up, cur_down, new_up, new_down)
-                            if delta:
-                                result_text = (
-                                    f"Added {actual_up} lines above and {actual_down} lines below. "
-                                    f"Window is now [{img_line_idx - new_up} to {img_line_idx + new_down}].\n\n"
-                                    f"NEW content (delta only):\n\n" + "\n".join(delta)
-                                )
-                            else:
-                                result_text = f"No new lines could be added. Window remains [{img_line_idx - cur_up} to {img_line_idx + cur_down}]. Please proceed."
-                            cur_up, cur_down = new_up, new_down
-                            messages.append({"role": "tool", "tool_call_id": tool_call_obj["id"], "content": result_text})
-                            continue  # 继续下一轮对话，模型会基于新上下文继续
-                        except ValueError:
-                            pass  # 参数解析失败，忽略，走下面的普通返回
-            # 没有 XML 工具调用或解析失败，正常返回内容
             return content
 
     # Forced final
@@ -496,6 +450,7 @@ def main():
     api_max_retries = config["options"].get("api_max_retries", 3)
     rate_limit_retries = config["options"].get("rate_limit_retries", 0)
     concurrency = config["options"].get("concurrency", 3)
+    SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{MAX_TOOL_CALLS}", str(max_ret))
     # 设置日志线程ID宽度（根据并发数自动对齐）
     global _thread_id_width
     _thread_id_width = len(str(concurrency))
