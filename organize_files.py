@@ -113,11 +113,11 @@ def organize_files(config: dict):
         sorted_parts = sorted(parts, key=lambda x: int(x))
 
         if len(sorted_parts) == 1:
-            # 单个分片，直接移动到 output 根目录
+            # 单个分片，复制到 output 根目录（temp 中保留原件）
             src_file = temp_dir / f"{sub}_{sorted_parts[0]}.md"
             dst_file = output_dir / f"{sub}.md"
             if src_file.exists():
-                shutil.move(str(src_file), str(dst_file))
+                shutil.copy2(str(src_file), str(dst_file))
                 print(f"  {sub}_{sorted_parts[0]}.md -> {sub}.md")
             continue
 

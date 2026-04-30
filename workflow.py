@@ -20,6 +20,7 @@ MinerU 工作流主脚本 - 串联整个 PDF 处理流程
 """
 
 import os
+import re
 import sys
 import argparse
 import subprocess
@@ -55,6 +56,104 @@ def run_command(cmd: List[str], cwd: Optional[str] = None) -> bool:
     except Exception as e:
         print(f"命令执行失败: {e}")
         return False
+
+
+def run_img2text_filtered(cmd: List[str], cwd: Optional[str] = None) -> bool:
+    """
+    运行 img2text 并过滤输出，只保留关键进度信息。
+    显示初始配置信息，每个任务完成时打印一行进度摘要，最后显示 Saved 和 Done。
+    """
+    try:
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        proc = subprocess.Popen(
+            cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, env=env, bufsize=1
+        )
+
+        re_done_line = re.compile(r'^\[.*?\]\[T\d+\]\s*✓\s*\[[\d.]+s\]\s*DONE')
+        re_failed_line = re.compile(r'^\[.*?\]\[T\d+\].*?✗\s*\[[\d.]+s\]\s*FAILED')
+        re_saved = re.compile(r'Saved:')
+
+        done_count = 0
+        error_count = 0
+        warn_count = 0
+        total = 0
+        # 收集初始配置摘要行
+        header_done = False
+
+        for line in proc.stdout:
+            line = line.rstrip('\n')
+            if not line:
+                continue
+
+            # 提取总数
+            m = re.search(r'To process:\s*(\d+)', line)
+            if m:
+                total = int(m.group(1))
+
+            # 初始配置区域：打印 Found/Model/Concurrency/Total 等摘要行
+            if not header_done:
+                # 遇到第一个 START 或第一个 DONE/FAILED 时，结束 header
+                if '▶' in line or re_done_line.match(line) or re_failed_line.match(line):
+                    header_done = True
+                else:
+                    # 只打印有信息量的行，跳过分隔线
+                    if not re.match(r'^\[.*?\]\[T\d+\]\s*=+', line):
+                        # 去掉时间戳和线程号前缀，简化输出
+                        clean = re.sub(r'^\[\d{2}:\d{2}:\d{2}\]\[T\d+\]\s*', '', line)
+                        if clean.strip():
+                            print(clean)
+                    continue
+
+            # DONE 行
+            if re_done_line.match(line):
+                done_count += 1
+                _print_progress(done_count, error_count, warn_count, total)
+                continue
+
+            # FAILED 行
+            if re_failed_line.match(line):
+                error_count += 1
+                done_count += 1
+                _print_progress(done_count, error_count, warn_count, total)
+                continue
+
+            # WARNING
+            if '[WARNING]' in line:
+                warn_count += 1
+                continue
+
+            # Saved 行
+            if re_saved.search(line):
+                clean = re.sub(r'^\[\d{2}:\d{2}:\d{2}\]\[T\d+\]\s*', '', line)
+                print(clean)
+                continue
+
+            # Done! 行
+            if 'Done!' in line:
+                print("Done!")
+                continue
+
+            # 其他行全部跳过（ToolCall, RESULT, 分隔线等）
+
+        proc.wait()
+        print()
+        return proc.returncode == 0
+    except Exception as e:
+        print(f"命令执行失败: {e}")
+        return False
+
+
+def _print_progress(done: int, errors: int, warns: int, total: int):
+    """打印一行进度摘要"""
+    pct = f"({done/total*100:.0f}%)" if total > 0 else ""
+    parts = [f"[{done}/{total}] {pct}"]
+    if errors:
+        parts.append(f"错误: {errors}")
+    if warns:
+        parts.append(f"警告: {warns}")
+    print(" | ".join(parts))
 
 
 def step_split(config: dict) -> bool:
@@ -154,9 +253,9 @@ def step_img2text(config: dict) -> bool:
     print("步骤 4: 使用 AI 将图片转换为文本")
     print("=" * 50)
 
-    # 运行图片转文本脚本
+    # 运行图片转文本脚本（过滤输出，只保留关键进度）
     cmd = [sys.executable, "img2text.py"]
-    return run_command(cmd)
+    return run_img2text_filtered(cmd)
 
 
 def step_analyze(config: dict) -> bool:
@@ -174,7 +273,7 @@ def step_analyze(config: dict) -> bool:
     print("=" * 50)
 
     # 运行日志分析脚本
-    cmd = [sys.executable, "analyze.py", "--progress"]
+    cmd = [sys.executable, "analyze.py"]
     return run_command(cmd)
 
 
