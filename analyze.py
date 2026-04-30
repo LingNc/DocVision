@@ -588,8 +588,8 @@ def main():
     # 加载配置
     try:
         config = load_config(args.config)
-        outdir = Path(config["paths"]["output_dir"])
-        input_dir = Path(config["paths"]["input_dir"])
+        outdir = Path(config["paths"]["finally_dir"])
+        input_dir = Path(config["paths"]["output_dir"])
     except Exception as e:
         print(f"加载配置失败: {e}")
         sys.exit(1)

@@ -10,6 +10,9 @@ output/
 finally*/
 release/
 test*/mineru_output/
+files/
+split_pdfs/
+mineru_output/
 temp/
 
 config.yaml

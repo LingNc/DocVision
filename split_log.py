@@ -65,14 +65,14 @@ def main():
     if args.logfile:
         log_path = Path(args.logfile)
     else:
-        # 尝试从 config 读取 output_dir
+        # 尝试从 config 读取 finally_dir（日志在最终输出目录）
         out_dir = Path.cwd() / "finally"   # 默认 fallback
         if Path(args.config).exists():
             import yaml
             try:
                 with open(args.config, 'r', encoding='utf-8') as f:
                     config = yaml.safe_load(f)
-                out_dir = Path(config["paths"]["output_dir"])
+                out_dir = Path(config["paths"]["finally_dir"])
             except Exception:
                 pass  # 使用默认
 

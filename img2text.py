@@ -510,10 +510,12 @@ def main():
     args = parse_args()
 
     config = load_config()
-    base_url = config["api"]["base_url"]
-    api_key  = config["api"]["api_key"]
-    model    = config["api"]["model"]
-    enable_thinking = config["api"].get("enable_thinking", False)
+    # Support both old format (api.*) and new format (ai.*)
+    ai_config = config.get("ai", config.get("api", {}))
+    base_url = ai_config["base_url"]
+    api_key  = ai_config["api_key"]
+    model    = ai_config["model"]
+    enable_thinking = ai_config.get("enable_thinking", False)
     max_ret = config["options"]["max_retries"]
     _g_up    = config["options"]["max_context_lines_up"]
     _g_down  = config["options"]["max_context_lines_down"]
@@ -540,9 +542,9 @@ def main():
     # 设置日志线程ID宽度（根据并发数自动对齐）
     global _thread_id_width
     _thread_id_width = len(str(concurrency))
-    indir   = Path(config["paths"]["input_dir"])
+    indir   = Path(config["paths"]["output_dir"])
     imgdir  = Path(config["paths"]["images_dir"])
-    outdir  = Path(config["paths"]["output_dir"])
+    outdir  = Path(config["paths"]["finally_dir"])
 
     outdir.mkdir(parents=True, exist_ok=True)
 

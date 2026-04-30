@@ -2,3 +2,5 @@ openai
 PyYAML
 Pillow
 httpx[socks]
+requests
+pymupdf
