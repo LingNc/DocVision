@@ -8,5 +8,6 @@ __pycache__
 
 output/
 finally*/
+release/
 
 config.yaml
