@@ -2,7 +2,7 @@
 api:
   base_url: "https://your-api-proxy.com/v1"
   api_key: "sk-YOUR-API-KEY-HERE"
-  model: "qwen3.6-plus"
+  model: "Qwen/Qwen3.6-27B"
   enable_thinking: false       # pass as top-level param to disable thinking mode (Qwen3.6+)
 
 # Processing options

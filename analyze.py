@@ -50,9 +50,11 @@ ERROR_PATTERNS = {
     'connection_timeout': re.compile(r'connection|timeout|timed out', re.I),
     'rate_limit': re.compile(r'429|rate.*limit', re.I),
     'img_missing': re.compile(r'IMG_MISSING', re.I),
+    'img_error': re.compile(r'IMG_ERROR', re.I),
     'api_error': re.compile(r'IMG_API_ERROR|IMG_PROCESS_ERROR', re.I),
     'worker_fatal': re.compile(r'IMG_WORKER_FATAL', re.I),
-    'invalid_response': re.compile(r'__INVALID_RESPONSE__', re.I),
+    'empty_response': re.compile(r'IMG_EMPTY_RESPONSE', re.I),
+    'invalid_format': re.compile(r'IMG_INVALID_FORMAT', re.I)
 }
 
 

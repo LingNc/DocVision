@@ -142,12 +142,12 @@ def build_tools(max_per_request_up, max_per_request_down):
                     "more_above": {
                         "type": "integer",
                         "description": f"How many ADDITIONAL lines to expand UPWARD beyond your current view (0-{max_per_request_up}).",
-                        "minimum": 1, "maximum": max_per_request_up
+                        "minimum": 0, "maximum": max_per_request_up
                     },
                     "more_below": {
                         "type": "integer",
                         "description": f"How many ADDITIONAL lines to expand DOWNWARD beyond your current view (0-{max_per_request_down}).",
-                        "minimum": 1, "maximum": max_per_request_down
+                        "minimum": 0, "maximum": max_per_request_down
                     }
                 },
                 "required": ["more_above", "more_below"]
@@ -420,21 +420,21 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
         idx = result.find("[IMG_TYPE:")
         if idx != -1:
             if idx > 0:
-                # 前面有内容，输出警告
                 prefix = result[:idx].strip()
                 log_warning(f"Unexpected prefix before '[IMG_TYPE:' in {img_path_str}: {prefix[:80]}")
-            result = result[idx:]
-        else:
-            log_warning(f"No '[IMG_TYPE:' found in result from {img_path_str}")
-
-        result = result.strip()
-        # 状态判断
-        if result.startswith("[IMG_TYPE:"):
+            result = result[idx:].strip()
             status = "ok"
-        elif result.startswith("[IMG_"):
-            status = "error"      # 系统错误标记，保存但标记失败
         else:
-            status = "retry"      # 格式异常，不保存，下次重试
+            # 没有 [IMG_TYPE: 开头
+            if result.startswith("[IMG_"):
+                # 已经是系统错误标记（如 [IMG_MISSING]、[IMG_RATE_LIMIT_EXCEEDED]……）
+                status = "error"
+            else:
+                # 完全不符合格式，生成错误标记
+                prefix = result[:100] if result else "(empty)"
+                log_error(f"No '[IMG_TYPE:' found in result from {img_path_str}: {prefix}")
+                result = f"[IMG_INVALID_FORMAT]"
+                status = "retry"
         return result, status
     except Exception as e:
         return f"[IMG_PROCESS_ERROR: {e}]", "error"
@@ -605,11 +605,10 @@ def main():
                 elapsed = time.time() - start_time
                 if status == "ok":
                     log(f"✓ [{elapsed:.2f}s] DONE")
-                elif status == "retry":
-                    log_error(f"✗ [{elapsed:.2f}s] INVALID FORMAT (will retry) {r[:120]}")
-                    r = "__INVALID_RESPONSE__"
-                else:  # error
-                    log_error(f"✗ [{elapsed:.2f}s] PERMANENT ERROR {r[:120]}")
+                else:
+                    log_error(f"✗ [{elapsed:.2f}s] FAILED {r[:200]}")
+                    if status == "retry":
+                        r = "__INVALID_RESPONSE__"
                 return key, r, ms, me, ip
             except Exception as e:
                 elapsed = time.time() - start_time
