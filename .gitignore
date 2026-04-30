@@ -9,5 +9,7 @@ __pycache__
 output/
 finally*/
 release/
+test*/mineru_output/
+temp/
 
 config.yaml

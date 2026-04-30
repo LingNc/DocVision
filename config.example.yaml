@@ -1,5 +1,20 @@
-# AI Image-to-Text config (example - copy to config.yaml and fill in your keys)
-api:
+# MinerU Tools Configuration (example - copy to config.yaml and fill in your values)
+
+# MinerU API Configuration
+mineru:
+  api_base_url: "https://mineru.net/api/v4"
+  token: "YOUR-MINERU-TOKEN-HERE"
+  model_version: "vlm"         # pipeline, vlm, or MinerU-HTML
+  is_ocr: false
+  enable_formula: true
+  enable_table: true
+  language: "ch"               # ch, en, japan, korean, etc.
+  poll_interval: 3             # seconds between polling attempts
+  poll_timeout: 600            # max seconds to wait for task completion
+  max_pages_per_part: 200      # max pages per PDF part (MinerU limit)
+
+# AI Image-to-Text config
+ai:
   base_url: "https://your-api-proxy.com/v1"
   api_key: "sk-YOUR-API-KEY-HERE"
   model: "Qwen/Qwen3.6-27B"
@@ -24,6 +39,9 @@ options:
 
 # Paths
 paths:
-  input_dir: "./output"        # dir with merged .md files
+  input_dir: "./files"    # dir with source PDF files
+  split_dir: "./split_files"    # dir for split PDF parts
+  mineru_output: "./mineru_output"  # dir for MinerU API results
+  output_dir: "./output"       # dir with merged .md files
   images_dir: "./output/images"
-  output_dir: "./finally"
+  finally_dir: "./finally"     # final output directory
