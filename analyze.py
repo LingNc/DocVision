@@ -38,8 +38,8 @@ LOG_PATTERNS = {
     'start': re.compile(r'^\[\d{2}:\d{2}:\d{2}\]\[T\d+\]\s*▶\s*START\s+(.+)$'),
     # 匹配: [HH:MM:SS][Txx] ✓ [3.12s] DONE [IMG_TYPE: ...]
     'done': re.compile(r'^\[\d{2}:\d{2}:\d{2}\]\[T\d+\]\s*✓\s*\[(\d+\.?\d*)s\]\s*DONE(?:\s+\[IMG_TYPE:\s*([^\]]+)\])?'),
-    # 匹配: [HH:MM:SS][Txx] ✗ [0.89s] FAILED error_msg
-    'failed': re.compile(r'^\[\d{2}:\d{2}:\d{2}\]\[T\d+\]\s*✗\s*\[(\d+\.?\d*)s\]\s*FAILED\s*(.+)$'),
+    # 匹配: [HH:MM:SS][Txx] ✗ [0.89s] FAILED error_msg（✗ 前可能有 [ERROR] 等前缀）
+    'failed': re.compile(r'^\[\d{2}:\d{2}:\d{2}\]\[T\d+\].*?✗\s*\[(\d+\.?\d*)s\]\s*FAILED\s*(.+)$'),
     'tool_call': re.compile(r'\[ToolCall\]'),
     'warning': re.compile(r'\[WARNING\]'),
     'error': re.compile(r'\[ERROR\]'),

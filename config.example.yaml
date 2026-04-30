@@ -19,6 +19,7 @@ options:
   concurrency: 10              # number of concurrent worker threads
   temperature: 0.1
   output_language: "Chinese"   # "Chinese" or "English"
+  format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:
   max_tokens: 65536
 
 # Paths

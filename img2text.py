@@ -180,12 +180,13 @@ If ambiguous or overly complex, call get_more_context to resolve; if still uncle
 <description / mermaid / table / latex>
 
 ## CRITICAL
-Start your response DIRECTLY with "[IMG_TYPE:" (no extra text before). Do NOT include any introductory phrases, conversational text, meta-commentary, or analysis before "[IMG_TYPE:". Wrong: "Based on the image...".
+Your response MUST start exactly with "[IMG_TYPE:" (no extra text before), NEVER omit it. Do NOT include any introductory phrases, conversational text, meta-commentary, or analysis. "Do NOT write \"The image shows\", \"This diagram illustrates\", or any similar analysis."
+Never output XML tags like <tool_call> or <function=>.
 
 ## Tool: get_more_context
 Start with a small context window. To get more, call get_more_context(more_above=N, more_below=M) — N and M are additional lines.
 You receive only the delta. Max {MAX_TOOL_CALLS} calls.
-When making multiple calls, each new call must request STRICTLY MORE lines in at least one direction (above or below) than you have requested in any previous call. This helps you gather enough context quickly and avoid unnecessary extra calls.
+Each subsequent call must request STRICTLY MORE lines than the previous call in at least one direction (above or below).
 
 ## LANGUAGE
 Respond in {OUTPUT_LANG}.
@@ -194,12 +195,61 @@ Respond in {OUTPUT_LANG}.
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
 def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
                        max_tool_rounds=3, max_api_retries=3, rate_limit_retries=0,
-                       enable_thinking=None, temperature=0.3):
+                       enable_thinking=None, temperature=0.3, custom_user_text=None):
     """
     Call AI API with incremental context expansion.
     Uses per-request cap from global config (_g_max_up, _g_max_down).
     No cumulative cap across rounds — AI can keep expanding 3 times.
     """
+    # ─── 自定义消息模式（用于格式修正等，不带工具） ───
+    if custom_user_text is not None:
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": [
+                {"type": "text", "text": custom_user_text},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+            ]},
+        ]
+        rate_limit_limit = 100 if rate_limit_retries == 0 else rate_limit_retries
+        retry = 0
+        rate_limit_retry = 0
+        while True:
+            try:
+                extra_body = {}
+                if enable_thinking is not None:
+                    extra_body["enable_thinking"] = enable_thinking
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                )
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                err = str(e)
+                err_lower = err.lower()
+                if "429" in err or "rate" in err_lower:
+                    if rate_limit_retry < rate_limit_limit:
+                        wait = min(2 ** rate_limit_retry * 2, 60)
+                        time.sleep(wait)
+                        rate_limit_retry += 1
+                        continue
+                    return "[IMG_RATE_LIMIT_EXCEEDED]"
+                if any(kw in err_lower for kw in ("connect", "timeout", "handshake", "timed out")):
+                    if retry < max_api_retries:
+                        wait = min(2 ** retry * 5, 60)
+                        time.sleep(wait)
+                        retry += 1
+                        continue
+                    return "[IMG_CONNECTION_TIMEOUT]"
+                if retry < max_api_retries:
+                    time.sleep(2)
+                    retry += 1
+                    continue
+                return f"[IMG_API_ERROR: {err[:200]}]"
+
+    # ─── 原有逻辑（带工具的增量上下文扩展） ───
     cur_up, cur_down = _g_up, _g_down
     max_per_up, max_per_down = _g_max_up, _g_max_down
 
@@ -350,7 +400,8 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
 # ─── Process one image ─────────────────────────────────────────────
 def process_one_image(client, model, images_dir, img_path_str, lines, img_line_idx,
                        max_tool_rounds=3, max_tokens=65536, max_api_retries=3,
-                       rate_limit_retries=0, enable_thinking=None, temperature=0.3):
+                       rate_limit_retries=0, enable_thinking=None, temperature=0.3,
+                       format_fix_attempts=1):
     img_file = images_dir / Path(img_path_str).name
     if not img_file.exists(): return f"[IMG_MISSING: {img_path_str}]", "error"
     try: img_b64 = image_to_base64(img_file)
@@ -384,11 +435,45 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
                 # 已经是系统错误标记（如 [IMG_MISSING]、[IMG_RATE_LIMIT_EXCEEDED]……）
                 status = "error"
             else:
-                # 完全不符合格式，生成错误标记
-                prefix = result[:100] if result else "(empty)"
-                log_error(f"No '[IMG_TYPE:' found in result from {img_path_str}: {prefix}")
-                result = f"[IMG_INVALID_FORMAT]"
-                status = "retry"
+                # 完全不符合格式，尝试修正
+                if format_fix_attempts > 0:
+                    log_warning(f"Format fix triggered for {img_path_str}")
+                    fix_msg = (
+                        'Your previous response was REJECTED because it did NOT start with "[IMG_TYPE: <type>]".\n'
+                        "Here is your previous response (for reference only):\n"
+                        f"---\n{result}\n---\n\n"
+                        "Now output ONLY the image content itself, without any explanatory or introductory phrases. "
+                        "Start EXACTLY with \"[IMG_TYPE:\" followed by the type, then the pure description (mermaid/table/latex/text). "
+                        "Do NOT write \"The image shows\", \"This diagram illustrates\", or any similar analysis."
+                    )
+                    fixed = call_ai_with_tools(
+                        client, model, img_b64,
+                        lines=[], img_line_idx=0,
+                        max_tokens=max_tokens,
+                        max_tool_rounds=0,
+                        max_api_retries=1,
+                        rate_limit_retries=0,
+                        enable_thinking=enable_thinking,
+                        temperature=temperature,
+                        custom_user_text=fix_msg,
+                    )
+                    fixed = (fixed or "").strip()
+                    idx2 = fixed.find("[IMG_TYPE:")
+                    if idx2 != -1:
+                        if idx2 > 0:
+                            log_warning(f"Format fix had extra prefix in {img_path_str}: {fixed[:idx2].strip()[:80]}")
+                        result = fixed[idx2:].strip()
+                        status = "ok"
+                    else:
+                        prefix = result[:100] if result else "(empty)"
+                        log_error(f"Format fix still missing [IMG_TYPE:] for {img_path_str}: {prefix}")
+                        result = "[IMG_INVALID_FORMAT]"
+                        status = "retry"
+                else:
+                    prefix = result[:100] if result else "(empty)"
+                    log_error(f"No '[IMG_TYPE:' found in result from {img_path_str}: {prefix}")
+                    result = "[IMG_INVALID_FORMAT]"
+                    status = "retry"
         return result, status
     except Exception as e:
         return f"[IMG_PROCESS_ERROR: {e}]", "error"
@@ -450,6 +535,7 @@ def main():
     api_max_retries = config["options"].get("api_max_retries", 3)
     rate_limit_retries = config["options"].get("rate_limit_retries", 0)
     concurrency = config["options"].get("concurrency", 3)
+    format_fix_attempts = config["options"].get("format_fix_attempts", 1)
     SYSTEM_PROMPT = SYSTEM_PROMPT.replace("{MAX_TOOL_CALLS}", str(max_ret))
     # 设置日志线程ID宽度（根据并发数自动对齐）
     global _thread_id_width
@@ -556,6 +642,7 @@ def main():
                     rate_limit_retries,
                     enable_thinking,
                     temperature,
+                    format_fix_attempts,
                 )
                 elapsed = time.time() - start_time
                 if status == "ok":
