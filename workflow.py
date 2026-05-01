@@ -61,7 +61,7 @@ def run_command(cmd: List[str], cwd: Optional[str] = None) -> bool:
 def run_img2text_filtered(cmd: List[str], cwd: Optional[str] = None) -> bool:
     """
     运行 img2text 并过滤输出，只保留关键进度信息。
-    显示初始配置信息，每个任务完成时打印一行进度摘要，最后显示 Saved 和 Done。
+    显示初始配置信息，按百分比打印进度摘要，最后显示 Saved 和 Done。
     """
     try:
         env = os.environ.copy()
@@ -79,6 +79,7 @@ def run_img2text_filtered(cmd: List[str], cwd: Optional[str] = None) -> bool:
         error_count = 0
         warn_count = 0
         total = 0
+        last_printed_pct = -1
         # 收集初始配置摘要行
         header_done = False
 
@@ -109,14 +110,16 @@ def run_img2text_filtered(cmd: List[str], cwd: Optional[str] = None) -> bool:
             # DONE 行
             if re_done_line.match(line):
                 done_count += 1
-                _print_progress(done_count, error_count, warn_count, total)
+                _check_and_print_progress(done_count, error_count, warn_count, total, last_printed_pct)
+                last_printed_pct = done_count * 100 // total if total > 0 else -1
                 continue
 
             # FAILED 行
             if re_failed_line.match(line):
                 error_count += 1
                 done_count += 1
-                _print_progress(done_count, error_count, warn_count, total)
+                _check_and_print_progress(done_count, error_count, warn_count, total, last_printed_pct)
+                last_printed_pct = done_count * 100 // total if total > 0 else -1
                 continue
 
             # WARNING
@@ -132,6 +135,8 @@ def run_img2text_filtered(cmd: List[str], cwd: Optional[str] = None) -> bool:
 
             # Done! 行
             if 'Done!' in line:
+                # 最终进度（确保 100% 一定打印）
+                _print_progress(done_count, error_count, warn_count, total)
                 print("Done!")
                 continue
 
@@ -145,9 +150,18 @@ def run_img2text_filtered(cmd: List[str], cwd: Optional[str] = None) -> bool:
         return False
 
 
+def _check_and_print_progress(done: int, errors: int, warns: int, total: int, last_pct: int):
+    """仅在百分比跨越新的整数时打印进度"""
+    if total <= 0:
+        return
+    current_pct = done * 100 // total
+    if current_pct > last_pct:
+        _print_progress(done, errors, warns, total)
+
+
 def _print_progress(done: int, errors: int, warns: int, total: int):
     """打印一行进度摘要"""
-    pct = f"({done/total*100:.0f}%)" if total > 0 else ""
+    pct = f"({done*100//total}%)" if total > 0 else ""
     parts = [f"[{done}/{total}] {pct}"]
     if errors:
         parts.append(f"错误: {errors}")

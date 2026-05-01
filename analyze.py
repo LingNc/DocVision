@@ -631,14 +631,14 @@ def main():
             print(f"  {log_path.name}: {len(sessions)} 条记录")
 
     if not all_sessions:
-        print("未解析到任何会话数据")
-        sys.exit(1)
+        print("日志中未解析到图片处理会话（可能所有任务之前已完成）")
 
-    # 计算统计
-    stats = compute_statistics(all_sessions, percentiles)
-
-    # 打印报告
-    print_report(stats, log_paths[-1] if len(log_paths) == 1 else log_paths[0], args)
+    # 计算统计（有会话才计算）
+    if all_sessions:
+        stats = compute_statistics(all_sessions, percentiles)
+        print_report(stats, log_paths[-1] if len(log_paths) == 1 else log_paths[0], args)
+    else:
+        stats = None
 
     # 简要进度摘要
     total_images = count_images_in_md_files(input_dir)
