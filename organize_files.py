@@ -5,7 +5,7 @@ MinerU 文件整理脚本 - 将 MinerU API 返回的 zip 解压文件整理到 o
 功能：
 1. 从 mineru_output 目录复制 full.md -> output/temp/subject_partN.md
 2. 合并同名科目的分片 -> output/subject.md
-3. 收集所有图片 -> output/images/
+3. 按 markdown 引用收集图片 -> output/images/（仅复制实际引用的图片）
 
 用法:
     python organize_files.py                    # 使用默认配置
@@ -55,11 +55,10 @@ def organize_files(config: dict):
     print("=" * 50)
     print()
 
-    # ---- 步骤 1: 复制 md 和图片 ----
-    print(f"[1/3] 复制 full.md -> {temp_dir}/ 和图片 -> {images_dir}/ ...")
+    # ---- 步骤 1: 复制 md ----
+    print(f"[1/4] 复制 full.md -> {temp_dir}/ ...")
 
     md_count = 0
-    img_count = 0
 
     # 查找所有 _partN 目录
     part_dirs = [d for d in mineru_output.iterdir() if d.is_dir() and re.search(r'_part\d+', d.name)]
@@ -88,23 +87,11 @@ def organize_files(config: dict):
         else:
             print(f"    警告: 没有 full.md")
 
-        # 复制图片 -> output/images/
-        src_images = d / "images"
-        if src_images.exists():
-            for img_file in src_images.iterdir():
-                if img_file.is_file():
-                    dst_img = images_dir / img_file.name
-                    if not dst_img.exists():
-                        shutil.copy2(img_file, dst_img)
-                        img_count += 1
-        else:
-            print(f"    警告: 没有 images/ 目录")
-
-    print(f"  MD: {md_count}, 图片: {img_count}")
+    print(f"  MD: {md_count}")
     print()
 
     # ---- 步骤 2: 合并分片 ----
-    print(f"[2/3] 合并分片 -> {output_dir}/ ...")
+    print(f"[2/4] 合并分片 -> {output_dir}/ ...")
 
     merge_count = 0
 
@@ -140,8 +127,46 @@ def organize_files(config: dict):
     print(f"  合并: {merge_count}")
     print()
 
-    # ---- 步骤 3: 汇总 ----
-    print("[3/3] 汇总")
+    # ---- 步骤 3: 按 markdown 引用收集图片 ----
+    print(f"[3/4] 收集引用的图片 -> {images_dir}/ ...")
+
+    img_re = re.compile(r'!\[.*?\]\((images/[^)]+)\)')
+    img_count = 0
+    missing = 0
+
+    # 建立图片源路径索引: image_name -> full_path（从所有 part 目录）
+    img_source_map = {}
+    for d in part_dirs:
+        src_images = d / "images"
+        if src_images.exists():
+            for img_file in src_images.iterdir():
+                if img_file.is_file() and img_file.name not in img_source_map:
+                    img_source_map[img_file.name] = img_file
+
+    for md_file in sorted(output_dir.glob("*.md")):
+        content = md_file.read_text(encoding="utf-8")
+        refs = set(img_re.findall(content))
+        for ref in refs:
+            # ref = "images/xxx.jpg"
+            img_name = ref.split("/", 1)[1] if "/" in ref else ref
+            dst_img = images_dir / img_name
+            if dst_img.exists():
+                continue
+            src_img = img_source_map.get(img_name)
+            if src_img:
+                shutil.copy2(src_img, dst_img)
+                img_count += 1
+            else:
+                missing += 1
+                print(f"  警告: 找不到图片源 {ref}")
+
+    print(f"  收集: {img_count} 张")
+    if missing:
+        print(f"  缺失: {missing} 张")
+    print()
+
+    # ---- 步骤 4: 汇总 ----
+    print("[4/4] 汇总")
     print("=" * 50)
 
     print()

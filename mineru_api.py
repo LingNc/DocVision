@@ -71,6 +71,7 @@ class MinerUClient:
         self.log_poll_interval = mineru_config.get("log_poll_interval", 3)
         self.poll_timeout = mineru_config.get("poll_timeout", 0)
         self.progress_threshold = mineru_config.get("progress_threshold", 80)
+        self.upload_timeout = mineru_config.get("upload_timeout", 300)
 
         self.headers = {
             "Content-Type": "application/json",
@@ -78,7 +79,7 @@ class MinerUClient:
         }
 
     def create_single_upload_task(self, file_path: Path) -> Optional[str]:
-        """为单个文件创建上传任务"""
+        """为单个文件创建上传任务（带重试和空闲超时检测）"""
         url = f"{self.api_base_url}/file-urls/batch"
         data = {
             "files": [{"name": file_path.name, "data_id": file_path.stem}],
@@ -89,28 +90,61 @@ class MinerUClient:
             "language": self.language
         }
 
-        try:
-            response = requests.post(url, headers=self.headers, json=data, timeout=30)
-            response.raise_for_status()
-            result = response.json()
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.post(url, headers=self.headers, json=data, timeout=30)
+                response.raise_for_status()
+                result = response.json()
 
-            if result.get("code") == 0:
-                batch_id = result["data"]["batch_id"]
-                upload_url = result["data"]["file_urls"][0]
+                if result.get("code") == 0:
+                    batch_id = result["data"]["batch_id"]
+                    upload_url = result["data"]["file_urls"][0]
 
-                with open(file_path, "rb") as f:
-                    upload_resp = requests.put(upload_url, data=f, timeout=120)
-                    if upload_resp.status_code == 200:
-                        return batch_id
-                    else:
-                        print(f"[{file_path.name}] 上传失败: HTTP {upload_resp.status_code}")
+                    # 流式上传：分块发送，每块有独立超时（空闲检测）
+                    # 只要数据在流动就不会超时，停止流动超过 upload_timeout 秒才断开
+                    file_size = file_path.stat().st_size
+                    chunk_size = 1024 * 1024  # 1MB per chunk
+                    idle_timeout = self.upload_timeout
+
+                    def chunked_file():
+                        with open(file_path, "rb") as f:
+                            while True:
+                                chunk = f.read(chunk_size)
+                                if not chunk:
+                                    break
+                                yield chunk
+
+                    try:
+                        upload_resp = requests.put(
+                            upload_url,
+                            data=chunked_file(),
+                            timeout=(30, idle_timeout),  # connect=30s, read=idle_timeout
+                            headers={"Content-Length": str(file_size)},
+                        )
+                        if upload_resp.status_code == 200:
+                            return batch_id
+                        else:
+                            print(f"[{file_path.name}] 上传失败: HTTP {upload_resp.status_code}")
+                            if attempt < max_retries:
+                                print(f"[{file_path.name}] 重试上传 ({attempt}/{max_retries})...")
+                                continue
+                            return None
+                    except requests.exceptions.Timeout:
+                        print(f"[{file_path.name}] 上传超时（空闲超过 {idle_timeout}s），重试中...")
+                        if attempt < max_retries:
+                            continue
                         return None
-            else:
-                print(f"[{file_path.name}] 创建任务失败: {result.get('msg', '未知错误')}")
+                else:
+                    print(f"[{file_path.name}] 创建任务失败: {result.get('msg', '未知错误')}")
+                    return None
+            except Exception as e:
+                print(f"[{file_path.name}] 上传异常 ({attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    time.sleep(3)
+                    continue
                 return None
-        except Exception as e:
-            print(f"[{file_path.name}] 创建任务异常: {e}")
-            return None
+        return None
 
     def get_batch_results(self, batch_id: str) -> Dict[str, Any]:
         """获取批量任务结果"""
