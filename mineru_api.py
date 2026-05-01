@@ -54,6 +54,68 @@ def atomic_write_json(json_path: Path, data: dict):
     os.replace(tmp_path, json_path)
 
 
+class _UploadWithProgress:
+    """带进度显示和空闲超时检测的文件上传器"""
+
+    def __init__(self, file_path: Path, upload_url: str, file_size: int,
+                 idle_timeout: int, file_name: str, chunk_size: int = 1024 * 1024):
+        self.file_path = file_path
+        self.upload_url = upload_url
+        self.file_size = file_size
+        self.idle_timeout = idle_timeout
+        self.file_name = file_name
+        self.chunk_size = chunk_size
+        self.uploaded = 0
+        self.last_activity = time.time()
+        self.last_log_time = time.time()
+        self.log_interval = 3  # 初始 3 秒，指数退避
+
+    def _progress_callback(self, chunk: bytes):
+        """每次有数据发送时调用"""
+        self.uploaded += len(chunk)
+        self.last_activity = time.time()
+        now = time.time()
+
+        if now - self.last_log_time >= self.log_interval:
+            pct = self.uploaded * 100 // self.file_size if self.file_size > 0 else 0
+            uploaded_mb = self.uploaded / (1024 * 1024)
+            total_mb = self.file_size / (1024 * 1024)
+            print(f"[{self.file_name}] 上传中 {uploaded_mb:.1f}/{total_mb:.1f} MB ({pct}%)")
+            self.log_interval = min(self.log_interval * 2, 64)
+            self.last_log_time = now
+
+    def upload(self) -> requests.Response:
+        """执行上传，返回 Response"""
+        file_size = self.file_size
+
+        def chunked_with_progress():
+            with open(self.file_path, "rb") as f:
+                while True:
+                    # 检查空闲超时
+                    idle = time.time() - self.last_activity
+                    if idle > self.idle_timeout:
+                        raise requests.exceptions.Timeout(
+                            f"上传空闲超过 {self.idle_timeout}s"
+                        )
+                    chunk = f.read(self.chunk_size)
+                    if not chunk:
+                        break
+                    self._progress_callback(chunk)
+                    yield chunk
+
+        print(f"[{self.file_name}] 开始上传 ({file_size / (1024 * 1024):.1f} MB)...")
+        resp = requests.put(
+            self.upload_url,
+            data=chunked_with_progress(),
+            timeout=(30, self.idle_timeout * 2),  # connect=30s, read 宽限
+            headers={"Content-Length": str(file_size)},
+        )
+        if resp.status_code == 200:
+            elapsed = time.time() - self.last_activity + (self.last_activity - self.last_log_time)
+            print(f"[{self.file_name}] 上传完成")
+        return resp
+
+
 class MinerUClient:
     """MinerU API 客户端"""
 
@@ -79,7 +141,7 @@ class MinerUClient:
         }
 
     def create_single_upload_task(self, file_path: Path) -> Optional[str]:
-        """为单个文件创建上传任务（带重试和空闲超时检测）"""
+        """为单个文件创建上传任务（带进度显示、空闲超时检测和重试）"""
         url = f"{self.api_base_url}/file-urls/batch"
         data = {
             "files": [{"name": file_path.name, "data_id": file_path.stem}],
@@ -91,6 +153,8 @@ class MinerUClient:
         }
 
         max_retries = 3
+        idle_timeout = self.upload_timeout
+
         for attempt in range(1, max_retries + 1):
             try:
                 response = requests.post(url, headers=self.headers, json=data, timeout=30)
@@ -101,45 +165,35 @@ class MinerUClient:
                     batch_id = result["data"]["batch_id"]
                     upload_url = result["data"]["file_urls"][0]
 
-                    # 流式上传：分块发送，每块有独立超时（空闲检测）
-                    # 只要数据在流动就不会超时，停止流动超过 upload_timeout 秒才断开
                     file_size = file_path.stat().st_size
-                    chunk_size = 1024 * 1024  # 1MB per chunk
-                    idle_timeout = self.upload_timeout
+                    file_name = file_path.name
 
-                    def chunked_file():
-                        with open(file_path, "rb") as f:
-                            while True:
-                                chunk = f.read(chunk_size)
-                                if not chunk:
-                                    break
-                                yield chunk
-
+                    # 使用带进度跟踪和空闲超时的上传
                     try:
-                        upload_resp = requests.put(
-                            upload_url,
-                            data=chunked_file(),
-                            timeout=(30, idle_timeout),  # connect=30s, read=idle_timeout
-                            headers={"Content-Length": str(file_size)},
+                        uploader = _UploadWithProgress(
+                            file_path, upload_url, file_size,
+                            idle_timeout, file_name
                         )
+                        upload_resp = uploader.upload()
                         if upload_resp.status_code == 200:
                             return batch_id
                         else:
-                            print(f"[{file_path.name}] 上传失败: HTTP {upload_resp.status_code}")
+                            print(f"[{file_name}] 上传失败: HTTP {upload_resp.status_code}")
                             if attempt < max_retries:
-                                print(f"[{file_path.name}] 重试上传 ({attempt}/{max_retries})...")
+                                print(f"[{file_name}] 重试上传 ({attempt}/{max_retries})...")
                                 continue
                             return None
-                    except requests.exceptions.Timeout:
-                        print(f"[{file_path.name}] 上传超时（空闲超过 {idle_timeout}s），重试中...")
+                    except Exception as e:
+                        print(f"[{file_name}] 上传异常 ({attempt}/{max_retries}): {e}")
                         if attempt < max_retries:
+                            time.sleep(3)
                             continue
                         return None
                 else:
                     print(f"[{file_path.name}] 创建任务失败: {result.get('msg', '未知错误')}")
                     return None
             except Exception as e:
-                print(f"[{file_path.name}] 上传异常 ({attempt}/{max_retries}): {e}")
+                print(f"[{file_path.name}] 创建任务异常 ({attempt}/{max_retries}): {e}")
                 if attempt < max_retries:
                     time.sleep(3)
                     continue
