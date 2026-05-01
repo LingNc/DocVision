@@ -26,11 +26,18 @@ import argparse
 import requests
 import threading
 from pathlib import Path
+from enum import Enum
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import yaml
+
+
+class TaskStatus(Enum):
+    DONE = "done"    # 本次成功处理
+    SKIP = "skip"    # 之前已完成，直接跳过
+    FAIL = "fail"    # 最终失败（包括超时退出）
 
 
 def load_config(config_path: str = "config.yaml") -> dict:
@@ -63,7 +70,7 @@ class MinerUClient:
         self.poll_interval = mineru_config.get("poll_interval", 3)
         self.log_poll_interval = mineru_config.get("log_poll_interval", 3)
         self.poll_timeout = mineru_config.get("poll_timeout", 0)
-        self.progress_threshold = mineru_config.get("progress_threshold", 100)
+        self.progress_threshold = mineru_config.get("progress_threshold", 80)
 
         self.headers = {
             "Content-Type": "application/json",
@@ -149,6 +156,7 @@ class MinerUClient:
         last_log_time = start_time
         log_interval = self.log_poll_interval
         last_progress = None
+        last_valid_progress = None  # 记录最后一次有效的页数进度
 
         state_labels = {
             "pending": "排队中",
@@ -180,6 +188,10 @@ class MinerUClient:
             if last_progress is not None:
                 pages_delta = current_progress[0] - last_progress[0]
 
+            # 记录最后一次有效的页数进度（total_pages > 0）
+            if current_progress[1] > 0:
+                last_valid_progress = current_progress
+
             # 检测是否需要立即输出：
             # 1. 首次运行
             # 2. 页数变化 >= 阈值
@@ -195,7 +207,13 @@ class MinerUClient:
             if has_significant_change:
                 # 立即输出并重置间隔
                 if state == "done":
-                    print(f"[{file_name}] [{elapsed}s] 解析完成 ({current_progress[0]}/{current_progress[1]} 页)")
+                    total_pages = current_progress[1]
+                    if last_valid_progress and last_valid_progress[1] > 0:
+                        total_pages = last_valid_progress[1]
+                    if total_pages > 0:
+                        print(f"[{file_name}] [{elapsed}s] 解析完成，共 {total_pages} 页")
+                    else:
+                        print(f"[{file_name}] [{elapsed}s] 解析完成")
                 elif state == "failed":
                     err_msg = item.get("err_msg", "未知错误")
                     print(f"[{file_name}] [{elapsed}s] 解析失败: {err_msg}")
@@ -285,12 +303,12 @@ def process_single_file(
     pdf_file: Path,
     output_dir: Path,
     status_dir: Path
-) -> Tuple[str, bool]:
+) -> Tuple[str, TaskStatus]:
     """
     处理单个 PDF 文件（支持断点续传和恢复）
 
     Returns:
-        (文件名, 是否成功)
+        (文件名, TaskStatus)
     """
     json_path = status_dir / f"{pdf_file.stem}_task.json"
 
@@ -303,23 +321,37 @@ def process_single_file(
             output_folder = output_dir / pdf_file.stem
             if output_folder.exists() and any(output_folder.iterdir()):
                 print(f"[{pdf_file.name}] [跳过] 已完成")
-                return pdf_file.name, True
+                return pdf_file.name, TaskStatus.SKIP
 
-        # 尝试恢复旧任务
+        # 尝试恢复旧任务（包括 running 状态，覆盖超时退出的情况）
         old_batch_id = info.get("batch_id")
         if old_batch_id and info.get("status") in ("running", "timeout"):
             print(f"[{pdf_file.name}] 恢复任务 {old_batch_id} ...")
             is_valid, item = client.check_old_task_valid(old_batch_id)
             if is_valid:
+                # 检查是否已经完成（服务端早已完成但本地未下载）
+                state = item.get("state", "unknown")
+                if state == "done":
+                    zip_url = item.get("full_zip_url")
+                    if zip_url:
+                        info["status"] = "done"
+                        atomic_write_json(json_path, info)
+                        folder_name = info["output_folder"]
+                        if client.download_and_extract(pdf_file.name, zip_url, output_dir, folder_name):
+                            print(f"[{pdf_file.name}] ✓ 恢复并下载完成")
+                            return pdf_file.name, TaskStatus.DONE
+                    # 没有下载链接，走正常轮询流程
                 # 旧任务有效，继续轮询
                 success, is_timeout = client.poll_batch_with_display(
                     pdf_file.name, old_batch_id, info, json_path, output_dir
                 )
                 if success:
-                    return pdf_file.name, True
+                    return pdf_file.name, TaskStatus.DONE
                 elif is_timeout:
-                    # 超时退出，保留 running 状态
-                    return pdf_file.name, False
+                    # 超时退出，保留 running 状态，下次继续恢复
+                    info["status"] = "running"
+                    atomic_write_json(json_path, info)
+                    return pdf_file.name, TaskStatus.FAIL
                 # 轮询返回失败但非超时，尝试重建任务
                 print(f"[{pdf_file.name}] 旧任务无法继续，重新提交...")
             else:
@@ -328,7 +360,7 @@ def process_single_file(
     # 创建新任务
     batch_id = client.create_single_upload_task(pdf_file)
     if not batch_id:
-        return pdf_file.name, False
+        return pdf_file.name, TaskStatus.FAIL
 
     info = {
         "file": pdf_file.name,
@@ -346,10 +378,14 @@ def process_single_file(
     )
 
     if is_timeout:
-        # 超时，保留 running 状态
-        return pdf_file.name, False
+        # 超时，保留 running 状态，下次继续恢复
+        info["status"] = "running"
+        atomic_write_json(json_path, info)
+        return pdf_file.name, TaskStatus.FAIL
 
-    return pdf_file.name, success
+    if success:
+        return pdf_file.name, TaskStatus.DONE
+    return pdf_file.name, TaskStatus.FAIL
 
 
 def process_all_files_concurrent(client: MinerUClient, split_dir: Path, output_dir: Path, max_concurrent: int) -> bool:
@@ -373,7 +409,7 @@ def process_all_files_concurrent(client: MinerUClient, split_dir: Path, output_d
     results = {"success": 0, "skip": 0, "fail": 0}
     lock = threading.Lock()
 
-    def worker(pdf_file: Path) -> Tuple[str, bool]:
+    def worker(pdf_file: Path) -> Tuple[str, TaskStatus]:
         return process_single_file(client, pdf_file, output_dir, status_dir)
 
     with ThreadPoolExecutor(max_workers=max_concurrent) as executor:
@@ -382,25 +418,12 @@ def process_all_files_concurrent(client: MinerUClient, split_dir: Path, output_d
         for future in as_completed(futures):
             pdf = futures[future]
             try:
-                file_name, success = future.result()
+                file_name, status = future.result()
                 with lock:
-                    if success:
-                        # 需要判断是跳过还是成功完成
-                        json_path = status_dir / f"{pdf.stem}_task.json"
-                        if json_path.exists():
-                            with open(json_path, "r", encoding="utf-8") as f:
-                                info = json.load(f)
-                            if info.get("status") == "done":
-                                # 检查是否是本次完成的
-                                created_at = datetime.fromisoformat(info.get("created_at", "2000-01-01"))
-                                if (datetime.now() - created_at).total_seconds() < 3600:
-                                    results["success"] += 1
-                                else:
-                                    results["skip"] += 1
-                            else:
-                                results["fail"] += 1
-                        else:
-                            results["fail"] += 1
+                    if status == TaskStatus.DONE:
+                        results["success"] += 1
+                    elif status == TaskStatus.SKIP:
+                        results["skip"] += 1
                     else:
                         results["fail"] += 1
             except Exception as e:
@@ -438,8 +461,8 @@ def main():
         status_dir = output_dir / "tasks"
         status_dir.mkdir(parents=True, exist_ok=True)
 
-        file_name, success = process_single_file(client, pdf_path, output_dir, status_dir)
-        sys.exit(0 if success else 1)
+        file_name, status = process_single_file(client, pdf_path, output_dir, status_dir)
+        sys.exit(0 if status == TaskStatus.DONE else 1)
     else:
         # 并发处理 split_pdfs 目录
         split_dir = Path(config["paths"]["split_dir"])
