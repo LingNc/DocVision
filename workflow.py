@@ -204,7 +204,7 @@ def step_split(config: dict) -> bool:
     all_success = True
     for pdf_file in pdf_files:
         cmd = [
-            sys.executable, "split_pdfs.py",
+            sys.executable, "python/split_pdfs.py",
             str(pdf_file),
             "--max-pages", str(max_pages),
             "--output-dir", str(split_dir)
@@ -230,7 +230,7 @@ def step_mineru(config: dict) -> bool:
     print("=" * 50)
 
     # 运行 MinerU API 脚本
-    cmd = [sys.executable, "mineru_api.py"]
+    cmd = [sys.executable, "python/mineru_api.py"]
     return run_command(cmd)
 
 
@@ -249,7 +249,7 @@ def step_organize(config: dict) -> bool:
     print("=" * 50)
 
     # 运行文件整理脚本
-    cmd = [sys.executable, "organize_files.py"]
+    cmd = [sys.executable, "python/organize_files.py"]
     return run_command(cmd)
 
 
@@ -268,7 +268,7 @@ def step_img2text(config: dict) -> bool:
     print("=" * 50)
 
     # 运行图片转文本脚本（过滤输出，只保留关键进度）
-    cmd = [sys.executable, "img2text.py"]
+    cmd = [sys.executable, "python/img2text.py"]
     return run_img2text_filtered(cmd)
 
 
@@ -287,7 +287,7 @@ def step_analyze(config: dict) -> bool:
     print("=" * 50)
 
     # 运行日志分析脚本
-    cmd = [sys.executable, "analyze.py"]
+    cmd = [sys.executable, "python/analyze.py"]
     return run_command(cmd)
 
 

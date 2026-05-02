@@ -74,25 +74,25 @@ python workflow.py --config my.yaml
 
 ```bash
 # 分割 PDF
-python split_pdfs.py input.pdf --max-pages 200 --output-dir split_pdfs
+python python/split_pdfs.py input.pdf --max-pages 200 --output-dir split_pdfs
 
 # 调用 MinerU API
-python mineru_api.py
-python mineru_api.py --file test.pdf
+python python/mineru_api.py
+python python/mineru_api.py --file test.pdf
 
 # 整理文件
-python organize_files.py
+python python/organize_files.py
 
 # AI 图片转文本
-python img2text.py
-python img2text.py --test                  # 测试模式，随机 10 张
-python img2text.py --test --number 5       # 随机 5 张
-python img2text.py --test --seed 42        # 固定随机种子
+python python/img2text.py
+python python/img2text.py --test                  # 测试模式，随机 10 张
+python python/img2text.py --test --number 5       # 随机 5 张
+python python/img2text.py --test --seed 42        # 固定随机种子
 
 # 分析日志
-python analyze.py
-python analyze.py --progress               # 仅显示进度摘要
-python analyze.py --all                    # 汇总所有历史日志
+python python/analyze.py
+python python/analyze.py --progress               # 仅显示进度摘要
+python python/analyze.py --all                    # 汇总所有历史日志
 ```
 
 ## 目录结构
