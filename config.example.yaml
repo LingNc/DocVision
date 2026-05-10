@@ -14,6 +14,7 @@ mineru:
   poll_timeout: 0              # max seconds to wait for task completion (0 = unlimited)
   progress_threshold: 80       # 页数变化阈值，达到此值立即刷新输出
   max_pages_per_part: 200      # max pages per PDF part (MinerU limit)
+  max_size_mb: 200             # max file size in MB per PDF part (MinerU limit)
   max_concurrent: 5            # 并发处理任务数
   upload_timeout: 300          # 上传空闲超时秒数（有数据流动时不超时）
 

@@ -187,6 +187,7 @@ def step_split(config: dict) -> bool:
     input_dir = Path(config["paths"]["input_dir"])
     split_dir = Path(config["paths"]["split_dir"])
     max_pages = config["mineru"]["max_pages_per_part"]
+    max_size_mb = config["mineru"].get("max_size_mb", 200)
 
     # 检查输入目录
     if not input_dir.exists():
@@ -207,6 +208,7 @@ def step_split(config: dict) -> bool:
             sys.executable, "python/split_pdfs.py",
             str(pdf_file),
             "--max-pages", str(max_pages),
+            "--max-size-mb", str(max_size_mb),
             "--output-dir", str(split_dir)
         ]
         if not run_command(cmd):
