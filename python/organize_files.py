@@ -48,44 +48,45 @@ def organize_files(config: dict):
     temp_dir.mkdir(parents=True, exist_ok=True)
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    groups = defaultdict(list)
-
     print("=" * 50)
     print("  MinerU 文件整理工具")
     print("=" * 50)
     print()
 
-    # ---- 步骤 1: 复制 md ----
+    # ---- 步骤 1: 发现目录并复制 md ----
     print(f"[1/4] 复制 full.md -> {temp_dir}/ ...")
 
     md_count = 0
+    groups = defaultdict(list)
+    all_dirs = []  # 所有含 full.md 的目录（用于图片索引）
 
-    # 查找所有 _partN 目录
-    part_dirs = [d for d in mineru_output.iterdir() if d.is_dir() and re.search(r'_part\d+', d.name)]
-
-    for d in part_dirs:
-        n = d.name
-        match = re.match(r'^(.+?)_part(\d+)', n)
-        if not match:
+    for d in sorted(mineru_output.iterdir()):
+        if not d.is_dir():
+            continue
+        if not (d / "full.md").exists():
             continue
 
-        sub = match.group(1)
-        pn = match.group(2)
+        all_dirs.append(d)
 
-        print(f"  {sub} (part{pn})")
-
-        if sub not in groups:
-            groups[sub] = []
-        groups[sub].append(pn)
-
-        # 复制 full.md -> output/temp/subject_partN.md
-        src_md = d / "full.md"
-        dst_md = temp_dir / f"{sub}_{pn}.md"
-        if src_md.exists():
+        match = re.match(r'^(.+?)_part(\d+)$', d.name)
+        if match:
+            # 分片目录: subject_partN
+            sub, pn = match.group(1), match.group(2)
+            groups[sub].append(pn)
+            print(f"  {sub} (part{pn})")
+            src_md = d / "full.md"
+            dst_md = temp_dir / f"{sub}_{pn}.md"
             shutil.copy2(src_md, dst_md)
             md_count += 1
         else:
-            print(f"    警告: 没有 full.md")
+            # 单文件目录: 直接作为 subject（无分片）
+            sub = d.name
+            groups[sub] = []
+            print(f"  {sub} (单文件)")
+            src_md = d / "full.md"
+            dst_md = temp_dir / f"{sub}.md"
+            shutil.copy2(src_md, dst_md)
+            md_count += 1
 
     print(f"  MD: {md_count}")
     print()
@@ -96,6 +97,14 @@ def organize_files(config: dict):
     merge_count = 0
 
     for sub, parts in groups.items():
+        if not parts:
+            # 单文件（非分片），temp 中已有 sub.md，直接复制到 output
+            src_file = temp_dir / f"{sub}.md"
+            dst_file = output_dir / f"{sub}.md"
+            if src_file.exists():
+                shutil.copy2(str(src_file), str(dst_file))
+                print(f"  {sub}.md -> {sub}.md (单文件)")
+            continue
         # 按数字排序
         sorted_parts = sorted(parts, key=lambda x: int(x))
 
@@ -140,9 +149,9 @@ def organize_files(config: dict):
         img_count = 0
         missing = 0
 
-        # 建立图片源路径索引: image_name -> full_path（从所有 part 目录）
+        # 建立图片源路径索引: image_name -> full_path（从所有输出目录）
         img_source_map = {}
-        for d in part_dirs:
+        for d in all_dirs:
             src_images = d / "images"
             if src_images.exists():
                 for img_file in src_images.iterdir():
