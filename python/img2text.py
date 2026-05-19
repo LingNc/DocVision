@@ -402,7 +402,9 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
                        max_tool_rounds=3, max_tokens=65536, max_api_retries=3,
                        rate_limit_retries=0, enable_thinking=None, temperature=0.3,
                        format_fix_attempts=1):
-    img_file = images_dir / Path(img_path_str).name
+    # img_path_str: "images/subject/xxx.jpg" → images_dir/subject/xxx.jpg
+    img_rel = img_path_str.split("/", 1)[1] if "/" in img_path_str else img_path_str
+    img_file = images_dir / img_rel
     if not img_file.exists(): return f"[IMG_MISSING: {img_path_str}]", "error"
     try: img_b64 = image_to_base64(img_file)
     except Exception as e: return f"[IMG_ERROR: {img_path_str} - {e}]", "error"

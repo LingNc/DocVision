@@ -143,49 +143,68 @@ def organize_files(config: dict):
     print(f"  合并: {merge_count}, 跳过: {skip_count}")
     print()
 
-    # ---- 步骤 3: 按 markdown 引用收集图片 ----
+    # ---- 步骤 3: 按文件收集图片到独立子目录 ----
     print(f"[3/4] 收集引用的图片 -> {images_dir}/ ...")
 
-    # 目的文件夹已存在且有内容，跳过收集（避免重复扫描和转移）
-    if images_dir.exists() and any(images_dir.iterdir()):
-        img_total = len(list(images_dir.iterdir()))
-        print(f"  目的文件夹已存在 ({img_total} 张图片)，跳过收集")
-        print()
-    else:
-        img_re = re.compile(r'!\[.*?\]\((images/[^)]+)\)')
-        img_count = 0
-        missing = 0
+    img_re = re.compile(r'!\[.*?\]\((images/[^)]+)\)')
+    img_count = 0
+    skip_subject = 0
+    missing = 0
 
-        # 建立图片源路径索引: image_name -> full_path（从所有输出目录）
-        img_source_map = {}
-        for d in all_dirs:
-            src_images = d / "images"
-            if src_images.exists():
-                for img_file in src_images.iterdir():
-                    if img_file.is_file() and img_file.name not in img_source_map:
-                        img_source_map[img_file.name] = img_file
+    # 建立图片源路径索引: image_name -> full_path（从所有输出目录）
+    img_source_map = {}
+    for d in all_dirs:
+        src_images = d / "images"
+        if src_images.exists():
+            for img_file in src_images.iterdir():
+                if img_file.is_file() and img_file.name not in img_source_map:
+                    img_source_map[img_file.name] = img_file
 
-        for md_file in sorted(output_dir.glob("*.md")):
-            content = md_file.read_text(encoding="utf-8")
-            refs = set(img_re.findall(content))
-            for ref in refs:
-                # ref = "images/xxx.jpg"
-                img_name = ref.split("/", 1)[1] if "/" in ref else ref
-                dst_img = images_dir / img_name
-                if dst_img.exists():
-                    continue
-                src_img = img_source_map.get(img_name)
-                if src_img:
-                    shutil.copy2(src_img, dst_img)
-                    img_count += 1
-                else:
-                    missing += 1
-                    print(f"  警告: 找不到图片源 {ref}")
+    for md_file in sorted(output_dir.glob("*.md")):
+        subject = md_file.stem
+        subject_img_dir = images_dir / subject
 
-        print(f"  收集: {img_count} 张")
-        if missing:
-            print(f"  缺失: {missing} 张")
-        print()
+        # 该文件的图片目录已存在且有内容，跳过
+        if subject_img_dir.exists() and any(subject_img_dir.iterdir()):
+            skip_subject += 1
+            continue
+
+        content = md_file.read_text(encoding="utf-8")
+        refs = set(img_re.findall(content))
+        if not refs:
+            continue
+
+        subject_img_dir.mkdir(parents=True, exist_ok=True)
+        collected = 0
+
+        for ref in refs:
+            img_name = ref.split("/", 1)[1] if "/" in ref else ref
+            dst_img = subject_img_dir / img_name
+            if dst_img.exists():
+                collected += 1
+                continue
+            src_img = img_source_map.get(img_name)
+            if src_img:
+                shutil.copy2(src_img, dst_img)
+                img_count += 1
+                collected += 1
+            else:
+                missing += 1
+                print(f"  警告: [{subject}] 找不到图片源 {ref}")
+
+        # 更新 md 中的图片引用路径: images/xxx.jpg -> images/subject/xxx.jpg
+        new_content = content.replace(
+            "images/", f"images/{subject}/"
+        )
+        if new_content != content:
+            md_file.write_text(new_content, encoding="utf-8")
+
+        print(f"  {subject}: {collected} 张图片")
+
+    print(f"  收集: {img_count} 张, 跳过: {skip_subject} 个文件")
+    if missing:
+        print(f"  缺失: {missing} 张")
+    print()
 
     # ---- 步骤 4: 汇总 ----
     print("[4/4] 汇总")
@@ -203,9 +222,16 @@ def organize_files(config: dict):
         size_kb = md_file.stat().st_size / 1024
         print(f"    {md_file.name}  ({size_kb:.1f} KB)")
 
-    img_total = len(list(images_dir.iterdir()))
+    img_total = 0
     print()
-    print(f"  {images_dir}/ : {img_total} 张图片")
+    print(f"  {images_dir}/ :")
+    if images_dir.exists():
+        for sub_dir in sorted(images_dir.iterdir()):
+            if sub_dir.is_dir():
+                count = len(list(sub_dir.iterdir()))
+                img_total += count
+                print(f"    {sub_dir.name}/ ({count} 张)")
+    print(f"    共 {img_total} 张图片")
     print("=" * 50)
     print("完成!")
 
