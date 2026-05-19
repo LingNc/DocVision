@@ -95,26 +95,33 @@ def organize_files(config: dict):
     print(f"[2/4] 合并分片 -> {output_dir}/ ...")
 
     merge_count = 0
+    skip_count = 0
 
     for sub, parts in groups.items():
+        dst_file = output_dir / f"{sub}.md"
+
+        # 最终文件已存在则跳过（想重新生成请删除 output/ 下对应的 .md 文件）
+        if dst_file.exists():
+            skip_count += 1
+            continue
+
         if not parts:
             # 单文件（非分片），temp 中已有 sub.md，直接复制到 output
             src_file = temp_dir / f"{sub}.md"
-            dst_file = output_dir / f"{sub}.md"
             if src_file.exists():
                 shutil.copy2(str(src_file), str(dst_file))
-                print(f"  {sub}.md -> {sub}.md (单文件)")
+                print(f"  {sub}.md (单文件)")
             continue
+
         # 按数字排序
         sorted_parts = sorted(parts, key=lambda x: int(x))
 
         if len(sorted_parts) == 1:
             # 单个分片，复制到 output 根目录（temp 中保留原件）
             src_file = temp_dir / f"{sub}_{sorted_parts[0]}.md"
-            dst_file = output_dir / f"{sub}.md"
             if src_file.exists():
                 shutil.copy2(str(src_file), str(dst_file))
-                print(f"  {sub}_{sorted_parts[0]}.md -> {sub}.md")
+                print(f"  {sub}.md (单分片)")
             continue
 
         print(f"  合并: {sub} (parts {sorted_parts})")
@@ -133,7 +140,7 @@ def organize_files(config: dict):
         merged_file.write_text("\n\n---\n\n".join(contents), encoding="utf-8")
         merge_count += 1
 
-    print(f"  合并: {merge_count}")
+    print(f"  合并: {merge_count}, 跳过: {skip_count}")
     print()
 
     # ---- 步骤 3: 按 markdown 引用收集图片 ----
