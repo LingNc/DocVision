@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MinerU 工作流主脚本 - 串联整个 PDF 处理流程
+MinerU 工作流主脚本 - 串联整个文件处理流程
+支持格式：PDF、图片(png/jpg/jpeg/jp2/webp/gif/bmp)、Doc、Docx、Ppt、PPTx、Xls、Xlsx、HTML
 工作流程：
-1. 分割 PDF 文件（如果需要）
-2. 调用 MinerU API 解析 PDF
+1. 分割 PDF 文件（如果需要，仅 PDF 走此步骤）
+2. 调用 MinerU API 解析所有支持的文件（split_pdfs + input_dir 中的非 PDF 文件）
 3. 整理 MinerU 输出文件
 4. 使用 AI 将图片转换为文本
 5. 分析处理日志
@@ -172,7 +173,7 @@ def _print_progress(done: int, errors: int, warns: int, total: int):
 
 def step_split(config: dict) -> bool:
     """
-    步骤 1: 分割 PDF 文件
+    步骤 1: 分割 PDF 文件（仅 PDF 需要此步骤，其他格式直接进入步骤 2）
 
     Args:
         config: 配置字典
@@ -219,7 +220,8 @@ def step_split(config: dict) -> bool:
 
 def step_mineru(config: dict) -> bool:
     """
-    步骤 2: 调用 MinerU API 解析 PDF
+    步骤 2: 调用 MinerU API 解析所有支持的文件
+    处理 split_dir 中的分割 PDF + input_dir 中的非 PDF 文件（图片、Office 文档等）
 
     Args:
         config: 配置字典
