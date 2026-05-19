@@ -27,25 +27,25 @@ ai:
 
 # Processing options
 options:
-  max_context_lines_up: 10     # initial lines above image
-  max_context_lines_down: 5    # initial lines below image
-  max_window_up: 50            # maximum total lines above (cap)
-  max_window_down: 50          # maximum total lines below (cap)
-  max_retries: 5               # max AI tool_call rounds for more context
-  api_timeout: 400             # request timeout in seconds for the OpenAI call
-  api_connect_timeout: 60      # connect timeout in seconds
-  api_max_retries: 3           # API retry count for non-rate-limit errors
-  rate_limit_retries: 0        # 0 means unlimited with a safety cap in code
+  max_context_lines_up: 10      # default: initial lines above image
+  max_context_lines_down: 5    # default: initial lines below image
+  max_window_up: 50             # maximum total lines above (cap)
+  max_window_down: 50           # maximum total lines below (cap)
+  max_retries: 5               # max retries for AI to request more context
+  api_timeout: 400              # request timeout in seconds for the OpenAI call
+  api_connect_timeout: 60       # connect timeout in seconds
+  api_max_retries: 3            # API retry count for non-rate-limit errors
+  rate_limit_retries: 0         # 0 means unlimited with a safety cap in code
   concurrency: 10              # number of concurrent worker threads
-  temperature: 0.1
+  temperature: 0.10
   output_language: "Chinese"   # "Chinese" or "English"
-  format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:
+  format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
   max_tokens: 65536
 
 # Paths
 paths:
-  input_dir: "./files"         # dir with source PDF files
-  split_dir: "./split_files"   # dir for split PDF parts
+  input_dir: "./files"    # dir with source files
+  split_dir: "./split_pdfs"    # dir for split PDF parts
   mineru_output: "./mineru_output"  # dir for MinerU API results
   output_dir: "./output"       # dir with merged .md files
   images_dir: "./output/images"
