@@ -15,5 +15,6 @@ files*/
 split_files/
 mineru_output/
 temp/
+test*/
 
 config.yaml
