@@ -146,7 +146,7 @@ def organize_files(config: dict):
     # ---- 步骤 3: 按文件收集图片到独立子目录 ----
     print(f"[3/4] 收集引用的图片 -> {images_dir}/ ...")
 
-    img_re = re.compile(r'!\[.*?\]\((images/[^)]+)\)')
+    img_re = re.compile(r'!\[.*?\]\((images/.+?\.(?:jpg|jpeg|png|gif|webp))\)')
     img_count = 0
     skip_subject = 0
     missing = 0

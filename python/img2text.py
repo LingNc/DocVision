@@ -94,7 +94,7 @@ def image_to_base64(image_path: Path, max_size=1280) -> str:
     buf = BytesIO(); img.save(buf, format="JPEG", quality=85)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
-IMAGE_RE = re.compile(r'!\[.*?\]\((images/[^)]+\.(?:jpg|jpeg|png|gif|webp))\)')
+IMAGE_RE = re.compile(r'!\[.*?\]\((images/.+?\.(?:jpg|jpeg|png|gif|webp))\)')
 
 # ─── Context: return specific line range ───────────────────────────
 def get_context_lines(lines, img_idx, up, down):

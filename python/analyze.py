@@ -83,7 +83,7 @@ def find_all_logs(log_dir: Path) -> List[Path]:
 # =============================================================================
 # 进度检查（原 check_progress.py 功能）
 # =============================================================================
-IMAGE_RE = re.compile(r'!\[.*?\]\((images/[^)]+\.(?:jpg|jpeg|png|gif|webp))\)')
+IMAGE_RE = re.compile(r'!\[.*?\]\((images/.+?\.(?:jpg|jpeg|png|gif|webp))\)')
 
 def count_images_in_md_files(input_dir: Path) -> int:
     """计算所有 md 文件中的图片总数"""
