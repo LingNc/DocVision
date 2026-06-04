@@ -74,12 +74,16 @@ func LoadProgress(progressRoot string) map[string]bool {
 				continue
 			}
 			var doc struct {
-				Key string `json:"key"`
+				Key    string `json:"key"`
+				Result string `json:"result"`
 			}
 			if err := json.Unmarshal(data, &doc); err != nil {
 				continue
 			}
-			if doc.Key != "" {
+			// Only count as "done" if result has [IMG_TYPE:] prefix,
+			// indicating a successful conversion. Error sentinels like
+			// [IMG_API_ERROR] should be reprocessed.
+			if doc.Key != "" && strings.Contains(doc.Result, "[IMG_TYPE:") {
 				progress[doc.Key] = true
 			}
 		}

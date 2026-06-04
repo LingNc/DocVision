@@ -17,6 +17,7 @@ type Logger struct {
 	logFile       *os.File // may be nil if logPath is empty
 	errorFile     *os.File // may be nil if errLogPath is empty
 	threadIDWidth int
+	quiet         bool // when true, suppress console output; still writes to log files
 }
 
 // NewLogger creates a Logger.
@@ -107,6 +108,14 @@ func (l *Logger) ThreadIDWidth() int {
 	return l.threadIDWidth
 }
 
+// SetQuiet enables or disables console output. When quiet=true, messages
+// are still written to the log file but not printed to the console.
+func (l *Logger) SetQuiet(quiet bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.quiet = quiet
+}
+
 // write formats the message and writes it to console and (if non-nil) the
 // given file under a single lock. Tag is prepended inside the message body
 // (e.g. "[ERROR] "); tag may be empty.
@@ -122,7 +131,9 @@ func (l *Logger) write(file *os.File, tid int, tag string, args ...interface{}) 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	fmt.Print(line)
+	if !l.quiet {
+		fmt.Print(line)
+	}
 	if file != nil {
 		_, _ = file.WriteString(line)
 	}

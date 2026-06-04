@@ -120,6 +120,7 @@ func CallAIWithTools(
 	// Mode 1: format-fix / custom user text — single shot, no tools.
 	if customUserText != "" {
 		req := &ChatRequest{
+			Model: client.Model(),
 			Messages: []ChatMessage{
 				{Role: "system", Content: BuildSystemPrompt(opts.MaxRetries, opts.OutputLanguage)},
 				{Role: "user", Content: []map[string]interface{}{
@@ -173,6 +174,7 @@ func CallAIWithTools(
 
 	for round := 0; round < maxRounds+1; round++ {
 		req := &ChatRequest{
+			Model:       client.Model(),
 			Messages:       messages,
 			MaxTokens:      opts.MaxTokens,
 			Temperature:    opts.Temperature,
@@ -273,6 +275,7 @@ func CallAIWithTools(
 		Content: "Provide your best analysis now.",
 	})
 	req := &ChatRequest{
+		Model:       client.Model(),
 		Messages:       messages,
 		MaxTokens:      opts.MaxTokens,
 		Temperature:    opts.Temperature,

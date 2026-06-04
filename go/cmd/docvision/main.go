@@ -146,13 +146,18 @@ func stepLabel(s string) string {
 func runStep(step string, cmd *cobra.Command, cfg *config.Config) error {
 	switch step {
 	case "split":
+		// In workflow mode, default to --all if not explicitly set.
+		if !cmd.Flags().Changed("all") {
+			cmd.Flags().Set("all", "true")
+		}
 		return runSplitFromConfig(cmd, cfg)
 	case "mineru":
 		return runMinerUFromConfig(cmd, cfg)
 	case "organize":
 		return organize.OrganizeFiles(cfg)
 	case "img2text":
-		return runImg2TextFromConfig(cmd, cfg)
+		// In workflow mode, use quiet output (progress percentages only).
+		return runImg2TextFromConfig(cmd, cfg, true)
 	case "analyze":
 		return runAnalyzeFromConfig(cmd, cfg)
 	default:
@@ -311,7 +316,7 @@ func newImg2TextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runImg2TextFromConfig(cmd, cfg)
+			return runImg2TextFromConfig(cmd, cfg, false)
 		},
 	}
 	cmd.Flags().Bool("test", false, "启用测试模式（随机抽样）")
@@ -320,7 +325,7 @@ func newImg2TextCmd() *cobra.Command {
 	return cmd
 }
 
-func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config) error {
+func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) error {
 	testMode, _ := cmd.Flags().GetBool("test")
 	number, _ := cmd.Flags().GetInt("number")
 	seed, _ := cmd.Flags().GetString("seed")
@@ -345,6 +350,7 @@ func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config) error {
 		TestMode: testMode,
 		Number:   number,
 		Seed:     seed,
+		Quiet:    quiet,
 	}
 	return img2text.Run(cfg, log, opts)
 }

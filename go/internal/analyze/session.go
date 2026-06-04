@@ -80,11 +80,12 @@ func ParseLogLine(line string) (timestamp, threadID, content string, ok bool) {
 		threadID = "0"
 	}
 
-	content = line[tsMatch[0][0]:]
-	// strip the timestamp prefix and trim
-	if len(content) >= len(timestamp)+2 {
-		content = content[len(timestamp)+2:]
+	// Strip the timestamp prefix (e.g. "[19:26:30]") from the line.
+	tsEnd := len(tsMatch[0])
+	if tsEnd < len(line) && line[tsEnd] == ' ' {
+		tsEnd++ // also consume the single space after the bracket
 	}
+	content = line[tsEnd:]
 	content = trimRight(content)
 	return timestamp, threadID, content, true
 }

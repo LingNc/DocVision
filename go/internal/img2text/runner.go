@@ -29,6 +29,7 @@ type RunOptions struct {
 	TestMode bool
 	Number   int
 	Seed     string
+	Quiet    bool // when true, suppress verbose output; show only progress percentages
 }
 
 // imageTask is the per-image work item collected by Run.
@@ -56,6 +57,7 @@ type runResult struct {
 	start   int
 	end     int
 	imgPath string
+	isError bool // true if the result is an error sentinel
 }
 
 // Run is the top-level entry point. It scans the output directory for
@@ -106,6 +108,9 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 	if opts.TestMode {
 		modeStr = fmt.Sprintf("TEST MODE (random sample, n=%d)", opts.Number)
 	}
+
+	// Always log header to file. In quiet mode, also print clean
+	// header to console (without timestamps).
 	logger.Log(0, "Found", strconv.Itoa(len(mdFiles)), "file(s) | Model:", client.Model(),
 		"| Default ctx: up=", cfg.Options.MaxContextLinesUp,
 		"down=", cfg.Options.MaxContextLinesDown)
@@ -114,6 +119,13 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		"down=", cfg.Options.MaxWindowDown,
 		"| Concurrency:", cfg.Options.Concurrency, "|", modeStr)
 	logger.Log(0, strings.Repeat("=", 60))
+	if opts.Quiet {
+		fmt.Fprintf(os.Stdout, "Found %d file(s) | Model: %s | Default ctx: up= %d down= %d\n",
+			len(mdFiles), client.Model(), cfg.Options.MaxContextLinesUp, cfg.Options.MaxContextLinesDown)
+		fmt.Fprintf(os.Stdout, "Max tool rounds: %d | Max window: up= %d down= %d | Concurrency: %d | %s\n",
+			cfg.Options.MaxRetries, cfg.Options.MaxWindowUp, cfg.Options.MaxWindowDown,
+			cfg.Options.Concurrency, modeStr)
+	}
 
 	mdCache := map[string]mdEntry{}
 	var allTasks []imageTask
@@ -186,6 +198,10 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 	logger.Log(0, "Already done:", strconv.Itoa(len(allTasks)-len(pending)),
 		"| To process:", strconv.Itoa(len(pending)))
 	logger.Log(0, strings.Repeat("=", 60))
+	if opts.Quiet {
+		fmt.Fprintf(os.Stdout, "Already done: %d | To process: %d\n",
+			len(allTasks)-len(pending), len(pending))
+	}
 
 	progressMu := sync.Mutex{}
 	progressData := map[string]runResult{}
@@ -193,8 +209,14 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 	if len(pending) == 0 {
 		logger.Log(0, "All done! Clear progress_items/ directory to re-run.")
 	} else {
+		if opts.Quiet {
+			logger.SetQuiet(true)
+		}
 		runWorkers(client, pending, imagesDir, mdCache, progressRoot,
-			logger, &progressData, &progressMu, cfg.Options)
+			logger, &progressData, &progressMu, cfg.Options, opts.Quiet)
+		if opts.Quiet {
+			logger.SetQuiet(false)
+		}
 	}
 
 	// Final pass: rewrite each *.md with the [AI] blocks.
@@ -258,6 +280,7 @@ func runWorkers(
 	progressData *map[string]runResult,
 	progressMu *sync.Mutex,
 	opts config.OptionsConfig,
+	quiet bool,
 ) {
 	results := make(chan runResult, len(pending))
 	var wg sync.WaitGroup
@@ -284,7 +307,7 @@ func runWorkers(
 			entry, ok := mdCache[tt.mdName]
 			if !ok {
 				results <- runResult{tt.key, "[IMG_WORKER_FATAL: md missing]",
-					tt.start, tt.end, tt.imgPath}
+					tt.start, tt.end, tt.imgPath, true}
 				return
 			}
 			r, status := ProcessOneImage(
@@ -294,6 +317,7 @@ func runWorkers(
 			)
 			elapsed := time.Since(startTime).Seconds()
 			elapsedStr := strconv.FormatFloat(elapsed, 'f', 2, 64)
+			isErr := false
 			if status == StatusOK {
 				logger.Log(tid, "✓", "["+elapsedStr+"s]", "DONE")
 			} else {
@@ -302,11 +326,12 @@ func runWorkers(
 					preview = preview[:200]
 				}
 				logger.LogError(tid, "✗", "["+elapsedStr+"s]", "FAILED", preview)
+				isErr = true
 				if status == StatusRetry {
 					r = "__INVALID_RESPONSE__"
 				}
 			}
-			results <- runResult{tt.key, r, tt.start, tt.end, tt.imgPath}
+			results <- runResult{tt.key, r, tt.start, tt.end, tt.imgPath, isErr}
 		}(t)
 	}
 
@@ -314,9 +339,14 @@ func runWorkers(
 	go func() {
 		count := 0
 		total := len(pending)
+		doneCount := 0
+		errorCount := 0
+		warnCount := 0
+		lastPct := -1
 		for r := range results {
 			count++
 			if r.result == "__INVALID_RESPONSE__" {
+				warnCount++
 				logger.LogWarning(0, "Skipped invalid response for",
 					r.imgPath+", will retry next run.")
 				continue
@@ -341,6 +371,18 @@ func runWorkers(
 			progressMu.Lock()
 			(*progressData)[r.key] = r
 			progressMu.Unlock()
+
+			// Track counts for progress reporting.
+			// Only count as error if result contains error sentinels like
+			// [IMG_API_ERROR], [IMG_MISSING], etc. — NOT [IMG_TYPE:] which
+			// indicates a successful result.
+			if r.isError {
+				errorCount++
+			}
+			doneCount++
+
+			// Always log result details to file (logger handles quiet
+			// mode: file gets everything, console is suppressed).
 			logger.Log(0, strings.Repeat("-", 50))
 			logger.Log(0, "["+strconv.Itoa(count)+"/"+strconv.Itoa(total)+"]",
 				r.imgPath, "(from", mdName+")")
@@ -350,6 +392,23 @@ func runWorkers(
 			}
 			logger.Log(0, "RESULT:\n"+preview)
 			logger.Log(0, strings.Repeat("-", 50))
+
+			if quiet {
+				// Print progress at integer percentage thresholds.
+				if total > 0 {
+					pct := doneCount * 100 / total
+					if pct > lastPct {
+						fmt.Fprintf(os.Stdout, "\r[%d/%d] %d%% (done: %d, errors: %d, warns: %d)",
+							doneCount, total, pct, doneCount-errorCount, errorCount, warnCount)
+						lastPct = pct
+					}
+				}
+			}
+		}
+		if quiet && total > 0 {
+			// Final progress line (ensure 100% is printed).
+			fmt.Fprintf(os.Stdout, "\r[%d/%d] 100%% (done: %d, errors: %d, warns: %d)\n",
+				total, total, doneCount-errorCount, errorCount, warnCount)
 		}
 	}()
 

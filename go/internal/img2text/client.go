@@ -64,6 +64,7 @@ func (c *AIClient) Model() string { return c.model }
 // top-level JSON payload before sending, allowing vendor-specific fields
 // like enable_thinking, extra_body, etc.
 type ChatRequest struct {
+	Model       string           `json:"model"`
 	Messages    []ChatMessage    `json:"messages"`
 	Tools       []map[string]any `json:"tools,omitempty"`
 	ToolChoice  any              `json:"tool_choice,omitempty"`
