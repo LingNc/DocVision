@@ -39,6 +39,9 @@ func newRootCmd() *cobra.Command {
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		CompletionOptions: cobra.CompletionOptions{
+			DisableDefaultCmd: true,
+		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			configPath, err := cmd.Flags().GetString("config")
 			if err != nil {
@@ -61,15 +64,6 @@ func newRootCmd() *cobra.Command {
 	}
 
 	root.PersistentFlags().StringP("config", "c", "config.yaml", "配置文件路径")
-
-	// Reusable split flags attached to the root so the workflow command
-	// can read them via the same plumbing as `split`.
-	root.PersistentFlags().Bool("all", false, "分割目录下所有 PDF（默认从 config.yaml 的 paths.input_dir）")
-	root.PersistentFlags().Bool("force", false, "强制重新分割（忽略已有文件）")
-	root.PersistentFlags().Int("max-pages", 200, "每部分最大页数")
-	root.PersistentFlags().Float64("max-size-mb", 200, "每部分最大大小 MB（0=不限制）")
-	root.PersistentFlags().String("output-dir", "", "输出目录（默认从 config.yaml 的 paths.split_dir）")
-	root.PersistentFlags().String("input-dir", "", "--all 模式下的输入目录（默认从 config.yaml 的 paths.input_dir）")
 
 	root.AddCommand(
 		newWorkflowCmd(),
@@ -130,6 +124,7 @@ func newWorkflowCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringP("step", "s", "", "仅运行指定步骤 (split|mineru|organize|img2text|analyze)")
+	addSplitFlags(cmd)
 	return cmd
 }
 
@@ -183,7 +178,19 @@ func newSplitCmd() *cobra.Command {
 			return runSplitFromConfig(cmd, cfg)
 		},
 	}
+	addSplitFlags(cmd)
 	return cmd
+}
+
+// addSplitFlags wires the split-related flags onto a command. Used by both
+// the `split` and `workflow` subcommands (workflow may run individual steps).
+func addSplitFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("all", false, "分割目录下所有 PDF（默认从 config.yaml 的 paths.input_dir）")
+	cmd.Flags().Bool("force", false, "强制重新分割（忽略已有文件）")
+	cmd.Flags().Int("max-pages", 200, "每部分最大页数")
+	cmd.Flags().Float64("max-size-mb", 200, "每部分最大大小 MB（0=不限制）")
+	cmd.Flags().String("output-dir", "", "输出目录（默认从 config.yaml 的 paths.split_dir）")
+	cmd.Flags().String("input-dir", "", "--all 模式下的输入目录（默认从 config.yaml 的 paths.input_dir）")
 }
 
 // splitOptsFromFlags returns (maxPages, maxSizeMB, outputDir, force) by
