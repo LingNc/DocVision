@@ -24,7 +24,11 @@ ai:
   base_url: "https://your-api-proxy.com/v1"
   api_key: "sk-YOUR-API-KEY-HERE"
   model: "Qwen/Qwen3.6-27B"
-  enable_thinking: false       # pass as top-level param to disable thinking mode (Qwen3.6+)
+  request_body:                # additional body params for the API call
+    enable_thinking: false     # Qwen 3.6+
+    extra_body: {              # OpenAI/Anthropic/DeepSeek
+      "thinking": { "type": "disabled" }
+    }
 
 # Processing options
 options:

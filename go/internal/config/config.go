@@ -39,10 +39,10 @@ type MinerUConfig struct {
 
 // AIConfig holds OpenAI-compatible image-to-text client settings.
 type AIConfig struct {
-	BaseURL        string `yaml:"base_url"`
-	APIKey         string `yaml:"api_key"`
-	Model          string `yaml:"model"`
-	EnableThinking bool   `yaml:"enable_thinking"`
+	BaseURL     string                 `yaml:"base_url"`
+	APIKey      string                 `yaml:"api_key"`
+	Model       string                 `yaml:"model"`
+	RequestBody map[string]interface{} `yaml:"request_body"`
 }
 
 // OptionsConfig holds tuning knobs for the image-to-text processing pipeline.

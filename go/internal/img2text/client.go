@@ -16,11 +16,11 @@ import (
 // completions endpoint. It owns the connection pool, base URL, and
 // credentials; everything else is per-call.
 type AIClient struct {
-	http           *http.Client
-	baseURL        string
-	apiKey         string
-	model          string
-	enableThinking bool
+	http        *http.Client
+	baseURL     string
+	apiKey      string
+	model       string
+	requestBody map[string]interface{}
 }
 
 // NewAIClient builds an AIClient from the loaded configuration. Read and
@@ -47,34 +47,29 @@ func NewAIClient(cfg config.AIConfig, opts config.OptionsConfig) *AIClient {
 	overall := connectTimeout + readTimeout
 
 	return &AIClient{
-		http:           &http.Client{Timeout: overall},
-		baseURL:        strings.TrimRight(cfg.BaseURL, "/"),
-		apiKey:         cfg.APIKey,
-		model:          cfg.Model,
-		enableThinking: cfg.EnableThinking,
+		http:        &http.Client{Timeout: overall},
+		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
+		apiKey:      cfg.APIKey,
+		model:       cfg.Model,
+		requestBody: cfg.RequestBody,
 	}
 }
 
 // Model returns the configured model name.
 func (c *AIClient) Model() string { return c.model }
 
-// EnableThinking returns whether the model should be asked to use its
-// "thinking" mode via the top-level extra_body field.
-func (c *AIClient) EnableThinking() bool { return c.enableThinking }
-
 // ChatRequest is the wire-level payload we POST to the chat completions
-// endpoint. The shape mirrors the OpenAI Chat Completions schema exactly,
-// plus an optional EnableThinking *bool which (when non-nil) is forwarded
-// as a top-level extra_body field so OpenAI-compatible providers that
-// support it (e.g. Qwen, DeepSeek) can opt into thinking mode.
+// endpoint. The shape mirrors the OpenAI Chat Completions schema exactly.
+// Any keys in the client's request_body config are merged into the
+// top-level JSON payload before sending, allowing vendor-specific fields
+// like enable_thinking, extra_body, etc.
 type ChatRequest struct {
-	Messages         []ChatMessage    `json:"messages"`
-	Tools            []map[string]any `json:"tools,omitempty"`
-	ToolChoice       any              `json:"tool_choice,omitempty"`
-	MaxTokens        int              `json:"max_tokens"`
-	Temperature      float64          `json:"temperature"`
-	EnableThinking   *bool            `json:"-"`
-	Stream           bool             `json:"stream"`
+	Messages    []ChatMessage    `json:"messages"`
+	Tools       []map[string]any `json:"tools,omitempty"`
+	ToolChoice  any              `json:"tool_choice,omitempty"`
+	MaxTokens   int              `json:"max_tokens"`
+	Temperature float64          `json:"temperature"`
+	Stream      bool             `json:"stream"`
 }
 
 // ChatMessage is one message in the conversation. The Content field is
@@ -120,12 +115,11 @@ func (c *AIClient) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Inject enable_thinking into the top-level body (extra_body) when
-	// the caller set it. We do this with a second marshal round-trip
-	// because Go's encoding/json has no clean way to "add a key only if
-	// non-nil" without using map[string]any.
-	if req.EnableThinking != nil {
-		raw, err = injectEnableThinking(raw, *req.EnableThinking)
+	// Merge request_body config into the top-level JSON payload. This
+	// allows vendor-specific fields (enable_thinking, extra_body, etc.)
+	// to be injected without code changes.
+	if len(c.requestBody) > 0 {
+		raw, err = injectRequestBody(raw, c.requestBody)
 		if err != nil {
 			return nil, err
 		}
@@ -160,15 +154,17 @@ func (c *AIClient) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 	return &out, nil
 }
 
-// injectEnableThinking adds the "enable_thinking" key into a JSON object
-// payload that has already been marshalled. Implemented as
-// unmarshal->set->remarshal to keep the JSON-encoding logic in one place.
-func injectEnableThinking(raw []byte, enabled bool) ([]byte, error) {
+// injectRequestBody merges extra keys from the config's request_body
+// map into an already-marshalled JSON payload. Implemented as
+// unmarshal->merge->remarshal to keep the JSON-encoding logic in one place.
+func injectRequestBody(raw []byte, extra map[string]interface{}) ([]byte, error) {
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("decode for enable_thinking injection: %w", err)
+		return nil, fmt.Errorf("decode for request_body injection: %w", err)
 	}
-	m["enable_thinking"] = enabled
+	for k, v := range extra {
+		m[k] = v
+	}
 	return json.Marshal(m)
 }
 

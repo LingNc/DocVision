@@ -81,7 +81,8 @@ ai:
   base_url: "https://custom.api/v1"
   api_key: "sk-test"
   model: "m"
-  enable_thinking: true
+  request_body:
+    enable_thinking: true
 options:
   max_context_lines_up: 20
   max_context_lines_down: 8

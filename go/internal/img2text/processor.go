@@ -132,7 +132,6 @@ func CallAIWithTools(
 			MaxTokens:      opts.MaxTokens,
 			Temperature:    opts.Temperature,
 			Stream:         false,
-			EnableThinking: boolPtr(client.EnableThinking()),
 		}
 		content, status := doCallWithRetry(client, req, maxAPIRetries, rateLimitLimit, logger, tid)
 		if status != "" {
@@ -178,7 +177,6 @@ func CallAIWithTools(
 			MaxTokens:      opts.MaxTokens,
 			Temperature:    opts.Temperature,
 			Stream:         false,
-			EnableThinking: boolPtr(client.EnableThinking()),
 		}
 		if round < maxRounds {
 			req.Tools = tools
@@ -279,7 +277,6 @@ func CallAIWithTools(
 		MaxTokens:      opts.MaxTokens,
 		Temperature:    opts.Temperature,
 		Stream:         false,
-		EnableThinking: boolPtr(client.EnableThinking()),
 	}
 	resp, errSentinel, status := doCallWithRetryFull(client, req, maxAPIRetries, rateLimitLimit, logger, tid)
 	if status != "" {
@@ -518,6 +515,3 @@ func resolveImageFile(imagesDir, imgPath string) (string, error) {
 	}
 	return full, nil
 }
-
-// boolPtr is a tiny helper to take the address of a bool literal/value.
-func boolPtr(b bool) *bool { return &b }
