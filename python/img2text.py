@@ -195,7 +195,7 @@ Respond in {OUTPUT_LANG}.
 # ─── Core: AI call with INCREMENTAL tool_call ──────────────────────
 def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
                        max_tool_rounds=3, max_api_retries=3, rate_limit_retries=0,
-                       enable_thinking=None, temperature=0.3, custom_user_text=None):
+                       request_body=None, temperature=0.3, custom_user_text=None):
     """
     Call AI API with incremental context expansion.
     Uses per-request cap from global config (_g_max_up, _g_max_down).
@@ -215,9 +215,7 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
         rate_limit_retry = 0
         while True:
             try:
-                extra_body = {}
-                if enable_thinking is not None:
-                    extra_body["enable_thinking"] = enable_thinking
+                extra_body = dict(request_body or {})
                 response = client.chat.completions.create(
                     model=model,
                     messages=messages,
@@ -285,9 +283,7 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
         rate_limit_retry = 0
         while True:
             try:
-                extra_body = {}
-                if enable_thinking is not None:
-                    extra_body["enable_thinking"] = enable_thinking
+                extra_body = dict(request_body or {})
                 response = client.chat.completions.create(
                     model=model,
                     messages=messages,
@@ -383,9 +379,7 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
     # Forced final
     messages.append({"role": "user", "content": "Provide your best analysis now."})
     try:
-        extra_body = {}
-        if enable_thinking is not None:
-            extra_body["enable_thinking"] = enable_thinking
+        extra_body = dict(request_body or {})
         r = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -400,7 +394,7 @@ def call_ai_with_tools(client, model, img_b64, lines, img_line_idx, max_tokens,
 # ─── Process one image ─────────────────────────────────────────────
 def process_one_image(client, model, images_dir, img_path_str, lines, img_line_idx,
                        max_tool_rounds=3, max_tokens=65536, max_api_retries=3,
-                       rate_limit_retries=0, enable_thinking=None, temperature=0.3,
+                       rate_limit_retries=0, request_body=None, temperature=0.3,
                        format_fix_attempts=1):
     # img_path_str: "images/subject/xxx.jpg" → images_dir/subject/xxx.jpg
     img_rel = img_path_str.split("/", 1)[1] if "/" in img_path_str else img_path_str
@@ -419,7 +413,7 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
             max_tool_rounds,
             max_api_retries,
             rate_limit_retries,
-            enable_thinking,
+            request_body,
             temperature,
         ) or "").strip()
 
@@ -455,7 +449,7 @@ def process_one_image(client, model, images_dir, img_path_str, lines, img_line_i
                         max_tool_rounds=0,
                         max_api_retries=1,
                         rate_limit_retries=0,
-                        enable_thinking=enable_thinking,
+                        request_body=request_body,
                         temperature=temperature,
                         custom_user_text=fix_msg,
                     )
@@ -517,7 +511,11 @@ def main():
     base_url = ai_config["base_url"]
     api_key  = ai_config["api_key"]
     model    = ai_config["model"]
-    enable_thinking = ai_config.get("enable_thinking", False)
+    enable_thinking = ai_config.get("enable_thinking", None)
+    request_body = dict(ai_config.get("request_body", {}))
+    # Backward compatibility: old config format with enable_thinking as top-level key
+    if enable_thinking is not None and "enable_thinking" not in request_body:
+        request_body["enable_thinking"] = enable_thinking
     max_ret = config["options"]["max_retries"]
     _g_up    = config["options"]["max_context_lines_up"]
     _g_down  = config["options"]["max_context_lines_down"]
@@ -644,7 +642,7 @@ def main():
                     max_tok,
                     api_max_retries,
                     rate_limit_retries,
-                    enable_thinking,
+                    request_body,
                     temperature,
                     format_fix_attempts,
                 )
