@@ -18,3 +18,5 @@ temp/
 test*/
 
 config.yaml
+
+!LICENSE
