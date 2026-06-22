@@ -294,7 +294,18 @@ func runMinerUFromConfig(cmd *cobra.Command, cfg *config.Config) error {
 			if err != nil {
 				return fmt.Errorf("list input_dir: %w", err)
 			}
-			files = append(files, more...)
+			// Skip docx files that already have PDF parts in split_dir
+			// (the split step converted them to PDF).
+			for _, f := range more {
+				if strings.EqualFold(filepath.Ext(f), ".docx") {
+					base := util.BaseNameNoExt(f)
+					parts, _ := util.GlobSorted(filepath.Join(cfg.Paths.SplitDir, base+"_part*.pdf"))
+					if len(parts) > 0 {
+						continue // already converted to PDF parts
+					}
+				}
+				files = append(files, f)
+			}
 		}
 	}
 

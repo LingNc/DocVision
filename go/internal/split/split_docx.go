@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"mineru-tools/pkg/util"
@@ -30,6 +31,40 @@ import (
 // paragraphs per page; we use 10 to be conservative and stay under
 // MinerU's 200-page limit.
 const paragraphsPerPage = 10
+
+// convertDocxToPDF converts a DOCX file to PDF using LibreOffice.
+// The PDF is written to outDir with the same base name. Returns the
+// path to the created PDF file.
+func convertDocxToPDF(docxPath, outDir string) (string, error) {
+	absDocx, err := filepath.Abs(docxPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	absOut, err := filepath.Abs(outDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve output dir: %w", err)
+	}
+
+	cmd := exec.Command("libreoffice",
+		"--headless",
+		"--convert-to", "pdf",
+		"--outdir", absOut,
+		absDocx,
+	)
+	// Suppress LibreOffice's stderr (Java warnings etc.) — the
+	// conversion result is verified by checking the output file.
+	cmd.Stderr = nil
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("libreoffice 转换失败: %w", err)
+	}
+
+	baseName := util.BaseNameNoExt(docxPath)
+	pdfPath := filepath.Join(outDir, baseName+".pdf")
+	if !util.FileExists(pdfPath) {
+		return "", fmt.Errorf("转换后的 PDF 文件未生成: %s", pdfPath)
+	}
+	return pdfPath, nil
+}
 
 // docxBodyElement represents one top-level element inside <w:body>.
 // isParagraph is true for <w:p>; isSectPr is true for the trailing
@@ -406,114 +441,39 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 		return fmt.Errorf("创建输出目录失败: %w", err)
 	}
 
-	prefix, elements, suffix, err := readDOCXBody(docxPath)
-	if err != nil {
-		return fmt.Errorf("读取 DOCX 失败: %w", err)
-	}
-
+	// Read page count from Word metadata.
 	realPages := readDOCXPageCount(docxPath)
-	totalParagraphs := countParagraphs(elements)
-	totalElements := len(elements)
-
-	var totalPages int
-	var elementsPerPage int
-	if realPages > 0 {
-		// Use real page count from Word metadata.
-		totalPages = realPages
-		// Compute actual elements-per-page ratio.
-		elementsPerPage = totalElements / realPages
-		if elementsPerPage < 1 {
-			elementsPerPage = 1
-		}
-	} else {
-		// Fall back to paragraph-based heuristic.
-		totalPages = estimatedPages(totalParagraphs)
-		elementsPerPage = paragraphsPerPage
-	}
-
-	baseName := util.BaseNameNoExt(docxPath)
 	displayName := filepath.Base(docxPath)
 
-	// Skip detection.
-	if !force {
-		existing, err := util.GlobSorted(filepath.Join(outputDir, baseName+"_part*.docx"))
-		if err != nil {
-			return fmt.Errorf("查找已有分片失败: %w", err)
-		}
-		if len(existing) > 0 {
-			if isAlreadySplitDOCX(existing, totalParagraphs) {
-				fmt.Printf("[跳过] %s: 已分割为 %d 个部分，跳过\n", displayName, len(existing))
-				return nil
-			}
-			fmt.Printf("[信息] %s: 已有 %d 个部分但段落数不匹配，重新分割\n", displayName, len(existing))
-		}
-	}
-
 	if realPages > 0 {
-		fmt.Printf("[信息] %s: 共 %d 段落, %d 页 (来自 Word 元数据)\n", displayName, totalParagraphs, totalPages)
+		fmt.Printf("[信息] %s: %d 页 (来自 Word 元数据)\n", displayName, realPages)
 	} else {
-		fmt.Printf("[信息] %s: 共 %d 段落（预估 %d 页）\n", displayName, totalParagraphs, totalPages)
+		fmt.Printf("[信息] %s: 无法读取页数元数据\n", displayName)
 	}
 
-	// If the file fits within limits, just copy it without XML manipulation.
-	if totalPages <= maxPages {
-		partName := fmt.Sprintf("%s_part1.docx", baseName)
-		partPath := filepath.Join(outputDir, partName)
-		if err := util.CopyFile(docxPath, partPath); err != nil {
-			return fmt.Errorf("复制文件失败: %w", err)
-		}
-		info, _ := os.Stat(partPath)
-		mb := float64(info.Size()) / (1024 * 1024)
-		fmt.Printf("  → %s  (共 %d 页, %.1fMB)\n", partName, totalPages, mb)
-		fmt.Printf("[完成] 共分割为 1 个部分，输出到 %s\n", outputDir)
+	// If the file is comfortably under the limit, no conversion needed.
+	// MinerU's rendered page count can be ~1.6x higher than Word's
+	// metadata (e.g. Word 137 → MinerU 221). Use 50% as safety margin.
+	safeLimit := maxPages / 2
+	if realPages > 0 && realPages <= safeLimit {
 		return nil
 	}
 
-	part := 1
-	start := 0 // 0-based start, matches PDF variant.
-	for start < totalElements {
-		end, err := splitBySizeAndPagesDOCX(docxPath, start, totalElements, maxPages, maxSizeMB, prefix, elements, suffix, elementsPerPage)
-		if err != nil {
-			return fmt.Errorf("规划第 %d 部分失败: %w", part, err)
-		}
-
-		// <w:sectPr> at the end of body carries page-layout settings
-		// (margins, page size, etc.) and should only appear in the
-		// final part. For earlier parts, we drop sectPr elements so
-		// each part is still a valid, standalone DOCX.
-		selected := make([]docxBodyElement, 0, end-start)
-		isLast := end == totalElements
-		for _, el := range elements[start:end] {
-			if el.isSectPr && !isLast {
-				continue
-			}
-			selected = append(selected, el)
-		}
-
-		partName := fmt.Sprintf("%s_part%d.docx", baseName, part)
-		partPath := filepath.Join(outputDir, partName)
-		if err := writeDOCXPart(partPath, docxPath, prefix, selected, suffix); err != nil {
-			return fmt.Errorf("写入 %s 失败: %w", partName, err)
-		}
-
-		info, err := os.Stat(partPath)
-		if err != nil {
-			return fmt.Errorf("stat %s: %w", partName, err)
-		}
-		partParagraphs := countParagraphs(selected)
-		partPages := estimatedPages(partParagraphs)
-		if maxSizeMB > 0 {
-			fmt.Printf("  → %s  (元素 %d–%d, 共 %d 段落 / 预估 %d 页, %.1fMB)\n",
-				partName, start+1, end, partParagraphs, partPages, float64(info.Size())/(1024*1024))
-		} else {
-			fmt.Printf("  → %s  (元素 %d–%d, 共 %d 段落 / 预估 %d 页)\n",
-				partName, start+1, end, partParagraphs, partPages)
-		}
-
-		start = end
-		part++
+	// Convert DOCX to PDF for MinerU processing. This handles:
+	// 1. Page count exceeds limit — PDF splitter will split it.
+	// 2. Page count close to limit — might exceed after rendering.
+	// 3. Page count unknown — convert to PDF to get accurate count.
+	fmt.Printf("  [信息] 转为 PDF 后分割...\n")
+	pdfPath, err := convertDocxToPDF(docxPath, outputDir)
+	if err != nil {
+		return fmt.Errorf("DOCX 转 PDF 失败: %w", err)
 	}
-
-	fmt.Printf("[完成] 共分割为 %d 个部分，输出到 %s/\n\n", part-1, outputDir)
+	fmt.Printf("  [完成] 已转为 PDF: %s\n", filepath.Base(pdfPath))
+	// Split the converted PDF using the existing PDF splitter.
+	if err := SplitPDF(pdfPath, maxPages, maxSizeMB, outputDir, force); err != nil {
+		return err
+	}
+	// Remove the intermediate PDF (only the _part*.pdf files are needed).
+	os.Remove(pdfPath)
 	return nil
 }
