@@ -26,8 +26,10 @@ import (
 )
 
 // paragraphsPerPage is the heuristic used to convert a paragraph count
-// into an estimated page count. 20 mirrors the Python reference.
-const paragraphsPerPage = 20
+// into an estimated page count. Typical Word documents have ~10-20
+// paragraphs per page; we use 10 to be conservative and stay under
+// MinerU's 200-page limit.
+const paragraphsPerPage = 10
 
 // docxBodyElement represents one top-level element inside <w:body>.
 // isParagraph is true for <w:p>; isSectPr is true for the trailing
