@@ -43,6 +43,42 @@ type docxBodyElement struct {
 	data        []byte
 }
 
+// readDOCXPageCount reads docProps/app.xml from the DOCX ZIP and returns
+// the <Pages> value. Returns 0 if the file or element is missing.
+func readDOCXPageCount(path string) int {
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		return 0
+	}
+	defer r.Close()
+
+	rc, err := openZipEntry(r, "docProps/app.xml")
+	if err != nil {
+		return 0
+	}
+	defer rc.Close()
+
+	raw, err := io.ReadAll(rc)
+	if err != nil {
+		return 0
+	}
+
+	dec := xml.NewDecoder(bytes.NewReader(raw))
+	dec.Strict = false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return 0
+		}
+		if start, ok := tok.(xml.StartElement); ok && start.Name.Local == "Pages" {
+			var pages int
+			if dec.DecodeElement(&pages, &start) == nil {
+				return pages
+			}
+		}
+	}
+}
+
 // readDOCXBody opens the DOCX at path and extracts the top-level body
 // elements from word/document.xml. It returns:
 //   - prefix:  raw bytes from the start of document.xml up to and
@@ -286,17 +322,15 @@ func estimatedPages(paragraphs int) int {
 
 // splitBySizeAndPagesDOCX finds the largest end index such that the
 // elements elements[start:end] satisfy:
-//   - estimated pages (paragraphs/20) <= maxPages
+//   - estimated pages <= maxPages
 //   - estimated file size <= maxSizeMB
 //
-// start is 0-based and inclusive (matches the PDF variant).
-//
-// If maxSizeMB <= 0, size is not constrained and the page-count cap is
-// used. If a single element already exceeds the limit, a warning is
-// printed and that single element is returned.
-func splitBySizeAndPagesDOCX(srcPath string, start, totalElements, maxPages int, maxSizeMB float64, prefix []byte, allElements []docxBodyElement, suffix []byte) (int, error) {
+// elementsPerPage is the ratio used to convert element count to pages.
+// It is either the constant paragraphsPerPage (fallback) or computed
+// from real page metadata (totalElements / realPages).
+func splitBySizeAndPagesDOCX(srcPath string, start, totalElements, maxPages int, maxSizeMB float64, prefix []byte, allElements []docxBodyElement, suffix []byte, elementsPerPage int) (int, error) {
 	// Page-count cap, expressed as an element index.
-	maxEl := start + maxPages*paragraphsPerPage
+	maxEl := start + maxPages*elementsPerPage
 	if maxEl > totalElements {
 		maxEl = totalElements
 	}
@@ -377,8 +411,25 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 		return fmt.Errorf("读取 DOCX 失败: %w", err)
 	}
 
+	realPages := readDOCXPageCount(docxPath)
 	totalParagraphs := countParagraphs(elements)
-	totalPages := estimatedPages(totalParagraphs)
+	totalElements := len(elements)
+
+	var totalPages int
+	var elementsPerPage int
+	if realPages > 0 {
+		// Use real page count from Word metadata.
+		totalPages = realPages
+		// Compute actual elements-per-page ratio.
+		elementsPerPage = totalElements / realPages
+		if elementsPerPage < 1 {
+			elementsPerPage = 1
+		}
+	} else {
+		// Fall back to paragraph-based heuristic.
+		totalPages = estimatedPages(totalParagraphs)
+		elementsPerPage = paragraphsPerPage
+	}
 
 	baseName := util.BaseNameNoExt(docxPath)
 	displayName := filepath.Base(docxPath)
@@ -398,13 +449,16 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 		}
 	}
 
-	fmt.Printf("[信息] %s: 共 %d 段落（预估 %d 页）\n", displayName, totalParagraphs, totalPages)
+	if realPages > 0 {
+		fmt.Printf("[信息] %s: 共 %d 段落, %d 页 (来自 Word 元数据)\n", displayName, totalParagraphs, totalPages)
+	} else {
+		fmt.Printf("[信息] %s: 共 %d 段落（预估 %d 页）\n", displayName, totalParagraphs, totalPages)
+	}
 
-	totalElements := len(elements)
 	part := 1
 	start := 0 // 0-based start, matches PDF variant.
 	for start < totalElements {
-		end, err := splitBySizeAndPagesDOCX(docxPath, start, totalElements, maxPages, maxSizeMB, prefix, elements, suffix)
+		end, err := splitBySizeAndPagesDOCX(docxPath, start, totalElements, maxPages, maxSizeMB, prefix, elements, suffix, elementsPerPage)
 		if err != nil {
 			return fmt.Errorf("规划第 %d 部分失败: %w", part, err)
 		}
