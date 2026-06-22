@@ -198,38 +198,58 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 	return nil
 }
 
-// SplitAll runs SplitPDF on every .pdf file in inputDir (non-recursive,
-// hidden files skipped). Each file is processed independently; an error
-// on one file does not stop the others — the first error is returned at
-// the end.
+// SplitAll runs SplitPDF on every .pdf and SplitDOCX on every .docx
+// file in inputDir (non-recursive, hidden files skipped). Each file
+// is processed independently; an error on one file does not stop
+// the others — the first error is returned at the end.
 func SplitAll(inputDir string, maxPages int, maxSizeMB float64, outputDir string, force bool) error {
 	if !util.DirExists(inputDir) {
 		return fmt.Errorf("输入目录不存在: %s", inputDir)
 	}
 
-	files, err := util.ListFiles(inputDir, ".pdf")
+	pdfs, err := util.ListFiles(inputDir, ".pdf")
+	if err != nil {
+		return fmt.Errorf("读取目录失败: %w", err)
+	}
+	docxs, err := util.ListFiles(inputDir, ".docx")
 	if err != nil {
 		return fmt.Errorf("读取目录失败: %w", err)
 	}
 	// ListFiles does not filter dotfiles — drop them to match Python.
-	visible := files[:0]
-	for _, f := range files {
+	visible := pdfs[:0]
+	for _, f := range pdfs {
 		if !strings.HasPrefix(filepath.Base(f), ".") {
 			visible = append(visible, f)
 		}
 	}
-	files = visible
+	pdfs = visible
+	visible = docxs[:0]
+	for _, f := range docxs {
+		if !strings.HasPrefix(filepath.Base(f), ".") {
+			visible = append(visible, f)
+		}
+	}
+	docxs = visible
 
-	if len(files) == 0 {
-		fmt.Printf("[警告] 目录 %s 下没有找到 PDF 文件\n", inputDir)
+	total := len(pdfs) + len(docxs)
+	if total == 0 {
+		fmt.Printf("[警告] 目录 %s 下没有找到 PDF 或 DOCX 文件\n", inputDir)
 		return nil
 	}
 
-	fmt.Printf("找到 %d 个 PDF 文件\n\n", len(files))
+	fmt.Printf("找到 %d 个文件（%d 个 PDF, %d 个 DOCX）\n\n", total, len(pdfs), len(docxs))
 
 	var firstErr error
-	for _, f := range files {
+	for _, f := range pdfs {
 		if err := SplitPDF(f, maxPages, maxSizeMB, outputDir, force); err != nil {
+			fmt.Fprintf(os.Stderr, "[错误] %v\n", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	for _, f := range docxs {
+		if err := SplitDOCX(f, maxPages, maxSizeMB, outputDir, force); err != nil {
 			fmt.Fprintf(os.Stderr, "[错误] %v\n", err)
 			if firstErr == nil {
 				firstErr = err

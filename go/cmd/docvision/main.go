@@ -92,7 +92,7 @@ func newWorkflowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workflow",
 		Short: "运行完整工作流或单个步骤",
-		Long:  "串联 PDF 分割、MinerU API、文件整理、图片转文本、日志分析等步骤。\n使用 --step 指定单个步骤。",
+		Long:  "串联 PDF/DOCX 分割、MinerU API、文件整理、图片转文本、日志分析等步骤。\n使用 --step 指定单个步骤。",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfigWithFlag(cmd)
 			if err != nil {
@@ -130,7 +130,7 @@ func newWorkflowCmd() *cobra.Command {
 
 func stepLabel(s string) string {
 	labels := map[string]string{
-		"split":    "Split PDFs",
+		"split":    "Split Documents",
 		"mineru":   "MinerU API",
 		"organize": "Organize Files",
 		"img2text": "Image to Text",
@@ -167,9 +167,9 @@ func runStep(step string, cmd *cobra.Command, cfg *config.Config) error {
 
 func newSplitCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "split [pdf_file]",
-		Short: "按页数/大小分割 PDF",
-		Long:  "将大 PDF 按指定最大页数或文件大小拆分为多个部分。可处理单个文件或 --all 处理目录下所有 PDF。",
+		Use:   "split [file]",
+		Short: "按页数/大小分割 PDF 或 DOCX",
+		Long:  "将大 PDF 或 DOCX 按指定最大页数或文件大小拆分为多个部分。可处理单个文件或 --all 处理目录下所有 PDF/DOCX。",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigWithFlag(cmd)
 			if err != nil {
@@ -178,7 +178,7 @@ func newSplitCmd() *cobra.Command {
 			// Positional argument overrides any --all behaviour.
 			if len(args) > 0 {
 				maxPages, maxSizeMB, outputDir, force := splitOptsFromFlags(cmd, cfg)
-				return split.SplitPDF(args[0], maxPages, maxSizeMB, outputDir, force)
+				return splitOne(args[0], maxPages, maxSizeMB, outputDir, force)
 			}
 			return runSplitFromConfig(cmd, cfg)
 		},
@@ -187,10 +187,23 @@ func newSplitCmd() *cobra.Command {
 	return cmd
 }
 
+// splitOne dispatches a single file to the appropriate splitter based
+// on its extension. Unknown extensions return an error.
+func splitOne(path string, maxPages int, maxSizeMB float64, outputDir string, force bool) error {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".pdf":
+		return split.SplitPDF(path, maxPages, maxSizeMB, outputDir, force)
+	case ".docx":
+		return split.SplitDOCX(path, maxPages, maxSizeMB, outputDir, force)
+	default:
+		return fmt.Errorf("unsupported file type %q (expected .pdf or .docx)", filepath.Ext(path))
+	}
+}
+
 // addSplitFlags wires the split-related flags onto a command. Used by both
 // the `split` and `workflow` subcommands (workflow may run individual steps).
 func addSplitFlags(cmd *cobra.Command) {
-	cmd.Flags().Bool("all", false, "分割目录下所有 PDF（默认从 config.yaml 的 paths.input_dir）")
+	cmd.Flags().Bool("all", false, "分割目录下所有 PDF/DOCX（默认从 config.yaml 的 paths.input_dir）")
 	cmd.Flags().Bool("force", false, "强制重新分割（忽略已有文件）")
 	cmd.Flags().Int("max-pages", 200, "每部分最大页数")
 	cmd.Flags().Float64("max-size-mb", 200, "每部分最大大小 MB（0=不限制）")
@@ -233,7 +246,7 @@ func runSplitFromConfig(cmd *cobra.Command, cfg *config.Config) error {
 	if all {
 		return split.SplitAll(inputDir, maxPages, maxSizeMB, outputDir, force)
 	}
-	return fmt.Errorf("split: 请提供 PDF 文件路径或使用 --all")
+	return fmt.Errorf("split: 请提供 PDF/DOCX 文件路径或使用 --all")
 }
 
 func newMinerUCmd() *cobra.Command {
