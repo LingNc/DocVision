@@ -221,7 +221,8 @@ func SplitAll(inputDir string, maxPages int, maxSizeMB float64, outputDir string
 	files = visible
 
 	if len(files) == 0 {
-		return fmt.Errorf("目录 %s 下没有找到 PDF 文件", inputDir)
+		fmt.Printf("[警告] 目录 %s 下没有找到 PDF 文件\n", inputDir)
+		return nil
 	}
 
 	fmt.Printf("找到 %d 个 PDF 文件\n\n", len(files))
