@@ -12,7 +12,7 @@ PDF 文件 -> 分割 -> MinerU API 解析 -> 整理文件 -> AI 图片转文本 
 
 共 5 个步骤：
 
-1. **split** - 将大 PDF 按页数和文件大小限制分割（MinerU 限制单次最多 200 页）
+1. **split** - 将大文件按页数和文件大小限制分割（PDF 和 DOCX，MinerU 限制单次最多 200 页）
 2. **mineru** - 调用 MinerU API 解析文件，支持并发、断点续传、上传进度显示
 3. **organize** - 整理解析结果，合并分片，按引用收集图片到按主题子目录
 4. **img2text** - 用 AI 模型识别图片内容并转为文本，支持并发和上下文增量扩展（工具调用）
@@ -82,7 +82,7 @@ python workflow.py --step analyze
 
 ```
 docvision workflow    运行完整流水线（默认），或 --step 指定单步
-docvision split       分割 PDF（单文件或 --all 目录模式）
+docvision split       分割 PDF/DOCX（单文件或 --all 目录模式）
 docvision mineru      调用 MinerU API 解析文件
 docvision organize    整理解析结果
 docvision img2text    AI 图片转文本（--test 测试模式）
@@ -139,8 +139,8 @@ python split_log.py
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `mineru.max_pages_per_part` | 单个 PDF 分片最大页数 | 200 |
-| `mineru.max_size_mb` | 单个 PDF 分片最大文件大小（MB） | 200 |
+| `mineru.max_pages_per_part` | 单个文件分片最大页数（PDF 和 DOCX） | 200 |
+| `mineru.max_size_mb` | 单个文件分片最大大小（MB） | 200 |
 | `mineru.max_concurrent` | MinerU API 并发数 | 5 |
 | `mineru.upload_timeout` | 上传空闲超时（秒） | 300 |
 | `ai.request_body` | 注入 API 请求体的额外参数（如 enable_thinking） | 见示例 |

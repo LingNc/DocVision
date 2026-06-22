@@ -11,6 +11,7 @@
 - 8 个子命令：`workflow`、`split`、`mineru`、`organize`、`img2text`、`analyze`、`splitlog`、`init`
 - `docvision init` 生成配置模板（`default.yaml` 嵌入二进制）
 - Makefile：`make build`、`make release`、`make test`、`make clean`
+- DOCX 分割支持：按段落分组，使用与 PDF 相同的页数和大小限制
 
 #### 核心功能
 - PDF 分割：按页数 + 文件大小二进制搜索，跳过已分割文件，`--force` 强制重分
