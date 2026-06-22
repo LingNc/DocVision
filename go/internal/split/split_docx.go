@@ -455,6 +455,20 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 		fmt.Printf("[信息] %s: 共 %d 段落（预估 %d 页）\n", displayName, totalParagraphs, totalPages)
 	}
 
+	// If the file fits within limits, just copy it without XML manipulation.
+	if totalPages <= maxPages {
+		partName := fmt.Sprintf("%s_part1.docx", baseName)
+		partPath := filepath.Join(outputDir, partName)
+		if err := util.CopyFile(docxPath, partPath); err != nil {
+			return fmt.Errorf("复制文件失败: %w", err)
+		}
+		info, _ := os.Stat(partPath)
+		mb := float64(info.Size()) / (1024 * 1024)
+		fmt.Printf("  → %s  (共 %d 页, %.1fMB)\n", partName, totalPages, mb)
+		fmt.Printf("[完成] 共分割为 1 个部分，输出到 %s\n", outputDir)
+		return nil
+	}
+
 	part := 1
 	start := 0 // 0-based start, matches PDF variant.
 	for start < totalElements {
