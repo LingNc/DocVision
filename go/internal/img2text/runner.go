@@ -343,6 +343,10 @@ func runWorkers(
 		errorCount := 0
 		warnCount := 0
 		lastPct := -1
+		// Show initial progress immediately so the user sees activity.
+		if quiet && total > 0 {
+			fmt.Fprintf(os.Stdout, "[0/%d] 0%% (done: 0, errors: 0, warns: 0)", total)
+		}
 		for r := range results {
 			count++
 			if r.result == "__INVALID_RESPONSE__" {
