@@ -1,6 +1,7 @@
 package img2text
 
 import (
+	"bufio"
 	"fmt"
 	"math/rand"
 	"os"
@@ -342,10 +343,13 @@ func runWorkers(
 		doneCount := 0
 		errorCount := 0
 		warnCount := 0
-		lastPct := -1
+
+		progressOut := bufio.NewWriter(os.Stdout)
+
 		// Show initial progress immediately so the user sees activity.
 		if quiet && total > 0 {
-			fmt.Fprintf(os.Stdout, "[0/%d] 0%% (done: 0, errors: 0, warns: 0)", total)
+			fmt.Fprintf(progressOut, "[0/%d] 0.00%% (done: 0, errors: 0, warns: 0)", total)
+			progressOut.Flush()
 		}
 		for r := range results {
 			count++
@@ -398,21 +402,20 @@ func runWorkers(
 			logger.Log(0, strings.Repeat("-", 50))
 
 			if quiet {
-				// Print progress at integer percentage thresholds.
+				// Print progress with 2-decimal precision on every update.
 				if total > 0 {
-					pct := doneCount * 100 / total
-					if pct > lastPct {
-						fmt.Fprintf(os.Stdout, "\r[%d/%d] %d%% (done: %d, errors: %d, warns: %d)",
-							doneCount, total, pct, doneCount-errorCount, errorCount, warnCount)
-						lastPct = pct
-					}
+					pct := float64(doneCount) * 100.0 / float64(total)
+					fmt.Fprintf(progressOut, "\r[%d/%d] %.2f%% (done: %d, errors: %d, warns: %d)",
+						doneCount, total, pct, doneCount-errorCount, errorCount, warnCount)
+					progressOut.Flush()
 				}
 			}
 		}
 		if quiet && total > 0 {
 			// Final progress line (ensure 100% is printed).
-			fmt.Fprintf(os.Stdout, "\r[%d/%d] 100%% (done: %d, errors: %d, warns: %d)\n",
+			fmt.Fprintf(progressOut, "\r[%d/%d] 100.00%% (done: %d, errors: %d, warns: %d)\n",
 				total, total, doneCount-errorCount, errorCount, warnCount)
+			progressOut.Flush()
 		}
 	}()
 
