@@ -76,7 +76,9 @@ python workflow.py --step img2text
 python workflow.py --step analyze
 ```
 
-将 PDF 文件放入 `files/` 目录，运行工作流即可。
+> **Note:** Python 版本的 `split_pdfs.py` 仅支持 PDF 分割。DOCX 分割请使用 Go 版本。
+
+将 PDF 或 DOCX 文件放入 `files/` 目录，运行工作流即可。
 
 ## Go 命令行说明
 
@@ -143,11 +145,18 @@ python split_log.py
 | `mineru.max_size_mb` | 单个文件分片最大大小（MB） | 200 |
 | `mineru.max_concurrent` | MinerU API 并发数 | 5 |
 | `mineru.upload_timeout` | 上传空闲超时（秒） | 300 |
+| `mineru.log_poll_interval` | 控制台日志输出间隔（秒） | 3 |
+| `mineru.progress_threshold` | 页数变化阈值，达到此值立即刷新输出 | 80 |
 | `ai.request_body` | 注入 API 请求体的额外参数（如 enable_thinking） | 见示例 |
 | `options.concurrency` | AI 图片转文本并发数 | 10 |
 | `options.max_retries` | AI 请求更多上下文的最大轮数 | 5 |
 | `options.max_context_lines_up` | 图片上方初始上下文行数 | 10 |
 | `options.max_context_lines_down` | 图片下方初始上下文行数 | 5 |
+| `options.api_connect_timeout` | API 连接超时（秒） | 60 |
+| `options.api_max_retries` | 非限流错误的 API 重试次数 | 3 |
+| `options.rate_limit_retries` | 限流错误重试次数（0 表示无限次，由代码设置上限） | 0 |
+| `options.format_fix_attempts` | 格式修复重试次数（0 禁用，1 表示重试一次） | 1 |
+| `options.max_tokens` | API 调用最大 token 数 | 65536 |
 
 完整配置见 `config.example.yaml`。
 
@@ -155,7 +164,7 @@ python split_log.py
 
 ```
 files/                  源 PDF/Office/图片文件
-split_files/            分割后的 PDF
+split_files/            分割后的 PDF/DOCX
 mineru_output/          MinerU API 返回的解析结果
 output/                 合并后的 Markdown 和引用的图片
 output/images/{主题}/   按主题组织的图片
@@ -165,15 +174,15 @@ finally/progress_items/ AI 处理进度记录（断点续传）
 
 ## CI/CD
 
-推送 `v*.0` 标签时，GitHub Actions 自动：
+推送 `v*.*.*` 标签时，GitHub Actions 自动：
 
 1. 运行测试（`go test -race ./...`）
 2. 交叉编译 5 个平台二进制
 3. 创建 GitHub Release 并上传产物
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 ## 许可证

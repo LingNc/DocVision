@@ -2,7 +2,8 @@ BINARY_NAME := docvision
 BUILD_DIR := build
 RELEASE_DIR := release
 GO := go
-GOFLAGS := -ldflags="-s -w"
+VERSION ?= dev
+GOFLAGS := -ldflags="-s -w -X main.Version=$(VERSION)"
 
 .PHONY: build clean release test vet
 
