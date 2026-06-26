@@ -290,6 +290,13 @@ func runWorkers(
 		concurrency = 1
 	}
 	sem := make(chan struct{}, concurrency)
+	total := len(pending)
+
+	// Show initial progress immediately before starting any workers.
+	if quiet && total > 0 {
+		fmt.Fprintf(os.Stdout, "[0/%d] 0.00%% (done: 0, errors: 0, warns: 0)", total)
+		os.Stdout.Sync()
+	}
 
 	for _, t := range pending {
 		wg.Add(1)
@@ -339,18 +346,12 @@ func runWorkers(
 	// Writer goroutine: drains results and persists them.
 	go func() {
 		count := 0
-		total := len(pending)
 		doneCount := 0
 		errorCount := 0
 		warnCount := 0
 
 		progressOut := bufio.NewWriter(os.Stdout)
 
-		// Show initial progress immediately so the user sees activity.
-		if quiet && total > 0 {
-			fmt.Fprintf(progressOut, "[0/%d] 0.00%% (done: 0, errors: 0, warns: 0)", total)
-			progressOut.Flush()
-		}
 		for r := range results {
 			count++
 			if r.result == "__INVALID_RESPONSE__" {
