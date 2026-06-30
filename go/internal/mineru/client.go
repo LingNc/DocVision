@@ -2,6 +2,8 @@ package mineru
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -113,12 +115,41 @@ func (c *MinerUClient) CreateUploadTask(filePath string) (string, error) {
 	return "", fmt.Errorf("[%s] 创建任务失败: 超过最大重试次数", fileName)
 }
 
+// dataIDMaxLen is the maximum number of characters the MinerU API
+// accepts in the "files[].data_id" field. The API rejects anything
+// longer with: "field files.data_id cannot exceed 128 characters".
+const dataIDMaxLen = 128
+
+// dataIDForStemHashLen is the length (in hex characters) of the SHA-256
+// suffix appended to shortened stems. 16 hex chars give 64 bits of
+// collision resistance, which is more than enough for a per-batch
+// client-side identifier.
+const dataIDForStemHashLen = 16
+
+// dataIDForUpload derives the value sent to the MinerU API as
+// "files[].data_id". The API caps this field at dataIDMaxLen bytes;
+// long Chinese filenames exceed that limit when passed verbatim, so
+// oversized stems are replaced with a human-readable prefix plus a
+// stable SHA-256 hex suffix. Stems within the limit are returned
+// unchanged so on-disk state files keyed by the same stem keep
+// matching across runs.
+func dataIDForUpload(stem string) string {
+	if len(stem) <= dataIDMaxLen {
+		return stem
+	}
+	sum := sha256.Sum256([]byte(stem))
+	suffix := hex.EncodeToString(sum[:])[:dataIDForStemHashLen]
+	// Reserve room for a single "_" separator and the hex suffix.
+	prefix := stem[:dataIDMaxLen-dataIDForStemHashLen-1]
+	return prefix + "_" + suffix
+}
+
 // requestUploadURL POSTs to /file-urls/batch to obtain a presigned
 // upload URL and the batch_id we should poll on.
 func (c *MinerUClient) requestUploadURL(fileName, stem string) (string, string, error) {
 	body := map[string]interface{}{
 		"files": []map[string]string{
-			{"name": fileName, "data_id": stem},
+			{"name": fileName, "data_id": dataIDForUpload(stem)},
 		},
 		"model_version":  c.cfg.ModelVersion,
 		"is_ocr":         c.cfg.IsOCR,
