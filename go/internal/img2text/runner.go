@@ -285,6 +285,7 @@ func runWorkers(
 ) {
 	results := make(chan runResult, len(pending))
 	var wg sync.WaitGroup
+	var writerWG sync.WaitGroup
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
 		concurrency = 1
@@ -344,7 +345,9 @@ func runWorkers(
 	}
 
 	// Writer goroutine: drains results and persists them.
+	writerWG.Add(1)
 	go func() {
+		defer writerWG.Done()
 		count := 0
 		doneCount := 0
 		errorCount := 0
@@ -424,6 +427,7 @@ func runWorkers(
 	close(results)
 	// close(results) signals the writer goroutine to exit on its next
 	// range iteration; wg.Wait above guarantees no new sends are pending.
+	writerWG.Wait()
 }
 
 // findLineIndex returns the line index (0-based) that contains the byte
