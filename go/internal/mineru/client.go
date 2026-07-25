@@ -2,6 +2,7 @@ package mineru
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -90,7 +91,7 @@ func (c *MinerUClient) CreateUploadTask(filePath string) (string, error) {
 	for attempt := 1; attempt <= maxUploadRetries; attempt++ {
 		uploadURL, batchID, err := c.requestUploadURL(fileName, stem)
 		if err != nil {
-			fmt.Printf("[%s] 创建任务异常 (%d/%d): %v\n", fileName, attempt, maxUploadRetries, err)
+			consolePrintf("[%s] 创建任务异常 (%d/%d): %v\n", fileName, attempt, maxUploadRetries, err)
 			if attempt < maxUploadRetries {
 				time.Sleep(retrySleep)
 				continue
@@ -99,7 +100,7 @@ func (c *MinerUClient) CreateUploadTask(filePath string) (string, error) {
 		}
 
 		if err := c.chunkedUpload(fileName, uploadURL, filePath, fileSize); err != nil {
-			fmt.Printf("[%s] 上传异常 (%d/%d): %v\n", fileName, attempt, maxUploadRetries, err)
+			consolePrintf("[%s] 上传异常 (%d/%d): %v\n", fileName, attempt, maxUploadRetries, err)
 			if attempt < maxUploadRetries {
 				time.Sleep(retrySleep)
 				continue
@@ -227,19 +228,18 @@ func (c *MinerUClient) chunkedUpload(fileName, uploadURL, filePath string, fileS
 		idleTimeout = 300 * time.Second
 	}
 
-	// Build a per-request client that gives the connection enough time
-	// to settle (connect 30s, read 2x idle) but is bounded so a stuck
-	// server eventually surfaces an error.
-	reqClient := &http.Client{
-		Timeout: idleTimeout * 2,
-	}
+	// The configured timeout is an idle timeout, not a total upload limit.
+	// Keep the request context cancellable so the pipe-pumping goroutine is
+	// always released when the upload finishes or fails.
+	requestCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// We cannot use http.NewRequest with a streaming body and a known
 	// Content-Length without buffering. Build a custom *io.Pipe and let
 	// a goroutine pump chunks while the main goroutine runs the request.
 	pr, pw := io.Pipe()
 
-	req, err := http.NewRequest(http.MethodPut, uploadURL, pr)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPut, uploadURL, pr)
 	if err != nil {
 		return err
 	}
@@ -247,9 +247,12 @@ func (c *MinerUClient) chunkedUpload(fileName, uploadURL, filePath string, fileS
 	req.Header.Set("Content-Length", fmt.Sprintf("%d", fileSize))
 
 	uploaded := int64(0)
-	lastActivity := time.Now()
 	lastLog := time.Now()
 	logInterval := 3 * time.Second
+	idleErr := fmt.Errorf("上传空闲超过 %s", idleTimeout)
+	idleTimer := time.AfterFunc(idleTimeout, func() {
+		_ = pw.CloseWithError(idleErr)
+	})
 
 	type pumpResult struct {
 		err error
@@ -257,17 +260,9 @@ func (c *MinerUClient) chunkedUpload(fileName, uploadURL, filePath string, fileS
 	done := make(chan pumpResult, 1)
 
 	go func() {
+		defer idleTimer.Stop()
 		buf := make([]byte, chunkSize)
 		for {
-			// Idle timeout check: if the network has been silent for too
-			// long, abort. We measure from the last chunk we sent (or the
-			// start of the upload) so a slow connection still works.
-			if time.Since(lastActivity) > idleTimeout {
-				_ = pw.CloseWithError(fmt.Errorf("上传空闲超过 %s", idleTimeout))
-				done <- pumpResult{err: fmt.Errorf("上传空闲超过 %s", idleTimeout)}
-				return
-			}
-
 			n, rerr := f.Read(buf)
 			if n > 0 {
 				if _, werr := pw.Write(buf[:n]); werr != nil {
@@ -275,7 +270,7 @@ func (c *MinerUClient) chunkedUpload(fileName, uploadURL, filePath string, fileS
 					return
 				}
 				uploaded += int64(n)
-				lastActivity = time.Now()
+				idleTimer.Reset(idleTimeout)
 
 				now := time.Now()
 				if now.Sub(lastLog) >= logInterval {
@@ -283,7 +278,7 @@ func (c *MinerUClient) chunkedUpload(fileName, uploadURL, filePath string, fileS
 					if fileSize > 0 {
 						pct = int(uploaded * 100 / fileSize)
 					}
-					fmt.Printf("[%s] 上传中 %.1f/%.1f MB (%d%%)\n",
+					consolePrintf("[%s] 上传中 %.1f/%.1f MB (%d%%)\n",
 						fileName,
 						float64(uploaded)/(1024*1024),
 						float64(fileSize)/(1024*1024),
@@ -311,25 +306,30 @@ func (c *MinerUClient) chunkedUpload(fileName, uploadURL, filePath string, fileS
 		}
 	}()
 
-	fmt.Printf("[%s] 开始上传 (%.1f MB)...\n", fileName, float64(fileSize)/(1024*1024))
+	consolePrintf("[%s] 开始上传 (%.1f MB)...\n", fileName, float64(fileSize)/(1024*1024))
 
-	resp, err := reqClient.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
-		// Make sure the pump goroutine has exited.
-		<-done
+		// Unblock a pump waiting for the transport after a failed request.
+		_ = pw.CloseWithError(err)
+		pumpErr := (<-done).err
+		if pumpErr != nil && pumpErr != err {
+			return fmt.Errorf("%w (upload stream: %v)", err, pumpErr)
+		}
 		return err
 	}
 	defer resp.Body.Close()
-	// Drain pump so we don't leak the goroutine if the server is slow.
-	<-done
+	if pumpErr := (<-done).err; pumpErr != nil {
+		return fmt.Errorf("upload stream: %w", pumpErr)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("[%s] 上传失败: HTTP %d\n", fileName, resp.StatusCode)
+		consolePrintf("[%s] 上传失败: HTTP %d\n", fileName, resp.StatusCode)
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	fmt.Printf("[%s] 上传完成\n", fileName)
+	consolePrintf("[%s] 上传完成\n", fileName)
 	return nil
 }
 
@@ -415,7 +415,7 @@ func (c *MinerUClient) PollBatchWithDisplay(
 
 	saveState := func() {
 		if err := util.AtomicWriteJSON(jsonPath, info); err != nil {
-			fmt.Printf("[%s] 写入任务状态失败: %v\n", fileName, err)
+			consolePrintf("[%s] 写入任务状态失败: %v\n", fileName, err)
 		}
 	}
 
@@ -458,16 +458,16 @@ func (c *MinerUClient) PollBatchWithDisplay(
 					totalPages = lastValidProgress.TotalPages
 				}
 				if totalPages > 0 {
-					fmt.Printf("[%s] [%ds] 解析完成，共 %d 页\n", fileName, elapsed, totalPages)
+					consolePrintf("[%s] [%ds] 解析完成，共 %d 页\n", fileName, elapsed, totalPages)
 				} else {
-					fmt.Printf("[%s] [%ds] 解析完成\n", fileName, elapsed)
+					consolePrintf("[%s] [%ds] 解析完成\n", fileName, elapsed)
 				}
 			case "failed":
 				errMsg := item.ErrMsg
 				if errMsg == "" {
 					errMsg = "未知错误"
 				}
-				fmt.Printf("[%s] [%ds] 解析失败: %s\n", fileName, elapsed, errMsg)
+				consolePrintf("[%s] [%ds] 解析失败: %s\n", fileName, elapsed, errMsg)
 			default:
 				label := stateLabels[state]
 				if label == "" {
@@ -477,7 +477,7 @@ func (c *MinerUClient) PollBatchWithDisplay(
 				if current.TotalPages > 0 {
 					pagesInfo = fmt.Sprintf("(%d/%d 页)", current.ExtractedPages, current.TotalPages)
 				}
-				fmt.Printf("[%s] [%ds] %s %s\n", fileName, elapsed, label, pagesInfo)
+				consolePrintf("[%s] [%ds] %s %s\n", fileName, elapsed, label, pagesInfo)
 			}
 
 			logInterval = time.Duration(c.cfg.LogPollInterval) * time.Second
@@ -506,7 +506,7 @@ func (c *MinerUClient) PollBatchWithDisplay(
 					saveState()
 					return false, false
 				}
-				fmt.Printf("[%s] ✓ 已完成并下载\n", fileName)
+				consolePrintf("[%s] ✓ 已完成并下载\n", fileName)
 				return true, false
 			}
 			if state == "failed" {
@@ -528,7 +528,7 @@ func (c *MinerUClient) PollBatchWithDisplay(
 			if current.TotalPages > 0 {
 				pagesInfo = fmt.Sprintf("(%d/%d 页)", current.ExtractedPages, current.TotalPages)
 			}
-			fmt.Printf("[%s] [%ds] %s %s\n", fileName, elapsed, label, pagesInfo)
+			consolePrintf("[%s] [%ds] %s %s\n", fileName, elapsed, label, pagesInfo)
 
 			if logInterval < time.Duration(logIntervalCap)*time.Second {
 				logInterval *= 2
@@ -543,8 +543,8 @@ func (c *MinerUClient) PollBatchWithDisplay(
 
 		// Timeout check (0 = no limit, matches the Python reference).
 		if c.cfg.PollTimeout > 0 && elapsed >= c.cfg.PollTimeout {
-			fmt.Printf("\n[%s] [错误] 轮询超时 (%ds)\n", fileName, c.cfg.PollTimeout)
-			fmt.Printf("[%s] 任务仍在运行，建议稍后重新运行脚本继续等待\n", fileName)
+			consolePrintf("\n[%s] [错误] 轮询超时 (%ds)\n", fileName, c.cfg.PollTimeout)
+			consolePrintf("[%s] 任务仍在运行，建议稍后重新运行脚本继续等待\n", fileName)
 			return false, true
 		}
 
@@ -561,12 +561,12 @@ func (c *MinerUClient) DownloadAndExtract(fileName, zipURL, outputDir, folderNam
 		return err
 	}
 
-	fmt.Printf("[%s] 下载结果...\n", fileName)
+	consolePrintf("[%s] 下载结果...\n", fileName)
 
 	dlClient := &http.Client{Timeout: 120 * time.Second}
 	resp, err := dlClient.Get(zipURL)
 	if err != nil {
-		fmt.Printf("[%s] 下载解压失败: %v\n", fileName, err)
+		consolePrintf("[%s] 下载解压失败: %v\n", fileName, err)
 		return err
 	}
 	defer resp.Body.Close()
@@ -574,7 +574,7 @@ func (c *MinerUClient) DownloadAndExtract(fileName, zipURL, outputDir, folderNam
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		err := fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-		fmt.Printf("[%s] 下载解压失败: %v\n", fileName, err)
+		consolePrintf("[%s] 下载解压失败: %v\n", fileName, err)
 		return err
 	}
 
@@ -592,12 +592,12 @@ func (c *MinerUClient) DownloadAndExtract(fileName, zipURL, outputDir, folderNam
 	}
 
 	if err := util.Unzip(zipPath, targetDir); err != nil {
-		fmt.Printf("[%s] 下载解压失败: %v\n", fileName, err)
+		consolePrintf("[%s] 下载解压失败: %v\n", fileName, err)
 		return err
 	}
 	if err := os.Remove(zipPath); err != nil {
 		// Non-fatal: log but keep going.
-		fmt.Printf("[%s] 清理 zip 失败: %v\n", fileName, err)
+		consolePrintf("[%s] 清理 zip 失败: %v\n", fileName, err)
 	}
 	return nil
 }

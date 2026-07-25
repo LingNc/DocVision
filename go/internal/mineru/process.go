@@ -2,7 +2,6 @@ package mineru
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,7 +69,7 @@ func ProcessSingleFile(client *MinerUClient, filePath, outputDir, statusDir stri
 		if info.Status == "done" {
 			folder := filepath.Join(outputDir, stem)
 			if util.DirExists(folder) && hasAnyFile(folder) {
-				fmt.Printf("[%s] [跳过] 已完成\n", fileName)
+				consolePrintf("[%s] [跳过] 已完成\n", fileName)
 				return fileName, TaskSkip
 			}
 		}
@@ -80,7 +79,7 @@ func ProcessSingleFile(client *MinerUClient, filePath, outputDir, statusDir stri
 		// ourselves; matching it keeps us robust if the on-disk file
 		// predates this binary.
 		if info.BatchID != "" && (info.Status == "running" || info.Status == "timeout") {
-			fmt.Printf("[%s] 恢复任务 %s ...\n", fileName, info.BatchID)
+			consolePrintf("[%s] 恢复任务 %s ...\n", fileName, info.BatchID)
 			valid, item := client.CheckOldTaskValid(info.BatchID)
 			if valid {
 				// Server reports the task is already done — short-circuit
@@ -91,12 +90,12 @@ func ProcessSingleFile(client *MinerUClient, filePath, outputDir, statusDir stri
 					if zipURL != "" {
 						info.Status = "done"
 						if err := util.AtomicWriteJSON(jsonPath, info); err != nil {
-							fmt.Printf("[%s] 写入任务状态失败: %v\n", fileName, err)
+							consolePrintf("[%s] 写入任务状态失败: %v\n", fileName, err)
 						}
 						if err := client.DownloadAndExtract(fileName, zipURL, outputDir, info.OutputFolder); err != nil {
 							return fileName, TaskFail
 						}
-						fmt.Printf("[%s] ✓ 恢复并下载完成\n", fileName)
+						consolePrintf("[%s] ✓ 恢复并下载完成\n", fileName)
 						return fileName, TaskDone
 					}
 					// No zip URL — fall through to normal polling.
@@ -108,13 +107,13 @@ func ProcessSingleFile(client *MinerUClient, filePath, outputDir, statusDir stri
 				if isTimeout {
 					info.Status = "running"
 					if err := util.AtomicWriteJSON(jsonPath, info); err != nil {
-						fmt.Printf("[%s] 写入任务状态失败: %v\n", fileName, err)
+						consolePrintf("[%s] 写入任务状态失败: %v\n", fileName, err)
 					}
 					return fileName, TaskFail
 				}
-				fmt.Printf("[%s] 旧任务无法继续，重新提交...\n", fileName)
+				consolePrintf("[%s] 旧任务无法继续，重新提交...\n", fileName)
 			} else {
-				fmt.Printf("[%s] 旧任务已失效，重新提交...\n", fileName)
+				consolePrintf("[%s] 旧任务已失效，重新提交...\n", fileName)
 			}
 		}
 	}
@@ -134,15 +133,15 @@ func ProcessSingleFile(client *MinerUClient, filePath, outputDir, statusDir stri
 		OutputFolder: stem,
 	}
 	if err := util.AtomicWriteJSON(jsonPath, info); err != nil {
-		fmt.Printf("[%s] 写入任务状态失败: %v\n", fileName, err)
+		consolePrintf("[%s] 写入任务状态失败: %v\n", fileName, err)
 	}
-	fmt.Printf("[%s] 任务已创建: %s\n", fileName, batchID)
+	consolePrintf("[%s] 任务已创建: %s\n", fileName, batchID)
 
 	success, isTimeout := client.PollBatchWithDisplay(fileName, batchID, info, jsonPath, outputDir)
 	if isTimeout {
 		info.Status = "running"
 		if err := util.AtomicWriteJSON(jsonPath, info); err != nil {
-			fmt.Printf("[%s] 写入任务状态失败: %v\n", fileName, err)
+			consolePrintf("[%s] 写入任务状态失败: %v\n", fileName, err)
 		}
 		return fileName, TaskFail
 	}
@@ -175,27 +174,27 @@ func ProcessFilesConcurrent(
 	maxConcurrent int,
 ) (int, int, int) {
 	if len(files) == 0 {
-		fmt.Println("[错误] 没有找到需要处理的文件")
+		consolePrintln("[错误] 没有找到需要处理的文件")
 		return 0, 0, 0
 	}
 	if maxConcurrent <= 0 {
 		maxConcurrent = 1
 	}
 
-	fmt.Printf("找到 %d 个文件，并发数: %d\n", len(files), maxConcurrent)
+	consolePrintf("找到 %d 个文件，并发数: %d\n", len(files), maxConcurrent)
 
 	if err := os.MkdirAll(statusDir, 0o755); err != nil {
-		fmt.Printf("[错误] 创建状态目录失败: %v\n", err)
+		consolePrintf("[错误] 创建状态目录失败: %v\n", err)
 		return 0, 0, 0
 	}
 
 	var (
-		wg      sync.WaitGroup
-		mu      sync.Mutex
-		doneN   int
-		skipN   int
-		failN   int
-		sem     = make(chan struct{}, maxConcurrent)
+		wg    sync.WaitGroup
+		mu    sync.Mutex
+		doneN int
+		skipN int
+		failN int
+		sem   = make(chan struct{}, maxConcurrent)
 	)
 
 	for _, f := range files {
@@ -207,7 +206,7 @@ func ProcessFilesConcurrent(
 
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Printf("[%s] 处理异常: %v\n", filepath.Base(filePath), r)
+					consolePrintf("[%s] 处理异常: %v\n", filepath.Base(filePath), r)
 					mu.Lock()
 					failN++
 					mu.Unlock()
@@ -230,10 +229,10 @@ func ProcessFilesConcurrent(
 
 	wg.Wait()
 
-	fmt.Println()
-	fmt.Println(strings.Repeat("=", 50))
-	fmt.Printf("处理完成: %d 成功, %d 跳过, %d 失败/超时\n", doneN, skipN, failN)
-	fmt.Println(strings.Repeat("=", 50))
+	consolePrintln()
+	consolePrintln(strings.Repeat("=", 50))
+	consolePrintf("处理完成: %d 成功, %d 跳过, %d 失败/超时\n", doneN, skipN, failN)
+	consolePrintln(strings.Repeat("=", 50))
 
 	return doneN, skipN, failN
 }
