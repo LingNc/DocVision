@@ -533,11 +533,12 @@ func validateAndRepairMermaid(
 		return result, StatusOK
 	}
 	if !validation.Available {
+		installHint := "请安装 Node.js/npm 后执行: npm install -g @mermaid-js/mermaid-cli"
 		if mode == "strict" {
-			logger.LogError(tid, "Mermaid validation unavailable for", imgPath+":", validation.Error)
+			logger.LogError(tid, "Mermaid validation unavailable for", imgPath+":", validation.Error, "；", installHint)
 			return sentinelMermaid, StatusRetry
 		}
-		logger.LogWarning(tid, "Mermaid validation skipped for", imgPath+":", validation.Error)
+		logger.LogWarning(tid, "Mermaid validation skipped for", imgPath+":", validation.Error, "；", installHint)
 		return result, StatusOK
 	}
 
@@ -550,7 +551,8 @@ func validateAndRepairMermaid(
 	for attempt := 1; attempt <= attempts; attempt++ {
 		logger.LogWarning(tid, fmt.Sprintf("Mermaid validation failed for %s (%d/%d): %s", imgPath, attempt, attempts, lastError))
 		fixMsg := fmt.Sprintf(
-			"Your previous response contains invalid Mermaid syntax. Validation error: %s\n\n"+
+			"Your previous response contains invalid Mermaid syntax. Fix only the Mermaid syntax.\n"+
+				"Validator output: %s\n\n"+
 				"Previous response:\n---\n%s\n---\n\n"+
 				"Return the complete corrected response. Preserve the [IMG_TYPE: <type>] prefix and all non-Mermaid content. "+
 				"If a Mermaid block is present, keep it fenced with ```mermaid and make its syntax valid. Do not add explanations outside the response.",

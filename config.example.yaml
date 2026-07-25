@@ -44,7 +44,9 @@ options:
   temperature: 0.10
   output_language: "Chinese"   # "Chinese" or "English"
   format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
-  mermaid_validation: "auto"  # off, auto, strict
+  # Recommended: npm install -g @mermaid-js/mermaid-cli (provides mmdc).
+  # init only creates this config; it does not install Node.js/npm or Mermaid CLI.
+  mermaid_validation: "auto"  # off, auto, strict; auto warns and skips if mmdc is missing
   mermaid_command: "mmdc"     # Mermaid CLI command
   mermaid_fix_attempts: 2     # Mermaid-only repair attempts
   mermaid_timeout: 30         # Mermaid validation timeout in seconds

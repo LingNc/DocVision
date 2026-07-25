@@ -60,6 +60,21 @@ make build
 make release   # 输出到 go/release/（Linux/macOS/Windows，amd64+arm64）
 ```
 
+### Mermaid 验证工具（推荐安装）
+
+如果 AI 输出 Mermaid 图，推荐安装 Mermaid CLI：
+
+```bash
+# 需要先安装 Node.js/npm
+npm install -g @mermaid-js/mermaid-cli
+```
+
+`docvision init` 只生成配置文件，不会自动安装 Node.js、npm 或 Mermaid CLI。
+
+- `mermaid_validation: auto`：找不到 `mmdc` 时给出安装提示，并跳过本次验证；
+- `mermaid_validation: strict`：找不到 `mmdc` 时明确报错，需安装后再继续；
+- `mermaid_validation: off`：禁用 Mermaid 验证。
+
 ### Python 版本
 
 ```bash
