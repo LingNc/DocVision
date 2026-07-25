@@ -110,10 +110,15 @@ func newWorkflowCmd() *cobra.Command {
 			}
 
 			overallStart := time.Now()
+			var currentImg2TextLog string
 			for i, s := range steps {
 				fmt.Printf("\n=== Step %d: %s ===\n", i+1, stepLabel(s))
-				if err := runStep(s, cmd, cfg); err != nil {
+				stepLog, err := runStep(s, cmd, cfg, currentImg2TextLog)
+				if err != nil {
 					return fmt.Errorf("step %q failed: %w", s, err)
+				}
+				if s == "img2text" {
+					currentImg2TextLog = stepLog
 				}
 			}
 
@@ -143,25 +148,25 @@ func stepLabel(s string) string {
 }
 
 // runStep dispatches a single named step.
-func runStep(step string, cmd *cobra.Command, cfg *config.Config) error {
+func runStep(step string, cmd *cobra.Command, cfg *config.Config, currentImg2TextLog string) (string, error) {
 	switch step {
 	case "split":
 		// In workflow mode, default to --all if not explicitly set.
 		if !cmd.Flags().Changed("all") {
 			cmd.Flags().Set("all", "true")
 		}
-		return runSplitFromConfig(cmd, cfg)
+		return "", runSplitFromConfig(cmd, cfg)
 	case "mineru":
-		return runMinerUFromConfig(cmd, cfg)
+		return "", runMinerUFromConfig(cmd, cfg)
 	case "organize":
-		return organize.OrganizeFiles(cfg)
+		return "", organize.OrganizeFiles(cfg)
 	case "img2text":
 		// In workflow mode, use quiet output (progress percentages only).
 		return runImg2TextFromConfig(cmd, cfg, true)
 	case "analyze":
-		return runAnalyzeFromConfig(cmd, cfg)
+		return "", runAnalyzeFromConfig(cmd, cfg, currentImg2TextLog)
 	default:
-		return fmt.Errorf("unknown step %q", step)
+		return "", fmt.Errorf("unknown step %q", step)
 	}
 }
 
@@ -340,7 +345,8 @@ func newImg2TextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runImg2TextFromConfig(cmd, cfg, false)
+			_, err = runImg2TextFromConfig(cmd, cfg, false)
+			return err
 		},
 	}
 	cmd.Flags().Bool("test", false, "启用测试模式（随机抽样）")
@@ -349,13 +355,13 @@ func newImg2TextCmd() *cobra.Command {
 	return cmd
 }
 
-func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) error {
+func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) (string, error) {
 	testMode, _ := cmd.Flags().GetBool("test")
 	number, _ := cmd.Flags().GetInt("number")
 	seed, _ := cmd.Flags().GetString("seed")
 
 	if err := os.MkdirAll(cfg.Paths.FinallyDir, 0o755); err != nil {
-		return fmt.Errorf("create finally dir: %w", err)
+		return "", fmt.Errorf("create finally dir: %w", err)
 	}
 	ts := time.Now().Format("20060102_150405")
 	logPath := filepath.Join(cfg.Paths.FinallyDir, fmt.Sprintf("img2text_%s.log", ts))
@@ -366,7 +372,7 @@ func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) e
 	}
 	log, err := logger.NewLogger(logPath, errLogPath, threadIDWidth)
 	if err != nil {
-		return fmt.Errorf("create logger: %w", err)
+		return logPath, fmt.Errorf("create logger: %w", err)
 	}
 	defer log.Close()
 
@@ -376,7 +382,7 @@ func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) e
 		Seed:     seed,
 		Quiet:    quiet,
 	}
-	return img2text.Run(cfg, log, opts)
+	return logPath, img2text.Run(cfg, log, opts)
 }
 
 func newAnalyzeCmd() *cobra.Command {
@@ -389,7 +395,7 @@ func newAnalyzeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runAnalyzeFromConfig(cmd, cfg)
+			return runAnalyzeFromConfig(cmd, cfg, "")
 		},
 	}
 	cmd.Flags().Bool("all", false, "汇总所有历史日志进行分析")
@@ -401,9 +407,12 @@ func newAnalyzeCmd() *cobra.Command {
 	return cmd
 }
 
-func runAnalyzeFromConfig(cmd *cobra.Command, cfg *config.Config) error {
+func runAnalyzeFromConfig(cmd *cobra.Command, cfg *config.Config, forcedLogFile string) error {
 	all, _ := cmd.Flags().GetBool("all")
 	logFile, _ := cmd.Flags().GetString("logfile")
+	if forcedLogFile != "" {
+		logFile = forcedLogFile
+	}
 	showThreads, _ := cmd.Flags().GetBool("threads")
 	percentilesStr, _ := cmd.Flags().GetString("percentiles")
 	outputCSV, _ := cmd.Flags().GetString("output")
