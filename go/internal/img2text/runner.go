@@ -299,51 +299,6 @@ func runWorkers(
 		os.Stdout.Sync()
 	}
 
-	for _, t := range pending {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(tt imageTask) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			tid := nextWorkerTID(concurrency)
-			startTime := time.Now()
-			logger.Log(tid, "▶ START", tt.key)
-			defer func() {
-				if r := recover(); r != nil {
-					logger.LogError(tid, "  [panic]", r)
-				}
-			}()
-			entry, ok := mdCache[tt.mdName]
-			if !ok {
-				results <- runResult{tt.key, "[IMG_WORKER_FATAL: md missing]",
-					tt.start, tt.end, tt.imgPath, true}
-				return
-			}
-			r, status := ProcessOneImage(
-				client, imagesDir, tt.imgPath,
-				entry.lines, tt.lineIdx,
-				logger, tid, opts,
-			)
-			elapsed := time.Since(startTime).Seconds()
-			elapsedStr := strconv.FormatFloat(elapsed, 'f', 2, 64)
-			isErr := false
-			if status == StatusOK {
-				logger.Log(tid, "✓", "["+elapsedStr+"s]", "DONE")
-			} else {
-				preview := r
-				if len(preview) > 200 {
-					preview = preview[:200]
-				}
-				logger.LogError(tid, "✗", "["+elapsedStr+"s]", "FAILED", preview)
-				isErr = true
-				if status == StatusRetry {
-					r = "__INVALID_RESPONSE__"
-				}
-			}
-			results <- runResult{tt.key, r, tt.start, tt.end, tt.imgPath, isErr}
-		}(t)
-	}
-
 	// Writer goroutine: drains results and persists them.
 	writerWG.Add(1)
 	go func() {
@@ -422,6 +377,51 @@ func runWorkers(
 			progressOut.Flush()
 		}
 	}()
+
+	for _, t := range pending {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(tt imageTask) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			tid := nextWorkerTID(concurrency)
+			startTime := time.Now()
+			logger.Log(tid, "▶ START", tt.key)
+			defer func() {
+				if r := recover(); r != nil {
+					logger.LogError(tid, "  [panic]", r)
+				}
+			}()
+			entry, ok := mdCache[tt.mdName]
+			if !ok {
+				results <- runResult{tt.key, "[IMG_WORKER_FATAL: md missing]",
+					tt.start, tt.end, tt.imgPath, true}
+				return
+			}
+			r, status := ProcessOneImage(
+				client, imagesDir, tt.imgPath,
+				entry.lines, tt.lineIdx,
+				logger, tid, opts,
+			)
+			elapsed := time.Since(startTime).Seconds()
+			elapsedStr := strconv.FormatFloat(elapsed, 'f', 2, 64)
+			isErr := false
+			if status == StatusOK {
+				logger.Log(tid, "✓", "["+elapsedStr+"s]", "DONE")
+			} else {
+				preview := r
+				if len(preview) > 200 {
+					preview = preview[:200]
+				}
+				logger.LogError(tid, "✗", "["+elapsedStr+"s]", "FAILED", preview)
+				isErr = true
+				if status == StatusRetry {
+					r = "__INVALID_RESPONSE__"
+				}
+			}
+			results <- runResult{tt.key, r, tt.start, tt.end, tt.imgPath, isErr}
+		}(t)
+	}
 
 	wg.Wait()
 	close(results)
