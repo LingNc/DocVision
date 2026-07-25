@@ -37,7 +37,7 @@ cp config.example.yaml config.yaml
 cd go
 make build
 
-# 初始化配置模板
+# 初始化配置模板；会询问是否安装 Mermaid CLI
 ./build/docvision init
 
 # 运行完整工作流

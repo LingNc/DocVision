@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -496,15 +499,56 @@ func newInitCmd() *cobra.Command {
 				return err
 			}
 			if _, err := os.Stat(output); err == nil {
-				fmt.Printf("Warning: %s already exists, overwriting\n", output)
+				fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s already exists, overwriting\n", output)
 			}
 			if err := os.WriteFile(output, []byte(config.ConfigTemplate), 0o644); err != nil {
 				return fmt.Errorf("write %s: %w", output, err)
 			}
-			fmt.Printf("Wrote config template to %s\n", output)
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote config template to %s\n", output)
+			if err := offerMermaidInstall(cmd.InOrStdin(), cmd.OutOrStdout()); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringP("output", "o", "config.yaml", "模板输出路径")
 	return cmd
+}
+
+// offerMermaidInstall optionally installs the Mermaid CLI used by Mermaid
+// validation. EOF or an answer other than Y/yes declines installation; an
+// empty answer accepts the default Y.
+func offerMermaidInstall(in io.Reader, out io.Writer) error {
+	if _, err := exec.LookPath("mmdc"); err == nil {
+		fmt.Fprintln(out, "Mermaid CLI (mmdc) is already installed.")
+		return nil
+	}
+	if _, err := exec.LookPath("npm"); err != nil {
+		fmt.Fprintln(out, "未找到 npm，跳过 Mermaid CLI 安装。请先安装 Node.js/npm，再执行：npm install -g @mermaid-js/mermaid-cli")
+		return nil
+	}
+
+	fmt.Fprintln(out, "是否安装 Mermaid 验证工具？")
+	fmt.Fprintln(out, "将执行: npm install -g @mermaid-js/mermaid-cli")
+	fmt.Fprint(out, "继续安装？[Y/n] ")
+	answer, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && len(answer) == 0 {
+		fmt.Fprintln(out, "\n未收到确认，跳过 Mermaid CLI 安装。")
+		return nil
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer != "" && answer != "y" && answer != "yes" {
+		fmt.Fprintln(out, "跳过 Mermaid CLI 安装。")
+		return nil
+	}
+
+	fmt.Fprintln(out, "开始安装 Mermaid CLI...")
+	install := exec.Command("npm", "install", "-g", "@mermaid-js/mermaid-cli")
+	install.Stdout = out
+	install.Stderr = out
+	if err := install.Run(); err != nil {
+		return fmt.Errorf("安装 Mermaid CLI 失败: %w；可稍后手动执行 npm install -g @mermaid-js/mermaid-cli", err)
+	}
+	fmt.Fprintln(out, "Mermaid CLI 安装完成。")
+	return nil
 }
