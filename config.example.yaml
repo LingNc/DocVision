@@ -44,6 +44,10 @@ options:
   temperature: 0.10
   output_language: "Chinese"   # "Chinese" or "English"
   format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
+  mermaid_validation: "auto"  # off, auto, strict
+  mermaid_command: "mmdc"     # Mermaid CLI command
+  mermaid_fix_attempts: 2     # Mermaid-only repair attempts
+  mermaid_timeout: 30         # Mermaid validation timeout in seconds
   max_tokens: 65536
 
 # Paths

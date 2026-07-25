@@ -49,6 +49,12 @@ ai:
 	if cfg.Options.MaxTokens != 65536 {
 		t.Errorf("MaxTokens default = %d", cfg.Options.MaxTokens)
 	}
+	if cfg.Options.MermaidValidation != "auto" || cfg.Options.MermaidCommand != "mmdc" ||
+		cfg.Options.MermaidFixAttempts != 2 || cfg.Options.MermaidTimeout != 30 {
+		t.Errorf("Mermaid defaults = mode=%q command=%q attempts=%d timeout=%d",
+			cfg.Options.MermaidValidation, cfg.Options.MermaidCommand,
+			cfg.Options.MermaidFixAttempts, cfg.Options.MermaidTimeout)
+	}
 	if cfg.Paths.InputDir != "./files" {
 		t.Errorf("InputDir default = %q", cfg.Paths.InputDir)
 	}
@@ -97,6 +103,10 @@ options:
   temperature: 0.5
   output_language: "English"
   format_fix_attempts: 2
+  mermaid_validation: "strict"
+  mermaid_command: "custom-mmdc"
+  mermaid_fix_attempts: 4
+  mermaid_timeout: 45
   max_tokens: 32768
 paths:
   input_dir: "./in"
@@ -118,6 +128,12 @@ paths:
 	}
 	if cfg.Options.Temperature != 0.5 {
 		t.Errorf("Temperature overridden = %v", cfg.Options.Temperature)
+	}
+	if cfg.Options.MermaidValidation != "strict" || cfg.Options.MermaidCommand != "custom-mmdc" ||
+		cfg.Options.MermaidFixAttempts != 4 || cfg.Options.MermaidTimeout != 45 {
+		t.Errorf("Mermaid overrides = mode=%q command=%q attempts=%d timeout=%d",
+			cfg.Options.MermaidValidation, cfg.Options.MermaidCommand,
+			cfg.Options.MermaidFixAttempts, cfg.Options.MermaidTimeout)
 	}
 	if cfg.Paths.FinallyDir != "./fin" {
 		t.Errorf("FinallyDir overridden = %q", cfg.Paths.FinallyDir)

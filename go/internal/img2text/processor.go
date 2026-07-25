@@ -1,6 +1,7 @@
 package img2text
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -55,13 +56,14 @@ Respond in {OUTPUT_LANG}.
 // return tuple ("ok", "error", "retry") so the existing log analyser
 // can classify them.
 const (
-	StatusOK         = "ok"
-	StatusError      = "error"
-	StatusRetry      = "retry"
-	sentinelEmpty    = "[IMG_EMPTY_RESPONSE]"
-	sentinelInvalid  = "[IMG_INVALID_FORMAT]"
-	sentinelRate     = "[IMG_RATE_LIMIT_EXCEEDED]"
-	sentinelConnTO   = "[IMG_CONNECTION_TIMEOUT]"
+	StatusOK        = "ok"
+	StatusError     = "error"
+	StatusRetry     = "retry"
+	sentinelEmpty   = "[IMG_EMPTY_RESPONSE]"
+	sentinelInvalid = "[IMG_INVALID_FORMAT]"
+	sentinelRate    = "[IMG_RATE_LIMIT_EXCEEDED]"
+	sentinelConnTO  = "[IMG_CONNECTION_TIMEOUT]"
+	sentinelMermaid = "[IMG_MERMAID_INVALID]"
 )
 
 // BuildSystemPrompt returns the system prompt with the two placeholders
@@ -130,9 +132,9 @@ func CallAIWithTools(
 					}},
 				}},
 			},
-			MaxTokens:      opts.MaxTokens,
-			Temperature:    opts.Temperature,
-			Stream:         false,
+			MaxTokens:   opts.MaxTokens,
+			Temperature: opts.Temperature,
+			Stream:      false,
 		}
 		content, status := doCallWithRetry(client, req, maxAPIRetries, rateLimitLimit, logger, tid)
 		if status != "" {
@@ -175,10 +177,10 @@ func CallAIWithTools(
 	for round := 0; round < maxRounds+1; round++ {
 		req := &ChatRequest{
 			Model:       client.Model(),
-			Messages:       messages,
-			MaxTokens:      opts.MaxTokens,
-			Temperature:    opts.Temperature,
-			Stream:         false,
+			Messages:    messages,
+			MaxTokens:   opts.MaxTokens,
+			Temperature: opts.Temperature,
+			Stream:      false,
 		}
 		if round < maxRounds {
 			req.Tools = tools
@@ -276,10 +278,10 @@ func CallAIWithTools(
 	})
 	req := &ChatRequest{
 		Model:       client.Model(),
-		Messages:       messages,
-		MaxTokens:      opts.MaxTokens,
-		Temperature:    opts.Temperature,
-		Stream:         false,
+		Messages:    messages,
+		MaxTokens:   opts.MaxTokens,
+		Temperature: opts.Temperature,
+		Stream:      false,
 	}
 	resp, errSentinel, status := doCallWithRetryFull(client, req, maxAPIRetries, rateLimitLimit, logger, tid)
 	if status != "" {
@@ -453,7 +455,10 @@ func ProcessOneImage(
 				"Unexpected prefix before '[IMG_TYPE:' in", imgPath+":",
 				strings.TrimSpace(prefix)[:min(80, len(strings.TrimSpace(prefix)))])
 		}
-		return strings.TrimSpace(result[idx:]), StatusOK
+		return validateAndRepairMermaid(
+			client, imgBase64, strings.TrimSpace(result[idx:]), imgPath,
+			logger, tid, opts,
+		)
 	}
 
 	// Missing [IMG_TYPE:. If the response is already a system error
@@ -485,7 +490,10 @@ func ProcessOneImage(
 			if idx > 0 {
 				logger.LogWarning(tid, "Format fix had extra prefix in", imgPath)
 			}
-			return strings.TrimSpace(fixed[idx:]), StatusOK
+			return validateAndRepairMermaid(
+				client, imgBase64, strings.TrimSpace(fixed[idx:]), imgPath,
+				logger, tid, opts,
+			)
 		}
 		prefix := result
 		if len(prefix) > 100 {
@@ -502,6 +510,83 @@ func ProcessOneImage(
 	}
 	logger.LogError(tid, "No '[IMG_TYPE:' found in result from", imgPath+":", prefix)
 	return sentinelInvalid, StatusRetry
+}
+
+// validateAndRepairMermaid validates Mermaid blocks without consuming the
+// get_more_context tool-round budget. Mermaid repair calls use the existing
+// one-shot custom prompt path, which does not expose tools.
+func validateAndRepairMermaid(
+	client *AIClient,
+	imgBase64, result, imgPath string,
+	logger *logger.Logger,
+	tid int,
+	opts config.OptionsConfig,
+) (string, string) {
+	mode := strings.ToLower(strings.TrimSpace(opts.MermaidValidation))
+	if mode == "" || mode == "off" {
+		return result, StatusOK
+	}
+
+	timeout := time.Duration(opts.MermaidTimeout) * time.Second
+	validation := ValidateMermaid(context.Background(), result, opts.MermaidCommand, timeout)
+	if !validation.HasMermaid || validation.Valid {
+		return result, StatusOK
+	}
+	if !validation.Available {
+		if mode == "strict" {
+			logger.LogError(tid, "Mermaid validation unavailable for", imgPath+":", validation.Error)
+			return sentinelMermaid, StatusRetry
+		}
+		logger.LogWarning(tid, "Mermaid validation skipped for", imgPath+":", validation.Error)
+		return result, StatusOK
+	}
+
+	attempts := opts.MermaidFixAttempts
+	if attempts <= 0 {
+		attempts = 2
+	}
+	current := result
+	lastError := validation.Error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		logger.LogWarning(tid, fmt.Sprintf("Mermaid validation failed for %s (%d/%d): %s", imgPath, attempt, attempts, lastError))
+		fixMsg := fmt.Sprintf(
+			"Your previous response contains invalid Mermaid syntax. Validation error: %s\n\n"+
+				"Previous response:\n---\n%s\n---\n\n"+
+				"Return the complete corrected response. Preserve the [IMG_TYPE: <type>] prefix and all non-Mermaid content. "+
+				"If a Mermaid block is present, keep it fenced with ```mermaid and make its syntax valid. Do not add explanations outside the response.",
+			lastError, current,
+		)
+		fixed, fixStatus := CallAIWithTools(
+			client, imgBase64, nil, 0,
+			logger, tid, opts, fixMsg,
+		)
+		if fixStatus != StatusOK {
+			return fixed, fixStatus
+		}
+		fixed = strings.TrimSpace(fixed)
+		prefixIdx := strings.Index(fixed, "[IMG_TYPE:")
+		if prefixIdx < 0 {
+			lastError = "修正结果缺少 [IMG_TYPE:] 前缀"
+			current = fixed
+			continue
+		}
+		current = strings.TrimSpace(fixed[prefixIdx:])
+		validation = ValidateMermaid(context.Background(), current, opts.MermaidCommand, timeout)
+		if !validation.HasMermaid || validation.Valid {
+			return current, StatusOK
+		}
+		if !validation.Available {
+			if mode == "strict" {
+				return sentinelMermaid, StatusRetry
+			}
+			logger.LogWarning(tid, "Mermaid validation became unavailable for", imgPath+":", validation.Error)
+			return current, StatusOK
+		}
+		lastError = validation.Error
+	}
+
+	logger.LogError(tid, "Mermaid validation failed after repairs for", imgPath+":", lastError)
+	return sentinelMermaid, StatusRetry
 }
 
 // resolveImageFile maps an "images/..." reference from the markdown into

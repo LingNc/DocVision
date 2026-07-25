@@ -60,6 +60,10 @@ type OptionsConfig struct {
 	Temperature         float64 `yaml:"temperature"`
 	OutputLanguage      string  `yaml:"output_language"`
 	FormatFixAttempts   int     `yaml:"format_fix_attempts"`
+	MermaidValidation   string  `yaml:"mermaid_validation"`
+	MermaidCommand      string  `yaml:"mermaid_command"`
+	MermaidFixAttempts  int     `yaml:"mermaid_fix_attempts"`
+	MermaidTimeout      int     `yaml:"mermaid_timeout"`
 	MaxTokens           int     `yaml:"max_tokens"`
 }
 
@@ -170,6 +174,18 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Options.FormatFixAttempts == 0 {
 		cfg.Options.FormatFixAttempts = 1
+	}
+	if cfg.Options.MermaidValidation == "" {
+		cfg.Options.MermaidValidation = "auto"
+	}
+	if cfg.Options.MermaidCommand == "" {
+		cfg.Options.MermaidCommand = "mmdc"
+	}
+	if cfg.Options.MermaidFixAttempts == 0 {
+		cfg.Options.MermaidFixAttempts = 2
+	}
+	if cfg.Options.MermaidTimeout == 0 {
+		cfg.Options.MermaidTimeout = 30
 	}
 	if cfg.Options.MaxTokens == 0 {
 		cfg.Options.MaxTokens = 65536
