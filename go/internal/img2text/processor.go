@@ -544,7 +544,7 @@ func validateAndRepairMermaid(
 
 	attempts := opts.MermaidFixAttempts
 	if attempts <= 0 {
-		attempts = 2
+		attempts = 3
 	}
 	current := result
 	lastError := validation.Error

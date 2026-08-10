@@ -215,7 +215,7 @@ func setDefaults(cfg *Config) {
 		cfg.Options.MermaidCommand = "mmdc"
 	}
 	if cfg.Options.MermaidFixAttempts == 0 {
-		cfg.Options.MermaidFixAttempts = 2
+		cfg.Options.MermaidFixAttempts = 3
 	}
 	if cfg.Options.MermaidTimeout == 0 {
 		cfg.Options.MermaidTimeout = 30

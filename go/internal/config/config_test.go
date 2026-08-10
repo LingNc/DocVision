@@ -50,7 +50,7 @@ ai:
 		t.Errorf("MaxTokens default = %d", cfg.Options.MaxTokens)
 	}
 	if cfg.Options.MermaidValidation != "auto" || cfg.Options.MermaidCommand != "mmdc" ||
-		cfg.Options.MermaidFixAttempts != 2 || cfg.Options.MermaidTimeout != 30 {
+		cfg.Options.MermaidFixAttempts != 3 || cfg.Options.MermaidTimeout != 30 {
 		t.Errorf("Mermaid defaults = mode=%q command=%q attempts=%d timeout=%d",
 			cfg.Options.MermaidValidation, cfg.Options.MermaidCommand,
 			cfg.Options.MermaidFixAttempts, cfg.Options.MermaidTimeout)
