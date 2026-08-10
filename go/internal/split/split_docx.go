@@ -473,7 +473,14 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 	if err := SplitPDF(pdfPath, maxPages, maxSizeMB, outputDir, force); err != nil {
 		return err
 	}
-	// Remove the intermediate PDF (only the _part*.pdf files are needed).
+	// Remove the intermediate PDF (only the _part*.pdf files are
+	// needed). SplitPDF may have written a sidecar manifest keyed
+	// on this intermediate PDF; remove it too so the DOCX output
+	// dir doesn't accumulate orphan manifests from deleted
+	// intermediates. This is best-effort and does not affect the
+	// part files.
+	intermediateBase := util.BaseNameNoExt(pdfPath)
+	CleanupStaleManifests(outputDir, intermediateBase)
 	os.Remove(pdfPath)
 	return nil
 }

@@ -5,6 +5,10 @@
 //   - A binary search over page ranges respects both maxPages and maxSizeMB.
 //   - Existing parts whose total page count matches the source are skipped
 //     unless force=true.
+//   - A sidecar split manifest (see manifest.go) is written after a
+//     successful split. Subsequent invocations that find a matching,
+//     fully-verifiable manifest can skip pdfcpu PageCountFile/TrimFile
+//     entirely. --force always bypasses the cache.
 //
 // Note: pdfcpu does not expose a "split-by-page-count from an open context"
 // API, so the helpers operate on file paths and use api.TrimFile to write
@@ -123,11 +127,78 @@ func isAlreadySplit(existingParts []string, totalPages int) bool {
 	return sum == totalPages
 }
 
+// sourceIdentity captures the stat info used for manifest matching.
+// It is also used by the legacy skip path so both code paths agree
+// on what "the source" means.
+type sourceIdentity struct {
+	Path  string
+	Size  int64
+	MTime int64
+}
+
+// statSource returns a sourceIdentity for pdfPath. Returns the error
+// from os.Stat unchanged — both the manifest and the legacy skip
+// path treat unreadable sources as a hard failure.
+func statSource(pdfPath string) (sourceIdentity, error) {
+	info, err := os.Stat(pdfPath)
+	if err != nil {
+		return sourceIdentity{}, err
+	}
+	return sourceIdentity{
+		Path:  pdfPath,
+		Size:  info.Size(),
+		MTime: info.ModTime().UnixNano(),
+	}, nil
+}
+
+// tryManifestHit checks whether a valid manifest exists for the
+// given source and parameters, and whether every recorded part
+// still matches on disk. On hit it logs a skip line and returns
+// true. On miss it returns false (errors are not fatal here — any
+// read/parse/mismatch failure silently degrades to a miss so the
+// caller can re-split safely).
+func tryManifestHit(outputDir, baseName string, src sourceIdentity, maxPages int, maxSizeMB float64) bool {
+	manifestPath := ManifestPath(outputDir, baseName)
+	m, err := LoadManifest(manifestPath)
+	if err != nil {
+		return false
+	}
+	if !m.Matches(MatchParams{
+		SourcePath:  src.Path,
+		SourceSize:  src.Size,
+		SourceMTime: src.MTime,
+		MaxPages:    maxPages,
+		MaxSizeMB:   maxSizeMB,
+	}) {
+		return false
+	}
+	ok, err := m.VerifyAgainstDisk(outputDir)
+	if err != nil || !ok {
+		return false
+	}
+	fmt.Printf("[跳过] %s: 命中 split manifest (%d 个部分)，跳过 pdfcpu 解析\n",
+		filepath.Base(src.Path), len(m.Parts))
+	return true
+}
+
+// recordedPart is one part as captured during the split loop, so
+// that the manifest can be built without re-reading the part files.
+type recordedPart struct {
+	Index     int
+	PageStart int
+	PageEnd   int
+	Size      int64
+	Filename  string
+}
+
 // SplitPDF splits pdfPath into "{base}_partN.pdf" files in outputDir,
 // honouring both maxPages and maxSizeMB (0 = no size limit).
 //
-// If existing "{base}_part*.pdf" files already account for the source's
-// total page count, the split is skipped (unless force=true).
+// If a valid split manifest exists for pdfPath and every recorded
+// part is still on disk with matching size, the split is skipped
+// without invoking pdfcpu (unless force=true). Without a manifest
+// the existing page-sum skip check still applies, so legacy output
+// directories continue to work.
 func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string, force bool) error {
 	if !util.FileExists(pdfPath) {
 		return fmt.Errorf("文件不存在: %s", pdfPath)
@@ -136,15 +207,35 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 		return fmt.Errorf("创建输出目录失败: %w", err)
 	}
 
+	baseName := util.BaseNameNoExt(pdfPath)
+	displayName := filepath.Base(pdfPath)
+
+	src, err := statSource(pdfPath)
+	if err != nil {
+		return fmt.Errorf("读取源文件失败: %w", err)
+	}
+
+	// Manifest hit is checked before pdfcpu is touched. --force bypasses.
+	//
+	// statSource uses os.Stat (not pdfcpu) so a hit path is robust
+	// to a source that pdfcpu can no longer parse — e.g. the file
+	// was overwritten with garbage since the manifest was written.
+	// That is exactly the contract called out by the test
+	// TestSplitPDFCorruptSourceStillSkippedOnHit.
+	if !force {
+		if tryManifestHit(outputDir, baseName, src, maxPages, maxSizeMB) {
+			return nil
+		}
+	}
+
 	totalPages, err := api.PageCountFile(pdfPath)
 	if err != nil {
 		return fmt.Errorf("读取 PDF 失败: %w", err)
 	}
 
-	baseName := util.BaseNameNoExt(pdfPath)
-	displayName := filepath.Base(pdfPath)
-
-	// Skip detection.
+	// Legacy skip path (no manifest): existing parts already cover
+	// the source's full page count. Kept for backwards compatibility
+	// with directories produced before the manifest format existed.
 	if !force {
 		existing, err := util.GlobSorted(filepath.Join(outputDir, baseName+"_part*.pdf"))
 		if err != nil {
@@ -160,6 +251,8 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 	}
 
 	fmt.Printf("[信息] %s: 共 %d 页\n", displayName, totalPages)
+
+	var recorded []recordedPart
 
 	part := 1
 	start := 0 // 0-based start, matches Python.
@@ -181,6 +274,13 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", partName, err)
 		}
+		recorded = append(recorded, recordedPart{
+			Index:     part,
+			PageStart: start + 1,
+			PageEnd:   end,
+			Size:      info.Size(),
+			Filename:  partName,
+		})
 		pageCount := end - start
 		if maxSizeMB > 0 {
 			fmt.Printf("  → %s  (页 %d–%d, 共 %d 页, %.1fMB)\n",
@@ -195,7 +295,63 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 	}
 
 	fmt.Printf("[完成] 共分割为 %d 个部分，输出到 %s/\n\n", part-1, outputDir)
+
+	// Manifest write: only after every part has been successfully
+	// written and stat'd. A failure here must not silently produce
+	// a half-valid manifest — we log and continue, since the
+	// on-disk parts are already correct and the next run will
+	// re-validate via the legacy path.
+	m := &Manifest{
+		SchemaVersion: ManifestSchemaVersion,
+		SourcePath:    src.Path,
+		SourceSize:    src.Size,
+		SourceMTimeNS: src.MTime,
+		MaxPages:      maxPages,
+		MaxSizeMB:     maxSizeMB,
+		Parts:         make([]Part, 0, len(recorded)),
+	}
+	for _, r := range recorded {
+		m.Parts = append(m.Parts, Part{
+			Filename:  r.Filename,
+			Index:     r.Index,
+			PageStart: r.PageStart,
+			PageEnd:   r.PageEnd,
+			Size:      r.Size,
+		})
+	}
+	if err := WriteManifest(ManifestPath(outputDir, baseName), m); err != nil {
+		fmt.Fprintf(os.Stderr, "[警告] 写入 split manifest 失败: %v\n", err)
+	}
+
+	// Best-effort cleanup of stale parts from a previous run that
+	// are not present in the new manifest. Skips the manifest file
+	// itself (different name pattern) and any non-pdf artefacts.
+	cleanupStaleParts(outputDir, baseName, recorded)
+
 	return nil
+}
+
+// cleanupStaleParts removes pdf files named "{base}_partN.pdf" in
+// outputDir whose index does not appear in the new split. Hidden /
+// non-pdf files are ignored. Manifests are never matched by the
+// glob (different filename) so they are safe.
+func cleanupStaleParts(outputDir, baseName string, kept []recordedPart) {
+	keptNames := make(map[string]bool, len(kept))
+	for _, r := range kept {
+		keptNames[r.Filename] = true
+	}
+	pattern := filepath.Join(outputDir, baseName+"_part*.pdf")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return
+	}
+	for _, m := range matches {
+		name := filepath.Base(m)
+		if keptNames[name] {
+			continue
+		}
+		_ = os.Remove(m)
+	}
 }
 
 // SplitAll runs SplitPDF on every .pdf and SplitDOCX on every .docx
