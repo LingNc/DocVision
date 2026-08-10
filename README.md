@@ -2,7 +2,7 @@
 
 PDF 转 Markdown 自动化工作流。通过 MinerU API 解析 PDF，再用 AI 将文档中的图片转换为文本描述，最终输出结构化的 Markdown 文件。
 
-提供 **Python** 和 **Go** 两种实现，功能完全一致。
+提供 **Go** 实现（推荐）；历史 **Python** 实现已归档至 `legacy/python/`，仅供参考且不再维护。
 
 ## 工作流程
 
@@ -69,7 +69,7 @@ make release   # 输出到 go/release/（Linux/macOS/Windows，amd64+arm64）
 npm install -g @mermaid-js/mermaid-cli
 ```
 
-`docvision init` 只生成配置文件，不会自动安装 Node.js、npm 或 Mermaid CLI。
+`docvision init` 生成配置文件后会询问是否通过 npm 安装 Mermaid CLI；只有确认后才执行 `npm install -g @mermaid-js/mermaid-cli`，不会自动安装 Node.js/npm。
 
 - `mermaid_validation: auto`：找不到 `mmdc` 时给出安装提示，并跳过本次验证；
 - `mermaid_validation: strict`：找不到 `mmdc` 时明确报错，需安装后再继续；
@@ -77,21 +77,7 @@ npm install -g @mermaid-js/mermaid-cli
 
 ### Python 版本
 
-```bash
-pip install -r python/requirements.txt
-
-# 运行完整工作流
-python workflow.py
-
-# 仅运行某个步骤
-python workflow.py --step split
-python workflow.py --step mineru
-python workflow.py --step organize
-python workflow.py --step img2text
-python workflow.py --step analyze
-```
-
-> **Note:** Python 版本的 `split_pdfs.py` 仅支持 PDF 分割。DOCX 分割请使用 Go 版本。
+历史 Python 实现已归档至 `legacy/python/`，不再维护，建议使用 Go 版本。
 
 将 PDF 或 DOCX 文件放入 `files/` 目录，运行工作流即可。
 
@@ -129,28 +115,7 @@ docvision init        生成配置模板
 
 ## Python 脚本独立使用
 
-```bash
-# 分割 PDF
-python python/split_pdfs.py input.pdf --max-pages 200 --output-dir split_files
-
-# 调用 MinerU API
-python python/mineru_api.py
-python python/mineru_api.py --file test.pdf
-
-# 整理文件
-python python/organize_files.py
-
-# AI 图片转文本
-python python/img2text.py
-python python/img2text.py --test --number 5 --seed 42
-
-# 分析日志
-python python/analyze.py --progress
-python python/analyze.py --all -o report.csv
-
-# 按线程拆分日志
-python split_log.py
-```
+历史 Python 脚本已归档至 `legacy/python/`，独立使用方式请参阅该目录下的 `README.md`。
 
 ## 主要配置说明
 
@@ -176,6 +141,7 @@ python split_log.py
 | `options.mermaid_fix_attempts` | Mermaid 独立修正次数 | 2 |
 | `options.mermaid_timeout` | 单个 Mermaid 验证超时（秒） | 30 |
 | `options.max_tokens` | API 调用最大 token 数 | 65536 |
+| `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 
 完整配置见 `config.example.yaml`。
 

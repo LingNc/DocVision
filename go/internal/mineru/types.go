@@ -1,6 +1,6 @@
 // Package mineru implements the MinerU API client and per-file task
-// processing. It mirrors the Python reference (python/mineru_api.py) and
-// is composed of three small files:
+// processing. It mirrors the archived Python reference
+// (legacy/python/python/mineru_api.py) and is composed of three small files:
 //
 //   - types.go    : data types and enums
 //   - client.go   : HTTP client and polling/upload/download primitives

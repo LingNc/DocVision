@@ -45,7 +45,9 @@ options:
   output_language: "Chinese"   # "Chinese" or "English"
   format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
   # Recommended: npm install -g @mermaid-js/mermaid-cli (provides mmdc).
-  # init only creates this config; it does not install Node.js/npm or Mermaid CLI.
+  # init only creates this config; it does not install Node.js/npm, but it
+  # will prompt for permission to run npm install -g @mermaid-js/mermaid-cli
+  # before any installation happens.
   mermaid_validation: "auto"  # off, auto, strict; auto warns and skips if mmdc is missing
   mermaid_command: "mmdc"     # Mermaid CLI command
   mermaid_fix_attempts: 2     # Mermaid-only repair attempts

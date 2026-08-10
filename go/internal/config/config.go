@@ -1,6 +1,6 @@
 // Package config loads, validates, and provides defaults for the
-// DocVision configuration file (config.yaml). Field names and defaults
-// mirror the Python implementation exactly.
+// DocVision configuration file (config.yaml). This is the reference
+// implementation; see legacy/python/ for the archived Python version.
 package config
 
 import (
@@ -95,8 +95,8 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// setDefaults fills in zero-valued fields with the defaults that the
-// Python implementation applies via dict.get(key, default).
+// setDefaults fills in zero-valued fields with the same defaults that the
+// archived Python implementation applies via dict.get(key, default).
 func setDefaults(cfg *Config) {
 	// MinerU defaults
 	if cfg.Mineru.APIBaseURL == "" {

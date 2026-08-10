@@ -1,6 +1,7 @@
 // Package img2text converts document images to structured text by calling
-// an OpenAI-compatible vision API. The package mirrors the Python reference
-// (python/img2text.py) and is split across several small files:
+// an OpenAI-compatible vision API. The package mirrors the archived Python
+// reference (legacy/python/python/img2text.py) and is split across several
+// small files:
 //
 //   - image.go    : image loading, RGBA->RGB conversion, resize, JPEG encode
 //   - context.go  : context-window line selection with delta support

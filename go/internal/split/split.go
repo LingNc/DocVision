@@ -1,6 +1,7 @@
 // Package split implements PDF splitting by page count and file size.
 //
-// Behaviour mirrors the Python reference (python/split_pdfs.py):
+// Behaviour mirrors the archived Python reference
+// (legacy/python/python/split_pdfs.py):
 //   - Output files are named "{base}_part{N}.pdf" in outputDir.
 //   - A binary search over page ranges respects both maxPages and maxSizeMB.
 //   - Existing parts whose total page count matches the source are skipped

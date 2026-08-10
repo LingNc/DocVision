@@ -1,8 +1,9 @@
 // Package organize copies full.md files from the MinerU output directory,
 // merges split parts by subject, and collects referenced images into per-
-// subject subdirectories. It mirrors python/organize_files.py while adding
-// incremental behaviour: reruns preserve existing output Markdown, images,
-// and manually created files; only the temp directory is rebuilt each run.
+// subject subdirectories. It mirrors the archived Python reference
+// (legacy/python/python/organize_files.py) while adding incremental
+// behaviour: reruns preserve existing output Markdown, images, and manually
+// created files; only the temp directory is rebuilt each run.
 package organize
 
 import (
