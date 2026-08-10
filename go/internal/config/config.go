@@ -63,7 +63,7 @@ type OptionsConfig struct {
 	FormatFixAttempts   int     `yaml:"format_fix_attempts"`
 	MermaidValidation   string  `yaml:"mermaid_validation"`
 	MermaidCommand      string  `yaml:"mermaid_command"`
-	MermaidFixAttempts  int     `yaml:"mermaid_fix_attempts"`
+	MermaidFixAttempts  *int    `yaml:"mermaid_fix_attempts"`
 	MermaidTimeout      int     `yaml:"mermaid_timeout"`
 	MaxTokens           int     `yaml:"max_tokens"`
 }
@@ -214,8 +214,8 @@ func setDefaults(cfg *Config) {
 	if cfg.Options.MermaidCommand == "" {
 		cfg.Options.MermaidCommand = "mmdc"
 	}
-	if cfg.Options.MermaidFixAttempts == 0 {
-		cfg.Options.MermaidFixAttempts = 3
+	if cfg.Options.MermaidFixAttempts == nil {
+		cfg.Options.MermaidFixAttempts = intPtr(3)
 	}
 	if cfg.Options.MermaidTimeout == 0 {
 		cfg.Options.MermaidTimeout = 30
@@ -251,4 +251,12 @@ func setDefaults(cfg *Config) {
 	if cfg.Paths.DoneDir == "" {
 		cfg.Paths.DoneDir = filepath.Join(cfg.Paths.InputDir, "done")
 	}
+}
+
+// intPtr returns a pointer to the given int value. It exists so we can
+// distinguish "field unset in YAML" (nil pointer, fill with default)
+// from "field explicitly set to 0" (pointer to 0, preserve as-is) for
+// settings where 0 carries a special meaning such as unlimited retries.
+func intPtr(v int) *int {
+	return &v
 }

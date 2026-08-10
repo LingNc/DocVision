@@ -542,8 +542,24 @@ func validateAndRepairMermaid(
 		return result, StatusOK
 	}
 
-	attempts := opts.MermaidFixAttempts
-	if attempts <= 0 {
+	// Resolve MermaidFixAttempts semantics:
+	//   nil  -> unset, use default 3.
+	//   >0   -> attempt exactly that many repair rounds.
+	//   ==0  -> unlimited attempts (user explicitly opted in),
+	//           clamped by a safety cap to prevent infinite loops on
+	//           a model that never produces valid Mermaid.
+	//   <0   -> treat as misconfiguration, fall back to default 3.
+	// (Field is *int so we can distinguish "unset" from explicit 0.)
+	const mermaidFixSafetyCap = 100
+	attempts := 3
+	switch {
+	case opts.MermaidFixAttempts == nil:
+		attempts = 3
+	case *opts.MermaidFixAttempts > 0:
+		attempts = *opts.MermaidFixAttempts
+	case *opts.MermaidFixAttempts == 0:
+		attempts = mermaidFixSafetyCap
+	default: // <0
 		attempts = 3
 	}
 	current := result

@@ -138,7 +138,7 @@ docvision init        生成配置模板
 | `options.format_fix_attempts` | 格式修复重试次数（0 禁用，1 表示重试一次） | 1 |
 | `options.mermaid_validation` | Mermaid 验证模式（off/auto/strict） | auto |
 | `options.mermaid_command` | Mermaid CLI 命令 | mmdc |
-| `options.mermaid_fix_attempts` | Mermaid 独立修正次数 | 3 |
+| `options.mermaid_fix_attempts` | Mermaid 独立修正次数（0 表示无限次，受代码内安全上限保护） | 3 |
 | `options.mermaid_timeout` | 单个 Mermaid 验证超时（秒） | 30 |
 | `options.max_tokens` | API 调用最大 token 数 | 65536 |
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |

@@ -50,10 +50,14 @@ ai:
 		t.Errorf("MaxTokens default = %d", cfg.Options.MaxTokens)
 	}
 	if cfg.Options.MermaidValidation != "auto" || cfg.Options.MermaidCommand != "mmdc" ||
-		cfg.Options.MermaidFixAttempts != 3 || cfg.Options.MermaidTimeout != 30 {
+		cfg.Options.MermaidFixAttempts == nil || *cfg.Options.MermaidFixAttempts != 3 || cfg.Options.MermaidTimeout != 30 {
+		var attempts int
+		if cfg.Options.MermaidFixAttempts != nil {
+			attempts = *cfg.Options.MermaidFixAttempts
+		}
 		t.Errorf("Mermaid defaults = mode=%q command=%q attempts=%d timeout=%d",
 			cfg.Options.MermaidValidation, cfg.Options.MermaidCommand,
-			cfg.Options.MermaidFixAttempts, cfg.Options.MermaidTimeout)
+			attempts, cfg.Options.MermaidTimeout)
 	}
 	if cfg.Paths.InputDir != "./files" {
 		t.Errorf("InputDir default = %q", cfg.Paths.InputDir)
@@ -134,10 +138,14 @@ paths:
 		t.Errorf("Temperature overridden = %v", cfg.Options.Temperature)
 	}
 	if cfg.Options.MermaidValidation != "strict" || cfg.Options.MermaidCommand != "custom-mmdc" ||
-		cfg.Options.MermaidFixAttempts != 4 || cfg.Options.MermaidTimeout != 45 {
+		cfg.Options.MermaidFixAttempts == nil || *cfg.Options.MermaidFixAttempts != 4 || cfg.Options.MermaidTimeout != 45 {
+		var attempts int
+		if cfg.Options.MermaidFixAttempts != nil {
+			attempts = *cfg.Options.MermaidFixAttempts
+		}
 		t.Errorf("Mermaid overrides = mode=%q command=%q attempts=%d timeout=%d",
 			cfg.Options.MermaidValidation, cfg.Options.MermaidCommand,
-			cfg.Options.MermaidFixAttempts, cfg.Options.MermaidTimeout)
+			attempts, cfg.Options.MermaidTimeout)
 	}
 	if cfg.Paths.FinallyDir != "./fin" {
 		t.Errorf("FinallyDir overridden = %q", cfg.Paths.FinallyDir)
@@ -212,5 +220,55 @@ paths:
 	}
 	if cfg.Paths.DoneDir != "/tmp/alt-done" {
 		t.Fatalf("DoneDir = %q, want explicit override", cfg.Paths.DoneDir)
+	}
+}
+
+// TestLoadConfig_MermaidFixAttemptsExplicitZero guards the *int semantics:
+// when YAML explicitly sets mermaid_fix_attempts: 0 the loader must
+// preserve the explicit zero (pointer to 0) and not silently rewrite it
+// to the default. The downstream consumer (processor.go) interprets
+// pointer-to-0 as "unlimited attempts, capped by safety limit".
+func TestLoadConfig_MermaidFixAttemptsExplicitZero(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := `
+mineru:
+  token: x
+options:
+  mermaid_fix_attempts: 0
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Options.MermaidFixAttempts == nil {
+		t.Fatal("MermaidFixAttempts = nil, want non-nil pointer to 0")
+	}
+	if *cfg.Options.MermaidFixAttempts != 0 {
+		t.Fatalf("*MermaidFixAttempts = %d, want 0", *cfg.Options.MermaidFixAttempts)
+	}
+}
+
+// TestLoadConfig_MermaidFixAttemptsOmittedUsesDefault confirms the
+// nil-pointer default path: when the YAML omits mermaid_fix_attempts
+// entirely, the loader fills it in with a pointer to 3.
+func TestLoadConfig_MermaidFixAttemptsOmittedUsesDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("mineru:\n  token: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Options.MermaidFixAttempts == nil {
+		t.Fatal("MermaidFixAttempts = nil, want non-nil pointer to 3")
+	}
+	if *cfg.Options.MermaidFixAttempts != 3 {
+		t.Fatalf("*MermaidFixAttempts = %d, want 3", *cfg.Options.MermaidFixAttempts)
 	}
 }
