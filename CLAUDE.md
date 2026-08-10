@@ -1,4 +1,3 @@
-```markdown
 # CLAUDE.md
 
 Behavioral guidelines to reduce common LLM coding mistakes and ensure clean coordination.
@@ -90,4 +89,3 @@ Strong success criteria let sub-agents loop independently. Weak criteria ("make 
 ---
 
 **These guidelines are working if:** the main conversation stays clean, sub-agents produce verified results with minimal back-and-forth, commits are small and logical, and clarifying questions come before implementation rather than after mistakes.
-```
