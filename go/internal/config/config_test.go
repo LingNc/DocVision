@@ -61,6 +61,9 @@ ai:
 	if cfg.Paths.FinallyDir != "./finally" {
 		t.Errorf("FinallyDir default = %q", cfg.Paths.FinallyDir)
 	}
+	if cfg.Paths.LogsDir != "./logs" {
+		t.Errorf("LogsDir default = %q", cfg.Paths.LogsDir)
+	}
 }
 
 func TestLoadConfig_PreservesExplicitValues(t *testing.T) {
@@ -115,6 +118,7 @@ paths:
   output_dir: "./out"
   images_dir: "./out/img"
   finally_dir: "./fin"
+  logs_dir: "./logz"
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
@@ -137,6 +141,9 @@ paths:
 	}
 	if cfg.Paths.FinallyDir != "./fin" {
 		t.Errorf("FinallyDir overridden = %q", cfg.Paths.FinallyDir)
+	}
+	if cfg.Paths.LogsDir != "./logz" {
+		t.Errorf("LogsDir overridden = %q", cfg.Paths.LogsDir)
 	}
 }
 

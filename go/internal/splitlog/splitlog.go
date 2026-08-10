@@ -86,15 +86,16 @@ func SplitLogByThread(logPath, outputDir string) error {
 }
 
 // Run is the entry point used by the CLI: if logFile is empty, the latest
-// img2text_*.log in cfg.Paths.FinallyDir is used. If outputDir is non-empty,
-// it overrides the default sibling-directory placement. It prints a summary
-// of the created files via SplitLogByThread.
+// img2text_*.log in cfg.Paths.LogsDir is used and falls back to
+// cfg.Paths.FinallyDir when no primary logs exist there. If outputDir is
+// non-empty, it overrides the default sibling-directory placement. It
+// prints a summary of the created files via SplitLogByThread.
 func Run(cfg *config.Config, logFile, outputDir string) error {
 	if logFile == "" {
 		if cfg == nil {
 			return fmt.Errorf("config and logFile are both empty")
 		}
-		latest, err := FindLatestLog(cfg.Paths.FinallyDir)
+		latest, err := logfind.FindLatestWithFallback(cfg.Paths.LogsDir, cfg.Paths.FinallyDir)
 		if err != nil {
 			return err
 		}

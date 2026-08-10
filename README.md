@@ -189,7 +189,12 @@ output/                 合并后的 Markdown 和引用的图片
 output/images/{主题}/   按主题组织的图片
 finally/                AI 处理后的最终 Markdown
 finally/progress_items/ AI 处理进度记录（断点续传）
+logs/                   img2text 处理日志（img2text_*.log + img2text_error_*.log）
 ```
+
+> `logs/` 是 T7 新增目录，专门放 `img2text` 处理期间生成的主日志和错误日志。
+> `finally/` 仍保存最终 Markdown 和 `progress_items/` 断点续传记录；
+> 分析 / 拆分工具默认从 `logs/` 读取，并回退到 `finally/` 以兼容旧日志。
 
 ## CI/CD
 

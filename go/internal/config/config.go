@@ -75,6 +75,7 @@ type PathsConfig struct {
 	OutputDir    string `yaml:"output_dir"`
 	ImagesDir    string `yaml:"images_dir"`
 	FinallyDir   string `yaml:"finally_dir"`
+	LogsDir      string `yaml:"logs_dir"`
 }
 
 // LoadConfig reads the YAML file at path, applies defaults for any
@@ -209,5 +210,8 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Paths.FinallyDir == "" {
 		cfg.Paths.FinallyDir = "./finally"
+	}
+	if cfg.Paths.LogsDir == "" {
+		cfg.Paths.LogsDir = "./logs"
 	}
 }

@@ -53,3 +53,45 @@ func FindAll(dir string) ([]string, error) {
 	sort.Strings(files)
 	return files, nil
 }
+
+// FindLatestWithFallback returns the latest primary log found in primaryDir.
+// If primaryDir has no primary logs, it falls back to legacyDir. Returns an
+// error only when neither directory yields a primary log. Results from the
+// two directories are never merged, so the returned path always belongs to a
+// single, unambiguous source.
+func FindLatestWithFallback(primaryDir, legacyDir string) (string, error) {
+	files, err := find(primaryDir)
+	if err == nil {
+		sort.Strings(files)
+		return files[len(files)-1], nil
+	}
+	if legacyDir == "" || legacyDir == primaryDir {
+		return "", err
+	}
+	files, err = find(legacyDir)
+	if err != nil {
+		return "", fmt.Errorf("no primary img2text_*.log in %s and fallback %s", primaryDir, legacyDir)
+	}
+	sort.Strings(files)
+	return files[len(files)-1], nil
+}
+
+// FindAllWithFallback returns all primary logs from primaryDir. If primaryDir
+// has no primary logs, it falls back to legacyDir. Results from the two
+// directories are never merged or duplicated.
+func FindAllWithFallback(primaryDir, legacyDir string) ([]string, error) {
+	files, err := find(primaryDir)
+	if err == nil {
+		sort.Strings(files)
+		return files, nil
+	}
+	if legacyDir == "" || legacyDir == primaryDir {
+		return nil, err
+	}
+	files, err = find(legacyDir)
+	if err != nil {
+		return nil, fmt.Errorf("no primary img2text_*.log in %s and fallback %s", primaryDir, legacyDir)
+	}
+	sort.Strings(files)
+	return files, nil
+}

@@ -26,16 +26,17 @@ func Run(cfg *config.Config, opts RunOptions) error {
 	}
 
 	inputDir := cfg.Paths.OutputDir
+	logsDir := cfg.Paths.LogsDir
 	finallyDir := cfg.Paths.FinallyDir
 	progressRoot := filepath.Join(finallyDir, "progress_items")
 
 	if opts.ProgressOnly {
-		PrintProgressReport(inputDir, progressRoot, finallyDir)
+		PrintProgressReport(inputDir, progressRoot, logsDir, finallyDir)
 		return nil
 	}
 
 	// Resolve log files to analyse.
-	logPaths, err := resolveLogPaths(opts, finallyDir)
+	logPaths, err := resolveLogPaths(opts, logsDir, finallyDir)
 	if err != nil {
 		return err
 	}
@@ -78,20 +79,22 @@ func Run(cfg *config.Config, opts RunOptions) error {
 	return nil
 }
 
-// resolveLogPaths picks the log files to analyse based on opts.
-func resolveLogPaths(opts RunOptions, finallyDir string) ([]string, error) {
+// resolveLogPaths picks the log files to analyse based on opts. When
+// LogFile is empty, the lookup walks logsDir first and falls back to
+// finallyDir so legacy logs produced before the T7 split keep working.
+func resolveLogPaths(opts RunOptions, logsDir, finallyDir string) ([]string, error) {
 	if opts.LogFile != "" {
 		return []string{opts.LogFile}, nil
 	}
 	if opts.All {
-		paths, err := logfind.FindAll(finallyDir)
+		paths, err := logfind.FindAllWithFallback(logsDir, finallyDir)
 		if err != nil {
 			return nil, err
 		}
 		fmt.Printf("找到 %d 个日志文件\n", len(paths))
 		return paths, nil
 	}
-	latest, err := logfind.FindLatest(finallyDir)
+	latest, err := logfind.FindLatestWithFallback(logsDir, finallyDir)
 	if err != nil {
 		return nil, err
 	}

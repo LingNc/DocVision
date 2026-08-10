@@ -137,3 +137,128 @@ func TestFindAll_MissingDir(t *testing.T) {
 		t.Fatalf("expected error for missing dir")
 	}
 }
+
+func TestFindLatestWithFallback_PrimaryWins(t *testing.T) {
+	primary := t.TempDir()
+	legacy := t.TempDir()
+	primaryHit := write(t, primary, "img2text_20250110_000000.log", time.Hour)
+	legacyHit := write(t, legacy, "img2text_20250120_000000.log", time.Hour)
+
+	got, err := FindLatestWithFallback(primary, legacy)
+	if err != nil {
+		t.Fatalf("FindLatestWithFallback: %v", err)
+	}
+	if got != primaryHit {
+		t.Fatalf("FindLatestWithFallback = %q, want primary %q (legacy was %q)", got, primaryHit, legacyHit)
+	}
+}
+
+func TestFindLatestWithFallback_LegacyOnly(t *testing.T) {
+	primary := filepath.Join(t.TempDir(), "nope")
+	legacy := t.TempDir()
+	legacyHit := write(t, legacy, "img2text_20250111_000000.log", time.Hour)
+
+	got, err := FindLatestWithFallback(primary, legacy)
+	if err != nil {
+		t.Fatalf("FindLatestWithFallback: %v", err)
+	}
+	if got != legacyHit {
+		t.Fatalf("FindLatestWithFallback = %q, want legacy %q", got, legacyHit)
+	}
+}
+
+func TestFindLatestWithFallback_BothEmpty(t *testing.T) {
+	primary := filepath.Join(t.TempDir(), "nope")
+	legacy := filepath.Join(t.TempDir(), "nope2")
+	if _, err := FindLatestWithFallback(primary, legacy); err == nil {
+		t.Fatalf("expected error when both directories missing")
+	}
+}
+
+func TestFindLatestWithFallback_SkipsLegacyWhenPrimaryHasErrorsOnly(t *testing.T) {
+	primary := t.TempDir()
+	legacy := t.TempDir()
+	write(t, primary, "img2text_error_20250101_000000.log", time.Hour)
+	legacyHit := write(t, legacy, "img2text_20250102_000000.log", time.Hour)
+
+	got, err := FindLatestWithFallback(primary, legacy)
+	if err != nil {
+		t.Fatalf("FindLatestWithFallback: %v", err)
+	}
+	if got != legacyHit {
+		t.Fatalf("FindLatestWithFallback = %q, want legacy %q", got, legacyHit)
+	}
+}
+
+func TestFindLatestWithFallback_NoMergeWhenBothHaveLogs(t *testing.T) {
+	primary := t.TempDir()
+	legacy := t.TempDir()
+	primaryHit := write(t, primary, "img2text_20250103_000000.log", time.Hour)
+	write(t, legacy, "img2text_20250110_000000.log", time.Hour)
+
+	got, err := FindLatestWithFallback(primary, legacy)
+	if err != nil {
+		t.Fatalf("FindLatestWithFallback: %v", err)
+	}
+	if got != primaryHit {
+		t.Fatalf("FindLatestWithFallback = %q, want primary %q (must not merge with legacy)", got, primaryHit)
+	}
+}
+
+func TestFindAllWithFallback_PrimaryWins(t *testing.T) {
+	primary := t.TempDir()
+	legacy := t.TempDir()
+	p1 := write(t, primary, "img2text_20250101_000000.log", time.Hour)
+	p2 := write(t, primary, "img2text_20250102_000000.log", time.Hour)
+	write(t, legacy, "img2text_20250103_000000.log", time.Hour)
+	write(t, legacy, "img2text_20250104_000000.log", time.Hour)
+
+	files, err := FindAllWithFallback(primary, legacy)
+	if err != nil {
+		t.Fatalf("FindAllWithFallback: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("len = %d, want 2 (%v)", len(files), files)
+	}
+	if files[0] != p1 || files[1] != p2 {
+		t.Fatalf("unexpected order: %v", files)
+	}
+}
+
+func TestFindAllWithFallback_LegacyOnly(t *testing.T) {
+	primary := filepath.Join(t.TempDir(), "nope")
+	legacy := t.TempDir()
+	l1 := write(t, legacy, "img2text_20250101_000000.log", time.Hour)
+	l2 := write(t, legacy, "img2text_20250102_000000.log", time.Hour)
+
+	files, err := FindAllWithFallback(primary, legacy)
+	if err != nil {
+		t.Fatalf("FindAllWithFallback: %v", err)
+	}
+	if len(files) != 2 || files[0] != l1 || files[1] != l2 {
+		t.Fatalf("unexpected files: %v", files)
+	}
+}
+
+func TestFindAllWithFallback_BothEmpty(t *testing.T) {
+	primary := filepath.Join(t.TempDir(), "nope")
+	legacy := filepath.Join(t.TempDir(), "nope2")
+	if _, err := FindAllWithFallback(primary, legacy); err == nil {
+		t.Fatalf("expected error when both directories missing")
+	}
+}
+
+func TestFindAllWithFallback_NoDuplicateMerge(t *testing.T) {
+	primary := t.TempDir()
+	legacy := t.TempDir()
+	p1 := write(t, primary, "img2text_20250101_000000.log", time.Hour)
+	write(t, legacy, "img2text_20250110_000000.log", time.Hour)
+
+	files, err := FindAllWithFallback(primary, legacy)
+	if err != nil {
+		t.Fatalf("FindAllWithFallback: %v", err)
+	}
+	if len(files) != 1 || files[0] != p1 {
+		t.Fatalf("expected primary-only result, got %v", files)
+	}
+}

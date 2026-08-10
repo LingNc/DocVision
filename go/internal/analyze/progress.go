@@ -125,7 +125,9 @@ func GetProblematicImages(logPath string) []string {
 }
 
 // PrintProgressReport prints a progress-only summary (no log statistics).
-func PrintProgressReport(inputDir, progressRoot, finallyDir string) {
+// logsDir is consulted first and finallyDir is used as a fallback so old
+// logs written before the T7 logs_dir split still show up in the report.
+func PrintProgressReport(inputDir, progressRoot, logsDir, finallyDir string) {
 	sep := strings.Repeat("=", 70)
 	fmt.Println(sep)
 	fmt.Println("进度检查报告")
@@ -156,7 +158,7 @@ func PrintProgressReport(inputDir, progressRoot, finallyDir string) {
 	}
 
 	// Quality rate from log ERROR/WARNING
-	logs, err := logfind.FindAll(finallyDir)
+	logs, err := logfind.FindAllWithFallback(logsDir, finallyDir)
 	if err != nil {
 		logs = nil
 	}

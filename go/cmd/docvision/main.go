@@ -369,9 +369,12 @@ func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) (
 	if err := os.MkdirAll(cfg.Paths.FinallyDir, 0o755); err != nil {
 		return "", fmt.Errorf("create finally dir: %w", err)
 	}
+	if err := os.MkdirAll(cfg.Paths.LogsDir, 0o755); err != nil {
+		return "", fmt.Errorf("create logs dir: %w", err)
+	}
 	ts := time.Now().Format("20060102_150405")
-	logPath := filepath.Join(cfg.Paths.FinallyDir, fmt.Sprintf("img2text_%s.log", ts))
-	errLogPath := filepath.Join(cfg.Paths.FinallyDir, fmt.Sprintf("img2text_error_%s.log", ts))
+	logPath := filepath.Join(cfg.Paths.LogsDir, fmt.Sprintf("img2text_%s.log", ts))
+	errLogPath := filepath.Join(cfg.Paths.LogsDir, fmt.Sprintf("img2text_error_%s.log", ts))
 	threadIDWidth := len(strconv.Itoa(cfg.Options.Concurrency))
 	if threadIDWidth < 2 {
 		threadIDWidth = 2
