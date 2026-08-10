@@ -66,6 +66,30 @@ const (
 	sentinelMermaid = "[IMG_MERMAID_INVALID]"
 )
 
+// mermaidFixSafetyCap is the upper bound applied when the user opts
+// into "unlimited" mermaid repair attempts by setting
+// MermaidFixAttempts to 0. It prevents an infinite loop on a model that
+// never produces valid Mermaid syntax.
+const mermaidFixSafetyCap = 100
+
+// mermaidDefaultFixBudget is used when the operator leaves
+// MermaidFixAttempts unset or sets it to a negative value.
+const mermaidDefaultFixBudget = 3
+
+// MermaidValidatorFunc runs Mermaid validation against a candidate
+// assistant response. Callers wire it from ProcessOneImage using
+// ValidateMermaid + the resolved MermaidCommand/timeout. Returning
+// nil skips validation entirely (used for the format-fix path).
+type MermaidValidatorFunc func(response string) MermaidValidationResult
+
+// MermaidRepairPromptBuilder builds the user-turn prompt that asks the
+// model to fix its previous Mermaid syntax. It receives the current
+// assistant response and the validator's error message so the prompt
+// can quote the mmdc failure inline while keeping the previous
+// response compact (we no longer inline the full previous response —
+// the conversation already contains it).
+type MermaidRepairPromptBuilder func(currentResult, validationError string) string
+
 // BuildSystemPrompt returns the system prompt with the two placeholders
 // filled in. The Python reference substitutes them exactly once before
 // the run starts; we mirror that semantics.
@@ -91,6 +115,12 @@ func BuildSystemPrompt(maxToolCalls int, lang string) string {
 //   - Rate-limit backoff: 2*2^n seconds, capped at 60. Unlimited retries
 //     when rateLimitRetries == 0.
 //   - Connection-timeout backoff: 5*2^n seconds, capped at 60.
+//   - Optional Mermaid validation/repair: when validator is non-nil
+//     every final assistant text is checked; syntax failures send the
+//     model a compact fix message inside the same tool loop (the
+//     conversation keeps its prior turns, get_more_context remains
+//     available until toolRounds is exhausted, and toolRounds /
+//     repairAttempts are tracked independently).
 //
 // Returns the final assistant text and a status string. The status
 // matches the Python return tuple (result, status) where "ok" means a
@@ -105,6 +135,8 @@ func CallAIWithTools(
 	tid int,
 	opts config.OptionsConfig,
 	customUserText string,
+	validator MermaidValidatorFunc,
+	repairPromptBuilder MermaidRepairPromptBuilder,
 ) (string, string) {
 	rateLimitLimit := 100
 	if opts.RateLimitRetries > 0 {
@@ -174,7 +206,19 @@ func CallAIWithTools(
 		}},
 	}
 
-	for round := 0; round < maxRounds+1; round++ {
+	repairBudget := resolveMermaidRepairBudget(opts.MermaidFixAttempts)
+	toolRounds := 0
+	repairAttempts := 0
+	currentResult := ""
+
+	for {
+		// toolRounds counts how many get_more_context rounds we've spent
+		// so far. The Python reference caps tool calls at maxRounds;
+		// after that we send the request without tools so the model is
+		// forced to commit. The forced-final "Provide your best analysis
+		// now." path is handled below once toolRounds == maxRounds and
+		// the next reply still returns no tool_calls.
+		includeTools := toolRounds < maxRounds
 		req := &ChatRequest{
 			Model:       client.Model(),
 			Messages:    messages,
@@ -182,11 +226,10 @@ func CallAIWithTools(
 			Temperature: opts.Temperature,
 			Stream:      false,
 		}
-		if round < maxRounds {
+		if includeTools {
 			req.Tools = tools
 			req.ToolChoice = "auto"
 		} else {
-			// Forced final round: no tools, force commitment.
 			req.ToolChoice = "none"
 		}
 
@@ -199,102 +242,267 @@ func CallAIWithTools(
 		}
 		choice := resp.Choices[0]
 
-		if len(choice.Message.ToolCalls) == 0 {
-			return contentString(choice.Message), StatusOK
+		if len(choice.Message.ToolCalls) > 0 {
+			// Tool round: append assistant verbatim, execute each
+			// get_more_context, append the matching tool responses,
+			// then continue the loop. toolRounds advances by one
+			// regardless of how many tool calls the model issued in
+			// this turn (matches the Python reference semantics).
+			messages = append(messages, choice.Message)
+
+			for _, tc := range choice.Message.ToolCalls {
+				if tc.Function.Name != "get_more_context" {
+					continue
+				}
+				var args struct {
+					MoreAbove int `json:"more_above"`
+					MoreBelow int `json:"more_below"`
+				}
+				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+					logger.LogWarning(tid, "  [ToolCall] invalid arguments:", err)
+					continue
+				}
+
+				actualUp := args.MoreAbove
+				if actualUp > opts.MaxWindowUp {
+					actualUp = opts.MaxWindowUp
+				}
+				actualDown := args.MoreBelow
+				if actualDown > opts.MaxWindowDown {
+					actualDown = opts.MaxWindowDown
+				}
+				newUp := curUp + actualUp
+				newDown := curDown + actualDown
+
+				logger.Log(tid, fmt.Sprintf(
+					"  [ToolCall] AI wants +%dup/-%ddown -> window %d/%d>%d/%d (per-request max=%d/%d)",
+					args.MoreAbove, args.MoreBelow,
+					curUp, curDown, newUp, newDown,
+					opts.MaxWindowUp, opts.MaxWindowDown,
+				))
+
+				delta := GetDeltaLines(lines, imgLineIdx, curUp, curDown, newUp, newDown)
+
+				var resultText string
+				if len(delta) > 0 {
+					resultText = fmt.Sprintf(
+						"Added %d lines above and %d lines below. "+
+							"Window is now [%d to %d].\n\nNEW content (delta only):\n\n%s",
+						actualUp, actualDown,
+						imgLineIdx-newUp, imgLineIdx+newDown,
+						strings.Join(delta, "\n"),
+					)
+				} else {
+					resultText = fmt.Sprintf(
+						"No new lines could be added. Window remains [%d to %d]. "+
+							"Please proceed with your best analysis.",
+						imgLineIdx-curUp, imgLineIdx+curDown,
+					)
+				}
+				curUp, curDown = newUp, newDown
+
+				toolMsg := ChatMessage{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Content:    resultText,
+				}
+				messages = append(messages, toolMsg)
+			}
+			toolRounds++
+			continue
 		}
 
-		// Append the assistant turn (with tool_calls) verbatim.
-		messages = append(messages, choice.Message)
+		// No tool_calls this turn. The forced-final path fires when the
+		// model has spent all its tool rounds AND we still have not
+		// received a usable answer; we append the same "Provide your
+		// best analysis now." nudge the legacy code used.
+		if !includeTools {
+			messages = append(messages, ChatMessage{
+				Role:    "user",
+				Content: "Provide your best analysis now.",
+			})
+			// Re-issue one last no-tools request so the nudge is part
+			// of the model-visible transcript (and so Mermaid
+			// validation runs on this final reply).
+			finalReq := &ChatRequest{
+				Model:       client.Model(),
+				Messages:    messages,
+				MaxTokens:   opts.MaxTokens,
+				Temperature: opts.Temperature,
+				Stream:      false,
+				ToolChoice:  "none",
+			}
+			finalResp, finalSentinel, finalStatus := doCallWithRetryFull(client, finalReq, maxAPIRetries, rateLimitLimit, logger, tid)
+			if finalStatus != "" {
+				return finalSentinel, finalStatus
+			}
+			if len(finalResp.Choices) == 0 {
+				return sentinelEmpty, StatusError
+			}
+			finalChoice := finalResp.Choices[0]
+			messages = append(messages, finalChoice.Message)
+			content := contentString(finalChoice.Message)
+			if content == "" {
+				return sentinelEmpty, StatusError
+			}
+			if validator == nil {
+				return content, StatusOK
+			}
+			currentResult = content
+		} else {
+			// Normal final-of-round reply: stash it for the Mermaid
+			// check and append it to the transcript so subsequent
+			// turns can reference it.
+			messages = append(messages, choice.Message)
+			content := contentString(choice.Message)
+			if content == "" {
+				return sentinelEmpty, StatusError
+			}
+			if validator == nil {
+				return content, StatusOK
+			}
+			currentResult = content
+		}
 
-		// Walk every tool call in this turn. Multiple get_more_context
-		// calls in one turn are possible (the Python reference handles
-		// them by appending one tool response per call).
-		for _, tc := range choice.Message.ToolCalls {
-			if tc.Function.Name != "get_more_context" {
-				continue
+		// Mermaid validation: classify the action.
+		validation := validator(currentResult)
+		action := decideMermaidAction(validation, strings.ToLower(strings.TrimSpace(opts.MermaidValidation)))
+		switch action.kind {
+		case actionAccept:
+			return currentResult, StatusOK
+		case actionSentinel:
+			logger.LogError(tid,
+				"Mermaid validation unavailable for", imgPathFromIdx(lines, imgLineIdx),
+				":", validation.Error)
+			return sentinelMermaid, StatusRetry
+		case actionRepair:
+			if repairAttempts >= repairBudget {
+				logger.LogError(tid,
+					"Mermaid validation failed after repairs for",
+					imgPathFromIdx(lines, imgLineIdx)+":", validation.Error)
+				return sentinelMermaid, StatusRetry
 			}
-			var args struct {
-				MoreAbove int `json:"more_above"`
-				MoreBelow int `json:"more_below"`
+			if repairPromptBuilder == nil {
+				// No builder wired (e.g. tests use the validator without
+				// exercising fix). Treat as terminal so we do not
+				// loop forever sending identical fix messages.
+				return sentinelMermaid, StatusRetry
 			}
-			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-				logger.LogWarning(tid, "  [ToolCall] invalid arguments:", err)
-				continue
-			}
-
-			// Per-request cap; no cumulative cap across rounds.
-			actualUp := args.MoreAbove
-			if actualUp > opts.MaxWindowUp {
-				actualUp = opts.MaxWindowUp
-			}
-			actualDown := args.MoreBelow
-			if actualDown > opts.MaxWindowDown {
-				actualDown = opts.MaxWindowDown
-			}
-			newUp := curUp + actualUp
-			newDown := curDown + actualDown
-
-			logger.Log(tid, fmt.Sprintf(
-				"  [ToolCall] AI wants +%dup/-%ddown -> window %d/%d>%d/%d (per-request max=%d/%d)",
-				args.MoreAbove, args.MoreBelow,
-				curUp, curDown, newUp, newDown,
-				opts.MaxWindowUp, opts.MaxWindowDown,
+			logger.LogWarning(tid, fmt.Sprintf(
+				"Mermaid validation failed (%d/%d): %s",
+				repairAttempts+1, repairBudget, validation.Error,
 			))
-
-			delta := GetDeltaLines(lines, imgLineIdx, curUp, curDown, newUp, newDown)
-
-			var resultText string
-			if len(delta) > 0 {
-				resultText = fmt.Sprintf(
-					"Added %d lines above and %d lines below. "+
-						"Window is now [%d to %d].\n\nNEW content (delta only):\n\n%s",
-					actualUp, actualDown,
-					imgLineIdx-newUp, imgLineIdx+newDown,
-					strings.Join(delta, "\n"),
-				)
-			} else {
-				resultText = fmt.Sprintf(
-					"No new lines could be added. Window remains [%d to %d]. "+
-						"Please proceed with your best analysis.",
-					imgLineIdx-curUp, imgLineIdx+curDown,
-				)
-			}
-			curUp, curDown = newUp, newDown
-
-			toolMsg := ChatMessage{
-				Role:       "tool",
-				ToolCallID: tc.ID,
-				Content:    resultText,
-			}
-			messages = append(messages, toolMsg)
+			fixMsg := repairPromptBuilder(currentResult, validation.Error)
+			messages = append(messages, ChatMessage{Role: "user", Content: fixMsg})
+			repairAttempts++
+			// After a fix message we still want to allow the model to
+			// call get_more_context if it needs more lines. toolRounds
+			// is unchanged so the loop's includeTools gate continues
+			// to work from its current position.
+			continue
+		default:
+			return sentinelMermaid, StatusRetry
 		}
 	}
+}
 
-	// Forced final attempt: out of tool rounds. Ask for a best-effort
-	// response without tools.
-	messages = append(messages, ChatMessage{
-		Role:    "user",
-		Content: "Provide your best analysis now.",
-	})
-	req := &ChatRequest{
-		Model:       client.Model(),
-		Messages:    messages,
-		MaxTokens:   opts.MaxTokens,
-		Temperature: opts.Temperature,
-		Stream:      false,
+// resolveMermaidRepairBudget normalises the user-facing
+// MermaidFixAttempts field into a concrete retry budget:
+//
+//	nil  -> default 3
+//	>0   -> the configured value
+//	0    -> explicit unlimited, clamped by mermaidFixSafetyCap
+//	<0   -> misconfiguration, default 3
+func resolveMermaidRepairBudget(cfg *int) int {
+	if cfg == nil {
+		return mermaidDefaultFixBudget
 	}
-	resp, errSentinel, status := doCallWithRetryFull(client, req, maxAPIRetries, rateLimitLimit, logger, tid)
-	if status != "" {
-		return errSentinel, status
+	if *cfg > 0 {
+		return *cfg
 	}
-	if len(resp.Choices) == 0 {
-		return sentinelEmpty, StatusError
+	if *cfg == 0 {
+		return mermaidFixSafetyCap
 	}
-	content := contentString(resp.Choices[0].Message)
-	if content == "" {
-		return sentinelEmpty, StatusError
+	return mermaidDefaultFixBudget
+}
+
+// mermaidAction enumerates the decisions decideMermaidAction can make.
+type mermaidAction struct {
+	kind   int
+	reason string
+}
+
+const (
+	actionAccept   = iota // No Mermaid, valid Mermaid, or auto-mode unavailable.
+	actionSentinel        // strict mode + Mermaid validator unavailable.
+	actionRepair          // Syntax failure with budget remaining.
+)
+
+// decideMermaidAction maps a MermaidValidationResult + mode into a
+// high-level action. The validation contract is the same one the
+// pre-refactor validateAndRepairMermaid enforced:
+//
+//   - no Mermaid block          -> accept
+//   - valid Mermaid             -> accept
+//   - validator unavailable     -> accept (auto) | sentinel (strict)
+//   - syntax failure            -> repair (caller enforces budget)
+func decideMermaidAction(v MermaidValidationResult, mode string) mermaidAction {
+	if !v.HasMermaid || v.Valid {
+		return mermaidAction{kind: actionAccept}
 	}
-	return content, StatusOK
+	if !v.Available {
+		if mode == "strict" {
+			return mermaidAction{kind: actionSentinel, reason: v.Error}
+		}
+		// auto (or any non-strict mode) tolerates unavailable
+		// validators and treats the response as acceptable.
+		return mermaidAction{kind: actionAccept, reason: v.Error}
+	}
+	return mermaidAction{kind: actionRepair, reason: v.Error}
+}
+
+// buildMermaidRepairMessage returns the user-turn prompt that asks the
+// model to fix its previous Mermaid syntax. We deliberately do NOT
+// inline the full previous response — it is already part of the
+// conversation, so duplicating it would balloon the request without
+// adding information. The mmdc error is quoted inline (truncated to
+// ~4KB) so the model can target the failing construct.
+func buildMermaidRepairMessage(currentResult, validationError string) string {
+	trimmedError := strings.TrimSpace(validationError)
+	if len(trimmedError) > 4096 {
+		trimmedError = trimmedError[:4096] + "..."
+	}
+	return strings.Join([]string{
+		"Your previous response contains invalid Mermaid syntax. Fix only the Mermaid syntax.",
+		"Validator output: " + trimmedError,
+		"",
+		"Preserve the [IMG_TYPE: <type>] prefix and all non-Mermaid content.",
+		"If a Mermaid block is present, keep it fenced with ```mermaid and make its syntax valid.",
+		"Do not add explanations outside the response.",
+		"",
+		"Special-character rules inside the Mermaid block:",
+		"- Wrap node labels containing `( ) < > & | { } [ ]` in double quotes, e.g. `A[\"x (y)\"]` or `A[\"a<b\"]`.",
+		"- Do not use unescaped HTML such as `<br/>`, `<b>`, etc.; either escape with `&lt;br/&gt;` or replace with spaces.",
+		"- Do not use the math operator `~` outside of explicit math contexts; prefer text labels instead.",
+		"- Use only ASCII quotes (\"...\"); never use Chinese/typographic quotes like “ ” ‘ ’, and avoid full-width punctuation （ ） ， ： inside the diagram.",
+	}, "\n")
+}
+
+// imgPathFromIdx is a small helper used purely for log messages. It
+// returns a short tag derived from the image line index so logs do not
+// require the caller to thread the image path through every step of
+// the state machine. Used only when callers do not pass an explicit
+// image path (e.g. the format-fix path which reuses the same
+// validator closure from ProcessOneImage).
+func imgPathFromIdx(lines []string, idx int) string {
+	if idx < 0 || idx >= len(lines) {
+		return fmt.Sprintf("line:%d", idx)
+	}
+	line := strings.TrimSpace(lines[idx])
+	if len(line) > 80 {
+		line = line[:80] + "..."
+	}
+	return fmt.Sprintf("line:%d", idx)
 }
 
 // doCallWithRetry issues a single chat completion and returns the
@@ -436,9 +644,25 @@ func ProcessOneImage(
 		return fmt.Sprintf("[IMG_ERROR: %s - %v]", imgPath, err), StatusError
 	}
 
+	// Mermaid validator: nil when the operator disabled validation.
+	// The closure re-uses the resolved MermaidCommand / timeout so each
+	// fix round sees the same configuration.
+	mode := strings.ToLower(strings.TrimSpace(opts.MermaidValidation))
+	var validator MermaidValidatorFunc
+	var repairBuilder MermaidRepairPromptBuilder
+	if mode != "" && mode != "off" {
+		timeout := time.Duration(opts.MermaidTimeout) * time.Second
+		command := opts.MermaidCommand
+		validator = func(response string) MermaidValidationResult {
+			return ValidateMermaid(context.Background(), response, command, timeout)
+		}
+		repairBuilder = buildMermaidRepairMessage
+	}
+
 	result, status := CallAIWithTools(
 		client, imgBase64, lines, imgLineIdx,
 		logger, tid, opts, "",
+		validator, repairBuilder,
 	)
 	if status != StatusOK {
 		return result, status
@@ -455,10 +679,7 @@ func ProcessOneImage(
 				"Unexpected prefix before '[IMG_TYPE:' in", imgPath+":",
 				strings.TrimSpace(prefix)[:min(80, len(strings.TrimSpace(prefix)))])
 		}
-		return validateAndRepairMermaid(
-			client, imgBase64, strings.TrimSpace(result[idx:]), imgPath,
-			logger, tid, opts,
-		)
+		return strings.TrimSpace(result[idx:]), StatusOK
 	}
 
 	// Missing [IMG_TYPE:. If the response is already a system error
@@ -478,9 +699,14 @@ func ProcessOneImage(
 				"Do NOT write \"The image shows\", \"This diagram illustrates\", or any similar analysis.",
 			result,
 		)
+		// Format-fix path runs without Mermaid validation: the model is
+		// being asked to repair the [IMG_TYPE:] prefix, not syntax.
+		// The validator stays in scope on the *initial* call so the
+		// original response still benefits from validation.
 		fixed, fixStatus := CallAIWithTools(
 			client, imgBase64, nil, 0,
 			logger, tid, opts, fixMsg,
+			nil, nil,
 		)
 		if fixStatus != StatusOK && !strings.HasPrefix(fixed, "[IMG_") {
 			return fixed, fixStatus
@@ -490,10 +716,7 @@ func ProcessOneImage(
 			if idx > 0 {
 				logger.LogWarning(tid, "Format fix had extra prefix in", imgPath)
 			}
-			return validateAndRepairMermaid(
-				client, imgBase64, strings.TrimSpace(fixed[idx:]), imgPath,
-				logger, tid, opts,
-			)
+			return strings.TrimSpace(fixed[idx:]), StatusOK
 		}
 		prefix := result
 		if len(prefix) > 100 {
@@ -510,106 +733,6 @@ func ProcessOneImage(
 	}
 	logger.LogError(tid, "No '[IMG_TYPE:' found in result from", imgPath+":", prefix)
 	return sentinelInvalid, StatusRetry
-}
-
-// validateAndRepairMermaid validates Mermaid blocks without consuming the
-// get_more_context tool-round budget. Mermaid repair calls use the existing
-// one-shot custom prompt path, which does not expose tools.
-func validateAndRepairMermaid(
-	client *AIClient,
-	imgBase64, result, imgPath string,
-	logger *logger.Logger,
-	tid int,
-	opts config.OptionsConfig,
-) (string, string) {
-	mode := strings.ToLower(strings.TrimSpace(opts.MermaidValidation))
-	if mode == "" || mode == "off" {
-		return result, StatusOK
-	}
-
-	timeout := time.Duration(opts.MermaidTimeout) * time.Second
-	validation := ValidateMermaid(context.Background(), result, opts.MermaidCommand, timeout)
-	if !validation.HasMermaid || validation.Valid {
-		return result, StatusOK
-	}
-	if !validation.Available {
-		installHint := "请安装 Node.js/npm 后执行: npm install -g @mermaid-js/mermaid-cli"
-		if mode == "strict" {
-			logger.LogError(tid, "Mermaid validation unavailable for", imgPath+":", validation.Error, "；", installHint)
-			return sentinelMermaid, StatusRetry
-		}
-		logger.LogWarning(tid, "Mermaid validation skipped for", imgPath+":", validation.Error, "；", installHint)
-		return result, StatusOK
-	}
-
-	// Resolve MermaidFixAttempts semantics:
-	//   nil  -> unset, use default 3.
-	//   >0   -> attempt exactly that many repair rounds.
-	//   ==0  -> unlimited attempts (user explicitly opted in),
-	//           clamped by a safety cap to prevent infinite loops on
-	//           a model that never produces valid Mermaid.
-	//   <0   -> treat as misconfiguration, fall back to default 3.
-	// (Field is *int so we can distinguish "unset" from explicit 0.)
-	const mermaidFixSafetyCap = 100
-	attempts := 3
-	switch {
-	case opts.MermaidFixAttempts == nil:
-		attempts = 3
-	case *opts.MermaidFixAttempts > 0:
-		attempts = *opts.MermaidFixAttempts
-	case *opts.MermaidFixAttempts == 0:
-		attempts = mermaidFixSafetyCap
-	default: // <0
-		attempts = 3
-	}
-	current := result
-	lastError := validation.Error
-	for attempt := 1; attempt <= attempts; attempt++ {
-		logger.LogWarning(tid, fmt.Sprintf("Mermaid validation failed for %s (%d/%d): %s", imgPath, attempt, attempts, lastError))
-		fixMsg := fmt.Sprintf(
-			"Your previous response contains invalid Mermaid syntax. Fix only the Mermaid syntax.\n"+
-				"Validator output: %s\n\n"+
-				"Previous response:\n---\n%s\n---\n\n"+
-				"Return the complete corrected response. Preserve the [IMG_TYPE: <type>] prefix and all non-Mermaid content. "+
-				"If a Mermaid block is present, keep it fenced with ```mermaid and make its syntax valid. Do not add explanations outside the response.\n"+
-				"Special-character rules inside the Mermaid block:\n"+
-				"- Wrap node labels containing `( ) < > & | { } [ ]` in double quotes, e.g. `A[\"x (y)\"]` or `A[\"a<b\"]`.\n"+
-				"- Do not use unescaped HTML such as `<br/>`, `<b>`, etc.; either escape with `&lt;br/&gt;` or replace with spaces.\n"+
-				"- Do not use the math operator `~` outside of explicit math contexts; prefer text labels instead.\n"+
-				"- Use only ASCII quotes (\"...\"); never use Chinese/typographic quotes like \u201c \u201d \u2018 \u2019, and avoid full-width punctuation (`\uFF08 \uFF09 \uFF0C \uFF1A`) inside the diagram.",
-			lastError, current,
-		)
-		fixed, fixStatus := CallAIWithTools(
-			client, imgBase64, nil, 0,
-			logger, tid, opts, fixMsg,
-		)
-		if fixStatus != StatusOK {
-			return fixed, fixStatus
-		}
-		fixed = strings.TrimSpace(fixed)
-		prefixIdx := strings.Index(fixed, "[IMG_TYPE:")
-		if prefixIdx < 0 {
-			lastError = "修正结果缺少 [IMG_TYPE:] 前缀"
-			current = fixed
-			continue
-		}
-		current = strings.TrimSpace(fixed[prefixIdx:])
-		validation = ValidateMermaid(context.Background(), current, opts.MermaidCommand, timeout)
-		if !validation.HasMermaid || validation.Valid {
-			return current, StatusOK
-		}
-		if !validation.Available {
-			if mode == "strict" {
-				return sentinelMermaid, StatusRetry
-			}
-			logger.LogWarning(tid, "Mermaid validation became unavailable for", imgPath+":", validation.Error)
-			return current, StatusOK
-		}
-		lastError = validation.Error
-	}
-
-	logger.LogError(tid, "Mermaid validation failed after repairs for", imgPath+":", lastError)
-	return sentinelMermaid, StatusRetry
 }
 
 // resolveImageFile maps an "images/..." reference from the markdown into
