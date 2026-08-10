@@ -459,6 +459,199 @@ func TestRewriteImagePathsIdempotent(t *testing.T) {
 	}
 }
 
+// TestRewriteImagePathsIdempotentTrickySubjects covers the original bug:
+// subjects whose names contain spaces, parentheses, commas or trailing
+// whitespace. The previous token scanner stopped at whitespace, which
+// truncated subject names like "foo (1)" at the internal space and
+// re-prefixed the half-token on every rerun, producing
+// images/<subject>/<subject>/file chains. The test asserts that both
+// bare and already-prefixed references round-trip safely across two
+// passes, regardless of the subject's name.
+func TestRewriteImagePathsIdempotentTrickySubjects(t *testing.T) {
+	cases := []struct {
+		name      string
+		subject   string
+		input     string
+		wantOnce  string
+		wantTwice string
+	}{
+		{
+			name:      "trailing space in subject, bare ref",
+			subject:   "foo ", // single trailing space
+			input:     "see ![](images/pic.jpg) below",
+			wantOnce:  "see ![](images/foo /pic.jpg) below",
+			wantTwice: "see ![](images/foo /pic.jpg) below",
+		},
+		{
+			name:      "trailing space in subject, already prefixed",
+			subject:   "foo ",
+			input:     "see ![](images/foo /pic.jpg) below",
+			wantOnce:  "see ![](images/foo /pic.jpg) below",
+			wantTwice: "see ![](images/foo /pic.jpg) below",
+		},
+		{
+			name:      "parentheses in subject, bare ref",
+			subject:   "foo (1)",
+			input:     "see ![](images/pic.jpg) below",
+			wantOnce:  "see ![](images/foo (1)/pic.jpg) below",
+			wantTwice: "see ![](images/foo (1)/pic.jpg) below",
+		},
+		{
+			name:      "parentheses in subject, already prefixed",
+			subject:   "foo (1)",
+			input:     "see ![](images/foo (1)/pic.jpg) below",
+			wantOnce:  "see ![](images/foo (1)/pic.jpg) below",
+			wantTwice: "see ![](images/foo (1)/pic.jpg) below",
+		},
+		{
+			name:      "comma in subject, bare ref",
+			subject:   "foo, bar",
+			input:     "see ![](images/pic.jpg) below",
+			wantOnce:  "see ![](images/foo, bar/pic.jpg) below",
+			wantTwice: "see ![](images/foo, bar/pic.jpg) below",
+		},
+		{
+			name:      "comma in subject, already prefixed",
+			subject:   "foo, bar",
+			input:     "see ![](images/foo, bar/pic.jpg) below",
+			wantOnce:  "see ![](images/foo, bar/pic.jpg) below",
+			wantTwice: "see ![](images/foo, bar/pic.jpg) below",
+		},
+		{
+			name:      "chinese characters in subject, already prefixed",
+			subject:   "中文主题",
+			input:     "see ![](images/中文主题/pic.jpg) below",
+			wantOnce:  "see ![](images/中文主题/pic.jpg) below",
+			wantTwice: "see ![](images/中文主题/pic.jpg) below",
+		},
+		{
+			name:      "mixed bare and already prefixed with parens subject",
+			subject:   "foo (1)",
+			input:     "![a](images/pic.jpg) ![b](images/foo (1)/pic.jpg)",
+			wantOnce:  "![a](images/foo (1)/pic.jpg) ![b](images/foo (1)/pic.jpg)",
+			wantTwice: "![a](images/foo (1)/pic.jpg) ![b](images/foo (1)/pic.jpg)",
+		},
+	}
+
+	tmp := t.TempDir()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(tmp, "case.md")
+			if err := os.WriteFile(path, []byte(tc.input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rewriteImagePaths(path, string(data), tc.subject); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.wantOnce {
+				t.Fatalf("after first pass: got %q, want %q", string(got), tc.wantOnce)
+			}
+			// Second pass must be a no-op even for tricky subjects:
+			// this is the regression assertion for the production bug.
+			if err := rewriteImagePaths(path, string(got), tc.subject); err != nil {
+				t.Fatal(err)
+			}
+			got2, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got2) != tc.wantTwice {
+				t.Fatalf("after second pass: got %q, want %q", string(got2), tc.wantTwice)
+			}
+			// Defensive: assert no images/<subject>/<subject>/ stacking.
+			double := "images/" + tc.subject + "/images/" + tc.subject + "/"
+			if strings.Contains(string(got2), double) {
+				t.Fatalf("path stacked: %q", string(got2))
+			}
+		})
+	}
+}
+
+// TestOrganizeFilesSkipPathDoesNotRewriteMd verifies that when all
+// referenced images are already on disk, step3 leaves the Markdown
+// untouched on a rerun (no path rewrite, no mtime change). This is the
+// regression guard for subjects with spaces/parentheses/commas/trailing
+// whitespace: previously the skip path called rewriteImagePaths which
+// truncated the subject name and stacked the prefix on every rerun.
+func TestOrganizeFilesSkipPathDoesNotRewriteMd(t *testing.T) {
+	cases := []struct {
+		name    string
+		subject string
+		mdBody  string
+	}{
+		{"parens in subject", "foo (1)", "content\n\n![](images/pic.jpg)\n"},
+		{"trailing space in subject", "foo  ", "content\n\n![](images/pic.jpg)\n"},
+		{"comma in subject", "foo, bar", "content\n\n![](images/pic.jpg)\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			mineruOutput := filepath.Join(root, "mineru_output")
+			outputDir := filepath.Join(root, "output")
+			imagesDir := filepath.Join(outputDir, "images")
+
+			srcDir := filepath.Join(mineruOutput, tc.subject)
+			writeFile(t, filepath.Join(srcDir, "full.md"), tc.mdBody)
+			if err := os.MkdirAll(filepath.Join(srcDir, "images"), 0o755); err != nil {
+				t.Fatalf("mkdir images: %v", err)
+			}
+			writeFile(t, filepath.Join(srcDir, "images", "pic.jpg"), "fake-image")
+
+			cfg := newTestConfig(mineruOutput, outputDir, imagesDir)
+
+			// First run: normalises the md and copies the image.
+			if err := OrganizeFiles(cfg); err != nil {
+				t.Fatalf("first run: %v", err)
+			}
+
+			mergedMD := filepath.Join(outputDir, tc.subject+".md")
+			before, err := os.ReadFile(mergedMD)
+			if err != nil {
+				t.Fatalf("read md: %v", err)
+			}
+			beforeInfo, err := os.Stat(mergedMD)
+			if err != nil {
+				t.Fatalf("stat md: %v", err)
+			}
+
+			// Second run on unchanged source: skip path must NOT rewrite.
+			if err := OrganizeFiles(cfg); err != nil {
+				t.Fatalf("second run: %v", err)
+			}
+
+			after, err := os.ReadFile(mergedMD)
+			if err != nil {
+				t.Fatalf("read md after: %v", err)
+			}
+			if string(after) != string(before) {
+				t.Fatalf("skip path rewrote md: before=%q after=%q", string(before), string(after))
+			}
+			afterInfo, err := os.Stat(mergedMD)
+			if err != nil {
+				t.Fatalf("stat md after: %v", err)
+			}
+			if !afterInfo.ModTime().Equal(beforeInfo.ModTime()) {
+				t.Fatalf("skip path advanced md mtime: before=%v after=%v",
+					beforeInfo.ModTime(), afterInfo.ModTime())
+			}
+			// No images/<subject>/<subject>/ stacking either.
+			double := "images/" + tc.subject + "/images/" + tc.subject + "/"
+			if strings.Contains(string(after), double) {
+				t.Fatalf("paths double-prefixed: %q", string(after))
+			}
+		})
+	}
+}
+
 // helpers
 
 // newTestConfig returns a config.Config wired to the test paths.

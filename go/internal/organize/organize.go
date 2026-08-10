@@ -339,12 +339,15 @@ func step3CollectImages(allDirs []string, outputDir, imagesDir string) error {
 		}
 
 		if !needsIndex {
-			// All referenced images are already present locally. Skip the
-			// copy work entirely; still apply idempotent path rewrite in
-			// case the Markdown still points at unprefixed paths.
-			if err := rewriteImagePaths(mdFile, content, subject); err != nil {
-				return err
-			}
+			// All referenced images are already present locally. The
+			// earlier run that populated this subject already normalised
+			// its Markdown paths, so a second run must NOT rewrite the
+			// md. The previous token scanner truncated subject names
+			// containing spaces (e.g. "foo (1)") and re-prefixed the
+			// half-token on every rerun, producing
+			// images/<subject>/<subject>/file.jpg chains that broke
+			// img2text. Skipping the rewrite here keeps the file on
+			// its canonical form.
 			skipSubject++
 			continue
 		}
@@ -517,50 +520,66 @@ func missingImageTargets(refs []string, imagesDir, subject string) []string {
 }
 
 // rewriteImagePaths rewrites bare "images/foo.ext" occurrences in the
-// Markdown content to point at images/<subject>/foo.ext, without touching
-// already-prefixed paths. The change is written back to disk only if the
-// content actually changed.
+// Markdown content to point at images/<subject>/foo.ext, leaving any
+// already-prefixed path untouched. The change is written back to disk
+// only if the content actually changed.
+//
+// "Bare" means the segment after "images/" has no further "/" — i.e.
+// it is exactly a filename. Already-prefixed paths are recognised by
+// an exact byte-level prefix match against the subject, with no trim,
+// case folding or other normalisation, so subjects that contain
+// spaces, parentheses, commas, trailing whitespace or non-ASCII
+// characters round-trip safely across runs.
+//
+// Tokenisation reuses imgRe — the same regex step3 uses to identify
+// image references. Anchoring on the Markdown image syntax
+// `![alt](images/...)` is the only reliable way to bound a path
+// token, because subject names and even bare filenames may contain
+// whitespace, parentheses, quotes or other characters that ad-hoc
+// scanners would mistake for delimiters.
 func rewriteImagePaths(mdFile, content, subject string) error {
 	prefix := "images/" + subject + "/"
-	// Walk every "images/..." token in the content and rewrite only those
-	// that are not already prefixed. This avoids the naive global
-	// ReplaceAll that would turn images/subject/foo.jpg into
-	// images/subject/subject/foo.jpg on a second run.
+	subjectWithSlash := subject + "/"
+	// imgRe matches `![...](images/<path>)`. m[0]:m[1] is the whole
+	// match (including the surrounding `](` and trailing `)`); m[2]:m[3]
+	// is the captured URL ("images/..."). Use the captured URL as the
+	// token — that is exactly the Markdown-link-bounded path we want,
+	// regardless of what characters appear inside the subject or the
+	// filename.
+	matches := imgRe.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return nil
+	}
 	var b strings.Builder
-	i := 0
-	for i < len(content) {
-		// Find the next "images/" occurrence.
-		idx := strings.Index(content[i:], "images/")
-		if idx < 0 {
-			b.WriteString(content[i:])
-			break
-		}
-		start := i + idx
-		end := start + len("images/")
-		b.WriteString(content[i:start])
-		// Extract the path token until the next whitespace, ) or end.
-		j := end
-		for j < len(content) {
-			c := content[j]
-			if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ')' || c == ']' || c == '"' || c == '\'' {
-				break
-			}
-			j++
-		}
-		token := content[start:j]
-		// Rewrite only when the segment after "images/" is a single bare
-		// filename (i.e. no further "/") or it equals the subject
-		// followed by "/". Otherwise leave it untouched.
-		if rest := token[len("images/"):]; !strings.HasPrefix(rest, subject+"/") && !strings.Contains(rest, "/") {
+	last := 0
+	changed := false
+	for _, m := range matches {
+		urlStart, urlEnd := m[2], m[3]
+		url := content[urlStart:urlEnd]
+		rest := url[len("images/"):]
+		switch {
+		case strings.HasPrefix(rest, subjectWithSlash):
+			// Exact subject prefix: already normalised, leave alone.
+			b.WriteString(content[last:urlStart])
+			b.WriteString(url)
+			last = urlEnd
+		case !strings.Contains(rest, "/"):
+			// Single bare filename: prefix with the subject directory.
+			b.WriteString(content[last:urlStart])
 			b.WriteString(prefix)
 			b.WriteString(rest)
-		} else {
-			b.WriteString(token)
+			last = urlEnd
+			changed = true
+		default:
+			// Some other relative path under images/: not ours to touch.
+			b.WriteString(content[last:urlStart])
+			b.WriteString(url)
+			last = urlEnd
 		}
-		i = j
 	}
+	b.WriteString(content[last:])
 	newContent := b.String()
-	if newContent == content {
+	if !changed {
 		return nil
 	}
 	return os.WriteFile(mdFile, []byte(newContent), 0o644)
