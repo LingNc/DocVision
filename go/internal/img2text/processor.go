@@ -555,7 +555,12 @@ func validateAndRepairMermaid(
 				"Validator output: %s\n\n"+
 				"Previous response:\n---\n%s\n---\n\n"+
 				"Return the complete corrected response. Preserve the [IMG_TYPE: <type>] prefix and all non-Mermaid content. "+
-				"If a Mermaid block is present, keep it fenced with ```mermaid and make its syntax valid. Do not add explanations outside the response.",
+				"If a Mermaid block is present, keep it fenced with ```mermaid and make its syntax valid. Do not add explanations outside the response.\n"+
+				"Special-character rules inside the Mermaid block:\n"+
+				"- Wrap node labels containing `( ) < > & | { } [ ]` in double quotes, e.g. `A[\"x (y)\"]` or `A[\"a<b\"]`.\n"+
+				"- Do not use unescaped HTML such as `<br/>`, `<b>`, etc.; either escape with `&lt;br/&gt;` or replace with spaces.\n"+
+				"- Do not use the math operator `~` outside of explicit math contexts; prefer text labels instead.\n"+
+				"- Use only ASCII quotes (\"...\"); never use Chinese/typographic quotes like \u201c \u201d \u2018 \u2019, and avoid full-width punctuation (`\uFF08 \uFF09 \uFF0C \uFF1A`) inside the diagram.",
 			lastError, current,
 		)
 		fixed, fixStatus := CallAIWithTools(

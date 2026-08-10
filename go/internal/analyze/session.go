@@ -47,6 +47,7 @@ var (
 	ErrorWorkerFatal       = regexp.MustCompile(`(?i)IMG_WORKER_FATAL`)
 	ErrorEmptyResponse     = regexp.MustCompile(`(?i)IMG_EMPTY_RESPONSE`)
 	ErrorInvalidFormat     = regexp.MustCompile(`(?i)IMG_INVALID_FORMAT`)
+	ErrorMermaidInvalid    = regexp.MustCompile(`(?i)IMG_MERMAID_INVALID`)
 )
 
 // errorPatternList is checked in order by ClassifyError.
@@ -62,6 +63,7 @@ var errorPatternList = []struct {
 	{"worker_fatal", ErrorWorkerFatal},
 	{"empty_response", ErrorEmptyResponse},
 	{"invalid_format", ErrorInvalidFormat},
+	{"mermaid_invalid", ErrorMermaidInvalid},
 }
 
 // ParseLogLine parses one log line and returns timestamp, thread id, content.
