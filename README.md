@@ -142,6 +142,7 @@ docvision init        生成配置模板
 | `options.mermaid_timeout` | 单个 Mermaid 验证超时（秒） | 30 |
 | `options.max_tokens` | API 调用最大 token 数 | 65536 |
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
+| `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |
 
 完整配置见 `config.example.yaml`。
 
@@ -149,6 +150,7 @@ docvision init        生成配置模板
 
 ```
 files/                  源 PDF/Office/图片文件
+files/done/             分割完成后归档的源文件（成功 split 后从 files/ 移入）
 split_files/            分割后的 PDF/DOCX
 mineru_output/          MinerU API 返回的解析结果
 output/                 合并后的 Markdown 和引用的图片
@@ -158,6 +160,10 @@ finally/progress_items/ AI 处理进度记录（断点续传）
 logs/                   img2text 处理日志（img2text_*.log + img2text_error_*.log）
 ```
 
+> `files/done/` 在 SplitAll 模式下自动维护：每次 split 成功的源文件会被 `os.Rename` 到这里；DOCX 直通文件（页数低于阈值）保留在 `files/`，等下次评估。
+> `--force` 会在 split 前把 `done/` 中同名的源文件移回 `files/` 再处理。
+> 旧的 `*.pdf.done` / `*.docx.done` 标记会在 SplitAll 开始时被迁移到 `done/` 并去掉后缀。
+> `os.Rename` 跨文件系统会失败（EXDEV），此时仅打印 warning，不会中断 split；如需跨盘归档请在 `paths.done_dir` 选择同盘路径。
 > `logs/` 是 T7 新增目录，专门放 `img2text` 处理期间生成的主日志和错误日志。
 > `finally/` 仍保存最终 Markdown 和 `progress_items/` 断点续传记录；
 > 分析 / 拆分工具默认从 `logs/` 读取，并回退到 `finally/` 以兼容旧日志。

@@ -252,7 +252,11 @@ func runSplitFromConfig(cmd *cobra.Command, cfg *config.Config) error {
 		inputDir = cfg.Paths.InputDir
 	}
 	if all {
-		return split.SplitAll(inputDir, maxPages, maxSizeMB, outputDir, force)
+		// SplitAll archives successfully-split sources into
+		// cfg.Paths.DoneDir. Single-file entry points go through
+		// splitOne/splitSplit — they intentionally do NOT archive,
+		// so a manual command never silently moves files.
+		return split.SplitAll(inputDir, maxPages, maxSizeMB, outputDir, force, cfg.Paths.DoneDir)
 	}
 	return fmt.Errorf("split: 请提供 PDF/DOCX 文件路径或使用 --all")
 }

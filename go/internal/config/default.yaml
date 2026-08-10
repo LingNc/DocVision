@@ -64,3 +64,4 @@ paths:
   images_dir: "./output/images"
   finally_dir: "./finally"          # final output directory
   logs_dir: "./logs"               # img2text_*.log / img2text_error_*.log
+  done_dir: "./files/done"         # dir for sources archived after a successful split

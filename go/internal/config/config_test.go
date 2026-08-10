@@ -152,3 +152,65 @@ func TestLoadConfig_MissingFile(t *testing.T) {
 		t.Error("expected error for missing file")
 	}
 }
+
+// TestLoadConfig_DoneDirDefault confirms DoneDir defaults to a
+// sub-directory of InputDir (anchored to the defaulted value).
+func TestLoadConfig_DoneDirDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("mineru:\n  token: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	want := filepath.Join(cfg.Paths.InputDir, "done")
+	if cfg.Paths.DoneDir != want {
+		t.Fatalf("DoneDir default = %q, want %q", cfg.Paths.DoneDir, want)
+	}
+}
+
+// TestLoadConfig_DoneDirEqualsInputDirRejected ensures the
+// cross-field invariant: archiving into the same directory the
+// sources live in is rejected so SplitAll can't loop forever.
+func TestLoadConfig_DoneDirEqualsInputDirRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := `
+mineru:
+  token: x
+paths:
+  input_dir: "./files"
+  done_dir: "./files"
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error when done_dir == input_dir")
+	}
+}
+
+// TestLoadConfig_DoneDirOverride confirms an explicit
+// paths.done_dir value is preserved.
+func TestLoadConfig_DoneDirOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := `
+mineru:
+  token: x
+paths:
+  done_dir: "/tmp/alt-done"
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Paths.DoneDir != "/tmp/alt-done" {
+		t.Fatalf("DoneDir = %q, want explicit override", cfg.Paths.DoneDir)
+	}
+}

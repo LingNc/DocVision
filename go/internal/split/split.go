@@ -304,6 +304,8 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 	// re-validate via the legacy path.
 	m := &Manifest{
 		SchemaVersion: ManifestSchemaVersion,
+		Kind:          KindPDF,
+		Mode:          ModeSplit,
 		SourcePath:    src.Path,
 		SourceSize:    src.Size,
 		SourceMTimeNS: src.MTime,
@@ -359,7 +361,17 @@ func cleanupStaleParts(outputDir, baseName string, kept []recordedPart) {
 // file in inputDir (non-recursive, hidden files skipped). Each file
 // is processed independently; an error on one file does not stop
 // the others — the first error is returned at the end.
-func SplitAll(inputDir string, maxPages int, maxSizeMB float64, outputDir string, force bool) error {
+//
+// If doneDir is non-empty, every source file whose split produced
+// parts on disk is moved (os.Rename) into doneDir/basename so the
+// input directory only contains files that still need processing.
+// Sources whose split skipped work (DOCX passthrough, or a PDF
+// manifest hit that produced nothing new) are NOT archived. The
+// pass is best-effort: a rename failure is logged and never blocks
+// the split of other files. When force=true, any previously-
+// archived source with the same basename is restored to inputDir
+// before splitting so the source path in the manifest matches.
+func SplitAll(inputDir string, maxPages int, maxSizeMB float64, outputDir string, force bool, doneDir string) error {
 	if !util.DirExists(inputDir) {
 		return fmt.Errorf("输入目录不存在: %s", inputDir)
 	}
@@ -388,6 +400,43 @@ func SplitAll(inputDir string, maxPages int, maxSizeMB float64, outputDir string
 	}
 	docxs = visible
 
+	// One-time housekeeping runs BEFORE the empty-input early
+	// return: --force may need to restore previously-archived
+	// sources even when inputDir currently looks empty, and the
+	// *.done migration should happen on every run regardless of
+	// whether anything is left to split.
+	if doneDir != "" {
+		if err := util.EnsureDir(doneDir); err != nil {
+			fmt.Fprintf(os.Stderr, "[警告] 创建 done 目录失败: %v\n", err)
+		}
+		migrateDoneMarkers(inputDir, doneDir)
+	}
+	if force && doneDir != "" {
+		restoreArchivedOnForce(inputDir, doneDir)
+		// Refresh the listings after restoring — newly-restored
+		// files are exactly the ones we want to split next.
+		if pdfs, err = util.ListFiles(inputDir, ".pdf"); err != nil {
+			return fmt.Errorf("读取目录失败: %w", err)
+		}
+		if docxs, err = util.ListFiles(inputDir, ".docx"); err != nil {
+			return fmt.Errorf("读取目录失败: %w", err)
+		}
+		visible := pdfs[:0]
+		for _, f := range pdfs {
+			if !strings.HasPrefix(filepath.Base(f), ".") {
+				visible = append(visible, f)
+			}
+		}
+		pdfs = visible
+		visible = docxs[:0]
+		for _, f := range docxs {
+			if !strings.HasPrefix(filepath.Base(f), ".") {
+				visible = append(visible, f)
+			}
+		}
+		docxs = visible
+	}
+
 	total := len(pdfs) + len(docxs)
 	if total == 0 {
 		fmt.Printf("[警告] 目录 %s 下没有找到 PDF 或 DOCX 文件\n", inputDir)
@@ -403,6 +452,10 @@ func SplitAll(inputDir string, maxPages int, maxSizeMB float64, outputDir string
 			if firstErr == nil {
 				firstErr = err
 			}
+			continue
+		}
+		if doneDir != "" && pdfShouldArchive(f, outputDir) {
+			_ = archiveSourceFile(f, doneDir)
 		}
 	}
 	for _, f := range docxs {
@@ -411,7 +464,133 @@ func SplitAll(inputDir string, maxPages int, maxSizeMB float64, outputDir string
 			if firstErr == nil {
 				firstErr = err
 			}
+			continue
+		}
+		if doneDir != "" && docxShouldArchive(f, outputDir) {
+			_ = archiveSourceFile(f, doneDir)
 		}
 	}
 	return firstErr
+}
+
+// pdfShouldArchive reports whether the PDF source should be moved
+// into doneDir after a successful split. We require at least one
+// "{base}_part*.pdf" on disk — a manifest hit with a deleted part
+// leaves the source needing re-split, so we do not archive it.
+func pdfShouldArchive(srcPath, outputDir string) bool {
+	base := util.BaseNameNoExt(srcPath)
+	matches, err := util.GlobSorted(filepath.Join(outputDir, base+"_part*.pdf"))
+	if err != nil {
+		return false
+	}
+	return len(matches) > 0
+}
+
+// docxShouldArchive reports whether the DOCX source should be moved
+// into doneDir. We only archive when the DOCX manifest records
+// Mode=split (i.e. parts exist on disk). Passthrough sources stay
+// in inputDir so the next run can re-evaluate them.
+func docxShouldArchive(srcPath, outputDir string) bool {
+	base := util.BaseNameNoExt(srcPath)
+	m, err := LoadManifest(docxManifestPath(outputDir, base))
+	if err != nil {
+		return false
+	}
+	return m.Mode == ModeSplit && len(m.Parts) > 0
+}
+
+// archiveSourceFile moves srcPath into doneDir/basename. The
+// destination must not already exist; we never overwrite an
+// archived file. Rename failures (including cross-filesystem
+// EXDEV) are logged and swallowed so the split of subsequent
+// files proceeds.
+func archiveSourceFile(srcPath, doneDir string) bool {
+	if doneDir == "" {
+		return false
+	}
+	if err := util.EnsureDir(doneDir); err != nil {
+		fmt.Fprintf(os.Stderr, "[警告] 创建 done 目录失败 (%s): %v\n", doneDir, err)
+		return false
+	}
+	dst := filepath.Join(doneDir, filepath.Base(srcPath))
+	if _, err := os.Stat(dst); err == nil {
+		fmt.Fprintf(os.Stderr, "[警告] done 目录已存在同名文件，跳过归档: %s\n", dst)
+		return false
+	}
+	if err := os.Rename(srcPath, dst); err != nil {
+		fmt.Fprintf(os.Stderr, "[警告] 归档源文件失败 (%s -> %s): %v\n", srcPath, dst, err)
+		return false
+	}
+	fmt.Printf("[归档] %s -> %s/\n", filepath.Base(srcPath), filepath.Base(doneDir))
+	return true
+}
+
+// migrateDoneMarkers moves any input_dir/*.pdf.done / *.docx.done
+// files into doneDir, stripping the .done suffix on the way.
+// Targets that already exist are skipped (warning logged). This is
+// a one-shot migration for installations that previously archived
+// files by renaming them in place.
+func migrateDoneMarkers(inputDir, doneDir string) {
+	entries, err := os.ReadDir(inputDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".done") {
+			continue
+		}
+		if !strings.HasSuffix(strings.ToLower(name), ".pdf.done") &&
+			!strings.HasSuffix(strings.ToLower(name), ".docx.done") {
+			continue
+		}
+		src := filepath.Join(inputDir, name)
+		dst := filepath.Join(doneDir, strings.TrimSuffix(name, ".done"))
+		if _, err := os.Stat(dst); err == nil {
+			fmt.Fprintf(os.Stderr, "[警告] done 目录已有同名文件，跳过迁移: %s\n", dst)
+			continue
+		}
+		if err := os.Rename(src, dst); err != nil {
+			fmt.Fprintf(os.Stderr, "[警告] 迁移 .done 标记失败 (%s -> %s): %v\n", src, dst, err)
+			continue
+		}
+		fmt.Printf("[迁移] %s -> %s\n", name, dst)
+	}
+}
+
+// restoreArchivedOnForce moves any doneDir/{base}.pdf / {base}.docx
+// whose basename is not currently in inputDir back into inputDir
+// so --force re-splits from the original source. Same-filename
+// conflicts are skipped (warning logged).
+func restoreArchivedOnForce(inputDir, doneDir string) {
+	if !util.DirExists(doneDir) {
+		return
+	}
+	entries, err := os.ReadDir(doneDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := strings.ToLower(e.Name())
+		if !strings.HasSuffix(name, ".pdf") && !strings.HasSuffix(name, ".docx") {
+			continue
+		}
+		dst := filepath.Join(inputDir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			fmt.Fprintf(os.Stderr, "[警告] input_dir 已有同名文件，跳过恢复: %s\n", dst)
+			continue
+		}
+		src := filepath.Join(doneDir, e.Name())
+		if err := os.Rename(src, dst); err != nil {
+			fmt.Fprintf(os.Stderr, "[警告] 从 done 恢复源文件失败 (%s -> %s): %v\n", src, dst, err)
+			continue
+		}
+		fmt.Printf("[恢复] %s -> %s/\n", e.Name(), filepath.Base(inputDir))
+	}
 }

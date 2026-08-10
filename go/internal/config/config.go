@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -76,6 +77,10 @@ type PathsConfig struct {
 	ImagesDir    string `yaml:"images_dir"`
 	FinallyDir   string `yaml:"finally_dir"`
 	LogsDir      string `yaml:"logs_dir"`
+	// DoneDir is where SplitAll moves source files after they have
+	// been split successfully. Empty string disables archiving.
+	// Default: filepath.Join(InputDir, "done").
+	DoneDir string `yaml:"done_dir"`
 }
 
 // LoadConfig reads the YAML file at path, applies defaults for any
@@ -92,7 +97,34 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	setDefaults(cfg)
+	if err := validatePaths(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// validatePaths enforces cross-field invariants that defaulting
+// alone cannot express. The only rule currently is that DoneDir
+// must not coincide with InputDir — archiving into the same
+// directory would cause the next SplitAll to re-discover the
+// files it just archived.
+func validatePaths(cfg *Config) error {
+	if cfg.Paths.InputDir == "" || cfg.Paths.DoneDir == "" {
+		return nil
+	}
+	inAbs, err := filepath.Abs(cfg.Paths.InputDir)
+	if err != nil {
+		return fmt.Errorf("resolve input_dir: %w", err)
+	}
+	doneAbs, err := filepath.Abs(cfg.Paths.DoneDir)
+	if err != nil {
+		return fmt.Errorf("resolve done_dir: %w", err)
+	}
+	if inAbs == doneAbs {
+		return fmt.Errorf("paths.done_dir (%s) must differ from paths.input_dir (%s)",
+			cfg.Paths.DoneDir, cfg.Paths.InputDir)
+	}
+	return nil
 }
 
 // setDefaults fills in zero-valued fields with the same defaults that the
@@ -213,5 +245,10 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Paths.LogsDir == "" {
 		cfg.Paths.LogsDir = "./logs"
+	}
+	// DoneDir is anchored to the (already defaulted) InputDir so a
+	// typical installation gets files/done out of the box.
+	if cfg.Paths.DoneDir == "" {
+		cfg.Paths.DoneDir = filepath.Join(cfg.Paths.InputDir, "done")
 	}
 }
