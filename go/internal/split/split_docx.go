@@ -413,26 +413,35 @@ func splitBySizeAndPagesDOCX(srcPath string, start, totalElements, maxPages int,
 	return best, nil
 }
 
-// isAlreadySplitDOCX reports whether existingParts together cover the
-// same total paragraph count as the source. It opens each part, reads
-// its body, and counts <w:p> elements; any read error returns false.
-func isAlreadySplitDOCX(existingParts []string, totalParagraphs int) bool {
-	sum := 0
-	for _, p := range existingParts {
-		_, elems, _, err := readDOCXBody(p)
-		if err != nil {
-			return false
-		}
-		sum += countParagraphs(elems)
-	}
-	return sum == totalParagraphs
+// docxManifestPath returns the kind-aware sidecar manifest path for
+// a DOCX source. Defined here rather than inline in SplitDOCX so
+// the read/write helpers and tests can share one source of truth.
+func docxManifestPath(outputDir, baseName string) string {
+	return KindedManifestPath(outputDir, baseName, KindDOCX)
 }
 
-// SplitDOCX splits docxPath into "{base}_partN.docx" files in
-// outputDir, honouring both maxPages and maxSizeMB (0 = no size limit).
+// docxPartsGlob returns the glob pattern for "{base}_part*.docx"
+// files in outputDir. Returned for symmetry with PDF manifest
+// matching; tests use it to confirm a passthrough manifest is
+// written without producing parts.
+func docxPartsGlob(outputDir, baseName string) string {
+	return filepath.Join(outputDir, baseName+"_part*.docx")
+}
+
+// SplitDOCX decides what to do with docxPath by consulting a
+// kind-aware DOCX manifest before doing any work. Outcomes:
 //
-// If existing "{base}_part*.docx" files already account for the source's
-// total paragraph count, the split is skipped (unless force=true).
+//   - manifest hit (mode=split, parts on disk) → skip everything,
+//     return nil.
+//   - manifest hit (mode=passthrough) → skip everything, return
+//     nil (no LibreOffice conversion either).
+//   - manifest miss or --force → compute realPages from Word
+//     metadata. If comfortably under the page limit, write a
+//     passthrough manifest and return. Otherwise convert the
+//     DOCX to PDF and delegate to SplitPDF, then write a
+//     split-mode DOCX manifest sourced from the intermediate
+//     PDF's manifest and remove the intermediate PDF and its
+//     own PDF manifest.
 func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir string, force bool) error {
 	if !util.FileExists(docxPath) {
 		return fmt.Errorf("文件不存在: %s", docxPath)
@@ -441,9 +450,46 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 		return fmt.Errorf("创建输出目录失败: %w", err)
 	}
 
+	src, err := statSource(docxPath)
+	if err != nil {
+		return fmt.Errorf("读取源文件失败: %w", err)
+	}
+	baseName := util.BaseNameNoExt(docxPath)
+	manifestPath := docxManifestPath(outputDir, baseName)
+	displayName := filepath.Base(docxPath)
+
+	// Manifest fast-path. The cache keys on the same identity
+	// (source path / size / mtime) and split parameters as PDF,
+	// so a hit means "we already made a decision about this
+	// file under these parameters".
+	if !force {
+		m, err := LoadManifest(manifestPath)
+		if err == nil {
+			if !m.Matches(MatchParams{
+				SourcePath:  src.Path,
+				SourceSize:  src.Size,
+				SourceMTime: src.MTime,
+				MaxPages:    maxPages,
+				MaxSizeMB:   maxSizeMB,
+			}) {
+				// miss by identity/params — fall through to re-run
+			} else if m.Mode == ModeSplit {
+				// parts are recorded; require every part on disk
+				ok, verr := m.VerifyAgainstDisk(outputDir)
+				if verr == nil && ok {
+					fmt.Printf("[跳过] %s: 命中 DOCX split manifest (%d 个部分)\n",
+						displayName, len(m.Parts))
+					return nil
+				}
+			} else if m.Mode == ModePassthrough {
+				fmt.Printf("[跳过] %s: 命中 DOCX passthrough manifest，无需 LibreOffice\n", displayName)
+				return nil
+			}
+		}
+	}
+
 	// Read page count from Word metadata.
 	realPages := readDOCXPageCount(docxPath)
-	displayName := filepath.Base(docxPath)
 
 	if realPages > 0 {
 		fmt.Printf("[信息] %s: %d 页 (来自 Word 元数据)\n", displayName, realPages)
@@ -456,6 +502,22 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 	// metadata (e.g. Word 137 → MinerU 221). Use 50% as safety margin.
 	safeLimit := maxPages / 2
 	if realPages > 0 && realPages <= safeLimit {
+		fmt.Printf("[信息] %s: 低于 %d 页阈值，记录 passthrough manifest\n",
+			displayName, safeLimit)
+		pm := &Manifest{
+			SchemaVersion: ManifestSchemaVersion,
+			Kind:          KindDOCX,
+			Mode:          ModePassthrough,
+			SourcePath:    src.Path,
+			SourceSize:    src.Size,
+			SourceMTimeNS: src.MTime,
+			MaxPages:      maxPages,
+			MaxSizeMB:     maxSizeMB,
+			Parts:         nil,
+		}
+		if err := WriteManifest(manifestPath, pm); err != nil {
+			fmt.Fprintf(os.Stderr, "[警告] 写入 DOCX passthrough manifest 失败: %v\n", err)
+		}
 		return nil
 	}
 
@@ -469,18 +531,74 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 		return fmt.Errorf("DOCX 转 PDF 失败: %w", err)
 	}
 	fmt.Printf("  [完成] 已转为 PDF: %s\n", filepath.Base(pdfPath))
+
 	// Split the converted PDF using the existing PDF splitter.
-	if err := SplitPDF(pdfPath, maxPages, maxSizeMB, outputDir, force); err != nil {
+	// We always run SplitPDF with force=true here so a stale PDF
+	// manifest from an earlier failed run can't strand us in a
+	// state where the intermediate PDF exists but no parts do.
+	if err := SplitPDF(pdfPath, maxPages, maxSizeMB, outputDir, true); err != nil {
+		// Best-effort cleanup of the intermediate PDF on failure.
+		intermediateBase := util.BaseNameNoExt(pdfPath)
+		CleanupStaleManifests(outputDir, intermediateBase)
+		_ = os.Remove(pdfPath)
 		return err
 	}
-	// Remove the intermediate PDF (only the _part*.pdf files are
-	// needed). SplitPDF may have written a sidecar manifest keyed
-	// on this intermediate PDF; remove it too so the DOCX output
-	// dir doesn't accumulate orphan manifests from deleted
-	// intermediates. This is best-effort and does not affect the
-	// part files.
+
+	// Pull parts metadata from the freshly-written PDF manifest.
 	intermediateBase := util.BaseNameNoExt(pdfPath)
+	pdfManifestPath := ManifestPath(outputDir, intermediateBase)
+	pdfManifest, err := LoadManifest(pdfManifestPath)
+	if err != nil {
+		// If for some reason the PDF manifest is gone (e.g. force
+		// cache miss path was bypassed), still record a DOCX
+		// passthrough manifest so the next run sees "we already
+		// handled this file".
+		fmt.Fprintf(os.Stderr, "[警告] 读取中间 PDF manifest 失败: %v\n", err)
+		dm := &Manifest{
+			SchemaVersion: ManifestSchemaVersion,
+			Kind:          KindDOCX,
+			Mode:          ModePassthrough,
+			SourcePath:    src.Path,
+			SourceSize:    src.Size,
+			SourceMTimeNS: src.MTime,
+			MaxPages:      maxPages,
+			MaxSizeMB:     maxSizeMB,
+			Parts:         nil,
+		}
+		if werr := WriteManifest(manifestPath, dm); werr != nil {
+			fmt.Fprintf(os.Stderr, "[警告] 写入 DOCX passthrough manifest 失败: %v\n", werr)
+		}
+		CleanupStaleManifests(outputDir, intermediateBase)
+		_ = os.Remove(pdfPath)
+		return nil
+	}
+
+	// Write a DOCX manifest sourced from the PDF manifest. Parts
+	// keep their original basename and sizes — they were renamed
+	// during SplitPDF to {base}_partN.pdf but the DOCX manifest
+	// still records them under the DOCX base. Since SplitPDF
+	// keys its manifest on the DOCX basename too (the
+	// intermediate PDF inherits the source's basename), the
+	// recorded parts are {docxBase}_partN.pdf — those are the
+	// files a downstream DOCX-aware consumer should look for.
+	dm := &Manifest{
+		SchemaVersion: ManifestSchemaVersion,
+		Kind:          KindDOCX,
+		Mode:          ModeSplit,
+		SourcePath:    src.Path,
+		SourceSize:    src.Size,
+		SourceMTimeNS: src.MTime,
+		MaxPages:      pdfManifest.MaxPages,
+		MaxSizeMB:     pdfManifest.MaxSizeMB,
+		Parts:         pdfManifest.Parts,
+	}
+	if err := WriteManifest(manifestPath, dm); err != nil {
+		fmt.Fprintf(os.Stderr, "[警告] 写入 DOCX manifest 失败: %v\n", err)
+	}
+
+	// Remove the intermediate PDF and its (default-layout) PDF
+	// manifest. The DOCX manifest above replaces it.
 	CleanupStaleManifests(outputDir, intermediateBase)
-	os.Remove(pdfPath)
+	_ = os.Remove(pdfPath)
 	return nil
 }

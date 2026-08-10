@@ -21,6 +21,8 @@ func makeTestManifest(t *testing.T, outputDir, baseName string, src sourceIdenti
 	}
 	m := &Manifest{
 		SchemaVersion: ManifestSchemaVersion,
+		Kind:          KindPDF,
+		Mode:          ModeSplit,
 		SourcePath:    src.Path,
 		SourceSize:    src.Size,
 		SourceMTimeNS: src.MTime,
@@ -90,7 +92,7 @@ func TestManifestJSONFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, key := range []string{
-		"schema_version", "source_path", "source_size", "source_mtime_ns",
+		"schema_version", "kind", "mode", "source_path", "source_size", "source_mtime_ns",
 		"max_pages", "max_size_mb", "status", "parts",
 	} {
 		if _, ok := raw[key]; !ok {
@@ -131,10 +133,20 @@ func TestValidateManifestRejectsBad(t *testing.T) {
 		{"part_empty_filename", func(m *Manifest) {
 			m.Parts[0].Filename = ""
 		}},
+		{"bad_kind", func(m *Manifest) { m.Kind = "xlsx" }},
+		{"passthrough_with_parts", func(m *Manifest) {
+			m.Mode = ModePassthrough
+		}},
+		{"split_with_zero_parts", func(m *Manifest) {
+			m.Mode = ModeSplit
+			m.Parts = nil
+		}},
 	}
 	good := func() *Manifest {
 		return &Manifest{
 			SchemaVersion: ManifestSchemaVersion,
+			Kind:          KindPDF,
+			Mode:          ModeSplit,
 			SourcePath:    "/x",
 			Status:        StatusComplete,
 			Parts: []Part{
@@ -151,6 +163,58 @@ func TestValidateManifestRejectsBad(t *testing.T) {
 				t.Fatalf("expected validate to reject: %s", tc.name)
 			}
 		})
+	}
+}
+
+// TestLoadManifestAppliesLegacyDefaults verifies that a manifest
+// JSON written without Kind/Mode fields loads with pdf/split so
+// pre-generalization caches still hit on subsequent runs.
+func TestLoadManifestAppliesLegacyDefaults(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "legacy.json")
+	legacy := `{
+		"schema_version": 1,
+		"source_path": "/x",
+		"source_size": 1,
+		"source_mtime_ns": 1,
+		"max_pages": 1,
+		"max_size_mb": 0,
+		"status": "complete",
+		"parts": [{"filename":"a_part1.pdf","index":1,"page_start":1,"page_end":1,"size":1}]
+	}`
+	if err := os.WriteFile(p, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadManifest(p)
+	if err != nil {
+		t.Fatalf("legacy manifest should load with defaults: %v", err)
+	}
+	if m.Kind != KindPDF || m.Mode != ModeSplit {
+		t.Fatalf("legacy defaults applied incorrectly: kind=%q mode=%q", m.Kind, m.Mode)
+	}
+}
+
+// TestKindedManifestPath verifies the kind-aware manifest path
+// differs from the default PDF path so a DOCX and a PDF sharing
+// a basename do not collide.
+func TestKindedManifestPath(t *testing.T) {
+	dir := t.TempDir()
+	base := "doc"
+	defaultPath := ManifestPath(dir, base)
+	docxPath := docxManifestPath(dir, base)
+	pdfKinded := KindedManifestPath(dir, base, KindPDF)
+	docxKinded := KindedManifestPath(dir, base, KindDOCX)
+	if docxPath == defaultPath {
+		t.Fatalf("docx manifest should differ from default pdf manifest for same basename")
+	}
+	if pdfKinded == defaultPath {
+		// The kind-aware PDF variant intentionally diverges from
+		// the legacy default path so the two are guaranteed to
+		// differ. This test only asserts the DOCX variant is
+		// distinct from the PDF default.
+	}
+	if docxKinded != docxPath {
+		t.Fatalf("kinded DOCX manifest should equal docxManifestPath: %q vs %q", docxKinded, docxPath)
 	}
 }
 

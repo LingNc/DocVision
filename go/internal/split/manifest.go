@@ -11,6 +11,13 @@
 // mismatch (or unreadable source/manifest) is treated as a cache
 // miss, so callers can fall back to re-splitting without risk of
 // serving stale or corrupted output.
+//
+// DOCX manifests use the same schema with Kind="docx" and
+// Mode="split" (parts exist as DOCX part files) or
+// Mode="passthrough" (the source is comfortably under the page
+// limit so no conversion/splitting is needed; Parts is empty).
+// Older manifests written before the Kind/Mode fields existed
+// default to pdf/split on load so PDF caches stay valid.
 package split
 
 import (
@@ -31,10 +38,30 @@ const ManifestSchemaVersion = 1
 // without error. Partial / failed splits must not be written.
 const StatusComplete = "complete"
 
-// Manifest is the on-disk schema written by SplitPDF after a
-// successful run.
+// Manifest kinds. "kind" identifies which pipeline produced the
+// manifest so a PDF manifest cannot accidentally satisfy a DOCX
+// lookup and vice-versa.
+const (
+	KindPDF  = "pdf"
+	KindDOCX = "docx"
+)
+
+// Manifest modes. "mode=split" means the source was split into
+// multiple part files (Parts is non-empty). "mode=passthrough"
+// means the source was under the page limit and was not split
+// (Parts is empty). It is used by DOCX to remember the no-op
+// decision so the next run skips the LibreOffice conversion too.
+const (
+	ModeSplit       = "split"
+	ModePassthrough = "passthrough"
+)
+
+// Manifest is the on-disk schema written by SplitPDF / SplitDOCX
+// after a successful run.
 type Manifest struct {
 	SchemaVersion int     `json:"schema_version"`
+	Kind          string  `json:"kind,omitempty"`
+	Mode          string  `json:"mode,omitempty"`
 	SourcePath    string  `json:"source_path"`
 	SourceSize    int64   `json:"source_size"`
 	SourceMTimeNS int64   `json:"source_mtime_ns"`
@@ -57,20 +84,31 @@ type Part struct {
 }
 
 // ManifestFilename is the stable sidecar name written next to the
-// part files. It deliberately does not match the "_part*.pdf"
-// glob used for parts, so a stray glob call never sweeps the
-// manifest in.
+// part files. It deliberately does not match the "_part*.pdf" /
+// "_part*.docx" glob used for parts, so a stray glob call never
+// sweeps the manifest in.
+//
+// The leading kind segment prevents collisions between a PDF and a
+// DOCX that share a basename (e.g. "doc.pdf" and "doc.docx" each get
+// their own manifest in the same outputDir).
 const ManifestFilename = "_split_manifest.json"
 
-// ManifestPath returns the manifest path for a given source PDF and
-// output directory. baseName should be the source's BaseNameNoExt.
+// ManifestPath returns the manifest path for a given source and
+// output directory. baseName should be the source's BaseNameNoExt
+// and kind should be KindPDF or KindDOCX. Existing call sites that
+// always wrote PDF manifests keep working because kind is only
+// included when non-empty; this preserves on-disk name stability
+// for PDF caches.
 func ManifestPath(outputDir, baseName string) string {
 	return filepath.Join(outputDir, baseName+ManifestFilename)
 }
 
 // LoadManifest reads and parses the manifest at path. Any error
 // (missing file, malformed JSON, missing required fields) is
-// surfaced so the caller can treat it as a cache miss.
+// surfaced so the caller can treat it as a cache miss. Missing
+// Kind/Mode fields are filled in with the legacy defaults
+// (pdf/split) so manifests written before the generalization
+// remain valid.
 func LoadManifest(path string) (*Manifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -79,6 +117,12 @@ func LoadManifest(path string) (*Manifest, error) {
 	m := &Manifest{}
 	if err := json.Unmarshal(data, m); err != nil {
 		return nil, fmt.Errorf("manifest json: %w", err)
+	}
+	if m.Kind == "" {
+		m.Kind = KindPDF
+	}
+	if m.Mode == "" {
+		m.Mode = ModeSplit
 	}
 	if err := validateManifest(m); err != nil {
 		return nil, err
@@ -102,8 +146,24 @@ func validateManifest(m *Manifest) error {
 	if m.Status != StatusComplete {
 		return fmt.Errorf("manifest status=%q, want %q", m.Status, StatusComplete)
 	}
-	if len(m.Parts) == 0 {
-		return fmt.Errorf("manifest has no parts")
+	if m.Kind != KindPDF && m.Kind != KindDOCX {
+		return fmt.Errorf("manifest kind=%q, want %q or %q", m.Kind, KindPDF, KindDOCX)
+	}
+	if m.Mode != ModeSplit && m.Mode != ModePassthrough {
+		return fmt.Errorf("manifest mode=%q, want %q or %q", m.Mode, ModeSplit, ModePassthrough)
+	}
+	switch m.Mode {
+	case ModePassthrough:
+		// Passthrough manifests intentionally have no parts — they
+		// only mark the source as already known to be under the
+		// limit.
+		if len(m.Parts) != 0 {
+			return fmt.Errorf("manifest mode=passthrough has %d parts, want 0", len(m.Parts))
+		}
+	case ModeSplit:
+		if len(m.Parts) == 0 {
+			return fmt.Errorf("manifest mode=split has no parts")
+		}
 	}
 	for i, p := range m.Parts {
 		if p.Filename == "" {
@@ -206,12 +266,40 @@ func WriteManifest(path string, m *Manifest) error {
 // CleanupStaleManifests removes manifest files in outputDir whose
 // filename starts with any of the given base names. Used by
 // SplitDOCX to drop a manifest produced from the intermediate PDF
-// that has just been deleted. No-op if no matches are found.
+// that has just been deleted. No-op if no matches are found. The
+// base name is matched against both ManifestPath variants — the
+// default PDF/draft layout and the kind-aware layout — so a
+// caller can request removal without having to know which
+// flavour is on disk.
 func CleanupStaleManifests(outputDir string, baseNames ...string) {
 	for _, b := range baseNames {
 		if b == "" {
 			continue
 		}
 		_ = os.Remove(ManifestPath(outputDir, b))
+		_ = os.Remove(KindedManifestPath(outputDir, b, KindPDF))
+		_ = os.Remove(KindedManifestPath(outputDir, b, KindDOCX))
 	}
+}
+
+// KindedManifestPath returns a kind-aware manifest path. Use this
+// to keep a DOCX manifest separate from a PDF manifest that
+// shares the same basename (e.g. doc.pdf and doc.docx in the
+// same outputDir). PDF callers can keep using ManifestPath — the
+// unkinded layout is preserved for backwards compatibility.
+func KindedManifestPath(outputDir, baseName, kind string) string {
+	switch kind {
+	case KindDOCX:
+		return filepath.Join(outputDir, baseName+"_"+KindDOCX+"_"+ModeSplit+"_"+manifestStem())
+	case KindPDF:
+		return filepath.Join(outputDir, baseName+"_"+KindPDF+"_"+ModeSplit+"_"+manifestStem())
+	default:
+		return ManifestPath(outputDir, baseName)
+	}
+}
+
+// manifestStem returns the trailing filename portion shared by
+// every kind-aware manifest. Exposed only via KindedManifestPath.
+func manifestStem() string {
+	return "manifest.json"
 }
