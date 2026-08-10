@@ -33,14 +33,16 @@ type RunOptions struct {
 	Quiet    bool // when true, suppress verbose output; show only progress percentages
 }
 
-// imageTask is the per-image work item collected by Run.
+// imageTask is one image's work item. A task may cover multiple byte
+// ranges inside the same markdown file when the source document
+// references the same image more than once; only one AI call is made per
+// task and every range gets the same final result.
 type imageTask struct {
 	key     string // "<mdName>::<imgPath>"
 	mdName  string
 	imgPath string
-	lineIdx int
-	start   int
-	end     int
+	lineIdx int          // line index for the first offset (used by ProcessOneImage context)
+	offsets []OffsetPair // all occurrences of this image in mdName, sorted ascending
 }
 
 // mdEntry caches the per-file line table for one markdown file.
@@ -51,13 +53,16 @@ type mdEntry struct {
 	starts  []int // cumulative line starts, len = len(lines)+1
 }
 
-// runResult is what workers push to the writer goroutine.
+// runResult is what workers push to the writer goroutine. The result
+// carries every offset for the task (typically one, but possibly many
+// when the same image was referenced more than once in the source
+// markdown). Worker writes always replace the first offset's Start/End
+// with the legacy fields so older readers still see a sensible value.
 type runResult struct {
 	key     string
 	result  string
-	start   int
-	end     int
 	imgPath string
+	offsets []OffsetPair
 	isError bool // true if the result is an error sentinel
 }
 
@@ -129,7 +134,13 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 	}
 
 	mdCache := map[string]mdEntry{}
-	var allTasks []imageTask
+	// tasksByKey deduplicates references: when the same image appears
+	// more than once inside the same markdown we want a single AI call,
+	// but every reference must still be replaced in the final output.
+	tasksByKey := map[string]*imageTask{}
+	// refCount reports the total number of image references across all
+	// md files; used purely for logging "Total images available:".
+	refCount := 0
 	for _, mdf := range mdFiles {
 		data, err := os.ReadFile(mdf)
 		if err != nil {
@@ -151,21 +162,33 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 			starts:  starts,
 		}
 		matches := imageRefRe.FindAllStringSubmatchIndex(content, -1)
+		refCount += len(matches)
 		logger.Log(0, "  ", name+":", strconv.Itoa(len(matches)), "images")
 		for _, m := range matches {
 			imgPath := content[m[2]:m[3]]
+			off := OffsetPair{Start: m[0], End: m[1]}
+			key := name + "::" + imgPath
+			if t, ok := tasksByKey[key]; ok {
+				t.offsets = append(t.offsets, off)
+				continue
+			}
 			il := findLineIndex(starts, m[0])
-			allTasks = append(allTasks, imageTask{
-				key:     name + "::" + imgPath,
+			tasksByKey[key] = &imageTask{
+				key:     key,
 				mdName:  name,
 				imgPath: imgPath,
 				lineIdx: il,
-				start:   m[0],
-				end:     m[1],
-			})
+				offsets: []OffsetPair{off},
+			}
 		}
 	}
-	logger.Log(0, "Total images available:", strconv.Itoa(len(allTasks)))
+	allTasks := make([]imageTask, 0, len(tasksByKey))
+	for _, t := range tasksByKey {
+		sort.Slice(t.offsets, func(i, j int) bool { return t.offsets[i].Start < t.offsets[j].Start })
+		allTasks = append(allTasks, *t)
+	}
+	logger.Log(0, "Total images available:", strconv.Itoa(refCount),
+		"| Unique tasks:", strconv.Itoa(len(allTasks)))
 
 	remaining := make([]imageTask, 0, len(allTasks))
 	for _, t := range allTasks {
@@ -220,7 +243,29 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		}
 	}
 
-	// Final pass: rewrite each *.md with the [AI] blocks.
+	// Final pass: rewrite each *.md with the [AI] blocks. Merge the
+	// history recorded on disk with the work we just produced this run so
+	// the rebuild survives "all done, nothing to process" cases (e.g. the
+	// finally file was deleted but progress_items is intact).
+	historyItems := LoadProgressItems(progressRoot)
+	historyByKey := make(map[string]ProgressItem, len(historyItems))
+	for _, it := range historyItems {
+		historyByKey[it.Key] = it
+	}
+	progressMu.Lock()
+	for k, v := range progressData {
+		if !v.isError && strings.Contains(v.result, "[IMG_TYPE:") {
+			item := ProgressItem{
+				Key:     k,
+				Result:  v.result,
+				ImgPath: v.imgPath,
+			}
+			item.SetOffsets(v.offsets)
+			historyByKey[k] = item
+		}
+	}
+	progressMu.Unlock()
+
 	logger.Log(0, "\nWriting final files...")
 	for _, mdf := range mdFiles {
 		name := filepath.Base(mdf)
@@ -228,16 +273,37 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		if !ok {
 			continue
 		}
-		progressMu.Lock()
-		var reps []runResult
-		for k, v := range progressData {
-			if strings.HasPrefix(k, name+"::") {
-				reps = append(reps, v)
+
+		// Collect every successful item belonging to this markdown. We
+		// restrict to the current markdown content so stale offsets from
+		// a previous version of the file do not silently corrupt it. We
+		// also re-check that the image path at each recorded offset still
+		// matches the one this item was generated for; otherwise the
+		// cached AI answer is for the wrong image and must be discarded
+		// so the current run can reprocess it.
+		type rep struct {
+			off  OffsetPair
+			item ProgressItem
+		}
+		var reps []rep
+		for k, it := range historyByKey {
+			parts := strings.SplitN(k, "::", 2)
+			if len(parts) != 2 || parts[0] != name {
+				continue
+			}
+			expected := expectedImgPath(it, parts[1])
+			if expected == "" {
+				// Cannot establish which image this item is for; keep
+				// the legacy "offset still matches an image ref" check
+				// but skip the path-equality guard. This mirrors the
+				// conservative contract requested by the audit.
+				expected = ""
+			}
+			valid := validateOffsetsWithPath(entry.content, it.EffectiveOffsets(), expected)
+			for _, o := range valid {
+				reps = append(reps, rep{off: o, item: it})
 			}
 		}
-		progressMu.Unlock()
-		// Process replacements right-to-left so byte offsets stay valid.
-		sort.Slice(reps, func(i, j int) bool { return reps[i].start > reps[j].start })
 
 		outPath := filepath.Join(finallyDir, name)
 		if len(reps) == 0 {
@@ -248,11 +314,14 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 			}
 			continue
 		}
+		// Process replacements right-to-left so byte offsets stay valid.
+		sort.Slice(reps, func(i, j int) bool { return reps[i].off.Start > reps[j].off.Start })
+
 		nc := entry.content
 		for _, r := range reps {
-			block := "\n\n<!-- IMG: " + r.imgPath + " -->\n[AI] " +
-				r.result + "\n\n<!-- /IMG -->\n\n"
-			nc = nc[:r.start] + block + nc[r.end:]
+			block := "\n\n<!-- IMG: " + r.item.ImgPath + " -->\n[AI] " +
+				r.item.Result + "\n\n<!-- /IMG -->\n\n"
+			nc = nc[:r.off.Start] + block + nc[r.off.End:]
 		}
 		if err := os.WriteFile(outPath, []byte(nc), 0o644); err != nil {
 			logger.LogError(0, "  [", name, "] write failed:", err)
@@ -328,10 +397,9 @@ func runWorkers(
 			item := ProgressItem{
 				Key:     r.key,
 				Result:  r.result,
-				Start:   r.start,
-				End:     r.end,
 				ImgPath: r.imgPath,
 			}
+			item.SetOffsets(r.offsets)
 			if err := SaveProgressItem(progressRoot, mdName, imgRel, item); err != nil {
 				logger.LogError(0, "save progress failed:", err)
 			}
@@ -394,8 +462,11 @@ func runWorkers(
 			}()
 			entry, ok := mdCache[tt.mdName]
 			if !ok {
-				results <- runResult{tt.key, "[IMG_WORKER_FATAL: md missing]",
-					tt.start, tt.end, tt.imgPath, true}
+				results <- runResult{key: tt.key,
+					result:  "[IMG_WORKER_FATAL: md missing]",
+					imgPath: tt.imgPath,
+					offsets: tt.offsets,
+					isError: true}
 				return
 			}
 			r, status := ProcessOneImage(
@@ -419,7 +490,11 @@ func runWorkers(
 					r = "__INVALID_RESPONSE__"
 				}
 			}
-			results <- runResult{tt.key, r, tt.start, tt.end, tt.imgPath, isErr}
+			results <- runResult{key: tt.key,
+				result:  r,
+				imgPath: tt.imgPath,
+				offsets: tt.offsets,
+				isError: isErr}
 		}(t)
 	}
 
@@ -428,6 +503,97 @@ func runWorkers(
 	// close(results) signals the writer goroutine to exit on its next
 	// range iteration; wg.Wait above guarantees no new sends are pending.
 	writerWG.Wait()
+}
+
+// expectedImgPath returns the image path that a historical record was
+// generated for. ImgPath is preferred because it is the authoritative
+// field written by SaveProgressItem; the key suffix is used as a fallback
+// for legacy JSON that omits img_path. When neither source yields a
+// usable value, expectedImgPath returns "" so the caller can take the
+// conservative "skip path-equality guard" branch.
+func expectedImgPath(it ProgressItem, keySuffix string) string {
+	if it.ImgPath != "" {
+		return it.ImgPath
+	}
+	return keySuffix
+}
+
+// imagePathAtOffset extracts the image path captured by imageRefRe at the
+// given [start, end) range. It returns "" if the range is out of bounds
+// or the substring there is not a complete image reference (we want to
+// keep the same single-pass behaviour as validateOffsets, so the path
+// check piggybacks on the regex match).
+func imagePathAtOffset(content string, off OffsetPair) string {
+	if off.Start < 0 || off.End > len(content) || off.Start >= off.End {
+		return ""
+	}
+	m := imageRefRe.FindStringSubmatchIndex(content[off.Start:off.End])
+	if m == nil {
+		return ""
+	}
+	// m[2], m[3] are relative to the substring; translate back to content.
+	return content[off.Start+m[2] : off.Start+m[3]]
+}
+
+// validateOffsets returns the subset of offsets that still correspond
+// to image references inside content. An offset is considered valid when
+// the byte range is in bounds AND the substring there matches the
+// shared image reference pattern (i.e. it is still an
+// ![...](images/...) markdown image). Offsets that fail this check are
+// silently dropped so a markdown edit that shifted or removed an image
+// reference cannot corrupt the rebuilt file.
+func validateOffsets(content string, offsets []OffsetPair) []OffsetPair {
+	if len(offsets) == 0 {
+		return nil
+	}
+	out := make([]OffsetPair, 0, len(offsets))
+	for _, o := range offsets {
+		if o.Start < 0 || o.End > len(content) || o.Start >= o.End {
+			continue
+		}
+		sub := content[o.Start:o.End]
+		if !strings.HasPrefix(sub, "![") {
+			continue
+		}
+		if !strings.HasSuffix(sub, ")") {
+			continue
+		}
+		// Verify the substring really is an image reference; this catches
+		// the case where the markdown has been edited at that byte range
+		// (token mismatch) so we cannot safely replace it.
+		if imageRefRe.FindStringIndex(sub) == nil {
+			continue
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+// validateOffsetsWithPath is validateOffsets plus an extra guard: each
+// surviving offset must reference the expectedPath image. When
+// expectedPath is "" the path check is skipped (conservative behaviour
+// for legacy records we cannot attribute to any specific image).
+//
+// This catches the case where a user renamed images/a.jpg to
+// images/b.jpg at the same byte range; the offset would otherwise still
+// pass the regex check and silently rewrite unrelated content with the
+// cached AI answer for the original image.
+func validateOffsetsWithPath(content string, offsets []OffsetPair, expectedPath string) []OffsetPair {
+	if len(offsets) == 0 {
+		return nil
+	}
+	base := validateOffsets(content, offsets)
+	if expectedPath == "" {
+		return base
+	}
+	out := make([]OffsetPair, 0, len(base))
+	for _, o := range base {
+		if imagePathAtOffset(content, o) != expectedPath {
+			continue
+		}
+		out = append(out, o)
+	}
+	return out
 }
 
 // findLineIndex returns the line index (0-based) that contains the byte
