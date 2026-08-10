@@ -600,7 +600,7 @@ func resolveImageFile(imagesDir, imgPath string) (string, error) {
 		rel = imgPath[i+1:]
 	}
 	full := filepath.Join(imagesDir, rel)
-	if _, err := os.Open(full); err != nil {
+	if _, err := os.Stat(full); err != nil {
 		return "", err
 	}
 	return full, nil

@@ -319,7 +319,10 @@ func runMinerUFromConfig(cmd *cobra.Command, cfg *config.Config) error {
 
 	client := mineru.NewClient(cfg.Mineru)
 	statusDir := filepath.Join(cfg.Paths.MineruOutput, "status")
-	_, _, _ = mineru.ProcessFilesConcurrent(client, files, cfg.Paths.MineruOutput, statusDir, cfg.Mineru.MaxConcurrent)
+	_, _, failN := mineru.ProcessFilesConcurrent(client, files, cfg.Paths.MineruOutput, statusDir, cfg.Mineru.MaxConcurrent)
+	if failN > 0 {
+		return fmt.Errorf("mineru: %d 个文件处理失败", failN)
+	}
 	return nil
 }
 

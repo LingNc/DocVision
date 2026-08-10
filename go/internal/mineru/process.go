@@ -68,7 +68,7 @@ func ProcessSingleFile(client *MinerUClient, filePath, outputDir, statusDir stri
 	if info, ok := loadInfo(); ok {
 		if info.Status == "done" {
 			folder := filepath.Join(outputDir, stem)
-			if util.DirExists(folder) && hasAnyFile(folder) {
+			if util.DirExists(folder) && hasCoreOutput(folder) {
 				consolePrintf("[%s] [跳过] 已完成\n", fileName)
 				return fileName, TaskSkip
 			}
@@ -83,17 +83,20 @@ func ProcessSingleFile(client *MinerUClient, filePath, outputDir, statusDir stri
 			valid, item := client.CheckOldTaskValid(info.BatchID)
 			if valid {
 				// Server reports the task is already done — short-circuit
-				// straight to download. This handles the case where a
-				// previous run timed out after the server finished.
+				// straight to download. The download/extract must succeed
+				// before we promote the on-disk state to "done"; otherwise
+				// the next run must be able to retry, so we leave status
+				// as "running".
 				if item != nil && item.State == "done" {
 					zipURL := item.FullZipURL
 					if zipURL != "" {
+						if err := client.DownloadAndExtract(fileName, zipURL, outputDir, info.OutputFolder); err != nil {
+							consolePrintf("[%s] 恢复下载失败: %v\n", fileName, err)
+							return fileName, TaskFail
+						}
 						info.Status = "done"
 						if err := util.AtomicWriteJSON(jsonPath, info); err != nil {
 							consolePrintf("[%s] 写入任务状态失败: %v\n", fileName, err)
-						}
-						if err := client.DownloadAndExtract(fileName, zipURL, outputDir, info.OutputFolder); err != nil {
-							return fileName, TaskFail
 						}
 						consolePrintf("[%s] ✓ 恢复并下载完成\n", fileName)
 						return fileName, TaskDone
@@ -153,13 +156,35 @@ func ProcessSingleFile(client *MinerUClient, filePath, outputDir, statusDir stri
 
 // hasAnyFile reports whether dir contains at least one entry. The
 // Python reference uses `any(output_folder.iterdir())` which is true
-// for any entry, including subdirectories.
+// for any entry, including subdirectories. It is kept for callers that
+// only care about the directory being non-empty.
 func hasAnyFile(dir string) bool {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false
 	}
 	return len(entries) > 0
+}
+
+// coreOutputFile is the relative path of the canonical MinerU result
+// document that must exist for an output folder to be considered
+// "really done". full.md is the consolidated Markdown produced by
+// MinerU; it is always written when the task succeeds. We deliberately
+// avoid the "any entry present" heuristic from the Python reference
+// because a partially extracted zip can leave stray directories
+// (e.g. an empty images/) that would otherwise be mistaken for
+// completion.
+const coreOutputFile = "full.md"
+
+// hasCoreOutput reports whether dir contains the canonical MinerU
+// output file and that file is non-empty.
+func hasCoreOutput(dir string) bool {
+	path := filepath.Join(dir, coreOutputFile)
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir() && info.Size() > 0
 }
 
 // ProcessFilesConcurrent runs ProcessSingleFile across files with at
