@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"mineru-tools/internal/logfind"
 )
 
 // imageMDRef matches markdown image references to image files.
@@ -154,7 +156,10 @@ func PrintProgressReport(inputDir, progressRoot, finallyDir string) {
 	}
 
 	// Quality rate from log ERROR/WARNING
-	logs := findAllLogs(finallyDir)
+	logs, err := logfind.FindAll(finallyDir)
+	if err != nil {
+		logs = nil
+	}
 	if len(logs) > 0 && completed > 0 {
 		problemSet := map[string]struct{}{}
 		for _, lf := range logs {
@@ -182,11 +187,4 @@ func PrintProgressReport(inputDir, progressRoot, finallyDir string) {
 		fmt.Println("\n【良品率】")
 		fmt.Printf("  无错误/警告: %d/%d (%.2f%%)\n", good, completed, rate)
 	}
-}
-
-// findAllLogs returns every img2text_*.log file under logDir sorted by mtime.
-func findAllLogs(logDir string) []string {
-	matches, _ := filepath.Glob(filepath.Join(logDir, "img2text_*.log"))
-	sort.Strings(matches)
-	return matches
 }

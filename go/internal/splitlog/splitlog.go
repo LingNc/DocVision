@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/logfind"
 )
 
 // threadPat matches the leading "[HH:MM:SS][Txx]" prefix on a log line.
@@ -23,27 +24,7 @@ var threadPat = regexp.MustCompile(`^\[.*?\]\[(T\d+)\]`)
 // logDir. Files are sorted by name in descending order, so the lexicographically
 // largest filename (which embeds a timestamp) is returned.
 func FindLatestLog(logDir string) (string, error) {
-	entries, err := os.ReadDir(logDir)
-	if err != nil {
-		return "", fmt.Errorf("read log dir %s: %w", logDir, err)
-	}
-
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if strings.HasPrefix(name, "img2text_") && strings.HasSuffix(name, ".log") {
-			names = append(names, name)
-		}
-	}
-	if len(names) == 0 {
-		return "", fmt.Errorf("no img2text_*.log found in %s", logDir)
-	}
-
-	sort.Sort(sort.Reverse(sort.StringSlice(names)))
-	return filepath.Join(logDir, names[0]), nil
+	return logfind.FindLatest(logDir)
 }
 
 // SplitLogByThread reads the log file at logPath, groups lines by their

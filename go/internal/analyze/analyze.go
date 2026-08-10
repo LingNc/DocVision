@@ -2,12 +2,11 @@ package analyze
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/logfind"
 )
 
 // RunOptions configures the analyze command.
@@ -85,36 +84,18 @@ func resolveLogPaths(opts RunOptions, finallyDir string) ([]string, error) {
 		return []string{opts.LogFile}, nil
 	}
 	if opts.All {
-		paths := findAllLogs(finallyDir)
-		if len(paths) == 0 {
-			return nil, fmt.Errorf("未找到任何日志文件")
+		paths, err := logfind.FindAll(finallyDir)
+		if err != nil {
+			return nil, err
 		}
 		fmt.Printf("找到 %d 个日志文件\n", len(paths))
 		return paths, nil
 	}
-	latest := findLatestLog(finallyDir)
-	if latest == "" {
-		return nil, fmt.Errorf("未找到日志文件")
+	latest, err := logfind.FindLatest(finallyDir)
+	if err != nil {
+		return nil, err
 	}
 	return []string{latest}, nil
-}
-
-// findLatestLog returns the path of the newest img2text_*.log under dir.
-func findLatestLog(dir string) string {
-	matches, _ := filepath.Glob(filepath.Join(dir, "img2text_*.log"))
-	if len(matches) == 0 {
-		return ""
-	}
-	// Sort by modification time, newest first.
-	sort.Slice(matches, func(i, j int) bool {
-		ai, _ := os.Stat(matches[i])
-		aj, _ := os.Stat(matches[j])
-		if ai == nil || aj == nil {
-			return false
-		}
-		return ai.ModTime().After(aj.ModTime())
-	})
-	return matches[0]
 }
 
 // printProgressFooter prints the brief "总计/已完成/无效/剩余" line.
