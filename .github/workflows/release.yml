@@ -36,9 +36,27 @@ jobs:
         working-directory: go
         run: make release VERSION=${{ env.VERSION }}
 
+      - name: Extract changelog section for this version
+        run: |
+          set -euo pipefail
+          # Extract the "## [<VERSION>]" section from CHANGELOG.md until the next "## [".
+          # VERSION looks like v1.2.0; the brackets in awk regex need escaping.
+          awk -v ver="$VERSION" '
+            BEGIN { capture = 0 }
+            {
+              if (capture == 0 && $0 ~ "^## \\[" ver "\\]") { capture = 1; print; next }
+              if (capture == 1 && $0 ~ "^## \\[") { capture = 0; next }
+              if (capture == 1) { print }
+            }
+          ' CHANGELOG.md > /tmp/release_body.md
+          if [ ! -s /tmp/release_body.md ]; then
+            echo "::warning::No changelog section found for ${VERSION}; falling back to full CHANGELOG.md."
+            cp CHANGELOG.md /tmp/release_body.md
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body_path: CHANGELOG.md
+          body_path: /tmp/release_body.md
           files: go/release/*
           generate_release_notes: false
