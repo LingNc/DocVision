@@ -461,17 +461,96 @@ func decideMermaidAction(v MermaidValidationResult, mode string) mermaidAction {
 	return mermaidAction{kind: actionRepair, reason: v.Error}
 }
 
+// mermaidErrorStackCap is the byte budget applied to the mmdc error
+// string before it is inlined into the Mermaid repair prompt. The
+// previous behaviour truncated to 16384 bytes; sanitizeMermaidError
+// keeps that contract as a safety net while also stripping the
+// puppeteer internals that pad every mmdc failure with hundreds of
+// unhelpful stack frames.
+const mermaidErrorStackCap = 16384
+
+// mermaidErrorCutMarkers are the substrings we look for in the
+// post-"Error:" summary to decide where the useful error ends and the
+// runtime/puppeteer stack begins. The first match wins; when neither
+// is present we keep the whole summary.
+var mermaidErrorCutMarkers = []string{
+	"Parser.parseError",
+	"\n    at ",
+}
+
+// sanitizeMermaidError turns a noisy mmdc / ValidateMermaid error
+// string into a compact, model-friendly summary that can be safely
+// embedded in the Mermaid repair prompt.
+//
+// The input format is something like:
+//
+//	Generating single mermaid chart
+//
+//	block 1: Error: Parse error on line 17:
+//	... end    Cup1 -->|P(A) = 3/5| Cup2
+//	---------------------^
+//	Expecting 'SQE', 'DOUBLECIRCLEEND', ... got 'PS'
+//	Parser.parseError (https://mermaid-cli-intercept.invalid/.../node_modules/...)
+//	    at #evaluate (...)
+//	    at processTicksAndRejections (...)
+//	    ... (hundreds of puppeteer frames)
+//
+// The only lines that actually help the model are the "Error:" line,
+// the caret underline, and the "Expecting ... got ..." line; everything
+// from "Parser.parseError" (or, when missing, the first `\n    at `)
+// downwards is puppeteer internals and is dropped. The "block N: "
+// wrapper added by ValidateMermaid and the "Generating single mermaid
+// chart" preamble are also removed by anchoring the summary at the
+// first "Error:" (case-insensitive). When no "Error:" is present we
+// keep the trimmed input verbatim.
+//
+// The result is finally trimmed and bounded by mermaidErrorStackCap
+// bytes (with a trailing "...") so the prompt stays capped even on
+// inputs that lack any stack marker.
+func sanitizeMermaidError(msg string) string {
+	trimmed := strings.TrimSpace(msg)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	summary := trimmed
+	if idx := strings.Index(lower, "error:"); idx >= 0 {
+		// Drop "block N: " (added by ValidateMermaid) and any
+		// "Generating single mermaid chart" preamble in one shot
+		// by anchoring at the first "Error:" occurrence.
+		summary = trimmed[idx:]
+	}
+	// Truncate at the first stack marker. We only scan the summary
+	// we just extracted, so words like "Error: ...catch" that appear
+	// in the useful lines are not mistaken for a stack frame.
+	cut := -1
+	for _, marker := range mermaidErrorCutMarkers {
+		if i := strings.Index(summary, marker); i >= 0 {
+			if cut == -1 || i < cut {
+				cut = i
+			}
+		}
+	}
+	if cut > 0 {
+		summary = summary[:cut]
+	}
+	summary = strings.TrimSpace(summary)
+	if len(summary) > mermaidErrorStackCap {
+		summary = summary[:mermaidErrorStackCap] + "..."
+	}
+	return summary
+}
+
 // buildMermaidRepairMessage returns the user-turn prompt that asks the
 // model to fix its previous Mermaid syntax. We deliberately do NOT
 // inline the full previous response — it is already part of the
 // conversation, so duplicating it would balloon the request without
-// adding information. The mmdc error is quoted inline (truncated to
-// ~4KB) so the model can target the failing construct.
+// adding information. The mmdc error is sanitised (stack frames and
+// the "block N: " wrapper stripped) and quoted inline (truncated to
+// ~16KB) so the model can target the failing construct without being
+// distracted by hundreds of puppeteer frames.
 func buildMermaidRepairMessage(currentResult, validationError string) string {
-	trimmedError := strings.TrimSpace(validationError)
-	if len(trimmedError) > 4096 {
-		trimmedError = trimmedError[:4096] + "..."
-	}
+	trimmedError := sanitizeMermaidError(validationError)
 	return strings.Join([]string{
 		"Your previous response contains invalid Mermaid syntax. Fix only the Mermaid syntax.",
 		"Validator output: " + trimmedError,
