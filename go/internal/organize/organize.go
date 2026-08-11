@@ -43,7 +43,7 @@ const mdSeparator = "\n\n---\n\n"
 // full.md files contributed to a given output subject. Keeping a sidecar
 // alongside the merged Markdown lets later runs skip regeneration when
 // the source content is unchanged.
-const fingerprintExt = ".md.fp"
+const fingerprintExt = ".fp"
 
 // indexScanCounter is a package-level counter incremented every time
 // step3CollectImages actually builds the source image index in a given
@@ -647,7 +647,7 @@ func listMarkdown(dir string) []string {
 }
 
 // listOutputMarkdown lists the merged Markdown files in outputDir,
-// excluding the .md.fp fingerprint sidecars.
+// excluding the .fp fingerprint sidecars.
 func listOutputMarkdown(dir string) []string {
 	if !util.DirExists(dir) {
 		return nil
