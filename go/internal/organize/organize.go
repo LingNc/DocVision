@@ -339,15 +339,18 @@ func step3CollectImages(allDirs []string, outputDir, imagesDir string) error {
 		}
 
 		if !needsIndex {
-			// All referenced images are already present locally. The
-			// earlier run that populated this subject already normalised
-			// its Markdown paths, so a second run must NOT rewrite the
-			// md. The previous token scanner truncated subject names
-			// containing spaces (e.g. "foo (1)") and re-prefixed the
-			// half-token on every rerun, producing
-			// images/<subject>/<subject>/file.jpg chains that broke
-			// img2text. Skipping the rewrite here keeps the file on
-			// its canonical form.
+			// All referenced images are already present locally, so no
+			// copy work is needed. Still apply the idempotent rewrite: a
+			// rerun may have regenerated this markdown from the MinerU
+			// source (which carries bare "images/foo.ext" paths), and if
+			// we skip the rewrite those bare references survive and make
+			// img2text fail with IMG_MISSING. rewriteImagePaths is strict
+			// and idempotent: it only prefixes bare filenames and leaves
+			// already-prefixed paths alone, so it cannot double-prefix
+			// (including subjects that contain spaces/parentheses).
+			if err := rewriteImagePaths(mdFile, content, subject); err != nil {
+				return err
+			}
 			skipSubject++
 			continue
 		}

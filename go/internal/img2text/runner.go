@@ -469,8 +469,9 @@ func runWorkers(
 					isError: true}
 				return
 			}
+			subject := strings.TrimSuffix(tt.mdName, filepath.Ext(tt.mdName))
 			r, status := ProcessOneImage(
-				client, imagesDir, tt.imgPath,
+				client, imagesDir, tt.imgPath, subject,
 				entry.lines, tt.lineIdx,
 				logger, tid, opts,
 			)

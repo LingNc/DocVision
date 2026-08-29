@@ -707,14 +707,14 @@ func containsAny(s string, subs ...string) bool {
 // tuple matching the Python reference.
 func ProcessOneImage(
 	client *AIClient,
-	imagesDir, imgPath string,
+	imagesDir, imgPath, subject string,
 	lines []string,
 	imgLineIdx int,
 	logger *logger.Logger,
 	tid int,
 	opts config.OptionsConfig,
 ) (string, string) {
-	imgFile, err := resolveImageFile(imagesDir, imgPath)
+	imgFile, err := resolveImageFile(imagesDir, imgPath, subject)
 	if err != nil {
 		return fmt.Sprintf("[IMG_MISSING: %s]", imgPath), StatusError
 	}
@@ -817,14 +817,28 @@ func ProcessOneImage(
 // resolveImageFile maps an "images/..." reference from the markdown into
 // an absolute path under imagesDir. The Python reference splits the path
 // on the first "/" and joins with images_dir; we mirror that semantics.
-func resolveImageFile(imagesDir, imgPath string) (string, error) {
+func resolveImageFile(imagesDir, imgPath, subject string) (string, error) {
 	rel := imgPath
 	if i := strings.Index(imgPath, "/"); i >= 0 {
 		rel = imgPath[i+1:]
 	}
-	full := filepath.Join(imagesDir, rel)
-	if _, err := os.Stat(full); err != nil {
-		return "", err
+	if full := filepath.Join(imagesDir, rel); pathExists(full) {
+		return full, nil
 	}
-	return full, nil
+	// Fallback: the markdown may reference a bare "images/foo.jpg" while
+	// the collected images live under images/<subject>/foo.jpg. This
+	// happens when organize's incremental path kept an unnormalised
+	// markdown on a rerun (see organize.step3CollectImages).
+	if subject != "" {
+		if alt := filepath.Join(imagesDir, subject, filepath.Base(imgPath)); pathExists(alt) {
+			return alt, nil
+		}
+	}
+	return "", os.ErrNotExist
+}
+
+// pathExists reports whether p exists on disk.
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
