@@ -26,7 +26,7 @@ var partRe = regexp.MustCompile(`^(.+?)_part(\d+)$`)
 // imgRe matches markdown image references of the form
 // ![alt](images/foo.jpg) where the extension is jpg/jpeg/png/gif/webp.
 // Group 1 captures "images/foo.ext".
-var imgRe = regexp.MustCompile(`!\[.*?\]\((images/.+?\.(?:jpg|jpeg|png|gif|webp))\)`)
+var imgRe = regexp.MustCompile(`(?i)(?:!\[.*?\]\(|<img[^>]*?src=["'])(images/.+?\.(?:jpg|jpeg|png|gif|webp))(?:\)|["'][^>]*>)`)
 
 // supportedExts is the set of image extensions recognised by step3.
 var supportedExts = map[string]bool{

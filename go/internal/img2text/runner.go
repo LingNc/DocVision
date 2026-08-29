@@ -21,7 +21,7 @@ import (
 // imageRefRe is the regex used to find markdown image references. It
 // matches `![alt](images/...jpg|jpeg|png|gif|webp)` and is the same
 // pattern used by the analyze package, kept here for self-containment.
-var imageRefRe = regexp.MustCompile(`!\[.*?\]\((images/.+?\.(?:jpg|jpeg|png|gif|webp))\)`)
+var imageRefRe = regexp.MustCompile(`(?i)(?:!\[.*?\]\(|<img[^>]*?src=["'])(images/.+?\.(?:jpg|jpeg|png|gif|webp))(?:\)|["'][^>]*>)`)
 
 // RunOptions collects the CLI flags that only affect how the runner
 // samples / filters work. Image processing itself is driven by the
@@ -553,10 +553,11 @@ func validateOffsets(content string, offsets []OffsetPair) []OffsetPair {
 			continue
 		}
 		sub := content[o.Start:o.End]
-		if !strings.HasPrefix(sub, "![") {
-			continue
-		}
-		if !strings.HasSuffix(sub, ")") {
+		// Accept both markdown ![...](...) image links and self-contained
+		// HTML <img ...> references. They close differently (")" vs ">").
+		isMarkdown := strings.HasPrefix(sub, "![") && strings.HasSuffix(sub, ")")
+		isHTML := strings.HasPrefix(sub, "<img") && strings.HasSuffix(sub, ">")
+		if !isMarkdown && !isHTML {
 			continue
 		}
 		// Verify the substring really is an image reference; this catches
