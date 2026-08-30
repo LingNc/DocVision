@@ -2,6 +2,7 @@ package img2text
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
@@ -323,8 +324,18 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 				r.item.Result + "\n\n<!-- /IMG -->\n\n"
 			nc = nc[:r.off.Start] + block + nc[r.off.End:]
 		}
-		if err := os.WriteFile(outPath, []byte(nc), 0o644); err != nil {
-			logger.LogError(0, "  [", name, "] write failed:", err)
+		// Only write when the rebuilt content differs from what is already
+		// on disk. Files whose images were fully processed in earlier rounds
+		// rebuild to the identical content, so this round should not touch
+		// them (their mtime stays unchanged). Only files with newly
+		// processed images actually change and get written.
+		written, werr := writeFinalMD(outPath, []byte(nc))
+		if werr != nil {
+			logger.LogError(0, "  [", name, "] write failed:", werr)
+			continue
+		}
+		if !written {
+			logger.Log(0, "  跳过（内容无变化）:", name)
 			continue
 		}
 		logger.Log(0, "  Saved:", name, "("+strconv.Itoa(len(reps))+" replacements)")
@@ -333,6 +344,18 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 	logger.Log(0, strings.Repeat("=", 60))
 	logger.Log(0, "Done!")
 	return nil
+}
+
+// writeFinalMD writes content to outPath unless the file already exists with
+// byte-identical content, in which case it is left untouched (mtime preserved)
+// and written=false is returned.
+func writeFinalMD(outPath string, content []byte) (written bool, err error) {
+	if existing, err := os.ReadFile(outPath); err == nil {
+		if bytes.Equal(existing, content) {
+			return false, nil
+		}
+	}
+	return true, os.WriteFile(outPath, content, 0o644)
 }
 
 // runWorkers is the producer/consumer loop. N workers call
