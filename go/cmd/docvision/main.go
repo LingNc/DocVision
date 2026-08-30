@@ -417,7 +417,6 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().String("percentiles", "90,95,99", "自定义百分位数，逗号分隔 (默认: 90,95,99)")
 	cmd.Flags().StringP("output", "o", "", "导出 CSV 文件路径")
 	cmd.Flags().Bool("progress", false, "仅显示进度摘要（完成率/良品率）")
-	cmd.Flags().Bool("files", false, "显示本轮处理了哪些文件的图片并写入了 finally（含成功率统计）")
 	return cmd
 }
 
@@ -431,7 +430,6 @@ func runAnalyzeFromConfig(cmd *cobra.Command, cfg *config.Config, forcedLogFile 
 	percentilesStr, _ := cmd.Flags().GetString("percentiles")
 	outputCSV, _ := cmd.Flags().GetString("output")
 	progressOnly, _ := cmd.Flags().GetBool("progress")
-	showFiles, _ := cmd.Flags().GetBool("files")
 
 	percentiles, err := parsePercentiles(percentilesStr)
 	if err != nil {
@@ -445,7 +443,6 @@ func runAnalyzeFromConfig(cmd *cobra.Command, cfg *config.Config, forcedLogFile 
 		Percentiles:  percentiles,
 		OutputCSV:    outputCSV,
 		ProgressOnly: progressOnly,
-		ShowFiles:    showFiles,
 	}
 	return analyze.Run(cfg, opts)
 }

@@ -17,7 +17,6 @@ type RunOptions struct {
 	Percentiles  []int
 	OutputCSV    string
 	ProgressOnly bool
-	ShowFiles    bool // 显示本轮处理了哪些文件的图片并写入了 finally
 }
 
 // Run is the entry point for log analysis + progress checking.
@@ -68,9 +67,9 @@ func Run(cfg *config.Config, opts RunOptions) error {
 		PrintReport(stats, filepath.Base(reportPath), opts.ShowThreads)
 	}
 
-	// Round output-file summary: which md files had images processed and
-	// written this round, plus overall success statistics.
-	if opts.ShowFiles && len(allSessions) > 0 {
+	// Round output-file summary (always shown): which md files had images
+	// processed and written this round, plus overall success statistics.
+	if len(allSessions) > 0 {
 		PrintRoundFileSummary(filepath.Base(logPaths[0]), allSessions)
 	}
 

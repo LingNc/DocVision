@@ -111,7 +111,7 @@ docvision init        生成配置模板
 ./build/docvision analyze --threads                # 显示线程详细统计
 ./build/docvision analyze --percentiles 90,95,99   # 自定义百分位
 ./build/docvision analyze -o report.csv            # 导出 CSV
-./build/docvision analyze --files                  # 显示本轮处理并写入了 finally 的文件及成功率统计
+# analyze 默认即输出“本轮写入 finally 的文件及成功率统计”
 ```
 
 ## Python 脚本独立使用
