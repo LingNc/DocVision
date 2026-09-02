@@ -103,6 +103,19 @@ func BuildSystemPrompt(maxToolCalls int, lang string) string {
 	return prompt
 }
 
+// normalizeToolCallTypes fills in an empty Type on echoed assistant
+// tool_calls with "function". Some providers return tool_call entries
+// without a type field; replaying them verbatim makes strict upstream
+// validators reject the follow-up request with HTTP 400
+// ("Input should be 'function'").
+func normalizeToolCallTypes(msg *ChatMessage) {
+	for i := range msg.ToolCalls {
+		if msg.ToolCalls[i].Type == "" {
+			msg.ToolCalls[i].Type = "function"
+		}
+	}
+}
+
 // CallAIWithTools is the core multi-round tool-calling loop. It mirrors
 // the Python reference precisely:
 //
@@ -248,6 +261,7 @@ func CallAIWithTools(
 			// then continue the loop. toolRounds advances by one
 			// regardless of how many tool calls the model issued in
 			// this turn (matches the Python reference semantics).
+			normalizeToolCallTypes(&choice.Message)
 			messages = append(messages, choice.Message)
 
 			for _, tc := range choice.Message.ToolCalls {
