@@ -382,7 +382,13 @@ func runWorkers(
 	if concurrency <= 0 {
 		concurrency = 1
 	}
-	sem := make(chan struct{}, concurrency)
+	// tidPool doubles as the concurrency limiter and the worker-id source:
+	// holding a token means owning tid N exclusively for the lifetime of one
+	// task, so a thread's START/DONE pairs never interleave in the log.
+	tidPool := make(chan int, concurrency)
+	for i := 1; i <= concurrency; i++ {
+		tidPool <- i
+	}
 	total := len(pending)
 
 	// Show initial progress immediately before starting any workers.
@@ -471,11 +477,10 @@ func runWorkers(
 
 	for _, t := range pending {
 		wg.Add(1)
-		sem <- struct{}{}
+		tid := <-tidPool
 		go func(tt imageTask) {
 			defer wg.Done()
-			defer func() { <-sem }()
-			tid := nextWorkerTID(concurrency)
+			defer func() { tidPool <- tid }()
 			startTime := time.Now()
 			logger.Log(tid, "▶ START", tt.key)
 			defer func() {
@@ -652,23 +657,4 @@ func resolveSeed(seedStr string) (int64, int64) {
 		return 42, 42
 	}
 	return n, n
-}
-
-// tidSeqMu protects tidSeq. Worker thread IDs are surfaced in log
-// lines as [T<id>]; we approximate the Python ThreadPoolExecutor-style
-// stable IDs with a process-wide atomic that wraps modulo concurrency.
-var (
-	tidSeqMu sync.Mutex
-	tidSeq   int
-)
-
-func nextWorkerTID(concurrency int) int {
-	tidSeqMu.Lock()
-	tidSeq++
-	if concurrency > 0 && tidSeq > concurrency {
-		tidSeq = 1
-	}
-	id := tidSeq
-	tidSeqMu.Unlock()
-	return id
 }
