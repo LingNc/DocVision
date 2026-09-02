@@ -13,6 +13,8 @@ import (
 type RunOptions struct {
 	All          bool
 	LogFile      string
+	RoundSpec    string // -r/--round: 轮次选择，如 "1"（上一次）、"1-3"；0=最新
+	TimeSpec     string // -l/--last: 时间范围，如 "+2d"、"2026Y9M1D-2026Y9M2D"
 	ShowThreads  bool
 	Percentiles  []int
 	OutputCSV    string
@@ -88,6 +90,8 @@ func Run(cfg *config.Config, opts RunOptions) error {
 // resolveLogPaths picks the log files to analyse based on opts. When
 // LogFile is empty, the lookup walks logsDir first and falls back to
 // finallyDir so legacy logs produced before the T7 split keep working.
+// RoundSpec (-r) and TimeSpec (-l) narrow the candidate list; the chosen
+// files are printed before analysis so the user sees what will be read.
 func resolveLogPaths(opts RunOptions, logsDir, finallyDir string) ([]string, error) {
 	if opts.LogFile != "" {
 		return []string{opts.LogFile}, nil
@@ -100,11 +104,24 @@ func resolveLogPaths(opts RunOptions, logsDir, finallyDir string) ([]string, err
 		fmt.Printf("找到 %d 个日志文件\n", len(paths))
 		return paths, nil
 	}
-	latest, err := logfind.FindLatestWithFallback(logsDir, finallyDir)
+
+	// Candidates: all primary logs (newest first); -r/-l narrow the set.
+	all, err := logfind.FindAllWithFallback(logsDir, finallyDir)
 	if err != nil {
 		return nil, err
 	}
-	return []string{latest}, nil
+	sel, desc, err := SelectLogs(all, opts.RoundSpec, opts.TimeSpec)
+	if err != nil {
+		return nil, err
+	}
+	if desc != "" {
+		fmt.Printf("日志筛选: %s\n", desc)
+	}
+	fmt.Printf("本次分析 %d 个日志文件:\n", len(sel))
+	for _, p := range sel {
+		fmt.Printf("  %s\n", filepath.Base(p))
+	}
+	return sel, nil
 }
 
 // printProgressFooter prints the brief "总计/已完成/无效/剩余" line.

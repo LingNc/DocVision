@@ -111,7 +111,12 @@ docvision init        生成配置模板
 ./build/docvision analyze --threads                # 显示线程详细统计
 ./build/docvision analyze --percentiles 90,95,99   # 自定义百分位
 ./build/docvision analyze -o report.csv            # 导出 CSV
-# analyze 默认即输出“本轮写入 finally 的文件及成功率统计”
+./build/docvision analyze -r 1                     # 分析上一次的日志（0=最新, 1=上一次...）
+./build/docvision analyze -r 1-3                   # 分析上一次到前3次的范围
+./build/docvision analyze -l +2d                   # 分析最近2天内的日志
+./build/docvision analyze -l 2026Y9M1D-2026Y9M2D   # 按日期范围（含整天）
+./build/docvision analyze -l 2026-09-01_15:30-     # 从某时刻到现在的日志
+# analyze 默认即输出“本轮写入 finally 的文件及成功率统计”，分析前会列出选中的日志
 ```
 
 ## Python 脚本独立使用

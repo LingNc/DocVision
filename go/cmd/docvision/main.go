@@ -413,6 +413,8 @@ func newAnalyzeCmd() *cobra.Command {
 	}
 	cmd.Flags().Bool("all", false, "汇总所有历史日志进行分析")
 	cmd.Flags().String("logfile", "", "指定单个日志文件路径")
+	cmd.Flags().StringP("round", "r", "", "按轮次选择日志: 0=最新一次, 1=上一次...；范围 1-3")
+	cmd.Flags().StringP("last", "l", "", "按时间范围选择日志: +2d / 2026Y9M1D-2026Y9M2D / 2026-09-01_15:30-")
 	cmd.Flags().Bool("threads", false, "显示线程详细统计")
 	cmd.Flags().String("percentiles", "90,95,99", "自定义百分位数，逗号分隔 (默认: 90,95,99)")
 	cmd.Flags().StringP("output", "o", "", "导出 CSV 文件路径")
@@ -430,6 +432,8 @@ func runAnalyzeFromConfig(cmd *cobra.Command, cfg *config.Config, forcedLogFile 
 	percentilesStr, _ := cmd.Flags().GetString("percentiles")
 	outputCSV, _ := cmd.Flags().GetString("output")
 	progressOnly, _ := cmd.Flags().GetBool("progress")
+	roundSpec, _ := cmd.Flags().GetString("round")
+	timeSpec, _ := cmd.Flags().GetString("last")
 
 	percentiles, err := parsePercentiles(percentilesStr)
 	if err != nil {
@@ -439,6 +443,8 @@ func runAnalyzeFromConfig(cmd *cobra.Command, cfg *config.Config, forcedLogFile 
 	opts := analyze.RunOptions{
 		All:          all,
 		LogFile:      logFile,
+		RoundSpec:    roundSpec,
+		TimeSpec:     timeSpec,
 		ShowThreads:  showThreads,
 		Percentiles:  percentiles,
 		OutputCSV:    outputCSV,
