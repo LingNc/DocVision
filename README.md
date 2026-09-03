@@ -37,6 +37,23 @@ cp config.example.yaml config.yaml
 cd go
 make build
 
+# 一键安装到 /usr/local/bin（无权限时回退 ~/.local/bin），
+# 并初始化 ~/.docvision/config.yaml；之后任意目录可用 docvision
+./build/docvision install
+
+# 编辑生效的配置（当前目录 config.yaml 优先，否则 ~/.docvision/config.yaml），
+# 自动选择 vim/nano；保存时校验语法与配置项，有问题可回车重编或 q 退出
+docvision setup
+
+# 处理任意位置的 PDF/DOCX（单文件或整个目录）——临时模式：
+# 中间文件保存在 ~/.docvision/jobs/，最终 .md 输出到源文件所在目录
+docvision workflow /path/to/paper.pdf
+docvision workflow /path/to/pdf-dir/
+
+# 项目模式（老用法不变）：在项目目录里放 config.yaml + files/，
+# workflow/split/mineru/organize/img2text/analyze 照旧
+cd 项目目录 && docvision workflow
+
 # 初始化配置模板；会询问是否安装 Mermaid CLI
 ./build/docvision init
 

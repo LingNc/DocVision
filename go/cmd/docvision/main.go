@@ -27,6 +27,10 @@ import (
 // Version is set at build time via -ldflags.
 var Version = "dev"
 
+// resolvedConfigPath is set by PersistentPreRunE and reused by
+// loadConfigWithFlag so every command agrees on which config file applies.
+var resolvedConfigPath string
+
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -50,17 +54,35 @@ func newRootCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if configPath == "" {
+			if cmd.Flags().Changed("config") {
+				// Mirror the Python workflow: chdir to the directory containing the
+				// config file so relative paths in the YAML resolve from there.
+				abs, err := filepath.Abs(configPath)
+				if err != nil {
+					return fmt.Errorf("resolve config path: %w", err)
+				}
+				if err := os.Chdir(filepath.Dir(abs)); err != nil {
+					return fmt.Errorf("chdir to config dir: %w", err)
+				}
+				resolvedConfigPath = configPath
 				return nil
 			}
-			// Mirror the Python workflow: chdir to the directory containing the
-			// config file so relative paths in the YAML resolve from there.
-			abs, err := filepath.Abs(configPath)
+			// Lookup order: ./config.yaml (existing projects) then the global
+			// ~/.docvision/config.yaml, which is auto-created when missing.
+			path, source, created, err := config.ResolveConfigPath("")
 			if err != nil {
-				return fmt.Errorf("resolve config path: %w", err)
+				return err
 			}
-			if err := os.Chdir(filepath.Dir(abs)); err != nil {
-				return fmt.Errorf("chdir to config dir: %w", err)
+			resolvedConfigPath = path
+			if created {
+				fmt.Printf("已创建默认配置: %s（可运行 docvision setup 编辑）\n", path)
+			}
+			// The global config's relative paths must resolve from its own
+			// directory; a local ./config.yaml keeps the cwd (existing behavior).
+			if source == "global" {
+				if err := os.Chdir(filepath.Dir(path)); err != nil {
+					return fmt.Errorf("chdir to config dir: %w", err)
+				}
 			}
 			return nil
 		},
@@ -77,26 +99,35 @@ func newRootCmd() *cobra.Command {
 		newAnalyzeCmd(),
 		newSplitLogCmd(),
 		newInitCmd(),
+		newSetupCmd(),
+		newInstallCmd(),
+		newUninstallCmd(),
 	)
 
 	return root
 }
 
 // loadConfigWithFlag is a small helper that respects the --config flag.
+// Without an explicit flag it loads the path resolved by PersistentPreRunE
+// (./config.yaml preferred, then ~/.docvision/config.yaml).
 func loadConfigWithFlag(cmd *cobra.Command) (*config.Config, error) {
 	configPath, err := cmd.Flags().GetString("config")
 	if err != nil {
 		return nil, err
+	}
+	if !cmd.Flags().Changed("config") && resolvedConfigPath != "" {
+		configPath = resolvedConfigPath
 	}
 	return config.LoadConfig(configPath)
 }
 
 func newWorkflowCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "workflow",
+		Use:   "workflow [path]",
 		Short: "运行完整工作流或单个步骤",
-		Long:  "串联 PDF/DOCX 分割、MinerU API、文件整理、图片转文本、日志分析等步骤。\n使用 --step 指定单个步骤。",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Long:  "串联 PDF/DOCX 分割、MinerU API、文件整理、图片转文本、日志分析等步骤。\n使用 --step 指定单个步骤。\n给定可选 path（PDF/DOCX 文件或目录）时进入临时模式：中间文件保存在 ~/.docvision/jobs/，仅把最终 .md 输出到源文件所在目录。",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigWithFlag(cmd)
 			if err != nil {
 				return err
@@ -105,6 +136,13 @@ func newWorkflowCmd() *cobra.Command {
 			step, err := cmd.Flags().GetString("step")
 			if err != nil {
 				return err
+			}
+
+			if len(args) == 1 {
+				if step != "" {
+					return fmt.Errorf("指定文件/目录时不能同时使用 --step")
+				}
+				return runAdHocWorkflow(cmd, cfg, args[0])
 			}
 
 			steps := []string{"split", "mineru", "organize", "img2text", "analyze"}
