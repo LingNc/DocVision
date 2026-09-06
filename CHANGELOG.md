@@ -7,6 +7,13 @@
 - `setup`：自动选择编辑器（`$DOCVISION_EDITOR`/`$EDITOR` 优先，回退 vim → nano → vi）编辑生效配置；保存时严格校验（YAML 语法、未知配置项、类型、必填项、占位符），不通过可回车重编或 q 退出
 - 配置查找顺序：`--config` > 当前目录 `config.yaml` > `~/.docvision/config.yaml`（缺失自动从模板创建），任意目录可直接使用
 - `workflow <path>` 临时模式：处理任意位置的 PDF/DOCX 文件或目录，中间产物存于 `~/.docvision/jobs/<名称>-<时间戳>/`，仅将最终 `.md` 输出到源文件所在目录
+
+### Changed
+- GitHub Actions release 工作流支持 `workflow_dispatch` 手动补发任意标签
+
+## [v1.0.1] - 2026-09-03
+
+### Added
 - `analyze -r/--round`：按轮次选择日志（0=最新，1=上一次…，支持 `1-3` 范围）
 - `analyze -l/--last`：按时间范围选择日志（`+2d`、`2026Y9M1D-2026Y9M2D`、`2026-09-01_15:30-` 等）
 - analyze 默认输出“本轮写入 finally 的文件及成功率统计”
@@ -17,8 +24,6 @@
 - AI 工具调用消息的 tool_call 类型规范化，修复部分 API 网关报 HTTP 400 (Input should be 'function')
 - `finally` 最终文件跳过内容无变化的重复写入
 
-### Changed
-- GitHub Actions release 工作流支持 `workflow_dispatch` 手动补发任意标签
 
 ## [v1.0.0] - 2026-08-11
 
