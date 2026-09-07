@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+#### LaTeX 输出（两档位）
+- `docvision latex`：档位2（默认）图片矢量化——分类 AI 逐图标记 text/vector/raster；text 纯内容嵌入文本流（去除 [AI]/[IMG_TYPE] 标记）；vector 由作图 AI 会话写 TikZ，自动编译+栅格化 PNG 视觉核对+确认提交，编译 PDF 以矢量图嵌入；raster 保留原图（可选嵌入 AI 解释文本），矢量失败自动回退并告警
+- `docvision latex --level 1`：全书 LaTeX——样式分析 AI（图像裁剪放大/读 md 工具）产出 cls+结构化使用手册+案例并自动试编译；章节划分 AI（grep + 最小 bash 沙箱，虚拟单文件系统）行号划分并全覆盖校验；转换 AI 并发逐章转 .tex（虚拟文件目录，只读他人/只写自己）；汇总多文件 .tex 编译全书 PDF（修复会话兜底）+ 单文件 standalone.tex
+- AI 会话基础设施 `internal/session`：可复用多轮会话引擎，可分离工具注册（compile_preview/submit/grep/bash 沙箱/受限读写），可配置上下文窗口（默认 128K，支持 64K/256K 等），达到阈值自动 AI 压缩会话历史（保留关键决策与成果，丢弃草稿/工具噪音）
+- 模型注册表 `models:`：每个专用 AI（classifier/drawing/style/chapter/convert/verifier）独立配置 base_url/api_key/model/request_body，空字段继承顶层 ai
+- `docvision verify`：AI 核对每张图与嵌入内容（含 TikZ 渲染预览对比），输出问题与修改意见报告（`verify.enabled` 默认关闭，先上日程）
+- 断点续传：档位2逐图进度（progress_items），档位1逐阶段进度（progress.json）
+- latex 会话日志独立落盘 logs/latex_*.log
+
+### Fixed
+- `--config` 传入相对子目录路径时 chdir 后解析错位（改用绝对路径）
+
+
 ## [v1.1.0] - 2026-09-03
 
 ### Added
