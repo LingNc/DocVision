@@ -177,20 +177,47 @@ func (r *Runner) stylePhase(proj string) error {
 	}
 
 	submit := &SubmitStyleTool{}
-	sess := session.NewSession(client, modelCfg, tuning, styleSystemPrompt, []session.Tool{
+	tools := []session.Tool{
 		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
 		&ViewImageTool{Root: sourceDir},
 		&ReadMDTool{Path: mainMD},
 		submit,
-	}, r.log, 1, "style")
+	}
+
+	// Original scanned pages: render the MinerU-preserved origin PDFs
+	// so the analyst can inspect REAL typography (this is the whole
+	// point of style reverse-engineering).
+	pagesDir := filepath.Join(proj, "pages")
+	pageCount := 0
+	if originPDFs := findOriginPDFs(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD))); len(originPDFs) > 0 {
+		n, err := r.renderOriginPages(originPDFs, pagesDir)
+		if err != nil {
+			r.log.LogWarning(1, "[style] 原始页面渲染失败（退化为仅用提取图片分析）:", err)
+		} else {
+			pageCount = n
+			r.log.Log(1, "[style] 原始页面已渲染:", strconv.Itoa(n), "页 ->", pagesDir)
+			tools = append([]session.Tool{&ListPagesTool{PagesDir: pagesDir}}, tools...)
+		}
+	} else {
+		r.log.LogWarning(1, "[style] 未找到 MinerU 保留的原始 PDF（mineru_output/<subject>_part*/*_origin.pdf），将仅基于提取图片与 md 分析样式")
+	}
+
+	prompt := styleSystemPrompt
+	if pageCount > 0 {
+		prompt += "\n\nIMPORTANT: this document HAS original page renders (list_pages -> p001.png...). They show the TRUE typography and layout — inspect them FIRST (chapter title pages, section headings, body text, headers/footers) before looking at extracted images."
+	}
+	sess := session.NewSession(client, modelCfg, tuning, prompt, tools, r.log, 1, "style")
 
 	initial := strings.Join([]string{
 		"Analyse the style of this book and produce the LaTeX class package.",
 		"",
 		"- Organized markdown (high-quality text): " + filepath.Base(mainMD),
 		"- Extracted images live under images/ (use list_images + view_image).",
-		"Start by listing images and reading the markdown structure, inspect a few representative images (crop/zoom title pages, headings, figures), then submit_style.",
 	}, "\n")
+	if pageCount > 0 {
+		initial += fmt.Sprintf("\n- ORIGINAL page renders (%d pages) are available via list_pages + view_image — use them for typography/layout.", pageCount)
+	}
+	initial += "\nStart by mapping the structure (list_pages / list_images / read_md), inspect representative pages (crop/zoom title pages, headings, figures), then submit_style."
 
 	scratch, err := os.MkdirTemp("", "dsv-style-")
 	if err != nil {

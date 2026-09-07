@@ -4,6 +4,9 @@
 
 ### Changed
 
+- `docvision latex` 自助化：位置参数为 PDF/DOCX/目录时自动补跑前置流程（split→mineru→organize，隔离于 ~/.docvision/jobs 作业目录）再进入 LaTeX，无需先手动跑 workflow；md 名字参数直接处理 output/ 中对应文件；不带参数批量处理全部 md
+- 档位1 样式分析改用 MinerU 保留的原始扫描页面（`*_origin.pdf` 自动渲染为整页 PNG 并缓存到 latex_project/pages/），新增 list_pages/view（裁剪+放大）工具；原始 PDF 缺失时退化为提取图片分析并日志提示
+
 - 配置精简：移除模板中的顶层 `ai:` 块，所有模型统一在 `models:` 注册表配置；`models.text` 成为 img2text 等基础流程的默认模型（必填），其余条目空字段自动继承；旧配置的 `ai:` 块（含 ai.model 引用注册表名）保持完全兼容
 
 - 配置整合：`ai.model` 可直接引用 `models:` 注册表名（如 `text`），base_url/api_key/request_body 从注册表继承，凭据只需维护一份；img2text 等基础流程同样生效

@@ -16,7 +16,7 @@ PDF 文件 -> 分割 -> MinerU API 解析 -> 整理文件 -> AI 图片转文本 
 2. **mineru** - 调用 MinerU API 解析文件，支持并发、断点续传、上传进度显示
 3. **organize** - 整理解析结果，合并分片，按引用收集图片到按主题子目录
 4. **img2text** - 用 AI 模型识别图片内容并转为文本，支持并发和上下文增量扩展（工具调用）
-5. **latex** - LaTeX 输出（图片矢量化 / 全书转换，见下文）
+5. **latex** - LaTeX 输出（图片矢量化 / 全书转换，见下文；也可独立自助运行）
 6. **verify** - AI 核对图片与嵌入内容（默认关闭，`verify.enabled`）
 7. **analyze** - 分析处理日志（img2text 与 latex 日志均支持），统计耗时、成功率、进度
 
@@ -108,7 +108,7 @@ docvision split       分割 PDF/DOCX（单文件或 --all 目录模式）
 docvision mineru      调用 MinerU API 解析文件
 docvision organize    整理解析结果
 docvision img2text    AI 图片转文本（--test 测试模式）
-docvision latex       LaTeX 输出（可传文件名只处理指定文件）
+docvision latex       LaTeX 输出（可直接传 PDF/DOCX 自动补前置流程，或传 md 名只处理指定文件）
 docvision verify      AI 核对输出与原图（默认关闭）
 docvision analyze     分析日志（--progress 仅进度，--all 汇总历史）
 docvision splitlog    按线程 ID 拆分日志
@@ -179,32 +179,39 @@ docvision verify
 ### 用法
 
 ```bash
-# 档位2（默认）：批量处理 output/ 下全部 markdown（自动）
-docvision latex
+# ★ 最常用：一条命令从原始文档到 LaTeX（自动补跑 分割→MinerU→整理）
+docvision latex 书.pdf
+docvision latex 书.docx
+docvision latex 目录/              # 目录下所有 PDF/DOCX
 
-# 只处理指定文件（文件名可带可不带 .md，可多个）
+# output/ 已经有解析结果时：直接对某个 md 继续 LaTeX（跳过前置）
 docvision latex 编译原理课程设计报告样例.md
 docvision latex book1 book2
 
-docvision latex --level 2 --test --number 5   # 抽样测试
+# 批量：处理 output/ 下全部 markdown
+# （前置流程已跑过时，裸命令即批量；未跑过会提示先跑 workflow）
+docvision latex
 
-docvision latex --step classify               # 仅分类
+# 档位与阶段控制
+docvision latex --level 1 书.pdf               # 档位1 全书转换
+docvision latex --level 2 --test --number 5    # 抽样测试
+docvision latex --level 1 --step style 书.md   # 仅样式分析阶段
 
-# 档位1（全书）
-docvision latex --level 1
-
-docvision latex --level 1 --step style        # 仅样式分析阶段
-
-# 完整工作流：分割→MinerU→整理→LaTeX→日志分析（一条命令）
-docvision workflow --step latex
-
-# AI 核对也可以作为工作流步骤（respect verify.enabled）
-docvision workflow --step verify
+docvision verify                               # AI 核对报告
 ```
+
+> 说明：`docvision latex` 是**自助式**的——传 PDF/DOCX 会自动隔离在
+> `~/.docvision/jobs/` 作业目录里补跑前置流程，不需要先手动跑 workflow。
+> 老用户仍可把 latex 作为 workflow 步骤：`docvision workflow --step latex`
+> （split→mineru→organize→latex→analyze 一条龙，`--step verify` 同理）。
 
 输出目录：档位2 → `finally_latex/`；档位1 → `latex_project/`（含 out/book.pdf 与 standalone.tex），与 img2text 的 `finally/` 互不干扰。
 
 需要本地 LaTeX 工具链：TeX 发行版（xelatex）+ poppler-utils（pdftoppm）。`docvision init` 会自动检查并给出安装提示。
+
+### 风格分析的数据来源（档位1）
+
+样式分析 AI 直接查看 **MinerU 保留的原始扫描页面**（`mineru_output/<主题>_part*/*_origin.pdf`，自动用 pdftoppm 渲染为整页 PNG 并缓存到 `latex_project/pages/`），支持按页浏览、按百分比裁剪、放大查看细节——这才是真实排版（标题格式、页眉页脚、字号行距）。原始 PDF 缺失时退化为仅用提取图片 + 解析 md 分析，并输出日志提示。
 
 ## Python 脚本独立使用
 
@@ -220,7 +227,7 @@ docvision workflow --step verify
 | `mineru.upload_timeout` | 上传空闲超时（秒） | 300 |
 | `mineru.log_poll_interval` | 控制台日志输出间隔（秒） | 3 |
 | `mineru.progress_threshold` | 页数变化阈值，达到此值立即刷新输出 | 80 |
-| `ai.request_body` | 注入 API 请求体的额外参数（如 enable_thinking） | 见示例 |
+| `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking） | 见示例 |
 | `options.concurrency` | AI 图片转文本并发数 | 10 |
 | `options.max_retries` | AI 请求更多上下文的最大轮数 | 5 |
 | `options.max_context_lines_up` | 图片上方初始上下文行数 | 10 |

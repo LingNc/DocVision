@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -54,6 +55,21 @@ func newLatexCmd() *cobra.Command {
 			seed, _ := cmd.Flags().GetString("seed")
 			sourceDir, _ := cmd.Flags().GetString("source-dir")
 
+			// Self-service: PDF/DOCX/目录 参数会自动补跑前置流程
+			// （split → mineru → organize，隔离在 ~/.docvision/jobs 作业目录），
+			// 然后对产出的 markdown 继续 LaTeX 流程；md 名字参数则直接
+			// 选中 output/ 中的对应文件。不带参数 = 批量处理全部 md。
+			jobs, mdFiles := partitionLatexArgs(args)
+			for _, arg := range jobs {
+				if err := runLatexPrerequisites(cmd, cfg, arg); err != nil {
+					return err
+				}
+			}
+			selected := append(mdFiles, latexSelectedFiles...)
+			if latexSelectedSourceDir != "" && sourceDir == "" {
+				sourceDir = latexSelectedSourceDir
+			}
+
 			log, closeLog, err := newLatexLogger(cfg)
 			if err != nil {
 				return err
@@ -66,13 +82,13 @@ func newLatexCmd() *cobra.Command {
 				return runner.RunBook(latex.BookOptions{
 					Step: step, SourceDir: sourceDir, Restart: false,
 					TestMode: testMode, Number: number, Seed: seed,
-					Files: args,
+					Files: selected,
 				})
 			}
 			fmt.Println("=== LaTeX 档位 2：图片矢量化 ===")
 			return runner.RunImages(latex.ImagesOptions{
 				Step: step, TestMode: testMode, Number: number, Seed: seed,
-				SourceDir: sourceDir, Files: args,
+				SourceDir: sourceDir, Files: selected,
 			})
 		},
 	}
@@ -169,4 +185,107 @@ func runVerifyFromConfig(cfg *config.Config) error {
 	}
 	defer closeLog()
 	return latex.NewRunner(cfg, log).RunVerify(latex.VerifyOptions{})
+}
+
+// latexSelectedFiles collects the markdown selections derived from the
+// latex command arguments (explicit md names, or md files produced by
+// auto-run prerequisites for PDF/DOCX inputs).
+var latexSelectedFiles []string
+
+// latexSelectedSourceDir overrides the latex source dir when
+// prerequisites produced a dedicated output directory.
+var latexSelectedSourceDir string
+
+// partitionLatexArgs splits the positional arguments into source
+// documents (PDF/DOCX files or directories containing them, which need
+// the MinerU prerequisites) and markdown selections (files in the
+// output dir).
+func partitionLatexArgs(args []string) (sources []string, mdFiles []string) {
+	for _, arg := range args {
+		info, err := os.Stat(arg)
+		if err == nil && !info.IsDir() {
+			ext := strings.ToLower(filepath.Ext(arg))
+			if ext == ".pdf" || ext == ".docx" {
+				sources = append(sources, arg)
+				continue
+			}
+		}
+		if err == nil && info.IsDir() {
+			pdfs, _ := filepath.Glob(filepath.Join(arg, "*.pdf"))
+			docxs, _ := filepath.Glob(filepath.Join(arg, "*.docx"))
+			if len(pdfs)+len(docxs) > 0 {
+				sources = append(sources, arg)
+				continue
+			}
+		}
+		mdFiles = append(mdFiles, arg)
+	}
+	return sources, mdFiles
+}
+
+// runLatexPrerequisites runs split → mineru → organize for one source
+// document inside an isolated job directory (same layout as the
+// ad-hoc workflow), then registers the produced markdown files so the
+// latex runner picks them up.
+func runLatexPrerequisites(cmd *cobra.Command, cfg *config.Config, source string) error {
+	abs, err := filepath.Abs(source)
+	if err != nil {
+		return err
+	}
+	var inputs []string
+	if info, err := os.Stat(abs); err == nil && info.IsDir() {
+		pdfs, _ := filepath.Glob(filepath.Join(abs, "*.pdf"))
+		docxs, _ := filepath.Glob(filepath.Join(abs, "*.docx"))
+		inputs = append(pdfs, docxs...)
+	} else {
+		inputs = []string{abs}
+	}
+	base := strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	job := filepath.Join(home, ".docvision", "jobs", base+"-latex-"+time.Now().Format("20060102_150405"))
+	for _, d := range []string{"files", "split_files", "mineru_output", "output", "output/images", "logs", "files/done"} {
+		if err := os.MkdirAll(filepath.Join(job, d), 0o755); err != nil {
+			return err
+		}
+	}
+	for _, in := range inputs {
+		if err := copyFile(filepath.Join(job, "files", filepath.Base(in)), in); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("LaTeX 前置流程工作目录: %s\n", job)
+
+	jobCfg := *cfg
+	jobCfg.Paths.InputDir = filepath.Join(job, "files")
+	jobCfg.Paths.SplitDir = filepath.Join(job, "split_files")
+	jobCfg.Paths.MineruOutput = filepath.Join(job, "mineru_output")
+	jobCfg.Paths.OutputDir = filepath.Join(job, "output")
+	jobCfg.Paths.ImagesDir = filepath.Join(job, "output/images")
+	jobCfg.Paths.LogsDir = filepath.Join(job, "logs")
+	jobCfg.Paths.DoneDir = filepath.Join(job, "files/done")
+
+	oldWd, wdErr := os.Getwd()
+	if wdErr == nil {
+		defer os.Chdir(oldWd)
+	}
+	os.Chdir(job)
+	for _, s := range []string{"split", "mineru", "organize"} {
+		fmt.Printf("\n=== LaTeX 前置: %s ===\n", stepLabel(s))
+		if _, err := runStep(s, cmd, &jobCfg, ""); err != nil {
+			return fmt.Errorf("前置步骤 %s 失败: %w", s, err)
+		}
+	}
+	// The latex pipeline itself must see the job's mineru_output
+	// (original pages for style analysis) and output dir.
+	cfg.Paths.MineruOutput = jobCfg.Paths.MineruOutput
+	cfg.Paths.ImagesDir = jobCfg.Paths.ImagesDir
+	mds, _ := filepath.Glob(filepath.Join(jobCfg.Paths.OutputDir, "*.md"))
+	for _, md := range mds {
+		latexSelectedFiles = append(latexSelectedFiles, filepath.Base(md))
+	}
+	latexSelectedSourceDir = jobCfg.Paths.OutputDir
+	return nil
 }
