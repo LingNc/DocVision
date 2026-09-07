@@ -64,7 +64,9 @@ func newRootCmd() *cobra.Command {
 				if err := os.Chdir(filepath.Dir(abs)); err != nil {
 					return fmt.Errorf("chdir to config dir: %w", err)
 				}
-				resolvedConfigPath = configPath
+				// Keep the ABSOLUTE path: after chdir, a relative --config
+				// argument would resolve against the wrong directory.
+				resolvedConfigPath = abs
 				return nil
 			}
 			// Lookup order: ./config.yaml (existing projects) then the global
@@ -117,7 +119,9 @@ func loadConfigWithFlag(cmd *cobra.Command) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !cmd.Flags().Changed("config") && resolvedConfigPath != "" {
+	if resolvedConfigPath != "" {
+		// resolvedConfigPath is absolute (set by PersistentPreRunE) so
+			// it survives the chdir into the config directory.
 		configPath = resolvedConfigPath
 	}
 	return config.LoadConfig(configPath)
