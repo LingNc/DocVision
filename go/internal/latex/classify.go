@@ -26,11 +26,11 @@ type Classification struct {
 // ClassifyImage sends one image to the classifier model and parses the
 // strict JSON verdict. Any failure degrades to ClassRaster (the safe
 // choice: keep the original image).
-func ClassifyImage(client *session.Client, modelCfg config.ModelConfig, imgBase64 string) (Classification, error) {
+func ClassifyImage(client *session.Client, modelCfg config.ModelConfig, imgBase64, systemExtra string) (Classification, error) {
 	req := &session.ChatRequest{
 		Model: client.Model(),
 		Messages: []session.ChatMessage{
-			{Role: "system", Content: classifierSystemPrompt},
+			{Role: "system", Content: classifierSystemPrompt + systemExtra},
 			{Role: "user", Content: []map[string]interface{}{
 				{"type": "text", "text": "Classify this document image."},
 				{"type": "image_url", "image_url": map[string]string{

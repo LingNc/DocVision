@@ -220,23 +220,26 @@ type AIConfig struct {
 
 // OptionsConfig holds tuning knobs for the image-to-text processing pipeline.
 type OptionsConfig struct {
-	MaxContextLinesUp   int     `yaml:"max_context_lines_up"`
-	MaxContextLinesDown int     `yaml:"max_context_lines_down"`
-	MaxWindowUp         int     `yaml:"max_window_up"`
-	MaxWindowDown       int     `yaml:"max_window_down"`
-	MaxRetries          int     `yaml:"max_retries"`
-	APITimeout          int     `yaml:"api_timeout"`
-	APIConnectTimeout   int     `yaml:"api_connect_timeout"`
-	APIMaxRetries       int     `yaml:"api_max_retries"`
-	RateLimitRetries    int     `yaml:"rate_limit_retries"`
-	Concurrency         int     `yaml:"concurrency"`
-	Temperature         float64 `yaml:"temperature"`
-	OutputLanguage      string  `yaml:"output_language"`
-	FormatFixAttempts   int     `yaml:"format_fix_attempts"`
-	MermaidValidation   string  `yaml:"mermaid_validation"`
-	MermaidCommand      string  `yaml:"mermaid_command"`
-	MermaidFixAttempts  *int    `yaml:"mermaid_fix_attempts"`
-	MermaidTimeout      int     `yaml:"mermaid_timeout"`
+	MaxContextLinesUp   int `yaml:"max_context_lines_up"`
+	MaxContextLinesDown int `yaml:"max_context_lines_down"`
+	MaxWindowUp         int `yaml:"max_window_up"`
+	MaxWindowDown       int `yaml:"max_window_down"`
+	MaxRetries          int `yaml:"max_retries"`
+	// ExtraInstruction is injected programmatically (not from yaml),
+	// e.g. the latex watermark working memory; appended to the system prompt.
+	ExtraInstruction   string  `yaml:"-"`
+	APITimeout         int     `yaml:"api_timeout"`
+	APIConnectTimeout  int     `yaml:"api_connect_timeout"`
+	APIMaxRetries      int     `yaml:"api_max_retries"`
+	RateLimitRetries   int     `yaml:"rate_limit_retries"`
+	Concurrency        int     `yaml:"concurrency"`
+	Temperature        float64 `yaml:"temperature"`
+	OutputLanguage     string  `yaml:"output_language"`
+	FormatFixAttempts  int     `yaml:"format_fix_attempts"`
+	MermaidValidation  string  `yaml:"mermaid_validation"`
+	MermaidCommand     string  `yaml:"mermaid_command"`
+	MermaidFixAttempts *int    `yaml:"mermaid_fix_attempts"`
+	MermaidTimeout     int     `yaml:"mermaid_timeout"`
 	// TikZ compile-check (auto/strict/off). Engine defaults to xelatex
 	// with automatic fallback to pdflatex/lualatex.
 	TikzValidation string `yaml:"tikz_validation"`

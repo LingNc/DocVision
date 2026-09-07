@@ -45,6 +45,9 @@ func (r *Runner) checkChapter(base, chapPath, texPath string) (bool, string) {
 		"```",
 	}, "\n")
 	if r.cfg.Latex.RemoveWatermark {
+		if wb := r.wm.Block(); wb != "" {
+			prompt += "\n\n" + wb
+		}
 		prompt += "\n\nWatermark note: if watermark-like content is absent from the tex, that is CORRECT (watermark removal is enabled) - do not report it as missing content."
 	}
 

@@ -91,6 +91,16 @@ type MermaidValidatorFunc func(response string) MermaidValidationResult
 // the conversation already contains it).
 type MermaidRepairPromptBuilder func(currentResult, validationError string) string
 
+// systemPromptWithExtra appends the caller-provided working-memory
+// instruction (e.g. the latex watermark memory) to the base prompt.
+func systemPromptWithExtra(opts config.OptionsConfig) string {
+	sys := BuildSystemPrompt(opts.MaxRetries, opts.OutputLanguage)
+	if opts.ExtraInstruction != "" {
+		sys += "\n\n" + opts.ExtraInstruction
+	}
+	return sys
+}
+
 // BuildSystemPrompt returns the system prompt with the two placeholders
 // filled in. The Python reference substitutes them exactly once before
 // the run starts; we mirror that semantics.
@@ -166,7 +176,7 @@ func CallAIWithTools(
 		req := &ChatRequest{
 			Model: client.Model(),
 			Messages: []ChatMessage{
-				{Role: "system", Content: BuildSystemPrompt(opts.MaxRetries, opts.OutputLanguage)},
+				{Role: "system", Content: systemPromptWithExtra(opts)},
 				{Role: "user", Content: []map[string]interface{}{
 					{"type": "text", "text": customUserText},
 					{"type": "image_url", "image_url": map[string]string{
@@ -199,8 +209,12 @@ func CallAIWithTools(
 	parts := GetContextLines(lines, imgLineIdx, curUp, curDown)
 	ctxText := strings.Join(parts, "\n")
 
+	mainSystem := BuildSystemPrompt(opts.MaxRetries, opts.OutputLanguage)
+	if opts.ExtraInstruction != "" {
+		mainSystem += "\n\n" + opts.ExtraInstruction
+	}
 	messages := []ChatMessage{
-		{Role: "system", Content: BuildSystemPrompt(opts.MaxRetries, opts.OutputLanguage)},
+		{Role: "system", Content: mainSystem},
 		{Role: "user", Content: []map[string]interface{}{
 			{"type": "text", "text": fmt.Sprintf(
 				"The image to describe is at line %d. "+

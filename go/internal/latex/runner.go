@@ -118,6 +118,8 @@ type Runner struct {
 	clients map[string]*session.Client
 	models  map[string]config.ModelConfig
 
+	wm *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
+
 	// lastSplitError remembers the latest split validation failure so
 	// the chapter session can be re-prompted with a concrete reason.
 	lastSplitError string
@@ -253,6 +255,15 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 
 	// Phase 1: classification.
 	if opts.Step == "" || opts.Step == "classify" {
+		// 水印工作记忆：最先检测（全览页 + md 统计），结果贯穿全部会话。
+		if r.cfg.Latex.RemoveWatermark {
+			var samples []watermarkSample
+			for name, mf := range mdCache {
+				samples = append(samples, watermarkSample{name: name, content: mf.content})
+			}
+			sort.Slice(samples, func(i, j int) bool { return samples[i].name < samples[j].name })
+			r.detectWatermarkPhase(samples)
+		}
 		r.classifyPhase(pending, mdCache, prog, progDir, verbose)
 	}
 	if opts.Step == "classify" {
@@ -310,8 +321,35 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 		fmt.Fprintf(os.Stdout, "\r[classify %d/%d] %.2f%% (失败: %d)          ", done, total, pct, failed)
 	}
 
+	// 水印图片引用：直接预标记 absorbed（重建时删除引用），
+	// 不消耗任何 AI 会话，后续也不会重复处理。
+	if r.wm != nil && len(r.wm.ImageRefs) > 0 {
+		wmSet := map[string]bool{}
+		for _, ref := range r.wm.ImageRefs {
+			wmSet[strings.TrimSpace(ref)] = true
+		}
+		var kept []*task
+		for _, t := range pending {
+			if wmSet[t.imgPath] {
+				pp := prog[t.key()]
+				if pp != nil && pp.Status != "done" {
+					pp.Status = "done"
+					pp.Absorbed = true
+					pp.Error = ""
+					saveProgress(progDir, pp)
+					r.log.Log(0, "[watermark] 跳过水印图片:", t.imgPath)
+				}
+				continue
+			}
+			kept = append(kept, t)
+		}
+		pending = kept
+		total = len(pending)
+	}
+
 	client := r.clientFor(r.cfg.Latex.ClassifierModel)
 	modelCfg := r.models[r.cfg.Latex.ClassifierModel]
+	classifyExtra := r.wm.Block()
 
 	for _, t := range pending {
 		wg.Add(1)
@@ -347,10 +385,10 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 				mu.Unlock()
 				return
 			}
-			class, err := ClassifyImage(client, modelCfg, img64)
+			class, err := ClassifyImage(client, modelCfg, img64, classifyExtra)
 			if err != nil {
 				// One retry with a stricter instruction.
-				class, err = ClassifyImageStrict(client, modelCfg, img64)
+				class, err = ClassifyImageStrict(client, modelCfg, img64, classifyExtra)
 				if err != nil {
 					r.log.LogWarning(tid, "[classify] 失败（按 raster 处理）:", tt.imgPath, err)
 					mu.Lock()
@@ -379,8 +417,8 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 
 // ClassifyImageStrict is the second-chance call with an explicit
 // "JSON only" reminder.
-func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, imgBase64 string) (Classification, error) {
-	c, err := ClassifyImage(client, modelCfg, imgBase64)
+func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, imgBase64, systemExtra string) (Classification, error) {
+	c, err := ClassifyImage(client, modelCfg, imgBase64, systemExtra)
 	if err == nil {
 		return c, nil
 	}
@@ -533,9 +571,13 @@ func (r *Runner) processTextImage(mf *mdFile, t *task, tid int) (string, error) 
 	mc, _ := r.cfg.ResolveModel("") // top-level ai block (+ options.* defaults)
 	client := img2text.NewAIClient(mc, r.cfg.Options)
 	subject := subjectOf(t.mdName)
+	textOpts := r.cfg.Options
+	if wb := r.wm.Block(); wb != "" {
+		textOpts.ExtraInstruction = wb
+	}
 	result, status := img2text.ProcessOneImage(
 		client, r.cfg.Paths.ImagesDir, t.imgPath, subject,
-		mf.lines, t.lineIdx, r.log, tid, r.cfg.Options,
+		mf.lines, t.lineIdx, r.log, tid, textOpts,
 	)
 	if status != img2text.StatusOK {
 		return "", fmt.Errorf("img2text 状态 %s: %s", status, truncateStr(result, 200))
@@ -570,7 +612,11 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 		r.log.LogError(tid, "[vector] 读取图片失败:", t.imgPath, err)
 		return false
 	}
-	contextText := strings.Join(img2text.GetContextLines(mf.lines, t.lineIdx,
+	contextText := ""
+	if wb := r.wm.Block(); wb != "" {
+		contextText = wb + "\n\n---\n\n"
+	}
+	contextText += strings.Join(img2text.GetContextLines(mf.lines, t.lineIdx,
 		r.cfg.Options.MaxContextLinesUp, r.cfg.Options.MaxContextLinesDown), "\n")
 
 	modelCfg := r.models[r.cfg.Latex.DrawingModel]

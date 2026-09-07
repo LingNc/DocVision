@@ -297,7 +297,7 @@ docvision verify                               # AI 核对报告
 | `options.tikz_validation` | img2text tikz 代码块 LaTeX 编译校验（off/auto/strict） | auto |
 | `options.tikz_engine` | tikz 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
 | `latex.checker_model` | 每章核对模型（留空用 convert_model） | 空 |
-| `latex.remove_watermark` | 水印处理：true 时样式/转换/核对 AI 会检测并排除水印 | false |
+| `latex.remove_watermark` | 水印处理：true 时样式/转换/核对 AI 会检测并排除水印 | false |（开启后流程开始时先做一次水印检测：全览页渲染 + markdown 重复图片统计，结果缓存为 latex_project/watermark_memory.json 并作为工作记忆注入后续所有会话；水印图片引用直接剔除不再处理）
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |
 

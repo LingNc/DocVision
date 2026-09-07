@@ -4,6 +4,8 @@
 
 ### Added
 
+- 水印工作记忆：remove_watermark 开启时，流程最开始做一次性检测（view_page 全览页渲染 + 全文档重复图片引用统计 + markdown 采样），AI 判定水印文本形态与被裁剪成图的水印/广告图引用，结果缓存为 latex_project/watermark_memory.json（两档位共享）；之后作为小工作记忆注入 classify/img2text 文本提取/作图/style/convert/checker 全部会话，水印图片引用在分类阶段直接预剔除（absorbed），不再重复处理
+
 - 档位2 跨页图表拼接：作图会话新增 `image_context`（查任意图片的上下文与前后图片引用）与 `view_image`（查看图片）工具；提示词引导识别跨页续片（重复表头/"续表"/边缘截断等），一次绘制合并图并在 submit 声明 `merges`；被吸收的续片引用在重建 markdown 时自动删除且不再重复处理
 
 - latex 档位2 控制台进度：默认每个阶段显示一行实时进度（classify/process），逐图明细只写日志文件；`--verbose` 恢复详细输出
