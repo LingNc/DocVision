@@ -19,18 +19,7 @@ mineru:
   max_concurrent: 5            # number of concurrent MinerU tasks
   upload_timeout: 300          # upload idle timeout in seconds (no timeout while data is flowing)
 
-# AI Image-to-Text config (OpenAI-compatible)
-# 提示：model 可直接填 models: 注册表里的名字（如 "text"），
-# base_url/api_key/request_body 会从注册表继承，凭据只需在 models: 维护一份。
-ai:
-  base_url: "https://your-api-proxy.com/v1"
-  api_key: "sk-YOUR-API-KEY-HERE"
-  model: "Qwen/Qwen3.6-27B"
-  request_body:                # additional body params for the API call
-    enable_thinking: false     # Qwen 3.6+
-    extra_body: {              # OpenAI/Anthropic/DeepSeek
-      "thinking": { "type": "disabled" }
-    }
+# AI 模型统一在下方 models: 注册表配置（旧版顶层 ai: 块仍兼容，新配置不必写）。
 
 # Processing options
 options:
@@ -76,7 +65,7 @@ latex:
   # Model registry keys for each specialised AI session.
   # Each key must exist in the models: registry below; entries there
   # may declare their own base_url / api_key / model / request_body
-  # (empty fields inherit the top-level ai block).
+  # (empty fields inherit the models.text default entry).
   classifier_model: "classifier" # 图像分类 AI（text/vector/raster 标记）
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
@@ -125,8 +114,15 @@ verify:
 # top-level ai block, so a minimal setup only sets model:.
 # ----------------------------------------------------------------
 models:
-  text:                        # img2text 等基础流程使用的默认模型
-    model: "Qwen/Qwen3.6-27B"  # 与顶层 ai.model 二选一：ai.model 填 "text" 即引用此处
+  text:                        # img2text 等基础流程使用的默认模型（必填）
+    base_url: "https://your-api-proxy.com/v1"
+    api_key: "sk-YOUR-API-KEY-HERE"
+    model: "Qwen/Qwen3.6-27B"
+    request_body:              # additional body params for the API call
+      enable_thinking: false   # Qwen 3.6+
+      extra_body: {            # OpenAI/Anthropic/DeepSeek
+        "thinking": { "type": "disabled" }
+      }
   classifier:
     model: "glm-5.3-flash"       # 要求具备视觉能力
   drawing:

@@ -13,15 +13,21 @@ import (
 
 // Config is the root configuration loaded from config.yaml.
 type Config struct {
-	Mineru  MinerUConfig  `yaml:"mineru"`
+	Mineru MinerUConfig `yaml:"mineru"`
+	// AI is the resolved default model for the basic pipelines
+	// (img2text etc.). It is DERIVED from the models: registry entry
+	// "text" at load time; a legacy top-level ai: block (or an
+	// ai.model registry reference) is still honoured for backwards
+	// compatibility but new configs should not set it.
 	AI      AIConfig      `yaml:"ai"`
 	Options OptionsConfig `yaml:"options"`
 	Paths   PathsConfig   `yaml:"paths"`
-	// Models is the named model registry. Every specialised AI used by
-	// the latex / verify pipelines (classifier, drawing, style, chapter,
-	// convert, verifier) references an entry here by name, so each model
-	// can have its own base_url / api_key / request_body. Fields left
-	// empty fall back to the top-level ai block.
+	// Models is the named model registry — the single source of truth
+	// for every AI (img2text uses the "text" entry; the latex / verify
+	// pipelines use classifier / drawing / style / chapter / convert /
+	// verifier). Each entry may declare its own base_url / api_key /
+	// model / request_body; empty fields inherit from the resolved
+	// default (the "text" entry, or a legacy top-level ai: block).
 	Models map[string]ModelConfig `yaml:"models"`
 	Latex  LatexConfig            `yaml:"latex"`
 	Verify VerifyConfig           `yaml:"verify"`
@@ -488,30 +494,39 @@ func (c *Config) LatexSession(name string) SessionTuning {
 	return s
 }
 
-// resolveAIReference lets the top-level ai block reference a named
-// registry entry: when ai.model matches a key of models:, the block
-// inherits that entry's base_url / api_key / model / request_body
-// (entry values win; empty entry fields keep the ai values). This way
-// img2text and every other consumer only needs a registered model
-// name — all credentials live in the registry.
+// defaultModelKey is the registry entry that provides the default
+// model for the basic pipelines (img2text etc.).
+const defaultModelKey = "text"
+
+// resolveAIReference derives the top-level AI block from the models:
+// registry. The canonical source is the "text" entry; additionally a
+// legacy ai.model that names a registry key still resolves (entry
+// values win, empty entry fields keep the ai values). Configs that
+// only use the registry need no ai: block at all.
 func resolveAIReference(cfg *Config) {
-	if cfg.AI.Model == "" || len(cfg.Models) == 0 {
+	if len(cfg.Models) == 0 {
 		return
 	}
-	entry, ok := cfg.Models[cfg.AI.Model]
-	if !ok {
-		return
+	apply := func(entry ModelConfig) {
+		if entry.BaseURL != "" {
+			cfg.AI.BaseURL = entry.BaseURL
+		}
+		if entry.APIKey != "" {
+			cfg.AI.APIKey = entry.APIKey
+		}
+		if entry.Model != "" {
+			cfg.AI.Model = entry.Model
+		}
+		if entry.RequestBody != nil {
+			cfg.AI.RequestBody = entry.RequestBody
+		}
 	}
-	if entry.BaseURL != "" {
-		cfg.AI.BaseURL = entry.BaseURL
+	if entry, ok := cfg.Models[defaultModelKey]; ok {
+		apply(entry)
 	}
-	if entry.APIKey != "" {
-		cfg.AI.APIKey = entry.APIKey
-	}
-	if entry.Model != "" {
-		cfg.AI.Model = entry.Model
-	}
-	if entry.RequestBody != nil {
-		cfg.AI.RequestBody = entry.RequestBody
+	if cfg.AI.Model != "" {
+		if entry, ok := cfg.Models[cfg.AI.Model]; ok && cfg.AI.Model != defaultModelKey {
+			apply(entry)
+		}
 	}
 }

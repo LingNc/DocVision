@@ -315,3 +315,38 @@ models:
 		t.Fatalf("partial registry entry must merge with fallback: %+v", cfg3.AI)
 	}
 }
+
+// New-style configs drop the top-level ai: block entirely; the
+// "text" registry entry is the single source for img2text etc.
+func TestResolveAIReference_RegistryOnly(t *testing.T) {
+	data := []byte(`
+models:
+  text:
+    base_url: "https://registry.example/v1"
+    api_key: "sk-registry"
+    model: "glm-5.3-flash"
+    request_body:
+      enable_thinking: false
+`)
+	cfg := &Config{}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		t.Fatal(err)
+	}
+	setDefaults(cfg)
+	if cfg.AI.BaseURL != "https://registry.example/v1" || cfg.AI.APIKey != "sk-registry" || cfg.AI.Model != "glm-5.3-flash" {
+		t.Fatalf("models.text not promoted to AI: %+v", cfg.AI)
+	}
+	if cfg.AI.RequestBody == nil {
+		t.Fatal("request_body not promoted")
+	}
+
+	// Other registry entries inherit the resolved default for empty
+	// fields (base_url/api_key) but keep their own model name.
+	mc, _ := cfg.ResolveModel("classifier")
+	if mc.BaseURL != "https://registry.example/v1" || mc.APIKey != "sk-registry" {
+		t.Fatalf("classifier did not inherit default credentials: %+v", mc)
+	}
+	if mc.Model != "glm-5.3-flash" {
+		t.Fatalf("classifier with no model must inherit the default model: %+v", mc)
+	}
+}

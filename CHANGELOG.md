@@ -4,6 +4,8 @@
 
 ### Changed
 
+- 配置精简：移除模板中的顶层 `ai:` 块，所有模型统一在 `models:` 注册表配置；`models.text` 成为 img2text 等基础流程的默认模型（必填），其余条目空字段自动继承；旧配置的 `ai:` 块（含 ai.model 引用注册表名）保持完全兼容
+
 - 配置整合：`ai.model` 可直接引用 `models:` 注册表名（如 `text`），base_url/api_key/request_body 从注册表继承，凭据只需维护一份；img2text 等基础流程同样生效
 - 会话工具轮数 `max_tool_rounds` 默认 0 = 不限制（代码内安全上限兜底）
 - `docvision latex` 支持位置参数只处理指定 markdown 文件；不带参数则批量处理 `output/` 全部文件

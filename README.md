@@ -31,7 +31,7 @@ cp config.example.yaml config.yaml
 编辑 `config.yaml`，填入：
 
 - MinerU API token（从 [mineru.net](https://mineru.net) 获取）
-- AI 模型 API 地址和密钥（兼容 OpenAI 接口的模型）
+- AI 模型：统一在 `models:` 注册表配置，其中 `models.text` 为 img2text 等基础流程的默认模型（必填）；每个专用 AI（classifier/drawing/style/chapter/convert/verifier）可单独配置 base_url/api_key/model/request_body，空字段自动继承默认条目（兼容旧版顶层 `ai:` 块）
 
 ### Go 版本（推荐）
 
@@ -234,8 +234,8 @@ docvision workflow --step verify
 | `options.mermaid_fix_attempts` | Mermaid 独立修正次数（0 表示无限次，受代码内安全上限保护） | 3 |
 | `options.mermaid_timeout` | 单个 Mermaid 验证超时（秒） | 30 |
 | `options.max_tokens` | API 调用最大 token 数 | 65536 |
-| `ai.model` | 可直接填 `models:` 注册表中的模型名，凭据从注册表继承 | - |
-| `models.<name>` | 每个专用 AI 的独立 base_url/api_key/model/request_body | - |
+| `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body） | - |
+| `models.<name>` | 每个专用 AI 的独立 base_url/api_key/model/request_body，空字段继承 `models.text` | - |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
 | `latex.sessions.*.max_tool_rounds` | 会话工具轮数上限，0=不限制（代码内安全上限兜底） | 0 |
 | `latex.sessions.*.context_limit` | 会话上下文窗口（tokens），达到阈值自动 AI 压缩 | 131072 |
