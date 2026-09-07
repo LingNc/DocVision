@@ -204,6 +204,10 @@ type OptionsConfig struct {
 	MermaidCommand      string  `yaml:"mermaid_command"`
 	MermaidFixAttempts  *int    `yaml:"mermaid_fix_attempts"`
 	MermaidTimeout      int     `yaml:"mermaid_timeout"`
+	// TikZ compile-check (auto/strict/off). Engine defaults to xelatex
+	// with automatic fallback to pdflatex/lualatex.
+	TikzValidation       string  `yaml:"tikz_validation"`
+	TikzEngine          string  `yaml:"tikz_engine"`
 	MaxTokens           int     `yaml:"max_tokens"`
 }
 
@@ -356,6 +360,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Options.MermaidValidation == "" {
 		cfg.Options.MermaidValidation = "auto"
+	}
+	if cfg.Options.TikzValidation == "" {
+		cfg.Options.TikzValidation = "auto"
 	}
 	if cfg.Options.MermaidCommand == "" {
 		cfg.Options.MermaidCommand = "mmdc"

@@ -30,6 +30,7 @@ If ambiguous or overly complex, call get_more_context to resolve; if still uncle
 2. **Mermaid** for flowcharts, Gantt charts, sequence diagrams, class diagrams, state diagrams, ER diagrams, mind maps, timeline, Sankey, pie charts, quadrant charts, requirement diagrams. Use ` + "```mermaid code block." + `
 3. **Markdown table** for tabular data: ALL rows and columns exactly as shown.
 4. **LaTeX** for formulas: $$...$$ block or $...$ inline.
+4b. **TikZ** for geometric/structural figures that need precise vector rendering (geometry constructions, precise plots): use a tikz code block with a standalone-compatible body. Prefer Mermaid when a listed Mermaid diagram type fits.
 5. **Structured text** for diagrams not suitable for Mermaid: preserve ALL labels, arrows, relationships shown.
 6. **Code block** for code screenshots.
 7. **Graph description**: key data points, max/min, trends for charts.
@@ -746,10 +747,23 @@ func ProcessOneImage(
 	if mode != "" && mode != "off" {
 		timeout := time.Duration(opts.MermaidTimeout) * time.Second
 		command := opts.MermaidCommand
+		tikzMode := strings.ToLower(strings.TrimSpace(opts.TikzValidation))
+		tikzEngine := opts.TikzEngine
 		validator = func(response string) MermaidValidationResult {
+			// TikZ responses route to the LaTeX compile check; Mermaid
+			// keeps its own CLI validation. Pure text/math/table answers
+			// hit ValidateMermaid's no-block fast path (valid).
+			if tikzMode != "off" && len(ExtractTikZBlocks(response)) > 0 && !hasMermaidBlock(response) {
+				return ValidateTikZ(context.Background(), response, tikzEngine, timeout)
+			}
 			return ValidateMermaid(context.Background(), response, command, timeout)
 		}
-		repairBuilder = buildMermaidRepairMessage
+		repairBuilder = func(current, validationError string) string {
+			if len(ExtractTikZBlocks(current)) > 0 && !hasMermaidBlock(current) {
+				return buildTikzRepairMessage(current, validationError)
+			}
+			return buildMermaidRepairMessage(current, validationError)
+		}
 	}
 
 	result, status := CallAIWithTools(
@@ -788,7 +802,7 @@ func ProcessOneImage(
 			`Your previous response was REJECTED because it did NOT start with "[IMG_TYPE: <type>]".`+"\n"+
 				"Here is your previous response (for reference only):\n"+
 				"---\n%s\n---\n\n"+
-				"Start EXACTLY with \"[IMG_TYPE:\" followed by the type, then the pure description (mermaid/table/latex/text). "+
+				"Start EXACTLY with \"[IMG_TYPE:\" followed by the type, then the pure description (mermaid/tikz/table/latex/text/flowchart/...). "+
 				"Do NOT write \"The image shows\", \"This diagram illustrates\", or any similar analysis.",
 			result,
 		)

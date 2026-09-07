@@ -70,7 +70,7 @@ type runResult struct {
 // Run is the top-level entry point. It scans the output directory for
 // markdown files, extracts every image reference, dispatches the work
 // across N worker goroutines, persists per-item progress, and finally
-// rewrites the markdown files with `<!-- IMG: ... --> [AI] result` blocks.
+// rewrites the markdown files with type-based embeds (direct text for
 //
 // The flow matches the Python reference:
 //
@@ -80,7 +80,7 @@ type runResult struct {
 //  4. In test mode, sample N items with the given seed.
 //  5. Run a worker pool that puts results on a channel.
 //  6. A single writer goroutine writes per-item JSON progress files.
-//  7. Finally rewrite each *.md with the [AI] blocks inserted.
+//  7. Finally rewrite each *.md with the embed blocks inserted.
 func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 	if logger == nil {
 		return fmt.Errorf("img2text.Run: logger is nil")
@@ -269,7 +269,7 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		}
 	}
 
-	// Final pass: rewrite each *.md with the [AI] blocks. Merge the
+	// Final pass: rewrite each *.md with the embed blocks. Merge the
 	// history recorded on disk with the work we just produced this run so
 	// the rebuild survives "all done, nothing to process" cases (e.g. the
 	// finally file was deleted but progress_items is intact).
@@ -345,9 +345,7 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 
 		nc := entry.content
 		for _, r := range reps {
-			block := "\n\n<!-- IMG: " + r.item.ImgPath + " -->\n[AI] " +
-				r.item.Result + "\n\n<!-- /IMG -->\n\n"
-			nc = nc[:r.off.Start] + block + nc[r.off.End:]
+			nc = nc[:r.off.Start] + embedBlockFor(r.item.Result) + nc[r.off.End:]
 		}
 		// Only write when the rebuilt content differs from what is already
 		// on disk. Files whose images were fully processed in earlier rounds
@@ -682,4 +680,45 @@ func resolveSeed(seedStr string) (int64, int64) {
 		return 42, 42
 	}
 	return n, n
+}
+
+// embedBlockFor converts an AI result (with its [IMG_TYPE:] prefix)
+// into the final markdown embed, chosen by content type:
+//   - non-image content (pure text, LaTeX math, tables, code) embeds
+//     DIRECTLY so downstream AI readers get searchable text;
+//   - mermaid / tikz embed as their code blocks (already validated);
+//   - remaining visual types keep a readable [Image]( description ).
+func embedBlockFor(result string) string {
+	typ, body := splitImgTypePrefix(result)
+	body = strings.TrimSpace(body)
+	switch {
+	case typ == "text" || typ == "latex" || typ == "math" || typ == "formula" ||
+		typ == "table" || typ == "code":
+		return "\n\n" + body + "\n\n"
+	case typ == "mermaid" || typ == "tikz",
+		strings.Contains(body, "```mermaid"), strings.Contains(body, "```tikz"):
+		// Diagram types whose body IS an already-validated code block.
+		return "\n\n" + body + "\n\n"
+	default:
+		return "\n\n[Image]( " + body + " )\n\n"
+	}
+}
+
+// Missing or malformed prefixes return ("", whole input) and the
+// caller falls back to the [Image] embed.
+func splitImgTypePrefix(result string) (string, string) {
+	idx := strings.Index(result, "[IMG_TYPE:")
+	if idx < 0 {
+		return "", result
+	}
+	rest := result[idx+len("[IMG_TYPE:"):]
+	end := strings.Index(rest, "]")
+	if end < 0 {
+		return "", result
+	}
+	typ := strings.ToLower(strings.TrimSpace(rest[:end]))
+	body := rest[end+1:]
+	body = strings.TrimPrefix(body, "\r")
+	body = strings.TrimPrefix(body, "\n")
+	return typ, body
 }

@@ -31,7 +31,7 @@ cp config.example.yaml config.yaml
 编辑 `config.yaml`，填入：
 
 - MinerU API token（从 [mineru.net](https://mineru.net) 获取）
-- AI 模型：统一在 `models:` 注册表配置，其中 `models.text` 为 img2text 等基础流程的默认模型（必填）；每个专用 AI（classifier/drawing/style/chapter/convert/verifier）可单独配置 base_url/api_key/model/request_body，空字段自动继承默认条目（兼容旧版顶层 `ai:` 块）
+- AI 模型：统一在 `models:` 注册表配置，其中 `models.text` 为 img2text 等基础流程的默认模型（必填）；每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url/api_key/model/request_body，空字段自动继承默认条目（兼容旧版顶层 `ai:` 块）
 
 ### Go 版本（推荐）
 
@@ -115,6 +115,18 @@ docvision splitlog    按线程 ID 拆分日志
 docvision init        生成配置模板
 ```
 
+### img2text 嵌入格式
+
+AI 结果带 `[IMG_TYPE: <类型>]` 标签，写入 `finally/` 的 markdown 时按类型选择嵌入方式：
+
+| 类型 | 嵌入方式 |
+| --- | --- |
+| text / latex（数学公式）/ table / code | **直接嵌入正文**（无任何包装标记，方便后续 AI 检索阅读） |
+| mermaid / tikz | 代码块直接嵌入（tikz 经过 LaTeX 编译校验，失败自动回炉修复） |
+| 其余视觉类型（截图/照片/复杂图等） | `[Image]( 可读描述 )` |
+
+tikz 校验由 `options.tikz_validation`（off/auto/strict，默认 auto）与 `options.tikz_engine`（默认 xelatex，自动回退 pdflatex/lualatex）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。
+
 ### img2text 测试模式
 
 ```bash
@@ -156,14 +168,14 @@ docvision init        生成配置模板
 
 **档位 1（`latex.level: 1`）—— 全书 LaTeX**
 
-1. **样式分析 AI**（`models.style`）：通过查看页面/图像（支持裁剪放大）、读取解析 md 等工具分析全书样式，产出 `book.cls` + 结构化使用手册 + 案例（自动试编译，失败自动回炉）
+1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/work/style/`），通过 `view_page` 工具**按需渲染** MinerU 保留的原始扫描页（`*_origin.pdf`，调用哪页渲染哪页并缓存，支持裁剪放大）、`list_images`/`view_image` 看提取图、`read_md` 读解析文本，分析全书样式后用 `write_file` 增量起草并 `submit_style` 提交 `book.cls` + 使用手册 + 案例（自动试编译，失败回炉）。字体通过 `list_fonts` 查看、`install_font` 下载到 `paths.fonts`；无法提供的字体会标注替换方法
 2. **章节划分 AI**（`models.chapter`）：grep 检索 + 最小 bash 沙箱（虚拟文件系统只有这一个文件），按行号划分章节（结构化提交，全覆盖校验）
-3. **转换 AI** 并发逐章转 `.tex`（只读他人产物，仅可写自己的文件，支持跨章引用）
-4. 汇总为多文件 `.tex` 项目 → 编译全书 PDF（失败进入修复会话）→ 生成单文件 `standalone.tex`
+3. **转换 AI** 并发逐章转 `.tex`（只读全部章节文件与他人产物，仅可写自己的文件）→ 每章提交后由 **核对 AI**（`models.checker`，小文本模型即可）比对原章 md 与产物，发现问题回炉一轮，遗留问题记录为 `.checker` 备注供终审处理
+4. 汇总为多文件 `.tex` 项目 → 编译全书 PDF（失败进入**修复会话**：读文件/改文件/重编译 + 字体工具核对样式）→ 生成单文件 `standalone.tex`
 
 ### AI 会话基础设施
 
-- **模型注册表** `models:`：每个专用 AI（classifier/drawing/style/chapter/convert/verifier）可单独配置 base_url / api_key / model / request_body
+- **模型注册表** `models:`：每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url / api_key / model / request_body
 - **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到阈值自动 **AI 压缩**会话（保留关键决策/成果，丢弃草稿与工具噪音）
 - **可分离工具**：会话工具按需注册（编译预览、提交确认、grep、bash 沙箱、受限文件读写等）
 - **断点续传**：档位2逐图进度、档位1逐阶段进度（progress.json）
@@ -244,9 +256,16 @@ docvision verify                               # AI 核对报告
 | `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body） | - |
 | `models.<name>` | 每个专用 AI 的独立 base_url/api_key/model/request_body，空字段继承 `models.text` | - |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
-| `latex.sessions.*.max_tool_rounds` | 会话工具轮数上限，0=不限制（代码内安全上限兜底） | 0 |
+| `latex.sessions.*.max_tool_rounds` | 会话工具轮数上限，0=真正不限制（无安全上限） | 128 |
 | `latex.sessions.*.context_limit` | 会话上下文窗口（tokens），达到阈值自动 AI 压缩 | 131072 |
 | `verify.enabled` | AI 核对开关（默认关闭） | false |
+| `paths.latex_output` | 档位2 LaTeX 输出目录 | ./finally_latex |
+| `paths.latex_project` | 档位1 全书工作目录 | ./latex_project |
+| `paths.fonts` | AI 字体目录（install_font 可下载字体到此） | ./fonts |
+| `img2text.model` | 基础流程模型（models: 注册表代号，默认 text） | text |
+| `options.tikz_validation` | img2text tikz 代码块 LaTeX 编译校验（off/auto/strict） | auto |
+| `options.tikz_engine` | tikz 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
+| `latex.checker_model` | 每章核对模型（留空用 convert_model） | 空 |
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |
 

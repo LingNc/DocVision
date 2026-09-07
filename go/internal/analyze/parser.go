@@ -67,7 +67,7 @@ func AnalyzeLog(logPath string) ([]Session, error) {
 	}
 	defer f.Close()
 
-threads := make(map[string]*threadLog)
+	threads := make(map[string]*threadLog)
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 

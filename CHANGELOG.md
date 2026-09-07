@@ -2,7 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- 档位1 样式分析虚拟工作区（`latex_project/work/style/`）：write_file 增量起草，submit_style 可引用文件而非全量重发
+- 字体管理：`paths.fonts` 目录 + `list_fonts`/`install_font` 工具（样式分析与终审修复会话可用），缺失字体标注替换方法
+- 每章核对 AI：`latex.checker_model`（默认用 convert_model，可为小文本模型），逐章比对产物与原 md，问题回炉一轮，遗留记录 `.checker` 备注
+- img2text 支持 TikZ：提示词新增 tikz 类型，`options.tikz_validation`/`options.tikz_engine` 用 LaTeX 编译校验（失败自动回炉修复）
+
 ### Changed
+
+- img2text 输出嵌入格式按类型分流：纯文本/数学公式/表格/代码直接嵌入正文（无包装标记），mermaid/tikz 代码块直接嵌入，其余视觉类型用 `[Image]( 描述 )`——不再使用 `<!-- IMG -->`/`[AI]` 包装（**注意：v1.3.0 及之前的 finally/ 输出格式不变，仅新生成内容使用新格式**）
+- `docvision latex` 自助化：无参数即从 `files/` 跑全流程（自动跳过已处理）；单文件传 files/ 中的 PDF/DOCX；自备 md 也放 files/；禁止拿 output/ 产物当输入；结束后自动接日志分析
+- 移除 `workflow --step latex/verify`（latex 本身就是完整工作流）
+- 档位1 原始页面改为 `view_page` 工具**按需渲染**（AI 看哪页渲染哪页并缓存），不再全量预渲染
+- 会话工具轮数：模板默认 128；显式 `0` = 真正不限制（无安全上限）
+- `paths:` 新增 latex_output/latex_project/fonts；img2text 独立配置块（model 用 models: 代号）
 
 - `docvision latex` 自助化：位置参数为 PDF/DOCX/目录时自动补跑前置流程（split→mineru→organize，隔离于 ~/.docvision/jobs 作业目录）再进入 LaTeX，无需先手动跑 workflow；md 名字参数直接处理 output/ 中对应文件；不带参数批量处理全部 md
 - 档位1 样式分析改用 MinerU 保留的原始扫描页面（`*_origin.pdf` 自动渲染为整页 PNG 并缓存到 latex_project/pages/），新增 list_pages/view（裁剪+放大）工具；原始 PDF 缺失时退化为提取图片分析并日志提示

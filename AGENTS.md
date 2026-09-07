@@ -7,7 +7,7 @@
 
 ## 维护内容
 
-- **DocVision（本目录主体）**：PDF→Markdown 自动化工作流（Go）。v1.2 起新增 LaTeX 输出两档位（`docvision latex`，图片矢量化 / 全书 LaTeX）、AI 会话基础设施（`go/internal/session`：可分离工具、上下文窗口与自动压缩）、模型注册表（`config.yaml models:`）、AI 核对（`verify.enabled` 默认关闭）。开发约定：分步开发并适时提交 git；新增配置项必须同步 `config.go` 默认值、`default.yaml`/`config.example.yaml` 模板与 `setup` 严格校验。
+- **DocVision（本目录主体）**：PDF→Markdown 自动化工作流（Go）。v1.2 起新增 LaTeX 输出两档位（`docvision latex`，图片矢量化 / 全书 LaTeX）、AI 会话基础设施（`go/internal/session`：可分离工具、上下文窗口与自动压缩）、模型注册表（`config.yaml models:`）、AI 核对（`verify.enabled` 默认关闭）。v1.3+ latex 自带完整工作流（files/ 输入 → 自动跳过前置 → 按档位处理 → 日志分析；原始扫描页 view_page 按需渲染；样式虚拟工作区；fonts 字体管理；每章 checker 小模型核对），workflow 已不再包含 latex/verify 步骤。v1.4 起 img2text 嵌入按类型分流（文本/公式/表格直接嵌入，mermaid/tikz 代码块，视觉类型 [Image]( 描述 )），不再使用 <!-- IMG -->/[AI] 包装。开发约定：分步开发并适时提交 git；新增配置项必须同步 `config.go` 默认值、`default.yaml`/`config.example.yaml` 模板与 `setup` 严格校验。
 
 
 ## 规则

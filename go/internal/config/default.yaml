@@ -44,6 +44,8 @@ options:
   mermaid_command: "mmdc"     # Mermaid CLI command
   mermaid_fix_attempts: 3     # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
   mermaid_timeout: 30         # Mermaid validation timeout in seconds
+  tikz_validation: "auto"  # off, auto, strict；tikz 代码块用 LaTeX 编译校验
+  tikz_engine: "xelatex"    # tikz 校验引擎（缺 pdflatex/lualatex 自动回退）
   max_tokens: 65536
 
 # Paths

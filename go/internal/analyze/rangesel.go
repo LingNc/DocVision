@@ -104,7 +104,6 @@ func parseTimePoint(s string, now time.Time) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("无法解析时间点 %q（示例: 2026Y9M2D / 2026-09-02 / 20260902_1530 / +2d）", s)
 }
 
-
 // dateOnly reports whether s is a pure date with no time component.
 func dateOnly(s string) bool {
 	s = strings.TrimSpace(s)
