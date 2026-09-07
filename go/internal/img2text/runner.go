@@ -700,7 +700,7 @@ func embedBlockFor(result string) string {
 		typ == "table" || typ == "code":
 		return "\n\n" + body + "\n\n"
 	case typ == "mermaid" || typ == "tikz",
-		strings.Contains(body, "```mermaid"), strings.Contains(body, "```tikz"):
+		strings.Contains(body, "```mermaid"), strings.Contains(body, "```latex"), strings.Contains(body, "```tikz"):
 		// Diagram types whose body IS an already-validated code block.
 		return "\n\n" + body + "\n\n"
 	default:

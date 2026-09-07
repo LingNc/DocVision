@@ -204,10 +204,10 @@ type ToolsConfig struct {
 		FixAttempts *int   `yaml:"fix_attempts"` // 0 = unlimited (in-code cap)
 		Timeout     int    `yaml:"timeout"`      // seconds per validation
 	} `yaml:"mermaid"`
-	Tikz struct {
-		Validation string `yaml:"validation"` // off, auto, strict
+	Latex struct {
+		Validation string `yaml:"validation"` // off, auto, strict (latex code block compile check)
 		Engine     string `yaml:"engine"`     // xelatex / pdflatex / lualatex
-	} `yaml:"tikz"`
+	} `yaml:"latex"`
 }
 
 // OptionsConfig holds tuning knobs for the image-to-text processing pipeline.
@@ -230,9 +230,9 @@ type OptionsConfig struct {
 	MermaidTimeout     int     `yaml:"-"` // set from tools.mermaid.timeout
 	// TikZ compile-check (auto/strict/off). Engine defaults to xelatex
 	// with automatic fallback to pdflatex/lualatex.
-	TikzValidation string `yaml:"-"` // set from tools.tikz.validation
-	TikzEngine     string `yaml:"-"` // set from tools.tikz.engine
-	MaxTokens      int    `yaml:"max_tokens"`
+	LatexValidation string `yaml:"-"` // set from tools.latex.validation
+	LatexEngine     string `yaml:"-"` // set from tools.latex.engine
+	MaxTokens       int    `yaml:"max_tokens"`
 	// LogLevel: info (default) or debug. Debug writes every AI prompt,
 	// tool call and tool result into the log file (console unaffected).
 	LogLevel string `yaml:"log_level"`
@@ -263,7 +263,7 @@ type PathsConfig struct {
 // zero-valued fields, and returns the resulting Config.
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
-const CurrentConfigVersion = 3
+const CurrentConfigVersion = 4
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -387,11 +387,11 @@ func setDefaults(cfg *Config) {
 	if cfg.Tools.Mermaid.Timeout == 0 {
 		cfg.Tools.Mermaid.Timeout = 30
 	}
-	if cfg.Tools.Tikz.Validation == "" {
-		cfg.Tools.Tikz.Validation = "auto"
+	if cfg.Tools.Latex.Validation == "" {
+		cfg.Tools.Latex.Validation = "auto"
 	}
-	if cfg.Tools.Tikz.Engine == "" {
-		cfg.Tools.Tikz.Engine = "xelatex"
+	if cfg.Tools.Latex.Engine == "" {
+		cfg.Tools.Latex.Engine = "xelatex"
 	}
 	// Runtime carriers derived from tools:.
 	cfg.Options.MaxContextLinesUp = cfg.Tools.Context.InitialUp
@@ -403,8 +403,8 @@ func setDefaults(cfg *Config) {
 	cfg.Options.MermaidCommand = cfg.Tools.Mermaid.Command
 	cfg.Options.MermaidFixAttempts = cfg.Tools.Mermaid.FixAttempts
 	cfg.Options.MermaidTimeout = cfg.Tools.Mermaid.Timeout
-	cfg.Options.TikzValidation = cfg.Tools.Tikz.Validation
-	cfg.Options.TikzEngine = cfg.Tools.Tikz.Engine
+	cfg.Options.LatexValidation = cfg.Tools.Latex.Validation
+	cfg.Options.LatexEngine = cfg.Tools.Latex.Engine
 	if cfg.Options.Concurrency == 0 {
 		cfg.Options.Concurrency = 10
 	}
@@ -420,9 +420,7 @@ func setDefaults(cfg *Config) {
 	if cfg.Options.MermaidValidation == "" {
 		cfg.Options.MermaidValidation = "auto"
 	}
-	if cfg.Options.TikzValidation == "" {
-		cfg.Options.TikzValidation = "auto"
-	}
+
 	if cfg.Options.LogLevel == "" {
 		cfg.Options.LogLevel = "info"
 	}

@@ -775,7 +775,7 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 			// 档位1：直接内嵌 LaTeX 代码，转换 AI 原样粘贴进 .tex，
 			// 不产生也不引用 figures/*.pdf 资源。
 			if p.TikzCode != "" {
-				return "```tikz\n" + p.TikzCode + "\n```"
+				return "```latex\n" + p.TikzCode + "\n```"
 			}
 			if p.Content != "" {
 				return p.Content
@@ -786,7 +786,7 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 			return r.rasterBlock(p, mdName, outDir)
 		}
 		if r.cfg.Latex.InsertImageDescription && p.TikzCode != "" {
-			return "```tikz\n" + p.TikzCode + "\n```"
+			return "```latex\n" + p.TikzCode + "\n```"
 		}
 		label := p.Label
 		if label == "" {

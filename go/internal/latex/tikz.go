@@ -45,7 +45,7 @@ func RunTikZSession(
 	engineIsXe := strings.Contains(strings.ToLower(comp.engine), "xe") ||
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
-	sess := session.NewSession(client, modelCfg, tuning, tikzSystemPrompt, []session.Tool{
+	sess := session.NewSession(client, modelCfg, tuning, latexFigurePrompt, []session.Tool{
 		&CompilePreviewTool{Comp: comp, State: state, EngineIsXe: engineIsXe},
 		&SubmitFigureTool{State: state},
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},

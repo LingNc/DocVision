@@ -21,10 +21,10 @@ Judgement order:
 Respond with ONLY a JSON object, no fences, no prose. Put "kind" LAST so you can judge from your own description first:
 {"confidence":0.0-1.0,"label":"<short name of the content>","reason":"<one short sentence: what it shows and why this kind>","kind":"text|table|vector|raster"}`
 
-// tikzSystemPrompt drives the figure-drawing session (level 2 vector
+// latexFigurePrompt drives the figure-drawing session (level 2 vector
 // path). Mermaid is explicitly forbidden: the LaTeX pipeline compiles
 // TikZ, not mmdc.
-const tikzSystemPrompt = `You are an expert LaTeX vector illustrator. You redraw ONE document image as vector LaTeX graphics — any LaTeX approach that reproduces the structure faithfully: TikZ (nodes/arrows/trees/mindmaps), pgfplots (function/coordinate plots), tabular/array (complex tables), or a combination.
+const latexFigurePrompt = `You are an expert LaTeX vector illustrator. You redraw ONE document image as vector LaTeX graphics — any LaTeX approach that reproduces the structure faithfully: TikZ (nodes/arrows/trees/mindmaps), pgfplots (function/coordinate plots), tabular/array (complex tables), or a combination.
 
 ## Workflow
 1. Study the attached image carefully (boxes, arrows, hierarchy, axes, curves, labels, proportions).
@@ -99,7 +99,7 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 ## Conversion rules
 1. Use the class commands from the manual for chapter/section titles and any special environments.
 2. Images come in TWO forms:
-   - tikz FENCED CODE BLOCKS (three-backtick fences): the figure is ALREADY LaTeX. Paste the code verbatim inside the class figure environment, stripping the fence lines. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
+   - latex FENCED CODE BLOCKS (three-backtick latex fences): the figure is ALREADY LaTeX. Paste the code verbatim inside the class figure environment, stripping the fence lines. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
    - markdown image links to raster files under images/: includegraphics them (same path) inside the class figure environment (or standard figure+caption if the manual does not define one). NEVER invent new image files.
 3. Markdown tables -> LaTeX tables (booktabs if available per manual).
 4. Inline markdown (bold/italic/code/links) -> the LaTeX equivalent. Math is already LaTeX in the markdown — keep it verbatim inside math environments.

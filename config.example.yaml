@@ -1,6 +1,6 @@
 # DocVision Configuration (example - copy to config.yaml and fill in your values)
 
-config_version: 3
+config_version: 4
 
 # MinerU API Configuration
 mineru:
@@ -117,9 +117,9 @@ tools:
     command: "mmdc"             # Mermaid CLI command
     fix_attempts: 3             # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
     timeout: 30                 # Mermaid validation timeout in seconds
-  tikz:
-    validation: "auto"          # off, auto, strict; tikz code blocks are compile-checked
-    engine: "xelatex"           # tikz validation engine (pdflatex/lualatex fallback)
+  latex:
+    validation: "auto"          # off, auto, strict; latex code blocks are compile-checked
+    engine: "xelatex"           # latex validation engine (pdflatex/lualatex fallback)
 verify:
   enabled: false                 # 默认关闭；开启后自动流程核对每张图与内容
   verifier_model: "verifier"     # models: 中支持图像的校验模型

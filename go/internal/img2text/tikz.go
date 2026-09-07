@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var tikzBlockRe = regexp.MustCompile("(?is)```[ \t]*tikz[ \t]*\\r?\\n(.*?)```")
+var tikzBlockRe = regexp.MustCompile("(?is)```[ \t]*(?:tikz|latex)[ \t]*\\r?\\n(.*?)```") // latex 为主，tikz 为旧格式兼容
 
 // ExtractTikZBlocks returns the contents of fenced TikZ code blocks.
 func ExtractTikZBlocks(text string) []string {

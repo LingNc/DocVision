@@ -126,10 +126,10 @@ AI 结果带 `[IMG_TYPE: <类型>]` 标签，写入 `finally/` 的 markdown 时�
 | 类型 | 嵌入方式 |
 | --- | --- |
 | text / latex（数学公式）/ table / code | **直接嵌入正文**（无任何包装标记，方便后续 AI 检索阅读） |
-| mermaid / tikz | 代码块直接嵌入（tikz 经过 LaTeX 编译校验，失败自动回炉修复） |
+| mermaid / latex | 代码块直接嵌入（latex 代码块经过 LaTeX 编译校验，失败自动回炉修复） |
 | 其余视觉类型（截图/照片/复杂图等） | `[Image]( 可读描述 )` |
 
-tikz 校验由 `options.tikz_validation`（off/auto/strict，默认 auto）与 `options.tikz_engine`（默认 xelatex，自动回退 pdflatex/lualatex）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。
+latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 auto）与 `tools.latex.engine`（默认 xelatex，自动回退 pdflatex/lualatex）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。
 
 ### img2text 测试模式
 
@@ -168,13 +168,13 @@ tikz 校验由 `options.tikz_validation`（off/auto/strict，默认 auto）与 `
    - `vector`：函数图像/立体结构/流程图等可矢量重绘图形 → 进入作图流程
    - `raster`：照片/截图等 → 保留原图链接（`insert_image_description: true` 时嵌入可读解释文本）
 2. **作图 AI**（`models.drawing`）在独立会话中重绘矢量图（TikZ/pgfplots/tabular 等任意 LaTeX 方式）→ `compile_preview` 工具自动编译并栅格化为 PNG 回给模型**视觉核对** → 迭代修正 → `submit` 确认提交。会话附带 `image_context`/`view_image` 工具：跨页拆分的长表/大图可查看相邻图片及其上下文，**一次绘制合并图**并在 submit 时声明吸收的续片（续片引用自动删除、不再重复处理）
-3. 编译产物 PDF 按矢量图嵌入 Markdown（`insert_image_description: true` 时嵌入 tikz 代码块）；矢量转换失败时回退保留原图并输出警告日志
+3. 编译产物 PDF 按矢量图嵌入 Markdown（`insert_image_description: true` 时嵌入 latex 代码块）；矢量转换失败时回退保留原图并输出警告日志
 
 **档位 1（`latex.level: 1`）—— 全书 LaTeX**
 
 1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/work/style/`），通过 `view_page` 工具**按需渲染** MinerU 保留的原始扫描页（`*_origin.pdf`，调用哪页渲染哪页并缓存，支持裁剪放大）、`list_images`/`view_image` 看提取图、`read_md` 读解析文本，分析全书样式后用 `write_file` 增量起草并 `submit_style` 提交 `book.cls` + 使用手册 + 案例（自动试编译，失败回炉）。字体通过 `list_fonts` 查看、`install_font` 下载到 `paths.fonts`；无法提供的字体会标注替换方法
 2. **章节划分 AI**（`models.chapter`）：grep 检索 + 最小 bash 沙箱（虚拟文件系统只有这一个文件），按行号划分章节（结构化提交，全覆盖校验）
-3. **转换 AI** 并发逐章转 `.tex`（矢量图已在 images 阶段以 tikz 代码块内嵌进章节 md，转换时原样粘贴为 LaTeX 内容；raster 原图走 includegraphics）→ 每章提交后由 **核对 AI**（`models.checker`，小文本模型即可）比对原章 md 与产物，发现问题回炉一轮，遗留问题记录为 `.checker` 备注供终审处理
+3. **转换 AI** 并发逐章转 `.tex`（矢量图已在 images 阶段以 latex 代码块内嵌进章节 md，转换时原样粘贴为 LaTeX 内容；raster 原图走 includegraphics）→ 每章提交后由 **核对 AI**（`models.checker`，小文本模型即可）比对原章 md 与产物，发现问题回炉一轮，遗留问题记录为 `.checker` 备注供终审处理
 4. 汇总为多文件 `.tex` 项目 → 编译全书 PDF（失败进入**修复会话**：读文件/改文件/重编译 + 字体工具核对样式）→ 生成单文件 `standalone.tex`
 
 ### AI 会话基础设施
@@ -283,8 +283,8 @@ docvision verify                               # AI 核对报告
 | `tools.mermaid.command` | Mermaid CLI 命令 | mmdc |
 | `tools.mermaid.fix_attempts` | Mermaid 独立修正次数（0=无限，受安全上限保护） | 3 |
 | `tools.mermaid.timeout` | 单次 Mermaid 校验超时（秒） | 30 |
-| `tools.tikz.validation` | tikz 代码块编译校验（off/auto/strict） | auto |
-| `tools.tikz.engine` | tikz 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
+| `tools.latex.validation` | latex 代码块编译校验（off/auto/strict） | auto |
+| `tools.latex.engine` | latex 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
 
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking） | 见示例 |
 | `models.text.api_timeout` | API 请求超时（秒）；所有模型条目可覆盖，留空继承 text | 400 |
