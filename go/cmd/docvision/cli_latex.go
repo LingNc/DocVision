@@ -261,21 +261,18 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 		selected = append(selected, filepath.Base(abs))
 	}
 
-	// 无参数：output/ 里有 md 直接处理；没有则自动从 files/ 跑全流程前置。
+	// 无参数：正常走前置流程（split --all → mineru → organize，均自动
+	// 跳过已处理内容），然后处理 output/ 中的全部 markdown。
 	if len(args) == 0 && len(sources) == 0 {
+		for _, stepName := range []string{"split", "mineru", "organize"} {
+			fmt.Printf("\n=== LaTeX 前置: %s ===\n", stepLabel(stepName))
+			if _, err := runStep(stepName, cmd, cfg, ""); err != nil {
+				return nil, fmt.Errorf("前置步骤 %s 失败: %w", stepName, err)
+			}
+		}
 		exists, _ := filepath.Glob(filepath.Join(cfg.Paths.OutputDir, "*.md"))
 		if len(exists) == 0 {
-			fmt.Println("output/ 中没有 markdown，自动从 files/ 跑前置流程（split → mineru → organize）...")
-			for _, stepName := range []string{"split", "mineru", "organize"} {
-				fmt.Printf("\n=== LaTeX 前置: %s ===\n", stepLabel(stepName))
-				if _, err := runStep(stepName, cmd, cfg, ""); err != nil {
-					return nil, fmt.Errorf("前置步骤 %s 失败: %w", stepName, err)
-				}
-			}
-			exists, _ = filepath.Glob(filepath.Join(cfg.Paths.OutputDir, "*.md"))
-			if len(exists) == 0 {
-				return nil, fmt.Errorf("前置流程完成后 output/ 仍没有 markdown：请确认 files/ 中有 PDF/DOCX")
-			}
+			return nil, fmt.Errorf("前置流程完成后 output/ 中没有 markdown：请确认 files/ 中有 PDF/DOCX")
 		}
 		fmt.Println("处理 output/ 中全部 markdown:", len(exists), "个")
 	}
