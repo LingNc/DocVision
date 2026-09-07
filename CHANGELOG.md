@@ -4,6 +4,8 @@
 
 ### Added
 
+- latex 档位2 控制台进度：默认每个阶段显示一行实时进度（classify/process），逐图明细只写日志文件；`--verbose` 恢复详细输出
+
 - `latex.remove_watermark`（默认 false）：开启后样式分析 AI 会在使用手册中标注水印模式并指示排除，转换 AI 跳过水印内容，核对 AI 不把水印缺失报为问题
 
 - 档位1 样式分析虚拟工作区（`latex_project/work/style/`）：write_file 增量起草，submit_style 可引用文件而非全量重发

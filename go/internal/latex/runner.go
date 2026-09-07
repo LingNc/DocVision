@@ -33,6 +33,10 @@ type ImagesOptions struct {
 	// Files selects specific markdown files (base names with or
 	// without .md, or paths). Empty = every *.md in SourceDir (batch).
 	Files []string
+	// Verbose keeps per-image console output. Default (false) shows a
+	// compact img2text-style progress line instead; details always go
+	// to the log file.
+	Verbose bool
 }
 
 // filterFiles keeps only the md files matching opts.Files (base-name
@@ -61,19 +65,19 @@ func filterFiles(mdFiles []string, selected []string) []string {
 
 // imageProgress is the per-image persisted state (断点续传).
 type imageProgress struct {
-	Key     string `json:"key"`
-	MDName  string `json:"md"`
-	ImgPath string `json:"img"`
-	Class   string `json:"class,omitempty"`
-	Label   string `json:"label,omitempty"`
-	Reason  string `json:"class_reason,omitempty"`
-	Status  string `json:"status"` // classified | done | error
-	Content string `json:"content,omitempty"`
+	Key      string `json:"key"`
+	MDName   string `json:"md"`
+	ImgPath  string `json:"img"`
+	Class    string `json:"class,omitempty"`
+	Label    string `json:"label,omitempty"`
+	Reason   string `json:"class_reason,omitempty"`
+	Status   string `json:"status"` // classified | done | error
+	Content  string `json:"content,omitempty"`
 	TikzCode string `json:"tikz_code,omitempty"`
-	FigPDF  string `json:"figure_pdf,omitempty"`
-	FigPNG  string `json:"figure_png,omitempty"`
-	Kept    bool   `json:"original_kept,omitempty"`
-	Error   string `json:"error,omitempty"`
+	FigPDF   string `json:"figure_pdf,omitempty"`
+	FigPNG   string `json:"figure_png,omitempty"`
+	Kept     bool   `json:"original_kept,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // mdFile caches one scanned markdown file.
@@ -89,7 +93,7 @@ type task struct {
 	mdName  string
 	imgPath string
 	lineIdx int
-	offsets  [][2]int
+	offsets [][2]int
 }
 
 func (t *task) key() string { return t.mdName + "::" + t.imgPath }
@@ -226,18 +230,34 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	}
 	r.log.Log(0, "Already done:", strconv.Itoa(len(all)-len(pending)), "| to process:", strconv.Itoa(len(pending)))
 
+	// Default console behaviour mirrors img2text: one compact progress
+	// line per phase; every detail line goes to the log file only.
+	verbose := opts.Verbose
+	if !verbose {
+		r.log.SetQuiet(true)
+		defer func() { r.log.SetQuiet(false) }()
+	}
+
 	// Phase 1: classification.
 	if opts.Step == "" || opts.Step == "classify" {
-		r.classifyPhase(pending, mdCache, prog, progDir)
+		r.classifyPhase(pending, mdCache, prog, progDir, verbose)
 	}
 	if opts.Step == "classify" {
+		if !verbose {
+			r.log.SetQuiet(false)
+			fmt.Println()
+		}
 		r.log.Log(0, "classify step finished.")
 		return nil
 	}
 
 	// Phase 2: per-class processing.
-	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr)
+	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose)
 
+	if !verbose {
+		r.log.SetQuiet(false)
+		fmt.Println()
+	}
 	// Phase 3: rebuild markdown.
 	return r.rebuildPhase(mdCache, prog, outDir)
 }
@@ -256,7 +276,7 @@ func findLineIdx(starts []int, pos int) int {
 // ------------------------------------------------------------------
 
 func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir string) {
+	prog map[string]*imageProgress, progDir string, verbose bool) {
 
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
@@ -268,6 +288,14 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	total, done, failed := len(pending), 0, 0
+	progress := func() {
+		if verbose || total == 0 {
+			return
+		}
+		pct := float64(done) * 100.0 / float64(total)
+		fmt.Fprintf(os.Stdout, "\r[classify %d/%d] %.2f%% (失败: %d)          ", done, total, pct, failed)
+	}
 
 	client := r.clientFor(r.cfg.Latex.ClassifierModel)
 	modelCfg := r.models[r.cfg.Latex.ClassifierModel]
@@ -278,6 +306,12 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 		go func(tt *task) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
+			defer func() {
+				mu.Lock()
+				done++
+				mu.Unlock()
+				progress()
+			}()
 			mu.Lock()
 			_, seen := prog[tt.key()]
 			mu.Unlock()
@@ -287,11 +321,17 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 			imgFile, err := resolveImageFile(r.cfg.Paths.ImagesDir, tt.imgPath, subjectOf(tt.mdName))
 			if err != nil {
 				r.log.LogWarning(tid, "[classify] 图片缺失:", tt.imgPath)
+				mu.Lock()
+				failed++
+				mu.Unlock()
 				return
 			}
 			img64, err := img2text.ImageToBase64(imgFile, 1280)
 			if err != nil {
 				r.log.LogWarning(tid, "[classify] 读取图片失败:", tt.imgPath, err)
+				mu.Lock()
+				failed++
+				mu.Unlock()
 				return
 			}
 			class, err := ClassifyImage(client, modelCfg, img64)
@@ -300,6 +340,9 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 				class, err = ClassifyImageStrict(client, modelCfg, img64)
 				if err != nil {
 					r.log.LogWarning(tid, "[classify] 失败（按 raster 处理）:", tt.imgPath, err)
+					mu.Lock()
+					failed++
+					mu.Unlock()
 				}
 			}
 			if err != nil {
@@ -357,7 +400,7 @@ func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, im
 // ------------------------------------------------------------------
 
 func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir, outDir string, compErr error) {
+	prog map[string]*imageProgress, progDir, outDir string, compErr error, verbose bool) {
 
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
@@ -369,6 +412,23 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	total, done, failed, warned := 0, 0, 0, 0
+	for _, t := range pending {
+		mu.Lock()
+		p, ok := prog[t.key()]
+		mu.Unlock()
+		if !ok || p.Class == "" {
+			continue // not classified yet
+		}
+		total++
+	}
+	progress := func() {
+		if verbose || total == 0 {
+			return
+		}
+		pct := float64(done) * 100.0 / float64(total)
+		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (失败: %d, 回退: %d)          ", done, total, pct, failed, warned)
+	}
 
 	for _, t := range pending {
 		mu.Lock()
@@ -382,8 +442,17 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		go func(tt *task, pp *imageProgress) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
+			defer func() {
+				mu.Lock()
+				done++
+				mu.Unlock()
+				progress()
+			}()
 			if rec := recover(); rec != nil {
 				r.log.LogError(tid, "[process] panic:", rec)
+				mu.Lock()
+				failed++
+				mu.Unlock()
 				return
 			}
 			mf := mdCache[tt.mdName]
@@ -392,6 +461,9 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				content, err := r.processTextImage(mf, tt, tid)
 				if err != nil {
 					r.log.LogError(tid, "[text] 失败:", tt.imgPath, err)
+					mu.Lock()
+					failed++
+					mu.Unlock()
 					return
 				}
 				pp.Content = content
@@ -411,6 +483,9 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				} else {
 					// Fallback: keep the original (logged as warning).
 					r.log.LogWarning(tid, "[vector] TikZ 未通过，保留原图（警告：矢量转换失败）:", tt.imgPath, pp.Error)
+					mu.Lock()
+					warned++
+					mu.Unlock()
 					pp.Kept = true
 					pp.Status = "done"
 				}

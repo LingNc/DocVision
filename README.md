@@ -188,9 +188,12 @@ tikz 校验由 `options.tikz_validation`（off/auto/strict，默认 auto）与 `
 
 ```bash
 docvision latex --debug        # 或配置 options.log_level: "debug"
+docvision latex --verbose      # 详细控制台输出（默认仅显示进度行）
 ```
 
 开启后，每一轮 AI 调用的**完整系统提示词、用户提示词、工具调用（名称+参数）、工具结果**都会写入 `logs/latex_*.log`（`[DEBUG]` 前缀，控制台输出不受影响）。可在日志里完整回放某个会话的推理与工具使用过程。
+
+默认控制台输出与 img2text 一致：每个阶段只显示一行实时进度（如 `[classify 12/345] 3.48% (失败: 0)`），逐图明细写入日志文件；`--verbose` 恢复逐图控制台输出。
 
 ### 档位1 目录布局（latex_project/）
 

@@ -59,6 +59,7 @@ func newLatexCmd() *cobra.Command {
 				return fmt.Errorf("latex.level 必须为 1 或 2（当前 %d）", cfg.Latex.Level)
 			}
 			step, _ := cmd.Flags().GetString("step")
+			verbose, _ := cmd.Flags().GetBool("verbose")
 			testMode, _ := cmd.Flags().GetBool("test")
 			number, _ := cmd.Flags().GetInt("number")
 			seed, _ := cmd.Flags().GetString("seed")
@@ -101,6 +102,7 @@ func newLatexCmd() *cobra.Command {
 				if err := runner.RunImages(latex.ImagesOptions{
 					Step: step, TestMode: testMode, Number: number, Seed: seed,
 					SourceDir: sourceDir, Files: selected,
+					Verbose: verbose,
 				}); err != nil {
 					return err
 				}
@@ -117,6 +119,7 @@ func newLatexCmd() *cobra.Command {
 	cmd.Flags().String("seed", "", "随机种子")
 	cmd.Flags().String("source-dir", "", "覆盖输入 markdown 目录（默认 paths.output_dir）")
 	cmd.Flags().Bool("debug", false, "调试模式：完整记录 AI 提示词/工具调用/工具结果到日志文件")
+	cmd.Flags().Bool("verbose", false, "详细控制台输出（默认仅显示 img2text 风格的进度行，详情写日志文件）")
 	return cmd
 }
 
