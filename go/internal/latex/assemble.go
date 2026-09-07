@@ -117,6 +117,7 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 	submit := &SubmitDoneTool{Label: "the build fix"}
 	sess := session.NewSession(client, modelCfg, tuning, fixSystemPrompt, []session.Tool{
 		&ReadFileTool{Root: buildDir},
+		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		&EditFileTool{Root: buildDir},
 		recompile,
 		submit,

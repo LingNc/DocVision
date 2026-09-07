@@ -98,6 +98,10 @@ type LatexConfig struct {
 	StyleModel      string `yaml:"style_model"`
 	ChapterModel    string `yaml:"chapter_model"`
 	ConvertModel    string `yaml:"convert_model"`
+	// CheckerModel reviews converted chapters (text model, e.g. a
+	// small/fast model from the registry). Empty falls back to
+	// convert_model.
+	CheckerModel    string `yaml:"checker_model"`
 	// InsertImageDescription: when true, images kept as raster (no
 	// vector structure) embed a readable AI explanation as
 	// "[Image]( content )" instead of the bare image link. The same
@@ -120,7 +124,10 @@ type LatexConfig struct {
 		Drawing SessionTuning `yaml:"drawing"`
 		Style   SessionTuning `yaml:"style"`
 		Chapter SessionTuning `yaml:"chapter"`
-		Convert SessionTuning `yaml:"convert"`
+		Convert  SessionTuning `yaml:"convert"`
+		// Checker is the small text model that reviews each converted
+		// chapter before assembly. Defaults to the convert tuning.
+		Checker SessionTuning `yaml:"checker"`
 	} `yaml:"sessions"`
 }
 
@@ -521,6 +528,11 @@ func (c *Config) LatexSession(name string) SessionTuning {
 		s = c.Latex.Sessions.Chapter
 	case "convert":
 		s = c.Latex.Sessions.Convert
+	case "checker":
+		s = c.Latex.Sessions.Checker
+		if s == (SessionTuning{}) {
+			s = c.Latex.Sessions.Convert
+		}
 	default:
 		s = SessionTuning{}
 	}

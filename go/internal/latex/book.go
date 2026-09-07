@@ -176,11 +176,18 @@ func (r *Runner) stylePhase(proj string) error {
 		return fmt.Errorf("样式阶段需要 LaTeX 工具链: %w", err)
 	}
 
-	submit := &SubmitStyleTool{}
+	// Analyst workspace: drafts persist as real files under the project
+	// so later turns edit diffs instead of re-emitting full contents.
+	workDir := filepath.Join(proj, "work", "style")
+	_ = os.MkdirAll(workDir, 0o755)
+	submit := &SubmitStyleTool{Workspace: workDir}
 	tools := []session.Tool{
+		&WriteWorkFileTool{Root: workDir},
 		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
 		&ViewImageTool{Root: sourceDir},
 		&ReadMDTool{Path: mainMD},
+		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
+		&InstallFontTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
 
@@ -196,7 +203,7 @@ func (r *Runner) stylePhase(proj string) error {
 		tools = append(tools, &ListPagesTool{Idx: pageIdx}, &ViewPageTool{Idx: pageIdx, PagesDir: pagesDir, Runner: r})
 	}
 
-	prompt := styleSystemPrompt
+	prompt := styleSystemPrompt + "\n\nYou have a persistent WORKSPACE: write_file stores class.cls / manual.md / example.tex as real files; submit_style can then reference them by file name instead of full inline contents. Check list_fonts before referencing fonts; install_font can add missing font files (record substitutions in the manual when a font cannot be provided)."
 	if pageIdx != nil {
 		prompt += "\n\nIMPORTANT: this document HAS original page renders (list_pages -> p001.png...). They show the TRUE typography and layout — inspect them FIRST (chapter title pages, section headings, body text, headers/footers) before looking at extracted images."
 	}
@@ -497,6 +504,31 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 
 	if _, err := sess.Run(session.RunOptions{UserText: initial}); err != nil {
 		return fmt.Errorf("会话失败: %w", err)
+	}
+	// Checker pass: a small text model verifies the chapter output
+	// against the chapter markdown. On issues the converter gets one
+	// feedback round; repeated failure is accepted with a warning.
+	if fileExists(texPath) {
+		if ok, issues := r.checkChapter(base, chapPath, texPath); !ok {
+			fixed := false
+			if submit.Submitted {
+				fmt2 := "Your submitted chapter was reviewed and has issues:\n" + issues +
+					"\n\nFix the .tex (write_file + compile) and submit again."
+				if _, err := sess.Run(session.RunOptions{UserText: fmt2}); err == nil {
+					if ok2, _ := r.checkChapter(base, chapPath, texPath); ok2 {
+						fixed = true
+					}
+				}
+			}
+			if !fixed {
+				r.log.LogWarning(tid, "[checker]", base, "核对仍有问题（已记录，供终审处理）:", issues)
+				_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
+			} else {
+				r.log.Log(tid, "[checker]", base, "复核通过")
+			}
+		} else {
+			r.log.Log(tid, "[checker]", base, "通过")
+		}
 	}
 	if !submit.Submitted {
 		// Accept a written file that compiles clean even without an

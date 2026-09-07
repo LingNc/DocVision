@@ -2,18 +2,25 @@ package latex
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
-	"mineru-tools/internal/session"
+	"io"
+	"net/http"
+
+	_ "golang.org/x/image/webp"
 	_ "image/gif"
 	_ "image/png"
-	_ "golang.org/x/image/webp"
+	"mineru-tools/internal/session"
 )
 
 // ListImagesTool enumerates the extracted document images so the style
@@ -178,6 +185,9 @@ type SubmitStyleTool struct {
 	Manual  string
 	Example string
 	Set     bool
+	// Workspace (optional) lets the args reference files previously
+	// written via write_file instead of full inline contents.
+	Workspace string
 }
 
 func (t *SubmitStyleTool) Name() string { return "submit_style" }
@@ -206,6 +216,20 @@ func (t *SubmitStyleTool) Execute(argsJSON string) (session.ToolResult, error) {
 	cls, _ := args["cls"].(string)
 	manual, _ := args["manual"].(string)
 	example, _ := args["example"].(string)
+	read := func(v string) string {
+		if strings.TrimSpace(v) == "" || strings.Contains(v, "\n") {
+			return v
+		}
+		if path, err := resolveInside(t.Workspace, v); err == nil {
+			if data, err := os.ReadFile(path); err == nil {
+				return string(data)
+			}
+		}
+		return v
+	}
+	cls = read(cls)
+	manual = read(manual)
+	example = read(example)
 	if strings.TrimSpace(cls) == "" || strings.TrimSpace(example) == "" {
 		return session.ToolResult{Text: "REJECTED: cls and example are required."}, nil
 	}
@@ -386,4 +410,168 @@ func readLinesFrom(path string, start, end, maxLines int) (session.ToolResult, e
 		fmt.Fprintf(&b, "%d: %s\n", i, l)
 	}
 	return session.ToolResult{Text: b.String()}, nil
+}
+
+// WriteWorkFileTool gives an analyst a persistent VIRTUAL WORKSPACE (a
+// real directory under the project): it can draft the cls, manual and
+// examples incrementally without re-emitting full contents every turn.
+type WriteWorkFileTool struct {
+	Root string // real workspace directory
+}
+
+func (t *WriteWorkFileTool) Name() string { return "write_file" }
+
+func (t *WriteWorkFileTool) Definition() map[string]any {
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name":        "write_file",
+		"description": "Write a file into YOUR workspace (full content replaces the file). Allowed extensions: .cls .sty .tex .md. Keep drafts here so later edits are small diffs instead of full re-outputs.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":    map[string]any{"type": "string", "description": "relative path inside your workspace, e.g. class.cls, manual.md, examples/ch1.tex"},
+				"content": map[string]any{"type": "string", "description": "full file content"},
+			},
+			"required": []string{"path", "content"},
+		},
+	}}
+}
+
+var workFileExtRe = regexp.MustCompile(`(?i)\.(cls|sty|tex|md)$`)
+
+func (t *WriteWorkFileTool) Execute(argsJSON string) (session.ToolResult, error) {
+	args, err := parseJSONObject(argsJSON)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	rel, _ := args["path"].(string)
+	content, _ := args["content"].(string)
+	if strings.TrimSpace(rel) == "" {
+		return session.ToolResult{Text: "REJECTED: path is required."}, nil
+	}
+	if !workFileExtRe.MatchString(rel) {
+		return session.ToolResult{Text: "REJECTED: only .cls .sty .tex .md files are allowed."}, nil
+	}
+	path, err := resolveInside(t.Root, rel)
+	if err != nil {
+		return session.ToolResult{Text: "REJECTED: " + err.Error()}, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return session.ToolResult{}, err
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return session.ToolResult{}, err
+	}
+	return session.ToolResult{Text: "WROTE " + rel + fmt.Sprintf(" (%d bytes)", len(content))}, nil
+}
+
+// ListFontsTool reports the fonts available to the LaTeX build: the
+// project fonts directory (paths.fonts, AI-managed) plus system fonts
+// (via fc-list when present).
+type ListFontsTool struct {
+	FontsDir string
+}
+
+func (t *ListFontsTool) Name() string { return "list_fonts" }
+
+func (t *ListFontsTool) Definition() map[string]any {
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name":        "list_fonts",
+		"description": "List usable fonts: files in the project fonts directory (install_font can add more) and installed system fonts. Use this before referencing a font in the cls; if a needed font is missing, name the expected substitution in the manual.",
+		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
+	}}
+}
+
+func (t *ListFontsTool) Execute(_ string) (session.ToolResult, error) {
+	var b strings.Builder
+	entries, _ := os.ReadDir(t.FontsDir)
+	if len(entries) > 0 {
+		b.WriteString("Project fonts directory (use with \\setCJKmainfont Path=... etc.):\n")
+		for _, e := range entries {
+			if !e.IsDir() {
+				b.WriteString("  " + e.Name() + "\n")
+			}
+		}
+	} else {
+		b.WriteString("Project fonts directory is empty (install_font can add files).\n")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if cmd := exec.CommandContext(ctx, "fc-list", ":", "family", "file"); cmd.Run() == nil {
+		out, _ := cmd.Output()
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(lines) > 60 {
+			lines = append(lines[:60], fmt.Sprintf("... (%d total)", len(lines)))
+		}
+		b.WriteString("\nSystem fonts (fc-list):\n")
+		for _, l := range lines {
+			b.WriteString("  " + l + "\n")
+		}
+	}
+	return session.ToolResult{Text: b.String()}, nil
+}
+
+// InstallFontTool downloads a font file (ttf/otf) into the project
+// fonts directory so the cls can reference it directly.
+type InstallFontTool struct {
+	FontsDir string
+}
+
+func (t *InstallFontTool) Name() string { return "install_font" }
+
+func (t *InstallFontTool) Definition() map[string]any {
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name":        "install_font",
+		"description": "Download one font file (.ttf/.otf) from a URL into the project fonts directory. Only use URLs you are confident provide the font legally (official releases, open-source fonts like SIL OFL families).",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"url":  map[string]any{"type": "string", "description": "direct font file URL"},
+				"name": map[string]any{"type": "string", "description": "file name to save as, e.g. SourceHanSerifSC-Regular.otf"},
+			},
+			"required": []string{"url", "name"},
+		},
+	}}
+}
+
+func (t *InstallFontTool) Execute(argsJSON string) (session.ToolResult, error) {
+	args, err := parseJSONObject(argsJSON)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	url, _ := args["url"].(string)
+	name, _ := args["name"].(string)
+	if strings.TrimSpace(url) == "" || strings.TrimSpace(name) == "" {
+		return session.ToolResult{Text: "REJECTED: url and name are required."}, nil
+	}
+	if !workFileExtRe.MatchString(name) {
+		return session.ToolResult{Text: "REJECTED: name must end with .ttf or .otf."}, nil
+	}
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return session.ToolResult{Text: "REJECTED: url must be http(s)."}, nil
+	}
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return session.ToolResult{Text: "DOWNLOAD FAILED: " + err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return session.ToolResult{Text: fmt.Sprintf("DOWNLOAD FAILED: HTTP %d", resp.StatusCode)}, nil
+	}
+	limited := io.LimitReader(resp.Body, 64<<20)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return session.ToolResult{Text: "DOWNLOAD FAILED: " + err.Error()}, nil
+	}
+	if len(data) < 1000 {
+		return session.ToolResult{Text: "REJECTED: file too small to be a font."}, nil
+	}
+	if err := os.MkdirAll(t.FontsDir, 0o755); err != nil {
+		return session.ToolResult{}, err
+	}
+	dst := filepath.Join(t.FontsDir, filepath.Base(name))
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		return session.ToolResult{}, err
+	}
+	return session.ToolResult{Text: "INSTALLED " + dst + fmt.Sprintf(" (%d bytes). Reference it in the cls with its file name.", len(data))}, nil
 }
