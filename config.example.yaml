@@ -64,3 +64,76 @@ paths:
   finally_dir: "./finally"          # final output directory
   logs_dir: "./logs"               # img2text_*.log / img2text_error_*.log
   done_dir: "./files/done"         # dir for sources archived after a successful split
+
+# ----------------------------------------------------------------
+# LaTeX output (docvision latex)
+# ----------------------------------------------------------------
+latex:
+  level: 2                       # 2 = per-image vectorisation; 1 = full-book LaTeX
+  # Model registry keys for each specialised AI session.
+  # Each key must exist in the models: registry below; entries there
+  # may declare their own base_url / api_key / model / request_body
+  # (empty fields inherit the top-level ai block).
+  classifier_model: "classifier" # 图像分类 AI（text/vector/raster 标记）
+  drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
+  style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
+  chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
+  convert_model: "convert"       # 档位1：章节转换 / 构建修复 AI
+  insert_image_description: false # raster 保留原图时是否嵌入 AI 解释文本
+                                  # （同时控制 vector 确认后嵌入 tikz 代码块而非 PDF 链接）
+  output_dir: "./finally_latex"  # 档位2 输出目录
+  project_dir: "./latex_project" # 档位1 工作目录
+  concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
+  compile:
+    engine: "xelatex"            # pdflatex / xelatex / lualatex
+    timeout: 120                 # 单次编译超时（秒）
+    raster_command: "pdftoppm"   # PDF 栅格化工具（poppler-utils）
+    raster_dpi: 110              # 回给 AI 核对的 PNG 分辨率
+    max_fix_rounds: 8            # 编译-修正整体循环上限
+  sessions:                      # 每个 AI 会话的独立调优
+    drawing:
+      context_limit: 131072      # 上下文窗口（tokens，默认 128K，可改 64K/256K 等）
+      max_tool_rounds: 24
+      max_tokens: 16384
+      compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩
+    style:
+      context_limit: 262144      # 样式分析建议更大窗口（256K）
+      max_tool_rounds: 40
+      max_tokens: 32768
+    chapter:
+      context_limit: 131072
+      max_tool_rounds: 30
+    convert:
+      context_limit: 131072
+      max_tool_rounds: 30
+
+# ----------------------------------------------------------------
+# AI verification（AI 校验：默认关闭，先上日程）
+# ----------------------------------------------------------------
+verify:
+  enabled: false                 # 默认关闭；开启后自动流程核对每张图与内容
+  verifier_model: "verifier"     # models: 中支持图像的校验模型
+  concurrency: 2
+  report_file: "verify_report.md"
+
+# ----------------------------------------------------------------
+# Named model registry — every specialised AI gets its own entry.
+# Empty fields (base_url/api_key/model/request_body) inherit the
+# top-level ai block, so a minimal setup only sets model:.
+# ----------------------------------------------------------------
+models:
+  classifier:
+    model: "glm-5.3-flash"       # 要求具备视觉能力
+  drawing:
+    model: "glm-5.3-flash"       # 作图 AI：需强视觉+代码能力
+    # base_url: "https://other-provider.example/v1"   # 可单独指定
+    # api_key: "sk-..."
+    # request_body: { enable_thinking: false }
+  style:
+    model: "glm-5.3-flash"
+  chapter:
+    model: "glm-5.3-flash"
+  convert:
+    model: "glm-5.3-flash"
+  verifier:
+    model: "glm-5.3-flash"       # AI 校验模型（需视觉能力）

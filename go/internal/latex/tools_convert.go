@@ -63,8 +63,11 @@ func (t *ReadFileTool) Execute(argsJSON string) (session.ToolResult, error) {
 
 // resolveInside maps rel under root, refusing escapes.
 func resolveInside(root, rel string) (string, error) {
-	clean := filepath.Clean(strings.TrimPrefix(rel, "/"))
-	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("路径越界（绝对路径）: %s", rel)
+	}
+	clean := filepath.Clean(rel)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("路径越界: %s", rel)
 	}
 	rootAbs, _ := filepath.Abs(root)
