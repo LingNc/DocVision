@@ -18,6 +18,7 @@ type Logger struct {
 	errorFile     *os.File // may be nil if errLogPath is empty
 	threadIDWidth int
 	quiet         bool // when true, suppress console output; still writes to log files
+	debug         bool // when true, Debug() entries are written to the log file
 }
 
 // NewLogger creates a Logger.
@@ -57,6 +58,33 @@ func NewLogger(logPath, errLogPath string, threadIDWidth int) (*Logger, error) {
 // swallowed so logging never disrupts the caller.
 func (l *Logger) Log(tid int, args ...interface{}) {
 	l.write(l.logFile, tid, "", args...)
+}
+
+// SetDebug toggles verbose debug logging (written to the log file only,
+// never to the console, so long prompts/tool dumps stay out of the way).
+func (l *Logger) SetDebug(on bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.debug = on
+}
+
+// DebugEnabled reports whether debug logging is on.
+func (l *Logger) DebugEnabled() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.debug
+}
+
+// Debug writes a [DEBUG] entry to the main log file only. No-op unless
+// debug mode was enabled via SetDebug.
+func (l *Logger) Debug(tid int, args ...interface{}) {
+	l.mu.Lock()
+	on := l.debug
+	l.mu.Unlock()
+	if !on {
+		return
+	}
+	l.write(l.logFile, tid, "[DEBUG] ", args...)
 }
 
 // LogError writes "[ERROR] ..." tagged message to the console, the main log

@@ -140,6 +140,27 @@ type Img2TextConfig struct {
 	MaxTokens   int            `yaml:"max_tokens"`
 	Temperature float64        `yaml:"temperature"`
 	RequestBody map[string]any `yaml:"request_body"`
+
+	// Pipeline tuning (mirrors the legacy options: keys; a non-zero
+	// value here overrides the options: counterpart).
+	Concurrency        int     `yaml:"concurrency"`
+	OutputLanguage     string  `yaml:"output_language"`
+	MaxContextLinesUp  int     `yaml:"max_context_lines_up"`
+	MaxContextLinesDown int    `yaml:"max_context_lines_down"`
+	MaxWindowUp        int     `yaml:"max_window_up"`
+	MaxWindowDown      int     `yaml:"max_window_down"`
+	MaxRetries         int     `yaml:"max_retries"`
+	APITimeout         int     `yaml:"api_timeout"`
+	APIConnectTimeout  int     `yaml:"api_connect_timeout"`
+	APIMaxRetries      int     `yaml:"api_max_retries"`
+	RateLimitRetries   int     `yaml:"rate_limit_retries"`
+	FormatFixAttempts  int     `yaml:"format_fix_attempts"`
+	MermaidValidation  string  `yaml:"mermaid_validation"`
+	MermaidCommand     string  `yaml:"mermaid_command"`
+	MermaidFixAttempts *int    `yaml:"mermaid_fix_attempts"`
+	MermaidTimeout     int     `yaml:"mermaid_timeout"`
+	TikzValidation     string  `yaml:"tikz_validation"`
+	TikzEngine         string  `yaml:"tikz_engine"`
 }
 
 // VerifyConfig configures the AI verification pass (核对输出的每张图与
@@ -209,6 +230,9 @@ type OptionsConfig struct {
 	TikzValidation       string  `yaml:"tikz_validation"`
 	TikzEngine          string  `yaml:"tikz_engine"`
 	MaxTokens           int     `yaml:"max_tokens"`
+	// LogLevel: info (default) or debug. Debug writes every AI prompt,
+	// tool call and tool result into the log file (console unaffected).
+	LogLevel            string  `yaml:"log_level"`
 }
 
 // PathsConfig holds directory locations used by the workflow.
@@ -280,6 +304,7 @@ func validatePaths(cfg *Config) error {
 // archived Python implementation applies via dict.get(key, default).
 func setDefaults(cfg *Config) {
 	resolveAIReference(cfg)
+	applyImg2TextOverrides(cfg)
 	// MinerU defaults
 	if cfg.Mineru.APIBaseURL == "" {
 		cfg.Mineru.APIBaseURL = "https://mineru.net/api/v4"
@@ -363,6 +388,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Options.TikzValidation == "" {
 		cfg.Options.TikzValidation = "auto"
+	}
+	if cfg.Options.LogLevel == "" {
+		cfg.Options.LogLevel = "info"
 	}
 	if cfg.Options.MermaidCommand == "" {
 		cfg.Options.MermaidCommand = "mmdc"

@@ -22,31 +22,11 @@ mineru:
 
 # Processing options
 options:
-  max_context_lines_up: 10     # default: initial lines above image
-  max_context_lines_down: 5    # default: initial lines below image
-  max_window_up: 50            # maximum total lines above (cap)
-  max_window_down: 50          # maximum total lines below (cap)
-  max_retries: 5               # max retries for AI to request more context
-  api_timeout: 400             # request timeout in seconds for the OpenAI call
-  api_connect_timeout: 60      # connect timeout in seconds
-  api_max_retries: 3           # API retry count for non-rate-limit errors
-  rate_limit_retries: 0        # 0 means unlimited with a safety cap in code
-  concurrency: 10              # number of concurrent worker threads
-  temperature: 0.10
-  output_language: "Chinese"   # "Chinese" or "English"
-  format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
   # Recommended: npm install -g @mermaid-js/mermaid-cli (provides mmdc).
   # init only creates this config; it does not install Node.js/npm, but it
   # will prompt for permission to run npm install -g @mermaid-js/mermaid-cli
   # before any installation happens.
-  mermaid_validation: "auto"  # off, auto, strict; auto warns and skips if mmdc is missing
-  mermaid_command: "mmdc"     # Mermaid CLI command
-  mermaid_fix_attempts: 3     # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
-  mermaid_timeout: 30         # Mermaid validation timeout in seconds
-  tikz_validation: "auto"  # off, auto, strict；tikz 代码块用 LaTeX 编译校验
-  tikz_engine: "xelatex"    # tikz 校验引擎（缺 pdflatex/lualatex 自动回退）
-  max_tokens: 65536
-
+  log_level: "info"        # info | debug（debug 把 AI 提示词/工具调用完整写进日志文件）
 # Paths
 paths:
   input_dir: "./files"              # dir with source files
@@ -75,7 +55,7 @@ latex:
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
   convert_model: "convert"       # 档位1：章节转换 / 构建修复 AI
-  checker_model: ""             # 每章核对模型（留空用 convert_model）
+  checker_model: "checker"             # 每章核对模型（留空用 convert_model）
   insert_image_description: false # raster 保留原图时是否嵌入 AI 解释文本
                                   # （同时控制 vector 确认后嵌入 tikz 代码块而非 PDF 链接）
   output_dir: "./finally_latex"  # 档位2 输出目录
@@ -108,6 +88,27 @@ latex:
 # AI verification（AI 校验：默认关闭，先上日程）
 # img2text 基础图片转文本流程的独立配置（模型用 models: 注册表代号）
 img2text:
+  # ---- 以下由原 options: 块迁移（仅作用于 img2text 流程） ----
+  max_context_lines_up: 10     # default: initial lines above image
+  max_context_lines_down: 5    # default: initial lines below image
+  max_window_up: 50            # maximum total lines above (cap)
+  max_window_down: 50          # maximum total lines below (cap)
+  max_retries: 5               # max retries for AI to request more context
+  api_timeout: 400             # request timeout in seconds for the OpenAI call
+  api_connect_timeout: 60      # connect timeout in seconds
+  api_max_retries: 3           # API retry count for non-rate-limit errors
+  rate_limit_retries: 0        # 0 means unlimited with a safety cap in code
+  concurrency: 10              # number of concurrent worker threads
+  temperature: 0.10
+  output_language: "Chinese"   # "Chinese" or "English"
+  format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
+  mermaid_validation: "auto"  # off, auto, strict; auto warns and skips if mmdc is missing
+  mermaid_command: "mmdc"     # Mermaid CLI command
+  mermaid_fix_attempts: 3     # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
+  mermaid_timeout: 30         # Mermaid validation timeout in seconds
+  tikz_validation: "auto"  # off, auto, strict；tikz 代码块用 LaTeX 编译校验
+  tikz_engine: "xelatex"    # tikz 校验引擎（缺 pdflatex/lualatex 自动回退）
+  max_tokens: 65536
   model: "text"                # models: 中的条目名；留空用 models.text
   # max_tokens: 65536           # 覆盖 options.max_tokens
   # temperature: 0.10

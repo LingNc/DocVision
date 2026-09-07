@@ -77,6 +77,10 @@ func newLatexCmd() *cobra.Command {
 			}
 
 			log, closeLog, err := newLatexLogger(cfg)
+			if debugFlag, _ := cmd.Flags().GetBool("debug"); debugFlag || cfg.Options.LogLevel == "debug" {
+				log.SetDebug(true)
+				fmt.Println("调试模式：AI 提示词与工具调用将完整写入日志文件")
+			}
 			if err != nil {
 				return err
 			}
@@ -112,6 +116,7 @@ func newLatexCmd() *cobra.Command {
 	cmd.Flags().Int("number", 10, "测试图片数量")
 	cmd.Flags().String("seed", "", "随机种子")
 	cmd.Flags().String("source-dir", "", "覆盖输入 markdown 目录（默认 paths.output_dir）")
+	cmd.Flags().Bool("debug", false, "调试模式：完整记录 AI 提示词/工具调用/工具结果到日志文件")
 	return cmd
 }
 

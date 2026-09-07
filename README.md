@@ -184,6 +184,29 @@ tikz 校验由 `options.tikz_validation`（off/auto/strict，默认 auto）与 `
 - **可分离工具**：会话工具按需注册（编译预览、提交确认、grep、bash 沙箱、受限文件读写等）
 - **断点续传**：档位2逐图进度、档位1逐阶段进度（progress.json）
 
+### 调试日志
+
+```bash
+docvision latex --debug        # 或配置 options.log_level: "debug"
+```
+
+开启后，每一轮 AI 调用的**完整系统提示词、用户提示词、工具调用（名称+参数）、工具结果**都会写入 `logs/latex_*.log`（`[DEBUG]` 前缀，控制台输出不受影响）。可在日志里完整回放某个会话的推理与工具使用过程。
+
+### 档位1 目录布局（latex_project/）
+
+| 目录 | 用途 |
+| --- | --- |
+| `source/` | images 阶段整理的 md 输入 |
+| `pages/` | 原始扫描页按需渲染缓存（view_page 调用哪页渲染哪页） |
+| `style/` | 样式分析产物（book.cls / manual.md / example.tex） |
+| `work/style/` | 样式分析 AI 的虚拟工作区（write_file 增量起草） |
+| `chapters/` | 章节划分 AI 产出的 chapter_00N.md |
+| `work/` | 转换 AI 虚拟根（每个会话只能写 `work/chapters/<章>.tex`） |
+| `build/` | 终审编译目录（每次 clean 重建，多文件 .tex + 编译） |
+| `out/` | 最终产物：book.pdf、main.tex、standalone.tex |
+| `progress.json` | 逐阶段断点进度 |
+
+章节划分 AI 本身没有写目录：它只读全书 md（虚拟 bash 沙箱 + grep/按行读取工具），通过结构化 submit 提交切分方案，由代码落盘到 `chapters/`。
 ### AI 核对（verify，默认关闭）
 
 `verify.enabled: true` 后，用配置的视觉校验模型逐项核对每张图与其嵌入内容，生成 `verify_report.md`（问题 + 修改意见，不改动输出）。也可显式运行：

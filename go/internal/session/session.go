@@ -147,6 +147,19 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 	}
 	s.messages = append(s.messages, userMsg)
 
+	// Debug tracing: full prompts and every tool exchange land in the
+	// log file (never the console) when debug mode is on.
+	if s.logger.DebugEnabled() {
+		s.logger.Debug(s.tid, "[session:"+s.label+"] === 新会话轮 ===")
+		s.logger.Debug(s.tid, "[session:"+s.label+"] system prompt:", s.system)
+		if opts.UserText != "" {
+			s.logger.Debug(s.tid, "[session:"+s.label+"] user prompt:", opts.UserText)
+		}
+		if len(opts.Images) > 0 {
+			s.logger.Debug(s.tid, "[session:"+s.label+"] attached images:", len(opts.Images))
+		}
+	}
+
 	toolRounds := 0
 	// maxRounds <= 0 means unlimited (user opted out of any cap).
 	maxRounds := s.tuning.MaxToolRounds
@@ -168,6 +181,10 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			req.ToolChoice = "none"
 		}
 
+		if s.logger.DebugEnabled() {
+			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api request (messages=%d, est_tokens=%d, tools=%v)",
+				s.label, toolRounds+1, len(s.messages), s.EstimatedTokens(), useTools))
+		}
 		resp, sentinel, status := s.client.CallWithRetry(req, 3, 100)
 		s.APIRequests++
 		if status != "" {
@@ -183,7 +200,21 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			s.messages = append(s.messages, choice.Message)
 
 			for _, tc := range choice.Message.ToolCalls {
+				if s.logger.DebugEnabled() {
+					s.logger.Debug(s.tid, "[session:"+s.label+"] tool call:", tc.Function.Name, tc.Function.Arguments)
+				}
 				result := s.executeTool(tc)
+				if s.logger.DebugEnabled() {
+					out := result.Text
+					if len(out) > 2000 {
+						out = out[:2000] + fmt.Sprintf("...(truncated, %d bytes total)", len(result.Text))
+					}
+					if result.ImageBase64 != "" {
+						out += fmt.Sprintf(" [image: %s, %d bytes b64]", result.ImageMIME, len(result.ImageBase64))
+					}
+					s.logger.Debug(s.tid, "[session:"+s.label+"] tool result:", tc.Function.Name, out)
+				}
+
 				s.messages = append(s.messages, ChatMessage{
 					Role:       "tool",
 					ToolCallID: tc.ID,
