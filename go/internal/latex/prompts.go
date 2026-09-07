@@ -34,6 +34,9 @@ const tikzSystemPrompt = `You are an expert LaTeX vector illustrator. You redraw
 5. Compare the preview with the original image. Fix structure, geometry, label positions and proportions; compile again.
 6. When the preview faithfully matches the original, call the submit tool with the final code. Only submit after a successful compile AND a visual check.
 
+## Cross-page continuations
+Document tables/figures split by pagination appear as SEVERAL consecutive image refs. Before drawing, call image_context (no args) to see the previous/next image refs and their text. Signs of a continuation: repeated table header, axis/box cut at the edge, "续表"/"continued" marks, content that only makes sense together. Use view_image to LOOK at the neighbouring image. If they belong together, draw ONE combined figure from all fragments and call submit with "merges": [list of the absorbed image paths exactly as they appear in the markdown]. Do NOT merge unrelated figures. If THIS image is itself the tail of a figure whose head is an earlier ref, still draw the best possible combined version and merge the earlier ref via "merges" only if that earlier fragment has no finished figure yet.
+
 ## Rules
 - LaTeX only — NEVER Mermaid or other non-LaTeX diagram syntaxes.
 - Reproduce ALL visible text labels exactly (numbers, symbols, Chinese characters). Chinese labels are fine; the wrapper loads ctex when needed.

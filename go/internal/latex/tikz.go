@@ -17,8 +17,9 @@ type TikZResult struct {
 	PDFPath   string // scratch PDF of the confirmed compile
 	PNGPath   string // rasterised preview of the confirmed compile
 	Rounds    int
-	Fallback  bool   // true when the pipeline gave up and keeps the original
-	Reason    string // why it fell back
+	Fallback  bool     // true when the pipeline gave up and keeps the original
+	Merges    []string // image paths absorbed into this figure
+	Reason    string   // why it fell back
 }
 
 // RunTikZSession drives one complete draw→compile→review→submit cycle
@@ -32,6 +33,7 @@ func RunTikZSession(
 	contextText string,
 	outDir string,
 	dstTex, dstPDF, dstPNG string, // final destinations (absolute)
+	env FigureEnv, // document context for cross-page merging
 	log *logger.Logger,
 	tid int,
 ) (TikZResult, error) {
@@ -46,6 +48,8 @@ func RunTikZSession(
 	sess := session.NewSession(client, modelCfg, tuning, tikzSystemPrompt, []session.Tool{
 		&CompilePreviewTool{Comp: comp, State: state, EngineIsXe: engineIsXe},
 		&SubmitFigureTool{State: state},
+		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg},
+		&ViewImageTool{Root: env.ImagesDir},
 	}, log, tid, "tikz")
 
 	initial := strings.Join([]string{
@@ -92,6 +96,7 @@ func RunTikZSession(
 	}
 	result.Submitted = true
 	result.Code = state.finalCode
+	result.Merges = state.merges
 	result.PDFPath = dstPDF
 	result.PNGPath = dstPNG
 	os.RemoveAll(scratch)

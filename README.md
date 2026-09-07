@@ -167,7 +167,7 @@ tikz 校验由 `options.tikz_validation`（off/auto/strict，默认 auto）与 `
    - `text`：艺术样式文本（如美化题号）→ 复用图片解释 AI，纯内容嵌入文本流（无 `[AI]`/`[IMG_TYPE]` 标记）
    - `vector`：函数图像/立体结构/流程图等可矢量重绘图形 → 进入作图流程
    - `raster`：照片/截图等 → 保留原图链接（`insert_image_description: true` 时嵌入可读解释文本）
-2. **作图 AI**（`models.drawing`）在独立会话中写 TikZ → `compile_preview` 工具自动编译并栅格化为 PNG 回给模型**视觉核对** → 迭代修正 → `submit` 确认提交
+2. **作图 AI**（`models.drawing`）在独立会话中重绘矢量图（TikZ/pgfplots/tabular 等任意 LaTeX 方式）→ `compile_preview` 工具自动编译并栅格化为 PNG 回给模型**视觉核对** → 迭代修正 → `submit` 确认提交。会话附带 `image_context`/`view_image` 工具：跨页拆分的长表/大图可查看相邻图片及其上下文，**一次绘制合并图**并在 submit 时声明吸收的续片（续片引用自动删除、不再重复处理）
 3. 编译产物 PDF 按矢量图嵌入 Markdown（`insert_image_description: true` 时嵌入 tikz 代码块）；矢量转换失败时回退保留原图并输出警告日志
 
 **档位 1（`latex.level: 1`）—— 全书 LaTeX**

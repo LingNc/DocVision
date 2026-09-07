@@ -4,6 +4,8 @@
 
 ### Added
 
+- 档位2 跨页图表拼接：作图会话新增 `image_context`（查任意图片的上下文与前后图片引用）与 `view_image`（查看图片）工具；提示词引导识别跨页续片（重复表头/"续表"/边缘截断等），一次绘制合并图并在 submit 声明 `merges`；被吸收的续片引用在重建 markdown 时自动删除且不再重复处理
+
 - latex 档位2 控制台进度：默认每个阶段显示一行实时进度（classify/process），逐图明细只写日志文件；`--verbose` 恢复详细输出
 
 - `latex.remove_watermark`（默认 false）：开启后样式分析 AI 会在使用手册中标注水印模式并指示排除，转换 AI 跳过水印内容，核对 AI 不把水印缺失报为问题

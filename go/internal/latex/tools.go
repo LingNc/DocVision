@@ -22,7 +22,8 @@ type tikzState struct {
 	compileOK  bool
 	submitted  bool
 	finalCode  string
-	compileErr string // last error, reported by the runner on give-up
+	compileErr string   // last error, reported by the runner on give-up
+	merges     []string // image paths absorbed into this figure (cross-page merge)
 }
 
 // CompilePreviewTool compiles model-supplied TikZ body code inside a
@@ -62,6 +63,13 @@ func (t *CompilePreviewTool) Execute(argsJSON string) (session.ToolResult, error
 		return session.ToolResult{}, err
 	}
 	code, _ := args["code"].(string)
+	if arr, ok := args["merges"].([]interface{}); ok {
+		for _, v := range arr {
+			if p, ok := v.(string); ok && strings.TrimSpace(p) != "" {
+				t.State.merges = append(t.State.merges, strings.TrimSpace(p))
+			}
+		}
+	}
 	if strings.TrimSpace(code) == "" {
 		return session.ToolResult{}, fmt.Errorf("code 为空")
 	}
@@ -119,7 +127,8 @@ func (t *SubmitFigureTool) Definition() map[string]any {
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"code": map[string]any{"type": "string", "description": "The final TikZ body code (identical to the last successful compile_preview)."},
+					"code":   map[string]any{"type": "string", "description": "The final TikZ body code (identical to the last successful compile_preview)."},
+					"merges": map[string]any{"type": "string", "description": "Image paths (as in the markdown) of page-boundary continuations absorbed into this combined figure."},
 				},
 				"required": []string{"code"},
 			},

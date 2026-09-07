@@ -64,22 +64,32 @@ func filterFiles(mdFiles []string, selected []string) []string {
 	return out
 }
 
+// FigureEnv carries the document context a figure session needs for
+// cross-page merge decisions (neighbour images + their text).
+type FigureEnv struct {
+	MDContent  string // full markdown of the current document
+	CurrentImg string // image path (as in markdown) being drawn
+	ImagesDir  string // absolute images root for view_image
+}
+
 // imageProgress is the per-image persisted state (断点续传).
 type imageProgress struct {
-	Key      string `json:"key"`
-	MDName   string `json:"md"`
-	ImgPath  string `json:"img"`
-	Class    string `json:"class,omitempty"`
-	Label    string `json:"label,omitempty"`
-	Reason   string `json:"class_reason,omitempty"`
-	Status   string `json:"status"` // classified | done | error
-	Content  string `json:"content,omitempty"`
-	TikzCode string `json:"tikz_code,omitempty"`
-	FigPDF   string `json:"figure_pdf,omitempty"`
-	FigPNG   string `json:"figure_png,omitempty"`
-	FigSVG   string `json:"figure_svg,omitempty"`
-	Kept     bool   `json:"original_kept,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Key        string   `json:"key"`
+	MDName     string   `json:"md"`
+	ImgPath    string   `json:"img"`
+	Class      string   `json:"class,omitempty"`
+	Label      string   `json:"label,omitempty"`
+	Reason     string   `json:"class_reason,omitempty"`
+	Status     string   `json:"status"` // classified | done | error
+	Content    string   `json:"content,omitempty"`
+	TikzCode   string   `json:"tikz_code,omitempty"`
+	FigPDF     string   `json:"figure_pdf,omitempty"`
+	FigPNG     string   `json:"figure_png,omitempty"`
+	FigSVG     string   `json:"figure_svg,omitempty"`
+	Kept       bool     `json:"original_kept,omitempty"`
+	Absorbed   bool     `json:"absorbed,omitempty"`    // cross-page continuation merged into an earlier figure
+	MergedRefs []string `json:"merged_refs,omitempty"` // refs absorbed by THIS combined figure
+	Error      string   `json:"error,omitempty"`
 }
 
 // mdFile caches one scanned markdown file.
@@ -459,6 +469,10 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				return
 			}
 			mf := mdCache[tt.mdName]
+			if pp.Absorbed {
+				// 已被前面的合并图吸收：不再单独处理。
+				return
+			}
 			switch pp.Class {
 			case ClassText:
 				content, err := r.processTextImage(mf, tt, tid)
@@ -480,7 +494,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 					pp.Status = "done"
 					break
 				}
-				res := r.processVectorImage(mf, tt, pp, outDir, tid)
+				res := r.processVectorImage(mf, tt, pp, outDir, tid, prog, progDir, &mu)
 				if res {
 					pp.Status = "done"
 				} else {
@@ -547,7 +561,7 @@ func stripImgTypeHeader(s string) string {
 
 // processVectorImage runs one TikZ session; returns true when the
 // figure was confirmed and persisted.
-func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outDir string, tid int) bool {
+func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outDir string, tid int, prog map[string]*imageProgress, progDir string, mu *sync.Mutex) bool {
 	imgFile, err := resolveImageFile(r.cfg.Paths.ImagesDir, t.imgPath, subjectOf(t.mdName))
 	if err != nil {
 		r.log.LogError(tid, "[vector] 图片缺失:", t.imgPath)
@@ -579,7 +593,9 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	dstPNG := filepath.Join(outDir, "figures", name+".png")
 
 	res, err := RunTikZSession(client, modelCfg, tuning, r.comp, img64, contextText,
-		outDir, dstTex, dstPDF, dstPNG, r.log, tid)
+		outDir, dstTex, dstPDF, dstPNG,
+		FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir},
+		r.log, tid)
 	if err != nil {
 		pp.Error = err.Error()
 		return false
@@ -591,6 +607,30 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	pp.TikzCode = res.Code
 	pp.FigPDF = "figures/" + filepath.Base(dstPDF)
 	pp.FigPNG = "figures/" + filepath.Base(dstPNG)
+	// Cross-page merge: mark every absorbed continuation image as
+	// done+absorbed so it is never processed separately and its ref
+	// is removed from the rebuilt markdown.
+	if len(res.Merges) > 0 {
+		pp.MergedRefs = append(pp.MergedRefs, res.Merges...)
+		saveProgress(progDir, pp)
+	}
+	for _, imgPath := range res.Merges {
+		key := t.mdName + "::" + imgPath
+		mu.Lock()
+		ap, ok := prog[key]
+		if ok {
+			ap.Status = "done"
+			ap.Absorbed = true
+			ap.Error = ""
+			saveProgress(progDir, ap)
+		}
+		mu.Unlock()
+		if !ok {
+			r.log.LogWarning(tid, "[vector] merge 目标不在任务表中:", imgPath)
+		} else {
+			r.log.Log(tid, "[vector] 已合并跨页续片:", imgPath)
+		}
+	}
 	// Markdown 无法内嵌 PDF：用 dvisvgm 把矢量图编译为 SVG 供嵌入
 	//（失败时回退 PNG/PDF 链接，仅记录警告）。
 	if _, err := exec.LookPath("dvisvgm"); err == nil {
@@ -612,6 +652,16 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 // ------------------------------------------------------------------
 
 func (r *Runner) rebuildPhase(mdCache map[string]*mdFile, prog map[string]*imageProgress, outDir string) error {
+	// Cross-page merges win over any per-fragment state: refs absorbed
+	// by a combined figure are always deleted from the markdown.
+	absorbed := map[string]bool{}
+	for _, p := range prog {
+		if p.Status == "done" {
+			for _, ref := range p.MergedRefs {
+				absorbed[ref] = true
+			}
+		}
+	}
 	r.log.Log(0, "\nRebuilding markdown files...")
 	for name, mf := range mdCache {
 		type rep struct {
@@ -636,6 +686,11 @@ func (r *Runner) rebuildPhase(mdCache map[string]*mdFile, prog map[string]*image
 
 		nc := mf.content
 		for _, rp := range reps {
+			if rp.p.Absorbed || absorbed[rp.p.ImgPath] {
+				// 已并入前面的合并图：直接删除该引用
+				nc = nc[:rp.off[0]] + nc[rp.off[1]:]
+				continue
+			}
 			block := r.embedBlock(rp.p, name, outDir)
 			if block == "" {
 				continue
