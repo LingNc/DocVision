@@ -11,6 +11,9 @@
 
 ### Changed
 
+- latex md 参数不再硬拒绝：output/ 中的 md 直接选用，其他位置的 md 复制进 files/ 后整理进 output/（用户路径里带 output 不会误伤）
+- img2text 嵌入前自动留存原版 markdown 到 `finally/progress_items/<文件名>/original.md`（每文件仅首次），嵌入结果可随时还原
+
 - img2text 输出嵌入格式按类型分流：纯文本/数学公式/表格/代码直接嵌入正文（无包装标记），mermaid/tikz 代码块直接嵌入，其余视觉类型用 `[Image]( 描述 )`——不再使用 `<!-- IMG -->`/`[AI]` 包装（**注意：v1.3.0 及之前的 finally/ 输出格式不变，仅新生成内容使用新格式**）
 - `docvision latex` 自助化：无参数即从 `files/` 跑全流程（自动跳过已处理）；单文件传 files/ 中的 PDF/DOCX；自备 md 也放 files/；禁止拿 output/ 产物当输入；结束后自动接日志分析
 - 移除 `workflow --step latex/verify`（latex 本身就是完整工作流）

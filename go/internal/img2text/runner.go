@@ -340,6 +340,21 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 			}
 			continue
 		}
+		// Retention: keep the PRE-EMBED original of this markdown (with
+		// all image refs intact) under progress_items so the replacement
+		// is always reversible. Written once per md (first embed round);
+		// later rounds never overwrite the archived original.
+		origPath := filepath.Join(progressRoot, name, "original.md")
+		if !util.FileExists(origPath) {
+			if err := os.MkdirAll(filepath.Dir(origPath), 0o755); err != nil {
+				logger.LogError(0, "  [", name, "] archive original failed:", err)
+			} else if err := os.WriteFile(origPath, []byte(entry.content), 0o644); err != nil {
+				logger.LogError(0, "  [", name, "] archive original failed:", err)
+			} else {
+				logger.Log(0, "  已留存原版（嵌入前）:", origPath)
+			}
+		}
+
 		// Process replacements right-to-left so byte offsets stay valid.
 		sort.Slice(reps, func(i, j int) bool { return reps[i].off.Start > reps[j].off.Start })
 

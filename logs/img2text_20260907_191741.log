@@ -1,0 +1,14 @@
+[19:17:41][T00] Found 1 file(s) | Model: mimo-v2.5 | Default ctx: up= 10 down= 5
+[19:17:41][T00] Max tool rounds: 5 | Max window: up= 50 down= 50 | Concurrency: 10 | FULL BATCH MODE
+[19:17:41][T00] ============================================================
+[19:17:41][T00]    编译原理课程设计报告样例.md: 18 images
+[19:17:41][T00] Total images available: 18 | Unique tasks: 18
+[19:17:41][T00] Already done: 18 | To process: 0
+[19:17:41][T00] ============================================================
+[19:17:41][T00] All done! Clear progress_items/ directory to re-run.
+[19:17:41][T00] 
+Writing final files...
+[19:17:41][T00]   已留存原版（嵌入前）: finally/progress_items/编译原理课程设计报告样例.md/original.md
+[19:17:41][T00]   Saved: 编译原理课程设计报告样例.md (18 replacements)
+[19:17:41][T00] ============================================================
+[19:17:41][T00] Done!

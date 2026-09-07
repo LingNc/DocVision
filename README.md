@@ -117,6 +117,10 @@ docvision init        生成配置模板
 
 ### img2text 嵌入格式
 
+> **可还原**：嵌入发生前，原版 markdown（图片引用完整）会自动留存到
+> `finally/progress_items/<文件名>/original.md`（每个文件只存首次版本），
+> 需要回滚时直接复制回去即可。
+
 AI 结果带 `[IMG_TYPE: <类型>]` 标签，写入 `finally/` 的 markdown 时按类型选择嵌入方式：
 
 | 类型 | 嵌入方式 |

@@ -28,8 +28,8 @@ func newLatexCmd() *cobra.Command {
                               一路到 output/，然后按档位处理全部 md，最后日志分析
   docvision latex 书.pdf      单文件：自动复制进 files/ 并跑前置，只处理该文件
   docvision latex 书.docx
-  docvision latex 书.md       自备 md（放 files/）：跳过 MinerU，整理进 output/ 后直接处理
-                              （不允许拿 output/ 的产物当输入）
+  docvision latex 书.md       自备 md：复制进 files/ 后整理进 output/ 直接处理
+                              （output/ 里的 md 直接选用，不做拒绝）
 
 档位 2（latex.level: 2）:
   专用分类 AI 逐图标记 text（艺术字文本）/ vector（可用 TikZ 重绘）/ raster（保留原图）。
@@ -70,7 +70,7 @@ func newLatexCmd() *cobra.Command {
 			// - PDF/DOCX 参数：先复制进 files/，跑前置（只处理新文件），
 			//   再对产出的 md 继续 LaTeX。
 			// - md 参数：视为用户自备的输入文件（放在 files/ 中），整理
-			//   进 output/ 后直接 LaTeX——不允许拿 output/ 的产物当输入。
+			//     整理进 output/ 后直接 LaTeX（不做硬拒绝）。
 			selected, err := prepareLatexInputs(cmd, cfg, args)
 			if err != nil {
 				return err
@@ -214,7 +214,9 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 		}
 	}
 
-	// md：只接受 files/（或其子路径）中的文件，禁止 output/ 产物当输入。
+	// md：output/ 里的直接选用（本就是整理产物）；其他位置的复制进
+	// files/ 后再整理进 output/。不做任何硬拒绝——用户路径里带 output
+	// 之类的名字完全正常。
 	var selected []string
 	for _, md := range mds {
 		abs, err := filepath.Abs(md)
@@ -223,10 +225,14 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 		}
 		outAbs, _ := filepath.Abs(cfg.Paths.OutputDir)
 		if outAbs != "" && (abs == outAbs || strings.HasPrefix(abs, outAbs+string(filepath.Separator))) {
-			return nil, fmt.Errorf("%s 位于 output/ 中——那是产物目录，不是输入。请把源 md 放到 files/ 后再运行", md)
+			selected = append(selected, filepath.Base(abs))
+			continue
 		}
 		inDir, _ := filepath.Abs(cfg.Paths.InputDir)
 		if inDir == "" || (!strings.HasPrefix(abs, inDir+string(filepath.Separator)) && filepath.Dir(abs) != inDir) {
+			if err := os.MkdirAll(cfg.Paths.InputDir, 0o755); err != nil {
+				return nil, err
+			}
 			copied := filepath.Join(cfg.Paths.InputDir, filepath.Base(abs))
 			if !util.FileExists(copied) {
 				if err := copyFile(copied, abs); err != nil {
@@ -256,6 +262,9 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 // folder, if any) into output/, mimicking what organize produces, so
 // the latex pipeline can treat it like any other input.
 func stageUserMD(cfg *config.Config, mdPath string) error {
+	if err := os.MkdirAll(cfg.Paths.OutputDir, 0o755); err != nil {
+		return err
+	}
 	dst := filepath.Join(cfg.Paths.OutputDir, filepath.Base(mdPath))
 	if !util.FileExists(dst) {
 		if err := copyFile(dst, mdPath); err != nil {
