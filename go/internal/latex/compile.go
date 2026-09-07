@@ -171,6 +171,25 @@ func (c *Compiler) Rasterize(pdfPath, outPNG string) error {
 	return nil
 }
 
+// RasterizePages renders pages first..last (1-based) of pdfPath to
+// outPNG (no extension; used for on-demand single-page rendering).
+func (c *Compiler) RasterizePages(pdfPath string, first, last int, outPNG string) error {
+	if _, err := exec.LookPath(c.raster); err != nil {
+		return fmt.Errorf("未找到 %s", c.raster)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, c.raster,
+		"-png", "-r", strconv.Itoa(c.dpi), "-singlefile",
+		"-f", strconv.Itoa(first), "-l", strconv.Itoa(last),
+		pdfPath, outPNG,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("栅格化失败: %v: %s", err, truncateStr(string(out), 400))
+	}
+	return nil
+}
+
 // RasterizeAll renders every page of pdfPath to outBase-1.png,
 // outBase-2.png, ...
 func (c *Compiler) RasterizeAll(pdfPath, outBase string) ([]string, error) {

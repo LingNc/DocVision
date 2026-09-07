@@ -184,26 +184,20 @@ func (r *Runner) stylePhase(proj string) error {
 		submit,
 	}
 
-	// Original scanned pages: render the MinerU-preserved origin PDFs
-	// so the analyst can inspect REAL typography (this is the whole
-	// point of style reverse-engineering).
+	// Original scanned pages: build the page index over the
+	// MinerU-preserved origin PDFs. Pages render ON DEMAND when the
+	// analyst calls view_page (cached afterwards).
 	pagesDir := filepath.Join(proj, "pages")
-	pageCount := 0
-	if originPDFs := findOriginPDFs(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD))); len(originPDFs) > 0 {
-		n, err := r.renderOriginPages(originPDFs, pagesDir)
-		if err != nil {
-			r.log.LogWarning(1, "[style] 原始页面渲染失败（退化为仅用提取图片分析）:", err)
-		} else {
-			pageCount = n
-			r.log.Log(1, "[style] 原始页面已渲染:", strconv.Itoa(n), "页 ->", pagesDir)
-			tools = append([]session.Tool{&ListPagesTool{PagesDir: pagesDir}}, tools...)
-		}
+	pageIdx, pageErr := buildPageIndex(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD)))
+	if pageErr != nil {
+		r.log.LogWarning(1, "[style] 未找到 MinerU 保留的原始 PDF（mineru_output/<主题>_part*/*_origin.pdf），将仅基于提取图片与 md 分析样式")
 	} else {
-		r.log.LogWarning(1, "[style] 未找到 MinerU 保留的原始 PDF（mineru_output/<subject>_part*/*_origin.pdf），将仅基于提取图片与 md 分析样式")
+		r.log.Log(1, "[style] 原始页面索引就绪:", strconv.Itoa(pageIdx.total), "页（view_page 按需渲染）")
+		tools = append(tools, &ListPagesTool{Idx: pageIdx}, &ViewPageTool{Idx: pageIdx, PagesDir: pagesDir, Runner: r})
 	}
 
 	prompt := styleSystemPrompt
-	if pageCount > 0 {
+	if pageIdx != nil {
 		prompt += "\n\nIMPORTANT: this document HAS original page renders (list_pages -> p001.png...). They show the TRUE typography and layout — inspect them FIRST (chapter title pages, section headings, body text, headers/footers) before looking at extracted images."
 	}
 	sess := session.NewSession(client, modelCfg, tuning, prompt, tools, r.log, 1, "style")
@@ -214,8 +208,8 @@ func (r *Runner) stylePhase(proj string) error {
 		"- Organized markdown (high-quality text): " + filepath.Base(mainMD),
 		"- Extracted images live under images/ (use list_images + view_image).",
 	}, "\n")
-	if pageCount > 0 {
-		initial += fmt.Sprintf("\n- ORIGINAL page renders (%d pages) are available via list_pages + view_image — use them for typography/layout.", pageCount)
+	if pageIdx != nil {
+		initial += fmt.Sprintf("\n- ORIGINAL pages (%d total) are available via list_pages + view_page — use them for typography/layout (rendered on demand).", pageIdx.total)
 	}
 	initial += "\nStart by mapping the structure (list_pages / list_images / read_md), inspect representative pages (crop/zoom title pages, headings, figures), then submit_style."
 

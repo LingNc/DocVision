@@ -9,6 +9,7 @@ import (
 
 	"mineru-tools/internal/config"
 	"mineru-tools/internal/logger"
+	"mineru-tools/pkg/util"
 )
 
 func TestParseClassification(t *testing.T) {
@@ -180,10 +181,12 @@ func TestFindOriginPDFs(t *testing.T) {
 	}
 }
 
-func TestRenderOriginPages(t *testing.T) {
-	// 用真实 LaTeX 生成两页 PDF 来验证渲染与缓存。
+func TestViewPageOnDemand(t *testing.T) {
 	if _, err := exec.LookPath("pdflatex"); err != nil {
 		t.Skip("pdflatex 不可用")
+	}
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		t.Skip("pdftoppm 不可用")
 	}
 	dir := t.TempDir()
 	tex := filepath.Join(dir, "t.tex")
@@ -210,17 +213,43 @@ func TestRenderOriginPages(t *testing.T) {
 	}
 	defer log.Close()
 	r := &Runner{cfg: cfg, comp: comp, log: log}
-	outDir := filepath.Join(dir, "pages")
-	n, err := r.renderOriginPages([]string{filepath.Join(dir, "t.pdf")}, outDir)
+
+	idx, err := buildPageIndex(dir, "t")
+	if err == nil {
+		t.Skip("buildPageIndex 需要 origin pdf 命名，这里直接构造索引")
+	}
+	idx = &pageIndex{srcs: []pageSrc{{pdf: filepath.Join(dir, "t.pdf"), first: 1, count: 2}}, total: 2}
+	pagesDir := filepath.Join(dir, "pages")
+	tool := &ViewPageTool{Idx: idx, PagesDir: pagesDir, Runner: r}
+
+	res, err := tool.Execute(`{"page": 2}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Fatalf("want 2 pages, got %d", n)
+	if res.ImageMIME != "image/png" || res.ImageBase64 == "" {
+		t.Fatalf("want png image, got mime=%q len=%d", res.ImageMIME, len(res.ImageBase64))
 	}
-	// 再跑一次：缓存生效，页数不变。
-	n2, err := r.renderOriginPages([]string{filepath.Join(dir, "t.pdf")}, outDir)
-	if err != nil || n2 != 2 {
-		t.Fatalf("cache re-run: n=%d err=%v", n2, err)
+	if !util.FileExists(pageCachePath(pagesDir, 2)) {
+		t.Fatal("page 2 cache file missing")
+	}
+	if util.FileExists(pageCachePath(pagesDir, 1)) {
+		t.Fatal("page 1 must NOT be rendered on demand for page 2")
+	}
+	// 再次请求命中缓存且结果一致。
+	res2, err := tool.Execute(`{"page": 2}`)
+	if err != nil || res2.ImageBase64 != res.ImageBase64 {
+		t.Fatalf("cache re-run mismatch: err=%v same=%v", err, res2.ImageBase64 == res.ImageBase64)
+	}
+	// 越界页报错。
+	if _, err := tool.Execute(`{"page": 9}`); err == nil {
+		t.Fatal("want out-of-range error")
+	}
+	// 裁剪 + 放大返回 JPEG。
+	res3, err := tool.Execute(`{"page": 1, "left": 10, "top": 10, "right": 60, "bottom": 50, "zoom_width": 400}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res3.ImageMIME != "image/jpeg" {
+		t.Fatalf("cropped view should be jpeg, got %q", res3.ImageMIME)
 	}
 }
