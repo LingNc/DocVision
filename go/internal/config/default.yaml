@@ -47,6 +47,7 @@ paths:
 # ----------------------------------------------------------------
 latex:
   level: 2                       # 2 = per-image vectorisation; 1 = full-book LaTeX
+  remove_watermark: false          # 水印处理：true 时提示各 AI 检测并排除水印（默认关闭，水印原样保留）
   # Model registry keys for each specialised AI session.
   # Each key must exist in the models: registry below; entries there
   # may declare their own base_url / api_key / model / request_body

@@ -204,6 +204,9 @@ func (r *Runner) stylePhase(proj string) error {
 	}
 
 	prompt := styleSystemPrompt + "\n\nYou have a persistent WORKSPACE: write_file stores class.cls / manual.md / example.tex as real files; submit_style can then reference them by file name instead of full inline contents. Check list_fonts before referencing fonts; install_font can add missing font files (record substitutions in the manual when a font cannot be provided)."
+	if r.cfg.Latex.RemoveWatermark {
+		prompt += "\n\nWATERMARK: the source may carry watermark artifacts (repeated decorative overlay text such as institution/library marks, faint background strings). Identify the watermark pattern in the manual and instruct conversion to EXCLUDE it entirely - watermark text/graphics must NOT be typeset in the LaTeX output."
+	}
 	if pageIdx != nil {
 		prompt += "\n\nIMPORTANT: this document HAS original page renders (list_pages -> p001.png...). They show the TRUE typography and layout — inspect them FIRST (chapter title pages, section headings, body text, headers/footers) before looking at extracted images."
 	}
@@ -501,6 +504,10 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		"Chapter markdown preview (first 2000 chars):",
 		truncateStr(string(chapData), 2000),
 	}, "\n")
+
+	if r.cfg.Latex.RemoveWatermark {
+		initial += "\n\nWATERMARK: exclude watermark artifacts from the .tex output (repeated decorative overlay text such as institution marks, faint background strings). Skip such content entirely - do not typeset it."
+	}
 
 	if _, err := sess.Run(session.RunOptions{UserText: initial}); err != nil {
 		return fmt.Errorf("会话失败: %w", err)

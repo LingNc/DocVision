@@ -4,6 +4,8 @@
 
 ### Added
 
+- `latex.remove_watermark`（默认 false）：开启后样式分析 AI 会在使用手册中标注水印模式并指示排除，转换 AI 跳过水印内容，核对 AI 不把水印缺失报为问题
+
 - 档位1 样式分析虚拟工作区（`latex_project/work/style/`）：write_file 增量起草，submit_style 可引用文件而非全量重发
 - 字体管理：`paths.fonts` 目录 + `list_fonts`/`install_font` 工具（样式分析与终审修复会话可用），缺失字体标注替换方法
 - 每章核对 AI：`latex.checker_model`（默认用 convert_model，可为小文本模型），逐章比对产物与原 md，问题回炉一轮，遗留记录 `.checker` 备注

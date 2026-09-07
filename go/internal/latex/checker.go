@@ -44,6 +44,9 @@ func (r *Runner) checkChapter(base, chapPath, texPath string) (bool, string) {
 		truncateStr(string(texData), 20000),
 		"```",
 	}, "\n")
+	if r.cfg.Latex.RemoveWatermark {
+		prompt += "\n\nWatermark note: if watermark-like content is absent from the tex, that is CORRECT (watermark removal is enabled) - do not report it as missing content."
+	}
 
 	req := &session.ChatRequest{
 		Model: modelCfg.Model,

@@ -101,13 +101,18 @@ type LatexConfig struct {
 	// CheckerModel reviews converted chapters (text model, e.g. a
 	// small/fast model from the registry). Empty falls back to
 	// convert_model.
-	CheckerModel    string `yaml:"checker_model"`
+	CheckerModel string `yaml:"checker_model"`
 	// InsertImageDescription: when true, images kept as raster (no
 	// vector structure) embed a readable AI explanation as
 	// "[Image]( content )" instead of the bare image link. The same
 	// flag controls whether confirmed TikZ figures embed the code
 	// block instead of the compiled PDF link. Default false.
 	InsertImageDescription bool `yaml:"insert_image_description"`
+
+	// RemoveWatermark: when true, LaTeX sessions are instructed to detect
+	// and EXCLUDE watermark artifacts (repeated decorative overlay text /
+	// logos) instead of reproducing them. Default false (keep as-is).
+	RemoveWatermark bool `yaml:"remove_watermark"`
 	// Deprecated: use paths.latex_output (still parsed for old configs;
 	// migrated onto Paths in setDefaults).
 	OutputDir string `yaml:"output_dir"`
@@ -124,7 +129,7 @@ type LatexConfig struct {
 		Drawing SessionTuning `yaml:"drawing"`
 		Style   SessionTuning `yaml:"style"`
 		Chapter SessionTuning `yaml:"chapter"`
-		Convert  SessionTuning `yaml:"convert"`
+		Convert SessionTuning `yaml:"convert"`
 		// Checker is the small text model that reviews each converted
 		// chapter before assembly. Defaults to the convert tuning.
 		Checker SessionTuning `yaml:"checker"`
@@ -143,24 +148,24 @@ type Img2TextConfig struct {
 
 	// Pipeline tuning (mirrors the legacy options: keys; a non-zero
 	// value here overrides the options: counterpart).
-	Concurrency        int     `yaml:"concurrency"`
-	OutputLanguage     string  `yaml:"output_language"`
-	MaxContextLinesUp  int     `yaml:"max_context_lines_up"`
+	Concurrency         int    `yaml:"concurrency"`
+	OutputLanguage      string `yaml:"output_language"`
+	MaxContextLinesUp   int    `yaml:"max_context_lines_up"`
 	MaxContextLinesDown int    `yaml:"max_context_lines_down"`
-	MaxWindowUp        int     `yaml:"max_window_up"`
-	MaxWindowDown      int     `yaml:"max_window_down"`
-	MaxRetries         int     `yaml:"max_retries"`
-	APITimeout         int     `yaml:"api_timeout"`
-	APIConnectTimeout  int     `yaml:"api_connect_timeout"`
-	APIMaxRetries      int     `yaml:"api_max_retries"`
-	RateLimitRetries   int     `yaml:"rate_limit_retries"`
-	FormatFixAttempts  int     `yaml:"format_fix_attempts"`
-	MermaidValidation  string  `yaml:"mermaid_validation"`
-	MermaidCommand     string  `yaml:"mermaid_command"`
-	MermaidFixAttempts *int    `yaml:"mermaid_fix_attempts"`
-	MermaidTimeout     int     `yaml:"mermaid_timeout"`
-	TikzValidation     string  `yaml:"tikz_validation"`
-	TikzEngine         string  `yaml:"tikz_engine"`
+	MaxWindowUp         int    `yaml:"max_window_up"`
+	MaxWindowDown       int    `yaml:"max_window_down"`
+	MaxRetries          int    `yaml:"max_retries"`
+	APITimeout          int    `yaml:"api_timeout"`
+	APIConnectTimeout   int    `yaml:"api_connect_timeout"`
+	APIMaxRetries       int    `yaml:"api_max_retries"`
+	RateLimitRetries    int    `yaml:"rate_limit_retries"`
+	FormatFixAttempts   int    `yaml:"format_fix_attempts"`
+	MermaidValidation   string `yaml:"mermaid_validation"`
+	MermaidCommand      string `yaml:"mermaid_command"`
+	MermaidFixAttempts  *int   `yaml:"mermaid_fix_attempts"`
+	MermaidTimeout      int    `yaml:"mermaid_timeout"`
+	TikzValidation      string `yaml:"tikz_validation"`
+	TikzEngine          string `yaml:"tikz_engine"`
 }
 
 // VerifyConfig configures the AI verification pass (核对输出的每张图与
@@ -227,12 +232,12 @@ type OptionsConfig struct {
 	MermaidTimeout      int     `yaml:"mermaid_timeout"`
 	// TikZ compile-check (auto/strict/off). Engine defaults to xelatex
 	// with automatic fallback to pdflatex/lualatex.
-	TikzValidation       string  `yaml:"tikz_validation"`
-	TikzEngine          string  `yaml:"tikz_engine"`
-	MaxTokens           int     `yaml:"max_tokens"`
+	TikzValidation string `yaml:"tikz_validation"`
+	TikzEngine     string `yaml:"tikz_engine"`
+	MaxTokens      int    `yaml:"max_tokens"`
 	// LogLevel: info (default) or debug. Debug writes every AI prompt,
 	// tool call and tool result into the log file (console unaffected).
-	LogLevel            string  `yaml:"log_level"`
+	LogLevel string `yaml:"log_level"`
 }
 
 // PathsConfig holds directory locations used by the workflow.
@@ -499,8 +504,8 @@ func defaultSessionTuning(s *SessionTuning) {
 		s.ContextLimit = 131072 // 128K
 	}
 	// MaxToolRounds: <=0 means unlimited (no safety cap). The 128 default
-//	 lives in the config templates, not here — an explicit 0 in the user's
-//	 config must stay 0.
+	//	 lives in the config templates, not here — an explicit 0 in the user's
+	//	 config must stay 0.
 	if s.MaxTokens == 0 {
 		s.MaxTokens = 16384
 	}
