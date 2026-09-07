@@ -167,8 +167,14 @@ func (c *Client) CallWithRetry(req *ChatRequest) (*ChatResponse, string, string)
 	retry := 0
 	rateRetry := 0
 	waitLog := func(tag string, wait time.Duration) {
-		if c.log != nil {
+		if c.log == nil {
+			return
+		}
+		if tag == "RateLimit" {
+			// 限速等待是常规自恢复事件，不进 error 日志。
 			c.log.LogInfo(0, "  ["+tag+"] 等待重试:", wait)
+		} else {
+			c.log.LogWarning(0, "  ["+tag+"] 等待重试:", wait)
 		}
 	}
 	for {
