@@ -182,6 +182,10 @@ func newLatexLogger(cfg *config.Config) (*logger.Logger, func(), error) {
 //     into output/ (+ adjacent images) and processed directly.
 //   - No args: full prerequisites then every md in output/.
 func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) ([]string, error) {
+	// 前置步骤复用 split 的参数体系（--all/--force/max-pages 等）。
+	if cmd.Flags().Lookup("all") == nil {
+		addSplitFlags(cmd)
+	}
 	var sources, mds []string
 	for _, arg := range args {
 		switch strings.ToLower(filepath.Ext(arg)) {
@@ -194,11 +198,12 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 		}
 	}
 
-	// PDF/DOCX：归位到 files/，再跑前置（已处理过的自动跳过）。
+	// PDF/DOCX：归位到 files/，只拆这些文件，再跑 mineru → organize。
 	if len(sources) > 0 {
 		if err := os.MkdirAll(cfg.Paths.InputDir, 0o755); err != nil {
 			return nil, err
 		}
+		maxPages, maxSizeMB, splitOut, force := splitOptsFromFlags(cmd, cfg)
 		for _, src := range sources {
 			abs, err := filepath.Abs(src)
 			if err != nil {
@@ -210,8 +215,12 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 					return nil, err
 				}
 			}
+			fmt.Printf("\n=== LaTeX 前置: Split Documents (%s) ===\n", filepath.Base(dst))
+			if err := splitOne(dst, maxPages, maxSizeMB, splitOut, force); err != nil {
+				return nil, fmt.Errorf("前置步骤 split 失败: %w", err)
+			}
 		}
-		for _, stepName := range []string{"split", "mineru", "organize"} {
+		for _, stepName := range []string{"mineru", "organize"} {
 			fmt.Printf("\n=== LaTeX 前置: %s ===\n", stepLabel(stepName))
 			if _, err := runStep(stepName, cmd, cfg, ""); err != nil {
 				return nil, fmt.Errorf("前置步骤 %s 失败: %w", stepName, err)
@@ -252,11 +261,21 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 		selected = append(selected, filepath.Base(abs))
 	}
 
-	// 无参数：确认 output/ 里确实有内容（前置没跑过会误导）。
+	// 无参数：output/ 里有 md 直接处理；没有则自动从 files/ 跑全流程前置。
 	if len(args) == 0 && len(sources) == 0 {
 		exists, _ := filepath.Glob(filepath.Join(cfg.Paths.OutputDir, "*.md"))
 		if len(exists) == 0 {
-			return nil, fmt.Errorf("output/ 中没有 markdown。请先把 PDF/DOCX 放到 files/ 并运行本命令（会自动跑前置流程）")
+			fmt.Println("output/ 中没有 markdown，自动从 files/ 跑前置流程（split → mineru → organize）...")
+			for _, stepName := range []string{"split", "mineru", "organize"} {
+				fmt.Printf("\n=== LaTeX 前置: %s ===\n", stepLabel(stepName))
+				if _, err := runStep(stepName, cmd, cfg, ""); err != nil {
+					return nil, fmt.Errorf("前置步骤 %s 失败: %w", stepName, err)
+				}
+			}
+			exists, _ = filepath.Glob(filepath.Join(cfg.Paths.OutputDir, "*.md"))
+			if len(exists) == 0 {
+				return nil, fmt.Errorf("前置流程完成后 output/ 仍没有 markdown：请确认 files/ 中有 PDF/DOCX")
+			}
 		}
 		fmt.Println("处理 output/ 中全部 markdown:", len(exists), "个")
 	}
