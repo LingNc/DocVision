@@ -136,6 +136,60 @@ docvision init        生成配置模板
 # analyze 默认即输出“本轮写入 finally 的文件及成功率统计”，分析前会列出选中的日志
 ```
 
+
+## LaTeX 输出（docvision latex）
+
+基于 `output/` 中 MinerU 整理后的 Markdown 构建 LaTeX 输出，两档位：
+
+**档位 2（默认，`latex.level: 2`）—— 图片矢量化**
+
+1. 专用**分类 AI**（`models.classifier`，需视觉能力）逐图标记：
+   - `text`：艺术样式文本（如美化题号）→ 复用图片解释 AI，纯内容嵌入文本流（无 `[AI]`/`[IMG_TYPE]` 标记）
+   - `vector`：函数图像/立体结构/流程图等可矢量重绘图形 → 进入作图流程
+   - `raster`：照片/截图等 → 保留原图链接（`insert_image_description: true` 时嵌入可读解释文本）
+2. **作图 AI**（`models.drawing`）在独立会话中写 TikZ → `compile_preview` 工具自动编译并栅格化为 PNG 回给模型**视觉核对** → 迭代修正 → `submit` 确认提交
+3. 编译产物 PDF 按矢量图嵌入 Markdown（`insert_image_description: true` 时嵌入 tikz 代码块）；矢量转换失败时回退保留原图并输出警告日志
+
+**档位 1（`latex.level: 1`）—— 全书 LaTeX**
+
+1. **样式分析 AI**（`models.style`）：通过查看页面/图像（支持裁剪放大）、读取解析 md 等工具分析全书样式，产出 `book.cls` + 结构化使用手册 + 案例（自动试编译，失败自动回炉）
+2. **章节划分 AI**（`models.chapter`）：grep 检索 + 最小 bash 沙箱（虚拟文件系统只有这一个文件），按行号划分章节（结构化提交，全覆盖校验）
+3. **转换 AI** 并发逐章转 `.tex`（只读他人产物，仅可写自己的文件，支持跨章引用）
+4. 汇总为多文件 `.tex` 项目 → 编译全书 PDF（失败进入修复会话）→ 生成单文件 `standalone.tex`
+
+### AI 会话基础设施
+
+- **模型注册表** `models:`：每个专用 AI（classifier/drawing/style/chapter/convert/verifier）可单独配置 base_url / api_key / model / request_body
+- **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到阈值自动 **AI 压缩**会话（保留关键决策/成果，丢弃草稿与工具噪音）
+- **可分离工具**：会话工具按需注册（编译预览、提交确认、grep、bash 沙箱、受限文件读写等）
+- **断点续传**：档位2逐图进度、档位1逐阶段进度（progress.json）
+
+### AI 核对（verify，默认关闭）
+
+`verify.enabled: true` 后，用配置的视觉校验模型逐项核对每张图与其嵌入内容，生成 `verify_report.md`（问题 + 修改意见，不改动输出）。也可显式运行：
+
+```bash
+docvision verify
+```
+
+### 用法
+
+```bash
+# 档位2（默认）
+docvision latex
+
+docvision latex --level 2 --test --number 5   # 抽样测试
+
+docvision latex --step classify               # 仅分类
+
+# 档位1（全书）
+docvision latex --level 1
+
+docvision latex --level 1 --step style        # 仅样式分析阶段
+```
+
+需要本地 LaTeX 工具链：TeX 发行版（xelatex）+ poppler-utils（pdftoppm）。
+
 ## Python 脚本独立使用
 
 历史 Python 脚本已归档至 `legacy/python/`，独立使用方式请参阅该目录下的 `README.md`。
