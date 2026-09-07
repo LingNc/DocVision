@@ -60,8 +60,6 @@ latex:
   checker_model: ""             # 每章核对模型（留空用 convert_model）
   insert_image_description: false # raster 保留原图时是否嵌入 AI 解释文本
                                   # （同时控制 vector 确认后嵌入 tikz 代码块而非 PDF 链接）
-  output_dir: "./finally_latex"  # 档位2 输出目录
-  project_dir: "./latex_project" # 档位1 工作目录
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
