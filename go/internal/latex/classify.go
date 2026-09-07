@@ -60,6 +60,11 @@ func parseClassification(reply string) (Classification, error) {
 	}
 	kind, _ := obj["kind"].(string)
 	kind = strings.ToLower(strings.TrimSpace(kind))
+	if kind == "table" {
+		// Markdown 可表达的表格走文本管线：img2text 的 table 类型
+		// 会产出 Markdown 表格并直接嵌入。
+		kind = ClassText
+	}
 	switch kind {
 	case ClassText, ClassVector, ClassRaster:
 	default:

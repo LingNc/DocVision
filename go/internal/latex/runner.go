@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -76,6 +77,7 @@ type imageProgress struct {
 	TikzCode string `json:"tikz_code,omitempty"`
 	FigPDF   string `json:"figure_pdf,omitempty"`
 	FigPNG   string `json:"figure_png,omitempty"`
+	FigSVG   string `json:"figure_svg,omitempty"`
 	Kept     bool   `json:"original_kept,omitempty"`
 	Error    string `json:"error,omitempty"`
 }
@@ -129,6 +131,7 @@ func (r *Runner) clientFor(name string) *session.Client {
 	}
 	mc, _ := r.cfg.ResolveModel(name)
 	c := session.NewClient(mc)
+	c.SetLogger(r.log)
 	r.clients[name] = c
 	r.models[name] = mc
 	return c
@@ -588,6 +591,19 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	pp.TikzCode = res.Code
 	pp.FigPDF = "figures/" + filepath.Base(dstPDF)
 	pp.FigPNG = "figures/" + filepath.Base(dstPNG)
+	// Markdown 无法内嵌 PDF：用 dvisvgm 把矢量图编译为 SVG 供嵌入
+	//（失败时回退 PNG/PDF 链接，仅记录警告）。
+	if _, err := exec.LookPath("dvisvgm"); err == nil {
+		dstSVG := filepath.Join(outDir, "figures", name+".svg")
+		cmd := exec.Command("dvisvgm", "--pdf", "--exact", "--output",
+			filepath.Base(dstSVG), filepath.Base(dstPDF))
+		cmd.Dir = outDir
+		if err := cmd.Run(); err != nil {
+			r.log.LogWarning(tid, "[vector] SVG 转换失败（回退 PDF/PNG 链接）:", err)
+		} else {
+			pp.FigSVG = "figures/" + name + ".svg"
+		}
+	}
 	return true
 }
 
@@ -658,6 +674,13 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 		label := p.Label
 		if label == "" {
 			label = "figure"
+		}
+		// Markdown 不支持内嵌 PDF：优先嵌入 dvisvgm 生成的 SVG。
+		if p.FigSVG != "" {
+			return "![" + label + "](" + p.FigSVG + ")"
+		}
+		if p.FigPNG != "" {
+			return "![" + label + "](" + p.FigPNG + ")"
 		}
 		return "![" + label + "](" + p.FigPDF + ")"
 	case ClassRaster:

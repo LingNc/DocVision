@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/logger"
 )
 
 // Client is a thin HTTP wrapper around an OpenAI-compatible chat
@@ -25,6 +26,13 @@ type Client struct {
 	apiKey      string
 	model       string
 	requestBody map[string]interface{}
+	log         *logger.Logger // optional; logs retry/backoff waits when set
+}
+
+// SetLogger attaches a logger so retry/backoff waits become visible in
+// the log file (the console stays untouched).
+func (c *Client) SetLogger(l *logger.Logger) {
+	c.log = l
 }
 
 // NewClient builds a Client from a resolved ModelConfig.
@@ -43,13 +51,13 @@ func (c *Client) Model() string { return c.model }
 
 // ChatRequest mirrors the OpenAI chat completions schema.
 type ChatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
+	Model       string           `json:"model"`
+	Messages    []ChatMessage    `json:"messages"`
 	Tools       []map[string]any `json:"tools,omitempty"`
-	ToolChoice  any           `json:"tool_choice,omitempty"`
-	MaxTokens   int           `json:"max_tokens"`
-	Temperature float64       `json:"temperature"`
-	Stream      bool          `json:"stream"`
+	ToolChoice  any              `json:"tool_choice,omitempty"`
+	MaxTokens   int              `json:"max_tokens"`
+	Temperature float64          `json:"temperature"`
+	Stream      bool             `json:"stream"`
 }
 
 // ChatMessage is one message in a conversation. Content is either a
@@ -126,12 +134,18 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 
 // CallWithRetry performs the bounded exponential-backoff loop shared by
 // all pipelines: rate limits (429) back off 2*2^n capped at 60s,
-// connection issues 5*2^n capped at 60s, other errors a flat 2s. The
-// same sentinel strings as img2text are returned so log analysers can
-// classify failures uniformly.
+// connection issues 5*2^n capped at 60s, other errors (e.g. transient
+// 5xx with a non-JSON body) 2*2^n capped at 30s. The same sentinel
+// strings as img2text are returned so log analysers can classify
+// failures uniformly.
 func (c *Client) CallWithRetry(req *ChatRequest, maxAPIRetries, rateLimitLimit int) (*ChatResponse, string, string) {
 	retry := 0
 	rateRetry := 0
+	waitLog := func(tag string, wait time.Duration) {
+		if c.log != nil {
+			c.log.LogWarning(0, "  ["+tag+"] 等待重试:", wait)
+		}
+	}
 	for {
 		resp, err := c.ChatCompletion(req)
 		if err == nil {
@@ -145,6 +159,7 @@ func (c *Client) CallWithRetry(req *ChatRequest, maxAPIRetries, rateLimitLimit i
 				if wait > 60*time.Second {
 					wait = 60 * time.Second
 				}
+				waitLog("RateLimit", wait)
 				time.Sleep(wait)
 				rateRetry++
 				continue
@@ -157,6 +172,7 @@ func (c *Client) CallWithRetry(req *ChatRequest, maxAPIRetries, rateLimitLimit i
 				if wait > 60*time.Second {
 					wait = 60 * time.Second
 				}
+				waitLog("ConnRetry", wait)
 				time.Sleep(wait)
 				retry++
 				continue
@@ -164,7 +180,14 @@ func (c *Client) CallWithRetry(req *ChatRequest, maxAPIRetries, rateLimitLimit i
 			return nil, "[SESSION_CONNECTION_TIMEOUT]", "error"
 		}
 		if retry < maxAPIRetries {
-			time.Sleep(2 * time.Second)
+			// Generic API error (e.g. transient 5xx with a non-JSON
+			// body from the proxy): exponential backoff 2s, 4s, 8s...
+			wait := time.Duration(1<<retry) * 2 * time.Second
+			if wait > 30*time.Second {
+				wait = 30 * time.Second
+			}
+			waitLog("APIRetry", wait)
+			time.Sleep(wait)
 			retry++
 			continue
 		}

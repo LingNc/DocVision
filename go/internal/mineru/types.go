@@ -58,9 +58,9 @@ type ExtractProgress struct {
 // the poll endpoint. Only the fields we actually inspect are declared;
 // unknown fields are tolerated by encoding/json.
 type ExtractResultItem struct {
-	State         string           `json:"state"`
-	ErrMsg        string           `json:"err_msg"`
-	FullZipURL    string           `json:"full_zip_url"`
+	State           string          `json:"state"`
+	ErrMsg          string          `json:"err_msg"`
+	FullZipURL      string          `json:"full_zip_url"`
 	ExtractProgress ExtractProgress `json:"extract_progress"`
 }
 
@@ -72,8 +72,8 @@ type ExtractResultData struct {
 // BatchResult is the JSON body returned by the poll endpoint. Code 0
 // means success; non-zero codes carry an error message in Msg.
 type BatchResult struct {
-	Code int              `json:"code"`
-	Msg  string           `json:"msg"`
+	Code int               `json:"code"`
+	Msg  string            `json:"msg"`
 	Data ExtractResultData `json:"data"`
 }
 

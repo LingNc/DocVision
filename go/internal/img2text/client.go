@@ -77,10 +77,10 @@ type ChatRequest struct {
 // intentionally `any` so callers can pass a plain string (for text-only
 // turns) or a []map (for multimodal turns with image_url parts).
 type ChatMessage struct {
-	Role       string `json:"role"`
-	Content    any    `json:"content"`
+	Role       string     `json:"role"`
+	Content    any        `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
 // ToolCall mirrors the assistant-side tool_calls entry that comes back

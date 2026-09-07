@@ -77,7 +77,7 @@ func newLatexCmd() *cobra.Command {
 				return err
 			}
 
-			log, closeLog, err := newLatexLogger(cfg)
+			log, logPath, closeLog, err := newLatexLogger(cfg)
 			if debugFlag, _ := cmd.Flags().GetBool("debug"); debugFlag || cfg.Options.LogLevel == "debug" {
 				log.SetDebug(true)
 				fmt.Println("调试模式：AI 提示词与工具调用将完整写入日志文件")
@@ -107,9 +107,14 @@ func newLatexCmd() *cobra.Command {
 					return err
 				}
 			}
-			// LaTeX 自带工作流属性：结束后自动做日志分析。
+			// LaTeX 自带工作流属性：结束后自动做日志分析（默认只分析
+			// 本次运行的日志；显式 --all 才汇总全部历史）。
+			analyzeLog := logPath
+			if all, _ := cmd.Flags().GetBool("all"); all {
+				analyzeLog = ""
+			}
 			fmt.Println("\n=== 日志分析 ===")
-			return runAnalyzeFromConfig(cmd, cfg, "")
+			return runAnalyzeFromConfig(cmd, cfg, analyzeLog)
 		},
 	}
 	cmd.Flags().Int("level", 0, "覆盖配置的档位（1=全书 LaTeX，2=图片矢量化）")
@@ -137,7 +142,7 @@ verify.enabled: true 时执行。`,
 			if err != nil {
 				return err
 			}
-			log, closeLog, err := newLatexLogger(cfg)
+			log, _, closeLog, err := newLatexLogger(cfg)
 			if err != nil {
 				return err
 			}
@@ -157,9 +162,9 @@ verify.enabled: true 时执行。`,
 }
 
 // newLatexLogger creates the shared latex/verify logger.
-func newLatexLogger(cfg *config.Config) (*logger.Logger, func(), error) {
+func newLatexLogger(cfg *config.Config) (*logger.Logger, string, func(), error) {
 	if err := os.MkdirAll(cfg.Paths.LogsDir, 0o755); err != nil {
-		return nil, nil, fmt.Errorf("create logs dir: %w", err)
+		return nil, "", nil, fmt.Errorf("create logs dir: %w", err)
 	}
 	ts := time.Now().Format("20060102_150405")
 	logPath := filepath.Join(cfg.Paths.LogsDir, "latex_"+ts+".log")
@@ -170,9 +175,9 @@ func newLatexLogger(cfg *config.Config) (*logger.Logger, func(), error) {
 	}
 	log, err := logger.NewLogger(logPath, errLogPath, width)
 	if err != nil {
-		return nil, nil, err
+		return nil, "", nil, err
 	}
-	return log, func() { log.Close() }, nil
+	return log, logPath, func() { log.Close() }, nil
 }
 
 // prepareLatexInputs applies the files/-centred input contract and

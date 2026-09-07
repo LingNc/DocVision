@@ -1,10 +1,10 @@
 package config
 
 import (
+	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"testing"
-	"gopkg.in/yaml.v3"
 )
 
 func TestLoadConfig_DefaultsApplied(t *testing.T) {

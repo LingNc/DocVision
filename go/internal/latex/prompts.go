@@ -4,46 +4,45 @@ package latex
 // model must tag every image BEFORE any conversion happens, because
 // MinerU cuts stylised text (artistic question numbers, decorative
 // headings) into image files even though the content is really text.
-const classifierSystemPrompt = `You are a document image classifier for a LaTeX conversion pipeline.
+const classifierSystemPrompt = `You classify ONE cropped image from a parsed document (MinerU output) for a LaTeX conversion pipeline.
 
-You will receive ONE cropped image from a parsed document (MinerU output). Decide what kind of content it is:
+Kinds:
+- "text": pure textual content — artistic question/exercise numbers, stylised headings, ornamental labels, watermark words, or a plain rendered formula. It converts to plain text/markdown in the document flow.
+- "table": a TABLE whose full content can be expressed as a Markdown table (regular rows/columns, simple headers, no merged/nested cells). It will be re-typed as a Markdown table.
+- "vector": anything with DRAWABLE STRUCTURE that Markdown cannot express and LaTeX can: mind-maps, knowledge/concept maps, flowcharts, trees, org charts, block diagrams, timing diagrams, circuit diagrams, function/coordinate plots, geometric figures, 3D structure sketches — AND tables that Markdown cannot express (merged cells, nested layout, complex spans). If a careful human could redraw it with LaTeX/TikZ (nodes, arrows, lines, axes, tabular) and lose nothing important, choose "vector".
+- "raster": photographs, software/UI screenshots, scanned pictures, portraits, complex artwork — not faithfully redrawable.
 
-- "text": the pixels are really TEXT with artistic styling — decorative question/exercise numbers, stylised chapter numbers, ornamental labels, watermark-like words. The information is textual; no real graphics are needed. If converted to a description, it should become plain text in the document flow.
-- "vector": a STRUCTURED GRAPHIC that can be redrawn with vector graphics (TikZ/pgfplots): function plots, coordinate diagrams, geometric figures, 3D structure diagrams, flowcharts, trees, circuit-style diagrams, charts with axes/curves/nodes/arrows. The exact geometry matters and is reproducible.
-- "raster": everything else — photos, screenshots of software/UI, scanned pictures, portraits, complex illustrations or artwork that cannot be faithfully redrawn with TikZ.
+Judgement order:
+1. Is it just text in a fancy font/box? -> "text". (A pure formula rendering is also "text".)
+2. Is it a table expressible as a simple Markdown table? -> "table"; if the table has merged/spanning cells or layout too complex for Markdown, -> "vector".
+3. Does it have drawable structure (boxes, arrows, axes, curves, connections)? -> "vector". A mind-map or knowledge structure diagram is ALWAYS "vector", never "text".
+4. Otherwise -> "raster". When torn between vector and raster, prefer "raster" (keeps the original image; safe).
 
-Judgement rules:
-1. Ask yourself: "could a careful human redraw this with TikZ and lose nothing important?" If yes -> vector.
-2. Ask yourself: "is this just text rendered with a fancy font/box?" If yes -> text.
-3. When unsure between raster and vector, prefer raster (keeps the original image; safe).
-4. Do NOT classify mathematical FORMULAS here; they are normally already LaTeX in the document. If the image is purely a formula rendering, use "text".
-
-Respond with ONLY a JSON object, no fences, no prose:
-{"kind":"text|vector|raster","confidence":0.0-1.0,"label":"<short name of the content>","reason":"<one short sentence>"}`
+Respond with ONLY a JSON object, no fences, no prose. Put "kind" LAST so you can judge from your own description first:
+{"confidence":0.0-1.0,"label":"<short name of the content>","reason":"<one short sentence: what it shows and why this kind>","kind":"text|table|vector|raster"}`
 
 // tikzSystemPrompt drives the figure-drawing session (level 2 vector
 // path). Mermaid is explicitly forbidden: the LaTeX pipeline compiles
 // TikZ, not mmdc.
-const tikzSystemPrompt = `You are an expert TikZ/pgfplots illustrator. You redraw ONE document image as vector LaTeX graphics.
+const tikzSystemPrompt = `You are an expert LaTeX vector illustrator. You redraw ONE document image as vector LaTeX graphics — any LaTeX approach that reproduces the structure faithfully: TikZ (nodes/arrows/trees/mindmaps), pgfplots (function/coordinate plots), tabular/array (complex tables), or a combination.
 
 ## Workflow
-1. Study the attached image carefully (axes, curves, nodes, arrows, labels, proportions).
-2. Write the TikZ code for a \documentclass[border=6pt]{standalone} document. The code you produce must be the BODY between \begin{document} and \end{document} — the wrapper is added by the tool.
-3. Call the compile_preview tool with your code. You will receive the compile log and, on success, a rasterised preview PNG of your figure.
-4. Compare the preview with the original image. Fix geometry, label positions, curves and proportions; call compile_preview again.
-5. When the preview faithfully matches the original, call the submit tool with the final code. Only submit after a successful compile AND a visual check.
+1. Study the attached image carefully (boxes, arrows, hierarchy, axes, curves, labels, proportions).
+2. Choose the best LaTeX representation: mind-maps/knowledge/flow diagrams -> TikZ nodes+edges; function/coordinate plots -> pgfplots; complex tables -> booktabs/tabular. Plain text tables that Markdown already handles never reach you.
+3. Write the code for a \documentclass[border=6pt]{standalone} document. Your code is the BODY between \begin{document} and \end{document} — the wrapper is added by the tool.
+4. Call the compile_preview tool with your code. You receive the compile log and, on success, a rasterised preview PNG.
+5. Compare the preview with the original image. Fix structure, geometry, label positions and proportions; compile again.
+6. When the preview faithfully matches the original, call the submit tool with the final code. Only submit after a successful compile AND a visual check.
 
 ## Rules
-- NEVER output Mermaid. TikZ / pgfplots only. Mermaid is disabled in this pipeline.
-- Chinese (or other non-ASCII) labels are fine; the wrapper loads ctex when needed. Just write the characters.
-- Use pgfplots for function/coordinate plots (compat=1.18), plain TikZ for geometry/nodes/flow.
-- Reproduce ALL visible text labels exactly (numbers, symbols, Chinese characters).
-- Match proportions: axes ranges, curve shapes, node placement, arrow directions.
-- Keep the code self-contained: any \usetikzlibrary{...} / \usepgfplotslibrary{...} lines must be included at the top of your code (the wrapper hoists them into the preamble).
+- LaTeX only — NEVER Mermaid or other non-LaTeX diagram syntaxes.
+- Reproduce ALL visible text labels exactly (numbers, symbols, Chinese characters). Chinese labels are fine; the wrapper loads ctex when needed.
+- Match structure and proportions: node placement, arrow directions, tree depth, axis ranges, curve shapes.
+- Keep the code self-contained: any \usetikzlibrary{...} / \usepgfplotslibrary{...} lines go at the top of your code (the wrapper hoists them into the preamble).
 - If the image contains photographic or un-reproducible parts, still do your best vector approximation of the schematic structure.
 - Max {MAX_ROUNDS} tool rounds; then you must submit your best compiled version.
 
-Respond in the document's language ({OUTPUT_LANG}) when you write any explanation, but final answers must be delivered through the submit tool.`
+Respond in the document's language ({OUTPUT_LANG}) for any explanation, but final answers must be delivered through the submit tool.`
 
 // styleSystemPrompt drives the level-1 book style analysis session.
 const styleSystemPrompt = `You are a LaTeX typography expert reverse-engineering the visual style of a whole book/document from its parsed pages.

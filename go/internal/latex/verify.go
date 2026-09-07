@@ -194,7 +194,7 @@ func (r *Runner) verifyOne(client *session.Client, p *imageProgress, tid int) *v
 			parts = append(parts, map[string]interface{}{
 				"type": "text", "text": "Rendered preview of the TikZ re-drawing:"},
 				map[string]interface{}{
-				"type": "image_url", "image_url": map[string]string{"url": "data:image/png;base64," + png64}})
+					"type": "image_url", "image_url": map[string]string{"url": "data:image/png;base64," + png64}})
 		}
 	}
 	req := &session.ChatRequest{

@@ -52,7 +52,8 @@ func BuildTools(maxPerRequestUp, maxPerRequestDown int) []map[string]interface{}
 }
 
 // rangeDescription matches the Python f-string:
-//   f"How many ADDITIONAL lines to expand {direction} ... (1-{cap}). Must increase each call."
+//
+//	f"How many ADDITIONAL lines to expand {direction} ... (1-{cap}). Must increase each call."
 func rangeDescription(direction string, cap int) string {
 	return "How many ADDITIONAL lines to expand " + direction +
 		" beyond your current view (1-" + strconv.Itoa(cap) +

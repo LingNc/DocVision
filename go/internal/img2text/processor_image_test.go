@@ -14,7 +14,7 @@ import (
 func TestResolveImageFileSubjectFallback(t *testing.T) {
 	tmp := t.TempDir()
 	imagesDir := filepath.Join(tmp, "output", "images")
-	subject := "高数 上册 (数学)"     // subject with spaces/ASCII + CJK
+	subject := "高数 上册 (数学)" // subject with spaces/ASCII + CJK
 	name := "deadbeef.jpg"
 	subjectDir := filepath.Join(imagesDir, subject)
 	if err := os.MkdirAll(subjectDir, 0o755); err != nil {

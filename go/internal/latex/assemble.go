@@ -2,9 +2,9 @@ package latex
 
 import (
 	"fmt"
-	"regexp"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"

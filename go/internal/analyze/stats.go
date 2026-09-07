@@ -14,26 +14,26 @@ type Statistics struct {
 	Incomplete  int
 	SuccessRate float64
 
-	ToolCalls        *ToolCallStats
-	Elapsed          *ElapsedStats
+	ToolCalls          *ToolCallStats
+	Elapsed            *ElapsedStats
 	ElapsedByToolCalls map[int]*ElapsedGroup
-	ErrorDistribution map[string]int
-	ThreadStats      map[string]*ThreadStat
-	ThreadCount      int
+	ErrorDistribution  map[string]int
+	ThreadStats        map[string]*ThreadStat
+	ThreadCount        int
 
-	WallClock float64
+	WallClock  float64
 	Throughput float64
 }
 
 // ToolCallStats summarises the tool-call counts across successful sessions.
 type ToolCallStats struct {
-	Total       int
-	Avg         float64
-	Median      float64
-	Min         int
-	Max         int
+	Total        int
+	Avg          float64
+	Median       float64
+	Min          int
+	Max          int
 	Distribution map[int]int
-	Top         []KeyCount
+	Top          []KeyCount
 }
 
 // KeyCount pairs a session key with its tool-call count.
@@ -78,9 +78,9 @@ func ComputeStatistics(sessions []Session, percentiles []int) *Statistics {
 	}
 
 	stats := &Statistics{
-		Total:             len(sessions),
-		ErrorDistribution: map[string]int{},
-		ThreadStats:       map[string]*ThreadStat{},
+		Total:              len(sessions),
+		ErrorDistribution:  map[string]int{},
+		ThreadStats:        map[string]*ThreadStat{},
 		ElapsedByToolCalls: map[int]*ElapsedGroup{},
 	}
 
@@ -113,11 +113,11 @@ func ComputeStatistics(sessions []Session, percentiles []int) *Statistics {
 		avg := meanFloat(toIntF(tcList))
 		med := medianInt(tcList)
 		tc := &ToolCallStats{
-			Total:       sumInt(tcList),
-			Avg:         avg,
-			Median:      med,
-			Min:         minInt(tcList),
-			Max:         maxInt(tcList),
+			Total:        sumInt(tcList),
+			Avg:          avg,
+			Median:       med,
+			Min:          minInt(tcList),
+			Max:          maxInt(tcList),
 			Distribution: dist,
 		}
 		// Top-20 most-called images
