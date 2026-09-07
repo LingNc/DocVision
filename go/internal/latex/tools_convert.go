@@ -126,9 +126,10 @@ func (t *WriteFileTool) Execute(argsJSON string) (session.ToolResult, error) {
 // CompileChapterTool compiles the chapter .tex inside a scratch
 // wrapper that uses the book class, returning the error log only.
 type CompileChapterTool struct {
-	Comp     *Compiler
-	Scratch  string // per-chapter scratch dir (contains wrapper + cls copy)
-	MainFile string
+	Comp       *Compiler
+	Scratch    string // per-chapter scratch dir (contains wrapper + cls copy)
+	MainFile   string
+	SourcePath string // live chapter .tex in the virtual work tree; copied into Scratch before compiling
 }
 
 func (t *CompileChapterTool) Name() string { return "compile" }
@@ -142,6 +143,15 @@ func (t *CompileChapterTool) Definition() map[string]any {
 }
 
 func (t *CompileChapterTool) Execute(_ string) (session.ToolResult, error) {
+	if t.SourcePath != "" {
+		data, err := os.ReadFile(t.SourcePath)
+		if err != nil {
+			return session.ToolResult{Text: "COMPILE SKIPPED: " + t.MainFile + " has not been written yet (call write_file first)."}, nil
+		}
+		if err := os.WriteFile(filepath.Join(t.Scratch, t.MainFile), data, 0o644); err != nil {
+			return session.ToolResult{}, err
+		}
+	}
 	res := t.Comp.Compile(t.Scratch, t.MainFile)
 	if res.OK {
 		return session.ToolResult{Text: "COMPILE OK."}, nil

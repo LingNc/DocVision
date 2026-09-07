@@ -27,6 +27,9 @@ type ImagesOptions struct {
 	Step string
 	// SourceDir overrides paths.output_dir (defaults to it).
 	SourceDir string
+	// OutDir overrides paths.latex.output_dir (used by the level-1
+	// book pipeline to place processed source inside its project dir).
+	OutDir string
 }
 
 // imageProgress is the per-image persisted state (断点续传).
@@ -71,6 +74,10 @@ type Runner struct {
 	comp    *Compiler
 	clients map[string]*session.Client
 	models  map[string]config.ModelConfig
+
+	// lastSplitError remembers the latest split validation failure so
+	// the chapter session can be re-prompted with a concrete reason.
+	lastSplitError string
 }
 
 // NewRunner builds the shared runner (clients resolved per registry
@@ -105,7 +112,10 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	if srcDir == "" {
 		srcDir = cfg.Paths.OutputDir
 	}
-	outDir := cfg.Latex.OutputDir
+	outDir := opts.OutDir
+	if outDir == "" {
+		outDir = cfg.Latex.OutputDir
+	}
 	for _, d := range []string{outDir, filepath.Join(outDir, "figures"),
 		filepath.Join(outDir, "images"), filepath.Join(outDir, "tikz"),
 		filepath.Join(outDir, "progress_items")} {
