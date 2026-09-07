@@ -97,6 +97,8 @@ func newRootCmd() *cobra.Command {
 		newOrganizeCmd(),
 		newImg2TextCmd(),
 		newAnalyzeCmd(),
+		newLatexCmd(),
+		newVerifyCmd(),
 		newSplitLogCmd(),
 		newInitCmd(),
 		newSetupCmd(),
