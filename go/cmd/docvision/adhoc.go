@@ -51,7 +51,7 @@ func runAdHocWorkflow(cmd *cobra.Command, cfg *config.Config, target string) err
 		destDir = filepath.Dir(abs)
 	}
 	if strings.Contains(cfg.Mineru.Token, "YOUR-") || strings.TrimSpace(cfg.Mineru.Token) == "" ||
-		strings.Contains(cfg.AI.APIKey, "YOUR-") || strings.TrimSpace(cfg.AI.APIKey) == "" {
+		strings.Contains(cfg.Models["text"].APIKey, "YOUR-") || strings.TrimSpace(cfg.Models["text"].APIKey) == "" {
 		return fmt.Errorf("配置中的 mineru.token / ai.api_key 还是占位符，请先运行 docvision setup 配置")
 	}
 	home, err := os.UserHomeDir()

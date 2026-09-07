@@ -31,7 +31,7 @@ cp config.example.yaml config.yaml
 编辑 `config.yaml`，填入：
 
 - MinerU API token（从 [mineru.net](https://mineru.net) 获取）
-- AI 模型：统一在 `models:` 注册表配置，其中 `models.text` 为 img2text 等基础流程的默认模型（必填）；每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url/api_key/model/request_body，空字段自动继承默认条目（兼容旧版顶层 `ai:` 块）
+- AI 模型：统一在 `models:` 注册表配置，其中 `models.text` 为 img2text 等基础流程的默认模型（必填）；每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url/api_key/model/request_body，空字段自动继承默认条目（`config_version: 2`，版本不符会提示更新配置文件）
 
 ### Go 版本（推荐）
 
@@ -174,7 +174,7 @@ tikz 校验由 `options.tikz_validation`（off/auto/strict，默认 auto）与 `
 
 1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/work/style/`），通过 `view_page` 工具**按需渲染** MinerU 保留的原始扫描页（`*_origin.pdf`，调用哪页渲染哪页并缓存，支持裁剪放大）、`list_images`/`view_image` 看提取图、`read_md` 读解析文本，分析全书样式后用 `write_file` 增量起草并 `submit_style` 提交 `book.cls` + 使用手册 + 案例（自动试编译，失败回炉）。字体通过 `list_fonts` 查看、`install_font` 下载到 `paths.fonts`；无法提供的字体会标注替换方法
 2. **章节划分 AI**（`models.chapter`）：grep 检索 + 最小 bash 沙箱（虚拟文件系统只有这一个文件），按行号划分章节（结构化提交，全覆盖校验）
-3. **转换 AI** 并发逐章转 `.tex`（只读全部章节文件与他人产物，仅可写自己的文件）→ 每章提交后由 **核对 AI**（`models.checker`，小文本模型即可）比对原章 md 与产物，发现问题回炉一轮，遗留问题记录为 `.checker` 备注供终审处理
+3. **转换 AI** 并发逐章转 `.tex`（矢量图已在 images 阶段以 tikz 代码块内嵌进章节 md，转换时原样粘贴为 LaTeX 内容；raster 原图走 includegraphics）→ 每章提交后由 **核对 AI**（`models.checker`，小文本模型即可）比对原章 md 与产物，发现问题回炉一轮，遗留问题记录为 `.checker` 备注供终审处理
 4. 汇总为多文件 `.tex` 项目 → 编译全书 PDF（失败进入**修复会话**：读文件/改文件/重编译 + 字体工具核对样式）→ 生成单文件 `standalone.tex`
 
 ### AI 会话基础设施
@@ -296,7 +296,7 @@ docvision verify                               # AI 核对报告
 | `img2text.model` | 基础流程模型（models: 注册表代号，默认 text） | text |
 | `options.tikz_validation` | img2text tikz 代码块 LaTeX 编译校验（off/auto/strict） | auto |
 | `options.tikz_engine` | tikz 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
-| `latex.checker_model` | 每章核对模型（留空用 convert_model） | 空 |
+| `latex.checker_model` | 每章核对模型（独立小模型，不继承 convert） | "checker" |
 | `latex.remove_watermark` | 水印处理：true 时样式/转换/核对 AI 会检测并排除水印 | false |（开启后流程开始时先做一次水印检测：全览页渲染 + markdown 重复图片统计，结果缓存为 latex_project/watermark_memory.json 并作为工作记忆注入后续所有会话；水印图片引用直接剔除不再处理）
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |

@@ -1,5 +1,7 @@
 # DocVision Configuration (example - copy to config.yaml and fill in your values)
 
+config_version: 2
+
 # MinerU API Configuration
 mineru:
   api_base_url: "https://mineru.net/api/v4"
@@ -26,7 +28,7 @@ options:
   # init only creates this config; it does not install Node.js/npm, but it
   # will prompt for permission to run npm install -g @mermaid-js/mermaid-cli
   # before any installation happens.
-  log_level: "info"        # info | debug（debug 把 AI 提示词/工具调用完整写进日志文件）
+  log_level: "info"                 # info | debug（debug 把 AI 提示词/工具调用完整写进日志文件）
 # Paths
 paths:
   input_dir: "./files"              # dir with source files
@@ -35,18 +37,18 @@ paths:
   output_dir: "./output"            # dir with merged .md files
   images_dir: "./output/images"
   finally_dir: "./finally"          # final output directory
-  logs_dir: "./logs"               # img2text_*.log / img2text_error_*.log
-  done_dir: "./files/done"         # dir for sources archived after a successful split
+  logs_dir: "./logs"                # img2text_*.log / img2text_error_*.log
+  done_dir: "./files/done"          # dir for sources archived after a successful split
   latex_output:  ./finally_latex    # 档位2 LaTeX 输出目录
   latex_project: ./latex_project    # 档位1 全书工作目录
-  fonts:        ./fonts            # AI 字体目录（可自动下载字体）
+  fonts:        ./fonts             # AI 字体目录（可自动下载字体）
 
 # ----------------------------------------------------------------
 # LaTeX output (docvision latex)
 # ----------------------------------------------------------------
 latex:
   level: 2                       # 2 = per-image vectorisation; 1 = full-book LaTeX
-  remove_watermark: false          # 水印处理：true 时提示各 AI 检测并排除水印（默认关闭，水印原样保留）
+  remove_watermark: false        # 水印处理：true 时提示各 AI 检测并排除水印（默认关闭，水印原样保留）
   # Model registry keys for each specialised AI session.
   # Each key must exist in the models: registry below; entries there
   # may declare their own base_url / api_key / model / request_body
@@ -56,59 +58,59 @@ latex:
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
   convert_model: "convert"       # 档位1：章节转换 / 构建修复 AI
-  checker_model: ""             # 每章核对模型（留空用 convert_model）
+  checker_model: "checker"
   insert_image_description: false # raster 保留原图时是否嵌入 AI 解释文本
-                                  # （同时控制 vector 确认后嵌入 tikz 代码块而非 PDF 链接）
+                                 # （同时控制 vector 确认后嵌入 tikz 代码块而非 PDF 链接）
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）
     raster_command: "pdftoppm"   # PDF 栅格化工具（poppler-utils）
     raster_dpi: 110              # 回给 AI 核对的 PNG 分辨率
-    max_fix_rounds: 40            # 编译-修正整体循环上限
+    max_fix_rounds: 40           # 编译-修正整体循环上限
   sessions:                      # 每个 AI 会话的独立调优
     drawing:
       context_limit: 131072      # 上下文窗口（tokens，默认 128K，可改 64K/256K 等）
-      max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
+      max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
       max_tokens: 16384
       compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩
     style:
       context_limit: 262144      # 样式分析建议更大窗口（256K）
-      max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
+      max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
       max_tokens: 32768
     chapter:
       context_limit: 131072
-      max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
+      max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
     convert:
       context_limit: 131072
-      max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
-    checker:                   # 留空继承 convert 的会话配置
+      max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
+    checker:                     # 每章核对会话配置（独立于 convert）
 
-# AI verification（AI 校验：默认关闭，先上日程）
 # img2text 基础图片转文本流程的独立配置（模型用 models: 注册表代号）
 img2text:
   # ---- 以下由原 options: 块迁移（仅作用于 img2text 流程） ----
-  max_context_lines_up: 10     # default: initial lines above image
-  max_context_lines_down: 5    # default: initial lines below image
-  max_window_up: 50            # maximum total lines above (cap)
-  max_window_down: 50          # maximum total lines below (cap)
-  max_retries: 5               # max retries for AI to request more context
-  concurrency: 10              # number of concurrent worker threads
+  max_context_lines_up: 10       # default: initial lines above image
+  max_context_lines_down: 5      # default: initial lines below image
+  max_window_up: 50              # maximum total lines above (cap)
+  max_window_down: 50            # maximum total lines below (cap)
+  max_retries: 5                 # max retries for AI to request more context
+  concurrency: 10                # number of concurrent worker threads
   temperature: 0.10
-  output_language: "Chinese"   # "Chinese" or "English"
-  format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
-  mermaid_validation: "auto"  # off, auto, strict; auto warns and skips if mmdc is missing
-  mermaid_command: "mmdc"     # Mermaid CLI command
-  mermaid_fix_attempts: 3     # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
-  mermaid_timeout: 30         # Mermaid validation timeout in seconds
-  tikz_validation: "auto"  # off, auto, strict；tikz 代码块用 LaTeX 编译校验
-  tikz_engine: "xelatex"    # tikz 校验引擎（缺 pdflatex/lualatex 自动回退）
+  output_language: "Chinese"     # "Chinese" or "English"
+  format_fix_attempts: 1         # 0=disable, 1=one retry for missing [IMG_TYPE:]
+  mermaid_validation: "auto"     # off, auto, strict; auto warns and skips if mmdc is missing
+  mermaid_command: "mmdc"        # Mermaid CLI command
+  mermaid_fix_attempts: 3        # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
+  mermaid_timeout: 30            # Mermaid validation timeout in seconds
+  tikz_validation: "auto"        # off, auto, strict；tikz 代码块用 LaTeX 编译校验
+  tikz_engine: "xelatex"         # tikz 校验引擎（缺 pdflatex/lualatex 自动回退）
   max_tokens: 65536
-  model: "text"                # models: 中的条目名；留空用 models.text
-  # max_tokens: 65536           # 覆盖 options.max_tokens
+  model: "text"                  # models: 中的条目名；留空用 models.text
+  # max_tokens: 65536            # 覆盖 options.max_tokens
   # temperature: 0.10
-  # request_body:               # 覆盖请求体参数
+  # request_body:                # 覆盖请求体参数
 
+# AI verification（AI 校验：默认关闭，先上日程）
 # ----------------------------------------------------------------
 verify:
   enabled: false                 # 默认关闭；开启后自动流程核对每张图与内容
@@ -122,22 +124,22 @@ verify:
 # top-level ai block, so a minimal setup only sets model:.
 # ----------------------------------------------------------------
 models:
-  text:                        # img2text 等基础流程使用的默认模型（必填；其他条目留空字段继承这里）
+  text:                          # img2text 等基础流程使用的默认模型（必填；其他条目留空字段继承这里）
     base_url: "https://your-api-proxy.com/v1"
     api_key: "sk-YOUR-API-KEY-HERE"
     model: "Qwen/Qwen3.6-27B"
     # API 请求控制（全局默认；各 models 条目可单独覆盖）
-    api_timeout: 400            # request timeout in seconds
-    api_connect_timeout: 60     # connect timeout in seconds
-    api_max_retries: 3          # API retry count for non-rate-limit errors
-    rate_limit_retries: 100     # 429 限流重试上限（原代码内安全上限值）
-    request_body:              # additional body params for the API call
-      enable_thinking: false   # Qwen 3.6+
-      extra_body: {            # OpenAI/Anthropic/DeepSeek
+    api_timeout: 400             # request timeout in seconds
+    api_connect_timeout: 60      # connect timeout in seconds
+    api_max_retries: 3           # API retry count for non-rate-limit errors
+    rate_limit_retries: 100      # 429 限流重试上限（原代码内安全上限值）
+    request_body:                # additional body params for the API call
+      enable_thinking: false     # Qwen 3.6+
+      extra_body: {              # OpenAI/Anthropic/DeepSeek
         "thinking": { "type": "disabled" }
       }
   classifier:
-    model: "Qwen/Qwen3.6-27B"       # 要求具备视觉能力
+    model: "glm-5.3-flash"    # 要求具备视觉能力
   drawing:
     model: "glm-5.3-flash"       # 作图 AI：需强视觉+代码能力
     # base_url: "https://other-provider.example/v1"   # 可单独指定
@@ -149,7 +151,7 @@ models:
     model: "glm-5.3-flash"
   convert:
     model: "glm-5.3-flash"
-  checker:                    # 每章核对（小文本模型即可）
+  checker:                       # 每章核对（小文本模型即可）
     model: "Qwen/Qwen3.6-27B"
   verifier:
     model: "glm-5.3-flash"       # AI 校验模型（需视觉能力）

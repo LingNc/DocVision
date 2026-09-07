@@ -86,10 +86,10 @@ func TestValidateDataBadType(t *testing.T) {
 }
 
 func TestValidateDataSemantic(t *testing.T) {
-	data := []byte("mineru:\n  token: \"YOUR-X\"\n")
+	data := []byte("config_version: 2\nmodels:\n  text:\n    base_url: \"https://x/v1\"\n    api_key: \"YOUR-X\"\n    model: \"m\"\nmineru:\n  token: \"YOUR-X\"\n")
 	problems := ValidateData(data)
 	joined := strings.Join(problems, "\n")
-	if !strings.Contains(joined, "占位符") || !strings.Contains(joined, "ai.api_key") {
+	if !strings.Contains(joined, "占位符") || !strings.Contains(joined, "models.text.api_key") {
 		t.Fatalf("semantic problems: %v", problems)
 	}
 }

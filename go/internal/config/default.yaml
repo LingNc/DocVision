@@ -1,4 +1,6 @@
 # DocVision Configuration
+
+config_version: 2
 # Copy this file to config.yaml and fill in your credentials.
 
 # MinerU API Configuration
@@ -57,7 +59,7 @@ latex:
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
   convert_model: "convert"       # 档位1：章节转换 / 构建修复 AI
-  checker_model: ""             # 每章核对模型（留空用 convert_model）
+  checker_model: "checker"
   insert_image_description: false # raster 保留原图时是否嵌入 AI 解释文本
                                   # （同时控制 vector 确认后嵌入 tikz 代码块而非 PDF 链接）
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
@@ -83,7 +85,7 @@ latex:
     convert:
       context_limit: 131072
       max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
-    checker:                   # 留空继承 convert 的会话配置
+    checker:                   # 每章核对会话配置（独立于 convert）
 
 # AI verification（AI 校验：默认关闭，先上日程）
 # img2text 基础图片转文本流程的独立配置（模型用 models: 注册表代号）
@@ -151,6 +153,6 @@ models:
   convert:
     model: "glm-5.3-flash"
   checker:                    # 每章核对（小文本模型即可）
-    model: "glm-5.3-flash"
+    model: "Qwen/Qwen3.6-27B"
   verifier:
     model: "glm-5.3-flash"       # AI 校验模型（需视觉能力）

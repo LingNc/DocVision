@@ -27,18 +27,6 @@ func applyImg2TextOverrides(cfg *Config) {
 	if o.MaxRetries > 0 {
 		cfg.Options.MaxRetries = o.MaxRetries
 	}
-	if o.APITimeout > 0 {
-		cfg.Options.APITimeout = o.APITimeout
-	}
-	if o.APIConnectTimeout > 0 {
-		cfg.Options.APIConnectTimeout = o.APIConnectTimeout
-	}
-	if o.APIMaxRetries > 0 {
-		cfg.Options.APIMaxRetries = o.APIMaxRetries
-	}
-	if o.RateLimitRetries > 0 {
-		cfg.Options.RateLimitRetries = o.RateLimitRetries
-	}
 	if o.FormatFixAttempts > 0 {
 		cfg.Options.FormatFixAttempts = o.FormatFixAttempts
 	}

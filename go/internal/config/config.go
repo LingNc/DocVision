@@ -15,13 +15,11 @@ import (
 type Config struct {
 	Mineru MinerUConfig `yaml:"mineru"`
 	// AI is the resolved default model for the basic pipelines
-	// (img2text etc.). It is DERIVED from the models: registry entry
-	// "text" at load time; a legacy top-level ai: block (or an
-	// ai.model registry reference) is still honoured for backwards
-	// compatibility but new configs should not set it.
-	AI      AIConfig      `yaml:"ai"`
-	Options OptionsConfig `yaml:"options"`
-	Paths   PathsConfig   `yaml:"paths"`
+	// (img2text etc.). It comes straight from the models: registry
+	// entry "text" — there is no separate top-level ai: block anymore.
+	ConfigVersion int           `yaml:"config_version"`
+	Options       OptionsConfig `yaml:"options"`
+	Paths         PathsConfig   `yaml:"paths"`
 	// Models is the named model registry — the single source of truth
 	// for every AI (img2text uses the "text" entry; the latex / verify
 	// pipelines use classifier / drawing / style / chapter / convert /
@@ -120,13 +118,6 @@ type LatexConfig struct {
 	// and EXCLUDE watermark artifacts (repeated decorative overlay text /
 	// logos) instead of reproducing them. Default false (keep as-is).
 	RemoveWatermark bool `yaml:"remove_watermark"`
-	// Deprecated: use paths.latex_output (still parsed for old configs;
-	// migrated onto Paths in setDefaults).
-	OutputDir string `yaml:"output_dir"`
-	// Deprecated: use paths.latex_project.
-	// ProjectDir is the working root for level-1 book builds.
-	// Default ./latex_project
-	ProjectDir string `yaml:"project_dir"`
 	// Concurrency for per-image and per-chapter workers. Default 3
 	// (sessions are long-lived and much heavier than plain img2text calls).
 	Concurrency int                `yaml:"concurrency"`
@@ -162,10 +153,6 @@ type Img2TextConfig struct {
 	MaxWindowUp         int    `yaml:"max_window_up"`
 	MaxWindowDown       int    `yaml:"max_window_down"`
 	MaxRetries          int    `yaml:"max_retries"`
-	APITimeout          int    `yaml:"api_timeout"`
-	APIConnectTimeout   int    `yaml:"api_connect_timeout"`
-	APIMaxRetries       int    `yaml:"api_max_retries"`
-	RateLimitRetries    int    `yaml:"rate_limit_retries"`
 	FormatFixAttempts   int    `yaml:"format_fix_attempts"`
 	MermaidValidation   string `yaml:"mermaid_validation"`
 	MermaidCommand      string `yaml:"mermaid_command"`
@@ -210,14 +197,6 @@ type MinerUConfig struct {
 	UploadTimeout     int    `yaml:"upload_timeout"`
 }
 
-// AIConfig holds OpenAI-compatible image-to-text client settings.
-type AIConfig struct {
-	BaseURL     string                 `yaml:"base_url"`
-	APIKey      string                 `yaml:"api_key"`
-	Model       string                 `yaml:"model"`
-	RequestBody map[string]interface{} `yaml:"request_body"`
-}
-
 // OptionsConfig holds tuning knobs for the image-to-text processing pipeline.
 type OptionsConfig struct {
 	MaxContextLinesUp   int `yaml:"max_context_lines_up"`
@@ -228,10 +207,6 @@ type OptionsConfig struct {
 	// ExtraInstruction is injected programmatically (not from yaml),
 	// e.g. the latex watermark working memory; appended to the system prompt.
 	ExtraInstruction   string  `yaml:"-"`
-	APITimeout         int     `yaml:"api_timeout"`
-	APIConnectTimeout  int     `yaml:"api_connect_timeout"`
-	APIMaxRetries      int     `yaml:"api_max_retries"`
-	RateLimitRetries   int     `yaml:"rate_limit_retries"`
 	Concurrency        int     `yaml:"concurrency"`
 	Temperature        float64 `yaml:"temperature"`
 	OutputLanguage     string  `yaml:"output_language"`
@@ -273,6 +248,18 @@ type PathsConfig struct {
 
 // LoadConfig reads the YAML file at path, applies defaults for any
 // zero-valued fields, and returns the resulting Config.
+// CurrentConfigVersion is the config schema version this binary expects.
+// Bump it whenever yaml keys change; loaders warn when the file differs.
+const CurrentConfigVersion = 2
+
+// checkConfigVersion warns (non-fatally) when the loaded config was
+// written for a different schema version.
+func checkConfigVersion(cfg *Config) {
+	if cfg.ConfigVersion != CurrentConfigVersion {
+		fmt.Fprintf(os.Stderr, "⚠ 配置文件版本不匹配 (config_version: %d，当前程序期望 %d) —— 请参考 config.example.yaml 更新你的配置文件\n", cfg.ConfigVersion, CurrentConfigVersion)
+	}
+}
+
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -284,6 +271,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
+	checkConfigVersion(cfg)
 	setDefaults(cfg)
 	if err := validatePaths(cfg); err != nil {
 		return nil, err
@@ -318,7 +306,6 @@ func validatePaths(cfg *Config) error {
 // setDefaults fills in zero-valued fields with the same defaults that the
 // archived Python implementation applies via dict.get(key, default).
 func setDefaults(cfg *Config) {
-	resolveAIReference(cfg)
 	applyImg2TextOverrides(cfg)
 	// MinerU defaults
 	if cfg.Mineru.APIBaseURL == "" {
@@ -377,15 +364,6 @@ func setDefaults(cfg *Config) {
 	if cfg.Options.MaxRetries == 0 {
 		cfg.Options.MaxRetries = 5
 	}
-	if cfg.Options.APITimeout == 0 {
-		cfg.Options.APITimeout = 400
-	}
-	if cfg.Options.APIConnectTimeout == 0 {
-		cfg.Options.APIConnectTimeout = 60
-	}
-	if cfg.Options.APIMaxRetries == 0 {
-		cfg.Options.APIMaxRetries = 3
-	}
 	if cfg.Options.Concurrency == 0 {
 		cfg.Options.Concurrency = 10
 	}
@@ -423,13 +401,6 @@ func setDefaults(cfg *Config) {
 	// Latex defaults
 	if cfg.Latex.Level == 0 {
 		cfg.Latex.Level = 2
-	}
-	// Legacy latex.output_dir / latex_project migrate onto paths.*.
-	if cfg.Latex.OutputDir != "" {
-		cfg.Paths.LatexOutput = cfg.Latex.OutputDir
-	}
-	if cfg.Latex.ProjectDir != "" {
-		cfg.Paths.LatexProject = cfg.Latex.ProjectDir
 	}
 	if cfg.Paths.LatexOutput == "" {
 		cfg.Paths.LatexOutput = "./finally_latex"
@@ -533,21 +504,11 @@ func defaultSessionTuning(s *SessionTuning) {
 // optional per-entry token/temperature overrides, which cannot be
 // inherited and therefore keep their zero values).
 func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
-	fallback := ModelConfig{
-		BaseURL:     c.AI.BaseURL,
-		APIKey:      c.AI.APIKey,
-		Model:       c.AI.Model,
-		RequestBody: c.AI.RequestBody,
-		MaxTokens:   c.Options.MaxTokens,
-		// legacy options.* values act as defaults for the new
-		// model-level request controls.
-		APITimeout:        c.Options.APITimeout,
-		APIConnectTimeout: c.Options.APIConnectTimeout,
-		APIMaxRetries:     c.Options.APIMaxRetries,
-		RateLimitRetries:  c.Options.RateLimitRetries,
-	}
-	if name == "" {
-		return fallback, false
+	// The registry entry "text" is the mandatory base: every other
+	// entry (and unnamed requests) inherit its fields.
+	fallback := c.Models[defaultModelKey]
+	if name == "" || name == defaultModelKey {
+		return fallback, name != ""
 	}
 	entry, ok := c.Models[name]
 	if !ok {
@@ -598,9 +559,6 @@ func (c *Config) LatexSession(name string) SessionTuning {
 		s = c.Latex.Sessions.Convert
 	case "checker":
 		s = c.Latex.Sessions.Checker
-		if s == (SessionTuning{}) {
-			s = c.Latex.Sessions.Convert
-		}
 	default:
 		s = SessionTuning{}
 	}
@@ -611,36 +569,3 @@ func (c *Config) LatexSession(name string) SessionTuning {
 // defaultModelKey is the registry entry that provides the default
 // model for the basic pipelines (img2text etc.).
 const defaultModelKey = "text"
-
-// resolveAIReference derives the top-level AI block from the models:
-// registry. The canonical source is the "text" entry; additionally a
-// legacy ai.model that names a registry key still resolves (entry
-// values win, empty entry fields keep the ai values). Configs that
-// only use the registry need no ai: block at all.
-func resolveAIReference(cfg *Config) {
-	if len(cfg.Models) == 0 {
-		return
-	}
-	apply := func(entry ModelConfig) {
-		if entry.BaseURL != "" {
-			cfg.AI.BaseURL = entry.BaseURL
-		}
-		if entry.APIKey != "" {
-			cfg.AI.APIKey = entry.APIKey
-		}
-		if entry.Model != "" {
-			cfg.AI.Model = entry.Model
-		}
-		if entry.RequestBody != nil {
-			cfg.AI.RequestBody = entry.RequestBody
-		}
-	}
-	if entry, ok := cfg.Models[defaultModelKey]; ok {
-		apply(entry)
-	}
-	if cfg.AI.Model != "" {
-		if entry, ok := cfg.Models[cfg.AI.Model]; ok && cfg.AI.Model != defaultModelKey {
-			apply(entry)
-		}
-	}
-}

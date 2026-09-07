@@ -32,47 +32,25 @@ type AIClient struct {
 // `httpx.Timeout(connect=..., read=..., write=..., pool=10.0)`). Per-call
 // retry is handled by the caller (processor.go) so this client stays
 // stateless and safe to share across goroutines.
-func NewAIClient(mc config.ModelConfig, legacy config.OptionsConfig) *AIClient {
-	// Precedence: model-level fields > legacy options.* > built-ins.
+func NewAIClient(mc config.ModelConfig) *AIClient {
 	read := 400 * time.Second
-	if legacy.APITimeout > 0 {
-		read = time.Duration(legacy.APITimeout) * time.Second
-	}
 	if mc.APITimeout > 0 {
 		read = time.Duration(mc.APITimeout) * time.Second
 	}
 	connect := 60 * time.Second
-	if legacy.APIConnectTimeout > 0 {
-		connect = time.Duration(legacy.APIConnectTimeout) * time.Second
-	}
 	if mc.APIConnectTimeout > 0 {
 		connect = time.Duration(mc.APIConnectTimeout) * time.Second
 	}
-	maxRetries := legacy.APIMaxRetries
+	maxRetries := mc.APIMaxRetries
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
-	if mc.APIMaxRetries > 0 {
-		maxRetries = mc.APIMaxRetries
-	}
-	rateLimit := legacy.RateLimitRetries
+	rateLimit := mc.RateLimitRetries
 	if rateLimit <= 0 {
-		rateLimit = 100 // in-code safety cap
+		rateLimit = 100
 	}
-	if mc.RateLimitRetries > 0 {
-		rateLimit = mc.RateLimitRetries
-	}
-
-	// The Go http.Client only exposes a single Timeout. We approximate
-	// the Python "connect / read / write / pool" split by setting
-	// Timeout to the larger of connect+read so a slow response has
-	// enough headroom, while the per-request context (in ChatCompletion)
-	// bounds the connect phase separately via a custom dialer-free
-	// client. In practice Timeout = connect + read is a close match.
-	overall := connect + read
-
 	return &AIClient{
-		http:             &http.Client{Timeout: overall},
+		http:             &http.Client{Timeout: connect + read},
 		baseURL:          strings.TrimRight(mc.BaseURL, "/"),
 		apiKey:           mc.APIKey,
 		model:            mc.Model,

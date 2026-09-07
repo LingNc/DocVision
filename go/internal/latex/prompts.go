@@ -98,7 +98,9 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 
 ## Conversion rules
 1. Use the class commands from the manual for chapter/section titles and any special environments.
-2. Images: markdown ![alt](figures/x.pdf) becomes \includegraphics{figures/x.pdf} inside the class figure environment from the manual (or standard figure+\caption if the manual does not define one). NEVER invent new image files.
+2. Images come in TWO forms:
+   - tikz FENCED CODE BLOCKS (three-backtick fences): the figure is ALREADY LaTeX. Paste the code verbatim inside the class figure environment, stripping the fence lines. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
+   - markdown image links to raster files under images/: includegraphics them (same path) inside the class figure environment (or standard figure+caption if the manual does not define one). NEVER invent new image files.
 3. Markdown tables -> LaTeX tables (booktabs if available per manual).
 4. Inline markdown (bold/italic/code/links) -> the LaTeX equivalent. Math is already LaTeX in the markdown — keep it verbatim inside math environments.
 5. Escape %, &, #, _ in plain text. Do NOT escape inside math/code.

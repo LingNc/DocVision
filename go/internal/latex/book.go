@@ -95,6 +95,7 @@ func (r *Runner) RunBook(opts BookOptions) error {
 			TestMode: opts.TestMode, Number: opts.Number, Seed: opts.Seed,
 			SourceDir: opts.SourceDir, Files: opts.Files,
 			OutDir: filepath.Join(proj, "source"),
+			Inline: true, // 档位1：矢量图内嵌 tikz 代码，不产 figures 资源
 		})
 	})
 	if err != nil {

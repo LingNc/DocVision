@@ -21,6 +21,7 @@ import (
 
 // ImagesOptions drives the level-2 image pipeline.
 type ImagesOptions struct {
+	Inline   bool // 档位1：矢量图内嵌 tikz 代码块而非 figures/*.pdf 资源
 	TestMode bool
 	Number   int
 	Seed     string
@@ -120,7 +121,8 @@ type Runner struct {
 	clients map[string]*session.Client
 	models  map[string]config.ModelConfig
 
-	wm *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
+	wm     *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
+	inline bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
 
 	// lastSplitError remembers the latest split validation failure so
 	// the chapter session can be re-prompted with a concrete reason.
@@ -156,6 +158,7 @@ func (r *Runner) clientFor(name string) *session.Client {
 // raster), finally rebuild the markdown files under latex.output_dir.
 func (r *Runner) RunImages(opts ImagesOptions) error {
 	cfg := r.cfg
+	r.inline = opts.Inline
 	srcDir := opts.SourceDir
 	if srcDir == "" {
 		srcDir = cfg.Paths.OutputDir
@@ -571,7 +574,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 // [IMG_TYPE: ...] header so only the pure content is embedded.
 func (r *Runner) processTextImage(mf *mdFile, t *task, tid int) (string, error) {
 	mc, _ := r.cfg.ResolveModel("") // top-level ai block (+ options.* defaults)
-	client := img2text.NewAIClient(mc, r.cfg.Options)
+	client := img2text.NewAIClient(mc)
 	subject := subjectOf(t.mdName)
 	textOpts := r.cfg.Options
 	if wb := r.wm.Block(); wb != "" {
@@ -679,15 +682,17 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	}
 	// Markdown 无法内嵌 PDF：用 dvisvgm 把矢量图编译为 SVG 供嵌入
 	//（失败时回退 PNG/PDF 链接，仅记录警告）。
-	if _, err := exec.LookPath("dvisvgm"); err == nil {
-		dstSVG := filepath.Join(outDir, "figures", name+".svg")
-		cmd := exec.Command("dvisvgm", "--pdf", "--exact", "--output",
-			filepath.Base(dstSVG), filepath.Base(dstPDF))
-		cmd.Dir = outDir
-		if err := cmd.Run(); err != nil {
-			r.log.LogWarning(tid, "[vector] SVG 转换失败（回退 PDF/PNG 链接）:", err)
-		} else {
-			pp.FigSVG = "figures/" + name + ".svg"
+	if !r.inline { // 档位1 内嵌 tikz 代码，无需 SVG
+		if _, err := exec.LookPath("dvisvgm"); err == nil {
+			dstSVG := filepath.Join(outDir, "figures", name+".svg")
+			cmd := exec.Command("dvisvgm", "--pdf", "--exact", "--output",
+				filepath.Base(dstSVG), filepath.Base(dstPDF))
+			cmd.Dir = outDir
+			if err := cmd.Run(); err != nil {
+				r.log.LogWarning(tid, "[vector] SVG 转换失败（回退 PDF/PNG 链接）:", err)
+			} else {
+				pp.FigSVG = "figures/" + name + ".svg"
+			}
 		}
 	}
 	return true
@@ -766,6 +771,17 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 		}
 		return p.Content
 	case ClassVector:
+		if r.inline {
+			// 档位1：直接内嵌 LaTeX 代码，转换 AI 原样粘贴进 .tex，
+			// 不产生也不引用 figures/*.pdf 资源。
+			if p.TikzCode != "" {
+				return "```tikz\n" + p.TikzCode + "\n```"
+			}
+			if p.Content != "" {
+				return p.Content
+			}
+			return ""
+		}
 		if p.Kept || p.FigPDF == "" {
 			return r.rasterBlock(p, mdName, outDir)
 		}

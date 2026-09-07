@@ -275,78 +275,41 @@ func TestLoadConfig_MermaidFixAttemptsOmittedUsesDefault(t *testing.T) {
 }
 
 // ai.model may reference a named registry entry; credentials then live
-// only in models:.
-func TestResolveAIReference(t *testing.T) {
-	data := []byte(`
-ai:
-  base_url: "https://fallback.example/v1"
-  api_key: "sk-fallback"
-  model: "text"
-models:
-  text:
-    base_url: "https://registry.example/v1"
-    api_key: "sk-registry"
-    model: "glm-5.3-flash"
-  drawing:
-    model: "glm-5.3-flash"
-`)
-	cfg := &Config{}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		t.Fatal(err)
-	}
-	setDefaults(cfg)
-	if cfg.AI.BaseURL != "https://registry.example/v1" || cfg.AI.APIKey != "sk-registry" || cfg.AI.Model != "glm-5.3-flash" {
-		t.Fatalf("registry reference not resolved: %+v", cfg.AI)
-	}
-
-	// Non-registry model names keep the ai block untouched.
-	cfg2 := &Config{}
-	_ = yaml.Unmarshal([]byte("ai:\n  model: \"Qwen/X\"\n  base_url: \"https://a.b/v1\"\n"), cfg2)
-	setDefaults(cfg2)
-	if cfg2.AI.Model != "Qwen/X" || cfg2.AI.BaseURL != "https://a.b/v1" {
-		t.Fatalf("plain model name must stay untouched: %+v", cfg2.AI)
-	}
-
-	// Registry entry with empty fields falls back to the ai block.
-	cfg3 := &Config{}
-	_ = yaml.Unmarshal([]byte("ai:\n  model: \"drawing\"\n  base_url: \"https://keep.me/v1\"\n  api_key: \"sk-keep\"\nmodels:\n  drawing:\n    model: \"glm-x\"\n"), cfg3)
-	setDefaults(cfg3)
-	if cfg3.AI.Model != "glm-x" || cfg3.AI.BaseURL != "https://keep.me/v1" || cfg3.AI.APIKey != "sk-keep" {
-		t.Fatalf("partial registry entry must merge with fallback: %+v", cfg3.AI)
-	}
-}
-
-// New-style configs drop the top-level ai: block entirely; the
-// "text" registry entry is the single source for img2text etc.
-func TestResolveAIReference_RegistryOnly(t *testing.T) {
+// New-style configs have no top-level ai: block; models.text is the
+// single mandatory base and other entries inherit its fields.
+func TestResolveModel_Inheritance(t *testing.T) {
 	data := []byte(`
 models:
   text:
     base_url: "https://registry.example/v1"
     api_key: "sk-registry"
     model: "glm-5.3-flash"
-    request_body:
-      enable_thinking: false
+    api_timeout: 500
+    rate_limit_retries: 50
+  classifier:
+    model: "Qwen/Qwen3.6-27B"
 `)
 	cfg := &Config{}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		t.Fatal(err)
 	}
 	setDefaults(cfg)
-	if cfg.AI.BaseURL != "https://registry.example/v1" || cfg.AI.APIKey != "sk-registry" || cfg.AI.Model != "glm-5.3-flash" {
-		t.Fatalf("models.text not promoted to AI: %+v", cfg.AI)
+	mc, ok := cfg.ResolveModel("classifier")
+	if !ok {
+		t.Fatal("classifier should resolve")
 	}
-	if cfg.AI.RequestBody == nil {
-		t.Fatal("request_body not promoted")
-	}
-
-	// Other registry entries inherit the resolved default for empty
-	// fields (base_url/api_key) but keep their own model name.
-	mc, _ := cfg.ResolveModel("classifier")
 	if mc.BaseURL != "https://registry.example/v1" || mc.APIKey != "sk-registry" {
 		t.Fatalf("classifier did not inherit default credentials: %+v", mc)
 	}
-	if mc.Model != "glm-5.3-flash" {
-		t.Fatalf("classifier with no model must inherit the default model: %+v", mc)
+	if mc.Model != "Qwen/Qwen3.6-27B" {
+		t.Fatalf("own model must be kept: %+v", mc)
+	}
+	if mc.APITimeout != 500 || mc.RateLimitRetries != 50 {
+		t.Fatalf("request controls must inherit from text: %+v", mc)
+	}
+	// Unnamed requests fall back to text itself.
+	mc2, _ := cfg.ResolveModel("")
+	if mc2.Model != "glm-5.3-flash" {
+		t.Fatalf("unnamed must resolve to text: %+v", mc2)
 	}
 }

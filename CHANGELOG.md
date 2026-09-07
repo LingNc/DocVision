@@ -19,6 +19,13 @@
 
 ### Changed
 
+- **配置 v2（不兼容清理）**：新增 `config_version: 2`，版本不符时启动警告并要求参考模板更新；移除全部向后兼容层——顶层 `ai:` 块、`resolveAIReference`、`options.*`/`img2text.*` 中的 api_timeout/api_connect_timeout/api_max_retries/rate_limit_retries（统一收敛到 models 层）、废弃的 `latex.output_dir`/`latex.project_dir`；`models.text` 成为强制基础条目（setup 校验必填）
+- checker 会话不再继承 convert 的会话配置（独立可调）；模板 `checker_model: "checker"` + `models.checker: Qwen/Qwen3.6-27B`（小文本模型）
+
+### Changed
+
+- **档位1 图片内嵌**：全书流程 images 阶段改用 inline 模式——矢量图以 tikz 代码块直接内嵌进 markdown，转换 AI 将代码原样粘贴进 .tex（不再生成/引用 figures/*.pdf 资源）；raster 保留原图引用由 includegraphics 处理；SVG 转换仅在档位2 执行
+
 - API 请求控制参数（api_timeout/api_connect_timeout/api_max_retries/rate_limit_retries）从 img2text/options 迁移到 models 层：任何 models 条目可设置，留空继承 models.text，最终回退代码内置默认（400s/60s/3/100）；旧位置仍解析兼容。session 会话客户端与 img2text 客户端统一使用同一套参数，重试均带指数退避
 - rate_limit_retries 默认从 0（无限+代码安全上限 100）改为直接取安全上限值 100
 - 结构化 JSON 输出请求（图片分类、章节核对、校验报告）统一附加 response_format={type: json_object}，保证返回一定是 JSON
