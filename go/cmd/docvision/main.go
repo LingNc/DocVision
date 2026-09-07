@@ -90,6 +90,7 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 
+	root.SetVersionTemplate("docvision version {{.Version}}\nCopyright (c) 2026 绫袅 LingNc\n仓库: https://github.com/LingNc/DocVision\n")
 	root.PersistentFlags().StringP("config", "c", "config.yaml", "配置文件路径")
 
 	root.AddCommand(

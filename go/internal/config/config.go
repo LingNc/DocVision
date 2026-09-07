@@ -19,6 +19,7 @@ type Config struct {
 	// entry "text" — there is no separate top-level ai: block anymore.
 	ConfigVersion int           `yaml:"config_version"`
 	Options       OptionsConfig `yaml:"options"`
+	Tools         ToolsConfig   `yaml:"tools"`
 	Paths         PathsConfig   `yaml:"paths"`
 	// Models is the named model registry — the single source of truth
 	// for every AI (img2text uses the "text" entry; the latex / verify
@@ -146,20 +147,9 @@ type Img2TextConfig struct {
 
 	// Pipeline tuning (mirrors the legacy options: keys; a non-zero
 	// value here overrides the options: counterpart).
-	Concurrency         int    `yaml:"concurrency"`
-	OutputLanguage      string `yaml:"output_language"`
-	MaxContextLinesUp   int    `yaml:"max_context_lines_up"`
-	MaxContextLinesDown int    `yaml:"max_context_lines_down"`
-	MaxWindowUp         int    `yaml:"max_window_up"`
-	MaxWindowDown       int    `yaml:"max_window_down"`
-	MaxRetries          int    `yaml:"max_retries"`
-	FormatFixAttempts   int    `yaml:"format_fix_attempts"`
-	MermaidValidation   string `yaml:"mermaid_validation"`
-	MermaidCommand      string `yaml:"mermaid_command"`
-	MermaidFixAttempts  *int   `yaml:"mermaid_fix_attempts"`
-	MermaidTimeout      int    `yaml:"mermaid_timeout"`
-	TikzValidation      string `yaml:"tikz_validation"`
-	TikzEngine          string `yaml:"tikz_engine"`
+	Concurrency       int    `yaml:"concurrency"`
+	OutputLanguage    string `yaml:"output_language"`
+	FormatFixAttempts int    `yaml:"format_fix_attempts"`
 }
 
 // VerifyConfig configures the AI verification pass (核对输出的每张图与
@@ -197,28 +187,51 @@ type MinerUConfig struct {
 	UploadTimeout     int    `yaml:"upload_timeout"`
 }
 
+// ToolsConfig groups the per-tool tunables that are shared across
+// pipelines (img2text context expansion, latex image_context, mermaid
+// and tikz validation tools). Tools are no longer img2text-private.
+type ToolsConfig struct {
+	Context struct {
+		InitialUp   int `yaml:"initial_up"`   // initial context lines above the image
+		InitialDown int `yaml:"initial_down"` // initial context lines below the image
+		MaxUp       int `yaml:"max_up"`       // expansion cap above (lines)
+		MaxDown     int `yaml:"max_down"`     // expansion cap below (lines)
+		MaxCalls    int `yaml:"max_calls"`    // max expansion requests per image
+	} `yaml:"context"`
+	Mermaid struct {
+		Validation  string `yaml:"validation"`   // off, auto, strict
+		Command     string `yaml:"command"`      // Mermaid CLI command
+		FixAttempts *int   `yaml:"fix_attempts"` // 0 = unlimited (in-code cap)
+		Timeout     int    `yaml:"timeout"`      // seconds per validation
+	} `yaml:"mermaid"`
+	Tikz struct {
+		Validation string `yaml:"validation"` // off, auto, strict
+		Engine     string `yaml:"engine"`     // xelatex / pdflatex / lualatex
+	} `yaml:"tikz"`
+}
+
 // OptionsConfig holds tuning knobs for the image-to-text processing pipeline.
 type OptionsConfig struct {
-	MaxContextLinesUp   int `yaml:"max_context_lines_up"`
-	MaxContextLinesDown int `yaml:"max_context_lines_down"`
-	MaxWindowUp         int `yaml:"max_window_up"`
-	MaxWindowDown       int `yaml:"max_window_down"`
-	MaxRetries          int `yaml:"max_retries"`
+	MaxContextLinesUp   int `yaml:"-"` // set from tools.context.initial_up
+	MaxContextLinesDown int `yaml:"-"` // set from tools.context.initial_down
+	MaxWindowUp         int `yaml:"-"` // set from tools.context.max_up
+	MaxWindowDown       int `yaml:"-"` // set from tools.context.max_down
+	MaxRetries          int `yaml:"-"` // set from tools.context.max_calls
 	// ExtraInstruction is injected programmatically (not from yaml),
 	// e.g. the latex watermark working memory; appended to the system prompt.
 	ExtraInstruction   string  `yaml:"-"`
 	Concurrency        int     `yaml:"concurrency"`
 	Temperature        float64 `yaml:"temperature"`
 	OutputLanguage     string  `yaml:"output_language"`
-	FormatFixAttempts  int     `yaml:"format_fix_attempts"`
-	MermaidValidation  string  `yaml:"mermaid_validation"`
-	MermaidCommand     string  `yaml:"mermaid_command"`
-	MermaidFixAttempts *int    `yaml:"mermaid_fix_attempts"`
-	MermaidTimeout     int     `yaml:"mermaid_timeout"`
+	FormatFixAttempts  int     `yaml:"-"` // img2text pipeline policy
+	MermaidValidation  string  `yaml:"-"` // set from tools.mermaid.validation
+	MermaidCommand     string  `yaml:"-"` // set from tools.mermaid.command
+	MermaidFixAttempts *int    `yaml:"-"` // set from tools.mermaid.fix_attempts
+	MermaidTimeout     int     `yaml:"-"` // set from tools.mermaid.timeout
 	// TikZ compile-check (auto/strict/off). Engine defaults to xelatex
 	// with automatic fallback to pdflatex/lualatex.
-	TikzValidation string `yaml:"tikz_validation"`
-	TikzEngine     string `yaml:"tikz_engine"`
+	TikzValidation string `yaml:"-"` // set from tools.tikz.validation
+	TikzEngine     string `yaml:"-"` // set from tools.tikz.engine
 	MaxTokens      int    `yaml:"max_tokens"`
 	// LogLevel: info (default) or debug. Debug writes every AI prompt,
 	// tool call and tool result into the log file (console unaffected).
@@ -250,7 +263,7 @@ type PathsConfig struct {
 // zero-valued fields, and returns the resulting Config.
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
-const CurrentConfigVersion = 2
+const CurrentConfigVersion = 3
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -349,21 +362,49 @@ func setDefaults(cfg *Config) {
 	}
 
 	// Options defaults
-	if cfg.Options.MaxContextLinesUp == 0 {
-		cfg.Options.MaxContextLinesUp = 10
+	// tools.* defaults
+	if cfg.Tools.Context.InitialUp == 0 {
+		cfg.Tools.Context.InitialUp = 10
 	}
-	if cfg.Options.MaxContextLinesDown == 0 {
-		cfg.Options.MaxContextLinesDown = 5
+	if cfg.Tools.Context.InitialDown == 0 {
+		cfg.Tools.Context.InitialDown = 5
 	}
-	if cfg.Options.MaxWindowUp == 0 {
-		cfg.Options.MaxWindowUp = 50
+	if cfg.Tools.Context.MaxUp == 0 {
+		cfg.Tools.Context.MaxUp = 50
 	}
-	if cfg.Options.MaxWindowDown == 0 {
-		cfg.Options.MaxWindowDown = 50
+	if cfg.Tools.Context.MaxDown == 0 {
+		cfg.Tools.Context.MaxDown = 50
 	}
-	if cfg.Options.MaxRetries == 0 {
-		cfg.Options.MaxRetries = 5
+	if cfg.Tools.Context.MaxCalls == 0 {
+		cfg.Tools.Context.MaxCalls = 5
 	}
+	if cfg.Tools.Mermaid.Validation == "" {
+		cfg.Tools.Mermaid.Validation = "auto"
+	}
+	if cfg.Tools.Mermaid.Command == "" {
+		cfg.Tools.Mermaid.Command = "mmdc"
+	}
+	if cfg.Tools.Mermaid.Timeout == 0 {
+		cfg.Tools.Mermaid.Timeout = 30
+	}
+	if cfg.Tools.Tikz.Validation == "" {
+		cfg.Tools.Tikz.Validation = "auto"
+	}
+	if cfg.Tools.Tikz.Engine == "" {
+		cfg.Tools.Tikz.Engine = "xelatex"
+	}
+	// Runtime carriers derived from tools:.
+	cfg.Options.MaxContextLinesUp = cfg.Tools.Context.InitialUp
+	cfg.Options.MaxContextLinesDown = cfg.Tools.Context.InitialDown
+	cfg.Options.MaxWindowUp = cfg.Tools.Context.MaxUp
+	cfg.Options.MaxWindowDown = cfg.Tools.Context.MaxDown
+	cfg.Options.MaxRetries = cfg.Tools.Context.MaxCalls
+	cfg.Options.MermaidValidation = cfg.Tools.Mermaid.Validation
+	cfg.Options.MermaidCommand = cfg.Tools.Mermaid.Command
+	cfg.Options.MermaidFixAttempts = cfg.Tools.Mermaid.FixAttempts
+	cfg.Options.MermaidTimeout = cfg.Tools.Mermaid.Timeout
+	cfg.Options.TikzValidation = cfg.Tools.Tikz.Validation
+	cfg.Options.TikzEngine = cfg.Tools.Tikz.Engine
 	if cfg.Options.Concurrency == 0 {
 		cfg.Options.Concurrency = 10
 	}

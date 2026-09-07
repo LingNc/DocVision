@@ -49,6 +49,7 @@ func RunTikZSession(
 		&CompilePreviewTool{Comp: comp, State: state, EngineIsXe: engineIsXe},
 		&SubmitFigureTool{State: state},
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
+		&ImageLocateTool{Content: env.MDContent, CurrentImg: env.CurrentImg},
 		&ViewImageTool{Root: env.ImagesDir},
 	}, log, tid, "tikz")
 

@@ -135,3 +135,66 @@ func (t *ImageContextTool) Execute(argsJSON string) (session.ToolResult, error) 
 	b.WriteString("\n\nDecide WITHOUT assuming: adjacency does NOT imply relation. If PREVIOUS/NEXT is the same table/figure continued across a page break, view_image it, then draw ONE combined figure and submit with \"merges\" listing the absorbed image paths. If they are unrelated, or this image is obviously complete on its own, just draw THIS image and merge nothing.")
 	return session.ToolResult{Text: b.String()}, nil
 }
+
+// ImageLocateTool answers a lightweight question: WHERE are the
+// previous/next image refs relative to the current one (line numbers
+// and +/- line deltas), so the model can aim image_context/view_image
+// precisely without dumping large context windows.
+type ImageLocateTool struct {
+	Content    string
+	CurrentImg string
+}
+
+func (t *ImageLocateTool) Name() string { return "image_locate" }
+
+func (t *ImageLocateTool) Definition() map[string]any {
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name":        "image_locate",
+		"description": "Locate the previous/next image refs relative to the current image: line numbers and +/- line deltas. Cheap orientation step before image_context/view_image.",
+		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
+	}}
+}
+
+func (t *ImageLocateTool) Execute(argsJSON string) (session.ToolResult, error) {
+	target := t.CurrentImg
+	if target == "" {
+		return session.ToolResult{}, fmt.Errorf("会话未绑定当前图片")
+	}
+	lines := strings.Split(t.Content, "\n")
+	type ref struct {
+		path string
+		line int
+	}
+	var refs []ref
+	for i, line := range lines {
+		for _, m := range imageRefRe.FindAllStringSubmatch(line, -1) {
+			refs = append(refs, ref{path: m[1], line: i})
+		}
+	}
+	idx := -1
+	for i, r := range refs {
+		if r.path == target {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return session.ToolResult{}, fmt.Errorf("markdown 中找不到图片 %s", target)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "image %d of %d: %s at line %d\n", idx+1, len(refs), target, refs[idx].line+1)
+	if idx > 0 {
+		p := refs[idx-1]
+		fmt.Fprintf(&b, "previous: %s (line %d, %d lines above)\n", p.path, p.line+1, refs[idx].line-p.line)
+	} else {
+		b.WriteString("previous: (none)\n")
+	}
+	if idx+1 < len(refs) {
+		n := refs[idx+1]
+		fmt.Fprintf(&b, "next: %s (line %d, +%d lines below)\n", n.path, n.line+1, n.line-refs[idx].line)
+	} else {
+		b.WriteString("next: (none)\n")
+	}
+	b.WriteString("Use image_context {image, up, down} to expand text around any of them; view_image to look. Adjacency does NOT imply relation.")
+	return session.ToolResult{Text: b.String()}, nil
+}

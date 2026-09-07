@@ -2,7 +2,7 @@ BINARY_NAME := docvision
 BUILD_DIR := build
 RELEASE_DIR := release
 GO := go
-VERSION ?= dev
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOFLAGS := -ldflags="-s -w -X main.Version=$(VERSION)"
 
 .PHONY: build clean release test vet

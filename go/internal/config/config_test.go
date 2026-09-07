@@ -98,24 +98,23 @@ ai:
   request_body:
     enable_thinking: true
 options:
-  max_context_lines_up: 20
-  max_context_lines_down: 8
-  max_window_up: 100
-  max_window_down: 100
-  max_retries: 7
-  api_timeout: 500
-  api_connect_timeout: 90
-  api_max_retries: 5
-  rate_limit_retries: 0
   concurrency: 20
   temperature: 0.5
   output_language: "English"
   format_fix_attempts: 2
-  mermaid_validation: "strict"
-  mermaid_command: "custom-mmdc"
-  mermaid_fix_attempts: 4
-  mermaid_timeout: 45
   max_tokens: 32768
+tools:
+  context:
+    initial_up: 20
+    initial_down: 8
+    max_up: 100
+    max_down: 100
+    max_calls: 7
+  mermaid:
+    validation: "strict"
+    command: "custom-mmdc"
+    fix_attempts: 4
+    timeout: 45
 paths:
   input_dir: "./in"
   split_dir: "./split"
@@ -235,8 +234,9 @@ func TestLoadConfig_MermaidFixAttemptsExplicitZero(t *testing.T) {
 	yaml := `
 mineru:
   token: x
-options:
-  mermaid_fix_attempts: 0
+tools:
+  mermaid:
+    fix_attempts: 0
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)

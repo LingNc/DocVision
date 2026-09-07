@@ -1,6 +1,6 @@
 # DocVision Configuration
 
-config_version: 2
+config_version: 3
 # Copy this file to config.yaml and fill in your credentials.
 
 # MinerU API Configuration
@@ -91,21 +91,10 @@ latex:
 # img2text 基础图片转文本流程的独立配置（模型用 models: 注册表代号）
 img2text:
   # ---- 以下由原 options: 块迁移（仅作用于 img2text 流程） ----
-  max_context_lines_up: 10     # default: initial lines above image
-  max_context_lines_down: 5    # default: initial lines below image
-  max_window_up: 50            # maximum total lines above (cap)
-  max_window_down: 50          # maximum total lines below (cap)
-  max_retries: 5               # max retries for AI to request more context
   concurrency: 10              # number of concurrent worker threads
   temperature: 0.10
   output_language: "Chinese"   # "Chinese" or "English"
   format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
-  mermaid_validation: "auto"  # off, auto, strict; auto warns and skips if mmdc is missing
-  mermaid_command: "mmdc"     # Mermaid CLI command
-  mermaid_fix_attempts: 3     # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
-  mermaid_timeout: 30         # Mermaid validation timeout in seconds
-  tikz_validation: "auto"  # off, auto, strict；tikz 代码块用 LaTeX 编译校验
-  tikz_engine: "xelatex"    # tikz 校验引擎（缺 pdflatex/lualatex 自动回退）
   max_tokens: 65536
   model: "text"                # models: 中的条目名；留空用 models.text
   # max_tokens: 65536           # 覆盖 options.max_tokens
@@ -113,6 +102,25 @@ img2text:
   # request_body:               # 覆盖请求体参数
 
 # ----------------------------------------------------------------
+# ----------------------------------------------------------------
+# Tools - per-tool tunables shared by every pipeline (img2text context
+# expansion, latex image_context, mermaid/tikz validation).
+# ----------------------------------------------------------------
+tools:
+  context:
+    initial_up: 10              # initial context lines above the image
+    initial_down: 5             # initial context lines below the image
+    max_up: 50                  # expansion cap above (lines)
+    max_down: 50                # expansion cap below (lines)
+    max_calls: 5                # max expansion requests per image
+  mermaid:
+    validation: "auto"          # off, auto, strict; auto warns and skips if mmdc is missing
+    command: "mmdc"             # Mermaid CLI command
+    fix_attempts: 3             # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
+    timeout: 30                 # Mermaid validation timeout in seconds
+  tikz:
+    validation: "auto"          # off, auto, strict; tikz code blocks are compile-checked
+    engine: "xelatex"           # tikz validation engine (pdflatex/lualatex fallback)
 verify:
   enabled: false                 # 默认关闭；开启后自动流程核对每张图与内容
   verifier_model: "verifier"     # models: 中支持图像的校验模型

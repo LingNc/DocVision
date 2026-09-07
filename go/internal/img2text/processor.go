@@ -30,7 +30,7 @@ If ambiguous or overly complex, call get_more_context to resolve; if still uncle
 2. **Mermaid** for flowcharts, Gantt charts, sequence diagrams, class diagrams, state diagrams, ER diagrams, mind maps, timeline, Sankey, pie charts, quadrant charts, requirement diagrams. Use ` + "```mermaid code block." + `
 3. **Markdown table** for tabular data: ALL rows and columns exactly as shown.
 4. **LaTeX** for formulas: $$...$$ block or $...$ inline.
-4b. **TikZ** for geometric/structural figures that need precise vector rendering (geometry constructions, precise plots): use a tikz code block with a standalone-compatible body. Prefer Mermaid when a listed Mermaid diagram type fits.
+4b. **LaTeX vector graphics** for figures that need precise vector rendering and no Mermaid type fits: TikZ, pgfplots (function/coordinate plots), tabular/array, or any LaTeX approach that reproduces the structure faithfully — use a tikz code block with a standalone-compatible body. Division of labour: Mermaid for the listed diagram types, LaTeX for everything else (geometry, plots, complex tables, mixed structures).
 5. **Structured text** for diagrams not suitable for Mermaid: preserve ALL labels, arrows, relationships shown.
 6. **Code block** for code screenshots.
 7. **Graph description**: key data points, max/min, trends for charts.

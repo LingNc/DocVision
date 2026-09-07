@@ -269,20 +269,30 @@ docvision verify                               # AI 核对报告
 | `mineru.upload_timeout` | 上传空闲超时（秒） | 300 |
 | `mineru.log_poll_interval` | 控制台日志输出间隔（秒） | 3 |
 | `mineru.progress_threshold` | 页数变化阈值，达到此值立即刷新输出 | 80 |
+
+### 工具配置（tools:）
+
+各流程共用的工具参数（get_more_context / image_context / 校验工具）：
+
+| 键 | 说明 | 默认 |
+| --- | --- | --- |
+| `tools.context.initial_up` / `initial_down` | 图片初始上下文行数（上/下） | 10 / 5 |
+| `tools.context.max_up` / `max_down` | 上下文可扩展上限（行） | 50 / 50 |
+| `tools.context.max_calls` | 单图最大上下文扩展请求次数 | 5 |
+| `tools.mermaid.validation` | Mermaid 校验模式（off/auto/strict） | auto |
+| `tools.mermaid.command` | Mermaid CLI 命令 | mmdc |
+| `tools.mermaid.fix_attempts` | Mermaid 独立修正次数（0=无限，受安全上限保护） | 3 |
+| `tools.mermaid.timeout` | 单次 Mermaid 校验超时（秒） | 30 |
+| `tools.tikz.validation` | tikz 代码块编译校验（off/auto/strict） | auto |
+| `tools.tikz.engine` | tikz 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
+
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking） | 见示例 |
 | `models.text.api_timeout` | API 请求超时（秒）；所有模型条目可覆盖，留空继承 text | 400 |
 | `models.text.api_connect_timeout` | API 连接超时（秒） | 60 |
 | `models.text.api_max_retries` | 非限流错误重试次数（指数退避 2s/4s/8s…封顶 30s） | 3 |
 | `models.text.rate_limit_retries` | 429 限流重试上限（指数退避封顶 60s；原为 0=无限+代码上限 100，现默认直接取上限值） | 100 |
 | `options.concurrency` | AI 图片转文本并发数 | 10 |
-| `options.max_retries` | AI 请求更多上下文的最大轮数 | 5 |
-| `options.max_context_lines_up` | 图片上方初始上下文行数 | 10 |
-| `options.max_context_lines_down` | 图片下方初始上下文行数 | 5 |
 | `options.format_fix_attempts` | 格式修复重试次数（0 禁用，1 表示重试一次） | 1 |
-| `options.mermaid_validation` | Mermaid 验证模式（off/auto/strict） | auto |
-| `options.mermaid_command` | Mermaid CLI 命令 | mmdc |
-| `options.mermaid_fix_attempts` | Mermaid 独立修正次数（0 表示无限次，受代码内安全上限保护） | 3 |
-| `options.mermaid_timeout` | 单个 Mermaid 验证超时（秒） | 30 |
 | `options.max_tokens` | API 调用最大 token 数 | 65536 |
 | `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body） | - |
 | `models.<name>` | 每个专用 AI 的独立 base_url/api_key/model/request_body，空字段继承 `models.text` | - |
@@ -294,8 +304,6 @@ docvision verify                               # AI 核对报告
 | `paths.latex_project` | 档位1 全书工作目录 | ./latex_project |
 | `paths.fonts` | AI 字体目录（install_font 可下载字体到此） | ./fonts |
 | `img2text.model` | 基础流程模型（models: 注册表代号，默认 text） | text |
-| `options.tikz_validation` | img2text tikz 代码块 LaTeX 编译校验（off/auto/strict） | auto |
-| `options.tikz_engine` | tikz 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
 | `latex.checker_model` | 每章核对模型（独立小模型，不继承 convert） | "checker" |
 | `latex.remove_watermark` | 水印处理：true 时样式/转换/核对 AI 会检测并排除水印 | false |（开启后流程开始时先做一次水印检测：全览页渲染 + markdown 重复图片统计，结果缓存为 latex_project/watermark_memory.json 并作为工作记忆注入后续所有会话；水印图片引用直接剔除不再处理）
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |

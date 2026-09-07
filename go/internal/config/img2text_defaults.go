@@ -1,9 +1,9 @@
 package config
 
-// applyImg2TextOverrides migrates img2text-block tuning onto the legacy
-// Options block so the rest of the code keeps reading cfg.Options.
-// Old configs that only set options: keys keep working; a non-zero
-// (or non-empty) img2text value wins.
+// applyImg2TextOverrides migrates img2text-block pipeline tuning (model-
+// level bits such as concurrency/output_language) onto the Options
+// block so the rest of the code keeps reading cfg.Options. Tool
+// tunables now live in tools: and are mapped in setDefaults.
 func applyImg2TextOverrides(cfg *Config) {
 	o := cfg.Img2Text
 	if o.Concurrency > 0 {
@@ -12,41 +12,8 @@ func applyImg2TextOverrides(cfg *Config) {
 	if o.OutputLanguage != "" {
 		cfg.Options.OutputLanguage = o.OutputLanguage
 	}
-	if o.MaxContextLinesUp > 0 {
-		cfg.Options.MaxContextLinesUp = o.MaxContextLinesUp
-	}
-	if o.MaxContextLinesDown > 0 {
-		cfg.Options.MaxContextLinesDown = o.MaxContextLinesDown
-	}
-	if o.MaxWindowUp > 0 {
-		cfg.Options.MaxWindowUp = o.MaxWindowUp
-	}
-	if o.MaxWindowDown > 0 {
-		cfg.Options.MaxWindowDown = o.MaxWindowDown
-	}
-	if o.MaxRetries > 0 {
-		cfg.Options.MaxRetries = o.MaxRetries
-	}
 	if o.FormatFixAttempts > 0 {
 		cfg.Options.FormatFixAttempts = o.FormatFixAttempts
-	}
-	if o.MermaidValidation != "" {
-		cfg.Options.MermaidValidation = o.MermaidValidation
-	}
-	if o.MermaidCommand != "" {
-		cfg.Options.MermaidCommand = o.MermaidCommand
-	}
-	if o.MermaidFixAttempts != nil {
-		cfg.Options.MermaidFixAttempts = o.MermaidFixAttempts
-	}
-	if o.MermaidTimeout > 0 {
-		cfg.Options.MermaidTimeout = o.MermaidTimeout
-	}
-	if o.TikzValidation != "" {
-		cfg.Options.TikzValidation = o.TikzValidation
-	}
-	if o.TikzEngine != "" {
-		cfg.Options.TikzEngine = o.TikzEngine
 	}
 	if o.MaxTokens > 0 {
 		cfg.Options.MaxTokens = o.MaxTokens
