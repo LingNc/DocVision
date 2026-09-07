@@ -102,6 +102,13 @@ func (l *Logger) LogError(tid int, args ...interface{}) {
 // LogWarning writes "[WARNING] ..." tagged message to the console, the main
 // log file, and the error log file. The error log entry is prefixed with a
 // full date+time, matching the Python reference.
+// LogInfo records a transient/recoverable event (rate-limit waits,
+// auto-retried connection issues) in the console and the MAIN log
+// only - it must not pollute the error log, which the analyser and
+// operators treat as a list of things needing attention.
+func (l *Logger) LogInfo(tid int, args ...interface{}) {
+	l.write(l.logFile, tid, "[INFO] ", args...)
+}
 func (l *Logger) LogWarning(tid int, args ...interface{}) {
 	l.write(l.logFile, tid, "[WARNING] ", args...)
 	if l.errorFile != nil {

@@ -168,7 +168,7 @@ func (c *Client) CallWithRetry(req *ChatRequest) (*ChatResponse, string, string)
 	rateRetry := 0
 	waitLog := func(tag string, wait time.Duration) {
 		if c.log != nil {
-			c.log.LogWarning(0, "  ["+tag+"] 等待重试:", wait)
+			c.log.LogInfo(0, "  ["+tag+"] 等待重试:", wait)
 		}
 	}
 	for {

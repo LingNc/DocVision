@@ -663,7 +663,7 @@ func doCallWithRetryFull(
 				if wait > 60*time.Second {
 					wait = 60 * time.Second
 				}
-				logger.LogWarning(tid, "  [RateLimit] waiting", wait)
+				logger.LogInfo(tid, "  [RateLimit] waiting", wait)
 				time.Sleep(wait)
 				rateLimitRetry++
 				continue
@@ -678,7 +678,7 @@ func doCallWithRetryFull(
 				if wait > 60*time.Second {
 					wait = 60 * time.Second
 				}
-				logger.LogWarning(tid, "  [ConnRetry] waiting", wait)
+				logger.LogInfo(tid, "  [ConnRetry] waiting", wait)
 				time.Sleep(wait)
 				retry++
 				continue
