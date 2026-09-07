@@ -154,14 +154,6 @@ func newWorkflowCmd() *cobra.Command {
 			steps := []string{"split", "mineru", "organize", "img2text", "analyze"}
 			if step != "" {
 				steps = []string{step}
-				if step == "latex" {
-					// LaTeX 工作流：自动处理到 output（分割→解析→整理），
-					// 接 LaTeX 流程，最后做日志分析。
-					steps = []string{"split", "mineru", "organize", "latex", "analyze"}
-				}
-				if step == "verify" {
-					steps = []string{"split", "mineru", "organize", "img2text", "latex", "verify"}
-				}
 			}
 
 			overallStart := time.Now()
@@ -183,7 +175,7 @@ func newWorkflowCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringP("step", "s", "", "仅运行指定步骤 (split|mineru|organize|img2text|latex|verify|analyze)；latex/verify 自动前置 split→mineru→organize")
+	cmd.Flags().StringP("step", "s", "", "仅运行指定步骤 (split|mineru|organize|img2text|analyze)。LaTeX 请直接用 docvision latex（自带前置流程与日志分析）")
 	addSplitFlags(cmd)
 	return cmd
 }
@@ -194,8 +186,6 @@ func stepLabel(s string) string {
 		"mineru":   "MinerU API",
 		"organize": "Organize Files",
 		"img2text": "Image to Text",
-		"latex":    "LaTeX Output",
-		"verify":   "AI Verify",
 		"analyze":  "Analyze Logs",
 	}
 	if l, ok := labels[s]; ok {
@@ -220,10 +210,6 @@ func runStep(step string, cmd *cobra.Command, cfg *config.Config, currentImg2Tex
 	case "img2text":
 		// In workflow mode, use quiet output (progress percentages only).
 		return runImg2TextFromConfig(cmd, cfg, true)
-	case "latex":
-		return "", runLatexFromConfig(cfg)
-	case "verify":
-		return "", runVerifyFromConfig(cfg)
 	case "analyze":
 		return "", runAnalyzeFromConfig(cmd, cfg, currentImg2TextLog)
 	default:
