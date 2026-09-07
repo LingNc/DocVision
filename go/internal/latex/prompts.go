@@ -101,6 +101,12 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 2. Images come in TWO forms:
    - latex FENCED CODE BLOCKS (three-backtick latex fences): the figure is ALREADY LaTeX. Paste the code verbatim inside the class figure environment, stripping the fence lines. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
    - markdown image links to raster files under images/: includegraphics them (same path) inside the class figure environment (or standard figure+caption if the manual does not define one). NEVER invent new image files.
+
+## Original PDF access (read-only)
+The original document (from which the markdown was parsed) is available read-only:
+- doc_search {query}: search the block index (text snippets, figure/table captions, equation LaTeX, image filenames). Returns the GLOBAL page number (pN) plus the block bbox. Also try image filenames like images/xxx.jpg and bare page numbers.
+- view_page {page: pN, left/top/right/bottom (percent), zoom_width}: render that original PDF page (or a crop) to see the REAL document layout and typography.
+Use them when the markdown is ambiguous: order/placement of figures and tables, lost captions, garbled fragments, or layout you cannot reconstruct. Convert doc_search bbox (PDF points, top-left origin) to percents with the page size if you need a precise crop. Do not overuse: only when plain reading of the markdown is not enough.
 3. Markdown tables -> LaTeX tables (booktabs if available per manual).
 4. Inline markdown (bold/italic/code/links) -> the LaTeX equivalent. Math is already LaTeX in the markdown — keep it verbatim inside math environments.
 5. Escape %, &, #, _ in plain text. Do NOT escape inside math/code.

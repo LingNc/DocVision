@@ -4,6 +4,8 @@
 
 ### Added
 
+- **档位1 原始文档检索**：转换会话新增只读 `doc_search`（MinerU content_list 加工的块索引，关键词/图片名/页码检索，返回全局页号与 bbox）并可复用 `view_page` 按需渲染原始 PDF 页（与样式阶段共享缓存）；MinerU 产物缺失时自动降级
+
 - `tools:` 独立配置块（v3）：get_more_context / image_context 的上下文参数与 mermaid/tikz 校验参数从 img2text/options 迁出，全流程共用；新增 `image_locate` 工具（返回前后图片引用的行号与 ±行数差，轻量定位后再按需扩展）
 
 ### Changed

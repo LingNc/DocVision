@@ -109,6 +109,10 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	if err != nil {
 		return err
 	}
+	// 原始文档索引：把 MinerU 中间产物（content_list/layout/origin.pdf）
+	// 加工为只读检索索引，转换会话可 doc_search 定位片段对应的原 PDF 页。
+	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
+
 	err = runPhase("convert", func() error { return r.convertPhase(proj) })
 	if err != nil {
 		return err
@@ -391,6 +395,29 @@ func validateSplit(chapters []ChapterRange, totalLines int) error {
 }
 
 // ------------------------------------------------------------------
+// buildDocIndexQuiet compiles the read-only original-document index
+// from the MinerU intermediate output. Failures are non-fatal: the
+// convert sessions simply run without doc_search/view_page.
+func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
+	mds := files
+	if len(mds) == 0 && sourceDir != "" {
+		matches, _ := filepath.Glob(filepath.Join(sourceDir, "*.md"))
+		mds = matches
+	}
+	if len(mds) == 0 || r.cfg.Paths.MineruOutput == "" {
+		return
+	}
+	outPath := filepath.Join(proj, "doc_index", "doc_index.json")
+	idx, pageIdx, err := buildDocIndex(r.cfg.Paths.MineruOutput, mds, outPath)
+	if err != nil {
+		r.log.Log(0, "[docindex] 原始文档索引不可用（doc_search/view_page 关闭）:", err)
+		return
+	}
+	r.docIndex = idx
+	r.docPages = pageIdx
+	r.log.Log(0, "[docindex] 原始文档索引就绪:", strconv.Itoa(len(idx.Entries)), "个块 /", strconv.Itoa(len(idx.Parts)), "个 part ->", outPath)
+}
+
 // phase: convert (concurrent per-chapter sessions)
 // ------------------------------------------------------------------
 
@@ -488,14 +515,22 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 
 	write := &WriteFileTool{Root: workDir, AllowedRel: texRel}
 	submit := &SubmitDoneTool{Label: "chapter " + base}
+	tools := []session.Tool{
+		&ReadFileTool{Root: proj},
+		write,
+		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath},
+		submit,
+	}
+	if r.docIndex != nil && r.docPages != nil {
+		// 原始文档只读工具：片段→原 PDF 页定位（doc_search），
+		// 页面渲染检视复用 style 阶段的 view_page （全局页号 + 缓存）。
+		tools = append(tools,
+			&DocSearchTool{Index: r.docIndex},
+			&ViewPageTool{Idx: r.docPages, PagesDir: filepath.Join(proj, "pages"), Runner: r})
+	}
 	sess := session.NewSession(client, modelCfg, tuning,
 		strings.ReplaceAll(convertSystemPrompt, "{MAX_ROUNDS}", strconv.Itoa(session.EffectiveToolRounds(tuning))),
-		[]session.Tool{
-			&ReadFileTool{Root: proj},
-			write,
-			&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath},
-			submit,
-		}, r.log, tid, "convert:"+base)
+		tools, r.log, tid, "convert:"+base)
 
 	// Pre-place the compiled wrapper input target: the wrapper inputs
 	// base.tex, so the scratch MainFile is base.tex (copied by the tool).

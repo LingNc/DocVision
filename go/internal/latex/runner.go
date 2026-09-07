@@ -121,8 +121,10 @@ type Runner struct {
 	clients map[string]*session.Client
 	models  map[string]config.ModelConfig
 
-	wm     *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
-	inline bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
+	wm       *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
+	inline   bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
+	docIndex *DocIndex        // 原始文档只读索引（doc_search/view_page）
+	docPages *pageIndex       // 与索引对齐的全局页表（供 view_page）
 
 	// lastSplitError remembers the latest split validation failure so
 	// the chapter session can be re-prompted with a concrete reason.

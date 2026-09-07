@@ -286,6 +286,15 @@ docvision verify                               # AI 核对报告
 | `tools.latex.validation` | latex 代码块编译校验（off/auto/strict） | auto |
 | `tools.latex.engine` | latex 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
 
+### 原始文档检索（档位1 转换会话，只读）
+
+构建时把 MinerU 中间产物（`mineru_output/<主题>_part*/` 的 content_list/layout/origin.pdf）加工为只读块索引（`latex_project/doc_index/doc_index.json`），转换会话可用：
+
+- `doc_search {query}`：按关键词 / 图片文件名 / 页码检索块索引（文本片段、图表标题、公式 LaTeX、bbox），返回**全局页号 pN** 与 bbox；
+- `view_page {page, left/top/right/bottom, zoom_width}`：渲染原始 PDF 页（或按百分比裁剪）查看真实排版，与档位1 样式阶段共用按需渲染缓存（`latex_project/pages/`）。
+
+MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不影响主流程。
+
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking） | 见示例 |
 | `models.text.api_timeout` | API 请求超时（秒）；所有模型条目可覆盖，留空继承 text | 400 |
 | `models.text.api_connect_timeout` | API 连接超时（秒） | 60 |
