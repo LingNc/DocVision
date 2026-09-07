@@ -102,7 +102,32 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 	}
 
 	progress := LoadProgress(progressRoot)
-	client := NewAIClient(cfg.AI, cfg.Options)
+	// Pipeline-specific overrides: img2text.model may reference a
+	// models: registry name; other fields override the resolved default.
+	aiCfg := cfg.AI
+	aiOpts := cfg.Options
+	if o := cfg.Img2Text; o.Model != "" {
+		if mc, ok := cfg.ResolveModel(o.Model); ok {
+			aiCfg = config.AIConfig{BaseURL: mc.BaseURL, APIKey: mc.APIKey,
+				Model: mc.Model, RequestBody: mc.RequestBody}
+			if mc.MaxTokens > 0 {
+				aiOpts.MaxTokens = mc.MaxTokens
+			}
+			if mc.Temperature > 0 {
+				aiOpts.Temperature = mc.Temperature
+			}
+		}
+	}
+	if cfg.Img2Text.MaxTokens > 0 {
+		aiOpts.MaxTokens = cfg.Img2Text.MaxTokens
+	}
+	if cfg.Img2Text.Temperature > 0 {
+		aiOpts.Temperature = cfg.Img2Text.Temperature
+	}
+	if cfg.Img2Text.RequestBody != nil {
+		aiCfg.RequestBody = cfg.Img2Text.RequestBody
+	}
+	client := NewAIClient(aiCfg, aiOpts)
 
 	// Discover markdown files (sorted, like Python's sorted(...)).
 	mdFiles, err := filepath.Glob(filepath.Join(outputDir, "*.md"))

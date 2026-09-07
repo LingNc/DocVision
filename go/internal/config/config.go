@@ -31,6 +31,9 @@ type Config struct {
 	Models map[string]ModelConfig `yaml:"models"`
 	Latex  LatexConfig            `yaml:"latex"`
 	Verify VerifyConfig           `yaml:"verify"`
+	// Img2Text overrides for the basic image-to-text pipeline. Model may
+	// reference a models: registry name (default "text").
+	Img2Text Img2TextConfig `yaml:"img2text"`
 }
 
 // ModelConfig is one entry of the named model registry. Empty fields
@@ -101,8 +104,10 @@ type LatexConfig struct {
 	// flag controls whether confirmed TikZ figures embed the code
 	// block instead of the compiled PDF link. Default false.
 	InsertImageDescription bool `yaml:"insert_image_description"`
-	// OutputDir receives the level-2 markdown output. Default ./finally_latex
+	// Deprecated: use paths.latex_output (still parsed for old configs;
+	// migrated onto Paths in setDefaults).
 	OutputDir string `yaml:"output_dir"`
+	// Deprecated: use paths.latex_project.
 	// ProjectDir is the working root for level-1 book builds.
 	// Default ./latex_project
 	ProjectDir string `yaml:"project_dir"`
@@ -117,6 +122,17 @@ type LatexConfig struct {
 		Chapter SessionTuning `yaml:"chapter"`
 		Convert SessionTuning `yaml:"convert"`
 	} `yaml:"sessions"`
+}
+
+// Img2TextConfig holds pipeline-specific overrides for the basic
+// image-to-text workflow.
+type Img2TextConfig struct {
+	// Model is a models: registry name (default "text"). Empty falls
+	// back to the resolved top-level AI block.
+	Model       string         `yaml:"model"`
+	MaxTokens   int            `yaml:"max_tokens"`
+	Temperature float64        `yaml:"temperature"`
+	RequestBody map[string]any `yaml:"request_body"`
 }
 
 // VerifyConfig configures the AI verification pass (核对输出的每张图与
@@ -197,6 +213,12 @@ type PathsConfig struct {
 	// been split successfully. Empty string disables archiving.
 	// Default: filepath.Join(InputDir, "done").
 	DoneDir string `yaml:"done_dir"`
+
+	// LaTeX destinations (defaults: ./finally_latex, ./latex_project).
+	LatexOutput  string `yaml:"latex_output"`
+	LatexProject string `yaml:"latex_project"`
+	// Fonts is the AI-managed font directory (defaults: ./fonts).
+	Fonts string `yaml:"fonts"`
 }
 
 // LoadConfig reads the YAML file at path, applies defaults for any
@@ -345,11 +367,18 @@ func setDefaults(cfg *Config) {
 	if cfg.Latex.Level == 0 {
 		cfg.Latex.Level = 2
 	}
-	if cfg.Latex.OutputDir == "" {
-		cfg.Latex.OutputDir = "./finally_latex"
+	// Legacy latex.output_dir / latex_project migrate onto paths.*.
+	if cfg.Latex.OutputDir != "" {
+		cfg.Paths.LatexOutput = cfg.Latex.OutputDir
 	}
-	if cfg.Latex.ProjectDir == "" {
-		cfg.Latex.ProjectDir = "./latex_project"
+	if cfg.Latex.ProjectDir != "" {
+		cfg.Paths.LatexProject = cfg.Latex.ProjectDir
+	}
+	if cfg.Paths.LatexOutput == "" {
+		cfg.Paths.LatexOutput = "./finally_latex"
+	}
+	if cfg.Paths.LatexProject == "" {
+		cfg.Paths.LatexProject = "./latex_project"
 	}
 	if cfg.Latex.Concurrency == 0 {
 		cfg.Latex.Concurrency = 3
@@ -404,6 +433,9 @@ func setDefaults(cfg *Config) {
 	if cfg.Paths.LogsDir == "" {
 		cfg.Paths.LogsDir = "./logs"
 	}
+	if cfg.Paths.Fonts == "" {
+		cfg.Paths.Fonts = "./fonts"
+	}
 	// DoneDir is anchored to the (already defaulted) InputDir so a
 	// typical installation gets files/done out of the box.
 	if cfg.Paths.DoneDir == "" {
@@ -424,7 +456,9 @@ func defaultSessionTuning(s *SessionTuning) {
 	if s.ContextLimit == 0 {
 		s.ContextLimit = 131072 // 128K
 	}
-	// MaxToolRounds 0 = unlimited (bounded by the session safety cap).
+	// MaxToolRounds: <=0 means unlimited (no safety cap). The 128 default
+//	 lives in the config templates, not here — an explicit 0 in the user's
+//	 config must stay 0.
 	if s.MaxTokens == 0 {
 		s.MaxTokens = 16384
 	}

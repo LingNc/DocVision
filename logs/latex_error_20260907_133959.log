@@ -1,0 +1,1 @@
+2026-09-07 13:44:29 [WARNING] [vector] TikZ 未通过，保留原图（警告：矢量转换失败）: images/编译原理课程设计报告样例/98f50570de56963aa26b375ad408472905540750378cbca9add9376a739f3b3d.jpg 会话错误: api error: [SESSION_API_ERROR: HTTP 500: {"error":{"message":"invalid character 'd' looking for beginning of value","type":"bad_response_body","param":"","code":"bad_response_body"}}]

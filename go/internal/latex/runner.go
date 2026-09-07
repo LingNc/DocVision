@@ -141,7 +141,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	}
 	outDir := opts.OutDir
 	if outDir == "" {
-		outDir = cfg.Latex.OutputDir
+		outDir = cfg.Paths.LatexOutput
 	}
 	for _, d := range []string{outDir, filepath.Join(outDir, "figures"),
 		filepath.Join(outDir, "images"), filepath.Join(outDir, "tikz"),

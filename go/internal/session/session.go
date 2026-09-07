@@ -33,8 +33,9 @@ type Tool interface {
 	Name() string
 }
 
-// ToolRoundsSafetyCap bounds "unlimited" (max_tool_rounds: 0) tool
-// loops so a model that never converges cannot run forever.
+// ToolRoundsSafetyCap is kept only as a reference value for docs; the
+// runtime does NOT enforce it (max_tool_rounds: 0 = truly unlimited,
+// so a model that never converges CAN run forever).
 const ToolRoundsSafetyCap = 200
 
 // Session is a multi-turn AI conversation with tools, a configurable
@@ -147,10 +148,8 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 	s.messages = append(s.messages, userMsg)
 
 	toolRounds := 0
+	// maxRounds <= 0 means unlimited (user opted out of any cap).
 	maxRounds := s.tuning.MaxToolRounds
-	if maxRounds <= 0 {
-		maxRounds = ToolRoundsSafetyCap
-	}
 
 	for {
 		req := &ChatRequest{
@@ -160,7 +159,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			Temperature: s.tuning.Temperature,
 			Stream:      false,
 		}
-		useTools := len(s.tools) > 0 && !opts.ForceNoTools && toolRounds < maxRounds
+		useTools := len(s.tools) > 0 && !opts.ForceNoTools && (maxRounds <= 0 || toolRounds < maxRounds)
 		if useTools {
 			req.Tools = s.toolDefs
 			req.ToolChoice = "auto"
@@ -416,10 +415,8 @@ func textTokens(s string) int {
 }
 
 // EffectiveToolRounds returns the concrete tool-round budget for a
-// tuning block (0/unset = safety cap).
+// tuning block. Values <= 0 mean UNLIMITED (the user explicitly opted
+// out of a cap; there is no hidden safety limit).
 func EffectiveToolRounds(t config.SessionTuning) int {
-	if t.MaxToolRounds <= 0 {
-		return ToolRoundsSafetyCap
-	}
 	return t.MaxToolRounds
 }

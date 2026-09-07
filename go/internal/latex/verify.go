@@ -48,7 +48,7 @@ issues = concrete errors/omissions found; suggestions = actionable fix advice. B
 func (r *Runner) RunVerify(opts VerifyOptions) error {
 	progDir := opts.ProgressDir
 	if progDir == "" {
-		progDir = filepath.Join(r.cfg.Latex.OutputDir, "progress_items")
+		progDir = filepath.Join(r.cfg.Paths.LatexOutput, "progress_items")
 	}
 	items := map[string]*imageProgress{}
 	loadProgress(progDir, items)
@@ -104,7 +104,7 @@ func (r *Runner) RunVerify(opts VerifyOptions) error {
 	// Report.
 	reportPath := opts.ReportPath
 	if reportPath == "" {
-		reportPath = filepath.Join(r.cfg.Latex.OutputDir, r.cfg.Verify.ReportFile)
+		reportPath = filepath.Join(r.cfg.Paths.LatexOutput, r.cfg.Verify.ReportFile)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# AI 核对报告\n\n- 生成时间: %s\n- 核对项: %d\n\n", time.Now().Format("2006-01-02 15:04:05"), total)
@@ -189,7 +189,7 @@ func (r *Runner) verifyOne(client *session.Client, p *imageProgress, tid int) *v
 	}
 	// Vector figures: attach the rendered preview for visual diff.
 	if p.Class == ClassVector && p.FigPNG != "" {
-		pngPath := filepath.Join(r.cfg.Latex.OutputDir, p.FigPNG)
+		pngPath := filepath.Join(r.cfg.Paths.LatexOutput, p.FigPNG)
 		if png64, err := ReadImageFile(pngPath); err == nil {
 			parts = append(parts, map[string]interface{}{
 				"type": "text", "text": "Rendered preview of the TikZ re-drawing:"},

@@ -53,7 +53,7 @@ var classNameRe = regexp.MustCompile(`\\ProvidesClass\{([^}]*)\}`)
 //  5. assemble  : main.tex + full-book compile (+ fix session) + standalone.tex
 func (r *Runner) RunBook(opts BookOptions) error {
 	cfg := r.cfg
-	proj := cfg.Latex.ProjectDir
+	proj := cfg.Paths.LatexProject
 	for _, d := range []string{
 		proj, filepath.Join(proj, "source"), filepath.Join(proj, "style"),
 		filepath.Join(proj, "chapters"), filepath.Join(proj, "work"),

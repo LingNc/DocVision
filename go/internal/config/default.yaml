@@ -56,6 +56,9 @@ paths:
   finally_dir: "./finally"          # final output directory
   logs_dir: "./logs"               # img2text_*.log / img2text_error_*.log
   done_dir: "./files/done"         # dir for sources archived after a successful split
+  latex_output:  ./finally_latex    # 档位2 LaTeX 输出目录
+  latex_project: ./latex_project    # 档位1 全书工作目录
+  fonts:        ./fonts            # AI 字体目录（可自动下载字体）
 
 # ----------------------------------------------------------------
 # LaTeX output (docvision latex)
@@ -85,22 +88,27 @@ latex:
   sessions:                      # 每个 AI 会话的独立调优
     drawing:
       context_limit: 131072      # 上下文窗口（tokens，默认 128K，可改 64K/256K 等）
-      max_tool_rounds: 0          # 0 = 不限制（代码内安全上限兜底）
+      max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
       max_tokens: 16384
       compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩
     style:
       context_limit: 262144      # 样式分析建议更大窗口（256K）
-      max_tool_rounds: 0
+      max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
       max_tokens: 32768
     chapter:
       context_limit: 131072
-      max_tool_rounds: 0
+      max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
     convert:
       context_limit: 131072
-      max_tool_rounds: 0
-
-# ----------------------------------------------------------------
+      max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
 # AI verification（AI 校验：默认关闭，先上日程）
+# img2text 基础图片转文本流程的独立配置（模型用 models: 注册表代号）
+img2text:
+  model: "text"                # models: 中的条目名；留空用 models.text
+  # max_tokens: 65536           # 覆盖 options.max_tokens
+  # temperature: 0.10
+  # request_body:               # 覆盖请求体参数
+
 # ----------------------------------------------------------------
 verify:
   enabled: false                 # 默认关闭；开启后自动流程核对每张图与内容
