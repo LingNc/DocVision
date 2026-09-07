@@ -17,6 +17,10 @@
 
 ### Changed
 
+- API 请求控制参数（api_timeout/api_connect_timeout/api_max_retries/rate_limit_retries）从 img2text/options 迁移到 models 层：任何 models 条目可设置，留空继承 models.text，最终回退代码内置默认（400s/60s/3/100）；旧位置仍解析兼容。session 会话客户端与 img2text 客户端统一使用同一套参数，重试均带指数退避
+- rate_limit_retries 默认从 0（无限+代码安全上限 100）改为直接取安全上限值 100
+- 结构化 JSON 输出请求（图片分类、章节核对、校验报告）统一附加 response_format={type: json_object}，保证返回一定是 JSON
+
 - latex md 参数不再硬拒绝：output/ 中的 md 直接选用，其他位置的 md 复制进 files/ 后整理进 output/（用户路径里带 output 不会误伤）
 - img2text 嵌入前自动留存原版 markdown 到 `finally/progress_items/<文件名>/original.md`（每文件仅首次），嵌入结果可随时还原
 

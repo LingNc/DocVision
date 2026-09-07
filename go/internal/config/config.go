@@ -48,6 +48,13 @@ type ModelConfig struct {
 	// options.temperature for this model when non-zero.
 	MaxTokens   int     `yaml:"max_tokens"`
 	Temperature float64 `yaml:"temperature"`
+	// Per-model API/request controls. Zero values inherit models.text
+	// (via ResolveModel) and finally the built-in defaults
+	// (400s read / 60s connect / 3 retries / 100 rate-limit cap).
+	APITimeout        int `yaml:"api_timeout"`
+	APIConnectTimeout int `yaml:"api_connect_timeout"`
+	APIMaxRetries     int `yaml:"api_max_retries"`
+	RateLimitRetries  int `yaml:"rate_limit_retries"`
 }
 
 // SessionTuning tunes one AI session type (context window, tool budget).
@@ -529,6 +536,12 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 		Model:       c.AI.Model,
 		RequestBody: c.AI.RequestBody,
 		MaxTokens:   c.Options.MaxTokens,
+		// legacy options.* values act as defaults for the new
+		// model-level request controls.
+		APITimeout:        c.Options.APITimeout,
+		APIConnectTimeout: c.Options.APIConnectTimeout,
+		APIMaxRetries:     c.Options.APIMaxRetries,
+		RateLimitRetries:  c.Options.RateLimitRetries,
 	}
 	if name == "" {
 		return fallback, false
@@ -551,6 +564,18 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 	}
 	if entry.MaxTokens == 0 {
 		entry.MaxTokens = fallback.MaxTokens
+	}
+	if entry.APITimeout == 0 {
+		entry.APITimeout = fallback.APITimeout
+	}
+	if entry.APIConnectTimeout == 0 {
+		entry.APIConnectTimeout = fallback.APIConnectTimeout
+	}
+	if entry.APIMaxRetries == 0 {
+		entry.APIMaxRetries = fallback.APIMaxRetries
+	}
+	if entry.RateLimitRetries == 0 {
+		entry.RateLimitRetries = fallback.RateLimitRetries
 	}
 	return entry, true
 }

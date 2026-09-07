@@ -270,13 +270,14 @@ docvision verify                               # AI 核对报告
 | `mineru.log_poll_interval` | 控制台日志输出间隔（秒） | 3 |
 | `mineru.progress_threshold` | 页数变化阈值，达到此值立即刷新输出 | 80 |
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking） | 见示例 |
+| `models.text.api_timeout` | API 请求超时（秒）；所有模型条目可覆盖，留空继承 text | 400 |
+| `models.text.api_connect_timeout` | API 连接超时（秒） | 60 |
+| `models.text.api_max_retries` | 非限流错误重试次数（指数退避 2s/4s/8s…封顶 30s） | 3 |
+| `models.text.rate_limit_retries` | 429 限流重试上限（指数退避封顶 60s；原为 0=无限+代码上限 100，现默认直接取上限值） | 100 |
 | `options.concurrency` | AI 图片转文本并发数 | 10 |
 | `options.max_retries` | AI 请求更多上下文的最大轮数 | 5 |
 | `options.max_context_lines_up` | 图片上方初始上下文行数 | 10 |
 | `options.max_context_lines_down` | 图片下方初始上下文行数 | 5 |
-| `options.api_connect_timeout` | API 连接超时（秒） | 60 |
-| `options.api_max_retries` | 非限流错误的 API 重试次数 | 3 |
-| `options.rate_limit_retries` | 限流错误重试次数（0 表示无限次，由代码设置上限） | 0 |
 | `options.format_fix_attempts` | 格式修复重试次数（0 禁用，1 表示重试一次） | 1 |
 | `options.mermaid_validation` | Mermaid 验证模式（off/auto/strict） | auto |
 | `options.mermaid_command` | Mermaid CLI 命令 | mmdc |

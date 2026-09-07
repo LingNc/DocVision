@@ -38,10 +38,11 @@ func ClassifyImage(client *session.Client, modelCfg config.ModelConfig, imgBase6
 				}},
 			}},
 		},
-		MaxTokens:   512,
-		Temperature: 0.0,
+		MaxTokens:      512,
+		Temperature:    0.0,
+		ResponseFormat: map[string]any{"type": "json_object"}, // 保证返回一定是 JSON
 	}
-	resp, sentinel, status := client.CallWithRetry(req, 3, 20)
+	resp, sentinel, status := client.CallWithRetry(req)
 	if status != "" {
 		return Classification{}, fmt.Errorf("分类请求失败: %s", sentinel)
 	}

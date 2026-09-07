@@ -152,14 +152,10 @@ func CallAIWithTools(
 	validator MermaidValidatorFunc,
 	repairPromptBuilder MermaidRepairPromptBuilder,
 ) (string, string) {
-	rateLimitLimit := 100
-	if opts.RateLimitRetries > 0 {
-		rateLimitLimit = opts.RateLimitRetries
-	}
-	maxAPIRetries := opts.APIMaxRetries
-	if maxAPIRetries <= 0 {
-		maxAPIRetries = 3
-	}
+	// Request/retry controls now live on the client (resolved from
+	// the model config); legacy options.* act as fallbacks there.
+	rateLimitLimit := client.RateLimitRetries
+	maxAPIRetries := client.MaxRetries
 	maxRounds := opts.MaxRetries
 	if maxRounds <= 0 {
 		maxRounds = 3

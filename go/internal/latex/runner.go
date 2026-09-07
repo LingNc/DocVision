@@ -397,8 +397,9 @@ func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, im
 			}},
 		},
 		MaxTokens: 512, Temperature: 0.0,
+		ResponseFormat: map[string]any{"type": "json_object"},
 	}
-	resp, sentinel, status := client.CallWithRetry(req, 3, 20)
+	resp, sentinel, status := client.CallWithRetry(req)
 	if status != "" {
 		return Classification{}, fmt.Errorf("分类请求失败: %s", sentinel)
 	}
@@ -529,11 +530,8 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 // processTextImage runs the existing img2text pipeline and strips the
 // [IMG_TYPE: ...] header so only the pure content is embedded.
 func (r *Runner) processTextImage(mf *mdFile, t *task, tid int) (string, error) {
-	mc, _ := r.cfg.ResolveModel("") // top-level ai block
-	aiCfg := config.AIConfig{
-		BaseURL: mc.BaseURL, APIKey: mc.APIKey, Model: mc.Model, RequestBody: mc.RequestBody,
-	}
-	client := img2text.NewAIClient(aiCfg, r.cfg.Options)
+	mc, _ := r.cfg.ResolveModel("") // top-level ai block (+ options.* defaults)
+	client := img2text.NewAIClient(mc, r.cfg.Options)
 	subject := subjectOf(t.mdName)
 	result, status := img2text.ProcessOneImage(
 		client, r.cfg.Paths.ImagesDir, t.imgPath, subject,

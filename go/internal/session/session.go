@@ -185,7 +185,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api request (messages=%d, est_tokens=%d, tools=%v)",
 				s.label, toolRounds+1, len(s.messages), s.EstimatedTokens(), useTools))
 		}
-		resp, sentinel, status := s.client.CallWithRetry(req, 3, 100)
+		resp, sentinel, status := s.client.CallWithRetry(req)
 		s.APIRequests++
 		if status != "" {
 			return "", fmt.Errorf("api error: %s", sentinel)
@@ -256,7 +256,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			req2.Messages = s.messages
 			req2.ToolChoice = "none"
 			req2.Tools = nil
-			resp2, sentinel, status := s.client.CallWithRetry(&req2, 3, 100)
+			resp2, sentinel, status := s.client.CallWithRetry(&req2)
 			s.APIRequests++
 			if status != "" {
 				return "", fmt.Errorf("api error: %s", sentinel)
@@ -380,7 +380,7 @@ func (s *Session) compact() error {
 		Temperature: 0.1,
 		Stream:      false,
 	}
-	resp, sentinel, status := s.client.CallWithRetry(req, 3, 20)
+	resp, sentinel, status := s.client.CallWithRetry(req)
 	if status != "" {
 		return fmt.Errorf("summary request failed: %s", sentinel)
 	}

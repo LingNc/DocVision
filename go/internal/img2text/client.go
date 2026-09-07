@@ -21,6 +21,10 @@ type AIClient struct {
 	apiKey      string
 	model       string
 	requestBody map[string]interface{}
+
+	// Retry controls resolved from ModelConfig / legacy options.
+	MaxRetries       int // API retry count for non-rate-limit errors
+	RateLimitRetries int // rate-limit retry cap (fallback: in-code cap)
 }
 
 // NewAIClient builds an AIClient from the loaded configuration. Read and
@@ -28,14 +32,35 @@ type AIClient struct {
 // `httpx.Timeout(connect=..., read=..., write=..., pool=10.0)`). Per-call
 // retry is handled by the caller (processor.go) so this client stays
 // stateless and safe to share across goroutines.
-func NewAIClient(cfg config.AIConfig, opts config.OptionsConfig) *AIClient {
-	readTimeout := time.Duration(opts.APITimeout) * time.Second
-	if readTimeout <= 0 {
-		readTimeout = 400 * time.Second
+func NewAIClient(mc config.ModelConfig, legacy config.OptionsConfig) *AIClient {
+	// Precedence: model-level fields > legacy options.* > built-ins.
+	read := 400 * time.Second
+	if legacy.APITimeout > 0 {
+		read = time.Duration(legacy.APITimeout) * time.Second
 	}
-	connectTimeout := time.Duration(opts.APIConnectTimeout) * time.Second
-	if connectTimeout <= 0 {
-		connectTimeout = 60 * time.Second
+	if mc.APITimeout > 0 {
+		read = time.Duration(mc.APITimeout) * time.Second
+	}
+	connect := 60 * time.Second
+	if legacy.APIConnectTimeout > 0 {
+		connect = time.Duration(legacy.APIConnectTimeout) * time.Second
+	}
+	if mc.APIConnectTimeout > 0 {
+		connect = time.Duration(mc.APIConnectTimeout) * time.Second
+	}
+	maxRetries := legacy.APIMaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	if mc.APIMaxRetries > 0 {
+		maxRetries = mc.APIMaxRetries
+	}
+	rateLimit := legacy.RateLimitRetries
+	if rateLimit <= 0 {
+		rateLimit = 100 // in-code safety cap
+	}
+	if mc.RateLimitRetries > 0 {
+		rateLimit = mc.RateLimitRetries
 	}
 
 	// The Go http.Client only exposes a single Timeout. We approximate
@@ -44,14 +69,16 @@ func NewAIClient(cfg config.AIConfig, opts config.OptionsConfig) *AIClient {
 	// enough headroom, while the per-request context (in ChatCompletion)
 	// bounds the connect phase separately via a custom dialer-free
 	// client. In practice Timeout = connect + read is a close match.
-	overall := connectTimeout + readTimeout
+	overall := connect + read
 
 	return &AIClient{
-		http:        &http.Client{Timeout: overall},
-		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
-		apiKey:      cfg.APIKey,
-		model:       cfg.Model,
-		requestBody: cfg.RequestBody,
+		http:             &http.Client{Timeout: overall},
+		baseURL:          strings.TrimRight(mc.BaseURL, "/"),
+		apiKey:           mc.APIKey,
+		model:            mc.Model,
+		requestBody:      mc.RequestBody,
+		MaxRetries:       maxRetries,
+		RateLimitRetries: rateLimit,
 	}
 }
 
@@ -64,13 +91,14 @@ func (c *AIClient) Model() string { return c.model }
 // top-level JSON payload before sending, allowing vendor-specific fields
 // like enable_thinking, extra_body, etc.
 type ChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []ChatMessage    `json:"messages"`
-	Tools       []map[string]any `json:"tools,omitempty"`
-	ToolChoice  any              `json:"tool_choice,omitempty"`
-	MaxTokens   int              `json:"max_tokens"`
-	Temperature float64          `json:"temperature"`
-	Stream      bool             `json:"stream"`
+	Model          string           `json:"model"`
+	Messages       []ChatMessage    `json:"messages"`
+	Tools          []map[string]any `json:"tools,omitempty"`
+	ToolChoice     any              `json:"tool_choice,omitempty"`
+	MaxTokens      int              `json:"max_tokens"`
+	Temperature    float64          `json:"temperature"`
+	Stream         bool             `json:"stream"`
+	ResponseFormat map[string]any   `json:"response_format,omitempty"`
 }
 
 // ChatMessage is one message in the conversation. The Content field is

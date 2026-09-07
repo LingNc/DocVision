@@ -27,6 +27,10 @@ type Client struct {
 	model       string
 	requestBody map[string]interface{}
 	log         *logger.Logger // optional; logs retry/backoff waits when set
+
+	// Request/retry controls resolved from ModelConfig (with defaults).
+	maxAPIRetries int
+	rateLimitCap  int
 }
 
 // SetLogger attaches a logger so retry/backoff waits become visible in
@@ -37,12 +41,30 @@ func (c *Client) SetLogger(l *logger.Logger) {
 
 // NewClient builds a Client from a resolved ModelConfig.
 func NewClient(cfg config.ModelConfig) *Client {
+	read := 400 * time.Second
+	if cfg.APITimeout > 0 {
+		read = time.Duration(cfg.APITimeout) * time.Second
+	}
+	connect := 60 * time.Second
+	if cfg.APIConnectTimeout > 0 {
+		connect = time.Duration(cfg.APIConnectTimeout) * time.Second
+	}
+	maxRetries := cfg.APIMaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	rateLimit := cfg.RateLimitRetries
+	if rateLimit <= 0 {
+		rateLimit = 100 // in-code safety cap, matches img2text
+	}
 	return &Client{
-		http:        &http.Client{Timeout: 460 * time.Second},
-		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
-		apiKey:      cfg.APIKey,
-		model:       cfg.Model,
-		requestBody: cfg.RequestBody,
+		http:          &http.Client{Timeout: connect + read},
+		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
+		apiKey:        cfg.APIKey,
+		model:         cfg.Model,
+		requestBody:   cfg.RequestBody,
+		maxAPIRetries: maxRetries,
+		rateLimitCap:  rateLimit,
 	}
 }
 
@@ -51,13 +73,14 @@ func (c *Client) Model() string { return c.model }
 
 // ChatRequest mirrors the OpenAI chat completions schema.
 type ChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []ChatMessage    `json:"messages"`
-	Tools       []map[string]any `json:"tools,omitempty"`
-	ToolChoice  any              `json:"tool_choice,omitempty"`
-	MaxTokens   int              `json:"max_tokens"`
-	Temperature float64          `json:"temperature"`
-	Stream      bool             `json:"stream"`
+	Model          string           `json:"model"`
+	Messages       []ChatMessage    `json:"messages"`
+	Tools          []map[string]any `json:"tools,omitempty"`
+	ToolChoice     any              `json:"tool_choice,omitempty"`
+	MaxTokens      int              `json:"max_tokens"`
+	Temperature    float64          `json:"temperature"`
+	Stream         bool             `json:"stream"`
+	ResponseFormat map[string]any   `json:"response_format,omitempty"`
 }
 
 // ChatMessage is one message in a conversation. Content is either a
@@ -138,7 +161,9 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 // 5xx with a non-JSON body) 2*2^n capped at 30s. The same sentinel
 // strings as img2text are returned so log analysers can classify
 // failures uniformly.
-func (c *Client) CallWithRetry(req *ChatRequest, maxAPIRetries, rateLimitLimit int) (*ChatResponse, string, string) {
+func (c *Client) CallWithRetry(req *ChatRequest) (*ChatResponse, string, string) {
+	maxAPIRetries := c.maxAPIRetries
+	rateLimitLimit := c.rateLimitCap
 	retry := 0
 	rateRetry := 0
 	waitLog := func(tag string, wait time.Duration) {

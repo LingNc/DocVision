@@ -204,8 +204,9 @@ func (r *Runner) verifyOne(client *session.Client, p *imageProgress, tid int) *v
 			{Role: "user", Content: parts},
 		},
 		MaxTokens: 2048, Temperature: 0.0,
+		ResponseFormat: map[string]any{"type": "json_object"},
 	}
-	resp, sentinel, status := client.CallWithRetry(req, 3, 20)
+	resp, sentinel, status := client.CallWithRetry(req)
 	if status != "" {
 		r.log.LogWarning(tid, "[verify] 请求失败:", sentinel)
 		return dummy

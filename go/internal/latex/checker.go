@@ -53,8 +53,9 @@ func (r *Runner) checkChapter(base, chapPath, texPath string) (bool, string) {
 		Messages: []session.ChatMessage{
 			{Role: "user", Content: prompt},
 		},
+		ResponseFormat: map[string]any{"type": "json_object"}, // 保证返回一定是 JSON
 	}
-	resp, sentinel, status := client.CallWithRetry(req, 2, 3)
+	resp, sentinel, status := client.CallWithRetry(req)
 	if resp == nil {
 		r.log.LogWarning(0, "[checker]", base, "调用失败，视为通过:", sentinel, status)
 		return true, ""

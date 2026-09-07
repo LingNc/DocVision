@@ -93,10 +93,6 @@ img2text:
   max_window_up: 50            # maximum total lines above (cap)
   max_window_down: 50          # maximum total lines below (cap)
   max_retries: 5               # max retries for AI to request more context
-  api_timeout: 400             # request timeout in seconds for the OpenAI call
-  api_connect_timeout: 60      # connect timeout in seconds
-  api_max_retries: 3           # API retry count for non-rate-limit errors
-  rate_limit_retries: 0        # 0 means unlimited with a safety cap in code
   concurrency: 10              # number of concurrent worker threads
   temperature: 0.10
   output_language: "Chinese"   # "Chinese" or "English"
@@ -126,10 +122,15 @@ verify:
 # top-level ai block, so a minimal setup only sets model:.
 # ----------------------------------------------------------------
 models:
-  text:                        # img2text 等基础流程使用的默认模型（必填）
+  text:                        # img2text 等基础流程使用的默认模型（必填；其他条目留空字段继承这里）
     base_url: "https://your-api-proxy.com/v1"
     api_key: "sk-YOUR-API-KEY-HERE"
     model: "Qwen/Qwen3.6-27B"
+    # API 请求控制（全局默认；各 models 条目可单独覆盖）
+    api_timeout: 400            # request timeout in seconds
+    api_connect_timeout: 60     # connect timeout in seconds
+    api_max_retries: 3          # API retry count for non-rate-limit errors
+    rate_limit_retries: 100     # 429 限流重试上限（原代码内安全上限值）
     request_body:              # additional body params for the API call
       enable_thinking: false   # Qwen 3.6+
       extra_body: {            # OpenAI/Anthropic/DeepSeek
@@ -149,6 +150,6 @@ models:
   convert:
     model: "glm-5.3-flash"
   checker:                    # 每章核对（小文本模型即可）
-    model: "glm-5.3-flash"
+    model: "Qwen/Qwen3.6-27B"
   verifier:
     model: "glm-5.3-flash"       # AI 校验模型（需视觉能力）
