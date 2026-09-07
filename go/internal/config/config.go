@@ -240,6 +240,7 @@ func validatePaths(cfg *Config) error {
 // setDefaults fills in zero-valued fields with the same defaults that the
 // archived Python implementation applies via dict.get(key, default).
 func setDefaults(cfg *Config) {
+	resolveAIReference(cfg)
 	// MinerU defaults
 	if cfg.Mineru.APIBaseURL == "" {
 		cfg.Mineru.APIBaseURL = "https://mineru.net/api/v4"
@@ -417,9 +418,7 @@ func defaultSessionTuning(s *SessionTuning) {
 	if s.ContextLimit == 0 {
 		s.ContextLimit = 131072 // 128K
 	}
-	if s.MaxToolRounds == 0 {
-		s.MaxToolRounds = 24
-	}
+	// MaxToolRounds 0 = unlimited (bounded by the session safety cap).
 	if s.MaxTokens == 0 {
 		s.MaxTokens = 16384
 	}
@@ -487,4 +486,32 @@ func (c *Config) LatexSession(name string) SessionTuning {
 	}
 	defaultSessionTuning(&s)
 	return s
+}
+
+// resolveAIReference lets the top-level ai block reference a named
+// registry entry: when ai.model matches a key of models:, the block
+// inherits that entry's base_url / api_key / model / request_body
+// (entry values win; empty entry fields keep the ai values). This way
+// img2text and every other consumer only needs a registered model
+// name — all credentials live in the registry.
+func resolveAIReference(cfg *Config) {
+	if cfg.AI.Model == "" || len(cfg.Models) == 0 {
+		return
+	}
+	entry, ok := cfg.Models[cfg.AI.Model]
+	if !ok {
+		return
+	}
+	if entry.BaseURL != "" {
+		cfg.AI.BaseURL = entry.BaseURL
+	}
+	if entry.APIKey != "" {
+		cfg.AI.APIKey = entry.APIKey
+	}
+	if entry.Model != "" {
+		cfg.AI.Model = entry.Model
+	}
+	if entry.RequestBody != nil {
+		cfg.AI.RequestBody = entry.RequestBody
+	}
 }

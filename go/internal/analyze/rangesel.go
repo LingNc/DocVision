@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	logNameRe = regexp.MustCompile(`img2text_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.log`)
+	logNameRe = regexp.MustCompile(`(?:img2text|latex)_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.log`)
 	relSpecRe = regexp.MustCompile(`^(\d+[YMWDdhms])+$`)
 	relTokRe  = regexp.MustCompile(`(\d+)([YMWDdhms])`)
 )

@@ -30,6 +30,33 @@ type ImagesOptions struct {
 	// OutDir overrides paths.latex.output_dir (used by the level-1
 	// book pipeline to place processed source inside its project dir).
 	OutDir string
+	// Files selects specific markdown files (base names with or
+	// without .md, or paths). Empty = every *.md in SourceDir (batch).
+	Files []string
+}
+
+// filterFiles keeps only the md files matching opts.Files (base-name
+// match, with or without extension). Empty selection = no filtering.
+func filterFiles(mdFiles []string, selected []string) []string {
+	if len(selected) == 0 {
+		return mdFiles
+	}
+	want := map[string]bool{}
+	for _, f := range selected {
+		f = filepath.Clean(f)
+		want[f] = true
+		want[strings.TrimSuffix(f, filepath.Ext(f))] = true
+		want[filepath.Base(f)] = true
+		want[strings.TrimSuffix(filepath.Base(f), filepath.Ext(f))] = true
+	}
+	var out []string
+	for _, f := range mdFiles {
+		base := filepath.Base(f)
+		if want[base] || want[strings.TrimSuffix(base, filepath.Ext(base))] || want[f] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // imageProgress is the per-image persisted state (断点续传).
@@ -135,8 +162,9 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 		return err
 	}
 	sort.Strings(mdFiles)
+	mdFiles = filterFiles(mdFiles, opts.Files)
 	if len(mdFiles) == 0 {
-		return fmt.Errorf("在 %s 未找到 markdown 文件", srcDir)
+		return fmt.Errorf("没有匹配的 markdown 文件（指定文件请用: docvision latex <文件名.md> ...）")
 	}
 
 	mdCache := map[string]*mdFile{}

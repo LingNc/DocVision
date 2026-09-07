@@ -27,6 +27,8 @@ type BookOptions struct {
 	TestMode bool
 	Number   int
 	Seed     string
+	// Files selects specific markdown files (empty = all).
+	Files []string
 }
 
 // bookProgress is the persisted phase state of a book project.
@@ -91,8 +93,8 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	err := runPhase("images", func() error {
 		return r.RunImages(ImagesOptions{
 			TestMode: opts.TestMode, Number: opts.Number, Seed: opts.Seed,
-			SourceDir: opts.SourceDir,
-			OutDir:    filepath.Join(proj, "source"),
+			SourceDir: opts.SourceDir, Files: opts.Files,
+			OutDir: filepath.Join(proj, "source"),
 		})
 	})
 	if err != nil {
@@ -445,7 +447,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	write := &WriteFileTool{Root: workDir, AllowedRel: texRel}
 	submit := &SubmitDoneTool{Label: "chapter " + base}
 	sess := session.NewSession(client, modelCfg, tuning,
-		strings.ReplaceAll(convertSystemPrompt, "{MAX_ROUNDS}", strconv.Itoa(tuning.MaxToolRounds)),
+		strings.ReplaceAll(convertSystemPrompt, "{MAX_ROUNDS}", strconv.Itoa(session.EffectiveToolRounds(tuning))),
 		[]session.Tool{
 			&ReadFileTool{Root: proj},
 			write,

@@ -16,7 +16,9 @@ PDF 文件 -> 分割 -> MinerU API 解析 -> 整理文件 -> AI 图片转文本 
 2. **mineru** - 调用 MinerU API 解析文件，支持并发、断点续传、上传进度显示
 3. **organize** - 整理解析结果，合并分片，按引用收集图片到按主题子目录
 4. **img2text** - 用 AI 模型识别图片内容并转为文本，支持并发和上下文增量扩展（工具调用）
-5. **analyze** - 分析处理日志，统计耗时、成功率、进度
+5. **latex** - LaTeX 输出（图片矢量化 / 全书转换，见下文）
+6. **verify** - AI 核对图片与嵌入内容（默认关闭，`verify.enabled`）
+7. **analyze** - 分析处理日志（img2text 与 latex 日志均支持），统计耗时、成功率、进度
 
 ## 快速开始
 
@@ -106,6 +108,8 @@ docvision split       分割 PDF/DOCX（单文件或 --all 目录模式）
 docvision mineru      调用 MinerU API 解析文件
 docvision organize    整理解析结果
 docvision img2text    AI 图片转文本（--test 测试模式）
+docvision latex       LaTeX 输出（可传文件名只处理指定文件）
+docvision verify      AI 核对输出与原图（默认关闭）
 docvision analyze     分析日志（--progress 仅进度，--all 汇总历史）
 docvision splitlog    按线程 ID 拆分日志
 docvision init        生成配置模板
@@ -175,8 +179,12 @@ docvision verify
 ### 用法
 
 ```bash
-# 档位2（默认）
+# 档位2（默认）：批量处理 output/ 下全部 markdown（自动）
 docvision latex
+
+# 只处理指定文件（文件名可带可不带 .md，可多个）
+docvision latex 编译原理课程设计报告样例.md
+docvision latex book1 book2
 
 docvision latex --level 2 --test --number 5   # 抽样测试
 
@@ -186,9 +194,17 @@ docvision latex --step classify               # 仅分类
 docvision latex --level 1
 
 docvision latex --level 1 --step style        # 仅样式分析阶段
+
+# 完整工作流：分割→MinerU→整理→LaTeX→日志分析（一条命令）
+docvision workflow --step latex
+
+# AI 核对也可以作为工作流步骤（respect verify.enabled）
+docvision workflow --step verify
 ```
 
-需要本地 LaTeX 工具链：TeX 发行版（xelatex）+ poppler-utils（pdftoppm）。
+输出目录：档位2 → `finally_latex/`；档位1 → `latex_project/`（含 out/book.pdf 与 standalone.tex），与 img2text 的 `finally/` 互不干扰。
+
+需要本地 LaTeX 工具链：TeX 发行版（xelatex）+ poppler-utils（pdftoppm）。`docvision init` 会自动检查并给出安装提示。
 
 ## Python 脚本独立使用
 
@@ -218,6 +234,12 @@ docvision latex --level 1 --step style        # 仅样式分析阶段
 | `options.mermaid_fix_attempts` | Mermaid 独立修正次数（0 表示无限次，受代码内安全上限保护） | 3 |
 | `options.mermaid_timeout` | 单个 Mermaid 验证超时（秒） | 30 |
 | `options.max_tokens` | API 调用最大 token 数 | 65536 |
+| `ai.model` | 可直接填 `models:` 注册表中的模型名，凭据从注册表继承 | - |
+| `models.<name>` | 每个专用 AI 的独立 base_url/api_key/model/request_body | - |
+| `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
+| `latex.sessions.*.max_tool_rounds` | 会话工具轮数上限，0=不限制（代码内安全上限兜底） | 0 |
+| `latex.sessions.*.context_limit` | 会话上下文窗口（tokens），达到阈值自动 AI 压缩 | 131072 |
+| `verify.enabled` | AI 核对开关（默认关闭） | false |
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |
 

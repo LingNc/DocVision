@@ -1,4 +1,5 @@
-// Package logfind locates primary img2text log files.
+// Package logfind locates primary pipeline log files (img2text and
+// latex share the same logger format, so the analyser accepts both).
 package logfind
 
 import (
@@ -9,27 +10,44 @@ import (
 	"strings"
 )
 
-// IsErrorLog reports whether name is an error log filename.
+// logPatterns are the primary log filename prefixes of every pipeline
+// that uses the shared logger format.
+var logPatterns = []string{"img2text_", "latex_"}
+
+// IsErrorLog reports whether name is an error log filename of any
+// known pipeline.
 func IsErrorLog(name string) bool {
-	const prefix = "img2text_error_"
-	return strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".log") && len(name) > len(prefix)+len(".log")
+	for _, p := range logPatterns {
+		prefix := p + "error_"
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".log") && len(name) > len(prefix)+len(".log") {
+			return true
+		}
+	}
+	return false
 }
 
 func find(dir string) ([]string, error) {
-	matches, err := filepath.Glob(filepath.Join(dir, "img2text_*.log"))
-	if err != nil {
-		return nil, fmt.Errorf("find logs in %s: %w", dir, err)
-	}
-	files := make([]string, 0, len(matches))
-	for _, path := range matches {
-		info, statErr := os.Stat(path)
-		if statErr != nil || !info.Mode().IsRegular() || IsErrorLog(filepath.Base(path)) {
-			continue
+	var files []string
+	seen := map[string]bool{}
+	for _, pattern := range logPatterns {
+		matches, err := filepath.Glob(filepath.Join(dir, pattern+"*.log"))
+		if err != nil {
+			return nil, fmt.Errorf("find logs in %s: %w", dir, err)
 		}
-		files = append(files, path)
+		for _, path := range matches {
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			info, statErr := os.Stat(path)
+			if statErr != nil || !info.Mode().IsRegular() || IsErrorLog(filepath.Base(path)) {
+				continue
+			}
+			files = append(files, path)
+		}
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no primary img2text_*.log found in %s", dir)
+		return nil, fmt.Errorf("no primary pipeline logs (img2text_*/latex_*) found in %s", dir)
 	}
 	return files, nil
 }
@@ -70,7 +88,7 @@ func FindLatestWithFallback(primaryDir, legacyDir string) (string, error) {
 	}
 	files, err = find(legacyDir)
 	if err != nil {
-		return "", fmt.Errorf("no primary img2text_*.log in %s and fallback %s", primaryDir, legacyDir)
+		return "", fmt.Errorf("no primary pipeline log in %s and fallback %s", primaryDir, legacyDir)
 	}
 	sort.Strings(files)
 	return files[len(files)-1], nil

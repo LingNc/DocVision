@@ -17,7 +17,7 @@ import (
 // newLatexCmd wires the LaTeX output pipeline (level 1 / level 2).
 func newLatexCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "latex",
+		Use:   "latex [file.md ...]",
 		Short: "LaTeX 输出管线（档位2：图片矢量化 / 档位1：全书 LaTeX）",
 		Long: `基于 output/ 中 MinerU 整理后的 Markdown 构建 LaTeX 输出。
 
@@ -35,6 +35,7 @@ func newLatexCmd() *cobra.Command {
 
 所有 AI 会话支持：独立模型配置（models: 注册表）、上下文窗口配置、自动压缩、
 可分离工具注册。进度自动断点续传。`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigWithFlag(cmd)
 			if err != nil {
@@ -65,12 +66,13 @@ func newLatexCmd() *cobra.Command {
 				return runner.RunBook(latex.BookOptions{
 					Step: step, SourceDir: sourceDir, Restart: false,
 					TestMode: testMode, Number: number, Seed: seed,
+					Files: args,
 				})
 			}
 			fmt.Println("=== LaTeX 档位 2：图片矢量化 ===")
 			return runner.RunImages(latex.ImagesOptions{
 				Step: step, TestMode: testMode, Number: number, Seed: seed,
-				SourceDir: sourceDir,
+				SourceDir: sourceDir, Files: args,
 			})
 		},
 	}
@@ -133,4 +135,38 @@ func newLatexLogger(cfg *config.Config) (*logger.Logger, func(), error) {
 		return nil, nil, err
 	}
 	return log, func() { log.Close() }, nil
+}
+
+// runLatexFromConfig is the workflow --step latex entry: it runs the
+// configured latex level over every md in output_dir (or the files
+// selected via latex.files when provided).
+func runLatexFromConfig(cfg *config.Config) error {
+	if cfg.Latex.Level != 1 && cfg.Latex.Level != 2 {
+		return fmt.Errorf("latex.level 必须为 1或 2（当前 %d）", cfg.Latex.Level)
+	}
+	log, closeLog, err := newLatexLogger(cfg)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+	runner := latex.NewRunner(cfg, log)
+	if cfg.Latex.Level == 1 {
+		return runner.RunBook(latex.BookOptions{})
+	}
+	return runner.RunImages(latex.ImagesOptions{})
+}
+
+// runVerifyFromConfig is the workflow --step verify entry. It respects
+// verify.enabled (skips with a notice when disabled).
+func runVerifyFromConfig(cfg *config.Config) error {
+	if !cfg.Verify.Enabled {
+		fmt.Println("verify.enabled 为 false，跳过 AI 核对步骤（如需启用请修改 config.yaml）")
+		return nil
+	}
+	log, closeLog, err := newLatexLogger(cfg)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+	return latex.NewRunner(cfg, log).RunVerify(latex.VerifyOptions{})
 }

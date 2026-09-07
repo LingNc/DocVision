@@ -125,7 +125,7 @@ func TestFindLatest_AllErrors(t *testing.T) {
 func TestFindLatest_MissingDir(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope")
 	_, err := FindLatest(missing)
-	if err == nil || !strings.Contains(err.Error(), "no primary img2text") {
+	if err == nil || !strings.Contains(err.Error(), "no primary pipeline log") {
 		t.Fatalf("want missing-dir error, got %v", err)
 	}
 }

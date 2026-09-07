@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 配置整合：`ai.model` 可直接引用 `models:` 注册表名（如 `text`），base_url/api_key/request_body 从注册表继承，凭据只需维护一份；img2text 等基础流程同样生效
+- 会话工具轮数 `max_tool_rounds` 默认 0 = 不限制（代码内安全上限兜底）
+- `docvision latex` 支持位置参数只处理指定 markdown 文件；不带参数则批量处理 `output/` 全部文件
+- `docvision workflow --step latex`：自动前置 split→mineru→organize 再进入 LaTeX 流程并接日志分析；`--step verify` 同理（受 `verify.enabled` 控制）
+- analyze/logfind/rangesel 兼容 `latex_*.log`：`docvision analyze` 可直接分析 LaTeX 管线日志
+- `docvision init` 生成模板后自动检查环境（xelatex/pdftoppm/mmdc）并给出安装提示
+
 ### Added
 
 #### LaTeX 输出（两档位）

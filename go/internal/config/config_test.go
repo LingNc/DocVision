@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadConfig_DefaultsApplied(t *testing.T) {
@@ -270,5 +271,47 @@ func TestLoadConfig_MermaidFixAttemptsOmittedUsesDefault(t *testing.T) {
 	}
 	if *cfg.Options.MermaidFixAttempts != 3 {
 		t.Fatalf("*MermaidFixAttempts = %d, want 3", *cfg.Options.MermaidFixAttempts)
+	}
+}
+
+// ai.model may reference a named registry entry; credentials then live
+// only in models:.
+func TestResolveAIReference(t *testing.T) {
+	data := []byte(`
+ai:
+  base_url: "https://fallback.example/v1"
+  api_key: "sk-fallback"
+  model: "text"
+models:
+  text:
+    base_url: "https://registry.example/v1"
+    api_key: "sk-registry"
+    model: "glm-5.3-flash"
+  drawing:
+    model: "glm-5.3-flash"
+`)
+	cfg := &Config{}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		t.Fatal(err)
+	}
+	setDefaults(cfg)
+	if cfg.AI.BaseURL != "https://registry.example/v1" || cfg.AI.APIKey != "sk-registry" || cfg.AI.Model != "glm-5.3-flash" {
+		t.Fatalf("registry reference not resolved: %+v", cfg.AI)
+	}
+
+	// Non-registry model names keep the ai block untouched.
+	cfg2 := &Config{}
+	_ = yaml.Unmarshal([]byte("ai:\n  model: \"Qwen/X\"\n  base_url: \"https://a.b/v1\"\n"), cfg2)
+	setDefaults(cfg2)
+	if cfg2.AI.Model != "Qwen/X" || cfg2.AI.BaseURL != "https://a.b/v1" {
+		t.Fatalf("plain model name must stay untouched: %+v", cfg2.AI)
+	}
+
+	// Registry entry with empty fields falls back to the ai block.
+	cfg3 := &Config{}
+	_ = yaml.Unmarshal([]byte("ai:\n  model: \"drawing\"\n  base_url: \"https://keep.me/v1\"\n  api_key: \"sk-keep\"\nmodels:\n  drawing:\n    model: \"glm-x\"\n"), cfg3)
+	setDefaults(cfg3)
+	if cfg3.AI.Model != "glm-x" || cfg3.AI.BaseURL != "https://keep.me/v1" || cfg3.AI.APIKey != "sk-keep" {
+		t.Fatalf("partial registry entry must merge with fallback: %+v", cfg3.AI)
 	}
 }

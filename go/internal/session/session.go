@@ -33,6 +33,10 @@ type Tool interface {
 	Name() string
 }
 
+// ToolRoundsSafetyCap bounds "unlimited" (max_tool_rounds: 0) tool
+// loops so a model that never converges cannot run forever.
+const ToolRoundsSafetyCap = 200
+
 // Session is a multi-turn AI conversation with tools, a configurable
 // context window and automatic AI-driven compaction. A Session is NOT
 // safe for concurrent use; each worker builds its own.
@@ -145,7 +149,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 	toolRounds := 0
 	maxRounds := s.tuning.MaxToolRounds
 	if maxRounds <= 0 {
-		maxRounds = 24
+		maxRounds = ToolRoundsSafetyCap
 	}
 
 	for {
@@ -409,4 +413,13 @@ func textTokens(s string) int {
 		}
 	}
 	return cjk + other/4 + 8
+}
+
+// EffectiveToolRounds returns the concrete tool-round budget for a
+// tuning block (0/unset = safety cap).
+func EffectiveToolRounds(t config.SessionTuning) int {
+	if t.MaxToolRounds <= 0 {
+		return ToolRoundsSafetyCap
+	}
+	return t.MaxToolRounds
 }
