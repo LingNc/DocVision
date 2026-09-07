@@ -48,7 +48,7 @@ func RunTikZSession(
 	sess := session.NewSession(client, modelCfg, tuning, tikzSystemPrompt, []session.Tool{
 		&CompilePreviewTool{Comp: comp, State: state, EngineIsXe: engineIsXe},
 		&SubmitFigureTool{State: state},
-		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg},
+		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
 		&ViewImageTool{Root: env.ImagesDir},
 	}, log, tid, "tikz")
 

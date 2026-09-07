@@ -70,6 +70,8 @@ type FigureEnv struct {
 	MDContent  string // full markdown of the current document
 	CurrentImg string // image path (as in markdown) being drawn
 	ImagesDir  string // absolute images root for view_image
+	MaxUp      int    // image_context expansion caps (from options.max_window_*)
+	MaxDown    int
 }
 
 // imageProgress is the per-image persisted state (断点续传).
@@ -638,7 +640,7 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 
 	res, err := RunTikZSession(client, modelCfg, tuning, r.comp, img64, contextText,
 		outDir, dstTex, dstPDF, dstPNG,
-		FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir},
+		FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown},
 		r.log, tid)
 	if err != nil {
 		pp.Error = err.Error()
