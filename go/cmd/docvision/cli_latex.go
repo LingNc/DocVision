@@ -187,6 +187,7 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 		addSplitFlags(cmd)
 	}
 	var sources, mds []string
+	var selected []string
 	for _, arg := range args {
 		switch strings.ToLower(filepath.Ext(arg)) {
 		case ".pdf", ".docx":
@@ -226,12 +227,16 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 				return nil, fmt.Errorf("前置步骤 %s 失败: %w", stepName, err)
 			}
 		}
+		// 前置产出的 md（<stem>.md）就是本次 LaTeX 的处理范围。
+		for _, src := range sources {
+			base := filepath.Base(src)
+			selected = append(selected, strings.TrimSuffix(base, filepath.Ext(base))+".md")
+		}
 	}
 
 	// md：output/ 里的直接选用（本就是整理产物）；其他位置的复制进
 	// files/ 后再整理进 output/。不做任何硬拒绝——用户路径里带 output
 	// 之类的名字完全正常。
-	var selected []string
 	for _, md := range mds {
 		abs, err := filepath.Abs(md)
 		if err != nil {
