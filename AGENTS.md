@@ -1,91 +1,26 @@
-# AGENTS.md
+# Agent工作目录
 
-Behavioral guidelines to reduce common LLM coding mistakes and ensure clean coordination.
-Merge with project-specific instructions as needed.
+你是Agent。该文件是一个说明，说明当前文件夹是一个对于Agent的工作区，这里是Agent所管理的范围，对于编辑修改这里的文件和文件夹无需通过任何审核，但是必须遵守以下的规定。
 
-**Tradeoff:** These guidelines bias toward caution, clean context, and deliberate delegation over speed.
-For trivial tasks, use judgment.
+## 该文件夹目的
+方便管理所有的用户无指定目录时，Agent产出和中间的临时文件等，并且整理和分类用户的不同任务在不同的文件夹保证不会混乱。该目录下每个文件夹都是一个项目（也可以包含嵌套项目）内部包含项目自己的说明，无非必要请勿在根目录（当前文件所在目录）下防止无用文件。
 
-## 0. Context Hygiene & Delegation
+## 维护内容
 
-**The main agent coordinates and records; it never directly edits code or performs implementation actions.**
 
-- The main agent must **never** modify code, explore, debug, or implement anything inside the main conversation.
-- Instead, it delegates all work through a three-tier sub-agent hierarchy:
-  - **Opus** – Senior architect. Responsible for high-level design, critical decisions, technology selection, solution design, and final acceptance. Opus defines the “what” and “why”.
-  - **Sonnet** – Mid-level lead. Takes Opus’s direction, refines it into detailed implementation plans, specifies concrete methods, and audits Haiku’s output. When Sonnet encounters issues or ambiguity, it collects the questions and escalates to Opus. Sonnet owns the “how”.
-  - **Haiku** – Fast, low-cost executor. Performs concrete tasks: coding, testing, environment setup, web searches, information gathering, and other scoped work. Haiku’s output must always be audited by Sonnet.
-- **Audit loop:** Haiku develops → Sonnet audits → iterate until Sonnet is satisfied. Only then does the result move forward.
-- Unrelated exploration or independent tasks can run in parallel across multiple Haiku/Sonnet sub-agents.
-- After the audit loop completes and **before** Opus’s final acceptance, the main agent commits the work.
-- Sub-agents work in isolation; only reviewed, final artifacts are presented in the main conversation.
+## 规则
 
-**Git rhythm:** Commit after the Sonnet audit passes and before Opus acceptance. One logical change = one commit with a clear message.
 
----
+## Agent 自举说明
 
-## 1. Think Before Coding
+**本文档作为项目全局状态机与综述，能够防止代码库膨胀后上下文丢失，确保后续 Agent 辅助开发时拥有完整的记忆和设计初衷。**
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+### 维护责任
+- 每次会话开始前，应优先读取 AGENTS.md 了解项目状态。
+- 当用户需要变更该文件夹部分功能时应修改当前文件(ADGENTS.md)加入用户的新规则或者修改现有规定。
+- 保持 AGENTS.md 与其余部分的描述一致性。
+- 有新的项目加入时应及时修改"维护内容"板块，对当前文件夹中的项目分条列项说明大概功能。
+- 当用户有新的规则或者自发的发现需要进行新的规则约束时应及时编辑该文件的"规则板块"。
 
-Before implementing (in a sub-agent or planning the next step):
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
----
-
-## 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
----
-
-## 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
----
-
-## 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
-
-Strong success criteria let sub-agents loop independently. Weak criteria ("make it work") require constant clarification.
-
----
-
-**These guidelines are working if:** the main conversation stays clean, sub-agents produce verified results with minimal back-and-forth, commits are small and logical, and clarifying questions come before implementation rather than after mistakes.
+### 必须做的事
+- 当当前文件被你变更时，必须回复：“根目录AGENTS.md已修改。”。
