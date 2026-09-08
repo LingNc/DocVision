@@ -24,6 +24,7 @@ type tikzState struct {
 	finalCode  string
 	compileErr string   // last error, reported by the runner on give-up
 	merges     []string // image paths absorbed into this figure (cross-page merge)
+	uncertain  bool     // submitted code contains % [?] uncertainty marks
 }
 
 // CompilePreviewTool compiles model-supplied TikZ body code inside a
@@ -150,6 +151,7 @@ func (t *SubmitFigureTool) Execute(argsJSON string) (session.ToolResult, error) 
 	}
 	t.State.submitted = true
 	t.State.finalCode = code
+	t.State.uncertain = strings.Contains(code, "[?]")
 	return session.ToolResult{Text: "SUBMITTED. The figure is accepted. Reply with a one-line confirmation and nothing else."}, nil
 }
 

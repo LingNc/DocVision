@@ -38,6 +38,9 @@ const latexFigurePrompt = `You are an expert LaTeX vector illustrator. You redra
 ## Cross-page continuations
 Document tables/figures split by pagination appear as SEVERAL consecutive image refs. Before drawing, call image_context (no args) to see the previous/next image refs and their text. Signs of a continuation: repeated table header, axis/box cut at the edge, "续表"/"continued" marks, content that only makes sense together. Use view_image to LOOK at the neighbouring image. Adjacency does NOT imply relation: neighbours are only CANDIDATES — always verify with view_image. If they belong together, draw ONE combined figure from all fragments and call submit with "merges": [list of the absorbed image paths exactly as they appear in the markdown]. If the image is obviously complete on its own, or the neighbours are unrelated, just draw THIS image and merge nothing. If THIS image is itself the tail of a figure whose head is an earlier ref, still draw the best possible combined version and merge the earlier ref via "merges" only if that earlier fragment has no finished figure yet.
 
+## Core rule: reproduce WHAT is visible, never WHY/HOW.
+If ambiguous or overly complex, call image_context / view_image (crop + zoom) to resolve; if still unclear, mark the uncertain label or region with % [?] comments in the code and reproduce only what is certain. No guessing.
+
 ## Rules
 - LaTeX only — NEVER Mermaid or other non-LaTeX diagram syntaxes.
 - Reproduce ALL visible text labels exactly (numbers, symbols, Chinese characters). Chinese labels are fine; the wrapper loads ctex when needed.
@@ -119,7 +122,7 @@ Use them when the markdown is ambiguous: order/placement of figures and tables, 
 - Spot-check your conversion against the ORIGINAL document: pick 1-2 representative pages (a heading page, a table or figure page) with doc_search + view_page and compare the real typography with what your .tex produces through the class commands. Confirm you followed the manual (heading hierarchy, captions, table style, environments).
 - If the problem is the cls/manual ITSELF (a needed environment/command is missing, the heading/caption/table style cannot reproduce what the book really does), do NOT hack around it: that is a STYLE ISSUE — report it (see below), work around it minimally for now, and describe exactly what the class should provide.
 
-## Work report (工作汇报, required at submit)
+## Work report (required at submit)
 submit takes a required report object:
 - report.status: "pass" when your conversion used the manual/cls correctly and the style self-check found no problems; "issues" when the cls/manual could not satisfy the book's real formatting.
 - report.issues: concrete cls/manual/format problems (empty for pass).

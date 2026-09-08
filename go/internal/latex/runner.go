@@ -706,6 +706,10 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 		return false
 	}
 	pp.TikzCode = res.Code
+	if res.Uncertain {
+		// 模型标注了不确定内容（% [?] 注释）：记警告便于人工复核。
+		r.log.LogWarning(tid, "[tikz] 图形含不确定标注 [?]（建议人工复核）:", t.imgPath)
+	}
 	pp.FigPDF = "figures/" + filepath.Base(dstPDF)
 	pp.FigPNG = "figures/" + filepath.Base(dstPNG)
 	// Cross-page merge: mark every absorbed continuation image as

@@ -19,6 +19,7 @@ type TikZResult struct {
 	Rounds    int
 	Fallback  bool     // true when the pipeline gave up and keeps the original
 	Merges    []string // image paths absorbed into this figure
+	Uncertain bool     // submitted code contains % [?] uncertainty marks
 	Reason    string   // why it fell back
 }
 
@@ -98,6 +99,7 @@ func RunTikZSession(
 	result.Submitted = true
 	result.Code = state.finalCode
 	result.Merges = state.merges
+	result.Uncertain = state.uncertain
 	result.PDFPath = dstPDF
 	result.PNGPath = dstPNG
 	os.RemoveAll(scratch)
