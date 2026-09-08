@@ -4,6 +4,8 @@
 
 ### Added
 
+- **作图不确定兜底规则**：latex 作图提示词新增 Core rule（不确定时先用 image_context/view_image 裁剪放大核实，仍不确定则以 `% [?]` 注释标记并只画确定内容，禁止臆造）；submit 时程序检测 `[?]` 标记并记警告（建议人工复核）
+- **版本规范化**：版本号进入 1.5.0 开发线（当前 v1.5.0-beta.1），历史 v1.3.0/v1.4.0 重打为 beta 标签以示测试态；后续开发构建自动显示 v1.5.0-beta.1-N-gxxxx
 - **img2text 嵌入按类型细分**：math/formula 用 markdown 数学定界符包裹（单行短式 `$…$`，整块/含环境 `$$…$$`），code 用带语言标注的围栏代码块，table 保持 Markdown/HTML 表格原样，latex（含 TikZ）统一 ```latex 围栏（已围栏的直通、裸 TikZ 补围栏），其余视觉类型照旧 `[Image]( 描述 )`；提示词同步要求带语言标注的代码块
 - **档位1 样式化文本图处理**：classify 新增 `styled`/`style_note` 标记（艺术字/彩色/装饰等纯文本无法表达的视觉样式）；嵌入时打 `<!-- DOCVISION-STYLED-TEXT: … -->` 记号并保留原图链接与提取文本，转换会话拿到 cls 后按手册重排或保留原图，标记注释不得进入 .tex
 - **全书图形风格统一（方案A，转换期二次加工）**：样式手册固定新增 `## Vector figure style` section（调色板 \definecolor、节点/箭头/线宽、caption 约定）；转换提示词允许（并要求编译验证）按手册对内嵌 latex 围栏图代码二次加工，跨章一致性由手册 section + 逐章 checker 保障
