@@ -326,7 +326,7 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 			return
 		}
 		pct := float64(done) * 100.0 / float64(total)
-		fmt.Fprintf(os.Stdout, "\r[classify %d/%d] %.2f%% (失败: %d)          ", done, total, pct, failed)
+		fmt.Fprintf(os.Stdout, "\r[classify %d/%d] %.2f%% (failed: %d)          ", done, total, pct, failed)
 	}
 
 	// 水印图片引用：直接预标记 absorbed（重建时删除引用），
@@ -491,7 +491,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		if ok < 0 {
 			ok = 0
 		}
-		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (成功: %d, 失败: %d, 回退: %d)          ",
+		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d)          ",
 			done, total, pct, ok, failed, warned)
 	}
 
