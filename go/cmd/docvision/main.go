@@ -621,7 +621,7 @@ func newSplitLogCmd() *cobra.Command {
 			return splitlog.Run(cfg, logFile, outputDir)
 		},
 	}
-	cmd.Flags().String("logfile", "", "指定日志文件路径（不指定则取最新的 img2text_*.log）")
+	cmd.Flags().String("logfile", "", "指定日志文件路径（不指定则取最新的 img2text_*.log 或 latex_*.log）")
 	cmd.Flags().String("output-dir", "", "输出目录（默认放在日志文件同目录的 <logstem>/）")
 	return cmd
 }

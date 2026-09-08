@@ -1,4 +1,5 @@
-// Package splitlog splits an img2text_*.log file into per-thread files
+// Package splitlog splits a pipeline log (img2text_*.log or
+// latex_*.log — both use the same logger format) into per-thread files
 // by parsing the leading "[HH:MM:SS][Txx]" prefix on each line. Lines that
 // do not match the prefix are grouped into "T00". Output files are written
 // to a directory named after the input log (without the .log extension).
