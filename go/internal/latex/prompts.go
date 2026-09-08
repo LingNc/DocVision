@@ -60,6 +60,8 @@ You have tools to inspect the source material:
 - view_image: view any image (you may crop a sub-region in percentages and scale it up to inspect details); give the file name as it appears in the markdown.
 - read_md: read the organized Markdown (MinerU's text is high quality; trust it over OCR-by-eye).
 
+Pipeline markers in the Markdown are machine comments, NOT document content — ignore them when inferring style: <!-- DOCVISION-STYLED-TEXT: ... --> (stylised text image; its real text follows between <!-- DOCVISION-STYLED-TEXT-BEGIN --> and <!-- DOCVISION-STYLED-TEXT-END -->) and <!-- DOCVISION-ERROR: ... --> (a conversion that fell back).
+
 ## Your job
 1. Inspect several representative pages/images: chapter title pages, section headings, body text, figures, tables, headers/footers if visible.
 2. Infer: document class behaviour, chapter/section title formats (fonts, sizes, alignment, numbering style, decorations/rules), body layout (line width, paragraph indent, spacing), figure caption style, header/footer style, colour usage, page geometry (A4/B5, margins).
@@ -105,7 +107,7 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 1. Use the class commands from the manual for chapter/section titles and any special environments.
 2. Images come in THREE forms:
    - latex FENCED CODE BLOCKS (three-backtick latex fences): the figure is ALREADY LaTeX. Paste the code inside the class figure environment, stripping the fence lines. You MAY restyle the code to the book's house style (colours, node/arrow/line styles — follow the manual's '## Vector figure style' section) while keeping its structure, geometry and ALL labels; compile to verify. This keeps figure styling uniform across the whole book. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
-   - MARKED styled-text blocks: an HTML comment <!-- DOCVISION-STYLED-TEXT: ... --> followed by the original image link and the extracted text. The image is TEXT WITH STYLING (artistic fonts, colours, ornaments) that plain markdown could not carry. After checking the manual/cls: re-typeset the text with the class constructs that best reproduce its role (stylised heading/label/ornament environment), or includegraphics the original image when the styling is truly un-reproducible. Either way the visible text must survive and the marker comment must NOT reach the .tex.
+   - MARKED styled-text blocks: an HTML comment <!-- DOCVISION-STYLED-TEXT: ... --> followed by the image's OWN text between <!-- DOCVISION-STYLED-TEXT-BEGIN --> and <!-- DOCVISION-STYLED-TEXT-END -->, then the original image link. The text between the BEGIN/END markers IS the document's real text (verbatim from the image), not commentary — never drop it. The image is TEXT WITH STYLING (artistic fonts, colours, ornaments) that plain markdown could not carry. After checking the manual/cls: re-typeset that text with the class constructs that best reproduce its role (stylised heading/label/ornament environment), or includegraphics the original image when the styling is truly un-reproducible. Either way the visible text must survive and ALL marker comments must NOT reach the .tex.
    - plain markdown image links to raster files under images/: includegraphics them (same path) inside the class figure environment (or standard figure+caption if the manual does not define one). NEVER invent new image files.
 
 ## Original PDF access (read-only)

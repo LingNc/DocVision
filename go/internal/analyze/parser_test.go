@@ -124,3 +124,45 @@ func joinLines(lines []string) string {
 	}
 	return out
 }
+
+// TestAnalyzeLog_CountsToolCalls pins the tool-call accounting: both the
+// img2text "[ToolCall] ..." lines and the session engine's
+// "[tool:<name>] ok|error ..." lines count towards the session that is
+// open on that thread.
+func TestAnalyzeLog_CountsToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "latex.log")
+	lines := []string{
+		"[19:29:46][T01] ▶ START 书.md::images/书/a.jpg",
+		"[19:29:51][T01] [tikz] [tool:view_image] ok (145 chars result)",
+		"[19:29:51][T01] [tikz] [tool:image_context] ok (4387 chars result)",
+		"[19:29:51][T01] [tikz] [tool:view_image] error (已返回模型，会话继续): 文件不存在",
+		"[19:30:28][T01] ✓ [22.75s] DONE [IMG_TYPE: vector]",
+		"[19:30:30][T01] ▶ START 书.md::images/书/b.jpg",
+		"[19:30:31][T01]   [ToolCall] AI wants +5up/-0down -> window 10/5>15/5",
+		"[19:30:33][T01] ✓ [2.86s] DONE [IMG_TYPE: text]",
+		"[19:30:40][T01] ▶ START 书.md::images/书/c.jpg",
+		"[19:30:42][T01] ✓ [2.00s] DONE [IMG_TYPE: text]",
+	}
+	if err := os.WriteFile(logPath, []byte(joinLines(lines)), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	sessions, err := AnalyzeLog(logPath)
+	if err != nil {
+		t.Fatalf("AnalyzeLog: %v", err)
+	}
+	got := map[string]int{}
+	for _, s := range sessions {
+		got[s.Key] = s.ToolCalls
+	}
+	want := map[string]int{
+		"书.md::images/书/a.jpg": 3,
+		"书.md::images/书/b.jpg": 1,
+		"书.md::images/书/c.jpg": 0,
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("ToolCalls[%s] = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+}

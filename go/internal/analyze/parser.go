@@ -9,10 +9,11 @@ import (
 
 // startEvent is one ▶ START line.
 type startEvent struct {
-	ts      int64       // seconds since midnight (from HH:MM:SS)
-	key     string      // image key "<md>.md::images/..."
-	matched bool        // already claimed by a close line
-	close   *closeEvent // set when matched
+	ts        int64       // seconds since midnight (from HH:MM:SS)
+	key       string      // image key "<md>.md::images/..."
+	matched   bool        // already claimed by a close line
+	close     *closeEvent // set when matched
+	toolCalls int         // tool calls observed while this session was open
 }
 
 // closeEvent is one ✓ DONE / ✗ FAILED line.
@@ -68,6 +69,9 @@ func AnalyzeLog(logPath string) ([]Session, error) {
 	defer f.Close()
 
 	threads := make(map[string]*threadLog)
+	// lastStart tracks, per thread, the index of the most recent ▶ START
+	// so tool-call lines can be attributed to the session in flight.
+	lastStart := make(map[string]int)
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
 
@@ -87,6 +91,7 @@ func AnalyzeLog(logPath string) ([]Session, error) {
 		if m := PatternStart.FindStringSubmatch(line); m != nil {
 			tl.starts = append(tl.starts, startEvent{ts: tsSec, key: m[1]})
 			tl.order = append(tl.order, "s")
+			lastStart[tid] = len(tl.starts) - 1
 			continue
 		}
 		if m := PatternDone.FindStringSubmatch(line); m != nil {
@@ -104,6 +109,15 @@ func AnalyzeLog(logPath string) ([]Session, error) {
 				ts: tsSec, elapsed: parseFloat(m[1]), failed: true, errMsg: msg,
 			})
 			tl.order = append(tl.order, "c")
+			continue
+		}
+		// Tool-call lines belong to the session currently open on this
+		// thread. Two formats exist: img2text's "[ToolCall] ..." and the
+		// session engine's "[tool:<name>] ok|error ...".
+		if PatternToolCall.MatchString(line) || PatternSessionTool.MatchString(line) {
+			if idx, ok := lastStart[tid]; ok {
+				tl.starts[idx].toolCalls++
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -121,9 +135,10 @@ func AnalyzeLog(logPath string) ([]Session, error) {
 				se := tl.starts[si]
 				si++
 				s := Session{
-					Key:     se.key,
-					TID:     tid,
-					StartTS: fmtSeconds(se.ts),
+					Key:       se.key,
+					TID:       tid,
+					StartTS:   fmtSeconds(se.ts),
+					ToolCalls: se.toolCalls,
 				}
 				if se.matched {
 					ce := *se.close

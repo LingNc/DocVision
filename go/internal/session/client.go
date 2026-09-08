@@ -364,7 +364,9 @@ func shouldFallbackToNonStream(err error) bool {
 	if strings.Contains(s, "unsupported") || strings.Contains(s, "not support") {
 		return true
 	}
-	for _, code := range []string{"http 400", "http 404", "http 405", "http 415", "http 422"} {
+	// Generic HTTP 400 is NOT a streaming hint (a malformed transcript
+	// returns 400 too): only method/media/route errors trigger a fallback.
+	for _, code := range []string{"http 404", "http 405", "http 415", "http 422"} {
 		if strings.Contains(s, code) {
 			return true
 		}

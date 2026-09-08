@@ -136,11 +136,20 @@ func printProgressFooter(inputDir, progressRoot, finallyDir string, logPaths []s
 	totalImages := CountImagesInMDFiles(inputDir)
 	completed, invalid, _ := checkProgressWithPaths(progressRoot)
 	remaining := totalImages - completed - invalid
+	// Progress items can outnumber the current md refs (renamed/deleted
+	// books, older formats): never print a negative "remaining".
+	stale := remaining < 0
+	if stale {
+		remaining = 0
+	}
 
 	sep := strings.Repeat("=", 70)
 	fmt.Printf("\n%s\n", sep)
 	fmt.Printf("【进度摘要】 总计 %d | 已完成 %d | 无效 %d | 剩余 %d\n",
 		totalImages, completed, invalid, remaining)
+	if stale {
+		fmt.Printf("  注: 进度条目多于当前 md 引用（可能含历史/已删除书目或旧格式条目），剩余按 0 计\n")
+	}
 	if totalImages > 0 {
 		fmt.Printf("  完成率: %.2f%%\n", float64(completed)/float64(totalImages)*100)
 	}

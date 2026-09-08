@@ -214,6 +214,14 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			NormalizeToolCallTypes(&choice.Message)
 			s.messages = append(s.messages, choice.Message)
 
+			// Tool-produced images are delivered AFTER every tool message:
+			// the OpenAI schema requires the messages directly following an
+			// assistant tool_calls turn to be the matching tool responses,
+			// so an interleaved user turn makes the next request fail with
+			// "insufficient tool messages following tool_calls message".
+			type visionTurn struct{ mime, b64 string }
+			var vision []visionTurn
+
 			for _, tc := range choice.Message.ToolCalls {
 				if s.logger.DebugEnabled() {
 					s.logger.Debug(s.tid, "[session:"+s.label+"] tool call:", tc.Function.Name, tc.Function.Arguments)
@@ -235,9 +243,49 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 					ToolCallID: tc.ID,
 					Content:    result.Text,
 				})
-				// Vision feedback: deliver tool-produced images as an
-				// attached user turn (tool role content is text-only in
-				// the OpenAI schema).
+				if result.ImageBase64 != "" {
+					mime := result.ImageMIME
+					if mime == "" {
+						mime = "image/png"
+					}
+					vision = append(vision, visionTurn{mime: mime, b64: result.ImageBase64})
+				}
+			}
+			// Vision feedback: tool images ride a user turn (tool role
+			// content is text-only in the OpenAI schema), appended once all
+			// tool responses are in place.
+			for _, v := range vision {
+				s.messages = append(s.messages, ChatMessage{
+					Role: "user",
+					Content: []map[string]interface{}{
+						{"type": "text", "text": "Tool image output (for your visual review):"},
+						{"type": "image_url", "image_url": map[string]string{
+							"url": "data:" + v.mime + ";base64," + v.b64,
+						}},
+					},
+				})
+			}
+			toolRounds++
+			continue
+		}
+
+		// Tool calls with the tool budget exhausted (some models ignore
+		// tool_choice: none): execute them anyway so the transcript stays
+		// valid, then force a text-only answer next round.
+		if len(choice.Message.ToolCalls) > 0 && len(s.tools) > 0 && !opts.ForceNoTools {
+			if s.logger.DebugEnabled() {
+				s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: %d tool call(s) after the tool budget — executing them to keep the transcript valid",
+					s.label, toolRounds+1, len(choice.Message.ToolCalls)))
+			}
+			NormalizeToolCallTypes(&choice.Message)
+			s.messages = append(s.messages, choice.Message)
+			for _, tc := range choice.Message.ToolCalls {
+				result := s.executeTool(tc)
+				s.messages = append(s.messages, ChatMessage{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Content:    result.Text,
+				})
 				if result.ImageBase64 != "" {
 					mime := result.ImageMIME
 					if mime == "" {
@@ -307,7 +355,9 @@ func (s *Session) executeTool(tc ToolCall) ToolResult {
 		}
 		res, err := t.Execute(tc.Function.Arguments)
 		if err != nil {
-			s.logf("[tool:%s] error: %v", tc.Function.Name, err)
+			// A tool error is handed back to the model (which usually
+			// recovers), so it is not a session failure: say so in the log.
+			s.logf("[tool:%s] error (已返回模型，会话继续): %v", tc.Function.Name, err)
 			return ToolResult{Text: "TOOL ERROR: " + err.Error()}
 		}
 		s.logf("[tool:%s] ok (%d chars result)", tc.Function.Name, len(res.Text))

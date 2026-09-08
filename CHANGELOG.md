@@ -15,6 +15,14 @@
 
 ### Fixed
 
+- **多工具调用触发 HTTP 400**：返回图片的工具（view_image/compile_preview 等）此前把"图片 user 轮"插在多个 tool 响应之间，违反 OpenAI 协议（tool_calls 之后必须紧跟对应的 tool 消息），导致会话直接失败（`insufficient tool messages following tool_calls message`）。现在先连续追加全部 tool 响应，图片轮统一放在工具块之后；工具预算耗尽后模型仍返回 tool_calls 时也会执行并补齐响应
+- **流式回退误触发**：HTTP 400 不再视为"不支持流式"（畸形对话同样是 400），只在错误提到 stream/unsupported 或 404/405/415/422 时回退一次非流式，避免把重试预算浪费在同一个坏请求上
+- **档位2 文本图嵌入 AI 描述**：text 类图片此前走 img2text 的通用"描述图片"提示词，会把"该图像是一个标题或图标…"这类描述写进 markdown（即使 `insert_image_description` 关闭）。现在改用专用"只提取可见文本"提示词（公式→LaTeX 数学、表格→Markdown 表格、无文字→`[NO_TEXT]` 并保留原图），描述不再进入正文
+- **样式化文本图缺少内容包裹**：styled 文本图现在把提取出的原文用 `<!-- DOCVISION-STYLED-TEXT-BEGIN --> … <!-- DOCVISION-STYLED-TEXT-END -->` 包裹（原图链接保留在其后），转换会话能明确区分"图片原文"与普通 markdown 文本；转换/样式提示词同步说明这些标记是机器注释、不得进入 .tex
+- **日志分析工具调用数恒为 0**：`Session.ToolCalls` 此前从未赋值；现在解析会话引擎的 `[tool:<name>] ok|error` 与 img2text 的 `[ToolCall]` 两种格式，并按线程归属到对应会话
+- **错误分类 unknown**：新增 `SESSION_*` 归类（`SESSION_API_ERROR`→api_error，其余→session_error）
+- **进度摘要出现负数**：进度条目多于当前 md 引用时（改名/删除的书目、旧格式条目）剩余按 0 计并加注说明
+- **日志措辞易误解**：交互式编译失败记 `[compile:preview] compile error (0.8s) → 已返回 AI 修复`（此前写 FAILED，容易被当成会话失败）；工具调用错误记 `[tool:x] error (已返回模型，会话继续)`
 - **矢量图 SVG 转换必然失败**：dvisvgm 3.6 处理 PDF 需要 Ghostscript < 10.01 或 mutool，而本机 Ghostscript 10.05.1 不受支持（`ERROR: To process PDF files, either Ghostscript < 10.01.0 or mutool is required`），导致所有矢量图降级为 PNG/PDF 链接并记 ERROR；现由 pdftocairo 等后端兜底
 - **`image_locate` 与 `image_context` 功能重叠**：删除 `image_locate`（其行号/前后引用/±行差信息并入 `image_context` 输出），作图会话只保留 `image_context`（文本上下文）与 `view_image`（看像素）两个职责清晰的工具
 

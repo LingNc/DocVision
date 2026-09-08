@@ -32,8 +32,12 @@ var (
 	PatternDone      = regexp.MustCompile(`^\[\d{2}:\d{2}:\d{2}\]\[T\d+\]\s*✓\s*\[(\d+\.?\d*)s\]\s*DONE(?:\s+\[IMG_TYPE:\s*([^\]]+)\])?`)
 	PatternFailed    = regexp.MustCompile(`^\[\d{2}:\d{2}:\d{2}\]\[T\d+\].*?✗\s*\[(\d+\.?\d*)s\]\s*FAILED\s*(.+)$`)
 	PatternToolCall  = regexp.MustCompile(`\[ToolCall\]`)
-	PatternWarning   = regexp.MustCompile(`\[WARNING\]`)
-	PatternError     = regexp.MustCompile(`\[ERROR\]`)
+	// PatternSessionTool matches the session engine's per-tool log lines
+	// ("[tool:view_image] ok (145 chars result)" / "... error: ..."), so
+	// latex logs contribute tool-call counts too.
+	PatternSessionTool = regexp.MustCompile(`\[tool:[A-Za-z0-9_]+\]\s+(?:ok|error)\b`)
+	PatternWarning     = regexp.MustCompile(`\[WARNING\]`)
+	PatternError       = regexp.MustCompile(`\[ERROR\]`)
 )
 
 // ErrorPattern regex constants for error classification.
@@ -43,7 +47,8 @@ var (
 	ErrorRateLimit         = regexp.MustCompile(`(?i)429|rate.*limit`)
 	ErrorImgMissing        = regexp.MustCompile(`(?i)IMG_MISSING`)
 	ErrorImgError          = regexp.MustCompile(`(?i)IMG_ERROR`)
-	ErrorAPIError          = regexp.MustCompile(`(?i)IMG_API_ERROR|IMG_PROCESS_ERROR`)
+	ErrorAPIError          = regexp.MustCompile(`(?i)IMG_API_ERROR|IMG_PROCESS_ERROR|SESSION_API_ERROR`)
+	ErrorSessionError      = regexp.MustCompile(`(?i)SESSION_`)
 	ErrorWorkerFatal       = regexp.MustCompile(`(?i)IMG_WORKER_FATAL`)
 	ErrorEmptyResponse     = regexp.MustCompile(`(?i)IMG_EMPTY_RESPONSE`)
 	ErrorInvalidFormat     = regexp.MustCompile(`(?i)IMG_INVALID_FORMAT`)
@@ -64,6 +69,7 @@ var errorPatternList = []struct {
 	{"empty_response", ErrorEmptyResponse},
 	{"invalid_format", ErrorInvalidFormat},
 	{"mermaid_invalid", ErrorMermaidInvalid},
+	{"session_error", ErrorSessionError},
 }
 
 // ParseLogLine parses one log line and returns timestamp, thread id, content.

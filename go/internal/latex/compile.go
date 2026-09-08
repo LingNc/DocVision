@@ -263,20 +263,25 @@ func (c *Compiler) RasterizeAll(pdfPath, outBase string) ([]string, error) {
 }
 
 // LogCompileResult writes one compact [compile] line to the debug log:
-// OK/FAILED, duration, warning count, the bounded warning list and — on
-// failure — exactly the error text handed to the AI. The full LaTeX log
-// is never dumped (too long to be useful).
+// OK / compile error, duration, warning count, the bounded warning list
+// and — on failure — exactly the error text handed to the AI. The full
+// LaTeX log is never dumped (too long to be useful). Interactive compile
+// failures (figure/chapter iteration) are marked as "returned to the AI
+// for repair" so they are not mistaken for a failed session.
 func LogCompileResult(log *logger.Logger, tid int, tag string, res CompileResult, elapsed time.Duration) {
 	if log == nil || !log.DebugEnabled() {
 		return
 	}
 	status := "OK"
 	if !res.OK {
-		status = "FAILED"
+		status = "compile error"
 	}
 	line := fmt.Sprintf("[compile:%s] %s (%.1fs)", tag, status, elapsed.Seconds())
 	if res.WarningCount > 0 {
 		line += fmt.Sprintf(" warnings=%d", res.WarningCount)
+	}
+	if !res.OK && isInteractiveCompile(tag) {
+		line += " → 已返回 AI 修复"
 	}
 	log.Debug(tid, line)
 	if w := res.WarningSummary(); w != "" {
@@ -285,6 +290,16 @@ func LogCompileResult(log *logger.Logger, tid int, tag string, res CompileResult
 	if !res.OK {
 		log.Debug(tid, "[compile:"+tag+"] error returned to AI:\n"+truncateStr(res.Err, 2000))
 	}
+}
+
+// isInteractiveCompile reports whether a failed compile is just feedback
+// for the model (figure/chapter iteration) rather than a hard failure.
+func isInteractiveCompile(tag string) bool {
+	switch tag {
+	case "preview", "chapter", "convert-check":
+		return true
+	}
+	return false
 }
 
 // ReadImageFile loads a PNG/JPEG file as base64 (no data: prefix).

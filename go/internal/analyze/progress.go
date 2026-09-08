@@ -149,6 +149,10 @@ func PrintProgressReport(inputDir, progressRoot, logsDir, finallyDir string) {
 
 	completed, invalid := CheckProgressItems(progressRoot)
 	remaining := totalImages - completed - invalid
+	if remaining < 0 {
+		remaining = 0
+		fmt.Println("  (注: 进度条目多于当前 md 引用，剩余按 0 计)")
+	}
 	fmt.Println("\n【进度统计】")
 	fmt.Printf("  已完成有效: %d\n", completed)
 	fmt.Printf("  无效条目:   %d\n", invalid)

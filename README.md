@@ -131,6 +131,20 @@ AI 结果带 `[IMG_TYPE: <类型>]` 标签，写入 `finally/` 的 markdown 时�
 
 latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 auto）与 `tools.latex.engine`（默认 xelatex，自动回退 pdflatex/lualatex）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。
 
+### latex 档位2 文本图嵌入
+
+`docvision latex` 的 text 类图片**只提取图片里的可见文本**（专用提示词：公式→LaTeX 数学、表格→Markdown 表格、无文字→保留原图），不会把 AI 的描述性文字写进 markdown：
+
+| 情况 | 嵌入方式 |
+| --- | --- |
+| 普通文本图（classify 未标 styled） | 提取到的文本**直接嵌入正文** |
+| 样式化文本图（styled） | `<!-- DOCVISION-STYLED-TEXT: 样式: … -->` + `<!-- DOCVISION-STYLED-TEXT-BEGIN -->` 原文 `<!-- DOCVISION-STYLED-TEXT-END -->` + 原图链接（转换会话按 BEGIN/END 区分"图片原文"与普通正文；所有标记注释都不得进入 .tex） |
+| 提取不到文本 | 保留原图链接（不丢内容） |
+
+### 日志分析（analyze）
+
+工具调用统计同时解析 img2text 的 `[ToolCall]` 行与 latex 会话的 `[tool:<名称>] ok/error` 行，并按线程归属到对应会话；错误分类识别 `IMG_*` 与 `SESSION_*` 两类哨兵。
+
 ### img2text 测试模式
 
 ```bash

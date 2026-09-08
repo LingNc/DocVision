@@ -566,10 +566,18 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 					mu.Unlock()
 					return
 				}
-				pp.Content = content
-				pp.Status = "done"
-				sessOK, sessType = true, "text"
-				r.log.Log(tid, "[text]", tt.imgPath, "done")
+				if strings.TrimSpace(content) == "" {
+					// 没提取到文本：保留原图（不丢内容），不算失败。
+					pp.Kept = true
+					pp.Status = "done"
+					sessOK, sessType = true, "text-empty-keep"
+					r.log.LogWarning(tid, "[text] 未提取到文本，保留原图:", tt.imgPath)
+				} else {
+					pp.Content = content
+					pp.Status = "done"
+					sessOK, sessType = true, "text"
+					r.log.Log(tid, "[text]", tt.imgPath, "done")
+				}
 
 			case ClassVector:
 				if compErr != nil {
@@ -625,24 +633,39 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	wg.Wait()
 }
 
-// processTextImage runs the existing img2text pipeline and strips the
-// [IMG_TYPE: ...] header so only the pure content is embedded.
+// processTextImage extracts the VISIBLE TEXT of a text-class image (the
+// latex pipeline replaces such images with their text). It never returns
+// an image description — that would leak AI commentary into the
+// markdown. An empty result means "no readable text": the caller keeps
+// the original image.
 func (r *Runner) processTextImage(mf *mdFile, t *task, tid int) (string, error) {
 	mc, _ := r.cfg.ResolveModel("") // top-level ai block (+ options.* defaults)
 	client := img2text.NewAIClient(mc)
+	client.SetLogger(r.log)
 	subject := subjectOf(t.mdName)
+	imgFile, err := resolveImageFile(r.cfg.Paths.ImagesDir, t.imgPath, subject)
+	if err != nil {
+		return "", fmt.Errorf("图片缺失: %w", err)
+	}
+	img64, err := img2text.ImageToBase64(imgFile, 1280)
+	if err != nil {
+		return "", fmt.Errorf("读取图片失败: %w", err)
+	}
+	contextText := strings.Join(img2text.GetContextLines(mf.lines, t.lineIdx,
+		r.cfg.Options.MaxContextLinesUp, r.cfg.Options.MaxContextLinesDown), "\n")
 	textOpts := r.cfg.Options
 	if wb := r.wm.Block(); wb != "" {
 		textOpts.ExtraInstruction = wb
 	}
-	result, status := img2text.ProcessOneImage(
-		client, r.cfg.Paths.ImagesDir, t.imgPath, subject,
-		mf.lines, t.lineIdx, r.log, tid, textOpts,
-	)
+	text, status := img2text.ExtractTextOnly(client, img64, contextText, textOpts, r.log, tid)
 	if status != img2text.StatusOK {
-		return "", fmt.Errorf("img2text 状态 %s: %s", status, truncateStr(result, 200))
+		return "", fmt.Errorf("文本提取状态 %s: %s", status, truncateStr(text, 200))
 	}
-	return stripImgTypeHeader(result), nil
+	text = stripImgTypeHeader(text)
+	if strings.TrimSpace(text) == img2text.NoTextMarker {
+		return "", nil
+	}
+	return text, nil
 }
 
 // stripImgTypeHeader removes the leading [IMG_TYPE: xxx] line.
@@ -845,20 +868,27 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 	switch p.Class {
 	case ClassText:
 		if p.Content == "" {
-			return ""
+			// No readable text extracted (or extraction degraded): keep
+			// the original image instead of dropping content.
+			return r.rasterBlock(p, mdName, outDir)
 		}
 		if p.Styled {
-			// 样式化文本图：纯文本嵌入会丢失视觉样式 —— 打标记并保留
-			// 原图链接，转换会话拿到 cls 后按手册重排或保留原图。
+			// 样式化文本图：提取到的文本用 BEGIN/END 标记包裹，转换会话
+			// 能明确区分"图片里的原文"和普通 markdown 文本；原图链接保留
+			// 以便样式无法复现时 includegraphics。
 			noteText := p.StyleNote
 			if strings.TrimSpace(noteText) == "" {
 				noteText = "样式未提供，见原图"
 			}
-			note := "<!-- DOCVISION-STYLED-TEXT: 样式化文本图，需按全书样式重排；样式: " + mdCommentSafe(noteText) + " -->"
+			var b strings.Builder
+			b.WriteString("<!-- DOCVISION-STYLED-TEXT: 样式化文本图，需按全书样式重排；样式: " + mdCommentSafe(noteText) + " -->\n")
+			b.WriteString("<!-- DOCVISION-STYLED-TEXT-BEGIN -->\n")
+			b.WriteString(p.Content)
+			b.WriteString("\n<!-- DOCVISION-STYLED-TEXT-END -->")
 			if rel, ok := r.copyOriginalImage(p, mdName, outDir); ok {
-				return note + "\n\n![styled-text](" + rel + ")\n\n" + p.Content
+				b.WriteString("\n\n![styled-text](" + rel + ")")
 			}
-			return note + "\n\n" + p.Content
+			return b.String()
 		}
 		return p.Content
 	case ClassVector:
