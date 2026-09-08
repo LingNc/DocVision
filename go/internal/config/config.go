@@ -627,6 +627,9 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 	if entry.MaxTokens == 0 {
 		entry.MaxTokens = fallback.MaxTokens
 	}
+	if entry.Temperature == 0 {
+		entry.Temperature = fallback.Temperature
+	}
 	if entry.APITimeout == 0 {
 		entry.APITimeout = fallback.APITimeout
 	}

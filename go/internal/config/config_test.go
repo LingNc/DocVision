@@ -284,6 +284,7 @@ models:
     base_url: "https://registry.example/v1"
     api_key: "sk-registry"
     model: "glm-5.3-flash"
+    temperature: 0.10
     api_timeout: 500
     rate_limit_retries: 50
   classifier:
@@ -306,6 +307,9 @@ models:
 	}
 	if mc.APITimeout != 500 || mc.RateLimitRetries != 50 {
 		t.Fatalf("request controls must inherit from text: %+v", mc)
+	}
+	if mc.Temperature != 0.10 {
+		t.Fatalf("temperature must inherit from text when left empty: %+v", mc)
 	}
 	// Unnamed requests fall back to text itself.
 	mc2, _ := cfg.ResolveModel("")

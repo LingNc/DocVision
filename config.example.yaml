@@ -137,6 +137,7 @@ models:
     base_url: "https://your-api-proxy.com/v1"
     api_key: "sk-YOUR-API-KEY-HERE"
     model: "Qwen/Qwen3.6-27B"
+    temperature: 0.10
     # API 请求控制（全局默认；各 models 条目可单独覆盖）
     api_timeout: 400            # 非流式：整次请求（连接+读取）总上限（秒）
     api_connect_timeout: 60     # 连接/首字节等待上限（秒）
