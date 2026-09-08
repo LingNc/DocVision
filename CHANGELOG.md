@@ -18,6 +18,8 @@
 - `session.Session.SetMessages`：恢复持久化会话上下文
 
 ### Fixed
+- latex 档位2 重试进度：fallback 重试条目不再被 classify 阶段虚报计数（已带分类结果的直接进 process）；process 阶段开始时先打印 `[process 0/N]` 起始进度行，长会话处理期间进度可见
+- latex 前置 Organize Files 汇总（[4/4]）按选中书目过滤：单书 latex 流程不再罗列全树全部 md 与图片目录
 - processPhase 的 panic 恢复原为普通语句（recover 不生效，会击穿整个进程），改为 defer 内调用
 
 - **档位1 原始文档检索**：转换会话新增只读 `doc_search`（MinerU content_list 加工的块索引，关键词/图片名/页码检索，返回全局页号与 bbox）并可复用 `view_page` 按需渲染原始 PDF 页（与样式阶段共享缓存）；MinerU 产物缺失时自动降级

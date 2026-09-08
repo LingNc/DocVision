@@ -129,7 +129,7 @@ func OrganizeFiles(cfg *config.Config, subjects ...string) error {
 		return err
 	}
 
-	step4Summary(outputDir, tempDir, imagesDir)
+	step4Summary(outputDir, tempDir, imagesDir, subjects)
 	return nil
 }
 
@@ -433,14 +433,28 @@ func step3CollectImages(allDirs []string, outputDir, imagesDir string) error {
 }
 
 // step4Summary prints sizes for the output, temp and images directories.
-func step4Summary(outputDir, tempDir, imagesDir string) {
+// When subjects are named (latex preflow for one book), the listing is
+// scoped to those subjects instead of dumping the whole shared tree.
+func step4Summary(outputDir, tempDir, imagesDir string, subjects []string) {
+	var filter map[string]bool
+	scoped := len(subjects) > 0
+	if scoped {
+		filter = map[string]bool{}
+		for _, sub := range subjects {
+			filter[sub] = true
+		}
+	}
 	fmt.Println("[4/4] 汇总")
 	fmt.Println("=" + strings.Repeat("=", 49))
 	fmt.Println()
 
 	fmt.Printf("  %s/ (合并后):\n", outputDir)
 	for _, md := range listOutputMarkdown(outputDir) {
-		fmt.Printf("    %s  (%.1f KB)\n", filepath.Base(md), float64(fileSize(md))/1024)
+		base := filepath.Base(md)
+		if scoped && !filter[strings.TrimSuffix(base, ".md")] {
+			continue
+		}
+		fmt.Printf("    %s  (%.1f KB)\n", base, float64(fileSize(md))/1024)
 	}
 
 	fmt.Println()
@@ -460,13 +474,20 @@ func step4Summary(outputDir, tempDir, imagesDir string) {
 				if !e.IsDir() {
 					continue
 				}
+				if scoped && !filter[e.Name()] {
+					continue
+				}
 				count, _ := countFiles(filepath.Join(imagesDir, e.Name()))
 				imgTotal += count
 				fmt.Printf("    %s/ (%d 张)\n", e.Name(), count)
 			}
 		}
 	}
-	fmt.Printf("    共 %d 张图片\n", imgTotal)
+	if scoped {
+		fmt.Printf("    共 %d 张图片（仅选中书目）\n", imgTotal)
+	} else {
+		fmt.Printf("    共 %d 张图片\n", imgTotal)
+	}
 	fmt.Println("=" + strings.Repeat("=", 49))
 	fmt.Println("完成!")
 }

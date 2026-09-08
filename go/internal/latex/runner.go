@@ -362,7 +362,17 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	modelCfg := r.models[r.cfg.Latex.ClassifierModel]
 	classifyExtra := r.wm.Block()
 
+	// 只对尚未分类的任务调用分类会话（fallback 重试等已带 Class
+	// 的条目直接进 process，不再重复分类，进度计数也不虚报）。
+	toClassify := make([]*task, 0, len(pending))
 	for _, t := range pending {
+		if _, ok := prog[t.key()]; !ok {
+			toClassify = append(toClassify, t)
+		}
+	}
+	total = len(toClassify)
+
+	for _, t := range toClassify {
 		wg.Add(1)
 		tid := <-tidPool
 		go func(tt *task) {
@@ -374,12 +384,6 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 				mu.Unlock()
 				progress()
 			}()
-			mu.Lock()
-			_, seen := prog[tt.key()]
-			mu.Unlock()
-			if seen {
-				return // already classified
-			}
 			imgFile, err := resolveImageFile(r.cfg.Paths.ImagesDir, tt.imgPath, subjectOf(tt.mdName))
 			if err != nil {
 				r.log.LogWarning(tid, "[classify] 图片缺失:", tt.imgPath)
@@ -497,6 +501,10 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		}
 		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d)          ",
 			done, total, pct, ok, failed, warned)
+	}
+	if total > 0 {
+		// 会话处理耗时长：先打出 0/N 起始行，处理期间进度可见。
+		progress()
 	}
 
 	for _, t := range pending {
