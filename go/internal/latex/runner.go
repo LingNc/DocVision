@@ -370,6 +370,10 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 		}
 	}
 	total = len(toClassify)
+	if total > 0 {
+		// 分类会话也耗时：先打出 0/N 起始行，第一张完成前控制台不空白。
+		progress()
+	}
 
 	for _, t := range toClassify {
 		wg.Add(1)
