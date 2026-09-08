@@ -688,24 +688,70 @@ func resolveSeed(seedStr string) (int64, int64) {
 
 // embedBlockFor converts an AI result (with its [IMG_TYPE:] prefix)
 // into the final markdown embed, chosen by content type:
-//   - non-image content (pure text, LaTeX math, tables, code) embeds
-//     DIRECTLY so downstream AI readers get searchable text;
-//   - mermaid / tikz embed as their code blocks (already validated);
+//   - text / table embed DIRECTLY (searchable text; tables stay
+//     markdown or HTML exactly as produced);
+//   - latex / math / formula keep existing $/$$ or fence wrapping and
+//     otherwise get wrapped: single short line -> $inline$, the rest
+//     -> $$display$$;
+//   - code embeds as a fenced block (with the language the model
+//     annotated; bare fence for legacy results);
+//   - mermaid / tikz embed as their code blocks (already validated;
+//     unfenced tikz bodies get a latex fence);
 //   - remaining visual types keep a readable [Image]( description ).
 func embedBlockFor(result string) string {
 	typ, body := splitImgTypePrefix(result)
 	body = strings.TrimSpace(body)
+	fenced := strings.HasPrefix(body, "```")
 	switch {
-	case typ == "text" || typ == "latex" || typ == "math" || typ == "formula" ||
-		typ == "table" || typ == "code":
+	case typ == "text":
 		return "\n\n" + body + "\n\n"
-	case typ == "mermaid" || typ == "tikz",
+	case typ == "latex" || typ == "math" || typ == "formula":
+		if fenced {
+			return "\n\n" + body + "\n\n"
+		}
+		return "\n\n" + wrapMathDelimiters(body) + "\n\n"
+	case typ == "table":
+		// Markdown or HTML table, embedded exactly as produced.
+		return "\n\n" + body + "\n\n"
+	case typ == "code":
+		if fenced {
+			return "\n\n" + body + "\n\n"
+		}
+		// Legacy result without a fence; language unknown.
+		return "\n\n```\n" + body + "\n```\n\n"
+	case typ == "mermaid",
 		strings.Contains(body, "```mermaid"), strings.Contains(body, "```latex"), strings.Contains(body, "```tikz"):
-		// Diagram types whose body IS an already-validated code block.
-		return "\n\n" + body + "\n\n"
+		// Bodies that ARE an already-validated code block embed verbatim.
+		if fenced || strings.HasPrefix(body, "```") {
+			return "\n\n" + body + "\n\n"
+		}
+		return "\n\n```mermaid\n" + body + "\n```\n\n"
+	case typ == "tikz":
+		if fenced {
+			return "\n\n" + body + "\n\n"
+		}
+		return "\n\n```latex\n" + body + "\n```\n\n"
 	default:
 		return "\n\n[Image]( " + body + " )\n\n"
 	}
+}
+
+// wrapMathDelimiters ensures a bare LaTeX formula body carries math
+// delimiters: already-wrapped bodies pass through; single short lines
+// become $inline$ math, everything else $$display$$ blocks.
+func wrapMathDelimiters(body string) string {
+	if strings.HasPrefix(body, "$$") && strings.HasSuffix(body, "$$") {
+		return body
+	}
+	if strings.HasPrefix(body, "$") && strings.HasSuffix(body, "$") && !strings.HasPrefix(body, "$$") {
+		return body
+	}
+	singleShort := !strings.Contains(body, "\n") && len(body) <= 120 &&
+		!strings.Contains(body, "\\begin{")
+	if singleShort {
+		return "$" + body + "$"
+	}
+	return "$$\n" + body + "\n$$"
 }
 
 // Missing or malformed prefixes return ("", whole input) and the

@@ -17,9 +17,10 @@ Judgement order:
 2. Is it a table expressible as a simple Markdown table? -> "table"; if the table has merged/spanning cells or layout too complex for Markdown, -> "vector".
 3. Does it have drawable structure (boxes, arrows, axes, curves, connections)? -> "vector". A mind-map or knowledge structure diagram is ALWAYS "vector", never "text".
 4. Otherwise -> "raster". When torn between vector and raster, prefer "raster" (keeps the original image; safe).
+5. "styled" flag: set "styled": true when the content carries VISUAL STYLING that plain markdown text cannot express (artistic/decorative fonts, colours, borders, ornaments, unusual layout) and that styling matters for faithful reproduction — stylised headings, art-text titles, ornamental labels. Keep "styled": false for plain body text, plain formulas and plain tables. Add "style_note" (one short sentence: fonts, colours, decoration, layout) exactly when "styled" is true.
 
 Respond with ONLY a JSON object, no fences, no prose. Put "kind" LAST so you can judge from your own description first:
-{"confidence":0.0-1.0,"label":"<short name of the content>","reason":"<one short sentence: what it shows and why this kind>","kind":"text|table|vector|raster"}`
+{"confidence":0.0-1.0,"label":"<short name>","reason":"<one short sentence>","styled":false,"style_note":"","kind":"text|table|vector|raster"}`
 
 // latexFigurePrompt drives the figure-drawing session (level 2 vector
 // path). Mermaid is explicitly forbidden: the LaTeX pipeline compiles
@@ -60,7 +61,7 @@ You have tools to inspect the source material:
 2. Infer: document class behaviour, chapter/section title formats (fonts, sizes, alignment, numbering style, decorations/rules), body layout (line width, paragraph indent, spacing), figure caption style, header/footer style, colour usage, page geometry (A4/B5, margins).
 3. Produce, via the submit_style tool:
    a. cls: a COMPLETE, compilable LaTeX class file named after the document (\ProvidesClass{...}) implementing that style. It must load all packages it needs and define sensible defaults.
-   b. manual: a detailed, structured usage manual (Markdown) for the class: every user-facing command/environment it provides, with arguments and one-line examples. Structure it with fixed sections: '## Document class options', '## Commands', '## Environments', '## Examples'. The convert agents will rely on it — be exhaustive and precise; do not reference commands that do not exist in the cls.
+   b. manual: a detailed, structured usage manual (Markdown) for the class: every user-facing command/environment it provides, with arguments and one-line examples. Structure it with fixed sections: '## Document class options', '## Commands', '## Environments', '## Vector figure style', '## Examples'. The '## Vector figure style' section defines the book's figure conventions: colour palette (concrete \definecolor names), node/arrow/line styles, font sizes and caption conventions for TikZ/pgfplots figures — every convert agent restyles figure code to THIS section so figure styling stays uniform across the whole book. The convert agents will rely on the manual — be exhaustive and precise; do not reference commands that do not exist in the cls.
    c. example: a complete compilable .tex example using the class that reproduces ONE representative page (a chapter title, a section heading, a figure with caption, body text) as closely as possible to the original.
 
 The example MUST compile with the cls you submit. Prefer plain LaTeX primitives over exotic packages. Keep everything deterministic (no random colours, no external assets).`
@@ -75,7 +76,7 @@ Available tools:
 
 ## Requirements for submit_split
 - chapters is an ordered list of {title, start_line, end_line} (1-based, inclusive) covering the ENTIRE file from line 1 to the last line with NO gaps and NO overlaps.
-- One chapter = one top-level chapter of the book (match '# ' / '## ' chapter-level headings or the book's logical structure). Never split a chapter into pieces; if a chapter is huge, it stays one file (the converter handles it).
+- One chapter follows the granularity given in the task message (SMALL = section-level files, LARGE = whole top-level chapters). Never split BELOW the requested level; if a unit is huge, it stays one file (the converter handles it).
 - Every file must contain at least one chapter — no tiny fragments.
 - title is the chapter title text without the leading # marks.
 
@@ -98,20 +99,21 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 
 ## Conversion rules
 1. Use the class commands from the manual for chapter/section titles and any special environments.
-2. Images come in TWO forms:
-   - latex FENCED CODE BLOCKS (three-backtick latex fences): the figure is ALREADY LaTeX. Paste the code verbatim inside the class figure environment, stripping the fence lines. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
-   - markdown image links to raster files under images/: includegraphics them (same path) inside the class figure environment (or standard figure+caption if the manual does not define one). NEVER invent new image files.
+2. Images come in THREE forms:
+   - latex FENCED CODE BLOCKS (three-backtick latex fences): the figure is ALREADY LaTeX. Paste the code inside the class figure environment, stripping the fence lines. You MAY restyle the code to the book's house style (colours, node/arrow/line styles — follow the manual's '## Vector figure style' section) while keeping its structure, geometry and ALL labels; compile to verify. This keeps figure styling uniform across the whole book. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
+   - MARKED styled-text blocks: an HTML comment <!-- DOCVISION-STYLED-TEXT: ... --> followed by the original image link and the extracted text. The image is TEXT WITH STYLING (artistic fonts, colours, ornaments) that plain markdown could not carry. After checking the manual/cls: re-typeset the text with the class constructs that best reproduce its role (stylised heading/label/ornament environment), or includegraphics the original image when the styling is truly un-reproducible. Either way the visible text must survive and the marker comment must NOT reach the .tex.
+   - plain markdown image links to raster files under images/: includegraphics them (same path) inside the class figure environment (or standard figure+caption if the manual does not define one). NEVER invent new image files.
 
 ## Original PDF access (read-only)
 The original document (from which the markdown was parsed) is available read-only:
 - doc_search {query}: search the block index (text snippets, figure/table captions, equation LaTeX, image filenames). Returns the GLOBAL page number (pN) plus the block bbox. Also try image filenames like images/xxx.jpg and bare page numbers.
 - view_page {page: pN, left/top/right/bottom (percent), zoom_width}: render that original PDF page (or a crop) to see the REAL document layout and typography.
 Use them when the markdown is ambiguous: order/placement of figures and tables, lost captions, garbled fragments, or layout you cannot reconstruct. Convert doc_search bbox (PDF points, top-left origin) to percents with the page size if you need a precise crop. Table caveat: MinerU parses tables to HTML (preserved in the markdown), and the HTML can drift from the real table (merged cells, nested headers, column spans). Since the class (cls) defines the house table style, reproduce tables with the manual/cls constructs - if a table looks odd (ragged rows, suspicious cells, wrong spans), doc_search its caption or a cell text and view_page the page (crop around the bbox) to check the ORIGINAL before rebuilding it. Do not overuse: only when plain reading of the markdown is not enough.
-3. Markdown tables -> LaTeX tables (booktabs if available per manual).
-4. Inline markdown (bold/italic/code/links) -> the LaTeX equivalent. Math is already LaTeX in the markdown — keep it verbatim inside math environments.
-5. Escape %, &, #, _ in plain text. Do NOT escape inside math/code.
-6. Your .tex file must NOT contain \documentclass or preamble — it is an \input fragment containing only what goes INSIDE \begin{document}.
-7. Preserve ALL content: no summarising, no dropping paragraphs, exercises, examples or footnotes.
+4. Markdown tables -> LaTeX tables (booktabs if available per manual).
+5. Inline markdown (bold/italic/code/links) -> the LaTeX equivalent. Math is already LaTeX in the markdown — keep it verbatim inside math environments.
+6. Escape %, &, #, _ in plain text. Do NOT escape inside math/code.
+7. Your .tex file must NOT contain \documentclass or preamble — it is an \input fragment containing only what goes INSIDE \begin{document}.
+8. Preserve ALL content: no summarising, no dropping paragraphs, exercises, examples or footnotes.
 
 ## Style self-check (before submit)
 - Spot-check your conversion against the ORIGINAL document: pick 1-2 representative pages (a heading page, a table or figure page) with doc_search + view_page and compare the real typography with what your .tex produces through the class commands. Confirm you followed the manual (heading hierarchy, captions, table style, environments).

@@ -91,6 +91,8 @@ type imageProgress struct {
 	FigSVG     string   `json:"figure_svg,omitempty"`
 	Kept       bool     `json:"original_kept,omitempty"`
 	SVGFail    bool     `json:"svg_failed,omitempty"`  // vector ok but dvisvgm failed (degraded to PNG/PDF link)
+	Styled     bool     `json:"styled,omitempty"`      // styled-text image (needs book-level restyle)
+	StyleNote  string   `json:"style_note,omitempty"`  // what the styling looks like
 	Absorbed   bool     `json:"absorbed,omitempty"`    // cross-page continuation merged into an earlier figure
 	MergedRefs []string `json:"merged_refs,omitempty"` // refs absorbed by THIS combined figure
 	Error      string   `json:"error,omitempty"`
@@ -240,6 +242,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	progDir := filepath.Join(outDir, "progress_items")
 	prog := map[string]*imageProgress{}
 	loadProgress(progDir, prog)
+	r.migrateProgress(prog, progDir, outDir)
 
 	pending := make([]*task, 0, len(all))
 	for _, t := range all {
@@ -410,6 +413,7 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 			p := &imageProgress{
 				Key: tt.key(), MDName: tt.mdName, ImgPath: tt.imgPath,
 				Class: class.Kind, Label: class.Label, Reason: class.Reason,
+				Styled: class.Styled, StyleNote: class.StyleNote,
 				Status: "classified",
 			}
 			mu.Lock()
@@ -828,6 +832,19 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 		if p.Content == "" {
 			return ""
 		}
+		if p.Styled {
+			// 样式化文本图：纯文本嵌入会丢失视觉样式 —— 打标记并保留
+			// 原图链接，转换会话拿到 cls 后按手册重排或保留原图。
+			noteText := p.StyleNote
+			if strings.TrimSpace(noteText) == "" {
+				noteText = "样式未提供，见原图"
+			}
+			note := "<!-- DOCVISION-STYLED-TEXT: 样式化文本图，需按全书样式重排；样式: " + mdCommentSafe(noteText) + " -->"
+			if rel, ok := r.copyOriginalImage(p, mdName, outDir); ok {
+				return note + "\n\n![styled-text](" + rel + ")\n\n" + p.Content
+			}
+			return note + "\n\n" + p.Content
+		}
 		return p.Content
 	case ClassVector:
 		if r.inline {
@@ -871,27 +888,36 @@ func (r *Runner) rasterBlock(p *imageProgress, mdName, outDir string) string {
 	if r.cfg.Latex.InsertImageDescription && p.Content != "" {
 		return "[Image]( " + p.Content + " )"
 	}
-	// Copy the original image and keep the link.
+	rel, ok := r.copyOriginalImage(p, mdName, outDir)
+	if !ok {
+		return ""
+	}
+	return "![image](" + rel + ")"
+}
+
+// copyOriginalImage copies the source image into outDir/images and
+// returns the markdown-relative link path ("" on failure).
+func (r *Runner) copyOriginalImage(p *imageProgress, mdName, outDir string) (string, bool) {
+	src, err := resolveImageFile(r.cfg.Paths.ImagesDir, p.ImgPath, subjectOf(mdName))
+	if err != nil {
+		r.log.LogWarning(0, "保留原图失败（文件缺失）:", p.ImgPath)
+		return "", false
+	}
 	rel := p.ImgPath
 	if i := strings.Index(rel, "/"); i >= 0 {
 		rel = rel[i+1:]
 	}
-	src, err := resolveImageFile(r.cfg.Paths.ImagesDir, p.ImgPath, subjectOf(mdName))
-	if err != nil {
-		r.log.LogWarning(0, "保留原图失败（文件缺失）:", p.ImgPath)
-		return ""
-	}
 	dst := filepath.Join(outDir, "images", rel)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return ""
+		return "", false
 	}
 	if !fileExists(dst) {
 		if err := copyFile(src, dst); err != nil {
 			r.log.LogWarning(0, "复制原图失败:", src, err)
-			return ""
+			return "", false
 		}
 	}
-	return "![image](images/" + rel + ")"
+	return "images/" + rel, true
 }
 
 // validOffsets re-checks that each recorded occurrence still points at
@@ -957,6 +983,46 @@ func mdCommentSafe(s string) string {
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return strings.TrimSpace(s)
+}
+
+// migrateProgress upgrades legacy progress entries written by older
+// versions:
+//   - vector items recorded as done+kept (回退即完成) become "fallback"
+//     so the next run retries the vector conversion;
+//   - items with a failed SVG conversion get a free dvisvgm retry when
+//     the figure PDF still exists (no AI session needed).
+func (r *Runner) migrateProgress(prog map[string]*imageProgress, progDir, outDir string) {
+	for _, p := range prog {
+		if p.Class == ClassVector && p.Status == "done" && p.Kept && !p.Absorbed {
+			p.Status = "fallback"
+			saveProgress(progDir, p)
+			r.log.Log(0, "[migrate] 旧版回退条目改为可重试:", p.ImgPath)
+			continue
+		}
+		if p.SVGFail && p.Status == "done" && p.FigPDF != "" && p.FigSVG == "" {
+			if r.retrySVG(p, outDir) {
+				saveProgress(progDir, p)
+			}
+		}
+	}
+}
+
+// retrySVG re-runs dvisvgm for a previously failed SVG conversion.
+func (r *Runner) retrySVG(p *imageProgress, outDir string) bool {
+	if _, err := exec.LookPath("dvisvgm"); err != nil {
+		return false
+	}
+	svg := strings.TrimSuffix(p.FigPDF, filepath.Ext(p.FigPDF)) + ".svg"
+	cmd := exec.Command("dvisvgm", "--pdf", "--exact", "--output", filepath.Base(svg), filepath.Base(p.FigPDF))
+	cmd.Dir = outDir
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	p.FigSVG = svg
+	p.SVGFail = false
+	p.Error = ""
+	r.log.Log(0, "[migrate] SVG 转换补跑成功:", p.ImgPath)
+	return true
 }
 
 func sampleTasks(pending []*task, n int, seedStr string, log *logger.Logger) []*task {

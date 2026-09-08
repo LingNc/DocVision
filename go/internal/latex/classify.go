@@ -21,6 +21,8 @@ type Classification struct {
 	Confidence float64 `json:"confidence"`
 	Label      string  `json:"label"`
 	Reason     string  `json:"reason"`
+	Styled     bool    `json:"styled"`   // 带视觉样式（艺术字/颜色/装饰），纯文本无法表达
+	StyleNote  string  `json:"style_note"` // 样式描述（字体/颜色/装饰/布局）
 }
 
 // ClassifyImage sends one image to the classifier model and parses the
@@ -80,6 +82,12 @@ func parseClassification(reply string) (Classification, error) {
 	}
 	if v, ok := obj["reason"].(string); ok {
 		c.Reason = strings.TrimSpace(v)
+	}
+	if v, ok := obj["styled"].(bool); ok {
+		c.Styled = v
+	}
+	if v, ok := obj["style_note"].(string); ok {
+		c.StyleNote = strings.TrimSpace(v)
 	}
 	return c, nil
 }

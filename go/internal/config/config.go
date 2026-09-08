@@ -114,6 +114,10 @@ type LatexConfig struct {
 	// flag controls whether confirmed TikZ figures embed the code
 	// block instead of the compiled PDF link. Default false.
 	InsertImageDescription bool `yaml:"insert_image_description"`
+	// ChapterGranularity controls the level-1 chapter split: "small"
+	// (default) splits at section level into coherent self-contained
+	// units; "large" keeps each whole top-level chapter as one file.
+	ChapterGranularity string `yaml:"chapter_granularity"`
 
 	// RemoveWatermark: when true, LaTeX sessions are instructed to detect
 	// and EXCLUDE watermark artifacts (repeated decorative overlay text /
@@ -263,7 +267,7 @@ type PathsConfig struct {
 // zero-valued fields, and returns the resulting Config.
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
-const CurrentConfigVersion = 4
+const CurrentConfigVersion = 5
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -298,6 +302,11 @@ func LoadConfig(path string) (*Config, error) {
 // directory would cause the next SplitAll to re-discover the
 // files it just archived.
 func validatePaths(cfg *Config) error {
+	switch cfg.Latex.ChapterGranularity {
+	case "", "small", "large":
+	default:
+		return fmt.Errorf("latex.chapter_granularity 必须为 small 或 large（当前 %q）", cfg.Latex.ChapterGranularity)
+	}
 	if cfg.Paths.InputDir == "" || cfg.Paths.DoneDir == "" {
 		return nil
 	}
@@ -469,6 +478,9 @@ func setDefaults(cfg *Config) {
 	defaultSessionTuning(&cfg.Latex.Sessions.Style)
 	defaultSessionTuning(&cfg.Latex.Sessions.Chapter)
 	defaultSessionTuning(&cfg.Latex.Sessions.Convert)
+	if cfg.Latex.ChapterGranularity == "" {
+		cfg.Latex.ChapterGranularity = "small"
+	}
 
 	// Verify defaults (feature is OFF unless explicitly enabled).
 	if cfg.Verify.Concurrency == 0 {

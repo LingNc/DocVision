@@ -32,7 +32,7 @@ If ambiguous or overly complex, call get_more_context to resolve; if still uncle
 4. **LaTeX** for formulas: $$...$$ block or $...$ inline.
 4b. **LaTeX vector graphics** for figures that need precise vector rendering and no Mermaid type fits: TikZ, pgfplots (function/coordinate plots), tabular/array, or any LaTeX approach that reproduces the structure faithfully — use a latex code block (three-backtick latex fence) with a standalone-compatible body. Division of labour: Mermaid for the listed diagram types, LaTeX for everything else (geometry, plots, complex tables, mixed structures).
 5. **Structured text** for diagrams not suitable for Mermaid: preserve ALL labels, arrows, relationships shown.
-6. **Code block** for code screenshots.
+6. **Code block** for code screenshots: a fenced code block WITH the language annotation (` + "```python ... ```" + `, ` + "```java ... ```" + ` etc.).
 7. **Graph description**: key data points, max/min, trends for charts.
 8. **Be EXHAUSTIVE**: every visible text, number, label. No summary.
 

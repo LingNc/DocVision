@@ -113,7 +113,13 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// 加工为只读检索索引，转换会话可 doc_search 定位片段对应的原 PDF 页。
 	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
 
-	err = runPhase("convert", func() error { return r.convertPhase(proj, 0) })
+	err = runPhase("convert", func() error {
+		// 前置检查：样式包完整 + 图片全部处理完毕，有问题直接停。
+		if err := r.preflightConvert(proj); err != nil {
+			return err
+		}
+		return r.convertPhase(proj, 0)
+	})
 	if err != nil {
 		return err
 	}
@@ -344,9 +350,17 @@ func (r *Runner) chaptersPhase(proj string) error {
 		submit,
 	}, r.log, 1, "chapters")
 
+	granularity := r.cfg.Latex.ChapterGranularity
+	if granularity == "" {
+		granularity = "small"
+	}
+	gran := "SMALL granularity (default): one chapter = one SECTION. Split at the finest heading level that yields coherent, self-contained units (a top-level chapter containing several sections becomes several files). Never split mid-section."
+	if granularity == "large" {
+		gran = "LARGE granularity: one chapter = one TOP-LEVEL chapter of the book. Never split a top-level chapter into pieces; if a chapter is huge, it stays one file (the converter handles it)."
+	}
 	initial := fmt.Sprintf(
-		"Split the markdown into chapter files.\nThe file has %d lines total. Map the heading structure with grep, verify boundaries, then submit_split.",
-		totalLines)
+		"Split the markdown into chapter files.\nThe file has %d lines total. %s\nMap the heading structure with grep, verify boundaries, then submit_split.",
+		totalLines, gran)
 
 	for attempt := 0; attempt < 3; attempt++ {
 		userText := initial
@@ -798,4 +812,41 @@ func mainSourceMD(sourceDir string) string {
 		}
 	}
 	return mainMD
+}
+
+// preflightConvert gates the concurrent conversion on clean upstream
+// phases: the style package must be complete and every source image
+// must be finished (done or fallback-annotated). Problems STOP the
+// pipeline here — converting on top of unfinished work would bake
+// errors into the whole book.
+func (r *Runner) preflightConvert(proj string) error {
+	if classNameOfFile(filepath.Join(proj, "style")) == "" {
+		return fmt.Errorf("转换前置检查未通过：style 目录缺少可识别的 cls（\\ProvidesClass{...}）")
+	}
+	if _, err := os.Stat(filepath.Join(proj, "style", "manual.md")); err != nil {
+		return fmt.Errorf("转换前置检查未通过：缺少 style/manual.md")
+	}
+	progDir := filepath.Join(proj, "source", "progress_items")
+	matches, _ := filepath.Glob(filepath.Join(progDir, "*", "*.json"))
+	unfinished := 0
+	for _, f := range matches {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var p struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(data, &p) != nil || p.Status == "" {
+			continue
+		}
+		if p.Status != "done" && p.Status != "fallback" {
+			unfinished++
+		}
+	}
+	if unfinished > 0 {
+		return fmt.Errorf("转换前置检查未通过：source 中有 %d 张图片未完成处理（先补齐图片处理再转换，例如 docvision latex --step images）", unfinished)
+	}
+	r.log.Log(0, "[preflight] 转换前置检查通过：样式包完整，图片全部处理完毕")
+	return nil
 }

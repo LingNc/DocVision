@@ -4,6 +4,13 @@
 
 ### Added
 
+- **img2text 嵌入按类型细分**：math/formula 用 markdown 数学定界符包裹（单行短式 `$…$`，整块/含环境 `$$…$$`），code 用带语言标注的围栏代码块，table 保持 Markdown/HTML 表格原样，latex（含 TikZ）统一 ```latex 围栏（已围栏的直通、裸 TikZ 补围栏），其余视觉类型照旧 `[Image]( 描述 )`；提示词同步要求带语言标注的代码块
+- **档位1 样式化文本图处理**：classify 新增 `styled`/`style_note` 标记（艺术字/彩色/装饰等纯文本无法表达的视觉样式）；嵌入时打 `<!-- DOCVISION-STYLED-TEXT: … -->` 记号并保留原图链接与提取文本，转换会话拿到 cls 后按手册重排或保留原图，标记注释不得进入 .tex
+- **全书图形风格统一（方案A，转换期二次加工）**：样式手册固定新增 `## Vector figure style` section（调色板 \definecolor、节点/箭头/线宽、caption 约定）；转换提示词允许（并要求编译验证）按手册对内嵌 latex 围栏图代码二次加工，跨章一致性由手册 section + 逐章 checker 保障
+- **档位1 转换前置检查（preflight）**：进入并发转换前校验 style cls/manual.md 存在、source 图片全部处理完毕（done/fallback），有问题直接停止并提示先补图片处理
+- **latex.chapter_granularity（默认 small）**：档位1 章节拆分粒度可选 small（按小节拆分为自洽单元）/ large（整章单文件）；配置版本 4→5
+- **进度条目自动迁移**：旧版本写成的 `done + original_kept` 回退条目加载时迁移为 `fallback`，下次运行自动重试矢量转换；dvisvgm 失败（svg_failed）且 figure PDF 尚存的条目直接补跑 dvisvgm（无需重跑 AI 会话）
+
 - **latex 会话日志分析**：档位2 图片处理逐图输出 ▶ START / ✓ DONE [IMG_TYPE: …] / ✗ FAILED 标记（与 img2text 同格式），`docvision latex` 结束后的日志分析可正常解析本次会话数与耗时；进度摘要改读 latex 输出目录（档位1: latex_project/source，档位2: latex.output_dir）的 progress_items（总计/已完成/回退/未完成），不再误读 img2text 历史进度
 - **矢量回退可重试 + ERROR 标注**：TikZ/SVG 转换失败按 ERROR 记录，图片保留原图并就地标注 `<!-- DOCVISION-ERROR: … -->`（可搜索定位）；回退条目状态记为 `fallback`，下次运行自动重试（已完成的保持不动）；进度行区分为 成功/失败/回退；dvisvgm 失败降级 PNG/PDF 链接同样 ERROR + 标注
 - **逐章工作汇报**：转换会话 submit 必须携带 `report`（pass/issues + 问题 + 建议），固定格式实时写入 `latex_project/work/reports/<章>.md`；转换提示词要求提交前用 doc_search/view_page 抽查原 PDF 核对 cls/手册符合性
