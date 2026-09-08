@@ -31,7 +31,7 @@ const latexFigurePrompt = `You are an expert LaTeX vector illustrator. You redra
 1. Study the attached image carefully (boxes, arrows, hierarchy, axes, curves, labels, proportions).
 2. Choose the best LaTeX representation: mind-maps/knowledge/flow diagrams -> TikZ nodes+edges; function/coordinate plots -> pgfplots; complex tables -> booktabs/tabular. Plain text tables that Markdown already handles never reach you.
 3. Write the code for a \documentclass[border=6pt]{standalone} document. Your code is the BODY between \begin{document} and \end{document} — the wrapper is added by the tool.
-4. Call the compile_preview tool with your code. You receive the compile log and, on success, a rasterised preview PNG.
+4. Call the compile_preview tool with your code. You receive the compile log and, on success, a rasterised preview PNG. The preview is also addressable as view_image {path:"preview.png"} (newest) or preview-<n>.png (an earlier compile): use its left/top/right/bottom + zoom to inspect small labels, arrows or overlaps that the overview is too small to show.
 5. Compare the preview with the original image. Fix structure, geometry, label positions and proportions; compile again.
 6. When the preview faithfully matches the original, call the submit tool with the final code. Only submit after a successful compile AND a visual check.
 

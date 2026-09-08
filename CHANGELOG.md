@@ -4,6 +4,8 @@
 
 ### Added
 
+- **编译预览可放大细看（复用 view_image）**：`compile_preview` 的每张预览图都留存为会话内的 `preview-<n>.png`（并保存对应 `preview-<n>.pdf`），`view_image {path:"preview.png"}` 取最新、`preview-<n>.png` 取历史版本，配合 `left/top/right/bottom` 百分比裁剪与 `zoom` 目标宽度即可细看小字号标签/箭头/重叠；`zoom` 时**直接从 PDF 以更高分辨率重渲染**（pdftoppm `-scale-to-x`，上限 6000px），而不是把已有像素拉大，因此放大是真清晰。未编译、名称写错、序号越界都会返回明确提示
+- **classify 起始进度行**：`[classify 0/N] 0.00% (failed: 0)` 在进入分类阶段立即打印（此前要等第一张分类完成才出现），与 process 阶段一致
 - **日志等级 info / debug / trace**：`options.log_level` 新增 `trace`，命令新增 `--trace`。debug 只保留每轮请求/响应摘要、提示词、工具调用与**最终接收内容**；流式分片进展行等噪音降到 trace。`options.log_level` 取值错误由 `setup` 校验
 - **PDF→SVG 多后端回退**：`dvisvgm → pdftocairo → mutool → inkscape` 依次尝试，成功后记录所用后端；全部失败时 ERROR 日志列出每个后端的具体原因（不再是裸 exit status）
 - **LaTeX 编译警告反馈**：编译结果新增 `Warnings` / `WarningCount` / `WarningSummary`（Overfull/Underfull box、LaTeX/Package/Class Warning，去重并限长），随 compile_preview / compile / recompile 的工具结果一并返回给 AI；debug 日志新增 `[compile:<preview|chapter|book>] OK|FAILED (耗时) warnings=N` + 警告清单 + 失败时给 AI 的错误原文（完整编译日志仍然不进上下文/日志）
