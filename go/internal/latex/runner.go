@@ -872,24 +872,25 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 			// the original image instead of dropping content.
 			return r.rasterBlock(p, mdName, outDir)
 		}
-		if p.Styled {
-			// 样式化文本图：提取到的文本用 BEGIN/END 标记包裹，转换会话
-			// 能明确区分"图片里的原文"和普通 markdown 文本；原图链接保留
-			// 以便样式无法复现时 includegraphics。
+		if p.Styled && r.inline {
+			// 档位1：样式化文本图用一条 HTML 注释携带"样式 + 原文 + 原图
+			// 链接"，转换会话按手册重排或直接 includegraphics；注释本身
+			// 不进入 .tex。档位2 不做样式保留（见下方直接嵌入）。
 			noteText := p.StyleNote
 			if strings.TrimSpace(noteText) == "" {
 				noteText = "样式未提供，见原图"
 			}
 			var b strings.Builder
-			b.WriteString("<!-- DOCVISION-STYLED-TEXT: 样式化文本图，需按全书样式重排；样式: " + mdCommentSafe(noteText) + " -->\n")
-			b.WriteString("<!-- DOCVISION-STYLED-TEXT-BEGIN -->\n")
-			b.WriteString(p.Content)
-			b.WriteString("\n<!-- DOCVISION-STYLED-TEXT-END -->")
+			b.WriteString("<!-- DOCVISION-STYLED-TEXT: " + mdCommentSafe(noteText) + "\n")
+			b.WriteString("CONTENT: " + mdCommentBody(p.Content) + "\n")
 			if rel, ok := r.copyOriginalImage(p, mdName, outDir); ok {
-				b.WriteString("\n\n![styled-text](" + rel + ")")
+				b.WriteString("LINK: ![styled-text](" + rel + ")\n")
 			}
+			b.WriteString(" -->")
 			return b.String()
 		}
+		// 档位2（以及档位1 的非样式化文本图）：直接把提取到的原文
+		// 嵌入正文，不保留样式、不加任何标记。
 		return p.Content
 	case ClassVector:
 		if r.inline {
@@ -1027,6 +1028,16 @@ func mdCommentSafe(s string) string {
 	s = strings.ReplaceAll(s, "--", "—")
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.TrimSpace(s)
+}
+
+// mdCommentBody keeps the line structure of an HTML-comment payload
+// (CONTENT: may be a multi-line list) but neutralises sequences that
+// would terminate the comment.
+func mdCommentBody(s string) string {
+	s = strings.ReplaceAll(s, "--", "—")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
 	return strings.TrimSpace(s)
 }
 

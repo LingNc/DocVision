@@ -135,10 +135,11 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 
 `docvision latex` 的 text 类图片**只提取图片里的可见文本**（专用提示词：公式→LaTeX 数学、表格→Markdown 表格、无文字→保留原图），不会把 AI 的描述性文字写进 markdown：
 
-| 情况 | 嵌入方式 |
+| 档位 / 情况 | 嵌入方式 |
 | --- | --- |
-| 普通文本图（classify 未标 styled） | 提取到的文本**直接嵌入正文** |
-| 样式化文本图（styled） | `<!-- DOCVISION-STYLED-TEXT: 样式: … -->` + `<!-- DOCVISION-STYLED-TEXT-BEGIN -->` 原文 `<!-- DOCVISION-STYLED-TEXT-END -->` + 原图链接（转换会话按 BEGIN/END 区分"图片原文"与普通正文；所有标记注释都不得进入 .tex） |
+| 档位2（任何文本图，含 styled） | 提取到的文本**直接嵌入正文**，不保留样式、不加标记（档位2 只做"图→文字 / 图→LaTeX"） |
+| 档位1 · 普通文本图 | 提取到的文本直接嵌入正文 |
+| 档位1 · 样式化文本图（styled） | 单条 HTML 注释：`<!-- DOCVISION-STYLED-TEXT: <样式说明>` / `CONTENT: <图片原文>` / `LINK: ![styled-text](images/…)` / ` -->`，转换会话按手册重排 CONTENT 或直接 includegraphics LINK |
 | 提取不到文本 | 保留原图链接（不丢内容） |
 
 ### 日志分析（analyze）
