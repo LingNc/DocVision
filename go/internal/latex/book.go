@@ -30,6 +30,20 @@ type BookOptions struct {
 	Seed     string
 	// Files selects specific markdown files (empty = all).
 	Files []string
+	// Verbose keeps per-phase detail output on the console (session
+	// rounds, tool calls, compile results). Default (false) shows one
+	// compact progress line per phase — like the level-2 process line —
+	// and sends every detail line to the log file only.
+	Verbose bool
+}
+
+// fmtDuration renders a duration compactly for phase progress lines:
+// "42.3s" under a minute, "4m12s" above.
+func fmtDuration(d time.Duration) string {
+	if d < time.Minute {
+		return strconv.FormatFloat(d.Seconds(), 'f', 1, 64) + "s"
+	}
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 // bookProgress is the persisted phase state of a book project.
@@ -73,18 +87,39 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		data, _ := json.MarshalIndent(prog, "", "  ")
 		_ = os.WriteFile(progPath, data, 0o644)
 	}
+	// Default console behaviour mirrors the level-2 image pass: one
+	// compact progress line per phase; every detail line (session
+	// rounds, tool calls, compile results) goes to the log file only.
+	verbose := opts.Verbose
+	r.consoleVerbose = verbose
+	if !verbose {
+		r.log.SetQuiet(true)
+		defer func() { r.log.SetQuiet(false) }()
+	}
+	// note prints a user-facing phase line directly to the console —
+	// used only in compact mode (in verbose mode the logger already
+	// shows everything).
+	note := func(format string, a ...any) {
+		if !verbose {
+			fmt.Fprintf(os.Stdout, format+"\n", a...)
+		}
+	}
+
 	runPhase := func(name string, fn func() error) error {
 		if prog2Field(prog, name) == "done" && !opts.Restart && opts.Step == "" {
-			r.log.Log(0, "[book] phase", name, "already done, skipping")
+			note("[book] phase %s already done, skipping", name)
 			return nil
 		}
 		if opts.Step != "" && opts.Step != name {
 			return nil
 		}
-		r.log.Log(0, "[book] === phase:", name, "===")
+		note("[book] === phase: %s ===", name)
+		phaseStart := time.Now()
 		if err := fn(); err != nil {
+			note("[book] === phase: %s FAILED (%s) ===", name, fmtDuration(time.Since(phaseStart)))
 			return fmt.Errorf("phase %s: %w", name, err)
 		}
+		note("[book] === phase: %s done (%s) ===", name, fmtDuration(time.Since(phaseStart)))
 		setProgField(&prog, name, "done")
 		saveProg()
 		return nil
@@ -95,8 +130,9 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		return r.RunImages(ImagesOptions{
 			TestMode: opts.TestMode, Number: opts.Number, Seed: opts.Seed,
 			SourceDir: opts.SourceDir, Files: opts.Files,
-			OutDir: filepath.Join(proj, "source"),
-			Inline: true, // 档位1：矢量图内嵌 tikz 代码，不产 figures 资源
+			OutDir:  filepath.Join(proj, "source"),
+			Inline:  true, // 档位1：矢量图内嵌 tikz 代码，不产 figures 资源
+			Verbose: verbose,
 		})
 	})
 	if err != nil {
@@ -163,6 +199,9 @@ func setProgField(p *bookProgress, name, v string) {
 // ------------------------------------------------------------------
 
 func (r *Runner) stylePhase(proj string) error {
+	start := time.Now()
+	notef := r.phaseNote()
+	defer func() { notef("[style] 耗时 %s", fmtDuration(time.Since(start))) }()
 	sourceDir := filepath.Join(proj, "source")
 	mds, _ := filepath.Glob(filepath.Join(sourceDir, "*.md"))
 	if len(mds) == 0 {
@@ -320,6 +359,9 @@ func classNameOf(cls string) string {
 // ------------------------------------------------------------------
 
 func (r *Runner) chaptersPhase(proj string) error {
+	start := time.Now()
+	notef := r.phaseNote()
+	defer func() { notef("[chapters] 耗时 %s", fmtDuration(time.Since(start))) }()
 	sourceDir := filepath.Join(proj, "source")
 	mds, _ := filepath.Glob(filepath.Join(sourceDir, "*.md"))
 	if len(mds) == 0 {
@@ -394,6 +436,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 			}
 			r.log.Log(1, "[chapters]", name, "= lines", strconv.Itoa(c.StartLine)+"-"+strconv.Itoa(c.EndLine), "|", c.Title)
 		}
+		notef("[chapters] 划分完成: %d 章 (granularity=%s)", len(submit.Chapters), granularity)
 		return nil
 	}
 	return fmt.Errorf("章节划分在 3 次尝试内未通过校验: %s", r.lastSplitError)
@@ -474,14 +517,46 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 	var failsMu sync.Mutex
 	var failures []string
 
+	// Compact console progress, mirroring the level-2 [process k/N] line.
+	// Details stay in the log file; the console only shows the counter.
+	verbose := r.consoleVerbose
+	label := "[convert]"
+	if fbRound > 0 {
+		label = fmt.Sprintf("[convert#%d]", fbRound+1)
+	}
+	r.phaseNote()("%s %d 章，并发 %d", label, len(chapters), conc)
+	var done, failed int
+	var progMu sync.Mutex
+	total := len(chapters)
+	progress := func() {
+		if verbose || total == 0 {
+			return
+		}
+		pct := float64(done) * 100.0 / float64(total)
+		fmt.Fprintf(os.Stdout, "\r%s %d/%d] %.2f%% (done: %d, errors: %d)          ",
+			label, done, total, pct, done-failed, failed)
+	}
+
 	for idx, chapPath := range chapters {
 		wg.Add(1)
 		tid := <-tidPool
+		if verbose {
+			r.log.Log(0, label, "start", filepath.Base(chapPath),
+				fmt.Sprintf("(%d/%d)", idx+1, total))
+		}
 		go func(i int, chap string, tid int) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
-			if err := r.convertOneChapter(proj, clsName, manualPath, chap, workDir, i, tid); err != nil {
-				r.log.LogError(tid, "[convert] 章节失败:", filepath.Base(chap), err)
+			err := r.convertOneChapter(proj, clsName, manualPath, chap, workDir, i, tid)
+			progMu.Lock()
+			done++
+			if err != nil {
+				failed++
+			}
+			progMu.Unlock()
+			progress()
+			if err != nil {
+				r.log.LogError(tid, label, "章节失败:", filepath.Base(chap), err)
 				failsMu.Lock()
 				failures = append(failures, filepath.Base(chap)+": "+err.Error())
 				failsMu.Unlock()
@@ -489,10 +564,13 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		}(idx, chapPath, tid)
 	}
 	wg.Wait()
+	if !verbose && total > 0 {
+		fmt.Fprintln(os.Stdout)
+	}
 	if len(failures) > 0 {
 		return fmt.Errorf("%d 个章节转换失败: %s", len(failures), strings.Join(failures, "; "))
 	}
-	r.log.Log(0, "[convert] 全部", strconv.Itoa(len(chapters)), "章转换完成")
+	r.log.Log(0, label, "全部", strconv.Itoa(len(chapters)), "章转换完成")
 	// 样式反馈回路：多数章节汇报 cls/手册问题 → 打回原样式会话修正
 	// 后，用全新上下文重新并发转换。
 	return r.styleFeedbackLoop(proj, fbRound)
@@ -674,16 +752,20 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	}
 	r.log.Log(0, "[style-feedback] 工作汇报:", strconv.Itoa(len(files)), "份，其中",
 		strconv.Itoa(len(issueFiles)), "份报告 cls/手册问题")
+	r.phaseNote()("[style-feedback] 工作汇报 %d 份，其中 %d 份报告 cls/手册问题",
+		len(files), len(issueFiles))
 	if len(issueFiles)*2 <= len(files) {
 		return nil // 少数派：不算样式包问题，留给 checker/终审处理
 	}
 	if round >= maxStyleFeedbackRounds {
 		r.log.LogWarning(0, "[style-feedback] 已达最大打回轮数(",
 			strconv.Itoa(maxStyleFeedbackRounds), ")，跳过打回")
+		r.phaseNote()("[style-feedback] 已达最大打回轮数(%d)，跳过打回", maxStyleFeedbackRounds)
 		return nil
 	}
 	r.log.LogWarning(0, "[style-feedback] 多数章节报告样式问题 — 打回原样式会话（第",
 		strconv.Itoa(round+1), "轮）")
+	r.phaseNote()("[style-feedback] 多数章节报告样式问题 — 打回原样式会话（第 %d 轮）", round+1)
 
 	ctxPath := filepath.Join(proj, "work", "style_session.json")
 	msgs, err := loadSessionContext(ctxPath)

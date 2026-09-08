@@ -91,7 +91,7 @@ func newLatexCmd() *cobra.Command {
 				if err := runner.RunBook(latex.BookOptions{
 					Step: step, SourceDir: sourceDir, Restart: false,
 					TestMode: testMode, Number: number, Seed: seed,
-					Files: selected,
+					Files: selected, Verbose: verbose,
 				}); err != nil {
 					return err
 				}

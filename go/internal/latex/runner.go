@@ -131,6 +131,25 @@ type Runner struct {
 	// lastSplitError remembers the latest split validation failure so
 	// the chapter session can be re-prompted with a concrete reason.
 	lastSplitError string
+
+	// consoleVerbose mirrors the book-run --verbose flag: when false
+	// (compact mode) the convert phase shows a single [convert k/N]
+	// progress line instead of streaming every session event.
+	consoleVerbose bool
+}
+
+// phaseNote returns a console printer for phase-level progress notes.
+// In compact mode (book run without --verbose) it prints directly to
+// stdout — the logger is quiet then, so this is the only way phase
+// progress stays visible. In verbose mode it is a no-op (the logger
+// already streams everything).
+func (r *Runner) phaseNote() func(format string, a ...any) {
+	if r.consoleVerbose {
+		return func(string, ...any) {}
+	}
+	return func(format string, a ...any) {
+		fmt.Fprintf(os.Stdout, format+"\n", a...)
+	}
 }
 
 // NewRunner builds the shared runner (clients resolved per registry
