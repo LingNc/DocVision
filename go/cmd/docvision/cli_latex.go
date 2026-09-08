@@ -115,7 +115,13 @@ func newLatexCmd() *cobra.Command {
 				analyzeLog = ""
 			}
 			fmt.Println("\n=== 日志分析 ===")
-			return runAnalyzeFromConfig(cmd, cfg, analyzeLog)
+			// 进度摘要指向 latex 输出目录（档位1: <latex_project>/source，
+			// 档位2: latex.output_dir），避免误读 img2text 的历史进度。
+			latexOut := cfg.Paths.LatexOutput
+			if cfg.Latex.Level == 1 {
+				latexOut = filepath.Join(cfg.Paths.LatexProject, "source")
+			}
+			return runAnalyzeFromConfigDir(cmd, cfg, analyzeLog, latexOut)
 		},
 	}
 	cmd.Flags().Int("level", 0, "覆盖配置的档位（1=全书 LaTeX，2=图片矢量化）")

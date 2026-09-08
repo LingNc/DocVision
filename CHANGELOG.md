@@ -4,6 +4,15 @@
 
 ### Added
 
+- **latex 会话日志分析**：档位2 图片处理逐图输出 ▶ START / ✓ DONE [IMG_TYPE: …] / ✗ FAILED 标记（与 img2text 同格式），`docvision latex` 结束后的日志分析可正常解析本次会话数与耗时；进度摘要改读 latex 输出目录（档位1: latex_project/source，档位2: latex.output_dir）的 progress_items（总计/已完成/回退/未完成），不再误读 img2text 历史进度
+- **矢量回退可重试 + ERROR 标注**：TikZ/SVG 转换失败按 ERROR 记录，图片保留原图并就地标注 `<!-- DOCVISION-ERROR: … -->`（可搜索定位）；回退条目状态记为 `fallback`，下次运行自动重试（已完成的保持不动）；进度行区分为 成功/失败/回退；dvisvgm 失败降级 PNG/PDF 链接同样 ERROR + 标注
+- **逐章工作汇报**：转换会话 submit 必须携带 `report`（pass/issues + 问题 + 建议），固定格式实时写入 `latex_project/work/reports/<章>.md`；转换提示词要求提交前用 doc_search/view_page 抽查原 PDF 核对 cls/手册符合性
+- **cls/手册反馈回路**：多数章节汇报样式问题时打回原样式会话修正（样式会话上下文实时持久化到 `latex_project/work/style_session.json`，复用同一上下文不开新会话）；样式包更新并试编译通过后丢弃全部章节 .tex，用全新上下文重新并发转换（最多打回 2 轮）
+- `session.Session.SetMessages`：恢复持久化会话上下文
+
+### Fixed
+- processPhase 的 panic 恢复原为普通语句（recover 不生效，会击穿整个进程），改为 defer 内调用
+
 - **档位1 原始文档检索**：转换会话新增只读 `doc_search`（MinerU content_list 加工的块索引，关键词/图片名/页码检索，返回全局页号与 bbox）并可复用 `view_page` 按需渲染原始 PDF 页（与样式阶段共享缓存）；MinerU 产物缺失时自动降级
 
 - `tools:` 独立配置块（v3）：get_more_context / image_context 的上下文参数与 mermaid/tikz 校验参数从 img2text/options 迁出，全流程共用；新增 `image_locate` 工具（返回前后图片引用的行号与 ±行数差，轻量定位后再按需扩展）

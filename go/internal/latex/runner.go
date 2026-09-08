@@ -90,6 +90,7 @@ type imageProgress struct {
 	FigPNG     string   `json:"figure_png,omitempty"`
 	FigSVG     string   `json:"figure_svg,omitempty"`
 	Kept       bool     `json:"original_kept,omitempty"`
+	SVGFail    bool     `json:"svg_failed,omitempty"`  // vector ok but dvisvgm failed (degraded to PNG/PDF link)
 	Absorbed   bool     `json:"absorbed,omitempty"`    // cross-page continuation merged into an earlier figure
 	MergedRefs []string `json:"merged_refs,omitempty"` // refs absorbed by THIS combined figure
 	Error      string   `json:"error,omitempty"`
@@ -486,7 +487,12 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			return
 		}
 		pct := float64(done) * 100.0 / float64(total)
-		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (失败: %d, 回退: %d)          ", done, total, pct, failed, warned)
+		ok := done - failed - warned
+		if ok < 0 {
+			ok = 0
+		}
+		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (成功: %d, 失败: %d, 回退: %d)          ",
+			done, total, pct, ok, failed, warned)
 	}
 
 	for _, t := range pending {
@@ -507,23 +513,39 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				mu.Unlock()
 				progress()
 			}()
-			if rec := recover(); rec != nil {
-				r.log.LogError(tid, "[process] panic:", rec)
-				mu.Lock()
-				failed++
-				mu.Unlock()
-				return
-			}
 			mf := mdCache[tt.mdName]
 			if pp.Absorbed {
 				// 已被前面的合并图吸收：不再单独处理。
 				return
 			}
+			// 会话标记（▶ START / ✓ DONE / ✗ FAILED）：与 img2text 日志
+			// 同格式，日志分析器因此也能解析 latex 日志（含耗时/类型）。
+			st := time.Now()
+			r.log.Log(tid, "▶ START", tt.key())
+			sessOK, sessType, sessMsg := false, "", ""
+			// recover 必须在 defer 内调用才生效（原实现为普通语句，
+			// panic 会直接击穿整个进程）。
+			defer func() {
+				if rec := recover(); rec != nil {
+					sessMsg = fmt.Sprintf("panic: %v", rec)
+					r.log.LogError(tid, "[process] panic:", rec)
+					mu.Lock()
+					failed++
+					mu.Unlock()
+				}
+				el := strconv.FormatFloat(time.Since(st).Seconds(), 'f', 2, 64)
+				if sessOK {
+					r.log.Log(tid, "✓", "["+el+"s]", "DONE", "[IMG_TYPE: "+sessType+"]")
+				} else {
+					r.log.LogError(tid, "✗", "["+el+"s]", "FAILED", sessMsg)
+				}
+			}()
 			switch pp.Class {
 			case ClassText:
 				content, err := r.processTextImage(mf, tt, tid)
 				if err != nil {
 					r.log.LogError(tid, "[text] 失败:", tt.imgPath, err)
+					sessMsg = err.Error()
 					mu.Lock()
 					failed++
 					mu.Unlock()
@@ -531,26 +553,41 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				}
 				pp.Content = content
 				pp.Status = "done"
+				sessOK, sessType = true, "text"
 				r.log.Log(tid, "[text]", tt.imgPath, "done")
 
 			case ClassVector:
 				if compErr != nil {
-					r.log.LogWarning(tid, "[vector] 工具链不可用，保留原图:", tt.imgPath)
+					r.log.LogWarning(tid, "[vector] 工具链不可用，保留原图（下次运行重试）:", tt.imgPath)
 					pp.Kept = true
-					pp.Status = "done"
+					pp.Status = "fallback"
+					sessType = "vector-fallback"
+					sessMsg = "toolchain unavailable"
 					break
 				}
 				res := r.processVectorImage(mf, tt, pp, outDir, tid, prog, progDir, &mu)
+				if res && pp.SVGFail {
+					// TikZ 成功但 dvisvgm 失败：以 PNG/PDF 链接嵌入，
+					// 已按 ERROR 记录并在 markdown 标注；tikz 产物保留。
+					pp.Status = "done"
+					sessType = "vector-svg-fallback"
+					sessMsg = pp.Error
+					break
+				}
 				if res {
 					pp.Status = "done"
+					sessOK, sessType = true, "vector"
 				} else {
-					// Fallback: keep the original (logged as warning).
-					r.log.LogWarning(tid, "[vector] TikZ 未通过，保留原图（警告：矢量转换失败）:", tt.imgPath, pp.Error)
+					// Fallback: keep the original. Logged as ERROR and
+					// annotated in the markdown; retried next run.
+					r.log.LogError(tid, "[vector] TikZ 未通过，保留原图（下次运行自动重试）:", tt.imgPath, pp.Error)
 					mu.Lock()
 					warned++
 					mu.Unlock()
 					pp.Kept = true
-					pp.Status = "done"
+					pp.Status = "fallback"
+					sessType = "vector-fallback"
+					sessMsg = pp.Error
 				}
 
 			case ClassRaster:
@@ -564,6 +601,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				}
 				pp.Kept = true
 				pp.Status = "done"
+				sessOK, sessType = true, "raster"
 				r.log.Log(tid, "[raster]", tt.imgPath, "kept as original")
 			}
 			saveProgress(progDir, pp)
@@ -691,7 +729,11 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 				filepath.Base(dstSVG), filepath.Base(dstPDF))
 			cmd.Dir = outDir
 			if err := cmd.Run(); err != nil {
-				r.log.LogWarning(tid, "[vector] SVG 转换失败（回退 PDF/PNG 链接）:", err)
+				// 矢量产物已就绪但 SVG 化失败：降级为 PNG/PDF 链接。
+				// 按 ERROR 记录并标记（markdown 重建时就地标注，便于查找）。
+				pp.SVGFail = true
+				pp.Error = "svg 转换失败: " + err.Error()
+				r.log.LogError(tid, "[vector] SVG 转换失败（降级 PNG/PDF 链接，已在 markdown 标注）:", err)
 			} else {
 				pp.FigSVG = "figures/" + name + ".svg"
 			}
@@ -724,7 +766,8 @@ func (r *Runner) rebuildPhase(mdCache map[string]*mdFile, prog map[string]*image
 		var reps []rep
 		for k, p := range prog {
 			parts := strings.SplitN(k, "::", 2)
-			if len(parts) != 2 || parts[0] != name || p.Status != "done" {
+			if len(parts) != 2 || parts[0] != name ||
+				(p.Status != "done" && p.Status != "fallback") {
 				continue
 			}
 			for _, off := range validOffsets(mf.content, p.ImgPath, p.Key) {
@@ -744,9 +787,23 @@ func (r *Runner) rebuildPhase(mdCache map[string]*mdFile, prog map[string]*image
 				nc = nc[:rp.off[0]] + nc[rp.off[1]:]
 				continue
 			}
+			if rp.p.Status == "fallback" {
+				// 矢量转换失败：保留原图引用并就地标注（HTML 注释），
+				// 便于全局搜索定位；下次运行会自动重试该图。
+				note := "<!-- DOCVISION-ERROR: 矢量图转换失败，已保留原图（下次运行自动重试）"
+				if rp.p.Error != "" {
+					note += " | " + mdCommentSafe(rp.p.Error)
+				}
+				note += " -->"
+				nc = nc[:rp.off[0]] + nc[rp.off[0]:rp.off[1]] + " " + note + nc[rp.off[1]:]
+				continue
+			}
 			block := r.embedBlock(rp.p, name, outDir)
 			if block == "" {
 				continue
+			}
+			if rp.p.SVGFail {
+				block += " <!-- DOCVISION-ERROR: SVG 转换失败，已降级为位图/PDF 链接 -->"
 			}
 			// Replacements are applied right-to-left, so earlier
 			// (leftward) offsets are never invalidated.
@@ -891,6 +948,15 @@ func saveProgress(progDir string, p *imageProgress) {
 		return
 	}
 	_ = os.WriteFile(filepath.Join(dir, name), data, 0o644)
+}
+
+// mdCommentSafe strips characters that could break an HTML comment
+// (newlines and the "--" sequence) from error text embedded in markdown.
+func mdCommentSafe(s string) string {
+	s = strings.ReplaceAll(s, "--", "—")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.TrimSpace(s)
 }
 
 func sampleTasks(pending []*task, n int, seedStr string, log *logger.Logger) []*task {

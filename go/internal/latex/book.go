@@ -113,7 +113,7 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// 加工为只读检索索引，转换会话可 doc_search 定位片段对应的原 PDF 页。
 	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
 
-	err = runPhase("convert", func() error { return r.convertPhase(proj) })
+	err = runPhase("convert", func() error { return r.convertPhase(proj, 0) })
 	if err != nil {
 		return err
 	}
@@ -226,6 +226,14 @@ func (r *Runner) stylePhase(proj string) error {
 		prompt += "\n\nIMPORTANT: this document HAS original page renders (list_pages -> p001.png...). They show the TRUE typography and layout — inspect them FIRST (chapter title pages, section headings, body text, headers/footers) before looking at extracted images."
 	}
 	sess := session.NewSession(client, modelCfg, tuning, prompt, tools, r.log, 1, "style")
+	// 会话上下文实时持久化：样式反馈回路直接复用这个上下文打回
+	//（不开新会话，避免丢失信息）。成功/失败路径都会保存最新状态。
+	ctxPath := filepath.Join(proj, "work", "style_session.json")
+	defer func() {
+		if err := saveSessionContext(sess, ctxPath); err != nil {
+			r.log.LogWarning(1, "[style] 会话上下文保存失败:", err)
+		}
+	}()
 
 	initial := strings.Join([]string{
 		"Analyse the style of this book and produce the LaTeX class package.",
@@ -421,7 +429,7 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 // phase: convert (concurrent per-chapter sessions)
 // ------------------------------------------------------------------
 
-func (r *Runner) convertPhase(proj string) error {
+func (r *Runner) convertPhase(proj string, fbRound int) error {
 	clsName := classNameOfFile(filepath.Join(proj, "style"))
 	if clsName == "" {
 		return fmt.Errorf("未找到样式 cls（style 阶段未完成？）")
@@ -467,7 +475,9 @@ func (r *Runner) convertPhase(proj string) error {
 		return fmt.Errorf("%d 个章节转换失败: %s", len(failures), strings.Join(failures, "; "))
 	}
 	r.log.Log(0, "[convert] 全部", strconv.Itoa(len(chapters)), "章转换完成")
-	return nil
+	// 样式反馈回路：多数章节汇报 cls/手册问题 → 打回原样式会话修正
+	// 后，用全新上下文重新并发转换。
+	return r.styleFeedbackLoop(proj, fbRound)
 }
 
 func classNameOfFile(styleDir string) string {
@@ -514,7 +524,10 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	}
 
 	write := &WriteFileTool{Root: workDir, AllowedRel: texRel}
-	submit := &SubmitDoneTool{Label: "chapter " + base}
+	submit := &SubmitDoneTool{
+		Label:      "chapter " + base,
+		ReportPath: filepath.Join(workDir, "reports", base+".md"), // 工作汇报（实时落盘）
+	}
 	tools := []session.Tool{
 		&ReadFileTool{Root: proj},
 		write,
@@ -602,4 +615,187 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		return fmt.Errorf("会话已提交但没有写出 .tex")
 	}
 	return nil
+}
+
+// ------------------------------------------------------------------
+// phase: style feedback loop (cls/手册 打回)
+// ------------------------------------------------------------------
+
+// maxStyleFeedbackRounds caps how many times conversion results can be
+// sent back to the original style session.
+const maxStyleFeedbackRounds = 2
+
+// styleFeedbackLoop aggregates the per-chapter work reports (工作汇报,
+// written in real time at submit). When a MAJORITY reports cls/manual
+// conformance problems, the ORIGINAL style session context (persisted
+// to work/style_session.json at style phase) is restored — no new
+// context, so no information is lost — and asked to fix the style
+// package. Afterwards every converted chapter is discarded and
+// convertPhase re-runs with FRESH sessions (new context by design).
+func (r *Runner) styleFeedbackLoop(proj string, round int) error {
+	reportsDir := filepath.Join(proj, "work", "reports")
+	files, _ := filepath.Glob(filepath.Join(reportsDir, "*.md"))
+	if len(files) == 0 {
+		return nil
+	}
+	var issueFiles []string
+	var b strings.Builder
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), "- 结论: 存在问题") {
+			issueFiles = append(issueFiles, f)
+			b.WriteString("\n--- " + filepath.Base(f) + " ---\n")
+			b.Write(data)
+			b.WriteString("\n")
+		}
+	}
+	r.log.Log(0, "[style-feedback] 工作汇报:", strconv.Itoa(len(files)), "份，其中",
+		strconv.Itoa(len(issueFiles)), "份报告 cls/手册问题")
+	if len(issueFiles)*2 <= len(files) {
+		return nil // 少数派：不算样式包问题，留给 checker/终审处理
+	}
+	if round >= maxStyleFeedbackRounds {
+		r.log.LogWarning(0, "[style-feedback] 已达最大打回轮数(",
+			strconv.Itoa(maxStyleFeedbackRounds), ")，跳过打回")
+		return nil
+	}
+	r.log.LogWarning(0, "[style-feedback] 多数章节报告样式问题 — 打回原样式会话（第",
+		strconv.Itoa(round+1), "轮）")
+
+	ctxPath := filepath.Join(proj, "work", "style_session.json")
+	msgs, err := loadSessionContext(ctxPath)
+	if err != nil {
+		r.log.LogWarning(0, "[style-feedback] 样式会话上下文不可用，跳过打回:", err)
+		return nil
+	}
+	sourceDir := filepath.Join(proj, "source")
+	mainMD := mainSourceMD(sourceDir)
+	styleDir := filepath.Join(proj, "style")
+	workDir := filepath.Join(proj, "work", "style")
+
+	client := r.clientFor(r.cfg.Latex.StyleModel)
+	modelCfg := r.models[r.cfg.Latex.StyleModel]
+	tuning := r.cfg.LatexSession("style")
+	tuning.MaxTokens = 32768
+
+	// 工具集与原样式会话一致（历史消息中引用过这些工具名）。
+	submit := &SubmitStyleTool{Workspace: workDir}
+	tools := []session.Tool{
+		&WriteWorkFileTool{Root: workDir},
+		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
+		&ViewImageTool{Root: sourceDir},
+		&ReadMDTool{Path: mainMD},
+		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
+		&InstallFontTool{FontsDir: r.cfg.Paths.Fonts},
+		submit,
+	}
+	if pageIdx, perr := buildPageIndex(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD))); perr == nil {
+		tools = append(tools,
+			&ListPagesTool{Idx: pageIdx},
+			&ViewPageTool{Idx: pageIdx, PagesDir: filepath.Join(proj, "pages"), Runner: r})
+	}
+
+	// 复用原样式会话：系统提示已在持久化消息里，不开新上下文。
+	sess := session.NewSession(client, modelCfg, tuning, "", tools, r.log, 1, "style-feedback")
+	sess.SetMessages(msgs)
+
+	feedback := "The conversion phase finished: the MAJORITY of chapter conversion agents reported that the class/manual did NOT satisfy the book's real formatting." +
+		" Their work reports follow (固定格式，结论: 存在问题 = issues):" + b.String() +
+		"\n\nRe-inspect the relevant original pages (view_page), fix the cls/manual/example so these problems cannot recur, then submit_style with the corrected package."
+	if _, err := sess.Run(session.RunOptions{UserText: feedback}); err != nil {
+		return fmt.Errorf("样式反馈会话失败: %w", err)
+	}
+	if err := saveSessionContext(sess, ctxPath); err != nil {
+		r.log.LogWarning(1, "[style-feedback] 会话上下文回写失败:", err)
+	}
+	if !submit.Set {
+		return fmt.Errorf("样式反馈会话未提交 submit_style")
+	}
+	clsName := classNameOf(submit.Cls)
+	if clsName == "" {
+		return fmt.Errorf("样式反馈提交的 cls 缺少 \\ProvidesClass{...}")
+	}
+	if err := os.WriteFile(filepath.Join(styleDir, clsName+".cls"), []byte(submit.Cls), 0o644); err != nil {
+		return err
+	}
+	_ = os.WriteFile(filepath.Join(styleDir, "manual.md"), []byte(submit.Manual), 0o644)
+	_ = os.WriteFile(filepath.Join(styleDir, "example.tex"), []byte(submit.Example), 0o644)
+
+	scratch, err := os.MkdirTemp("", "dsv-stylefb-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(scratch)
+	if err := copyFile(filepath.Join(styleDir, clsName+".cls"), filepath.Join(scratch, clsName+".cls")); err != nil {
+		return err
+	}
+	if err := copyFile(filepath.Join(styleDir, "example.tex"), filepath.Join(scratch, "example.tex")); err != nil {
+		return err
+	}
+	if res := r.comp.Compile(scratch, "example.tex"); !res.OK {
+		return fmt.Errorf("样式反馈 example 编译失败: %s", res.Err)
+	}
+	r.log.Log(1, "[style-feedback] 更新后的 example 编译通过:", clsName+".cls")
+
+	// 章节产物全部作废（转换必须用全新上下文，不复用旧会话）。
+	chapWork := filepath.Join(proj, "work", "chapters")
+	if matches, gerr := filepath.Glob(filepath.Join(chapWork, "*")); gerr == nil {
+		for _, m := range matches {
+			_ = os.RemoveAll(m)
+		}
+	}
+	_ = os.RemoveAll(reportsDir)
+	r.log.Log(0, "[style-feedback] 样式包已更新，丢弃全部章节 .tex，使用全新会话重新并发转换")
+	return r.convertPhase(proj, round+1)
+}
+
+// saveSessionContext persists the full conversation of a session.
+func saveSessionContext(sess *session.Session, path string) error {
+	msgs := sess.Messages()
+	if len(msgs) == 0 {
+		return fmt.Errorf("空会话")
+	}
+	data, err := json.Marshal(msgs)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// loadSessionContext restores a persisted conversation.
+func loadSessionContext(path string) ([]session.ChatMessage, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var msgs []session.ChatMessage
+	if err := json.Unmarshal(data, &msgs); err != nil {
+		return nil, err
+	}
+	if len(msgs) == 0 {
+		return nil, fmt.Errorf("空会话上下文")
+	}
+	return msgs, nil
+}
+
+// mainSourceMD picks the largest processed markdown in sourceDir (the
+// book body) — shared by the style and style-feedback sessions.
+func mainSourceMD(sourceDir string) string {
+	mds, _ := filepath.Glob(filepath.Join(sourceDir, "*.md"))
+	if len(mds) == 0 {
+		return ""
+	}
+	sort.Strings(mds)
+	mainMD := mds[0]
+	for _, f := range mds {
+		if fi, err := os.Stat(f); err == nil {
+			if mj, e2 := os.Stat(mainMD); e2 == nil && fi.Size() > mj.Size() {
+				mainMD = f
+			}
+		}
+	}
+	return mainMD
 }

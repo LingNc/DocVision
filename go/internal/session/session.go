@@ -107,6 +107,14 @@ func (s *Session) Messages() []ChatMessage {
 	return out
 }
 
+// SetMessages replaces the conversation history with a previously
+// persisted context (Messages / saveSessionContext). The system prompt
+// is expected to be part of msgs; the tool registry stays as built.
+func (s *Session) SetMessages(msgs []ChatMessage) {
+	s.messages = make([]ChatMessage, len(msgs))
+	copy(s.messages, msgs)
+}
+
 // RunOptions describes one logical user turn.
 type RunOptions struct {
 	// UserText is the user message body.

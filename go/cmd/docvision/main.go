@@ -495,6 +495,12 @@ func newAnalyzeCmd() *cobra.Command {
 }
 
 func runAnalyzeFromConfig(cmd *cobra.Command, cfg *config.Config, forcedLogFile string) error {
+	return runAnalyzeFromConfigDir(cmd, cfg, forcedLogFile, "")
+}
+
+// runAnalyzeFromConfigDir is runAnalyzeFromConfig with an optional latex
+// output directory override for the progress footer (latex pipelines).
+func runAnalyzeFromConfigDir(cmd *cobra.Command, cfg *config.Config, forcedLogFile, latexOutDir string) error {
 	all, _ := cmd.Flags().GetBool("all")
 	logFile, _ := cmd.Flags().GetString("logfile")
 	if forcedLogFile != "" {
@@ -521,6 +527,7 @@ func runAnalyzeFromConfig(cmd *cobra.Command, cfg *config.Config, forcedLogFile 
 		Percentiles:  percentiles,
 		OutputCSV:    outputCSV,
 		ProgressOnly: progressOnly,
+		LatexOutDir:  latexOutDir,
 	}
 	return analyze.Run(cfg, opts)
 }
@@ -560,7 +567,7 @@ func newSplitLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "splitlog",
 		Short: "按线程 ID 分割日志文件",
-		Long:  "默认处理 finally 目录中最新的 img2text_*.log，按线程前缀拆分为多个文件。",
+		Long:  "默认处理 finally/logs 目录中最新的 img2text_*.log 或 latex_*.log（latex 日志同样带 [Txx] 线程标记），按线程前缀拆分为多个文件。",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfigWithFlag(cmd)
 			if err != nil {

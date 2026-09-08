@@ -19,6 +19,9 @@ type RunOptions struct {
 	Percentiles  []int
 	OutputCSV    string
 	ProgressOnly bool
+	// LatexOutDir: when set (latex command), the progress footer
+	// summarises the latex progress_items instead of the img2text ones.
+	LatexOutDir string
 }
 
 // Run is the entry point for log analysis + progress checking.
@@ -76,7 +79,11 @@ func Run(cfg *config.Config, opts RunOptions) error {
 	}
 
 	// Always print a progress summary footer.
-	printProgressFooter(inputDir, progressRoot, finallyDir, logPaths)
+	if opts.LatexOutDir != "" {
+		PrintLatexProgressFooter(opts.LatexOutDir)
+	} else {
+		printProgressFooter(inputDir, progressRoot, finallyDir, logPaths)
+	}
 
 	if opts.OutputCSV != "" {
 		if err := ExportCSV(allSessions, opts.OutputCSV); err != nil {

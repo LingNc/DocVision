@@ -113,6 +113,17 @@ Use them when the markdown is ambiguous: order/placement of figures and tables, 
 6. Your .tex file must NOT contain \documentclass or preamble — it is an \input fragment containing only what goes INSIDE \begin{document}.
 7. Preserve ALL content: no summarising, no dropping paragraphs, exercises, examples or footnotes.
 
+## Style self-check (before submit)
+- Spot-check your conversion against the ORIGINAL document: pick 1-2 representative pages (a heading page, a table or figure page) with doc_search + view_page and compare the real typography with what your .tex produces through the class commands. Confirm you followed the manual (heading hierarchy, captions, table style, environments).
+- If the problem is the cls/manual ITSELF (a needed environment/command is missing, the heading/caption/table style cannot reproduce what the book really does), do NOT hack around it: that is a STYLE ISSUE — report it (see below), work around it minimally for now, and describe exactly what the class should provide.
+
+## Work report (工作汇报, required at submit)
+submit takes a required report object:
+- report.status: "pass" when your conversion used the manual/cls correctly and the style self-check found no problems; "issues" when the cls/manual could not satisfy the book's real formatting.
+- report.issues: concrete cls/manual/format problems (empty for pass).
+- report.suggestions: concrete suggestions for the style package (empty for pass).
+The report is written verbatim to the project reports/ folder; be specific — the style agent reads these to fix the class.
+
 Work iteratively: write_file → compile → fix → submit. Max {MAX_ROUNDS} rounds.`
 
 // fixSystemPrompt drives the final book assembly repair session.
