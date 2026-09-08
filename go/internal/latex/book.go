@@ -189,8 +189,9 @@ func (r *Runner) stylePhase(proj string) error {
 
 	client := r.clientFor(r.cfg.Latex.StyleModel)
 	modelCfg := r.models[r.cfg.Latex.StyleModel]
+	// style 会话的内置 max_tokens 默认即 32768（cls+manual+example 较大），
+	// 用户显式配置 latex.sessions.style.max_tokens 时以配置为准。
 	tuning := r.cfg.LatexSession("style")
-	tuning.MaxTokens = 32768 // cls+manual+example are big
 
 	comp := r.comp
 	if err := comp.Available(); err != nil {
@@ -693,7 +694,6 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	client := r.clientFor(r.cfg.Latex.StyleModel)
 	modelCfg := r.models[r.cfg.Latex.StyleModel]
 	tuning := r.cfg.LatexSession("style")
-	tuning.MaxTokens = 32768
 
 	// 工具集与原样式会话一致（历史消息中引用过这些工具名）。
 	submit := &SubmitStyleTool{Workspace: workDir}

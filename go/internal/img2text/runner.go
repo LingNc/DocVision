@@ -117,6 +117,7 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		mc.RequestBody = cfg.Img2Text.RequestBody
 	}
 	client := NewAIClient(mc)
+	client.SetLogger(logger)
 
 	// Discover markdown files (sorted, like Python's sorted(...)).
 	mdFiles, err := filepath.Glob(filepath.Join(outputDir, "*.md"))

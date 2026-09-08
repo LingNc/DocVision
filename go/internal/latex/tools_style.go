@@ -74,11 +74,11 @@ func (t *ViewImageTool) Name() string { return "view_image" }
 func (t *ViewImageTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "view_image",
-		"description": "View an image (relative to the document assets root). Optionally crop a region by percentages (left/top/right/bottom, 0-100) and scale it up for detail inspection.",
+		"description": "View an image (relative to the document assets root; a leading images/ prefix is optional). Optionally crop a region by percentages (left/top/right/bottom, 0-100) and scale it up for detail inspection.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":   map[string]any{"type": "string", "description": "Image path relative to the assets root."},
+				"path":   map[string]any{"type": "string", "description": "Image path relative to the assets root, e.g. images/subject/foo.jpg or subject/foo.jpg."},
 				"left":   map[string]any{"type": "number", "description": "Crop left in percent (0-100), default 0."},
 				"top":    map[string]any{"type": "number", "description": "Crop top in percent (0-100), default 0."},
 				"right":  map[string]any{"type": "number", "description": "Crop right in percent (0-100), default 100."},
@@ -128,20 +128,56 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 }
 
 func (t *ViewImageTool) resolve(rel string) (string, error) {
-	clean := filepath.Clean(rel)
+	clean := filepath.Clean(strings.TrimSpace(rel))
+	if clean == "" || clean == "." {
+		return "", fmt.Errorf("path 不能为空")
+	}
 	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("只允许相对路径")
+		return "", fmt.Errorf("只允许相对路径: %s", rel)
 	}
-	full := filepath.Join(t.Root, clean)
-	rootAbs, _ := filepath.Abs(t.Root)
-	fullAbs, _ := filepath.Abs(full)
-	if !strings.HasPrefix(fullAbs, rootAbs+string(filepath.Separator)) && fullAbs != rootAbs {
-		return "", fmt.Errorf("路径越界: %s", rel)
+	// Markdown image refs look like "images/<subject>/foo.jpg" while the
+	// tool root is usually the images directory itself (figure sessions)
+	// or the document directory (style analyst). Accept both forms so the
+	// first view_image call does not fail on the prefix.
+	cands := []string{clean}
+	if stripped := stripImagesPrefix(clean); stripped != clean {
+		cands = append(cands, stripped)
 	}
-	if !fileExists(full) {
-		return "", fmt.Errorf("文件不存在: %s", rel)
+	rootAbs, err := filepath.Abs(t.Root)
+	if err != nil {
+		return "", err
 	}
-	return full, nil
+	var escapeErr error
+	for _, cand := range cands {
+		full := filepath.Join(t.Root, cand)
+		fullAbs, err := filepath.Abs(full)
+		if err != nil {
+			return "", err
+		}
+		if !strings.HasPrefix(fullAbs, rootAbs+string(filepath.Separator)) && fullAbs != rootAbs {
+			if escapeErr == nil {
+				escapeErr = fmt.Errorf("路径越界: %s", rel)
+			}
+			continue
+		}
+		if fileExists(full) {
+			return full, nil
+		}
+	}
+	if escapeErr != nil {
+		return "", escapeErr
+	}
+	return "", fmt.Errorf("文件不存在: %s（可省略 images/ 前缀；用 list_images 查看可用路径）", rel)
+}
+
+// stripImagesPrefix removes a leading "images/" (the markdown-relative
+// prefix) so a ref resolves against an images root as well.
+func stripImagesPrefix(p string) string {
+	slashed := filepath.ToSlash(p)
+	if strings.HasPrefix(slashed, "images/") {
+		return strings.TrimPrefix(slashed, "images/")
+	}
+	return p
 }
 
 // ReadMDTool lets the style analyst read the organized Markdown in

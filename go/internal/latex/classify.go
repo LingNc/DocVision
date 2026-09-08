@@ -21,7 +21,7 @@ type Classification struct {
 	Confidence float64 `json:"confidence"`
 	Label      string  `json:"label"`
 	Reason     string  `json:"reason"`
-	Styled     bool    `json:"styled"`   // 带视觉样式（艺术字/颜色/装饰），纯文本无法表达
+	Styled     bool    `json:"styled"`     // 带视觉样式（艺术字/颜色/装饰），纯文本无法表达
 	StyleNote  string  `json:"style_note"` // 样式描述（字体/颜色/装饰/布局）
 }
 

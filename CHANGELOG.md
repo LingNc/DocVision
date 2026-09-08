@@ -4,6 +4,19 @@
 
 ### Added
 
+- **流式接收（默认开启）**：新增 `models.<name>.stream`（不写即 true），AI 请求改用 SSE 流式接收（`internal/chatstream` 统一组装 content/reasoning/tool_calls/usage），长思考/长输出期间持续有进展不再静默；流式模式自动带 `stream_options.include_usage`；厂商不支持流式（HTTP 400/404/405/415/422 或提示 stream 不支持）时自动回退一次非流式请求
+- **流式超时语义**：非流式仍是 `api_connect_timeout + api_timeout`（默认 60+400s）整次请求上限；流式不再设总上限，改用 `models.<name>.api_stream_idle_timeout`（默认取 `api_timeout`）判定"两个数据块之间的最大间隔"，长但不间断的流不会被杀
+- **思考控制配置**：`models.<name>.thinking`（顶层 `{type: enabled|disabled}`，GLM-4.5+/DeepSeek）与 `models.<name>.reasoning_effort`（顶层 max/xhigh/high/medium/low/minimal/none，GLM-5.2+），随 `request_body` 之后合并到请求体顶层，显式配置优先；`setup` 严格校验取值
+- **调试日志增强**：每次请求/响应记录实际生效的模型、stream、max_tokens、temperature、thinking、reasoning_effort、消息数/上下文估算、耗时、finish_reason、输出与思维链字符数、provider token 用量（含 `reasoning_tokens`）；流式期间每 10s 输出进展行；img2text / verify 也支持 `--debug` 与 `options.log_level: debug`（此前只有 latex 命令生效）
+- **`models.<name>.max_tokens` / `temperature` 兜底生效**：会话或单次调用未指定时使用该模型的取值（此前这两个键被继承但无人读取）
+- 会话单次最大输出说明：`latex.sessions.*.max_tokens` 为单次请求 `max_tokens`（不含厂商单独计费的思维链预算），style 会话内置默认 32768（不再由 book.go 硬编码覆盖用户配置）
+
+### Fixed
+
+- `view_image` 首次调用失败：图片引用按 markdown 原文 `images/<主题>/x.jpg` 传入，而工具根目录通常是 images 目录本身，导致"文件不存在"；现在两种形式（带/不带 `images/` 前缀）都能解析，错误信息也提示可省略前缀
+- `latex.sessions.checker` 的调优此前被忽略（`_ = LatexSession("checker")`）：现在真正生效，且未配置字段继承 `convert` 块；checker 请求也不再发送 `max_tokens: 0`
+- 配置版本 5→6（新增 models 层 stream/thinking/reasoning_effort/api_stream_idle_timeout 等键）
+
 - **作图不确定兜底规则**：latex 作图提示词新增 Core rule（不确定时先用 image_context/view_image 裁剪放大核实，仍不确定则以 `% [?]` 注释标记并只画确定内容，禁止臆造）；submit 时程序检测 `[?]` 标记并记警告（建议人工复核）
 - **版本规范化**：版本号进入 1.5.0 开发线（当前 v1.5.0-beta.1），历史 v1.3.0/v1.4.0 重打为 beta 标签以示测试态；后续开发构建自动显示 v1.5.0-beta.1-N-gxxxx
 - **img2text 嵌入按类型细分**：math/formula 用 markdown 数学定界符包裹（单行短式 `$…$`，整块/含环境 `$$…$$`），code 用带语言标注的围栏代码块，table 保持 Markdown/HTML 表格原样，latex（含 TikZ）统一 ```latex 围栏（已围栏的直通、裸 TikZ 补围栏），其余视觉类型照旧 `[Image]( 描述 )`；提示词同步要求带语言标注的代码块

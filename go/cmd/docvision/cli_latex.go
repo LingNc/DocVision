@@ -79,7 +79,7 @@ func newLatexCmd() *cobra.Command {
 			}
 
 			log, logPath, closeLog, err := newLatexLogger(cfg)
-			if debugFlag, _ := cmd.Flags().GetBool("debug"); debugFlag || cfg.Options.LogLevel == "debug" {
+			if debugEnabled(cmd, cfg) {
 				log.SetDebug(true)
 				fmt.Println("调试模式：AI 提示词与工具调用将完整写入日志文件")
 			}
@@ -137,7 +137,7 @@ func newLatexCmd() *cobra.Command {
 
 // newVerifyCmd wires the AI verification pass (default off in config).
 func newVerifyCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "verify",
 		Short: "AI 核对输出内容与原图是否一致（verify.enabled 默认关闭）",
 		Long: `用配置的视觉模型逐项核对每张图片与其嵌入内容（描述/TikZ）是否一致，
@@ -154,6 +154,10 @@ verify.enabled: true 时执行。`,
 				return err
 			}
 			defer closeLog()
+			if debugEnabled(cmd, cfg) {
+				log.SetDebug(true)
+				fmt.Println("调试模式：AI 提示词与工具调用将完整写入日志文件")
+			}
 			if !cfg.Verify.Enabled {
 				fmt.Println("提示: verify.enabled 当前为 false（本命令为显式运行，照常执行）")
 			}
@@ -166,6 +170,8 @@ verify.enabled: true 时执行。`,
 			})
 		},
 	}
+	cmd.Flags().Bool("debug", false, "调试模式：把请求参数/提示词/响应统计完整写入日志文件")
+	return cmd
 }
 
 // newLatexLogger creates the shared latex/verify logger.

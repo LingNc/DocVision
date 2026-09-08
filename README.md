@@ -31,7 +31,7 @@ cp config.example.yaml config.yaml
 编辑 `config.yaml`，填入：
 
 - MinerU API token（从 [mineru.net](https://mineru.net) 获取）
-- AI 模型：统一在 `models:` 注册表配置，其中 `models.text` 为 img2text 等基础流程的默认模型（必填）；每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url/api_key/model/request_body，空字段自动继承默认条目（`config_version: 2`，版本不符会提示更新配置文件）
+- AI 模型：统一在 `models:` 注册表配置，其中 `models.text` 为 img2text 等基础流程的默认模型（必填）；每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url/api_key/model/request_body/stream/thinking/reasoning_effort，空字段自动继承默认条目（`config_version: 6`，版本不符会提示更新配置文件）
 
 ### Go 版本（推荐）
 
@@ -179,8 +179,10 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 
 ### AI 会话基础设施
 
-- **模型注册表** `models:`：每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url / api_key / model / request_body
-- **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到阈值自动 **AI 压缩**会话（保留关键决策/成果，丢弃草稿与工具噪音）
+- **模型注册表** `models:`：每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url / api_key / model / request_body / stream / thinking / reasoning_effort
+- **流式请求（默认开启）**：`models.*.stream: true`（默认）时走 SSE 流式接收，长思考/长输出期间持续有进展，不会长时间静默；厂商不支持流式时自动回退一次非流式请求。流式模式下用 `api_stream_idle_timeout`（默认取 `api_timeout`）判定"卡住"，而不是整次请求超时
+- **思考控制**：`thinking: {type: enabled|disabled}` 与 `reasoning_effort: max|xhigh|high|medium|low|minimal|none` 都是请求体**顶层字段**（不要写进 `request_body.extra_body`），按 `models` 条目配置，空值继承 `models.text`
+- **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到 `compaction_at`（默认 0.85）阈值自动 **AI 压缩**会话（保留关键决策/成果，丢弃草稿与工具噪音）；`sessions.checker` 未设置的字段继承 `sessions.convert`
 - **可分离工具**：会话工具按需注册（编译预览、提交确认、grep、bash 沙箱、受限文件读写等）
 - **断点续传**：档位2逐图进度、档位1逐阶段进度（progress.json）
 
@@ -188,10 +190,12 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 
 ```bash
 docvision latex --debug        # 或配置 options.log_level: "debug"
+docvision img2text --debug     # img2text 同样支持
+docvision verify --debug
 docvision latex --verbose      # 详细控制台输出（默认仅显示进度行）
 ```
 
-开启后，每一轮 AI 调用的**完整系统提示词、用户提示词、工具调用（名称+参数）、工具结果**都会写入 `logs/latex_*.log`（`[DEBUG]` 前缀，控制台输出不受影响）。可在日志里完整回放某个会话的推理与工具使用过程。
+开启后，每一轮 AI 调用的**完整系统提示词、用户提示词、工具调用（名称+参数）、工具结果**都会写入日志（`[DEBUG]` 前缀，控制台输出不受影响），另外每次请求/响应还记录：使用的模型、`stream`/`max_tokens`/`temperature`/`thinking`/`reasoning_effort` 实际取值、消息数与上下文估算、耗时、finish_reason、输出与思维链字符数、provider 返回的 token 用量（含 `reasoning_tokens`）。流式请求还会每 10 秒输出一次进展行（`[stream] ... content=N chars reasoning=M chars`）。可在日志里完整回放某个会话的推理与工具使用过程。
 
 默认控制台输出与 img2text 一致：每个阶段只显示一行实时进度（如 `[classify 12/345] 3.48% (失败: 0)`），逐图明细写入日志文件；`--verbose` 恢复逐图控制台输出。
 
@@ -295,25 +299,31 @@ docvision verify                               # AI 核对报告
 
 MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不影响主流程。
 
-| `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking） | 见示例 |
-| `models.text.api_timeout` | API 请求超时（秒）；所有模型条目可覆盖，留空继承 text | 400 |
-| `models.text.api_connect_timeout` | API 连接超时（秒） | 60 |
+| `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking），原样合并到请求体顶层 | 见示例 |
+| `models.text.stream` | 是否流式接收（SSE）；不写即 true。厂商不支持时自动回退一次非流式 | true |
+| `models.text.api_stream_idle_timeout` | 流式模式下两个数据块之间的最大间隔（秒），超时判定卡住；0 取 `api_timeout` | 0 |
+| `models.text.thinking` | 顶层 `thinking` 对象：`{type: enabled|disabled}`（GLM-4.5+/DeepSeek）。**不要放进 `extra_body`** | 未设置 |
+| `models.text.reasoning_effort` | 顶层 `reasoning_effort`（GLM-5.2+，thinking 开启时生效）：max/xhigh/high/medium/low/minimal/none | 未设置 |
+| `models.text.api_timeout` | **非流式**整次请求（连接+读取）总超时（秒）；流式模式改用 idle 超时；所有模型条目可覆盖，留空继承 text | 400 |
+| `models.text.api_connect_timeout` | 连接/首字节等待超时（秒） | 60 |
 | `models.text.api_max_retries` | 非限流错误重试次数（指数退避 2s/4s/8s…封顶 30s） | 3 |
 | `models.text.rate_limit_retries` | 429 限流重试上限（指数退避封顶 60s；原为 0=无限+代码上限 100，现默认直接取上限值） | 100 |
 | `options.concurrency` | AI 图片转文本并发数 | 10 |
 | `options.format_fix_attempts` | 格式修复重试次数（0 禁用，1 表示重试一次） | 1 |
-| `options.max_tokens` | API 调用最大 token 数 | 65536 |
-| `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body） | - |
-| `models.<name>` | 每个专用 AI 的独立 base_url/api_key/model/request_body，空字段继承 `models.text` | - |
+| `options.max_tokens` | img2text 单次请求最大输出（`max_tokens`） | 65536 |
+| `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body/stream/thinking…） | - |
+| `models.<name>` | 每个专用 AI 的独立配置，空字段继承 `models.text`；`max_tokens`/`temperature` 作为该模型未指定时的兜底 | - |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
-| `latex.sessions.*.max_tool_rounds` | 会话工具轮数上限，0=真正不限制（无安全上限） | 128 |
+| `latex.sessions.*.max_tool_rounds` | 会话工具轮数上限，0=真正不限制（无安全上限）；checker 继承时 0 表示"继承 convert"，-1 才是无限 | 128 |
 | `latex.sessions.*.context_limit` | 会话上下文窗口（tokens），达到阈值自动 AI 压缩 | 131072 |
+| `latex.sessions.*.max_tokens` | 该会话**单次请求最大输出**（不含厂商单独计费的思维链预算）；drawing 默认 16384、style 内置 32768、其余 16384 | 见示例 |
+| `latex.sessions.*.compaction_at` | 触发自动压缩的窗口占用比例（0-1），不写默认 0.85（所有会话一致，不是只继承 drawing） | 0.85 |
 | `verify.enabled` | AI 核对开关（默认关闭） | false |
 | `paths.latex_output` | 档位2 LaTeX 输出目录 | ./finally_latex |
 | `paths.latex_project` | 档位1 全书工作目录 | ./latex_project |
 | `paths.fonts` | AI 字体目录（install_font 可下载字体到此） | ./fonts |
 | `img2text.model` | 基础流程模型（models: 注册表代号，默认 text） | text |
-| `latex.checker_model` | 每章核对模型（独立小模型，不继承 convert） | "checker" |
+| `latex.checker_model` | 每章核对模型（独立小模型；会话调优未配置的字段继承 convert） | "checker" |
 | `latex.remove_watermark` | 水印处理：true 时样式/转换/核对 AI 会检测并排除水印 | false |（开启后流程开始时先做一次水印检测：全览页渲染 + markdown 重复图片统计，结果缓存为 latex_project/watermark_memory.json 并作为工作记忆注入后续所有会话；水印图片引用直接剔除不再处理）
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |

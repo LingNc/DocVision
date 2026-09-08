@@ -178,7 +178,6 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			Messages:    s.messages,
 			MaxTokens:   s.tuning.MaxTokens,
 			Temperature: s.tuning.Temperature,
-			Stream:      false,
 		}
 		useTools := len(s.tools) > 0 && !opts.ForceNoTools && (maxRounds <= 0 || toolRounds < maxRounds)
 		if useTools {
@@ -190,8 +189,8 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		}
 
 		if s.logger.DebugEnabled() {
-			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api request (messages=%d, est_tokens=%d, tools=%v)",
-				s.label, toolRounds+1, len(s.messages), s.EstimatedTokens(), useTools))
+			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api request (%s messages=%d est_tokens=%d tools=%v)",
+				s.label, toolRounds+1, s.client.RequestSummary(req), len(s.messages), s.EstimatedTokens(), useTools))
 		}
 		resp, sentinel, status := s.client.CallWithRetry(req)
 		s.APIRequests++
@@ -202,6 +201,11 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			return "", fmt.Errorf("empty response (no choices)")
 		}
 		choice := resp.Choices[0]
+		if s.logger.DebugEnabled() {
+			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api response (%.1fs, stream=%v finish=%s content=%d chars reasoning=%d chars tools=%d %s)",
+				s.label, toolRounds+1, resp.Elapsed.Seconds(), resp.Streamed, dash(resp.FinishReason),
+				len(ContentString(choice.Message)), resp.ReasoningChars, len(choice.Message.ToolCalls), resp.Usage.String()))
+		}
 
 		if len(choice.Message.ToolCalls) > 0 && useTools {
 			NormalizeToolCallTypes(&choice.Message)
@@ -264,6 +268,10 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			req2.Messages = s.messages
 			req2.ToolChoice = "none"
 			req2.Tools = nil
+			if s.logger.DebugEnabled() {
+				s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: nudge request (empty reply, tools disabled)",
+					s.label, toolRounds+1))
+			}
 			resp2, sentinel, status := s.client.CallWithRetry(&req2)
 			s.APIRequests++
 			if status != "" {
@@ -271,6 +279,11 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			}
 			if len(resp2.Choices) == 0 {
 				return "", fmt.Errorf("empty response after nudge")
+			}
+			if s.logger.DebugEnabled() {
+				s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] nudge response (%.1fs, stream=%v finish=%s content=%d chars %s)",
+					s.label, resp2.Elapsed.Seconds(), resp2.Streamed, dash(resp2.FinishReason),
+					len(ContentString(resp2.Choices[0].Message)), resp2.Usage.String()))
 			}
 			s.messages = append(s.messages, resp2.Choices[0].Message)
 			content = ContentString(resp2.Choices[0].Message)
@@ -386,7 +399,10 @@ func (s *Session) compact() error {
 		},
 		MaxTokens:   8192,
 		Temperature: 0.1,
-		Stream:      false,
+	}
+	if s.logger.DebugEnabled() {
+		s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] [compact] summary request (%s transcript=%d chars)",
+			s.label, s.client.RequestSummary(req), sb.Len()))
 	}
 	resp, sentinel, status := s.client.CallWithRetry(req)
 	if status != "" {
@@ -398,6 +414,10 @@ func (s *Session) compact() error {
 	summary := ContentString(resp.Choices[0].Message)
 	if strings.TrimSpace(summary) == "" {
 		return fmt.Errorf("empty summary content")
+	}
+	if s.logger.DebugEnabled() {
+		s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] [compact] summary response (%.1fs, %d chars %s)",
+			s.label, resp.Elapsed.Seconds(), len(summary), resp.Usage.String()))
 	}
 
 	note := "=== COMPRESSED SESSION CONTEXT (auto-generated; earlier turns were summarised) ===\n" + summary
@@ -458,4 +478,12 @@ func textTokens(s string) int {
 // out of a cap; there is no hidden safety limit).
 func EffectiveToolRounds(t config.SessionTuning) int {
 	return t.MaxToolRounds
+}
+
+// dash renders an empty string as "-" for log lines.
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }

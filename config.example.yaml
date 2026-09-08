@@ -1,6 +1,6 @@
 # DocVision Configuration (example - copy to config.yaml and fill in your values)
 
-config_version: 4
+config_version: 6
 
 # MinerU API Configuration
 mineru:
@@ -73,19 +73,19 @@ latex:
     drawing:
       context_limit: 131072      # 上下文窗口（tokens，默认 128K，可改 64K/256K 等）
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
-      max_tokens: 16384
+      max_tokens: 131072
       compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩
     style:
       context_limit: 262144      # 样式分析建议更大窗口（256K）
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
-      max_tokens: 32768
+      max_tokens: 131072
     chapter:
       context_limit: 131072
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
     convert:
       context_limit: 131072
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
-    checker:                     # 每章核对会话配置（独立于 convert）
+    checker:                     # 每章核对会话配置（未设置的字段继承 convert 块）
 
 # img2text 基础图片转文本流程的独立配置（模型用 models: 注册表代号）
 img2text:
@@ -133,27 +133,32 @@ verify:
 # top-level ai block, so a minimal setup only sets model:.
 # ----------------------------------------------------------------
 models:
-  text:                          # img2text 等基础流程使用的默认模型（必填；其他条目留空字段继承这里）
+  text:                        # img2text 等基础流程使用的默认模型（必填；其他条目留空字段继承这里）
     base_url: "https://your-api-proxy.com/v1"
     api_key: "sk-YOUR-API-KEY-HERE"
     model: "Qwen/Qwen3.6-27B"
     # API 请求控制（全局默认；各 models 条目可单独覆盖）
-    api_timeout: 400             # request timeout in seconds
-    api_connect_timeout: 60      # connect timeout in seconds
-    api_max_retries: 3           # API retry count for non-rate-limit errors
-    rate_limit_retries: 100      # 429 限流重试上限（原代码内安全上限值）
-    request_body:                # additional body params for the API call
-      enable_thinking: false     # Qwen 3.6+
-      extra_body: {              # OpenAI/Anthropic/DeepSeek
-        "thinking": { "type": "disabled" }
-      }
+    api_timeout: 400            # 非流式：整次请求（连接+读取）总上限（秒）
+    api_connect_timeout: 60     # 连接/首字节等待上限（秒）
+    api_stream_idle_timeout: 0  # 流式：两个数据块之间的最大间隔（秒），0 = 用 api_timeout
+    api_max_retries: 3          # API retry count for non-rate-limit errors
+    rate_limit_retries: 100     # 429 限流重试上限（原代码内安全上限值）
+    stream: true                # 默认流式（SSE）：长思考/长输出期间持续有进展，不再静默等待
+    # 思考（思维链）控制：顶层字段，不要写进 request_body.extra_body
+    thinking:
+      type: disabled            # enabled | disabled（GLM-4.5+ / DeepSeek）
+    # reasoning_effort: high    # 思考强度 max|xhigh|high|medium|low|minimal|none（GLM-5.2+，thinking 开启时生效）
+    request_body:               # 其它厂商参数（原样合并进请求体顶层）
+      enable_thinking: false    # Qwen 3.6+
   classifier:
     model: "Qwen/Qwen3.6-27B"    # 要求具备视觉能力
   drawing:
     model: "glm-5.3-flash"       # 作图 AI：需强视觉+代码能力
     # base_url: "https://other-provider.example/v1"   # 可单独指定
     # api_key: "sk-..."
-    # request_body: { enable_thinking: false }
+    # stream: false                                  # 该模型单独关闭流式
+    # thinking: { type: enabled }                    # 该模型单独开启思考
+    # reasoning_effort: high
   style:
     model: "glm-5.3-flash"
   chapter:
@@ -163,4 +168,4 @@ models:
   checker:                       # 每章核对（小文本模型即可）
     model: "Qwen/Qwen3.6-27B"
   verifier:
-    model: "Qwen/Qwen3.6-27B"       # AI 校验模型（需视觉能力）
+    model: "glm-5.3-flash"       # AI 校验模型（需视觉能力）

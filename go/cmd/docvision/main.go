@@ -434,6 +434,7 @@ func newImg2TextCmd() *cobra.Command {
 	cmd.Flags().Bool("test", false, "启用测试模式（随机抽样）")
 	cmd.Flags().Int("number", 10, "测试图片数量（默认: 10）")
 	cmd.Flags().String("seed", "", "随机种子：'random' 或数字（用于复现）")
+	cmd.Flags().Bool("debug", false, "调试模式：把请求参数/提示词/响应统计完整写入日志文件")
 	return cmd
 }
 
@@ -460,6 +461,10 @@ func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) (
 		return logPath, fmt.Errorf("create logger: %w", err)
 	}
 	defer log.Close()
+	if debugEnabled(cmd, cfg) {
+		log.SetDebug(true)
+		fmt.Println("调试模式：请求参数/提示词/响应统计将完整写入日志文件")
+	}
 
 	opts := img2text.RunOptions{
 		TestMode: testMode,
@@ -468,6 +473,20 @@ func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) (
 		Quiet:    quiet,
 	}
 	return logPath, img2text.Run(cfg, log, opts)
+}
+
+// debugEnabled reports whether verbose debug logging is on, either from
+// the --debug flag or options.log_level: debug. The flag is optional:
+// workflow steps reuse commands that do not define it.
+func debugEnabled(cmd *cobra.Command, cfg *config.Config) bool {
+	if cfg != nil && cfg.Options.LogLevel == "debug" {
+		return true
+	}
+	if cmd == nil || cmd.Flags().Lookup("debug") == nil {
+		return false
+	}
+	v, err := cmd.Flags().GetBool("debug")
+	return err == nil && v
 }
 
 func newAnalyzeCmd() *cobra.Command {

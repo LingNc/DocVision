@@ -186,7 +186,6 @@ func CallAIWithTools(
 			},
 			MaxTokens:   opts.MaxTokens,
 			Temperature: opts.Temperature,
-			Stream:      false,
 		}
 		content, status := doCallWithRetry(client, req, maxAPIRetries, rateLimitLimit, logger, tid)
 		if status != "" {
@@ -248,7 +247,6 @@ func CallAIWithTools(
 			Messages:    messages,
 			MaxTokens:   opts.MaxTokens,
 			Temperature: opts.Temperature,
-			Stream:      false,
 		}
 		if includeTools {
 			req.Tools = tools
@@ -354,7 +352,6 @@ func CallAIWithTools(
 				Messages:    messages,
 				MaxTokens:   opts.MaxTokens,
 				Temperature: opts.Temperature,
-				Stream:      false,
 				ToolChoice:  "none",
 			}
 			finalResp, finalSentinel, finalStatus := doCallWithRetryFull(client, finalReq, maxAPIRetries, rateLimitLimit, logger, tid)
@@ -647,9 +644,26 @@ func doCallWithRetryFull(
 ) (*ChatResponse, string, string) {
 	retry := 0
 	rateLimitRetry := 0
+	round := 0
 	for {
+		round++
+		if logger.DebugEnabled() {
+			logger.Debug(tid, fmt.Sprintf("[api] request #%d (%s messages=%d tools=%d tool_choice=%v)",
+				round, client.RequestSummary(req), len(req.Messages), len(req.Tools), req.ToolChoice))
+			debugDumpMessages(logger, tid, req.Messages)
+		}
 		resp, err := client.ChatCompletion(req)
 		if err == nil {
+			if logger.DebugEnabled() {
+				content, reasoning, tools := 0, resp.ReasoningChars, 0
+				if len(resp.Choices) > 0 {
+					content = len(contentString(resp.Choices[0].Message))
+					tools = len(resp.Choices[0].Message.ToolCalls)
+				}
+				logger.Debug(tid, fmt.Sprintf("[api] response #%d (%.1fs stream=%v finish=%s content=%d chars reasoning=%d chars tools=%d %s)",
+					round, resp.Elapsed.Seconds(), resp.Streamed, dash(resp.FinishReason),
+					content, reasoning, tools, resp.Usage.String()))
+			}
 			return resp, "", ""
 		}
 
@@ -879,4 +893,49 @@ func resolveImageFile(imagesDir, imgPath, subject string) (string, error) {
 func pathExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+// dash renders an empty string as "-" for log lines.
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// debugDumpMessages writes the full prompt of every request to the log
+// file (debug mode only). Image parts are summarised, never dumped.
+func debugDumpMessages(logger *logger.Logger, tid int, msgs []ChatMessage) {
+	for i, m := range msgs {
+		logger.Debug(tid, fmt.Sprintf("[api]   msg[%d] role=%s content=%s",
+			i, m.Role, debugContent(m.Content)))
+	}
+}
+
+func debugContent(content any) string {
+	switch c := content.(type) {
+	case string:
+		return truncate(c, 8000)
+	case []map[string]interface{}:
+		var b strings.Builder
+		for _, part := range c {
+			switch t, _ := part["type"].(string); t {
+			case "text":
+				if s, ok := part["text"].(string); ok {
+					b.WriteString(truncate(s, 8000))
+				}
+			case "image_url":
+				b.WriteString("[image]")
+			}
+		}
+		return b.String()
+	case nil:
+		return ""
+	default:
+		raw, err := json.Marshal(c)
+		if err != nil {
+			return fmt.Sprint(c)
+		}
+		return truncate(string(raw), 2000)
+	}
 }

@@ -129,6 +129,25 @@ func semanticChecks(cfg *Config) []string {
 	req(cfg.Options.Concurrency >= 1, "options.concurrency 必须 >= 1")
 
 	req(cfg.Options.MaxTokens >= 1, "options.max_tokens 必须 >= 1")
+	// Per-model vendor request fields: catch typos before a long run.
+	for name, m := range cfg.Models {
+		label := "models." + name
+		if m.ReasoningEffort != "" && !validReasoningEfforts[m.ReasoningEffort] {
+			p = append(p, fmt.Sprintf("%s.reasoning_effort 必须为 max/xhigh/high/medium/low/minimal/none（当前 %q）", label, m.ReasoningEffort))
+		}
+		if m.Thinking != nil {
+			if v, ok := m.Thinking["type"]; ok {
+				if s, _ := v.(string); s != "enabled" && s != "disabled" {
+					p = append(p, fmt.Sprintf("%s.thinking.type 必须为 enabled 或 disabled（当前 %v）", label, v))
+				}
+			} else {
+				p = append(p, fmt.Sprintf("%s.thinking 缺少 type（enabled|disabled）", label))
+			}
+		}
+		if m.APIStreamIdleTimeout < 0 {
+			p = append(p, fmt.Sprintf("%s.api_stream_idle_timeout 不能为负", label))
+		}
+	}
 	req(strings.TrimSpace(cfg.Paths.InputDir) != "", "paths.input_dir 不能为空")
 	req(strings.TrimSpace(cfg.Paths.OutputDir) != "", "paths.output_dir 不能为空")
 	req(strings.TrimSpace(cfg.Paths.FinallyDir) != "", "paths.finally_dir 不能为空")

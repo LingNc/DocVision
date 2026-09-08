@@ -22,7 +22,8 @@ func (r *Runner) checkChapter(base, chapPath, texPath string) (bool, string) {
 	}
 	client := r.clientFor(checkerName)
 	modelCfg := r.models[checkerName]
-	_ = r.cfg.LatexSession("checker") // tuning reserved for future use
+	// 每章核对会话的调优（未配置的字段继承 convert 块）。
+	tuning := r.cfg.LatexSession("checker")
 
 	chapData, err1 := os.ReadFile(chapPath)
 	texData, err2 := os.ReadFile(texPath)
@@ -56,6 +57,8 @@ func (r *Runner) checkChapter(base, chapPath, texPath string) (bool, string) {
 		Messages: []session.ChatMessage{
 			{Role: "user", Content: prompt},
 		},
+		MaxTokens:      tuning.MaxTokens,
+		Temperature:    tuning.Temperature,
 		ResponseFormat: map[string]any{"type": "json_object"}, // 保证返回一定是 JSON
 	}
 	resp, sentinel, status := client.CallWithRetry(req)

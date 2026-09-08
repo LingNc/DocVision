@@ -43,8 +43,10 @@ type ModelConfig struct {
 	APIKey      string                 `yaml:"api_key"`
 	Model       string                 `yaml:"model"`
 	RequestBody map[string]interface{} `yaml:"request_body"`
-	// MaxTokens / Temperature override options.max_tokens /
-	// options.temperature for this model when non-zero.
+	// MaxTokens / Temperature are the per-model completion budget and
+	// sampling temperature. They act as the fallback used when a
+	// session or single-shot call does not set its own value
+	// (latex.sessions.<session>.max_tokens always wins for sessions).
 	MaxTokens   int     `yaml:"max_tokens"`
 	Temperature float64 `yaml:"temperature"`
 	// Per-model API/request controls. Zero values inherit models.text
@@ -54,6 +56,41 @@ type ModelConfig struct {
 	APIConnectTimeout int `yaml:"api_connect_timeout"`
 	APIMaxRetries     int `yaml:"api_max_retries"`
 	RateLimitRetries  int `yaml:"rate_limit_retries"`
+	// Stream enables SSE streaming for this model's chat requests.
+	// nil or true = streaming (default), false = single JSON response.
+	// Streaming keeps long thinking/output requests alive with visible
+	// progress instead of one silent wait.
+	Stream *bool `yaml:"stream"`
+	// APIStreamIdleTimeout bounds the gap between two stream chunks in
+	// seconds (the stream is aborted after that much silence). 0
+	// inherits api_timeout. It replaces the total request timeout while
+	// streaming: a long but active stream is never killed.
+	APIStreamIdleTimeout int `yaml:"api_stream_idle_timeout"`
+	// Thinking is the vendor top-level "thinking" request field, e.g.
+	// {type: enabled|disabled} (GLM-4.5+, DeepSeek). It is sent at the
+	// TOP LEVEL of the request body, not inside request_body.extra_body
+	// (extra_body is a Python-SDK concept and is ignored on the wire).
+	Thinking map[string]any `yaml:"thinking"`
+	// ReasoningEffort is the vendor top-level reasoning_effort field
+	// (GLM-5.2+: max|xhigh|high|medium|low|minimal|none; only effective
+	// while thinking is enabled).
+	ReasoningEffort string `yaml:"reasoning_effort"`
+}
+
+// Streaming reports whether chat requests for this model use SSE
+// streaming. Unset (nil) means streaming: it is the default.
+func (m ModelConfig) Streaming() bool {
+	if m.Stream == nil {
+		return true
+	}
+	return *m.Stream
+}
+
+// validReasoningEfforts is the accepted reasoning_effort vocabulary
+// (GLM-5.2 and above; other vendors may accept a subset).
+var validReasoningEfforts = map[string]bool{
+	"max": true, "xhigh": true, "high": true, "medium": true,
+	"low": true, "minimal": true, "none": true,
 }
 
 // SessionTuning tunes one AI session type (context window, tool budget).
@@ -64,7 +101,10 @@ type SessionTuning struct {
 	ContextLimit int `yaml:"context_limit"`
 	// MaxToolRounds caps tool-calling rounds inside one session turn.
 	MaxToolRounds int `yaml:"max_tool_rounds"`
-	// MaxTokens is the per-request completion budget.
+	// MaxTokens is the per-request completion budget (max_tokens). It is
+	// the FINAL answer budget as the vendor defines it; where a vendor
+	// bills thinking separately (e.g. DeepSeek's 32K CoT budget) it does
+	// not include it.
 	MaxTokens int `yaml:"max_tokens"`
 	// Temperature for this session; 0 falls back to the global value.
 	Temperature float64 `yaml:"temperature"`
@@ -267,7 +307,7 @@ type PathsConfig struct {
 // zero-valued fields, and returns the resulting Config.
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
-const CurrentConfigVersion = 5
+const CurrentConfigVersion = 6
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -475,6 +515,11 @@ func setDefaults(cfg *Config) {
 		cfg.Latex.Compile.MaxFixRounds = 8
 	}
 	defaultSessionTuning(&cfg.Latex.Sessions.Drawing)
+	// The style analyst emits a full .cls + manual + example in one
+	// reply, so its built-in budget is larger than the shared default.
+	if cfg.Latex.Sessions.Style.MaxTokens == 0 {
+		cfg.Latex.Sessions.Style.MaxTokens = 32768
+	}
 	defaultSessionTuning(&cfg.Latex.Sessions.Style)
 	defaultSessionTuning(&cfg.Latex.Sessions.Chapter)
 	defaultSessionTuning(&cfg.Latex.Sessions.Convert)
@@ -592,11 +637,26 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 	if entry.RateLimitRetries == 0 {
 		entry.RateLimitRetries = fallback.RateLimitRetries
 	}
+	if entry.Stream == nil {
+		entry.Stream = fallback.Stream
+	}
+	if entry.APIStreamIdleTimeout == 0 {
+		entry.APIStreamIdleTimeout = fallback.APIStreamIdleTimeout
+	}
+	if entry.Thinking == nil {
+		entry.Thinking = fallback.Thinking
+	}
+	if entry.ReasoningEffort == "" {
+		entry.ReasoningEffort = fallback.ReasoningEffort
+	}
 	return entry, true
 }
 
 // LatexSession returns the tuning block for a named latex session
-// (drawing / style / chapter / convert), applying the shared defaults.
+// (drawing / style / chapter / convert / checker), applying the shared
+// defaults. The checker block is the exception: any field it leaves at
+// zero inherits the convert block (an explicit negative max_tool_rounds
+// still means "unlimited").
 func (c *Config) LatexSession(name string) SessionTuning {
 	var s SessionTuning
 	switch name {
@@ -610,11 +670,34 @@ func (c *Config) LatexSession(name string) SessionTuning {
 		s = c.Latex.Sessions.Convert
 	case "checker":
 		s = c.Latex.Sessions.Checker
+		inheritSessionTuning(&s, c.Latex.Sessions.Convert)
 	default:
 		s = SessionTuning{}
 	}
 	defaultSessionTuning(&s)
 	return s
+}
+
+// inheritSessionTuning fills every zero field of dst from base. Zero
+// means "not configured" for the inherited fields; a caller that wants
+// unlimited tool rounds in an inheriting block must write a negative
+// max_tool_rounds.
+func inheritSessionTuning(dst *SessionTuning, base SessionTuning) {
+	if dst.ContextLimit == 0 {
+		dst.ContextLimit = base.ContextLimit
+	}
+	if dst.MaxToolRounds == 0 {
+		dst.MaxToolRounds = base.MaxToolRounds
+	}
+	if dst.MaxTokens == 0 {
+		dst.MaxTokens = base.MaxTokens
+	}
+	if dst.Temperature == 0 {
+		dst.Temperature = base.Temperature
+	}
+	if dst.CompactionAt == 0 {
+		dst.CompactionAt = base.CompactionAt
+	}
 }
 
 // defaultModelKey is the registry entry that provides the default
