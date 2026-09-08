@@ -207,7 +207,7 @@ func (r *Runner) stylePhase(proj string) error {
 	tools := []session.Tool{
 		&WriteWorkFileTool{Root: workDir},
 		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
-		&ViewImageTool{Root: sourceDir},
+		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ReadMDTool{Path: mainMD},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		&InstallFontTool{FontsDir: r.cfg.Paths.Fonts},
@@ -705,7 +705,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	tools := []session.Tool{
 		&WriteWorkFileTool{Root: workDir},
 		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
-		&ViewImageTool{Root: sourceDir},
+		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ReadMDTool{Path: mainMD},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		&InstallFontTool{FontsDir: r.cfg.Paths.Fonts},

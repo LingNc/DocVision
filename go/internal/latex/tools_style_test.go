@@ -6,10 +6,11 @@ import (
 	"testing"
 )
 
-// TestViewImageResolveAcceptsMarkdownRefs pins the fix for the "文件不存在"
-// first-call failure: figure sessions ask for the markdown ref
-// "images/<subject>/x.jpg" while the tool root is the images directory.
-func TestViewImageResolveAcceptsMarkdownRefs(t *testing.T) {
+// TestViewImageResolveFigureSession pins the figure-session contract:
+// Root is the images root, Subject is the current document's folder, and
+// the model may pass the markdown ref or just the file name — both are a
+// plain join, never a search.
+func TestViewImageResolveFigureSession(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "测试-概率论")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -19,11 +20,12 @@ func TestViewImageResolveAcceptsMarkdownRefs(t *testing.T) {
 	if err := os.WriteFile(img, []byte("jpg"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tool := &ViewImageTool{Root: root}
+	tool := &ViewImageTool{Root: root, Subject: "测试-概率论"}
 
 	for _, rel := range []string{
 		"images/测试-概率论/fig.jpg",
 		"测试-概率论/fig.jpg",
+		"fig.jpg",
 		"./images/测试-概率论/fig.jpg",
 	} {
 		got, err := tool.resolve(rel)
@@ -42,44 +44,27 @@ func TestViewImageResolveAcceptsMarkdownRefs(t *testing.T) {
 	}
 }
 
-// TestViewImageResolveBareNameWithSubject covers the "just give me the
-// file name" contract: the session knows the document's image folder.
-func TestViewImageResolveBareNameWithSubject(t *testing.T) {
+// TestViewImageResolveNoSearchAcrossSubjects: a wrong name must fail
+// instead of silently finding the same file in another document's
+// folder.
+func TestViewImageResolveNoSearchAcrossSubjects(t *testing.T) {
 	root := t.TempDir()
-	sub := filepath.Join(root, "测试-概率论")
 	other := filepath.Join(root, "其他")
-	for _, d := range []string{sub, other} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	img := filepath.Join(sub, "fig.jpg")
-	if err := os.WriteFile(img, []byte("jpg"), 0o644); err != nil {
+	if err := os.MkdirAll(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Same file name in another document's folder: the Subject decides.
 	if err := os.WriteFile(filepath.Join(other, "fig.jpg"), []byte("jpg"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tool := &ViewImageTool{Root: root, Subject: "测试-概率论"}
-	got, err := tool.resolve("fig.jpg")
-	if err != nil {
-		t.Fatalf("resolve bare name: %v", err)
-	}
-	if got != img {
-		t.Errorf("resolve = %q, want %q", got, img)
-	}
-
-	// Without a subject the name is ambiguous and must be reported.
-	plain := &ViewImageTool{Root: root}
-	if _, err := plain.resolve("fig.jpg"); err == nil {
-		t.Error("ambiguous bare name without subject must fail")
+	if _, err := tool.resolve("fig.jpg"); err == nil {
+		t.Fatal("view_image must not search other documents' folders")
 	}
 }
 
 // TestViewImageResolveDocumentRoot keeps the style-analyst case working:
-// there the root IS the document directory, so "images/..." must resolve
-// directly.
+// Root is the document directory and Subject is its images/ folder, so
+// both "images/subject/fig.png" and "subject/fig.png" resolve.
 func TestViewImageResolveDocumentRoot(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "images", "subject")
@@ -90,12 +75,14 @@ func TestViewImageResolveDocumentRoot(t *testing.T) {
 	if err := os.WriteFile(img, []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tool := &ViewImageTool{Root: root}
-	got, err := tool.resolve("images/subject/fig.png")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if got != img {
-		t.Errorf("resolve = %q, want %q", got, img)
+	tool := &ViewImageTool{Root: root, Subject: "images"}
+	for _, rel := range []string{"images/subject/fig.png", "subject/fig.png"} {
+		got, err := tool.resolve(rel)
+		if err != nil {
+			t.Fatalf("resolve(%q): %v", rel, err)
+		}
+		if got != img {
+			t.Errorf("resolve(%q) = %q, want %q", rel, got, img)
+		}
 	}
 }

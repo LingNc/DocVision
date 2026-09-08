@@ -9,7 +9,7 @@
 - **LaTeX 编译警告反馈**：编译结果新增 `Warnings` / `WarningCount` / `WarningSummary`（Overfull/Underfull box、LaTeX/Package/Class Warning，去重并限长），随 compile_preview / compile / recompile 的工具结果一并返回给 AI；debug 日志新增 `[compile:<preview|chapter|book>] OK|FAILED (耗时) warnings=N` + 警告清单 + 失败时给 AI 的错误原文（完整编译日志仍然不进上下文/日志）
 - **Mermaid / LaTeX 校验结果进 debug 日志**：`[validate:mermaid]` / `[validate:latex]` 记录 has_blocks / valid / available / 精简后的错误
 - **作图禁止重叠/拥挤**：latex 作图提示词新增硬规则与提交前检查项（标签不得压线/互相遮挡、节点不得重叠或越界，空间不足就整体放大/增间距/按比例缩小字号），img2text 提示词同步
-- **图片工具可直接用文件名**：`view_image` 增加会话文档图片目录（`Subject`）解析，接受 `foo.jpg`、`subject/foo.jpg`、`images/subject/foo.jpg` 三种形式，重名时报告歧义；`image_context` 同样接受裸文件名并按唯一基名匹配；提示词说明"直接用文件名，不要卡在路径上"
+- **图片工具可直接用文件名**：`view_image` 以**当前文档的图片目录为根**直接拼接（`foo.jpg`、`subject/foo.jpg`、`images/subject/foo.jpg` 都落到同一路径），**不做任何搜索**——找不到就报错（说明名字写错了），避免跨文档误命中；`image_context` 同样接受裸文件名（按唯一基名匹配，歧义报错）。提示词只保留一句"直接用文件名"，删掉冗余的路径说明与重复的重叠规则（重叠要求只留在 Rules 一处，省 token）
 
 ### Fixed
 
