@@ -33,18 +33,21 @@ const latexFigurePrompt = `You are an expert LaTeX vector illustrator. You redra
 3. Write the code for a \documentclass[border=6pt]{standalone} document. Your code is the BODY between \begin{document} and \end{document} — the wrapper is added by the tool.
 4. Call the compile_preview tool with your code. You receive the compile log and, on success, a rasterised preview PNG.
 5. Compare the preview with the original image. Fix structure, geometry, label positions and proportions; compile again.
-6. When the preview faithfully matches the original, call the submit tool with the final code. Only submit after a successful compile AND a visual check.
+6. Check for OVERLAP and CROWDING before submitting: no node, label, arrow or text may collide with another element, sit on a line, be clipped, or run off the page. If the drawing is cramped, enlarge the figure (scale up, add spacing/margins, reduce font size proportionally) or restructure the layout — never squeeze elements on top of each other. Re-compile and re-check the preview after any such change.
+7. When the preview faithfully matches the original and nothing overlaps or is crowded, call the submit tool with the final code. Only submit after a successful compile AND a visual check.
 
 ## Cross-page continuations
-Document tables/figures split by pagination appear as SEVERAL consecutive image refs. Before drawing, call image_context (no args) to see the previous/next image refs and their text. Signs of a continuation: repeated table header, axis/box cut at the edge, "续表"/"continued" marks, content that only makes sense together. Use view_image to LOOK at the neighbouring image. Adjacency does NOT imply relation: neighbours are only CANDIDATES — always verify with view_image. If they belong together, draw ONE combined figure from all fragments and call submit with "merges": [list of the absorbed image paths exactly as they appear in the markdown]. If the image is obviously complete on its own, or the neighbours are unrelated, just draw THIS image and merge nothing. If THIS image is itself the tail of a figure whose head is an earlier ref, still draw the best possible combined version and merge the earlier ref via "merges" only if that earlier fragment has no finished figure yet.
+Document tables/figures split by pagination appear as SEVERAL consecutive image refs. Before drawing, call image_context (no args) to see the previous/next image refs and their text. Signs of a continuation: repeated table header, axis/box cut at the edge, "续表"/"continued" marks, content that only makes sense together. Use view_image to LOOK at the neighbouring image. IMAGE NAMES: image_context and view_image accept a BARE FILE NAME (e.g. foo.jpg) — no folder/path needed, the tools resolve it inside THIS document's image folder; never guess or invent paths, and never give up on a path problem (use list_images only if a name is unknown). Adjacency does NOT imply relation: neighbours are only CANDIDATES — always verify with view_image. If they belong together, draw ONE combined figure from all fragments and call submit with "merges": [list of the absorbed image paths exactly as they appear in the markdown]. If the image is obviously complete on its own, or the neighbours are unrelated, just draw THIS image and merge nothing. If THIS image is itself the tail of a figure whose head is an earlier ref, still draw the best possible combined version and merge the earlier ref via "merges" only if that earlier fragment has no finished figure yet.
 
 ## Core rule: reproduce WHAT is visible, never WHY/HOW.
 If ambiguous or overly complex, call image_context / view_image (crop + zoom) to resolve; if still unclear, mark the uncertain label or region with % [?] comments in the code and reproduce only what is certain. No guessing.
+Tool split: image_context = TEXT around an image + neighbour refs (no pixels); view_image = LOOK at an image (bare file name is fine). They complement each other — do not use one where the other is needed.
 
 ## Rules
 - LaTeX only — NEVER Mermaid or other non-LaTeX diagram syntaxes.
 - Reproduce ALL visible text labels exactly (numbers, symbols, Chinese characters). Chinese labels are fine; the wrapper loads ctex when needed.
 - Match structure and proportions: node placement, arrow directions, tree depth, axis ranges, curve shapes.
+- NO OVERLAPS, NO CROWDING (hard requirement): labels must never sit on lines/arrows/other labels, nodes must not touch or overlap, nothing may be clipped or pushed outside the canvas. Prefer a larger figure with generous spacing over a compact one that collides; scale the whole drawing (or its sub-parts) up and shrink fonts proportionally when space is tight. Look at the preview and fix every collision before submitting.
 - Keep the code self-contained: any \usetikzlibrary{...} / \usepgfplotslibrary{...} lines go at the top of your code (the wrapper hoists them into the preamble).
 - If the image contains photographic or un-reproducible parts, still do your best vector approximation of the schematic structure.
 - Max {MAX_ROUNDS} tool rounds; then you must submit your best compiled version.
@@ -56,7 +59,7 @@ const styleSystemPrompt = `You are a LaTeX typography expert reverse-engineering
 
 You have tools to inspect the source material:
 - list_images: enumerate the extracted images and original page material available.
-- view_image: view any image (you may crop a sub-region in percentages and scale it up to inspect details).
+- view_image: view any image (you may crop a sub-region in percentages and scale it up to inspect details). A bare file name is enough — the tool resolves it inside this document's image folder.
 - read_md: read the organized Markdown (MinerU's text is high quality; trust it over OCR-by-eye).
 
 ## Your job
@@ -109,7 +112,7 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 
 ## Original PDF access (read-only)
 The original document (from which the markdown was parsed) is available read-only:
-- doc_search {query}: search the block index (text snippets, figure/table captions, equation LaTeX, image filenames). Returns the GLOBAL page number (pN) plus the block bbox. Also try image filenames like images/xxx.jpg and bare page numbers.
+- doc_search {query}: search the block index (text snippets, figure/table captions, equation LaTeX, image filenames). Returns the GLOBAL page number (pN) plus the block bbox. Image queries accept a BARE file name (xxx.jpg) or the markdown ref (images/xxx.jpg); bare page numbers work too.
 - view_page {page: pN, left/top/right/bottom (percent), zoom_width}: render that original PDF page (or a crop) to see the REAL document layout and typography.
 Use them when the markdown is ambiguous: order/placement of figures and tables, lost captions, garbled fragments, or layout you cannot reconstruct. Convert doc_search bbox (PDF points, top-left origin) to percents with the page size if you need a precise crop. Table caveat: MinerU parses tables to HTML (preserved in the markdown), and the HTML can drift from the real table (merged cells, nested headers, column spans). Since the class (cls) defines the house table style, reproduce tables with the manual/cls constructs - if a table looks odd (ragged rows, suspicious cells, wrong spans), doc_search its caption or a cell text and view_page the page (crop around the bbox) to check the ORIGINAL before rebuilding it. Do not overuse: only when plain reading of the markdown is not enough.
 4. Markdown tables -> LaTeX tables (booktabs if available per manual).

@@ -183,6 +183,8 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 - **流式请求（默认开启）**：`models.*.stream: true`（默认）时走 SSE 流式接收，长思考/长输出期间持续有进展，不会长时间静默；厂商不支持流式时自动回退一次非流式请求。流式模式下用 `api_stream_idle_timeout`（默认取 `api_timeout`）判定"卡住"，而不是整次请求超时
 - **思考控制**：`thinking: {type: enabled|disabled}` 与 `reasoning_effort: max|xhigh|high|medium|low|minimal|none` 都是请求体**顶层字段**（不要写进 `request_body.extra_body`），按 `models` 条目配置，空值继承 `models.text`
 - **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到 `compaction_at`（默认 0.85）阈值自动 **AI 压缩**会话（保留关键决策/成果，丢弃草稿与工具噪音）；`sessions.checker` 未设置的字段继承 `sessions.convert`
+- **矢量图落盘**：TikZ 编译成功后依次尝试 `dvisvgm → pdftocairo → mutool → inkscape` 转 SVG 内嵌（dvisvgm 3.6 处理 PDF 需要 Ghostscript < 10.01 或 mutool，缺条件时自动走 pdftocairo）；全部失败才回退 PNG/PDF 链接，并记 ERROR + 在 markdown 就地标注
+- **图片查看工具**：`image_context` 只给文本上下文与前后引用（不看像素），`view_image` 才看图片（支持百分比裁剪与放大）；两者都接受**裸文件名**（自动在本文档的图片目录内解析，重名会报歧义）
 - **可分离工具**：会话工具按需注册（编译预览、提交确认、grep、bash 沙箱、受限文件读写等）
 - **断点续传**：档位2逐图进度、档位1逐阶段进度（progress.json）
 
@@ -190,12 +192,13 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 
 ```bash
 docvision latex --debug        # 或配置 options.log_level: "debug"
+docvision latex --trace        # 或配置 options.log_level: "trace"（更细）
 docvision img2text --debug     # img2text 同样支持
 docvision verify --debug
 docvision latex --verbose      # 详细控制台输出（默认仅显示进度行）
 ```
 
-开启后，每一轮 AI 调用的**完整系统提示词、用户提示词、工具调用（名称+参数）、工具结果**都会写入日志（`[DEBUG]` 前缀，控制台输出不受影响），另外每次请求/响应还记录：使用的模型、`stream`/`max_tokens`/`temperature`/`thinking`/`reasoning_effort` 实际取值、消息数与上下文估算、耗时、finish_reason、输出与思维链字符数、provider 返回的 token 用量（含 `reasoning_tokens`）。流式请求还会每 10 秒输出一次进展行（`[stream] ... content=N chars reasoning=M chars`）。可在日志里完整回放某个会话的推理与工具使用过程。
+日志等级：`info`（默认，进度与警告/错误）< `debug`（每轮请求/响应摘要、提示词、工具调用、**最终接收内容**、编译结果与警告、Mermaid/LaTeX 校验结论）< `trace`（再加流式分片进展行等噪音）。全部写入日志文件（`[DEBUG]`/`[TRACE]` 前缀，控制台输出不受影响），每次请求/响应记录：使用的模型、`stream`/`max_tokens`/`temperature`/`thinking`/`reasoning_effort` 实际取值、消息数与上下文估算、耗时、finish_reason、输出与思维链字符数、provider 返回的 token 用量（含 `reasoning_tokens`）。LaTeX 编译只记 `OK|FAILED + 耗时 + warnings=N + 警告清单`（失败时附给 AI 的错误原文），完整编译日志不会写入。可在日志里完整回放某个会话的推理与工具使用过程。
 
 默认控制台输出与 img2text 一致：每个阶段只显示一行实时进度（如 `[classify 12/345] 3.48% (失败: 0)`），逐图明细写入日志文件；`--verbose` 恢复逐图控制台输出。
 
@@ -300,6 +303,7 @@ docvision verify                               # AI 核对报告
 MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不影响主流程。
 
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking），原样合并到请求体顶层 | 见示例 |
+| `options.log_level` | 日志等级：info / debug / trace（debug 记请求响应摘要与最终内容，trace 再加流式分片） | info |
 | `models.text.stream` | 是否流式接收（SSE）；不写即 true。厂商不支持时自动回退一次非流式 | true |
 | `models.text.api_stream_idle_timeout` | 流式模式下两个数据块之间的最大间隔（秒），超时判定卡住；0 取 `api_timeout` | 0 |
 | `models.text.thinking` | 顶层 `thinking` 对象：`{type: enabled|disabled}`（GLM-4.5+/DeepSeek）。**不要放进 `extra_body`** | 未设置 |

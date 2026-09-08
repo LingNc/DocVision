@@ -277,8 +277,10 @@ type OptionsConfig struct {
 	LatexValidation string `yaml:"-"` // set from tools.latex.validation
 	LatexEngine     string `yaml:"-"` // set from tools.latex.engine
 	MaxTokens       int    `yaml:"max_tokens"`
-	// LogLevel: info (default) or debug. Debug writes every AI prompt,
-	// tool call and tool result into the log file (console unaffected).
+	// LogLevel: info (default), debug or trace. Debug writes every AI
+	// request/response summary, prompt and tool result into the log
+	// file; trace additionally records per-chunk stream traffic and raw
+	// dumps (console unaffected).
 	LogLevel string `yaml:"log_level"`
 }
 

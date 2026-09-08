@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
+	"mineru-tools/internal/logger"
 	"mineru-tools/internal/session"
 )
 
@@ -34,6 +36,8 @@ type CompilePreviewTool struct {
 	Comp       *Compiler
 	State      *tikzState
 	EngineIsXe bool
+	Log        *logger.Logger
+	Tid        int
 }
 
 func (t *CompilePreviewTool) Name() string { return "compile_preview" }
@@ -86,12 +90,16 @@ func (t *CompilePreviewTool) Execute(argsJSON string) (session.ToolResult, error
 	os.Remove(filepath.Join(t.State.workDir, "figure.pdf"))
 	os.Remove(filepath.Join(t.State.workDir, "figure.png"))
 
+	start := time.Now()
 	res := t.Comp.Compile(t.State.workDir, "figure.tex")
+	LogCompileResult(t.Log, t.Tid, "preview", res, time.Since(start))
 	if !res.OK {
 		t.State.compileErr = res.Err
-		return session.ToolResult{
-			Text: "COMPILE FAILED. Fix the code and call compile_preview again.\nError:\n" + res.Err,
-		}, nil
+		text := "COMPILE FAILED. Fix the code and call compile_preview again.\nError:\n" + res.Err
+		if w := res.WarningSummary(); w != "" {
+			text += "\n" + truncateStr(w, 1500)
+		}
+		return session.ToolResult{Text: text}, nil
 	}
 	png := filepath.Join(t.State.workDir, "figure") // pdftoppm appends .png
 	if err := t.Comp.Rasterize(res.PDF, png); err != nil {
@@ -105,8 +113,12 @@ func (t *CompilePreviewTool) Execute(argsJSON string) (session.ToolResult, error
 	if err != nil {
 		return session.ToolResult{Text: "Compiled OK but preview could not be loaded: " + err.Error()}, nil
 	}
+	text := "COMPILE OK. The preview PNG is attached. Compare it with the original image (structure, labels, overlaps/crowding); if it faithfully matches, call submit; otherwise fix the differences and compile again."
+	if w := res.WarningSummary(); w != "" {
+		text += "\n" + truncateStr(w, 1500)
+	}
 	return session.ToolResult{
-		Text:        "COMPILE OK. The preview PNG is attached. Compare it with the original image; if it faithfully matches, call submit; otherwise fix the differences and compile again.",
+		Text:        text,
 		ImageBase64: img64,
 		ImageMIME:   "image/png",
 	}, nil

@@ -67,6 +67,9 @@ type ViewImageTool struct {
 	// Root is the base directory; path arguments are resolved inside
 	// it (absolute paths outside Root are rejected).
 	Root string
+	// Subject is the current document's image subfolder (e.g.
+	// "测试-概率论"); it lets a bare file name resolve without a path.
+	Subject string
 }
 
 func (t *ViewImageTool) Name() string { return "view_image" }
@@ -74,11 +77,11 @@ func (t *ViewImageTool) Name() string { return "view_image" }
 func (t *ViewImageTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "view_image",
-		"description": "View an image (relative to the document assets root; a leading images/ prefix is optional). Optionally crop a region by percentages (left/top/right/bottom, 0-100) and scale it up for detail inspection.",
+		"description": "LOOK at an image (pixels). path may be a bare file name (e.g. foo.jpg) — it is resolved inside this document's image folder — or a path relative to the assets root (a leading images/ prefix is optional). Optionally crop a region by percentages (left/top/right/bottom, 0-100) and scale it up for detail inspection. For TEXT context around an image use image_context instead.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":   map[string]any{"type": "string", "description": "Image path relative to the assets root, e.g. images/subject/foo.jpg or subject/foo.jpg."},
+				"path":   map[string]any{"type": "string", "description": "Image file name (e.g. foo.jpg) or path relative to the assets root, e.g. images/subject/foo.jpg."},
 				"left":   map[string]any{"type": "number", "description": "Crop left in percent (0-100), default 0."},
 				"top":    map[string]any{"type": "number", "description": "Crop top in percent (0-100), default 0."},
 				"right":  map[string]any{"type": "number", "description": "Crop right in percent (0-100), default 100."},
@@ -135,20 +138,35 @@ func (t *ViewImageTool) resolve(rel string) (string, error) {
 	if filepath.IsAbs(clean) {
 		return "", fmt.Errorf("只允许相对路径: %s", rel)
 	}
-	// Markdown image refs look like "images/<subject>/foo.jpg" while the
-	// tool root is usually the images directory itself (figure sessions)
-	// or the document directory (style analyst). Accept both forms so the
-	// first view_image call does not fail on the prefix.
+	// Accepted forms, in order:
+	//   1. path as given (document root / assets root)
+	//   2. without the markdown "images/" prefix (assets root = images/)
+	//   3. <subject>/<path>  (bare name inside this document's folder)
+	//   4. bare file name inside this document's folder
+	//   5. bare file name at the assets root
 	cands := []string{clean}
 	if stripped := stripImagesPrefix(clean); stripped != clean {
 		cands = append(cands, stripped)
 	}
+	base := filepath.Base(clean)
+	if t.Subject != "" {
+		cands = append(cands,
+			filepath.Join(t.Subject, clean),
+			filepath.Join(t.Subject, base),
+		)
+	}
+	cands = append(cands, base)
+	seen := map[string]bool{}
 	rootAbs, err := filepath.Abs(t.Root)
 	if err != nil {
 		return "", err
 	}
 	var escapeErr error
 	for _, cand := range cands {
+		if seen[cand] {
+			continue
+		}
+		seen[cand] = true
 		full := filepath.Join(t.Root, cand)
 		fullAbs, err := filepath.Abs(full)
 		if err != nil {
@@ -164,10 +182,53 @@ func (t *ViewImageTool) resolve(rel string) (string, error) {
 			return full, nil
 		}
 	}
+	// Last resort: a unique file with that name anywhere under the root
+	// (bounded walk, ambiguity is reported instead of guessing).
+	if matches := findByName(rootAbs, base, 2); len(matches) == 1 {
+		return matches[0], nil
+	} else if len(matches) > 1 {
+		return "", fmt.Errorf("文件名 %s 在素材目录中有多个匹配，请带上子目录: %s", base, strings.Join(shortNames(rootAbs, matches), ", "))
+	}
 	if escapeErr != nil {
 		return "", escapeErr
 	}
-	return "", fmt.Errorf("文件不存在: %s（可省略 images/ 前缀；用 list_images 查看可用路径）", rel)
+	return "", fmt.Errorf("文件不存在: %s（可直接用文件名，程序会在本文档图片目录内查找；用 list_images 查看可用图片）", rel)
+}
+
+// findByName walks root (bounded by maxDepth) looking for files whose
+// base name equals name.
+func findByName(root, name string, maxDepth int) []string {
+	var out []string
+	rootDepth := strings.Count(filepath.Clean(root), string(filepath.Separator))
+	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info == nil {
+			return nil
+		}
+		if info.IsDir() {
+			if strings.Count(filepath.Clean(p), string(filepath.Separator))-rootDepth > maxDepth {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Base(p) == name {
+			out = append(out, p)
+		}
+		return nil
+	})
+	return out
+}
+
+// shortNames renders candidate paths relative to root for messages.
+func shortNames(root string, paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if rel, err := filepath.Rel(root, p); err == nil {
+			out = append(out, rel)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // stripImagesPrefix removes a leading "images/" (the markdown-relative

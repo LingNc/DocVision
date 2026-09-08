@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"mineru-tools/internal/session"
 )
@@ -66,10 +67,12 @@ func (r *Runner) assemblePhase(proj string) error {
 	}
 
 	// Compile (2 passes for TOC/refs).
+	start := time.Now()
 	res := r.comp.Compile(buildDir, "main.tex")
 	if res.OK {
 		res = r.comp.Compile(buildDir, "main.tex")
 	}
+	LogCompileResult(r.log, 1, "book", res, time.Since(start))
 	if !res.OK {
 		if err := r.fixSession(proj, buildDir, res.Err); err != nil {
 			return err
@@ -113,7 +116,7 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 	client := r.clientFor(r.cfg.Latex.ConvertModel)
 	modelCfg := r.models[r.cfg.Latex.ConvertModel]
 	tuning := r.cfg.LatexSession("convert")
-	recompile := &RecompileTool{Comp: r.comp, Dir: buildDir, MainFile: "main.tex"}
+	recompile := &RecompileTool{Comp: r.comp, Dir: buildDir, MainFile: "main.tex", Log: r.log, Tid: 1}
 	submit := &SubmitDoneTool{Label: "the build fix"}
 	sess := session.NewSession(client, modelCfg, tuning, fixSystemPrompt, []session.Tool{
 		&ReadFileTool{Root: buildDir},
@@ -136,7 +139,9 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 		if recompile.LastOK {
 			return nil
 		}
+		start := time.Now()
 		res := r.comp.Compile(buildDir, "main.tex")
+		LogCompileResult(r.log, 1, "book-fix", res, time.Since(start))
 		if res.OK {
 			return nil
 		}

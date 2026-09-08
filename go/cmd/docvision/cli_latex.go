@@ -79,10 +79,7 @@ func newLatexCmd() *cobra.Command {
 			}
 
 			log, logPath, closeLog, err := newLatexLogger(cfg)
-			if debugEnabled(cmd, cfg) {
-				log.SetDebug(true)
-				fmt.Println("调试模式：AI 提示词与工具调用将完整写入日志文件")
-			}
+			applyLogLevel(cmd, cfg, log)
 			if err != nil {
 				return err
 			}
@@ -130,7 +127,8 @@ func newLatexCmd() *cobra.Command {
 	cmd.Flags().Int("number", 10, "测试图片数量")
 	cmd.Flags().String("seed", "", "随机种子")
 	cmd.Flags().String("source-dir", "", "覆盖输入 markdown 目录（默认 paths.output_dir）")
-	cmd.Flags().Bool("debug", false, "调试模式：完整记录 AI 提示词/工具调用/工具结果到日志文件")
+	cmd.Flags().Bool("debug", false, "调试模式：记录请求参数/提示词/工具调用/响应统计到日志文件")
+	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节")
 	cmd.Flags().Bool("verbose", false, "详细控制台输出（默认仅显示 img2text 风格的进度行，详情写日志文件）")
 	return cmd
 }
@@ -154,10 +152,7 @@ verify.enabled: true 时执行。`,
 				return err
 			}
 			defer closeLog()
-			if debugEnabled(cmd, cfg) {
-				log.SetDebug(true)
-				fmt.Println("调试模式：AI 提示词与工具调用将完整写入日志文件")
-			}
+			applyLogLevel(cmd, cfg, log)
 			if !cfg.Verify.Enabled {
 				fmt.Println("提示: verify.enabled 当前为 false（本命令为显式运行，照常执行）")
 			}
@@ -170,7 +165,8 @@ verify.enabled: true 时执行。`,
 			})
 		},
 	}
-	cmd.Flags().Bool("debug", false, "调试模式：把请求参数/提示词/响应统计完整写入日志文件")
+	cmd.Flags().Bool("debug", false, "调试模式：记录请求参数/提示词/响应统计到日志文件")
+	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节")
 	return cmd
 }
 

@@ -129,6 +129,11 @@ func semanticChecks(cfg *Config) []string {
 	req(cfg.Options.Concurrency >= 1, "options.concurrency 必须 >= 1")
 
 	req(cfg.Options.MaxTokens >= 1, "options.max_tokens 必须 >= 1")
+	switch strings.ToLower(cfg.Options.LogLevel) {
+	case "info", "debug", "trace":
+	default:
+		p = append(p, fmt.Sprintf("options.log_level 必须为 info/debug/trace（当前 %q）", cfg.Options.LogLevel))
+	}
 	// Per-model vendor request fields: catch typos before a long run.
 	for name, m := range cfg.Models {
 		label := "models." + name

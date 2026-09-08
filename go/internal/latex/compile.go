@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/logger"
 )
 
 // Compiler wraps the local LaTeX toolchain (engine + pdftoppm). All
@@ -55,12 +56,66 @@ type CompileResult struct {
 	Log string // full log output (bounded)
 	PDF string // absolute path when OK
 	Err string // human-readable error summary when failed
+	// Warnings are the deduplicated warning lines (Overfull/Underfull
+	// boxes, LaTeX/Package/Class warnings), bounded; WarningCount is the
+	// total number seen. The full log stays out of the AI context and
+	// the debug log — only this summary travels.
+	Warnings     []string
+	WarningCount int
 }
 
 // errExtractors cut noisy LaTeX logs down to the interesting lines.
 var errExtractors = []*regexp.Regexp{
 	regexp.MustCompile(`(?m)^! .*$`),
 	regexp.MustCompile(`(?m)^l\.\d+.*$`),
+}
+
+// warnExtractors collect the warning lines worth reporting.
+var warnExtractors = []*regexp.Regexp{
+	regexp.MustCompile(`(?m)^(?:LaTeX|Package|Class|Module)\b.*Warning:.*$`),
+	regexp.MustCompile(`(?m)^(?:Overfull|Underfull) \\[hv]box.*$`),
+}
+
+// extractLatexWarnings deduplicates warning lines and bounds the list
+// while keeping the true total count.
+func extractLatexWarnings(logText string, limit int) ([]string, int) {
+	if limit <= 0 {
+		limit = 20
+	}
+	seen := map[string]bool{}
+	var out []string
+	total := 0
+	for _, re := range warnExtractors {
+		for _, m := range re.FindAllString(logText, -1) {
+			line := strings.TrimSpace(m)
+			if line == "" || seen[line] {
+				continue
+			}
+			seen[line] = true
+			total++
+			if len(out) < limit {
+				out = append(out, truncateStr(line, 300))
+			}
+		}
+	}
+	return out, total
+}
+
+// WarningSummary renders the bounded warning summary ("" when none).
+func (r CompileResult) WarningSummary() string {
+	if r.WarningCount == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "WARNINGS (%d", r.WarningCount)
+	if r.WarningCount > len(r.Warnings) {
+		fmt.Fprintf(&b, ", showing first %d", len(r.Warnings))
+	}
+	b.WriteString("):")
+	for _, w := range r.Warnings {
+		b.WriteString("\n  - " + w)
+	}
+	return b.String()
 }
 
 // Compile runs the engine once inside dir for mainFile (basename).
@@ -86,6 +141,7 @@ func (c *Compiler) Compile(dir, mainFile string) CompileResult {
 	}
 
 	res := CompileResult{Log: logText}
+	res.Warnings, res.WarningCount = extractLatexWarnings(logText, 20)
 	base := strings.TrimSuffix(mainFile, filepath.Ext(mainFile))
 	pdf := filepath.Join(dir, base+".pdf")
 	if err == nil {
@@ -206,6 +262,31 @@ func (c *Compiler) RasterizeAll(pdfPath, outBase string) ([]string, error) {
 	return matches, nil
 }
 
+// LogCompileResult writes one compact [compile] line to the debug log:
+// OK/FAILED, duration, warning count, the bounded warning list and — on
+// failure — exactly the error text handed to the AI. The full LaTeX log
+// is never dumped (too long to be useful).
+func LogCompileResult(log *logger.Logger, tid int, tag string, res CompileResult, elapsed time.Duration) {
+	if log == nil || !log.DebugEnabled() {
+		return
+	}
+	status := "OK"
+	if !res.OK {
+		status = "FAILED"
+	}
+	line := fmt.Sprintf("[compile:%s] %s (%.1fs)", tag, status, elapsed.Seconds())
+	if res.WarningCount > 0 {
+		line += fmt.Sprintf(" warnings=%d", res.WarningCount)
+	}
+	log.Debug(tid, line)
+	if w := res.WarningSummary(); w != "" {
+		log.Debug(tid, "[compile:"+tag+"] "+w)
+	}
+	if !res.OK {
+		log.Debug(tid, "[compile:"+tag+"] error returned to AI:\n"+truncateStr(res.Err, 2000))
+	}
+}
+
 // ReadImageFile loads a PNG/JPEG file as base64 (no data: prefix).
 func ReadImageFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
@@ -213,6 +294,89 @@ func ReadImageFile(path string) (string, error) {
 		return "", err
 	}
 	return b64Encode(data), nil
+}
+
+// svgBackend is one PDF→SVG converter. run is invoked with the absolute
+// input/output paths and must produce outSVG.
+type svgBackend struct {
+	name string
+	run  func(pdf, svg string) error
+}
+
+// svgBackends lists the supported PDF→SVG converters in preference
+// order. dvisvgm is fastest but needs Ghostscript < 10.01 or mutool for
+// PDF input (newer Ghostscript is rejected: "Ghostscript version 10.05.1
+// is not supported"); pdftocairo comes with poppler-utils, which the
+// pipeline already requires for rasterisation; mutool/inkscape are
+// optional extras.
+func svgBackends() []svgBackend {
+	return []svgBackend{
+		{name: "dvisvgm", run: func(pdf, svg string) error {
+			return runSVGTool(120*time.Second, svg, "dvisvgm", "--pdf", "--exact", "--output="+svg, pdf)
+		}},
+		{name: "pdftocairo", run: func(pdf, svg string) error {
+			return runSVGTool(120*time.Second, svg, "pdftocairo", "-svg", pdf, svg)
+		}},
+		{name: "mutool", run: func(pdf, svg string) error {
+			return runSVGTool(120*time.Second, svg, "mutool", "draw", "-F", "svg", "-o", svg, pdf)
+		}},
+		{name: "inkscape", run: func(pdf, svg string) error {
+			return runSVGTool(180*time.Second, svg, "inkscape", "--pdf-poppler",
+				"--export-type=svg", "--export-filename="+svg, pdf)
+		}},
+	}
+}
+
+// runSVGTool runs one converter, returning a compact error. out is the
+// file the backend is expected to create.
+func runSVGTool(timeout time.Duration, out, bin string, args ...string) error {
+	if _, err := exec.LookPath(bin); err != nil {
+		return fmt.Errorf("未安装 %s", bin)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(output))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("%s: %s", err, truncateStr(lastNonEmptyString(msg), 300))
+	}
+	if _, statErr := os.Stat(out); statErr != nil {
+		return fmt.Errorf("%s 未生成 SVG", bin)
+	}
+	return nil
+}
+
+// lastNonEmptyString keeps the most informative tail of a tool message.
+func lastNonEmptyString(s string) string {
+	lines := lastNonEmptyLines(s, 3)
+	if len(lines) == 0 {
+		return s
+	}
+	return strings.Join(lines, " | ")
+}
+
+// ConvertPDFToSVG converts pdfPath to svgPath, trying every available
+// backend until one succeeds. It returns the backend name that produced
+// the file, or an error listing what each backend reported (so the log
+// shows WHY the conversion failed instead of a bare exit status).
+func ConvertPDFToSVG(pdfPath, svgPath string) (string, error) {
+	var failures []string
+	for _, b := range svgBackends() {
+		os.Remove(svgPath) // never accept a stale file from a previous attempt
+		if err := b.run(pdfPath, svgPath); err != nil {
+			failures = append(failures, b.name+"("+err.Error()+")")
+			continue
+		}
+		if info, err := os.Stat(svgPath); err == nil && info.Size() > 0 {
+			return b.name, nil
+		}
+		failures = append(failures, b.name+"(输出为空)")
+	}
+	return "", fmt.Errorf("所有 PDF→SVG 后端均失败: %s", strings.Join(failures, "; "))
 }
 
 func truncateStr(s string, n int) string {

@@ -205,6 +205,9 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api response (%.1fs, stream=%v finish=%s content=%d chars reasoning=%d chars tools=%d %s)",
 				s.label, toolRounds+1, resp.Elapsed.Seconds(), resp.Streamed, dash(resp.FinishReason),
 				len(ContentString(choice.Message)), resp.ReasoningChars, len(choice.Message.ToolCalls), resp.Usage.String()))
+			if text := strings.TrimSpace(ContentString(choice.Message)); text != "" {
+				s.logger.Debug(s.tid, "[session:"+s.label+"] round "+fmt.Sprint(toolRounds+1)+" content:", truncateForLog(text, 4000))
+			}
 		}
 
 		if len(choice.Message.ToolCalls) > 0 && useTools {
@@ -486,4 +489,12 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// truncateForLog bounds a string for debug log lines.
+func truncateForLog(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + fmt.Sprintf("...(truncated, %d bytes total)", len(s))
 }

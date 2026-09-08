@@ -29,7 +29,7 @@ options:
   # init only creates this config; it does not install Node.js/npm, but it
   # will prompt for permission to run npm install -g @mermaid-js/mermaid-cli
   # before any installation happens.
-  log_level: "info"        # info | debug（debug 把 AI 提示词/工具调用完整写进日志文件）
+  log_level: "info"        # info | debug | trace（debug 记请求响应/提示词/工具调用/最终内容，trace 再加流式分片）
 # Paths
 paths:
   input_dir: "./files"              # dir with source files

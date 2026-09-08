@@ -31,6 +31,7 @@ If ambiguous or overly complex, call get_more_context to resolve; if still uncle
 3. **Markdown table** for tabular data: ALL rows and columns exactly as shown.
 4. **LaTeX** for formulas: $$...$$ block or $...$ inline.
 4b. **LaTeX vector graphics** for figures that need precise vector rendering and no Mermaid type fits: TikZ, pgfplots (function/coordinate plots), tabular/array, or any LaTeX approach that reproduces the structure faithfully — use a latex code block (three-backtick latex fence) with a standalone-compatible body. Division of labour: Mermaid for the listed diagram types, LaTeX for everything else (geometry, plots, complex tables, mixed structures).
+4c. **No overlaps / no crowding** in any diagram you draw (Mermaid or LaTeX): labels must not sit on lines, arrows or each other; nodes must not touch or overlap; nothing may be clipped. Enlarge the canvas/spacing (or shrink fonts proportionally) instead of squeezing elements together.
 5. **Structured text** for diagrams not suitable for Mermaid: preserve ALL labels, arrows, relationships shown.
 6. **Code block** for code screenshots: a fenced code block WITH the language annotation (` + "```python ... ```" + `, ` + "```java ... ```" + ` etc.).
 7. **Graph description**: key data points, max/min, trends for charts.
@@ -663,6 +664,11 @@ func doCallWithRetryFull(
 				logger.Debug(tid, fmt.Sprintf("[api] response #%d (%.1fs stream=%v finish=%s content=%d chars reasoning=%d chars tools=%d %s)",
 					round, resp.Elapsed.Seconds(), resp.Streamed, dash(resp.FinishReason),
 					content, reasoning, tools, resp.Usage.String()))
+				if len(resp.Choices) > 0 {
+					if text := strings.TrimSpace(contentString(resp.Choices[0].Message)); text != "" {
+						logger.Debug(tid, fmt.Sprintf("[api] response #%d content:", round), truncate(text, 4000))
+					}
+				}
 			}
 			return resp, "", ""
 		}
@@ -778,9 +784,13 @@ func ProcessOneImage(
 			// keeps its own CLI validation. Pure text/math/table answers
 			// hit ValidateMermaid's no-block fast path (valid).
 			if tikzMode != "off" && len(ExtractTikZBlocks(response)) > 0 && !hasMermaidBlock(response) {
-				return ValidateTikZ(context.Background(), response, tikzEngine, timeout)
+				v := ValidateTikZ(context.Background(), response, tikzEngine, timeout)
+				debugValidation(logger, tid, "latex", v)
+				return v
 			}
-			return ValidateMermaid(context.Background(), response, command, timeout)
+			v := ValidateMermaid(context.Background(), response, command, timeout)
+			debugValidation(logger, tid, "mermaid", v)
+			return v
 		}
 		repairBuilder = func(current, validationError string) string {
 			if len(ExtractTikZBlocks(current)) > 0 && !hasMermaidBlock(current) {
@@ -901,6 +911,21 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// debugValidation writes one [validate:<kind>] line to the debug log so
+// a run's Mermaid/LaTeX syntax checks are visible without dumping the
+// full tool output.
+func debugValidation(logger *logger.Logger, tid int, kind string, v MermaidValidationResult) {
+	if !logger.DebugEnabled() {
+		return
+	}
+	errText := "-"
+	if v.Error != "" {
+		errText = truncate(sanitizeMermaidError(v.Error), 400)
+	}
+	logger.Debug(tid, fmt.Sprintf("[validate:%s] has_blocks=%v valid=%v available=%v error=%s",
+		kind, v.HasMermaid, v.Valid, v.Available, errText))
 }
 
 // debugDumpMessages writes the full prompt of every request to the log

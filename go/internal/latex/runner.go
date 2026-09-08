@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -736,22 +735,22 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 			r.log.Log(tid, "[vector] 已合并跨页续片:", imgPath)
 		}
 	}
-	// Markdown 无法内嵌 PDF：用 dvisvgm 把矢量图编译为 SVG 供嵌入
-	//（失败时回退 PNG/PDF 链接，仅记录警告）。
+	// Markdown 无法内嵌 PDF：用 PDF→SVG 后端转换后嵌入（dvisvgm →
+	// pdftocairo → mutool → inkscape 依次尝试；失败时回退 PNG/PDF 链接，
+	// 仅记录警告）。
 	if !r.inline { // 档位1 内嵌 tikz 代码，无需 SVG
-		if _, err := exec.LookPath("dvisvgm"); err == nil {
-			dstSVG := filepath.Join(outDir, "figures", name+".svg")
-			cmd := exec.Command("dvisvgm", "--pdf", "--exact", "--output",
-				filepath.Base(dstSVG), filepath.Base(dstPDF))
-			cmd.Dir = outDir
-			if err := cmd.Run(); err != nil {
-				// 矢量产物已就绪但 SVG 化失败：降级为 PNG/PDF 链接。
-				// 按 ERROR 记录并标记（markdown 重建时就地标注，便于查找）。
-				pp.SVGFail = true
-				pp.Error = "svg 转换失败: " + err.Error()
-				r.log.LogError(tid, "[vector] SVG 转换失败（降级 PNG/PDF 链接，已在 markdown 标注）:", err)
-			} else {
-				pp.FigSVG = "figures/" + name + ".svg"
+		dstSVG := filepath.Join(outDir, "figures", name+".svg")
+		backend, err := ConvertPDFToSVG(dstPDF, dstSVG)
+		if err != nil {
+			// 矢量产物已就绪但 SVG 化失败：降级为 PNG/PDF 链接。
+			// 按 ERROR 记录并标记（markdown 重建时就地标注，便于查找）。
+			pp.SVGFail = true
+			pp.Error = "svg 转换失败: " + err.Error()
+			r.log.LogError(tid, "[vector] SVG 转换失败（降级 PNG/PDF 链接，已在 markdown 标注）:", err)
+		} else {
+			pp.FigSVG = "figures/" + name + ".svg"
+			if backend != "dvisvgm" {
+				r.log.Debug(tid, "[vector] SVG 由", backend, "生成:", pp.FigSVG)
 			}
 		}
 	}
@@ -1019,21 +1018,19 @@ func (r *Runner) migrateProgress(prog map[string]*imageProgress, progDir, outDir
 	}
 }
 
-// retrySVG re-runs dvisvgm for a previously failed SVG conversion.
+// retrySVG re-runs the PDF→SVG conversion for a previously failed
+// entry (no AI session needed).
 func (r *Runner) retrySVG(p *imageProgress, outDir string) bool {
-	if _, err := exec.LookPath("dvisvgm"); err != nil {
+	svgRel := strings.TrimSuffix(p.FigPDF, filepath.Ext(p.FigPDF)) + ".svg"
+	backend, err := ConvertPDFToSVG(filepath.Join(outDir, p.FigPDF), filepath.Join(outDir, svgRel))
+	if err != nil {
+		r.log.Debug(0, "[migrate] SVG 补跑仍失败:", p.ImgPath, err)
 		return false
 	}
-	svg := strings.TrimSuffix(p.FigPDF, filepath.Ext(p.FigPDF)) + ".svg"
-	cmd := exec.Command("dvisvgm", "--pdf", "--exact", "--output", filepath.Base(svg), filepath.Base(p.FigPDF))
-	cmd.Dir = outDir
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	p.FigSVG = svg
+	p.FigSVG = svgRel
 	p.SVGFail = false
 	p.Error = ""
-	r.log.Log(0, "[migrate] SVG 转换补跑成功:", p.ImgPath)
+	r.log.Log(0, "[migrate] SVG 转换补跑成功:", p.ImgPath, "("+backend+")")
 	return true
 }
 

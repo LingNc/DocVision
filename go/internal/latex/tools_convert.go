@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"mineru-tools/internal/logger"
 	"mineru-tools/internal/session"
 )
 
@@ -134,6 +135,8 @@ type CompileChapterTool struct {
 	Scratch    string // per-chapter scratch dir (contains wrapper + cls copy)
 	MainFile   string
 	SourcePath string // live chapter .tex in the virtual work tree; copied into Scratch before compiling
+	Log        *logger.Logger
+	Tid        int
 }
 
 func (t *CompileChapterTool) Name() string { return "compile" }
@@ -156,11 +159,20 @@ func (t *CompileChapterTool) Execute(_ string) (session.ToolResult, error) {
 			return session.ToolResult{}, err
 		}
 	}
+	start := time.Now()
 	res := t.Comp.Compile(t.Scratch, t.MainFile)
+	LogCompileResult(t.Log, t.Tid, "chapter", res, time.Since(start))
 	if res.OK {
+		if w := res.WarningSummary(); w != "" {
+			return session.ToolResult{Text: "COMPILE OK.\n" + truncateStr(w, 1500)}, nil
+		}
 		return session.ToolResult{Text: "COMPILE OK."}, nil
 	}
-	return session.ToolResult{Text: "COMPILE FAILED:\n" + res.Err}, nil
+	text := "COMPILE FAILED:\n" + res.Err
+	if w := res.WarningSummary(); w != "" {
+		text += "\n" + truncateStr(w, 1500)
+	}
+	return session.ToolResult{Text: text}, nil
 }
 
 // SubmitDoneTool is the generic final confirmation for convert / fix
@@ -327,6 +339,8 @@ type RecompileTool struct {
 	Dir      string
 	MainFile string
 	LastOK   bool
+	Log      *logger.Logger
+	Tid      int
 }
 
 func (t *RecompileTool) Name() string { return "recompile" }
@@ -340,10 +354,20 @@ func (t *RecompileTool) Definition() map[string]any {
 }
 
 func (t *RecompileTool) Execute(_ string) (session.ToolResult, error) {
+	start := time.Now()
 	res := t.Comp.Compile(t.Dir, t.MainFile)
+	LogCompileResult(t.Log, t.Tid, "book", res, time.Since(start))
 	t.LastOK = res.OK
 	if res.OK {
-		return session.ToolResult{Text: "COMPILE OK. The book PDF built successfully."}, nil
+		text := "COMPILE OK. The book PDF built successfully."
+		if w := res.WarningSummary(); w != "" {
+			text += "\n" + truncateStr(w, 1500)
+		}
+		return session.ToolResult{Text: text}, nil
 	}
-	return session.ToolResult{Text: "COMPILE FAILED:\n" + res.Err}, nil
+	text := "COMPILE FAILED:\n" + res.Err
+	if w := res.WarningSummary(); w != "" {
+		text += "\n" + truncateStr(w, 1500)
+	}
+	return session.ToolResult{Text: text}, nil
 }

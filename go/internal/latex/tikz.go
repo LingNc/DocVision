@@ -47,11 +47,10 @@ func RunTikZSession(
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
 	sess := session.NewSession(client, modelCfg, tuning, latexFigurePrompt, []session.Tool{
-		&CompilePreviewTool{Comp: comp, State: state, EngineIsXe: engineIsXe},
+		&CompilePreviewTool{Comp: comp, State: state, EngineIsXe: engineIsXe, Log: log, Tid: tid},
 		&SubmitFigureTool{State: state},
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
-		&ImageLocateTool{Content: env.MDContent, CurrentImg: env.CurrentImg},
-		&ViewImageTool{Root: env.ImagesDir},
+		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg)},
 	}, log, tid, "tikz")
 
 	initial := strings.Join([]string{

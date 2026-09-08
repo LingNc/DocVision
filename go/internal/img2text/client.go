@@ -372,7 +372,7 @@ func (c *AIClient) readStream(resp *http.Response, start time.Time) (*ChatRespon
 	var lastLog time.Time
 	var contentChars, reasoningChars int
 	progress := func() {
-		if c.log == nil || !c.log.DebugEnabled() {
+		if c.log == nil || !c.log.TraceEnabled() {
 			return
 		}
 		now := time.Now()
@@ -380,7 +380,7 @@ func (c *AIClient) readStream(resp *http.Response, start time.Time) (*ChatRespon
 			return
 		}
 		lastLog = now
-		c.log.Debug(0, fmt.Sprintf("[stream] %s: elapsed=%s content=%d chars reasoning=%d chars",
+		c.log.Trace(0, fmt.Sprintf("[stream] %s: elapsed=%s content=%d chars reasoning=%d chars",
 			c.model, now.Sub(start).Round(time.Second), contentChars, reasoningChars))
 	}
 	res, err := chatstream.Collect(resp.Body, chatstream.Options{

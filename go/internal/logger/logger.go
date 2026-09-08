@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+// Log levels. info is the default (progress + warnings/errors); debug
+// adds per-request summaries, prompts and tool results; trace adds the
+// noisy per-chunk stream traffic and raw dumps.
+const (
+	LevelInfo  = 0
+	LevelDebug = 1
+	LevelTrace = 2
+)
+
 // Logger is a thread-safe logger that writes timestamped, thread-tagged
 // messages to console and (optionally) to a log file and an error log file.
 //
@@ -18,7 +27,7 @@ type Logger struct {
 	errorFile     *os.File // may be nil if errLogPath is empty
 	threadIDWidth int
 	quiet         bool // when true, suppress console output; still writes to log files
-	debug         bool // when true, Debug() entries are written to the log file
+	level         int  // LevelInfo / LevelDebug / LevelTrace
 }
 
 // NewLogger creates a Logger.
@@ -60,31 +69,59 @@ func (l *Logger) Log(tid int, args ...interface{}) {
 	l.write(l.logFile, tid, "", args...)
 }
 
-// SetDebug toggles verbose debug logging (written to the log file only,
-// never to the console, so long prompts/tool dumps stay out of the way).
+// SetDebug toggles debug logging (written to the log file only, never
+// to the console, so long prompts/tool dumps stay out of the way).
 func (l *Logger) SetDebug(on bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.debug = on
+	if on {
+		l.SetLevel(LevelDebug)
+		return
+	}
+	l.SetLevel(LevelInfo)
 }
 
-// DebugEnabled reports whether debug logging is on.
-func (l *Logger) DebugEnabled() bool {
+// SetLevel sets the log level (LevelInfo / LevelDebug / LevelTrace).
+func (l *Logger) SetLevel(level int) {
+	if level < LevelInfo {
+		level = LevelInfo
+	}
+	if level > LevelTrace {
+		level = LevelTrace
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.debug
+	l.level = level
 }
+
+// Level returns the current log level.
+func (l *Logger) Level() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.level
+}
+
+// DebugEnabled reports whether debug (or trace) logging is on.
+func (l *Logger) DebugEnabled() bool { return l.Level() >= LevelDebug }
+
+// TraceEnabled reports whether trace logging is on.
+func (l *Logger) TraceEnabled() bool { return l.Level() >= LevelTrace }
 
 // Debug writes a [DEBUG] entry to the main log file only. No-op unless
-// debug mode was enabled via SetDebug.
+// debug or trace logging was enabled.
 func (l *Logger) Debug(tid int, args ...interface{}) {
-	l.mu.Lock()
-	on := l.debug
-	l.mu.Unlock()
-	if !on {
+	if !l.DebugEnabled() {
 		return
 	}
 	l.write(l.logFile, tid, "[DEBUG] ", args...)
+}
+
+// Trace writes a [TRACE] entry to the main log file only. Trace is the
+// deepest level: per-chunk stream traffic and raw dumps live here so a
+// normal debug log stays readable.
+func (l *Logger) Trace(tid int, args ...interface{}) {
+	if !l.TraceEnabled() {
+		return
+	}
+	l.write(l.logFile, tid, "[TRACE] ", args...)
 }
 
 // LogError writes "[ERROR] ..." tagged message to the console, the main log

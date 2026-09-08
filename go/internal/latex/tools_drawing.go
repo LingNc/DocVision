@@ -2,18 +2,91 @@ package latex
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
 	"strings"
 
 	"mineru-tools/internal/session"
 )
 
+// mdImageRef is one image reference found in a document's markdown.
+type mdImageRef struct {
+	path string
+	line int // 0-based line index
+}
+
+// scanImageRefs returns every image ref of a markdown document in order.
+func scanImageRefs(content string) ([]mdImageRef, []string) {
+	lines := strings.Split(content, "\n")
+	var refs []mdImageRef
+	for i, line := range lines {
+		for _, m := range imageRefRe.FindAllStringSubmatch(line, -1) {
+			refs = append(refs, mdImageRef{path: m[1], line: i})
+		}
+	}
+	return refs, lines
+}
+
+// matchImageRef finds the index of target among the markdown refs. It
+// accepts the exact ref, a path with/without the images/ prefix, or a
+// bare file name (a unique match is required — an ambiguous name yields
+// -1 instead of guessing).
+func matchImageRef(refs []mdImageRef, target string) int {
+	target = strings.TrimSpace(filepath.ToSlash(target))
+	if target == "" {
+		return -1
+	}
+	for i, r := range refs {
+		if r.path == target {
+			return i
+		}
+	}
+	norm := strings.TrimPrefix(strings.TrimPrefix(target, "./"), "images/")
+	if strings.Contains(norm, "/") {
+		// Partial path (subject/fig.jpg): match by suffix.
+		for i, r := range refs {
+			rel := strings.TrimPrefix(filepath.ToSlash(r.path), "images/")
+			if rel == norm || strings.HasSuffix(rel, "/"+norm) {
+				return i
+			}
+		}
+	}
+	// Bare file name: require a unique basename match.
+	base := path.Base(norm)
+	hits := 0
+	hit := -1
+	for i, r := range refs {
+		if path.Base(filepath.ToSlash(r.path)) == base {
+			hits++
+			hit = i
+		}
+	}
+	if hits == 1 {
+		return hit
+	}
+	return -1
+}
+
+// imageSubject returns the per-document subfolder of a markdown image
+// ref ("images/测试-概率论/x.jpg" -> "测试-概率论"), or "" when the ref
+// has no folder. Used so tools can resolve bare file names.
+func imageSubject(ref string) string {
+	p := strings.TrimPrefix(filepath.ToSlash(ref), "images/")
+	dir := path.Dir(p)
+	if dir == "." || dir == "/" || dir == "" {
+		return ""
+	}
+	return dir
+}
+
 // ImageContextTool lets a figure session inspect the document context
 // around ANY image reference of the source markdown and discover the
 // previous/next image refs — the same expandable up/down semantics as
-// img2text's get_more_context, but text-window based. This is the
-// backbone of cross-page figure merging: pagination shows a split
-// table/diagram as several consecutive image refs; the session inspects
-// neighbours to decide whether they are continuations.
+// img2text's get_more_context, but text-window based. It never returns
+// pixels: view_image does that. This is the backbone of cross-page
+// figure merging: pagination shows a split table/diagram as several
+// consecutive image refs; the session inspects neighbours to decide
+// whether they are continuations.
 type ImageContextTool struct {
 	Content    string // full markdown of the current document
 	CurrentImg string // the image this session was started for
@@ -31,13 +104,13 @@ func (t *ImageContextTool) Name() string { return "image_context" }
 func (t *ImageContextTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "image_context",
-		"description": "Show the markdown text lines around an image ref (expandable up/down window, like get_more_context) plus its prev/next image refs. Use it to detect cross-page continuations before drawing.",
+		"description": "TEXT context (no pixels): show the markdown lines around an image ref (expandable up/down window, like get_more_context) plus the previous/next image refs with their line numbers. Use it to detect cross-page continuations; use view_image to actually LOOK at an image.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"image": map[string]any{
 					"type":        "string",
-					"description": "Image path as it appears in the markdown (default: the image this session is drawing).",
+					"description": "Image ref as in the markdown (default: the image this session is drawing). A bare file name is also accepted (resolved inside this document's image folder).",
 				},
 				"up": map[string]any{
 					"type":        "integer",
@@ -80,28 +153,18 @@ func (t *ImageContextTool) Execute(argsJSON string) (session.ToolResult, error) 
 		return session.ToolResult{}, fmt.Errorf("image 为空且会话未绑定当前图片")
 	}
 
-	lines := strings.Split(t.Content, "\n")
-	type ref struct {
-		path string
-		line int
-	}
-	var refs []ref
-	for i, line := range lines {
-		for _, m := range imageRefRe.FindAllStringSubmatch(line, -1) {
-			refs = append(refs, ref{path: m[1], line: i})
-		}
-	}
-	idx := -1
-	for i, r := range refs {
-		if r.path == target {
-			idx = i
-			break
-		}
-	}
+	refs, lines := scanImageRefs(t.Content)
+	idx := matchImageRef(refs, target)
 	if idx < 0 {
-		return session.ToolResult{}, fmt.Errorf("markdown 中找不到图片 %s", target)
+		return session.ToolResult{}, fmt.Errorf("markdown 中找不到图片 %s（可直接用文件名，程序会在本文档图片目录内匹配）", target)
 	}
 
+	deltaTo := func(i int) int {
+		if i < 0 || i >= len(refs) {
+			return 0
+		}
+		return refs[i].line - refs[idx].line
+	}
 	build := func(i, upN, downN int) string {
 		if i < 0 || i >= len(refs) {
 			return "(none)"
@@ -116,7 +179,11 @@ func (t *ImageContextTool) Execute(argsJSON string) (session.ToolResult, error) 
 			hi = len(lines)
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "%s (line %d)\n", r.path, r.line+1)
+		if d := deltaTo(i); d == 0 {
+			fmt.Fprintf(&b, "%s (line %d)\n", r.path, r.line+1)
+		} else {
+			fmt.Fprintf(&b, "%s (line %d, %+d lines from this image)\n", r.path, r.line+1, d)
+		}
 		for ln := lo; ln < hi; ln++ {
 			marker := "  "
 			if ln == r.line {
@@ -128,73 +195,10 @@ func (t *ImageContextTool) Execute(argsJSON string) (session.ToolResult, error) 
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "image %d of %d in this document: %s\n", idx+1, len(refs), target)
+	fmt.Fprintf(&b, "image %d of %d in this document: %s\n", idx+1, len(refs), refs[idx].path)
 	fmt.Fprintf(&b, "\n## PREVIOUS image ref:\n%s", build(idx-1, up, down))
 	fmt.Fprintf(&b, "\n\n## THIS image context (up %d / down %d lines; request again with bigger up/down to expand):\n%s", up, down, build(idx, up, down))
 	fmt.Fprintf(&b, "\n\n## NEXT image ref:\n%s", build(idx+1, up, down))
 	b.WriteString("\n\nDecide WITHOUT assuming: adjacency does NOT imply relation. If PREVIOUS/NEXT is the same table/figure continued across a page break, view_image it, then draw ONE combined figure and submit with \"merges\" listing the absorbed image paths. If they are unrelated, or this image is obviously complete on its own, just draw THIS image and merge nothing.")
-	return session.ToolResult{Text: b.String()}, nil
-}
-
-// ImageLocateTool answers a lightweight question: WHERE are the
-// previous/next image refs relative to the current one (line numbers
-// and +/- line deltas), so the model can aim image_context/view_image
-// precisely without dumping large context windows.
-type ImageLocateTool struct {
-	Content    string
-	CurrentImg string
-}
-
-func (t *ImageLocateTool) Name() string { return "image_locate" }
-
-func (t *ImageLocateTool) Definition() map[string]any {
-	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "image_locate",
-		"description": "Locate the previous/next image refs relative to the current image: line numbers and +/- line deltas. Cheap orientation step before image_context/view_image.",
-		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
-	}}
-}
-
-func (t *ImageLocateTool) Execute(argsJSON string) (session.ToolResult, error) {
-	target := t.CurrentImg
-	if target == "" {
-		return session.ToolResult{}, fmt.Errorf("会话未绑定当前图片")
-	}
-	lines := strings.Split(t.Content, "\n")
-	type ref struct {
-		path string
-		line int
-	}
-	var refs []ref
-	for i, line := range lines {
-		for _, m := range imageRefRe.FindAllStringSubmatch(line, -1) {
-			refs = append(refs, ref{path: m[1], line: i})
-		}
-	}
-	idx := -1
-	for i, r := range refs {
-		if r.path == target {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return session.ToolResult{}, fmt.Errorf("markdown 中找不到图片 %s", target)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "image %d of %d: %s at line %d\n", idx+1, len(refs), target, refs[idx].line+1)
-	if idx > 0 {
-		p := refs[idx-1]
-		fmt.Fprintf(&b, "previous: %s (line %d, %d lines above)\n", p.path, p.line+1, refs[idx].line-p.line)
-	} else {
-		b.WriteString("previous: (none)\n")
-	}
-	if idx+1 < len(refs) {
-		n := refs[idx+1]
-		fmt.Fprintf(&b, "next: %s (line %d, +%d lines below)\n", n.path, n.line+1, n.line-refs[idx].line)
-	} else {
-		b.WriteString("next: (none)\n")
-	}
-	b.WriteString("Use image_context {image, up, down} to expand text around any of them; view_image to look. Adjacency does NOT imply relation.")
 	return session.ToolResult{Text: b.String()}, nil
 }

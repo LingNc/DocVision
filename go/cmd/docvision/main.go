@@ -434,7 +434,8 @@ func newImg2TextCmd() *cobra.Command {
 	cmd.Flags().Bool("test", false, "启用测试模式（随机抽样）")
 	cmd.Flags().Int("number", 10, "测试图片数量（默认: 10）")
 	cmd.Flags().String("seed", "", "随机种子：'random' 或数字（用于复现）")
-	cmd.Flags().Bool("debug", false, "调试模式：把请求参数/提示词/响应统计完整写入日志文件")
+	cmd.Flags().Bool("debug", false, "调试模式：记录请求参数/提示词/响应统计到日志文件")
+	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节")
 	return cmd
 }
 
@@ -461,10 +462,7 @@ func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) (
 		return logPath, fmt.Errorf("create logger: %w", err)
 	}
 	defer log.Close()
-	if debugEnabled(cmd, cfg) {
-		log.SetDebug(true)
-		fmt.Println("调试模式：请求参数/提示词/响应统计将完整写入日志文件")
-	}
+	applyLogLevel(cmd, cfg, log)
 
 	opts := img2text.RunOptions{
 		TestMode: testMode,
@@ -475,18 +473,44 @@ func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) (
 	return logPath, img2text.Run(cfg, log, opts)
 }
 
-// debugEnabled reports whether verbose debug logging is on, either from
-// the --debug flag or options.log_level: debug. The flag is optional:
-// workflow steps reuse commands that do not define it.
-func debugEnabled(cmd *cobra.Command, cfg *config.Config) bool {
-	if cfg != nil && cfg.Options.LogLevel == "debug" {
-		return true
+// requestedLogLevel resolves the log level from the CLI flags and
+// options.log_level (the higher level wins). The flags are optional:
+// workflow steps reuse commands that do not define them.
+func requestedLogLevel(cmd *cobra.Command, cfg *config.Config) int {
+	level := logger.LevelInfo
+	if cfg != nil {
+		switch strings.ToLower(strings.TrimSpace(cfg.Options.LogLevel)) {
+		case "trace":
+			level = logger.LevelTrace
+		case "debug":
+			level = logger.LevelDebug
+		}
 	}
-	if cmd == nil || cmd.Flags().Lookup("debug") == nil {
-		return false
+	flag := func(name string) bool {
+		if cmd == nil || cmd.Flags().Lookup(name) == nil {
+			return false
+		}
+		v, err := cmd.Flags().GetBool(name)
+		return err == nil && v
 	}
-	v, err := cmd.Flags().GetBool("debug")
-	return err == nil && v
+	if flag("trace") {
+		level = logger.LevelTrace
+	} else if flag("debug") && level < logger.LevelDebug {
+		level = logger.LevelDebug
+	}
+	return level
+}
+
+// applyLogLevel sets the logger level and prints a one-line notice.
+func applyLogLevel(cmd *cobra.Command, cfg *config.Config, log *logger.Logger) {
+	level := requestedLogLevel(cmd, cfg)
+	log.SetLevel(level)
+	switch level {
+	case logger.LevelTrace:
+		fmt.Println("调试模式(TRACE)：请求参数/提示词/流式分片/响应统计完整写入日志文件")
+	case logger.LevelDebug:
+		fmt.Println("调试模式：请求参数/提示词/响应统计写入日志文件")
+	}
 }
 
 func newAnalyzeCmd() *cobra.Command {

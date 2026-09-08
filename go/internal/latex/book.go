@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"mineru-tools/internal/session"
 )
@@ -292,7 +293,9 @@ func (r *Runner) stylePhase(proj string) error {
 		copyFile(filepath.Join(styleDir, clsName+".cls"), filepath.Join(scratch, clsName+".cls"))
 		exFile := filepath.Join(scratch, "example.tex")
 		copyFile(filepath.Join(styleDir, "example.tex"), exFile)
+		start := time.Now()
 		res := comp.Compile(scratch, "example.tex")
+		LogCompileResult(r.log, 1, "style-example", res, time.Since(start))
 		if res.OK {
 			r.log.Log(1, "[style] example 编译通过，样式包已就绪:", clsName+".cls")
 			return nil
@@ -546,7 +549,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	tools := []session.Tool{
 		&ReadFileTool{Root: proj},
 		write,
-		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath},
+		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: 1},
 		submit,
 	}
 	if r.docIndex != nil && r.docPages != nil {
@@ -619,7 +622,9 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		}
 		data, _ := os.ReadFile(texPath)
 		_ = os.WriteFile(filepath.Join(scratch, base+".tex"), data, 0o644)
+		start := time.Now()
 		res := r.comp.Compile(scratch, base+"_wrapper.tex")
+		LogCompileResult(r.log, tid, "convert-check", res, time.Since(start))
 		if !res.OK {
 			return fmt.Errorf("会话未提交且编译失败: %s", res.Err)
 		}
@@ -749,7 +754,10 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	if err := copyFile(filepath.Join(styleDir, "example.tex"), filepath.Join(scratch, "example.tex")); err != nil {
 		return err
 	}
-	if res := r.comp.Compile(scratch, "example.tex"); !res.OK {
+	start := time.Now()
+	res := r.comp.Compile(scratch, "example.tex")
+	LogCompileResult(r.log, 1, "style-feedback", res, time.Since(start))
+	if !res.OK {
 		return fmt.Errorf("样式反馈 example 编译失败: %s", res.Err)
 	}
 	r.log.Log(1, "[style-feedback] 更新后的 example 编译通过:", clsName+".cls")

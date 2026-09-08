@@ -4,6 +4,20 @@
 
 ### Added
 
+- **日志等级 info / debug / trace**：`options.log_level` 新增 `trace`，命令新增 `--trace`。debug 只保留每轮请求/响应摘要、提示词、工具调用与**最终接收内容**；流式分片进展行等噪音降到 trace。`options.log_level` 取值错误由 `setup` 校验
+- **PDF→SVG 多后端回退**：`dvisvgm → pdftocairo → mutool → inkscape` 依次尝试，成功后记录所用后端；全部失败时 ERROR 日志列出每个后端的具体原因（不再是裸 exit status）
+- **LaTeX 编译警告反馈**：编译结果新增 `Warnings` / `WarningCount` / `WarningSummary`（Overfull/Underfull box、LaTeX/Package/Class Warning，去重并限长），随 compile_preview / compile / recompile 的工具结果一并返回给 AI；debug 日志新增 `[compile:<preview|chapter|book>] OK|FAILED (耗时) warnings=N` + 警告清单 + 失败时给 AI 的错误原文（完整编译日志仍然不进上下文/日志）
+- **Mermaid / LaTeX 校验结果进 debug 日志**：`[validate:mermaid]` / `[validate:latex]` 记录 has_blocks / valid / available / 精简后的错误
+- **作图禁止重叠/拥挤**：latex 作图提示词新增硬规则与提交前检查项（标签不得压线/互相遮挡、节点不得重叠或越界，空间不足就整体放大/增间距/按比例缩小字号），img2text 提示词同步
+- **图片工具可直接用文件名**：`view_image` 增加会话文档图片目录（`Subject`）解析，接受 `foo.jpg`、`subject/foo.jpg`、`images/subject/foo.jpg` 三种形式，重名时报告歧义；`image_context` 同样接受裸文件名并按唯一基名匹配；提示词说明"直接用文件名，不要卡在路径上"
+
+### Fixed
+
+- **矢量图 SVG 转换必然失败**：dvisvgm 3.6 处理 PDF 需要 Ghostscript < 10.01 或 mutool，而本机 Ghostscript 10.05.1 不受支持（`ERROR: To process PDF files, either Ghostscript < 10.01.0 or mutool is required`），导致所有矢量图降级为 PNG/PDF 链接并记 ERROR；现由 pdftocairo 等后端兜底
+- **`image_locate` 与 `image_context` 功能重叠**：删除 `image_locate`（其行号/前后引用/±行差信息并入 `image_context` 输出），作图会话只保留 `image_context`（文本上下文）与 `view_image`（看像素）两个职责清晰的工具
+
+### Added（前一轮）
+
 - **流式接收（默认开启）**：新增 `models.<name>.stream`（不写即 true），AI 请求改用 SSE 流式接收（`internal/chatstream` 统一组装 content/reasoning/tool_calls/usage），长思考/长输出期间持续有进展不再静默；流式模式自动带 `stream_options.include_usage`；厂商不支持流式（HTTP 400/404/405/415/422 或提示 stream 不支持）时自动回退一次非流式请求
 - **流式超时语义**：非流式仍是 `api_connect_timeout + api_timeout`（默认 60+400s）整次请求上限；流式不再设总上限，改用 `models.<name>.api_stream_idle_timeout`（默认取 `api_timeout`）判定"两个数据块之间的最大间隔"，长但不间断的流不会被杀
 - **思考控制配置**：`models.<name>.thinking`（顶层 `{type: enabled|disabled}`，GLM-4.5+/DeepSeek）与 `models.<name>.reasoning_effort`（顶层 max/xhigh/high/medium/low/minimal/none，GLM-5.2+），随 `request_body` 之后合并到请求体顶层，显式配置优先；`setup` 严格校验取值
