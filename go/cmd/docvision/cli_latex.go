@@ -13,6 +13,7 @@ import (
 	"mineru-tools/internal/config"
 	"mineru-tools/internal/latex"
 	"mineru-tools/internal/logger"
+	"mineru-tools/internal/organize"
 	"mineru-tools/pkg/util"
 )
 
@@ -229,11 +230,18 @@ func prepareLatexInputs(cmd *cobra.Command, cfg *config.Config, args []string) (
 				return nil, fmt.Errorf("前置步骤 split 失败: %w", err)
 			}
 		}
-		for _, stepName := range []string{"mineru", "organize"} {
-			fmt.Printf("\n=== LaTeX 前置: %s ===\n", stepLabel(stepName))
-			if _, err := runStep(stepName, cmd, cfg, ""); err != nil {
-				return nil, fmt.Errorf("前置步骤 %s 失败: %w", stepName, err)
-			}
+		// 只处理指定源对应的分片与 subject，不全量扫描 files/。
+		fmt.Printf("\n=== LaTeX 前置: %s ===\n", stepLabel("mineru"))
+		if err := processMinerUFiles(cfg, mineruFilesForSources(cfg, splitOut, sources)); err != nil {
+			return nil, fmt.Errorf("前置步骤 mineru 失败: %w", err)
+		}
+		fmt.Printf("\n=== LaTeX 前置: %s ===\n", stepLabel("organize"))
+		var subjects []string
+		for _, src := range sources {
+			subjects = append(subjects, strings.TrimSuffix(filepath.Base(src), filepath.Ext(filepath.Base(src))))
+		}
+		if err := organize.OrganizeFiles(cfg, subjects...); err != nil {
+			return nil, fmt.Errorf("前置步骤 organize 失败: %w", err)
 		}
 		// 前置产出的 md（<stem>.md）就是本次 LaTeX 的处理范围。
 		for _, src := range sources {

@@ -366,6 +366,33 @@ func runMinerUFromConfig(cmd *cobra.Command, cfg *config.Config) error {
 		}
 	}
 
+	return processMinerUFiles(cfg, files)
+}
+
+// mineruFilesForSources maps latex preflow source files to the exact
+// split parts / input files that belong to them, so the MinerU stage
+// only touches the requested book instead of the whole files/ tree.
+func mineruFilesForSources(cfg *config.Config, splitDir string, sources []string) []string {
+	var files []string
+	for _, src := range sources {
+		base := filepath.Base(src)
+		stem := strings.TrimSuffix(base, filepath.Ext(base))
+		parts, _ := util.GlobSorted(filepath.Join(splitDir, stem+"_part*.pdf"))
+		if len(parts) > 0 {
+			files = append(files, parts...)
+			continue
+		}
+		// No PDF parts: feed the original file (docx/image/office path).
+		if util.FileExists(filepath.Join(cfg.Paths.InputDir, base)) {
+			files = append(files, filepath.Join(cfg.Paths.InputDir, base))
+		}
+	}
+	return files
+}
+
+// processMinerUFiles uploads/parses exactly the given files (skipping
+// ones already completed in mineru_output).
+func processMinerUFiles(cfg *config.Config, files []string) error {
 	client := mineru.NewClient(cfg.Mineru)
 	statusDir := filepath.Join(cfg.Paths.MineruOutput, "status")
 	_, _, failN := mineru.ProcessFilesConcurrent(client, files, cfg.Paths.MineruOutput, statusDir, cfg.Mineru.MaxConcurrent)

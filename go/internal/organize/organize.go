@@ -69,7 +69,7 @@ var indexScanCounter int
 // The function is incremental: reruns preserve the existing output/*.md,
 // output/images and any manually created files. Only output/temp is
 // rebuilt on every invocation.
-func OrganizeFiles(cfg *config.Config) error {
+func OrganizeFiles(cfg *config.Config, subjects ...string) error {
 	mineruOutput := cfg.Paths.MineruOutput
 	outputDir := cfg.Paths.OutputDir
 	imagesDir := cfg.Paths.ImagesDir
@@ -107,7 +107,16 @@ func OrganizeFiles(cfg *config.Config) error {
 	fmt.Println()
 
 	// groups[subject] = sorted list of part numbers (empty for single-file subjects).
-	groups, allDirs, err := step1CopyMarkdown(mineruOutput, tempDir)
+	// Optional subjects filter: when latex preflow names a specific book,
+	// only that subject's parts are copied/merged (no full-tree scan).
+	var filter map[string]bool
+	if len(subjects) > 0 {
+		filter = map[string]bool{}
+		for _, sub := range subjects {
+			filter[sub] = true
+		}
+	}
+	groups, allDirs, err := step1CopyMarkdown(mineruOutput, tempDir, filter)
 	if err != nil {
 		return err
 	}
@@ -127,7 +136,7 @@ func OrganizeFiles(cfg *config.Config) error {
 // step1CopyMarkdown walks the MinerU output, copying every full.md into
 // temp/ and grouping part directories by subject. The temp directory is
 // always rebuilt so this step does no incremental bookkeeping.
-func step1CopyMarkdown(mineruOutput, tempDir string) (map[string][]string, []string, error) {
+func step1CopyMarkdown(mineruOutput, tempDir string, filter map[string]bool) (map[string][]string, []string, error) {
 	fmt.Printf("[1/4] 复制 full.md -> %s/ ...\n", tempDir)
 
 	entries, err := os.ReadDir(mineruOutput)
@@ -143,6 +152,15 @@ func step1CopyMarkdown(mineruOutput, tempDir string) (map[string][]string, []str
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
+		}
+		if filter != nil {
+			subject := e.Name()
+			if m := partRe.FindStringSubmatch(e.Name()); m != nil {
+				subject = m[1]
+			}
+			if !filter[subject] {
+				continue
+			}
 		}
 		dirPath := filepath.Join(mineruOutput, e.Name())
 		fullMD := filepath.Join(dirPath, "full.md")
