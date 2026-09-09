@@ -37,6 +37,16 @@ func TestWriteWorkFileToolPrefixes(t *testing.T) {
 	} else if !strings.Contains(res.Text, "input fragment") {
 		t.Fatalf("documentclass must be rejected: %q", res.Text)
 	}
+	if res, err := tool.Execute(`{"path":"project:chapters/ch1.tex","content":"x"}`); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(res.Text, "read-only") {
+		t.Fatalf("foreign mount write = %q", res.Text)
+	}
+	if res, err := tool.Execute(`{"path":"work:chapters/ch1.tex","content":"\\section{One}"}`); err != nil {
+		t.Fatal(err)
+	} else if !strings.HasPrefix(res.Text, "WROTE") {
+		t.Fatalf("work: prefix = %q", res.Text)
+	}
 }
 
 // TestViewImageResolveFigureSession pins the figure-session contract:

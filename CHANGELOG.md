@@ -22,6 +22,7 @@
 
 ### Added
 
+- **虚拟工作区挂载表（VFS）**：新增 `internal/latex/vfs.go`——每个会话一个命名空间，`Mount{Name,Dir,Writable}` 挂载表 + `VFS.Resolve(path, write)`。路径语法：`chapters/x.tex`（默认挂载点，通常 `work`）、`project:chapters/x.md`、`/project/chapters/x.md`；越界 `../` 拒绝、只读挂载点写入拒绝、未知挂载点报错并列出可用挂载点。`read_file` 新增 `Mounts` 字段（优先于 Root/AltRoots），回显统一为 `挂载点:路径`；`grep` 新增 `AltRoots`（多根检索，附加根命中加 `label/` 前缀）；`write_file`/`edit_file` 接受 `work:` 前缀、拒绝其它挂载点。终审/修复会话的 grep 现在可同时搜索构建树与项目原始 md。
 - **终审会话（全书汇总/整理）**：全书编译成功后不再直接交付，而是总是进入 `finalReview` 会话——构建树 `build/` 同时是样式包基础工作区（cls/sty/manual.md/example.tex 一并复制），工具集与修复会话共享 `bookSessionTools`（read_file 可读构建树 + 项目根、write_file/edit_file/grep/bash、compile {engine:"latexmk"}、view_pdf、view_image、list_fonts、list_source_pages/view_source_page、submit）；它逐页检视成品 PDF（封面/目录/章节顺序与完整性/页码/图表位置与溢出/孤页/overfull box）并做最小 edit_file 修正后重新构建，轮数上限 `latex.compile.max_fix_rounds`。开关 `latex.compile.final_review`（默认 true）；终审未通过只告警，已编译全书照常交付。
 - **raster 图档位1 统一解释块**：档位1 的 raster 图在 process 阶段总是生成解释文本（复用 img2text 文本提取，每张一次视觉调用），嵌入格式与 STYLED/VECTOR 同骨架——`<!-- DOCVISION-IMAGE: <label> -->` + `DESCRIBE: <解释>` + `LINK: [image](…)`，无文本时只有 LINK 行；`latex.insert_image_description` 仅控制档位2（开=嵌入 `[Image]( content )`，关=纯 `![image]` 原图引用）
 

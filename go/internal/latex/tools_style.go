@@ -620,6 +620,12 @@ func (t *WriteWorkFileTool) Execute(argsJSON string) (session.ToolResult, error)
 	if !t.AnyExt && !workFileExtRe.MatchString(rel) {
 		return session.ToolResult{Text: "REJECTED: only .cls .sty .tex .md files are allowed."}, nil
 	}
+	if m := explicitMountOf(rel); m != "" {
+		if m != "work" {
+			return session.ToolResult{Text: "REJECTED: mount \"" + m + "\" is read-only here; write under your own workspace (work:...)."}, nil
+		}
+		rel = stripMount(rel)
+	}
 	if !t.pathAllowed(rel) {
 		return session.ToolResult{Text: "REJECTED: " + rel + " is outside your writable paths (" + strings.Join(t.Prefixes, ", ") + ")."}, nil
 	}

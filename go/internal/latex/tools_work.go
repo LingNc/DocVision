@@ -33,6 +33,9 @@ type ReadFileTool struct {
 	// not resolve under Root (e.g. the project tree for a session whose
 	// workspace is a subdirectory).
 	AltRoots []AltRoot
+	// Mounts overrides Root/AltRoots with an explicit virtual workspace
+	// mount table (name + dir + writability).
+	Mounts []Mount
 	// MaxBytes caps a whole-file read (default 64KB).
 	MaxBytes int
 	// MaxLines caps one line-window read (default 400).
@@ -41,16 +44,29 @@ type ReadFileTool struct {
 
 func (t *ReadFileTool) Name() string { return "read_file" }
 
+// vfs returns the session's virtual workspace (Mounts wins over
+// Root/AltRoots when both are set).
+func (t *ReadFileTool) vfs() *VFS {
+	if len(t.Mounts) > 0 {
+		return &VFS{Mounts: t.Mounts}
+	}
+	return vfsFrom(t.Root, t.AltRoots)
+}
+
 func (t *ReadFileTool) Definition() map[string]any {
+	desc := "Read a text file (read-only): your workspace files AND, where allowed, the project files (source markdown, class manual, other chapters). " +
+		"Without start_line/end_line the whole file is returned (truncated when large); with start_line/end_line a numbered window of at most 400 lines is returned. " +
+		"Paths are workspace-relative."
+	if d := t.vfs().Describe(); d != "" {
+		desc += " " + d
+	}
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name": "read_file",
-		"description": "Read a text file (read-only): your workspace files AND, where allowed, the project files (source markdown, class manual, other chapters). " +
-			"Without start_line/end_line the whole file is returned (truncated when large); with start_line/end_line a numbered window of at most 400 lines is returned. " +
-			"Paths are workspace-relative.",
+		"name":        "read_file",
+		"description": desc,
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":       map[string]any{"type": "string", "description": "file path relative to the workspace root"},
+				"path":       map[string]any{"type": "string", "description": "file path relative to the workspace root (or name:path for another mount)"},
 				"start_line": map[string]any{"type": "integer", "description": "optional first line (1-based) of a window"},
 				"end_line":   map[string]any{"type": "integer", "description": "optional last line (inclusive) of a window"},
 			},
@@ -59,13 +75,30 @@ func (t *ReadFileTool) Definition() map[string]any {
 	}}
 }
 
-// resolve finds the file under Root, then under the extra roots.
+// resolve finds the file through the virtual workspace mounts. Plain
+// paths try the workspace first, then the read-only roots (historic
+// behaviour); "name:path" / "/name/path" address one mount directly.
 func (t *ReadFileTool) resolve(rel string) (full, label string, err error) {
 	if strings.TrimSpace(rel) == "" {
 		return "", "", fmt.Errorf("path 为空")
 	}
+	v := t.vfs()
+	// 显式挂载点（name:path / /name/path）直接定位，不做跨挂载点搜索。
+	if explicitMountOf(rel) != "" {
+		full, label, rerr := v.Resolve(rel, false)
+		if rerr != nil {
+			return "", "", rerr
+		}
+		if !fileExists(full) {
+			if st, se := os.Stat(full); se == nil && st.IsDir() {
+				return "", "", fmt.Errorf("%s 是目录（用 grep 或 bash ls 查看目录内容）", rel)
+			}
+			return "", "", fmt.Errorf("文件不存在: %s", rel)
+		}
+		return full, label, nil
+	}
 	if p, e := resolveInside(t.Root, rel); e == nil && fileExists(p) {
-		return p, "", nil
+		return p, "work", nil
 	}
 	for _, ar := range t.AltRoots {
 		if ar.Dir == "" {
@@ -83,6 +116,23 @@ func (t *ReadFileTool) resolve(rel string) (full, label string, err error) {
 	return "", "", fmt.Errorf("文件不存在: %s", rel)
 }
 
+// explicitMountOf returns the mount name when the path uses the
+// "name:path" or "/name/path" form.
+func explicitMountOf(p string) string {
+	p = strings.TrimSpace(p)
+	if strings.HasPrefix(p, "/") {
+		rest := strings.TrimPrefix(p, "/")
+		if i := strings.Index(rest, "/"); i > 0 {
+			return rest[:i]
+		}
+		return rest
+	}
+	if i := strings.Index(p, ":"); i > 0 {
+		return p[:i]
+	}
+	return ""
+}
+
 func (t *ReadFileTool) Execute(argsJSON string) (session.ToolResult, error) {
 	args, err := parseJSONObject(argsJSON)
 	if err != nil {
@@ -94,7 +144,9 @@ func (t *ReadFileTool) Execute(argsJSON string) (session.ToolResult, error) {
 		return session.ToolResult{}, err
 	}
 	shown := rel
-	if label != "" {
+	if m := explicitMountOf(rel); m != "" {
+		shown = label + ":" + stripMount(rel)
+	} else if label != "" {
 		shown = label + "/" + rel
 	}
 	_, hasStart := args["start_line"]
@@ -289,6 +341,12 @@ func (t *EditWorkFileTool) Execute(argsJSON string) (session.ToolResult, error) 
 	if strings.TrimSpace(rel) == "" {
 		return session.ToolResult{}, fmt.Errorf("path 为空")
 	}
+	if m := explicitMountOf(rel); m != "" {
+		if m != "work" {
+			return session.ToolResult{Text: "REJECTED: mount \"" + m + "\" is read-only here; edit files under your own workspace (work:...)."}, nil
+		}
+		rel = stripMount(rel)
+	}
 	full, err := resolveInside(t.Root, rel)
 	if err != nil {
 		return session.ToolResult{}, err
@@ -344,15 +402,23 @@ func (t *EditWorkFileTool) Execute(argsJSON string) (session.ToolResult, error) 
 // line numbers.
 type GrepTool struct {
 	Root string
+	// AltRoots are additional read-only roots searched after Root; hits
+	// are prefixed with the mount label so the model knows where the
+	// file lives.
+	AltRoots []AltRoot
 }
 
 func (t *GrepTool) Name() string { return "grep" }
 
 func (t *GrepTool) Definition() map[string]any {
+	desc := "Search files for a pattern (Go regexp). path: a file, or a directory (recursive, text files only). " +
+		"Returns matched lines with 1-based line numbers; use read_file with those lines for context."
+	if v := vfsFrom(t.Root, t.AltRoots); len(v.Mounts) > 1 {
+		desc += " " + v.Describe()
+	}
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name": "grep",
-		"description": "Search files for a pattern (Go regexp). path: a file, or a directory (recursive, text files only). " +
-			"Returns matched lines with 1-based line numbers; use read_file with those lines for context.",
+		"name":        "grep",
+		"description": desc,
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -378,32 +444,87 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if rel == "" {
 		rel = "."
 	}
-	full, err := resolveInside(t.Root, rel)
-	if err != nil {
-		return session.ToolResult{}, err
-	}
 	maxMatches := intArg(args, "max_matches", 50)
 	if maxMatches > 200 {
 		maxMatches = 200
+	}
+	// 主工作区 + 只读附加根（后者命中加 label/ 前缀）。
+	mounts := []struct {
+		dir, label string
+	}{{t.Root, ""}}
+	for _, ar := range t.AltRoots {
+		if ar.Dir != "" {
+			mounts = append(mounts, struct{ dir, label string }{ar.Dir, ar.Label})
+		}
+	}
+	var out strings.Builder
+	total := 0
+	for _, m := range mounts {
+		full, rerr := resolveInside(m.dir, rel)
+		if rerr != nil {
+			if m.label == "" {
+				return session.ToolResult{}, rerr
+			}
+			continue
+		}
+		if !fileExists(full) && m.label != "" {
+			continue
+		}
+		text, herr := runGrep(pattern, full, maxMatches-total)
+		if herr != nil {
+			if m.label == "" {
+				return session.ToolResult{Text: "grep error: " + herr.Error()}, nil
+			}
+			continue
+		}
+		if text == "" {
+			continue
+		}
+		// 绝对路径改回工作区相对路径，省 token
+		text = strings.ReplaceAll(text, full+"/", "")
+		text = strings.ReplaceAll(text, full, ".")
+		if m.label != "" {
+			lines := strings.Split(text, "\n")
+			for i, ln := range lines {
+				lines[i] = m.label + "/" + ln
+			}
+			text = strings.Join(lines, "\n")
+		}
+		out.WriteString(text)
+		out.WriteString("\n")
+		total += strings.Count(text, "\n")
+		if total >= maxMatches {
+			break
+		}
+	}
+	res := strings.TrimRight(out.String(), "\n")
+	if res == "" {
+		return session.ToolResult{Text: "NO MATCHES: " + pattern}, nil
+	}
+	return session.ToolResult{Text: res}, nil
+}
+
+// runGrep runs grep -rIn on a file or directory and returns the raw
+// output, or an error for real failures (bad regexp, ...). "No match"
+// is not an error.
+func runGrep(pattern, full string, limit int) (string, error) {
+	if limit < 1 {
+		limit = 1
 	}
 	cmd := exec.Command("grep", "-rIn", "-n", "-e", pattern, "--", full)
 	out, err := cmd.CombinedOutput()
 	text := string(out)
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return session.ToolResult{Text: "NO MATCHES: " + pattern}, nil
+			return "", nil
 		}
-		// grep 传目录时会递归；其他错误（坏正则等）原样返回
-		return session.ToolResult{Text: "grep error: " + text}, nil
+		return "", fmt.Errorf("%s", text)
 	}
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	if len(lines) > maxMatches {
-		text = strings.Join(lines[:maxMatches], "\n") + fmt.Sprintf("\n...(%d more, 收窄 pattern)", len(lines)-maxMatches)
+	if len(lines) > limit {
+		text = strings.Join(lines[:limit], "\n") + fmt.Sprintf("\n...(%d more, 收窄 pattern)", len(lines)-limit)
 	}
-	// 绝对路径改回工作区相对路径，省 token
-	text = strings.ReplaceAll(text, full+"/", "")
-	text = strings.ReplaceAll(text, full, ".")
-	return session.ToolResult{Text: text}, nil
+	return text, nil
 }
 
 // blockedPatterns rejects commands that try to escape the workspace or

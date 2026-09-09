@@ -40,12 +40,20 @@ func newLatexCmd() *cobra.Command {
   raster -> 保留原图链接（insert_image_description 开启时嵌入可读解释文本）。
 
 档位 1（latex.level: 1）:
-  在档位 2 图片处理之上：样式分析 AI 产出 book.cls + 使用手册 + 案例（自动试编译），
-  章节划分 AI（grep + 最小 bash 沙箱）切分章节，转换 AI 并发逐章转 .tex，
-  最终汇总编译全书 PDF 并生成单文件 standalone.tex。
+  images   图片处理（同档位 2：classify → 矢量/文本/raster 嵌入 md）
+  style    样式分析 AI 读全书 md + 扫描页，产出 book.cls + 使用手册 + 案例，
+           在工作区里反复 compile/view_pdf 自查后 submit
+  chapters 章节划分 AI（grep + read_file + bash + 记忆缓冲区）切分章节
+  convert  转换 AI 并发逐章转 .tex（每章独立工作区，可写自己的章节文件与
+           资源目录，compile/view_pdf/view_image/doc_search 可用），
+           每章产物交 checker 小模型核对，问题章节自动打回重做
+  feedback 多数章节报 cls/手册问题时打回原样式会话；样式包更新后只对
+           「报问题」或「新 cls 下编译不过」的章节并发跑样式修复子会话
+  assemble 汇总编译全书 PDF（latexmk 多遍），失败进入修复会话；
+           成功后进入终审会话逐页核对成品 PDF 并整理，最后写 standalone.tex
 
 所有 AI 会话支持：独立模型配置（models: 注册表）、上下文窗口配置、自动压缩、
-可分离工具注册。进度自动断点续传。`,
+可分离工具注册、JSONL 转录断点续传。`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigWithFlag(cmd)

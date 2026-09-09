@@ -139,7 +139,7 @@ func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool
 		&ReadFileTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&WriteWorkFileTool{Root: buildDir, AnyExt: true},
 		&EditWorkFileTool{Root: buildDir},
-		&GrepTool{Root: buildDir},
+		&GrepTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&WorkBashTool{Dir: buildDir, MaxOutput: r.cfg.Latex.BashMaxOutput},
 		compile,
 		&ViewPDFTool{Root: buildDir, Comp: r.comp},
