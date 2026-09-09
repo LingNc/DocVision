@@ -35,6 +35,7 @@ type Client struct {
 	// inside request_body.extra_body).
 	thinking        map[string]any
 	reasoningEffort string
+	toolStream      bool // GLM: stream tool-call arguments alongside content
 
 	// Streaming policy resolved from ModelConfig (default: on).
 	stream     bool
@@ -92,6 +93,7 @@ func NewClient(cfg config.ModelConfig) *Client {
 		requestBody:     cfg.RequestBody,
 		thinking:        cfg.Thinking,
 		reasoningEffort: cfg.ReasoningEffort,
+		toolStream:      cfg.ToolStream != nil && *cfg.ToolStream,
 		stream:          cfg.Streaming(),
 		streamIdle:      streamIdle,
 		maxTokens:       cfg.MaxTokens,
@@ -133,8 +135,14 @@ func (c *Client) RequestSummary(req *ChatRequest) string {
 	if effort == "" {
 		effort = "-"
 	}
-	return fmt.Sprintf("model=%s stream=%v max_tokens=%d temperature=%.2f thinking=%s reasoning_effort=%s",
-		c.model, c.stream, maxTokens, temp, think, effort)
+	clearThinking := "-"
+	if c.thinking != nil {
+		if v, ok := c.thinking["clear_thinking"]; ok {
+			clearThinking = fmt.Sprint(v)
+		}
+	}
+	return fmt.Sprintf("model=%s stream=%v tool_stream=%v max_tokens=%d temperature=%.2f thinking=%s clear_thinking=%s reasoning_effort=%s",
+		c.model, c.stream, c.toolStream, maxTokens, temp, think, clearThinking, effort)
 }
 
 // ChatRequest mirrors the OpenAI chat completions schema.
@@ -157,6 +165,10 @@ type ChatMessage struct {
 	Content    any        `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	// ReasoningContent 思维链（assistant 消息）：逐字节存回历史并随
+	// 请求重发——GLM 保留式思考（clear_thinking:false）要求完整回传，
+	// 同时保证请求前缀逐字节一致以提高 prompt cache 命中。
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // ToolCall mirrors the assistant-side tool_calls entry.
@@ -296,6 +308,11 @@ func (c *Client) buildBody(payload *ChatRequest) ([]byte, error) {
 	}
 	if c.reasoningEffort != "" {
 		extra["reasoning_effort"] = c.reasoningEffort
+	}
+	if c.toolStream {
+		// GLM 工具流式输出：与 stream:true 搭配，工具参数随流增量返回。
+		// 我们的 SSE 组装器按 delta.tool_calls 增量累积，线格式兼容。
+		extra["tool_stream"] = true
 	}
 	if len(extra) > 0 {
 		raw, err = injectRequestBody(raw, extra)

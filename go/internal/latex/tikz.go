@@ -39,8 +39,11 @@ func RunTikZSession(
 	log *logger.Logger,
 	tid int,
 ) (TikZResult, error) {
-	scratch, err := os.MkdirTemp(outDir, "tikzwork-")
-	if err != nil {
+	// 持久工作区：按镜像命名（不处理完不删除，中断后下次续上）。
+	// 成功提交后清理；失败保留供 resume。
+	texBase := strings.TrimSuffix(filepath.Base(dstTex), ".tex")
+	scratch := filepath.Join(outDir, "sessions", "vector_"+texBase+".work")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
 		return TikZResult{}, err
 	}
 	state := &tikzState{workDir: scratch}
@@ -48,6 +51,9 @@ func RunTikZSession(
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
 	sess := session.NewSession(client, modelCfg, tuning, latexFigurePrompt, []session.Tool{
+		&WriteWorkFileTool{Root: scratch},
+		&EditWorkFileTool{Root: scratch},
+		&GrepTool{Root: scratch},
 		&CompilePreviewTool{Comp: comp, State: state, EngineIsXe: engineIsXe, Log: log, Tid: tid},
 		&SubmitFigureTool{State: state},
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
@@ -69,7 +75,6 @@ func RunTikZSession(
 	// 若此前运行在同一张图上中断（进程被杀 / 网络断连），恢复历史上下文
 	// 继续会话，避免从零重烧 token。
 	sessDir := filepath.Join(outDir, "sessions")
-	texBase := strings.TrimSuffix(filepath.Base(dstTex), ".tex")
 	trPath := filepath.Join(sessDir, "vector_"+texBase+".jsonl")
 	if msgs, err := session.LoadTranscript(trPath); err != nil {
 		log.LogWarning(tid, "[tikz] 转录读取失败（忽略，按全新会话继续）:", err)
@@ -108,8 +113,7 @@ func RunTikZSession(
 			}
 		}
 		result.Fallback = true
-		// Cleanup scratch on failure.
-		os.RemoveAll(scratch)
+		// 失败时保留工作区（中断/重试可续上；状态 done 的图下次进不来）。
 		return result, nil
 	}
 
@@ -133,6 +137,7 @@ func RunTikZSession(
 	result.PDFPath = dstPDF
 	result.PNGPath = dstPNG
 	os.RemoveAll(scratch)
+	os.Remove(filepath.Join(outDir, "sessions", "vector_"+texBase+".jsonl")) // 已完成，转录不再需要
 	return result, nil
 }
 

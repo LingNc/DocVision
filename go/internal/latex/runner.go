@@ -940,8 +940,12 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 	case ClassVector:
 		if r.inline {
 			// 档位1：直接内嵌 LaTeX 代码，转换 AI 原样粘贴进 .tex，
-			// 不产生也不引用 figures/*.pdf 资源。
+			// 不产生也不引用 figures/*.pdf 资源。代码块前保留一条
+			// 机器注释指向原图，下游转换会话可据此找到原始图像/页面。
 			if p.TikzCode != "" {
+				if rel, ok := r.copyOriginalImage(p, mdName, outDir); ok {
+					return "<!-- DOCVISION-ORIG-IMAGE: ![](" + rel + ") -->\n```latex\n" + p.TikzCode + "\n```"
+				}
 				return "```latex\n" + p.TikzCode + "\n```"
 			}
 			if p.Content != "" {

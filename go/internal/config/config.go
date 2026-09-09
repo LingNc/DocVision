@@ -70,7 +70,14 @@ type ModelConfig struct {
 	// {type: enabled|disabled} (GLM-4.5+, DeepSeek). It is sent at the
 	// TOP LEVEL of the request body, not inside request_body.extra_body
 	// (extra_body is a Python-SDK concept and is ignored on the wire).
+	// GLM 还支持 clear_thinking: false（保留式思考——历史 assistant 轮的
+	// 思维链完整回传，提升缓存命中）；需要时直接写进这个 map。
 	Thinking map[string]any `yaml:"thinking"`
+	// ToolStream (GLM) requests streamed tool-call arguments alongside
+	// content chunks (stream must be true). Our SSE assembler already
+	// accumulates delta.tool_calls incrementally, so this is wire
+	// compatible without parser changes.
+	ToolStream *bool `yaml:"tool_stream"`
 	// ReasoningEffort is the vendor top-level reasoning_effort field
 	// (GLM-5.2+: max|xhigh|high|medium|low|minimal|none; only effective
 	// while thinking is enabled).
@@ -650,6 +657,9 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 	}
 	if entry.Thinking == nil {
 		entry.Thinking = fallback.Thinking
+	}
+	if entry.ToolStream == nil {
+		entry.ToolStream = fallback.ToolStream
 	}
 	if entry.ReasoningEffort == "" {
 		entry.ReasoningEffort = fallback.ReasoningEffort

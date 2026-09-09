@@ -158,7 +158,8 @@ models:
     # base_url: "https://other-provider.example/v1"   # 可单独指定
     # api_key: "sk-..."
     # stream: false                                  # 该模型单独关闭流式
-    # thinking: { type: enabled }                    # 该模型单独开启思考
+    # thinking: { type: enabled, clear_thinking: false }  # 单独开启思考；clear_thinking:false=保留式思考（GLM，提升缓存命中）
+    # tool_stream: true                               # GLM 工具流式输出（stream:true 时随流返回工具参数）
     # reasoning_effort: high
     thinking:
       type: enabled

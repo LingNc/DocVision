@@ -60,7 +60,7 @@ You have tools to inspect the source material:
 - view_image: view any image (you may crop a sub-region in percentages and scale it up to inspect details); give the file name as it appears in the markdown.
 - read_md: read the organized Markdown (MinerU's text is high quality; trust it over OCR-by-eye).
 
-Pipeline markers in the Markdown are machine comments, NOT document content — ignore them when inferring style: <!-- DOCVISION-STYLED-TEXT: <style note> CONTENT: <text> LINK: <image> --> (stylised text image; only in level-1 source) and <!-- DOCVISION-ERROR: ... --> (a conversion that fell back).
+Pipeline markers in the Markdown are machine comments, NOT document content — ignore them when inferring style: <!-- DOCVISION-STYLED-TEXT: <style note> CONTENT: <text> LINK: <image> --> (stylised text image; only in level-1 source) and <!-- DOCVISION-ORIG-IMAGE: ![](images/...) --> (the original raster image a latex fence was drawn from — keep it out of the .tex, use it to view the source figure) and <!-- DOCVISION-ERROR: ... --> (a conversion that fell back).
 
 ## Your job
 1. Inspect several representative pages/images: chapter title pages, section headings, body text, figures, tables, headers/footers if visible.
@@ -78,7 +78,8 @@ const chapterSystemPrompt = `You are a document structure analyst. Your ONLY job
 Available tools:
 - grep: regex search over the file, returns line numbers + matched lines (bounded).
 - read_lines: read a small window of lines by number.
-- bash: a MINIMAL sandbox shell. The virtual filesystem contains ONLY this one file (book.md). Use it for things like wc -l, sed -n ranges, grep -n. Nothing outside the sandbox is visible; nothing you do there affects the real project.
+- bash: a MINIMAL sandbox shell. The virtual filesystem contains ONLY book.md (the source) and buffer.md (your working buffer). Use it for things like wc -l, sed -n ranges, grep -n. Nothing outside the sandbox is visible; nothing you do there affects the real project.
+- edit_file / read_file: edit and read files in the sandbox. Use buffer.md as your WORKING MEMORY: as you map the structure (and later verify boundaries), write your findings there incrementally with edit_file {path:"buffer.md", append:true, replace:"..."} — one append per chunk of analysis — so a long book never needs to be held in one turn. read_file {path:"buffer.md"} recalls what you already established.
 
 ## Requirements for submit_split
 - chapters is an ordered list of {title, start_line, end_line} (1-based, inclusive) covering the ENTIRE file from line 1 to the last line with NO gaps and NO overlaps.
@@ -86,7 +87,7 @@ Available tools:
 - Every file must contain at least one chapter — no tiny fragments.
 - title is the chapter title text without the leading # marks.
 
-Use grep first to map the heading structure, verify boundaries with read_lines, then submit.`
+Use grep first to map the heading structure, note your findings in buffer.md as you go, verify boundaries with read_lines, then submit.`
 
 // convertSystemPrompt drives the per-chapter Markdown→LaTeX conversion
 // sessions (level 1).
@@ -106,7 +107,7 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 ## Conversion rules
 1. Use the class commands from the manual for chapter/section titles and any special environments.
 2. Images come in THREE forms:
-   - latex FENCED CODE BLOCKS (three-backtick latex fences): the figure is ALREADY LaTeX. Paste the code inside the class figure environment, stripping the fence lines. You MAY restyle the code to the book's house style (colours, node/arrow/line styles — follow the manual's '## Vector figure style' section) while keeping its structure, geometry and ALL labels; compile to verify. This keeps figure styling uniform across the whole book. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
+   - latex FENCED CODE BLOCKS (three-backtick latex fences): the figure is ALREADY LaTeX. A machine comment <!-- DOCVISION-ORIG-IMAGE: ![](images/...) --> directly above a fence points at the original raster — use it with view_image/doc_search to check the source figure; the comment itself must NOT reach the .tex. Paste the code inside the class figure environment, stripping the fence lines. You MAY restyle the code to the book's house style (colours, node/arrow/line styles — follow the manual's '## Vector figure style' section) while keeping its structure, geometry and ALL labels; compile to verify. This keeps figure styling uniform across the whole book. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
    - STYLED-TEXT comment blocks: one HTML comment carrying the image's styling and its real text:
      <!-- DOCVISION-STYLED-TEXT: <style note>
      CONTENT: <the image's own text, verbatim>

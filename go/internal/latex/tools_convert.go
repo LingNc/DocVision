@@ -163,10 +163,16 @@ func (t *CompileChapterTool) Execute(_ string) (session.ToolResult, error) {
 	res := t.Comp.Compile(t.Scratch, t.MainFile)
 	LogCompileResult(t.Log, t.Tid, "chapter", res, time.Since(start))
 	if res.OK {
-		if w := res.WarningSummary(); w != "" {
-			return session.ToolResult{Text: "COMPILE OK.\n" + truncateStr(w, 1500)}, nil
+		// 成功时提供有用信息：产物 PDF 名 + 页数，便于 view_pdf 检视。
+		detail := ""
+		pdf := filepath.Join(t.Scratch, strings.TrimSuffix(t.MainFile, ".tex")+".pdf")
+		if n, err := pdfPageCount(pdf); err == nil {
+			detail = fmt.Sprintf("\nOutput: %s.pdf (%d pages). Inspect with view_pdf {path, page}.", strings.TrimSuffix(t.MainFile, ".tex"), n)
 		}
-		return session.ToolResult{Text: "COMPILE OK."}, nil
+		if w := res.WarningSummary(); w != "" {
+			return session.ToolResult{Text: "COMPILE OK.\n" + truncateStr(w, 1500) + detail}, nil
+		}
+		return session.ToolResult{Text: "COMPILE OK." + detail}, nil
 	}
 	text := "COMPILE FAILED:\n" + res.Err
 	if w := res.WarningSummary(); w != "" {

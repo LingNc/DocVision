@@ -200,6 +200,7 @@ func Collect(r io.Reader, opt Options) (*Result, error) {
 // assembler accumulates the deltas of one stream.
 type assembler struct {
 	content        strings.Builder
+	reasoning      strings.Builder // 思维链全文：回传历史用（保留式思考/缓存命中）
 	tools          map[int]*toolCallAcc
 	toolOrder      []int
 	usage          map[string]any
@@ -286,6 +287,7 @@ func (a *assembler) addReasoning(text string) {
 	if text == "" {
 		return
 	}
+	a.reasoning.WriteString(text)
 	a.reasoningChars += len(text)
 	if a.opt.OnReasoning != nil {
 		a.opt.OnReasoning(text)
@@ -319,6 +321,11 @@ func (a *assembler) addToolCalls(calls []streamToolCall) {
 
 func (a *assembler) result() *Result {
 	msg := map[string]any{"role": "assistant", "content": a.content.String()}
+	if a.reasoning.Len() > 0 {
+		// 思维链随 assistant 消息存回历史（GLM 保留式思考要求完整回传，
+		// 同时保证前缀逐字节一致以提高 prompt cache 命中）。
+		msg["reasoning_content"] = a.reasoning.String()
+	}
 	if len(a.toolOrder) > 0 {
 		calls := make([]map[string]any, 0, len(a.toolOrder))
 		for _, idx := range a.toolOrder {

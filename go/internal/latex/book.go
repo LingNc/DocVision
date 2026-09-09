@@ -295,6 +295,9 @@ func (r *Runner) stylePhase(proj string) error {
 	submit := &SubmitStyleTool{Workspace: workDir}
 	tools := []session.Tool{
 		&WriteWorkFileTool{Root: workDir},
+		&EditWorkFileTool{Root: workDir},
+		&GrepTool{Root: workDir},
+		&ViewPDFTool{Root: workDir},
 		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ReadMDTool{Path: mainMD},
@@ -442,7 +445,10 @@ func (r *Runner) chaptersPhase(proj string) error {
 	}
 	totalLines := strings.Count(string(data), "\n") + 1
 
-	// Sandbox with ONLY the source file, as book.md.
+	// Sandbox with ONLY the source file, as book.md + 一个可编辑的
+	// 缓冲区 buffer.md（工作记忆：划分结果先增量写入这里，最后
+	// submit_split 按缓冲区内容提交）。书多章多时单次会话可能放不下，
+	// 缓冲区让进度跨轮保留。
 	sandbox, err := os.MkdirTemp("", "dsv-chap-")
 	if err != nil {
 		return err
@@ -451,6 +457,8 @@ func (r *Runner) chaptersPhase(proj string) error {
 	if err := copyFile(mainMD, filepath.Join(sandbox, "book.md")); err != nil {
 		return err
 	}
+	bufferPath := filepath.Join(sandbox, "buffer.md")
+	_ = os.WriteFile(bufferPath, []byte("# split buffer\n"), 0o644)
 
 	client := r.clientFor(r.cfg.Latex.ChapterModel)
 	modelCfg := r.models[r.cfg.Latex.ChapterModel]
@@ -459,9 +467,22 @@ func (r *Runner) chaptersPhase(proj string) error {
 	sess := session.NewSession(client, modelCfg, tuning, chapterSystemPrompt, []session.Tool{
 		&GrepMDTool{Path: mainMD},
 		&ReadLinesTool{Path: mainMD},
-		&SandboxBashTool{Dir: sandbox},
+		&WorkBashTool{Dir: sandbox},
+		&EditWorkFileTool{Root: sandbox},
+		&ReadFileTool{Root: sandbox},
 		submit,
 	}, r.log, 1, "chapters")
+	// 划分会话也带转录：大部头一本书可能分多次跑，中断后从转录续上。
+	// （转录里的 book.md 内容以 file:// 引用，恢复时自动还原。）
+	trChap := filepath.Join(proj, "work", "sessions", "chapters.jsonl")
+	if msgsCh, errC := session.LoadTranscript(trChap); errC == nil && len(msgsCh) > 0 {
+		sess.SetMessages(msgsCh)
+		r.log.Log(1, "[chapters] 恢复中断的划分会话 (", strconv.Itoa(len(msgsCh)), "条历史消息 )")
+	}
+	if tr, errT := session.NewTranscript(trChap); errT == nil {
+		sess.SetTranscript(tr)
+		defer tr.Close()
+	}
 	liveHook, liveClose := r.livePhaseLine("chapters")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
@@ -507,6 +528,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 			r.log.Log(1, "[chapters]", name, "= lines", strconv.Itoa(c.StartLine)+"-"+strconv.Itoa(c.EndLine), "|", c.Title)
 		}
 		notef("[chapters] 划分完成: %d 章 (granularity=%s)", len(submit.Chapters), granularity)
+		os.Remove(filepath.Join(proj, "work", "sessions", "chapters.jsonl")) // 已完成，转录不再需要
 		return nil
 	}
 	return fmt.Errorf("章节划分在 3 次尝试内未通过校验: %s", r.lastSplitError)
@@ -723,6 +745,10 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	tools := []session.Tool{
 		&ReadFileTool{Root: proj},
 		write,
+		// 增量编辑自己的章节文件 + 工作区检索（手册/cls/其它章节只读参考）
+		&EditFileTool{Root: workDir},
+		&GrepTool{Root: proj},
+		&ViewPDFTool{Root: scratch},
 		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: 1},
 		submit,
 	}
@@ -901,6 +927,9 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	submit := &SubmitStyleTool{Workspace: workDir}
 	tools := []session.Tool{
 		&WriteWorkFileTool{Root: workDir},
+		&EditWorkFileTool{Root: workDir},
+		&GrepTool{Root: workDir},
+		&ViewPDFTool{Root: workDir},
 		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ReadMDTool{Path: mainMD},
