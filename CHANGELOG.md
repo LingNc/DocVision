@@ -4,6 +4,15 @@
 
 ### Added
 
+- **会话工具大升级（增量编辑 / 检索 / PDF 查看 / 可配 bash）**：新工具文件 `tools_work.go`——`edit_file`（任意文本文件精确 find/replace，支持 `replace_all` 与 `append:true` 追加；回答"追加能否用编辑实现"：能）；`grep`（工作区递归检索，返回行号+相对路径）；`WorkBashTool`（**timeout 由 AI 参数决定**默认 30s 上限 300s，cwd=会话工作区根，输出上限 5000 字符）；`view_pdf`（按页渲染工作区 PDF，裁剪/放大与 view_image 同一套参数，**始终从 PDF 重渲染**因此放大清晰，返回 page N/M）。接入：tikz（write_file/edit_file/grep + 持久工作区）、style（edit_file/grep/view_pdf）、convert（edit_file 仅自己的 .tex/grep 全项目/view_pdf 编译草稿）、chapters（buffer.md 工作记忆 + read_file + bash）
+- **submit 按文件路径引用（process）**：tikz 的 submit 优先接受 `{path:"figure.tex"}`——模型先把最终代码 write_file 进工作区再按路径提交，不再强制整段重输出代码（省 token）
+- **process 持久工作区**：tikz 工作区改为 `sessions/vector_<图>.work`（不处理完不删除，中断后下次续上；成功提交后连同转录一起清理）
+- **档位1 嵌入携带原图链接**：latex 代码块前新增机器注释 `<!-- DOCVISION-ORIG-IMAGE: ![](images/…) -->` 指向原图，转换会话可回看源图/定位原始页面，注释不得进入 .tex
+- **编译与预览分离信息**：compile/compile_preview 成功时返回产物 PDF 文件名与页数并提示 view_pdf 检视；失败仍返回错误日志
+- **chapters 工作记忆缓冲区**：章节划分会话获得 `buffer.md`（edit_file 增量写入分析结论，大部头跨轮保留）+ read_file + 可配超时 bash；划分会话也接入 JSONL 转录（中断续上，完成清理）
+- **GLM 官方推荐参数**：`models.<name>.tool_stream`（工具参数随流返回，顶层字段，SSE 组装器原生兼容）；`thinking.clear_thinking` 直接写进 thinking map；运行配置 glm-5.3-flash 按推荐设 temperature 1、`thinking: {type: enabled, clear_thinking: false}`、`tool_stream: true`；debug 请求摘要增加 `tool_stream=` / `clear_thinking=`
+- **思维链回传（缓存修复）**：chatstream 组装 assistant 消息时保留 `reasoning_content`，ChatMessage 逐字节存回历史并随请求重发——GLM 保留式思考要求完整回传，且请求前缀逐字节一致是 prompt cache 命中的前提（此前思维链每轮丢弃）
+
 - **会话 JSONL 转录与断点续传**：新增 `internal/session/transcript.go`——每条会话消息实时追加为一行 JSON（append-only，一行一条；图片 base64 不入转录，落 `media/` 目录以 `file://media/<hash>.<ext>` 引用，加载时还原为 data URL）。三处会话接入：tikz 矢量会话（`<outDir>/sessions/vector_<图>.jsonl`）、样式会话（`work/style_session.jsonl`，替代旧单文件 `.json`，旧文件自动迁移）、单章转换会话（`work/sessions/convert_<章>.jsonl`）。进程被杀 / 网络断连后，下次运行自动从转录恢复完整上下文续跑（含图片），不再从零重烧 token；章节产物已存在时清理对应转录
 - **未提交提醒（tikz）**：作图会话结束时若模型尚未调用 submit（此前有会话未提交就结束的先例），自动补发一次 "You have NOT called submit yet…" 提醒并给追加轮次
 - **档位1 版面重排规则**：转换系统提示新增 Layout reconstruction 段——原始 PDF 中横向排列/组合形式的内容（如一行 6 张 venn 图）在线性 markdown 中退化为连续图片引用；转换会话须对连续多图/图文交替区段 doc_search + view_page 查原版面，用 subfigure/minipage 等复现横排/网格，不再线性堆叠
