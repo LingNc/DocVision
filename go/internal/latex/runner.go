@@ -277,6 +277,10 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	// Default console behaviour mirrors img2text: one compact progress
 	// line per phase; every detail line goes to the log file only.
 	verbose := opts.Verbose
+	skipped := len(all) - len(pending)
+	if verbose {
+		skipped = 0 // verbose 模式进度行不输出，保持明细流
+	}
 	if !verbose {
 		r.log.SetQuiet(true)
 		defer func() { r.log.SetQuiet(false) }()
@@ -293,23 +297,21 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 			sort.Slice(samples, func(i, j int) bool { return samples[i].name < samples[j].name })
 			r.detectWatermarkPhase(samples)
 		}
-		r.classifyPhase(pending, mdCache, prog, progDir, verbose)
+		r.classifyPhase(pending, mdCache, prog, progDir, verbose, skipped)
 	}
 	if opts.Step == "classify" {
 		if !verbose {
 			r.log.SetQuiet(false)
-			fmt.Println()
 		}
 		r.log.Log(0, "classify step finished.")
 		return nil
 	}
 
 	// Phase 2: per-class processing.
-	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose)
+	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose, skipped)
 
 	if !verbose {
 		r.log.SetQuiet(false)
-		fmt.Println()
 	}
 	// Phase 3: rebuild markdown.
 	return r.rebuildPhase(mdCache, prog, outDir)
@@ -329,7 +331,7 @@ func findLineIdx(starts []int, pos int) int {
 // ------------------------------------------------------------------
 
 func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir string, verbose bool) {
+	prog map[string]*imageProgress, progDir string, verbose bool, skipped int) {
 
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
@@ -341,13 +343,17 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	total, done, failed := len(pending), 0, 0
+	total, done, failed, running := len(pending), 0, 0, 0
 	progress := func() {
 		if verbose || total == 0 {
 			return
 		}
 		pct := float64(done) * 100.0 / float64(total)
-		fmt.Fprintf(os.Stdout, "\r[classify %d/%d] %.2f%% (failed: %d)          ", done, total, pct, failed)
+		fmt.Fprintf(os.Stdout, "\r[classify %d/%d] %.2f%% (failed: %d, running: %d, skip: %d)          ",
+			done, total, pct, failed, running, skipped)
+	}
+	if !verbose && total > 0 {
+		progress() // 0/N 起始行
 	}
 
 	// 水印图片引用：直接预标记 absorbed（重建时删除引用），
@@ -397,12 +403,16 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	for _, t := range toClassify {
 		wg.Add(1)
 		tid := <-tidPool
+		mu.Lock()
+		running++
+		mu.Unlock()
 		go func(tt *task) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
 			defer func() {
 				mu.Lock()
 				done++
+				running--
 				mu.Unlock()
 				progress()
 			}()
@@ -451,6 +461,12 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 		}(t)
 	}
 	wg.Wait()
+	// 定格 classify 进度行并换行：下一阶段的 [process …] 行从新行开始，
+	// 不会把 classify 的最终状态覆盖掉。
+	if !verbose && total > 0 {
+		progress()
+		fmt.Fprintln(os.Stdout)
+	}
 }
 
 // ClassifyImageStrict is the second-chance call with an explicit
@@ -490,7 +506,7 @@ func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, im
 // ------------------------------------------------------------------
 
 func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir, outDir string, compErr error, verbose bool) {
+	prog map[string]*imageProgress, progDir, outDir string, compErr error, verbose bool, skipped int) {
 
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
@@ -502,7 +518,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	total, done, failed, warned := 0, 0, 0, 0
+	total, done, failed, warned, running := 0, 0, 0, 0, 0
 	for _, t := range pending {
 		mu.Lock()
 		p, ok := prog[t.key()]
@@ -521,8 +537,8 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		if ok < 0 {
 			ok = 0
 		}
-		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d)          ",
-			done, total, pct, ok, failed, warned)
+		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, running: %d, skip: %d)          ",
+			done, total, pct, ok, failed, warned, running, skipped)
 	}
 	if total > 0 {
 		// 会话处理耗时长：先打出 0/N 起始行，处理期间进度可见。
@@ -538,12 +554,16 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		}
 		wg.Add(1)
 		tid := <-tidPool
+		mu.Lock()
+		running++
+		mu.Unlock()
 		go func(tt *task, pp *imageProgress) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
 			defer func() {
 				mu.Lock()
 				done++
+				running--
 				mu.Unlock()
 				progress()
 			}()
@@ -650,6 +670,12 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		}(t, p)
 	}
 	wg.Wait()
+	// 定格 process 进度行并换行：后续的 rebuild 输出从新行开始，
+	// 最终状态保留在控制台上。
+	if !verbose && total > 0 {
+		progress()
+		fmt.Fprintln(os.Stdout)
+	}
 }
 
 // processTextImage extracts the VISIBLE TEXT of a text-class image (the

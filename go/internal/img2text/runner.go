@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mineru-tools/internal/config"
@@ -253,7 +254,8 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 			logger.SetQuiet(true)
 		}
 		runWorkers(client, pending, imagesDir, mdCache, progressRoot,
-			logger, &progressData, &progressMu, cfg.Options, opts.Quiet)
+			logger, &progressData, &progressMu, cfg.Options, opts.Quiet,
+			len(allTasks)-len(pending))
 		if opts.Quiet {
 			logger.SetQuiet(false)
 		}
@@ -402,6 +404,7 @@ func runWorkers(
 	progressMu *sync.Mutex,
 	opts config.OptionsConfig,
 	quiet bool,
+	skipped int,
 ) {
 	results := make(chan runResult, len(pending))
 	var wg sync.WaitGroup
@@ -418,10 +421,11 @@ func runWorkers(
 		tidPool <- i
 	}
 	total := len(pending)
+	var running atomic.Int64
 
 	// Show initial progress immediately before starting any workers.
 	if quiet && total > 0 {
-		fmt.Fprintf(os.Stdout, "[0/%d] 0.00%% (done: 0, errors: 0, warns: 0)", total)
+		fmt.Fprintf(os.Stdout, "[0/%d] 0.00%% (done: 0, errors: 0, warns: 0, running: 0, skip: %d)", total, skipped)
 		os.Stdout.Sync()
 	}
 
@@ -489,16 +493,17 @@ func runWorkers(
 				// Print progress with 2-decimal precision on every update.
 				if total > 0 {
 					pct := float64(doneCount) * 100.0 / float64(total)
-					fmt.Fprintf(progressOut, "\r[%d/%d] %.2f%% (done: %d, errors: %d, warns: %d)",
-						doneCount, total, pct, doneCount-errorCount, errorCount, warnCount)
+					fmt.Fprintf(progressOut, "\r[%d/%d] %.2f%% (done: %d, errors: %d, warns: %d, running: %d, skip: %d)",
+						doneCount, total, pct, doneCount-errorCount, errorCount, warnCount,
+						running.Load(), skipped)
 					progressOut.Flush()
 				}
 			}
 		}
 		if quiet && total > 0 {
 			// Final progress line (ensure 100% is printed).
-			fmt.Fprintf(progressOut, "\r[%d/%d] 100.00%% (done: %d, errors: %d, warns: %d)\n",
-				total, total, doneCount-errorCount, errorCount, warnCount)
+			fmt.Fprintf(progressOut, "\r[%d/%d] 100.00%% (done: %d, errors: %d, warns: %d, running: 0, skip: %d)\n",
+				total, total, doneCount-errorCount, errorCount, warnCount, skipped)
 			progressOut.Flush()
 		}
 	}()
@@ -506,6 +511,7 @@ func runWorkers(
 	for _, t := range pending {
 		wg.Add(1)
 		tid := <-tidPool
+		running.Add(1)
 		go func(tt imageTask) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
@@ -547,6 +553,7 @@ func runWorkers(
 					r = "__INVALID_RESPONSE__"
 				}
 			}
+			running.Add(-1) // 计数先落，writer 渲染时 running 已准确
 			results <- runResult{key: tt.key,
 				result:  r,
 				imgPath: tt.imgPath,
