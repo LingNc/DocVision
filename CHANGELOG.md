@@ -13,6 +13,13 @@
   - 新增配置 `latex.bash_max_output`（会话 bash 返回给模型的字符上限，默认 5000），`default.yaml`/`config.example.yaml` 与 `setup` 校验同步。
   - process 进度行新增 `raster: N` 计数（档位1 保留原图并生成解释的图数量），`[raster]` 日志附 `described=true|false`——档位1 控制台可直接看出"矢量 vs 原图"比例。
 
+- **章节提交（文件夹）与样式回环定向重做**：
+  - convert 会话的写权限收敛为「自己的主文件 `chapters/<base>.tex` + 自己的资源目录 `chapters/<base>/`」（`WriteWorkFileTool.Prefixes` 白名单 + `RejectDocumentclass` 仍禁止 `\documentclass`），`write_file` 改为必带 path；提交即整棵章节树，assemble 复制整棵 `work/chapters`（保留多文件层级，只有顶层 `*.tex` 作为 `\input`），复杂层级/内嵌资源不再被丢掉。
+  - 样式反馈回路改为**定向重做**：不再丢弃全部章节，只挑出「工作汇报报问题」或「新 cls 下编译失败」的章节，为它们并发跑 style-fix 子会话（`styleFixSystemPrompt`：读现有 .tex，用 edit_file 增量适配新 cls/manual，保留全部内容、绝不重新转换；编译通过且 submit 才算成功），失败者才删产物 + 转录、退回整章重转换。
+  - 样式反馈会话可直接 `read_file {path:"work/chapters/<name>.tex"}` 查看真实提交（不只是工作汇报）。
+  - assemble 修复会话新增 `read_file`（AltRoots=项目根，可读原 md/chapters/style）与 `list_source_pages`/`view_source_page`。
+  - 删除单文件专用 `WriteFileTool`（与 `WriteWorkFileTool` 重复）。
+
 ### Added
 
 - **raster 图档位1 统一解释块**：档位1 的 raster 图在 process 阶段总是生成解释文本（复用 img2text 文本提取，每张一次视觉调用），嵌入格式与 STYLED/VECTOR 同骨架——`<!-- DOCVISION-IMAGE: <label> -->` + `DESCRIBE: <解释>` + `LINK: [image](…)`，无文本时只有 LINK 行；`latex.insert_image_description` 仅控制档位2（开=嵌入 `[Image]( content )`，关=纯 `![image]` 原图引用）

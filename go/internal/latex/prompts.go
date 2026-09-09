@@ -107,8 +107,8 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 
 ## Tools
 - read_file {path, start_line?, end_line?}: read any allowed file (whole file or a numbered line window).
-- write_file: write YOUR chapter .tex file (the only file you may write). Give the FULL file content each time (it replaces the file).
-- edit_file {path, find, replace} / {path, replace, append:true}: incremental fixes to your .tex (exact-once find/replace, or append) — no need to re-emit the whole file.
+- write_file {path, content}: write a file into YOUR workspace. Your MAIN file is chapters/<base>.tex (full content replaces it). If your chapter needs extra resources (included .tex parts, long tables), put them under chapters/<base>/ and \input them — the whole folder is submitted and copied into the final book. Never write outside those paths.
+- edit_file {path, find, replace} / {path, replace, append:true}: incremental fixes to your files (exact-once find/replace, or append) — no need to re-emit the whole file.
 - grep {pattern, path?}: search the project (manual, class, chapters, markdown) with line numbers.
 - compile: compile your current .tex in a scratch wrapper that uses the book class and resolves the project images/figures to catch LaTeX errors early. You get the error log, not a preview; on success it reports the output PDF and page count, which view_pdf can render.
 - view_pdf {path, page, left/top/right/bottom, zoom}: look at a page of that compiled PDF.
@@ -156,6 +156,21 @@ submit takes a required report object:
 The report is written verbatim to the project reports/ folder; be specific — the style agent reads these to fix the class.
 
 Work iteratively: write_file → compile → fix → submit. Max {MAX_ROUNDS} rounds.`
+
+// styleFixSystemPrompt drives a targeted sub-session that adapts ONE
+// already converted chapter to a revised class/manual. It is NOT a
+// conversion session: content stays, only the class usage changes.
+const styleFixSystemPrompt = `You are a LaTeX style-fix agent. One chapter of a book was already converted to LaTeX; afterwards the book class (cls) and its usage manual were revised. Your job: adapt the EXISTING chapter .tex to the NEW class/manual with MINIMAL edits.
+
+Rules:
+- Do NOT re-convert from markdown and do NOT rewrite the chapter. Read it (read_file) and change only what the new class/manual requires: renamed/removed commands, changed environments, new heading/caption/table/figure constructs, colour/style macros.
+- Preserve ALL content and wording. Never drop, summarise or reorder text.
+- Use edit_file for every change (exact find/replace, or append). write_file only if a genuinely new file is needed.
+- Compile after the edits (compile); fix every error. The compile uses the new class and resolves the project images/figures.
+- Your file is an \input fragment: no \documentclass, no preamble.
+- When the compile is clean and the chapter follows the manual, call submit.
+
+Respond in the document's language for explanations, but finish through the submit tool.`
 
 // fixSystemPrompt drives the final book assembly repair session.
 const fixSystemPrompt = `You are the LaTeX build doctor for a multi-file book project. The full-book compile failed.

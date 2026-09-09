@@ -549,6 +549,15 @@ type WriteWorkFileTool struct {
 	// AnyExt allows any text extension (build-fix workspace: .bib, .bst,
 	// .cfg, ...); default restricts to .cls .sty .tex .md.
 	AnyExt bool
+	// Prefixes, when non-empty, restricts writes to these workspace
+	// paths: a path is allowed when it equals a prefix or lies under it
+	// (e.g. the convert session's own chapter file + its asset folder).
+	Prefixes []string
+	// RejectDocumentclass refuses content containing \documentclass
+	// (chapter files are \input fragments, not standalone documents).
+	RejectDocumentclass bool
+	// Hint is appended to the tool description (workspace layout).
+	Hint string
 }
 
 func (t *WriteWorkFileTool) Name() string { return "write_file" }
@@ -558,9 +567,17 @@ func (t *WriteWorkFileTool) Definition() map[string]any {
 	if t.AnyExt {
 		allowed = "Any text file name is allowed (.tex .cls .sty .md .bib .bst .cfg ...)."
 	}
+	if len(t.Prefixes) > 0 {
+		allowed += " Writable paths: " + strings.Join(t.Prefixes, ", ") + " (and files under them)."
+	}
+	desc := "Write a file into YOUR workspace (full content replaces the file). " + allowed +
+		" Keep drafts here so later edits are small diffs instead of full re-outputs."
+	if t.Hint != "" {
+		desc += " " + t.Hint
+	}
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "write_file",
-		"description": "Write a file into YOUR workspace (full content replaces the file). " + allowed + " Keep drafts here so later edits are small diffs instead of full re-outputs.",
+		"description": desc,
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -574,6 +591,22 @@ func (t *WriteWorkFileTool) Definition() map[string]any {
 
 var workFileExtRe = regexp.MustCompile(`(?i)\.(cls|sty|tex|md)$`)
 
+// pathAllowed reports whether rel is one of the allowed prefixes or a
+// file under them.
+func (t *WriteWorkFileTool) pathAllowed(rel string) bool {
+	if len(t.Prefixes) == 0 {
+		return true
+	}
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	for _, p := range t.Prefixes {
+		p = strings.TrimSuffix(filepath.ToSlash(filepath.Clean(p)), "/")
+		if clean == p || strings.HasPrefix(clean, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *WriteWorkFileTool) Execute(argsJSON string) (session.ToolResult, error) {
 	args, err := parseJSONObject(argsJSON)
 	if err != nil {
@@ -586,6 +619,12 @@ func (t *WriteWorkFileTool) Execute(argsJSON string) (session.ToolResult, error)
 	}
 	if !t.AnyExt && !workFileExtRe.MatchString(rel) {
 		return session.ToolResult{Text: "REJECTED: only .cls .sty .tex .md files are allowed."}, nil
+	}
+	if !t.pathAllowed(rel) {
+		return session.ToolResult{Text: "REJECTED: " + rel + " is outside your writable paths (" + strings.Join(t.Prefixes, ", ") + ")."}, nil
+	}
+	if t.RejectDocumentclass && strings.Contains(content, "\\documentclass") {
+		return session.ToolResult{Text: "REJECTED: the chapter must be an \\input fragment — no \\documentclass / preamble."}, nil
 	}
 	path, err := resolveInside(t.Root, rel)
 	if err != nil {

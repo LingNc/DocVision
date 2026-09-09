@@ -3,8 +3,41 @@ package latex
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestWriteWorkFileToolPrefixes pins the convert-session submission
+// rules: only the chapter's own main file and its asset folder are
+// writable, and chapter files must be \input fragments.
+func TestWriteWorkFileToolPrefixes(t *testing.T) {
+	root := t.TempDir()
+	tool := &WriteWorkFileTool{
+		Root:                root,
+		Prefixes:            []string{"chapters/ch1.tex", "chapters/ch1/"},
+		RejectDocumentclass: true,
+	}
+	if res, err := tool.Execute(`{"path":"chapters/ch1.tex","content":"\\section{One}"}`); err != nil {
+		t.Fatal(err)
+	} else if !strings.HasPrefix(res.Text, "WROTE") {
+		t.Fatalf("main file write = %q", res.Text)
+	}
+	if res, err := tool.Execute(`{"path":"chapters/ch1/tables/t1.tex","content":"x"}`); err != nil {
+		t.Fatal(err)
+	} else if !strings.HasPrefix(res.Text, "WROTE") {
+		t.Fatalf("asset write = %q", res.Text)
+	}
+	if res, err := tool.Execute(`{"path":"chapters/ch2.tex","content":"x"}`); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(res.Text, "outside your writable paths") {
+		t.Fatalf("foreign chapter write = %q", res.Text)
+	}
+	if res, err := tool.Execute(`{"path":"chapters/ch1.tex","content":"\\documentclass{book}"}`); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(res.Text, "input fragment") {
+		t.Fatalf("documentclass must be rejected: %q", res.Text)
+	}
+}
 
 // TestViewImageResolveFigureSession pins the figure-session contract:
 // Root is the images root, Subject is the current document's folder, and

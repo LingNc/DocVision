@@ -723,32 +723,18 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	manual, _ := os.ReadFile(manualPath)
 
 	// Scratch for per-chapter compile checks.
-	scratch, err := os.MkdirTemp("", "dsv-conv-")
+	scratch, err := r.chapterScratch(proj, clsName, base)
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(scratch)
-	copyFile(filepath.Join(proj, "style", clsName+".cls"), filepath.Join(scratch, clsName+".cls"))
-	// 章节里的图片/图形引用要能在预览编译时解析：把 source 的
-	// images/figures 以符号链接挂进 scratch（失败则退回复制）。
-	for _, asset := range []string{"images", "figures"} {
-		src := filepath.Join(proj, "source", asset)
-		if !fileExists(src) {
-			continue
-		}
-		if err := os.Symlink(src, filepath.Join(scratch, asset)); err != nil {
-			_ = copyDir(src, filepath.Join(scratch, asset))
-		}
-	}
-	wrapper := "\\documentclass{" + clsName + "}\n" +
-		"\\usepackage{graphicx,amsmath,amssymb,longtable,booktabs}\n" +
-		"\\graphicspath{{figures/}}\n" +
-		"\\begin{document}\n\\input{" + base + ".tex}\n\\end{document}\n"
-	if err := os.WriteFile(filepath.Join(scratch, base+"_wrapper.tex"), []byte(wrapper), 0o644); err != nil {
-		return err
-	}
 
-	write := &WriteFileTool{Root: workDir, AllowedRel: texRel}
+	write := &WriteWorkFileTool{
+		Root:                workDir,
+		Prefixes:            []string{texRel, "chapters/" + base + "/"},
+		RejectDocumentclass: true,
+		Hint:                "Your main file is " + texRel + "; extra resources (included .tex parts, tables) go under chapters/" + base + "/.",
+	}
 	submit := &SubmitDoneTool{
 		Label:      "chapter " + base,
 		ReportPath: filepath.Join(workDir, "reports", base+".md"), // 工作汇报（实时落盘）
@@ -806,7 +792,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		truncateStr(string(manual), 24000),
 		"```",
 		"",
-		"Read the chapter via read_file, then write_file your .tex and compile until clean, then submit.",
+		"Read the chapter via read_file, then write_file {path:\"" + texRel + "\", content: ...} and compile until clean, then submit.",
 		"Chapter markdown preview (first 2000 chars):",
 		truncateStr(string(chapData), 2000),
 	}, "\n")
@@ -865,6 +851,111 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	}
 	if !fileExists(texPath) {
 		return fmt.Errorf("会话已提交但没有写出 .tex")
+	}
+	return nil
+}
+
+// chapterScratch builds a scratch dir that can compile ONE chapter as an
+// \input fragment: the book class, a wrapper that inputs <base>.tex, and
+// the project images/figures mounted (symlink, copy as fallback) so
+// image references in the chapter resolve.
+func (r *Runner) chapterScratch(proj, clsName, base string) (string, error) {
+	scratch, err := os.MkdirTemp("", "dsv-conv-")
+	if err != nil {
+		return "", err
+	}
+	copyFile(filepath.Join(proj, "style", clsName+".cls"), filepath.Join(scratch, clsName+".cls"))
+	for _, asset := range []string{"images", "figures"} {
+		src := filepath.Join(proj, "source", asset)
+		if !fileExists(src) {
+			continue
+		}
+		if err := os.Symlink(src, filepath.Join(scratch, asset)); err != nil {
+			_ = copyDir(src, filepath.Join(scratch, asset))
+		}
+	}
+	wrapper := "\\documentclass{" + clsName + "}\n" +
+		"\\usepackage{graphicx,amsmath,amssymb,longtable,booktabs}\n" +
+		"\\graphicspath{{figures/}}\n" +
+		"\\begin{document}\n\\input{" + base + ".tex}\n\\end{document}\n"
+	if err := os.WriteFile(filepath.Join(scratch, base+"_wrapper.tex"), []byte(wrapper), 0o644); err != nil {
+		os.RemoveAll(scratch)
+		return "", err
+	}
+	return scratch, nil
+}
+
+// fixChapterStyle runs a targeted style-fix sub-session on ONE already
+// converted chapter: the class/manual changed, so the .tex must be
+// adapted (NOT re-converted from markdown). Returns nil when the
+// chapter compiles and was submitted; otherwise the caller falls back
+// to a full re-conversion.
+func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workDir, base, issues string, tid int) error {
+	texRel := "chapters/" + base + ".tex"
+	texPath := filepath.Join(workDir, texRel)
+	if !fileExists(texPath) {
+		return fmt.Errorf("没有已转换的 %s", texRel)
+	}
+	scratch, err := r.chapterScratch(proj, clsName, base)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(scratch)
+	manual, _ := os.ReadFile(manualPath)
+
+	submit := &SubmitDoneTool{Label: "the style fix for " + base}
+	tools := []session.Tool{
+		&ReadFileTool{Root: proj},
+		&EditWorkFileTool{Root: workDir},
+		&WriteWorkFileTool{
+			Root:                workDir,
+			Prefixes:            []string{texRel, "chapters/" + base + "/"},
+			RejectDocumentclass: true,
+		},
+		&GrepTool{Root: proj},
+		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
+		&ViewPDFTool{Root: scratch},
+		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: tid},
+		submit,
+	}
+	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
+		r.cfg.LatexSession("convert"), styleFixSystemPrompt, tools, r.log, tid, "style-fix:"+base)
+	liveHook, liveClose := r.livePhaseLine("style-fix")
+	sess.SetProgressHook(liveHook)
+	defer liveClose()
+
+	userText := strings.Join([]string{
+		"The class/manual was revised after your chapter was converted. Adapt chapters/" + base + ".tex so it compiles with the NEW class and follows the NEW manual.",
+		"",
+		"## Updated manual (authoritative):",
+		"```",
+		truncateStr(string(manual), 24000),
+		"```",
+		"",
+		"## Reported problems:",
+		truncateStr(issues, 4000),
+		"",
+		"Apply MINIMAL edits with edit_file (do not re-convert from markdown, do not drop content), compile until clean, then submit.",
+	}, "\n")
+	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
+		return fmt.Errorf("样式修复会话失败: %w", err)
+	}
+	if !submit.Submitted {
+		return fmt.Errorf("样式修复会话未提交")
+	}
+	// 复核：编译必须通过（章节内容核对由后续 checker/终审负责）。
+	data, rerr := os.ReadFile(texPath)
+	if rerr != nil {
+		return rerr
+	}
+	if err := os.WriteFile(filepath.Join(scratch, base+".tex"), data, 0o644); err != nil {
+		return err
+	}
+	start := time.Now()
+	res := r.comp.Compile(scratch, base+"_wrapper.tex")
+	LogCompileResult(r.log, tid, "style-fix-check", res, time.Since(start))
+	if !res.OK {
+		return fmt.Errorf("样式修复后仍编译失败: %s", res.Err)
 	}
 	return nil
 }
@@ -930,6 +1021,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	sourceDir := filepath.Join(proj, "source")
 	mainMD := mainSourceMD(sourceDir)
 	styleDir := filepath.Join(proj, "style")
+	manualPath := filepath.Join(styleDir, "manual.md")
 	workDir := filepath.Join(proj, "work", "style")
 
 	client := r.clientFor(r.cfg.Latex.StyleModel)
@@ -965,6 +1057,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 
 	feedback := "The conversion phase finished: the MAJORITY of chapter conversion agents reported that the class/manual did NOT satisfy the book's real formatting." +
 		" Their work reports follow (固定格式，结论: 存在问题 = issues):" + b.String() +
+		"\n\nThe actual submitted chapters are in the project workspace under work/chapters/ — read any of them with read_file {path:\"work/chapters/<name>.tex\"} to see how the class was used in practice (this is the real submission, the reports above are its summary)." +
 		"\n\nRe-inspect the relevant original pages (view_source_page), fix the cls/manual/example so these problems cannot recur, then submit_style with the corrected package."
 	if _, err := sess.Run(session.RunOptions{UserText: feedback}); err != nil {
 		return fmt.Errorf("样式反馈会话失败: %w", err)
@@ -1004,16 +1097,106 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	}
 	r.log.Log(1, "[style-feedback] 更新后的 example 编译通过:", clsName+".cls")
 
-	// 章节产物全部作废（转换必须用全新上下文，不复用旧会话）。
+	// 定向修复：只重做"报告样式问题"或"新 cls 下编译不过"的章节，
+	// 其余章节产物保留（省 token）。每章先跑一个并发子会话做增量修复
+	// （不是重新转换），修复失败才退回整章重转换。
 	chapWork := filepath.Join(proj, "work", "chapters")
-	if matches, gerr := filepath.Glob(filepath.Join(chapWork, "*")); gerr == nil {
-		for _, m := range matches {
-			_ = os.RemoveAll(m)
+	var redo []string
+	for _, f := range issueFiles {
+		base := strings.TrimSuffix(filepath.Base(f), ".md")
+		if fileExists(filepath.Join(chapWork, base+".tex")) {
+			redo = append(redo, base)
 		}
 	}
+	// 新 cls 下编译不过的章节也必须重做。
+	allTex, _ := filepath.Glob(filepath.Join(chapWork, "*.tex"))
+	for _, t := range allTex {
+		base := strings.TrimSuffix(filepath.Base(t), ".tex")
+		if sliceHas(redo, base) {
+			continue
+		}
+		scratch, serr := r.chapterScratch(proj, clsName, base)
+		if serr != nil {
+			continue
+		}
+		data, rerr := os.ReadFile(t)
+		if rerr == nil {
+			_ = os.WriteFile(filepath.Join(scratch, base+".tex"), data, 0o644)
+			res := r.comp.Compile(scratch, base+"_wrapper.tex")
+			if !res.OK {
+				redo = append(redo, base)
+				r.log.LogWarning(0, "[style-feedback] 新样式下编译失败，需重做:", base)
+			}
+		}
+		os.RemoveAll(scratch)
+	}
+	if len(redo) == 0 {
+		r.log.Log(0, "[style-feedback] 样式包已更新，没有章节需要重做")
+		_ = os.RemoveAll(reportsDir)
+		return nil
+	}
+	r.log.Log(0, "[style-feedback] 样式包已更新，重做", strconv.Itoa(len(redo)), "个章节:",
+		strings.Join(redo, ", "))
+	r.phaseNote()("[style-feedback] 样式包已更新，重做 %d 章", len(redo))
+
+	// 并发子会话做增量样式修复；失败者删除产物，退回整章重转换。
+	chapDir := filepath.Join(proj, "chapters")
+	conc := r.cfg.Latex.Concurrency
+	if conc <= 0 {
+		conc = 3
+	}
+	tidPool := make(chan int, conc)
+	for i := 1; i <= conc; i++ {
+		tidPool <- i
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var fallback []string
+	for _, base := range redo {
+		wg.Add(1)
+		tid := <-tidPool
+		go func(b string, tid int) {
+			defer wg.Done()
+			defer func() { tidPool <- tid }()
+			chapPath := filepath.Join(chapDir, b+".md")
+			issues := ""
+			if data, err := os.ReadFile(filepath.Join(reportsDir, b+".md")); err == nil {
+				issues = string(data)
+			}
+			if err := r.fixChapterStyle(proj, clsName, manualPath, chapPath, workDir, b, issues, tid); err != nil {
+				r.log.LogWarning(tid, "[style-fix]", b, "增量修复失败，将整章重转换:", err)
+				mu.Lock()
+				fallback = append(fallback, b)
+				mu.Unlock()
+			} else {
+				r.log.Log(tid, "[style-fix]", b, "修复完成")
+			}
+		}(base, tid)
+	}
+	wg.Wait()
+
+	// 失败的章节：删除产物 + 转录，交给 convertPhase 用全新会话重转换。
+	for _, b := range fallback {
+		_ = os.RemoveAll(filepath.Join(chapWork, b+".tex"))
+		_ = os.RemoveAll(filepath.Join(chapWork, b))
+		_ = os.Remove(filepath.Join(proj, "work", "sessions", "convert_"+b+".jsonl"))
+	}
 	_ = os.RemoveAll(reportsDir)
-	r.log.Log(0, "[style-feedback] 样式包已更新，丢弃全部章节 .tex，使用全新会话重新并发转换")
+	if len(fallback) == 0 {
+		return nil
+	}
+	r.log.Log(0, "[style-feedback]", strconv.Itoa(len(fallback)), "章需要整章重转换")
 	return r.convertPhase(proj, round+1)
+}
+
+// sliceHas reports whether the slice contains want.
+func sliceHas(s []string, want string) bool {
+	for _, x := range s {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }
 
 // saveSessionContext persists the full conversation of a session as a

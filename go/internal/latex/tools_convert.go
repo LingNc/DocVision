@@ -28,54 +28,6 @@ func resolveInside(root, rel string) (string, error) {
 	return filepath.Join(root, clean), nil
 }
 
-// WriteFileTool writes EXACTLY one assigned file inside the virtual
-// project tree (the chapter's own .tex). Content replaces the file.
-type WriteFileTool struct {
-	Root       string
-	AllowedRel string // the only writable path, relative to Root
-}
-
-func (t *WriteFileTool) Name() string { return "write_file" }
-
-func (t *WriteFileTool) Definition() map[string]any {
-	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "write_file",
-		"description": "Write YOUR chapter .tex file with the FULL new content (it replaces the file). This is the only file you can write.",
-		"parameters": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"content": map[string]any{"type": "string"},
-			},
-			"required": []string{"content"},
-		},
-	}}
-}
-
-func (t *WriteFileTool) Execute(argsJSON string) (session.ToolResult, error) {
-	args, err := parseJSONObject(argsJSON)
-	if err != nil {
-		return session.ToolResult{}, err
-	}
-	content, _ := args["content"].(string)
-	if strings.TrimSpace(content) == "" {
-		return session.ToolResult{Text: "REJECTED: empty content."}, nil
-	}
-	if strings.Contains(content, "\\documentclass") {
-		return session.ToolResult{Text: "REJECTED: the chapter must be an \\input fragment — no \\documentclass / preamble."}, nil
-	}
-	full, err := resolveInside(t.Root, t.AllowedRel)
-	if err != nil {
-		return session.ToolResult{}, err
-	}
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		return session.ToolResult{}, err
-	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		return session.ToolResult{}, err
-	}
-	return session.ToolResult{Text: fmt.Sprintf("WROTE %s (%d bytes). Call compile to check, then submit when clean.", t.AllowedRel, len(content))}, nil
-}
-
 // CompileChapterTool compiles the chapter .tex inside a scratch
 // wrapper that uses the book class, returning the error log only.
 type CompileChapterTool struct {

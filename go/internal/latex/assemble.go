@@ -42,16 +42,16 @@ func (r *Runner) assemblePhase(proj string) error {
 			}
 		}
 	}
-	// Chapter .tex files.
-	texs, _ := filepath.Glob(filepath.Join(proj, "work", "chapters", "chapter_*.tex"))
+	// Chapter .tex files: the WHOLE chapters tree is copied so a chapter
+	// that submitted extra files (chapters/<base>/…) keeps its relative
+	// structure. Only top-level .tex files become \input targets.
+	texs, _ := filepath.Glob(filepath.Join(proj, "work", "chapters", "*.tex"))
 	if len(texs) == 0 {
 		return fmt.Errorf("没有已转换的章节 .tex")
 	}
 	sort.Strings(texs)
-	for _, f := range texs {
-		if err := copyFile(f, filepath.Join(buildDir, "chapters", filepath.Base(f))); err != nil {
-			return err
-		}
+	if err := copyDir(filepath.Join(proj, "work", "chapters"), filepath.Join(buildDir, "chapters")); err != nil {
+		return err
 	}
 
 	// main.tex.
@@ -120,8 +120,9 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 	tuning := r.cfg.LatexSession("convert")
 	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "book", Log: r.log, Tid: 1}
 	submit := &SubmitDoneTool{Label: "the build fix"}
-	sess := session.NewSession(client, modelCfg, tuning, fixSystemPrompt, []session.Tool{
-		&ReadFileTool{Root: buildDir},
+	tools := []session.Tool{
+		// 项目文件（原 md、chapters、style）只读可查；构建树可写。
+		&ReadFileTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&WriteWorkFileTool{Root: buildDir, AnyExt: true},
 		&EditWorkFileTool{Root: buildDir},
 		&GrepTool{Root: buildDir},
@@ -131,7 +132,14 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 		&ViewImageTool{Root: buildDir},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
-	}, r.log, 1, "fix")
+	}
+	if r.docPages != nil {
+		// 原书扫描页：核对真实版面/图表来源。
+		tools = append(tools,
+			&ListSourcePagesTool{Idx: r.docPages},
+			&ViewSourcePageTool{Idx: r.docPages, PagesDir: filepath.Join(proj, "pages"), Runner: r})
+	}
+	sess := session.NewSession(client, modelCfg, tuning, fixSystemPrompt, tools, r.log, 1, "fix")
 
 	lastErr := firstErr
 	for attempt := 0; attempt < r.cfg.Latex.Compile.MaxFixRounds; attempt++ {
