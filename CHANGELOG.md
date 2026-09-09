@@ -4,6 +4,9 @@
 
 ### Added
 
+- **项目字体目录接入编译**：`Compiler` 注入 `TEXINPUTS`/`OSFONTDIR` 指向 `paths.fonts`（默认 `./fonts`）——cls 里按文件名直接引用用户放入的字体文件，无需安装系统字体；latex 运行时自动创建 `fonts/README.md` 说明缺失字体的放置方法与命名约定；移除 `install_font` 工具（下载字体不必要且有版权风险），缺字体改为样式会话在 submit_style 报告与 manual.md 中列出清单、由用户手动下载
+- **档位1 嵌入注释统一骨架**：所有机器注释统一为首行 `<!-- DOCVISION-<TYPE>: <描述>` + 字段行（CONTENT:/LINK:）+ 独立闭合行 ` -->`；矢量图注释为 `DOCVISION-VECTOR: <label>` + `LINK: ![](原图)`（替代单行 ORIG-IMAGE），与 STYLED-TEXT 同构
+
 - **会话工具大升级（增量编辑 / 检索 / PDF 查看 / 可配 bash）**：新工具文件 `tools_work.go`——`edit_file`（任意文本文件精确 find/replace，支持 `replace_all` 与 `append:true` 追加；回答"追加能否用编辑实现"：能）；`grep`（工作区递归检索，返回行号+相对路径）；`WorkBashTool`（**timeout 由 AI 参数决定**默认 30s 上限 300s，cwd=会话工作区根，输出上限 5000 字符）；`view_pdf`（按页渲染工作区 PDF，裁剪/放大与 view_image 同一套参数，**始终从 PDF 重渲染**因此放大清晰，返回 page N/M）。接入：tikz（write_file/edit_file/grep + 持久工作区）、style（edit_file/grep/view_pdf）、convert（edit_file 仅自己的 .tex/grep 全项目/view_pdf 编译草稿）、chapters（buffer.md 工作记忆 + read_file + bash）
 - **submit 按文件路径引用（process）**：tikz 的 submit 优先接受 `{path:"figure.tex"}`——模型先把最终代码 write_file 进工作区再按路径提交，不再强制整段重输出代码（省 token）
 - **process 持久工作区**：tikz 工作区改为 `sessions/vector_<图>.work`（不处理完不删除，中断后下次续上；成功提交后连同转录一起清理）
