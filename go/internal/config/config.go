@@ -134,6 +134,17 @@ type LatexCompileConfig struct {
 	// MaxFixRounds bounds the whole compile→review→fix cycle per figure
 	// (safety cap on top of the session tool budget). Default 8.
 	MaxFixRounds int `yaml:"max_fix_rounds"`
+	// FinalReview runs the final book-doctor session after a successful
+	// full-book build: it reads the finished PDF and does the final
+	// consolidation (front matter, TOC, order, layout), then recompiles.
+	// Default true.
+	FinalReview *bool `yaml:"final_review"`
+}
+
+// FinalReviewEnabled reports whether the final review session runs
+// (nil → default true).
+func (c LatexCompileConfig) FinalReviewEnabled() bool {
+	return c.FinalReview == nil || *c.FinalReview
 }
 
 // LatexConfig configures the LaTeX output feature (two levels).

@@ -22,6 +22,7 @@
 
 ### Added
 
+- **终审会话（全书汇总/整理）**：全书编译成功后不再直接交付，而是总是进入 `finalReview` 会话——构建树 `build/` 同时是样式包基础工作区（cls/sty/manual.md/example.tex 一并复制），工具集与修复会话共享 `bookSessionTools`（read_file 可读构建树 + 项目根、write_file/edit_file/grep/bash、compile {engine:"latexmk"}、view_pdf、view_image、list_fonts、list_source_pages/view_source_page、submit）；它逐页检视成品 PDF（封面/目录/章节顺序与完整性/页码/图表位置与溢出/孤页/overfull box）并做最小 edit_file 修正后重新构建，轮数上限 `latex.compile.max_fix_rounds`。开关 `latex.compile.final_review`（默认 true）；终审未通过只告警，已编译全书照常交付。
 - **raster 图档位1 统一解释块**：档位1 的 raster 图在 process 阶段总是生成解释文本（复用 img2text 文本提取，每张一次视觉调用），嵌入格式与 STYLED/VECTOR 同骨架——`<!-- DOCVISION-IMAGE: <label> -->` + `DESCRIBE: <解释>` + `LINK: [image](…)`，无文本时只有 LINK 行；`latex.insert_image_description` 仅控制档位2（开=嵌入 `[Image]( content )`，关=纯 `![image]` 原图引用）
 
 - **档位1 嵌入注释最终骨架（首行闭合 + 字段在外 + `[class]` 链接）**：HTML 注释第一行即闭合 `<!-- DOCVISION-<TYPE>: <描述> -->`，CONTENT/LINK 一律在注释**外面**、各自独立一行；LINK 用链接形式（非图片）且括号前带 class 名：`[styled-text](…)`、`[vector](…)`。STYLED-TEXT = 注释 + CONTENT 原文 + LINK；VECTOR = 注释 + latex 围栏上方 LINK；RASTER 有 AI 描述 = `<!-- DOCVISION-IMAGE: <描述> -->` + 原图 `![image](…)`（图仍是图片形式），无描述保持纯图；fallback 保持原图 + `<!– DOCVISION-ERROR –>`。style/convert 提示词标记说明、embed 测试同步

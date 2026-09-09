@@ -71,6 +71,7 @@ latex:
     raster_command: "pdftoppm"   # PDF 栅格化工具（poppler-utils）
     raster_dpi: 110              # 回给 AI 核对的 PNG 分辨率
     max_fix_rounds: 8            # 编译-修正整体循环上限
+    final_review: true           # 全书编译通过后再跑一次终审会话（汇总/整理/重编译）
   sessions:                      # 每个 AI 会话的独立调优
     drawing:
       context_limit: 131072      # 上下文窗口（tokens，默认 128K，可改 64K/256K 等）

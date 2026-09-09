@@ -33,6 +33,11 @@ func (r *Runner) assemblePhase(proj string) error {
 	if err := copyFile(filepath.Join(proj, "style", clsName+".cls"), filepath.Join(buildDir, clsName+".cls")); err != nil {
 		return err
 	}
+	// 整个样式包（cls/sty/manual/example）作为构建树的基础：终审会话
+	// 需要它来整理全书、核对章节用法。
+	if err := copyDir(filepath.Join(proj, "style"), buildDir); err != nil {
+		return err
+	}
 	// Figures and raster assets from the level-2 source pass.
 	for _, asset := range []string{"figures", "images"} {
 		src := filepath.Join(proj, "source", asset)
@@ -77,6 +82,15 @@ func (r *Runner) assemblePhase(proj string) error {
 			return err
 		}
 	}
+	// 终审会话：全书已经能编译，让汇总会话通读成品 PDF 与原始 md/原书
+	// 做最终整理（目录/页码/图表位置/版面），并重新构建。失败只告警，
+	// 已编译出的全书仍然交付。
+	if r.cfg.Latex.Compile.FinalReviewEnabled() {
+		if err := r.finalReview(proj, buildDir, texs); err != nil {
+			r.log.LogWarning(0, "[final-review] 终审会话未通过（保留已编译全书）:", err)
+			r.phaseNote()("[final-review] 终审未通过（保留已编译全书）")
+		}
+	}
 
 	// Final artefacts.
 	pdf := filepath.Join(buildDir, "main.pdf")
@@ -94,7 +108,13 @@ func (r *Runner) assemblePhase(proj string) error {
 	}
 
 	// standalone.tex: single file with all chapters inlined (no compile
-	// needed; easy for AI consumption and archival).
+	// needed; easy for AI consumption and archival). The file list is
+	// re-globbed because the final review session may have reorganised
+	// or renamed chapter files.
+	if reglob, gerr := filepath.Glob(filepath.Join(buildDir, "chapters", "*.tex")); gerr == nil && len(reglob) > 0 {
+		texs = reglob
+		sort.Strings(texs)
+	}
 	standalone, err := buildStandaloneTex(filepath.Join(buildDir, "main.tex"), texs)
 	if err != nil {
 		return err
@@ -109,19 +129,13 @@ func (r *Runner) assemblePhase(proj string) error {
 	return nil
 }
 
-// fixSession spawns the build-doctor session. It is a full workspace
-// session on the build tree: read/write/edit/grep/bash + compile +
-// view_pdf/view_image + fonts, so it can restructure the assembled
-// project (multi-file, resources) and verify the PDF itself.
-func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
-	r.log.LogWarning(0, "[assemble] 全书编译失败，启动修复会话:", firstErr)
-	client := r.clientFor(r.cfg.Latex.ConvertModel)
-	modelCfg := r.models[r.cfg.Latex.ConvertModel]
-	tuning := r.cfg.LatexSession("convert")
-	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "book", Log: r.log, Tid: 1}
-	submit := &SubmitDoneTool{Label: "the build fix"}
+// bookSessionTools is the toolset shared by the build doctor and the
+// final review session: a full workspace on the assembled book tree
+// (read/write/edit/grep/bash + compile + view_pdf/view_image + fonts)
+// with the project (original markdown, chapters, style) readable
+// read-only.
+func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool, submit *SubmitDoneTool) []session.Tool {
 	tools := []session.Tool{
-		// 项目文件（原 md、chapters、style）只读可查；构建树可写。
 		&ReadFileTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&WriteWorkFileTool{Root: buildDir, AnyExt: true},
 		&EditWorkFileTool{Root: buildDir},
@@ -139,6 +153,21 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 			&ListSourcePagesTool{Idx: r.docPages},
 			&ViewSourcePageTool{Idx: r.docPages, PagesDir: filepath.Join(proj, "pages"), Runner: r})
 	}
+	return tools
+}
+
+// fixSession spawns the build-doctor session. It is a full workspace
+// session on the build tree: read/write/edit/grep/bash + compile +
+// view_pdf/view_image + fonts, so it can restructure the assembled
+// project (multi-file, resources) and verify the PDF itself.
+func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
+	r.log.LogWarning(0, "[assemble] 全书编译失败，启动修复会话:", firstErr)
+	client := r.clientFor(r.cfg.Latex.ConvertModel)
+	modelCfg := r.models[r.cfg.Latex.ConvertModel]
+	tuning := r.cfg.LatexSession("convert")
+	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "book", Log: r.log, Tid: 1}
+	submit := &SubmitDoneTool{Label: "the build fix"}
+	tools := r.bookSessionTools(proj, buildDir, compile, submit)
 	sess := session.NewSession(client, modelCfg, tuning, fixSystemPrompt, tools, r.log, 1, "fix")
 
 	lastErr := firstErr
@@ -164,6 +193,71 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 		r.log.LogWarning(1, "[assemble] 修复第", strconv.Itoa(attempt+1), "轮后仍失败")
 	}
 	return fmt.Errorf("全书编译在 %d 轮修复内未通过", r.cfg.Latex.Compile.MaxFixRounds)
+}
+
+// finalReview runs the book-doctor session on an ALREADY COMPILED book:
+// it reads the finished PDF (and the original pages / chapter markdown)
+// and does the final consolidation — front matter, TOC, chapter order,
+// page numbering, figure placement, layout — then recompiles. Capped by
+// latex.compile.max_fix_rounds.
+func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
+	rounds := r.cfg.Latex.Compile.MaxFixRounds
+	if rounds <= 0 {
+		rounds = 1
+	}
+	r.log.Log(0, "[final-review] 启动终审会话（上限", strconv.Itoa(rounds), "轮）")
+	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "final-review", Log: r.log, Tid: 1}
+	submit := &SubmitDoneTool{Label: "the final review"}
+	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
+		r.cfg.LatexSession("convert"), finalReviewSystemPrompt,
+		r.bookSessionTools(proj, buildDir, compile, submit), r.log, 1, "final-review")
+	liveHook, liveClose := r.livePhaseLine("final-review")
+	sess.SetProgressHook(liveHook)
+	defer liveClose()
+
+	var chaps strings.Builder
+	for _, f := range texs {
+		fmt.Fprintf(&chaps, "- chapters/%s\n", filepath.Base(f))
+	}
+	pages, _ := pdfPageCount(filepath.Join(buildDir, "main.pdf"))
+	first := strings.Join([]string{
+		"The full book compiled successfully. This is the final consolidation pass.",
+		"",
+		"Book tree (your workspace): main.tex, chapters/*.tex, the class and manual.md/example.tex, figures/, images/.",
+		fmt.Sprintf("Compiled book.pdf: %d page(s).", pages),
+		"Chapters:",
+		chaps.String(),
+		"",
+		"Read the finished PDF page by page (view_pdf) and compare against the original markdown (read_file \"project:<path>\") and the original book pages (list_source_pages/view_source_page).",
+		"Fix everything a printed book needs: front matter/cover, table of contents, chapter order and completeness, page numbering and headers/footers, figure/table placement and sizing, orphan/blank pages, overfull boxes, duplicated or missing sections.",
+		"Use edit_file for minimal fixes (never drop content), bash to reorganise files if needed, then compile {path:\"main.tex\", engine:\"latexmk\"} and verify with view_pdf.",
+		"When the book is final, call submit.",
+	}, "\n")
+
+	lastErr := ""
+	for attempt := 0; attempt < rounds; attempt++ {
+		userText := first
+		if attempt > 0 {
+			userText = "The book still does not compile after your last edits:\n\n" + truncateStr(lastErr, 8000) +
+				"\n\nFix it (edit_file / bash), compile {path:\"main.tex\", engine:\"latexmk\"}, verify with view_pdf, then submit."
+		}
+		if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
+			return fmt.Errorf("终审会话失败: %w", err)
+		}
+		start := time.Now()
+		res := r.comp.CompileFull(buildDir, "main.tex")
+		LogCompileResult(r.log, 1, "final-review", res, time.Since(start))
+		if res.OK {
+			if !submit.Submitted {
+				r.log.LogWarning(0, "[final-review] 会话未显式提交，但全书编译通过，予以采纳")
+			}
+			finalPages, _ := pdfPageCount(filepath.Join(buildDir, "main.pdf"))
+			r.log.Log(0, "[final-review] 终审完成，全书页数:", strconv.Itoa(finalPages))
+			return nil
+		}
+		lastErr = res.Err
+	}
+	return fmt.Errorf("终审 %d 轮后全书仍编译失败: %s", rounds, lastErr)
 }
 
 // buildStandaloneTex inlines every \input{chapters/...} of main.tex.

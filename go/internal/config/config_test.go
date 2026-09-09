@@ -317,3 +317,22 @@ models:
 		t.Fatalf("unnamed must resolve to text: %+v", mc2)
 	}
 }
+
+// TestLatexCompileFinalReviewDefault: the final review session is on
+// unless explicitly disabled.
+func TestLatexCompileFinalReviewDefault(t *testing.T) {
+	var c LatexCompileConfig
+	if !c.FinalReviewEnabled() {
+		t.Fatal("unset final_review must default to enabled")
+	}
+	off := false
+	c.FinalReview = &off
+	if c.FinalReviewEnabled() {
+		t.Fatal("explicit final_review: false must disable the session")
+	}
+	on := true
+	c.FinalReview = &on
+	if !c.FinalReviewEnabled() {
+		t.Fatal("explicit final_review: true must enable the session")
+	}
+}
