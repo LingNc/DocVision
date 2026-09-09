@@ -60,9 +60,11 @@ You have tools to inspect the source material:
 - view_image: view any image (you may crop a sub-region in percentages and scale it up to inspect details); give the file name as it appears in the markdown.
 - read_md: read the organized Markdown (MinerU's text is high quality; trust it over OCR-by-eye).
 
-Pipeline markers in the Markdown are machine comments, NOT document content — ignore them when inferring style: <!-- DOCVISION-STYLED-TEXT: <style note> CONTENT: <text> LINK: <image> --> (stylised text image; only in level-1 source) and <!-- DOCVISION-VECTOR: <what the figure shows>
-LINK: ![](images/...)
- --> (the original raster image the latex fence below was drawn from — keep the whole comment out of the .tex, use LINK to view the source figure) and <!-- DOCVISION-ERROR: ... --> (a conversion that fell back).
+Pipeline markers in the Markdown are machine comments, NOT document content — ignore them when inferring style. Every marker block is: one HTML comment whose first line closes immediately (<!-- DOCVISION-<TYPE>: <desc> -->), followed by field lines (CONTENT:/LINK:) OUTSIDE the comment, each on its own line:
+- <!-- DOCVISION-STYLED-TEXT: <style note> --> then CONTENT: <text> then LINK: [styled-text](images/...) (stylised text image; only in level-1 source)
+- <!-- DOCVISION-VECTOR: <what the figure shows> --> then LINK: [vector](images/...) above a latex fence (the original raster image the fence was drawn from)
+- <!-- DOCVISION-IMAGE: <description> --> then a plain image link (raster with an AI description)
+- <!-- DOCVISION-ERROR: ... --> (a conversion that fell back)
 
 ## Your job
 1. Inspect several representative pages/images: chapter title pages, section headings, body text, figures, tables, headers/footers if visible.
@@ -109,12 +111,11 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 ## Conversion rules
 1. Use the class commands from the manual for chapter/section titles and any special environments.
 2. Images come in THREE forms:
-   - latex FENCED CODE BLOCKS (three-backtick latex fences): the figure is ALREADY LaTeX. A machine comment <!-- DOCVISION-VECTOR: <desc> ... LINK: ![](images/...) ... --> directly above a fence points at the original raster — use it with view_image/doc_search to check the source figure; the comment itself must NOT reach the .tex. Paste the code inside the class figure environment, stripping the fence lines. You MAY restyle the code to the book's house style (colours, node/arrow/line styles — follow the manual's '## Vector figure style' section) while keeping its structure, geometry and ALL labels; compile to verify. This keeps figure styling uniform across the whole book. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
+   - latex FENCED CODE BLOCKS (three-backtick latex fences): the figure is ALREADY LaTeX. A machine comment block <!-- DOCVISION-VECTOR: <desc> --> with LINK: [vector](images/...) on the line right below it, directly above a fence, points at the original raster — use it with view_image/doc_search to check the source figure; the comment itself must NOT reach the .tex. Paste the code inside the class figure environment, stripping the fence lines. You MAY restyle the code to the book's house style (colours, node/arrow/line styles — follow the manual's '## Vector figure style' section) while keeping its structure, geometry and ALL labels; compile to verify. This keeps figure styling uniform across the whole book. Do NOT includegraphics it, do NOT wrap it in verbatim/lstlisting.
    - STYLED-TEXT comment blocks: one HTML comment carrying the image's styling and its real text:
-     <!-- DOCVISION-STYLED-TEXT: <style note>
+     <!-- DOCVISION-STYLED-TEXT: <style note> -->
      CONTENT: <the image's own text, verbatim>
-     LINK: ![styled-text](images/...)
-      -->
+     LINK: [styled-text](images/...)
      The text after CONTENT: IS the document's real text (verbatim from the image) — never drop it. The image is TEXT WITH STYLING (artistic fonts, colours, ornaments) that plain markdown could not carry. After checking the manual/cls: re-typeset that CONTENT with the class constructs that best reproduce its role (stylised heading/label/ornament environment), or includegraphics the LINK image when the styling is truly un-reproducible. Either way the visible text must survive and the whole comment must NOT reach the .tex.
    - plain markdown image links to raster files under images/: includegraphics them (same path) inside the class figure environment (or standard figure+caption if the manual does not define one). NEVER invent new image files.
 

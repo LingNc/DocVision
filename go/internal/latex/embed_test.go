@@ -1,6 +1,8 @@
 package latex
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -18,7 +20,16 @@ func testRunner(t *testing.T, inline bool) *Runner {
 	}
 	log.SetQuiet(true)
 	t.Cleanup(func() { _ = log.Close() })
-	return &Runner{cfg: &config.Config{}, log: log, inline: inline}
+	// 提供真实 images 目录，让 copyOriginalImage 能复制原图并生成 LINK 行。
+	imgs := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(imgs, "book"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(imgs, "book", "img1.png"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return &Runner{cfg: &config.Config{Paths: config.PathsConfig{ImagesDir: imgs}},
+		log: log, inline: inline}
 }
 
 // TestEmbedBlockLevel2StyledTextIsDirect: level 2 replaces a text image
@@ -45,13 +56,14 @@ func TestEmbedBlockLevel1StyledTextComment(t *testing.T) {
 		Class: ClassText, Styled: true,
 		StyleNote: "black characters in blue circular bubbles",
 		Content:   "知识导图",
+		ImgPath:   "images/book/img1.png",
 	}
 	block := r.embedBlock(p, "book.md", t.TempDir())
 
 	for _, want := range []string{
-		"<!-- DOCVISION-STYLED-TEXT: black characters in blue circular bubbles",
+		"<!-- DOCVISION-STYLED-TEXT: black characters in blue circular bubbles -->",
 		"CONTENT: 知识导图",
-		" -->",
+		"LINK: [styled-text](",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("level-1 styled block missing %q:\n%s", want, block)
@@ -59,6 +71,53 @@ func TestEmbedBlockLevel1StyledTextComment(t *testing.T) {
 	}
 	if strings.Contains(block, "BEGIN") || strings.Contains(block, "END") {
 		t.Errorf("level-1 styled block must not use BEGIN/END markers:\n%s", block)
+	}
+}
+
+// TestEmbedBlockLevel1VectorComment pins the level-1 vector format:
+// a first-line-closed comment (DOCVISION-VECTOR), the LINK outside the
+// comment above the latex fence, in [vector](path) link form.
+func TestEmbedBlockLevel1VectorComment(t *testing.T) {
+	r := testRunner(t, true)
+	p := &imageProgress{
+		Class: ClassVector, Label: "Venn diagram",
+		TikzCode: "\\begin{tikzpicture}\n%...\n\\end{tikzpicture}",
+		ImgPath:  "images/book/img1.png",
+	}
+	block := r.embedBlock(p, "book.md", t.TempDir())
+	for _, want := range []string{
+		"<!-- DOCVISION-VECTOR: Venn diagram -->",
+		"LINK: [vector](images/",
+		"```latex",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("level-1 vector block missing %q:\n%s", want, block)
+		}
+	}
+	// 注释首行即闭合，LINK 是注释后的独立行：--> 直接跟换行再 LINK。
+	if !strings.Contains(block, " -->\nLINK:") {
+		t.Errorf("comment must close on the first line with LINK outside:\n%s", block)
+	}
+}
+
+// TestEmbedBlockRasterDescription pins the level-1 raster format:
+// DOCVISION-IMAGE comment with the description (first-line closed),
+// original image kept as a real image right below it.
+func TestEmbedBlockRasterDescription(t *testing.T) {
+	r := testRunner(t, true)
+	r.cfg.Latex.InsertImageDescription = true
+	p := &imageProgress{
+		Class: ClassRaster, Content: "a drawing of the experimental setup",
+		ImgPath: "images/book/img1.png",
+	}
+	block := r.embedBlock(p, "book.md", t.TempDir())
+	for _, want := range []string{
+		"<!-- DOCVISION-IMAGE: a drawing of the experimental setup -->",
+		"![image](images/",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("level-1 raster block missing %q:\n%s", want, block)
+		}
 	}
 }
 

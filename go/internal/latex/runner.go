@@ -920,21 +920,21 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 			return r.rasterBlock(p, mdName, outDir)
 		}
 		if p.Styled && r.inline {
-			// 档位1：样式化文本图用一条 HTML 注释携带"样式 + 原文 + 原图
-			// 链接"，转换会话按手册重排或直接 includegraphics；注释本身
-			// 不进入 .tex。档位2 不做样式保留（见下方直接嵌入）。
+			// 档位1：样式化文本图。注释首行即闭合（`-->` 在行尾），
+			// CONTENT/LINK 在注释外随行列出；LINK 用 [styled-text](路径)
+			// 链接形式。转换会话按手册重排或 includegraphics；整块
+			// 注释+字段不进入 .tex。档位2 不做样式保留。
 			noteText := p.StyleNote
 			if strings.TrimSpace(noteText) == "" {
 				noteText = "样式未提供，见原图"
 			}
 			var b strings.Builder
-			b.WriteString("<!-- DOCVISION-STYLED-TEXT: " + mdCommentSafe(noteText) + "\n")
+			b.WriteString("<!-- DOCVISION-STYLED-TEXT: " + mdCommentSafe(noteText) + " -->\n")
 			b.WriteString("CONTENT: " + mdCommentBody(p.Content) + "\n")
 			if rel, ok := r.copyOriginalImage(p, mdName, outDir); ok {
-				b.WriteString("LINK: ![styled-text](" + rel + ")\n")
+				b.WriteString("LINK: [styled-text](" + rel + ")\n")
 			}
-			b.WriteString(" -->")
-			return b.String()
+			return strings.TrimRight(b.String(), "\n")
 		}
 		// 档位2（以及档位1 的非样式化文本图）：直接把提取到的原文
 		// 嵌入正文，不保留样式、不加任何标记。
@@ -946,15 +946,14 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 			// 机器注释指向原图，下游转换会话可据此找到原始图像/页面。
 			if p.TikzCode != "" {
 				if rel, ok := r.copyOriginalImage(p, mdName, outDir); ok {
-					// 与 DOCVISION-STYLED-TEXT 同构：首行 类型+描述，
-					// 下面 LINK 字段，闭合 --> 独立一行。
+					// 注释首行闭合；LINK 在注释外、latex 围栏上方，
+					// 用 [vector](路径) 链接形式指向原图。
 					label := p.Label
 					if label == "" {
 						label = "vector figure"
 					}
-					head := "<!-- DOCVISION-VECTOR: " + mdCommentSafe(label) + "\n" +
-						"LINK: ![]( " + rel + " )\n" +
-						" -->"
+					head := "<!-- DOCVISION-VECTOR: " + mdCommentSafe(label) + " -->\n" +
+						"LINK: [vector](" + rel + ")"
 					return head + "\n```latex\n" + p.TikzCode + "\n```"
 				}
 				return "```latex\n" + p.TikzCode + "\n```"
@@ -989,14 +988,16 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 }
 
 // rasterBlock keeps the original image link (copying the file into the
-// output tree) or embeds the readable explanation.
+// output tree) or embeds the readable explanation. 档位1 有描述时用
+// 注释携带解释（首行闭合），原图本身仍是图片形式紧随其后——图就是
+// 正文，不能变成链接；档位2 不受影响。
 func (r *Runner) rasterBlock(p *imageProgress, mdName, outDir string) string {
-	if r.cfg.Latex.InsertImageDescription && p.Content != "" {
-		return "[Image]( " + p.Content + " )"
-	}
 	rel, ok := r.copyOriginalImage(p, mdName, outDir)
 	if !ok {
 		return ""
+	}
+	if r.inline && r.cfg.Latex.InsertImageDescription && p.Content != "" {
+		return "<!-- DOCVISION-IMAGE: " + mdCommentSafe(p.Content) + " -->\n![image](" + rel + ")"
 	}
 	return "![image](" + rel + ")"
 }
