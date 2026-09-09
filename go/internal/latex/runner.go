@@ -521,6 +521,9 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	var mu sync.Mutex
 	// done0：断点续传时此前已完成的部分——进度直接从它起跳。
 	total, done, failed, warned, running := done0, done0, 0, 0, 0
+	// raster 计数：保留原图的图（档位1 每张都生成解释文本），单独显示
+	// 让档位1 的控制台能看出"矢量 vs 原图"的比例。
+	raster := 0
 	for _, t := range pending {
 		mu.Lock()
 		p, ok := prog[t.key()]
@@ -529,6 +532,9 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			continue // not classified yet
 		}
 		total++
+		if p.Class == ClassRaster && p.Status == "done" {
+			raster++ // 上次已完成的 raster（断点续传）
+		}
 	}
 	progress := func() {
 		if verbose || total == 0 {
@@ -539,8 +545,8 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		if ok < 0 {
 			ok = 0
 		}
-		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, running: %d)          ",
-			done, total, pct, ok, failed, warned, running)
+		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, raster: %d, running: %d)          ",
+			done, total, pct, ok, failed, warned, raster, running)
 	}
 	if total > 0 {
 		// 会话处理耗时长：先打出 0/N 起始行，处理期间进度可见。
@@ -669,7 +675,11 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				pp.Kept = true
 				pp.Status = "done"
 				sessOK, sessType = true, "raster"
-				r.log.Log(tid, "[raster]", tt.imgPath, "kept as original")
+				mu.Lock()
+				raster++
+				mu.Unlock()
+				r.log.Log(tid, "[raster]", tt.imgPath, "kept as original",
+					"described="+strconv.FormatBool(strings.TrimSpace(pp.Content) != ""))
 			}
 			saveProgress(progDir, pp)
 		}(t, p)

@@ -11,6 +11,7 @@
   - convert 会话新增 `view_image`（看 md 中引用的原图），并把 `source/images`、`source/figures` 符号链接进预览编译的 scratch，章节里的图片引用不再因缺资源而编译失败。
   - assemble 的修复会话升级为完整工作区会话（read/write/edit/grep/bash/compile/view_pdf/view_image/list_fonts，`write_file` 允许任意文本扩展名），全书编译改用 `CompileFull`（有 latexmk 用 latexmk，否则两遍）。
   - 新增配置 `latex.bash_max_output`（会话 bash 返回给模型的字符上限，默认 5000），`default.yaml`/`config.example.yaml` 与 `setup` 校验同步。
+  - process 进度行新增 `raster: N` 计数（档位1 保留原图并生成解释的图数量），`[raster]` 日志附 `described=true|false`——档位1 控制台可直接看出"矢量 vs 原图"比例。
 
 ### Added
 
