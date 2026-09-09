@@ -3,6 +3,7 @@ package latex
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"mineru-tools/internal/config"
@@ -64,10 +65,40 @@ func RunTikZSession(
 		"Begin: write the TikZ code and call compile_preview.",
 	}, "\n")
 
+	// 会话转录（JSONL）：每条消息实时追加，图片以 file:// 媒体引用存储。
+	// 若此前运行在同一张图上中断（进程被杀 / 网络断连），恢复历史上下文
+	// 继续会话，避免从零重烧 token。
+	sessDir := filepath.Join(outDir, "sessions")
+	texBase := strings.TrimSuffix(filepath.Base(dstTex), ".tex")
+	trPath := filepath.Join(sessDir, "vector_"+texBase+".jsonl")
+	if msgs, err := session.LoadTranscript(trPath); err != nil {
+		log.LogWarning(tid, "[tikz] 转录读取失败（忽略，按全新会话继续）:", err)
+	} else if len(msgs) > 0 {
+		sess.SetMessages(msgs)
+		if tr, err := session.NewTranscript(trPath); err == nil {
+			sess.SetTranscript(tr)
+			defer tr.Close()
+			log.Log(tid, "[tikz] 恢复中断的会话:", filepath.Base(trPath), "(", strconv.Itoa(len(msgs)), "条历史消息 )")
+			initial = "The session was interrupted earlier. Continue from where you left off: check your last compile_preview result, fix the code if needed, and call submit once the preview faithfully matches the original image."
+		}
+	} else if tr, err := session.NewTranscript(trPath); err == nil {
+		sess.SetTranscript(tr)
+		defer tr.Close()
+	}
+
 	_, runErr := sess.Run(session.RunOptions{UserText: initial, Images: []string{imgBase64}})
 	result := TikZResult{Rounds: sess.ToolInvoked}
 	if runErr != nil {
 		result.Reason = "会话错误: " + runErr.Error()
+	}
+	// 未提交时提醒一次提交（模型可能漏掉 submit 就停了）。
+	if !state.submitted && runErr == nil {
+		log.LogWarning(tid, "[tikz] 会话结束但模型未提交，发送提交提醒:")
+		if _, err := sess.Run(session.RunOptions{
+			UserText: "You have NOT called submit yet. Call submit now with your final TikZ code (identical to the last successful compile_preview). If no compile succeeded yet, fix the code, call compile_preview, then submit.",
+		}); err == nil && state.submitted {
+			result.Rounds = sess.ToolInvoked
+		}
 	}
 	if !state.submitted {
 		if result.Reason == "" {

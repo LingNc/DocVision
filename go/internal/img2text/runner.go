@@ -420,12 +420,15 @@ func runWorkers(
 	for i := 1; i <= concurrency; i++ {
 		tidPool <- i
 	}
-	total := len(pending)
+	// done0：断点续传时此前已完成数——进度直接从它起跳。
+	total := len(pending) + skipped
+	doneCount := skipped
 	var running atomic.Int64
 
 	// Show initial progress immediately before starting any workers.
 	if quiet && total > 0 {
-		fmt.Fprintf(os.Stdout, "[0/%d] 0.00%% (done: 0, errors: 0, warns: 0, running: 0, skip: %d)", total, skipped)
+		fmt.Fprintf(os.Stdout, "[%d/%d] %.2f%% (done: %d, errors: 0, warns: 0, running: 0)",
+			doneCount, total, float64(doneCount)*100.0/float64(total), doneCount)
 		os.Stdout.Sync()
 	}
 
@@ -434,7 +437,7 @@ func runWorkers(
 	go func() {
 		defer writerWG.Done()
 		count := 0
-		doneCount := 0
+		doneCount := skipped // 断点续传：从已完成数起跳
 		errorCount := 0
 		warnCount := 0
 
@@ -493,17 +496,17 @@ func runWorkers(
 				// Print progress with 2-decimal precision on every update.
 				if total > 0 {
 					pct := float64(doneCount) * 100.0 / float64(total)
-					fmt.Fprintf(progressOut, "\r[%d/%d] %.2f%% (done: %d, errors: %d, warns: %d, running: %d, skip: %d)",
+					fmt.Fprintf(progressOut, "\r[%d/%d] %.2f%% (done: %d, errors: %d, warns: %d, running: %d)",
 						doneCount, total, pct, doneCount-errorCount, errorCount, warnCount,
-						running.Load(), skipped)
+						running.Load())
 					progressOut.Flush()
 				}
 			}
 		}
 		if quiet && total > 0 {
 			// Final progress line (ensure 100% is printed).
-			fmt.Fprintf(progressOut, "\r[%d/%d] 100.00%% (done: %d, errors: %d, warns: %d, running: 0, skip: %d)\n",
-				total, total, doneCount-errorCount, errorCount, warnCount, skipped)
+			fmt.Fprintf(progressOut, "\r[%d/%d] 100.00%% (done: %d, errors: %d, warns: %d, running: 0)\n",
+				total, total, doneCount-errorCount, errorCount, warnCount)
 			progressOut.Flush()
 		}
 	}()

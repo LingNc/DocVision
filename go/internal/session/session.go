@@ -63,6 +63,10 @@ type Session struct {
 	// calls) — used by compact console modes to show a live line.
 	progressHook func(rounds, tools int)
 	rounds       int
+
+	// transcript, when set, receives every appended conversation
+	// message as a JSONL line (images as file:// refs) for resume.
+	transcript *TranscriptWriter
 }
 
 // SetProgressHook registers a callback notified after every API round
@@ -77,6 +81,24 @@ func (s *Session) SetProgressHook(fn func(rounds, tools int)) {
 func (s *Session) notifyProgress() {
 	if s.progressHook != nil {
 		s.progressHook(s.rounds, s.ToolInvoked)
+	}
+}
+
+// SetTranscript attaches a JSONL transcript writer. Every message
+// appended to the conversation afterwards (user turns, assistant
+// replies, tool results) is also appended to the transcript file, so
+// an interrupted session can be resumed later without burning tokens
+// on a fresh context. Images are stored as file://media/... refs.
+func (s *Session) SetTranscript(w *TranscriptWriter) { s.transcript = w }
+
+// appendTranscript writes one message to the transcript if attached.
+// Errors are logged (debug) but never fail the session itself.
+func (s *Session) appendTranscript(msg ChatMessage) {
+	if s.transcript == nil {
+		return
+	}
+	if err := s.transcript.Append(msg); err != nil && s.logger != nil {
+		s.logger.Debug(s.tid, "[session:"+s.label+"] transcript 写入失败:", err)
 	}
 }
 
@@ -175,6 +197,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		userMsg.Content = opts.UserText
 	}
 	s.messages = append(s.messages, userMsg)
+	s.appendTranscript(userMsg)
 
 	// Debug tracing: full prompts and every tool exchange land in the
 	// log file (never the console) when debug mode is on.
@@ -236,6 +259,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		if len(choice.Message.ToolCalls) > 0 && useTools {
 			NormalizeToolCallTypes(&choice.Message)
 			s.messages = append(s.messages, choice.Message)
+			s.appendTranscript(choice.Message)
 
 			// Tool-produced images are delivered AFTER every tool message:
 			// the OpenAI schema requires the messages directly following an
@@ -266,6 +290,11 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 					ToolCallID: tc.ID,
 					Content:    result.Text,
 				})
+				s.appendTranscript(ChatMessage{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Content:    result.Text,
+				})
 				if result.ImageBase64 != "" {
 					mime := result.ImageMIME
 					if mime == "" {
@@ -279,6 +308,15 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			// tool responses are in place.
 			for _, v := range vision {
 				s.messages = append(s.messages, ChatMessage{
+					Role: "user",
+					Content: []map[string]interface{}{
+						{"type": "text", "text": "Tool image output (for your visual review):"},
+						{"type": "image_url", "image_url": map[string]string{
+							"url": "data:" + v.mime + ";base64," + v.b64,
+						}},
+					},
+				})
+				s.appendTranscript(ChatMessage{
 					Role: "user",
 					Content: []map[string]interface{}{
 						{"type": "text", "text": "Tool image output (for your visual review):"},
@@ -302,9 +340,15 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			}
 			NormalizeToolCallTypes(&choice.Message)
 			s.messages = append(s.messages, choice.Message)
+			s.appendTranscript(choice.Message)
 			for _, tc := range choice.Message.ToolCalls {
 				result := s.executeTool(tc)
 				s.messages = append(s.messages, ChatMessage{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Content:    result.Text,
+				})
+				s.appendTranscript(ChatMessage{
 					Role:       "tool",
 					ToolCallID: tc.ID,
 					Content:    result.Text,
@@ -323,6 +367,15 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 							}},
 						},
 					})
+					s.appendTranscript(ChatMessage{
+						Role: "user",
+						Content: []map[string]interface{}{
+							{"type": "text", "text": "Tool image output (for your visual review):"},
+							{"type": "image_url", "image_url": map[string]string{
+								"url": "data:" + mime + ";base64," + result.ImageBase64,
+							}},
+						},
+					})
 				}
 			}
 			toolRounds++
@@ -331,10 +384,15 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 
 		// Final text reply for this turn.
 		s.messages = append(s.messages, choice.Message)
+		s.appendTranscript(choice.Message)
 		content := ContentString(choice.Message)
 		if strings.TrimSpace(content) == "" {
 			// One nudge before giving up (mirrors img2text behaviour).
 			s.messages = append(s.messages, ChatMessage{
+				Role:    "user",
+				Content: "Provide your final answer now.",
+			})
+			s.appendTranscript(ChatMessage{
 				Role:    "user",
 				Content: "Provide your final answer now.",
 			})
@@ -360,6 +418,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 					len(ContentString(resp2.Choices[0].Message)), resp2.Usage.String()))
 			}
 			s.messages = append(s.messages, resp2.Choices[0].Message)
+			s.appendTranscript(resp2.Choices[0].Message)
 			content = ContentString(resp2.Choices[0].Message)
 			if strings.TrimSpace(content) == "" {
 				return "", fmt.Errorf("empty final answer")
@@ -503,6 +562,7 @@ func (s *Session) compact() error {
 		s.messages = append(s.messages, ChatMessage{Role: "system", Content: s.system})
 	}
 	s.messages = append(s.messages, ChatMessage{Role: "user", Content: note})
+	s.appendTranscript(ChatMessage{Role: "user", Content: note})
 	return nil
 }
 

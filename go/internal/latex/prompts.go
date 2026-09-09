@@ -115,6 +115,13 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
      The text after CONTENT: IS the document's real text (verbatim from the image) — never drop it. The image is TEXT WITH STYLING (artistic fonts, colours, ornaments) that plain markdown could not carry. After checking the manual/cls: re-typeset that CONTENT with the class constructs that best reproduce its role (stylised heading/label/ornament environment), or includegraphics the LINK image when the styling is truly un-reproducible. Either way the visible text must survive and the whole comment must NOT reach the .tex.
    - plain markdown image links to raster files under images/: includegraphics them (same path) inside the class figure environment (or standard figure+caption if the manual does not define one). NEVER invent new image files.
 
+## Layout reconstruction (IMPORTANT)
+The markdown is LINEAR: content that was arranged HORIZONTALLY (side by side) or in a special combined layout in the original PDF gets flattened into sequential lines. Warning signs: SEVERAL consecutive image refs in a row (e.g. a row of 6 Venn diagrams), or alternating short text / small figures in a tight pattern.
+When you see such a run:
+1. doc_search the surrounding images + view_page the original page(s) to see the TRUE arrangement (side-by-side row? grid? one figure with items (a)(b)(c)?).
+2. Reproduce that arrangement instead of stacking the images vertically: subfigure rows (minipage/subcaption per manual), side-by-side text+figure, or the class constructs the manual provides. Keep EVERY image and EVERY text fragment — only the GEOMETRY changes.
+3. Single isolated images keep their normal figure treatment.
+
 ## Original PDF access (read-only)
 The original document (from which the markdown was parsed) is available read-only:
 - doc_search {query}: search the block index (text snippets, figure/table captions, equation LaTeX, image filenames). Returns the GLOBAL page number (pN) plus the block bbox. Image queries accept a BARE file name (xxx.jpg) or the markdown ref (images/xxx.jpg); bare page numbers work too.

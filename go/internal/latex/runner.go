@@ -277,10 +277,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	// Default console behaviour mirrors img2text: one compact progress
 	// line per phase; every detail line goes to the log file only.
 	verbose := opts.Verbose
-	skipped := len(all) - len(pending)
-	if verbose {
-		skipped = 0 // verbose 模式进度行不输出，保持明细流
-	}
+	done0 := len(all) - len(pending) // 断点续传：此前已完成数
 	if !verbose {
 		r.log.SetQuiet(true)
 		defer func() { r.log.SetQuiet(false) }()
@@ -297,7 +294,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 			sort.Slice(samples, func(i, j int) bool { return samples[i].name < samples[j].name })
 			r.detectWatermarkPhase(samples)
 		}
-		r.classifyPhase(pending, mdCache, prog, progDir, verbose, skipped)
+		r.classifyPhase(pending, mdCache, prog, progDir, verbose, done0)
 	}
 	if opts.Step == "classify" {
 		if !verbose {
@@ -308,7 +305,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	}
 
 	// Phase 2: per-class processing.
-	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose, skipped)
+	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose, done0)
 
 	if !verbose {
 		r.log.SetQuiet(false)
@@ -331,7 +328,7 @@ func findLineIdx(starts []int, pos int) int {
 // ------------------------------------------------------------------
 
 func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir string, verbose bool, skipped int) {
+	prog map[string]*imageProgress, progDir string, verbose bool, done0 int) {
 
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
@@ -343,14 +340,16 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	total, done, failed, running := len(pending), 0, 0, 0
+	// done0：断点续传时此前已完成的部分——进度直接从它起跳，与
+	// "Already done" 行呼应，不再单列 skip。
+	total, done, failed, running := len(pending)+done0, done0, 0, 0
 	progress := func() {
 		if verbose || total == 0 {
 			return
 		}
 		pct := float64(done) * 100.0 / float64(total)
-		fmt.Fprintf(os.Stdout, "\r[classify %d/%d] %.2f%% (failed: %d, running: %d, skip: %d)          ",
-			done, total, pct, failed, running, skipped)
+		fmt.Fprintf(os.Stdout, "\r[classify %d/%d] %.2f%% (failed: %d, running: %d)          ",
+			done, total, pct, failed, running)
 	}
 	if !verbose && total > 0 {
 		progress() // 0/N 起始行
@@ -506,7 +505,7 @@ func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, im
 // ------------------------------------------------------------------
 
 func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir, outDir string, compErr error, verbose bool, skipped int) {
+	prog map[string]*imageProgress, progDir, outDir string, compErr error, verbose bool, done0 int) {
 
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
@@ -518,7 +517,8 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	total, done, failed, warned, running := 0, 0, 0, 0, 0
+	// done0：断点续传时此前已完成的部分——进度直接从它起跳。
+	total, done, failed, warned, running := done0, done0, 0, 0, 0
 	for _, t := range pending {
 		mu.Lock()
 		p, ok := prog[t.key()]
@@ -537,8 +537,8 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		if ok < 0 {
 			ok = 0
 		}
-		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, running: %d, skip: %d)          ",
-			done, total, pct, ok, failed, warned, running, skipped)
+		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, running: %d)          ",
+			done, total, pct, ok, failed, warned, running)
 	}
 	if total > 0 {
 		// 会话处理耗时长：先打出 0/N 起始行，处理期间进度可见。

@@ -153,7 +153,10 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	}
 
 	runPhase := func(name string, fn func() error) error {
-		if prog2Field(prog, name) == "done" && !opts.Restart && opts.Step == "" {
+		// images 阶段不做 phase 级跳过：RunImages 自身就是增量的
+		// （done 跳过、fallback 重试），phase 级 done 标记会让上次
+		// 失败（fallback）的图片永远得不到重试。
+		if name != "images" && prog2Field(prog, name) == "done" && !opts.Restart && opts.Step == "" {
 			note("[book] phase %s already done, skipping", name)
 			return nil
 		}
@@ -323,9 +326,23 @@ func (r *Runner) stylePhase(proj string) error {
 	liveHook, liveClose := r.livePhaseLine("style")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
-	// 会话上下文实时持久化：样式反馈回路直接复用这个上下文打回
-	//（不开新会话，避免丢失信息）。成功/失败路径都会保存最新状态。
-	ctxPath := filepath.Join(proj, "work", "style_session.json")
+	// 会话上下文实时持久化（JSONL 转录，图片走 file:// 引用）：样式
+	// 反馈回路直接复用这个上下文打回（不开新会话，避免丢失信息）；
+	// 运行中断时下次从转录恢复，不重烧 token。成功/失败路径都会保存
+	// 最新状态。
+	ctxPath := filepath.Join(proj, "work", "style_session.jsonl")
+	if legacyMsgs, lerr := loadSessionContext(ctxPath); lerr == nil && len(legacyMsgs) > 0 {
+		// 上次运行中断（phase 未标 done）→ 从历史上下文续跑。
+		sess.SetMessages(legacyMsgs)
+		if tr, terr := session.NewTranscript(ctxPath); terr == nil {
+			sess.SetTranscript(tr)
+			defer tr.Close()
+		}
+		r.log.Log(1, "[style] 恢复中断的样式会话 (", strconv.Itoa(len(legacyMsgs)), "条历史消息 )")
+	} else if tr, terr := session.NewTranscript(ctxPath); terr == nil {
+		sess.SetTranscript(tr)
+		defer tr.Close()
+	}
 	defer func() {
 		if err := saveSessionContext(sess, ctxPath); err != nil {
 			r.log.LogWarning(1, "[style] 会话上下文保存失败:", err)
@@ -673,6 +690,8 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	texPath := filepath.Join(workDir, texRel)
 	if fileExists(texPath) {
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")
+		// 产物已写出的章节不再需要会话转录。
+		_ = os.Remove(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
 		return nil
 	}
 
@@ -718,6 +737,22 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		strings.ReplaceAll(convertSystemPrompt, "{MAX_ROUNDS}", strconv.Itoa(session.EffectiveToolRounds(tuning))),
 		tools, r.log, tid, "convert:"+base)
 
+	// 会话转录（JSONL，图片走 file:// 引用）：单章转换中断后（进程被
+	// 杀 / 网络断连）下次从转录恢复上下文继续，不重烧 token。
+	trPath := filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")
+	resumed := false
+	if msgs, err := session.LoadTranscript(trPath); err != nil {
+		r.log.LogWarning(tid, "[convert] 转录读取失败（忽略，按全新会话继续）:", err)
+	} else if len(msgs) > 0 {
+		sess.SetMessages(msgs)
+		resumed = true
+		r.log.Log(tid, "[convert] 恢复中断的转换会话:", base, "(", strconv.Itoa(len(msgs)), "条历史消息 )")
+	}
+	if tr, err := session.NewTranscript(trPath); err == nil {
+		sess.SetTranscript(tr)
+		defer tr.Close()
+	}
+
 	// Pre-place the compiled wrapper input target: the wrapper inputs
 	// base.tex, so the scratch MainFile is base.tex (copied by the tool).
 	chapData, err := os.ReadFile(chapPath)
@@ -741,6 +776,9 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		initial += "\n\n" + r.watermarkGuidance("WATERMARK: exclude watermark artifacts from the .tex output (repeated decorative overlay text such as institution marks, faint background strings). Skip such content entirely - do not typeset it.")
 	}
 
+	if resumed {
+		initial = "The session was interrupted earlier. Continue from where you left off: read your last written .tex state (read_file), finish the conversion, compile until clean, then submit."
+	}
 	if _, err := sess.Run(session.RunOptions{UserText: initial}); err != nil {
 		return fmt.Errorf("会话失败: %w", err)
 	}
@@ -844,7 +882,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 		strconv.Itoa(round+1), "轮）")
 	r.phaseNote()("[style-feedback] 多数章节报告样式问题 — 打回原样式会话（第 %d 轮）", round+1)
 
-	ctxPath := filepath.Join(proj, "work", "style_session.json")
+	ctxPath := filepath.Join(proj, "work", "style_session.jsonl")
 	msgs, err := loadSessionContext(ctxPath)
 	if err != nil {
 		r.log.LogWarning(0, "[style-feedback] 样式会话上下文不可用，跳过打回:", err)
@@ -936,24 +974,38 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	return r.convertPhase(proj, round+1)
 }
 
-// saveSessionContext persists the full conversation of a session.
+// saveSessionContext persists the full conversation of a session as a
+// JSONL transcript（图片以 file:// 媒体引用存储，不内联 base64）。
+// 兼容旧版单 JSON 文件：若 <path> 不存在而同名 .json 存在，则先迁移。
 func saveSessionContext(sess *session.Session, path string) error {
 	msgs := sess.Messages()
 	if len(msgs) == 0 {
 		return fmt.Errorf("空会话")
 	}
-	data, err := json.Marshal(msgs)
+	migrateLegacyContext(path)
+	w, err := session.NewTranscript(path)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	defer w.Close()
+	for _, m := range msgs {
+		if err := w.Append(m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// loadSessionContext restores a persisted conversation.
+// loadSessionContext restores a persisted conversation (JSONL 转录，
+// 兼容旧版单 JSON 文件).
 func loadSessionContext(path string) ([]session.ChatMessage, error) {
-	data, err := os.ReadFile(path)
+	if msgs, err := session.LoadTranscript(path); err == nil && len(msgs) > 0 {
+		return msgs, nil
+	}
+	legacy := strings.TrimSuffix(path, ".jsonl") + ".json"
+	data, err := os.ReadFile(legacy)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("空会话上下文")
 	}
 	var msgs []session.ChatMessage
 	if err := json.Unmarshal(data, &msgs); err != nil {
@@ -963,6 +1015,28 @@ func loadSessionContext(path string) ([]session.ChatMessage, error) {
 		return nil, fmt.Errorf("空会话上下文")
 	}
 	return msgs, nil
+}
+
+// migrateLegacyContext converts an old single-JSON style session file
+// (.json) into the new JSONL transcript format (best effort).
+func migrateLegacyContext(jsonlPath string) {
+	legacy := strings.TrimSuffix(jsonlPath, ".jsonl") + ".json"
+	if _, err := os.Stat(legacy); err != nil {
+		return
+	}
+	if _, err := os.Stat(jsonlPath); err == nil {
+		return // already migrated / new format exists
+	}
+	msgs, err := loadSessionContext(jsonlPath)
+	if err != nil {
+		return
+	}
+	if w, err := session.NewTranscript(jsonlPath); err == nil {
+		for _, m := range msgs {
+			_ = w.Append(m)
+		}
+		w.Close()
+	}
 }
 
 // mainSourceMD picks the largest processed markdown in sourceDir (the
