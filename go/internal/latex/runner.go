@@ -655,7 +655,10 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				}
 
 			case ClassRaster:
-				if r.cfg.Latex.InsertImageDescription {
+				// 档位1：raster 图总是生成解释文本（复用 img2text 的
+				// 文本提取，一次视觉调用），进 DESCRIBE 块供转换会话参考；
+				// 档位2 由 insert_image_description 开关控制。
+				if r.inline || r.cfg.Latex.InsertImageDescription {
 					content, err := r.processTextImage(mf, tt, tid)
 					if err != nil {
 						r.log.LogWarning(tid, "[raster] 解释生成失败，仅保留链接:", tt.imgPath, err)
@@ -992,13 +995,32 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 // 注释携带解释（首行闭合），原图本身仍是图片形式紧随其后——图就是
 // 正文，不能变成链接；档位2 不受影响。
 func (r *Runner) rasterBlock(p *imageProgress, mdName, outDir string) string {
+	// 档位2：insert_image_description 开关控制——开启且已有解释时嵌入
+	// "[Image]( content )"（v1.4 规格），否则纯原图引用。
+	if !r.inline && r.cfg.Latex.InsertImageDescription && p.Content != "" {
+		return "[Image]( " + p.Content + " )"
+	}
 	rel, ok := r.copyOriginalImage(p, mdName, outDir)
 	if !ok {
 		return ""
 	}
-	if r.inline && r.cfg.Latex.InsertImageDescription && p.Content != "" {
-		return "<!-- DOCVISION-IMAGE: " + mdCommentSafe(p.Content) + " -->\n![image](" + rel + ")"
+	// 档位1：process 阶段已为该图生成解释文本（复用 img2text 提取，
+	// 不依赖 insert_image_description——那是档位2 的开关）。有就进
+	// DESCRIBE 块；没有（无文本/提取失败）就只给 LINK。注释块整体不
+	// 进入 .tex；LINK 指向的原图由转换会话 includegraphics。
+	if r.inline {
+		if p.Content != "" {
+			label := p.Label
+			if label == "" {
+				label = "image"
+			}
+			return "<!-- DOCVISION-IMAGE: " + mdCommentSafe(label) + " -->\n" +
+				"DESCRIBE: " + mdCommentBody(p.Content) + "\n" +
+				"LINK: [image](" + rel + ")"
+		}
+		return "LINK: [image](" + rel + ")"
 	}
+	// 档位2 无解释：直接保留原图引用。
 	return "![image](" + rel + ")"
 }
 

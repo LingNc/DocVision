@@ -4,6 +4,8 @@
 
 ### Added
 
+- **raster 图档位1 统一解释块**：档位1 的 raster 图在 process 阶段总是生成解释文本（复用 img2text 文本提取，每张一次视觉调用），嵌入格式与 STYLED/VECTOR 同骨架——`<!-- DOCVISION-IMAGE: <label> -->` + `DESCRIBE: <解释>` + `LINK: [image](…)`，无文本时只有 LINK 行；`latex.insert_image_description` 仅控制档位2（开=嵌入 `[Image]( content )`，关=纯 `![image]` 原图引用）
+
 - **档位1 嵌入注释最终骨架（首行闭合 + 字段在外 + `[class]` 链接）**：HTML 注释第一行即闭合 `<!-- DOCVISION-<TYPE>: <描述> -->`，CONTENT/LINK 一律在注释**外面**、各自独立一行；LINK 用链接形式（非图片）且括号前带 class 名：`[styled-text](…)`、`[vector](…)`。STYLED-TEXT = 注释 + CONTENT 原文 + LINK；VECTOR = 注释 + latex 围栏上方 LINK；RASTER 有 AI 描述 = `<!-- DOCVISION-IMAGE: <描述> -->` + 原图 `![image](…)`（图仍是图片形式），无描述保持纯图；fallback 保持原图 + `<!– DOCVISION-ERROR –>`。style/convert 提示词标记说明、embed 测试同步
 
 - **项目字体目录接入编译**：`Compiler` 注入 `TEXINPUTS`/`OSFONTDIR` 指向 `paths.fonts`（默认 `./fonts`）——cls 里按文件名直接引用用户放入的字体文件，无需安装系统字体；latex 运行时自动创建 `fonts/README.md` 说明缺失字体的放置方法与命名约定；移除 `install_font` 工具（下载字体不必要且有版权风险），缺字体改为样式会话在 submit_style 报告与 manual.md 中列出清单、由用户手动下载

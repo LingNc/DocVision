@@ -101,23 +101,66 @@ func TestEmbedBlockLevel1VectorComment(t *testing.T) {
 }
 
 // TestEmbedBlockRasterDescription pins the level-1 raster format:
-// DOCVISION-IMAGE comment with the description (first-line closed),
-// original image kept as a real image right below it.
+// DOCVISION-IMAGE comment (first-line closed), DESCRIBE block with the
+// AI explanation and LINK in [image](path) link form — same skeleton
+// as STYLED/VECTOR.
 func TestEmbedBlockRasterDescription(t *testing.T) {
 	r := testRunner(t, true)
+	r.cfg.Latex.InsertImageDescription = true
+	p := &imageProgress{
+		Class: ClassRaster, Label: "experiment setup",
+		Content: "a drawing of the experimental setup",
+		ImgPath: "images/book/img1.png",
+	}
+	block := r.embedBlock(p, "book.md", t.TempDir())
+	for _, want := range []string{
+		"<!-- DOCVISION-IMAGE: experiment setup -->",
+		"DESCRIBE: a drawing of the experimental setup",
+		"LINK: [image](images/",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("level-1 raster block missing %q:\n%s", want, block)
+		}
+	}
+}
+
+// TestEmbedBlockLevel2RasterDescription: level-2 keeps the historical
+// "[Image]( content )" embed when insert_image_description is on.
+func TestEmbedBlockLevel2RasterDescription(t *testing.T) {
+	r := testRunner(t, false)
 	r.cfg.Latex.InsertImageDescription = true
 	p := &imageProgress{
 		Class: ClassRaster, Content: "a drawing of the experimental setup",
 		ImgPath: "images/book/img1.png",
 	}
 	block := r.embedBlock(p, "book.md", t.TempDir())
-	for _, want := range []string{
-		"<!-- DOCVISION-IMAGE: a drawing of the experimental setup -->",
-		"![image](images/",
-	} {
-		if !strings.Contains(block, want) {
-			t.Errorf("level-1 raster block missing %q:\n%s", want, block)
-		}
+	if want := "[Image]( a drawing of the experimental setup )"; !strings.Contains(block, want) {
+		t.Errorf("level-2 raster description missing %q:\n%s", want, block)
+	}
+}
+
+// TestEmbedBlockLevel2RasterNoDescription: level-2 without the flag keeps
+// the plain image link.
+func TestEmbedBlockLevel2RasterNoDescription(t *testing.T) {
+	r := testRunner(t, false)
+	p := &imageProgress{Class: ClassRaster, ImgPath: "images/book/img1.png"}
+	block := r.embedBlock(p, "book.md", t.TempDir())
+	if want := "![image](images/"; !strings.Contains(block, want) {
+		t.Errorf("level-2 raster missing %q:\n%s", want, block)
+	}
+}
+
+// TestEmbedBlockLevel1RasterNoDescription: without an AI description the
+// level-1 raster still emits the LINK line so the block shape stays
+// uniform (the converter includes the image via LINK).
+func TestEmbedBlockLevel1RasterNoDescription(t *testing.T) {
+	r := testRunner(t, true) // insert_image_description 默认 false
+	p := &imageProgress{
+		Class: ClassRaster, ImgPath: "images/book/img1.png",
+	}
+	block := r.embedBlock(p, "book.md", t.TempDir())
+	if want := "LINK: [image](images/"; !strings.Contains(block, want) {
+		t.Errorf("level-1 raster without description missing %q:\n%s", want, block)
 	}
 }
 
