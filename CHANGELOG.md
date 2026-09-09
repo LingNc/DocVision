@@ -4,6 +4,9 @@
 
 ### Added
 
+- **会话 JSONL 转录与断点续传**：新增 `internal/session/transcript.go`——每条会话消息实时追加为一行 JSON（append-only，一行一条；图片 base64 不入转录，落 `media/` 目录以 `file://media/<hash>.<ext>` 引用，加载时还原为 data URL）。三处会话接入：tikz 矢量会话（`<outDir>/sessions/vector_<图>.jsonl`）、样式会话（`work/style_session.jsonl`，替代旧单文件 `.json`，旧文件自动迁移）、单章转换会话（`work/sessions/convert_<章>.jsonl`）。进程被杀 / 网络断连后，下次运行自动从转录恢复完整上下文续跑（含图片），不再从零重烧 token；章节产物已存在时清理对应转录
+- **未提交提醒（tikz）**：作图会话结束时若模型尚未调用 submit（此前有会话未提交就结束的先例），自动补发一次 "You have NOT called submit yet…" 提醒并给追加轮次
+- **档位1 版面重排规则**：转换系统提示新增 Layout reconstruction 段——原始 PDF 中横向排列/组合形式的内容（如一行 6 张 venn 图）在线性 markdown 中退化为连续图片引用；转换会话须对连续多图/图文交替区段 doc_search + view_page 查原版面，用 subfigure/minipage 等复现横排/网格，不再线性堆叠
 - **编译预览可放大细看（复用 view_image）**：`compile_preview` 的每张预览图都留存为会话内的 `preview-<n>.png`（并保存对应 `preview-<n>.pdf`），`view_image {path:"preview.png"}` 取最新、`preview-<n>.png` 取历史版本，配合 `left/top/right/bottom` 百分比裁剪与 `zoom` 目标宽度即可细看小字号标签/箭头/重叠；`zoom` 时**直接从 PDF 以更高分辨率重渲染**（pdftoppm `-scale-to-x`，上限 6000px），而不是把已有像素拉大，因此放大是真清晰。未编译、名称写错、序号越界都会返回明确提示
 - **classify 起始进度行**：`[classify 0/N] 0.00% (failed: 0)` 在进入分类阶段立即打印（此前要等第一张分类完成才出现），与 process 阶段一致
 - **日志等级 info / debug / trace**：`options.log_level` 新增 `trace`，命令新增 `--trace`。debug 只保留每轮请求/响应摘要、提示词、工具调用与**最终接收内容**；流式分片进展行等噪音降到 trace。`options.log_level` 取值错误由 `setup` 校验
@@ -15,6 +18,8 @@
 
 ### Fixed
 
+- **上次失败的图片重跑被整个跳过**：档位1 的 images 阶段此前有 phase 级 done 标记（`progress.json` 的 `images: "done"`），重跑全书时该阶段直接跳过——上次 API 失败留下的 fallback（可重试）图片永远不再重试，控制台看起来"直接完成"。现在 images 阶段不再做 phase 级跳过：`RunImages` 自身就是增量的（done 跳过、fallback 重试、未分类补跑），phase 标记仅作展示
+- **进度行 skip 计数语义模糊**：`[classify]/[process]/img2text` 进度行去掉 `skip: N`；断点续传时进度直接从已完成数起跳（如 `[process 5/13] 38.46%`，与 `Already done: 5` 呼应），运行中的任务数仍由 `running: N` 实时显示
 - **多工具调用触发 HTTP 400**：返回图片的工具（view_image/compile_preview 等）此前把"图片 user 轮"插在多个 tool 响应之间，违反 OpenAI 协议（tool_calls 之后必须紧跟对应的 tool 消息），导致会话直接失败（`insufficient tool messages following tool_calls message`）。现在先连续追加全部 tool 响应，图片轮统一放在工具块之后；工具预算耗尽后模型仍返回 tool_calls 时也会执行并补齐响应
 - **流式回退误触发**：HTTP 400 不再视为"不支持流式"（畸形对话同样是 400），只在错误提到 stream/unsupported 或 404/405/415/422 时回退一次非流式，避免把重试预算浪费在同一个坏请求上
 - **档位2 文本图嵌入 AI 描述**：text 类图片此前走 img2text 的通用"描述图片"提示词，会把"该图像是一个标题或图标…"这类描述写进 markdown（即使 `insert_image_description` 关闭）。现在改用专用"只提取可见文本"提示词（公式→LaTeX 数学、表格→Markdown 表格、无文字→`[NO_TEXT]` 并保留原图），描述不再进入正文
