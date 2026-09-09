@@ -46,6 +46,53 @@ func fmtDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
+// livePhaseLine manages the compact console status line of a
+// single-session phase (style / chapters / style-feedback): a hook fed
+// by the session's progress notifications plus a 10s ticker keeping the
+// elapsed time fresh. In verbose mode everything is a no-op (the
+// logger already streams the details). fin() is idempotent and ends
+// the line with a newline.
+func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin func()) {
+	if r.consoleVerbose {
+		return func(int, int) {}, func() {}
+	}
+	start := time.Now()
+	var mu sync.Mutex
+	var rounds, tools int
+	render := func() {
+		mu.Lock()
+		fmt.Fprintf(os.Stdout, "\r[%s] 轮次 %d · 工具调用 %d · 已用 %s          ",
+			label, rounds, tools, fmtDuration(time.Since(start)))
+		mu.Unlock()
+	}
+	render() // 立即出现起始行，会话一开始就有进度
+	stop := make(chan struct{})
+	ticker := time.NewTicker(10 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				render()
+			}
+		}
+	}()
+	var once sync.Once
+	return func(rr, tt int) {
+			mu.Lock()
+			rounds, tools = rr, tt
+			mu.Unlock()
+			render()
+		}, func() {
+			once.Do(func() {
+				close(stop)
+				ticker.Stop()
+				fmt.Fprintln(os.Stdout)
+			})
+		}
+}
+
 // bookProgress is the persisted phase state of a book project.
 type bookProgress struct {
 	Style    string `json:"style"`
@@ -273,6 +320,9 @@ func (r *Runner) stylePhase(proj string) error {
 		prompt += "\n\nIMPORTANT: this document HAS original page renders (list_pages -> p001.png...). They show the TRUE typography and layout — inspect them FIRST (chapter title pages, section headings, body text, headers/footers) before looking at extracted images."
 	}
 	sess := session.NewSession(client, modelCfg, tuning, prompt, tools, r.log, 1, "style")
+	liveHook, liveClose := r.livePhaseLine("style")
+	sess.SetProgressHook(liveHook)
+	defer liveClose()
 	// 会话上下文实时持久化：样式反馈回路直接复用这个上下文打回
 	//（不开新会话，避免丢失信息）。成功/失败路径都会保存最新状态。
 	ctxPath := filepath.Join(proj, "work", "style_session.json")
@@ -395,6 +445,9 @@ func (r *Runner) chaptersPhase(proj string) error {
 		&SandboxBashTool{Dir: sandbox},
 		submit,
 	}, r.log, 1, "chapters")
+	liveHook, liveClose := r.livePhaseLine("chapters")
+	sess.SetProgressHook(liveHook)
+	defer liveClose()
 
 	granularity := r.cfg.Latex.ChapterGranularity
 	if granularity == "" {
@@ -525,17 +578,36 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		label = fmt.Sprintf("[convert#%d]", fbRound+1)
 	}
 	r.phaseNote()("%s %d 章，并发 %d", label, len(chapters), conc)
-	var done, failed int
+	var done, failed, running int
 	var progMu sync.Mutex
 	total := len(chapters)
+	start := time.Now()
 	progress := func() {
 		if verbose || total == 0 {
 			return
 		}
 		pct := float64(done) * 100.0 / float64(total)
-		fmt.Fprintf(os.Stdout, "\r%s %d/%d] %.2f%% (done: %d, errors: %d)          ",
-			label, done, total, pct, done-failed, failed)
+		fmt.Fprintf(os.Stdout, "\r%s %d/%d] %.2f%% (done: %d, errors: %d, running: %d, %s)          ",
+			label, done, total, pct, done-failed, failed, running, fmtDuration(time.Since(start)))
 	}
+	// 章节内会话可能长达数十分钟：每 10s 刷新一次进度行（耗时/running），
+	// 控制台不再"长时间无输出"。
+	stopTicker := make(chan struct{})
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	go func() {
+		for {
+			select {
+			case <-stopTicker:
+				return
+			case <-ticker.C:
+				progMu.Lock()
+				progress()
+				progMu.Unlock()
+			}
+		}
+	}()
+	progress() // 0/N 起始行
 
 	for idx, chapPath := range chapters {
 		wg.Add(1)
@@ -544,12 +616,16 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 			r.log.Log(0, label, "start", filepath.Base(chapPath),
 				fmt.Sprintf("(%d/%d)", idx+1, total))
 		}
+		progMu.Lock()
+		running++
+		progMu.Unlock()
 		go func(i int, chap string, tid int) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
 			err := r.convertOneChapter(proj, clsName, manualPath, chap, workDir, i, tid)
 			progMu.Lock()
 			done++
+			running--
 			if err != nil {
 				failed++
 			}
@@ -564,6 +640,7 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		}(idx, chapPath, tid)
 	}
 	wg.Wait()
+	close(stopTicker)
 	if !verbose && total > 0 {
 		fmt.Fprintln(os.Stdout)
 	}
@@ -801,6 +878,9 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 
 	// 复用原样式会话：系统提示已在持久化消息里，不开新上下文。
 	sess := session.NewSession(client, modelCfg, tuning, "", tools, r.log, 1, "style-feedback")
+	liveHook, liveClose := r.livePhaseLine("style-feedback")
+	sess.SetProgressHook(liveHook)
+	defer liveClose()
 	sess.SetMessages(msgs)
 
 	feedback := "The conversion phase finished: the MAJORITY of chapter conversion agents reported that the class/manual did NOT satisfy the book's real formatting." +

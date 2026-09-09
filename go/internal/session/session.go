@@ -57,6 +57,27 @@ type Session struct {
 	APIRequests int
 	ToolInvoked int
 	Compactions int
+
+	// progressHook, when set, is notified after every API round and
+	// every tool execution with (completed rounds, executed tool
+	// calls) — used by compact console modes to show a live line.
+	progressHook func(rounds, tools int)
+	rounds       int
+}
+
+// SetProgressHook registers a callback notified after every API round
+// and every tool execution with (completed rounds, executed tool
+// calls). Only one hook is supported; pass nil to clear.
+func (s *Session) SetProgressHook(fn func(rounds, tools int)) {
+	s.progressHook = fn
+}
+
+// notifyProgress reports the current counters to the hook (no-op
+// without one).
+func (s *Session) notifyProgress() {
+	if s.progressHook != nil {
+		s.progressHook(s.rounds, s.ToolInvoked)
+	}
 }
 
 // NewSession creates a session. system is the system prompt; tools may
@@ -194,6 +215,8 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		}
 		resp, sentinel, status := s.client.CallWithRetry(req)
 		s.APIRequests++
+		s.rounds++
+		s.notifyProgress()
 		if status != "" {
 			return "", fmt.Errorf("api error: %s", sentinel)
 		}
@@ -349,6 +372,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 // executeTool dispatches one tool call, logging and error-wrapping.
 func (s *Session) executeTool(tc ToolCall) ToolResult {
 	s.ToolInvoked++
+	s.notifyProgress()
 	for _, t := range s.tools {
 		if t.Name() != tc.Function.Name {
 			continue
