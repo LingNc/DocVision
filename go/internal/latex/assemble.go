@@ -68,10 +68,9 @@ func (r *Runner) assemblePhase(proj string) error {
 
 	// Compile (2 passes for TOC/refs).
 	start := time.Now()
-	res := r.comp.Compile(buildDir, "main.tex")
-	if res.OK {
-		res = r.comp.Compile(buildDir, "main.tex")
-	}
+	// 全书是多文件工程（main.tex + chapters/*.tex + cls + figures）：
+	// 有 latexmk 就整轮构建（多遍 + 参考文献），否则退回两遍编译。
+	res := r.comp.CompileFull(buildDir, "main.tex")
 	LogCompileResult(r.log, 1, "book", res, time.Since(start))
 	if !res.OK {
 		if err := r.fixSession(proj, buildDir, res.Err); err != nil {
@@ -110,37 +109,45 @@ func (r *Runner) assemblePhase(proj string) error {
 	return nil
 }
 
-// fixSession spawns the build-doctor session with edit + recompile tools.
+// fixSession spawns the build-doctor session. It is a full workspace
+// session on the build tree: read/write/edit/grep/bash + compile +
+// view_pdf/view_image + fonts, so it can restructure the assembled
+// project (multi-file, resources) and verify the PDF itself.
 func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 	r.log.LogWarning(0, "[assemble] 全书编译失败，启动修复会话:", firstErr)
 	client := r.clientFor(r.cfg.Latex.ConvertModel)
 	modelCfg := r.models[r.cfg.Latex.ConvertModel]
 	tuning := r.cfg.LatexSession("convert")
-	recompile := &RecompileTool{Comp: r.comp, Dir: buildDir, MainFile: "main.tex", Log: r.log, Tid: 1}
+	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "book", Log: r.log, Tid: 1}
 	submit := &SubmitDoneTool{Label: "the build fix"}
 	sess := session.NewSession(client, modelCfg, tuning, fixSystemPrompt, []session.Tool{
 		&ReadFileTool{Root: buildDir},
+		&WriteWorkFileTool{Root: buildDir, AnyExt: true},
+		&EditWorkFileTool{Root: buildDir},
+		&GrepTool{Root: buildDir},
+		&WorkBashTool{Dir: buildDir, MaxOutput: r.cfg.Latex.BashMaxOutput},
+		compile,
+		&ViewPDFTool{Root: buildDir, Comp: r.comp},
+		&ViewImageTool{Root: buildDir},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
-		&EditFileTool{Root: buildDir},
-		recompile,
 		submit,
 	}, r.log, 1, "fix")
 
 	lastErr := firstErr
 	for attempt := 0; attempt < r.cfg.Latex.Compile.MaxFixRounds; attempt++ {
 		userText := "The full-book compile failed:\n\n" + truncateStr(lastErr, 8000) +
-			"\n\nRead the failing file, apply a minimal edit_file, then recompile."
+			"\n\nRead the failing file, apply a minimal edit_file, then compile {path: \"main.tex\"} (engine \"latexmk\" for a full multi-pass build) and check the result with view_pdf."
 		if attempt > 0 {
 			userText = "Still failing:\n\n" + truncateStr(lastErr, 8000)
 		}
 		if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 			return fmt.Errorf("修复会话失败: %w", err)
 		}
-		if recompile.LastOK {
+		if compile.LastOK {
 			return nil
 		}
 		start := time.Now()
-		res := r.comp.Compile(buildDir, "main.tex")
+		res := r.comp.CompileFull(buildDir, "main.tex")
 		LogCompileResult(r.log, 1, "book-fix", res, time.Since(start))
 		if res.OK {
 			return nil

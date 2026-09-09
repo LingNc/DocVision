@@ -53,8 +53,10 @@ func RunTikZSession(
 	sess := session.NewSession(client, modelCfg, tuning, latexFigurePrompt, []session.Tool{
 		&WriteWorkFileTool{Root: scratch},
 		&EditWorkFileTool{Root: scratch},
+		&ReadFileTool{Root: scratch},
 		&GrepTool{Root: scratch},
-		&CompilePreviewTool{Comp: comp, State: state, EngineIsXe: engineIsXe, Log: log, Tid: tid},
+		&CompileFigureTool{Comp: comp, State: state, EngineIsXe: engineIsXe, Log: log, Tid: tid},
+		&ViewPDFTool{Root: scratch, Comp: comp},
 		&SubmitFigureTool{State: state},
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
 		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg), Previews: state.previewEntries},
@@ -68,7 +70,7 @@ func RunTikZSession(
 		truncateStr(contextText, 4000),
 		"```",
 		"",
-		"Begin: write the TikZ code and call compile_preview.",
+		"Begin: write the TikZ code to figure.tex with write_file, then call compile {path: \"figure.tex\"}.",
 	}, "\n")
 
 	// 会话转录（JSONL）：每条消息实时追加，图片以 file:// 媒体引用存储。
@@ -84,7 +86,7 @@ func RunTikZSession(
 			sess.SetTranscript(tr)
 			defer tr.Close()
 			log.Log(tid, "[tikz] 恢复中断的会话:", filepath.Base(trPath), "(", strconv.Itoa(len(msgs)), "条历史消息 )")
-			initial = "The session was interrupted earlier. Continue from where you left off: check your last compile_preview result, fix the code if needed, and call submit once the preview faithfully matches the original image."
+			initial = "The session was interrupted earlier. Continue from where you left off: check your last compile result, fix figure.tex if needed, and call submit once the preview faithfully matches the original image."
 		}
 	} else if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
@@ -100,7 +102,7 @@ func RunTikZSession(
 	if !state.submitted && runErr == nil {
 		log.LogWarning(tid, "[tikz] 会话结束但模型未提交，发送提交提醒:")
 		if _, err := sess.Run(session.RunOptions{
-			UserText: "You have NOT called submit yet. Call submit now with your final TikZ code (identical to the last successful compile_preview). If no compile succeeded yet, fix the code, call compile_preview, then submit.",
+			UserText: "You have NOT called submit yet. Call submit now with {path: \"figure.tex\"} (the file must match the last successful compile). If no compile succeeded yet, fix figure.tex, call compile {path: \"figure.tex\"}, then submit.",
 		}); err == nil && state.submitted {
 			result.Rounds = sess.ToolInvoked
 		}

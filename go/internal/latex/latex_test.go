@@ -220,7 +220,7 @@ func TestViewPageOnDemand(t *testing.T) {
 	}
 	idx = &pageIndex{srcs: []pageSrc{{pdf: filepath.Join(dir, "t.pdf"), first: 1, count: 2}}, total: 2}
 	pagesDir := filepath.Join(dir, "pages")
-	tool := &ViewPageTool{Idx: idx, PagesDir: pagesDir, Runner: r}
+	tool := &ViewSourcePageTool{Idx: idx, PagesDir: pagesDir, Runner: r}
 
 	res, err := tool.Execute(`{"page": 2}`)
 	if err != nil {

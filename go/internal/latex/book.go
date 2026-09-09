@@ -297,33 +297,34 @@ func (r *Runner) stylePhase(proj string) error {
 	tools := []session.Tool{
 		&WriteWorkFileTool{Root: workDir},
 		&EditWorkFileTool{Root: workDir},
+		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&GrepTool{Root: workDir},
-		&ViewPDFTool{Root: workDir},
+		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style", Log: r.log, Tid: 1},
+		&ViewPDFTool{Root: workDir, Comp: r.comp},
 		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
-		&ReadMDTool{Path: mainMD},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
 
 	// Original scanned pages: build the page index over the
 	// MinerU-preserved origin PDFs. Pages render ON DEMAND when the
-	// analyst calls view_page (cached afterwards).
+	// analyst calls view_source_page (cached afterwards).
 	pagesDir := filepath.Join(proj, "pages")
 	pageIdx, pageErr := buildPageIndex(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD)))
 	if pageErr != nil {
 		r.log.LogWarning(1, "[style] 未找到 MinerU 保留的原始 PDF（mineru_output/<主题>_part*/*_origin.pdf），将仅基于提取图片与 md 分析样式")
 	} else {
-		r.log.Log(1, "[style] 原始页面索引就绪:", strconv.Itoa(pageIdx.total), "页（view_page 按需渲染）")
-		tools = append(tools, &ListPagesTool{Idx: pageIdx}, &ViewPageTool{Idx: pageIdx, PagesDir: pagesDir, Runner: r})
+		r.log.Log(1, "[style] 原始页面索引就绪:", strconv.Itoa(pageIdx.total), "页（view_source_page 按需渲染）")
+		tools = append(tools, &ListSourcePagesTool{Idx: pageIdx}, &ViewSourcePageTool{Idx: pageIdx, PagesDir: pagesDir, Runner: r})
 	}
 
-	prompt := styleSystemPrompt + "\n\nYou have a persistent WORKSPACE: write_file stores class.cls / manual.md / example.tex as real files; submit_style can then reference them by file name instead of full inline contents. Check list_fonts before referencing fonts. There is NO font download tool: when a font is missing, record the substitution in the manual AND report the missing font to the user (font file name + where to place it: the project fonts/ directory) in the submit_style report — the user downloads it manually and re-runs."
+	prompt := styleSystemPrompt + "\n\nYou have a persistent WORKSPACE: write_file stores class.cls / manual.md / example.tex as real files; submit_style can then reference them by file name instead of full inline contents. Compile your example with compile {path: \"example.tex\"} (the class is picked up from the same workspace) and inspect it with view_pdf. Check list_fonts before referencing fonts. There is NO font download tool: when a font is missing, record the substitution in the manual AND report the missing font to the user (font file name + where to place it: the project fonts/ directory) in the submit_style report — the user downloads it manually and re-runs."
 	if r.cfg.Latex.RemoveWatermark {
 		prompt += "\n\n" + r.watermarkGuidance("WATERMARK: the source may carry watermark artifacts (repeated decorative overlay text such as institution/library marks, faint background strings). Identify the watermark pattern in the manual and instruct conversion to EXCLUDE it entirely - watermark text/graphics must NOT be typeset in the LaTeX output.")
 	}
 	if pageIdx != nil {
-		prompt += "\n\nIMPORTANT: this document HAS original page renders (list_pages -> p001.png...). They show the TRUE typography and layout — inspect them FIRST (chapter title pages, section headings, body text, headers/footers) before looking at extracted images."
+		prompt += "\n\nIMPORTANT: this document HAS original page renders (list_source_pages -> p001.png...). They show the TRUE typography and layout — inspect them FIRST (chapter title pages, section headings, body text, headers/footers) before looking at extracted images."
 	}
 	sess := session.NewSession(client, modelCfg, tuning, prompt, tools, r.log, 1, "style")
 	liveHook, liveClose := r.livePhaseLine("style")
@@ -359,9 +360,9 @@ func (r *Runner) stylePhase(proj string) error {
 		"- Extracted images live under images/ (use list_images + view_image).",
 	}, "\n")
 	if pageIdx != nil {
-		initial += fmt.Sprintf("\n- ORIGINAL pages (%d total) are available via list_pages + view_page — use them for typography/layout (rendered on demand).", pageIdx.total)
+		initial += fmt.Sprintf("\n- ORIGINAL pages (%d total) are available via list_source_pages + view_source_page — use them for typography/layout (rendered on demand).", pageIdx.total)
 	}
-	initial += "\nStart by mapping the structure (list_pages / list_images / read_md), inspect representative pages (crop/zoom title pages, headings, figures), then submit_style."
+	initial += "\nStart by mapping the structure (list_source_pages / list_images / read_file), inspect representative pages (crop/zoom title pages, headings, figures), then submit_style."
 
 	scratch, err := os.MkdirTemp("", "dsv-style-")
 	if err != nil {
@@ -465,11 +466,10 @@ func (r *Runner) chaptersPhase(proj string) error {
 	tuning := r.cfg.LatexSession("chapter")
 	submit := &SubmitSplitTool{}
 	sess := session.NewSession(client, modelCfg, tuning, chapterSystemPrompt, []session.Tool{
-		&GrepMDTool{Path: mainMD},
-		&ReadLinesTool{Path: mainMD},
-		&WorkBashTool{Dir: sandbox},
-		&EditWorkFileTool{Root: sandbox},
+		&GrepTool{Root: sandbox},
 		&ReadFileTool{Root: sandbox},
+		&WorkBashTool{Dir: sandbox, MaxOutput: r.cfg.Latex.BashMaxOutput},
+		&EditWorkFileTool{Root: sandbox},
 		submit,
 	}, r.log, 1, "chapters")
 	// 划分会话也带转录：大部头一本书可能分多次跑，中断后从转录续上。
@@ -558,7 +558,7 @@ func validateSplit(chapters []ChapterRange, totalLines int) error {
 // ------------------------------------------------------------------
 // buildDocIndexQuiet compiles the read-only original-document index
 // from the MinerU intermediate output. Failures are non-fatal: the
-// convert sessions simply run without doc_search/view_page.
+// convert sessions simply run without doc_search/view_source_page.
 func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	mds := files
 	if len(mds) == 0 && sourceDir != "" {
@@ -571,7 +571,7 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	outPath := filepath.Join(proj, "doc_index", "doc_index.json")
 	idx, pageIdx, err := buildDocIndex(r.cfg.Paths.MineruOutput, mds, outPath)
 	if err != nil {
-		r.log.Log(0, "[docindex] 原始文档索引不可用（doc_search/view_page 关闭）:", err)
+		r.log.Log(0, "[docindex] 原始文档索引不可用（doc_search/view_source_page 关闭）:", err)
 		return
 	}
 	r.docIndex = idx
@@ -729,6 +729,17 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	}
 	defer os.RemoveAll(scratch)
 	copyFile(filepath.Join(proj, "style", clsName+".cls"), filepath.Join(scratch, clsName+".cls"))
+	// 章节里的图片/图形引用要能在预览编译时解析：把 source 的
+	// images/figures 以符号链接挂进 scratch（失败则退回复制）。
+	for _, asset := range []string{"images", "figures"} {
+		src := filepath.Join(proj, "source", asset)
+		if !fileExists(src) {
+			continue
+		}
+		if err := os.Symlink(src, filepath.Join(scratch, asset)); err != nil {
+			_ = copyDir(src, filepath.Join(scratch, asset))
+		}
+	}
 	wrapper := "\\documentclass{" + clsName + "}\n" +
 		"\\usepackage{graphicx,amsmath,amssymb,longtable,booktabs}\n" +
 		"\\graphicspath{{figures/}}\n" +
@@ -746,18 +757,20 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		&ReadFileTool{Root: proj},
 		write,
 		// 增量编辑自己的章节文件 + 工作区检索（手册/cls/其它章节只读参考）
-		&EditFileTool{Root: workDir},
+		&EditWorkFileTool{Root: workDir},
 		&GrepTool{Root: proj},
+		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
+		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
 		&ViewPDFTool{Root: scratch},
 		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: 1},
 		submit,
 	}
 	if r.docIndex != nil && r.docPages != nil {
 		// 原始文档只读工具：片段→原 PDF 页定位（doc_search），
-		// 页面渲染检视复用 style 阶段的 view_page （全局页号 + 缓存）。
+		// 页面渲染检视复用 style 阶段的 view_source_page（全局页号 + 缓存）。
 		tools = append(tools,
 			&DocSearchTool{Index: r.docIndex},
-			&ViewPageTool{Idx: r.docPages, PagesDir: filepath.Join(proj, "pages"), Runner: r})
+			&ViewSourcePageTool{Idx: r.docPages, PagesDir: filepath.Join(proj, "pages"), Runner: r})
 	}
 	sess := session.NewSession(client, modelCfg, tuning,
 		strings.ReplaceAll(convertSystemPrompt, "{MAX_ROUNDS}", strconv.Itoa(session.EffectiveToolRounds(tuning))),
@@ -928,18 +941,19 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	tools := []session.Tool{
 		&WriteWorkFileTool{Root: workDir},
 		&EditWorkFileTool{Root: workDir},
+		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&GrepTool{Root: workDir},
-		&ViewPDFTool{Root: workDir},
+		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style-feedback", Log: r.log, Tid: 1},
+		&ViewPDFTool{Root: workDir, Comp: r.comp},
 		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
-		&ReadMDTool{Path: mainMD},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
 	if pageIdx, perr := buildPageIndex(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD))); perr == nil {
 		tools = append(tools,
-			&ListPagesTool{Idx: pageIdx},
-			&ViewPageTool{Idx: pageIdx, PagesDir: filepath.Join(proj, "pages"), Runner: r})
+			&ListSourcePagesTool{Idx: pageIdx},
+			&ViewSourcePageTool{Idx: pageIdx, PagesDir: filepath.Join(proj, "pages"), Runner: r})
 	}
 
 	// 复用原样式会话：系统提示已在持久化消息里，不开新上下文。
@@ -951,7 +965,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 
 	feedback := "The conversion phase finished: the MAJORITY of chapter conversion agents reported that the class/manual did NOT satisfy the book's real formatting." +
 		" Their work reports follow (固定格式，结论: 存在问题 = issues):" + b.String() +
-		"\n\nRe-inspect the relevant original pages (view_page), fix the cls/manual/example so these problems cannot recur, then submit_style with the corrected package."
+		"\n\nRe-inspect the relevant original pages (view_source_page), fix the cls/manual/example so these problems cannot recur, then submit_style with the corrected package."
 	if _, err := sess.Run(session.RunOptions{UserText: feedback}); err != nil {
 		return fmt.Errorf("样式反馈会话失败: %w", err)
 	}

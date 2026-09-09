@@ -64,6 +64,7 @@ latex:
                                   # （同时控制 vector 确认后嵌入 tikz 代码块而非 PDF 链接）
   chapter_granularity: "small"   # 档位1 章节拆分粒度：small=按小节拆分（默认）/ large=按大章整体拆分
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
+  bash_max_output: 5000          # 会话 bash 工具返回给模型的字符上限（默认 5000）
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）

@@ -160,7 +160,7 @@ func (t *ViewImageTool) previewTarget(rel string) (entry previewEntry, handled b
 	}
 	list := t.Previews()
 	if len(list) == 0 {
-		return previewEntry{}, true, fmt.Errorf("当前会话还没有编译预览图（请先调用 compile_preview）")
+		return previewEntry{}, true, fmt.Errorf("当前会话还没有编译预览图（请先调用 compile）")
 	}
 	if name == "preview.png" {
 		return list[len(list)-1], true, nil
@@ -304,39 +304,6 @@ func (t *ViewImageTool) resolve(rel string) (string, error) {
 		return "", escapeErr
 	}
 	return "", fmt.Errorf("文件不存在: %s（请用图片文件名或 markdown 中的引用路径）", rel)
-}
-
-// ReadMDTool lets the style analyst read the organized Markdown in
-// bounded line windows.
-type ReadMDTool struct {
-	Path string
-}
-
-func (t *ReadMDTool) Name() string { return "read_md" }
-
-func (t *ReadMDTool) Definition() map[string]any {
-	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "read_md",
-		"description": "Read a window of lines (1-based, inclusive) from the organized Markdown file. Max 400 lines per call.",
-		"parameters": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"start_line": map[string]any{"type": "integer", "description": "First line to read (1-based)."},
-				"end_line":   map[string]any{"type": "integer", "description": "Last line to read (inclusive)."},
-			},
-			"required": []string{"start_line", "end_line"},
-		},
-	}}
-}
-
-func (t *ReadMDTool) Execute(argsJSON string) (session.ToolResult, error) {
-	args, err := parseJSONObject(argsJSON)
-	if err != nil {
-		return session.ToolResult{}, err
-	}
-	start := intArg(args, "start_line", 1)
-	end := intArg(args, "end_line", start)
-	return readLinesFrom(t.Path, start, end, 400)
 }
 
 // SubmitStyleTool receives the structured style package: cls + usage
@@ -579,14 +546,21 @@ func readLinesFrom(path string, start, end, maxLines int) (session.ToolResult, e
 // examples incrementally without re-emitting full contents every turn.
 type WriteWorkFileTool struct {
 	Root string // real workspace directory
+	// AnyExt allows any text extension (build-fix workspace: .bib, .bst,
+	// .cfg, ...); default restricts to .cls .sty .tex .md.
+	AnyExt bool
 }
 
 func (t *WriteWorkFileTool) Name() string { return "write_file" }
 
 func (t *WriteWorkFileTool) Definition() map[string]any {
+	allowed := "Allowed extensions: .cls .sty .tex .md."
+	if t.AnyExt {
+		allowed = "Any text file name is allowed (.tex .cls .sty .md .bib .bst .cfg ...)."
+	}
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "write_file",
-		"description": "Write a file into YOUR workspace (full content replaces the file). Allowed extensions: .cls .sty .tex .md. Keep drafts here so later edits are small diffs instead of full re-outputs.",
+		"description": "Write a file into YOUR workspace (full content replaces the file). " + allowed + " Keep drafts here so later edits are small diffs instead of full re-outputs.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -610,7 +584,7 @@ func (t *WriteWorkFileTool) Execute(argsJSON string) (session.ToolResult, error)
 	if strings.TrimSpace(rel) == "" {
 		return session.ToolResult{Text: "REJECTED: path is required."}, nil
 	}
-	if !workFileExtRe.MatchString(rel) {
+	if !t.AnyExt && !workFileExtRe.MatchString(rel) {
 		return session.ToolResult{Text: "REJECTED: only .cls .sty .tex .md files are allowed."}, nil
 	}
 	path, err := resolveInside(t.Root, rel)

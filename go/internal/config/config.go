@@ -174,6 +174,9 @@ type LatexConfig struct {
 	// (sessions are long-lived and much heavier than plain img2text calls).
 	Concurrency int                `yaml:"concurrency"`
 	Compile     LatexCompileConfig `yaml:"compile"`
+	// BashMaxOutput caps how many characters a session's bash tool
+	// returns to the model. Default 5000.
+	BashMaxOutput int `yaml:"bash_max_output"`
 	// Sessions tunes each specialised AI session independently.
 	Sessions struct {
 		Drawing SessionTuning `yaml:"drawing"`
@@ -356,6 +359,9 @@ func validatePaths(cfg *Config) error {
 	default:
 		return fmt.Errorf("latex.chapter_granularity 必须为 small 或 large（当前 %q）", cfg.Latex.ChapterGranularity)
 	}
+	if cfg.Latex.BashMaxOutput < 0 {
+		return fmt.Errorf("latex.bash_max_output 不能为负（当前 %d）", cfg.Latex.BashMaxOutput)
+	}
 	if cfg.Paths.InputDir == "" || cfg.Paths.DoneDir == "" {
 		return nil
 	}
@@ -522,6 +528,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Latex.Compile.MaxFixRounds == 0 {
 		cfg.Latex.Compile.MaxFixRounds = 8
+	}
+	if cfg.Latex.BashMaxOutput == 0 {
+		cfg.Latex.BashMaxOutput = 5000
 	}
 	defaultSessionTuning(&cfg.Latex.Sessions.Drawing)
 	// The style analyst emits a full .cls + manual + example in one

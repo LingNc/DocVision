@@ -2,10 +2,65 @@ package latex
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mineru-tools/internal/config"
 )
+
+// TestCompileFigureToolFromFile pins the process-session contract: the
+// figure code lives in a workspace file, compile takes a PATH (never
+// inline code) and submit references the same file.
+func TestCompileFigureToolFromFile(t *testing.T) {
+	if _, err := exec.LookPath("xelatex"); err != nil {
+		t.Skip("xelatex not installed")
+	}
+	dir := t.TempDir()
+	body := "\\begin{tikzpicture}\n\\draw (0,0) rectangle (2,1);\n\\end{tikzpicture}\n"
+	if err := os.WriteFile(filepath.Join(dir, "figure.tex"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := &tikzState{workDir: dir}
+	tool := &CompileFigureTool{
+		Comp:  NewCompiler(config.LatexCompileConfig{Engine: "xelatex", RasterCommand: "pdftoppm", RasterDPI: 72}),
+		State: state,
+	}
+
+	res, err := tool.Execute(`{}`) // default figure.tex
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.Text, "COMPILE OK.") || res.ImageBase64 == "" {
+		t.Fatalf("compile from file = %q (image %d bytes)", truncateStr(res.Text, 300), len(res.ImageBase64))
+	}
+	if !state.compileOK || state.lastCode != body {
+		t.Errorf("state not recorded: ok=%v code=%q", state.compileOK, state.lastCode)
+	}
+	if !fileExists(filepath.Join(dir, "standalone.pdf")) {
+		t.Error("standalone.pdf missing")
+	}
+
+	sub := &SubmitFigureTool{State: state}
+	res, err = sub.Execute(`{"path":"figure.tex"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.Text, "SUBMITTED") {
+		t.Errorf("submit by path = %q", res.Text)
+	}
+
+	// A missing path must be reported, never silently compiled.
+	missing := &CompileFigureTool{Comp: tool.Comp, State: &tikzState{workDir: dir}}
+	res, err = missing.Execute(`{"path":"nope.tex"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "NOT FOUND") {
+		t.Errorf("missing figure file = %q", res.Text)
+	}
+}
 
 // TestViewImageResolvePreviewNames pins the compile-preview contract:
 // preview.png is the newest compile, preview-<n>.png the n-th, and
@@ -38,8 +93,8 @@ func TestViewImageResolvePreviewNames(t *testing.T) {
 	// No previews yet: a clear "compile first" error instead of a
 	// confusing file-not-found.
 	empty := &ViewImageTool{Root: dir, Previews: func() []previewEntry { return nil }}
-	if _, err := empty.resolve("preview.png"); err == nil || !strings.Contains(err.Error(), "compile_preview") {
-		t.Errorf("empty preview list must hint at compile_preview, got %v", err)
+	if _, err := empty.resolve("preview.png"); err == nil || !strings.Contains(err.Error(), "compile") {
+		t.Errorf("empty preview list must hint at compile, got %v", err)
 	}
 }
 

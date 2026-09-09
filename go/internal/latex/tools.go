@@ -63,10 +63,11 @@ func (s *tikzState) previewEntries() []previewEntry {
 	return out
 }
 
-// CompilePreviewTool compiles model-supplied TikZ body code inside a
-// standalone wrapper, rasterises the PDF and feeds the preview PNG
-// back to the model.
-type CompilePreviewTool struct {
+// CompileFigureTool compiles the TikZ body code held in a WORKSPACE
+// FILE (default figure.tex) inside a standalone wrapper, rasterises the
+// PDF and feeds the preview back to the model. The code is never passed
+// inline: write_file / edit_file first, then compile {path}.
+type CompileFigureTool struct {
 	Comp       *Compiler
 	State      *tikzState
 	EngineIsXe bool
@@ -74,34 +75,39 @@ type CompilePreviewTool struct {
 	Tid        int
 }
 
-func (t *CompilePreviewTool) Name() string { return "compile_preview" }
+func (t *CompileFigureTool) Name() string { return "compile" }
 
-func (t *CompilePreviewTool) Definition() map[string]any {
+func (t *CompileFigureTool) Definition() map[string]any {
 	return map[string]any{
 		"type": "function",
 		"function": map[string]any{
-			"name":        "compile_preview",
-			"description": "Compile TikZ body code and receive the compile log plus a rasterised PNG preview of the figure for visual comparison with the original image. Each preview is kept and can be re-inspected with view_image (preview.png = newest, preview-<n>.png = n-th compile) using crop/zoom.",
+			"name": "compile",
+			"description": "Compile your figure code from a workspace file (default figure.tex) and get the compile log plus a rendered preview of the figure to compare with the original image. " +
+				"Write the code with write_file/edit_file first - never paste code into this tool. The file holds the TikZ body (between \\begin{document} and \\end{document}); \\usetikzlibrary / \\usepgfplotslibrary / \\usepackage lines at the top are hoisted into the preamble. " +
+				"Each preview is kept and can be re-inspected with view_image (preview.png = newest, preview-<n>.png = n-th compile) or view_pdf (standalone.pdf).",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"code": map[string]any{
+					"path": map[string]any{
 						"type":        "string",
-						"description": "The TikZ code that goes between \\begin{document} and \\end{document}. Include \\usetikzlibrary / \\usepgfplotslibrary lines at the top; they are hoisted into the preamble.",
+						"description": "workspace-relative file holding the TikZ body (default figure.tex)",
+					},
+					"merges": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "optional: image paths (as in the markdown) of page-boundary continuations absorbed into this figure",
 					},
 				},
-				"required": []string{"code"},
 			},
 		},
 	}
 }
 
-func (t *CompilePreviewTool) Execute(argsJSON string) (session.ToolResult, error) {
+func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error) {
 	args, err := parseJSONObject(argsJSON)
 	if err != nil {
 		return session.ToolResult{}, err
 	}
-	code, _ := args["code"].(string)
 	if arr, ok := args["merges"].([]interface{}); ok {
 		for _, v := range arr {
 			if p, ok := v.(string); ok && strings.TrimSpace(p) != "" {
@@ -109,33 +115,47 @@ func (t *CompilePreviewTool) Execute(argsJSON string) (session.ToolResult, error
 			}
 		}
 	}
+	rel := strings.TrimSpace(strArg(args, "path"))
+	if rel == "" {
+		rel = "figure.tex"
+	}
+	src, err := resolveInside(t.State.workDir, rel)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return session.ToolResult{Text: "NOT FOUND: " + rel + "（先用 write_file 把图形代码写入该文件，compile 只接收路径）"}, nil
+	}
+	code := string(data)
 	if strings.TrimSpace(code) == "" {
-		return session.ToolResult{}, fmt.Errorf("code 为空")
+		return session.ToolResult{Text: "REJECTED: " + rel + " 为空。"}, nil
 	}
 	t.State.lastCode = code
 	t.State.compileOK = false
 	t.State.lastPDF = ""
 
-	texFile := filepath.Join(t.State.workDir, "figure.tex")
+	// 包装成 standalone 文档后编译（figure.tex 保持为模型的原样代码）。
+	texFile := filepath.Join(t.State.workDir, "standalone.tex")
 	if err := os.WriteFile(texFile, []byte(buildStandalone(code, t.EngineIsXe)), 0o644); err != nil {
 		return session.ToolResult{}, err
 	}
 	// Clear previous outputs so a stale PDF can never pass as fresh.
-	os.Remove(filepath.Join(t.State.workDir, "figure.pdf"))
-	os.Remove(filepath.Join(t.State.workDir, "figure.png"))
+	os.Remove(filepath.Join(t.State.workDir, "standalone.pdf"))
+	os.Remove(filepath.Join(t.State.workDir, "standalone.png"))
 
 	start := time.Now()
-	res := t.Comp.Compile(t.State.workDir, "figure.tex")
+	res := t.Comp.Compile(t.State.workDir, "standalone.tex")
 	LogCompileResult(t.Log, t.Tid, "preview", res, time.Since(start))
 	if !res.OK {
 		t.State.compileErr = res.Err
-		text := "COMPILE FAILED. Fix the code and call compile_preview again.\nError:\n" + res.Err
+		text := "COMPILE FAILED. Fix " + rel + " and call compile again.\nError:\n" + res.Err
 		if w := res.WarningSummary(); w != "" {
 			text += "\n" + truncateStr(w, 1500)
 		}
 		return session.ToolResult{Text: text}, nil
 	}
-	png := filepath.Join(t.State.workDir, "figure") // pdftoppm appends .png
+	png := filepath.Join(t.State.workDir, "standalone") // pdftoppm appends .png
 	if err := t.Comp.Rasterize(res.PDF, png); err != nil {
 		t.State.compileErr = err.Error()
 		return session.ToolResult{Text: "Compiled OK but rasterisation failed: " + err.Error()}, nil
@@ -152,10 +172,10 @@ func (t *CompilePreviewTool) Execute(argsJSON string) (session.ToolResult, error
 	if err != nil {
 		return session.ToolResult{Text: "Compiled OK but preview could not be loaded: " + err.Error()}, nil
 	}
-	text := "COMPILE OK. Output: figure.pdf" + pdfDetail + ". The preview PNG is attached. Compare it with the original image (structure, labels, overlaps/crowding); if it faithfully matches, call submit; otherwise fix the differences and compile again."
+	text := "COMPILE OK. Output: standalone.pdf" + pdfDetail + ". The preview is attached. Compare it with the original image (structure, labels, overlaps/crowding); if it faithfully matches, call submit; otherwise fix " + rel + " and compile again."
 	if name := t.State.addPreview(png+".png", res.PDF); name != "" {
 		text += "\nThe same preview is also addressable as view_image {path: \"" + name +
-			"\"} (latest = \"preview.png\"); add left/top/right/bottom (percent) and zoom (target width px, e.g. 1600) to inspect a region closely instead of the overview."
+			"\"} (latest = \"preview.png\"); add left/top/right/bottom (percent) and zoom (target width px, e.g. 1600) to inspect a region closely instead of the overview. view_pdf {path: \"standalone.pdf\", page: 1} renders it from the PDF."
 	}
 	if w := res.WarningSummary(); w != "" {
 		text += "\n" + truncateStr(w, 1500)
@@ -179,11 +199,11 @@ func (t *SubmitFigureTool) Definition() map[string]any {
 		"type": "function",
 		"function": map[string]any{
 			"name":        "submit",
-			"description": "Submit the final TikZ figure. Preferred: write the final code to a workspace file (write_file figure.tex) and submit {path: 'figure.tex'} — no need to repeat the code. Allowed only after a successful compile_preview of EXACTLY this code.",
+			"description": "Submit the final TikZ figure. Write the final code to a workspace file (write_file figure.tex) and submit {path: 'figure.tex'} — no need to repeat the code. Allowed only after a successful compile of EXACTLY this code.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":   map[string]any{"type": "string", "description": "workspace-relative file holding the final TikZ code (preferred; must equal the last successful compile_preview)."},
+					"path":   map[string]any{"type": "string", "description": "workspace-relative file holding the final TikZ code (must equal the last successful compile)."},
 					"code":   map[string]any{"type": "string", "description": "The final TikZ body code inline (only when not using path)."},
 					"merges": map[string]any{"type": "string", "description": "Image paths (as in the markdown) of page-boundary continuations absorbed into this combined figure."},
 				},
@@ -214,7 +234,7 @@ func (t *SubmitFigureTool) Execute(argsJSON string) (session.ToolResult, error) 
 		return session.ToolResult{}, fmt.Errorf("code 为空（或 path 文件不存在）")
 	}
 	if !t.State.compileOK || strings.TrimSpace(code) != strings.TrimSpace(t.State.lastCode) {
-		return session.ToolResult{Text: "REJECTED: the submitted code differs from the last successful compile. Call compile_preview with this exact code first."}, nil
+		return session.ToolResult{Text: "REJECTED: the submitted code differs from the last successful compile. Call compile {path} with this exact file first."}, nil
 	}
 	t.State.submitted = true
 	t.State.finalCode = code

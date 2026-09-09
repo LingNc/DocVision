@@ -28,7 +28,7 @@ type pageSrc struct {
 }
 
 // pageIndex is the global page table over all origin PDFs. Pages are
-// rendered ON DEMAND by view_page (and then cached), never up front.
+// rendered ON DEMAND by view_source_page (and then cached), never up front.
 type pageIndex struct {
 	srcs  []pageSrc
 	total int
@@ -143,47 +143,50 @@ func (r *Runner) ensurePageRendered(idx *pageIndex, pagesDir string, page int) (
 	return cache, nil
 }
 
-// ListPagesTool tells the style analyst how many original pages exist
-// (they are rendered on demand via view_page).
-type ListPagesTool struct {
+// ListSourcePagesTool tells a session how many ORIGINAL document pages
+// exist (rendered on demand by view_source_page). These are the real
+// scanned/layout pages, NOT the PDFs produced by our own compiles —
+// those are viewed with view_pdf.
+type ListSourcePagesTool struct {
 	Idx *pageIndex
 }
 
-func (t *ListPagesTool) Name() string { return "list_pages" }
+func (t *ListSourcePagesTool) Name() string { return "list_source_pages" }
 
-func (t *ListPagesTool) Definition() map[string]any {
+func (t *ListSourcePagesTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "list_pages",
-		"description": "Report the number of ORIGINAL document pages (real scanned/layout pages) available for viewing via view_page. The best source for typography, heading styles, headers/footers and overall design.",
+		"name":        "list_source_pages",
+		"description": "Report how many ORIGINAL source-document pages (the real scanned/layout pages of the book) can be inspected with view_source_page. These are the best source for typography, heading styles, headers/footers and overall design. (view_pdf is only for PDFs you compiled yourself.)",
 		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
 	}}
 }
 
-func (t *ListPagesTool) Execute(_ string) (session.ToolResult, error) {
+func (t *ListSourcePagesTool) Execute(_ string) (session.ToolResult, error) {
 	if t.Idx == nil || t.Idx.total == 0 {
 		return session.ToolResult{Text: "(no original page renders available)"}, nil
 	}
-	return session.ToolResult{Text: fmt.Sprintf("%d original pages available (view_page page=1..%d). Pages render on demand and are cached.", t.Idx.total, t.Idx.total)}, nil
+	return session.ToolResult{Text: fmt.Sprintf("%d original pages available (view_source_page page=1..%d). Pages render on demand and are cached.", t.Idx.total, t.Idx.total)}, nil
 }
 
-// ViewPageTool renders ONE original page on demand (with cache) and
-// returns it as an image. Supports percent crop + zoom like view_image.
-type ViewPageTool struct {
+// ViewSourcePageTool renders ONE ORIGINAL source page on demand (with
+// cache) and returns it as an image. Supports percent crop + zoom like
+// view_image.
+type ViewSourcePageTool struct {
 	Idx      *pageIndex
 	PagesDir string
 	Runner   *Runner
 }
 
-func (t *ViewPageTool) Name() string { return "view_page" }
+func (t *ViewSourcePageTool) Name() string { return "view_source_page" }
 
-func (t *ViewPageTool) Definition() map[string]any {
+func (t *ViewSourcePageTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "view_page",
-		"description": "View one ORIGINAL document page (real typography/layout). Renders on demand and caches. Optional percent crop (0-100, relative to full page) and zoom_width let you inspect details like heading styles, headers/footers and font shapes.",
+		"name":        "view_source_page",
+		"description": "View one page of the ORIGINAL source document (real typography/layout of the book, page numbers as in the scan). Renders on demand and caches. Optional percent crop (0-100, relative to full page) and zoom_width let you inspect details like heading styles, headers/footers and font shapes. Use view_pdf instead for PDFs you compiled.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"page":       map[string]any{"type": "integer", "description": "global page number, 1-based"},
+				"page":       map[string]any{"type": "integer", "description": "global source page number, 1-based"},
 				"left":       map[string]any{"type": "number", "description": "crop left percent (0-100)"},
 				"top":        map[string]any{"type": "number", "description": "crop top percent"},
 				"right":      map[string]any{"type": "number", "description": "crop right percent (100 = full width)"},
@@ -195,7 +198,7 @@ func (t *ViewPageTool) Definition() map[string]any {
 	}}
 }
 
-func (t *ViewPageTool) Execute(argsJSON string) (session.ToolResult, error) {
+func (t *ViewSourcePageTool) Execute(argsJSON string) (session.ToolResult, error) {
 	var args struct {
 		Page      int     `json:"page"`
 		Left      float64 `json:"left"`
@@ -205,7 +208,7 @@ func (t *ViewPageTool) Execute(argsJSON string) (session.ToolResult, error) {
 		ZoomWidth int     `json:"zoom_width"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return session.ToolResult{}, fmt.Errorf("view_page 参数错误: %w", err)
+		return session.ToolResult{}, fmt.Errorf("view_source_page 参数错误: %w", err)
 	}
 	if t.Idx == nil || t.Idx.total == 0 {
 		return session.ToolResult{}, fmt.Errorf("原始页面不可用（未找到 MinerU 保留的 origin PDF）")

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **会话工具统一（读文件 / 编译 / 原书页）**：
+  - `read_file` 成为唯一读文件工具：`{path, start_line?, end_line?}`（整文件或带行号的窗口），`AltRoots` 支持只读附加根——style 工作区既能读自己写的 cls/manual/example，也能读项目 md/chapters；删除重复的 `read_md`、`read_lines` 与章节专用 md-grep。
+  - `compile` 统一为**只收路径**的通用编译工具（`CompileTexTool`）：`{path?, engine?, passes?, bib?, shell_escape?, args?, timeout?}`，多文件 `\input` 工程可直接编译，`engine:"latexmk"` 走完整多遍构建（参考文献/toc/refs），成功返回产物 PDF 名+页数并提示用 `view_pdf` 检视。tikz 的 `compile_preview` 改为 `compile {path:"figure.tex"}`：模型先 `write_file` 再按路径编译，绝不内联代码；工具把 body 包装成 `standalone.tex` 编译，预览图仍走 `view_image`/`view_pdf`。
+  - style 会话新增 `compile {path:"example.tex"}`（cls 同目录直接命中，可先自查再 submit）与 `read_file`；`list_pages`/`view_page` 改名 `list_source_pages`/`view_source_page`（原书扫描页，与"看自己编译出的 PDF"的 `view_pdf` 区分开），提示词同步说明。
+  - convert 会话新增 `view_image`（看 md 中引用的原图），并把 `source/images`、`source/figures` 符号链接进预览编译的 scratch，章节里的图片引用不再因缺资源而编译失败。
+  - assemble 的修复会话升级为完整工作区会话（read/write/edit/grep/bash/compile/view_pdf/view_image/list_fonts，`write_file` 允许任意文本扩展名），全书编译改用 `CompileFull`（有 latexmk 用 latexmk，否则两遍）。
+  - 新增配置 `latex.bash_max_output`（会话 bash 返回给模型的字符上限，默认 5000），`default.yaml`/`config.example.yaml` 与 `setup` 校验同步。
+
 ### Added
 
 - **raster 图档位1 统一解释块**：档位1 的 raster 图在 process 阶段总是生成解释文本（复用 img2text 文本提取，每张一次视觉调用），嵌入格式与 STYLED/VECTOR 同骨架——`<!-- DOCVISION-IMAGE: <label> -->` + `DESCRIBE: <解释>` + `LINK: [image](…)`，无文本时只有 LINK 行；`latex.insert_image_description` 仅控制档位2（开=嵌入 `[Image]( content )`，关=纯 `![image]` 原图引用）

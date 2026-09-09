@@ -10,8 +10,241 @@ import (
 	"strings"
 	"time"
 
+	"mineru-tools/internal/logger"
 	"mineru-tools/internal/session"
 )
+
+// AltRoot is an extra read-only root tried after the primary workspace
+// root (label is shown to the model so it knows where the file came
+// from, e.g. "project").
+type AltRoot struct {
+	Label string
+	Dir   string
+}
+
+// ReadFileTool is the ONE file-reading tool for every session type. It
+// replaces the old read_file / read_md / read_lines variants: a path
+// (workspace-relative, optionally under a read-only extra root) plus an
+// optional 1-based inclusive line window. Whole-file reads are capped;
+// line windows return numbered lines.
+type ReadFileTool struct {
+	Root string
+	// AltRoots are additional READ-ONLY roots tried when the path does
+	// not resolve under Root (e.g. the project tree for a session whose
+	// workspace is a subdirectory).
+	AltRoots []AltRoot
+	// MaxBytes caps a whole-file read (default 64KB).
+	MaxBytes int
+	// MaxLines caps one line-window read (default 400).
+	MaxLines int
+}
+
+func (t *ReadFileTool) Name() string { return "read_file" }
+
+func (t *ReadFileTool) Definition() map[string]any {
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name": "read_file",
+		"description": "Read a text file (read-only): your workspace files AND, where allowed, the project files (source markdown, class manual, other chapters). " +
+			"Without start_line/end_line the whole file is returned (truncated when large); with start_line/end_line a numbered window of at most 400 lines is returned. " +
+			"Paths are workspace-relative.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":       map[string]any{"type": "string", "description": "file path relative to the workspace root"},
+				"start_line": map[string]any{"type": "integer", "description": "optional first line (1-based) of a window"},
+				"end_line":   map[string]any{"type": "integer", "description": "optional last line (inclusive) of a window"},
+			},
+			"required": []string{"path"},
+		},
+	}}
+}
+
+// resolve finds the file under Root, then under the extra roots.
+func (t *ReadFileTool) resolve(rel string) (full, label string, err error) {
+	if strings.TrimSpace(rel) == "" {
+		return "", "", fmt.Errorf("path 为空")
+	}
+	if p, e := resolveInside(t.Root, rel); e == nil && fileExists(p) {
+		return p, "", nil
+	}
+	for _, ar := range t.AltRoots {
+		if ar.Dir == "" {
+			continue
+		}
+		if p, e := resolveInside(ar.Dir, rel); e == nil && fileExists(p) {
+			return p, ar.Label, nil
+		}
+	}
+	if p, e := resolveInside(t.Root, rel); e == nil {
+		if st, se := os.Stat(p); se == nil && st.IsDir() {
+			return "", "", fmt.Errorf("%s 是目录（用 grep 或 bash ls 查看目录内容）", rel)
+		}
+	}
+	return "", "", fmt.Errorf("文件不存在: %s", rel)
+}
+
+func (t *ReadFileTool) Execute(argsJSON string) (session.ToolResult, error) {
+	args, err := parseJSONObject(argsJSON)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	rel, _ := args["path"].(string)
+	full, label, err := t.resolve(rel)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	shown := rel
+	if label != "" {
+		shown = label + "/" + rel
+	}
+	_, hasStart := args["start_line"]
+	_, hasEnd := args["end_line"]
+	if hasStart || hasEnd {
+		start := intArg(args, "start_line", 1)
+		end := intArg(args, "end_line", start)
+		maxLines := t.MaxLines
+		if maxLines <= 0 {
+			maxLines = 400
+		}
+		return readLinesFrom(full, start, end, maxLines)
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	max := t.MaxBytes
+	if max <= 0 {
+		max = 65536
+	}
+	text := string(data)
+	note := ""
+	if len(text) > max {
+		text = text[:max]
+		note = "\n...[truncated; use start_line/end_line for later parts]..."
+	}
+	return session.ToolResult{Text: fmt.Sprintf("[%s, %d bytes]\n%s%s", shown, len(data), text, note)}, nil
+}
+
+// CompileTexTool is the general LaTeX build tool for a workspace: it
+// compiles ONE .tex file that already exists in the workspace (never
+// inline code) and reports the result. Multi-file projects work because
+// the main file may \input / \include other workspace files; passes /
+// bibliography / engine / extra flags can be chosen by the model, and
+// engine "latexmk" runs a complete multi-pass build.
+type CompileTexTool struct {
+	Comp     *Compiler
+	Root     string // workspace root = build directory
+	MainFile string // default main file, workspace-relative
+	Tag      string // log tag ("chapter", "book", "style", ...)
+	Log      *logger.Logger
+	Tid      int
+	LastOK   bool
+	LastPDF  string
+	Pages    int
+}
+
+func (t *CompileTexTool) Name() string { return "compile" }
+
+func (t *CompileTexTool) Definition() map[string]any {
+	def := t.MainFile
+	if def == "" {
+		def = "main.tex"
+	}
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name": "compile",
+		"description": "Compile a .tex file of your workspace (default " + def + ") and get the result: errors to fix, or OK plus the output PDF name and page count. " +
+			"The file must already exist (write_file/edit_file first) - never paste code here. Multi-file projects work: the main file may \\input other workspace files. " +
+			"Use engine 'latexmk' for a full multi-pass build (bibliography, toc, refs); passes/bib/args cover the rest. Inspect the result with view_pdf.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":         map[string]any{"type": "string", "description": "workspace-relative main .tex file (default " + def + ")"},
+				"engine":       map[string]any{"type": "string", "description": "optional: latexmk | xelatex | pdflatex | lualatex"},
+				"passes":       map[string]any{"type": "integer", "description": "number of engine passes (default auto: 2 when toc/refs/bibliography are present)"},
+				"bib":          map[string]any{"type": "string", "description": "optional: run bibtex or biber after the first pass"},
+				"shell_escape": map[string]any{"type": "boolean", "description": "add -shell-escape (minted / externalised pgfplots)"},
+				"args":         map[string]any{"type": "string", "description": "extra engine flags, space separated"},
+				"timeout":      map[string]any{"type": "integer", "description": "seconds per engine pass (default: configured latex.compile.timeout)"},
+			},
+		},
+	}}
+}
+
+func (t *CompileTexTool) Execute(argsJSON string) (session.ToolResult, error) {
+	args, err := parseJSONObject(argsJSON)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	rel, _ := args["path"].(string)
+	if strings.TrimSpace(rel) == "" {
+		rel = t.MainFile
+	}
+	if strings.TrimSpace(rel) == "" {
+		return session.ToolResult{Text: "REJECTED: path 为空（未配置默认主文件）"}, nil
+	}
+	full, err := resolveInside(t.Root, rel)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	if !strings.HasSuffix(strings.ToLower(full), ".tex") {
+		return session.ToolResult{Text: "REJECTED: compile 只接受 .tex 主文件（先 write_file 写好）"}, nil
+	}
+	if !fileExists(full) {
+		return session.ToolResult{Text: "NOT FOUND: " + rel + "（先 write_file 写入内容，compile 只接收路径）"}, nil
+	}
+	opts := CompileOptions{
+		Engine:      strings.TrimSpace(strArg(args, "engine")),
+		Passes:      intArg(args, "passes", 0),
+		Bib:         strings.TrimSpace(strArg(args, "bib")),
+		ShellEscape: boolArg(args, "shell_escape"),
+	}
+	if extra := strings.TrimSpace(strArg(args, "args")); extra != "" {
+		opts.ExtraArgs = strings.Fields(extra)
+	}
+	if secs := intArg(args, "timeout", 0); secs > 0 {
+		opts.Timeout = time.Duration(secs) * time.Second
+	}
+	start := time.Now()
+	res := t.Comp.CompileOpts(t.Root, rel, opts)
+	tag := t.Tag
+	if tag == "" {
+		tag = "work"
+	}
+	LogCompileResult(t.Log, t.Tid, tag, res, time.Since(start))
+	t.LastOK = res.OK
+	t.LastPDF = res.PDF
+	if res.OK {
+		outName := strings.TrimSuffix(filepath.Base(rel), ".tex") + ".pdf"
+		detail := ""
+		if n, perr := pdfPageCount(res.PDF); perr == nil {
+			t.Pages = n
+			detail = fmt.Sprintf(" Output: %s (%d pages). Inspect with view_pdf {path: %q, page: 1}.", outName, n, outName)
+		} else {
+			detail = " Output: " + outName + "."
+		}
+		text := "COMPILE OK." + detail
+		if w := res.WarningSummary(); w != "" {
+			text += "\n" + truncateStr(w, 1500)
+		}
+		return session.ToolResult{Text: text}, nil
+	}
+	text := "COMPILE FAILED:\n" + res.Err
+	if w := res.WarningSummary(); w != "" {
+		text += "\n" + truncateStr(w, 1500)
+	}
+	return session.ToolResult{Text: text}, nil
+}
+
+// strArg / boolArg are small typed accessors for tool arguments.
+func strArg(args map[string]interface{}, key string) string {
+	v, _ := args[key].(string)
+	return v
+}
+
+func boolArg(args map[string]interface{}, key string) bool {
+	v, _ := args[key].(bool)
+	return v
+}
 
 // EditWorkFileTool applies ONE literal find/replace to any text file in
 // the session workspace (增量编辑，不必整文件重写). append:true 直接把
@@ -171,6 +404,14 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 	text = strings.ReplaceAll(text, full+"/", "")
 	text = strings.ReplaceAll(text, full, ".")
 	return session.ToolResult{Text: text}, nil
+}
+
+// blockedPatterns rejects commands that try to escape the workspace or
+// damage the host. This is a tripwire, not a security boundary: the
+// tool runs with the user's own privileges on their own machine.
+var blockedPatterns = []string{
+	"sudo", "rm -rf /", "mkfs", ":(){", "fork bomb", "dd if=",
+	"curl", "wget", "/etc/", "/dev/sd", "chmod 777 /", "mv / ",
 }
 
 // WorkBashTool runs a shell command with cwd = the session workspace
