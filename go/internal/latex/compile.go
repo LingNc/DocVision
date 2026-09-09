@@ -26,6 +26,10 @@ type Compiler struct {
 	timeout time.Duration
 	raster  string
 	dpi     int
+	// fontsDir 项目字体目录（可空）。非空时每次编译注入 TEXINPUTS /
+	// OSFONTDIR，cls 里 \setmainfont{字体文件名} 可直接命中用户手动
+	// 放入的字体文件。
+	fontsDir string
 }
 
 // NewCompiler builds a Compiler from the latex compile config.
@@ -133,6 +137,16 @@ func (c *Compiler) Compile(dir, mainFile string) CompileResult {
 	)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "openout_any=a", "openin_any=a")
+	if c.fontsDir != "" {
+		if abs, err := filepath.Abs(c.fontsDir); err == nil {
+			// TEXINPUTS 末尾双斜杠 = 递归检索；OSFONTDIR 让 fontspec
+			// 按文件名找到项目字体。
+			cmd.Env = append(cmd.Env,
+				"TEXINPUTS="+abs+string(os.PathListSeparator),
+				"OSFONTDIR="+abs,
+			)
+		}
+	}
 
 	out, err := cmd.CombinedOutput()
 	logText := string(out)

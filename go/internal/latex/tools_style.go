@@ -15,9 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"io"
-	"net/http"
-
 	_ "golang.org/x/image/webp"
 	_ "image/gif"
 	_ "image/png"
@@ -641,7 +638,7 @@ func (t *ListFontsTool) Name() string { return "list_fonts" }
 func (t *ListFontsTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "list_fonts",
-		"description": "List usable fonts: files in the project fonts directory (install_font can add more) and installed system fonts. Use this before referencing a font in the cls; if a needed font is missing, name the expected substitution in the manual.",
+		"description": "List usable fonts: files in the project fonts directory and installed system fonts. Use this before referencing a font in the cls; if a needed font is missing, name the expected substitution in the manual and report the missing font in the submit_style report (user downloads it manually into the fonts/ directory).",
 		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
 	}}
 }
@@ -657,7 +654,7 @@ func (t *ListFontsTool) Execute(_ string) (session.ToolResult, error) {
 			}
 		}
 	} else {
-		b.WriteString("Project fonts directory is empty (install_font can add files).\n")
+		b.WriteString("Project fonts directory is empty (the user can place font files there manually).\n")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -673,70 +670,4 @@ func (t *ListFontsTool) Execute(_ string) (session.ToolResult, error) {
 		}
 	}
 	return session.ToolResult{Text: b.String()}, nil
-}
-
-// InstallFontTool downloads a font file (ttf/otf) into the project
-// fonts directory so the cls can reference it directly.
-type InstallFontTool struct {
-	FontsDir string
-}
-
-func (t *InstallFontTool) Name() string { return "install_font" }
-
-func (t *InstallFontTool) Definition() map[string]any {
-	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "install_font",
-		"description": "Download one font file (.ttf/.otf) from a URL into the project fonts directory. Only use URLs you are confident provide the font legally (official releases, open-source fonts like SIL OFL families).",
-		"parameters": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"url":  map[string]any{"type": "string", "description": "direct font file URL"},
-				"name": map[string]any{"type": "string", "description": "file name to save as, e.g. SourceHanSerifSC-Regular.otf"},
-			},
-			"required": []string{"url", "name"},
-		},
-	}}
-}
-
-func (t *InstallFontTool) Execute(argsJSON string) (session.ToolResult, error) {
-	args, err := parseJSONObject(argsJSON)
-	if err != nil {
-		return session.ToolResult{}, err
-	}
-	url, _ := args["url"].(string)
-	name, _ := args["name"].(string)
-	if strings.TrimSpace(url) == "" || strings.TrimSpace(name) == "" {
-		return session.ToolResult{Text: "REJECTED: url and name are required."}, nil
-	}
-	if !workFileExtRe.MatchString(name) {
-		return session.ToolResult{Text: "REJECTED: name must end with .ttf or .otf."}, nil
-	}
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return session.ToolResult{Text: "REJECTED: url must be http(s)."}, nil
-	}
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return session.ToolResult{Text: "DOWNLOAD FAILED: " + err.Error()}, nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return session.ToolResult{Text: fmt.Sprintf("DOWNLOAD FAILED: HTTP %d", resp.StatusCode)}, nil
-	}
-	limited := io.LimitReader(resp.Body, 64<<20)
-	data, err := io.ReadAll(limited)
-	if err != nil {
-		return session.ToolResult{Text: "DOWNLOAD FAILED: " + err.Error()}, nil
-	}
-	if len(data) < 1000 {
-		return session.ToolResult{Text: "REJECTED: file too small to be a font."}, nil
-	}
-	if err := os.MkdirAll(t.FontsDir, 0o755); err != nil {
-		return session.ToolResult{}, err
-	}
-	dst := filepath.Join(t.FontsDir, filepath.Base(name))
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
-		return session.ToolResult{}, err
-	}
-	return session.ToolResult{Text: "INSTALLED " + dst + fmt.Sprintf(" (%d bytes). Reference it in the cls with its file name.", len(data))}, nil
 }

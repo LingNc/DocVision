@@ -125,6 +125,7 @@ func (r *Runner) RunBook(opts BookOptions) error {
 			return fmt.Errorf("create %s: %w", d, err)
 		}
 	}
+	writeFontsReadme(r.cfg.Paths.Fonts)
 	progPath := filepath.Join(proj, "progress.json")
 	prog := bookProgress{}
 	if data, err := os.ReadFile(progPath); err == nil {
@@ -302,7 +303,6 @@ func (r *Runner) stylePhase(proj string) error {
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ReadMDTool{Path: mainMD},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
-		&InstallFontTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
 
@@ -318,7 +318,7 @@ func (r *Runner) stylePhase(proj string) error {
 		tools = append(tools, &ListPagesTool{Idx: pageIdx}, &ViewPageTool{Idx: pageIdx, PagesDir: pagesDir, Runner: r})
 	}
 
-	prompt := styleSystemPrompt + "\n\nYou have a persistent WORKSPACE: write_file stores class.cls / manual.md / example.tex as real files; submit_style can then reference them by file name instead of full inline contents. Check list_fonts before referencing fonts; install_font can add missing font files (record substitutions in the manual when a font cannot be provided)."
+	prompt := styleSystemPrompt + "\n\nYou have a persistent WORKSPACE: write_file stores class.cls / manual.md / example.tex as real files; submit_style can then reference them by file name instead of full inline contents. Check list_fonts before referencing fonts. There is NO font download tool: when a font is missing, record the substitution in the manual AND report the missing font to the user (font file name + where to place it: the project fonts/ directory) in the submit_style report — the user downloads it manually and re-runs."
 	if r.cfg.Latex.RemoveWatermark {
 		prompt += "\n\n" + r.watermarkGuidance("WATERMARK: the source may carry watermark artifacts (repeated decorative overlay text such as institution/library marks, faint background strings). Identify the watermark pattern in the manual and instruct conversion to EXCLUDE it entirely - watermark text/graphics must NOT be typeset in the LaTeX output.")
 	}
@@ -934,7 +934,6 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ReadMDTool{Path: mainMD},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
-		&InstallFontTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
 	if pageIdx, perr := buildPageIndex(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD))); perr == nil {
@@ -1122,4 +1121,36 @@ func (r *Runner) preflightConvert(proj string) error {
 	}
 	r.log.Log(0, "[preflight] 转换前置检查通过：样式包完整，图片全部处理完毕")
 	return nil
+}
+
+// writeFontsReadme 保证项目字体目录里有 README：告诉用户缺字体时把
+// 什么文件按什么名字放进该目录（编译环境已通过 TEXINPUTS/OSFONTDIR
+// 指向这里，cls 里直接用文件名引用即可）。已存在则不覆盖。
+func writeFontsReadme(fontsDir string) {
+	if fontsDir == "" {
+		return
+	}
+	if err := os.MkdirAll(fontsDir, 0o755); err != nil {
+		return
+	}
+	readme := filepath.Join(fontsDir, "README.md")
+	if _, err := os.Stat(readme); err == nil {
+		return
+	}
+	content := `# 字体目录 / Fonts
+
+样式会话发现原书使用的字体本机没有时，会在提交报告与 manual.md 里列出**缺失字体清单**。
+
+## 使用方法
+
+1. 自行下载对应的字体文件（.ttf / .otf），下载渠道自选（官方发布页、开源字体如思源/SIL OFL 家族等）。
+2. 把文件放进本目录（fonts/），**文件名保持清单里给出的名字**（例如 SourceHanSerifSC-Regular.otf）。
+3. 重新运行 latex 流程（或只重跑 style 后续阶段）。编译环境已把本目录注入 TEXINPUTS / OSFONTDIR，cls 里按文件名引用即可命中，无需安装到系统。
+
+## 命名约定
+
+- 文件名 = 样式会话清单里的名字（通常为原字体英文名）。
+- 一个字体家族的多个字重各自单独成文件（Regular / Bold / Italic ...）。
+`
+	_ = os.WriteFile(readme, []byte(content), 0o644)
 }

@@ -155,10 +155,12 @@ func (r *Runner) phaseNote() func(format string, a ...any) {
 // NewRunner builds the shared runner (clients resolved per registry
 // key with fallback to the top-level ai block).
 func NewRunner(cfg *config.Config, log *logger.Logger) *Runner {
+	comp := NewCompiler(cfg.Latex.Compile)
+	comp.fontsDir = cfg.Paths.Fonts // 项目字体目录对编译可见（TEXINPUTS/OSFONTDIR）
 	return &Runner{
 		cfg:     cfg,
 		log:     log,
-		comp:    NewCompiler(cfg.Latex.Compile),
+		comp:    comp,
 		clients: map[string]*session.Client{},
 		models:  map[string]config.ModelConfig{},
 	}
@@ -944,7 +946,16 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 			// 机器注释指向原图，下游转换会话可据此找到原始图像/页面。
 			if p.TikzCode != "" {
 				if rel, ok := r.copyOriginalImage(p, mdName, outDir); ok {
-					return "<!-- DOCVISION-ORIG-IMAGE: ![](" + rel + ") -->\n```latex\n" + p.TikzCode + "\n```"
+					// 与 DOCVISION-STYLED-TEXT 同构：首行 类型+描述，
+					// 下面 LINK 字段，闭合 --> 独立一行。
+					label := p.Label
+					if label == "" {
+						label = "vector figure"
+					}
+					head := "<!-- DOCVISION-VECTOR: " + mdCommentSafe(label) + "\n" +
+						"LINK: ![]( " + rel + " )\n" +
+						" -->"
+					return head + "\n```latex\n" + p.TikzCode + "\n```"
 				}
 				return "```latex\n" + p.TikzCode + "\n```"
 			}
