@@ -85,11 +85,11 @@ func RunTikZSession(
 			ratioLine = fmt.Sprintf("The original bitmap is %dx%d px: aspect ratio %.2f:1 (width:height). Your drawing must keep that aspect ratio and must NOT be blown up to page size.", w, h, float64(w)/float64(h))
 		}
 	}
-	// 看图预算在**开头**一次性告知（而不是用着用着才反复提醒"还剩几次"）：
-	// 模型据此自己安排"先看清原图、再写代码、编译后核对"的节奏。
-	viewBudget := fmt.Sprintf("You may look at the original image up to %d times and any page of your compiled PDF up to %d times (per file/page). Nothing blocks you at the limit — plan the looks you need: understand the original first, then check your own output.", cfgImageMax, cfgPdfMax)
+	// 看图预算只报数字（一句话）：额度、口径说清即可，工具回执在超限时
+	// 会给出用量，不需要在提示词里反复强调"计划着看"。
+	viewBudget := fmt.Sprintf("View budget: %d looks at the original image, %d at any one page of your compiled PDF.", cfgImageMax, cfgPdfMax)
 	if cfgImageMax <= 0 {
-		viewBudget = fmt.Sprintf("You may look at the original image as often as you need and any page of your compiled PDF up to %d times (per page).", cfgPdfMax)
+		viewBudget = fmt.Sprintf("View budget: unlimited looks at the original image, %d at any one page of your compiled PDF.", cfgPdfMax)
 	}
 	initial := prompts.Render(prompts.FigureUser, map[string]string{
 		"CONTEXT":       truncateStr(contextText, 4000),

@@ -54,7 +54,7 @@ func (m ImageMeasure) AspectOnly() string {
 	if m.AspectStr == "" {
 		return ""
 	}
-	return fmt.Sprintf("ORIGINAL BITMAP: %dx%dpx, aspect %s (keep that aspect ratio; do not blow the figure up to page size).",
+	return fmt.Sprintf("ORIGINAL BITMAP: %dx%dpx, aspect %s.",
 		m.PixelsW, m.PixelsH, m.AspectStr)
 }
 

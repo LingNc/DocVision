@@ -199,6 +199,5 @@ func (t *ImageContextTool) Execute(argsJSON string) (session.ToolResult, error) 
 	fmt.Fprintf(&b, "\n## PREVIOUS image ref:\n%s", build(idx-1, up, down))
 	fmt.Fprintf(&b, "\n\n## THIS image context (up %d / down %d lines; request again with bigger up/down to expand):\n%s", up, down, build(idx, up, down))
 	fmt.Fprintf(&b, "\n\n## NEXT image ref:\n%s", build(idx+1, up, down))
-	b.WriteString("\n\nDecide WITHOUT assuming: adjacency does NOT imply relation. If PREVIOUS/NEXT is the same table/figure continued across a page break, view_image it, then draw ONE combined figure and submit with \"merges\" listing the absorbed image paths. If they are unrelated, or this image is obviously complete on its own, just draw THIS image and merge nothing.")
 	return session.ToolResult{Text: b.String()}, nil
 }

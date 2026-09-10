@@ -121,9 +121,9 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 		t.State.compileErr = res.Err
 		text := "COMPILE FAILED. Fix " + rel + " and call compile again.\nError:\n" + res.Err
 		if hadPrev {
-			text += "\n(The PDF from your previous compile is still there: view_pdf {path: \"standalone.pdf\", page: 1} shows the OLD version.)"
+			text += "\n(standalone.pdf still holds the previous build.)"
 		} else {
-			text += "\n(No PDF exists yet, so view_pdf would fail — compile successfully first.)"
+			text += "\n(No standalone.pdf yet.)"
 		}
 		if w := res.WarningSummary(); w != "" {
 			text += "\n" + truncateStr(w, 1500)
@@ -142,9 +142,8 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 		sizeDetail = fmt.Sprintf(" Drawn size: %.1fpt x %.1fpt (%.2fcm x %.2fcm, aspect %.2f:1)",
 			w, h, w/28.45, h/28.45, w/h)
 	}
-	text := "COMPILE OK. Available artifact: standalone.pdf" + pdfDetail + "." + sizeDetail +
-		" View it with view_pdf {path:\"standalone.pdf\", page: 1}. Note " + rel + " is only the document body: the rendered PDF is standalone.pdf (there is no figure.pdf)." +
-		" Compare what you see with the ORIGINAL image (view_image): structure, labels, overlaps/crowding and the overall proportion should match it."
+	text := "COMPILE OK. Artifact: standalone.pdf" + pdfDetail + "." + sizeDetail +
+		" View it with view_pdf {path: \"standalone.pdf\", page: 1}."
 	if w := res.WarningSummary(); w != "" {
 		text += "\n" + truncateStr(w, 1500)
 	}
