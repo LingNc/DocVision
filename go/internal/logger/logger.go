@@ -3,6 +3,7 @@ package logger
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -261,6 +262,28 @@ func (l *Logger) writeFileOnly(file *os.File, tid int, tag string, args ...inter
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	_, _ = file.WriteString(fmt.Sprintf("[%s][T%s] %s\n", ts, tidStr, body))
+}
+
+// PrintConsole writes one plain line to the console, ending (and redrawing)
+// the live progress line around it. Callers that print their own user-facing
+// phase lines must use this instead of fmt.Print* directly, otherwise the
+// text lands on top of the progress line exactly like logger output did.
+func (l *Logger) PrintConsole(line string) {
+	if !strings.HasSuffix(line, "\n") {
+		line += "\n"
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.quiet {
+		return
+	}
+	if l.live != nil {
+		fmt.Print("\n")
+	}
+	fmt.Print(line)
+	if l.live != nil {
+		l.live()
+	}
 }
 
 // append writes a pre-formatted line to the given file under the logger's

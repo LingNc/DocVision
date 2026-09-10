@@ -178,7 +178,10 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// shows everything).
 	note := func(format string, a ...any) {
 		if !verbose {
-			fmt.Fprintf(os.Stdout, format+"\n", a...)
+			// PrintConsole ends/redraws the live progress line, so a phase
+			// line never lands on top of it (the log lines were fixed the
+			// same way).
+			r.log.PrintConsole(fmt.Sprintf(format, a...))
 		}
 	}
 
