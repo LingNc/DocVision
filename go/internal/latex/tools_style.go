@@ -40,7 +40,8 @@ type ViewImageTool struct {
 	// SoftMax 0 = no budget.
 	SoftMax   int
 	WarnRatio float64
-	views     map[string]int // resolved image path -> look count
+	views     map[string]int  // resolved image path -> look count
+	warned    map[string]bool // already reminded about this image
 	// Measure, when set, adds the ORIGINAL figure's printed size (mm, px,
 	// effective dpi) to every result — the model otherwise has no idea how
 	// big the figure is on the page and draws it page-sized.
@@ -62,12 +63,37 @@ func viewBudgetNote(label string, used, softMax int, ratio float64) string {
 	}
 	switch {
 	case used > softMax:
-		return fmt.Sprintf(" VIEW BUDGET SPENT (%s: %d/%d). Do not keep looking — finish the work and submit your best result now.", label, used, softMax)
+		return fmt.Sprintf(" VIEW BUDGET SPENT (%s: %d/%d).", label, used, softMax)
 	case used >= warnFrom:
-		return fmt.Sprintf(" VIEW BUDGET: %s used %d/%d, only %d left — use them sparingly and submit as soon as the result is faithful.", label, used, softMax, softMax-used)
+		return fmt.Sprintf(" VIEW BUDGET: %s used %d/%d, %d left.", label, used, softMax, softMax-used)
 	default:
 		return ""
 	}
+}
+
+// viewBudgetNoteOnce is viewBudgetNote limited to ONE reminder per counted
+// object: repeating "only N left" on every single look was pure noise that
+// pushed the model away from looking at all (the budget is soft anyway).
+func viewBudgetNoteOnce(warned map[string]bool, key, label string, used, softMax int, ratio float64) string {
+	if softMax <= 0 || used <= softMax {
+		if warned[key] {
+			return ""
+		}
+		if note := viewBudgetNote(label, used, softMax, ratio); note != "" {
+			warned[key] = true
+			return note
+		}
+		return ""
+	}
+	return viewBudgetNote(label, used, softMax, ratio)
+}
+
+// budgetOnce appends the (soft) view-budget reminder at most once per image.
+func (t *ViewImageTool) budgetOnce(full string, used int) string {
+	if t.warned == nil {
+		t.warned = map[string]bool{}
+	}
+	return viewBudgetNoteOnce(t.warned, full, "view_image on "+filepath.Base(full), used, t.SoftMax, t.WarnRatio)
 }
 
 // measureNote reports the original figure's printed size. Callers with a
@@ -151,8 +177,7 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 	return session.ToolResult{
 		Text: "Image " + fmt.Sprintf("%s (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx) attached.", pathArg, left, top, right, bottom, zoom) +
 			t.measureNote(full) +
-			" If this matches what you already saw, stop viewing and call submit." +
-			viewBudgetNote("view_image on "+filepath.Base(full), used, t.SoftMax, t.WarnRatio),
+			t.budgetOnce(full, used),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
 	}, nil

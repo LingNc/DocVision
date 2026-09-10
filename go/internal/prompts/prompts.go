@@ -161,7 +161,7 @@ var registry = []Template{
 	},
 	{
 		Name: FigureUser, File: "latex_figure.user.md",
-		Vars:        []string{"ORIGINAL_SIZE", "CONTEXT"},
+		Vars:        []string{"ORIGINAL_SIZE", "VIEW_BUDGET", "CONTEXT"},
 		MustMention: []string{"compile", "write_file"},
 	},
 	{

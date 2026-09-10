@@ -113,6 +113,7 @@ docvision organize    整理解析结果
 docvision img2text    AI 图片转文本（--test 测试模式）
 docvision latex       LaTeX 输出（可直接传 PDF/DOCX 自动补前置流程，或传 md 名只处理指定文件）
 docvision verify      AI 核对输出与原图（默认关闭；只能显式运行，不参与自动流程）
+docvision sessions    会话预览：把 AI 会话转录渲染成可浏览页面（静态导出 / 本地实时服务）
 docvision analyze     分析日志（--progress 仅进度，--all 汇总历史，--logfile 指定日志）
 docvision splitlog    按线程 ID 拆分日志（--logfile / --output-dir）
 docvision init        生成配置模板
@@ -180,6 +181,32 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 # analyze 默认即输出“本轮写入 finally 的文件及成功率统计”，分析前会列出选中的日志
 ```
 
+### 会话预览（docvision sessions）
+
+把项目里所有 AI 会话的 JSONL 转录渲染成像聊天软件一样的可浏览页面。扫描范围是根目录下**任意层级**的 `*.jsonl`：`work/style_session.jsonl`（样式）、`work/sessions/chapters.jsonl`（章节划分）、`work/sessions/convert_<章>.jsonl`（单章转换）、`source/sessions/vector_<书名>__<sha256>__<图>.jsonl`（档位2 矢量图）等。
+
+```bash
+docvision sessions                           # 扫描当前目录，生成 <当前目录>/sessions.html
+docvision sessions --dir /path/to/PDF2MD      # 指定扫描根目录
+docvision sessions --list                     # 只在终端列出会话（阶段/消息数/大小/修改时间/路径）
+docvision sessions --serve                    # 本地实时预览 http://127.0.0.1:8848/
+docvision sessions --serve --addr 127.0.0.1:9000
+docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
+```
+
+两种模式的区别：
+
+| 模式 | 产物 | 刷新方式 | 适合 |
+| --- | --- | --- | --- |
+| 静态导出（默认） | 一个自包含 HTML：数据（`<script type="application/json" id="dsh-data">`）、样式、脚本全部内嵌，图片按相对路径引用 | 打开即定格，页面显示「静态快照 · 生成于 …」，**不做任何轮询** | 留存/转发某次运行的会话记录，`file://` 直接打开 |
+| 实时服务 `--serve` | 本地只读 HTTP 服务，默认只监听 `127.0.0.1:8848` | 页面每 2 秒轮询 `/api/index`，当前会话 size 变了才用 `from=<已拉取行数>` 增量追加（保持滚动位置，开「自动跟随」则滚到底部），显示「实时」徽标 | 边跑 latex/转换边盯会话 |
+
+两种模式共用同一套前端资源（`go/internal/sessionview/assets/`，`//go:embed` 内嵌，无 CDN、无构建步骤、纯原生 JS）：页面启动时若存在 `#dsh-data` 就用内嵌数据，否则走 `/api/*` 轮询。
+
+页面能看什么：左侧是会话列表（阶段标签徽标、消息数、大小、相对时间、活跃圆点、名字过滤）；右侧是消息时间线——用户/任务卡片（长文本可折叠，`images` 渲染成缩略图、点击放大、Esc 关闭）、AI 正文、**可折叠的思考过程**（带字符数、折叠状态记忆）、**工具调用**（工具名 + 格式化高亮的参数 JSON）、与调用按 `tool_call_id` 配对编号着色的**工具结果**（默认只显示前 8 行，可展开全文/复制；含 `error`/`REJECTED`/`文件不存在` 与 `ok (` 用不同颜色）。工具栏有「自动跟随」（实时模式默认开）、「折叠全部思考」、「仅看工具调用」。转录**不含系统提示词**（system 消息不落盘）也**不含工具的 JSON Schema**，页面不会假装显示它们；转录也不记录每条消息的时间戳，因此每条消息显示序号与所在行号，时间只有侧栏的相对时间与工具栏的「最后写入」。
+
+只读接口（供页面使用，也可自己 curl）：`GET /`、`GET /api/index`（`Scan` 结果 + 每个会话的 size/mtime）、`GET /api/session?id=<相对路径>&from=<行号>`（返回 `lines` 与 `nextFrom`）、`GET /media/...`、`GET /file/...`（只提供根目录内的文件，`id` 必须命中扫描结果否则 404，`..` 越界一律 400，目录不列举）。无法解析的行会被跳过并在页面顶部提示「跳过 N 行坏数据」。
+
 
 ## LaTeX 输出（docvision latex）
 
@@ -215,7 +242,7 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 - **可分离工具**：会话工具按需注册（编译、提交确认、grep、bash 沙箱、受限文件读写、PDF/图片查看等）
 - **断点续传**：档位2 逐图进度、档位1 逐阶段进度（`progress.json`）
 - **工具轮次软限制**：`max_tool_rounds` 限制的是**assistant 轮次**（一轮里发多少个 tool_call 都只算 1 次）。用满 `sessions.*.tool_rounds_warn_ratio`（默认 0.7）后，每轮往会话里更新一条提醒（"已用 N/M 轮，还剩 K 轮，请合理使用并尽快提交"）；到达 `max_tool_rounds` 后**还能再用 `sessions.*.tool_rounds_grace` 轮**（默认 20，负值=不留宽限），此后才真正禁用工具、逼最终文本。提醒是**原地替换**同一条消息，不膨胀历史也不破坏前缀缓存。
-- **看图软预算**（按"对象"计数，长文档不吃亏）：`tools.view.image_max`（默认 30）是**同一张图片文件**的软上限，`tools.view.pdf_max`（默认 25）是**同一个 PDF 的每一页**的软上限——所以一本书里每页各有 25 次额度，而不是整个会话共用一个池子。用满 `tools.view.warn_ratio`（默认 0.7，向上取整）起，每次 `view_image`/`view_pdf` 的结果里附带"已用 N/30，仅剩 K 次"（30×0.7=21 → 从第 21 次起提醒），超出后提示"预算已用尽，请尽快完成并提交"——**只提醒，不拦截调用**（0=默认值，负值=不限）。
+- **看图软预算**（按"对象"计数，长文档不吃亏；矢量图会话在**首次提示词里就一次性告知**额度，不再每次看图都重复提醒）：`tools.view.image_max`（默认 30）是**同一张图片文件**的软上限，`tools.view.pdf_max`（默认 25）是**同一个 PDF 的每一页**的软上限——所以一本书里每页各有 25 次额度，而不是整个会话共用一个池子。用满 `tools.view.warn_ratio`（默认 0.7，向上取整）起，每次 `view_image`/`view_pdf` 的结果里附带"已用 N/30，仅剩 K 次"（30×0.7=21 → 从第 21 次起提醒），超出后提示"预算已用尽，请尽快完成并提交"——**只提醒，不拦截调用**（0=默认值，负值=不限）。
 - **原图尺寸测量**：每次 `view_image` 都会实时算出原图的**印刷尺寸**并回给模型——从位图回溯到 MinerU 解析目录（`content_list.json` 的 bbox + `layout.json` 的页尺寸），显示标准为 **mm 优先**：`ORIGINAL FIGURE SIZE: 36.9mm x 20.2mm on the page (about 21% of the page width); bitmap 284x156px, effective resolution 195 dpi, aspect 1.82:1`（高度按位图自身比例换算，因为 MinerU 的块 bbox 不紧贴图）。测不出解析目录时退化为只给宽高比。
 - **会话转录（JSONL）**：每条消息实时追加为一行 JSON（含 `reasoning_content` 思维链——GLM 保留式思考要求历史思维链完整回传，也是前缀缓存的前提），图片以 `file://media/<hash>.<ext>` 引用（base64 不入转录）；矢量图会话（`<outDir>/sessions/vector_<图>.jsonl`）、样式会话（`work/style_session.jsonl`）、章节划分（`work/sessions/chapters.jsonl`）、单章转换（`work/sessions/convert_<章>.jsonl`）都接入——进程被杀或网络断连后，下次运行自动从转录恢复上下文续跑，不重烧 token（恢复时**重新挂上系统提示词**、只回放最近一次压缩之后的消息）；成功会话的转录默认清理（`latex.keep_session_records` 可保留）
 

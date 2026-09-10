@@ -2,6 +2,8 @@ package logger
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,5 +99,68 @@ func TestJoinArgs(t *testing.T) {
 	// sanity check of internal join
 	if got := joinArgs([]interface{}{"a", 1, "b"}); got != "a 1 b" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// 进度行（live line）与日志行必须各自独占一行：修复前日志行直接写在
+// 进度行光标处，终端里两条内容叠在一行、`\r` 反复覆写留下残影。
+func TestLogSeparatesLiveLine(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "t.log")
+	l, err := NewLogger(logPath, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	renders := 0
+	l.SetLiveLine(func() { renders++; fmt.Fprint(os.Stdout, "\r[style] 轮次 1") })
+	l.Log(1, "[style] [tool:bash] ok")
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	got := string(out)
+
+	if renders == 0 {
+		t.Errorf("日志行后应重绘进度行")
+	}
+	if !strings.Contains(got, "\n[") {
+		t.Errorf("日志行前必须先换行结束进度行，实际 %q", got)
+	}
+	if strings.Count(got, "\n") < 2 {
+		t.Errorf("日志行与重绘的进度行应各占一行，实际 %q", got)
+	}
+
+	l.SetLiveLine(nil)
+	l.Log(1, "plain")
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "plain") {
+		t.Errorf("日志文件应始终记录，实际 %q", body)
+	}
+}
+
+// Quiet 必须可读：RunImages 之前硬编码 SetQuiet(false)，把 RunBook 的静默
+// 状态抹掉，导致其后所有阶段的会话内部行都打到终端。
+func TestQuietIsReadable(t *testing.T) {
+	l, err := NewLogger("", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.SetQuiet(true)
+	if !l.Quiet() {
+		t.Fatalf("Quiet() 应为 true")
+	}
+	l.SetQuiet(false)
+	if l.Quiet() {
+		t.Fatalf("Quiet() 应为 false")
 	}
 }

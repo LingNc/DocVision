@@ -27,7 +27,12 @@ type Logger struct {
 	errorFile     *os.File // may be nil if errLogPath is empty
 	threadIDWidth int
 	quiet         bool // when true, suppress console output; still writes to log files
-	level         int  // LevelInfo / LevelDebug / LevelTrace
+	// live renders the "live" progress line (the one that is redrawn in
+	// place with \r while a phase runs). While it is set, every console
+	// line is preceded by a newline and the live line is redrawn after it,
+	// so log lines never overwrite/garble the progress line.
+	live  func()
+	level int // LevelInfo / LevelDebug / LevelTrace
 }
 
 // NewLogger creates a Logger.
@@ -182,6 +187,25 @@ func (l *Logger) ThreadIDWidth() int {
 
 // SetQuiet enables or disables console output. When quiet=true, messages
 // are still written to the log file but not printed to the console.
+// Quiet reports whether console output is currently suppressed. Callers
+// that temporarily need the console (e.g. a phase that prints its own
+// progress) must restore the PREVIOUS value instead of hard-coding false:
+// doing the latter leaked every session log line of the following phases
+// into the terminal.
+func (l *Logger) Quiet() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.quiet
+}
+
+// SetLiveLine installs (fn != nil) or clears (fn == nil) the live progress
+// line renderer. See the field comment for the interleaving guarantee.
+func (l *Logger) SetLiveLine(fn func()) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.live = fn
+}
+
 func (l *Logger) SetQuiet(quiet bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -204,7 +228,16 @@ func (l *Logger) write(file *os.File, tid int, tag string, args ...interface{}) 
 	defer l.mu.Unlock()
 
 	if !l.quiet {
+		if l.live != nil {
+			// Finish the live progress line before the log line, then
+			// redraw it below: without this the log text landed on top of
+			// the progress line and the two interleaved.
+			fmt.Print("\n")
+		}
 		fmt.Print(line)
+		if l.live != nil {
+			l.live()
+		}
 	}
 	if file != nil {
 		_, _ = file.WriteString(line)

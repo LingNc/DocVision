@@ -1,6 +1,7 @@
 Redraw the attached image as TikZ.
 
 {ORIGINAL_SIZE}
+{VIEW_BUDGET}
 
 Its surrounding document context (for correct labels/terminology):
 ```

@@ -108,9 +108,11 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	if err := os.WriteFile(texFile, []byte(buildStandalone(code, t.EngineIsXe)), 0o644); err != nil {
 		return session.ToolResult{}, err
 	}
-	// Clear previous outputs so a stale PDF can never pass as fresh.
-	os.Remove(filepath.Join(t.State.workDir, "standalone.pdf"))
-	os.Remove(filepath.Join(t.State.workDir, "standalone.png"))
+	// Keep the PREVIOUS pdf until the new build succeeds: deleting it first
+	// meant one failed compile wiped the only artifact, and the next
+	// view_pdf {path:"standalone.pdf"} answered "文件不存在" with no clue why.
+	prevPDF := filepath.Join(t.State.workDir, "standalone.pdf")
+	hadPrev := fileExists(prevPDF)
 
 	start := time.Now()
 	res := t.Comp.Compile(t.State.workDir, "standalone.tex")
@@ -118,6 +120,11 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	if !res.OK {
 		t.State.compileErr = res.Err
 		text := "COMPILE FAILED. Fix " + rel + " and call compile again.\nError:\n" + res.Err
+		if hadPrev {
+			text += "\n(The PDF from your previous compile is still there: view_pdf {path: \"standalone.pdf\", page: 1} shows the OLD version.)"
+		} else {
+			text += "\n(No PDF exists yet, so view_pdf would fail — compile successfully first.)"
+		}
 		if w := res.WarningSummary(); w != "" {
 			text += "\n" + truncateStr(w, 1500)
 		}
@@ -135,9 +142,9 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 		sizeDetail = fmt.Sprintf(" Drawn size: %.1fpt x %.1fpt (%.2fcm x %.2fcm, aspect %.2f:1)",
 			w, h, w/28.45, h/28.45, w/h)
 	}
-	text := "COMPILE OK. Output: standalone.pdf" + pdfDetail + "." + sizeDetail +
-		" Look at it with view_pdf {path: \"standalone.pdf\", page: 1} and compare it with the ORIGINAL image (structure, labels, overlaps/crowding, and above all size/aspect ratio; crop with left/top/right/bottom and zoom to a pixel width to inspect details). " +
-		"If the picture is much larger than the original's printed size, or its width:height ratio differs, fix the geometry and the stroke widths in " + rel + " and compile again; if it faithfully matches, stop viewing and call submit."
+	text := "COMPILE OK. Available artifact: standalone.pdf" + pdfDetail + "." + sizeDetail +
+		" View it with view_pdf {path:\"standalone.pdf\", page: 1}. Note " + rel + " is only the document body: the rendered PDF is standalone.pdf (there is no figure.pdf)." +
+		" Compare what you see with the ORIGINAL image (view_image): structure, labels, overlaps/crowding and the overall proportion should match it."
 	if w := res.WarningSummary(); w != "" {
 		text += "\n" + truncateStr(w, 1500)
 	}

@@ -5,7 +5,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **会话预览 `docvision sessions`（新包 `go/internal/sessionview`）**：把项目里所有 AI 会话的 JSONL 转录渲染成可浏览页面。`Scan(root)` 递归扫描任意层级的 `*.jsonl`（`work/style_session.jsonl`、`work/sessions/chapters.jsonl`、`work/sessions/convert_<章>.jsonl`、`source/sessions/vector_<书名>__<sha256>__<图>.jsonl` 等；跳过 `media/` 与 `.git`），按 mtime 倒序返回（活跃会话自然排在前面，同刻按路径定序）：相对路径 id、阶段标签（`style`/`chapters`/`convert:<章>`/`vector:<图>`，矢量图名去掉 sha 段并把 `_` 还原成空格）、中文显示名（样式/章节划分/转换 · <章>/矢量图 · <图>）、消息数（按 `t=="msg"` 计数，按 size+mtime 缓存，2 秒轮询不重复读盘）、字节数、mtime、以及「最近 60 秒内写入」的活跃标志。`ReadSession(path, fromLine)` 按行增量读取并返回 `nextFrom`，前端只取新行；坏行不中断读取（带 `bad` 标记与原始文本），文件末尾「写到一半」的行不计入 `nextFrom`，下次轮询重读而不会永久丢行。
+- **两种查看模式，一套前端资源**（`assets/viewer.html|viewer.css|viewer.js`，`//go:embed`，无 CDN、无构建步骤、纯原生 JS）：`WriteStaticHTML(root, outPath, sessions)` 生成自包含 HTML——数据内嵌在 `<script type="application/json" id="dsh-data">`，样式与脚本一并内联（`json.Encoder.SetEscapeHTML` 保证转录里的 `</script>` 不会冲出数据块），图片按相对导出文件算出的路径引用，`file://` 打开即用、不轮询、显示「静态快照 · 生成于 …」；`Serve(root, addr, openBrowser)` 起本地只读服务（默认 `127.0.0.1:8848`，监听成功后才打印确切 URL），提供 `GET /`、`/api/index`（含每个会话的 size+mtime）、`/api/session?id=&from=`（返回 `lines` + `nextFrom`）、`/media/...`、`/file/...`，`id` 必须命中 `Scan` 结果否则 404，路径越界（`..`、`%2e%2e`）一律 400，目录不列举，非 GET/HEAD 返回 405——自建 handler 而不用 `http.ServeMux`，避免它把 `..` 变成 301 重定向而不是明确拒绝。
+- **会话预览界面（深色，DSH 风格）**：左侧会话列表（阶段标签、消息数、大小、相对时间、活跃圆点、按名字过滤）；右侧消息时间线——用户/任务卡片（长文本折叠，`images` 缩略图点击放大、Esc 关闭）、AI 正文、可折叠的思考过程（带字符数、折叠状态记忆）、工具调用（工具名 + 格式化高亮参数 JSON）与按 `tool_call_id` 配对编号着色的工具结果（默认前 8 行、可展开全文/复制，含 `error`/`REJECTED`/`文件不存在` 与 `ok (` 分色）；工具栏含「自动跟随」（实时模式默认开，手动上滚自动关闭）、「折叠全部思考」、「仅看工具调用」。转录**不含系统提示词**（system 消息不落盘）也**不含工具的 JSON Schema**，页面不假装显示；转录不记录每条消息的时间戳，故每条消息显示序号与行号，时间只取侧栏相对时间与工具栏「最后写入」。坏行跳过并在顶部提示「跳过 N 行坏数据」。
+- `docvision sessions` 命令（`go/cmd/docvision/cli_sessions.go`）：默认扫描**命令启动时所在的目录**（`--config`/全局配置导致的 chdir 不影响它）并生成 `<根目录>/sessions.html`；`--dir` 指定根、`--out` 指定导出路径、`--list` 在终端列会话（阶段/消息数/大小/修改时间/路径）、`--serve --addr` 起服务并打印 `会话预览: http://127.0.0.1:8848/`（不自动打开浏览器；端口占用时明确提示换 `--addr`）。
+
 ### Changed
+- **绘图（矢量）提示词收敛**：上一版新增的"比例/尺寸硬规则（553 字符）+ 线宽硬规则（442）+ 看图纪律 + 看图预算"把提示词从 4300 撑到 6055 字符（+41%），实测同一张图（bfea 思维导图）的会话从 0909 的 13 轮 / 首个工具调用 `view_image`（先看图）变成 21 轮 / 首个工具调用 `write_file`（先写代码），效果反而下降。现在把两条硬规则合并成两句口语要求——「整体比例与印刷尺寸**和原图差不多**」「线宽**和原图差不多**、字在该尺寸下要看得清」，删掉"最多看几次""看完就提交"的劝退措辞，并把工作流第 1 步改成"**先看清原图再写代码**"（工具选型、body-only、跨页续图、标签忠实等规则不变）。
+- **看图预算改为开头一次性告知**：预算数值（`tools.view.image_max` / `pdf_max`）现在写进矢量图会话的首次用户提示词（模板占位符 `{VIEW_BUDGET}`），不再等用满 `warn_ratio` 后**每一次**看图都在回执尾部重复"只剩 N 次"；提醒改为**每个对象只出现一次**（`viewBudgetNoteOnce`），超限也只说"已用尽"。同时删掉 `view_image` / `view_pdf` / `compile` 回执里"看完就提交"，"stop viewing and call submit"式的催促。
+
 
 - **提示词集中管理**：19 段内置提示词（12 段系统提示词 + 7 段各会话的首次用户提示词）从散落的 Go 源码搬进 `go/internal/prompts/templates/*.md`（`//go:embed` 编进二进制），调用点统一为 `prompts.Must(Name)`（纯静态）与 `prompts.Render(Name, map[string]string{…})`（带占位符），替换逻辑只有一份 `prompts.Fill`。注册表为每个模板声明占位符清单、必须提到的工具名、不得出现的退役工具名。搬迁逐字节核对（脚本从旧常量/旧 `fmt.Sprintf` 抽取后与原文本比对），提示词自身行为不变。
 - **提示词守护测试（4 条）**：① 模板文件 ↔ 注册表双向一致；② 按声明占位符全量渲染后不得残留 `{...}`（历史事故：`{OUTPUT_LANG}`/`{MAX_ROUNDS}` 原样发给模型）；③ 模板锁定的工具名必须在代码里存在、且代码里的工具必须在某处模板被提到；④ 退役工具名不得复活（`read_md`/`view_page`/`list_images`/`install_font`/`compile_preview`/`preview.png`/`format_fix_attempts`）。
@@ -18,6 +28,12 @@
 - **会话 bash 配置归位到 `tools.bash`**：`latex.bash_sandbox` → `tools.bash.sandbox`、`latex.bash_max_output` → `tools.bash.max_output`（与 `tools.mermaid.*` / `tools.latex.*` 同级——描述的是**工具**本身，不是档位）。解析优先级 `tools.bash.*` > 旧 `latex.bash_*` > 内置默认（sandbox=true / max_output=5000）；旧键仍生效但启动会打印迁移提示；`setDefaults` 不再把默认值写进旧字段（否则会掩盖显式的新键）。
 
 ### Fixed
+- **虚拟工作区在磁盘上是坏的（会话反复报"文件不存在"的真因）**：`buildPDFView` / `ensureProjectView` / 逐章视图都用裸 `os.Symlink(src, link)` 建软链，而 `src` 来自配置的相对路径（`./mineru_output`、`./latex_project`）——软链目标是按**链接所在目录**解析的，于是 `<proj>/work/pdfview/<part>.pdf` 与 `<proj>/work/views/project/{source,style,chapters}` 全部**悬空**。表现：`list_source_pages` / `doc_search` 走内存里的视图所以正常，一旦落到文件系统就 `文件不存在: source:<part>.pdf` / `project:source/<md>.md`，模型只好反复猜名字（三个报错、三轮空转）。新增 `linkAbs`（绝对目标 + 幂等替换，真实文件/目录不覆盖）并用于 pdfview、project 视图、逐章视图与章节编译 scratch。
+- **沙箱 bash 在默认配置下必然失败**：`WorkBashTool.sandboxArgs` 把挂载目录**原样**交给 bwrap，而 bwrap 自己解析源路径（不经过我们的 CWD），默认配置又是相对路径 → 每个会话的 `bash` 都以 `bwrap: Can't find source path latex_project/work/style` 失败，模型因此失去 `ls`/`grep` 能力并开始猜文件名。现在所有 `--bind`/`--ro-bind` 源与 `--chdir` 一律 `filepath.Abs`。
+- **会话内部日志外泄到终端 + 进度行被覆盖**：`RunImages` 在结束处**硬编码** `SetQuiet(false)`，把 `RunBook` 设好的静默状态抹掉（全仓库仅此一处），于是 style/chapters/convert/assemble 全程的 info 级 `[tool:x] ok (N chars result)` 直冲控制台；而进度行用 `` 重绘且不清行，日志行正好写在光标处 → 终端里两条内容叠在一行、反复换行留下残影（时间戳"倒流"即屏幕残留）。修法：① `RunImages` 保存并恢复原 quiet（新增 `logger.Quiet()`）；② `Logger.SetLiveLine` 让进度行可注册，任何控制台日志行之前先换行、之后重绘进度行；③ 进度行只在 stdout 是字符设备时用 `` 重绘（管道/重定向/日志捕获下改为按 10s 节拍整行输出），并加 `[K` 清行。
+- **`view_pdf` 找不到 PDF 时不给任何线索**：`compile` 曾**在编译前**就删掉上一次的 `standalone.pdf`，一次失败编译即抹掉唯一产物，随后的 `view_pdf {path:"standalone.pdf"}` 只回一句"文件不存在"，模型连试三次（含误写 `Standalone.pdf`）。现在编译失败不再删旧产物，失败回执直接说明"旧 PDF 还在/尚不存在"，成功回执写明"可用产物: standalone.pdf（figure.tex 只是正文，不存在 figure.pdf）"；`read_file` / `view_pdf` 的"文件不存在"一律附带**该目录可用文件清单**与**可用挂载点**（新增 `suggestInDir` / `suggestNear`）。
+- **挂载点写法混用被误判越界**：模型把两种语法拼在一起（`source:/source/<part>.pdf`）时，`VFS.Resolve` 剥掉挂载点前缀后把绝对路径交给越界检查，回一句看不懂的"路径越界（绝对路径）"。现在容忍"挂载点前缀 + 同名绝对路径"的冗余写法（含 `source:/source/...`、`/source/source/...`）。
+
 
 - **看图预算是硬拦截**（上一版实现把超预算直接变成"拒绝调用"）：改为**软预算**——`tools.view.image_max`（默认 30）/ `tools.view.pdf_max`（默认 25）/ `tools.view.warn_ratio`（默认 0.7，向上取整），用满 70% 起每次调用附带"已用 N/30，仅剩 K 次"，超出后提示尽快提交，**从不拦截调用**。计数粒度是**对象**而非整会话：`image_max` 按**图片文件**、`pdf_max` 按**文件+页**——整会话共用一个池子会让"几百页 PDF 的会话"过早耗尽额度（每页各有 25 次更符合直觉，也便于预估）。
 - **原图没有绝对尺度**（模型只知道像素，于是把图放大到整页）：新增 `imagescale.go` —— 从位图回溯到 MinerU 解析目录（`content_list.json` 的 bbox + `layout.json` 的 page_size），算出**印刷尺寸（mm）**、有效 dpi、占版面宽度比例，并在每次 `view_image` 结果与作图会话的初始消息里回给模型（显示标准：mm 优先）。实测该测试图：36.9mm x 20.2mm、占页宽 21%、195 dpi、比例 1.82:1（与独立复算一致）。高度按位图自身比例换算（MinerU 块 bbox 不紧贴图，直接取 bbox 高度会得到 2.7:1 的矛盾比例）。

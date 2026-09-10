@@ -53,6 +53,16 @@ func fmtDuration(d time.Duration) string {
 // elapsed time fresh. In verbose mode everything is a no-op (the
 // logger already streams the details). fin() is idempotent and ends
 // the line with a newline.
+// stdoutIsTerminal reports whether stdout is a character device (a real
+// terminal). Progress lines redraw themselves with "\r", which is only
+// meaningful there.
+func stdoutIsTerminal() bool {
+	st, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return st.Mode()&os.ModeCharDevice != 0
+}
 func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin func()) {
 	if r.consoleVerbose {
 		return func(int, int) {}, func() {}
@@ -60,11 +70,21 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 	start := time.Now()
 	var mu sync.Mutex
 	var rounds, tools int
+	// Redraw in place only on a real terminal: when stdout is a pipe or a
+	// file (tee, CI, log capture) the "\r" bytes end up in the output and
+	// every redraw is appended as loose text; there we print the line only
+	// on the 10s ticker instead.
+	tty := stdoutIsTerminal()
 	render := func() {
 		mu.Lock()
-		fmt.Fprintf(os.Stdout, "\r[%s] 轮次 %d · 工具调用 %d · 已用 %s          ",
+		defer mu.Unlock()
+		line := fmt.Sprintf("[%s] 轮次 %d · 工具调用 %d · 已用 %s",
 			label, rounds, tools, fmtDuration(time.Since(start)))
-		mu.Unlock()
+		if tty {
+			fmt.Fprintf(os.Stdout, "\r\x1b[K%s", line)
+			return
+		}
+		fmt.Fprintln(os.Stdout, line)
 	}
 	render() // 立即出现起始行，会话一开始就有进度
 	stop := make(chan struct{})
@@ -80,6 +100,9 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 		}
 	}()
 	var once sync.Once
+	// The logger redraws this line after every console line, so session log
+	// lines (which ARE printed in verbose runs) never overwrite it.
+	r.log.SetLiveLine(render)
 	return func(rr, tt int) {
 			mu.Lock()
 			rounds, tools = rr, tt
@@ -89,7 +112,12 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 			once.Do(func() {
 				close(stop)
 				ticker.Stop()
-				fmt.Fprintln(os.Stdout)
+				r.log.SetLiveLine(nil)
+				if tty {
+					fmt.Fprint(os.Stdout, "\r\x1b[K")
+				} else {
+					fmt.Fprintln(os.Stdout)
+				}
 			})
 		}
 }
@@ -354,7 +382,7 @@ func (r *Runner) stylePhase(proj string) error {
 		"MAIN_MD": "- Organized markdown (high-quality text): " + filepath.Base(mainMD) + " (readable as project:source/" + filepath.Base(mainMD) + " with read_file)",
 	})
 	if r.pdfView != nil {
-		initial += fmt.Sprintf("\n- ORIGINAL pages: %d in total (%s) — list_source_pages lists them with the detected section starts; view any page with view_pdf {path:\"source:<file>\", page:N} (in bash the same files are /source/<file>).", r.pdfView.total, strings.Join(r.pdfView.names(), ", "))
+		initial += fmt.Sprintf("\n- ORIGINAL pages: %d in total (%s) — list_source_pages lists them with the detected section starts; view any page with view_pdf {path:\"source:<file>\", page:N} — in bash that directory is /source with the SAME file names (use one form or the other; do not paste the /source/... path into view_pdf).", r.pdfView.total, strings.Join(r.pdfView.names(), ", "))
 	}
 
 	scratch, cleanScratch, err := r.tempDir(proj, "style")
@@ -1010,7 +1038,7 @@ func (r *Runner) chapterScratch(proj, clsName, base, tag string) (string, func()
 		if !fileExists(src) {
 			continue
 		}
-		if err := os.Symlink(src, filepath.Join(scratch, asset)); err != nil {
+		if err := linkAbs(src, filepath.Join(scratch, asset)); err != nil {
 			_ = copyDir(src, filepath.Join(scratch, asset))
 		}
 	}
@@ -1018,7 +1046,7 @@ func (r *Runner) chapterScratch(proj, clsName, base, tag string) (string, func()
 	// (chapters/<base>/table1.tex ...) exactly as the assembled book does,
 	// so the scratch needs the same relative layout.
 	if chapTree := filepath.Join(proj, "work", "chapters"); fileExists(chapTree) {
-		if err := os.Symlink(chapTree, filepath.Join(scratch, "chapters")); err != nil {
+		if err := linkAbs(chapTree, filepath.Join(scratch, "chapters")); err != nil {
 			_ = copyDir(chapTree, filepath.Join(scratch, "chapters"))
 		}
 	}

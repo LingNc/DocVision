@@ -369,9 +369,15 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	// line per phase; every detail line goes to the log file only.
 	verbose := opts.Verbose
 	done0 := len(all) - len(pending) // 断点续传：此前已完成数
+	// Restore the PREVIOUS quiet state: RunBook already silenced the
+	// console for its compact phase lines, and hard-coding SetQuiet(false)
+	// here re-enabled info-level output for every later phase (style,
+	// chapters, convert, assemble), which is what leaked session internals
+	// into the terminal.
+	prevQuiet := r.log.Quiet()
 	if !verbose {
 		r.log.SetQuiet(true)
-		defer func() { r.log.SetQuiet(false) }()
+		defer r.log.SetQuiet(prevQuiet)
 	}
 
 	// Phase 1: classification.
@@ -399,7 +405,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose, done0)
 
 	if !verbose {
-		r.log.SetQuiet(false)
+		r.log.SetQuiet(prevQuiet)
 	}
 	// Phase 3: rebuild markdown.
 	return r.rebuildPhase(mdCache, prog, outDir)

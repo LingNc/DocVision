@@ -2,7 +2,9 @@ package latex
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -89,6 +91,19 @@ func (v *VFS) Resolve(p string, write bool) (full, label string, err error) {
 	if write && !m.Writable {
 		return "", "", fmt.Errorf("挂载点 %q 是只读的", m.Name)
 	}
+	// Tolerate a REDUNDANT mount name inside the path: models mix the two
+	// syntaxes and write "source:/source/book.pdf" (mount prefix + the bash
+	// style absolute path). Without this it fell through to resolveInside,
+	// which rejected the absolute remainder with a confusing
+	// "路径越界（绝对路径）" instead of simply finding the file.
+	if explicit != "" {
+		rest := strings.TrimPrefix(p, "/")
+		if trimmed := strings.TrimPrefix(rest, explicit); trimmed != rest {
+			if trimmed == "" || strings.HasPrefix(trimmed, "/") {
+				p = strings.TrimPrefix(trimmed, "/")
+			}
+		}
+	}
 	if p == "" {
 		p = "."
 	}
@@ -131,6 +146,55 @@ func stripMount(p string) string {
 		return p[i+1:]
 	}
 	return p
+}
+
+// suggestInDir lists up to limit entries of dir as a "（可用: a, b, c）"
+// suffix for "file not found" errors. Sessions used to get a bare
+// "文件不存在: source:book_part1.pdf" and then burned several rounds
+// guessing names (the real name differed by a suffix/part number); naming
+// the neighbours turns that into a single round.
+func suggestInDir(dir string, limit int) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var names []string
+	for _, e := range entries {
+		n := e.Name()
+		if strings.HasPrefix(n, ".") {
+			continue
+		}
+		if e.IsDir() {
+			n += "/"
+		}
+		names = append(names, n)
+		if len(names) >= limit {
+			break
+		}
+	}
+	if len(names) == 0 {
+		return "（该目录为空）"
+	}
+	sort.Strings(names)
+	return "（该目录可用: " + strings.Join(names, ", ") + "）"
+}
+
+// suggestNear is suggestInDir for a path that may not exist: it falls back
+// to the deepest existing ancestor directory, so a missing file still gets
+// a useful listing.
+func suggestNear(full string, limit int) string {
+	dir := filepath.Dir(full)
+	for i := 0; i < 4; i++ {
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			return suggestInDir(dir, limit)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 // Describe renders the mount table for a tool description.

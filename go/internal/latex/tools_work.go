@@ -93,7 +93,7 @@ func (t *ReadFileTool) resolve(rel string) (full, label string, err error) {
 			if st, se := os.Stat(full); se == nil && st.IsDir() {
 				return "", "", fmt.Errorf("%s 是目录（用 grep 或 bash ls 查看目录内容）", rel)
 			}
-			return "", "", fmt.Errorf("文件不存在: %s", rel)
+			return "", "", fmt.Errorf("文件不存在: %s%s（可用挂载点: %s）", rel, suggestNear(full, 12), t.vfs().Names())
 		}
 		return full, label, nil
 	}
@@ -112,8 +112,9 @@ func (t *ReadFileTool) resolve(rel string) (full, label string, err error) {
 		if st, se := os.Stat(p); se == nil && st.IsDir() {
 			return "", "", fmt.Errorf("%s 是目录（用 grep 或 bash ls 查看目录内容）", rel)
 		}
+		return "", "", fmt.Errorf("文件不存在: %s%s（可用挂载点: %s）", rel, suggestNear(p, 12), t.vfs().Names())
 	}
-	return "", "", fmt.Errorf("文件不存在: %s", rel)
+	return "", "", fmt.Errorf("文件不存在: %s（可用挂载点: %s）", rel, t.vfs().Names())
 }
 
 // explicitMountOf returns the mount name when the path uses the
@@ -669,7 +670,16 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 			continue
 		}
 		dst := "/" + m.Name
-		entries, err := os.ReadDir(m.Dir)
+		// bwrap resolves its source paths itself (not through our process
+		// CWD), and the default config is RELATIVE ("./latex_project",
+		// "./mineru_output"). Handing those to bwrap made every sandboxed
+		// bash fail with "bwrap: Can't find source path …" — the session
+		// then lost ls/grep entirely and started guessing file names.
+		mountDir, aerr := filepath.Abs(m.Dir)
+		if aerr != nil {
+			continue
+		}
+		entries, err := os.ReadDir(mountDir)
 		if err != nil {
 			continue
 		}
@@ -686,7 +696,7 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 			// individually, never following links outside the mounts.
 			args = append(args, "--dir", dst)
 			for _, e := range entries {
-				src := filepath.Join(m.Dir, e.Name())
+				src := filepath.Join(mountDir, e.Name())
 				if target, lerr := filepath.EvalSymlinks(src); lerr == nil {
 					src = target
 				}
@@ -696,9 +706,9 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 				args = append(args, "--ro-bind", src, filepath.Join(dst, e.Name()))
 			}
 		} else if m.Writable {
-			args = append(args, "--dir", dst, "--bind", m.Dir, dst)
+			args = append(args, "--dir", dst, "--bind", mountDir, dst)
 		} else {
-			args = append(args, "--dir", dst, "--ro-bind", m.Dir, dst)
+			args = append(args, "--dir", dst, "--ro-bind", mountDir, dst)
 		}
 		if m.Name == "work" {
 			work = dst
@@ -809,7 +819,8 @@ type ViewPDFTool struct {
 	// SoftMax 0 = no budget.
 	SoftMax   int
 	WarnRatio float64
-	views     map[string]int // "file#page" -> render count
+	views     map[string]int  // "file#page" -> render count
+	warned    map[string]bool // already reminded about this page
 }
 
 // vfs returns the tool's namespace (Mounts wins over Root).
@@ -865,7 +876,7 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 		return session.ToolResult{Text: "REJECTED: view_pdf 只接受 .pdf（图片请用 view_image）"}, nil
 	}
 	if _, err := os.Stat(full); err != nil {
-		return session.ToolResult{}, fmt.Errorf("文件不存在: %s", rel)
+		return session.ToolResult{}, fmt.Errorf("文件不存在: %s%s（可用挂载点: %s）", rel, suggestNear(full, 12), t.vfs().Names())
 	}
 	page := intArg(args, "page", 1)
 	if page < 1 {
@@ -945,11 +956,18 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 	}
 	return session.ToolResult{
 		Text: fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx)%s attached.", rel, page, left, top, right, bottom, zoom, note) +
-			" If this rendering matches the original, stop viewing and call submit." +
-			viewBudgetNote(fmt.Sprintf("view_pdf on %s p%d", filepath.Base(rel), page), used, t.SoftMax, t.WarnRatio),
+			t.budgetOnce(key, rel, page, used),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
 	}, nil
+}
+
+// budgetOnce appends the (soft) view-budget reminder at most once per page.
+func (t *ViewPDFTool) budgetOnce(key, rel string, page, used int) string {
+	if t.warned == nil {
+		t.warned = map[string]bool{}
+	}
+	return viewBudgetNoteOnce(t.warned, key, fmt.Sprintf("view_pdf on %s p%d", filepath.Base(rel), page), used, t.SoftMax, t.WarnRatio)
 }
 
 func clampPct(v float64) float64 {

@@ -27,6 +27,37 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 )
 
+// linkAbs creates a symlink at link whose stored target is an ABSOLUTE path.
+//
+// Why this exists: os.Symlink stores the target string verbatim and the
+// kernel resolves it relative to the DIRECTORY CONTAINING THE LINK, not
+// relative to the process working directory. Config paths are relative
+// ("mineru_output/..."), so linking them directly produced DANGLING links
+// under <proj>/work/pdfview/ and <proj>/work/views/... — the sessions then
+// reported "文件不存在: source:<part>.pdf" for files that plainly existed,
+// and the sandboxed bash saw empty /source and /project trees.
+//
+// An existing link is replaced when it points somewhere else, so repeated
+// runs converge instead of keeping a stale target.
+func linkAbs(src, link string) error {
+	abs, err := filepath.Abs(src)
+	if err != nil {
+		return err
+	}
+	if target, rerr := os.Readlink(link); rerr == nil {
+		if target == abs {
+			return nil
+		}
+		if err := os.Remove(link); err != nil {
+			return err
+		}
+	} else if _, lerr := os.Lstat(link); lerr == nil {
+		// A real file/directory sits there: never clobber it.
+		return fmt.Errorf("%s 已存在且不是软链", link)
+	}
+	return os.Symlink(abs, link)
+}
+
 // pdfViewFile is one original PDF in the view.
 type pdfViewFile struct {
 	Name  string // clean name exposed to the model ("book_part1.pdf")
@@ -62,7 +93,7 @@ func buildPDFView(proj, mineruDir, subject string) (*pdfView, error) {
 	used := map[string]bool{}
 	for _, pdf := range pdfs {
 		name := viewName(pdf, subject, used)
-		if err := os.Symlink(pdf, filepath.Join(dir, name)); err != nil {
+		if err := linkAbs(pdf, filepath.Join(dir, name)); err != nil {
 			return nil, fmt.Errorf("link %s: %w", name, err)
 		}
 		n, err := api.PageCountFile(pdf)
@@ -266,15 +297,11 @@ func ensureProjectView(proj string) string {
 			continue
 		}
 		link := filepath.Join(dir, e.Name)
-		if target, err := os.Readlink(link); err == nil {
-			if target == src {
-				continue
-			}
-			_ = os.Remove(link)
-		} else if _, err := os.Lstat(link); err == nil {
-			continue // a real directory/file is already there
+		if err := linkAbs(src, link); err != nil {
+			// A real directory already sits there (or the link is
+			// undeletable): keep it, the view still works.
+			continue
 		}
-		_ = os.Symlink(src, link)
 	}
 	return dir
 }
@@ -305,14 +332,14 @@ func ensureChapterView(proj, base string) string {
 	// own main file: always ensure the symlink exists (may dangle until written)
 	texLink := filepath.Join(viewChapDir, base+".tex")
 	if _, err := os.Lstat(texLink); err != nil {
-		_ = os.Symlink(filepath.Join(realChapDir, base+".tex"), texLink)
+		_ = linkAbs(filepath.Join(realChapDir, base+".tex"), texLink)
 	}
 	// own asset folder: a real folder holding a symlink to the real one
 	subLink := filepath.Join(viewChapDir, base)
 	realSub := filepath.Join(realChapDir, base)
 	if _, err := os.Lstat(subLink); err != nil {
 		_ = os.MkdirAll(realSub, 0o755)
-		_ = os.Symlink(realSub, subLink)
+		_ = linkAbs(realSub, subLink)
 	}
 	return filepath.Dir(viewChapDir)
 }
