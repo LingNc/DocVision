@@ -283,16 +283,30 @@ type sectionStart struct {
 }
 
 var (
-	namedSectionRe    = regexp.MustCompile(`^(第[0-9一二三四五六七八九十百零〇]+[章节篇部]|Chapter\s+[0-9IVX]+|Part\s+[0-9IVX]+|Appendix\s+[A-Z0-9]?|附录[A-Z0-9]?|前言|序言|引言|绪论|目录|参考文献|参考书目|索引|致谢|后记|总结|结语|词汇表)`)
-	numberedSectionRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,3}[\s、.．]\s*\S`)
+	namedSectionRe = regexp.MustCompile(`^(第[0-9一二三四五六七八九十百零〇]+[章节篇部讲]|Chapter\s+[0-9IVX]+|Part\s+[0-9IVX]+|Appendix\s+[A-Z0-9]?|附录[A-Z0-9]?|前言|序言|引言|绪论|目录|参考文献|参考书目|索引|致谢|后记|总结|结语|词汇表|基础篇|强化篇|综合篇|冲刺篇|真题篇|模拟篇)`)
+	// 1.2 / 1.2.3 / 1、/ 1. section numbers (a bare integer is a page
+	// number, never a heading).
+	numberedSectionRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}\s*\S|^[0-9]+[、.．]\s*\S`)
+	// （一）… / 一、… Chinese outline markers.
+	cjkOutlineRe  = regexp.MustCompile(`^[（(][一二三四五六七八九十百]+[）)]\s*\S|^[一二三四五六七八九十百]+[、.．]\s*\S`)
+	numericOnlyRe = regexp.MustCompile(`^[0-9\s.、,，/\\-]+$`)
 )
 
 // derivedSections scans the OCR blocks for heading-like short lines and
 // returns them in page order (deduplicated). This gives a usable table
-// of contents even when the book has none.
+// of contents even when the book has none. Repetition is the strongest
+// signal against a candidate: body fragments ("于是", "所以") recur,
+// headings do not.
 func derivedSections(idx *DocIndex, max int) []sectionStart {
 	if idx == nil {
 		return nil
+	}
+	freq := map[string]int{}
+	for _, e := range idx.Entries {
+		if e.Img != "" || e.Type == "image" {
+			continue
+		}
+		freq[strings.ToLower(strings.Join(strings.Fields(e.Text), " "))]++
 	}
 	var out []sectionStart
 	seen := map[string]bool{}
@@ -305,7 +319,7 @@ func derivedSections(idx *DocIndex, max int) []sectionStart {
 			continue
 		}
 		key := strings.ToLower(title)
-		if seen[key] {
+		if seen[key] || freq[key] > 2 {
 			continue
 		}
 		seen[key] = true
@@ -328,9 +342,14 @@ func headingLike(t string) bool {
 	if strings.ContainsAny(t, "。；，,;.!?！？") {
 		return false
 	}
-	if namedSectionRe.MatchString(t) || numberedSectionRe.MatchString(t) {
-		return true
+	// Front-matter / metadata lines ("责任编辑：高芳", "邮编/100070",
+	// pure page numbers, URLs) are not section starts.
+	if strings.ContainsAny(t, "：:【】@") || strings.Contains(t, "http") {
+		return false
 	}
-	// 独立成行的短标题（无标点、无空格混排），如 "概率空间"
-	return len(r) <= 20 && !strings.Contains(t, " ")
+	if numericOnlyRe.MatchString(t) {
+		return false
+	}
+	return namedSectionRe.MatchString(t) || numberedSectionRe.MatchString(t) ||
+		cjkOutlineRe.MatchString(t)
 }
