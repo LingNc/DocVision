@@ -106,7 +106,49 @@ func (s *Session) HasTranscript() bool {
 	return s.transcript != nil
 }
 
-func (s *Session) SetTranscript(w *TranscriptWriter) { s.transcript = w }
+func (s *Session) SetTranscript(w *TranscriptWriter) {
+	s.transcript = w
+	s.recordPromptMeta()
+}
+
+// recordPromptMeta writes the "what was the model told" meta line: the
+// system prompt of THIS run plus the tool definitions that go with it.
+// Rationale: the transcript deliberately stores no system message (the
+// prompt is re-rendered per run, so replaying a stored one would be wrong),
+// which left the file unable to explain itself. The meta line fixes that
+// without touching replay: LoadTranscript ignores every non-"msg" line.
+func (s *Session) recordPromptMeta() {
+	if s.transcript == nil {
+		return
+	}
+	tools := make([]ToolSnapshot, 0, len(s.tools))
+	for _, t := range s.tools {
+		snap := ToolSnapshot{Name: t.Name()}
+		if def, ok := t.Definition()["function"].(map[string]any); ok {
+			if d, ok := def["description"].(string); ok {
+				snap.Description = d
+			}
+			if params, ok := def["parameters"]; ok {
+				if raw, err := json.Marshal(params); err == nil {
+					snap.Parameters = raw
+				}
+			}
+		}
+		tools = append(tools, snap)
+	}
+	model := ""
+	if s.client != nil {
+		model = s.client.Model()
+	}
+	if s.logger != nil && strings.TrimSpace(s.system) == "" {
+		// 历史事故：样式反馈会话曾经以空系统提示词启动，转录里看不出
+		// 异常、模型也没被交代规则。这里显式告警，别再靠人去翻。
+		s.logger.LogWarning(s.tid, fmt.Sprintf("[session:%s] 系统提示词为空，转录快照将不含任何指令", s.label))
+	}
+	if err := s.transcript.AppendMeta("system", s.label, model, s.system, tools); err != nil && s.logger != nil {
+		s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] 元信息写入失败: %v", s.label, err))
+	}
+}
 
 // appendTranscript writes one message to the transcript if attached.
 // Errors are logged (debug) but never fail the session itself.

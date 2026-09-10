@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -14,7 +15,8 @@ import (
 
 // Transcript JSONL format (one JSON object per line, append-only):
 //
-//	{"t":"meta","label":"style","savedAt":...}
+//	{"t":"meta","kind":"system","label":"style","model":"glm-4.6", ...}
+//	{"t":"meta","kind":"system","system":"<完整系统提示词>","tools":[{"name":...}]}
 //	{"t":"msg","role":"user","text":"...","images":["file://media/ab12.jpg"]}
 //	{"t":"msg","role":"assistant","text":"...","tool_calls":[...]}
 //	{"t":"msg","role":"tool","tool_call_id":"...","text":"..."}
@@ -36,6 +38,27 @@ type transcriptLine struct {
 	// retained thinking (GLM thinking.clear_thinking:false) expect the
 	// full chain back and it is also a precondition for prefix caching.
 	Reasoning string `json:"reasoning_content,omitempty"`
+
+	// ---- t == "meta" lines only (never replayed) ----
+	// A meta line records WHAT the model was told at the start of this run
+	// (system prompt + the tool definitions that were sent). It is written
+	// for inspection only: LoadTranscript ignores every non-"msg" line, so
+	// resume semantics are unchanged and the live system prompt stays the
+	// single source of truth (it is re-rendered per run — watermark flag,
+	// mounts, available source pages).
+	Kind    string         `json:"kind,omitempty"`
+	Label   string         `json:"session_label,omitempty"`
+	Model   string         `json:"model,omitempty"`
+	SysHash string         `json:"system_sha,omitempty"`
+	Tools   []toolSnapshot `json:"tools,omitempty"`
+}
+
+// toolSnapshot is the tool definition recorded in a meta line: exactly what
+// the API received (name, description, parameter schema).
+type toolSnapshot struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
 // TranscriptWriter appends messages of one session to a JSONL file.
@@ -43,6 +66,9 @@ type TranscriptWriter struct {
 	path     string // absolute path of the .jsonl
 	mediaDir string // absolute dir for image payloads
 	file     *os.File
+	// lastMetaHash guards against duplicate meta lines when a resumed
+	// session re-attaches to the same transcript file.
+	lastMetaHash string
 }
 
 // NewTranscript opens (creating if needed) the JSONL transcript at path.
@@ -62,11 +88,13 @@ func NewTranscript(path string) (*TranscriptWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TranscriptWriter{
+	w := &TranscriptWriter{
 		path:     abs,
 		mediaDir: filepath.Join(filepath.Dir(abs), "media"),
 		file:     f,
-	}, nil
+	}
+	w.lastMetaHash = w.readLastMetaHash()
+	return w, nil
 }
 
 // Close releases the underlying file.
@@ -75,6 +103,75 @@ func (w *TranscriptWriter) Close() error {
 		return w.file.Close()
 	}
 	return nil
+}
+
+// ToolSnapshot is one tool definition as sent to the API.
+type ToolSnapshot struct {
+	Name        string
+	Description string
+	Parameters  json.RawMessage
+}
+
+// AppendMeta records one t="meta" line: what the model was told when this
+// session started. It is never replayed (LoadTranscript skips non-"msg"
+// lines), it exists so a transcript explains itself — the session preview
+// page renders it, and "what was the model actually instructed" no longer
+// needs a --debug log.
+//
+// To keep resumed sessions from piling up identical copies, the system
+// prompt is hashed and an identical consecutive meta line is skipped.
+func (w *TranscriptWriter) AppendMeta(kind, label, model, system string, tools []ToolSnapshot) error {
+	if w == nil || w.file == nil {
+		return nil
+	}
+	sum := sha256.Sum256([]byte(system))
+	hash := hex.EncodeToString(sum[:8])
+	if w.lastMetaHash == kind+":"+hash {
+		return nil
+	}
+	line := transcriptLine{
+		T:       "meta",
+		Kind:    kind,
+		Label:   label,
+		Model:   model,
+		SysHash: hash,
+		Text:    system,
+	}
+	for _, t := range tools {
+		line.Tools = append(line.Tools, toolSnapshot{Name: t.Name, Description: t.Description, Parameters: t.Parameters})
+	}
+	data, err := json.Marshal(line)
+	if err != nil {
+		return err
+	}
+	if _, err := w.file.Write(append(data, '\n')); err != nil {
+		return err
+	}
+	w.lastMetaHash = kind + ":" + hash
+	return nil
+}
+
+// lastMetaHash remembers the (kind, system hash) of the meta line written by
+// THIS writer, so re-attaching a transcript for a resumed run does not
+// duplicate an unchanged prompt.
+func (w *TranscriptWriter) readLastMetaHash() string {
+	data, err := os.ReadFile(w.path)
+	if err != nil {
+		return ""
+	}
+	idx := bytes.LastIndex(data, []byte(`{"t":"meta"`))
+	if idx < 0 {
+		return ""
+	}
+	end := bytes.IndexByte(data[idx:], '\n')
+	if end < 0 {
+		end = len(data) - idx
+	}
+	var line transcriptLine
+	if err := json.Unmarshal(data[idx:idx+end], &line); err != nil {
+		return ""
+	}
+	return line.Kind + ":" + line.SysHash
 }
 
 // Append persists one message. Base64 image payloads (data URLs in

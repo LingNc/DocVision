@@ -1,6 +1,8 @@
 package session
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,5 +80,65 @@ func TestLoadTranscriptReplaysCompactionKeepTail(t *testing.T) {
 	}
 	if strings.Contains(joined, "SYS") {
 		t.Errorf("system 提示词不应进入回放（由 SetMessages 重新插入）：%s", joined)
+	}
+}
+
+// 元信息行（t=meta）记录"这次运行模型被交代了什么"：系统提示词 + 工具定义。
+// 它**不参与回放**（LoadTranscript 只认 t=="msg"），因此续跑语义不变；
+// 同一份系统提示词重复挂载时不会写第二条。
+func TestTranscriptMetaLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	w, err := NewTranscript(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := []ToolSnapshot{{Name: "read_file", Description: "读文件", Parameters: json.RawMessage(`{"type":"object"}`)}}
+	if err := w.AppendMeta("system", "style", "glm-4.6", "你是样式助手", tools); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.AppendMeta("system", "style", "glm-4.6", "你是样式助手", tools); err != nil {
+		t.Fatal(err) // 同一提示词：应被去重
+	}
+	if err := w.Append(ChatMessage{Role: "user", Content: "开始"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(body), `"t":"meta"`); n != 1 {
+		t.Fatalf("meta 行应只写一条（去重），实际 %d 条:\n%s", n, body)
+	}
+	if !strings.Contains(string(body), `"system_sha"`) || !strings.Contains(string(body), "read_file") {
+		t.Fatalf("meta 行缺少系统提示词哈希或工具定义:\n%s", body)
+	}
+
+	// 回放必须只看到消息
+	msgs, err := LoadTranscript(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 || msgs[0].Role != "user" {
+		t.Fatalf("回放应只有 1 条 user 消息，实际 %d 条: %+v", len(msgs), msgs)
+	}
+
+	// 换了系统提示词（新一次运行）→ 再写一条
+	w2, err := NewTranscript(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w2.AppendMeta("system", "style", "glm-4.6", "你是样式助手（新）", tools); err != nil {
+		t.Fatal(err)
+	}
+	_ = w2.Close()
+	body, _ = os.ReadFile(path)
+	if n := strings.Count(string(body), `"t":"meta"`); n != 2 {
+		t.Fatalf("提示词变化后应追加一条，实际 %d 条", n)
+	}
+	if msgs, _ = LoadTranscript(path); len(msgs) != 1 {
+		t.Fatalf("新增 meta 行后回放仍应只有 1 条消息，实际 %d", len(msgs))
 	}
 }
