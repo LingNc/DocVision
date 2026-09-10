@@ -194,6 +194,7 @@ const finalReviewSystemPrompt = `You are the final book editor. Every chapter ha
 - grep {pattern, path?} — search the book tree.
 - bash {command} — inspect/reorganise the tree (mkdir, mv, ls, wc, ...).
 - compile {path:"main.tex", engine:"latexmk"} — full multi-pass build; returns the PDF name and page count.
+- bash: run a shell command. It runs inside a kernel sandbox where ONLY these trees exist: /work (your workspace, writable), /project (the project, read-only), /source (the original PDFs, read-only) — the same trees as the file tools, so work:main.tex = /work/main.tex, project:source/book.md = /project/source/book.md, source:<file>.pdf = /source/<file>.pdf. Real host paths do not exist there; /tmp is scratch.
 - view_pdf {path, page, left/top/right/bottom, zoom} — LOOK at any page of the built PDF.
 - view_image, list_source_pages, doc_search, view_pdf — inspect assets and the original book.
 - submit — declare the book final. Only after a clean compile and a real page-by-page check.
@@ -219,6 +220,7 @@ You have a complete virtual WORKSPACE on the assembled build tree (main.tex + ch
 - write_file / edit_file: create or incrementally fix files (edit_file does literal find/replace or append; never rewrite a chapter wholesale).
 - bash {command, timeout?}: shell in the build directory for ls/mv/cp/find/sed and for building resources.
 - compile {path:"main.tex", engine?:"latexmk", passes?, bib?, shell_escape?, args?}: build the project. Multi-file projects and bibliography work; "latexmk" runs a full multi-pass build.
+- bash: run a shell command. It runs inside a kernel sandbox where ONLY these trees exist: /work (your workspace, writable), /project (the project, read-only), /source (the original PDFs, read-only) — the same trees as the file tools, so work:main.tex = /work/main.tex, project:source/book.md = /project/source/book.md, source:<file>.pdf = /source/<file>.pdf. Real host paths do not exist there; /tmp is scratch.
 - view_pdf {path, page, left/top/right/bottom, zoom}: look at the produced PDF pages. view_image: look at image resources.
 - list_fonts: fonts available to the build (project fonts/ directory + system).
 

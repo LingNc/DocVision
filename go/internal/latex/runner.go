@@ -126,7 +126,9 @@ type Runner struct {
 	wm       *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
 	inline   bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
 	docIndex *DocIndex        // 原始文档只读索引（doc_search/原书页面）
-	docPages *pageIndex       // 与索引对齐的全局页表（供 list_source_pages）
+	docPages *pageIndex       // 与索引对齐的全局页表（水印采样/索引对齐）
+	projDir  string           // 项目根（project 挂载点，只读）
+	pdfView  *pdfView         // 原书 PDF 的最小视图（source 挂载点，只读）
 
 	// lastSplitError remembers the latest split validation failure so
 	// the chapter session can be re-prompted with a concrete reason.

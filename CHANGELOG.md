@@ -2,8 +2,10 @@
 
 ## [Unreleased]
 
-### Changed
+### Added
 
+- **会话 bash 内核沙箱**（`latex.bash_sandbox`，默认 true）：会话 bash 通过 bubblewrap 运行，沙箱内只存在该会话挂载表的树（`/work` 可写、`/project`、`/source` 只读，宿主真实路径不可见，`--unshare-net`，`/tmp` 私有）；结构化工具与 bash 的路径后缀完全一致；bwrap 缺失时回退普通 shell + 警告。新增集成测试验证只读挂载被内核拒绝写入、工作区可写、宿主路径不可见。
+- **原书 PDF 最小视图**（`pdfview.go`）：把本书的 `*_origin.pdf` 以干净文件名软链到 `<proj>/work/pdfview/`，只这一份进 `source` 挂载点；`sessionMounts(kind, workDir)` 统一各会话可见范围（tikz/chapters 只有 work；style/convert/book 还有 project + source）。
 - **查看工具统一（删除 `view_source_page`）**：原书 PDF 以只读挂载点 `source`（`paths.mineru_output`）进入会话命名空间，用同一个 `view_pdf` 查看（`view_pdf {path:"source:<part>/<x>_origin.pdf", page:N}`），裁剪/缩放参数与看自己编译的 PDF 完全一致；`ViewPDFTool` 新增 `Mounts`（`Runner.bookMounts`：work 可写 + source 只读），`zoom_width` 作为 `zoom` 别名兼容旧用法。
 - **`list_source_pages` 升级为原书索引**：无参数 → 源 PDF/页范围/全局页号表 + 从 OCR 版面推导的章节起点（书没有目录也能得到可用目录）；`{page:N}` → 该全局页的正文片段 + 该页抽出的图片文件名（可直接 `view_image`），形成"文本→页→图"闭环。
 - **删除 `list_images`**：它只服务样式会话；现在样式/反馈会话改用 `list_source_pages` + 新增的 `bash`（cwd=work/style）与 `doc_search`（文本→原页），提示词同步为 list_source_pages → view_pdf(source:) → view_image 的路径。原始文档索引提前到 style 阶段之前构建。

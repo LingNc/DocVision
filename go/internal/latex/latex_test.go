@@ -191,20 +191,29 @@ func TestListSourcePagesTool(t *testing.T) {
 	if err := os.WriteFile(pdf, []byte("%PDF-1.4"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	idx := &pageIndex{srcs: []pageSrc{{pdf: pdf, first: 1, count: 12}}, total: 12}
+	// The view exposes clean names; the real pdf paths stay internal.
+	viewDir := filepath.Join(dir, "pdfview")
+	if err := os.MkdirAll(viewDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(pdf, filepath.Join(viewDir, "book_part1.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	view := &pdfView{Dir: viewDir, total: 12,
+		Files: []pdfViewFile{{Name: "book_part1.pdf", PDF: pdf, First: 1, Count: 12}}}
 	doc := &DocIndex{Entries: []DocEntry{
 		{Global: 3, Type: "text", Text: "第二章 随机变量"},
 		{Global: 3, Type: "text", Text: "这是一段普通正文，带标点符号，不应当被当成标题。"},
 		{Global: 4, Type: "image", Img: "book_part1/images/abc.jpg", Text: "图 2.1 分布函数"},
 	}}
-	tool := &ListSourcePagesTool{Idx: idx, Index: doc, Mount: "source", MineruDir: mineru}
+	tool := &ListSourcePagesTool{View: view, Index: doc, Mount: "source"}
 
 	res, err := tool.Execute(`{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"source:book_part1/book_part1_origin.pdf",
+		"source:book_part1.pdf",
 		"pages 1..12",
 		"TOTAL 12 original pages",
 		"g3  第二章 随机变量",

@@ -137,22 +137,15 @@ func renderSourcePage(comp *Compiler, idx *pageIndex, pagesDir string, page int)
 }
 
 // ListSourcePagesTool reports the ORIGINAL book pages and how to view
-// them. The origin PDFs are mounted READ-ONLY under a virtual mount
-// (usually "source"), so the model inspects them with the ordinary
-// view_pdf tool — there is no separate source-page viewer.
-//
-// Without arguments it prints the part → page-range table plus the
-// section starts derived from the OCR layout (useful when the book has
-// no printed table of contents). With page=N it prints what that page
-// contains: text snippets and the extracted image file names, so the
-// model can immediately view_image the figure it just found.
+// them. Only the mount-relative CLEAN names are exposed ("book_part1.pdf"),
+// never the mineru_output tree: the same tree is mounted at /source for
+// the bash tool, so the two path spaces line up.
 type ListSourcePagesTool struct {
-	Idx *pageIndex
-	// Mount is the virtual mount name the origin PDFs are readable
-	// under ("" = not mounted, only counts are reported).
+	// View is the minimal set of original PDFs of this book.
+	View *pdfView
+	// Mount is the mount name the view is reachable under ("" = not
+	// mounted, only the ranges are reported).
 	Mount string
-	// MineruDir is the real MinerU output dir (mount-relative path base).
-	MineruDir string
 	// Index supplies per-page text/image detail and section starts.
 	Index *DocIndex
 }
@@ -160,11 +153,12 @@ type ListSourcePagesTool struct {
 func (t *ListSourcePagesTool) Name() string { return "list_source_pages" }
 
 func (t *ListSourcePagesTool) Definition() map[string]any {
-	desc := "Index of the ORIGINAL book pages (the real scanned typeset pages): source PDFs with their page ranges, " +
+	desc := "Index of the ORIGINAL book pages (the real typeset pages): the source PDFs with their page ranges, " +
 		"the section starts detected from the OCR layout, and — with page=N — the text snippets and extracted image " +
-		"file names of that page. View a page with view_pdf {path:\"<mount>:<pdf>\", page:L} (same crop/zoom as any PDF)."
+		"file names of that page. View any page with view_pdf {path:\"<mount>:<file>\", page:<local page>} " +
+		"(crop/zoom behave like every other PDF)."
 	if t.Mount != "" {
-		desc += " Origin PDFs are mounted read-only as \"" + t.Mount + "\"."
+		desc += " The source PDFs are mounted read-only as \"" + t.Mount + "\" (bash: /" + t.Mount + ")."
 	}
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "list_source_pages",
@@ -179,7 +173,7 @@ func (t *ListSourcePagesTool) Definition() map[string]any {
 }
 
 func (t *ListSourcePagesTool) Execute(argsJSON string) (session.ToolResult, error) {
-	if t.Idx == nil || t.Idx.total == 0 {
+	if t.View == nil || t.View.total == 0 {
 		return session.ToolResult{Text: "(no original pages available: MinerU kept no *_origin.pdf)"}, nil
 	}
 	page := 0
@@ -192,25 +186,19 @@ func (t *ListSourcePagesTool) Execute(argsJSON string) (session.ToolResult, erro
 		return t.pageDetail(page)
 	}
 	var b strings.Builder
-	if t.Mount != "" && t.MineruDir != "" {
-		fmt.Fprintf(&b, "Source PDFs (read-only mount %q):\n", t.Mount)
+	if t.Mount != "" {
+		fmt.Fprintf(&b, "Source PDFs (read-only mount %q; bash path /%s):\n", t.Mount, t.Mount)
 	} else {
-		b.WriteString("Source PDFs (not mounted; counts only):\n")
+		b.WriteString("Source PDFs (not mounted; page ranges only):\n")
 	}
-	for _, src := range t.Idx.srcs {
-		rel := src.pdf
-		if t.MineruDir != "" {
-			if r, err := filepath.Rel(t.MineruDir, src.pdf); err == nil {
-				rel = filepath.ToSlash(r)
-			}
-		}
-		path := rel
+	for _, f := range t.View.Files {
+		path := f.Name
 		if t.Mount != "" {
-			path = t.Mount + ":" + rel
+			path = t.Mount + ":" + f.Name
 		}
-		fmt.Fprintf(&b, "  %s  pages 1..%d  (global %d..%d)\n", path, src.count, src.first, src.first+src.count-1)
+		fmt.Fprintf(&b, "  %s  pages 1..%d  (global %d..%d)\n", path, f.Count, f.First, f.First+f.Count-1)
 	}
-	fmt.Fprintf(&b, "TOTAL %d original pages.\n", t.Idx.total)
+	fmt.Fprintf(&b, "TOTAL %d original pages.\n", t.View.total)
 	if t.Mount != "" {
 		fmt.Fprintf(&b, "View a page: view_pdf {path:\"%s:<file>\", page:<local page>} with optional left/top/right/bottom/zoom.\n", t.Mount)
 	}
@@ -228,19 +216,13 @@ func (t *ListSourcePagesTool) Execute(argsJSON string) (session.ToolResult, erro
 
 // pageDetail lists one global page: where it lives and what is on it.
 func (t *ListSourcePagesTool) pageDetail(page int) (session.ToolResult, error) {
-	pdf, local, err := t.Idx.locate(page)
+	f, local, err := t.View.Locate(page)
 	if err != nil {
 		return session.ToolResult{Text: "OUT OF RANGE: " + err.Error()}, nil
 	}
-	rel := pdf
-	path := pdf
-	if t.MineruDir != "" {
-		if r, rerr := filepath.Rel(t.MineruDir, pdf); rerr == nil {
-			rel = filepath.ToSlash(r)
-		}
-	}
+	path := f.Name
 	if t.Mount != "" {
-		path = t.Mount + ":" + rel
+		path = t.Mount + ":" + f.Name
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Global page %d -> %s, local page %d.\n", page, path, local)

@@ -193,6 +193,8 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// layout/origin.pdf）加工为只读检索索引。样式会话最先用到它
 	// （doc_search 定位文本页、list_source_pages 列章节起点与逐页图片），
 	// 所以放在 style 之前构建。
+	r.projDir = proj
+	r.buildPDFViewQuiet(opts.SourceDir, opts.Files)
 	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
 
 	err = runPhase("style", func() error { return r.stylePhase(proj) })
@@ -302,20 +304,21 @@ func (r *Runner) stylePhase(proj string) error {
 		&EditWorkFileTool{Root: workDir},
 		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&GrepTool{Root: workDir},
-		&WorkBashTool{Dir: workDir, MaxOutput: r.cfg.Latex.BashMaxOutput},
+		&WorkBashTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), MaxOutput: r.cfg.Latex.BashMaxOutput, Sandbox: r.cfg.Latex.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style", Log: r.log, Tid: 1},
-		&ViewPDFTool{Root: workDir, Mounts: r.bookMounts(workDir), Comp: r.comp},
+		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
-	tools = append(tools, r.sourcePageTools(proj, mainMD)...)
+	tools = append(tools, r.sourcePageTools()...)
 
 	prompt := styleSystemPrompt + "\n\nYou have a persistent WORKSPACE: write_file stores class.cls / manual.md / example.tex as real files; submit_style can then reference them by file name instead of full inline contents. Compile your example with compile {path: \"example.tex\"} (the class is picked up from the same workspace) and inspect it with view_pdf. Check list_fonts before referencing fonts. There is NO font download tool: when a font is missing, record the substitution in the manual AND report the missing font to the user (font file name + where to place it: the project fonts/ directory) in the submit_style report — the user downloads it manually and re-runs."
+	prompt += "\n\nBASH PATHS: the bash tool runs inside a kernel sandbox where your workspace, the project and the original PDFs are the only trees, mounted as /work, /project and /source — exactly the trees of the file tools, so work:x.tex = /work/x.tex, project:source/book.md = /project/source/book.md, source:<file>.pdf = /source/<file>.pdf. The real host paths do not exist there; /tmp is scratch."
 	if r.cfg.Latex.RemoveWatermark {
 		prompt += "\n\n" + r.watermarkGuidance("WATERMARK: the source may carry watermark artifacts (repeated decorative overlay text such as institution/library marks, faint background strings). Identify the watermark pattern in the manual and instruct conversion to EXCLUDE it entirely - watermark text/graphics must NOT be typeset in the LaTeX output.")
 	}
-	if r.docPages != nil {
+	if r.pdfView != nil {
 		prompt += "\n\nIMPORTANT: the ORIGINAL book pages are available — call list_source_pages to get the source PDFs, the detected section starts and (with page=N) that page's text snippets and extracted image file names, then look at the page with view_pdf {\"path\":\"source:<file>\", \"page\":N} (crop/zoom supported). They show the TRUE typography and layout: inspect the title pages, headings, headers/footers and representative figures before writing the class. The OCR markdown itself is readable with read_file {\"path\":\"project:<md>\"} whenever you need exact text."
 	}
 	sess := session.NewSession(client, modelCfg, tuning, prompt, tools, r.log, 1, "style")
@@ -351,8 +354,8 @@ func (r *Runner) stylePhase(proj string) error {
 		"- Organized markdown (high-quality text): " + filepath.Base(mainMD) + " (readable as project:source/" + filepath.Base(mainMD) + " with read_file)",
 		"- Extracted images live under images/: view_image takes the file name, and list_source_pages {page:N} tells you which extracted images sit on that page.",
 	}, "\n")
-	if r.docPages != nil {
-		initial += fmt.Sprintf("\n- ORIGINAL pages: %d in total — list_source_pages lists the source PDFs and the detected section starts; view any page with view_pdf {path:\"source:<file>\", page:N}.", r.docPages.total)
+	if r.pdfView != nil {
+		initial += fmt.Sprintf("\n- ORIGINAL pages: %d in total (%s) — list_source_pages lists them with the detected section starts; view any page with view_pdf {path:\"source:<file>\", page:N} (in bash the same files are /source/<file>).", r.pdfView.total, strings.Join(r.pdfView.names(), ", "))
 	}
 	initial += "\nStart by mapping the structure (list_source_pages / doc_search / read_file), inspect representative pages (crop/zoom title pages, headings, figures), then submit_style."
 
@@ -460,7 +463,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 	sess := session.NewSession(client, modelCfg, tuning, chapterSystemPrompt, []session.Tool{
 		&GrepTool{Root: sandbox},
 		&ReadFileTool{Root: sandbox},
-		&WorkBashTool{Dir: sandbox, MaxOutput: r.cfg.Latex.BashMaxOutput},
+		&WorkBashTool{Root: sandbox, Mounts: r.sessionMounts(kindChapters, sandbox), MaxOutput: r.cfg.Latex.BashMaxOutput, Sandbox: r.cfg.Latex.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		&EditWorkFileTool{Root: sandbox},
 		submit,
 	}, r.log, 1, "chapters")
@@ -548,6 +551,49 @@ func validateSplit(chapters []ChapterRange, totalLines int) error {
 }
 
 // ------------------------------------------------------------------
+// mainMDFile picks the book's main markdown (the largest *.md), the same
+// way the style phase does.
+func mainMDFile(sourceDir string, files []string) string {
+	mds := files
+	if len(mds) == 0 && sourceDir != "" {
+		matches, _ := filepath.Glob(filepath.Join(sourceDir, "*.md"))
+		mds = matches
+	}
+	if len(mds) == 0 {
+		return ""
+	}
+	main := mds[0]
+	fi, err := os.Stat(main)
+	for _, f := range mds[1:] {
+		mj, e := os.Stat(f)
+		if e == nil && err == nil && mj.Size() > fi.Size() {
+			main, fi, err = f, mj, e
+		}
+	}
+	return main
+}
+
+// buildPDFViewQuiet mounts ONLY this book's original PDFs (clean names)
+// as the session "source" view. The whole mineru_output tree is never
+// exposed to a session.
+func (r *Runner) buildPDFViewQuiet(sourceDir string, files []string) {
+	if r.cfg.Paths.MineruOutput == "" || r.projDir == "" {
+		return
+	}
+	main := mainMDFile(sourceDir, files)
+	if main == "" {
+		return
+	}
+	view, err := buildPDFView(r.projDir, r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(main)))
+	if err != nil {
+		r.log.LogWarning(0, "[pdfview] 原书 PDF 视图不可用（source 挂载点关闭）:", err)
+		return
+	}
+	r.pdfView = view
+	r.log.Log(0, "[pdfview] 原书 PDF 视图就绪:", strings.Join(view.names(), ", "),
+		"("+strconv.Itoa(view.total)+" 页) ->", view.Dir)
+}
+
 // buildDocIndexQuiet compiles the read-only original-document index
 // from the MinerU intermediate output. Failures are non-fatal: the
 // convert sessions simply run without doc_search/source pages.
@@ -731,6 +777,10 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		Label:      "chapter " + base,
 		ReportPath: filepath.Join(workDir, "reports", base+".md"), // 工作汇报（实时落盘）
 	}
+	// 挂载表：build = 编译 scratch（默认挂载点，编译产物在这里），
+	// work = 章节工作树（可写），project/source = 只读。
+	convertMounts := append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
+		r.sessionMounts(kindConvert, workDir)...)
 	tools := []session.Tool{
 		&ReadFileTool{Root: proj},
 		write,
@@ -739,18 +789,14 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		&GrepTool{Root: proj},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
-		&ViewPDFTool{Mounts: r.bookMounts(scratch), Comp: r.comp},
+		&ViewPDFTool{Mounts: convertMounts, Comp: r.comp},
 		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: 1},
 		submit,
 	}
-	if r.docIndex != nil && r.docPages != nil {
-		// 原始文档只读工具：片段→原 PDF 页定位（doc_search）+ 原书页面
-		// 索引/逐页内容（list_source_pages），原书 PDF 本身通过
-		// view_pdf 的 source 挂载查看。
-		tools = append(tools,
-			&DocSearchTool{Index: r.docIndex},
-			&ListSourcePagesTool{Idx: r.docPages, Index: r.docIndex, Mount: "source", MineruDir: r.cfg.Paths.MineruOutput})
-	}
+	// 原始文档只读工具：片段→原 PDF 页定位（doc_search）+ 原书页面索引/
+	// 逐页内容（list_source_pages）；原书 PDF 通过 view_pdf 的 source
+	// 挂载查看。
+	tools = append(tools, r.sourcePageTools()...)
 	sess := session.NewSession(client, modelCfg, tuning,
 		strings.ReplaceAll(convertSystemPrompt, "{MAX_ROUNDS}", strconv.Itoa(session.EffectiveToolRounds(tuning))),
 		tools, r.log, tid, "convert:"+base)
@@ -858,38 +904,53 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	return nil
 }
 
-// bookMounts is the mount table of a session that works in a scratch or
-// workspace directory but must also READ the original book PDFs and the
-// project tree. The caller's dir is the default (writable) mount; the
-// origin PDFs are mounted read-only as "source".
-func (r *Runner) bookMounts(workDir string) []Mount {
+// sessionKind names the role of a session: it decides which trees the
+// session may see (and thus which trees the sandboxed bash mounts).
+type sessionKind string
+
+const (
+	kindTikz     sessionKind = "tikz"     // one vector figure
+	kindStyle    sessionKind = "style"    // class/manual analysis
+	kindChapters sessionKind = "chapters" // chapter splitting
+	kindConvert  sessionKind = "convert"  // one chapter .tex
+	kindBook     sessionKind = "book"     // build fix + final review
+)
+
+// sessionMounts is the ONE place that defines what a session can see.
+// workDir is the session's own workspace (the only writable tree); the
+// project and the original PDFs are read-only, and a session only gets
+// what its role needs — never the whole mineru_output tree.
+func (r *Runner) sessionMounts(kind sessionKind, workDir string) []Mount {
 	mounts := []Mount{{Name: "work", Dir: workDir, Writable: true}}
-	if r.cfg.Paths.MineruOutput != "" {
-		mounts = append(mounts, Mount{Name: "source", Dir: r.cfg.Paths.MineruOutput})
+	switch kind {
+	case kindTikz, kindChapters:
+		// A figure session only draws; a chapter session only splits the
+		// single book markdown in its own workspace.
+		return mounts
 	}
+	// Everything else reads the project (class, manual, markdown,
+	// images/figures) and the original book PDFs.
+	if r.projDir != "" {
+		mounts = append(mounts, Mount{Name: "project", Dir: r.projDir})
+	}
+	mounts = append(mounts, r.pdfView.Mounts()...)
 	return mounts
 }
 
 // sourcePageTools gives a session the original-document tooling: a text
 // index (doc_search) plus the page index that also lists what each page
-// contains. The origin PDFs themselves are viewed with view_pdf through
-// the read-only "source" mount — there is no separate viewer tool.
-func (r *Runner) sourcePageTools(proj, mainMD string) []session.Tool {
+// contains. The original PDFs themselves are viewed with view_pdf
+// through the read-only "source" mount — there is no separate viewer.
+func (r *Runner) sourcePageTools() []session.Tool {
 	var tools []session.Tool
 	if r.docIndex != nil {
 		tools = append(tools, &DocSearchTool{Index: r.docIndex})
 	}
-	pageIdx := r.docPages
-	if pageIdx == nil {
-		idx, err := buildPageIndex(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD)))
-		if err != nil {
-			r.log.LogWarning(1, "[pages] 未找到 MinerU 保留的原始 PDF（mineru_output/<主题>_part*/*_origin.pdf），原始页面工具关闭:", err)
-			return tools
-		}
-		pageIdx = idx
+	if r.pdfView == nil || r.pdfView.total == 0 {
+		return tools
 	}
 	tools = append(tools, &ListSourcePagesTool{
-		Idx: pageIdx, Index: r.docIndex, Mount: "source", MineruDir: r.cfg.Paths.MineruOutput,
+		View: r.pdfView, Index: r.docIndex, Mount: "source",
 	})
 	return tools
 }
@@ -955,13 +1016,12 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 		},
 		&GrepTool{Root: proj},
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
-		&ViewPDFTool{Mounts: r.bookMounts(scratch), Comp: r.comp},
+		&ViewPDFTool{Mounts: append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
+			r.sessionMounts(kindConvert, workRoot)...), Comp: r.comp},
 		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: tid},
 		submit,
 	}
-	if r.docPages != nil {
-		tools = append(tools, &ListSourcePagesTool{Idx: r.docPages, Index: r.docIndex, Mount: "source", MineruDir: r.cfg.Paths.MineruOutput})
-	}
+	tools = append(tools, r.sourcePageTools()...)
 	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
 		r.cfg.LatexSession("convert"), styleFixSystemPrompt, tools, r.log, tid, "style-fix:"+base)
 	liveHook, liveClose := r.livePhaseLine("style-fix")
@@ -1068,7 +1128,6 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 		return nil
 	}
 	sourceDir := filepath.Join(proj, "source")
-	mainMD := mainSourceMD(sourceDir)
 	styleDir := filepath.Join(proj, "style")
 	manualPath := filepath.Join(styleDir, "manual.md")
 	workDir := filepath.Join(proj, "work", "style")
@@ -1085,12 +1144,12 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&GrepTool{Root: workDir},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style-feedback", Log: r.log, Tid: 1},
-		&ViewPDFTool{Root: workDir, Mounts: r.bookMounts(workDir), Comp: r.comp},
+		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
-	tools = append(tools, r.sourcePageTools(proj, mainMD)...)
+	tools = append(tools, r.sourcePageTools()...)
 
 	// 复用原样式会话：系统提示已在持久化消息里，不开新上下文。
 	sess := session.NewSession(client, modelCfg, tuning, "", tools, r.log, 1, "style-feedback")

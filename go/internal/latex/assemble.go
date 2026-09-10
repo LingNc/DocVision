@@ -143,19 +143,15 @@ func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool
 		&WriteWorkFileTool{Root: buildDir, AnyExt: true},
 		&EditWorkFileTool{Root: buildDir},
 		&GrepTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
-		&WorkBashTool{Dir: buildDir, MaxOutput: r.cfg.Latex.BashMaxOutput},
+		&WorkBashTool{Root: buildDir, Mounts: r.sessionMounts(kindBook, buildDir), MaxOutput: r.cfg.Latex.BashMaxOutput, Sandbox: r.cfg.Latex.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		compile,
-		&ViewPDFTool{Mounts: r.bookMounts(buildDir), Comp: r.comp},
+		&ViewPDFTool{Mounts: r.sessionMounts(kindBook, buildDir), Comp: r.comp},
 		&ViewImageTool{Root: buildDir},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
-	if r.docPages != nil {
-		// 原书页面：核对真实版面/图表来源（原书 PDF 走 view_pdf 的 source 挂载）。
-		tools = append(tools,
-			&ListSourcePagesTool{Idx: r.docPages, Index: r.docIndex, Mount: "source", MineruDir: r.cfg.Paths.MineruOutput},
-			&DocSearchTool{Index: r.docIndex})
-	}
+	// 原书页面：核对真实版面/图表来源（原书 PDF 走 view_pdf 的 source 挂载）。
+	tools = append(tools, r.sourcePageTools()...)
 	return tools
 }
 

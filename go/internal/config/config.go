@@ -143,6 +143,12 @@ type LatexCompileConfig struct {
 
 // FinalReviewEnabled reports whether the final review session runs
 // (nil → default true).
+// BashSandboxEnabled reports whether session bash runs inside the
+// bubblewrap sandbox (default true).
+func (c LatexConfig) BashSandboxEnabled() bool {
+	return c.BashSandbox == nil || *c.BashSandbox
+}
+
 func (c LatexCompileConfig) FinalReviewEnabled() bool {
 	return c.FinalReview == nil || *c.FinalReview
 }
@@ -185,6 +191,11 @@ type LatexConfig struct {
 	// (sessions are long-lived and much heavier than plain img2text calls).
 	Concurrency int                `yaml:"concurrency"`
 	Compile     LatexCompileConfig `yaml:"compile"`
+	// BashSandbox wraps session bash commands in bubblewrap: inside the
+	// sandbox only the session's mounts exist (writable mounts writable,
+	// read-only mounts read-only). nil/true = enabled; also falls back to
+	// a plain shell with a warning when bubblewrap is unavailable.
+	BashSandbox *bool `yaml:"bash_sandbox"`
 	// BashMaxOutput caps how many characters a session's bash tool
 	// returns to the model. Default 5000.
 	BashMaxOutput int `yaml:"bash_max_output"`
@@ -539,6 +550,10 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Latex.Compile.MaxFixRounds == 0 {
 		cfg.Latex.Compile.MaxFixRounds = 8
+	}
+	if cfg.Latex.BashSandbox == nil {
+		enabled := true
+		cfg.Latex.BashSandbox = &enabled
 	}
 	if cfg.Latex.BashMaxOutput == 0 {
 		cfg.Latex.BashMaxOutput = 5000

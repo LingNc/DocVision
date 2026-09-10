@@ -539,18 +539,59 @@ var blockedPatterns = []string{
 // root. timeout (seconds, default 30, max 300) is chosen by the model;
 // output is capped at maxOutput chars (default 5000).
 type WorkBashTool struct {
-	Dir       string
+	// Root is the session workspace (also the cwd); kept for the
+	// non-sandboxed fallback when Mounts is empty.
+	Root string
+	// Mounts is the session's mount table. Inside the sandbox every
+	// mount appears as a top-level directory of the same name, so the
+	// path after the prefix is IDENTICAL in the structured tools and in
+	// bash: work:chapters/a.tex <-> /work/chapters/a.tex.
+	Mounts []Mount
+	// Sandbox wraps the command in bubblewrap (kernel-enforced binds:
+	// writable mounts are writable, read-only mounts are read-only,
+	// everything else does not exist). Falls back to a plain shell with
+	// a warning when bubblewrap is unavailable.
+	Sandbox   bool
 	MaxOutput int    // 字符上限；<=0 取默认 5000
 	RootNote  string // 提示词中说明工作区内容的备注
+	Log       *logger.Logger
+	Tid       int
+}
+
+// Dir is the workspace (cwd) of the tool.
+func (t *WorkBashTool) Dir() string {
+	for _, m := range t.Mounts {
+		if m.Name == "work" && m.Dir != "" {
+			return m.Dir
+		}
+	}
+	return t.Root
 }
 
 func (t *WorkBashTool) Name() string { return "bash" }
 
 func (t *WorkBashTool) Definition() map[string]any {
+	desc := "Run a shell command. cwd = your workspace. "
+	if t.Sandbox {
+		desc += "The command runs inside a kernel sandbox where only these trees exist (everything else, including the real host paths, is invisible; writes outside the writable one fail): "
+	} else {
+		desc += "WARNING: no sandbox is active, stay inside your workspace. Available trees: "
+	}
+	for _, m := range t.Mounts {
+		if m.Dir == "" {
+			continue
+		}
+		kind := "read-only"
+		if m.Writable {
+			kind = "writable"
+		}
+		desc += fmt.Sprintf("/%s (%s), ", m.Name, kind)
+	}
+	desc += "and these are exactly the trees of the file tools — the suffix after the prefix is the same: work:chapters/a.tex = /work/chapters/a.tex, project:source/book.md = /project/source/book.md, source:book_part1.pdf = /source/book_part1.pdf. " +
+		"Only /tmp is a scratch area. Useful for wc/sed/awk/ls/diff. timeout: seconds (default 30, max 300). Output is capped."
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name": "bash",
-		"description": "Run a shell command inside the session workspace (cwd = workspace root; it is NOT a security sandbox - do not write outside). " +
-			"Useful for wc/sed/awk/ls to inspect files. timeout: seconds (default 30, max 300). Output capped at 5000 chars.",
+		"name":        "bash",
+		"description": desc,
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -560,6 +601,98 @@ func (t *WorkBashTool) Definition() map[string]any {
 			"required": []string{"command"},
 		},
 	}}
+}
+
+// pathExists reports whether a directory OR file exists (util.FileExists
+// intentionally excludes directories, which is wrong for mount sources).
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// logf writes a warning through the session logger (best effort).
+func (t *WorkBashTool) logf(format string, a ...any) {
+	if t.Log != nil {
+		t.Log.LogWarning(t.Tid, fmt.Sprintf(format, a...))
+	}
+}
+
+// bwrapAvailable reports whether bubblewrap can be used on this host.
+func bwrapAvailable() bool {
+	_, err := exec.LookPath("bwrap")
+	return err == nil
+}
+
+// sandboxArgs builds the bubblewrap argv for one command: system trees
+// are bound read-only, each mount of the session is bound at /<name>
+// (writable mounts with --bind, the rest with --ro-bind), the network is
+// unshared and /tmp is a private tmpfs. Symlinked entries (e.g. the
+// pdfview of the original PDFs) are bound per file.
+func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
+	args := []string{"--die-with-parent", "--unshare-net", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"}
+	for _, p := range []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"} {
+		if pathExists(p) {
+			args = append(args, "--ro-bind", p, p)
+		}
+	}
+	work := ""
+	for _, m := range t.Mounts {
+		if m.Dir == "" {
+			continue
+		}
+		dst := "/" + m.Name
+		entries, err := os.ReadDir(m.Dir)
+		if err != nil {
+			continue
+		}
+		linked := false
+		for _, e := range entries {
+			if e.Type()&os.ModeSymlink != 0 {
+				linked = true
+				break
+			}
+		}
+		if linked {
+			// A view of individual files (the pdfview): bind each target.
+			args = append(args, "--dir", dst)
+			for _, e := range entries {
+				src := filepath.Join(m.Dir, e.Name())
+				if target, lerr := filepath.EvalSymlinks(src); lerr == nil {
+					src = target
+				}
+				if st, serr := os.Stat(src); serr != nil || st.IsDir() {
+					continue
+				}
+				args = append(args, "--ro-bind", src, filepath.Join(dst, e.Name()))
+			}
+		} else if m.Writable {
+			args = append(args, "--dir", dst, "--bind", m.Dir, dst)
+		} else {
+			args = append(args, "--dir", dst, "--ro-bind", m.Dir, dst)
+		}
+		if m.Name == "work" {
+			work = dst
+		}
+	}
+	if work == "" {
+		work = "/work"
+	}
+	// PATH/LANG are set explicitly: the sandbox must not depend on the
+	// inherited environment (and 'bash' is exec'd by absolute path).
+	args = append(args, "--chdir", work, "--setenv", "HOME", work, "--setenv", "PWD", work,
+		"--setenv", "PATH", "/usr/local/texlive/2026/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/texlive/bin")
+	if lang := os.Getenv("LANG"); lang != "" {
+		args = append(args, "--setenv", "LANG", lang)
+	}
+	if fast {
+		args = append(args, "--")
+	}
+	sh := "bash"
+	if p, err := exec.LookPath("bash"); err == nil {
+		sh = p // absolute: never depend on PATH lookup order
+	}
+	args = append(args, sh, "-c", command)
+	return args
 }
 
 func (t *WorkBashTool) Execute(argsJSON string) (session.ToolResult, error) {
@@ -588,9 +721,20 @@ func (t *WorkBashTool) Execute(argsJSON string) (session.ToolResult, error) {
 			return session.ToolResult{Text: "BLOCKED: command refused by the sandbox policy."}, nil
 		}
 	}
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Dir = t.Dir
-	cmd.Env = append(os.Environ(), "HOME="+t.Dir)
+	dir := t.Dir()
+	var cmd *exec.Cmd
+	if t.Sandbox && bwrapAvailable() {
+		cmd = exec.Command("bwrap", t.sandboxArgs(command, false)...)
+		cmd.Dir = dir
+		cmd.Env = os.Environ()
+	} else {
+		if t.Sandbox {
+			t.logf("bash 沙箱不可用（bwrap 未安装），本会话回退为普通 shell")
+		}
+		cmd = exec.Command("bash", "-c", command)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "HOME="+dir)
+	}
 	done := make(chan error, 1)
 	var out []byte
 	go func() {
