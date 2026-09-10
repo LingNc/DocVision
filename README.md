@@ -208,14 +208,14 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 - **模型注册表** `models:`：每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url / api_key / model / request_body / stream / thinking / reasoning_effort / tool_stream
 - **流式请求（默认开启）**：`models.*.stream: true`（默认）时走 SSE 流式接收，长思考/长输出期间持续有进展，不会长时间静默；厂商不支持流式时自动回退一次非流式请求。流式模式下用 `api_stream_idle_timeout`（默认取 `api_timeout`）判定"卡住"，而不是整次请求超时
 - **思考控制**：`thinking: {type: enabled|disabled}` 与 `reasoning_effort: max|xhigh|high|medium|low|minimal|none` 都是请求体**顶层字段**（不要写进 `request_body.extra_body`），按 `models` 条目配置，空值继承 `models.text`；GLM 的保留式思考写 `thinking.clear_thinking: false`（历史 assistant 轮的思维链完整回传，提升缓存命中）
-- **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到 `compaction_at`（默认 0.85）阈值自动压缩，**两级**：先做**本地裁剪**（零成本，不调用模型）——超长工具结果只留头尾（`sessions.*.prune_tool_chars`，默认 8192 字符），较早的图片换成文字占位（`sessions.*.keep_images`，默认保留最近 3 张；占位写明"这里曾附过 N 张图，需要时重新 view_image"，所以"看过什么"不会丢）；仍超阈值才花一次 **AI 摘要**：**系统提示词、原始任务、最近 8 条消息原样保留**，中间部分由 AI 写成一篇续跑笔记替换（摘要请求是"在原会话末尾追加一条指令"的增量请求，因此仍能命中厂商前缀缓存）；token 估算现在把系统提示词与工具定义一并计入（原来漏算，实测低估 5 万+ tokens）；`sessions.checker` 未设置的字段继承 `sessions.convert`
+- **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到 `compaction_at`（默认 0.85）阈值自动压缩，**两级**：先做**本地裁剪**（零成本，不调用模型）——超长工具结果留"前半 + 后 1/4"（`sessions.*.prune_tool_chars`，默认 4096 字符；实测真实会话里最长的工具结果 6183 字符、p99 5046，8K 阈值从不触发，只有 `read_file` 整文件（硬上限 64KB）与 `bash`（`tools.bash.max_output`，默认 5000）才可能很长），较早的图片换成文字占位（`sessions.*.keep_images`，默认保留最近 3 张；占位写明"这里曾附过 N 张图，需要时重新 view_image"，所以"看过什么"不会丢）；仍超阈值才花一次 **AI 摘要**：**系统提示词、原始任务、最近 8 条消息原样保留**，中间部分由 AI 写成一篇续跑笔记替换（摘要请求是"在原会话末尾追加一条指令"的增量请求，因此仍能命中厂商前缀缓存）；token 估算现在把系统提示词与工具定义一并计入（原来漏算，实测低估 5 万+ tokens）；`sessions.checker` 未设置的字段继承 `sessions.convert`
 - **矢量图落盘**：TikZ 编译成功后依次尝试 `dvisvgm → pdftocairo → mutool → inkscape` 转 SVG 内嵌（dvisvgm 3.6 处理 PDF 需要 Ghostscript < 10.01 或 mutool，缺条件时自动走 pdftocairo）；全部失败才回退 PNG/PDF 链接——档位2 只记日志与 `progress.json`，档位1 另在 markdown 就地标注 `<!-- DOCVISION-ERROR: … -->`
 - **图片查看工具**：`image_context` 只给文本上下文与前后引用（不看像素），`view_image` 才看图片（支持百分比裁剪与放大）；两者都接受**裸文件名**——`view_image` 以本文档的图片目录为根直接拼接，不做搜索，名字错了就报错
 - **编译与看图分离**：`compile {path:"figure.tex"}` 只返回编译日志、产物名与页数，看图统一用 `view_pdf {path:"standalone.pdf", page:1}`（裁剪 + zoom 直接从 PDF 高分辨率重渲染，真放大，不是拉伸像素）
 - **可分离工具**：会话工具按需注册（编译、提交确认、grep、bash 沙箱、受限文件读写、PDF/图片查看等）
 - **断点续传**：档位2 逐图进度、档位1 逐阶段进度（`progress.json`）
 - **工具轮次软限制**：`max_tool_rounds` 限制的是**assistant 轮次**（一轮里发多少个 tool_call 都只算 1 次）。用满 `sessions.*.tool_rounds_warn_ratio`（默认 0.7）后，每轮往会话里更新一条提醒（"已用 N/M 轮，还剩 K 轮，请合理使用并尽快提交"）；到达 `max_tool_rounds` 后**还能再用 `sessions.*.tool_rounds_grace` 轮**（默认 20，负值=不留宽限），此后才真正禁用工具、逼最终文本。提醒是**原地替换**同一条消息，不膨胀历史也不破坏前缀缓存。
-- **看图软预算**：`tools.view.image_max`（默认 30）与 `tools.view.pdf_max`（默认 25）是**每会话**的软预算：用满 `tools.view.warn_ratio`（默认 0.7）起，每次 `view_image`/`view_pdf` 的结果里附带"已用 N/30，仅剩 K 次"（30×0.7=21 → 从第 21 次起提醒；取整用向上取整），超出后提示"预算已用尽，请尽快完成并提交"——**只提醒，不拦截调用**（0=默认值，负值=不限）。
+- **看图软预算**（按"对象"计数，长文档不吃亏）：`tools.view.image_max`（默认 30）是**同一张图片文件**的软上限，`tools.view.pdf_max`（默认 25）是**同一个 PDF 的每一页**的软上限——所以一本书里每页各有 25 次额度，而不是整个会话共用一个池子。用满 `tools.view.warn_ratio`（默认 0.7，向上取整）起，每次 `view_image`/`view_pdf` 的结果里附带"已用 N/30，仅剩 K 次"（30×0.7=21 → 从第 21 次起提醒），超出后提示"预算已用尽，请尽快完成并提交"——**只提醒，不拦截调用**（0=默认值，负值=不限）。
 - **原图尺寸测量**：每次 `view_image` 都会实时算出原图的**印刷尺寸**并回给模型——从位图回溯到 MinerU 解析目录（`content_list.json` 的 bbox + `layout.json` 的页尺寸），显示标准为 **mm 优先**：`ORIGINAL FIGURE SIZE: 36.9mm x 20.2mm on the page (about 21% of the page width); bitmap 284x156px, effective resolution 195 dpi, aspect 1.82:1`（高度按位图自身比例换算，因为 MinerU 的块 bbox 不紧贴图）。测不出解析目录时退化为只给宽高比。
 - **会话转录（JSONL）**：每条消息实时追加为一行 JSON（含 `reasoning_content` 思维链——GLM 保留式思考要求历史思维链完整回传，也是前缀缓存的前提），图片以 `file://media/<hash>.<ext>` 引用（base64 不入转录）；矢量图会话（`<outDir>/sessions/vector_<图>.jsonl`）、样式会话（`work/style_session.jsonl`）、章节划分（`work/sessions/chapters.jsonl`）、单章转换（`work/sessions/convert_<章>.jsonl`）都接入——进程被杀或网络断连后，下次运行自动从转录恢复上下文续跑，不重烧 token（恢复时**重新挂上系统提示词**、只回放最近一次压缩之后的消息）；成功会话的转录默认清理（`latex.keep_session_records` 可保留）
 
@@ -407,12 +407,12 @@ MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不�
 | `latex.compile.final_review` | 全书编译成功后是否再跑终审会话（汇总/整理/重编译）；未通过只告警、照常交付 | true |
 | `verify.enabled` | AI 核对开关标记（默认关闭；核对只能显式运行 `docvision verify`） | false |
 | `verify.verifier_model` | `models:` 中支持图像的校验模型代号 | "verifier" |
-| `tools.view.image_max` | `view_image` 每会话软预算（只提醒不拦截；负值不限） | 30 |
-| `tools.view.pdf_max` | `view_pdf` 每会话软预算（同上） | 25 |
+| `tools.view.image_max` | 同一张图片文件的 `view_image` 软预算（只提醒不拦截；负值不限） | 30 |
+| `tools.view.pdf_max` | 同一个 PDF **每页**的 `view_pdf` 软预算（同上） | 25 |
 | `tools.view.warn_ratio` | 用满该比例起提醒"仅剩 N 次" | 0.7 |
 | `latex.sessions.*.tool_rounds_warn_ratio` | 工具轮次提醒起点比例 | 0.7 |
 | `latex.sessions.*.tool_rounds_grace` | 达到 `max_tool_rounds` 后仍可用的额外轮次（负值=无宽限） | 20 |
-| `latex.sessions.*.prune_tool_chars` | 本地裁剪：超长工具结果的保留字符数（负值=不裁剪） | 8192 |
+| `latex.sessions.*.prune_tool_chars` | 本地裁剪阈值：超过该长度的工具结果裁成"前半 + 后 1/4"（负值=不裁剪） | 4096 |
 | `latex.sessions.*.keep_images` | 本地裁剪时保留的最近图片数（负值=全保留） | 3 |
 | `verify.concurrency` | 核对并发数 | 2 |
 | `verify.report_file` | 核对报告文件名 | verify_report.md |

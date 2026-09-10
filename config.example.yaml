@@ -80,7 +80,7 @@ latex:
       compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩（先本地裁剪，仍超才花 AI 摘要）
       tool_rounds_warn_ratio: 0.7 # 用满该比例的工具轮次后，每轮提醒剩余轮次
       tool_rounds_grace: 20      # 达到 max_tool_rounds 后仍允许的工具轮次（之后才真正禁用工具）
-      prune_tool_chars: 8192     # 本地裁剪：超长工具结果只留头尾（0=默认，负=从不裁剪）
+      prune_tool_chars: 4096     # 本地裁剪：超长工具结果留"前半+后1/4"（0=默认4096，负=从不裁剪）
       keep_images: 3             # 本地裁剪时保留最近几张图（负=全部保留）
     style:
       context_limit: 262144      # 样式分析建议更大窗口（256K）
@@ -114,10 +114,10 @@ img2text:
 # expansion, latex image_context, mermaid/tikz validation).
 # ----------------------------------------------------------------
 tools:
-  view:                         # 会话看图工具的软预算（只提醒，不拦截调用）
-    image_max: 30               # view_image 每会话软上限（0=30，负=不限）
-    pdf_max: 25                 # view_pdf 每会话软上限（0=25，负=不限）
-    warn_ratio: 0.7             # 用满该比例起，每次调用附带"仅剩 N 次"提醒（30*0.7=21，从第 21 次起）
+  view:                         # 看图软预算（只提醒，不拦截调用；按"对象"计数）
+    image_max: 30               # 同一张图（文件）最多看 30 次（0=30，负=不限）
+    pdf_max: 25                 # 同一个 PDF 的**每一页**最多看 25 次（0=25，负=不限）
+    warn_ratio: 0.7             # 用满该比例起提醒"仅剩 N 次"（30*0.7=21，向上取整 → 从第 21 次起）
   context:
     initial_up: 10              # initial context lines above the image
     initial_down: 5             # initial context lines below the image

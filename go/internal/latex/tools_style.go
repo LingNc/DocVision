@@ -30,15 +30,17 @@ type ViewImageTool struct {
 	// Subject is the current document's image subfolder (e.g.
 	// "测试-概率论"); it lets a bare file name resolve without a path.
 	Subject string
-	// SoftMax / WarnRatio implement the view budget: from
-	// ceil(SoftMax*WarnRatio) calls on, the tool result carries a short
-	// reminder of how many views are left, and past SoftMax it says the
-	// budget is spent. It NEVER blocks the call — the model decides.
-	// Configured by tools.view.image_max / tools.view.warn_ratio.
+	// SoftMax / WarnRatio implement the view budget for ONE image file:
+	// from ceil(SoftMax*WarnRatio) looks at that file on, the result
+	// carries a short reminder of how many views are left, and past
+	// SoftMax it says the budget is spent. It NEVER blocks the call — the
+	// model decides. Configured by tools.view.image_max / warn_ratio.
+	// Counting per image (not per session) keeps a session that has to
+	// inspect many figures from being starved by one stubborn bitmap.
 	// SoftMax 0 = no budget.
 	SoftMax   int
 	WarnRatio float64
-	views     int
+	views     map[string]int // resolved image path -> look count
 	// Measure, when set, adds the ORIGINAL figure's printed size (mm, px,
 	// effective dpi) to every result — the model otherwise has no idea how
 	// big the figure is on the page and draws it page-sized.
@@ -47,8 +49,9 @@ type ViewImageTool struct {
 
 // viewBudgetNote renders the budget reminder appended to a view result.
 // The budget is soft: the call is never blocked, the model is just told how
-// many views it has left. `label` is the tool name shown to the model;
-// softMax 0 means no budget.
+// many views it has left. `label` identifies the counted subject (the tool
+// name plus the image file / PDF page it applies to); softMax 0 means no
+// budget.
 func viewBudgetNote(label string, used, softMax int, ratio float64) string {
 	if softMax <= 0 {
 		return ""
@@ -127,7 +130,11 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if zoom > 6000 {
 		zoom = 6000
 	}
-	t.views++
+	if t.views == nil {
+		t.views = map[string]int{}
+	}
+	t.views[full]++
+	used := t.views[full]
 
 	img, err := decodeImage(full)
 	if err != nil {
@@ -145,7 +152,7 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 		Text: "Image " + fmt.Sprintf("%s (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx) attached.", pathArg, left, top, right, bottom, zoom) +
 			t.measureNote(full) +
 			" If this matches what you already saw, stop viewing and call submit." +
-			viewBudgetNote("view_image", t.views, t.SoftMax, t.WarnRatio),
+			viewBudgetNote("view_image on "+filepath.Base(full), used, t.SoftMax, t.WarnRatio),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
 	}, nil

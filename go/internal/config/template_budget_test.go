@@ -17,7 +17,7 @@ func TestTemplatesLoadSoftBudgetKeys(t *testing.T) {
 			t.Errorf("%s: warn_ratio %v", p, r)
 		}
 		tn := cfg.LatexSession("drawing")
-		if tn.ToolRoundsGraceRounds() != 20 || tn.PruneToolCharsLimit() != 8192 || tn.KeepImagesCount() != 3 {
+		if tn.ToolRoundsGraceRounds() != 20 || tn.PruneToolCharsLimit() != 4096 || tn.KeepImagesCount() != 3 {
 			t.Errorf("%s: tuning grace=%d prune=%d keep=%d", p, tn.ToolRoundsGraceRounds(), tn.PruneToolCharsLimit(), tn.KeepImagesCount())
 		}
 		if tn.ToolRoundsWarnRatio != 0.7 {

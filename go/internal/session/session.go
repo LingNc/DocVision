@@ -584,6 +584,12 @@ func (s *Session) pruneHistory() int {
 		return 0
 	}
 	// Which image-bearing messages are recent enough to keep?
+	// (Long tool results are cut to half-head + quarter-tail of the
+	// configured budget, so a just-over-threshold result still loses a
+	// quarter of its length and a 64 KB read_file loses ~95%.)
+	// (Long tool results are cut to half-head + quarter-tail of the
+	// configured budget below, so a just-over-threshold result still loses
+	// a quarter of its length and a 64 KB read_file loses ~95%.)
 	keepFrom := 0
 	if keepImages >= 0 {
 		seen := 0

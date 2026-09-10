@@ -749,11 +749,18 @@ func (s SessionTuning) ToolRoundsGraceRounds() int {
 	return s.ToolRoundsGrace
 }
 
-// PruneToolCharsLimit resolves sessions.prune_tool_chars (default 8192,
+// PruneToolCharsLimit resolves sessions.prune_tool_chars (default 4096,
 // negative disables local pruning).
+//
+// Measured on real transcripts: 325 tool results, longest 6183 chars
+// (doc_search), p99 5046, and not one above 8192 — an 8k threshold never
+// fired. The tools that CAN return a lot are read_file (whole file, hard cap
+// 64 KB) and bash (tools.bash.max_output, default 5000), so 4096 catches
+// those and long doc_search dumps while leaving ordinary results alone.
+// Pruned results keep the first half plus the last quarter of this budget.
 func (s SessionTuning) PruneToolCharsLimit() int {
 	if s.PruneToolChars == 0 {
-		return 8192
+		return 4096
 	}
 	if s.PruneToolChars < 0 {
 		return 0

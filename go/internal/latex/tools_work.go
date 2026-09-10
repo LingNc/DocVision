@@ -801,12 +801,15 @@ type ViewPDFTool struct {
 	// Comp provides the pdftoppm rasterizer settings (dpi); nil uses a
 	// plain pdftoppm call.
 	Comp *Compiler
-	// SoftMax / WarnRatio implement the (soft) view budget for view_pdf —
-	// same semantics as ViewImageTool; configured by tools.view.pdf_max /
-	// tools.view.warn_ratio. SoftMax 0 = no budget.
+	// SoftMax / WarnRatio implement the (soft) view budget for view_pdf,
+	// counted per (file, page) — same semantics as ViewImageTool;
+	// configured by tools.view.pdf_max / tools.view.warn_ratio.
+	// Counting per page means a long book is not punished by a session
+	// total: each page gets its own allowance.
+	// SoftMax 0 = no budget.
 	SoftMax   int
 	WarnRatio float64
-	views     int
+	views     map[string]int // "file#page" -> render count
 }
 
 // vfs returns the tool's namespace (Mounts wins over Root).
@@ -875,8 +878,13 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 			return session.ToolResult{Text: fmt.Sprintf("OUT OF RANGE: %s 共 %d 页，请求第 %d 页", rel, n, page)}, nil
 		}
 	}
-	// 会话级看图预算（软）：计数用于提醒，不拦截调用。
-	t.views++
+	// 看图预算（软）：按 文件+页 计数，只提醒不拦截。
+	if t.views == nil {
+		t.views = map[string]int{}
+	}
+	key := fmt.Sprintf("%s#%d", rel, page)
+	t.views[key]++
+	used := t.views[key]
 	left := pctArg(args, "left", 0)
 	top := pctArg(args, "top", 0)
 	right := pctArg(args, "right", 100)
@@ -938,7 +946,7 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 	return session.ToolResult{
 		Text: fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx)%s attached.", rel, page, left, top, right, bottom, zoom, note) +
 			" If this rendering matches the original, stop viewing and call submit." +
-			viewBudgetNote("view_pdf", t.views, t.SoftMax, t.WarnRatio),
+			viewBudgetNote(fmt.Sprintf("view_pdf on %s p%d", filepath.Base(rel), page), used, t.SoftMax, t.WarnRatio),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
 	}, nil
