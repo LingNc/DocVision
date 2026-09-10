@@ -900,9 +900,11 @@ func (r *Runner) chapterScratch(proj, clsName, base string) (string, error) {
 // adapted (NOT re-converted from markdown). Returns nil when the
 // chapter compiles and was submitted; otherwise the caller falls back
 // to a full re-conversion.
-func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workDir, base, issues string, tid int) error {
+// workRoot is the CHAPTER work tree (proj/work: chapters/<base>.tex +
+// chapters/<base>/), NOT the style workspace.
+func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, base, issues string, tid int) error {
 	texRel := "chapters/" + base + ".tex"
-	texPath := filepath.Join(workDir, texRel)
+	texPath := filepath.Join(workRoot, texRel)
 	if !fileExists(texPath) {
 		return fmt.Errorf("没有已转换的 %s", texRel)
 	}
@@ -916,9 +918,9 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workDir, b
 	submit := &SubmitDoneTool{Label: "the style fix for " + base}
 	tools := []session.Tool{
 		&ReadFileTool{Root: proj},
-		&EditWorkFileTool{Root: workDir},
+		&EditWorkFileTool{Root: workRoot},
 		&WriteWorkFileTool{
-			Root:                workDir,
+			Root:                workRoot,
 			Prefixes:            []string{texRel, "chapters/" + base + "/"},
 			RejectDocumentclass: true,
 		},
@@ -1178,7 +1180,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 			if data, err := os.ReadFile(filepath.Join(reportsDir, b+".md")); err == nil {
 				issues = string(data)
 			}
-			if err := r.fixChapterStyle(proj, clsName, manualPath, chapPath, workDir, b, issues, tid); err != nil {
+			if err := r.fixChapterStyle(proj, clsName, manualPath, chapPath, filepath.Join(proj, "work"), b, issues, tid); err != nil {
 				r.log.LogWarning(tid, "[style-fix]", b, "增量修复失败，将整章重转换:", err)
 				mu.Lock()
 				fallback = append(fallback, b)
