@@ -31,7 +31,12 @@ type ImagesOptions struct {
 	SourceDir string
 	// OutDir overrides paths.latex.output_dir (used by the level-1
 	// book pipeline to place processed source inside its project dir).
+	// When empty the workspace is <paths.latex_output>/<项目名>/ (see
+	// resolveProjectDir).
 	OutDir string
+	// Project overrides the project name (--project). Default: the
+	// book's 主题名 (main markdown base name, same as images/<主题>/).
+	Project string
 	// Files selects specific markdown files (base names with or
 	// without .md, or paths). Empty = every *.md in SourceDir (batch).
 	Files []string
@@ -269,7 +274,10 @@ func (r *Runner) clientFor(name string) *session.Client {
 
 // RunImages executes the level-2 pipeline: classify every image, then
 // process per class (text extraction / TikZ vectorisation / keep
-// raster), finally rebuild the markdown files under latex.output_dir.
+// raster), finally rebuild the markdown files under
+// <paths.latex_output>/<项目名>/ (or opts.OutDir when the level-1 book
+// pipeline nested the call, or the output root itself for legacy
+// single-project layouts — see resolveProjectDir).
 func (r *Runner) RunImages(opts ImagesOptions) error {
 	cfg := r.cfg
 	r.inline = opts.Inline
@@ -277,9 +285,29 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	if srcDir == "" {
 		srcDir = cfg.Paths.OutputDir
 	}
+
+	// Scan markdown files first: the git-style project name is derived
+	// from them (主题名), and the workspace must be resolved before any
+	// output directory is created.
+	mdFiles, err := filepath.Glob(filepath.Join(srcDir, "*.md"))
+	if err != nil {
+		return err
+	}
+	sort.Strings(mdFiles)
+	mdFiles = filterFiles(mdFiles, opts.Files)
+	if len(mdFiles) == 0 {
+		return fmt.Errorf("没有匹配的 markdown 文件（指定文件请用: docvision latex <文件名.md> ...）")
+	}
+
 	outDir := opts.OutDir
 	if outDir == "" {
-		outDir = cfg.Paths.LatexOutput
+		// 独立档位2：工作区是 <paths.latex_output>/<项目名>/。档位1 会把
+		// OutDir 指到 <proj>/source，此时项目根已由 RunBook 决定。
+		proj, err := r.useProjectDir(cfg.Paths.LatexOutput, opts.Project, projectSourceName(srcDir, mdFiles), 2)
+		if err != nil {
+			return err
+		}
+		outDir = proj
 	}
 	for _, d := range []string{outDir, filepath.Join(outDir, "figures"),
 		filepath.Join(outDir, "images"), filepath.Join(outDir, "tikz"),
@@ -292,17 +320,6 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	compErr := r.comp.Available()
 	if compErr != nil {
 		r.log.LogWarning(0, "LaTeX 工具链不可用，vector 图像将回退为保留原图:", compErr)
-	}
-
-	// Scan markdown files.
-	mdFiles, err := filepath.Glob(filepath.Join(srcDir, "*.md"))
-	if err != nil {
-		return err
-	}
-	sort.Strings(mdFiles)
-	mdFiles = filterFiles(mdFiles, opts.Files)
-	if len(mdFiles) == 0 {
-		return fmt.Errorf("没有匹配的 markdown 文件（指定文件请用: docvision latex <文件名.md> ...）")
 	}
 
 	mdCache := map[string]*mdFile{}

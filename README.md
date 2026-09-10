@@ -230,7 +230,7 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 
 **档位 1（`latex.level: 1`）—— 全书 LaTeX**
 
-1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/work/style/`），用 `list_source_pages` 取原书页索引（源 PDF / 页范围 / 全局页号 / OCR 推导的章节起点），再用 `view_pdf {path:"source:<file>.pdf", page:N}` **按需渲染** MinerU 保留的原始扫描页（支持裁剪放大）、`view_image` 看提取图、`read_file`/`grep` 读解析文本，分析全书样式后用 `write_file`/`edit_file` 增量起草并 `submit_style` 提交 `book.cls` + 使用手册 + 案例（自动试编译，失败回炉）。字体通过 `list_fonts` 查看；缺字体时在提交报告与手册里列出清单，由用户按文件名手动放进 `paths.fonts`（编译环境已注入 `TEXINPUTS`/`OSFONTDIR`，无需装系统字体）
+1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/<项目名>/work/style/`），用 `list_source_pages` 取原书页索引（源 PDF / 页范围 / 全局页号 / OCR 推导的章节起点），再用 `view_pdf {path:"source:<file>.pdf", page:N}` **按需渲染** MinerU 保留的原始扫描页（支持裁剪放大）、`view_image` 看提取图、`read_file`/`grep` 读解析文本，分析全书样式后用 `write_file`/`edit_file` 增量起草并 `submit_style` 提交 `book.cls` + 使用手册 + 案例（自动试编译，失败回炉）。字体通过 `list_fonts` 查看；缺字体时在提交报告与手册里列出清单，由用户按文件名手动放进 `paths.fonts`（编译环境已注入 `TEXINPUTS`/`OSFONTDIR`，无需装系统字体）
 2. **章节划分 AI**（`models.chapter`）：`grep`/`read_file`/`bash` + `buffer.md` 工作记忆缓冲区（分析结论增量写入、跨轮保留），按行号划分章节（结构化提交，全覆盖校验）
 3. **转换 AI** 并发逐章转 `.tex`：每章有**私有工作视图**（只能读写自己那一章），别人的成品只能经只读通道 `project:converted/`（其他章节已提交的 `.tex`）与 `project:reports/`（其他章节的工作汇报）参考；矢量图已在 images 阶段以 latex 代码块内嵌进章节 md，转换时按手册的 `## Vector figure style` 二次加工（保留结构、几何与全部标签）；raster 原图走 includegraphics → 每章提交后由 **核对 AI**（`models.checker`，小文本模型即可）比对原章 md 与产物，**硬性问题回同一个转换会话最多 3 轮**（上下文还在，最省 token），3 轮仍未过才作废该章 `.tex`、资源目录与转录，用全新会话重转换一次
 4. 汇总为多文件 `.tex` 项目 → 编译全书 PDF（失败进入**修复会话**：读文件/改文件/重编译 + 字体工具核对样式）→ 成功后进入**终审会话**逐页核对成品 PDF 并整理（`latex.compile.final_review`，默认开启）→ 生成单文件 `standalone.tex`；交付把整棵 build 树复制到 `out/`，`book.pdf` 只是 `main.pdf` 的别名
@@ -287,7 +287,7 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 
 `tools.bash.sandbox`（默认 true）把会话 `bash` 包进 **bubblewrap**：沙箱里只存在上表的树（`/work`、`/project`、`/source`），宿主真实路径一律不存在，`--unshare-net` 断网、`/tmp` 为私有 tmpfs；bwrap 缺失时自动回退普通 shell 并记警告。
 
-档位1 的临时工作区统一落在 `latex_project/work/temp/<名称>`（拆章沙箱、样式/反馈 scratch、每章编译 scratch），不再藏进 `/tmp`；`latex.keep_temp_dirs` 可保留以便事后检查。
+档位1 的临时工作区统一落在**本项目工作区**里的 `work/temp/<名称>`（即 `latex_project/<项目名>/work/temp/…`；拆章沙箱、样式/反馈 scratch、每章编译 scratch），不再藏进 `/tmp`；`latex.keep_temp_dirs` 可保留以便事后检查。
 
 ### 调试日志
 
@@ -305,7 +305,9 @@ docvision latex --verbose      # 详细控制台输出（默认仅显示进度�
 
 `--debug`（或 `options.log_level: debug`）下，临时工作目录与会话转录**必定保留**（`latex.keep_temp_dirs` / `latex.keep_session_records` 打开也保留），因此一次完整运行事后可以逐会话复现。
 
-### 档位1 目录布局（latex_project/）
+### 档位1 目录布局（`latex_project/<项目名>/`）
+
+每本书一个工作区：`<latex_project>/<项目名>/`（项目名 = 主题名或 `--project`；旧版单项目布局时就是 `latex_project/` 本身，下表同）。下表所有路径都相对于**项目工作区**：
 
 | 目录 | 用途 |
 | --- | --- |
@@ -324,10 +326,13 @@ docvision latex --verbose      # 详细控制台输出（默认仅显示进度�
 | `build/` | 全书的构建树（每次 clean 重建：cls/手册/案例 + chapters + figures + main.tex），同时是修复会话与终审会话的工作区 |
 | `out/` | 交付产物：整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件），`book.pdf` 是 `main.pdf` 的别名，另有 `standalone.tex` |
 | `doc_index/doc_index.json` | 只读块索引（`doc_search` 的检索库，style 阶段之前构建；图片条目带 md 里 DOCVISION 注释的类型/描述/原文） |
-| `watermark_memory.json` | 水印检测工作记忆（`latex.remove_watermark` 开启时生成，两档位共享） |
+| `watermark_memory.json` | 水印检测工作记忆（`latex.remove_watermark` 开启时生成；档位1 落在本项目工作区，档位2 同理落在 `<latex_output>/<项目名>/`） |
 | `progress.json` | 逐阶段断点进度 |
+| `.docvision_project.json` | 项目自述（项目名 + 主题名来源，仅新建项目写入；同名去重依据；旧版单项目目录不写） |
 
-> 档位2（`paths.latex_output`，默认 `finally_latex/`）的会话文件：`sessions/vector_<图>.jsonl`（转录）与 `sessions/vector_<图>.work/`（持久工作区），另有逐图进度 `progress_items/`。
+> 多项目：`latex_project/` 下可以并存 `测试-概率论/`、`线性代数/` …，各自拥有上表全部内容，互不覆盖。项目名默认取主题名（主 md 主文件名），`--project <名字>` 可覆盖。
+>
+> 档位2（`paths.latex_output`，默认 `finally_latex/`）的工作区同样是 `<latex_output>/<项目名>/`，其中：会话文件 `sessions/vector_<图>.jsonl`（转录）与 `sessions/vector_<图>.work/`（持久工作区），逐图进度 `progress_items/`，另有整理后的 md 与 `figures/`、`images/`、`tikz/`。
 
 章节划分 AI 本身没有写目录：它只在自己沙箱里的 `book.md` + `buffer.md` 上工作（bash + grep/read_file/edit_file），通过结构化 submit 提交切分方案，由代码落盘到 `chapters/`。
 ### AI 核对（verify，默认关闭）
@@ -361,13 +366,29 @@ docvision latex --level 1 --step style 书.md   # 仅某个阶段
 docvision latex --source-dir 其它md目录 书.md  # 覆盖输入 markdown 目录（paths.output_dir）
 docvision latex --all                          # 日志分析汇总全部历史
 
+# 多项目：一个 latex_project/ 下并存多本书，各自一个工作区
+docvision latex --level 1 线性代数.pdf         # 默认项目名 = 主题名（主 md 名，同 images/<主题>/）
+docvision latex --level 1 --project 概率论-2026 书.md   # 显式指定项目名
+#   工作区：档位1 <latex_project>/<项目名>/，档位2 <latex_output>/<项目名>/
+#   --project 名字会被安全化（去路径分隔符/首尾空白与点，中文保留）
+
 docvision verify                               # AI 核对报告
+docvision verify --project 概率论-2026         # 多项目时指定核对哪个项目
 ```
 
 > 说明：`docvision latex` 是**自助式**的——位置参数支持 `files/` 里的 PDF/DOCX（自动复制进 `files/` 并在项目内补跑 split→mineru→organize）和 md 名（复制进 `files/` 后整理进 `output/`），**目录与不带扩展名的裸文件名不受支持**；前置流程跑完它自己接日志分析，不需要先手动跑 workflow。
 > `latex` 与 `verify` 都**不是** workflow 步骤（`workflow --step` 只接受 split|mineru|organize|img2text|analyze）。需要"中间文件隔离在 `~/.docvision/jobs/` 的一次性作业目录"时，用 `docvision workflow <文件或目录>`。
 
-输出目录：档位2 → `finally_latex/`；档位1 → `latex_project/`（含 out/book.pdf 与 standalone.tex），与 img2text 的 `finally/` 互不干扰。
+输出目录（**多项目**）：一个输出根下每本书一个工作区——档位1 `latex_project/<项目名>/`（含 out/book.pdf 与 standalone.tex），档位2 `finally_latex/<项目名>/`，与 img2text 的 `finally/` 互不干扰。项目名默认取这本书的**主题名**（主 markdown 的主文件名，也就是 `images/<主题>/` 用的那个名字，例如 `测试-概率论`），可用 `--project <名字>` 覆盖。
+
+> **兼容旧版单项目布局**：若输出根**本身**已经是工程（含 `work/`、`source/`、`style/`、`chapters/`、`build/`、`out/`、`doc_index/`、`progress.json`、`progress_items/` 任意一项），且**未**指定 `--project`，则继续沿用该目录（既有工程原地可跑、内容一个字节都不动），日志里会写一条提示："检测到旧版单项目布局 …，未指定 --project，继续沿用 …；要在同一输出根下新建独立项目请用 `--project <名字>`"。也就是说：**要开第二本书，显式给 `--project`**。想把旧工程改造成多项目布局，只需把它整体挪进输出根并以书名命名（进度、会话、doc_index 全部随之保留）：
+>
+> ```bash
+> mv latex_project 测试-概率论 && mkdir latex_project && mv 测试-概率论 latex_project/
+> # 之后 docvision latex 测试-概率论.pdf 会复用 latex_project/测试-概率论/（断点续传照常）
+> ```
+
+`docvision verify` 也按项目工作区定位：`--project <名字>` 显式指定；不指定时，输出根本身是旧版单项目工程就用它，否则用其中**唯一**的子项目（有多个会报错并列出名字，避免核对错书）。默认读写的 `progress_items/` 与 `verify_report.md` 都在该项目工作区内。
 
 需要本地 LaTeX 工具链：TeX 发行版（xelatex）+ poppler-utils（pdftoppm）。全书多文件构建优先用 `latexmk`（缺失时退回两遍编译）；矢量图转 SVG 按 `dvisvgm → pdftocairo → mutool → inkscape` 依次尝试，任一可用即可；会话 bash 沙箱用 bubblewrap（缺失时自动回退普通 shell 并记警告）。`docvision init` 会自动检查 xelatex / pdftoppm / mmdc 并给出安装提示。
 
@@ -410,7 +431,7 @@ docvision verify                               # AI 核对报告
 
 ### 原始文档检索（档位1 会话，只读）
 
-构建时把 MinerU 中间产物（`mineru_output/<主题>_part*/` 的 content_list/layout/origin.pdf）加工为只读块索引（`latex_project/doc_index/doc_index.json`，在 style 阶段之前构建），样式/转换/修复/终审会话都可用：
+构建时把 MinerU 中间产物（`mineru_output/<主题>_part*/` 的 content_list/layout/origin.pdf）加工为只读块索引（`<项目工作区>/doc_index/doc_index.json`，在 style 阶段之前构建），样式/转换/修复/终审会话都可用：
 
 - `doc_search {query}`：按关键词 / 图片文件名 / 页码检索块索引（文本片段、图表标题、公式 LaTeX、bbox），返回**全局页号 pN** 与 bbox，并直接给出精确路径 `source page: view_pdf {path:"source:<file>.pdf", page:N}`（part 级定位，不依赖全局页号累加）；
 - `list_source_pages {page?}`：无参数列出「源 PDF → 页范围 → 全局页号」表 + 从 OCR 版面推导的章节起点；带 `{page:N}` 时列出该全局页的正文片段与该页抽出的图片文件名（随后可直接 `view_image`）；
@@ -469,8 +490,8 @@ MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不�
 | `latex.sessions.*.keep_images` | 本地裁剪时保留的最近图片数（负值=全保留） | 3 |
 | `verify.concurrency` | 核对并发数 | 2 |
 | `verify.report_file` | 核对报告文件名 | verify_report.md |
-| `paths.latex_output` | 档位2 LaTeX 输出目录 | ./finally_latex |
-| `paths.latex_project` | 档位1 全书工作目录 | ./latex_project |
+| `paths.latex_output` | 档位2 输出根：每本书的工作区是 `<latex_output>/<项目名>/`（旧版单项目布局则沿用根目录本身） | ./finally_latex |
+| `paths.latex_project` | 档位1 输出根：每本书的工作区是 `<latex_project>/<项目名>/`（旧版单项目布局则沿用根目录本身） | ./latex_project |
 | `paths.fonts` | AI 字体目录：缺字体时按样式会话报告的清单手动放入，编译环境注入 `TEXINPUTS`/`OSFONTDIR`（无下载工具） | ./fonts |
 | `img2text.model` | 基础流程模型（models: 注册表代号，默认 text） | text |
 | `latex.checker_model` | 每章核对模型（独立小模型；会话调优未配置的字段继承 convert） | "checker" |
@@ -478,7 +499,7 @@ MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不�
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |
 
-> `latex.remove_watermark` 开启后流程开始时先做一次水印检测：全览页渲染 + markdown 重复图片统计，结果缓存为 `latex_project/watermark_memory.json` 并作为工作记忆注入后续所有会话；水印图片引用直接剔除不再处理。
+> `latex.remove_watermark` 开启后流程开始时先做一次水印检测：全览页渲染 + markdown 重复图片统计，结果缓存在本项目工作区的 `watermark_memory.json`（档位1 `<latex_project>/<项目名>/`，档位2 `<latex_output>/<项目名>/`）并作为工作记忆注入后续所有会话；水印图片引用直接剔除不再处理。
 
 完整配置见 `config.example.yaml`。
 
@@ -494,8 +515,8 @@ output/images/{主题}/   按主题组织的图片
 finally/                AI 处理后的最终 Markdown
 finally/progress_items/ AI 处理进度记录（断点续传）
 logs/                   img2text 处理日志（img2text_*.log + img2text_error_*.log）
-finally_latex/          档位2 LaTeX 输出（paths.latex_output）：md + figures/ + images/ + progress_items/ + sessions/
-latex_project/          档位1 全书工作目录：source/ style/ chapters/ work/ build/ out/ 及 progress.json
+finally_latex/{项目名}/    档位2 LaTeX 输出（paths.latex_output）：md + figures/ + images/ + progress_items/ + sessions/
+latex_project/{项目名}/    档位1 全书工作区：source/ style/ chapters/ work/ build/ out/ 及 progress.json
 fonts/                  AI 字体目录（paths.fonts）：缺字体时按样式会话报告的清单手动放入
 ```
 

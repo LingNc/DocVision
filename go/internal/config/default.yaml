@@ -40,8 +40,12 @@ paths:
   finally_dir: "./finally"          # final output directory
   logs_dir: "./logs"               # img2text_*.log / img2text_error_*.log
   done_dir: "./files/done"         # dir for sources archived after a successful split
-  latex_output:  ./finally_latex    # 档位2 LaTeX 输出目录
-  latex_project: ./latex_project    # 档位1 全书工作目录
+  latex_output:  ./finally_latex    # 档位2 输出根：每本书的工作区是 <latex_output>/<项目名>/
+  latex_project: ./latex_project    # 档位1 输出根：每本书的工作区是 <latex_project>/<项目名>/
+                                    #   项目名默认取主题名（主 md 主文件名，同 images/<主题>/），
+                                    #   可用 `docvision latex --project <名字>` 覆盖；
+                                    #   输出根本身已是旧版单项目工程时（含 work/ source/ progress.json 等）
+                                    #   未指定 --project 则继续沿用该目录（既有工程原地可跑）
   fonts:        ./fonts            # 字体目录（按样式会话报告的清单手动放入；编译时经 TEXINPUTS/OSFONTDIR 生效）
 
 # ----------------------------------------------------------------

@@ -32,6 +32,15 @@ func newLatexCmd() *cobra.Command {
   docvision latex 书.md       自备 md：复制进 files/ 后整理进 output/ 直接处理
                               （output/ 里的 md 直接选用，不做拒绝）
 
+工作区（同一输出根下可并存多本书）：
+  档位1 <latex_project>/<项目名>/      档位2 <latex_output>/<项目名>/
+  项目名默认取本书的"主题名"（主 markdown 的主文件名，也就是
+  images/<主题>/ 用的那个名字，例如 测试-概率论），用 --project <名字>
+  覆盖。若输出根本身已经是旧版单项目工程（含 work/ source/ chapters/
+  out/ progress.json 等），且未指定 --project，则继续沿用该目录（既有工程
+  原地可跑、内容不改动）；此时要新开一本书请显式给 --project <名字>。
+  每次运行都会在日志里说明"检测到旧版单项目布局/项目工作区: <路径>"。
+
 档位 2（latex.level: 2）——产物是"可以直接当 markdown 读"的干净文本：
   专用分类 AI 逐图标记 text（样式化文本）/ vector（可用 LaTeX 重绘）/ raster（保留原图）。
   text   -> 只提取图中可见文本（公式→LaTeX、表格→Markdown；无文字则保留原图），
@@ -81,6 +90,7 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 			number, _ := cmd.Flags().GetInt("number")
 			seed, _ := cmd.Flags().GetString("seed")
 			sourceDir, _ := cmd.Flags().GetString("source-dir")
+			project, _ := cmd.Flags().GetString("project")
 
 			// 输入约定：与 workflow 相同——源头是 paths.input_dir（files/）。
 			// - 无参数：像 workflow 一样跑前置（split→mineru→organize，
@@ -107,7 +117,7 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 				if err := runner.RunBook(latex.BookOptions{
 					Step: step, SourceDir: sourceDir, Restart: false,
 					TestMode: testMode, Number: number, Seed: seed,
-					Files: selected, Verbose: verbose,
+					Files: selected, Verbose: verbose, Project: project,
 				}); err != nil {
 					return err
 				}
@@ -116,7 +126,7 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 				if err := runner.RunImages(latex.ImagesOptions{
 					Step: step, TestMode: testMode, Number: number, Seed: seed,
 					SourceDir: sourceDir, Files: selected,
-					Verbose: verbose,
+					Verbose: verbose, Project: project,
 				}); err != nil {
 					return err
 				}
@@ -128,11 +138,19 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 				analyzeLog = ""
 			}
 			fmt.Println("\n=== 日志分析 ===")
-			// 进度摘要指向 latex 输出目录（档位1: <latex_project>/source，
-			// 档位2: latex.output_dir），避免误读 img2text 的历史进度。
-			latexOut := cfg.Paths.LatexOutput
-			if cfg.Latex.Level == 1 {
+			// 进度摘要指向**本次运行的项目工作区**（档位1 再进 source/：
+			// <latex_project>/<项目名>/source；档位2 就是工作区本身，
+			// 两者都可能是旧版单项目布局的输出根，由 Runner 决定）。
+			latexOut := runner.ProjectDir()
+			switch {
+			case latexOut != "" && cfg.Latex.Level == 1:
+				latexOut = filepath.Join(latexOut, "source")
+			case latexOut != "":
+				// 档位2：工作区本身
+			case cfg.Latex.Level == 1:
 				latexOut = filepath.Join(cfg.Paths.LatexProject, "source")
+			default:
+				latexOut = cfg.Paths.LatexOutput
 			}
 			return runAnalyzeFromConfigDir(cmd, cfg, analyzeLog, latexOut)
 		},
@@ -143,6 +161,7 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 	cmd.Flags().Int("number", 10, "测试图片数量")
 	cmd.Flags().String("seed", "", "随机种子")
 	cmd.Flags().String("source-dir", "", "覆盖输入 markdown 目录（默认 paths.output_dir）")
+	cmd.Flags().String("project", "", "项目名（默认取本书主题名）：工作区为 <latex_project>/<项目名>/（档位1）、<latex_output>/<项目名>/（档位2）——同一输出根下可并存多本书；显式指定时即使输出根里有旧版单项目工程也照样新建子目录")
 	cmd.Flags().Bool("all", false, "日志分析汇总全部历史日志（默认只分析本次运行）")
 	cmd.Flags().Bool("debug", false, "调试模式：请求参数/提示词/工具调用/响应统计等细节**只写日志文件**（终端只保留进度行与告警，不再刷屏）")
 	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节")
@@ -157,6 +176,11 @@ func newVerifyCmd() *cobra.Command {
 		Short: "AI 核对输出内容与原图是否一致（仅显式运行，自动流程不调用）",
 		Long: `用配置的视觉模型逐项核对每张图片与其嵌入内容（描述/矢量代码）是否一致，
 给出问题与修改意见，写入 verify_report.md。不会修改输出本身。
+
+工作区：核对 paths.latex_output 下**某一个项目**的进度（多项目布局
+<latex_output>/<项目名>/）——不指定 --project 时，若 latex_output 本身是
+旧版单项目工程就用它，否则用其中唯一的子项目；有多个子项目会报错并列出
+名字（避免核对错书）。
 
 本核对**只在显式运行本命令时执行**：workflow 与 latex 自动流程都不会调用它
 （v1.3 起 workflow 已不含 verify 步骤）。verify.enabled 只作为提示信息，
@@ -177,13 +201,18 @@ func newVerifyCmd() *cobra.Command {
 			}
 			progressDir, _ := cmd.Flags().GetString("progress-dir")
 			report, _ := cmd.Flags().GetString("report")
+			project, _ := cmd.Flags().GetString("project")
 			runner := latex.NewRunner(cfg, log)
 			return runner.RunVerify(latex.VerifyOptions{
 				ProgressDir: progressDir,
 				ReportPath:  report,
+				Project:     project,
 			})
 		},
 	}
+	cmd.Flags().String("progress-dir", "", "进度记录目录（默认 <项目工作区>/progress_items）")
+	cmd.Flags().String("report", "", "报告路径（默认 <项目工作区>/verify_report.md）")
+	cmd.Flags().String("project", "", "项目名（paths.latex_output 下的子目录；不指定时：输出根本身是旧版单项目工程则用它，否则用唯一的子项目，有多个则报错）")
 	cmd.Flags().Bool("debug", false, "调试模式：记录请求参数/提示词/响应统计到日志文件")
 	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节")
 	return cmd

@@ -23,6 +23,10 @@ type BookOptions struct {
 	Step string
 	// SourceDir overrides paths.output_dir.
 	SourceDir string
+	// Project overrides the project name (--project): the workspace
+	// becomes <paths.latex_project>/<项目名>/. Default: the book's
+	// 主题名 (main markdown base name, the images/<主题>/ name).
+	Project string
 	// Restart re-runs phases already marked done.
 	Restart bool
 	// TestMode / Number / Seed are forwarded to the level-2 image pass.
@@ -144,7 +148,19 @@ var classNameRe = regexp.MustCompile(`\\ProvidesClass\{([^}]*)\}`)
 //  5. assemble  : main.tex + full-book compile (+ fix session) + standalone.tex
 func (r *Runner) RunBook(opts BookOptions) error {
 	cfg := r.cfg
-	proj := cfg.Paths.LatexProject
+	// 项目根只在这里决定一次：<paths.latex_project>/<项目名>/（项目名
+	// 默认取本书主题名，可用 --project 覆盖），或者——当输出根本身已是
+	// 一个工程（旧版单项目布局）且未指定 --project——继续沿用输出根。
+	// 下游（source/ style/ chapters/ work/ build/ out/ progress.json、
+	// doc_index、pdfview、临时目录）全部从 proj 派生。
+	sourceDir := opts.SourceDir
+	if sourceDir == "" {
+		sourceDir = cfg.Paths.OutputDir
+	}
+	proj, err := r.useProjectDir(cfg.Paths.LatexProject, opts.Project, projectSourceName(sourceDir, opts.Files), 1)
+	if err != nil {
+		return err
+	}
 	for _, d := range []string{
 		proj, filepath.Join(proj, "source"), filepath.Join(proj, "style"),
 		filepath.Join(proj, "chapters"), filepath.Join(proj, "work"),
@@ -208,8 +224,11 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		return nil
 	}
 
-	// Phase: images (level-2 pass on the source markdown).
-	err := runPhase("images", func() error {
+	// Phase: images (level-2 pass on the source markdown). r.projDir is
+	// already set (by useProjectDir above), so the watermark memory, the
+	// pages cache and the sessions of the image pass land inside THIS
+	// book's workspace rather than at the output root.
+	err = runPhase("images", func() error {
 		return r.RunImages(ImagesOptions{
 			TestMode: opts.TestMode, Number: opts.Number, Seed: opts.Seed,
 			SourceDir: opts.SourceDir, Files: opts.Files,
@@ -225,7 +244,6 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// layout/origin.pdf）加工为只读检索索引。样式会话最先用到它
 	// （doc_search 定位文本页、list_source_pages 列章节起点与逐页图片），
 	// 所以放在 style 之前构建。
-	r.projDir = proj
 	r.buildPDFViewQuiet(opts.SourceDir, opts.Files)
 	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
 	r.checkPageAlignment()

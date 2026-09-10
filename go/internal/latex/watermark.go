@@ -73,7 +73,7 @@ type watermarkSample struct {
 // detectWatermarkPhase runs the one-shot watermark pre-scan (or loads a
 // cached result) and stores it on the Runner for the rest of the flow.
 func (r *Runner) detectWatermarkPhase(samples []watermarkSample) {
-	cachePath := filepath.Join(r.cfg.Paths.LatexProject, "watermark_memory.json")
+	cachePath := filepath.Join(r.workRoot(), "watermark_memory.json")
 	if data, err := os.ReadFile(cachePath); err == nil {
 		var wm WatermarkMemory
 		if json.Unmarshal(data, &wm) == nil {
@@ -167,7 +167,7 @@ func (r *Runner) runWatermarkDetection(samples []watermarkSample) *WatermarkMemo
 		subject = subjectOf(samples[0].name)
 	}
 	if idx, err := buildPageIndex(r.cfg.Paths.MineruOutput, subject); err == nil {
-		pagesDir := filepath.Join(r.cfg.Paths.LatexProject, "pages")
+		pagesDir := filepath.Join(r.workRoot(), "pages")
 		mid := idx.total / 2
 		if mid < 1 {
 			mid = 1

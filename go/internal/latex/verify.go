@@ -17,10 +17,14 @@ import (
 // VerifyOptions drives the AI verification pass (默认关闭，verify.enabled).
 type VerifyOptions struct {
 	// ProgressDir holds the level-2 progress items to verify.
-	// Default: <latex.output_dir>/progress_items.
+	// Default: <项目工作区>/progress_items。
 	ProgressDir string
 	// ReportPath is the output markdown report.
 	ReportPath string
+	// Project selects the project workspace under paths.latex_output
+	// (--project). Empty: the output root itself when it is a legacy
+	// single-project layout, otherwise the only sub-project.
+	Project string
 }
 
 // verifyVerdict is the verification model's structured answer.
@@ -33,9 +37,17 @@ type verifyVerdict struct {
 // RunVerify checks each processed image against its embedded content
 // and writes a human-readable report. It never modifies the output.
 func (r *Runner) RunVerify(opts VerifyOptions) error {
+	// 多项目布局下核对必须先选定项目工作区（旧版单项目布局 → 输出根本身）。
+	lay, err := resolveExistingProjectDir(r.cfg.Paths.LatexOutput, opts.Project)
+	if err != nil {
+		return err
+	}
+	r.projDir = lay.Dir
+	r.log.Log(0, "[project] 核对工作区:", lay.Dir)
+
 	progDir := opts.ProgressDir
 	if progDir == "" {
-		progDir = filepath.Join(r.cfg.Paths.LatexOutput, "progress_items")
+		progDir = filepath.Join(lay.Dir, "progress_items")
 	}
 	items := map[string]*imageProgress{}
 	loadProgress(progDir, items)
@@ -91,7 +103,7 @@ func (r *Runner) RunVerify(opts VerifyOptions) error {
 	// Report.
 	reportPath := opts.ReportPath
 	if reportPath == "" {
-		reportPath = filepath.Join(r.cfg.Paths.LatexOutput, r.cfg.Verify.ReportFile)
+		reportPath = filepath.Join(lay.Dir, r.cfg.Verify.ReportFile)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# AI 核对报告\n\n- 生成时间: %s\n- 核对项: %d\n\n", time.Now().Format("2006-01-02 15:04:05"), total)
@@ -176,7 +188,7 @@ func (r *Runner) verifyOne(client *session.Client, p *imageProgress, tid int) *v
 	}
 	// Vector figures: attach the rendered preview for visual diff.
 	if p.Class == ClassVector && p.FigPNG != "" {
-		pngPath := filepath.Join(r.cfg.Paths.LatexOutput, p.FigPNG)
+		pngPath := filepath.Join(r.workRoot(), p.FigPNG)
 		if png64, err := ReadImageFile(pngPath); err == nil {
 			parts = append(parts, map[string]interface{}{
 				"type": "text", "text": "Rendered preview of the TikZ re-drawing:"},
