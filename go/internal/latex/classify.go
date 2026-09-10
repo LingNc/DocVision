@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/prompts"
 	"mineru-tools/internal/session"
 )
 
@@ -32,7 +33,7 @@ func ClassifyImage(client *session.Client, modelCfg config.ModelConfig, imgBase6
 	req := &session.ChatRequest{
 		Model: client.Model(),
 		Messages: []session.ChatMessage{
-			{Role: "system", Content: classifierSystemPrompt + systemExtra},
+			{Role: "system", Content: prompts.Must(prompts.ClassifierSystem) + systemExtra},
 			{Role: "user", Content: []map[string]interface{}{
 				{"type": "text", "text": "Classify this document image."},
 				{"type": "image_url", "image_url": map[string]string{

@@ -5,20 +5,8 @@ import (
 
 	"mineru-tools/internal/config"
 	"mineru-tools/internal/logger"
+	"mineru-tools/internal/prompts"
 )
-
-// textOnlySystemPrompt drives a pure text extraction: the latex level-2
-// "text" class needs the image's OWN text in the document flow, not an
-// image description (a description must never leak into the markdown).
-const textOnlySystemPrompt = `You extract the visible text of ONE document image.
-
-Output ONLY the text exactly as it appears, in reading order, preserving line breaks and punctuation. No description, no commentary, no preamble, no headings you did not see, no code fences, no [IMG_TYPE:] header. Bullets only when the image itself shows bullets.
-
-Rules:
-- Formula -> LaTeX math ($...$ inline, $$...$$ for a standalone display).
-- Table -> a Markdown table with all rows/columns.
-- No readable text at all -> output exactly: [NO_TEXT]
-- Never describe fonts, colours, styling, layout or what the image "shows".`
 
 // NoTextMarker is returned by ExtractTextOnly when the image carries no
 // readable text (the caller should keep the original image instead).
@@ -43,7 +31,7 @@ func ExtractTextOnly(
 	req := &ChatRequest{
 		Model: client.Model(),
 		Messages: []ChatMessage{
-			{Role: "system", Content: textOnlySystemPrompt},
+			{Role: "system", Content: prompts.Must(prompts.TextOnlySystem)},
 			{Role: "user", Content: []map[string]interface{}{
 				{"type": "text", "text": user},
 				{"type": "image_url", "image_url": map[string]string{

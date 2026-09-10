@@ -15,6 +15,7 @@ import (
 	"mineru-tools/internal/config"
 	"mineru-tools/internal/img2text"
 	"mineru-tools/internal/logger"
+	"mineru-tools/internal/prompts"
 	"mineru-tools/internal/session"
 )
 
@@ -87,7 +88,9 @@ type FigureEnv struct {
 // renderPrompt fills the placeholders used by the built-in session
 // prompts: {MAX_ROUNDS} (session tool budget) and {OUTPUT_LANG} (the
 // configured output language). The prompts are plain strings, so an
-// unsubstituted placeholder reaches the model verbatim.
+// unsubstituted placeholder reaches the model verbatim — which is why the
+// substitution itself lives in internal/prompts and is covered by guard
+// tests there (every declared placeholder must be gone after rendering).
 func renderPrompt(prompt string, tuning config.SessionTuning, lang string) string {
 	if prompt == "" {
 		return ""
@@ -95,9 +98,10 @@ func renderPrompt(prompt string, tuning config.SessionTuning, lang string) strin
 	if lang == "" {
 		lang = "Chinese"
 	}
-	prompt = strings.ReplaceAll(prompt, "{OUTPUT_LANG}", lang)
-	prompt = strings.ReplaceAll(prompt, "{MAX_ROUNDS}", strconv.Itoa(session.EffectiveToolRounds(tuning)))
-	return prompt
+	return prompts.Fill(prompt, map[string]string{
+		"OUTPUT_LANG": lang,
+		"MAX_ROUNDS":  strconv.Itoa(session.EffectiveToolRounds(tuning)),
+	})
 }
 
 // outputLang is the configured {OUTPUT_LANG} value (default Chinese).
@@ -631,7 +635,7 @@ func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, im
 	req := &session.ChatRequest{
 		Model: client.Model(),
 		Messages: []session.ChatMessage{
-			{Role: "system", Content: classifierSystemPrompt + "\n\nIMPORTANT: reply with the raw JSON object ONLY."},
+			{Role: "system", Content: prompts.Must(prompts.ClassifierSystem) + "\n\nIMPORTANT: reply with the raw JSON object ONLY."},
 			{Role: "user", Content: []map[string]interface{}{
 				{"type": "text", "text": "Classify this document image. JSON only."},
 				{"type": "image_url", "image_url": map[string]string{

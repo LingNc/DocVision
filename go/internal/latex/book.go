@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"mineru-tools/internal/prompts"
 	"mineru-tools/internal/session"
 )
 
@@ -314,7 +315,7 @@ func (r *Runner) stylePhase(proj string) error {
 	}
 	tools = append(tools, r.sourcePageTools()...)
 
-	prompt := styleSystemPrompt + "\n\nYou have a persistent WORKSPACE: write_file stores class.cls / manual.md / example.tex as real files; submit_style can then reference them by file name instead of full inline contents. Compile your example with compile {path: \"example.tex\"} (the class is picked up from the same workspace) and inspect it with view_pdf. Check list_fonts before referencing fonts. There is NO font download tool: when a font is missing, record the substitution in the manual AND report the missing font to the user (font file name + where to place it: the project fonts/ directory) in the submit_style report — the user downloads it manually and re-runs."
+	prompt := prompts.Must(prompts.StyleSystem)
 	prompt += "\n\nBASH PATHS: the bash tool runs inside a kernel sandbox where your workspace, the project and the original PDFs are the only trees, mounted as /work, /project and /source — exactly the trees of the file tools, so work:x.tex = /work/x.tex, project:source/book.md = /project/source/book.md, source:<file>.pdf = /source/<file>.pdf. The real host paths do not exist there; /tmp is scratch."
 	if r.cfg.Latex.RemoveWatermark {
 		prompt += "\n\n" + r.watermarkGuidance("WATERMARK: the source may carry watermark artifacts (repeated decorative overlay text such as institution/library marks, faint background strings). Identify the watermark pattern in the manual and instruct conversion to EXCLUDE it entirely - watermark text/graphics must NOT be typeset in the LaTeX output.")
@@ -465,7 +466,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 	modelCfg := r.models[r.cfg.Latex.ChapterModel]
 	tuning := r.cfg.LatexSession("chapter")
 	submit := &SubmitSplitTool{}
-	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(chapterSystemPrompt, tuning, r.outputLang()), []session.Tool{
+	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.ChaptersSystem), tuning, r.outputLang()), []session.Tool{
 		&GrepTool{Root: sandbox},
 		&ReadFileTool{Root: sandbox},
 		&WorkBashTool{Root: sandbox, Mounts: r.sessionMounts(kindChapters, sandbox), MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
@@ -826,7 +827,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	// 挂载查看。
 	tools = append(tools, r.sourcePageTools()...)
 	sess := session.NewSession(client, modelCfg, tuning,
-		renderPrompt(convertSystemPrompt, tuning, r.outputLang()),
+		renderPrompt(prompts.Must(prompts.ConvertSystem), tuning, r.outputLang()),
 		tools, r.log, tid, "convert:"+base)
 
 	// 会话转录（JSONL，图片走 file:// 引用）：单章转换中断后（进程被
@@ -1083,7 +1084,7 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	}
 	tools = append(tools, r.sourcePageTools()...)
 	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
-		r.cfg.LatexSession("convert"), styleFixSystemPrompt, tools, r.log, tid, "style-fix:"+base)
+		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.StyleFixSystem), r.cfg.LatexSession("convert"), r.outputLang()), tools, r.log, tid, "style-fix:"+base)
 	liveHook, liveClose := r.livePhaseLine("style-fix")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()

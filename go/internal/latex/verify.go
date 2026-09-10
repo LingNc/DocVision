@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"mineru-tools/internal/prompts"
 	"mineru-tools/internal/session"
 )
 
@@ -28,20 +29,6 @@ type verifyVerdict struct {
 	Issues      []string `json:"issues"`
 	Suggestions []string `json:"suggestions"`
 }
-
-const verifySystemPrompt = `You are a meticulous document QA reviewer. You receive:
-1. The ORIGINAL image cropped from a parsed document.
-2. (Optional) a rendered preview of a vector (TikZ) re-drawing of it.
-3. The content currently embedded in the output for that image (a description, or the TikZ code).
-
-Cross-check the content against the original image:
-- Are all visible facts preserved (labels, numbers, axes, arrows, structure)?
-- Any hallucinated content (things not in the image)?
-- For TikZ: does the preview faithfully reproduce the original geometry?
-
-Respond with ONLY a JSON object:
-{"ok":true|false,"issues":["..."],"suggestions":["..."]}
-issues = concrete errors/omissions found; suggestions = actionable fix advice. Be strict but do not invent problems.`
 
 // RunVerify checks each processed image against its embedded content
 // and writes a human-readable report. It never modifies the output.
@@ -200,7 +187,7 @@ func (r *Runner) verifyOne(client *session.Client, p *imageProgress, tid int) *v
 	req := &session.ChatRequest{
 		Model: client.Model(),
 		Messages: []session.ChatMessage{
-			{Role: "system", Content: verifySystemPrompt},
+			{Role: "system", Content: prompts.Must(prompts.VerifySystem)},
 			{Role: "user", Content: parts},
 		},
 		MaxTokens: 2048, Temperature: 0.0,

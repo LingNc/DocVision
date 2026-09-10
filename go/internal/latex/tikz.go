@@ -9,6 +9,7 @@ import (
 
 	"mineru-tools/internal/config"
 	"mineru-tools/internal/logger"
+	"mineru-tools/internal/prompts"
 	"mineru-tools/internal/session"
 )
 
@@ -58,7 +59,7 @@ func RunTikZSession(
 	engineIsXe := strings.Contains(strings.ToLower(comp.engine), "xe") ||
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
-	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(latexFigurePrompt, tuning, env.OutputLang), []session.Tool{
+	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.FigureSystem), tuning, env.OutputLang), []session.Tool{
 		&WriteWorkFileTool{Root: scratch},
 		&EditWorkFileTool{Root: scratch},
 		&ReadFileTool{Root: scratch},
