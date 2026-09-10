@@ -29,7 +29,17 @@ type ViewImageTool struct {
 	// Subject is the current document's image subfolder (e.g.
 	// "测试-概率论"); it lets a bare file name resolve without a path.
 	Subject string
+	// MaxViews caps how many times one session may look at the image.
+	// A session that keeps re-cropping and re-zooming a small source
+	// bitmap never gains information (upscaling is not OCR) — the real
+	// incident was 115 view_image calls on one 284x156px figure. 0 =
+	// unlimited (level-1 style/convert sessions look at many pages).
+	MaxViews int
+	views    int
 }
+
+// viewBudgetMessage is returned once a session exhausts its view budget.
+const viewBudgetMessage = "VIEW BUDGET EXHAUSTED for this session: you have already looked at this figure enough times and upscaling a small source image cannot reveal more. Mark anything still uncertain with % [?], make your best redraw, compile and call submit now."
 
 func (t *ViewImageTool) Name() string { return "view_image" }
 
@@ -70,6 +80,15 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if zoom <= 0 {
 		zoom = 1280
 	}
+	// Same ceiling as view_pdf: an unbounded zoom on a small bitmap only
+	// produces a bigger blurry picture and burns tokens.
+	if zoom > 6000 {
+		zoom = 6000
+	}
+	t.views++
+	if t.MaxViews > 0 && t.views > t.MaxViews {
+		return session.ToolResult{Text: viewBudgetMessage}, nil
+	}
 
 	img, err := decodeImage(full)
 	if err != nil {
@@ -84,7 +103,7 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 		return session.ToolResult{}, err
 	}
 	return session.ToolResult{
-		Text:        fmt.Sprintf("Image %s (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx) attached.", pathArg, left, top, right, bottom, zoom),
+		Text:        fmt.Sprintf("Image %s (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx) attached. If this matches what you already saw, stop viewing and call submit.", pathArg, left, top, right, bottom, zoom),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
 	}, nil

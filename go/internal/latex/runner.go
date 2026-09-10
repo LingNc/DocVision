@@ -402,6 +402,62 @@ func findLineIdx(starts []int, pos int) int {
 }
 
 // ------------------------------------------------------------------
+// live console progress
+// ------------------------------------------------------------------
+
+// liveProgress renders ONE repainting console line. The text callback is
+// called under the owner's own lock state (it must lock its counters
+// itself), and a ticker re-renders every few seconds so a line never
+// freezes at its 0/N start value while long sessions run — a frozen
+// "running: 0" looked like a counter bug.
+type liveProgress struct {
+	text func() string
+	stop chan struct{}
+	once sync.Once
+}
+
+func newLiveProgress(text func() string) *liveProgress {
+	p := &liveProgress{text: text, stop: make(chan struct{})}
+	p.render()
+	go func() {
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-p.stop:
+				return
+			case <-t.C:
+				p.render()
+			}
+		}
+	}()
+	return p
+}
+
+func (p *liveProgress) render() {
+	if p == nil || p.text == nil {
+		return
+	}
+	if line := p.text(); line != "" {
+		fmt.Fprintf(os.Stdout, "\r%s          ", line)
+	}
+}
+
+// Close stops the ticker and terminates the line.
+func (p *liveProgress) Close() {
+	if p == nil {
+		return
+	}
+	p.once.Do(func() {
+		close(p.stop)
+		if p.text != nil && p.text() != "" {
+			fmt.Fprint(os.Stdout, "\n")
+		}
+	})
+}
+
+// classifyPhase starts here
+// ------------------------------------------------------------------
 // phase 1: classification
 // ------------------------------------------------------------------
 
@@ -421,16 +477,25 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	// done0：断点续传时此前已完成的部分——进度直接从它起跳，与
 	// "Already done" 行呼应，不再单列 skip。
 	total, done, failed, running := len(pending)+done0, done0, 0, 0
+	var progLive *liveProgress
 	progress := func() {
-		if verbose || total == 0 {
-			return
+		if progLive != nil {
+			progLive.render()
 		}
-		pct := float64(done) * 100.0 / float64(total)
-		fmt.Fprintf(os.Stdout, "\r[classify %d/%d] %.2f%% (failed: %d, running: %d)          ",
-			done, total, pct, failed, running)
 	}
-	if !verbose && total > 0 {
-		progress() // 0/N 起始行
+	progLive = newLiveProgress(func() string {
+		if verbose || total == 0 {
+			return ""
+		}
+		mu.Lock()
+		d, f, rn := done, failed, running
+		mu.Unlock()
+		pct := float64(d) * 100.0 / float64(total)
+		return fmt.Sprintf("[classify %d/%d] %.2f%% (failed: %d, running: %d)", d, total, pct, f, rn)
+	})
+	defer progLive.Close()
+	if total > 0 {
+		r.log.Log(0, "[classify] 待分类", strconv.Itoa(len(pending)), "张，并发", strconv.Itoa(conc), "（latex.concurrency）")
 	}
 
 	// 水印图片引用：直接预标记 absorbed（重建时删除引用），
@@ -612,21 +677,30 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			raster++ // 上次已完成的 raster（断点续传）
 		}
 	}
+	var progLive *liveProgress
 	progress := func() {
-		if verbose || total == 0 {
-			return
+		if progLive != nil {
+			progLive.render()
 		}
-		pct := float64(done) * 100.0 / float64(total)
-		ok := done - failed - warned
+	}
+	progLive = newLiveProgress(func() string {
+		if verbose || total == 0 {
+			return ""
+		}
+		mu.Lock()
+		d, f, w, rn, rs := done, failed, warned, running, raster
+		mu.Unlock()
+		pct := float64(d) * 100.0 / float64(total)
+		ok := d - f - w
 		if ok < 0 {
 			ok = 0
 		}
-		fmt.Fprintf(os.Stdout, "\r[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, raster: %d, running: %d)          ",
-			done, total, pct, ok, failed, warned, raster, running)
-	}
+		return fmt.Sprintf("[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, raster: %d, running: %d)",
+			d, total, pct, ok, f, w, rs, rn)
+	})
+	defer progLive.Close()
 	if total > 0 {
-		// 会话处理耗时长：先打出 0/N 起始行，处理期间进度可见。
-		progress()
+		r.log.Log(0, "[process] 待处理", strconv.Itoa(len(pending)), "张，并发", strconv.Itoa(conc), "（latex.concurrency）")
 	}
 
 	for _, t := range pending {

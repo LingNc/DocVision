@@ -130,9 +130,14 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	if n, err := pdfPageCount(res.PDF); err == nil {
 		pdfDetail = fmt.Sprintf(" (%d page)", n)
 	}
-	text := "COMPILE OK. Output: standalone.pdf" + pdfDetail +
-		". Look at it with view_pdf {path: \"standalone.pdf\", page: 1} and compare it with the ORIGINAL image (structure, labels, overlaps/crowding; crop with left/top/right/bottom and zoom to a pixel width to inspect details). " +
-		"If it faithfully matches, call submit; otherwise fix " + rel + " and compile again."
+	sizeDetail := ""
+	if w, h, err := pdfPageSize(res.PDF); err == nil && w > 0 && h > 0 {
+		sizeDetail = fmt.Sprintf(" Drawn size: %.1fpt x %.1fpt (%.2fcm x %.2fcm, aspect %.2f:1)",
+			w, h, w/28.45, h/28.45, w/h)
+	}
+	text := "COMPILE OK. Output: standalone.pdf" + pdfDetail + "." + sizeDetail +
+		" Look at it with view_pdf {path: \"standalone.pdf\", page: 1} and compare it with the ORIGINAL image (structure, labels, overlaps/crowding, and above all size/aspect ratio; crop with left/top/right/bottom and zoom to a pixel width to inspect details). " +
+		"If the picture is much larger than the original's printed size, or its width:height ratio differs, fix the geometry and the stroke widths in " + rel + " and compile again; if it faithfully matches, stop viewing and call submit."
 	if w := res.WarningSummary(); w != "" {
 		text += "\n" + truncateStr(w, 1500)
 	}

@@ -14,6 +14,14 @@
 
 ### Fixed
 
+- **续跑丢系统提示词**：转录（JSONL）里没有 system 行，恢复时 `SetMessages` 整体覆盖 → 续跑会话**完全没有系统提示**。现在 `SetMessages` 总是把本会话的系统提示放回队首（转录里若有旧 system 行则替换，不重复）。
+- **思维链不入转录**：`transcriptLine` 没有 reasoning 字段，续跑时历史思维链全丢（GLM 保留式思考要求完整回传，也是前缀缓存的前提）。现在转录写入/恢复 `reasoning_content`。
+- **压缩会毁掉前缀且花冤枉钱**：旧实现把整段会话（含 base64 图片）塞进**一条全新的 user 消息**去要摘要 → 一个 100k+ token 的新前缀全额计费、图片重发；压缩后历史只剩 system+摘要，最近上下文全丢。现在：压缩请求改为"在原会话末尾追加一条指令"的增量请求（复用前缀、命中缓存），系统提示词 + 原始任务 + 最近 8 条消息原样保留，只压中间段；回放时忽略最近一次压缩标记之前的旧消息。
+- **档位2 进度行"永远是 0"**：`[process 0/N] … running: 0` 只在任务完成时重绘（无 ticker），首个会话跑几十分钟期间看起来像计数坏了。现在 classify/process 进度行与 convert 一样带 5s ticker 自动重绘，计数器读写同锁（原来读侧无锁，属数据竞争）。
+- **并发不可见**：控制台进度行不进日志文件，事后看日志无法判断当时并发几个会话。现在 classify/process/convert 阶段各写一条 `并发 N（latex.concurrency）` 日志行。
+- **作图比例失真**（实测：原图印刷约 3.6×2.0cm、占页宽 21%，成品 10.85×8.15cm、占页宽 62%，宽高比 1.82→1.33）：提示词里"宁可画大一点"的反向引导已删除，改为硬规则（与原图同宽高比 ±5%、线宽必须随图形一起缩放、禁止整图 `\resizebox`），并给作图会话传入原图位图宽高比 + 编译回执报告产出 PDF 的 pt 尺寸/宽高比，模型可以自查。
+- **看图空转**：单张图的会话可以无限 `view_image`/`view_pdf`（实测一张 284×156px 小图被看了 115 次，其中 100 次是 2400px 放大——放大不产生新信息）。现在矢量图会话有看图预算（`view_image` 12 次、`view_pdf` 每页 10 次，超预算返回"请提交"），`view_image` 的 `zoom` 上限与 `view_pdf` 对齐（6000px），工具回执明确写"若与已看过的一致就停止查看并提交"。
+- **`doc_search` 的 bbox 单位说错了**：提示词教模型"bbox 是 PDF points，除以页宽得百分比"——实际是 MinerU 版面坐标系（约 2× 页宽点数，493×720pt 的页可到 ~986×1440），照做必然溢出 100%。现在工具直接给出可用的裁剪百分比（`left/top/right/bottom`），提示词写明单位不是 points。
 - **提示词占位符未被替换**：作图提示词里的 `{OUTPUT_LANG}` 与 `{MAX_ROUNDS}` 原样进入 system prompt（日志里可见 `Respond in the document's language ({OUTPUT_LANG}) for any explanation`）。现在所有内置提示词统一走 `renderPrompt(prompt, tuning, lang)`：`{MAX_ROUNDS}` 取会话工具预算，`{OUTPUT_LANG}` 取 `options.output_language`（默认 Chinese）；新增 `TestBuiltinPromptsAreRendered` 守住所有提示词常量。
 - **`docvision latex --all` 缺失标志注册**：代码一直在读 `cmd.Flags().GetBool("all")`（决定日志分析是"只看本次"还是"汇总全部历史"），但从未 `cmd.Flags().Bool("all", ...)` 注册，于是显式传 `--all` 会直接报 `unknown flag: --all`（自 7f3b7d0 起的潜在缺陷，该分支实际是死代码）。现已注册并出现在 `--help` 里。
 - 文档与帮助文本里的历史遗留名清理：`view_page` → `view_pdf {path:"source:<file>.pdf", page:N}`、`view_source_page`、`list_images`、`read_md`、`install_font`、`compile_preview` 与 `preview-<n>.png`/`preview.png` 虚拟名、`mermaid_validation` → `tools.mermaid.validation`、`options.format_fix_attempts` → `img2text.format_fix_attempts`、`workflow --step latex/verify`。

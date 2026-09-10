@@ -205,6 +205,21 @@ type Usage struct {
 	CompletionTokensDetails *struct {
 		ReasoningTokens int `json:"reasoning_tokens"`
 	} `json:"completion_tokens_details,omitempty"`
+	// PromptTokensDetails carries the provider's prefix-cache accounting
+	// (Zhipu/GLM report cached_tokens here); it makes cache hits visible
+	// in the debug log, which is the only way to see why a request missed.
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
+}
+
+// CachedTokens reports the provider-side prefix cache hit size (0 when the
+// provider does not report it).
+func (u *Usage) CachedTokens() int {
+	if u == nil || u.PromptTokensDetails == nil {
+		return 0
+	}
+	return u.PromptTokensDetails.CachedTokens
 }
 
 // String renders the usage compactly for debug logs.
@@ -216,8 +231,12 @@ func (u *Usage) String() string {
 	if u.CompletionTokensDetails != nil {
 		reasoning = u.CompletionTokensDetails.ReasoningTokens
 	}
-	return fmt.Sprintf("prompt=%d completion=%d total=%d reasoning=%d",
+	line := fmt.Sprintf("prompt=%d completion=%d total=%d reasoning=%d",
 		u.PromptTokens, u.CompletionTokens, u.TotalTokens, reasoning)
+	if c := u.CachedTokens(); c > 0 {
+		line += fmt.Sprintf(" cached=%d(%.0f%%)", c, float64(c)*100/float64(max(u.PromptTokens, 1)))
+	}
+	return line
 }
 
 // ChatResponseChoice is one entry of choices.

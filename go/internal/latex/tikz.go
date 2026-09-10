@@ -1,6 +1,7 @@
 package latex
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -57,14 +58,24 @@ func RunTikZSession(
 		&ReadFileTool{Root: scratch},
 		&GrepTool{Root: scratch},
 		&CompileFigureTool{Comp: comp, State: state, EngineIsXe: engineIsXe, Log: log, Tid: tid},
-		&ViewPDFTool{Root: scratch, Comp: comp},
+		// 每页最多看 10 次：防止无限抛光（原事故：一张图 115 次 view_image）。
+		&ViewPDFTool{Root: scratch, Comp: comp, MaxViews: 10},
 		&SubmitFigureTool{State: state},
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
-		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg)},
+		// 单张矢量图会话限制看图次数：小图放大再多也不会产生新信息。
+		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg), MaxViews: 12},
 	}, log, tid, "tikz")
 
+	// 原图位图尺寸 → 宽高比：模型只看渲染图，无法判断物理大小，
+	// 不给参考就会出现"画满画布、比例失真"。
+	ratioLine := ""
+	if w, h := imageSize(env.CurrentImg); w > 0 && h > 0 {
+		ratioLine = fmt.Sprintf("The original bitmap is %dx%d px: aspect ratio %.2f:1 (width:height). Your drawing must keep that aspect ratio and must NOT be blown up to page size.", w, h, float64(w)/float64(h))
+	}
 	initial := strings.Join([]string{
 		"Redraw the attached image as TikZ.",
+		"",
+		ratioLine,
 		"",
 		"Its surrounding document context (for correct labels/terminology):",
 		"```",

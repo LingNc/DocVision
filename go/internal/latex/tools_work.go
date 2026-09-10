@@ -801,6 +801,11 @@ type ViewPDFTool struct {
 	// Comp provides the pdftoppm rasterizer settings (dpi); nil uses a
 	// plain pdftoppm call.
 	Comp *Compiler
+	// MaxViews (0 = unlimited) caps how often one session may re-render
+	// the same page; figure sessions use it to break the "look again,
+	// tweak, look again" loop.
+	MaxViews int
+	views    map[string]int
 }
 
 // vfs returns the tool's namespace (Mounts wins over Root).
@@ -869,6 +874,18 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 			return session.ToolResult{Text: fmt.Sprintf("OUT OF RANGE: %s 共 %d 页，请求第 %d 页", rel, n, page)}, nil
 		}
 	}
+	// 会话级看图预算（按 文件+页 计数）：真正渲染前拦截，既省 token
+	// 也打断"看一眼→改一点→再看一眼"的空转。
+	if t.MaxViews > 0 {
+		if t.views == nil {
+			t.views = map[string]int{}
+		}
+		k := fmt.Sprintf("%s#%d", rel, page)
+		t.views[k]++
+		if t.views[k] > t.MaxViews {
+			return session.ToolResult{Text: viewBudgetMessage}, nil
+		}
+	}
 	left := pctArg(args, "left", 0)
 	top := pctArg(args, "top", 0)
 	right := pctArg(args, "right", 100)
@@ -928,7 +945,7 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 		note = fmt.Sprintf(" (page %d/%d)", page, total)
 	}
 	return session.ToolResult{
-		Text:        fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx)%s attached.", rel, page, left, top, right, bottom, zoom, note),
+		Text:        fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx)%s attached. If this rendering matches the original, stop viewing and call submit.", rel, page, left, top, right, bottom, zoom, note),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
 	}, nil
@@ -945,6 +962,28 @@ func clampPct(v float64) float64 {
 }
 
 // pdfPageCount returns the page count of a PDF via pdfinfo.
+// pdfPageSize returns the first page's size in points (pdfinfo reports
+// "Page size: 307.56 x 231.02 pts"). Used to tell the drawing session how
+// large its picture actually came out, so it can match the original's
+// physical size and aspect ratio.
+func pdfPageSize(pdf string) (w, h float64, err error) {
+	out, err := exec.Command("pdfinfo", pdf).CombinedOutput()
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, ln := range strings.Split(string(out), "\n") {
+		v, ok := strings.CutPrefix(ln, "Page size:")
+		if !ok {
+			continue
+		}
+		var a, b float64
+		if _, err := fmt.Sscanf(strings.TrimSpace(v), "%f x %f", &a, &b); err == nil {
+			return a, b, nil
+		}
+	}
+	return 0, 0, fmt.Errorf("pdfinfo: 未找到 Page size 行")
+}
+
 func pdfPageCount(pdf string) (int, error) {
 	out, err := exec.Command("pdfinfo", pdf).CombinedOutput()
 	if err != nil {

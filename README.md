@@ -208,13 +208,13 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 - **模型注册表** `models:`：每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url / api_key / model / request_body / stream / thinking / reasoning_effort / tool_stream
 - **流式请求（默认开启）**：`models.*.stream: true`（默认）时走 SSE 流式接收，长思考/长输出期间持续有进展，不会长时间静默；厂商不支持流式时自动回退一次非流式请求。流式模式下用 `api_stream_idle_timeout`（默认取 `api_timeout`）判定"卡住"，而不是整次请求超时
 - **思考控制**：`thinking: {type: enabled|disabled}` 与 `reasoning_effort: max|xhigh|high|medium|low|minimal|none` 都是请求体**顶层字段**（不要写进 `request_body.extra_body`），按 `models` 条目配置，空值继承 `models.text`；GLM 的保留式思考写 `thinking.clear_thinking: false`（历史 assistant 轮的思维链完整回传，提升缓存命中）
-- **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到 `compaction_at`（默认 0.85）阈值自动 **AI 压缩**会话（保留关键决策/成果，丢弃草稿与工具噪音）；`sessions.checker` 未设置的字段继承 `sessions.convert`
+- **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到 `compaction_at`（默认 0.85）阈值自动 **AI 压缩**会话：**系统提示词、原始任务、最近 8 条消息原样保留**，中间部分由 AI 写成一篇续跑笔记替换（压缩请求是"在原会话末尾追加一条指令"的增量请求，因此仍能命中厂商前缀缓存；`CompactionAt` 触发点不变）；`sessions.checker` 未设置的字段继承 `sessions.convert`
 - **矢量图落盘**：TikZ 编译成功后依次尝试 `dvisvgm → pdftocairo → mutool → inkscape` 转 SVG 内嵌（dvisvgm 3.6 处理 PDF 需要 Ghostscript < 10.01 或 mutool，缺条件时自动走 pdftocairo）；全部失败才回退 PNG/PDF 链接——档位2 只记日志与 `progress.json`，档位1 另在 markdown 就地标注 `<!-- DOCVISION-ERROR: … -->`
 - **图片查看工具**：`image_context` 只给文本上下文与前后引用（不看像素），`view_image` 才看图片（支持百分比裁剪与放大）；两者都接受**裸文件名**——`view_image` 以本文档的图片目录为根直接拼接，不做搜索，名字错了就报错
 - **编译与看图分离**：`compile {path:"figure.tex"}` 只返回编译日志、产物名与页数，看图统一用 `view_pdf {path:"standalone.pdf", page:1}`（裁剪 + zoom 直接从 PDF 高分辨率重渲染，真放大，不是拉伸像素）
 - **可分离工具**：会话工具按需注册（编译、提交确认、grep、bash 沙箱、受限文件读写、PDF/图片查看等）
 - **断点续传**：档位2 逐图进度、档位1 逐阶段进度（`progress.json`）
-- **会话转录（JSONL）**：每条消息实时追加为一行 JSON，图片以 `file://media/<hash>.<ext>` 引用（base64 不入转录）；矢量图会话（`<outDir>/sessions/vector_<图>.jsonl`）、样式会话（`work/style_session.jsonl`）、章节划分（`work/sessions/chapters.jsonl`）、单章转换（`work/sessions/convert_<章>.jsonl`）都接入——进程被杀或网络断连后，下次运行自动从转录恢复上下文续跑，不重烧 token；成功会话的转录默认清理（`latex.keep_session_records` 可保留）
+- **会话转录（JSONL）**：每条消息实时追加为一行 JSON（含 `reasoning_content` 思维链——GLM 保留式思考要求历史思维链完整回传，也是前缀缓存的前提），图片以 `file://media/<hash>.<ext>` 引用（base64 不入转录）；矢量图会话（`<outDir>/sessions/vector_<图>.jsonl`）、样式会话（`work/style_session.jsonl`）、章节划分（`work/sessions/chapters.jsonl`）、单章转换（`work/sessions/convert_<章>.jsonl`）都接入——进程被杀或网络断连后，下次运行自动从转录恢复上下文续跑，不重烧 token（恢复时**重新挂上系统提示词**、只回放最近一次压缩之后的消息）；成功会话的转录默认清理（`latex.keep_session_records` 可保留）
 
 ### 会话沙箱与虚拟工作区（挂载表）
 
@@ -242,7 +242,7 @@ docvision latex --debug        # 或配置 options.log_level: "debug"
 docvision latex --trace        # 或配置 options.log_level: "trace"（更细）
 docvision img2text --debug     # img2text 同样支持
 docvision verify --debug
-docvision latex --verbose      # 详细控制台输出（默认仅显示进度行）
+docvision latex --verbose      # 详细控制台输出（默认仅显示进度行，5-10s 自动刷新一次；进度行只在控制台，日志文件里看并发与耗时）
 ```
 
 日志等级：`info`（默认，进度与警告/错误）< `debug`（每轮请求/响应摘要、提示词、工具调用、**最终接收内容**、编译结果与警告、Mermaid/LaTeX 校验结论）< `trace`（再加流式分片进展行等噪音）。全部写入日志文件（`[DEBUG]`/`[TRACE]` 前缀，控制台输出不受影响），每次请求/响应记录：使用的模型、`stream`/`max_tokens`/`temperature`/`thinking`/`reasoning_effort` 实际取值、消息数与上下文估算、耗时、finish_reason、输出与思维链字符数、provider 返回的 token 用量（含 `reasoning_tokens`）。LaTeX 编译只记 `OK|FAILED + 耗时 + warnings=N + 警告清单`（失败时附给 AI 的错误原文），完整编译日志不会写入。可在日志里完整回放某个会话的推理与工具使用过程。
@@ -391,7 +391,7 @@ MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不�
 | `latex.sessions.*.max_tokens` | 该会话**单次请求最大输出**（不含厂商单独计费的思维链预算）：drawing 16384、style 内置 32768、其余 16384（随附模板示例把 drawing/style 写成 131072） | 16384 / style 32768 |
 | `latex.sessions.*.temperature` | 该会话采样温度（同 `models.<name>.temperature`，会话配置优先） | 未设置 |
 | `latex.sessions.*.compaction_at` | 触发自动压缩的窗口占用比例（0-1），不写默认 0.85（所有会话一致，不是只继承 drawing） | 0.85 |
-| `latex.concurrency` | 档位1/档位2 的会话级并发（重于 img2text） | 3 |
+| `latex.concurrency` | 档位1/档位2 的会话级并发（classify / 档位2 process / 档位1 逐章 convert / style-fix 共用；style、chapters、assemble、终审是单会话） | 3 |
 | `latex.insert_image_description` | 档位2 专用：raster 保留原图时是否嵌入 AI 解释文本（`[Image]( … )`）；档位1 不受它控制（总是生成解释块） | false |
 | `latex.chapter_granularity` | 档位1 章节拆分粒度：small=按小节拆分 / large=按大章整体拆分 | small |
 | `latex.keep_temp_dirs` | 保留 `<项目>/work/temp/` 下的临时工作目录（拆章沙箱、编译 scratch、矢量图工作区） | false |

@@ -329,6 +329,33 @@ func (d *DocIndex) EntryOnPage(global int) *DocEntry {
 	return nil
 }
 
+// layoutScale converts MinerU content_list bbox coordinates into PDF
+// points. MinerU scores the page at 2x its point size for this pipeline
+// (a 493x720pt page has content_list coordinates up to ~986x1440), so the
+// bbox is NOT in points: dividing it by the index's page_size directly
+// overflows past 100%. The crop hint below is derived with this factor and
+// is meant as a starting point for view_pdf.
+const layoutScale = 2.0
+
+// CropHint converts a block bbox into view_pdf crop percentages
+// (left/top/right/bottom), clamped to the page.
+func CropHint(bbox [4]float64, pageSize [2]float64) (int, int, int, int) {
+	if pageSize[0] <= 0 || pageSize[1] <= 0 {
+		return 0, 0, 100, 100
+	}
+	pct := func(v, total float64) int {
+		p := int(v / (total * layoutScale) * 100)
+		if p < 0 {
+			p = 0
+		}
+		if p > 100 {
+			p = 100
+		}
+		return p
+	}
+	return pct(bbox[0], pageSize[0]), pct(bbox[1], pageSize[1]), pct(bbox[2], pageSize[0]), pct(bbox[3], pageSize[1])
+}
+
 // FormatEntry renders one entry for tool output (pN = global page for
 // view_pdf on the source mount / list_source_pages; the local page is
 // 1-based, exactly what list_source_pages {page:N} and view_pdf print).

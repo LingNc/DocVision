@@ -35,7 +35,12 @@ func (t *DocSearchTool) formatEntry(e DocEntry) string {
 		if t.Mount != "" {
 			path = t.Mount + ":" + f.Name
 		}
-		s += fmt.Sprintf("\n    source page: view_pdf {path:\"%s\", page:%d}", path, local)
+		var size [2]float64
+		if t.Index != nil {
+			size = t.Index.Sizes[e.Part]
+		}
+		l, tp, r, b := CropHint(e.BBox, size)
+		s += fmt.Sprintf("\n    source page: view_pdf {path:\"%s\", page:%d, left:%d, top:%d, right:%d, bottom:%d}", path, local, l, tp, r, b)
 	}
 	return s
 }
@@ -76,6 +81,6 @@ func (t *DocSearchTool) Execute(argsJSON string) (session.ToolResult, error) {
 	for _, e := range hits {
 		b.WriteString(t.formatEntry(e) + "\n")
 	}
-	b.WriteString("Each hit shows its exact source page (view_pdf {path:\"<source>:<file>\", page:<local page>}); list_source_pages {page: pN} prints that page's text and images. The bbox is in PDF points, top-left origin; page sizes are in the index. Adjacency in the index does NOT imply relation.")
+	b.WriteString("Each hit shows its exact source page (view_pdf {path:\"<source>:<file>\", page:<local page>}); list_source_pages {page: pN} prints that page's text and images. The bbox is NOT in PDF points: it uses MinerU's layout coordinate space, which is about 2x the page's point size (a 493x720pt page reaches ~986x1440), so never divide it by the printed page size. When you need a crop, use the crop percentages printed with the hit. Adjacency in the index does NOT imply relation.")
 	return session.ToolResult{Text: b.String()}, nil
 }

@@ -31,6 +31,11 @@ type transcriptLine struct {
 	Images []string   `json:"images,omitempty"`
 	Calls  []ToolCall `json:"tool_calls,omitempty"`
 	CallID string     `json:"tool_call_id,omitempty"`
+	// Reasoning keeps the provider's reasoning_content (思维链) so a
+	// resumed session replays the history byte-identically: vendors with
+	// retained thinking (GLM thinking.clear_thinking:false) expect the
+	// full chain back and it is also a precondition for prefix caching.
+	Reasoning string `json:"reasoning_content,omitempty"`
 }
 
 // TranscriptWriter appends messages of one session to a JSONL file.
@@ -105,6 +110,7 @@ func (w *TranscriptWriter) Append(msg ChatMessage) error {
 		line.Text = string(data)
 	}
 	line.Calls = msg.ToolCalls
+	line.Reasoning = msg.ReasoningContent
 	data, err := json.Marshal(line)
 	if err != nil {
 		return err
@@ -178,7 +184,7 @@ func LoadTranscript(path string) ([]ChatMessage, error) {
 		if line.T != "msg" {
 			continue
 		}
-		msg := ChatMessage{Role: line.Role, ToolCallID: line.CallID, ToolCalls: line.Calls}
+		msg := ChatMessage{Role: line.Role, ToolCallID: line.CallID, ToolCalls: line.Calls, ReasoningContent: line.Reasoning}
 		switch {
 		case len(line.Images) > 0:
 			parts := []map[string]interface{}{}
@@ -205,6 +211,18 @@ func LoadTranscript(path string) ([]ChatMessage, error) {
 			msg.Content = line.Text
 		}
 		msgs = append(msgs, msg)
+	}
+	// Compaction is append-only on disk: everything before the newest
+	// COMPRESSED marker was already summarised, so replaying it would
+	// resurrect a history the session deliberately dropped.
+	last := -1
+	for i, m := range msgs {
+		if m.Role == "user" && strings.HasPrefix(ContentString(m), compactedMarker) {
+			last = i
+		}
+	}
+	if last > 0 {
+		msgs = msgs[last:]
 	}
 	return msgs, nil
 }

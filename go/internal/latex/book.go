@@ -673,6 +673,9 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		label = fmt.Sprintf("[convert#%d]", fbRound+1)
 	}
 	r.phaseNote()("%s %d 章，并发 %d", label, len(chapters), conc)
+	// 并发数同时进日志文件：控制台进度行不进日志，事后看日志无法判断
+	// 当时跑了几个会话（所有阶段共用 latex.concurrency）。
+	r.log.Log(0, fmt.Sprintf("%s 并发 %d（latex.concurrency），共 %d 章", label, conc, len(chapters)))
 	var done, failed, running int
 	var progMu sync.Mutex
 	total := len(chapters)

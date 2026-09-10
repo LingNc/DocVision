@@ -153,9 +153,22 @@ func (s *Session) Messages() []ChatMessage {
 // SetMessages replaces the conversation history with a previously
 // persisted context (Messages / saveSessionContext). The system prompt
 // is expected to be part of msgs; the tool registry stays as built.
+// SetMessages replaces the conversation, e.g. with a transcript loaded
+// from disk when a previous run was interrupted. The session's own
+// system prompt is authoritative: transcripts do not carry it, so it is
+// re-inserted at the head (and an old copy inside msgs is replaced) —
+// otherwise a resumed session would run without any system prompt.
 func (s *Session) SetMessages(msgs []ChatMessage) {
-	s.messages = make([]ChatMessage, len(msgs))
-	copy(s.messages, msgs)
+	rest := msgs
+	if len(rest) > 0 && rest[0].Role == "system" {
+		rest = rest[1:]
+	}
+	out := make([]ChatMessage, 0, len(rest)+1)
+	if s.system != "" {
+		out = append(out, ChatMessage{Role: "system", Content: s.system})
+	}
+	out = append(out, rest...)
+	s.messages = out
 }
 
 // RunOptions describes one logical user turn.
@@ -398,8 +411,11 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			})
 			req2 := *req
 			req2.Messages = s.messages
+			// Keep the tool definitions (the provider builds its prompt
+			// prefix from tools + messages, so dropping them would throw
+			// away the whole prefix cache); tool_choice=none is enough to
+			// force a text answer.
 			req2.ToolChoice = "none"
-			req2.Tools = nil
 			if s.logger.DebugEnabled() {
 				s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: nudge request (empty reply, tools disabled)",
 					s.label, toolRounds+1))
@@ -492,53 +508,71 @@ func (s *Session) maybeCompact() error {
 	return nil
 }
 
-// compact rewrites the transcript: everything after the system prompt
-// is summarised by the model itself into a compact context note.
-func (s *Session) compact() error {
-	var sb strings.Builder
-	for _, m := range s.messages {
-		if m.Role == "system" {
-			continue
-		}
-		switch m.Role {
-		case "user":
-			sb.WriteString("## USER\n")
-		case "assistant":
-			sb.WriteString("## ASSISTANT\n")
-		case "tool":
-			sb.WriteString("## TOOL RESULT\n")
-		}
-		text := ContentString(m)
-		if len(text) > 4000 {
-			text = text[:2000] + "\n...[truncated]...\n" + text[len(text)-1500:]
-		}
-		sb.WriteString(text)
-		sb.WriteString("\n\n")
-	}
+// compactedMarker prefixes the replacement note written by compact; it is
+// also used to collapse a transcript on resume (see LoadTranscript).
+const compactedMarker = "=== COMPRESSED SESSION CONTEXT"
 
-	summaryPrompt := strings.Join([]string{
-		"You are compressing a long AI working session so it can continue within a limited context window.",
-		"Produce a COMPACT but COMPLETE continuation note. Rules:",
-		"- Keep: the task definition, all confirmed decisions, final artefacts (code, data, results that will still be needed), current progress and remaining steps.",
+// compactKeepTail is how many of the most recent messages stay verbatim
+// across a compaction; everything between the original task and this tail
+// is summarised. Keeping real recent turns (instead of a summary only) is
+// what makes a resumed session actually continue working.
+const compactKeepTail = 8
+
+// compact rewrites the transcript at a turn boundary: the system prompt and
+// the original task stay verbatim, the most recent turns stay verbatim, and
+// everything in between is replaced by one AI-written continuation note.
+//
+// The summary request is append-only — it reuses the current conversation
+// as-is and adds one instruction — so the provider's prefix cache stays
+// warm. The previous implementation embedded the whole transcript into a
+// single fresh user message, which paid full price for a new (often
+// 100k+ token) prefix and re-sent every base64 image.
+func (s *Session) compact() error {
+	head := 0
+	if len(s.messages) > 0 && s.messages[0].Role == "system" {
+		head = 1
+	}
+	// Keep the original task turn verbatim right after the system prompt.
+	headEnd := head
+	if headEnd < len(s.messages) && s.messages[headEnd].Role == "user" {
+		headEnd++
+	}
+	tailStart := len(s.messages) - compactKeepTail
+	if tailStart < headEnd {
+		tailStart = headEnd
+	}
+	// Never start the kept tail on a tool result: its assistant tool_calls
+	// turn must come with it, otherwise the replayed history is invalid.
+	for tailStart > headEnd && s.messages[tailStart].Role == "tool" {
+		tailStart--
+	}
+	if tailStart-headEnd <= 0 {
+		return nil // nothing between task and tail worth summarising
+	}
+	tail := make([]ChatMessage, len(s.messages)-tailStart)
+	copy(tail, s.messages[tailStart:])
+
+	instruction := strings.Join([]string{
+		"=== CONTEXT COMPACTION REQUEST ===",
+		"Summarise the work done so far in this session as a COMPACT but COMPLETE continuation note",
+		fmt.Sprintf("covering everything up to (but NOT including) the last %d messages.", len(tail)),
+		"Rules:",
+		"- Keep: the task definition, all confirmed decisions, final artefacts (the exact code, commands, file paths, ids, numbers already produced), current progress and the remaining steps.",
 		"- Drop: intermediate tool dumps, failed drafts, verbose reasoning, duplicate content.",
-		"- Keep any exact strings (code, identifiers, paths) that are still referenced.",
+		"- Keep exact strings (code, identifiers, paths) that are still referenced later.",
+		"- Do NOT summarise or repeat the last messages: they stay in the conversation as-is.",
 		"Respond with the note only, no preamble.",
-		"",
-		"=== SESSION TRANSCRIPT ===",
-		sb.String(),
 	}, "\n")
 
 	req := &ChatRequest{
-		Model: s.client.Model(),
-		Messages: []ChatMessage{
-			{Role: "user", Content: summaryPrompt},
-		},
+		Model:       s.client.Model(),
+		Messages:    append(append([]ChatMessage{}, s.messages...), ChatMessage{Role: "user", Content: instruction}),
 		MaxTokens:   8192,
 		Temperature: 0.1,
 	}
 	if s.logger.DebugEnabled() {
-		s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] [compact] summary request (%s transcript=%d chars)",
-			s.label, s.client.RequestSummary(req), sb.Len()))
+		s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] [compact] summary request (append-only, %s messages=%d keep_tail=%d)",
+			s.label, s.client.RequestSummary(req), len(req.Messages), len(tail)))
 	}
 	resp, sentinel, status := s.client.CallWithRetry(req)
 	if status != "" {
@@ -556,12 +590,12 @@ func (s *Session) compact() error {
 			s.label, resp.Elapsed.Seconds(), len(summary), resp.Usage.String()))
 	}
 
-	note := "=== COMPRESSED SESSION CONTEXT (auto-generated; earlier turns were summarised) ===\n" + summary
-	s.messages = []ChatMessage{}
-	if s.system != "" {
-		s.messages = append(s.messages, ChatMessage{Role: "system", Content: s.system})
-	}
-	s.messages = append(s.messages, ChatMessage{Role: "user", Content: note})
+	note := compactedMarker + " (auto-generated; the earlier turns were summarised) ===\n" + summary
+	rebuilt := make([]ChatMessage, 0, headEnd+1+len(tail))
+	rebuilt = append(rebuilt, s.messages[:headEnd]...)
+	rebuilt = append(rebuilt, ChatMessage{Role: "user", Content: note})
+	rebuilt = append(rebuilt, tail...)
+	s.messages = rebuilt
 	s.appendTranscript(ChatMessage{Role: "user", Content: note})
 	return nil
 }
