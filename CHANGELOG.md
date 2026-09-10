@@ -20,8 +20,11 @@
   - assemble 修复会话新增 `read_file`（AltRoots=项目根，可读原 md/chapters/style）与 `list_source_pages`/`view_source_page`。
   - 删除单文件专用 `WriteFileTool`（与 `WriteWorkFileTool` 重复）。
 
-### Added
+### Changed
 
+- **档位2 产物纯净（可直接当 markdown 读）**：档位2 输出不含任何 `<!-- DOCVISION-* -->` 注释——矢量图一律嵌入 SVG（`![label](figures/*.svg)`，SVG 缺失退 PNG/PDF 链接），移除了「`insert_image_description` 打开时嵌 latex 代码块」的档位2 分支；text/styled 一律只嵌纯文本；raster 默认嵌原图（该开关默认 false）。矢量回退与 SVG 转换失败在档位2 只写日志与 progress.json，不再就地插注释（档位1 的注释骨架不变，注释也不进 .tex）。
+- **checker 反馈改为同一会话三轮 + 兜底重转换**：checker 发现硬性问题后直接反馈给**原来的** convert 会话（上下文仍在，最省 token、修正更准），最多 3 轮；3 轮仍未通过才作废该章 `.tex`、资源目录与转录，用全新会话重转换一次（新增 `maxCheckerRounds`，重转换带 `retry` 标志避免无限递归）。
+- **assemble 容错与整树交付**：全书编译失败不再算阶段失败——修复会话在构建树里编译、看报错、迭代，超过 `max_fix_rounds` 只告警；有 PDF 才进入终审会话（核对成品/整理目录/重新构建，submit = 定稿）；交付改为把整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件）复制到 `out/`，目录结构以终审会话实际产出为准，`book.pdf` 是 `main.pdf` 的别名。
 - **虚拟工作区挂载表（VFS）**：新增 `internal/latex/vfs.go`——每个会话一个命名空间，`Mount{Name,Dir,Writable}` 挂载表 + `VFS.Resolve(path, write)`。路径语法：`chapters/x.tex`（默认挂载点，通常 `work`）、`project:chapters/x.md`、`/project/chapters/x.md`；越界 `../` 拒绝、只读挂载点写入拒绝、未知挂载点报错并列出可用挂载点。`read_file` 新增 `Mounts` 字段（优先于 Root/AltRoots），回显统一为 `挂载点:路径`；`grep` 新增 `AltRoots`（多根检索，附加根命中加 `label/` 前缀）；`write_file`/`edit_file` 接受 `work:` 前缀、拒绝其它挂载点。终审/修复会话的 grep 现在可同时搜索构建树与项目原始 md。
 - **终审会话（全书汇总/整理）**：全书编译成功后不再直接交付，而是总是进入 `finalReview` 会话——构建树 `build/` 同时是样式包基础工作区（cls/sty/manual.md/example.tex 一并复制），工具集与修复会话共享 `bookSessionTools`（read_file 可读构建树 + 项目根、write_file/edit_file/grep/bash、compile {engine:"latexmk"}、view_pdf、view_image、list_fonts、list_source_pages/view_source_page、submit）；它逐页检视成品 PDF（封面/目录/章节顺序与完整性/页码/图表位置与溢出/孤页/overfull box）并做最小 edit_file 修正后重新构建，轮数上限 `latex.compile.max_fix_rounds`。开关 `latex.compile.final_review`（默认 true）；终审未通过只告警，已编译全书照常交付。
 - **raster 图档位1 统一解释块**：档位1 的 raster 图在 process 阶段总是生成解释文本（复用 img2text 文本提取，每张一次视觉调用），嵌入格式与 STYLED/VECTOR 同骨架——`<!-- DOCVISION-IMAGE: <label> -->` + `DESCRIBE: <解释>` + `LINK: [image](…)`，无文本时只有 LINK 行；`latex.insert_image_description` 仅控制档位2（开=嵌入 `[Image]( content )`，关=纯 `![image]` 原图引用）

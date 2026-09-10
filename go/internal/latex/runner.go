@@ -890,21 +890,27 @@ func (r *Runner) rebuildPhase(mdCache map[string]*mdFile, prog map[string]*image
 				continue
 			}
 			if rp.p.Status == "fallback" {
-				// 矢量转换失败：保留原图引用并就地标注（HTML 注释），
-				// 便于全局搜索定位；下次运行会自动重试该图。
-				note := "<!-- DOCVISION-ERROR: 矢量图转换失败，已保留原图（下次运行自动重试）"
-				if rp.p.Error != "" {
-					note += " | " + mdCommentSafe(rp.p.Error)
+				// 矢量转换失败：保留原图引用；下次运行会自动重试该图
+				// （状态记在 progress.json）。
+				if r.inline {
+					// 档位1：就地标注便于全局搜索定位（注释不进 .tex）。
+					note := "<!-- DOCVISION-ERROR: 矢量图转换失败，已保留原图（下次运行自动重试）"
+					if rp.p.Error != "" {
+						note += " | " + mdCommentSafe(rp.p.Error)
+					}
+					note += " -->"
+					nc = nc[:rp.off[0]] + nc[rp.off[0]:rp.off[1]] + " " + note + nc[rp.off[1]:]
 				}
-				note += " -->"
-				nc = nc[:rp.off[0]] + nc[rp.off[0]:rp.off[1]] + " " + note + nc[rp.off[1]:]
+				// 档位2：产物必须是干净 markdown——不加任何注释，
+				// 失败信息只进日志与 progress.json。
+				r.log.LogWarning(0, "[vector] 转换失败，保留原图（下次自动重试）:", rp.p.ImgPath)
 				continue
 			}
 			block := r.embedBlock(rp.p, name, outDir)
 			if block == "" {
 				continue
 			}
-			if rp.p.SVGFail {
+			if rp.p.SVGFail && r.inline {
 				block += " <!-- DOCVISION-ERROR: SVG 转换失败，已降级为位图/PDF 链接 -->"
 			}
 			// Replacements are applied right-to-left, so earlier
@@ -979,14 +985,13 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 		if p.Kept || p.FigPDF == "" {
 			return r.rasterBlock(p, mdName, outDir)
 		}
-		if r.cfg.Latex.InsertImageDescription && p.TikzCode != "" {
-			return "```latex\n" + p.TikzCode + "\n```"
-		}
 		label := p.Label
 		if label == "" {
 			label = "figure"
 		}
-		// Markdown 不支持内嵌 PDF：优先嵌入 dvisvgm 生成的 SVG。
+		// 档位2 只当普通 markdown 看：矢量图一律嵌入 SVG（Markdown
+		// 不支持内嵌 PDF），SVG 不可用时退回 PNG / PDF 链接；
+		// 绝不嵌入 latex 代码块、绝不加任何注释。
 		if p.FigSVG != "" {
 			return "![" + label + "](" + p.FigSVG + ")"
 		}

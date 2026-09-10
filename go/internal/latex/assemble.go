@@ -78,33 +78,36 @@ func (r *Runner) assemblePhase(proj string) error {
 	res := r.comp.CompileFull(buildDir, "main.tex")
 	LogCompileResult(r.log, 1, "book", res, time.Since(start))
 	if !res.OK {
+		// 编译失败是正常的工作状态（会话需要编译才能看到报错），
+		// 不是阶段失败：交给修复会话在构建树里迭代。修复会话最终
+		// 也没能让它编译通过时才告警，产物照样交付。
 		if err := r.fixSession(proj, buildDir, res.Err); err != nil {
-			return err
+			r.log.LogWarning(0, "[assemble] 修复会话未能在上限内让全书编译通过:", err)
+			r.phaseNote()("[assemble] 修复未完成，交付现有产物")
 		}
 	}
-	// 终审会话：全书已经能编译，让汇总会话通读成品 PDF 与原始 md/原书
-	// 做最终整理（目录/页码/图表位置/版面），并重新构建。失败只告警，
-	// 已编译出的全书仍然交付。
-	if r.cfg.Latex.Compile.FinalReviewEnabled() {
+	// 汇总/终审会话：核对成品 PDF（封面/目录/顺序/页码/图表/版面）、
+	// 整理目录结构，并重新构建 —— 它以 submit 作为"全书定稿"的标记。
+	if r.cfg.Latex.Compile.FinalReviewEnabled() && fileExists(filepath.Join(buildDir, "main.pdf")) {
 		if err := r.finalReview(proj, buildDir, texs); err != nil {
 			r.log.LogWarning(0, "[final-review] 终审会话未通过（保留已编译全书）:", err)
 			r.phaseNote()("[final-review] 终审未通过（保留已编译全书）")
 		}
+	} else if r.cfg.Latex.Compile.FinalReviewEnabled() {
+		r.log.LogWarning(0, "[final-review] 没有可用的全书 PDF，跳过终审")
 	}
 
-	// Final artefacts.
+	// 交付：整棵构建树 → out/（去掉编译中间文件），结构以终审会话
+	// 实际产出的目录为准（书不同结构可以不同），book.pdf 为成品别名。
+	if err := deliverBook(buildDir, outDir); err != nil {
+		return err
+	}
 	pdf := filepath.Join(buildDir, "main.pdf")
 	if !fileExists(pdf) {
-		return fmt.Errorf("全书编译未产出 PDF")
+		return fmt.Errorf("全书编译未产出 PDF（源码树已交付到 %s，可查看 build 日志）", outDir)
 	}
 	if err := copyFile(pdf, filepath.Join(outDir, "book.pdf")); err != nil {
 		return err
-	}
-	copyFile(filepath.Join(buildDir, "main.tex"), filepath.Join(outDir, "main.tex"))
-	copyFile(filepath.Join(buildDir, clsName+".cls"), filepath.Join(outDir, clsName+".cls"))
-	copyDir(filepath.Join(buildDir, "chapters"), filepath.Join(outDir, "chapters"))
-	if fileExists(filepath.Join(buildDir, "figures")) {
-		copyDir(filepath.Join(buildDir, "figures"), filepath.Join(outDir, "figures"))
 	}
 
 	// standalone.tex: single file with all chapters inlined (no compile
@@ -258,6 +261,45 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 		lastErr = res.Err
 	}
 	return fmt.Errorf("终审 %d 轮后全书仍编译失败: %s", rounds, lastErr)
+}
+
+// deliverBook copies the WHOLE build tree into out/ so the delivered
+// structure is exactly what the sessions produced (extra front-matter
+// folders, renamed or split chapters, added resources) — not a fixed
+// file list. LaTeX intermediate files are skipped.
+func deliverBook(buildDir, outDir string) error {
+	if err := os.RemoveAll(outDir); err != nil {
+		return err
+	}
+	skipExt := map[string]bool{
+		".aux": true, ".log": true, ".out": true, ".toc": true, ".fls": true,
+		".fdb_latexmk": true, ".bbl": true, ".blg": true, ".nav": true,
+		".snm": true, ".vrb": true, ".idx": true, ".ilg": true, ".ind": true,
+		".synctex": true, ".lof": true, ".lot": true,
+	}
+	skipName := func(name string) bool {
+		low := strings.ToLower(name)
+		return strings.HasSuffix(low, ".synctex.gz")
+	}
+	return filepath.Walk(buildDir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(buildDir, p)
+		if rerr != nil {
+			return rerr
+		}
+		if rel == "." {
+			return nil
+		}
+		if info.IsDir() {
+			return os.MkdirAll(filepath.Join(outDir, rel), 0o755)
+		}
+		if skipExt[strings.ToLower(filepath.Ext(p))] || skipName(info.Name()) {
+			return nil
+		}
+		return copyFile(p, filepath.Join(outDir, rel))
+	})
 }
 
 // buildStandaloneTex inlines every \input{chapters/...} of main.tex.

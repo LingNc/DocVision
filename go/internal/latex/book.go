@@ -661,7 +661,7 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		go func(i int, chap string, tid int) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
-			err := r.convertOneChapter(proj, clsName, manualPath, chap, workDir, i, tid)
+			err := r.convertOneChapter(proj, clsName, manualPath, chap, workDir, i, tid, false)
 			progMu.Lock()
 			done++
 			running--
@@ -706,7 +706,7 @@ func classNameOfFile(styleDir string) string {
 	return ""
 }
 
-func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir string, idx, tid int) error {
+func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool) error {
 	base := strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
 	texRel := "chapters/" + base + ".tex"
 	texPath := filepath.Join(workDir, texRel)
@@ -808,28 +808,38 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		return fmt.Errorf("会话失败: %w", err)
 	}
 	// Checker pass: a small text model verifies the chapter output
-	// against the chapter markdown. On issues the converter gets one
-	// feedback round; repeated failure is accepted with a warning.
+	// against the chapter markdown. Hard problems are fed straight back
+	// to the SAME conversion session (its context is still live, so it
+	// is the cheapest and most accurate fixer), up to maxCheckerRounds
+	// rounds; only then the chapter is discarded and re-converted with a
+	// fresh session.
 	if fileExists(texPath) {
-		if ok, issues := r.checkChapter(base, chapPath, texPath); !ok {
-			fixed := false
-			if submit.Submitted {
-				fmt2 := "Your submitted chapter was reviewed and has issues:\n" + issues +
-					"\n\nFix the .tex (write_file + compile) and submit again."
-				if _, err := sess.Run(session.RunOptions{UserText: fmt2}); err == nil {
-					if ok2, _ := r.checkChapter(base, chapPath, texPath); ok2 {
-						fixed = true
-					}
-				}
+		ok, issues := r.checkChapter(base, chapPath, texPath)
+		for round := 0; !ok && round < maxCheckerRounds; round++ {
+			r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
+			r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
+			msg := "The checker reviewed your submitted chapter and found problems that must be fixed:\n" + issues +
+				"\n\nFix the .tex (edit_file/write_file), compile until clean, then submit again."
+			if _, err := sess.Run(session.RunOptions{UserText: msg}); err != nil {
+				r.log.LogWarning(tid, "[checker]", base, "反馈轮失败:", err)
+				break
 			}
-			if !fixed {
-				r.log.LogWarning(tid, "[checker]", base, "核对仍有问题（已记录，供终审处理）:", issues)
-				_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
-			} else {
-				r.log.Log(tid, "[checker]", base, "复核通过")
-			}
-		} else {
+			ok, issues = r.checkChapter(base, chapPath, texPath)
+		}
+		if ok {
 			r.log.Log(tid, "[checker]", base, "通过")
+			_ = os.Remove(texPath + ".checker")
+		} else {
+			_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
+			if !retry {
+				r.log.LogWarning(tid, "[checker]", base, strconv.Itoa(maxCheckerRounds)+" 轮反馈后仍有问题 — 作废产物，改用全新会话重转换")
+				r.phaseNote()("[checker] %s 反馈 %d 轮未过 — 重转换", base, maxCheckerRounds)
+				_ = os.Remove(texPath)
+				_ = os.RemoveAll(filepath.Join(workDir, "chapters", base))
+				_ = os.Remove(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
+				return r.convertOneChapter(proj, clsName, manualPath, chapPath, workDir, idx, tid, true)
+			}
+			r.log.LogWarning(tid, "[checker]", base, "重转换后仍未过（已记录，供终审处理）:", issues)
 		}
 	}
 	if !submit.Submitted {
@@ -967,6 +977,11 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workDir, b
 // maxStyleFeedbackRounds caps how many times conversion results can be
 // sent back to the original style session.
 const maxStyleFeedbackRounds = 2
+
+// maxCheckerRounds caps how many times a checker verdict is fed back to
+// the SAME conversion session before the chapter is discarded and
+// re-converted with a fresh session.
+const maxCheckerRounds = 3
 
 // styleFeedbackLoop aggregates the per-chapter work reports (工作汇报,
 // written in real time at submit). When a MAJORITY reports cls/manual

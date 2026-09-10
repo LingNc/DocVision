@@ -100,6 +100,27 @@ func TestEmbedBlockLevel1VectorComment(t *testing.T) {
 	}
 }
 
+// TestEmbedBlockLevel2VectorIsSVGImage pins the level-2 contract: the
+// output is plain markdown — a vector figure becomes an SVG image embed
+// (never a latex fence, never a comment).
+func TestEmbedBlockLevel2VectorIsSVGImage(t *testing.T) {
+	r := testRunner(t, false)
+	r.cfg.Latex.InsertImageDescription = true // 也不能改变矢量图的嵌入形式
+	p := &imageProgress{
+		Class: ClassVector, Label: "Venn diagram",
+		TikzCode: "\\begin{tikzpicture}\\end{tikzpicture}",
+		FigSVG:   "figures/img1.svg", FigPDF: "figures/img1.pdf",
+		ImgPath: "images/book/img1.png",
+	}
+	block := r.embedBlock(p, "book.md", t.TempDir())
+	if block != "![Venn diagram](figures/img1.svg)" {
+		t.Fatalf("level-2 vector embed = %q", block)
+	}
+	if strings.Contains(block, "```") || strings.Contains(block, "<!--") {
+		t.Fatalf("level-2 output must be plain markdown: %q", block)
+	}
+}
+
 // TestEmbedBlockRasterDescription pins the level-1 raster format:
 // DOCVISION-IMAGE comment (first-line closed), DESCRIBE block with the
 // AI explanation and LINK in [image](path) link form — same skeleton
