@@ -72,6 +72,31 @@ type FigureEnv struct {
 	ImagesDir  string // absolute images root for view_image
 	MaxUp      int    // image_context expansion caps (from options.max_window_*)
 	MaxDown    int
+	OutputLang string // {OUTPUT_LANG} placeholder value (options.output_language)
+}
+
+// renderPrompt fills the placeholders used by the built-in session
+// prompts: {MAX_ROUNDS} (session tool budget) and {OUTPUT_LANG} (the
+// configured output language). The prompts are plain strings, so an
+// unsubstituted placeholder reaches the model verbatim.
+func renderPrompt(prompt string, tuning config.SessionTuning, lang string) string {
+	if prompt == "" {
+		return ""
+	}
+	if lang == "" {
+		lang = "Chinese"
+	}
+	prompt = strings.ReplaceAll(prompt, "{OUTPUT_LANG}", lang)
+	prompt = strings.ReplaceAll(prompt, "{MAX_ROUNDS}", strconv.Itoa(session.EffectiveToolRounds(tuning)))
+	return prompt
+}
+
+// outputLang is the configured {OUTPUT_LANG} value (default Chinese).
+func (r *Runner) outputLang() string {
+	if r.cfg == nil || r.cfg.Options.OutputLanguage == "" {
+		return "Chinese"
+	}
+	return r.cfg.Options.OutputLanguage
 }
 
 // imageProgress is the per-image persisted state (断点续传).
@@ -832,7 +857,7 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 
 	res, err := RunTikZSession(client, modelCfg, tuning, r.comp, img64, contextText,
 		outDir, dstTex, dstPDF, dstPNG,
-		FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown},
+		FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown, OutputLang: r.outputLang()},
 		r.log, tid, r.keepTemp(), r.keepRecords())
 	if err != nil {
 		pp.Error = err.Error()

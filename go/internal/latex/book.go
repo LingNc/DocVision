@@ -322,7 +322,7 @@ func (r *Runner) stylePhase(proj string) error {
 	if r.pdfView != nil {
 		prompt += "\n\nIMPORTANT: the ORIGINAL book pages are available — call list_source_pages to get the source PDFs, the detected section starts and (with page=N) that page's text snippets and extracted image file names, then look at the page with view_pdf {\"path\":\"source:<file>\", \"page\":N} (crop/zoom supported). They show the TRUE typography and layout: inspect the title pages, headings, headers/footers and representative figures before writing the class. The OCR markdown itself is readable with read_file {\"path\":\"project:<md>\"} whenever you need exact text."
 	}
-	sess := session.NewSession(client, modelCfg, tuning, prompt, tools, r.log, 1, "style")
+	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompt, tuning, r.outputLang()), tools, r.log, 1, "style")
 	liveHook, liveClose := r.livePhaseLine("style")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
@@ -465,7 +465,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 	modelCfg := r.models[r.cfg.Latex.ChapterModel]
 	tuning := r.cfg.LatexSession("chapter")
 	submit := &SubmitSplitTool{}
-	sess := session.NewSession(client, modelCfg, tuning, chapterSystemPrompt, []session.Tool{
+	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(chapterSystemPrompt, tuning, r.outputLang()), []session.Tool{
 		&GrepTool{Root: sandbox},
 		&ReadFileTool{Root: sandbox},
 		&WorkBashTool{Root: sandbox, Mounts: r.sessionMounts(kindChapters, sandbox), MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
@@ -823,7 +823,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	// 挂载查看。
 	tools = append(tools, r.sourcePageTools()...)
 	sess := session.NewSession(client, modelCfg, tuning,
-		strings.ReplaceAll(convertSystemPrompt, "{MAX_ROUNDS}", strconv.Itoa(session.EffectiveToolRounds(tuning))),
+		renderPrompt(convertSystemPrompt, tuning, r.outputLang()),
 		tools, r.log, tid, "convert:"+base)
 
 	// 会话转录（JSONL，图片走 file:// 引用）：单章转换中断后（进程被

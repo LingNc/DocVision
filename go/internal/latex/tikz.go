@@ -51,7 +51,7 @@ func RunTikZSession(
 	engineIsXe := strings.Contains(strings.ToLower(comp.engine), "xe") ||
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
-	sess := session.NewSession(client, modelCfg, tuning, latexFigurePrompt, []session.Tool{
+	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(latexFigurePrompt, tuning, env.OutputLang), []session.Tool{
 		&WriteWorkFileTool{Root: scratch},
 		&EditWorkFileTool{Root: scratch},
 		&ReadFileTool{Root: scratch},

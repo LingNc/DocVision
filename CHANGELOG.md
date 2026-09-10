@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- **提示词占位符未被替换**：作图提示词里的 `{OUTPUT_LANG}` 与 `{MAX_ROUNDS}` 原样进入 system prompt（日志里可见 `Respond in the document's language ({OUTPUT_LANG}) for any explanation`）。现在所有内置提示词统一走 `renderPrompt(prompt, tuning, lang)`：`{MAX_ROUNDS}` 取会话工具预算，`{OUTPUT_LANG}` 取 `options.output_language`（默认 Chinese）；新增 `TestBuiltinPromptsAreRendered` 守住所有提示词常量。
 - **`docvision latex --all` 缺失标志注册**：代码一直在读 `cmd.Flags().GetBool("all")`（决定日志分析是"只看本次"还是"汇总全部历史"），但从未 `cmd.Flags().Bool("all", ...)` 注册，于是显式传 `--all` 会直接报 `unknown flag: --all`（自 7f3b7d0 起的潜在缺陷，该分支实际是死代码）。现已注册并出现在 `--help` 里。
 - 文档与帮助文本里的历史遗留名清理：`view_page` → `view_pdf {path:"source:<file>.pdf", page:N}`、`view_source_page`、`list_images`、`read_md`、`install_font`、`compile_preview` 与 `preview-<n>.png`/`preview.png` 虚拟名、`mermaid_validation` → `tools.mermaid.validation`、`options.format_fix_attempts` → `img2text.format_fix_attempts`、`workflow --step latex/verify`。
 - 配置模板注释与代码事实对齐（`config.example.yaml` + `default.yaml`）：`paths.fonts` 不再自动下载字体（按会话报告清单手动放入，编译经 `TEXINPUTS`/`OSFONTDIR`）、`latex.insert_image_description` 仅作用于档位2（档位1 raster 总带 `DESCRIBE`）、`latex.compile.raster_dpi` 只用于矢量图 PNG 回退产物。

@@ -167,7 +167,7 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "book", Log: r.log, Tid: 1}
 	submit := &SubmitDoneTool{Label: "the build fix"}
 	tools := r.bookSessionTools(proj, buildDir, compile, submit)
-	sess := session.NewSession(client, modelCfg, tuning, fixSystemPrompt, tools, r.log, 1, "fix")
+	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(fixSystemPrompt, tuning, r.outputLang()), tools, r.log, 1, "fix")
 
 	lastErr := firstErr
 	for attempt := 0; attempt < r.cfg.Latex.Compile.MaxFixRounds; attempt++ {
@@ -208,7 +208,7 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "final-review", Log: r.log, Tid: 1}
 	submit := &SubmitDoneTool{Label: "the final review"}
 	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
-		r.cfg.LatexSession("convert"), finalReviewSystemPrompt,
+		r.cfg.LatexSession("convert"), renderPrompt(finalReviewSystemPrompt, r.cfg.LatexSession("convert"), r.outputLang()),
 		r.bookSessionTools(proj, buildDir, compile, submit), r.log, 1, "final-review")
 	liveHook, liveClose := r.livePhaseLine("final-review")
 	sess.SetProgressHook(liveHook)
