@@ -60,7 +60,7 @@ func newLatexCmd() *cobra.Command {
 
 所有 AI 会话支持：独立模型配置（models: 注册表）、上下文窗口配置、自动压缩、
 可分离工具注册、JSONL 转录断点续传。每个会话有独立命名空间（挂载表：work 可写，
-project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（latex.bash_sandbox），
+project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools.bash.sandbox），
 临时工作区落在 <项目>/work/temp（latex.keep_temp_dirs 可保留，debug 下必定保留）。`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
