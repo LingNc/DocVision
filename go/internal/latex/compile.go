@@ -60,7 +60,7 @@ func NewCompiler(cfg config.LatexCompileConfig) *Compiler {
 
 // Available reports whether the configured engine and raster tool are
 // installed. Used for auto-mode style degradation (mirroring the
-// mermaid_validation behaviour of img2text).
+// tools.mermaid.validation behaviour of img2text).
 func (c *Compiler) Available() error {
 	for _, bin := range []string{c.engine, c.raster} {
 		if _, err := exec.LookPath(bin); err != nil {

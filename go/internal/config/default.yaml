@@ -42,7 +42,7 @@ paths:
   done_dir: "./files/done"         # dir for sources archived after a successful split
   latex_output:  ./finally_latex    # 档位2 LaTeX 输出目录
   latex_project: ./latex_project    # 档位1 全书工作目录
-  fonts:        ./fonts            # AI 字体目录（可自动下载字体）
+  fonts:        ./fonts            # 字体目录（按样式会话报告的清单手动放入；编译时经 TEXINPUTS/OSFONTDIR 生效）
 
 # ----------------------------------------------------------------
 # LaTeX output (docvision latex)
@@ -60,19 +60,17 @@ latex:
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
   convert_model: "convert"       # 档位1：章节转换 / 构建修复 AI
   checker_model: "checker"
-  insert_image_description: false # raster 保留原图时是否嵌入 AI 解释文本
-                                  # （同时控制 vector 确认后嵌入 tikz 代码块而非 PDF 链接）
+  insert_image_description: false # 档位2：raster 保留原图时是否再嵌入一段 AI 解释文本
+                                  # （档位1 不受此开关控制：raster 总是带 DESCRIBE 解释块）
   chapter_granularity: "small"   # 档位1 章节拆分粒度：small=按小节拆分（默认）/ large=按大章整体拆分
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/编译 scratch/矢量图工作区）；debug 日志下必定保留
   keep_session_records: false # 保留会话转录 JSONL（成功会话默认清理）；debug 日志下必定保留
-  bash_sandbox: true          # 会话 bash 是否用 bubblewrap 内核沙箱（只挂载本会话的挂载表）
-  bash_max_output: 5000          # 会话 bash 工具返回给模型的字符上限（默认 5000）
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）
     raster_command: "pdftoppm"   # PDF 栅格化工具（poppler-utils）
-    raster_dpi: 110              # 回给 AI 核对的 PNG 分辨率
+    raster_dpi: 110              # 矢量图 PDF 栅格化为 PNG 的分辨率（SVG 不可用时的回退产物）
     max_fix_rounds: 8            # 编译-修正整体循环上限
     final_review: true           # 全书编译通过后再跑一次终审会话（汇总/整理/重编译）
   sessions:                      # 每个 AI 会话的独立调优
@@ -127,8 +125,12 @@ tools:
   latex:
     validation: "auto"          # off, auto, strict; latex code blocks are compile-checked
     engine: "xelatex"           # latex validation engine (pdflatex/lualatex fallback)
+  bash:                         # 会话 bash 工具（latex AI 会话用）
+    sandbox: true               # 用 bubblewrap 内核沙箱（沙箱里只有本会话的挂载表；缺 bwrap 自动回退并告警）
+    max_output: 5000            # bash 工具返回给模型的字符上限
+
 verify:
-  enabled: false                 # 默认关闭；开启后自动流程核对每张图与内容
+  enabled: false                 # 仅作提示：核对只在显式运行 docvision verify 时执行（自动流程不调用）
   verifier_model: "verifier"     # models: 中支持图像的校验模型
   concurrency: 2
   report_file: "verify_report.md"

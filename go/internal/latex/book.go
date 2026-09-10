@@ -305,7 +305,7 @@ func (r *Runner) stylePhase(proj string) error {
 		&EditWorkFileTool{Root: workDir},
 		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
 		&GrepTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
-		&WorkBashTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), MaxOutput: r.cfg.Latex.BashMaxOutput, Sandbox: r.cfg.Latex.BashSandboxEnabled(), Log: r.log, Tid: 1},
+		&WorkBashTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style", Log: r.log, Tid: 1},
 		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
@@ -468,7 +468,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 	sess := session.NewSession(client, modelCfg, tuning, chapterSystemPrompt, []session.Tool{
 		&GrepTool{Root: sandbox},
 		&ReadFileTool{Root: sandbox},
-		&WorkBashTool{Root: sandbox, Mounts: r.sessionMounts(kindChapters, sandbox), MaxOutput: r.cfg.Latex.BashMaxOutput, Sandbox: r.cfg.Latex.BashSandboxEnabled(), Log: r.log, Tid: 1},
+		&WorkBashTool{Root: sandbox, Mounts: r.sessionMounts(kindChapters, sandbox), MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		&EditWorkFileTool{Root: sandbox},
 		submit,
 	}, r.log, 1, "chapters")

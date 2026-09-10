@@ -161,6 +161,35 @@ func (c LatexConfig) BashSandboxEnabled() bool {
 	return c.BashSandbox == nil || *c.BashSandbox
 }
 
+// BashSandboxEnabled reports whether session bash runs inside the
+// bubblewrap sandbox. tools.bash.sandbox wins; the deprecated
+// latex.bash_sandbox is still honoured.
+func (c *Config) BashSandboxEnabled() bool {
+	if c.Tools.Bash.Sandbox != nil {
+		return *c.Tools.Bash.Sandbox
+	}
+	return c.Latex.BashSandboxEnabled()
+}
+
+// BashMaxOutput is the character cap of the session bash tool:
+// tools.bash.max_output wins, then the deprecated latex.bash_max_output,
+// then the built-in default (5000).
+func (c *Config) BashMaxOutput() int {
+	if c.Tools.Bash.MaxOutput > 0 {
+		return c.Tools.Bash.MaxOutput
+	}
+	if c.Latex.BashMaxOutput > 0 {
+		return c.Latex.BashMaxOutput
+	}
+	return 5000
+}
+
+// UsesDeprecatedBashKeys reports whether the config still uses the old
+// latex.bash_* location (the loader prints a migration hint).
+func (c *Config) UsesDeprecatedBashKeys() bool {
+	return c.Latex.BashSandbox != nil || c.Latex.BashMaxOutput > 0
+}
+
 func (c LatexCompileConfig) FinalReviewEnabled() bool {
 	return c.FinalReview == nil || *c.FinalReview
 }
@@ -212,13 +241,11 @@ type LatexConfig struct {
 	// session succeeds. Independent from KeepTempDirs: some users want
 	// every conversation on disk. Debug logging implies keeping them.
 	KeepSessionRecords *bool `yaml:"keep_session_records"`
-	// BashSandbox wraps session bash commands in bubblewrap: inside the
-	// sandbox only the session's mounts exist (writable mounts writable,
-	// read-only mounts read-only). nil/true = enabled; also falls back to
-	// a plain shell with a warning when bubblewrap is unavailable.
+	// BashSandbox is the deprecated location of tools.bash.sandbox; kept so
+	// existing configs keep working (resolved by Config.BashSandboxEnabled).
 	BashSandbox *bool `yaml:"bash_sandbox"`
-	// BashMaxOutput caps how many characters a session's bash tool
-	// returns to the model. Default 5000.
+	// BashMaxOutput is the deprecated location of tools.bash.max_output
+	// (resolved by Config.BashMaxOutput).
 	BashMaxOutput int `yaml:"bash_max_output"`
 	// Sessions tunes each specialised AI session independently.
 	Sessions struct {
@@ -305,6 +332,15 @@ type ToolsConfig struct {
 		Validation string `yaml:"validation"` // off, auto, strict (latex code block compile check)
 		Engine     string `yaml:"engine"`     // xelatex / pdflatex / lualatex
 	} `yaml:"latex"`
+	// Bash configures the session bash tool used by the latex AI
+	// sessions: whether commands run inside the bubblewrap sandbox and
+	// how much output is handed back to the model. It lives here (not
+	// under latex:) because it describes the tool itself, like
+	// tools.mermaid / tools.latex.
+	Bash struct {
+		Sandbox   *bool `yaml:"sandbox"`    // bubblewrap kernel sandbox (default true)
+		MaxOutput int   `yaml:"max_output"` // characters of bash output fed to the model
+	} `yaml:"bash"`
 }
 
 // OptionsConfig holds tuning knobs for the image-to-text processing pipeline.
@@ -366,6 +402,14 @@ const CurrentConfigVersion = 6
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
+// warnDeprecatedKeys prints migration hints for configs written with an
+// older key layout. Non-fatal: the old keys still work.
+func warnDeprecatedKeys(cfg *Config) {
+	if cfg.UsesDeprecatedBashKeys() {
+		fmt.Fprintln(os.Stderr, "⚠ latex.bash_sandbox / latex.bash_max_output 已迁移到 tools.bash.sandbox / tools.bash.max_output（旧键仍生效，建议改用新位置）")
+	}
+}
+
 func checkConfigVersion(cfg *Config) {
 	if cfg.ConfigVersion != CurrentConfigVersion {
 		fmt.Fprintf(os.Stderr, "⚠ 配置文件版本不匹配 (config_version: %d，当前程序期望 %d) —— 请参考 config.example.yaml 更新你的配置文件\n", cfg.ConfigVersion, CurrentConfigVersion)
@@ -384,6 +428,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	checkConfigVersion(cfg)
+	warnDeprecatedKeys(cfg)
 	setDefaults(cfg)
 	if err := validatePaths(cfg); err != nil {
 		return nil, err
@@ -402,8 +447,11 @@ func validatePaths(cfg *Config) error {
 	default:
 		return fmt.Errorf("latex.chapter_granularity 必须为 small 或 large（当前 %q）", cfg.Latex.ChapterGranularity)
 	}
+	if cfg.Tools.Bash.MaxOutput < 0 {
+		return fmt.Errorf("tools.bash.max_output 不能为负（当前 %d）", cfg.Tools.Bash.MaxOutput)
+	}
 	if cfg.Latex.BashMaxOutput < 0 {
-		return fmt.Errorf("latex.bash_max_output 不能为负（当前 %d）", cfg.Latex.BashMaxOutput)
+		return fmt.Errorf("latex.bash_max_output（已废弃，请改用 tools.bash.max_output）不能为负（当前 %d）", cfg.Latex.BashMaxOutput)
 	}
 	if cfg.Paths.InputDir == "" || cfg.Paths.DoneDir == "" {
 		return nil
@@ -580,13 +628,10 @@ func setDefaults(cfg *Config) {
 		off := false
 		cfg.Latex.KeepSessionRecords = &off
 	}
-	if cfg.Latex.BashSandbox == nil {
-		enabled := true
-		cfg.Latex.BashSandbox = &enabled
-	}
-	if cfg.Latex.BashMaxOutput == 0 {
-		cfg.Latex.BashMaxOutput = 5000
-	}
+	// Bash tool settings are resolved lazily by Config.BashSandboxEnabled /
+	// Config.BashMaxOutput (tools.bash.* wins, latex.bash_* deprecated):
+	// they are deliberately not filled in here, otherwise a default written
+	// into the legacy fields would mask an explicit tools.bash.* value.
 	defaultSessionTuning(&cfg.Latex.Sessions.Drawing)
 	// The style analyst emits a full .cls + manual + example in one
 	// reply, so its built-in budget is larger than the shared default.

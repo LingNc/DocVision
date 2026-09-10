@@ -32,28 +32,36 @@ func newLatexCmd() *cobra.Command {
   docvision latex 书.md       自备 md：复制进 files/ 后整理进 output/ 直接处理
                               （output/ 里的 md 直接选用，不做拒绝）
 
-档位 2（latex.level: 2）:
-  专用分类 AI 逐图标记 text（艺术字文本）/ vector（可用 TikZ 重绘）/ raster（保留原图）。
-  text   -> 复用图片解释 AI，纯内容嵌入文本流（无 [AI]/[IMG_TYPE] 标记）。
-  vector -> 专用作图 AI 会话写 TikZ -> 自动编译 -> 栅格化 PNG 回给模型视觉核对
-            -> 确认提交；编译产物 PDF 以矢量图嵌入 Markdown。
-  raster -> 保留原图链接（insert_image_description 开启时嵌入可读解释文本）。
+档位 2（latex.level: 2）——产物是"可以直接当 markdown 读"的干净文本：
+  专用分类 AI 逐图标记 text（样式化文本）/ vector（可用 LaTeX 重绘）/ raster（保留原图）。
+  text   -> 只提取图中可见文本（公式→LaTeX、表格→Markdown；无文字则保留原图），
+            纯文本嵌入正文（无 [AI]/[IMG_TYPE] 标记）。
+  vector -> 专用作图 AI 会话 write_file 写代码 -> compile 编译（只回日志/产物名/页数）
+            -> view_pdf 看自己编译出的 PDF 视觉核对 -> submit；
+            产物转 SVG 后以 ![label](figures/*.svg) 嵌入（SVG 不可用退 PNG/PDF 链接）。
+  raster -> 保留原图链接（insert_image_description 开启时才嵌入可读解释文本）。
+  档位2 输出**不含任何 <!-- DOCVISION-* --> 注释**，失败只记日志与 progress.json。
 
-档位 1（latex.level: 1）:
-  images   图片处理（同档位 2：classify → 矢量/文本/raster 嵌入 md）
-  style    样式分析 AI 读全书 md + 扫描页，产出 book.cls + 使用手册 + 案例，
+档位 1（latex.level: 1）——全书 LaTeX，产物是 cls + 分章 .tex + 编译好的 PDF：
+  images   图片处理（classify → 矢量代码块/文本/raster 按骨架嵌入 md，
+           注释首行闭合，CONTENT:/LINK: 字段在注释外）
+  style    样式分析 AI 读全书 md + 原书扫描页，产出 book.cls + 使用手册 + 案例，
            在工作区里反复 compile/view_pdf 自查后 submit
   chapters 章节划分 AI（grep + read_file + bash + 记忆缓冲区）切分章节
-  convert  转换 AI 并发逐章转 .tex（每章独立工作区，可写自己的章节文件与
-           资源目录，compile/view_pdf/view_image/doc_search 可用），
-           每章产物交 checker 小模型核对，问题章节自动打回重做
+  convert  转换 AI 并发逐章转 .tex：每章有**私有工作视图**（只能读写自己那章），
+           别人的成品只能经只读通道 project:converted/、project:reports/ 参考；
+           工具 compile/view_pdf/view_image/doc_search；每章产物交 checker 小模型核对，
+           硬性问题回同一会话最多 3 轮，仍不过才换新会话重转换一次
   feedback 多数章节报 cls/手册问题时打回原样式会话；样式包更新后只对
-           「报问题」或「新 cls 下编译不过」的章节并发跑样式修复子会话
+           「报问题」或「新 cls 下编译不过」的章节并发跑样式修复子会话（不重转换）
   assemble 汇总编译全书 PDF（latexmk 多遍），失败进入修复会话；
-           成功后进入终审会话逐页核对成品 PDF 并整理，最后写 standalone.tex
+           成功后进入终审会话逐页核对成品 PDF 并整理，最后写 standalone.tex；
+           交付把整棵 build 树复制到 out/（book.pdf = main.pdf 别名）
 
 所有 AI 会话支持：独立模型配置（models: 注册表）、上下文窗口配置、自动压缩、
-可分离工具注册、JSONL 转录断点续传。`,
+可分离工具注册、JSONL 转录断点续传。每个会话有独立命名空间（挂载表：work 可写，
+project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（latex.bash_sandbox），
+临时工作区落在 <项目>/work/temp（latex.keep_temp_dirs 可保留，debug 下必定保留）。`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigWithFlag(cmd)
@@ -135,6 +143,7 @@ func newLatexCmd() *cobra.Command {
 	cmd.Flags().Int("number", 10, "测试图片数量")
 	cmd.Flags().String("seed", "", "随机种子")
 	cmd.Flags().String("source-dir", "", "覆盖输入 markdown 目录（默认 paths.output_dir）")
+	cmd.Flags().Bool("all", false, "日志分析汇总全部历史日志（默认只分析本次运行）")
 	cmd.Flags().Bool("debug", false, "调试模式：记录请求参数/提示词/工具调用/响应统计到日志文件")
 	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节")
 	cmd.Flags().Bool("verbose", false, "详细控制台输出（默认仅显示 img2text 风格的进度行，详情写日志文件）")
@@ -145,11 +154,13 @@ func newLatexCmd() *cobra.Command {
 func newVerifyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "verify",
-		Short: "AI 核对输出内容与原图是否一致（verify.enabled 默认关闭）",
-		Long: `用配置的视觉模型逐项核对每张图片与其嵌入内容（描述/TikZ）是否一致，
+		Short: "AI 核对输出内容与原图是否一致（仅显式运行，自动流程不调用）",
+		Long: `用配置的视觉模型逐项核对每张图片与其嵌入内容（描述/矢量代码）是否一致，
 给出问题与修改意见，写入 verify_report.md。不会修改输出本身。
-显式运行本命令不受 verify.enabled 开关限制；workflow 自动流程中则仅在
-verify.enabled: true 时执行。`,
+
+本核对**只在显式运行本命令时执行**：workflow 与 latex 自动流程都不会调用它
+（v1.3 起 workflow 已不含 verify 步骤）。verify.enabled 只作为提示信息，
+控制台会告知当前取值，不影响本命令是否运行。`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigWithFlag(cmd)
 			if err != nil {
