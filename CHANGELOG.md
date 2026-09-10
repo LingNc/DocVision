@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+（无）
+
+## [v1.5.0-beta.3] - 2026-09-10
+
 ### Added
 
 - `latex.keep_temp_dirs` / `latex.keep_session_records`（默认 false，debug 日志下必定保留）：临时工作目录与会话转录的保留策略分开配置。
