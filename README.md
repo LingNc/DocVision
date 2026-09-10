@@ -185,7 +185,13 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 
 把项目里所有 AI 会话的 JSONL 转录渲染成像聊天软件一样的可浏览页面。扫描范围是根目录下**任意层级**的 `*.jsonl`：`work/style_session.jsonl`（样式）、`work/sessions/chapters.jsonl`（章节划分）、`work/sessions/convert_<章>.jsonl`（单章转换）、`source/sessions/vector_<书名>__<sha256>__<图>.jsonl`（档位2 矢量图）等。
 
-扫描根下可以并存多个项目（`latex_project/`、`latex_project_0909/`，以及同一个 `latex_project/<书名>/`），因此左侧会话列表**按项目分组**：组名取相对路径的第一段（直接躺在根目录的转录归到「（根目录）」），标题带会话数，点标题折叠/展开该组。默认全部展开；过滤时只留下有命中的组并自动展开（命中组标注「过滤命中」）；折叠状态记在页面内存里，点「刷新」重新扫描后仍保持（不落盘，重开页面回到全部展开）。
+扫描根下可以并存多个项目，因此左侧会话列表**按项目分组**：一个项目 = 一个可折叠集合，标题带会话数，点标题折叠/展开。分组按**磁盘上的工程结构**判定，而不是死板地取路径第一段：
+
+- `latex_project/<书名>/work/sessions/convert_01.jsonl` → 组名 `latex_project/<书名>`。多项目布局下每本书一个工作区，书名目录里有 `.docvision_project.json`／`progress.json`／`work/`／`source/` 之类的东西，因此它自己就是一个组——侧栏标题显示**书名**，输出根 `latex_project/` 弱化成灰色前缀；否则同一个输出根下的所有书会挤成一个组，「这本书的会话在哪」就看不出来了。
+- `latex_project/work/style_session.jsonl` → 组名 `latex_project`，并标一句「**旧版单项目**」：该输出根**本身**就是工程（`work/`、`progress.json` 直接挂在它下面），是引入多项目布局之前的形态（见上文「兼容旧版单项目布局」）。
+- 工程内部的结构名（`work`、`source`、`style`、`sessions`、`temp`…）永远不当组名；直接躺在扫描根下的转录、或用 `--dir` 指向某个工程本身时，一律归到「（根目录）」。
+
+默认全部展开；过滤时只留下有命中的组并自动展开（命中组标注「过滤命中」）；折叠状态记在页面内存里，点「刷新」重新扫描后仍保持（不落盘，重开页面回到全部展开）。
 
 ```bash
 docvision sessions                           # 扫描当前目录，生成 <当前目录>/sessions.html

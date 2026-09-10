@@ -223,9 +223,22 @@
       var name = s.project || projectOf(s.id);
       var g = byName[name];
       if (!g) {
-        g = byName[name] = { name: name, items: [], live: 0, matched: false };
+        // 「输出根/项目名」（多项目布局：<latex_project>/<书名>/…）与
+        // 「输出根」（旧版单项目布局，该目录本身就是工作区）在侧栏里
+        // 区别对待：前者以书名为标题、容器名弱化成前缀，后者标一句
+        // 「旧版单项目」——否则一个输出根下的多本书会全挤在一个组里，
+        // 或者把老工程误当成新布局的一本书。
+        var cut = name.lastIndexOf('/');
+        g = byName[name] = {
+          name: name,
+          prefix: cut > 0 ? name.slice(0, cut + 1) : '',
+          title: cut > 0 ? name.slice(cut + 1) : name,
+          legacy: !!s.projectLegacy,
+          items: [], live: 0, matched: false
+        };
         groups.push(g);
       }
+      if (s.projectLegacy) { g.legacy = true; }
       if (q && sessionHaystack(s).indexOf(q) < 0) { return; }
       g.items.push(s);
       if (s.live) { g.live++; }
@@ -280,8 +293,21 @@
       wrap.open = g.matched ? true : !state.collapsed[g.name];
 
       var head = el('summary', 'proj-head');
-      head.appendChild(el('span', 'proj-name', g.name));
+      var name = el('span', 'proj-name');
+      name.title = g.name;
+      if (g.prefix) {
+        // 容器（输出根）名弱化：一眼看到的是书名，鼠标悬停看到全路径。
+        name.appendChild(el('span', 'proj-prefix', g.prefix));
+      }
+      name.appendChild(el('span', 'proj-title', g.title));
+      head.appendChild(name);
       head.appendChild(el('span', 'proj-count', g.items.length + ' 个会话'));
+      if (g.legacy) {
+        var chip = el('span', 'proj-note', '旧版单项目');
+        chip.title = '这个输出根本身就是一个工程（work/、progress.json 等直接挂在它下面），' +
+          '是引入多项目布局之前的形态；新布局是「输出根/书名/」。';
+        head.appendChild(chip);
+      }
       if (g.live) { head.appendChild(el('span', 'dot live')); }
       if (g.matched) { head.appendChild(el('span', 'proj-note', '过滤命中')); }
       wrap.appendChild(head);
@@ -976,10 +1002,14 @@
     if (MODE === 'static') {
       state.root = DATA.root || '';
       state.generated = DATA.generated || '';
+      // 静态模式从内嵌数据里挑字段（丢掉每会话的 lines 大块）；这里漏一个
+      // 字段，页面就会静默少一块 UI（曾漏掉 projectLegacy，"旧版单项目"
+      // 标记在静态快照里不显示）。新增字段时记得同时加到这里与实时模式。
       state.sessions = (DATA.sessions || []).map(function (s) {
         return {
           id: s.id, label: s.label, title: s.title, name: s.name, messages: s.messages,
-          size: s.size, mtime: s.mtime, live: s.live, project: s.project, meta: s.meta
+          size: s.size, mtime: s.mtime, live: s.live, project: s.project,
+          projectLegacy: s.projectLegacy, meta: s.meta
         };
       });
       renderSessions();

@@ -148,9 +148,14 @@ html, body {
 .proj-head::before { content: "▸"; color: var(--dim); }
 .proj-group[open] > .proj-head::before { content: "▾"; }
 .proj-head:hover { background: var(--panel-3); }
-.proj-name { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 多项目布局的组标题：「输出根/」弱化成前缀，「书名」为主。 */
+.proj-prefix { color: var(--dim); font-weight: 500; font-family: var(--mono); font-size: 11px; }
+.proj-title { font-weight: 600; }
 .proj-count { color: var(--dim); font-family: var(--mono); font-size: 11px; }
 .proj-note { color: var(--accent); font-size: 11px; }
+/* 「旧版单项目」这类说明性标记：比"过滤命中"更弱，不抢视线。 */
+.proj-note[title] { color: var(--dim); font-weight: 500; }
 .proj-body { padding: 4px 0 2px; }
 
 .session-row {

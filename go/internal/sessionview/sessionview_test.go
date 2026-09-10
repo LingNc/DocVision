@@ -618,8 +618,14 @@ func TestScanProjectsAndMeta(t *testing.T) {
 	if got := byID["latex_project_0909/work/sessions/convert_chapter_01.jsonl"]; got.Project != "latex_project_0909" || got.Meta != nil || got.Messages != 2 {
 		t.Errorf("老转录（无 meta 行）扫描结果不对：%+v", got)
 	}
-	if got := byID["latex_project/书名/work/sessions/chapters.jsonl"]; got.Project != "latex_project" {
-		t.Errorf("嵌套书名目录的 project = %q, want latex_project", got.Project)
+	// 多项目布局：书名目录本身就是工作区（含 work/），因此它自己是一个组，
+	// 组名带上容器（输出根），否则一个输出根下的所有书会挤成一组。
+	if got := byID["latex_project/书名/work/sessions/chapters.jsonl"]; got.Project != "latex_project/书名" {
+		t.Errorf("书名目录的 project = %q, want latex_project/书名", got.Project)
+	}
+	// latex_project 下直接有 work/：它是旧版单项目工程本身，标成 legacy。
+	if !style.ProjectLegacy {
+		t.Errorf("旧版单项目组的 legacy 标记 = false，want true（%+v）", style)
 	}
 	if got := byID["loose.jsonl"]; got.Project != RootProject {
 		t.Errorf("根目录直挂的 project = %q, want %q", got.Project, RootProject)
@@ -855,6 +861,21 @@ func TestViewerAssetsThemeAndMeta(t *testing.T) {
 			t.Errorf("脚本缺少项目分组关键逻辑 %q", marker)
 		}
 	}
+	// 多项目布局：「输出根/书名」以书名为标题（容器名弱化成前缀），旧版
+	// 单项目根标一句说明——两者在侧栏里必须能一眼分清。
+	for _, marker := range []string{"proj-prefix", "proj-title", "'旧版单项目'"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("脚本缺少多项目布局的组标题逻辑 %q", marker)
+		}
+	}
+	if !strings.Contains(css, ".proj-prefix") {
+		t.Error("样式表没有容器前缀样式（书名应当是视觉主体）")
+	}
+	// 静态快照把每个会话的字段挑进 state.sessions：漏字段会让 UI 少一块
+	// （曾经漏掉 projectLegacy，静态页里"旧版单项目"标记不显示）。
+	if !strings.Contains(js, "projectLegacy: s.projectLegacy") {
+		t.Error("静态模式的会话字段映射漏了 projectLegacy")
+	}
 	if !strings.Contains(js, "含系统提示词快照") {
 		t.Error("会话行没有提示含系统提示词快照")
 	}
@@ -928,6 +949,98 @@ func TestServeAPIMetaAndProject(t *testing.T) {
 	for _, marker := range []string{`id="theme-toggle"`, "dsh.sessionview.theme", `data-theme="light"`} {
 		if !strings.Contains(string(page), marker) {
 			t.Errorf("实时页面缺少主题切换标识 %q", marker)
+		}
+	}
+}
+
+// TestProjectGroupMultiProjectLayout pins the sidebar grouping to the
+// multi-project layout: <输出根>/<书名>/ is its own group (so several books
+// in one output root do not collapse into one group), a legacy single-project
+// root stays one group and is marked legacy, and a directory that is merely a
+// workspace subdirectory (work/, source/, …) never becomes a group of its own.
+func TestProjectGroupMultiProjectLayout(t *testing.T) {
+	root := t.TempDir()
+
+	// 新布局：每本书一个目录，docvision 在其中写 .docvision_project.json。
+	bookA := jsonl(root, "latex_project", "概率论-测试", "work", "sessions", "convert_01.jsonl")
+	writeFile(t, bookA, transcript(`{"t":"msg","role":"user","text":"转换"}`))
+	writeFile(t, filepath.Join(root, "latex_project", "概率论-测试", ".docvision_project.json"), `{"name":"概率论-测试"}`)
+	bookB := jsonl(root, "latex_project", "线性代数-测试", "source", "sessions", "vector_x.jsonl")
+	writeFile(t, bookB, transcript(`{"t":"msg","role":"user","text":"画图"}`))
+	writeFile(t, filepath.Join(root, "latex_project", "线性代数-测试", "progress.json"), `{}`)
+
+	// 旧版单项目：输出根本身就是工作区（work/ 直接挂在它下面）。
+	legacy := jsonl(root, "latex_project_0909", "work", "style_session.jsonl")
+	writeFile(t, legacy, transcript(`{"t":"msg","role":"user","text":"样式"}`))
+
+	// 档位2 旧版（finally_latex/progress_items 直接挂根下）。
+	legacy2 := jsonl(root, "finally_latex", "sessions", "vector_y.jsonl")
+	writeFile(t, legacy2, transcript(`{"t":"msg","role":"user","text":"矢量"}`))
+	writeFile(t, filepath.Join(root, "finally_latex", "progress_items", ".keep"), "")
+
+	// 既不是工作区、也不是结构名的目录：分组退回第一层，不能凭空造组。
+	plain := jsonl(root, "latex_project", "scratch", "notes.jsonl")
+	writeFile(t, plain, transcript(`{"t":"msg","role":"user","text":"随手记"}`))
+
+	sessions, err := Scan(root)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	byID := map[string]SessionInfo{}
+	for _, s := range sessions {
+		byID[s.ID] = s
+	}
+	cases := []struct {
+		id     string
+		group  string
+		legacy bool
+	}{
+		{"latex_project/概率论-测试/work/sessions/convert_01.jsonl", "latex_project/概率论-测试", false},
+		{"latex_project/线性代数-测试/source/sessions/vector_x.jsonl", "latex_project/线性代数-测试", false},
+		{"latex_project_0909/work/style_session.jsonl", "latex_project_0909", true},
+		{"finally_latex/sessions/vector_y.jsonl", "finally_latex", true},
+		// 容器本身不是工作区（书都在子目录里）：只退到容器名，不算 legacy。
+		{"latex_project/scratch/notes.jsonl", "latex_project", false},
+	}
+	for _, c := range cases {
+		got, ok := byID[c.id]
+		if !ok {
+			t.Fatalf("没扫到 %s", c.id)
+		}
+		if got.Project != c.group {
+			t.Errorf("%s 的 project = %q, want %q", c.id, got.Project, c.group)
+		}
+		if got.ProjectLegacy != c.legacy {
+			t.Errorf("%s 的 legacy = %v, want %v", c.id, got.ProjectLegacy, c.legacy)
+		}
+	}
+
+	// 组名必须逐个不同：三本书/工程各一组，而不是挤进 latex_project。
+	seen := map[string]int{}
+	for _, s := range sessions {
+		seen[s.Project]++
+	}
+	for _, want := range []string{"latex_project/概率论-测试", "latex_project/线性代数-测试", "latex_project_0909", "finally_latex"} {
+		if seen[want] != 1 {
+			t.Errorf("组 %q 有 %d 个会话，want 1（分组：%v）", want, seen[want], seen)
+		}
+	}
+}
+
+// TestProjectGroupScannedInsideWorkspace covers scanning a project directory
+// itself (docvision sessions --dir <proj>): the first segment is then a
+// workspace internal (work/, source/), which must not become a group name.
+func TestProjectGroupScannedInsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, jsonl(root, "work", "sessions", "convert_01.jsonl"), transcript(`{"t":"msg","role":"user","text":"转换"}`))
+	writeFile(t, jsonl(root, "source", "sessions", "vector_x.jsonl"), transcript(`{"t":"msg","role":"user","text":"矢量"}`))
+	sessions, err := Scan(root)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	for _, s := range sessions {
+		if s.Project != RootProject {
+			t.Errorf("%s 的 project = %q, want %q（扫描根就是工程时不该拿 work/source 当组名）", s.ID, s.Project, RootProject)
 		}
 	}
 }

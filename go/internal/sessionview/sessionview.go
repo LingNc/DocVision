@@ -50,6 +50,86 @@ func ProjectFor(rel string) string {
 	return id[:i]
 }
 
+// projectMarkers are entries that only a project WORKSPACE root has: the
+// multi-project marker docvision writes, the phase state files, and the
+// per-stage directories of either level.
+var projectMarkers = []string{
+	".docvision_project.json", "progress.json", "progress_items",
+	"work", "source", "style", "chapters", "doc_index",
+}
+
+// structuralNames are workspace internals. A directory with one of these
+// names is never itself a project: without this, the legacy single-project
+// layout (latex_project/work/sessions/*.jsonl) would be read as a project
+// called "work" instead of a session of the project latex_project.
+var structuralNames = map[string]bool{
+	"work": true, "source": true, "style": true, "chapters": true,
+	"sessions": true, "temp": true, "views": true, "pages": true,
+	"build": true, "out": true, "doc_index": true, "reports": true,
+	"media": true, "figures": true, "images": true, "pdfview": true,
+}
+
+// ProjectGroup is the sidebar group of one transcript: which project it
+// belongs to, and whether that project sits in the legacy single-project
+// layout (the output root IS the workspace) rather than the multi-project
+// one (the output root holds one directory per book).
+type ProjectGroup struct {
+	Name string
+	// Legacy is true when the group directory is itself a workspace root
+	// (style/, chapters/, progress.json … live directly inside it), which is
+	// what an output root looked like before projects were introduced.
+	Legacy bool
+}
+
+// projectGroupFor decides the sidebar group of rel (a transcript path
+// relative to the scan root) by looking at the tree, not just the path:
+//
+//	latex_project/测试-概率论/work/sessions/convert_01.jsonl -> latex_project/测试-概率论
+//	latex_project/work/style_session.jsonl                    -> latex_project   (legacy root)
+//	projA/x.jsonl                                             -> projA
+//
+// The middle case is why a plain "first segment" rule is not enough any
+// more: with one directory per book, every book would collapse into the
+// single group "latex_project" and the grouping would stop answering
+// "which book is this session from". The second segment is only accepted
+// when that directory really is a workspace (marker file or stage
+// directories) and is not a structural name such as "work".
+func (s *scanner) projectGroupFor(root, rel string) ProjectGroup {
+	seg := strings.Split(rel, "/")
+	if len(seg) < 2 || structuralNames[seg[0]] {
+		// Either a transcript directly under the scan root, or one whose
+		// first segment is a workspace internal — which happens when the
+		// scan root already IS a project (docvision sessions --dir <proj>).
+		// In both cases the root is the project; "work" is not a book name.
+		return ProjectGroup{Name: RootProject, Legacy: isProjectWorkspace(root)}
+	}
+	name := seg[0]
+	if len(seg) >= 3 && !structuralNames[seg[1]] {
+		cand := filepath.Join(root, seg[0], seg[1])
+		if isProjectWorkspace(cand) {
+			return ProjectGroup{Name: seg[0] + "/" + seg[1], Legacy: false}
+		}
+	}
+	return ProjectGroup{Name: name, Legacy: isProjectWorkspace(filepath.Join(root, seg[0]))}
+}
+
+// isProjectWorkspace reports whether dir looks like a docvision project
+// workspace. The answer is cached: the live viewer rescans every 2 seconds
+// and must not stat the same directories again on every poll.
+func (s *scanner) isProjectWorkspace(dir string) bool {
+	return s.workspace(dir)
+}
+
+// isProjectWorkspace is the uncached check (also used by tests).
+func isProjectWorkspace(dir string) bool {
+	for _, name := range projectMarkers {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // MetaInfo summarises the t="meta" lines of one transcript: what the model was
 // told when a run started (system prompt + tool definitions). Meta lines are
 // never replayed and are not messages, so they are counted separately and the
@@ -106,9 +186,15 @@ type SessionInfo struct {
 	// of the viewer thinks of as "the conversation"; meta lines and
 	// unparseable lines are not messages.
 	Messages int `json:"messages"`
-	// Project is the sidebar group this session belongs to: the first path
-	// segment under the scan root (see ProjectFor).
+	// Project is the sidebar group this session belongs to. It is the first
+	// path segment under the scan root, extended to "<root>/<book>" when the
+	// session sits inside a per-book project workspace of the multi-project
+	// layout (see projectGroupFor).
 	Project string `json:"project"`
+	// ProjectLegacy marks a group whose directory is itself a workspace root,
+	// i.e. the pre-multi-project layout. The sidebar labels it so an old
+	// project is not mistaken for a book of the new layout.
+	ProjectLegacy bool `json:"projectLegacy,omitempty"`
 	// Meta summarises the t="meta" lines (what the model was told when this
 	// run started). It is nil for a transcript written before meta lines
 	// existed, which is why the viewer shows nothing for those.
@@ -306,6 +392,26 @@ type scanner struct {
 	root   string
 	mu     sync.Mutex
 	counts map[string]countEntry
+	// ws caches "is this directory a project workspace" between polls.
+	ws map[string]bool
+}
+
+// workspace caches the workspace check (see isProjectWorkspace).
+func (s *scanner) workspace(dir string) bool {
+	s.mu.Lock()
+	if v, ok := s.ws[dir]; ok {
+		s.mu.Unlock()
+		return v
+	}
+	s.mu.Unlock()
+	v := isProjectWorkspace(dir)
+	s.mu.Lock()
+	if s.ws == nil {
+		s.ws = map[string]bool{}
+	}
+	s.ws[dir] = v
+	s.mu.Unlock()
+	return v
 }
 
 type countEntry struct {
@@ -364,18 +470,20 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		stat := s.fileStat(p, info.Size(), info.ModTime())
+		grp := s.projectGroupFor(root, rel)
 		out = append(out, SessionInfo{
-			ID:       rel,
-			Label:    LabelFor(rel),
-			Title:    TitleFor(rel),
-			Name:     d.Name(),
-			Path:     p,
-			Project:  ProjectFor(rel),
-			Messages: stat.Messages,
-			Meta:     stat.Meta,
-			Bytes:    info.Size(),
-			ModTime:  info.ModTime(),
-			Live:     now.Sub(info.ModTime()) < LiveWindow,
+			ID:            rel,
+			Label:         LabelFor(rel),
+			Title:         TitleFor(rel),
+			Name:          d.Name(),
+			Path:          p,
+			Project:       grp.Name,
+			ProjectLegacy: grp.Legacy,
+			Messages:      stat.Messages,
+			Meta:          stat.Meta,
+			Bytes:         info.Size(),
+			ModTime:       info.ModTime(),
+			Live:          now.Sub(info.ModTime()) < LiveWindow,
 		})
 		return nil
 	})
