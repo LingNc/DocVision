@@ -28,9 +28,14 @@
 - **会话 bash 配置归位到 `tools.bash`**：`latex.bash_sandbox` → `tools.bash.sandbox`、`latex.bash_max_output` → `tools.bash.max_output`（与 `tools.mermaid.*` / `tools.latex.*` 同级——描述的是**工具**本身，不是档位）。解析优先级 `tools.bash.*` > 旧 `latex.bash_*` > 内置默认（sandbox=true / max_output=5000）；旧键仍生效但启动会打印迁移提示；`setDefaults` 不再把默认值写进旧字段（否则会掩盖显式的新键）。
 
 ### Fixed
+- **会话转录的三个真实缺陷**：① **样式反馈轮没有系统提示词**——打回原样式会话时 `NewSession(..., "", tools, …)` 以为"系统提示已在持久化消息里"，但 JSONL 转录**从不写 system 行**，于是那一轮完全失去系统提示（模板、挂载说明、水印要求全丢）；现抽出 `Runner.styleSystemPrompt()` 供样式会话与反馈会话共用。② **转录里历史重复**——`saveSessionContext` 在已有实时转录的情况下把整段会话（含 system）再写一遍，文件里出现重复历史且夹着一条 system 行；现 `Session.HasTranscript()` 为真即跳过，仅在实时转录不可用时兜底；旧版单 JSON 上下文续跑时先把历史补写进新 JSONL，避免下次续跑丢历史。③ **压缩后的续跑丢掉"任务 + 最近 8 条"**——压缩的磁盘形态是「…中间段、最近 8 条、note」（消息实时追加），而回放从最新 note 起截断，恰好把压缩刻意保留的原始任务与最近上下文一起丢掉；现在写完 note 后再补写这两部分，磁盘回放与内存状态一致。
+- **进度行与日志行互相覆盖 / info 行外泄终端**（详见下方"虚拟工作区与终端输出"条目）：`RunImages` 硬编码恢复 `SetQuiet(false)` 抹掉了整体静默，`` 进度行不清行导致日志行叠在同一行。
+
 - **虚拟工作区在磁盘上是坏的（会话反复报"文件不存在"的真因）**：`buildPDFView` / `ensureProjectView` / 逐章视图都用裸 `os.Symlink(src, link)` 建软链，而 `src` 来自配置的相对路径（`./mineru_output`、`./latex_project`）——软链目标是按**链接所在目录**解析的，于是 `<proj>/work/pdfview/<part>.pdf` 与 `<proj>/work/views/project/{source,style,chapters}` 全部**悬空**。表现：`list_source_pages` / `doc_search` 走内存里的视图所以正常，一旦落到文件系统就 `文件不存在: source:<part>.pdf` / `project:source/<md>.md`，模型只好反复猜名字（三个报错、三轮空转）。新增 `linkAbs`（绝对目标 + 幂等替换，真实文件/目录不覆盖）并用于 pdfview、project 视图、逐章视图与章节编译 scratch。
 - **沙箱 bash 在默认配置下必然失败**：`WorkBashTool.sandboxArgs` 把挂载目录**原样**交给 bwrap，而 bwrap 自己解析源路径（不经过我们的 CWD），默认配置又是相对路径 → 每个会话的 `bash` 都以 `bwrap: Can't find source path latex_project/work/style` 失败，模型因此失去 `ls`/`grep` 能力并开始猜文件名。现在所有 `--bind`/`--ro-bind` 源与 `--chdir` 一律 `filepath.Abs`。
-- **会话内部日志外泄到终端 + 进度行被覆盖**：`RunImages` 在结束处**硬编码** `SetQuiet(false)`，把 `RunBook` 设好的静默状态抹掉（全仓库仅此一处），于是 style/chapters/convert/assemble 全程的 info 级 `[tool:x] ok (N chars result)` 直冲控制台；而进度行用 `` 重绘且不清行，日志行正好写在光标处 → 终端里两条内容叠在一行、反复换行留下残影（时间戳"倒流"即屏幕残留）。修法：① `RunImages` 保存并恢复原 quiet（新增 `logger.Quiet()`）；② `Logger.SetLiveLine` 让进度行可注册，任何控制台日志行之前先换行、之后重绘进度行；③ 进度行只在 stdout 是字符设备时用 `` 重绘（管道/重定向/日志捕获下改为按 10s 节拍整行输出），并加 `[K` 清行。
+- **会话内部日志外泄到终端 + 进度行被覆盖**：`RunImages` 在结束处**硬编码** `SetQuiet(false)`，把 `RunBook` 设好的静默状态抹掉（全仓库仅此一处），于是 style/chapters/convert/assemble 全程的 info 级 `[tool:x] ok (N chars result)` 直冲控制台；而进度行用 `
+` 重绘且不清行，日志行正好写在光标处 → 终端里两条内容叠在一行、反复换行留下残影（时间戳"倒流"即屏幕残留）。修法：① `RunImages` 保存并恢复原 quiet（新增 `logger.Quiet()`）；② `Logger.SetLiveLine` 让进度行可注册，任何控制台日志行之前先换行、之后重绘进度行；③ 进度行只在 stdout 是字符设备时用 `
+` 重绘（管道/重定向/日志捕获下改为按 10s 节拍整行输出），并加 `[K` 清行。
 - **`view_pdf` 找不到 PDF 时不给任何线索**：`compile` 曾**在编译前**就删掉上一次的 `standalone.pdf`，一次失败编译即抹掉唯一产物，随后的 `view_pdf {path:"standalone.pdf"}` 只回一句"文件不存在"，模型连试三次（含误写 `Standalone.pdf`）。现在编译失败不再删旧产物，失败回执直接说明"旧 PDF 还在/尚不存在"，成功回执写明"可用产物: standalone.pdf（figure.tex 只是正文，不存在 figure.pdf）"；`read_file` / `view_pdf` 的"文件不存在"一律附带**该目录可用文件清单**与**可用挂载点**（新增 `suggestInDir` / `suggestNear`）。
 - **挂载点写法混用被误判越界**：模型把两种语法拼在一起（`source:/source/<part>.pdf`）时，`VFS.Resolve` 剥掉挂载点前缀后把绝对路径交给越界检查，回一句看不懂的"路径越界（绝对路径）"。现在容忍"挂载点前缀 + 同名绝对路径"的冗余写法（含 `source:/source/...`、`/source/source/...`）。
 

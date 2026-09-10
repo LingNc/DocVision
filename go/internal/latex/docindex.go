@@ -10,8 +10,10 @@ package latex
 // (global 1-based page numbers over the same origin PDFs).
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +25,12 @@ import (
 
 // DocEntry is one indexed original-document block. Global is the
 // 1-based page number across the whole subject (what view_pdf/source takes).
+//
+// Marker/Label/Content come from the DOCVISION notes the images phase
+// writes into the processed markdown (see parseMdMarkers): MinerU gives an
+// image block no text at all when it has no caption, so without them the
+// index only knows a file name for that picture. They are omitempty, so an
+// index written by an older version still loads (fields stay empty).
 type DocEntry struct {
 	Seq    int        `json:"seq"`
 	Part   string     `json:"part"`
@@ -32,6 +40,13 @@ type DocEntry struct {
 	BBox   [4]float64 `json:"bbox"`
 	Text   string     `json:"text"`
 	Img    string     `json:"img,omitempty"`
+	// Marker is the DOCVISION note kind: styled-text / vector / image.
+	Marker string `json:"marker,omitempty"`
+	// Label is the note's description (style note, figure label, …).
+	Label string `json:"label,omitempty"`
+	// Content is the note body: STYLED-TEXT's printed text (CONTENT) or
+	// RASTER's explanation (DESCRIBE).
+	Content string `json:"content,omitempty"`
 }
 
 // DocIndex is the searchable, read-only view of the original document.
@@ -197,12 +212,271 @@ func buildDocIndexPart(dir string) (entries []DocEntry, pages int, size [2]float
 	return entries, maxPage, size, nil
 }
 
+// ------------------------------------------------------------------
+// DOCVISION notes in the processed markdown
+// ------------------------------------------------------------------
+//
+// The images phase (level 1) rewrites every picture of the source
+// markdown into a machine note carrying what the OCR content_list does
+// NOT have for a picture without caption:
+//
+//	<!-- DOCVISION-STYLED-TEXT: 知识导图 -->
+//	CONTENT: <the text printed in the picture>
+//	LINK: [styled-text](images/<主题>/<sha>.jpg)
+//
+//	<!-- DOCVISION-VECTOR: mind-map diagram -->
+//	LINK: [vector](images/<主题>/<sha>.jpg)
+//	```latex …```
+//
+//	<!-- DOCVISION-IMAGE: <label> -->
+//	DESCRIBE: <explanation>
+//	LINK: [image](images/<主题>/<sha>.jpg)
+//
+// buildDocIndex therefore reads them back and joins them onto the image
+// blocks by FILE NAME (the index stores "images/<sha>.jpg", the note
+// "images/<主题>/<sha>.jpg").
+
+// mdMarker is what one DOCVISION note says about one image file.
+type mdMarker struct {
+	Marker  string // styled-text / vector / image
+	Label   string // 描述文本（样式说明 / 图标签）
+	Content string // STYLED-TEXT 的 CONTENT / RASTER 的 DESCRIBE 原文
+}
+
+// marker kind names stored in DocEntry.Marker.
+const (
+	markerStyledText = "styled-text"
+	markerVector     = "vector"
+	markerImage      = "image"
+)
+
+// markerNoteWindow bounds how far a field line (CONTENT/DESCRIBE) or the
+// LINK may sit from its note header. Notes are written as one compact
+// block, so a distant LINK belongs to something else and must not be
+// attached to a stale header.
+const markerNoteWindow = 20
+
+// markerType maps a DOCVISION-<TYPE> comment name to the short marker.
+func markerType(name string) string {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "STYLED-TEXT":
+		return markerStyledText
+	case "VECTOR":
+		return markerVector
+	case "IMAGE":
+		return markerImage
+	}
+	return ""
+}
+
+// markerLinkClass maps a [class](path) link class to the marker it
+// implies; only note-carrying classes are recognised (a plain image link
+// without a note adds nothing to the index).
+func markerLinkClass(class string) string {
+	switch strings.ToLower(strings.TrimSpace(class)) {
+	case "styled-text":
+		return markerStyledText
+	case "vector":
+		return markerVector
+	case "image":
+		return markerImage
+	}
+	return ""
+}
+
+// markerKey is the join key between a note and a DocEntry: the image FILE
+// name (the index keeps "images/<sha>.jpg", the note
+// "images/<主题>/<sha>.jpg").
+func markerKey(p string) string {
+	p = strings.Trim(strings.TrimSpace(p), "<>\"'")
+	if p == "" {
+		return ""
+	}
+	p = strings.ReplaceAll(p, "\\", "/")
+	return filepath.Base(p)
+}
+
+// parseNoteHeader reads "<!-- DOCVISION-<TYPE>: <label> -->" from one
+// already-trimmed line. A missing closing " -->" is tolerated: older
+// output closed the comment on a later line.
+func parseNoteHeader(line string) (marker, label string, ok bool) {
+	if !strings.HasPrefix(line, "<!--") {
+		return "", "", false
+	}
+	body := strings.TrimSpace(strings.TrimPrefix(line, "<!--"))
+	body = strings.TrimSpace(strings.TrimSuffix(body, "-->"))
+	if !strings.HasPrefix(body, "DOCVISION-") {
+		return "", "", false
+	}
+	name, label, found := strings.Cut(strings.TrimPrefix(body, "DOCVISION-"), ":")
+	if !found {
+		return "", "", false
+	}
+	m := markerType(name)
+	if m == "" {
+		return "", "", false
+	}
+	return m, strings.TrimSpace(label), true
+}
+
+// parseLinkLine reads "LINK: [class](path)" from one trimmed line.
+func parseLinkLine(line string) (class, path string, ok bool) {
+	if !strings.HasPrefix(line, "LINK:") {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(line, "LINK:"))
+	open := strings.Index(rest, "[")
+	if open < 0 {
+		return "", "", false
+	}
+	rest = rest[open:]
+	mid := strings.Index(rest, "](")
+	if mid < 0 {
+		return "", "", false
+	}
+	class = rest[1:mid]
+	rest = rest[mid+2:]
+	end := strings.Index(rest, ")")
+	if end < 0 {
+		return "", "", false
+	}
+	return strings.TrimSpace(class), strings.TrimSpace(rest[:end]), true
+}
+
+// parseMdMarkers scans the given markdown files (names relative to mdDir)
+// for the DOCVISION notes above and returns them keyed by image file name.
+// Files that do not exist are skipped; an empty mdNames returns an empty
+// map, so a caller without a notes directory simply gets no backfill.
+func parseMdMarkers(mdDir string, mdNames []string) map[string]mdMarker {
+	out := map[string]mdMarker{}
+	if mdDir == "" || len(mdNames) == 0 {
+		return out
+	}
+	for _, name := range mdNames {
+		base := filepath.Base(strings.TrimSpace(name))
+		if base == "" || base == "." || base == string(filepath.Separator) {
+			continue
+		}
+		f, err := os.Open(filepath.Join(mdDir, base))
+		if err != nil {
+			continue // missing/unreadable md: no backfill, never fatal
+		}
+		scanMdMarkers(f, out)
+		_ = f.Close()
+	}
+	return out
+}
+
+// scanMdMarkers is the line scanner behind parseMdMarkers: one pass, no
+// regex, so a huge or malformed file can neither backtrack nor allocate
+// per match. Tolerant by construction — notes may be missing, field lines
+// may be reordered or absent, CONTENT/DESCRIBE may span lines, files may
+// be CRLF.
+func scanMdMarkers(r io.Reader, out map[string]mdMarker) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // CONTENT lines can be long
+	var (
+		cur     *mdMarker // note header seen, waiting for its LINK
+		curKey  string    // …already joined (LINK was written above the header)
+		curLine int
+		fields  []string // CONTENT:/DESCRIBE: lines of the current note
+		pendKey string   // LINK seen with no note yet (field order may vary)
+		pendLn  int
+	)
+	lineNo := 0
+	for sc.Scan() {
+		lineNo++
+		line := strings.TrimSpace(strings.TrimRight(sc.Text(), "\r"))
+		if line == "" {
+			continue
+		}
+		if m, label, ok := parseNoteHeader(line); ok {
+			key := ""
+			if pendKey != "" && lineNo-pendLn <= markerNoteWindow {
+				key = pendKey
+			}
+			cur = &mdMarker{Marker: m, Label: label}
+			curKey, curLine, fields, pendKey = key, lineNo, nil, ""
+			if key != "" {
+				out[key] = *cur // CONTENT/DESCRIBE below fills it in
+			}
+			continue
+		}
+		if class, path, ok := parseLinkLine(line); ok {
+			key := markerKey(path)
+			if cur != nil && key != "" && lineNo-curLine <= markerNoteWindow {
+				storeNote(out, key, cur, fields)
+			} else if cur == nil && key != "" && markerLinkClass(class) != "" {
+				pendKey, pendLn = key, lineNo
+			}
+			cur, curKey, fields = nil, "", nil
+			continue
+		}
+		if cur == nil {
+			continue
+		}
+		if lineNo-curLine > markerNoteWindow || strings.HasPrefix(line, "```") {
+			cur, curKey, fields = nil, "", nil
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "CONTENT:"):
+			fields = append(fields, strings.TrimSpace(strings.TrimPrefix(line, "CONTENT:")))
+		case strings.HasPrefix(line, "DESCRIBE:"):
+			fields = append(fields, strings.TrimSpace(strings.TrimPrefix(line, "DESCRIBE:")))
+		case len(fields) > 0:
+			fields = append(fields, line) // continuation of the field above
+		default:
+			continue
+		}
+		if curKey != "" {
+			storeNote(out, curKey, cur, fields)
+		}
+	}
+}
+
+// storeNote writes the current note (header + collected fields) under key.
+func storeNote(out map[string]mdMarker, key string, cur *mdMarker, fields []string) {
+	if key == "" || cur == nil {
+		return
+	}
+	m := *cur
+	m.Content = strings.TrimSpace(strings.Join(fields, "\n"))
+	out[key] = m
+}
+
+// applyMarkers joins parsed notes onto the image blocks by file name. A
+// block with no note (the common case) keeps the three fields empty, and
+// a note that matches no block is simply dropped — never an error.
+func (idx *DocIndex) applyMarkers(markers map[string]mdMarker) int {
+	if len(markers) == 0 {
+		return 0
+	}
+	hits := 0
+	for i := range idx.Entries {
+		e := &idx.Entries[i]
+		if e.Img == "" {
+			continue
+		}
+		m, ok := markers[markerKey(e.Img)]
+		if !ok {
+			continue
+		}
+		e.Marker, e.Label, e.Content = m.Marker, m.Label, m.Content
+		hits++
+	}
+	return hits
+}
+
 // buildDocIndex compiles the MinerU artifacts for the given source
 // markdown files into the read-only index AND the matching global page
-// table (reported by list_source_pages).
-func buildDocIndex(mineruOutput string, sourceMDs []string, outPath string) (*DocIndex, *pageIndex, error) {
+// table (reported by list_source_pages). markerDir is the directory of
+// the PROCESSED markdown (the images phase output) whose DOCVISION notes
+// are joined onto the image blocks; "" disables the join.
+func buildDocIndex(mineruOutput string, sourceMDs []string, markerDir, outPath string) (*DocIndex, *pageIndex, error) {
 	idx := &DocIndex{Sizes: map[string][2]float64{}}
 	pages := &pageIndex{}
+	markers := parseMdMarkers(markerDir, sourceMDs)
 	seen := map[string]bool{}
 	for _, md := range sourceMDs {
 		subject := strings.TrimSuffix(filepath.Base(md), filepath.Ext(filepath.Base(md)))

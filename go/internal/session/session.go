@@ -790,6 +790,22 @@ func (s *Session) compact() error {
 	rebuilt = append(rebuilt, tail...)
 	s.messages = rebuilt
 	s.appendTranscript(ChatMessage{Role: "user", Content: note})
+	// On disk the tail arrived BEFORE this note (messages are appended live
+	// as they happen), and LoadTranscript drops everything older than the
+	// newest note — so a resumed session lost exactly the two things
+	// compaction promised to keep: the original task and the recent turns.
+	// Re-append both AFTER the note so the replayed history equals the
+	// in-memory one (the system prompt is excluded: SetMessages re-inserts
+	// it at the front, and a system line mid-conversation would break it).
+	for _, m := range s.messages[:headEnd] {
+		if m.Role == "system" {
+			continue
+		}
+		s.appendTranscript(m)
+	}
+	for _, m := range tail {
+		s.appendTranscript(m)
+	}
 	return nil
 }
 
