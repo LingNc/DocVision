@@ -7,6 +7,11 @@
 
 ### Changed
 
+- **提示词集中管理**：19 段内置提示词（12 段系统提示词 + 7 段各会话的首次用户提示词）从散落的 Go 源码搬进 `go/internal/prompts/templates/*.md`（`//go:embed` 编进二进制），调用点统一为 `prompts.Must(Name)`（纯静态）与 `prompts.Render(Name, map[string]string{…})`（带占位符），替换逻辑只有一份 `prompts.Fill`。注册表为每个模板声明占位符清单、必须提到的工具名、不得出现的退役工具名。搬迁逐字节核对（脚本从旧常量/旧 `fmt.Sprintf` 抽取后与原文本比对），提示词自身行为不变。
+- **提示词守护测试（4 条）**：① 模板文件 ↔ 注册表双向一致；② 按声明占位符全量渲染后不得残留 `{...}`（历史事故：`{OUTPUT_LANG}`/`{MAX_ROUNDS}` 原样发给模型）；③ 模板锁定的工具名必须在代码里存在、且代码里的工具必须在某处模板被提到；④ 退役工具名不得复活（`read_md`/`view_page`/`list_images`/`install_font`/`compile_preview`/`preview.png`/`format_fix_attempts`）。
+
+### Changed
+
 - **文档全面同步（本轮）**：`README.md` 按当前代码事实定点修补——「LaTeX 输出」整章（两档位真实行为、会话工具集、checker 三轮同会话 + 兜底重转换、终审会话与整树交付）、命令用法示例（latex 只收显式扩展名、裸命令自带前置、删除 `workflow --step latex/verify`）、档位1 嵌入骨架（注释首行闭合 + 字段在外 + `[class]` 链接、RASTER 的 `DESCRIBE` 块）、新增「会话沙箱与虚拟工作区（挂载表）」「断点续传（JSONL 转录）」小节、目录布局表（`work/pdfview`、`work/views/**`、`work/reports`、`work/sessions`、`work/temp` 等）、配置表默认值与新增键、环境依赖（latexmk / bubblewrap / SVG 后端任一）。
 - `docvision latex --help` 重写：档位2 产物纯净（SVG 嵌入、无 `DOCVISION` 注释、text 只提取可见文本）、档位1 逐章私有工作视图 + 只读参考通道 + checker 三轮 + 终审会话、会话挂载表与 bubblewrap 沙箱说明。
 - `docvision verify --help` 更正：核对**只在显式运行本命令时执行**（workflow/latex 自动流程都不调用；`verify.enabled` 仅作提示，不影响是否运行）。

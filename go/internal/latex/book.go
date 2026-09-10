@@ -350,16 +350,12 @@ func (r *Runner) stylePhase(proj string) error {
 		}
 	}()
 
-	initial := strings.Join([]string{
-		"Analyse the style of this book and produce the LaTeX class package.",
-		"",
-		"- Organized markdown (high-quality text): " + filepath.Base(mainMD) + " (readable as project:source/" + filepath.Base(mainMD) + " with read_file)",
-		"- Extracted images live under images/: view_image takes the file name, and list_source_pages {page:N} tells you which extracted images sit on that page.",
-	}, "\n")
+	initial := prompts.Render(prompts.StyleUser, map[string]string{
+		"MAIN_MD": "- Organized markdown (high-quality text): " + filepath.Base(mainMD) + " (readable as project:source/" + filepath.Base(mainMD) + " with read_file)",
+	})
 	if r.pdfView != nil {
 		initial += fmt.Sprintf("\n- ORIGINAL pages: %d in total (%s) — list_source_pages lists them with the detected section starts; view any page with view_pdf {path:\"source:<file>\", page:N} (in bash the same files are /source/<file>).", r.pdfView.total, strings.Join(r.pdfView.names(), ", "))
 	}
-	initial += "\nStart by mapping the structure (list_source_pages / doc_search / read_file), inspect representative pages (crop/zoom title pages, headings, figures), then submit_style."
 
 	scratch, cleanScratch, err := r.tempDir(proj, "style")
 	if err != nil {
@@ -496,9 +492,10 @@ func (r *Runner) chaptersPhase(proj string) error {
 	if granularity == "large" {
 		gran = "LARGE granularity: one chapter = one TOP-LEVEL chapter of the book. Never split a top-level chapter into pieces; if a chapter is huge, it stays one file (the converter handles it)."
 	}
-	initial := fmt.Sprintf(
-		"Split the markdown into chapter files.\nThe file has %d lines total. %s\nMap the heading structure with grep, verify boundaries, then submit_split.",
-		totalLines, gran)
+	initial := prompts.Render(prompts.ChaptersUser, map[string]string{
+		"GRANULARITY": gran,
+		"TOTAL_LINES": strconv.Itoa(totalLines),
+	})
 
 	for attempt := 0; attempt < 3; attempt++ {
 		userText := initial
@@ -852,18 +849,12 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	if err != nil {
 		return err
 	}
-	initial := strings.Join([]string{
-		"Convert the chapter file chapters/" + base + ".md to LaTeX.",
-		"",
-		"## The usage manual (authoritative):",
-		"```",
-		truncateStr(string(manual), 24000),
-		"```",
-		"",
-		"Read the chapter via read_file, then write_file {path:\"" + texRel + "\", content: ...} and compile until clean, then submit.",
-		"Chapter markdown preview (first 2000 chars):",
-		truncateStr(string(chapData), 2000),
-	}, "\n")
+	initial := prompts.Render(prompts.ConvertUser, map[string]string{
+		"CHAPTER_FILE":    "Convert the chapter file chapters/" + base + ".md to LaTeX.",
+		"CHAPTER_PREVIEW": truncateStr(string(chapData), 2000),
+		"MANUAL":          truncateStr(string(manual), 24000),
+		"TEX_PATH":        "Read the chapter via read_file, then write_file {path:\"" + texRel + "\", content: ...} and compile until clean, then submit.",
+	})
 
 	if r.cfg.Latex.RemoveWatermark {
 		initial += "\n\n" + r.watermarkGuidance("WATERMARK: exclude watermark artifacts from the .tex output (repeated decorative overlay text such as institution marks, faint background strings). Skip such content entirely - do not typeset it.")
@@ -1089,19 +1080,11 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 
-	userText := strings.Join([]string{
-		"The class/manual was revised after your chapter was converted. Adapt chapters/" + base + ".tex so it compiles with the NEW class and follows the NEW manual.",
-		"",
-		"## Updated manual (authoritative):",
-		"```",
-		truncateStr(string(manual), 24000),
-		"```",
-		"",
-		"## Reported problems:",
-		truncateStr(issues, 4000),
-		"",
-		"Apply MINIMAL edits with edit_file (do not re-convert from markdown, do not drop content), compile until clean, then submit.",
-	}, "\n")
+	userText := prompts.Render(prompts.StyleFixUser, map[string]string{
+		"CHAPTER_FILE": "The class/manual was revised after your chapter was converted. Adapt chapters/" + base + ".tex so it compiles with the NEW class and follows the NEW manual.",
+		"ISSUES":       truncateStr(issues, 4000),
+		"MANUAL":       truncateStr(string(manual), 24000),
+	})
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return fmt.Errorf("样式修复会话失败: %w", err)
 	}

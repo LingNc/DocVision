@@ -220,19 +220,10 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 		fmt.Fprintf(&chaps, "- chapters/%s\n", filepath.Base(f))
 	}
 	pages, _ := pdfPageCount(filepath.Join(buildDir, "main.pdf"))
-	first := strings.Join([]string{
-		"The full book compiled successfully. This is the final consolidation pass.",
-		"",
-		"Book tree (your workspace): main.tex, chapters/*.tex, the class and manual.md/example.tex, figures/, images/.",
-		fmt.Sprintf("Compiled book.pdf: %d page(s).", pages),
-		"Chapters:",
-		chaps.String(),
-		"",
-		"Read the finished PDF page by page (view_pdf) and compare against the original markdown (read_file \"project:<path>\") and the original book pages (list_source_pages + view_pdf on the source mount).",
-		"Fix everything a printed book needs: front matter/cover, table of contents, chapter order and completeness, page numbering and headers/footers, figure/table placement and sizing, orphan/blank pages, overfull boxes, duplicated or missing sections.",
-		"Use edit_file for minimal fixes (never drop content), bash to reorganise files if needed, then compile {path:\"main.tex\", engine:\"latexmk\"} and verify with view_pdf.",
-		"When the book is final, call submit.",
-	}, "\n")
+	first := prompts.Render(prompts.FinalReviewUser, map[string]string{
+		"CHAPTERS":   chaps.String(),
+		"PAGES_LINE": fmt.Sprintf("Compiled book.pdf: %d page(s).", pages),
+	})
 
 	lastErr := ""
 	for attempt := 0; attempt < rounds; attempt++ {

@@ -85,18 +85,10 @@ func RunTikZSession(
 			ratioLine = fmt.Sprintf("The original bitmap is %dx%d px: aspect ratio %.2f:1 (width:height). Your drawing must keep that aspect ratio and must NOT be blown up to page size.", w, h, float64(w)/float64(h))
 		}
 	}
-	initial := strings.Join([]string{
-		"Redraw the attached image as TikZ.",
-		"",
-		ratioLine,
-		"",
-		"Its surrounding document context (for correct labels/terminology):",
-		"```",
-		truncateStr(contextText, 4000),
-		"```",
-		"",
-		"Begin: write the TikZ code to figure.tex with write_file, then call compile {path: \"figure.tex\"}.",
-	}, "\n")
+	initial := prompts.Render(prompts.FigureUser, map[string]string{
+		"CONTEXT":       truncateStr(contextText, 4000),
+		"ORIGINAL_SIZE": ratioLine,
+	})
 
 	// 会话转录（JSONL）：每条消息实时追加，图片以 file:// 媒体引用存储。
 	// 若此前运行在同一张图上中断（进程被杀 / 网络断连），恢复历史上下文

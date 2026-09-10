@@ -219,6 +219,24 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 - **原图尺寸测量**：每次 `view_image` 都会实时算出原图的**印刷尺寸**并回给模型——从位图回溯到 MinerU 解析目录（`content_list.json` 的 bbox + `layout.json` 的页尺寸），显示标准为 **mm 优先**：`ORIGINAL FIGURE SIZE: 36.9mm x 20.2mm on the page (about 21% of the page width); bitmap 284x156px, effective resolution 195 dpi, aspect 1.82:1`（高度按位图自身比例换算，因为 MinerU 的块 bbox 不紧贴图）。测不出解析目录时退化为只给宽高比。
 - **会话转录（JSONL）**：每条消息实时追加为一行 JSON（含 `reasoning_content` 思维链——GLM 保留式思考要求历史思维链完整回传，也是前缀缓存的前提），图片以 `file://media/<hash>.<ext>` 引用（base64 不入转录）；矢量图会话（`<outDir>/sessions/vector_<图>.jsonl`）、样式会话（`work/style_session.jsonl`）、章节划分（`work/sessions/chapters.jsonl`）、单章转换（`work/sessions/convert_<章>.jsonl`）都接入——进程被杀或网络断连后，下次运行自动从转录恢复上下文续跑，不重烧 token（恢复时**重新挂上系统提示词**、只回放最近一次压缩之后的消息）；成功会话的转录默认清理（`latex.keep_session_records` 可保留）
 
+### 提示词集中管理（`internal/prompts`）
+
+所有**内置提示词**都放在 `go/internal/prompts/templates/*.md`（用 `//go:embed` 编进二进制），不再散落在各会话的 Go 源码里：
+
+- **系统提示词**（12 段：classifier / figure / style / chapters / convert / style-fix / final-review / fix / verify / watermark / img2text / text-only）与**各会话的首次用户提示词**（7 段）都在模板里；模板用 `{占位符}` 接收动态数据（如 `{OUTPUT_LANG}`、`{MAX_ROUNDS}`、`{MANUAL}`、`{CONTEXT}`）。
+- 调用点只有两种写法：纯静态用 `prompts.Must(prompts.FigureSystem)`，带数据用 `prompts.Render(prompts.ConvertUser, map[string]string{"MANUAL": manual})`——占位符替换逻辑只有一份（`prompts.Fill`），不会出现"某个会话忘了替换"的情况。
+- 注册表（`prompts.go` 的 `registry`）为每个模板声明三件事：占位符清单、**该会话必须提到的工具名**、以及不得出现的**退役工具名**；`prompts.Templates()` 可自省，供测试与文档使用。
+- 仍然留在原地的只有"跟着状态实时累加"的碎片：轮次预算提醒、图片占位说明、压缩指令、续跑/重试提示、checker 反馈回写等（它们与运行时状态同生共死，抽出来反而更难读），以及各工具自身的 `Definition()` 文案。
+
+守护测试（`go/internal/prompts`、`go/internal/latex`）：
+
+1. 模板文件与注册表**双向一致**（磁盘上有未登记的模板、或登记了不存在的模板都失败）；
+2. 每个模板**按声明的占位符全量渲染后不得残留 `{...}`**（历史事故：`{OUTPUT_LANG}` 曾原样发给模型）；
+3. 模板锁定的**工具名必须在代码里真实存在**，且代码里的工具必须在某处模板被提到（工具改名/新增而提示词没跟上就会失败）；
+4. 退役工具名不得复活（`read_md` / `view_page` / `list_images` / `install_font` / `compile_preview` / `preview.png` / `format_fix_attempts` 等——这些名字都曾长期残留在提示词里，模型因此调用不存在的工具）。
+
+> 这样做的原因很实际：同一个规则曾写在两个会话里而互相矛盾（"禁止重叠/拥挤"与"画大一点"）、工具删了提示词还在教、占位符漏渲染直接发给模型——把提示词收进一处之后，这些问题都能被测试而非人工巡检拦住。
+
 ### 会话沙箱与虚拟工作区（挂载表）
 
 每个 AI 会话有独立的命名空间（挂载表），结构化工具与 `bash` 看到**完全同一套路径**，只在需要时挂对应的树——模型拿不到整个 `mineru_output`、转录或构建产物：

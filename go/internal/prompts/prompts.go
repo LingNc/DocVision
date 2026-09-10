@@ -50,6 +50,15 @@ const (
 	VerifySystem      = "latex_verify.system"
 	WatermarkSystem   = "latex_watermark.system"
 
+	// 各会话的首次用户提示词（静态文案进模板，动态数据用占位符传入）。
+	StyleUser       = "latex_style.user"
+	ChaptersUser    = "latex_chapters.user"
+	ConvertUser     = "latex_convert.user"
+	StyleFixUser    = "latex_stylefix.user"
+	FinalReviewUser = "latex_finalreview.user"
+	FigureUser      = "latex_figure.user"
+	Img2TextUser    = "img2text.user"
+
 	// img2text (image understanding) sessions.
 	Img2TextSystem = "img2text.system"
 	TextOnlySystem = "img2text_textonly.system"
@@ -125,6 +134,39 @@ var registry = []Template{
 	},
 	{
 		Name: TextOnlySystem, File: "img2text_textonly.system.md",
+	},
+	{
+		Name: StyleUser, File: "latex_style.user.md",
+		Vars:        []string{"MAIN_MD"},
+		MustMention: []string{"doc_search", "list_source_pages", "read_file", "submit_style", "view_image"},
+	},
+	{
+		Name: ChaptersUser, File: "latex_chapters.user.md",
+		Vars:        []string{"TOTAL_LINES", "GRANULARITY"},
+		MustMention: []string{"grep", "submit_split"},
+	},
+	{
+		Name: ConvertUser, File: "latex_convert.user.md",
+		Vars: []string{"CHAPTER_FILE", "MANUAL", "TEX_PATH", "CHAPTER_PREVIEW"},
+	},
+	{
+		Name: StyleFixUser, File: "latex_stylefix.user.md",
+		Vars:        []string{"CHAPTER_FILE", "MANUAL", "ISSUES"},
+		MustMention: []string{"compile", "edit_file", "submit"},
+	},
+	{
+		Name: FinalReviewUser, File: "latex_finalreview.user.md",
+		Vars:        []string{"PAGES_LINE", "CHAPTERS"},
+		MustMention: []string{"bash", "compile", "edit_file", "list_source_pages", "read_file", "submit", "view_pdf"},
+	},
+	{
+		Name: FigureUser, File: "latex_figure.user.md",
+		Vars:        []string{"ORIGINAL_SIZE", "CONTEXT"},
+		MustMention: []string{"compile", "write_file"},
+	},
+	{
+		Name: Img2TextUser, File: "img2text.user.md",
+		Vars: []string{"LINE", "UP_START", "DOWN_END", "UP", "DOWN", "CONTEXT", "MAX_UP", "MAX_DOWN"},
 	},
 }
 

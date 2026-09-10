@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -173,17 +174,22 @@ func CallAIWithTools(
 	if opts.ExtraInstruction != "" {
 		mainSystem += "\n\n" + opts.ExtraInstruction
 	}
+	// 首次用户提示词统一取自 internal/prompts（模板 img2text.user）；
+	// 只把本次的坐标/上下文/窗口上限作为数据传进去。
+	prompt := prompts.Render(prompts.Img2TextUser, map[string]string{
+		"LINE":     strconv.Itoa(imgLineIdx),
+		"UP_START": strconv.Itoa(imgLineIdx - curUp),
+		"DOWN_END": strconv.Itoa(imgLineIdx + curDown),
+		"UP":       strconv.Itoa(curUp),
+		"DOWN":     strconv.Itoa(curDown),
+		"CONTEXT":  ctxText,
+		"MAX_UP":   strconv.Itoa(opts.MaxWindowUp),
+		"MAX_DOWN": strconv.Itoa(opts.MaxWindowDown),
+	})
 	messages := []ChatMessage{
 		{Role: "system", Content: mainSystem},
 		{Role: "user", Content: []map[string]interface{}{
-			{"type": "text", "text": fmt.Sprintf(
-				"The image to describe is at line %d. "+
-					"Context: [%d to %d] (%d↑, %d↓).\n"+
-					"```\n%s\n```\n"+
-					"Understand image before output. If confused, call get_more_context(↑N, ↓M) — max per call: ↑%d, ↓%d.",
-				imgLineIdx, imgLineIdx-curUp, imgLineIdx+curDown, curUp, curDown,
-				ctxText, opts.MaxWindowUp, opts.MaxWindowDown,
-			)},
+			{"type": "text", "text": prompt},
 			{"type": "image_url", "image_url": map[string]string{
 				"url": "data:image/jpeg;base64," + imgBase64,
 			}},
