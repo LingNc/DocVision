@@ -101,6 +101,10 @@ html, body {
 .session-row .row-top { display: flex; align-items: center; gap: 6px; }
 .session-row .row-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .session-row .row-meta { color: var(--dim); font-size: 11px; margin-top: 2px; font-family: var(--mono); }
+.session-row .row-project {
+  display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 4px;
+  background: var(--chip, rgba(255, 255, 255, .08)); color: var(--dim);
+}
 
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: 0 0 auto; }
 .dot.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(78, 201, 160, .15); }

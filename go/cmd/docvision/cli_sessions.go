@@ -92,6 +92,11 @@ func newSessionsCmd() *cobra.Command {
 			out, _ := cmd.Flags().GetString("out")
 			if out == "" {
 				out = filepath.Join(root, "sessions.html")
+			} else if !filepath.IsAbs(out) {
+				// 相对 --out 必须按"命令启动时"的目录解析：进程在读取
+				// 配置后可能已经 chdir 到 ~/.docvision，此时相对路径会
+				// 落到那里（并因只读而报 mkdir 失败）。
+				out = filepath.Join(startDir, out)
 			}
 			out, err = filepath.Abs(out)
 			if err != nil {

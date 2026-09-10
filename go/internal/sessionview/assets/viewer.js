@@ -164,6 +164,12 @@
       row.appendChild(top);
       var meta = el('div', 'row-meta',
         s.messages + ' 条消息 · ' + fmtSize(s.size) + ' · ' + relTime(s.mtime));
+      // 扫描根下可能有多个项目（latex_project、latex_project_0909…）：
+      // 把第一段路径作为项目标签显示，配合过滤框即可当"工作区切换"用。
+      var project = String(s.id || '').split('/')[0];
+      if (project && project !== s.id) {
+        meta.appendChild(el('span', 'row-project', project));
+      }
       row.appendChild(meta);
       row.addEventListener('click', function () { selectSession(s.id); });
       refs.list.appendChild(row);

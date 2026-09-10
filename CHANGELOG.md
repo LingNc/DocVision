@@ -31,6 +31,8 @@
 - **会话 bash 配置归位到 `tools.bash`**：`latex.bash_sandbox` → `tools.bash.sandbox`、`latex.bash_max_output` → `tools.bash.max_output`（与 `tools.mermaid.*` / `tools.latex.*` 同级——描述的是**工具**本身，不是档位）。解析优先级 `tools.bash.*` > 旧 `latex.bash_*` > 内置默认（sandbox=true / max_output=5000）；旧键仍生效但启动会打印迁移提示；`setDefaults` 不再把默认值写进旧字段（否则会掩盖显式的新键）。
 
 ### Fixed
+- **会话预览的两个小缺陷**：① `docvision sessions --out` 传**相对**路径时按进程当前目录解析，而进程在读配置后可能已经 chdir 到 `~/.docvision`，于是相对路径落到那里并因只读报 `mkdir … read-only file system`；现在相对 `--out` 与 `--dir` 一样按**命令启动时**的目录解析。② 侧栏只显示会话名，扫描根下存在多个项目（`latex_project`、`latex_project_0909`…）时不好区分——每行现在带**项目标签**（相对路径第一段），过滤框提示改为"会话名或项目（如 latex_project_0909）"，于是过滤框既是名字搜索也是工作区切换。
+
 - **会话转录的三个真实缺陷**：① **样式反馈轮没有系统提示词**——打回原样式会话时 `NewSession(..., "", tools, …)` 以为"系统提示已在持久化消息里"，但 JSONL 转录**从不写 system 行**，于是那一轮完全失去系统提示（模板、挂载说明、水印要求全丢）；现抽出 `Runner.styleSystemPrompt()` 供样式会话与反馈会话共用。② **转录里历史重复**——`saveSessionContext` 在已有实时转录的情况下把整段会话（含 system）再写一遍，文件里出现重复历史且夹着一条 system 行；现 `Session.HasTranscript()` 为真即跳过，仅在实时转录不可用时兜底；旧版单 JSON 上下文续跑时先把历史补写进新 JSONL，避免下次续跑丢历史。③ **压缩后的续跑丢掉"任务 + 最近 8 条"**——压缩的磁盘形态是「…中间段、最近 8 条、note」（消息实时追加），而回放从最新 note 起截断，恰好把压缩刻意保留的原始任务与最近上下文一起丢掉；现在写完 note 后再补写这两部分，磁盘回放与内存状态一致。
 - **进度行与日志行互相覆盖 / info 行外泄终端**（详见下方"虚拟工作区与终端输出"条目）：`RunImages` 硬编码恢复 `SetQuiet(false)` 抹掉了整体静默，`
 ` 进度行不清行导致日志行叠在同一行。
