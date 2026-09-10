@@ -38,6 +38,7 @@ func RunTikZSession(
 	env FigureEnv, // document context for cross-page merging
 	log *logger.Logger,
 	tid int,
+	keepTemps, keepRecords bool,
 ) (TikZResult, error) {
 	// 持久工作区：按镜像命名（不处理完不删除，中断后下次续上）。
 	// 成功提交后清理；失败保留供 resume。
@@ -138,8 +139,17 @@ func RunTikZSession(
 	result.Uncertain = state.uncertain
 	result.PDFPath = dstPDF
 	result.PNGPath = dstPNG
-	os.RemoveAll(scratch)
-	os.Remove(filepath.Join(outDir, "sessions", "vector_"+texBase+".jsonl")) // 已完成，转录不再需要
+	if keepTemps {
+		log.Log(0, "[temp] 保留矢量图工作区:", scratch)
+	} else {
+		os.RemoveAll(scratch)
+	}
+	tr := filepath.Join(outDir, "sessions", "vector_"+texBase+".jsonl") // 已完成
+	if keepRecords {
+		log.Log(0, "[session] 保留会话记录:", tr)
+	} else {
+		os.Remove(tr)
+	}
 	return result, nil
 }
 

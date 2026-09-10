@@ -4,6 +4,9 @@
 
 ### Added
 
+- `latex.keep_temp_dirs` / `latex.keep_session_records`（默认 false，debug 日志下必定保留）：临时工作目录与会话转录的保留策略分开配置。
+- **part 级页码定位**：`pdfView.LocatePart/FileByPart` + 构建期 `alignmentProblems` 校验；`doc_search` 命中直接给出 `view_pdf {path:"source:<file>.pdf", page:N}`；`list_source_pages` 优先按索引 part 定位。
+- 临时工作目录改到 `<proj>/work/temp/`（不再用 `/tmp`），便于事后检查；逐章私有工作视图 `work/views/chapter_<章>/`。
 - **参考通道（只读）**：`project:converted/<file>.tex`（其他章节已提交的 .tex + 资源目录）与 `project:reports/<file>.md`（其他章节的工作汇报）；会话转录仍不暴露；`edit_file` 新增 `Prefixes` 白名单（convert/style-fix 只能改自己的章节）。
 
 ### Fixed

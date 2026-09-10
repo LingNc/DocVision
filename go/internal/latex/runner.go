@@ -169,6 +169,54 @@ func NewRunner(cfg *config.Config, log *logger.Logger) *Runner {
 	}
 }
 
+// keepTemp reports whether temporary work directories survive the run:
+// latex.keep_temp_dirs, or any debug logging (--debug / log_level: debug).
+func (r *Runner) keepTemp() bool {
+	return r.cfg.Latex.KeepTempDirsEnabled() || r.log.DebugEnabled()
+}
+
+// keepRecords reports whether session transcripts survive after a
+// session succeeds: latex.keep_session_records, or any debug logging.
+func (r *Runner) keepRecords() bool {
+	return r.cfg.Latex.KeepSessionRecordsEnabled() || r.log.DebugEnabled()
+}
+
+// tempDir creates a temporary work directory INSIDE the project
+// (<proj>/work/temp/<name>) instead of /tmp: it sits next to the rest of
+// the run so it can be inspected, and whether it is deleted afterwards
+// depends on keepTemp(). The returned cleanup function is safe to call
+// more than once.
+func (r *Runner) tempDir(proj, name string) (string, func(), error) {
+	root := filepath.Join(proj, "work", "temp")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", func() {}, err
+	}
+	dir := filepath.Join(root, name)
+	if err := os.RemoveAll(dir); err != nil {
+		return "", func() {}, err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() {
+		if r.keepTemp() {
+			r.log.Log(0, "[temp] 保留临时工作目录:", dir)
+			return
+		}
+		_ = os.RemoveAll(dir)
+	}
+	return dir, cleanup, nil
+}
+
+// keepSessionFile deletes a session transcript unless records are kept.
+func (r *Runner) keepSessionFile(path string) {
+	if r.keepRecords() {
+		r.log.Log(0, "[session] 保留会话记录:", path)
+		return
+	}
+	_ = os.Remove(path)
+}
+
 func (r *Runner) clientFor(name string) *session.Client {
 	if c, ok := r.clients[name]; ok {
 		return c
@@ -785,7 +833,7 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	res, err := RunTikZSession(client, modelCfg, tuning, r.comp, img64, contextText,
 		outDir, dstTex, dstPDF, dstPNG,
 		FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown},
-		r.log, tid)
+		r.log, tid, r.keepTemp(), r.keepRecords())
 	if err != nil {
 		pp.Error = err.Error()
 		return false

@@ -314,6 +314,21 @@ func clampInt(v, lo, hi int) int {
 	return v
 }
 
+// EntryOnPage returns the first indexed block on a global page (nil when
+// the index has nothing there): used to map a global page to its MinerU
+// part, which gives the drift-free (part, local page) location.
+func (d *DocIndex) EntryOnPage(global int) *DocEntry {
+	if d == nil {
+		return nil
+	}
+	for i := range d.Entries {
+		if d.Entries[i].Global == global {
+			return &d.Entries[i]
+		}
+	}
+	return nil
+}
+
 // FormatEntry renders one entry for tool output (pN = global page for
 // view_pdf on the source mount / list_source_pages; the local page is
 // 1-based, exactly what list_source_pages {page:N} and view_pdf print).

@@ -215,8 +215,18 @@ func (t *ListSourcePagesTool) Execute(argsJSON string) (session.ToolResult, erro
 }
 
 // pageDetail lists one global page: where it lives and what is on it.
+//
+// Locating prefers the part recorded in the page index (part + local page
+// = exact, immune to page-count drift), and falls back to the cumulative
+// global offset when the index has no block on that page.
 func (t *ListSourcePagesTool) pageDetail(page int) (session.ToolResult, error) {
 	f, local, err := t.View.Locate(page)
+	viaPart := false
+	if e := t.Index.EntryOnPage(page); e != nil {
+		if pf, plocal, perr := t.View.LocatePart(e.Part, e.Page+1); perr == nil {
+			f, local, err, viaPart = pf, plocal, nil, true
+		}
+	}
 	if err != nil {
 		return session.ToolResult{Text: "OUT OF RANGE: " + err.Error()}, nil
 	}
@@ -226,6 +236,9 @@ func (t *ListSourcePagesTool) pageDetail(page int) (session.ToolResult, error) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Global page %d -> %s, local page %d.\n", page, path, local)
+	if viaPart {
+		fmt.Fprintf(&b, "(located through the OCR page index: part %s, page %d)\n", f.Part, local)
+	}
 	fmt.Fprintf(&b, "Look at it: view_pdf {path:\"%s\", page:%d}\n", path, local)
 	if t.Index != nil {
 		var texts, imgs []DocEntry

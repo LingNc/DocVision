@@ -200,11 +200,11 @@ func TestListSourcePagesTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := &pdfView{Dir: viewDir, total: 12,
-		Files: []pdfViewFile{{Name: "book_part1.pdf", PDF: pdf, First: 1, Count: 12}}}
+		Files: []pdfViewFile{{Name: "book_part1.pdf", PDF: pdf, Part: "book_part1", First: 1, Count: 12}}}
 	doc := &DocIndex{Entries: []DocEntry{
-		{Global: 3, Type: "text", Text: "第二章 随机变量"},
-		{Global: 3, Type: "text", Text: "这是一段普通正文，带标点符号，不应当被当成标题。"},
-		{Global: 4, Type: "image", Img: "book_part1/images/abc.jpg", Text: "图 2.1 分布函数"},
+		{Global: 3, Part: "book_part1", Page: 2, Type: "text", Text: "第二章 随机变量"},
+		{Global: 3, Part: "book_part1", Page: 2, Type: "text", Text: "这是一段普通正文，带标点符号，不应当被当成标题。"},
+		{Global: 4, Part: "book_part1", Page: 3, Type: "image", Img: "book_part1/images/abc.jpg", Text: "图 2.1 分布函数"},
 	}}
 	tool := &ListSourcePagesTool{View: view, Index: doc, Mount: "source"}
 

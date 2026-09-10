@@ -31,6 +31,7 @@ import (
 type pdfViewFile struct {
 	Name  string // clean name exposed to the model ("book_part1.pdf")
 	PDF   string // real path of the origin PDF
+	Part  string // MinerU part directory (the DocIndex page-index key)
 	First int    // first global page number (1-based)
 	Count int    // page count
 }
@@ -68,7 +69,10 @@ func buildPDFView(proj, mineruDir, subject string) (*pdfView, error) {
 		if err != nil {
 			return nil, fmt.Errorf("count pages of %s: %w", pdf, err)
 		}
-		view.Files = append(view.Files, pdfViewFile{Name: name, PDF: pdf, First: view.total + 1, Count: n})
+		view.Files = append(view.Files, pdfViewFile{
+			Name: name, PDF: pdf, Part: filepath.Base(filepath.Dir(pdf)),
+			First: view.total + 1, Count: n,
+		})
 		view.total += n
 	}
 	return view, nil
@@ -109,6 +113,70 @@ func (v *pdfView) Locate(page int) (pdfViewFile, int, error) {
 		}
 	}
 	return pdfViewFile{}, 0, fmt.Errorf("page %d not found", page)
+}
+
+// FileByPart finds the view file that came from a MinerU part directory
+// (the "part" recorded in the page index). This is the drift-free way to
+// locate an indexed block: it does not depend on cumulative page offsets.
+func (v *pdfView) FileByPart(part string) (pdfViewFile, bool) {
+	if v == nil {
+		return pdfViewFile{}, false
+	}
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return pdfViewFile{}, false // no part info: never guess
+	}
+	for _, f := range v.Files {
+		if f.Part == part {
+			return f, true
+		}
+	}
+	return pdfViewFile{}, false
+}
+
+// LocatePart maps a MinerU part directory plus a 1-based page inside that
+// part to a view file. Because both sides key on the part itself, this
+// stays correct even when a part's page count in the page index differs
+// from the real PDF page count.
+func (v *pdfView) LocatePart(part string, localPage int) (pdfViewFile, int, error) {
+	f, ok := v.FileByPart(part)
+	if !ok {
+		return pdfViewFile{}, 0, fmt.Errorf("no source PDF for part %q", part)
+	}
+	if localPage < 1 || localPage > f.Count {
+		return pdfViewFile{}, 0, fmt.Errorf("page %d out of range 1..%d of %s", localPage, f.Count, f.Name)
+	}
+	return f, localPage, nil
+}
+
+// alignmentProblems cross-checks the page index against the real PDFs:
+// if a part's indexed page count differs from the origin PDF's page
+// count, the global page numbers derived from the index drift away from
+// the cumulative offsets used here, and global-page lookups can land on
+// the wrong part or page. Part-based lookups (FileByPart/LocatePart) stay
+// correct in that case.
+func (v *pdfView) alignmentProblems(pages *pageIndex) []string {
+	if v == nil || pages == nil {
+		return nil
+	}
+	var out []string
+	byPart := map[string]pdfViewFile{}
+	for _, f := range v.Files {
+		byPart[f.Part] = f
+	}
+	for _, src := range pages.srcs {
+		part := filepath.Base(filepath.Dir(src.pdf))
+		f, ok := byPart[part]
+		if !ok {
+			out = append(out, fmt.Sprintf("part %s: no view file", part))
+			continue
+		}
+		if f.Count != src.count {
+			out = append(out, fmt.Sprintf("part %s: index says %d pages, the PDF has %d (global page numbers may drift; part-based lookups are exact)",
+				part, src.count, f.Count))
+		}
+	}
+	return out
 }
 
 // FileByName finds a view file by its clean name or its real path.
@@ -209,4 +277,42 @@ func ensureProjectView(proj string) string {
 		_ = os.Symlink(src, link)
 	}
 	return dir
+}
+
+// ------------------------------------------------------------------
+// Per-chapter work view
+// ------------------------------------------------------------------
+
+// ensureChapterView materialises the private work view of ONE chapter
+// conversion session: <proj>/work/views/chapter_<base>/chapters/ holds a
+// symlink to that chapter's .tex and to its asset folder, so the session
+// can read and write exactly its own files — a sibling chapter is not
+// reachable here (it is read-only reference material through
+// project:converted/). Writing through the .tex symlink creates the real
+// file in <proj>/work/chapters/ when it does not exist yet.
+func ensureChapterView(proj, base string) string {
+	if proj == "" || base == "" {
+		return ""
+	}
+	realChapDir := filepath.Join(proj, "work", "chapters")
+	viewChapDir := filepath.Join(proj, "work", "views", "chapter_"+base, "chapters")
+	if err := os.MkdirAll(realChapDir, 0o755); err != nil {
+		return ""
+	}
+	if err := os.MkdirAll(viewChapDir, 0o755); err != nil {
+		return ""
+	}
+	// own main file: always ensure the symlink exists (may dangle until written)
+	texLink := filepath.Join(viewChapDir, base+".tex")
+	if _, err := os.Lstat(texLink); err != nil {
+		_ = os.Symlink(filepath.Join(realChapDir, base+".tex"), texLink)
+	}
+	// own asset folder: a real folder holding a symlink to the real one
+	subLink := filepath.Join(viewChapDir, base)
+	realSub := filepath.Join(realChapDir, base)
+	if _, err := os.Lstat(subLink); err != nil {
+		_ = os.MkdirAll(realSub, 0o755)
+		_ = os.Symlink(realSub, subLink)
+	}
+	return filepath.Dir(viewChapDir)
 }

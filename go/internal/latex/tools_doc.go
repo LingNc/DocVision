@@ -16,6 +16,28 @@ import (
 // DocSearchTool searches the compiled original-document index.
 type DocSearchTool struct {
 	Index *DocIndex
+	// View (optional) lets every hit carry the exact source path and local
+	// page (source:<file>.pdf page N), located through the MinerU part of
+	// the block — no global-offset arithmetic needed by the model.
+	View  *pdfView
+	Mount string
+}
+
+// formatEntry renders one hit, appending the exact source page when the
+// PDF view is available.
+func (t *DocSearchTool) formatEntry(e DocEntry) string {
+	s := FormatEntry(e)
+	if t.View == nil {
+		return s
+	}
+	if f, local, err := t.View.LocatePart(e.Part, e.Page+1); err == nil {
+		path := f.Name
+		if t.Mount != "" {
+			path = t.Mount + ":" + f.Name
+		}
+		s += fmt.Sprintf("\n    source page: view_pdf {path:\"%s\", page:%d}", path, local)
+	}
+	return s
 }
 
 func (t *DocSearchTool) Name() string { return "doc_search" }
@@ -52,8 +74,8 @@ func (t *DocSearchTool) Execute(argsJSON string) (session.ToolResult, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "找到 %d 个匹配（doc_search '%s'）：\n", len(hits), query)
 	for _, e := range hits {
-		b.WriteString(FormatEntry(e) + "\n")
+		b.WriteString(t.formatEntry(e) + "\n")
 	}
-	b.WriteString("list_source_pages {page: pN} prints that page's text and images; view_pdf {path: \"source:<file>\", page:<local page>} renders the original PDF page (bbox is in PDF points, top-left origin; page sizes are in the index). Adjacency in the index does NOT imply relation.")
+	b.WriteString("Each hit shows its exact source page (view_pdf {path:\"<source>:<file>\", page:<local page>}); list_source_pages {page: pN} prints that page's text and images. The bbox is in PDF points, top-left origin; page sizes are in the index. Adjacency in the index does NOT imply relation.")
 	return session.ToolResult{Text: b.String()}, nil
 }

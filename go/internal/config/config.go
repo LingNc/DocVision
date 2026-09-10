@@ -143,6 +143,18 @@ type LatexCompileConfig struct {
 
 // FinalReviewEnabled reports whether the final review session runs
 // (nil → default true).
+// KeepTempDirsEnabled reports whether temporary work directories are
+// kept after use (default false).
+func (c LatexConfig) KeepTempDirsEnabled() bool {
+	return c.KeepTempDirs != nil && *c.KeepTempDirs
+}
+
+// KeepSessionRecordsEnabled reports whether session transcripts are kept
+// after a successful session (default false).
+func (c LatexConfig) KeepSessionRecordsEnabled() bool {
+	return c.KeepSessionRecords != nil && *c.KeepSessionRecords
+}
+
 // BashSandboxEnabled reports whether session bash runs inside the
 // bubblewrap sandbox (default true).
 func (c LatexConfig) BashSandboxEnabled() bool {
@@ -191,6 +203,15 @@ type LatexConfig struct {
 	// (sessions are long-lived and much heavier than plain img2text calls).
 	Concurrency int                `yaml:"concurrency"`
 	Compile     LatexCompileConfig `yaml:"compile"`
+	// KeepTempDirs keeps the temporary work directories (chapter
+	// splitting sandbox, per-chapter compile scratch, vector figure
+	// workspace) after use instead of deleting them, so a run can be
+	// inspected afterwards. Debug logging implies keeping them.
+	KeepTempDirs *bool `yaml:"keep_temp_dirs"`
+	// KeepSessionRecords keeps the session transcripts (JSONL) after a
+	// session succeeds. Independent from KeepTempDirs: some users want
+	// every conversation on disk. Debug logging implies keeping them.
+	KeepSessionRecords *bool `yaml:"keep_session_records"`
 	// BashSandbox wraps session bash commands in bubblewrap: inside the
 	// sandbox only the session's mounts exist (writable mounts writable,
 	// read-only mounts read-only). nil/true = enabled; also falls back to
@@ -550,6 +571,14 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Latex.Compile.MaxFixRounds == 0 {
 		cfg.Latex.Compile.MaxFixRounds = 8
+	}
+	if cfg.Latex.KeepTempDirs == nil {
+		off := false
+		cfg.Latex.KeepTempDirs = &off
+	}
+	if cfg.Latex.KeepSessionRecords == nil {
+		off := false
+		cfg.Latex.KeepSessionRecords = &off
 	}
 	if cfg.Latex.BashSandbox == nil {
 		enabled := true

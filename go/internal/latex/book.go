@@ -196,6 +196,7 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	r.projDir = proj
 	r.buildPDFViewQuiet(opts.SourceDir, opts.Files)
 	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
+	r.checkPageAlignment()
 
 	err = runPhase("style", func() error { return r.stylePhase(proj) })
 	if err != nil {
@@ -359,11 +360,11 @@ func (r *Runner) stylePhase(proj string) error {
 	}
 	initial += "\nStart by mapping the structure (list_source_pages / doc_search / read_file), inspect representative pages (crop/zoom title pages, headings, figures), then submit_style."
 
-	scratch, err := os.MkdirTemp("", "dsv-style-")
+	scratch, cleanScratch, err := r.tempDir(proj, "style")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(scratch)
+	defer cleanScratch()
 
 	var lastExampleCompile string
 	for attempt := 0; attempt <= r.cfg.Latex.Compile.MaxFixRounds; attempt++ {
@@ -393,8 +394,12 @@ func (r *Runner) stylePhase(proj string) error {
 		_ = os.WriteFile(filepath.Join(styleDir, "manual.md"), []byte(submit.Manual), 0o644)
 		_ = os.WriteFile(filepath.Join(styleDir, "example.tex"), []byte(submit.Example), 0o644)
 
-		os.RemoveAll(scratch)
-		scratch, _ = os.MkdirTemp("", "dsv-style-")
+		// 重新编译当前提交：清空同一个临时目录后重放 cls/example。
+		if entries, derr := os.ReadDir(scratch); derr == nil {
+			for _, e := range entries {
+				_ = os.RemoveAll(filepath.Join(scratch, e.Name()))
+			}
+		}
 		copyFile(filepath.Join(styleDir, clsName+".cls"), filepath.Join(scratch, clsName+".cls"))
 		exFile := filepath.Join(scratch, "example.tex")
 		copyFile(filepath.Join(styleDir, "example.tex"), exFile)
@@ -445,11 +450,11 @@ func (r *Runner) chaptersPhase(proj string) error {
 	// 缓冲区 buffer.md（工作记忆：划分结果先增量写入这里，最后
 	// submit_split 按缓冲区内容提交）。书多章多时单次会话可能放不下，
 	// 缓冲区让进度跨轮保留。
-	sandbox, err := os.MkdirTemp("", "dsv-chap-")
+	sandbox, cleanSandbox, err := r.tempDir(proj, "chapters")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(sandbox)
+	defer cleanSandbox()
 	if err := copyFile(mainMD, filepath.Join(sandbox, "book.md")); err != nil {
 		return err
 	}
@@ -523,7 +528,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 			r.log.Log(1, "[chapters]", name, "= lines", strconv.Itoa(c.StartLine)+"-"+strconv.Itoa(c.EndLine), "|", c.Title)
 		}
 		notef("[chapters] 划分完成: %d 章 (granularity=%s)", len(submit.Chapters), granularity)
-		os.Remove(filepath.Join(proj, "work", "sessions", "chapters.jsonl")) // 已完成，转录不再需要
+		r.keepSessionFile(filepath.Join(proj, "work", "sessions", "chapters.jsonl")) // 已完成
 		return nil
 	}
 	return fmt.Errorf("章节划分在 3 次尝试内未通过校验: %s", r.lastSplitError)
@@ -592,6 +597,19 @@ func (r *Runner) buildPDFViewQuiet(sourceDir string, files []string) {
 	r.pdfView = view
 	r.log.Log(0, "[pdfview] 原书 PDF 视图就绪:", strings.Join(view.names(), ", "),
 		"("+strconv.Itoa(view.total)+" 页) ->", view.Dir)
+}
+
+// checkPageAlignment cross-checks the OCR page index against the real
+// origin PDFs: a mismatch means global page numbers can drift, while the
+// part-based lookups (used by doc_search and list_source_pages) stay
+// exact. Reported once per run, never fatal.
+func (r *Runner) checkPageAlignment() {
+	if r.pdfView == nil || r.docPages == nil {
+		return
+	}
+	for _, msg := range r.pdfView.alignmentProblems(r.docPages) {
+		r.log.LogWarning(0, "[pdfview] 页数不一致:", msg)
+	}
 }
 
 // buildDocIndexQuiet compiles the read-only original-document index
@@ -751,7 +769,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	if fileExists(texPath) {
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")
 		// 产物已写出的章节不再需要会话转录。
-		_ = os.Remove(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
+		r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
 		return nil
 	}
 
@@ -761,14 +779,21 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	manual, _ := os.ReadFile(manualPath)
 
 	// Scratch for per-chapter compile checks.
-	scratch, err := r.chapterScratch(proj, clsName, base)
+	scratch, cleanConvScratch, err := r.chapterScratch(proj, clsName, base, "conv")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(scratch)
+	defer cleanConvScratch()
 
+	// 本章私有工作视图：只能看到/改到自己那章的文件（别人的成品走只读
+	// 通道 project:converted/、project:reports/）。
+	chapView := ensureChapterView(proj, base)
+	writeRoot := workDir
+	if chapView != "" {
+		writeRoot = chapView
+	}
 	write := &WriteWorkFileTool{
-		Root:                workDir,
+		Root:                writeRoot,
 		Prefixes:            []string{texRel, "chapters/" + base + "/"},
 		RejectDocumentclass: true,
 		Hint:                "Your main file is " + texRel + "; extra resources (included .tex parts, tables) go under chapters/" + base + "/.",
@@ -780,12 +805,12 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	// 挂载表：build = 编译 scratch（默认挂载点，编译产物在这里），
 	// work = 章节工作树（可写），project/source = 只读。
 	convertMounts := append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
-		r.sessionMounts(kindConvert, workDir)...)
+		r.sessionMounts(kindConvert, writeRoot)...)
 	tools := []session.Tool{
 		&ReadFileTool{Root: r.projectRoot()},
 		write,
 		// 增量编辑自己的章节文件 + 工作区检索（手册/cls/其它章节只读参考）
-		&EditWorkFileTool{Root: workDir, Prefixes: []string{texRel, "chapters/" + base + "/"}},
+		&EditWorkFileTool{Root: writeRoot, Prefixes: []string{texRel, "chapters/" + base + "/"}},
 		&GrepTool{Root: r.projectRoot()},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
@@ -875,7 +900,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 				r.phaseNote()("[checker] %s 反馈 %d 轮未过 — 重转换", base, maxCheckerRounds)
 				_ = os.Remove(texPath)
 				_ = os.RemoveAll(filepath.Join(workDir, "chapters", base))
-				_ = os.Remove(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
+				r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
 				return r.convertOneChapter(proj, clsName, manualPath, chapPath, workDir, idx, tid, true)
 			}
 			r.log.LogWarning(tid, "[checker]", base, "重转换后仍未过（已记录，供终审处理）:", issues)
@@ -964,7 +989,7 @@ func (r *Runner) projectRoot() string {
 func (r *Runner) sourcePageTools() []session.Tool {
 	var tools []session.Tool
 	if r.docIndex != nil {
-		tools = append(tools, &DocSearchTool{Index: r.docIndex})
+		tools = append(tools, &DocSearchTool{Index: r.docIndex, View: r.pdfView, Mount: "source"})
 	}
 	if r.pdfView == nil || r.pdfView.total == 0 {
 		return tools
@@ -979,10 +1004,10 @@ func (r *Runner) sourcePageTools() []session.Tool {
 // \input fragment: the book class, a wrapper that inputs <base>.tex, and
 // the project images/figures mounted (symlink, copy as fallback) so
 // image references in the chapter resolve.
-func (r *Runner) chapterScratch(proj, clsName, base string) (string, error) {
-	scratch, err := os.MkdirTemp("", "dsv-conv-")
+func (r *Runner) chapterScratch(proj, clsName, base, tag string) (string, func(), error) {
+	scratch, cleanup, err := r.tempDir(proj, tag+"_"+base)
 	if err != nil {
-		return "", err
+		return "", func() {}, err
 	}
 	copyFile(filepath.Join(proj, "style", clsName+".cls"), filepath.Join(scratch, clsName+".cls"))
 	for _, asset := range []string{"images", "figures"} {
@@ -1007,10 +1032,10 @@ func (r *Runner) chapterScratch(proj, clsName, base string) (string, error) {
 		"\\graphicspath{{figures/}}\n" +
 		"\\begin{document}\n\\input{" + base + ".tex}\n\\end{document}\n"
 	if err := os.WriteFile(filepath.Join(scratch, base+"_wrapper.tex"), []byte(wrapper), 0o644); err != nil {
-		os.RemoveAll(scratch)
-		return "", err
+		cleanup()
+		return "", func() {}, err
 	}
-	return scratch, nil
+	return scratch, cleanup, nil
 }
 
 // fixChapterStyle runs a targeted style-fix sub-session on ONE already
@@ -1026,19 +1051,23 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	if !fileExists(texPath) {
 		return fmt.Errorf("没有已转换的 %s", texRel)
 	}
-	scratch, err := r.chapterScratch(proj, clsName, base)
+	scratch, cleanFixScratch, err := r.chapterScratch(proj, clsName, base, "convfix")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(scratch)
+	defer cleanFixScratch()
 	manual, _ := os.ReadFile(manualPath)
 
 	submit := &SubmitDoneTool{Label: "the style fix for " + base}
+	fixView := ensureChapterView(proj, base)
+	if fixView == "" {
+		fixView = workRoot
+	}
 	tools := []session.Tool{
 		&ReadFileTool{Root: r.projectRoot()},
-		&EditWorkFileTool{Root: workRoot, Prefixes: []string{texRel, "chapters/" + base + "/"}},
+		&EditWorkFileTool{Root: fixView, Prefixes: []string{texRel, "chapters/" + base + "/"}},
 		&WriteWorkFileTool{
-			Root:                workRoot,
+			Root:                fixView,
 			Prefixes:            []string{texRel, "chapters/" + base + "/"},
 			RejectDocumentclass: true,
 		},
@@ -1169,8 +1198,8 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	tools := []session.Tool{
 		&WriteWorkFileTool{Root: workDir},
 		&EditWorkFileTool{Root: workDir},
-		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
-		&GrepTool{Root: workDir},
+		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
+		&GrepTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style-feedback", Log: r.log, Tid: 1},
 		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
@@ -1209,11 +1238,11 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	_ = os.WriteFile(filepath.Join(styleDir, "manual.md"), []byte(submit.Manual), 0o644)
 	_ = os.WriteFile(filepath.Join(styleDir, "example.tex"), []byte(submit.Example), 0o644)
 
-	scratch, err := os.MkdirTemp("", "dsv-stylefb-")
+	scratch, cleanFBScratch, err := r.tempDir(proj, "style-feedback")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(scratch)
+	defer cleanFBScratch()
 	if err := copyFile(filepath.Join(styleDir, clsName+".cls"), filepath.Join(scratch, clsName+".cls")); err != nil {
 		return err
 	}
@@ -1246,7 +1275,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 		if sliceHas(redo, base) {
 			continue
 		}
-		scratch, serr := r.chapterScratch(proj, clsName, base)
+		scratch, cleanChk, serr := r.chapterScratch(proj, clsName, base, "convchk")
 		if serr != nil {
 			continue
 		}
@@ -1259,7 +1288,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 				r.log.LogWarning(0, "[style-feedback] 新样式下编译失败，需重做:", base)
 			}
 		}
-		os.RemoveAll(scratch)
+		cleanChk()
 	}
 	if len(redo) == 0 {
 		r.log.Log(0, "[style-feedback] 样式包已更新，没有章节需要重做")
@@ -1310,7 +1339,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	for _, b := range fallback {
 		_ = os.RemoveAll(filepath.Join(chapWork, b+".tex"))
 		_ = os.RemoveAll(filepath.Join(chapWork, b))
-		_ = os.Remove(filepath.Join(proj, "work", "sessions", "convert_"+b+".jsonl"))
+		r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+b+".jsonl"))
 	}
 	_ = os.RemoveAll(reportsDir)
 	if len(fallback) == 0 {
