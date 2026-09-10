@@ -177,3 +177,38 @@ func TestCompileTexToolMultiFile(t *testing.T) {
 		t.Errorf("state not recorded: ok=%v pdf=%q pages=%d", tool.LastOK, tool.LastPDF, tool.Pages)
 	}
 }
+
+// TestEditWorkFilePrefixes: a convert session may edit its OWN chapter
+// file and asset folder, and is refused on any sibling chapter.
+func TestEditWorkFilePrefixes(t *testing.T) {
+	work := t.TempDir()
+	for _, f := range []string{"chapters/chapter_01.tex", "chapters/chapter_02.tex", "chapters/chapter_01/table1.tex", "reports/chapter_01.md"} {
+		full := filepath.Join(work, f)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("OLD\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tool := &EditWorkFileTool{Root: work, Prefixes: []string{"chapters/chapter_01.tex", "chapters/chapter_01/"}}
+
+	res, err := tool.Execute(`{"path":"chapters/chapter_01.tex","find":"OLD","replace":"NEW"}`)
+	if err != nil || strings.Contains(res.Text, "REJECTED") {
+		t.Fatalf("own chapter must be editable: %v %s", err, res.Text)
+	}
+	res, err = tool.Execute(`{"path":"chapters/chapter_01/table1.tex","find":"OLD","replace":"NEW"}`)
+	if err != nil || strings.Contains(res.Text, "REJECTED") {
+		t.Fatalf("own asset folder must be editable: %v %s", err, res.Text)
+	}
+	for _, bad := range []string{"chapters/chapter_02.tex", "reports/chapter_01.md", "../outside.tex"} {
+		res, _ := tool.Execute(`{"path":"` + bad + `","find":"OLD","replace":"NEW"}`)
+		if !strings.Contains(res.Text, "REJECTED") && !strings.Contains(res.Text, "越界") {
+			t.Errorf("%s must be refused, got: %s", bad, res.Text)
+		}
+	}
+	data, _ := os.ReadFile(filepath.Join(work, "chapters", "chapter_02.tex"))
+	if string(data) != "OLD\n" {
+		t.Errorf("sibling chapter was modified: %q", data)
+	}
+}

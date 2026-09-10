@@ -104,12 +104,15 @@ func TestBashSandboxIsolates(t *testing.T) {
 // renders, build, out), which is either huge or none of its business.
 func TestProjectViewIsNarrow(t *testing.T) {
 	proj := t.TempDir()
-	for _, d := range []string{"source/images", "style", "chapters", "work/sessions", "pages", "build", "out", "doc_index"} {
+	for _, d := range []string{"source/images", "style", "chapters", "work/chapters", "work/reports",
+		"work/sessions", "pages", "build", "out", "doc_index"} {
 		if err := os.MkdirAll(filepath.Join(proj, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, f := range []string{"work/sessions/convert_x.jsonl", "pages/p001.png", "doc_index/doc_index.json", "out/book.pdf", "source/book.md", "chapters/chapter_01.md", "style/book.cls"} {
+	for _, f := range []string{"work/sessions/convert_x.jsonl", "pages/p001.png", "doc_index/doc_index.json",
+		"out/book.pdf", "source/book.md", "chapters/chapter_01.md", "style/book.cls",
+		"work/chapters/chapter_01.tex", "work/reports/chapter_01.md"} {
 		if err := os.WriteFile(filepath.Join(proj, f), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -123,6 +126,13 @@ func TestProjectViewIsNarrow(t *testing.T) {
 		t.Fatalf("view dir changed: %q vs %q", again, view)
 	}
 	for _, want := range []string{"source/book.md", "chapters/chapter_01.md", "style/book.cls"} {
+		if _, err := os.Stat(filepath.Join(view, want)); err != nil {
+			t.Errorf("view must expose %s: %v", want, err)
+		}
+	}
+	// The read-only channel to OTHER conversion sessions: their submitted
+	// .tex and their work reports — never their transcripts.
+	for _, want := range []string{"converted/chapter_01.tex", "reports/chapter_01.md"} {
 		if _, err := os.Stat(filepath.Join(view, want)); err != nil {
 			t.Errorf("view must expose %s: %v", want, err)
 		}

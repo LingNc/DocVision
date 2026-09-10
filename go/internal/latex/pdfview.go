@@ -165,9 +165,20 @@ func (v *pdfView) names() []string {
 
 // projectViewEntries are the ONLY project trees a session may read.
 // Everything else the pipeline produces (work/sessions transcripts,
-// work/reports, doc_index.json, pages/ renders, build/, out/) stays
-// invisible: it is either internal bookkeeping or huge.
-var projectViewEntries = []string{"source", "style", "chapters"}
+// doc_index.json, pages/ renders, build/, out/) stays invisible: it is
+// either internal bookkeeping or huge.
+//
+// Name is what the session sees (project:<Name>/...), Target is the real
+// tree. "converted" and "reports" are the READ-ONLY channel to what other
+// conversion sessions produced: their submitted .tex and their work
+// reports. Session transcripts are deliberately NOT exposed.
+var projectViewEntries = []struct{ Name, Target string }{
+	{"source", "source"},
+	{"style", "style"},
+	{"chapters", "chapters"},
+	{"converted", filepath.Join("work", "chapters")},
+	{"reports", filepath.Join("work", "reports")},
+}
 
 // ensureProjectView materialises the narrow read-only project view
 // (<proj>/work/views/project/{source,style,chapters} as symlinks) and
@@ -181,12 +192,12 @@ func ensureProjectView(proj string) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return ""
 	}
-	for _, name := range projectViewEntries {
-		src := filepath.Join(proj, name)
+	for _, e := range projectViewEntries {
+		src := filepath.Join(proj, e.Target)
 		if st, err := os.Stat(src); err != nil || !st.IsDir() {
 			continue
 		}
-		link := filepath.Join(dir, name)
+		link := filepath.Join(dir, e.Name)
 		if target, err := os.Readlink(link); err == nil {
 			if target == src {
 				continue

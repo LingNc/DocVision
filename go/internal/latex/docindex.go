@@ -315,9 +315,10 @@ func clampInt(v, lo, hi int) int {
 }
 
 // FormatEntry renders one entry for tool output (pN = global page for
-// view_pdf on the source mount / list_source_pages).
+// view_pdf on the source mount / list_source_pages; the local page is
+// 1-based, exactly what list_source_pages {page:N} and view_pdf print).
 func FormatEntry(e DocEntry) string {
-	s := fmt.Sprintf("#%d p%d (%s local p%d) %s bbox=[%.0f,%.0f,%.0f,%.0f]", e.Seq, e.Global, e.Part, e.Page, e.Type, e.BBox[0], e.BBox[1], e.BBox[2], e.BBox[3])
+	s := fmt.Sprintf("#%d p%d (%s local p%d) %s bbox=[%.0f,%.0f,%.0f,%.0f]", e.Seq, e.Global, e.Part, e.Page+1, e.Type, e.BBox[0], e.BBox[1], e.BBox[2], e.BBox[3])
 	if e.Img != "" {
 		s += " img=" + e.Img
 	}

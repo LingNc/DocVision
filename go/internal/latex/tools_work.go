@@ -303,15 +303,39 @@ func boolArg(args map[string]interface{}, key string) bool {
 // replace 追加到文件末尾（等价于"追加"操作，无需 find）。
 type EditWorkFileTool struct {
 	Root string
+	// Prefixes, when non-empty, restricts edits to these workspace paths
+	// (a path is allowed when it equals a prefix or lies under it): the
+	// convert / style-fix sessions may only touch their OWN chapter file
+	// and asset folder, never a sibling chapter's.
+	Prefixes []string
+}
+
+// pathAllowed reports whether rel is one of the allowed prefixes or a
+// file under them.
+func (t *EditWorkFileTool) pathAllowed(rel string) bool {
+	if len(t.Prefixes) == 0 {
+		return true
+	}
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	for _, p := range t.Prefixes {
+		p = strings.TrimSuffix(filepath.ToSlash(filepath.Clean(p)), "/")
+		if clean == p || strings.HasPrefix(clean, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *EditWorkFileTool) Name() string { return "edit_file" }
 
 func (t *EditWorkFileTool) Definition() map[string]any {
+	desc := "Edit a file in your workspace by exact find/replace (or append:true). "
+	if len(t.Prefixes) > 0 {
+		desc += "Editable paths: " + strings.Join(t.Prefixes, ", ") + " (and files under them)."
+	}
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name": "edit_file",
-		"description": "Edit a workspace text file incrementally. Either " +
-			"(a) literal find/replace: give find+replace (find must occur exactly once unless replace_all=true), or " +
+		"description": desc + "Either (a) literal find/replace: give find+replace (find must occur exactly once unless replace_all=true), or " +
 			"(b) append: set append=true and give replace (the text is appended to the end of the file; find ignored). " +
 			"Never rewrite a whole file when a small edit suffices.",
 		"parameters": map[string]any{
@@ -346,6 +370,10 @@ func (t *EditWorkFileTool) Execute(argsJSON string) (session.ToolResult, error) 
 			return session.ToolResult{Text: "REJECTED: mount \"" + m + "\" is read-only here; edit files under your own workspace (work:...)."}, nil
 		}
 		rel = stripMount(rel)
+	}
+	if !t.pathAllowed(rel) {
+		return session.ToolResult{Text: "REJECTED: " + rel + " is outside your own files (" +
+			strings.Join(t.Prefixes, ", ") + "). Other chapters are READ-ONLY reference material — never edit them."}, nil
 	}
 	full, err := resolveInside(t.Root, rel)
 	if err != nil {

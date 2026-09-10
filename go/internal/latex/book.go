@@ -785,7 +785,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		&ReadFileTool{Root: r.projectRoot()},
 		write,
 		// 增量编辑自己的章节文件 + 工作区检索（手册/cls/其它章节只读参考）
-		&EditWorkFileTool{Root: workDir},
+		&EditWorkFileTool{Root: workDir, Prefixes: []string{texRel, "chapters/" + base + "/"}},
 		&GrepTool{Root: r.projectRoot()},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
@@ -994,6 +994,14 @@ func (r *Runner) chapterScratch(proj, clsName, base string) (string, error) {
 			_ = copyDir(src, filepath.Join(scratch, asset))
 		}
 	}
+	// The chapter tree itself: a chapter may \input its own extra files
+	// (chapters/<base>/table1.tex ...) exactly as the assembled book does,
+	// so the scratch needs the same relative layout.
+	if chapTree := filepath.Join(proj, "work", "chapters"); fileExists(chapTree) {
+		if err := os.Symlink(chapTree, filepath.Join(scratch, "chapters")); err != nil {
+			_ = copyDir(chapTree, filepath.Join(scratch, "chapters"))
+		}
+	}
 	wrapper := "\\documentclass{" + clsName + "}\n" +
 		"\\usepackage{graphicx,amsmath,amssymb,longtable,booktabs}\n" +
 		"\\graphicspath{{figures/}}\n" +
@@ -1028,7 +1036,7 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	submit := &SubmitDoneTool{Label: "the style fix for " + base}
 	tools := []session.Tool{
 		&ReadFileTool{Root: r.projectRoot()},
-		&EditWorkFileTool{Root: workRoot},
+		&EditWorkFileTool{Root: workRoot, Prefixes: []string{texRel, "chapters/" + base + "/"}},
 		&WriteWorkFileTool{
 			Root:                workRoot,
 			Prefixes:            []string{texRel, "chapters/" + base + "/"},
