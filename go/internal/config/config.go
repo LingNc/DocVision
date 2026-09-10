@@ -118,6 +118,21 @@ type SessionTuning struct {
 	// CompactionAt is the fraction of ContextLimit that triggers
 	// auto-compaction (0.0-1.0). Default 0.85.
 	CompactionAt float64 `yaml:"compaction_at"`
+	// ToolRoundsWarnRatio starts the "N rounds left" reminder once the
+	// session has used this fraction of MaxToolRounds. 0 = default 0.7.
+	ToolRoundsWarnRatio float64 `yaml:"tool_rounds_warn_ratio"`
+	// ToolRoundsGrace is how many EXTRA rounds may still call tools after
+	// MaxToolRounds is reached (with a growing warning each round).
+	// 0 = default 20, negative = no grace (tools stop exactly at the cap).
+	ToolRoundsGrace int `yaml:"tool_rounds_grace"`
+	// PruneToolChars locally shortens tool results longer than this many
+	// characters (head+tail kept) before any AI compaction is paid for.
+	// 0 = default 8192, negative = never prune.
+	PruneToolChars int `yaml:"prune_tool_chars"`
+	// KeepImages is how many of the most recent images stay attached
+	// through a local prune; older ones become a text placeholder.
+	// 0 = default 3, negative = keep every image.
+	KeepImages int `yaml:"keep_images"`
 }
 
 // LatexCompileConfig controls the LaTeX toolchain used to compile and
@@ -322,6 +337,14 @@ type ToolsConfig struct {
 		MaxDown     int `yaml:"max_down"`     // expansion cap below (lines)
 		MaxCalls    int `yaml:"max_calls"`    // max expansion requests per image
 	} `yaml:"context"`
+	// View bounds the session image-viewing tools. Both are SOFT budgets:
+	// crossing them only adds a reminder to the tool result, it never
+	// blocks the call.
+	View struct {
+		ImageMax  int     `yaml:"image_max"`  // view_image calls per session: 0=30, <0=unlimited
+		PDFMax    int     `yaml:"pdf_max"`    // view_pdf calls per session: 0=25, <0=unlimited
+		WarnRatio float64 `yaml:"warn_ratio"` // start reminding at this fraction (0=0.7)
+	} `yaml:"view"`
 	Mermaid struct {
 		Validation  string `yaml:"validation"`   // off, auto, strict
 		Command     string `yaml:"command"`      // Mermaid CLI command
@@ -710,6 +733,76 @@ func defaultSessionTuning(s *SessionTuning) {
 	if s.CompactionAt <= 0 || s.CompactionAt > 1 {
 		s.CompactionAt = 0.85
 	}
+	if s.ToolRoundsWarnRatio <= 0 || s.ToolRoundsWarnRatio > 1 {
+		s.ToolRoundsWarnRatio = 0.7
+	}
+}
+
+// ToolRoundsGraceRounds resolves sessions.tool_rounds_grace (default 20).
+func (s SessionTuning) ToolRoundsGraceRounds() int {
+	if s.ToolRoundsGrace == 0 {
+		return 20
+	}
+	if s.ToolRoundsGrace < 0 {
+		return 0
+	}
+	return s.ToolRoundsGrace
+}
+
+// PruneToolCharsLimit resolves sessions.prune_tool_chars (default 8192,
+// negative disables local pruning).
+func (s SessionTuning) PruneToolCharsLimit() int {
+	if s.PruneToolChars == 0 {
+		return 8192
+	}
+	if s.PruneToolChars < 0 {
+		return 0
+	}
+	return s.PruneToolChars
+}
+
+// KeepImagesCount resolves sessions.keep_images (default 3, negative keeps
+// every image attached).
+func (s SessionTuning) KeepImagesCount() int {
+	if s.KeepImages == 0 {
+		return 3
+	}
+	if s.KeepImages < 0 {
+		return -1
+	}
+	return s.KeepImages
+}
+
+// ViewWarnRatio resolves tools.view.warn_ratio (default 0.7).
+func (c *Config) ViewWarnRatio() float64 {
+	r := c.Tools.View.WarnRatio
+	if r <= 0 || r > 1 {
+		return 0.7
+	}
+	return r
+}
+
+// ViewImageMax resolves tools.view.image_max (default 30, negative = no
+// budget). Soft: only used for reminders.
+func (c *Config) ViewImageMax() int {
+	if c.Tools.View.ImageMax == 0 {
+		return 30
+	}
+	if c.Tools.View.ImageMax < 0 {
+		return 0
+	}
+	return c.Tools.View.ImageMax
+}
+
+// ViewPDFMax resolves tools.view.pdf_max (default 25, negative = no budget).
+func (c *Config) ViewPDFMax() int {
+	if c.Tools.View.PDFMax == 0 {
+		return 25
+	}
+	if c.Tools.View.PDFMax < 0 {
+		return 0
+	}
+	return c.Tools.View.PDFMax
 }
 
 // ResolveModel merges the named registry entry with the top-level ai

@@ -14,6 +14,12 @@
 
 ### Fixed
 
+- **看图预算是硬拦截**（上一版实现把超预算直接变成"拒绝调用"）：改为**软预算**——`tools.view.image_max`（默认 30）/ `tools.view.pdf_max`（默认 25）/ `tools.view.warn_ratio`（默认 0.7），用满 70% 起每次调用附带"已用 N/30，仅剩 K 次"，超出后提示尽快提交，**从不拦截调用**；`view_pdf` 的计数也从"每文件每页"改为每会话。
+- **原图没有绝对尺度**（模型只知道像素，于是把图放大到整页）：新增 `imagescale.go` —— 从位图回溯到 MinerU 解析目录（`content_list.json` 的 bbox + `layout.json` 的 page_size），算出**印刷尺寸（mm）**、有效 dpi、占版面宽度比例，并在每次 `view_image` 结果与作图会话的初始消息里回给模型（显示标准：mm 优先）。实测该测试图：36.9mm x 20.2mm、占页宽 21%、195 dpi、比例 1.82:1（与独立复算一致）。高度按位图自身比例换算（MinerU 块 bbox 不紧贴图，直接取 bbox 高度会得到 2.7:1 的矛盾比例）。
+- **工具轮次只有硬上限**：`max_tool_rounds` 达到后立刻禁用工具，长任务常在收尾阶段被砍。现在有两级软限制——用满 `tool_rounds_warn_ratio`（默认 0.7）后每轮提醒剩余轮次；到达上限后仍有 `tool_rounds_grace`（默认 20）轮可调用，之后才禁用；提醒消息**原地替换**同一条，不膨胀历史、不破坏前缀缓存。
+- **调试日志刷屏**：`logger.write` 对 debug/trace 也打印控制台，导致 `--debug` 时终端里 style 的会话日志与进度行交错重叠（进度行被覆盖）。现在 debug/trace **只写日志文件**，终端只保留进度行与告警；`--debug`/`--trace` 帮助文本同步说明。
+- **压缩只有一级（且先付 AI 的钱）**：改为两级——先本地裁剪（超长工具结果留头尾、较早图片换文字占位并注明"需要时重新查看"），仍超阈值才调用 AI 摘要；token 估算补上系统提示词与工具定义（原来漏算，实测低估 5 万+ tokens）。
+- **前缀缓存无法固定上游**：请求现在带稳定的 `user` 字段（`docvision-<会话标签>-T<线程号>`），网关（new-api 等）可用它做渠道亲和，把同一会话固定到同一上游渠道——厂商前缀缓存是按上游 key 分的，换渠道即 0 命中；debug 的 `[cache-probe]` 行同时打印 `user`，便于核对。
 - **工具轮耗尽时摘掉整个工具块**：`max_tool_rounds` 用尽后 `req.Tools` 不再发送（只设 `tool_choice:"none"`）——厂商把 (system, tools, messages) 拼成缓存前缀，工具块消失会让其后所有 token 位移、**整个前缀缓存归零**（实测 prompt 37114→35362，差 1752 = 整个工具 schema）。现在工具块恒定发送，是否可调用只由 `tool_choice` 决定。
 - **缓存命中不可观测**：`Usage` 新解析 `prompt_tokens_details.cached_tokens` 并在用量行输出 `cached=N(%)`；debug 下每请求多打一行 `[cache-probe] body=… head_sha=… tools=N tool_choice=… messages=…` —— 前缀头哈希变了说明是**我们自己**改了前缀，哈希没变而 `cached=0` 则指向网关把请求路由到了另一个上游（厂商缓存按上游 key/节点，不跨渠道）。
 - **续跑丢系统提示词**：转录（JSONL）里没有 system 行，恢复时 `SetMessages` 整体覆盖 → 续跑会话**完全没有系统提示**。现在 `SetMessages` 总是把本会话的系统提示放回队首（转录里若有旧 system 行则替换，不重复）。

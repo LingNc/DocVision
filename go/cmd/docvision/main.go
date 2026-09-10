@@ -434,8 +434,8 @@ func newImg2TextCmd() *cobra.Command {
 	cmd.Flags().Bool("test", false, "启用测试模式（随机抽样）")
 	cmd.Flags().Int("number", 10, "测试图片数量（默认: 10）")
 	cmd.Flags().String("seed", "", "随机种子：'random' 或数字（用于复现）")
-	cmd.Flags().Bool("debug", false, "调试模式：记录请求参数/提示词/响应统计到日志文件")
-	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节")
+	cmd.Flags().Bool("debug", false, "调试模式：请求参数/提示词/响应统计等细节只写日志文件（终端只保留进度行与告警）")
+	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节（同样只写日志文件）")
 	return cmd
 }
 

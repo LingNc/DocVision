@@ -73,6 +73,15 @@ type FigureEnv struct {
 	MaxUp      int    // image_context expansion caps (from options.max_window_*)
 	MaxDown    int
 	OutputLang string // {OUTPUT_LANG} placeholder value (options.output_language)
+	// CurrentImgAbs is the absolute path of the source bitmap: the view
+	// tool measures its printed size (mm/dpi) from the MinerU parse so the
+	// model can keep the original scale.
+	CurrentImgAbs string
+	// ViewImageMax / ViewPDFMax / ViewWarnRatio: soft view budgets
+	// (tools.view.*); 0 = no budget.
+	ViewImageMax  int
+	ViewPDFMax    int
+	ViewWarnRatio float64
 }
 
 // renderPrompt fills the placeholders used by the built-in session
@@ -931,7 +940,8 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 
 	res, err := RunTikZSession(client, modelCfg, tuning, r.comp, img64, contextText,
 		outDir, dstTex, dstPDF, dstPNG,
-		FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown, OutputLang: r.outputLang()},
+		FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown, OutputLang: r.outputLang(),
+			CurrentImgAbs: imgFile, ViewImageMax: r.cfg.ViewImageMax(), ViewPDFMax: r.cfg.ViewPDFMax(), ViewWarnRatio: r.cfg.ViewWarnRatio()},
 		r.log, tid, r.keepTemp(), r.keepRecords())
 	if err != nil {
 		pp.Error = err.Error()

@@ -157,6 +157,11 @@ type ChatRequest struct {
 	Stream         bool             `json:"stream"`
 	StreamOptions  map[string]any   `json:"stream_options,omitempty"`
 	ResponseFormat map[string]any   `json:"response_format,omitempty"`
+	// User is a stable per-session identifier (the OpenAI `user` field).
+	// Gateways use it for routing/affinity: new-api can hash on it so one
+	// conversation always reaches the SAME upstream channel, which is what
+	// keeps the vendor's prefix cache (per upstream key) warm across turns.
+	User string `json:"user,omitempty"`
 }
 
 // ChatMessage is one message in a conversation. Content is either a
@@ -364,8 +369,8 @@ func (c *Client) logCacheProbe(payload *ChatRequest, raw []byte) {
 	if payload.Tools != nil {
 		tools = fmt.Sprintf("%d", len(payload.Tools))
 	}
-	c.log.Debug(0, fmt.Sprintf("[cache-probe] body=%dB head_sha=%x tools=%s tool_choice=%q messages=%d",
-		len(raw), sum[:8], tools, payload.ToolChoice, len(payload.Messages)))
+	c.log.Debug(0, fmt.Sprintf("[cache-probe] body=%dB head_sha=%x tools=%s tool_choice=%q messages=%d user=%q",
+		len(raw), sum[:8], tools, payload.ToolChoice, len(payload.Messages), payload.User))
 }
 
 // post performs the HTTP call with the transport matching the mode.

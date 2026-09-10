@@ -111,7 +111,7 @@ func (l *Logger) Debug(tid int, args ...interface{}) {
 	if !l.DebugEnabled() {
 		return
 	}
-	l.write(l.logFile, tid, "[DEBUG] ", args...)
+	l.writeFileOnly(l.logFile, tid, "[DEBUG] ", args...)
 }
 
 // Trace writes a [TRACE] entry to the main log file only. Trace is the
@@ -121,7 +121,7 @@ func (l *Logger) Trace(tid int, args ...interface{}) {
 	if !l.TraceEnabled() {
 		return
 	}
-	l.write(l.logFile, tid, "[TRACE] ", args...)
+	l.writeFileOnly(l.logFile, tid, "[TRACE] ", args...)
 }
 
 // LogError writes "[ERROR] ..." tagged message to the console, the main log
@@ -209,6 +209,25 @@ func (l *Logger) write(file *os.File, tid int, tag string, args ...interface{}) 
 	if file != nil {
 		_, _ = file.WriteString(line)
 	}
+}
+
+// writeFileOnly writes an entry to the log file WITHOUT touching the
+// console. Debug/trace detail (prompts, tool dumps, per-request summaries)
+// belongs in the file: printing it next to the live progress line garbles
+// the terminal, which is why only info/warning/error reach the console.
+func (l *Logger) writeFileOnly(file *os.File, tid int, tag string, args ...interface{}) {
+	if file == nil {
+		return
+	}
+	ts := time.Now().Format("15:04:05")
+	tidStr := fmt.Sprintf("%0*d", l.threadIDWidth, tid)
+	body := joinArgs(args)
+	if tag != "" {
+		body = tag + body
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_, _ = file.WriteString(fmt.Sprintf("[%s][T%s] %s\n", ts, tidStr, body))
 }
 
 // append writes a pre-formatted line to the given file under the logger's

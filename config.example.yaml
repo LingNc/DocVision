@@ -62,7 +62,7 @@ latex:
   insert_image_description: false # 档位2：raster 保留原图时是否再嵌入一段 AI 解释文本
                                  # （档位1 不受此开关控制：raster 总是带 DESCRIBE 解释块）
   chapter_granularity: "small"   # 档位1 章节拆分粒度：small=按小节拆分（默认）/ large=按大章整体拆分
-  concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
+  concurrency: 3                 # 会话级并发（处理process/drawing、convert等的并发限制）
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/编译 scratch/矢量图工作区）；debug 日志下必定保留
   keep_session_records: false # 保留会话转录 JSONL（成功会话默认清理）；debug 日志下必定保留
   compile:
@@ -77,7 +77,11 @@ latex:
       context_limit: 131072      # 上下文窗口（tokens，默认 128K，可改 64K/256K 等）
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
       max_tokens: 131072
-      compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩
+      compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩（先本地裁剪，仍超才花 AI 摘要）
+      tool_rounds_warn_ratio: 0.7 # 用满该比例的工具轮次后，每轮提醒剩余轮次
+      tool_rounds_grace: 20      # 达到 max_tool_rounds 后仍允许的工具轮次（之后才真正禁用工具）
+      prune_tool_chars: 8192     # 本地裁剪：超长工具结果只留头尾（0=默认，负=从不裁剪）
+      keep_images: 3             # 本地裁剪时保留最近几张图（负=全部保留）
     style:
       context_limit: 262144      # 样式分析建议更大窗口（256K）
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
@@ -110,6 +114,10 @@ img2text:
 # expansion, latex image_context, mermaid/tikz validation).
 # ----------------------------------------------------------------
 tools:
+  view:                         # 会话看图工具的软预算（只提醒，不拦截调用）
+    image_max: 30               # view_image 每会话软上限（0=30，负=不限）
+    pdf_max: 25                 # view_pdf 每会话软上限（0=25，负=不限）
+    warn_ratio: 0.7             # 用满该比例起，每次调用附带"仅剩 N 次"提醒（30*0.7=21，从第 21 次起）
   context:
     initial_up: 10              # initial context lines above the image
     initial_down: 5             # initial context lines below the image

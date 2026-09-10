@@ -801,11 +801,12 @@ type ViewPDFTool struct {
 	// Comp provides the pdftoppm rasterizer settings (dpi); nil uses a
 	// plain pdftoppm call.
 	Comp *Compiler
-	// MaxViews (0 = unlimited) caps how often one session may re-render
-	// the same page; figure sessions use it to break the "look again,
-	// tweak, look again" loop.
-	MaxViews int
-	views    map[string]int
+	// SoftMax / WarnRatio implement the (soft) view budget for view_pdf —
+	// same semantics as ViewImageTool; configured by tools.view.pdf_max /
+	// tools.view.warn_ratio. SoftMax 0 = no budget.
+	SoftMax   int
+	WarnRatio float64
+	views     int
 }
 
 // vfs returns the tool's namespace (Mounts wins over Root).
@@ -874,18 +875,8 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 			return session.ToolResult{Text: fmt.Sprintf("OUT OF RANGE: %s 共 %d 页，请求第 %d 页", rel, n, page)}, nil
 		}
 	}
-	// 会话级看图预算（按 文件+页 计数）：真正渲染前拦截，既省 token
-	// 也打断"看一眼→改一点→再看一眼"的空转。
-	if t.MaxViews > 0 {
-		if t.views == nil {
-			t.views = map[string]int{}
-		}
-		k := fmt.Sprintf("%s#%d", rel, page)
-		t.views[k]++
-		if t.views[k] > t.MaxViews {
-			return session.ToolResult{Text: viewBudgetMessage}, nil
-		}
-	}
+	// 会话级看图预算（软）：计数用于提醒，不拦截调用。
+	t.views++
 	left := pctArg(args, "left", 0)
 	top := pctArg(args, "top", 0)
 	right := pctArg(args, "right", 100)
@@ -945,7 +936,9 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 		note = fmt.Sprintf(" (page %d/%d)", page, total)
 	}
 	return session.ToolResult{
-		Text:        fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx)%s attached. If this rendering matches the original, stop viewing and call submit.", rel, page, left, top, right, bottom, zoom, note),
+		Text: fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx)%s attached.", rel, page, left, top, right, bottom, zoom, note) +
+			" If this rendering matches the original, stop viewing and call submit." +
+			viewBudgetNote("view_pdf", t.views, t.SoftMax, t.WarnRatio),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
 	}, nil

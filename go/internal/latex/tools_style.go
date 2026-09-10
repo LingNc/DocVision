@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,17 +30,58 @@ type ViewImageTool struct {
 	// Subject is the current document's image subfolder (e.g.
 	// "测试-概率论"); it lets a bare file name resolve without a path.
 	Subject string
-	// MaxViews caps how many times one session may look at the image.
-	// A session that keeps re-cropping and re-zooming a small source
-	// bitmap never gains information (upscaling is not OCR) — the real
-	// incident was 115 view_image calls on one 284x156px figure. 0 =
-	// unlimited (level-1 style/convert sessions look at many pages).
-	MaxViews int
-	views    int
+	// SoftMax / WarnRatio implement the view budget: from
+	// ceil(SoftMax*WarnRatio) calls on, the tool result carries a short
+	// reminder of how many views are left, and past SoftMax it says the
+	// budget is spent. It NEVER blocks the call — the model decides.
+	// Configured by tools.view.image_max / tools.view.warn_ratio.
+	// SoftMax 0 = no budget.
+	SoftMax   int
+	WarnRatio float64
+	views     int
+	// Measure, when set, adds the ORIGINAL figure's printed size (mm, px,
+	// effective dpi) to every result — the model otherwise has no idea how
+	// big the figure is on the page and draws it page-sized.
+	Measure func() string
 }
 
-// viewBudgetMessage is returned once a session exhausts its view budget.
-const viewBudgetMessage = "VIEW BUDGET EXHAUSTED for this session: you have already looked at this figure enough times and upscaling a small source image cannot reveal more. Mark anything still uncertain with % [?], make your best redraw, compile and call submit now."
+// viewBudgetNote renders the budget reminder appended to a view result.
+// The budget is soft: the call is never blocked, the model is just told how
+// many views it has left. `label` is the tool name shown to the model;
+// softMax 0 means no budget.
+func viewBudgetNote(label string, used, softMax int, ratio float64) string {
+	if softMax <= 0 {
+		return ""
+	}
+	warnFrom := int(math.Ceil(float64(softMax) * ratio))
+	if warnFrom < 1 {
+		warnFrom = 1
+	}
+	switch {
+	case used > softMax:
+		return fmt.Sprintf(" VIEW BUDGET SPENT (%s: %d/%d). Do not keep looking — finish the work and submit your best result now.", label, used, softMax)
+	case used >= warnFrom:
+		return fmt.Sprintf(" VIEW BUDGET: %s used %d/%d, only %d left — use them sparingly and submit as soon as the result is faithful.", label, used, softMax, softMax-used)
+	default:
+		return ""
+	}
+}
+
+// measureNote reports the original figure's printed size. Callers with a
+// pre-computed value supply Measure; otherwise it is measured from the
+// resolved file (the MinerU parse of its part directory is looked up).
+func (t *ViewImageTool) measureNote(full string) string {
+	if t.Measure != nil {
+		if m := t.Measure(); m != "" {
+			return " " + m
+		}
+		return ""
+	}
+	if m := measureHint(full); m != "" {
+		return " " + m
+	}
+	return ""
+}
 
 func (t *ViewImageTool) Name() string { return "view_image" }
 
@@ -86,9 +128,6 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 		zoom = 6000
 	}
 	t.views++
-	if t.MaxViews > 0 && t.views > t.MaxViews {
-		return session.ToolResult{Text: viewBudgetMessage}, nil
-	}
 
 	img, err := decodeImage(full)
 	if err != nil {
@@ -103,7 +142,10 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 		return session.ToolResult{}, err
 	}
 	return session.ToolResult{
-		Text:        fmt.Sprintf("Image %s (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx) attached. If this matches what you already saw, stop viewing and call submit.", pathArg, left, top, right, bottom, zoom),
+		Text: "Image " + fmt.Sprintf("%s (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx) attached.", pathArg, left, top, right, bottom, zoom) +
+			t.measureNote(full) +
+			" If this matches what you already saw, stop viewing and call submit." +
+			viewBudgetNote("view_image", t.views, t.SoftMax, t.WarnRatio),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
 	}, nil

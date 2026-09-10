@@ -41,6 +41,12 @@ func RunTikZSession(
 	tid int,
 	keepTemps, keepRecords bool,
 ) (TikZResult, error) {
+	cfgImageMax := env.ViewImageMax
+	cfgPdfMax := env.ViewPDFMax
+	cfgWarnRatio := env.ViewWarnRatio
+	if cfgWarnRatio <= 0 {
+		cfgWarnRatio = 0.7
+	}
 	// 持久工作区：按镜像命名（不处理完不删除，中断后下次续上）。
 	// 成功提交后清理；失败保留供 resume。
 	texBase := strings.TrimSuffix(filepath.Base(dstTex), ".tex")
@@ -58,19 +64,25 @@ func RunTikZSession(
 		&ReadFileTool{Root: scratch},
 		&GrepTool{Root: scratch},
 		&CompileFigureTool{Comp: comp, State: state, EngineIsXe: engineIsXe, Log: log, Tid: tid},
-		// 每页最多看 10 次：防止无限抛光（原事故：一张图 115 次 view_image）。
-		&ViewPDFTool{Root: scratch, Comp: comp, MaxViews: 10},
+		// 看图预算（软，提醒不拦截）：tools.view.pdf_max / warn_ratio。
+		&ViewPDFTool{Root: scratch, Comp: comp, SoftMax: cfgPdfMax, WarnRatio: cfgWarnRatio},
 		&SubmitFigureTool{State: state},
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
-		// 单张矢量图会话限制看图次数：小图放大再多也不会产生新信息。
-		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg), MaxViews: 12},
+		// 原图:每次看图都附带"印刷尺寸/像素/有效 dpi"测量 + 软预算提醒。
+		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg),
+			SoftMax: cfgImageMax, WarnRatio: cfgWarnRatio,
+			Measure: func() string { return measureHint(env.CurrentImgAbs) }}, // 与自动测量等价，这里是避免重复回溯
 	}, log, tid, "tikz")
 
 	// 原图位图尺寸 → 宽高比：模型只看渲染图，无法判断物理大小，
 	// 不给参考就会出现"画满画布、比例失真"。
-	ratioLine := ""
-	if w, h := imageSize(env.CurrentImg); w > 0 && h > 0 {
-		ratioLine = fmt.Sprintf("The original bitmap is %dx%d px: aspect ratio %.2f:1 (width:height). Your drawing must keep that aspect ratio and must NOT be blown up to page size.", w, h, float64(w)/float64(h))
+	// 印刷尺寸测量（mm + 有效 dpi）：模型无法从像素判断物理大小，
+	// 不给绝对尺度就会把图放大到整页（实测 21% 页宽 → 62%）。
+	ratioLine := measureHint(env.CurrentImgAbs)
+	if ratioLine == "" {
+		if w, h := imageSize(env.CurrentImg); w > 0 && h > 0 {
+			ratioLine = fmt.Sprintf("The original bitmap is %dx%d px: aspect ratio %.2f:1 (width:height). Your drawing must keep that aspect ratio and must NOT be blown up to page size.", w, h, float64(w)/float64(h))
+		}
 	}
 	initial := strings.Join([]string{
 		"Redraw the attached image as TikZ.",

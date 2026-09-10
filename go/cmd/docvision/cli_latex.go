@@ -144,7 +144,7 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 	cmd.Flags().String("seed", "", "随机种子")
 	cmd.Flags().String("source-dir", "", "覆盖输入 markdown 目录（默认 paths.output_dir）")
 	cmd.Flags().Bool("all", false, "日志分析汇总全部历史日志（默认只分析本次运行）")
-	cmd.Flags().Bool("debug", false, "调试模式：记录请求参数/提示词/工具调用/响应统计到日志文件")
+	cmd.Flags().Bool("debug", false, "调试模式：请求参数/提示词/工具调用/响应统计等细节**只写日志文件**（终端只保留进度行与告警，不再刷屏）")
 	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节")
 	cmd.Flags().Bool("verbose", false, "详细控制台输出（默认仅显示 img2text 风格的进度行，详情写日志文件）")
 	return cmd

@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"mineru-tools/internal/config"
@@ -57,12 +58,19 @@ type Session struct {
 	APIRequests int
 	ToolInvoked int
 	Compactions int
+	Prunes      int
 
 	// progressHook, when set, is notified after every API round and
 	// every tool execution with (completed rounds, executed tool
 	// calls) — used by compact console modes to show a live line.
 	progressHook func(rounds, tools int)
 	rounds       int
+	// user is the stable per-conversation identifier sent as the OpenAI
+	// `user` field. Gateways such as new-api can pin routing on it so one
+	// conversation always reaches the same upstream channel; vendor prefix
+	// caches live per upstream key, so affinity is what makes
+	// prompt_tokens_details.cached_tokens reliable.
+	user string
 
 	// transcript, when set, receives every appended conversation
 	// message as a JSONL line (images as file:// refs) for resume.
@@ -133,7 +141,30 @@ func NewSession(
 	if system != "" {
 		s.messages = append(s.messages, ChatMessage{Role: "system", Content: system})
 	}
+	s.user = affinityUser(label, tid)
 	return s
+}
+
+// affinityUser builds the per-conversation identifier sent as `user`.
+// One session keeps the same value on every request (that is what makes the
+// gateway route it to a stable upstream channel), while different sessions
+// get different values so the gateway can still spread them out.
+func affinityUser(label string, tid int) string {
+	if label == "" {
+		return ""
+	}
+	clean := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, label)
+	if len(clean) > 60 {
+		clean = clean[:60]
+	}
+	return fmt.Sprintf("docvision-%s-T%d", clean, tid)
 }
 
 // Label returns the session label used in log lines.
@@ -228,6 +259,37 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 	toolRounds := 0
 	// maxRounds <= 0 means unlimited (user opted out of any cap).
 	maxRounds := s.tuning.MaxToolRounds
+	// Soft round budget: from warnFrom the session starts reporting how
+	// many tool rounds are left, and the cap itself only ends the tool
+	// phase after `grace` extra rounds — a hard cut-off in the middle of
+	// real work loses more than it saves.
+	warnFrom := 0
+	hardStop := 0
+	if maxRounds > 0 {
+		ratio := s.tuning.ToolRoundsWarnRatio
+		if ratio <= 0 || ratio > 1 {
+			ratio = 0.7
+		}
+		warnFrom = int(math.Ceil(float64(maxRounds) * ratio))
+		if warnFrom < 1 {
+			warnFrom = 1
+		}
+		hardStop = maxRounds + s.tuning.ToolRoundsGraceRounds()
+	}
+	reminderIdx := -1 // index of the replaceable round-budget reminder
+	remind := func(text string) {
+		// Replace the previous reminder in place: the history stays short
+		// and the prefix before it is untouched, so prompt caching keeps
+		// working while the countdown stays accurate.
+		msg := ChatMessage{Role: "user", Content: text}
+		if reminderIdx >= 0 && reminderIdx < len(s.messages) {
+			s.messages[reminderIdx] = msg
+			return
+		}
+		reminderIdx = len(s.messages)
+		s.messages = append(s.messages, msg)
+		s.appendTranscript(msg)
+	}
 
 	for {
 		req := &ChatRequest{
@@ -235,8 +297,19 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			Messages:    s.messages,
 			MaxTokens:   s.tuning.MaxTokens,
 			Temperature: s.tuning.Temperature,
+			User:        s.user,
 		}
-		useTools := len(s.tools) > 0 && !opts.ForceNoTools && (maxRounds <= 0 || toolRounds < maxRounds)
+		if maxRounds > 0 && toolRounds >= warnFrom {
+			switch {
+			case toolRounds < maxRounds:
+				remind(fmt.Sprintf("ROUND BUDGET: %d of %d tool rounds used, %d left. Use them sparingly, finish the work and call submit with your best result.",
+					toolRounds, maxRounds, maxRounds-toolRounds))
+			case toolRounds < hardStop:
+				remind(fmt.Sprintf("ROUND BUDGET EXCEEDED: the soft limit of %d tool rounds is used up. You have %d extra rounds left; after that no more tool calls are possible, so wrap up now and submit your best result.",
+					maxRounds, hardStop-toolRounds))
+			}
+		}
+		useTools := len(s.tools) > 0 && !opts.ForceNoTools && (maxRounds <= 0 || toolRounds < hardStop)
 		if len(s.tools) > 0 && !opts.ForceNoTools {
 			// ALWAYS send the tool definitions. Providers build their prompt
 			// prefix from (system, tools, messages): dropping the tool block
@@ -481,13 +554,99 @@ func (s *Session) logf(format string, args ...interface{}) {
 	s.logger.Log(s.tid, "["+s.label+"] "+fmt.Sprintf(format, args...))
 }
 
-// EstimatedTokens reports the current conversation size estimate.
+// EstimatedTokens reports the current request size estimate. The system
+// prompt and the tool definitions are part of every request and they are
+// NOT small (a full LaTeX tool set costs ~1.8k tokens), so leaving them out
+// underestimated the real prompt by tens of thousands of tokens.
 func (s *Session) EstimatedTokens() int {
-	total := 0
+	total := textTokens(s.system)
+	if len(s.toolDefs) > 0 {
+		if raw, err := json.Marshal(s.toolDefs); err == nil {
+			total += textTokens(string(raw))
+		}
+	}
 	for _, m := range s.messages {
 		total += messageTokens(m)
 	}
 	return total
+}
+
+// pruneHistory shortens the conversation WITHOUT calling the model: long
+// tool results are cut to head+tail and older images are replaced by a text
+// placeholder (the record of what was inspected survives, the pixels do
+// not). It returns how many messages it changed. This is the first of two
+// compaction stages — an AI summary is only paid for when local pruning is
+// not enough.
+func (s *Session) pruneHistory() int {
+	maxChars := s.tuning.PruneToolCharsLimit()
+	keepImages := s.tuning.KeepImagesCount()
+	if maxChars <= 0 && keepImages < 0 {
+		return 0
+	}
+	// Which image-bearing messages are recent enough to keep?
+	keepFrom := 0
+	if keepImages >= 0 {
+		seen := 0
+		for i := len(s.messages) - 1; i >= 0; i-- {
+			if !hasImage(s.messages[i]) {
+				continue
+			}
+			seen++
+			if seen > keepImages {
+				keepFrom = i + 1
+				break
+			}
+		}
+	}
+	changed := 0
+	for i := range s.messages {
+		m := &s.messages[i]
+		if maxChars > 0 {
+			if text, ok := m.Content.(string); ok && m.Role == "tool" && len(text) > maxChars {
+				head := maxChars / 2
+				tail := maxChars / 4
+				m.Content = fmt.Sprintf("%s\n[... %d characters pruned by docvision (local, no model call) ...]\n%s",
+					text[:head], len(text)-head-tail, text[len(text)-tail:])
+				changed++
+			}
+		}
+		if keepImages >= 0 && i < keepFrom && hasImage(*m) {
+			parts, ok := m.Content.([]map[string]interface{})
+			if !ok {
+				continue
+			}
+			var b strings.Builder
+			imgs := 0
+			for _, part := range parts {
+				if t, ok := part["text"].(string); ok && t != "" {
+					b.WriteString(t)
+					b.WriteString("\n")
+					continue
+				}
+				if _, ok := part["image_url"].(map[string]string); ok {
+					imgs++
+				}
+			}
+			note := fmt.Sprintf("[%d image(s) attached here are no longer carried in the context; call view_image/view_pdf again if you need to look at them.]", imgs)
+			m.Content = strings.TrimSpace(b.String() + "\n" + note)
+			changed++
+		}
+	}
+	return changed
+}
+
+// hasImage reports whether a message carries an attached image.
+func hasImage(m ChatMessage) bool {
+	parts, ok := m.Content.([]map[string]interface{})
+	if !ok {
+		return false
+	}
+	for _, part := range parts {
+		if _, ok := part["image_url"].(map[string]string); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // maybeCompact triggers AI-driven compaction when the conversation
@@ -505,9 +664,20 @@ func (s *Session) maybeCompact() error {
 	if s.EstimatedTokens() < int(float64(limit)*at) {
 		return nil
 	}
+	// Stage 1: local pruning (free).
+	before := s.EstimatedTokens()
+	if n := s.pruneHistory(); n > 0 {
+		now := s.EstimatedTokens()
+		s.logf("[compact] 本地裁剪：%d 条消息，估算 %d → %d tokens（未调用模型）", n, before, now)
+		if now < int(float64(limit)*at) {
+			s.Prunes++
+			return nil
+		}
+	}
 	if len(s.messages) <= 2 {
 		return nil // nothing to compact beyond the system prompt
 	}
+	// Stage 2: the conversation is still too large — pay for an AI summary.
 	if err := s.compact(); err != nil {
 		return err
 	}
