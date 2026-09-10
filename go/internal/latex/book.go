@@ -343,15 +343,7 @@ func (r *Runner) stylePhase(proj string) error {
 	}
 	tools = append(tools, r.sourcePageTools()...)
 
-	prompt := prompts.Must(prompts.StyleSystem)
-	prompt += "\n\nBASH PATHS: the bash tool runs inside a kernel sandbox where your workspace, the project and the original PDFs are the only trees, mounted as /work, /project and /source — exactly the trees of the file tools, so work:x.tex = /work/x.tex, project:source/book.md = /project/source/book.md, source:<file>.pdf = /source/<file>.pdf. The real host paths do not exist there; /tmp is scratch."
-	if r.cfg.Latex.RemoveWatermark {
-		prompt += "\n\n" + r.watermarkGuidance("WATERMARK: the source may carry watermark artifacts (repeated decorative overlay text such as institution/library marks, faint background strings). Identify the watermark pattern in the manual and instruct conversion to EXCLUDE it entirely - watermark text/graphics must NOT be typeset in the LaTeX output.")
-	}
-	if r.pdfView != nil {
-		prompt += "\n\nIMPORTANT: the ORIGINAL book pages are available — call list_source_pages to get the source PDFs, the detected section starts and (with page=N) that page's text snippets and extracted image file names, then look at the page with view_pdf {\"path\":\"source:<file>\", \"page\":N} (crop/zoom supported). They show the TRUE typography and layout: inspect the title pages, headings, headers/footers and representative figures before writing the class. The OCR markdown itself is readable with read_file {\"path\":\"project:<md>\"} whenever you need exact text."
-	}
-	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompt, tuning, r.outputLang()), tools, r.log, 1, "style")
+	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "style")
 	liveHook, liveClose := r.livePhaseLine("style")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
@@ -363,9 +355,18 @@ func (r *Runner) stylePhase(proj string) error {
 	if legacyMsgs, lerr := loadSessionContext(ctxPath); lerr == nil && len(legacyMsgs) > 0 {
 		// 上次运行中断（phase 未标 done）→ 从历史上下文续跑。
 		sess.SetMessages(legacyMsgs)
+		_, statErr := os.Stat(ctxPath)
+		freshTranscript := os.IsNotExist(statErr)
 		if tr, terr := session.NewTranscript(ctxPath); terr == nil {
 			sess.SetTranscript(tr)
 			defer tr.Close()
+			// 迁移旧上下文（旧版单 JSON 文件）：不写一遍的话新转录从本轮
+			// 才开头，历史在下次续跑时就找不回来了。
+			if freshTranscript {
+				for _, m := range legacyMsgs {
+					_ = tr.Append(m)
+				}
+			}
 		}
 		r.log.Log(1, "[style] 恢复中断的样式会话 (", strconv.Itoa(len(legacyMsgs)), "条历史消息 )")
 	} else if tr, terr := session.NewTranscript(ctxPath); terr == nil {
@@ -1223,8 +1224,10 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	}
 	tools = append(tools, r.sourcePageTools()...)
 
-	// 复用原样式会话：系统提示已在持久化消息里，不开新上下文。
-	sess := session.NewSession(client, modelCfg, tuning, "", tools, r.log, 1, "style-feedback")
+	// 复用原样式会话的上下文（转录里只有 user/assistant/tool，没有 system
+	// 行），因此这里必须重新挂上同一份系统提示词——否则打回的这一轮
+	// 完全没有系统提示（模板、挂载说明、水印要求全部丢失）。
+	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "style-feedback")
 	liveHook, liveClose := r.livePhaseLine("style-feedback")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
@@ -1374,10 +1377,35 @@ func sliceHas(s []string, want string) bool {
 	return false
 }
 
+// styleSystemPrompt builds the system prompt of the style session: the
+// shared template plus the run-specific mount/watermark/source-page
+// guidance. The style-FEEDBACK session (which re-runs in the same
+// conversation later) MUST use the same text: a resumed transcript carries
+// no system message (system prompts are never written to the JSONL), so
+// passing "" there silently left that turn without any system prompt.
+func (r *Runner) styleSystemPrompt() string {
+	prompt := prompts.Must(prompts.StyleSystem)
+	prompt += "\n\nBASH PATHS: the bash tool runs inside a kernel sandbox where your workspace, the project and the original PDFs are the only trees, mounted as /work, /project and /source — exactly the trees of the file tools, so work:x.tex = /work/x.tex, project:source/book.md = /project/source/book.md, source:<file>.pdf = /source/<file>.pdf. The real host paths do not exist there; /tmp is scratch."
+	if r.cfg.Latex.RemoveWatermark {
+		prompt += "\n\n" + r.watermarkGuidance("WATERMARK: the source may carry watermark artifacts (repeated decorative overlay text such as institution/library marks, faint background strings). Identify the watermark pattern in the manual and instruct conversion to EXCLUDE it entirely - watermark text/graphics must NOT be typeset in the LaTeX output.")
+	}
+	if r.pdfView != nil {
+		prompt += "\n\nIMPORTANT: the ORIGINAL book pages are available — call list_source_pages to get the source PDFs, the detected section starts and (with page=N) that page's text snippets and extracted image file names, then look at the page with view_pdf {\"path\":\"source:<file>\", \"page\":N} (crop/zoom supported). They show the TRUE typography and layout: inspect the title pages, headings, headers/footers and representative figures before writing the class. The OCR markdown itself is readable with read_file {\"path\":\"project:<md>\"} whenever you need exact text."
+	}
+	tuning := r.cfg.LatexSession("style")
+	return renderPrompt(prompt, tuning, r.outputLang())
+}
+
 // saveSessionContext persists the full conversation of a session as a
 // JSONL transcript（图片以 file:// 媒体引用存储，不内联 base64）。
 // 兼容旧版单 JSON 文件：若 <path> 不存在而同名 .json 存在，则先迁移。
 func saveSessionContext(sess *session.Session, path string) error {
+	// A live transcript already appends every message as it happens; writing
+	// the whole conversation again produced a duplicated transcript with a
+	// system line in the middle (which LoadTranscript does not deduplicate).
+	if sess.HasTranscript() {
+		return nil
+	}
 	msgs := sess.Messages()
 	if len(msgs) == 0 {
 		return fmt.Errorf("空会话")

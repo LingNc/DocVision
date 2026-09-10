@@ -97,6 +97,15 @@ func (s *Session) notifyProgress() {
 // replies, tool results) is also appended to the transcript file, so
 // an interrupted session can be resumed later without burning tokens
 // on a fresh context. Images are stored as file://media/... refs.
+// HasTranscript reports whether this session writes its messages to a live
+// JSONL transcript. Callers that used to dump the whole conversation to the
+// same file at the end (style session) must skip that when a transcript is
+// attached: the messages are already on disk, and appending them again
+// duplicated the history.
+func (s *Session) HasTranscript() bool {
+	return s.transcript != nil
+}
+
 func (s *Session) SetTranscript(w *TranscriptWriter) { s.transcript = w }
 
 // appendTranscript writes one message to the transcript if attached.

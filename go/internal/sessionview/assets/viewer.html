@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocVision 会话预览</title>
+{{DSH_STYLE}}
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="side-head">
+      <span class="side-title">工作区/目录</span>
+      <button id="refresh" class="ghost-btn" type="button" title="重新扫描会话">刷新</button>
+    </div>
+    <div id="root-path" class="root-path">—</div>
+    <div class="side-search">
+      <input id="search" type="search" placeholder="按名字过滤会话…" autocomplete="off">
+    </div>
+    <div id="session-list" class="session-list"></div>
+    <div id="side-foot" class="side-foot"></div>
+  </aside>
+  <main id="main">
+    <header id="toolbar">
+      <div class="tool-left">
+        <span id="session-title" class="session-title">未选择会话</span>
+        <span id="session-sub" class="session-sub"></span>
+      </div>
+      <div class="tool-right">
+        <span id="mode-badge" class="badge badge-muted">—</span>
+        <label class="switch" title="新消息到达时自动滚动到底部"><input id="follow" type="checkbox"><span>自动跟随</span></label>
+        <label class="switch" title="把所有思考过程折叠起来"><input id="collapse-thinking" type="checkbox"><span>折叠全部思考</span></label>
+        <label class="switch" title="只显示工具调用与工具结果"><input id="only-tools" type="checkbox"><span>仅看工具调用</span></label>
+      </div>
+    </header>
+    <div id="banner" class="banner hidden"></div>
+    <div id="timeline" class="timeline">
+      <div class="empty">左侧选择一个会话开始浏览。</div>
+    </div>
+  </main>
+</div>
+<div id="lightbox" class="lightbox hidden">
+  <img id="lightbox-img" alt="">
+  <div class="lightbox-hint">点击空白处或按 Esc 关闭</div>
+</div>
+{{DSH_DATA}}
+{{DSH_SCRIPT}}
+</body>
+</html>
