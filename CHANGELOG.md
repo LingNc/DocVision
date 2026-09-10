@@ -5,7 +5,19 @@
 
 ## [Unreleased]
 
-（无）
+### Changed
+
+- **文档全面同步（本轮）**：`README.md` 按当前代码事实定点修补——「LaTeX 输出」整章（两档位真实行为、会话工具集、checker 三轮同会话 + 兜底重转换、终审会话与整树交付）、命令用法示例（latex 只收显式扩展名、裸命令自带前置、删除 `workflow --step latex/verify`）、档位1 嵌入骨架（注释首行闭合 + 字段在外 + `[class]` 链接、RASTER 的 `DESCRIBE` 块）、新增「会话沙箱与虚拟工作区（挂载表）」「断点续传（JSONL 转录）」小节、目录布局表（`work/pdfview`、`work/views/**`、`work/reports`、`work/sessions`、`work/temp` 等）、配置表默认值与新增键、环境依赖（latexmk / bubblewrap / SVG 后端任一）。
+- `docvision latex --help` 重写：档位2 产物纯净（SVG 嵌入、无 `DOCVISION` 注释、text 只提取可见文本）、档位1 逐章私有工作视图 + 只读参考通道 + checker 三轮 + 终审会话、会话挂载表与 bubblewrap 沙箱说明。
+- `docvision verify --help` 更正：核对**只在显式运行本命令时执行**（workflow/latex 自动流程都不调用；`verify.enabled` 仅作提示，不影响是否运行）。
+- **会话 bash 配置归位到 `tools.bash`**：`latex.bash_sandbox` → `tools.bash.sandbox`、`latex.bash_max_output` → `tools.bash.max_output`（与 `tools.mermaid.*` / `tools.latex.*` 同级——描述的是**工具**本身，不是档位）。解析优先级 `tools.bash.*` > 旧 `latex.bash_*` > 内置默认（sandbox=true / max_output=5000）；旧键仍生效但启动会打印迁移提示；`setDefaults` 不再把默认值写进旧字段（否则会掩盖显式的新键）。
+
+### Fixed
+
+- **`docvision latex --all` 缺失标志注册**：代码一直在读 `cmd.Flags().GetBool("all")`（决定日志分析是"只看本次"还是"汇总全部历史"），但从未 `cmd.Flags().Bool("all", ...)` 注册，于是显式传 `--all` 会直接报 `unknown flag: --all`（自 7f3b7d0 起的潜在缺陷，该分支实际是死代码）。现已注册并出现在 `--help` 里。
+- 文档与帮助文本里的历史遗留名清理：`view_page` → `view_pdf {path:"source:<file>.pdf", page:N}`、`view_source_page`、`list_images`、`read_md`、`install_font`、`compile_preview` 与 `preview-<n>.png`/`preview.png` 虚拟名、`mermaid_validation` → `tools.mermaid.validation`、`options.format_fix_attempts` → `img2text.format_fix_attempts`、`workflow --step latex/verify`。
+- 配置模板注释与代码事实对齐（`config.example.yaml` + `default.yaml`）：`paths.fonts` 不再自动下载字体（按会话报告清单手动放入，编译经 `TEXINPUTS`/`OSFONTDIR`）、`latex.insert_image_description` 仅作用于档位2（档位1 raster 总带 `DESCRIBE`）、`latex.compile.raster_dpi` 只用于矢量图 PNG 回退产物。
+- `AGENTS.md` 规则板块新增五条：文档同步（README + `--help` + CHANGELOG 三处同批更新、删名必须全局 grep 清理）、CHANGELOG 归属规则（`git log -S` 回溯到引入提交所在标签、节日期取标签创建日期、分类不得错位）、配置项一致性（默认值三处同步 + 注释不得描述已移除行为）、发布线纪律（不移动既有标签，仅同日未推送的笔误可 `-f`）、大改动后做只读文档审计再定点修补。
 
 ## [v1.5.0-beta.3] - 2026-09-10
 
