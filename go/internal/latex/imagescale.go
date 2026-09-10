@@ -170,9 +170,18 @@ func measureImageUncached(path string) ImageMeasure {
 		// The bitmap is a copy inside the project: match it by file name
 		// against the parse index built from paths.mineru_output.
 		if e, ok := lookupParseEntry(filepath.Base(path)); ok {
-			m.WidthMM, m.HeightMM, m.PageWMM = e.WidthMM, e.HeightMM, e.PageWMM
-			m.DPI, m.Found = e.DPI, true
-			if e.Aspect != "" {
+			// 与祖先回溯路径同一口径：宽度信 bbox、形状信位图（MinerU 的
+			// bbox 不紧贴图，直接用它的高度会与"保持该宽高比"自相矛盾）。
+			m.WidthMM, m.PageWMM, m.Found = e.WidthMM, e.PageWMM, true
+			if m.PixelsW > 0 && m.PixelsH > 0 {
+				m.HeightMM = m.WidthMM * float64(m.PixelsH) / float64(m.PixelsW)
+			} else {
+				m.HeightMM = e.HeightMM
+			}
+			if m.PixelsW > 0 && m.WidthMM > 0 {
+				m.DPI = int(float64(m.PixelsW) / (m.WidthMM / 25.4))
+			}
+			if m.AspectStr == "" {
 				m.AspectStr = e.Aspect
 			}
 		}

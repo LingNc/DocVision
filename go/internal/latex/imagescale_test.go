@@ -107,6 +107,16 @@ func TestMeasureImageCopiedIntoProject(t *testing.T) {
 	if s := m.String(); !strings.Contains(s, "ORIGINAL FIGURE SIZE") || !strings.Contains(s, "mm") {
 		t.Errorf("显示串应给 mm: %s", s)
 	}
+	// 与祖先回溯路径同一口径：高度按位图比例（156/284）、dpi 由位图宽度推
+	if m.HeightMM < 19 || m.HeightMM > 21.5 {
+		t.Errorf("高 %.1fmm，期望 ~20.3mm（按位图比例，而不是 bbox 高度）", m.HeightMM)
+	}
+	if m.DPI < 180 || m.DPI > 210 {
+		t.Errorf("有效 dpi = %d，期望 ~195（索引路径同样要算）", m.DPI)
+	}
+	if !strings.Contains(m.String(), "aspect 1.82:1") {
+		t.Errorf("宽高比应取位图（1.82:1）: %s", m.String())
+	}
 
 	// 裁剪后的当前尺寸：取右半边（50%..100%）→ 宽高各减半
 	c := m.Crop(50, 0, 100, 50)
