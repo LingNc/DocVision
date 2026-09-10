@@ -32,8 +32,16 @@ func TestCompileFigureToolFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(res.Text, "COMPILE OK.") || res.ImageBase64 == "" {
-		t.Fatalf("compile from file = %q (image %d bytes)", truncateStr(res.Text, 300), len(res.ImageBase64))
+	// compile is a PURE compile tool: no preview image is attached, the
+	// model inspects the PDF with view_pdf instead.
+	if !strings.HasPrefix(res.Text, "COMPILE OK.") {
+		t.Fatalf("compile from file = %q", truncateStr(res.Text, 300))
+	}
+	if res.ImageBase64 != "" {
+		t.Fatalf("compile must not attach a preview image any more (%d bytes)", len(res.ImageBase64))
+	}
+	if !strings.Contains(res.Text, "view_pdf") {
+		t.Errorf("compile result must point at view_pdf: %q", res.Text)
 	}
 	if !state.compileOK || state.lastCode != body {
 		t.Errorf("state not recorded: ok=%v code=%q", state.compileOK, state.lastCode)
@@ -59,42 +67,6 @@ func TestCompileFigureToolFromFile(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "NOT FOUND") {
 		t.Errorf("missing figure file = %q", res.Text)
-	}
-}
-
-// TestViewImageResolvePreviewNames pins the compile-preview contract:
-// preview.png is the newest compile, preview-<n>.png the n-th, and
-// unknown/out-of-range names are errors (never a search).
-func TestViewImageResolvePreviewNames(t *testing.T) {
-	dir := t.TempDir()
-	var previews []previewEntry
-	for i := 1; i <= 3; i++ {
-		p := filepath.Join(dir, "preview-"+string(rune('0'+i))+".png")
-		if err := os.WriteFile(p, []byte("png"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		previews = append(previews, previewEntry{png: p})
-	}
-	tool := &ViewImageTool{Root: dir, Previews: func() []previewEntry { return previews }}
-
-	if got, err := tool.resolve("preview.png"); err != nil || got != previews[2].png {
-		t.Errorf("preview.png = %q, %v; want newest %q", got, err, previews[2].png)
-	}
-	if got, err := tool.resolve("preview-1.png"); err != nil || got != previews[0].png {
-		t.Errorf("preview-1.png = %q, %v; want %q", got, err, previews[0].png)
-	}
-	if _, err := tool.resolve("preview-9.png"); err == nil || !strings.Contains(err.Error(), "不存在") {
-		t.Errorf("out-of-range preview must fail with a hint, got %v", err)
-	}
-	if _, err := tool.resolve("preview-abc.png"); err == nil || !strings.Contains(err.Error(), "未知的预览名") {
-		t.Errorf("unknown preview name must fail with a hint, got %v", err)
-	}
-
-	// No previews yet: a clear "compile first" error instead of a
-	// confusing file-not-found.
-	empty := &ViewImageTool{Root: dir, Previews: func() []previewEntry { return nil }}
-	if _, err := empty.resolve("preview.png"); err == nil || !strings.Contains(err.Error(), "compile") {
-		t.Errorf("empty preview list must hint at compile, got %v", err)
 	}
 }
 

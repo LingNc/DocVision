@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,44 +19,6 @@ import (
 	_ "image/png"
 	"mineru-tools/internal/session"
 )
-
-// ListImagesTool enumerates the extracted document images so the style
-// analyst can pick which ones to inspect.
-type ListImagesTool struct {
-	ImagesDir string
-}
-
-func (t *ListImagesTool) Name() string { return "list_images" }
-
-func (t *ListImagesTool) Definition() map[string]any {
-	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "list_images",
-		"description": "List the extracted document images (path relative to the images root + pixel dimensions), up to 400 entries.",
-		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
-	}}
-}
-
-func (t *ListImagesTool) Execute(_ string) (session.ToolResult, error) {
-	var b strings.Builder
-	count := 0
-	_ = filepath.Walk(t.ImagesDir, func(p string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || count >= 400 {
-			return nil
-		}
-		switch strings.ToLower(filepath.Ext(p)) {
-		case ".jpg", ".jpeg", ".png", ".gif", ".webp":
-			rel, _ := filepath.Rel(t.ImagesDir, p)
-			w, h := imageSize(p)
-			fmt.Fprintf(&b, "%s (%dx%d)\n", rel, w, h)
-			count++
-		}
-		return nil
-	})
-	if count == 0 {
-		return session.ToolResult{Text: "(no images found)"}, nil
-	}
-	return session.ToolResult{Text: b.String()}, nil
-}
 
 // ViewImageTool returns an image to the model, optionally cropping a
 // percentage-defined sub-region and scaling it up (zoom inspection).
@@ -68,12 +29,6 @@ type ViewImageTool struct {
 	// Subject is the current document's image subfolder (e.g.
 	// "测试-概率论"); it lets a bare file name resolve without a path.
 	Subject string
-	// Previews returns this session's compiled figure previews (oldest
-	// first). When set, the virtual names "preview.png" (newest) and
-	// "preview-<n>.png" resolve to them so a compile preview can be
-	// inspected with crop/zoom like any image; zooming re-renders from
-	// the stored PDF at higher resolution when possible.
-	Previews func() []previewEntry
 }
 
 func (t *ViewImageTool) Name() string { return "view_image" }
@@ -81,11 +36,11 @@ func (t *ViewImageTool) Name() string { return "view_image" }
 func (t *ViewImageTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "view_image",
-		"description": "LOOK at an image (pixels). path is the image as it appears in the markdown (images/<subject>/foo.jpg) or just its file name (foo.jpg); it is joined to this document's image folder — a wrong name is reported as an error. In a figure session the compiled previews are also addressable as \"preview.png\" (newest) and \"preview-<n>.png\". Optionally crop a region by percentages (left/top/right/bottom, 0-100) and scale it up for detail inspection. For TEXT context around an image use image_context instead.",
+		"description": "LOOK at an image (pixels). path is the image as it appears in the markdown (images/<subject>/foo.jpg) or just its file name (foo.jpg); it is joined to this document's image folder — a wrong name is reported as an error. Compiled PDFs are NOT images: inspect them with view_pdf. Optionally crop a region by percentages (left/top/right/bottom, 0-100) and scale it up for detail inspection. For TEXT context around an image use image_context instead.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":   map[string]any{"type": "string", "description": "Image file name (foo.jpg) or the markdown ref (images/<subject>/foo.jpg); in a figure session also preview.png / preview-<n>.png."},
+				"path":   map[string]any{"type": "string", "description": "Image file name (foo.jpg) or the markdown ref (images/<subject>/foo.jpg)."},
 				"left":   map[string]any{"type": "number", "description": "Crop left in percent (0-100), default 0."},
 				"top":    map[string]any{"type": "number", "description": "Crop top in percent (0-100), default 0."},
 				"right":  map[string]any{"type": "number", "description": "Crop right in percent (0-100), default 100."},
@@ -116,20 +71,14 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 		zoom = 1280
 	}
 
-	// Compile previews keep their PDF: render the crop from the PDF at a
-	// higher resolution instead of upscaling the already-rasterised PNG,
-	// so small labels stay readable.
-	img, rendered := t.zoomFromPDF(pathArg, left, top, right, bottom, zoom)
-	if !rendered {
-		img, err = decodeImage(full)
-		if err != nil {
-			return session.ToolResult{}, err
-		}
-		if left > 0 || top > 0 || right < 100 || bottom < 100 {
-			img = cropPercent(img, left, top, right, bottom)
-		}
-		img = scaleToWidth(img, zoom)
+	img, err := decodeImage(full)
+	if err != nil {
+		return session.ToolResult{}, err
 	}
+	if left > 0 || top > 0 || right < 100 || bottom < 100 {
+		img = cropPercent(img, left, top, right, bottom)
+	}
+	img = scaleToWidth(img, zoom)
 	b64, err := encodeJPEGBase64(img)
 	if err != nil {
 		return session.ToolResult{}, err
@@ -141,116 +90,7 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 	}, nil
 }
 
-// previewNameRe matches the versioned compile-preview names.
-var previewNameRe = regexp.MustCompile(`^preview-(\d+)\.png$`)
-
-// previewTarget resolves a virtual preview name against the session's
-// preview list. handled=false means "not a preview name".
-func (t *ViewImageTool) previewTarget(rel string) (entry previewEntry, handled bool, err error) {
-	if t.Previews == nil {
-		return previewEntry{}, false, nil
-	}
-	clean := filepath.Clean(strings.TrimSpace(rel))
-	if filepath.Dir(clean) != "." { // previews are top-level names only
-		return previewEntry{}, false, nil
-	}
-	name := clean
-	if name != "preview.png" && !strings.HasPrefix(name, "preview-") {
-		return previewEntry{}, false, nil
-	}
-	list := t.Previews()
-	if len(list) == 0 {
-		return previewEntry{}, true, fmt.Errorf("当前会话还没有编译预览图（请先调用 compile）")
-	}
-	if name == "preview.png" {
-		return list[len(list)-1], true, nil
-	}
-	m := previewNameRe.FindStringSubmatch(name)
-	if m == nil {
-		return previewEntry{}, true, fmt.Errorf("未知的预览名 %s；可用: preview.png（最新）、preview-1.png … preview-%d.png", rel, len(list))
-	}
-	n, _ := strconv.Atoi(m[1])
-	if n < 1 || n > len(list) {
-		return previewEntry{}, true, fmt.Errorf("预览 %s 不存在（本次会话共 %d 个：preview-1.png … preview-%d.png）", rel, len(list), len(list))
-	}
-	return list[n-1], true, nil
-}
-
-// resolvePreview handles the virtual preview names (compile previews of
-// the current figure session). handled=false means "not a preview name,
-// use the normal image resolution".
-func (t *ViewImageTool) resolvePreview(rel string) (path string, handled bool, err error) {
-	entry, handled, err := t.previewTarget(rel)
-	if !handled || err != nil {
-		return "", handled, err
-	}
-	return entry.png, true, nil
-}
-
-// zoomFromPDF re-renders the requested crop straight from the preview's
-// PDF so zooming adds real resolution instead of upscaling pixels.
-// ok=false means "not a preview / no PDF / rendering failed" — the
-// caller then falls back to cropping the stored PNG.
-func (t *ViewImageTool) zoomFromPDF(rel string, left, top, right, bottom float64, zoom int) (image.Image, bool) {
-	entry, handled, err := t.previewTarget(rel)
-	if !handled || err != nil || entry.pdf == "" {
-		return nil, false
-	}
-	if _, err := exec.LookPath("pdftoppm"); err != nil {
-		return nil, false
-	}
-	clamp := func(v float64) float64 {
-		if v < 0 {
-			return 0
-		}
-		if v > 100 {
-			return 100
-		}
-		return v
-	}
-	frac := (clamp(right) - clamp(left)) / 100
-	if frac < 0.02 {
-		frac = 1 // degenerate crop: render the whole page
-	}
-	pageW := int(float64(zoom)/frac) + 8
-	if pageW < 400 {
-		pageW = 400
-	}
-	if pageW > 6000 {
-		pageW = 6000
-	}
-	dir, err := os.MkdirTemp("", "dsv-zoom-")
-	if err != nil {
-		return nil, false
-	}
-	defer os.RemoveAll(dir)
-	out := filepath.Join(dir, "page")
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "pdftoppm", "-png", "-singlefile",
-		"-scale-to-x", strconv.Itoa(pageW), "-scale-to-y", "-1", entry.pdf, out)
-	if err := cmd.Run(); err != nil {
-		return nil, false
-	}
-	img, err := decodeImage(out + ".png")
-	if err != nil {
-		return nil, false
-	}
-	if left > 0 || top > 0 || right < 100 || bottom < 100 {
-		img = cropPercent(img, left, top, right, bottom)
-	}
-	return scaleToWidth(img, zoom), true
-}
-
-// resolve maps an image argument to a file. Resolution is a plain join
-// against the document's image folder — there is NO searching: the model
-// may pass the markdown ref (images/<subject>/foo.jpg) or just foo.jpg,
-// and both land on <Root>/<Subject>/foo.jpg. A missing file is an error
-// (wrong name), not something to hunt for.
 func (t *ViewImageTool) resolve(rel string) (string, error) {
-	if full, handled, err := t.resolvePreview(rel); handled {
-		return full, err
-	}
 	clean := filepath.Clean(strings.TrimSpace(rel))
 	if clean == "" || clean == "." {
 		return "", fmt.Errorf("path 不能为空")

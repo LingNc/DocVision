@@ -59,7 +59,7 @@ func RunTikZSession(
 		&ViewPDFTool{Root: scratch, Comp: comp},
 		&SubmitFigureTool{State: state},
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
-		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg), Previews: state.previewEntries},
+		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg)},
 	}, log, tid, "tikz")
 
 	initial := strings.Join([]string{

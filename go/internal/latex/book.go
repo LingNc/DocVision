@@ -189,6 +189,12 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	if err != nil {
 		return err
 	}
+	// 原始文档索引 + 原书页表：把 MinerU 中间产物（content_list/
+	// layout/origin.pdf）加工为只读检索索引。样式会话最先用到它
+	// （doc_search 定位文本页、list_source_pages 列章节起点与逐页图片），
+	// 所以放在 style 之前构建。
+	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
+
 	err = runPhase("style", func() error { return r.stylePhase(proj) })
 	if err != nil {
 		return err
@@ -197,9 +203,6 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	if err != nil {
 		return err
 	}
-	// 原始文档索引：把 MinerU 中间产物（content_list/layout/origin.pdf）
-	// 加工为只读检索索引，转换会话可 doc_search 定位片段对应的原 PDF 页。
-	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
 
 	err = runPhase("convert", func() error {
 		// 前置检查：样式包完整 + 图片全部处理完毕，有问题直接停。
@@ -299,32 +302,21 @@ func (r *Runner) stylePhase(proj string) error {
 		&EditWorkFileTool{Root: workDir},
 		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&GrepTool{Root: workDir},
+		&WorkBashTool{Dir: workDir, MaxOutput: r.cfg.Latex.BashMaxOutput},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style", Log: r.log, Tid: 1},
-		&ViewPDFTool{Root: workDir, Comp: r.comp},
-		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
+		&ViewPDFTool{Root: workDir, Mounts: r.bookMounts(workDir), Comp: r.comp},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
-
-	// Original scanned pages: build the page index over the
-	// MinerU-preserved origin PDFs. Pages render ON DEMAND when the
-	// analyst calls view_source_page (cached afterwards).
-	pagesDir := filepath.Join(proj, "pages")
-	pageIdx, pageErr := buildPageIndex(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD)))
-	if pageErr != nil {
-		r.log.LogWarning(1, "[style] 未找到 MinerU 保留的原始 PDF（mineru_output/<主题>_part*/*_origin.pdf），将仅基于提取图片与 md 分析样式")
-	} else {
-		r.log.Log(1, "[style] 原始页面索引就绪:", strconv.Itoa(pageIdx.total), "页（view_source_page 按需渲染）")
-		tools = append(tools, &ListSourcePagesTool{Idx: pageIdx}, &ViewSourcePageTool{Idx: pageIdx, PagesDir: pagesDir, Runner: r})
-	}
+	tools = append(tools, r.sourcePageTools(proj, mainMD)...)
 
 	prompt := styleSystemPrompt + "\n\nYou have a persistent WORKSPACE: write_file stores class.cls / manual.md / example.tex as real files; submit_style can then reference them by file name instead of full inline contents. Compile your example with compile {path: \"example.tex\"} (the class is picked up from the same workspace) and inspect it with view_pdf. Check list_fonts before referencing fonts. There is NO font download tool: when a font is missing, record the substitution in the manual AND report the missing font to the user (font file name + where to place it: the project fonts/ directory) in the submit_style report — the user downloads it manually and re-runs."
 	if r.cfg.Latex.RemoveWatermark {
 		prompt += "\n\n" + r.watermarkGuidance("WATERMARK: the source may carry watermark artifacts (repeated decorative overlay text such as institution/library marks, faint background strings). Identify the watermark pattern in the manual and instruct conversion to EXCLUDE it entirely - watermark text/graphics must NOT be typeset in the LaTeX output.")
 	}
-	if pageIdx != nil {
-		prompt += "\n\nIMPORTANT: this document HAS original page renders (list_source_pages -> p001.png...). They show the TRUE typography and layout — inspect them FIRST (chapter title pages, section headings, body text, headers/footers) before looking at extracted images."
+	if r.docPages != nil {
+		prompt += "\n\nIMPORTANT: the ORIGINAL book pages are available — call list_source_pages to get the source PDFs, the detected section starts and (with page=N) that page's text snippets and extracted image file names, then look at the page with view_pdf {\"path\":\"source:<file>\", \"page\":N} (crop/zoom supported). They show the TRUE typography and layout: inspect the title pages, headings, headers/footers and representative figures before writing the class. The OCR markdown itself is readable with read_file {\"path\":\"project:<md>\"} whenever you need exact text."
 	}
 	sess := session.NewSession(client, modelCfg, tuning, prompt, tools, r.log, 1, "style")
 	liveHook, liveClose := r.livePhaseLine("style")
@@ -356,13 +348,13 @@ func (r *Runner) stylePhase(proj string) error {
 	initial := strings.Join([]string{
 		"Analyse the style of this book and produce the LaTeX class package.",
 		"",
-		"- Organized markdown (high-quality text): " + filepath.Base(mainMD),
-		"- Extracted images live under images/ (use list_images + view_image).",
+		"- Organized markdown (high-quality text): " + filepath.Base(mainMD) + " (readable as project:source/" + filepath.Base(mainMD) + " with read_file)",
+		"- Extracted images live under images/: view_image takes the file name, and list_source_pages {page:N} tells you which extracted images sit on that page.",
 	}, "\n")
-	if pageIdx != nil {
-		initial += fmt.Sprintf("\n- ORIGINAL pages (%d total) are available via list_source_pages + view_source_page — use them for typography/layout (rendered on demand).", pageIdx.total)
+	if r.docPages != nil {
+		initial += fmt.Sprintf("\n- ORIGINAL pages: %d in total — list_source_pages lists the source PDFs and the detected section starts; view any page with view_pdf {path:\"source:<file>\", page:N}.", r.docPages.total)
 	}
-	initial += "\nStart by mapping the structure (list_source_pages / list_images / read_file), inspect representative pages (crop/zoom title pages, headings, figures), then submit_style."
+	initial += "\nStart by mapping the structure (list_source_pages / doc_search / read_file), inspect representative pages (crop/zoom title pages, headings, figures), then submit_style."
 
 	scratch, err := os.MkdirTemp("", "dsv-style-")
 	if err != nil {
@@ -558,7 +550,7 @@ func validateSplit(chapters []ChapterRange, totalLines int) error {
 // ------------------------------------------------------------------
 // buildDocIndexQuiet compiles the read-only original-document index
 // from the MinerU intermediate output. Failures are non-fatal: the
-// convert sessions simply run without doc_search/view_source_page.
+// convert sessions simply run without doc_search/source pages.
 func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	mds := files
 	if len(mds) == 0 && sourceDir != "" {
@@ -571,7 +563,7 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	outPath := filepath.Join(proj, "doc_index", "doc_index.json")
 	idx, pageIdx, err := buildDocIndex(r.cfg.Paths.MineruOutput, mds, outPath)
 	if err != nil {
-		r.log.Log(0, "[docindex] 原始文档索引不可用（doc_search/view_source_page 关闭）:", err)
+		r.log.Log(0, "[docindex] 原始文档索引不可用（doc_search/原书页面工具关闭）:", err)
 		return
 	}
 	r.docIndex = idx
@@ -747,16 +739,17 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		&GrepTool{Root: proj},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
-		&ViewPDFTool{Root: scratch},
+		&ViewPDFTool{Mounts: r.bookMounts(scratch), Comp: r.comp},
 		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: 1},
 		submit,
 	}
 	if r.docIndex != nil && r.docPages != nil {
-		// 原始文档只读工具：片段→原 PDF 页定位（doc_search），
-		// 页面渲染检视复用 style 阶段的 view_source_page（全局页号 + 缓存）。
+		// 原始文档只读工具：片段→原 PDF 页定位（doc_search）+ 原书页面
+		// 索引/逐页内容（list_source_pages），原书 PDF 本身通过
+		// view_pdf 的 source 挂载查看。
 		tools = append(tools,
 			&DocSearchTool{Index: r.docIndex},
-			&ViewSourcePageTool{Idx: r.docPages, PagesDir: filepath.Join(proj, "pages"), Runner: r})
+			&ListSourcePagesTool{Idx: r.docPages, Index: r.docIndex, Mount: "source", MineruDir: r.cfg.Paths.MineruOutput})
 	}
 	sess := session.NewSession(client, modelCfg, tuning,
 		strings.ReplaceAll(convertSystemPrompt, "{MAX_ROUNDS}", strconv.Itoa(session.EffectiveToolRounds(tuning))),
@@ -865,6 +858,42 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	return nil
 }
 
+// bookMounts is the mount table of a session that works in a scratch or
+// workspace directory but must also READ the original book PDFs and the
+// project tree. The caller's dir is the default (writable) mount; the
+// origin PDFs are mounted read-only as "source".
+func (r *Runner) bookMounts(workDir string) []Mount {
+	mounts := []Mount{{Name: "work", Dir: workDir, Writable: true}}
+	if r.cfg.Paths.MineruOutput != "" {
+		mounts = append(mounts, Mount{Name: "source", Dir: r.cfg.Paths.MineruOutput})
+	}
+	return mounts
+}
+
+// sourcePageTools gives a session the original-document tooling: a text
+// index (doc_search) plus the page index that also lists what each page
+// contains. The origin PDFs themselves are viewed with view_pdf through
+// the read-only "source" mount — there is no separate viewer tool.
+func (r *Runner) sourcePageTools(proj, mainMD string) []session.Tool {
+	var tools []session.Tool
+	if r.docIndex != nil {
+		tools = append(tools, &DocSearchTool{Index: r.docIndex})
+	}
+	pageIdx := r.docPages
+	if pageIdx == nil {
+		idx, err := buildPageIndex(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD)))
+		if err != nil {
+			r.log.LogWarning(1, "[pages] 未找到 MinerU 保留的原始 PDF（mineru_output/<主题>_part*/*_origin.pdf），原始页面工具关闭:", err)
+			return tools
+		}
+		pageIdx = idx
+	}
+	tools = append(tools, &ListSourcePagesTool{
+		Idx: pageIdx, Index: r.docIndex, Mount: "source", MineruDir: r.cfg.Paths.MineruOutput,
+	})
+	return tools
+}
+
 // chapterScratch builds a scratch dir that can compile ONE chapter as an
 // \input fragment: the book class, a wrapper that inputs <base>.tex, and
 // the project images/figures mounted (symlink, copy as fallback) so
@@ -926,9 +955,12 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 		},
 		&GrepTool{Root: proj},
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
-		&ViewPDFTool{Root: scratch},
+		&ViewPDFTool{Mounts: r.bookMounts(scratch), Comp: r.comp},
 		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: tid},
 		submit,
+	}
+	if r.docPages != nil {
+		tools = append(tools, &ListSourcePagesTool{Idx: r.docPages, Index: r.docIndex, Mount: "source", MineruDir: r.cfg.Paths.MineruOutput})
 	}
 	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
 		r.cfg.LatexSession("convert"), styleFixSystemPrompt, tools, r.log, tid, "style-fix:"+base)
@@ -1053,17 +1085,12 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&GrepTool{Root: workDir},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style-feedback", Log: r.log, Tid: 1},
-		&ViewPDFTool{Root: workDir, Comp: r.comp},
-		&ListImagesTool{ImagesDir: filepath.Join(sourceDir, "images")},
+		&ViewPDFTool{Root: workDir, Mounts: r.bookMounts(workDir), Comp: r.comp},
 		&ViewImageTool{Root: sourceDir, Subject: "images"},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
-	if pageIdx, perr := buildPageIndex(r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(mainMD))); perr == nil {
-		tools = append(tools,
-			&ListSourcePagesTool{Idx: pageIdx},
-			&ViewSourcePageTool{Idx: pageIdx, PagesDir: filepath.Join(proj, "pages"), Runner: r})
-	}
+	tools = append(tools, r.sourcePageTools(proj, mainMD)...)
 
 	// 复用原样式会话：系统提示已在持久化消息里，不开新上下文。
 	sess := session.NewSession(client, modelCfg, tuning, "", tools, r.log, 1, "style-feedback")
@@ -1075,7 +1102,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	feedback := "The conversion phase finished: the MAJORITY of chapter conversion agents reported that the class/manual did NOT satisfy the book's real formatting." +
 		" Their work reports follow (固定格式，结论: 存在问题 = issues):" + b.String() +
 		"\n\nThe actual submitted chapters are in the project workspace under work/chapters/ — read any of them with read_file {path:\"work/chapters/<name>.tex\"} to see how the class was used in practice (this is the real submission, the reports above are its summary)." +
-		"\n\nRe-inspect the relevant original pages (view_source_page), fix the cls/manual/example so these problems cannot recur, then submit_style with the corrected package."
+		"\n\nRe-inspect the relevant original pages (list_source_pages -> view_pdf on the source mount), fix the cls/manual/example so these problems cannot recur, then submit_style with the corrected package."
 	if _, err := sess.Run(session.RunOptions{UserText: feedback}); err != nil {
 		return fmt.Errorf("样式反馈会话失败: %w", err)
 	}

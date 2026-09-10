@@ -16,13 +16,6 @@ import (
 // TikZ figure session tools (level 2 vector path)
 // ------------------------------------------------------------------
 
-// previewEntry is one compiled figure preview: the rasterised PNG plus
-// the PDF it came from (used for high-resolution re-rendering on zoom).
-type previewEntry struct {
-	png string
-	pdf string
-}
-
 // tikzState carries the live state of one figure-drawing session.
 type tikzState struct {
 	workDir    string // scratch dir for the standalone wrapper
@@ -34,39 +27,14 @@ type tikzState struct {
 	compileErr string   // last error, reported by the runner on give-up
 	merges     []string // image paths absorbed into this figure (cross-page merge)
 	uncertain  bool     // submitted code contains % [?] uncertainty marks
-	previews   []previewEntry
-}
-
-// addPreview records a freshly rasterised preview (preview-<n>.png plus
-// its PDF in the scratch dir) so view_image can crop/zoom it later.
-func (s *tikzState) addPreview(srcPNG, srcPDF string) string {
-	idx := len(s.previews) + 1
-	dstPNG := filepath.Join(s.workDir, fmt.Sprintf("preview-%d.png", idx))
-	if err := copyFile(srcPNG, dstPNG); err != nil {
-		return ""
-	}
-	dstPDF := ""
-	if srcPDF != "" {
-		cand := filepath.Join(s.workDir, fmt.Sprintf("preview-%d.pdf", idx))
-		if err := copyFile(srcPDF, cand); err == nil {
-			dstPDF = cand
-		}
-	}
-	s.previews = append(s.previews, previewEntry{png: dstPNG, pdf: dstPDF})
-	return filepath.Base(dstPNG)
-}
-
-// previewEntries returns the previews of this session, oldest first.
-func (s *tikzState) previewEntries() []previewEntry {
-	out := make([]previewEntry, len(s.previews))
-	copy(out, s.previews)
-	return out
 }
 
 // CompileFigureTool compiles the TikZ body code held in a WORKSPACE
-// FILE (default figure.tex) inside a standalone wrapper, rasterises the
-// PDF and feeds the preview back to the model. The code is never passed
-// inline: write_file / edit_file first, then compile {path}.
+// FILE (default figure.tex) inside a standalone wrapper. It is a pure
+// COMPILE tool: it returns the log, the output PDF name and the page
+// count — the figure is INSPECTED with view_pdf {path:"standalone.pdf"}
+// (crop/zoom re-render from the PDF), so no preview image is produced.
+// The code is never passed inline: write_file / edit_file first.
 type CompileFigureTool struct {
 	Comp       *Compiler
 	State      *tikzState
@@ -82,9 +50,9 @@ func (t *CompileFigureTool) Definition() map[string]any {
 		"type": "function",
 		"function": map[string]any{
 			"name": "compile",
-			"description": "Compile your figure code from a workspace file (default figure.tex) and get the compile log plus a rendered preview of the figure to compare with the original image. " +
+			"description": "Compile your figure code from a workspace file (default figure.tex) and get the compile log plus the output PDF name. Inspect the result with view_pdf {path: standalone.pdf, page: 1}. " +
 				"Write the code with write_file/edit_file first - never paste code into this tool. The file holds the TikZ body (between \\begin{document} and \\end{document}); \\usetikzlibrary / \\usepgfplotslibrary / \\usepackage lines at the top are hoisted into the preamble. " +
-				"Each preview is kept and can be re-inspected with view_image (preview.png = newest, preview-<n>.png = n-th compile) or view_pdf (standalone.pdf).",
+				"There is no preview image: inspect the compiled PDF with view_pdf (crop/zoom re-render it at high resolution), and compare it with the original image via view_image.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -155,36 +123,20 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 		}
 		return session.ToolResult{Text: text}, nil
 	}
-	png := filepath.Join(t.State.workDir, "standalone") // pdftoppm appends .png
-	if err := t.Comp.Rasterize(res.PDF, png); err != nil {
-		t.State.compileErr = err.Error()
-		return session.ToolResult{Text: "Compiled OK but rasterisation failed: " + err.Error()}, nil
-	}
 	t.State.compileOK = true
 	t.State.lastPDF = res.PDF
 	t.State.compileErr = ""
-	// 编译/预览分离：编译结果附产物信息（页数），预览走 view_pdf/view_image。
 	pdfDetail := ""
-	if n, err := pdfPageCount(res.PDF); err == nil && n != 1 {
-		pdfDetail = fmt.Sprintf(" (%d pages)", n)
+	if n, err := pdfPageCount(res.PDF); err == nil {
+		pdfDetail = fmt.Sprintf(" (%d page)", n)
 	}
-	img64, err := ReadImageFile(png + ".png")
-	if err != nil {
-		return session.ToolResult{Text: "Compiled OK but preview could not be loaded: " + err.Error()}, nil
-	}
-	text := "COMPILE OK. Output: standalone.pdf" + pdfDetail + ". The preview is attached. Compare it with the original image (structure, labels, overlaps/crowding); if it faithfully matches, call submit; otherwise fix " + rel + " and compile again."
-	if name := t.State.addPreview(png+".png", res.PDF); name != "" {
-		text += "\nThe same preview is also addressable as view_image {path: \"" + name +
-			"\"} (latest = \"preview.png\"); add left/top/right/bottom (percent) and zoom (target width px, e.g. 1600) to inspect a region closely instead of the overview. view_pdf {path: \"standalone.pdf\", page: 1} renders it from the PDF."
-	}
+	text := "COMPILE OK. Output: standalone.pdf" + pdfDetail +
+		". Look at it with view_pdf {path: \"standalone.pdf\", page: 1} and compare it with the ORIGINAL image (structure, labels, overlaps/crowding; crop with left/top/right/bottom and zoom to a pixel width to inspect details). " +
+		"If it faithfully matches, call submit; otherwise fix " + rel + " and compile again."
 	if w := res.WarningSummary(); w != "" {
 		text += "\n" + truncateStr(w, 1500)
 	}
-	return session.ToolResult{
-		Text:        text,
-		ImageBase64: img64,
-		ImageMIME:   "image/png",
-	}, nil
+	return session.ToolResult{Text: text}, nil
 }
 
 // SubmitFigureTool records the model's confirmed final TikZ code.

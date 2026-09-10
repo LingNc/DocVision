@@ -187,7 +187,7 @@ func (r *Runner) runWatermarkDetection(samples []watermarkSample) *WatermarkMemo
 			if pg < 1 || pg > idx.total {
 				continue
 			}
-			path, err := r.ensurePageRendered(idx, pagesDir, pg)
+			path, err := renderSourcePage(r.comp, idx, pagesDir, pg)
 			if err != nil {
 				continue
 			}

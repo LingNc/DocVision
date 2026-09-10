@@ -2,7 +2,7 @@ package latex
 
 // Read-only original-document tools for conversion sessions:
 // doc_search locates a markdown fragment in the MinerU block index and
-// returns the GLOBAL page number; view_source_page (existing pages.go tool,
+// returns the GLOBAL page number; list_source_pages + view_pdf (source mount,
 // shared render cache) then renders that original PDF page. list_source_pages
 // is included so sessions can sanity-check the page range.
 
@@ -54,6 +54,6 @@ func (t *DocSearchTool) Execute(argsJSON string) (session.ToolResult, error) {
 	for _, e := range hits {
 		b.WriteString(FormatEntry(e) + "\n")
 	}
-	b.WriteString("view_source_page {page: pN} renders that original PDF page (bbox is in PDF points, top-left origin; page sizes are in the index). Adjacency in the index does NOT imply relation.")
+	b.WriteString("list_source_pages {page: pN} prints that page's text and images; view_pdf {path: \"source:<file>\", page:<local page>} renders the original PDF page (bbox is in PDF points, top-left origin; page sizes are in the index). Adjacency in the index does NOT imply relation.")
 	return session.ToolResult{Text: b.String()}, nil
 }

@@ -4,6 +4,11 @@
 
 ### Changed
 
+- **查看工具统一（删除 `view_source_page`）**：原书 PDF 以只读挂载点 `source`（`paths.mineru_output`）进入会话命名空间，用同一个 `view_pdf` 查看（`view_pdf {path:"source:<part>/<x>_origin.pdf", page:N}`），裁剪/缩放参数与看自己编译的 PDF 完全一致；`ViewPDFTool` 新增 `Mounts`（`Runner.bookMounts`：work 可写 + source 只读），`zoom_width` 作为 `zoom` 别名兼容旧用法。
+- **`list_source_pages` 升级为原书索引**：无参数 → 源 PDF/页范围/全局页号表 + 从 OCR 版面推导的章节起点（书没有目录也能得到可用目录）；`{page:N}` → 该全局页的正文片段 + 该页抽出的图片文件名（可直接 `view_image`），形成"文本→页→图"闭环。
+- **删除 `list_images`**：它只服务样式会话；现在样式/反馈会话改用 `list_source_pages` + 新增的 `bash`（cwd=work/style）与 `doc_search`（文本→原页），提示词同步为 list_source_pages → view_pdf(source:) → view_image 的路径。原始文档索引提前到 style 阶段之前构建。
+- **编译纯化**：`compile {path:"figure.tex"}` 不再栅格化、不再回贴预览图（删除 `previewEntry`/`addPreview`/`preview-<n>.png`/`preview.png` 虚拟名、`ViewImageTool.Previews` 与 `zoomFromPDF`），只返回日志 + 产物名 + 页数，看图统一 `view_pdf`；`view_image` 只用于原图。
+- 修正样式修复子会话的章节工作根（此前误传样式工作区 `work/style`，实际应为 `proj/work`）。
 - **会话工具统一（读文件 / 编译 / 原书页）**：
   - `read_file` 成为唯一读文件工具：`{path, start_line?, end_line?}`（整文件或带行号的窗口），`AltRoots` 支持只读附加根——style 工作区既能读自己写的 cls/manual/example，也能读项目 md/chapters；删除重复的 `read_md`、`read_lines` 与章节专用 md-grep。
   - `compile` 统一为**只收路径**的通用编译工具（`CompileTexTool`）：`{path?, engine?, passes?, bib?, shell_escape?, args?, timeout?}`，多文件 `\input` 工程可直接编译，`engine:"latexmk"` 走完整多遍构建（参考文献/toc/refs），成功返回产物 PDF 名+页数并提示用 `view_pdf` 检视。tikz 的 `compile_preview` 改为 `compile {path:"figure.tex"}`：模型先 `write_file` 再按路径编译，绝不内联代码；工具把 body 包装成 `standalone.tex` 编译，预览图仍走 `view_image`/`view_pdf`。

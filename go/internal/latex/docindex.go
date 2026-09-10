@@ -6,8 +6,8 @@ package latex
 // a text snippet or caption. buildDocIndex compiles those raw
 // artifacts into a compact, read-only index so AI sessions can map a
 // markdown fragment back to the ORIGINAL PDF page (doc_search) and
-// then inspect it with the existing view_source_page tool (global 1-based
-// page numbers over the same origin PDFs, shared render cache).
+// then inspect it with view_pdf through the read-only "source" mount
+// (global 1-based page numbers over the same origin PDFs).
 
 import (
 	"encoding/json"
@@ -22,7 +22,7 @@ import (
 )
 
 // DocEntry is one indexed original-document block. Global is the
-// 1-based page number across the whole subject (what view_source_page takes).
+// 1-based page number across the whole subject (what view_pdf/source takes).
 type DocEntry struct {
 	Seq    int        `json:"seq"`
 	Part   string     `json:"part"`
@@ -199,7 +199,7 @@ func buildDocIndexPart(dir string) (entries []DocEntry, pages int, size [2]float
 
 // buildDocIndex compiles the MinerU artifacts for the given source
 // markdown files into the read-only index AND the matching global page
-// table (shared with view_source_page's render cache).
+// table (reported by list_source_pages).
 func buildDocIndex(mineruOutput string, sourceMDs []string, outPath string) (*DocIndex, *pageIndex, error) {
 	idx := &DocIndex{Sizes: map[string][2]float64{}}
 	pages := &pageIndex{}
@@ -315,7 +315,7 @@ func clampInt(v, lo, hi int) int {
 }
 
 // FormatEntry renders one entry for tool output (pN = global page for
-// view_source_page).
+// view_pdf on the source mount / list_source_pages).
 func FormatEntry(e DocEntry) string {
 	s := fmt.Sprintf("#%d p%d (%s local p%d) %s bbox=[%.0f,%.0f,%.0f,%.0f]", e.Seq, e.Global, e.Part, e.Page, e.Type, e.BBox[0], e.BBox[1], e.BBox[2], e.BBox[3])
 	if e.Img != "" {

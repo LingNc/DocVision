@@ -620,23 +620,39 @@ func (t *WorkBashTool) Execute(argsJSON string) (session.ToolResult, error) {
 // scales existing pixels.
 type ViewPDFTool struct {
 	Root string
+	// Mounts, when set, makes the tool resolve paths through the
+	// session's virtual workspace (so the read-only "source" mount with
+	// the ORIGINAL book PDFs is viewed with the same tool).
+	Mounts []Mount
 	// Comp provides the pdftoppm rasterizer settings (dpi); nil uses a
 	// plain pdftoppm call.
 	Comp *Compiler
 }
 
+// vfs returns the tool's namespace (Mounts wins over Root).
+func (t *ViewPDFTool) vfs() *VFS {
+	if len(t.Mounts) > 0 {
+		return &VFS{Mounts: t.Mounts}
+	}
+	return vfsFrom(t.Root, nil)
+}
+
 func (t *ViewPDFTool) Name() string { return "view_pdf" }
 
 func (t *ViewPDFTool) Definition() map[string]any {
+	desc := "Render ONE page of a PDF and attach it as an image: PDFs you compiled (chapter/figure/book) AND, " +
+		"where mounted, the ORIGINAL book PDFs. Crop (percent) and zoom (target pixel width) work the same in both cases; " +
+		"the page is re-rendered from the PDF at the requested width, so zoom stays sharp."
+	if d := t.vfs().Describe(); d != "" {
+		desc += " " + d
+	}
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name": "view_pdf",
-		"description": "Render ONE page of a workspace PDF and attach it as an image. " +
-			"Works for compiled chapter/figure/preview PDFs. Crop and zoom behave like view_image; " +
-			"the page is re-rendered from the PDF at the requested width (sharp at any zoom).",
+		"name":        "view_pdf",
+		"description": desc,
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":   map[string]any{"type": "string", "description": "workspace-relative PDF path"},
+				"path":   map[string]any{"type": "string", "description": "PDF path (workspace-relative, or name:path for another mount)"},
 				"page":   map[string]any{"type": "integer", "description": "1-based page number (default 1)"},
 				"left":   map[string]any{"type": "number", "description": "crop left percent 0-100"},
 				"top":    map[string]any{"type": "number", "description": "crop top percent 0-100"},
@@ -658,7 +674,7 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if strings.TrimSpace(rel) == "" {
 		return session.ToolResult{}, fmt.Errorf("path 为空")
 	}
-	full, err := resolveInside(t.Root, rel)
+	full, _, err := t.vfs().Resolve(rel, false)
 	if err != nil {
 		return session.ToolResult{}, err
 	}
@@ -684,6 +700,9 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 	right := pctArg(args, "right", 100)
 	bottom := pctArg(args, "bottom", 100)
 	zoom := intArg(args, "zoom", 0)
+	if zoom <= 0 {
+		zoom = intArg(args, "zoom_width", 0) // alias kept from the old source-page viewer
+	}
 	if zoom <= 0 {
 		zoom = 1280
 	}

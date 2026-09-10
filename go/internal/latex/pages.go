@@ -1,7 +1,6 @@
 package latex
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,7 +27,7 @@ type pageSrc struct {
 }
 
 // pageIndex is the global page table over all origin PDFs. Pages are
-// rendered ON DEMAND by view_source_page (and then cached), never up front.
+// rendered through view_pdf on the "source" mount (no cache; pdftoppm per page).
 type pageIndex struct {
 	srcs  []pageSrc
 	total int
@@ -109,22 +108,17 @@ func findOriginPDFs(mineruDir, subject string) []string {
 	return pdfs
 }
 
-// pageCachePath returns the cache file for a global page number.
-func pageCachePath(pagesDir string, page int) string {
-	return filepath.Join(pagesDir, fmt.Sprintf("p%03d.png", page))
-}
-
-// ensurePageRendered renders page (global number) into the cache when
-// not present yet, and returns the cache path. Rendering happens ONLY
-// when the AI actually asks for that page.
-func (r *Runner) ensurePageRendered(idx *pageIndex, pagesDir string, page int) (string, error) {
+// renderSourcePage renders ONE global page of the original book into
+// the cache dir (used by the watermark sampler; AI sessions view source
+// pages through view_pdf on the "source" mount instead).
+func renderSourcePage(comp *Compiler, idx *pageIndex, pagesDir string, page int) (string, error) {
 	if err := os.MkdirAll(pagesDir, 0o755); err != nil {
 		return "", err
 	}
-	if err := r.comp.Available(); err != nil {
+	if err := comp.Available(); err != nil {
 		return "", err
 	}
-	cache := pageCachePath(pagesDir, page)
+	cache := filepath.Join(pagesDir, fmt.Sprintf("p%03d.png", page))
 	if util.FileExists(cache) {
 		return cache, nil
 	}
@@ -132,9 +126,8 @@ func (r *Runner) ensurePageRendered(idx *pageIndex, pagesDir string, page int) (
 	if err != nil {
 		return "", err
 	}
-	// pdftoppm -singlefile still appends .png to the output base.
 	tmpBase := filepath.Join(pagesDir, fmt.Sprintf("tmp_%d", page))
-	if err := r.comp.RasterizePages(pdf, local, local, tmpBase); err != nil {
+	if err := comp.RasterizePages(pdf, local, local, tmpBase); err != nil {
 		return "", err
 	}
 	if err := os.Rename(tmpBase+".png", cache); err != nil {
@@ -143,101 +136,211 @@ func (r *Runner) ensurePageRendered(idx *pageIndex, pagesDir string, page int) (
 	return cache, nil
 }
 
-// ListSourcePagesTool tells a session how many ORIGINAL document pages
-// exist (rendered on demand by view_source_page). These are the real
-// scanned/layout pages, NOT the PDFs produced by our own compiles —
-// those are viewed with view_pdf.
+// ListSourcePagesTool reports the ORIGINAL book pages and how to view
+// them. The origin PDFs are mounted READ-ONLY under a virtual mount
+// (usually "source"), so the model inspects them with the ordinary
+// view_pdf tool — there is no separate source-page viewer.
+//
+// Without arguments it prints the part → page-range table plus the
+// section starts derived from the OCR layout (useful when the book has
+// no printed table of contents). With page=N it prints what that page
+// contains: text snippets and the extracted image file names, so the
+// model can immediately view_image the figure it just found.
 type ListSourcePagesTool struct {
 	Idx *pageIndex
+	// Mount is the virtual mount name the origin PDFs are readable
+	// under ("" = not mounted, only counts are reported).
+	Mount string
+	// MineruDir is the real MinerU output dir (mount-relative path base).
+	MineruDir string
+	// Index supplies per-page text/image detail and section starts.
+	Index *DocIndex
 }
 
 func (t *ListSourcePagesTool) Name() string { return "list_source_pages" }
 
 func (t *ListSourcePagesTool) Definition() map[string]any {
+	desc := "Index of the ORIGINAL book pages (the real scanned typeset pages): source PDFs with their page ranges, " +
+		"the section starts detected from the OCR layout, and — with page=N — the text snippets and extracted image " +
+		"file names of that page. View a page with view_pdf {path:\"<mount>:<pdf>\", page:L} (same crop/zoom as any PDF)."
+	if t.Mount != "" {
+		desc += " Origin PDFs are mounted read-only as \"" + t.Mount + "\"."
+	}
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "list_source_pages",
-		"description": "Report how many ORIGINAL source-document pages (the real scanned/layout pages of the book) can be inspected with view_source_page. These are the best source for typography, heading styles, headers/footers and overall design. (view_pdf is only for PDFs you compiled yourself.)",
-		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
-	}}
-}
-
-func (t *ListSourcePagesTool) Execute(_ string) (session.ToolResult, error) {
-	if t.Idx == nil || t.Idx.total == 0 {
-		return session.ToolResult{Text: "(no original page renders available)"}, nil
-	}
-	return session.ToolResult{Text: fmt.Sprintf("%d original pages available (view_source_page page=1..%d). Pages render on demand and are cached.", t.Idx.total, t.Idx.total)}, nil
-}
-
-// ViewSourcePageTool renders ONE ORIGINAL source page on demand (with
-// cache) and returns it as an image. Supports percent crop + zoom like
-// view_image.
-type ViewSourcePageTool struct {
-	Idx      *pageIndex
-	PagesDir string
-	Runner   *Runner
-}
-
-func (t *ViewSourcePageTool) Name() string { return "view_source_page" }
-
-func (t *ViewSourcePageTool) Definition() map[string]any {
-	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "view_source_page",
-		"description": "View one page of the ORIGINAL source document (real typography/layout of the book, page numbers as in the scan). Renders on demand and caches. Optional percent crop (0-100, relative to full page) and zoom_width let you inspect details like heading styles, headers/footers and font shapes. Use view_pdf instead for PDFs you compiled.",
+		"description": desc,
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"page":       map[string]any{"type": "integer", "description": "global source page number, 1-based"},
-				"left":       map[string]any{"type": "number", "description": "crop left percent (0-100)"},
-				"top":        map[string]any{"type": "number", "description": "crop top percent"},
-				"right":      map[string]any{"type": "number", "description": "crop right percent (100 = full width)"},
-				"bottom":     map[string]any{"type": "number", "description": "crop bottom percent (100 = full height)"},
-				"zoom_width": map[string]any{"type": "integer", "description": "rescale cropped image to this pixel width for detail inspection"},
+				"page": map[string]any{"type": "integer", "description": "optional GLOBAL page number (1-based): print this page's text snippets and image names"},
 			},
-			"required": []string{"page"},
 		},
 	}}
 }
 
-func (t *ViewSourcePageTool) Execute(argsJSON string) (session.ToolResult, error) {
-	var args struct {
-		Page      int     `json:"page"`
-		Left      float64 `json:"left"`
-		Top       float64 `json:"top"`
-		Right     float64 `json:"right"`
-		Bottom    float64 `json:"bottom"`
-		ZoomWidth int     `json:"zoom_width"`
-	}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return session.ToolResult{}, fmt.Errorf("view_source_page 参数错误: %w", err)
-	}
+func (t *ListSourcePagesTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if t.Idx == nil || t.Idx.total == 0 {
-		return session.ToolResult{}, fmt.Errorf("原始页面不可用（未找到 MinerU 保留的 origin PDF）")
+		return session.ToolResult{Text: "(no original pages available: MinerU kept no *_origin.pdf)"}, nil
 	}
-	if args.Page < 1 || args.Page > t.Idx.total {
-		return session.ToolResult{}, fmt.Errorf("page 必须在 1..%d", t.Idx.total)
+	page := 0
+	if argsJSON != "" {
+		if args, err := parseJSONObject(argsJSON); err == nil {
+			page = intArg(args, "page", 0)
+		}
 	}
-	path, err := t.Runner.ensurePageRendered(t.Idx, t.PagesDir, args.Page)
+	if page > 0 {
+		return t.pageDetail(page)
+	}
+	var b strings.Builder
+	if t.Mount != "" && t.MineruDir != "" {
+		fmt.Fprintf(&b, "Source PDFs (read-only mount %q):\n", t.Mount)
+	} else {
+		b.WriteString("Source PDFs (not mounted; counts only):\n")
+	}
+	for _, src := range t.Idx.srcs {
+		rel := src.pdf
+		if t.MineruDir != "" {
+			if r, err := filepath.Rel(t.MineruDir, src.pdf); err == nil {
+				rel = filepath.ToSlash(r)
+			}
+		}
+		path := rel
+		if t.Mount != "" {
+			path = t.Mount + ":" + rel
+		}
+		fmt.Fprintf(&b, "  %s  pages 1..%d  (global %d..%d)\n", path, src.count, src.first, src.first+src.count-1)
+	}
+	fmt.Fprintf(&b, "TOTAL %d original pages.\n", t.Idx.total)
+	if t.Mount != "" {
+		fmt.Fprintf(&b, "View a page: view_pdf {path:\"%s:<file>\", page:<local page>} with optional left/top/right/bottom/zoom.\n", t.Mount)
+	}
+	if secs := derivedSections(t.Index, 120); len(secs) > 0 {
+		b.WriteString("Section starts detected in the OCR layout (global page — heading):\n")
+		for _, s := range secs {
+			fmt.Fprintf(&b, "  g%d  %s\n", s.Global, s.Title)
+		}
+	} else {
+		b.WriteString("No heading-like lines detected; use doc_search with a phrase from the text to find its page instead.\n")
+	}
+	b.WriteString("Page detail (text snippets + extracted image names): list_source_pages {page:<GLOBAL>}.")
+	return session.ToolResult{Text: b.String()}, nil
+}
+
+// pageDetail lists one global page: where it lives and what is on it.
+func (t *ListSourcePagesTool) pageDetail(page int) (session.ToolResult, error) {
+	pdf, local, err := t.Idx.locate(page)
 	if err != nil {
-		return session.ToolResult{}, err
+		return session.ToolResult{Text: "OUT OF RANGE: " + err.Error()}, nil
 	}
-	if args.Left > 0 || args.Top > 0 || args.Right > 0 || args.Bottom > 0 || args.ZoomWidth > 0 {
-		img, err := decodeImage(path)
-		if err != nil {
-			return session.ToolResult{}, err
+	rel := pdf
+	path := pdf
+	if t.MineruDir != "" {
+		if r, rerr := filepath.Rel(t.MineruDir, pdf); rerr == nil {
+			rel = filepath.ToSlash(r)
 		}
-		cropped := cropPercent(flattenToOpaque(img), args.Left, args.Top, args.Right, args.Bottom)
-		if args.ZoomWidth > 0 {
-			cropped = scaleToWidth(cropped, args.ZoomWidth)
-		}
-		b64, err := encodeJPEGBase64(cropped)
-		if err != nil {
-			return session.ToolResult{}, err
-		}
-		return session.ToolResult{ImageBase64: b64, ImageMIME: "image/jpeg"}, nil
 	}
-	b64, err := ReadImageFile(path)
-	if err != nil {
-		return session.ToolResult{}, err
+	if t.Mount != "" {
+		path = t.Mount + ":" + rel
 	}
-	return session.ToolResult{ImageBase64: b64, ImageMIME: "image/png"}, nil
+	var b strings.Builder
+	fmt.Fprintf(&b, "Global page %d -> %s, local page %d.\n", page, path, local)
+	fmt.Fprintf(&b, "Look at it: view_pdf {path:\"%s\", page:%d}\n", path, local)
+	if t.Index != nil {
+		var texts, imgs []DocEntry
+		for _, e := range t.Index.Entries {
+			if e.Global != page {
+				continue
+			}
+			if e.Type == "image" || e.Img != "" {
+				imgs = append(imgs, e)
+				continue
+			}
+			texts = append(texts, e)
+		}
+		if len(texts) > 0 {
+			b.WriteString("Text on this page:\n")
+			for i, e := range texts {
+				if i >= 12 {
+					fmt.Fprintf(&b, "  ...(%d more blocks)\n", len(texts)-i)
+					break
+				}
+				fmt.Fprintf(&b, "  %s\n", snippet(e.Text, 160))
+			}
+		}
+		if len(imgs) > 0 {
+			b.WriteString("Extracted images on this page (view them with view_image):\n")
+			for _, e := range imgs {
+				name := filepath.Base(e.Img)
+				cap := snippet(e.Text, 80)
+				if cap != "" {
+					fmt.Fprintf(&b, "  %s   <%s>\n", name, cap)
+				} else {
+					fmt.Fprintf(&b, "  %s\n", name)
+				}
+			}
+		}
+		if len(texts) == 0 && len(imgs) == 0 {
+			b.WriteString("(no OCR blocks indexed for this page)\n")
+		}
+	}
+	return session.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
+}
+
+// sectionStart is one detected heading.
+type sectionStart struct {
+	Global int
+	Title  string
+}
+
+var (
+	namedSectionRe    = regexp.MustCompile(`^(第[0-9一二三四五六七八九十百零〇]+[章节篇部]|Chapter\s+[0-9IVX]+|Part\s+[0-9IVX]+|Appendix\s+[A-Z0-9]?|附录[A-Z0-9]?|前言|序言|引言|绪论|目录|参考文献|参考书目|索引|致谢|后记|总结|结语|词汇表)`)
+	numberedSectionRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,3}[\s、.．]\s*\S`)
+)
+
+// derivedSections scans the OCR blocks for heading-like short lines and
+// returns them in page order (deduplicated). This gives a usable table
+// of contents even when the book has none.
+func derivedSections(idx *DocIndex, max int) []sectionStart {
+	if idx == nil {
+		return nil
+	}
+	var out []sectionStart
+	seen := map[string]bool{}
+	for _, e := range idx.Entries {
+		if e.Img != "" || e.Type == "image" {
+			continue
+		}
+		title := strings.Join(strings.Fields(e.Text), " ")
+		if !headingLike(title) {
+			continue
+		}
+		key := strings.ToLower(title)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, sectionStart{Global: e.Global, Title: snippet(title, 70)})
+		if len(out) >= max {
+			break
+		}
+	}
+	return out
+}
+
+// headingLike reports whether a line looks like a section heading:
+// short, no sentence punctuation, and either a named/numbered section
+// start or an all-short standalone line.
+func headingLike(t string) bool {
+	r := []rune(t)
+	if len(r) == 0 || len(r) > 40 {
+		return false
+	}
+	if strings.ContainsAny(t, "。；，,;.!?！？") {
+		return false
+	}
+	if namedSectionRe.MatchString(t) || numberedSectionRe.MatchString(t) {
+		return true
+	}
+	// 独立成行的短标题（无标点、无空格混排），如 "概率空间"
+	return len(r) <= 20 && !strings.Contains(t, " ")
 }

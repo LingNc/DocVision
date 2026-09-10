@@ -145,16 +145,16 @@ func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool
 		&GrepTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
 		&WorkBashTool{Dir: buildDir, MaxOutput: r.cfg.Latex.BashMaxOutput},
 		compile,
-		&ViewPDFTool{Root: buildDir, Comp: r.comp},
+		&ViewPDFTool{Mounts: r.bookMounts(buildDir), Comp: r.comp},
 		&ViewImageTool{Root: buildDir},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
 	if r.docPages != nil {
-		// 原书扫描页：核对真实版面/图表来源。
+		// 原书页面：核对真实版面/图表来源（原书 PDF 走 view_pdf 的 source 挂载）。
 		tools = append(tools,
-			&ListSourcePagesTool{Idx: r.docPages},
-			&ViewSourcePageTool{Idx: r.docPages, PagesDir: filepath.Join(proj, "pages"), Runner: r})
+			&ListSourcePagesTool{Idx: r.docPages, Index: r.docIndex, Mount: "source", MineruDir: r.cfg.Paths.MineruOutput},
+			&DocSearchTool{Index: r.docIndex})
 	}
 	return tools
 }
@@ -231,7 +231,7 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 		"Chapters:",
 		chaps.String(),
 		"",
-		"Read the finished PDF page by page (view_pdf) and compare against the original markdown (read_file \"project:<path>\") and the original book pages (list_source_pages/view_source_page).",
+		"Read the finished PDF page by page (view_pdf) and compare against the original markdown (read_file \"project:<path>\") and the original book pages (list_source_pages + view_pdf on the source mount).",
 		"Fix everything a printed book needs: front matter/cover, table of contents, chapter order and completeness, page numbering and headers/footers, figure/table placement and sizing, orphan/blank pages, overfull boxes, duplicated or missing sections.",
 		"Use edit_file for minimal fixes (never drop content), bash to reorganise files if needed, then compile {path:\"main.tex\", engine:\"latexmk\"} and verify with view_pdf.",
 		"When the book is final, call submit.",

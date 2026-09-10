@@ -31,9 +31,9 @@ const latexFigurePrompt = `You are an expert LaTeX vector illustrator. You redra
 1. Study the attached image carefully (boxes, arrows, hierarchy, axes, curves, labels, proportions).
 2. Choose the best LaTeX representation: mind-maps/knowledge/flow diagrams -> TikZ nodes+edges; function/coordinate plots -> pgfplots; complex tables -> booktabs/tabular. Plain text tables that Markdown already handles never reach you.
 3. Write the code for a \documentclass[border=6pt]{standalone} document. Your code is the BODY between \begin{document} and \end{document} — the wrapper is added by the tool. Write it to the workspace file figure.tex with write_file (then edit_file for small fixes).
-4. Call the compile tool with {path:"figure.tex"} (never paste code into the tool). You receive the compile log and, on success, a rendered preview of the figure. The preview is also addressable as view_image {path:"preview.png"} (newest) or preview-<n>.png (an earlier compile): use its left/top/right/bottom + zoom to inspect small labels, arrows or overlaps that the overview is too small to show. view_pdf {path:"standalone.pdf", page:1} renders the same figure from the PDF; read_file reads back your own figure.tex.
-5. Compare the preview with the original image. Fix structure, geometry, label positions and proportions; compile again.
-6. When the preview faithfully matches the original, call the submit tool with {path:"figure.tex"}. Only submit after a successful compile AND a visual check.
+4. Call the compile tool with {path:"figure.tex"} (never paste code into the tool). It returns the compile log, the output PDF name and the page count — it does NOT return an image. Look at the result with view_pdf {path:"standalone.pdf", page:1}: add left/top/right/bottom (percent) and zoom (target pixel width) to re-render a region straight from the PDF at high resolution, so small labels, arrows and overlaps are legible. read_file reads back your own figure.tex.
+5. Compare what you see in view_pdf with the ORIGINAL image (view_image). Fix structure, geometry, label positions and proportions; compile again.
+6. Only when the rendering faithfully matches the original, call the submit tool with {path:"figure.tex"}. Submit only after a successful compile AND a visual check.
 
 ## Cross-page continuations
 Document tables/figures split by pagination appear as SEVERAL consecutive image refs. Before drawing, call image_context (no args) to see the previous/next image refs and their text. Signs of a continuation: repeated table header, axis/box cut at the edge, "续表"/"continued" marks, content that only makes sense together. Use view_image to LOOK at the neighbouring image (just give the file name, e.g. foo.jpg). Adjacency does NOT imply relation: neighbours are only CANDIDATES — always verify with view_image. If they belong together, draw ONE combined figure from all fragments and call submit with "merges": [list of the absorbed image paths exactly as they appear in the markdown]. If the image is obviously complete on its own, or the neighbours are unrelated, just draw THIS image and merge nothing. If THIS image is itself the tail of a figure whose head is an earlier ref, still draw the best possible combined version and merge the earlier ref via "merges" only if that earlier fragment has no finished figure yet.
@@ -57,10 +57,12 @@ const styleSystemPrompt = `You are a LaTeX typography expert reverse-engineering
 
 You have a virtual WORKSPACE (write_file / edit_file / grep / read_file) and tools to inspect the source material:
 - read_file {path, start_line?, end_line?}: read any text file — your own drafts (class.cls, manual.md, example.tex) and the project's organized Markdown, chapters and class files. Without a line window the whole file is returned (truncated when large); with start_line/end_line you get a numbered window.
-- list_images: enumerate the extracted images (figures/tables cut out of the document).
 - view_image: view any image (you may crop a sub-region in percentages and scale it up to inspect details); give the file name as it appears in the markdown.
-- list_source_pages / view_source_page: the ORIGINAL scanned pages of the book (real typography/layout, page numbers as in the scan) — the best source for style. view_source_page renders one page on demand with crop + zoom_width.
-- view_pdf: view a page of a PDF you compiled yourself (example.pdf). Not for the original pages — use view_source_page for those.
+- list_source_pages: the ORIGINAL book pages — the source PDFs and their page ranges, the section starts detected from the OCR layout (a usable table of contents even when the book has none), and, with {page:N}, that page's text snippets plus the extracted image file names. The best source for style.
+- doc_search: find the original page of any text fragment, so you can jump from a passage of the markdown to the real page.
+- read_file: read the OCR markdown itself (project:source/<file>.md) when you need the exact text/characters, and your own workspace files.
+- view_pdf: one PDF viewer for everything — your own compiled example.pdf AND the original book PDFs, which are mounted read-only as "source": view_pdf {path:"source:<file>", page:N}. Crop (percent) and zoom (pixel width) behave identically for both. This is the only page-viewing tool; there is no separate source-page viewer.
+- view_image: look at ONE extracted image (pixels) — use the file name that list_source_pages prints.
 - compile {path:"example.tex"}: compile your own class + example inside the workspace (passes/engine/bib can be chosen), then inspect the result with view_pdf.
 
 Pipeline markers in the Markdown are machine comments, NOT document content — ignore them when inferring style. Every marker block is: one HTML comment whose first line closes immediately (<!-- DOCVISION-<TYPE>: <desc> -->), followed by field lines (CONTENT:/LINK:) OUTSIDE the comment, each on its own line:
@@ -110,7 +112,7 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 - write_file {path, content}: write a file into YOUR workspace. Your MAIN file is chapters/<base>.tex (full content replaces it). If your chapter needs extra resources (included .tex parts, long tables), put them under chapters/<base>/ and \input them — the whole folder is submitted and copied into the final book. Never write outside those paths.
 - edit_file {path, find, replace} / {path, replace, append:true}: incremental fixes to your files (exact-once find/replace, or append) — no need to re-emit the whole file.
 - grep {pattern, path?}: search the project (manual, class, chapters, markdown) with line numbers.
-- compile: compile your current .tex in a scratch wrapper that uses the book class and resolves the project images/figures to catch LaTeX errors early. You get the error log, not a preview; on success it reports the output PDF and page count, which view_pdf can render.
+- compile: compile your current .tex in a scratch wrapper that uses the book class and resolves the project images/figures to catch LaTeX errors early. You get the error log, not an image; on success it reports the output PDF and page count, which view_pdf renders on demand.
 - view_pdf {path, page, left/top/right/bottom, zoom}: look at a page of that compiled PDF.
 - view_image {path, left/top/right/bottom, zoom}: LOOK at an image referenced in the markdown (give the markdown path, e.g. images/<subject>/foo.jpg) with crop + zoom.
 - submit: declare your chapter final. Only submit after a clean compile.
@@ -129,15 +131,15 @@ const convertSystemPrompt = `You are a LaTeX conversion agent. Convert ONE chapt
 ## Layout reconstruction (IMPORTANT)
 The markdown is LINEAR: content that was arranged HORIZONTALLY (side by side) or in a special combined layout in the original PDF gets flattened into sequential lines. Warning signs: SEVERAL consecutive image refs in a row (e.g. a row of 6 Venn diagrams), or alternating short text / small figures in a tight pattern.
 When you see such a run:
-1. doc_search the surrounding images + view_source_page the original page(s) to see the TRUE arrangement (side-by-side row? grid? one figure with items (a)(b)(c)?).
+1. doc_search the surrounding images + list_source_pages {page:N} then view_pdf {path:"source:<file>", page:N} the original page(s) to see the TRUE arrangement (side-by-side row? grid? one figure with items (a)(b)(c)?).
 2. Reproduce that arrangement instead of stacking the images vertically: subfigure rows (minipage/subcaption per manual), side-by-side text+figure, or the class constructs the manual provides. Keep EVERY image and EVERY text fragment — only the GEOMETRY changes.
 3. Single isolated images keep their normal figure treatment.
 
 ## Original PDF access (read-only)
 The original document (from which the markdown was parsed) is available read-only:
 - doc_search {query}: search the block index (text snippets, figure/table captions, equation LaTeX, image filenames). Returns the GLOBAL page number (pN) plus the block bbox. Image queries accept a BARE file name (xxx.jpg) or the markdown ref (images/xxx.jpg); bare page numbers work too.
-- view_source_page {page: pN, left/top/right/bottom (percent), zoom_width}: render that original PDF page (or a crop) to see the REAL document layout and typography.
-Use them when the markdown is ambiguous: order/placement of figures and tables, lost captions, garbled fragments, or layout you cannot reconstruct. Convert doc_search bbox (PDF points, top-left origin) to percents with the page size if you need a precise crop. Table caveat: MinerU parses tables to HTML (preserved in the markdown), and the HTML can drift from the real table (merged cells, nested headers, column spans). Since the class (cls) defines the house table style, reproduce tables with the manual/cls constructs - if a table looks odd (ragged rows, suspicious cells, wrong spans), doc_search its caption or a cell text and view_source_page the page (crop around the bbox) to check the ORIGINAL before rebuilding it. Do not overuse: only when plain reading of the markdown is not enough.
+- list_source_pages {page: pN} -> view_pdf {path:"source:<file>", page:<local page>, left/top/right/bottom (percent), zoom (pixel width)}: render that original page (or a crop) to see the REAL document layout and typography.
+Use them when the markdown is ambiguous: order/placement of figures and tables, lost captions, garbled fragments, or layout you cannot reconstruct. Convert doc_search bbox (PDF points, top-left origin) to percents with the page size if you need a precise crop. Table caveat: MinerU parses tables to HTML (preserved in the markdown), and the HTML can drift from the real table (merged cells, nested headers, column spans). Since the class (cls) defines the house table style, reproduce tables with the manual/cls constructs - if a table looks odd (ragged rows, suspicious cells, wrong spans), doc_search its caption or a cell text and view the source page with view_pdf (crop around the bbox) to check the ORIGINAL before rebuilding it. Do not overuse: only when plain reading of the markdown is not enough.
 4. Markdown tables -> LaTeX tables (booktabs if available per manual).
 5. Inline markdown (bold/italic/code/links) -> the LaTeX equivalent. Math is already LaTeX in the markdown — keep it verbatim inside math environments.
 6. Escape %, &, #, _ in plain text. Do NOT escape inside math/code.
@@ -145,7 +147,7 @@ Use them when the markdown is ambiguous: order/placement of figures and tables, 
 8. Preserve ALL content: no summarising, no dropping paragraphs, exercises, examples or footnotes.
 
 ## Style self-check (before submit)
-- Spot-check your conversion against the ORIGINAL document: pick 1-2 representative pages (a heading page, a table or figure page) with doc_search + view_source_page and compare the real typography with what your .tex produces through the class commands. Confirm you followed the manual (heading hierarchy, captions, table style, environments).
+- Spot-check your conversion against the ORIGINAL document: pick 1-2 representative pages (a heading page, a table or figure page) with doc_search + list_source_pages + view_pdf (source mount) and compare the real typography with what your .tex produces through the class commands. Confirm you followed the manual (heading hierarchy, captions, table style, environments).
 - If the problem is the cls/manual ITSELF (a needed environment/command is missing, the heading/caption/table style cannot reproduce what the book really does), do NOT hack around it: that is a STYLE ISSUE — report it (see below), work around it minimally for now, and describe exactly what the class should provide.
 
 ## Work report (required at submit)
@@ -183,7 +185,7 @@ const finalReviewSystemPrompt = `You are the final book editor. Every chapter ha
 - chapters/*.tex — the converted chapters (subfolders keep their resources).
 - the book class and manual.md / example.tex — the authoritative usage guide.
 - figures/ and images/ — the assets.
-- The ORIGINAL markdown and the original scanned book are readable read-only via read_file "project:<path>", list_source_pages and view_source_page.
+- The ORIGINAL markdown and the original scanned book are readable read-only via read_file "project:<path>", doc_search, list_source_pages and view_pdf (the source mount).
 
 ## Tools
 - read_file {path, start_line?, end_line?} — workspace files, or "project:<path>" for the original markdown/chapters.
@@ -193,7 +195,7 @@ const finalReviewSystemPrompt = `You are the final book editor. Every chapter ha
 - bash {command} — inspect/reorganise the tree (mkdir, mv, ls, wc, ...).
 - compile {path:"main.tex", engine:"latexmk"} — full multi-pass build; returns the PDF name and page count.
 - view_pdf {path, page, left/top/right/bottom, zoom} — LOOK at any page of the built PDF.
-- view_image, list_source_pages, view_source_page — inspect assets and the original book.
+- view_image, list_source_pages, doc_search, view_pdf — inspect assets and the original book.
 - submit — declare the book final. Only after a clean compile and a real page-by-page check.
 
 ## What to check (page by page with view_pdf)

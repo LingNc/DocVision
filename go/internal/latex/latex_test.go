@@ -2,14 +2,9 @@ package latex
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"mineru-tools/internal/config"
-	"mineru-tools/internal/logger"
-	"mineru-tools/pkg/util"
 )
 
 func TestParseClassification(t *testing.T) {
@@ -181,75 +176,77 @@ func TestFindOriginPDFs(t *testing.T) {
 	}
 }
 
-func TestViewPageOnDemand(t *testing.T) {
-	if _, err := exec.LookPath("pdflatex"); err != nil {
-		t.Skip("pdflatex 不可用")
-	}
-	if _, err := exec.LookPath("pdftoppm"); err != nil {
-		t.Skip("pdftoppm 不可用")
-	}
+// TestListSourcePagesTool pins the source-page contract: the origin
+// PDFs are reported under their READ-ONLY mount (so they are viewed
+// with the ordinary view_pdf), section starts are derived from the OCR
+// layout, and page detail lists that page's text and extracted images.
+func TestListSourcePagesTool(t *testing.T) {
 	dir := t.TempDir()
-	tex := filepath.Join(dir, "t.tex")
-	content := strings.Join([]string{
-		"\\documentclass{article}",
-		"\\usepackage[paperheight=10cm,paperwidth=8cm,margin=1cm]{geometry}",
-		"\\begin{document}",
-		"Page one\\newpage",
-		"Page two",
-		"\\end{document}",
-		"",
-	}, "\n")
-	if err := os.WriteFile(tex, []byte(content), 0o644); err != nil {
+	mineru := filepath.Join(dir, "mineru_output")
+	part := filepath.Join(mineru, "book_part1")
+	if err := os.MkdirAll(part, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	comp := NewCompiler(config.LatexCompileConfig{Engine: "pdflatex", Timeout: 60, RasterCommand: "pdftoppm", RasterDPI: 60})
-	if res := comp.Compile(dir, "t.tex"); !res.OK {
-		t.Fatalf("compile failed: %s", res.Err)
-	}
-	cfg := &config.Config{Paths: config.PathsConfig{MineruOutput: t.TempDir()}}
-	log, err := logger.NewLogger(filepath.Join(dir, "t.log"), filepath.Join(dir, "t.err.log"), 2)
-	if err != nil {
+	pdf := filepath.Join(part, "book_part1_origin.pdf")
+	if err := os.WriteFile(pdf, []byte("%PDF-1.4"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer log.Close()
-	r := &Runner{cfg: cfg, comp: comp, log: log}
+	idx := &pageIndex{srcs: []pageSrc{{pdf: pdf, first: 1, count: 12}}, total: 12}
+	doc := &DocIndex{Entries: []DocEntry{
+		{Global: 3, Type: "text", Text: "第二章 随机变量"},
+		{Global: 3, Type: "text", Text: "这是一段普通正文，带标点符号，不应当被当成标题。"},
+		{Global: 4, Type: "image", Img: "book_part1/images/abc.jpg", Text: "图 2.1 分布函数"},
+	}}
+	tool := &ListSourcePagesTool{Idx: idx, Index: doc, Mount: "source", MineruDir: mineru}
 
-	idx, err := buildPageIndex(dir, "t")
-	if err == nil {
-		t.Skip("buildPageIndex 需要 origin pdf 命名，这里直接构造索引")
+	res, err := tool.Execute(`{}`)
+	if err != nil {
+		t.Fatal(err)
 	}
-	idx = &pageIndex{srcs: []pageSrc{{pdf: filepath.Join(dir, "t.pdf"), first: 1, count: 2}}, total: 2}
-	pagesDir := filepath.Join(dir, "pages")
-	tool := &ViewSourcePageTool{Idx: idx, PagesDir: pagesDir, Runner: r}
+	for _, want := range []string{
+		"source:book_part1/book_part1_origin.pdf",
+		"pages 1..12",
+		"TOTAL 12 original pages",
+		"g3  第二章 随机变量",
+	} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("list output missing %q:\n%s", want, res.Text)
+		}
+	}
+	if strings.Contains(res.Text, "普通正文") {
+		t.Errorf("body text must not be listed as a section start:\n%s", res.Text)
+	}
 
-	res, err := tool.Execute(`{"page": 2}`)
+	det, err := tool.Execute(`{"page":4}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.ImageMIME != "image/png" || res.ImageBase64 == "" {
-		t.Fatalf("want png image, got mime=%q len=%d", res.ImageMIME, len(res.ImageBase64))
+	for _, want := range []string{"local page 4", "abc.jpg", "view_pdf", "分布函数"} {
+		if !strings.Contains(det.Text, want) {
+			t.Errorf("page detail missing %q:\n%s", want, det.Text)
+		}
 	}
-	if !util.FileExists(pageCachePath(pagesDir, 2)) {
-		t.Fatal("page 2 cache file missing")
-	}
-	if util.FileExists(pageCachePath(pagesDir, 1)) {
-		t.Fatal("page 1 must NOT be rendered on demand for page 2")
-	}
-	// 再次请求命中缓存且结果一致。
-	res2, err := tool.Execute(`{"page": 2}`)
-	if err != nil || res2.ImageBase64 != res.ImageBase64 {
-		t.Fatalf("cache re-run mismatch: err=%v same=%v", err, res2.ImageBase64 == res.ImageBase64)
-	}
-	// 越界页报错。
-	if _, err := tool.Execute(`{"page": 9}`); err == nil {
-		t.Fatal("want out-of-range error")
-	}
-	// 裁剪 + 放大返回 JPEG。
-	res3, err := tool.Execute(`{"page": 1, "left": 10, "top": 10, "right": 60, "bottom": 50, "zoom_width": 400}`)
+
+	out, err := tool.Execute(`{"page":99}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res3.ImageMIME != "image/jpeg" {
-		t.Fatalf("cropped view should be jpeg, got %q", res3.ImageMIME)
+	if !strings.Contains(out.Text, "OUT OF RANGE") {
+		t.Errorf("out-of-range page must be reported: %s", out.Text)
+	}
+}
+
+// TestViewPDFToolMountDescription: the origin PDFs are reachable with
+// the SAME viewer as compiled PDFs, and the tool says so.
+func TestViewPDFToolMountDescription(t *testing.T) {
+	tool := &ViewPDFTool{
+		Mounts: []Mount{
+			{Name: "work", Dir: t.TempDir(), Writable: true},
+			{Name: "source", Dir: t.TempDir()},
+		},
+	}
+	desc, _ := tool.Definition()["function"].(map[string]any)["description"].(string)
+	if !strings.Contains(desc, "source") || !strings.Contains(desc, "ORIGINAL") {
+		t.Fatalf("description must mention the read-only source mount:\n%s", desc)
 	}
 }
