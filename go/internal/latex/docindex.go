@@ -447,7 +447,8 @@ func storeNote(out map[string]mdMarker, key string, cur *mdMarker, fields []stri
 
 // applyMarkers joins parsed notes onto the image blocks by file name. A
 // block with no note (the common case) keeps the three fields empty, and
-// a note that matches no block is simply dropped — never an error.
+// a note that matches no block is simply dropped — never an error. It
+// returns how many blocks were filled in (for the build log).
 func (idx *DocIndex) applyMarkers(markers map[string]mdMarker) int {
 	if len(markers) == 0 {
 		return 0
@@ -516,6 +517,9 @@ func buildDocIndex(mineruOutput string, sourceMDs []string, markerDir, outPath s
 	if len(idx.Entries) == 0 {
 		return nil, nil, fmt.Errorf("mineru_output 中未找到可索引的 content_list")
 	}
+	// 回填 DOCVISION 注释（图片条目唯一的"内容"来源）：按图片文件名
+	// 匹配，匹配不上就留空，绝不报错。
+	idx.applyMarkers(markers)
 	for i := range idx.Entries {
 		idx.Entries[i].Seq = i + 1
 	}
@@ -550,8 +554,10 @@ func loadDocIndex(path string) (*DocIndex, error) {
 }
 
 // Search returns entries containing ALL whitespace-separated terms
-// (case-insensitive) across text snippet, image path and type. A bare
-// integer term also matches the global page number.
+// (case-insensitive) across text snippet, image path, type and the
+// DOCVISION note (marker/label/content, i.e. what a picture actually
+// shows even when MinerU extracted no caption). A bare integer term also
+// matches the global page number.
 func (idx *DocIndex) Search(query string, max int) []DocEntry {
 	max = clampInt(max, 1, 50)
 	fields := strings.Fields(strings.ToLower(query))
@@ -560,7 +566,8 @@ func (idx *DocIndex) Search(query string, max int) []DocEntry {
 	}
 	var out []DocEntry
 	for _, e := range idx.Entries {
-		hay := strings.ToLower(e.Text + " " + e.Img + " " + e.Type + " p" + strconv.Itoa(e.Global))
+		hay := strings.ToLower(e.Text + " " + e.Img + " " + e.Type + " " +
+			e.Marker + " " + e.Label + " " + e.Content + " p" + strconv.Itoa(e.Global))
 		ok := true
 		for _, f := range fields {
 			if !strings.Contains(hay, f) && strconv.Itoa(e.Global) != f {
@@ -630,6 +637,30 @@ func CropHint(bbox [4]float64, pageSize [2]float64) (int, int, int, int) {
 	return pct(bbox[0], pageSize[0]), pct(bbox[1], pageSize[1]), pct(bbox[2], pageSize[0]), pct(bbox[3], pageSize[1])
 }
 
+// markerTag renders an image entry's DOCVISION note as a short label:
+// "[vector] mind-map diagram", "[styled-text] 知识导图", "[image]" when
+// the note carries no description. Empty for the (common) unannotated
+// block.
+func markerTag(e DocEntry) string {
+	if e.Marker == "" {
+		return ""
+	}
+	if label := snippet(e.Label, 80); label != "" {
+		return "[" + e.Marker + "] " + label
+	}
+	return "[" + e.Marker + "]"
+}
+
+// markerFieldName names the note body in tool output: STYLED-TEXT carries
+// the text printed in the picture, RASTER an explanation of it (VECTOR
+// notes have no body — the tikz code lives in the markdown fence).
+func markerFieldName(marker string) string {
+	if marker == markerImage {
+		return "description"
+	}
+	return "content"
+}
+
 // FormatEntry renders one entry for tool output (pN = global page for
 // view_pdf on the source mount / list_source_pages; the local page is
 // 1-based, exactly what list_source_pages {page:N} and view_pdf print).
@@ -638,8 +669,14 @@ func FormatEntry(e DocEntry) string {
 	if e.Img != "" {
 		s += " img=" + e.Img
 	}
+	if tag := markerTag(e); tag != "" {
+		s += " " + tag
+	}
 	if e.Text != "" {
 		s += "\n    " + e.Text
+	}
+	if e.Content != "" {
+		s += "\n    " + markerFieldName(e.Marker) + ": " + snippet(e.Content, 120)
 	}
 	return s
 }

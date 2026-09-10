@@ -13,7 +13,7 @@
 - `docvision sessions` 命令（`go/cmd/docvision/cli_sessions.go`）：默认扫描**命令启动时所在的目录**（`--config`/全局配置导致的 chdir 不影响它）并生成 `<根目录>/sessions.html`；`--dir` 指定根、`--out` 指定导出路径、`--list` 在终端列会话（阶段/消息数/大小/修改时间/路径）、`--serve --addr` 起服务并打印 `会话预览: http://127.0.0.1:8848/`（不自动打开浏览器；端口占用时明确提示换 `--addr`）。
 
 ### Changed
-- **绘图（矢量）提示词收敛**：上一版新增的"比例/尺寸硬规则（553 字符）+ 线宽硬规则（442）+ 看图纪律 + 看图预算"把提示词从 4300 撑到 6055 字符（+41%），实测同一张图（bfea 思维导图）的会话从 0909 的 13 轮 / 首个工具调用 `view_image`（先看图）变成 21 轮 / 首个工具调用 `write_file`（先写代码），效果反而下降。现在把两条硬规则合并成两句口语要求——「整体比例与印刷尺寸**和原图差不多**」「线宽**和原图差不多**、字在该尺寸下要看得清」，删掉"最多看几次""看完就提交"的劝退措辞，并把工作流第 1 步改成"**先看清原图再写代码**"（工具选型、body-only、跨页续图、标签忠实等规则不变）。
+- **绘图（矢量）提示词收敛**：上一版新增的"比例/尺寸硬规则（553 字符）+ 线宽硬规则（442）+ 看图纪律 + 看图预算"把提示词从 4300 撑到 6055 字符（+41%），实测同一张图（bfea 思维导图）的会话从 0909 的 13 轮 / 首个工具调用 `view_image`（先看图）变成 21 轮 / 首个工具调用 `write_file`（先写代码），效果反而下降。现在把两条硬规则合并成两句口语要求——「整体比例与印刷尺寸**和原图差不多**」「线宽**和原图差不多**、字在该尺寸下要看得清」，删掉"最多看几次""看完就提交"的劝退措辞，并把工作流第 1 步改成"**先看清原图再写代码**"、首次用户提示词的开场从"Begin: write the TikZ code…"改成"Begin by LOOKING at the attached image…"（0909 版首次工具调用是 `view_image`，现在是 `write_file`，这一句就是诱因）（工具选型、body-only、跨页续图、标签忠实等规则不变）。
 - **看图预算改为开头一次性告知**：预算数值（`tools.view.image_max` / `pdf_max`）现在写进矢量图会话的首次用户提示词（模板占位符 `{VIEW_BUDGET}`），不再等用满 `warn_ratio` 后**每一次**看图都在回执尾部重复"只剩 N 次"；提醒改为**每个对象只出现一次**（`viewBudgetNoteOnce`），超限也只说"已用尽"。同时删掉 `view_image` / `view_pdf` / `compile` 回执里"看完就提交"，"stop viewing and call submit"式的催促。
 
 
@@ -29,7 +29,8 @@
 
 ### Fixed
 - **会话转录的三个真实缺陷**：① **样式反馈轮没有系统提示词**——打回原样式会话时 `NewSession(..., "", tools, …)` 以为"系统提示已在持久化消息里"，但 JSONL 转录**从不写 system 行**，于是那一轮完全失去系统提示（模板、挂载说明、水印要求全丢）；现抽出 `Runner.styleSystemPrompt()` 供样式会话与反馈会话共用。② **转录里历史重复**——`saveSessionContext` 在已有实时转录的情况下把整段会话（含 system）再写一遍，文件里出现重复历史且夹着一条 system 行；现 `Session.HasTranscript()` 为真即跳过，仅在实时转录不可用时兜底；旧版单 JSON 上下文续跑时先把历史补写进新 JSONL，避免下次续跑丢历史。③ **压缩后的续跑丢掉"任务 + 最近 8 条"**——压缩的磁盘形态是「…中间段、最近 8 条、note」（消息实时追加），而回放从最新 note 起截断，恰好把压缩刻意保留的原始任务与最近上下文一起丢掉；现在写完 note 后再补写这两部分，磁盘回放与内存状态一致。
-- **进度行与日志行互相覆盖 / info 行外泄终端**（详见下方"虚拟工作区与终端输出"条目）：`RunImages` 硬编码恢复 `SetQuiet(false)` 抹掉了整体静默，`` 进度行不清行导致日志行叠在同一行。
+- **进度行与日志行互相覆盖 / info 行外泄终端**（详见下方"虚拟工作区与终端输出"条目）：`RunImages` 硬编码恢复 `SetQuiet(false)` 抹掉了整体静默，`
+` 进度行不清行导致日志行叠在同一行。
 
 - **虚拟工作区在磁盘上是坏的（会话反复报"文件不存在"的真因）**：`buildPDFView` / `ensureProjectView` / 逐章视图都用裸 `os.Symlink(src, link)` 建软链，而 `src` 来自配置的相对路径（`./mineru_output`、`./latex_project`）——软链目标是按**链接所在目录**解析的，于是 `<proj>/work/pdfview/<part>.pdf` 与 `<proj>/work/views/project/{source,style,chapters}` 全部**悬空**。表现：`list_source_pages` / `doc_search` 走内存里的视图所以正常，一旦落到文件系统就 `文件不存在: source:<part>.pdf` / `project:source/<md>.md`，模型只好反复猜名字（三个报错、三轮空转）。新增 `linkAbs`（绝对目标 + 幂等替换，真实文件/目录不覆盖）并用于 pdfview、project 视图、逐章视图与章节编译 scratch。
 - **沙箱 bash 在默认配置下必然失败**：`WorkBashTool.sandboxArgs` 把挂载目录**原样**交给 bwrap，而 bwrap 自己解析源路径（不经过我们的 CWD），默认配置又是相对路径 → 每个会话的 `bash` 都以 `bwrap: Can't find source path latex_project/work/style` 失败，模型因此失去 `ls`/`grep` 能力并开始猜文件名。现在所有 `--bind`/`--ro-bind` 源与 `--chdir` 一律 `filepath.Abs`。

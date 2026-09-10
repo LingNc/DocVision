@@ -155,7 +155,10 @@ func (t *ListSourcePagesTool) Name() string { return "list_source_pages" }
 func (t *ListSourcePagesTool) Definition() map[string]any {
 	desc := "Index of the ORIGINAL book pages (the real typeset pages): the source PDFs with their page ranges, " +
 		"the section starts detected from the OCR layout, and — with page=N — the text snippets and extracted image " +
-		"file names of that page. View any page with view_pdf {path:\"<mount>:<file>\", page:<local page>} " +
+		"file names of that page (" +
+		"a picture without an OCR caption shows its DOCVISION note instead: kind [styled-text]/[vector]/[image], " +
+		"label and the text or description read from the picture). " +
+		"View any page with view_pdf {path:\"<mount>:<file>\", page:<local page>} " +
 		"(crop/zoom behave like every other PDF)."
 	if t.Mount != "" {
 		desc += " The source PDFs are mounted read-only as \"" + t.Mount + "\" (bash: /" + t.Mount + ")."
@@ -263,7 +266,7 @@ func (t *ListSourcePagesTool) pageDetail(page int) (session.ToolResult, error) {
 			}
 		}
 		if len(imgs) > 0 {
-			b.WriteString("Extracted images on this page (view them with view_image):\n")
+			b.WriteString("Extracted images on this page (view them with view_image). A picture with no OCR caption carries the DOCVISION note of the markdown instead — [styled-text] / [vector] / [image] + label + the text or description read from the picture:\n")
 			for _, e := range imgs {
 				name := filepath.Base(e.Img)
 				if name == "." || name == "" {
@@ -275,8 +278,15 @@ func (t *ListSourcePagesTool) pageDetail(page int) (session.ToolResult, error) {
 				} else if e.Type == "equation" {
 					kind = "[formula] "
 				}
-				if cap := snippet(e.Text, 80); cap != "" {
-					fmt.Fprintf(&b, "  %s   %s<%s>\n", name, kind, cap)
+				if tag := markerTag(e); tag != "" {
+					kind += tag + " "
+				}
+				note := snippet(e.Text, 80)
+				if note == "" {
+					note = snippet(e.Content, 80)
+				}
+				if note != "" {
+					fmt.Fprintf(&b, "  %s   %s<%s>\n", name, kind, note)
 				} else {
 					fmt.Fprintf(&b, "  %s   %s\n", name, strings.TrimSpace(kind))
 				}

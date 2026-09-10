@@ -651,15 +651,30 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	if len(mds) == 0 || r.cfg.Paths.MineruOutput == "" {
 		return
 	}
+	// DOCVISION 注释（图片条目的类型/描述/原文）只存在于 images 阶段
+	// 加工过的 md 里——也就是 <proj>/source（RunBook 把 RunImages 的
+	// OutDir 指到这里）。没有该目录（例如只跑 --step 子阶段）就退回
+	// 输入 md 目录，保持旧行为可用。
+	markerDir := filepath.Join(proj, "source")
+	if st, serr := os.Stat(markerDir); serr != nil || !st.IsDir() {
+		markerDir = sourceDir
+	}
 	outPath := filepath.Join(proj, "doc_index", "doc_index.json")
-	idx, pageIdx, err := buildDocIndex(r.cfg.Paths.MineruOutput, mds, outPath)
+	idx, pageIdx, err := buildDocIndex(r.cfg.Paths.MineruOutput, mds, markerDir, outPath)
 	if err != nil {
 		r.log.Log(0, "[docindex] 原始文档索引不可用（doc_search/原书页面工具关闭）:", err)
 		return
 	}
 	r.docIndex = idx
 	r.docPages = pageIdx
-	r.log.Log(0, "[docindex] 原始文档索引就绪:", strconv.Itoa(len(idx.Entries)), "个块 /", strconv.Itoa(len(idx.Parts)), "个 part ->", outPath)
+	withNotes := 0
+	for _, e := range idx.Entries {
+		if e.Marker != "" {
+			withNotes++
+		}
+	}
+	r.log.Log(0, "[docindex] 原始文档索引就绪:", strconv.Itoa(len(idx.Entries)), "个块 /", strconv.Itoa(len(idx.Parts)),
+		"个 part（带 DOCVISION 注释:", strconv.Itoa(withNotes), "）->", outPath)
 }
 
 // phase: convert (concurrent per-chapter sessions)
