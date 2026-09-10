@@ -271,11 +271,19 @@ func (t *ListSourcePagesTool) pageDetail(page int) (session.ToolResult, error) {
 			b.WriteString("Extracted images on this page (view them with view_image):\n")
 			for _, e := range imgs {
 				name := filepath.Base(e.Img)
-				cap := snippet(e.Text, 80)
-				if cap != "" {
-					fmt.Fprintf(&b, "  %s   <%s>\n", name, cap)
+				if name == "." || name == "" {
+					continue
+				}
+				kind := ""
+				if e.Type == "table" {
+					kind = "[table] "
+				} else if e.Type == "equation" {
+					kind = "[formula] "
+				}
+				if cap := snippet(e.Text, 80); cap != "" {
+					fmt.Fprintf(&b, "  %s   %s<%s>\n", name, kind, cap)
 				} else {
-					fmt.Fprintf(&b, "  %s\n", name)
+					fmt.Fprintf(&b, "  %s   %s\n", name, strings.TrimSpace(kind))
 				}
 			}
 		}
