@@ -139,10 +139,10 @@ func (r *Runner) assemblePhase(proj string) error {
 // read-only.
 func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool, submit *SubmitDoneTool) []session.Tool {
 	tools := []session.Tool{
-		&ReadFileTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
+		&ReadFileTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
 		&WriteWorkFileTool{Root: buildDir, AnyExt: true},
 		&EditWorkFileTool{Root: buildDir},
-		&GrepTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
+		&GrepTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
 		&WorkBashTool{Root: buildDir, Mounts: r.sessionMounts(kindBook, buildDir), MaxOutput: r.cfg.Latex.BashMaxOutput, Sandbox: r.cfg.Latex.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		compile,
 		&ViewPDFTool{Mounts: r.sessionMounts(kindBook, buildDir), Comp: r.comp},

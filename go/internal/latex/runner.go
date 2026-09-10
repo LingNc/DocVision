@@ -129,6 +129,7 @@ type Runner struct {
 	docPages *pageIndex       // 与索引对齐的全局页表（水印采样/索引对齐）
 	projDir  string           // 项目根（project 挂载点，只读）
 	pdfView  *pdfView         // 原书 PDF 的最小视图（source 挂载点，只读）
+	projView string           // 项目的最小只读视图（project 挂载点）
 
 	// lastSplitError remembers the latest split validation failure so
 	// the chapter session can be re-prompted with a concrete reason.

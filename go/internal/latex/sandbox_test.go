@@ -97,3 +97,39 @@ func TestBashSandboxIsolates(t *testing.T) {
 	}
 	_ = config.Config{}
 }
+
+// TestProjectViewIsNarrow pins the project-view contract: a session's
+// "project" mount contains ONLY source/style/chapters — never the
+// internal bookkeeping (work/sessions transcripts, doc_index, pages
+// renders, build, out), which is either huge or none of its business.
+func TestProjectViewIsNarrow(t *testing.T) {
+	proj := t.TempDir()
+	for _, d := range []string{"source/images", "style", "chapters", "work/sessions", "pages", "build", "out", "doc_index"} {
+		if err := os.MkdirAll(filepath.Join(proj, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{"work/sessions/convert_x.jsonl", "pages/p001.png", "doc_index/doc_index.json", "out/book.pdf", "source/book.md", "chapters/chapter_01.md", "style/book.cls"} {
+		if err := os.WriteFile(filepath.Join(proj, f), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view := ensureProjectView(proj)
+	if view == "" {
+		t.Fatal("no view built")
+	}
+	// Idempotent.
+	if again := ensureProjectView(proj); again != view {
+		t.Fatalf("view dir changed: %q vs %q", again, view)
+	}
+	for _, want := range []string{"source/book.md", "chapters/chapter_01.md", "style/book.cls"} {
+		if _, err := os.Stat(filepath.Join(view, want)); err != nil {
+			t.Errorf("view must expose %s: %v", want, err)
+		}
+	}
+	for _, hidden := range []string{"work", "pages", "build", "out", "doc_index"} {
+		if _, err := os.Lstat(filepath.Join(view, hidden)); err == nil {
+			t.Errorf("view must NOT expose %s", hidden)
+		}
+	}
+}

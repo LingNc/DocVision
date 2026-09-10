@@ -653,14 +653,16 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 			}
 		}
 		if linked {
-			// A view of individual files (the pdfview): bind each target.
+			// A VIEW directory (symlinks to files and/or directories:
+			// the original-PDF view, the project view): bind every target
+			// individually, never following links outside the mounts.
 			args = append(args, "--dir", dst)
 			for _, e := range entries {
 				src := filepath.Join(m.Dir, e.Name())
 				if target, lerr := filepath.EvalSymlinks(src); lerr == nil {
 					src = target
 				}
-				if st, serr := os.Stat(src); serr != nil || st.IsDir() {
+				if _, serr := os.Stat(src); serr != nil {
 					continue
 				}
 				args = append(args, "--ro-bind", src, filepath.Join(dst, e.Name()))

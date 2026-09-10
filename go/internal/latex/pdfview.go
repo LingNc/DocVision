@@ -158,3 +158,44 @@ func (v *pdfView) names() []string {
 	}
 	return out
 }
+
+// ------------------------------------------------------------------
+// Project view
+// ------------------------------------------------------------------
+
+// projectViewEntries are the ONLY project trees a session may read.
+// Everything else the pipeline produces (work/sessions transcripts,
+// work/reports, doc_index.json, pages/ renders, build/, out/) stays
+// invisible: it is either internal bookkeeping or huge.
+var projectViewEntries = []string{"source", "style", "chapters"}
+
+// ensureProjectView materialises the narrow read-only project view
+// (<proj>/work/views/project/{source,style,chapters} as symlinks) and
+// returns its directory. It is idempotent and safe to call repeatedly
+// (e.g. per session, since "style" only appears after the style phase).
+func ensureProjectView(proj string) string {
+	if proj == "" {
+		return ""
+	}
+	dir := filepath.Join(proj, "work", "views", "project")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	for _, name := range projectViewEntries {
+		src := filepath.Join(proj, name)
+		if st, err := os.Stat(src); err != nil || !st.IsDir() {
+			continue
+		}
+		link := filepath.Join(dir, name)
+		if target, err := os.Readlink(link); err == nil {
+			if target == src {
+				continue
+			}
+			_ = os.Remove(link)
+		} else if _, err := os.Lstat(link); err == nil {
+			continue // a real directory/file is already there
+		}
+		_ = os.Symlink(src, link)
+	}
+	return dir
+}

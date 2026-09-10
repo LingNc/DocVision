@@ -302,8 +302,8 @@ func (r *Runner) stylePhase(proj string) error {
 	tools := []session.Tool{
 		&WriteWorkFileTool{Root: workDir},
 		&EditWorkFileTool{Root: workDir},
-		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: proj}}},
-		&GrepTool{Root: workDir},
+		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
+		&GrepTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
 		&WorkBashTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), MaxOutput: r.cfg.Latex.BashMaxOutput, Sandbox: r.cfg.Latex.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style", Log: r.log, Tid: 1},
 		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp},
@@ -782,11 +782,11 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	convertMounts := append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
 		r.sessionMounts(kindConvert, workDir)...)
 	tools := []session.Tool{
-		&ReadFileTool{Root: proj},
+		&ReadFileTool{Root: r.projectRoot()},
 		write,
 		// 增量编辑自己的章节文件 + 工作区检索（手册/cls/其它章节只读参考）
 		&EditWorkFileTool{Root: workDir},
-		&GrepTool{Root: proj},
+		&GrepTool{Root: r.projectRoot()},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
 		&ViewPDFTool{Mounts: convertMounts, Comp: r.comp},
@@ -928,13 +928,33 @@ func (r *Runner) sessionMounts(kind sessionKind, workDir string) []Mount {
 		// single book markdown in its own workspace.
 		return mounts
 	}
-	// Everything else reads the project (class, manual, markdown,
-	// images/figures) and the original book PDFs.
+	// Everything else reads part of the project (source markdown +
+	// images, the submitted style package, the chapter markdown) and the
+	// original book PDFs. The project is mounted through the NARROW view:
+	// work/sessions, work/reports, doc_index.json, pages/, build/ and out/
+	// are not part of it.
 	if r.projDir != "" {
-		mounts = append(mounts, Mount{Name: "project", Dir: r.projDir})
+		r.projView = ensureProjectView(r.projDir)
+		if r.projView != "" {
+			mounts = append(mounts, Mount{Name: "project", Dir: r.projView})
+		}
 	}
 	mounts = append(mounts, r.pdfView.Mounts()...)
 	return mounts
+}
+
+// projectRoot is the directory a session reads as "the project": the
+// narrow view when available, otherwise the project root (degraded).
+func (r *Runner) projectRoot() string {
+	if r.projView != "" {
+		return r.projView
+	}
+	if r.projDir != "" {
+		if v := ensureProjectView(r.projDir); v != "" {
+			return v
+		}
+	}
+	return r.projDir
 }
 
 // sourcePageTools gives a session the original-document tooling: a text
@@ -1007,14 +1027,14 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 
 	submit := &SubmitDoneTool{Label: "the style fix for " + base}
 	tools := []session.Tool{
-		&ReadFileTool{Root: proj},
+		&ReadFileTool{Root: r.projectRoot()},
 		&EditWorkFileTool{Root: workRoot},
 		&WriteWorkFileTool{
 			Root:                workRoot,
 			Prefixes:            []string{texRel, "chapters/" + base + "/"},
 			RejectDocumentclass: true,
 		},
-		&GrepTool{Root: proj},
+		&GrepTool{Root: r.projectRoot()},
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images"},
 		&ViewPDFTool{Mounts: append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
 			r.sessionMounts(kindConvert, workRoot)...), Comp: r.comp},
