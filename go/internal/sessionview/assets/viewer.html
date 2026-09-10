@@ -1,21 +1,32 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DocVision 会话预览</title>
+<script>
+/* 主题在首帧渲染前应用，避免"先白后黑"的闪烁；取不到存储一律回退白天模式。 */
+(function () {
+  var theme = 'light';
+  try {
+    var saved = window.localStorage.getItem('dsh.sessionview.theme');
+    if (saved === 'dark' || saved === 'light') { theme = saved; }
+  } catch (err) { /* file:// 下可能禁用 localStorage：静默用默认值 */ }
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+</script>
 {{DSH_STYLE}}
 </head>
 <body>
 <div id="app">
   <aside id="sidebar">
     <div class="side-head">
-      <span class="side-title">工作区/目录</span>
+      <span class="side-title">工作区（按项目分组）</span>
       <button id="refresh" class="ghost-btn" type="button" title="重新扫描会话">刷新</button>
     </div>
     <div id="root-path" class="root-path">—</div>
     <div class="side-search">
-      <input id="search" type="search" placeholder="过滤：会话名或项目（如 latex_project_0909）…" autocomplete="off">
+      <input id="search" type="search" placeholder="过滤：会话名 / 阶段 / 项目（如 latex_project_0909）…" autocomplete="off">
     </div>
     <div id="session-list" class="session-list"></div>
     <div id="side-foot" class="side-foot"></div>
@@ -24,13 +35,21 @@
     <header id="toolbar">
       <div class="tool-left">
         <span id="session-title" class="session-title">未选择会话</span>
+        <span id="session-badge" class="badge hidden"></span>
         <span id="session-sub" class="session-sub"></span>
       </div>
       <div class="tool-right">
-        <span id="mode-badge" class="badge badge-muted">—</span>
-        <label class="switch" title="新消息到达时自动滚动到底部"><input id="follow" type="checkbox"><span>自动跟随</span></label>
-        <label class="switch" title="把所有思考过程折叠起来"><input id="collapse-thinking" type="checkbox"><span>折叠全部思考</span></label>
-        <label class="switch" title="只显示工具调用与工具结果"><input id="only-tools" type="checkbox"><span>仅看工具调用</span></label>
+        <div class="tool-group">
+          <span id="mode-badge" class="badge badge-muted">—</span>
+        </div>
+        <div class="tool-group" role="group" aria-label="显示选项">
+          <label class="switch" title="新消息到达时自动滚动到底部"><input id="follow" type="checkbox"><span>自动跟随</span></label>
+          <label class="switch" title="把所有消息的思考过程折叠起来"><input id="collapse-thinking" type="checkbox"><span>折叠全部思考</span></label>
+          <label class="switch" title="只显示工具调用与工具结果"><input id="only-tools" type="checkbox"><span>仅看工具调用</span></label>
+        </div>
+        <div class="tool-group" role="group" aria-label="外观">
+          <button id="theme-toggle" class="ghost-btn theme-btn" type="button" title="切换浅色/深色主题">🌙 深色</button>
+        </div>
       </div>
     </header>
     <div id="banner" class="banner hidden"></div>

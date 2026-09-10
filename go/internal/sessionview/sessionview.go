@@ -6,9 +6,11 @@
 //
 // The page renders what the transcript actually contains and nothing more.
 // Transcripts hold user/assistant/tool messages, optional reasoning traces,
-// tool calls and image references — system prompts and tool JSON schemas are
-// deliberately never persisted by the writer, so the viewer never pretends to
-// show them.
+// tool calls and image references. What the model was told at the start of a
+// run — the system prompt and the tool definitions — is recorded in separate
+// t="meta" lines that are never replayed; the viewer shows the newest one as a
+// "what was the model instructed" card instead of pretending the information
+// is missing.
 package sessionview
 
 import (
@@ -25,9 +27,59 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"mineru-tools/internal/session"
 )
+
+// RootProject is the sidebar group used for transcripts that sit directly in
+// the scan root, i.e. whose relative path has no project directory above them.
+const RootProject = "（根目录）"
+
+// ProjectFor returns the sidebar group of a transcript: the first segment of
+// its path relative to the scan root. A scan root can hold several projects
+// (latex_project/, latex_project_0909/, and later latex_project/<书名>/), so
+// that first segment is exactly the "which project is this session from"
+// question the grouped sidebar answers.
+func ProjectFor(rel string) string {
+	id := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(rel), "./"))
+	i := strings.Index(id, "/")
+	if i <= 0 {
+		return RootProject
+	}
+	return id[:i]
+}
+
+// MetaInfo summarises the t="meta" lines of one transcript: what the model was
+// told when a run started (system prompt + tool definitions). Meta lines are
+// never replayed and are not messages, so they are counted separately and the
+// sidebar uses their presence to say "this session has a prompt snapshot".
+type MetaInfo struct {
+	// Count is how many meta lines the transcript holds. A resumed session
+	// writes a new one whenever the rendered system prompt changed, so a
+	// transcript can legitimately carry several.
+	Count int `json:"count"`
+	// PromptChars is the character count of the newest system prompt.
+	PromptChars int `json:"promptChars"`
+	// Model is the model the newest run was sent to.
+	Model string `json:"model,omitempty"`
+	// SessionLabel is the newest run's session label (style, convert:…).
+	SessionLabel string `json:"sessionLabel,omitempty"`
+	// SystemSHA is the short hash the writer stored for the newest prompt.
+	SystemSHA string `json:"systemSha,omitempty"`
+	// Tools is how many tool definitions the newest meta line recorded.
+	Tools int `json:"tools"`
+}
+
+// ToolSchema is one tool definition as recorded by a t="meta" line. Parameters
+// keeps the JSON schema as raw text: the viewer only ever pretty-prints it, and
+// keeping it a string means a malformed schema can never break the payload
+// encoding of the whole page.
+type ToolSchema struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Parameters  string `json:"parameters,omitempty"`
+}
 
 // LiveWindow is how recent a transcript's mtime must be for the viewer to
 // show it as "being written right now". The writer Syncs after every message,
@@ -54,6 +106,13 @@ type SessionInfo struct {
 	// of the viewer thinks of as "the conversation"; meta lines and
 	// unparseable lines are not messages.
 	Messages int `json:"messages"`
+	// Project is the sidebar group this session belongs to: the first path
+	// segment under the scan root (see ProjectFor).
+	Project string `json:"project"`
+	// Meta summarises the t="meta" lines (what the model was told when this
+	// run started). It is nil for a transcript written before meta lines
+	// existed, which is why the viewer shows nothing for those.
+	Meta *MetaInfo `json:"meta,omitempty"`
 	// Bytes is the transcript size, which the live viewer compares between
 	// polls to decide whether an incremental fetch is worth doing.
 	Bytes int64 `json:"size"`
@@ -94,7 +153,27 @@ type Line struct {
 	Reasoning string `json:"reasoning_content,omitempty"`
 	// Bad marks a line that could not be parsed as JSON.
 	Bad bool `json:"bad,omitempty"`
+
+	// ---- t == "meta" lines only (never replayed messages) ----
+	// A meta line records what the model was told when a run started. It is
+	// not part of the conversation: it has no role, it is not counted as a
+	// message, and the viewer renders it as one card above the timeline
+	// rather than as a message.
+	Kind string `json:"kind,omitempty"`
+	// SessionLabel is the meta line's "session_label" (style, convert:…).
+	SessionLabel string `json:"session_label,omitempty"`
+	// Model is the model the run was sent to.
+	Model string `json:"model,omitempty"`
+	// SystemSHA is the writer's short hash of the system prompt.
+	SystemSHA string `json:"system_sha,omitempty"`
+	// Tools are the tool definitions that were sent with this run.
+	Tools []ToolSchema `json:"tools,omitempty"`
 }
+
+// IsMeta reports whether this line is a t="meta" record rather than a message.
+// The viewer keys every "meta versus message" decision off this so a transcript
+// that gains new non-"msg" types later still renders as messages only.
+func (l Line) IsMeta() bool { return l.Type == "meta" }
 
 // MarshalJSON is what keeps a broken line deliverable. json.RawMessage
 // validates its bytes while encoding and refuses anything that is not valid
@@ -232,7 +311,14 @@ type scanner struct {
 type countEntry struct {
 	size    int64
 	modTime time.Time
-	count   int
+	stat    transcriptStat
+}
+
+// transcriptStat is what one streaming pass over a transcript yields: the
+// message count the sidebar shows, plus a summary of its meta lines.
+type transcriptStat struct {
+	Messages int
+	Meta     *MetaInfo
 }
 
 func (s *scanner) scan() ([]SessionInfo, error) {
@@ -277,13 +363,16 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
+		stat := s.fileStat(p, info.Size(), info.ModTime())
 		out = append(out, SessionInfo{
 			ID:       rel,
 			Label:    LabelFor(rel),
 			Title:    TitleFor(rel),
 			Name:     d.Name(),
 			Path:     p,
-			Messages: s.messageCount(p, info.Size(), info.ModTime()),
+			Project:  ProjectFor(rel),
+			Messages: stat.Messages,
+			Meta:     stat.Meta,
 			Bytes:    info.Size(),
 			ModTime:  info.ModTime(),
 			Live:     now.Sub(info.ModTime()) < LiveWindow,
@@ -303,58 +392,93 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 	return out, nil
 }
 
-// messageCount returns how many message lines the transcript has, reusing the
-// cached value while (size, mtime) is unchanged.
-func (s *scanner) messageCount(p string, size int64, modTime time.Time) int {
+// fileStat returns the transcript's message count and meta summary, reusing the
+// cached value while (size, mtime) is unchanged. Meta lines change the summary
+// but never the message count.
+func (s *scanner) fileStat(p string, size int64, modTime time.Time) transcriptStat {
 	s.mu.Lock()
 	if e, ok := s.counts[p]; ok && e.size == size && e.modTime.Equal(modTime) {
 		s.mu.Unlock()
-		return e.count
+		return e.stat
 	}
 	s.mu.Unlock()
 
-	n, err := countMessages(p)
+	stat, err := readStat(p)
 	if err != nil {
-		return 0
+		return transcriptStat{}
 	}
 	s.mu.Lock()
 	if s.counts == nil {
 		s.counts = map[string]countEntry{}
 	}
-	s.counts[p] = countEntry{size: size, modTime: modTime, count: n}
+	s.counts[p] = countEntry{size: size, modTime: modTime, stat: stat}
 	s.mu.Unlock()
-	return n
+	return stat
 }
 
-// countMessages streams the file and counts "t":"msg" lines without building
+// readStat streams the file once and counts "t":"msg" lines without building
 // the parsed messages (transcripts are append-only text, so a single pass is
-// enough and nothing is materialised).
-func countMessages(p string) (int, error) {
+// enough and nothing is materialised). Meta lines are summarised on the way,
+// with the newest one winning: a resumed run re-writes the prompt, and the run
+// that is actually ongoing is the one a reader cares about.
+func readStat(p string) (transcriptStat, error) {
 	f, err := os.Open(p)
 	if err != nil {
-		return 0, err
+		return transcriptStat{}, err
 	}
 	defer f.Close()
 	br := bufio.NewReaderSize(f, 64*1024)
-	n := 0
+	var stat transcriptStat
 	for {
 		text, rerr := br.ReadString('\n')
 		trimmed := strings.TrimSpace(text)
 		if trimmed != "" {
-			var rec struct {
+			// Only the type is decoded for every line: messages are the vast
+			// majority and must stay cheap to skip.
+			var head struct {
 				T string `json:"t"`
 			}
-			if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.T == "msg" {
-				n++
+			if json.Unmarshal([]byte(trimmed), &head) == nil {
+				switch head.T {
+				case "msg":
+					stat.Messages++
+				case "meta":
+					stat.addMeta(trimmed)
+				}
 			}
 		}
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {
-				return n, nil
+				return stat, nil
 			}
-			return n, rerr
+			return stat, rerr
 		}
 	}
+}
+
+// addMeta folds one meta line into the summary. A meta line that cannot be
+// decoded is ignored: the count shown to the reader must never be inflated by
+// data the viewer cannot explain.
+func (stat *transcriptStat) addMeta(line string) {
+	var rec struct {
+		Model        string            `json:"model"`
+		SessionLabel string            `json:"session_label"`
+		SysHash      string            `json:"system_sha"`
+		Text         string            `json:"text"`
+		Tools        []json.RawMessage `json:"tools"`
+	}
+	if json.Unmarshal([]byte(line), &rec) != nil {
+		return
+	}
+	if stat.Meta == nil {
+		stat.Meta = &MetaInfo{}
+	}
+	stat.Meta.Count++
+	stat.Meta.PromptChars = utf8.RuneCountInString(rec.Text)
+	stat.Meta.Model = rec.Model
+	stat.Meta.SessionLabel = rec.SessionLabel
+	stat.Meta.SystemSHA = rec.SysHash
+	stat.Meta.Tools = len(rec.Tools)
 }
 
 // HumanSize renders a byte count for terminal output and the sidebar.
@@ -438,12 +562,29 @@ func parseLine(n int, raw string) (Line, bool) {
 	line.Calls = rec.Calls
 	line.CallID = rec.CallID
 	line.Reasoning = rec.Reasoning
+	if rec.T == "meta" {
+		// A meta line reuses "text" for the system prompt, but it is not a
+		// message: the viewer keeps the meta view of it separately so a
+		// "message" is never a 40k-character prompt.
+		line.Kind = rec.Kind
+		line.SessionLabel = rec.SessionLabel
+		line.Model = rec.Model
+		line.SystemSHA = rec.SysHash
+		for _, t := range rec.Tools {
+			line.Tools = append(line.Tools, ToolSchema{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  strings.TrimSpace(string(t.Parameters)),
+			})
+		}
+	}
 	return line, true
 }
 
 // transcriptLine mirrors internal/session's on-disk record. It is duplicated
 // on purpose: the viewer must tolerate unknown fields and drift, and it must
-// not silently start depending on writer internals it does not own.
+// not silently start depending on writer internals it does not own. The meta
+// fields below are the same deliberate copy of the writer's t="meta" shape.
 type transcriptLine struct {
 	T         string             `json:"t"`
 	Role      string             `json:"role,omitempty"`
@@ -452,4 +593,20 @@ type transcriptLine struct {
 	Calls     []session.ToolCall `json:"tool_calls,omitempty"`
 	CallID    string             `json:"tool_call_id,omitempty"`
 	Reasoning string             `json:"reasoning_content,omitempty"`
+
+	// ---- t == "meta" lines only ----
+	Kind         string           `json:"kind,omitempty"`
+	SessionLabel string           `json:"session_label,omitempty"`
+	Model        string           `json:"model,omitempty"`
+	SysHash      string           `json:"system_sha,omitempty"`
+	Tools        []transcriptTool `json:"tools,omitempty"`
+}
+
+// transcriptTool is one tool definition inside a meta line. Parameters stays a
+// json.RawMessage here so the raw bytes survive decoding; it is handed to the
+// viewer as a string afterwards.
+type transcriptTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }

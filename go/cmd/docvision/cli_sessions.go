@@ -30,11 +30,15 @@ func newSessionsCmd() *cobra.Command {
   work/style_session.jsonl（样式会话）、work/sessions/chapters.jsonl（章节划分）、
   work/sessions/convert_<章>.jsonl（单章转换）、
   source/sessions/vector_<图>.jsonl（档位2 矢量图会话）。
-页面左侧是会话列表（阶段标签、消息数、相对时间、活跃圆点），右侧是消息时间线：
-用户/任务卡片与图片缩略图（点击放大，Esc 关闭）、可折叠的思考过程（带字符数）、
-工具调用（工具名 + 格式化参数）、与调用配对编号着色的工具结果（默认只显示前 8 行，
-可展开/复制）。转录里**没有系统提示词**，也**没有工具的 JSON Schema**（写入时就未落盘），
-页面不会假装显示它们；无法解析的行会跳过并在顶部提示"跳过 N 行坏数据"。
+页面默认**白天模式**（工具栏「🌙 深色 / ☀️ 浅色」切换，选择记在浏览器 localStorage；
+两种主题的配色都走 CSS 变量）。左侧**按项目分组**（组名 = 相对路径第一段，点标题折叠/展开，
+带会话数），组内是会话行（阶段标签、消息数、大小、相对时间、活跃圆点）；右侧是消息时间线：
+用户/任务卡片与图片缩略图（点击放大，Esc 关闭）、默认折叠的思考过程（带字符数，展开后
+等宽低对比 + 卡内滚动）、工具调用（工具名 + 格式化参数）、与调用配对编号着色的工具结果
+（默认只显示前 8 行，可展开/复制）。每个会话开头还会写一条 t=meta 元信息行记录**本次运行
+模型被交代了什么**（系统提示词全文 + 当时发给 API 的工具定义），它**不参与会话回放**、
+也不计入消息数，页面把它渲染成时间线最前面的可折叠卡片（老转录没有这行，照常显示）；
+无法解析的行会跳过并在顶部提示"跳过 N 行坏数据"。
 
 两种模式：
   静态导出（默认）  生成一个自包含 HTML（数据/样式/脚本全部内嵌），图片按相对路径
@@ -118,7 +122,7 @@ func newSessionsCmd() *cobra.Command {
 	cmd.Flags().String("dir", "", "扫描根目录（默认：运行命令时所在的目录）")
 	cmd.Flags().Bool("serve", false, "启动本地只读服务并实时刷新（打印 URL，不自动打开浏览器）")
 	cmd.Flags().String("addr", sessionview.DefaultAddr, "服务监听地址（默认 127.0.0.1:8848，只监听本机）")
-	cmd.Flags().Bool("list", false, "只在终端列出扫到的会话（阶段/消息数/大小/修改时间/路径）")
+	cmd.Flags().Bool("list", false, "只在终端列出扫到的会话（项目/阶段/消息数/提示词字符数/大小/修改时间/路径）")
 	cmd.Flags().String("out", "", "静态导出路径（默认 <根目录>/sessions.html）")
 	return cmd
 }
@@ -130,7 +134,7 @@ func printSessions(sessions []sessionview.SessionInfo, root string) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "阶段\t消息数\t大小\t修改时间\t路径")
+	fmt.Fprintln(w, "项目\t阶段\t消息数\t提示词\t大小\t修改时间\t路径")
 	var msgs int
 	for _, s := range sessions {
 		msgs += s.Messages
@@ -138,8 +142,17 @@ func printSessions(sessions []sessionview.SessionInfo, root string) {
 		if s.Live {
 			live = " ●"
 		}
-		fmt.Fprintf(w, "%s%s\t%d\t%s\t%s\t%s\n",
-			s.Title, live, s.Messages, sessionview.HumanSize(s.Bytes),
+		prompt := "-"
+		if s.Meta != nil && s.Meta.PromptChars > 0 {
+			prompt = fmt.Sprintf("%d 字符", s.Meta.PromptChars)
+		}
+		project := s.Project
+		if project == "" {
+			project = "（根目录）"
+		}
+		fmt.Fprintf(w, "%s\t%s%s\t%d\t%s\t%s\t%s\t%s\n",
+			project,
+			s.Title, live, s.Messages, prompt, sessionview.HumanSize(s.Bytes),
 			s.ModTime.Format("2006-01-02 15:04:05"), s.ID)
 	}
 	_ = w.Flush()

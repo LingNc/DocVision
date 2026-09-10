@@ -520,3 +520,414 @@ func TestIndexOnMissingRoot(t *testing.T) {
 		t.Fatal("Scan of a missing root should fail so the CLI can report it")
 	}
 }
+
+/* ===================== 第二十四批：meta 行 / 项目分组 / 主题 ===================== */
+
+// readAsset reads one embedded viewer resource, so the assertions below run
+// against exactly what the binary ships.
+func readAsset(t *testing.T, name string) string {
+	t.Helper()
+	data, err := assets.ReadFile("assets/" + name)
+	if err != nil {
+		t.Fatalf("读取内嵌资源 %s: %v", name, err)
+	}
+	return string(data)
+}
+
+func TestProjectFor(t *testing.T) {
+	cases := map[string]string{
+		"latex_project/work/style_session.jsonl":                    "latex_project",
+		"latex_project_0909/work/sessions/convert_chapter_01.jsonl": "latex_project_0909",
+		"latex_project/书名/work/sessions/convert_chapter_01.jsonl":   "latex_project",
+		"sessions.jsonl":   RootProject,
+		"./sessions.jsonl": RootProject,
+		"":                 RootProject,
+		"a/b/c/d.jsonl":    "a",
+	}
+	for rel, want := range cases {
+		if got := ProjectFor(rel); got != want {
+			t.Errorf("ProjectFor(%q) = %q, want %q", rel, got, want)
+		}
+	}
+}
+
+// TestScanProjectsAndMeta pins what the grouped sidebar needs: the project of
+// every session, the newest meta line summarised, meta lines never counted as
+// messages, and a transcript without any meta line still scanning cleanly.
+func TestScanProjectsAndMeta(t *testing.T) {
+	root := t.TempDir()
+
+	// A session with two meta lines (a resumed run rewrote the prompt): only
+	// the newest one may drive the summary.
+	stylePath := jsonl(root, "latex_project", "work", "style_session.jsonl")
+	writeFile(t, stylePath, transcript(
+		`{"t":"meta","kind":"system","session_label":"style","model":"glm-4.6-OLD","system_sha":"0000000000000000","text":"旧提示词","tools":[{"name":"read_file","description":"读文件","parameters":{"type":"object"}}]}`,
+		`{"t":"msg","role":"user","text":"请分析样式"}`,
+		`{"t":"meta","kind":"system","session_label":"style","model":"glm-4.6","system_sha":"ab12cd34deadbeef","text":"新提示词一二三","tools":[{"name":"read_file","description":"读文件","parameters":{"type":"object","properties":{"path":{"type":"string"}}}},{"name":"submit","description":"提交"}]}`,
+		`{"t":"msg","role":"assistant","text":"好的","reasoning_content":"先看目录"}`,
+	))
+	// A transcript written before meta lines existed: it must scan without a
+	// meta summary and without an error.
+	oldPath := jsonl(root, "latex_project_0909", "work", "sessions", "convert_chapter_01.jsonl")
+	writeFile(t, oldPath, transcript(
+		`{"t":"msg","role":"user","text":"转换第一章"}`,
+		`{"t":"msg","role":"assistant","text":"已提交"}`,
+	))
+	// A nested book under the same project: still the same project group.
+	bookPath := jsonl(root, "latex_project", "书名", "work", "sessions", "chapters.jsonl")
+	writeFile(t, bookPath, transcript(`{"t":"msg","role":"user","text":"划分章节"}`))
+	// A loose transcript directly in the scan root.
+	loosePath := jsonl(root, "loose.jsonl")
+	writeFile(t, loosePath, transcript(`{"t":"msg","role":"user","text":"根目录会话"}`))
+
+	sessions, err := Scan(root)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	byID := map[string]SessionInfo{}
+	for _, s := range sessions {
+		byID[s.ID] = s
+	}
+	if len(byID) != 4 {
+		t.Fatalf("扫描到 %d 个会话，want 4", len(byID))
+	}
+
+	style := byID["latex_project/work/style_session.jsonl"]
+	if style.Project != "latex_project" {
+		t.Errorf("style 会话 project = %q, want latex_project", style.Project)
+	}
+	if style.Messages != 2 {
+		t.Errorf("style 会话 messages = %d, want 2（meta 行不计入消息数）", style.Messages)
+	}
+	if style.Meta == nil {
+		t.Fatalf("style 会话没有 meta 摘要：%+v", style)
+	}
+	if style.Meta.Count != 2 {
+		t.Errorf("meta count = %d, want 2", style.Meta.Count)
+	}
+	if style.Meta.Model != "glm-4.6" || style.Meta.SystemSHA != "ab12cd34deadbeef" || style.Meta.SessionLabel != "style" {
+		t.Errorf("meta 摘要没有取最新一条：%+v", style.Meta)
+	}
+	if style.Meta.PromptChars != len([]rune("新提示词一二三")) {
+		t.Errorf("promptChars = %d, want %d", style.Meta.PromptChars, len([]rune("新提示词一二三")))
+	}
+	if style.Meta.Tools != 2 {
+		t.Errorf("meta tools = %d, want 2", style.Meta.Tools)
+	}
+
+	if got := byID["latex_project_0909/work/sessions/convert_chapter_01.jsonl"]; got.Project != "latex_project_0909" || got.Meta != nil || got.Messages != 2 {
+		t.Errorf("老转录（无 meta 行）扫描结果不对：%+v", got)
+	}
+	if got := byID["latex_project/书名/work/sessions/chapters.jsonl"]; got.Project != "latex_project" {
+		t.Errorf("嵌套书名目录的 project = %q, want latex_project", got.Project)
+	}
+	if got := byID["loose.jsonl"]; got.Project != RootProject {
+		t.Errorf("根目录直挂的 project = %q, want %q", got.Project, RootProject)
+	}
+}
+
+// TestReadSessionMetaLine checks the parsed shape of a meta line: the viewer
+// needs the prompt, the model, the short hash and the tool definitions, while
+// the line must stay out of the message stream (no role).
+func TestReadSessionMetaLine(t *testing.T) {
+	root := t.TempDir()
+	path := jsonl(root, "p", "work", "style_session.jsonl")
+	writeFile(t, path, transcript(
+		`{"t":"meta","kind":"system","session_label":"convert:chapter_01","model":"glm-4.6","system_sha":"ab12cd34deadbeef","text":"你是转换助手。","tools":[{"name":"read_file","description":"读文件","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}]}`,
+		`{"t":"msg","role":"user","text":"开始"}`,
+	))
+
+	lines, next, err := ReadSession(path, 0)
+	if err != nil {
+		t.Fatalf("ReadSession: %v", err)
+	}
+	if next != 2 || len(lines) != 2 {
+		t.Fatalf("读出 %d 行 nextFrom=%d, want 2/2", len(lines), next)
+	}
+	meta := lines[0]
+	if !meta.IsMeta() || meta.Type != "meta" {
+		t.Fatalf("第一行不是 meta 行：%+v", meta)
+	}
+	if meta.Role != "" {
+		t.Errorf("meta 行不该有 role（否则会被当成一条正文消息渲染）：%q", meta.Role)
+	}
+	if meta.Text != "你是转换助手。" || meta.Model != "glm-4.6" || meta.SystemSHA != "ab12cd34deadbeef" || meta.SessionLabel != "convert:chapter_01" || meta.Kind != "system" {
+		t.Errorf("meta 字段解析不完整：%+v", meta)
+	}
+	if len(meta.Tools) != 1 || meta.Tools[0].Name != "read_file" || meta.Tools[0].Description != "读文件" {
+		t.Fatalf("meta 行的工具定义丢失：%+v", meta.Tools)
+	}
+	if !strings.Contains(meta.Tools[0].Parameters, `"path"`) {
+		t.Errorf("meta 行的 parameters 没有保留原始 JSON：%q", meta.Tools[0].Parameters)
+	}
+	if lines[1].IsMeta() {
+		t.Errorf("普通消息被当成 meta 行：%+v", lines[1])
+	}
+
+	// 老转录（一条 meta 行都没有）必须照旧可读。
+	oldPath := jsonl(root, "p", "work", "sessions", "convert_chapter_01.jsonl")
+	writeFile(t, oldPath, transcript(
+		`{"t":"msg","role":"user","text":"老会话"}`,
+		`{"t":"msg","role":"assistant","text":"好的"}`,
+	))
+	oldLines, _, err := ReadSession(oldPath, 0)
+	if err != nil {
+		t.Fatalf("读取老转录失败：%v", err)
+	}
+	for _, l := range oldLines {
+		if l.IsMeta() || len(l.Tools) != 0 {
+			t.Errorf("老转录里出现了 meta 行：%+v", l)
+		}
+	}
+	if sessions, err := Scan(root); err != nil {
+		t.Fatalf("扫描含老转录的根目录失败：%v", err)
+	} else {
+		for _, s := range sessions {
+			if strings.Contains(s.ID, "convert_chapter_01") && s.Meta != nil {
+				t.Errorf("没有 meta 行的转录却有 meta 摘要：%+v", s.Meta)
+			}
+		}
+	}
+}
+
+// TestStaticHTMLMetaAndGroups proves the exported snapshot carries everything
+// the grouped sidebar and the meta card need, and that the shipped page has the
+// theme switch and the meta card renderer in it.
+func TestStaticHTMLMetaAndGroups(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, jsonl(root, "latex_project", "work", "style_session.jsonl"), transcript(
+		`{"t":"meta","kind":"system","session_label":"style","model":"glm-4.6","system_sha":"ab12cd34deadbeef","text":"系统提示词正文","tools":[{"name":"read_file","description":"读文件","parameters":{"type":"object"}}]}`,
+		`{"t":"msg","role":"user","text":"分析样式"}`,
+		`{"t":"msg","role":"assistant","reasoning_content":"思考一下","text":"好的"}`,
+	))
+	writeFile(t, jsonl(root, "latex_project_0909", "work", "sessions", "convert_chapter_01.jsonl"), transcript(
+		`{"t":"msg","role":"user","text":"转换"}`,
+	))
+
+	out := filepath.Join(root, "sessions.html")
+	if err := WriteStaticHTML(root, out, nil); err != nil {
+		t.Fatalf("WriteStaticHTML: %v", err)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(raw)
+
+	// 页面资源里的关键标识：主题切换、项目分组容器、meta 卡片、思考滚动区。
+	for _, marker := range []string{
+		`id="theme-toggle"`,
+		`data-theme="light"`,
+		"dsh.sessionview.theme",
+		"proj-group",
+		"meta-card",
+		"系统提示词（本次运行快照，不参与回放）",
+		"reasoning-scroll",
+	} {
+		if !strings.Contains(page, marker) {
+			t.Errorf("静态页面缺少关键标识 %q", marker)
+		}
+	}
+
+	start := strings.Index(page, `id="dsh-data">`) + len(`id="dsh-data">`)
+	end := strings.Index(page[start:], `</script>`)
+	var payload pageData
+	if err := json.Unmarshal([]byte(page[start:start+end]), &payload); err != nil {
+		t.Fatalf("内嵌数据不是合法 JSON: %v", err)
+	}
+	if len(payload.Sessions) != 2 {
+		t.Fatalf("内嵌 %d 个会话, want 2", len(payload.Sessions))
+	}
+	byID := map[string]staticSession{}
+	for _, s := range payload.Sessions {
+		byID[s.ID] = s
+	}
+	style, ok := byID["latex_project/work/style_session.jsonl"]
+	if !ok {
+		t.Fatalf("内嵌数据里没有 style 会话：%+v", byID)
+	}
+	if style.Project != "latex_project" {
+		t.Errorf("内嵌数据的 project = %q, want latex_project（左侧分组依赖它）", style.Project)
+	}
+	if style.Meta == nil || style.Meta.Count != 1 || style.Meta.PromptChars != 7 || style.Meta.Model != "glm-4.6" || style.Meta.Tools != 1 {
+		t.Fatalf("内嵌数据的 meta 摘要不对：%+v", style.Meta)
+	}
+	var metaLine *Line
+	for i := range style.Lines {
+		if style.Lines[i].IsMeta() {
+			metaLine = &style.Lines[i]
+		}
+	}
+	if metaLine == nil {
+		t.Fatalf("内嵌数据里没有 meta 行：%+v", style.Lines)
+	}
+	if metaLine.Text != "系统提示词正文" || metaLine.Model != "glm-4.6" || metaLine.SystemSHA != "ab12cd34deadbeef" {
+		t.Errorf("内嵌的 meta 行少了字段：%+v", metaLine)
+	}
+	if len(metaLine.Tools) != 1 || metaLine.Tools[0].Name != "read_file" || !strings.Contains(metaLine.Tools[0].Parameters, "object") {
+		t.Errorf("内嵌的 meta 行没有工具定义：%+v", metaLine.Tools)
+	}
+	var reasoning *Line
+	for i := range style.Lines {
+		if style.Lines[i].Reasoning != "" {
+			reasoning = &style.Lines[i]
+		}
+	}
+	if reasoning == nil || reasoning.Reasoning != "思考一下" {
+		t.Errorf("内嵌数据丢了推理内容：%+v", reasoning)
+	}
+
+	if got := byID["latex_project_0909/work/sessions/convert_chapter_01.jsonl"]; got.Project != "latex_project_0909" || got.Meta != nil {
+		t.Errorf("老转录的内嵌数据不对：project=%q meta=%+v", got.Project, got.Meta)
+	}
+}
+
+// TestViewerAssetsThemeAndMeta is the guard for the two things this batch is
+// about: the theme switch must default to daylight (dark is an override), and
+// the meta/reasoning rendering must stay in the shipped assets.
+func TestViewerAssetsThemeAndMeta(t *testing.T) {
+	css := readAsset(t, "viewer.css")
+	js := readAsset(t, "viewer.js")
+	html := readAsset(t, "viewer.html")
+
+	// 浅色是默认：:root 里就是浅色底，深色只是 html[data-theme="dark"] 的一层覆盖。
+	if !strings.Contains(css, `html[data-theme="dark"]`) {
+		t.Error("样式表里没有深色主题覆盖块")
+	}
+	rootBlock := css[:strings.Index(css, `html[data-theme="dark"]`)]
+	if strings.Contains(rootBlock, "#0f1115") {
+		t.Error("深色底出现在 :root 里：默认主题必须是白天模式")
+	}
+	if !strings.Contains(css, "--bg: #f4f6f9") {
+		t.Error(":root 不是浅色默认配色")
+	}
+	if !strings.Contains(css, "--mono:") || !strings.Contains(css, ".reasoning-scroll { max-height") {
+		t.Error("思考内容缺少等宽字体变量或最大高度滚动")
+	}
+
+	// 主题切换只改根元素上的一个属性，并写进 localStorage。
+	if !strings.Contains(html, `data-theme="light"`) {
+		t.Error("页面没有默认的浅色主题属性")
+	}
+	if !strings.Contains(html, "dsh.sessionview.theme") || !strings.Contains(html, "setAttribute('data-theme'") {
+		t.Error("首帧前的主题应用脚本缺失")
+	}
+	if !strings.Contains(html, "var theme = 'light';") {
+		t.Error("首帧前的主题回退值不是浅色：默认必须是白天模式")
+	}
+	if !strings.Contains(js, "setAttribute('data-theme'") {
+		t.Error("脚本没有通过根元素属性切换主题")
+	}
+	if !strings.Contains(js, "THEME_KEY = 'theme'") || !strings.Contains(js, "DEFAULT_THEME = 'light'") {
+		t.Error("主题记忆键或默认值不对（必须默认浅色）")
+	}
+	if !strings.Contains(js, "function toggleTheme") || !strings.Contains(js, "themeToggle.addEventListener") {
+		t.Error("主题切换按钮没有接线")
+	}
+
+	// 思考过程：默认折叠 + 字符数摘要 + 滚动容器。
+	if !strings.Contains(js, "details.open = !state.forceCollapse && remembered") {
+		t.Error("思考块不再默认折叠")
+	}
+	if !strings.Contains(js, "'· ' + line.reasoning.length + ' 字符'") {
+		t.Error("思考摘要行没有写清字符数")
+	}
+	if !strings.Contains(js, "reasoning-scroll") {
+		t.Error("思考正文没有放进带最大高度的滚动容器")
+	}
+
+	// meta 卡片：标题、最新一条、工具二级折叠。
+	for _, marker := range []string{
+		"系统提示词（本次运行快照，不参与回放）",
+		"共 ' + m.count + ' 条，显示最新",
+		"tool-schema",
+		"schema-params",
+		"refs.timeline.insertBefore(card",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("脚本缺少 meta 卡片关键逻辑 %q", marker)
+		}
+	}
+
+	// 侧栏按项目分组，折叠状态在内存里保持。
+	for _, marker := range []string{"proj-group", "state.collapsed", "wrap.open = g.matched ? true : !state.collapsed[g.name]"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("脚本缺少项目分组关键逻辑 %q", marker)
+		}
+	}
+	if !strings.Contains(js, "含系统提示词快照") {
+		t.Error("会话行没有提示含系统提示词快照")
+	}
+}
+
+// TestServeAPIMetaAndProject covers the live path of the same two features: the
+// index must carry the project/meta summary the sidebar groups on, the session
+// endpoint must deliver the meta line itself (it is the transcript's first
+// line, so from=0 returns it), and the served page must carry the theme switch.
+func TestServeAPIMetaAndProject(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, jsonl(root, "latex_project", "work", "style_session.jsonl"), transcript(
+		`{"t":"meta","kind":"system","session_label":"style","model":"glm-4.6","system_sha":"ab12cd34deadbeef","text":"系统提示词","tools":[{"name":"read_file","description":"读文件","parameters":{"type":"object"}}]}`,
+		`{"t":"msg","role":"user","text":"分析样式"}`,
+	))
+	srv := httptest.NewServer(newViewerServer(root))
+	defer srv.Close()
+
+	getJSON := func(path string, out any) {
+		t.Helper()
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s = %d", path, resp.StatusCode)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			t.Fatalf("GET %s 不是合法 JSON: %v", path, err)
+		}
+	}
+
+	var idx indexResponse
+	getJSON("/api/index", &idx)
+	if len(idx.Sessions) != 1 {
+		t.Fatalf("/api/index 返回 %d 个会话, want 1", len(idx.Sessions))
+	}
+	got := idx.Sessions[0]
+	if got.Project != "latex_project" {
+		t.Errorf("/api/index 的 project = %q, want latex_project", got.Project)
+	}
+	if got.Meta == nil || got.Meta.Count != 1 || got.Meta.Model != "glm-4.6" || got.Meta.Tools != 1 || got.Meta.PromptChars == 0 {
+		t.Fatalf("/api/index 的 meta 摘要不对：%+v", got.Meta)
+	}
+	if got.Messages != 1 {
+		t.Errorf("/api/index 的 messages = %d, want 1（meta 行不计入）", got.Messages)
+	}
+
+	var sess sessionResponse
+	getJSON("/api/session?id="+got.ID+"&from=0", &sess)
+	if len(sess.Lines) != 2 {
+		t.Fatalf("/api/session 返回 %d 行, want 2", len(sess.Lines))
+	}
+	if !sess.Lines[0].IsMeta() || sess.Lines[0].Text != "系统提示词" || len(sess.Lines[0].Tools) != 1 {
+		t.Errorf("增量接口没有把 meta 行原样送出：%+v", sess.Lines[0])
+	}
+	if sess.Lines[1].IsMeta() {
+		t.Errorf("第二条消息被当成 meta 行：%+v", sess.Lines[1])
+	}
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+	page, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{`id="theme-toggle"`, "dsh.sessionview.theme", `data-theme="light"`} {
+		if !strings.Contains(string(page), marker) {
+			t.Errorf("实时页面缺少主题切换标识 %q", marker)
+		}
+	}
+}

@@ -8,12 +8,20 @@
  *
  * Transcript content is always inserted as text (never as HTML), so a tool
  * result containing markup stays visible instead of becoming markup.
+ *
+ * Three things the transcript now lets the page show honestly: the newest
+ * t="meta" line (what the model was told: system prompt + tool definitions),
+ * the project a session belongs to (the sidebar groups sessions by it), and a
+ * light/dark theme that defaults to daylight.
  */
 (function () {
   var POLL_MS = 2000;
   var PREVIEW_LINES = 8;
   var LONG_TEXT_LINES = 20;
   var STORE_PREFIX = 'dsh.sessionview.';
+  var THEME_KEY = 'theme';
+  var DEFAULT_THEME = 'light';
+  var ROOT_PROJECT = '（根目录）';
 
   var dataEl = document.getElementById('dsh-data');
   var DATA = null;
@@ -29,11 +37,13 @@
     list: document.getElementById('session-list'),
     foot: document.getElementById('side-foot'),
     title: document.getElementById('session-title'),
+    sessionBadge: document.getElementById('session-badge'),
     sub: document.getElementById('session-sub'),
     badge: document.getElementById('mode-badge'),
     follow: document.getElementById('follow'),
     collapseThinking: document.getElementById('collapse-thinking'),
     onlyTools: document.getElementById('only-tools'),
+    themeToggle: document.getElementById('theme-toggle'),
     banner: document.getElementById('banner'),
     timeline: document.getElementById('timeline'),
     lightbox: document.getElementById('lightbox'),
@@ -57,7 +67,11 @@
     toolSeq: 0,
     calls: new Map(),
     badLines: 0,
-    polling: false
+    polling: false,
+    theme: DEFAULT_THEME,
+    // 项目折叠状态只存在内存里：刷新（重新扫描）后保持，页面重开回到"全部展开"。
+    collapsed: {},
+    meta: null
   };
 
   /* ---------- small helpers ---------- */
@@ -109,6 +123,20 @@
     return i < 0 ? '' : String(id).slice(0, i);
   }
 
+  // 项目 = 相对路径的第一段；根目录直挂的转录归到"（根目录）"。
+  function projectOf(id) {
+    var i = String(id || '').indexOf('/');
+    return i <= 0 ? ROOT_PROJECT : String(id).slice(0, i);
+  }
+
+  // 项目内的子目录（work/sessions 之类），让人一眼看出这个会话是什么阶段落的盘。
+  function subPathOf(id) {
+    var parts = String(id || '').split('/');
+    parts.pop();
+    parts.shift();
+    return parts.join('/');
+  }
+
   function mediaURL(ref) {
     var tail = String(ref || '').replace(/^file:\/\//, '');
     var rel = joinPath(sessionDir(state.current ? state.current.id : ''), tail);
@@ -128,6 +156,12 @@
     while (node.firstChild) { node.removeChild(node.firstChild); }
   }
 
+  function shortSHA(value) {
+    var s = String(value || '');
+    if (!s) { return '—'; }
+    return s.length > 12 ? s.slice(0, 12) : s;
+  }
+
   /*
    * The wire format keeps the provider's own field name (reasoning_content);
    * normalising it once here means the render code reads one spelling only.
@@ -143,43 +177,132 @@
     return (lines || []).map(normalizeLine);
   }
 
+  /* ---------- theme ---------- */
+
+  function applyTheme(theme) {
+    state.theme = theme === 'dark' ? 'dark' : DEFAULT_THEME;
+    document.documentElement.setAttribute('data-theme', state.theme);
+    if (refs.themeToggle) {
+      // 按钮上写的是"点一下会变成什么"，不是当前状态。
+      refs.themeToggle.textContent = state.theme === 'dark' ? '☀️ 浅色' : '🌙 深色';
+      refs.themeToggle.title = state.theme === 'dark' ? '切换为白天模式（浅色，默认）' : '切换为夜间模式（深色）';
+      refs.themeToggle.setAttribute('aria-pressed', state.theme === 'dark' ? 'true' : 'false');
+    }
+  }
+
+  function storedTheme() {
+    var saved = storeGet(THEME_KEY);
+    return saved === 'dark' || saved === 'light' ? saved : DEFAULT_THEME;
+  }
+
+  function toggleTheme() {
+    var next = state.theme === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    storeSet(THEME_KEY, next);
+  }
+
   /* ---------- sidebar ---------- */
+
+  function sessionHaystack(s) {
+    return [s.title, s.label, s.id, s.name, s.project].join(' ').toLowerCase();
+  }
+
+  function metaOf(session) {
+    return (session && session.meta && session.meta.count) ? session.meta : null;
+  }
+
+  /*
+   * 侧栏按项目分组：每个项目是一个可折叠集合（标题 = 项目名 + 会话数）。
+   * 过滤时只保留有命中的组并强制展开，命中信息写进组的摘要行。
+   */
+  function buildGroups() {
+    var q = state.filter;
+    var groups = [];
+    var byName = {};
+    state.sessions.forEach(function (s) {
+      var name = s.project || projectOf(s.id);
+      var g = byName[name];
+      if (!g) {
+        g = byName[name] = { name: name, items: [], live: 0, matched: false };
+        groups.push(g);
+      }
+      if (q && sessionHaystack(s).indexOf(q) < 0) { return; }
+      g.items.push(s);
+      if (s.live) { g.live++; }
+    });
+    if (q) {
+      groups = groups.filter(function (g) { return g.items.length > 0; });
+      groups.forEach(function (g) { g.matched = true; });
+    }
+    return groups;
+  }
+
+  function sessionRow(s) {
+    var row = el('button', 'session-row');
+    row.type = 'button';
+    if (state.current && state.current.id === s.id) { row.classList.add('active'); }
+
+    var top = el('div', 'row-top');
+    top.appendChild(el('span', 'dot' + (s.live ? ' live' : '')));
+    top.appendChild(el('span', 'row-title', s.title || s.label || s.name));
+    top.appendChild(el('span', 'badge', s.label || ''));
+    row.appendChild(top);
+
+    var meta = el('div', 'row-meta');
+    meta.appendChild(el('span', null, s.messages + ' 条消息 · ' + fmtSize(s.size) + ' · ' + relTime(s.mtime)));
+    var m = metaOf(s);
+    if (m) {
+      var chip = el('span', 'row-chip meta-chip', '含系统提示词快照');
+      chip.title = '这个转录有 ' + m.count + ' 条 t=meta 元信息行，最新一条 ' +
+        (m.promptChars || 0) + ' 字符' + (m.model ? '（模型 ' + m.model + '）' : '') +
+        ((m.tools) ? '，含 ' + m.tools + ' 个工具定义' : '');
+      meta.appendChild(chip);
+    }
+    var sub = subPathOf(s.id);
+    if (sub) {
+      var subChip = el('span', 'row-chip row-sub', sub);
+      subChip.title = s.id;
+      meta.appendChild(subChip);
+    }
+    row.appendChild(meta);
+    row.addEventListener('click', function () { selectSession(s.id); });
+    return row;
+  }
 
   function renderSessions() {
     clear(refs.list);
-    var q = state.filter;
+    var groups = buildGroups();
     var shown = 0;
-    state.sessions.forEach(function (s) {
-      var haystack = (s.title + ' ' + s.label + ' ' + s.id + ' ' + s.name).toLowerCase();
-      if (q && haystack.indexOf(q) < 0) { return; }
-      shown++;
-      var row = el('button', 'session-row');
-      row.type = 'button';
-      if (state.current && state.current.id === s.id) { row.classList.add('active'); }
+    groups.forEach(function (g) {
+      var wrap = document.createElement('details');
+      wrap.className = 'proj-group';
+      // 默认全部展开；过滤命中的组强制展开，其余按记忆的折叠状态恢复。
+      wrap.open = g.matched ? true : !state.collapsed[g.name];
 
-      var top = el('div', 'row-top');
-      top.appendChild(el('span', 'dot' + (s.live ? ' live' : '')));
-      top.appendChild(el('span', 'row-title', s.title || s.label || s.name));
-      top.appendChild(el('span', 'badge', s.label || ''));
-      row.appendChild(top);
-      var meta = el('div', 'row-meta',
-        s.messages + ' 条消息 · ' + fmtSize(s.size) + ' · ' + relTime(s.mtime));
-      // 扫描根下可能有多个项目（latex_project、latex_project_0909…）：
-      // 把第一段路径作为项目标签显示，配合过滤框即可当"工作区切换"用。
-      var project = String(s.id || '').split('/')[0];
-      if (project && project !== s.id) {
-        meta.appendChild(el('span', 'row-project', project));
-      }
-      row.appendChild(meta);
-      row.addEventListener('click', function () { selectSession(s.id); });
-      refs.list.appendChild(row);
+      var head = el('summary', 'proj-head');
+      head.appendChild(el('span', 'proj-name', g.name));
+      head.appendChild(el('span', 'proj-count', g.items.length + ' 个会话'));
+      if (g.live) { head.appendChild(el('span', 'dot live')); }
+      if (g.matched) { head.appendChild(el('span', 'proj-note', '过滤命中')); }
+      wrap.appendChild(head);
+
+      var body = el('div', 'proj-body');
+      g.items.forEach(function (s) { body.appendChild(sessionRow(s)); shown++; });
+      wrap.appendChild(body);
+
+      wrap.addEventListener('toggle', function () {
+        if (g.matched) { return; } // 过滤强制展开时不要把状态写回记忆
+        state.collapsed[g.name] = !wrap.open;
+      });
+      refs.list.appendChild(wrap);
     });
     if (!shown) {
-      refs.list.appendChild(el('div', 'empty', state.sessions.length ? '没有匹配的会话' : '没有找到 *.jsonl 会话转录'));
+      refs.list.appendChild(el('div', 'empty',
+        state.sessions.length ? '没有匹配的会话' : '没有找到 *.jsonl 会话转录'));
     }
     var live = state.sessions.filter(function (s) { return s.live; }).length;
-    refs.foot.textContent = state.sessions.length + ' 个会话' +
-      (live ? ' · ' + live + ' 个活跃' : '') + (q ? ' · 匹配 ' + shown : '');
+    refs.foot.textContent = groups.length + ' 个项目 · ' + state.sessions.length + ' 个会话' +
+      (live ? ' · ' + live + ' 个活跃' : '') + (state.filter ? ' · 匹配 ' + shown : '');
   }
 
   function updateRootLabel() {
@@ -192,10 +315,25 @@
     if (!state.current) {
       refs.title.textContent = '未选择会话';
       refs.sub.textContent = '';
+      if (refs.sessionBadge) {
+        refs.sessionBadge.textContent = '';
+        refs.sessionBadge.classList.add('hidden');
+      }
       return;
     }
     refs.title.textContent = state.current.title || state.current.label || state.current.name;
-    var parts = [state.current.label, state.lines.length + ' 行', fmtSize(state.current.size)];
+    if (refs.sessionBadge) {
+      var label = state.current.label || '';
+      refs.sessionBadge.textContent = label;
+      refs.sessionBadge.classList.toggle('hidden', !label);
+    }
+    var parts = [state.current.messages + ' 条消息', state.lines.length + ' 行', fmtSize(state.current.size)];
+    var m = metaState();
+    if (m) {
+      parts.push('系统提示词 ' + m.promptChars + ' 字符' +
+        (m.count > 1 ? '（共 ' + m.count + ' 条 meta，显示最新）' : '') +
+        (m.line.tools && m.line.tools.length ? ' · 工具定义 ' + m.line.tools.length : ''));
+    }
     if (state.badLines) { parts.push('坏行 ' + state.badLines); }
     if (state.current.mtime) { parts.push('最后写入 ' + fmtClock(state.current.mtime)); }
     refs.sub.textContent = parts.join(' · ');
@@ -229,6 +367,195 @@
     }
   }
 
+  /* ---------- meta line (系统提示词快照) ---------- */
+
+  function metaLines() {
+    var found = [];
+    state.lines.forEach(function (l) { if (l.t === 'meta') { found.push(l); } });
+    return found;
+  }
+
+  /*
+   * 一个转录可能有多条 meta 行（同一会话多次运行、提示词变化时会追加），
+   * 只显示最后一条，并注明总条数。总条数取扫描结果与已加载行的较大值：
+   * 扫描是权威的，增量加载时也不会因为只拉到一部分而少报。
+   */
+  function metaState() {
+    var metas = metaLines();
+    if (!metas.length && !metaOf(state.current)) { return null; }
+    var line = metas.length ? metas[metas.length - 1] : null;
+    if (!line) { return null; }
+    var scanned = metaOf(state.current);
+    return {
+      line: line,
+      count: Math.max(metas.length, scanned ? scanned.count : 0),
+      promptChars: String(line.text || '').length
+    };
+  }
+
+  /* Pretty-print a JSON blob by walking text nodes, never by building HTML. */
+  function prettyJSON(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) { return ''; }
+    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch (err) { return raw; }
+  }
+
+  function appendHighlighted(parent, text) {
+    var re = /("(?:\\.|[^"\\])*")\s*:|("(?:\\.|[^"\\])*")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/g;
+    var last = 0;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) { parent.appendChild(document.createTextNode(text.slice(last, m.index))); }
+      var cls = m[1] !== undefined ? 'key' : m[2] !== undefined ? 'str' : m[3] !== undefined ? 'bool' : 'num';
+      parent.appendChild(el('span', cls, m[0]));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) { parent.appendChild(document.createTextNode(text.slice(last))); }
+  }
+
+  function copyButton(text) {
+    var btn = el('button', 'text-toggle', '复制');
+    btn.type = 'button';
+    btn.addEventListener('click', function () {
+      var done = function () { btn.textContent = '已复制'; setTimeout(function () { btn.textContent = '复制'; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text) && done(); });
+      } else if (fallbackCopy(text)) {
+        done();
+      }
+    });
+    return btn;
+  }
+
+  function fallbackCopy(text) {
+    try {
+      var area = document.createElement('textarea');
+      area.value = text;
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(area);
+      return ok;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /* 工具定义：名字 + 描述；parameters 的 JSON 收在二级折叠里（默认收起）。 */
+  function toolSchemaBlock(tool, index) {
+    var d = document.createElement('details');
+    d.className = 'tool-schema';
+    var head = el('summary', 'schema-head');
+    head.appendChild(el('span', 'schema-index', '#' + (index + 1)));
+    head.appendChild(el('span', 'schema-name', tool.name || '(未命名工具)'));
+    if (tool.description) {
+      head.appendChild(el('span', 'schema-meta', '描述 ' + String(tool.description).length + ' 字符'));
+    }
+    if (tool.parameters) {
+      head.appendChild(el('span', 'schema-meta', 'schema ' + String(tool.parameters).length + ' 字符'));
+    }
+    d.appendChild(head);
+
+    var body = el('div', 'schema-body');
+    if (tool.description) {
+      body.appendChild(el('pre', 'body-text schema-desc', tool.description));
+    }
+    if (tool.parameters) {
+      var pd = document.createElement('details');
+      pd.className = 'schema-params';
+      var ph = el('summary', 'schema-head');
+      ph.appendChild(el('span', 'schema-name', 'parameters'));
+      ph.appendChild(el('span', 'schema-meta', 'JSON · 默认收起'));
+      pd.appendChild(ph);
+      var pbody = el('div', 'schema-body');
+      var pre = el('pre', 'code');
+      appendHighlighted(pre, prettyJSON(tool.parameters));
+      pbody.appendChild(pre);
+      var actions = el('div', 'row-actions');
+      actions.appendChild(copyButton(String(tool.parameters)));
+      pbody.appendChild(actions);
+      pd.appendChild(pbody);
+      body.appendChild(pd);
+    } else {
+      body.appendChild(el('div', 'note', '（这条工具定义没有记录 parameters）'));
+    }
+    d.appendChild(body);
+    return d;
+  }
+
+  function metaCardKey(line) {
+    return 'meta.' + (state.current ? state.current.id : '') + '.' + (line.system_sha || line.n);
+  }
+
+  function metaCard() {
+    var m = metaState();
+    if (!m) { state.meta = null; return null; }
+    state.meta = m;
+    var line = m.line;
+
+    var card = document.createElement('details');
+    card.className = 'block meta-card';
+    // 默认**收起**：摘要行已经写明模型/会话/哈希/字符数，一次点击才展开
+    // 全文——系统提示词动辄几万字符，默认展开会把会话时间线整个顶下去。
+    // 展开状态按会话 + 提示词哈希记忆（用户展开过一次后保持）。
+    card.open = storeGet(metaCardKey(line)) === '1';
+
+    var head = el('summary', 'block-head');
+    head.appendChild(el('span', 'block-name', '系统提示词（本次运行快照，不参与回放）'));
+    head.appendChild(el('span', 'block-meta', '模型 ' + (line.model || '—')));
+    if (line.session_label) { head.appendChild(el('span', 'block-meta', '会话 ' + line.session_label)); }
+    head.appendChild(el('span', 'block-meta', 'sha ' + shortSHA(line.system_sha)));
+    head.appendChild(el('span', 'block-meta', m.promptChars + ' 字符'));
+    if (line.kind) { head.appendChild(el('span', 'block-meta', 'kind ' + line.kind)); }
+    if (m.count > 1) {
+      var note = el('span', 'block-meta', '共 ' + m.count + ' 条，显示最新');
+      note.title = '同一个转录里有 ' + m.count + ' 条 meta 行（多次运行 / 提示词变化各一条），这里显示最后一条。';
+      head.appendChild(note);
+    }
+    card.appendChild(head);
+
+    var body = el('div', 'block-body');
+    var scroll = el('div', 'prompt-scroll');
+    scroll.appendChild(el('pre', 'body-text prompt-text', String(line.text || '（这条 meta 行没有正文）')));
+    body.appendChild(scroll);
+    var actions = el('div', 'row-actions');
+    actions.appendChild(copyButton(String(line.text || '')));
+    body.appendChild(actions);
+
+    var tools = line.tools || [];
+    var toolsWrap = el('div', 'meta-tools');
+    toolsWrap.appendChild(el('div', 'meta-tools-head',
+      tools.length ? '工具定义 ' + tools.length + ' 个（parameters 的 JSON 默认收起）' : '工具定义 0 个'));
+    if (!tools.length) {
+      toolsWrap.appendChild(el('div', 'note', '这条 meta 行没有记录工具定义。'));
+    }
+    tools.forEach(function (t, i) { toolsWrap.appendChild(toolSchemaBlock(t, i)); });
+    body.appendChild(toolsWrap);
+    card.appendChild(body);
+
+    card.addEventListener('toggle', function () {
+      storeSet(metaCardKey(line), card.open ? '1' : '0');
+    });
+    return card;
+  }
+
+  var EMPTY_TEXTS = {
+    none: '左侧选择一个会话开始浏览。',
+    noMessages: '这个会话还没有可显示的消息',
+    onlyTools: '这个会话没有工具调用记录'
+  };
+
+  /* 卡片永远在最前面：时间线重建时插到第一个节点，增量到达时也挪到最前。 */
+  function renderMetaCard() {
+    var old = refs.timeline.querySelector('.meta-card');
+    if (old && old.parentNode) { old.parentNode.removeChild(old); }
+    var card = metaCard();
+    if (!card) { return 0; }
+    refs.timeline.insertBefore(card, refs.timeline.firstChild);
+    return 1;
+  }
+
   /* ---------- message rendering ---------- */
 
   function roleName(role) {
@@ -244,7 +571,7 @@
     head.appendChild(el('span', 'msg-seq', '#' + (++state.msgSeq)));
     head.appendChild(el('span', 'msg-role', roleName(line.role)));
     head.appendChild(el('span', 'msg-line', '行 ' + line.n));
-    if (line.reasoning) { head.appendChild(el('span', 'msg-chip', '思考 ' + line.reasoning.length + ' 字')); }
+    if (line.reasoning) { head.appendChild(el('span', 'msg-chip', '思考 ' + line.reasoning.length + ' 字符')); }
     if (line.tool_calls && line.tool_calls.length) { head.appendChild(el('span', 'msg-chip', '工具 ' + line.tool_calls.length + ' 次')); }
     if (line.images && line.images.length) { head.appendChild(el('span', 'msg-chip', '图片 ' + line.images.length)); }
     return head;
@@ -301,6 +628,10 @@
     return strip;
   }
 
+  /*
+   * 思考过程默认折叠；展开后是等宽、低对比、保留原始换行的整段文本，
+   * 长思考靠容器自身的 max-height + overflow 滚动，不撑爆页面。
+   */
   function reasoningBlock(line) {
     var details = document.createElement('details');
     details.className = 'block thinking';
@@ -308,66 +639,20 @@
     details.open = !state.forceCollapse && remembered;
     var head = el('summary', 'block-head');
     head.appendChild(el('span', 'block-name', '思考过程'));
-    head.appendChild(el('span', 'block-meta', line.reasoning.length + ' 字符'));
+    head.appendChild(el('span', 'block-meta', '· ' + line.reasoning.length + ' 字符'));
+    var rows = line.reasoning.split('\n').length;
+    if (rows > 1) { head.appendChild(el('span', 'block-meta', rows + ' 行')); }
     details.appendChild(head);
     var body = el('div', 'block-body');
-    body.appendChild(collapsibleText(line.reasoning, LONG_TEXT_LINES, 'think.' + line.n, 'reasoning-text'));
+    var scroll = el('div', 'reasoning-scroll');
+    scroll.appendChild(el('pre', 'body-text reasoning-text', line.reasoning));
+    body.appendChild(scroll);
     details.appendChild(body);
     details.addEventListener('toggle', function () {
       if (state.forceCollapse) { return; }
       storeSet('thinking.' + state.current.id + '.' + line.n, details.open ? '1' : '0');
     });
     return details;
-  }
-
-  /* Pretty-print a tool call's arguments, falling back to the raw string. */
-  function prettyArgs(raw) {
-    if (typeof raw !== 'string' || !raw.trim()) { return ''; }
-    try { return JSON.stringify(JSON.parse(raw), null, 2); } catch (err) { return raw; }
-  }
-
-  /* Colourise a JSON blob by walking text nodes, never by building HTML. */
-  function appendHighlighted(parent, text) {
-    var re = /("(?:\\.|[^"\\])*")\s*:|("(?:\\.|[^"\\])*")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/g;
-    var last = 0;
-    var m;
-    while ((m = re.exec(text)) !== null) {
-      if (m.index > last) { parent.appendChild(document.createTextNode(text.slice(last, m.index))); }
-      var cls = m[1] !== undefined ? 'key' : m[2] !== undefined ? 'str' : m[3] !== undefined ? 'bool' : 'num';
-      parent.appendChild(el('span', cls, m[0]));
-      last = m.index + m[0].length;
-    }
-    if (last < text.length) { parent.appendChild(document.createTextNode(text.slice(last))); }
-  }
-
-  function copyButton(text) {
-    var btn = el('button', 'text-toggle', '复制');
-    btn.type = 'button';
-    btn.addEventListener('click', function () {
-      var done = function () { btn.textContent = '已复制'; setTimeout(function () { btn.textContent = '复制'; }, 1200); };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text) && done(); });
-      } else if (fallbackCopy(text)) {
-        done();
-      }
-    });
-    return btn;
-  }
-
-  function fallbackCopy(text) {
-    try {
-      var area = document.createElement('textarea');
-      area.value = text;
-      area.style.position = 'fixed';
-      area.style.opacity = '0';
-      document.body.appendChild(area);
-      area.select();
-      var ok = document.execCommand('copy');
-      document.body.removeChild(area);
-      return ok;
-    } catch (err) {
-      return false;
-    }
   }
 
   function toolCallBlock(call) {
@@ -382,7 +667,7 @@
     var head = el('summary', 'block-head');
     head.appendChild(el('span', 'call-tag', '#' + state.toolSeq));
     head.appendChild(el('span', 'block-name', name));
-    var args = prettyArgs(fn.arguments);
+    var args = prettyJSON(String(fn.arguments || ''));
     head.appendChild(el('span', 'block-meta', '参数 ' + String(fn.arguments || '').length + ' 字符'));
     details.appendChild(head);
 
@@ -439,6 +724,7 @@
       updateBanner();
       return null;
     }
+    // meta 行不是消息：它由时间线最前面的那张卡片渲染，绝不进消息序列。
     if (line.t && line.t !== 'msg') { return null; }
     if (!line.role) { return null; }
 
@@ -482,6 +768,12 @@
     return msg;
   }
 
+  function timelineEmptyText() {
+    if (state.onlyTools) { return EMPTY_TEXTS.onlyTools; }
+    if (!state.current) { return EMPTY_TEXTS.none; }
+    return EMPTY_TEXTS.noMessages;
+  }
+
   function renderTimeline() {
     clear(refs.timeline);
     state.msgSeq = 0;
@@ -493,9 +785,9 @@
       var node = renderLine(line);
       if (node) { refs.timeline.appendChild(node); rendered++; }
     });
+    rendered += renderMetaCard();
     if (!rendered) {
-      refs.timeline.appendChild(el('div', 'empty',
-        state.onlyTools ? '这个会话没有工具调用记录' : '这个会话还没有可显示的消息'));
+      refs.timeline.appendChild(el('div', 'empty', timelineEmptyText()));
     }
     updateBanner();
     renderToolbar();
@@ -503,13 +795,20 @@
 
   function appendLines(lines) {
     if (!lines || !lines.length) { return; }
-    lines.forEach(function (line) { state.lines.push(line); });
+    var hasMeta = false;
+    lines.forEach(function (line) {
+      state.lines.push(line);
+      if (line.t === 'meta') { hasMeta = true; }
+    });
+    var placeholder = refs.timeline.querySelector('.empty');
     lines.forEach(function (line) {
       var node = renderLine(line);
       if (node) { refs.timeline.appendChild(node); }
     });
-    var placeholder = refs.timeline.querySelector('.empty');
-    if (placeholder && refs.timeline.children.length > 1) { refs.timeline.removeChild(placeholder); }
+    if (hasMeta) { renderMetaCard(); }
+    if (placeholder && placeholder.parentNode && refs.timeline.children.length > 1) {
+      refs.timeline.removeChild(placeholder);
+    }
     updateBanner();
     renderToolbar();
     if (state.follow) { scrollToBottom(); }
@@ -535,6 +834,7 @@
     state.nextFrom = 0;
     state.curSize = -1;
     state.curMtime = 0;
+    state.meta = null;
     renderSessions();
     if (!s) { renderTimeline(); return; }
 
@@ -649,6 +949,7 @@
   refs.collapseThinking.addEventListener('change', function () {
     state.forceCollapse = refs.collapseThinking.checked;
     if (state.forceCollapse) {
+      // 作用于时间线上所有消息（含增量追加进来的）。
       Array.prototype.forEach.call(refs.timeline.querySelectorAll('details.thinking'), function (d) { d.open = false; });
     }
   });
@@ -656,6 +957,7 @@
     state.onlyTools = refs.onlyTools.checked;
     renderTimeline();
   });
+  if (refs.themeToggle) { refs.themeToggle.addEventListener('click', toggleTheme); }
   refs.timeline.addEventListener('scroll', function () {
     var near = refs.timeline.scrollHeight - refs.timeline.scrollTop - refs.timeline.clientHeight < 40;
     if (!near && state.follow) {
@@ -669,12 +971,16 @@
   });
 
   function boot() {
+    applyTheme(storedTheme());
     refs.follow.checked = state.follow;
     if (MODE === 'static') {
       state.root = DATA.root || '';
       state.generated = DATA.generated || '';
       state.sessions = (DATA.sessions || []).map(function (s) {
-        return { id: s.id, label: s.label, title: s.title, name: s.name, messages: s.messages, size: s.size, mtime: s.mtime, live: s.live };
+        return {
+          id: s.id, label: s.label, title: s.title, name: s.name, messages: s.messages,
+          size: s.size, mtime: s.mtime, live: s.live, project: s.project, meta: s.meta
+        };
       });
       renderSessions();
       updateRootLabel();
