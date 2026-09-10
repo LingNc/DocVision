@@ -317,7 +317,7 @@ docvision latex --verbose      # 详细控制台输出（默认仅显示进度�
 | `work/temp/` | 临时工作区（拆章沙箱、样式/反馈 scratch、每章编译 scratch），默认用完即删 |
 | `build/` | 全书的构建树（每次 clean 重建：cls/手册/案例 + chapters + figures + main.tex），同时是修复会话与终审会话的工作区 |
 | `out/` | 交付产物：整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件），`book.pdf` 是 `main.pdf` 的别名，另有 `standalone.tex` |
-| `doc_index/doc_index.json` | 只读块索引（`doc_search` 的检索库，style 阶段之前构建） |
+| `doc_index/doc_index.json` | 只读块索引（`doc_search` 的检索库，style 阶段之前构建；图片条目带 md 里 DOCVISION 注释的类型/描述/原文） |
 | `watermark_memory.json` | 水印检测工作记忆（`latex.remove_watermark` 开启时生成，两档位共享） |
 | `progress.json` | 逐阶段断点进度 |
 
@@ -409,6 +409,8 @@ docvision verify                               # AI 核对报告
 - `doc_search {query}`：按关键词 / 图片文件名 / 页码检索块索引（文本片段、图表标题、公式 LaTeX、bbox），返回**全局页号 pN** 与 bbox，并直接给出精确路径 `source page: view_pdf {path:"source:<file>.pdf", page:N}`（part 级定位，不依赖全局页号累加）；
 - `list_source_pages {page?}`：无参数列出「源 PDF → 页范围 → 全局页号」表 + 从 OCR 版面推导的章节起点；带 `{page:N}` 时列出该全局页的正文片段与该页抽出的图片文件名（随后可直接 `view_image`）；
 - `view_pdf {path:"source:<file>.pdf", page, left/top/right/bottom, zoom}`：渲染原书某页（或按百分比裁剪/放大）查看真实排版——与"看自己编译出的 PDF"是**同一个工具**（`zoom_width` 是 `zoom` 的别名，渲染时按目标宽度从 PDF 重渲染，真放大）。
+
+**图片条目带上类型标记、描述与原文（来自 md 里的 DOCVISION 注释）**：MinerU 对没有 caption 的图片块只给一个文件名，于是索引构建时会把 images 阶段写进 `source/*.md` 的机器注释按**图片文件名**接回对应的图片块——`Marker`（`styled-text`/`vector`/`image`）、`Label`（注释里的描述，如 `mind-map diagram`）与 `Content`（STYLED-TEXT 的 `CONTENT:` 原文 / RASTER 的 `DESCRIBE:` 解释文本）。因此 `doc_search` 既可按文件名、也可按"图里写了什么"检索（例如按"知识导图""mind-map"找到那张思维导图），命中与 `list_source_pages` 页详情里都会显示 `[vector] mind-map diagram` 这样的短标签与内容摘要；没有注释的图片块照旧只有文件名（字段留空，不报错），旧版 `doc_index.json` 仍可读取。
 
 样式会话、章节转换会话与全书修复/终审会话都带这套检索工具（终审/修复会话还会同时搜构建树）。
 

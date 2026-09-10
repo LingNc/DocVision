@@ -49,12 +49,14 @@ func (t *DocSearchTool) Name() string { return "doc_search" }
 
 func (t *DocSearchTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "doc_search",
-		"description": "Search the original-document block index (read-only): text snippets, figure/table captions, equation LaTeX and image filenames from the MinerU parse. Maps a markdown fragment to its original PDF page (pN) and bbox. Query is space-separated keywords (ALL must match); a bare number also matches page numbers.",
+		"name": "doc_search",
+		"description": "Search the original-document block index (read-only): text snippets, figure/table captions, equation LaTeX and image filenames from the MinerU parse. " +
+			"Image entries also carry the DOCVISION note the images phase wrote into the markdown — kind (styled-text / vector / image), its label and the text or description read from the picture — so a figure can be found by what it shows (a mind map, 知识导图, …) and not only by its filename. " +
+			"Maps a markdown fragment to its original PDF page (pN) and bbox. Query is space-separated keywords (ALL must match); a bare number also matches page numbers.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query": map[string]any{"type": "string", "description": "Keywords, an image filename (images/...), or a page number."},
+				"query": map[string]any{"type": "string", "description": "Keywords (document text, a figure's label or description, an image filename such as images/..., or a page number)."},
 				"max":   map[string]any{"type": "integer", "description": "Max results (default 12, cap 50)."},
 			},
 			"required": []string{"query"},

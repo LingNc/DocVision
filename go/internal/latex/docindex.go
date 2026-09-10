@@ -378,9 +378,9 @@ func scanMdMarkers(r io.Reader, out map[string]mdMarker) {
 	var (
 		cur     *mdMarker // note header seen, waiting for its LINK
 		curKey  string    // …already joined (LINK was written above the header)
-		curLine int
-		fields  []string // CONTENT:/DESCRIBE: lines of the current note
-		pendKey string   // LINK seen with no note yet (field order may vary)
+		curLine int       // line of the header or of the last field line
+		fields  []string  // CONTENT:/DESCRIBE: lines of the current note
+		pendKey string    // LINK seen with no note yet (field order may vary)
 		pendLn  int
 	)
 	lineNo := 0
@@ -429,6 +429,10 @@ func scanMdMarkers(r io.Reader, out map[string]mdMarker) {
 		default:
 			continue
 		}
+		// The window is measured from the LAST line that belonged to the
+		// note, not from the header: a styled-text picture can carry a
+		// 30-line CONTENT and its LINK must still be attached to it.
+		curLine = lineNo
 		if curKey != "" {
 			storeNote(out, curKey, cur, fields)
 		}
