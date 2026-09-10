@@ -297,6 +297,8 @@ docvision latex --trace        # 或配置 options.log_level: "trace"（更细�
 docvision img2text --debug     # img2text 同样支持
 docvision verify --debug
 docvision latex --verbose      # 详细控制台输出（默认仅显示进度行，5-10s 自动刷新一次；进度行只在控制台，日志文件里看并发与耗时）
+#   进度行是终端里的"原地覆写"行：重定向/管道时改为按节拍整行打印（日志里会看到多行进度），
+#   阶段结束时保留最后一行状态，不会留下空行
 ```
 
 日志等级：`info`（默认，进度与警告/错误）< `debug`（每轮请求/响应摘要、提示词、工具调用、**最终接收内容**、编译结果与警告、Mermaid/LaTeX 校验结论）< `trace`（再加流式分片进展行等噪音）。全部写入日志文件（`[DEBUG]`/`[TRACE]` 前缀，控制台输出不受影响），每次请求/响应记录：使用的模型、`stream`/`max_tokens`/`temperature`/`thinking`/`reasoning_effort` 实际取值、消息数与上下文估算、耗时、finish_reason、输出与思维链字符数、provider 返回的 token 用量（含 `reasoning_tokens`）。LaTeX 编译只记 `OK|FAILED + 耗时 + warnings=N + 警告清单`（失败时附给 AI 的错误原文），完整编译日志不会写入。可在日志里完整回放某个会话的推理与工具使用过程。

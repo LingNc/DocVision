@@ -118,10 +118,13 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 				ticker.Stop()
 				r.log.SetLiveLine(nil)
 				if tty {
+					// 只清行、不换行：这一行是"会消失的"实时行，
+					// 补 \n 会在阶段之间留下一行空白（管道模式下
+					// render 已经是整行 + 换行，再补就是重复行）。
 					fmt.Fprint(os.Stdout, "\r\x1b[K")
-				} else {
-					fmt.Fprintln(os.Stdout)
+					return
 				}
+				// 管道：最后一次 render 已经整行换过行，这里什么都不打。
 			})
 		}
 }

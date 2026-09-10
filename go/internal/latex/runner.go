@@ -450,10 +450,22 @@ type liveProgress struct {
 	text func() string
 	stop chan struct{}
 	once sync.Once
+	// tty 决定重绘方式：终端里用 `\r` + 清行原地覆写（一行；会话实时行
+	// 也会在它上面覆写），管道/重定向里按节拍整行输出（否则日志里全是
+	// 裸 CR，且两次"整行 + 换行"会多出空行）。
+	tty bool
+	mu  sync.Mutex
+	// last 是最近一次真正画出去的那一行，Close 用它重画最终状态。
+	last string
 }
 
 func newLiveProgress(text func() string) *liveProgress {
-	p := &liveProgress{text: text, stop: make(chan struct{})}
+	return newLiveProgressTTY(text, stdoutIsTerminal())
+}
+
+// newLiveProgressTTY 是 newLiveProgress 的可注入 tty 版本（测试用）。
+func newLiveProgressTTY(text func() string, tty bool) *liveProgress {
+	p := &liveProgress{text: text, stop: make(chan struct{}), tty: tty}
 	p.render()
 	go func() {
 		t := time.NewTicker(5 * time.Second)
@@ -474,20 +486,43 @@ func (p *liveProgress) render() {
 	if p == nil || p.text == nil {
 		return
 	}
-	if line := p.text(); line != "" {
-		fmt.Fprintf(os.Stdout, "\r%s          ", line)
+	line := p.text()
+	if line == "" {
+		return
 	}
+	p.mu.Lock()
+	p.last = line
+	p.mu.Unlock()
+	if p.tty {
+		// \x1b[K 先清掉本行残留（上一次更长的进度行、或会话实时行留下的
+		// 尾巴），否则会看到两行文字叠在一起的残影。
+		fmt.Fprintf(os.Stdout, "\r\x1b[K%s", line)
+		return
+	}
+	fmt.Fprintln(os.Stdout, line)
 }
 
 // Close stops the ticker and terminates the line.
+//
+// 终端里**重画**最终一行再换行：期间会话实时行（book.go 的
+// livePhaseLine）结束时会把这一行清掉（`\r\x1b[K`），此时只补一个 `\n`
+// 就会在阶段之间留下一行空白——实测 `[classify 8/8] …` 与
+// `[process 2/8] …` 之间就是这么来的。管道里最后一次 render 已经整行
+// 换过行了，再补就是重复行，所以什么都不打。
 func (p *liveProgress) Close() {
 	if p == nil {
 		return
 	}
 	p.once.Do(func() {
 		close(p.stop)
-		if p.text != nil && p.text() != "" {
-			fmt.Fprint(os.Stdout, "\n")
+		p.mu.Lock()
+		line := p.last
+		p.mu.Unlock()
+		if line == "" {
+			return
+		}
+		if p.tty {
+			fmt.Fprintf(os.Stdout, "\r\x1b[K%s\n", line)
 		}
 	})
 }
