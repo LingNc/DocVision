@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- **工具轮耗尽时摘掉整个工具块**：`max_tool_rounds` 用尽后 `req.Tools` 不再发送（只设 `tool_choice:"none"`）——厂商把 (system, tools, messages) 拼成缓存前缀，工具块消失会让其后所有 token 位移、**整个前缀缓存归零**（实测 prompt 37114→35362，差 1752 = 整个工具 schema）。现在工具块恒定发送，是否可调用只由 `tool_choice` 决定。
+- **缓存命中不可观测**：`Usage` 新解析 `prompt_tokens_details.cached_tokens` 并在用量行输出 `cached=N(%)`；debug 下每请求多打一行 `[cache-probe] body=… head_sha=… tools=N tool_choice=… messages=…` —— 前缀头哈希变了说明是**我们自己**改了前缀，哈希没变而 `cached=0` 则指向网关把请求路由到了另一个上游（厂商缓存按上游 key/节点，不跨渠道）。
 - **续跑丢系统提示词**：转录（JSONL）里没有 system 行，恢复时 `SetMessages` 整体覆盖 → 续跑会话**完全没有系统提示**。现在 `SetMessages` 总是把本会话的系统提示放回队首（转录里若有旧 system 行则替换，不重复）。
 - **思维链不入转录**：`transcriptLine` 没有 reasoning 字段，续跑时历史思维链全丢（GLM 保留式思考要求完整回传，也是前缀缓存的前提）。现在转录写入/恢复 `reasoning_content`。
 - **压缩会毁掉前缀且花冤枉钱**：旧实现把整段会话（含 base64 图片）塞进**一条全新的 user 消息**去要摘要 → 一个 100k+ token 的新前缀全额计费、图片重发；压缩后历史只剩 system+摘要，最近上下文全丢。现在：压缩请求改为"在原会话末尾追加一条指令"的增量请求（复用前缀、命中缓存），系统提示词 + 原始任务 + 最近 8 条消息原样保留，只压中间段；回放时忽略最近一次压缩标记之前的旧消息。

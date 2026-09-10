@@ -6,6 +6,7 @@ package session
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -265,6 +266,7 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.logCacheProbe(&payload, raw)
 	fallback := func(cause error) (*ChatResponse, error) {
 		// Gateway without SSE (or without streamed tool calls): retry
 		// once as a single JSON response instead of burning the whole
@@ -340,6 +342,30 @@ func (c *Client) buildBody(payload *ChatRequest) ([]byte, error) {
 		}
 	}
 	return raw, nil
+}
+
+// logCacheProbe writes a debug fingerprint of the outgoing body. Prefix
+// caching (GLM `prompt_tokens_details.cached_tokens`) only pays off while
+// the head of the request stays byte-identical: a changed head_sha means WE
+// changed the prefix (system prompt, tool block, first messages), while an
+// unchanged sha together with cached=0 points at the gateway routing the
+// request to a different upstream (a provider-side cache is per upstream
+// key/node, never global).
+func (c *Client) logCacheProbe(payload *ChatRequest, raw []byte) {
+	if c.log == nil || !c.log.DebugEnabled() {
+		return
+	}
+	head := raw
+	if len(head) > 512 {
+		head = head[:512]
+	}
+	sum := sha256.Sum256(head)
+	tools := "none"
+	if payload.Tools != nil {
+		tools = fmt.Sprintf("%d", len(payload.Tools))
+	}
+	c.log.Debug(0, fmt.Sprintf("[cache-probe] body=%dB head_sha=%x tools=%s tool_choice=%q messages=%d",
+		len(raw), sum[:8], tools, payload.ToolChoice, len(payload.Messages)))
 }
 
 // post performs the HTTP call with the transport matching the mode.

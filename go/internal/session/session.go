@@ -237,8 +237,16 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			Temperature: s.tuning.Temperature,
 		}
 		useTools := len(s.tools) > 0 && !opts.ForceNoTools && (maxRounds <= 0 || toolRounds < maxRounds)
-		if useTools {
+		if len(s.tools) > 0 && !opts.ForceNoTools {
+			// ALWAYS send the tool definitions. Providers build their prompt
+			// prefix from (system, tools, messages): dropping the tool block
+			// on the final round shifts everything after it and throws away
+			// the whole prefix cache (measured: prompt 37114 -> 35362, i.e.
+			// the entire 1752-token tool schema). Whether tools may actually
+			// be called is decided by tool_choice alone.
 			req.Tools = s.toolDefs
+		}
+		if useTools {
 			req.ToolChoice = "auto"
 		} else if len(s.tools) > 0 && !opts.ForceNoTools {
 			// Budget exhausted: force a text-only final answer.
