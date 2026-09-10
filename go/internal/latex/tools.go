@@ -139,8 +139,9 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	}
 	sizeDetail := ""
 	if w, h, err := pdfPageSize(res.PDF); err == nil && w > 0 && h > 0 {
-		sizeDetail = fmt.Sprintf(" Drawn size: %.1fpt x %.1fpt (%.2fcm x %.2fcm, aspect %.2f:1)",
-			w, h, w/28.45, h/28.45, w/h)
+		// 与 ORIGINAL FIGURE SIZE 同单位（mm），这样"画出来多大 vs 原图多大"能直接比。
+		sizeDetail = fmt.Sprintf(" Drawn size: %.1fpt x %.1fpt (%.1fmm x %.1fmm, aspect %.2f:1)",
+			w, h, w*25.4/72, h*25.4/72, w/h)
 	}
 	text := "COMPILE OK. Artifact: standalone.pdf" + pdfDetail + "." + sizeDetail +
 		" View it with view_pdf {path: \"standalone.pdf\", page: 1}."

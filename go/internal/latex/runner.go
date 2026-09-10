@@ -201,6 +201,9 @@ func (r *Runner) phaseNote() func(format string, a ...any) {
 // NewRunner builds the shared runner (clients resolved per registry
 // key with fallback to the top-level ai block).
 func NewRunner(cfg *config.Config, log *logger.Logger) *Runner {
+	// 原图尺寸测量要靠 MinerU 解析（content_list/layout）把位图换算成 mm；
+	// 会话看的是拷进项目的位图，只有知道 mineru_output 在哪才找得到解析。
+	SetImageParseRoot(cfg.Paths.MineruOutput)
 	comp := NewCompiler(cfg.Latex.Compile)
 	comp.fontsDir = cfg.Paths.Fonts // 项目字体目录对编译可见（TEXINPUTS/OSFONTDIR）
 	return &Runner{

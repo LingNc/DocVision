@@ -19,7 +19,7 @@ If ambiguous or overly complex, call image_context / view_image (crop + zoom) to
 - Reproduce ALL visible text labels exactly (numbers, symbols, Chinese characters). Chinese labels are fine; the wrapper loads ctex when needed.
 - Match structure and proportions: node placement, arrow directions, tree depth, axis ranges, curve shapes.
 - Keep the same proportion, printed size and line weight as the original (the compile result and
-  view_pdf report the actual numbers).
+  view_pdf report the actual numbers in mm, the same unit as the original's measured size).
 - NO OVERLAPS, NO CROWDING (hard requirement): labels must never sit on lines/arrows/other labels, nodes must not touch or overlap, nothing may be clipped or pushed outside the canvas. When space is tight, REARRANGE (spread nodes, shorten labels to shorter equivalent text, use a legend, rotate axis labels) and shrink FONT SIZE — do not enlarge the canvas to full page size. Note the compiled PDF's physical size does not have to look big: it is placed in the book at the original's size.
 - Up-scaling a small source image adds no information; if a label stays unreadable, reproduce what is
   certain and mark the rest with % [?].

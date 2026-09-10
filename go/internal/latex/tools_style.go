@@ -112,6 +112,24 @@ func (t *ViewImageTool) measureNote(full string) string {
 	return ""
 }
 
+// cropNote reports the printed size of the CROPPED region (mm): the crop is
+// taken in bitmap pixels, and the mm-per-pixel scale is known from the
+// original measurement, so "how big is what I am looking at now" is a
+// division — the model needs it to size a redrawn detail.
+func (t *ViewImageTool) cropNote(full string, left, top, right, bottom float64, cropped bool) string {
+	if !cropped {
+		return ""
+	}
+	m := MeasureImage(full)
+	if !m.Found {
+		return ""
+	}
+	if h := m.Crop(left, top, right, bottom).CropHint(); h != "" {
+		return " " + h + "."
+	}
+	return ""
+}
+
 func (t *ViewImageTool) Name() string { return "view_image" }
 
 func (t *ViewImageTool) Definition() map[string]any {
@@ -174,9 +192,11 @@ func (t *ViewImageTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if err != nil {
 		return session.ToolResult{}, err
 	}
+	cropped := left > 0 || top > 0 || right < 100 || bottom < 100
 	return session.ToolResult{
 		Text: "Image " + fmt.Sprintf("%s (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx) attached.", pathArg, left, top, right, bottom, zoom) +
 			t.measureNote(full) +
+			t.cropNote(full, left, top, right, bottom, cropped) +
 			t.budgetOnce(full, used),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",

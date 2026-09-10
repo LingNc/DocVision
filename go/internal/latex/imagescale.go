@@ -58,6 +58,72 @@ func (m ImageMeasure) AspectOnly() string {
 		m.PixelsW, m.PixelsH, m.AspectStr)
 }
 
+// parseRoot is the MinerU output root (paths.mineru_output). The sessions
+// look at bitmaps that images 阶段 COPIED into the project
+// (<proj>/source/images/<主题>/<sha>.jpg), so walking up from the bitmap
+// never reaches the parse and every measurement silently degraded to the
+// px-only fallback ("ORIGINAL BITMAP: 320x178px"): the mm the model needs
+// to keep the printed scale was missing in every real run. With the root
+// known, the bitmap is matched to its parse entry by FILE NAME (MinerU
+// image names are content hashes and the copies keep them).
+var (
+	parseRootMu sync.RWMutex
+	parseRoot   string
+)
+
+// SetImageParseRoot tells the measurement where MinerU results live. Called
+// once per runner (paths.mineru_output); safe to call repeatedly.
+func SetImageParseRoot(dir string) {
+	if strings.TrimSpace(dir) == "" {
+		// 空串 = 清空（测试隔离；正常运行总是给 paths.mineru_output）。
+		parseRootMu.Lock()
+		parseRoot, parseIndex, parseIndexOnce = "", nil, sync.Once{}
+		parseRootMu.Unlock()
+		resetImageMeasureCache()
+		return
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		abs = dir
+	}
+	parseRootMu.Lock()
+	changed := parseRoot != abs
+	if changed {
+		parseRoot = abs
+		parseIndexOnce = sync.Once{}
+		parseIndex = nil
+	}
+	parseRootMu.Unlock()
+	if changed {
+		// 之前那些"找不解析→只有 px"的失败结论已经过时，必须丢掉。
+		resetImageMeasureCache()
+	}
+}
+
+// resetImageMeasureCache drops cached measurements (they depend on the parse
+// root: a miss recorded before the root was known would otherwise stick).
+func resetImageMeasureCache() {
+	imageMeasureCache.Range(func(k, _ any) bool {
+		imageMeasureCache.Delete(k)
+		return true
+	})
+}
+
+// parseEntry is one image block of a MinerU parse: where it is printed on
+// which page, and how big that page is.
+type parseEntry struct {
+	WidthMM  float64
+	HeightMM float64
+	PageWMM  float64
+	DPI      int
+	Aspect   string
+}
+
+var (
+	parseIndexOnce sync.Once
+	parseIndex     map[string]parseEntry // lower-cased image file name -> entry
+)
+
 type measureCacheEntry struct {
 	m  ImageMeasure
 	ok bool
@@ -86,7 +152,12 @@ func measureImageUncached(path string) ImageMeasure {
 	}
 	// Locate the MinerU part directory: the nearest ancestor holding a
 	// content_list.json (the folder such as <mineru>/<part>/images/<subject>/x.jpg).
-	dir := filepath.Dir(path)
+	// Symlinks are resolved first: a project view may link into the parse.
+	lookup := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		lookup = resolved
+	}
+	dir := filepath.Dir(lookup)
 	var partDir string
 	for i := 0; i < 5 && dir != "" && dir != "/"; i++ {
 		if matches, _ := filepath.Glob(filepath.Join(dir, "*content_list.json")); len(matches) > 0 {
@@ -96,6 +167,15 @@ func measureImageUncached(path string) ImageMeasure {
 		dir = filepath.Dir(dir)
 	}
 	if partDir == "" {
+		// The bitmap is a copy inside the project: match it by file name
+		// against the parse index built from paths.mineru_output.
+		if e, ok := lookupParseEntry(filepath.Base(path)); ok {
+			m.WidthMM, m.HeightMM, m.PageWMM = e.WidthMM, e.HeightMM, e.PageWMM
+			m.DPI, m.Found = e.DPI, true
+			if e.Aspect != "" {
+				m.AspectStr = e.Aspect
+			}
+		}
 		return m
 	}
 	base := strings.ToLower(filepath.Base(path))
@@ -174,6 +254,123 @@ func measureImageUncached(path string) ImageMeasure {
 		m.AspectStr = fmt.Sprintf("%.2f:1", wPt/hPt)
 	}
 	return m
+}
+
+// lookupParseEntry finds one bitmap in the MinerU parse index (built once
+// per root from every <root>/<part>/content_list.json + layout.json).
+func lookupParseEntry(name string) (parseEntry, bool) {
+	parseRootMu.RLock()
+	root := parseRoot
+	parseRootMu.RUnlock()
+	if root == "" {
+		return parseEntry{}, false
+	}
+	parseIndexOnce.Do(func() { parseIndex = buildParseIndex(root) })
+	if parseIndex == nil {
+		return parseEntry{}, false
+	}
+	e, ok := parseIndex[strings.ToLower(name)]
+	return e, ok
+}
+
+// buildParseIndex maps every parsed image file name to its printed size.
+// content_list.json holds one bbox per image block, layout.json the page
+// size of each page; both are needed to turn a bbox into millimetres.
+func buildParseIndex(root string) map[string]parseEntry {
+	idx := map[string]parseEntry{}
+	parts, _ := filepath.Glob(filepath.Join(root, "*"))
+	const ptPerMM = 72.0 / 25.4
+	for _, part := range parts {
+		matches, _ := filepath.Glob(filepath.Join(part, "*content_list.json"))
+		if len(matches) == 0 {
+			continue
+		}
+		// Page sizes of this part, indexed by page.
+		pageMM := map[int][2]float64{}
+		var layout struct {
+			PDFInfo []struct {
+				PageSize [2]float64 `json:"page_size"`
+			} `json:"pdf_info"`
+		}
+		if raw, err := os.ReadFile(filepath.Join(part, "layout.json")); err == nil {
+			if json.Unmarshal(raw, &layout) == nil {
+				for i, p := range layout.PDFInfo {
+					if p.PageSize[0] > 0 && p.PageSize[1] > 0 {
+						pageMM[i] = [2]float64{p.PageSize[0] / ptPerMM, p.PageSize[1] / ptPerMM}
+					}
+				}
+			}
+		}
+		for _, cl := range matches {
+			raw, err := os.ReadFile(cl)
+			if err != nil {
+				continue
+			}
+			var entries []struct {
+				PageIdx int        `json:"page_idx"`
+				BBox    [4]float64 `json:"bbox"`
+				ImgPath string     `json:"img_path"`
+			}
+			if json.Unmarshal(raw, &entries) != nil {
+				continue
+			}
+			for _, e := range entries {
+				if e.ImgPath == "" || len(e.BBox) != 4 {
+					continue
+				}
+				wMM := (e.BBox[2] - e.BBox[0]) / layoutScale / ptPerMM
+				hMM := (e.BBox[3] - e.BBox[1]) / layoutScale / ptPerMM
+				if wMM <= 0 || hMM <= 0 {
+					continue
+				}
+				key := strings.ToLower(filepath.Base(e.ImgPath))
+				if _, dup := idx[key]; dup {
+					continue
+				}
+				ent := parseEntry{WidthMM: wMM, HeightMM: hMM, Aspect: fmt.Sprintf("%.2f:1", wMM/hMM)}
+				if pg, ok := pageMM[e.PageIdx]; ok {
+					ent.PageWMM = pg[0]
+				}
+				idx[key] = ent
+			}
+		}
+	}
+	return idx
+}
+
+// Crop returns the measurement of a sub-rectangle of this bitmap, given crop
+// percentages. view_image crops in bitmap pixels; the printed size of the
+// crop follows from the same mm-per-pixel scale, which is what lets the
+// model size a redrawn detail (or check one) against the original.
+func (m ImageMeasure) Crop(left, top, right, bottom float64) ImageMeasure {
+	if !m.Found || m.PixelsW <= 0 || m.PixelsH <= 0 {
+		return ImageMeasure{}
+	}
+	fw := (right - left) / 100
+	fh := (bottom - top) / 100
+	if fw <= 0 || fh <= 0 {
+		return ImageMeasure{}
+	}
+	out := m
+	out.PixelsW = int(float64(m.PixelsW) * fw)
+	out.PixelsH = int(float64(m.PixelsH) * fh)
+	out.WidthMM = m.WidthMM * fw
+	// 高度按位图比例换算（与 MeasureImage 同一口径：宽度信 bbox，形状信位图）。
+	if m.WidthMM > 0 && m.PixelsW > 0 && m.PixelsH > 0 {
+		out.HeightMM = out.WidthMM * float64(out.PixelsH) / float64(out.PixelsW)
+	} else {
+		out.HeightMM = m.HeightMM * fh
+	}
+	return out
+}
+
+// CropHint renders a crop's printed size in the same mm-first form as the
+// full figure (empty when the measurement is unavailable).
+func (m ImageMeasure) CropHint() string {
+	if !m.Found {
+		return ""
+	}
+	return fmt.Sprintf("this crop is %.1fmm x %.1fmm on the page", m.WidthMM, m.HeightMM)
 }
 
 // measureHint is the one-line hint used in prompts/tool results.

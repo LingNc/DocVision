@@ -954,8 +954,21 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if total > 0 {
 		note = fmt.Sprintf(" (page %d/%d)", page, total)
 	}
+	// 物理尺寸：页面本身 + 当前裁剪区域（看原书页时就是真实书本尺寸，
+	// 看自己编的 PDF 时就是成品的实际尺寸——两者同单位才好对照）。
+	sizeNote := ""
+	if wMM, hMM, ok := pdfPageSizeMM(full, page); ok {
+		sizeNote = fmt.Sprintf(", page %.1fmm x %.1fmm", wMM, hMM)
+		if left > 0 || top > 0 || right < 100 || bottom < 100 {
+			fw := (clampPct(right) - clampPct(left)) / 100
+			fh := (clampPct(bottom) - clampPct(top)) / 100
+			if fw > 0 && fh > 0 {
+				sizeNote += fmt.Sprintf(", this crop %.1fmm x %.1fmm", wMM*fw, hMM*fh)
+			}
+		}
+	}
 	return session.ToolResult{
-		Text: fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx)%s attached.", rel, page, left, top, right, bottom, zoom, note) +
+		Text: fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx%s)%s attached.", rel, page, left, top, right, bottom, zoom, sizeNote, note) +
 			t.budgetOnce(key, rel, page, used),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
@@ -990,17 +1003,107 @@ func pdfPageSize(pdf string) (w, h float64, err error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	for _, ln := range strings.Split(string(out), "\n") {
-		v, ok := strings.CutPrefix(ln, "Page size:")
-		if !ok {
-			continue
-		}
-		var a, b float64
-		if _, err := fmt.Sscanf(strings.TrimSpace(v), "%f x %f", &a, &b); err == nil {
-			return a, b, nil
-		}
+	first, haveFirst, perPage := parsePDFInfoSizes(string(out))
+	if haveFirst {
+		return first[0], first[1], nil
+	}
+	if sz, ok := perPage[1]; ok {
+		return sz[0], sz[1], nil
 	}
 	return 0, 0, fmt.Errorf("pdfinfo: 未找到 Page size 行")
+}
+
+// parsePDFInfoSizes extracts page sizes (points) from pdfinfo output.
+// poppler prints the FIRST page as "Page size:  W x H pts" and, with
+// -f/-l, each requested page as "Page    2 size:  W x H pts" — the number
+// is padded with spaces, so the line is tokenized instead of prefix-matched
+// (a prefix match silently misses every per-page size).
+func parsePDFInfoSizes(out string) (first [2]float64, haveFirst bool, perPage map[int][2]float64) {
+	perPage = map[int][2]float64{}
+	for _, ln := range strings.Split(out, "\n") {
+		f := strings.Fields(ln)
+		if len(f) < 5 || f[0] != "Page" {
+			continue
+		}
+		var num [2]float64
+		var pageNo int
+		var ok bool
+		if f[1] == "size:" && len(f) >= 5 { // "Page size: W x H pts"
+			ok = sscanf2(f[2], f[4], &num)
+		} else if strings.HasSuffix(f[1], ":") || len(f) >= 7 { // 数字列
+			ok = false
+		}
+		if len(f) >= 7 && f[2] == "size:" { // "Page 2 size: W x H pts"
+			if n := atoiSafe(f[1]); n > 0 {
+				pageNo = n
+				ok = sscanf2(f[3], f[5], &num)
+			}
+		}
+		if !ok || num[0] <= 0 || num[1] <= 0 {
+			continue
+		}
+		if pageNo > 0 {
+			perPage[pageNo] = num
+		} else if !haveFirst {
+			first, haveFirst = num, true
+		}
+	}
+	return first, haveFirst, perPage
+}
+
+// sscanf2 parses "283.46" and "425.2" into a size pair.
+func sscanf2(a, b string, out *[2]float64) bool {
+	var x, y float64
+	if _, err := fmt.Sscanf(a, "%f", &x); err != nil {
+		return false
+	}
+	if _, err := fmt.Sscanf(b, "%f", &y); err != nil {
+		return false
+	}
+	out[0], out[1] = x, y
+	return true
+}
+
+func atoiSafe(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+func ptToMM(v float64) float64 { return v * 25.4 / 72 }
+
+// pdfPageSizeMM returns ONE page's real size in millimetres. mm is the unit
+// the original-figure measurement uses, so page size, crop size and drawn
+// size can be compared directly — the model needs that to judge whether what
+// it produces matches the real book.
+func pdfPageSizeMM(pdf string, page int) (wMM, hMM float64, ok bool) {
+	args := []string{}
+	if page > 0 {
+		args = append(args, "-f", strconv.Itoa(page), "-l", strconv.Itoa(page))
+	}
+	args = append(args, pdf)
+	out, err := exec.Command("pdfinfo", args...).CombinedOutput()
+	if err != nil {
+		return 0, 0, false
+	}
+	first, haveFirst, perPage := parsePDFInfoSizes(string(out))
+	if page > 0 {
+		if sz, found := perPage[page]; found {
+			return ptToMM(sz[0]), ptToMM(sz[1]), true
+		}
+	}
+	if haveFirst {
+		return ptToMM(first[0]), ptToMM(first[1]), true
+	}
+	for _, sz := range perPage {
+		return ptToMM(sz[0]), ptToMM(sz[1]), true
+	}
+	return 0, 0, false
 }
 
 func pdfPageCount(pdf string) (int, error) {
