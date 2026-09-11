@@ -307,3 +307,14 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - 兜底口径与 checker 一致（fail-open）：模型跑飞、不交结论、栅格化失败、打回失败一律**视为通过**并记警告——校验是额外的一张网，不是让整本书失败的新理由。轮次用尽仍不合格：记警告、照常交付。会话没改动图形（`finalCode` 不变）时提前停止，不空烧轮次。
 - 提示词新增 `latex_figurecheck.system.md` / `latex_figurecheck.user.md`（注册表含 Vars/MustMention，守护测试通过）；明确"字体/线宽/颜色差异不算问题"——重画本来就是不同字体，判"pass"的门槛写在提示词里。
 - 测试：`TestFigureCheckSendsBothImagesAndReadsVerdict`（假模型服务：第 1 轮 issues → 不通过并带回问题清单；第 2 轮 pass → 通过；断言请求里**两个 image part** 且后续轮次说明"同一比较的第 N 轮"）、`TestFigureCheckFailsOpenWithoutVerdict`、`TestFigureCheckFeedbackQuotesProblems`、config 侧 `TestFigureCheckDefaultsAreOffButSane`。
+
+### ⑧ 会话预览页：项目 → 流程阶段 → 会话，逐图会话按图片身份命名
+
+用户第 8 条：左侧按项目 + 流程阶段组织会话，可展开、显示当前进展/完成情况；process 阶段按图片名/PDF 页/顺序/图片类型命名与检索。
+
+- 侧栏三层：项目组（书名 + `progress.json` 各阶段状态行）→ 阶段子组（`矢量图`/`样式`/`章节划分`/`章节转换`/`章节核对`/`样式修复`/`逐图校验`，组头带会话数、阶段状态 ✓、live 点）→ 会话行；`<details>` 各自折叠，过滤命中强制展开（沿用原有记忆逻辑）。
+- 逐图会话的"图片身份"来自 `doc_index.json`：转录文件名 `vector_<书>__<图片名>__<标签>` 的**倒数第二段**就是图片名（按 `__` 切，不能按 `_`——标签里带下划线），拿它去匹配 doc_index 图片条目的 `img` 文件名（MinerU 的图片名就是内容哈希）→ 得到页码、书内序号、类型、图注。行标题用图注，行内标签 `第 N 页 · 第 N 张 · 类型 · 哈希前 12 位`，排序按书内图片顺序。
+- 搜索串加入 `imageName/imageType/imageCaption` 以及 `p12`/`p.12`/`页12`/`#3`/`第3张`/裸数字，用户要的四种检索方式（图片名/PDF 页/顺序/类型）都能用。
+- 数据层：`SessionInfo` 新增 `stage`/`stageTitle`/`imageName`/`imageOrder`/`page`/`imageType`/`imageCaption`/`projectStages`；`enrichSessions` 在扫描末尾统一补齐（`loadProjectFacts` 读 `progress.json` + `doc_index/doc_index.json`，按项目目录缓存；`projectDirFor` 从转录相对路径推出项目目录）。静态导出与实时服务共用同一份 JSON，无需改 API 形状。
+- 真缺陷（本批自查发现并修掉）：上一批给侧栏行加费用显示时，`statsSummary(st, session)` 里传了一个**在 `sessionRow(s)` 作用域里不存在的标识符** `session`（应为 `s`）——费用列在侧栏等于永远为空。已改回 `s`。
+- 测试：`TestEnrichSessionsAddsStageProgressAndImageIdentity`（真实目录结构：progress.json + doc_index + 四种转录名 → 断言 stage/页/序号/类型/图注/项目进展，以及阶段分组按流程顺序）、`TestVectorImageBaseParsing`（含带下划线标签与不足三段的情况）。

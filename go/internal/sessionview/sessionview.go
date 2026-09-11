@@ -315,6 +315,23 @@ type SessionInfo struct {
 	// Live reports whether the transcript looks like it is being appended to
 	// right now (mtime within LiveWindow).
 	Live bool `json:"live"`
+	// Stage / StageTitle group sessions by pipeline stage inside a project
+	// ("vector", "convert", "checker", …) — the sidebar's second level.
+	Stage      string `json:"stage,omitempty"`
+	StageTitle string `json:"stageTitle,omitempty"`
+	// ImageName / Page / ImageOrder / ImageType / ImageCaption describe WHICH
+	// image a level-2 per-image session belongs to (doc_index): the MinerU
+	// image base name, its page in the book, its position among the book's
+	// images, the block type and the caption. They make per-image sessions
+	// findable by image name / page / order / type instead of by hash.
+	ImageName    string `json:"imageName,omitempty"`
+	ImageOrder   int    `json:"imageOrder,omitempty"`
+	Page         int    `json:"page,omitempty"`
+	ImageType    string `json:"imageType,omitempty"`
+	ImageCaption string `json:"imageCaption,omitempty"`
+	// ProjectStages is the project's progress.json (stage → status) so the
+	// sidebar can show how far the pipeline got, not just which sessions exist.
+	ProjectStages map[string]string `json:"projectStages,omitempty"`
 	// Cost is the money this session's usage added up to, filled by
 	// ApplyPrices when the config has rates for the model; nil when unpriced
 	// (the viewer shows no cost rather than ¥0).
@@ -630,6 +647,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		return nil, walkErr
 	}
 
+	s.enrichSessions(root, out)
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].ModTime.Equal(out[j].ModTime) {
 			return out[i].ModTime.After(out[j].ModTime)

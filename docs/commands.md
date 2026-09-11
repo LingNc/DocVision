@@ -91,6 +91,8 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 
 扫描根下可以并存多个项目，因此左侧会话列表**按项目分组**：一个项目 = 一个可折叠集合，标题带会话数，点标题折叠/展开。分组按**磁盘上的工程结构**判定，而不是死板地取路径第一段：
 
+- **侧栏是三层：项目 → 流程阶段 → 会话**。项目组头显示书名与进展（`progress.json` 里各阶段状态：`images ✓ · style ✓ · chapters done · convert running`）；项目内再按阶段分子组（`矢量图` / `样式` / `章节划分` / `章节转换` / `章节核对` / `样式修复` / `逐图校验`），每个阶段组头带会话数与该阶段在 `progress.json` 里的状态（完成打 ✓），可各自展开折叠。
+- **逐图（矢量图）会话按图片身份命名与检索**：转录文件名是哈希，页面会把它还原成"哪张图、在哪一页、第几张、什么类型"——行标题用图注/图片名，行内附 `第 12 页 · 第 3 张 · image · abc123def456` 小标签（来自 `doc_index.json` 的图片条目），排序按书里的图片顺序而不是修改时间。搜索框对这些字段同样生效：`p12`／`第12页`／`#3`／`第3张`／`abc123`／`vector`／`table` 都能定位。
 - `latex_project/<书名>/work/sessions/convert_01.jsonl` → 组名 `latex_project/<书名>`。多项目布局下每本书一个工作区，书名目录里有 `.docvision_project.json`／`progress.json`／`work/`／`source/` 之类的东西，因此它自己就是一个组——侧栏标题显示**书名**，输出根 `latex_project/` 弱化成灰色前缀；否则同一个输出根下的所有书会挤成一个组，「这本书的会话在哪」就看不出来了。
 - `latex_project/work/style_session.jsonl` → 组名 `latex_project`，并标一句「**旧版单项目**」：该输出根**本身**就是工程（`work/`、`progress.json` 直接挂在它下面），是引入多项目布局之前的形态（见上文「兼容旧版单项目布局」）。
 - 工程内部的结构名（`work`、`source`、`style`、`sessions`、`temp`…）永远不当组名；直接躺在扫描根下的转录、或用 `--dir` 指向某个工程本身时，一律归到「（根目录）」。

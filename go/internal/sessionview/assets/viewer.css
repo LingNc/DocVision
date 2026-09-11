@@ -471,3 +471,25 @@ html, body {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* 侧栏第二层：项目 → 流程阶段 → 会话；组头带会话数与 progress.json 状态。 */
+.stage-group { margin: 2px 0 2px 6px; border-left: 2px solid var(--border, #e3e8ef); }
+.stage-head {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  padding: 3px 8px; font-size: 12px; color: var(--muted, #667085);
+  list-style: none;
+}
+.stage-head::-webkit-details-marker { display: none; }
+.stage-name { font-weight: 600; }
+.stage-count { opacity: .75; }
+.stage-progress {
+  padding: 0 6px; border-radius: 8px; font-size: 11px;
+  background: rgba(148, 163, 184, .18);
+}
+.stage-progress.done { background: rgba(34, 197, 94, .18); color: #15803d; }
+.stage-body { padding-left: 4px; }
+.proj-progress {
+  padding: 3px 10px; font-size: 11px; color: var(--muted, #667085);
+  font-family: var(--mono, monospace); word-break: break-all;
+}
+.image-chip { font-family: var(--mono, monospace); }

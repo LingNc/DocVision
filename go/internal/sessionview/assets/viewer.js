@@ -297,8 +297,70 @@
 
   /* ---------- sidebar ---------- */
 
+  /*
+   * 侧栏的第二层：项目 → **流程阶段** → 会话。用户要的是"按项目 + 流程
+   * 阶段组织、可展开、显示当前进展/完成情况"，所以阶段组头上既有本阶段
+   * 的会话数，也有从 progress.json 读来的阶段状态（✓ 完成 / 进行中 / —）。
+   */
+  var STAGE_ORDER = ['vector', 'style', 'chapters', 'convert', 'checker', 'style-fix', 'figure-check'];
+
+  function stageRank(stage) {
+    var i = STAGE_ORDER.indexOf(stage);
+    return i < 0 ? STAGE_ORDER.length : i;
+  }
+
+  function stageTitleOf(stage) {
+    var map = {
+      'vector': '矢量图', 'style': '样式', 'chapters': '章节划分', 'convert': '章节转换',
+      'checker': '章节核对', 'style-fix': '样式修复', 'figure-check': '逐图校验'
+    };
+    return map[stage] || stage || '其他会话';
+  }
+
+  // progress.json 里的键是档位级的（images/style/chapters/convert/assemble），
+  // 阶段名与它并不一一对应：矢量图属于 images，checker/样式修复属于 convert 之后。
+  function progressKeyFor(stage) {
+    if (stage === 'vector') { return 'images'; }
+    if (stage === 'checker' || stage === 'style-fix') { return 'convert'; }
+    return stage;
+  }
+
+  function progressChip(stages, stage) {
+    if (!stages) { return null; }
+    var key = progressKeyFor(stage);
+    var v = stages[key];
+    if (v === undefined || v === null || v === '') { return null; }
+    var text = String(v);
+    var done = /^(done|ok|true|finished|complete[d]?)$/i.test(text);
+    var chip = el('span', 'stage-progress' + (done ? ' done' : ''), done ? '✓ 完成' : text);
+    chip.title = 'progress.json: ' + key + ' = ' + text;
+    return chip;
+  }
+
+  // 书级进展：progress.json 原样列出各阶段状态（档位1/2 的键略有不同）。
+  function projectProgressLine(stages) {
+    if (!stages) { return null; }
+    var order = ['images', 'style', 'chapters', 'convert', 'assemble'];
+    var parts = [];
+    order.forEach(function (k) {
+      if (stages[k] === undefined) { return; }
+      var done = /^(done|ok|true|finished|complete[d]?)$/i.test(String(stages[k]));
+      parts.push(k + (done ? ' ✓' : ' ' + stages[k]));
+    });
+    if (!parts.length) { return null; }
+    var line = el('div', 'proj-progress', parts.join(' · '));
+    line.title = 'progress.json 里各阶段的当前状态';
+    return line;
+  }
+
   function sessionHaystack(s) {
-    return [s.title, s.label, s.id, s.name, s.project].join(' ').toLowerCase();
+    // 逐图会话要能按**图片名 / PDF 页 / 顺序 / 图片类型**检索，所以这些
+    // 字段都进搜索串（页码与序号连 "p12"/"p.12"/"#12"/"12" 都能命中）。
+    var parts = [s.title, s.label, s.id, s.name, s.project, s.stage, s.stageTitle,
+      s.imageName, s.imageType, s.imageCaption];
+    if (s.page) { parts.push('p' + s.page, 'p.' + s.page, '页' + s.page, String(s.page)); }
+    if (s.imageOrder) { parts.push('#' + s.imageOrder, '第' + s.imageOrder + '张', String(s.imageOrder)); }
+    return parts.filter(Boolean).join(' ').toLowerCase();
   }
 
   function metaOf(session) {
@@ -336,6 +398,15 @@
       if (q && sessionHaystack(s).indexOf(q) < 0) { return; }
       g.items.push(s);
       if (s.live) { g.live++; }
+      // 阶段子组：项目内按流程阶段再分一层（组头带会话数与 progress.json 状态）。
+      var stage = s.stage || 'session';
+      if (!g.stages) { g.stages = {}; }
+      var sg = g.stages[stage];
+      if (!sg) {
+        sg = g.stages[stage] = { stage: stage, title: stageTitleOf(stage), items: [], live: 0 };
+      }
+      sg.items.push(s);
+      if (s.live) { sg.live++; }
     });
     if (q) {
       groups = groups.filter(function (g) { return g.items.length > 0; });
@@ -351,7 +422,13 @@
 
     var top = el('div', 'row-top');
     top.appendChild(el('span', 'dot' + (s.live ? ' live' : '')));
-    top.appendChild(el('span', 'row-title', s.title || s.label || s.name));
+    // 逐图会话的标题用**图片名 + 页 + 序号 + 类型**，这样"哪张图、在哪一页、
+    // 第几张、什么类型"一眼可见（transcript 文件名是哈希，读不出这些）。
+    var title = s.title || s.label || s.name;
+    if (s.imageName && (s.page || s.imageOrder)) {
+      title = '矢量图 · ' + (s.imageCaption || s.imageName);
+    }
+    top.appendChild(el('span', 'row-title', title));
     top.appendChild(el('span', 'badge', s.label || ''));
     row.appendChild(top);
 
@@ -367,13 +444,24 @@
     }
     var st = scanStats(s);
     if (st) {
-      var schip = el('span', 'row-chip usage-chip', statsSummary(st, session));
+      var schip = el('span', 'row-chip usage-chip', statsSummary(st, s));
       schip.title = st.requests + ' 次 API 请求 · 输入 ' + st.promptTokens + ' tokens（其中 ' +
         st.cachedTokens + ' 命中前缀缓存）· 输出 ' + st.completionTokens +
         (st.reasoningTokens ? '（思考 ' + st.reasoningTokens + '）' : '') +
         ' · 平均耗时 ' + fmtDur(st.avgDurationMs) + ' · 平均首字 ' + fmtDur(st.avgTtftMs) +
         ' · 输出 ' + (st.outputTps || 0).toFixed(1) + ' tok/s';
       meta.appendChild(schip);
+    }
+    if (s.imageName) {
+      var bits = [];
+      if (s.page) { bits.push('第 ' + s.page + ' 页'); }
+      if (s.imageOrder) { bits.push('第 ' + s.imageOrder + ' 张'); }
+      if (s.imageType) { bits.push(s.imageType); }
+      bits.push(s.imageName.slice(0, 12));
+      var ichip = el('span', 'row-chip image-chip', bits.join(' · '));
+      ichip.title = '来源图片: ' + s.imageName + (s.imageType ? ('（' + s.imageType + '）') : '') +
+        (s.imageCaption ? ('\n图注: ' + s.imageCaption) : '');
+      meta.appendChild(ichip);
     }
     var sub = subPathOf(s.id);
     if (sub) {
@@ -417,7 +505,43 @@
       wrap.appendChild(head);
 
       var body = el('div', 'proj-body');
-      g.items.forEach(function (s) { body.appendChild(sessionRow(s)); shown++; });
+      var stages0 = g.items.length ? g.items[0].projectStages : null;
+      var prog = projectProgressLine(stages0);
+      if (prog) { body.appendChild(prog); }
+      // 阶段子组：可展开、显示本阶段会话数 + 该阶段在 progress.json 里的状态。
+      var stageKeys = Object.keys(g.stages || {}).sort(function (a, b) {
+        var d = stageRank(a) - stageRank(b);
+        return d !== 0 ? d : (a < b ? -1 : 1);
+      });
+      var multi = stageKeys.length > 1;
+      stageKeys.forEach(function (key) {
+        var sg = g.stages[key];
+        var items = sg.items.slice().sort(function (x, y) {
+          // 逐图会话按"书里的顺序"排，而不是按修改时间。
+          if (x.imageOrder && y.imageOrder && x.imageOrder !== y.imageOrder) {
+            return x.imageOrder - y.imageOrder;
+          }
+          return (y.mtime > x.mtime) ? 1 : -1;
+        });
+        var host = body;
+        if (multi) {
+          var det = document.createElement('details');
+          det.className = 'stage-group';
+          det.open = true;
+          var sh = el('summary', 'stage-head');
+          sh.appendChild(el('span', 'stage-name', sg.title));
+          sh.appendChild(el('span', 'stage-count', sg.items.length + ' 个会话'));
+          var pc = progressChip(stages0, key);
+          if (pc) { sh.appendChild(pc); }
+          if (sg.live) { sh.appendChild(el('span', 'dot live')); }
+          det.appendChild(sh);
+          var sbody = el('div', 'stage-body');
+          det.appendChild(sbody);
+          body.appendChild(det);
+          host = sbody;
+        }
+        items.forEach(function (s) { host.appendChild(sessionRow(s)); shown++; });
+      });
       wrap.appendChild(body);
 
       wrap.addEventListener('toggle', function () {
