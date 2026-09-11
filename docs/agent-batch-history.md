@@ -362,3 +362,54 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - 指标卡改成瓦片网格（`repeat(auto-fit, minmax(140px, 1fr))`，格线用 1px 底色差而不是边框）。
 
 **校验方式（这次的证据）**：装了无头 chromium，直接把静态页渲染成 PNG 回头看——`chromium --headless=new --no-sandbox --user-data-dir=… --screenshot=… file://…/page.html`，浅色与深色各截一张（`data-theme="dark"` 注入副本）。这一步立刻暴露了另一个我自己的错误：我手写的**预览数据用了转录的原始行形状**（`{"t":"msg","message":{"role":…}}`），而页面真正吃的是 Go 侧加工后的 `Line`（`{n,t,role,text,tool_calls,tool_call_id,reasoning_content,stats}`）——用错形状时主区域显示"这个会话还没有可显示的消息"，看起来像页面坏了，其实是**我的预览数据不对**。按真实形状重做预览数据后才看到真正的页面。
+
+### ⑬ 会话预览页改成 DSH 的**组织方式**（三栏 + 页签 + 轨迹表 + 详情栏），并修掉"侧栏被刷新冲掉"
+
+用户看到 ⑫ 的成品后直接否掉了它："感觉还不如之前的 css 好看，这还是之前的样式。完全没有和正常的 dsh 一样的界面。并且左边那个展开总是被刷新然后自动展开。默认展开。**我要的不是样式。是结构界面组织方式。和 dsh 一样高效。更具展现力**。"
+
+这一句把上一批的错判说清楚了：⑫ 改的是**配色与卡片外观**（CSS 层面），而用户要的是**信息怎么摆**（结构层面）——DSH 之所以"高效"，是因为它把三层信息分流到三个栏位、把过程性内容收成一行、给出一条可筛选的事件表，而不是因为它用了什么灰阶。于是这一批去读 DSH 自己的前端源码（`~/.nvm/…/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-*/lib/client.js`，把其中的 `css` 字符串抽出来当参照），逐项对齐它的布局常量与行词汇。
+
+**① 先复现用户报的缺陷（"左边那个展开总是被刷新然后自动展开"）——是真缺陷，而且有两处**
+
+- `--serve` 每 2 秒轮询 `/api/index`，`applyIndex()` → `refreshList()` 无条件调 `renderSessions()`：`clear()` 掉整个 `#session-list` 再重建。手动折叠的项目组/阶段组**每次都被还原成展开**，滚动位置被弹回顶部，鼠标悬停状态被清掉。
+- 更隐蔽的第二处：列表签名里混进了 `Object.keys(state.collapsed)` 与 `Object.keys(state.overflow)`——**视图状态写进了数据签名**，于是"点一下组头折叠"本身就把签名改掉，下一轮询必然重建一次。就算重建能还原状态，这一次无谓重建也会吃掉滚动位置与悬停。
+- 修法：签名只统计**会改变行集合或可见文案**的东西（会话 id 顺序 + 消息数 + 费用 + 请求数 + 项目的 `progress.json` 快照 + 过滤词）；签名不变走 `patchList()` —— 只改相对时间、活跃圆点、用量 chip、悬浮说明与选中高亮，**一个 DOM 节点都不新建/搬动**；签名变了才重建，重建后按落盘的 `state.collapsed` 还原各组展开状态并恢复 `scrollTop`（`refs.list.scrollTop = scroll`）。`mtime`/`live` 也移出签名：它们每 2 秒都可能变（`live` 会跨过 60 秒的 `LiveWindow` 边界），唯一的可见表现就是行尾时间与活跃圆点，补丁即可。
+
+**② 用 CDP 做端到端验证（不是"看代码觉得对"）**
+
+起 `docvision sessions --serve`，用 headless chromium 带 `--remote-debugging-port` 打开实时页面，再用 node 的内置 `WebSocket` 直连 CDP 跑 `Runtime.evaluate`。探针做四件事：选中一条会话 → 折叠最后一个阶段组 → 把侧栏滚到底部 → 静默观察 3 个轮询周期 → 从**外部**往 jsonl 追加一行 usage（逼下一次轮询重建）→ 再观察。
+
+实测（脚本 `temp/dsh-ref/live-test.sh` + `live-probe.mjs`，跑完即删）：
+
+| 断言 | 结果 |
+| --- | --- |
+| 折叠一个阶段组 | `data-open="0"`，落盘 `{"stage:latex_project/book_alpha/checker":true}` |
+| 静默 3 个轮询周期（6.5s） | `sameRowNodes: true`、`sameStructure: true`（挖掉相对时间后的 innerHTML 逐字相同） |
+| 静默期的折叠状态 / 滚动位置 | 仍折叠（`"0"`），`scrollTop` 仍 317 |
+| 外部追加一行 usage | 下一轮询（`waitedPolls: 1`）检测到重建 |
+| 重建后的折叠状态 / 滚动位置 / 落盘 | 仍折叠（`"0"`），`scrollTop` 仍 317，落盘值不变 |
+| 「更多会话」溢出按钮 | 19 条会话的阶段只列 8 条 + 1 个按钮 |
+
+这一步顺带逼出三个**只有真跑才会发现**的问题（都不是"看代码觉得对"能发现的）：
+
+1. **详情栏渲染直接抛异常**：`kvList` 里写成 `el('dd' + (p[3] ? ' mono' : ''), …)`，`createElement('dd mono')` 抛 `InvalidCharacterError`。它是 `toggleDetails()` 里 `renderDetails()` 的第一句，异常一抛，后面的 `applyLayout()` 就再也执行不到——**点 ⓘ 完全没反应**，而页面其它部分看起来完全正常。截图里"详情栏一直不出现"就是这么来的。
+2. **窄窗口点开详情栏静默失败**：1180px 下 `computeColumns` 的让步链算出详情栏放不下（280+300+640 > 1180），于是 `state.details` 被设成 400 但实际宽度 0。DSH 也是这个行为（照搬），但"点了没反应"是坏的：现在放不下时顺手把侧栏折成 56px 轨道再解一次（1180−56−300 = 824 ≥ 640，放得下）。
+3. **截图本身不可信**：浅色/深色/详情三张 PNG 的字节数**完全一样**。原因是共用一个 `--user-data-dir`，`localStorage` 里上一轮存下的 `dsh.sessionview.theme='light'` 覆盖了注入的 `data-theme="dark"`，而 `layout.details` 也在变体之间串味。改成每个变体一个 profile 目录、并给深色变体加一段 `localStorage.getItem` 垫片后才拿到可信的对照图。**这条教训值得单记：用截图做验证时，先确认截的确实是你要的那张图。**
+
+**③ 结构改造（逐项对照 DSH 的常量与行词汇）**
+
+- `viewer.html`：三栏骨架（`#sidebar-col` + `#handle-sidebar` + `#center-col` + `#handle-details` + `#details-col`），中栏表头是"面包屑行 + 页签行"，页签行右端挂四个开关按钮。
+- `viewer.css`：`.frame` 用 `grid-template-columns` 布三栏（`transition` 见 DSH 的做法），分隔条 8px、`margin-left:-4px`、`cursor: col-resize`、悬停显一条 3px 圆角条；侧栏折叠态只留插槽（这版专门修了折叠态里 chip / 阶段状态 / 根路径**溢出到轨道外**的毛病）；`.tabs { gap: 36px }`、`.tab::after` 2px 下划线、`.crumb { max-width: 220px }`；`.stream { max-width: clamp(680px, 64%, 920px) }`；`.msg-user .bubble` 22px 圆角 / 10px 16px 内边距 / 最宽 82%；`.io-card` 0.5px 边框 + 代码底色 + 12px 圆角 + 每段内滚动 260px；`.traj-table` 固定表格布局、表头 30px 吸顶、`.kind-tag` 19px 高。
+- `viewer.js`：`computeColumns()` 是 DSH 让步链的**逐字实现**（纯函数，无迟滞，重新变宽自动恢复）；`wireHandle()` 用 pointer capture 拖拽、双击复位；`renderTrajectory()` / `jumpToLine()` 做轨迹表与"点行跳回对话"；`renderDetails()` / `detailsSessionBlock()` / `detailsStatsBlock()` / `metaCard()` 把元信息与指标搬进右侧；`bindCollapse()` 用 `node.dataset.open` 区分"程序化设置 open"与"用户点击"，只有后者才写回记忆（否则每 2 秒的重建会通过 `toggle` 事件把用户的折叠选择改坏）。
+
+**④ 有意保留的偏离（必须在报告里说清）**
+
+- DSH 的侧栏只有"项目 → 会话"两层，本项目有"项目 → 流程阶段 → 会话"三层（阶段分组是既有功能，不能为了像 DSH 而删）。折中是三层**都用 DSH 的行词汇**（34/28/32px、`padding: 0 8px`、圆角 8px、16px 固定插槽），并**取消按层级递增的缩进**——层级靠插槽内容与底色区分。
+- DSH 的会话行只有"标题 + 时间"，没有 chip。本项目要求"侧栏每个会话行有用量摘要 + 费用"，折中是保留两张**最小** chip（`14.5k / 6.2k` 用量、`p7·#3·table` 图片身份），完整口径（含"含系统提示词快照"那句）进整行的 `title`。
+- 每次请求明细表原本有 8 列（回合/首字/耗时/输入/缓存/输出/速度/结尾），在 300–520px 的详情栏里挤成换行；改成 5 列（回合/首字/耗时/输入·缓存/输出），模型、tok/s、结束原因、时刻移进行悬浮说明。
+
+**⑤ 验证与测试**
+
+- `gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿。
+- 测试同步更新（**没有为了过测试删功能**）：`TestViewerAssetsThemeAndMeta` 里四处因结构改变而失效的断言改成新形态（思考折叠行的 `open` 表达式、meta 卡片改挂详情栏、分组折叠改走 `bindCollapse`），并新增 `TestViewerMatchesDSHStructure` 钉住三栏骨架、分隔条与布局常量、面包屑/页签、轨迹表与跳转、详情栏、消息形态、以及**轮询守卫**（`if (sig === state.listSig && refs.list.childElementCount) { patchList(); return; }`；签名函数体内不得出现 `state.collapsed`/`state.overflow`/`s.mtime`/`s.live`；重建后必须有 `refs.list.scrollTop = scroll`）。
+- 截图矩阵（浅色/深色 × 对话/轨迹/详情/展开工具卡/展开轨迹行/类型筛选/窄窗口轨道/展开元信息）逐张回看，`ui-preview/` 与 `temp/dsh-ref/` 用完即删。

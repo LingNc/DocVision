@@ -18,46 +18,72 @@
 {{DSH_STYLE}}
 </head>
 <body>
-<div id="app">
-  <aside id="sidebar">
+<!--
+  三栏骨架（照 DSH 的 AppFrame）：grid-template-columns = 侧栏 | 中栏 | 详情栏。
+  两条 .handle 是绝对定位的拖拽分隔条（8px 命中区），left/right 由脚本按解出的
+  列宽写进内联样式；详情栏关掉时列宽为 0（子树不卸载）。
+-->
+<div id="frame" class="frame">
+  <aside id="sidebar-col" class="sidebar-col">
     <div class="side-head">
-      <span class="side-title">工作区（按项目分组）</span>
-      <button id="refresh" class="ghost-btn" type="button" title="重新扫描会话">刷新</button>
+      <span class="side-title">工作区</span>
+      <button id="refresh" class="icon-btn" type="button" title="重新扫描会话">⟳</button>
     </div>
-    <div id="root-path" class="root-path">—</div>
     <div class="side-search">
-      <input id="search" type="search" placeholder="过滤：会话名 / 阶段 / 项目（如 latex_project_0909）…" autocomplete="off">
+      <input id="search" type="search" placeholder="过滤：会话名 / 阶段 / 项目…" autocomplete="off">
     </div>
-    <div id="session-list" class="session-list"></div>
+    <div class="side-list-wrap">
+      <div id="session-list" class="session-list" role="tree" aria-label="会话列表"></div>
+      <div class="list-fade" aria-hidden="true"></div>
+    </div>
     <div id="side-totals" class="side-totals hidden"></div>
-    <div id="side-foot" class="side-foot"></div>
+    <div class="side-status">
+      <div id="root-path" class="root-path" title="扫描根目录">—</div>
+      <div id="side-foot" class="side-foot"></div>
+    </div>
   </aside>
-  <main id="main">
-    <header id="toolbar">
-      <div class="tool-left">
-        <span id="session-title" class="session-title">未选择会话</span>
-        <span id="session-badge" class="badge hidden"></span>
-        <span id="session-sub" class="session-sub"></span>
-      </div>
-      <div class="tool-right">
-        <div class="tool-group">
+
+  <div id="handle-sidebar" class="handle" data-side="sidebar" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度"></div>
+
+  <main id="center-col" class="center-col">
+    <header id="center-header" class="center-header">
+      <div class="title-row">
+        <button id="side-toggle" class="icon-btn" type="button" title="折叠 / 展开侧栏" aria-label="折叠或展开侧栏">▤</button>
+        <nav id="crumbs" class="crumbs" aria-label="面包屑"></nav>
+        <div id="header-actions" class="header-actions">
           <span id="mode-badge" class="badge badge-muted">—</span>
         </div>
-        <div class="tool-group" role="group" aria-label="显示选项">
-          <label class="switch" title="新消息到达时自动滚动到底部"><input id="follow" type="checkbox"><span>自动跟随</span></label>
-          <label class="switch" title="把所有消息的思考过程折叠起来"><input id="collapse-thinking" type="checkbox"><span>折叠全部思考</span></label>
-          <label class="switch" title="只显示工具调用与工具结果"><input id="only-tools" type="checkbox"><span>仅看工具调用</span></label>
+        <button id="details-toggle" class="icon-btn" type="button" title="详情面板（元信息 / 指标）" aria-label="展开或收起详情面板">ⓘ</button>
+      </div>
+      <div class="tabs-row">
+        <div class="tabs" role="tablist" aria-label="视图">
+          <button id="tab-chat" class="tab tab-active" type="button" role="tab" aria-selected="true" data-view="chat">对话</button>
+          <button id="tab-traj" class="tab" type="button" role="tab" aria-selected="false" data-view="trajectory">轨迹</button>
         </div>
-        <div class="tool-group" role="group" aria-label="外观">
-          <button id="theme-toggle" class="ghost-btn theme-btn" type="button" title="切换浅色/深色主题">🌙 深色</button>
+        <div class="tab-tools" role="group" aria-label="显示选项">
+          <button id="follow" class="tab-toggle" type="button" aria-pressed="false" title="新消息到达时自动滚动到底部">自动跟随</button>
+          <button id="collapse-thinking" class="tab-toggle" type="button" aria-pressed="false" title="把所有消息的思考过程折叠起来">折叠全部思考</button>
+          <button id="only-tools" class="tab-toggle" type="button" aria-pressed="false" title="只显示工具调用与工具结果">仅看工具调用</button>
+          <button id="theme-toggle" class="tab-toggle" type="button" title="切换浅色/深色主题">🌙 深色</button>
         </div>
       </div>
     </header>
     <div id="banner" class="banner hidden"></div>
-    <div id="timeline" class="timeline">
-      <div class="empty">左侧选择一个会话开始浏览。</div>
+    <div class="view-area">
+      <div id="timeline" class="timeline"></div>
+      <div id="trajectory" class="trajectory hidden"></div>
     </div>
   </main>
+
+  <div id="handle-details" class="handle" data-side="details" role="separator" aria-orientation="vertical" aria-label="调整详情栏宽度"></div>
+
+  <aside id="details-col" class="details-col" aria-label="详情">
+    <div class="details-head">
+      <span class="details-title">详情</span>
+      <button id="details-close" class="icon-btn" type="button" title="关闭详情面板" aria-label="关闭详情面板">✕</button>
+    </div>
+    <div id="details-body" class="details-body"></div>
+  </aside>
 </div>
 <div id="lightbox" class="lightbox hidden">
   <img id="lightbox-img" alt="">

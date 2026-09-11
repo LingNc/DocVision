@@ -806,7 +806,7 @@ func TestViewerAssetsThemeAndMeta(t *testing.T) {
 		t.Error("深色底出现在 :root 里：默认主题必须是白天模式")
 	}
 	// :root 必须是浅色默认（页面底色为白/近白），深色只在覆盖块里出现。
-	if !strings.Contains(rootBlock, "--bg: #ffffff") || !strings.Contains(rootBlock, "--text: #18181b") {
+	if !strings.Contains(rootBlock, "--bg: #ffffff") || !strings.Contains(rootBlock, "--text: #0f1115") {
 		t.Error(":root 不是浅色默认配色")
 	}
 	if !strings.Contains(css, "--mono:") || !strings.Contains(css, ".reasoning-scroll, .prompt-scroll { max-height") {
@@ -833,32 +833,46 @@ func TestViewerAssetsThemeAndMeta(t *testing.T) {
 		t.Error("主题切换按钮没有接线")
 	}
 
-	// 思考过程：默认折叠 + 字符数摘要 + 滚动容器。
-	if !strings.Contains(js, "details.open = !state.forceCollapse && remembered") {
-		t.Error("思考块不再默认折叠")
+	// 思考过程：折叠时就是**一行**（标签 + 圆点 + 一行摘要 + 字符数），展开后
+	// 正文进带最大高度的滚动容器，并整体缩进 22px。
+	if !strings.Contains(js, "!state.forceCollapse && remembered") {
+		t.Error("思考块不再默认折叠（「折叠全部思考」开关会失效）")
 	}
-	if !strings.Contains(js, "'· ' + line.reasoning.length + ' 字符'") {
+	if !strings.Contains(js, "line.reasoning.length + ' 字符'") {
 		t.Error("思考摘要行没有写清字符数")
 	}
 	if !strings.Contains(js, "reasoning-scroll") {
 		t.Error("思考正文没有放进带最大高度的滚动容器")
 	}
+	if !strings.Contains(js, "function disclosureLine") ||
+		!strings.Contains(css, ".thinking-body { padding: 4px 0 6px 22px; }") {
+		t.Error("思考块没有走 DSH 的单行折叠行形态（disclosureLine + 展开缩进）")
+	}
 
-	// meta 卡片：标题、最新一条、工具二级折叠。
+	// meta 卡片：标题、最新一条、工具二级折叠。这一块**搬到了右侧详情栏**，
+	// 消息流里只剩开头一行极简摘要，所以这里断的是挂在详情栏而不是时间线上。
 	for _, marker := range []string{
 		"系统提示词（本次运行快照，不参与回放）",
 		"共 ' + m.count + ' 条，显示最新",
 		"tool-schema",
 		"schema-params",
-		"refs.timeline.insertBefore(card",
+		"var meta = metaCard();",
+		"refs.detailsBody.appendChild(b);",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("脚本缺少 meta 卡片关键逻辑 %q", marker)
 		}
 	}
 
-	// 侧栏按项目分组，折叠状态在内存里保持。
-	for _, marker := range []string{"proj-group", "state.collapsed", "wrap.open = g.matched ? true : !state.collapsed[g.name]"} {
+	// 侧栏按项目/阶段分组，折叠状态写进记忆并在重建后还原。
+	for _, marker := range []string{
+		"proj-group",
+		"stage-group",
+		"state.collapsed",
+		"function bindCollapse",
+		"node.dataset.open = wantOpen ? '1' : '0'",
+		"setCollapsed(key, !node.open);",
+	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("脚本缺少项目分组关键逻辑 %q", marker)
 		}
@@ -885,6 +899,128 @@ func TestViewerAssetsThemeAndMeta(t *testing.T) {
 	}
 	if !strings.Contains(js, "含系统提示词快照") {
 		t.Error("会话行没有提示含系统提示词快照")
+	}
+}
+
+// TestViewerMatchesDSHStructure pins the *structure* this batch rebuilt the
+// preview page around: the DSH-style three-column frame with draggable
+// separators, a breadcrumb + tab header, the trajectory table, the right-hand
+// details panel, and — the actual user-visible bug — a polling path that does
+// not rebuild the sidebar DOM when nothing changed.
+func TestViewerMatchesDSHStructure(t *testing.T) {
+	css := readAsset(t, "viewer.css")
+	js := readAsset(t, "viewer.js")
+	html := readAsset(t, "viewer.html")
+
+	// 1. 三栏骨架：侧栏 + 中栏 + 详情栏，两条可拖分隔条。
+	for _, id := range []string{
+		`id="frame"`, `id="sidebar-col"`, `id="handle-sidebar"`,
+		`id="center-col"`, `id="handle-details"`, `id="details-col"`,
+	} {
+		if !strings.Contains(html, id) {
+			t.Errorf("页面缺少三栏骨架元素 %s", id)
+		}
+	}
+	if !strings.Contains(css, "grid-template-columns") {
+		t.Error("样式表没有用 grid 布三栏")
+	}
+	if !strings.Contains(css, "cursor: col-resize") {
+		t.Error("分隔条没有拖拽光标")
+	}
+	for _, marker := range []string{
+		"function computeColumns",
+		"var SIDEBAR_AUTO_COLLAPSE = 1024",
+		"var RAIL_W = 56",
+		"var CENTER_MIN = 640",
+		"var DETAILS_MIN = 300",
+		"var DETAILS_MAX = 520",
+		"function wireHandle",
+		"setPointerCapture",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("脚本缺少三栏布局关键逻辑 %q", marker)
+		}
+	}
+
+	// 2. 中栏表头 = 面包屑 + 页签（对话 / 轨迹），开关挪到页签行右端。
+	for _, id := range []string{`id="crumbs"`, `id="tab-chat"`, `id="tab-traj"`, `id="details-toggle"`, `id="side-toggle"`} {
+		if !strings.Contains(html, id) {
+			t.Errorf("页面表头缺少 %s", id)
+		}
+	}
+	if !strings.Contains(js, "function renderHeader") || !strings.Contains(css, ".crumb-current") {
+		t.Error("面包屑没有渲染逻辑或当前段样式")
+	}
+	if !strings.Contains(css, "max-width: 220px") || !strings.Contains(css, ".tabs { display: flex; gap: 36px;") {
+		t.Error("面包屑截断宽度或页签间距不是 DSH 的取值")
+	}
+
+	// 3. 轨迹页签是一张真表格，可筛选、可展开、能跳回对话。
+	for _, marker := range []string{
+		"function renderTrajectory",
+		"function jumpToLine",
+		"traj-table",
+		"traj-chip",
+		"traj-disclose",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("脚本缺少轨迹页关键逻辑 %q", marker)
+		}
+	}
+	if !strings.Contains(css, ".kind-tag") || !strings.Contains(css, "table-layout: fixed") {
+		t.Error("轨迹表格缺少事件类型标签或固定表格布局")
+	}
+
+	// 4. 右侧详情栏承载元信息与指标，消息流里只留一行摘要。
+	for _, marker := range []string{
+		"function renderDetails",
+		"function detailsSessionBlock",
+		"function detailsStatsBlock",
+		"function toggleDetails",
+		"stats-table",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("脚本缺少详情栏关键逻辑 %q", marker)
+		}
+	}
+	if !strings.Contains(html, `id="details-body"`) {
+		t.Error("页面没有详情栏容器")
+	}
+
+	// 7. 消息形态：用户气泡靠右、助手不套卡片、工具/思考都是一行折叠。
+	for _, marker := range []string{
+		"--content-w: clamp(680px, 64%, 920px)",
+		".msg-user .bubble",
+		"function toolDisclosure",
+		"function thinkingDisclosure",
+		"io-card",
+	} {
+		if !strings.Contains(css, marker) && !strings.Contains(js, marker) {
+			t.Errorf("缺少消息形态关键逻辑 %q", marker)
+		}
+	}
+	if !strings.Contains(css, "border-radius: 22px") {
+		t.Error("用户气泡不是 DSH 的 22px 圆角")
+	}
+
+	// 6. 轮询入口：签名没变就走 patchList()，一个 DOM 节点都不重建。
+	if !strings.Contains(js, "function listSignature") || !strings.Contains(js, "function patchList") {
+		t.Error("缺少列表签名或最小修补函数")
+	}
+	if !strings.Contains(js, "if (sig === state.listSig && refs.list.childElementCount) {\n      patchList();\n      return;\n    }") {
+		t.Error("轮询仍然无条件重建侧栏 DOM（用户折叠的组会被刷新掉）")
+	}
+	// 折叠/溢出的记忆键属于视图状态，不许进数据签名，否则点一下组头就让整份列表作废。
+	sig := js[strings.Index(js, "function listSignature"):]
+	sig = sig[:strings.Index(sig, "\n  }")]
+	if strings.Contains(sig, "state.collapsed") || strings.Contains(sig, "state.overflow") {
+		t.Error("列表签名里混进了视图状态（折叠/溢出）：点组头会触发整表重建")
+	}
+	if strings.Contains(sig, "s.mtime") || strings.Contains(sig, "s.live") {
+		t.Error("列表签名里混进了每 2 秒就变的字段（mtime/live）：轮询会一直重建 DOM")
+	}
+	if !strings.Contains(js, "refs.list.scrollTop = scroll;") {
+		t.Error("侧栏重建后没有恢复滚动位置")
 	}
 }
 
