@@ -402,3 +402,41 @@ func TestCondaFoundOutsidePATH(t *testing.T) {
 		t.Fatalf("没找到 conda 时前缀应为空（触发警告），got %q", got)
 	}
 }
+
+// conda base 也要真的能在沙箱里跑起来：现场故障是"配置写 conda、实际跑
+// Homebrew python"（PATH 上没有 conda → 静默降级）。这条用例在装了 conda
+// 的机器上验证：沙箱里 sys.prefix 必须是解析出来的 conda 前缀。
+func TestPythonEnvCondaRunsInsideRealSandbox(t *testing.T) {
+	if !bwrapAvailable() {
+		t.Skip("bwrap not installed")
+	}
+	resetCondaCache()
+	if findCondaBin() == "" {
+		t.Skip("conda not installed on this host")
+	}
+	dir := t.TempDir()
+	env := NewPythonEnv(config.ToolsPythonConfig{Mode: "conda", CondaEnv: "base"}, filepath.Join(dir, "report"), nil)
+	prefix := env.PrefixDir()
+	if prefix == "" {
+		t.Fatal("conda base 必须能解析出前缀")
+	}
+	env.Prepare()
+	if env.prepErr != "" {
+		t.Fatalf("prepare failed: %s", env.prepErr)
+	}
+	work := filepath.Join(dir, "work")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tool := &WorkBashTool{
+		Root: work, Mounts: []Mount{{Name: "work", Dir: work, Writable: true}},
+		Sandbox: true, Python: env, Tid: 1,
+	}
+	res, err := tool.Execute(`{"command":"python3 -c \"import sys;print('CONDA', sys.prefix)\" 2>&1","timeout":60}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "CONDA "+prefix) {
+		t.Fatalf("沙箱里的 python 必须是解析出的 conda 前缀 %s，got: %s", prefix, res.Text)
+	}
+}

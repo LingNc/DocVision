@@ -28,6 +28,8 @@ func TestProjectImagesMaterializedNextToMarkdown(t *testing.T) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// 真实形状：矢量图转换失败 → 状态 fallback、原引用留在 md 里，而
+	// embedBlock 的嵌入分支从不会被调用（copyOriginalImage 因此漏掉它）。
 	tasks := []*task{{
 		mdName:  "测试-概率论.md",
 		imgPath: "images/测试-概率论/" + name,

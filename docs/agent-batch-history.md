@@ -107,7 +107,9 @@ v1.5+（第三十批）：一次真实运行的三个问题（用户 2026-09-11 
 [18:45:59][T01] [style] [tool:view_image] error: 文件不存在: images/测试-概率论/b6f6f41…jpg
 ```
 
-模型给的就是 md 里的引用路径（完全正确），`ViewImageTool{Root: <proj>/source, Subject: "images"}` 解析成 `<proj>/source/images/测试-概率论/<sha>.jpg`——而**那个目录是空的**。全盘 `find` 显示图片只在 `output/images/测试-概率论/`（全局 `paths.images_dir`）以及旧项目 `latex_project_0909/source/images/测试-概率论/`（真副本，不同 inode）里；当前代码从 images 阶段到 assemble 从来没人把图铺进项目树。
+模型给的就是 md 里的引用路径（完全正确），`ViewImageTool{Root: <proj>/source, Subject: "images"}` 解析成 `<proj>/source/images/测试-概率论/<sha>.jpg`——而**那个目录是空的**。全盘 `find` 显示图片只在 `output/images/测试-概率论/`（全局 `paths.images_dir`）以及旧项目 `latex_project_0909/source/images/测试-概率论/`（真副本，不同 inode，且那个项目的 8 张图当年是**嵌入**分支复制过去的）里。
+
+精确根因（比"没人铺图"更窄）：`copyOriginalImage` 只在**嵌入**分支被调用——`rasterBlock()`（档位1 的 IMAGE 块 / 档位2 的原图引用）与 TikZ 内嵌（`embedBlock` 的 `ClassVector`+`TikzCode` 分支）；而"矢量转换失败 → 保留原图"的 fallback 分支（`runner.go` 的 `rp.p.Status == "fallback"`）只是**保留原引用**再补一条 `<!-- DOCVISION-ERROR … -->`，**从不复制文件**。本次运行 8 张图全是 `thinking.type: disable` 导致的 400 失败、状态全是 fallback（`Already done: 0 | to process: 8`），于是 8 个 `![](images/测试-概率论/<sha>.jpg)` 引用全都指向项目树里不存在的文件：样式会话 `view_image` 报"文件不存在"、章节工作区与 build 树同样无图。
 
 影响面比"样式会话看不了图"更大：`chapterWorkTree` 把 `<proj>/source/images` 软链成工作区的 `images/`，`assemble` 把 `<proj>/source/{images,figures}` 拷进 build 树——两处都指向同一个空目录，所以**保留栅格图的章节在会话内编译与最终成书时都拿不到图**。
 
