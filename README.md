@@ -296,6 +296,8 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 
 沙箱内的 `/tmp` 是**本会话私有的持久临时区**（`<proj>/work/temp/bash_<会话>`，`TMPDIR/TMP/TEMP` 都指向它）：同一个会话的多次 `bash` 调用共享它，会话结束后删除（`latex.keep_temp_dirs` 或 debug 下保留）。**一个会话一张挂载表**——`read_file`、`grep`、`write_file`、`edit_file`、`bash`、`view_pdf` 看到的是同一棵树、同一套挂载点名，所以 `project:chapters/<章>.md` 在哪个工具里都是同一个文件；`grep` 不带 `path` 时遍历全部挂载点（全项目检索），带 `project:style` 这类前缀时只搜该挂载点。
 
+**Python 环境**（`tools.python`）：会话 bash 跑在 `--unshare-net` 的沙箱里，**会话自己装不了任何包**（2026-09-11 实测：样式会话遇到 `ModuleNotFoundError: No module named 'PIL'` 后花约 10 轮自己手写了一个 PGM 解析器）。所以环境由宿主提供——按配置准备 `system`/`venv`/`conda` 解释器并把它的**运行所需目录只读绑定**进沙箱（解释器自身目录、`sys.prefix`、软链链上的每一跳、`ldd` 列出的共享库目录、site-packages；Homebrew 的 venv 就因为 `bin/python3 → .linuxbrew/opt/... → Cellar` 这条链少一环而 exec 失败，bash 的 PATH 搜索会**静默跳到下一个 `/usr/bin/python3`**，于是"装好的环境"根本没生效），`PATH` 指向它；缺模块时宿主侧（有网）自动 `pip install` 并让模型重试；安装失败则按缺字体同样的办法留下 `<项目>/work/python/requirements.txt` + `README.md`。沙箱内用 `python3` 即可，无需 Activation。
+
 档位1 的临时工作区统一落在**本项目工作区**里的 `work/temp/<名称>`（即 `latex_project/<项目名>/work/temp/…`；拆章沙箱、样式/反馈 scratch、每章编译 scratch），不再藏进 `/tmp`；`latex.keep_temp_dirs` 可保留以便事后检查。
 
 ### 调试日志
@@ -439,6 +441,14 @@ docvision verify --project 概率论-2026         # 多项目时指定核对哪�
 | `tools.latex.engine` | latex 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
 | `tools.bash.sandbox` | 会话 bash 是否用 bubblewrap 内核沙箱（沙箱里只有本会话的挂载表；缺 bwrap 自动回退并记警告） | true |
 | `tools.bash.max_output` | 会话 bash 工具返回给模型的字符上限 | 5000 |
+| `tools.python.enabled` | 是否给会话 bash 提供 Python 环境 | true |
+| `tools.python.mode` | 环境形态：`system` / `venv` / `conda`（venv 会按 `env_dir` 自动创建） | system |
+| `tools.python.interpreter` | 解释器路径（留空 = `env_dir/bin/python3` 或 PATH 里的 `python3`） | 空 |
+| `tools.python.env_dir` | venv 目录（不存在则宿主侧自动创建）或 conda 环境前缀 | 空 |
+| `tools.python.conda_env` | conda 环境名（`env_dir` 为空时用它） | 空 |
+| `tools.python.packages` | 启动前确保可导入的模块（缺则宿主侧安装） | 空 |
+| `tools.python.auto_install` | 会话 bash 报 `ModuleNotFoundError` 时由宿主侧自动 `pip install` 并提示重试 | true |
+| `tools.python.install_timeout` | 单次 `pip install` 超时（秒） | 300 |
 
 ### 原始文档检索（档位1 会话，只读）
 
