@@ -54,7 +54,7 @@ func TestEnrichSessionsAddsStageProgressAndImageIdentity(t *testing.T) {
 		t.Fatalf("progress.json 没进侧栏: %+v", vec.ProjectStages)
 	}
 	// 逐图校验会话同样带图片身份（转录名与矢量图同形），阶段是"逐图校验"。
-	fc, ok := byLabel["figure-check:book__abc123__Venn_diagram"]
+	fc, ok := byLabel["figure-check:Venn diagram"]
 	if !ok {
 		t.Fatalf("逐图校验会话没被识别: %+v", byLabel)
 	}

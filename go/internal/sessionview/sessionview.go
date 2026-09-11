@@ -493,11 +493,13 @@ func transcriptStem(rel string) string {
 	return strings.TrimSuffix(path.Base(filepath.ToSlash(rel)), ".jsonl")
 }
 
-// stageSubject turns the file-name remainder into a readable subject. Vector
-// transcripts are named vector_<书名>__<sha256>__<图label>: the hash is noise
-// and the label itself uses underscores where the caption had spaces.
+// stageSubject turns the file-name remainder into a readable subject. Per-image
+// transcripts are named <prefix>_<书名>__<图片名>__<图label> (vector_ for the
+// drawing session, figure_check_ for its verification): the book name and the
+// image name are noisy for a sidebar row, and the label itself uses underscores
+// where the caption had spaces.
 func stageSubject(stage, rest string) string {
-	if stage != "vector" {
+	if stage != "vector" && stage != "figure-check" {
 		return rest
 	}
 	var keep []string
