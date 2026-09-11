@@ -22,7 +22,7 @@ func writeThinkingCfg(t *testing.T, body string) string {
 // 纠正成 disabled，并在 stderr 告警（配置照旧能跑）。
 func TestThinkingTypeTypoIsRepairedAndWarns(t *testing.T) {
 	p := writeThinkingCfg(t, `
-config_version: 6
+config_version: 7
 models:
   drawing: { model: m, base_url: http://x/v1, thinking: { type: disable } }
   convert: { model: m, base_url: http://x/v1, thinking: { type: ENABLE } }
@@ -43,7 +43,7 @@ models:
 // 不要跑一整轮全是 fallback。
 func TestThinkingTypeUnknownIsFatal(t *testing.T) {
 	p := writeThinkingCfg(t, `
-config_version: 6
+config_version: 7
 models:
   drawing: { model: m, base_url: http://x/v1, thinking: { type: disableddd } }
 `)
@@ -61,7 +61,7 @@ models:
 // TestThinkingTypeValidValuesKeepWorking: adaptive / enabled / disabled 原样通过。
 func TestThinkingTypeValidValuesKeepWorking(t *testing.T) {
 	p := writeThinkingCfg(t, `
-config_version: 6
+config_version: 7
 models:
   text: { model: m, base_url: http://x/v1, thinking: { type: adaptive } }
   style: { model: m, base_url: http://x/v1, thinking: { enabled: true } }

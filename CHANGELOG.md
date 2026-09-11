@@ -19,6 +19,8 @@
 
 ### Changed
 
+- **配置模板版本 6 → 7**（`config_version`）：本批新增了三个配置块（`preview.*`、`latex.figure_check.*`、`models.<条目>.price.*`），按既有约定同步 bump——版本不符时启动只提示"请参考 config.example.yaml 更新"，不影响运行；`docvision setup` 会把它列为待修项。旧的 v6 配置不改也能跑（新块全部有默认值），但拿不到新选项的注释指引。
+
 - `doc_index` 图片条目的 `content` 现在也带**矢量图的 LaTeX 本体**（此前 only STYLED-TEXT 的印刷原文与 RASTER 的解释进了索引，矢量图只有个 label，`doc_search` 搜不到图形本体、转换会话也拿不到参考）。扫描器只吃紧跟该图 `LINK` 的那个 ` ```latex ` 围栏（中间夹了正文就判定不是本体，不会粘错别的代码块），`doc_search`/`list_source_pages` 里该字段显示为 `latex:`。测试补 `TestParseMdMarkers` 的三条边界（正常收进 / 夹正文不收 / 无关代码块不粘）。
 - **发布只由推标签驱动，移除手动触发入口**：`.github/workflows/release.yml` 删掉 `workflow_dispatch`（曾经用它给老标签补发预发布），`RELEASE_TAG` 只取 `github.ref_name`。手动运行会在 Actions 历史里留下与真实发布无关的记录，且与"发布=推标签"这条纪律冲突；要补发就重新推一个标签。
 - **发布：带 `-` 的标签也发 Release（预发布），并修正 "Latest" 归属**。此前工作流对含 `-` 的标签直接跳过整个任务，于是 `v1.3.0-beta`～`v1.5.0-beta.4` 即便推上去也**不会**产生任何产物；现在它们照常跑测试、交叉编译 5 个平台并创建 Release，只是标记为预发布（`prerelease: true`、`make_latest: false`），不会被 Badge 成 Latest。不带 `-` 的标签显式 `make_latest: true`——GitHub 默认把**最后发布**的标成 Latest，曾让 `v1.0.1` 顶掉更新的 `v1.1.0`。手动补发老标签：`gh workflow run release.yml -f tag=v1.5.0-beta.4`（`workflow_dispatch` 用当前分支的工作流逻辑，因此能给旧标签补发预发布）；这条路上另修两处：手动运行时必须给 `action-gh-release` 显式 `tag_name`（否则它从 `github.ref` 取到 `refs/heads/master`，报 `GitHub Releases requires a tag`——测试与构建都过、只有建 Release 一步失败），以及 `setup-go` 的 `cache-dependency-path: go/go.sum`（`go.sum` 不在仓库根，缓存一直没命中）。

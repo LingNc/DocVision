@@ -619,7 +619,7 @@ type PathsConfig struct {
 // zero-valued fields, and returns the resulting Config.
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
-const CurrentConfigVersion = 6
+const CurrentConfigVersion = 7
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.

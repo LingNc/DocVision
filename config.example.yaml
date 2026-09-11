@@ -1,6 +1,6 @@
 # DocVision Configuration (example - copy to config.yaml and fill in your values)
 
-config_version: 6
+config_version: 7
 
 # MinerU API Configuration
 mineru:
