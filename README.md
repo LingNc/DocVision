@@ -236,9 +236,9 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 
 **档位 1（`latex.level: 1`）—— 全书 LaTeX**
 
-1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/<项目名>/work/style/`），用 `list_source_pages` 取原书页索引（源 PDF / 页范围 / 全局页号 / OCR 推导的章节起点），再用 `view_pdf {path:"source:<file>.pdf", page:N}` **按需渲染** MinerU 保留的原始扫描页（支持裁剪放大）、`view_image` 看提取图、`read_file`/`grep` 读解析文本，分析全书样式后用 `write_file`/`edit_file` 增量起草并 `submit_style` 提交 `book.cls` + 使用手册 + 案例（自动试编译，失败回炉）。字体通过 `list_fonts` 查看；缺字体时在提交报告与手册里列出清单，由用户按文件名手动放进 `paths.fonts`（编译环境已注入 `TEXINPUTS`/`OSFONTDIR`，无需装系统字体）
+1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/<项目名>/work/style/`），用 `list_source_pages` 取原书页索引（源 PDF / 页范围 / 全局页号 / OCR 推导的章节起点），再用 `view_pdf {path:"source:<file>.pdf", page:N}` **按需渲染** MinerU 保留的原始扫描页（支持裁剪放大）、`view_image` 看提取图、`read_file`/`grep` 读解析文本，分析全书样式后用 `write_file`/`edit_file` 增量起草，再 `submit_style` **按工作区路径**提交 `book.cls` + 使用手册 + 案例（`{cls, manual, example, extra[], report}`：`extra` 可带上类需要的任何附属文件——helper `.sty`、TikZ 样式、字体表——会连同示例一起进试编译；`report` 写进 `style/REPORT.md`；示例自动试编译，失败回炉）。字体通过 `list_fonts` 查看；缺字体时在提交报告与手册里列出清单，由用户按文件名手动放进 `paths.fonts`（编译环境已注入 `TEXINPUTS`/`OSFONTDIR`，无需装系统字体）
 2. **章节划分 AI**（`models.chapter`）：`grep`/`read_file`/`bash` + `buffer.md` 工作记忆缓冲区（分析结论增量写入、跨轮保留），按行号划分章节（结构化提交，全覆盖校验）
-3. **转换 AI** 并发逐章转 `.tex`：每章有**私有工作视图**（只能读写自己那一章），别人的成品只能经只读通道 `project:converted/`（其他章节已提交的 `.tex`）与 `project:reports/`（其他章节的工作汇报）参考；矢量图已在 images 阶段以 latex 代码块内嵌进章节 md，转换时按手册的 `## Vector figure style` 二次加工（保留结构、几何与全部标签）；raster 原图走 includegraphics → 每章提交后由 **核对 AI**（`models.checker`，小文本模型即可）比对原章 md 与产物，**硬性问题回同一个转换会话最多 3 轮**（上下文还在，最省 token），3 轮仍未过才作废该章 `.tex`、资源目录与转录，用全新会话重转换一次
+3. **转换 AI** 并发逐章转 `.tex`：每章有**私有工作视图**（只能读写自己那一章），别人的成品只能经只读通道 `project:converted/`（其他章节已提交的 `.tex`）与 `project:reports/`（其他章节的工作汇报）参考；首条消息给出**工作区地图**（`work:`/`project:`/`source:`/`build:` 各是什么）与两处权威输入路径——章节文本 `project:chapters/<章>.md`（**从它转换**，原书 PDF 只用来看版面）与 class 手册 `project:style/manual.md`（不再整段内联）；工具集含 `bash`（沙箱内、与其它工具同一套挂载点）与 `compile`（**编译包了 `\\documentclass` 的 wrapper**；`compile {path:"chapters/<章>/probe.tex"}` 可单独编译工作区里任何一个 `.tex` 做验证，探针文件不得留在产物里）；矢量图已在 images 阶段以 latex 代码块内嵌进章节 md，转换时按手册的 `## Vector figure style` 二次加工（保留结构、几何与全部标签）；raster 原图走 includegraphics → 每章提交后由 **核对 AI**（`models.checker`，小文本模型即可）比对原章 md 与产物，**硬性问题回同一个转换会话最多 3 轮**（上下文还在，最省 token），3 轮仍未过才作废该章 `.tex`、资源目录与转录，用全新会话重转换一次
 4. 汇总为多文件 `.tex` 项目 → 编译全书 PDF（失败进入**修复会话**：读文件/改文件/重编译 + 字体工具核对样式）→ 成功后进入**终审会话**逐页核对成品 PDF 并整理（`latex.compile.final_review`，默认开启）→ 生成单文件 `standalone.tex`；交付把整棵 build 树复制到 `out/`，`book.pdf` 只是 `main.pdf` 的别名
 5. 多数章节的工作汇报报告 cls/手册问题时，打回原样式会话修正（上限 2 轮）；样式包更新后只对「报问题」或「新 cls 下编译不过」的章节并发跑**样式修复子会话**（增量 `edit_file` 适配新 cls/手册，不重新转换），修复失败才退回整章重转换
 
@@ -292,7 +292,9 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 
 路径语法：`path`（默认挂载点）、`name:path`（如 `project:style/manual.md`）、`/name/path`（bash 侧同路径）；越界 `../` 与只读挂载点写入会被直接拒绝，未知挂载点报错并列出可用挂载点。
 
-`tools.bash.sandbox`（默认 true）把会话 `bash` 包进 **bubblewrap**：沙箱里只存在上表的树（`/work`、`/project`、`/source`），宿主真实路径一律不存在，`--unshare-net` 断网、`/tmp` 为私有 tmpfs；bwrap 缺失时自动回退普通 shell 并记警告。
+`tools.bash.sandbox`（默认 true）把会话 `bash` 包进 **bubblewrap**：沙箱里只存在上表的树（`/work`、`/project`、`/source`），宿主真实路径一律不存在，`--unshare-net` 断网；bwrap 缺失时自动回退普通 shell 并记警告。
+
+沙箱内的 `/tmp` 是**本会话私有的持久临时区**（`<proj>/work/temp/bash_<会话>`，`TMPDIR/TMP/TEMP` 都指向它）：同一个会话的多次 `bash` 调用共享它，会话结束后删除（`latex.keep_temp_dirs` 或 debug 下保留）。**一个会话一张挂载表**——`read_file`、`grep`、`write_file`、`edit_file`、`bash`、`view_pdf` 看到的是同一棵树、同一套挂载点名，所以 `project:chapters/<章>.md` 在哪个工具里都是同一个文件；`grep` 不带 `path` 时遍历全部挂载点（全项目检索），带 `project:style` 这类前缀时只搜该挂载点。
 
 档位1 的临时工作区统一落在**本项目工作区**里的 `work/temp/<名称>`（即 `latex_project/<项目名>/work/temp/…`；拆章沙箱、样式/反馈 scratch、每章编译 scratch），不再藏进 `/tmp`；`latex.keep_temp_dirs` 可保留以便事后检查。
 
