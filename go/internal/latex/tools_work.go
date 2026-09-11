@@ -297,9 +297,9 @@ func (t *CompileTexTool) Execute(argsJSON string) (session.ToolResult, error) {
 		detail := ""
 		if n, perr := pdfPageCount(res.PDF); perr == nil {
 			t.Pages = n
-			detail = fmt.Sprintf(" Output: %s (%d pages). Inspect with view_pdf {path: %q, page: 1}.", outName, n, outName)
+			detail = fmt.Sprintf(" Output: %s (%d pages). See it with view_pdf {path: %q, page: 1}.", outName, n, outName)
 		} else {
-			detail = " Output: " + outName + "."
+			detail = fmt.Sprintf(" Output: %s. See it with view_pdf {path: %q, page: 1}.", outName, outName)
 		}
 		text := "COMPILE OK." + detail
 		if w := res.WarningSummary(); w != "" {

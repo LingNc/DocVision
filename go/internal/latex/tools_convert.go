@@ -142,11 +142,14 @@ func (t *CompileChapterTool) Execute(argsJSON string) (session.ToolResult, error
 	res := t.Comp.CompileOpts(t.Scratch, compileFile, opts)
 	LogCompileResult(t.Log, t.Tid, "chapter", res, time.Since(start))
 	if res.OK {
-		// 成功只报事实：产物名 + 页数（怎么检视是模型自己的事）。
+		// 成功只报事实：产物名 + 页数 + 一句"用 view_pdf 看它"（怎么细看是模型自己的事）。
 		detail := ""
-		pdf := filepath.Join(t.Scratch, strings.TrimSuffix(compileFile, ".tex")+".pdf")
+		outName := strings.TrimSuffix(compileFile, ".tex") + ".pdf"
+		pdf := filepath.Join(t.Scratch, outName)
 		if n, err := pdfPageCount(pdf); err == nil {
-			detail = fmt.Sprintf("\nOutput: %s.pdf (%d pages).", strings.TrimSuffix(compileFile, ".tex"), n)
+			detail = fmt.Sprintf("\nOutput: %s (%d pages). See it with view_pdf {path: %q, page: 1}.", outName, n, outName)
+		} else {
+			detail = fmt.Sprintf("\nOutput: %s. See it with view_pdf {path: %q, page: 1}.", outName, outName)
 		}
 		if w := res.WarningSummary(); w != "" {
 			return session.ToolResult{Text: "COMPILE OK.\n" + truncateStr(w, 1500) + detail}, nil

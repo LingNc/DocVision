@@ -53,6 +53,10 @@ func TestCompileChapterToolUsesWrapper(t *testing.T) {
 	if !strings.HasPrefix(res.Text, "COMPILE OK") {
 		t.Fatalf("wrapper compile must succeed, got: %s", res.Text)
 	}
+	// 回执只报事实，但要看产物得告诉模型用 view_pdf（用户明确要求"简单说一下"）。
+	if !strings.Contains(res.Text, "view_pdf") || !strings.Contains(res.Text, "chapter_007_wrapper.pdf") {
+		t.Fatalf("chapter compile receipt must name the PDF and point at view_pdf, got: %s", res.Text)
+	}
 	// The fragment alone (the old behaviour) cannot compile: no class.
 	plain := &CompileChapterTool{
 		Comp:    NewCompiler(config.LatexCompileConfig{Engine: "xelatex", Timeout: 120}),
