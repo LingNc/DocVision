@@ -369,8 +369,16 @@ func (c *Client) logCacheProbe(payload *ChatRequest, raw []byte) {
 	if payload.Tools != nil {
 		tools = fmt.Sprintf("%d", len(payload.Tools))
 	}
-	c.log.Debug(0, fmt.Sprintf("[cache-probe] body=%dB head_sha=%x tools=%s tool_choice=%q messages=%d user=%q",
-		len(raw), sum[:8], tools, payload.ToolChoice, len(payload.Messages), payload.User))
+	// ToolChoice is `any`: %q on a nil (classify/other pipelines leave it
+	// unset) printed the Go format artifact `%!q(<nil>)`.
+	choice := "auto"
+	if v, ok := payload.ToolChoice.(string); ok && v != "" {
+		choice = v
+	} else if payload.ToolChoice != nil {
+		choice = fmt.Sprintf("%v", payload.ToolChoice)
+	}
+	c.log.Debug(0, fmt.Sprintf("[cache-probe] body=%dB head_sha=%x tools=%s tool_choice=%s messages=%d user=%q",
+		len(raw), sum[:8], tools, choice, len(payload.Messages), payload.User))
 }
 
 // post performs the HTTP call with the transport matching the mode.
@@ -529,24 +537,30 @@ func (c *Client) CallWithRetry(req *ChatRequest) (*ChatResponse, string, string)
 		errStr := err.Error()
 		lower := strings.ToLower(errStr)
 		if strings.Contains(errStr, "429") || strings.Contains(lower, "rate") {
-			if rateRetry < rateLimitLimit {
-				wait := time.Duration(1<<rateRetry) * 2 * time.Second
-				if wait > 60*time.Second {
-					wait = 60 * time.Second
+			// 账户级错误不是限流：等下去也不会好（2026-09-11 实测
+			// `余额不足或无可用资源包` 让三个转换会话在冻结的请求体上
+			// 空转了 3h31m/239 次才放弃）。立刻收尾并给出自己的标记。
+			if insufficientBalance(lower) {
+				if c.log != nil {
+					c.log.LogError(0, "  [RateLimit] 上游账户不可用（余额/配额），停止重试:", truncate(errStr, 160))
 				}
+				return nil, "[SESSION_INSUFFICIENT_BALANCE]", "error"
+			}
+			if rateRetry < rateLimitLimit {
+				wait := backoffWait(rateRetry, 2*time.Second, 60*time.Second)
 				waitLog("RateLimit", wait)
 				time.Sleep(wait)
 				rateRetry++
 				continue
 			}
+			if c.log != nil {
+				c.log.LogError(0, "  [RateLimit] 重试上限用尽（rate_limit_retries=", rateLimitLimit, "），放弃本次请求")
+			}
 			return nil, "[SESSION_RATE_LIMIT_EXCEEDED]", "error"
 		}
 		if containsAny(lower, "connect", "timeout", "handshake", "timed out") {
 			if retry < maxAPIRetries {
-				wait := time.Duration(1<<retry) * 5 * time.Second
-				if wait > 60*time.Second {
-					wait = 60 * time.Second
-				}
+				wait := backoffWait(retry, 5*time.Second, 60*time.Second)
 				waitLog("ConnRetry", wait)
 				time.Sleep(wait)
 				retry++
@@ -557,10 +571,7 @@ func (c *Client) CallWithRetry(req *ChatRequest) (*ChatResponse, string, string)
 		if retry < maxAPIRetries {
 			// Generic API error (e.g. transient 5xx with a non-JSON
 			// body from the proxy): exponential backoff 2s, 4s, 8s...
-			wait := time.Duration(1<<retry) * 2 * time.Second
-			if wait > 30*time.Second {
-				wait = 30 * time.Second
-			}
+			wait := backoffWait(retry, 2*time.Second, 30*time.Second)
 			waitLog("APIRetry", wait)
 			time.Sleep(wait)
 			retry++
@@ -568,6 +579,40 @@ func (c *Client) CallWithRetry(req *ChatRequest) (*ChatResponse, string, string)
 		}
 		return nil, fmt.Sprintf("[SESSION_API_ERROR: %s]", truncate(errStr, 200)), "error"
 	}
+}
+
+// backoffWait returns base*2^attempt capped at max. The shift is clamped
+// BEFORE the multiplication: 1<<n * 2 * time.Second overflows int64 for
+// n >= 55 and produced negative waits (-2562047h47m16.854775808s) in real
+// runs, which time.Sleep treats as "no wait at all".
+func backoffWait(attempt int, base, max time.Duration) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	if attempt > 20 {
+		attempt = 20
+	}
+	wait := base * time.Duration(int64(1)<<uint(attempt))
+	if wait <= 0 || wait > max {
+		wait = max
+	}
+	return wait
+}
+
+// insufficientBalance reports an upstream account/quota error: retrying
+// is pointless, the operator must top up. Matched on the message body a
+// gateway sends with HTTP 429 (e.g. "余额不足或无可用资源包,请充值",
+// code 1113) plus the usual English equivalents.
+func insufficientBalance(lower string) bool {
+	for _, p := range []string{
+		"余额不足", "无可用资源包", "请充值", "欠费", "配额",
+		"insufficient", "no available resource", "quota", "out of credit", "billing", "balance",
+	} {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // injectRequestBody merges extra config keys into a marshalled payload.
