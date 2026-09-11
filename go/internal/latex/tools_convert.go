@@ -58,15 +58,17 @@ type CompileChapterTool struct {
 func (t *CompileChapterTool) Name() string { return "compile" }
 
 func (t *CompileChapterTool) Definition() map[string]any {
-	desc := "Compile your chapter with the book class in a scratch wrapper (wrapper file + your .tex). " +
-		"Returns COMPILE OK plus the artifact PDF name/pages, or the LaTeX error log. " +
-		"With no argument it compiles your own main file (" + t.MainFile + "). " +
-		"path names another .tex in your workspace (e.g. a probe or an \\input part) to compile alone for testing."
+	// 说明只讲"怎么用"（用户：compile 就是编译，不要附带一堆信息和额外要求）。
+	desc := "Compile a .tex file of your workspace (default " + t.MainFile + ") inside a wrapper that loads the book class, " +
+		"and get the result: the LaTeX error to fix, or OK plus the output PDF name and page count. The file must already exist (write_file/edit_file first)."
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "compile",
 		"description": desc,
 		"parameters": map[string]any{"type": "object", "properties": map[string]any{
-			"path": map[string]any{"type": "string", "description": "optional .tex path in your workspace; default = your main file"},
+			"path":   map[string]any{"type": "string", "description": "workspace-relative .tex file (default " + t.MainFile + ")"},
+			"engine": map[string]any{"type": "string", "description": "optional: latexmk | xelatex | pdflatex | lualatex (default: configured engine)"},
+			"passes": map[string]any{"type": "integer", "description": "optional number of engine passes (default: 2)"},
+			"args":   map[string]any{"type": "string", "description": "optional extra engine flags, space separated"},
 		}},
 	}}
 }
@@ -130,15 +132,21 @@ func (t *CompileChapterTool) Execute(argsJSON string) (session.ToolResult, error
 			return session.ToolResult{}, err
 		}
 	}
+	// 引擎/额外参数可以现场指定（与通用 compile 工具同一套参数）：有时候
+	// 需要 latexmk 多遍，或临时加一个 flag 试出来。
+	opts := CompileOptions{Engine: strings.TrimSpace(strArg(args, "engine")), Passes: intArg(args, "passes", 0)}
+	if extra := strings.TrimSpace(strArg(args, "args")); extra != "" {
+		opts.ExtraArgs = strings.Fields(extra)
+	}
 	start := time.Now()
-	res := t.Comp.Compile(t.Scratch, compileFile)
+	res := t.Comp.CompileOpts(t.Scratch, compileFile, opts)
 	LogCompileResult(t.Log, t.Tid, "chapter", res, time.Since(start))
 	if res.OK {
-		// 成功时提供有用信息：产物 PDF 名 + 页数，便于 view_pdf 检视。
+		// 成功只报事实：产物名 + 页数（怎么检视是模型自己的事）。
 		detail := ""
 		pdf := filepath.Join(t.Scratch, strings.TrimSuffix(compileFile, ".tex")+".pdf")
 		if n, err := pdfPageCount(pdf); err == nil {
-			detail = fmt.Sprintf("\nOutput: %s.pdf (%d pages). Inspect with view_pdf {path, page}.", strings.TrimSuffix(compileFile, ".tex"), n)
+			detail = fmt.Sprintf("\nOutput: %s.pdf (%d pages).", strings.TrimSuffix(compileFile, ".tex"), n)
 		}
 		if w := res.WarningSummary(); w != "" {
 			return session.ToolResult{Text: "COMPILE OK.\n" + truncateStr(w, 1500) + detail}, nil

@@ -241,3 +241,55 @@ func TestPythonEnvVenvRunsInsideRealSandbox(t *testing.T) {
 		t.Fatalf("a package present in the venv must import inside the sandbox, got: %s", res2.Text)
 	}
 }
+
+// mode=conda 全空 = 用 conda 的 base 环境（用户本地本来就有 base）。
+// 这里用一个假 conda（PATH 上的 shim）验证解析：`conda info --base` 给前缀，
+// 解释器就是 <base>/bin/python3。
+func TestPythonEnvCondaBaseDefault(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "miniconda3")
+	if err := os.MkdirAll(filepath.Join(base, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	py := filepath.Join(base, "bin", "python3")
+	if err := os.WriteFile(py, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "shim")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := "#!/bin/sh\nif [ \"$1\" = info ]; then echo " + base + "; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "conda"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	resetCondaCache() // 进程级缓存：别让别的用例影响这一条
+
+	env := NewPythonEnv(config.ToolsPythonConfig{Mode: "conda"}, filepath.Join(dir, "report"), nil)
+	if got := env.Interpreter(); got != py {
+		t.Fatalf("conda base 解释器 = %q, want %q", got, py)
+	}
+	if got := env.PrefixDir(); got != base {
+		t.Fatalf("conda base 前缀 = %q, want %q", got, base)
+	}
+	if got := env.BinDir(); got != filepath.Join(base, "bin") {
+		t.Fatalf("conda base bin = %q", got)
+	}
+	// conda_env: base 与留空等价。
+	resetCondaCache()
+	env2 := NewPythonEnv(config.ToolsPythonConfig{Mode: "conda", CondaEnv: "base"}, filepath.Join(dir, "report"), nil)
+	if got := env2.PrefixDir(); got != base {
+		t.Fatalf("conda_env=base 前缀 = %q, want %q", got, base)
+	}
+	// 有名字的环境走 <base>/envs/<name>。
+	named := filepath.Join(base, "envs", "docvision")
+	if err := os.MkdirAll(filepath.Join(named, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resetCondaCache()
+	env3 := NewPythonEnv(config.ToolsPythonConfig{Mode: "conda", CondaEnv: "docvision"}, filepath.Join(dir, "report"), nil)
+	if got := env3.PrefixDir(); got != named {
+		t.Fatalf("conda_env=docvision 前缀 = %q, want %q", got, named)
+	}
+}

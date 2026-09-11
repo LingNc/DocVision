@@ -200,7 +200,12 @@ func (r *Runner) phaseNote() func(format string, a ...any) {
 		return func(string, ...any) {}
 	}
 	return func(format string, a ...any) {
-		fmt.Fprintf(os.Stdout, format+"\n", a...)
+		// PrintConsole ends the live progress line, prints, and redraws it.
+		// Writing to stdout directly (the old code) put the note ON TOP of
+		// the session's live line when the note was emitted while that line
+		// was still active — the real output read
+		// "[chapters] 轮次 6 · 工具调用 9 · 已用 1m18s[chapters] 划分完成: 3 章".
+		r.log.PrintConsole(fmt.Sprintf(format, a...))
 	}
 }
 
@@ -494,6 +499,9 @@ func findLineIdx(starts []int, pos int) int {
 type liveProgress struct {
 	text func() string
 	stop chan struct{}
+	// done is closed by the ticker goroutine; Close waits for it so an
+	// already-started repaint cannot land after the line was cleared.
+	done chan struct{}
 	once sync.Once
 	// tty 决定重绘方式：终端里用 `\r` + 清行原地覆写（一行；会话实时行
 	// 也会在它上面覆写），管道/重定向里按节拍整行输出（否则日志里全是
@@ -510,9 +518,10 @@ func newLiveProgress(text func() string) *liveProgress {
 
 // newLiveProgressTTY 是 newLiveProgress 的可注入 tty 版本（测试用）。
 func newLiveProgressTTY(text func() string, tty bool) *liveProgress {
-	p := &liveProgress{text: text, stop: make(chan struct{}), tty: tty}
+	p := &liveProgress{text: text, stop: make(chan struct{}), done: make(chan struct{}), tty: tty}
 	p.render()
 	go func() {
+		defer close(p.done)
 		t := time.NewTicker(5 * time.Second)
 		defer t.Stop()
 		for {
@@ -560,6 +569,7 @@ func (p *liveProgress) Close() {
 	}
 	p.once.Do(func() {
 		close(p.stop)
+		<-p.done // 汇合：正在重画的那一帧必须先画完，否则会画在清行之后
 		p.mu.Lock()
 		line := p.last
 		p.mu.Unlock()

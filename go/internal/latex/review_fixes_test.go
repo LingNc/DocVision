@@ -212,11 +212,14 @@ func TestSubmitStyleByPathWithExtras(t *testing.T) {
 	if got, _ := bad.Execute(string(badArgs)); !strings.HasPrefix(got.Text, "REJECTED") {
 		t.Fatalf("missing path must be rejected, got: %s", got.Text)
 	}
-	// Backward compatible: inline content still works.
+	// No inline fallback any more (用户: 别给 AI 保留它不知道的旧形态):
+	// 内容式的参数一律拒绝，并明确指向"先 write_file 再交路径"。
 	inline := &SubmitStyleTool{Workspace: ws}
 	inlineArgs, _ := json.Marshal(map[string]any{"cls": cls, "manual": "## x", "example": files["example.tex"]})
-	if got, _ := inline.Execute(string(inlineArgs)); !strings.HasPrefix(got.Text, "SUBMITTED") {
-		t.Fatalf("inline content must still work, got: %s", got.Text)
+	if got, _ := inline.Execute(string(inlineArgs)); !strings.HasPrefix(got.Text, "REJECTED") {
+		t.Fatalf("inline content must be rejected, got: %s", got.Text)
+	} else if !strings.Contains(got.Text, "只收工作区路径") {
+		t.Fatalf("rejection must tell the model to submit a path: %s", got.Text)
 	}
 }
 

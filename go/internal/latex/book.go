@@ -92,6 +92,7 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 	}
 	render() // 立即出现起始行，会话一开始就有进度
 	stop := make(chan struct{})
+	done := make(chan struct{})
 	// 终端每秒刷新"已用"时长（用户实测：轮次/工具数在动、时间却像不动）；
 	// 管道模式下每次重绘都是一整行输出，保持 10 秒节拍免得刷爆日志。
 	tick := 10 * time.Second
@@ -100,6 +101,7 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 	}
 	ticker := time.NewTicker(tick)
 	go func() {
+		defer close(done)
 		for {
 			select {
 			case <-stop:
@@ -122,6 +124,7 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 			once.Do(func() {
 				close(stop)
 				ticker.Stop()
+				<-done // 汇合：已在途的一帧不得画在清行之后
 				r.log.SetLiveLine(nil)
 				if tty {
 					// 只清行、不换行：这一行是"会消失的"实时行，
@@ -133,6 +136,20 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 				// 管道：最后一次 render 已经整行换过行，这里什么都不打。
 			})
 		}
+}
+
+// convertProgressText renders the level-1 [convert] progress line. It does
+// NOT add a trailing "]" or a "\r": the label already carries its brackets
+// and the caller (liveProgress) owns redraw/termination — the old inline
+// Fprintf produced "[convert] 0/3] 0.00%" with a stray bracket and bare CRs
+// in pipes.
+func convertProgressText(label string, done, failed, running, total int, elapsed time.Duration) string {
+	pct := 0.0
+	if total > 0 {
+		pct = float64(done) * 100.0 / float64(total)
+	}
+	return fmt.Sprintf("%s %d/%d %.2f%% (done: %d, errors: %d, running: %d, %s)",
+		label, done, total, pct, done-failed, failed, running, fmtDuration(elapsed))
 }
 
 // bookProgress is the persisted phase state of a book project.
@@ -760,32 +777,21 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 	var progMu sync.Mutex
 	total := len(chapters)
 	start := time.Now()
-	progress := func() {
-		if verbose || total == 0 {
-			return
-		}
-		pct := float64(done) * 100.0 / float64(total)
-		fmt.Fprintf(os.Stdout, "\r%s %d/%d] %.2f%% (done: %d, errors: %d, running: %d, %s)          ",
-			label, done, total, pct, done-failed, failed, running, fmtDuration(time.Since(start)))
+	// 进度行统一走 liveProgress：终端里原地覆写、管道里按节拍整行输出。
+	// 这里原来是自己 fmt.Fprintf(os.Stdout, "\r…")，有两个真实毛病：
+	// ① 格式串写成了 "%s %d/%d]"，多了个 `]`，实际输出
+	//    "[convert] 0/3] 0.00% …"；② 裸 `\r` 在管道/日志里就是乱码，
+	//    用户看到的 "[convert] 0/3] 0.00% (done: 0,[convert] 3/3] …" 正是
+	//    两次重绘被当成普通文本落在一起。
+	var progLive *liveProgress
+	if !verbose && total > 0 {
+		progLive = newLiveProgress(func() string {
+			progMu.Lock()
+			defer progMu.Unlock()
+			return convertProgressText(label, done, failed, running, total, time.Since(start))
+		})
 	}
-	// 章节内会话可能长达数十分钟：每 10s 刷新一次进度行（耗时/running），
-	// 控制台不再"长时间无输出"。
-	stopTicker := make(chan struct{})
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	go func() {
-		for {
-			select {
-			case <-stopTicker:
-				return
-			case <-ticker.C:
-				progMu.Lock()
-				progress()
-				progMu.Unlock()
-			}
-		}
-	}()
-	progress() // 0/N 起始行
+	progress := func() { progLive.render() }
 
 	for idx, chapPath := range chapters {
 		wg.Add(1)
@@ -818,10 +824,7 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		}(idx, chapPath, tid)
 	}
 	wg.Wait()
-	close(stopTicker)
-	if !verbose && total > 0 {
-		fmt.Fprintln(os.Stdout)
-	}
+	progLive.Close()
 	if len(failures) > 0 {
 		return fmt.Errorf("%d 个章节转换失败: %s", len(failures), strings.Join(failures, "; "))
 	}

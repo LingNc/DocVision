@@ -58,7 +58,13 @@ type Session struct {
 	APIRequests int
 	ToolInvoked int
 	Compactions int
-	Prunes      int
+	// lastCompactTokens is the estimate right after the last AI summary:
+	// a tiny window plus a tail that is itself over the threshold would
+	// otherwise buy a new summary every single round (see maybeCompact).
+	lastCompactTokens int
+	// contextNoteStep is the last growth threshold already logged (0/50/80).
+	contextNoteStep int
+	Prunes          int
 
 	// progressHook, when set, is notified after every API round and
 	// every tool execution with (completed rounds, executed tool
@@ -270,10 +276,9 @@ type RunOptions struct {
 // a final text answer or the tool budget is exhausted (at which point
 // it forces a no-tools final reply). Returns the final assistant text.
 func (s *Session) Run(opts RunOptions) (string, error) {
-	// Context window guard BEFORE growing the conversation further.
-	if err := s.maybeCompact(); err != nil {
-		return "", fmt.Errorf("compaction failed: %w", err)
-	}
+	// The context guard lives INSIDE the request loop (see below): one
+	// Run() is an entire agentic session here, so checking only here
+	// meant checking once, at the smallest the conversation ever is.
 
 	userMsg := ChatMessage{Role: "user"}
 	if len(opts.Images) > 0 {
@@ -343,6 +348,20 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 	}
 
 	for {
+		// Context guard INSIDE the loop, i.e. before EVERY model request.
+		//
+		// It used to be called once per Run(), and for these sessions one
+		// Run() IS the whole agentic session (the latex sessions hand the
+		// initial task to Run and stay inside this loop for hundreds of
+		// rounds) — so the guard only ever looked at a conversation of
+		// system prompt + first message and never fired again. Real
+		// consequence: a run reached prompt=323,966 tokens with
+		// context_limit 128K and compaction_at 0.85 and nothing happened,
+		// no "COMPRESSED SESSION CONTEXT" line ever appeared in the
+		// transcript, and the bill ended in an exhausted account.
+		if err := s.maybeCompact(); err != nil {
+			return "", fmt.Errorf("compaction failed: %w", err)
+		}
 		req := &ChatRequest{
 			Model:       s.client.Model(),
 			Messages:    s.messages,
@@ -622,6 +641,24 @@ func (s *Session) EstimatedTokens() int {
 	return total
 }
 
+// noteContextGrowth logs once at half and once at 80% of the configured
+// window, so "the session is getting huge" is visible without --debug.
+func (s *Session) noteContextGrowth(est, limit int) {
+	if limit <= 0 || est <= 0 {
+		return
+	}
+	pct := est * 100 / limit
+	if s.contextNoteStep < 50 && pct >= 50 {
+		s.contextNoteStep = 50
+		s.logf("[context] 估算 %d tokens = 窗口(%d) 的 %d%%", est, limit, pct)
+		return
+	}
+	if s.contextNoteStep < 80 && pct >= 80 {
+		s.contextNoteStep = 80
+		s.logf("[context] 估算 %d tokens = 窗口(%d) 的 %d%%，接近压缩阈值", est, limit, pct)
+	}
+}
+
 // pruneHistory shortens the conversation WITHOUT calling the model: long
 // tool results are cut to head+tail and older images are replaced by a text
 // placeholder (the record of what was inspected survives, the pixels do
@@ -718,11 +755,23 @@ func (s *Session) maybeCompact() error {
 	if at <= 0 || at > 1 {
 		at = 0.85
 	}
-	if s.EstimatedTokens() < int(float64(limit)*at) {
+	now := s.EstimatedTokens()
+	// Surface context growth in the PLAIN log (no --debug needed). The bug
+	// this whole guard had was invisible precisely because every number
+	// about the request size lived in debug output: the run reached 324k
+	// tokens with a 128K window and the log said nothing at all.
+	s.noteContextGrowth(now, limit)
+	if now < int(float64(limit)*at) {
+		return nil
+	}
+	// 一张小窗口 + 一条本身就超阈值的尾巴（系统提示词/原始任务/最近 8 条）
+	// 会让"压完还是超阈值"成为常态。此时若每轮都再花钱摘要一次，就是持续
+	// 重复付费且几乎压不动——只有在上次压缩之后又涨了 20% 才值得再压。
+	if s.lastCompactTokens > 0 && now < s.lastCompactTokens*6/5 {
 		return nil
 	}
 	// Stage 1: local pruning (free).
-	before := s.EstimatedTokens()
+	before := now
 	if n := s.pruneHistory(); n > 0 {
 		now := s.EstimatedTokens()
 		s.logf("[compact] 本地裁剪：%d 条消息，估算 %d → %d tokens（未调用模型）", n, before, now)
@@ -739,7 +788,8 @@ func (s *Session) maybeCompact() error {
 		return err
 	}
 	s.Compactions++
-	s.logf("[compact] history compacted; now ~%d tokens", s.EstimatedTokens())
+	s.lastCompactTokens = s.EstimatedTokens()
+	s.logf("[compact] history compacted; now ~%d tokens", s.lastCompactTokens)
 	return nil
 }
 

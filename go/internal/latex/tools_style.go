@@ -309,33 +309,33 @@ func (t *SubmitStyleTool) Definition() map[string]any {
 	}}
 }
 
-// readSubmitted resolves one argument: a workspace path when it names an
-// existing file, otherwise (backward compatible) the inline content.
+// readSubmitted resolves one argument: ALWAYS a workspace path.
+//
+// There is no inline-content fallback any more (用户: "很多工具就别兼容了，
+// 比如那个内联兼容给谁兼容看的？ai 又不知道以前工具啥样"). It also removed
+// a real failure mode: the old heuristic had to guess "path or content",
+// and a one-line inline value like "## Vector figure style" or a short cls
+// begun with "%" was ambiguous — a wrong guess either wrote a filename as
+// the class file or rejected a legitimate submission.
 func (t *SubmitStyleTool) readSubmitted(v string) (string, string, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return "", "", nil
 	}
-	// 路径 vs 内容的判定：先按路径解析，命中即读盘；没命中时，只有当它
-	// 明确长得像"要提交的文件"（.cls/.md/.tex/.sty 结尾）才报错——否则
-	// 保持向后兼容，按内联内容处理。
-	looksLikePath := !strings.Contains(v, "\n") && len(v) < 512
-	if looksLikePath {
-		clean := strings.TrimPrefix(filepath.ToSlash(v), "./")
-		clean = strings.TrimPrefix(clean, "work:")
-		if path, err := resolveInside(t.Workspace, clean); err == nil {
-			if data, rerr := os.ReadFile(path); rerr == nil {
-				return string(data), clean, nil
-			}
-		}
-		low := strings.ToLower(clean)
-		for _, ext := range []string{".cls", ".sty", ".md", ".tex", ".txt", ".def", ".cfg"} {
-			if strings.HasSuffix(low, ext) {
-				return "", "", fmt.Errorf("找不到提交的文件 %q（用 write_file 先写好，再按工作区相对路径提交；注意路径相对工作区）", v)
-			}
-		}
+	clean := strings.TrimPrefix(filepath.ToSlash(v), "./")
+	clean = strings.TrimPrefix(clean, "work:")
+	if strings.Contains(clean, "\n") {
+		return "", "", fmt.Errorf("submit_style 只收工作区路径，不收文件内容：先用 write_file 写好，再提交路径（例如 {\"cls\": \"gailvbook.cls\"}）")
 	}
-	return v, "", nil
+	path, err := resolveInside(t.Workspace, clean)
+	if err != nil {
+		return "", "", err
+	}
+	data, rerr := os.ReadFile(path)
+	if rerr != nil {
+		return "", "", fmt.Errorf("找不到提交的文件 %q（用 write_file 先写好，再按工作区相对路径提交；注意路径相对工作区）", v)
+	}
+	return string(data), clean, nil
 }
 
 func (t *SubmitStyleTool) Execute(argsJSON string) (session.ToolResult, error) {

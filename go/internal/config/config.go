@@ -386,8 +386,9 @@ type ToolsPythonConfig struct {
 	Interpreter string `yaml:"interpreter"`
 	// EnvDir: venv directory (created when missing) or a conda prefix.
 	EnvDir string `yaml:"env_dir"`
-	// CondaEnv: conda environment NAME (mode=conda; resolved to its
-	// prefix and used when EnvDir is empty).
+	// CondaEnv: conda environment NAME (mode=conda). Empty — or base/root —
+	// means the conda BASE environment, so mode=conda with nothing else
+	// configured just works (that is the common local setup).
 	CondaEnv string `yaml:"conda_env"`
 	// Packages: modules ensured (import-checked, installed when missing)
 	// before sessions start.
@@ -548,9 +549,7 @@ func validatePaths(cfg *Config) error {
 	if cfg.Tools.Python.Mode == "venv" && cfg.Tools.Python.EnvDir == "" {
 		return fmt.Errorf("tools.python.mode=venv 必须同时设置 tools.python.env_dir（虚拟环境目录，不存在时会自动创建）")
 	}
-	if cfg.Tools.Python.Mode == "conda" && cfg.Tools.Python.EnvDir == "" && cfg.Tools.Python.CondaEnv == "" {
-		return fmt.Errorf("tools.python.mode=conda 必须设置 tools.python.env_dir（环境前缀）或 tools.python.conda_env（环境名）")
-	}
+	// mode=conda 全空是合法的：用 conda 的 base 环境（用户本地本来就有 base）。
 	if cfg.Tools.Python.InstallTimeout < 0 {
 		return fmt.Errorf("tools.python.install_timeout 不能为负（当前 %d）", cfg.Tools.Python.InstallTimeout)
 	}

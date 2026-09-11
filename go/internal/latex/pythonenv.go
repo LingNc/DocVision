@@ -1,6 +1,7 @@
 package latex
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -37,6 +38,11 @@ type PythonEnv struct {
 	prepErr   string
 	installed map[string]bool
 	failed    map[string]string
+
+	// conda resolution has its own once/mutex: Interpreter() may be called
+	// while mu is held (Prepare), so it must not take mu again.
+	condaOnce sync.Once
+	condaDir  string
 }
 
 // autoInstall reports the resolved tools.python.auto_install (default on).
@@ -83,6 +89,11 @@ func (p *PythonEnv) Interpreter() string {
 		}
 		return p.cfg.Interpreter
 	}
+	if p.cfg.Mode == "conda" {
+		if dir := p.condaPrefix(); dir != "" {
+			return filepath.Join(dir, "bin", "python3")
+		}
+	}
 	if p.cfg.EnvDir != "" {
 		cand := filepath.Join(p.cfg.EnvDir, "bin", "python3")
 		if pathExists(cand) {
@@ -95,14 +106,93 @@ func (p *PythonEnv) Interpreter() string {
 	return ""
 }
 
+// condaPrefix resolves the conda environment prefix.
+//
+// mode=conda with NOTHING configured means the user's BASE environment
+// (the common case: "我本地就有 conda 的 base"), so an empty config is a
+// valid, working setup instead of a validation error. conda_env: base /
+// root mean the same thing.
+func (p *PythonEnv) condaPrefix() string {
+	p.condaOnce.Do(func() {
+		if p.cfg.EnvDir != "" {
+			p.condaDir = p.cfg.EnvDir
+			return
+		}
+		base := condaBaseDir()
+		name := strings.TrimSpace(p.cfg.CondaEnv)
+		if name == "" || name == "base" || name == "root" {
+			p.condaDir = base
+			return
+		}
+		if cand := filepath.Join(base, "envs", name); pathExists(cand) {
+			p.condaDir = cand
+			return
+		}
+		p.condaDir = condaEnvPrefix(name)
+	})
+	return p.condaDir
+}
+
+// condaBaseDir runs `conda info --base` once per process.
+func condaBaseDir() string {
+	condaBaseOnce.Do(func() {
+		out, err := runHostTimeout("conda", 30*time.Second, "info", "--base")
+		if err != nil {
+			return
+		}
+		line := firstLine(out)
+		if line == "" {
+			return
+		}
+		if abs, aerr := filepath.Abs(line); aerr == nil {
+			line = abs
+		}
+		condaBase = line
+	})
+	return condaBase
+}
+
+// condaEnvPrefix finds a named environment through `conda env list --json`
+// (needed when the environment lives outside <base>/envs, e.g. -p prefixes
+// or envs_dirs).
+func condaEnvPrefix(name string) string {
+	out, err := runHostTimeout("conda", 30*time.Second, "env", "list", "--json")
+	if err != nil {
+		return ""
+	}
+	var parsed struct {
+		Envs []string `json:"envs"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &parsed); jerr != nil {
+		return ""
+	}
+	for _, dir := range parsed.Envs {
+		if filepath.Base(dir) == name && pathExists(dir) {
+			return dir
+		}
+	}
+	return ""
+}
+
+var (
+	condaBaseOnce sync.Once
+	condaBase     string
+)
+
+// resetCondaCache clears the process-wide conda base cache (tests).
+func resetCondaCache() {
+	condaBaseOnce = sync.Once{}
+	condaBase = ""
+}
+
 // BinDir is the directory that must be prepended to PATH inside the
 // sandbox ("" for a plain system interpreter, which is already on PATH).
 func (p *PythonEnv) BinDir() string {
 	if p == nil {
 		return ""
 	}
-	if p.cfg.EnvDir != "" && p.cfg.Mode != "system" {
-		return filepath.Join(p.cfg.EnvDir, "bin")
+	if prefix := p.PrefixDir(); prefix != "" {
+		return filepath.Join(prefix, "bin")
 	}
 	return ""
 }
@@ -111,8 +201,11 @@ func (p *PythonEnv) BinDir() string {
 // absolute path (a venv/conda prefix is not relocatable: its scripts
 // hardcode the path they were created with).
 func (p *PythonEnv) PrefixDir() string {
-	if p == nil || p.cfg.EnvDir == "" || p.cfg.Mode == "system" {
+	if p == nil || p.cfg.Mode == "system" {
 		return ""
+	}
+	if p.cfg.Mode == "conda" {
+		return p.condaPrefix()
 	}
 	return p.cfg.EnvDir
 }
