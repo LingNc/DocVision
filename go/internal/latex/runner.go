@@ -435,7 +435,6 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	// Default console behaviour mirrors img2text: one compact progress
 	// line per phase; every detail line goes to the log file only.
 	verbose := opts.Verbose
-	done0 := len(all) - len(pending) // 断点续传：此前已完成数
 	// Restore the PREVIOUS quiet state: RunBook already silenced the
 	// console for its compact phase lines, and hard-coding SetQuiet(false)
 	// here re-enabled info-level output for every later phase (style,
@@ -458,7 +457,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 			sort.Slice(samples, func(i, j int) bool { return samples[i].name < samples[j].name })
 			r.detectWatermarkPhase(samples)
 		}
-		r.classifyPhase(pending, mdCache, prog, progDir, verbose, done0)
+		r.classifyPhase(pending, mdCache, prog, progDir, verbose)
 	}
 	if opts.Step == "classify" {
 		if !verbose {
@@ -469,7 +468,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	}
 
 	// Phase 2: per-class processing.
-	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose, done0)
+	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose)
 
 	if !verbose {
 		r.log.SetQuiet(prevQuiet)
@@ -582,13 +581,38 @@ func (p *liveProgress) Close() {
 	})
 }
 
+// classifyProgressText / processProgressText render the compact phase
+// lines of a level-1 run. `done` and `total` are about THIS RUN only:
+// the resumed baseline is reported once on the "Already done" line, not
+// folded into the progress numbers (folding it in made a resumed run
+// open at [8874/9062] 97.93% while 396 images were left).
+func classifyProgressText(done, total, failed, running int) string {
+	pct := 0.0
+	if total > 0 {
+		pct = float64(done) * 100.0 / float64(total)
+	}
+	return fmt.Sprintf("[classify %d/%d] %.2f%% (failed: %d, running: %d)", done, total, pct, failed, running)
+}
+
+func processProgressText(done, total, ok, errors, warned, raster, running int) string {
+	pct := 0.0
+	if total > 0 {
+		pct = float64(done) * 100.0 / float64(total)
+	}
+	if ok < 0 {
+		ok = 0
+	}
+	return fmt.Sprintf("[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, raster: %d, running: %d)",
+		done, total, pct, ok, errors, warned, raster, running)
+}
+
 // classifyPhase starts here
 // ------------------------------------------------------------------
 // phase 1: classification
 // ------------------------------------------------------------------
 
 func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir string, verbose bool, done0 int) {
+	prog map[string]*imageProgress, progDir string, verbose bool) {
 
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
@@ -600,9 +624,10 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	// done0：断点续传时此前已完成的部分——进度直接从它起跳，与
-	// "Already done" 行呼应，不再单列 skip。
-	total, done, failed, running := len(pending)+done0, done0, 0, 0
+	// 进度只统计本次要处理的部分："Already done: N | to process: M" 那行
+	// 已经把断点续传的基数说过一次，混进进度线会让续跑一上来就 97.93%
+	// （用户："只看这次的 to process"）。
+	total, done, failed, running := len(pending), 0, 0, 0
 	var progLive *liveProgress
 	progress := func() {
 		if progLive != nil {
@@ -616,8 +641,7 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 		mu.Lock()
 		d, f, rn := done, failed, running
 		mu.Unlock()
-		pct := float64(d) * 100.0 / float64(total)
-		return fmt.Sprintf("[classify %d/%d] %.2f%% (failed: %d, running: %d)", d, total, pct, f, rn)
+		return classifyProgressText(d, total, f, rn)
 	})
 	defer progLive.Close()
 	if total > 0 {
@@ -774,7 +798,7 @@ func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, im
 // ------------------------------------------------------------------
 
 func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir, outDir string, compErr error, verbose bool, done0 int) {
+	prog map[string]*imageProgress, progDir, outDir string, compErr error, verbose bool) {
 
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
@@ -786,8 +810,8 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	// done0：断点续传时此前已完成的部分——进度直接从它起跳。
-	total, done, failed, warned, running := done0, done0, 0, 0, 0
+	// 同上：进度只算本次要处理的（基数是 "Already done" 行的事）。
+	total, done, failed, warned, running := 0, 0, 0, 0, 0
 	// raster 计数：保留原图的图（档位1 每张都生成解释文本），单独显示
 	// 让档位1 的控制台能看出"矢量 vs 原图"的比例。
 	raster := 0
@@ -799,9 +823,6 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			continue // not classified yet
 		}
 		total++
-		if p.Class == ClassRaster && p.Status == "done" {
-			raster++ // 上次已完成的 raster（断点续传）
-		}
 	}
 	var progLive *liveProgress
 	progress := func() {
@@ -816,13 +837,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		mu.Lock()
 		d, f, w, rn, rs := done, failed, warned, running, raster
 		mu.Unlock()
-		pct := float64(d) * 100.0 / float64(total)
-		ok := d - f - w
-		if ok < 0 {
-			ok = 0
-		}
-		return fmt.Sprintf("[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, raster: %d, running: %d)",
-			d, total, pct, ok, f, w, rs, rn)
+		return processProgressText(d, total, d-f-w, f, w, rs, rn)
 	})
 	defer progLive.Close()
 	if total > 0 {

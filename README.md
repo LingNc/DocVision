@@ -252,7 +252,7 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 - **图片查看工具**：`image_context` 只给文本上下文与前后引用（不看像素），`view_image` 才看图片（支持百分比裁剪与放大）；两者都接受**裸文件名**——`view_image` 以本文档的图片目录为根直接拼接，不做搜索，名字错了就报错
 - **编译与看图分离**：`compile {path:"figure.tex"}` 只返回编译日志、产物名与页数，看图统一用 `view_pdf {path:"standalone.pdf", page:1}`（裁剪 + zoom 直接从 PDF 高分辨率重渲染，真放大，不是拉伸像素）
 - **可分离工具**：会话工具按需注册（编译、提交确认、grep、bash 沙箱、受限文件读写、PDF/图片查看等）
-- **断点续传**：档位2 逐图进度、档位1 逐阶段进度（`progress.json`）
+- **断点续传**：档位2 逐图进度、档位1 逐阶段进度（`progress.json`）；控制台进度行只算**本次**要处理的部分（`Already done: N | To process: M` 给出基数）
 - **工具轮次软限制**：`max_tool_rounds` 限制的是**assistant 轮次**（一轮里发多少个 tool_call 都只算 1 次）。用满 `sessions.*.tool_rounds_warn_ratio`（默认 0.7）后，每轮往会话里更新一条提醒（"已用 N/M 轮，还剩 K 轮，请合理使用并尽快提交"）；到达 `max_tool_rounds` 后**还能再用 `sessions.*.tool_rounds_grace` 轮**（默认 20，负值=不留宽限），此后才真正禁用工具、逼最终文本。提醒是**原地替换**同一条消息，不膨胀历史也不破坏前缀缓存。
 - **看图软预算**（按"对象"计数，长文档不吃亏；矢量图会话在**首次提示词里就一次性告知**额度，不再每次看图都重复提醒）：`tools.view.image_max`（默认 30）是**同一张图片文件**的软上限，`tools.view.pdf_max`（默认 25）是**同一个 PDF 的每一页**的软上限——所以一本书里每页各有 25 次额度，而不是整个会话共用一个池子。用满 `tools.view.warn_ratio`（默认 0.7，向上取整）起，每次 `view_image`/`view_pdf` 的结果里附带"已用 N/30，仅剩 K 次"（30×0.7=21 → 从第 21 次起提醒），超出后提示"预算已用尽，请尽快完成并提交"——**只提醒，不拦截调用**（0=默认值，负值=不限）。
 - **原图尺寸测量**：每次 `view_image` 都会实时算出原图的**印刷尺寸**并回给模型——位图先解析软链、再按**文件名**匹配 `paths.mineru_output` 下 MinerU 解析（`content_list.json` 的 bbox + `layout.json` 的页尺寸；位图被 images 阶段拷进项目后名字不变，靠文件名就能接回解析），显示标准为 **mm 优先**：`ORIGINAL FIGURE SIZE: 36.9mm x 20.2mm on the page (about 21% of the page width); bitmap 284x156px, effective resolution 195 dpi, aspect 1.82:1`（高度按位图自身比例换算，因为 MinerU 的块 bbox 不紧贴图）。**裁剪之后还会给出当前裁剪区域的尺寸**（`this crop is 18.4mm x 10.1mm on the page`），因为"现在看的是多大一块"正是复现细节时需要的；真的找不到解析（比如位图不在本次解析里）才退化为只给宽高比。
@@ -314,7 +314,7 @@ docvision latex --verbose      # 详细控制台输出（默认仅显示进度�
 
 日志等级：`info`（默认，进度与警告/错误）< `debug`（每轮请求/响应摘要、提示词、工具调用、**最终接收内容**、编译结果与警告、Mermaid/LaTeX 校验结论）< `trace`（再加流式分片进展行等噪音）。全部写入日志文件（`[DEBUG]`/`[TRACE]` 前缀，控制台输出不受影响），每次请求/响应记录：使用的模型、`stream`/`max_tokens`/`temperature`/`thinking`/`reasoning_effort` 实际取值、消息数与上下文估算、耗时、finish_reason、输出与思维链字符数、provider 返回的 token 用量（含 `reasoning_tokens`）。LaTeX 编译只记 `OK|FAILED + 耗时 + warnings=N + 警告清单`（失败时附给 AI 的错误原文），完整编译日志不会写入。可在日志里完整回放某个会话的推理与工具使用过程。
 
-默认控制台输出与 img2text 一致：每个阶段只显示一行实时进度（如 `[classify 12/345] 3.48% (failed: 0, running: 2)`；process 行还带 `done/errors/fallback/raster` 计数），逐图明细写入日志文件；`--verbose` 恢复逐图控制台输出。
+默认控制台输出与 img2text 一致：每个阶段只显示一行实时进度（如 `[classify 12/345] 3.48% (failed: 0, running: 2)`；process 行还带 `done/errors/fallback/raster` 计数），逐图明细写入日志文件；`--verbose` 恢复逐图控制台输出。**进度行只统计本次运行**：断点续传时"此前已完成多少"只在 `Already done: N | to process: M` 那一行出现，所以续跑的第一行是 `[0/396] 0.00%`，而不是一上来就 97%。
 
 `--debug`（或 `options.log_level: debug`）下，临时工作目录与会话转录**必定保留**（`latex.keep_temp_dirs` / `latex.keep_session_records` 打开也保留），因此一次完整运行事后可以逐会话复现。
 

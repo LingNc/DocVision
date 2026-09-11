@@ -254,8 +254,7 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 			logger.SetQuiet(true)
 		}
 		runWorkers(client, pending, imagesDir, mdCache, progressRoot,
-			logger, &progressData, &progressMu, cfg.Options, opts.Quiet,
-			len(allTasks)-len(pending))
+			logger, &progressData, &progressMu, cfg.Options, opts.Quiet)
 		if opts.Quiet {
 			logger.SetQuiet(false)
 		}
@@ -404,7 +403,6 @@ func runWorkers(
 	progressMu *sync.Mutex,
 	opts config.OptionsConfig,
 	quiet bool,
-	skipped int,
 ) {
 	results := make(chan runResult, len(pending))
 	var wg sync.WaitGroup
@@ -420,15 +418,17 @@ func runWorkers(
 	for i := 1; i <= concurrency; i++ {
 		tidPool <- i
 	}
-	// done0：断点续传时此前已完成数——进度直接从它起跳。
-	total := len(pending) + skipped
-	doneCount := skipped
+	// 进度只统计**本次运行**：断点续传时"此前已完成"的数已经在
+	// "Already done: N | To process: M" 那行里说过一次，再混进进度线会
+	// 让续跑一上来就显示 97.93%（用户："按照这次的算，不要按照总的加上
+	// done，只看这次的 to process"）。所以 total = 本次待处理数，
+	// doneCount 从 0 起。
+	total := len(pending)
 	var running atomic.Int64
 
 	// Show initial progress immediately before starting any workers.
 	if quiet && total > 0 {
-		fmt.Fprintf(os.Stdout, "[%d/%d] %.2f%% (done: %d, errors: 0, warns: 0, running: 0)",
-			doneCount, total, float64(doneCount)*100.0/float64(total), doneCount)
+		fmt.Fprint(os.Stdout, progressLine(0, total, 0, 0, 0, 0))
 		os.Stdout.Sync()
 	}
 
@@ -437,7 +437,7 @@ func runWorkers(
 	go func() {
 		defer writerWG.Done()
 		count := 0
-		doneCount := skipped // 断点续传：从已完成数起跳
+		doneCount := 0 // 只数本次处理的
 		errorCount := 0
 		warnCount := 0
 
@@ -492,21 +492,17 @@ func runWorkers(
 			logger.Log(0, "RESULT:\n"+preview)
 			logger.Log(0, strings.Repeat("-", 50))
 
-			if quiet {
+			if quiet && total > 0 {
 				// Print progress with 2-decimal precision on every update.
-				if total > 0 {
-					pct := float64(doneCount) * 100.0 / float64(total)
-					fmt.Fprintf(progressOut, "\r[%d/%d] %.2f%% (done: %d, errors: %d, warns: %d, running: %d)",
-						doneCount, total, pct, doneCount-errorCount, errorCount, warnCount,
-						running.Load())
-					progressOut.Flush()
-				}
+				fmt.Fprint(progressOut, "\r"+progressLine(doneCount, total, doneCount-errorCount,
+					errorCount, warnCount, int(running.Load())))
+				progressOut.Flush()
 			}
 		}
 		if quiet && total > 0 {
 			// Final progress line (ensure 100% is printed).
-			fmt.Fprintf(progressOut, "\r[%d/%d] 100.00%% (done: %d, errors: %d, warns: %d, running: 0)\n",
-				total, total, doneCount-errorCount, errorCount, warnCount)
+			fmt.Fprint(progressOut, "\r"+progressLine(total, total, doneCount-errorCount,
+				errorCount, warnCount, 0)+"\n")
 			progressOut.Flush()
 		}
 	}()
@@ -570,6 +566,23 @@ func runWorkers(
 	// close(results) signals the writer goroutine to exit on its next
 	// range iteration; wg.Wait above guarantees no new sends are pending.
 	writerWG.Wait()
+}
+
+// progressLine renders the ONE compact progress line of the img2text
+// run. Every number is about THIS RUN only (processed, total = to process,
+// successes, errors, warns, running): the resumed baseline is reported
+// once on the "Already done" line instead — mixing it in made a resumed
+// run open at e.g. [8874/9062] 97.93% while only 396 images were left.
+func progressLine(processed, total, ok, errors, warns, running int) string {
+	pct := 0.0
+	if total > 0 {
+		pct = float64(processed) * 100.0 / float64(total)
+	}
+	if ok < 0 {
+		ok = 0
+	}
+	return fmt.Sprintf("[%d/%d] %.2f%% (done: %d, errors: %d, warns: %d, running: %d)",
+		processed, total, pct, ok, errors, warns, running)
 }
 
 // expectedImgPath returns the image path that a historical record was

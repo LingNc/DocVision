@@ -3,7 +3,7 @@
 > 版本号即 git 标签（`git tag`）：`v1.5.0-beta.N` 是 1.5.0 测试线，`v1.3.0-beta`/`v1.4.0-beta` 是 v1.3/v1.4 的重打测试标签。
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
-## [Unreleased]
+## [v1.5.0-beta.4] - 2026-09-11
 
 ### Added
 
@@ -40,6 +40,8 @@
 - **账户级错误不再当作限流重试**：`余额不足/无可用资源包/请充值/配额/insufficient/quota/billing` 等直接判定为 `[SESSION_INSUFFICIENT_BALANCE]` 并立即返回（2026-09-11 实测：账户余额耗尽的 3h31m 里，两个转换会话在冻结的请求体上空转 239 次，直到把 `rate_limit_retries: 100` 用完才报错）。
 
 ### Fixed
+
+- **续跑时的进度行把"以前已经做完的"也算进去了**（用户："img2text 这边继续的时候，按照这次的算，不要按照总的加上 done，只看这次的 to process"，实测输出 `Already done: 8666 | To process: 396` 之后紧跟 `[8874/9062] 97.93% (done: 8874, …)`）：进度线的分子分母现在**只算本次运行**——`[208/396] 52.53% (done: 206, errors: 2, warns: 0, running: 10)`，断点续传的基数只在 `Already done: N | To process: M` 那一行出现（那行本来就说了）。`latex` 档位1 的 `[classify d/total]` / `[process d/total]` 同一约定（原实现把 `done0` 混进 total 与 done，续跑一开就接近 100%）；渲染改成 `img2text.progressLine` / `latex.classifyProgressText` / `latex.processProgressText` 三个纯函数，回归测试 `TestProgressLineCountsThisRunOnly`、`TestResumedRunProgressIgnoresAlreadyDone`（真跑一遍 `Run`：1 张已完成 + 1 张待处理，抓 stdout 断言 `[1/1]`、不出 `[2/2]`）、`TestPhaseProgressCountsThisRunOnly`。
 
 - **章节转换的 `compile` 一直编译的是裸 `\input` 分片，而不是包了 `\documentclass` 的 wrapper**（真实缺陷，2026-09-11 运行里**87/87 次章节编译全部失败**，直接把三个转换会话逼成 133/80/98 轮的盲目编译-修改循环，最后两个会话因额度耗尽而失败、只转换成功 1/3 章）：`chapterScratch` 明明写出了 `<章>_wrapper.tex`（`\documentclass{book}` + `\input{<章>.tex}`），runner 自己的核对（`book.go` 三处）也编译 wrapper，唯独**交给会话的 `compile` 工具**的 `MainFile` 写成了 `base + ".tex"`，于是每次都在编译一个没有前导的分片——报错正是会话看到的 `Undefined control sequence`（首个 `\section`/`\tocpage`）与把它误导成"类加载失败"的 `The font size command \normalsize is not defined`（模型把 `\begin{document}` 自己写进分片后触发）。现在 `CompileChapterTool` 区分 `MainFile`（会话自己的分片）与 `WrapperFile`（真正编译的 wrapper），失败回执也标明编译的是哪个文件。回归测试 `TestCompileChapterToolUsesWrapper` 同时钉住"编译 wrapper 成功 / 只编译分片必须失败"两个方向。
 - **退避时长溢出成负数**（日志里出现 `[RateLimit] 等待重试: -2562047h47m16.854775808s` = `math.MinInt64`）：`time.Duration(1<<retry) * 2 * time.Second` 在 retry ≥ 55 时溢出 int64，`time.Sleep` 拿到负数等于**完全不等待**（237 次限速等待里有 26 次是负值）。新增 `backoffWait(attempt, base, max)`：先钳位移再乘、越界一律取上限。

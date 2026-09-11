@@ -43,11 +43,23 @@ v1.5+（第二十八批）：章节会话的临时工作区 + 只交两个路径
 
 
 
+v1.5+（第二十九批）：限流降 20 + raster 图说清 + 进度行只算本次运行 + 部署配置审计 + 打 v1.5.0-beta.4——用户三点："这个速率限制和余额限制还不一样。可以降到 20 吧"／"需要嵌入的图像怎么办？raster 的图像这边转换章节里面是放在章节的文件夹里面的吗？"／"img2text 这边继续的时候，按照这次的算，不要按照总的加上 done，只看这次的 to process"（实测输出 `Already done: 8666 | To process: 396` 紧跟 `[8874/9062] 97.93% (done: 8874, errors: 0, warns: 0, running: 10)`），另加"看一下我的部署工作区的 config 是否更新到了最新版"。
+
+① **限流重试 100 → 20**：账户级错误（余额/配额）早在第二十六批就改成直接判定 `[SESSION_INSUFFICIENT_BALANCE]` 立即返回、**不走重试**，所以 `rate_limit_retries` 只管真 429；20 次指数退避（封顶 60s）足够自恢复，也让真被限流的运行早点暴露而不是安静熬几小时。改动三处：`session.NewClient` 里 `rateLimit <= 0` 的兜底、`internal/config/default.yaml`、`config.example.yaml`，README 配置表默认值列同步（并写明"余额/配额类不消耗重试"），现场 `config.yaml` 第 147 行显式写的 100 也改成 20（先备份 `config.yaml.bak-rate`）。
+
+② **raster 图的位置（回答"放在章节文件夹里吗"）**：图的真身一直在 `source/images/<书名>/<sha>.jpg`，章节 `.tex` 按 markdown 原路径 `\includegraphics{images/<书名>/<sha>.jpg}` 引用，**既不进章节文件夹也不进提交**；会话里能编译是因为工作树的 `images/`、`figures/` 软链到 `source/` 且 wrapper 带 `\graphicspath{{figures/}}`，`assemble` 建 build 树时把 `source/{figures,images}` 原样复制（相对路径一致），所以引用一路有效到 `out/`。`<章>/` 文件夹的用途是真正需要 `\input` 的分片（超长表格等）。checker 的只读视图里**没有图**（就是"两个文件 + 一个文件夹"），因此 `latex_checker.system.md` 新增一段：图不在视图内、引用图是正常的、**不要报"图缺失/读不到"**（引用有效性由章节自己的 `compile` 保证），并把"坏 LaTeX"里的措辞收紧为"`\includegraphics{}` 空参数才算坏"；`latex_convert.system.md` 也写明"按 markdown 原路径引用、**绝不**把图片拷进提交"。新增真实验证 `TestChapterWorkTreeResolvesRasterImages`（真造 PNG、真 xelatex 编译带 `\includegraphics` 的章节通过、提交后章节文件夹里没有 images）。
+
+③ **进度行只算本次运行**：`img2text.runWorkers` 与 `latex` 档位1 的 `classifyPhase`/`processPhase` 此前把"断点续传已完成的数"（`skipped`/`done0`）混进进度线的分子分母（`total = len(pending)+done0`、`doneCount` 从 `done0` 起跳），于是续跑一开就显示接近 100%，用户看着困惑。现在 `total = len(pending)`、`done = 0` 起，断点基数只出现在 `Already done: N | To process: M` 那一行；渲染抽成 `img2text.progressLine(processed,total,ok,errors,warns,running)`、`latex.classifyProgressText`、`latex.processProgressText` 三个纯函数。回归测试：`TestProgressLineCountsThisRunOnly`（格式与 0/0 不除零）、`TestResumedRunProgressIgnoresAlreadyDone`（真跑 `Run`：1 张历史已完成 + 1 张待处理 + mock 模型服务，抓 stdout 断言出现 `Already done: 1 | To process: 1`、`[1/1] 100.00%`，且不出现 `[2/2]`）、`TestPhaseProgressCountsThisRunOnly`（含 ok 为负时钳 0）。
+
+④ **部署配置审计（只读比对脚本）**：把 `/home/share/samba-share/PDF2MD/config.yaml` 与 `internal/config/default.yaml`、`config.example.yaml` 逐键展开对比——`config_version: 6` 与程序要求一致；**模板里的键部署一个不缺**（没有需要补的新配置项）；部署"多"出来的键全部合法（`latex.sessions.*.max_tokens`、`models.*.thinking` 是自由 map，`clear_thinking`/`type` 写在里面、`tool_stream`/`reasoning_effort`/`verifier.temperature` 都是现役字段），没有死键要清理；值差异属于用户自己的选择（`level: 1`、`concurrency: 5`、`raster_dpi: 180`、`tools.python.mode: conda`、模型与 key、超时放宽），其中两处是模板默认值漂移、已提示用户自行决定：`models.text|checker|classifier.model` 部署仍是 `Qwen/Qwen3.5-27B`（模板已升 `3.6`）、`latex.compile.max_fix_rounds` 部署 8（模板/现行 40）。
+
+⑤ **发布**：`v1.5.0-beta.4`（2026-09-11 打标签，覆盖第十八～二十九批）；CHANGELOG 的 `[Unreleased]` 就地改名为该版本小节（节日期取标签创建日期），AGENTS.md 发布线段落同步。
+
 ---
 
 ## 发布线与 CHANGELOG（原文）
 
-**发布线与 CHANGELOG**：v1.5.0 测试线，当前标签 **`v1.5.0-beta.3`**。各标签**实际**覆盖范围（按提交可达性判定，非按文档批次号）：`v1.2.0`＝LaTeX 首版（两档位/会话基础设施/模型注册表/verify，未单独打标签），`v1.3.0-beta`＝自助化 + 样式虚拟工作区 + 字体 + 每章 checker + view_page 按需渲染，`v1.4.0-beta`＝img2text 按类型嵌入 + TikZ 编译校验（仅一个提交），`v1.5.0-beta.1`＝嵌入类型细分/styled 标记/风格统一/preflight/chapter_granularity/水印工作记忆/跨页图表拼接/doc_search/tools 块/配置 v2 等，`v1.5.0-beta.2`＝第一～三批（流式接收+thinking、日志三级 trace、SVG 多后端、编译警告反馈、多工具图片轮 400、文本图只提取文本、预览图、classify 起始行），`v1.5.0-beta.3`＝**第四～十七批**（JSONL 转录起，至 part 级页码定位/临时目录与保留开关/逐章私有工作视图）。CHANGELOG 已按标签分节（`v1.2.0`（未打标签，附注说明）/`v1.3.0-beta`/`v1.4.0-beta`/`v1.5.0-beta.1`/`.2`/`.3` + 历史各节）：条目按**引入该条的提交**归属到对应标签，节日期取标签创建日期（脚本用 `git log -S` 逐条回溯 + 提交区间映射生成，可复核）；`v1.5.0-beta.2` 及更早标签保持不动。运行目录：`/home/share/samba-share/PDF2MD`（config.yaml 与 docvision 二进制随代码更新）。
+**发布线与 CHANGELOG**：v1.5.0 测试线，当前标签 **`v1.5.0-beta.4`**。各标签**实际**覆盖范围（按提交可达性判定，非按文档批次号）：`v1.2.0`＝LaTeX 首版（两档位/会话基础设施/模型注册表/verify，未单独打标签），`v1.3.0-beta`＝自助化 + 样式虚拟工作区 + 字体 + 每章 checker + view_page 按需渲染，`v1.4.0-beta`＝img2text 按类型嵌入 + TikZ 编译校验（仅一个提交），`v1.5.0-beta.1`＝嵌入类型细分/styled 标记/风格统一/preflight/chapter_granularity/水印工作记忆/跨页图表拼接/doc_search/tools 块/配置 v2 等，`v1.5.0-beta.2`＝第一～三批（流式接收+thinking、日志三级 trace、SVG 多后端、编译警告反馈、多工具图片轮 400、文本图只提取文本、预览图、classify 起始行），`v1.5.0-beta.3`＝**第四～十七批**（JSONL 转录起，至 part 级页码定位/临时目录与保留开关/逐章私有工作视图），`v1.5.0-beta.4`＝**第十八～二十九批**。CHANGELOG 已按标签分节（`v1.2.0`（未打标签，附注说明）/`v1.3.0-beta`/`v1.4.0-beta`/`v1.5.0-beta.1`/`.2`/`.3` + 历史各节）：条目按**引入该条的提交**归属到对应标签，节日期取标签创建日期（脚本用 `git log -S` 逐条回溯 + 提交区间映射生成，可复核）；`v1.5.0-beta.2` 及更早标签保持不动。运行目录：`/home/share/samba-share/PDF2MD`（config.yaml 与 docvision 二进制随代码更新）。
 
 
 
