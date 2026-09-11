@@ -15,7 +15,7 @@
   - **提示词集中管理** `go/internal/prompts/templates/*.md`：`prompts.Must/Render` + 注册表（`Vars`/`MustMention`/`RetiredNames`）+ 4 条守护测试；**禁止**再往会话源码里内联大段提示词，**禁止**出现退役工具名。
   - **虚拟工作区**：每会话一张挂载表（`Runner.sessionMounts` 是唯一来源），`work:`（可写：逐章转换/修复会话是临时工作区 `work/temp/conv_<章>/work`，checker 会话没有可写挂载点、只有只读视图 `work/views/checker_<章>`）、`project:`（最小只读视图）、`source:`（原书 PDF 视图）；会话 bash 在 **bubblewrap** 里看到同一棵窄树（无网络），`/tmp` 是**会话私有持久目录**；`tools.python` 给沙箱内提供 Python 环境（`mode: system|venv|conda`，conda 默认 base；conda 不在 PATH 时自动探测 `~/miniconda3`/`~/anaconda3`/`/opt/conda` 等常见前缀，找不到则**明确警告**而不是静默降级；宿主侧自动 pip 安装会把模块名换算成 PyPI 包名（`PIL`→`Pillow`、`fitz`→`PyMuPDF`），遇 PEP 668 externally-managed 解释器自动补 `--break-system-packages`，镜像可由 `tools.python.pip_index_url` 指定）。
   - **插图就位**：images 阶段把每条被 md 引用的插图按 **md 相对路径**铺进项目树（`<proj>/source/images/<书>/<file>`，逐文件软链到全局 `paths.images_dir`，失败则复制；幂等）。章节工作区、`assemble` 的 build 树、样式会话的 `view_image` 全靠这棵树解析——它没铺好时会话会"拿着 md 里的正确路径却报文件不存在"。
-  - **看图/尺度**：`view_pdf`（自己的产物与原书同一工具，回执给 mm）、`view_image`（原图 + 实测印刷尺寸 mm；找不到文件时回报目录里真实存在的名字）、`list_source_pages`/`doc_search`（原书页索引）；看图有软预算（`tools.view.*`，只提醒不拦截）。
+  - **看图/尺度**：`view_pdf`（自己的产物与原书同一工具，回执给 mm）、`view_image`（原图 + 实测印刷尺寸 mm；路径**两种写法并存**——md 里的引用 `images/<书>/<file>` 或裸文件名，裸名字在 `Root+Subject` 内深度受限唯一匹配、同名多份报错列出候选；找不到文件时回报目录里真实存在的名字）、`list_source_pages`/`doc_search`（原书页索引）；看图有软预算（`tools.view.*`，只提醒不拦截）。
   - **编译**：通用 `compile {path, engine, passes, bib, shell_escape, args, timeout}`（引擎 latexmk/xelatex/pdflatex/lualatex 可现场选），章节 `compile` 编译 wrapper 并同样接受 `engine/passes/args`；成功只报产物名 + 页数 + 一句 "See it with view_pdf"。
   - **详细批次历史（第一批～第二十七批，原文）** → **`docs/agent-batch-history.md`**。查设计理由、历史事故根因时读它；AGENTS.md 只写现状，不再堆批次流水。
 
