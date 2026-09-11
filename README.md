@@ -94,8 +94,11 @@ cd 项目目录 && docvision workflow
 # 从原始文档直接到 LaTeX（自动补跑 分割→MinerU→整理 前置流程）
 docvision latex --project 我的书 /path/to/book.pdf
 
-# 只看 AI 会话做了什么（转录渲染成可浏览页面）
+# 只看 AI 会话做了什么（转录渲染成可浏览页面：左栏按项目→流程阶段分组）
 docvision sessions
+
+# 只看这次跑了多少 token、命中多少缓存、花了多少钱（按阶段统计 + 每图/每页均摊）
+docvision sessions --cost
 
 # 指定配置文件（默认当前目录 config.yaml，其次 ~/.docvision/config.yaml）
 docvision workflow -c my.yaml
@@ -110,9 +113,9 @@ docvision workflow -c my.yaml
 | `docvision mineru` | 调用 MinerU API 解析文件 |
 | `docvision organize` | 整理解析结果 |
 | `docvision img2text` | AI 图片转文本（`--test` 测试模式） |
-| `docvision latex` | LaTeX 输出（可直接传 PDF/DOCX 自动补前置流程，或传 md 名只处理指定文件） |
+| `docvision latex` | LaTeX 输出（可直接传 PDF/DOCX 自动补前置流程，或传 md 名只处理指定文件；跑完打印按阶段 AI 用量与费用，可配 `latex.figure_check` 开逐图校验、`preview.enabled` 边跑边看会话） |
 | `docvision verify` | AI 核对输出与原图（默认关闭；只能显式运行，不参与自动流程） |
-| `docvision sessions` | 会话预览：把 AI 会话转录渲染成可浏览页面（静态导出 / 本地实时服务，含 token/缓存/时延指标） |
+| `docvision sessions` | 会话预览：把 AI 会话转录渲染成可浏览页面（静态导出 / 本地实时服务，含 token/缓存/时延/费用指标；`--cost` 只出费用报告） |
 | `docvision analyze` | 分析日志（`--progress` 仅进度，`--all` 汇总历史，`--logfile` 指定日志） |
 | `docvision splitlog` | 按线程 ID 拆分日志（`--logfile` / `--output-dir`） |
 | `docvision init` | 生成配置模板 |
