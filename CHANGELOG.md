@@ -10,6 +10,8 @@
 - **同一份目录在 Windows 与 Linux 上轮流跑时，切分缓存互相作废、每个平台都整库重切一遍**。`split` 的 manifest 缓存键里存的是"调用方拿到的源路径"原样字符串，Windows 是 `files\书.pdf`、POSIX 是 `files/书.pdf`，`Matches()` 又是严格字符串比较 → 每次换平台全部 miss（部署目录里能直接看到两种写法并存的 manifest：Windows 写下的那份 `source_path` 带反斜杠、权限是 `-rw-rw-r--`，Linux 写下的带斜杠、`-rw-------`）。现在比较与落盘都先做**分隔符无关归一化**（`\`→`/`、折叠 `./` 与重复斜杠），旧 manifest 也照样命中；实测部署目录 `split_files/` 里 60 份 manifest（**36 份 Windows 写、24 份 POSIX 写**）现在**全部 60/60 命中**并通过分片校验——修复前那 36 份在 Linux 上必然全部 miss、反向亦然，来回切平台等于每次整库重切。切分与 img2text 本身没有任何平台分支（`runtime.GOOS` 只出现在测试、`install`、浏览器打开）。
 
 ### Changed
+- **发布只由推标签驱动，移除手动触发入口**：`.github/workflows/release.yml` 删掉 `workflow_dispatch`（曾经用它给老标签补发预发布），`RELEASE_TAG` 只取 `github.ref_name`。手动运行会在 Actions 历史里留下与真实发布无关的记录，且与"发布=推标签"这条纪律冲突；要补发就重新推一个标签。
+
 
 - **发布：带 `-` 的标签也发 Release（预发布），并修正 "Latest" 归属**。此前工作流对含 `-` 的标签直接跳过整个任务，于是 `v1.3.0-beta`～`v1.5.0-beta.4` 即便推上去也**不会**产生任何产物；现在它们照常跑测试、交叉编译 5 个平台并创建 Release，只是标记为预发布（`prerelease: true`、`make_latest: false`），不会被 Badge 成 Latest。不带 `-` 的标签显式 `make_latest: true`——GitHub 默认把**最后发布**的标成 Latest，曾让 `v1.0.1` 顶掉更新的 `v1.1.0`。手动补发老标签：`gh workflow run release.yml -f tag=v1.5.0-beta.4`（`workflow_dispatch` 用当前分支的工作流逻辑，因此能给旧标签补发预发布）；这条路上另修两处：手动运行时必须给 `action-gh-release` 显式 `tag_name`（否则它从 `github.ref` 取到 `refs/heads/master`，报 `GitHub Releases requires a tag`——测试与构建都过、只有建 Release 一步失败），以及 `setup-go` 的 `cache-dependency-path: go/go.sum`（`go.sum` 不在仓库根，缓存一直没命中）。
 
@@ -34,9 +36,6 @@
 - **`thinking.type` 写错会让整轮绘图全部"保留原图"**（用户实测：8/8 张图全 fallback，日志只写"TikZ 未通过"）：现场 `models.drawing.thinking.type: disable`，而服务端只认 `adaptive`/`enabled`/`disabled`，于是每个请求都被 HTTP 400 拒掉（`unknown variant \`disable\`…`），8 张图各耗 90s（含退避重试）后全部回退成原图，看起来像提示词或编译器的问题。现在 `LoadConfig` 校验每个 `models.*.thinking.type`：一眼能认出的笔误（disable/enable/off/on/false/true…）自动纠正成 disabled/enabled 并在 stderr 告警，其余未知取值**直接报错退出**（附模型名与合法取值）；`[vector]` 的失败日志也分清因果——会话/接口错误打"会话/接口错误（不是 TikZ 问题）"并计入 `errors`，只有 TikZ 校验失败才是 `fallback`；另外连续 3 张接口错误且无一成功时判定为环境问题，**停止处理剩下的图片**（剩余保持未处理，修好后重跑自动继续），不再逐张空转。测试 `TestThinkingTypeTypoIsRepairedAndWarns`、`TestThinkingTypeUnknownIsFatal`、`TestThinkingTypeValidValuesKeepWorking`、`TestIsSessionAPIError`、`TestProcessAbortsOnRepeatedAPIErrors`。
 
 - **进度行重复输出**（用户实测 `[classify 8/8] …` 与 `[process 8/8] …` 各出现两遍）：两个阶段在 `wg.Wait()` 之后自己 `progress() + Fprintln(os.Stdout)` 定格，随后 deferred `liveProgress.Close()` 又重画同一行——终端里就是"同一行出现两次"。定格与换行现在只由 `Close()` 负责；管道/日志里连续相同的状态也不再重复整行。测试 `TestLiveProgressNoDuplicateFinalLine`。
-
-### Added
-
 - 会话转录记录**用量与时间戳**：每行写入 `ts`（RFC3339 毫秒），每次 API 请求追加一条 `t="usage"` 行（模型、流式标志、回合、`kind`、`prompt_tokens`、`cached_tokens`、`completion_tokens`、`reasoning_tokens`、`duration_ms`、`ttft_ms`、`finish_reason`）。普通回合、空回复后的强制文本请求（`nudge`）与上下文压缩摘要请求（`compact`）都记，token 统计才不会漏。`t="usage"` 与 `t="meta"` 一样**永不参与回放**（`LoadTranscript` 只认 `t=="msg"`），续跑语义不变。
 - `docvision sessions` 页面新增**会话指标**：输入/输出/思考 tokens、前缀缓存命中率（`Σcached/Σprompt`）、平均首字延迟（流式首增量耗时，本轮新测 `TTFT`）、输出速度（`Σ输出/Σ(耗时−首字)`）、平均耗时、会话跨度，外加可展开的「每次请求明细」表格（标出 `compact`/`nudge`）。侧栏每行给用量摘要、底部给全部会话合计，工具栏重复关键项；`--list` 新增「用量」列（请求数 · 输入/输出 · 缓存命中率 · tok/s）。**旧转录没有用量行时不显示指标**（不拿 0 冒充实测值）。
 

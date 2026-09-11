@@ -37,16 +37,11 @@ fonts/                  AI 字体目录（paths.fonts）：缺字体时按样式
 **带 `-` 的标签发"预发布"（Pre-release），不带 `-` 的标签发正式版**：两者都会真正构建并附上 5 个平台产物，区别只在 Release 的标记——预发布永远不会被标成 "Latest"，正式版则显式标 Latest（GitHub 默认把**最后发布**的那个标成 Latest，曾因此让 `v1.0.1` 抢了 `v1.1.0` 的位置）。
 
 ```bash
-git tag v1.5.0
-git push origin v1.5.0
-
-# 老标签补发（比如打标签时工作流还不会发预发布）：用当前分支的工作流逻辑补跑
-gh workflow run release.yml -f tag=v1.5.0-beta.4
+git tag v1.5.0-beta.5      # 或 v1.5.0
+git push origin v1.5.0-beta.5
 ```
 
-> 手动补发时 `softprops/action-gh-release` 必须显式给 `tag_name`：它默认从 `github.ref` 取标签，而手动运行时的 ref 是 `refs/heads/master`，会直接报 `GitHub Releases requires a tag`（构建、测试、CHANGELOG 抽取都成功，只有建 Release 这一步失败，产物也就不会上传）。
-
-> 只推 `master`（不打标签）**不会**触发任何构建——工作流的触发条件是标签推送。所以"1.1 之后没有任何 Release"通常是标签没推上去，而不是构建失败（可用 `git ls-remote --tags origin` 看远端到底有哪些标签）。
+> 发布**只由推标签驱动**：工作流没有 `workflow_dispatch`，所以不会出现与真实发布无关的手动运行记录（Actions 历史=真实的发布历史）。只推 `master`（不打标签）**不会**触发任何构建——所以"1.1 之后没有任何 Release"通常是标签没推上去，而不是构建失败（用 `git ls-remote --tags origin` 看远端到底有哪些标签）。
 
 ## Python 脚本独立使用
 

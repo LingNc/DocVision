@@ -4,18 +4,9 @@ on:
   push:
     tags:
       - "v*.*.*"
-  # Manual fallback: build a release for any existing tag (e.g. a tag whose
-  # push event was missed, or a tag created before this workflow could
-  # publish pre-releases). Runs the workflow file from the branch it is
-  # dispatched on, so an old tag can be published with the current logic:
-  #   gh workflow run release.yml -f tag=v1.5.0-beta.4
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "要发布的标签（如 v1.5.0-beta.4）"
-        required: true
-        type: string
-
+  # 发布只由"推标签"驱动，不提供手动触发：手动 workflow_dispatch 会在
+  # Actions 历史里留下与真实发布无关的记录。（历史上曾用 dispatch 给老标签
+  # 补发预发布，现已取消；需要补发就重新推一个标签。）
 permissions:
   contents: write
 
@@ -23,7 +14,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
