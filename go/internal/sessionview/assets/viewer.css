@@ -493,3 +493,18 @@ html, body {
   font-family: var(--mono, monospace); word-break: break-all;
 }
 .image-chip { font-family: var(--mono, monospace); }
+
+/* 工具调用卡片：按"工具家族"着色 + 一行摘要（调用过程一眼可读）。 */
+.block.tool-call { border-left: 3px solid var(--border, #e3e8ef); }
+.block.tool-call.fam-shell { border-left-color: #f59e0b; }
+.block.tool-call.fam-write { border-left-color: #3b82f6; }
+.block.tool-call.fam-view { border-left-color: #10b981; }
+.block.tool-call.fam-search { border-left-color: #8b5cf6; }
+.block.tool-call.fam-submit { border-left-color: #ef4444; }
+.block.tool-call.fam-other { border-left-color: #94a3b8; }
+.call-brief {
+  flex: 1 1 auto; min-width: 0;
+  font-family: var(--mono, monospace); font-size: 12px;
+  color: var(--muted, #667085);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

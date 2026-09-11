@@ -1050,6 +1050,53 @@
     return details;
   }
 
+  /*
+   * 工具家族：DSH 的调用卡片一眼能分出"读/写/跑命令/检索"，这里也用同一个
+   * 思路——把工具名归成几族，卡片左侧色条与工具名颜色按族着色。
+   */
+  function toolFamily(name) {
+    var n = String(name || '').toLowerCase();
+    if (n === 'bash' || n === 'compile' || n === 'python') { return 'shell'; }
+    if (n === 'submit') { return 'submit'; }
+    if (n.indexOf('write') === 0 || n.indexOf('edit') === 0) { return 'write'; }
+    if (n.indexOf('grep') === 0 || n.indexOf('doc_search') === 0 ||
+        n.indexOf('list_') === 0 || n.indexOf('search') >= 0) { return 'search'; }
+    if (n.indexOf('read') === 0 || n.indexOf('view_') === 0 || n.indexOf('image_context') === 0) { return 'view'; }
+    return 'other';
+  }
+
+  /*
+   * 调用的"一行摘要"：参数里最能说明这次调用在干什么的那一个（命令/path/
+   * pattern/query），折叠状态下也能读懂调用过程，不必逐个展开 JSON。
+   */
+  function toolSummary(name, argsText) {
+    var obj = null;
+    try { obj = JSON.parse(String(argsText || '{}')); } catch (e) { obj = null; }
+    if (!obj || typeof obj !== 'object') { return ''; }
+    var n = String(name || '').toLowerCase();
+    var pick = function (v) {
+      if (typeof v === 'string') { return v; }
+      if (v === undefined || v === null) { return ''; }
+      try { return JSON.stringify(v); } catch (e) { return ''; }
+    };
+    var v = '';
+    if (n === 'bash' || n === 'python') { v = pick(obj.command || obj.code || obj.script); }
+    else if (n === 'compile') { v = pick(obj.path); }
+    else if (n.indexOf('grep') === 0 || n.indexOf('search') >= 0 || n === 'doc_search') { v = pick(obj.pattern || obj.query); }
+    else if (n.indexOf('write') === 0 || n.indexOf('read') === 0 || n === 'view_pdf' || n === 'view_image') { v = pick(obj.path); }
+    else if (n === 'submit') { v = pick(obj.path || obj.status); }
+    if (!v) {
+      // 兜底：参数里第一个非空字符串（顺序与模型给的参数顺序一致）。
+      var keys = Object.keys(obj);
+      for (var i = 0; i < keys.length; i++) {
+        var cand = pick(obj[keys[i]]);
+        if (cand) { v = cand; break; }
+      }
+    }
+    v = String(v).split('\n')[0].replace(/\s+/g, ' ').trim();
+    return v.length > 90 ? v.slice(0, 90) + '…' : v;
+  }
+
   function toolCallBlock(call) {
     var fn = call.function || {};
     var name = fn.name || '(未命名工具)';
@@ -1057,11 +1104,17 @@
     state.calls.set(call.id, { name: name, seq: state.toolSeq });
 
     var details = document.createElement('details');
-    details.className = 'block tool-call';
+    details.className = 'block tool-call fam-' + toolFamily(name);
     details.open = storeGet('call.' + state.current.id + '.' + call.id) === '1';
     var head = el('summary', 'block-head');
     head.appendChild(el('span', 'call-tag', '#' + state.toolSeq));
     head.appendChild(el('span', 'block-name', name));
+    var brief = toolSummary(name, fn.arguments);
+    if (brief) {
+      var sum = el('span', 'call-brief', brief);
+      sum.title = brief;
+      head.appendChild(sum);
+    }
     var args = prettyJSON(String(fn.arguments || ''));
     head.appendChild(el('span', 'block-meta', '参数 ' + String(fn.arguments || '').length + ' 字符'));
     details.appendChild(head);

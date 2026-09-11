@@ -318,3 +318,13 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - 数据层：`SessionInfo` 新增 `stage`/`stageTitle`/`imageName`/`imageOrder`/`page`/`imageType`/`imageCaption`/`projectStages`；`enrichSessions` 在扫描末尾统一补齐（`loadProjectFacts` 读 `progress.json` + `doc_index/doc_index.json`，按项目目录缓存；`projectDirFor` 从转录相对路径推出项目目录）。静态导出与实时服务共用同一份 JSON，无需改 API 形状。
 - 真缺陷（本批自查发现并修掉）：上一批给侧栏行加费用显示时，`statsSummary(st, session)` 里传了一个**在 `sessionRow(s)` 作用域里不存在的标识符** `session`（应为 `s`）——费用列在侧栏等于永远为空。已改回 `s`。
 - 测试：`TestEnrichSessionsAddsStageProgressAndImageIdentity`（真实目录结构：progress.json + doc_index + 四种转录名 → 断言 stage/页/序号/类型/图注/项目进展，以及阶段分组按流程顺序）、`TestVectorImageBaseParsing`（含带下划线标签与不足三段的情况）。
+
+### ⑨ 会话预览页：调用卡片按工具家族着色 + 一行摘要（对照 DSH 会话界面）
+
+用户第 6 条：UI 参考 DSH 整体界面（左侧项目、中间调用样式、CSS、查看调用过程）。
+
+- 现状盘点：预览页本来就是"左侧项目树 + 中间消息/调用时间线 + 指标卡片 + 静态导出/实时服务"，"仅看工具调用"开关与 `#序号` 配对的调用/结果卡片也早就有；本批按 DSH 的会话界面补上最影响"看调用过程"的两点。
+- `toolFamily(name)`：shell（`bash`/`compile`/`python`）/ write（`write_*`）/ view（`read_*`/`view_*`/`image_context`）/ search（`grep`/`doc_search`/`list_*`/`*search*`）/ submit / other；卡片左侧色条 + 工具名按家族着色（CSS `fam-*`）。
+- `toolSummary(name, argsText)`：折叠状态显示一行摘要——`bash`/`python` 取命令**首行**并压掉空白，`compile`/`write_*`/`read_*`/`view_*` 取 `path`，`grep`/`doc_search` 取 `pattern`/`query`，`submit` 取 `path`/`status`，其余工具兜底取参数里第一个非空字符串；超 90 字符截断加省略号，标题悬停看全文。
+- 证据：把这两个函数从 `viewer.js` 按大括号配对**原样抽出**跑 node 校验——7 个工具名的家族判定全对、`{"command":"ls -la\nrm -rf x"}` → `"ls -la"`、坏 JSON → 空摘要（不抛错）、200 字符命令 → 91 字符（90 + 省略号）。
+- 未做：不追求逐像素复刻 DSH（那是另一套前端）；如需要具体某个 DSH 组件的等价物，按组件名单独提。
