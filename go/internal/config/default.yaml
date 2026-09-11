@@ -148,7 +148,8 @@ tools:
     interpreter: ""             # 解释器路径；留空=用 env_dir/bin/python3 或 PATH 里的 python3
     env_dir: ""                 # mode=venv：虚拟环境目录（不存在则宿主侧自动创建）；mode=conda：环境前缀
     conda_env: ""               # mode=conda：环境名（env_dir 为空时用它解析前缀）
-    packages: []                # 启动前确保可导入的模块（如 ["numpy", "PIL"]；缺则宿主侧装）
+    pip_index_url: ""           # 宿主侧自动安装用的 PyPI 镜像（如 https://mirrors.aliyun.com/pypi/simple）；留空=用宿主 pip 配置
+    packages: []                # 启动前确保可导入的模块（如 ["numpy", "PIL"]；缺则宿主侧装；PIL→Pillow、fitz→PyMuPDF 自动换算包名）
     auto_install: true          # 会话 bash 报 ModuleNotFoundError 时由宿主侧自动 pip install 后提示重试
     install_timeout: 300        # 单次 pip install 的超时（秒）
 verify:

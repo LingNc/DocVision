@@ -392,6 +392,11 @@ type ToolsPythonConfig struct {
 	// means the conda BASE environment, so mode=conda with nothing else
 	// configured just works (that is the common local setup).
 	CondaEnv string `yaml:"conda_env"`
+	// PipIndexURL: explicit PyPI mirror for the host-side auto-install
+	// (`pip install -i <url>`). Empty = whatever the host pip config says
+	// (~/.config/pip/pip.conf), which is invisible to DocVision and
+	// silently breaks installs when the mirror dies.
+	PipIndexURL string `yaml:"pip_index_url"`
 	// Packages: modules ensured (import-checked, installed when missing)
 	// before sessions start.
 	Packages []string `yaml:"packages"`

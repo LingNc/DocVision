@@ -134,29 +134,75 @@ func (p *PythonEnv) condaPrefix() string {
 }
 
 // condaBaseDir runs `conda info --base` once per process.
+//
+// `conda` is often NOT on PATH for the process that runs DocVision: the
+// user's ~/.bashrc does `conda init` (so an interactive shell has it) but
+// a service/tmux/screen/nohup start does not — and `mode: conda` then
+// silently degraded to whatever `python3` PATH happened to hold (on this
+// host: a Homebrew Python 3.14 that is PEP 668 externally-managed, so
+// every auto-install died with "externally-managed-environment" even
+// though the conda base env already had PIL and PyMuPDF). So: PATH first,
+// then $CONDA_EXE, then the usual install prefixes.
 func condaBaseDir() string {
 	condaBaseOnce.Do(func() {
-		out, err := runHostTimeout("conda", 30*time.Second, "info", "--base")
-		if err != nil {
+		bin := findCondaBin()
+		if bin == "" {
 			return
 		}
-		line := firstLine(out)
-		if line == "" {
-			return
+		out, err := runHostTimeout(bin, 30*time.Second, "info", "--base")
+		if err == nil {
+			if line := firstLine(out); line != "" {
+				if abs, aerr := filepath.Abs(line); aerr == nil {
+					line = abs
+				}
+				condaBase = line
+				return
+			}
 		}
-		if abs, aerr := filepath.Abs(line); aerr == nil {
-			line = abs
-		}
-		condaBase = line
+		// `info --base` failed (broken install, slow first run): the
+		// binary's own prefix is the conventional answer.
+		condaBase = filepath.Dir(filepath.Dir(bin))
 	})
 	return condaBase
+}
+
+// findCondaBin locates the conda executable: PATH, $CONDA_EXE, then the
+// standard install prefixes under $HOME and /opt.
+func findCondaBin() string {
+	if p, err := exec.LookPath("conda"); err == nil {
+		return p
+	}
+	if exe := strings.TrimSpace(os.Getenv("CONDA_EXE")); exe != "" && pathExists(exe) {
+		return exe
+	}
+	home, _ := os.UserHomeDir()
+	var prefixes []string
+	for _, name := range []string{"miniconda3", "anaconda3", "miniforge3", "mambaforge", "miniconda", "anaconda"} {
+		if home != "" {
+			prefixes = append(prefixes, filepath.Join(home, name))
+		}
+	}
+	prefixes = append(prefixes, "/opt/conda", "/opt/miniconda3", "/opt/anaconda3", "/usr/local/miniconda3", "/usr/local/anaconda3")
+	for _, pre := range prefixes {
+		for _, rel := range []string{"bin/conda", "condabin/conda"} {
+			cand := filepath.Join(pre, rel)
+			if pathExists(cand) {
+				return cand
+			}
+		}
+	}
+	return ""
 }
 
 // condaEnvPrefix finds a named environment through `conda env list --json`
 // (needed when the environment lives outside <base>/envs, e.g. -p prefixes
 // or envs_dirs).
 func condaEnvPrefix(name string) string {
-	out, err := runHostTimeout("conda", 30*time.Second, "env", "list", "--json")
+	bin := findCondaBin()
+	if bin == "" {
+		return ""
+	}
+	out, err := runHostTimeout(bin, 30*time.Second, "env", "list", "--json")
 	if err != nil {
 		return ""
 	}
@@ -464,6 +510,19 @@ func (p *PythonEnv) Prepare() {
 		}
 		p.logf("[python] 已创建虚拟环境:", p.cfg.EnvDir)
 	}
+	if p.cfg.Mode == "conda" {
+		// 静默降级曾经掩盖了真实故障：配置写的是 conda base（那里
+		// PIL/PyMuPDF 都在），实际却用了 PATH 上的 Homebrew python 3.14
+		// （PEP 668 externally-managed），于是每次自动安装都失败、会话只能
+		// 自己手搓 PGM 解析器。找不到 conda 就必须说清楚。
+		if p.condaPrefix() == "" {
+			p.logf("[python] 警告: 配置了 mode=conda 但没找到 conda（PATH/$CONDA_EXE/常见安装位置都没有）——"+
+				"将回退到 PATH 上的 python3；想用 conda 请设 tools.python.interpreter 或 env_dir",
+				"（已尝试:", findCondaBin(), "）")
+		} else {
+			p.logf("[python] conda 环境:", p.condaPrefix())
+		}
+	}
 	if inter := p.Interpreter(); inter != "" {
 		p.logf("[python] 会话 bash 使用:", inter)
 	} else {
@@ -547,24 +606,95 @@ func (p *PythonEnv) ensureModuleLocked(mod string) error {
 		_ = out
 		return nil
 	}
-	args := []string{"-m", "pip", "install"}
+	base := []string{"-m", "pip", "install"}
 	if p.cfg.Mode == "system" {
-		args = append(args, "--user") // no root, and it is visible in the sandbox
+		base = append(base, "--user") // no root, and it is visible in the sandbox
 	}
-	args = append(args, mod)
+	if idx := strings.TrimSpace(p.cfg.PipIndexURL); idx != "" {
+		// 显式源：不依赖宿主 ~/.config/pip/pip.conf 是否被改成可用的镜像。
+		base = append(base, "-i", idx)
+	}
+	// The module name is NOT always the PyPI name: `pip install PIL` fails
+	// with "No matching distribution found for PIL" (the project is
+	// Pillow), and `pip install fitz` fetches an unrelated legacy package
+	// (the real one is PyMuPDF). Map before installing.
+	pkg := pipPackageName(mod)
 	timeout := time.Duration(p.cfg.InstallTimeout) * time.Second
 	if timeout <= 0 {
 		timeout = 300 * time.Second
 	}
+	args := append(append([]string{}, base...), pkg)
 	out, err := runHostTimeout(inter, timeout, args...)
+	if err != nil && needsBreakSystemPackages(out) {
+		// PEP 668 (Homebrew / Debian / most distro pythons): pip refuses to
+		// touch the interpreter's site-packages. This interpreter is the
+		// user's own brew python, so allow it explicitly instead of failing
+		// — otherwise the session can never get the module and burns rounds
+		// hand-rolling a PGM parser (observed in a real run).
+		p.logf("[python] 解释器是 externally-managed，改用 --break-system-packages 重试:", pkg)
+		args = append(append([]string{}, base...), "--break-system-packages", pkg)
+		out, err = runHostTimeout(inter, timeout, args...)
+	}
 	if err != nil {
 		p.failed[mod] = firstLine(out)
-		p.logf("[python] 安装失败:", mod, err, firstLine(out))
+		p.logf("[python] 安装失败:", pkg, "(模块 "+mod+")", err, firstLine(out))
 		return fmt.Errorf("%v %s", err, firstLine(out))
 	}
 	p.installed[mod] = true
-	p.logf("[python] 已自动安装:", mod)
+	if pkg != mod {
+		p.logf("[python] 已自动安装:", pkg, "(模块 "+mod+")")
+	} else {
+		p.logf("[python] 已自动安装:", mod)
+	}
 	return nil
+}
+
+// needsBreakSystemPackages reports the PEP 668 refusal that makes a
+// plain `pip install` impossible on a managed interpreter.
+func needsBreakSystemPackages(out string) bool {
+	return strings.Contains(out, "externally-managed-environment")
+}
+
+// pipPackageName maps an importable module name to its PyPI distribution
+// name. Only names that genuinely differ are listed; everything else is
+// installed under its own name.
+func pipPackageName(mod string) string {
+	// 先整名查（google.protobuf 这类点号名本身就是包名），再退到根模块
+	// （PIL.Image → PIL），最后按点号取第一段。
+	if pkg, ok := pipPackageAliases[mod]; ok {
+		return pkg
+	}
+	top := mod
+	if i := strings.IndexAny(top, ".["); i > 0 {
+		top = top[:i]
+	}
+	if pkg, ok := pipPackageAliases[top]; ok {
+		return pkg
+	}
+	return top
+}
+
+// pipPackageAliases: module -> PyPI distribution (the classic traps).
+var pipPackageAliases = map[string]string{
+	"PIL":             "Pillow",
+	"fitz":            "PyMuPDF",
+	"cv2":             "opencv-python",
+	"yaml":            "PyYAML",
+	"sklearn":         "scikit-learn",
+	"bs4":             "beautifulsoup4",
+	"dateutil":        "python-dateutil",
+	"dotenv":          "python-dotenv",
+	"serial":          "pyserial",
+	"OpenSSL":         "pyOpenSSL",
+	"Cryptodome":      "pycryptodome",
+	"Crypto":          "pycryptodome",
+	"pkg_resources":   "setuptools",
+	"google.protobuf": "protobuf",
+	"mpl_toolkits":    "matplotlib",
+	"pytesseract":     "pytesseract",
+	"docx":            "python-docx",
+	"pptx":            "python-pptx",
+	"fpdf":            "fpdf2",
 }
 
 // WriteRequirements writes the manual-install fallback (same shape as

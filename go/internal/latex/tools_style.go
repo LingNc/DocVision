@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -256,7 +257,69 @@ func (t *ViewImageTool) resolve(rel string) (string, error) {
 	if escapeErr != nil {
 		return "", escapeErr
 	}
-	return "", fmt.Errorf("文件不存在: %s（请用图片文件名或 markdown 中的引用路径）", rel)
+	return "", fmt.Errorf("文件不存在: %s（%s）", rel, t.missingHint(rel))
+}
+
+// missingHint tells the model what the tool DID see around the missing
+// path. A real style session asked for `images/测试-概率论/<sha>.jpg` and
+// got only "文件不存在"，于是它以为"这个路径里没有图片"而放弃看图；实际上
+// 是项目 source 树里根本没铺图片（见 linkProjectImages）。给出目录里真实
+// 存在的名字，模型下一轮就能自己纠正，而不是反复猜。
+func (t *ViewImageTool) missingHint(rel string) string {
+	root := t.Root
+	if t.Subject != "" {
+		root = filepath.Join(t.Root, t.Subject)
+	}
+	if !pathExists(root) {
+		return "图片根目录不存在: " + root
+	}
+	var dirs, files []string
+	if ents, err := os.ReadDir(root); err == nil {
+		for _, e := range ents {
+			if e.IsDir() {
+				dirs = append(dirs, e.Name())
+			} else {
+				files = append(files, e.Name())
+			}
+		}
+	}
+	sort.Strings(dirs)
+	sort.Strings(files)
+	parts := []string{}
+	if len(dirs) > 0 {
+		parts = append(parts, "子目录 "+strings.Join(cap8(dirs), ", "))
+	}
+	if len(files) > 0 {
+		parts = append(parts, "文件 "+strings.Join(cap8(files), ", "))
+	}
+	head := "目录 " + root + " 下没有这个文件"
+	if len(parts) > 0 {
+		head += "；实际有: " + strings.Join(parts, "；")
+	}
+	// 同名的文件在某个子目录里 → 直接把完整引用写出来。
+	if base := filepath.Base(filepath.ToSlash(strings.TrimSpace(rel))); base != "" && base != "." {
+		var hits []string
+		for _, d := range dirs {
+			if fileExists(filepath.Join(root, d, base)) {
+				hits = append(hits, filepath.ToSlash(filepath.Join(t.Subject, d, base)))
+			}
+		}
+		if len(hits) == 1 {
+			return head + "；你要找的 " + base + " 在 " + hits[0] + "（直接把这个路径给我即可）"
+		}
+		if len(hits) > 1 {
+			return head + "；同名文件有多个: " + strings.Join(hits, ", ") + "（请给完整路径）"
+		}
+	}
+	return head
+}
+
+// cap8 keeps a hint short; the model only needs a couple of real names.
+func cap8(in []string) []string {
+	if len(in) <= 8 {
+		return in
+	}
+	return append(in[:8], "…")
 }
 
 // SubmitStyleTool receives the style package: which FILES the session

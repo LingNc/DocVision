@@ -37,8 +37,9 @@ func TestPythonEnvAutoInstallsMissingModule(t *testing.T) {
 		t.Fatalf("note must tell the model it was installed and to retry, got %q", note)
 	}
 	calls, _ := os.ReadFile(log)
-	if !strings.Contains(string(calls), "pip install --user PIL") {
-		t.Fatalf("host must run pip install --user PIL, got:\n%s", calls)
+	// 模块名 PIL，PyPI 包名 Pillow：`pip install PIL` 永远装不上。
+	if !strings.Contains(string(calls), "pip install --user Pillow") {
+		t.Fatalf("host must run pip install --user Pillow, got:\n%s", calls)
 	}
 	// 同一模块第二次只提醒重试，不再重复安装。
 	before := strings.Count(string(calls), "pip install")
@@ -291,5 +292,113 @@ func TestPythonEnvCondaBaseDefault(t *testing.T) {
 	env3 := NewPythonEnv(config.ToolsPythonConfig{Mode: "conda", CondaEnv: "docvision"}, filepath.Join(dir, "report"), nil)
 	if got := env3.PrefixDir(); got != named {
 		t.Fatalf("conda_env=docvision 前缀 = %q, want %q", got, named)
+	}
+}
+
+// 模块名 ≠ PyPI 包名：`pip install PIL` 报 "No matching distribution
+// found for PIL"（真名 Pillow），`pip install fitz` 装的是一个无关的旧包
+// （真名 PyMuPDF）。现场样式会话就是这么把 PIL 装失败的。
+func TestPipPackageNameMapping(t *testing.T) {
+	cases := map[string]string{
+		"PIL": "Pillow", "PIL.Image": "Pillow", "PIL.ImageDraw": "Pillow",
+		"fitz": "PyMuPDF", "cv2": "opencv-python", "yaml": "PyYAML",
+		"sklearn": "scikit-learn", "bs4": "beautifulsoup4",
+		"google.protobuf": "protobuf", "matplotlib.pyplot": "matplotlib",
+		"numpy": "numpy", "sympy": "sympy", "requests": "requests",
+	}
+	for mod, want := range cases {
+		if got := pipPackageName(mod); got != want {
+			t.Errorf("pipPackageName(%q) = %q, want %q", mod, got, want)
+		}
+	}
+	if !needsBreakSystemPackages("error: externally-managed-environment") {
+		t.Error("PEP 668 拒绝必须被识别")
+	}
+	if needsBreakSystemPackages("ERROR: No matching distribution found for PIL") {
+		t.Error("普通失败不该被当成 PEP 668")
+	}
+}
+
+// PEP 668（Homebrew/Debian 的 python）拒绝写入：改用
+// --break-system-packages 重试一次，并且用映射后的包名。
+func TestPythonEnvBreakSystemPackagesRetry(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "pip.log")
+	shim := filepath.Join(dir, "python3")
+	script := "#!/bin/sh\n" +
+		"echo \"$@\" >> " + log + "\n" +
+		"if [ \"$1\" = \"-c\" ]; then exit 1; fi\n" +
+		"case \"$*\" in *break-system-packages*) exit 0;; esac\n" +
+		"echo 'error: externally-managed-environment' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := NewPythonEnv(config.ToolsPythonConfig{Mode: "system", Interpreter: shim},
+		filepath.Join(dir, "report"), nil)
+	note := env.NoteFor("ModuleNotFoundError: No module named 'fitz'\n")
+	if !strings.Contains(note, "已自动安装") {
+		t.Fatalf("PEP 668 之后必须重试成功并通知模型，note = %q", note)
+	}
+	calls, _ := os.ReadFile(log)
+	txt := string(calls)
+	if !strings.Contains(txt, "pip install --user PyMuPDF") {
+		t.Fatalf("第一次应安装映射后的包名 PyMuPDF，got:\n%s", txt)
+	}
+	if !strings.Contains(txt, "--break-system-packages PyMuPDF") {
+		t.Fatalf("第二次应带 --break-system-packages 重试，got:\n%s", txt)
+	}
+}
+
+// conda 不在 PATH 上（服务方式启动没有 ~/.bashrc 的 conda init）时，仍要
+// 在常见安装位置找到它——现场就是在这里静默降级成了 Homebrew python 3.14。
+func TestCondaFoundOutsidePATH(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "miniconda3")
+	if err := os.MkdirAll(filepath.Join(base, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := "#!/bin/sh\nif [ \"$1\" = info ]; then echo " + base + "; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(base, "bin", "conda"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	py := filepath.Join(base, "bin", "python3")
+	if err := os.WriteFile(py, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// PATH 里没有 conda；HOME 指向假家目录。
+	empty := filepath.Join(dir, "emptybin")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", empty)
+	t.Setenv("HOME", dir)
+	t.Setenv("CONDA_EXE", "")
+	resetCondaCache()
+
+	if got := findCondaBin(); got != filepath.Join(base, "bin", "conda") {
+		t.Fatalf("findCondaBin = %q, want %q", got, filepath.Join(base, "bin", "conda"))
+	}
+	env := NewPythonEnv(config.ToolsPythonConfig{Mode: "conda"}, filepath.Join(dir, "report"), nil)
+	if got := env.Interpreter(); got != py {
+		t.Fatalf("conda 解释器 = %q, want %q", got, py)
+	}
+	if got := env.PrefixDir(); got != base {
+		t.Fatalf("conda 前缀 = %q, want %q", got, base)
+	}
+	// 完全找不到 conda 时必须能被上层识别为"没解析出来"（好打印警告）。
+	resetCondaCache()
+	none := filepath.Join(dir, "nohome")
+	if err := os.MkdirAll(none, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", none)
+	resetCondaCache()
+	if got := findCondaBin(); got != "" {
+		t.Fatalf("没有 conda 时 findCondaBin = %q, want 空", got)
+	}
+	env2 := NewPythonEnv(config.ToolsPythonConfig{Mode: "conda"}, filepath.Join(dir, "report"), nil)
+	if got := env2.condaPrefix(); got != "" {
+		t.Fatalf("没找到 conda 时前缀应为空（触发警告），got %q", got)
 	}
 }

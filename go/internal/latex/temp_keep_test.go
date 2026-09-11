@@ -195,11 +195,18 @@ func TestChapterWorkTreeResolvesRasterImages(t *testing.T) {
 		"\\NeedsTeXFormat{LaTeX2e}\n\\ProvidesClass{mybook}\n\\LoadClass{article}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	imgDir := filepath.Join(proj, "source", "images", "测试-概率论")
-	if err := os.MkdirAll(imgDir, 0o755); err != nil {
+	// 图片实体住在全局 paths.images_dir 下（output/images/<书>/），项目树里
+	// 的 `images/…` 由 images 阶段调用 linkProjectImages 铺好——这正是曾经
+	// 缺失的一步（项目树 images/ 是空的，章节与样式会话都找不到图）。
+	outer := filepath.Join(proj, "output", "images", "测试-概率论")
+	if err := os.MkdirAll(outer, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writePNG(t, filepath.Join(imgDir, "abc123.png"), 8, 8)
+	writePNG(t, filepath.Join(outer, "abc123.png"), 8, 8)
+	if n, missing := linkProjectImages(filepath.Join(proj, "source"), filepath.Join(proj, "output", "images"),
+		[]*task{{mdName: "测试-概率论.md", imgPath: "images/测试-概率论/abc123.png"}}); n != 1 || missing != 0 {
+		t.Fatalf("images 阶段必须先铺图: linked=%d missing=%d", n, missing)
+	}
 
 	r := keepTestRunner(t)
 	work, cleanup, err := r.chapterWorkTree(proj, "mybook", "chapter_003", false, "")

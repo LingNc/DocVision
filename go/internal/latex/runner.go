@@ -413,6 +413,13 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 		all = append(all, t)
 	}
 	r.log.Log(0, "Total image refs:", strconv.Itoa(refCount), "| unique tasks:", strconv.Itoa(len(all)))
+	if n, missing := linkProjectImages(outDir, r.cfg.Paths.ImagesDir, all); n > 0 || missing > 0 {
+		line := "  图片已铺到项目 source 树: " + strconv.Itoa(n) + " 个"
+		if missing > 0 {
+			line += "（源文件缺失 " + strconv.Itoa(missing) + " 个）"
+		}
+		r.log.Log(0, line)
+	}
 
 	// Load progress.
 	progDir := filepath.Join(outDir, "progress_items")
@@ -1557,6 +1564,64 @@ func subjectOf(mdName string) string {
 }
 
 // resolveImageFile mirrors img2text's resolution semantics.
+// linkProjectImages makes every image the markdown references exist at
+// its markdown-relative path INSIDE the project tree
+// (`<outDir>/images/<书>/<file>.jpg`, or `figures/…`).
+//
+// Why this is not optional: the processed markdown refers to images as
+// `images/<书>/<sha>.jpg`, i.e. relative to the markdown itself, and the
+// whole downstream pipeline resolves them that way — the chapter work
+// tree symlinks `<proj>/source/images` as its `images/`, `assemble`
+// copies `<proj>/source/{images,figures}` into the build tree, and the
+// style session's view_image has `<proj>/source` as its root. Nothing
+// else ever copied the files there (they live in the global
+// `paths.images_dir`, i.e. `output/images/<书>/`), so in a real run the
+// project tree had an EMPTY images/ dir: the style session asking
+// `view_image {path:"images/测试-概率论/<sha>.jpg"}` got "文件不存在"
+// (18:45:59 in logs/latex_20260911_184017.log) and every chapter that
+// kept a raster image had nothing to include.
+//
+// A per-FILE symlink is deliberate: `assemble.copyDir` walks with
+// filepath.Walk, which does not descend into a symlinked DIRECTORY —
+// per-file links are opened and copied as real files, a linked dir
+// would break the build tree. Copy is the fallback (e.g. a share that
+// refuses symlinks). Idempotent: existing entries are left alone.
+func linkProjectImages(outDir, imagesDir string, tasks []*task) (linked, missing int) {
+	if outDir == "" || imagesDir == "" {
+		return 0, 0
+	}
+	for _, t := range tasks {
+		dst := filepath.Join(outDir, filepath.FromSlash(t.imgPath))
+		if pathExists(dst) || isSymlink(dst) {
+			continue
+		}
+		src, err := resolveImageFile(imagesDir, t.imgPath, subjectOf(t.mdName))
+		if err != nil {
+			missing++
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			missing++
+			continue
+		}
+		if err := os.Symlink(src, dst); err != nil {
+			if cerr := copyFile(src, dst); cerr != nil {
+				missing++
+				continue
+			}
+		}
+		linked++
+	}
+	return linked, missing
+}
+
+// isSymlink reports a symlink entry even when it is broken (a re-run must
+// not create a second link on top of one whose target moved).
+func isSymlink(path string) bool {
+	fi, err := os.Lstat(path)
+	return err == nil && fi.Mode()&os.ModeSymlink != 0
+}
+
 func resolveImageFile(imagesDir, imgPath, subject string) (string, error) {
 	rel := imgPath
 	if i := strings.Index(imgPath, "/"); i >= 0 {

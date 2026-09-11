@@ -71,5 +71,51 @@ v1.5+（第三十批）：一次真实运行的三个问题（用户 2026-09-11 
 
 **发布线与 CHANGELOG**：v1.5.0 测试线，当前标签 **`v1.5.0-beta.4`**。各标签**实际**覆盖范围（按提交可达性判定，非按文档批次号）：`v1.2.0`＝LaTeX 首版（两档位/会话基础设施/模型注册表/verify，未单独打标签），`v1.3.0-beta`＝自助化 + 样式虚拟工作区 + 字体 + 每章 checker + view_page 按需渲染，`v1.4.0-beta`＝img2text 按类型嵌入 + TikZ 编译校验（仅一个提交），`v1.5.0-beta.1`＝嵌入类型细分/styled 标记/风格统一/preflight/chapter_granularity/水印工作记忆/跨页图表拼接/doc_search/tools 块/配置 v2 等，`v1.5.0-beta.2`＝第一～三批（流式接收+thinking、日志三级 trace、SVG 多后端、编译警告反馈、多工具图片轮 400、文本图只提取文本、预览图、classify 起始行），`v1.5.0-beta.3`＝**第四～十七批**（JSONL 转录起，至 part 级页码定位/临时目录与保留开关/逐章私有工作视图），`v1.5.0-beta.4`＝**第十八～二十九批**。CHANGELOG 已按标签分节（`v1.2.0`（未打标签，附注说明）/`v1.3.0-beta`/`v1.4.0-beta`/`v1.5.0-beta.1`/`.2`/`.3` + 历史各节）：条目按**引入该条的提交**归属到对应标签，节日期取标签创建日期（脚本用 `git log -S` 逐条回溯 + 提交区间映射生成，可复核）；`v1.5.0-beta.2` 及更早标签保持不动。运行目录：`/home/share/samba-share/PDF2MD`（config.yaml 与 docvision 二进制随代码更新）。
 
+## 第三十一批：conda 静默降级、包名映射、项目树铺图（2026-09-11，用户三问）
 
+用户三个问题：① 看看 conda 环境（清华源好像没了，换成别的源）② 样式会话看图到底读没读到像素、为什么给它路径却读不到 ③ `list_source_pages` 的内容是从 md 来的还是 OCR 索引来的。
+
+### ① Python/conda：根因不是镜像，是"配了 conda 却在用 Homebrew python"
+
+现场证据（`latex_project/测试-概率论/work/python/README.md` + 日志）：
+
+```
+[python] 会话 bash 使用: /home/lingnc/.linuxbrew/bin/python3
+[python] 安装失败: fitz exit status 1 error: externally-managed-environment
+[python] 安装失败: PIL exit status 1 error: externally-managed-environment
+```
+
+宿主上 conda **是装了的**（`/home/lingnc/miniconda3`，base 里 `PIL 11.1.0`、`fitz` 都能 import），但它只被 `~/.bashrc` 的 `conda init` 挂进交互 shell；服务方式启动的 DocVision PATH 里没有 conda → `conda info --base` 失败 → `mode: conda` **静默降级**成 PATH 上的 Homebrew python 3.14，而那是 PEP 668 externally-managed，`pip install --user` 一律被拒。会话因此拿不到 PIL/fitz，只能 `pdftoppm` + 自己想办法（更早一轮还手写过 PGM 解析器）。
+
+镜像另说：`~/.config/pip/pip.conf` 指向清华（`https://pypi.tuna.tsinghua.edu.cn/simple`）；实测六个源（清华/阿里/中科大/腾讯/华为/官方）`pip download six` **全部成功**，清华本身没坏——坏的是上面那条降级链。按用户要求仍把宿主 pip.conf 换成阿里云（备份 `~/.config/pip/pip.conf.bak-tuna`），并新增配置项 `tools.python.pip_index_url` 让镜像**写进配置**（宿主 pip.conf 对 DocVision 不可见，镜像坏了只能靠猜）。
+
+三处代码修复（`internal/latex/pythonenv.go`）：
+
+1. `findCondaBin()`：PATH → `$CONDA_EXE` → `~/miniconda3`、`~/anaconda3`、`~/miniforge3`、`~/mambaforge`、`~/miniconda`、`~/anaconda`、`/opt/conda`、`/opt/miniconda3`、`/opt/anaconda3`、`/usr/local/miniconda3|anaconda3` 的 `bin/conda`、`condabin/conda`；`conda info --base` 失败时退回二进制自身的 prefix。
+2. `Prepare()` 里 mode=conda 而解析为空 → **明确警告**（"配置了 mode=conda 但没找到 conda…将回退到 PATH 上的 python3"），不再静默。
+3. `pipPackageName()` 映射：`PIL`→`Pillow`、`PIL.Image`→`Pillow`、`fitz`→`PyMuPDF`、`cv2`→`opencv-python`、`yaml`→`PyYAML`、`sklearn`→`scikit-learn`、`bs4`→`beautifulsoup4`、`dateutil`→`python-dateutil`、`dotenv`→`python-dotenv`、`serial`→`pyserial`、`OpenSSL`→`pyOpenSSL`、`Cryptodome`/`Crypto`→`pycryptodome`、`pkg_resources`→`setuptools`、`google.protobuf`→`protobuf`、`mpl_toolkits`→`matplotlib`、`docx`→`python-docx`、`pptx`→`python-pptx`、`fpdf`→`fpdf2`（实测 `pip download PIL` = `ERROR: No matching distribution found for PIL`）。点号名先整名匹配再退根模块。
+4. PEP 668 兜底：`needsBreakSystemPackages()` 命中 `externally-managed-environment` → 自动带 `--break-system-packages` 重试一次。
+
+测试：`TestPipPackageNameMapping`、`TestPythonEnvBreakSystemPackagesRetry`、`TestCondaFoundOutsidePATH`（假 HOME + 无 conda 的 PATH → 仍解析出 `<home>/miniconda3`；完全找不到时前缀为空，供上层打警告）、`TestPythonEnvPipIndexURL`；旧用例 `TestPythonEnvAutoInstallsMissingModule` 的断言从 `pip install --user PIL` 改为 `--user Pillow`。
+
+### ② 样式会话看图：路径解析没错，是**项目树里根本没有图片**
+
+日志（`logs/latex_20260911_184017.log`）：
+
+```
+[18:45:59][T01] [session:style] tool call: view_image {"path": "images/测试-概率论/b6f6f41…jpg", "zoom": 900}
+[18:45:59][T01] [style] [tool:view_image] error: 文件不存在: images/测试-概率论/b6f6f41…jpg
+```
+
+模型给的就是 md 里的引用路径（完全正确），`ViewImageTool{Root: <proj>/source, Subject: "images"}` 解析成 `<proj>/source/images/测试-概率论/<sha>.jpg`——而**那个目录是空的**。全盘 `find` 显示图片只在 `output/images/测试-概率论/`（全局 `paths.images_dir`）以及旧项目 `latex_project_0909/source/images/测试-概率论/`（真副本，不同 inode）里；当前代码从 images 阶段到 assemble 从来没人把图铺进项目树。
+
+影响面比"样式会话看不了图"更大：`chapterWorkTree` 把 `<proj>/source/images` 软链成工作区的 `images/`，`assemble` 把 `<proj>/source/{images,figures}` 拷进 build 树——两处都指向同一个空目录，所以**保留栅格图的章节在会话内编译与最终成书时都拿不到图**。
+
+修复：images 阶段（`RunImages` 收集完任务后）调用新增的 `linkProjectImages(outDir, imagesDir, tasks)`，把每条被引用插图按 **md 相对路径**铺到 `<outDir>/images/<书>/<file>`：优先**逐文件软链**到实体（`assemble.copyDir` 用 `filepath.Walk` 不跟随目录软链，整目录软链会破坏 build 树；逐文件链接会被 `copyFile` 正常读出），链接失败退回复制；幂等（`isSymlink` 连断链也算已存在）；源缺失只计数不报错。日志一行 `图片已铺到项目 source 树: N 个`。同时 `ViewImageTool.missingHint()` 在找不到文件时回报"目录里实际有什么、你要找的同名文件在哪个可用路径"，让模型当轮自我纠正（曾经的教训是模型以为"这个路径里没有图片"而放弃）。
+
+测试：`TestProjectImagesMaterializedNextToMarkdown`（铺图 + 幂等 + 缺源计数）、`TestProjectImagesSurviveAssembleCopy`（build 树里必须是真文件）、`TestViewImageResolvesProjectPathAndHints`（md 路径可解析 + 错名/错目录的提示含真实文件名）；`TestChapterWorkTreeResolvesRasterImages` 从"测试自己手写 PNG"改成走真实的 `linkProjectImages`（修复前这条链是断的）。
+
+### ③ `list_source_pages` 的数据来源
+
+读代码确认（不涉及改动，答复用户）：工具本身只输出 `pdfView`（原书 PDF 列表 + 全局页码）与 `DocIndex` 的内容；`DocIndex` 由 `buildDocIndex` 从 MinerU 中间产物 `*_content_list.json` 构建（每个 text/image/table/equation 块的局部页码、bbox、文本或 caption），章节起点 `derivedSections` 由版面里的标题类块推导——**都不是从我们生成的 md 正文抽的**。唯一来自 md 的是图片块的补充说明：images 阶段写进 `source/*.md` 的 `DOCVISION-*` 注释按图片文件名接回对应图片块（`Marker`/`Label`/`Content`）。所以改 md 不会刷新索引，重跑 images 阶段才会。
 

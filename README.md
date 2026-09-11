@@ -296,7 +296,7 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 
 沙箱内的 `/tmp` 是**本会话私有的持久临时区**（`<proj>/work/temp/bash_<会话>`，`TMPDIR/TMP/TEMP` 都指向它）：同一个会话的多次 `bash` 调用共享它，会话结束后删除（`latex.keep_temp_dirs` 或 debug 下保留）。**一个会话一张挂载表**——`read_file`、`grep`、`write_file`、`edit_file`、`bash`、`view_pdf` 看到的是同一棵树、同一套挂载点名，所以 `project:chapters/<章>.md` 在哪个工具里都是同一个文件；`grep` 不带 `path` 时遍历全部挂载点（全项目检索），带 `project:style` 这类前缀时只搜该挂载点。
 
-**Python 环境**（`tools.python`）：会话 bash 跑在 `--unshare-net` 的沙箱里，**会话自己装不了任何包**（2026-09-11 实测：样式会话遇到 `ModuleNotFoundError: No module named 'PIL'` 后花约 10 轮自己手写了一个 PGM 解析器）。所以环境由宿主提供——按配置准备 `system`/`venv`/`conda` 解释器并把它的**运行所需目录只读绑定**进沙箱（解释器自身目录、`sys.prefix`、软链链上的每一跳、`ldd` 列出的共享库目录、site-packages；Homebrew 的 venv 就因为 `bin/python3 → .linuxbrew/opt/... → Cellar` 这条链少一环而 exec 失败，bash 的 PATH 搜索会**静默跳到下一个 `/usr/bin/python3`**，于是"装好的环境"根本没生效），`PATH` 指向它；缺模块时宿主侧（有网）自动 `pip install` 并让模型重试；安装失败则按缺字体同样的办法留下 `<项目>/work/python/requirements.txt` + `README.md`。沙箱内用 `python3` 即可，无需 Activation。
+**Python 环境**（`tools.python`）：会话 bash 跑在 `--unshare-net` 的沙箱里，**会话自己装不了任何包**（2026-09-11 实测：样式会话遇到 `ModuleNotFoundError: No module named 'PIL'` 后花约 10 轮自己手写了一个 PGM 解析器）。所以环境由宿主提供——按配置准备 `system`/`venv`/`conda` 解释器并把它的**运行所需目录只读绑定**进沙箱（解释器自身目录、`sys.prefix`、软链链上的每一跳、`ldd` 列出的共享库目录、site-packages；Homebrew 的 venv 就因为 `bin/python3 → .linuxbrew/opt/... → Cellar` 这条链少一环而 exec 失败，bash 的 PATH 搜索会**静默跳到下一个 `/usr/bin/python3`**，于是"装好的环境"根本没生效），`PATH` 指向它；缺模块时宿主侧（有网）自动 `pip install` 并让模型重试（`PIL`→`Pillow`、`fitz`→`PyMuPDF`、`cv2`→`opencv-python` 等**会自动换算成 PyPI 包名**——`pip install PIL` 本身永远装不上）；`mode: conda` 时 conda 可执行文件**不再只靠 PATH**（`~/.bashrc` 里 `conda init` 只对交互 shell 生效，服务方式启动的 DocVision 看不到它，于是"配置写 conda、实际用 Homebrew python"这种静默降级曾让自动安装全灭），会依次尝试 PATH → `$CONDA_EXE` → `~/miniconda3`/`~/anaconda3`/`~/miniforge3`/`/opt/conda` 等常见前缀，找不到就在日志里明确警告并说明回退到了哪个解释器；解释器若是 PEP 668 的 externally-managed（Homebrew/Debian 的 python），`pip install` 会自动改用 `--break-system-packages` 重试一次。安装失败则按缺字体同样的办法留下 `<项目>/work/python/requirements.txt` + `README.md`。沙箱内用 `python3` 即可，无需 Activation。
 
 档位1 的临时工作区统一落在**本项目工作区**里的 `work/temp/<名称>`（即 `latex_project/<项目名>/work/temp/…`；拆章沙箱、样式/反馈 scratch、每章转换/修复工作区 `conv_<章>/work`），不再藏进 `/tmp`；`latex.keep_temp_dirs` 可保留以便事后检查。
 
@@ -324,7 +324,8 @@ docvision latex --verbose      # 详细控制台输出（默认仅显示进度�
 
 | 目录 | 用途 |
 | --- | --- |
-| `source/` | images 阶段整理的 md 输入（另有 `source/progress_items/` 逐图进度） |
+| `source/` | images 阶段整理的 md 输入（另有 `source/progress_items/` 逐图进度，以及 `source/images/<书>/` —— 见下条） |
+| `source/images/<书名>/` | 该书**全部被引用的插图**，按 md 里的相对路径就位（链接到全局 `paths.images_dir`，失败则复制）。md 用 `images/<书>/<sha>.jpg` 这种相对引用，所以章节工作区、`assemble` 的 build 树、样式会话的 `view_image` 全都靠这棵树解析——曾因这里没铺图而出现"样式会话拿着 md 里的路径却报文件不存在" |
 | `pages/` | 原始扫描页渲染缓存（仅水印采样使用；会话看图走 `view_pdf` 现场渲染，不缓存） |
 | `style/` | 样式分析产物（book.cls / manual.md / example.tex） |
 | `work/style/` | 样式分析 AI 的虚拟工作区（write_file 增量起草；转录 `work/style_session.jsonl`） |
@@ -446,7 +447,8 @@ docvision verify --project 概率论-2026         # 多项目时指定核对哪�
 | `tools.python.interpreter` | 解释器路径（留空 = `env_dir/bin/python3` 或 PATH 里的 `python3`） | 空 |
 | `tools.python.env_dir` | venv 目录（不存在则宿主侧自动创建）或 conda 环境前缀 | 空 |
 | `tools.python.conda_env` | conda 环境名（`env_dir` 为空时用它；留空或 `base`/`root` = conda 的 **base** 环境） | 空 |
-| `tools.python.packages` | 启动前确保可导入的模块（缺则宿主侧安装） | 空 |
+| `tools.python.pip_index_url` | 宿主侧自动安装用的 PyPI 镜像（如 `https://mirrors.aliyun.com/pypi/simple`）；留空 = 用宿主 `pip.conf` | 空 |
+| `tools.python.packages` | 启动前确保可导入的模块（缺则宿主侧安装；`PIL`→`Pillow`、`fitz`→`PyMuPDF` 等自动换算成 PyPI 包名） | 空 |
 | `tools.python.auto_install` | 会话 bash 报 `ModuleNotFoundError` 时由宿主侧自动 `pip install` 并提示重试 | true |
 | `tools.python.install_timeout` | 单次 `pip install` 超时（秒） | 300 |
 
@@ -457,6 +459,8 @@ docvision verify --project 概率论-2026         # 多项目时指定核对哪�
 - `doc_search {query}`：按关键词 / 图片文件名 / 页码检索块索引（文本片段、图表标题、公式 LaTeX、bbox），返回**全局页号 pN** 与 bbox，并直接给出精确路径 `source page: view_pdf {path:"source:<file>.pdf", page:N}`（part 级定位，不依赖全局页号累加）；
 - `list_source_pages {page?}`：无参数列出「源 PDF → 页范围 → 全局页号」表 + 从 OCR 版面推导的章节起点；带 `{page:N}` 时列出该全局页的正文片段与该页抽出的图片文件名（随后可直接 `view_image`）；
 - `view_pdf {path:"source:<file>.pdf", page, left/top/right/bottom, zoom}`：渲染原书某页（或按百分比裁剪/放大）查看真实排版，回执附带该页与裁剪区域的 **mm 尺寸**——与"看自己编译出的 PDF"是**同一个工具**（`zoom_width` 是 `zoom` 的别名，渲染时按目标宽度从 PDF 重渲染，真放大）。
+
+**`list_source_pages` / `doc_search` 的内容来自 OCR 索引，不是我们生成的 md**：条目、页码、bbox、文本与表格/公式内容都取自 MinerU 的 `*_content_list.json`（版面识别结果），章节起点由版面里的标题类块推导；只有图片块的"这是什么图"补充说明来自 images 阶段写进 `source/*.md` 的 DOCVISION 注释（见下条）。md 正文只是这些块的**加工产物**，索引从不回头读它——所以改 md 不会改变索引，重新跑 images 阶段才会刷新 `doc_index/`。
 
 **图片条目带上类型标记、描述与原文（来自 md 里的 DOCVISION 注释）**：MinerU 对没有 caption 的图片块只给一个文件名，于是索引构建时会把 images 阶段写进 `source/*.md` 的机器注释按**图片文件名**接回对应的图片块——`Marker`（`styled-text`/`vector`/`image`）、`Label`（注释里的描述，如 `mind-map diagram`）与 `Content`（STYLED-TEXT 的 `CONTENT:` 原文 / RASTER 的 `DESCRIBE:` 解释文本）。因此 `doc_search` 既可按文件名、也可按"图里写了什么"检索（例如按"知识导图""mind-map"找到那张思维导图），命中与 `list_source_pages` 页详情里都会显示 `[vector] mind-map diagram` 这样的短标签与内容摘要；没有注释的图片块照旧只有文件名（字段留空，不报错），旧版 `doc_index.json` 仍可读取。
 

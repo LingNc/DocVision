@@ -7,6 +7,14 @@
 
 ### Fixed
 
+- **项目 source 树里的插图从未铺进去，样式会话/章节编译因此都找不到图**：md 里写的是 `images/<书>/<sha>.jpg`（相对 md 自身），`chapterWorkTree`、`assemble` 与样式会话的 `view_image` 全都按这个相对路径解析，但图片实体一直只躺在全局 `paths.images_dir`（`output/images/<书>/`）里，`<proj>/source/images/` 是个空目录。后果：真实运行里样式会话 `view_image {path:"images/测试-概率论/<sha>.jpg"}` 直接报"文件不存在"（`logs/latex_20260911_184017.log` 18:45:59 两连），章节里保留的栅格图在 build 树也无处可寻。现在 images 阶段把每条被引用的插图按 md 相对路径**逐文件链接**进项目树（链接失败则复制；`assemble.copyDir` 用 `filepath.Walk` 不跟随目录软链，所以是逐文件而不是整目录软链），`view_image` 找不到文件时会把目录里**真实存在**的名字与"你要找的文件在 <可用路径>"一起回给模型。测试 `TestProjectImagesMaterializedNextToMarkdown`、`TestProjectImagesSurviveAssembleCopy`、`TestViewImageResolvesProjectPathAndHints`，并把 `TestChapterWorkTreeResolvesRasterImages` 改成走真实的铺图函数。
+- **`mode: conda` 找不到 conda 时静默降级，自动安装全灭**：宿主上 conda 明明装了（`~/miniconda3`，base 里 PIL/PyMuPDF 都有），但它只被 `~/.bashrc` 的 `conda init` 挂进交互 shell，服务方式启动的 DocVision PATH 里没有 → 配置写 conda、实际用 Homebrew python 3.14（PEP 668 externally-managed）→ `pip install PIL` 报 `externally-managed-environment`，会话只能自己手搓 PGM 解析器。现在 conda 解析依次尝试 PATH → `$CONDA_EXE` → `~/miniconda3`/`~/anaconda3`/`~/miniforge3`/`~/mambaforge`/`/opt/conda` 等常见前缀，找不到就**明确警告**并说明回退到了哪个解释器。
+- **自动安装用的是模块名而不是 PyPI 包名**：`pip install PIL` 永远装不上（真名 `Pillow`），`pip install fitz` 装的是无关旧包（真名 `PyMuPDF`）。现在装了映射表（`PIL`→`Pillow`、`fitz`→`PyMuPDF`、`cv2`→`opencv-python`、`yaml`→`PyYAML`、`sklearn`→`scikit-learn`、`google.protobuf`→`protobuf` 等）；解释器是 PEP 668 externally-managed 时自动带 `--break-system-packages` 重试一次。
+
+### Added
+
+- `tools.python.pip_index_url`：宿主侧自动安装用的 PyPI 镜像（如 `https://mirrors.aliyun.com/pypi/simple`），留空=沿用宿主 `pip.conf`。宿主 `pip.conf` 对 DocVision 不可见，镜像失效时只能靠猜——现在可以在配置里写死。
+
 - **4xx 客户端错误被当成 transient 反复重试**（同一批现场）：`thinking.type: disable` 引出的 HTTP 400 被通用重试通道接住，按 `api_max_retries: 5` 退避 2/4/8/16/30s 重发——8 张图**光退避就烧掉十几分钟**，日志里只有一串"等待重试"。现在 `CallWithRetry` 把 4xx 客户端错误（400/401/403/404/422…，排除 408 超时与 429 限流）判为**不可重试**，一次到位返回 `[SESSION_API_ERROR: HTTP 400 (不可重试): …]`；余额/配额类错误也不再依赖状态码（网关用 400/402/429 报都认），统一立即返回 `[SESSION_INSUFFICIENT_BALANCE]`。测试 `TestClientDoesNotRetryClientErrors`、`TestClientRetriesServerErrors`（5xx 仍按上限重试）、`TestClientBalanceErrorIsNeverRetried`、`TestHTTPStatusCodeParsing`。
 
 - **`thinking.type` 写错会让整轮绘图全部"保留原图"**（用户实测：8/8 张图全 fallback，日志只写"TikZ 未通过"）：现场 `models.drawing.thinking.type: disable`，而服务端只认 `adaptive`/`enabled`/`disabled`，于是每个请求都被 HTTP 400 拒掉（`unknown variant \`disable\`…`），8 张图各耗 90s（含退避重试）后全部回退成原图，看起来像提示词或编译器的问题。现在 `LoadConfig` 校验每个 `models.*.thinking.type`：一眼能认出的笔误（disable/enable/off/on/false/true…）自动纠正成 disabled/enabled 并在 stderr 告警，其余未知取值**直接报错退出**（附模型名与合法取值）；`[vector]` 的失败日志也分清因果——会话/接口错误打"会话/接口错误（不是 TikZ 问题）"并计入 `errors`，只有 TikZ 校验失败才是 `fallback`；另外连续 3 张接口错误且无一成功时判定为环境问题，**停止处理剩下的图片**（剩余保持未处理，修好后重跑自动继续），不再逐张空转。测试 `TestThinkingTypeTypoIsRepairedAndWarns`、`TestThinkingTypeUnknownIsFatal`、`TestThinkingTypeValidValuesKeepWorking`、`TestIsSessionAPIError`、`TestProcessAbortsOnRepeatedAPIErrors`。
