@@ -446,6 +446,7 @@ func LabelFor(rel string) string {
 		{"checker_", "checker"},
 		{"style_fix_", "style-fix"},
 		{"vector_", "vector"},
+		{"figure_check_", "figure-check"},
 	} {
 		if strings.HasPrefix(base, p.prefix) && len(base) > len(p.prefix) {
 			return p.label + ":" + stageSubject(p.label, strings.TrimPrefix(base, p.prefix))
@@ -479,6 +480,8 @@ func TitleFor(rel string) string {
 		return "核对 · " + subject
 	case "style-fix":
 		return "样式修复 · " + subject
+	case "figure-check":
+		return "逐图校验 · " + subject
 	case "会话":
 		return subject
 	}

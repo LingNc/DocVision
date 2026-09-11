@@ -227,7 +227,7 @@ func (s *scanner) enrichSessions(root string, sessions []SessionInfo) {
 		if len(f.Stages) > 0 {
 			sessions[i].ProjectStages = f.Stages
 		}
-		if stage != "vector" {
+		if stage != "vector" && stage != "figure-check" {
 			continue
 		}
 		base := vectorImageBase(sessions[i].ID)
@@ -262,11 +262,14 @@ func imageTypeOf(e docIndexImage) string {
 	}
 }
 
-// vectorImageBase extracts the image base name from a vector transcript path:
-// <proj>/source/sessions/vector_<book>__<imagebase>__<label>.jsonl.
+// vectorImageBase extracts the image base name from a per-image transcript path:
+// <proj>/source/sessions/vector_<book>__<imagebase>__<label>.jsonl, or the
+// figure-check transcript that names the same image
+// (work/sessions/figure_check_<book>__<imagebase>__<label>.jsonl).
 func vectorImageBase(rel string) string {
 	stem := transcriptStem(rel)
 	stem = strings.TrimPrefix(stem, "vector_")
+	stem = strings.TrimPrefix(stem, "figure_check_")
 	parts := strings.Split(stem, "__")
 	if len(parts) < 3 {
 		return ""

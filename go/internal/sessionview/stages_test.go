@@ -17,6 +17,7 @@ func TestEnrichSessionsAddsStageProgressAndImageIdentity(t *testing.T) {
 	mustWrite(t, filepath.Join(proj, "work", "sessions", "checker_chapter_001.jsonl"), `{"t":"msg","message":{"role":"user","content":"x"}}`+"\n")
 	mustWrite(t, filepath.Join(proj, "work", "style_session.jsonl"), `{"t":"msg","message":{"role":"user","content":"x"}}`+"\n")
 	mustWrite(t, filepath.Join(proj, "source", "sessions", "vector_book__abc123__Venn_diagram.jsonl"), `{"t":"msg","message":{"role":"user","content":"x"}}`+"\n")
+	mustWrite(t, filepath.Join(proj, "work", "sessions", "figure_check_book__abc123__Venn_diagram.jsonl"), `{"t":"msg","message":{"role":"user","content":"x"}}`+"\n")
 	// progress.json：档位级状态
 	mustWrite(t, filepath.Join(proj, "progress.json"), `{"style":"done","images":"done","chapters":"running","convert":"","assemble":""}`+"\n")
 	// doc_index：图片块带 img/page/type/text
@@ -52,6 +53,17 @@ func TestEnrichSessionsAddsStageProgressAndImageIdentity(t *testing.T) {
 	if got := vec.ProjectStages["style"]; got != "done" {
 		t.Fatalf("progress.json 没进侧栏: %+v", vec.ProjectStages)
 	}
+	// 逐图校验会话同样带图片身份（转录名与矢量图同形），阶段是"逐图校验"。
+	fc, ok := byLabel["figure-check:book__abc123__Venn_diagram"]
+	if !ok {
+		t.Fatalf("逐图校验会话没被识别: %+v", byLabel)
+	}
+	if fc.Stage != "figure-check" || fc.StageTitle != "逐图校验" {
+		t.Fatalf("逐图校验阶段字段不对: stage=%q title=%q", fc.Stage, fc.StageTitle)
+	}
+	if fc.ImageName != "abc123" || fc.Page != 7 || fc.ImageOrder != 1 {
+		t.Fatalf("逐图校验会话也该定位到图片: %+v", fc)
+	}
 	// 非逐图会话也有阶段与进展，但没有图片身份。
 	conv := byLabel["convert:chapter_001"]
 	if conv.Stage != "convert" || conv.ImageName != "" {
@@ -66,7 +78,7 @@ func TestEnrichSessionsAddsStageProgressAndImageIdentity(t *testing.T) {
 	for _, r := range sum {
 		order = append(order, r.Stage)
 	}
-	want := []string{"vector", "style", "convert", "checker"}
+	want := []string{"vector", "style", "convert", "checker", "figure-check"}
 	if len(order) != len(want) {
 		t.Fatalf("阶段分组 = %v, want %v", order, want)
 	}
@@ -91,10 +103,11 @@ func mustWrite(t *testing.T, path, content string) {
 // 有下划线，不能按 "_" 切）。
 func TestVectorImageBaseParsing(t *testing.T) {
 	cases := map[string]string{
-		"p/source/sessions/vector_book__abc123__Venn_diagram.jsonl":    "abc123",
-		"p/source/sessions/vector_测试-概率论__deadbeef__concept_map.jsonl": "deadbeef",
-		"p/source/sessions/vector_book__abc123.jsonl":                  "",
-		"p/work/style_session.jsonl":                                   "",
+		"p/source/sessions/vector_book__abc123__Venn_diagram.jsonl":     "abc123",
+		"p/source/sessions/vector_测试-概率论__deadbeef__concept_map.jsonl":  "deadbeef",
+		"p/source/sessions/vector_book__abc123.jsonl":                   "",
+		"p/work/sessions/figure_check_book__abc123__Venn_diagram.jsonl": "abc123",
+		"p/work/style_session.jsonl":                                    "",
 	}
 	for in, want := range cases {
 		if got := vectorImageBase(in); got != want {
