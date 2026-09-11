@@ -11,9 +11,13 @@
 - **`mode: conda` 找不到 conda 时静默降级，自动安装全灭**：宿主上 conda 明明装了（`~/miniconda3`，base 里 PIL/PyMuPDF 都有），但它只被 `~/.bashrc` 的 `conda init` 挂进交互 shell，服务方式启动的 DocVision PATH 里没有 → 配置写 conda、实际用 Homebrew python 3.14（PEP 668 externally-managed）→ `pip install PIL` 报 `externally-managed-environment`，会话只能自己手搓 PGM 解析器。现在 conda 解析依次尝试 PATH → `$CONDA_EXE` → `~/miniconda3`/`~/anaconda3`/`~/miniforge3`/`~/mambaforge`/`/opt/conda` 等常见前缀，找不到就**明确警告**并说明回退到了哪个解释器。
 - **自动安装用的是模块名而不是 PyPI 包名**：`pip install PIL` 永远装不上（真名 `Pillow`），`pip install fitz` 装的是无关旧包（真名 `PyMuPDF`）。现在装了映射表（`PIL`→`Pillow`、`fitz`→`PyMuPDF`、`cv2`→`opencv-python`、`yaml`→`PyYAML`、`sklearn`→`scikit-learn`、`google.protobuf`→`protobuf` 等）；解释器是 PEP 668 externally-managed 时自动带 `--break-system-packages` 重试一次。
 
+### Changed
+
+- `view_image` 的 `path` **两种写法并存**：markdown 里的引用路径 `images/<书>/<file>`，或只给文件名。项目级会话（style/convert/修复/终审，`Subject` 是共享的 `images` 根）此前只认前者——而提示词恰恰让样式会话"用 `list_source_pages` 打印的文件名"（那是裸文件名），于是裸名字会拼成 `images/<file>` 而报"文件不存在"；按书为 `Subject` 的作图会话本来就支持裸名字。现在裸名字在 `Root+Subject` 内**唯一匹配**即接受（深度受限、不跟随目录软链），同名多份则报错并列出候选路径，绝不错拿别本书的图。
+
 ### Added
 
-- `tools.python.pip_index_url`：宿主侧自动安装用的 PyPI 镜像（如 `https://mirrors.aliyun.com/pypi/simple`），留空=沿用宿主 `pip.conf`。宿主 `pip.conf` 对 DocVision 不可见，镜像失效时只能靠猜——现在可以在配置里写死。
+- `tools.python.pip_index_url`：宿主侧自动安装用的 PyPI 镜像（如 `https://pypi.tuna.tsinghua.edu.cn/simple`），留空=沿用宿主 `pip.conf`。宿主 `pip.conf` 对 DocVision 不可见，镜像失效时只能靠猜——现在可以在配置里写死。
 
 - **4xx 客户端错误被当成 transient 反复重试**（同一批现场）：`thinking.type: disable` 引出的 HTTP 400 被通用重试通道接住，按 `api_max_retries: 5` 退避 2/4/8/16/30s 重发——8 张图**光退避就烧掉十几分钟**，日志里只有一串"等待重试"。现在 `CallWithRetry` 把 4xx 客户端错误（400/401/403/404/422…，排除 408 超时与 429 限流）判为**不可重试**，一次到位返回 `[SESSION_API_ERROR: HTTP 400 (不可重试): …]`；余额/配额类错误也不再依赖状态码（网关用 400/402/429 报都认），统一立即返回 `[SESSION_INSUFFICIENT_BALANCE]`。测试 `TestClientDoesNotRetryClientErrors`、`TestClientRetriesServerErrors`（5xx 仍按上限重试）、`TestClientBalanceErrorIsNeverRetried`、`TestHTTPStatusCodeParsing`。
 

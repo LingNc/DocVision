@@ -3,6 +3,7 @@ package latex
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -29,8 +30,20 @@ type ViewImageTool struct {
 	// it (absolute paths outside Root are rejected).
 	Root string
 	// Subject is the current document's image subfolder (e.g.
-	// "测试-概率论"); it lets a bare file name resolve without a path.
+	// "测试-概率论"), or the shared images root ("images") for the
+	// sessions that work on the whole project (style/convert/fix).
 	Subject string
+	// BareSearch lets a bare file name (no directory part) be found by
+	// UNIQUE match in the subfolders of Root+Subject. Two shapes exist:
+	// with Subject = the book folder a bare name already resolves
+	// (figure sessions); with Subject = "images" the file sits one level
+	// deeper (images/<书>/<file>) and would otherwise fail — yet that is
+	// exactly what the prompts tell the style session to pass ("the file
+	// name that list_source_pages prints") and what a model naturally
+	// does after reading a name out of the index. Ambiguous names (the
+	// same file name under two books) are REJECTED with the candidates
+	// listed, never silently guessed.
+	BareSearch bool
 	// SoftMax / WarnRatio implement the view budget for ONE image file:
 	// from ceil(SoftMax*WarnRatio) looks at that file on, the result
 	// carries a short reminder of how many views are left, and past
@@ -257,7 +270,67 @@ func (t *ViewImageTool) resolve(rel string) (string, error) {
 	if escapeErr != nil {
 		return "", escapeErr
 	}
+	if t.BareSearch && !strings.Contains(filepath.ToSlash(clean), "/") {
+		if full, err := t.searchBare(clean); err == nil {
+			return full, nil
+		} else if err != errBareMissing {
+			return "", err
+		}
+	}
 	return "", fmt.Errorf("文件不存在: %s（%s）", rel, t.missingHint(rel))
+}
+
+// errBareMissing means "no unique match"; the caller then reports the
+// usual hint instead of a hard ambiguity error.
+var errBareMissing = errors.New("no unique bare-name match")
+
+// searchBare resolves a bare file name by unique match under
+// Root+Subject and its immediate subfolders (images/<书>/<file>).
+func (t *ViewImageTool) searchBare(name string) (string, error) {
+	root := t.Root
+	if t.Subject != "" {
+		root = filepath.Join(t.Root, t.Subject)
+	}
+	// 深度受限的遍历（不跟随目录软链）：Subject="images" 时目标在
+	// <书>/<file>（深 2），没有 Subject 的 build 树里在 images/<书>/<file>
+	// （深 3），再深就不是"图片资源"了。
+	var matches []string
+	rootDepth := strings.Count(filepath.Clean(root), string(filepath.Separator))
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != root && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			if strings.Count(filepath.Clean(p), string(filepath.Separator))-rootDepth >= 3 {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == name && fileExists(p) {
+			matches = append(matches, p)
+		}
+		return nil
+	})
+	switch len(matches) {
+	case 0:
+		return "", errBareMissing
+	case 1:
+		return matches[0], nil
+	default:
+		sort.Strings(matches)
+		rels := make([]string, 0, len(matches))
+		for _, m := range matches {
+			if rel, err := filepath.Rel(t.Root, m); err == nil {
+				rels = append(rels, filepath.ToSlash(rel))
+				continue
+			}
+			rels = append(rels, m)
+		}
+		return "", fmt.Errorf("文件名 %s 不唯一，请给完整路径: %s", name, strings.Join(rels, ", "))
+	}
 }
 
 // missingHint tells the model what the tool DID see around the missing

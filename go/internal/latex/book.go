@@ -386,7 +386,7 @@ func (r *Runner) stylePhase(proj string) error {
 		&WorkBashTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style", Log: r.log, Tid: 1},
 		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ViewImageTool{Root: sourceDir, Subject: "images", SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
+		&ViewImageTool{Root: sourceDir, Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
@@ -950,7 +950,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		&EditWorkFileTool{Root: work},
 		&GrepTool{Mounts: convertMounts},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
-		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
+		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ViewPDFTool{Mounts: convertMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&CompileChapterTool{Comp: r.comp, Dir: work, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex", Log: r.log, Tid: 1},
 		&WorkBashTool{Mounts: convertMounts, Root: work, TmpDir: bashTmp,
@@ -1306,7 +1306,7 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 		&WriteWorkFileTool{Root: work, AnyExt: true, Hint: "Your chapter is " + base + ".tex plus the folder " + base +
 			"/ for its \\input parts; everything else here is scratch."},
 		&GrepTool{Mounts: fixMounts},
-		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
+		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ViewPDFTool{Mounts: fixMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&CompileChapterTool{Comp: r.comp, Dir: work, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex", Log: r.log, Tid: tid},
 		submit,
@@ -1419,7 +1419,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 		&GrepTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style-feedback", Log: r.log, Tid: 1},
 		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ViewImageTool{Root: sourceDir, Subject: "images", SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
+		&ViewImageTool{Root: sourceDir, Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}

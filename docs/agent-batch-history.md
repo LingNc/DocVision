@@ -87,7 +87,7 @@ v1.5+（第三十批）：一次真实运行的三个问题（用户 2026-09-11 
 
 宿主上 conda **是装了的**（`/home/lingnc/miniconda3`，base 里 `PIL 11.1.0`、`fitz` 都能 import），但它只被 `~/.bashrc` 的 `conda init` 挂进交互 shell；服务方式启动的 DocVision PATH 里没有 conda → `conda info --base` 失败 → `mode: conda` **静默降级**成 PATH 上的 Homebrew python 3.14，而那是 PEP 668 externally-managed，`pip install --user` 一律被拒。会话因此拿不到 PIL/fitz，只能 `pdftoppm` + 自己想办法（更早一轮还手写过 PGM 解析器）。
 
-镜像另说：`~/.config/pip/pip.conf` 指向清华（`https://pypi.tuna.tsinghua.edu.cn/simple`）；实测六个源（清华/阿里/中科大/腾讯/华为/官方）`pip download six` **全部成功**，清华本身没坏——坏的是上面那条降级链。按用户要求仍把宿主 pip.conf 换成阿里云（备份 `~/.config/pip/pip.conf.bak-tuna`），并新增配置项 `tools.python.pip_index_url` 让镜像**写进配置**（宿主 pip.conf 对 DocVision 不可见，镜像坏了只能靠猜）。
+镜像另说：`~/.config/pip/pip.conf` 指向清华（`https://pypi.tuna.tsinghua.edu.cn/simple`）；实测六个源（清华/阿里/中科大/腾讯/华为/官方）`pip download six` **全部成功**，清华本身没坏——坏的是上面那条降级链。按用户要求先换成了阿里云（备份 `~/.config/pip/pip.conf.bak-tuna`），随后用户改主意：**就用清华源**——宿主 pip.conf 已从该备份还原成清华，部署配置的 `pip_index_url` 也写清华。并新增配置项 `tools.python.pip_index_url` 让镜像**写进配置**（宿主 pip.conf 对 DocVision 不可见，镜像坏了只能靠猜）。
 
 三处代码修复（`internal/latex/pythonenv.go`）：
 
@@ -120,4 +120,25 @@ v1.5+（第三十批）：一次真实运行的三个问题（用户 2026-09-11 
 ### ③ `list_source_pages` 的数据来源
 
 读代码确认（不涉及改动，答复用户）：工具本身只输出 `pdfView`（原书 PDF 列表 + 全局页码）与 `DocIndex` 的内容；`DocIndex` 由 `buildDocIndex` 从 MinerU 中间产物 `*_content_list.json` 构建（每个 text/image/table/equation 块的局部页码、bbox、文本或 caption），章节起点 `derivedSections` 由版面里的标题类块推导——**都不是从我们生成的 md 正文抽的**。唯一来自 md 的是图片块的补充说明：images 阶段写进 `source/*.md` 的 `DOCVISION-*` 注释按图片文件名接回对应图片块（`Marker`/`Label`/`Content`）。所以改 md 不会刷新索引，重跑 images 阶段才会。
+
+### 第四问（同批）：`view_image`「只给文件名」这条老路子在项目级会话里失效
+
+用户问："之前做的好像是给文件名就可以防止路径问题？也就是说现在这两种读取方法并存吧"。
+
+核查结论：**并存是对的，但有一半是假的**。构造点共 6 处（`grep 'ViewImageTool{'`）：
+
+| 会话 | Root / Subject | 裸文件名 | md 引用路径 |
+| --- | --- | --- | --- |
+| 作图（tikz，`tikz.go:73`） | 全局 `images_dir` / `<书>` | ✅ 可用（`Subject/<file>`） | ✅ |
+| 样式（`book.go:389`、`1422`） | `<proj>/source` / `images` | ❌ 拼成 `images/<file>` | ✅（铺图后） |
+| 转换（`book.go:953`）、定向修复（`1309`） | `<proj>/source` / `images` | ❌ 同上 | ✅ |
+| assemble/终审（`assemble.go:152`） | build 树 / 无 Subject | ❌ | ✅ |
+
+也就是说：**提示词说"给文件名"，工具只认路径**（`latex_style.system.md` 原文 "use the file name that list_source_pages prints"，而 `list_source_pages` 打印的就是裸文件名；`latex_style.user.md` 也写 "view_image takes the file name"）。作图会话能用，是因为它的 `Subject` 恰好是书目录。
+
+修复：`ViewImageTool` 新增 `BareSearch`，在 `Root+Subject` 内做**深度受限（≤3 层、跳过隐藏目录、不跟随目录软链）的唯一匹配**——唯一命中即用，同名多份报错并列出候选（`文件名 X 不唯一，请给完整路径: images/书甲/x.jpg, images/书乙/x.jpg`），完全不命中才走原来的提示信息。开启于 5 处项目级会话（样式 ×2、转换、修复、assemble），作图会话保持原样（跨书搜索在那里是错误行为，`TestViewImageResolveNoSearchAcrossSubjects` 的契约不变）。提示词同步写清"两种写法都行"。
+
+测试：`TestViewImageBareNameResolvesUnderImagesRoot`（裸名/`images/<书>/<file>`/`<书>/<file>` 三种写法指向同一文件；未开启 BareSearch 时不搜索）、`TestViewImageBareNameAmbiguousIsRejected`（同名两份拒绝并列出候选、完整路径仍可用）、`TestViewImageBareNameWorksInBuildTree`（build 树 `images/<书>/<file>` 两级深度也能唯一匹配，根目录文件仍直接命中）。
+
+`pip 源`：用户先把清华换成阿里云，同批又改主意"就用清华源"——宿主 `~/.config/pip/pip.conf` 已从备份 `.bak-tuna` 还原成清华，部署配置 `tools.python.pip_index_url` 也写清华，模板/README 的示例同步为清华。
 
