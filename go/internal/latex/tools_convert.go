@@ -28,30 +28,101 @@ func resolveInside(root, rel string) (string, error) {
 	return filepath.Join(root, clean), nil
 }
 
-// CompileChapterTool compiles the chapter .tex inside a scratch
-// wrapper that uses the book class, returning the error log only.
+// CompileChapterTool compiles a chapter .tex inside a scratch wrapper
+// that uses the book class, returning the error log only.
+//
+// WrapperFile is the file actually compiled (`\documentclass{...}` +
+// `\input{<chapter>.tex}`); SourcePath is the live chapter fragment in
+// the session's virtual tree, copied into the scratch before each run.
+// Compiling the FRAGMENT directly (what this tool used to do) can never
+// work — a fragment has no \documentclass, so the class never loads and
+// LaTeX reports "The font size command \normalsize is not defined" /
+// "Undefined control sequence" at the first \section. In the 2026-09-11
+// run that made 87 of 87 chapter compiles fail, which sent three
+// conversion sessions into 133/80/98 rounds of blind compile-fix loops
+// until the account ran out of credit.
 type CompileChapterTool struct {
-	Comp       *Compiler
-	Scratch    string // per-chapter scratch dir (contains wrapper + cls copy)
-	MainFile   string
-	SourcePath string // live chapter .tex in the virtual work tree; copied into Scratch before compiling
-	Log        *logger.Logger
-	Tid        int
+	Comp        *Compiler
+	Scratch     string // per-chapter scratch dir (contains wrapper + cls copy)
+	MainFile    string // the session's own chapter fragment, e.g. chapter_003.tex
+	WrapperFile string // what gets compiled, e.g. chapter_003_wrapper.tex ("" = MainFile)
+	SourcePath  string // live chapter .tex in the virtual work tree; copied into Scratch before compiling
+	// WorkDir is the session's writable tree; a {path} argument naming
+	// another .tex inside it is copied into the scratch and compiled in
+	// the same wrapper (probe files, extra \input parts, …).
+	WorkDir string
+	Log     *logger.Logger
+	Tid     int
 }
 
 func (t *CompileChapterTool) Name() string { return "compile" }
 
 func (t *CompileChapterTool) Definition() map[string]any {
+	desc := "Compile your chapter with the book class in a scratch wrapper (wrapper file + your .tex). " +
+		"Returns COMPILE OK plus the artifact PDF name/pages, or the LaTeX error log. " +
+		"With no argument it compiles your own main file (" + t.MainFile + "). " +
+		"path names another .tex in your workspace (e.g. a probe or an \\input part) to compile alone for testing."
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "compile",
-		"description": "Compile your current .tex with the book class in a scratch wrapper. Returns OK or the error log.",
-		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
+		"description": desc,
+		"parameters": map[string]any{"type": "object", "properties": map[string]any{
+			"path": map[string]any{"type": "string", "description": "optional .tex path in your workspace; default = your main file"},
+		}},
 	}}
 }
 
-func (t *CompileChapterTool) Execute(_ string) (session.ToolResult, error) {
-	if t.SourcePath != "" {
-		data, err := os.ReadFile(t.SourcePath)
+// mainFile returns the wrapper to compile and the fragment to refresh
+// from the live tree ("" when nothing needs copying).
+func (t *CompileChapterTool) mainFile() (compileFile, sourceFile, liveName string) {
+	compileFile = t.WrapperFile
+	if compileFile == "" {
+		compileFile = t.MainFile
+	}
+	sourceFile = t.SourcePath
+	liveName = t.MainFile
+	return
+}
+
+func (t *CompileChapterTool) Execute(argsJSON string) (session.ToolResult, error) {
+	args, _ := parseJSONObject(argsJSON)
+	rel, _ := args["path"].(string)
+	rel = strings.TrimSpace(rel)
+	compileFile, sourceFile, liveName := t.mainFile()
+	if rel != "" && rel != t.MainFile {
+		// 编译工作区里的另一个 .tex：先把它拷进 scratch（同一 wrapper 下
+		// 编译），这样"探针文件/分片"能真正验证类命令是否存在。
+		if t.WorkDir == "" {
+			return session.ToolResult{Text: "COMPILE SKIPPED: this session can only compile " + t.MainFile + "."}, nil
+		}
+		clean := strings.TrimPrefix(filepath.ToSlash(rel), "./")
+		clean = strings.TrimPrefix(clean, "work:")
+		full, err := resolveInside(t.WorkDir, clean)
+		if err != nil {
+			return session.ToolResult{Text: "COMPILE SKIPPED: " + err.Error()}, nil
+		}
+		if !fileExists(full) {
+			return session.ToolResult{Text: "COMPILE SKIPPED: " + clean + " does not exist in your workspace."}, nil
+		}
+		base := strings.TrimSuffix(filepath.Base(clean), filepath.Ext(clean))
+		data, rerr := os.ReadFile(full)
+		if rerr != nil {
+			return session.ToolResult{}, rerr
+		}
+		if err := os.WriteFile(filepath.Join(t.Scratch, base+".tex"), data, 0o644); err != nil {
+			return session.ToolResult{}, err
+		}
+		// 用同一 wrapper 模板换成 input 这个文件。
+		wrapper := "\\documentclass{" + t.clsName() + "}\n" +
+			"\\usepackage{graphicx,amsmath,amssymb,longtable,booktabs}\n" +
+			"\\graphicspath{{figures/}}\n" +
+			"\\begin{document}\n\\input{" + base + ".tex}\n\\end{document}\n"
+		compileFile = base + "_wrapper.tex"
+		if werr := os.WriteFile(filepath.Join(t.Scratch, compileFile), []byte(wrapper), 0o644); werr != nil {
+			return session.ToolResult{}, werr
+		}
+		sourceFile, liveName = "", base+".tex"
+	} else if sourceFile != "" {
+		data, err := os.ReadFile(sourceFile)
 		if err != nil {
 			return session.ToolResult{Text: "COMPILE SKIPPED: " + t.MainFile + " has not been written yet (call write_file first)."}, nil
 		}
@@ -60,25 +131,47 @@ func (t *CompileChapterTool) Execute(_ string) (session.ToolResult, error) {
 		}
 	}
 	start := time.Now()
-	res := t.Comp.Compile(t.Scratch, t.MainFile)
+	res := t.Comp.Compile(t.Scratch, compileFile)
 	LogCompileResult(t.Log, t.Tid, "chapter", res, time.Since(start))
 	if res.OK {
 		// 成功时提供有用信息：产物 PDF 名 + 页数，便于 view_pdf 检视。
 		detail := ""
-		pdf := filepath.Join(t.Scratch, strings.TrimSuffix(t.MainFile, ".tex")+".pdf")
+		pdf := filepath.Join(t.Scratch, strings.TrimSuffix(compileFile, ".tex")+".pdf")
 		if n, err := pdfPageCount(pdf); err == nil {
-			detail = fmt.Sprintf("\nOutput: %s.pdf (%d pages). Inspect with view_pdf {path, page}.", strings.TrimSuffix(t.MainFile, ".tex"), n)
+			detail = fmt.Sprintf("\nOutput: %s.pdf (%d pages). Inspect with view_pdf {path, page}.", strings.TrimSuffix(compileFile, ".tex"), n)
 		}
 		if w := res.WarningSummary(); w != "" {
 			return session.ToolResult{Text: "COMPILE OK.\n" + truncateStr(w, 1500) + detail}, nil
 		}
 		return session.ToolResult{Text: "COMPILE OK." + detail}, nil
 	}
-	text := "COMPILE FAILED:\n" + res.Err
+	text := "COMPILE FAILED (" + liveName + "):\n" + res.Err
 	if w := res.WarningSummary(); w != "" {
 		text += "\n" + truncateStr(w, 1500)
 	}
 	return session.ToolResult{Text: text}, nil
+}
+
+// clsName recovers the book class from the scratch copy of the wrapper
+// (the scratch always holds exactly one *_wrapper.tex).
+func (t *CompileChapterTool) clsName() string {
+	if data, err := os.ReadFile(filepath.Join(t.Scratch, t.WrapperFile)); err == nil {
+		line := string(data)
+		if i := strings.Index(line, "\\documentclass{"); i >= 0 {
+			rest := line[i+len("\\documentclass{"):]
+			if j := strings.Index(rest, "}"); j > 0 {
+				return rest[:j]
+			}
+		}
+	}
+	if entries, err := os.ReadDir(t.Scratch); err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".cls") {
+				return strings.TrimSuffix(e.Name(), ".cls")
+			}
+		}
+	}
+	return "book"
 }
 
 // SubmitDoneTool is the generic final confirmation for convert / fix
