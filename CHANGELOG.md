@@ -13,7 +13,7 @@
 
 ### Changed
 
-- `view_image` 的 `path` **两种写法并存**：markdown 里的引用路径 `images/<书>/<file>`，或只给文件名。项目级会话（style/convert/修复/终审，`Subject` 是共享的 `images` 根）此前只认前者——而提示词恰恰让样式会话"用 `list_source_pages` 打印的文件名"（那是裸文件名），于是裸名字会拼成 `images/<file>` 而报"文件不存在"；按书为 `Subject` 的作图会话本来就支持裸名字。现在裸名字在 `Root+Subject` 内**唯一匹配**即接受（深度受限、不跟随目录软链），同名多份则报错并列出候选路径，绝不错拿别本书的图。
+- `view_image` 的 `path` **两种写法并存**：markdown 里的引用路径 `images/<书>/<file>`，或只给文件名。项目级会话（style/convert/修复/终审，`Subject` 是共享的 `images` 根）此前只认前者——而提示词恰恰让样式会话"用 `list_source_pages` 打印的文件名"（那是裸文件名），于是裸名字会拼成 `images/<file>` 而报"文件不存在"；按书为 `Subject` 的作图会话本来就支持裸名字。现在裸名字在 `Root+Subject` 内**唯一匹配**即接受（深度受限、不跟随目录软链），同名多份则报错并列出候选路径，绝不错拿别本书的图。提示词**不因这次改动而增补**（style 模板逐字保持原样），只把 `latex_fix.system.md` 里原本含糊的一句 `view_image: look at image resources` 写成 `view_image {path}: look at one image — give its full path (images/<book>/<file>) or just the file name.`。
 
 ### Added
 

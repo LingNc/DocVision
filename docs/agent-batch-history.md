@@ -136,7 +136,9 @@ v1.5+（第三十批）：一次真实运行的三个问题（用户 2026-09-11 
 
 也就是说：**提示词说"给文件名"，工具只认路径**（`latex_style.system.md` 原文 "use the file name that list_source_pages prints"，而 `list_source_pages` 打印的就是裸文件名；`latex_style.user.md` 也写 "view_image takes the file name"）。作图会话能用，是因为它的 `Subject` 恰好是书目录。
 
-修复：`ViewImageTool` 新增 `BareSearch`，在 `Root+Subject` 内做**深度受限（≤3 层、跳过隐藏目录、不跟随目录软链）的唯一匹配**——唯一命中即用，同名多份报错并列出候选（`文件名 X 不唯一，请给完整路径: images/书甲/x.jpg, images/书乙/x.jpg`），完全不命中才走原来的提示信息。开启于 5 处项目级会话（样式 ×2、转换、修复、assemble），作图会话保持原样（跨书搜索在那里是错误行为，`TestViewImageResolveNoSearchAcrossSubjects` 的契约不变）。提示词同步写清"两种写法都行"。
+修复：`ViewImageTool` 新增 `BareSearch`，在 `Root+Subject` 内做**深度受限（≤3 层、跳过隐藏目录、不跟随目录软链）的唯一匹配**——唯一命中即用，同名多份报错并列出候选（`文件名 X 不唯一，请给完整路径: images/书甲/x.jpg, images/书乙/x.jpg`），完全不命中才走原来的提示信息。开启于 5 处项目级会话（样式 ×2、转换、修复、assemble），作图会话保持原样（跨书搜索在那里是错误行为，`TestViewImageResolveNoSearchAcrossSubjects` 的契约不变）。
+
+**提示词：一度改多了，被用户打回**。改完 BareSearch 我顺手把 `latex_style.system.md`（两处）与 `latex_style.user.md` 的说法扩写成"两种写法都行"，用户反馈："提示词又开始变多了…style 里面的提示词写的挺清晰的，我觉得没有什么问题。模型自己会明白什么意思，他输入文件名或者路径我们这边不都接受吗？…少即是多。"于是**逐字还原**这三个文件（`git checkout e7a595c^ --`，与改动前完全一致），只保留 `latex_fix.system.md` 里**一行最小修正**：原来只有一句 `view_image: look at image resources`（没说该怎么给路径），改成 `view_image {path}: look at one image — give its full path (images/<book>/<file>) or just the file name.`。结论写进规则：工具同时接受多种写法时**不在提示词里罗列**。
 
 测试：`TestViewImageBareNameResolvesUnderImagesRoot`（裸名/`images/<书>/<file>`/`<书>/<file>` 三种写法指向同一文件；未开启 BareSearch 时不搜索）、`TestViewImageBareNameAmbiguousIsRejected`（同名两份拒绝并列出候选、完整路径仍可用）、`TestViewImageBareNameWorksInBuildTree`（build 树 `images/<书>/<file>` 两级深度也能唯一匹配，根目录文件仍直接命中）。
 
