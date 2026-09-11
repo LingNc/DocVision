@@ -509,6 +509,11 @@ type liveProgress struct {
 	mu  sync.Mutex
 	// last 是最近一次真正画出去的那一行，Close 用它重画最终状态。
 	last string
+	// printed 是**已经整行输出过**的那一行（管道模式）：连续相同的状态
+	// 不再重复整行——用户实测 `[classify 8/8] …` 与 `[process 8/8] …`
+	// 各出现两遍，就是"最后一张完成时 render 一次 + 阶段末尾再 render
+	// 一次"两次文本相同落在管道里成了两行。
+	printed string
 }
 
 func newLiveProgress(text func() string) *liveProgress {
@@ -545,23 +550,35 @@ func (p *liveProgress) render() {
 	}
 	p.mu.Lock()
 	p.last = line
+	same := line == p.printed
 	p.mu.Unlock()
 	if p.tty {
 		// \x1b[K 先清掉本行残留（上一次更长的进度行、或会话实时行留下的
-		// 尾巴），否则会看到两行文字叠在一起的残影。
+		// 尾巴），否则会看到两行文字叠在一起的残影。终端里即使文本没变也
+		// 要重画：会话实时行结束时会把这行清掉。
 		fmt.Fprintf(os.Stdout, "\r\x1b[K%s", line)
 		return
 	}
+	if same {
+		return // 管道/日志：同一状态只留一行
+	}
 	fmt.Fprintln(os.Stdout, line)
+	p.mu.Lock()
+	p.printed = line
+	p.mu.Unlock()
 }
 
-// Close stops the ticker and terminates the line.
+// Close stops the ticker and finalizes the line — it is the ONLY place
+// that terminates a phase line.
 //
 // 终端里**重画**最终一行再换行：期间会话实时行（book.go 的
 // livePhaseLine）结束时会把这一行清掉（`\r\x1b[K`），此时只补一个 `\n`
-// 就会在阶段之间留下一行空白——实测 `[classify 8/8] …` 与
-// `[process 2/8] …` 之间就是这么来的。管道里最后一次 render 已经整行
-// 换过行了，再补就是重复行，所以什么都不打。
+// 就会在阶段之间留下一行空白。管道里上一次 render 已经整行换过行了，
+// 文本没变就什么都不打（再打一遍就是重复行）。
+//
+// 阶段代码**不要**自己再 `progress() + Fprintln` 定格：那样终端里会
+// "整行 + 换行"之后再被 Close 重画一次，用户看到的就是同一行出现两遍
+// （实测 `[classify 8/8] …` 各两行）。
 func (p *liveProgress) Close() {
 	if p == nil {
 		return
@@ -570,13 +587,17 @@ func (p *liveProgress) Close() {
 		close(p.stop)
 		<-p.done // 汇合：正在重画的那一帧必须先画完，否则会画在清行之后
 		p.mu.Lock()
-		line := p.last
+		line, printed := p.last, p.printed
 		p.mu.Unlock()
 		if line == "" {
 			return
 		}
 		if p.tty {
 			fmt.Fprintf(os.Stdout, "\r\x1b[K%s\n", line)
+			return
+		}
+		if line != printed {
+			fmt.Fprintln(os.Stdout, line)
 		}
 	})
 }
@@ -753,12 +774,8 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 		}(t)
 	}
 	wg.Wait()
-	// 定格 classify 进度行并换行：下一阶段的 [process …] 行从新行开始，
-	// 不会把 classify 的最终状态覆盖掉。
-	if !verbose && total > 0 {
-		progress()
-		fmt.Fprintln(os.Stdout)
-	}
+	// 定格与换行交给 deferred progLive.Close()：这里再 render 一次 +
+	// Fprintln，终端里就会看到同一行出现两遍（整行一次、Close 重画一次）。
 }
 
 // ClassifyImageStrict is the second-chance call with an explicit
@@ -815,6 +832,9 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	// raster 计数：保留原图的图（档位1 每张都生成解释文本），单独显示
 	// 让档位1 的控制台能看出"矢量 vs 原图"的比例。
 	raster := 0
+	// okCount 与 apiErr 用于"接口整体不通就早点收手"：现场一次配置笔误让
+	// 8/8 张图各耗 90s（含退避重试）全部 fallback，白等十几分钟。
+	okCount, apiErr := 0, 0
 	for _, t := range pending {
 		mu.Lock()
 		p, ok := prog[t.key()]
@@ -844,12 +864,26 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		r.log.Log(0, "[process] 待处理", strconv.Itoa(len(pending)), "张，并发", strconv.Itoa(conc), "（latex.concurrency）")
 	}
 
+	aborted := false
 	for _, t := range pending {
 		mu.Lock()
 		p, ok := prog[t.key()]
+		apiErrs, successes := apiErr, okCount
 		mu.Unlock()
 		if !ok || p.Class == "" {
 			continue // not classified yet
+		}
+		// 连续接口/会话错误且一张都没成功：明显不是图的问题（配置、额度、
+		// 端点），再逐张重试只是空转——停在这里，剩下的保持未处理状态，
+		// 下次运行自动继续。
+		if !aborted && apiErrs >= processAPIErrorAbort && successes == 0 {
+			aborted = true
+			r.log.LogError(0, "[process] 连续", strconv.Itoa(apiErrs),
+				"张都是接口/会话错误、无一成功，判定为环境问题（不是图的问题）——停止处理剩下的图片；",
+				"修好配置/额度/端点后重跑即可（已完成的结果会跳过）")
+		}
+		if aborted {
+			break
 		}
 		wg.Add(1)
 		tid := <-tidPool
@@ -889,6 +923,9 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				el := strconv.FormatFloat(time.Since(st).Seconds(), 'f', 2, 64)
 				if sessOK {
 					r.log.Log(tid, "✓", "["+el+"s]", "DONE", "[IMG_TYPE: "+sessType+"]")
+					mu.Lock()
+					okCount++
+					mu.Unlock()
 				} else {
 					r.log.LogError(tid, "✗", "["+el+"s]", "FAILED", sessMsg)
 				}
@@ -939,12 +976,22 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 					pp.Status = "done"
 					sessOK, sessType = true, "vector"
 				} else {
-					// Fallback: keep the original. Logged as ERROR and
-					// annotated in the markdown; retried next run.
-					r.log.LogError(tid, "[vector] TikZ 未通过，保留原图（下次运行自动重试）:", tt.imgPath, pp.Error)
-					mu.Lock()
-					warned++
-					mu.Unlock()
+					// 两种失败要分清：接口/会话错误（不是图的问题，整轮都会
+					// 失败，算 errors）与 TikZ 校验失败（算 fallback，下次重试）。
+					if isSessionAPIError(pp.Error) {
+						r.log.LogError(tid, "[vector] 会话/接口错误（不是 TikZ 问题），保留原图:", tt.imgPath, pp.Error)
+						mu.Lock()
+						failed++
+						apiErr++
+						mu.Unlock()
+					} else {
+						// Fallback: keep the original. Logged as ERROR and
+						// annotated in the markdown; retried next run.
+						r.log.LogError(tid, "[vector] TikZ 未通过，保留原图（下次运行自动重试）:", tt.imgPath, pp.Error)
+						mu.Lock()
+						warned++
+						mu.Unlock()
+					}
 					pp.Kept = true
 					pp.Status = "fallback"
 					sessType = "vector-fallback"
@@ -976,12 +1023,25 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		}(t, p)
 	}
 	wg.Wait()
-	// 定格 process 进度行并换行：后续的 rebuild 输出从新行开始，
-	// 最终状态保留在控制台上。
-	if !verbose && total > 0 {
-		progress()
-		fmt.Fprintln(os.Stdout)
+	// 同 classifyPhase：定格与换行只由 deferred Close 负责，避免重复行。
+}
+
+// processAPIErrorAbort 是"接口整体不通"的判定阈值：连续这么多张会话/接口
+// 错误且一张都没成功，就停止处理剩下的图片。
+const processAPIErrorAbort = 3
+
+// isSessionAPIError reports whether a failure message came from the AI
+// session layer (HTTP/接口/额度) rather than from the figure itself. 现场
+// 教训：配置写错 thinking.type 时服务端 400 拒掉每个请求，日志却打的是
+// "[vector] TikZ 未通过"，看起来像提示词或编译器的问题。
+func isSessionAPIError(msg string) bool {
+	for _, mark := range []string{"SESSION_API_ERROR", "SESSION_INSUFFICIENT_BALANCE",
+		"SESSION_TIMEOUT", "SESSION_ERROR", "api error:", "会话错误"} {
+		if strings.Contains(msg, mark) {
+			return true
+		}
 	}
+	return false
 }
 
 // processTextImage extracts the VISIBLE TEXT of a text-class image (the

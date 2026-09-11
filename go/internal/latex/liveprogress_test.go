@@ -157,3 +157,44 @@ func TestPhaseNoteDoesNotOverwriteLiveLine(t *testing.T) {
 		t.Errorf("打印后应重画实时行: %q", out)
 	}
 }
+
+// TestLiveProgressNoDuplicateFinalLine: 用户实测 classify 与 process 各出现
+// 两行完全相同的进度——阶段末尾那段 `progress(); Fprintln(os.Stdout)` 先
+// 整行 + 换行，deferred Close 又重画一遍同一行。现在定格只由 Close 负责，
+// 且管道里连续相同的状态不重复整行：每个状态**恰好一行**。
+func TestLiveProgressNoDuplicateFinalLine(t *testing.T) {
+	states := []string{
+		"[classify 0/8] 0.00% (failed: 0, running: 5)",
+		"[classify 8/8] 100.00% (failed: 0, running: 0)",
+	}
+	i := 0
+	out := captureStdout(t, func() {
+		p := newLiveProgressTTY(func() string { return states[i] }, false)
+		i = 1
+		p.render() // 状态变了 → 一行
+		p.render() // 状态没变 → 不再重复
+		p.Close()  // 文本已整行输出过 → 什么都不打
+	})
+	want := states[0] + "\n" + states[1] + "\n"
+	if out != want {
+		t.Errorf("管道输出 = %q, want %q（每个状态恰好一行）", out, want)
+	}
+	if strings.Count(out, states[1]) != 1 {
+		t.Errorf("最终行出现了 %d 次，want 1", strings.Count(out, states[1]))
+	}
+
+	// 终端里则相反：Close 必须重画最终一行（会话实时行可能把它清掉了），
+	// 且只换一次行。
+	out = captureStdout(t, func() {
+		i = 0
+		p := newLiveProgressTTY(func() string { return states[0] }, true)
+		i = 0
+		p.Close()
+	})
+	if countByte(out, '\n') != 1 {
+		t.Errorf("终端里换行 %d 次，want 1: %q", countByte(out, '\n'), out)
+	}
+	if strings.Count(out, states[0]) != 2 {
+		t.Errorf("终端里最终行应重画一次（共 2 次原地写）: %q", out)
+	}
+}

@@ -3,6 +3,14 @@
 > 版本号即 git 标签（`git tag`）：`v1.5.0-beta.N` 是 1.5.0 测试线，`v1.3.0-beta`/`v1.4.0-beta` 是 v1.3/v1.4 的重打测试标签。
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
+## [Unreleased]
+
+### Fixed
+
+- **`thinking.type` 写错会让整轮绘图全部"保留原图"**（用户实测：8/8 张图全 fallback，日志只写"TikZ 未通过"）：现场 `models.drawing.thinking.type: disable`，而服务端只认 `adaptive`/`enabled`/`disabled`，于是每个请求都被 HTTP 400 拒掉（`unknown variant \`disable\`…`），8 张图各耗 90s（含退避重试）后全部回退成原图，看起来像提示词或编译器的问题。现在 `LoadConfig` 校验每个 `models.*.thinking.type`：一眼能认出的笔误（disable/enable/off/on/false/true…）自动纠正成 disabled/enabled 并在 stderr 告警，其余未知取值**直接报错退出**（附模型名与合法取值）；`[vector]` 的失败日志也分清因果——会话/接口错误打"会话/接口错误（不是 TikZ 问题）"并计入 `errors`，只有 TikZ 校验失败才是 `fallback`；另外连续 3 张接口错误且无一成功时判定为环境问题，**停止处理剩下的图片**（剩余保持未处理，修好后重跑自动继续），不再逐张空转。测试 `TestThinkingTypeTypoIsRepairedAndWarns`、`TestThinkingTypeUnknownIsFatal`、`TestThinkingTypeValidValuesKeepWorking`、`TestIsSessionAPIError`、`TestProcessAbortsOnRepeatedAPIErrors`。
+
+- **进度行重复输出**（用户实测 `[classify 8/8] …` 与 `[process 8/8] …` 各出现两遍）：两个阶段在 `wg.Wait()` 之后自己 `progress() + Fprintln(os.Stdout)` 定格，随后 deferred `liveProgress.Close()` 又重画同一行——终端里就是"同一行出现两次"。定格与换行现在只由 `Close()` 负责；管道/日志里连续相同的状态也不再重复整行。测试 `TestLiveProgressNoDuplicateFinalLine`。
+
 ## [v1.5.0-beta.4] - 2026-09-11
 
 ### Added

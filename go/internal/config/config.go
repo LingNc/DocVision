@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -518,6 +520,9 @@ func LoadConfig(path string) (*Config, error) {
 	checkConfigVersion(cfg)
 	warnDeprecatedKeys(cfg)
 	setDefaults(cfg)
+	if err := validateThinkingTypes(cfg); err != nil {
+		return nil, err
+	}
 	if err := validatePaths(cfg); err != nil {
 		return nil, err
 	}
@@ -529,6 +534,57 @@ func LoadConfig(path string) (*Config, error) {
 // must not coincide with InputDir — archiving into the same
 // directory would cause the next SplitAll to re-discover the
 // files it just archived.
+// thinkingTypes 是 models.*.thinking.type 的合法取值（GLM/DeepSeek/Qwen 的
+// OpenAI 兼容端点都只认这三个）。
+var thinkingTypes = map[string]bool{"enabled": true, "disabled": true, "adaptive": true}
+
+// thinkingTypeTypos 收录一眼能认出的同义写法（用户现场写的是 `disable`）。
+var thinkingTypeTypos = map[string]string{
+	"disable": "disabled", "off": "disabled", "false": "disabled", "no": "disabled", "none": "disabled",
+	"enable": "enabled", "on": "enabled", "true": "enabled", "yes": "enabled",
+}
+
+// validateThinkingTypes 校验每个模型的 thinking.type。
+//
+// 为什么值得在启动时拦住：这个字段是**原样**发到请求体顶层的，取值写错时
+// 服务端会用 HTTP 400 拒掉**整个请求**（现场报
+// `unknown variant \`disable\`, expected one of \`adaptive\`, \`enabled\`, \`disabled\“），
+// 于是一次运行里 8/8 张图全部"保留原图"，日志却只说"TikZ 未通过"，看起来
+// 像是绘图提示词或编译器的问题。一眼能认出的笔误（disable/off/on…）自动
+// 纠正并告警，其余未知取值直接报错，附上模型名与合法取值。
+func validateThinkingTypes(cfg *Config) error {
+	names := make([]string, 0, len(cfg.Models))
+	for name := range cfg.Models {
+		names = append(names, name)
+	}
+	sort.Strings(names) // 报错与告警顺序稳定，便于复现
+	for _, name := range names {
+		m := cfg.Models[name]
+		if m.Thinking == nil {
+			continue
+		}
+		raw, ok := m.Thinking["type"]
+		if !ok || raw == nil {
+			continue
+		}
+		str, isStr := raw.(string)
+		if !isStr {
+			continue // 非字符串（bool/自定义结构）交给服务端自己判
+		}
+		v := strings.ToLower(strings.TrimSpace(str))
+		if fixed, isTypo := thinkingTypeTypos[v]; isTypo {
+			m.Thinking["type"] = fixed
+			fmt.Fprintf(os.Stderr, "\u26a0 models.%s.thinking.type: %q 不是合法取值，已按 %q 发送（合法值：enabled / disabled / adaptive）\n", name, str, fixed)
+			continue
+		}
+		if !thinkingTypes[v] {
+			return fmt.Errorf("models.%s.thinking.type: %q 不是合法取值（合法值：enabled / disabled / adaptive）——该字段原样进请求体，写错会让服务端拒掉每一个请求", name, str)
+		}
+		m.Thinking["type"] = v
+	}
+	return nil
+}
+
 func validatePaths(cfg *Config) error {
 	switch cfg.Latex.ChapterGranularity {
 	case "", "small", "large":

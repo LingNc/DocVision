@@ -55,6 +55,14 @@ v1.5+（第二十九批）：限流降 20 + raster 图说清 + 进度行只算�
 
 ⑤ **发布**：`v1.5.0-beta.4`（2026-09-11 打标签，覆盖第十八～二十九批）；CHANGELOG 的 `[Unreleased]` 就地改名为该版本小节（节日期取标签创建日期），AGENTS.md 发布线段落同步。
 
+v1.5+（第三十批）：一次真实运行的三个问题（用户 2026-09-11 18:40 跑档位1 的终端输出 + 日志）——① 进度行重复：`[classify 8/8] …` 与 `[process 8/8] …` 各出现两遍；② 8/8 张图全部 fallback（`[process 8/8] 100.00% (done: 0, errors: 0, fallback: 8, raster: 0, running: 0)`），用户问"为什么全 fallback 了你看看日志"；③ 同批把 v1.5.0-beta.4 打上。
+
+① **重复行的真正来源**：`classifyPhase`/`processPhase` 在 `wg.Wait()` 之后自己 `progress(); fmt.Fprintln(os.Stdout)` 定格，紧接着 deferred `liveProgress.Close()` 又 `\r\x1b[K{line}\n` 重画同一行——终端里就是同一行出现两次（管道里则是"整行 + 空行"）。定格与换行现在**只由 `Close()` 负责**（终端重画+换行；管道里上一次 render 已整行输出过就不再打），另外 `render()` 在管道模式下对**连续相同**的状态不再重复整行。测试 `TestLiveProgressNoDuplicateFinalLine`（含终端侧"必须重画、且只换一次行"的反向断言）。
+
+② **8/8 fallback 的根因**：错误日志里的 400 是 `Failed to deserialize the JSON body into the target type: ***.type: unknown variant \`disable\`, expected one of \`adaptive\`, \`enabled\`, \`disabled\``——现场 `models.drawing.thinking.type: disable`。这个字段原样进请求体顶层，服务端因此拒掉**每一个**绘图会话请求；`[vector]` 的失败分支只把它记成"TikZ 未通过，保留原图"，于是 8 张图各耗 90s（含 2/4/8/16/30s 退避）后全部保留原图，控制台显示 `errors: 0, fallback: 8`，看起来像提示词/编译器问题。修法三层：**(a) 启动校验** `config.validateThinkingTypes`（笔误 disable/enable/off/on/false/true/no/yes/none 自动纠正 + stderr 告警；其余未知取值直接报错，附模型名与合法值），现场配置也已改正并备份 `config.yaml.bak-thinking`；**(b) 日志与计数分清因果**：`isSessionAPIError()` 判定 `SESSION_*`/`api error:`/`会话错误` → 打"会话/接口错误（不是 TikZ 问题）"并计入 `errors`，只有 TikZ 校验失败才算 `fallback`；**(c) 早停**：连续 3 张接口/会话错误且**无一成功**时判定为环境问题（配置/额度/端点），停止开始新任务并明确告知"剩余保持未处理，修好后重跑会跳过已完成"，不再逐张空转。测试 `TestThinkingTypeTypoIsRepairedAndWarns`、`TestThinkingTypeUnknownIsFatal`、`TestThinkingTypeValidValuesKeepWorking`、`TestIsSessionAPIError`、`TestProcessAbortsOnRepeatedAPIErrors`。
+
+③ 顺带确认：`Already done: 8 | To process: 0` 之外的偏好没变；`config_version: 6` 与模板键一致（见第二十九批的配置审计）。
+
 ---
 
 ## 发布线与 CHANGELOG（原文）
