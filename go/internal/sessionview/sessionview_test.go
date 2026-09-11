@@ -1095,10 +1095,19 @@ func TestViewerMergesToolCallsAndImageTurns(t *testing.T) {
 		t.Error("系统消息没有默认折叠的渐隐遮罩")
 	}
 
-	// 3. 图片归属：按**句柄 + 顺序**推断（第八条，不改 wire），归到调用就并进那次
-	//    调用的卡片（附件段），归到任务就并进任务块，配不上才单独成行。
+	// 3. 图片归属：按**句柄 + 顺序**推断（第八条，不改 wire）。顺序那一半是 **FIFO**：
+	//    转录里"会产生图片的调用"按出现次序排队（回执有 `Image … attached.` 证据最硬，
+	//    没回执才退回工具名 view_image/view_pdf 推定），每条还没归属的图片行领走队里
+	//    最早那个还没被认领、且**排在它前面**的调用；有 `(call <id>)` 的句柄精确匹配优先；
+	//    带正文的图片行是任务自己的图（FIFO 不许抢）。归到调用就并进那次调用的卡片，
+	//    归到任务就并进任务块，配不上才单独成行。
 	for _, marker := range []string{
 		"function imageAttributions()",
+		"var IMAGE_TOOLS = { view_image: 1, view_pdf: 1 };",
+		"var IMAGE_RESULT_RE = /^(?:Image\\s+\\S+|PDF page\\s+\\S+)[^\\n]*\\battached\\b/im;",
+		"var nextUnclaimed = function (lineN) {",
+		"candRound[c.id] = c.lineN;",
+		"roundLast[c.lineN] = c.id;",
 		"var IMAGE_HANDLE_RE = /^Tool image output\\b/i;",
 		"var IMAGE_CALL_RE = /\\(call\\s+([A-Za-z0-9_.:-]+)\\)/;",
 		"var IMAGE_FROM_RE = /\\bfrom\\s+([A-Za-z0-9_.:-]+)/i;",
@@ -1115,14 +1124,31 @@ func TestViewerMergesToolCallsAndImageTurns(t *testing.T) {
 		"attachImages(msg, w.line, w.attr);",
 		"return anchor(imageTurnSection(line, attr), line);",
 		"host.attachments = (host.attachments || 0) + imgs.length;",
+		// 第 E 条：精确匹配时图片算这次调用的**输出**——贴在输出正文下面（text-wrap 里、
+		// 滚动区之外），不另立附件段；卡片里只剩一行小字归属说明。
+		"host.card.querySelector('.io-section.out-section')",
+		"col.appendChild(imageStrip(line));",
+		"'归属：call ' + attr.callId + (attr.name ? '（' + attr.name + '，精确匹配）' : '（精确匹配）')",
+		// 第 D 条：看图类调用的缩略图预览行，紧跟在那一行下面、折叠态就可见；
+		// 一轮多 view 时全挂在这一轮**最后一个** view 行下面（按行号重排后再画）。
+		"function addPreview(host, line)",
+		"sec.insertBefore(strip, host.details.nextSibling);",
+		"strip.__items.sort(function (a, b) { return a.n - b.n; });",
+		"function previewHost(host, attr)",
+		"if (host.details) { addPreview(previewHost(host, attr), line); }",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("图片归属逻辑缺少 %q", marker)
 		}
 	}
 	// 归属结果要缓存（渲染是增量的），并且跟着会话/行数失效。
-	if !strings.Contains(js, "state.imgAttr = { sig: sig, map: map };") {
+	if !strings.Contains(js, "state.imgAttr = { sig: sig, map: map, candRound: candRound, roundLast: roundLast };") {
 		t.Error("归属结果没有按会话 + 行数缓存")
+	}
+	// 带图 user 行归到工具调用时只登记锚点：卡片已经在它那条消息的 section 里，
+	// 再把它交给调用方 appendChild 会被拽到 .stream 上，行距/回合分隔线就跟别的工具行不一样。
+	if !strings.Contains(js, "anchor(callNode.details, line);\n            return null;") {
+		t.Error("图片轮的卡片被从消息 section 里拽出来了（行间距会与其他工具行不一致）")
 	}
 
 	// 4. 一次调用 = 一行：回执并进同一个卡片（返回 null，不再另起一行），
@@ -1604,7 +1630,8 @@ func TestViewerJSONHighlighting(t *testing.T) {
 	// 应用位置：工具输入 / 工具输出 / parameters / 轨迹 / 提示词快照 / 代码块。
 	for _, marker := range []string{
 		"card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)'));",
-		"node.card.appendChild(ioSection('输出', text, status === 'error', 'result.' + line.n));",
+		"var out = ioSection('输出', text, status === 'error', 'result.' + line.n);",
+		"out.classList.add('out-section');",
 		"pbody.appendChild(machineBlock(String(tool.parameters), 'code'));",
 		"scroll.appendChild(machineBlock(promptText, 'body-text prompt-text'));",
 		"if (k === 'input' || k === 'request' || k === 'output') {",

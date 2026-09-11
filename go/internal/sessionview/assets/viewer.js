@@ -2079,18 +2079,21 @@
     return wrap;
   }
 
+  // 一张缩略图：点它进灯箱看原图（图片条与"看图类调用的预览行"共用）。
+  function thumbImg(ref, cls) {
+    var url = mediaURL(ref);
+    var img = el('img', cls || 'thumb');
+    img.src = url;
+    img.alt = ref;
+    img.loading = 'lazy';
+    img.title = ref;
+    img.addEventListener('click', function () { openLightbox(url, ref); });
+    return img;
+  }
+
   function imageStrip(line) {
     var strip = el('div', 'images');
-    (line.images || []).forEach(function (ref) {
-      var url = mediaURL(ref);
-      var img = el('img', 'thumb');
-      img.src = url;
-      img.alt = ref;
-      img.loading = 'lazy';
-      img.title = ref;
-      img.addEventListener('click', function () { openLightbox(url, ref); });
-      strip.appendChild(img);
-    });
+    (line.images || []).forEach(function (ref) { strip.appendChild(thumbImg(ref)); });
     return strip;
   }
 
@@ -2294,7 +2297,11 @@
     var status = classifyResult(text);
     node.result = { line: line, status: status };
     node.card.appendChild(el('div', 'io-divider'));
-    node.card.appendChild(ioSection('输出', text, status === 'error', 'result.' + line.n));
+    var out = ioSection('输出', text, status === 'error', 'result.' + line.n);
+    // 精确匹配时图片就是这个工具的**输出**（第 E 条），要贴在输出正文正下方；
+    // 用类名把这一段认出来（ioSection 只认标签文本，没法从外面找）。
+    out.classList.add('out-section');
+    node.card.appendChild(out);
     var actions = el('div', 'io-actions');
     actions.appendChild(copyButton(text));
     node.card.appendChild(actions);
@@ -2304,26 +2311,83 @@
   }
 
   /*
-   * 图片轮（带 images 的 user 行）作为**附件**并进对应调用/回执的卡片：
-   * 与「输入 / 输出」同属一次调用，展开才看到缩略图（点图进灯箱）。
+   * 看图类调用的**缩略图预览行**（第 D 条）：紧跟在那一行工具调用下面，
+   * **折叠态就可见**（所以它是 <details> 的兄弟节点，不能塞进卡片里）。一轮里调了
+   * 多次 view 时，这一轮的缩略图**全部并排挂在最后一个 view 行下面**（不是每个 view
+   * 行下面各挂一张），顺序按转录里的先后——所以每次都按行号重排一遍再重画。
+   */
+  function addPreview(host, line) {
+    if (!host || !host.details || !host.details.parentNode) { return null; }
+    var strip = host.preview;
+    if (!strip || !strip.parentNode) {
+      strip = el('div', 'preview-strip');
+      strip.__items = [];
+      host.preview = strip;
+      var sec = host.details.parentNode;
+      sec.insertBefore(strip, host.details.nextSibling);
+    }
+    strip.__items.push(line);
+    strip.__items.sort(function (a, b) { return a.n - b.n; });
+    clear(strip);
+    strip.__items.forEach(function (l) {
+      (l.images || []).forEach(function (ref) { strip.appendChild(thumbImg(ref, 'preview-thumb')); });
+    });
+    return strip;
+  }
+
+  // 缩略图预览挂哪一行：这一轮里**最后一个**能产图的看图调用（第 D 条的"一轮多 view"）。
+  function previewHost(host, attr) {
+    var info = state.imgAttr;
+    if (!info || !attr || !attr.callId) { return host; }
+    var round = info.candRound ? info.candRound[attr.callId] : undefined;
+    var lastId = (round !== undefined && info.roundLast) ? info.roundLast[round] : '';
+    var node = lastId && state.callNodes ? state.callNodes[lastId] : null;
+    return node || host;
+  }
+
+  /*
+   * 图片轮到哪一行去：精确匹配时图片是那次调用的**输出**（第 E 条），贴「输出」正文
+   * 正下方、不再另立「附件（user 轮）」分区，卡片结尾只留一行小字归属说明；
+   * 推断出来的（FIFO / 未识别）仍按**附件段**呈现（单列块：说明文字贴块首、左对齐
+   * → 图片各自成行按原比例 → **归属脚注放最后**；不用「输入/输出」那套两列网格，
+   * 否则脚注会撑宽左列、把图片挤成右边一小条）。
    */
   function attachImages(host, line, attr) {
     var imgs = line.images || [];
     if (!imgs.length) { return host; }
+    // 第 D 条：不论怎么归属，看图类调用的行下面都要挂缩略图预览（折叠态可见）。
+    if (host.details) { addPreview(previewHost(host, attr), line); }
     // 宿主可以是调用卡片（node.card）也可以是系统消息块（任务提示）：图片归属
     // 决定挂哪儿——工具图片回执挂那次调用，会话开头投喂的原图挂任务。
+    var outSec = attr && attr.how === 'call-id' && host.card
+      ? host.card.querySelector('.io-section.out-section') : null;
+    if (outSec) {
+      // 图片 = 这次调用的输出：接在输出正文的下一个块（text-wrap 里、滚动区之外，
+      // 所以长输出内滚也不会把图片卷进去）。末尾一行小字说明归属，不参与图片布局。
+      var col = outSec.querySelector('.text-wrap') || outSec;
+      col.appendChild(imageStrip(line));
+      col.appendChild(el('div', 'attach-note',
+        '归属：call ' + attr.callId + (attr.name ? '（' + attr.name + '，精确匹配）' : '（精确匹配）')));
+      host.attachments = (host.attachments || 0) + imgs.length;
+      if (host.details) { updateCallTail(host); }
+      return host;
+    }
     var box = host.card || host;
     box.appendChild(el('div', 'io-divider'));
-    var section = el('div', 'io-section');
+    var section = el('div', 'io-section attach-section');
     section.appendChild(el('div', 'io-label', '附件（user 轮）'));
     var body = el('div', 'attach-body');
-    if (line.text) { body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'imgtext.' + line.n)); }
+    // 任务行**自己**带的图（attr.taskLineN 就是这一行）：正文已经在任务块里了，
+    // 附件段只放图，不把任务提示原样再抄一遍。
+    if (line.text && line.n !== (attr && attr.taskLineN)) {
+      body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'imgtext.' + line.n));
+    }
     body.appendChild(imageStrip(line));
     section.appendChild(body);
-    box.appendChild(section);
     section.appendChild(el('div', 'attach-note',
       '这一轮是 user 轮发出的（' + (attr && attr.kind === 'task' ? '会话开头的原图投喂，作为任务的输入' : '工具的输入/附件') +
       '）· ' + attributionText(attr)));
+    box.appendChild(section);
     host.attachments = (host.attachments || 0) + imgs.length;
     if (host.details) { updateCallTail(host); }
     return host;
@@ -2389,91 +2453,177 @@
   }
 
   /*
-   * 图片轮该归到哪次调用：往前找**最近的调用或回执**（assistant 的 tool_calls、
-   * 或已配对的 tool 回执行；同批图片轮继续往前找）。中间隔着任务提示或普通助手
-   * 正文就说明它们不是一回事——配不上就让它自己成行（左对齐、同样默认折叠）。
-   */
-  /*
-   * 带图 user 轮的**工具归属**（第八条）。wire 上图片只能走 user 消息（tool 消息的
-   * content 只能是文本），所以归属只能从**句柄文本 + 顺序**里推断，绝不新增字段：
-   *   · 句柄以 `Tool image output` 开头（工具图片回执的固定前缀，旧转录同样是它）：
-   *       句柄里有 `(call <id>)`  → 精确匹配那一次调用（新转录会写明归属）；
-   *       只有 `from <tool>`      → 该轮里同名、且还没被认领的那一次调用；
-   *       两者都没有（旧转录）    → 该轮里还没被认领的那一次调用（纯顺序推断）；
-   *   · 不是句柄（会话开头"投喂原图"的那一轮）→ 归属到本会话**第一条任务**
-   *     （第一条不带图的 user 行）的输入附件，不塞给任何工具。
+   * 带图 user 轮的**工具归属**。wire 上图片只能走 user 消息（tool 消息的 content 只能
+   * 是文本），所以归属只能从**句柄文本 + 顺序**里推断，绝不新增字段。
+   *
+   * 顺序那一半是 **FIFO 配对**：先把转录里"会产生图片的工具调用"按出现次序排成队列，
+   * 再按顺序扫带图 user 行，每条**还没归属**的图片行领走队列里**最早的那个还没被
+   * 认领**的调用（一对一）。理由就是转录本身的次序——一轮里多次看图调用，图片回执
+   * 也是按同样的次序依次回来的，所以第 N 条图配第 N 次产图调用（真数据里"就近往前
+   * 找"会把图片挂到 bash/edit_file/grep 这类根本不产图的调用上，见 compare 记录）。
+   *
+   *   · 句柄 `Tool image output` 开头（固定前缀，旧转录同样是它）：
+   *       有 `(call <id>)`  → **精确匹配**优先（新转录会写明归属），FIFO 让位；
+   *       有 `from <tool>`  → 队列里最早的同名、还没被认领的那次调用；
+   *       都没有（旧转录）  → 队列里最早的还没被认领的那次调用（纯 FIFO）。
+   *   · 不是句柄但**有正文**（真实矢量图会话：任务提示里头就带着原图）→ 这一轮就是
+   *     任务本身，归「本会话任务」，**FIFO 不许抢**。
+   *   · 不是句柄也没正文（纯图片行）：先按 FIFO 配（老转录里它就是没句柄的图片回执）；
+   *     队列空/配不上才当任务投喂的原图 → 归「本会话任务」（会话开头先投图、任务提示在后
+   *     的那种，挂到本会话第一条任务上）。
+   *   · 什么都配不上 → kind 'none'，页面标「归属：未识别」并让它单独成行。
+   *
    * 每条结果都带 how（依据），轨迹页据此标"精确匹配 / 由顺序推断"，让人能核对。
    */
   var IMAGE_HANDLE_RE = /^Tool image output\b/i;
   var IMAGE_CALL_RE = /\(call\s+([A-Za-z0-9_.:-]+)\)/;
   var IMAGE_FROM_RE = /\bfrom\s+([A-Za-z0-9_.:-]+)/i;
+  // 哪些调用"会产生图片"——两条依据都用上：
+  //   · **回执里的图片证据最硬**：`Image <路径> … attached.` / `PDF page <文件> … attached.`
+  //     （真实回执就长这样）。有回执就看回执——失败的 `view_pdf` 回执是 `TOOL ERROR`，
+  //     它没产图，不该占着队列位置把后面那条图认错（真数据里这类失败调用有 37 次）。
+  //   · 没有回执（被压缩截断、或还在跑）才退回**工具名**当推定：看图就这两个工具。
+  var IMAGE_TOOLS = { view_image: 1, view_pdf: 1 };
+  var IMAGE_RESULT_RE = /^(?:Image\s+\S+|PDF page\s+\S+)[^\n]*\battached\b/im;
 
   // 归属结果按"会话 + 行数"缓存：渲染是增量的，行数变了就重算一遍。
   function imageAttributions() {
     var sig = (state.current ? state.current.id : '') + ':' + state.lines.length;
     if (state.imgAttr && state.imgAttr.sig === sig) { return state.imgAttr.map; }
 
-    var map = {};
-    var claims = {};       // callId → 已被几张图认领
-    var roundCalls = [];   // 最近一条带 tool_calls 的助手消息发起的调用
+    /*
+     * 第一步：按转录顺序记下**每一次调用**（id / 工具名 / 所在行，以及它的回执文本），
+     * 再挑出"会产生图片"的那些排成 FIFO 队列。用**条目**而不是 callId 当队列元素，
+     * 因为续跑/重放的转录里同一个 call id 会出现两次（真数据里样式会话有 133 个重复 id），
+     * 按 id 去重会让重放段的图片全部认不出归属。
+     */
+    var calls = [];
+    var idxById = {};      // callId → 该 id 的条目下标（可能多个）
+    state.lines.forEach(function (line) {
+      if (!line || line.bad || (line.t && line.t !== 'msg')) { return; }
+      if (line.role === 'assistant') {
+        (line.tool_calls || []).forEach(function (c) {
+          (idxById[c.id] = idxById[c.id] || []).push(calls.length);
+          calls.push({ id: c.id, name: (c.function || {}).name || '', lineN: line.n,
+                       receipt: null, claimed: false, qpos: -1 });
+        });
+        return;
+      }
+      if (line.role === 'tool') {
+        var idxs = idxById[line.tool_call_id] || [];
+        for (var k = 0; k < idxs.length; k++) {
+          if (calls[idxs[k]].receipt === null) {
+            calls[idxs[k]].receipt = String(line.text || '');
+            break;
+          }
+        }
+      }
+    });
+
+    var queue = [];
+    var candRound = {};   // callId → 这次调用所在的那条助手消息（行号）
+    var roundLast = {};   // 助手消息行号 → 那一轮里**最后一个**能产图的调用 id
+    calls.forEach(function (c) {
+      var img = c.receipt === null
+        ? !!IMAGE_TOOLS[c.name]
+        : IMAGE_RESULT_RE.test(c.receipt.trim());
+      if (img) {
+        c.qpos = queue.length;
+        queue.push(c);
+        candRound[c.id] = c.lineN;
+        roundLast[c.lineN] = c.id;
+      }
+    });
+
     var firstTask = 0;     // 本会话第一条任务（不带图的 user 行）
     state.lines.forEach(function (l) {
       if (!l || l.bad || (l.t && l.t !== 'msg')) { return; }
       if (l.role === 'user' && !(l.images && l.images.length) && !firstTask) { firstTask = l.n; }
     });
 
+    var map = {};
+    var qi = 0;            // FIFO 指针：队列里最早那个还没被认领的调用
+    // 只能领**这一行之前**发生过的调用——图片是回执之后才回来的；排在后面的调用
+    // 还没发生（会话开头先投图的纯图片行就是这么落到「本会话任务」上的）。
+    var nextUnclaimed = function (lineN) {
+      while (qi < queue.length && queue[qi].claimed) { qi++; }
+      if (qi >= queue.length || queue[qi].lineN >= lineN) { return null; }
+      return queue[qi];
+    };
+
+    var claim = function (entry, pick, how) {
+      pick.claimed = true;
+      entry.kind = 'call';
+      entry.how = how;
+      entry.callId = pick.id;
+      if (!entry.name) { entry.name = pick.name; }
+    };
+
     state.lines.forEach(function (line) {
       if (!line || line.bad || (line.t && line.t !== 'msg')) { return; }
-      if (line.role === 'assistant') {
-        var calls = line.tool_calls || [];
-        if (calls.length) {
-          roundCalls = calls.map(function (c) {
-            return { id: c.id, name: (c.function || {}).name || '', lineN: line.n };
-          });
-        }
-        return;
-      }
       if (line.role !== 'user' || !(line.images && line.images.length)) { return; }
 
       var text = String(line.text || '').trim();
       var entry = { kind: 'none', how: '', callId: '', name: '', lineN: line.n, taskLineN: firstTask };
+
+      // 有正文又不是句柄 = 这一轮就是**任务本身**（任务提示里头带着原图）→ 归本会话任务，
+      // FIFO 不许抢它。（真实矢量图会话的第 2 行就是这种。）
+      if (text && !IMAGE_HANDLE_RE.test(text)) {
+        entry.kind = 'task';
+        entry.how = 'task';
+        entry.taskLineN = line.n;
+        map[line.n] = entry;
+        return;
+      }
+
+      var pick = null;
       if (IMAGE_HANDLE_RE.test(text)) {
         var idm = IMAGE_CALL_RE.exec(text);
         var frm = IMAGE_FROM_RE.exec(text);
         entry.name = frm ? frm[1] : '';
-        var pick = null;
         if (idm) {
-          roundCalls.forEach(function (c) { if (!pick && c.id === idm[1]) { pick = c; } });
-          if (!pick && state.callNodes && state.callNodes[idm[1]]) {
-            pick = { id: idm[1], name: entry.name, lineN: 0 };
+          // 精确匹配优先：同 id 的条目里取"这一行之前、还没被认领"的最后一个
+          // （重放时同一个 call id 会出现两次）。
+          var cands = idxById[idm[1]] || [];
+          for (var k = cands.length - 1; k >= 0; k--) {
+            var ex = calls[cands[k]];
+            if (ex.qpos >= 0 && !ex.claimed && ex.lineN < line.n) { pick = ex; break; }
           }
-          if (pick) { entry.how = 'call-id'; }
+          if (!pick && state.callNodes && state.callNodes[idm[1]]) {
+            // 不在队列里（那条调用没产图/还没回执）也要认句柄写明的归属。
+            pick = { id: idm[1], name: entry.name, claimed: false };
+          }
+          if (pick) { claim(entry, pick, 'call-id'); }
         }
         if (!pick && entry.name) {
-          roundCalls.forEach(function (c) {
-            if (!pick && c.name === entry.name && !claims[c.id]) { pick = c; entry.how = 'tool-name'; }
-          });
+          for (var j = qi; j < queue.length; j++) {
+            if (queue[j].lineN >= line.n) { break; }
+            if (!queue[j].claimed && queue[j].name === entry.name) {
+              pick = queue[j];
+              claim(entry, pick, 'tool-name');
+              break;
+            }
+          }
         }
-        if (!pick) {
-          roundCalls.forEach(function (c) {
-            if (!pick && !claims[c.id]) { pick = c; entry.how = 'order'; }
-          });
+      }
+      if (!pick) {
+        pick = nextUnclaimed(line.n);
+        if (pick) { claim(entry, pick, 'order'); }
+      }
+      if (!pick) {
+        // 队列里没有可领的产图调用：纯图片行当**任务投喂的原图**（会话开头先投图、
+        // 任务提示在后 → 挂到第一条任务行上，那条任务行还没渲染时先记进
+        // pendingTaskImages，见 renderLine）；句柄却配不上 → 未识别。
+        if (!IMAGE_HANDLE_RE.test(text)) {
+          entry.kind = 'task';
+          entry.how = 'task';
+          entry.taskLineN = text ? line.n : (firstTask || line.n);
         }
-        if (pick) {
-          claims[pick.id] = (claims[pick.id] || 0) + 1;
-          entry.kind = 'call';
-          entry.callId = pick.id;
-          if (!entry.name) { entry.name = pick.name; }
-        }
-      } else if (firstTask) {
-        // 会话开头投喂原图的轮：归到第一条任务（它是那次作图的输入），不塞给工具。
-        entry.kind = 'task';
-        entry.how = 'task';
       }
       map[line.n] = entry;
     });
 
-    state.imgAttr = { sig: sig, map: map };
+    state.imgAttr = { sig: sig, map: map, candRound: candRound, roundLast: roundLast };
     return map;
   }
 
@@ -2610,7 +2760,7 @@
         /*
          * 两条路都不靠右对齐（右侧气泡那套已经去掉）：
          *   · **带图**的 user 行是图片投喂/工具图片回执 → 按归属挂到那一次调用
-         *     （会话开头的原图则挂到第一条任务）上，配不上才单独一行折叠行；
+         *     （任务自己的图则收进任务块）上，配不上才单独一行折叠行；
          *   · **不带图**的 user 行是 harness 自己发的长任务提示 → 按**系统消息**
          *     呈现（安静样式 + 「系统 · user 轮」标签），默认只露一小段，可展开。
          */
@@ -2619,7 +2769,19 @@
           if (attr.kind === 'call' && state.callNodes[attr.callId]) {
             var callNode = state.callNodes[attr.callId];
             attachImages(callNode, line, attr);
-            return anchor(callNode.details, line);
+            // 卡片已经在它那条助手消息的 section 里了：**只登记锚点、不返回节点**
+            // （返回就会被调用方 appendChild 到 .stream 上，把这一行从消息里拽出来，
+            // 于是它的行间距和回合分隔线就跟别的工具行不一样——真数据里 40 行都这样）。
+            anchor(callNode.details, line);
+            return null;
+          }
+          if (attr.kind === 'task' && attr.taskLineN === line.n) {
+            // 任务行**自己**带图（真实矢量图会话的任务提示就是"重画附带的图" + 原图）：
+            // 这一行照系统消息/任务块的样式渲染，图片作为**它的附件**收在同一个块里，
+            // 绝不塞进任何工具调用。
+            var own = systemTurnSection(line);
+            attachImages(own, line, attr);
+            return anchor(own, line);
           }
           if (attr.kind === 'task' && attr.taskLineN) {
             var taskNode = state.anchors[attr.taskLineN];
@@ -2871,7 +3033,10 @@
           summary: (fromTool ? '接上一行工具回执 · ' : '') + '图片 ×' + line.images.length + ' · ' +
             (firstLine(line.text) || '（无正文）') + ' · ' + attributionText(attr),
           title: IMAGE_WIRE_TITLE + '\n' + attributionText(attr) +
-            (attr.how === 'call-id' ? '（句柄里写了 call id，属于精确匹配）' : '（旧转录没有 call id，按顺序推断；新转录会写上归属）') +
+            (attr.how === 'call-id' ? '（句柄里写了 call id，属于精确匹配）'
+              : attr.how === 'tool-name' ? '（句柄里写了工具名，按名称匹配到本轮的调用）'
+              : attr.how === 'order' ? '（旧转录没有 call id，按顺序推断；新转录会写上归属）'
+              : attr.how === 'task' ? '（这一轮带的是任务自己的图，不归任何工具调用）' : '') +
             (fromTool ? '\n这一轮的图片就是上一行工具回执投出来的（同一件事的两段 wire 表达，所以两行不合并）' : ''),
           chars: String(line.text || '').length,
           status: '', jump: jumpTo,

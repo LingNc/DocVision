@@ -48,6 +48,20 @@
   --code-font: 11px;
   --code-line: 19px;
   --code-scroll-h: 340px;
+  /* 对话页的**行高与间距只有这一组值**（工具行/思考行/图片行/系统行共用，不因
+     "有没有回执、有没有附件、ok 还是 error"而变）：折叠行 24px；同一条消息里相邻
+     折叠行间隔 6px；回合边界（两个 section 之间）= 8px + 0.5px 虚线 + 8px。
+     测试（attribution_browser_test.go）按这组 token 钉死。 */
+  --row-h: 24px;
+  --row-gap: 6px;
+  --divider-gap: 8px;
+  /* 图片（附件段 / 图片轮）：按原比例、左对齐、可点开灯箱，尺寸只走这两个 token */
+  --attach-img-w: 520px;
+  --attach-img-h: 420px;
+  /* 看图类调用行下面的**缩略图预览**（第 D 条）：不大不小 —— 高不超过 108px、
+     宽不超过 240px，保持原比例（不裁切、不拉伸、不留空框）。 */
+  --preview-h: 108px;
+  --preview-w: 240px;
   --dot-live: #22c55e;
   /* 轨迹表的种类标签（照 DSH 的 kindTag 上色：用户=业务主色、工具=琥珀、错误=红） */
   --kind-user-fg: #4176e6;
@@ -611,7 +625,14 @@ details[open] > summary .row-caret { transform: rotate(90deg); }
 /* ============================ 对话（DSH 的消息形态） ============================ */
 
 .timeline { flex: 1; overflow-y: auto; padding: 16px 24px 80px; }
-.stream { max-width: var(--content-w); margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.stream { max-width: var(--content-w); margin: 0 auto; display: flex; flex-direction: column; }
+/* 回合边界**只有一种画法**：8px + 0.5px 虚线 + 8px（--divider-gap）。虚线只出现在
+   section 之间（也就是回合之间），同一条消息里的工具行之间永远只是 --row-gap。 */
+.stream > .msg + .msg {
+  margin-top: var(--divider-gap);
+  padding-top: var(--divider-gap);
+  border-top: .5px dashed var(--border);
+}
 .empty { padding: 56px 24px; color: var(--dim); text-align: center; }
 
 /* 消息流开头只留一行极简摘要（指标与元信息都在右侧详情面板里） */
@@ -619,7 +640,7 @@ details[open] > summary .row-caret { transform: rotate(90deg); }
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 24px;
+  min-height: var(--row-h);
   color: var(--caption);
   font-size: 12.5px;
   line-height: 20px;
@@ -644,7 +665,7 @@ details[open] > summary .row-caret { transform: rotate(90deg); }
 }
 .stream-summary button:hover { text-decoration: underline; }
 
-.msg { display: flex; flex-direction: column; gap: 6px; }
+.msg { display: flex; flex-direction: column; gap: var(--row-gap); }
 
 /* 消息全部**左对齐**，没有右侧气泡：在这个工具里 role:"user" 行其实是 harness
    自己发的一轮（见 docs/commands.md 的"消息形态"），所以——
@@ -680,15 +701,53 @@ details[open] > summary .row-caret { transform: rotate(90deg); }
   mask-image: linear-gradient(180deg, #000 72%, transparent);
 }
 .msg-system .body-text { color: var(--muted); }
-.attach-note { color: var(--caption); font-size: 11.5px; }
+.attach-note { color: var(--caption); font-size: 11.5px; text-align: left; }
 
 /* 图片轮自己的折叠行（配不上调用时）：展开后是缩略图 + 那一轮的正文 */
 .disclosure-image > summary .line-name { color: var(--fam-view); }
-.image-body { padding: 4px 0 6px 22px; display: flex; flex-direction: column; gap: 6px; }
-.image-body .images img { max-width: 220px; max-height: 220px; }
-/* 并进调用卡片的附件段（与「输入 / 输出」同一张卡片的第三段） */
-.attach-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.attach-body .images img { max-width: 160px; max-height: 160px; }
+.image-body { padding: 4px 0 6px 22px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+/* 看图类调用（view_image / view_pdf）的**缩略图预览行**（第 D 条）：紧跟在那一行
+   工具调用下面，**折叠态就可见**（所以它是 <details> 的兄弟节点，不在卡片里）。
+   一轮里调了多次 view 时，这一轮的缩略图全部并排挂在这一轮**最后一个** view 行下，
+   顺序按转录先后；超宽就换行。缩进 20px 与工具行里的名称对齐。 */
+.preview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-left: 20px;
+}
+.preview-strip img {
+  width: auto;
+  height: auto;
+  max-width: var(--preview-w);
+  max-height: var(--preview-h);
+  border: .5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: zoom-in;
+}
+
+/* 并进调用卡片的附件段（与「输入 / 输出」同一张卡片的第三段）：**单列块**，左对齐。
+   绝不能沿用「输入/输出」那套 `label | 内容` 两列网格——归属脚注是这一段的第三个
+   子元素，在网格里会掉到第二行第一列并把第一列撑到脚注那么宽，于是说明文字被推到
+   右边、图片被挤成一小条（用户看到的就是这个）。 */
+.io-section.attach-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.io-section.attach-section .io-label { position: static; }
+.attach-body {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
 
 /* 助手消息 = 左对齐、全宽、无气泡无边框 */
 .msg-assistant { align-items: stretch; }
@@ -727,7 +786,7 @@ details[open] > summary .row-caret { transform: rotate(90deg); }
 .disclosure > summary {
   display: flex;
   align-items: center;
-  min-height: 24px;
+  min-height: var(--row-h);
   padding: 2px 4px 2px 0;
   border-radius: 6px;
   cursor: pointer;
@@ -896,9 +955,19 @@ details[open] > summary .line-caret { transform: rotate(90deg); }
 }
 .row-actions button:hover { background: var(--hover); color: var(--text); border-color: var(--border-strong); }
 
-.images { display: flex; flex-wrap: wrap; gap: 8px; }
-.images img { max-width: 220px; max-height: 220px; border: .5px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); cursor: zoom-in; }
-.thumb { max-width: 160px; max-height: 160px; }
+.images { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; }
+/* 图片一律**左对齐、按原比例**，尺寸只有一组 token（附件段与图片轮共用）：宽不超过
+   520px、高不超过 420px，绝不撑出容器、也绝不裁切（宽高都不写死，所以没有空框）。 */
+.images img {
+  width: auto;
+  height: auto;
+  max-width: min(100%, var(--attach-img-w));
+  max-height: var(--attach-img-h);
+  border: .5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: zoom-in;
+}
 .note { color: var(--caption); font-size: 11.5px; }
 
 /* 跳转落地时的短暂高亮（轨迹 → 对话） */

@@ -470,9 +470,50 @@ JSON：`prettyJSON()`（先 `JSON.parse` 再 2 空格 `stringify`，解析失败
 - **轨迹页**：带图 user 行的摘要末尾直接写归属依据，`title` 里写明协议原因与"精确 vs 顺序"的区别；`tool` 回执与紧随其后的带图 user 轮**互相提示**（「图片见下一行用户轮」/「接上一行工具回执」）但仍是两行；跳转目标 = 归属到的那次调用（或任务行）。
 - **测试**（`sessionview`）：新增 `attribution_browser_test.go`，用 headless chromium（`--headless=new --no-sandbox --user-data-dir=<可写目录>`，没有 chromium 的机器 `t.Skip`）跑**真实渲染**：① 旧转录（句柄只有前缀）的图片回执必须落进那次调用的 `.io-card` 里且带「归属：由顺序推断（本轮的 call call_1）」；② 会话首图必须落进 `.msg msg-system` 且「归属：本会话任务」、**不得出现**「归属：call」；③ 轨迹页同时出现「由顺序推断」与「本会话任务」，且 `kind-result` 行存在（调用/结果未合并）；④ 句柄带 `(call call_b)` 时必须精确落到 `view_call_b`（同一轮里顺序推断会给出 `call_a`，所以这条能真正区分两种路径）。断言前会剥掉内联 `<style>`/`<script>`——否则 dump 出来的源码文本会让断言假通过。
 
+### 追加修复：任务提示**自带原图**的轮被判成"未识别"（真实矢量图会话）
+
+真实数据把第 8 轮的归属规则打出一个洞：`source/sessions/vector_<书>__<哈希>__<图>.jsonl` 的**第 2 行**是 `role:"user"` + 1 张原图 + 任务正文（`Redraw the attached image as TikZ.\n\nORIGINAL FIGURE SIZE: …`）——**会话任务自己带着原图**，既不是"纯图片行"，也不以 `Tool image output` 开头。而 `imageAttributions()` 里 `firstTask` 只认"**不带图**的 user 行"，这类会话（同一本书的矢量图会话通常全程只有这一条 user 正文）压根没有任务行可选，整行掉到 `kind:'none'`：页面标「归属：未识别」、`本会话任务` 一次都不出现。用只读导出 + headless chromium 数出来的真数据：36 个矢量图会话里 **35 个各中一条**（每个会话 `归属：未识别` 可见 1 处；DOM 里出现 2 次是因为同一行的可见脚注与折叠行的 `title` 各写了一次，**不是**图例/说明文字），并伴随 35 条孤立的图片行。
+
+改法（`viewer.js` 同一个函数，不动算法骨架）：不以 `Tool image output` 开头的带图 user 轮一律算"任务自己的图"，`entry.taskLineN = text ? line.n : (firstTask || line.n)`——**自带任务正文的**（真实矢量图会话就是这种）归到它**自己**那条任务行；**纯图片行**（排在任务提示前面的那种）仍挂到本会话第一条任务上，`pendingTaskImages` 那条路原样保留。呈现上加一个分支：`attr.taskLineN === line.n` 时这一行照**系统消息/任务块**的样式渲染（`systemTurnSection` + `attachImages`），图片作为**该任务的附件**（缩略图可点开灯箱、默认折在任务块里），绝不塞进任何工具调用；附件段顺手不再把任务正文重复抄一遍（正文已经在任务块里了）。
+
+**顺带查出的第二处「该归属却落到未识别」**：句柄"还没被认领的那次调用"用的是**跨轮累计**的 `claims` 表，而续跑/重放的转录里同一个 call id 会出现两次（样式会话 `style_session.jsonl` 实测 133 个重复 id）——重放段的图片发现"本轮调用全被前面的段认领光了"，只能标未识别。改为**每轮清零**（认领本来就是"这一轮里哪次调用还没拿到图"）。真数据统计（`docvision sessions --dir .` 只读导出 /home/share/samba-share/PDF2MD，headless chromium 逐会话点开、剥掉内联脚本后数 DOM）：
+
+| 类型 | 会话数 | 未识别（前 → 后） | 本会话任务（前 → 后） | 由顺序推断（前 → 后） |
+| --- | --- | --- | --- | --- |
+| 矢量图会话 | 36 | 35 → 0 | 1 → 36 | 308 → 308 |
+| 样式会话 | 5 | 33 → 0 | 0 → 0 | 99 → 132 |
+| 转换会话 | 7 | 0 → 0 | 0 → 0 | 97 → 97 |
+| 核对会话 | 4 | 0 → 0（无图片轮） | 0 → 0 | 0 → 0 |
+| 章节划分 | 2 | 0 → 0（无图片轮） | 0 → 0 | 0 → 0 |
+
+（`归属：call <id>` 在真数据里 0 次：现有转录的句柄都还是旧式"只有前缀"，精确匹配那条路由 chromium 用例 `TestImageHandleAttributionIsPreciseWhenCallIDPresent` 钉住。逐图校验会话在这份真数据里不存在——`latex.figure_check` 默认关闭，没跑过。）测试：`attribution_browser_test.go` 新增 `TestTaskImageTurnStaysWithTaskInChromium`（照真实矢量图会话第 2 行的形状：任务行带图 → 出现 `归属：本会话任务`、不得出现 `归属：未识别`，图片必须落在 `.msg msg-system` 的附件段里、不得落进 `.io-card`）与 `TestTaskFeedBeforeTaskAndOldHandleInChromium`（会话开头**纯图片行**排在任务之前 → 仍归本会话任务；旧式 `Tool image output (for your visual review):` → 仍归「由顺序推断」）。
+
+### 追加：图片归属改 FIFO + 附件段排版 + 行高间距 token + 缩略图预览 + 精确匹配即工具输出（用户追加五条）
+
+用户在真机截图上看 `view_pdf` 卡片时又提了五条（A 归属改 FIFO / B 附件段排版 / C 工具行间距统一 / D 看图调用下面的缩略图预览 / E 精确匹配时不要拆成"输出 + 附件"），同一批做完。
+
+**A. 归属从"就近往前找"改成按转录顺序 FIFO**。旧规则只看"最近一条带 `tool_calls` 的助手消息"，因此会把图片挂到**根本不产图的调用**头上：在 `/home/share/samba-share/PDF2MD` 只读导出的 54 个会话上逐条模拟两种算法，573 条图片行里配到调用的 537 条中有 **10 条两种算法给出不同答案**，而这 10 条全部是旧算法错、FIFO 对——旧算法把图片挂给了同轮的 `bash` / `edit_file` / `grep` / `write_file` / `list_fonts`（最典型的是 `latex_project/测试-概率论_0910/source/sessions/vector_…__mind-map_diagram.jsonl` 第 2 行：一条 `write_file` + 4 次 `view_image`，4 张图被整体错位一格，第一张挂到 `write_file`、其余挂到前三次 view 上）。新规则：先把"会产生图片的调用"按出现顺序排成队列，再按顺序扫带图 user 行，每条还没归属的图片行领走队列里**最早那个还没被认领、且行号排在它前面**的调用（一对一）。**两条证据都用**：有回执时以回执为准（`Image <路径> … attached.` / `PDF page <文件> … attached.`）——真数据里有 **37 次失败的看图调用**（26 次 `view_pdf` + 8 次 `view_image` 回执是 `TOOL ERROR`、3 次 `REJECTED`），它们没产图，按工具名入队就会把后面那条图认错；**没有回执**（被压缩截断）才退回工具名 `view_image`/`view_pdf` 推定。队列元素是**每一次调用**而不是 call id（重放转录里同一 id 出现两次）。`(call <id>)` 句柄仍精确匹配优先，带正文的图片行仍是任务自己的图（FIFO 不许抢）。真数据结果：**537 条图片行 ↔ 537 次产图调用正好一对一、0 条未认领、0 条未识别**；`归属：call <id>` 仍是 0（现有转录的句柄全是旧式），跨轮配对 0 次（所以"本轮"这个措辞在真数据上仍然准确）。只读导出 + headless chromium 逐会话点开统计的最终结果：
+
+| 类型 | 会话数 | 未识别 | 本会话任务 | 由顺序推断 | 任务块带附件 | 调用卡片带附件 | 孤立图片行 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 矢量图会话 | 36 | 0 | 36 | 308 | 36 | 308 | 0 |
+| 样式会话 | 5 | 0 | 0 | 132 | 0 | 132 | 0 |
+| 转换会话 | 7 | 0 | 0 | 97 | 0 | 97 | 0 |
+| 核对会话 | 4 | 0 | 0 | 0（无图片轮） | 0 | 0 | 0 |
+| 章节划分 | 2 | 0 | 0 | 0（无图片轮） | 0 | 0 | 0 |
+
+**B. 附件段排版：图片被挤、说明文字跑到右边、空一大片**。根因是一个具体的选择器冲突：附件段复用了「输入 / 输出」的 `.io-section`，而它是 `grid-template-columns: max-content minmax(0, 1fr)` 的两列网格；`attachImages()` 往这一段里追加了**三个**子元素（标签、图片容器、归属脚注），第三个只能落到第二行第一列，把 `max-content` 那一列撑成**脚注那么宽**——于是说明文字被顶到右边、图片列被压成一小条，剩下的空白被当成"卡片空了一大片"。修法：附件段换成单列块 `.io-section.attach-section`（`display: flex; flex-direction: column; align-items: flex-start`，标签 `position: static`），DOM 顺序固定为**说明文字 → 图片（各自成行）→ 归属脚注（块末）**；图片尺寸也归到 token：`.images img { max-width: min(100%, var(--attach-img-w)); max-height: var(--attach-img-h) }`（`520px × 420px`，原来是 `160px` 缩略图）。实测（`convert_chapter_003` 精确匹配卡片的几何）：标签 / 说明 / 图片 / 脚注左边缘同在 `x=532.5`，`1400×2057` 的整页渲染被收到 `281×420`（按原比例顶到高度上限），脚注在最后一行、不参与图片布局。
+
+**C. 工具行间距不一致**。先用 headless chromium 量了真页面（`convert_chapter_003`，183 个折叠行）：行高本来就统一（全部 24px，不因回执/附件/ok-error 而变），不一致的是**间距**——同一条消息里的相邻行 6px、跨消息的行却是落在 `section` 之间，量出来有 8/24/48 三种值，而且**没有任何回合分隔标识**。真根因是另一处代码缺陷：`renderLine()` 在"带图 user 行归到某次调用"时 `return anchor(callNode.details, line)`，调用方拿到这个 `<details>` 就 `appendChild` 到 `.stream`——**卡片被从它所在的助手消息 section 里搬走了**（`convert_chapter_003` 里 40 个带附件的行全中），于是它既没有 6px 的同消息间距、也套不上回合分隔。修法：只登记锚点、`return null`（源码断言钉住）。间距统一成一组 token：`--row-h: 24px`（折叠行高，`min-height: var(--row-h)`，摘要行 `.stream-summary` 同用）、`--row-gap: 6px`（`.msg` 的行间距）、`--divider-gap: 8px`（`.stream > .msg + .msg` 的 `margin-top`/`padding-top`，中间一条 `.5px dashed` 回合分隔线；第一条消息上面没有线）。改后实测：行高唯一值 24px、同消息行间距唯一值 6px、section 间距唯一值 8px（+1px 虚线），`.stream` 的直接子节点不再出现裸 `<details>`；折叠态与"全部展开"态量出来的行高与分隔线完全一致。
+
+**D. 看图类调用下面的缩略图预览行**（新功能，用户原话"显示 view 的图片预览图，跟在对应工具调用下面，直接跟…一轮调用了多次 view，就在最后一个 view 下面显示并排的缩略图，按照顺序"）。`addPreview(host, line)` 把缩略图行插在工具行 `<details>` 的**兄弟位置**（`insertBefore(strip, host.details.nextSibling)`）——这是"折叠态就可见"的唯一办法（`<details>` 的折叠会藏掉卡片里的内容）；宿主行由 `previewHost()` 给出：同一轮里**最后一个**能产图的看图调用（`imageAttributions()` 顺带产出 `candRound`/`roundLast` 两张表），所以一轮多次 view 只在最后一行下面出现一条缩略图行；缩略图按转录行号重排后再画（`strip.__items.sort`）。真数据截图确认：`convert_chapter_003` 里连续两条 `view_pdf` 的一轮，两张缩略图并排挂在**后一条**下面；尺寸实测全部 ≤ `240×108`（竖版整页 73×108、横版裁切 240×24…240×72），一律保持原比例、8px 间距、20px 缩进（与工具行名称对齐）、点图进灯箱。
+
+**E. 精确匹配时图片就是那次调用的输出**。句柄带 `(call <id>)` 时不再另立「附件（user 轮）」段：`attachResult()` 给「输出」段加 `out-section` 标记，图片（`imageStrip`）与一行小字归属说明直接追加进该段的 `.text-wrap`（在滚动区**之外**，所以长输出的内滚不会把图片卷进去），顺序是**输出正文 → 图片 → `归属：call <id>（<工具>，精确匹配）`**，脚注不参与图片布局（同一列里的块级兄弟）。没匹配上（FIFO 推断 / 未识别）的卡片仍走「附件（user 轮）」单列段 + 推断脚注，两种呈现一眼可辨；轨迹页的归属依据不变。真数据里 `(call <id>)` 句柄 0 条，所以这条用**由真实转录改写句柄**的合成工程（`convert_chapter_003` 的 38 条句柄改成新式、留 2 条旧的作对照，图片与回执都是真的）跑截图与 DOM 断言：38 张精确匹配卡片全部没有 `attach-section`、图片在 `.out-section` 内、脚注含"精确匹配"；2 张旧式卡片全部保留附件段且脚注在段末。
+
 ### 验证与测试
 
-- `gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿（`internal/session` 6.1s、`internal/sessionview` 2.4s，含两条 chromium 用例）。
+- `gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿（`internal/sessionview` 7.4s，含 8 条 chromium 用例）。
+- 本批追加的 chromium 用例（`attribution_browser_test.go`，全部在真实渲染上断言，先剥掉内联 `<style>`/`<script>`）：`TestViewPreviewStripFollowsLastViewRowInChromium`（一轮两次 view → 只有一条缩略图行、挂在这一轮**最后一个** view 行下、两张按 a.png→b.png 顺序、是 `<details>` 的兄弟节点；不产图的 `bash` 卡片不得带附件）、`TestExactHandleRendersImageAsToolOutputInChromium`（精确匹配 → 卡片里**没有**「附件（user 轮）」、图片在 `.out-section` 内且顺序是正文→图片→脚注、脚注写「精确匹配」）、`TestFifoHandleKeepsAttachmentSectionLayoutInChromium`（旧句柄 → 仍有 `attach-section`、标签/图片/脚注顺序正确、图片不算输出）、`TestToolRowGeometryComesFromOneTokenSetInChromium`（注入测量脚本等图片加载完再量：行高唯一 24、同消息行间距唯一 6、回合分隔线唯一 `dashed/8px/8px` 且第一条消息无线、折叠态与全展开态行高一致、缩略图 ≤240×108 与附件图 ≤520×420 且保持原比例、竖版图正好顶到高度上限）、`TestSpacingTokensAreDeclaredOnce`（CSS 里这组 token 只声明一次，且不允许再出现硬编码的旧行高/图片尺寸）。夹具里的图片用 `image/png` 现场生成 800×1200 / 1400×400 的真 PNG（原来写的 `"jpeg"` 文本文件其实根本加载不出来，量不到真实尺寸），并且放在**会话目录**下的 `media/` 里——页面按 `sessionDir(id) + ref` 解析路径。
 - `go/internal/sessionview` 测试新增/改写：`TestViewerJSONHighlighting`、`TestViewerToolCardsScrollAndExpandLikeThinking`、`TestViewerConsoleAndDiffHighlighting`、`TestViewerCodeTypographyUsesOneToken`（辅助函数 `jsFunc`/`cssRule` 直接取 JS 函数体与 CSS 规则来断言，不再只做整文件 `Contains`）、`TestViewerMergesToolCallsAndImageTurns`（归属规则与轨迹结构改成新形态）。
 - 端到端夹具（`.dsh-check/`，临时、交付前删除）：合成工程 + `--list` + 静态导出 + 5 张截图（浅色/浅色展开/轨迹/深色/深色展开）逐张回看，30→34 条 DOM 断言全过（断言前剥掉内联 `<style>`/`<script>`，并且先注入点击脚本选中目标会话——页面默认选中的是字母序第一个会话，不点就验错对象）。
 
