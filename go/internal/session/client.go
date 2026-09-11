@@ -77,7 +77,10 @@ func NewClient(cfg config.ModelConfig) *Client {
 	}
 	rateLimit := cfg.RateLimitRetries
 	if rateLimit <= 0 {
-		rateLimit = 100 // in-code safety cap, matches img2text
+		// 429 限流重试上限（退避封顶 60s）。账户级错误（余额/配额）不走
+		// 这条路——它们已经直接判定为 [SESSION_INSUFFICIENT_BALANCE] 立即
+		// 返回，所以这里只是"真限流"的自恢复次数，20 次足够（用户指定）。
+		rateLimit = 20
 	}
 	// The streaming client must NOT carry a total timeout: a healthy
 	// long thinking/output stream would be killed by it. The connect /

@@ -2,6 +2,7 @@ package latex
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -173,6 +174,62 @@ func TestChapterWorkTreeIsSelfContained(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(work2, "chapter_03.tex")); string(data) != "half done" {
 		t.Errorf("续跑丢了上次的产物: %q", data)
+	}
+}
+
+// TestChapterWorkTreeResolvesRasterImages: raster figures are NOT part of
+// the submission — a chapter references them with the very path its
+// markdown uses (`images/<书名>/<sha>.jpg`) and the work tree makes that
+// path resolve (symlinked images/ + \graphicspath{{figures/}}), so the
+// session can really embed and compile them; the book build tree copies
+// the same assets, so the reference stays valid to the end.
+func TestChapterWorkTreeResolvesRasterImages(t *testing.T) {
+	if _, err := exec.LookPath("xelatex"); err != nil {
+		t.Skip("xelatex not installed")
+	}
+	proj := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(proj, "style"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "style", "mybook.cls"), []byte(
+		"\\NeedsTeXFormat{LaTeX2e}\n\\ProvidesClass{mybook}\n\\LoadClass{article}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	imgDir := filepath.Join(proj, "source", "images", "测试-概率论")
+	if err := os.MkdirAll(imgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePNG(t, filepath.Join(imgDir, "abc123.png"), 8, 8)
+
+	r := keepTestRunner(t)
+	work, cleanup, err := r.chapterWorkTree(proj, "mybook", "chapter_003", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	frag := "\\section{图}\n\\begin{figure}[htbp]\n\\includegraphics[width=0.3\\textwidth]{images/测试-概率论/abc123.png}\n\\caption{示例图}\n\\end{figure}\n"
+	if err := os.WriteFile(filepath.Join(work, "chapter_003.tex"), []byte(frag), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &CompileChapterTool{Comp: NewCompiler(config.LatexCompileConfig{Engine: "xelatex", Timeout: 120}),
+		Dir: work, MainFile: "chapter_003.tex", WrapperFile: "chapter_003_wrapper.tex"}
+	res, err := tool.Execute("{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(res.Text, "COMPILE OK") {
+		t.Fatalf("章节里的 raster 图必须能编译进产物, got: %s", res.Text)
+	}
+	// 提交只带两个路径：图不进章节文件夹。
+	submitRoot := filepath.Join(proj, "work", "chapters")
+	if _, err := placeChapterFiles(work, submitRoot, "chapter_003"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(submitRoot, "chapter_003", "images")); err == nil {
+		t.Errorf("raster 图不该被复制进提交的章节文件夹")
+	}
+	if _, err := os.Stat(filepath.Join(submitRoot, "chapter_003.tex")); err != nil {
+		t.Errorf("主文件应在: %v", err)
 	}
 }
 

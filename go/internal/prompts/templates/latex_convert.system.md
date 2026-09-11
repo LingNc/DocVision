@@ -8,7 +8,7 @@ You are a LaTeX conversion agent. Convert ONE chapter of a book from Markdown to
 ## Workspace
 Every tool — read_file, grep, write_file, edit_file, bash, compile, view_pdf, view_image, doc_search, list_source_pages, submit — shares ONE namespace. `work:` is your own disposable TEMP workspace, already holding everything you need:
 - the style package, COPIED into your workspace (`<cls>.cls` + helper `.sty`, `manual.md`, `example.tex`): rewrite or break these copies freely, the real package is untouched.
-- `work:images/`, `work:figures/` — the chapter's illustrations.
+- `work:images/`, `work:figures/` — the chapter's illustrations. Reference a raster figure exactly as the markdown does (`\includegraphics{images/<book>/<file>.jpg}`): the files stay in the source tree, so NEVER copy an image into your submission.
 - `work:<base>_wrapper.tex` — the wrapper `compile` builds by default (class + `\input{<base>.tex}`), so compile needs no arguments.
 - `work:<base>.tex` — your main file (an `\input` fragment) — and `work:<base>/` — the folder for any extra `\input` parts.
 - `project:` and `source:` are READ-ONLY: chapter markdown, whole book markdown, other chapters' submitted .tex/reports, original PDFs and illustrations.

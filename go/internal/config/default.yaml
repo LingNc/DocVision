@@ -173,7 +173,7 @@ models:
     api_connect_timeout: 60     # 连接/首字节等待上限（秒）
     api_stream_idle_timeout: 0  # 流式：两个数据块之间的最大间隔（秒），0 = 用 api_timeout
     api_max_retries: 3          # API retry count for non-rate-limit errors
-    rate_limit_retries: 100     # 429 限流重试上限（原代码内安全上限值）
+    rate_limit_retries: 20      # 429 限流重试上限（退避封顶 60s；余额/配额类错误不走重试，直接报错）
     stream: true                # 默认流式（SSE）：长思考/长输出期间持续有进展，不再静默等待
     # 思考（思维链）控制：顶层字段，不要写进 request_body.extra_body
     thinking:
