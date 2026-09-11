@@ -29,6 +29,9 @@
 
 ### Fixed
 
+- **未配价时的费用显示不再写 `0.00`**：单价"存在但全是 0"（或根本没写）时，金额列、合计、每次请求、每图/每页一律显示 `-` 并说明原因——`0.00` 会被读成"几乎没花钱"，真实含义是"没配价、算不出来"；提示语也从"配置里没有任何 models.*.price"改成"没有**可用**的（没写，或单价全是 0）"。
+
+
 - **4xx 客户端错误被当成 transient 反复重试**（同一批现场）：`thinking.type: disable` 引出的 HTTP 400 被通用重试通道接住，按 `api_max_retries: 5` 退避 2/4/8/16/30s 重发——8 张图**光退避就烧掉十几分钟**，日志里只有一串"等待重试"。现在 `CallWithRetry` 把 4xx 客户端错误（400/401/403/404/422…，排除 408 超时与 429 限流）判为**不可重试**，一次到位返回 `[SESSION_API_ERROR: HTTP 400 (不可重试): …]`；余额/配额类错误也不再依赖状态码（网关用 400/402/429 报都认），统一立即返回 `[SESSION_INSUFFICIENT_BALANCE]`。测试 `TestClientDoesNotRetryClientErrors`、`TestClientRetriesServerErrors`（5xx 仍按上限重试）、`TestClientBalanceErrorIsNeverRetried`、`TestHTTPStatusCodeParsing`。
 - **`thinking.type` 写错会让整轮绘图全部"保留原图"**（用户实测：8/8 张图全 fallback，日志只写"TikZ 未通过"）：现场 `models.drawing.thinking.type: disable`，而服务端只认 `adaptive`/`enabled`/`disabled`，于是每个请求都被 HTTP 400 拒掉（`unknown variant \`disable\`…`），8 张图各耗 90s（含退避重试）后全部回退成原图，看起来像提示词或编译器的问题。现在 `LoadConfig` 校验每个 `models.*.thinking.type`：一眼能认出的笔误（disable/enable/off/on/false/true…）自动纠正成 disabled/enabled 并在 stderr 告警，其余未知取值**直接报错退出**（附模型名与合法取值）；`[vector]` 的失败日志也分清因果——会话/接口错误打"会话/接口错误（不是 TikZ 问题）"并计入 `errors`，只有 TikZ 校验失败才是 `fallback`；另外连续 3 张接口错误且无一成功时判定为环境问题，**停止处理剩下的图片**（剩余保持未处理，修好后重跑自动继续），不再逐张空转。测试 `TestThinkingTypeTypoIsRepairedAndWarns`、`TestThinkingTypeUnknownIsFatal`、`TestThinkingTypeValidValuesKeepWorking`、`TestIsSessionAPIError`、`TestProcessAbortsOnRepeatedAPIErrors`。
 - **进度行重复输出**（用户实测 `[classify 8/8] …` 与 `[process 8/8] …` 各出现两遍）：两个阶段在 `wg.Wait()` 之后自己 `progress() + Fprintln(os.Stdout)` 定格，随后 deferred `liveProgress.Close()` 又重画同一行——终端里就是"同一行出现两次"。定格与换行现在只由 `Close()` 负责；管道/日志里连续相同的状态也不再重复整行。测试 `TestLiveProgressNoDuplicateFinalLine`。
