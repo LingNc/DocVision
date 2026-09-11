@@ -20,6 +20,12 @@ docvision setup       编辑配置文件，保存时校验语法与配置项
 docvision uninstall   从系统路径移除已安装的 docvision
 ```
 
+## 切分缓存（split manifest）
+
+`split` 会在 `split_files/` 里为每个源文件写一份 `<源文件名>_split_manifest.json`，记录源文件大小/修改时间、切分参数（页数/大小上限）与每个分片的文件名、页码区间、字节数；下次运行只要这些全部对得上就直接跳过昂贵的 pdfcpu 解析与切分，输出 `[跳过] <文件>: 命中 split manifest (N 个部分)，跳过 pdfcpu 解析`。DOCX 同理，另有一种 `mode=passthrough` 的 manifest 记录"页数够小、无需 LibreOffice 转换"。任何一处对不上（源文件改了、分片缺失或大小不符、参数变了、manifest 损坏）都按缓存未命中原样重切，不会用陈旧结果；源文件被切分并归档进 `done/` 后，manifest 仍留在 `split_files/`。
+
+> 缓存键里的源文件路径**分平台无关**：同一个文件在 Windows 上是 `files\书.pdf`、在 Linux 上是 `files/书.pdf`，两边写的 manifest 现在互相认（反斜杠/斜杠、`.`、重复斜杠都折叠成同一种写法）。在此之前缓存键是原样字符串，于是同一份 Samba 目录在 Windows 和 Linux 上轮流跑时**每个平台都会把对方的缓存全部作废**、整库重新切分一遍——看起来就像"两个平台的 img2text 不一样"，其实切分与 img2text 代码完全相同（`runtime.GOOS` 只出现在测试、`install` 与浏览器打开这几处）。
+
 ## img2text 嵌入格式
 
 > **可还原**：嵌入发生前，原版 markdown（图片引用完整）会自动留存到

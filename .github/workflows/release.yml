@@ -4,12 +4,15 @@ on:
   push:
     tags:
       - "v*.*.*"
-  # Manual fallback: build a release for any existing tag (e.g. when a tag
-  # push event was missed). Run from the Actions tab, passing the tag name.
+  # Manual fallback: build a release for any existing tag (e.g. a tag whose
+  # push event was missed, or a tag created before this workflow could
+  # publish pre-releases). Runs the workflow file from the branch it is
+  # dispatched on, so an old tag can be published with the current logic:
+  #   gh workflow run release.yml -f tag=v1.5.0-beta.4
   workflow_dispatch:
     inputs:
       tag:
-        description: "要发布的标签（如 v1.1.0）"
+        description: "要发布的标签（如 v1.5.0-beta.4）"
         required: true
         type: string
 
@@ -18,9 +21,6 @@ permissions:
 
 jobs:
   release:
-    # Skip pre-release tags (e.g. v0.1.2-beta, v0.1.2-rc1).
-    # Only clean version tags trigger a release.
-    if: ${{ !contains(github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name, '-') }}
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -65,9 +65,18 @@ jobs:
             cp CHANGELOG.md /tmp/release_body.md
           fi
 
+      # Tags containing "-" (v1.5.0-beta.1, v0.1.2-rc1) publish as GitHub
+      # *pre-releases*: binaries are built and attached exactly like a clean
+      # tag, but the release is never marked Latest, so the stable line stays
+      # authoritative. Clean tags (v1.5.0) publish as a normal release and are
+      # explicitly marked Latest — GitHub otherwise badges whichever release
+      # was published *last*, which once put "Latest" on v1.0.1 even though
+      # v1.1.0 was newer.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: /tmp/release_body.md
           files: go/release/*
           generate_release_notes: false
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+          make_latest: ${{ contains(env.RELEASE_TAG, '-') && 'false' || 'true' }}

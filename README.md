@@ -140,7 +140,7 @@ docvision workflow -c my.yaml
 
 ## CI/CD
 
-推送 `v*.*.*` 标签时 GitHub Actions 自动运行测试、交叉编译 5 个平台产物并创建 GitHub Release（带 `-` 的预发布标签如 `v1.5.0-beta.4` 会跳过发布任务）；细节见 [开发与代码结构](docs/dev.md)。
+推送 `v*.*.*` 标签（或手动 `gh workflow run release.yml -f tag=…`）时 GitHub Actions 自动运行测试、交叉编译 5 个平台产物并创建 GitHub Release：不带 `-` 的标签发正式版，带 `-` 的标签（如 `v1.5.0-beta.4`）发**预发布**（同样带产物，只是不会被标成 Latest）。只推 master 不打标签不会触发构建；细节见 [开发与代码结构](docs/dev.md)。
 
 ## 许可证
 

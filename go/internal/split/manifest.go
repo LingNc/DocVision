@@ -12,6 +12,13 @@
 // miss, so callers can fall back to re-splitting without risk of
 // serving stale or corrupted output.
 //
+// Source paths are compared separator-insensitively (see
+// normalizeSourcePath): the same file reaches the code as
+// "files\a.pdf" on Windows and "files/a.pdf" on POSIX, and a raw
+// string compare made the cache miss every time the same project was
+// driven from the other platform — each side then re-ran the whole
+// pdfcpu split of the other's library.
+//
 // DOCX manifests use the same schema with Kind="docx" and
 // Mode="split" (parts exist as DOCX part files) or
 // Mode="passthrough" (the source is comfortably under the page
@@ -24,7 +31,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"mineru-tools/pkg/util"
 )
@@ -193,13 +202,25 @@ type MatchParams struct {
 	MaxSizeMB   float64
 }
 
+// normalizeSourcePath makes a recorded source path comparable across
+// platforms and spellings. Callers hand us the path they were given
+// ("files\book.pdf" on Windows, "files/book.pdf" on POSIX, possibly
+// "./files/book.pdf"), so the manifest key must not depend on the
+// separator or on redundant prefixes. Both backslash and slash are
+// folded to "/" on every platform (filepath.ToSlash is a no-op on
+// POSIX, which would leave a Windows-written key unmatched when the
+// same tree is read from Linux), then path.Clean collapses "." / "//".
+func normalizeSourcePath(p string) string {
+	return path.Clean(strings.ReplaceAll(p, `\`, "/"))
+}
+
 // Matches reports whether m describes a split with the same source
 // identity and split parameters as p. Pure (no filesystem access).
 func (m *Manifest) Matches(p MatchParams) bool {
 	if m == nil {
 		return false
 	}
-	if m.SourcePath != p.SourcePath {
+	if normalizeSourcePath(m.SourcePath) != normalizeSourcePath(p.SourcePath) {
 		return false
 	}
 	if m.SourceSize != p.SourceSize {

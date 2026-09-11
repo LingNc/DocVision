@@ -466,7 +466,7 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 		m, err := LoadManifest(manifestPath)
 		if err == nil {
 			if !m.Matches(MatchParams{
-				SourcePath:  src.Path,
+				SourcePath:  normalizeSourcePath(src.Path),
 				SourceSize:  src.Size,
 				SourceMTime: src.MTime,
 				MaxPages:    maxPages,
@@ -508,7 +508,7 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 			SchemaVersion: ManifestSchemaVersion,
 			Kind:          KindDOCX,
 			Mode:          ModePassthrough,
-			SourcePath:    src.Path,
+			SourcePath:    normalizeSourcePath(src.Path),
 			SourceSize:    src.Size,
 			SourceMTimeNS: src.MTime,
 			MaxPages:      maxPages,
@@ -558,7 +558,7 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 			SchemaVersion: ManifestSchemaVersion,
 			Kind:          KindDOCX,
 			Mode:          ModePassthrough,
-			SourcePath:    src.Path,
+			SourcePath:    normalizeSourcePath(src.Path),
 			SourceSize:    src.Size,
 			SourceMTimeNS: src.MTime,
 			MaxPages:      maxPages,
@@ -585,7 +585,7 @@ func SplitDOCX(docxPath string, maxPages int, maxSizeMB float64, outputDir strin
 		SchemaVersion: ManifestSchemaVersion,
 		Kind:          KindDOCX,
 		Mode:          ModeSplit,
-		SourcePath:    src.Path,
+		SourcePath:    normalizeSourcePath(src.Path),
 		SourceSize:    src.Size,
 		SourceMTimeNS: src.MTime,
 		MaxPages:      pdfManifest.MaxPages,

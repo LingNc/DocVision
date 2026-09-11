@@ -28,18 +28,23 @@ fonts/                  AI 字体目录（paths.fonts）：缺字体时按样式
 
 ## CI/CD
 
-推送 `v*.*.*` 标签时，GitHub Actions 自动：
+推送 `v*.*.*` 标签（或手动 `workflow_dispatch` 指定标签）时，GitHub Actions 自动：
 
 1. 运行测试（`go test -v -race ./...`）
 2. 交叉编译 5 个平台二进制
-3. 创建 GitHub Release 并上传产物（Release 说明取 `CHANGELOG.md` 中该标签的小节）
+3. 创建 GitHub Release 并上传产物（Release 说明取 `CHANGELOG.md` 中该标签的小节，找不到就退回整份 CHANGELOG 并给 warning）
 
-> 带 `-` 的标签（如 `v1.5.0-beta.3`）属于预发布，工作流会跳过发布任务，不会创建 Release；需要发布时用不带 `-` 的版本号。
+**带 `-` 的标签发"预发布"（Pre-release），不带 `-` 的标签发正式版**：两者都会真正构建并附上 5 个平台产物，区别只在 Release 的标记——预发布永远不会被标成 "Latest"，正式版则显式标 Latest（GitHub 默认把**最后发布**的那个标成 Latest，曾因此让 `v1.0.1` 抢了 `v1.1.0` 的位置）。
 
 ```bash
 git tag v1.5.0
 git push origin v1.5.0
+
+# 老标签补发（比如打标签时工作流还不会发预发布）：用当前分支的工作流逻辑补跑
+gh workflow run release.yml -f tag=v1.5.0-beta.4
 ```
+
+> 只推 `master`（不打标签）**不会**触发任何构建——工作流的触发条件是标签推送。所以"1.1 之后没有任何 Release"通常是标签没推上去，而不是构建失败（可用 `git ls-remote --tags origin` 看远端到底有哪些标签）。
 
 ## Python 脚本独立使用
 

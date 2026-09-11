@@ -163,3 +163,22 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 **核对方式**（脚本）：取 `git show HEAD:README.md` 的每一非空行，检查是否仍逐字存在于 README 或某个 `docs/*.md`——结果 435 行里只有 17 行"非标题行"缺失，全部是安装段/快速开始段/ Mermaid 段的重写（事实逐条保留：`make release` 5 产物、`init` 询问装 Mermaid CLI、`auto/strict/off` 三种校验模式、`-c` 指定配置文件、Python 版本已归档），其余 29 行是标题层级变化。顺手修正两处过期/不准确：README 原没有 Go 版本要求（写 `go.mod` 的 1.25）、我起初把 CI 写成 `.github/workflows/ci.yml`（实际只有 `release.yml`：标签触发、预发布跳过 Release）。
 
 新增规则（AGENTS.md）：README 只写"是什么/怎么装/怎么跑/有哪些命令/去哪看细节"，**配置全表、命令细节、流程内幕、会话与沙箱机制一律进 `docs/`**；新增超过 ~10 行或"查资料"性质的内容一律写进 docs，README 不重复同一件事；搬迁必须逐字并做"原文每一行是否仍存在"的核对。
+
+### 第六问（同批）：CI/CD 为什么 1.1 之后没有构建 + "win 和 linux 的 img2text 不一样吗"
+
+**① 为什么没有 Release**（两问合一，都是"标签没推 + 预发布被跳过"）：
+
+- 远端实际只有 8 个标签：`git ls-remote --tags origin` → `v0.1.0 v0.1.1 v0.1.2 v0.2.0 v0.3.0 v1.0.0 v1.0.1 v1.1.0`，**`v1.3.0-beta`/`v1.4.0-beta`/`v1.5.0-beta.1~4` 从来没推上去**（`v1.2.0` 也从未打过标签）。工作流只在 `push: tags: v*.*.*` 触发，推 master 不构建 → 这些版本自然没有任何 Actions 运行。
+- 就算推了，`9d27b5c` 加的任务级 `if: !contains(..., '-')` 会**整个跳过**含 `-` 的标签 → beta 线永远不发产物。
+- `v1.1.0` 其实**发了** Release（`gh release list` → v0.1.0 / v1.1.0 / v1.0.1），但 GitHub 把"最后发布"的 `v1.0.1` 标成了 **Latest**，看起来就像"停在 1.0.1"。
+
+修法：删掉跳过条件，含 `-` 的标签照常测试+交叉编译+创建 Release，但 `prerelease: true` / `make_latest: false`；正式标签显式 `make_latest: true`（顺带纠正"Latest 归属"这个坑）。手动补发老标签用 `workflow_dispatch`（它跑当前分支的工作流逻辑，能给旧标签补发预发布）：`gh workflow run release.yml -f tag=v1.5.0-beta.4`。文档同步 `docs/dev.md` 的 CI/CD 段 + README 一行 + AGENTS 发布线纪律。
+
+**②"win 和 linux 的 img2text 不一样吗"**：不是。
+
+- 用户贴的两段都是 **Step 1 切分**的输出（img2text 根本没跑），差别在**状态**不在平台：Linux 那次 `files/` 里有 8 个 PDF（多出 `27考研红宝书` 与 `数据结构` 两本，随后被归档进 `files/done/`），Windows 那次只有 6 个；缓存命中情况也不同。
+- 代码里**没有平台分支**：`runtime.GOOS` 只出现在 `img2text/mermaid_test.go`、`cmd/docvision/main_test.go`、`install.go`、`sessionview/serve.go`（测试/安装/开浏览器），切分与 img2text 完全共用一套代码。
+- 真正的坑是**切分缓存的键含平台写法**：manifest 落盘的 `source_path` 是调用方给的字符串原样——部署目录里 Windows 写下的 `split_files/2010-26年数一真题套卷[解析]_split_manifest.json`（mtime 09-11 20:12、权限 `-rw-rw-r--`＝Samba 客户端指纹）里是 `files\2010-26年数一真题套卷[解析].pdf`，而 Linux 写的 `测试-概率论_split_manifest.json` 是 `files/测试-概率论.pdf`；`Matches()` 严格比较字符串 → 同一份 Samba 目录在两边轮流跑时**每个平台都会把对方的缓存全部作废**，整库重新 pdfcpu 切分（大书十几分钟 + 重新上传），看起来就像"两个平台行为不一样"。源文件大小/毫秒级 mtime 两边完全一致（实测 `size=184496581`、`mtime_ns=1788440981906804900` 都吻合），只有分隔符不同。
+- 修法：`normalizeSourcePath()`（`\`→`/` 后再 `path.Clean`，**不**用 `filepath.ToSlash`——它在 POSIX 上是 no-op，读 Windows 写下的键会漏）用于比较与落盘；旧 manifest 照旧命中。用部署目录里的真文件验证：`source_path = "files\\2010-26年数一真题套卷[解析].pdf" → 归一化 "files/2010-26年数一真题套卷[解析].pdf"`，POSIX 查询命中、`VerifyAgainstDisk = true` ✓。
+
+**规模比想象的大**：部署目录 `split_files/` 里 60 份 manifest，**36 份是 Windows 写的**（`source_path` 带反斜杠）、24 份是 POSIX 写的——也就是说这台机器上两边来回切了很多次，每次切换都会把对方写下的缓存整体作废、重新 pdfcpu 切分一遍。修复后逐一检查：**POSIX 路径查询命中且分片校验通过 60/60，未命中 0**（36 份 Windows 写的全部转成命中）。测试：`TestManifestMatchesAcrossPathSeparators`（双向 + `./` + 重复斜杠 + 不同文件）、`TestManifestNormalizesSourcePathOnWrite`、`TestWindowsWrittenManifestHitsOnPOSIX`（走 `LoadManifest` 的真实落盘往返）。

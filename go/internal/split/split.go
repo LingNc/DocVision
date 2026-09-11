@@ -165,7 +165,7 @@ func tryManifestHit(outputDir, baseName string, src sourceIdentity, maxPages int
 		return false
 	}
 	if !m.Matches(MatchParams{
-		SourcePath:  src.Path,
+		SourcePath:  normalizeSourcePath(src.Path),
 		SourceSize:  src.Size,
 		SourceMTime: src.MTime,
 		MaxPages:    maxPages,
@@ -306,7 +306,7 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 		SchemaVersion: ManifestSchemaVersion,
 		Kind:          KindPDF,
 		Mode:          ModeSplit,
-		SourcePath:    src.Path,
+		SourcePath:    normalizeSourcePath(src.Path),
 		SourceSize:    src.Size,
 		SourceMTimeNS: src.MTime,
 		MaxPages:      maxPages,
