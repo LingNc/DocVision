@@ -189,3 +189,58 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 2. `setup-go` 注解 `Restore cache failed: Dependencies file is not found`：`go.sum` 在 `go/` 子目录而不是仓库根，加 `cache-dependency-path: go/go.sum` 才真正命中缓存。
 
 修复后重跑，`v1.5.0-beta.4` 预发布按预期生成（5 平台产物 + CHANGELOG 小节正文、`prerelease=true`）。另外执行了 `gh release edit v1.1.0 --latest`：把 Latest 徽章从"最后发布的 v1.0.1"纠正回语义更新的 v1.1.0。
+
+## 第三十二批：会话用量与时间戳、预览页指标、发布只由标签驱动
+
+**用户原话（三问）**：
+1. 「我发现在 process 的最新会话中调用 image content 为空是什么意思？“{}” 就是这个。」
+2. 「还有一些基本指标比如每个绘画缓存命中率，输入多少 token 输出多少 token，用时多久什么的。token 的输出速度，首字延迟平均等等。在 html 也应该有一点体现。jsonl 不知道有没有保存相关的信息。应该是时间戳？这样可以直接算出来吧？」
+3. 「CIDI 还是随着发布根据标签构建吧，不要你手动构建了。不然污染这个 Action 的历史记录。」
+
+### 第一问：`image_context` 的 `{}` 是**参数**，不是结果
+
+先把部署目录 66 份转录全扫一遍：`image_context` 被调用 28 次，其中 **24 次 `arguments` 是 `{}`**（其余是 `{"image":…,"up":6,"down":6}` 之类）。`{}` 表示**一个参数都没传**——这是合法的：`ImageContextTool.Execute` 在 `args` 为空时用 `target = t.CurrentImg`、`up/down = 10`（默认窗口）。
+
+原始转录证据（`latex_project/测试-概率论_0910_glm/work/views/project/source/sessions/vector_…__Venn_diagram.jsonl`，行 3–5）：
+
+```
+行3 assistant tool_calls: view_image{"path":"images/…/b6f6…jpg","zoom":1280} + image_context{}
+行4 tool (call_00_…): Image images/…/b6f6….jpg … attached. ORIGINAL FIGURE SIZE: 41.5mm x 22.8mm …
+行5 tool (call_01_…): image 7 of 8 in this document: images/…/b6f6….jpg
+                       ## PREVIOUS image ref: images/…/2e69….jpg (line 272, -5 lines from this image)
+                       … ## THIS image context (up 10 / down 10 lines; request agai…
+```
+
+即：`{}` 的调用**拿到了完整上下文窗口**，功能正常。这条统计里另外还看到 `list_source_pages` 12 次、`list_fonts` 3 次、`compile` 87 次也是空参数（同样都是"全部用默认值"的合法写法）。
+
+顺带查到 **3 条空结果**（`text` 为 `None`）：全在 `测试-概率论_0910_glm/work/style_session.jsonl`（行 55/168/180），调用都是 `bash`，命令以 `| grep -E "Overfull" | head -3` 结尾——**命令本身没输出**，所以结果为空。不是工具故障。
+
+> 我第一遍的扫描脚本把字段名写成了 `content`（转录里是 `text`），于是把"有多工具调用的一轮"里配对的 `view_image` 结果误读成空串——脚本 bug，不是产品缺陷；改用 `text` 并按下标取紧随其后的 tool 行后即得上面的原文。
+
+### 第二问：指标——JSONL 之前确实**什么都没有**
+
+改造前转录只有 `t=meta`（系统提示词快照）与 `t=msg`，**既没有时间戳、也没有任何 token 用量**；用量只出现在 `--debug` 日志的 `[DEBUG] … prompt=… completion=… cached=…(N%)` 行里，按会话聚合得靠人肉 grep。所以这一批做了两件事：
+
+**① 写侧（`internal/session`）**
+- `transcriptLine` 增 `ts`（RFC3339 毫秒），`Append` 每条消息都带。
+- 新增 `t="usage"` 行 + `AppendUsage(UsageRecord)`：`model/stream/round/kind/prompt_tokens/cached_tokens/completion_tokens/reasoning_tokens/duration_ms/ttft_ms/finish_reason`。
+- `ChatResponse` 增 `TTFT`：`readStream` 在**第一个** `OnContent`/`OnReasoning` 回调里记 `time.Since(start)`（思考里的第一个增量也算），非流式在 `decode` 里令 `TTFT = Elapsed`（一个 JSON body 无法再分首字）。
+- 三处请求都记：主循环（`kind=""`）、空回复后的强制文本请求（`kind="nudge"`，session.go 里 604 行的第二次调用）、上下文压缩摘要（`kind="compact"`）——**漏掉后两者，token 统计与缓存命中率都会偏低**。
+- `t="usage"` 与 `t=meta` 一样**永不参与回放**：`LoadTranscript` 只认 `t=="msg"`，续跑语义零变化（新测试 `TestTranscriptWritesTimestampsAndUsage` 里明确断言"回放忽略 usage 行"）。
+
+**② 读侧（`internal/sessionview` + 前端）**
+- `UsageStats`（前后端同一套口径）：`CacheHitPct = Σcached/Σprompt`、`AvgTTFTMS = Σttft/请求数`、`OutputTPS = Σcompletion / Σ(duration−ttft)`（用**生成时间**作分母，排队与思考等待不算生成速度）、`SpanMS = 末次−首次 ts`。后端在 `Scan` 的**同一趟单遍扫描**里聚合（`transcriptStat.addUsage`），所以侧栏不需要为每行指标多读一次文件；`/api/index` 与静态导出都带 `stats`，`/api/session` 的 usage 行也带解析好的 `stats`。
+- 页面：时间线上系统提示词卡片之后是**「会话指标」卡片**（tiles + 可展开的"每次请求明细"表，`compact`/`nudge` 会在回合列标出），侧栏每行一条用量摘要、侧栏底部**全部会话合计**（加权缓存命中率）、工具栏重复关键几项；`--list` 新增「用量」列。
+- **旧转录不显示指标**（`Stats` 为 nil 而不是 0）——0 会被读成"实测为 0"。对应测试 `TestScanWithoutUsageHasNoStats`。
+
+**验证**（真实二进制 + 真实数据，非仅单测）：
+- `go test ./...` 全绿；新增 `TestRunRecordsUsageAndTTFT` 用 httptest 起一个"先睡 60ms 再送第一个增量"的 SSE mock，跑完整 `Session.Run` 后断言转录里的 usage 行 `ttft_ms ∈ [40, duration_ms]` 且 `cached_tokens/reasoning_tokens/model/stream/finish_reason` 全部落盘——即 **TTFT 是真测出来的，不是补的**。
+- 造一份 6 请求的转录 + 一份无用量旧转录，用**静态导出**喂给一个 Node 里的极简 DOM 影子实现跑真实 `viewer.js`：侧栏合计 `合计 6 次请求 · 输入 183k / 输出 3.5k tokens · 缓存命中 80%`、指标卡片 tiles + 6 行明细（`#2 · compact` / `#2 · nudge` 正常标出）、旧转录那张卡片**不生成**且页面不报错。手算核对：prompt 合计 183000、cached 146000 → 79.8%≈80%；completion 3450、Σ(dur−ttft)=19950ms → 172.9 tok/s ✓。
+- 实时服务：`curl /api/index` 与 `/api/session` 都返回带口径说明的 `stats`（`cacheHitPct: 80`、`outputTps: 214.28…`）。
+- 改动前先确认**没有别的消费者**按行解析转录：`grep '\.jsonl'` 的其它命中（`internal/latex` 的 tikz/checker/book）都只是拼路径，不解析行内容。
+
+### 第三问：发布只由标签驱动
+
+- `.github/workflows/release.yml` **删除 `workflow_dispatch`**（含其 `inputs.tag`），`RELEASE_TAG` 只取 `github.ref_name`；`docs/dev.md` 的 CI/CD 段改为"只推标签"，README 那句"（或手动 `gh workflow run`）"同步删掉。手动跑过的 run **删除**了失败那一条（`gh run delete 34599166588`，`⚠️ GitHub Releases requires a tag` 那次），Action 历史里只留真实发布。
+- 上一批的 beta.4 补发用的是手动 run，产物与预发布状态都正确（`gh release list`：`v1.5.0-beta.4 Pre-release`、`v1.1.0 Latest`）——从这一批起，之后的版本一律"打标签 → 推送"。
+

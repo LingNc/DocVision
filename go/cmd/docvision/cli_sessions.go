@@ -42,6 +42,12 @@ func newSessionsCmd() *cobra.Command {
 也不计入消息数，页面把它渲染成时间线最前面的可折叠卡片（老转录没有这行，照常显示）；
 无法解析的行会跳过并在顶部提示"跳过 N 行坏数据"。
 
+每次 API 请求还会写一条 t="usage" 用量行（同样不计入消息、不参与回放）：输入/输出 token、
+前缀缓存命中量、耗时、首字延迟、结束原因。页面借此在时间线顶部显示**会话指标卡片**
+（输入/输出 token、缓存命中率、平均首字延迟、输出速度 tok/s、平均耗时、会话跨度，
+外加可展开的"每次请求明细"表），侧栏每个会话显示一行用量摘要并在底部给出所有会话的合计；
+旧转录没有用量行时这一块不显示（不会用 0 冒充实测值）。每行还带写入时间戳 ts。
+
 两种模式：
   静态导出（默认）  生成一个自包含 HTML（数据/样式/脚本全部内嵌），图片按相对路径
                     引用，file:// 直接打开即可，不需要服务；页面显示
@@ -129,6 +135,26 @@ func newSessionsCmd() *cobra.Command {
 	return cmd
 }
 
+// usageCell summarises the session's token accounting for --list: requests,
+// tokens in/out and the prefix-cache hit rate. "-" means the transcript has no
+// t="usage" lines (it predates usage recording), which must not look like a
+// measurement of zero.
+func usageCell(s sessionview.SessionInfo) string {
+	st := s.Stats
+	if st == nil || st.Requests == 0 {
+		return "-"
+	}
+	cell := fmt.Sprintf("%d req · %s/%s", st.Requests,
+		sessionview.HumanCount(st.PromptTokens), sessionview.HumanCount(st.Completion))
+	if st.PromptTokens > 0 {
+		cell += fmt.Sprintf(" · 缓存 %.0f%%", st.CacheHitPct)
+	}
+	if st.OutputTPS > 0 {
+		cell += fmt.Sprintf(" · %.1f tok/s", st.OutputTPS)
+	}
+	return cell
+}
+
 // printSessions renders the terminal table used by --list.
 func printSessions(sessions []sessionview.SessionInfo, root string) {
 	if len(sessions) == 0 {
@@ -136,7 +162,7 @@ func printSessions(sessions []sessionview.SessionInfo, root string) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "项目\t阶段\t消息数\t提示词\t大小\t修改时间\t路径")
+	fmt.Fprintln(w, "项目\t阶段\t消息数\t提示词\t用量\t大小\t修改时间\t路径")
 	var msgs int
 	for _, s := range sessions {
 		msgs += s.Messages
@@ -152,9 +178,9 @@ func printSessions(sessions []sessionview.SessionInfo, root string) {
 		if project == "" {
 			project = "（根目录）"
 		}
-		fmt.Fprintf(w, "%s\t%s%s\t%d\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
 			project,
-			s.Title, live, s.Messages, prompt, sessionview.HumanSize(s.Bytes),
+			s.Title, live, s.Messages, prompt, usageCell(s), sessionview.HumanSize(s.Bytes),
 			s.ModTime.Format("2006-01-02 15:04:05"), s.ID)
 	}
 	_ = w.Flush()

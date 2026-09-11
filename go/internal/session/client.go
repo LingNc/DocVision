@@ -199,6 +199,11 @@ type ChatResponse struct {
 
 	// Elapsed is the wall-clock duration of the call.
 	Elapsed time.Duration `json:"-"`
+	// TTFT is the time from sending the request to the FIRST streamed delta
+	// (thinking counts: the first visible output of a reasoning model). For a
+	// non-streamed reply the whole body arrives at once, so TTFT equals Elapsed
+	// — callers averaging latencies must look at Streamed before mixing them.
+	TTFT time.Duration `json:"-"`
 	// Streamed reports whether the reply arrived as an SSE stream.
 	Streamed bool `json:"-"`
 	// ReasoningChars counts reasoning/thinking deltas (streaming only).
@@ -423,6 +428,7 @@ func (c *Client) decode(resp *http.Response, stream bool, start time.Time) (*Cha
 		return nil, fmt.Errorf("decode response: %w (body=%q)", err, truncate(string(body), 256))
 	}
 	out.Elapsed = time.Since(start)
+	out.TTFT = out.Elapsed // one JSON body: nothing to measure separately
 	return &out, nil
 }
 
@@ -458,6 +464,12 @@ func shouldFallbackToNonStream(err error) bool {
 func (c *Client) readStream(resp *http.Response, start time.Time) (*ChatResponse, error) {
 	var lastLog time.Time
 	var contentChars, reasoningChars int
+	var ttft time.Duration
+	markFirst := func() {
+		if ttft == 0 {
+			ttft = time.Since(start)
+		}
+	}
 	progress := func() {
 		if c.log == nil || !c.log.TraceEnabled() {
 			return
@@ -473,10 +485,12 @@ func (c *Client) readStream(resp *http.Response, start time.Time) (*ChatResponse
 	res, err := chatstream.Collect(resp.Body, chatstream.Options{
 		IdleTimeout: c.streamIdle,
 		OnContent: func(s string) {
+			markFirst()
 			contentChars += len(s)
 			progress()
 		},
 		OnReasoning: func(s string) {
+			markFirst()
 			reasoningChars += len(s)
 			progress()
 		},
@@ -495,6 +509,7 @@ func (c *Client) readStream(resp *http.Response, start time.Time) (*ChatResponse
 	out := &ChatResponse{
 		Choices:        []ChatResponseChoice{{Message: msg}},
 		Elapsed:        time.Since(start),
+		TTFT:           ttft,
 		Streamed:       true,
 		ReasoningChars: res.ReasoningChars,
 		FinishReason:   res.FinishReason,

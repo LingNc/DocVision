@@ -35,6 +35,11 @@
 
 - **进度行重复输出**（用户实测 `[classify 8/8] …` 与 `[process 8/8] …` 各出现两遍）：两个阶段在 `wg.Wait()` 之后自己 `progress() + Fprintln(os.Stdout)` 定格，随后 deferred `liveProgress.Close()` 又重画同一行——终端里就是"同一行出现两次"。定格与换行现在只由 `Close()` 负责；管道/日志里连续相同的状态也不再重复整行。测试 `TestLiveProgressNoDuplicateFinalLine`。
 
+### Added
+
+- 会话转录记录**用量与时间戳**：每行写入 `ts`（RFC3339 毫秒），每次 API 请求追加一条 `t="usage"` 行（模型、流式标志、回合、`kind`、`prompt_tokens`、`cached_tokens`、`completion_tokens`、`reasoning_tokens`、`duration_ms`、`ttft_ms`、`finish_reason`）。普通回合、空回复后的强制文本请求（`nudge`）与上下文压缩摘要请求（`compact`）都记，token 统计才不会漏。`t="usage"` 与 `t="meta"` 一样**永不参与回放**（`LoadTranscript` 只认 `t=="msg"`），续跑语义不变。
+- `docvision sessions` 页面新增**会话指标**：输入/输出/思考 tokens、前缀缓存命中率（`Σcached/Σprompt`）、平均首字延迟（流式首增量耗时，本轮新测 `TTFT`）、输出速度（`Σ输出/Σ(耗时−首字)`）、平均耗时、会话跨度，外加可展开的「每次请求明细」表格（标出 `compact`/`nudge`）。侧栏每行给用量摘要、底部给全部会话合计，工具栏重复关键项；`--list` 新增「用量」列（请求数 · 输入/输出 · 缓存命中率 · tok/s）。**旧转录没有用量行时不显示指标**（不拿 0 冒充实测值）。
+
 ## [v1.5.0-beta.4] - 2026-09-11
 
 ### Added

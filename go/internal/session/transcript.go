@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Transcript JSONL format (one JSON object per line, append-only):
@@ -51,6 +52,25 @@ type transcriptLine struct {
 	Model   string         `json:"model,omitempty"`
 	SysHash string         `json:"system_sha,omitempty"`
 	Tools   []toolSnapshot `json:"tools,omitempty"`
+
+	// TS is the write time (RFC3339, milliseconds). Every line carries it so a
+	// reader can reconstruct the timeline (duration, idle gaps) without a log.
+	// Transcripts written before this field existed simply have no ts.
+	TS string `json:"ts,omitempty"`
+
+	// ---- t == "usage" lines only (never replayed) ----
+	// One usage line per completed API request, so the preview page (and any
+	// script reading the JSONL) can compute input/output tokens, prefix-cache
+	// hit rate, latency, time-to-first-token and output speed per session.
+	Stream          *bool  `json:"stream,omitempty"`
+	Round           int    `json:"round,omitempty"`
+	PromptTokens    int    `json:"prompt_tokens,omitempty"`
+	CachedTokens    int    `json:"cached_tokens,omitempty"`
+	Completion      int    `json:"completion_tokens,omitempty"`
+	ReasoningTokens int    `json:"reasoning_tokens,omitempty"`
+	DurationMS      int64  `json:"duration_ms,omitempty"`
+	TTFTMS          int64  `json:"ttft_ms,omitempty"`
+	Finish          string `json:"finish_reason,omitempty"`
 }
 
 // toolSnapshot is the tool definition recorded in a meta line: exactly what
@@ -174,10 +194,64 @@ func (w *TranscriptWriter) readLastMetaHash() string {
 	return line.Kind + ":" + line.SysHash
 }
 
+// UsageRecord is the per-request accounting appended as a t="usage" line.
+type UsageRecord struct {
+	Model string
+	// Kind names the request inside the session: "" for an ordinary turn,
+	// "nudge" (forced text answer after an empty reply) or "compact"
+	// (context summarisation). Token totals must include all of them: a
+	// session that compacted 5 times really did pay for those prompts.
+	Kind         string
+	Stream       bool
+	Round        int
+	PromptTokens int
+	CachedTokens int
+	Completion   int
+	Reasoning    int
+	Duration     time.Duration
+	TTFT         time.Duration
+	Finish       string
+}
+
+// AppendUsage records one completed API request. Like meta lines it is never
+// replayed (LoadTranscript only reads t="msg"), so it cannot change resume
+// semantics; it exists so the preview page and any JSONL reader can derive
+// cache hit rate, token counts, latency, TTFT and output speed.
+func (w *TranscriptWriter) AppendUsage(u UsageRecord) error {
+	if w == nil || w.file == nil {
+		return nil
+	}
+	stream := u.Stream
+	line := transcriptLine{
+		T:               "usage",
+		TS:              nowStamp(),
+		Kind:            u.Kind,
+		Model:           u.Model,
+		Stream:          &stream,
+		Round:           u.Round,
+		PromptTokens:    u.PromptTokens,
+		CachedTokens:    u.CachedTokens,
+		Completion:      u.Completion,
+		ReasoningTokens: u.Reasoning,
+		DurationMS:      u.Duration.Milliseconds(),
+		TTFTMS:          u.TTFT.Milliseconds(),
+		Finish:          u.Finish,
+	}
+	data, err := json.Marshal(line)
+	if err != nil {
+		return err
+	}
+	_, err = w.file.Write(append(data, '\n'))
+	return err
+}
+
+// nowStamp is the timestamp format every transcript line carries.
+func nowStamp() string { return time.Now().Format("2006-01-02T15:04:05.000Z07:00") }
+
 // Append persists one message. Base64 image payloads (data URLs in
 // multipart content) are extracted into media files.
 func (w *TranscriptWriter) Append(msg ChatMessage) error {
-	line := transcriptLine{T: "msg", Role: msg.Role, CallID: msg.ToolCallID}
+	line := transcriptLine{T: "msg", Role: msg.Role, CallID: msg.ToolCallID, TS: nowStamp()}
 	switch c := msg.Content.(type) {
 	case string:
 		line.Text = c

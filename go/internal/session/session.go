@@ -167,6 +167,35 @@ func (s *Session) appendTranscript(msg ChatMessage) {
 	}
 }
 
+// recordUsage appends one t="usage" line for the request that just finished,
+// so the transcript alone is enough to compute token counts, prefix-cache hit
+// rate, latency, time-to-first-token and output speed for a session.
+func (s *Session) recordUsage(resp *ChatResponse, round int, kind string) {
+	if s.transcript == nil || resp == nil {
+		return
+	}
+	rec := UsageRecord{
+		Model:    s.client.Model(),
+		Stream:   resp.Streamed,
+		Round:    round,
+		Kind:     kind,
+		Duration: resp.Elapsed,
+		TTFT:     resp.TTFT,
+		Finish:   resp.FinishReason,
+	}
+	if u := resp.Usage; u != nil {
+		rec.PromptTokens = u.PromptTokens
+		rec.CachedTokens = u.CachedTokens()
+		rec.Completion = u.CompletionTokens
+		if u.CompletionTokensDetails != nil {
+			rec.Reasoning = u.CompletionTokensDetails.ReasoningTokens
+		}
+	}
+	if err := s.transcript.AppendUsage(rec); err != nil && s.logger != nil {
+		s.logger.Debug(s.tid, "[session:"+s.label+"] usage 写入失败:", err)
+	}
+}
+
 // NewSession creates a session. system is the system prompt; tools may
 // be nil. The conversation keeps the system prompt out of the
 // compaction scope so it is never rewritten.
@@ -420,6 +449,8 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			}
 		}
 
+		s.recordUsage(resp, toolRounds+1, "")
+
 		if len(choice.Message.ToolCalls) > 0 && useTools {
 			NormalizeToolCallTypes(&choice.Message)
 			s.messages = append(s.messages, choice.Message)
@@ -584,6 +615,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 					s.label, resp2.Elapsed.Seconds(), resp2.Streamed, dash(resp2.FinishReason),
 					len(ContentString(resp2.Choices[0].Message)), resp2.Usage.String()))
 			}
+			s.recordUsage(resp2, toolRounds+1, "nudge")
 			s.messages = append(s.messages, resp2.Choices[0].Message)
 			s.appendTranscript(resp2.Choices[0].Message)
 			content = ContentString(resp2.Choices[0].Message)
@@ -875,6 +907,7 @@ func (s *Session) compact() error {
 			s.label, resp.Elapsed.Seconds(), len(summary), resp.Usage.String()))
 	}
 
+	s.recordUsage(resp, s.rounds, "compact")
 	note := compactedMarker + " (auto-generated; the earlier turns were summarised) ===\n" + summary
 	rebuilt := make([]ChatMessage, 0, headEnd+1+len(tail))
 	rebuilt = append(rebuilt, s.messages[:headEnd]...)

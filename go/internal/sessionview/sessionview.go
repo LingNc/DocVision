@@ -161,6 +161,114 @@ type ToolSchema struct {
 	Parameters  string `json:"parameters,omitempty"`
 }
 
+// UsageStats is the token/latency accounting of one API request (a t="usage"
+// line) or, with Requests > 1, the aggregate over a whole session. All the
+// derived numbers a reader wants — prefix-cache hit rate, average time to
+// first token, output speed — are computed here so the viewer only formats
+// them (and any JSONL consumer gets the same definitions).
+type UsageStats struct {
+	// Requests is how many API requests the numbers cover.
+	Requests int `json:"requests"`
+	// PromptTokens / Completion are the provider counters summed over the
+	// covered requests; CachedTokens is the part of PromptTokens that hit the
+	// provider prefix cache (0 when the provider does not report it).
+	PromptTokens int `json:"promptTokens"`
+	CachedTokens int `json:"cachedTokens"`
+	Completion   int `json:"completionTokens"`
+	// ReasoningTokens is the thinking share of Completion (when reported).
+	ReasoningTokens int `json:"reasoningTokens,omitempty"`
+	// DurationMS is the wall time (one request), or the sum over requests.
+	DurationMS int64 `json:"durationMs"`
+	// TTFTMS is the time to first streamed delta (or the average, in an
+	// aggregate). AvgTTFTMS is the aggregate average.
+	TTFTMS    int64 `json:"ttftMs,omitempty"`
+	AvgTTFTMS int64 `json:"avgTtftMs,omitempty"`
+	// AvgDurationMS is the aggregate average request duration.
+	AvgDurationMS int64 `json:"avgDurationMs,omitempty"`
+	// CacheHitPct is 100*CachedTokens/PromptTokens (0 when unknown).
+	CacheHitPct float64 `json:"cacheHitPct,omitempty"`
+	// OutputTPS is completion tokens per second of *generation* time
+	// (duration minus TTFT, so queueing/thinking latency is not counted as
+	// generation), summed over the covered requests.
+	OutputTPS float64 `json:"outputTps,omitempty"`
+	// FirstTS / LastTS bound the covered requests (transcripts that predate
+	// timestamps leave these empty and the span unavailable).
+	FirstTS string `json:"firstTs,omitempty"`
+	LastTS  string `json:"lastTs,omitempty"`
+	// SpanMS is LastTS - FirstTS when both are known (>0).
+	SpanMS int64 `json:"spanMs,omitempty"`
+	// Streamed is true when the covered requests used SSE streaming.
+	Streamed bool `json:"streamed,omitempty"`
+	// Round / Model / Finish describe a single request (empty in aggregates).
+	Round  int    `json:"round,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Finish string `json:"finish,omitempty"`
+	// Kind names the request inside its session: "" ordinary turn,
+	// "nudge" (forced text answer) or "compact" (context summarisation).
+	Kind string `json:"kind,omitempty"`
+
+	// genMS accumulates generation time for OutputTPS; not serialised.
+	genMS int64
+}
+
+// add folds another set of counters (one request or another aggregate) in.
+func (u *UsageStats) add(o UsageStats) {
+	u.Requests += o.Requests
+	u.PromptTokens += o.PromptTokens
+	u.CachedTokens += o.CachedTokens
+	u.Completion += o.Completion
+	u.ReasoningTokens += o.ReasoningTokens
+	u.DurationMS += o.DurationMS
+	u.TTFTMS += o.TTFTMS
+	u.genMS += o.genMS
+	if o.Streamed {
+		u.Streamed = true
+	}
+	if o.FirstTS != "" && (u.FirstTS == "" || o.FirstTS < u.FirstTS) {
+		u.FirstTS = o.FirstTS
+	}
+	if o.LastTS > u.LastTS {
+		u.LastTS = o.LastTS
+	}
+	if o.Model != "" {
+		u.Model = o.Model
+	}
+}
+
+// finish recomputes the derived numbers. It is called after any add so an
+// aggregate always carries consistent ratios.
+func (u *UsageStats) finish() {
+	if u.Requests > 1 {
+		u.AvgTTFTMS = u.TTFTMS / int64(u.Requests)
+		u.AvgDurationMS = u.DurationMS / int64(u.Requests)
+		u.Round = 0
+		u.Finish = ""
+	}
+	if u.PromptTokens > 0 {
+		u.CacheHitPct = float64(u.CachedTokens) * 100 / float64(u.PromptTokens)
+	}
+	if u.genMS > 0 {
+		u.OutputTPS = float64(u.Completion) * 1000 / float64(u.genMS)
+	}
+	if u.FirstTS != "" && u.LastTS != "" && u.LastTS > u.FirstTS {
+		if t0, err := time.Parse(time.RFC3339, u.FirstTS); err == nil {
+			if t1, err := time.Parse(time.RFC3339, u.LastTS); err == nil {
+				u.SpanMS = t1.Sub(t0).Milliseconds()
+			}
+		}
+	}
+}
+
+// usageGenMS is the generation window of one request: total duration minus the
+// wait for the first token, floored at 1ms so a same-millisecond reply still
+// yields a finite speed instead of a division by zero.
+func usageGenMS(durationMS, ttftMS int64) int64 {
+	if durationMS <= ttftMS {
+		return 1
+	}
+	return durationMS - ttftMS
+}
+
 // LiveWindow is how recent a transcript's mtime must be for the viewer to
 // show it as "being written right now". The writer Syncs after every message,
 // so a running session keeps its mtime fresh; 60s is long enough to survive a
@@ -207,6 +315,11 @@ type SessionInfo struct {
 	// Live reports whether the transcript looks like it is being appended to
 	// right now (mtime within LiveWindow).
 	Live bool `json:"live"`
+	// Stats aggregates the t="usage" lines: tokens in/out, prefix-cache hit
+	// rate, latency, TTFT and output speed. Nil for transcripts written before
+	// usage recording existed (the viewer then shows no metrics rather than
+	// zeros that look like a measurement).
+	Stats *UsageStats `json:"stats,omitempty"`
 }
 
 // Line is one transcript line, verbatim plus parsed. Bad is set when the line
@@ -254,12 +367,25 @@ type Line struct {
 	SystemSHA string `json:"system_sha,omitempty"`
 	// Tools are the tool definitions that were sent with this run.
 	Tools []ToolSchema `json:"tools,omitempty"`
+
+	// ---- timestamps and t == "usage" lines ----
+	// TS is when the line was written (RFC3339 ms), empty in transcripts
+	// produced before timestamps existed.
+	TS string `json:"ts,omitempty"`
+	// Stats carries one request's accounting for t == "usage" lines: the
+	// viewer sums them into the session metrics (tokens in/out, prefix-cache
+	// hit rate, latency, TTFT, output speed).
+	Stats *UsageStats `json:"stats,omitempty"`
 }
 
 // IsMeta reports whether this line is a t="meta" record rather than a message.
 // The viewer keys every "meta versus message" decision off this so a transcript
 // that gains new non-"msg" types later still renders as messages only.
 func (l Line) IsMeta() bool { return l.Type == "meta" }
+
+// IsUsage reports whether this line is a t="usage" record (one API request's
+// token accounting and latency). Like meta lines it is never a message.
+func (l Line) IsUsage() bool { return l.Type == "usage" }
 
 // MarshalJSON is what keeps a broken line deliverable. json.RawMessage
 // validates its bytes while encoding and refuses anything that is not valid
@@ -425,6 +551,8 @@ type countEntry struct {
 type transcriptStat struct {
 	Messages int
 	Meta     *MetaInfo
+	// Usage aggregates the t="usage" lines seen in the same single pass.
+	Usage *UsageStats
 }
 
 func (s *scanner) scan() ([]SessionInfo, error) {
@@ -481,6 +609,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			ProjectLegacy: grp.Legacy,
 			Messages:      stat.Messages,
 			Meta:          stat.Meta,
+			Stats:         stat.Usage,
 			Bytes:         info.Size(),
 			ModTime:       info.ModTime(),
 			Live:          now.Sub(info.ModTime()) < LiveWindow,
@@ -552,6 +681,8 @@ func readStat(p string) (transcriptStat, error) {
 					stat.Messages++
 				case "meta":
 					stat.addMeta(trimmed)
+				case "usage":
+					stat.addUsage(trimmed)
 				}
 			}
 		}
@@ -562,6 +693,34 @@ func readStat(p string) (transcriptStat, error) {
 			return stat, rerr
 		}
 	}
+}
+
+// addUsage folds one t="usage" line into the session aggregate. A line that
+// cannot be parsed is skipped: a torn tail must never hide the metrics of the
+// requests that did complete.
+func (stat *transcriptStat) addUsage(line string) {
+	var rec transcriptLine
+	if err := json.Unmarshal([]byte(line), &rec); err != nil || rec.T != "usage" {
+		return
+	}
+	one := UsageStats{
+		Requests:        1,
+		PromptTokens:    rec.PromptTokens,
+		CachedTokens:    rec.CachedTokens,
+		Completion:      rec.Completion,
+		ReasoningTokens: rec.ReasoningTokens,
+		DurationMS:      rec.DurationMS,
+		TTFTMS:          rec.TTFTMS,
+		Streamed:        rec.Stream != nil && *rec.Stream,
+		FirstTS:         rec.TS,
+		LastTS:          rec.TS,
+	}
+	one.genMS = usageGenMS(rec.DurationMS, rec.TTFTMS)
+	if stat.Usage == nil {
+		stat.Usage = &UsageStats{}
+	}
+	stat.Usage.add(one)
+	stat.Usage.finish()
 }
 
 // addMeta folds one meta line into the summary. A meta line that cannot be
@@ -598,6 +757,19 @@ func HumanSize(bytes int64) string {
 		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
 	default:
 		return fmt.Sprintf("%.2f MB", float64(bytes)/1024/1024)
+	}
+}
+
+// HumanCount renders a token count compactly (12.3k / 1.20M), used by the
+// --list table and anywhere a raw count would be unreadable.
+func HumanCount(n int) string {
+	switch {
+	case n >= 1000000:
+		return fmt.Sprintf("%.2fM", float64(n)/1000000)
+	case n >= 1000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%d", n)
 	}
 }
 
@@ -670,6 +842,28 @@ func parseLine(n int, raw string) (Line, bool) {
 	line.Calls = rec.Calls
 	line.CallID = rec.CallID
 	line.Reasoning = rec.Reasoning
+	line.TS = rec.TS
+	if rec.T == "usage" {
+		streamed := rec.Stream != nil && *rec.Stream
+		line.Stats = &UsageStats{
+			Requests:        1,
+			PromptTokens:    rec.PromptTokens,
+			CachedTokens:    rec.CachedTokens,
+			Completion:      rec.Completion,
+			ReasoningTokens: rec.ReasoningTokens,
+			DurationMS:      rec.DurationMS,
+			TTFTMS:          rec.TTFTMS,
+			Round:           rec.Round,
+			Model:           rec.Model,
+			Finish:          rec.Finish,
+			Kind:            rec.Kind,
+			Streamed:        streamed,
+		}
+		line.Stats.genMS = usageGenMS(rec.DurationMS, rec.TTFTMS)
+		line.Stats.FirstTS = rec.TS
+		line.Stats.LastTS = rec.TS
+		line.Stats.finish()
+	}
 	if rec.T == "meta" {
 		// A meta line reuses "text" for the system prompt, but it is not a
 		// message: the viewer keeps the meta view of it separately so a
@@ -708,6 +902,20 @@ type transcriptLine struct {
 	Model        string           `json:"model,omitempty"`
 	SysHash      string           `json:"system_sha,omitempty"`
 	Tools        []transcriptTool `json:"tools,omitempty"`
+
+	// TS is the line write time (every line since usage recording exists).
+	TS string `json:"ts,omitempty"`
+
+	// ---- t == "usage" lines only ----
+	Stream          *bool  `json:"stream,omitempty"`
+	Round           int    `json:"round,omitempty"`
+	PromptTokens    int    `json:"prompt_tokens,omitempty"`
+	CachedTokens    int    `json:"cached_tokens,omitempty"`
+	Completion      int    `json:"completion_tokens,omitempty"`
+	ReasoningTokens int    `json:"reasoning_tokens,omitempty"`
+	DurationMS      int64  `json:"duration_ms,omitempty"`
+	TTFTMS          int64  `json:"ttft_ms,omitempty"`
+	Finish          string `json:"finish_reason,omitempty"`
 }
 
 // transcriptTool is one tool definition inside a meta line. Parameters stays a

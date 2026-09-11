@@ -112,7 +112,7 @@ docvision workflow -c my.yaml
 | `docvision img2text` | AI 图片转文本（`--test` 测试模式） |
 | `docvision latex` | LaTeX 输出（可直接传 PDF/DOCX 自动补前置流程，或传 md 名只处理指定文件） |
 | `docvision verify` | AI 核对输出与原图（默认关闭；只能显式运行，不参与自动流程） |
-| `docvision sessions` | 会话预览：把 AI 会话转录渲染成可浏览页面（静态导出 / 本地实时服务） |
+| `docvision sessions` | 会话预览：把 AI 会话转录渲染成可浏览页面（静态导出 / 本地实时服务，含 token/缓存/时延指标） |
 | `docvision analyze` | 分析日志（`--progress` 仅进度，`--all` 汇总历史，`--logfile` 指定日志） |
 | `docvision splitlog` | 按线程 ID 拆分日志（`--logfile` / `--output-dir`） |
 | `docvision init` | 生成配置模板 |
@@ -131,7 +131,7 @@ docvision workflow -c my.yaml
 
 | 文档 | 内容 |
 | --- | --- |
-| [docs/commands.md](docs/commands.md) | 全部命令与参数、img2text/档位2 嵌入格式、`analyze` 选项、`sessions` 预览页 |
+| [docs/commands.md](docs/commands.md) | 全部命令与参数、img2text/档位2 嵌入格式、`analyze` 选项、`sessions` 预览页与指标 |
 | [docs/config.md](docs/config.md) | 配置项全表（`mineru` / `paths` / `models` / `latex` / `tools` / `sessions` / `verify`）与默认值 |
 | [docs/latex.md](docs/latex.md) | LaTeX 档位1/档位2 全流程、`latex` 用法与阶段控制、项目目录布局、原书检索工具、AI 核对 |
 | [docs/sessions.md](docs/sessions.md) | 会话基础设施（上下文窗口/压缩/转录）、提示词管理、会话沙箱与挂载表、调试日志 |

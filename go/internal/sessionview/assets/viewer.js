@@ -36,6 +36,7 @@
     search: document.getElementById('search'),
     list: document.getElementById('session-list'),
     foot: document.getElementById('side-foot'),
+    totals: document.getElementById('side-totals'),
     title: document.getElementById('session-title'),
     sessionBadge: document.getElementById('session-badge'),
     sub: document.getElementById('session-sub'),
@@ -177,6 +178,87 @@
     return (lines || []).map(normalizeLine);
   }
 
+  /* ---------- 指标（t="usage" 行：token / 缓存 / 时延 / 速度） ---------- */
+
+  function fmtTokens(n) {
+    n = Number(n) || 0;
+    if (n >= 1e6) { return (n / 1e6).toFixed(2) + 'M'; }
+    if (n >= 1e3) { return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'; }
+    return String(n);
+  }
+
+  function fmtDur(ms) {
+    ms = Number(ms) || 0;
+    if (ms < 1000) { return ms + 'ms'; }
+    if (ms < 60000) { return (ms / 1000).toFixed(1) + 's'; }
+    var m = Math.floor(ms / 60000);
+    var sec = Math.round((ms % 60000) / 1000);
+    return m + 'm' + (sec < 10 ? '0' : '') + sec + 's';
+  }
+
+  /*
+   * 会话指标：把 t="usage" 行按请求加权求和。口径与后端 UsageStats 一致——
+   * 缓存命中率 = Σcached/Σprompt，输出速度用"生成时间"（总耗时减首字延迟）
+   * 作分母，所以把请求排队与思考等待排除在速度之外。返回 null 表示这个转录
+   * 没有用量记录（旧转录），页面显示"无指标"而不是一堆 0（0 会被误读成实测）。
+   */
+  function usageLines(lines) {
+    var out = [];
+    (lines || []).forEach(function (l) { if (l && l.t === 'usage' && l.stats) { out.push(l); } });
+    return out;
+  }
+
+  function aggregate(usages) {
+    if (!usages.length) { return null; }
+    var agg = {
+      requests: 0, promptTokens: 0, cachedTokens: 0, completionTokens: 0, reasoningTokens: 0,
+      durationMs: 0, ttftMs: 0, genMs: 0, streamed: false, firstTs: '', lastTs: '', perRequest: usages
+    };
+    usages.forEach(function (l) {
+      var st = l.stats;
+      agg.requests += 1;
+      agg.promptTokens += Number(st.promptTokens) || 0;
+      agg.cachedTokens += Number(st.cachedTokens) || 0;
+      agg.completionTokens += Number(st.completionTokens) || 0;
+      agg.reasoningTokens += Number(st.reasoningTokens) || 0;
+      var dur = Number(st.durationMs) || 0;
+      var ttft = Number(st.ttftMs) || 0;
+      agg.durationMs += dur;
+      agg.ttftMs += ttft;
+      agg.genMs += Math.max(dur - ttft, 1);
+      if (st.streamed) { agg.streamed = true; }
+      var ts = l.ts || '';
+      if (ts && (!agg.firstTs || ts < agg.firstTs)) { agg.firstTs = ts; }
+      if (ts && ts > agg.lastTs) { agg.lastTs = ts; }
+    });
+    agg.cacheHitPct = agg.promptTokens ? agg.cachedTokens * 100 / agg.promptTokens : 0;
+    agg.avgTtftMs = agg.ttftMs / agg.requests;
+    agg.avgDurationMs = agg.durationMs / agg.requests;
+    agg.outputTps = agg.genMs ? agg.completionTokens * 1000 / agg.genMs : 0;
+    agg.spanMs = 0;
+    if (agg.firstTs && agg.lastTs) {
+      var t0 = Date.parse(agg.firstTs);
+      var t1 = Date.parse(agg.lastTs);
+      if (!isNaN(t0) && !isNaN(t1) && t1 > t0) { agg.spanMs = t1 - t0; }
+    }
+    return agg;
+  }
+
+  // 会话列表里的 sessions 项已经带后端聚合好的 stats（不用再读转录）。
+  function scanStats(session) {
+    var st = session && session.stats;
+    if (!st || !st.requests) { return null; }
+    return st;
+  }
+
+  function statsSummary(st) {
+    if (!st) { return ''; }
+    var parts = ['输入 ' + fmtTokens(st.promptTokens) + ' · 输出 ' + fmtTokens(st.completionTokens)];
+    if (st.promptTokens) { parts.push('缓存 ' + st.cacheHitPct.toFixed(0) + '%'); }
+    if (st.avgTtftMs) { parts.push('首字 ' + fmtDur(st.avgTtftMs)); }
+    return parts.join(' · ');
+  }
+
   /* ---------- theme ---------- */
 
   function applyTheme(theme) {
@@ -271,6 +353,16 @@
         ((m.tools) ? '，含 ' + m.tools + ' 个工具定义' : '');
       meta.appendChild(chip);
     }
+    var st = scanStats(s);
+    if (st) {
+      var schip = el('span', 'row-chip usage-chip', statsSummary(st));
+      schip.title = st.requests + ' 次 API 请求 · 输入 ' + st.promptTokens + ' tokens（其中 ' +
+        st.cachedTokens + ' 命中前缀缓存）· 输出 ' + st.completionTokens +
+        (st.reasoningTokens ? '（思考 ' + st.reasoningTokens + '）' : '') +
+        ' · 平均耗时 ' + fmtDur(st.avgDurationMs) + ' · 平均首字 ' + fmtDur(st.avgTtftMs) +
+        ' · 输出 ' + (st.outputTps || 0).toFixed(1) + ' tok/s';
+      meta.appendChild(schip);
+    }
     var sub = subPathOf(s.id);
     if (sub) {
       var subChip = el('span', 'row-chip row-sub', sub);
@@ -329,6 +421,26 @@
     var live = state.sessions.filter(function (s) { return s.live; }).length;
     refs.foot.textContent = groups.length + ' 个项目 · ' + state.sessions.length + ' 个会话' +
       (live ? ' · ' + live + ' 个活跃' : '') + (state.filter ? ' · 匹配 ' + shown : '');
+
+    // 合计：所有会话的输入/输出 token 与平均缓存命中率（按 token 加权）。
+    var tot = { requests: 0, prompt: 0, cached: 0, completion: 0 };
+    state.sessions.forEach(function (s) {
+      var st = scanStats(s);
+      if (!st) { return; }
+      tot.requests += st.requests;
+      tot.prompt += st.promptTokens;
+      tot.cached += st.cachedTokens;
+      tot.completion += st.completionTokens;
+    });
+    if (tot.requests) {
+      refs.totals.textContent = '合计 ' + tot.requests + ' 次请求 · 输入 ' + fmtTokens(tot.prompt) +
+        ' / 输出 ' + fmtTokens(tot.completion) + ' tokens' +
+        (tot.prompt ? ' · 缓存命中 ' + (tot.cached * 100 / tot.prompt).toFixed(0) + '%' : '');
+      refs.totals.classList.remove('hidden');
+    } else {
+      refs.totals.textContent = '';
+      refs.totals.classList.add('hidden');
+    }
   }
 
   function updateRootLabel() {
@@ -359,6 +471,12 @@
       parts.push('系统提示词 ' + m.promptChars + ' 字符' +
         (m.count > 1 ? '（共 ' + m.count + ' 条 meta，显示最新）' : '') +
         (m.line.tools && m.line.tools.length ? ' · 工具定义 ' + m.line.tools.length : ''));
+    }
+    var live = aggregate(usageLines(state.lines));
+    if (live) {
+      parts.push('输入 ' + fmtTokens(live.promptTokens) + ' / 输出 ' + fmtTokens(live.completionTokens) + ' tokens');
+      if (live.promptTokens) { parts.push('缓存 ' + live.cacheHitPct.toFixed(0) + '%'); }
+      if (live.outputTps) { parts.push(live.outputTps.toFixed(1) + ' tok/s'); }
     }
     if (state.badLines) { parts.push('坏行 ' + state.badLines); }
     if (state.current.mtime) { parts.push('最后写入 ' + fmtClock(state.current.mtime)); }
@@ -579,6 +697,101 @@
     var card = metaCard();
     if (!card) { return 0; }
     refs.timeline.insertBefore(card, refs.timeline.firstChild);
+    return 1;
+  }
+
+  /* ---------- 指标卡片 ---------- */
+
+  /*
+   * 打开一个会话时，在时间线顶部插一张指标卡片：先给出总量（token、缓存、
+   * 时长、速度），再列出每次请求一行。数据来自转录里的 t="usage" 行；旧转录
+   * 没有这种行，卡片就只显示一句说明，不会伪造数字。
+   */
+  function statsCard() {
+    var st = aggregate(usageLines(state.lines));
+    if (!st) {
+      if (!state.current) { return null; }
+      return null;
+    }
+    var card = el('div', 'card stats-card');
+
+    var head = el('div', 'card-title stats-head');
+    head.appendChild(el('span', null, '会话指标'));
+    head.appendChild(el('span', 'stats-note',
+      st.requests + ' 次请求 · ' + (st.streamed ? '流式' : '非流式')));
+    card.appendChild(head);
+
+    var tiles = el('div', 'stats-tiles');
+    var tile = function (label, value, title) {
+      var t = el('div', 'stats-tile');
+      t.appendChild(el('div', 'stats-value', value));
+      t.appendChild(el('div', 'stats-label', label));
+      if (title) { t.title = title; }
+      tiles.appendChild(t);
+    };
+    tile('输入 tokens', fmtTokens(st.promptTokens),
+      st.promptTokens + ' prompt tokens（含缓存命中 ' + st.cachedTokens + '）');
+    tile('缓存命中', st.promptTokens ? st.cacheHitPct.toFixed(0) + '%' : '—',
+      '前缀缓存命中率 = Σcached_tokens / Σprompt_tokens（供应商未上报时为 —）');
+    tile('输出 tokens', fmtTokens(st.completionTokens),
+      st.completionTokens + ' completion tokens' + (st.reasoningTokens ? '，其中思考 ' + st.reasoningTokens : ''));
+    tile('平均首字', st.avgTtftMs ? fmtDur(st.avgTtftMs) : '—', '每请求"发出→第一个流式增量"的平均耗时');
+    tile('输出速度', (st.outputTps || 0).toFixed(1) + ' tok/s',
+      '生成速度 = Σ输出 tokens / Σ(请求耗时 − 首字延迟)，不含排队与思考等待');
+    tile('平均耗时', fmtDur(st.avgDurationMs), '每请求平均墙钟耗时（含思考与工具执行前后的等待）');
+    if (st.spanMs) { tile('会话跨度', fmtDur(st.spanMs), '首末两次请求之间的墙钟时间（来自转录时间戳）'); }
+    if (st.reasoningTokens) { tile('思考 tokens', fmtTokens(st.reasoningTokens), 'reasoning_tokens（思考链）'); }
+    card.appendChild(tiles);
+
+    var details = document.createElement('details');
+    details.className = 'stats-details';
+    var sum = document.createElement('summary');
+    sum.textContent = '每次请求明细（' + st.requests + '）';
+    details.appendChild(sum);
+    var table = el('table', 'stats-table');
+    var thead = document.createElement('tr');
+    ['回合', '时刻', '首字', '耗时', '输入', '缓存', '输出', '速度', '结束'].forEach(function (h) {
+      thead.appendChild(el('th', null, h));
+    });
+    table.appendChild(thead);
+    st.perRequest.forEach(function (l) {
+      var one = l.stats;
+      var tr = document.createElement('tr');
+      var cell = function (text, title) {
+        var td = el('td', null, text);
+        if (title) { td.title = title; }
+        tr.appendChild(td);
+        return td;
+      };
+      var roundCell = cell(one.round ? '#' + one.round : '—',
+        one.kind === 'compact' ? '上下文压缩摘要请求'
+          : one.kind === 'nudge' ? '空回复后的强制文本请求' : '普通对话回合');
+      if (one.kind) { roundCell.textContent += ' · ' + one.kind; }
+      cell(l.ts ? fmtClock(l.ts) : '—');
+      cell(one.ttftMs ? fmtDur(one.ttftMs) : '—');
+      cell(one.durationMs ? fmtDur(one.durationMs) : '—');
+      cell(fmtTokens(one.promptTokens));
+      cell(one.promptTokens ? (one.cachedTokens * 100 / one.promptTokens).toFixed(0) + '%' : '—',
+        one.cachedTokens + ' / ' + one.promptTokens + ' tokens 命中前缀缓存');
+      cell(fmtTokens(one.completionTokens) + (one.reasoningTokens ? '（思 ' + fmtTokens(one.reasoningTokens) + '）' : ''));
+      cell((one.outputTps || 0).toFixed(1));
+      cell(one.finish || '—');
+      table.appendChild(tr);
+    });
+    details.appendChild(table);
+    card.appendChild(details);
+    return card;
+  }
+
+  function renderStatsCard() {
+    var old = refs.timeline.querySelector('.stats-card');
+    if (old && old.parentNode) { old.parentNode.removeChild(old); }
+    var card = statsCard();
+    if (!card) { return 0; }
+    var meta = refs.timeline.querySelector('.meta-card');
+    if (meta && meta.nextSibling) { refs.timeline.insertBefore(card, meta.nextSibling); }
+    else if (meta) { refs.timeline.appendChild(card); }
+    else { refs.timeline.insertBefore(card, refs.timeline.firstChild); }
     return 1;
   }
 
@@ -812,6 +1025,7 @@
       if (node) { refs.timeline.appendChild(node); rendered++; }
     });
     rendered += renderMetaCard();
+    rendered += renderStatsCard();
     if (!rendered) {
       refs.timeline.appendChild(el('div', 'empty', timelineEmptyText()));
     }
@@ -832,6 +1046,7 @@
       if (node) { refs.timeline.appendChild(node); }
     });
     if (hasMeta) { renderMetaCard(); }
+    if (lines.some(function (l) { return l.t === 'usage'; })) { renderStatsCard(); }
     if (placeholder && placeholder.parentNode && refs.timeline.children.length > 1) {
       refs.timeline.removeChild(placeholder);
     }
@@ -1009,7 +1224,7 @@
         return {
           id: s.id, label: s.label, title: s.title, name: s.name, messages: s.messages,
           size: s.size, mtime: s.mtime, live: s.live, project: s.project,
-          projectLegacy: s.projectLegacy, meta: s.meta
+          projectLegacy: s.projectLegacy, meta: s.meta, stats: s.stats
         };
       });
       renderSessions();
