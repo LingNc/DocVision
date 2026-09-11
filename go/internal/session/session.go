@@ -66,6 +66,19 @@ type Session struct {
 	contextNoteStep int
 	Prunes          int
 
+	// 本地估算与厂商实测的标定。textTokens 数不出厂商侧真实开销
+	// （reasoning_content/tool_calls/图片像素编码/每轮包装），实测
+	// 差到 2~4 倍：现场一次运行里估算说 66k tokens、厂商
+	// prompt_tokens 却是 132k~243k，于是 compaction_at=0.85×128k 的
+	// 阈值永远够不着，整个运行一次都没压缩过。现在每次响应后拿
+	// prompt_tokens / 请求前估算 得到系数，阈值判断用**标定后**的规模。
+	lastPromptTokens int     // 最近一次厂商实测的 prompt_tokens
+	calibNum         float64 // 标定分子（实测）
+	calibDen         float64 // 标定分母（当时估算）
+	// estBeforeRequest 是最近一次请求发出**之前**的本地估算，用它当
+	// 标定分母（响应回来后才知道厂商实测值）。
+	estBeforeRequest int
+
 	// progressHook, when set, is notified after every API round and
 	// every tool execution with (completed rounds, executed tool
 	// calls) — used by compact console modes to show a live line.
@@ -171,7 +184,15 @@ func (s *Session) appendTranscript(msg ChatMessage) {
 // so the transcript alone is enough to compute token counts, prefix-cache hit
 // rate, latency, time-to-first-token and output speed for a session.
 func (s *Session) recordUsage(resp *ChatResponse, round int, kind string) {
-	if s.transcript == nil || resp == nil {
+	if resp == nil {
+		return
+	}
+	// 标定必须在 transcript 判空**之前**：没有转录的会话（没挂转录文件的
+	// 一次性会话）同样要按真实 prompt 规模判断压缩阈值。
+	if u := resp.Usage; u != nil {
+		s.observePromptSize(s.estBeforeRequest, u.PromptTokens)
+	}
+	if s.transcript == nil {
 		return
 	}
 	rec := UsageRecord{
@@ -391,6 +412,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		if err := s.maybeCompact(); err != nil {
 			return "", fmt.Errorf("compaction failed: %w", err)
 		}
+		s.estBeforeRequest = s.EstimatedTokens()
 		req := &ChatRequest{
 			Model:       s.client.Model(),
 			Messages:    s.messages,
@@ -673,6 +695,55 @@ func (s *Session) EstimatedTokens() int {
 	return total
 }
 
+// observePromptSize 用厂商返回的真实 prompt_tokens 校准本地估算。
+// estBefore 是发请求前的 EstimatedTokens()。厂商侧还有估算看不见的
+// 开销（图片按像素编码、每轮包装、reasoning 回传），实测普遍是估算的
+// 2~4 倍；不校准就会像现场那样"估算 66k、实际 132k"，压缩阈值永远
+// 够不着。系数夹在 [1, 10] 之间，避免单次异常值把阈值推到天上。
+func (s *Session) observePromptSize(estBefore, actual int) {
+	if actual <= 0 {
+		return
+	}
+	s.lastPromptTokens = actual
+	if estBefore <= 0 {
+		return
+	}
+	ratio := float64(actual) / float64(estBefore)
+	if ratio < 1 {
+		ratio = 1
+	}
+	if ratio > 10 {
+		ratio = 10
+	}
+	s.calibNum, s.calibDen = ratio, 1
+}
+
+// CurrentTokens 是压缩阈值判断使用的规模，取三者最大：
+// ① 本地估算；② 标定后的估算（估算 × 实测/估算比）；③ 最近一次厂商实测的
+// prompt_tokens。③ 是"下一次请求至少这么大"的硬下限——本地估算漏算的
+// 开销（图片按像素编码、每轮包装）再多，厂商的数字不会骗人。裁剪或压缩
+// 之后历史真的变小了，这两个值都会被清掉/重算，所以不会把旧的大值钉住。
+func (s *Session) CurrentTokens() int {
+	est := s.EstimatedTokens()
+	best := est
+	if s.calibDen > 0 && s.calibNum > 0 {
+		if c := int(float64(est) * s.calibNum / s.calibDen); c > best {
+			best = c
+		}
+	}
+	if s.lastPromptTokens > best {
+		best = s.lastPromptTokens
+	}
+	return best
+}
+
+// forgetMeasuredPromptSize 在历史真的被缩小（本地裁剪 / AI 摘要）之后清掉
+// 实测值：那一轮请求的规模已经不代表现在的上下文，留着会让阈值判断虚高。
+func (s *Session) forgetMeasuredPromptSize() {
+	s.lastPromptTokens = 0
+	s.calibNum, s.calibDen = 0, 0
+}
+
 // noteContextGrowth logs once at half and once at 80% of the configured
 // window, so "the session is getting huge" is visible without --debug.
 func (s *Session) noteContextGrowth(est, limit int) {
@@ -680,14 +751,18 @@ func (s *Session) noteContextGrowth(est, limit int) {
 		return
 	}
 	pct := est * 100 / limit
+	measured := ""
+	if s.lastPromptTokens > 0 {
+		measured = fmt.Sprintf("（上次请求厂商实测 prompt=%d）", s.lastPromptTokens)
+	}
 	if s.contextNoteStep < 50 && pct >= 50 {
 		s.contextNoteStep = 50
-		s.logf("[context] 估算 %d tokens = 窗口(%d) 的 %d%%", est, limit, pct)
+		s.logf("[context] 估算 %d tokens%s = 窗口(%d) 的 %d%%", est, measured, limit, pct)
 		return
 	}
 	if s.contextNoteStep < 80 && pct >= 80 {
 		s.contextNoteStep = 80
-		s.logf("[context] 估算 %d tokens = 窗口(%d) 的 %d%%，接近压缩阈值", est, limit, pct)
+		s.logf("[context] 估算 %d tokens%s = 窗口(%d) 的 %d%%，接近压缩阈值", est, measured, limit, pct)
 	}
 }
 
@@ -787,7 +862,7 @@ func (s *Session) maybeCompact() error {
 	if at <= 0 || at > 1 {
 		at = 0.85
 	}
-	now := s.EstimatedTokens()
+	now := s.CurrentTokens()
 	// Surface context growth in the PLAIN log (no --debug needed). The bug
 	// this whole guard had was invisible precisely because every number
 	// about the request size lived in debug output: the run reached 324k
@@ -805,10 +880,14 @@ func (s *Session) maybeCompact() error {
 	// Stage 1: local pruning (free).
 	before := now
 	if n := s.pruneHistory(); n > 0 {
-		now := s.EstimatedTokens()
+		now := s.CurrentTokens()
 		s.logf("[compact] 本地裁剪：%d 条消息，估算 %d → %d tokens（未调用模型）", n, before, now)
 		if now < int(float64(limit)*at) {
 			s.Prunes++
+			// 注意：这里**不**清掉厂商实测值。裁剪只动本地历史，而实测
+			// 值是"上一次请求厂商真的发了多少"——清掉它就会退回"只看
+			// 估算"，又变成估算说够小、实则超窗。下一次响应的实测值会
+			// 自动刷新成裁剪后的真实规模。
 			return nil
 		}
 	}
@@ -816,11 +895,19 @@ func (s *Session) maybeCompact() error {
 		return nil // nothing to compact beyond the system prompt
 	}
 	// Stage 2: the conversation is still too large — pay for an AI summary.
-	if err := s.compact(); err != nil {
+	did, err := s.compact()
+	if err != nil {
 		return err
 	}
+	if !did {
+		// 没有可摘要的中段（任务与保留的最近 N 条之间是空的）：这次不是
+		// 一次压缩，不能记账、也不能把 lastCompactTokens 当成压缩后规模。
+		s.logf("[compact] 无需摘要（任务与最近 %d 条之间没有内容）；上下文仍偏大", compactKeepTail)
+		return nil
+	}
 	s.Compactions++
-	s.lastCompactTokens = s.EstimatedTokens()
+	s.forgetMeasuredPromptSize()
+	s.lastCompactTokens = s.CurrentTokens()
 	s.logf("[compact] history compacted; now ~%d tokens", s.lastCompactTokens)
 	return nil
 }
@@ -844,7 +931,10 @@ const compactKeepTail = 8
 // warm. The previous implementation embedded the whole transcript into a
 // single fresh user message, which paid full price for a new (often
 // 100k+ token) prefix and re-sent every base64 image.
-func (s *Session) compact() error {
+// compact 用一次 AI 摘要替换"任务与最近若干条之间"的中段历史。返回值
+// 表示**真的压了**（false = 会话还短、没有可摘要的中段，调用方不得按
+// 已压缩记账）。
+func (s *Session) compact() (bool, error) {
 	head := 0
 	if len(s.messages) > 0 && s.messages[0].Role == "system" {
 		head = 1
@@ -864,7 +954,10 @@ func (s *Session) compact() error {
 		tailStart--
 	}
 	if tailStart-headEnd <= 0 {
-		return nil // nothing between task and tail worth summarising
+		// 会话还短（任务与"保留的最近 N 条"之间没有内容）：不做摘要。
+		// 返回 false 而不是 nil——调用方曾无条件 Compactions++，于是
+		// "压缩次数"统计里混进了根本没发生的压缩。
+		return false, nil
 	}
 	tail := make([]ChatMessage, len(s.messages)-tailStart)
 	copy(tail, s.messages[tailStart:])
@@ -881,6 +974,7 @@ func (s *Session) compact() error {
 		"Respond with the note only, no preamble.",
 	}, "\n")
 
+	s.estBeforeRequest = s.EstimatedTokens()
 	req := &ChatRequest{
 		Model:       s.client.Model(),
 		Messages:    append(append([]ChatMessage{}, s.messages...), ChatMessage{Role: "user", Content: instruction}),
@@ -893,14 +987,14 @@ func (s *Session) compact() error {
 	}
 	resp, sentinel, status := s.client.CallWithRetry(req)
 	if status != "" {
-		return fmt.Errorf("summary request failed: %s", sentinel)
+		return false, fmt.Errorf("summary request failed: %s", sentinel)
 	}
 	if len(resp.Choices) == 0 {
-		return fmt.Errorf("empty summary response")
+		return false, fmt.Errorf("empty summary response")
 	}
 	summary := ContentString(resp.Choices[0].Message)
 	if strings.TrimSpace(summary) == "" {
-		return fmt.Errorf("empty summary content")
+		return false, fmt.Errorf("empty summary content")
 	}
 	if s.logger.DebugEnabled() {
 		s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] [compact] summary response (%.1fs, %d chars %s)",
@@ -931,7 +1025,7 @@ func (s *Session) compact() error {
 	for _, m := range tail {
 		s.appendTranscript(m)
 	}
-	return nil
+	return true, nil
 }
 
 // imageTokens is the flat cost assigned to each attached image.
@@ -940,12 +1034,16 @@ const imageTokens = 1100
 // messageTokens estimates the token cost of one message: CJK runes
 // count roughly one token each, other text four characters per token,
 // plus a flat cost per attached image.
+// messageTokens 必须覆盖请求体里真正发出去的一切：除了 Content，
+// 历史里回传的 reasoning_content（GLM 保留式思考）与 tool_calls 的
+// 函数名/参数 JSON 同样占 token——它们曾经完全不计入，是估算偏低
+// 数倍的主因之一。
 func messageTokens(m ChatMessage) int {
+	total := 0
 	switch c := m.Content.(type) {
 	case string:
-		return textTokens(c)
+		total += textTokens(c)
 	case []map[string]interface{}:
-		total := 0
 		for _, part := range c {
 			if t, ok := part["type"].(string); ok && t == "image_url" {
 				total += imageTokens
@@ -955,14 +1053,16 @@ func messageTokens(m ChatMessage) int {
 				total += textTokens(t)
 			}
 		}
-		return total
 	default:
-		raw, err := json.Marshal(m.Content)
-		if err != nil {
-			return 0
+		if raw, err := json.Marshal(m.Content); err == nil {
+			total += textTokens(string(raw))
 		}
-		return textTokens(string(raw))
 	}
+	total += textTokens(m.ReasoningContent)
+	for _, tc := range m.ToolCalls {
+		total += textTokens(tc.Function.Name) + textTokens(tc.Function.Arguments)
+	}
+	return total
 }
 
 func textTokens(s string) int {

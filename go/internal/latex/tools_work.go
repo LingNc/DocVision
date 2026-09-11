@@ -136,7 +136,9 @@ func (t *ReadFileTool) resolve(rel string) (full, label string, err error) {
 	}
 	if p, e := resolveInside(t.Root, rel); e == nil {
 		if st, se := os.Stat(p); se == nil && st.IsDir() {
-			return "", "", fmt.Errorf("%s 是目录（用 grep 或 bash ls 查看目录内容）", rel)
+			// 不要说 "用 bash ls"：checker / style-fix 这些会话根本没有 bash，
+			// 提示一个它们拿不到的工具只会让模型继续瞎试。直接把目录内容列出来。
+			return "", "", fmt.Errorf("%s 是目录不是文件；里面是: %s", rel, suggestInDir(p, 12))
 		}
 		return "", "", fmt.Errorf("文件不存在: %s%s（可用挂载点: %s）", rel, suggestNear(p, 12), t.vfs().Names())
 	}
@@ -175,6 +177,12 @@ func (t *ReadFileTool) Execute(argsJSON string) (session.ToolResult, error) {
 		shown = label + ":" + stripMount(rel)
 	} else if label != "" {
 		shown = label + "/" + rel
+	}
+	// 解析成功但目标是目录（最常见：read_file {"path":"work:"} 或写了个文件夹名）
+	// 原先直接把 os.ReadFile 的 EISDIR 原样丢给模型（"read …: is a directory"），
+	// 既没说是哪个引用、也没说里面有什么，模型只能再猜一轮。
+	if st, se := os.Stat(full); se == nil && st.IsDir() {
+		return session.ToolResult{}, fmt.Errorf("%s 是目录不是文件；里面是: %s", shown, suggestInDir(full, 12))
 	}
 	_, hasStart := args["start_line"]
 	_, hasEnd := args["end_line"]

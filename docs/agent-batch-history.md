@@ -244,3 +244,33 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - `.github/workflows/release.yml` **删除 `workflow_dispatch`**（含其 `inputs.tag`），`RELEASE_TAG` 只取 `github.ref_name`；`docs/dev.md` 的 CI/CD 段改为"只推标签"，README 那句"（或手动 `gh workflow run`）"同步删掉。手动跑过的 run **删除**了失败那一条（`gh run delete 34599166588`，`⚠️ GitHub Releases requires a tag` 那次），Action 历史里只留真实发布。
 - 上一批的 beta.4 补发用的是手动 run，产物与预发布状态都正确（`gh release list`：`v1.5.0-beta.4 Pre-release`、`v1.1.0 Latest`）——从这一批起，之后的版本一律"打标签 → 推送"。
 
+
+## 第三十三批（续）：会话压缩从未触发、样式会话工具集不一致、样式修复无转录
+
+用户在第三十三条反馈里问"会话压缩好像没有触发？""style 重新启用之后…工具 bash 坏了，文件不可读取"。三条都能在真实运行（`logs/latex_20260911_201722.log` + `latex_project/测试-概率论/`）里定位到，证据如下。
+
+### ① 压缩从未触发（真缺陷，代价最大）
+
+- 普通日志里 `[context]` 只出现 **1 行**：`[21:06:49][T03] [convert:chapter_003] [context] 估算 66427 tokens = 窗口(131072) 的 50%`——连 80% 那条都没到过。
+- **所有转录里 `=== COMPRESSED SESSION CONTEXT` 计数为 0**（`grep -rl` 扫 `latex_project/测试-概率论/` 无命中），即整个运行一次压缩都没有。
+- 同一批 `--debug` 行里厂商实测 prompt 规模：`style-feedback 243,533`、`style 206,886`、`convert:chapter_003 132,063`、`convert:chapter_002 110,842`——**全都超过了配置的 131,072 窗口**，阈值 0.85×131072=111,411 却按本地估算判断，估算最高只报 66,427。
+- 估算为什么低：`messageTokens` 只累加 `Content`，历史回传的 `reasoning_content`（GLM 保留式思考，逐字节回传）与 `tool_calls` 的参数 JSON（写文件的整段 TikZ/tex 都在里面）**完全不计**；厂商侧还有图片按像素编码、每轮包装等本地看不见的开销。
+- 第二个记账缺陷：`compact()` 在"任务与最近 8 条之间没有可摘要内容"时静默 `return nil`，`maybeCompact` 却无条件 `s.Compactions++`、`s.lastCompactTokens = CurrentTokens()`——短会话会记下一次根本没发生的压缩。
+
+修法：估算补上 `ReasoningContent` 与 `ToolCalls`；阈值改用 `CurrentTokens()` = max(本地估算, 标定估算, 厂商实测 `prompt_tokens`)，标定系数由每次响应的 `prompt_tokens ÷ estBeforeRequest` 得出并夹在 1~10；`recordUsage` 里的标定放在 transcript 判空**之前**（没有转录的会话同样要判阈值）；只有真的压缩过（`compact()` 返回 true）才清实测值/标定并记账；`[context]` 行附上厂商实测值。回归测试 4 条，其中 `TestCompactionUsesVendorPromptTokens` 复刻现场：本地估算几千、厂商实测 130k，必须压缩。
+
+### ② 样式反馈会话缺 bash（用户"工具 bash 坏了"）
+
+`[21:12:04]`、`[21:12:45]` 各一条 `[T01] [style-feedback] [tool:bash] unknown tool`。反馈轮 `styleFeedbackPhase` 复用 `work/style_session.jsonl` 的历史，而那段历史里全是样式会话用 `bash` 探测字体/包/编译的回合；反馈会话的工具表是**手抄的第二份**（代码里还写着"工具集与原样式会话一致"的注释），漏了 `WorkBashTool` → 模型照着历史调用，拿到的是"unknown tool"。现在两处共用 `styleSessionTools(proj, workDir, sourceDir, tag, bashTmp, submit)`，parity 由构造方式保证；反馈轮用独立的 `bash_style_feedback` 临时目录。
+
+### ③ 样式修复会话没有转录
+
+`work/sessions/` 里只有 `chapters.jsonl`、`convert_<章>.jsonl`、`checker_<章>.jsonl`，**没有任何 style_fix 转录**，`work/temp/` 下也没有——而日志里 `[style-fix:chapter_002]` 从 21:17 跑到 21:20、49 轮。`fixChapterStyle` 从不 `SetTranscript`，于是逐章样式修复这段工作**在 `docvision sessions` 里根本不出现**，用户第 11 条"用全跑完的会话分析问题"到这里直接断掉，中断重跑也只能从零开始。现在写 `work/sessions/style_fix_<章>.jsonl`。
+
+### ④ 顺带：目录被当文件读只会回一句 EISDIR
+
+`[21:17:21] [style-fix:chapter_002] [tool:read_file] error … read latex_project/测试-概率论/work/temp/conv_chapter_002/work: is a directory`——原始 Go 错误原样丢给模型，用户看到的就是"文件不可读取"。现在回报"是目录不是文件"并列出该目录真实条目（复用 `suggestInDir`）；`resolve` 里的同类提示不再写"用 bash ls"（checker/style-fix 没有 bash）。2 条测试。
+
+### 关于 grep 工具（用户第 12 条）
+
+`grep` **不是**沙箱里的 shell：`GrepTool`（`internal/latex/tools_work.go`）自己按会话挂载表解析路径（`project:style`、`/work/x.tex`、裸相对路径遍历全部挂载点），再在**宿主**上 `exec.Command("grep", "-rIn", …)`。所以它用的是宿主的 grep 二进制、但跑在沙箱之外、看得到全部挂载点——与 `bash` 里那条 `grep` 的可见范围不同。提示词无需改动（按用户要求未动）。

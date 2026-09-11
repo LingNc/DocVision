@@ -378,19 +378,7 @@ func (r *Runner) stylePhase(proj string) error {
 	submit := &SubmitStyleTool{Workspace: workDir}
 	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_style")
 	defer cleanBashTmp()
-	tools := []session.Tool{
-		&WriteWorkFileTool{Root: workDir},
-		&EditWorkFileTool{Root: workDir},
-		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
-		&GrepTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
-		&WorkBashTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
-		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style", Log: r.log, Tid: 1},
-		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ViewImageTool{Root: sourceDir, Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
-		submit,
-	}
-	tools = append(tools, r.sourcePageTools()...)
+	tools := r.styleSessionTools(proj, workDir, sourceDir, "style", bashTmp, submit)
 
 	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "style")
 	liveHook, liveClose := r.livePhaseLine("style")
@@ -1270,6 +1258,32 @@ func (r *Runner) chapterScratch(proj, clsName, base, tag string) (string, func()
 	return scratch, cleanup, nil
 }
 
+// styleSessionTools is the ONE tool set used by the style session AND by the
+// feedback round that continues its history. They must be identical: the
+// feedback session replays the style session's transcript, so every tool the
+// history used has to exist there too. It was written out twice by hand and
+// the copy had silently lost bash — the model followed its own history, called
+// bash, and got "unknown tool" (real run 2026-09-11 21:12, twice), leaving it
+// to guess which of the tools it had just been using still existed. Sharing
+// the constructor makes that class of drift impossible.
+// tag only names the compile artefact (style / style-feedback).
+func (r *Runner) styleSessionTools(proj, workDir, sourceDir, tag, bashTmp string, submit session.Tool) []session.Tool {
+	tools := []session.Tool{
+		&WriteWorkFileTool{Root: workDir},
+		&EditWorkFileTool{Root: workDir},
+		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
+		&GrepTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
+		&WorkBashTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), TmpDir: bashTmp,
+			MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
+		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: tag, Log: r.log, Tid: 1},
+		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
+		&ViewImageTool{Root: sourceDir, Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
+		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
+		submit,
+	}
+	return append(tools, r.sourcePageTools()...)
+}
+
 // fixChapterStyle runs a targeted style-fix sub-session on ONE already
 // converted chapter: the class/manual changed, so the .tex must be
 // adapted (NOT re-converted from markdown). Returns nil when the
@@ -1317,6 +1331,18 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	liveHook, liveClose := r.livePhaseLine("style-fix")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
+	// 样式修复会话原先**没有转录**：它改的是真实章节，出问题却无从复盘
+	// （docvision sessions 里根本不出现这个会话），中断后重跑也只能从零
+	// 再来一遍。与 convert/checker 一样落一份 JSONL。
+	trPath := filepath.Join(proj, "work", "sessions", "style_fix_"+base+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(trPath), 0o755); err == nil {
+		if tr, terr := session.NewTranscript(trPath); terr == nil {
+			sess.SetTranscript(tr)
+			defer tr.Close()
+		} else {
+			r.log.LogWarning(tid, "[style-fix] 转录创建失败:", terr)
+		}
+	}
 
 	userText := prompts.Render(prompts.StyleFixUser, map[string]string{
 		"CHAPTER_FILE": "The class/manual was revised after your chapter was converted. Adapt work:" + base + ".tex (and work:" + base + "/ if it has \\input parts) so it compiles with the NEW class and follows the NEW manual, then submit those two paths.",
@@ -1410,20 +1436,11 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	modelCfg := r.models[r.cfg.Latex.StyleModel]
 	tuning := r.cfg.LatexSession("style")
 
-	// 工具集与原样式会话一致（历史消息中引用过这些工具名）。
+	// 工具集与原样式会话**同一份**（构造器共享，见 styleSessionTools）。
 	submit := &SubmitStyleTool{Workspace: workDir}
-	tools := []session.Tool{
-		&WriteWorkFileTool{Root: workDir},
-		&EditWorkFileTool{Root: workDir},
-		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
-		&GrepTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
-		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style-feedback", Log: r.log, Tid: 1},
-		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ViewImageTool{Root: sourceDir, Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
-		submit,
-	}
-	tools = append(tools, r.sourcePageTools()...)
+	feedbackBashTmp, cleanFeedbackBash := r.sessionBashTemp(proj, "bash_style_feedback")
+	defer cleanFeedbackBash()
+	tools := r.styleSessionTools(proj, workDir, sourceDir, "style-feedback", feedbackBashTmp, submit)
 
 	// 复用原样式会话的上下文（转录里只有 user/assistant/tool，没有 system
 	// 行），因此这里必须重新挂上同一份系统提示词——否则打回的这一轮

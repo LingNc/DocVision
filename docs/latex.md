@@ -40,7 +40,7 @@
 | `work/views/checker_<章>/` | checker 会话的**只读视图**：`<章>.md`、`<章>.tex`、`parts/`（正好两个文件 + 一个文件夹） |
 | `work/pdfview/` | 原书 PDF 最小视图（`source` 挂载点，`<part>.pdf` 软链到 MinerU 的 `*_origin.pdf`） |
 | `work/reports/` | 每章转换会话的工作汇报 `<章>.md`（转换期间，只读通道 `project:reports/`） |
-| `work/sessions/` | 会话转录（`chapters.jsonl`、`convert_<章>.jsonl`）；矢量图另有 `sessions/vector_<图>.work` 持久工作区 |
+| `work/sessions/` | 会话转录（`chapters.jsonl`、`convert_<章>.jsonl`、`checker_<章>.jsonl`、`style_fix_<章>.jsonl`）；矢量图另有 `sessions/vector_<图>.work` 持久工作区 |
 | `work/temp/` | 临时工作区（拆章沙箱、样式/反馈 scratch、每章转换工作区 `conv_<章>/work`），默认用完即删 |
 | `build/` | 全书的构建树（每次 clean 重建：cls/手册/案例 + chapters + figures + main.tex），同时是修复会话与终审会话的工作区 |
 | `out/` | 交付产物：整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件），`book.pdf` 是 `main.pdf` 的别名，另有 `standalone.tex` |
