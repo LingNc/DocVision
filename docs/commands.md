@@ -104,7 +104,12 @@ docvision sessions --list                     # 只在终端列出会话（阶�
 docvision sessions --serve                    # 本地实时预览 http://127.0.0.1:8848/
 docvision sessions --serve --addr 127.0.0.1:9000
 docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
+docvision sessions --cost                     # 只打印按阶段的用量/费用报告
 ```
+
+页面本身也会显示费用：侧栏每个会话的用量摘要末尾、底部合计、以及会话指标卡里的「费用」瓷砖（都读索引 JSON 里的 `cost` 字段，由配置里的价格算好；没配价格的会话整块不显示金额）。
+
+`--cost` 按**阶段**汇总（`convert` / `checker` / `style-fix` / `style` / `vector` …）：会话数、请求数、输入与输出 tokens、加权缓存命中率、金额与平均每次请求，最贵的排前面。价格来自配置里的 `models.<条目>.price`（元/百万 tokens，分**未命中缓存输入 / 命中缓存输入 / 输出**三段），没配价格的模型**不显示金额**（显示"未配价"并提示金额只是下界，绝不用 ¥0 冒充免费）。`docvision latex` 跑完也会自动打印同一份表，并额外按书的规模给出**每张图 / 每页成本**（图片数取 `progress_items/`，页数取交付的 `out/book.pdf`）。
 
 想在**跑 latex 的同时**看，不必另开终端：把 `preview.enabled` 打开（默认关闭），`docvision latex` 启动时会自己拉起同一份只读服务并把确切 URL 打进日志（地址/端口用 `preview.host`/`preview.port`，端口 `0` = 由内核挑；根目录取该档位的输出根 `<latex_project>` / `<latex_output>`），运行结束后随进程退出。详见 `docs/config.md` 的 `preview` 三项。
 

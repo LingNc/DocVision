@@ -284,3 +284,15 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - 日志行前只补一个 `\n` 再重画：进度行被**永久留在滚动区**，终端里同一行内容出现两次（"重叠"的另一种形态）。
 
 现在 `logger` 提供行式 API：`LiveRow(id)` → `Set/Update/Remove/Finalize`，内部维护 `liveRows`（按创建顺序）与 `liveDrawn`（已画行数），重绘是"上移 N 行 → 清行 → 重画"，日志行与 `PrintConsole` 先擦块、写在块原来的位置、再把块画在下面；管道/重定向下不玩光标，按**变化**追加整行（同一状态不重复，延续第三十批的修复）。`liveProgress` 变成块里的一行（不再自己写 stdout），`livePhaseRow(id,label)` 供 style/chapters/style-feedback/final-review 以及新增的**逐章 convert / 逐章 checker / 逐章 style-fix** 使用。`Finalize` 负责把最后一帧定格成普通行（终端里必打，管道里只在没打过时打），阶段行因此"消失后不留空行、也不重复"。测试：`TestLivePanelNeverOverlapsOwnerRows`（把字节流回放进一个终端模型，断言日志行完整、跑完的行消失、在跑的并排、同一行不出现两个实时行）、`TestLiveBlockKeepsRowsIndependent`（两行互不改动、摘掉的行不会因迟到更新复活）、以及改写后的 `TestLiveProgressTTYCloseRepaints`/`TestLiveProgressPipeNoTrailingBlank`/`TestLiveProgressNoDuplicateFinalLine`/`TestPhaseNoteDoesNotOverwriteLiveLine`。
+
+### ⑥ 模型价格与费用报告（含两个真实缺陷）
+
+用户第 4 条：配置里加模型价格（输入/输出/缓存），按阶段统计用量、命中率、价格、规模，算平均每图/每页成本。
+
+- 配置：`models.<条目>.price: {input, cached, output, currency}`，单位元/百万 tokens。`cached` 不填按 `input` 计（未知折扣不能凭空打折）；`currency` 只在配了价格时才补默认 `¥`。价格全 0 = 未配置 → **整块不显示金额**，因为 `¥0` 会被读成"这次没花钱"。
+- 汇总口径：`internal/sessionview/cost.go` 按 `Σcached/Σprompt` 算加权命中率，金额分三段（未命中输入 / 命中输入 / 输出）；`StageCosts` 按阶段分组（`convert`/`checker`/`style-fix`/`style`/`chapters`/`vector`），贵的排前面。数字全部来自转录里的 `t="usage"` 行 → 无需运行期埋点，事后重算结果一致。
+- 入口：`docvision sessions --cost`（阶段表）、`--list` 新增"成本"列、预览页侧栏摘要/合计/指标卡「费用」瓷砖；`docvision latex` 跑完自动打印同一份表，并用 `progress_items/` 的图片数与交付 `out/book.pdf` 的页数算出**每张图 / 每页成本**。
+- 缺陷 1（页面/报告一直显示"未配价"）：`UsageStats` 的聚合 `addUsage` **漏了 `Model: rec.Model`** —— 费用报告按 t="usage" 行里的厂商模型名查价格表，少了这个字段就永远查无此价，价格配了也一个都用不上。回归测试 `TestUsageAggregateKeepsModelName`。
+- 缺陷 2（分组错位）：`LabelFor` 不认 `checker_` / `style_fix_` 前缀，这两类会话在预览页、`--list` 与费用表里都掉进"会话:<文件名>"，按阶段统计会把它们算成"其他"。现在分别是 `checker:<章>`、`style-fix:<章>`（标题"核对 · <章>"/"样式修复 · <章>"）。
+- 实测（合成项目 + 临时价格表 input 1 / cached 0.1 / output 4 元/百万）：`--cost` 输出 `style ¥0.20（3 请求，输入 630k/缓存 590k/输出 24k）`、`convert ¥0.15`、合计 `¥0.44`，手算 (630k−590k)×1 + 590k×0.1 + 24k×4 = 195000 微元 = ¥0.195 ✓。
+- 另注：用户现场那 46 份转录里 `t="usage"` 行数为 **0** —— 因为 0911 20:17 那次运行用的二进制早于 20:47 引入用量行的提交，不是缺陷；下次运行起就有数据。

@@ -315,6 +315,10 @@ type SessionInfo struct {
 	// Live reports whether the transcript looks like it is being appended to
 	// right now (mtime within LiveWindow).
 	Live bool `json:"live"`
+	// Cost is the money this session's usage added up to, filled by
+	// ApplyPrices when the config has rates for the model; nil when unpriced
+	// (the viewer shows no cost rather than ¥0).
+	Cost *CostStats `json:"cost,omitempty"`
 	// Stats aggregates the t="usage" lines: tokens in/out, prefix-cache hit
 	// rate, latency, TTFT and output speed. Nil for transcripts written before
 	// usage recording existed (the viewer then shows no metrics rather than
@@ -422,6 +426,8 @@ func LabelFor(rel string) string {
 	}
 	for _, p := range []struct{ prefix, label string }{
 		{"convert_", "convert"},
+		{"checker_", "checker"},
+		{"style_fix_", "style-fix"},
 		{"vector_", "vector"},
 	} {
 		if strings.HasPrefix(base, p.prefix) && len(base) > len(p.prefix) {
@@ -452,6 +458,10 @@ func TitleFor(rel string) string {
 		return "转换 · " + subject
 	case "vector":
 		return "矢量图 · " + subject
+	case "checker":
+		return "核对 · " + subject
+	case "style-fix":
+		return "样式修复 · " + subject
 	case "会话":
 		return subject
 	}
@@ -704,7 +714,11 @@ func (stat *transcriptStat) addUsage(line string) {
 		return
 	}
 	one := UsageStats{
-		Requests:        1,
+		Requests: 1,
+		// Model 必须带上：费用报告按 t="usage" 行里的**厂商模型名**查价格表，
+		// 少了它每次会话都"查无此价"，金额永远是 0（真实缺陷：聚合里漏字段，
+		// 于是配好的价格一个也用不上）。
+		Model:           rec.Model,
 		PromptTokens:    rec.PromptTokens,
 		CachedTokens:    rec.CachedTokens,
 		Completion:      rec.Completion,

@@ -251,11 +251,23 @@
     return st;
   }
 
-  function statsSummary(st) {
+  /*
+   * 费用：后端按配置里的 models.*.price 算好放在 session.cost 里（没配价格
+   * 就是 null，这里什么都不显示——"¥0"会被读成"这次没花钱"）。金额下界时前
+   * 缀 "≥"：有请求的模型没配价格，真实花费只会更高。
+   */
+  function fmtCost(cost, unpriced) {
+    if (!cost) { return ''; }
+    return (unpriced ? '≥' : '') + (cost.currency || '') + cost.total.toFixed(2);
+  }
+
+  function statsSummary(st, session) {
     if (!st) { return ''; }
     var parts = ['输入 ' + fmtTokens(st.promptTokens) + ' · 输出 ' + fmtTokens(st.completionTokens)];
     if (st.promptTokens) { parts.push('缓存 ' + st.cacheHitPct.toFixed(0) + '%'); }
     if (st.avgTtftMs) { parts.push('首字 ' + fmtDur(st.avgTtftMs)); }
+    var money = session ? fmtCost(session.cost, false) : '';
+    if (money) { parts.push(money); }
     return parts.join(' · ');
   }
 
@@ -355,7 +367,7 @@
     }
     var st = scanStats(s);
     if (st) {
-      var schip = el('span', 'row-chip usage-chip', statsSummary(st));
+      var schip = el('span', 'row-chip usage-chip', statsSummary(st, session));
       schip.title = st.requests + ' 次 API 请求 · 输入 ' + st.promptTokens + ' tokens（其中 ' +
         st.cachedTokens + ' 命中前缀缓存）· 输出 ' + st.completionTokens +
         (st.reasoningTokens ? '（思考 ' + st.reasoningTokens + '）' : '') +
@@ -423,7 +435,7 @@
       (live ? ' · ' + live + ' 个活跃' : '') + (state.filter ? ' · 匹配 ' + shown : '');
 
     // 合计：所有会话的输入/输出 token 与平均缓存命中率（按 token 加权）。
-    var tot = { requests: 0, prompt: 0, cached: 0, completion: 0 };
+    var tot = { requests: 0, prompt: 0, cached: 0, completion: 0, cost: 0, costCurrency: '', unpriced: 0 };
     state.sessions.forEach(function (s) {
       var st = scanStats(s);
       if (!st) { return; }
@@ -431,11 +443,25 @@
       tot.prompt += st.promptTokens;
       tot.cached += st.cachedTokens;
       tot.completion += st.completionTokens;
+      if (s.cost) {
+        tot.cost += Number(s.cost.total) || 0;
+        tot.costCurrency = s.cost.currency || tot.costCurrency;
+      } else {
+        // 没有 cost 的会话：它的请求都算"未配价"，金额只是下界。
+        tot.unpriced += st.requests;
+      }
     });
     if (tot.requests) {
+      var money = '';
+      if (tot.cost > 0 || tot.costCurrency) {
+        money = ' · 费用 ' + (tot.unpriced ? '≥' : '') + tot.costCurrency + tot.cost.toFixed(2);
+      }
       refs.totals.textContent = '合计 ' + tot.requests + ' 次请求 · 输入 ' + fmtTokens(tot.prompt) +
         ' / 输出 ' + fmtTokens(tot.completion) + ' tokens' +
-        (tot.prompt ? ' · 缓存命中 ' + (tot.cached * 100 / tot.prompt).toFixed(0) + '%' : '');
+        (tot.prompt ? ' · 缓存命中 ' + (tot.cached * 100 / tot.prompt).toFixed(0) + '%' : '') + money;
+      if (tot.unpriced && money) {
+        refs.totals.title = '有 ' + tot.unpriced + ' 次请求的模型没配价格（models.<条目>.price），金额只是下界';
+      }
       refs.totals.classList.remove('hidden');
     } else {
       refs.totals.textContent = '';
@@ -741,6 +767,12 @@
     tile('平均耗时', fmtDur(st.avgDurationMs), '每请求平均墙钟耗时（含思考与工具执行前后的等待）');
     if (st.spanMs) { tile('会话跨度', fmtDur(st.spanMs), '首末两次请求之间的墙钟时间（来自转录时间戳）'); }
     if (st.reasoningTokens) { tile('思考 tokens', fmtTokens(st.reasoningTokens), 'reasoning_tokens（思考链）'); }
+    var sessionCost = state.current && state.current.cost;
+    if (sessionCost) {
+      tile('费用', fmtCost(sessionCost, false),
+        '按配置里的 models.*.price 计算：未命中缓存的输入 × input + 命中缓存的输入 × cached + 输出 × output。' +
+        '没配价格的模型不显示金额（¥0 会被读成"没花钱"）。');
+    }
     card.appendChild(tiles);
 
     var details = document.createElement('details');

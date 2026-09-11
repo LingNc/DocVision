@@ -51,6 +51,9 @@ type ModelConfig struct {
 	APIKey      string                 `yaml:"api_key"`
 	Model       string                 `yaml:"model"`
 	RequestBody map[string]interface{} `yaml:"request_body"`
+	// Price is this entry's billing rate. All-zero = unknown, and every
+	// cost report then says "未配置价格" instead of inventing ¥0.
+	Price PriceConfig `yaml:"price"`
 	// MaxTokens / Temperature are the per-model completion budget and
 	// sampling temperature. They act as the fallback used when a
 	// session or single-shot call does not set its own value
@@ -303,6 +306,75 @@ type Img2TextConfig struct {
 // 对应内容). Disabled by default; when enabled it cross-checks each
 // image against the embedded content and writes a report with fix
 // suggestions without altering the output.
+// PriceConfig is one model's billing rate, in `currency` per MILLION tokens
+// (the unit every Chinese provider quotes).
+//
+// Input  = 未命中前缀缓存的输入；Cached = 命中缓存的输入（留空/0 时按 Input
+// 计，宁可高估不要凭空打折）；Output = 输出（含思考 tokens，厂商就是这么计
+// 的）。价格为 0 = 未知，成本报告里显示"未配置价格"，绝不当成免费。
+type PriceConfig struct {
+	Input    float64 `yaml:"input"`
+	Cached   float64 `yaml:"cached"`
+	Output   float64 `yaml:"output"`
+	Currency string  `yaml:"currency"`
+}
+
+// Configured reports whether any rate is set.
+func (p PriceConfig) Configured() bool {
+	return p.Input != 0 || p.Cached != 0 || p.Output != 0
+}
+
+// CachedRate is the cache-hit input rate: the configured value, or the plain
+// input rate when unset (an unknown discount must not silently lower a bill).
+func (p PriceConfig) CachedRate() float64 {
+	if p.Cached != 0 {
+		return p.Cached
+	}
+	return p.Input
+}
+
+// CostOf returns the money for one request's counters (tokens, not millions).
+// inputTokens is the FULL prompt; cachedTokens is the cached part of it.
+func (p PriceConfig) CostOf(inputTokens, cachedTokens, outputTokens int) float64 {
+	if !p.Configured() {
+		return 0
+	}
+	fresh := inputTokens - cachedTokens
+	if fresh < 0 {
+		fresh = 0
+	}
+	return (float64(fresh)*p.Input + float64(cachedTokens)*p.CachedRate() +
+		float64(outputTokens)*p.Output) / 1e6
+}
+
+// ModelPrices maps WIRE model names (what the provider reports in usage lines)
+// to their rates, so a transcript can be priced without knowing which registry
+// entry produced it. Entries without a configured price are skipped.
+func (c *Config) ModelPrices() map[string]PriceConfig {
+	out := map[string]PriceConfig{}
+	if c == nil {
+		return out
+	}
+	def := c.Models["text"].Model
+	for _, mc := range c.Models {
+		if !mc.Price.Configured() {
+			continue
+		}
+		name := mc.Model
+		if name == "" {
+			name = def
+		}
+		if name == "" {
+			continue
+		}
+		out[name] = mc.Price
+	}
+	if len(out) == 0 {
+		return map[string]PriceConfig{}
+	}
+	return out
+}
+
 // PreviewConfig controls the automatic session preview server.
 type PreviewConfig struct {
 	// Enabled starts the viewer when a latex run begins. Default false:
@@ -852,6 +924,14 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Preview.Port == 0 {
 		cfg.Preview.Port = 8848
+	}
+
+	// Model prices: currency only (a rate of 0 stays 0 = unknown).
+	for name, mc := range cfg.Models {
+		if mc.Price.Configured() && mc.Price.Currency == "" {
+			mc.Price.Currency = "¥"
+			cfg.Models[name] = mc
+		}
 	}
 
 	// Paths defaults

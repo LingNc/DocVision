@@ -71,6 +71,11 @@ func newLatexCmd() *cobra.Command {
            成功后进入终审会话逐页核对成品 PDF 并整理，最后写 standalone.tex；
            交付把整棵 build 树复制到 out/（book.pdf = main.pdf 别名）
 
+跑完会打印**按阶段的 AI 用量与费用**表（token 拆分、前缀缓存命中率、
+金额、平均每次请求，以及每张图/每页成本）；价格来自配置里的
+models.<条目>.price（input/cached/output，单位元/百万 tokens），
+没配价格就整块不打印（不显示 ¥0）。
+
 想边跑边在浏览器里看会话，把 preview.enabled 打开（默认关闭）：
 跑 latex 时自动启动只读的会话预览服务（preview.host/preview.port，
 默认 127.0.0.1:8848），启动日志里打印确切 URL；等价的手动方式是
@@ -143,6 +148,11 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 					return err
 				}
 			}
+			// 费用统计：直接读会话转录里的 t="usage" 行按阶段汇总，
+			// 因此跑完之后随时重算都是同一个答案（不需要运行期埋点）。
+			fmt.Println("\n=== AI 用量与费用 ===")
+			runner.CostReport(runner.ProjectDir())
+
 			// LaTeX 自带工作流属性：结束后自动做日志分析（默认只分析
 			// 本次运行的日志；显式 --all 才汇总全部历史）。
 			analyzeLog := logPath

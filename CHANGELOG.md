@@ -7,6 +7,7 @@
 
 ### Added
 
+- **模型单价与费用报告**（用户第 4 条）：`models.<条目>.price` 配 `input` / `cached` / `output`（元/百万 tokens，`currency` 默认 `¥`）。`cached` 不填时按 `input` 计——未知的折扣不能凭空打折；**没配价格的模型不显示金额**，报告里标"未配价"并提示总额只是下界，因为 ¥0 会被读成"这次没花钱"。`docvision sessions --cost`（以及 `--list` 的新"成本"列）按**阶段**汇总会话数/请求数/输入输出 tokens/加权缓存命中率/金额/平均每次请求，最贵的排前面；`docvision latex` 跑完自动打印同一份表，并用 `progress_items/` 的图片数与交付 `out/book.pdf` 的页数算出**每张图 / 每页成本**。数字全部来自转录里的 `t="usage"` 行，没有运行期埋点，因此事后重算结果一致。另修：`LabelFor` 此前不认 `checker_`/`style_fix_` 前缀，这两类会话在预览页/`--list`/费用表里都掉进"会话:<文件名>"，现在分别归为 `checker:<章>` 与 `style-fix:<章>`（标题"核对 · <章>"/"样式修复 · <章>"）。
 - **`preview` 配置块：跑 latex 时自动启动会话预览服务**（用户要的"开关 + 接口 + 端口"）。`preview.enabled`（默认 **false**：没人要求的服务不该自己占端口）、`preview.host`（默认 `127.0.0.1`，只本机；转录含全书内容，写 `0.0.0.0` 才会暴露给局域网）、`preview.port`（默认 `8848`；`0` = 由内核挑空闲端口，启动日志里打印确切 URL）。启动的是 `docvision sessions --serve` 的同一份只读服务（根目录取该档位的输出根 `<latex_project>` / `<latex_output>`），边跑边在浏览器里看每个会话的实时进度，进程退出即随之中止。`sessionview` 新增不打印任何东西的 `Start(root, addr)`（返回 URL 与停止通道）——它可能被后台调用，而 latex 运行时终端上正画着实时进度块，goroutine 里一个裸 `fmt.Printf` 会把块打乱。
 
 

@@ -173,6 +173,15 @@ models:
     base_url: "https://your-api-proxy.com/v1"
     api_key: "sk-YOUR-API-KEY-HERE"
     model: "Qwen/Qwen3.6-27B"
+    # 计费单价（元/百万 tokens；用于 docvision sessions --cost 与 latex 跑完的
+    # 费用表）。不配就整块不显示金额——绝不显示 ¥0 冒充"没花钱"。
+    # input = 未命中前缀缓存；cached = 命中缓存（不填按 input 计，宁可高估）；
+    # output = 输出（含思考 tokens，厂商就是这么计的）。
+    price:
+      input: 0
+      cached: 0
+      output: 0
+      currency: "¥"
     temperature: 0.10
     # API 请求控制（全局默认；各 models 条目可单独覆盖）
     api_timeout: 400            # 非流式：整次请求（连接+读取）总上限（秒）

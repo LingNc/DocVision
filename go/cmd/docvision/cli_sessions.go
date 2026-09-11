@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"mineru-tools/internal/config"
 	"mineru-tools/internal/sessionview"
 )
 
@@ -90,9 +91,23 @@ func newSessionsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// 价格来自配置里的 models.*.price（每个模型一份费率），没有配置
+			// 就整篇不显示金额：¥0 会被读成"这次没花钱"。
+			prices := map[string]config.PriceConfig{}
+			if cfg, cerr := loadConfigWithFlag(cmd); cerr != nil {
+				// 读不到配置就只是没有价格，不该挡住查看会话。
+				fmt.Fprintln(os.Stderr, "提示：读取配置失败，本次不显示金额：", cerr)
+			} else {
+				prices = cfg.ModelPrices()
+			}
+			sessionview.ApplyPrices(sessions, prices)
 
 			if list {
 				printSessions(sessions, root)
+				return nil
+			}
+			if costOnly, _ := cmd.Flags().GetBool("cost"); costOnly {
+				printCostReport(sessions, len(prices) > 0)
 				return nil
 			}
 			if serve {
@@ -132,6 +147,7 @@ func newSessionsCmd() *cobra.Command {
 	cmd.Flags().String("addr", sessionview.DefaultAddr, "服务监听地址（默认 127.0.0.1:8848，只监听本机）")
 	cmd.Flags().Bool("list", false, "只在终端列出扫到的会话（项目/阶段/消息数/提示词字符数/大小/修改时间/路径）")
 	cmd.Flags().String("out", "", "静态导出路径（默认 <根目录>/sessions.html）")
+	cmd.Flags().Bool("cost", false, "只打印按阶段的用量与费用报告（token/缓存命中率/价格/平均每次请求），价格来自配置 models.*.price")
 	return cmd
 }
 
@@ -162,7 +178,7 @@ func printSessions(sessions []sessionview.SessionInfo, root string) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "项目\t阶段\t消息数\t提示词\t用量\t大小\t修改时间\t路径")
+	fmt.Fprintln(w, "项目\t阶段\t消息数\t提示词\t用量\t成本\t大小\t修改时间\t路径")
 	var msgs int
 	for _, s := range sessions {
 		msgs += s.Messages
@@ -178,11 +194,100 @@ func printSessions(sessions []sessionview.SessionInfo, root string) {
 		if project == "" {
 			project = "（根目录）"
 		}
-		fmt.Fprintf(w, "%s\t%s%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			project,
-			s.Title, live, s.Messages, prompt, usageCell(s), sessionview.HumanSize(s.Bytes),
+			s.Title, live, s.Messages, prompt, usageCell(s), costCell(s), sessionview.HumanSize(s.Bytes),
 			s.ModTime.Format("2006-01-02 15:04:05"), s.ID)
 	}
 	_ = w.Flush()
 	fmt.Printf("\n共 %d 个会话 / %d 条消息（● = 最近 60 秒内有写入）\n根目录: %s\n", len(sessions), msgs, root)
+}
+
+// costCell renders the session's money for --list: "-" when the model has no
+// configured price (an unknown rate must not look like a free session) and
+// "≥" when some of its requests could not be priced.
+func costCell(s sessionview.SessionInfo) string {
+	if s.Cost == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%s%.2f", s.Cost.Currency, s.Cost.Total)
+}
+
+// printCostReport renders the per-stage cost table: which stage spent what,
+// with the token split, the prefix-cache hit rate and the average per request.
+// Total row included; per-image / per-page averages need the book's scale and
+// are printed by the latex run itself (see internal/latex CostSummary).
+func printCostReport(sessions []sessionview.SessionInfo, pricesConfigured bool) {
+	rows := sessionview.StageCosts(sessions)
+	if len(rows) == 0 {
+		fmt.Println("没有可统计的会话")
+		return
+	}
+	total := sessionview.TotalCost(sessions)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "阶段\t会话\t请求\t输入 tokens\t缓存命中\t缓存率\t输出 tokens\t费用\t每次请求")
+	var reqs, in, cached, out int
+	var money float64
+	currency := ""
+	unpriced := sessionview.UnpricedRequests(sessions)
+	for _, r := range rows {
+		cache := "-"
+		if r.PromptTokens > 0 {
+			cache = fmt.Sprintf("%s (%.0f%%)", sessionview.HumanCount(r.CachedTokens), r.CacheHitPct)
+		}
+		cost := "未配价"
+		if r.Currency != "" || r.Cost > 0 {
+			cost = fmt.Sprintf("%s%.2f", r.Currency, r.Cost)
+		}
+		if r.Unpriced > 0 {
+			cost = "≥" + cost
+		}
+		avg := "-"
+		if r.Requests > 0 && (r.Currency != "" || r.Cost > 0) {
+			avg = fmt.Sprintf("%s%.4f", r.Currency, r.AvgCostPerRequest())
+		}
+		fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			r.Stage, r.Sessions, r.Requests, sessionview.HumanCount(r.PromptTokens),
+			cache, cachePct(r.PromptTokens, r.CachedTokens), sessionview.HumanCount(r.Completion), cost, avg)
+		reqs += r.Requests
+		in += r.PromptTokens
+		cached += r.CachedTokens
+		out += r.Completion
+		money += r.Cost
+		if r.Currency != "" {
+			currency = r.Currency
+		}
+	}
+	fmt.Fprintf(w, "合计\t%d\t%d\t%s\t%s\t%s\t%s\t%s%.2f\t-\n",
+		len(sessions), reqs, sessionview.HumanCount(in), sessionview.HumanCount(cached),
+		cachePct(in, cached), sessionview.HumanCount(out), currency, money)
+	_ = w.Flush()
+	if unpriced > 0 {
+		fmt.Printf("注意：有 %d 次请求的模型没配价格，金额是**下界**（models.<条目>.price 里补 input/cached/output）\n", unpriced)
+	}
+	if total == nil {
+		if pricesConfigured {
+			fmt.Println("注意：会话用的模型名在价格表里找不到（转录里的 model 字段必须与 models.<条目>.model 一致），本次不显示金额。")
+		} else {
+			fmt.Println("注意：配置里没有任何 models.*.price，因此不显示金额（配置文件:" + configPathUsed() + "）。")
+		}
+	}
+}
+
+// configPathUsed reports which config file the command resolved (the --config
+// flag or the discovered ./config.yaml / ~/.docvision/config.yaml). It lands in
+// the "no prices configured" hint because that hint is usually produced by a
+// config the user did not mean to load.
+func configPathUsed() string {
+	if resolvedConfigPath != "" {
+		return resolvedConfigPath
+	}
+	return "未找到"
+}
+
+func cachePct(prompt, cached int) string {
+	if prompt <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.0f%%", float64(cached)*100/float64(prompt))
 }
