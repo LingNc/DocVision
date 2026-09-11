@@ -19,6 +19,9 @@
 
 ### Changed
 
+- **图块的 `text` 不再留空**：MinerU 没给图注（`image_caption`/`image_footnote` 都空）时，`doc_index.json` 里 image 块的 `text` 改用**我们自己**写在图上的内容兜底——styled-text 用图里的印刷原文、raster 用生成的解释、vector 用图标签（不塞 LaTeX 本体）。厂商给了图注的仍保持厂商原文，我们的内容照旧在 `content` 里，两者都可检索且来源不混；链接（`img` 与档位1 的 `LINK:`）三种类型一直指向**原图**，从不指向生成的 `figures/*.svg`（那只是档位2 正文的嵌入方式）。
+
+
 - **配置模板版本 6 → 7**（`config_version`）：本批新增了三个配置块（`preview.*`、`latex.figure_check.*`、`models.<条目>.price.*`），按既有约定同步 bump——版本不符时启动只提示"请参考 config.example.yaml 更新"，不影响运行；`docvision setup` 会把它列为待修项。旧的 v6 配置不改也能跑（新块全部有默认值），但拿不到新选项的注释指引。
 
 - `doc_index` 图片条目的 `content` 现在也带**矢量图的 LaTeX 本体**（此前 only STYLED-TEXT 的印刷原文与 RASTER 的解释进了索引，矢量图只有个 label，`doc_search` 搜不到图形本体、转换会话也拿不到参考）。扫描器只吃紧跟该图 `LINK` 的那个 ` ```latex ` 围栏（中间夹了正文就判定不是本体，不会粘错别的代码块），`doc_search`/`list_source_pages` 里该字段显示为 `latex:`。测试补 `TestParseMdMarkers` 的三条边界（正常收进 / 夹正文不收 / 无关代码块不粘）。

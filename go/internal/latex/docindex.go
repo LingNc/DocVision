@@ -501,9 +501,34 @@ func (idx *DocIndex) applyMarkers(markers map[string]mdMarker) int {
 			continue
 		}
 		e.Marker, e.Label, e.Content = m.Marker, m.Label, m.Content
+		// 厂商没给图注（image_caption/image_footnote 都空）时，text 用**我们
+		// 自己**写在这张图上的内容兜底：styled-text 用图里的印刷原文、raster
+		// 用我们生成的解释、vector 用图标签（不用 LaTeX 本体——整段代码塞进
+		// "图注"位置只会把检索结果淹没）。有厂商图注时保持原样，我们的内容仍
+		// 在 content 字段里，检索与输出两边都能看到，来源不会混。
+		if strings.TrimSpace(e.Text) == "" {
+			e.Text = markerFallbackText(m)
+		}
 		hits++
 	}
 	return hits
+}
+
+// markerFallbackText is the caption substitute for an image block whose own
+// MinerU caption is empty: the text we read out of the picture (styled-text's
+// printed text, a raster's generated explanation) or the figure's label.
+func markerFallbackText(m mdMarker) string {
+	first := m.Label
+	if m.Marker != markerVector {
+		// STYLED-TEXT / IMAGE：正文（印刷原文 / 我们的解释）比标签有用。
+		if c := strings.TrimSpace(m.Content); c != "" {
+			return snippet(c, 120)
+		}
+	}
+	if c := strings.TrimSpace(m.Content); c != "" && strings.TrimSpace(first) == "" {
+		first = c
+	}
+	return snippet(strings.TrimSpace(first), 120)
 }
 
 // buildDocIndex compiles the MinerU artifacts for the given source

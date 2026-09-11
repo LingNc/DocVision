@@ -45,7 +45,7 @@
 | `work/temp/` | 临时工作区（拆章沙箱、样式/反馈 scratch、每章转换工作区 `conv_<章>/work`），默认用完即删 |
 | `build/` | 全书的构建树（每次 clean 重建：cls/手册/案例 + chapters + figures + main.tex），同时是修复会话与终审会话的工作区 |
 | `out/` | 交付产物：整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件），`book.pdf` 是 `main.pdf` 的别名，另有 `standalone.tex` |
-| `doc_index/doc_index.json` | 只读块索引（`doc_search` 的检索库，style 阶段之前构建；图片条目带 md 里 DOCVISION 注释的类型/描述/原文：`marker`（styled-text/vector/image）、`label`（描述）、`content`（styled-text 的印刷原文 / raster 的解释 / **矢量图的 LaTeX 本体**）） |
+| `doc_index/doc_index.json` | 只读块索引（`doc_search` 的检索库，style 阶段之前构建；图片条目带 md 里 DOCVISION 注释的类型/描述/原文：`marker`（styled-text/vector/image）、`label`（描述）、`content`（styled-text 的印刷原文 / raster 的解释 / **矢量图的 LaTeX 本体**）；链接（`img` 与档位1 md 里的 `LINK:`）**一律指向原图**，`text` 是厂商图注，**厂商没给图注时用我们自己的内容兜底**（styled-text 的印刷原文 / raster 的解释 / vector 的图标签，不用 LaTeX 本体）） |
 | `watermark_memory.json` | 水印检测工作记忆（`latex.remove_watermark` 开启时生成；档位1 落在本项目工作区，档位2 同理落在 `<latex_output>/<项目名>/`） |
 | `progress.json` | 逐阶段断点进度 |
 | `.docvision_project.json` | 项目自述（项目名 + 主题名来源，仅新建项目写入；同名去重依据；旧版单项目目录不写） |
@@ -126,7 +126,7 @@ docvision verify --project 概率论-2026         # 多项目时指定核对哪�
 
 **`list_source_pages` / `doc_search` 的内容来自 OCR 索引，不是我们生成的 md**：条目、页码、bbox、文本与表格/公式内容都取自 MinerU 的 `*_content_list.json`（版面识别结果），章节起点由版面里的标题类块推导；只有图片块的"这是什么图"补充说明来自 images 阶段写进 `source/*.md` 的 DOCVISION 注释（见下条）。md 正文只是这些块的**加工产物**，索引从不回头读它——所以改 md 不会改变索引，重新跑 images 阶段才会刷新 `doc_index/`。
 
-**图片条目带上类型标记、描述与原文（来自 md 里的 DOCVISION 注释）**：MinerU 对没有 caption 的图片块只给一个文件名，于是索引构建时会把 images 阶段写进 `source/*.md` 的机器注释按**图片文件名**接回对应的图片块——`Marker`（`styled-text`/`vector`/`image`）、`Label`（注释里的描述，如 `mind-map diagram`）与 `Content`（STYLED-TEXT 的 `CONTENT:` 原文 / RASTER 的 `DESCRIBE:` 解释文本）。因此 `doc_search` 既可按文件名、也可按"图里写了什么"检索（例如按"知识导图""mind-map"找到那张思维导图），命中与 `list_source_pages` 页详情里都会显示 `[vector] mind-map diagram` 这样的短标签与内容摘要；没有注释的图片块照旧只有文件名（字段留空，不报错），旧版 `doc_index.json` 仍可读取。
+**图片条目带上类型标记、描述与原文（来自 md 里的 DOCVISION 注释）**：MinerU 对没有 caption 的图片块只给一个文件名，于是索引构建时会把 images 阶段写进 `source/*.md` 的机器注释按**图片文件名**接回对应的图片块——`Marker`（`styled-text`/`vector`/`image`）、`Label`（注释里的描述，如 `mind-map diagram`）与 `Content`（STYLED-TEXT 的 `CONTENT:` 原文 / RASTER 的 `DESCRIBE:` 解释文本）。因此 `doc_search` 既可按文件名、也可按"图里写了什么"检索（例如按"知识导图""mind-map"找到那张思维导图），命中与 `list_source_pages` 页详情里都会显示 `[vector] mind-map diagram` 这样的短标签与内容摘要；厂商没给图注（`image_caption`/`image_footnote` 都空）的图块，`text` 会用**我们**写在这张图上的内容兜底（styled-text 的印刷原文 / raster 的解释文本 / vector 的图标签）——这样按"图里写了什么"检索、以及 `list_source_pages` 的页详情都不会看到空条目；厂商本来给了图注的，`text` 保持厂商原文、我们的解释仍在 `content` 里，两边都可检索且来源不混。链接（`img`/`LINK`）三种类型**都指向原图**（`images/<主题>/<sha>.jpg`），从不指向生成的 `figures/*.svg`——那只是**档位2 正文**里的嵌入方式。没有注释的图片块照旧只有文件名（字段留空，不报错），旧版 `doc_index.json` 仍可读取。
 
 样式会话、章节转换会话与全书修复/终审会话都带这套检索工具（终审/修复会话还会同时搜构建树）。
 

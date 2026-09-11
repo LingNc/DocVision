@@ -337,3 +337,11 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - **漏项二：部署目录的 `config.yaml` 没有任何新块**。核对部署配置：`config_version: 6`、无 `preview:`、无 `figure_check:`、无 `price:`。现按 AGENTS.md 的"运行目录 config.yaml 与二进制随代码更新"补齐：备份 `config.yaml.bak-<时间戳>` 后，`config_version` 改 7、顶层插入 `preview:`（关闭/127.0.0.1/8848）、`latex:` 末尾插入 `figure_check:`（关闭/verifier/2 轮）、8 个 `models` 条目各补 `price:` 占位（全 0 = 未配置）。补丁用文本级插入（不经过 YAML round-trip，避免注释与顺序被重写），全程不打印任何密钥值。
 - **顺带修一处真实缺陷**（这次核对时暴露）：单价"存在但全是 0"时，报告写"配置里没有任何 models.*.price"（措辞不实），且合计行打印 `0.00`、每图/每页打印 `0.0000`——`0.00` 会被读成"几乎没花钱"，真实含义是"没配价、算不出来"。现在 `currency` 为空（没有任何一次请求命中已配置单价）时，金额列/合计/每次请求/每图每页一律写 `-` 并说明原因；提示语改成"没有**可用**的 models.*.price（没写，或单价全是 0）"。新增 `TestCostReportShowsNoMoneyWhenUnpriced`（未配价输出不含 `0.00`、必含"未配价"与全零说明；配价后照常显示 `¥0.12`）。
 - 验证：部署二进制 `v1.5.0-beta.4-28-g53669ef` 用补好的配置加载**无版本告警**；`sessions --cost` 输出全部为"未配价 / -"，无 ¥0.00；`go vet ./...` 干净、`go test ./...` 全绿。
+
+### ⑪ doc_index 的 text：厂商没图注时用我们自己的内容兜底
+
+用户复查第 13 条的答复时指出两点：（a）"vector → figures/*.svg；raster → 保留原图链接"这句表述有问题，"都应该是原图链接"；（b）"text 是否是对应的内容"，raster 在我们生成的 md 里就是解释内容，这边就该放解释。
+
+- **（a）是我在回复里把两件事混成了一句话**：`figures/*.svg` 是**档位2 正文**的嵌入方式（档位2 的产物就是"用重画结果替换矢量图"）；而**链接**（档位1 md 里的 `LINK: [class](path)` 与 `doc_index.json` 的 `img`）三种类型**一直**都走 `copyOriginalImage` 指向原图 `images/<主题>/<sha>.jpg`，从不是生成物——已核对 `runner.go` 三处 LINK 构造（styled-text/vector/image）与 `docindex.go` 的 `markerKey`（按原图文件名 join）。文档同步补一句"链接一律指向原图，`figures/*.svg` 只是档位2 正文的嵌入"。
+- **（b）是真缺陷**：`DocEntry.Text` 只取厂商的 `image_caption`/`image_footnote`（表格取 `table_caption` / 正文摘要），厂商没给就留空——于是"这张图对应什么内容"在 `text` 上是空的，我们的解释只躺在 `content` 里。现在 `applyMarkers` 里加兜底 `markerFallbackText`：`text` 为空时用我们写在图上的内容填——styled-text → 印刷原文、raster → 生成的解释、vector → **图标签**（不塞 LaTeX 本体，整段代码放"图注"位置会把检索结果淹没）；厂商给了图注的不动，我们的内容仍在 `content`，两边都可检索、来源不混。
+- 测试 `TestDocIndexTextFallsBackToOurOwnContent`（四种图块：无图注 raster/styled-text/vector 各取对应内容、有厂商图注的不被顶掉且 content 仍在；顺带断言三种类型的 `Img` 都是 `images/` 下的原图、绝不是 `.svg`；兜底后的 text 仍可被 `Search` 命中）。既有 marker 测试全部保持通过。
