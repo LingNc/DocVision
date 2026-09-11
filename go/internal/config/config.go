@@ -953,6 +953,10 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 	return entry, true
 }
 
+// checkerDefaultToolRounds caps the per-chapter checker session when the
+// config does not say otherwise (it does NOT inherit convert's rounds).
+const checkerDefaultToolRounds = 50
+
 // LatexSession returns the tuning block for a named latex session
 // (drawing / style / chapter / convert / checker), applying the shared
 // defaults. The checker block is the exception: any field it leaves at
@@ -971,7 +975,14 @@ func (c *Config) LatexSession(name string) SessionTuning {
 		s = c.Latex.Sessions.Convert
 	case "checker":
 		s = c.Latex.Sessions.Checker
+		explicitRounds := s.MaxToolRounds
 		inheritSessionTuning(&s, c.Latex.Sessions.Convert)
+		// 核对会话是"读两个文件 + 搜索 + 交结论"的简单会话，不需要
+		// convert 的上百轮：没显式配置就用 50（用户指定）。显式写负数
+		// = 真正不限制，照旧生效。
+		if explicitRounds == 0 {
+			s.MaxToolRounds = checkerDefaultToolRounds
+		}
 	default:
 		s = SessionTuning{}
 	}

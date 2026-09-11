@@ -238,16 +238,16 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 
 1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/<项目名>/work/style/`），用 `list_source_pages` 取原书页索引（源 PDF / 页范围 / 全局页号 / OCR 推导的章节起点），再用 `view_pdf {path:"source:<file>.pdf", page:N}` **按需渲染** MinerU 保留的原始扫描页（支持裁剪放大）、`view_image` 看提取图、`read_file`/`grep` 读解析文本，分析全书样式后用 `write_file`/`edit_file` 增量起草（`example.tex` 的图**直接用 md 里已有的 LaTeX**：`<!-- DOCVISION-VECTOR -->` 下面那个 ```latex 围栏就是这本书真正的图代码，复制它比重新画一张更省心智、也更贴合实际成品），再 `submit_style` **按工作区路径**提交 `book.cls` + 使用手册 + 案例（`{cls, manual, example, extra[], report}`：`extra` 可带上类需要的任何附属文件——helper `.sty`、TikZ 样式、字体表——会连同示例一起进试编译；`report` 写进 `style/REPORT.md`；示例自动试编译，失败回炉）。`submit_style` **只收工作区路径**，没有内联内容兼容（工具形态不该对模型保留历史包袱，且"路径还是内容"的启发式曾把一行 `## Vector figure style` 误判为文件名）；参数里带换行内容会被拒绝并提示先 `write_file` 再交路径。字体通过 `list_fonts` 查看；缺字体时在提交报告与手册里列出清单，由用户按文件名手动放进 `paths.fonts`（编译环境已注入 `TEXINPUTS`/`OSFONTDIR`，无需装系统字体）
 2. **章节划分 AI**（`models.chapter`）：`grep`/`read_file`/`bash` + `buffer.md` 工作记忆缓冲区（分析结论增量写入、跨轮保留），按行号划分章节（结构化提交，全覆盖校验）
-3. **转换 AI** 并发逐章转 `.tex`：每章有**私有工作视图**（只能读写自己那一章），别人的成品只能经只读通道 `project:converted/`（其他章节已提交的 `.tex`）与 `project:reports/`（其他章节的工作汇报）参考；首条消息给出**工作区地图**（`work:`/`project:`/`source:`/`build:` 各是什么）与两处权威输入路径——章节文本 `project:chapters/<章>.md`（**从它转换**：它是解析好的纯文本，读起来最省；但它是 OCR 来的、**可能出错**——遇到读不通的字、公式、图表就以**原书为准**，用 `doc_search`/`list_source_pages`/`view_pdf source:` 翻原页核对；版面问题一律以原书为准）与 class 手册 `project:style/manual.md`（不再整段内联）；工具集含 `bash`（沙箱内、与其它工具同一套挂载点）与 `compile`（**编译包了 `\\documentclass` 的 wrapper**；`compile {path:"chapters/<章>/probe.tex"}` 可单独编译工作区里任何一个 `.tex` 做验证，探针文件不得留在产物里；章节 `compile` 也接受 `engine`/`passes`/`args` 现场指定引擎与额外参数，回执只报 `COMPILE OK` + 产物名 + 页数或错误日志）；章节提示词只写"怎么用"与转换规则，工具参数交给工具自己的 schema（system 9.3K→4.9K、首条消息 1.2K→0.17K，模型不用把同一件事读两遍）；矢量图已在 images 阶段以 latex 代码块内嵌进章节 md，转换时按手册的 `## Vector figure style` 二次加工（保留结构、几何与全部标签）；raster 原图走 includegraphics → 每章提交后由 **核对 AI**（`models.checker`，小文本模型即可）比对原章 md 与产物，**硬性问题回同一个转换会话最多 3 轮**（上下文还在，最省 token），3 轮仍未过才作废该章 `.tex`、资源目录与转录，用全新会话重转换一次
+3. **转换 AI** 并发逐章转 `.tex`：每章在**自己的临时工作区** `work/temp/conv_<章>/work` 里干活——里面已经铺好 cls/`.sty`/手册/`example.tex` 的**副本**（随便改随便试，真样式包不受影响）、插图（`images/`、`figures/`）、该编译的 wrapper 与**待提交的两个路径**（`<章>.tex` + `<章>/`）；探针、实验 `.tex`、PDF 都留在临时工作区里，**只有提交的那两个路径会被拷进 `work/chapters/`**（分片文件夹整棵替换，历史残留与探针不会混进书里）；别人的成品只能经只读通道 `project:converted/`（其他章节已提交的 `.tex`）与 `project:reports/`（其他章节的工作汇报）参考；首条消息给出**工作区地图**（`work:`/`project:`/`source:` 各是什么）与两处权威输入路径——章节文本 `project:chapters/<章>.md`（**从它转换**：它是解析好的纯文本，读起来最省；但它是 OCR 来的、**可能出错**——遇到读不通的字、公式、图表就以**原书为准**，用 `doc_search`/`list_source_pages`/`view_pdf source:` 翻原页核对；版面问题一律以原书为准）与 class 手册 `project:style/manual.md`（不再整段内联）；工具集含 `bash`（沙箱内、与其它工具同一套挂载点）与 `compile`（**编译包了 `\\documentclass` 的 wrapper**；`compile {path:"chapters/<章>/probe.tex"}` 可单独编译工作区里任何一个 `.tex` 做验证，探针文件不得留在产物里；章节 `compile` 也接受 `engine`/`passes`/`args` 现场指定引擎与额外参数，回执只报 `COMPILE OK` + 产物名 + 页数或错误日志）；章节提示词只写"怎么用"与转换规则，工具参数交给工具自己的 schema（system 9.3K→4.9K、首条消息 1.2K→0.17K，模型不用把同一件事读两遍）；矢量图已在 images 阶段以 latex 代码块内嵌进章节 md，转换时按手册的 `## Vector figure style` 二次加工（保留结构、几何与全部标签）；raster 原图走 includegraphics → 每章提交后由 **核对会话**（`models.checker`，小文本模型即可）比对原章 md 与产物：它跑成一个**极简的只读会话**——挂载表里只有两个文件（章节 md + 提交的 `.tex`）与一个文件夹（`parts/` 分片），工具只有 `read_file`/`grep`/`submit`，默认 50 轮，写不了任何东西；**硬性问题回同一个转换会话最多 3 轮**（上下文还在，最省 token），3 轮仍未过才作废该章 `.tex`、资源目录与转录，用全新会话重转换一次
 4. 汇总为多文件 `.tex` 项目 → 编译全书 PDF（失败进入**修复会话**：读文件/改文件/重编译 + 字体工具核对样式）→ 成功后进入**终审会话**逐页核对成品 PDF 并整理（`latex.compile.final_review`，默认开启）→ 生成单文件 `standalone.tex`；交付把整棵 build 树复制到 `out/`，`book.pdf` 只是 `main.pdf` 的别名
-5. 多数章节的工作汇报报告 cls/手册问题时，打回原样式会话修正（上限 2 轮）；样式包更新后只对「报问题」或「新 cls 下编译不过」的章节并发跑**样式修复子会话**（增量 `edit_file` 适配新 cls/手册，不重新转换），修复失败才退回整章重转换
+5. 多数章节的工作汇报报告 cls/手册问题时，打回原样式会话修正（上限 2 轮）；样式包更新后只对「报问题」或「新 cls 下编译不过」的章节并发跑**样式修复子会话**（同样在 `work/temp/conv_<章>/work` 里，先把该章已转换的产物拷进去，增量 `edit_file` 适配新 cls/手册，提交同样只交那两个路径，不重新转换），修复失败才退回整章重转换
 
 ### AI 会话基础设施
 
 - **模型注册表** `models:`：每个专用 AI（classifier/drawing/style/chapter/convert/checker/verifier）可单独配置 base_url / api_key / model / request_body / stream / thinking / reasoning_effort / tool_stream
 - **流式请求（默认开启）**：`models.*.stream: true`（默认）时走 SSE 流式接收，长思考/长输出期间持续有进展，不会长时间静默；厂商不支持流式时自动回退一次非流式请求。流式模式下用 `api_stream_idle_timeout`（默认取 `api_timeout`）判定"卡住"，而不是整次请求超时
 - **思考控制**：`thinking: {type: enabled|disabled}` 与 `reasoning_effort: max|xhigh|high|medium|low|minimal|none` 都是请求体**顶层字段**（不要写进 `request_body.extra_body`），按 `models` 条目配置，空值继承 `models.text`；GLM 的保留式思考写 `thinking.clear_thinking: false`（历史 assistant 轮的思维链完整回传，提升缓存命中）
-- **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到 `compaction_at`（默认 0.85）阈值自动压缩，**两级**：先做**本地裁剪**（零成本，不调用模型）——超长工具结果留"前半 + 后 1/4"（`sessions.*.prune_tool_chars`，默认 4096 字符；实测真实会话里最长的工具结果 6183 字符、p99 5046，8K 阈值从不触发，只有 `read_file` 整文件（硬上限 64KB）与 `bash`（`tools.bash.max_output`，默认 5000）才可能很长），较早的图片换成文字占位（`sessions.*.keep_images`，默认保留最近 3 张；占位写明"这里曾附过 N 张图，需要时重新 view_image"，所以"看过什么"不会丢）；仍超阈值才花一次 **AI 摘要**：**系统提示词、原始任务、最近 8 条消息原样保留**，中间部分由 AI 写成一篇续跑笔记替换（摘要请求是"在原会话末尾追加一条指令"的增量请求，因此仍能命中厂商前缀缓存）；token 估算现在把系统提示词与工具定义一并计入（原来漏算，实测低估 5 万+ tokens）；**阈值检查在每一次模型请求之前都做**——这一条曾经是真实缺陷：守卫原本只在 `Run()` 入口调一次，而 latex 的这些会话"一次 `Run()` 就是整个会话"（初始任务进去以后几百轮都在同一个循环里），于是守卫只见过"系统提示词 + 第一条消息"，**一次都没触发过**：实测一轮运行里 prompt 涨到 323,966 tokens（窗口 128K、阈值 0.85）、转录里从来没有 `=== COMPRESSED SESSION CONTEXT` 行，费用一路升到账户余额不足；现在压缩在循环内每轮检查，并在**普通日志**（不需要 `--debug`）里打出上下文增长：占用到 50%、80% 各一条 `[context] 估算 N tokens = 窗口(M) 的 P%`，压缩本身打 `[compact] 本地裁剪…` / `[compact] history compacted…`；另外"压完仍超阈值"（窗口极小、或尾部本身就很长）不会每轮重复花钱摘要——只有在上次压缩之后又涨了 20% 才再压一次。**本地裁剪只在接近窗口时才发生**（不是每轮都裁）：窗口很大时即便有 5 万字符的工具结果也一个字都不动，历史里"早先看过的图"也不会被换成占位；裁剪后仍超阈值才进入 AI 摘要，因此"裁过就不用了"的担心不成立；压缩后续跑从**最后一次压缩检查点**开始（`LoadTranscript` 丢弃最后一条 `COMPRESSED SESSION CONTEXT` 之前的消息，并在写摘要后补写"原始任务 + 最近 8 条"，回放与内存一致）；`sessions.checker` 未设置的字段继承 `sessions.convert`
+- **会话管理**：每个会话独立上下文窗口（`sessions.*.context_limit`，默认 128K，可设 64K/256K），达到 `compaction_at`（默认 0.85）阈值自动压缩，**两级**：先做**本地裁剪**（零成本，不调用模型）——超长工具结果留"前半 + 后 1/4"（`sessions.*.prune_tool_chars`，默认 4096 字符；实测真实会话里最长的工具结果 6183 字符、p99 5046，8K 阈值从不触发，只有 `read_file` 整文件（硬上限 64KB）与 `bash`（`tools.bash.max_output`，默认 5000）才可能很长），较早的图片换成文字占位（`sessions.*.keep_images`，默认保留最近 3 张；占位写明"这里曾附过 N 张图，需要时重新 view_image"，所以"看过什么"不会丢）；仍超阈值才花一次 **AI 摘要**：**系统提示词、原始任务、最近 8 条消息原样保留**，中间部分由 AI 写成一篇续跑笔记替换（摘要请求是"在原会话末尾追加一条指令"的增量请求，因此仍能命中厂商前缀缓存）；token 估算现在把系统提示词与工具定义一并计入（原来漏算，实测低估 5 万+ tokens）；**阈值检查在每一次模型请求之前都做**——这一条曾经是真实缺陷：守卫原本只在 `Run()` 入口调一次，而 latex 的这些会话"一次 `Run()` 就是整个会话"（初始任务进去以后几百轮都在同一个循环里），于是守卫只见过"系统提示词 + 第一条消息"，**一次都没触发过**：实测一轮运行里 prompt 涨到 323,966 tokens（窗口 128K、阈值 0.85）、转录里从来没有 `=== COMPRESSED SESSION CONTEXT` 行，费用一路升到账户余额不足；现在压缩在循环内每轮检查，并在**普通日志**（不需要 `--debug`）里打出上下文增长：占用到 50%、80% 各一条 `[context] 估算 N tokens = 窗口(M) 的 P%`，压缩本身打 `[compact] 本地裁剪…` / `[compact] history compacted…`；另外"压完仍超阈值"（窗口极小、或尾部本身就很长）不会每轮重复花钱摘要——只有在上次压缩之后又涨了 20% 才再压一次。**本地裁剪只在接近窗口时才发生**（不是每轮都裁）：窗口很大时即便有 5 万字符的工具结果也一个字都不动，历史里"早先看过的图"也不会被换成占位；裁剪后仍超阈值才进入 AI 摘要，因此"裁过就不用了"的担心不成立；压缩后续跑从**最后一次压缩检查点**开始（`LoadTranscript` 丢弃最后一条 `COMPRESSED SESSION CONTEXT` 之前的消息，并在写摘要后补写"原始任务 + 最近 8 条"，回放与内存一致）；`sessions.checker` 未设置的字段继承 `sessions.convert`（唯一例外：`max_tool_rounds` 默认 50）
 - **矢量图落盘**：TikZ 编译成功后依次尝试 `dvisvgm → pdftocairo → mutool → inkscape` 转 SVG 内嵌（dvisvgm 3.6 处理 PDF 需要 Ghostscript < 10.01 或 mutool，缺条件时自动走 pdftocairo）；全部失败才回退 PNG/PDF 链接——档位2 只记日志与 `progress.json`，档位1 另在 markdown 就地标注 `<!-- DOCVISION-ERROR: … -->`
 - **图片查看工具**：`image_context` 只给文本上下文与前后引用（不看像素），`view_image` 才看图片（支持百分比裁剪与放大）；两者都接受**裸文件名**——`view_image` 以本文档的图片目录为根直接拼接，不做搜索，名字错了就报错
 - **编译与看图分离**：`compile {path:"figure.tex"}` 只返回编译日志、产物名与页数，看图统一用 `view_pdf {path:"standalone.pdf", page:1}`（裁剪 + zoom 直接从 PDF 高分辨率重渲染，真放大，不是拉伸像素）
@@ -283,10 +283,10 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 
 | 挂载点 | 内容 | 权限 |
 | --- | --- | --- |
-| `work` | 会话自己的可写工作区——作图/拆章会话=专用 scratch；样式会话=`work/style`；转换与样式修复会话=`work/views/chapter_<章>`（只含自己那一章）；修复/终审会话=构建树 `build/` | 可写 |
+| `work` | 会话自己的可写工作区——作图/拆章会话=专用 scratch；样式会话=`work/style`；转换与样式修复会话=`work/temp/conv_<章>/work`（**本章的临时工作区**：cls/手册/示例副本 + 插图 + 该编译的 wrapper + 待提交的两个路径，随会话用完即删）；修复/终审会话=构建树 `build/` | 可写 |
 | `project` | 项目只读窄视图：`source`/`style`/`chapters`/`converted`/`reports`；`work/sessions` 转录、`work/temp`、`doc_index/`、`pages/`、`build/`、`out/` 都不在其中 | 只读 |
 | `source` | 本书原书 PDF 的最小视图（`work/pdfview/<part>.pdf`，只含本书的 `*_origin.pdf`） | 只读 |
-| `build` | 只有转换与样式修复会话额外挂载的**编译 scratch**——它是这两个会话表里的**第一个**挂载点，也就是默认挂载点，所以它们的相对路径（含 `compile` 产物与 `standalone.pdf`）都落在 scratch 里 | 可写 |
+| `build` | 已不再使用：转换与样式修复会话的编译就发生在自己的 `work:` 临时工作区里（wrapper 与类都在那儿），全书构建树对修复/终审会话是 `work:` | — |
 
 挂载表的**第一个挂载点即默认挂载点**：写 `x.tex` 等价于写 `<默认挂载点>:x.tex`。
 
@@ -298,7 +298,7 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 
 **Python 环境**（`tools.python`）：会话 bash 跑在 `--unshare-net` 的沙箱里，**会话自己装不了任何包**（2026-09-11 实测：样式会话遇到 `ModuleNotFoundError: No module named 'PIL'` 后花约 10 轮自己手写了一个 PGM 解析器）。所以环境由宿主提供——按配置准备 `system`/`venv`/`conda` 解释器并把它的**运行所需目录只读绑定**进沙箱（解释器自身目录、`sys.prefix`、软链链上的每一跳、`ldd` 列出的共享库目录、site-packages；Homebrew 的 venv 就因为 `bin/python3 → .linuxbrew/opt/... → Cellar` 这条链少一环而 exec 失败，bash 的 PATH 搜索会**静默跳到下一个 `/usr/bin/python3`**，于是"装好的环境"根本没生效），`PATH` 指向它；缺模块时宿主侧（有网）自动 `pip install` 并让模型重试；安装失败则按缺字体同样的办法留下 `<项目>/work/python/requirements.txt` + `README.md`。沙箱内用 `python3` 即可，无需 Activation。
 
-档位1 的临时工作区统一落在**本项目工作区**里的 `work/temp/<名称>`（即 `latex_project/<项目名>/work/temp/…`；拆章沙箱、样式/反馈 scratch、每章编译 scratch），不再藏进 `/tmp`；`latex.keep_temp_dirs` 可保留以便事后检查。
+档位1 的临时工作区统一落在**本项目工作区**里的 `work/temp/<名称>`（即 `latex_project/<项目名>/work/temp/…`；拆章沙箱、样式/反馈 scratch、每章转换/修复工作区 `conv_<章>/work`），不再藏进 `/tmp`；`latex.keep_temp_dirs` 可保留以便事后检查。
 
 ### 调试日志
 
@@ -331,11 +331,11 @@ docvision latex --verbose      # 详细控制台输出（默认仅显示进度�
 | `chapters/` | 章节划分 AI 产出的 chapter_00N.md |
 | `work/chapters/` | 转换 AI 的正式产物：`chapter_00N.tex` + 每章资源目录 `chapter_00N/` |
 | `work/views/project/` | `project` 挂载点（只读窄视图：source / style / chapters / converted / reports） |
-| `work/views/chapter_<章>/` | 单章转换会话的**私有工作视图**（只含自己那章的 .tex 与资源目录） |
+| `work/views/checker_<章>/` | checker 会话的**只读视图**：`<章>.md`、`<章>.tex`、`parts/`（正好两个文件 + 一个文件夹） |
 | `work/pdfview/` | 原书 PDF 最小视图（`source` 挂载点，`<part>.pdf` 软链到 MinerU 的 `*_origin.pdf`） |
 | `work/reports/` | 每章转换会话的工作汇报 `<章>.md`（转换期间，只读通道 `project:reports/`） |
 | `work/sessions/` | 会话转录（`chapters.jsonl`、`convert_<章>.jsonl`）；矢量图另有 `sessions/vector_<图>.work` 持久工作区 |
-| `work/temp/` | 临时工作区（拆章沙箱、样式/反馈 scratch、每章编译 scratch），默认用完即删 |
+| `work/temp/` | 临时工作区（拆章沙箱、样式/反馈 scratch、每章转换工作区 `conv_<章>/work`），默认用完即删 |
 | `build/` | 全书的构建树（每次 clean 重建：cls/手册/案例 + chapters + figures + main.tex），同时是修复会话与终审会话的工作区 |
 | `out/` | 交付产物：整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件），`book.pdf` 是 `main.pdf` 的别名，另有 `standalone.tex` |
 | `doc_index/doc_index.json` | 只读块索引（`doc_search` 的检索库，style 阶段之前构建；图片条目带 md 里 DOCVISION 注释的类型/描述/原文） |
@@ -484,7 +484,7 @@ MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不�
 | `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body/stream/thinking…） | - |
 | `models.<name>` | 每个专用 AI 的独立配置，空字段继承 `models.text`；`max_tokens`/`temperature` 作为该模型未指定时的兜底；GLM 可用 `tool_stream: true`（工具参数随流返回）与 `thinking.clear_thinking: false`（保留式思考） | - |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
-| `latex.sessions.{drawing,style,chapter,convert,checker}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 继承时 0 表示"继承 convert"，-1 才是无限 | 0（不限制） |
+| `latex.sessions.{drawing,style,chapter,convert,checker}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |
 | `latex.sessions.*.context_limit` | 会话上下文窗口（tokens），达到阈值自动 AI 压缩 | 131072 |
 | `latex.sessions.*.max_tokens` | 该会话**单次请求最大输出**（不含厂商单独计费的思维链预算）：drawing 16384、style 内置 32768、其余 16384（随附模板示例把 drawing/style 写成 131072） | 16384 / style 32768 |
 | `latex.sessions.*.temperature` | 该会话采样温度（同 `models.<name>.temperature`，会话配置优先） | 未设置 |
@@ -492,7 +492,7 @@ MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不�
 | `latex.concurrency` | 档位1/档位2 的会话级并发（classify / 档位2 process / 档位1 逐章 convert / style-fix 共用；style、chapters、assemble、终审是单会话） | 3 |
 | `latex.insert_image_description` | 档位2 专用：raster 保留原图时是否嵌入 AI 解释文本（`[Image]( … )`）；档位1 不受它控制（总是生成解释块） | false |
 | `latex.chapter_granularity` | 档位1 章节拆分粒度：small=按小节拆分 / large=按大章整体拆分 | small |
-| `latex.keep_temp_dirs` | 保留 `<项目>/work/temp/` 下的临时工作目录（拆章沙箱、编译 scratch、矢量图工作区） | false |
+| `latex.keep_temp_dirs` | 保留 `<项目>/work/temp/` 下的临时工作目录（拆章沙箱、逐章转换/修复工作区 `conv_<章>`、矢量图工作区） | false |
 | `latex.keep_session_records` | 保留成功会话的 JSONL 转录（与上一项独立）；debug 日志下两项都必定保留 | false |
 | `latex.compile.engine` | 编译引擎（pdflatex / xelatex / lualatex） | xelatex |
 | `latex.compile.timeout` | 单次编译超时（秒） | 120 |
@@ -515,7 +515,7 @@ MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不�
 | `paths.latex_project` | 档位1 输出根：每本书的工作区是 `<latex_project>/<项目名>/`（旧版单项目布局则沿用根目录本身） | ./latex_project |
 | `paths.fonts` | AI 字体目录：缺字体时按样式会话报告的清单手动放入，编译环境注入 `TEXINPUTS`/`OSFONTDIR`（无下载工具） | ./fonts |
 | `img2text.model` | 基础流程模型（models: 注册表代号，默认 text） | text |
-| `latex.checker_model` | 每章核对模型（独立小模型；会话调优未配置的字段继承 convert） | "checker" |
+| `latex.checker_model` | 每章核对模型（独立小模型）。核对本身是一个极简会话：只读两个文件（章节 md + 提交的 .tex）与一个文件夹（分片），工具只有 read_file/grep/submit，默认 50 轮；调优里未配置的字段继承 convert（轮数除外） | "checker" |
 | `latex.remove_watermark` | 水印处理：true 时样式/转换/核对 AI 会检测并排除水印 | false |
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |

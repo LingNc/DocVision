@@ -68,7 +68,7 @@ latex:
                                   # （档位1 不受此开关控制：raster 总是带 DESCRIBE 解释块）
   chapter_granularity: "small"   # 档位1 章节拆分粒度：small=按小节拆分（默认）/ large=按大章整体拆分
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
-  keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/编译 scratch/矢量图工作区）；debug 日志下必定保留
+  keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: false # 保留会话转录 JSONL（成功会话默认清理）；debug 日志下必定保留
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
@@ -97,7 +97,8 @@ latex:
     convert:
       context_limit: 131072
       max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
-    checker:                   # 每章核对会话配置（未设置的字段继承 convert 块）
+    checker:                     # 每章核对会话（只读两个文件 + 一个文件夹；工具只有 read_file/grep/submit）
+      max_tool_rounds: 50       # 默认 50 轮（不继承 convert 的 128；其余字段仍继承 convert）
 
 # AI verification（AI 校验：默认关闭，先上日程）
 # img2text 基础图片转文本流程的独立配置（模型用 models: 注册表代号）

@@ -21,14 +21,44 @@ func TestCheckerSessionInheritsConvert(t *testing.T) {
 	if got.ContextLimit != 64000 {
 		t.Errorf("ContextLimit = %d, want inherited 64000", got.ContextLimit)
 	}
-	if got.MaxToolRounds != 33 {
-		t.Errorf("MaxToolRounds = %d, want inherited 33", got.MaxToolRounds)
+	if got.MaxToolRounds != 50 {
+		t.Errorf("MaxToolRounds = %d, want the checker default 50 (秒级只读核对不该继承 convert 的 33)", got.MaxToolRounds)
 	}
 	if got.CompactionAt != 0.5 {
 		t.Errorf("CompactionAt = %v, want inherited 0.5", got.CompactionAt)
 	}
 	if got.Temperature != 0.2 {
 		t.Errorf("Temperature = %v, want inherited 0.2", got.Temperature)
+	}
+}
+
+// TestCheckerDefaultRounds: the checker session is deliberately small
+// ("两个只读文件 + 一个文件夹，read_file/grep/submit"), so it gets 50
+// rounds by default — it must NOT inherit the convert block's rounds —
+// while every other unset field still inherits convert, and an explicit
+// value (including a negative "unlimited") still wins.
+func TestCheckerDefaultRounds(t *testing.T) {
+	cfg := &Config{}
+	cfg.Latex.Sessions.Convert = SessionTuning{ContextLimit: 64000, MaxToolRounds: 200}
+	setDefaults(cfg)
+	if got := cfg.LatexSession("checker").MaxToolRounds; got != 50 {
+		t.Errorf("checker MaxToolRounds = %d, want 50", got)
+	}
+	cfg.Latex.Sessions.Checker = SessionTuning{MaxToolRounds: 12}
+	if got := cfg.LatexSession("checker").MaxToolRounds; got != 12 {
+		t.Errorf("explicit checker MaxToolRounds = %d, want 12", got)
+	}
+	cfg.Latex.Sessions.Checker = SessionTuning{MaxToolRounds: -1}
+	if got := cfg.LatexSession("checker").MaxToolRounds; got != -1 {
+		t.Errorf("negative checker MaxToolRounds = %d, want -1 (unlimited)", got)
+	}
+	// 其它字段照旧继承
+	cfg2 := &Config{}
+	cfg2.Latex.Sessions.Convert = SessionTuning{ContextLimit: 64000, MaxTokens: 2048}
+	setDefaults(cfg2)
+	c := cfg2.LatexSession("checker")
+	if c.ContextLimit != 64000 || c.MaxTokens != 2048 {
+		t.Errorf("checker must still inherit context/tokens from convert: %+v", c)
 	}
 }
 

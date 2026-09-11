@@ -57,9 +57,12 @@ func newLatexCmd() *cobra.Command {
   style    样式分析 AI 读全书 md + 原书扫描页，产出 book.cls + 使用手册 + 案例，
            在工作区里反复 compile/view_pdf 自查后 submit
   chapters 章节划分 AI（grep + read_file + bash + 记忆缓冲区）切分章节
-  convert  转换 AI 并发逐章转 .tex：每章有**私有工作视图**（只能读写自己那章），
-           别人的成品只能经只读通道 project:converted/、project:reports/ 参考；
-           工具 compile/view_pdf/view_image/doc_search；每章产物交 checker 小模型核对，
+  convert  转换 AI 并发逐章转 .tex：每章在自己的 temp 工作区里干活（cls/手册/
+           示例都是副本，探针与实验随便写），提交时只交两个路径（章节 .tex + 它的
+           分片文件夹），代码把它们拷进 work/chapters；别人的成品只能经只读通道
+           project:converted/、project:reports/ 参考；工具
+           compile/view_pdf/view_image/doc_search；每章产物交 checker 会话核对
+           （只读两个文件 + 一个文件夹，read_file/grep/submit，默认 50 轮），
            硬性问题回同一会话最多 3 轮，仍不过才换新会话重转换一次
   feedback 多数章节报 cls/手册问题时打回原样式会话；样式包更新后只对
            「报问题」或「新 cls 下编译不过」的章节并发跑样式修复子会话（不重转换）

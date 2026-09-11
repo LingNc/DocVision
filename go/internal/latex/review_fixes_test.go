@@ -19,32 +19,26 @@ func TestCompileChapterToolUsesWrapper(t *testing.T) {
 	if _, err := exec.LookPath("xelatex"); err != nil {
 		t.Skip("xelatex not installed")
 	}
-	scratch := t.TempDir()
+	// 会话的工作树就是编译目录：类、wrapper、章节片段都在同一棵树里，
+	// 编译不再从别处拷贝任何文件。
 	work := t.TempDir()
 
-	// Minimal class with the same shape as a submitted one: it defines a
-	// command the chapter fragment uses.
-	if err := os.WriteFile(filepath.Join(scratch, "mybook.cls"), []byte(
+	if err := os.WriteFile(filepath.Join(work, "mybook.cls"), []byte(
 		"\\NeedsTeXFormat{LaTeX2e}\n\\ProvidesClass{mybook}\n\\LoadClass{article}\n"+
 			"\\newcommand{\\gnote}[1]{\\par\\noindent\\textbf{Note:} #1}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	wrapper := "\\documentclass{mybook}\n\\begin{document}\n\\input{chapter_007.tex}\n\\end{document}\n"
-	if err := os.WriteFile(filepath.Join(scratch, "chapter_007_wrapper.tex"), []byte(wrapper), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(work, "chapter_007_wrapper.tex"), []byte(wrapper), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	live := filepath.Join(work, "chapters", "chapter_007.tex")
-	if err := os.MkdirAll(filepath.Dir(live), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(live, []byte("\\section{A section}\n\\gnote{a note}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(work, "chapter_007.tex"), []byte("\\section{A section}\n\\gnote{a note}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	tool := &CompileChapterTool{
-		Comp:    NewCompiler(config.LatexCompileConfig{Engine: "xelatex", Timeout: 120}),
-		Scratch: scratch, MainFile: "chapter_007.tex", WrapperFile: "chapter_007_wrapper.tex",
-		SourcePath: live, WorkDir: work,
+		Comp: NewCompiler(config.LatexCompileConfig{Engine: "xelatex", Timeout: 120}),
+		Dir:  work, MainFile: "chapter_007.tex", WrapperFile: "chapter_007_wrapper.tex",
 	}
 	res, err := tool.Execute("{}")
 	if err != nil {
@@ -59,9 +53,8 @@ func TestCompileChapterToolUsesWrapper(t *testing.T) {
 	}
 	// The fragment alone (the old behaviour) cannot compile: no class.
 	plain := &CompileChapterTool{
-		Comp:    NewCompiler(config.LatexCompileConfig{Engine: "xelatex", Timeout: 120}),
-		Scratch: scratch, MainFile: "chapter_007.tex",
-		SourcePath: live, WorkDir: work,
+		Comp: NewCompiler(config.LatexCompileConfig{Engine: "xelatex", Timeout: 120}),
+		Dir:  work, MainFile: "chapter_007.tex",
 	}
 	if got, err := plain.Execute("{}"); err != nil {
 		t.Fatal(err)
@@ -69,15 +62,15 @@ func TestCompileChapterToolUsesWrapper(t *testing.T) {
 		t.Fatalf("compiling the bare fragment must fail (that was the bug), got: %s", got.Text)
 	}
 
-	// {path} compiles any other .tex of the workspace in the same wrapper.
-	probe := filepath.Join(work, "chapters", "chapter_007", "probe.tex")
+	// {path} compiles any other .tex of the same tree in the same wrapper.
+	probe := filepath.Join(work, "chapter_007", "probe.tex")
 	if err := os.MkdirAll(filepath.Dir(probe), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(probe, []byte("\\gnote{probe}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args, _ := json.Marshal(map[string]string{"path": "chapters/chapter_007/probe.tex"})
+	args, _ := json.Marshal(map[string]string{"path": "chapter_007/probe.tex"})
 	got, err := tool.Execute(string(args))
 	if err != nil {
 		t.Fatal(err)

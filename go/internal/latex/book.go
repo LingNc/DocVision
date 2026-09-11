@@ -896,10 +896,17 @@ func classNameOfFile(styleDir string) string {
 	return ""
 }
 
+// convertOneChapter converts ONE chapter in its own session. The session
+// works in a disposable TEMP workspace that already carries everything it
+// needs (the class package, the manual, example.tex, the illustrations)
+// and it may experiment there freely: nothing it writes reaches the book
+// until it submits the TWO paths of the chapter — the main .tex and the
+// folder with its \input parts — which the runner copies into
+// <proj>/work/chapters. Probe files, test PDFs and other scratch can
+// therefore never leak into the book.
 func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool) error {
 	base := strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
-	texRel := "chapters/" + base + ".tex"
-	texPath := filepath.Join(workDir, texRel)
+	texPath := filepath.Join(workDir, "chapters", base+".tex")
 	if fileExists(texPath) {
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")
 		// 产物已写出的章节不再需要会话转录。
@@ -910,56 +917,40 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	client := r.clientFor(r.cfg.Latex.ConvertModel)
 	modelCfg := r.models[r.cfg.Latex.ConvertModel]
 	tuning := r.cfg.LatexSession("convert")
-	manual, _ := os.ReadFile(manualPath)
+	// 手册不在首条消息里内联：它就在会话工作区里（work:manual.md）以及
+	// project:style/manual.md，内联 11k 字符会跟着每轮请求重发。
+	_ = manualPath
 
-	// Scratch for per-chapter compile checks.
-	scratch, cleanConvScratch, err := r.chapterScratch(proj, clsName, base, "conv")
+	// 本章会话的临时工作区；中断续跑时保留上次的树（不重新铺）。
+	trPath := filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")
+	work, cleanWork, err := r.chapterWorkTree(proj, clsName, base, fileExists(trPath), "")
 	if err != nil {
 		return err
 	}
-	defer cleanConvScratch()
+	defer cleanWork()
 
-	// 本章私有工作视图：只能看到/改到自己那章的文件（别人的成品走只读
-	// 通道 project:converted/、project:reports/）。
-	chapView := ensureChapterView(proj, base)
-	writeRoot := workDir
-	if chapView != "" {
-		writeRoot = chapView
-	}
-	write := &WriteWorkFileTool{
-		Root:                writeRoot,
-		Prefixes:            []string{texRel, "chapters/" + base + "/"},
-		RejectDocumentclass: true,
-		Hint:                "Your main file is " + texRel + "; extra resources (included .tex parts, tables) go under chapters/" + base + "/.",
-	}
-	submit := &SubmitDoneTool{
-		Label:      "chapter " + base,
+	submit := &SubmitChapterTool{
+		WorkRoot:   work,
+		SubmitRoot: filepath.Join(workDir, "chapters"),
+		Base:       base,
 		ReportPath: filepath.Join(workDir, "reports", base+".md"), // 工作汇报（实时落盘）
 	}
-	// 挂载表：build = 编译 scratch（默认挂载点，编译产物在这里），
-	// work = 章节工作树（可写），project/source = 只读。
-	convertMounts := append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
-		r.sessionMounts(kindConvert, writeRoot)...)
-	// 结构化读工具与 bash/view_pdf 共用同一张挂载表：work = 本章私有视图
-	// （可写）、project = 项目只读视图（手册/cls/章节 md/其它章节成品）、
-	// source = 原书 PDF、build = 编译 scratch。此前 read_file/grep 各自
-	// 用 Root 拼出一个**名叫 work 却指向项目视图**的挂载点，而 write_file
-	// 的 work 是私有视图 → 同一个名字两张树，会话只能靠猜（实测每个转换
-	// 会话开头都在 `project:`/`style/`/`work/style/` 之间乱撞）。
+	// 挂载表：work = 本章临时工作区（唯一可写），project/source = 只读。
+	convertMounts := r.sessionMounts(kindConvert, work)
 	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_"+base)
 	defer cleanBashTmp()
 	tools := []session.Tool{
 		&ReadFileTool{Mounts: convertMounts},
-		write,
-		// 增量编辑自己的章节文件 + 工作区检索（手册/cls/其它章节只读参考）
-		&EditWorkFileTool{Root: writeRoot, Prefixes: []string{texRel, "chapters/" + base + "/"}},
+		// 工作区里什么都能写（探针/实验都留着当草稿），提交时才拷两个路径。
+		&WriteWorkFileTool{Root: work, AnyExt: true, Hint: "Your chapter is " + base + ".tex plus the folder " + base +
+			"/ for its \\input parts. Everything else in this workspace is scratch you may experiment with."},
+		&EditWorkFileTool{Root: work},
 		&GrepTool{Mounts: convertMounts},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ViewPDFTool{Mounts: convertMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex",
-			SourcePath: texPath, WorkDir: writeRoot, Log: r.log, Tid: 1},
-		&WorkBashTool{Mounts: convertMounts, Root: writeRoot, TmpDir: bashTmp,
+		&CompileChapterTool{Comp: r.comp, Dir: work, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex", Log: r.log, Tid: 1},
+		&WorkBashTool{Mounts: convertMounts, Root: work, TmpDir: bashTmp,
 			MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		submit,
 	}
@@ -973,7 +964,6 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 
 	// 会话转录（JSONL，图片走 file:// 引用）：单章转换中断后（进程被
 	// 杀 / 网络断连）下次从转录恢复上下文继续，不重烧 token。
-	trPath := filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")
 	resumed := false
 	if msgs, err := session.LoadTranscript(trPath); err != nil {
 		r.log.LogWarning(tid, "[convert] 转录读取失败（忽略，按全新会话继续）:", err)
@@ -987,19 +977,14 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		defer tr.Close()
 	}
 
-	// Pre-place the compiled wrapper input target: the wrapper inputs
-	// base.tex, so the scratch MainFile is base.tex (copied by the tool).
 	chapData, err := os.ReadFile(chapPath)
 	if err != nil {
 		return err
 	}
-	// 手册不再整段内联：它就在 project:style/manual.md（会话第一步即读），
-	// 内联 11k 字符会跟着每轮请求重发。首条消息只给路径 + 工作区地图。
-	_ = manual
 	initial := prompts.Render(prompts.ConvertUser, map[string]string{
 		"CHAPTER_FILE":    "chapter markdown path: project:chapters/" + base + ".md",
 		"CHAPTER_PREVIEW": truncateRunes(string(chapData), 2000),
-		"TEX_PATH":        "Then write_file {path:\"" + texRel + "\", content: ...} and compile until clean, then submit.",
+		"TEX_PATH":        "Write it as work:" + base + ".tex (extra \\input parts go in the folder work:" + base + "/), compile until clean, then submit those TWO paths.",
 	})
 
 	if r.cfg.Latex.RemoveWatermark {
@@ -1012,60 +997,59 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	if _, err := sess.Run(session.RunOptions{UserText: initial}); err != nil {
 		return fmt.Errorf("会话失败: %w", err)
 	}
-	// Checker pass: a small text model verifies the chapter output
-	// against the chapter markdown. Hard problems are fed straight back
-	// to the SAME conversion session (its context is still live, so it
-	// is the cheapest and most accurate fixer), up to maxCheckerRounds
-	// rounds; only then the chapter is discarded and re-converted with a
-	// fresh session.
-	if fileExists(texPath) {
-		ok, issues := r.checkChapter(base, chapPath, texPath)
-		for round := 0; !ok && round < maxCheckerRounds; round++ {
-			r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
-			r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
-			msg := "The checker reviewed your submitted chapter and found problems that must be fixed:\n" + issues +
-				"\n\nFix the .tex (edit_file/write_file), compile until clean, then submit again."
-			if _, err := sess.Run(session.RunOptions{UserText: msg}); err != nil {
-				r.log.LogWarning(tid, "[checker]", base, "反馈轮失败:", err)
-				break
-			}
-			ok, issues = r.checkChapter(base, chapPath, texPath)
-		}
-		if ok {
-			r.log.Log(tid, "[checker]", base, "通过")
-			_ = os.Remove(texPath + ".checker")
-		} else {
-			_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
-			if !retry {
-				r.log.LogWarning(tid, "[checker]", base, strconv.Itoa(maxCheckerRounds)+" 轮反馈后仍有问题 — 作废产物，改用全新会话重转换")
-				r.phaseNote()("[checker] %s 反馈 %d 轮未过 — 重转换", base, maxCheckerRounds)
-				_ = os.Remove(texPath)
-				_ = os.RemoveAll(filepath.Join(workDir, "chapters", base))
-				r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
-				return r.convertOneChapter(proj, clsName, manualPath, chapPath, workDir, idx, tid, true)
-			}
-			r.log.LogWarning(tid, "[checker]", base, "重转换后仍未过（已记录，供终审处理）:", issues)
-		}
-	}
 	if !submit.Submitted {
-		// Accept a written file that compiles clean even without an
-		// explicit submit (rounds may have run out).
-		if !fileExists(texPath) {
+		// Accept a chapter that compiles clean even without an explicit
+		// submit (rounds may have run out): the same two paths are placed.
+		if !fileExists(filepath.Join(work, base+".tex")) {
 			return fmt.Errorf("会话未提交且未写出 .tex")
 		}
-		data, _ := os.ReadFile(texPath)
-		_ = os.WriteFile(filepath.Join(scratch, base+".tex"), data, 0o644)
 		start := time.Now()
-		res := r.comp.Compile(scratch, base+"_wrapper.tex")
+		res := r.comp.Compile(work, base+"_wrapper.tex")
 		LogCompileResult(r.log, tid, "convert-check", res, time.Since(start))
 		if !res.OK {
 			return fmt.Errorf("会话未提交且编译失败: %s", res.Err)
 		}
+		if _, perr := placeChapterFiles(work, filepath.Join(workDir, "chapters"), base); perr != nil {
+			return perr
+		}
 		r.log.LogWarning(tid, "[convert]", base, "未显式提交，但编译通过，予以采纳")
-		return nil
 	}
 	if !fileExists(texPath) {
 		return fmt.Errorf("会话已提交但没有写出 .tex")
+	}
+	// Checker pass: a small dedicated session (read_file/grep/submit only,
+	// read-only view holding the chapter markdown + the submitted .tex +
+	// its parts folder) verifies the chapter against the markdown. Hard
+	// problems are fed straight back to the SAME conversion session (its
+	// context is still live, so it is the cheapest and most accurate
+	// fixer), up to maxCheckerRounds rounds; only then the chapter is
+	// discarded and re-converted with a fresh session.
+	ok, issues := r.checkChapter(proj, base, chapPath, texPath, filepath.Join(workDir, "chapters", base), tid)
+	for round := 0; !ok && round < maxCheckerRounds; round++ {
+		r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
+		r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
+		msg := "The checker reviewed your submitted chapter and found problems that must be fixed:\n" + issues +
+			"\n\nFix it in your workspace (edit_file/write_file), compile until clean, then submit the two paths again."
+		if _, err := sess.Run(session.RunOptions{UserText: msg}); err != nil {
+			r.log.LogWarning(tid, "[checker]", base, "反馈轮失败:", err)
+			break
+		}
+		ok, issues = r.checkChapter(proj, base, chapPath, texPath, filepath.Join(workDir, "chapters", base), tid)
+	}
+	if ok {
+		r.log.Log(tid, "[checker]", base, "通过")
+		_ = os.Remove(texPath + ".checker")
+	} else {
+		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
+		if !retry {
+			r.log.LogWarning(tid, "[checker]", base, strconv.Itoa(maxCheckerRounds)+" 轮反馈后仍有问题 — 作废产物，改用全新会话重转换")
+			r.phaseNote()("[checker] %s 反馈 %d 轮未过 — 重转换", base, maxCheckerRounds)
+			_ = os.Remove(texPath)
+			_ = os.RemoveAll(filepath.Join(workDir, "chapters", base))
+			r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
+			return r.convertOneChapter(proj, clsName, manualPath, chapPath, workDir, idx, tid, true)
+		}
+		r.log.LogWarning(tid, "[checker]", base, "重转换后仍未过（已记录，供终审处理）:", issues)
 	}
 	return nil
 }
@@ -1141,6 +1125,107 @@ func (r *Runner) sourcePageTools() []session.Tool {
 	return tools
 }
 
+// chapterWorkTree builds the disposable TEMP workspace of ONE chapter
+// session: everything the session needs to work and compile (the class,
+// helper .sty files, manual.md, example.tex, the illustrations) plus the
+// two paths the chapter is submitted as (<base>.tex + <base>/, created
+// empty). The style package is COPIED, not linked: the session may
+// rewrite or break those files at will without touching the real package.
+//
+// resume=true keeps whatever the previous attempt left behind (an
+// interrupted session continues in place); seed is an optional directory
+// holding an already converted chapter to start from (the style-fix
+// session adapts the existing chapter instead of re-converting).
+func (r *Runner) chapterWorkTree(proj, clsName, base string, resume bool, seed string) (string, func(), error) {
+	root := filepath.Join(proj, "work", "temp", "conv_"+base)
+	if !resume {
+		_ = os.RemoveAll(root)
+	}
+	work := filepath.Join(root, "work")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		return "", func() {}, err
+	}
+	if entries, err := os.ReadDir(filepath.Join(proj, "style")); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			switch strings.ToLower(filepath.Ext(name)) {
+			case ".cls", ".sty", ".tex", ".md":
+				_ = copyFile(filepath.Join(proj, "style", name), filepath.Join(work, name))
+			}
+		}
+	}
+	for _, asset := range []string{"images", "figures"} {
+		src := filepath.Join(proj, "source", asset)
+		if !fileExists(src) {
+			continue
+		}
+		if err := linkAbs(src, filepath.Join(work, asset)); err != nil {
+			_ = copyDir(src, filepath.Join(work, asset))
+		}
+	}
+	// 待提交的两个路径：主文件 + 它的 \input 分片文件夹。
+	if err := os.MkdirAll(filepath.Join(work, base), 0o755); err != nil {
+		return "", func() {}, err
+	}
+	if seed != "" {
+		if fileExists(filepath.Join(seed, base+".tex")) {
+			if err := copyFile(filepath.Join(seed, base+".tex"), filepath.Join(work, base+".tex")); err != nil {
+				return "", func() {}, fmt.Errorf("读取已转换的章节失败: %w", err)
+			}
+		}
+		if fileExists(filepath.Join(seed, base)) {
+			_ = os.RemoveAll(filepath.Join(work, base))
+			if err := copyDir(filepath.Join(seed, base), filepath.Join(work, base)); err != nil {
+				return "", func() {}, err
+			}
+		}
+	}
+	wrapper := "\\documentclass{" + clsName + "}\n" +
+		"\\usepackage{graphicx,amsmath,amssymb,longtable,booktabs}\n" +
+		"\\graphicspath{{figures/}}\n" +
+		"\\begin{document}\n\\input{" + base + ".tex}\n\\end{document}\n"
+	if err := os.WriteFile(filepath.Join(work, base+"_wrapper.tex"), []byte(wrapper), 0o644); err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() {
+		if r.keepTemp() {
+			r.log.Log(0, "[temp] 保留临时工作目录:", root)
+			return
+		}
+		_ = os.RemoveAll(root)
+	}
+	return work, cleanup, nil
+}
+
+// placeChapterFiles copies the TWO submitted paths of one chapter — its
+// main .tex and the folder with its \input parts — into the real chapter
+// tree, replacing that folder wholesale (so nothing stale survives).
+// Returns the number of files placed.
+func placeChapterFiles(tree, submitRoot, base string) (int, error) {
+	dstTex := filepath.Join(submitRoot, base+".tex")
+	dstDir := filepath.Join(submitRoot, base)
+	if err := os.MkdirAll(submitRoot, 0o755); err != nil {
+		return 0, err
+	}
+	if err := os.RemoveAll(dstDir); err != nil {
+		return 0, err
+	}
+	n := 0
+	if st, err := os.Stat(filepath.Join(tree, base)); err == nil && st.IsDir() {
+		if err := copyDir(filepath.Join(tree, base), dstDir); err != nil {
+			return 0, fmt.Errorf("复制章节文件夹失败: %w", err)
+		}
+		n = countTreeFiles(filepath.Join(tree, base))
+	}
+	if err := copyFile(filepath.Join(tree, base+".tex"), dstTex); err != nil {
+		return 0, fmt.Errorf("复制章节主文件失败: %w", err)
+	}
+	return n + 1, nil
+}
+
 // chapterScratch builds a scratch dir that can compile ONE chapter as an
 // \input fragment: the book class, a wrapper that inputs <base>.tex, and
 // the project images/figures mounted (symlink, copy as fallback) so
@@ -1192,34 +1277,32 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	if !fileExists(texPath) {
 		return fmt.Errorf("没有已转换的 %s", texRel)
 	}
-	scratch, cleanFixScratch, err := r.chapterScratch(proj, clsName, base, "convfix")
+	// 同一套临时工作区（类/手册/示例 + 本章现有产物），会话在里面随便改，
+	// 提交时同样只交那两个路径，正式树不会被草稿污染。
+	work, cleanWork, err := r.chapterWorkTree(proj, clsName, base, false, filepath.Join(workRoot, "chapters"))
 	if err != nil {
 		return err
 	}
-	defer cleanFixScratch()
-	// 手册不内联：修复会话按路径读 project:style/manual.md（模板里写明）。
+	defer cleanWork()
+	// 手册不内联：它在会话工作区里（work:manual.md）与 project:style/manual.md。
 	_ = manualPath
 
-	submit := &SubmitDoneTool{Label: "the style fix for " + base}
-	fixView := ensureChapterView(proj, base)
-	if fixView == "" {
-		fixView = workRoot
+	submit := &SubmitChapterTool{
+		WorkRoot:       work,
+		SubmitRoot:     filepath.Join(workRoot, "chapters"),
+		Base:           base,
+		ReportOptional: true, // 定向修复只要交出适配后的章节
 	}
-	fixMounts := append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
-		r.sessionMounts(kindConvert, fixView)...)
+	fixMounts := r.sessionMounts(kindConvert, work)
 	tools := []session.Tool{
 		&ReadFileTool{Mounts: fixMounts},
-		&EditWorkFileTool{Root: fixView, Prefixes: []string{texRel, "chapters/" + base + "/"}},
-		&WriteWorkFileTool{
-			Root:                fixView,
-			Prefixes:            []string{texRel, "chapters/" + base + "/"},
-			RejectDocumentclass: true,
-		},
+		&EditWorkFileTool{Root: work},
+		&WriteWorkFileTool{Root: work, AnyExt: true, Hint: "Your chapter is " + base + ".tex plus the folder " + base +
+			"/ for its \\input parts; everything else here is scratch."},
 		&GrepTool{Mounts: fixMounts},
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ViewPDFTool{Mounts: fixMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex",
-			SourcePath: texPath, WorkDir: workRoot, Log: r.log, Tid: tid},
+		&CompileChapterTool{Comp: r.comp, Dir: work, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex", Log: r.log, Tid: tid},
 		submit,
 	}
 	tools = append(tools, r.sourcePageTools()...)
@@ -1230,7 +1313,7 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	defer liveClose()
 
 	userText := prompts.Render(prompts.StyleFixUser, map[string]string{
-		"CHAPTER_FILE": "The class/manual was revised after your chapter was converted. Adapt chapters/" + base + ".tex so it compiles with the NEW class and follows the NEW manual.",
+		"CHAPTER_FILE": "The class/manual was revised after your chapter was converted. Adapt work:" + base + ".tex (and work:" + base + "/ if it has \\input parts) so it compiles with the NEW class and follows the NEW manual, then submit those two paths.",
 		"ISSUES":       truncateStr(issues, 4000),
 	})
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
@@ -1240,15 +1323,8 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 		return fmt.Errorf("样式修复会话未提交")
 	}
 	// 复核：编译必须通过（章节内容核对由后续 checker/终审负责）。
-	data, rerr := os.ReadFile(texPath)
-	if rerr != nil {
-		return rerr
-	}
-	if err := os.WriteFile(filepath.Join(scratch, base+".tex"), data, 0o644); err != nil {
-		return err
-	}
 	start := time.Now()
-	res := r.comp.Compile(scratch, base+"_wrapper.tex")
+	res := r.comp.Compile(work, base+"_wrapper.tex")
 	LogCompileResult(r.log, tid, "style-fix-check", res, time.Since(start))
 	if !res.OK {
 		return fmt.Errorf("样式修复后仍编译失败: %s", res.Err)

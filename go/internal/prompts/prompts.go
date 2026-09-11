@@ -49,11 +49,13 @@ const (
 	FixSystem         = "latex_fix.system"
 	VerifySystem      = "latex_verify.system"
 	WatermarkSystem   = "latex_watermark.system"
+	CheckerSystem     = "latex_checker.system"
 
 	// 各会话的首次用户提示词（静态文案进模板，动态数据用占位符传入）。
 	StyleUser       = "latex_style.user"
 	ChaptersUser    = "latex_chapters.user"
 	ConvertUser     = "latex_convert.user"
+	CheckerUser     = "latex_checker.user"
 	StyleFixUser    = "latex_stylefix.user"
 	FinalReviewUser = "latex_finalreview.user"
 	FigureUser      = "latex_figure.user"
@@ -144,6 +146,16 @@ var registry = []Template{
 		Name: ChaptersUser, File: "latex_chapters.user.md",
 		Vars:        []string{"TOTAL_LINES", "GRANULARITY"},
 		MustMention: []string{"grep", "submit_split"},
+	},
+	{
+		Name: CheckerSystem, File: "latex_checker.system.md",
+		Vars:        []string{"MAX_ROUNDS"},
+		MustMention: []string{"grep", "read_file", "submit"},
+	},
+	{
+		Name: CheckerUser, File: "latex_checker.user.md",
+		Vars:        []string{"CHAPTER_MD", "CHAPTER_TEX", "PARTS_DIR"},
+		MustMention: []string{"grep", "read_file", "submit"},
 	},
 	{
 		Name: ConvertUser, File: "latex_convert.user.md",
