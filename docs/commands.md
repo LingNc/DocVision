@@ -106,6 +106,8 @@ docvision sessions --serve --addr 127.0.0.1:9000
 docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 ```
 
+想在**跑 latex 的同时**看，不必另开终端：把 `preview.enabled` 打开（默认关闭），`docvision latex` 启动时会自己拉起同一份只读服务并把确切 URL 打进日志（地址/端口用 `preview.host`/`preview.port`，端口 `0` = 由内核挑；根目录取该档位的输出根 `<latex_project>` / `<latex_output>`），运行结束后随进程退出。详见 `docs/config.md` 的 `preview` 三项。
+
 两种模式的区别：
 
 | 模式 | 产物 | 刷新方式 | 适合 |

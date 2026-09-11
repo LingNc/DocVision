@@ -27,37 +27,66 @@ const DefaultAddr = "127.0.0.1:8848"
 // want it; the CLI deliberately passes false and lets the user click the
 // printed link.
 func Serve(root, addr string, openBrowser bool) error {
-	if addr == "" {
-		addr = DefaultAddr
-	}
-	rootAbs, err := filepath.Abs(root)
+	url, stop, err := Start(root, addr)
 	if err != nil {
 		return err
 	}
-	st, err := os.Stat(rootAbs)
-	if err != nil {
-		return fmt.Errorf("会话预览: 无法读取目录 %s: %w", root, err)
-	}
-	if !st.IsDir() {
-		return fmt.Errorf("会话预览: %s 不是目录", root)
-	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("会话预览: 监听 %s 失败（端口可能已被占用，请用 --addr 换一个端口）: %w", addr, err)
-	}
-
-	url := "http://" + displayAddr(ln.Addr()) + "/"
+	rootAbs, _ := filepath.Abs(root)
 	fmt.Printf("会话预览: %s\n", url)
 	fmt.Printf("目录: %s（只读服务，Ctrl+C 停止）\n", rootAbs)
 	if openBrowser {
 		openInBrowser(url)
 	}
+	<-stop
+	return nil
+}
 
+// Start launches the read-only viewer in the background and returns the URL
+// it is reachable at plus a channel that is closed when the listener stops.
+// It prints NOTHING: the caller owns the terminal (a latex run paints a live
+// progress block there, and a stray Printf from a goroutine would land in the
+// middle of it), and it may want the URL for its own log line.
+//
+// addr "" = DefaultAddr; port 0 = the kernel picks one, so the returned URL is
+// the authoritative address.
+func Start(root, addr string) (url string, stopped <-chan struct{}, err error) {
+	if addr == "" {
+		addr = DefaultAddr
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", nil, err
+	}
+	st, err := os.Stat(rootAbs)
+	if err != nil {
+		return "", nil, fmt.Errorf("会话预览: 无法读取目录 %s: %w", root, err)
+	}
+	if !st.IsDir() {
+		return "", nil, fmt.Errorf("会话预览: %s 不是目录", root)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return "", nil, fmt.Errorf("会话预览: 监听 %s 失败（端口可能已被占用，请换一个端口）: %w", addr, err)
+	}
 	srv := &http.Server{
 		Handler:           newViewerServer(rootAbs),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	return srv.Serve(ln)
+	done := make(chan struct{})
+	go func() {
+		_ = srv.Serve(ln)
+		close(done)
+	}()
+	return "http://" + displayAddr(ln.Addr()) + "/", done, nil
+}
+
+// PreviewAddr renders host:port for the config-driven viewer ("" host =
+// loopback, port 0 = let the kernel choose).
+func PreviewAddr(host string, port int) string {
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, fmt.Sprint(port))
 }
 
 // displayAddr turns a listener address into something a human can paste into a

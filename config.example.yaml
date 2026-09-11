@@ -152,6 +152,11 @@ tools:
     auto_install: true          # 会话 bash 报 ModuleNotFoundError 时由宿主侧自动 pip install 后提示重试
     install_timeout: 30000        # 单次 pip install 的超时（秒）
 
+preview:
+  enabled: false                 # true = 跑 docvision latex 时自动启动会话预览服务（只读，浏览器里看每个会话实时进度）
+  host: "127.0.0.1"              # 监听地址；0.0.0.0 会让局域网内可访问（转录含全书内容，默认只本机）
+  port: 8848                     # 端口；0 = 由内核挑一个空闲端口（启动日志里给出确切 URL）
+
 verify:
   enabled: false                 # 仅作提示：核对只在显式运行 docvision verify 时执行（自动流程不调用）
   verifier_model: "verifier"     # models: 中支持图像的校验模型

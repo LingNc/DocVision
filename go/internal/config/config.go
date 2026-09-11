@@ -5,9 +5,11 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -32,6 +34,10 @@ type Config struct {
 	Models map[string]ModelConfig `yaml:"models"`
 	Latex  LatexConfig            `yaml:"latex"`
 	Verify VerifyConfig           `yaml:"verify"`
+	// Preview is the always-on variant of `docvision sessions --serve`:
+	// when enabled, a latex run starts the read-only session viewer so the
+	// transcripts can be watched in a browser while the book is built.
+	Preview PreviewConfig `yaml:"preview"`
 	// Img2Text overrides for the basic image-to-text pipeline. Model may
 	// reference a models: registry name (default "text").
 	Img2Text Img2TextConfig `yaml:"img2text"`
@@ -297,6 +303,31 @@ type Img2TextConfig struct {
 // 对应内容). Disabled by default; when enabled it cross-checks each
 // image against the embedded content and writes a report with fix
 // suggestions without altering the output.
+// PreviewConfig controls the automatic session preview server.
+type PreviewConfig struct {
+	// Enabled starts the viewer when a latex run begins. Default false:
+	// a service nobody asked for should not appear on a port.
+	Enabled bool `yaml:"enabled"`
+	// Host is the bind address (default 127.0.0.1 = this machine only;
+	// "0.0.0.0" exposes the transcripts to the local network — the
+	// viewer is read-only but the transcripts contain the whole book).
+	Host string `yaml:"host"`
+	// Port default 8848 (sessionview.DefaultAddr); 0 lets the kernel pick
+	// a free port and the run log prints the exact URL.
+	Port int `yaml:"port"`
+}
+
+// Addr renders host:port for net.Listen. Host "" = loopback; Port 0 (after
+// setDefaults it is 8848, but a hand-written config struct can still be 0)
+// means "let the kernel pick", which the run log then reports.
+func (p PreviewConfig) Addr() string {
+	host := p.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(p.Port))
+}
+
 type VerifyConfig struct {
 	// Enabled toggles the verification pass. Default false.
 	Enabled bool `yaml:"enabled"`
@@ -812,6 +843,15 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Verify.ReportFile == "" {
 		cfg.Verify.ReportFile = "verify_report.md"
+	}
+
+	// Preview defaults (feature is OFF unless explicitly enabled). Host
+	// stays empty = loopback-only, which Addr() renders.
+	if cfg.Preview.Host == "" {
+		cfg.Preview.Host = "127.0.0.1"
+	}
+	if cfg.Preview.Port == 0 {
+		cfg.Preview.Port = 8848
 	}
 
 	// Paths defaults

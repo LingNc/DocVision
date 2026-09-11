@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`preview` 配置块：跑 latex 时自动启动会话预览服务**（用户要的"开关 + 接口 + 端口"）。`preview.enabled`（默认 **false**：没人要求的服务不该自己占端口）、`preview.host`（默认 `127.0.0.1`，只本机；转录含全书内容，写 `0.0.0.0` 才会暴露给局域网）、`preview.port`（默认 `8848`；`0` = 由内核挑空闲端口，启动日志里打印确切 URL）。启动的是 `docvision sessions --serve` 的同一份只读服务（根目录取该档位的输出根 `<latex_project>` / `<latex_output>`），边跑边在浏览器里看每个会话的实时进度，进程退出即随之中止。`sessionview` 新增不打印任何东西的 `Start(root, addr)`（返回 URL 与停止通道）——它可能被后台调用，而 latex 运行时终端上正画着实时进度块，goroutine 里一个裸 `fmt.Printf` 会把块打乱。
+
+
 ### Fixed
 
 - **进度行互相覆盖 / 重叠**（用户实测：`[classify 8/8]`、`[process 8/8]`、`[chapters] 轮次 7 · 工具调用 14 · 已用 2m45s` 挤在同一行；`[convert] 0/4 0.00% …` 把上面的 chapters 行盖掉；`[style-feedback] 轮次 33 · 已用 7m06s` 与 `[style-fix] …` 来回跳且两边时间都在涨）。根因是**终端只有一个"实时行"槽位**：`logger.SetLiveLine` 谁最后装谁显示，于是并发的子会话（逐章 style-fix、style-feedback、convert/checker）每秒互相覆盖；阶段进度行 `liveProgress` 还自己独立写 stdout，构成了第二个光标所有者；日志行前只补一个 `\n` 又把状态行**永久留进滚动区**（同一行内容出现两次 = 用户看到的"重叠"）。现在改为**每人一行的实时块**：`logger` 提供 `LiveRow(id)` 句柄（`Set`/`Remove`/`Finalize`），整块一起原地重绘（ANSI 光标上移 + 清行），日志行先擦块、写在块原来的位置、再把块画在下面；行按创建顺序排列，`liveProgress` 与所有会话实时行都改成块里的一行。用终端模型回放字节流的测试 `TestLivePanelNeverOverlapsOwnerRows` 钉住"日志行完整、跑完的行消失、仍在跑的并排显示、同一行里不出现两个实时行"。

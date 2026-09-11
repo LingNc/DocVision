@@ -14,6 +14,7 @@ import (
 	"mineru-tools/internal/latex"
 	"mineru-tools/internal/logger"
 	"mineru-tools/internal/organize"
+	"mineru-tools/internal/sessionview"
 	"mineru-tools/pkg/util"
 )
 
@@ -70,6 +71,11 @@ func newLatexCmd() *cobra.Command {
            成功后进入终审会话逐页核对成品 PDF 并整理，最后写 standalone.tex；
            交付把整棵 build 树复制到 out/（book.pdf = main.pdf 别名）
 
+想边跑边在浏览器里看会话，把 preview.enabled 打开（默认关闭）：
+跑 latex 时自动启动只读的会话预览服务（preview.host/preview.port，
+默认 127.0.0.1:8848），启动日志里打印确切 URL；等价的手动方式是
+docvision sessions --serve。
+
 所有 AI 会话支持：独立模型配置（models: 注册表）、上下文窗口配置、自动压缩、
 可分离工具注册、JSONL 转录断点续传。每个会话有独立命名空间（挂载表：work 可写，
 project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools.bash.sandbox），
@@ -115,6 +121,9 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 			defer closeLog()
 
 			runner := latex.NewRunner(cfg, log)
+			if stop := startPreview(cfg, log); stop != nil {
+				defer stop()
+			}
 			if cfg.Latex.Level == 1 {
 				fmt.Println("=== LaTeX 档位 1：全书转换 ===")
 				if err := runner.RunBook(latex.BookOptions{
@@ -401,4 +410,33 @@ func stageUserMD(cfg *config.Config, mdPath string) error {
 		break
 	}
 	return nil
+}
+
+// startPreview honours preview.enabled: while a latex run is in flight it
+// serves the same read-only viewer as `docvision sessions --serve`, rooted at
+// that level's output root (the per-book workspaces sit one level below), so
+// the transcripts can be watched in a browser during the run. It returns a
+// stop function, or nil when the feature is off / could not start — a preview
+// service must never abort a book build.
+func startPreview(cfg *config.Config, log *logger.Logger) func() {
+	if cfg == nil || !cfg.Preview.Enabled {
+		return nil
+	}
+	root := cfg.Paths.LatexProject
+	if cfg.Latex.Level == 2 {
+		root = cfg.Paths.LatexOutput
+	}
+	url, stopped, err := sessionview.Start(root, cfg.Preview.Addr())
+	if err != nil {
+		log.LogWarning(0, "[preview] 会话预览服务未启动:", err)
+		return nil
+	}
+	log.Log(0, "[preview] 实时会话预览:", url, "（目录", root, "，只读；preview.enabled 可关闭）")
+	return func() {
+		select {
+		case <-stopped:
+		default:
+			log.Log(0, "[preview] 本次运行结束，预览服务随进程退出:", url)
+		}
+	}
 }
