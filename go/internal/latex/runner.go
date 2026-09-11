@@ -88,6 +88,13 @@ type FigureEnv struct {
 	ViewImageMax  int
 	ViewPDFMax    int
 	ViewWarnRatio float64
+	// CheckFigure verifies the submitted render against the original bitmap
+	// (latex.figure_check.enabled). It receives the path of a freshly
+	// rasterised PNG of the submitted figure and returns (ok, problems);
+	// nil = the check is off and the figure is accepted as-is.
+	CheckFigure func(png string) (bool, string)
+	// CheckRounds caps the fix loop (0 = one verification, no fix round).
+	CheckRounds int
 }
 
 // renderPrompt fills the placeholders used by the built-in session
@@ -1116,10 +1123,16 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	dstPDF := filepath.Join(outDir, "figures", name+".pdf")
 	dstPNG := filepath.Join(outDir, "figures", name+".png")
 
+	env := FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown, OutputLang: r.outputLang(),
+		CurrentImgAbs: imgFile, ViewImageMax: r.cfg.ViewImageMax(), ViewPDFMax: r.cfg.ViewPDFMax(), ViewWarnRatio: r.cfg.ViewWarnRatio()}
+	if r.cfg.Latex.FigureCheck.Enabled {
+		// 逐图校验（默认关闭）：原图 ↔ 重画图比对交给视觉模型，不一致的问题
+		// 打回**同一个**作图会话修正，最多 MaxRounds 轮。
+		env.CheckRounds = r.cfg.Latex.FigureCheck.MaxRounds
+		env.CheckFigure = r.newFigureChecker(tid, imgFile, name, env.CheckRounds)
+	}
 	res, err := RunTikZSession(client, modelCfg, tuning, r.comp, img64, contextText,
-		outDir, dstTex, dstPDF, dstPNG,
-		FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown, OutputLang: r.outputLang(),
-			CurrentImgAbs: imgFile, ViewImageMax: r.cfg.ViewImageMax(), ViewPDFMax: r.cfg.ViewPDFMax(), ViewWarnRatio: r.cfg.ViewWarnRatio()},
+		outDir, dstTex, dstPDF, dstPNG, env,
 		r.log, tid, r.keepTemp(), r.keepRecords())
 	if err != nil {
 		pp.Error = err.Error()

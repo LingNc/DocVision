@@ -143,6 +143,43 @@ func RunTikZSession(
 		return result, nil
 	}
 
+	// 逐图校验（latex.figure_check.enabled，默认关闭）：把刚提交的重画图栅格
+	// 化后与原图一起交给视觉模型比对；不一致就把问题打回**同一个作图会话**
+	// （上下文还在，它最便宜也最准），最多 CheckRounds 轮，仍不合格则记警告
+	// 照常交付——校验是额外的一张网，不是让整本书失败的新理由。
+	if env.CheckFigure != nil && state.lastPDF != "" {
+		rounds := env.CheckRounds
+		if rounds < 1 {
+			rounds = 1
+		}
+		for i := 1; i <= rounds; i++ {
+			png := filepath.Join(scratch, fmt.Sprintf("check_%d.png", i))
+			if err := comp.Rasterize(state.lastPDF, strings.TrimSuffix(png, ".png")); err != nil {
+				log.LogWarning(tid, "[figure-check] 栅格化失败，跳过逐图校验:", err)
+				break
+			}
+			ok, problems := env.CheckFigure(png)
+			if ok {
+				log.Log(tid, "[figure-check] 逐图校验通过:", filepath.Base(dstPDF))
+				break
+			}
+			codeBefore := state.finalCode
+			log.LogWarning(tid, fmt.Sprintf("[figure-check] 第 %d 轮未通过，打回作图会话:", i), truncateStr(problems, 300))
+			if i >= rounds {
+				log.LogWarning(tid, "[figure-check] 已达校验轮次上限，交付当前版本（问题已记日志）:", filepath.Base(dstPDF))
+				break
+			}
+			if _, err := sess.Run(session.RunOptions{UserText: figureCheckFeedback(problems)}); err != nil {
+				log.LogWarning(tid, "[figure-check] 打回会话失败，交付当前版本:", err)
+				break
+			}
+			if state.finalCode == codeBefore {
+				log.LogWarning(tid, "[figure-check] 会话未修改图形，停止校验并交付当前版本")
+				break
+			}
+		}
+	}
+
 	// Persist the confirmed artifacts.
 	if err := os.MkdirAll(filepath.Dir(dstTex), 0o755); err != nil {
 		return TikZResult{}, err

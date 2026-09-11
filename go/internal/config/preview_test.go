@@ -43,3 +43,25 @@ func TestPreviewBlockIsInTemplate(t *testing.T) {
 		}
 	}
 }
+
+// 逐图校验默认**关闭**（多一次视觉调用，多数书不需要），但一旦打开就必须有
+// 可用的模型键与至少一轮校验；轮次上限不能是 0（那等于开了又什么都不做）。
+func TestFigureCheckDefaultsAreOffButSane(t *testing.T) {
+	cfg := &Config{}
+	setDefaults(cfg)
+	if cfg.Latex.FigureCheck.Enabled {
+		t.Fatal("figure_check.enabled 默认必须为 false")
+	}
+	if cfg.Latex.FigureCheck.Model != "verifier" {
+		t.Fatalf("默认校验模型应为 verifier，got %q", cfg.Latex.FigureCheck.Model)
+	}
+	if cfg.Latex.FigureCheck.MaxRounds != 2 {
+		t.Fatalf("默认轮次上限应为 2，got %d", cfg.Latex.FigureCheck.MaxRounds)
+	}
+	// 显式配置不被默认值覆盖。
+	cfg2 := &Config{Latex: LatexConfig{FigureCheck: FigureCheckConfig{Enabled: true, Model: "checker", MaxRounds: 5}}}
+	setDefaults(cfg2)
+	if !cfg2.Latex.FigureCheck.Enabled || cfg2.Latex.FigureCheck.Model != "checker" || cfg2.Latex.FigureCheck.MaxRounds != 5 {
+		t.Fatalf("显式配置被默认值改写了: %+v", cfg2.Latex.FigureCheck)
+	}
+}

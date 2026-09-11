@@ -296,3 +296,14 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - 缺陷 2（分组错位）：`LabelFor` 不认 `checker_` / `style_fix_` 前缀，这两类会话在预览页、`--list` 与费用表里都掉进"会话:<文件名>"，按阶段统计会把它们算成"其他"。现在分别是 `checker:<章>`、`style-fix:<章>`（标题"核对 · <章>"/"样式修复 · <章>"）。
 - 实测（合成项目 + 临时价格表 input 1 / cached 0.1 / output 4 元/百万）：`--cost` 输出 `style ¥0.20（3 请求，输入 630k/缓存 590k/输出 24k）`、`convert ¥0.15`、合计 `¥0.44`，手算 (630k−590k)×1 + 590k×0.1 + 24k×4 = 195000 微元 = ¥0.195 ✓。
 - 另注：用户现场那 46 份转录里 `t="usage"` 行数为 **0** —— 因为 0911 20:17 那次运行用的二进制早于 20:47 引入用量行的提交，不是缺陷；下次运行起就有数据。
+
+### ⑦ 逐图校验（默认关闭）
+
+用户第 9 条：新增默认关闭的逐图校验——生成图与原图（或多页图）比对，一致通过，否则打回上一次 submit 的会话继续。
+
+- 为什么值得做：作图会话**只看得到自己的渲染**，编译干净不等于画对（缺坐标轴标签、版式被重排、内容跑出画布都编译得过去）。只有跟原图比才看得出来。
+- 配置 `latex.figure_check: {enabled: false, model: "verifier", max_rounds: 2}`：默认关闭（每张图多一次视觉调用）；`model` 必须能看图，缺该条目时**退回作图模型并在日志里说明**（否则"开了却从没跑过"会变成谜）。
+- 流程：`submit` 确认 → 用 `state.lastPDF` **重新栅格化**成校验用 PNG → 校验会话（原图 + 重画图两张图，工具只有 `submit`，转录 `work/sessions/figure_check_<图>.jsonl`，实时行 `figure-check:<图>`）→ 判 issues 就把问题清单打回**同一个作图会话**（`figureCheckFeedback`：只改这几点、编译、再看一眼、重新 submit）→ 下一轮再比。会话跨轮复用，所以第 2 轮看得见自己第 1 轮抱怨过什么。
+- 兜底口径与 checker 一致（fail-open）：模型跑飞、不交结论、栅格化失败、打回失败一律**视为通过**并记警告——校验是额外的一张网，不是让整本书失败的新理由。轮次用尽仍不合格：记警告、照常交付。会话没改动图形（`finalCode` 不变）时提前停止，不空烧轮次。
+- 提示词新增 `latex_figurecheck.system.md` / `latex_figurecheck.user.md`（注册表含 Vars/MustMention，守护测试通过）；明确"字体/线宽/颜色差异不算问题"——重画本来就是不同字体，判"pass"的门槛写在提示词里。
+- 测试：`TestFigureCheckSendsBothImagesAndReadsVerdict`（假模型服务：第 1 轮 issues → 不通过并带回问题清单；第 2 轮 pass → 通过；断言请求里**两个 image part** 且后续轮次说明"同一比较的第 N 轮"）、`TestFigureCheckFailsOpenWithoutVerdict`、`TestFigureCheckFeedbackQuotesProblems`、config 侧 `TestFigureCheckDefaultsAreOffButSane`。

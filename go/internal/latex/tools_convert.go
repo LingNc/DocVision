@@ -181,6 +181,10 @@ type SubmitDoneTool struct {
 	// RequireReport makes the report mandatory even when nothing is
 	// persisted (the checker session reports its verdict that way).
 	RequireReport bool
+	// ReportPrompt overrides the report's description in the tool schema:
+	// the checker's wording is about cls/manual conformance, while the
+	// figure check asks for a visual comparison verdict.
+	ReportPrompt string
 	// Raw report fields, kept for callers that need the structured
 	// verdict instead of the rendered text.
 	Status      string // "pass" | "issues"
@@ -199,9 +203,13 @@ func (t *SubmitDoneTool) Definition() map[string]any {
 		"notes": map[string]any{"type": "string", "description": "Optional short handover notes."},
 	}
 	if t.ReportPath != "" || t.RequireReport {
+		desc := t.ReportPrompt
+		if desc == "" {
+			desc = "REQUIRED work report (工作汇报) on style/manual conformance. status=pass when your conversion used the manual/cls correctly with no style problems; status=issues when the cls/manual could not express what the book really does (missing environment, wrong heading style, unusable table style...). Describe each problem concretely and give suggestions for the style package."
+		}
 		props["report"] = map[string]any{
 			"type":        "object",
-			"description": "REQUIRED work report (工作汇报) on style/manual conformance. status=pass when your conversion used the manual/cls correctly with no style problems; status=issues when the cls/manual could not express what the book really does (missing environment, wrong heading style, unusable table style...). Describe each problem concretely and give suggestions for the style package.",
+			"description": desc,
 			"properties": map[string]any{
 				"status":      map[string]any{"type": "string", "enum": []string{"pass", "issues"}},
 				"issues":      map[string]any{"type": "string", "description": "Concrete cls/manual/format problems found (empty for pass)."},

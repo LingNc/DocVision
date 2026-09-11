@@ -71,6 +71,10 @@ func newLatexCmd() *cobra.Command {
            成功后进入终审会话逐页核对成品 PDF 并整理，最后写 standalone.tex；
            交付把整棵 build 树复制到 out/（book.pdf = main.pdf 别名）
 
+矢量图重画完成后可以再做一次**逐图校验**（latex.figure_check.enabled，默认关闭）：
+用一个能看图的模型把"重画图 ↔ 原图"比一遍，不一致就把问题打回**同一个**作图
+会话继续修（最多 latex.figure_check.max_rounds 轮），仍不合格则记警告照常交付。
+
 跑完会打印**按阶段的 AI 用量与费用**表（token 拆分、前缀缓存命中率、
 金额、平均每次请求，以及每张图/每页成本）；价格来自配置里的
 models.<条目>.price（input/cached/output，单位元/百万 tokens），

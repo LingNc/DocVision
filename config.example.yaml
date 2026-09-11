@@ -53,6 +53,13 @@ paths:
 latex:
   level: 2                       # 2 = per-image vectorisation; 1 = full-book LaTeX
   remove_watermark: false        # 水印处理：true 时提示各 AI 检测并排除水印（默认关闭，水印原样保留）
+  # 逐图校验（默认关闭）：矢量图重画完成后，再用一个**能看图**的模型把
+  # "重画图 ↔ 原图"比一遍；不一致就把问题打回**同一个作图会话**继续修，
+  # 最多 max_rounds 轮，仍不合格则记警告照常交付（校验是额外的网，不是新的失败理由）。
+  figure_check:
+    enabled: false               # true = 逐图校验（每张图多一次视觉调用）
+    model: "verifier"            # models: 里能看图的模型（缺条目时退回作图模型并在日志说明）
+    max_rounds: 2                # 第 1 轮校验 + 最多这么多轮修正
   # Model registry keys for each specialised AI session.
   # Each key must exist in the models: registry below; entries there
   # may declare their own base_url / api_key / model / request_body

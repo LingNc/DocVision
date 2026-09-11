@@ -258,6 +258,12 @@ type LatexConfig struct {
 	// (sessions are long-lived and much heavier than plain img2text calls).
 	Concurrency int                `yaml:"concurrency"`
 	Compile     LatexCompileConfig `yaml:"compile"`
+	// FigureCheck re-verifies every redrawn figure against the original
+	// bitmap with a vision model before it is accepted. Default OFF: it
+	// costs one extra vision call per figure and most books do not need
+	// it. When it fails, the drawing session that submitted the figure
+	// gets the discrepancy list back and fixes its own work.
+	FigureCheck FigureCheckConfig `yaml:"figure_check"`
 	// KeepTempDirs keeps the temporary work directories (chapter
 	// splitting sandbox, per-chapter compile scratch, vector figure
 	// workspace) after use instead of deleting them, so a run can be
@@ -373,6 +379,23 @@ func (c *Config) ModelPrices() map[string]PriceConfig {
 		return map[string]PriceConfig{}
 	}
 	return out
+}
+
+// FigureCheckConfig configures the per-figure verification loop (level 2
+// vector figures). The check compares the ORIGINAL bitmap with the REDRAWN
+// figure — the drawing session only ever sees its own render, so a figure that
+// compiles cleanly can still be visibly wrong (missing labels, rearranged
+// layout, content running off the canvas).
+type FigureCheckConfig struct {
+	// Enabled is off by default (see LatexConfig.FigureCheck).
+	Enabled bool `yaml:"enabled"`
+	// Model is the models: registry key of a VISION-capable model
+	// (default "verifier"). Empty falls back to that same key.
+	Model string `yaml:"model"`
+	// MaxRounds caps the fix loop: round 1 verifies, every failed round is
+	// sent back to the same drawing session, and after MaxRounds the figure
+	// is delivered with a warning instead of looping forever.
+	MaxRounds int `yaml:"max_rounds"`
 }
 
 // PreviewConfig controls the automatic session preview server.
@@ -915,6 +938,14 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Verify.ReportFile == "" {
 		cfg.Verify.ReportFile = "verify_report.md"
+	}
+
+	// Figure check defaults (feature is OFF unless explicitly enabled).
+	if cfg.Latex.FigureCheck.Model == "" {
+		cfg.Latex.FigureCheck.Model = "verifier"
+	}
+	if cfg.Latex.FigureCheck.MaxRounds == 0 {
+		cfg.Latex.FigureCheck.MaxRounds = 2
 	}
 
 	// Preview defaults (feature is OFF unless explicitly enabled). Host

@@ -90,6 +90,9 @@
 | `latex.sessions.*.keep_images` | 本地裁剪时保留的最近图片数（负值=全保留） | 3 |
 | `verify.concurrency` | 核对并发数 | 2 |
 | `verify.report_file` | 核对报告文件名 | verify_report.md |
+| `latex.figure_check.enabled` | 逐图校验开关（**默认关闭**）：矢量图提交后再用能看图的模型把"重画图 ↔ 原图"比一遍 | false |
+| `latex.figure_check.model` | 校验用的 `models:` 条目（必须能看图；缺该条目时退回作图模型并在日志说明） | "verifier" |
+| `latex.figure_check.max_rounds` | 校验轮次上限：第 1 轮校验 + 最多这么多轮"打回同一作图会话修正" | 2 |
 | `models.<条目>.price.input` | 该模型**未命中前缀缓存**的输入单价（元/百万 tokens；`0` = 未配置，费用报告整块不显示） | 0 |
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
