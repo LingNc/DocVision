@@ -23,6 +23,7 @@ config.yaml
 # Go build artifacts
 go/build/
 go/.gocache/
+go/*.exe
 
 logs/
 logs/

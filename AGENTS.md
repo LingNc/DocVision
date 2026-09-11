@@ -17,7 +17,8 @@
   - **插图就位**：images 阶段把每条被 md 引用的插图按 **md 相对路径**铺进项目树（`<proj>/source/images/<书>/<file>`，逐文件软链到全局 `paths.images_dir`，失败则复制；幂等）。章节工作区、`assemble` 的 build 树、样式会话的 `view_image` 全靠这棵树解析——它没铺好时会话会"拿着 md 里的正确路径却报文件不存在"。
   - **看图/尺度**：`view_pdf`（自己的产物与原书同一工具，回执给 mm）、`view_image`（原图 + 实测印刷尺寸 mm；路径**两种写法并存**——md 里的引用 `images/<书>/<file>` 或裸文件名，裸名字在 `Root+Subject` 内深度受限唯一匹配、同名多份报错列出候选；找不到文件时回报目录里真实存在的名字）、`list_source_pages`/`doc_search`（原书页索引）；看图有软预算（`tools.view.*`，只提醒不拦截）。
   - **编译**：通用 `compile {path, engine, passes, bib, shell_escape, args, timeout}`（引擎 latexmk/xelatex/pdflatex/lualatex 可现场选），章节 `compile` 编译 wrapper 并同样接受 `engine/passes/args`；成功只报产物名 + 页数 + 一句 "See it with view_pdf"。
-  - **详细批次历史（第一批～第二十七批，原文）** → **`docs/agent-batch-history.md`**。查设计理由、历史事故根因时读它；AGENTS.md 只写现状，不再堆批次流水。
+  - **文档分层**：`README.md` 只做**介绍 + 构建/安装 + 快速开始 + 命令一览 + 文档索引**（约 150 行）；细节按主题拆在 `docs/`——`commands.md`（命令/参数、img2text 与档位2 嵌入格式、analyze、sessions 预览页）、`config.md`（配置项全表与默认值）、`latex.md`（档位1/2 全流程、用法与阶段控制、目录布局、原书检索工具、verify）、`sessions.md`（会话基础设施、提示词、沙箱与挂载表、调试日志）、`dev.md`（代码结构、CI/CD、历史 Python 实现）。README 的每处细节只留一行 + 指向对应文档；**拆分=逐字搬迁**，不重写内容。
+  - **详细批次历史（第一批～第三十一批，原文）** → **`docs/agent-batch-history.md`**。查设计理由、历史事故根因时读它；AGENTS.md 只写现状，不再堆批次流水。
 
 **发布线与 CHANGELOG**：v1.5.0 测试线，当前标签 **`v1.5.0-beta.4`**（**第十八～二十九批**随它发布）。各标签**实际**覆盖范围（按提交可达性判定，非按文档批次号）：`v1.2.0`＝LaTeX 首版（两档位/会话基础设施/模型注册表/verify，未单独打标签），`v1.3.0-beta`＝自助化 + 样式虚拟工作区 + 字体 + 每章 checker + view_page 按需渲染，`v1.4.0-beta`＝img2text 按类型嵌入 + TikZ 编译校验（仅一个提交），`v1.5.0-beta.1`＝嵌入类型细分/styled 标记/风格统一/preflight/chapter_granularity/水印工作记忆/跨页图表拼接/doc_search/tools 块/配置 v2 等，`v1.5.0-beta.2`＝第一～三批（流式接收+thinking、日志三级 trace、SVG 多后端、编译警告反馈、多工具图片轮 400、文本图只提取文本、预览图、classify 起始行），`v1.5.0-beta.3`＝**第四～十七批**（JSONL 转录起，至 part 级页码定位/临时目录与保留开关/逐章私有工作视图），`v1.5.0-beta.4`＝**第十八～二十九批**（转录与压缩修复、虚拟工作区/挂载表统一、wrapper 编译、临时目录与会话私有 `/tmp`、逐章 temp 工作区 + 两路径提交 + checker 极简只读会话、限流与余额错误分流、进度行只算本次运行等）。CHANGELOG 已按标签分节（`v1.2.0`（未打标签，附注说明）/`v1.3.0-beta`/`v1.4.0-beta`/`v1.5.0-beta.1`/`.2`/`.3`/`.4` + 历史各节）：条目按**引入该条的提交**归属到对应标签，节日期取标签创建日期（脚本用 `git log -S` 逐条回溯 + 提交区间映射生成，可复核）；`v1.5.0-beta.3` 及更早标签保持不动。运行目录：`/home/share/samba-share/PDF2MD`（config.yaml 与 docvision 二进制随代码更新）。
 
@@ -26,9 +27,10 @@
 
 - **文档同步（强制）**：功能／工具／配置项／CLI 的增删改，必须在同一批提交里同步三处——① `README.md`（用户手册）② 相关命令的 `--help` 文本（`go/cmd/docvision/*.go` 的 Short/Long/Flags）③ `CHANGELOG.md`。**删除或改名**工具/配置项时，必须全局 grep 旧名并清理（曾漏掉：`view_page`、`list_images`、`install_font`、`compile_preview`、`preview.png`、`read_md`、`mermaid_validation`、`workflow --step latex`、`options.format_fix_attempts`——README/帮助文本里长期残留旧行为）。
 - **CHANGELOG 规则**：按标签分节，节日期取**标签创建日期**；每条条目归到「引入它的提交」所在的标签（用 `git log -S <条目片段> -- CHANGELOG.md` 回溯，别凭印象归批）；无标签的版本另立小节并注明。条目里的 Added/Changed/Fixed 分类要与内容相符（新功能不要塞进 Fixed）。
-- **配置项一致性**：新增配置项同步 `config.go` 默认值 + `internal/config/default.yaml` + `config.example.yaml`；模板注释不得描述已移除的行为；README 配置表的"默认值"列写**代码默认值**，与随附模板示例不同处要注明（如 `raster_dpi`：代码 110 / 示例 220）。
+- **配置项一致性**：新增配置项同步 `config.go` 默认值 + `internal/config/default.yaml` + `config.example.yaml`；模板注释不得描述已移除的行为；`docs/config.md` 配置表的"默认值"列写**代码默认值**，与随附模板示例不同处要注明（如 `raster_dpi`：代码 110 / 示例 220）。
 - **发布线纪律**：`v1.5.0-beta.N` 为测试线。发布后**不要移动既有标签**；仅在"标签创建当天 + 未推送 + 内容确实是笔误"时才允许 `git tag -f`，并在提交信息与回复里说明旧→新指向。其余情况一律打新标签。
 - **提示词维护**：内置提示词一律写在 `go/internal/prompts/templates/*.md`，通过 `prompts.Must/Render` 取用；**不要**再往会话源码里内联大段提示词。新增/改名工具时，同步该会话模板并更新注册表的 `MustMention`；模板里禁止出现退役工具名（黑名单见 `RetiredNames`）。**同理不要因为工具变得"更宽容"就往提示词里加说明**——工具同时接受多种写法（如 `view_image` 既收完整路径也收裸文件名）时，提示词保持原样、由模型自己判断；只有当原句**本身就说不清**（如 `view_image: look at image resources` 没说怎么给路径）才做**一行**最小修正。提示词只减不增（少即是多）。搬迁或修改提示词必须**抽取或逐字校对**，禁止凭记忆重写。
+- **README 定位（强制）**：`README.md` 只写"这是什么 / 怎么装 / 怎么跑起来 / 有哪些命令 / 去哪看细节"；**配置项全表、命令细节、流程内幕、会话与沙箱机制一律进 `docs/`** 的对应主题文件，README 只放一行指向它。判断标准：新增一段超过 ~10 行、或属于"查资料"性质的内容，一律写进 `docs/`；README 里同一件事不写第二遍。拆分/搬迁文档必须**逐字**搬（可调标题层级、可补一行返回 README 的链接），不得凭记忆重写；搬完要核对"原文每一行是否仍存在于 README 或某个 docs 文件里"。
 - **文档审计**：大改动后（或用户要求时）做一次只读审计——`README.md` + 全部 `--help` 文本 + 配置模板 vs 代码事实，产出"过期／缺失／仍准确"三段清单，再定点修补；禁止整体重写文档。
 
 

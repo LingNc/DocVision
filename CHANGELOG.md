@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **文档分层：README 瘦身 + `docs/` 按主题拆分**（575 行 → 147 行）。README 只留"介绍 + 环境要求 + 构建安装 + 快速开始 + 命令一览 + 输出/文档索引"；细节**逐字搬迁**到 `docs/commands.md`（命令与参数、img2text 与档位2 嵌入格式、`analyze`、`sessions` 预览页）、`docs/config.md`（配置项全表与默认值）、`docs/latex.md`（档位1/2 全流程、用法与阶段控制、目录布局、原书检索工具、verify）、`docs/sessions.md`（会话基础设施、提示词、沙箱与挂载表、调试日志）、`docs/dev.md`（代码结构、CI/CD、历史 Python 实现）。搬迁前后逐行核对：原文 435 个非空行全部仍存在于 README 或某个 docs 文件（差异只来自标题层级与 README 安装段/快速开始段的重写，事实逐条保留并顺手修正了两处：Go 版本 `1.25`、CI 只有 `release.yml` 没有 `ci.yml`）。
+
 ### Fixed
 
 - **项目 source 树里的插图从未铺进去，样式会话/章节编译因此都找不到图**：md 里写的是 `images/<书>/<sha>.jpg`（相对 md 自身），`chapterWorkTree`、`assemble` 与样式会话的 `view_image` 全都按这个相对路径解析，但图片实体一直只躺在全局 `paths.images_dir`（`output/images/<书>/`）里，`<proj>/source/images/` 是个空目录——`copyOriginalImage` 只在**嵌入**分支里被调用（`rasterBlock`、TikZ 内嵌），而"矢量转换失败 → 保留原图"的 fallback 分支只是把原引用留着再补一条 `DOCVISION-ERROR` 注释，从不复制文件，于是这一整类图片在项目树里根本不存在。后果：真实运行里样式会话 `view_image {path:"images/测试-概率论/<sha>.jpg"}` 直接报"文件不存在"（`logs/latex_20260911_184017.log` 18:45:59 两连），章节里保留的栅格图在 build 树也无处可寻。现在 images 阶段把每条被引用的插图按 md 相对路径**逐文件链接**进项目树（链接失败则复制；`assemble.copyDir` 用 `filepath.Walk` 不跟随目录软链，所以是逐文件而不是整目录软链），`view_image` 找不到文件时会把目录里**真实存在**的名字与"你要找的文件在 <可用路径>"一起回给模型。测试 `TestProjectImagesMaterializedNextToMarkdown`、`TestProjectImagesSurviveAssembleCopy`、`TestViewImageResolvesProjectPathAndHints`，并把 `TestChapterWorkTreeResolvesRasterImages` 改成走真实的铺图函数。
