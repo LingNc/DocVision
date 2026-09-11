@@ -17,6 +17,10 @@
 - 会话转录记录**用量与时间戳**：每行写入 `ts`（RFC3339 毫秒），每次 API 请求追加一条 `t="usage"` 行（模型、流式标志、回合、`kind`、`prompt_tokens`、`cached_tokens`、`completion_tokens`、`reasoning_tokens`、`duration_ms`、`ttft_ms`、`finish_reason`）。普通回合、空回复后的强制文本请求（`nudge`）与上下文压缩摘要请求（`compact`）都记，token 统计才不会漏。`t="usage"` 与 `t="meta"` 一样**永不参与回放**（`LoadTranscript` 只认 `t=="msg"`），续跑语义不变。
 - `docvision sessions` 页面新增**会话指标**：输入/输出/思考 tokens、前缀缓存命中率（`Σcached/Σprompt`）、平均首字延迟（流式首增量耗时，本轮新测 `TTFT`）、输出速度（`Σ输出/Σ(耗时−首字)`）、平均耗时、会话跨度，外加可展开的「每次请求明细」表格（标出 `compact`/`nudge`）。侧栏每行给用量摘要、底部给全部会话合计，工具栏重复关键项；`--list` 新增「用量」列（请求数 · 输入/输出 · 缓存命中率 · tok/s）。**旧转录没有用量行时不显示指标**（不拿 0 冒充实测值）。
 
+- **会话预览页：消息正文 Markdown 预览 + 工具输入输出语法高亮**（用户第 2、5、7 条）：消息正文（助手、user 轮、系统提示词快照）按 Markdown 渲染——标题、粗体/斜体/删除线、行内代码、围栏代码块（语言标签 + 复制按钮）、有序/无序列表、引用、水平线、链接（新窗口 + `rel="noopener noreferrer"`）、`|` 表格、段落与软换行；渲染器是 `viewer.js` 里自己写的小函数（**无第三方库、无外链、从不拼 HTML**——所有内容走 `createTextNode` 落树，`<script>` 之类就是文本）。页签行右端新增 `Markdown` 开关（**默认开**，选择落盘）。工具输入输出与代码块做等宽高亮：JSON（键/字符串/数字/`true`/`false`/`null` 四色、两空格缩进）、终端输出（行首命令行 `$ `/`# `、diff 的 `+`/`-`/`@@`、`error`/`FAIL` 红、`warning` 黄、`OK`/`PASS`/`COMPILE OK` 绿、LaTeX 的 `!` 错误行与 `Overfull`/`Underfull`、路径与 URL 弱强调）；超过 200 KB 或 4000 行退回纯文本并给一句提示。**高亮与 Markdown 开关互不相干**，思考内容、复制按钮复制的都是**原始文本**。
+- **工具图片回灌的归属句柄**（用户第 8 条，`internal/session`）：工具产出的图片在 wire 上只能走 **user 消息**（`tool` 消息的 content 只能是文本，OpenAI 兼容 schema 里也没有放 `tool_call_id` 的位置；DSH 同样靠"内部模型里图片是 tool-result 的附件、发请求那一刻才摊平成 text + image_url"）。所以归属写在**文本句柄**里、不动任何 wire 字段：`Tool image output from <工具> (call <id>) (for your visual review):`（前缀 `Tool image output` 固定不变，工具名/call id 缺失时对应部分省略，两条回灌路径共用同一个 `appendToolImage`）。查看页据此**精确归属**；**旧转录**（只有前缀）按顺序推断到最近一条带 `tool_calls` 的助手消息里尚未被认领的那次调用，并在 UI 上标明"由顺序推断"。测试：`TestToolImageTurnDoesNotBreakToolBlock` 追加句柄与"user 消息里不得出现 `tool_call_id`"断言，新增 `TestToolImageHandleText` 钉住三种句柄形态。
+- **会话预览页：图片轮的工具归属与轨迹页证据**（用户第 8 条）：带图 user 轮按归属收进那次工具调用的展开区（`附件（user 轮）`段 + 脚注 `归属：call <id>` / `归属：由顺序推断（本轮的 call <id>）` / `归属：本会话任务` / `归属：未识别`），**会话开头投喂原图的轮归到本会话第一条任务**（排在任务前面时先记账、等任务行渲染再挂上去），归属不出来的才单独成一条折叠行。轨迹页把归属写成可核对的证据（摘要列直接写归属依据，悬浮说明写明协议原因——`tool` 消息的 content 只能是文本，图片只能走 user 消息；`tool` 回执与紧随其后的带图 user 轮互相提示「图片见下一行用户轮」/「接上一行工具回执」，但**两行仍然独立**）。
+
 ### Changed
 
 - **会话预览页改成 DSH 的界面组织方式（三栏 + 页签 + 轨迹表 + 详情栏）**：上一批只换了配色，用户要的是**结构**——"和 dsh 一样高效、更具展现力"，于是按 DSH 自己的会话界面重排：
@@ -40,6 +44,12 @@
 - **发布：带 `-` 的标签也发 Release（预发布），并修正 "Latest" 归属**。此前工作流对含 `-` 的标签直接跳过整个任务，于是 `v1.3.0-beta`～`v1.5.0-beta.4` 即便推上去也**不会**产生任何产物；现在它们照常跑测试、交叉编译 5 个平台并创建 Release，只是标记为预发布（`prerelease: true`、`make_latest: false`），不会被 Badge 成 Latest。不带 `-` 的标签显式 `make_latest: true`——GitHub 默认把**最后发布**的标成 Latest，曾让 `v1.0.1` 顶掉更新的 `v1.1.0`。手动补发老标签：`gh workflow run release.yml -f tag=v1.5.0-beta.4`（`workflow_dispatch` 用当前分支的工作流逻辑，因此能给旧标签补发预发布）；这条路上另修两处：手动运行时必须给 `action-gh-release` 显式 `tag_name`（否则它从 `github.ref` 取到 `refs/heads/master`，报 `GitHub Releases requires a tag`——测试与构建都过、只有建 Release 一步失败），以及 `setup-go` 的 `cache-dependency-path: go/go.sum`（`go.sum` 不在仓库根，缓存一直没命中）。
 - **文档分层：README 瘦身 + `docs/` 按主题拆分**（575 行 → 147 行）。README 只留"介绍 + 环境要求 + 构建安装 + 快速开始 + 命令一览 + 输出/文档索引"；细节**逐字搬迁**到 `docs/commands.md`（命令与参数、img2text 与档位2 嵌入格式、`analyze`、`sessions` 预览页）、`docs/config.md`（配置项全表与默认值）、`docs/latex.md`（档位1/2 全流程、用法与阶段控制、目录布局、原书检索工具、verify）、`docs/sessions.md`（会话基础设施、提示词、沙箱与挂载表、调试日志）、`docs/dev.md`（代码结构、CI/CD、历史 Python 实现）。搬迁前后逐行核对：原文 435 个非空行全部仍存在于 README 或某个 docs 文件（差异只来自标题层级与 README 安装段/快速开始段的重写，事实逐条保留并顺手修正了两处：Go 版本 `1.25`、CI 只有 `release.yml` 没有 `ci.yml`）。
 - `view_image` 的 `path` **两种写法并存**：markdown 里的引用路径 `images/<书>/<file>`，或只给文件名。项目级会话（style/convert/修复/终审，`Subject` 是共享的 `images` 根）此前只认前者——而提示词恰恰让样式会话"用 `list_source_pages` 打印的文件名"（那是裸文件名），于是裸名字会拼成 `images/<file>` 而报"文件不存在"；按书为 `Subject` 的作图会话本来就支持裸名字。现在裸名字在 `Root+Subject` 内**唯一匹配**即接受（深度受限、不跟随目录软链），同名多份则报错并列出候选路径，绝不错拿别本书的图。提示词**不因这次改动而增补**（style 模板逐字保持原样），只把 `latex_fix.system.md` 里原本含糊的一句 `view_image: look at image resources` 写成 `view_image {path}: look at one image — give its full path (images/<book>/<file>) or just the file name.`。
+
+- **会话预览页：消息全部左对齐，`role:"user"` 的行按「系统消息」呈现**（用户第 4、9、10 条）：右侧浅蓝气泡那套**整段去掉**——在这个工具里 user 轮是 harness 自己发的一轮（任务提示、`[cache-probe]`、图片回灌），不是人打的字。不带图的 user 行 = **系统消息**（角色标签「系统」+ 次级标签「user 轮」，安静样式、无气泡），长任务提示默认只露 8 行（渐隐遮罩），点「展开全文（N 行 / M 字符）」看全文、展开后限高 340px 内滚；带图的 user 行 = 图片投喂 / 工具图片回执，按归属收进工具展开区或第一条任务，缩略图点击放大、Esc 关闭。**工具调用 = 一次调用一行**（`工具名 · 一行摘要 · 输入→输出 字符数 · ok/error`），回执按 `tool_call_id` 合并进同一张卡片的「输入 / 输出 / 附件」三段，配不上的回执单独成行并注明「未配对的工具回执」；输入侧首行给 `$ ` 前导提示符强调这次真正执行的命令行。
+- **会话预览页：等宽内容只有一套字号刻度，工具展开区与思考块共用同一套折叠**（用户第 6、8 条）：`--code-font: 11px` / `--code-line: 19px` 成为**唯一**刻度——工具输入、工具输出、思考正文、JSON 高亮、行内 `code`、代码块全部用它，只有次级说明（`25 → 138 字符`、`ok`/`error`）用 12px；工具输入/输出的展开区与思考块、系统消息块共用**同一个**限高内滚（340px）与**同一句**「展开全文（N 行 / M 字符）」/「收起」按钮（`foldLabel()` 是文案的唯一来源），折叠记忆按内容键落盘。
+- **会话预览页：侧栏三层默认全部收起**（用户第 1 条）：项目 → 流程阶段 → 会话三层默认都不展开，只认「手动展开过」的记忆（`localStorage` 三态：展开过 / 收起过 / 没碰过）；切换会话时装着当前会话的那一组会自动展开，但只要手动收起过就尊重你的选择。展开记忆与溢出按钮的记忆键**刻意不进列表签名**——否则点一下组头就会让整份列表作废重建。
+- **会话预览页：逐图会话按图片短写命名**（用户第 3 条）：行标题的取名规则改为**图注 → 转录文件名里的可读标签 → 前 8 位内容哈希 + 原扩展名**（同一本书里撞车退化到 12 位、再撞才写全名），**64 位哈希永远不当标题**（它连同 `images/<书名>/<文件>` 路径进悬浮说明）；`--list` 与页面共用同一个 Go 侧规则（`SessionInfo.ImageLabel`），搜索对短名、完整哈希、图注、页码、序号、类型都命中。
+- **会话预览页：「轨迹」页回到真实的 wire 结构**（用户第 11 条及追加）：类型照转录里的**真实角色**（用户/助手/思考/工具/结果/元信息/用量），**工具调用与工具结果各占一行、不合并**，类型 chip 的条数按真实行数统计；唯一增量是带图 user 轮标明归属并可点开看图、点行跳回对话里合并后的那一块。
 
 ### Fixed
 
@@ -492,3 +502,5 @@
 ### Changed
 - 配置格式：`ai.enable_thinking` 改为 `ai.request_body`，支持通用请求体注入
 - Python `img2text.py` 同步支持新 `request_body` 配置格式（向后兼容 `enable_thinking`）
+
+- **会话预览页：工具展开区的折叠按钮与内滚在展开后一定可见**：`.io-scroll` 之前只为思考块写了滚动规则，展开的工具输入输出会在卡片里长到整屏——现在 `.io-scroll`/`.io-scroll.open` 与 `.reasoning-scroll`/`.prompt-scroll` 共用 `--code-scroll-h`，`IO_FOLD_LINES = 16` 保证按钮在触到限高前就出现（19px 行高 × 16 行 ≈ 304px < 340px）。

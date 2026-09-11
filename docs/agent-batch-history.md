@@ -413,3 +413,71 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - `gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿。
 - 测试同步更新（**没有为了过测试删功能**）：`TestViewerAssetsThemeAndMeta` 里四处因结构改变而失效的断言改成新形态（思考折叠行的 `open` 表达式、meta 卡片改挂详情栏、分组折叠改走 `bindCollapse`），并新增 `TestViewerMatchesDSHStructure` 钉住三栏骨架、分隔条与布局常量、面包屑/页签、轨迹表与跳转、详情栏、消息形态、以及**轮询守卫**（`if (sig === state.listSig && refs.list.childElementCount) { patchList(); return; }`；签名函数体内不得出现 `state.collapsed`/`state.overflow`/`s.mtime`/`s.live`；重建后必须有 `refs.list.scrollTop = scroll`）。
 - 截图矩阵（浅色/深色 × 对话/轨迹/详情/展开工具卡/展开轨迹行/类型筛选/窄窗口轨道/展开元信息）逐张回看，`ui-preview/` 与 `temp/dsh-ref/` 用完即删。
+
+## 第三十四批：会话预览页十条要求（左对齐 / Markdown / 高亮 / 统一字号 / 折叠 / 系统消息 / 轨迹页保真 / 图片归属）
+
+用户在这一批给的是一串**逐条验收意见**（① 侧栏默认收起 ② Markdown 预览 ③ 图片名短写 ④ 消息全左对齐 + 合并 ⑤ JSON 高亮 ⑥ 工具展开区照思考块 ⑦ 高亮补齐 + 字号统一 ⑧ 输入输出字号一致 ⑨ 任务提示折叠 ⑩ 按系统消息呈现 ⑪ 轨迹页保持真实），外加一条**追加的 wire 事实**（工具图片只能走 user 消息）与第 8 轮的"图片归属"。十条要求**一起交付**，全部落在 `go/internal/sessionview`（页面）与 `go/internal/session`（归属句柄）两处，没有新配置项、没有新依赖（页面仍然是 `//go:embed` 的纯原生 JS，无 CDN、无构建步骤、无第三方库）。
+
+### ① 侧栏三层默认收起（用户第 1 条）
+
+三层（项目 → 阶段 → 会话）此前是 `open` 写死在 HTML 里的"默认全展开"，重开页面永远全开，用户要的是"记住我的选择、默认不展开"。改为三态记忆（`collapsed` 键：`'1'` 手动展开过 / `'0'` 手动收起过 / 缺失 没碰过）：只看"手动展开过"的组才开；**切换会话时**装着当前会话的那一组自动展开（这是"点完能看见"的必要让步），但只要手动收起过就尊重选择。关键是**记忆键不能进列表签名**——签名是实时轮询的最小修补守卫（`if (sig === state.listSig …) { patchList(); return; }`），把 `state.collapsed`/`state.overflow` 放进签名，点一下组头就会让整份侧栏作废重建，等于把"不刷掉用户操作"修复再推翻一次；测试里钉住 `listSignature()` 函数体内不得出现这两个字段。
+
+另一个已知行为记在这里：**切换会话会把"自动展开过"的组收回去**（没记忆就是收起）——这是"默认全部收起"的必然结果，不是 bug。
+
+### ② Markdown 预览（用户第 2 条）
+
+`renderMarkdown(text) -> DocumentFragment`：自己写的小渲染器（标题/粗体/斜体/删除线/行内代码/围栏代码块 + 语言标签 + 复制按钮/有序无序列表/引用/水平线/链接/`|` 表格/段落与软换行），**不使用任何库，也从不拼 HTML**——只 `createTextNode` + `document.createElement`。页签行右端新增 `Markdown` 开关（默认开，落盘 `dsh.sessionview.markdown`），应用到助手正文、user 轮正文、系统提示词快照；思考与工具输入输出**保持等宽纯文本**（它们是机器内容）。
+
+两个刻意的偏离（要写清楚）：① **没有独立的"先转义再解析"步骤**——DOM-only 渲染里 `<script>` 落树就是文本，等价且更安全；先转义再解析反而会把 URL 里的 `&`/引号弄坏。测试同时钉住"源码里没有 `.innerHTML`"与真实 chromium DOM（`<script>` 出现在系统提示词里时仍是文本）。② 链接协议只放行 `http(s)`/`mailto`/锚点/相对路径，一律 `target="_blank" rel="noopener noreferrer"`。
+
+页签行的开关与语法高亮**互不相干**：关掉 Markdown 只是回到纯文本，JSON/终端着色照旧（这条也有测试）。
+
+### ③ 逐图会话按图片短写命名（用户第 3 条）
+
+`internal/sessionview/stages.go` 的取名规则改为**图注 → 转录文件名里的可读标签 → 前 8 位内容哈希 + 原扩展名**（`imageShortKeep = 8`，同一本书里撞车退化到 `imageShortFallbackKeep = 12`，再撞才写全名），**64 位哈希永远不当标题**；完整名 + `images/<书名>/<文件>` 路径进行的悬浮说明。命名在 Go 侧算一次、`--list` 与页面共用（`SessionInfo.ImageLabel`），搜索对短名、完整哈希、图注、页码、序号、类型都命中。注意 `vectorImageParts` 只认 `vector_<book>__<imagebase>__<label>.jsonl` 三段式 stem——夹具若用 `vector_<hash>.jsonl` 这种裸哈希名，短名逻辑**理应什么都不做**（不是失败）。
+
+### ④ 消息全左对齐 + 一次调用一行（用户第 4 条）
+
+右侧浅蓝气泡那套**整段删除**（`.msg-user`/`--user-bubble` 相关 CSS 与 `role` 分支一起清掉）：不用右侧对齐是因为在这个工具里 user 轮不是人打的字（见 ⑩）。`role:"user"` 分两条路：带图 → 图片投喂/工具图片回执（见第 8 轮的归属）；不带图 → 系统消息。工具调用改为**一次调用一行**（`工具名 · 摘要 · 输入→输出 字符数 · ok/error`），回执按 `tool_call_id` **合并**进同一张卡片的三段（输入/输出/附件），配不上的回执单独成行并注明「未配对的工具回执」。
+
+### ⑤⑦ 高亮（用户第 5、7 条）
+
+JSON：`prettyJSON()`（先 `JSON.parse` 再 2 空格 `stringify`，解析失败就返回 null → 保持原文）+ `appendJSONSpans` 正则产出 `span.k/s/n/b`（复用既有的 `--key/--str/--num/--bool` 四个 token），应用到工具输入、工具回执、元信息里的 `parameters`、系统提示词里的 JSON 片段、轨迹展开正文。终端：`consoleLineClass()` 逐行判定 + `CONSOLE_TOKENS` 逐 token 判定——行首命令行（`$ `/`# `）加粗、diff 的 `+`/`-`/`@@`、`error`/`FAIL` 红、`warning` 黄、`OK`/`PASS`/`COMPILE OK` 绿、LaTeX 的 `!` 错误行红、`Overfull`/`Underfull` 黄、路径与 URL 弱强调；输入侧首行给 `$ ` 前导提示符（命令行优先，但**不比输出更亮**）。超过 200 KB 或 4000 行**退回纯文本 + 一句提示**（`JSON_HL_MAX_CHARS`/`JSON_HL_MAX_LINES`）。踩到的坑：早期的高亮函数吐出 `key/str/bool/num` 类名，而 CSS 定义的是 `.k/.s/.n/.b`，于是"高亮看起来没生效"——测试现在直接断言旧类名不存在。
+
+### ⑥⑧⑨ 折叠与字号统一（用户第 6、8、9 条）
+
+- **一套字号刻度**：`:root { --code-font: 11px; --code-line: 19px }`，工具输入、工具输出、思考正文、JSON 高亮、行内 `code`、代码块全部 `var(--code-font)`/`var(--code-line)`；只有次级说明（`25 → 138 字符`、`ok`/`error`）留 12px。测试断言这些选择器都引用同一个 token（而不是各写各的 `11px`）。
+- **同一套折叠**：`.io-scroll`/`.reasoning-scroll`/`.prompt-scroll` 共用 `--code-scroll-h: 340px`，`foldLabel(expanded, lines, chars)` 是**「展开全文（N 行 / M 字符）」/「收起」文案的唯一来源**，思考块、工具输入输出、系统消息块、Markdown 长文本全用它；`IO_FOLD_LINES = 16`（16 × 19px ≈ 304px < 340px）保证按钮在触到限高**之前**就出现。
+- **系统消息一层折叠**：`systemTurnSection` 最初套了 `bodyBlock()`，于是出现**两个**「展开全文」按钮（外层 `sys-scroll` 一层、内层正文一层）；现在系统消息自己渲染正文（Markdown 或 `pre`），只留一层折叠，默认露 `SYSTEM_PREVIEW_LINES = 8` 行 + 渐隐。
+
+### ⑩ 按系统消息呈现（用户第 10 条）
+
+不带图的 user 行改成安静的**系统消息**：`.sys-line` 里 `span.sys-badge`「系统」+ `span.sys-meta`「user 轮」+ 一行摘要，行的 `title` 写明"这一轮是 user 角色发出的任务提示（系统性质，不是人打的字）"。对话页里**不再出现"用户"这个词**（`>任务<`、`.bubble`、`.msg-task` 也随之消失，测试逐条断言）。
+
+### ⑪ 轨迹页保持真实（用户第 11 条，推翻第 5 条的一部分）
+
+上一批为了让轨迹页"一眼可读"，把工具调用与工具结果**合并成一行**了；用户要的是轨迹页当"事件的真实清单"。于是 `TRAJ_KINDS` 回到转录里的真实角色（`用户/助手/思考/工具/结果/元信息/用量`），工具调用与工具结果**各占一行**，类型 chip 的条数按真实行数统计。唯一增量：带图 user 轮标 `图片 ×N` + 归属依据（可点开看图），点行跳回对话里**合并后**的那一块——"对话页是整理的呈现、轨迹页是真实的结构"这个分工写进了 `docs/commands.md`。
+
+### 追加：工具图片只能走 user 消息（wire 事实）
+
+`tool` 消息的 content 只能是文本，`user` 消息又没有放 `tool_call_id` 的位置——所以"图片属于哪次调用"只能**写在文本里**。这正是第 8 轮归属句柄的依据，也解释了为什么转录里会冒出"带图 user 行"这种看起来奇怪的形态。
+
+### 第 8 轮：图片归属（`internal/session` + 查看页）
+
+- **生成侧**（`session.go`）：`visionTurn` 带上 `callID`/`name`，两条回灌路径合并成 `appendToolImage`，句柄文本由 `toolImageHandleText()` 生成：`Tool image output from <工具> (call <id>) (for your visual review):`（前缀 `toolImageTextPrefix` 固定不变——查看页靠它认旧转录；工具名/call id 缺失时对应部分省略）。`toolImageContent()` 只产生 **text + image_url 两段**，测试显式断言 user 消息里**不得出现 `tool_call_id`**（wire 兼容性）。测试：`TestToolImageTurnDoesNotBreakToolBlock` 追加句柄与 wire 断言、新增 `TestToolImageHandleText`（三种形态 + data URI）。
+- **查看侧**（`viewer.js`）：`imageAttributions()` 是**纯函数**（一次遍历 `state.lines`，结果按"会话 id + 行数"缓存并在会话切换时失效），规则是——句柄带 `(call <id>)` → 精确匹配那次调用；只有 `from <tool>` → 该轮里同名且未被认领的调用；只有前缀（旧转录）→ 该轮里**尚未被认领**的调用（按顺序）；不是句柄 → 会话开头投喂原图的轮，归到**本会话第一条任务**；推断不出来 → `kind: 'none'`，单独成一条折叠行。`attributionText()` 把依据翻成人话（`归属：call <id>` / `归属：由顺序推断（本轮的 call <id>）` / `归属：本会话任务` / `归属：未识别`），对话页的附件脚注与轨迹页共用。
+- **两个实现细节**：① `attachImages(host, line, attr)` 的宿主既可以是工具卡片（`host.card`）也可以是**系统消息块**（任务），后者让"投喂原图 → 第一条任务"这条归属真的能落地；② 会话开头的原图轮**排在任务行前面**，渲染到它时任务节点还不存在，于是先记进 `pendingTaskImages[任务行号]`，等任务行渲染时再挂上去（每次整表重渲染前清空）。若不这么做，这条归属就只能退化成孤立的图片行。
+- **轨迹页**：带图 user 行的摘要末尾直接写归属依据，`title` 里写明协议原因与"精确 vs 顺序"的区别；`tool` 回执与紧随其后的带图 user 轮**互相提示**（「图片见下一行用户轮」/「接上一行工具回执」）但仍是两行；跳转目标 = 归属到的那次调用（或任务行）。
+- **测试**（`sessionview`）：新增 `attribution_browser_test.go`，用 headless chromium（`--headless=new --no-sandbox --user-data-dir=<可写目录>`，没有 chromium 的机器 `t.Skip`）跑**真实渲染**：① 旧转录（句柄只有前缀）的图片回执必须落进那次调用的 `.io-card` 里且带「归属：由顺序推断（本轮的 call call_1）」；② 会话首图必须落进 `.msg msg-system` 且「归属：本会话任务」、**不得出现**「归属：call」；③ 轨迹页同时出现「由顺序推断」与「本会话任务」，且 `kind-result` 行存在（调用/结果未合并）；④ 句柄带 `(call call_b)` 时必须精确落到 `view_call_b`（同一轮里顺序推断会给出 `call_a`，所以这条能真正区分两种路径）。断言前会剥掉内联 `<style>`/`<script>`——否则 dump 出来的源码文本会让断言假通过。
+
+### 验证与测试
+
+- `gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿（`internal/session` 6.1s、`internal/sessionview` 2.4s，含两条 chromium 用例）。
+- `go/internal/sessionview` 测试新增/改写：`TestViewerJSONHighlighting`、`TestViewerToolCardsScrollAndExpandLikeThinking`、`TestViewerConsoleAndDiffHighlighting`、`TestViewerCodeTypographyUsesOneToken`（辅助函数 `jsFunc`/`cssRule` 直接取 JS 函数体与 CSS 规则来断言，不再只做整文件 `Contains`）、`TestViewerMergesToolCallsAndImageTurns`（归属规则与轨迹结构改成新形态）。
+- 端到端夹具（`.dsh-check/`，临时、交付前删除）：合成工程 + `--list` + 静态导出 + 5 张截图（浅色/浅色展开/轨迹/深色/深色展开）逐张回看，30→34 条 DOM 断言全过（断言前剥掉内联 `<style>`/`<script>`，并且先注入点击脚本选中目标会话——页面默认选中的是字母序第一个会话，不点就验错对象）。
+
+### 有意保留 / 未做
+
+- 侧栏"切换会话会收起此前自动展开的组"（见 ① ）是默认收起策略的必然结果，没有加"自动展开过就记住"这种更复杂的记忆。
+- 工具输出的整块 error 底色（`.io-text[data-error]`）保持不变：per-line 高亮用 span 覆盖颜色，diff 的 `+`/`-` 仍然分明；没有把整块红底改成"只在有高亮时不着色"，避免改变既有语义。
+- 没有引入任何前端依赖/构建步骤；Markdown 渲染器与高亮器都是页面自带的纯函数。

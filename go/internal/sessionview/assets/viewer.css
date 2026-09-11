@@ -28,7 +28,6 @@
   --caption: #979da6;
   --accent: #4176e6;
   --accent-soft: #e4edfd;
-  --user-bubble: #edf3fe;
   --ok: #15803d;
   --err: #dc2626;
   --warn: #b45309;
@@ -43,6 +42,12 @@
   --bool: #b91c1c;
   --radius: 12px;
   --radius-sm: 8px;
+  /* 机器内容（工具输入/输出、思考正文、JSON、行内 code、代码块）**只有一套刻度**：
+     等宽 + 11px/19px（DSH 的 markdown code block 就是这个刻度），限高与思考块同值。
+     次级说明文字（`25 → 72 字符`、ok/error 之类）才用 12px。 */
+  --code-font: 11px;
+  --code-line: 19px;
+  --code-scroll-h: 340px;
   --dot-live: #22c55e;
   /* 轨迹表的种类标签（照 DSH 的 kindTag 上色：用户=业务主色、工具=琥珀、错误=红） */
   --kind-user-fg: #4176e6;
@@ -90,7 +95,6 @@ html[data-theme="dark"] {
   --caption: #979da6;
   --accent: #5686fe;
   --accent-soft: rgba(255, 255, 255, .14);
-  --user-bubble: #2c2c2e;
   --ok: #4ade80;
   --err: #f87171;
   --warn: #fbbf24;
@@ -642,21 +646,49 @@ details[open] > summary .row-caret { transform: rotate(90deg); }
 
 .msg { display: flex; flex-direction: column; gap: 6px; }
 
-/* 用户消息 = 右对齐淡蓝气泡：22px 圆角、10px/16px 内边距、最大宽度 82% */
-.msg-user { align-items: flex-end; }
-.msg-user .bubble {
-  max-width: 82%;
-  background: var(--user-bubble);
-  color: var(--text);
-  border-radius: 22px;
-  padding: 10px 16px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 14px;
-  line-height: 22px;
+/* 消息全部**左对齐**，没有右侧气泡：在这个工具里 role:"user" 行其实是 harness
+   自己发的一轮（见 docs/commands.md 的"消息形态"），所以——
+   · 不带图的 user 行 = 系统消息（安静样式 + 「系统 · user 轮」标签，默认只露
+     前 8 行，可展开全文并内滚）；
+   · 带图的 user 行 = 把图片投给模型的那一轮，作为对应工具的输入/附件收在
+     同一次调用的块里（配不上才单独一行折叠行）。 */
+.msg-system { align-items: stretch; }
+.sys-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sys-badge {
+  flex: none;
+  font-size: 11.5px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--caption);
 }
-.msg-user .bubble .body-text { font: inherit; margin: 0; }
-.msg-user .images { justify-content: flex-end; }
+.sys-meta {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--chip-text);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+.sys-line .line-summary { min-width: 0; color: var(--dim); font-size: 12px; }
+/* 系统消息正文：默认露前 8 行（渐隐），展开后限高内滚——与思考/工具同一套 */
+.sys-scroll { overflow: auto; }
+.sys-scroll.folded {
+  overflow: hidden;
+  mask-image: linear-gradient(180deg, #000 72%, transparent);
+}
+.msg-system .body-text { color: var(--muted); }
+.attach-note { color: var(--caption); font-size: 11.5px; }
+
+/* 图片轮自己的折叠行（配不上调用时）：展开后是缩略图 + 那一轮的正文 */
+.disclosure-image > summary .line-name { color: var(--fam-view); }
+.image-body { padding: 4px 0 6px 22px; display: flex; flex-direction: column; gap: 6px; }
+.image-body .images img { max-width: 220px; max-height: 220px; }
+/* 并进调用卡片的附件段（与「输入 / 输出」同一张卡片的第三段） */
+.attach-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.attach-body .images img { max-width: 160px; max-height: 160px; }
 
 /* 助手消息 = 左对齐、全宽、无气泡无边框 */
 .msg-assistant { align-items: stretch; }
@@ -674,8 +706,8 @@ details[open] > summary .row-caret { transform: rotate(90deg); }
   color: var(--text);
 }
 .body-text.clamped { mask-image: linear-gradient(180deg, #000 74%, transparent); }
-.prompt-text { font-family: var(--mono); font-size: 12px; line-height: 19px; color: var(--muted); }
-.reasoning-text { font-size: 13px; line-height: 20px; color: var(--dim); }
+.prompt-text { font-family: var(--mono); font-size: var(--code-font); line-height: var(--code-line); color: var(--muted); }
+.reasoning-text { font-family: var(--mono); font-size: var(--code-font); line-height: var(--code-line); color: var(--dim); }
 
 .text-toggle {
   margin-top: 4px;
@@ -760,7 +792,7 @@ details[open] > summary .line-caret { transform: rotate(90deg); }
 
 /* 展开后思考缩进 22px、13px/20px */
 .thinking-body { padding: 4px 0 6px 22px; }
-.reasoning-scroll, .prompt-scroll { max-height: 340px; overflow: auto; }
+.reasoning-scroll, .prompt-scroll { max-height: var(--code-scroll-h); overflow: auto; }
 .thinking-body .reasoning-text { color: var(--dim); }
 
 /* 展开后是「输入 / 输出」两段的卡片：0.5px 边框、代码底色、12px 圆角、260px 内滚 */
@@ -779,8 +811,6 @@ details[open] > summary .line-caret { transform: rotate(90deg); }
   column-gap: 14px;
   align-items: baseline;
   padding: 10px 14px;
-  max-height: 260px;
-  overflow: auto;
 }
 .io-label {
   position: sticky;
@@ -797,10 +827,25 @@ details[open] > summary .line-caret { transform: rotate(90deg); }
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 19px;
+  font-size: var(--code-font);
+  line-height: var(--code-line);
   color: var(--code-text);
 }
+/* 工具展开区的正文与思考块同款：限高内滚 + 超出给「展开全文」 */
+.io-scroll { max-height: var(--code-scroll-h); overflow: auto; }
+.io-scroll.open { max-height: none; }
+/* 工具输入的"命令行首行"：JSON 之外的一点强调（$ 提示符 + 加重） */
+.io-cmd {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 0;
+  font-family: var(--mono);
+  font-size: var(--code-font);
+  line-height: var(--code-line);
+  min-width: 0;
+}
+.io-cmd .cmd-prompt { flex: none; color: var(--ok); font-weight: 600; }
+.io-cmd .cmd-line { min-width: 0; color: var(--text); font-weight: 600; word-break: break-all; }
 .io-text[data-error="true"] { color: var(--err); }
 .io-divider { flex: none; height: .5px; background: var(--border); }
 .io-empty { color: var(--caption); font-size: 12px; }
@@ -814,16 +859,28 @@ details[open] > summary .line-caret { transform: rotate(90deg); }
   border-radius: var(--radius);
   overflow-x: auto;
   font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 19px;
+  font-size: var(--code-font);
+  line-height: var(--code-line);
   color: var(--code-text);
   white-space: pre-wrap;
   word-break: break-word;
 }
-.code .k { color: var(--key); }
-.code .s { color: var(--str); }
-.code .n { color: var(--num); }
-.code .b { color: var(--bool); }
+
+/* JSON 高亮：键名 / 字符串 / 数字 / 字面量（容器在这里枚举，单字母类不外溢） */
+.code .k, .io-text .k, .md-code-body .k, .prompt-text .k { color: var(--key); }
+.code .s, .io-text .s, .md-code-body .s, .prompt-text .s { color: var(--str); }
+.code .n, .io-text .n, .md-code-body .n, .prompt-text .n { color: var(--num); }
+.code .b, .io-text .b, .md-code-body .b, .prompt-text .b { color: var(--bool); }
+/* 非 JSON 的机器内容：命令行 / diff / 日志 / 状态词 / 路径（只用既有色板） */
+.cmd-line, .code .cmd, .io-text .cmd { color: var(--text); font-weight: 600; }
+.code .diffhead, .io-text .diffhead { color: var(--caption); }
+.code .hunk, .io-text .hunk { color: var(--accent); }
+.code .add, .io-text .add { color: var(--ok); }
+.code .del, .io-text .del { color: var(--err); }
+.code .bad, .io-text .bad { color: var(--err); font-weight: 600; }
+.code .warn, .io-text .warn { color: var(--warn); }
+.code .good, .io-text .good { color: var(--ok); }
+.code .path, .io-text .path { color: var(--accent); }
 
 .row-actions { display: flex; gap: 8px; margin-top: 4px; }
 .row-actions button {
@@ -983,9 +1040,9 @@ details[open] > summary .line-caret { transform: rotate(90deg); }
 .kind-msg { color: var(--kind-msg-fg); background: var(--kind-msg-bg); }
 .kind-think { color: var(--kind-think-fg); background: var(--kind-think-bg); }
 .kind-tool { color: var(--kind-tool-fg); background: var(--kind-tool-bg); }
-.kind-result { color: var(--kind-tool-fg); background: var(--kind-tool-bg); }
 .kind-error { color: var(--kind-err-fg); background: var(--kind-err-bg); }
 .kind-meta { color: var(--kind-meta-fg); background: var(--kind-meta-bg); }
+.kind-result { color: var(--kind-tool-fg); background: var(--kind-tool-bg); }
 .kind-usage { color: var(--kind-usage-fg); background: var(--kind-usage-bg); }
 
 .traj-detail > td { height: auto; padding: 0; white-space: normal; overflow: visible; background: var(--surface-2); }
@@ -1051,6 +1108,116 @@ details[open] > summary .line-caret { transform: rotate(90deg); }
 .schema-desc { margin: 0 0 6px; color: var(--muted); font-size: 11.5px; line-height: 18px; font-family: var(--sans); }
 .schema-params { margin: 0; }
 .schema-params > .schema-body { padding-top: 4px; }
+
+/* ============================ Markdown 正文（自带渲染器） ============================ */
+
+/* 消息正文的 Markdown 预览（渲染器是同页脚本里的 renderMarkdown）。块级元素自己
+   管间距；长文本折叠沿用 .clamped 的渐隐遮罩；圆角/等宽/代码底色全部沿用既有
+   token（--radius / --mono / --code-bg），不引入新的配色体系。 */
+.md-body {
+  white-space: normal;
+  word-break: break-word;
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--text);
+}
+.md-body.clamped { overflow: hidden; mask-image: linear-gradient(180deg, #000 74%, transparent); }
+.md-body > *:first-child { margin-top: 0; }
+.md-body > *:last-child { margin-bottom: 0; }
+.md-p { margin: 0 0 8px; }
+.md-h { margin: 14px 0 6px; font-weight: 650; line-height: 1.35; }
+.md-h1 { font-size: 19px; }
+.md-h2 { font-size: 17px; }
+.md-h3 { font-size: 15.5px; }
+.md-h4, .md-h5, .md-h6 { font-size: 14px; color: var(--muted); }
+.md-list { margin: 0 0 8px; padding-left: 22px; }
+.md-list .md-list { margin: 2px 0 0; }     /* 一级嵌套 */
+.md-item { margin: 2px 0; }
+.md-quote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--muted);
+}
+.md-hr { margin: 12px 0; border: 0; border-top: .5px solid var(--border); }
+.md-inline-code {
+  font-family: var(--mono);
+  font-size: var(--code-font);
+  line-height: var(--code-line);
+  background: var(--chip);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.md-link { color: var(--accent); text-decoration: none; }
+.md-link:hover { text-decoration: underline; }
+.md-table-wrap { margin: 0 0 10px; max-width: 100%; overflow-x: auto; }
+.md-table { border-collapse: collapse; font-size: 13px; }
+.md-table th, .md-table td {
+  border: .5px solid var(--border);
+  padding: 4px 10px;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+}
+.md-table th { background: var(--surface-2); font-weight: 600; }
+
+/* 代码块 = 顶部 banner（语言名 + 复制按钮）+ 等宽正文；圆角照 --radius，
+   内容 11px/19px，单块最大高度内滚——与工具 IO 卡片同一套做法。 */
+.md-code-block {
+  margin: 0 0 10px;
+  border: .5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+.md-code-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 8px 0 12px;
+  border-bottom: .5px solid var(--border);
+}
+.md-code-lang {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  color: var(--caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.md-code-head button {          /* 复制按钮：照抄工具 IO 卡片那一套 */
+  margin: 0;
+  appearance: none;
+  border: .5px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.md-code-head button:hover { background: var(--hover); color: var(--text); border-color: var(--border-strong); }
+.md-code-body {
+  margin: 0;
+  padding: 10px 14px;
+  max-height: 260px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: var(--code-font);
+  line-height: var(--code-line);
+  color: var(--code-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.md-code-body code { font: inherit; background: transparent; padding: 0; }
+/* 详情栏里的系统提示词：比消息正文小一号，标题仍用正文色 */
+.prompt-md { font-size: 12.5px; line-height: 20px; color: var(--muted); }
+.prompt-md .md-h { color: var(--text); }
 
 /* ============================ 灯箱 ============================ */
 

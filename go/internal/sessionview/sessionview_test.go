@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -987,10 +988,13 @@ func TestViewerMatchesDSHStructure(t *testing.T) {
 		t.Error("页面没有详情栏容器")
 	}
 
-	// 7. 消息形态：用户气泡靠右、助手不套卡片、工具/思考都是一行折叠。
+	// 7. 消息形态：**全部左对齐**（右侧气泡已去掉）、助手不套卡片、
+	//    工具/思考/图片都是一行折叠行。
 	for _, marker := range []string{
 		"--content-w: clamp(680px, 64%, 920px)",
-		".msg-user .bubble",
+		".msg-system { align-items: stretch; }",
+		".sys-badge",
+		".disclosure-image > summary .line-name",
 		"function toolDisclosure",
 		"function thinkingDisclosure",
 		"io-card",
@@ -999,8 +1003,13 @@ func TestViewerMatchesDSHStructure(t *testing.T) {
 			t.Errorf("缺少消息形态关键逻辑 %q", marker)
 		}
 	}
-	if !strings.Contains(css, "border-radius: 22px") {
-		t.Error("用户气泡不是 DSH 的 22px 圆角")
+	if strings.Contains(css, ".msg-user") || strings.Contains(css, "--user-bubble") {
+		t.Error("用户消息又套回右侧浅蓝气泡了（那套已取消，消息一律左对齐）")
+	}
+	// 消息区里不许再出现右对齐（页签行自己用 flex-end 对齐下划线，不算）。
+	msgCSS := css[strings.Index(css, ".msg { display: flex"):strings.Index(css, "/* ============================ 轨迹")]
+	if strings.Contains(msgCSS, "flex-end") {
+		t.Error("消息区里还有右对齐（用户消息必须和其他消息一样靠左）")
 	}
 
 	// 6. 轮询入口：签名没变就走 patchList()，一个 DOM 节点都不重建。
@@ -1021,6 +1030,350 @@ func TestViewerMatchesDSHStructure(t *testing.T) {
 	}
 	if !strings.Contains(js, "refs.list.scrollTop = scroll;") {
 		t.Error("侧栏重建后没有恢复滚动位置")
+	}
+
+	// 9. 消息正文的 Markdown 预览：开关在页签行右端、默认开启，正文走
+	//    bodyBlock()（详细断言见 TestViewerMarkdownRendering）。
+	for _, marker := range []string{
+		"function renderMarkdown(text)",
+		"function bodyBlock(text, previewLines, key, extraClass)",
+		"if (!state.markdown) { return collapsibleText(text, previewLines, key, extraClass); }",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("缺少 Markdown 预览关键逻辑 %q", marker)
+		}
+	}
+	if !strings.Contains(html, `id="md-toggle"`) {
+		t.Error("页签行右端没有 Markdown 开关")
+	}
+}
+
+// TestViewerMergesToolCallsAndImageTurns pins the message layout the user asked
+// for: nothing is right-aligned any more, a role:"user" line is either a task
+// block (no images) or an image/attachment turn (with images) that folds into
+// the call it belongs to, and one tool call occupies exactly one row (its
+// receipt is merged in, not printed as a second "result" row).
+func TestViewerMergesToolCallsAndImageTurns(t *testing.T) {
+	js := readAsset(t, "viewer.js")
+	css := readAsset(t, "viewer.css")
+
+	// 1. 带图 user 行 = 图片轮/回执行，不是任务块，也不是右对齐气泡。
+	for _, marker := range []string{
+		"var isImageTurn = line.role === 'user' && !!(line.images && line.images.length);",
+		"function imageTurnRow(line, attr)",
+		"disclosureLine('disclosure-image', '图片（user 轮）', imageTurnSummary(line),",
+		"storeGet(key) === '1'", // 默认折叠（只认"用户展开过"）
+		"function imageTurnSummary(line)",
+		"bits.push(names.slice(0, 2).join('、')",
+		"function originalFigureSize(text)",
+		"ORIGINAL\\s+FIGURE\\s+SIZE\\s*:\\s*([0-9.]+\\s*mm\\s*[x×]\\s*[0-9.]+\\s*mm)",
+		"el('section', 'msg msg-image')",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("图片轮渲染缺少 %q", marker)
+		}
+	}
+	// 2. 不带图的 user 行 = **系统消息**（左对齐、无气泡），保留"user 轮"这个事实，
+	//    并且与思考/工具同一套折叠：「系统」标签 + user 轮次级标签 + 展开全文。
+	for _, marker := range []string{
+		"function systemTurnSection(line)",
+		"el('section', 'msg msg-system')",
+		"el('span', 'sys-badge', '系统')",
+		"el('span', 'sys-meta', 'user 轮')",
+		"var long = lines.length > SYSTEM_PREVIEW_LINES;",
+		"scroll.classList.toggle('folded', long && !expanded);",
+		"toggle.textContent = foldLabel(expanded, lines.length, raw.length);",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("系统消息块缺少 %q", marker)
+		}
+	}
+	if strings.Contains(js, "task-label") || strings.Contains(css, ".msg-task") || strings.Contains(css, ".msg-user") {
+		t.Error("还在用「任务」块或右侧气泡那一套（不带图的 user 行应当按系统消息呈现）")
+	}
+	if !strings.Contains(css, ".sys-scroll.folded") {
+		t.Error("系统消息没有默认折叠的渐隐遮罩")
+	}
+
+	// 3. 图片归属：按**句柄 + 顺序**推断（第八条，不改 wire），归到调用就并进那次
+	//    调用的卡片（附件段），归到任务就并进任务块，配不上才单独成行。
+	for _, marker := range []string{
+		"function imageAttributions()",
+		"var IMAGE_HANDLE_RE = /^Tool image output\\b/i;",
+		"var IMAGE_CALL_RE = /\\(call\\s+([A-Za-z0-9_.:-]+)\\)/;",
+		"var IMAGE_FROM_RE = /\\bfrom\\s+([A-Za-z0-9_.:-]+)/i;",
+		"function attributionText(attr)",
+		"'归属：call ' + attr.callId",
+		"'归属：由顺序推断（本轮的 call ' + attr.callId + '）'",
+		"'归属：本会话任务（这一段是投喂给任务的原图）'",
+		"function attachImages(host, line, attr)",
+		"section.appendChild(el('div', 'io-label', '附件（user 轮）'));",
+		"'这一轮是 user 轮发出的（' + (attr && attr.kind === 'task' ? '会话开头的原图投喂，作为任务的输入' : '工具的输入/附件') +",
+		"attachImages(callNode, line, attr);",
+		"attachImages(taskNode, line, attr);",
+		"pendingTaskImages[attr.taskLineN].push({ line: line, attr: attr });",
+		"attachImages(msg, w.line, w.attr);",
+		"return anchor(imageTurnSection(line, attr), line);",
+		"host.attachments = (host.attachments || 0) + imgs.length;",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("图片归属逻辑缺少 %q", marker)
+		}
+	}
+	// 归属结果要缓存（渲染是增量的），并且跟着会话/行数失效。
+	if !strings.Contains(js, "state.imgAttr = { sig: sig, map: map };") {
+		t.Error("归属结果没有按会话 + 行数缓存")
+	}
+
+	// 4. 一次调用 = 一行：回执并进同一个卡片（返回 null，不再另起一行），
+	//    折叠态一行写全 `输入 → 输出 字符数 · ok/error`；配不上的回执注明。
+	for _, marker := range []string{
+		"function updateCallTail(node)",
+		"tail = node.argsChars + ' → ' + text.length + ' 字符' +",
+		"'(未配对的工具回执)'",
+		"detail: { input: prettyJSON(args) || args }",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("调用/回执合并逻辑缺少 %q", marker)
+		}
+	}
+	// 配对上的回执行必须**不产生**第二个节点。
+	if !strings.Contains(js, "if (node) {\n        attachResult(node, line);") {
+		t.Error("回执没有并入调用卡片")
+	}
+
+	// 5. 轨迹页**保持真实结构**：一行一步、类型照真实角色（用户/助手/思考/工具/
+	//    结果/元信息/用量），工具调用与结果各自独立两行；唯一增量是给带图的
+	//    user 轮标出 `图片 ×N`，并且点行跳回对话里合并后的那一块。
+	for _, marker := range []string{
+		"{ id: 'user', label: '用户' }",
+		"{ id: 'tool', label: '工具' }",
+		"{ id: 'result', label: '结果' }",
+		"kind: 'user', tag: '用户', name: '用户',",
+		"summary: (fromTool ? '接上一行工具回执 · ' : '') + '图片 ×' + line.images.length + ' · ' +",
+		"title: IMAGE_WIRE_TITLE + '\\n' + attributionText(attr) +",
+		"var jumpTo = attr.kind === 'call' && attr.callId && state.callNodes[attr.callId]",
+		"images: line.images,",
+		"kind: 'result', tag: '结果',",
+		"labels = { prompt: '系统提示词', thinking: '思考', user: '用户消息', message: '助手消息', input: '输入', output: '输出', request: '用量行' }",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("轨迹页缺少 %q", marker)
+		}
+	}
+	if strings.Contains(js, "{ id: 'task', label: '任务' }") || strings.Contains(js, "{ id: 'image', label: '图片' }") {
+		t.Error("轨迹页被改成了对话页那套合并分类（轨迹要保持真实结构）")
+	}
+	if !strings.Contains(js, "if (k === 'input' || k === 'request' || k === 'output')") {
+		t.Error("轨迹的输入/输出没有走高亮渲染")
+	}
+	// 轨迹里的带图 user 轮要写明 wire 真相，并与上一行工具回执互指（但仍是两行）。
+	for _, marker := range []string{
+		"var IMAGE_WIRE_TITLE = 'user 消息承载图片（tool 消息的 content 只能文本，OpenAI 兼容 schema 限制）'",
+		" · text + image_url(data:image/jpeg;base64,…)'",
+		"var IMAGE_PLACEHOLDER = /\\[\\s*image\\b|\\[\\s*图片|图片见|image omitted/i;",
+		"' · 图片见下一行用户轮'",
+		"' · 图片在下一行用户轮里'",
+		"if (imageNext) { imageAfterTool[after.n] = true; }",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("轨迹里的图片 wire 说明缺少 %q", marker)
+		}
+	}
+
+	// 6. 「仅看工具调用」也要留着图片行（合并后的工具行 + 图片行）。
+	if !strings.Contains(js, "if (state.onlyTools && line.role !== 'tool' && !isToolCall && !isImageTurn) { return null; }") {
+		t.Error("「仅看工具调用」会把图片轮一并过滤掉")
+	}
+	// 7. 搜索：图片轮的摘要文本与文件名都要能命中。
+	for _, marker := range []string{
+		"s.imageShort, s.imageFile, s.imageLabel",
+		"function imageDisplayName(s)",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("图片的文件名/短名没有进搜索结果 %q", marker)
+		}
+	}
+}
+
+// TestViewerSidebarGroupsStartCollapsed pins the new sidebar default: a project
+// group and a stage group are collapsed unless the memory explicitly says the
+// user opened them — except the groups holding the selected session, which open
+// themselves (and stay shut once the user folds them by hand).
+func TestViewerSidebarGroupsStartCollapsed(t *testing.T) {
+	js := readAsset(t, "viewer.js")
+
+	for _, marker := range []string{
+		// 记忆是三态：true=折过、false=展开过、缺省=收起
+		"function isCollapsed(key) { return state.collapsed[key] === true; }",
+		"function hasCollapseMemory(key)",
+		"state.collapsed[key] = !!collapsed;",
+		// 默认收起 + 当前会话所在组自动展开
+		"function groupWantOpen(key, holdsCurrent)",
+		"if (hasCollapseMemory(key)) { return !isCollapsed(key); }",
+		"return !!holdsCurrent;",
+		"function syncGroupOpen()",
+		"setGroupOpen(node, groupWantOpen(key, holdsGroup));",
+		// 两个层级都走同一套判定
+		"bindCollapse(wrap, key, g.matched ? true : groupWantOpen(key, holdsCurrent), !!g.matched)",
+		"bindCollapse(det, skey, groupWantOpen(skey, holdsCurrent && curStage === stg), false)",
+		// 用户点击仍然是唯一写回记忆的入口
+		"setCollapsed(key, !node.open);",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("脚本缺少「默认收起」关键逻辑 %q", marker)
+		}
+	}
+
+	// 旧默认（wantOpen 来自 !isCollapsed(key)）不许回来。
+	if strings.Contains(js, "g.matched ? true : !isCollapsed(key)") {
+		t.Error("项目组又变回默认展开（wantOpen 仍来自 !isCollapsed(key)）")
+	}
+	if strings.Contains(js, "bindCollapse(det, skey, !isCollapsed(skey)") {
+		t.Error("阶段组又变回默认展开")
+	}
+	// 展开状态必须**显式**落盘（false 也是记录）；靠 delete 回到"缺省"的话，
+	// 缺省会被当成"未选择"，当前会话所在组就没法既自动展开又尊重手动折叠。
+	if strings.Contains(js, "delete state.collapsed[key]") {
+		t.Error("展开状态没有显式落盘（仍然用 delete 回到缺省）")
+	}
+
+	// 切换会话时只改 open、不重建侧栏 DOM：syncGroupOpen() 必须在 patchList 里
+	// 先跑（selectSession → patchList），且不写回记忆。
+	if !strings.Contains(js, "function patchList() {\n    syncGroupOpen();") {
+		t.Error("切换会话没有同步组的展开状态（当前会话所在的组应当自动展开）")
+	}
+	if !strings.Contains(js, "node.dataset.open = open ? '1' : '0';") {
+		t.Error("程序化开/关没有同步 dataset.open（会被 toggle 事件误当成用户操作写回记忆）")
+	}
+	// 过滤时是 frozen 强制展开，不许跟它抢。
+	if !strings.Contains(js, "if (state.filter) { return; }  // 过滤时全部强制展开") {
+		t.Error("syncGroupOpen 会在过滤（强制展开）时跟记忆抢 open")
+	}
+}
+
+// TestViewerMarkdownRendering pins the Markdown preview: the renderer is our own
+// (no library, no CDN), it builds the tree with DOM nodes only — so markup inside
+// a transcript stays text instead of becoming elements — and the toggle defaults
+// to on, remembers its state, and falls back to plain pre-wrap when switched off.
+func TestViewerMarkdownRendering(t *testing.T) {
+	js := readAsset(t, "viewer.js")
+	css := readAsset(t, "viewer.css")
+	html := readAsset(t, "viewer.html")
+
+	// 1. 转义：整份脚本里不许出现任何 HTML 注入入口——正文只能经
+	//    createElement / createTextNode 落树（`<script>` 因此就是一个文本节点，
+	//    不会变成元素）。注释里可以写这个 API 的名字，赋值/调用形式一律不许出现。
+	for _, bad := range []string{".innerHTML", "insertAdjacentHTML", ".outerHTML", "document.write(", "createContextualFragment"} {
+		if strings.Contains(js, bad) {
+			t.Errorf("脚本里出现 %s：Markdown 渲染有注入路径（正文必须只经 DOM API 落树）", bad)
+		}
+	}
+	for _, marker := range []string{
+		"function renderMarkdown(text)",
+		"var frag = document.createDocumentFragment();",
+		"parent.appendChild(document.createTextNode(",
+		"document.createTextNode(String(text || ''))",
+		"node = el('code', 'md-inline-code', m[2]);",
+		"mdInline(node, m[3], (depth || 0) + 1);",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("Markdown 渲染器缺少「DOM 构树 / 文本节点」逻辑 %q", marker)
+		}
+	}
+	// 链接协议白名单：`javascript:` 之类不生成 href。
+	for _, marker := range []string{
+		"function mdSafeURL(url)",
+		"if (/^[a-z][a-z0-9+.-]*:/i.test(s)) { return ''; }",
+		"node.setAttribute('rel', 'noopener noreferrer');",
+		"node.setAttribute('target', '_blank');",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("Markdown 链接缺少安全处理 %q", marker)
+		}
+	}
+
+	// 2. 支持的语法范围：标题 / 代码块（语言标签 + 复制）/ 列表 / 引用 / 水平线 /
+	//    表格 / 粗斜体删除线 / 行内代码。
+	for _, marker := range []string{
+		"var MD_HEADING = /^(#{1,6})\\s+(.*?)\\s*#*\\s*$/;",
+		"function mdFence(line)",
+		"function mdCodeBlock(code, lang)",
+		"head.appendChild(el('span', 'md-code-lang', lang || 'text'));",
+		"head.appendChild(copyButton(code));",
+		"function mdListMarker(line)",
+		"el('blockquote', 'md-quote')",
+		"el('hr', 'md-hr')",
+		"function mdTable(header, rows)",
+		"MD_HR.test(trimmed)",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("Markdown 渲染器缺少语法 %q", marker)
+		}
+	}
+	if !strings.Contains(js, "|\\*\\*([^*]+)\\*\\*|__([^_]+)__|~~([^~]+)~~") {
+		t.Error("Markdown 行内规则里没有粗体 / 删除线")
+	}
+
+	// 3. 应用位置：助手正文、用户正文、详情栏的系统提示词走渲染器；
+	//    思考与工具输入输出仍然是等宽纯文本（不许 Markdown 化）。
+	for _, marker := range []string{
+		"var md = el('div', 'md-body sys-md');",
+		"scroll.appendChild(el('pre', 'body-text sys-text', raw));",
+		"msg.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'asst.' + line.n));",
+		"promptMD.appendChild(renderMarkdown(promptText));",
+		// 关掉开关就回到原来的纯文本 pre-wrap
+		"if (!state.markdown) { return collapsibleText(text, previewLines, key, extraClass); }",
+		"scroll.appendChild(machineBlock(promptText, 'body-text prompt-text'));",
+		// 思考 / 工具 IO 保持等宽纯文本
+		"scroll.appendChild(el('pre', 'body-text reasoning-text', line.reasoning));",
+		"card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)'));",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("Markdown 的应用位置不对：缺少 %q", marker)
+		}
+	}
+
+	// 4. 开关：默认开启、落盘、能关；关掉后重新渲染整条消息流。
+	for _, marker := range []string{
+		"state.markdown = storeGet('markdown') !== '0';",
+		"markdown: true,",
+		"storeSet('markdown', state.markdown ? '1' : '0');",
+		"function applyMarkdownToggle()",
+		"refs.mdToggle.addEventListener('click', function () {",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("Markdown 开关缺少 %q", marker)
+		}
+	}
+	if !strings.Contains(html, `id="md-toggle" class="tab-toggle" type="button" aria-pressed="true"`) {
+		t.Error("Markdown 开关不是默认按下的状态（必须默认开启）")
+	}
+	// 长文本折叠 / 展开沿用同一套记忆键与按钮语义。
+	for _, marker := range []string{
+		"function markdownText(text, previewLines, key, extraClass)",
+		"var expanded = storeGet('text.' + key) === '1';",
+		"storeSet('text.' + key, expanded ? '1' : '0');",
+		"body.style.maxHeight = clamped ? (previewLines * 24) + 'px' : '';",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("Markdown 下的长文本折叠缺少 %q", marker)
+		}
+	}
+	// 5. 样式：代码块 banner / 等宽 11px·19px / 单块内滚 / 表格 / 圆角用既有 token。
+	for _, marker := range []string{
+		".md-code-block {",
+		"border-radius: var(--radius);",
+		".md-code-lang {",
+		"font-family: var(--mono);",
+		"font-size: var(--code-font);\n  line-height: var(--code-line);",
+		"max-height: 260px;\n  overflow: auto;",
+		".md-table th, .md-table td {",
+		".md-body.clamped",
+	} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("Markdown 样式缺少 %q", marker)
+		}
 	}
 }
 
@@ -1184,6 +1537,210 @@ func TestProjectGroupScannedInsideWorkspace(t *testing.T) {
 	for _, s := range sessions {
 		if s.Project != RootProject {
 			t.Errorf("%s 的 project = %q, want %q（扫描根就是工程时不该拿 work/source 当组名）", s.ID, s.Project, RootProject)
+		}
+	}
+}
+
+// jsFunc 取出 viewer 脚本里某个函数的源码（到下一个顶层函数定义为止），
+// 用来断言"某个渲染路径里不许出现某个东西"这类结构性约束。
+func jsFunc(t *testing.T, js, name string) string {
+	t.Helper()
+	start := strings.Index(js, "function "+name+"(")
+	if start < 0 {
+		t.Fatalf("找不到函数 %s", name)
+	}
+	rest := js[start+1:]
+	if end := strings.Index(rest, "\n  function "); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}
+
+// cssRule 取出样式表里某个选择器的规则体（到第一个 } 为止）。
+func cssRule(t *testing.T, css, sel string) string {
+	t.Helper()
+	start := strings.Index(css, sel+" {")
+	if start < 0 {
+		t.Fatalf("找不到选择器 %s", sel)
+	}
+	rest := css[start:]
+	end := strings.Index(rest, "}")
+	if end < 0 {
+		t.Fatalf("选择器 %s 的规则没有闭合", sel)
+	}
+	return rest[:end]
+}
+
+// TestViewerJSONHighlighting 钉住第五件：JSON 高亮用的是样式表里既有的
+// k/s/n/b 类名（原来那套 key/str/bool/num 与 CSS 对不上，等于没高亮），
+// 应用在工具输入、工具输出、工具 parameters、轨迹输入输出与代码块上，
+// 复制按钮仍然只拿原始文本，超大内容退回纯文本。
+func TestViewerJSONHighlighting(t *testing.T) {
+	js := readAsset(t, "viewer.js")
+	css := readAsset(t, "viewer.css")
+
+	if !strings.Contains(js, "var cls = m[1] !== undefined ? 'k' : m[2] !== undefined ? 's' : m[3] !== undefined ? 'b' : 'n';") {
+		t.Error("JSON 高亮没有产出 span.k / span.s / span.n / span.b")
+	}
+	for _, dead := range []string{"appendHighlighted", "'key' : m[2]", "'bool'", "'str' :", "'num';"} {
+		if strings.Contains(js, dead) {
+			t.Errorf("还留着与 CSS 对不上的旧高亮类名 %q", dead)
+		}
+	}
+	// 只有"整段就是 JSON"才做 JSON 高亮（否则交给终端/diff 着色）。
+	if !strings.Contains(js, "if (!s || (s.charAt(0) !== '{' && s.charAt(0) !== '[')) { return null; }") {
+		t.Error("JSON 判定不是「整段必须是对象/数组」")
+	}
+	// 阈值的两个来源都要有：字符数 200KB、行数 4000。
+	for _, marker := range []string{
+		"var JSON_HL_MAX_CHARS = 200 * 1024;",
+		"var JSON_HL_MAX_LINES = 4000;",
+		"内容过大（' + fmtChars(pretty.length) + '），已按纯文本显示，不做 JSON 高亮",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("JSON 高亮的阈值处理缺少 %q", marker)
+		}
+	}
+	// 应用位置：工具输入 / 工具输出 / parameters / 轨迹 / 提示词快照 / 代码块。
+	for _, marker := range []string{
+		"card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)'));",
+		"node.card.appendChild(ioSection('输出', text, status === 'error', 'result.' + line.n));",
+		"pbody.appendChild(machineBlock(String(tool.parameters), 'code'));",
+		"scroll.appendChild(machineBlock(promptText, 'body-text prompt-text'));",
+		"if (k === 'input' || k === 'request' || k === 'output') {",
+		"var res = highlightMachine(inner, code);",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("JSON 高亮没有应用到 %q", marker)
+		}
+	}
+	// 复制按钮拿到的必须是原始文本（不是 pretty 过的、更不是带 span 的 HTML）。
+	for _, marker := range []string{
+		"actions.appendChild(copyButton(argsText));",
+		"actions.appendChild(copyButton(String(tool.parameters)));",
+		"head.appendChild(copyButton(code));",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("复制按钮没有拿到原始文本：缺少 %q", marker)
+		}
+	}
+	// 键名/字符串/数字/字面量的配色要覆盖工具卡片的容器，不只是 .code。
+	for _, sel := range []string{".io-text .k", ".io-text .s", ".io-text .n", ".io-text .b", ".md-code-body .k"} {
+		if !strings.Contains(css, sel) {
+			t.Errorf("样式表没有给 %s 上色", sel)
+		}
+	}
+}
+
+// TestViewerToolCardsScrollAndExpandLikeThinking 钉住第六件：工具展开区与思考块
+// 用同一套限高与「展开全文」，按钮文案只有一处来源（foldLabel）。
+func TestViewerToolCardsScrollAndExpandLikeThinking(t *testing.T) {
+	js := readAsset(t, "viewer.js")
+	css := readAsset(t, "viewer.css")
+
+	if !strings.Contains(js, "toggle.textContent = foldLabel(expanded, lines.length, body.length);") {
+		t.Error("工具输入输出的展开按钮没有走统一的 foldLabel")
+	}
+	if !strings.Contains(js, "return expanded ? '收起' : '展开全文（' + lines + ' 行 / ' + chars + ' 字符）';") {
+		t.Error("foldLabel 的文案不是那一套（收起 / 展开全文（N 行 / M 字符））")
+	}
+	// 三处（思考块所在的 collapsibleText、工具卡片 machineScroll、系统消息）共用同一文案。
+	for _, fn := range []string{"collapsibleText", "machineScroll", "systemTurnSection"} {
+		if !strings.Contains(jsFunc(t, js, fn), "foldLabel(") {
+			t.Errorf("%s 没有用统一的折叠按钮文案", fn)
+		}
+	}
+	// 限高来自同一个 token：思考块与工具卡片同值。
+	if !strings.Contains(cssRule(t, css, ".io-scroll"), "max-height: var(--code-scroll-h)") {
+		t.Error("工具卡片没有限高内滚（.io-scroll 未使用 --code-scroll-h）")
+	}
+	if !strings.Contains(cssRule(t, css, ".reasoning-scroll, .prompt-scroll"), "max-height: var(--code-scroll-h)") {
+		t.Error("思考块与工具卡片不是同一个限高 token")
+	}
+	if !strings.Contains(css, ".io-scroll.open { max-height: none; }") {
+		t.Error("「展开全文」没有解除高度限制")
+	}
+	if !strings.Contains(js, "scroll.classList.toggle('open', expanded);") {
+		t.Error("展开状态没有落到 .io-scroll.open 上")
+	}
+}
+
+// TestViewerConsoleAndDiffHighlighting 钉住第七件：JSON 之外，终端输出 / diff /
+// 编译日志也要着色，并且这些高亮与 Markdown 开关无关。
+func TestViewerConsoleAndDiffHighlighting(t *testing.T) {
+	js := readAsset(t, "viewer.js")
+	css := readAsset(t, "viewer.css")
+
+	for _, marker := range []string{
+		"function consoleLineClass(line)",
+		"if (/^\\s*(\\$|#)\\s+\\S/.test(line)) { return 'cmd'; }",
+		"if (/^\\+/.test(line)) { return 'add'; }",
+		"if (/^-/.test(line)) { return 'del'; }",
+		"if (/^@@/.test(line)) { return 'hunk'; }",
+		"if (/^\\s*!/.test(line)) { return 'bad'; }",
+		"if (/Overfull|Underfull/.test(line)) { return 'warn'; }",
+		"(?:ERROR|Error|error|FAILED|FAIL|Failure|failed|FATAL|Fatal)",
+		"(?:WARNING|Warning|warning|WARN|Warn|OVERFULL|Overfull|UNDERFULL|Underfull)",
+		"(?:OK|PASS|PASSED|COMPILE OK|SUCCESS|Success|done)",
+		"https?:\\/\\/[^\\s\"'<>]+",
+		"function appendConsoleSpans(parent, text)",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("终端/diff/日志高亮缺少 %q", marker)
+		}
+	}
+	for _, sel := range []string{".io-text .cmd", ".io-text .add", ".io-text .del", ".io-text .hunk", ".io-text .bad", ".io-text .warn", ".io-text .good", ".io-text .path"} {
+		if !strings.Contains(css, sel) {
+			t.Errorf("样式表没有给 %s 上色", sel)
+		}
+	}
+	// 输入侧：命令行首行的强调（$ 提示符），且不比输出花。
+	for _, marker := range []string{
+		"function toolPromptLine(name, argsText)",
+		"function cmdPreview(cmd)",
+		"card.appendChild(cmdPreview(cmdLine));",
+		"el('span', 'cmd-prompt', '$ ')",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("工具输入的命令行首行强调缺少 %q", marker)
+		}
+	}
+	// 高亮与 Markdown 是两件事：机器文本的渲染路径不读 state.markdown。
+	for _, fn := range []string{"machineScroll", "machineBlock", "highlightMachine", "ioSection"} {
+		if strings.Contains(jsFunc(t, js, fn), "state.markdown") {
+			t.Errorf("%s 里出现了 state.markdown（高亮不该跟着 Markdown 开关走）", fn)
+		}
+	}
+}
+
+// TestViewerCodeTypographyUsesOneToken 钉住第八件：等宽内容只有一套字号刻度
+// （--code-font 11px / --code-line 19px），输入、输出、思考、JSON 高亮、
+// 行内 code、代码块全部取自同一个 token，不许再有 11.5px/12.5px/13px 这类分歧。
+func TestViewerCodeTypographyUsesOneToken(t *testing.T) {
+	css := readAsset(t, "viewer.css")
+
+	root := cssRule(t, css, ":root")
+	for _, marker := range []string{"--code-font: 11px;", "--code-line: 19px;"} {
+		if !strings.Contains(root, marker) {
+			t.Errorf(":root 缺少统一刻度 %q", marker)
+		}
+	}
+	for _, sel := range []string{".io-text", ".code", ".reasoning-text", ".prompt-text", ".md-code-body", ".md-inline-code"} {
+		r := cssRule(t, css, sel)
+		if !strings.Contains(r, "font-size: var(--code-font)") {
+			t.Errorf("%s 的字号没有取自 --code-font（输入/输出/思考/JSON/行内 code 必须一致）", sel)
+		}
+		if !strings.Contains(r, "line-height: var(--code-line)") {
+			t.Errorf("%s 的行高没有取自 --code-line", sel)
+		}
+		if regexp.MustCompile(`font-size:\s*[0-9.]+px`).MatchString(r) {
+			t.Errorf("%s 还写着字面量字号（应当只有一套 token）", sel)
+		}
+	}
+	// 上一次的分歧值不许再出现在"机器内容"这一族规则里（次级说明文字另有刻度）。
+	for _, sel := range []string{".io-text", ".code", ".reasoning-text", ".prompt-text", ".md-code-body", ".md-inline-code", ".io-cmd"} {
+		if strings.Contains(cssRule(t, css, sel), "11.5px") || strings.Contains(cssRule(t, css, sel), "12.5px") {
+			t.Errorf("%s 还留着分叉的字号", sel)
 		}
 	}
 }

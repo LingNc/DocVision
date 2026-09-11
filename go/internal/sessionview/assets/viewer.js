@@ -23,8 +23,9 @@
  */
 (function () {
   var POLL_MS = 2000;
-  var PREVIEW_LINES = 8;
   var LONG_TEXT_LINES = 20;
+  // 系统消息（user 轮的任务提示）默认只露这么多行，其余折叠起来（可展开全文）。
+  var SYSTEM_PREVIEW_LINES = 8;
   var STORE_PREFIX = 'dsh.sessionview.';
   var THEME_KEY = 'theme';
   var DEFAULT_THEME = 'light';
@@ -74,6 +75,7 @@
     follow: document.getElementById('follow'),
     collapseThinking: document.getElementById('collapse-thinking'),
     onlyTools: document.getElementById('only-tools'),
+    mdToggle: document.getElementById('md-toggle'),
     themeToggle: document.getElementById('theme-toggle'),
     tabs: {
       chat: document.getElementById('tab-chat'),
@@ -85,6 +87,9 @@
     lightbox: document.getElementById('lightbox'),
     lightboxImg: document.getElementById('lightbox-img')
   };
+
+  // 归属到「本会话任务」的图片轮，如果排在任务**前面**就先记在这里（见 renderLine）。
+  var pendingTaskImages = {};
 
   var state = {
     root: '',
@@ -108,12 +113,15 @@
     polling: false,
     theme: DEFAULT_THEME,
     view: 'chat',
+    // 消息正文的 Markdown 预览开关：默认开启，关掉回到纯文本 pre-wrap。
+    markdown: true,
     // 侧栏 / 详情栏的宽度偏好：0 = 折叠（侧栏折成 56px 轨道，详情栏关掉）
     sidebar: SIDEBAR_DEFAULT,
     details: 0,
     narrowExpanded: false,
     narrow: false,
-    // 组展开状态：key -> true 表示"用户折叠了它"，缺省即展开。
+    // 组展开状态：key -> true（用户折叠过）/ false（用户展开过）。
+    // **缺省即收起**：只有记忆里明确记着展开过、或这一组装着当前选中的会话才展开。
     collapsed: {},
     overflow: {},
     // 侧栏列表签名：签名不变就一行 DOM 都不重建（--serve 每 2 秒轮询的护身符）
@@ -137,6 +145,13 @@
     if (bytes < 1024) { return bytes + ' B'; }
     if (bytes < 1024 * 1024) { return (bytes / 1024).toFixed(1) + ' KB'; }
     return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
+  /* 字符数的短写（给"内容过大"的提示用：200 KB 以上就按 KB 报）。 */
+  function fmtChars(n) {
+    if (!n) { return '0 字符'; }
+    if (n < 1024) { return n + ' 字符'; }
+    return (n / 1024).toFixed(1) + ' KB';
   }
 
   function fmtClock(value) {
@@ -367,12 +382,15 @@
 
   /*
    * 折叠状态与布局都落 localStorage：
-   *   collapsed = { "proj:<项目>": true, "stage:<项目>/<阶段>": true }
-   * 缺省即"展开"（用户明确要求默认展开），只有用户手动折叠过才写进去。
+   *   collapsed = { "proj:<项目>": true|false, "stage:<项目>/<阶段>": true|false }
+   * true = 用户手动折起来过，false = 用户手动展开过，**没有记录 = 默认收起**。
+   * 两种选择都显式记下来：这样"当前会话所在组自动展开"既能生效，又不会把
+   * 用户手动折起来的那个组在下次切换会话时又顶开。
    */
   function loadState() {
     state.collapsed = storeJSON('collapsed', {});
     state.overflow = storeJSON('overflow', {});
+    state.markdown = storeGet('markdown') !== '0';
     // Number(null) === 0，所以要先用 null 判断"有没有存过"——否则首次访问
     // 会被读成"侧栏宽度 0 = 折叠"，页面一打开就是一条轨道。
     var rawSidebar = storeGet('layout.sidebar');
@@ -396,9 +414,26 @@
 
   function isCollapsed(key) { return state.collapsed[key] === true; }
 
+  // 记忆里到底有没有这一组的记录？（true/false 都算，缺省不算——缺省是"收起"）
+  function hasCollapseMemory(key) {
+    return Object.prototype.hasOwnProperty.call(state.collapsed, key);
+  }
+
   function setCollapsed(key, collapsed) {
-    if (collapsed) { state.collapsed[key] = true; } else { delete state.collapsed[key]; }
+    state.collapsed[key] = !!collapsed;
     storeSet('collapsed', JSON.stringify(state.collapsed));
+  }
+
+  /*
+   * 一个组要不要展开：
+   *   · 记忆里有记录 → 就按记忆（用户折过就折着，用户展开过就开着）；
+   *   · 记忆里没记录 → 默认**收起**，只有这一组装着当前选中的会话才展开
+   *     （否则用户看不到"我现在在哪"）。
+   * 过滤命中时由调用方强制展开（frozen），不进这里。
+   */
+  function groupWantOpen(key, holdsCurrent) {
+    if (hasCollapseMemory(key)) { return !isCollapsed(key); }
+    return !!holdsCurrent;
   }
 
   function isOverflowOpen(key) { return state.overflow[key] === true; }
@@ -422,6 +457,33 @@
       node.dataset.open = now;
       if (frozen) { return; }  // 过滤时强制展开，不要把"被强制"当成用户选择写回记忆
       setCollapsed(key, !node.open);
+    });
+  }
+
+  /* 程序化地开/关一个已有的组：只动 open 属性，不重建、也不写回记忆。 */
+  function setGroupOpen(node, open) {
+    if (node.open === open) { return; }
+    node.open = open;
+    node.dataset.open = open ? '1' : '0';
+  }
+
+  /*
+   * 切换会话时**只改 open、不重建侧栏**：当前选中会话所在的项目组与阶段组
+   * 自动展开（记忆里明确折过它的除外），其余组回到"记忆 / 默认收起"。
+   * 走这里而不是重建 DOM，是为了不打断滚动位置、悬停状态与用户刚点的折叠。
+   */
+  function syncGroupOpen() {
+    if (state.filter) { return; }  // 过滤时全部强制展开（frozen），别跟它抢
+    var cur = state.current;
+    var proj = cur ? (cur.project || projectOf(cur.id)) : '';
+    var stage = cur ? (cur.stage || 'session') : '';
+    var nodes = refs.list.querySelectorAll('.proj-group, .stage-group');
+    Array.prototype.forEach.call(nodes, function (node) {
+      var name = node.getAttribute('data-project') || '';
+      var stg = node.getAttribute('data-stage');
+      var holdsGroup = !!proj && name === proj && (stg === null || stg === stage);
+      var key = stg === null ? groupKey('proj', name) : groupKey('stage', name + '/' + stg);
+      setGroupOpen(node, groupWantOpen(key, holdsGroup));
     });
   }
 
@@ -609,17 +671,180 @@
     try { return JSON.stringify(JSON.parse(raw), null, 2); } catch (err) { return raw; }
   }
 
-  function appendHighlighted(parent, text) {
+  /* ---------- JSON 高亮（词法扫描，不嵌套解析） ---------- */
+
+  /*
+   * JSON 高亮：把一串 JSON 文本渲染成
+   *   span.k（键名）· span.s（字符串）· span.n（数字）· span.b（true/false/null）
+   * 类名与配色沿用样式表里既有的 .k/.s/.n/.b 与 --key/--str/--num/--bool，
+   * 浅色/深色两套自动生效，不新增配色体系。
+   *
+   * 只做**一层正则扫描**（不解析、不递归），并且一律用 createTextNode /
+   * createElement 落树：值里带 `<script>` 也只是文本。超过阈值就退回纯文本——
+   * 高亮是给人看的，为几十万字符的 payload 卡住整页不值。
+   */
+  var JSON_HL_MAX_CHARS = 200 * 1024;
+  var JSON_HL_MAX_LINES = 4000;
+  // 机器内容超过这么多行就认为"限高装不下"，给「展开全文」按钮（19px 行高 × 18 行
+  // ≈ 340px，正好是 --code-scroll-h；这里略保守一点）。
+  var IO_FOLD_LINES = 16;
+
+  /* 文本是 JSON 就返回两空格缩进后的规范化文本，否则 null（非 JSON 不碰）。 */
+  function jsonPretty(raw) {
+    var s = String(raw === undefined || raw === null ? '' : raw).trim();
+    if (!s || (s.charAt(0) !== '{' && s.charAt(0) !== '[')) { return null; }
+    try { return JSON.stringify(JSON.parse(s), null, 2); } catch (err) { return null; }
+  }
+
+  function countLines(text) { return String(text || '').split('\n').length; }
+
+  function jsonTooBig(text) {
+    return text.length > JSON_HL_MAX_CHARS || countLines(text) > JSON_HL_MAX_LINES;
+  }
+
+  /* 词法着色：键名 / 字符串 / 字面量 / 数字，其余原样进文本节点。 */
+  function appendJSONSpans(parent, text) {
     var re = /("(?:\\.|[^"\\])*")\s*:|("(?:\\.|[^"\\])*")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/g;
     var last = 0;
     var m;
     while ((m = re.exec(text)) !== null) {
       if (m.index > last) { parent.appendChild(document.createTextNode(text.slice(last, m.index))); }
-      var cls = m[1] !== undefined ? 'key' : m[2] !== undefined ? 'str' : m[3] !== undefined ? 'bool' : 'num';
+      var cls = m[1] !== undefined ? 'k' : m[2] !== undefined ? 's' : m[3] !== undefined ? 'b' : 'n';
       parent.appendChild(el('span', cls, m[0]));
       last = m.index + m[0].length;
     }
     if (last < text.length) { parent.appendChild(document.createTextNode(text.slice(last))); }
+  }
+
+  /*
+   * 非 JSON 的机器文本（终端输出 / diff / 编译日志）的着色。全部只产出
+   * span + 文本节点（先转义再构树在这里就是 createTextNode），规则尽量少：
+   *   · 整行：`$ `/`# ` 命令行、diff 的 `+`/`-`/`@@`/文件头、LaTeX 的 `!` 错误行、
+   *     Overfull/Underfull 警告；
+   *   · 词级：error/FAIL/warning/OK/PASS… 状态词，URL 与文件路径（弱强调）。
+   * 配色只用既有的 --err/--warn/--ok/--accent/--caption，不新增色板。
+   */
+  function consoleLineClass(line) {
+    if (/^\s*(\$|#)\s+\S/.test(line)) { return 'cmd'; }
+    if (/^\+\+\+|^---\s/.test(line)) { return 'diffhead'; }
+    if (/^@@/.test(line)) { return 'hunk'; }
+    if (/^\+/.test(line)) { return 'add'; }
+    if (/^-/.test(line)) { return 'del'; }
+    if (/^\s*!/.test(line)) { return 'bad'; }
+    if (/Overfull|Underfull/.test(line)) { return 'warn'; }
+    return '';
+  }
+
+  var CONSOLE_TOKENS = /(https?:\/\/[^\s"'<>]+)|((?:\.{0,2}\/|\/)[\w.\-]+\/[\w.\-/]*[\w.\-])|(\b(?:ERROR|Error|error|FAILED|FAIL|Failure|failed|FATAL|Fatal)\b)|(\b(?:WARNING|Warning|warning|WARN|Warn|OVERFULL|Overfull|UNDERFULL|Underfull)\b)|(\b(?:OK|PASS|PASSED|COMPILE OK|SUCCESS|Success|done)\b)/g;
+
+  function appendConsoleLine(parent, line) {
+    var whole = consoleLineClass(line);
+    if (whole) { parent.appendChild(el('span', whole, line)); return; }
+    var last = 0;
+    var m;
+    CONSOLE_TOKENS.lastIndex = 0;
+    while ((m = CONSOLE_TOKENS.exec(line)) !== null) {
+      if (m.index > last) { parent.appendChild(document.createTextNode(line.slice(last, m.index))); }
+      var cls = m[1] || m[2] ? 'path' : m[3] ? 'bad' : m[4] ? 'warn' : 'good';
+      parent.appendChild(el('span', cls, m[0]));
+      last = m.index + m[0].length;
+      if (m[0] === '') { break; }
+    }
+    if (last < line.length) { parent.appendChild(document.createTextNode(line.slice(last))); }
+  }
+
+  function appendConsoleSpans(parent, text) {
+    String(text === undefined || text === null ? '' : text).split('\n').forEach(function (line, i) {
+      if (i) { parent.appendChild(document.createTextNode('\n')); }
+      appendConsoleLine(parent, line);
+    });
+  }
+
+  /*
+   * 把一段机器文本放进 parent（<pre> 之类）：JSON 就做 JSON 高亮，否则按终端
+   * 输出着色；两者都过阈值就退回纯文本。返回 { highlighted, note }。
+   */
+  function highlightMachine(parent, raw) {
+    var text = String(raw === undefined || raw === null ? '' : raw);
+    var pretty = jsonPretty(text);
+    if (pretty === null) {
+      if (jsonTooBig(text)) {
+        parent.textContent = text;
+        return {
+          highlighted: false,
+          note: '内容过大（' + fmtChars(text.length) + '），已按纯文本显示，不做高亮'
+        };
+      }
+      appendConsoleSpans(parent, text);
+      return { highlighted: true, note: '' };
+    }
+    if (jsonTooBig(pretty)) {
+      parent.textContent = pretty;
+      return {
+        highlighted: false,
+        note: '内容过大（' + fmtChars(pretty.length) + '），已按纯文本显示，不做 JSON 高亮'
+      };
+    }
+    appendJSONSpans(parent, pretty);
+    return { highlighted: true, note: '' };
+  }
+
+  /* 不带折叠的机器文本块（详情栏的 parameters、轨迹的输入输出）。 */
+  function machineBlock(text, cls) {
+    var frag = document.createDocumentFragment();
+    var pre = el('pre', cls || 'code');
+    var res = highlightMachine(pre, text);
+    frag.appendChild(pre);
+    if (res.note) { frag.appendChild(el('div', 'note', res.note)); }
+    return frag;
+  }
+
+  /*
+   * 工具输入输出卡片的正文：**与思考块同一套**——固定高度内滚（--code-scroll-h，
+   * 与 reasoning-scroll 同值），内容超出限高时给「展开全文（N 行 / M 字符）」，
+   * 点掉高度限制直接看全文，再点「收起」（按钮文案与折叠记忆键都沿用既有的那套）。
+   * 高亮与 Markdown 开关无关：这里永远高亮，关掉 Markdown 也一样。
+   */
+  function machineScroll(text, key, extraClass) {
+    var wrap = el('div', 'text-wrap');
+    var raw = String(text === undefined || text === null ? '' : text);
+    var pretty = jsonPretty(raw);
+    var body = pretty === null ? raw : pretty;
+    var big = jsonTooBig(body);
+    var lines = body.split('\n');
+    var scroll = el('div', 'io-scroll' + (extraClass ? ' ' + extraClass : ''));
+    var pre = el('pre', 'io-text');
+    var expanded = storeGet('text.' + key) === '1';
+    var long = lines.length > IO_FOLD_LINES;
+    var paint = function () {
+      clear(pre);
+      if (big) { pre.textContent = body; }
+      else if (pretty !== null) { appendJSONSpans(pre, body); }
+      else { appendConsoleSpans(pre, body); }
+      scroll.classList.toggle('open', expanded);
+    };
+    paint();
+    scroll.appendChild(pre);
+    wrap.appendChild(scroll);
+    if (big) {
+      wrap.appendChild(el('div', 'note', '内容过大（' + fmtChars(body.length) + '），按纯文本显示，不做高亮'));
+    }
+    if (long) {
+      var toggle = el('button', 'text-toggle');
+      toggle.type = 'button';
+      var label = function () {
+        toggle.textContent = foldLabel(expanded, lines.length, body.length);
+      };
+      label();
+      toggle.addEventListener('click', function () {
+        expanded = !expanded;
+        storeSet('text.' + key, expanded ? '1' : '0');
+        paint();
+        label();
+      });
+      wrap.appendChild(toggle);
+    }
+    return wrap;
   }
 
   function copyButton(text) {
@@ -650,6 +875,345 @@
     } catch (err) {
       return false;
     }
+  }
+
+  /* ---------- Markdown（自带的小渲染器，无外部依赖） ---------- */
+
+  /*
+   * 消息正文支持 Markdown 预览：**自己写的小渲染器**，不引任何库、不加任何外链。
+   *
+   * 安全边界：整棵树只用 DOM API 造（createElement / createTextNode），**从不碰
+   * innerHTML**——转录里的 `<script>`、`<img onerror=…>` 落树时就是一个文本节点，
+   * 浏览器不会把它当标签解析，页面里因此"原样显示为文本"；链接另经 mdSafeURL()
+   * 过滤协议，`javascript:` / `data:` 一律不生成 href。
+   *
+   * 支持范围（够用为准）：标题 `#`~`######`、粗体/斜体/删除线、行内代码、围栏
+   * 代码块（带语言标签与复制按钮）、有序/无序列表（一级嵌套）、引用、水平线、
+   * 链接、`|` 表格、段落与软换行。
+   */
+
+  // 链接协议白名单：http(s)/mailto/锚点/相对路径放行，其余带协议的（javascript:、
+  // data:、vbscript:…）不生成可点击地址——只留文字。
+  function mdSafeURL(url) {
+    var s = String(url === undefined || url === null ? '' : url).trim();
+    if (!s) { return ''; }
+    if (/^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(s)) { return s; }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(s)) { return ''; }
+    return s;
+  }
+
+  function mdFence(line) {
+    var m = /^\s{0,3}(`{3,}|~{3,})\s*([^\s`]*)\s*$/.exec(line);
+    return m ? { mark: m[1].charAt(0), lang: m[2] || '' } : null;
+  }
+
+  function mdListMarker(line) {
+    var m = /^([ \t]*)([-*+]|\d{1,3}[.)])\s+(.*)$/.exec(line);
+    if (!m) { return null; }
+    return {
+      indent: m[1].replace(/\t/g, '  ').length,
+      ordered: /\d/.test(m[2]),
+      text: m[3]
+    };
+  }
+
+  var MD_HR = /^(?:\*\s*){3,}$|^(?:-\s*){3,}$|^(?:_\s*){3,}$/;
+  var MD_HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
+
+  // 表格分隔行（`|---|:--:|` 之类）；单独一行 `---` 是水平线，不走这里。
+  function mdSeparatorRow(line) {
+    var s = String(line || '').trim();
+    if (s.indexOf('-') < 0 || s.indexOf('|') < 0) { return false; }
+    return /^\|?[\s:|-]+\|?$/.test(s);
+  }
+
+  function mdSplitRow(line) {
+    var s = String(line || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+    return s.split('|').map(function (c) { return c.trim(); });
+  }
+
+  // 这一行会不会开启一个新块？（段落收集时用来判断在哪里停下）
+  function mdBlockStart(line, next) {
+    var t = String(line || '').trim();
+    if (!t) { return true; }
+    if (mdFence(line) || MD_HEADING.test(t) || MD_HR.test(t)) { return true; }
+    if (/^\s{0,3}>/.test(line) || mdListMarker(line)) { return true; }
+    return t.indexOf('|') >= 0 && !!next && mdSeparatorRow(next) && mdSplitRow(t).length > 1;
+  }
+
+  /*
+   * 行内：先认行内代码（里面一律字面量），再链接、粗体、删除线、斜体。
+   * 一律用 textContent / createTextNode 落树，任何位置都不会产生元素。
+   */
+  var MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_/;
+
+  function mdInline(parent, text, depth) {
+    if ((depth || 0) > 6) { parent.appendChild(document.createTextNode(String(text || ''))); return; }
+    var rest = String(text === undefined || text === null ? '' : text);
+    var guard = 0;
+    while (rest && guard++ < 800) {
+      var m = MD_INLINE.exec(rest);
+      if (!m) { break; }
+      if (m.index > 0) { parent.appendChild(document.createTextNode(rest.slice(0, m.index))); }
+      rest = rest.slice(m.index + m[0].length);
+      var node;
+      if (m[1] !== undefined) {
+        // 行内代码：内容原样进文本节点（含 < > & ，不会被当成标签）
+        node = el('code', 'md-inline-code', m[2]);
+      } else if (m[3] !== undefined) {
+        node = el('a', 'md-link');
+        var href = mdSafeURL(m[4]);
+        if (href) {
+          node.setAttribute('href', href);
+          node.setAttribute('target', '_blank');
+          node.setAttribute('rel', 'noopener noreferrer');
+        } else {
+          node.title = '链接协议不受支持，只显示文字';
+        }
+        mdInline(node, m[3], (depth || 0) + 1);
+      } else if (m[5] !== undefined || m[6] !== undefined) {
+        node = el('strong');
+        mdInline(node, m[5] !== undefined ? m[5] : m[6], (depth || 0) + 1);
+      } else if (m[7] !== undefined) {
+        node = el('del');
+        mdInline(node, m[7], (depth || 0) + 1);
+      } else {
+        node = el('em');
+        mdInline(node, m[8] !== undefined ? m[8] : m[9], (depth || 0) + 1);
+      }
+      parent.appendChild(node);
+    }
+    if (rest) { parent.appendChild(document.createTextNode(rest)); }
+  }
+
+  /* 块内的软换行按可见换行处理（转录里一行就是一行，不合并成空格）。 */
+  function mdInlineLines(parent, text) {
+    String(text === undefined || text === null ? '' : text).split('\n').forEach(function (part, i) {
+      if (i) { parent.appendChild(el('br', 'md-br')); }
+      mdInline(parent, part, 0);
+    });
+  }
+
+  /*
+   * 围栏代码块：顶部 banner（语言名 + 复制按钮）+ 等宽正文，圆角用 --radius，
+   * 内容 11px/19px、单块最大高度内滚——与工具 IO 卡片同一套做法与同一套 token。
+   */
+  function mdCodeBlock(code, lang) {
+    var wrap = el('div', 'md-code-block');
+    var head = el('div', 'md-code-head');
+    head.appendChild(el('span', 'md-code-lang', lang || 'text'));
+    head.appendChild(copyButton(code));
+    wrap.appendChild(head);
+    var body = el('pre', 'md-code-body');
+    var inner = el('code');
+    // 代码块内容也走机器文本渲染：```json 做 JSON 高亮，```bash / ```diff / ```log
+    // 按终端与 diff 着色，其余纯文本。
+    var res = highlightMachine(inner, code);
+    body.appendChild(inner);
+    wrap.appendChild(body);
+    if (res.note) { wrap.appendChild(el('div', 'note', res.note)); }
+    return wrap;
+  }
+
+  function mdTable(header, rows) {
+    var wrap = el('div', 'md-table-wrap');
+    var table = el('table', 'md-table');
+    var thead = el('thead');
+    var hrow = el('tr');
+    header.forEach(function (cell) {
+      var th = el('th');
+      mdInline(th, cell, 0);
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    var tbody = el('tbody');
+    rows.forEach(function (cells) {
+      var tr = el('tr');
+      for (var c = 0; c < header.length; c++) {
+        var td = el('td');
+        mdInline(td, cells[c] === undefined ? '' : cells[c], 0);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  function mdListItem(item) {
+    var li = el('li', 'md-item');
+    mdInlineLines(li, item.text);
+    return li;
+  }
+
+  /*
+   * 块级解析：围栏代码块 → 标题 → 水平线 → 表格 → 引用 → 列表 → 段落。
+   * 返回 DocumentFragment（调用方直接 appendChild 即可）。
+   */
+  function renderMarkdown(text) {
+    var frag = document.createDocumentFragment();
+    var lines = String(text === undefined || text === null ? '' : text).replace(/\r\n?/g, '\n').split('\n');
+    var i = 0;
+
+    while (i < lines.length) {
+      var line = lines[i];
+      var trimmed = line.trim();
+      if (!trimmed) { i++; continue; }
+
+      // 围栏代码块（收尾围栏用同一个字符、长度不限；没闭合就吃到文末）
+      var fence = mdFence(line);
+      if (fence) {
+        var code = [];
+        i++;
+        var close = new RegExp('^\\s{0,3}' + (fence.mark === '`' ? '`' : '~') + '{3,}\\s*$');
+        while (i < lines.length && !close.test(lines[i])) { code.push(lines[i]); i++; }
+        if (i < lines.length) { i++; }
+        frag.appendChild(mdCodeBlock(code.join('\n'), fence.lang));
+        continue;
+      }
+
+      var h = MD_HEADING.exec(trimmed);
+      if (h) {
+        var level = h[1].length;
+        var heading = el('h' + level, 'md-h md-h' + level);
+        mdInlineLines(heading, h[2]);
+        frag.appendChild(heading);
+        i++;
+        continue;
+      }
+
+      if (MD_HR.test(trimmed)) {
+        frag.appendChild(el('hr', 'md-hr'));
+        i++;
+        continue;
+      }
+
+      if (trimmed.indexOf('|') >= 0 && i + 1 < lines.length && mdSeparatorRow(lines[i + 1])) {
+        var header = mdSplitRow(trimmed);
+        if (header.length > 1) {
+          var rows = [];
+          i += 2;
+          while (i < lines.length && lines[i].trim() && lines[i].indexOf('|') >= 0) {
+            rows.push(mdSplitRow(lines[i]));
+            i++;
+          }
+          frag.appendChild(mdTable(header, rows));
+          continue;
+        }
+      }
+
+      if (/^\s{0,3}>/.test(line)) {
+        var quote = [];
+        while (i < lines.length && /^\s{0,3}>/.test(lines[i])) {
+          quote.push(lines[i].replace(/^\s{0,3}>\s?/, ''));
+          i++;
+        }
+        var bq = el('blockquote', 'md-quote');
+        bq.appendChild(renderMarkdown(quote.join('\n')));
+        frag.appendChild(bq);
+        continue;
+      }
+
+      if (mdListMarker(line)) {
+        var items = [];
+        while (i < lines.length) {
+          var mk = mdListMarker(lines[i]);
+          if (mk) { items.push(mk); i++; continue; }
+          // 列表项的续行（懒续行）：非空、且不是新块开头，就并进上一条。
+          if (items.length && lines[i].trim() && i + 1 <= lines.length &&
+              !mdBlockStart(lines[i], lines[i + 1])) {
+            items[items.length - 1].text += '\n' + lines[i].trim();
+            i++;
+            continue;
+          }
+          break;
+        }
+        var baseIndent = items[0].indent;
+        var list = null;
+        var listOrdered = false;
+        var lastLi = null;
+        var sub = null;
+        items.forEach(function (it) {
+          if (!list || (it.indent <= baseIndent && it.ordered !== listOrdered)) {
+            list = el(it.ordered ? 'ol' : 'ul', 'md-list');
+            listOrdered = it.ordered;
+            lastLi = null;
+            sub = null;
+            frag.appendChild(list);
+          }
+          if (it.indent > baseIndent && lastLi) {
+            // 一级嵌套：挂在上一顶层项里面
+            if (!sub) {
+              sub = el(it.ordered ? 'ol' : 'ul', 'md-list md-sub');
+              lastLi.appendChild(sub);
+            }
+            sub.appendChild(mdListItem(it));
+            return;
+          }
+          sub = null;
+          lastLi = mdListItem(it);
+          list.appendChild(lastLi);
+        });
+        continue;
+      }
+
+      // 段落：吃到空行或下一个块的开头
+      var buf = [];
+      while (i < lines.length && !mdBlockStart(lines[i], lines[i + 1])) { buf.push(lines[i]); i++; }
+      if (!buf.length) { buf.push(lines[i]); i++; }
+      var para = el('p', 'md-p');
+      mdInlineLines(para, buf.join('\n'));
+      frag.appendChild(para);
+    }
+    return frag;
+  }
+
+  /*
+   * 正文块 = Markdown 开关打开时走渲染器，关掉回到原来的纯文本 pre-wrap。
+   * 两条路径共用同一个折叠记忆键（`text.<key>`），切开关不会丢掉用户的展开选择。
+   */
+  function bodyBlock(text, previewLines, key, extraClass) {
+    if (!state.markdown) { return collapsibleText(text, previewLines, key, extraClass); }
+    return markdownText(text, previewLines, key, extraClass);
+  }
+
+  /*
+   * Markdown 正文：行数超过 previewLines 时先夹住（max-height + 渐隐遮罩），
+   * 展开/收起沿用与纯文本路径同一套按钮与记忆键。
+   */
+  function markdownText(text, previewLines, key, extraClass) {
+    var wrap = el('div', 'text-wrap');
+    var raw = String(text === undefined || text === null ? '' : text);
+    var body = el('div', 'md-body' + (extraClass ? ' ' + extraClass : ''));
+    body.appendChild(renderMarkdown(raw));
+    var lines = raw.split('\n');
+    var long = lines.length > previewLines;
+    var expanded = storeGet('text.' + key) === '1';
+    var paint = function () {
+      var clamped = long && !expanded;
+      body.classList.toggle('clamped', clamped);
+      body.style.maxHeight = clamped ? (previewLines * 24) + 'px' : '';
+    };
+    paint();
+    wrap.appendChild(body);
+    if (long) {
+      var toggle = el('button', 'text-toggle');
+      var label = function () {
+        toggle.textContent = foldLabel(expanded, lines.length, raw.length);
+      };
+      label();
+      toggle.type = 'button';
+      toggle.addEventListener('click', function () {
+        expanded = !expanded;
+        storeSet('text.' + key, expanded ? '1' : '0');
+        paint();
+        label();
+      });
+      wrap.appendChild(toggle);
+    }
+    return wrap;
   }
 
   /* ---------- 侧栏 ---------- */
@@ -711,17 +1275,28 @@
   function sessionHaystack(s) {
     // 逐图会话要能按**图片名 / PDF 页 / 顺序 / 图片类型**检索，所以这些
     // 字段都进搜索串（页码与序号连 "p12"/"p.12"/"#12"/"12" 都能命中）。
+    // 图片名三档（图注 / 短写 / 完整哈希）与 doc_index 路径全部可检索。
     var parts = [s.title, s.label, s.id, s.name, s.project, s.stage, s.stageTitle,
-      s.imageName, s.imageType, s.imageCaption];
+      s.imageName, s.imageType, s.imageCaption, s.imageShort, s.imageFile, s.imageLabel];
     if (s.page) { parts.push('p' + s.page, 'p.' + s.page, '页' + s.page, String(s.page)); }
     if (s.imageOrder) { parts.push('#' + s.imageOrder, '第' + s.imageOrder + '张', String(s.imageOrder)); }
     return parts.filter(Boolean).join(' ').toLowerCase();
   }
 
+  /*
+   * 逐图会话显示哪个名字：**有图注/标签就用它**，没有就用**短写文件名**
+   * （`bfeafce8.jpg`）——MinerU 按内容哈希命名图片，64 位哈希当标题没人看得懂。
+   * 口径与 Go 侧 imageSessionTitle 一致（--list 与侧栏因此显示同一个名字）；
+   * 完整文件名与 `images/<书>/<file>` 路径进行的悬浮说明，一个信息都不丢。
+   */
+  function imageDisplayName(s) {
+    return s.imageCaption || s.imageLabel || s.imageShort || s.imageName;
+  }
+
   function sessionTitleOf(s) {
-    if (s.imageName && (s.page || s.imageOrder)) {
-      // 逐图会话的标题用**图注/图片名**，页与序号在从属信息里（侧栏只有一行）。
-      return '矢量图 · ' + (s.imageCaption || s.imageName);
+    if (s.imageName && (s.page || s.imageOrder || s.imageShort || s.imageLabel || s.imageCaption)) {
+      // 逐图会话的标题用**图注 / 图片名**，页与序号在从属信息里（侧栏只有一行）。
+      return (s.stageTitle || '矢量图') + ' · ' + imageDisplayName(s);
     }
     return s.title || s.label || s.name;
   }
@@ -798,9 +1373,13 @@
         ((m.tools) ? '，含 ' + m.tools + ' 个工具定义' : ''));
     }
     if (s.imageName) {
-      tip.push('来源图片: ' + s.imageName + (s.imageType ? ('（' + s.imageType + '）') : '') +
+      // 图片身份：行里显示短名，**完整**文件名、哈希与 doc_index 路径在这里。
+      tip.push('来源图片: ' + imageDisplayName(s) + (s.imageType ? ('（' + s.imageType + '）') : '') +
         (s.page ? ('\n第 ' + s.page + ' 页') : '') + (s.imageOrder ? ('\n书内第 ' + s.imageOrder + ' 张') : '') +
         (s.imageCaption ? ('\n图注: ' + s.imageCaption) : ''));
+      if (s.imageFile) { tip.push('图片文件: ' + s.imageFile); }
+      if (s.imageName) { tip.push('图片哈希: ' + s.imageName); }
+      if (s.imagePath) { tip.push('图片路径: ' + s.imagePath); }
     }
     tip.push('消息 ' + s.messages + ' 条 · ' + fmtSize(s.size) + ' · 最后写入 ' + fmtClock(s.mtime));
     var sub = subPathOf(s.id);
@@ -819,6 +1398,18 @@
     if (s.imageOrder) { bits.push('#' + s.imageOrder); }
     if (s.imageType) { bits.push(s.imageType); }
     return bits.join('·');
+  }
+
+  /* 图片身份小标签的悬浮说明：短名之外把完整文件名 / 哈希 / doc_index 路径给全。 */
+  function imageTipText(s) {
+    var bits = [imageDisplayName(s)];
+    if (s.imageFile && s.imageFile !== imageDisplayName(s)) { bits.push('文件 ' + s.imageFile); }
+    if (s.imageName) { bits.push('哈希 ' + s.imageName); }
+    if (s.imagePath) { bits.push(s.imagePath); }
+    if (s.page) { bits.push('第 ' + s.page + ' 页'); }
+    if (s.imageOrder) { bits.push('书内第 ' + s.imageOrder + ' 张'); }
+    if (s.imageType) { bits.push(s.imageType); }
+    return bits.join('\n');
   }
 
   /*
@@ -844,7 +1435,11 @@
 
     var usage = usageChipText(s);
     if (usage) { row.appendChild(el('span', 'row-chip usage-chip', usage)); }
-    if (s.imageName) { row.appendChild(el('span', 'row-chip image-chip', imageChipText(s))); }
+    if (s.imageName) {
+      var chip = el('span', 'row-chip image-chip', imageChipText(s));
+      chip.title = imageTipText(s);  // 小标签上也带完整文件名 / 哈希 / 路径
+      row.appendChild(chip);
+    }
     row.title = sessionTip(s);
 
     row.appendChild(el('span', 'row-time', relTime(s.mtime)));
@@ -868,9 +1463,15 @@
   function buildGroup(g) {
     var wrap = document.createElement('details');
     wrap.className = 'proj-group';
+    wrap.setAttribute('data-project', g.name);
     var key = groupKey('proj', g.name);
-    // 默认全部展开；过滤命中的组强制展开，其余按记忆的折叠状态恢复。
-    bindCollapse(wrap, key, g.matched ? true : !isCollapsed(key), !!g.matched);
+    var cur = state.current;
+    var curProj = cur ? (cur.project || projectOf(cur.id)) : '';
+    var curStage = cur ? (cur.stage || 'session') : '';
+    // **默认收起**：只有记忆里明确展开过、或这一组装着当前选中的会话才展开；
+    // 过滤命中的组强制展开（frozen，不写回记忆）。
+    var holdsCurrent = !!curProj && curProj === g.name;
+    bindCollapse(wrap, key, g.matched ? true : groupWantOpen(key, holdsCurrent), !!g.matched);
 
     var head = el('summary', 'proj-row');
     head.title = g.name;
@@ -919,8 +1520,11 @@
       if (multi) {
         var det = document.createElement('details');
         det.className = 'stage-group';
+        det.setAttribute('data-project', g.name);
+        det.setAttribute('data-stage', stg);
         var skey = groupKey('stage', g.name + '/' + stg);
-        bindCollapse(det, skey, !isCollapsed(skey), false);
+        // 阶段组同样默认收起；装着当前会话的那个阶段才自动展开。
+        bindCollapse(det, skey, groupWantOpen(skey, holdsCurrent && curStage === stg), false);
 
         var sh = el('summary', 'stage-row');
         var sslot = el('span', 'row-slot');
@@ -994,6 +1598,7 @@
    * 滚动位置因此天然不动——这就是"左侧展开总被刷新冲掉"的修法。
    */
   function patchList() {
+    syncGroupOpen();  // 当前会话所在的项目组 / 阶段组自动展开（只改 open，不重建）
     var rows = refs.list.querySelectorAll('.session-row');
     Array.prototype.forEach.call(rows, function (row) {
       var id = row.getAttribute('data-id');
@@ -1195,7 +1800,9 @@
       ['消息', cur.messages + ' 条 · ' + state.lines.length + ' 行'],
       ['大小', fmtSize(cur.size)],
       ['最后写入', fmtClock(cur.mtime)],
-      cur.imageName ? ['图片', cur.imageName, null, true] : null,
+      cur.imageName ? ['图片', imageDisplayName(cur), imageTipText(cur), true] : null,
+      cur.imageFile ? ['图片文件', cur.imageFile, cur.imageName, true] : null,
+      cur.imagePath ? ['图片路径', cur.imagePath, null, true] : null,
       cur.imageName && cur.page ? ['页码', '第 ' + cur.page + ' 页'] : null,
       cur.imageName && cur.imageOrder ? ['顺序', '书内第 ' + cur.imageOrder + ' 张'] : null,
       cur.imageName && cur.imageType ? ['类型', cur.imageType] : null,
@@ -1318,9 +1925,8 @@
       ph.appendChild(el('span', 'schema-meta', 'JSON · 默认收起'));
       pd.appendChild(ph);
       var pbody = el('div', 'schema-body');
-      var pre = el('pre', 'code');
-      appendHighlighted(pre, prettyJSON(tool.parameters));
-      pbody.appendChild(pre);
+      // 注入给模型的工具 parameters 就是 JSON：**高亮**（用户点名这里少了高亮）。
+      pbody.appendChild(machineBlock(String(tool.parameters), 'code'));
       var actions = el('div', 'row-actions');
       actions.appendChild(copyButton(String(tool.parameters)));
       pbody.appendChild(actions);
@@ -1365,7 +1971,19 @@
 
     var body = el('div', 'schema-body');
     var scroll = el('div', 'prompt-scroll');
-    scroll.appendChild(el('pre', 'body-text prompt-text', String(line.text || '（这条 meta 行没有正文）')));
+    var promptText = String(line.text || '（这条 meta 行没有正文）');
+    if (jsonPretty(promptText) !== null) {
+      // 提示词整段就是 JSON（少数会话会把配置当提示词发）→ 直接 JSON 高亮。
+      scroll.appendChild(machineBlock(promptText, 'body-text prompt-text'));
+    } else if (state.markdown) {
+      // 系统提示词也按 Markdown 预览（与消息正文同一套渲染器与开关）；
+      // 里面的 ```json 代码块由 mdCodeBlock 顺带做 JSON 高亮。
+      var promptMD = el('div', 'md-body prompt-md');
+      promptMD.appendChild(renderMarkdown(promptText));
+      scroll.appendChild(promptMD);
+    } else {
+      scroll.appendChild(machineBlock(promptText, 'body-text prompt-text'));
+    }
     body.appendChild(scroll);
     var actions = el('div', 'row-actions');
     actions.appendChild(copyButton(String(line.text || '')));
@@ -1419,18 +2037,18 @@
 
   /* ---------- 对话流（DSH 的消息形态） ---------- */
 
-  function roleName(role) {
-    if (role === 'user') { return '用户'; }
-    if (role === 'assistant') { return 'AI'; }
-    if (role === 'tool') { return '工具结果'; }
-    if (role === 'system') { return '系统'; }
-    return role || '未知';
-  }
-
   /*
    * Long transcripts are common (a user turn can be thousands of characters),
    * so only the preview lines are put in the DOM until the reader expands it.
    */
+  /*
+   * 折叠/展开按钮的唯一文案来源：思考块、工具输入输出、系统消息（user 轮任务提示）
+   * 三处**逐字一致**，不另造说法。
+   */
+  function foldLabel(expanded, lines, chars) {
+    return expanded ? '收起' : '展开全文（' + lines + ' 行 / ' + chars + ' 字符）';
+  }
+
   function collapsibleText(text, previewLines, key, extraClass) {
     var wrap = el('div', 'text-wrap');
     var lines = String(text === undefined || text === null ? '' : text).split('\n');
@@ -1446,9 +2064,7 @@
     if (long) {
       var toggle = el('button', 'text-toggle');
       var label = function () {
-        toggle.textContent = expanded
-          ? '收起'
-          : '展开全文（' + lines.length + ' 行 / ' + String(text).length + ' 字符）';
+        toggle.textContent = foldLabel(expanded, lines.length, String(text).length);
       };
       label();
       toggle.type = 'button';
@@ -1566,6 +2182,35 @@
     return v.length > 90 ? v.slice(0, 90) + '…' : v;
   }
 
+  /*
+   * 展开后的"命令行首行"强调：JSON 高亮之外，把这次调用真正执行的那一行
+   * （bash 的 command、compile/read/write 的 path、grep 的 pattern）加一个
+   * `$ ` 前导提示符并加重——输入侧只做这一点，别比输出更花。
+   */
+  function toolPromptLine(name, argsText) {
+    var obj = null;
+    try { obj = JSON.parse(String(argsText || '{}')); } catch (e) { obj = null; }
+    if (!obj || typeof obj !== 'object') { return ''; }
+    var n = String(name || '').toLowerCase();
+    var v = '';
+    if (n === 'bash' || n === 'python') { v = obj.command || obj.code || ''; }
+    else if (n.indexOf('grep') === 0 || n === 'doc_search' || n.indexOf('search') >= 0) {
+      v = [obj.pattern || obj.query || '', obj.path || ''].filter(Boolean).join('  ');
+    } else if (n === 'compile' || n.indexOf('write') === 0 || n.indexOf('edit') === 0 ||
+               n.indexOf('read') === 0 || n === 'view_pdf' || n === 'view_image') {
+      v = obj.path || '';
+    }
+    v = String(v).split('\n')[0].trim();
+    return v.length > 160 ? v.slice(0, 160) + '…' : v;
+  }
+
+  function cmdPreview(cmd) {
+    var div = el('div', 'io-cmd');
+    div.appendChild(el('span', 'cmd-prompt', '$ '));
+    div.appendChild(el('span', 'cmd-line', cmd));
+    return div;
+  }
+
   function classifyResult(text) {
     var s = String(text || '');
     if (/REJECTED|文件不存在|失败|error|not found|traceback/i.test(s)) { return 'error'; }
@@ -1580,15 +2225,11 @@
       section.appendChild(el('div', 'io-empty', '（无内容）'));
       return section;
     }
-    var wrap;
-    if (key) {
-      wrap = collapsibleText(text, PREVIEW_LINES, key, 'io-text');
-    } else {
-      wrap = el('pre', 'io-text');
-      appendHighlighted(wrap, text);
-    }
+    // 输入输出都走同一套机器文本渲染：是 JSON 就做 JSON 高亮（k/s/n/b），
+    // 否则按终端输出/diff/日志着色；超过限高给「展开全文」，与思考块同一套。
+    var wrap = machineScroll(text, key);
     if (isError) {
-      var pre = wrap.tagName === 'PRE' ? wrap : wrap.querySelector('.io-text');
+      var pre = wrap.querySelector('.io-text');
       if (pre) { pre.setAttribute('data-error', 'true'); }
     }
     section.appendChild(wrap);
@@ -1615,6 +2256,8 @@
     var tail = d.querySelector('.line-tail');
 
     var card = el('div', 'io-card');
+    var cmdLine = toolPromptLine(name, argsText);
+    if (cmdLine) { card.appendChild(cmdPreview(cmdLine)); }
     card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)'));
     var actions = el('div', 'io-actions');
     actions.appendChild(copyButton(argsText));
@@ -1629,9 +2272,23 @@
     return node;
   }
 
-  // 把一条工具结果补进它对应的调用卡片（或独立成行——孤儿结果不丢）。
-  // 折叠行的尾巴换成「输入 → 输出」的字符数 + 状态：一行里就能看出这次调用
-  // 吃了多少、回了多少、成没成，不必展开。
+  // 折叠行的尾巴：`输入 → 输出 字符数 · ok/error`（再加附件张数）。
+  // 一行里就能看出这次调用吃了多少、回了多少、成没成、带了几张图，不必展开。
+  function updateCallTail(node) {
+    if (!node.tail) { return; }
+    var tail = node.argsChars + ' 字符';
+    if (node.result) {
+      var text = String(node.result.line.text || '');
+      tail = node.argsChars + ' → ' + text.length + ' 字符' +
+        (node.result.status === 'error' ? ' · error' : node.result.status === 'ok' ? ' · ok' : '');
+    }
+    if (node.attachments) { tail += ' · 附件 ' + node.attachments + ' 张（user 轮）'; }
+    node.tail.textContent = tail;
+  }
+
+  // 把一条工具回执补进它对应的调用卡片（同一次调用 = **一行**；配不上的回执
+  // 另起一行，见 standaloneResult）。回执与调用合并不只是省地方：折叠态那一行
+  // 就写完了 `工具名 · 摘要 · 输入→输出 字符数 · ok/error`。
   function attachResult(node, line) {
     var text = String(line.text || '');
     var status = classifyResult(text);
@@ -1642,16 +2299,39 @@
     actions.appendChild(copyButton(text));
     node.card.appendChild(actions);
     node.details.classList.add('status-' + status);
-    if (node.tail) {
-      node.tail.textContent = node.argsChars + ' → ' + text.length + ' 字符' +
-        (status === 'error' ? ' · error' : status === 'ok' ? ' · ok' : '');
-    }
+    updateCallTail(node);
     return node;
+  }
+
+  /*
+   * 图片轮（带 images 的 user 行）作为**附件**并进对应调用/回执的卡片：
+   * 与「输入 / 输出」同属一次调用，展开才看到缩略图（点图进灯箱）。
+   */
+  function attachImages(host, line, attr) {
+    var imgs = line.images || [];
+    if (!imgs.length) { return host; }
+    // 宿主可以是调用卡片（node.card）也可以是系统消息块（任务提示）：图片归属
+    // 决定挂哪儿——工具图片回执挂那次调用，会话开头投喂的原图挂任务。
+    var box = host.card || host;
+    box.appendChild(el('div', 'io-divider'));
+    var section = el('div', 'io-section');
+    section.appendChild(el('div', 'io-label', '附件（user 轮）'));
+    var body = el('div', 'attach-body');
+    if (line.text) { body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'imgtext.' + line.n)); }
+    body.appendChild(imageStrip(line));
+    section.appendChild(body);
+    box.appendChild(section);
+    section.appendChild(el('div', 'attach-note',
+      '这一轮是 user 轮发出的（' + (attr && attr.kind === 'task' ? '会话开头的原图投喂，作为任务的输入' : '工具的输入/附件') +
+      '）· ' + attributionText(attr)));
+    host.attachments = (host.attachments || 0) + imgs.length;
+    if (host.details) { updateCallTail(host); }
+    return host;
   }
 
   function standaloneResult(line) {
     var info = state.calls.get(line.tool_call_id);
-    var name = info ? info.name : '(未配对的工具调用)';
+    var name = info ? info.name : '(未配对的工具回执)';
     var text = String(line.text || '');
     var status = classifyResult(text);
     var d = disclosureLine('disclosure-result status-' + status,
@@ -1662,8 +2342,246 @@
     actions.appendChild(copyButton(text));
     card.appendChild(actions);
     d.appendChild(card);
-    if (!info && line.tool_call_id) { d.title = '未找到配对的工具调用：id ' + line.tool_call_id; }
+    if (!info) {
+      d.title = line.tool_call_id
+        ? '未找到配对的工具调用：id ' + line.tool_call_id
+        : '这条回执行没有 tool_call_id，无法与调用配对';
+    }
     return d;
+  }
+
+  /* ---------- 图片轮 / 任务块 ---------- */
+
+  // 图片引用（file://media/<sha>.jpg 之类）的**文件名**：长哈希只留前 8 位显示，
+  // 完整名字在缩略图的 title 与 alt 上（沿用 Go 侧"哈希当不了名字"的同一口径）。
+  function refBaseName(ref) {
+    var s = String(ref || '').split('?')[0];
+    var i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
+
+  function shortFileName(name) {
+    var s = String(name || '');
+    var dot = s.lastIndexOf('.');
+    var stem = dot > 0 ? s.slice(0, dot) : s;
+    var ext = dot > 0 ? s.slice(dot) : '';
+    if (/^[0-9a-f]{32,}$/i.test(stem)) { return stem.slice(0, 8) + ext; }
+    return s;
+  }
+
+  // 作图任务把原图印刷尺寸写在正文里（ORIGINAL FIGURE SIZE: 36.9mm x 20.1mm）
+  function originalFigureSize(text) {
+    var m = /ORIGINAL\s+FIGURE\s+SIZE\s*:\s*([0-9.]+\s*mm\s*[x×]\s*[0-9.]+\s*mm)/i.exec(String(text || ''));
+    return m ? m[1].replace(/\s+/g, ' ') : '';
+  }
+
+  // 图片轮的一行摘要：几张 + 原图尺寸（取得到就写）+ 文件名
+  function imageTurnSummary(line) {
+    var imgs = (line && line.images) || [];
+    var bits = [imgs.length + ' 张图片'];
+    var size = originalFigureSize(line && line.text);
+    if (size) { bits.push(size); }
+    var names = imgs.map(function (r) { return shortFileName(refBaseName(r)); });
+    if (names.length) {
+      bits.push(names.slice(0, 2).join('、') + (names.length > 2 ? ' 等 ' + names.length + ' 个文件' : ''));
+    }
+    return bits.join(' · ');
+  }
+
+  /*
+   * 图片轮该归到哪次调用：往前找**最近的调用或回执**（assistant 的 tool_calls、
+   * 或已配对的 tool 回执行；同批图片轮继续往前找）。中间隔着任务提示或普通助手
+   * 正文就说明它们不是一回事——配不上就让它自己成行（左对齐、同样默认折叠）。
+   */
+  /*
+   * 带图 user 轮的**工具归属**（第八条）。wire 上图片只能走 user 消息（tool 消息的
+   * content 只能是文本），所以归属只能从**句柄文本 + 顺序**里推断，绝不新增字段：
+   *   · 句柄以 `Tool image output` 开头（工具图片回执的固定前缀，旧转录同样是它）：
+   *       句柄里有 `(call <id>)`  → 精确匹配那一次调用（新转录会写明归属）；
+   *       只有 `from <tool>`      → 该轮里同名、且还没被认领的那一次调用；
+   *       两者都没有（旧转录）    → 该轮里还没被认领的那一次调用（纯顺序推断）；
+   *   · 不是句柄（会话开头"投喂原图"的那一轮）→ 归属到本会话**第一条任务**
+   *     （第一条不带图的 user 行）的输入附件，不塞给任何工具。
+   * 每条结果都带 how（依据），轨迹页据此标"精确匹配 / 由顺序推断"，让人能核对。
+   */
+  var IMAGE_HANDLE_RE = /^Tool image output\b/i;
+  var IMAGE_CALL_RE = /\(call\s+([A-Za-z0-9_.:-]+)\)/;
+  var IMAGE_FROM_RE = /\bfrom\s+([A-Za-z0-9_.:-]+)/i;
+
+  // 归属结果按"会话 + 行数"缓存：渲染是增量的，行数变了就重算一遍。
+  function imageAttributions() {
+    var sig = (state.current ? state.current.id : '') + ':' + state.lines.length;
+    if (state.imgAttr && state.imgAttr.sig === sig) { return state.imgAttr.map; }
+
+    var map = {};
+    var claims = {};       // callId → 已被几张图认领
+    var roundCalls = [];   // 最近一条带 tool_calls 的助手消息发起的调用
+    var firstTask = 0;     // 本会话第一条任务（不带图的 user 行）
+    state.lines.forEach(function (l) {
+      if (!l || l.bad || (l.t && l.t !== 'msg')) { return; }
+      if (l.role === 'user' && !(l.images && l.images.length) && !firstTask) { firstTask = l.n; }
+    });
+
+    state.lines.forEach(function (line) {
+      if (!line || line.bad || (line.t && line.t !== 'msg')) { return; }
+      if (line.role === 'assistant') {
+        var calls = line.tool_calls || [];
+        if (calls.length) {
+          roundCalls = calls.map(function (c) {
+            return { id: c.id, name: (c.function || {}).name || '', lineN: line.n };
+          });
+        }
+        return;
+      }
+      if (line.role !== 'user' || !(line.images && line.images.length)) { return; }
+
+      var text = String(line.text || '').trim();
+      var entry = { kind: 'none', how: '', callId: '', name: '', lineN: line.n, taskLineN: firstTask };
+      if (IMAGE_HANDLE_RE.test(text)) {
+        var idm = IMAGE_CALL_RE.exec(text);
+        var frm = IMAGE_FROM_RE.exec(text);
+        entry.name = frm ? frm[1] : '';
+        var pick = null;
+        if (idm) {
+          roundCalls.forEach(function (c) { if (!pick && c.id === idm[1]) { pick = c; } });
+          if (!pick && state.callNodes && state.callNodes[idm[1]]) {
+            pick = { id: idm[1], name: entry.name, lineN: 0 };
+          }
+          if (pick) { entry.how = 'call-id'; }
+        }
+        if (!pick && entry.name) {
+          roundCalls.forEach(function (c) {
+            if (!pick && c.name === entry.name && !claims[c.id]) { pick = c; entry.how = 'tool-name'; }
+          });
+        }
+        if (!pick) {
+          roundCalls.forEach(function (c) {
+            if (!pick && !claims[c.id]) { pick = c; entry.how = 'order'; }
+          });
+        }
+        if (pick) {
+          claims[pick.id] = (claims[pick.id] || 0) + 1;
+          entry.kind = 'call';
+          entry.callId = pick.id;
+          if (!entry.name) { entry.name = pick.name; }
+        }
+      } else if (firstTask) {
+        // 会话开头投喂原图的轮：归到第一条任务（它是那次作图的输入），不塞给工具。
+        entry.kind = 'task';
+        entry.how = 'task';
+      }
+      map[line.n] = entry;
+    });
+
+    state.imgAttr = { sig: sig, map: map };
+    return map;
+  }
+
+  // 归属依据的中文说明（对话页的附件脚注与轨迹页共用同一套说法）。
+  function attributionText(attr) {
+    if (!attr) { return ''; }
+    switch (attr.how) {
+      case 'call-id':
+        return '归属：call ' + attr.callId + (attr.name ? '（' + attr.name + '）' : '');
+      case 'tool-name':
+        return '归属：call ' + attr.callId + '（按工具名 ' + attr.name + ' 匹配）';
+      case 'order':
+        return '归属：由顺序推断（本轮的 call ' + attr.callId + '）';
+      case 'task':
+        return '归属：本会话任务（这一段是投喂给任务的原图）';
+      default:
+        return '归属：未识别';
+    }
+  }
+
+  /*
+   * 图片轮自己的折叠行（配不上调用时）：与工具行同一套词汇——16px 插槽 +
+   * 名称 + 圆点 + 一行摘要 + 右侧张数；**默认折叠**，点开才看具体图片。
+   * 名字里点明这是 **user 轮**发出的（它就是给模型的输入，不是"用户的话"）。
+   */
+  function imageTurnRow(line, attr) {
+    var imgs = line.images || [];
+    var key = 'image.' + state.current.id + '.' + line.n;
+    var d = disclosureLine('disclosure-image', '图片（user 轮）', imageTurnSummary(line),
+      imgs.length + ' 张', storeGet(key) === '1');
+    var body = el('div', 'image-body');
+    if (line.text) { body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'imgtext.' + line.n)); }
+    body.appendChild(imageStrip(line));
+    if (attr) { body.appendChild(el('div', 'attach-note', attributionText(attr))); }
+    d.appendChild(body);
+    d.title = '这一轮是 user 轮发出的（把图片投给模型），不是人打的字\n' +
+      IMAGE_WIRE_TITLE + '\n' + attributionText(attr) + '\n' + imageTurnSummary(line);
+    d.addEventListener('toggle', function () { storeSet(key, d.open ? '1' : '0'); });
+    return d;
+  }
+
+  // 图片轮做成一条独立消息行（左对齐，永远不靠右）。
+  function imageTurnSection(line, attr) {
+    var wrap = el('section', 'msg msg-image');
+    wrap.appendChild(imageTurnRow(line, attr));
+    return wrap;
+  }
+
+  /*
+   * 不带图的 user 行 = harness 自己发的任务提示，按**系统消息**呈现：
+   *   · 角色标签是「系统」+ 次级标签「user 轮」（这一轮确实是 user 角色发出的）；
+   *   · 安静样式（弱色、无气泡），正文仍然是正文；
+   *   · **与思考/工具展开同一套折叠**：默认只露前 SYSTEM_PREVIEW_LINES 行（渐隐），
+   *     点「展开全文（N 行 / M 字符）」看全文，展开后限高内滚、可「收起」——
+   *     几千字的任务提示否则会把一屏占满。
+   */
+  function systemTurnSection(line) {
+    var msg = el('section', 'msg msg-system');
+    var head = el('div', 'sys-line');
+    head.appendChild(el('span', 'sys-badge', '系统'));
+    head.appendChild(el('span', 'sys-meta', 'user 轮'));
+    head.appendChild(el('span', 'line-summary', firstLine(line.text)));
+    msg.appendChild(head);
+
+    var raw = String(line.text || '');
+    if (!raw) {
+      msg.appendChild(el('div', 'note', '（无正文）'));
+      return msg;
+    }
+    var key = 'sys.' + state.current.id + '.' + line.n;
+    var lines = raw.split('\n');
+    var long = lines.length > SYSTEM_PREVIEW_LINES;
+    var expanded = storeGet('text.' + key) === '1';
+    var scroll = el('div', 'sys-scroll');
+    // 正文按 Markdown 开关渲染（与消息正文同一个渲染器），但**折叠只由这一层
+    // 负责**：不套 bodyBlock 的第二层折叠，否则会冒出两个「展开全文」按钮。
+    if (state.markdown) {
+      var md = el('div', 'md-body sys-md');
+      md.appendChild(renderMarkdown(raw));
+      scroll.appendChild(md);
+    } else {
+      scroll.appendChild(el('pre', 'body-text sys-text', raw));
+    }
+    var paint = function () {
+      scroll.classList.toggle('folded', long && !expanded);
+      scroll.style.maxHeight = (long && !expanded)
+        ? (SYSTEM_PREVIEW_LINES * 24) + 'px'
+        : 'var(--code-scroll-h)';
+    };
+    paint();
+    msg.appendChild(scroll);
+    if (long) {
+      var toggle = el('button', 'text-toggle');
+      toggle.type = 'button';
+      var label = function () {
+        toggle.textContent = foldLabel(expanded, lines.length, raw.length);
+      };
+      label();
+      toggle.addEventListener('click', function () {
+        expanded = !expanded;
+        storeSet('text.' + key, expanded ? '1' : '0');
+        paint();
+        label();
+      });
+      msg.appendChild(toggle);
+    }
+    msg.title = '这一轮是 user 角色发出的任务提示（系统性质，不是人打的字）';
+    return msg;
   }
 
   function anchor(node, line) {
@@ -1672,7 +2590,7 @@
   }
 
   /* Returns the element for one transcript line, or null when it is skipped. */
-  function renderLine(line) {
+  function renderLine(line, idx) {
     if (line.bad) {
       state.badLines++;
       updateBanner();
@@ -1683,20 +2601,52 @@
     if (!line.role) { return null; }
 
     var isToolCall = line.role === 'assistant' && line.tool_calls && line.tool_calls.length > 0;
-    if (state.onlyTools && line.role !== 'tool' && !isToolCall) { return null; }
+    // 带图的 user 行是"把图片投给模型"的那一轮（图片投喂 / 工具回执），
+    // 不是用户的话，所以「仅看工具调用」里也要看得见它。
+    var isImageTurn = line.role === 'user' && !!(line.images && line.images.length);
+    if (state.onlyTools && line.role !== 'tool' && !isToolCall && !isImageTurn) { return null; }
 
-    if (line.role === 'user') {
-      var userMsg = el('section', 'msg msg-user');
-      var bubble = el('div', 'bubble');
-      if (line.text) { bubble.appendChild(collapsibleText(line.text, LONG_TEXT_LINES, 'user.' + line.n)); }
-      userMsg.appendChild(bubble);
-      if (line.images && line.images.length) { userMsg.appendChild(imageStrip(line)); }
-      return anchor(userMsg, line);
-    }
+      if (line.role === 'user') {
+        /*
+         * 两条路都不靠右对齐（右侧气泡那套已经去掉）：
+         *   · **带图**的 user 行是图片投喂/工具图片回执 → 按归属挂到那一次调用
+         *     （会话开头的原图则挂到第一条任务）上，配不上才单独一行折叠行；
+         *   · **不带图**的 user 行是 harness 自己发的长任务提示 → 按**系统消息**
+         *     呈现（安静样式 + 「系统 · user 轮」标签），默认只露一小段，可展开。
+         */
+        if (isImageTurn) {
+          var attr = imageAttributions()[line.n] || { kind: 'none', how: '', callId: '', taskLineN: 0 };
+          if (attr.kind === 'call' && state.callNodes[attr.callId]) {
+            var callNode = state.callNodes[attr.callId];
+            attachImages(callNode, line, attr);
+            return anchor(callNode.details, line);
+          }
+          if (attr.kind === 'task' && attr.taskLineN) {
+            var taskNode = state.anchors[attr.taskLineN];
+            if (taskNode) {
+              attachImages(taskNode, line, attr);
+              return anchor(taskNode, line);
+            }
+            // 会话开头的原图轮排在任务**前面**：这时任务节点还没建出来，先记账，
+            // 等任务行渲染时再挂上去（否则只能退化成一条孤立的图片行）。
+            pendingTaskImages[attr.taskLineN] = pendingTaskImages[attr.taskLineN] || [];
+            pendingTaskImages[attr.taskLineN].push({ line: line, attr: attr });
+            return null;
+          }
+          return anchor(imageTurnSection(line, attr), line);
+        }
+        var msg = systemTurnSection(line);
+        var waiting = pendingTaskImages[line.n];
+        if (waiting && waiting.length) {
+          waiting.forEach(function (w) { attachImages(msg, w.line, w.attr); });
+          delete pendingTaskImages[line.n];
+        }
+        return anchor(msg, line);
+      }
 
     if (line.role === 'tool') {
       // 已配对的调用行已经带了输出，这一行就并入那张卡片（节点已在 DOM 里，
-      // 这里返回 null，不要把 <details> 从助手消息里搬走）。
+      // 这里返回 null）：**一次调用只占一行**，不另起一行"结果"。
       var node = line.tool_call_id ? state.callNodes[line.tool_call_id] : null;
       if (node) {
         attachResult(node, line);
@@ -1717,7 +2667,7 @@
         // 思考行不是独立步骤：轨迹里"思考"这一行跳回的就是这条助手消息。
         msg.appendChild(thinkingDisclosure(line));
       }
-      if (line.text) { msg.appendChild(collapsibleText(line.text, LONG_TEXT_LINES, 'asst.' + line.n)); }
+      if (line.text) { msg.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'asst.' + line.n)); }
       (line.tool_calls || []).forEach(function (call) {
         msg.appendChild(toolDisclosure(call).details);
       });
@@ -1728,7 +2678,7 @@
     }
 
     var other = el('section', 'msg msg-other');
-    other.appendChild(collapsibleText(line.text || '(无正文)', LONG_TEXT_LINES, 'other.' + line.n));
+    other.appendChild(bodyBlock(line.text || '(无正文)', LONG_TEXT_LINES, 'other.' + line.n));
     return anchor(other, line);
   }
 
@@ -1776,6 +2726,7 @@
 
   function renderTimeline() {
     clear(refs.timeline);
+    pendingTaskImages = {};
     state.msgSeq = 0;
     state.toolSeq = 0;
     state.badLines = 0;
@@ -1788,8 +2739,8 @@
     var rendered = 0;
     var summary = streamSummary();
     if (summary) { stream.appendChild(summary); rendered++; }
-    state.lines.forEach(function (line) {
-      var node = renderLine(line);
+    state.lines.forEach(function (line, idx) {
+      var node = renderLine(line, idx);
       if (node) { stream.appendChild(node); rendered++; }
     });
     if (rendered <= (summary ? 1 : 0)) {
@@ -1814,8 +2765,10 @@
       return;
     }
     var placeholder = stream.querySelector('.empty');
-    lines.forEach(function (line) {
-      var node = renderLine(line);
+    // 增量追加时行号要接着已渲染的部分数：图片轮配对要用 state.lines 里的下标。
+    var base = state.lines.length - lines.length;
+    lines.forEach(function (line, idx) {
+      var node = renderLine(line, base + idx);
       if (node) { stream.appendChild(node); }
     });
     if (placeholder && placeholder.parentNode && stream.children.length > 1) {
@@ -1840,12 +2793,31 @@
    * 状态 / 字符数 / 耗时。点一行跳到对话里对应的那条消息；左侧的箭头展开
    * 完整的输入输出（不离开这个标签页）。
    */
+  // 带图 user 轮的 wire 真相：OpenAI 兼容 schema 里 tool 消息的 content 只能是
+  // 文本，图片只能作为 user 消息的多段内容回灌，所以"工具图片回执"在转录里表现为
+  // 紧随工具回执行的一条**带图 user 轮**（见 internal/session/session.go）。
+  var IMAGE_WIRE_TITLE = 'user 消息承载图片（tool 消息的 content 只能文本，OpenAI 兼容 schema 限制）' +
+    ' · text + image_url(data:image/jpeg;base64,…)';
+
+  // 图片占位标记：工具回执正文里如果写了这一笔（调试日志里的形状），说明图片在
+  // 紧随其后的 user 轮里。我们自己的转录通常只有紧邻关系，所以两种都认。
+  var IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
+
+  function nextMsgLine(lines, idx) {
+    for (var i = idx + 1; i < lines.length; i++) {
+      if (lines[i] && !lines[i].bad && lines[i].t === 'msg') { return lines[i]; }
+    }
+    return null;
+  }
+
   function trajectoryRows() {
     var rows = [];
     var callOf = {};
+    // 哪些带图 user 轮的图片是**上一行工具回执**投出来的（两行互相提示，但不合并）。
+    var imageAfterTool = {};
     state.lines.forEach(function (l) {
-      if (!l || l.bad) { return; }
-      if (l.t === 'msg' && l.role === 'assistant') {
+      if (!l || l.bad || l.t !== 'msg') { return; }
+      if (l.role === 'assistant') {
         (l.tool_calls || []).forEach(function (c) {
           var fn = c.function || {};
           callOf[c.id] = { name: fn.name || '?', ts: l.ts || '', n: l.n, args: String(fn.arguments || '') };
@@ -1853,7 +2825,7 @@
       }
     });
 
-    state.lines.forEach(function (line) {
+    state.lines.forEach(function (line, idx) {
       if (!line || line.bad) { return; }
       if (line.t === 'meta') {
         rows.push({
@@ -1881,37 +2853,97 @@
       }
       if (line.t !== 'msg' || !line.role) { return; }
 
-      if (line.reasoning) {
+      /*
+       * 步骤分类与对话页一一对应：
+       *   · 带图的 user 轮在类型列照旧是「用户」，摘要里写明 `图片 ×N` 并可展开看图；
+       *   · 点行跳回对话里**合并后的那一块**（对话是合并的，轨迹是真实的）。
+       */
+      if (line.role === 'user' && line.images && line.images.length) {
+        var attr = imageAttributions()[line.n] || { kind: 'none', how: '', callId: '', taskLineN: 0 };
+        var fromTool = !!imageAfterTool[line.n];
+        // 跳回对话里"合并后的那一块"：归到调用就跳那次调用，归到任务就跳任务行，
+        // 都没认出来才跳自己这一行。
+        var jumpTo = attr.kind === 'call' && attr.callId && state.callNodes[attr.callId]
+          ? state.callNodes[attr.callId].lineN
+          : (attr.kind === 'task' && attr.taskLineN ? attr.taskLineN : line.n);
         rows.push({
-          kind: 'think', tag: '思考', name: 'reasoning',
-          summary: firstLine(line.reasoning), chars: line.reasoning.length,
-          status: '', jump: line.n, detail: { thinking: line.reasoning }
+          kind: 'user', tag: '用户', name: '用户',
+          summary: (fromTool ? '接上一行工具回执 · ' : '') + '图片 ×' + line.images.length + ' · ' +
+            (firstLine(line.text) || '（无正文）') + ' · ' + attributionText(attr),
+          title: IMAGE_WIRE_TITLE + '\n' + attributionText(attr) +
+            (attr.how === 'call-id' ? '（句柄里写了 call id，属于精确匹配）' : '（旧转录没有 call id，按顺序推断；新转录会写上归属）') +
+            (fromTool ? '\n这一轮的图片就是上一行工具回执投出来的（同一件事的两段 wire 表达，所以两行不合并）' : ''),
+          chars: String(line.text || '').length,
+          status: '', jump: jumpTo,
+          images: line.images,
+          detail: { user: String(line.text || '') || '（这一轮没有正文）' }
         });
-      }
-      if (line.text) {
-        var isTool = line.role === 'tool';
-        var status = isTool ? classifyResult(line.text) : '';
-        rows.push({
-          kind: isTool ? 'result' : (line.role === 'user' ? 'user' : 'msg'),
-          tag: isTool ? '结果' : (line.role === 'user' ? '用户' : '助手'),
-          name: isTool ? ((callOf[line.tool_call_id] && callOf[line.tool_call_id].name) || 'tool') : roleName(line.role),
-          summary: firstLine(line.text), chars: line.text.length,
-          status: status, jump: line.n,
-          time: isTool ? callDuration(callOf[line.tool_call_id], line) : 0,
-          detail: isTool ? { output: String(line.text) } : (line.role === 'user' ? { user: String(line.text) } : { message: String(line.text) })
+      } else if (line.role === 'user') {
+        // 会话开头的原图投喂轮归到这条任务上：轨迹里也点明"它带着附件"。
+        var fed = 0;
+        var attrs = imageAttributions();
+        Object.keys(attrs).forEach(function (n) {
+          if (attrs[n].kind === 'task' && attrs[n].taskLineN === line.n) { fed++; }
         });
-      }
-      (line.tool_calls || []).forEach(function (c) {
-        var fn = c.function || {};
-        var name = fn.name || '(未命名工具)';
-        var args = String(fn.arguments || '');
         rows.push({
-          kind: 'tool', tag: '工具', name: name,
-          summary: toolSummary(name, fn.arguments), chars: args.length,
+          kind: 'user', tag: '用户', name: '用户',
+          summary: firstLine(line.text) + (fed ? ' · 附件 图片 ×' + fed : ''),
+          title: fed
+            ? '会话开头的原图投喂轮归到了这条任务（对话页里它们收在同一个块里）'
+            : '点击跳到对话里对应的那条消息',
+          chars: String(line.text || '').length,
           status: '', jump: line.n,
-          detail: { input: prettyJSON(args) || args }
+          detail: { user: String(line.text || '') }
         });
-      });
+      } else if (line.role === 'assistant') {
+        if (line.reasoning) {
+          rows.push({
+            kind: 'think', tag: '思考', name: 'reasoning',
+            summary: firstLine(line.reasoning), chars: line.reasoning.length,
+            status: '', jump: line.n, detail: { thinking: line.reasoning }
+          });
+        }
+        if (line.text) {
+          rows.push({
+            kind: 'msg', tag: '助手', name: 'AI',
+            summary: firstLine(line.text), chars: line.text.length,
+            status: '', jump: line.n, detail: { message: String(line.text) }
+          });
+        }
+        (line.tool_calls || []).forEach(function (c) {
+          var fn = c.function || {};
+          var name = fn.name || '(未命名工具)';
+          var args = String(fn.arguments || '');
+          rows.push({
+            kind: 'tool', tag: '工具', name: name,
+            summary: toolSummary(name, fn.arguments), chars: args.length,
+            status: '', jump: line.n,
+            detail: { input: prettyJSON(args) || args }
+          });
+        });
+      } else if (line.role === 'tool') {
+        // 工具结果**独立成行**（轨迹就是让人看清真实结构的）：配对得上的用调用名，
+        // 配不上的注明，不并进调用行。
+        var info = line.tool_call_id ? callOf[line.tool_call_id] : null;
+        var text = String(line.text || '');
+        var after = nextMsgLine(state.lines, idx);
+        var imageNext = !!(after && after.role === 'user' && after.images && after.images.length);
+        if (imageNext) { imageAfterTool[after.n] = true; }
+        var hint = imageNext
+          ? (IMAGE_PLACEHOLDER.test(text) ? ' · 图片见下一行用户轮' : ' · 图片在下一行用户轮里')
+          : '';
+        rows.push({
+          kind: 'result', tag: '结果',
+          name: info ? info.name : '(未配对的工具回执)',
+          summary: firstLine(text) + hint, chars: text.length,
+          title: imageNext
+            ? '这一行是工具回执：tool 消息的 content 只能是文本，随行的图片被回灌在紧随其后的 user 轮里（两行是同一件事，保持两行不合并）'
+            : '点击跳到对话里对应的那条消息',
+          status: classifyResult(text), jump: line.n,
+          time: callDuration(info, line),
+          detail: { output: text }
+        });
+      }
     });
     return rows;
   }
@@ -1925,6 +2957,7 @@
     return t1 - t0;
   }
 
+  // 轨迹的类型 chip 按**转录里的真实角色**列（对话页是合并后的呈现，两者语义不同）。
   var TRAJ_KINDS = [
     { id: 'user', label: '用户' },
     { id: 'msg', label: '助手' },
@@ -1947,16 +2980,23 @@
     Object.keys(row.detail || {}).forEach(function (k) {
       var section = el('div');
       section.appendChild(el('div', 'traj-detail-title', labels[k] || k));
-      var pre = el('pre', 'code');
       var text = String(row.detail[k] || '');
-      if (k === 'input' || k === 'request') { appendHighlighted(pre, text); }
-      else { pre.textContent = text; }
-      section.appendChild(pre);
+      // 输入 / 输出 / 用量行与对话页同源：JSON 高亮，其余纯文本。
+      if (k === 'input' || k === 'request' || k === 'output') {
+        section.appendChild(machineBlock(text, 'code'));
+      } else {
+        var pre = el('pre', 'code', text);
+        section.appendChild(pre);
+      }
       var actions = el('div', 'row-actions');
       actions.appendChild(copyButton(text));
       section.appendChild(actions);
       body.appendChild(section);
     });
+    // 图片轮的展开区里也要能看到图（点图进灯箱，与对话页同一个灯箱）。
+    if (row.images && row.images.length) {
+      body.appendChild(imageStrip({ images: row.images }));
+    }
     return body;
   }
 
@@ -2028,7 +3068,7 @@
       var tr = el('tr', 'traj-row');
       tr.setAttribute('data-kind', row.kind);
       if (row.status === 'error') { tr.setAttribute('data-error', 'true'); }
-      tr.title = '点击跳到对话里对应的那条消息';
+      tr.title = row.title || '点击跳到对话里对应的那条消息';
 
       var tdN = el('td', 'traj-num');
       var discl = el('button', 'traj-disclose', state.trajOpen[key] ? '▾' : '▸');
@@ -2240,6 +3280,26 @@
     setToggle(refs.onlyTools, state.onlyTools);
     renderTimeline();
   });
+  /*
+   * Markdown 开关：默认开启，关掉回到纯文本 pre-wrap（两条路径共用同一套折叠
+   * 记忆键）。切换后重画消息流——详情栏里的系统提示词也一起重画。
+   */
+  function applyMarkdownToggle() {
+    setToggle(refs.mdToggle, state.markdown);
+    if (refs.mdToggle) {
+      refs.mdToggle.title = state.markdown
+        ? '消息正文按 Markdown 渲染（标题 / 列表 / 代码块 / 表格），点击回到纯文本'
+        : '消息正文按纯文本显示（pre-wrap），点击改用 Markdown 渲染';
+    }
+  }
+  if (refs.mdToggle) {
+    refs.mdToggle.addEventListener('click', function () {
+      state.markdown = !state.markdown;
+      storeSet('markdown', state.markdown ? '1' : '0');
+      applyMarkdownToggle();
+      renderTimeline();
+    });
+  }
   if (refs.themeToggle) { refs.themeToggle.addEventListener('click', toggleTheme); }
   if (refs.sideToggle) { refs.sideToggle.addEventListener('click', toggleSidebar); }
   if (refs.detailsToggle) { refs.detailsToggle.addEventListener('click', toggleDetails); }
@@ -2285,6 +3345,7 @@
     setToggle(refs.follow, state.follow);
     setToggle(refs.collapseThinking, false);
     setToggle(refs.onlyTools, false);
+    applyMarkdownToggle();
     switchView('chat');
 
     if (MODE === 'static') {

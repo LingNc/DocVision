@@ -324,7 +324,21 @@ type SessionInfo struct {
 	// image base name, its page in the book, its position among the book's
 	// images, the block type and the caption. They make per-image sessions
 	// findable by image name / page / order / type instead of by hash.
+	//
+	// ImageLabel / ImageFile / ImageShort / ImagePath are the display side of
+	// that identity. MinerU names extracted images by content hash and a
+	// 64-character hash is not a name a reader can use, so the sidebar title and
+	// --list show the caption, else the readable label the transcript file name
+	// carries, else **ImageShort** ("bfeafce8.jpg": 8 characters of the hash, 12
+	// when two images of the same book would collide, plus the original
+	// extension). The full file name, the doc_index path
+	// ("images/<book>/<file>") and the hash itself stay in the row tooltip and
+	// in the search haystack, so no information is lost.
 	ImageName    string `json:"imageName,omitempty"`
+	ImageLabel   string `json:"imageLabel,omitempty"`
+	ImageFile    string `json:"imageFile,omitempty"`
+	ImageShort   string `json:"imageShort,omitempty"`
+	ImagePath    string `json:"imagePath,omitempty"`
 	ImageOrder   int    `json:"imageOrder,omitempty"`
 	Page         int    `json:"page,omitempty"`
 	ImageType    string `json:"imageType,omitempty"`

@@ -321,6 +321,67 @@ type RunOptions struct {
 	ForceNoTools bool
 }
 
+// visionTurn is one tool-produced image waiting to be handed back to the model.
+// The call id and the tool name ride along so the handle text can say **which
+// call** the image belongs to: tool-role content is text-only in the OpenAI
+// schema, so an image can only travel on a user message, and a user message has
+// nowhere to put a tool_call_id. Ownership therefore lives in the text handle,
+// never in a wire field (DSH does the same: its internal model keeps the image
+// as an attachment of the tool-result block and only flattens it into
+// text + image_url at request time, with an image handle text in front).
+type visionTurn struct {
+	mime   string
+	b64    string
+	callID string
+	name   string
+}
+
+// toolImageTextPrefix opens every tool-image handle. It is load-bearing: the
+// viewer recognises tool image turns in **old** transcripts by this prefix, so
+// it must never change.
+const toolImageTextPrefix = "Tool image output"
+
+// toolImageHandleText renders the text handle that precedes a tool image on its
+// user turn, e.g.
+//
+//	Tool image output from view_pdf (call call_abc123) (for your visual review):
+//
+// The attribution part is omitted when the call is unknown, which keeps the
+// handle readable and the prefix stable.
+func toolImageHandleText(v visionTurn) string {
+	if v.callID == "" && v.name == "" {
+		return toolImageTextPrefix + " (for your visual review):"
+	}
+	handle := toolImageTextPrefix
+	if v.name != "" {
+		handle += " from " + v.name
+	}
+	if v.callID != "" {
+		handle += " (call " + v.callID + ")"
+	}
+	return handle + " (for your visual review):"
+}
+
+// toolImageContent is the user message that carries one tool image back to the
+// model: a text part (the handle, which names the owning call) plus the image
+// as a data URI. It is deliberately a plain user message — no extra fields.
+func toolImageContent(v visionTurn) []map[string]interface{} {
+	return []map[string]interface{}{
+		{"type": "text", "text": toolImageHandleText(v)},
+		{"type": "image_url", "image_url": map[string]string{
+			"url": "data:" + v.mime + ";base64," + v.b64,
+		}},
+	}
+}
+
+// appendToolImage appends that user turn to the live request as well as to the
+// transcript, so a reader of the transcript sees the same thing the model saw.
+func (s *Session) appendToolImage(v visionTurn) {
+	content := toolImageContent(v)
+	s.messages = append(s.messages, ChatMessage{Role: "user", Content: content})
+	s.appendTranscript(ChatMessage{Role: "user", Content: toolImageContent(v)})
+}
+
 // Run processes one logical user turn: sends the message, executes any
 // tool calls, feeds results back, and repeats until the model produces
 // a final text answer or the tool budget is exhausted (at which point
@@ -483,7 +544,6 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			// assistant tool_calls turn to be the matching tool responses,
 			// so an interleaved user turn makes the next request fail with
 			// "insufficient tool messages following tool_calls message".
-			type visionTurn struct{ mime, b64 string }
 			var vision []visionTurn
 
 			for _, tc := range choice.Message.ToolCalls {
@@ -517,31 +577,17 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 					if mime == "" {
 						mime = "image/png"
 					}
-					vision = append(vision, visionTurn{mime: mime, b64: result.ImageBase64})
+					vision = append(vision, visionTurn{
+						mime: mime, b64: result.ImageBase64,
+						callID: tc.ID, name: tc.Function.Name,
+					})
 				}
 			}
 			// Vision feedback: tool images ride a user turn (tool role
 			// content is text-only in the OpenAI schema), appended once all
 			// tool responses are in place.
 			for _, v := range vision {
-				s.messages = append(s.messages, ChatMessage{
-					Role: "user",
-					Content: []map[string]interface{}{
-						{"type": "text", "text": "Tool image output (for your visual review):"},
-						{"type": "image_url", "image_url": map[string]string{
-							"url": "data:" + v.mime + ";base64," + v.b64,
-						}},
-					},
-				})
-				s.appendTranscript(ChatMessage{
-					Role: "user",
-					Content: []map[string]interface{}{
-						{"type": "text", "text": "Tool image output (for your visual review):"},
-						{"type": "image_url", "image_url": map[string]string{
-							"url": "data:" + v.mime + ";base64," + v.b64,
-						}},
-					},
-				})
+				s.appendToolImage(v)
 			}
 			toolRounds++
 			continue
@@ -575,23 +621,9 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 					if mime == "" {
 						mime = "image/png"
 					}
-					s.messages = append(s.messages, ChatMessage{
-						Role: "user",
-						Content: []map[string]interface{}{
-							{"type": "text", "text": "Tool image output (for your visual review):"},
-							{"type": "image_url", "image_url": map[string]string{
-								"url": "data:" + mime + ";base64," + result.ImageBase64,
-							}},
-						},
-					})
-					s.appendTranscript(ChatMessage{
-						Role: "user",
-						Content: []map[string]interface{}{
-							{"type": "text", "text": "Tool image output (for your visual review):"},
-							{"type": "image_url", "image_url": map[string]string{
-								"url": "data:" + mime + ";base64," + result.ImageBase64,
-							}},
-						},
+					s.appendToolImage(visionTurn{
+						mime: mime, b64: result.ImageBase64,
+						callID: tc.ID, name: tc.Function.Name,
 					})
 				}
 			}

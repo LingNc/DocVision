@@ -122,4 +122,88 @@ func TestToolImageTurnDoesNotBreakToolBlock(t *testing.T) {
 	if !strings.Contains(joined, "assistant,tool,tool,user") {
 		t.Fatalf("roles = %s, want the image user turn after both tool replies", joined)
 	}
+
+	// 归属句柄：这段 user 文本必须点名**是哪一次调用**投出来的图。旧转录靠
+	// 前缀 "Tool image output" 识别，所以前缀不能变；归属只写在文本里，wire 上
+	// 仍然是一条普通的 user 消息（不能给 user 消息塞 tool_call_id —— OpenAI 兼容
+	// schema 里没有这个位置，DSH 也是靠内部模型而不是 wire 字段）。
+	var parts []map[string]interface{}
+	for _, m := range msgs {
+		if m.Role != "user" {
+			continue
+		}
+		if cand, ok := m.Content.([]map[string]interface{}); ok {
+			parts = cand
+		}
+	}
+	if parts == nil {
+		t.Fatal("没有找到承载图片的 user 轮")
+	}
+	var handle string
+	var sawImage bool
+	for _, part := range parts {
+		if part["type"] == "text" {
+			handle, _ = part["text"].(string)
+		}
+		if part["type"] == "image_url" {
+			sawImage = true
+		}
+		if _, bad := part["tool_call_id"]; bad {
+			t.Error("user 消息里出现了 tool_call_id：这会违反 OpenAI 兼容 schema")
+		}
+	}
+	if !strings.HasPrefix(handle, toolImageTextPrefix) {
+		t.Errorf("句柄 = %q, want 以 %q 开头（旧转录的识别依赖这个前缀）", handle, toolImageTextPrefix)
+	}
+	if !strings.Contains(handle, "from view_image") || !strings.Contains(handle, "(call call_a)") {
+		t.Errorf("句柄 = %q, want 写明工具名与 call id", handle)
+	}
+	if !sawImage {
+		t.Error("user 轮里没有 image_url 段")
+	}
+}
+
+// TestToolImageHandleText 钉住句柄的三种形态（有归属 / 只有工具名 / 两者都没有）。
+func TestToolImageHandleText(t *testing.T) {
+	cases := []struct {
+		name string
+		in   visionTurn
+		want string
+	}{
+		{
+			name: "工具名 + call id",
+			in:   visionTurn{name: "view_pdf", callID: "call_abc123"},
+			want: "Tool image output from view_pdf (call call_abc123) (for your visual review):",
+		},
+		{
+			name: "只有工具名",
+			in:   visionTurn{name: "view_image"},
+			want: "Tool image output from view_image (for your visual review):",
+		},
+		{
+			name: "都没有（老路径）",
+			in:   visionTurn{},
+			want: "Tool image output (for your visual review):",
+		},
+	}
+	for _, tc := range cases {
+		if got := toolImageHandleText(tc.in); got != tc.want {
+			t.Errorf("%s: 句柄 = %q, want %q", tc.name, got, tc.want)
+		}
+		if !strings.HasPrefix(toolImageHandleText(tc.in), toolImageTextPrefix) {
+			t.Errorf("%s: 句柄前缀变了，旧转录会认不出来", tc.name)
+		}
+	}
+	// 内容块只有 text + image_url 两段，不带任何多余字段。
+	content := toolImageContent(visionTurn{mime: "image/png", b64: "aGk=", name: "view_image", callID: "call_a"})
+	if len(content) != 2 {
+		t.Fatalf("content 段数 = %d, want 2", len(content))
+	}
+	if content[0]["type"] != "text" || content[1]["type"] != "image_url" {
+		t.Errorf("content 形状不对: %v", content)
+	}
+	url, _ := content[1]["image_url"].(map[string]string)
+	if url["url"] != "data:image/png;base64,aGk=" {
+		t.Errorf("data URI = %q", url["url"])
+	}
 }
