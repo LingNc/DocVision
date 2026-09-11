@@ -921,9 +921,12 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	// project:style/manual.md，内联 11k 字符会跟着每轮请求重发。
 	_ = manualPath
 
-	// 本章会话的临时工作区；中断续跑时保留上次的树（不重新铺）。
+	// 本章会话的临时工作区；只有"转录与工作树都在"才算中断续跑（否则
+	// 回放一段没有文件的历史只会让会话空转，不如重来）。
 	trPath := filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")
-	work, cleanWork, err := r.chapterWorkTree(proj, clsName, base, fileExists(trPath), "")
+	workRoot := filepath.Join(proj, "work", "temp", "conv_"+base, "work")
+	resuming := fileExists(trPath) && fileExists(workRoot)
+	work, cleanWork, err := r.chapterWorkTree(proj, clsName, base, resuming, "")
 	if err != nil {
 		return err
 	}
@@ -964,13 +967,16 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 
 	// 会话转录（JSONL，图片走 file:// 引用）：单章转换中断后（进程被
 	// 杀 / 网络断连）下次从转录恢复上下文继续，不重烧 token。
+	// 中断续跑时才回放转录（resuming 已确认工作树也在）。
 	resumed := false
-	if msgs, err := session.LoadTranscript(trPath); err != nil {
-		r.log.LogWarning(tid, "[convert] 转录读取失败（忽略，按全新会话继续）:", err)
-	} else if len(msgs) > 0 {
-		sess.SetMessages(msgs)
-		resumed = true
-		r.log.Log(tid, "[convert] 恢复中断的转换会话:", base, "(", strconv.Itoa(len(msgs)), "条历史消息 )")
+	if resuming {
+		if msgs, err := session.LoadTranscript(trPath); err != nil {
+			r.log.LogWarning(tid, "[convert] 转录读取失败（忽略，按全新会话继续）:", err)
+		} else if len(msgs) > 0 {
+			sess.SetMessages(msgs)
+			resumed = true
+			r.log.Log(tid, "[convert] 恢复中断的转换会话:", base, "(", strconv.Itoa(len(msgs)), "条历史消息 )")
+		}
 	}
 	if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
