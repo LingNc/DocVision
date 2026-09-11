@@ -254,6 +254,24 @@ func (r *Runner) tempDir(proj, name string) (string, func(), error) {
 	return dir, cleanup, nil
 }
 
+// sessionBashTemp creates the scratch directory a session's sandboxed
+// bash sees as /tmp. It lives inside the project (<proj>/work/temp/
+// bash_<name>) so it can be inspected next to the rest of the run, it
+// PERSISTS across that session's bash calls (a per-call tmpfs silently
+// deleted files between calls), and it is removed when the session ends
+// unless latex.keep_temp_dirs / debug keeps it.
+func (r *Runner) sessionBashTemp(proj, name string) (string, func()) {
+	if proj == "" {
+		return "", func() {}
+	}
+	dir, cleanup, err := r.tempDir(proj, name)
+	if err != nil {
+		r.log.LogWarning(0, "[bash] 会话临时目录创建失败，/tmp 退回会话内 tmpfs:", err)
+		return "", func() {}
+	}
+	return dir, cleanup
+}
+
 // keepSessionFile deletes a session transcript unless records are kept.
 func (r *Runner) keepSessionFile(path string) {
 	if r.keepRecords() {

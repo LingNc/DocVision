@@ -139,12 +139,14 @@ func (r *Runner) assemblePhase(proj string) error {
 // with the project (original markdown, chapters, style) readable
 // read-only.
 func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool, submit *SubmitDoneTool) []session.Tool {
+	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_build")
+	defer cleanBashTmp()
 	tools := []session.Tool{
 		&ReadFileTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
 		&WriteWorkFileTool{Root: buildDir, AnyExt: true},
 		&EditWorkFileTool{Root: buildDir},
 		&GrepTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
-		&WorkBashTool{Root: buildDir, Mounts: r.sessionMounts(kindBook, buildDir), MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
+		&WorkBashTool{Root: buildDir, Mounts: r.sessionMounts(kindBook, buildDir), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		compile,
 		&ViewPDFTool{Mounts: r.sessionMounts(kindBook, buildDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ViewImageTool{Root: buildDir, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},

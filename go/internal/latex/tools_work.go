@@ -97,6 +97,32 @@ func (t *ReadFileTool) resolve(rel string) (full, label string, err error) {
 		}
 		return full, label, nil
 	}
+	if len(t.Mounts) > 0 {
+		// 有挂载表：先默认挂载点（可写的工作区），再依次查其它挂载点
+		// —— 与 bash 的路径空间一致，"自己的文件优先、项目文件兜底"。
+		if def, derr := v.DefaultMount(false); derr == nil {
+			if p, e := resolveInside(def.Dir, rel); e == nil && fileExists(p) {
+				return p, def.Name, nil
+			}
+		}
+		for _, m := range t.Mounts {
+			if m.Dir == "" {
+				continue
+			}
+			if p, e := resolveInside(m.Dir, rel); e == nil && fileExists(p) {
+				return p, m.Name, nil
+			}
+		}
+		if def, derr := v.DefaultMount(false); derr == nil {
+			if p, e := resolveInside(def.Dir, rel); e == nil {
+				if st, se := os.Stat(p); se == nil && st.IsDir() {
+					return "", "", fmt.Errorf("%s 是目录（用 grep 或 bash ls 查看目录内容）", rel)
+				}
+				return "", "", fmt.Errorf("文件不存在: %s%s（可用挂载点: %s）", rel, suggestNear(p, 12), v.Names())
+			}
+		}
+		return "", "", fmt.Errorf("文件不存在: %s（可用挂载点: %s）", rel, v.Names())
+	}
 	if p, e := resolveInside(t.Root, rel); e == nil && fileExists(p) {
 		return p, "work", nil
 	}
@@ -435,6 +461,12 @@ type GrepTool struct {
 	// are prefixed with the mount label so the model knows where the
 	// file lives.
 	AltRoots []AltRoot
+	// Mounts overrides Root/AltRoots with the session's real mount table
+	// (the same one its sandboxed bash sees). Without this, grep and
+	// read_file searched ONE tree while write_file wrote another and the
+	// sandbox showed a third — the convert sessions burned their first
+	// turns guessing which of "work", "project", "style" meant what.
+	Mounts []Mount
 }
 
 func (t *GrepTool) Name() string { return "grep" }
@@ -442,7 +474,7 @@ func (t *GrepTool) Name() string { return "grep" }
 func (t *GrepTool) Definition() map[string]any {
 	desc := "Search files for a pattern (Go regexp). path: a file, or a directory (recursive, text files only). " +
 		"Returns matched lines with 1-based line numbers; use read_file with those lines for context."
-	if v := vfsFrom(t.Root, t.AltRoots); len(v.Mounts) > 1 {
+	if v := t.vfs(); len(v.Mounts) > 1 {
 		desc += " " + v.Describe()
 	}
 	return map[string]any{"type": "function", "function": map[string]any{
@@ -460,6 +492,14 @@ func (t *GrepTool) Definition() map[string]any {
 	}}
 }
 
+// vfs returns the tool's namespace (Mounts wins over Root/AltRoots).
+func (t *GrepTool) vfs() *VFS {
+	if len(t.Mounts) > 0 {
+		return &VFS{Mounts: t.Mounts}
+	}
+	return vfsFrom(t.Root, t.AltRoots)
+}
+
 func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 	args, err := parseJSONObject(argsJSON)
 	if err != nil {
@@ -470,38 +510,60 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 		return session.ToolResult{}, fmt.Errorf("pattern 为空")
 	}
 	rel, _ := args["path"].(string)
-	if rel == "" {
+	rel = strings.TrimSpace(rel)
+	bare := rel == "" || rel == "." || rel == "./"
+	if bare {
 		rel = "."
 	}
 	maxMatches := intArg(args, "max_matches", 50)
 	if maxMatches > 200 {
 		maxMatches = 200
 	}
-	// 主工作区 + 只读附加根（后者命中加 label/ 前缀）。
-	mounts := []struct {
+	// 有挂载表时按 VFS 解析（`project:style`、`/work/x.tex` 都认），
+	// 无前缀的相对路径 = 遍历全部挂载点（提示词承诺 grep 搜整个项目）。
+	type target struct {
 		dir, label string
-	}{{t.Root, ""}}
-	for _, ar := range t.AltRoots {
-		if ar.Dir != "" {
-			mounts = append(mounts, struct{ dir, label string }{ar.Dir, ar.Label})
+		explicit   bool
+	}
+	var targets []target
+	if len(t.Mounts) > 0 {
+		v := &VFS{Mounts: t.Mounts}
+		if bare {
+			for _, m := range t.Mounts {
+				if m.Dir != "" {
+					targets = append(targets, target{dir: m.Dir, label: m.Name, explicit: true})
+				}
+			}
+		} else {
+			full, label, rerr := v.Resolve(rel, false)
+			if rerr != nil {
+				return session.ToolResult{Text: "grep error: " + rerr.Error()}, nil
+			}
+			targets = append(targets, target{dir: full, label: label, explicit: true})
+		}
+	} else {
+		targets = append(targets, target{dir: filepath.Join(t.Root, rel)})
+		for _, ar := range t.AltRoots {
+			if ar.Dir != "" {
+				full, rerr := resolveInside(ar.Dir, rel)
+				if rerr != nil {
+					continue
+				}
+				targets = append(targets, target{dir: full, label: ar.Label, explicit: true})
+			}
 		}
 	}
 	var out strings.Builder
 	total := 0
-	for _, m := range mounts {
-		full, rerr := resolveInside(m.dir, rel)
-		if rerr != nil {
-			if m.label == "" {
-				return session.ToolResult{}, rerr
-			}
-			continue
-		}
-		if !fileExists(full) && m.label != "" {
+	multi := len(targets) > 1
+	for _, tg := range targets {
+		full := tg.dir
+		if !fileExists(full) {
 			continue
 		}
 		text, herr := runGrep(pattern, full, maxMatches-total)
 		if herr != nil {
-			if m.label == "" {
+			if len(targets) == 1 {
 				return session.ToolResult{Text: "grep error: " + herr.Error()}, nil
 			}
 			continue
@@ -509,28 +571,39 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 		if text == "" {
 			continue
 		}
-		// 绝对路径改回工作区相对路径，省 token
+		// 绝对路径改回挂载点相对路径，省 token
+		for _, m := range t.Mounts {
+			if m.Dir == "" {
+				continue
+			}
+			if abs, aerr := filepath.Abs(m.Dir); aerr == nil {
+				text = strings.ReplaceAll(text, abs+"/", m.Name+"/")
+			}
+		}
 		text = strings.ReplaceAll(text, full+"/", "")
 		text = strings.ReplaceAll(text, full, ".")
-		if m.label != "" {
+		if multi && tg.label != "" && !strings.HasPrefix(text, tg.label+"/") {
 			lines := strings.Split(text, "\n")
 			for i, ln := range lines {
-				lines[i] = m.label + "/" + ln
+				if ln != "" {
+					lines[i] = tg.label + "/" + ln
+				}
 			}
 			text = strings.Join(lines, "\n")
 		}
 		out.WriteString(text)
-		out.WriteString("\n")
+		if !strings.HasSuffix(text, "\n") {
+			out.WriteString("\n")
+		}
 		total += strings.Count(text, "\n")
 		if total >= maxMatches {
 			break
 		}
 	}
-	res := strings.TrimRight(out.String(), "\n")
-	if res == "" {
+	if out.Len() == 0 {
 		return session.ToolResult{Text: "NO MATCHES: " + pattern}, nil
 	}
-	return session.ToolResult{Text: res}, nil
+	return session.ToolResult{Text: out.String()}, nil
 }
 
 // runGrep runs grep -rIn on a file or directory and returns the raw
@@ -571,6 +644,14 @@ type WorkBashTool struct {
 	// Root is the session workspace (also the cwd); kept for the
 	// non-sandboxed fallback when Mounts is empty.
 	Root string
+	// TmpDir, when set, is bound at /tmp inside the sandbox and persists
+	// across bash calls of the SAME session (it is removed when the
+	// session ends, unless keep_temp_dirs/debug keeps it). Without it the
+	// sandbox gets a fresh tmpfs per call, so a file written by one bash
+	// call is gone in the next — the 2026-09-11 run lost /tmp/p10-10.pgm
+	// and a probe t5.tex this way and the session spent ~10 rounds plus
+	// two FileNotFoundError tracebacks rediscovering it.
+	TmpDir string
 	// Mounts is the session's mount table. Inside the sandbox every
 	// mount appears as a top-level directory of the same name, so the
 	// path after the prefix is IDENTICAL in the structured tools and in
@@ -658,7 +739,21 @@ func bwrapAvailable() bool {
 // unshared and /tmp is a private tmpfs. Symlinked entries (e.g. the
 // pdfview of the original PDFs) are bound per file.
 func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
-	args := []string{"--die-with-parent", "--unshare-net", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"}
+	tmp := "/tmp"
+	if t.TmpDir != "" {
+		if abs, err := filepath.Abs(t.TmpDir); err == nil {
+			if err := os.MkdirAll(abs, 0o755); err == nil {
+				tmp = abs
+			}
+		}
+	}
+	args := []string{"--die-with-parent", "--unshare-net", "--dev", "/dev", "--proc", "/proc"}
+	if tmp == "/tmp" {
+		args = append(args, "--tmpfs", "/tmp")
+	} else {
+		// 会话级持久 /tmp：同一个会话的多次 bash 调用看到同一批临时文件。
+		args = append(args, "--bind", tmp, "/tmp")
+	}
 	for _, p := range []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"} {
 		if pathExists(p) {
 			args = append(args, "--ro-bind", p, p)
@@ -720,6 +815,7 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 	// PATH/LANG are set explicitly: the sandbox must not depend on the
 	// inherited environment (and 'bash' is exec'd by absolute path).
 	args = append(args, "--chdir", work, "--setenv", "HOME", work, "--setenv", "PWD", work,
+		"--setenv", "TMPDIR", "/tmp", "--setenv", "TMP", "/tmp", "--setenv", "TEMP", "/tmp",
 		"--setenv", "PATH", "/usr/local/texlive/2026/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/texlive/bin")
 	if lang := os.Getenv("LANG"); lang != "" {
 		args = append(args, "--setenv", "LANG", lang)

@@ -92,7 +92,13 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 	}
 	render() // 立即出现起始行，会话一开始就有进度
 	stop := make(chan struct{})
-	ticker := time.NewTicker(10 * time.Second)
+	// 终端每秒刷新"已用"时长（用户实测：轮次/工具数在动、时间却像不动）；
+	// 管道模式下每次重绘都是一整行输出，保持 10 秒节拍免得刷爆日志。
+	tick := 10 * time.Second
+	if tty {
+		tick = time.Second
+	}
+	ticker := time.NewTicker(tick)
 	go func() {
 		for {
 			select {
@@ -353,12 +359,14 @@ func (r *Runner) stylePhase(proj string) error {
 	workDir := filepath.Join(proj, "work", "style")
 	_ = os.MkdirAll(workDir, 0o755)
 	submit := &SubmitStyleTool{Workspace: workDir}
+	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_style")
+	defer cleanBashTmp()
 	tools := []session.Tool{
 		&WriteWorkFileTool{Root: workDir},
 		&EditWorkFileTool{Root: workDir},
 		&ReadFileTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
 		&GrepTool{Root: workDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
-		&WorkBashTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
+		&WorkBashTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		&CompileTexTool{Comp: r.comp, Root: workDir, MainFile: "example.tex", Tag: "style", Log: r.log, Tid: 1},
 		&ViewPDFTool{Root: workDir, Mounts: r.sessionMounts(kindStyle, workDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ViewImageTool{Root: sourceDir, Subject: "images", SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
@@ -443,6 +451,7 @@ func (r *Runner) stylePhase(proj string) error {
 		}
 		_ = os.WriteFile(filepath.Join(styleDir, "manual.md"), []byte(submit.Manual), 0o644)
 		_ = os.WriteFile(filepath.Join(styleDir, "example.tex"), []byte(submit.Example), 0o644)
+		r.writeStyleExtras(styleDir, submit)
 
 		// 重新编译当前提交：清空同一个临时目录后重放 cls/example。
 		if entries, derr := os.ReadDir(scratch); derr == nil {
@@ -453,6 +462,9 @@ func (r *Runner) stylePhase(proj string) error {
 		copyFile(filepath.Join(styleDir, clsName+".cls"), filepath.Join(scratch, clsName+".cls"))
 		exFile := filepath.Join(scratch, "example.tex")
 		copyFile(filepath.Join(styleDir, "example.tex"), exFile)
+		// 提交的额外文件（.sty / TikZ 样式 / 字体表）也要在示例编译时可见，
+		// 否则"示例编译通过"只是因为没有用到它们。
+		copyStyleExtras(styleDir, scratch, submit, clsName)
 		start := time.Now()
 		res := comp.Compile(scratch, "example.tex")
 		LogCompileResult(r.log, 1, "style-example", res, time.Since(start))
@@ -515,10 +527,12 @@ func (r *Runner) chaptersPhase(proj string) error {
 	modelCfg := r.models[r.cfg.Latex.ChapterModel]
 	tuning := r.cfg.LatexSession("chapter")
 	submit := &SubmitSplitTool{}
+	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_chapters")
+	defer cleanBashTmp()
 	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.ChaptersSystem), tuning, r.outputLang()), []session.Tool{
 		&GrepTool{Root: sandbox},
 		&ReadFileTool{Root: sandbox},
-		&WorkBashTool{Root: sandbox, Mounts: r.sessionMounts(kindChapters, sandbox), MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
+		&WorkBashTool{Root: sandbox, Mounts: r.sessionMounts(kindChapters, sandbox), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		&EditWorkFileTool{Root: sandbox},
 		submit,
 	}, r.log, 1, "chapters")
@@ -817,6 +831,54 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 	return r.styleFeedbackLoop(proj, fbRound)
 }
 
+// writeStyleExtras persists the files a submit_style call shipped
+// besides cls/manual/example (helper .sty, TikZ style files, font
+// tables…) into the style package, preserving relative paths, and
+// records the session's report for the operator (missing fonts and
+// other limitations the class cannot express yet).
+func (r *Runner) writeStyleExtras(styleDir string, submit *SubmitStyleTool) {
+	for rel, content := range submit.Extra {
+		clean := filepath.Clean(rel)
+		if clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+			continue
+		}
+		full := filepath.Join(styleDir, clean)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			continue
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			r.log.LogWarning(0, "[style] 额外文件写入失败:", clean, err)
+			continue
+		}
+		r.log.Log(0, "[style] 额外文件已收录:", clean)
+	}
+	if submit.Reported != "" {
+		path := filepath.Join(styleDir, "REPORT.md")
+		_ = os.WriteFile(path, []byte(submit.Reported+"\n"), 0o644)
+		r.log.Log(0, "[style] 样式会话报告已保存:", path)
+	}
+}
+
+// copyStyleExtras replays the submitted extra files into a compile
+// scratch so the example really exercises them.
+func copyStyleExtras(styleDir, scratch string, submit *SubmitStyleTool, clsName string) {
+	for rel := range submit.Extra {
+		clean := filepath.Clean(rel)
+		if clean == "." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+			continue
+		}
+		if clean == clsName+".cls" {
+			continue
+		}
+		src := filepath.Join(styleDir, clean)
+		dst := filepath.Join(scratch, clean)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			continue
+		}
+		copyFile(src, dst)
+	}
+}
+
 func classNameOfFile(styleDir string) string {
 	files, _ := filepath.Glob(filepath.Join(styleDir, "*.cls"))
 	for _, f := range files {
@@ -875,16 +937,27 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	// work = 章节工作树（可写），project/source = 只读。
 	convertMounts := append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
 		r.sessionMounts(kindConvert, writeRoot)...)
+	// 结构化读工具与 bash/view_pdf 共用同一张挂载表：work = 本章私有视图
+	// （可写）、project = 项目只读视图（手册/cls/章节 md/其它章节成品）、
+	// source = 原书 PDF、build = 编译 scratch。此前 read_file/grep 各自
+	// 用 Root 拼出一个**名叫 work 却指向项目视图**的挂载点，而 write_file
+	// 的 work 是私有视图 → 同一个名字两张树，会话只能靠猜（实测每个转换
+	// 会话开头都在 `project:`/`style/`/`work/style/` 之间乱撞）。
+	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_"+base)
+	defer cleanBashTmp()
 	tools := []session.Tool{
-		&ReadFileTool{Root: r.projectRoot()},
+		&ReadFileTool{Mounts: convertMounts},
 		write,
 		// 增量编辑自己的章节文件 + 工作区检索（手册/cls/其它章节只读参考）
 		&EditWorkFileTool{Root: writeRoot, Prefixes: []string{texRel, "chapters/" + base + "/"}},
-		&GrepTool{Root: r.projectRoot()},
+		&GrepTool{Mounts: convertMounts},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ViewPDFTool{Mounts: convertMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: 1},
+		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex",
+			SourcePath: texPath, WorkDir: writeRoot, Log: r.log, Tid: 1},
+		&WorkBashTool{Mounts: convertMounts, Root: writeRoot, TmpDir: bashTmp,
+			MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
 		submit,
 	}
 	// 原始文档只读工具：片段→原 PDF 页定位（doc_search）+ 原书页面索引/
@@ -917,11 +990,13 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	if err != nil {
 		return err
 	}
+	// 手册不再整段内联：它就在 project:style/manual.md（会话第一步即读），
+	// 内联 11k 字符会跟着每轮请求重发。首条消息只给路径 + 工作区地图。
+	_ = manual
 	initial := prompts.Render(prompts.ConvertUser, map[string]string{
-		"CHAPTER_FILE":    "Convert the chapter file chapters/" + base + ".md to LaTeX.",
-		"CHAPTER_PREVIEW": truncateStr(string(chapData), 2000),
-		"MANUAL":          truncateStr(string(manual), 24000),
-		"TEX_PATH":        "Read the chapter via read_file, then write_file {path:\"" + texRel + "\", content: ...} and compile until clean, then submit.",
+		"CHAPTER_FILE":    "chapter markdown path: project:chapters/" + base + ".md",
+		"CHAPTER_PREVIEW": truncateRunes(string(chapData), 2000),
+		"TEX_PATH":        "Then write_file {path:\"" + texRel + "\", content: ...} and compile until clean, then submit.",
 	})
 
 	if r.cfg.Latex.RemoveWatermark {
@@ -1119,26 +1194,29 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 		return err
 	}
 	defer cleanFixScratch()
-	manual, _ := os.ReadFile(manualPath)
+	// 手册不内联：修复会话按路径读 project:style/manual.md（模板里写明）。
+	_ = manualPath
 
 	submit := &SubmitDoneTool{Label: "the style fix for " + base}
 	fixView := ensureChapterView(proj, base)
 	if fixView == "" {
 		fixView = workRoot
 	}
+	fixMounts := append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
+		r.sessionMounts(kindConvert, fixView)...)
 	tools := []session.Tool{
-		&ReadFileTool{Root: r.projectRoot()},
+		&ReadFileTool{Mounts: fixMounts},
 		&EditWorkFileTool{Root: fixView, Prefixes: []string{texRel, "chapters/" + base + "/"}},
 		&WriteWorkFileTool{
 			Root:                fixView,
 			Prefixes:            []string{texRel, "chapters/" + base + "/"},
 			RejectDocumentclass: true,
 		},
-		&GrepTool{Root: r.projectRoot()},
+		&GrepTool{Mounts: fixMounts},
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ViewPDFTool{Mounts: append([]Mount{{Name: "build", Dir: scratch, Writable: true}},
-			r.sessionMounts(kindConvert, workRoot)...), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", SourcePath: texPath, Log: r.log, Tid: tid},
+		&ViewPDFTool{Mounts: fixMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
+		&CompileChapterTool{Comp: r.comp, Scratch: scratch, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex",
+			SourcePath: texPath, WorkDir: workRoot, Log: r.log, Tid: tid},
 		submit,
 	}
 	tools = append(tools, r.sourcePageTools()...)
@@ -1151,7 +1229,6 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	userText := prompts.Render(prompts.StyleFixUser, map[string]string{
 		"CHAPTER_FILE": "The class/manual was revised after your chapter was converted. Adapt chapters/" + base + ".tex so it compiles with the NEW class and follows the NEW manual.",
 		"ISSUES":       truncateStr(issues, 4000),
-		"MANUAL":       truncateStr(string(manual), 24000),
 	})
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return fmt.Errorf("样式修复会话失败: %w", err)
@@ -1294,6 +1371,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	}
 	_ = os.WriteFile(filepath.Join(styleDir, "manual.md"), []byte(submit.Manual), 0o644)
 	_ = os.WriteFile(filepath.Join(styleDir, "example.tex"), []byte(submit.Example), 0o644)
+	r.writeStyleExtras(styleDir, submit)
 
 	scratch, cleanFBScratch, err := r.tempDir(proj, "style-feedback")
 	if err != nil {
@@ -1306,6 +1384,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	if err := copyFile(filepath.Join(styleDir, "example.tex"), filepath.Join(scratch, "example.tex")); err != nil {
 		return err
 	}
+	copyStyleExtras(styleDir, scratch, submit, clsName)
 	start := time.Now()
 	res := r.comp.Compile(scratch, "example.tex")
 	LogCompileResult(r.log, 1, "style-feedback", res, time.Since(start))
