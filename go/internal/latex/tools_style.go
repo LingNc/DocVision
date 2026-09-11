@@ -259,16 +259,28 @@ func (t *ViewImageTool) resolve(rel string) (string, error) {
 	return "", fmt.Errorf("文件不存在: %s（请用图片文件名或 markdown 中的引用路径）", rel)
 }
 
-// SubmitStyleTool receives the structured style package: cls + usage
-// manual + example. The captured payload is validated and persisted by
-// the runner.
+// SubmitStyleTool receives the style package: which FILES the session
+// wants to submit, by workspace path, plus an optional report on
+// missing fonts/limits. The captured payload is validated and persisted
+// by the runner.
+//
+// Submitting by PATH (not by pasting contents) is deliberate: the three
+// artifacts are already written files, so inline submission made the
+// model re-read and re-emit ~47KB (cls 18KB + example 17KB + manual
+// 11KB) that the process already had on disk — and it silently dropped
+// everything else the session had produced.
 type SubmitStyleTool struct {
 	Cls     string
 	Manual  string
 	Example string
-	Set     bool
-	// Workspace (optional) lets the args reference files previously
-	// written via write_file instead of full inline contents.
+	// Extra holds additional submitted files: workspace path -> file
+	// content (fonts tables, .sty helpers, TikZ style files, samples…).
+	Extra map[string]string
+	// Reported is the optional report text (missing fonts, known limits).
+	Reported string
+	Set      bool
+	// Workspace lets the args reference files previously written via
+	// write_file instead of full inline contents.
 	Workspace string
 }
 
@@ -276,18 +288,54 @@ func (t *SubmitStyleTool) Name() string { return "submit_style" }
 
 func (t *SubmitStyleTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name":        "submit_style",
-		"description": "Submit the complete style package: the .cls file content, the structured usage manual (Markdown), and a complete compilable example .tex.",
+		"name": "submit_style",
+		"description": "Submit the style package by FILE PATH (not by pasting contents): cls, manual, example, " +
+			"plus any extra files your class needs. The files are read from your workspace as they are on disk.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"cls":     map[string]any{"type": "string", "description": "Full content of the custom .cls file."},
-				"manual":  map[string]any{"type": "string", "description": "Usage manual in Markdown with sections: '## Document class options', '## Commands', '## Environments', '## Examples'."},
-				"example": map[string]any{"type": "string", "description": "Complete compilable example .tex using the class."},
+				"cls":     map[string]any{"type": "string", "description": "Workspace path of the class file, e.g. \"mybook.cls\"."},
+				"manual":  map[string]any{"type": "string", "description": "Workspace path of the usage manual (Markdown, with '## Document class options', '## Commands', '## Environments', '## Examples', '## Vector figure style')."},
+				"example": map[string]any{"type": "string", "description": "Workspace path of a complete compilable example .tex."},
+				"extra": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional extra workspace paths to ship with the class (helper .sty, TikZ style files, fonts tables, sample pages). Their relative paths are preserved.",
+				},
+				"report": map[string]any{"type": "string", "description": "Optional report: missing fonts/characters, things the class cannot express, notes for the conversion sessions."},
 			},
 			"required": []string{"cls", "manual", "example"},
 		},
 	}}
+}
+
+// readSubmitted resolves one argument: a workspace path when it names an
+// existing file, otherwise (backward compatible) the inline content.
+func (t *SubmitStyleTool) readSubmitted(v string) (string, string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", "", nil
+	}
+	// 路径 vs 内容的判定：先按路径解析，命中即读盘；没命中时，只有当它
+	// 明确长得像"要提交的文件"（.cls/.md/.tex/.sty 结尾）才报错——否则
+	// 保持向后兼容，按内联内容处理。
+	looksLikePath := !strings.Contains(v, "\n") && len(v) < 512
+	if looksLikePath {
+		clean := strings.TrimPrefix(filepath.ToSlash(v), "./")
+		clean = strings.TrimPrefix(clean, "work:")
+		if path, err := resolveInside(t.Workspace, clean); err == nil {
+			if data, rerr := os.ReadFile(path); rerr == nil {
+				return string(data), clean, nil
+			}
+		}
+		low := strings.ToLower(clean)
+		for _, ext := range []string{".cls", ".sty", ".md", ".tex", ".txt", ".def", ".cfg"} {
+			if strings.HasSuffix(low, ext) {
+				return "", "", fmt.Errorf("找不到提交的文件 %q（用 write_file 先写好，再按工作区相对路径提交；注意路径相对工作区）", v)
+			}
+		}
+	}
+	return v, "", nil
 }
 
 func (t *SubmitStyleTool) Execute(argsJSON string) (session.ToolResult, error) {
@@ -295,25 +343,23 @@ func (t *SubmitStyleTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if err != nil {
 		return session.ToolResult{}, err
 	}
-	cls, _ := args["cls"].(string)
-	manual, _ := args["manual"].(string)
-	example, _ := args["example"].(string)
-	read := func(v string) string {
-		if strings.TrimSpace(v) == "" || strings.Contains(v, "\n") {
-			return v
-		}
-		if path, err := resolveInside(t.Workspace, v); err == nil {
-			if data, err := os.ReadFile(path); err == nil {
-				return string(data)
-			}
-		}
-		return v
+	rawCls, _ := args["cls"].(string)
+	rawManual, _ := args["manual"].(string)
+	rawExample, _ := args["example"].(string)
+	cls, clsPath, err := t.readSubmitted(rawCls)
+	if err != nil {
+		return session.ToolResult{Text: "REJECTED: " + err.Error()}, nil
 	}
-	cls = read(cls)
-	manual = read(manual)
-	example = read(example)
+	manual, _, err := t.readSubmitted(rawManual)
+	if err != nil {
+		return session.ToolResult{Text: "REJECTED: " + err.Error()}, nil
+	}
+	example, _, err := t.readSubmitted(rawExample)
+	if err != nil {
+		return session.ToolResult{Text: "REJECTED: " + err.Error()}, nil
+	}
 	if strings.TrimSpace(cls) == "" || strings.TrimSpace(example) == "" {
-		return session.ToolResult{Text: "REJECTED: cls and example are required."}, nil
+		return session.ToolResult{Text: "REJECTED: cls and example are required (submit their workspace paths)."}, nil
 	}
 	if !strings.Contains(cls, "\\ProvidesClass") {
 		return session.ToolResult{Text: "REJECTED: the cls must contain \\ProvidesClass{...}."}, nil
@@ -321,8 +367,38 @@ func (t *SubmitStyleTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if !strings.Contains(example, "\\documentclass") {
 		return session.ToolResult{Text: "REJECTED: the example must be a complete document with \\documentclass."}, nil
 	}
-	t.Cls, t.Manual, t.Example, t.Set = cls, manual, example, true
-	return session.ToolResult{Text: "SUBMITTED. The example will now be test-compiled; you will be told if it fails."}, nil
+	// 额外文件：按工作区相对路径原样带走（保留层级）。
+	extra := map[string]string{}
+	if list, ok := args["extra"].([]any); ok {
+		for _, item := range list {
+			name, _ := item.(string)
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			clean := strings.TrimPrefix(filepath.ToSlash(name), "./")
+			clean = strings.TrimPrefix(clean, "work:")
+			full, rerr := resolveInside(t.Workspace, clean)
+			if rerr != nil {
+				return session.ToolResult{Text: "REJECTED: extra file " + clean + ": " + rerr.Error()}, nil
+			}
+			data, rerr := os.ReadFile(full)
+			if rerr != nil {
+				return session.ToolResult{Text: "REJECTED: extra file " + clean + " does not exist in your workspace."}, nil
+			}
+			if clean == clsPath {
+				continue
+			}
+			extra[clean] = string(data)
+		}
+	}
+	report, _ := args["report"].(string)
+	t.Cls, t.Manual, t.Example, t.Extra, t.Reported, t.Set = cls, manual, example, extra, strings.TrimSpace(report), true
+	msg := "SUBMITTED. The example will now be test-compiled; failures come back to this session."
+	if len(extra) > 0 {
+		msg += fmt.Sprintf(" %d extra file(s) shipped with the class.", len(extra))
+	}
+	return session.ToolResult{Text: msg}, nil
 }
 
 // ------------------------------------------------------------------
