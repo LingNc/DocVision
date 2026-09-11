@@ -497,39 +497,39 @@ func findLineIdx(starts []int, pos int) int {
 // live console progress
 // ------------------------------------------------------------------
 
-// liveProgress renders ONE repainting console line. The text callback is
-// called under the owner's own lock state (it must lock its counters
-// itself), and a ticker re-renders every few seconds so a line never
-// freezes at its 0/N start value while long sessions run — a frozen
+// liveProgress repaints ONE line of the logger's live block. The text
+// callback is called under the owner's own lock state (it must lock its
+// counters itself), and a ticker re-renders every few seconds so a line
+// never freezes at its 0/N start value while long sessions run — a frozen
 // "running: 0" looked like a counter bug.
+//
+// It used to write to stdout itself ("\r" + clear, or whole lines in a
+// pipe), i.e. it was a second, independent owner of the terminal cursor
+// next to the sessions' own live lines. Two owners redrawing one row is
+// exactly what the user saw as overlapping progress lines; every phase
+// line is now a ROW of the logger's block instead, so nothing can clobber
+// anything else.
 type liveProgress struct {
+	log  *logger.Logger
+	row  *logger.LiveRow
 	text func() string
 	stop chan struct{}
 	// done is closed by the ticker goroutine; Close waits for it so an
-	// already-started repaint cannot land after the line was cleared.
+	// already-started repaint cannot land after the line was finalized.
 	done chan struct{}
 	once sync.Once
-	// tty 决定重绘方式：终端里用 `\r` + 清行原地覆写（一行；会话实时行
-	// 也会在它上面覆写），管道/重定向里按节拍整行输出（否则日志里全是
-	// 裸 CR，且两次"整行 + 换行"会多出空行）。
-	tty bool
-	mu  sync.Mutex
-	// last 是最近一次真正画出去的那一行，Close 用它重画最终状态。
+	mu   sync.Mutex
+	// last is the most recent text actually shown; Close leaves it in the
+	// scrollback as a normal line (the live row itself disappears).
 	last string
-	// printed 是**已经整行输出过**的那一行（管道模式）：连续相同的状态
-	// 不再重复整行——用户实测 `[classify 8/8] …` 与 `[process 8/8] …`
-	// 各出现两遍，就是"最后一张完成时 render 一次 + 阶段末尾再 render
-	// 一次"两次文本相同落在管道里成了两行。
-	printed string
 }
 
-func newLiveProgress(text func() string) *liveProgress {
-	return newLiveProgressTTY(text, stdoutIsTerminal())
-}
-
-// newLiveProgressTTY 是 newLiveProgress 的可注入 tty 版本（测试用）。
-func newLiveProgressTTY(text func() string, tty bool) *liveProgress {
-	p := &liveProgress{text: text, stop: make(chan struct{}), done: make(chan struct{}), tty: tty}
+// newLiveProgressRow starts the live row `id` fed by `text`. The ticker
+// runs at 5s: the text already carries an elapsed-time field, so the row
+// never looks frozen.
+func newLiveProgressRow(log *logger.Logger, id string, text func() string) *liveProgress {
+	p := &liveProgress{log: log, row: log.LiveRow(id), text: text,
+		stop: make(chan struct{}), done: make(chan struct{})}
 	p.render()
 	go func() {
 		defer close(p.done)
@@ -557,56 +557,35 @@ func (p *liveProgress) render() {
 	}
 	p.mu.Lock()
 	p.last = line
-	same := line == p.printed
 	p.mu.Unlock()
-	if p.tty {
-		// \x1b[K 先清掉本行残留（上一次更长的进度行、或会话实时行留下的
-		// 尾巴），否则会看到两行文字叠在一起的残影。终端里即使文本没变也
-		// 要重画：会话实时行结束时会把这行清掉。
-		fmt.Fprintf(os.Stdout, "\r\x1b[K%s", line)
-		return
-	}
-	if same {
-		return // 管道/日志：同一状态只留一行
-	}
-	fmt.Fprintln(os.Stdout, line)
-	p.mu.Lock()
-	p.printed = line
-	p.mu.Unlock()
+	p.row.Set(line)
 }
 
-// Close stops the ticker and finalizes the line — it is the ONLY place
-// that terminates a phase line.
-//
-// 终端里**重画**最终一行再换行：期间会话实时行（book.go 的
-// livePhaseLine）结束时会把这一行清掉（`\r\x1b[K`），此时只补一个 `\n`
-// 就会在阶段之间留下一行空白。管道里上一次 render 已经整行换过行了，
-// 文本没变就什么都不打（再打一遍就是重复行）。
-//
-// 阶段代码**不要**自己再 `progress() + Fprintln` 定格：那样终端里会
-// "整行 + 换行"之后再被 Close 重画一次，用户看到的就是同一行出现两遍
-// （实测 `[classify 8/8] …` 各两行）。
+// Close stops the ticker and finalizes the line: the live row is removed
+// and its last text is left behind as an ordinary line (so pipes and the
+// terminal scrollback both keep the phase's final state exactly once).
+// Close is the ONLY place that terminates a phase line.
 func (p *liveProgress) Close() {
 	if p == nil {
 		return
 	}
 	p.once.Do(func() {
 		close(p.stop)
-		<-p.done // 汇合：正在重画的那一帧必须先画完，否则会画在清行之后
+		<-p.done // 汇合：正在重画的那一帧必须先画完，否则会画在定格行之后
 		p.mu.Lock()
-		line, printed := p.last, p.printed
+		line := p.last
 		p.mu.Unlock()
-		if line == "" {
-			return
-		}
-		if p.tty {
-			fmt.Fprintf(os.Stdout, "\r\x1b[K%s\n", line)
-			return
-		}
-		if line != printed {
-			fmt.Fprintln(os.Stdout, line)
-		}
+		p.row.Finalize(line)
 	})
+}
+
+// scrollbackLine prints a line that must survive a phase (used by callers
+// that keep their own final summary).
+func (p *liveProgress) scrollbackLine(line string) {
+	if p == nil || line == "" {
+		return
+	}
+	p.log.PrintConsole(line)
 }
 
 // classifyProgressText / processProgressText render the compact phase
@@ -662,7 +641,7 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 			progLive.render()
 		}
 	}
-	progLive = newLiveProgress(func() string {
+	progLive = newLiveProgressRow(r.log, "classify", func() string {
 		if verbose || total == 0 {
 			return ""
 		}
@@ -857,7 +836,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			progLive.render()
 		}
 	}
-	progLive = newLiveProgress(func() string {
+	progLive = newLiveProgressRow(r.log, "process", func() string {
 		if verbose || total == 0 {
 			return ""
 		}

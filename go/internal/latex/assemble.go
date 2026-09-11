@@ -227,7 +227,7 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.FinalReviewSystem), r.cfg.LatexSession("convert"), r.outputLang()),
 		r.bookSessionTools(proj, buildDir, compile, submit), r.log, 1, "final-review")
-	liveHook, liveClose := r.livePhaseLine("final-review")
+	liveHook, liveClose := r.livePhaseRow("assemble/final-review", "final-review")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 

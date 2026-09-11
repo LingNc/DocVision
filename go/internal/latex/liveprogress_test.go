@@ -1,7 +1,6 @@
 package latex
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -36,19 +35,34 @@ func captureStdout(t *testing.T, fn func()) string {
 	return out
 }
 
-// TestLiveProgressTTYCloseRepaints: 终端里进度行是"原地覆写"的一行，而会话
-// 实时行（book.go livePhaseLine）结束时会用 \r\x1b[K 把这一行清掉；此时若
-// Close 只补一个 \n，阶段之间就会多出一行空白（实测就是
-// [classify 8/8] … 与 [process 2/8] … 之间的空行）。Close 必须重画最终
-// 状态再换行。
+// newTestLiveProgress 造一条进度的实时行：logger 的 tty 由参数强制
+// （测试的 stdout 是管道，靠探测永远走不到终端那条路）。
+func newTestLiveProgress(t *testing.T, text func() string, tty bool) (*liveProgress, *logger.Logger) {
+	t.Helper()
+	dir := t.TempDir()
+	forced := tty
+	logger.TTYForTest = &forced // 必须在 NewLogger 之前：tty 是建 logger 时定的
+	log, err := logger.NewLogger(dir+"/run.log", dir+"/err.log", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { logger.TTYForTest = nil; _ = log.Close() })
+	return newLiveProgressRow(log, "test", text), log
+}
+
+// TestLiveProgressTTYCloseRepaints: 终端里进度行是"原地覆写"的一行，
+// Close 把最终状态定格成普通行（否则阶段之间会多出空白行，或者最终状态
+// 随实时块一起消失）。只换一次行。
 func TestLiveProgressTTYCloseRepaints(t *testing.T) {
 	out := captureStdout(t, func() {
-		p := newLiveProgressTTY(func() string { return "[classify 8/8] 100.00% (failed: 0, running: 0)" }, true)
+		p, _ := newTestLiveProgress(t, func() string { return "[classify 8/8] 100.00% (failed: 0, running: 0)" }, true)
 		p.Close()
 	})
-	want := "\r\x1b[K[classify 8/8] 100.00% (failed: 0, running: 0)\r\x1b[K[classify 8/8] 100.00% (failed: 0, running: 0)\n"
-	if out != want {
-		t.Errorf("终端下进度行字节 = %q\nwant %q", out, want)
+	if !strings.Contains(out, "[classify 8/8] 100.00% (failed: 0, running: 0)") {
+		t.Fatalf("终端下必须画出并定格最终状态: %q", out)
+	}
+	if !strings.HasSuffix(out, "100.00% (failed: 0, running: 0)\n") {
+		t.Errorf("定格行必须以换行结束: %q", out)
 	}
 	// 关键属性：只换一次行（没有裸 \n 留下的空行）。
 	if n := countByte(out, '\n'); n != 1 {
@@ -60,7 +74,7 @@ func TestLiveProgressTTYCloseRepaints(t *testing.T) {
 // （自带换行），Close 再打一次就是重复行，而且未渲染过时不能凭空多打空行。
 func TestLiveProgressPipeNoTrailingBlank(t *testing.T) {
 	out := captureStdout(t, func() {
-		p := newLiveProgressTTY(func() string { return "[process 2/8] 25.00% (done: 2, running: 4)" }, false)
+		p, _ := newTestLiveProgress(t, func() string { return "[process 2/8] 25.00% (done: 2, running: 4)" }, false)
 		p.Close()
 	})
 	want := "[process 2/8] 25.00% (done: 2, running: 4)\n"
@@ -70,7 +84,7 @@ func TestLiveProgressPipeNoTrailingBlank(t *testing.T) {
 
 	// 提示词回调返回空串（verbose 或 total==0）：一行都不该出现。
 	out = captureStdout(t, func() {
-		p := newLiveProgressTTY(func() string { return "" }, true)
+		p, _ := newTestLiveProgress(t, func() string { return "" }, true)
 		p.Close()
 	})
 	if out != "" {
@@ -79,9 +93,9 @@ func TestLiveProgressPipeNoTrailingBlank(t *testing.T) {
 
 	// 两个阶段首尾相接：整体只应有一行空行都没有。
 	out = captureStdout(t, func() {
-		a := newLiveProgressTTY(func() string { return "[classify 8/8] 100.00%" }, false)
+		a, _ := newTestLiveProgress(t, func() string { return "[classify 8/8] 100.00%" }, false)
 		a.Close()
-		b := newLiveProgressTTY(func() string { return "[process 2/8] 25.00%" }, false)
+		b, _ := newTestLiveProgress(t, func() string { return "[process 2/8] 25.00%" }, false)
 		b.Close()
 	})
 	want = "[classify 8/8] 100.00%\n[process 2/8] 25.00%\n"
@@ -121,7 +135,7 @@ func TestConvertProgressTextNoStrayBracket(t *testing.T) {
 	}
 	// 管道里同一行渲染两次 = 两整行，绝不出现裸 CR。
 	out := captureStdout(t, func() {
-		p := newLiveProgressTTY(func() string { return convertProgressText("[convert]", 3, 2, 0, 3, 0) }, false)
+		p, _ := newTestLiveProgress(t, func() string { return convertProgressText("[convert]", 3, 2, 0, 3, 0) }, false)
 		p.Close()
 	})
 	if strings.Contains(out, "\r") {
@@ -137,21 +151,24 @@ func TestConvertProgressTextNoStrayBracket(t *testing.T) {
 // "[chapters] 轮次 6 · 工具调用 9 · 已用 1m18s[chapters] 划分完成: 3 章"。
 func TestPhaseNoteDoesNotOverwriteLiveLine(t *testing.T) {
 	dir := t.TempDir()
+	forced := true
+	logger.TTYForTest = &forced // 必须在 NewLogger 之前：tty 是建 logger 时定的
+	defer func() { logger.TTYForTest = nil }()
 	log, err := logger.NewLogger(dir+"/run.log", dir+"/err.log", 4)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := &Runner{cfg: &config.Config{}, log: log}
 	note := r.phaseNote()
-	// 装一条"实时行"（模拟 chapters 会话正在进行）。
-	log.SetLiveLine(func() { fmt.Fprint(os.Stdout, "LIVE") })
+	// 装一条实时行（模拟 chapters 会话正在进行）。
+	row := log.LiveRow("chapters")
+	row.Set("LIVE")
 	out := captureStdout(t, func() { note("[chapters] 划分完成: %d 章", 3) })
-	log.SetLiveLine(nil)
-	if !strings.Contains(out, "\n[chapters] 划分完成: 3 章\n") {
-		t.Errorf("阶段提示没有先结束实时行: %q", out)
+	if !strings.Contains(out, "[chapters] 划分完成: 3 章\n") {
+		t.Errorf("阶段提示必须整行输出: %q", out)
 	}
-	if strings.Contains(out, "LIVE[chapters]") {
-		t.Errorf("阶段提示被写在实时行上: %q", out)
+	if strings.Contains(out, "LIVE[chapters]") || strings.Contains(out, "章LIVE") {
+		t.Errorf("阶段提示与实时行粘连了: %q", out)
 	}
 	if !strings.HasSuffix(out, "LIVE") {
 		t.Errorf("打印后应重画实时行: %q", out)
@@ -169,7 +186,7 @@ func TestLiveProgressNoDuplicateFinalLine(t *testing.T) {
 	}
 	i := 0
 	out := captureStdout(t, func() {
-		p := newLiveProgressTTY(func() string { return states[i] }, false)
+		p, _ := newTestLiveProgress(t, func() string { return states[i] }, false)
 		i = 1
 		p.render() // 状态变了 → 一行
 		p.render() // 状态没变 → 不再重复
@@ -187,7 +204,7 @@ func TestLiveProgressNoDuplicateFinalLine(t *testing.T) {
 	// 且只换一次行。
 	out = captureStdout(t, func() {
 		i = 0
-		p := newLiveProgressTTY(func() string { return states[0] }, true)
+		p, _ := newTestLiveProgress(t, func() string { return states[0] }, true)
 		i = 0
 		p.Close()
 	})

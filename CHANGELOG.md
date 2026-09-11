@@ -7,6 +7,15 @@
 
 ### Fixed
 
+- **进度行互相覆盖 / 重叠**（用户实测：`[classify 8/8]`、`[process 8/8]`、`[chapters] 轮次 7 · 工具调用 14 · 已用 2m45s` 挤在同一行；`[convert] 0/4 0.00% …` 把上面的 chapters 行盖掉；`[style-feedback] 轮次 33 · 已用 7m06s` 与 `[style-fix] …` 来回跳且两边时间都在涨）。根因是**终端只有一个"实时行"槽位**：`logger.SetLiveLine` 谁最后装谁显示，于是并发的子会话（逐章 style-fix、style-feedback、convert/checker）每秒互相覆盖；阶段进度行 `liveProgress` 还自己独立写 stdout，构成了第二个光标所有者；日志行前只补一个 `\n` 又把状态行**永久留进滚动区**（同一行内容出现两次 = 用户看到的"重叠"）。现在改为**每人一行的实时块**：`logger` 提供 `LiveRow(id)` 句柄（`Set`/`Remove`/`Finalize`），整块一起原地重绘（ANSI 光标上移 + 清行），日志行先擦块、写在块原来的位置、再把块画在下面；行按创建顺序排列，`liveProgress` 与所有会话实时行都改成块里的一行。用终端模型回放字节流的测试 `TestLivePanelNeverOverlapsOwnerRows` 钉住"日志行完整、跑完的行消失、仍在跑的并排显示、同一行里不出现两个实时行"。
+
+### Added
+
+- **子会话进度并排显示**：`convert` 的每一章、每个 `checker`、每个 `style-fix` 现在各有自己的实时行（`[convert:chapter_002] 轮次 12 · 工具调用 25 · 已用 3m04s`），跑完即消失、新开始的补上；聚合行 `[convert] 1/4 25.00% (done: 1, errors: 0, running: 2, 12.0s)` 与它们同时存在，互不覆盖。checker 会话此前完全不进进度显示（用户要求"谁进了 checker 都要看得到"），现在有独立一行。
+
+
+### Fixed
+
 - **上下文压缩一次都没触发，prompt 一路涨到 24 万 tokens**（用户实测提问："会话压缩好像没有触发？"）。2026-09-11 那次运行里 `[context]` 只在普通日志出现过 **1 行**（`convert:chapter_003`，估算 66,427 tokens = 窗口的 50%），而**所有转录里 `=== COMPRESSED SESSION CONTEXT` 是 0 条**，同一批 `--debug` 行里厂商实测的 prompt 却涨到 **132k（convert:chapter_003）/ 206k（style）/ 243k（style-feedback）**——窗口 131,072、`compaction_at: 0.85`，阈值 111,411 用本地估算永远够不着。三处根因一起修：① `EstimatedTokens` 只数消息正文，漏掉历史回传的 `reasoning_content` 与 `tool_calls` 参数 JSON（都是每轮真发出去的内容）；② 阈值判断只用这个偏低的估算，不用厂商返回的真值；③ `compact()` 在没有可摘要中段时静默 `return nil`，调用方却照样 `Compactions++`，统计里混进了没发生的压缩。现在估算把 reasoning/tool_calls 计入，阈值取「本地估算 / **标定后估算** / **厂商实测 `prompt_tokens`**」三者最大（标定系数 = 每次响应的 `prompt_tokens ÷ 请求前估算`，夹在 1~10；实测值是"下次请求至少这么大"的硬下限），只有真压缩过才清掉实测值与标定系数，`compact()` 改为返回"真的压了吗"，没压就不记账；普通日志的 `[context]` 行同时打出厂商实测值。测试 `TestCompactionUsesVendorPromptTokens`（本地估算只有几千、厂商实测 130k，必须压缩）、`TestCurrentTokensNeverBelowMeasured`、`TestEstimatorCountsReasoningAndToolCalls`、`TestShortSessionDoesNotCountFakeCompaction`。
 - **样式反馈会话里 `bash` 变成"unknown tool"**（用户实测："style 重新启用之后…工具 bash 坏了"）。反馈轮复用样式会话的转录，那段历史里全是样式会话用 `bash` 探测包/字体/编译的回合，模型照着历史继续调用，而反馈会话的工具表是**手抄的第二份**、漏了 `WorkBashTool` → 21:12 两连 `[style-feedback] [tool:bash] unknown tool`，模型只能在一个"自己刚用过、现在却说没有"的工具集里瞎试。现在样式阶段与反馈阶段共用同一个构造器 `styleSessionTools`（`tag` 只决定编译产物名），parity 由构造方式保证而不是靠注释；反馈轮有自己的 bash 临时目录 `bash_style_feedback`。
 - **样式修复子会话没有转录**：`fixChapterStyle` 从不 `SetTranscript`，于是逐章修复的整段工作既不在 `docvision sessions` 里出现、也无从复盘，中断后重跑只能从零再来（用户第 11 条"用全跑完的会话分析问题"因此在 style-fix 这段直接断了）。现在与 convert/checker 一样写 `work/sessions/style_fix_<章>.jsonl`。

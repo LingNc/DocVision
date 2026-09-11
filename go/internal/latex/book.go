@@ -51,52 +51,43 @@ func fmtDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
-// livePhaseLine manages the compact console status line of a
-// single-session phase (style / chapters / style-feedback): a hook fed
-// by the session's progress notifications plus a 10s ticker keeping the
-// elapsed time fresh. In verbose mode everything is a no-op (the
-// logger already streams the details). fin() is idempotent and ends
-// the line with a newline.
-// stdoutIsTerminal reports whether stdout is a character device (a real
-// terminal). Progress lines redraw themselves with "\r", which is only
-// meaningful there.
-func stdoutIsTerminal() bool {
-	st, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return st.Mode()&os.ModeCharDevice != 0
-}
-func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin func()) {
+// livePhaseRow manages the compact console status line of a
+// single-session phase / sub-session (style / chapters / style-feedback /
+// per-chapter convert / checker / style-fix): ONE live row per owner, fed by
+// the session's progress notifications plus a ticker keeping the elapsed time
+// fresh, so concurrent sub-sessions show up side by side instead of fighting
+// over a single status line. In verbose mode everything is a no-op (the
+// logger already streams the details). fin() is idempotent: it removes the
+// row and (optionally) leaves a final line behind.
+//
+// id names the owner and MUST be unique per concurrent owner — a shared id
+// would make two sub-sessions overwrite each other's line (the bug this
+// replaced: "[style-feedback] 轮次 33 · 已用 7m06s" and "[style-fix] …"
+// alternating with both timers running, because the single live slot held
+// whichever owner had drawn last).
+func (r *Runner) livePhaseRow(id, label string) (hook func(rounds, tools int), fin func()) {
 	if r.consoleVerbose {
 		return func(int, int) {}, func() {}
 	}
 	start := time.Now()
 	var mu sync.Mutex
 	var rounds, tools int
-	// Redraw in place only on a real terminal: when stdout is a pipe or a
-	// file (tee, CI, log capture) the "\r" bytes end up in the output and
-	// every redraw is appended as loose text; there we print the line only
-	// on the 10s ticker instead.
-	tty := stdoutIsTerminal()
+	row := r.log.LiveRow(id)
 	render := func() {
 		mu.Lock()
-		defer mu.Unlock()
-		line := fmt.Sprintf("[%s] 轮次 %d · 工具调用 %d · 已用 %s",
+		rounds, tools := rounds, tools
+		mu.Unlock()
+		row.Update("[%s] 轮次 %d · 工具调用 %d · 已用 %s",
 			label, rounds, tools, fmtDuration(time.Since(start)))
-		if tty {
-			fmt.Fprintf(os.Stdout, "\r\x1b[K%s", line)
-			return
-		}
-		fmt.Fprintln(os.Stdout, line)
 	}
 	render() // 立即出现起始行，会话一开始就有进度
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	// 终端每秒刷新"已用"时长（用户实测：轮次/工具数在动、时间却像不动）；
-	// 管道模式下每次重绘都是一整行输出，保持 10 秒节拍免得刷爆日志。
+	// 管道模式下每次变化只追加一行（logger 的 paint 自己会去重），
+	// 所以同样保持 10 秒节拍免得刷爆日志。
 	tick := 10 * time.Second
-	if tty {
+	if r.log.TTY() {
 		tick = time.Second
 	}
 	ticker := time.NewTicker(tick)
@@ -112,9 +103,6 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 		}
 	}()
 	var once sync.Once
-	// The logger redraws this line after every console line, so session log
-	// lines (which ARE printed in verbose runs) never overwrite it.
-	r.log.SetLiveLine(render)
 	return func(rr, tt int) {
 			mu.Lock()
 			rounds, tools = rr, tt
@@ -125,15 +113,9 @@ func (r *Runner) livePhaseLine(label string) (hook func(rounds, tools int), fin 
 				close(stop)
 				ticker.Stop()
 				<-done // 汇合：已在途的一帧不得画在清行之后
-				r.log.SetLiveLine(nil)
-				if tty {
-					// 只清行、不换行：这一行是"会消失的"实时行，
-					// 补 \n 会在阶段之间留下一行空白（管道模式下
-					// render 已经是整行 + 换行，再补就是重复行）。
-					fmt.Fprint(os.Stdout, "\r\x1b[K")
-					return
-				}
-				// 管道：最后一次 render 已经整行换过行，这里什么都不打。
+				// 行是"会消失的"：阶段结束时从实时块里摘掉，最后由调用方
+				// （或下面这句）把定格行作为普通行留在滚动区里。
+				row.Remove()
 			})
 		}
 }
@@ -381,7 +363,7 @@ func (r *Runner) stylePhase(proj string) error {
 	tools := r.styleSessionTools(proj, workDir, sourceDir, "style", bashTmp, submit)
 
 	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "style")
-	liveHook, liveClose := r.livePhaseLine("style")
+	liveHook, liveClose := r.livePhaseRow("style", "style")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 	// 会话上下文实时持久化（JSONL 转录，图片走 file:// 引用）：样式
@@ -552,7 +534,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 		sess.SetTranscript(tr)
 		defer tr.Close()
 	}
-	liveHook, liveClose := r.livePhaseLine("chapters")
+	liveHook, liveClose := r.livePhaseRow("chapters", "chapters")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 
@@ -773,7 +755,7 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 	//    两次重绘被当成普通文本落在一起。
 	var progLive *liveProgress
 	if !verbose && total > 0 {
-		progLive = newLiveProgress(func() string {
+		progLive = newLiveProgressRow(r.log, "convert", func() string {
 			progMu.Lock()
 			defer progMu.Unlock()
 			return convertProgressText(label, done, failed, running, total, time.Since(start))
@@ -952,6 +934,12 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	sess := session.NewSession(client, modelCfg, tuning,
 		renderPrompt(prompts.Must(prompts.ConvertSystem), tuning, r.outputLang()),
 		tools, r.log, tid, "convert:"+base)
+	// 每章一行实时行：并发的 4 章并排显示各自的轮次/工具数/已用时间，
+	// 谁跑完谁那行消失（用户要的"箭头指过去看每个子会话状态"）。聚合进度
+	// 行是另一行（id "convert"），两者互不覆盖。
+	convHook, convClose := r.livePhaseRow("convert:"+base, "convert:"+base)
+	sess.SetProgressHook(convHook)
+	defer convClose()
 
 	// 会话转录（JSONL，图片走 file:// 引用）：单章转换中断后（进程被
 	// 杀 / 网络断连）下次从转录恢复上下文继续，不重烧 token。
@@ -1328,7 +1316,7 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	tools = append(tools, r.sourcePageTools()...)
 	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.StyleFixSystem), r.cfg.LatexSession("convert"), r.outputLang()), tools, r.log, tid, "style-fix:"+base)
-	liveHook, liveClose := r.livePhaseLine("style-fix")
+	liveHook, liveClose := r.livePhaseRow("style-fix:"+base, "style-fix:"+base)
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 	// 样式修复会话原先**没有转录**：它改的是真实章节，出问题却无从复盘
@@ -1446,7 +1434,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	// 行），因此这里必须重新挂上同一份系统提示词——否则打回的这一轮
 	// 完全没有系统提示（模板、挂载说明、水印要求全部丢失）。
 	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "style-feedback")
-	liveHook, liveClose := r.livePhaseLine("style-feedback")
+	liveHook, liveClose := r.livePhaseRow("style-feedback", "style-feedback")
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 	sess.SetMessages(msgs)

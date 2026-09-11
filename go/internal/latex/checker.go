@@ -54,6 +54,11 @@ func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, t
 		sess.SetTranscript(tr)
 		defer tr.Close()
 	}
+	// checker 会话也进实时块：用户要看得到"谁进了 checker、跑到哪了"，
+	// 而且 checker 是并发跑的，必须有自己的行而不是挤在转换行里。
+	chkHook, chkClose := r.livePhaseRow("checker:"+base, "checker:"+base)
+	sess.SetProgressHook(chkHook)
+	defer chkClose()
 	userText := prompts.Render(prompts.CheckerUser, map[string]string{
 		"CHAPTER_MD":  "check:" + base + ".md",
 		"CHAPTER_TEX": "check:" + base + ".tex",

@@ -274,3 +274,13 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 ### 关于 grep 工具（用户第 12 条）
 
 `grep` **不是**沙箱里的 shell：`GrepTool`（`internal/latex/tools_work.go`）自己按会话挂载表解析路径（`project:style`、`/work/x.tex`、裸相对路径遍历全部挂载点），再在**宿主**上 `exec.Command("grep", "-rIn", …)`。所以它用的是宿主的 grep 二进制、但跑在沙箱之外、看得到全部挂载点——与 `bash` 里那条 `grep` 的可见范围不同。提示词无需改动（按用户要求未动）。
+
+### ⑤ 控制台进度：从"一条会被覆盖的状态行"改成"每人一行的实时块"
+
+用户第三十三条前三点（进度行重叠、convert 要按子会话多行显示、style-fix 与 style-feedback 来回跳）是同一个根因：
+
+- `logger` 只有一个 `live func()` 槽位，`SetLiveLine` **谁最后装谁显示**。并发的子会话（逐章 style-fix、convert、feedback）各自 `livePhaseLine(label)` 装自己的渲染函数，于是终端的同一行每秒被不同所有者覆盖——用户看到的 `[style-feedback] 轮次 33 · 工具调用 49 · 已用 7m06s` 与 `[style-fix] …` 来回跳、两边时间都在涨，正是"两个所有者各带自己的 start 时间抢同一行"。
+- 阶段进度行 `liveProgress`（classify/process/convert 聚合）**另起一套**：自己 `fmt.Fprintf(os.Stdout, "\r\x1b[K…")`，是终端光标的第二个所有者，所以它能盖掉会话行（用户："[convert] 0/4 0.00% … 覆盖了上面的 chapters 行"）。
+- 日志行前只补一个 `\n` 再重画：进度行被**永久留在滚动区**，终端里同一行内容出现两次（"重叠"的另一种形态）。
+
+现在 `logger` 提供行式 API：`LiveRow(id)` → `Set/Update/Remove/Finalize`，内部维护 `liveRows`（按创建顺序）与 `liveDrawn`（已画行数），重绘是"上移 N 行 → 清行 → 重画"，日志行与 `PrintConsole` 先擦块、写在块原来的位置、再把块画在下面；管道/重定向下不玩光标，按**变化**追加整行（同一状态不重复，延续第三十批的修复）。`liveProgress` 变成块里的一行（不再自己写 stdout），`livePhaseRow(id,label)` 供 style/chapters/style-feedback/final-review 以及新增的**逐章 convert / 逐章 checker / 逐章 style-fix** 使用。`Finalize` 负责把最后一帧定格成普通行（终端里必打，管道里只在没打过时打），阶段行因此"消失后不留空行、也不重复"。测试：`TestLivePanelNeverOverlapsOwnerRows`（把字节流回放进一个终端模型，断言日志行完整、跑完的行消失、在跑的并排、同一行不出现两个实时行）、`TestLiveBlockKeepsRowsIndependent`（两行互不改动、摘掉的行不会因迟到更新复活）、以及改写后的 `TestLiveProgressTTYCloseRepaints`/`TestLiveProgressPipeNoTrailingBlank`/`TestLiveProgressNoDuplicateFinalLine`/`TestPhaseNoteDoesNotOverwriteLiveLine`。

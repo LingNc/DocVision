@@ -28,11 +28,18 @@ type Logger struct {
 	errorFile     *os.File // may be nil if errLogPath is empty
 	threadIDWidth int
 	quiet         bool // when true, suppress console output; still writes to log files
-	// live renders the "live" progress line (the one that is redrawn in
-	// place with \r while a phase runs). While it is set, every console
-	// line is preceded by a newline and the live line is redrawn after it,
-	// so log lines never overwrite/garble the progress line.
-	live  func()
+	// liveRows 是"实时进度块"：每行一个所有者（阶段进度、某个子会话）。
+	// 它们一起在终端里原地重绘，日志行先擦掉整块再画在下面。**每人一行**
+	// 是这套东西存在的理由：曾经只有一个 live 槽位，谁最后装谁的话就显示
+	// 谁，于是并发的样式修复会话与它的父阶段每秒互相覆盖（用户看到
+	// "[style-feedback] 轮次 33 …" 与 "[style-fix] …" 来回跳、两边时间都在
+	// 涨），而阶段收尾时又会把别人的行擦掉（用户看到"进度行重叠"）。
+	liveRows []*liveRowEntry
+	// liveDrawn 是**当前已经画在终端上**的行数，重绘/擦除要靠它把光标移回去。
+	liveDrawn int
+	// tty 决定重绘方式：真终端里用 ANSI 光标上移 + 清行原地重绘；管道/
+	// 重定向里每次变化只整行追加一次（否则日志里全是裸转义序列）。
+	tty   bool
 	level int // LevelInfo / LevelDebug / LevelTrace
 }
 
@@ -47,7 +54,7 @@ func NewLogger(logPath, errLogPath string, threadIDWidth int) (*Logger, error) {
 	if threadIDWidth <= 0 {
 		threadIDWidth = 2
 	}
-	l := &Logger{threadIDWidth: threadIDWidth}
+	l := &Logger{threadIDWidth: threadIDWidth, tty: stdoutIsTerminal()}
 
 	if logPath != "" {
 		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -199,12 +206,230 @@ func (l *Logger) Quiet() bool {
 	return l.quiet
 }
 
-// SetLiveLine installs (fn != nil) or clears (fn == nil) the live progress
-// line renderer. See the field comment for the interleaving guarantee.
-func (l *Logger) SetLiveLine(fn func()) {
+// TTYForTest forces the terminal/pipe decision of loggers created after it
+// is set (nil = detect from os.Stdout). A test's stdout is a pipe, so without
+// this the in-place redraw path could not be exercised at all.
+var TTYForTest *bool
+
+// stdoutIsTerminal reports whether os.Stdout is a character device. The
+// live block redraws itself with ANSI escapes, which is only meaningful
+// there.
+func stdoutIsTerminal() bool {
+	if TTYForTest != nil {
+		return *TTYForTest
+	}
+	st, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return st.Mode()&os.ModeCharDevice != 0
+}
+
+// liveRowEntry is one owner's line inside the live block.
+type liveRowEntry struct {
+	id   string
+	text string
+	// printed is the last text flushed as a whole line in non-TTY mode
+	// (one line per change; consecutive identical states stay one line).
+	printed string
+}
+
+// LiveRow is a handle to one line of the live progress block. Rows are
+// independent: setting or removing one never touches another owner's line.
+type LiveRow struct {
+	l   *Logger
+	ent *liveRowEntry
+}
+
+// LiveRow returns the row with this id, creating it when missing. The id
+// should name the owner (e.g. "convert/chapter_002", "style-feedback"), so a
+// caller can re-acquire the same row across reconnects and so two concurrent
+// owners can never share a line.
+func (l *Logger) LiveRow(id string) *LiveRow {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.live = fn
+	for _, e := range l.liveRows {
+		if e.id == id {
+			return &LiveRow{l: l, ent: e}
+		}
+	}
+	ent := &liveRowEntry{id: id}
+	l.liveRows = append(l.liveRows, ent)
+	return &LiveRow{l: l, ent: ent}
+}
+
+// Update sets the row text (printf-style) and repaints the block.
+func (r *LiveRow) Update(format string, args ...interface{}) {
+	if r == nil || r.l == nil || r.ent == nil {
+		return
+	}
+	r.Set(fmt.Sprintf(format, args...))
+}
+
+// Set replaces the row text and repaints the block. An empty text keeps the
+// row (it renders as a blank line) — use Remove to drop it.
+func (r *LiveRow) Set(text string) {
+	if r == nil || r.l == nil || r.ent == nil {
+		return
+	}
+	l := r.l
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.findRowLocked(r.ent)
+	if e == nil {
+		return // already removed: late updates must not resurrect a row
+	}
+	if e.text == text {
+		return
+	}
+	e.text = text
+	// 必须先擦再画：块画完后光标停在**最后一行**，直接重画会把第 0 行
+	// 盖到最后一行上。
+	l.refreshLiveLocked()
+}
+
+// Text returns the current text (empty when the row is gone).
+func (r *LiveRow) Text() string {
+	if r == nil || r.l == nil || r.ent == nil {
+		return ""
+	}
+	r.l.mu.Lock()
+	defer r.l.mu.Unlock()
+	if e := r.l.findRowLocked(r.ent); e != nil {
+		return e.text
+	}
+	return ""
+}
+
+// Remove drops the row from the block. Idempotent.
+func (r *LiveRow) Remove() {
+	if r == nil || r.l == nil || r.ent == nil {
+		return
+	}
+	l := r.l
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i, e := range l.liveRows {
+		if e == r.ent {
+			l.liveRows = append(l.liveRows[:i], l.liveRows[i+1:]...)
+			break
+		}
+	}
+	l.eraseLiveLocked()
+	l.paintLiveLocked()
+}
+
+// Finalize prints `text` as an ordinary line (so it survives in the
+// terminal scrollback and in a captured log) and drops the row. In a pipe
+// the line is only printed when a repaint has not already flushed that
+// exact text — otherwise the phase's final state would appear twice.
+func (r *LiveRow) Finalize(text string) {
+	if r == nil || r.l == nil || r.ent == nil {
+		return
+	}
+	l := r.l
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.findRowLocked(r.ent)
+	already := e != nil && text != "" && text == e.printed
+	for i, cur := range l.liveRows {
+		if cur == r.ent {
+			l.liveRows = append(l.liveRows[:i], l.liveRows[i+1:]...)
+			break
+		}
+	}
+	if l.quiet {
+		l.liveDrawn = 0
+		return
+	}
+	l.eraseLiveLocked()
+	if text != "" && (l.tty || !already) {
+		fmt.Fprintln(os.Stdout, text)
+	}
+	l.paintLiveLocked()
+}
+
+// TTY reports whether the live block redraws in place (a real terminal).
+func (l *Logger) TTY() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.tty
+}
+
+// LiveRowTexts returns the rows in display order (tests and the panel owner).
+func (l *Logger) LiveRowTexts() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]string, 0, len(l.liveRows))
+	for _, e := range l.liveRows {
+		out = append(out, e.text)
+	}
+	return out
+}
+
+func (l *Logger) findRowLocked(ent *liveRowEntry) *liveRowEntry {
+	for _, e := range l.liveRows {
+		if e == ent {
+			return e
+		}
+	}
+	return nil
+}
+
+// eraseLiveLocked clears the painted block and leaves the cursor on its
+// first line, so the next thing printed replaces the block instead of
+// landing next to it. No-op for pipes (nothing was ever painted in place).
+func (l *Logger) eraseLiveLocked() {
+	if !l.tty || l.liveDrawn == 0 {
+		l.liveDrawn = 0
+		return
+	}
+	n := l.liveDrawn
+	if n > 1 {
+		fmt.Fprintf(os.Stdout, "\x1b[%dA", n-1) // to the block's first line
+	}
+	for i := 0; i < n; i++ {
+		fmt.Fprint(os.Stdout, "\r\x1b[K")
+		if i < n-1 {
+			fmt.Fprint(os.Stdout, "\n")
+		}
+	}
+	if n > 1 {
+		fmt.Fprintf(os.Stdout, "\x1b[%dA", n-1) // back to the first line
+	}
+	l.liveDrawn = 0
+}
+
+// paintLiveLocked draws the current rows. In a TTY it reuses the space the
+// previous block occupied; for a pipe it appends one line per CHANGE (so a
+// captured log keeps a chronological record without每秒重画).
+func (l *Logger) paintLiveLocked() {
+	if l.quiet {
+		return
+	}
+	if !l.tty {
+		for _, e := range l.liveRows {
+			if e.text == "" || e.text == e.printed {
+				continue
+			}
+			e.printed = e.text
+			fmt.Fprintln(os.Stdout, e.text)
+		}
+		return
+	}
+	for i, e := range l.liveRows {
+		if i > 0 {
+			fmt.Fprint(os.Stdout, "\n")
+		}
+		fmt.Fprintf(os.Stdout, "\r\x1b[K%s", e.text)
+	}
+	l.liveDrawn = len(l.liveRows)
+}
+
+// refreshLiveLocked repaints the block in place (row added/updated/removed).
+func (l *Logger) refreshLiveLocked() {
+	l.eraseLiveLocked()
+	l.paintLiveLocked()
 }
 
 func (l *Logger) SetQuiet(quiet bool) {
@@ -229,16 +454,13 @@ func (l *Logger) write(file *os.File, tid int, tag string, args ...interface{}) 
 	defer l.mu.Unlock()
 
 	if !l.quiet {
-		if l.live != nil {
-			// Finish the live progress line before the log line, then
-			// redraw it below: without this the log text landed on top of
-			// the progress line and the two interleaved.
-			fmt.Print("\n")
-		}
+		// 先擦掉整个实时块（光标停在块首行），日志行写在块原来的位置，
+		// 再把块画在日志行下面：日志与进度块永不互相覆盖。旧实现只补一个
+		// "\n" 再重画，等于把进度行**永久留在滚动区**，终端里就是同一行
+		// 内容出现两次（用户实测的"重叠"）。
+		l.eraseLiveLocked()
 		fmt.Print(line)
-		if l.live != nil {
-			l.live()
-		}
+		l.paintLiveLocked()
 	}
 	if file != nil {
 		_, _ = file.WriteString(line)
@@ -277,13 +499,9 @@ func (l *Logger) PrintConsole(line string) {
 	if l.quiet {
 		return
 	}
-	if l.live != nil {
-		fmt.Print("\n")
-	}
+	l.eraseLiveLocked()
 	fmt.Print(line)
-	if l.live != nil {
-		l.live()
-	}
+	l.paintLiveLocked()
 }
 
 // append writes a pre-formatted line to the given file under the logger's
