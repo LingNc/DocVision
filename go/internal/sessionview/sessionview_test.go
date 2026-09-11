@@ -291,7 +291,7 @@ func TestWriteStaticHTML(t *testing.T) {
 	if !strings.Contains(page, "DocVision session viewer") {
 		t.Error("the script was not inlined, so the snapshot is not self-contained")
 	}
-	if !strings.Contains(page, "#0f1115") {
+	if !strings.Contains(page, "--mono:") || !strings.Contains(page, `html[data-theme="dark"]`) {
 		t.Error("the stylesheet was not inlined")
 	}
 	if strings.Contains(page, "viewer.js") || strings.Contains(page, "viewer.css") {
@@ -800,14 +800,16 @@ func TestViewerAssetsThemeAndMeta(t *testing.T) {
 	if !strings.Contains(css, `html[data-theme="dark"]`) {
 		t.Error("样式表里没有深色主题覆盖块")
 	}
-	rootBlock := css[:strings.Index(css, `html[data-theme="dark"]`)]
-	if strings.Contains(rootBlock, "#0f1115") {
+	// 从 ":root {" 量到深色覆盖块（文件头的注释里也提到过这个选择器）。
+	rootBlock := css[strings.Index(css, ":root {"):strings.Index(css, `html[data-theme="dark"] {`)]
+	if strings.Contains(rootBlock, "--bg: #0f0f10") {
 		t.Error("深色底出现在 :root 里：默认主题必须是白天模式")
 	}
-	if !strings.Contains(css, "--bg: #f4f6f9") {
+	// :root 必须是浅色默认（页面底色为白/近白），深色只在覆盖块里出现。
+	if !strings.Contains(rootBlock, "--bg: #ffffff") || !strings.Contains(rootBlock, "--text: #18181b") {
 		t.Error(":root 不是浅色默认配色")
 	}
-	if !strings.Contains(css, "--mono:") || !strings.Contains(css, ".reasoning-scroll { max-height") {
+	if !strings.Contains(css, "--mono:") || !strings.Contains(css, ".reasoning-scroll, .prompt-scroll { max-height") {
 		t.Error("思考内容缺少等宽字体变量或最大高度滚动")
 	}
 
@@ -871,10 +873,15 @@ func TestViewerAssetsThemeAndMeta(t *testing.T) {
 	if !strings.Contains(css, ".proj-prefix") {
 		t.Error("样式表没有容器前缀样式（书名应当是视觉主体）")
 	}
-	// 静态快照把每个会话的字段挑进 state.sessions：漏字段会让 UI 少一块
-	// （曾经漏掉 projectLegacy，静态页里"旧版单项目"标记不显示）。
-	if !strings.Contains(js, "projectLegacy: s.projectLegacy") {
-		t.Error("静态模式的会话字段映射漏了 projectLegacy")
+	// 静态快照的会话字段**整份带走**，只减掉每会话的 lines 大块。这里以前是
+	// 一个手写白名单，每加一个字段（projectLegacy、stage、projectStages、
+	// imageOrder、cost…）都要补一行，漏掉就在静态页里静默少一块 UI
+	// （--serve 实时模式却正常）。现在钉住的是"只减字段"的写法本身。
+	if !strings.Contains(js, "if (k !== 'lines') { copy[k] = s[k]; }") {
+		t.Error("静态模式的会话字段映射不再是「整份带走、只减 lines」")
+	}
+	if strings.Contains(js, "projectLegacy: s.projectLegacy") {
+		t.Error("静态模式又回到了手写字段白名单")
 	}
 	if !strings.Contains(js, "含系统提示词快照") {
 		t.Error("会话行没有提示含系统提示词快照")

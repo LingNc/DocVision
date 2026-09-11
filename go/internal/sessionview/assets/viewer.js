@@ -1426,15 +1426,18 @@
     if (MODE === 'static') {
       state.root = DATA.root || '';
       state.generated = DATA.generated || '';
-      // 静态模式从内嵌数据里挑字段（丢掉每会话的 lines 大块）；这里漏一个
-      // 字段，页面就会静默少一块 UI（曾漏掉 projectLegacy，"旧版单项目"
-      // 标记在静态快照里不显示）。新增字段时记得同时加到这里与实时模式。
+      // 静态模式只丢掉每会话的 lines 大块，其余字段**原样带走**。
+      // 这里以前是一个手写白名单：每加一个字段（projectLegacy、stage、
+      // projectStages、imageOrder、cost…）都要记得补一行，漏掉页面就静默
+      // 少一块 UI——侧栏的阶段分组、书级进展、图片名/页码、费用列在静态
+      // 快照里全都不显示，而实时模式（--serve）正常。改成"只减字段"而不是
+      // "列举字段"，这类漏项从此不会再有。
       state.sessions = (DATA.sessions || []).map(function (s) {
-        return {
-          id: s.id, label: s.label, title: s.title, name: s.name, messages: s.messages,
-          size: s.size, mtime: s.mtime, live: s.live, project: s.project,
-          projectLegacy: s.projectLegacy, meta: s.meta, stats: s.stats
-        };
+        var copy = {};
+        Object.keys(s).forEach(function (k) {
+          if (k !== 'lines') { copy[k] = s[k]; }
+        });
+        return copy;
       });
       renderSessions();
       updateRootLabel();

@@ -345,3 +345,20 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - **（a）是我在回复里把两件事混成了一句话**：`figures/*.svg` 是**档位2 正文**的嵌入方式（档位2 的产物就是"用重画结果替换矢量图"）；而**链接**（档位1 md 里的 `LINK: [class](path)` 与 `doc_index.json` 的 `img`）三种类型**一直**都走 `copyOriginalImage` 指向原图 `images/<主题>/<sha>.jpg`，从不是生成物——已核对 `runner.go` 三处 LINK 构造（styled-text/vector/image）与 `docindex.go` 的 `markerKey`（按原图文件名 join）。文档同步补一句"链接一律指向原图，`figures/*.svg` 只是档位2 正文的嵌入"。
 - **（b）是真缺陷**：`DocEntry.Text` 只取厂商的 `image_caption`/`image_footnote`（表格取 `table_caption` / 正文摘要），厂商没给就留空——于是"这张图对应什么内容"在 `text` 上是空的，我们的解释只躺在 `content` 里。现在 `applyMarkers` 里加兜底 `markerFallbackText`：`text` 为空时用我们写在图上的内容填——styled-text → 印刷原文、raster → 生成的解释、vector → **图标签**（不塞 LaTeX 本体，整段代码放"图注"位置会把检索结果淹没）；厂商给了图注的不动，我们的内容仍在 `content`，两边都可检索、来源不混。
 - 测试 `TestDocIndexTextFallsBackToOurOwnContent`（四种图块：无图注 raster/styled-text/vector 各取对应内容、有厂商图注的不被顶掉且 content 仍在；顺带断言三种类型的 `Img` 都是 `images/` 下的原图、绝不是 `.svg`；兜底后的 text 仍可被 `Search` 命中）。既有 marker 测试全部保持通过。
+
+### ⑫ 会话预览页按 DSH 的界面重做视觉（+ 静态快照丢字段的真缺陷）
+
+用户反馈："我们的界面我的意思就是让你仿照 DSH 的界面做，就是现在这个 AI 的界面样式。之前那个太难看了，并且显示的时候很多没有那么自然内容。并且我刚刚说的很多界面 ui 上的描述这边在原有的基础上不好落实。"
+
+**先说找到了什么真缺陷**：用户说"UI 上的描述落实不了"不是主观感受，而是**静态导出把新字段丢了**——`viewer.js` 的静态模式把每个会话的字段**逐个手写列举**进 `state.sessions`（注释里甚至已经写着"这里漏一个字段，页面就会静默少一块 UI（曾漏掉 projectLegacy）"），于是第七～十批加进去的 `stage`/`stageTitle`/`projectStages`/`imageOrder`/`imageName`/`page`/`cost` 在**静态页里全都不显示**：侧栏阶段分组、书级进展行、逐图会话的"第 N 页 · 第 M 张 · 类型 · 哈希"、费用列统统缺失，而 `--serve` 实时模式正常。用户平时看的就是静态页。修法：改成"**只减字段**"——`Object.keys(s)` 整份带走、只把 `lines` 大块丢掉，并把这一写法钉进 `TestViewerAssetsThemeAndMeta`（既断言新写法在，也断言手写白名单不再回来）。
+
+**视觉重做**：`viewer.css` 整份重写（399 行，浅深两套 token），取向是"扁平、安静、信息优先"：
+
+- 分层只用极浅底色差 + 1px 边框，去掉重描边与厚阴影；卡片圆角统一 10px、行内小元素 6px。
+- **助手消息不再套卡片**：正文直接排（13.5px/1.68），只有机器内容进等宽块；用户消息是唯一带浅底色的一侧（并去掉卡片里重复的"用户/任务"标题——上方角色行已经说了是谁）。
+- 角色行改成极窄的一行标签（`#序号 · 用户/AI/工具 · 行 N · 思考/工具/图片`），"谁在说话"靠它和缩进区分，而不是成片彩色块。
+- 工具调用/结果：无边框行 + 折叠，左侧一条 2px 轨道按**工具家族**着色（`bash`/`compile` 橙、`write_*` 蓝、`read_*`/`view_*` 绿、`grep`/`doc_search`/`list_*` 紫、`submit` 红），折叠态带一行摘要（命令首行/`path`/`pattern`/查询词），结果按 `ok`/`error` 给轨道染色。
+- 侧栏：三层全改成无边框行（悬停浅底、选中淡蓝底），阶段组头带该阶段状态、书级进展单独一行、逐图会话的身份小标签照旧；底部合计与脚注压成两行。
+- 指标卡改成瓦片网格（`repeat(auto-fit, minmax(140px, 1fr))`，格线用 1px 底色差而不是边框）。
+
+**校验方式（这次的证据）**：装了无头 chromium，直接把静态页渲染成 PNG 回头看——`chromium --headless=new --no-sandbox --user-data-dir=… --screenshot=… file://…/page.html`，浅色与深色各截一张（`data-theme="dark"` 注入副本）。这一步立刻暴露了另一个我自己的错误：我手写的**预览数据用了转录的原始行形状**（`{"t":"msg","message":{"role":…}}`），而页面真正吃的是 Go 侧加工后的 `Line`（`{n,t,role,text,tool_calls,tool_call_id,reasoning_content,stats}`）——用错形状时主区域显示"这个会话还没有可显示的消息"，看起来像页面坏了，其实是**我的预览数据不对**。按真实形状重做预览数据后才看到真正的页面。
