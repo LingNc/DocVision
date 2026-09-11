@@ -54,7 +54,7 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 | 档位1 · raster 原图 | `<!-- DOCVISION-IMAGE: <label> -->`（首行闭合）+ 注释外一行 `DESCRIBE: <解释文本>` + 注释外一行 `LINK: [image](images/…)`；档位1 在 process 阶段**总是**为 raster 图生成解释（复用 img2text 提取，每张一次视觉调用，不依赖 `insert_image_description`——那个开关只作用于档位2），提取不到文本时只写 LINK 行 |
 | 提取不到文本 | 档位2 保留原图链接；档位1 只写 `LINK: [image](…)`，都不丢内容 |
 
-档位1 的矢量图用同一套骨架：`<!-- DOCVISION-VECTOR: <label> -->`（首行闭合）独立一行，注释外一行 `LINK: [vector](images/…)` 位于 latex 围栏上方；注释与字段同样不得进入 `.tex`。fallback（矢量转换失败）保持原图并在档位1 就地标注 `<!-- DOCVISION-ERROR: … -->`。
+档位1 的矢量图用同一套骨架：`<!-- DOCVISION-VECTOR: <label> -->`（首行闭合）独立一行，注释外一行 `LINK: [vector](images/…)` 位于 latex 围栏上方；注释与字段同样不得进入 `.tex`。fallback（矢量转换失败）保持原图并在档位1 就地标注 `<!-- DOCVISION-ERROR: … -->`。原图没能就位时注释会带上 `| 原图未就位（见日志：复制原图失败）`，**不会**把注释与 LINK 一起丢掉（`doc_index` 靠这些注释回填图片条目）。
 
 ## 日志分析（analyze）
 

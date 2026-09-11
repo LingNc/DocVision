@@ -1,7 +1,9 @@
 package latex
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,11 +42,23 @@ func (r *Runner) assemblePhase(proj string) error {
 		return err
 	}
 	// Figures and raster assets from the level-2 source pass.
+	//
+	// 先自愈：上一次运行可能在项目 source 树里留下了一批断链（相对目标
+	// 的软链），而 filepath.Walk 会走进断链并让 copyFile 以
+	// "open …/source/images/<书>/<sha>.jpg: no such file or directory" 整段
+	// 中止——一条取不到的图不该毁掉跑了一刻钟的 assemble。
+	if n := r.repairProjectImageLinks(proj); n > 0 {
+		r.log.Log(0, "[images] assemble 前修复断链:", strconv.Itoa(n), "个")
+	}
 	for _, asset := range []string{"figures", "images"} {
 		src := filepath.Join(proj, "source", asset)
 		if fileExists(src) {
-			if err := copyDir(src, filepath.Join(buildDir, asset)); err != nil {
+			skipped, err := copyDirReport(src, filepath.Join(buildDir, asset))
+			if err != nil {
 				return err
+			}
+			for _, sk := range skipped {
+				r.log.LogWarning(0, "[assemble] 跳过取不到的插图（不中止）:", sk)
 			}
 		}
 	}
@@ -330,18 +344,38 @@ func regexpInputChapters() *regexp.Regexp {
 
 // copyDir recursively copies a directory tree.
 func copyDir(src, dst string) error {
-	return filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+	_, err := copyDirReport(src, dst)
+	return err
+}
+
+// copyDirReport 是 copyDir 的"别死在一张图上"版本：断链（软链自身存在、
+// 目标不解析）记进 skipped 而不是让整个复制失败。其余 IO 错误照旧上报——
+// 真正的磁盘问题必须响，不能悄悄少拷。
+func copyDirReport(src, dst string) (skipped []string, err error) {
+	err = filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(src, p)
-		if err != nil {
-			return err
+		rel, rerr := filepath.Rel(src, p)
+		if rerr != nil {
+			return rerr
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		return copyFile(p, target)
+		if info.Mode()&os.ModeSymlink != 0 && !pathExists(p) {
+			skipped = append(skipped, p)
+			return nil
+		}
+		if cerr := copyFile(p, target); cerr != nil {
+			if info.Mode()&os.ModeSymlink != 0 && errors.Is(cerr, fs.ErrNotExist) {
+				skipped = append(skipped, p)
+				return nil
+			}
+			return cerr
+		}
+		return nil
 	})
+	return skipped, err
 }

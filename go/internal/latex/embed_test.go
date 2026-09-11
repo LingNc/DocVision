@@ -32,6 +32,20 @@ func testRunner(t *testing.T, inline bool) *Runner {
 		log: log, inline: inline}
 }
 
+// testRunnerWithImages 与 testRunner 相同，但 imagesDir 由调用方给出——回归
+// 测试需要**相对**路径（现场配置就是 ./output/images）。
+func testRunnerWithImages(t *testing.T, imagesDir string) *Runner {
+	t.Helper()
+	log, err := logger.NewLogger("", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.SetQuiet(true)
+	t.Cleanup(func() { _ = log.Close() })
+	return &Runner{cfg: &config.Config{Paths: config.PathsConfig{ImagesDir: imagesDir}},
+		log: log, inline: true}
+}
+
 // TestEmbedBlockLevel2StyledTextIsDirect: level 2 replaces a text image
 // with its extracted text and nothing else — no styling preservation,
 // no markers, no original image link.

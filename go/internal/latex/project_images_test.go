@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/logger"
 )
 
 // 现场缺陷复现：md 里写的是 `images/测试-概率论/<sha>.jpg`（相对 md 自身），
@@ -181,4 +182,210 @@ func TestPythonEnvPipIndexURL(t *testing.T) {
 	if !strings.Contains(txt, "install --user -i https://mirrors.aliyun.com/pypi/simple Pillow") {
 		t.Fatalf("镜像 + 映射后的包名都要在, got:\n%s", txt)
 	}
+}
+
+// 现场缺陷（2026-09-11 20:29 那次运行）：配置里 paths.images_dir 是**相对**
+// 路径 `./output/images`，而 os.Symlink 会原样保存目标串、内核按"软链所在
+// 目录"解析——于是项目树里落下一批死链：
+//
+//	<proj>/source/images/测试-概率论/<sha>.jpg -> output/images/测试-概率论/<sha>.jpg
+//	（实际被解析成 <proj>/source/images/测试-概率论/output/images/…）
+//
+// 后果：rebuildPhase 里 copyOriginalImage 复制失败 → 7 条 DOCVISION-VECTOR
+// 注释连同 LINK 一起消失、STYLED-TEXT 只剩注释没有 LINK、doc_index 里对应
+// 条目的 text 为空；随后 assemble 复制 source/images 时以
+// "open …: no such file or directory" 中止整本书。
+//
+// 老测试用的是**绝对** imagesDir，所以一路绿灯；这里必须用相对路径复现。
+func TestProjectImagesLinkWithRelativeImagesDirIsReadable(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)                     // 真实运行里进程 cwd 就是 config.yaml 所在目录
+	const relImages = "output/images" // == config 默认值 ./output/images
+	name := "19c107f60583a9f492543a1907d5767586b4813c59cc5bb9b29c2cb5e8010b65.jpg"
+	sub := filepath.Join(relImages, "测试-概率论")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, name), []byte("jpg-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join("latex_project", "测试-概率论", "source")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tasks := []*task{{mdName: "测试-概率论.md", imgPath: "images/测试-概率论/" + name}}
+	if n, missing := linkProjectImages(outDir, relImages, tasks); n != 1 || missing != 0 {
+		t.Fatalf("linked=%d missing=%d, want 1/0", n, missing)
+	}
+	dst := filepath.Join(outDir, "images", "测试-概率论", name)
+	if !pathExists(dst) {
+		t.Fatalf("相对 images_dir 铺出来的条目必须能读到（不能是死链）: %s -> %q", dst, readLink(t, dst))
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil || string(data) != "jpg-bytes" {
+		t.Fatalf("读图失败: %v %q", err, data)
+	}
+	// 目标必须是绝对路径：绝对路径才与"软链所在目录"无关。
+	if target := readLink(t, dst); target != "" && !filepath.IsAbs(target) {
+		t.Errorf("软链目标应为绝对路径，got %q", target)
+	}
+}
+
+// 死链必须能被修好：旧实现的跳过条件是 `pathExists(dst) || isSymlink(dst)`，
+// 死链被当成"已铺好"永久跳过，源路径改对了也不会自愈。
+func TestLinkProjectImagesRepairsDanglingLink(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	const relImages = "output/images"
+	name := "fig.jpg"
+	if err := os.MkdirAll(filepath.Join(relImages, "book"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(relImages, "book", name), []byte("real"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join("proj", "source")
+	dst := filepath.Join(outDir, "images", "book", name)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 模拟上一次运行留下的死链（相对目标）。
+	if err := os.Symlink(filepath.Join(relImages, "book", name), dst); err != nil {
+		t.Fatal(err)
+	}
+	if pathExists(dst) {
+		t.Fatal("前置条件：这必须是一条死链")
+	}
+	n, missing := linkProjectImages(outDir, relImages, []*task{{
+		mdName: "book.md", imgPath: "images/book/" + name,
+	}})
+	if n != 1 || missing != 0 {
+		t.Fatalf("死链应被修好并计入 linked: linked=%d missing=%d", n, missing)
+	}
+	if !pathExists(dst) {
+		t.Fatalf("修复后仍读不到: %s -> %q", dst, readLink(t, dst))
+	}
+	if data, err := os.ReadFile(dst); err != nil || string(data) != "real" {
+		t.Fatalf("修复后内容不对: %v %q", err, data)
+	}
+	// 已就位的条目不该被动：再跑一次 linked=0。
+	if n2, _ := linkProjectImages(outDir, relImages, []*task{{
+		mdName: "book.md", imgPath: "images/book/" + name,
+	}}); n2 != 0 {
+		t.Fatalf("已就位条目被重建了: linked=%d", n2)
+	}
+}
+
+// repairProjectImageLinks：只跑 assemble 的场景（或上一次死在 assemble 的项目）
+// 也必须能自愈死链，否则整本书继续以 "no such file or directory" 中止。
+func TestRepairProjectImageLinks(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	const relImages = "output/images"
+	name := "keep.png"
+	if err := os.MkdirAll(filepath.Join(relImages, "book"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(relImages, "book", name), []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proj := filepath.Join("latex_project", "book")
+	dst := filepath.Join(proj, "source", "images", "book", name)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(relImages, "book", name), dst); err != nil {
+		t.Fatal(err)
+	}
+	// 一张真正找不到源的图：只警告，不能崩。
+	ghost := filepath.Join(proj, "source", "images", "book", "ghost.png")
+	if err := os.Symlink(filepath.Join(relImages, "book", "ghost.png"), ghost); err != nil {
+		t.Fatal(err)
+	}
+	// 一个真文件也不能被动。
+	real := filepath.Join(proj, "source", "figures", "fig.pdf")
+	if err := os.MkdirAll(filepath.Dir(real), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte("pdf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := testRunnerWithImages(t, relImages)
+	if fixed := r.repairProjectImageLinks(proj); fixed != 1 {
+		t.Fatalf("只应修好 1 条死链，got %d", fixed)
+	}
+	if !pathExists(dst) {
+		t.Fatalf("死链没修好: %s", dst)
+	}
+	if data, err := os.ReadFile(dst); err != nil || string(data) != "png" {
+		t.Fatalf("修复后内容不对: %v %q", err, data)
+	}
+	if got, err := os.ReadFile(real); err != nil || string(got) != "pdf" {
+		t.Fatalf("真文件被动了: %v %q", err, got)
+	}
+}
+
+// assemble 复制 source/images：断链只跳过并上报，绝不中止（跑了一刻钟的
+// assemble 不该被一张取不到的图毁掉）。
+func TestCopyDirReportSkipsDanglingLink(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(filepath.Join(src, "book"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "book", "ok.png"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("output/images/book/gone.png", filepath.Join(src, "book", "gone.png")); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(root, "dst")
+	skipped, err := copyDirReport(src, dst)
+	if err != nil {
+		t.Fatalf("断链不该让复制失败: %v", err)
+	}
+	if len(skipped) != 1 || !strings.HasSuffix(skipped[0], "gone.png") {
+		t.Fatalf("应上报 1 条跳过，got %v", skipped)
+	}
+	if data, err := os.ReadFile(filepath.Join(dst, "book", "ok.png")); err != nil || string(data) != "ok" {
+		t.Fatalf("好图必须照拷: %v %q", err, data)
+	}
+}
+
+// 原图搬不进项目树时，注释与 LINK 必须留下（曾经整条 DOCVISION-VECTOR
+// 注释被静默丢掉，导致 doc_index 里 text 为空、下游查不到是哪张图）。
+func TestVectorNoteSurvivesMissingOriginal(t *testing.T) {
+	log, err := logger.NewLogger("", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.SetQuiet(true)
+	t.Cleanup(func() { _ = log.Close() })
+	r := &Runner{cfg: &config.Config{Paths: config.PathsConfig{ImagesDir: t.TempDir()}},
+		log: log, inline: true}
+	// 源图不存在：copyOriginalImage 必然失败。
+	p := &imageProgress{
+		Class: ClassVector, ImgPath: "images/测试-概率论/deadbeef.jpg",
+		TikzCode: "\\begin{tikzpicture}\\end{tikzpicture}", Label: "Venn diagram",
+	}
+	got := r.embedBlock(p, "测试-概率论.md", t.TempDir())
+	if !strings.Contains(got, "DOCVISION-VECTOR") {
+		t.Fatalf("注释必须保留，got:\n%s", got)
+	}
+	if !strings.Contains(got, "原图未就位") {
+		t.Fatalf("必须标明原图没就位，got:\n%s", got)
+	}
+	if !strings.Contains(got, "tikzpicture") {
+		t.Fatalf("TikZ 代码必须保留，got:\n%s", got)
+	}
+}
+
+func readLink(t *testing.T, path string) string {
+	t.Helper()
+	target, err := os.Readlink(path)
+	if err != nil {
+		return ""
+	}
+	return target
 }

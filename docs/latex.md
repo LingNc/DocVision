@@ -30,7 +30,7 @@
 | 目录 | 用途 |
 | --- | --- |
 | `source/` | images 阶段整理的 md 输入（另有 `source/progress_items/` 逐图进度，以及 `source/images/<书>/` —— 见下条） |
-| `source/images/<书名>/` | 该书**全部被引用的插图**，按 md 里的相对路径就位（链接到全局 `paths.images_dir`，失败则复制）。md 用 `images/<书>/<sha>.jpg` 这种相对引用，所以章节工作区、`assemble` 的 build 树、样式会话的 `view_image` 全都靠这棵树解析——曾因这里没铺图而出现"样式会话拿着 md 里的路径却报文件不存在" |
+| `source/images/<书名>/` | 该书**全部被引用的插图**，按 md 里的相对路径就位（逐文件软链到全局 `paths.images_dir`，目标是**绝对路径**，失败则复制）。md 用 `images/<书>/<sha>.jpg` 这种相对引用，所以章节工作区、`assemble` 的 build 树、样式会话的 `view_image` 全都靠这棵树解析——曾因这里没铺图而出现"样式会话拿着 md 里的路径却报文件不存在"。软链目标一律绝对：`os.Symlink` 原样存目标串、内核按**软链所在目录**解析，配置里的相对 `paths.images_dir` 会造出读不到的死链。每次 images 阶段开头与 `assemble` 前都会**自愈**（能读到的不动，死链重建） |
 | `pages/` | 原始扫描页渲染缓存（仅水印采样使用；会话看图走 `view_pdf` 现场渲染，不缓存） |
 | `style/` | 样式分析产物（book.cls / manual.md / example.tex） |
 | `work/style/` | 样式分析 AI 的虚拟工作区（write_file 增量起草；转录 `work/style_session.jsonl`） |
@@ -44,7 +44,7 @@
 | `work/temp/` | 临时工作区（拆章沙箱、样式/反馈 scratch、每章转换工作区 `conv_<章>/work`），默认用完即删 |
 | `build/` | 全书的构建树（每次 clean 重建：cls/手册/案例 + chapters + figures + main.tex），同时是修复会话与终审会话的工作区 |
 | `out/` | 交付产物：整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件），`book.pdf` 是 `main.pdf` 的别名，另有 `standalone.tex` |
-| `doc_index/doc_index.json` | 只读块索引（`doc_search` 的检索库，style 阶段之前构建；图片条目带 md 里 DOCVISION 注释的类型/描述/原文） |
+| `doc_index/doc_index.json` | 只读块索引（`doc_search` 的检索库，style 阶段之前构建；图片条目带 md 里 DOCVISION 注释的类型/描述/原文：`marker`（styled-text/vector/image）、`label`（描述）、`content`（styled-text 的印刷原文 / raster 的解释 / **矢量图的 LaTeX 本体**）） |
 | `watermark_memory.json` | 水印检测工作记忆（`latex.remove_watermark` 开启时生成；档位1 落在本项目工作区，档位2 同理落在 `<latex_output>/<项目名>/`） |
 | `progress.json` | 逐阶段断点进度 |
 | `.docvision_project.json` | 项目自述（项目名 + 主题名来源，仅新建项目写入；同名去重依据；旧版单项目目录不写） |

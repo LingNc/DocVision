@@ -44,8 +44,9 @@ type DocEntry struct {
 	Marker string `json:"marker,omitempty"`
 	// Label is the note's description (style note, figure label, …).
 	Label string `json:"label,omitempty"`
-	// Content is the note body: STYLED-TEXT's printed text (CONTENT) or
-	// RASTER's explanation (DESCRIBE).
+	// Content is the note body: STYLED-TEXT's printed text (CONTENT),
+	// RASTER's explanation (DESCRIBE), or a VECTOR figure's LaTeX source
+	// (the ```latex block the conversion wrote into the markdown).
 	Content string `json:"content,omitempty"`
 }
 
@@ -382,6 +383,11 @@ func scanMdMarkers(r io.Reader, out map[string]mdMarker) {
 		fields  []string  // CONTENT:/DESCRIBE: lines of the current note
 		pendKey string    // LINK seen with no note yet (field order may vary)
 		pendLn  int
+		// 矢量图的"内容"就是它后面那个 ```latex 代码块：索引里必须带着
+		// 它，否则 image 条目永远只有文件名与标签（doc_search 查不到图形
+		// 本体，转换会话也无从参考）。vecKey 是正在等代码块的条目。
+		vecKey  string
+		inFence bool
 	)
 	lineNo := 0
 	for sc.Scan() {
@@ -397,6 +403,7 @@ func scanMdMarkers(r io.Reader, out map[string]mdMarker) {
 			}
 			cur = &mdMarker{Marker: m, Label: label}
 			curKey, curLine, fields, pendKey = key, lineNo, nil, ""
+			vecKey, inFence = "", false // 上一条矢量图没等到代码块就结束（或换了图）
 			if key != "" {
 				out[key] = *cur // CONTENT/DESCRIBE below fills it in
 			}
@@ -406,11 +413,37 @@ func scanMdMarkers(r io.Reader, out map[string]mdMarker) {
 			key := markerKey(path)
 			if cur != nil && key != "" && lineNo-curLine <= markerNoteWindow {
 				storeNote(out, key, cur, fields)
+				if cur.Marker == markerVector {
+					vecKey, inFence = key, false // 紧随其后的 ```latex 是这个图的本体
+				}
 			} else if cur == nil && key != "" && markerLinkClass(class) != "" {
 				pendKey, pendLn = key, lineNo
 			}
 			cur, curKey, fields = nil, "", nil
 			continue
+		}
+		// 矢量代码块：只吃紧跟 LINK 的那一段（中间空行/围栏之外的正文都
+		// 算结束），避免把正文里的别的代码块粘到图上。
+		if vecKey != "" {
+			if !inFence {
+				if strings.HasPrefix(line, "```latex") {
+					inFence = true
+					continue
+				}
+				vecKey = ""
+			} else if strings.HasPrefix(line, "```") {
+				vecKey, inFence = "", false
+				continue
+			} else {
+				if m, ok := out[vecKey]; ok {
+					if m.Content != "" {
+						m.Content += "\n"
+					}
+					m.Content += line
+					out[vecKey] = m
+				}
+				continue
+			}
 		}
 		if cur == nil {
 			continue
@@ -659,8 +692,11 @@ func markerTag(e DocEntry) string {
 // the text printed in the picture, RASTER an explanation of it (VECTOR
 // notes have no body — the tikz code lives in the markdown fence).
 func markerFieldName(marker string) string {
-	if marker == markerImage {
+	switch marker {
+	case markerImage:
 		return "description"
+	case markerVector:
+		return "latex"
 	}
 	return "content"
 }

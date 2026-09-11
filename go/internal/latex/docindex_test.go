@@ -127,8 +127,13 @@ func TestParseMdMarkers(t *testing.T) {
 		t.Errorf("STYLED-TEXT 解析错误: %#v", styled)
 	}
 	vec := got["bbb222.png"]
-	if vec.Marker != markerVector || vec.Label != "mind-map diagram" || vec.Content != "" {
-		t.Errorf("VECTOR 解析错误（内容应来自注释、tikz 不进 Content）: %#v", vec)
+	if vec.Marker != markerVector || vec.Label != "mind-map diagram" {
+		t.Errorf("VECTOR 解析错误: %#v", vec)
+	}
+	// 矢量图的"内容"就是紧随 LINK 的那个 ```latex 块：索引里带着它，
+	// doc_search 才能按图形本体检索、转换会话才有参考。
+	if !strings.Contains(vec.Content, "\\begin{tikzpicture}") {
+		t.Errorf("VECTOR 的 Content 应是它的 LaTeX 本体: %#v", vec)
 	}
 	ras := got["ccc333.png"]
 	if ras.Marker != markerImage || ras.Label != "experiment setup" || ras.Content != "实验装置的示意图" {
@@ -157,6 +162,30 @@ func TestParseMdMarkers(t *testing.T) {
 		!strings.Contains(note.Content, "第一行说明") || !strings.Contains(note.Content, "第二行说明") {
 		t.Errorf("CRLF/多行注释解析错误: %#v", note)
 	}
+	// 矢量代码块的边界：只吃紧跟 LINK 的那一段。正文里另外出现的 latex
+	// 块（与任何注释无关）不许粘到图上去；紧随其后的非围栏正文也不算代码。
+	stray := "<!-- DOCVISION-VECTOR: fig -->\nLINK: [vector](images/book/ddd444.png)\n" +
+		"正文一句话（不是代码块）\n\n```latex\n\\begin{tikzpicture}\n\\end{tikzpicture}\n```\n"
+	if err := os.WriteFile(filepath.Join(dir, "stray.md"), []byte(stray), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sg := parseMdMarkers(dir, []string{"stray.md"})
+	if n, ok := sg["ddd444.png"]; !ok {
+		t.Fatalf("矢量注释未解析: %#v", sg)
+	} else if strings.Contains(n.Content, "tikzpicture") {
+		t.Errorf("LINK 与代码块之间夹了正文，不该把别的代码块当成本体: %#v", n)
+	}
+	// 有代码块的正常情形（无中间正文）必须收进来。
+	ok2 := "<!-- DOCVISION-VECTOR: fig -->\nLINK: [vector](images/book/eee555.png)\n" +
+		"```latex\n\\draw (0,0)--(1,1);\n```\n\n正文继续\n"
+	if err := os.WriteFile(filepath.Join(dir, "ok.md"), []byte(ok2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	og := parseMdMarkers(dir, []string{"ok.md"})
+	if n, ok := og["eee555.png"]; !ok || !strings.Contains(n.Content, "\\draw (0,0)--(1,1);") {
+		t.Errorf("矢量代码块未收进 Content: %#v", og["eee555.png"])
+	}
+
 	if m := parseMdMarkers(dir, nil); len(m) != 0 {
 		t.Errorf("空 mdNames 应返回空 map，得到 %#v", m)
 	}

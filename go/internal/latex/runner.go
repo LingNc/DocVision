@@ -1307,9 +1307,14 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 				noteText = "样式未提供，见原图"
 			}
 			var b strings.Builder
-			b.WriteString("<!-- DOCVISION-STYLED-TEXT: " + mdCommentSafe(noteText) + " -->\n")
+			rel, ok := r.copyOriginalImage(p, mdName, outDir)
+			note := mdCommentSafe(noteText)
+			if !ok {
+				note += " | 原图未就位（见日志：复制原图失败）"
+			}
+			b.WriteString("<!-- DOCVISION-STYLED-TEXT: " + note + " -->\n")
 			b.WriteString("CONTENT: " + mdCommentBody(p.Content) + "\n")
-			if rel, ok := r.copyOriginalImage(p, mdName, outDir); ok {
+			if ok {
 				b.WriteString("LINK: [styled-text](" + rel + ")\n")
 			}
 			return strings.TrimRight(b.String(), "\n")
@@ -1323,18 +1328,25 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 			// 不产生也不引用 figures/*.pdf 资源。代码块前保留一条
 			// 机器注释指向原图，下游转换会话可据此找到原始图像/页面。
 			if p.TikzCode != "" {
-				if rel, ok := r.copyOriginalImage(p, mdName, outDir); ok {
-					// 注释首行闭合；LINK 在注释外、latex 围栏上方，
-					// 用 [vector](路径) 链接形式指向原图。
-					label := p.Label
-					if label == "" {
-						label = "vector figure"
-					}
-					head := "<!-- DOCVISION-VECTOR: " + mdCommentSafe(label) + " -->\n" +
-						"LINK: [vector](" + rel + ")"
-					return head + "\n```latex\n" + p.TikzCode + "\n```"
+				// 注释首行闭合；LINK 在注释外、latex 围栏上方，
+				// 用 [vector](路径) 链接形式指向原图。
+				label := p.Label
+				if label == "" {
+					label = "vector figure"
 				}
-				return "```latex\n" + p.TikzCode + "\n```"
+				rel, ok := r.copyOriginalImage(p, mdName, outDir)
+				head := "<!-- DOCVISION-VECTOR: " + mdCommentSafe(label)
+				if !ok {
+					// 曾经这里直接 return 代码块，注释与 LINK 一起消失：
+					// 下游靠注释把"这张原图在哪"贴回 doc_index/转换会话，
+					// 丢掉后就只剩一段没出处的 TikZ，且再也查不出来是哪张图。
+					head += " | 原图未就位（见日志：复制原图失败）"
+				}
+				head += " -->\n"
+				if ok {
+					head += "LINK: [vector](" + rel + ")\n"
+				}
+				return strings.TrimRight(head, "\n") + "\n```latex\n" + p.TikzCode + "\n```"
 			}
 			if p.Content != "" {
 				return p.Content
@@ -1376,6 +1388,9 @@ func (r *Runner) rasterBlock(p *imageProgress, mdName, outDir string) string {
 	}
 	rel, ok := r.copyOriginalImage(p, mdName, outDir)
 	if !ok {
+		// 空块 = "这次不替换"，rebuildPhase 会跳过它，于是 md 里**原始**
+		// 的图片引用原样留下（比在这里现编一个路径更准）。矢量图那种
+		// "必须替换掉原图"的分支另算——见 embedBlock 的 ClassVector。
 		return ""
 	}
 	// 档位1：process 阶段已为该图生成解释文本（复用 img2text 提取，
@@ -1398,6 +1413,17 @@ func (r *Runner) rasterBlock(p *imageProgress, mdName, outDir string) string {
 	return "![image](" + rel + ")"
 }
 
+// imgRelPath 把 md 里的引用 `images/<主题>/<file>` 简化为相对 source 树的
+// 路径 `<主题>/<file>`：copyOriginalImage 写出的 LINK 与"原图没就位"时补的
+// 占位 LINK 必须是同一个口径，否则下游按 LINK 找图会找错地方。
+func imgRelPath(imgPath string) string {
+	rel := imgPath
+	if i := strings.Index(rel, "/"); i >= 0 {
+		rel = rel[i+1:]
+	}
+	return rel
+}
+
 // copyOriginalImage copies the source image into outDir/images and
 // returns the markdown-relative link path ("" on failure).
 func (r *Runner) copyOriginalImage(p *imageProgress, mdName, outDir string) (string, bool) {
@@ -1406,15 +1432,20 @@ func (r *Runner) copyOriginalImage(p *imageProgress, mdName, outDir string) (str
 		r.log.LogWarning(0, "保留原图失败（文件缺失）:", p.ImgPath)
 		return "", false
 	}
-	rel := p.ImgPath
-	if i := strings.Index(rel, "/"); i >= 0 {
-		rel = rel[i+1:]
-	}
+	rel := imgRelPath(p.ImgPath)
 	dst := filepath.Join(outDir, "images", rel)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", false
 	}
 	if !fileExists(dst) {
+		// 目标处留着一条断链时，直接 copyFile 会"穿过"软链去写它指向的
+		// 路径（父目录多半不存在）→ ENOENT，而且 copyFile 自己的 O_EXCL
+		// 语义也救不了。先清掉断链再落真文件。
+		if isSymlink(dst) {
+			if err := os.Remove(dst); err != nil {
+				r.log.LogWarning(0, "清理断链失败:", dst, err)
+			}
+		}
 		if err := copyFile(src, dst); err != nil {
 			r.log.LogWarning(0, "复制原图失败:", src, err)
 			return "", false
@@ -1592,7 +1623,10 @@ func linkProjectImages(outDir, imagesDir string, tasks []*task) (linked, missing
 	}
 	for _, t := range tasks {
 		dst := filepath.Join(outDir, filepath.FromSlash(t.imgPath))
-		if pathExists(dst) || isSymlink(dst) {
+		// pathExists 跟随软链：只有**能读到内容**才算已就位。曾经这里写成
+		// `pathExists(dst) || isSymlink(dst)`，于是断链（软链自身存在、目标
+		// 不解析）被当成"已铺好"而永久跳过——源路径修好了也不会自愈。
+		if pathExists(dst) {
 			continue
 		}
 		src, err := resolveImageFile(imagesDir, t.imgPath, subjectOf(t.mdName))
@@ -1604,7 +1638,13 @@ func linkProjectImages(outDir, imagesDir string, tasks []*task) (linked, missing
 			missing++
 			continue
 		}
-		if err := os.Symlink(src, dst); err != nil {
+		// linkAbs 存**绝对**目标：os.Symlink 会原样保存目标串，而内核按
+		// "软链所在目录"解析它。配置里的 paths.images_dir 是相对路径
+		// （./output/images），直接拿去建链就得到
+		// <proj>/source/images/<书>/output/images/<书>/<sha>.jpg 这种死链，
+		// 下游 view_image / 复制 / assemble 全报 "no such file or directory"。
+		// 断链会被 linkAbs 替换掉（自愈），实文件则原样保留。
+		if err := linkAbs(src, dst); err != nil {
 			if cerr := copyFile(src, dst); cerr != nil {
 				missing++
 				continue
@@ -1613,6 +1653,45 @@ func linkProjectImages(outDir, imagesDir string, tasks []*task) (linked, missing
 		linked++
 	}
 	return linked, missing
+}
+
+// repairProjectImageLinks 把项目 source 树里**断掉**的图片软链重新指回全局
+// paths.images_dir。linkProjectImages 只在图片阶段的开头跑（还要有任务表），
+// 而 assemble/样式会话可能在只跑单个阶段的调用里直接面对上次留下的死链——
+// 那时整本书的编译会以 "no such file or directory" 中止。幂等：能读到的条目
+// 一个都不动。
+func (r *Runner) repairProjectImageLinks(proj string) (fixed int) {
+	imagesDir := r.cfg.Paths.ImagesDir
+	if imagesDir == "" {
+		return 0
+	}
+	root := filepath.Join(proj, "source")
+	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info == nil {
+			return nil //nolint:nilerr // 单条读不到不影响整棵树
+		}
+		if info.Mode()&os.ModeSymlink == 0 || pathExists(p) {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, p)
+		if rerr != nil {
+			return nil //nolint:nilerr
+		}
+		src, serr := resolveImageFile(imagesDir, filepath.ToSlash(rel),
+			subjectOf(filepath.Base(proj)))
+		if serr != nil {
+			r.log.LogWarning(0, "[images] 断链且源文件缺失:", rel)
+			return nil
+		}
+		if lerr := linkAbs(src, p); lerr != nil {
+			r.log.LogWarning(0, "[images] 修复软链失败:", rel, lerr)
+			return nil
+		}
+		r.log.Log(0, "[images] 修复软链:", rel)
+		fixed++
+		return nil
+	})
+	return fixed
 }
 
 // isSymlink reports a symlink entry even when it is broken (a re-run must

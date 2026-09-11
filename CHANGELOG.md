@@ -7,6 +7,14 @@
 
 ### Fixed
 
+- **项目 source 树里的插图全是死链，导致 DOCVISION 注释与 LINK 被丢掉、`assemble` 直接报错终止**（用户实测：`phase assemble: open latex_project/测试-概率论/source/images/测试-概率论/19c107f6….jpg: no such file or directory`，整本书在最后一步死掉）。根因是上一批的铺图用了 `os.Symlink(src, dst)` 而 `src` 是配置里的**相对**路径 `./output/images/…`：`os.Symlink` 原样保存目标串、内核按**软链所在目录**解析，于是每条链接实际被解成 `<proj>/source/images/测试-概率论/output/images/测试-概率论/<sha>.jpg`。实测该项目的 8 条链接 **8/8 悬空**。连带三处症状：① `copyOriginalImage` 的 `copyFile` "穿过"死链去写不存在的父目录 → ENOENT，`ClassVector` 分支直接 `return` 只留 TikZ 代码，**注释与 LINK 一起消失**（md 里 `DOCVISION-VECTOR` 7 条、`LINK:` 8 行全部丢失，只剩 STYLED-TEXT 那条没有 LINK 的注释）；② `doc_index` 靠这些注释回填图片条目，注释一丢，8 张图的 `marker`/`label`/`content` 全为空；③ `assemble` 的 `copyDir` 走 `filepath.Walk`，撞上死链即整段中止。现在铺图一律 `linkAbs`（**绝对**目标，与第二十二批修 PDF 视图时同一条教训），且跳过条件从 `pathExists || isSymlink` 改成 `pathExists`（只认**能读到内容**）——死链会被重建而不是被当成"已铺好"永久跳过；新增 `repairProjectImageLinks`（images 阶段开头与 `assemble` 前各跑一次，自愈上次留下的死链）；`copyOriginalImage` 先清掉目标处的死链再落真文件；矢量/样式文本分支即便搬图失败也**保留注释**并标注 `| 原图未就位（见日志：复制原图失败）`；`copyDirReport` 让 `assemble` 复制插图时遇到取不到的条目只警告不中止（一条取不到的图不该毁掉跑了一刻钟的 assemble）。回归测试用**相对** `images_dir`（老测试一律用绝对路径，所以一路绿灯）：`TestProjectImagesLinkWithRelativeImagesDirIsReadable`、`TestLinkProjectImagesRepairsDanglingLink`、`TestRepairProjectImageLinks`、`TestCopyDirReportSkipsDanglingLink`、`TestVectorNoteSurvivesMissingOriginal`。用真实损坏工程（复制到工作区）跑修复后的二进制验证：8 条链接全部可读、md 恢复 7 条 VECTOR 注释 + 8 行 LINK、`doc_index` 8/8 图片条目带上 marker。
+
+### Changed
+
+- `doc_index` 图片条目的 `content` 现在也带**矢量图的 LaTeX 本体**（此前 only STYLED-TEXT 的印刷原文与 RASTER 的解释进了索引，矢量图只有个 label，`doc_search` 搜不到图形本体、转换会话也拿不到参考）。扫描器只吃紧跟该图 `LINK` 的那个 ` ```latex ` 围栏（中间夹了正文就判定不是本体，不会粘错别的代码块），`doc_search`/`list_source_pages` 里该字段显示为 `latex:`。测试补 `TestParseMdMarkers` 的三条边界（正常收进 / 夹正文不收 / 无关代码块不粘）。
+
+### Fixed
+
 - **同一份目录在 Windows 与 Linux 上轮流跑时，切分缓存互相作废、每个平台都整库重切一遍**。`split` 的 manifest 缓存键里存的是"调用方拿到的源路径"原样字符串，Windows 是 `files\书.pdf`、POSIX 是 `files/书.pdf`，`Matches()` 又是严格字符串比较 → 每次换平台全部 miss（部署目录里能直接看到两种写法并存的 manifest：Windows 写下的那份 `source_path` 带反斜杠、权限是 `-rw-rw-r--`，Linux 写下的带斜杠、`-rw-------`）。现在比较与落盘都先做**分隔符无关归一化**（`\`→`/`、折叠 `./` 与重复斜杠），旧 manifest 也照样命中；实测部署目录 `split_files/` 里 60 份 manifest（**36 份 Windows 写、24 份 POSIX 写**）现在**全部 60/60 命中**并通过分片校验——修复前那 36 份在 Linux 上必然全部 miss、反向亦然，来回切平台等于每次整库重切。切分与 img2text 本身没有任何平台分支（`runtime.GOOS` 只出现在测试、`install`、浏览器打开）。
 
 ### Changed
