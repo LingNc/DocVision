@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -539,16 +540,25 @@ func (c *Client) CallWithRetry(req *ChatRequest) (*ChatResponse, string, string)
 		}
 		errStr := err.Error()
 		lower := strings.ToLower(errStr)
-		if strings.Contains(errStr, "429") || strings.Contains(lower, "rate") {
-			// 账户级错误不是限流：等下去也不会好（2026-09-11 实测
-			// `余额不足或无可用资源包` 让三个转换会话在冻结的请求体上
-			// 空转了 3h31m/239 次才放弃）。立刻收尾并给出自己的标记。
-			if insufficientBalance(lower) {
-				if c.log != nil {
-					c.log.LogError(0, "  [RateLimit] 上游账户不可用（余额/配额），停止重试:", truncate(errStr, 160))
-				}
-				return nil, "[SESSION_INSUFFICIENT_BALANCE]", "error"
+		// 余额/配额类错误与 HTTP 状态无关（网关可能用 400/402/429 任意一种
+		// 报），等下去永远不会好：直接收尾，不做任何重试。
+		if insufficientBalance(lower) {
+			if c.log != nil {
+				c.log.LogError(0, "  [RateLimit] 上游账户不可用（余额/配额），停止重试:", truncate(errStr, 160))
 			}
+			return nil, "[SESSION_INSUFFICIENT_BALANCE]", "error"
+		}
+		// 4xx 里的"客户端错误"（400 请求体不合法、401/403 密钥或权限、
+		// 404 模型名、422 参数）重试多少次都是同一个结果。现场一次
+		// `thinking.type: disable` 让服务端 400 拒掉每个请求，却被当成
+		// "transient" 重试 5 次（2/4/8/16/30s）——8 张图光退避就烧掉十几分钟。
+		// 408（超时）与 429（限流）走各自的通道，所以排除掉。
+		if code, ok := httpStatusCode(errStr); ok && code >= 400 && code < 500 && code != 408 && code != 429 {
+			return nil, fmt.Sprintf("[SESSION_API_ERROR: HTTP %d (不可重试): %s]", code, truncate(errStr, 200)), "error"
+		}
+		if strings.Contains(errStr, "429") || strings.Contains(lower, "rate") {
+			// 账户级错误已在上面统一拦下（2026-09-11 实测 `余额不足或无可用
+			// 资源包` 让三个转换会话在冻结的请求体上空转了 3h31m/239 次）。
 			if rateRetry < rateLimitLimit {
 				wait := backoffWait(rateRetry, 2*time.Second, 60*time.Second)
 				waitLog("RateLimit", wait)
@@ -582,6 +592,29 @@ func (c *Client) CallWithRetry(req *ChatRequest) (*ChatResponse, string, string)
 		}
 		return nil, fmt.Sprintf("[SESSION_API_ERROR: %s]", truncate(errStr, 200)), "error"
 	}
+}
+
+// httpStatusCode extracts the status code from the "HTTP 400: {...}"
+// error string produced by ChatCompletion (both the streaming and the
+// non-streaming path use that form).
+func httpStatusCode(errStr string) (int, bool) {
+	i := strings.Index(errStr, "HTTP ")
+	if i < 0 {
+		return 0, false
+	}
+	rest := errStr[i+len("HTTP "):]
+	j := 0
+	for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
+		j++
+	}
+	if j == 0 {
+		return 0, false
+	}
+	code, err := strconv.Atoi(rest[:j])
+	if err != nil {
+		return 0, false
+	}
+	return code, true
 }
 
 // backoffWait returns base*2^attempt capped at max. The shift is clamped

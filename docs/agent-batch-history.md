@@ -63,6 +63,8 @@ v1.5+（第三十批）：一次真实运行的三个问题（用户 2026-09-11 
 
 ③ 顺带确认：`Already done: 8 | To process: 0` 之外的偏好没变；`config_version: 6` 与模板键一致（见第二十九批的配置审计）。
 
+④ **4xx 不再当 transient 重试**（用户追问"那为什么 style 的会话能用？"时顺着日志看出来的第二个浪费）：`thinking` 是**按 models 条目**发的顶层字段——`models.style.thinking.type: enabled` 合法、style 会话 34 次请求全部正常（日志里 `thinking=enabled` × 34，就是"33 轮"那次会话），而 `models.drawing.thinking.type: disable` 非法、8 次绘图请求全被 400（日志里 `thinking=disable` × 8，同一个模型名）。可这 8 个 400 被 `CallWithRetry` 的通用分支当成 transient，按 `api_max_retries: 5` 退避 2/4/8/16/30s 重发——每张图 ~90s、8 张十几分钟，日志里只有一串 `[APIRetry] 等待重试`。现在 4xx（400/401/403/404/422…，排除 408/429）判为**不可重试**，一次到位返回 `[SESSION_API_ERROR: HTTP 400 (不可重试): …]`；余额/配额类错误不再依赖状态码（400/402/429 都认），统一立即 `[SESSION_INSUFFICIENT_BALANCE]`；404/422 仍保留"流式失败 → 非流式降级一次"的既有一致行为（测试里钉住是 2 次而非 5+ 次）。测试 `TestClientDoesNotRetryClientErrors`、`TestClientRetriesServerErrors`、`TestClientBalanceErrorIsNeverRetried`、`TestHTTPStatusCodeParsing`。
+
 ---
 
 ## 发布线与 CHANGELOG（原文）
