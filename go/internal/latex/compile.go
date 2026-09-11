@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"mineru-tools/internal/config"
 	"mineru-tools/internal/logger"
@@ -596,9 +597,34 @@ func ConvertPDFToSVG(pdfPath, svgPath string) (string, error) {
 	return "", fmt.Errorf("所有 PDF→SVG 后端均失败: %s", strings.Join(failures, "; "))
 }
 
+// truncateStr cuts s to at most n BYTES, never splitting a UTF-8 rune.
+// The byte/rune distinction matters for Chinese documents: a 2000-byte
+// "first 2000 chars" preview of a 21,658-char chapter handed the model a
+// 1,527-char stub cut in the middle of a TikZ style list (2026-09-11
+// run). Callers that mean characters should pass n*3 or use runeCount.
 func truncateStr(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "..."
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
+
+// truncateRunes cuts s to at most n RUNES (characters), appending "..."
+// when it had to cut. Use this for anything labelled "chars".
+func truncateRunes(s string, n int) string {
+	if n <= 0 || utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	i := 0
+	for pos := range s {
+		if i == n {
+			return s[:pos] + "..."
+		}
+		i++
+	}
+	return s
 }
