@@ -146,7 +146,7 @@ func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool
 		&WriteWorkFileTool{Root: buildDir, AnyExt: true},
 		&EditWorkFileTool{Root: buildDir},
 		&GrepTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
-		&WorkBashTool{Root: buildDir, Mounts: r.sessionMounts(kindBook, buildDir), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Log: r.log, Tid: 1},
+		&WorkBashTool{Root: buildDir, Mounts: r.sessionMounts(kindBook, buildDir), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		compile,
 		&ViewPDFTool{Mounts: r.sessionMounts(kindBook, buildDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ViewImageTool{Root: buildDir, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},

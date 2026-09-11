@@ -364,6 +364,70 @@ type ToolsConfig struct {
 		Sandbox   *bool `yaml:"sandbox"`    // bubblewrap kernel sandbox (default true)
 		MaxOutput int   `yaml:"max_output"` // characters of bash output fed to the model
 	} `yaml:"bash"`
+	// Python configures the Python environment session bash sees. The
+	// sandbox runs with --unshare-net, so a session can never install a
+	// package itself: the host provides the interpreter (system / venv /
+	// conda), makes it visible read-only inside the sandbox, and installs
+	// missing modules on demand (tools.python.auto_install). Lives here
+	// for the same reason as Bash — it describes the tool environment.
+	Python ToolsPythonConfig `yaml:"python"`
+}
+
+// ToolsPythonConfig is tools.python: the Python environment handed to
+// session bash.
+type ToolsPythonConfig struct {
+	// Enabled: provide python in session bash (default true; only an
+	// explicit `enabled: false` turns it off).
+	Enabled *bool `yaml:"enabled"`
+	// Mode: system | venv | conda. venv/conda additionally bind EnvDir.
+	Mode string `yaml:"mode"`
+	// Interpreter: python executable used to build the environment and
+	// to install packages ("" = python3 from PATH, or <EnvDir>/bin/python3).
+	Interpreter string `yaml:"interpreter"`
+	// EnvDir: venv directory (created when missing) or a conda prefix.
+	EnvDir string `yaml:"env_dir"`
+	// CondaEnv: conda environment NAME (mode=conda; resolved to its
+	// prefix and used when EnvDir is empty).
+	CondaEnv string `yaml:"conda_env"`
+	// Packages: modules ensured (import-checked, installed when missing)
+	// before sessions start.
+	Packages []string `yaml:"packages"`
+	// AutoInstall: install a missing module on the HOST when a session's
+	// bash hits ModuleNotFoundError, then tell the model to retry.
+	AutoInstall *bool `yaml:"auto_install"`
+	// InstallTimeout: seconds allowed for one pip install (default 300).
+	InstallTimeout int `yaml:"install_timeout"`
+}
+
+// PythonEnabled reports whether session bash should provide Python.
+func (c *Config) PythonEnabled() bool {
+	return c.Tools.Python.Enabled == nil || *c.Tools.Python.Enabled
+}
+
+// PythonAutoInstall reports whether missing modules are installed on
+// the host on demand (default true).
+func (c *Config) PythonAutoInstall() bool {
+	return c.Tools.Python.AutoInstall == nil || *c.Tools.Python.AutoInstall
+}
+
+// PythonConfig returns the resolved python environment config.
+func (c *Config) PythonConfig() ToolsPythonConfig {
+	cfg := c.Tools.Python
+	if cfg.Mode == "" {
+		cfg.Mode = "system"
+	}
+	if cfg.InstallTimeout <= 0 {
+		cfg.InstallTimeout = 300
+	}
+	if cfg.Enabled == nil {
+		on := true
+		cfg.Enabled = &on
+	}
+	if cfg.AutoInstall == nil {
+		on := true
+		cfg.AutoInstall = &on
+	}
+	return cfg
 }
 
 // OptionsConfig holds tuning knobs for the image-to-text processing pipeline.
@@ -475,6 +539,20 @@ func validatePaths(cfg *Config) error {
 	}
 	if cfg.Latex.BashMaxOutput < 0 {
 		return fmt.Errorf("latex.bash_max_output（已废弃，请改用 tools.bash.max_output）不能为负（当前 %d）", cfg.Latex.BashMaxOutput)
+	}
+	switch cfg.Tools.Python.Mode {
+	case "", "system", "venv", "conda":
+	default:
+		return fmt.Errorf("tools.python.mode 必须为 system / venv / conda（当前 %q）", cfg.Tools.Python.Mode)
+	}
+	if cfg.Tools.Python.Mode == "venv" && cfg.Tools.Python.EnvDir == "" {
+		return fmt.Errorf("tools.python.mode=venv 必须同时设置 tools.python.env_dir（虚拟环境目录，不存在时会自动创建）")
+	}
+	if cfg.Tools.Python.Mode == "conda" && cfg.Tools.Python.EnvDir == "" && cfg.Tools.Python.CondaEnv == "" {
+		return fmt.Errorf("tools.python.mode=conda 必须设置 tools.python.env_dir（环境前缀）或 tools.python.conda_env（环境名）")
+	}
+	if cfg.Tools.Python.InstallTimeout < 0 {
+		return fmt.Errorf("tools.python.install_timeout 不能为负（当前 %d）", cfg.Tools.Python.InstallTimeout)
 	}
 	if cfg.Paths.InputDir == "" || cfg.Paths.DoneDir == "" {
 		return nil

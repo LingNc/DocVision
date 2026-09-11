@@ -652,6 +652,12 @@ type WorkBashTool struct {
 	// and a probe t5.tex this way and the session spent ~10 rounds plus
 	// two FileNotFoundError tracebacks rediscovering it.
 	TmpDir string
+	// Python, when set, is the Python environment this session's bash
+	// sees: the interpreter (system/venv/conda) is bound read-only into
+	// the sandbox, PATH points at it, and a missing module is installed
+	// on the HOST (the sandbox has --unshare-net) with the model told to
+	// retry the same command.
+	Python *PythonEnv
 	// Mounts is the session's mount table. Inside the sandbox every
 	// mount appears as a top-level directory of the same name, so the
 	// path after the prefix is IDENTICAL in the structured tools and in
@@ -680,6 +686,21 @@ func (t *WorkBashTool) Dir() string {
 
 func (t *WorkBashTool) Name() string { return "bash" }
 
+// defaultSandboxPath is the PATH inside the sandbox (TeX Live first:
+// the sessions compile with xelatex).
+const defaultSandboxPath = "/usr/local/texlive/2026/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/texlive/bin"
+
+// PathWith prepends this environment's bin to a PATH value.
+func (p *PythonEnv) PathWith(path string) string {
+	if p == nil {
+		return path
+	}
+	if bin := p.BinDir(); bin != "" {
+		return bin + ":" + path
+	}
+	return path
+}
+
 func (t *WorkBashTool) Definition() map[string]any {
 	desc := "Run a shell command. cwd = your workspace. "
 	if t.Sandbox {
@@ -698,7 +719,12 @@ func (t *WorkBashTool) Definition() map[string]any {
 		desc += fmt.Sprintf("/%s (%s), ", m.Name, kind)
 	}
 	desc += "and these are exactly the trees of the file tools — the suffix after the prefix is the same: work:chapters/a.tex = /work/chapters/a.tex, project:source/book.md = /project/source/book.md, source:book_part1.pdf = /source/book_part1.pdf. " +
-		"Only /tmp is a scratch area. Useful for wc/sed/awk/ls/diff. timeout: seconds (default 30, max 300). Output is capped."
+		"Only /tmp is a scratch area (it persists across your bash calls). Useful for wc/sed/awk/ls/diff. timeout: seconds (default 30, max 300). Output is capped."
+	if t.Python != nil {
+		if d := t.Python.Describe(); d != "" {
+			desc += " " + d
+		}
+	}
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "bash",
 		"description": desc,
@@ -816,9 +842,17 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 	// inherited environment (and 'bash' is exec'd by absolute path).
 	args = append(args, "--chdir", work, "--setenv", "HOME", work, "--setenv", "PWD", work,
 		"--setenv", "TMPDIR", "/tmp", "--setenv", "TMP", "/tmp", "--setenv", "TEMP", "/tmp",
-		"--setenv", "PATH", "/usr/local/texlive/2026/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/texlive/bin")
+		"--setenv", "PATH", defaultSandboxPath)
 	if lang := os.Getenv("LANG"); lang != "" {
 		args = append(args, "--setenv", "LANG", lang)
+	}
+	if t.Python != nil {
+		// 环境只读可见。venv/conda 前缀按**原路径**绑定：它们不可搬迁
+		// （bin/ 下的脚本硬编码创建时的路径）。
+		args = append(args, t.Python.BindArgs()...)
+		for _, kv := range t.Python.EnvVars(defaultSandboxPath) {
+			args = append(args, "--setenv", kv[0], kv[1])
+		}
 	}
 	if fast {
 		args = append(args, "--")
@@ -869,7 +903,11 @@ func (t *WorkBashTool) Execute(argsJSON string) (session.ToolResult, error) {
 		}
 		cmd = exec.Command("bash", "-c", command)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "HOME="+dir)
+		env := append(os.Environ(), "HOME="+dir)
+		if t.Python != nil {
+			env = append(env, "PATH="+t.Python.PathWith(os.Getenv("PATH")))
+		}
+		cmd.Env = env
 	}
 	done := make(chan error, 1)
 	var out []byte
@@ -881,9 +919,17 @@ func (t *WorkBashTool) Execute(argsJSON string) (session.ToolResult, error) {
 	select {
 	case err := <-done:
 		text := string(out)
+		// 缺包是"环境问题"而不是"模型写错了"：沙箱断网装不了，由宿主侧装好
+		// 并让模型重试同一条命令（2026-09-11 的样式会话为 PIL 手写过一个
+		// PGM 解析器，转换会话写了 /tmp/p10-10.pgm 也读不回来）。
+		note := ""
+		if t.Python != nil {
+			note = t.Python.NoteFor(text)
+		}
 		if len(text) > cap {
 			text = text[:cap] + fmt.Sprintf("...(%d bytes more)", len(out)-cap)
 		}
+		text += note
 		if err != nil {
 			return session.ToolResult{Text: fmt.Sprintf("exit error: %v\n%s", err, text)}, nil
 		}

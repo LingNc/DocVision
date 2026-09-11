@@ -140,6 +140,16 @@ tools:
     sandbox: true               # 用 bubblewrap 内核沙箱（沙箱里只有本会话的挂载表；缺 bwrap 自动回退并告警）
     max_output: 5000            # bash 工具返回给模型的字符上限
 
+  python:                       # 会话 bash 提供的 Python 环境（沙箱 --unshare-net 断网，会话自己装不了包）
+    enabled: true               # 是否给会话 bash 提供 python3
+    mode: "system"              # system / venv / conda（venv 会按 env_dir 自动创建）
+    interpreter: ""             # 解释器路径；留空=用 env_dir/bin/python3 或 PATH 里的 python3
+    env_dir: ""                 # mode=venv：虚拟环境目录（不存在则宿主侧自动创建）；mode=conda：环境前缀
+    conda_env: ""               # mode=conda：环境名（env_dir 为空时用它解析前缀）
+    packages: []                # 启动前确保可导入的模块（如 ["numpy", "PIL"]；缺则宿主侧装）
+    auto_install: true          # 会话 bash 报 ModuleNotFoundError 时由宿主侧自动 pip install 后提示重试
+    install_timeout: 30000        # 单次 pip install 的超时（秒）
+
 verify:
   enabled: false                 # 仅作提示：核对只在显式运行 docvision verify 时执行（自动流程不调用）
   verifier_model: "verifier"     # models: 中支持图像的校验模型

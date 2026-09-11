@@ -178,6 +178,12 @@ type Runner struct {
 	// the chapter session can be re-prompted with a concrete reason.
 	lastSplitError string
 
+	// python is the shared Python environment handed to session bash
+	// (tools.python): created once per run, prepared on the host
+	// (venv creation + configured packages) before the first session.
+	python     *PythonEnv
+	pythonOnce sync.Once
+
 	// consoleVerbose mirrors the book-run --verbose flag: when false
 	// (compact mode) the convert phase shows a single [convert k/N]
 	// progress line instead of streaming every session event.
@@ -252,6 +258,24 @@ func (r *Runner) tempDir(proj, name string) (string, func(), error) {
 		_ = os.RemoveAll(dir)
 	}
 	return dir, cleanup, nil
+}
+
+// pythonEnv returns the run's shared Python environment (nil when
+// tools.python.enabled is false). Prepared once, on the host: the
+// sandbox has no network, so nothing about Python can be fixed from
+// inside a session.
+func (r *Runner) pythonEnv(proj string) *PythonEnv {
+	r.pythonOnce.Do(func() {
+		report := ""
+		if proj != "" {
+			report = filepath.Join(proj, "work", "python")
+		}
+		r.python = NewPythonEnv(r.cfg.PythonConfig(), report, r.log)
+		if r.python != nil {
+			r.python.Prepare()
+		}
+	})
+	return r.python
 }
 
 // sessionBashTemp creates the scratch directory a session's sandboxed
