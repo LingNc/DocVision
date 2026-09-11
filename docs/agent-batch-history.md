@@ -182,3 +182,10 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - 修法：`normalizeSourcePath()`（`\`→`/` 后再 `path.Clean`，**不**用 `filepath.ToSlash`——它在 POSIX 上是 no-op，读 Windows 写下的键会漏）用于比较与落盘；旧 manifest 照旧命中。用部署目录里的真文件验证：`source_path = "files\\2010-26年数一真题套卷[解析].pdf" → 归一化 "files/2010-26年数一真题套卷[解析].pdf"`，POSIX 查询命中、`VerifyAgainstDisk = true` ✓。
 
 **规模比想象的大**：部署目录 `split_files/` 里 60 份 manifest，**36 份是 Windows 写的**（`source_path` 带反斜杠）、24 份是 POSIX 写的——也就是说这台机器上两边来回切了很多次，每次切换都会把对方写下的缓存整体作废、重新 pdfcpu 切分一遍。修复后逐一检查：**POSIX 路径查询命中且分片校验通过 60/60，未命中 0**（36 份 Windows 写的全部转成命中）。测试：`TestManifestMatchesAcrossPathSeparators`（双向 + `./` + 重复斜杠 + 不同文件）、`TestManifestNormalizesSourcePathOnWrite`、`TestWindowsWrittenManifestHitsOnPOSIX`（走 `LoadManifest` 的真实落盘往返）。
+
+**实盘补发时又踩到两个真实缺陷**（都以 Actions 日志/注解为证）：
+
+1. `gh workflow run release.yml -f tag=v1.5.0-beta.4` 的第一次运行（run 34599166588）**测试、构建、CHANGELOG 抽取全成功，只有 `Create GitHub Release` 失败**，注解 `⚠️ GitHub Releases requires a tag`：`softprops/action-gh-release` 默认从 `github.ref` 取标签名，而手动运行的 ref 是 `refs/heads/master` → 必须显式 `tag_name: ${{ env.RELEASE_TAG }}`。没有这一行，手动补发这条路根本走不通（且失败发生在构建之后，5 个产物白烧一遍）。
+2. `setup-go` 注解 `Restore cache failed: Dependencies file is not found`：`go.sum` 在 `go/` 子目录而不是仓库根，加 `cache-dependency-path: go/go.sum` 才真正命中缓存。
+
+修复后重跑，`v1.5.0-beta.4` 预发布按预期生成（5 平台产物 + CHANGELOG 小节正文、`prerelease=true`）。另外执行了 `gh release edit v1.1.0 --latest`：把 Latest 徽章从"最后发布的 v1.0.1"纠正回语义更新的 v1.1.0。

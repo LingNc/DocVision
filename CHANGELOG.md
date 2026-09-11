@@ -11,7 +11,7 @@
 
 ### Changed
 
-- **发布：带 `-` 的标签也发 Release（预发布），并修正 "Latest" 归属**。此前工作流对含 `-` 的标签直接跳过整个任务，于是 `v1.3.0-beta`～`v1.5.0-beta.4` 即便推上去也**不会**产生任何产物；现在它们照常跑测试、交叉编译 5 个平台并创建 Release，只是标记为预发布（`prerelease: true`、`make_latest: false`），不会被 Badge 成 Latest。不带 `-` 的标签显式 `make_latest: true`——GitHub 默认把**最后发布**的标成 Latest，曾让 `v1.0.1` 顶掉更新的 `v1.1.0`。手动补发老标签：`gh workflow run release.yml -f tag=v1.5.0-beta.4`（`workflow_dispatch` 用当前分支的工作流逻辑，因此能给旧标签补发预发布）。
+- **发布：带 `-` 的标签也发 Release（预发布），并修正 "Latest" 归属**。此前工作流对含 `-` 的标签直接跳过整个任务，于是 `v1.3.0-beta`～`v1.5.0-beta.4` 即便推上去也**不会**产生任何产物；现在它们照常跑测试、交叉编译 5 个平台并创建 Release，只是标记为预发布（`prerelease: true`、`make_latest: false`），不会被 Badge 成 Latest。不带 `-` 的标签显式 `make_latest: true`——GitHub 默认把**最后发布**的标成 Latest，曾让 `v1.0.1` 顶掉更新的 `v1.1.0`。手动补发老标签：`gh workflow run release.yml -f tag=v1.5.0-beta.4`（`workflow_dispatch` 用当前分支的工作流逻辑，因此能给旧标签补发预发布）；这条路上另修两处：手动运行时必须给 `action-gh-release` 显式 `tag_name`（否则它从 `github.ref` 取到 `refs/heads/master`，报 `GitHub Releases requires a tag`——测试与构建都过、只有建 Release 一步失败），以及 `setup-go` 的 `cache-dependency-path: go/go.sum`（`go.sum` 不在仓库根，缓存一直没命中）。
 
 - **文档分层：README 瘦身 + `docs/` 按主题拆分**（575 行 → 147 行）。README 只留"介绍 + 环境要求 + 构建安装 + 快速开始 + 命令一览 + 输出/文档索引"；细节**逐字搬迁**到 `docs/commands.md`（命令与参数、img2text 与档位2 嵌入格式、`analyze`、`sessions` 预览页）、`docs/config.md`（配置项全表与默认值）、`docs/latex.md`（档位1/2 全流程、用法与阶段控制、目录布局、原书检索工具、verify）、`docs/sessions.md`（会话基础设施、提示词、沙箱与挂载表、调试日志）、`docs/dev.md`（代码结构、CI/CD、历史 Python 实现）。搬迁前后逐行核对：原文 435 个非空行全部仍存在于 README 或某个 docs 文件（差异只来自标题层级与 README 安装段/快速开始段的重写，事实逐条保留并顺手修正了两处：Go 版本 `1.25`、CI 只有 `release.yml` 没有 `ci.yml`）。
 

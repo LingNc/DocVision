@@ -35,6 +35,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go/go.mod
+          # go.sum lives in go/, not at the repo root
+          cache-dependency-path: go/go.sum
 
       - name: Run tests
         working-directory: go
@@ -75,6 +77,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # Required for workflow_dispatch: the action otherwise reads the tag
+          # from github.ref, which is refs/heads/master on a manual run and
+          # fails with "GitHub Releases requires a tag".
+          tag_name: ${{ env.RELEASE_TAG }}
           body_path: /tmp/release_body.md
           files: go/release/*
           generate_release_notes: false

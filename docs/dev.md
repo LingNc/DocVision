@@ -44,6 +44,8 @@ git push origin v1.5.0
 gh workflow run release.yml -f tag=v1.5.0-beta.4
 ```
 
+> 手动补发时 `softprops/action-gh-release` 必须显式给 `tag_name`：它默认从 `github.ref` 取标签，而手动运行时的 ref 是 `refs/heads/master`，会直接报 `GitHub Releases requires a tag`（构建、测试、CHANGELOG 抽取都成功，只有建 Release 这一步失败，产物也就不会上传）。
+
 > 只推 `master`（不打标签）**不会**触发任何构建——工作流的触发条件是标签推送。所以"1.1 之后没有任何 Release"通常是标签没推上去，而不是构建失败（可用 `git ls-remote --tags origin` 看远端到底有哪些标签）。
 
 ## Python 脚本独立使用
