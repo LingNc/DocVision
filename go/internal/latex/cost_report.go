@@ -69,13 +69,19 @@ func (r *Runner) CostReport(proj string) {
 		out += row.Completion
 		money += row.Cost
 	}
+	// currency 为空 = 没有任何一次请求命中已配置的单价：金额一律写 "-"，
+	// 不写 0.00（0.00 会被读成"几乎没花钱"，真实含义是"算不出来"）。
 	avg := "-"
-	if reqs > 0 {
+	if reqs > 0 && currency != "" {
 		avg = fmt.Sprintf("%s%.4f", currency, money/float64(reqs))
 	}
-	r.log.Log(0, fmt.Sprintf("[cost] %-11s %5d %6d %11s %8s %11s %s%.2f",
+	totalMoney := "-"
+	if currency != "" {
+		totalMoney = fmt.Sprintf("%s%.2f", currency, money)
+	}
+	r.log.Log(0, fmt.Sprintf("[cost] %-11s %5d %6d %11s %8s %11s %s",
 		"合计", len(sessions), reqs, sessionview.HumanCount(in),
-		pct(cached, in), sessionview.HumanCount(out), currency, money))
+		pct(cached, in), sessionview.HumanCount(out), totalMoney))
 	if reqs > 0 {
 		r.log.Log(0, "[cost] 平均每次请求:", avg, "；缓存命中", pct(cached, in))
 	}
@@ -86,10 +92,10 @@ func (r *Runner) CostReport(proj string) {
 	// 规模：把总量除到"每张图 / 每页"上，这才是单本书真正要对比的数字。
 	scale := []string{}
 	if images > 0 {
-		scale = append(scale, fmt.Sprintf("图片 %d 张 → 每张 %s%.4f", images, currency, money/float64(images)))
+		scale = append(scale, perUnit("图片 "+fmt.Sprint(images)+" 张 → 每张 ", images, currency, money))
 	}
 	if pages > 0 {
-		scale = append(scale, fmt.Sprintf("成品 %d 页 → 每页 %s%.4f", pages, currency, money/float64(pages)))
+		scale = append(scale, perUnit("成品 "+fmt.Sprint(pages)+" 页 → 每页 ", pages, currency, money))
 	}
 	if len(scale) > 0 {
 		r.log.Log(0, "[cost] 规模:", strings.Join(scale, "；"))
@@ -164,4 +170,13 @@ func countImageProgress(dir string) int {
 		}
 	}
 	return n
+}
+
+// perUnit renders a per-image / per-page average, or explains why there is no
+// number when no price is configured (never "0.0000").
+func perUnit(label string, n int, currency string, money float64) string {
+	if currency == "" || n == 0 {
+		return label + "未配价（models.<条目>.price 里补单价后才有数字）"
+	}
+	return fmt.Sprintf("%s%s%.4f", label, currency, money/float64(n))
 }

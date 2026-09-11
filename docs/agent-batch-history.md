@@ -328,3 +328,12 @@ README 575 → 147 行：保留简介、工作流程（5 步 + latex/verify 两�
 - `toolSummary(name, argsText)`：折叠状态显示一行摘要——`bash`/`python` 取命令**首行**并压掉空白，`compile`/`write_*`/`read_*`/`view_*` 取 `path`，`grep`/`doc_search` 取 `pattern`/`query`，`submit` 取 `path`/`status`，其余工具兜底取参数里第一个非空字符串；超 90 字符截断加省略号，标题悬停看全文。
 - 证据：把这两个函数从 `viewer.js` 按大括号配对**原样抽出**跑 node 校验——7 个工具名的家族判定全对、`{"command":"ls -la\nrm -rf x"}` → `"ls -la"`、坏 JSON → 空摘要（不抛错）、200 字符命令 → 91 字符（90 + 省略号）。
 - 未做：不追求逐像素复刻 DSH（那是另一套前端）；如需要具体某个 DSH 组件的等价物，按组件名单独提。
+
+### ⑩ 配置版本 6 → 7 + 部署配置补上新块（用户复查发现的漏项）
+
+用户问"config 变化版本升级了吗？我的部署那边的 config 新增这些新的内容了吗？"——两处都没做，是本批的真实漏项。
+
+- **漏项一：没 bump `config_version`**。本批新增了三个配置块（顶层 `preview.*`、`latex.figure_check.*`、`models.<条目>.price.*`），但 `CurrentConfigVersion` 仍是 6。按仓库既有约定（v2→v3 加 `tools` 块、v3→v4 `tikz`→`latex` 改名、v4→v5 嵌入规则、v5→v6 流式/thinking）新增配置块就该 bump：版本号是用户发现"模板过期、有新选项没跟上"的**唯一信号**。现改为 7，并同步 `default.yaml`/`config.example.yaml`/README 示例行/测试夹具/`docs/config.md`（新增 `config_version` 行）；AGENTS.md 规则板块补上"新增配置块必须同时 bump"这条纪律（含本批教训）。
+- **漏项二：部署目录的 `config.yaml` 没有任何新块**。核对部署配置：`config_version: 6`、无 `preview:`、无 `figure_check:`、无 `price:`。现按 AGENTS.md 的"运行目录 config.yaml 与二进制随代码更新"补齐：备份 `config.yaml.bak-<时间戳>` 后，`config_version` 改 7、顶层插入 `preview:`（关闭/127.0.0.1/8848）、`latex:` 末尾插入 `figure_check:`（关闭/verifier/2 轮）、8 个 `models` 条目各补 `price:` 占位（全 0 = 未配置）。补丁用文本级插入（不经过 YAML round-trip，避免注释与顺序被重写），全程不打印任何密钥值。
+- **顺带修一处真实缺陷**（这次核对时暴露）：单价"存在但全是 0"时，报告写"配置里没有任何 models.*.price"（措辞不实），且合计行打印 `0.00`、每图/每页打印 `0.0000`——`0.00` 会被读成"几乎没花钱"，真实含义是"没配价、算不出来"。现在 `currency` 为空（没有任何一次请求命中已配置单价）时，金额列/合计/每次请求/每图每页一律写 `-` 并说明原因；提示语改成"没有**可用**的 models.*.price（没写，或单价全是 0）"。新增 `TestCostReportShowsNoMoneyWhenUnpriced`（未配价输出不含 `0.00`、必含"未配价"与全零说明；配价后照常显示 `¥0.12`）。
+- 验证：部署二进制 `v1.5.0-beta.4-28-g53669ef` 用补好的配置加载**无版本告警**；`sessions --cost` 输出全部为"未配价 / -"，无 ¥0.00；`go vet ./...` 干净、`go test ./...` 全绿。

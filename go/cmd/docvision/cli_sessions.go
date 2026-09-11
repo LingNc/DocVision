@@ -258,9 +258,15 @@ func printCostReport(sessions []sessionview.SessionInfo, pricesConfigured bool) 
 			currency = r.Currency
 		}
 	}
-	fmt.Fprintf(w, "合计\t%d\t%d\t%s\t%s\t%s\t%s\t%s%.2f\t-\n",
+	// 没有任何一口价命中时，金额列写 "-" 而不是 "0.00"：0.00 会被读成
+	// "这次几乎没花钱"，而真实含义是"没配价格、算不出来"。
+	totalMoney := "-"
+	if currency != "" {
+		totalMoney = fmt.Sprintf("%s%.2f", currency, money)
+	}
+	fmt.Fprintf(w, "合计\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t-\n",
 		len(sessions), reqs, sessionview.HumanCount(in), sessionview.HumanCount(cached),
-		cachePct(in, cached), sessionview.HumanCount(out), currency, money)
+		cachePct(in, cached), sessionview.HumanCount(out), totalMoney)
 	_ = w.Flush()
 	if unpriced > 0 {
 		fmt.Printf("注意：有 %d 次请求的模型没配价格，金额是**下界**（models.<条目>.price 里补 input/cached/output）\n", unpriced)
@@ -269,7 +275,7 @@ func printCostReport(sessions []sessionview.SessionInfo, pricesConfigured bool) 
 		if pricesConfigured {
 			fmt.Println("注意：会话用的模型名在价格表里找不到（转录里的 model 字段必须与 models.<条目>.model 一致），本次不显示金额。")
 		} else {
-			fmt.Println("注意：配置里没有任何 models.*.price，因此不显示金额（配置文件:" + configPathUsed() + "）。")
+			fmt.Println("注意：配置里没有**可用**的 models.*.price（没写，或单价全是 0），因此不显示金额（配置文件:" + configPathUsed() + "）。")
 		}
 	}
 }
