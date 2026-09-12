@@ -422,10 +422,7 @@ func newImg2TextCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "img2text",
 		Short: "使用 AI 将图片转换为文本",
-		Long: "遍历文档图片，调用多模态大模型生成图片描述，写回 Markdown。\n\n" +
-			"描述格式为 [IMG_TYPE: <类型>] + 正文；模型只画 Mermaid（外加表格/正文/公式/代码块）。\n" +
-			"缺少 [IMG_TYPE:] 前缀或返回 ```latex/```tikz 绘图块时，该图按无效响应跳过（下轮自动重试），\n" +
-			"日志里打印截断后的模型原文与期望格式。",
+		Long:  "遍历文档图片，调用多模态大模型生成图片描述，写回 Markdown。",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfigWithFlag(cmd)
 			if err != nil {
@@ -521,9 +518,7 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "analyze",
 		Short: "分析 img2text 处理日志",
-		Long: "统计工具调用、耗时、成功率、百分位等指标，支持按线程细分。\n\n" +
-			"结果分三类统计：成功 / 警告（校验未通过或格式不符，已跳过、下轮重试）/ 失败（硬错误）。\n" +
-			"警告不是失败，报告与 img2text 进度行的 errors/warns 分列保持一致。",
+		Long:  "统计工具调用、耗时、成功率、百分位等指标，支持按线程细分。",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfigWithFlag(cmd)
 			if err != nil {
