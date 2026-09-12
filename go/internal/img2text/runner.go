@@ -66,12 +66,18 @@ type runResult struct {
 	imgPath string
 	offsets []OffsetPair
 	isError bool // true if the result is an error sentinel
+	// rawSnippet is the model's last raw response (truncated) for items
+	// discarded as invalid; the writer quotes it so "Skipped invalid
+	// response" says WHAT was wrong, not just that something was.
+	rawSnippet string
 }
 
 // Run is the top-level entry point. It scans the output directory for
 // markdown files, extracts every image reference, dispatches the work
 // across N worker goroutines, persists per-item progress, and finally
-// rewrites the markdown files with type-based embeds (direct text for
+// rewrites the markdown files with type-based embeds (text/table/code
+// embedded directly, mermaid as its code block, everything else as a
+// readable [Image]( description )).
 //
 // The flow matches the Python reference:
 //
@@ -447,8 +453,10 @@ func runWorkers(
 			count++
 			if r.result == "__INVALID_RESPONSE__" {
 				warnCount++
-				logger.LogWarning(0, "Skipped invalid response for",
-					r.imgPath+", will retry next run.")
+				logger.LogWarning(0, fmt.Sprintf(
+					"Skipped invalid response for %s, will retry next run. %s. Raw output: %s",
+					r.imgPath, expectedFormatHint, snippet(r.rawSnippet),
+				))
 				continue
 			}
 			parts := strings.SplitN(r.key, "::", 2)
@@ -531,7 +539,7 @@ func runWorkers(
 				return
 			}
 			subject := strings.TrimSuffix(tt.mdName, filepath.Ext(tt.mdName))
-			r, status := ProcessOneImage(
+			r, status, raw := ProcessOneImage(
 				client, imagesDir, tt.imgPath, subject,
 				entry.lines, tt.lineIdx,
 				logger, tid, opts,
@@ -554,10 +562,11 @@ func runWorkers(
 			}
 			running.Add(-1) // 计数先落，writer 渲染时 running 已准确
 			results <- runResult{key: tt.key,
-				result:  r,
-				imgPath: tt.imgPath,
-				offsets: tt.offsets,
-				isError: isErr}
+				result:     r,
+				imgPath:    tt.imgPath,
+				offsets:    tt.offsets,
+				isError:    isErr,
+				rawSnippet: snippet(raw)}
 		}(t)
 	}
 
@@ -712,70 +721,27 @@ func resolveSeed(seedStr string) (int64, int64) {
 
 // embedBlockFor converts an AI result (with its [IMG_TYPE:] prefix)
 // into the final markdown embed, chosen by content type:
-//   - text / table embed DIRECTLY (searchable text; tables stay
-//     markdown or HTML exactly as produced);
-//   - latex / math / formula keep existing $/$$ or fence wrapping and
-//     otherwise get wrapped: single short line -> $inline$, the rest
-//     -> $$display$$;
-//   - code embeds as a fenced block (with the language the model
-//     annotated; bare fence for legacy results);
-//   - mermaid / tikz embed as their code blocks (already validated;
-//     unfenced tikz bodies get a latex fence);
+//   - non-image content (pure text, LaTeX math, tables, code) embeds
+//     DIRECTLY so downstream AI readers get searchable text;
+//   - mermaid embeds as its (already validated) code block;
 //   - remaining visual types keep a readable [Image]( description ).
 func embedBlockFor(result string) string {
 	typ, body := splitImgTypePrefix(result)
 	body = strings.TrimSpace(body)
-	fenced := strings.HasPrefix(body, "```")
 	switch {
-	case typ == "text":
+	case typ == "text" || typ == "latex" || typ == "math" || typ == "formula" ||
+		typ == "table" || typ == "code":
 		return "\n\n" + body + "\n\n"
-	case typ == "latex" || typ == "math" || typ == "formula":
-		if fenced {
-			return "\n\n" + body + "\n\n"
-		}
-		return "\n\n" + wrapMathDelimiters(body) + "\n\n"
-	case typ == "table":
-		// Markdown or HTML table, embedded exactly as produced.
-		return "\n\n" + body + "\n\n"
-	case typ == "code":
-		if fenced {
-			return "\n\n" + body + "\n\n"
-		}
-		// Legacy result without a fence; language unknown.
-		return "\n\n```\n" + body + "\n```\n\n"
-	case typ == "mermaid",
-		strings.Contains(body, "```mermaid"), strings.Contains(body, "```latex"), strings.Contains(body, "```tikz"):
-		// Bodies that ARE an already-validated code block embed verbatim.
-		if fenced || strings.HasPrefix(body, "```") {
+	case typ == "mermaid", strings.Contains(body, "```mermaid"):
+		// A body that already IS a mermaid code block embeds verbatim; a
+		// bare diagram body (legacy progress data) gets the fence.
+		if strings.HasPrefix(body, "```") {
 			return "\n\n" + body + "\n\n"
 		}
 		return "\n\n```mermaid\n" + body + "\n```\n\n"
-	case typ == "tikz":
-		if fenced {
-			return "\n\n" + body + "\n\n"
-		}
-		return "\n\n```latex\n" + body + "\n```\n\n"
 	default:
 		return "\n\n[Image]( " + body + " )\n\n"
 	}
-}
-
-// wrapMathDelimiters ensures a bare LaTeX formula body carries math
-// delimiters: already-wrapped bodies pass through; single short lines
-// become $inline$ math, everything else $$display$$ blocks.
-func wrapMathDelimiters(body string) string {
-	if strings.HasPrefix(body, "$$") && strings.HasSuffix(body, "$$") {
-		return body
-	}
-	if strings.HasPrefix(body, "$") && strings.HasSuffix(body, "$") && !strings.HasPrefix(body, "$$") {
-		return body
-	}
-	singleShort := !strings.Contains(body, "\n") && len(body) <= 120 &&
-		!strings.Contains(body, "\\begin{")
-	if singleShort {
-		return "$" + body + "$"
-	}
-	return "$$\n" + body + "\n$$"
 }
 
 // Missing or malformed prefixes return ("", whole input) and the

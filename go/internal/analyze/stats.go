@@ -7,12 +7,24 @@ import (
 )
 
 // Statistics holds every metric computed from a slice of sessions.
+//
+// Success / Warning / Failed are three separate outcomes:
+//   - Success  : a usable result was written.
+//   - Warning  : the response failed validation or had the wrong format;
+//     the runner skipped it and retries it on the next run
+//     (the progress line's `warns`).
+//   - Failed   : a hard error (API, network, missing image, …).
+//
+// WarningRate is reported separately from SuccessRate on purpose: a
+// warning is not a failure, and adding them together misreports both.
 type Statistics struct {
 	Total       int
 	Success     int
+	Warning     int
 	Failed      int
 	Incomplete  int
 	SuccessRate float64
+	WarningRate float64
 
 	ToolCalls          *ToolCallStats
 	Elapsed            *ElapsedStats
@@ -64,6 +76,7 @@ type ElapsedGroup struct {
 type ThreadStat struct {
 	Count        int
 	Success      int
+	Warning      int
 	Failed       int
 	ElapsedTotal float64
 	ElapsedMax   float64
@@ -91,6 +104,12 @@ func ComputeStatistics(sessions []Session, percentiles []int) *Statistics {
 		case StatusSuccess:
 			stats.Success++
 			successes = append(successes, s)
+		case StatusWarning:
+			stats.Warning++
+			// A validation/format failure still carries an error type
+			// (mermaid_invalid / invalid_format); keep it in the
+			// distribution so the report can explain the warnings.
+			failures = append(failures, s)
 		case StatusFailed:
 			stats.Failed++
 			failures = append(failures, s)
@@ -100,6 +119,7 @@ func ComputeStatistics(sessions []Session, percentiles []int) *Statistics {
 	}
 	if stats.Total > 0 {
 		stats.SuccessRate = float64(stats.Success) / float64(stats.Total) * 100
+		stats.WarningRate = float64(stats.Warning) / float64(stats.Total) * 100
 	}
 
 	// ---- Tool-call stats (successful only) ----
@@ -188,13 +208,16 @@ func ComputeStatistics(sessions []Session, percentiles []int) *Statistics {
 			stats.ThreadStats[s.TID] = ts
 		}
 		ts.Count++
-		if s.Status == StatusSuccess {
+		switch s.Status {
+		case StatusSuccess:
 			ts.Success++
 			ts.ElapsedTotal += s.Elapsed
 			if s.Elapsed > ts.ElapsedMax {
 				ts.ElapsedMax = s.Elapsed
 			}
-		} else if s.Status == StatusFailed {
+		case StatusWarning:
+			ts.Warning++
+		case StatusFailed:
 			ts.Failed++
 		}
 	}

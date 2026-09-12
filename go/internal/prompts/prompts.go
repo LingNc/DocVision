@@ -80,7 +80,8 @@ type Template struct {
 	// has to be told which tools it may call).
 	MustMention []string
 	// ForbidMention lists names this template must NOT contain (stale
-	// wording that would teach the model a tool that no longer exists).
+	// wording that would teach the model a tool that no longer exists, or
+	// an output type the caller cannot parse). Case-insensitive.
 	ForbidMention []string
 }
 
@@ -135,6 +136,12 @@ var registry = []Template{
 	{
 		Name: Img2TextSystem, File: "img2text.system.md",
 		Vars: []string{"MAX_TOOL_CALLS", "OUTPUT_LANG"},
+		// img2text 只出 Mermaid（外加表格/正文），LaTeX 矢量图由 档位1
+		// 的作图会话负责。这段提示词曾被加上"用 latex 代码块画矢量图"
+		// 的规则，模型于是产出 ```latex/TikZ，而 img2text 侧的解析与
+		// 校验都处理不了（真实跑批 39/81 张因此报废）。这里钉住：这条
+		// 提示词不得再提 LaTeX 绘图类型。
+		ForbidMention: []string{"tikz", "pgfplots", "latex code block", "latex vector"},
 	},
 	{
 		Name: TextOnlySystem, File: "img2text_textonly.system.md",

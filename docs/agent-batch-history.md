@@ -522,3 +522,28 @@ JSON：`prettyJSON()`（先 `JSON.parse` 再 2 空格 `stringify`，解析失败
 - 侧栏"切换会话会收起此前自动展开的组"（见 ① ）是默认收起策略的必然结果，没有加"自动展开过就记住"这种更复杂的记忆。
 - 工具输出的整块 error 底色（`.io-text[data-error]`）保持不变：per-line 高亮用 span 覆盖颜色，diff 的 `+`/`-` 仍然分明；没有把整块红底改成"只在有高亮时不着色"，避免改变既有语义。
 - 没有引入任何前端依赖/构建步骤；Markdown 渲染器与高亮器都是页面自带的纯函数。
+
+### 同一批追加（后半）：img2text 回退到只出 Mermaid + 失败可诊断 + analyze 不再把 warning 当失败
+
+用户原话："还把 img2text 调整回之前的那种吧，不要让他产出 latex 的了。"以及"warning 也算失败吗？好像这边有的有问题？处理的他弄出来的是 latex 格式而不是 mermaid 但是这边解析的时候有问题？"
+
+**根因**：`3c9102e` 给 img2text 加了"用 latex 代码块画矢量图（TikZ/pgfplots）"，模型照做，而 img2text 侧解析不了这种块。
+
+**真实运行证据**（只读 `logs/img2text_error_20260912_012048.log`）：81 张图、42 成功、39 张报废；进度行 `errors: 0, warns: 39`（本来就分列）。161 条 WARNING 里 117 条为 `Mermaid validation failed (1/3..3/3): tikz block 1 failed: … This is XeTeX, Version 3.141592653-2.6-0.999998 …`；78 条 ERROR 里 39 条 `[IMG_MERMAID_INVALID]`、39 条 `Skipped invalid response for … will retry next run.`，另有 4 条 `Unexpected prefix before '[IMG_TYPE:'`。
+
+**A. 提示词逐字回退（不是凭记忆重写）**：从 `git show 3c9102e~1:go/internal/img2text/processor.go` 取旧 `systemPromptTemplate` 原文（当时内联在 Go 里，`go/internal/prompts` 是更晚的 `83e7b57` 才建的），逐字比对后写回 `templates/img2text.system.md`；与回退前只差 `3c9102e`/`641752d` 为 LaTeX 加的两处（4b 的 TikZ 绘图、"代码块带语言标注"），"不许重叠/拥挤"保留但限定为 Mermaid 图。注册表新增 `ForbidMention: []string{"tikz", "pgfplots", "latex code block", "latex vector"}` 与提示词守卫第 5 条。
+
+**B. img2text 路径上的 LaTeX/TikZ 通路全部摘掉**：`CallAIWithTools` 的校验闭包不再按 `opts.LatexValidation`/`opts.LatexEngine` 分流到 `ValidateTikZ`，只剩 Mermaid 校验；新增 `leftoverDrawingBlock`（`diag.go`，识别 ```tikz/```pgfplots/```latex 围栏），命中即按**无效响应**处理（`sentinelInvalid` + `StatusRetry`，跳过、下轮重试）并在日志里打印图片路径、期望格式摘要与截断后的模型原文；`embedBlockFor` 去掉 `typ == "tikz"` 分支与 body 里的围栏判断，只剩 text/latex(数学)/table/code 直嵌、mermaid 代码块、其余 `[Image]( … )`。随后的收尾把无调用方的 `tools.latex.*` 配置块（含 `Options.LatexValidation/Engine` 两个只写不读的载体字段）与 `internal/img2text/tikz.go` 连同其测试一并删除；档位1 作图会话用的是**另一份** `internal/latex/tikz.go`，未动。
+
+**C. 失败可诊断（三个真缺陷）**：
+1. 文案名不副实：`Mermaid validation failed (…)` 实际失败的是 TikZ 编译。现按实际校验对象命名并带图片路径——顺带修掉一个真 bug：`imgPathFromIdx` 只 `return "line:<idx>"`（前面拼的 line 变量没用上），现从该行 `![…](images/…)` 解出真实路径，解不出才退回行号。
+2. 错误详情截错方向：`truncateOut(out, 400)` 取的是 TeX 输出的**前 400 字节** = 版本横幅。新增 `extractValidationError`：抽 `! 开头` / `l.<数字>` / `Package … Error` / `Emergency stop` / `Runaway argument` 等真错误行（`!` 后紧跟的一行解释也带），排除 `This is XeTeX, Version …`、`entering extended mode`、`Document Class: …`、`preloaded format=` 与 mmdc 的 `Generating …`；一条都抽不到退回**最后 12 行**，仍为空才退回开头 400 字节。
+3. 格式不符没原文：`Unexpected prefix before '[IMG_TYPE:'` 与 `Skipped invalid response for …` 现在都附截断原文（rune 安全，800 字符上限 + `共 N 字符`）与期望格式摘要。`ProcessOneImage`/`CallAIWithTools` 因此多返回一个"最后一次原文"（`runResult.rawSnippet`）。
+
+**D. analyze 三分类**：新增 `StatusWarning`；runner 会重试的两类哨兵（`IMG_MERMAID_INVALID`、`IMG_INVALID_FORMAT`）判为警告，其余哨兵仍是失败。`Statistics` 增 `Warning`/`WarningRate`、`RoundFileStat` 增 `Warning`，报告的基础统计、按文件摘要、线程明细、错误分类表（每项标注"警告（下轮重试）"/"失败"）与 CSV 状态列全部同步；进度摘要的"无效条目"注明下轮自动重试并给出可达完成率。合成夹具按真实形状（42 成功 / 39 警告 / 0 失败 = 81）断言 `Failed == 0`——正是修前会打印"失败 39、成功率 51.9%"的那份数据。
+
+### 验证与测试（同批追加）
+
+- `gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿。
+- 新增用例：`img2text/diag_test.go`（真错误行 vs 版本横幅、无 `!` 时退回**最后**行、rune 安全截断、`leftoverDrawingBlock`、期望格式摘要）、`img2text/processor_latex_reject_test.go`（回 ```tikz → `StatusRetry` + `[IMG_INVALID_FORMAT]` 且**只发一次请求**，日志含图片路径+模型原文+期望格式且**不得**出现 `This is XeTeX`；Mermaid 正常路径仍 `StatusOK`；`BuildSystemPrompt` 不含 tikz/pgfplots 绘图要求）、`prompts/prompts_test.go` 第 5 条守卫、`analyze/parser_test.go`（重试哨兵→warning、`IMG_API_ERROR`→failed、三分类）、`analyze/report_warning_test.go`（真实形状 42/39/0 端到端）。
+- **离线验证口径**：真实跑批需要 API，未真跑。替代手段：①读只读日志原文（上述证据数字与 TeX 横幅片段都来自它）；②`httptest` 假服务模拟"回 ```tikz```"，断言请求次数与日志正文；③`extractValidationError` 用**真实日志里那段 XeTeX 输出的形状**（横幅 + `! Undefined control sequence.` + `l.14` + `Emergency stop`）做输入，断言抽到真错误、横幅一字节不留。

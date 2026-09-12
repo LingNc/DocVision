@@ -4,12 +4,37 @@ package analyze
 import "regexp"
 
 // Status constants for session lifecycle.
+//
+// StatusWarning is a fourth, distinct outcome: the item did NOT produce
+// a usable result, but the runner deliberately discarded it and it will
+// be retried next run ("Skipped invalid response … will retry next
+// run"), so the progress line counts it under `warns`, not `errors`.
+// Reporting it as a failure is what made `docvision analyze` print
+// "失败 39 / 成功率 51.9%" for a run whose own progress line said
+// "errors: 0, warns: 39".
 const (
 	StatusPending    = "pending"
 	StatusSuccess    = "success"
+	StatusWarning    = "warning"
 	StatusFailed     = "failed"
 	StatusIncomplete = "incomplete"
 )
+
+// retryableErrorTypes are the classified error types the runner treats
+// as "skipped, will retry": a validation failure (Mermaid syntax) or a
+// response that did not match the required format. Both come back as
+// __INVALID_RESPONSE__ and increment the warn counter, never the error
+// counter — see runWorkers' writer goroutine.
+var retryableErrorTypes = map[string]bool{
+	"mermaid_invalid": true,
+	"invalid_format":  true,
+}
+
+// isRetryableError reports whether an error type is one the runner
+// retries on the next run.
+func isRetryableError(errType string) bool {
+	return retryableErrorTypes[errType]
+}
 
 // Session represents a single image's processing session in the log.
 type Session struct {
@@ -17,7 +42,7 @@ type Session struct {
 	TID       string  // thread ID
 	StartTS   string  // HH:MM:SS
 	ToolCalls int     // number of tool calls observed
-	Status    string  // pending/success/failed/incomplete
+	Status    string  // pending/success/warning/failed/incomplete
 	Elapsed   float64 // seconds (0 if not yet closed)
 	ErrorType string  // classified error type, empty if success
 	ErrorMsg  string  // raw error message

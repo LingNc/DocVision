@@ -147,6 +147,9 @@ func printProgressFooter(inputDir, progressRoot, finallyDir string, logPaths []s
 	fmt.Printf("\n%s\n", sep)
 	fmt.Printf("【进度摘要】 总计 %d | 已完成 %d | 无效 %d | 剩余 %d\n",
 		totalImages, completed, invalid, remaining)
+	if invalid > 0 {
+		fmt.Printf("  注: “无效”是校验未通过/格式不符而被跳过的条目，下轮 img2text 会自动重试（不是失败）\n")
+	}
 	if stale {
 		fmt.Printf("  注: 进度条目多于当前 md 引用（可能含历史/已删除书目或旧格式条目），剩余按 0 计\n")
 	}

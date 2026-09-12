@@ -6,33 +6,39 @@ import (
 	"testing"
 )
 
-// TestAnalyzeLog_FailedBeforeNextStartSameTID guards the per-thread state
-// machine against the suspected miscount bug: when a task fails and the
-// same TID (worker slot) immediately picks up the next task, the
-// FAILED line must still be attributed to the failing session — not to
-// the new one or lost as incomplete.
+// TestAnalyzeLog_RetryableBeforeNextStartSameTID guards the per-thread
+// state machine against the suspected miscount bug: when a task ends
+// without a result and the same TID (worker slot) immediately picks up
+// the next task, the ✗ line must still be attributed to the closing
+// session — not to the new one or lost as incomplete.
 //
-// The log layout below mirrors what the runner emits:
+// It also pins the warning/failure split. The layout below mirrors what
+// the runner emits:
 //
 //	[T03] ▶ START imgA
-//	[T03] ✗ [5.0s] FAILED [IMG_MERMAID_INVALID]
+//	[T03] ✗ [5.0s] FAILED [IMG_MERMAID_INVALID]   ← skipped, retried next run
 //	[T03] ▶ START imgB
-//	[T03] ✗ [3.0s] FAILED [IMG_MERMAID_INVALID]
+//	[T03] ✗ [3.0s] FAILED [IMG_INVALID_FORMAT]    ← skipped, retried next run
 //	[T03] ▶ START imgC
+//	[T03] ✗ [2.0s] FAILED [IMG_API_ERROR: HTTP 400]  ← a hard failure
+//	[T03] ▶ START imgD
 //	[T03] ✓ [2.0s] DONE
 //
-// Expected: imgA and imgB are reported as failed; imgC as success.
-// If the parser mis-ordered them (or marked imgA incomplete because the
-// new START overwrote current[T03]), the Failed count would be wrong.
-func TestAnalyzeLog_FailedBeforeNextStartSameTID(t *testing.T) {
+// Expected: imgA/imgB are WARNINGS (validation/format problems the
+// runner retries), imgC is a FAILURE, imgD is a success. Reporting the
+// first two as failures is exactly the bug that made the report claim
+// "失败 39" for a run whose progress line said "errors: 0, warns: 39".
+func TestAnalyzeLog_RetryableBeforeNextStartSameTID(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "img2text.log")
 	lines := []string{
 		"[14:24:20][T03] ▶ START ch1.md::images/imgA.jpg",
 		"[14:24:25][T03] ✗ [5.0s] FAILED [IMG_MERMAID_INVALID]",
 		"[14:24:30][T03] ▶ START ch1.md::images/imgB.jpg",
-		"[14:24:33][T03] ✗ [3.0s] FAILED [IMG_MERMAID_INVALID]",
-		"[14:24:40][T03] ▶ START ch1.md::images/imgC.jpg",
+		"[14:24:33][T03] ✗ [3.0s] FAILED [IMG_INVALID_FORMAT]",
+		"[14:24:36][T03] ▶ START ch1.md::images/imgC.jpg",
+		"[14:24:38][T03] ✗ [2.0s] FAILED [IMG_API_ERROR: HTTP 400]",
+		"[14:24:40][T03] ▶ START ch1.md::images/imgD.jpg",
 		"[14:24:42][T03] ✓ [2.0s] DONE",
 	}
 	if err := os.WriteFile(logPath, []byte(joinLines(lines)), 0o644); err != nil {
@@ -49,30 +55,86 @@ func TestAnalyzeLog_FailedBeforeNextStartSameTID(t *testing.T) {
 		byKey[s.Key] = s
 	}
 
-	if len(sessions) != 3 {
-		t.Fatalf("expected 3 sessions, got %d (%v)", len(sessions), sessions)
+	if len(sessions) != 4 {
+		t.Fatalf("expected 4 sessions, got %d (%v)", len(sessions), sessions)
 	}
-	if s := byKey["ch1.md::images/imgA.jpg"]; s.Status != StatusFailed {
-		t.Fatalf("imgA: want %s, got %s (errType=%q errMsg=%q)",
-			StatusFailed, s.Status, s.ErrorType, s.ErrorMsg)
+	want := map[string]string{
+		"ch1.md::images/imgA.jpg": StatusWarning,
+		"ch1.md::images/imgB.jpg": StatusWarning,
+		"ch1.md::images/imgC.jpg": StatusFailed,
+		"ch1.md::images/imgD.jpg": StatusSuccess,
 	}
-	if s := byKey["ch1.md::images/imgB.jpg"]; s.Status != StatusFailed {
-		t.Fatalf("imgB: want %s, got %s (errType=%q errMsg=%q)",
-			StatusFailed, s.Status, s.ErrorType, s.ErrorMsg)
-	}
-	if s := byKey["ch1.md::images/imgC.jpg"]; s.Status != StatusSuccess {
-		t.Fatalf("imgC: want %s, got %s", StatusSuccess, s.Status)
+	for key, wantStatus := range want {
+		if got := byKey[key].Status; got != wantStatus {
+			t.Fatalf("%s: want %s, got %s (errType=%q errMsg=%q)",
+				key, wantStatus, got, byKey[key].ErrorType, byKey[key].ErrorMsg)
+		}
 	}
 
-	// Ensure both failures are classified as mermaid_invalid now that the
-	// pattern was added (task 1 wiring).
-	for _, key := range []string{
-		"ch1.md::images/imgA.jpg",
-		"ch1.md::images/imgB.jpg",
-	} {
-		if et := byKey[key].ErrorType; et != "mermaid_invalid" {
-			t.Fatalf("%s: want error type mermaid_invalid, got %q", key, et)
-		}
+	// The error type is still classified, so the report can explain WHY
+	// an item was skipped and retried.
+	if et := byKey["ch1.md::images/imgA.jpg"].ErrorType; et != "mermaid_invalid" {
+		t.Fatalf("imgA: want error type mermaid_invalid, got %q", et)
+	}
+	if et := byKey["ch1.md::images/imgB.jpg"].ErrorType; et != "invalid_format" {
+		t.Fatalf("imgB: want error type invalid_format, got %q", et)
+	}
+	if et := byKey["ch1.md::images/imgC.jpg"].ErrorType; et != "api_error" {
+		t.Fatalf("imgC: want error type api_error, got %q", et)
+	}
+}
+
+// TestComputeStatistics_SeparatesWarningsFromFailures pins the three-way
+// accounting (success / warning / failure) end to end, including the
+// retry note the report relies on.
+func TestComputeStatistics_SeparatesWarningsFromFailures(t *testing.T) {
+	sessions := []Session{
+		{Key: "a.md::images/1.jpg", TID: "1", Status: StatusSuccess},
+		{Key: "a.md::images/2.jpg", TID: "1", Status: StatusSuccess},
+		{Key: "a.md::images/3.jpg", TID: "2", Status: StatusWarning, ErrorType: "mermaid_invalid"},
+		{Key: "a.md::images/4.jpg", TID: "2", Status: StatusWarning, ErrorType: "mermaid_invalid"},
+		{Key: "a.md::images/5.jpg", TID: "2", Status: StatusWarning, ErrorType: "mermaid_invalid"},
+		{Key: "a.md::images/6.jpg", TID: "2", Status: StatusFailed, ErrorType: "api_error"},
+		{Key: "a.md::images/7.jpg", TID: "3", Status: StatusIncomplete},
+	}
+
+	st := ComputeStatistics(sessions, nil)
+	if st.Total != 7 || st.Success != 2 || st.Warning != 3 || st.Failed != 1 || st.Incomplete != 1 {
+		t.Fatalf("counts: total=%d success=%d warning=%d failed=%d incomplete=%d",
+			st.Total, st.Success, st.Warning, st.Failed, st.Incomplete)
+	}
+	if got, want := st.SuccessRate, 2.0/7.0*100; got < want-0.01 || got > want+0.01 {
+		t.Fatalf("SuccessRate = %.2f, want %.2f", got, want)
+	}
+	if got, want := st.WarningRate, 3.0/7.0*100; got < want-0.01 || got > want+0.01 {
+		t.Fatalf("WarningRate = %.2f, want %.2f", got, want)
+	}
+	// Warnings appear in the distribution (so the report explains them)
+	// but never in the failure count.
+	if st.ErrorDistribution["mermaid_invalid"] != 3 {
+		t.Fatalf("warning distribution = %v", st.ErrorDistribution)
+	}
+	if st.ErrorDistribution["api_error"] != 1 {
+		t.Fatalf("failure distribution = %v", st.ErrorDistribution)
+	}
+}
+
+// TestRoundFileStat_SeparatesWarnings pins the per-file summary.
+func TestRoundFileStat_SeparatesWarnings(t *testing.T) {
+	sessions := []Session{
+		{Key: "a.md::images/1.jpg", Status: StatusSuccess},
+		{Key: "a.md::images/2.jpg", Status: StatusWarning},
+		{Key: "a.md::images/3.jpg", Status: StatusFailed},
+		{Key: "b.md::images/4.jpg", Status: StatusIncomplete},
+	}
+	byFile := GroupSessionsByFile(sessions)
+	a := byFile["a.md"]
+	if a == nil || a.Total != 3 || a.Success != 1 || a.Warning != 1 || a.Failed != 1 {
+		t.Fatalf("a.md: %+v", a)
+	}
+	b := byFile["b.md"]
+	if b == nil || b.Total != 1 || b.Incomplete != 1 || b.Warning != 0 {
+		t.Fatalf("b.md: %+v", b)
 	}
 }
 

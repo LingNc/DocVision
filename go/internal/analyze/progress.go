@@ -157,8 +157,16 @@ func PrintProgressReport(inputDir, progressRoot, logsDir, finallyDir string) {
 	fmt.Printf("  已完成有效: %d\n", completed)
 	fmt.Printf("  无效条目:   %d\n", invalid)
 	fmt.Printf("  未完成:     %d\n", remaining)
+	if invalid > 0 {
+		fmt.Println("  注:         “无效条目”= 校验未通过或格式不符而被跳过的图片，结果没有写盘；")
+		fmt.Println("              下轮 img2text 会把它们重新处理（进度文件保留原状），所以它们不是失败。")
+	}
 	if totalImages > 0 {
 		fmt.Printf("  完成率:     %.2f%%\n", float64(completed)/float64(totalImages)*100)
+	}
+	if totalImages > 0 && invalid > 0 {
+		fmt.Printf("  填补后可达: %.2f%%（若下轮把 %d 个无效条目全部补上）\n",
+			float64(completed+invalid)/float64(totalImages)*100, invalid)
 	}
 
 	// Quality rate from log ERROR/WARNING

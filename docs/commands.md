@@ -37,10 +37,12 @@ AI 结果带 `[IMG_TYPE: <类型>]` 标签，写入 `finally/` 的 markdown 时�
 | 类型 | 嵌入方式 |
 | --- | --- |
 | text / latex（数学公式）/ table / code | **直接嵌入正文**（无任何包装标记，方便后续 AI 检索阅读） |
-| mermaid / latex | 代码块直接嵌入（latex 代码块经过 LaTeX 编译校验，失败自动回炉修复） |
+| mermaid | 代码块直接嵌入（Mermaid 校验不通过会回炉修复，修复不了则按无效响应跳过、下轮重试） |
 | 其余视觉类型（截图/照片/复杂图等） | `[Image]( 可读描述 )` |
 
-latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 auto）与 `tools.latex.engine`（默认 xelatex，自动回退 pdflatex/lualatex）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。
+img2text 的图片描述**只出 Mermaid**（外加表格、正文、公式、代码块）：矢量图重画是 `docvision latex` 档位 1 作图会话的职责。若模型无视提示词仍返回 ```` ```latex ```` / ```` ```tikz ```` 绘图代码块，该响应按**无效响应**处理——跳过、下轮重试，日志里附截断后的模型原文与"期望格式"一行摘要。
+
+Mermaid 校验由 `tools.mermaid.*`（off/auto/strict、CLI 命令、修正次数、超时）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。
 
 ## latex 档位2 文本图嵌入
 
@@ -59,6 +61,16 @@ latex 代码块校验由 `tools.latex.validation`（off/auto/strict，默认 aut
 ## 日志分析（analyze）
 
 工具调用统计同时解析 img2text 的 `[ToolCall]` 行与 latex 会话的 `[tool:<名称>] ok/error` 行，并按线程归属到对应会话；错误分类识别 `IMG_*` 与 `SESSION_*` 两类哨兵。
+
+结果的三种去向**分开统计**，措辞不混：
+
+| 分类 | 含义 | 日志里的样子 |
+| --- | --- | --- |
+| 成功 | 结果已写盘 | `✓ [1.2s] DONE [IMG_TYPE: …]` |
+| 警告 | 校验未通过或格式不符，**已被跳过、下轮重试**（进度文件不落盘） | `✗ … FAILED [IMG_MERMAID_INVALID]` / `[IMG_INVALID_FORMAT]`，随后一行 `Skipped invalid response … will retry next run` |
+| 失败 | 硬错误（API/网络/图片缺失等），需要人处理 | `✗ … FAILED [IMG_API_ERROR: …]` 等其它哨兵 |
+
+警告**不是失败**：img2text 的进度行把两者分列（`errors: N, warns: M`），`analyze` 报告与按文件摘要同样分列显示，并注明"下轮重试"；进度摘要里的“无效条目”也带同一句说明，并给出"若下轮全部补上"的可达完成率。
 
 ## img2text 测试模式
 

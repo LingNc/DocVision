@@ -25,8 +25,6 @@
 | `tools.mermaid.command` | Mermaid CLI 命令 | mmdc |
 | `tools.mermaid.fix_attempts` | Mermaid 独立修正次数（0=无限，受安全上限保护） | 3 |
 | `tools.mermaid.timeout` | 单次 Mermaid 校验超时（秒） | 30 |
-| `tools.latex.validation` | latex 代码块编译校验（off/auto/strict） | auto |
-| `tools.latex.engine` | latex 校验引擎（缺 pdflatex/lualatex 自动回退） | xelatex |
 | `tools.bash.sandbox` | 会话 bash 是否用 bubblewrap 内核沙箱（沙箱里只有本会话的挂载表；缺 bwrap 自动回退并记警告） | true |
 | `tools.bash.max_output` | 会话 bash 工具返回给模型的字符上限 | 5000 |
 | `tools.python.enabled` | 是否给会话 bash 提供 Python 环境 | true |

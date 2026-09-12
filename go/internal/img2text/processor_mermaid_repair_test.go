@@ -207,7 +207,7 @@ func TestCallAIWithTools_ValidMermaidSingleRequest(t *testing.T) {
 		}
 	}
 
-	result, status := CallAIWithTools(
+	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
 		validator, buildMermaidRepairMessage,
 	)
@@ -269,7 +269,7 @@ func TestCallAIWithTools_RepairSucceedsSameSession(t *testing.T) {
 		MermaidValidation: "auto",
 	}
 
-	result, status := CallAIWithTools(
+	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
 		validator, buildMermaidRepairMessage,
 	)
@@ -365,7 +365,7 @@ func TestCallAIWithTools_RepairBudgetExhausted(t *testing.T) {
 		MermaidFixAttempts: &budget,
 	}
 
-	result, status := CallAIWithTools(
+	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
 		validator, buildMermaidRepairMessage,
 	)
@@ -498,7 +498,7 @@ func TestCallAIWithTools_ToolCallsDuringRepair(t *testing.T) {
 		MermaidFixAttempts: &budget,
 	}
 
-	result, status := CallAIWithTools(
+	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
 		validator, buildMermaidRepairMessage,
 	)
@@ -617,7 +617,7 @@ func TestCallAIWithTools_ToolRoundsExhaustedNoTools(t *testing.T) {
 		MermaidValidation: "auto",
 	}
 
-	result, status := CallAIWithTools(
+	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
 		validator, buildMermaidRepairMessage,
 	)
@@ -686,7 +686,7 @@ func TestCallAIWithTools_StrictUnavailableSentinel(t *testing.T) {
 		MermaidValidation: "strict",
 	}
 
-	result, status := CallAIWithTools(
+	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
 		validator, buildMermaidRepairMessage,
 	)
@@ -727,7 +727,7 @@ func TestCallAIWithTools_AutoUnavailableAccept(t *testing.T) {
 		MermaidValidation: "auto",
 	}
 
-	result, status := CallAIWithTools(
+	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
 		validator, buildMermaidRepairMessage,
 	)
@@ -776,7 +776,7 @@ func TestCallAIWithTools_FormatFixNilValidator(t *testing.T) {
 		MermaidValidation: "auto",
 	}
 
-	result, status := CallAIWithTools(
+	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{}, 0, l, 0, opts,
 		"Fix the prefix to start with [IMG_TYPE:",
 		nil, nil, // <-- the format-fix wiring: nil validator + nil builder

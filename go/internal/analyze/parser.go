@@ -149,6 +149,14 @@ func AnalyzeLog(logPath string) ([]Session, error) {
 						s.Status = StatusFailed
 						s.ErrorMsg = ce.errMsg
 						s.ErrorType = ClassifyError(s.ErrorMsg)
+						// Validation / format failures are skipped and
+						// retried next run: they are warnings, not
+						// failures. Reclassifying here (rather than
+						// downstream) keeps every consumer — report,
+						// per-file summary, CSV — consistent.
+						if isRetryableError(s.ErrorType) {
+							s.Status = StatusWarning
+						}
 					}
 				} else {
 					s.Status = StatusIncomplete

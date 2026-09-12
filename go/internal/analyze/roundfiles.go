@@ -10,6 +10,7 @@ import (
 type RoundFileStat struct {
 	Total      int
 	Success    int
+	Warning    int
 	Failed     int
 	Incomplete int
 }
@@ -35,6 +36,8 @@ func GroupSessionsByFile(sessions []Session) map[string]*RoundFileStat {
 		switch s.Status {
 		case StatusSuccess:
 			st.Success++
+		case StatusWarning:
+			st.Warning++
 		case StatusFailed:
 			st.Failed++
 		case StatusIncomplete:
@@ -60,11 +63,12 @@ func PrintRoundFileSummary(logName string, sessions []Session) {
 	}
 	sort.Strings(names)
 
-	var totImg, totOK, totFail, totIncomplete int
+	var totImg, totOK, totWarn, totFail, totIncomplete int
 	for _, n := range names {
 		st := stats[n]
 		totImg += st.Total
 		totOK += st.Success
+		totWarn += st.Warning
 		totFail += st.Failed
 		totIncomplete += st.Incomplete
 	}
@@ -77,6 +81,7 @@ func PrintRoundFileSummary(logName string, sessions []Session) {
 	fmt.Printf("  涉及文件数:   %d\n", len(names))
 	fmt.Printf("  图片任务数:   %d\n", totImg)
 	fmt.Printf("  成功:         %d (%.1f%%)\n", totOK, rate)
+	fmt.Printf("  警告:         %d —— 校验未通过/格式不符，已跳过，下轮重试（不是失败）\n", totWarn)
 	fmt.Printf("  失败:         %d\n", totFail)
 	fmt.Printf("  未完成:       %d\n", totIncomplete)
 
@@ -92,8 +97,8 @@ func PrintRoundFileSummary(logName string, sessions []Session) {
 		if st.Total > 0 {
 			r = float64(st.Success) / float64(st.Total) * 100
 		}
-		fmt.Printf("  %s\n     总 %d | 成功 %d | 失败 %d | 成功率 %.1f%%\n",
-			n, st.Total, st.Success, st.Failed, r)
+		fmt.Printf("  %s\n     总 %d | 成功 %d | 警告 %d | 失败 %d | 成功率 %.1f%%\n",
+			n, st.Total, st.Success, st.Warning, st.Failed, r)
 	}
 	if written == 0 {
 		fmt.Println("  （本轮没有任何图片成功，finally/ 未被本轮写入/更新）")
@@ -102,7 +107,7 @@ func PrintRoundFileSummary(logName string, sessions []Session) {
 	fmt.Println("\n【全部文件明细】")
 	for _, n := range names {
 		st := stats[n]
-		fmt.Printf("  %s\n     总 %d | 成功 %d | 失败 %d | 未完成 %d\n",
-			n, st.Total, st.Success, st.Failed, st.Incomplete)
+		fmt.Printf("  %s\n     总 %d | 成功 %d | 警告 %d | 失败 %d | 未完成 %d\n",
+			n, st.Total, st.Success, st.Warning, st.Failed, st.Incomplete)
 	}
 }

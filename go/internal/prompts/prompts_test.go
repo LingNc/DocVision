@@ -84,6 +84,24 @@ func TestTemplatesMentionOnlyLiveTools(t *testing.T) {
 	}
 }
 
+// 守卫③b：模板声明的禁提名字不得出现（大小写不敏感）。这条是给
+// "某个会话不该产出某种格式"准备的：img2text 的提示词曾被要求用
+// latex 代码块画矢量图，模型于是产出 TikZ，而 img2text 侧既不校验
+// 也不嵌入这种块（真实跑批 39/81 张因此报废）。
+func TestTemplatesForbidMention(t *testing.T) {
+	for _, tpl := range Templates() {
+		if len(tpl.ForbidMention) == 0 {
+			continue
+		}
+		text := strings.ToLower(Must(tpl.Name))
+		for _, banned := range tpl.ForbidMention {
+			if strings.Contains(text, strings.ToLower(banned)) {
+				t.Errorf("%s 不该出现 %q（该模板禁用这个名字）", tpl.Name, banned)
+			}
+		}
+	}
+}
+
 // 守卫④：退役名字表本身要覆盖历史事故清单（防止顺手删条目）。
 func TestRetiredNamesCoverHistory(t *testing.T) {
 	want := []string{"read_md", "view_page", "list_images", "install_font", "compile_preview", "preview.png"}

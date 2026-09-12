@@ -19,9 +19,14 @@ func PrintReport(stats *Statistics, logPath string, showThreads bool) {
 	fmt.Println("\n【基础统计】")
 	fmt.Printf("  总图片数:      %d\n", stats.Total)
 	fmt.Printf("  成功:          %d (%.1f%%)\n", stats.Success, stats.SuccessRate)
+	fmt.Printf("  警告:          %d (%.1f%%) —— 校验未通过/格式不符，已跳过，下轮重试（不是失败）\n",
+		stats.Warning, stats.WarningRate)
 	fmt.Printf("  失败:          %d\n", stats.Failed)
 	fmt.Printf("  未完成:        %d\n", stats.Incomplete)
 	fmt.Printf("  线程数:        %d\n", stats.ThreadCount)
+	if stats.Warning > 0 {
+		fmt.Println("  说明:          警告项不计入失败；它们没有写出结果，重新运行 img2text 即会再试一次")
+	}
 
 	if stats.ToolCalls != nil {
 		tc := stats.ToolCalls
@@ -98,7 +103,7 @@ func PrintReport(stats *Statistics, logPath string, showThreads bool) {
 	}
 
 	if len(stats.ErrorDistribution) > 0 {
-		fmt.Println("\n【错误分类统计】")
+		fmt.Println("\n【错误与警告分类统计】")
 		type kv struct {
 			k string
 			v int
@@ -109,7 +114,11 @@ func PrintReport(stats *Statistics, logPath string, showThreads bool) {
 		}
 		sort.Slice(pairs, func(i, j int) bool { return pairs[i].v > pairs[j].v })
 		for _, p := range pairs {
-			fmt.Printf("  %-20s: %4d\n", p.k, p.v)
+			kind := "失败"
+			if isRetryableError(p.k) {
+				kind = "警告（下轮重试）"
+			}
+			fmt.Printf("  %-20s: %4d  [%s]\n", p.k, p.v, kind)
 		}
 	}
 
@@ -126,8 +135,8 @@ func PrintReport(stats *Statistics, logPath string, showThreads bool) {
 		})
 		for _, tid := range tids {
 			ts := stats.ThreadStats[tid]
-			fmt.Printf("  T%2s: %4d张 成功%4d (%5.1f%%) 平均%6.2fs 最大%6.2fs\n",
-				tid, ts.Count, ts.Success, ts.SuccessRate, ts.AvgElapsed, ts.ElapsedMax)
+			fmt.Printf("  T%2s: %4d张 成功%4d (%5.1f%%) 警告%4d 失败%4d 平均%6.2fs 最大%6.2fs\n",
+				tid, ts.Count, ts.Success, ts.SuccessRate, ts.Warning, ts.Failed, ts.AvgElapsed, ts.ElapsedMax)
 		}
 	}
 }

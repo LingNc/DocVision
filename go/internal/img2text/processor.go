@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -123,7 +124,7 @@ func CallAIWithTools(
 	customUserText string,
 	validator MermaidValidatorFunc,
 	repairPromptBuilder MermaidRepairPromptBuilder,
-) (string, string) {
+) (string, string, string) {
 	// Request/retry controls now live on the client (resolved from
 	// the model config); legacy options.* act as fallbacks there.
 	rateLimitLimit := client.RateLimitRetries
@@ -151,9 +152,9 @@ func CallAIWithTools(
 		}
 		content, status := doCallWithRetry(client, req, maxAPIRetries, rateLimitLimit, logger, tid)
 		if status != "" {
-			return content, status
+			return content, status, content
 		}
-		return content, StatusOK
+		return content, StatusOK, content
 	}
 
 	// Mode 2: incremental context expansion with tool calls.
@@ -224,10 +225,10 @@ func CallAIWithTools(
 
 		resp, errSentinel, status := doCallWithRetryFull(client, req, maxAPIRetries, rateLimitLimit, logger, tid)
 		if status != "" {
-			return errSentinel, status
+			return errSentinel, status, ""
 		}
 		if len(resp.Choices) == 0 {
-			return sentinelEmpty, StatusError
+			return sentinelEmpty, StatusError, ""
 		}
 		choice := resp.Choices[0]
 
@@ -323,19 +324,27 @@ func CallAIWithTools(
 			}
 			finalResp, finalSentinel, finalStatus := doCallWithRetryFull(client, finalReq, maxAPIRetries, rateLimitLimit, logger, tid)
 			if finalStatus != "" {
-				return finalSentinel, finalStatus
+				return finalSentinel, finalStatus, ""
 			}
 			if len(finalResp.Choices) == 0 {
-				return sentinelEmpty, StatusError
+				return sentinelEmpty, StatusError, ""
 			}
 			finalChoice := finalResp.Choices[0]
 			messages = append(messages, finalChoice.Message)
 			content := contentString(finalChoice.Message)
 			if content == "" {
-				return sentinelEmpty, StatusError
+				return sentinelEmpty, StatusError, ""
+			}
+			// The prompt asks for Mermaid only. A ```latex / ```tikz
+			// drawing block is a response this pipeline cannot use: it is
+			// neither compile-checked nor embedded any more, so reject it
+			// even when Mermaid validation is switched off.
+			if leftoverDrawingBlock(content) {
+				logRejectedDrawingBlock(logger, tid, content, lines, imgLineIdx)
+				return sentinelInvalid, StatusRetry, content
 			}
 			if validator == nil {
-				return content, StatusOK
+				return content, StatusOK, content
 			}
 			currentResult = content
 		} else {
@@ -345,10 +354,14 @@ func CallAIWithTools(
 			messages = append(messages, choice.Message)
 			content := contentString(choice.Message)
 			if content == "" {
-				return sentinelEmpty, StatusError
+				return sentinelEmpty, StatusError, ""
+			}
+			if leftoverDrawingBlock(content) {
+				logRejectedDrawingBlock(logger, tid, content, lines, imgLineIdx)
+				return sentinelInvalid, StatusRetry, content
 			}
 			if validator == nil {
-				return content, StatusOK
+				return content, StatusOK, content
 			}
 			currentResult = content
 		}
@@ -358,28 +371,29 @@ func CallAIWithTools(
 		action := decideMermaidAction(validation, strings.ToLower(strings.TrimSpace(opts.MermaidValidation)))
 		switch action.kind {
 		case actionAccept:
-			return currentResult, StatusOK
+			return currentResult, StatusOK, currentResult
 		case actionSentinel:
 			logger.LogError(tid,
 				"Mermaid validation unavailable for", imgPathFromIdx(lines, imgLineIdx),
 				":", validation.Error)
-			return sentinelMermaid, StatusRetry
+			return sentinelMermaid, StatusRetry, currentResult
 		case actionRepair:
 			if repairAttempts >= repairBudget {
-				logger.LogError(tid,
-					"Mermaid validation failed after repairs for",
-					imgPathFromIdx(lines, imgLineIdx)+":", validation.Error)
-				return sentinelMermaid, StatusRetry
+				logger.LogError(tid, fmt.Sprintf(
+					"Mermaid validation failed after %d repair round(s) for %s: %s. Raw output: %s",
+					repairBudget, imgPathFromIdx(lines, imgLineIdx), validation.Error, snippet(currentResult),
+				))
+				return sentinelMermaid, StatusRetry, currentResult
 			}
 			if repairPromptBuilder == nil {
 				// No builder wired (e.g. tests use the validator without
 				// exercising fix). Treat as terminal so we do not
 				// loop forever sending identical fix messages.
-				return sentinelMermaid, StatusRetry
+				return sentinelMermaid, StatusRetry, currentResult
 			}
 			logger.LogWarning(tid, fmt.Sprintf(
-				"Mermaid validation failed (%d/%d): %s",
-				repairAttempts+1, repairBudget, validation.Error,
+				"Mermaid validation failed (%d/%d) for %s: %s",
+				repairAttempts+1, repairBudget, imgPathFromIdx(lines, imgLineIdx), validation.Error,
 			))
 			fixMsg := repairPromptBuilder(currentResult, validation.Error)
 			messages = append(messages, ChatMessage{Role: "user", Content: fixMsg})
@@ -390,9 +404,19 @@ func CallAIWithTools(
 			// to work from its current position.
 			continue
 		default:
-			return sentinelMermaid, StatusRetry
+			return sentinelMermaid, StatusRetry, currentResult
 		}
 	}
+}
+
+// logRejectedDrawingBlock records a response that used a LaTeX/TikZ
+// drawing block, naming the actual problem, the image it belongs to, the
+// expected shape and the model's own text.
+func logRejectedDrawingBlock(l *logger.Logger, tid int, content string, lines []string, imgLineIdx int) {
+	l.LogWarning(tid, fmt.Sprintf(
+		"Invalid response for %s: model returned a LaTeX/TikZ drawing block, but img2text only accepts Mermaid. %s. Raw output: %s",
+		imgPathFromIdx(lines, imgLineIdx), expectedFormatHint, snippet(content),
+	))
 }
 
 // resolveMermaidRepairBudget normalises the user-facing
@@ -556,19 +580,27 @@ func buildMermaidRepairMessage(currentResult, validationError string) string {
 	}, "\n")
 }
 
-// imgPathFromIdx is a small helper used purely for log messages. It
-// returns a short tag derived from the image line index so logs do not
-// require the caller to thread the image path through every step of
-// the state machine. Used only when callers do not pass an explicit
-// image path (e.g. the format-fix path which reuses the same
-// validator closure from ProcessOneImage).
+// imgLineRefRe extracts the image reference from the markdown line the
+// current image sits on.
+var imgLineRefRe = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
+
+// imgPathFromIdx is a small helper used purely for log messages. The
+// img2text state machine (CallAIWithTools) only knows the markdown lines
+// and the image's line index, so this recovers the image path from that
+// line. The "line:<idx>" fallback stays for synthetic call sites (tests)
+// whose line array carries no image reference.
 func imgPathFromIdx(lines []string, idx int) string {
 	if idx < 0 || idx >= len(lines) {
 		return fmt.Sprintf("line:%d", idx)
 	}
-	line := strings.TrimSpace(lines[idx])
-	if len(line) > 80 {
-		line = line[:80] + "..."
+	if m := imgLineRefRe.FindStringSubmatch(lines[idx]); m != nil {
+		return m[1]
+	}
+	if line := strings.TrimSpace(lines[idx]); line != "" {
+		if len(line) > 80 {
+			line = line[:80] + "..."
+		}
+		return line
 	}
 	return fmt.Sprintf("line:%d", idx)
 }
@@ -715,7 +747,9 @@ func containsAny(s string, subs ...string) bool {
 // ProcessOneImage loads the image, calls CallAIWithTools, and validates
 // the [IMG_TYPE:] prefix. On missing prefix the format-fix path is
 // attempted up to formatFixAttempts times. Returns the (result, status)
-// tuple matching the Python reference.
+// tuple matching the Python reference, plus the last raw model response
+// so the runner can quote it when the item is discarded as invalid (a
+// run that only says "invalid" is undiagnosable).
 func ProcessOneImage(
 	client *AIClient,
 	imagesDir, imgPath, subject string,
@@ -724,15 +758,18 @@ func ProcessOneImage(
 	logger *logger.Logger,
 	tid int,
 	opts config.OptionsConfig,
-) (string, string) {
+) (string, string, string) {
 	imgFile, err := resolveImageFile(imagesDir, imgPath, subject)
 	if err != nil {
-		return fmt.Sprintf("[IMG_MISSING: %s]", imgPath), StatusError
+		return fmt.Sprintf("[IMG_MISSING: %s]", imgPath), StatusError, ""
 	}
 	imgBase64, err := ImageToBase64(imgFile, 1280)
 	if err != nil {
-		return fmt.Sprintf("[IMG_ERROR: %s - %v]", imgPath, err), StatusError
+		return fmt.Sprintf("[IMG_ERROR: %s - %v]", imgPath, err), StatusError, ""
 	}
+	// lastRaw keeps the model's most recent reply so a discarded item can
+	// be explained in the log instead of only marked "invalid".
+	lastRaw := ""
 
 	// Mermaid validator: nil when the operator disabled validation.
 	// The closure re-uses the resolved MermaidCommand / timeout so each
@@ -743,66 +780,60 @@ func ProcessOneImage(
 	if mode != "" && mode != "off" {
 		timeout := time.Duration(opts.MermaidTimeout) * time.Second
 		command := opts.MermaidCommand
-		tikzMode := strings.ToLower(strings.TrimSpace(opts.LatexValidation))
-		tikzEngine := opts.LatexEngine
 		validator = func(response string) MermaidValidationResult {
-			// TikZ responses route to the LaTeX compile check; Mermaid
-			// keeps its own CLI validation. Pure text/math/table answers
-			// hit ValidateMermaid's no-block fast path (valid).
-			if tikzMode != "off" && len(ExtractTikZBlocks(response)) > 0 && !hasMermaidBlock(response) {
-				v := ValidateTikZ(context.Background(), response, tikzEngine, timeout)
-				debugValidation(logger, tid, "latex", v)
-				return v
-			}
+			// img2text 只校验 Mermaid；LaTeX/TikZ 绘图块由下方的
+			// leftoverDrawingBlock 判为无效响应。
 			v := ValidateMermaid(context.Background(), response, command, timeout)
 			debugValidation(logger, tid, "mermaid", v)
 			return v
 		}
-		repairBuilder = func(current, validationError string) string {
-			if len(ExtractTikZBlocks(current)) > 0 && !hasMermaidBlock(current) {
-				return buildTikzRepairMessage(current, validationError)
-			}
-			return buildMermaidRepairMessage(current, validationError)
-		}
+		repairBuilder = buildMermaidRepairMessage
 	}
 
-	result, status := CallAIWithTools(
+	result, status, lastRaw := CallAIWithTools(
 		client, imgBase64, lines, imgLineIdx,
 		logger, tid, opts, "",
 		validator, repairBuilder,
 	)
 	if status != StatusOK {
-		return result, status
+		// result is a sentinel; lastRaw (the model's own text) is what
+		// makes the failure diagnosable downstream.
+		return result, status, lastRaw
 	}
 	result = strings.TrimSpace(result)
+	if lastRaw == "" {
+		lastRaw = result
+	}
 
 	// Look for the [IMG_TYPE: prefix anywhere in the result. If the
 	// model added leading prose we drop it and warn (Python does the
-	// same with log_warning).
+	// same with log_warning). The dropped prose is quoted in the log so
+	// a run can tell WHAT the model emitted instead of just "invalid".
 	if idx := strings.Index(result, "[IMG_TYPE:"); idx >= 0 {
 		if idx > 0 {
-			prefix := result[:idx]
+			prefix := strings.TrimSpace(result[:idx])
 			logger.LogWarning(tid,
 				"Unexpected prefix before '[IMG_TYPE:' in", imgPath+":",
-				strings.TrimSpace(prefix)[:min(80, len(strings.TrimSpace(prefix)))])
+				truncate(prefix, 200),
+				fmt.Sprintf("(前缀 %d 字符；完整响应 %d 字符，已丢弃前缀)", len([]rune(prefix)), len([]rune(result))))
 		}
-		return strings.TrimSpace(result[idx:]), StatusOK
+		return strings.TrimSpace(result[idx:]), StatusOK, result
 	}
 
 	// Missing [IMG_TYPE:. If the response is already a system error
 	// sentinel, return it as-is.
 	if strings.HasPrefix(result, "[IMG_") {
-		return result, StatusError
+		return result, StatusError, result
 	}
 
 	// Try the format fix.
 	if opts.FormatFixAttempts > 0 {
-		logger.LogWarning(tid, "Format fix triggered for", imgPath)
+		logger.LogWarning(tid, "Format fix triggered for", imgPath, "— raw output:", snippet(result))
 		fixMsg := fmt.Sprintf(
 			`Your previous response was REJECTED because it did NOT start with "[IMG_TYPE: <type>]".`+"\n"+
 				"Here is your previous response (for reference only):\n"+
 				"---\n%s\n---\n\n"+
-				"Start EXACTLY with \"[IMG_TYPE:\" followed by the type, then the pure description (mermaid/tikz/table/latex/text/flowchart/...). "+
+				"Start EXACTLY with \"[IMG_TYPE:\" followed by the type, then the pure description (mermaid/table/text/code/formula/flowchart/...). "+
 				"Do NOT write \"The image shows\", \"This diagram illustrates\", or any similar analysis.",
 			result,
 		)
@@ -810,36 +841,40 @@ func ProcessOneImage(
 		// being asked to repair the [IMG_TYPE:] prefix, not syntax.
 		// The validator stays in scope on the *initial* call so the
 		// original response still benefits from validation.
-		fixed, fixStatus := CallAIWithTools(
+		fixed, fixStatus, fixRaw := CallAIWithTools(
 			client, imgBase64, nil, 0,
 			logger, tid, opts, fixMsg,
 			nil, nil,
 		)
+		if fixRaw != "" {
+			fixed = strings.TrimSpace(fixed)
+			if !strings.HasPrefix(fixed, "[IMG_") {
+				fixed = strings.TrimSpace(fixRaw)
+			}
+			fixed = strings.TrimSpace(fixed)
+		}
 		if fixStatus != StatusOK && !strings.HasPrefix(fixed, "[IMG_") {
-			return fixed, fixStatus
+			return fixed, fixStatus, fixed
 		}
 		fixed = strings.TrimSpace(fixed)
 		if idx := strings.Index(fixed, "[IMG_TYPE:"); idx >= 0 {
 			if idx > 0 {
 				logger.LogWarning(tid, "Format fix had extra prefix in", imgPath)
 			}
-			return strings.TrimSpace(fixed[idx:]), StatusOK
+			return strings.TrimSpace(fixed[idx:]), StatusOK, fixed
 		}
-		prefix := result
-		if len(prefix) > 100 {
-			prefix = prefix[:100]
-		}
-		logger.LogError(tid,
-			"Format fix still missing [IMG_TYPE:] for", imgPath+":", prefix)
-		return sentinelInvalid, StatusRetry
+		logger.LogError(tid, fmt.Sprintf(
+			"Format fix still missing [IMG_TYPE:] for %s. %s. Raw output: %s",
+			imgPath, expectedFormatHint, snippet(fixed),
+		))
+		return sentinelInvalid, StatusRetry, fixed
 	}
 
-	prefix := result
-	if len(prefix) > 100 {
-		prefix = prefix[:100]
-	}
-	logger.LogError(tid, "No '[IMG_TYPE:' found in result from", imgPath+":", prefix)
-	return sentinelInvalid, StatusRetry
+	logger.LogError(tid, fmt.Sprintf(
+		"No '[IMG_TYPE:' found in result from %s. %s. Raw output: %s",
+		imgPath, expectedFormatHint, snippet(result),
+	))
+	return sentinelInvalid, StatusRetry, result
 }
 
 // resolveImageFile maps an "images/..." reference from the markdown into
@@ -880,15 +915,17 @@ func dash(s string) string {
 }
 
 // debugValidation writes one [validate:<kind>] line to the debug log so
-// a run's Mermaid/LaTeX syntax checks are visible without dumping the
-// full tool output.
+// a run's syntax checks are visible without dumping the full tool
+// output. The error text goes through extractValidationError so the
+// line carries the real failure (TeX `! …` / `l.NNN`, mmdc's parser
+// error) instead of the engine's version banner.
 func debugValidation(logger *logger.Logger, tid int, kind string, v MermaidValidationResult) {
 	if !logger.DebugEnabled() {
 		return
 	}
 	errText := "-"
 	if v.Error != "" {
-		errText = truncate(sanitizeMermaidError(v.Error), 400)
+		errText = truncate(extractValidationError(sanitizeMermaidError(v.Error)), errorLineMaxBytes)
 	}
 	logger.Debug(tid, fmt.Sprintf("[validate:%s] has_blocks=%v valid=%v available=%v error=%s",
 		kind, v.HasMermaid, v.Valid, v.Available, errText))

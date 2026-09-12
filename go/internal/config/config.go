@@ -455,8 +455,8 @@ type MinerUConfig struct {
 }
 
 // ToolsConfig groups the per-tool tunables that are shared across
-// pipelines (img2text context expansion, latex image_context, mermaid
-// and tikz validation tools). Tools are no longer img2text-private.
+// pipelines (img2text context expansion, latex image_context, the
+// mermaid validation tool). Tools are no longer img2text-private.
 type ToolsConfig struct {
 	Context struct {
 		InitialUp   int `yaml:"initial_up"`   // initial context lines above the image
@@ -479,15 +479,11 @@ type ToolsConfig struct {
 		FixAttempts *int   `yaml:"fix_attempts"` // 0 = unlimited (in-code cap)
 		Timeout     int    `yaml:"timeout"`      // seconds per validation
 	} `yaml:"mermaid"`
-	Latex struct {
-		Validation string `yaml:"validation"` // off, auto, strict (latex code block compile check)
-		Engine     string `yaml:"engine"`     // xelatex / pdflatex / lualatex
-	} `yaml:"latex"`
 	// Bash configures the session bash tool used by the latex AI
 	// sessions: whether commands run inside the bubblewrap sandbox and
 	// how much output is handed back to the model. It lives here (not
 	// under latex:) because it describes the tool itself, like
-	// tools.mermaid / tools.latex.
+	// tools.mermaid.
 	Bash struct {
 		Sandbox   *bool `yaml:"sandbox"`    // bubblewrap kernel sandbox (default true)
 		MaxOutput int   `yaml:"max_output"` // characters of bash output fed to the model
@@ -582,11 +578,7 @@ type OptionsConfig struct {
 	MermaidCommand     string  `yaml:"-"` // set from tools.mermaid.command
 	MermaidFixAttempts *int    `yaml:"-"` // set from tools.mermaid.fix_attempts
 	MermaidTimeout     int     `yaml:"-"` // set from tools.mermaid.timeout
-	// TikZ compile-check (auto/strict/off). Engine defaults to xelatex
-	// with automatic fallback to pdflatex/lualatex.
-	LatexValidation string `yaml:"-"` // set from tools.latex.validation
-	LatexEngine     string `yaml:"-"` // set from tools.latex.engine
-	MaxTokens       int    `yaml:"max_tokens"`
+	MaxTokens          int     `yaml:"max_tokens"`
 	// LogLevel: info (default), debug or trace. Debug writes every AI
 	// request/response summary, prompt and tool result into the log
 	// file; trace additionally records per-chunk stream traffic and raw
@@ -829,12 +821,6 @@ func setDefaults(cfg *Config) {
 	if cfg.Tools.Mermaid.Timeout == 0 {
 		cfg.Tools.Mermaid.Timeout = 30
 	}
-	if cfg.Tools.Latex.Validation == "" {
-		cfg.Tools.Latex.Validation = "auto"
-	}
-	if cfg.Tools.Latex.Engine == "" {
-		cfg.Tools.Latex.Engine = "xelatex"
-	}
 	// Runtime carriers derived from tools:.
 	cfg.Options.MaxContextLinesUp = cfg.Tools.Context.InitialUp
 	cfg.Options.MaxContextLinesDown = cfg.Tools.Context.InitialDown
@@ -845,8 +831,6 @@ func setDefaults(cfg *Config) {
 	cfg.Options.MermaidCommand = cfg.Tools.Mermaid.Command
 	cfg.Options.MermaidFixAttempts = cfg.Tools.Mermaid.FixAttempts
 	cfg.Options.MermaidTimeout = cfg.Tools.Mermaid.Timeout
-	cfg.Options.LatexValidation = cfg.Tools.Latex.Validation
-	cfg.Options.LatexEngine = cfg.Tools.Latex.Engine
 	if cfg.Options.Concurrency == 0 {
 		cfg.Options.Concurrency = 10
 	}

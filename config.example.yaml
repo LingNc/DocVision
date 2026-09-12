@@ -123,7 +123,7 @@ img2text:
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
 # Tools - per-tool tunables shared by every pipeline (img2text context
-# expansion, latex image_context, mermaid/tikz validation).
+# expansion, latex image_context, mermaid validation).
 # ----------------------------------------------------------------
 tools:
   view:                         # 看图软预算（只提醒，不拦截调用；按"对象"计数）
@@ -141,9 +141,6 @@ tools:
     command: "mmdc"             # Mermaid CLI command
     fix_attempts: 3             # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
     timeout: 30                 # Mermaid validation timeout in seconds
-  latex:
-    validation: "auto"          # off, auto, strict; latex code blocks are compile-checked
-    engine: "xelatex"           # latex validation engine (pdflatex/lualatex fallback)
   bash:                         # 会话 bash 工具（latex AI 会话用）
     sandbox: true               # 用 bubblewrap 内核沙箱（沙箱里只有本会话的挂载表；缺 bwrap 自动回退并告警）
     max_output: 5000            # bash 工具返回给模型的字符上限

@@ -652,3 +652,23 @@ func applyHistoryWithExtras(mdName, mdPath string, items []ProgressItem) (string
 	}
 	return nc, len(reps)
 }
+
+// TestEmbedBlockFor pins the embed chosen per [IMG_TYPE:]: searchable
+// text types inline, mermaid as a code block, everything else as an
+// [Image]( description ).
+func TestEmbedBlockFor(t *testing.T) {
+	cases := []struct{ name, result, want string }{
+		{"plain text", "[IMG_TYPE: text]\n这是一段说明文字。", "\n\n这是一段说明文字。\n\n"},
+		{"latex math", "[IMG_TYPE: latex]\n$$E=mc^2$$", "\n\n$$E=mc^2$$\n\n"},
+		{"table", "[IMG_TYPE: table]\n| a | b |\n| - | - |", "\n\n| a | b |\n| - | - |\n\n"},
+		{"mermaid passthrough", "[IMG_TYPE: flowchart]\n```mermaid\ngraph TD; A-->B\n```", "\n\n```mermaid\ngraph TD; A-->B\n```\n\n"},
+		{"bare mermaid body gets a fence", "[IMG_TYPE: mermaid]\ngraph TD; A-->B", "\n\n```mermaid\ngraph TD; A-->B\n```\n\n"},
+		{"visual default", "[IMG_TYPE: screenshot]\n一个 IDE 截图。", "\n\n[Image]( 一个 IDE 截图。 )\n\n"},
+		{"missing prefix", "普通文本", "\n\n[Image]( 普通文本 )\n\n"},
+	}
+	for _, tc := range cases {
+		if got := embedBlockFor(tc.result); got != tc.want {
+			t.Errorf("%s: got %q want %q", tc.name, got, tc.want)
+		}
+	}
+}
