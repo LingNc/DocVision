@@ -20,9 +20,16 @@ func TestMessageTokensMultimodal(t *testing.T) {
 		{"type": "text", "text": "hello world this is a test"},
 		{"type": "image_url", "image_url": map[string]string{"url": "data:image/jpeg;base64,xxx"}},
 	}}
-	got := messageTokens(m)
-	if got < imageTokens {
-		t.Fatalf("image cost missing: %d", got)
+	// 没有尺寸信息 → 按配置的兜底常量计。
+	if got, want := messageTokens(m), ImageTokens(0, 0); got < want {
+		t.Fatalf("image cost missing: %d < %d", got, want)
+	}
+	// 带上尺寸估算时按那一张算，不再退回常量。
+	m2 := ChatMessage{Role: "user", Content: m.Content, ImageTokens: []int{3000}}
+	if got := messageTokens(m2) - messageTokens(ChatMessage{Role: "user", Content: []map[string]interface{}{
+		{"type": "text", "text": "hello world this is a test"},
+	}}); got != 3000 {
+		t.Fatalf("per-image estimate ignored: delta %d", got)
 	}
 }
 

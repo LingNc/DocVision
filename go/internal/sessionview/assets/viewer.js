@@ -76,6 +76,7 @@
     collapseThinking: document.getElementById('collapse-thinking'),
     onlyTools: document.getElementById('only-tools'),
     mdToggle: document.getElementById('md-toggle'),
+    unitToggle: document.getElementById('unit-toggle'),
     themeToggle: document.getElementById('theme-toggle'),
     tabs: {
       chat: document.getElementById('tab-chat'),
@@ -108,6 +109,8 @@
     toolSeq: 0,
     calls: new Map(),
     callNodes: {},
+    // call id -> 参数 token 估算（Go 侧下发，见 indexCallEstimates）
+    callEst: {},
     anchors: {},
     badLines: 0,
     polling: false,
@@ -115,6 +118,11 @@
     view: 'chat',
     // 消息正文的 Markdown 预览开关：默认开启，关掉回到纯文本 pre-wrap。
     markdown: true,
+    // 计数显示单位：token（默认）或 char。token 一律是**本地估算**（带 ≈），
+    // char 是精确字符数；详情栏瓦片里的 tokens 是厂商回执，不受这个开关影响。
+    unit: 'token',
+    // 本地估算规则（页面数据下发，缺失时用内置默认值）。
+    estPolicy: { pxPerToken: 750, min: 85, max: 4096, fallback: 1100 },
     // 侧栏 / 详情栏的宽度偏好：0 = 折叠（侧栏折成 56px 轨道，详情栏关掉）
     sidebar: SIDEBAR_DEFAULT,
     details: 0,
@@ -152,6 +160,55 @@
     if (!n) { return '0 字符'; }
     if (n < 1024) { return n + ' 字符'; }
     return (n / 1024).toFixed(1) + ' KB';
+  }
+
+  /*
+   * 一处计数的**唯一**文案来源：按显示单位开关给出字符数或 token 数。
+   * chars 是精确字符数；tokens 是 Go 侧本地估算（internal/session 的估算器，
+   * 由页面数据下发，前端不自己算），所以 token 形态一律带 ≈。
+   */
+  function countText(chars, tokens) {
+    if (state.unit === 'char') { return (Number(chars) || 0) + ' 字符'; }
+    return '≈ ' + fmtTokens(tokens) + ' tokens';
+  }
+
+  /* 轨迹表 / 列里的短形态：单位由列名写明，值只有数字。 */
+  function countValue(chars, tokens) {
+    if (state.unit === 'char') { return String(Number(chars) || 0); }
+    return '≈ ' + fmtTokens(tokens);
+  }
+
+  function unitLabel() { return state.unit === 'char' ? '字符' : 'tokens'; }
+
+  /* 一行的本地估算（Go 侧算好下发）：缺字段时全 0，不在这里兜算。 */
+  var EMPTY_EST = { text: 0, reasoning: 0, calls: [], images: 0, imageCount: 0 };
+
+  function estOf(line) {
+    return (line && line.est) ? line.est : EMPTY_EST;
+  }
+
+  /*
+   * 工具调用的参数估算按 call id 索引一次：折叠行、输入段、轨迹表都从这里取，
+   * 保证同一次调用在三处的数字一致。
+   */
+  function indexCallEstimates(lines) {
+    (lines || []).forEach(function (line) {
+      var est = estOf(line);
+      (line.tool_calls || []).forEach(function (c, i) {
+        if (c && c.id) { state.callEst[c.id] = est.calls[i] || 0; }
+      });
+    });
+  }
+
+  /* 整个会话的图片张数与图片 token 估算（详情栏"图片"瓦片用）。 */
+  function imageEstimate(lines) {
+    var sum = { count: 0, tokens: 0 };
+    (lines || []).forEach(function (line) {
+      var est = estOf(line);
+      sum.count += est.imageCount || 0;
+      sum.tokens += est.images || 0;
+    });
+    return sum;
   }
 
   function fmtClock(value) {
@@ -391,6 +448,8 @@
     state.collapsed = storeJSON('collapsed', {});
     state.overflow = storeJSON('overflow', {});
     state.markdown = storeGet('markdown') !== '0';
+    // 显示单位：默认 token（本地估算，带 ≈），存过 'char' 才切成字符。
+    state.unit = storeGet('unit') === 'char' ? 'char' : 'token';
     // Number(null) === 0，所以要先用 null 判断"有没有存过"——否则首次访问
     // 会被读成"侧栏宽度 0 = 折叠"，页面一打开就是一条轨道。
     var rawSidebar = storeGet('layout.sidebar');
@@ -657,7 +716,10 @@
     return {
       line: line,
       count: Math.max(metas.length, scanned ? scanned.count : 0),
-      promptChars: String(line.text || '').length
+      promptChars: String(line.text || '').length,
+      // 本地估算（Go 侧下发）：显示单位是 token 时用它，单位是字符时用上面的
+      // 精确字符数——两个口径都留着，切换开关不用重新拉数据。
+      promptTokenEst: estOf(line).text
     };
   }
 
@@ -805,7 +867,7 @@
    * 点掉高度限制直接看全文，再点「收起」（按钮文案与折叠记忆键都沿用既有的那套）。
    * 高亮与 Markdown 开关无关：这里永远高亮，关掉 Markdown 也一样。
    */
-  function machineScroll(text, key, extraClass) {
+  function machineScroll(text, key, extraClass, tokens) {
     var wrap = el('div', 'text-wrap');
     var raw = String(text === undefined || text === null ? '' : text);
     var pretty = jsonPretty(raw);
@@ -827,13 +889,16 @@
     scroll.appendChild(pre);
     wrap.appendChild(scroll);
     if (big) {
-      wrap.appendChild(el('div', 'note', '内容过大（' + fmtChars(body.length) + '），按纯文本显示，不做高亮'));
+      // 这条说明的依据是"字符数越过了高亮上限"，所以有 token 估算就按当前
+      // 显示单位报，没有就退回字符数（KB 形态），两种情况都说清是什么过大。
+      var size = tokens ? countText(body.length, tokens) : fmtChars(body.length);
+      wrap.appendChild(el('div', 'note', '内容过大（' + size + '），按纯文本显示，不做高亮'));
     }
     if (long) {
       var toggle = el('button', 'text-toggle');
       toggle.type = 'button';
       var label = function () {
-        toggle.textContent = foldLabel(expanded, lines.length, body.length);
+        toggle.textContent = foldLabel(expanded, lines.length, body.length, tokens);
       };
       label();
       toggle.addEventListener('click', function () {
@@ -1174,16 +1239,16 @@
    * 正文块 = Markdown 开关打开时走渲染器，关掉回到原来的纯文本 pre-wrap。
    * 两条路径共用同一个折叠记忆键（`text.<key>`），切开关不会丢掉用户的展开选择。
    */
-  function bodyBlock(text, previewLines, key, extraClass) {
-    if (!state.markdown) { return collapsibleText(text, previewLines, key, extraClass); }
-    return markdownText(text, previewLines, key, extraClass);
+  function bodyBlock(text, previewLines, key, extraClass, tokens) {
+    if (!state.markdown) { return collapsibleText(text, previewLines, key, extraClass, tokens); }
+    return markdownText(text, previewLines, key, extraClass, tokens);
   }
 
   /*
    * Markdown 正文：行数超过 previewLines 时先夹住（max-height + 渐隐遮罩），
    * 展开/收起沿用与纯文本路径同一套按钮与记忆键。
    */
-  function markdownText(text, previewLines, key, extraClass) {
+  function markdownText(text, previewLines, key, extraClass, tokens) {
     var wrap = el('div', 'text-wrap');
     var raw = String(text === undefined || text === null ? '' : text);
     var body = el('div', 'md-body' + (extraClass ? ' ' + extraClass : ''));
@@ -1201,7 +1266,7 @@
     if (long) {
       var toggle = el('button', 'text-toggle');
       var label = function () {
-        toggle.textContent = foldLabel(expanded, lines.length, raw.length);
+        toggle.textContent = foldLabel(expanded, lines.length, raw.length, tokens);
       };
       label();
       toggle.type = 'button';
@@ -1369,7 +1434,7 @@
     if (m) {
       // 元信息（系统提示词快照 + 工具清单）本身搬到了右侧详情栏，这里只留提示。
       tip.push('含系统提示词快照：' + m.count + ' 条 t=meta 元信息行，最新一条 ' +
-        (m.promptChars || 0) + ' 字符' + (m.model ? '（模型 ' + m.model + '）' : '') +
+        countText(m.promptChars || 0, m.promptTokenEst) + (m.model ? '（模型 ' + m.model + '）' : '') +
         ((m.tools) ? '，含 ' + m.tools + ' 个工具定义' : ''));
     }
     if (s.imageName) {
@@ -1830,7 +1895,16 @@
       tiles.appendChild(t);
     };
     tile('输入 tokens', fmtTokens(st.promptTokens),
-      st.promptTokens + ' prompt tokens（含缓存命中 ' + st.cachedTokens + '）');
+      st.promptTokens + ' prompt tokens（含缓存命中 ' + st.cachedTokens + '）\n' +
+      '厂商实测值：随请求发出的图片 token 已经包含在里面，不单列。');
+    var imgs = imageEstimate(state.lines);
+    if (imgs.count) {
+      var pol = state.estPolicy;
+      tile('图片 ' + imgs.count + ' 张', '≈ ' + fmtTokens(imgs.tokens),
+        imgs.count + ' 张图片的本地估算（不是厂商数字）：能读到尺寸时按 宽×高/' + pol.pxPerToken +
+        ' 折算，夹在 ' + pol.min + '–' + pol.max + ' 之间；取不到尺寸时按每张 ' + pol.fallback + ' 计。\n' +
+        '对照：上面的「输入 tokens」是厂商实测的 prompt_tokens，其中已经包含图片 token。');
+    }
     tile('缓存命中', st.promptTokens ? st.cacheHitPct.toFixed(0) + '%' : '—',
       '前缀缓存命中率 = Σcached_tokens / Σprompt_tokens（供应商未上报时为 —）');
     tile('输出 tokens', fmtTokens(st.completionTokens),
@@ -1906,10 +1980,12 @@
     head.appendChild(el('span', 'schema-index', '#' + (index + 1)));
     head.appendChild(el('span', 'schema-name', tool.name || '(未命名工具)'));
     if (tool.description) {
-      head.appendChild(el('span', 'schema-meta', '描述 ' + String(tool.description).length + ' 字符'));
+      head.appendChild(el('span', 'schema-meta',
+        '描述 ' + countText(String(tool.description).length, tool.descTokens)));
     }
     if (tool.parameters) {
-      head.appendChild(el('span', 'schema-meta', 'schema ' + String(tool.parameters).length + ' 字符'));
+      head.appendChild(el('span', 'schema-meta',
+        'schema ' + countText(String(tool.parameters).length, tool.paramTokens)));
     }
     d.appendChild(head);
 
@@ -1965,7 +2041,7 @@
     var bits = ['模型 ' + (line.model || '—')];
     if (line.session_label) { bits.push('会话 ' + line.session_label); }
     bits.push('sha ' + shortSHA(line.system_sha));
-    bits.push(m.promptChars + ' 字符');
+    bits.push(countText(m.promptChars, m.promptTokenEst));
     head.appendChild(el('span', 'line-summary', bits.join(' · ')));
     card.appendChild(head);
 
@@ -2043,13 +2119,13 @@
    */
   /*
    * 折叠/展开按钮的唯一文案来源：思考块、工具输入输出、系统消息（user 轮任务提示）
-   * 三处**逐字一致**，不另造说法。
+   * 三处**逐字一致**，不另造说法。数字随显示单位开关走（token 是本地估算 → 带 ≈）。
    */
-  function foldLabel(expanded, lines, chars) {
-    return expanded ? '收起' : '展开全文（' + lines + ' 行 / ' + chars + ' 字符）';
+  function foldLabel(expanded, lines, chars, tokens) {
+    return expanded ? '收起' : '展开全文（' + lines + ' 行 / ' + countText(chars, tokens) + '）';
   }
 
-  function collapsibleText(text, previewLines, key, extraClass) {
+  function collapsibleText(text, previewLines, key, extraClass, tokens) {
     var wrap = el('div', 'text-wrap');
     var lines = String(text === undefined || text === null ? '' : text).split('\n');
     var long = lines.length > previewLines;
@@ -2064,7 +2140,7 @@
     if (long) {
       var toggle = el('button', 'text-toggle');
       var label = function () {
-        toggle.textContent = foldLabel(expanded, lines.length, String(text).length);
+        toggle.textContent = foldLabel(expanded, lines.length, String(text).length, tokens);
       };
       label();
       toggle.type = 'button';
@@ -2125,7 +2201,7 @@
   function thinkingDisclosure(line) {
     var remembered = storeGet('thinking.' + state.current.id + '.' + line.n) === '1';
     var d = disclosureLine('disclosure-thinking', '思考', firstLine(line.reasoning),
-      line.reasoning.length + ' 字符', !state.forceCollapse && remembered);
+      countText(line.reasoning.length, estOf(line).reasoning), !state.forceCollapse && remembered);
     var body = el('div', 'thinking-body');
     var scroll = el('div', 'reasoning-scroll');
     scroll.appendChild(el('pre', 'body-text reasoning-text', line.reasoning));
@@ -2221,7 +2297,7 @@
     return 'plain';
   }
 
-  function ioSection(label, text, isError, key) {
+  function ioSection(label, text, isError, key, tokens) {
     var section = el('div', 'io-section');
     section.appendChild(el('div', 'io-label', label));
     if (text === undefined || text === null || text === '') {
@@ -2230,7 +2306,7 @@
     }
     // 输入输出都走同一套机器文本渲染：是 JSON 就做 JSON 高亮（k/s/n/b），
     // 否则按终端输出/diff/日志着色；超过限高给「展开全文」，与思考块同一套。
-    var wrap = machineScroll(text, key);
+    var wrap = machineScroll(text, key, null, tokens);
     if (isError) {
       var pre = wrap.querySelector('.io-text');
       if (pre) { pre.setAttribute('data-error', 'true'); }
@@ -2253,15 +2329,16 @@
 
     var argsText = String(fn.arguments || '');
     var brief = toolSummary(name, fn.arguments);
+    var argsTokens = callTokensOf(call);
     var d = disclosureLine('disclosure-tool fam-' + toolFamily(name), name, brief,
-      argsText.length + ' 字符', storeGet('call.' + state.current.id + '.' + call.id) === '1');
+      countText(argsText.length, argsTokens), storeGet('call.' + state.current.id + '.' + call.id) === '1');
     d.setAttribute('data-call-id', call.id || '');
     var tail = d.querySelector('.line-tail');
 
     var card = el('div', 'io-card');
     var cmdLine = toolPromptLine(name, argsText);
     if (cmdLine) { card.appendChild(cmdPreview(cmdLine)); }
-    card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)'));
+    card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)', false, 'in.' + (call.id || ''), argsTokens));
     var actions = el('div', 'io-actions');
     actions.appendChild(copyButton(argsText));
     card.appendChild(actions);
@@ -2270,19 +2347,31 @@
       storeSet('call.' + state.current.id + '.' + call.id, d.open ? '1' : '0');
     });
 
-    var node = { details: d, card: card, summary: brief, tail: tail, argsChars: argsText.length, result: null };
+    var node = { details: d, card: card, summary: brief, tail: tail,
+      argsChars: argsText.length, argsTokens: argsTokens, result: null };
     if (call.id) { state.callNodes[call.id] = node; }
     return node;
   }
 
-  // 折叠行的尾巴：`输入 → 输出 字符数 · ok/error`（再加附件张数）。
+  /*
+   * 一次调用的参数估算：由 Go 侧下发（line.est.calls，与 calls 一一对应），
+   * 前端只取用、不自己算——两套公式必然漂移。
+   */
+  function callTokensOf(call) {
+    var est = state.callEst[call.id];
+    return est === undefined ? 0 : est;
+  }
+
+  // 折叠行的尾巴：`输入 → 输出 计数 · ok/error`（再加附件张数）。
   // 一行里就能看出这次调用吃了多少、回了多少、成没成、带了几张图，不必展开。
+  // 计数跟随显示单位开关：token 是本地估算（≈），字符是精确值。
   function updateCallTail(node) {
     if (!node.tail) { return; }
-    var tail = node.argsChars + ' 字符';
+    var tail = countText(node.argsChars, node.argsTokens);
     if (node.result) {
       var text = String(node.result.line.text || '');
-      tail = node.argsChars + ' → ' + text.length + ' 字符' +
+      tail = countText(node.argsChars, node.argsTokens) + ' → ' +
+        countText(text.length, estOf(node.result.line).text) +
         (node.result.status === 'error' ? ' · error' : node.result.status === 'ok' ? ' · ok' : '');
     }
     if (node.attachments) { tail += ' · 附件 ' + node.attachments + ' 张（user 轮）'; }
@@ -2297,7 +2386,7 @@
     var status = classifyResult(text);
     node.result = { line: line, status: status };
     node.card.appendChild(el('div', 'io-divider'));
-    var out = ioSection('输出', text, status === 'error', 'result.' + line.n);
+    var out = ioSection('输出', text, status === 'error', 'result.' + line.n, estOf(line).text);
     // 精确匹配时图片就是这个工具的**输出**（第 E 条），要贴在输出正文正下方；
     // 用类名把这一段认出来（ioSection 只认标签文本，没法从外面找）。
     out.classList.add('out-section');
@@ -2380,7 +2469,7 @@
     // 任务行**自己**带的图（attr.taskLineN 就是这一行）：正文已经在任务块里了，
     // 附件段只放图，不把任务提示原样再抄一遍。
     if (line.text && line.n !== (attr && attr.taskLineN)) {
-      body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'imgtext.' + line.n));
+      body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'imgtext.' + line.n, null, estOf(line).text));
     }
     body.appendChild(imageStrip(line));
     section.appendChild(body);
@@ -2399,9 +2488,10 @@
     var text = String(line.text || '');
     var status = classifyResult(text);
     var d = disclosureLine('disclosure-result status-' + status,
-      name, firstLine(text), text.length + ' 字符' + (status === 'error' ? ' · error' : status === 'ok' ? ' · ok' : ''));
+      name, firstLine(text), countText(text.length, estOf(line).text) +
+        (status === 'error' ? ' · error' : status === 'ok' ? ' · ok' : ''));
     var card = el('div', 'io-card');
-    card.appendChild(ioSection('输出', text, status === 'error', 'result.' + line.n));
+    card.appendChild(ioSection('输出', text, status === 'error', 'result.' + line.n, estOf(line).text));
     var actions = el('div', 'io-actions');
     actions.appendChild(copyButton(text));
     card.appendChild(actions);
@@ -2655,7 +2745,9 @@
     var d = disclosureLine('disclosure-image', '图片（user 轮）', imageTurnSummary(line),
       imgs.length + ' 张', storeGet(key) === '1');
     var body = el('div', 'image-body');
-    if (line.text) { body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'imgtext.' + line.n)); }
+    if (line.text) {
+      body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'imgtext.' + line.n, null, estOf(line).text));
+    }
     body.appendChild(imageStrip(line));
     if (attr) { body.appendChild(el('div', 'attach-note', attributionText(attr))); }
     d.appendChild(body);
@@ -2719,7 +2811,7 @@
       var toggle = el('button', 'text-toggle');
       toggle.type = 'button';
       var label = function () {
-        toggle.textContent = foldLabel(expanded, lines.length, raw.length);
+        toggle.textContent = foldLabel(expanded, lines.length, raw.length, estOf(line).text);
       };
       label();
       toggle.addEventListener('click', function () {
@@ -2829,7 +2921,9 @@
         // 思考行不是独立步骤：轨迹里"思考"这一行跳回的就是这条助手消息。
         msg.appendChild(thinkingDisclosure(line));
       }
-      if (line.text) { msg.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'asst.' + line.n)); }
+      if (line.text) {
+        msg.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'asst.' + line.n, null, estOf(line).text));
+      }
       (line.tool_calls || []).forEach(function (call) {
         msg.appendChild(toolDisclosure(call).details);
       });
@@ -2840,7 +2934,7 @@
     }
 
     var other = el('section', 'msg msg-other');
-    other.appendChild(bodyBlock(line.text || '(无正文)', LONG_TEXT_LINES, 'other.' + line.n));
+    other.appendChild(bodyBlock(line.text || '(无正文)', LONG_TEXT_LINES, 'other.' + line.n, null, estOf(line).text));
     return anchor(other, line);
   }
 
@@ -2861,7 +2955,7 @@
       if (money) { bits.push(money); }
     }
     var m = metaState();
-    if (m) { bits.push('提示词快照 ' + m.promptChars + ' 字符'); }
+    if (m) { bits.push('提示词快照 ' + countText(m.promptChars, m.promptTokenEst)); }
     bits.forEach(function (b, i) {
       if (i) { bar.appendChild(el('span', 'dot-sep')); }
       bar.appendChild(el('span', null, b));
@@ -2918,6 +3012,7 @@
     if (!lines || !lines.length) { return; }
     var stream = streamNode();
     var hasMeta = false;
+    indexCallEstimates(lines);
     lines.forEach(function (line) {
       state.lines.push(line);
       if (line.t === 'meta') { hasMeta = true; }
@@ -2992,9 +3087,11 @@
       if (line.t === 'meta') {
         rows.push({
           kind: 'meta', tag: '元信息', name: line.kind || 'system',
-          summary: '模型 ' + (line.model || '—') + ' · 提示词 ' + String(line.text || '').length + ' 字符' +
+          summary: '模型 ' + (line.model || '—') + ' · 提示词 ' +
+            countText(String(line.text || '').length, estOf(line).text) +
             ((line.tools || []).length ? ' · 工具 ' + line.tools.length : ''),
           chars: String(line.text || '').length,
+          tokens: estOf(line).text,
           status: '', detail: { prompt: String(line.text || '') }
         });
         return;
@@ -3006,7 +3103,7 @@
           summary: (st.kind || 'chat') + ' · 输入 ' + fmtTokens(st.promptTokens) + '（缓存 ' +
             (st.cachedTokens || 0) + '）· 输出 ' + fmtTokens(st.completionTokens) +
             (st.reasoningTokens ? '（思 ' + fmtTokens(st.reasoningTokens) + '）' : ''),
-          chars: '',
+          chars: '', tokens: 0,
           status: st.finish || '',
           time: Number(st.durationMs) || 0,
           detail: { request: JSON.stringify(st, null, 2) }
@@ -3039,6 +3136,7 @@
               : attr.how === 'task' ? '（这一轮带的是任务自己的图，不归任何工具调用）' : '') +
             (fromTool ? '\n这一轮的图片就是上一行工具回执投出来的（同一件事的两段 wire 表达，所以两行不合并）' : ''),
           chars: String(line.text || '').length,
+          tokens: estOf(line).text + estOf(line).images,
           status: '', jump: jumpTo,
           images: line.images,
           detail: { user: String(line.text || '') || '（这一轮没有正文）' }
@@ -3057,6 +3155,7 @@
             ? '会话开头的原图投喂轮归到了这条任务（对话页里它们收在同一个块里）'
             : '点击跳到对话里对应的那条消息',
           chars: String(line.text || '').length,
+          tokens: estOf(line).text,
           status: '', jump: line.n,
           detail: { user: String(line.text || '') }
         });
@@ -3065,6 +3164,7 @@
           rows.push({
             kind: 'think', tag: '思考', name: 'reasoning',
             summary: firstLine(line.reasoning), chars: line.reasoning.length,
+            tokens: estOf(line).reasoning,
             status: '', jump: line.n, detail: { thinking: line.reasoning }
           });
         }
@@ -3072,16 +3172,18 @@
           rows.push({
             kind: 'msg', tag: '助手', name: 'AI',
             summary: firstLine(line.text), chars: line.text.length,
+            tokens: estOf(line).text,
             status: '', jump: line.n, detail: { message: String(line.text) }
           });
         }
-        (line.tool_calls || []).forEach(function (c) {
+        (line.tool_calls || []).forEach(function (c, i) {
           var fn = c.function || {};
           var name = fn.name || '(未命名工具)';
           var args = String(fn.arguments || '');
           rows.push({
             kind: 'tool', tag: '工具', name: name,
             summary: toolSummary(name, fn.arguments), chars: args.length,
+            tokens: estOf(line).calls[i] || 0,
             status: '', jump: line.n,
             detail: { input: prettyJSON(args) || args }
           });
@@ -3101,6 +3203,7 @@
           kind: 'result', tag: '结果',
           name: info ? info.name : '(未配对的工具回执)',
           summary: firstLine(text) + hint, chars: text.length,
+          tokens: estOf(line).text,
           title: imageNext
             ? '这一行是工具回执：tool 消息的 content 只能是文本，随行的图片被回灌在紧随其后的 user 轮里（两行是同一件事，保持两行不合并）'
             : '点击跳到对话里对应的那条消息',
@@ -3221,7 +3324,7 @@
     table.appendChild(colgroup);
     var thead = el('thead');
     var hrow = el('tr');
-    ['#', '类型', '名称', '摘要', '状态', '字符', '耗时'].forEach(function (h, i) {
+    ['#', '类型', '名称', '摘要', '状态', unitLabel(), '耗时'].forEach(function (h, i) {
       hrow.appendChild(el('th', (i === 0 || i >= 5) ? 'num-head' : null, h));
     });
     thead.appendChild(hrow);
@@ -3261,7 +3364,10 @@
           : (row.status === 'plain' || !row.status) ? '—' : row.status;
       tr.appendChild(el('td', 'traj-status ' + (row.status === 'error' ? 'error' : row.status === 'ok' ? 'ok' : 'plain'),
         statusText));
-      tr.appendChild(el('td', 'traj-num-cell', row.chars ? String(row.chars) : '—'));
+      tr.appendChild(el('td', 'traj-num-cell',
+        state.unit === 'char'
+          ? (row.chars ? String(row.chars) : '—')
+          : (row.tokens ? countValue(row.chars, row.tokens) : '—')));
       tr.appendChild(el('td', 'traj-num-cell', row.time ? fmtDur(row.time) : '—'));
 
       tr.addEventListener('click', function () {
@@ -3308,6 +3414,7 @@
     var s = findSession(id);
     state.current = s;
     state.lines = [];
+    state.callEst = {};
     state.nextFrom = 0;
     state.curSize = -1;
     state.curMtime = 0;
@@ -3319,6 +3426,7 @@
     if (MODE === 'static') {
       var embedded = staticSession(id);
       state.lines = normalizeLines(embedded && embedded.lines);
+      indexCallEstimates(state.lines);
       state.nextFrom = state.lines.length;
       state.curSize = s.size;
       state.curMtime = new Date(s.mtime).getTime();
@@ -3350,6 +3458,7 @@
       state.curSize = payload.size;
       if (reset) {
         state.lines = normalizeLines(payload.lines);
+        indexCallEstimates(state.lines);
         renderTimeline();
         if (state.follow) { scrollToBottom(); }
       } else {
@@ -3364,6 +3473,7 @@
     state.sessions = payload.sessions || [];
     state.root = payload.root || state.root;
     state.generated = payload.generated || state.generated;
+    if (payload.estimate) { state.estPolicy = payload.estimate; }
     updateRootLabel();
     // 签名没变 → 一行 DOM 都不重建（只修补相对时间与高亮），
     // 用户手动折叠的项目组 / 阶段组与滚动位置因此不会被每 2 秒的轮询冲掉。
@@ -3465,6 +3575,32 @@
       renderTimeline();
     });
   }
+  /*
+   * 显示单位开关：token（本地估算，带 ≈）/ 字符（精确计数）。按钮上写的就是
+   * **当前单位**；切换后重画消息流、轨迹表、详情栏与侧栏提示，全部计数立刻换口径。
+   */
+  function applyUnitToggle() {
+    if (!refs.unitToggle) { return; }
+    refs.unitToggle.textContent = state.unit === 'char' ? '字符' : 'token';
+    refs.unitToggle.setAttribute('aria-pressed', state.unit === 'char' ? 'false' : 'true');
+    refs.unitToggle.title = state.unit === 'char'
+      ? '计数按字符数显示（精确值），点击改为 token'
+      : '计数按 token 显示（本地估算，带 ≈），点击改为字符';
+  }
+  if (refs.unitToggle) {
+    refs.unitToggle.addEventListener('click', function () {
+      state.unit = state.unit === 'char' ? 'token' : 'char';
+      storeSet('unit', state.unit);
+      applyUnitToggle();
+      renderTimeline();
+      renderTrajectory();
+      renderDetails();
+      // 侧栏提示里也有计数（系统提示词快照）：把签名作废，强制整份重建一次
+      // （轮询的"签名没变就只补文本"守卫不该拦住用户主动换单位）。
+      state.listSig = null;
+      refreshList();
+    });
+  }
   if (refs.themeToggle) { refs.themeToggle.addEventListener('click', toggleTheme); }
   if (refs.sideToggle) { refs.sideToggle.addEventListener('click', toggleSidebar); }
   if (refs.detailsToggle) { refs.detailsToggle.addEventListener('click', toggleDetails); }
@@ -3511,10 +3647,12 @@
     setToggle(refs.collapseThinking, false);
     setToggle(refs.onlyTools, false);
     applyMarkdownToggle();
+    applyUnitToggle();
     switchView('chat');
 
     if (MODE === 'static') {
       state.root = DATA.root || '';
+      state.estPolicy = DATA.estimate || state.estPolicy;
       state.generated = DATA.generated || '';
       // 静态模式只丢掉每会话的 lines 大块，其余字段**原样带走**。
       // 这里以前是一个手写白名单：每加一个字段（projectLegacy、stage、

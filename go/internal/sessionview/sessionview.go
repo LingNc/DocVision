@@ -141,6 +141,9 @@ type MetaInfo struct {
 	Count int `json:"count"`
 	// PromptChars is the character count of the newest system prompt.
 	PromptChars int `json:"promptChars"`
+	// PromptTokenEst is the LOCAL token estimate of that same prompt (never a
+	// provider number; the viewer marks it with ≈).
+	PromptTokenEst int `json:"promptTokenEst"`
 	// Model is the model the newest run was sent to.
 	Model string `json:"model,omitempty"`
 	// SessionLabel is the newest run's session label (style, convert:…).
@@ -159,6 +162,10 @@ type ToolSchema struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Parameters  string `json:"parameters,omitempty"`
+	// DescTokens / ParamTokens are the LOCAL token estimates of the description
+	// and of the parameter schema (the viewer shows them with a ≈ prefix).
+	DescTokens  int `json:"descTokens,omitempty"`
+	ParamTokens int `json:"paramTokens,omitempty"`
 }
 
 // UsageStats is the token/latency accounting of one API request (a t="usage"
@@ -411,6 +418,37 @@ type Line struct {
 	// viewer sums them into the session metrics (tokens in/out, prefix-cache
 	// hit rate, latency, TTFT, output speed).
 	Stats *UsageStats `json:"stats,omitempty"`
+	// Est carries the LOCAL token estimate of this line's text (and of its
+	// images), computed with the same estimator the context threshold uses.
+	// Everything under Est is an estimate and the viewer marks it with ≈;
+	// Stats above is the provider's own, exact number.
+	Est *LineEstimate `json:"est,omitempty"`
+}
+
+// LineEstimate is the local estimate of one transcript line: what the line's
+// text (plus tool arguments, reasoning and images) costs in prompt tokens. It is
+// what the viewer shows when the display unit is "token" — always with a ≈
+// prefix, because no provider ever reported these numbers.
+type LineEstimate struct {
+	// Text estimates the line's Text; Reasoning its reasoning_content.
+	Text      int `json:"text,omitempty"`
+	Reasoning int `json:"reasoning,omitempty"`
+	// Calls estimates the arguments of each tool call, parallel to Calls.
+	Calls []int `json:"calls,omitempty"`
+	// Images / ImageCount estimate the attached images (by pixel size when the
+	// media file's dimensions are readable) and how many there are.
+	Images     int `json:"images,omitempty"`
+	ImageCount int `json:"imageCount,omitempty"`
+}
+
+// Tokens returns the line's total local estimate (text + reasoning + tool
+// arguments + images); the trajectory table's token column shows it.
+func (e LineEstimate) Tokens() int {
+	total := e.Text + e.Reasoning + e.Images
+	for _, c := range e.Calls {
+		total += c
+	}
+	return total
 }
 
 // IsMeta reports whether this line is a t="meta" record rather than a message.
@@ -793,6 +831,7 @@ func (stat *transcriptStat) addMeta(line string) {
 	}
 	stat.Meta.Count++
 	stat.Meta.PromptChars = utf8.RuneCountInString(rec.Text)
+	stat.Meta.PromptTokenEst = session.TextTokens(rec.Text)
 	stat.Meta.Model = rec.Model
 	stat.Meta.SessionLabel = rec.SessionLabel
 	stat.Meta.SystemSHA = rec.SysHash
@@ -860,6 +899,7 @@ func ReadSession(filePath string, fromLine int) ([]Line, int, error) {
 		}
 		n++
 		if n > fromLine {
+			estimateLine(&line, filePath)
 			out = append(out, line)
 		}
 		if rerr != nil {
@@ -928,11 +968,64 @@ func parseLine(n int, raw string) (Line, bool) {
 				Name:        t.Name,
 				Description: t.Description,
 				Parameters:  strings.TrimSpace(string(t.Parameters)),
+				DescTokens:  session.TextTokens(t.Description),
+				ParamTokens: session.TextTokens(string(t.Parameters)),
 			})
 		}
 	}
 	return line, true
 }
+
+// estimateLine attaches the LOCAL token estimate of one parsed line: its text,
+// its reasoning, its tool-call arguments and its images. The numbers come from
+// internal/session's estimator (the one the context threshold uses) — the viewer
+// must never grow a second formula, or the two would drift apart.
+//
+// Images are estimated from the media file the line references; only the file
+// header is read, and a file that cannot be read falls back to the configured
+// constant instead of failing the read.
+func estimateLine(line *Line, transcriptPath string) {
+	est := &LineEstimate{
+		Text:      session.TextTokens(line.Text),
+		Reasoning: session.TextTokens(line.Reasoning),
+	}
+	for _, c := range line.Calls {
+		name := session.TextTokens(c.Function.Name)
+		args := session.TextTokens(c.Function.Arguments)
+		est.Calls = append(est.Calls, name+args)
+	}
+	if len(line.Images) > 0 {
+		base := filepath.Dir(transcriptPath)
+		for _, ref := range line.Images {
+			est.ImageCount++
+			est.Images += mediaImageTokens(base, ref)
+		}
+	}
+	if est.Text+est.Reasoning+est.Images > 0 || len(est.Calls) > 0 {
+		line.Est = est
+	}
+}
+
+// mediaImageTokens estimates one "file://media/<name>" image reference. Results
+// are cached by path: a media file is named after its content hash, so the same
+// path always means the same picture, and the live server re-reads transcripts
+// on every poll.
+func mediaImageTokens(baseDir, ref string) int {
+	rel := strings.TrimPrefix(strings.TrimSpace(ref), "file://")
+	if rel == "" {
+		return session.ImageTokens(0, 0)
+	}
+	p := filepath.Join(baseDir, filepath.FromSlash(rel))
+	if v, ok := imageTokensCache.Load(p); ok {
+		return v.(int)
+	}
+	v := session.ImageTokensOfFile(p)
+	imageTokensCache.Store(p, v)
+	return v
+}
+
+// imageTokensCache memoises per-image estimates (see mediaImageTokens).
+var imageTokensCache sync.Map
 
 // transcriptLine mirrors internal/session's on-disk record. It is duplicated
 // on purpose: the viewer must tolerate unknown fields and drift, and it must

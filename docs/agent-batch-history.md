@@ -547,3 +547,15 @@ JSON：`prettyJSON()`（先 `JSON.parse` 再 2 空格 `stringify`，解析失败
 - `gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿。
 - 新增用例：`img2text/diag_test.go`（真错误行 vs 版本横幅、无 `!` 时退回**最后**行、rune 安全截断、`leftoverDrawingBlock`、期望格式摘要）、`img2text/processor_latex_reject_test.go`（回 ```tikz → `StatusRetry` + `[IMG_INVALID_FORMAT]` 且**只发一次请求**，日志含图片路径+模型原文+期望格式且**不得**出现 `This is XeTeX`；Mermaid 正常路径仍 `StatusOK`；`BuildSystemPrompt` 不含 tikz/pgfplots 绘图要求）、`prompts/prompts_test.go` 第 5 条守卫、`analyze/parser_test.go`（重试哨兵→warning、`IMG_API_ERROR`→failed、三分类）、`analyze/report_warning_test.go`（真实形状 42/39/0 端到端）。
 - **离线验证口径**：真实跑批需要 API，未真跑。替代手段：①读只读日志原文（上述证据数字与 TeX 横幅片段都来自它）；②`httptest` 假服务模拟"回 ```tikz```"，断言请求次数与日志正文；③`extractValidationError` 用**真实日志里那段 XeTeX 输出的形状**（横幅 + `! Undefined control sequence.` + `l.14` + `Emergency stop`）做输入，断言抽到真错误、横幅一字节不留。
+
+### 同一批追加（其三）：图片 token 折算 + 显示单位开关 + `sessions --serve` 读配置
+
+用户三问：① "view 的图像工具调用返回的图片 token 有没有算进用户消息的 token 里？"② "界面里显示的是字符还是 token？"③ "单独跑 `docvision sessions --serve` 好像不用 config 里的配置？"
+
+**① 图片 token：两条路都算，但本地估算漏了大图。** 厂商侧一直算：真实日志里"只多了一张图"的相邻请求 `prompt_tokens` 增量为 292k 像素→440、986k→1285、2.32M→2987（glm-5.3-flash-official），与 `宽×高/750` 吻合，说明 `prompt_tokens` 已含图片。本地侧 `messageTokens` 也计图片，但**每张固定 1100**：对 deepseek-v4.1-flash（实测 ~1050 就饱和）够用，对 glm 的 2.3M 像素大图少算近 2000。改为按尺寸折算：`clamp(宽×高/750, 85, 4096)`，取不到尺寸退回 `1100`；PNG/JPEG/GIF/WebP 头解析用标准库 `image.DecodeConfig`（webp 由 `x/image/webp` 自注册），尺寸结果按路径缓存。**厂商数字一律照抄**（`t="usage"` 行与新加的详情栏瓦片口径分开）。新增 `estimate` 配置块（4 项，`config_version` 7→8）。
+
+**② 显示单位开关。** 行内所有按字数统计的地方（工具行 `输入 → 输出`、`foldLabel()`、思考行、轨迹表计数列与表头、系统提示词快照、`metaState()`）改为走唯一的 `countText(chars, tokens)`：默认 `token` 口径、**必带 `≈`**（本地估算），切到 `字符` 是精确计数；详情栏瓦片是厂商实测值，不带 `≈` 也不受开关影响。token 数全部由 Go 侧算好下发（`Line.est` / `MetaInfo.promptTokenEst` / `ToolSchema.descTokens`），前端不再自算一份。详情栏新增「图片 N 张 ≈ …」瓦片，说明按 `estimate` 规则折算，并注明 `prompt_tokens` 已含图片。
+
+**③ `sessions --serve` 读配置。** 此前 `--addr` 默认写死 `127.0.0.1:8848`、根目录只认 CWD，配置里的 `preview.host/port` 只有 latex 自动预览在用。现在扫描根默认取 `paths.latex_project`（档位2 用 `paths.latex_output`，与 `startPreview` 同源），地址默认取 `preview.host/port`，优先级 `--dir` > 配置 > 当前目录、`--addr` > `--port`（新增）> 配置 > 内置默认；启动打印三行（URL / 目录 / 配置文件），每项后面带来源标签，目录不存在时退回当前目录并写明原因。实测（临时目录 + 真转录副本）：`--list` 根目录显示 `.../latex_project（来源 config paths.latex_project）`，`--serve` 三行如设计，端口 8899 来自配置。
+
+**验证**：`gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿；新增 `sessionview/estimate_test.go`（行级估算完整性、1000×800→1066、上下限与兜底）、`sessionview/unit_toggle_browser_test.go`（真实 chromium：默认 `≈ N tokens` → 点一下变 `N 字符`，轨迹表头同步，图片瓦片 `图片 1 张 / ≈ 1.1k`，厂商瓦片 `12k` 不带 ≈）、`sessionview/serve_test.go`（三行横幅内容与来源）、`cmd/docvision/cli_sessions_test.go`（目录/地址优先级与 `--addr` 默认必须留空）。

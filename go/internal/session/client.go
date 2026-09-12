@@ -179,6 +179,12 @@ type ChatMessage struct {
 	// 请求重发——GLM 保留式思考（clear_thinking:false）要求完整回传，
 	// 同时保证请求前缀逐字节一致以提高 prompt cache 命中。
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// ImageTokens is the LOCAL token estimate of every image part of this
+	// message, in the order the images appear (see ImageTokens). It exists so
+	// the context estimate counts pictures by their dimensions instead of one
+	// flat constant; json:"-" keeps it off the wire, where the vendor counts
+	// the pixels itself and reports the total in prompt_tokens.
+	ImageTokens []int `json:"-"`
 }
 
 // ToolCall mirrors the assistant-side tool_calls entry.

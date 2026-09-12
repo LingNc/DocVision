@@ -78,7 +78,7 @@ models:
     model: "your-model"
 ```
 
-配置写在 `config_version: 7`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
+配置写在 `config_version: 8`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
 
 ### 2. 跑起来
 
@@ -115,7 +115,7 @@ docvision workflow -c my.yaml
 | `docvision img2text` | AI 图片转文本（`--test` 测试模式） |
 | `docvision latex` | LaTeX 输出（可直接传 PDF/DOCX 自动补前置流程，或传 md 名只处理指定文件；跑完打印按阶段 AI 用量与费用，可配 `latex.figure_check` 开逐图校验、`preview.enabled` 边跑边看会话） |
 | `docvision verify` | AI 核对输出与原图（默认关闭；只能显式运行，不参与自动流程） |
-| `docvision sessions` | 会话预览：把 AI 会话转录渲染成可浏览页面（静态导出 / 本地实时服务，含 token/缓存/时延/费用指标；`--cost` 只出费用报告） |
+| `docvision sessions` | 会话预览：把 AI 会话转录渲染成可浏览页面（静态导出 / 本地实时服务；目录与端口默认取配置，行内计数可切 `token`（本地估算，带 ≈）/`字符`，详情栏为厂商实测指标；`--cost` 只出费用报告） |
 | `docvision analyze` | 分析日志（`--progress` 仅进度，`--all` 汇总历史，`--logfile` 指定日志） |
 | `docvision splitlog` | 按线程 ID 拆分日志（`--logfile` / `--output-dir`） |
 | `docvision init` | 生成配置模板 |
@@ -135,7 +135,7 @@ docvision workflow -c my.yaml
 | 文档 | 内容 |
 | --- | --- |
 | [docs/commands.md](docs/commands.md) | 全部命令与参数、img2text/档位2 嵌入格式、`analyze` 选项、`sessions` 预览页与指标 |
-| [docs/config.md](docs/config.md) | 配置项全表（`mineru` / `paths` / `models` / `latex` / `tools` / `sessions` / `verify`）与默认值 |
+| [docs/config.md](docs/config.md) | 配置项全表（`mineru` / `paths` / `models` / `latex` / `tools` / `sessions` / `preview` / `estimate` / `verify`）与默认值 |
 | [docs/latex.md](docs/latex.md) | LaTeX 档位1/档位2 全流程、`latex` 用法与阶段控制、项目目录布局、原书检索工具、AI 核对 |
 | [docs/sessions.md](docs/sessions.md) | 会话基础设施（上下文窗口/压缩/转录）、提示词管理、会话沙箱与挂载表、调试日志 |
 | [docs/dev.md](docs/dev.md) | 代码目录结构、CI/CD、历史 Python 实现 |

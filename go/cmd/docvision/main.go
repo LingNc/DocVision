@@ -19,6 +19,7 @@ import (
 	"mineru-tools/internal/logger"
 	"mineru-tools/internal/mineru"
 	"mineru-tools/internal/organize"
+	"mineru-tools/internal/session"
 	"mineru-tools/internal/split"
 	"mineru-tools/internal/splitlog"
 	"mineru-tools/pkg/util"
@@ -116,6 +117,10 @@ func newRootCmd() *cobra.Command {
 // loadConfigWithFlag is a small helper that respects the --config flag.
 // Without an explicit flag it loads the path resolved by PersistentPreRunE
 // (./config.yaml preferred, then ~/.docvision/config.yaml).
+//
+// It also applies the estimate block to the process-wide local token estimate
+// (internal/session), so every command that reads a config uses the configured
+// image-token rule; a command that finds no config keeps the built-in default.
 func loadConfigWithFlag(cmd *cobra.Command) (*config.Config, error) {
 	configPath, err := cmd.Flags().GetString("config")
 	if err != nil {
@@ -126,7 +131,17 @@ func loadConfigWithFlag(cmd *cobra.Command) (*config.Config, error) {
 		// it survives the chdir into the config directory.
 		configPath = resolvedConfigPath
 	}
-	return config.LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+	session.SetEstimateConfig(session.EstimateConfig{
+		ImagePxPerToken: cfg.Estimate.ImagePxPerToken,
+		ImageTokensMin:  cfg.Estimate.ImageTokensMin,
+		ImageTokensMax:  cfg.Estimate.ImageTokensMax,
+		ImageFallback:   cfg.Estimate.ImageTokensFallback,
+	})
+	return cfg, nil
 }
 
 func newWorkflowCmd() *cobra.Command {

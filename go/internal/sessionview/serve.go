@@ -20,25 +20,77 @@ import (
 // otherwise.
 const DefaultAddr = "127.0.0.1:8848"
 
+// ServeOptions is everything the CLI's banner has to report: what is scanned,
+// where it listens, and where each of those values came from. The provenance
+// fields are plain labels (config key / flag / 内置默认) — no prose.
+type ServeOptions struct {
+	// Root is the directory scanned for transcripts.
+	Root string
+	// Addr is host:port to listen on ("" = DefaultAddr, port 0 = kernel picks).
+	Addr string
+	// DirSource says where Root came from, e.g. "config paths.latex_project".
+	DirSource string
+	// AddrSource says where Addr came from, e.g. "--port".
+	AddrSource string
+	// ConfigNote is the resolved config file, or "未找到" when none applies.
+	ConfigNote string
+	// OpenBrowser is honoured for callers that want it; the CLI deliberately
+	// leaves it false and lets the user click the printed URL.
+	OpenBrowser bool
+}
+
 // Serve runs the read-only session viewer until the process is interrupted.
 //
-// The URL is printed once the listener is actually up, so "--addr 127.0.0.1:0"
-// reports the port the kernel picked. openBrowser is honoured for callers that
-// want it; the CLI deliberately passes false and lets the user click the
-// printed link.
-func Serve(root, addr string, openBrowser bool) error {
-	url, stop, err := Start(root, addr)
+// It prints exactly three lines once the listener is actually up: the URL (with
+// the port the kernel picked when 0 was requested), the scanned directory, and
+// the config behind both choices.
+func Serve(opt ServeOptions) error {
+	url, stop, err := Start(opt.Root, opt.Addr)
 	if err != nil {
 		return err
 	}
-	rootAbs, _ := filepath.Abs(root)
-	fmt.Printf("会话预览: %s\n", url)
-	fmt.Printf("目录: %s（只读服务，Ctrl+C 停止）\n", rootAbs)
-	if openBrowser {
+	fmt.Print(serveBanner(url, opt))
+	if opt.OpenBrowser {
 		openInBrowser(url)
 	}
 	<-stop
 	return nil
+}
+
+// serveBanner renders the three startup lines: URL (with the port the kernel
+// picked when 0 was requested), the scanned directory, and the config behind
+// both choices. Each value carries where it came from; there is no prose.
+func serveBanner(url string, opt ServeOptions) string {
+	rootAbs, _ := filepath.Abs(opt.Root)
+	var b strings.Builder
+	fmt.Fprintf(&b, "会话预览: %s（只读服务，Ctrl+C 停止）\n", url)
+	fmt.Fprintf(&b, "目录: %s%s\n", rootAbs, sourceSuffix(opt.DirSource))
+	fmt.Fprintf(&b, "配置: %s%s\n", configNote(opt.ConfigNote), addrSourceSuffix(opt.AddrSource))
+	return b.String()
+}
+
+// addrSourceSuffix renders " · 监听地址来源 X" (or "" when the caller gave none).
+func addrSourceSuffix(src string) string {
+	if strings.TrimSpace(src) == "" {
+		return ""
+	}
+	return " · 监听地址来源 " + src
+}
+
+// sourceSuffix renders " · 来源 X" (or "" when the caller gave no label).
+func sourceSuffix(src string) string {
+	if strings.TrimSpace(src) == "" {
+		return ""
+	}
+	return " · 来源 " + src
+}
+
+// configNote keeps the config line factual when no config was found.
+func configNote(note string) string {
+	if strings.TrimSpace(note) == "" {
+		return "未找到"
+	}
+	return note
 }
 
 // Start launches the read-only viewer in the background and returns the URL
@@ -188,6 +240,9 @@ type indexResponse struct {
 	Root      string        `json:"root"`
 	Generated string        `json:"generated"`
 	Sessions  []SessionInfo `json:"sessions"`
+	// Estimate is the local estimate rule (see EstimatePolicy): the details
+	// pane quotes it when it explains where the ≈ image numbers come from.
+	Estimate EstimatePolicy `json:"estimate"`
 }
 
 func (v *viewerServer) serveIndex(w http.ResponseWriter) {
@@ -203,6 +258,7 @@ func (v *viewerServer) serveIndex(w http.ResponseWriter) {
 		Root:      v.root,
 		Generated: time.Now().Format(time.RFC3339),
 		Sessions:  sessions,
+		Estimate:  CurrentEstimatePolicy(),
 	})
 }
 

@@ -27,3 +27,5 @@ go/*.exe
 
 logs/
 logs/
+
+build.sh

@@ -95,10 +95,14 @@
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **7**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 7 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **8**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 8 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
-| `preview.port` | 预览服务端口（0 = 由内核挑一个空闲端口，日志里给出实际 URL） | 8848 |
+| `preview.port` | 预览服务端口（0 = 由内核挑一个空闲端口，日志里给出实际 URL）。`docvision sessions --serve` 默认也用这里；命令行 `--addr` / `--port` 优先于本项 | 8848 |
+| `estimate.image_px_per_token` | **本地估算**用的折算比例：能读到尺寸时，单张图片 token ≈ `宽×高 / 本项`（图片 token 的实测依据：单张图给 `prompt_tokens` 带来的增量与 `宽×高/750` 基本吻合） | 750 |
+| `estimate.image_tokens_min` | 单张图片估算下限 | 85 |
+| `estimate.image_tokens_max` | 单张图片估算上限 | 4096 |
+| `estimate.image_tokens_fallback` | 取不到图片尺寸（未知格式/文件读不到）时，每张按此固定值计 | 1100 |
 | `paths.latex_output` | 档位2 输出根：每本书的工作区是 `<latex_output>/<项目名>/`（旧版单项目布局则沿用根目录本身） | ./finally_latex |
 | `paths.latex_project` | 档位1 输出根：每本书的工作区是 `<latex_project>/<项目名>/`（旧版单项目布局则沿用根目录本身） | ./latex_project |
 | `paths.fonts` | AI 字体目录：缺字体时按样式会话报告的清单手动放入，编译环境注入 `TEXINPUTS`/`OSFONTDIR`（无下载工具） | ./fonts |
@@ -109,5 +113,7 @@
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |
 
 > `latex.remove_watermark` 开启后流程开始时先做一次水印检测：全览页渲染 + markdown 重复图片统计，结果缓存在本项目工作区的 `watermark_memory.json`（档位1 `<latex_project>/<项目名>/`，档位2 `<latex_output>/<项目名>/`）并作为工作记忆注入后续所有会话；水印图片引用直接剔除不再处理。
+
+`estimate` 四项只影响**本地估算**：上下文压缩阈值、以及会话预览页里带 `≈` 的数字（行内计数、轨迹表的计数列、详情栏的「图片 N 张 ≈ …」）。厂商回执的 `prompt_tokens` / `completion_tokens` 一律照抄，不受这里影响。
 
 完整配置见 `config.example.yaml`。

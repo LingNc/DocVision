@@ -38,6 +38,9 @@ type Config struct {
 	// when enabled, a latex run starts the read-only session viewer so the
 	// transcripts can be watched in a browser while the book is built.
 	Preview PreviewConfig `yaml:"preview"`
+	// Estimate tunes the LOCAL token estimate (context threshold + the ≈
+	// numbers the session preview shows). Provider numbers are never touched.
+	Estimate EstimateConfig `yaml:"estimate"`
 	// Img2Text overrides for the basic image-to-text pipeline. Model may
 	// reference a models: registry name (default "text").
 	Img2Text Img2TextConfig `yaml:"img2text"`
@@ -423,6 +426,23 @@ func (p PreviewConfig) Addr() string {
 	return net.JoinHostPort(host, strconv.Itoa(p.Port))
 }
 
+// EstimateConfig tunes the LOCAL token estimate: how many prompt tokens one
+// attached image counts as. It never changes a provider number — prompt_tokens
+// from the API is copied verbatim; this only feeds the compaction threshold and
+// the ≈ values in the session preview.
+type EstimateConfig struct {
+	// ImagePxPerToken is how many pixels one image token covers (default 750,
+	// measured against a real vision endpoint). With the dimensions known the
+	// estimate is width*height/ImagePxPerToken, clamped to the bounds below.
+	ImagePxPerToken int `yaml:"image_px_per_token"`
+	// ImageTokensMin / ImageTokensMax clamp a single image (default 85/4096).
+	ImageTokensMin int `yaml:"image_tokens_min"`
+	ImageTokensMax int `yaml:"image_tokens_max"`
+	// ImageTokensFallback is the per-image estimate when the dimensions are
+	// unknown (default 1100).
+	ImageTokensFallback int `yaml:"image_tokens_fallback"`
+}
+
 type VerifyConfig struct {
 	// Enabled toggles the verification pass. Default false.
 	Enabled bool `yaml:"enabled"`
@@ -611,7 +631,7 @@ type PathsConfig struct {
 // zero-valued fields, and returns the resulting Config.
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
-const CurrentConfigVersion = 7
+const CurrentConfigVersion = 8
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -939,6 +959,21 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Preview.Port == 0 {
 		cfg.Preview.Port = 8848
+	}
+
+	// Local estimate tuning: only used for the compaction threshold and the
+	// ≈ values the session preview shows.
+	if cfg.Estimate.ImagePxPerToken == 0 {
+		cfg.Estimate.ImagePxPerToken = 750
+	}
+	if cfg.Estimate.ImageTokensMin == 0 {
+		cfg.Estimate.ImageTokensMin = 85
+	}
+	if cfg.Estimate.ImageTokensMax == 0 {
+		cfg.Estimate.ImageTokensMax = 4096
+	}
+	if cfg.Estimate.ImageTokensFallback == 0 {
+		cfg.Estimate.ImageTokensFallback = 1100
 	}
 
 	// Model prices: currency only (a rate of 0 stays 0 = unknown).

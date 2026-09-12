@@ -376,9 +376,12 @@ func toolImageContent(v visionTurn) []map[string]interface{} {
 
 // appendToolImage appends that user turn to the live request as well as to the
 // transcript, so a reader of the transcript sees the same thing the model saw.
+// The image's local token estimate travels on the message (never on the wire),
+// so the compaction threshold counts the picture and not just its text handle.
 func (s *Session) appendToolImage(v visionTurn) {
 	content := toolImageContent(v)
-	s.messages = append(s.messages, ChatMessage{Role: "user", Content: content})
+	tokens := []int{ImageTokensOfBase64(v.b64)}
+	s.messages = append(s.messages, ChatMessage{Role: "user", Content: content, ImageTokens: tokens})
 	s.appendTranscript(ChatMessage{Role: "user", Content: toolImageContent(v)})
 }
 
@@ -402,6 +405,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 				"type":      "image_url",
 				"image_url": map[string]string{"url": "data:image/jpeg;base64," + img},
 			})
+			userMsg.ImageTokens = append(userMsg.ImageTokens, ImageTokensOfBase64(img))
 		}
 		userMsg.Content = parts
 	} else {
@@ -1060,25 +1064,25 @@ func (s *Session) compact() (bool, error) {
 	return true, nil
 }
 
-// imageTokens is the flat cost assigned to each attached image.
-const imageTokens = 1100
-
 // messageTokens estimates the token cost of one message: CJK runes
 // count roughly one token each, other text four characters per token,
-// plus a flat cost per attached image.
+// plus one estimate per attached image (by dimensions when they are known,
+// see ImageTokens).
 // messageTokens 必须覆盖请求体里真正发出去的一切：除了 Content，
 // 历史里回传的 reasoning_content（GLM 保留式思考）与 tool_calls 的
 // 函数名/参数 JSON 同样占 token——它们曾经完全不计入，是估算偏低
 // 数倍的主因之一。
 func messageTokens(m ChatMessage) int {
 	total := 0
+	imgIdx := 0
 	switch c := m.Content.(type) {
 	case string:
 		total += textTokens(c)
 	case []map[string]interface{}:
 		for _, part := range c {
 			if t, ok := part["type"].(string); ok && t == "image_url" {
-				total += imageTokens
+				total += messageImageTokens(m, imgIdx)
+				imgIdx++
 				continue
 			}
 			if t, ok := part["text"].(string); ok {
@@ -1095,6 +1099,17 @@ func messageTokens(m ChatMessage) int {
 		total += textTokens(tc.Function.Name) + textTokens(tc.Function.Arguments)
 	}
 	return total
+}
+
+// messageImageTokens is the estimate of the idx-th image of a message: the
+// per-image value computed when the image was attached (from its dimensions),
+// or the fallback constant when the message carries none (hand-built messages,
+// transcripts from before the field existed).
+func messageImageTokens(m ChatMessage, idx int) int {
+	if idx >= 0 && idx < len(m.ImageTokens) && m.ImageTokens[idx] > 0 {
+		return m.ImageTokens[idx]
+	}
+	return ImageTokens(0, 0)
 }
 
 func textTokens(s string) int {

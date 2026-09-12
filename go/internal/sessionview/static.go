@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"mineru-tools/internal/session"
 )
 
 // pageData is what the viewer finds in its <script type="application/json"
@@ -19,7 +21,24 @@ type pageData struct {
 	Root      string          `json:"root"`
 	Generated string          `json:"generated"`
 	MediaRoot string          `json:"mediaRoot"`
+	Estimate  EstimatePolicy  `json:"estimate"`
 	Sessions  []staticSession `json:"sessions"`
+}
+
+// EstimatePolicy describes the LOCAL token estimate the page shows, so the
+// details pane can state the actual rule (pixels per token, floor, ceiling,
+// fallback) instead of hard-coding a copy of it that could go stale.
+type EstimatePolicy struct {
+	PxPerToken int `json:"pxPerToken"`
+	Min        int `json:"min"`
+	Max        int `json:"max"`
+	Fallback   int `json:"fallback"`
+}
+
+// CurrentEstimatePolicy reads the effective estimate settings.
+func CurrentEstimatePolicy() EstimatePolicy {
+	c := session.EstimateSettings()
+	return EstimatePolicy{PxPerToken: c.ImagePxPerToken, Min: c.ImageTokensMin, Max: c.ImageTokensMax, Fallback: c.ImageFallback}
 }
 
 // staticSession is one session with its full transcript inlined.
@@ -67,6 +86,7 @@ func WriteStaticHTML(root, outPath string, sessions []SessionInfo) error {
 		Root:      rootAbs,
 		Generated: time.Now().Format(time.RFC3339),
 		MediaRoot: mediaRoot,
+		Estimate:  CurrentEstimatePolicy(),
 		Sessions:  make([]staticSession, 0, len(sessions)),
 	}
 	for _, s := range sessions {

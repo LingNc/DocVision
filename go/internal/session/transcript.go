@@ -371,6 +371,9 @@ func LoadTranscript(path string) ([]ChatMessage, error) {
 					"type":      "image_url",
 					"image_url": map[string]string{"url": "data:" + mime + ";base64," + payload},
 				})
+				// 重放时同样按尺寸估算：续跑会话的上下文估算不能因为"图是从
+				// 转录里读回来的"就退回固定常量。
+				msg.ImageTokens = append(msg.ImageTokens, ImageTokensOfBase64(payload))
 			}
 			msg.Content = parts
 		case line.Role == "assistant" && line.Calls != nil:

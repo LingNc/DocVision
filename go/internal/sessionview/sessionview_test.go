@@ -839,8 +839,8 @@ func TestViewerAssetsThemeAndMeta(t *testing.T) {
 	if !strings.Contains(js, "!state.forceCollapse && remembered") {
 		t.Error("思考块不再默认折叠（「折叠全部思考」开关会失效）")
 	}
-	if !strings.Contains(js, "line.reasoning.length + ' 字符'") {
-		t.Error("思考摘要行没有写清字符数")
+	if !strings.Contains(js, "countText(line.reasoning.length, estOf(line).reasoning)") {
+		t.Error("思考摘要行没有写清计数值（按显示单位：token 估算 / 字符）")
 	}
 	if !strings.Contains(js, "reasoning-scroll") {
 		t.Error("思考正文没有放进带最大高度的滚动容器")
@@ -1036,8 +1036,8 @@ func TestViewerMatchesDSHStructure(t *testing.T) {
 	//    bodyBlock()（详细断言见 TestViewerMarkdownRendering）。
 	for _, marker := range []string{
 		"function renderMarkdown(text)",
-		"function bodyBlock(text, previewLines, key, extraClass)",
-		"if (!state.markdown) { return collapsibleText(text, previewLines, key, extraClass); }",
+		"function bodyBlock(text, previewLines, key, extraClass, tokens)",
+		"if (!state.markdown) { return collapsibleText(text, previewLines, key, extraClass, tokens); }",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("缺少 Markdown 预览关键逻辑 %q", marker)
@@ -1082,7 +1082,7 @@ func TestViewerMergesToolCallsAndImageTurns(t *testing.T) {
 		"el('span', 'sys-meta', 'user 轮')",
 		"var long = lines.length > SYSTEM_PREVIEW_LINES;",
 		"scroll.classList.toggle('folded', long && !expanded);",
-		"toggle.textContent = foldLabel(expanded, lines.length, raw.length);",
+		"toggle.textContent = foldLabel(expanded, lines.length, raw.length, tokens);",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("系统消息块缺少 %q", marker)
@@ -1155,7 +1155,7 @@ func TestViewerMergesToolCallsAndImageTurns(t *testing.T) {
 	//    折叠态一行写全 `输入 → 输出 字符数 · ok/error`；配不上的回执注明。
 	for _, marker := range []string{
 		"function updateCallTail(node)",
-		"tail = node.argsChars + ' → ' + text.length + ' 字符' +",
+		"tail = countText(node.argsChars, node.argsTokens) + ' → ' +",
 		"'(未配对的工具回执)'",
 		"detail: { input: prettyJSON(args) || args }",
 	} {
@@ -1346,14 +1346,14 @@ func TestViewerMarkdownRendering(t *testing.T) {
 	for _, marker := range []string{
 		"var md = el('div', 'md-body sys-md');",
 		"scroll.appendChild(el('pre', 'body-text sys-text', raw));",
-		"msg.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'asst.' + line.n));",
+		"msg.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, 'asst.' + line.n, null, estOf(line).text));",
 		"promptMD.appendChild(renderMarkdown(promptText));",
 		// 关掉开关就回到原来的纯文本 pre-wrap
-		"if (!state.markdown) { return collapsibleText(text, previewLines, key, extraClass); }",
+		"if (!state.markdown) { return collapsibleText(text, previewLines, key, extraClass, tokens); }",
 		"scroll.appendChild(machineBlock(promptText, 'body-text prompt-text'));",
 		// 思考 / 工具 IO 保持等宽纯文本
 		"scroll.appendChild(el('pre', 'body-text reasoning-text', line.reasoning));",
-		"card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)'));",
+		"card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)', false, 'in.' + (call.id || ''), argsTokens));",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("Markdown 的应用位置不对：缺少 %q", marker)
@@ -1377,7 +1377,7 @@ func TestViewerMarkdownRendering(t *testing.T) {
 	}
 	// 长文本折叠 / 展开沿用同一套记忆键与按钮语义。
 	for _, marker := range []string{
-		"function markdownText(text, previewLines, key, extraClass)",
+		"function markdownText(text, previewLines, key, extraClass, tokens)",
 		"var expanded = storeGet('text.' + key) === '1';",
 		"storeSet('text.' + key, expanded ? '1' : '0');",
 		"body.style.maxHeight = clamped ? (previewLines * 24) + 'px' : '';",
@@ -1629,8 +1629,8 @@ func TestViewerJSONHighlighting(t *testing.T) {
 	}
 	// 应用位置：工具输入 / 工具输出 / parameters / 轨迹 / 提示词快照 / 代码块。
 	for _, marker := range []string{
-		"card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)'));",
-		"var out = ioSection('输出', text, status === 'error', 'result.' + line.n);",
+		"card.appendChild(ioSection('输入', prettyJSON(argsText) || '(无参数)', false, 'in.' + (call.id || ''), argsTokens));",
+		"var out = ioSection('输出', text, status === 'error', 'result.' + line.n, estOf(line).text);",
 		"out.classList.add('out-section');",
 		"pbody.appendChild(machineBlock(String(tool.parameters), 'code'));",
 		"scroll.appendChild(machineBlock(promptText, 'body-text prompt-text'));",
@@ -1665,11 +1665,11 @@ func TestViewerToolCardsScrollAndExpandLikeThinking(t *testing.T) {
 	js := readAsset(t, "viewer.js")
 	css := readAsset(t, "viewer.css")
 
-	if !strings.Contains(js, "toggle.textContent = foldLabel(expanded, lines.length, body.length);") {
+	if !strings.Contains(js, "toggle.textContent = foldLabel(expanded, lines.length, body.length, tokens);") {
 		t.Error("工具输入输出的展开按钮没有走统一的 foldLabel")
 	}
-	if !strings.Contains(js, "return expanded ? '收起' : '展开全文（' + lines + ' 行 / ' + chars + ' 字符）';") {
-		t.Error("foldLabel 的文案不是那一套（收起 / 展开全文（N 行 / M 字符））")
+	if !strings.Contains(js, "return expanded ? '收起' : '展开全文（' + lines + ' 行 / ' + countText(chars, tokens) + '）';") {
+		t.Error("foldLabel 的文案不是那一套（收起 / 展开全文（N 行 / 计数））")
 	}
 	// 三处（思考块所在的 collapsibleText、工具卡片 machineScroll、系统消息）共用同一文案。
 	for _, fn := range []string{"collapsibleText", "machineScroll", "systemTurnSection"} {
