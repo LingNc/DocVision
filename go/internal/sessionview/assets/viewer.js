@@ -1062,6 +1062,23 @@
     if (rest) { parent.appendChild(document.createTextNode(rest)); }
   }
 
+  /*
+   * 行内渲染入口：**单行**文本专用，只走 mdInline 那一套行内规则（整串一次
+   * 过），块级解析一概不参与——所以永远不会产生 <p>/<h*>/<ul>/<li>/<br>，
+   * 调用方拿到的是一个纯行内的 DocumentFragment。
+   *
+   * 会话名（来自转录文件名 / 图注的单行标签）走这里：名字里的 `` `code` ``、
+   * `**粗**`、`_斜_` 渲染成对应元素；名字里没有标记时，mdInline 找不到匹配就
+   * 把整串原样落成**一个文本节点**，可见结果与直接 textContent 逐字一致。
+   * 名字里的 `<`、`&` 仍然只是文本（行内渲染只产文本节点与 el() 造的元素），
+   * 与正文共用同一条"从不拼 HTML"的安全边界。
+   */
+  function renderInlineMarkdown(text) {
+    var frag = document.createDocumentFragment();
+    mdInline(frag, text, 0);
+    return frag;
+  }
+
   /* 块内的软换行按可见换行处理（转录里一行就是一行，不合并成空格）。 */
   function mdInlineLines(parent, text) {
     String(text === undefined || text === null ? '' : text).split('\n').forEach(function (part, i) {
@@ -1378,6 +1395,18 @@
   }
 
   /*
+   * 会话名的落点：截断/短写**先**由 sessionTitleOf 定死（短写规则、图注→标签→
+   * 哈希的优先级都不受渲染影响），这里只把定好的那串名字按**行内** Markdown
+   * 落进标签——侧栏行、面包屑、详情栏共用这一个入口，因此名字只有一个渲染
+   * 口径；要显示原始名字的地方（悬浮说明）仍旧拿 sessionTitleOf 的字符串。
+   */
+  function nameNode(tag, cls, name) {
+    var node = el(tag, cls);
+    node.appendChild(renderInlineMarkdown(name));
+    return node;
+  }
+
+  /*
    * 侧栏按项目分组：每个项目是一个可折叠集合（标题 = 项目名 + 会话数）。
    * 过滤时只保留有命中的组并强制展开，命中信息写进组的摘要行。
    */
@@ -1431,7 +1460,10 @@
    * 刷新行时口径只有一处实现。
    */
   function sessionTip(s) {
-    var tip = [s.id];
+    // 名字在行里按**行内 Markdown 渲染**（`code` / **粗** / _斜_ 变成样式），
+    // 所以悬浮说明的第一行放**原始**名字：渲染掉的那些标记符号在这里一个不
+    // 少（title 是纯文本属性，不参与渲染）。
+    var tip = [sessionTitleOf(s), s.id];
     var st = scanStats(s);
     if (st) {
       tip.push(statsSummary(st, s));
@@ -1507,7 +1539,7 @@
     slot.appendChild(el('span', 'dot' + (s.live ? ' live' : '')));
     row.appendChild(slot);
 
-    row.appendChild(el('span', 'row-title', sessionTitleOf(s)));
+    row.appendChild(nameNode('span', 'row-title', sessionTitleOf(s)));
 
     var usage = usageChipText(s);
     if (usage) { row.appendChild(el('span', 'row-chip usage-chip', usage)); }
@@ -1782,7 +1814,7 @@
       proj.addEventListener('click', function () { revealProject(project); });
       refs.crumbs.appendChild(proj);
       refs.crumbs.appendChild(el('span', 'crumb-sep', '›'));
-      var name = el('span', 'crumb crumb-current', sessionTitleOf(cur));
+      var name = nameNode('span', 'crumb crumb-current', sessionTitleOf(cur));
       name.title = cur.id;
       refs.crumbs.appendChild(name);
     }
@@ -1851,12 +1883,23 @@
     return wrap;
   }
 
+  /*
+   * 详情栏的键值表。值可以是字符串，也可以是一个**已造好的节点**（会话名按
+   * 行内 Markdown 渲染，交给这里的就是一个元素）；悬浮说明照旧只放纯文本。
+   */
   function kvList(pairs) {
     var dl = el('dl', 'detail-kv');
     pairs.forEach(function (p) {
       if (p === null) { return; }
       var dt = el('dt', null, p[0]);
-      var dd = el('dd', p[3] ? 'mono' : null, p[1]);
+      var dd = el('dd', p[3] ? 'mono' : null);
+      // 节点值直接接进来（会话名），字符串照旧走 textContent；undefined /
+      // null 保持空单元格（不能落成字面量 "undefined"）。
+      if (p[1] && p[1].nodeType) {
+        dd.appendChild(p[1]);
+      } else if (p[1] !== undefined && p[1] !== null) {
+        dd.textContent = p[1];
+      }
       if (p[2]) { dd.title = p[2]; }
       dl.appendChild(dt);
       dl.appendChild(dd);
@@ -1871,7 +1914,7 @@
     block.appendChild(kvList([
       ['项目', cur.project || projectOf(cur.id), cur.id],
       ['阶段', cur.stageTitle || cur.stage || '—'],
-      ['会话', sessionTitleOf(cur), cur.id, true],
+      ['会话', nameNode('span', 'detail-name', sessionTitleOf(cur)), cur.id, true],
       ['文件', cur.name || '—', cur.path, true],
       ['消息', cur.messages + ' 条 · ' + state.lines.length + ' 行'],
       ['大小', fmtSize(cur.size)],

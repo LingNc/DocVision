@@ -668,3 +668,11 @@ models:
 ### ⑥ `--list` 的提示词列改成 token 口径（用户追加）
 
 用户："list 列是哪里？但是感觉用 token 好一点。"`docvision sessions --list` 第 4 列量的是会话的**系统提示词快照**，此前打印字符数（`6247 字符`），现在默认打印**同一个本地估算器**算出的估计（`MetaInfo.PromptTokenEst`，与详情栏「提示词快照」同源），形态与页面一致（`≈ 1.5k`）、表头写明单位（「提示词 tokens」）。新增 `--unit token|char`（默认 `token`）切回字符：`--unit char` 的表头是「提示词 字符」、值是精确字符数（与原先一字不差），非法取值报错并列出可选值。测试钉住两种口径的表头与取值、`--list` 其余 8 列在两种单位下逐字段相同、以及纯 ASCII 与含中文假数据下的列起点（rune 与显示宽度两个口径）；实跑真实运行目录 `--dir /home/share/samba-share/PDF2MD/latex_project`（只读）核对两种单位的前 3 行。
+
+### ⑦ 会话名里的 Markdown 也渲染（用户追加）
+
+用户："简单的调整一下，会话名字中出现 markdown 格式也要渲染一下。"名字（转录文件名 / 图注）里的 `` `code` ``／`**粗**`／`_斜_` 此前原样显示。做法是**复用**消息正文那套自写渲染器的行内部分：`mdInline()` 早就在，只是没被单独调用过，所以只加了一个入口 `renderInlineMarkdown(text)`（一次 `mdInline(frag, text, 0)`，**不碰**块级解析，因此永不产生 `<p>/<h*>/<ul>/<br>`），再把手名落点收成一个 `nameNode(tag, cls, name)`——侧栏会话行、中栏面包屑、详情栏「会话」那一行三处共用（`kvList` 的键值对开始接受"已造好的节点"，旧写法行为不变：`undefined` 不再会落成字面量 "undefined"）。名字没有标记时 `mdInline` 找不到匹配就把整串落成一个文本节点，可见结果与改动前逐字相同（浏览器用例断言"1 个子节点 + 0 个元素"）。安全面没变：名字里的 `<`、`&` 仍只是文本，仍只经 `createElement`/`createTextNode` 落树（`<b>x>y&z*单\`` 这种文件名渲染后 `children.length === 0`）。
+
+顺序上刻意不动：短写/截断仍由 `sessionTitleOf()` 先算出**字符串**（图注 → 可读标签 → 前 8 位哈希 + 扩展名），渲染只发生在落点；`sessionHaystack()` 一个字段都没改，所以搜索仍按原始文本（拿 `**粗体**`、反引号本身都能搜到）；`listSignature()`/`patchList()` 都没进渲染代码，浏览器用例刷新两次后给行与 `<strong>` 打过的记号仍在（`1/attached`）——把签名守卫临时改成 `if (false)` 复跑，该断言如期变成 `detached` 失败，证明它不是空转。会话行的悬浮说明改成以**原始**名字开头（标记一个不少）；`--list` 与其它终端输出不渲染。行内 code 直接用共用的 `.md-inline-code`（`--code-font`/`--code-line`），没有新样式。
+
+证据：真实运行目录（`/home/share/samba-share/PDF2MD/latex_project`，只读）46 个会话的名字里**一个带标记的都没有**（唯一的 `_` 出现在 `chapter_003` 这种单下划线里，不构成强调），挑出 `矢量图 · $A\subset B$`、`矢量图 · $A\cup B$ / $A \cap B$ / A与B互斥`、`核对 · chapter_003` 三个真名在 chromium 里渲染，结果都是**单个文本节点、无子元素**——即真实数据逐字不变。带标记的名字只能用夹具：文件名带 `` ` ``/`**` 的 `convert_这是_斜体_与**粗体**与`code`的会话.jsonl`（合法文件名），图注带标记的逐图会话 `vector_book__<64位哈希>__label.jsonl` + `doc_index.json`，Chromium dump 出来的三处落点是同一份结构：`<span class="row-title">转换 · 这是<em>斜体</em>与<strong>粗体</strong>与<code class="md-inline-code">code</code>的会话</span>`（面包屑 / 详情栏同形，`title=` 仍是原始路径）。新增 `sessionname_browser_test.go` 三组用例（渲染+单行+纯文本对照+危险字符+图注+悬浮说明+样式比对+轮询不重建 / 搜索按原文 / 源码契约）。夹具踩到的坑记一笔：文件名里写不出 `/`，所以"闭合标签"形态只能用 `<b>x>y&z*单\``（`</b>` 会被当成目录分隔符，落盘成一个目录）。
