@@ -6,6 +6,7 @@
 ## [Unreleased]
 
 ### Added
+- 会话预览页渲染会话名与正文里的 LaTeX 数学（`$…$` / `$$…$$`，自写 LaTeX → MathML，零依赖；认不出的宏原样保留，单条公式失败退回原文）
 
 - **`models.<条目>.extends`：命名基座 + 只写差异**（`config_version` 9→10）。一套 key/endpoint/单价/思考设置被多个角色复用时，原来只能整块复制（现场配置里 `drawing` / `style` / `chapter` / `convert` 四块**逐字相同**、`price:` 出现 8 次）；现在写一个基座条目，其余条目 `extends: <基座名>` 只写差异键。合并在**加载期、YAML 节点层**完成：`ModelConfig` 几乎全是值类型，解码后分不清「没写这个键」与「写了 0/false/""」。语义——子条目没写的键取基座；写了任意值（含显式 `0`/`false`/`""`）算覆盖；写 `null` 显式清空；列表与 map 值（`request_body`/`thinking` 这种整块）整体替换、不拼接也不半合并；基座自身可以 extends 别人（链式）。错误在加载期硬报错并给出完整链：指向不存在的条目、自引用、成环（`a → b → c → a`）、`extends` 写成空值。**不写 `extends` 的配置逐字不变**（新加载路径与直接解码 + `setDefaults` 的参照路径 `reflect.DeepEqual`，既有继承用例一行未改仍过）。
 - **`LoadConfig` 对未知键出声**：`LoadConfig` 必须宽松（旧写法仍要能加载），但一个拼错的键完全没有症状——现在启动时按路径逐条打印 `⚠ <路径>: 未知配置键（第 N 行…）`，并且指出**继承了它的条目**（`models.base.<键>` 与 `models.drawing.<键>` 都会列出）；`docvision setup` 的严格路径照样把它当错误，并把 yaml.v3 那句「line N: field X not found in type config.ModelConfig」补上真实配置路径。旧 estimate 键的迁移提示改成按**键**匹配（不再被注释里提到的键名误触发）。

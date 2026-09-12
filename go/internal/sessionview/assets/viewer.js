@@ -1018,10 +1018,471 @@
   }
 
   /*
+   * LaTeX 数学 → MathML（自写、零依赖、零外链；浏览器原生排版 MathML Core）。
+   * $…$ 行内、$$…$$ 独立显示。支持的写法覆盖转录里真实出现的那些：
+   *   · 结构：{…} 分组、^ _ 上下标（大算符自动转 munderover）、\frac \dfrac \tfrac
+   *     \sqrt[n]{}、\left…\right 可伸缩定界符、\overline \underline \hat \vec \bar
+   *     \tilde \dot \ddot、\text \mathrm \mathbf \mathbb \mathcal \mathit \mathtt
+   *     \operatorname、\quad \qquad \, \; \: \!、矩阵族 \begin{matrix|pmatrix|
+   *     bmatrix|vmatrix|cases|aligned|array}（& 分列、\\ 分行）；
+   *   · 符号：希腊字母、关系符、二元算符、箭头、\sum \prod \int \oint \bigcup…
+   *     \lim \sin \cos \log \ln \exp \det \gcd 等常见函数名。
+   * 规则：**认不出来的宏不吞掉、也不留空**——按 \name 原样放进 <mtext> 继续排版，
+   * 于是页面上看到的是"大部分排好了 + 那个宏原文"，比整条公式退化成纯文本有用。
+   * 一律用 createElementNS 造 MathML（createElement('math') 只会得到 HTMLUnknownElement，
+   * 浏览器不会排版），所有文本走 createTextNode，与正文共用"从不拼 HTML"的边界。
+   */
+  var MATHML_NS = 'http://www.w3.org/1998/Math/MathML';
+  var MATH_CHARS = {
+    alpha: '\u03b1', beta: '\u03b2', gamma: '\u03b3', delta: '\u03b4',
+    epsilon: '\u03b5', varepsilon: '\u03b5', zeta: '\u03b6', eta: '\u03b7',
+    theta: '\u03b8', vartheta: '\u03d1', iota: '\u03b9', kappa: '\u03ba',
+    lambda: '\u03bb', mu: '\u03bc', nu: '\u03bd', xi: '\u03be', pi: '\u03c0',
+    varpi: '\u03d6', rho: '\u03c1', sigma: '\u03c3', varsigma: '\u03c2',
+    tau: '\u03c4', upsilon: '\u03c5', phi: '\u03c6', varphi: '\u03d5',
+    chi: '\u03c7', psi: '\u03c8', omega: '\u03c9',
+    Gamma: '\u0393', Delta: '\u0394', Theta: '\u0398', Lambda: '\u039b',
+    Xi: '\u039e', Pi: '\u03a0', Sigma: '\u03a3', Upsilon: '\u03a5',
+    Phi: '\u03a6', Psi: '\u03a8', Omega: '\u03a9'
+  };
+  var MATH_OPS = {
+    pm: '\u00b1', mp: '\u2213', times: '\u00d7', div: '\u00f7', cdot: '\u22c5',
+    ast: '\u2217', star: '\u22c6', circ: '\u2218', bullet: '\u2219',
+    le: '\u2264', leq: '\u2264', ge: '\u2265', geq: '\u2265', ne: '\u2260',
+    neq: '\u2260', approx: '\u2248', equiv: '\u2261', sim: '\u223c',
+    simeq: '\u2243', cong: '\u2245', propto: '\u221d', ll: '\u226a', gg: '\u226b',
+    in: '\u2208', notin: '\u2209', ni: '\u220b', subset: '\u2282',
+    subseteq: '\u2286', supset: '\u2283', supseteq: '\u2287',
+    cup: '\u222a', cap: '\u2229', setminus: '\u2216', emptyset: '\u2205',
+    varnothing: '\u2205', forall: '\u2200', exists: '\u2203', nexists: '\u2204',
+    neg: '\u00ac', land: '\u2227', wedge: '\u2227', lor: '\u2228',
+    vee: '\u2228', oplus: '\u2295', otimes: '\u2297', perp: '\u22a5',
+    parallel: '\u2225', angle: '\u2220', triangle: '\u25b3', square: '\u25a1',
+    to: '\u2192', rightarrow: '\u2192', leftarrow: '\u2190',
+    leftrightarrow: '\u2194', Rightarrow: '\u21d2', Leftarrow: '\u21d0',
+    Leftrightarrow: '\u21d4', mapsto: '\u21a6', implies: '\u27f9',
+    iff: '\u27fa', uparrow: '\u2191', downarrow: '\u2193',
+    infty: '\u221e', partial: '\u2202', nabla: '\u2207', ell: '\u2113',
+    hbar: '\u210f', imath: '\u0131', jmath: '\u0237', Re: '\u211c',
+    Im: '\u2111', aleph: '\u2135', wp: '\u2118', prime: '\u2032',
+    dots: '\u2026', ldots: '\u2026', cdots: '\u22ef', vdots: '\u22ee',
+    ddots: '\u22f1', cases: '{', lbrace: '{', rbrace: '}',
+    langle: '\u27e8', rangle: '\u27e9', lceil: '\u2308', rceil: '\u2309',
+    lfloor: '\u230a', rfloor: '\u230b', vert: '|', Vert: '\u2016',
+    backslash: '\\', dagger: '\u2020', ddagger: '\u2021', S: '\u00a7',
+    therefore: '\u2234', because: '\u2235', checkmark: '\u2713',
+    mid: '\u2223', nmid: '\u2224', bmod: 'mod', pmod: 'mod'
+  };
+  var MATH_LETTER_OPS = {
+    sum: '\u2211', prod: '\u220f', coprod: '\u2210', int: '\u222b',
+    iint: '\u222c', iiint: '\u222d', oint: '\u222e', bigcup: '\u22c3',
+    bigcap: '\u22c2', bigoplus: '\u2a01', bigotimes: '\u2a02',
+    bigvee: '\u22c1', bigwedge: '\u22c0', lim: 'lim', limsup: 'lim sup',
+    liminf: 'lim inf', sup: 'sup', inf: 'inf', max: 'max', min: 'min',
+    det: 'det', gcd: 'gcd', argmax: 'arg max', argmin: 'arg min'
+  };
+  var MATH_FUNCS = {
+    sin: 1, cos: 1, tan: 1, cot: 1, sec: 1, csc: 1, arcsin: 1, arccos: 1,
+    arctan: 1, sinh: 1, cosh: 1, tanh: 1, coth: 1, log: 1, ln: 1, lg: 1,
+    exp: 1, deg: 1, dim: 1, ker: 1, hom: 1, Pr: 1, sgn: 1, mod: 1
+  };
+  var MATH_BB = {
+    R: '\u211d', N: '\u2115', Z: '\u2124', Q: '\u211a', C: '\u2102',
+    P: '\u2119', H: '\u210d', E: '\u1d53c', F: '\u1d53d', A: '\ud835\udd38',
+    B: '\ud835\udd39', D: '\ud835\udd3b', K: '\u1d542', L: '\u1d53e',
+    M: '\u1d544', S: '\ud835\udd4a', U: '\ud835\udd4c', V: '\ud835\udd4d',
+    W: '\ud835\udd4e', X: '\ud835\udd4f', Y: '\ud835\udd50'
+  };
+  var MATH_MATRIX_ENVS = {
+    matrix: '', pmatrix: '()', bmatrix: '[]', vmatrix: '||',
+    Bmatrix: '{}', cases: '{', aligned: '', align: '', gathered: '',
+    array: '', split: ''
+  };
+  var MATH_SPACES = {
+    ',': '0.167em', ':': '0.222em', ';': '0.278em', '!': '-0.167em',
+    quad: '1em', qquad: '2em', thinspace: '0.167em', medspace: '0.222em',
+    thickspace: '0.278em', negthinspace: '-0.167em', space: '0.333em'
+  };
+  var MATH_ACCENTS = {
+    hat: '\u02c6', widehat: '\u02c6', bar: '\u00af', overline: '\u00af',
+    vec: '\u20d7', tilde: '\u02dc', widetilde: '\u02dc', dot: '\u02d9',
+    ddot: '\u00a8', acute: '\u00b4', grave: '`', check: '\u02c7',
+    breve: '\u02d8', mathring: '\u02da'
+  };
+  var MATH_FONTS = {
+    mathrm: 'normal', mathbf: 'bold', boldsymbol: 'bold', mathit: 'italic',
+    mathsf: 'sans-serif', mathtt: 'monospace', mathcal: 'script',
+    mathfrak: 'fraktur', mathbb: 'double-struck', mathnormal: 'italic'
+  };
+
+  function mathEl(tag) { return document.createElementNS(MATHML_NS, tag); }
+
+  function mathText(tag, str) {
+    var n = mathEl(tag);
+    n.appendChild(document.createTextNode(String(str)));
+    return n;
+  }
+
+  function mathSymbol(ch) {
+    var n = mathEl('mo');
+    n.appendChild(document.createTextNode(ch));
+    n.setAttribute('stretchy', 'false');
+    return n;
+  }
+
+  // 把 LaTeX 数学串编成 MathML 子树；display=true 时用块级 <math display="block">。
+  function mdMathML(tex, display) {
+    var src = String(tex === undefined || tex === null ? '' : tex);
+    var pos = 0;
+    var root = mathEl('math');
+    if (display) { root.setAttribute('display', 'block'); }
+    root.setAttribute('class', display ? 'md-math md-math-block' : 'md-math');
+
+    function isSpace(c) { return c === ' ' || c === '\t' || c === '\n'; }
+    function skipSpaces() { while (pos < src.length && isSpace(src[pos])) { pos += 1; } }
+    function atEndMarker() { return src.charAt(pos) === '\\' && /^\\end\b/.test(src.slice(pos)); }
+    function isLetter(c) { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'; }
+    function isDigit(c) { return c >= '0' && c <= '9'; }
+
+    function readBraceText() {
+      skipSpaces();
+      if (src.charAt(pos) !== '{') { return ''; }
+      var depth = 0, out = '', start = pos;
+      for (; pos < src.length; pos += 1) {
+        var c = src[pos];
+        if (c === '{') { depth += 1; if (depth === 1) { continue; } }
+        else if (c === '}') { depth -= 1; if (depth === 0) { pos += 1; return out; } }
+        out += c;
+      }
+      pos = start;
+      return '';
+    }
+
+    function readCommandName() {
+      // pos 停在 '\' 上
+      pos += 1;
+      if (pos >= src.length) { return '\\'; }
+      if (isLetter(src[pos])) {
+        var s = pos;
+        while (pos < src.length && isLetter(src[pos])) { pos += 1; }
+        return src.slice(s, pos);
+      }
+      pos += 1;
+      return src[pos - 1];
+    }
+
+    function parseGroup() {
+      skipSpaces();
+      if (src.charAt(pos) === '{') {
+        pos += 1;
+        var row = parseExpr();
+        skipSpaces();
+        if (src.charAt(pos) === '}') { pos += 1; }
+        return row;
+      }
+      return parseAtom();
+    }
+
+    function attachScript(row, sup) {
+      pos += 1;
+      var arg = parseGroup();
+      var base = row.lastChild;
+      if (base) { row.removeChild(base); } else { base = mathEl('mrow'); }
+      var prev = base.nodeName;
+      var isBig = prev === 'mo' && base.getAttribute('largeop') === 'true';
+      // 已经带上一个角标的大算符（munder/mover 且底下是 largeop）也算大算符，
+      // 否则 \sum_{i=1}^{n} 的 ^ 会接成 msup，看不到"上下限分居上下"的排版
+      if (!isBig && (prev === 'munder' || prev === 'mover') && base.firstChild &&
+          base.firstChild.nodeName === 'mo' &&
+          base.firstChild.getAttribute('largeop') === 'true') {
+        isBig = true;
+      }
+      var tag;
+      if (isBig) {
+        // 大算符的上下限要分居上下：先 _ 再 ^（或反之）累成 munderover
+        if (prev === 'munder' && sup || prev === 'mover' && !sup) { tag = 'munderover'; }
+        else { tag = sup ? 'mover' : 'munder'; }
+      } else if (prev === 'msub' || prev === 'msup') {
+        tag = 'msubsup';
+      } else {
+        tag = sup ? 'msup' : 'msub';
+      }
+      var n = mathEl(tag);
+      if (tag === 'msubsup' || tag === 'munderover') {
+        // 上一层的两个子节点恰好就是"基 + 已有的那个角标"
+        n.appendChild(base.firstChild);
+        n.appendChild(base.lastChild);
+      } else {
+        n.appendChild(base);
+      }
+      n.appendChild(arg);
+      row.appendChild(n);
+    }
+
+    function parseMathTable(env) {
+      var table = mathEl('mtable');
+      var row = mathEl('mtr');
+      var guard = 0;
+      while (pos < src.length && guard++ < 2000) {
+        skipSpaces();
+        if (src.charAt(pos) === '\\' && src.substr(pos, 2) === '\\\\') {
+          pos += 2;
+          table.appendChild(row);
+          row = mathEl('mtr');
+          continue;
+        }
+        if (atEndMarker()) { break; }
+        if (src.charAt(pos) === '\\' && /^\\hline\b/.test(src.slice(pos))) {
+          readCommandName();
+          continue;
+        }
+        if (src.charAt(pos) === '&') {
+          pos += 1;
+          continue;
+        }
+        var cell = parseExpr();
+        var td = mathEl('mtd');
+        td.appendChild(cell);
+        row.appendChild(td);
+        if (pos >= src.length) { break; }
+      }
+      if (row.childNodes.length) { table.appendChild(row); }
+      var delims = MATH_MATRIX_ENVS[env];
+      if (!delims) { return table; }
+      var wrap = mathEl('mrow');
+      var left = mathEl('mo'), right = mathEl('mo');
+      left.setAttribute('stretchy', 'true');
+      right.setAttribute('stretchy', 'true');
+      left.appendChild(document.createTextNode(delims.charAt(0)));
+      right.appendChild(document.createTextNode(delims.charAt(1)));
+      wrap.appendChild(left);
+      wrap.appendChild(table);
+      wrap.appendChild(right);
+      return wrap;
+    }
+
+    function parseCommand() {
+      var name = readCommandName();
+      if (name === '\\') {
+        var br = mathEl('mspace');
+        br.setAttribute('linebreak', 'newline');
+        return br;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_SPACES, name)) {
+        var sp = mathEl('mspace');
+        sp.setAttribute('width', MATH_SPACES[name]);
+        return sp;
+      }
+      if (name === 'frac' || name === 'dfrac' || name === 'tfrac') {
+        var f = mathEl('mfrac');
+        f.appendChild(parseGroup());
+        f.appendChild(parseGroup());
+        return f;
+      }
+      if (name === 'sqrt') {
+        skipSpaces();
+        var root2;
+        if (src.charAt(pos) === '[') {
+          // 度数直接按字符读（不能用 parseExpr：它会把 ] 和后面的组一起吃掉，
+          // 于是随后的 parseGroup 拿到 null、appendChild 抛错，整条公式退化）
+          var close = src.indexOf(']', pos + 1);
+          if (close < 0) { close = src.length; }
+          var degSrc = src.slice(pos + 1, close);
+          pos = close + 1;
+          var deg = mathEl('mrow');
+          for (var di = 0; di < degSrc.length; di += 1) {
+            var dc = degSrc.charAt(di);
+            if (isSpace(dc)) { continue; }
+            deg.appendChild(isDigit(dc) ? mathText('mn', dc)
+              : isLetter(dc) ? mathText('mi', dc) : mathSymbol(dc));
+          }
+          root2 = mathEl('mroot');
+          root2.appendChild(parseGroup());
+          root2.appendChild(deg);
+          return root2;
+        }
+        root2 = mathEl('msqrt');
+        root2.appendChild(parseGroup());
+        return root2;
+      }
+      if (name === 'left' || name === 'right' || name === 'big' || name === 'Big' ||
+          name === 'bigl' || name === 'bigr' || name === 'Bigl' || name === 'Bigr' ||
+          name === 'biggl' || name === 'biggr' || name === 'Biggl' || name === 'Biggr') {
+        skipSpaces();
+        var d = src.charAt(pos);
+        if (d === '\\') {
+          var dn = readCommandName();
+          d = Object.prototype.hasOwnProperty.call(MATH_OPS, dn) ? MATH_OPS[dn] : dn;
+        } else {
+          pos += 1;
+          if (d === '.') { return mathEl('mspace'); }
+        }
+        var mo = mathEl('mo');
+        mo.setAttribute('stretchy', name === 'left' || name === 'right' ? 'true' : 'false');
+        mo.appendChild(document.createTextNode(d || ''));
+        return mo;
+      }
+      if (name === 'begin') {
+        var env = readBraceText();
+        if (!Object.prototype.hasOwnProperty.call(MATH_MATRIX_ENVS, env)) {
+          return mathText('mtext', '\\begin{' + env + '}');
+        }
+        if (env === 'array') { readBraceText(); }
+        var built = parseMathTable(env);
+        skipSpaces();
+        if (atEndMarker()) {
+          readCommandName();
+          readBraceText();
+        }
+        return built;
+      }
+      if (name === 'text' || name === 'textrm' || name === 'mbox' || name === 'operatorname') {
+        var tx = mathText('mtext', readBraceText());
+        if (name === 'operatorname') { tx.setAttribute('mathvariant', 'normal'); }
+        return tx;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_FONTS, name)) {
+        var inner = parseGroup();
+        inner.setAttribute('mathvariant', MATH_FONTS[name]);
+        if (name === 'mathbb') {
+          (function mapBB(node) {
+            for (var i = 0; i < node.childNodes.length; i += 1) {
+              var kid = node.childNodes[i];
+              var ch = kid.textContent;
+              if (kid.nodeType === 3 && ch.length === 1 && MATH_BB[ch]) {
+                kid.textContent = MATH_BB[ch];
+              } else if (kid.childNodes && kid.childNodes.length) {
+                mapBB(kid);
+              }
+            }
+          }(inner));
+        }
+        return inner;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_ACCENTS, name)) {
+        var acc = mathEl('mover');
+        acc.setAttribute('accent', 'true');
+        acc.appendChild(parseGroup());
+        var am = mathEl('mo');
+        am.appendChild(document.createTextNode(MATH_ACCENTS[name]));
+        acc.appendChild(am);
+        return acc;
+      }
+      if (name === 'underline') {
+        var ul = mathEl('munder');
+        ul.setAttribute('accentunder', 'true');
+        ul.appendChild(parseGroup());
+        var um = mathEl('mo');
+        um.appendChild(document.createTextNode('_'));
+        ul.appendChild(um);
+        return ul;
+      }
+      if (name === 'overbrace' || name === 'underbrace' || name === 'overbrace' ||
+          name === 'stackrel' || name === 'overset' || name === 'underset') {
+        var ov = mathEl(name === 'underset' || name === 'underbrace' ? 'munder' : 'mover');
+        ov.appendChild(parseGroup());
+        ov.appendChild(parseGroup());
+        return ov;
+      }
+      if (name === 'displaystyle' || name === 'textstyle' || name === 'limits' ||
+          name === 'nolimits' || name === 'nonumber' || name === 'notag' ||
+          name === 'label' || name === 'tag' || name === 'mathrm' === name) {
+        if (name === 'label' || name === 'tag') { readBraceText(); }
+        return null;
+      }
+      if (name === 'pmod' || name === 'pod') {
+        var pm2 = mathEl('mrow');
+        pm2.appendChild(mathEl('mspace'));
+        pm2.appendChild(mathText('mtext', '('));
+        pm2.appendChild(parseGroup());
+        pm2.appendChild(mathText('mtext', ')'));
+        return pm2;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_LETTER_OPS, name)) {
+        var big = MATH_LETTER_OPS[name];
+        var isWord = !/[\u2200-\u22ff\u2a00-\u2aff]/.test(big);
+        var bo = mathEl(isWord ? 'mi' : 'mo');
+        bo.appendChild(document.createTextNode(big));
+        if (!isWord) { bo.setAttribute('largeop', 'true'); bo.setAttribute('movablelimits', 'true'); }
+        else { bo.setAttribute('mathvariant', 'normal'); }
+        return bo;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_FUNCS, name)) {
+        var fn = mathText('mi', name);
+        fn.setAttribute('mathvariant', 'normal');
+        return fn;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_CHARS, name)) {
+        return mathText('mi', MATH_CHARS[name]);
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_OPS, name)) {
+        return mathSymbol(MATH_OPS[name]);
+      }
+      // 认不出来：原样保留（不吞、不留空），继续排版其余部分
+      return mathText('mtext', '\\' + name);
+    }
+
+    function parseAtom() {
+      skipSpaces();
+      var c = src.charAt(pos);
+      if (!c) { return null; }
+      if (c === '{') {
+        pos += 1;
+        var g = parseExpr();
+        if (src.charAt(pos) === '}') { pos += 1; }
+        return g;
+      }
+      if (c === '\\') { return parseCommand(); }
+      if (isDigit(c) || c === '.' && isDigit(src.charAt(pos + 1))) {
+        var s = pos;
+        while (pos < src.length && (isDigit(src[pos]) || src[pos] === '.')) { pos += 1; }
+        return mathText('mn', src.slice(s, pos));
+      }
+      if (isLetter(c)) {
+        pos += 1;
+        return mathText('mi', c);
+      }
+      pos += 1;
+      if (c === '~') { var nb = mathEl('mspace'); nb.setAttribute('width', '0.333em'); return nb; }
+      return mathSymbol(c);
+    }
+
+    function parseExpr() {
+      var row = mathEl('mrow');
+      var guard = 0;
+      while (pos < src.length && guard++ < 4000) {
+        skipSpaces();
+        var c = src.charAt(pos);
+        if (!c || c === '}' || c === '&') { break; }
+        if (c === '\\' && (src.substr(pos, 2) === '\\\\' || atEndMarker())) { break; }
+        if (c === '^' || c === '_') { attachScript(row, c === '^'); continue; }
+        var atom = parseAtom();
+        if (atom) { row.appendChild(atom); }
+        else if (pos < src.length && src.charAt(pos) === c) { pos += 1; }
+      }
+      return row;
+    }
+
+    var body = parseExpr();
+    if (body.childNodes.length === 1 && body.firstChild.nodeName === 'mrow') {
+      body = body.firstChild;
+    }
+    root.appendChild(body);
+    return root;
+  }
+
+  /*
    * 行内：先认行内代码（里面一律字面量），再链接、粗体、删除线、斜体。
    * 一律用 textContent / createTextNode 落树，任何位置都不会产生元素。
    */
-  var MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_/;
+  /*
+   * 数学排在最后：交替式只在"同一个起点"上按书写顺序竞争，而 `$` 起点上只有这两条
+   * 能匹配（粗体/斜体要求 `*`/`_`），所以 `$…$` 一定赢在 `$` 那个位置；写成 `$a_b$`
+   * 也不会被 `_…_` 抢走（公式内部整段交给 mdMathML）。`$$…$$` 放在单 `$` 之前，
+   * 否则会被当成"空内容 + 尾巴"的单美元分支吃掉。单行公式不跨行（`[^$\n]`），
+   * 独立公式可跨行。
+   */
+  var MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/;
 
   function mdInline(parent, text, depth) {
     if ((depth || 0) > 6) { parent.appendChild(document.createTextNode(String(text || ''))); return; }
@@ -1047,6 +1508,14 @@
           node.title = '链接协议不受支持，只显示文字';
         }
         mdInline(node, m[3], (depth || 0) + 1);
+      } else if (m[10] !== undefined || m[11] !== undefined) {
+        // 数学：$$…$$ 独立显示、$…$ 行内；会话名与正文共用这一条。
+        // 转换器万一抛错，就地退回原始 $…$ 文本——一条坏公式不许打断整页渲染。
+        try {
+          node = mdMathML(m[10] !== undefined ? m[10] : m[11], m[10] !== undefined);
+        } catch (err) {
+          node = document.createTextNode(m[0]);
+        }
       } else if (m[5] !== undefined || m[6] !== undefined) {
         node = el('strong');
         mdInline(node, m[5] !== undefined ? m[5] : m[6], (depth || 0) + 1);
