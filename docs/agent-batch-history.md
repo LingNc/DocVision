@@ -684,7 +684,6 @@ models:
 真实缺陷（本批自己踩到并修掉）：① `\sqrt[3]{x}` 用 `parseExpr` 读度数会把 `]` 和后面的组一起吃掉，随后 `parseGroup` 拿到 `null`、`appendChild(null)` 抛错——**一条公式抛错会打断整页渲染**（第 3 条消息整段空白，测试里 `<mroot>/<munderover>` 与 `display="block"` 全缺）；改成按字符直读 `[..]`，并在 `mdInline` 里给数学分支加 try/catch（失败就地退回 `$…$` 原文）。② `\sum_{i=1}^{n}` 的 `^` 接在 `munder` 上时没被认成大算符，接成了 `msup`、看不到上下限 → 增加"底下是 largeop 的 munder/mover 也算大算符"判定。
 证据：真实数据 dump 出 `矢量图 · <math class="md-math"><mrow><mi>A</mi><mo stretchy="false">⊂</mo><mi>B</mi></mrow></math>`；新增 `internal/sessionview/math_browser_test.go`（chromium）钉住 `msup/mfrac/mroot/mover/munderover/display="block"/<mtext>\foobar</mtext>`。
 
-### ⑨ 监听地址照配置打印（用户追加："我配置的0.0.0.0来着"）
+### ⑩ 回退 ⑨（用户澄清是误读）
 
-用户贴出的横幅：`会话预览: [::]:8849 … 监听地址来源 config preview.host/port`，而他配置里写的是 `host: "0.0.0.0"`。排查：`config.PreviewAddr()` 忠实返回 `0.0.0.0:8849`、绑定也成功——**根因在 Go 的地址族选择**：`net.Listen("tcp", "0.0.0.0:8849")` 遇到通配 host 会优先拿 IPv6 双栈套接字，`ln.Addr()` 于是回报 `[::]:8849`；横幅只做"如实打印内核地址"，看上去就像配置没生效。
-修法：新增 `listenNetwork(addr)`，按**写死的字面 host** 挑网络族——`0.0.0.0` → `tcp4`、`::` → `tcp6`，只有 host 留空（`:8849`）才交给双栈，loopback 与主机名照旧 `tcp`；横幅仍只报 `net.Listen` 实际绑到的地址。新增 `internal/sessionview/serve_host_test.go`（网络族映射表 + 端到端 `Start("0.0.0.0:0")` 的 Addr 前缀与 loopback Browse）。证据：用真配置实跑 `sessions --config …/config.yaml --port 8850 --serve` → `会话预览: 0.0.0.0:8850` + `浏览 http://127.0.0.1:8850/`。
+用户看到横幅 `会话预览: [::]:8849` 下方还有一行 `浏览 http://127.0.0.1:8849/`，确认是误读——原写法（Go 双栈通配 + loopback 浏览行）就是要的行为，所以 ⑨ 的 `listenNetwork`（按字面 host 选 tcp4/tcp6）与配套文档一并回退，`preview.host: "0.0.0.0"` 恢复为双栈通配、横幅照实报内核地址。教训：横幅"如实打印内核地址"本身没问题，看到 `[::]` 先看下一行的浏览地址再判断是不是缺陷。

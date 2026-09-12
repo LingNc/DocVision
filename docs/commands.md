@@ -139,7 +139,7 @@ docvision sessions --cost                     # 只打印按阶段的用量/费�
 
 想在**跑 latex 的同时**看，不必另开终端：把 `preview.enabled` 打开（默认关闭），`docvision latex` 启动时会自己拉起同一份只读服务并把确切 URL 打进日志（地址/端口用 `preview.host`/`preview.port`；要临时改端口用 `--port`，`--port 0` = 由内核挑一个空闲端口；根目录取该档位的输出根 `<latex_project>` / `<latex_output>`），运行结束后随进程退出。详见 `docs/config.md` 的 `preview` 三项。
 
-`docvision sessions --serve` 用的是**同一份配置**：扫描根默认取 `paths.latex_project`（档位2 用 `paths.latex_output`，与上面自动预览的根同源），监听地址默认取 `preview.host`/`preview.port`；优先级是 `--dir` > 配置 > 当前目录、`--addr` > `--port` > 配置 > 内置默认。启动时打印扫到的目录、用的配置文件与**实际绑定到的监听地址**，每一项后面都跟着来源（`config paths.latex_project` / `--dir` / `config preview.host/port` / `--port` / `--addr` / `内置默认`）：监听地址取 `net.Listen` 回报的地址，所以 `preview.host: 0.0.0.0` 会照实打印 `0.0.0.0:8849`（按字面 host 选网络族：`0.0.0.0` 绑 IPv4 通配、`::` 绑 IPv6 通配，host 留空才是双栈）、端口写 `0` 时打印内核实际分配的端口，而不是配置里写的那个；绑定通配地址时额外多一行 `浏览 http://127.0.0.1:<端口>/`（`http://0.0.0.0/…` 不是能打开的页面），loopback 绑定时这一行不出现。扫到的目录不存在时退回当前目录并写明原因。
+`docvision sessions --serve` 用的是**同一份配置**：扫描根默认取 `paths.latex_project`（档位2 用 `paths.latex_output`，与上面自动预览的根同源），监听地址默认取 `preview.host`/`preview.port`；优先级是 `--dir` > 配置 > 当前目录、`--addr` > `--port` > 配置 > 内置默认。启动时打印扫到的目录、用的配置文件与**实际绑定到的监听地址**，每一项后面都跟着来源（`config paths.latex_project` / `--dir` / `config preview.host/port` / `--port` / `--addr` / `内置默认`）：监听地址取 `net.Listen` 回报的地址，所以 `preview.host: 0.0.0.0` 会照实打印 `0.0.0.0:8849`（双栈机器上可能是 `[::]:8849`）、端口写 `0` 时打印内核实际分配的端口，而不是配置里写的那个；绑定通配地址时额外多一行 `浏览 http://127.0.0.1:<端口>/`（`http://0.0.0.0/…` 不是能打开的页面），loopback 绑定时这一行不出现。扫到的目录不存在时退回当前目录并写明原因。
 
 两种模式的区别：
 

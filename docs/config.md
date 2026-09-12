@@ -99,7 +99,7 @@
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
 | `config_version` | 配置模板版本：与当前程序期望值（本版为 **10**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 10 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
-| `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机。`0.0.0.0` 绑 IPv4 通配、`::` 绑 IPv6 通配、留空为双栈） | "127.0.0.1" |
+| `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |
 | `estimate.method` | **本地估算**的图片计量方法：`pixels`（按尺寸折算）/ `fixed`（每张固定值）/ `none`（本地按 0 计） | "pixels" |
 | `estimate.tokens` | `method: fixed` 时每张的固定值；`method: pixels` 下**取不到尺寸**（未知格式/文件读不到）时也用它 | 1100 |
