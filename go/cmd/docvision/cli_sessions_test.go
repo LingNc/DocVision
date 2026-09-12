@@ -1,10 +1,13 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -146,7 +149,7 @@ func TestSessionsConfigNote(t *testing.T) {
 // （默认值由配置决定，flag 默认值不能再写死 8848，否则配置永远排不上）。
 func TestSessionsFlagsRegistered(t *testing.T) {
 	cmd, _ := sessionsCmdFor(t)
-	for _, name := range []string{"dir", "serve", "addr", "port", "list", "out", "cost"} {
+	for _, name := range []string{"dir", "serve", "addr", "port", "list", "unit", "out", "cost"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("缺少 --%s", name)
 		}
@@ -184,5 +187,375 @@ func TestApplyEstimateConfigReachesEstimator(t *testing.T) {
 	if got := session.EstimateForModel("glm-5.3-flash-official"); got.Method != config.EstimateMethodPixels ||
 		got.MaxTokens != 8192 || got.MinTokens != 85 {
 		t.Errorf("部分覆盖的规则 = %+v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// --list 的「提示词」列：默认 token 估算（带 ≈），--unit char 切回精确字符数
+// ---------------------------------------------------------------------------
+
+// 假的提示词快照：字符数与本地估算刻意不成比例（6247 字符 → 1512 tokens），因此
+// 断言 "≈ 1.5k" 就证明这一列取的是 Meta.PromptTokenEst（估算器算好的那个数），
+// 而不是拿字符数除个系数凑的（6247/4 ≈ 1.6k）。
+const (
+	listCharsSmall = 900
+	listCharsMid   = 6247
+	listCharsBig   = 120000
+	listTokSmall   = 980
+	listTokMid     = 1512
+	listTokBig     = 62384
+)
+
+func listMeta(chars, tokens int) *sessionview.MetaInfo {
+	return &sessionview.MetaInfo{Count: 1, PromptChars: chars, PromptTokenEst: tokens, Model: "glm-4.6", Tools: 12}
+}
+
+func listRow(id, project, title string, messages int, bytes int64, meta *sessionview.MetaInfo) sessionview.SessionInfo {
+	return sessionview.SessionInfo{
+		ID: id, Project: project, Title: title, Messages: messages,
+		Bytes: bytes, ModTime: time.Date(2026, 9, 12, 10, 30, 0, 0, time.UTC), Meta: meta,
+	}
+}
+
+// listFixtureASCII 全 ASCII 假数据（项目名、会话名、路径都不含中文）。
+func listFixtureASCII() []sessionview.SessionInfo {
+	return []sessionview.SessionInfo{
+		listRow("work/style_session.jsonl", "book", "style", 12, 4096, listMeta(listCharsMid, listTokMid)),
+		listRow("work/sessions/chapters.jsonl", "book", "chapters", 3, 12*1024, listMeta(listCharsSmall, listTokSmall)),
+		listRow("source/sessions/vector_x.jsonl", "other", "convert_chapter_01", 1234, 3*1024*1024, listMeta(listCharsBig, listTokBig)),
+	}
+}
+
+// listFixtureCJK 含中文的假数据：同一列里的中文宽度一致（同一个项目组的真实行就是
+// 这样），于是"每行列的显示起点相同"才是个有意义的断言。
+func listFixtureCJK() []sessionview.SessionInfo {
+	return []sessionview.SessionInfo{
+		listRow("work/style_session.jsonl", "（根目录）", "样式会话", 12, 4096, listMeta(listCharsMid, listTokMid)),
+		listRow("work/sessions/chapters.jsonl", "（根目录）", "章节划分", 3, 12*1024, listMeta(listCharsSmall, listTokSmall)),
+		listRow("source/sessions/vector_x.jsonl", "（根目录）", "逐图校验", 1234, 3*1024*1024, listMeta(listCharsBig, listTokBig)),
+	}
+}
+
+// listFixtureNoSnapshot 混一行"转录里没有 t=meta 行"的老会话（提示词列是 "-"）。
+func listFixtureNoSnapshot() []sessionview.SessionInfo {
+	return []sessionview.SessionInfo{
+		listRow("work/style_session.jsonl", "book", "style", 12, 4096, listMeta(listCharsMid, listTokMid)),
+		listRow("work/sessions/chapters.jsonl", "book", "chapters", 3, 12*1024, nil),
+	}
+}
+
+// captureSessionsTable 跑一遍 printSessions 把表格文本取回来。printSessions 直接写
+// os.Stdout，测试里换掉这个变量即可——不必为测试给生产代码加一层 io.Writer。
+func captureSessionsTable(t *testing.T, sessions []sessionview.SessionInfo, unit string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "list-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	old := os.Stdout
+	os.Stdout = f
+	printSessions(sessions, "/root", "--dir", unit)
+	os.Stdout = old
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// tableLines 把表格与后面的汇总行分开：汇总前面有一个空行。
+func tableLines(t *testing.T, table string) (header string, rows []string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(table, "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("表格是空的")
+	}
+	for i, l := range lines {
+		if l == "" {
+			return lines[0], lines[1:i]
+		}
+	}
+	return lines[0], lines[1:]
+}
+
+// displayWidth 是终端显示宽度：CJK / 全角按 2 格，其余按 1 格。
+func displayWidth(s string) int {
+	n := 0
+	for _, r := range s {
+		switch {
+		case r >= 0x1100 && r <= 0x115F, r >= 0x2E80 && r <= 0xA4CF,
+			r >= 0xAC00 && r <= 0xD7A3, r >= 0xF900 && r <= 0xFAFF,
+			r >= 0xFE30 && r <= 0xFE4F, r >= 0xFF00 && r <= 0xFF60,
+			r >= 0xFFE0 && r <= 0xFFE6, r >= 0x20000:
+			n += 2
+		default:
+			n++
+		}
+	}
+	return n
+}
+
+// cellStarts 找出这一行每个字段的起始位置，同时给出 rune 偏移与显示宽度偏移：
+// tabwriter 按 rune 数补空格（`b.cell.width += utf8.RuneCount(...)`），而"对齐"
+// 是这张表在终端里的样子，两个口径都要看。
+//
+// 字段边界靠"≥2 个空格"（tabwriter 的填充至少 2 个空格，而表里的字段内容——包括
+// 「4.0 KB」「2026-09-12 10:30:00」——不含连续空格）。
+func cellStarts(line string) (runeOffsets, displayOffsets []int) {
+	rs := []rune(line)
+	i := 0
+	for i < len(rs) {
+		runeOffsets = append(runeOffsets, i)
+		displayOffsets = append(displayOffsets, displayWidth(string(rs[:i])))
+		for i < len(rs) {
+			if rs[i] == ' ' && i+1 < len(rs) && rs[i+1] == ' ' {
+				for i < len(rs) && rs[i] == ' ' {
+					i++
+				}
+				break
+			}
+			i++
+		}
+	}
+	return runeOffsets, displayOffsets
+}
+
+// cells 按同一套规则切出字段内容（去掉填充空格）。
+func cells(line string) []string {
+	rs := []rune(line)
+	starts, _ := cellStarts(line)
+	out := make([]string, 0, len(starts))
+	for i, st := range starts {
+		end := len(rs)
+		if i+1 < len(starts) {
+			end = starts[i+1]
+		}
+		out = append(out, strings.TrimRight(string(rs[st:end]), " "))
+	}
+	return out
+}
+
+// listColumns 是表头顺序，也是"别的列一个都没动"的参照。
+var listColumns = []string{"项目", "阶段", "消息数", "提示词", "用量", "成本", "大小", "修改时间", "路径"}
+
+// TestSessionsListColumnsUnchanged 钉住表头顺序与列数：只有第 4 列随 --unit 换词。
+func TestSessionsListColumnsUnchanged(t *testing.T) {
+	header, rows := tableLines(t, captureSessionsTable(t, listFixtureASCII(), sessionsUnitToken))
+	want := []string{"项目", "阶段", "消息数", "提示词 tokens", "用量", "成本", "大小", "修改时间", "路径"}
+	if got := cells(header); !reflect.DeepEqual(got, want) {
+		t.Errorf("token 表头 = %q，期望 %q", got, want)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("数据行 = %d，期望 3", len(rows))
+	}
+	for _, line := range append([]string{header}, rows...) {
+		if got := len(cells(line)); got != len(listColumns) {
+			t.Errorf("列数 = %d，期望 %d：%q", got, len(listColumns), line)
+		}
+	}
+}
+
+// TestSessionsListPromptDefaultsToTokens 钉住默认口径：表头写明单位、值是本地估算的
+// ≈ 形态，且取的是估算器算好的那个数。
+func TestSessionsListPromptDefaultsToTokens(t *testing.T) {
+	table := captureSessionsTable(t, listFixtureASCII(), sessionsUnitToken)
+	header, rows := tableLines(t, table)
+	if !strings.Contains(header, "提示词 tokens") {
+		t.Errorf("默认表头 = %q，期望含「提示词 tokens」", header)
+	}
+	if strings.Contains(table, "字符") {
+		t.Error("默认 token 口径下不该出现「字符」")
+	}
+	for i, want := range []string{"≈ 1.5k", "≈ 980", "≈ 62k"} {
+		if got := cells(rows[i])[3]; got != want {
+			t.Errorf("第 %d 行提示词列 = %q，期望 %q（整行 %q）", i+1, got, want, rows[i])
+		}
+	}
+}
+
+// TestSessionsListUnitCharIsExactCharacters 钉住 --unit char：表头换词、值是精确
+// 字符数、整张表不再出现 ≈（与今天的样子一字不差）。
+func TestSessionsListUnitCharIsExactCharacters(t *testing.T) {
+	table := captureSessionsTable(t, listFixtureASCII(), sessionsUnitChar)
+	header, rows := tableLines(t, table)
+	if !strings.Contains(header, "提示词 字符") {
+		t.Errorf("char 表头 = %q，期望含「提示词 字符」", header)
+	}
+	if strings.Contains(table, "≈") {
+		t.Error("char 口径下不该出现 ≈（字符数是精确值）")
+	}
+	for i, want := range []string{"6247 字符", "900 字符", "120000 字符"} {
+		if got := cells(rows[i])[3]; got != want {
+			t.Errorf("第 %d 行提示词列 = %q，期望 %q（整行 %q）", i+1, got, want, rows[i])
+		}
+	}
+}
+
+// TestSessionsListPromptColumnWithoutSnapshot 没有 t=meta 行的老转录在两种口径下都是
+// "-"（不能显示成 0：0 会被读成"提示词是空的"）。
+func TestSessionsListPromptColumnWithoutSnapshot(t *testing.T) {
+	for _, unit := range []string{sessionsUnitToken, sessionsUnitChar} {
+		_, rows := tableLines(t, captureSessionsTable(t, listFixtureNoSnapshot(), unit))
+		if got := cells(rows[1])[3]; got != "-" {
+			t.Errorf("%s：无提示词快照的行 = %q，期望 -", unit, got)
+		}
+	}
+}
+
+// TestSessionsListOtherColumnsIdenticalAcrossUnits 钉住"只有提示词列跟着单位走"：
+// 其余 8 列在两种单位下逐字段完全相同，汇总行也一模一样。
+func TestSessionsListOtherColumnsIdenticalAcrossUnits(t *testing.T) {
+	tok := captureSessionsTable(t, listFixtureCJK(), sessionsUnitToken)
+	chr := captureSessionsTable(t, listFixtureCJK(), sessionsUnitChar)
+	tokHeader, tokRows := tableLines(t, tok)
+	chrHeader, chrRows := tableLines(t, chr)
+
+	sameExceptPrompt := func(a, b string) {
+		t.Helper()
+		ca, cb := cells(a), cells(b)
+		if len(ca) != len(cb) {
+			t.Fatalf("列数不同：%q / %q", a, b)
+		}
+		for i := range ca {
+			if i == 3 {
+				continue // 第 4 列就是被测的那一列
+			}
+			if ca[i] != cb[i] {
+				t.Errorf("第 %d 列 = %q（token）/ %q（char），期望相同", i+1, ca[i], cb[i])
+			}
+		}
+	}
+	sameExceptPrompt(tokHeader, chrHeader)
+	for i := range tokRows {
+		sameExceptPrompt(tokRows[i], chrRows[i])
+	}
+	if a, b := tok[strings.Index(tok, "\n\n"):], chr[strings.Index(chr, "\n\n"):]; a != b {
+		t.Errorf("汇总行不同：\n%q\n%q", a, b)
+	}
+}
+
+// TestSessionsListColumnsAlign 钉住定宽对齐：两种单位 × 纯 ASCII / 含中文假数据，
+// 所有行（含表头）的列起点在 rune 口径上一致（tabwriter 的排布不变量），数据行的列
+// 起点在**显示宽度**口径（中文算 2 格）上也一致——即中文列宽与变宽的数字/估算值都
+// 没有把后面的列挤歪。
+func TestSessionsListColumnsAlign(t *testing.T) {
+	cases := []struct {
+		name     string
+		sessions []sessionview.SessionInfo
+	}{
+		{"ascii", listFixtureASCII()},
+		{"cjk", listFixtureCJK()},
+	}
+	for _, c := range cases {
+		for _, unit := range []string{sessionsUnitToken, sessionsUnitChar} {
+			header, rows := tableLines(t, captureSessionsTable(t, c.sessions, unit))
+			all := append([]string{header}, rows...)
+
+			wantRunes, _ := cellStarts(all[0])
+			for _, line := range all[1:] {
+				gotRunes, _ := cellStarts(line)
+				if !reflect.DeepEqual(gotRunes, wantRunes) {
+					t.Errorf("%s/%s：列起点(rune) = %v，期望 %v：%q", c.name, unit, gotRunes, wantRunes, line)
+				}
+			}
+			wantDisp := []int(nil)
+			for i, line := range rows {
+				_, gotDisp := cellStarts(line)
+				if i == 0 {
+					wantDisp = gotDisp
+					continue
+				}
+				if !reflect.DeepEqual(gotDisp, wantDisp) {
+					t.Errorf("%s/%s：列起点(显示宽度) = %v，期望 %v：%q", c.name, unit, gotDisp, wantDisp, line)
+				}
+			}
+		}
+	}
+
+}
+
+// TestSessionsListTokenColumnAlignsWithoutSnapshot 默认（token）口径下，混进一行"没有
+// 提示词快照"的老会话（该列是 "-"）也不会歪：token 值全是 ASCII，rune 补位与显示补位
+// 一致（char 口径的「N 字符」与 "-" 混排按 rune 补位，与改动前一样）。
+func TestSessionsListTokenColumnAlignsWithoutSnapshot(t *testing.T) {
+	header, rows := tableLines(t, captureSessionsTable(t, listFixtureNoSnapshot(), sessionsUnitToken))
+	if len(header) == 0 || len(rows) != 2 {
+		t.Fatalf("表格形状不对：header=%q rows=%q", header, rows)
+	}
+	_, wantDisp := cellStarts(rows[0])
+	for _, line := range rows[1:] {
+		if _, gotDisp := cellStarts(line); !reflect.DeepEqual(gotDisp, wantDisp) {
+			t.Errorf("列起点(显示宽度) = %v，期望 %v：%q", gotDisp, wantDisp, line)
+		}
+	}
+	if got := cells(rows[1])[3]; got != "-" {
+		t.Errorf("无提示词快照的行 = %q，期望 -", got)
+	}
+	_, headerDisp := cellStarts(header)
+	if len(headerDisp) != len(listColumns) {
+		t.Errorf("表头列起点 = %v，期望 %d 列", headerDisp, len(listColumns))
+	}
+}
+
+// TestSessionsUnitFlag 钉住开关本身：默认 token、char 可切、忽略大小写与首尾空白、
+// 其它取值报错并列出可选值。
+func TestSessionsUnitFlag(t *testing.T) {
+	cmd, parse := sessionsCmdFor(t)
+	if got := cmd.Flags().Lookup("unit").DefValue; got != sessionsUnitToken {
+		t.Errorf("--unit 默认值 = %q，期望 %q", got, sessionsUnitToken)
+	}
+	if got, err := sessionsUnit(cmd); err != nil || got != sessionsUnitToken {
+		t.Errorf("默认 = %q, %v；期望 token, nil", got, err)
+	}
+	for _, in := range []string{"char", " CHAR ", "Token"} {
+		parse("--unit", in)
+		got, err := sessionsUnit(cmd)
+		if err != nil || got != strings.ToLower(strings.TrimSpace(in)) {
+			t.Errorf("--unit %q = %q, %v", in, got, err)
+		}
+	}
+	for _, in := range []string{"chars", "tokens", "", "字"} {
+		parse("--unit", in)
+		_, err := sessionsUnit(cmd)
+		if err == nil {
+			t.Fatalf("--unit %q 应当报错", in)
+		}
+		for _, want := range []string{"--unit 取值无效", "token|char"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("--unit %q 的报错 = %q，期望含 %q", in, err, want)
+			}
+		}
+	}
+}
+
+// TestSessionsListInvalidUnitFailsTheCommand 端到端：非法 --unit 让命令失败，不会
+// 悄悄按默认口径打一张表出来。
+func TestSessionsListInvalidUnitFailsTheCommand(t *testing.T) {
+	oldErr := os.Stderr
+	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devnull.Close()
+	os.Stderr = devnull
+	defer func() { os.Stderr = oldErr }()
+
+	cmd := newSessionsCmd()
+	cmd.SilenceUsage, cmd.SilenceErrors = true, true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--list", "--unit", "bogus", "--dir", t.TempDir()})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("非法 --unit 应当让命令失败")
+	}
+	for _, want := range []string{"--unit 取值无效", "token|char"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("报错 = %q，期望含 %q", err, want)
+		}
 	}
 }

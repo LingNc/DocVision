@@ -1006,6 +1006,24 @@ func HumanCount(n int) string {
 	}
 }
 
+// HumanTokenEst renders a LOCAL token estimate for terminal output (≈ 1.5k).
+// Same form as the viewer's fmtTokens (assets/viewer.js): k below a million,
+// two decimals of M above it, and the ≈ prefix is part of the value because a
+// local estimate must never be mistaken for a provider number. Provider
+// counts go through HumanCount instead — they are exact.
+func HumanTokenEst(n int) string {
+	switch {
+	case n >= 1000000:
+		return "≈ " + fmt.Sprintf("%.2fM", float64(n)/1000000)
+	case n >= 10000:
+		return "≈ " + fmt.Sprintf("%.0fk", float64(n)/1000)
+	case n >= 1000:
+		return "≈ " + fmt.Sprintf("%.1fk", float64(n)/1000)
+	default:
+		return "≈ " + fmt.Sprintf("%d", n)
+	}
+}
+
 // ReadSession returns the transcript lines starting at fromLine, which is the
 // number of lines the caller already has: 0 reads from the beginning, and
 // passing the previously returned nextFrom fetches only what was appended

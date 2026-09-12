@@ -664,3 +664,7 @@ models:
 `gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿。新增/改写的用例：`config/extends_test.go`（合并语义、显式 0/null、列表与 map 替换、链式、四类报错、**深拷贝不污染基座**、严格校验认 `extends`、被继承块里的未知键定位、`extends` 条目各自带 `image_tokens`、同名同价的四角色形态、无 `extends` 配置在节点合并路径与参照路径上 `reflect.DeepEqual`、无 `extends` 配置的问题清单逐字不变）、`config/knownkeys.go` + `TestUnknownKeyWarningLines`（路径与行号、两个模板零告警）、`config/template_keys_test.go`（两份模板键面一致、版本号一致、都能加载并解析出全部角色、`image_tokens` 逐键覆盖）、`config/runconfig_rewrite_test.go`（改写稿除白名单路径外逐键逐值等于源配置、每个角色解析出的有效模型与图片计量规则一致、严格校验只剩占位符、四个角色恰好各一行 `extends`）。
 
 **没有做的事**：`extends` 不做深层 map 的半合并（`request_body`/`thinking` 整块替换，语义表已写明）；改写稿里那处 `figure_check` 缩进修正改了行为面（虽然 `enabled: false`，但从此会被真正读到）——已在交付说明里单独列出，敢要就删掉那 8 行。
+
+### ⑥ `--list` 的提示词列改成 token 口径（用户追加）
+
+用户："list 列是哪里？但是感觉用 token 好一点。"`docvision sessions --list` 第 4 列量的是会话的**系统提示词快照**，此前打印字符数（`6247 字符`），现在默认打印**同一个本地估算器**算出的估计（`MetaInfo.PromptTokenEst`，与详情栏「提示词快照」同源），形态与页面一致（`≈ 1.5k`）、表头写明单位（「提示词 tokens」）。新增 `--unit token|char`（默认 `token`）切回字符：`--unit char` 的表头是「提示词 字符」、值是精确字符数（与原先一字不差），非法取值报错并列出可选值。测试钉住两种口径的表头与取值、`--list` 其余 8 列在两种单位下逐字段相同、以及纯 ASCII 与含中文假数据下的列起点（rune 与显示宽度两个口径）；实跑真实运行目录 `--dir /home/share/samba-share/PDF2MD/latex_project`（只读）核对两种单位的前 3 行。

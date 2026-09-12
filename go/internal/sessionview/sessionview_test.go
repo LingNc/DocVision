@@ -70,6 +70,31 @@ func TestHumanSize(t *testing.T) {
 	}
 }
 
+// TestHumanTokenEst pins the display form of a LOCAL estimate, which must match
+// the viewer's fmtTokens (assets/viewer.js): k below a million (no decimal from
+// 10k up), two decimals of M above it, and always the ≈ — a local estimate is
+// never a provider number. `sessions --list` shows exactly these strings.
+func TestHumanTokenEst(t *testing.T) {
+	cases := map[int]string{
+		0:       "≈ 0",
+		12:      "≈ 12",
+		999:     "≈ 999",
+		1000:    "≈ 1.0k",
+		1512:    "≈ 1.5k",
+		9999:    "≈ 10.0k",
+		10000:   "≈ 10k",
+		62384:   "≈ 62k",
+		999999:  "≈ 1000k",
+		1000000: "≈ 1.00M",
+		2880000: "≈ 2.88M",
+	}
+	for in, want := range cases {
+		if got := HumanTokenEst(in); got != want {
+			t.Errorf("HumanTokenEst(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TestScanLabelsCountingAndOrder covers the three things the sidebar depends
 // on: which files are sessions at all, how they are labelled, and the order.
 func TestScanLabelsCountingAndOrder(t *testing.T) {

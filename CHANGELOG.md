@@ -21,6 +21,7 @@
 - **配置里残留的旧 estimate 键会出声**：`image_px_per_token` / `image_tokens_min` / `image_tokens_max` / `image_tokens_fallback` 改名后没人再读它们，而 `LoadConfig` 对未知键不严格（严格检查只在 `docvision setup`），所以启动时按 `latex.bash_sandbox` 那条先例打印一行迁移提示，不让"改了却没生效"变成无声的困惑。
 - **`preview.port` 的文档口径改成与代码一致**：模板与 `docs/config.md` 一直写着"配置里写 `0` = 由内核挑一个空闲端口"，但 `setDefaults` 会把 `0` 补成 8848（配置分不出「没写」与「写了 0」）——实际能由内核挑端口的只有命令行 `--port 0`。只改文档措辞，行为未动。
 - **`docvision sessions --serve` 打印实际绑定的监听地址**：横幅改为打印 `net.Listen` 回报的地址，`preview.host: 0.0.0.0` 就打印 `0.0.0.0:8849`（双栈机器上可能是 `[::]:8849`）、端口配置成 `0` 就打印内核分配的端口，来源标签（`config preview.host/port` / `--port` / `--addr` / `内置默认`）照旧；绑定通配地址时额外打印一行 `浏览 http://127.0.0.1:<端口>/`，因为 `http://0.0.0.0/…` 不是能打开的页面。
+- **`docvision sessions --list` 的「提示词」列默认按 token 估算**：这一列量的是该会话的系统提示词快照，值与预览页详情栏那行同源——`MetaInfo.PromptTokenEst`（`internal/session` 的估算器算好、随页面数据下发），显示形态也与页面一致（`≈ 1.5k`），表头改成自解释的「提示词 tokens」。新增 `--unit token|char`（默认 `token`）切回字符：`--unit char` 的表头是「提示词 字符」、值是精确字符数（不带 `≈`，与原先的「N 字符」一字不差），非法取值报错并列出可选值。`--list` 其余列、列宽与排序行为一律未动。
 
 ## [v1.5.0-beta.5] - 2026-09-12
 

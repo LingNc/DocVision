@@ -58,7 +58,8 @@ paths.latex_output，与 docvision latex 自动启动的预览服务同源）；
   · 消息正文支持 **Markdown 预览**（标题 / 列表 / 代码块 / 表格 / 链接，自带小渲染器、无外链、
     不拼 HTML），页签行右端有 Markdown 开关（默认开，可回到纯文本）与显示单位开关
     token / 字符（默认 token：行内计数是**本地估算**、一律带 ≈，字符是精确计数；详情栏
-    指标是厂商实测值，不带 ≈，也不受这个开关影响）；
+    指标是厂商实测值，不带 ≈，也不受这个开关影响）；--list 的「提示词」列同理：默认 token
+    （本地估算、带 ≈，表头「提示词 tokens」），--unit char 换回精确字符数（表头「提示词 字符」）；
   · 工具输入输出与代码块做**等宽高亮**：JSON（键 / 字符串 / 数字 / true-false-null）与终端
     输出（命令行 $ / #、diff 的 + / -、error/warning/OK 状态词、LaTeX 的 ! 与
     Overfull/Underfull、路径与 URL）；复制按钮复制的始终是原始文本；
@@ -104,6 +105,7 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
   docvision sessions                            # 扫描配置里的根目录（无配置则当前目录），生成 <根目录>/sessions.html
   docvision sessions --dir ~/PDF2MD             # 指定扫描根目录
   docvision sessions --list                     # 只在终端列出扫到的会话
+  docvision sessions --list --unit char         # 提示词列改回精确字符数
   docvision sessions --serve                    # 实时预览（地址取配置 preview.host/port）
   docvision sessions --serve --port 9000        # 只改端口（host 仍取配置）
   docvision sessions --serve --addr 127.0.0.1:9000
@@ -130,6 +132,10 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 			if serve && list {
 				return fmt.Errorf("--list 与 --serve 不能同时使用：--list 只在终端列出会话")
 			}
+			unit, err := sessionsUnit(cmd)
+			if err != nil {
+				return err
+			}
 
 			sessions, err := sessionview.Scan(root)
 			if err != nil {
@@ -138,7 +144,7 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 			sessionview.ApplyPrices(sessions, prices)
 
 			if list {
-				printSessions(sessions, root, dirSource)
+				printSessions(sessions, root, dirSource, unit)
 				return nil
 			}
 			if costOnly, _ := cmd.Flags().GetBool("cost"); costOnly {
@@ -187,7 +193,8 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 	cmd.Flags().Bool("serve", false, "启动本地只读服务并实时刷新（打印 URL，不自动打开浏览器）")
 	cmd.Flags().String("addr", "", "服务监听地址 host:port（默认取配置 preview.host/port，再退回 127.0.0.1:8848；--addr 优先于 --port）")
 	cmd.Flags().Int("port", 0, "服务监听端口（默认取配置 preview.port；等价于 --addr <配置的 host>:<端口>）")
-	cmd.Flags().Bool("list", false, "只在终端列出扫到的会话（项目/阶段/消息数/提示词字符数/大小/修改时间/路径）")
+	cmd.Flags().Bool("list", false, "只在终端列出扫到的会话（项目/阶段/消息数/提示词 tokens|字符/用量/成本/大小/修改时间/路径）")
+	cmd.Flags().String("unit", sessionsUnitToken, "提示词列的口径 token|char（默认 token：本地估算、带 ≈；char：精确字符数）")
 	cmd.Flags().String("out", "", "静态导出路径（默认 <根目录>/sessions.html）")
 	cmd.Flags().Bool("cost", false, "只打印按阶段的用量与费用报告（token/缓存命中率/价格/平均每次请求），价格来自配置 models.*.price")
 	return cmd
@@ -289,14 +296,63 @@ func usageCell(s sessionview.SessionInfo) string {
 	return cell
 }
 
-// printSessions renders the terminal table used by --list.
-func printSessions(sessions []sessionview.SessionInfo, root, dirSource string) {
+// The --list prompt column counts one thing in two units, so the helper names
+// are the only place the strings appear: "token" is the local estimate of the
+// system prompt snapshot (the same estimator the preview page uses, hence the
+// ≈), "char" is the exact character count the column always showed.
+const (
+	sessionsUnitToken = "token"
+	sessionsUnitChar  = "char"
+)
+
+// sessionsUnit reads --unit and rejects anything else: a typo in a unit would
+// otherwise silently print the column in the wrong unit.
+func sessionsUnit(cmd *cobra.Command) (string, error) {
+	raw, _ := cmd.Flags().GetString("unit")
+	unit := strings.ToLower(strings.TrimSpace(raw))
+	if unit == sessionsUnitToken || unit == sessionsUnitChar {
+		return unit, nil
+	}
+	return "", fmt.Errorf("--unit 取值无效：%q（可选值：%s|%s）", raw, sessionsUnitToken, sessionsUnitChar)
+}
+
+// promptCell renders the --list 「提示词」 column: the size of the newest system
+// prompt snapshot of the session, which is exactly what the preview's detail
+// pane shows for 「提示词快照」. token (the default) is the LOCAL estimate and
+// therefore carries the ≈ prefix; char is the exact character count. "-" means
+// the transcript has no meta line at all (a session that never wrote a prompt
+// snapshot), which must not read as "an empty prompt".
+func promptCell(s sessionview.SessionInfo, unit string) string {
+	if s.Meta == nil {
+		return "-"
+	}
+	if unit == sessionsUnitChar {
+		if s.Meta.PromptChars > 0 {
+			return fmt.Sprintf("%d 字符", s.Meta.PromptChars)
+		}
+		return "-"
+	}
+	if s.Meta.PromptTokenEst > 0 {
+		return sessionview.HumanTokenEst(s.Meta.PromptTokenEst)
+	}
+	return "-"
+}
+
+// printSessions renders the terminal table used by --list. unit is the --unit
+// value and only affects the 提示词 column: the header names the unit so the
+// cell values stay short (「提示词 tokens」⇒ ≈ 1.5k), and every other column
+// keeps its wording, order and width.
+func printSessions(sessions []sessionview.SessionInfo, root, dirSource, unit string) {
 	if len(sessions) == 0 {
 		fmt.Printf("没有找到会话转录（*.jsonl）：%s（来源 %s）\n", root, dirSource)
 		return
 	}
+	promptHeader := "提示词 tokens"
+	if unit == sessionsUnitChar {
+		promptHeader = "提示词 字符"
+	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "项目\t阶段\t消息数\t提示词\t用量\t成本\t大小\t修改时间\t路径")
+	fmt.Fprintf(w, "项目\t阶段\t消息数\t%s\t用量\t成本\t大小\t修改时间\t路径\n", promptHeader)
 	var msgs int
 	for _, s := range sessions {
 		msgs += s.Messages
@@ -304,17 +360,13 @@ func printSessions(sessions []sessionview.SessionInfo, root, dirSource string) {
 		if s.Live {
 			live = " ●"
 		}
-		prompt := "-"
-		if s.Meta != nil && s.Meta.PromptChars > 0 {
-			prompt = fmt.Sprintf("%d 字符", s.Meta.PromptChars)
-		}
 		project := s.Project
 		if project == "" {
 			project = "（根目录）"
 		}
 		fmt.Fprintf(w, "%s\t%s%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			project,
-			s.Title, live, s.Messages, prompt, usageCell(s), costCell(s), sessionview.HumanSize(s.Bytes),
+			s.Title, live, s.Messages, promptCell(s, unit), usageCell(s), costCell(s), sessionview.HumanSize(s.Bytes),
 			s.ModTime.Format("2006-01-02 15:04:05"), s.ID)
 	}
 	_ = w.Flush()

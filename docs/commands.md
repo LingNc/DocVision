@@ -129,6 +129,8 @@ docvision sessions --out /tmp/sessions.html   # 自定义静态导出路径
 docvision sessions --cost                     # 只打印按阶段的用量/费用报告
 ```
 
+`--list` 的提示词列默认按 token 估算（带 `≈`），`--unit char` 切回精确字符数。
+
 页面本身也会显示费用：侧栏每个会话的用量摘要末尾、底部合计、以及会话指标卡里的「费用」瓷砖（都读索引 JSON 里的 `cost` 字段，由配置里的价格算好；没配价格的会话整块不显示金额）。
 
 `--cost` 按**阶段**汇总（`convert` / `checker` / `style-fix` / `style` / `vector` …）：会话数、请求数、输入与输出 tokens、加权缓存命中率、金额与平均每次请求，最贵的排前面。价格来自配置里的 `models.<条目>.price`（元/百万 tokens，分**未命中缓存输入 / 命中缓存输入 / 输出**三段），没配价格的模型**不显示金额**（显示"未配价"并提示金额只是下界，绝不用 ¥0 冒充免费）。`docvision latex` 跑完也会自动打印同一份表，并额外按书的规模给出**每张图 / 每页成本**（图片数取 `progress_items/`，页数取交付的 `out/book.pdf`）。
