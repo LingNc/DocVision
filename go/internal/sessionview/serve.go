@@ -39,31 +39,56 @@ type ServeOptions struct {
 	OpenBrowser bool
 }
 
+// Bound is where the viewer actually listens, as net.Listen reported it — not
+// as the config or the flags asked for it. A wildcard bind is a real address to
+// print (0.0.0.0:8849) but not one to open in a browser, so it also carries the
+// loopback URL to click.
+type Bound struct {
+	// Addr is host:port exactly as bound: "127.0.0.1:8848", "0.0.0.0:8849",
+	// "[::]:8849", or the port the kernel picked when 0 was requested.
+	Addr string
+	// URL is what a human can paste into a browser: the bound address, except
+	// that a wildcard bind is rendered as loopback (that is where the page is
+	// reachable from).
+	URL string
+	// Browse is the loopback URL to click, set only when Addr is a wildcard
+	// bind (otherwise it is URL and saying it twice helps nobody).
+	Browse string
+}
+
 // Serve runs the read-only session viewer until the process is interrupted.
 //
-// It prints exactly three lines once the listener is actually up: the URL (with
-// the port the kernel picked when 0 was requested), the scanned directory, and
-// the config behind both choices.
+// It prints the banner once the listener is actually up.
 func Serve(opt ServeOptions) error {
-	url, stop, err := Start(opt.Root, opt.Addr)
+	bound, stop, err := Start(opt.Root, opt.Addr)
 	if err != nil {
 		return err
 	}
-	fmt.Print(serveBanner(url, opt))
+	fmt.Print(serveBanner(bound, opt))
 	if opt.OpenBrowser {
-		openInBrowser(url)
+		openInBrowser(bound.URL)
 	}
 	<-stop
 	return nil
 }
 
-// serveBanner renders the three startup lines: URL (with the port the kernel
-// picked when 0 was requested), the scanned directory, and the config behind
-// both choices. Each value carries where it came from; there is no prose.
-func serveBanner(url string, opt ServeOptions) string {
+// serveBanner renders the startup lines: where it listens, what it scans and
+// which config is behind both choices. Each value carries where it came from;
+// there is no prose.
+//
+// The listen address is the one net.Listen returned, so a wildcard bind prints
+// "0.0.0.0:8849" and a port the kernel picked prints the port it picked. A
+// wildcard bind gets one extra line with the loopback URL, because that is the
+// address a browser can actually open.
+func serveBanner(bound Bound, opt ServeOptions) string {
 	rootAbs, _ := filepath.Abs(opt.Root)
 	var b strings.Builder
-	fmt.Fprintf(&b, "会话预览: %s（只读服务，Ctrl+C 停止）\n", url)
+	if bound.Browse != "" {
+		fmt.Fprintf(&b, "会话预览: %s（只读服务，Ctrl+C 停止）\n", bound.Addr)
+		fmt.Fprintf(&b, "浏览 %s\n", bound.Browse)
+	} else {
+		fmt.Fprintf(&b, "会话预览: %s（只读服务，Ctrl+C 停止）\n", bound.URL)
+	}
 	fmt.Fprintf(&b, "目录: %s%s\n", rootAbs, sourceSuffix(opt.DirSource))
 	fmt.Fprintf(&b, "配置: %s%s\n", configNote(opt.ConfigNote), addrSourceSuffix(opt.AddrSource))
 	return b.String()
@@ -93,32 +118,32 @@ func configNote(note string) string {
 	return note
 }
 
-// Start launches the read-only viewer in the background and returns the URL
-// it is reachable at plus a channel that is closed when the listener stops.
-// It prints NOTHING: the caller owns the terminal (a latex run paints a live
+// Start launches the read-only viewer in the background and returns where it
+// actually bound plus a channel that is closed when the listener stops. It
+// prints NOTHING: the caller owns the terminal (a latex run paints a live
 // progress block there, and a stray Printf from a goroutine would land in the
-// middle of it), and it may want the URL for its own log line.
+// middle of it), and it may want the address for its own log line.
 //
-// addr "" = DefaultAddr; port 0 = the kernel picks one, so the returned URL is
-// the authoritative address.
-func Start(root, addr string) (url string, stopped <-chan struct{}, err error) {
+// addr "" = DefaultAddr; port 0 = the kernel picks one, so the returned Bound
+// is the authoritative address.
+func Start(root, addr string) (bound Bound, stopped <-chan struct{}, err error) {
 	if addr == "" {
 		addr = DefaultAddr
 	}
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
-		return "", nil, err
+		return Bound{}, nil, err
 	}
 	st, err := os.Stat(rootAbs)
 	if err != nil {
-		return "", nil, fmt.Errorf("会话预览: 无法读取目录 %s: %w", root, err)
+		return Bound{}, nil, fmt.Errorf("会话预览: 无法读取目录 %s: %w", root, err)
 	}
 	if !st.IsDir() {
-		return "", nil, fmt.Errorf("会话预览: %s 不是目录", root)
+		return Bound{}, nil, fmt.Errorf("会话预览: %s 不是目录", root)
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return "", nil, fmt.Errorf("会话预览: 监听 %s 失败（端口可能已被占用，请换一个端口）: %w", addr, err)
+		return Bound{}, nil, fmt.Errorf("会话预览: 监听 %s 失败（端口可能已被占用，请换一个端口）: %w", addr, err)
 	}
 	srv := &http.Server{
 		Handler:           newViewerServer(rootAbs),
@@ -129,7 +154,21 @@ func Start(root, addr string) (url string, stopped <-chan struct{}, err error) {
 		_ = srv.Serve(ln)
 		close(done)
 	}()
-	return "http://" + displayAddr(ln.Addr()) + "/", done, nil
+	out := Bound{Addr: ln.Addr().String(), URL: "http://" + displayAddr(ln.Addr()) + "/"}
+	if isWildcardAddr(ln.Addr()) {
+		out.Browse = out.URL
+	}
+	return out, done, nil
+}
+
+// isWildcardAddr reports whether a listener bound every interface (0.0.0.0 /
+// ::), which is exactly when the printed address is not a URL to open.
+func isWildcardAddr(a net.Addr) bool {
+	tcp, ok := a.(*net.TCPAddr)
+	if !ok {
+		return false
+	}
+	return tcp.IP == nil || tcp.IP.IsUnspecified()
 }
 
 // PreviewAddr renders host:port for the config-driven viewer ("" host =
@@ -237,12 +276,11 @@ func (v *viewerServer) serveAsset(w http.ResponseWriter, r *http.Request, name s
 // indexResponse is what the page polls every couple of seconds: enough to
 // render the sidebar and to decide whether the open session grew.
 type indexResponse struct {
-	Root      string        `json:"root"`
-	Generated string        `json:"generated"`
-	Sessions  []SessionInfo `json:"sessions"`
-	// Estimate is the local estimate rule (see EstimatePolicy): the details
-	// pane quotes it when it explains where the ≈ image numbers come from.
-	Estimate EstimatePolicy `json:"estimate"`
+	Root      string `json:"root"`
+	Generated string `json:"generated"`
+	// Every session carries its own per-image estimate rule (SessionInfo.
+	// Estimate): with per-model rules there is no single page-wide one.
+	Sessions []SessionInfo `json:"sessions"`
 }
 
 func (v *viewerServer) serveIndex(w http.ResponseWriter) {
@@ -258,7 +296,6 @@ func (v *viewerServer) serveIndex(w http.ResponseWriter) {
 		Root:      v.root,
 		Generated: time.Now().Format(time.RFC3339),
 		Sessions:  sessions,
-		Estimate:  CurrentEstimatePolicy(),
 	})
 }
 

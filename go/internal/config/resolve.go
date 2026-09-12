@@ -152,11 +152,34 @@ func semanticChecks(cfg *Config) []string {
 		if m.APIStreamIdleTimeout < 0 {
 			p = append(p, fmt.Sprintf("%s.api_stream_idle_timeout 不能为负", label))
 		}
+		if m.ImageTokens != nil {
+			p = append(p, checkEstimateMethod(label+".image_tokens", *m.ImageTokens)...)
+		}
 	}
+	p = append(p, checkEstimateMethod("estimate", cfg.Estimate)...)
 	req(strings.TrimSpace(cfg.Paths.InputDir) != "", "paths.input_dir 不能为空")
 	req(strings.TrimSpace(cfg.Paths.OutputDir) != "", "paths.output_dir 不能为空")
 	req(strings.TrimSpace(cfg.Paths.FinallyDir) != "", "paths.finally_dir 不能为空")
 	req(strings.TrimSpace(cfg.Paths.LogsDir) != "", "paths.logs_dir 不能为空")
+	return p
+}
+
+// checkEstimateMethod validates one estimate block (the top-level `estimate:`
+// or a model's `image_tokens:`): the method must be one of the three known
+// names, and the parameters it uses must be ordered.
+func checkEstimateMethod(label string, e EstimateConfig) []string {
+	var p []string
+	switch strings.ToLower(strings.TrimSpace(e.Method)) {
+	case "", EstimateMethodFixed, EstimateMethodPixels, EstimateMethodNone:
+	default:
+		p = append(p, fmt.Sprintf("%s.method 必须为 fixed/pixels/none（当前 %q）", label, e.Method))
+	}
+	if e.PxPerToken < 0 || e.Tokens < 0 || e.MinTokens < 0 || e.MaxTokens < 0 {
+		p = append(p, fmt.Sprintf("%s 的 tokens/px_per_token/min_tokens/max_tokens 不能为负", label))
+	}
+	if e.MaxTokens != 0 && e.MinTokens != 0 && e.MaxTokens < e.MinTokens {
+		p = append(p, fmt.Sprintf("%s.max_tokens 不能小于 min_tokens（%d < %d）", label, e.MaxTokens, e.MinTokens))
+	}
 	return p
 }
 

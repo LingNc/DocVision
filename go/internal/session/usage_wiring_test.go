@@ -95,6 +95,20 @@ func TestRunRecordsUsageAndTTFT(t *testing.T) {
 		t.Fatalf("用量行没有时间戳: %v", rec)
 	}
 
+	// 本地那一半也必须落在用量行上：预览页靠它把厂商 prompt_tokens 的增量
+	// 换算成"每张图片实测多少 token"。
+	if rec["text_tokens"] == nil || rec["text_tokens"].(float64) <= 0 {
+		t.Fatalf("用量行没有记录本地文本估算 (text_tokens): %v", rec)
+	}
+	if got, ok := rec["image_count"]; ok && got != float64(0) {
+		t.Fatalf("这一轮没有图片，image_count 应为 0 或省略: %v", rec)
+	}
+	// 记的是**请求发出那一刻**的文本估算（请求之后历史又长了一条助手消息，
+	// 所以不能拿运行结束后的 promptTextTokens 比）。
+	if s.reqTextTokens <= 0 || rec["text_tokens"].(float64) != float64(s.reqTextTokens) {
+		t.Fatalf("text_tokens = %v，期望请求发出时的文本估算 %d", rec["text_tokens"], s.reqTextTokens)
+	}
+
 	// 消息行也要有时间戳。
 	data, err := os.ReadFile(path)
 	if err != nil {

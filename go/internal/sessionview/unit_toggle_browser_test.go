@@ -33,6 +33,14 @@ const unitProbeJS = `
         });
         return hit;
       };
+      var imgTileTitle = function () {
+        var hit = 'none';
+        Array.prototype.forEach.call(document.querySelectorAll('.tile'), function (t) {
+          var l = t.querySelector('.tile-label');
+          if (l && l.textContent.indexOf('图片') === 0) { hit = t.getAttribute('title') || ''; }
+        });
+        return hit;
+      };
       var trajHead = function () {
         var ths = document.querySelectorAll('.traj-table th');
         return ths.length > 5 ? ths[5].textContent : 'none';
@@ -47,6 +55,7 @@ const unitProbeJS = `
       push('thinking', firstText('.disclosure-thinking .line-tail'));
       push('inTile', tile('输入 tokens'));
       push('imgTile', imgTile());
+      push('imgTitle', imgTileTitle());
       document.getElementById('tab-traj').click();
       push('trajHead', trajHead());
       push('trajCell', trajCell());
@@ -146,9 +155,16 @@ func TestViewerUnitToggleInChromium(t *testing.T) {
 		t.Errorf("轨迹表计数列 = %q，期望 ≈ 前缀", got)
 	}
 
-	// ② 图片瓦片：按尺寸折算（1000×800 → 800000/750 = 1066 → ≈ 1.1k）。
-	if got := unitProbe(t, dom, "imgTile"); got != "图片 1 张 / ≈ 1.1k" {
-		t.Errorf("图片瓦片 = %q，期望 \"图片 1 张 / ≈ 1.1k\"", got)
+	// ② 图片瓦片：按尺寸折算（1000×800 → 800000/750 = 1066 → 每张 ≈ 1.1k）。
+	// 本夹具没有用量行，所以只有本地估算、没有实测值。
+	if got := unitProbe(t, dom, "imgTile"); got != "图片 1 张 / ≈ 1.1k/张" {
+		t.Errorf("图片瓦片 = %q，期望 \"图片 1 张 / ≈ 1.1k/张\"", got)
+	}
+	// 没有用量行（或用量行没有本地那一半）时，悬浮说明必须说清口径，且明确
+	// 说明"没有实测样本"，不能让读者以为那个数字是厂商实测的。
+	if got := unitProbe(t, dom, "imgTitle"); !strings.Contains(got, "估算口径：") ||
+		!strings.Contains(got, "没有可用的实测样本") {
+		t.Errorf("图片瓦片的悬浮说明没有给出估算口径/实测缺席：%q", got)
 	}
 
 	// ③ 厂商实测值不带 ≈（输入 tokens 是 prompt_tokens）。
@@ -183,5 +199,36 @@ func TestViewerUnitToggleInChromium(t *testing.T) {
 	}
 	if got := unitProbe(t, dom, "trajCell2"); !regexp.MustCompile(`^[0-9]+$`).MatchString(got) {
 		t.Errorf("切换后轨迹表计数列 = %q，期望纯数字", got)
+	}
+}
+
+// TestImageViewTileShowsMeasuredCost 钉住"有实测样本时给实测、没有时只给估算"：
+// 同一个页面、同一张瓦片，两条相邻用量行（都带本地那一半）能推出每张实测值，
+// 显示就换成厂商口径（不带 ≈），悬浮说明同时给出样本量与本地估算口径。
+func TestImageViewTileShowsMeasuredCost(t *testing.T) {
+	root := t.TempDir()
+	writePNG(t, jsonl(root, "proj", "work", "sessions", "media", "fig.png"), 1000, 800)
+	body := "把这一页的公式转成 LaTeX。\n"
+	// 相邻两次请求：prompt 10000 → 13000，本地文本估算 9000 → 9200，新增 1 张图
+	// ⇒ 每张实测 (3000 − 200) / 1 = 2800。
+	writeFile(t, jsonl(root, "proj", "work", "sessions", "meas_01.jsonl"), transcript(
+		`{"t":"meta","kind":"system","session_label":"convert:01","model":"wire-A","text":`+jsonString(body)+`}`,
+		`{"t":"usage","ts":"2025-01-02T03:00:00Z","model":"wire-A","round":1,"prompt_tokens":10000,"cached_tokens":9000,"completion_tokens":120,"text_tokens":9000,"image_count":0}`,
+		`{"t":"msg","role":"assistant","text":"看一下图。","ts":"2025-01-02T03:00:01Z","tool_calls":[{"id":"call_1","type":"function","function":{"name":"view_image","arguments":"{\"path\":\"images/fig.png\"}"}}]}`,
+		`{"t":"msg","role":"user","text":"Tool image output (for your visual review):","images":["file://media/fig.png"],"ts":"2025-01-02T03:00:02Z"}`,
+		`{"t":"usage","ts":"2025-01-02T03:00:03Z","model":"wire-A","round":2,"prompt_tokens":13000,"cached_tokens":9000,"completion_tokens":80,"text_tokens":9200,"image_count":1}`,
+	))
+
+	dom := renderViewerDOM(t, root, "meas_01.jsonl", unitProbeJS)
+	// 1000×800 → 本地估算 1066（每张 ≈ 1.1k）；实测 2800 → 2.8k（厂商口径，不带 ≈）。
+	if got := unitProbe(t, dom, "imgTile"); got != "图片 1 张 / 实测 2.8k/张" {
+		t.Errorf("图片瓦片 = %q，期望实测值 \"图片 1 张 / 实测 2.8k/张\"", got)
+	}
+	title := unitProbe(t, dom, "imgTitle")
+	for _, want := range []string{"实测 2.8k/张", "1 步 / 1 张", "本地估算每张 ≈ 1.1k",
+		"估算口径：pixels 750px per token（85–4096）"} {
+		if !strings.Contains(title, want) {
+			t.Errorf("图片瓦片悬浮说明缺 %q：%q", want, title)
+		}
 	}
 }

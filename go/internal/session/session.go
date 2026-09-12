@@ -78,6 +78,13 @@ type Session struct {
 	// estBeforeRequest 是最近一次请求发出**之前**的本地估算，用它当
 	// 标定分母（响应回来后才知道厂商实测值）。
 	estBeforeRequest int
+	// reqTextTokens / reqImages snapshot the request that was just sent: the
+	// text-only local estimate and how many images it carried. Both travel on
+	// the t="usage" line, which is what lets the preview derive the MEASURED
+	// per-image cost from two consecutive prompt_tokens values (vendor number
+	// minus the text growth, divided by the images that were added).
+	reqTextTokens int
+	reqImages     int
 
 	// progressHook, when set, is notified after every API round and
 	// every tool execution with (completed rounds, executed tool
@@ -203,6 +210,10 @@ func (s *Session) recordUsage(resp *ChatResponse, round int, kind string) {
 		Duration: resp.Elapsed,
 		TTFT:     resp.TTFT,
 		Finish:   resp.FinishReason,
+		// The local half of the request (text estimate + image count) is what
+		// makes the vendor's prompt_tokens delta readable as a per-image cost.
+		TextTokens: s.reqTextTokens,
+		Images:     s.reqImages,
 	}
 	if u := resp.Usage; u != nil {
 		rec.PromptTokens = u.PromptTokens
@@ -380,7 +391,7 @@ func toolImageContent(v visionTurn) []map[string]interface{} {
 // so the compaction threshold counts the picture and not just its text handle.
 func (s *Session) appendToolImage(v visionTurn) {
 	content := toolImageContent(v)
-	tokens := []int{ImageTokensOfBase64(v.b64)}
+	tokens := []int{ImageTokensOfBase64ForModel(s.modelName(), v.b64)}
 	s.messages = append(s.messages, ChatMessage{Role: "user", Content: content, ImageTokens: tokens})
 	s.appendTranscript(ChatMessage{Role: "user", Content: toolImageContent(v)})
 }
@@ -405,7 +416,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 				"type":      "image_url",
 				"image_url": map[string]string{"url": "data:image/jpeg;base64," + img},
 			})
-			userMsg.ImageTokens = append(userMsg.ImageTokens, ImageTokensOfBase64(img))
+			userMsg.ImageTokens = append(userMsg.ImageTokens, ImageTokensOfBase64ForModel(s.modelName(), img))
 		}
 		userMsg.Content = parts
 	} else {
@@ -477,7 +488,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		if err := s.maybeCompact(); err != nil {
 			return "", fmt.Errorf("compaction failed: %w", err)
 		}
-		s.estBeforeRequest = s.EstimatedTokens()
+		s.snapshotRequest("")
 		req := &ChatRequest{
 			Model:       s.client.Model(),
 			Messages:    s.messages,
@@ -719,6 +730,18 @@ func (s *Session) logf(format string, args ...interface{}) {
 // NOT small (a full LaTeX tool set costs ~1.8k tokens), so leaving them out
 // underestimated the real prompt by tens of thousands of tokens.
 func (s *Session) EstimatedTokens() int {
+	total := s.promptTextTokens()
+	for _, m := range s.messages {
+		total += messageImageTokens(s.modelName(), m)
+	}
+	return total
+}
+
+// promptTextTokens is the text-only half of EstimatedTokens: system prompt,
+// tool definitions and every message without its images. The usage line stores
+// it so the preview can subtract the text growth from a prompt_tokens delta and
+// get the measured per-image cost.
+func (s *Session) promptTextTokens() int {
 	total := textTokens(s.system)
 	if len(s.toolDefs) > 0 {
 		if raw, err := json.Marshal(s.toolDefs); err == nil {
@@ -726,9 +749,33 @@ func (s *Session) EstimatedTokens() int {
 		}
 	}
 	for _, m := range s.messages {
-		total += messageTokens(m)
+		total += messageTextTokens(m)
 	}
 	return total
+}
+
+// modelName is the wire model id this session talks to; it selects the
+// per-model image estimate. Empty when the session has no client (hand-built
+// sessions in tests) and then falls back to the global estimate.
+func (s *Session) modelName() string {
+	if s.client == nil {
+		return ""
+	}
+	return s.client.Model()
+}
+
+// snapshotRequest records what the request about to be sent contains: the local
+// size estimate (for the compaction threshold) plus the text-only estimate and
+// the image count that the usage line carries. extraText is request-only
+// content that is not in s.messages (the compaction instruction).
+func (s *Session) snapshotRequest(extraText string) {
+	extra := textTokens(extraText)
+	s.estBeforeRequest = s.EstimatedTokens() + extra
+	s.reqTextTokens = s.promptTextTokens() + extra
+	s.reqImages = 0
+	for _, m := range s.messages {
+		s.reqImages += messageImageCount(m)
+	}
 }
 
 // observePromptSize 用厂商返回的真实 prompt_tokens 校准本地估算。
@@ -1010,7 +1057,7 @@ func (s *Session) compact() (bool, error) {
 		"Respond with the note only, no preamble.",
 	}, "\n")
 
-	s.estBeforeRequest = s.EstimatedTokens()
+	s.snapshotRequest(instruction)
 	req := &ChatRequest{
 		Model:       s.client.Model(),
 		Messages:    append(append([]ChatMessage{}, s.messages...), ChatMessage{Role: "user", Content: instruction}),
@@ -1064,26 +1111,29 @@ func (s *Session) compact() (bool, error) {
 	return true, nil
 }
 
-// messageTokens estimates the token cost of one message: CJK runes
-// count roughly one token each, other text four characters per token,
-// plus one estimate per attached image (by dimensions when they are known,
-// see ImageTokens).
+// messageTokens estimates what one message costs under the rule that applies to
+// `model`: its text plus one estimate per attached image. The image half needs
+// the model because vision endpoints bill images differently (fixed per image
+// vs. scaling with the pixel grid), so the rule is per model.
+//
 // messageTokens 必须覆盖请求体里真正发出去的一切：除了 Content，
 // 历史里回传的 reasoning_content（GLM 保留式思考）与 tool_calls 的
 // 函数名/参数 JSON 同样占 token——它们曾经完全不计入，是估算偏低
 // 数倍的主因之一。
-func messageTokens(m ChatMessage) int {
+func messageTokens(m ChatMessage, model string) int {
+	return messageTextTokens(m) + messageImageTokens(model, m)
+}
+
+// messageTextTokens is the text half of one message.
+func messageTextTokens(m ChatMessage) int {
 	total := 0
-	imgIdx := 0
 	switch c := m.Content.(type) {
 	case string:
 		total += textTokens(c)
 	case []map[string]interface{}:
 		for _, part := range c {
 			if t, ok := part["type"].(string); ok && t == "image_url" {
-				total += messageImageTokens(m, imgIdx)
-				imgIdx++
-				continue
+				continue // images are counted by messageImageTokens
 			}
 			if t, ok := part["text"].(string); ok {
 				total += textTokens(t)
@@ -1101,15 +1151,40 @@ func messageTokens(m ChatMessage) int {
 	return total
 }
 
-// messageImageTokens is the estimate of the idx-th image of a message: the
-// per-image value computed when the image was attached (from its dimensions),
-// or the fallback constant when the message carries none (hand-built messages,
-// transcripts from before the field existed).
-func messageImageTokens(m ChatMessage, idx int) int {
-	if idx >= 0 && idx < len(m.ImageTokens) && m.ImageTokens[idx] > 0 {
-		return m.ImageTokens[idx]
+// messageImageCount is how many images one message carries.
+func messageImageCount(m ChatMessage) int {
+	n := 0
+	if parts, ok := m.Content.([]map[string]interface{}); ok {
+		for _, part := range parts {
+			if t, ok := part["type"].(string); ok && t == "image_url" {
+				n++
+			}
+		}
 	}
-	return ImageTokens(0, 0)
+	return n
+}
+
+// messageImageTokens is the local estimate of every image of one message under
+// the rule that applies to `model`: the per-image value computed when the image
+// was attached (from its dimensions), or the rule's constant when the message
+// carries none (hand-built messages, transcripts from before the field existed).
+func messageImageTokens(model string, m ChatMessage) int {
+	est := EstimateForModel(model)
+	total := 0
+	idx := 0
+	if parts, ok := m.Content.([]map[string]interface{}); ok {
+		for _, part := range parts {
+			if t, ok := part["type"].(string); ok && t == "image_url" {
+				if idx < len(m.ImageTokens) && m.ImageTokens[idx] > 0 {
+					total += m.ImageTokens[idx]
+				} else {
+					total += est.PerImage(0, 0)
+				}
+				idx++
+			}
+		}
+	}
+	return total
 }
 
 func textTokens(s string) int {

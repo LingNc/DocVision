@@ -4,6 +4,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
@@ -96,6 +97,11 @@ type ModelConfig struct {
 	// (GLM-5.2+: max|xhigh|high|medium|low|minimal|none; only effective
 	// while thinking is enabled).
 	ReasoningEffort string `yaml:"reasoning_effort"`
+	// ImageTokens overrides the top-level estimate: block for THIS model only
+	// (same keys: method/tokens/px_per_token/min_tokens/max_tokens). Unset keys
+	// inherit the estimate block, and anything unset there uses the code
+	// default, so a model that needs its own rule only writes that one key.
+	ImageTokens *EstimateConfig `yaml:"image_tokens"`
 }
 
 // Streaming reports whether chat requests for this model use SSE
@@ -410,14 +416,17 @@ type PreviewConfig struct {
 	// "0.0.0.0" exposes the transcripts to the local network — the
 	// viewer is read-only but the transcripts contain the whole book).
 	Host string `yaml:"host"`
-	// Port default 8848 (sessionview.DefaultAddr); 0 lets the kernel pick
-	// a free port and the run log prints the exact URL.
+	// Port default 8848 (sessionview.DefaultAddr). A config cannot say "let the
+	// kernel pick" with 0: setDefaults turns 0 into 8848, because a plain int
+	// cannot tell "key absent" from "written as 0". The kernel-pick path is the
+	// command line's --port 0; the banner prints whatever net.Listen bound.
 	Port int `yaml:"port"`
 }
 
-// Addr renders host:port for net.Listen. Host "" = loopback; Port 0 (after
-// setDefaults it is 8848, but a hand-written config struct can still be 0)
-// means "let the kernel pick", which the run log then reports.
+// Addr renders host:port for net.Listen. Host "" = loopback. Port 0 means
+// "let the kernel pick" — reachable from the command line (--port 0) and from a
+// hand-built struct; after setDefaults a loaded config's 0 has become 8848. The
+// banner reports the address net.Listen actually bound, port 0 included.
 func (p PreviewConfig) Addr() string {
 	host := p.Host
 	if host == "" {
@@ -426,21 +435,29 @@ func (p PreviewConfig) Addr() string {
 	return net.JoinHostPort(host, strconv.Itoa(p.Port))
 }
 
-// EstimateConfig tunes the LOCAL token estimate: how many prompt tokens one
-// attached image counts as. It never changes a provider number — prompt_tokens
-// from the API is copied verbatim; this only feeds the compaction threshold and
-// the ≈ values in the session preview.
+// EstimateConfig is the `estimate:` block: the LOCAL per-image token estimate
+// behind the compaction threshold and the ≈ values in the session preview. It
+// never changes a provider number — prompt_tokens from the API is copied
+// verbatim; this only says how much one attached image is assumed to cost.
+//
+// 每张图算多少 token 取决于厂商（同一张图不同视觉模型能差 3~10 倍），所以有
+// 两种方法可选：fixed（每张固定 Tokens）与 pixels（按尺寸折算
+// width*height/PxPerToken，夹在 [MinTokens, MaxTokens] 之间）。这里写的是
+// **全局默认**；models.<名>.image_tokens 只给那一条模型换方法或调参数。
 type EstimateConfig struct {
-	// ImagePxPerToken is how many pixels one image token covers (default 750,
-	// measured against a real vision endpoint). With the dimensions known the
-	// estimate is width*height/ImagePxPerToken, clamped to the bounds below.
-	ImagePxPerToken int `yaml:"image_px_per_token"`
-	// ImageTokensMin / ImageTokensMax clamp a single image (default 85/4096).
-	ImageTokensMin int `yaml:"image_tokens_min"`
-	ImageTokensMax int `yaml:"image_tokens_max"`
-	// ImageTokensFallback is the per-image estimate when the dimensions are
-	// unknown (default 1100).
-	ImageTokensFallback int `yaml:"image_tokens_fallback"`
+	// Method is "fixed", "pixels" or "none". Empty = pixels.
+	Method string `yaml:"method"`
+	// Tokens is the per-image value for method=fixed, and also what pixels mode
+	// charges when the dimensions cannot be read. 0 = 1100 (measured ≈1050 on
+	// deepseek-v4.1-flash, where large images saturate).
+	Tokens int `yaml:"tokens"`
+	// PxPerToken is how many pixels one prompt token covers in pixels mode.
+	// 0 = 750 (measured 2.88M px -> 3697 tokens on glm-5.3-flash-official,
+	// i.e. ≈780 px/token).
+	PxPerToken int `yaml:"px_per_token"`
+	// MinTokens / MaxTokens clamp one image in pixels mode. 0 = 85/4096.
+	MinTokens int `yaml:"min_tokens"`
+	MaxTokens int `yaml:"max_tokens"`
 }
 
 type VerifyConfig struct {
@@ -631,15 +648,44 @@ type PathsConfig struct {
 // zero-valued fields, and returns the resulting Config.
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
-const CurrentConfigVersion = 8
+const CurrentConfigVersion = 9
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
+// retiredEstimateKeys are the per-image estimate keys that method/tokens/
+// px_per_token/min_tokens/max_tokens replaced. Nothing reads them any more, so
+// a config that still carries them would fall back to the defaults without a
+// word — LoadConfig only warns about unknown keys here (strict checks live in
+// docvision setup).
+var retiredEstimateKeys = []string{
+	"image_px_per_token", "image_tokens_min", "image_tokens_max", "image_tokens_fallback",
+}
+
+// hasRetiredEstimateKeys reports whether the raw config still carries a retired
+// estimate key.
+func hasRetiredEstimateKeys(data []byte) bool {
+	for _, k := range retiredEstimateKeys {
+		if bytes.Contains(data, []byte(k)) {
+			return true
+		}
+	}
+	return false
+}
+
 // warnDeprecatedKeys prints migration hints for configs written with an
 // older key layout. Non-fatal: the old keys still work.
 func warnDeprecatedKeys(cfg *Config) {
 	if cfg.UsesDeprecatedBashKeys() {
 		fmt.Fprintln(os.Stderr, "⚠ latex.bash_sandbox / latex.bash_max_output 已迁移到 tools.bash.sandbox / tools.bash.max_output（旧键仍生效，建议改用新位置）")
+	}
+}
+
+// warnRetiredEstimateKeys says it out loud when a config still has the old
+// per-image estimate keys: after the rename nothing reads them, and a silent
+// fallback to the defaults is exactly the kind of thing a user cannot debug.
+func warnRetiredEstimateKeys(data []byte) {
+	if hasRetiredEstimateKeys(data) {
+		fmt.Fprintln(os.Stderr, "⚠ estimate.image_px_per_token / image_tokens_min / image_tokens_max / image_tokens_fallback 已被 estimate.method + tokens / px_per_token / min_tokens / max_tokens 取代（旧键不再生效，建议按 config.example.yaml 更新）")
 	}
 }
 
@@ -662,6 +708,7 @@ func LoadConfig(path string) (*Config, error) {
 
 	checkConfigVersion(cfg)
 	warnDeprecatedKeys(cfg)
+	warnRetiredEstimateKeys(data)
 	setDefaults(cfg)
 	if err := validateThinkingTypes(cfg); err != nil {
 		return nil, err
@@ -961,20 +1008,26 @@ func setDefaults(cfg *Config) {
 		cfg.Preview.Port = 8848
 	}
 
-	// Local estimate tuning: only used for the compaction threshold and the
-	// ≈ values the session preview shows.
-	if cfg.Estimate.ImagePxPerToken == 0 {
-		cfg.Estimate.ImagePxPerToken = 750
+	// Local per-image token estimate: only used for the compaction threshold
+	// and the ≈ values the session preview shows. Zero fields = code default,
+	// and an absent key inside a model's image_tokens block inherits this one.
+	if cfg.Estimate.Method == "" {
+		cfg.Estimate.Method = EstimateMethodPixels
 	}
-	if cfg.Estimate.ImageTokensMin == 0 {
-		cfg.Estimate.ImageTokensMin = 85
+	if cfg.Estimate.Tokens == 0 {
+		cfg.Estimate.Tokens = 1100
 	}
-	if cfg.Estimate.ImageTokensMax == 0 {
-		cfg.Estimate.ImageTokensMax = 4096
+	if cfg.Estimate.PxPerToken == 0 {
+		cfg.Estimate.PxPerToken = 750
 	}
-	if cfg.Estimate.ImageTokensFallback == 0 {
-		cfg.Estimate.ImageTokensFallback = 1100
+	if cfg.Estimate.MinTokens == 0 {
+		cfg.Estimate.MinTokens = 85
 	}
+	if cfg.Estimate.MaxTokens == 0 {
+		cfg.Estimate.MaxTokens = 4096
+	}
+	// 上下限写反不在这里悄悄纠正：它是配置错误，由 semanticChecks 报出来；
+	// 运行期 ImageEstimate.Normalized 仍会把界限理成有序的，估算不会失控。
 
 	// Model prices: currency only (a rate of 0 stays 0 = unknown).
 	for name, mc := range cfg.Models {
@@ -1182,6 +1235,46 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 		entry.ReasoningEffort = fallback.ReasoningEffort
 	}
 	return entry, true
+}
+
+// Estimate methods accepted by estimate.method / models.<名>.image_tokens.method.
+const (
+	// EstimateMethodFixed charges one constant per image (estimate.tokens).
+	EstimateMethodFixed = "fixed"
+	// EstimateMethodPixels scales with size: width*height/px_per_token clamped
+	// to [min_tokens, max_tokens].
+	EstimateMethodPixels = "pixels"
+	// EstimateMethodNone charges nothing for an image locally.
+	EstimateMethodNone = "none"
+)
+
+// ResolveImageEstimate returns the per-image token estimate that applies to one
+// models: entry: the entry's own image_tokens block wins key by key, every key
+// it leaves unset inherits the top-level estimate: block, and anything still
+// unset keeps the zero value (the session side then applies the code default).
+// Unknown entry names get the global block — the viewer asks by model id, which
+// need not be a configured entry.
+func (c *Config) ResolveImageEstimate(name string) EstimateConfig {
+	out := c.Estimate
+	if entry, ok := c.Models[name]; ok && entry.ImageTokens != nil {
+		o := *entry.ImageTokens
+		if o.Method != "" {
+			out.Method = o.Method
+		}
+		if o.Tokens != 0 {
+			out.Tokens = o.Tokens
+		}
+		if o.PxPerToken != 0 {
+			out.PxPerToken = o.PxPerToken
+		}
+		if o.MinTokens != 0 {
+			out.MinTokens = o.MinTokens
+		}
+		if o.MaxTokens != 0 {
+			out.MaxTokens = o.MaxTokens
+		}
+	}
+	return out
 }
 
 // checkerDefaultToolRounds caps the per-chapter checker session when the

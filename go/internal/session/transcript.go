@@ -71,6 +71,15 @@ type transcriptLine struct {
 	DurationMS      int64  `json:"duration_ms,omitempty"`
 	TTFTMS          int64  `json:"ttft_ms,omitempty"`
 	Finish          string `json:"finish_reason,omitempty"`
+	// ImageCount / TextTokens are the LOCAL half of the request: how many
+	// images it carried and the text-only local estimate (see
+	// Session.snapshotRequest). Two consecutive lines then give the measured
+	// per-image cost: the vendor's prompt_tokens delta minus the text growth,
+	// divided by the images added. The key is image_count, not images — a
+	// "msg" line already uses images for its media references.
+	// Absent in transcripts written before these fields existed.
+	ImageCount int `json:"image_count,omitempty"`
+	TextTokens int `json:"text_tokens,omitempty"`
 }
 
 // toolSnapshot is the tool definition recorded in a meta line: exactly what
@@ -211,6 +220,12 @@ type UsageRecord struct {
 	Duration     time.Duration
 	TTFT         time.Duration
 	Finish       string
+	// TextTokens is the local text-only estimate of that request and Images is
+	// how many images it carried (see Session.snapshotRequest). They are what
+	// the preview needs to turn a prompt_tokens delta into a measured
+	// per-image cost; 0 means the record predates the fields.
+	TextTokens int
+	Images     int
 }
 
 // AppendUsage records one completed API request. Like meta lines it is never
@@ -236,6 +251,8 @@ func (w *TranscriptWriter) AppendUsage(u UsageRecord) error {
 		DurationMS:      u.Duration.Milliseconds(),
 		TTFTMS:          u.TTFT.Milliseconds(),
 		Finish:          u.Finish,
+		ImageCount:      u.Images,
+		TextTokens:      u.TextTokens,
 	}
 	data, err := json.Marshal(line)
 	if err != nil {

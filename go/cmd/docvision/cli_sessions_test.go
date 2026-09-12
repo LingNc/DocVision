@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/session"
 	"mineru-tools/internal/sessionview"
 )
 
@@ -152,5 +153,36 @@ func TestSessionsFlagsRegistered(t *testing.T) {
 	}
 	if got := cmd.Flags().Lookup("addr").DefValue; got != "" {
 		t.Errorf("--addr 默认值 = %q，必须留空让配置生效", got)
+	}
+}
+
+// TestApplyEstimateConfigReachesEstimator 钉住配置真的走到估算器：全局 estimate
+// 是默认，models.<名>.image_tokens 只覆盖那一条，且 wire 模型 id 也认（会话与
+// 预览页只知道 wire id，不知道条目名）。
+func TestApplyEstimateConfigReachesEstimator(t *testing.T) {
+	defer session.ResetEstimates()
+	cfg := &config.Config{
+		Estimate: config.EstimateConfig{Method: config.EstimateMethodPixels, PxPerToken: 750, MinTokens: 85, MaxTokens: 4096},
+		Models: map[string]config.ModelConfig{
+			"text":     {Model: "wire-default"},
+			"drawing":  {Model: "glm-5.3-flash", ImageTokens: &config.EstimateConfig{Method: config.EstimateMethodFixed, Tokens: 1050}},
+			"verifier": {Model: "glm-5.3-flash-official", ImageTokens: &config.EstimateConfig{MaxTokens: 8192}},
+		},
+	}
+	applyEstimateConfig(cfg)
+
+	if got := session.ImageTokensForModel("wire-unknown", 1000, 800); got != 1066 {
+		t.Errorf("未配置模型 = %d，期望继承全局 1066", got)
+	}
+	// 条目名与 wire 模型 id 都能命中同一条覆盖。
+	for _, key := range []string{"drawing", "GLM-5.3-Flash"} {
+		if got := session.ImageTokensForModel(key, 1000, 800); got != 1050 {
+			t.Errorf("%s = %d，期望 fixed 1050", key, got)
+		}
+	}
+	// 只覆盖 max_tokens 的条目：其余继承全局。
+	if got := session.EstimateForModel("glm-5.3-flash-official"); got.Method != config.EstimateMethodPixels ||
+		got.MaxTokens != 8192 || got.MinTokens != 85 {
+		t.Errorf("部分覆盖的规则 = %+v", got)
 	}
 }

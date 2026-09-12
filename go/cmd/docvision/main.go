@@ -135,13 +135,40 @@ func loadConfigWithFlag(cmd *cobra.Command) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	session.SetEstimateConfig(session.EstimateConfig{
-		ImagePxPerToken: cfg.Estimate.ImagePxPerToken,
-		ImageTokensMin:  cfg.Estimate.ImageTokensMin,
-		ImageTokensMax:  cfg.Estimate.ImageTokensMax,
-		ImageFallback:   cfg.Estimate.ImageTokensFallback,
-	})
+	applyEstimateConfig(cfg)
 	return cfg, nil
+}
+
+// applyEstimateConfig installs the configured per-image token estimate into the
+// process-wide estimator: the top-level estimate: block is the default for
+// every model and each models.<name>.image_tokens block overrides it for that
+// model alone. The override is registered under the entry name AND its wire
+// model id, because a session (and the usage line the preview reads) only knows
+// the wire id.
+func applyEstimateConfig(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	toSession := func(e config.EstimateConfig) session.ImageEstimate {
+		return session.ImageEstimate{
+			Method:     e.Method,
+			Tokens:     e.Tokens,
+			PxPerToken: e.PxPerToken,
+			MinTokens:  e.MinTokens,
+			MaxTokens:  e.MaxTokens,
+		}
+	}
+	session.SetEstimateConfig(toSession(cfg.Estimate))
+	for name, mc := range cfg.Models {
+		if mc.ImageTokens == nil {
+			continue
+		}
+		est := toSession(cfg.ResolveImageEstimate(name))
+		session.SetModelEstimate(name, est)
+		if wire := mc.Model; wire != "" && wire != name {
+			session.SetModelEstimate(wire, est)
+		}
+	}
 }
 
 func newWorkflowCmd() *cobra.Command {

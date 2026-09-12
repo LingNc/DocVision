@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **图片 token 的本地估算改为"两种方法、可按模型各选一套"**：`estimate` 块不再只有一个"像素折算"口径，而是 `method`（`pixels` / `fixed` / `none`）+ 共用参数 `tokens` / `px_per_token` / `min_tokens` / `max_tokens`（键 `estimate.image_px_per_token` / `image_tokens_min` / `image_tokens_max` / `image_tokens_fallback` 被这四项取代，`config_version` 8→9）。同一个模型可以在自己的条目下写 `image_tokens:` 只覆盖要改的键（其余继承顶层 `estimate`，没配的条目完全跟全局走），因为同一个模型族里"按张固定计费"与"按像素折算"的端点会同时存在：实测 `glm-5.3-flash-official` 上 2.88M 像素的页面渲染约 3697 token（≈780 px/token），而 `deepseek-v4.1-flash` 上大图饱和在 ≈1050 token/张。默认仍是 `pixels 750 / 85 / 4096`（与上一版一致，老配置的估算数字不变），`method: fixed` 的默认 `tokens` 是 1100。
+- **详情栏「图片」瓦片分实测与估算**：同一会话的用量行能推出实测值时瓦片给 `实测 1.2k/张`，推不出时给 `≈ 1.1k/张`（本地估算），悬浮说明写出该会话生效的完整规则（如 `pixels 750px per token（85–4096）`）、实测的样本量与本地估算的对照。实测值算法：相邻两次请求的 `prompt_tokens` 差值减去文本估算增量、再除以新增图片数，取各步中位数；本地裁剪/压缩导致请求变小、该步没有新增图片、或用量行没有本地那一半（旧转录）的步一律跳过。为此用量行新增 `text_tokens`（请求发出前的本地文本估算）与 `image_count`（该次请求的图片数）两项。
+- **配置里残留的旧 estimate 键会出声**：`image_px_per_token` / `image_tokens_min` / `image_tokens_max` / `image_tokens_fallback` 改名后没人再读它们，而 `LoadConfig` 对未知键不严格（严格检查只在 `docvision setup`），所以启动时按 `latex.bash_sandbox` 那条先例打印一行迁移提示，不让"改了却没生效"变成无声的困惑。
+- **`preview.port` 的文档口径改成与代码一致**：模板与 `docs/config.md` 一直写着"配置里写 `0` = 由内核挑一个空闲端口"，但 `setDefaults` 会把 `0` 补成 8848（配置分不出「没写」与「写了 0」）——实际能由内核挑端口的只有命令行 `--port 0`。只改文档措辞，行为未动。
+- **`docvision sessions --serve` 打印实际绑定的监听地址**：横幅改为打印 `net.Listen` 回报的地址，`preview.host: 0.0.0.0` 就打印 `0.0.0.0:8849`（双栈机器上可能是 `[::]:8849`）、端口配置成 `0` 就打印内核分配的端口，来源标签（`config preview.host/port` / `--port` / `--addr` / `内置默认`）照旧；绑定通配地址时额外打印一行 `浏览 http://127.0.0.1:<端口>/`，因为 `http://0.0.0.0/…` 不是能打开的页面。
+
 ## [v1.5.0-beta.5] - 2026-09-12
 
 ### Added

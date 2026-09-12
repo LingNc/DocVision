@@ -121,8 +121,6 @@
     // 计数显示单位：token（默认）或 char。token 一律是**本地估算**（带 ≈），
     // char 是精确字符数；详情栏瓦片里的 tokens 是厂商回执，不受这个开关影响。
     unit: 'token',
-    // 本地估算规则（页面数据下发，缺失时用内置默认值）。
-    estPolicy: { pxPerToken: 750, min: 85, max: 4096, fallback: 1100 },
     // 侧栏 / 详情栏的宽度偏好：0 = 折叠（侧栏折成 56px 轨道，详情栏关掉）
     sidebar: SIDEBAR_DEFAULT,
     details: 0,
@@ -198,6 +196,19 @@
         if (c && c.id) { state.callEst[c.id] = est.calls[i] || 0; }
       });
     });
+  }
+
+  /* 本会话的图片计量规则：Go 侧按**本会话的模型**解析好的那条
+     （method/tokens/pxPerToken/min/max + rule 文案），有实测样本时还带
+     measuredPerImage（由厂商 prompt_tokens 推出的每张实测值）。
+     页面不再自己算规则：多模型可以各选一套 fixed / pixels，页面算会算错。 */
+  function currentEstimate() {
+    var id = state.current ? state.current.id : '';
+    var list = state.sessions || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id && list[i].estimate) { return list[i].estimate; }
+    }
+    return (state.current && state.current.estimate) || null;
   }
 
   /* 整个会话的图片张数与图片 token 估算（详情栏"图片"瓦片用）。 */
@@ -1899,11 +1910,26 @@
       '厂商实测值：随请求发出的图片 token 已经包含在里面，不单列。');
     var imgs = imageEstimate(state.lines);
     if (imgs.count) {
-      var pol = state.estPolicy;
-      tile('图片 ' + imgs.count + ' 张', '≈ ' + fmtTokens(imgs.tokens),
-        imgs.count + ' 张图片的本地估算（不是厂商数字）：能读到尺寸时按 宽×高/' + pol.pxPerToken +
-        ' 折算，夹在 ' + pol.min + '–' + pol.max + ' 之间；取不到尺寸时按每张 ' + pol.fallback + ' 计。\n' +
-        '对照：上面的「输入 tokens」是厂商实测的 prompt_tokens，其中已经包含图片 token。');
+      // 每张的平均值才是可以跟"每张多少 token"对比的量；总计放悬浮说明里
+      // （图片多的会话总计会盖过"每张"这个真正有用的数字）。
+      var est = currentEstimate();
+      var per = Math.round(imgs.tokens / imgs.count);
+      var rule = est ? est.rule : '本地估算';
+      var lines = [imgs.count + ' 张图片的本地估算合计 ≈ ' + fmtTokens(imgs.tokens) +
+        '（每张 ≈ ' + fmtTokens(per) + '）', '估算口径：' + rule];
+      var value = '≈ ' + fmtTokens(per) + '/张';
+      if (est && est.measuredPerImage) {
+        // 实测值由厂商 prompt_tokens 推出（相邻两次请求的差值，见 Go 侧
+        // measuredImageTokens），与上面的"输入 tokens"同源、不带 ≈。
+        value = '实测 ' + fmtTokens(est.measuredPerImage) + '/张';
+        lines.push('实测 ' + fmtTokens(est.measuredPerImage) + '/张：厂商 prompt_tokens 的相邻差值推出的每张均值' +
+          (est.measuredSamples ? '（' + est.measuredSamples + ' 步 / ' + est.measuredImages + ' 张）' : ''));
+        lines.push('本地估算每张 ≈ ' + fmtTokens(per) + '（口径：' + rule + '，本会话合计 ≈ ' + fmtTokens(imgs.tokens) + '）');
+      } else {
+        lines.push('没有可用的实测样本：本会话的用量行还不足以推出每张实测值（无用量行、或没有一次请求新增图片）');
+      }
+      lines.push('对照：上面的「输入 tokens」是厂商实测的 prompt_tokens，其中已经包含图片 token。');
+      tile('图片 ' + imgs.count + ' 张', value, lines.join('\n'));
     }
     tile('缓存命中', st.promptTokens ? st.cacheHitPct.toFixed(0) + '%' : '—',
       '前缀缓存命中率 = Σcached_tokens / Σprompt_tokens（供应商未上报时为 —）');
@@ -3473,7 +3499,6 @@
     state.sessions = payload.sessions || [];
     state.root = payload.root || state.root;
     state.generated = payload.generated || state.generated;
-    if (payload.estimate) { state.estPolicy = payload.estimate; }
     updateRootLabel();
     // 签名没变 → 一行 DOM 都不重建（只修补相对时间与高亮），
     // 用户手动折叠的项目组 / 阶段组与滚动位置因此不会被每 2 秒的轮询冲掉。
@@ -3652,7 +3677,6 @@
 
     if (MODE === 'static') {
       state.root = DATA.root || '';
-      state.estPolicy = DATA.estimate || state.estPolicy;
       state.generated = DATA.generated || '';
       // 静态模式只丢掉每会话的 lines 大块，其余字段**原样带走**。
       // 这里以前是一个手写白名单：每加一个字段（projectLegacy、stage、

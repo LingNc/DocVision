@@ -440,17 +440,19 @@ func startPreview(cfg *config.Config, log *logger.Logger) func() {
 	if cfg.Latex.Level == 2 {
 		root = cfg.Paths.LatexOutput
 	}
-	url, stopped, err := sessionview.Start(root, cfg.Preview.Addr())
+	bound, stopped, err := sessionview.Start(root, cfg.Preview.Addr())
 	if err != nil {
 		log.LogWarning(0, "[preview] 会话预览服务未启动:", err)
 		return nil
 	}
-	log.Log(0, "[preview] 实时会话预览:", url, "（目录", root, "，只读；preview.enabled 可关闭）")
+	// bound.URL is the address a browser can open (a wildcard bind is rendered
+	// as loopback); bound.Addr is what was really bound.
+	log.Log(0, "[preview] 实时会话预览:", bound.URL, "（监听", bound.Addr, "，目录", root, "，只读；preview.enabled 可关闭）")
 	return func() {
 		select {
 		case <-stopped:
 		default:
-			log.Log(0, "[preview] 本次运行结束，预览服务随进程退出:", url)
+			log.Log(0, "[preview] 本次运行结束，预览服务随进程退出:", bound.URL)
 		}
 	}
 }

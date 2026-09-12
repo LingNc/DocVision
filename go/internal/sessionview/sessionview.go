@@ -15,6 +15,7 @@ package sessionview
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -362,6 +364,55 @@ type SessionInfo struct {
 	// usage recording existed (the viewer then shows no metrics rather than
 	// zeros that look like a measurement).
 	Stats *UsageStats `json:"stats,omitempty"`
+	// Estimate is the per-image token rule that applies to THIS session's
+	// model, plus the measured per-image value when the usage lines allow
+	// deriving one. The details pane states the rule it actually used instead
+	// of keeping a copy that could go stale.
+	Estimate *SessionEstimate `json:"estimate,omitempty"`
+}
+
+// SessionEstimate describes, for one session, how the local per-image token
+// estimate is made and — when the vendor's usage lines allow it — what an image
+// actually cost.
+type SessionEstimate struct {
+	// Model is the wire model id the rule was resolved for ("" = the global
+	// estimate block, used by transcripts that record no model).
+	Model string `json:"model,omitempty"`
+	// Method / Tokens / PxPerToken / Min / Max are the resolved parameters of
+	// that rule.
+	Method     string `json:"method"`
+	Tokens     int    `json:"tokens"`
+	PxPerToken int    `json:"pxPerToken"`
+	Min        int    `json:"min"`
+	Max        int    `json:"max"`
+	// Rule is the same thing in one line, e.g. "fixed 1100/张" or
+	// "pixels 750px per token（85–4096）".
+	Rule string `json:"rule"`
+	// MeasuredPerImage is a per-image cost DERIVED FROM THE VENDOR's
+	// prompt_tokens (see measuredImageTokens), 0 when no usable sample exists.
+	// MeasuredSamples counts the request-to-request steps it came from and
+	// MeasuredImages how many images those steps added.
+	MeasuredPerImage int `json:"measuredPerImage,omitempty"`
+	MeasuredSamples  int `json:"measuredSamples,omitempty"`
+	MeasuredImages   int `json:"measuredImages,omitempty"`
+}
+
+// estimateInfoFor resolves the rule for one session and adds whatever the
+// usage lines can say about the real per-image cost.
+func estimateInfoFor(stat transcriptStat) *SessionEstimate {
+	model := stat.modelID()
+	rule := session.EstimateForModel(model)
+	out := &SessionEstimate{
+		Model:      model,
+		Method:     rule.Method,
+		Tokens:     rule.Tokens,
+		PxPerToken: rule.PxPerToken,
+		Min:        rule.MinTokens,
+		Max:        rule.MaxTokens,
+		Rule:       rule.Describe(),
+	}
+	out.MeasuredPerImage, out.MeasuredSamples, out.MeasuredImages = measuredImageTokens(stat.imageSamples)
+	return out
 }
 
 // Line is one transcript line, verbatim plus parsed. Bad is set when the line
@@ -637,6 +688,24 @@ type transcriptStat struct {
 	Meta     *MetaInfo
 	// Usage aggregates the t="usage" lines seen in the same single pass.
 	Usage *UsageStats
+	// model is the wire model id recorded by a meta or usage line; it decides
+	// which per-image token rule the page quotes (and applies).
+	model string
+	// imageSamples are the per-request numbers the measured per-image cost is
+	// derived from (see measuredImageTokens).
+	imageSamples []imageUsageSample
+}
+
+// modelID is the model this transcript was sent to, "" when no line recorded
+// one (transcripts written before meta/usage lines existed).
+func (stat transcriptStat) modelID() string {
+	if stat.Usage != nil && stat.Usage.Model != "" {
+		return stat.Usage.Model
+	}
+	if stat.Meta != nil {
+		return stat.Meta.Model
+	}
+	return stat.model
 }
 
 func (s *scanner) scan() ([]SessionInfo, error) {
@@ -694,6 +763,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			Messages:      stat.Messages,
 			Meta:          stat.Meta,
 			Stats:         stat.Usage,
+			Estimate:      estimateInfoFor(stat),
 			Bytes:         info.Size(),
 			ModTime:       info.ModTime(),
 			Live:          now.Sub(info.ModTime()) < LiveWindow,
@@ -805,11 +875,81 @@ func (stat *transcriptStat) addUsage(line string) {
 		LastTS:          rec.TS,
 	}
 	one.genMS = usageGenMS(rec.DurationMS, rec.TTFTMS)
+	if rec.Model != "" {
+		stat.model = rec.Model
+	}
+	stat.imageSamples = append(stat.imageSamples, imageUsageSample{
+		prompt: rec.PromptTokens,
+		text:   rec.TextTokens,
+		images: rec.ImageCount,
+		// A usage line without the local half (written before those fields
+		// existed) cannot be part of a measurement.
+		usable: rec.Round > 0 && rec.TextTokens > 0,
+	})
 	if stat.Usage == nil {
 		stat.Usage = &UsageStats{}
 	}
 	stat.Usage.add(one)
 	stat.Usage.finish()
+}
+
+// imageUsageSample is one request's numbers, as far as the measured per-image
+// cost needs them: the vendor's prompt_tokens, the local text-only estimate and
+// how many images the request carried.
+type imageUsageSample struct {
+	prompt int
+	text   int
+	images int
+	usable bool
+}
+
+// measuredImageTokens derives the MEASURED per-image token cost from the usage
+// lines of one session. Between two consecutive requests the vendor's
+// prompt_tokens grows by the text that was added plus the images that were
+// added, so
+//
+//	per-image = (Δprompt_tokens − Δtext_estimate) / Δimages
+//
+// The text part comes from the same local estimator that fills the ≈ numbers
+// (recorded on the usage line as text_tokens), never from a second formula.
+//
+// What it cannot see, and therefore skips: a step that added no image, a step
+// whose request SHRANK (local pruning or an AI compaction removed content —
+// the delta then measures the removal, not an image), and usage lines written
+// before the local half was recorded. It also stays a MEASUREMENT, not a rule:
+// gateway-reported prompt_tokens move between steps of the same session (real
+// logs: the same 900x1272 page render measured anywhere between ~630 and ~1800
+// tokens on one glm endpoint), so the result is the MEDIAN of the usable steps
+// and the caller reports how many steps and images it came from.
+func measuredImageTokens(samples []imageUsageSample) (perImage, steps, images int) {
+	var per []int
+	for i := 0; i+1 < len(samples); i++ {
+		a, b := samples[i], samples[i+1]
+		if !a.usable || !b.usable || a.prompt <= 0 || b.prompt <= 0 {
+			continue
+		}
+		dPrompt := b.prompt - a.prompt
+		dText := b.text - a.text
+		dImages := b.images - a.images
+		if dImages <= 0 || dPrompt <= 0 || dText < 0 {
+			continue
+		}
+		v := (dPrompt - dText) / dImages
+		if v <= 0 {
+			continue
+		}
+		per = append(per, v)
+		images += dImages
+	}
+	if len(per) == 0 {
+		return 0, 0, 0
+	}
+	sort.Ints(per)
+	mid := len(per) / 2
+	if len(per)%2 == 1 {
+		return per[mid], len(per), images
+	}
+	return (per[mid-1] + per[mid]) / 2, len(per), images
 }
 
 // addMeta folds one meta line into the summary. A meta line that cannot be
@@ -833,6 +973,9 @@ func (stat *transcriptStat) addMeta(line string) {
 	stat.Meta.PromptChars = utf8.RuneCountInString(rec.Text)
 	stat.Meta.PromptTokenEst = session.TextTokens(rec.Text)
 	stat.Meta.Model = rec.Model
+	if rec.Model != "" {
+		stat.model = rec.Model
+	}
 	stat.Meta.SessionLabel = rec.SessionLabel
 	stat.Meta.SystemSHA = rec.SysHash
 	stat.Meta.Tools = len(rec.Tools)
@@ -879,6 +1022,10 @@ func ReadSession(filePath string, fromLine int) ([]Line, int, error) {
 	}
 	defer f.Close()
 
+	// The per-image rule depends on the model the session talks to, and the
+	// transcript records it on its meta (or first usage) line.
+	model := sessionModelOf(filePath)
+
 	br := bufio.NewReaderSize(f, 64*1024)
 	n := 0
 	var out []Line
@@ -899,7 +1046,7 @@ func ReadSession(filePath string, fromLine int) ([]Line, int, error) {
 		}
 		n++
 		if n > fromLine {
-			estimateLine(&line, filePath)
+			estimateLine(&line, filePath, model)
 			out = append(out, line)
 		}
 		if rerr != nil {
@@ -984,7 +1131,7 @@ func parseLine(n int, raw string) (Line, bool) {
 // Images are estimated from the media file the line references; only the file
 // header is read, and a file that cannot be read falls back to the configured
 // constant instead of failing the read.
-func estimateLine(line *Line, transcriptPath string) {
+func estimateLine(line *Line, transcriptPath, model string) {
 	est := &LineEstimate{
 		Text:      session.TextTokens(line.Text),
 		Reasoning: session.TextTokens(line.Reasoning),
@@ -998,7 +1145,7 @@ func estimateLine(line *Line, transcriptPath string) {
 		base := filepath.Dir(transcriptPath)
 		for _, ref := range line.Images {
 			est.ImageCount++
-			est.Images += mediaImageTokens(base, ref)
+			est.Images += mediaImageTokens(base, ref, model)
 		}
 	}
 	if est.Text+est.Reasoning+est.Images > 0 || len(est.Calls) > 0 {
@@ -1010,22 +1157,70 @@ func estimateLine(line *Line, transcriptPath string) {
 // are cached by path: a media file is named after its content hash, so the same
 // path always means the same picture, and the live server re-reads transcripts
 // on every poll.
-func mediaImageTokens(baseDir, ref string) int {
+func mediaImageTokens(baseDir, ref, model string) int {
 	rel := strings.TrimPrefix(strings.TrimSpace(ref), "file://")
 	if rel == "" {
-		return session.ImageTokens(0, 0)
+		return session.ImageTokensForModel(model, 0, 0)
 	}
 	p := filepath.Join(baseDir, filepath.FromSlash(rel))
-	if v, ok := imageTokensCache.Load(p); ok {
+	key := model + "\x00" + p
+	if v, ok := imageTokensCache.Load(key); ok {
 		return v.(int)
 	}
-	v := session.ImageTokensOfFile(p)
-	imageTokensCache.Store(p, v)
+	v := session.ImageTokensOfFileForModel(model, p)
+	imageTokensCache.Store(key, v)
 	return v
 }
 
-// imageTokensCache memoises per-image estimates (see mediaImageTokens).
+// imageTokensCache memoises per-image estimates (see mediaImageTokens). The key
+// is the model plus the path: the same file costs different amounts under
+// different models' rules.
 var imageTokensCache sync.Map
+
+// sessionModelOf returns the wire model id a transcript records on its meta or
+// usage line, "" when it records none. The live server re-reads transcripts
+// every couple of seconds and a transcript's model never changes, so the answer
+// is cached by (path, size): only a file that grew is looked at again, and the
+// lookup stops at the first line that carries a model.
+func sessionModelOf(path string) string {
+	size := int64(-1)
+	if st, err := os.Stat(path); err == nil {
+		size = st.Size()
+	}
+	key := path + "\x00" + strconv.FormatInt(size, 10)
+	if v, ok := sessionModelCache.Load(key); ok {
+		return v.(string)
+	}
+	model := readSessionModel(path)
+	sessionModelCache.Store(key, model)
+	return model
+}
+
+func readSessionModel(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		raw := sc.Bytes()
+		if !bytes.Contains(raw, []byte(`"model"`)) {
+			continue
+		}
+		var rec struct {
+			Model string `json:"model"`
+		}
+		if json.Unmarshal(raw, &rec) == nil && rec.Model != "" {
+			return rec.Model
+		}
+	}
+	return ""
+}
+
+// sessionModelCache memoises sessionModelOf by (path, size).
+var sessionModelCache sync.Map
 
 // transcriptLine mirrors internal/session's on-disk record. It is duplicated
 // on purpose: the viewer must tolerate unknown fields and drift, and it must
@@ -1060,6 +1255,12 @@ type transcriptLine struct {
 	DurationMS      int64  `json:"duration_ms,omitempty"`
 	TTFTMS          int64  `json:"ttft_ms,omitempty"`
 	Finish          string `json:"finish_reason,omitempty"`
+	// ImageCount / TextTokens are the local half of that request: how many
+	// images it carried and the text-only local estimate. Two consecutive lines
+	// give the measured per-image cost (see measuredImageTokens); absent in
+	// transcripts written before these fields existed.
+	ImageCount int `json:"image_count,omitempty"`
+	TextTokens int `json:"text_tokens,omitempty"`
 }
 
 // transcriptTool is one tool definition inside a meta line. Parameters stays a

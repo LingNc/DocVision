@@ -20,16 +20,25 @@ func TestMessageTokensMultimodal(t *testing.T) {
 		{"type": "text", "text": "hello world this is a test"},
 		{"type": "image_url", "image_url": map[string]string{"url": "data:image/jpeg;base64,xxx"}},
 	}}
-	// 没有尺寸信息 → 按配置的兜底常量计。
-	if got, want := messageTokens(m), ImageTokens(0, 0); got < want {
+	// 没有尺寸信息 → 按规则里的常量计（全局默认规则下是 1100）。
+	if got, want := messageTokens(m, ""), ImageTokensForModel("", 0, 0); got < want {
 		t.Fatalf("image cost missing: %d < %d", got, want)
 	}
 	// 带上尺寸估算时按那一张算，不再退回常量。
 	m2 := ChatMessage{Role: "user", Content: m.Content, ImageTokens: []int{3000}}
-	if got := messageTokens(m2) - messageTokens(ChatMessage{Role: "user", Content: []map[string]interface{}{
+	if got := messageTokens(m2, "") - messageTokens(ChatMessage{Role: "user", Content: []map[string]interface{}{
 		{"type": "text", "text": "hello world this is a test"},
-	}}); got != 3000 {
+	}}, ""); got != 3000 {
 		t.Fatalf("per-image estimate ignored: delta %d", got)
+	}
+	// 同一个模型名下的消息在带尺寸时按**该模型**的规则算。
+	defer ResetEstimates()
+	SetModelEstimate("wire-flat", ImageEstimate{Method: ImageMethodFixed, Tokens: 850})
+	if got := messageTokens(ChatMessage{Role: "user", Content: m.Content}, "wire-flat"); got !=
+		messageTokens(ChatMessage{Role: "user", Content: []map[string]interface{}{
+			{"type": "text", "text": "hello world this is a test"},
+		}}, "wire-flat")+850 {
+		t.Fatalf("per-model rule ignored: %d", got)
 	}
 }
 

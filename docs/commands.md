@@ -133,9 +133,9 @@ docvision sessions --cost                     # 只打印按阶段的用量/费�
 
 `--cost` 按**阶段**汇总（`convert` / `checker` / `style-fix` / `style` / `vector` …）：会话数、请求数、输入与输出 tokens、加权缓存命中率、金额与平均每次请求，最贵的排前面。价格来自配置里的 `models.<条目>.price`（元/百万 tokens，分**未命中缓存输入 / 命中缓存输入 / 输出**三段），没配价格的模型**不显示金额**（显示"未配价"并提示金额只是下界，绝不用 ¥0 冒充免费）。`docvision latex` 跑完也会自动打印同一份表，并额外按书的规模给出**每张图 / 每页成本**（图片数取 `progress_items/`，页数取交付的 `out/book.pdf`）。
 
-想在**跑 latex 的同时**看，不必另开终端：把 `preview.enabled` 打开（默认关闭），`docvision latex` 启动时会自己拉起同一份只读服务并把确切 URL 打进日志（地址/端口用 `preview.host`/`preview.port`，端口 `0` = 由内核挑；根目录取该档位的输出根 `<latex_project>` / `<latex_output>`），运行结束后随进程退出。详见 `docs/config.md` 的 `preview` 三项。
+想在**跑 latex 的同时**看，不必另开终端：把 `preview.enabled` 打开（默认关闭），`docvision latex` 启动时会自己拉起同一份只读服务并把确切 URL 打进日志（地址/端口用 `preview.host`/`preview.port`；要临时改端口用 `--port`，`--port 0` = 由内核挑一个空闲端口；根目录取该档位的输出根 `<latex_project>` / `<latex_output>`），运行结束后随进程退出。详见 `docs/config.md` 的 `preview` 三项。
 
-`docvision sessions --serve` 用的是**同一份配置**：扫描根默认取 `paths.latex_project`（档位2 用 `paths.latex_output`，与上面自动预览的根同源），监听地址默认取 `preview.host`/`preview.port`；优先级是 `--dir` > 配置 > 当前目录、`--addr` > `--port` > 配置 > 内置默认。启动时打印三行——URL、扫到的目录、用的配置文件——每一项后面都跟着来源（`config paths.latex_project` / `--dir` / `config preview.host/port` / `内置默认`），扫到的目录不存在时退回当前目录并写明原因。
+`docvision sessions --serve` 用的是**同一份配置**：扫描根默认取 `paths.latex_project`（档位2 用 `paths.latex_output`，与上面自动预览的根同源），监听地址默认取 `preview.host`/`preview.port`；优先级是 `--dir` > 配置 > 当前目录、`--addr` > `--port` > 配置 > 内置默认。启动时打印扫到的目录、用的配置文件与**实际绑定到的监听地址**，每一项后面都跟着来源（`config paths.latex_project` / `--dir` / `config preview.host/port` / `--port` / `--addr` / `内置默认`）：监听地址取 `net.Listen` 回报的地址，所以 `preview.host: 0.0.0.0` 会照实打印 `0.0.0.0:8849`（双栈机器上可能是 `[::]:8849`）、端口写 `0` 时打印内核实际分配的端口，而不是配置里写的那个；绑定通配地址时额外多一行 `浏览 http://127.0.0.1:<端口>/`（`http://0.0.0.0/…` 不是能打开的页面），loopback 绑定时这一行不出现。扫到的目录不存在时退回当前目录并写明原因。
 
 两种模式的区别：
 
@@ -205,7 +205,7 @@ docvision sessions --cost                     # 只打印按阶段的用量/费�
 | 输出速度 | `Σ输出 tokens / Σ(耗时 − 首字延迟)`，**生成时间**作分母，所以排队与思考等待不会被算成生成速度 |
 | 平均耗时 | `Σduration_ms / 请求数`（墙钟，含思考） |
 | 会话跨度 | 首末两条用量行的时间戳之差 |
-| 图片 N 张 | **本地估算**（≈）：按每张图的像素尺寸折算（`宽×高 / estimate.image_px_per_token`，夹在上下限之间，取不到尺寸时按 `estimate.image_tokens_fallback`）。厂商的 `prompt_tokens` 里**已经包含图片 token**，「输入 tokens」那一格是实测总量，这一格只是把其中属于图片的部分单列出来对照 |
+| 图片 N 张 | 默认给**本地估算**（≈，每张 `宽×高 / estimate.px_per_token`，夹在上下限之间；方法可按模型配成 fixed/pixels，见[配置参考](config.md)）；同一会话的用量行能推出实测值时改成 **`实测 N/张`**（由相邻两次请求的 `prompt_tokens` 差值减去文本估算增量、再除以新增图片数，取各步中位数，悬浮说明里给出步数与张数），两种口径在瓦片上直接看得出来。厂商的 `prompt_tokens` 里**已经包含图片 token**，「输入 tokens」那一格是实测总量 |
 | 每次请求明细 | 可展开表格。详情栏只有 300–520px 宽，所以只留五列：回合（`compact`/`nudge` 会在悬浮说明里标出来）、首字、耗时、输入·缓存（`31k · 94%`）、输出；模型、tok/s、结束原因、时刻都在行的悬浮说明里。 |
 
 页签行右端还有一个**显示单位开关**（`token` / `字符`，默认 `token`）：行内的一切计数（工具行 `输入 → 输出`、折叠按钮「展开全文（N 行 / …）」、思考行、轨迹表的计数列、系统提示词快照）都跟着它换口径——**token 一律是本地估算、必带 `≈`；字符是精确计数**。详情栏「指标」里的数字是**厂商实测值**（`t="usage"` 行照抄），不带 `≈`，也不受这个开关影响。估算用的是上下文压缩阈值那同一套估算器（`internal/session`），前端不另算一份。

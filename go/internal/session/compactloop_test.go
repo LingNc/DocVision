@@ -328,8 +328,8 @@ func TestEstimatorCountsReasoningAndToolCalls(t *testing.T) {
 			Arguments string `json:"arguments"`
 		}{Name: "write_file", Arguments: strings.Repeat("{\"path\":\"a.tex\"}", 100)}}},
 	}
-	if messageTokens(rich) <= messageTokens(plain)+1000 {
+	if messageTokens(rich, "") <= messageTokens(plain, "")+1000 {
 		t.Fatalf("reasoning/tool_calls 必须计入估算: rich=%d plain=%d",
-			messageTokens(rich), messageTokens(plain))
+			messageTokens(rich, ""), messageTokens(plain, ""))
 	}
 }

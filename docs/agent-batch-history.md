@@ -559,3 +559,59 @@ JSON：`prettyJSON()`（先 `JSON.parse` 再 2 空格 `stringify`，解析失败
 **③ `sessions --serve` 读配置。** 此前 `--addr` 默认写死 `127.0.0.1:8848`、根目录只认 CWD，配置里的 `preview.host/port` 只有 latex 自动预览在用。现在扫描根默认取 `paths.latex_project`（档位2 用 `paths.latex_output`，与 `startPreview` 同源），地址默认取 `preview.host/port`，优先级 `--dir` > 配置 > 当前目录、`--addr` > `--port`（新增）> 配置 > 内置默认；启动打印三行（URL / 目录 / 配置文件），每项后面带来源标签，目录不存在时退回当前目录并写明原因。实测（临时目录 + 真转录副本）：`--list` 根目录显示 `.../latex_project（来源 config paths.latex_project）`，`--serve` 三行如设计，端口 8899 来自配置。
 
 **验证**：`gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿；新增 `sessionview/estimate_test.go`（行级估算完整性、1000×800→1066、上下限与兜底）、`sessionview/unit_toggle_browser_test.go`（真实 chromium：默认 `≈ N tokens` → 点一下变 `N 字符`，轨迹表头同步，图片瓦片 `图片 1 张 / ≈ 1.1k`，厂商瓦片 `12k` 不带 ≈）、`sessionview/serve_test.go`（三行横幅内容与来源）、`cmd/docvision/cli_sessions_test.go`（目录/地址优先级与 `--addr` 默认必须留空）。
+
+---
+
+## 第三十五批：图片 token 两种计量方法（可按模型各配一套）+ 详情栏实测/估算分离 + 横幅打印真实绑定地址
+
+用户原话（三件事）：① "不是 token 简化，而是两种计量方法，可以独立的在不同模型上使用。可以自己定义。而不是只用一个"；② 详情栏那张「图片 N 张」瓦片要能看出**实测还是估算**；③ `sessions --serve` 打印的必须是**实际绑定的地址**（配置里 `preview.host: 0.0.0.0` 时横幅却写 `127.0.0.1`）。
+
+### ① 两种计量方法 + 按模型各选一套
+
+上一批把"每张固定 1100"换成"按尺寸折算"（`estimate.image_px_per_token` 等 4 个键），用户指出这等于**只留了一种方法**：同一个模型族里"按张固定计费"与"按像素折算"的端点会同时存在，应该都能选、都能自己定参数、并且**可以按模型分别配**。因此 `estimate` 块改为：
+
+```yaml
+estimate:                  # 全局默认
+  method: pixels           # fixed / pixels / none
+  tokens: 1100             # fixed 的每张固定值；pixels 下取不到尺寸时也用它
+  px_per_token: 750
+  min_tokens: 85
+  max_tokens: 4096
+models:
+  drawing:
+    image_tokens:          # 只覆盖这一条，没写的键继承顶层 estimate
+      method: fixed
+      tokens: 1050
+```
+
+- 旧键 `image_px_per_token`/`image_tokens_min`/`image_tokens_max`/`image_tokens_fallback` **删除**（不留半死的兼容分支），`config_version` 8→9，两个模板、`docs/config.md`、README 版本行同步。
+- 解析顺序：`models.<条目>.image_tokens.<键>` → 顶层 `estimate.<键>` → 代码默认；注册时**条目名与 wire 模型 id 都登记**（会话与预览页只知道 wire id），大小写不敏感。
+- 默认值仍取 `pixels 750 / 85 / 4096`（与上一版数字一致，老配置的估算不变），`fixed` 的默认 `tokens` 取 1100。依据是这一批重新量的实测：`glm-5.3-flash-official` 上 2.88M 像素页面渲染 ≈3697 token（≈780 px/token，上一批日志里 292k→440 / 986k→1285 / 2.32M→2987 三点同向），`deepseek-v4.1-flash` 上大图饱和 ≈1050/张——两个端点量级差 3~4 倍，一套参数不可能同时准。
+- 非法 `method`、负参数、`max_tokens < min_tokens` 由 `semanticChecks` 报错（全局与按模型都查）；上下限写反不再被 `setDefaults` 悄悄纠正（运行期 `Normalized()` 仍会把界限理成有序的，估算不会失控）。
+
+### ② 实测每张多少 token：由用量行的相邻差值推出
+
+上一批记的用量行只有厂商数字，这一批给它加上**本地那一半**：`text_tokens`（请求发出前的文本估算，**不含图片**，由新增的 `Session.promptTextTokens()` 快照）与 `image_count`（该次请求带了几张图，`snapshotRequest()` 在每处发请求前记下）。于是
+
+```
+每张实测 = (Δprompt_tokens − Δtext_tokens) / Δ图片数
+```
+
+跳过三类步：该步没有新增图片、Δprompt_tokens ≤ 0（本地裁剪或 AI 压缩把内容删掉了，差值量的是删除而不是图片）、旧转录没有本地那一半（`text_tokens` 缺失）。结果取**各步中位数**，不是总计相除——真实网关（new-api 中转）回报的 `prompt_tokens` 在同一步内会漂（同一张 900×1272 页面渲染在不同步里落在 ~630–1800），中位数不会被单步异常带走。页面把步数与张数写进悬浮说明（`实测 2.8k/张：… （1 步 / 1 张）`）。
+
+瓦片因此有两种形态：有样本时 `实测 1.2k/张`（厂商口径、不带 `≈`），没有时 `≈ 1.1k/张`（本地估算），悬浮说明永远写出该会话生效的完整规则（`pixels 750px per token（85–4096）` / `fixed 1100/张`）与本地估算的对照。规则文案与实测值都由 Go 侧算好随 `SessionInfo.estimate` 下发（前端不再自算，`state.estPolicy` 那份页面级副本连同 `/api/index` 的 `estimate` 字段一起删掉——多模型下"一条页面级规则"本身就是错的前提）。
+
+真实数据里**没有任何转录带 `t="usage"` 行**（现存 54 个 `.jsonl` 都是加用量行之前跑的），所以"没有实测样本时只给估算"这条路径是当前默认路径，浏览器用例专门钉住了它。
+
+### ③ 横幅打印实际绑定的地址
+
+`Start()` 改为返回 `Bound{Addr, URL, Browse}`：`Addr` 是 `net.Listen` 回报的地址原样（`net.Listen("tcp","0.0.0.0:0")` 在双栈机器上会给出 `[::]:37703`，这正是要照实打印的东西），`URL` 是能粘进浏览器的（通配绑定渲染成 loopback），`Browse` 只在通配绑定时给出 loopback 地址。横幅：loopback 三行不变；通配绑定四行——第一行 `会话预览: 0.0.0.0:8849（只读服务，Ctrl+C 停止）`、第二行 `浏览 http://127.0.0.1:8849/`，来源标签（`config preview.host/port` / `--port` / `--addr` / `内置默认`）原样保留。latex 自动预览的日志行也一起给出"监听 `<实际地址>`"。
+
+### 顺手修掉的两处文档与代码不一致
+
+1. **旧 estimate 键不再生效时必须出声**：四个旧键改名后没有任何代码读它们，而 `LoadConfig` 用的是不严格的 `yaml.Unmarshal`（严格检查只在 `docvision setup`），所以运行目录那份 `config.yaml`（仍写着 `image_px_per_token: 750` 等四行）会静默按默认值跑。按 `latex.bash_sandbox → tools.bash.sandbox` 的先例加了一行启动迁移提示（`hasRetiredEstimateKeys` 在原始文本里找旧键名）。
+2. **`preview.port` 的"0 = 内核挑端口"只对命令行成立**：两个模板与 `docs/config.md` 都写着配置里写 `0` 由内核挑端口，但 `setDefaults` 会把 `0` 补成 8848（`int` 分不出「没写」与「写了 0」）；实际验证时把运行目录配置的副本改成 `port: 0`，横幅打出来的是 `[::]:8848` 而不是随机端口——即文档在骗人。只改措辞（配置写 0 与不写一样取 8848；要内核挑用 `--port 0`），行为未动；真要支持"配置里写 0 由内核挑"需要 presence 检测（`*int` 或自定义 `UnmarshalYAML`），这批没做。
+
+**验证**：`gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿（输出见提交说明）。新增/改写的用例：`session/estimate`（两法各自的行为与描述文案、按模型覆盖不影响其它模型、改全局不影响单独配置的模型）、`config/estimate_test.go`（默认值、逐键继承顺序、配置文件读入、非法 method/负参数/上下限写反都是配置错误）、`session/usage_wiring_test.go`（用量行必须落下 `text_tokens`）、`sessionview/measure_test.go`（中位数、按张数摊、裁剪步跳过、无新增图片步跳过、旧用量行跳过、估算偏差步跳过、单步可用）、`sessionview/estimate_test.go`（会话各自的规则与文案下发）、`sessionview/serve_test.go`（通配绑定照实打印 + loopback 浏览行 + 来源标签、端口 0 打印内核端口）、`cmd/docvision/cli_sessions_test.go`（配置 → 估算器的整条链路，条目名与 wire id 都命中）。真实浏览器用例（headless chromium）：`unit_toggle_browser_test.go` 的图片瓦片改为 `图片 1 张 / ≈ 1.1k/张` 并断言悬浮说明写明口径与"没有可用的实测样本"，新增 `TestImageViewTileShowsMeasuredCost`：两条带本地那一半的用量行（10000/9000/0 → 13000/9200/1）让瓦片显示 `实测 2.8k/张`、悬浮说明同时给出 `1 步 / 1 张` 与本地估算 `≈ 1.1k`。
+
+**没有做的事**：`models:` 的复用（同一模型在多处重复整块配置）这一批只做了设计、没有实现——三个方案（YAML anchors / 自研 `extends:` 深合并 / 命名 profile）的对比、风险与迁移路径见交付说明的独立一节；现存 54 个转录都没有用量行，所以实测每张那条路没有真实端到端数据可对照，只有合成夹具与浏览器用例。

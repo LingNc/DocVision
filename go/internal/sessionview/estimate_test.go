@@ -75,8 +75,8 @@ func TestLineEstimateIsLocalAndComplete(t *testing.T) {
 // TestImageTokenEstimateRules 钉住单张图片的估算规则：有尺寸按像素折算并夹在
 // 上下限内，取不到尺寸退回配置的兜底常量，空文本算 0。
 func TestImageTokenEstimateRules(t *testing.T) {
-	defer session.SetEstimateConfig(session.EstimateConfig{})
-	session.SetEstimateConfig(session.EstimateConfig{ImagePxPerToken: 750, ImageTokensMin: 85, ImageTokensMax: 4096, ImageFallback: 1100})
+	defer session.ResetEstimates()
+	session.SetEstimateConfig(session.ImageEstimate{PxPerToken: 750, MinTokens: 85, MaxTokens: 4096})
 
 	cases := []struct {
 		w, h, want int
@@ -85,7 +85,7 @@ func TestImageTokenEstimateRules(t *testing.T) {
 		{1000, 800, 1066, "常规插图按 宽×高/750 折算"},
 		{10, 10, 85, "极小图有下限"},
 		{4000, 4000, 4096, "超大图有上限"},
-		{0, 0, 1100, "取不到尺寸退回兜底常量"},
+		{0, 0, 1100, "取不到尺寸退回常量"},
 	}
 	for _, c := range cases {
 		if got := session.ImageTokens(c.w, c.h); got != c.want {
@@ -99,13 +99,72 @@ func TestImageTokenEstimateRules(t *testing.T) {
 		t.Error("文本估算不稳定")
 	}
 
-	// 配置能改规则（estimate.image_px_per_token 等），且缺项自动补默认值。
-	session.SetEstimateConfig(session.EstimateConfig{ImagePxPerToken: 1000})
+	// 配置能改规则（estimate.px_per_token 等），且缺项自动补默认值。
+	session.SetEstimateConfig(session.ImageEstimate{PxPerToken: 1000})
 	if got := session.ImageTokens(1000, 800); got != 800 {
 		t.Errorf("改配置后 ImageTokens(1000,800) = %d，期望 800", got)
 	}
 	if got := session.ImageTokens(0, 0); got != 1100 {
-		t.Errorf("未配置的兜底常量应为默认 1100，实际 %d", got)
+		t.Errorf("未配置的常量应为默认 1100，实际 %d", got)
+	}
+}
+
+// TestImageEstimateTwoMethods 钉住"两种计量方法各自可选、参数可改"：
+// fixed 每张一个常量（不看尺寸），pixels 按尺寸折算并夹在上下限内，none 记 0。
+func TestImageEstimateTwoMethods(t *testing.T) {
+	defer session.ResetEstimates()
+	session.SetEstimateConfig(session.ImageEstimate{Method: session.ImageMethodFixed, Tokens: 1100})
+
+	if got := session.ImageTokens(1000, 800); got != 1100 {
+		t.Errorf("fixed 模式 ImageTokens(1000,800) = %d，期望每张 1100", got)
+	}
+	if got := session.ImageTokens(0, 0); got != 1100 {
+		t.Errorf("fixed 模式未知尺寸 = %d，期望 1100", got)
+	}
+	if got := session.EstimateSettings().Describe(); got != "fixed 1100/张" {
+		t.Errorf("fixed 规则描述 = %q", got)
+	}
+
+	session.SetEstimateConfig(session.ImageEstimate{Method: session.ImageMethodPixels, PxPerToken: 750, MinTokens: 85, MaxTokens: 4096})
+	if got := session.ImageTokens(1000, 800); got != 1066 {
+		t.Errorf("pixels 模式 ImageTokens(1000,800) = %d，期望 1066", got)
+	}
+	if got := session.EstimateSettings().Describe(); got != "pixels 750px per token（85–4096）" {
+		t.Errorf("pixels 规则描述 = %q", got)
+	}
+
+	session.SetEstimateConfig(session.ImageEstimate{Method: session.ImageMethodNone})
+	if got := session.ImageTokens(1000, 800); got != 0 {
+		t.Errorf("none 模式 = %d，期望 0", got)
+	}
+}
+
+// TestPerModelEstimateOverridesGlobal 钉住"同一个模型可以单独一套规则，且不影响
+// 其他模型"：models.<名>.image_tokens 走的就是这条通道（条目名或 wire 模型 id）。
+func TestPerModelEstimateOverridesGlobal(t *testing.T) {
+	defer session.ResetEstimates()
+	session.SetEstimateConfig(session.ImageEstimate{Method: session.ImageMethodPixels, PxPerToken: 750, MinTokens: 85, MaxTokens: 4096})
+	session.SetModelEstimate("text", session.ImageEstimate{Method: session.ImageMethodFixed, Tokens: 1100})
+	session.SetModelEstimate("glm-5.3-flash-official", session.ImageEstimate{Method: session.ImageMethodPixels, PxPerToken: 780, MinTokens: 85, MaxTokens: 8192})
+
+	// 配了单独规则的模型用自己那套（含按 wire id 大小写不敏感匹配）。
+	if got := session.ImageTokensForModel("text", 1000, 800); got != 1100 {
+		t.Errorf("text = %d，期望 fixed 1100", got)
+	}
+	if got := session.ImageTokensForModel("GLM-5.3-Flash-Official", 2880000, 1); got != 3692 {
+		t.Errorf("glm = %d，期望 2880000/780 = 3692", got)
+	}
+	// 没配的模型跟着全局默认走。
+	if got := session.ImageTokensForModel("wire-B", 1000, 800); got != 1066 {
+		t.Errorf("未配置模型 = %d，期望继承全局 1066", got)
+	}
+	// 全局改了，单独配置的模型不受影响。
+	session.SetEstimateConfig(session.ImageEstimate{Method: session.ImageMethodNone})
+	if got := session.ImageTokensForModel("text", 1000, 800); got != 1100 {
+		t.Errorf("改全局后 text = %d，期望仍是自己那套 1100", got)
+	}
+	if got := session.ImageTokensForModel("wire-B", 1000, 800); got != 0 {
+		t.Errorf("改全局后未配置模型 = %d，期望 0", got)
 	}
 }
 
@@ -134,20 +193,49 @@ func TestMetaInfoCarriesPromptTokenEstimate(t *testing.T) {
 	}
 }
 
-// TestPageDataCarriesEstimatePolicy 钉住页面数据里带着估算规则本身：详情栏
-// 解释"≈ 图片 token 是怎么来的"时必须引用真实配置，不能写死一份会过期的副本。
-func TestPageDataCarriesEstimatePolicy(t *testing.T) {
-	defer session.SetEstimateConfig(session.EstimateConfig{})
-	session.SetEstimateConfig(session.EstimateConfig{ImagePxPerToken: 640, ImageTokensMin: 90, ImageTokensMax: 3000, ImageFallback: 900})
+// TestSessionCarriesItsOwnEstimateRule 钉住页面数据里带着**本会话那条模型**的估算
+// 规则：详情栏解释"≈ 图片 token 是怎么来的"时必须引用真实配置（多模型可以各选一套），
+// 不能写死一份会过期的副本，也不能再假设全页只有一条规则。
+func TestSessionCarriesItsOwnEstimateRule(t *testing.T) {
+	defer session.ResetEstimates()
+	session.SetEstimateConfig(session.ImageEstimate{Method: session.ImageMethodPixels, PxPerToken: 640, MinTokens: 90, MaxTokens: 3000})
+	session.SetModelEstimate("wire-B", session.ImageEstimate{Method: session.ImageMethodFixed, Tokens: 950})
 
-	raw, err := json.Marshal(pageData{Mode: "static", Estimate: CurrentEstimatePolicy()})
+	root := t.TempDir()
+	for _, tc := range []struct{ file, model string }{{"est_a.jsonl", "wire-A"}, {"est_b.jsonl", "wire-B"}} {
+		writeFile(t, jsonl(root, "proj", "work", "sessions", tc.file), transcript(
+			`{"t":"meta","kind":"system","model":"`+tc.model+`","text":"提示词"}`,
+			`{"t":"msg","role":"user","text":"hi"}`,
+		))
+	}
+	sessions, err := Scan(root)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	byModel := map[string]*SessionEstimate{}
+	for _, s := range sessions {
+		if s.Estimate == nil {
+			t.Fatalf("会话 %s 没有带上估算规则", s.ID)
+		}
+		byModel[s.Estimate.Model] = s.Estimate
+	}
+	global := byModel["wire-A"]
+	if global == nil || global.Method != session.ImageMethodPixels || global.PxPerToken != 640 || global.Min != 90 || global.Max != 3000 {
+		t.Fatalf("继承全局默认的会话规则不对: %+v", global)
+	}
+	own := byModel["wire-B"]
+	if own == nil || own.Method != session.ImageMethodFixed || own.Tokens != 950 || own.Rule != "fixed 950/张" {
+		t.Fatalf("有单独规则的会话规则不对: %+v", own)
+	}
+
+	raw, err := json.Marshal(sessions[0])
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	html := string(raw)
-	for _, want := range []string{`"pxPerToken":640`, `"min":90`, `"max":3000`, `"fallback":900`} {
+	for _, want := range []string{`"method":`, `"pxPerToken":640`, `"min":90`, `"max":3000`, `"rule":"pixels 640px per token（90–3000）"`} {
 		if !strings.Contains(html, want) {
-			t.Errorf("页面数据里缺少估算规则 %s", want)
+			t.Errorf("页面数据里缺少估算规则 %s（%s）", want, html)
 		}
 	}
 }
@@ -226,11 +314,25 @@ func TestViewerUnitToggleSourceRules(t *testing.T) {
 	if strings.Contains(stats, "countText(st.promptTokens") || strings.Contains(stats, "≈ ' + fmtTokens(st.promptTokens)") {
 		t.Error("详情栏的厂商实测值被套上了 ≈")
 	}
-	// 图片瓦片：按配置里的规则说明依据，且始终是 token 口径（带 ≈）。
-	if !strings.Contains(stats, "tile('图片 ' + imgs.count + ' 张', '≈ ' + fmtTokens(imgs.tokens)") {
-		t.Error("详情栏没有单列图片 token 的本地估算")
+	// 图片瓦片：数字来自图上的**每张**估算（token 口径，带 ≈），依据来自 Go 侧
+	// 解析好的规则文案（本会话的模型可能选了 fixed 或 pixels，页面不自己算）。
+	if !strings.Contains(stats, "tile('图片 ' + imgs.count + ' 张', value,") ||
+		!strings.Contains(stats, "var value = '≈ ' + fmtTokens(per) + '/张'") {
+		t.Error("详情栏没有单列图片的每张本地估算")
 	}
-	if !strings.Contains(stats, "pol.pxPerToken") || !strings.Contains(stats, "pol.fallback") {
-		t.Error("图片瓦片没有引用配置里的折算规则（依据说不清）")
+	if !strings.Contains(stats, "var rule = est ? est.rule : '本地估算'") ||
+		!strings.Contains(stats, "'估算口径：' + rule") {
+		t.Error("图片瓦片没有引用本会话的估算规则（依据说不清）")
+	}
+	// 有实测样本时，实测值走厂商口径（不带 ≈），并且与本地估算并排列出。
+	if !strings.Contains(stats, "if (est && est.measuredPerImage)") ||
+		!strings.Contains(stats, "value = '实测 ' + fmtTokens(est.measuredPerImage) + '/张'") {
+		t.Error("图片瓦片没有区分实测与估算")
+	}
+	if !strings.Contains(stats, "est.measuredSamples") || !strings.Contains(stats, "est.measuredImages") {
+		t.Error("图片瓦片没有给出实测的样本量（多少次请求 / 多少张图）")
+	}
+	if !strings.Contains(js, "function currentEstimate()") {
+		t.Error("页面没有读取本会话的估算规则")
 	}
 }
