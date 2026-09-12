@@ -141,7 +141,7 @@ func Start(root, addr string) (bound Bound, stopped <-chan struct{}, err error) 
 	if !st.IsDir() {
 		return Bound{}, nil, fmt.Errorf("会话预览: %s 不是目录", root)
 	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := net.Listen(listenNetwork(addr), addr)
 	if err != nil {
 		return Bound{}, nil, fmt.Errorf("会话预览: 监听 %s 失败（端口可能已被占用，请换一个端口）: %w", addr, err)
 	}
@@ -159,6 +159,25 @@ func Start(root, addr string) (bound Bound, stopped <-chan struct{}, err error) 
 		out.Browse = out.URL
 	}
 	return out, done, nil
+}
+
+// listenNetwork 按**写死的字面 host** 挑网络族：Go 的 net.Listen("tcp", "0.0.0.0:8849")
+// 遇到通配 host 会优先选 IPv6 双栈套接字，内核于是回报 "[::]:8849"——用户按配置写了
+// 0.0.0.0、横幅却显示 [::]，看着就像配置没生效。所以：0.0.0.0 → tcp4、:: → tcp6，
+// 只有 host 留空（":8849"）才交给双栈，loopback 与主机名照旧用 tcp。
+func listenNetwork(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "tcp"
+	}
+	host = strings.Trim(host, "[]")
+	switch host {
+	case "0.0.0.0":
+		return "tcp4"
+	case "::":
+		return "tcp6"
+	}
+	return "tcp"
 }
 
 // isWildcardAddr reports whether a listener bound every interface (0.0.0.0 /
