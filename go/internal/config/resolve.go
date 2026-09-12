@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -82,16 +83,30 @@ func ResolveConfigPath(explicit string) (path, source string, created bool, err 
 // ValidateData parses config content strictly (unknown keys are errors),
 // applies defaults, and runs semantic checks. It returns every problem
 // found so an editor loop can show them all at once; empty slice = valid.
+// `models.<名>.extends` is merged at the node level first, exactly like
+// LoadConfig does, so the strict path and the run path agree.
 func ValidateData(data []byte) []string {
 	var problems []string
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return []string{"YAML 语法错误: " + err.Error()}
+	}
+	if err := mergeModelExtends(&doc); err != nil {
+		problems = append(problems, err.Error())
+	}
 	cfg := &Config{}
-	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec := yaml.NewDecoder(bytes.NewReader(mergedData(data, &doc)))
 	dec.KnownFields(true)
 	if err := dec.Decode(cfg); err != nil {
 		var terr *yaml.TypeError
 		if errors.As(err, &terr) {
+			// yaml.v3 reports "line N: field X not found in type config.ModelConfig"
+			// — it cannot name the registry entry, and after a merge the line may
+			// have moved into another entry. Replace that line with the config
+			// paths that really carry the key, so the message points at a line the
+			// user can edit.
 			for _, e := range terr.Errors {
-				problems = append(problems, e)
+				problems = append(problems, nameUnknownField(e, data))
 			}
 		} else {
 			return []string{"YAML 语法错误: " + err.Error()}
@@ -101,12 +116,58 @@ func ValidateData(data []byte) []string {
 	if err := validatePaths(cfg); err != nil {
 		problems = append(problems, err.Error())
 	}
+	if err := checkDuplicateWireNames(cfg); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if cfg.ConfigVersion != CurrentConfigVersion {
 		problems = append(problems, fmt.Sprintf("config_version 应为 %d（当前为 %d）—— 请参考 config.example.yaml 更新配置文件", CurrentConfigVersion, cfg.ConfigVersion))
 	}
 	problems = append(problems, semanticChecks(cfg)...,
 	)
 	return problems
+}
+
+// nameUnknownField turns yaml.v3's "line N: field X not found in type
+// config.ModelConfig" into a message that names the config path the key is read
+// at, appending the entries that inherited it through `extends`. Anything it
+// cannot recognise is returned unchanged.
+func nameUnknownField(msg string, data []byte) string {
+	field := ""
+	if i := strings.Index(msg, "field "); i >= 0 {
+		rest := msg[i+len("field "):]
+		if j := strings.Index(rest, " not found"); j > 0 {
+			field = rest[:j]
+		}
+	}
+	if field == "" {
+		return msg
+	}
+	keys, err := unknownKeys(data)
+	if err != nil {
+		return msg
+	}
+	var paths []string
+	for _, k := range keys {
+		if k.Path == field || strings.HasSuffix(k.Path, "."+field) {
+			paths = append(paths, k.Path)
+		}
+	}
+	if len(paths) == 0 {
+		return msg
+	}
+	sort.Strings(paths)
+	return fmt.Sprintf("%s（未知配置键 %s）", msg, strings.Join(paths, ", "))
+}
+
+// mergedData re-encodes the merged node tree; when encoding is impossible (it
+// only fails for a document we could not have built) the original bytes are
+// used, so the strict decode below still reports its own problems.
+func mergedData(original []byte, doc *yaml.Node) []byte {
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return original
+	}
+	return out
 }
 
 func semanticChecks(cfg *Config) []string {

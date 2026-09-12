@@ -615,3 +615,52 @@ models:
 **验证**：`gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿（输出见提交说明）。新增/改写的用例：`session/estimate`（两法各自的行为与描述文案、按模型覆盖不影响其它模型、改全局不影响单独配置的模型）、`config/estimate_test.go`（默认值、逐键继承顺序、配置文件读入、非法 method/负参数/上下限写反都是配置错误）、`session/usage_wiring_test.go`（用量行必须落下 `text_tokens`）、`sessionview/measure_test.go`（中位数、按张数摊、裁剪步跳过、无新增图片步跳过、旧用量行跳过、估算偏差步跳过、单步可用）、`sessionview/estimate_test.go`（会话各自的规则与文案下发）、`sessionview/serve_test.go`（通配绑定照实打印 + loopback 浏览行 + 来源标签、端口 0 打印内核端口）、`cmd/docvision/cli_sessions_test.go`（配置 → 估算器的整条链路，条目名与 wire id 都命中）。真实浏览器用例（headless chromium）：`unit_toggle_browser_test.go` 的图片瓦片改为 `图片 1 张 / ≈ 1.1k/张` 并断言悬浮说明写明口径与"没有可用的实测样本"，新增 `TestImageViewTileShowsMeasuredCost`：两条带本地那一半的用量行（10000/9000/0 → 13000/9200/1）让瓦片显示 `实测 2.8k/张`、悬浮说明同时给出 `1 步 / 1 张` 与本地估算 `≈ 1.1k`。
 
 **没有做的事**：`models:` 的复用（同一模型在多处重复整块配置）这一批只做了设计、没有实现——三个方案（YAML anchors / 自研 `extends:` 深合并 / 命名 profile）的对比、风险与迁移路径见交付说明的独立一节；现存 54 个转录都没有用量行，所以实测每张那条路没有真实端到端数据可对照，只有合成夹具与浏览器用例。
+
+---
+
+## 第三十六批：`models.<条目>.extends` 命名基座（深合并）+ 未知键/同名不同价出声 + 用户运行目录配置改写
+
+第三十五批把 `models:` 的复用只做到设计（三个方案的对比），这一批按用户选定的**方案二**实现：命名基座 + `extends:` 深合并，并把它列出的风险一并解决。
+
+### ① 为什么必须在 YAML 节点层合并
+
+`ModelConfig` 除 `Thinking`/`RequestBody`/`ImageTokens`/`Stream`/`ToolStream` 外全是值类型（`int`/`float64`/`string`/`bool`），解码之后「没写这个键」与「写了 `0`/`false`/`""`」是同一个值，任何"逐字段继承"的写法都判不出覆盖。所以 `LoadConfig` 与 `ValidateData` 都先把文档解析成 `yaml.Node` 树，`mergeModelExtends` 在**解码之前**按**条目键**合并，然后才解码：
+
+- 只把子条目**自己写的键**写回树里，没写的键保持"不在树里"——这正是 `ResolveModel` 那套零值继承（第二套规则）能原样继续工作的原因：`models.drawing` 没写 `api_timeout` 时树里也没有这个键，解码后仍是 0，于是照旧往 `models.text` 回落。
+- 合并按"能合并的先合并"多趟推进（父条目自己还带 `extends` 时等下一趟），名字排序保证结果与 map 迭代顺序无关；跑不动了就说明有环。
+- 合并是**节点级**的：`parent.Content` 的节点被直接挂进子条目。因为解码会为每个条目新建 map，共享节点不会让两个条目共用同一张 map；跨条目的别名只可能来自"把 `models.text` 的 map 头赋给条目"那两处（见 ③）。
+
+### ② 语义表与报错
+
+| 情况 | 结果 |
+| --- | --- |
+| 子条目没写这个键 | 取基座的值 |
+| 子条目写了（任意值） | 整体替换；**显式 `0` / `false` / `""` 也算覆盖** |
+| 子条目写了 `null` | 显式清空（基座那个键不生效） |
+| 值是列表 | 整体替换，不拼接 |
+| 值是 map（`request_body`/`thinking`） | 整块替换，不做半合并 |
+
+加载期硬报错：`models.<名>.extends` 指向不存在的条目（提示"先定义基座名"）、自引用、成环（`a → b → c → a`，打印完整链）、`extends` 写成空值/非字符串。未定义键的定位分两条路：`docvision setup` 的严格路径把 yaml.v3 那句 `line N: field X not found in type config.ModelConfig` 补成真实配置路径（`models.base.thinking_typ, models.drawing.thinking_typ`）；运行期的未知键告警则用反射遍历 `Config` 的 yaml tag 逐层比对节点树，同样列出**写它的条目**与**继承它的条目**。
+
+### ③ 深拷贝（否则一次纠正就污染基座）
+
+两处会**就地写 map**：`validateThinkingTypes` 纠正 `thinking["type"]` 的笔误、`ResolveModel` 把 `fallback.Thinking`/`fallback.RequestBody` 的 map 头直接赋给条目。有了 `extends`，一个基座可能被 4~5 个条目引用，一次纠正就会改掉基座与所有兄弟条目。现在 `validateThinkingTypes` 先把 map 拷一份再写（`cloneAnyMap`），`ResolveModel` 赋的是副本。钉住它的用例：`TestExtendsDoesNotPolluteBase`（改 `models.a.thinking` 后断言 `base`/兄弟 `b`/`text` 都是原值，且两次 `ResolveModel` 的结果互不共享）、`TestValidateThinkingTypesDoesNotPollute`（`thinking.type: disable` 的笔误纠正后基座仍是 `enabled`）。
+
+### ④ 顺手解决的三件事
+
+1. **`extends` 是 `ModelConfig` 的真字段**（`Extends string`）：否则 `setup` 的 `KnownFields(true)` 会把它当未知键、运行期却装作没写。
+2. **同名 wire 不同单价**：价格表按厂商报的模型名索引，两个条目发往同一个 wire 名却配了不同费率时，原先是 `map` 迭代顺序随机取一条（同一份配置的费用报告会在两次运行之间变），现在加载期报错并指出两个条目名。
+3. **`price` 缺失**（15 个手写零值分支里唯一没被处理的字段）：定成"条目一项费率都没写 ⇒ 继承 `models.text` 的费率；写了任意一项就用自己这一份；全 0 仍是未配置、费用报告整块不显示"（新增 `TestPriceNotInheritedWhenTextHasNone`、改写 `TestModelPricesKeyedByWireModelName` 钉住继承那一半）。
+4. **旧 estimate 键的迁移提示改成按**键**匹配**：原来是 `bytes.Contains` 全文字节匹配，文件里一句"取代了 `image_tokens_max`"的注释也会触发迁移告警（改写用户配置时实际踩到）。
+
+### ⑤ 两份模板与运行目录配置
+
+`config.example.yaml` 重写成**教学示例**（用户明确"不要求能直接跑，要体现编辑方法与原理"）：`estimate` 三种方法、`image_tokens` 的逐键优先级链、`extends` 的三种用法（同一模型不同参数 / 跨模型共享 endpoint+key / 角色复用同一条目）与深合并语义、报错行为、`price` 继承规则，逐条短注释；`default.yaml` 保持精简可跑但新键全部出现。两份模板的键面由 `TestConfigTemplateKeyParity` 钉住（值可不同，条目名可不同）。
+
+运行目录 `/home/share/samba-share/PDF2MD/config.yaml` 的改写稿写到 `temp/config_new.yaml`（`temp/` 已 gitignore，只读源目录）：把那四块**逐字相同**的角色条目并成一条 `heavy` 基座 + 四个角色各一行 `extends: "heavy"`，`estimate` 换新键（值与原旧键一一对应：`image_px_per_token`→`px_per_token: 750`、`image_tokens_min`→`min_tokens: 85`、`image_tokens_max`→`max_tokens: 4096`、`image_tokens_fallback`→`tokens: 1100`），其余逐字保留；**255 → 236 行**（净减 19 行：四份逐字相同的角色条目共 60 行并成基座 + 4 行 extends）。**顺带修掉一处原稿的缩进错误**：`figure_check:` 写在 `img2text:` 下（`img2text` 没有这个键——严格校验会报未知键、运行期一直被忽略），改写稿把它移回 `latex:` 段末尾并保持 `enabled: false`（校验通过、运行期行为不变：该功能本来就是关的）。
+
+### 验证与测试
+
+`gofmt -l .` 干净、`go vet ./...` 干净、`go test ./...` 全绿。新增/改写的用例：`config/extends_test.go`（合并语义、显式 0/null、列表与 map 替换、链式、四类报错、**深拷贝不污染基座**、严格校验认 `extends`、被继承块里的未知键定位、`extends` 条目各自带 `image_tokens`、同名同价的四角色形态、无 `extends` 配置在节点合并路径与参照路径上 `reflect.DeepEqual`、无 `extends` 配置的问题清单逐字不变）、`config/knownkeys.go` + `TestUnknownKeyWarningLines`（路径与行号、两个模板零告警）、`config/template_keys_test.go`（两份模板键面一致、版本号一致、都能加载并解析出全部角色、`image_tokens` 逐键覆盖）、`config/runconfig_rewrite_test.go`（改写稿除白名单路径外逐键逐值等于源配置、每个角色解析出的有效模型与图片计量规则一致、严格校验只剩占位符、四个角色恰好各一行 `extends`）。
+
+**没有做的事**：`extends` 不做深层 map 的半合并（`request_body`/`thinking` 整块替换，语义表已写明）；改写稿里那处 `figure_check` 缩进修正改了行为面（虽然 `enabled: false`，但从此会被真正读到）——已在交付说明里单独列出，敢要就删掉那 8 行。

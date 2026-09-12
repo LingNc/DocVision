@@ -1,6 +1,18 @@
-# DocVision Configuration (example - copy to config.yaml and fill in your values)
+# DocVision Configuration — 示例与编辑方法
+#
+#   这份文件是**教学示例**：它的职责是把本项目的配置能力与编辑原理讲清楚，
+#   照抄示例里的占位值不一定能直接跑（真实值要按你的网关与模型填）。
+#   要能直接跑的默认模板是 `docvision init` 写出的那个（模板内容见
+#   go/internal/config/default.yaml）。
+#
+# 三条贯穿全文的规则：
+#   1. 键不写 = 用默认值（默认值见 docs/config.md 的表）；写了 = 用你写的值。
+#   2. 值类型分不清「没写」与「写了 0」，所以 `extends:` 的覆盖判定在解析期按
+#      **键是否出现**做（见下方 models: 的说明）。
+#   3. 未知键不生效：拼错一个键名不会有任何报错，启动时只会给一行"未知配置键"
+#      告警（`docvision setup` 保存时会把它拦下来）。
 
-config_version: 9
+config_version: 10
 
 # MinerU API Configuration
 mineru:
@@ -11,12 +23,12 @@ mineru:
   enable_formula: true
   enable_table: true
   language: "ch"               # ch, en, japan, korean, etc.
-  poll_interval: 3             # seconds between API polling attempts
-  log_poll_interval: 3         # seconds between console log output (exponential backoff starts here)
-  poll_timeout: 0              # max seconds to wait for task completion (0 = unlimited)
+  poll_interval: 3             # 轮询间隔（秒）
+  log_poll_interval: 3         # 控制台日志间隔（秒，指数退避起点）
+  poll_timeout: 0              # 单任务等待上限（秒，0 = 不限）
   progress_threshold: 80       # 页数变化阈值，达到此值立即刷新输出
-  max_pages_per_part: 200      # max pages per PDF part (MinerU limit)
-  max_size_mb: 200             # max file size in MB per PDF part (MinerU limit)
+  max_pages_per_part: 200      # 单个分片最大页数（MinerU 限制）
+  max_size_mb: 200             # 单个分片最大体积 MB（MinerU 限制）
   max_concurrent: 5            # 并发处理任务数
   upload_timeout: 300          # 上传空闲超时秒数（有数据流动时不超时）
 
@@ -29,16 +41,17 @@ options:
   # will prompt for permission to run npm install -g @mermaid-js/mermaid-cli
   # before any installation happens.
   log_level: "info"                 # info | debug | trace（debug 记请求响应/提示词/工具调用/最终内容，trace 再加流式分片）
-# Paths
+
+# Paths：目录类配置都支持相对路径（相对运行目录）与绝对路径。
 paths:
-  input_dir: "./files"              # dir with source files
-  split_dir: "./split_files"        # dir for split PDF parts
-  mineru_output: "./mineru_output"  # dir for MinerU API results
-  output_dir: "./output"            # dir with merged .md files
+  input_dir: "./files"              # 待处理源文件目录
+  split_dir: "./split_files"        # PDF 分片目录
+  mineru_output: "./mineru_output"  # MinerU 解析结果目录
+  output_dir: "./output"            # 合并后的 .md 目录
   images_dir: "./output/images"
-  finally_dir: "./finally"          # final output directory
+  finally_dir: "./finally"          # 成品目录
   logs_dir: "./logs"                # img2text_*.log / img2text_error_*.log
-  done_dir: "./files/done"          # dir for sources archived after a successful split
+  done_dir: "./files/done"          # 分割完成后源文件的归档目录
   latex_output:  ./finally_latex    # 档位2 输出根：每本书的工作区是 <latex_output>/<项目名>/
   latex_project: ./latex_project    # 档位1 输出根：每本书的工作区是 <latex_project>/<项目名>/
                                     #   项目名默认取主题名（主 md 主文件名，同 images/<主题>/），
@@ -60,20 +73,19 @@ latex:
     enabled: false               # true = 逐图校验（每张图多一次视觉调用）
     model: "verifier"            # models: 里能看图的模型（缺条目时退回作图模型并在日志说明）
     max_rounds: 2                # 第 1 轮校验 + 最多这么多轮修正
-  # Model registry keys for each specialised AI session.
-  # Each key must exist in the models: registry below; entries there
-  # may declare their own base_url / api_key / model / request_body
-  # (empty fields inherit the models.text default entry).
+  # 角色 → models: 条目名的映射。这里填的是**条目名**（不是 wire 模型名），
+  # 想换模型只改 registry 里那一条条目，不用动这一节。
+  # 这几个角色键本身不参与任何"继承与覆盖"，它们只是指针。
   classifier_model: "classifier" # 图像分类 AI（text/vector/raster 标记）
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
   convert_model: "convert"       # 档位1：章节转换 / 构建修复 AI
-  checker_model: "checker"
+  checker_model: "checker"       # 每章核对（小文本模型即可）
   insert_image_description: false # 档位2：raster 保留原图时是否再嵌入一段 AI 解释文本
                                  # （档位1 不受此开关控制：raster 总是带 DESCRIBE 解释块）
   chapter_granularity: "small"   # 档位1 章节拆分粒度：small=按小节拆分（默认）/ large=按大章整体拆分
-  concurrency: 3                 # 会话级并发（处理process/drawing、convert等的并发限制）
+  concurrency: 3                 # 会话级并发（classify / 逐章 convert / style-fix 共用）
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: false # 保留会话转录 JSONL（成功会话默认清理）；debug 日志下必定保留
   compile:
@@ -83,7 +95,10 @@ latex:
     raster_dpi: 220              # 矢量图 PDF 栅格化为 PNG 的分辨率（SVG 不可用时的回退产物）
     max_fix_rounds: 40           # 编译-修正整体循环上限
     final_review: true           # 全书编译通过后再跑一次终审会话（汇总/整理/重编译）
-  sessions:                      # 每个 AI 会话的独立调优
+  # 每个 AI 会话的独立调优。共同规则：字段不写 = 用内置默认（0 的字段含义见
+  # 各行的注释，例如 max_tool_rounds: 0 = 真正不限制）；checker 的特殊之处是
+  # 它没写的字段继承 convert（轮数除外，内置 50）。
+  sessions:
     drawing:
       context_limit: 131072      # 上下文窗口（tokens，默认 128K，可改 64K/256K 等）
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
@@ -120,22 +135,29 @@ img2text:
   # request_body:                # 覆盖请求体参数
 
 # AI verification（AI 校验：默认关闭，先上日程）
+verify:
+  enabled: false                 # 仅作提示：核对只在显式运行 docvision verify 时执行（自动流程不调用）
+  verifier_model: "verifier"     # models: 中支持图像的校验模型
+  concurrency: 2
+  report_file: "verify_report.md"
+
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
 # Tools - per-tool tunables shared by every pipeline (img2text context
 # expansion, latex image_context, mermaid validation).
+# 编号说明：0 表示"用内置默认"，负数表示"取消这个限制"，不写与写 0 等价。
 # ----------------------------------------------------------------
 tools:
   view:                         # 看图软预算（只提醒，不拦截调用；按"对象"计数）
     image_max: 30               # 同一张图（文件）最多看 30 次（0=30，负=不限）
     pdf_max: 25                 # 同一个 PDF 的**每一页**最多看 25 次（0=25，负=不限）
     warn_ratio: 0.7             # 用满该比例起提醒"仅剩 N 次"（30*0.7=21，向上取整 → 从第 21 次起）
-  context:
-    initial_up: 10              # initial context lines above the image
-    initial_down: 5             # initial context lines below the image
-    max_up: 50                  # expansion cap above (lines)
-    max_down: 50                # expansion cap below (lines)
-    max_calls: 5                # max expansion requests per image
+  context:                      # img2text 的上下文扩展工具
+    initial_up: 10              # 图片上方初始上下文行数
+    initial_down: 5             # 图片下方初始上下文行数
+    max_up: 50                  # 向上扩展上限（行）
+    max_down: 50                # 向下扩展上限（行）
+    max_calls: 5                # 单图最大扩展请求次数
   mermaid:
     validation: "auto"          # off, auto, strict; auto warns and skips if mmdc is missing
     command: "mmdc"             # Mermaid CLI command
@@ -161,19 +183,30 @@ preview:
   host: "127.0.0.1"              # 监听地址；0.0.0.0 会让局域网内可访问（转录含全书内容，默认只本机）
   port: 8848                     # 端口（配置里不写或写 0 都取默认 8848；命令行 --port 0 = 由内核挑一个空闲端口）
 
-# 本地 token 估算：只影响本地估算（上下文压缩阈值、会话预览页里带 ≈ 的数字）；
+# ----------------------------------------------------------------
+# 本地 token 估算（estimate）
+# ----------------------------------------------------------------
+# 只影响**本地估算**：上下文压缩阈值、会话预览页里带 ≈ 的数字。
 # 厂商回执的 prompt_tokens / completion_tokens 一律照抄，不受这里影响。
 #
-# 每张图算多少 token 取决于厂商（同一张图不同视觉模型能差 3~10 倍），所以有两种
-# 计量方法可选，并且可以**按模型**各选一套——顶层 estimate 是全局默认，
-# models.<名>.image_tokens 覆盖那一条（只写与全局不同的键，其余继承全局）：
-#   fixed  ：每张固定 tokens 个（不看尺寸）
-#   pixels ：每张 ≈ 宽×高 / px_per_token，夹在 [min_tokens, max_tokens] 之间
-#   none   ：本地按 0 计（厂商数字里仍然包含图片 token）
-# 默认值依据真实实测：glm-5.3-flash-official 上 2.88M 像素的页面渲染实测约 3697
-# token（≈780 px/token），deepseek-v4.1-flash 上大图饱和在 ≈1050 token/张——两者
-# 量级不同，所以默认（pixels 750 / 85 / 4096）只是"先能算准尺寸大图"的折中；
-# 换模型时把实测值写进该模型自己的 image_tokens。
+# 每张图算多少 token 取决于厂商（同一张图不同视觉模型能差 3~10 倍），所以有三种
+# 计量方法，而且**可以按模型各选一套**：
+#
+#   method: pixels（默认）  每张 ≈ 宽×高 / px_per_token，夹在 [min_tokens, max_tokens]
+#                           参数：px_per_token、min_tokens、max_tokens
+#                           tokens 在"取不到尺寸"（未知格式/文件读不到）时兜底
+#   method: fixed           每张固定 tokens 个，不看尺寸
+#                           参数：tokens
+#   method: none            本地按 0 计（厂商数字里仍含图片 token，只是本地不预扣）
+#
+# 优先级链（从高到低，逐键判断，不是整块覆盖）：
+#   models.<条目>.image_tokens.<键>  →  estimate.<键>  →  代码默认值
+# 所以只想改一个键的模型只写那一个键，其余照旧继承全局。
+#
+# 默认值的依据是实测：glm-5.3-flash-official 上 2.88M 像素的页面渲染实测约
+# 3697 token（≈780 px/token），deepseek-v4.1-flash 上大图饱和在 ≈1050 token/张
+# ——两者量级差 3~4 倍，所以默认（pixels 750 / 85 / 4096）只是"先能算准尺寸大图"
+# 的折中；换模型时把实测值写进该模型自己的 image_tokens。
 estimate:
   method: pixels                 # fixed / pixels / none；留空=pixels
   tokens: 1100                   # method=fixed 时每张的固定值；pixels 模式下取不到尺寸时也用它
@@ -181,71 +214,122 @@ estimate:
   min_tokens: 85                 # method=pixels：单张下限
   max_tokens: 4096               # method=pixels：单张上限
 
-verify:
-  enabled: false                 # 仅作提示：核对只在显式运行 docvision verify 时执行（自动流程不调用）
-  verifier_model: "verifier"     # models: 中支持图像的校验模型
-  concurrency: 2
-  report_file: "verify_report.md"
-
 # ----------------------------------------------------------------
-# Named model registry — every specialised AI gets its own entry.
-# Empty fields (base_url/api_key/model/request_body) inherit the
-# top-level ai block, so a minimal setup only sets model:.
+# Named model registry — every specialised AI gets its own entry
 # ----------------------------------------------------------------
+# 注册表是"一个名字 → 一套模型参数"的字典。三件事在这里决定：
+#
+# ① 条目字段不写 = 继承 models.text（base_url / api_key / model / request_body /
+#    max_tokens / temperature / api_timeout / api_connect_timeout / api_max_retries /
+#    rate_limit_retries / stream / api_stream_idle_timeout / thinking / tool_stream /
+#    reasoning_effort），models.text 没写的再用代码默认值。
+#    ⇒ 同网关的模型条目只写 model: 一行就够。
+#
+# ② `extends: <另一条目名>` = 命名基座 + 只写差异。加载期在 YAML 节点层把基座的
+#    条目键深合并进来，判定标准是**键是否出现**：
+#      · 没写的键     → 取基座的值
+#      · 写了任意值   → 用你写的值（包括显式 0 / false / "" 都算覆盖）
+#      · 写了 null    → 显式清空，基座那个键不会生效
+#      · 列表          → 整体替换，不拼接；map 值（request_body/thinking 这种整块）
+#                        → 整块替换，不做半合并
+#    基座可以是另一条 extends 出来的条目（链式解析），成环/指向不存在的条目/
+#    自引用在加载期直接报错，并打印完整链（如 `a → b → c → a`）。
+#    一套 key/endpoint 被多个角色共用时，这就是唯一要改的地方。
+#
+# ③ 单价（price）：条目自己写了任意一项就用自己这一份；一项都没写则继承
+#    models.text 的费率（同一个网关下的模型不必重复三行数字）。全 0 = 未配置，
+#    费用报告整块不显示金额——绝不用 ¥0 冒充"没花钱"。
+#    两个条目发往**同一个 wire 模型名**却配了不同单价，加载期直接报错：转录只记
+#    wire 名，费用报告无法判断该用哪一份。
+#
+# 注意区分两套规则：`extends` 只看"键是否出现"（显式 0 也算覆盖）；而条目没写的
+# 字段继承 models.text 时看的是**零值**（写了 0 就等于没写，继续往上回落）。
 models:
-  text:                        # img2text 等基础流程使用的默认模型（必填；其他条目留空字段继承这里）
+  text:                          # 基础流程默认模型（必填；其他条目留空字段继承这里）
     base_url: "https://your-api-proxy.com/v1"
     api_key: "sk-YOUR-API-KEY-HERE"
     model: "Qwen/Qwen3.6-27B"
-    # 计费单价（元/百万 tokens；用于 docvision sessions --cost 与 latex 跑完的
-    # 费用表）。不配就整块不显示金额——绝不显示 ¥0 冒充"没花钱"。
-    # input = 未命中前缀缓存；cached = 命中缓存（不填按 input 计，宁可高估）；
-    # output = 输出（含思考 tokens，厂商就是这么计的）。
-    price:
-      input: 0
-      cached: 0
-      output: 0
-      currency: "¥"
-    temperature: 0.10
-    # API 请求控制（全局默认；各 models 条目可单独覆盖）
+    price:                       # 计费单价（元/百万 tokens）
+      input: 0                   # 未命中前缀缓存的输入单价
+      cached: 0                  # 命中前缀缓存的输入单价；不填/0 按 input 计（宁可高估）
+      output: 0                  # 输出单价（含思考 tokens，厂商就是这么计的）
+      currency: "¥"              # 金额前缀；配了价格却没写时补默认 ¥
+    temperature: 0.10            # 采样温度
     api_timeout: 400            # 非流式：整次请求（连接+读取）总上限（秒）
     api_connect_timeout: 60     # 连接/首字节等待上限（秒）
     api_stream_idle_timeout: 0  # 流式：两个数据块之间的最大间隔（秒），0 = 用 api_timeout
-    api_max_retries: 3          # API retry count for non-rate-limit errors
-    rate_limit_retries: 20      # 429 限流重试上限（退避封顶 60s；余额/配额类错误不走重试，直接报错）
-    stream: true                # 默认流式（SSE）：长思考/长输出期间持续有进展，不再静默等待
-    # 思考（思维链）控制：顶层字段，不要写进 request_body.extra_body
-    thinking:
-      type: disabled            # enabled | disabled（GLM-4.5+ / DeepSeek）
-    # reasoning_effort: high    # 思考强度 max|xhigh|high|medium|low|minimal|none（GLM-5.2+，thinking 开启时生效）
+    api_max_retries: 3          # 通用 API 错误重试次数（4xx 客户端错误不重试）
+    rate_limit_retries: 20      # 429 限流重试上限（退避封顶 60s；余额/配额类错误不走重试）
+    stream: true                # 默认流式（SSE）：长思考/长输出期间持续有进展
+    thinking:                   # 思考控制：请求体**顶层**字段，不要写进 request_body.extra_body
+      type: disabled            # enabled | disabled | adaptive（写 disable 这类笔误会自动纠正并告警）
     request_body:               # 其它厂商参数（原样合并进请求体顶层）
       enable_thinking: false    # Qwen 3.6+
+    image_tokens:               # 该条目单独一套图片计量；只写与全局不同的键
+      method: pixels            # 这一条与顶层一致时其实可以不写，这里写全是为了展示键名
+      px_per_token: 750
+      min_tokens: 85
+      max_tokens: 4096
+
+  # ---- 命名基座 1：跨模型共享 endpoint / key / 请求控制 ----
+  # 基座不是"特殊条目"：它自己也可以被 latex.drawing_model 这类角色直接引用。
+  gateway-a:                    # 只写与 text 不同的键，其余继续继承 text
+    model: "glm-5.3-flash"
+    temperature: 1              # GLM 官方推荐
+    price:
+      input: 1
+      cached: 0.1
+      output: 4
+    thinking:
+      type: enabled
+      clear_thinking: false     # 保留式思考（GLM）：历史思维链完整回传，提升缓存命中
+    tool_stream: true           # 工具参数随流返回（stream: true 时生效）
+
+  # ---- 命名基座 2：另一个 provider，同样只写差异 ----
+  gateway-b:
+    base_url: "https://other-provider.example/v1"   # 换网关：只有这一处
+    api_key: "sk-ANOTHER-KEY-HERE"
+    model: "deepseek-v4.1"
+    stream: false               # 这个网关不支持 SSE，此条目单独关闭流式
+    thinking:
+      type: enabled
+    reasoning_effort: high      # max|xhigh|high|medium|low|minimal|none
+    price:
+      input: 2
+      cached: 0.2
+      output: 8
+      currency: "¥"
+
+  # ---- 同一模型不同参数：复用基座，只写差异键 ----
+  heavy:                        # 重活（作图/转换）：基座 B + 更长的超时
+    extends: "gateway-b"
+    api_timeout: 900            # 单张图/单章可能很慢，覆盖基座的默认
+    max_tokens: 65536
+
+  # ---- 角色复用同一条目：四个角色都指向 gateway-a 的同一套配置 ----
   classifier:
-    model: "Qwen/Qwen3.6-27B"    # 要求具备视觉能力
-  drawing:
-    model: "glm-5.3-flash"       # 作图 AI：需强视觉+代码能力
-    # image_tokens:                    # 该模型单独一套图片计量（不写=继承顶层 estimate）
-    #                                   # 例：这个视觉端点按像素折算，且上限更高
-    #   method: pixels
-    #   px_per_token: 780              # 实测：glm-5.3-flash-official 2.88M 像素 ≈ 3697 token
-    #   max_tokens: 8192
-    # base_url: "https://other-provider.example/v1"   # 可单独指定
-    # api_key: "sk-..."
-    # stream: false                                  # 该模型单独关闭流式
-    # thinking: { type: enabled, clear_thinking: false }  # 单独开启思考；clear_thinking:false=保留式思考（GLM，提升缓存命中）
-    # tool_stream: true                               # GLM 工具流式输出（stream:true 时随流返回工具参数）
-    # reasoning_effort: high
-    thinking:
-      type: enabled
+    extends: "gateway-a"
   style:
-    model: "glm-5.3-flash"
-    thinking:
-      type: enabled
+    extends: "gateway-a"
+    image_tokens:               # 只有它需要更高的图片 token 上限
+      max_tokens: 8192
   chapter:
-    model: "glm-5.3-flash"
+    extends: "gateway-a"
+    # 想给某个角色开思考又不动基座：把键写在这里即可（写了就覆盖，null 则清空）
+    # thinking:
+    #   type: enabled
+  drawing:
+    extends: "heavy"
+    image_tokens:               # 视觉端点按张固定计费：只覆盖 method 与 tokens
+      method: fixed
+      tokens: 1050              # 实测：deepseek-v4.1-flash 上大图饱和在 ≈1050/张
   convert:
-    model: "glm-5.3-flash"
+    extends: "heavy"
   checker:                       # 每章核对（小文本模型即可）
-    model: "Qwen/Qwen3.6-27B"
-  verifier:
-    model: "glm-5.3-flash"       # AI 校验模型（需视觉能力）
+    extends: "gateway-a"
+    stream: true                # 需要回一行 JSON，流式即可（示例：显式覆盖基座的 false）
+  verifier:                      # AI 校验模型（需视觉能力）
+    extends: "gateway-a"
+    image_tokens:
+      method: pixels
+      px_per_token: 780         # 实测：glm-5.3-flash-official 2.88M 像素 ≈ 3697 token

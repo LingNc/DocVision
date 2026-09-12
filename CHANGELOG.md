@@ -5,8 +5,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`models.<条目>.extends`：命名基座 + 只写差异**（`config_version` 9→10）。一套 key/endpoint/单价/思考设置被多个角色复用时，原来只能整块复制（现场配置里 `drawing` / `style` / `chapter` / `convert` 四块**逐字相同**、`price:` 出现 8 次）；现在写一个基座条目，其余条目 `extends: <基座名>` 只写差异键。合并在**加载期、YAML 节点层**完成：`ModelConfig` 几乎全是值类型，解码后分不清「没写这个键」与「写了 0/false/""」。语义——子条目没写的键取基座；写了任意值（含显式 `0`/`false`/`""`）算覆盖；写 `null` 显式清空；列表与 map 值（`request_body`/`thinking` 这种整块）整体替换、不拼接也不半合并；基座自身可以 extends 别人（链式）。错误在加载期硬报错并给出完整链：指向不存在的条目、自引用、成环（`a → b → c → a`）、`extends` 写成空值。**不写 `extends` 的配置逐字不变**（新加载路径与直接解码 + `setDefaults` 的参照路径 `reflect.DeepEqual`，既有继承用例一行未改仍过）。
+- **`LoadConfig` 对未知键出声**：`LoadConfig` 必须宽松（旧写法仍要能加载），但一个拼错的键完全没有症状——现在启动时按路径逐条打印 `⚠ <路径>: 未知配置键（第 N 行…）`，并且指出**继承了它的条目**（`models.base.<键>` 与 `models.drawing.<键>` 都会列出）；`docvision setup` 的严格路径照样把它当错误，并把 yaml.v3 那句「line N: field X not found in type config.ModelConfig」补上真实配置路径。旧 estimate 键的迁移提示改成按**键**匹配（不再被注释里提到的键名误触发）。
+- **同一 wire 模型名不同单价 → 加载期报错**：价格表按厂商报的**模型名**索引，两个条目发往同一个 wire 名却配了不同费率时，原先是 map 迭代顺序随机取一条（同一份配置的费用报告会在两次运行间变来变去）；现在直接报错并指出两个条目名与该改用哪条基座。同名同价（甚至都不配价）仍是正常写法。
+- **`config.example.yaml` 重写成"讲编辑方法"的示例**：`estimate` 三种方法（`pixels`/`fixed`/`none`）各自的含义与参数、`models.<条目>.image_tokens` 的逐键优先级链（条目键 → `estimate` 键 → 代码默认）、`extends` 的三种真实用法（同一模型不同参数、跨模型共享 endpoint/key、角色复用同一条目）与深合并语义/报错行为、以及 `price` 的继承规则，都逐条带短注释写清；`go/internal/config/default.yaml`（`docvision init` 模板）保持精简可跑但新键全部出现，两份模板的键面由 `TestConfigTemplateKeyParity` 钉住一致（值可不同）。
+
 ### Changed
 
+- **`models.<条目>.price` 没写任何费率时继承 `models.text` 的费率**：同一个网关下的模型不必重复三行数字；条目写了任意一项费率就用自己那一份（不逐项混用），全 0 仍是「未配置」、费用报告整块不显示金额。
+- **`ResolveModel` 不再把 `models.text` 的 map 头直接赋给条目**：`thinking` / `request_body` 现在拷一份（`validateThinkingTypes` 的就地纠正同样改成写回自己的副本）。原先"只改某个条目"会连带改到 `models.text` 与所有引用者——`extends` 会让这个共享面成倍放大。
 - **图片 token 的本地估算改为"两种方法、可按模型各选一套"**：`estimate` 块不再只有一个"像素折算"口径，而是 `method`（`pixels` / `fixed` / `none`）+ 共用参数 `tokens` / `px_per_token` / `min_tokens` / `max_tokens`（键 `estimate.image_px_per_token` / `image_tokens_min` / `image_tokens_max` / `image_tokens_fallback` 被这四项取代，`config_version` 8→9）。同一个模型可以在自己的条目下写 `image_tokens:` 只覆盖要改的键（其余继承顶层 `estimate`，没配的条目完全跟全局走），因为同一个模型族里"按张固定计费"与"按像素折算"的端点会同时存在：实测 `glm-5.3-flash-official` 上 2.88M 像素的页面渲染约 3697 token（≈780 px/token），而 `deepseek-v4.1-flash` 上大图饱和在 ≈1050 token/张。默认仍是 `pixels 750 / 85 / 4096`（与上一版一致，老配置的估算数字不变），`method: fixed` 的默认 `tokens` 是 1100。
 - **详情栏「图片」瓦片分实测与估算**：同一会话的用量行能推出实测值时瓦片给 `实测 1.2k/张`，推不出时给 `≈ 1.1k/张`（本地估算），悬浮说明写出该会话生效的完整规则（如 `pixels 750px per token（85–4096）`）、实测的样本量与本地估算的对照。实测值算法：相邻两次请求的 `prompt_tokens` 差值减去文本估算增量、再除以新增图片数，取各步中位数；本地裁剪/压缩导致请求变小、该步没有新增图片、或用量行没有本地那一半（旧转录）的步一律跳过。为此用量行新增 `text_tokens`（请求发出前的本地文本估算）与 `image_count`（该次请求的图片数）两项。
 - **配置里残留的旧 estimate 键会出声**：`image_px_per_token` / `image_tokens_min` / `image_tokens_max` / `image_tokens_fallback` 改名后没人再读它们，而 `LoadConfig` 对未知键不严格（严格检查只在 `docvision setup`），所以启动时按 `latex.bash_sandbox` 那条先例打印一行迁移提示，不让"改了却没生效"变成无声的困惑。

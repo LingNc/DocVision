@@ -60,6 +60,8 @@
 | `img2text.output_language` | AI 描述输出语言（"Chinese"/"English"） | Chinese |
 | `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body/stream/thinking…） | - |
 | `models.<name>` | 每个专用 AI 的独立配置，空字段继承 `models.text`；`max_tokens`/`temperature` 作为该模型未指定时的兜底；GLM 可用 `tool_stream: true`（工具参数随流返回）与 `thinking.clear_thinking: false`（保留式思考） | - |
+| `models.<条目>.extends` | 命名基座：本条目继承另一个 `models:` 条目的键（加载期在 YAML 节点层深合并）。语义见下方「`extends`：命名基座」一节 | 未设置 |
+| `models.<条目>.price.*` | 单价四键。条目**一项费率都没写**时继承 `models.text` 的费率；写了任意一项就用自己这一份。两个条目发往**同一个 wire 模型名**却配了不同单价 → 加载期报错 | 继承 `models.text`（或全 0 = 未配置） |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
 | `latex.sessions.{drawing,style,chapter,convert,checker}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |
 | `latex.sessions.*.context_limit` | 会话上下文窗口（tokens），达到阈值自动 AI 压缩 | 131072 |
@@ -95,7 +97,7 @@
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **9**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 9 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **10**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 10 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |
@@ -118,10 +120,56 @@
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |
 
-> **图片 token 的本地估算**：只影响本地估算（上下文压缩阈值、预览页里带 `≈` 的数字），厂商回执的 `prompt_tokens`/`completion_tokens` 一律照抄。每张图能算多少 token 取决于厂商，所以有 `pixels` 与 `fixed` 两种方法，并且**可以按模型各选一套**：优先取 `models.<条目>.image_tokens.<键>`，没写的键取顶层 `estimate.<键>`，都没有才用代码默认值（条目名与 wire 模型 id 都能命中覆盖；`latex.drawing_model` 这类角色键只是指向条目，不参与计量）。默认值是折中而非普适：实测 `glm-5.3-flash-official` 上 2.88M 像素的页面渲染约 3697 token（≈780 px/token），而 `deepseek-v4.1-flash` 上大图饱和在 ≈1050 token/张——所以默认用 `pixels`（750/85/4096）先算准尺寸大图，按张固定计费的端点则给该条目写 `method: fixed`。
+> **图片 token 的本地估算**：只影响本地估算（上下文压缩阈值、预览页里带 `≈` 的数字），厂商回执的 `prompt_tokens`/`completion_tokens` 一律照抄。每张图能算多少 token 取决于厂商，所以有三种计量方法，并且**可以按模型各选一套**：优先取 `models.<条目>.image_tokens.<键>`，没写的键取顶层 `estimate.<键>`，都没有才用代码默认值（条目名与 wire 模型 id 都能命中覆盖；`latex.drawing_model` 这类角色键只是指向条目，不参与计量）。默认值是折中而非普适：实测 `glm-5.3-flash-official` 上 2.88M 像素的页面渲染约 3697 token（≈780 px/token），而 `deepseek-v4.1-flash` 上大图饱和在 ≈1050 token/张——所以默认用 `pixels`（750/85/4096）先算准尺寸大图，按张固定计费的端点给该条目写 `method: fixed`，不关心本地预扣的写 `method: none`。
 
 > `latex.remove_watermark` 开启后流程开始时先做一次水印检测：全览页渲染 + markdown 重复图片统计，结果缓存在本项目工作区的 `watermark_memory.json`（档位1 `<latex_project>/<项目名>/`，档位2 `<latex_output>/<项目名>/`）并作为工作记忆注入后续所有会话；水印图片引用直接剔除不再处理。
 
-`estimate` 四项只影响**本地估算**：上下文压缩阈值、以及会话预览页里带 `≈` 的数字（行内计数、轨迹表的计数列、详情栏的「图片 N 张 ≈ …」）。厂商回执的 `prompt_tokens` / `completion_tokens` 一律照抄，不受这里影响。
+`estimate` 的四项参数只影响**本地估算**：上下文压缩阈值、以及会话预览页里带 `≈` 的数字（行内计数、轨迹表的计数列、详情栏的「图片 N 张 ≈ …」）。厂商回执的 `prompt_tokens` / `completion_tokens` 一律照抄，不受这里影响。三种方法的含义与各自用到的参数：
+
+| `method` | 含义 | 用到的参数 |
+| --- | --- | --- |
+| `pixels`（默认） | 每张 ≈ `宽×高 / px_per_token`，夹在 `[min_tokens, max_tokens]` | `px_per_token`、`min_tokens`、`max_tokens`；取不到尺寸时用 `tokens` |
+| `fixed` | 每张固定 `tokens` 个，不看尺寸（按张计费的端点） | `tokens` |
+| `none` | 本地按 0 计（厂商数字里仍含图片 token，只是本地不预扣） | 无 |
+
+## `extends`：命名基座
+
+`models.<条目>.extends: <另一条目名>` 让这个条目只写**差异键**，其余键取被指向的条目：
+
+```yaml
+models:
+  gateway-a:
+    model: "glm-5.3-flash"
+    temperature: 1
+    thinking: {type: enabled, clear_thinking: false}
+    price: {input: 1, cached: 0.1, output: 4}
+  drawing:
+    extends: "gateway-a"     # 只写差异；其余（key/单价/thinking/请求控制）全部继承
+    tool_stream: true
+  style:
+    extends: "drawing"       # 基座自己也可以 extends 别人（链式），逐级往上找
+```
+
+**合并语义**（在 YAML 节点层、解码之前按条目键合并）：
+
+| 情况 | 结果 |
+| --- | --- |
+| 子条目没写这个键 | 取基座的值 |
+| 子条目写了（任意值） | 用子条目的值整体替换；**显式 `0` / `false` / `""` 也算覆盖** |
+| 子条目写了 `null` | 显式清空，基座那个键不生效 |
+| 值是列表 | 整体替换，**不拼接** |
+| 值是 map（`request_body`/`thinking` 这种整块） | 整块替换，**不做半合并**（要对某个嵌套键覆盖就整块写出来） |
+
+判据是「键是否出现」，所以在解码后的值类型上做不了（`int` 分不清「没写」与「写了 0」）。两套规则不要混淆：
+
+- **`extends` 看键是否出现**：`api_timeout: 0` 写在子条目里就是覆盖（该条目这一项真的是 0）。
+- **条目没写的字段继承 `models.text` 时看零值**（`ResolveModel`）：`0`/空字符串等于「没写」，继续往 `models.text` 与代码默认走。
+
+报错（加载期即失败，`docvision setup` 会列出）：指向不存在的条目、自引用、成环（`a → b → c → a`，打印完整链）、`extends` 写成空值。未知键则单独出声：`docvision setup` 把它当错误拦下并指出真正写着那一行的条目（`models.base.<键>`），运行期至少打印一行「未知配置键」告警——包括被 `extends` 继承进另一个条目的那份。
+
+## 未知键与同名不同价
+
+- **未知键告警**：`LoadConfig` 对未知键不严格（旧写法仍要能加载），但一个拼错的键不会有任何症状，所以启动时按路径逐条打印 `⚠ <路径>: 未知配置键（第 N 行…）`。严格检查只在 `docvision setup`。
+- **同一 wire 模型名不同单价 → 加载期报错**：每处价格查询都按**厂商报的模型名**索引（转录里记的是它），两个条目发往同一个 wire 名却配了不同费率时，费用报告只能随机取一条。同名同价（甚至都不配价）是正常写法。
 
 完整配置见 `config.example.yaml`。

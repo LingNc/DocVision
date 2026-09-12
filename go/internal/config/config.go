@@ -4,7 +4,6 @@
 package config
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"os"
@@ -56,8 +55,18 @@ type ModelConfig struct {
 	Model       string                 `yaml:"model"`
 	RequestBody map[string]interface{} `yaml:"request_body"`
 	// Price is this entry's billing rate. All-zero = unknown, and every
-	// cost report then says "未配置价格" instead of inventing ¥0.
+	// cost report then says "未配置价格" instead of inventing ¥0. A model entry
+	// that sets none of the three rates inherits models.text's rates (models
+	// billed the same as the default don't repeat them); an entry that sets any
+	// rate uses its own block as-is.
 	Price PriceConfig `yaml:"price"`
+	// Extends names another models: entry whose keys this one inherits from,
+	// deep-merged at load time (see merge.go): maps merge recursively, scalars
+	// and lists replace wholesale, `key: null` clears an inherited key, and an
+	// explicit 0/false/"" counts as an override. Only the keys this entry
+	// actually writes end up "present", so ResolveModel's inheritance from
+	// models.text still applies underneath.
+	Extends string `yaml:"extends"`
 	// MaxTokens / Temperature are the per-model completion budget and
 	// sampling temperature. They act as the fallback used when a
 	// session or single-shot call does not set its own value
@@ -648,7 +657,8 @@ type PathsConfig struct {
 // zero-valued fields, and returns the resulting Config.
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
-const CurrentConfigVersion = 9
+// 10: models.<名>.extends + the price/unknown-key rules that came with it.
+const CurrentConfigVersion = 10
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -662,11 +672,20 @@ var retiredEstimateKeys = []string{
 }
 
 // hasRetiredEstimateKeys reports whether the raw config still carries a retired
-// estimate key.
+// estimate key. The match is on KEYS (`<indent><key>:`), not on the bare
+// substring: a comment or a note that merely mentions an old key name ("取代了
+// image_tokens_max") must not trigger a migration warning about a key the file
+// does not have.
 func hasRetiredEstimateKeys(data []byte) bool {
-	for _, k := range retiredEstimateKeys {
-		if bytes.Contains(data, []byte(k)) {
-			return true
+	for _, line := range strings.Split(string(data), "\n") {
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.TrimSpace(line)
+		for _, k := range retiredEstimateKeys {
+			if strings.HasPrefix(line, k+":") {
+				return true
+			}
 		}
 	}
 	return false
@@ -695,22 +714,42 @@ func checkConfigVersion(cfg *Config) {
 	}
 }
 
+// LoadConfig reads the YAML file at path, applies defaults for any
+// zero-valued fields, and returns the resulting Config.
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
+	return LoadConfigData(data, path)
+}
 
+// LoadConfigData is LoadConfig for content already in memory (path is only used
+// in error messages). The document is parsed into a yaml.Node tree first so
+// models.<名>.extends can be deep-merged BEFORE decoding — the only layer where
+// "key absent" and "key written as 0/false/\"\"" are still distinguishable.
+func LoadConfigData(data []byte, path string) (*Config, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	if err := mergeModelExtends(&doc); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
 	cfg := &Config{}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	if err := doc.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
 	checkConfigVersion(cfg)
 	warnDeprecatedKeys(cfg)
 	warnRetiredEstimateKeys(data)
+	warnUnknownKeys(data)
 	setDefaults(cfg)
 	if err := validateThinkingTypes(cfg); err != nil {
+		return nil, err
+	}
+	if err := checkDuplicateWireNames(cfg); err != nil {
 		return nil, err
 	}
 	if err := validatePaths(cfg); err != nil {
@@ -763,16 +802,87 @@ func validateThinkingTypes(cfg *Config) error {
 		}
 		v := strings.ToLower(strings.TrimSpace(str))
 		if fixed, isTypo := thinkingTypeTypos[v]; isTypo {
+			// 纠正要写回一个**自己的** map：直接改 cfg.Models 里那张共享的
+			// 表会连带改掉基座条目和所有继承它的条目（同一个 map 头）。
+			m.Thinking = cloneAnyMap(m.Thinking)
 			m.Thinking["type"] = fixed
+			cfg.Models[name] = m
 			fmt.Fprintf(os.Stderr, "\u26a0 models.%s.thinking.type: %q 不是合法取值，已按 %q 发送（合法值：enabled / disabled / adaptive）\n", name, str, fixed)
 			continue
 		}
 		if !thinkingTypes[v] {
 			return fmt.Errorf("models.%s.thinking.type: %q 不是合法取值（合法值：enabled / disabled / adaptive）——该字段原样进请求体，写错会让服务端拒掉每一个请求", name, str)
 		}
+		m.Thinking = cloneAnyMap(m.Thinking)
 		m.Thinking["type"] = v
+		cfg.Models[name] = m
 	}
 	return nil
+}
+
+// cloneAnyMap returns a shallow copy of m (nil stays nil). Shallow is enough:
+// only the top-level "type" key is ever written in place, and nested values are
+// never mutated after load.
+func cloneAnyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// checkDuplicateWireNames rejects two registry entries that send the same wire
+// model name but bill differently. Every price lookup is keyed by the WIRE name
+// (transcripts record that, not the registry key), so a conflict would silently
+// pick whichever entry the map iteration happened to visit last — a cost report
+// that changes between runs. Two entries with the SAME rates are fine (sharing
+// one wire model under two roles is normal).
+func checkDuplicateWireNames(cfg *Config) error {
+	def := cfg.Models[defaultModelKey].Model
+	type seen struct {
+		entry string
+		price PriceConfig
+	}
+	byName := map[string][]seen{}
+	for name, mc := range cfg.Models {
+		wire := mc.Model
+		if wire == "" {
+			wire = def
+		}
+		if wire == "" {
+			continue
+		}
+		byName[wire] = append(byName[wire], seen{entry: name, price: mc.Price})
+	}
+	wires := make([]string, 0, len(byName))
+	for w := range byName {
+		wires = append(wires, w)
+	}
+	sort.Strings(wires)
+	for _, wire := range wires {
+		group := byName[wire]
+		if len(group) < 2 {
+			continue
+		}
+		first := group[0]
+		for _, other := range group[1:] {
+			if other.price == first.price {
+				continue
+			}
+			return fmt.Errorf("models.%s.price 与 models.%s.price 冲突：两个条目发往同一个 wire 模型 %q（%s / %s）却配置了不同的单价。"+
+				"转录只记 wire 名，费用报告无法判断该用哪一份——请让同名的条目共用同一条基座（models.<基座>.extends 反过来用）或改成同一个价格",
+				first.entry, other.entry, wire, priceSummary(first.price), priceSummary(other.price))
+		}
+	}
+	return nil
+}
+
+// priceSummary renders a rate triple for error messages (never for reports).
+func priceSummary(p PriceConfig) string {
+	return fmt.Sprintf("input=%g cached=%g output=%g", p.Input, p.Cached, p.Output)
 }
 
 func validatePaths(cfg *Config) error {
@@ -1029,12 +1139,26 @@ func setDefaults(cfg *Config) {
 	// 上下限写反不在这里悄悄纠正：它是配置错误，由 semanticChecks 报出来；
 	// 运行期 ImageEstimate.Normalized 仍会把界限理成有序的，估算不会失控。
 
-	// Model prices: currency only (a rate of 0 stays 0 = unknown).
+	// Model prices: currency only (a rate of 0 stays 0 = unknown), and the
+	// rates themselves fall back to models.text exactly like every other model
+	// field does — a model billed at the default rate should not have to repeat
+	// three numbers. An entry that sets any rate uses its own block verbatim.
+	textPrice := cfg.Models[defaultModelKey].Price
 	for name, mc := range cfg.Models {
+		if name == defaultModelKey {
+			continue
+		}
+		if !mc.Price.Configured() {
+			mc.Price = textPrice
+		}
 		if mc.Price.Configured() && mc.Price.Currency == "" {
 			mc.Price.Currency = "¥"
-			cfg.Models[name] = mc
 		}
+		cfg.Models[name] = mc
+	}
+	if text := cfg.Models[defaultModelKey]; text.Price.Configured() && text.Price.Currency == "" {
+		text.Price.Currency = "¥"
+		cfg.Models[defaultModelKey] = text
 	}
 
 	// Paths defaults
@@ -1199,7 +1323,9 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 		entry.Model = fallback.Model
 	}
 	if entry.RequestBody == nil {
-		entry.RequestBody = fallback.RequestBody
+		// 深拷贝：直接把 fallback 的 map 头赋过来，会让"只改条目"的操作
+		// 顺带改到 models.text 与所有别的引用者（下同）。
+		entry.RequestBody = cloneAnyMap(fallback.RequestBody)
 	}
 	if entry.MaxTokens == 0 {
 		entry.MaxTokens = fallback.MaxTokens
@@ -1226,7 +1352,7 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 		entry.APIStreamIdleTimeout = fallback.APIStreamIdleTimeout
 	}
 	if entry.Thinking == nil {
-		entry.Thinking = fallback.Thinking
+		entry.Thinking = cloneAnyMap(fallback.Thinking)
 	}
 	if entry.ToolStream == nil {
 		entry.ToolStream = fallback.ToolStream

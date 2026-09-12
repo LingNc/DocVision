@@ -1,6 +1,6 @@
 # DocVision Configuration
 
-config_version: 9
+config_version: 10
 # Copy this file to config.yaml and fill in your credentials.
 
 # MinerU API Configuration
@@ -117,9 +117,6 @@ img2text:
   format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
   max_tokens: 65536
   model: "text"                # models: 中的条目名；留空用 models.text
-  # max_tokens: 65536           # 覆盖 options.max_tokens
-  # temperature: 0.10
-  # request_body:               # 覆盖请求体参数
 
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
@@ -198,7 +195,8 @@ models:
     api_key: "sk-YOUR-API-KEY-HERE"
     model: "Qwen/Qwen3.6-27B"
     # 计费单价（元/百万 tokens；用于 docvision sessions --cost 与 latex 跑完的
-    # 费用表）。不配就整块不显示金额——绝不显示 ¥0 冒充"没花钱"。
+    # 费用表）。不写任何一项 = 继承 models.text 的费率；models.text 自己也不写
+    # 才叫"未配置"，费用报告整块不显示金额——绝不显示 ¥0 冒充"没花钱"。
     # input = 未命中前缀缓存；cached = 命中缓存（不填按 input 计，宁可高估）；
     # output = 输出（含思考 tokens，厂商就是这么计的）。
     price:
@@ -220,26 +218,41 @@ models:
     # reasoning_effort: high    # 思考强度 max|xhigh|high|medium|low|minimal|none（GLM-5.2+，thinking 开启时生效）
     request_body:               # 其它厂商参数（原样合并进请求体顶层）
       enable_thinking: false    # Qwen 3.6+
+    # 逐图计量（本地 token 估算，只影响压缩阈值与预览页里带 ≈ 的数字）：
+    # 顶层 estimate 是全局默认，这里只写与全局不同的键，其余继承全局。
+    image_tokens:
+      method: pixels            # fixed（每张固定 tokens）/ pixels（按宽×高/px_per_token）/ none
+      tokens: 1100              # method=fixed 的每张固定值；pixels 下取不到尺寸时的兜底
+      px_per_token: 750         # pixels：单张 ≈ 宽×高 / 该值
+      min_tokens: 85            # pixels：单张下限
+      max_tokens: 4096          # pixels：单张上限
+  # 命名基座：一套 key/endpoint 被多个角色复用的写法。extends 在加载期按条目键
+  # 深合并，本条目只写"差异键"，没写的键取基座（基座没写的再取 models.text /
+  # 代码默认）；详情与覆盖规则见 config.example.yaml 与 docs/config.md。
+  heavy:
+    extends: "text"             # 换网关/换模型时只改这一条基座
+    model: "deepseek-v4.1"
+    temperature: 1
+    thinking:
+      type: enabled
+      clear_thinking: false     # 保留式思考（GLM）：历史思维链完整回传，提升缓存命中
+    reasoning_effort: high      # max|xhigh|high|medium|low|minimal|none
+    max_tokens: 65536           # 该条目的输出预算兜底（会话自己的 max_tokens 优先）
+    # 该条目单独一套图片计量（本地估算）：只写与顶层 estimate 不同的键，其余继承。
+    image_tokens:
+      method: fixed             # fixed（每张固定 tokens）/ pixels（按宽×高/px_per_token）/ none
+      tokens: 1050              # 实测：deepseek-v4.1-flash 上大图饱和在 ≈1050/张
   classifier:
     model: "Qwen/Qwen3.6-27B"    # 要求具备视觉能力
   drawing:
-    model: "glm-5.3-flash"       # 作图 AI：需强视觉+代码能力
-    # image_tokens:                    # 该模型单独一套图片计量（不写=继承顶层 estimate）
-    #                                   # 例：这个视觉端点按张固定计费，与尺寸无关
-    #   method: fixed
-    #   tokens: 1050                   # 实测：deepseek-v4.1-flash 上大图饱和在 ≈1050/张
-    # base_url: "https://other-provider.example/v1"   # 可单独指定
-    # api_key: "sk-..."
-    # stream: false                                  # 该模型单独关闭流式
-    # thinking: { type: enabled, clear_thinking: false }  # 单独开启思考；clear_thinking:false=保留式思考（GLM，提升缓存命中）
-    # tool_stream: true                               # GLM 工具流式输出（stream:true 时随流返回工具参数）
-    # reasoning_effort: high
+    extends: "heavy"             # 只写差异：其余（key/单价/thinking/请求控制）全部继承
+    tool_stream: true            # GLM 工具流式输出（stream:true 时随流返回工具参数）
   style:
-    model: "glm-5.3-flash"
+    extends: "heavy"
   chapter:
-    model: "glm-5.3-flash"
+    extends: "heavy"
   convert:
-    model: "glm-5.3-flash"
+    extends: "heavy"
   checker:                       # 每章核对（小文本模型即可）
     model: "Qwen/Qwen3.6-27B"
   verifier:

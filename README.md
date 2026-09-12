@@ -76,9 +76,12 @@ models:
     base_url: "https://api.example.com/v1"
     api_key: "sk-..."
     model: "your-model"
+  drawing:                        # 其余角色只写差异，空字段继承 models.text
+    extends: "text"               # 也可指向另一个条目：命名基座（详见 docs/config.md）
+    model: "your-vision-model"
 ```
 
-配置写在 `config_version: 9`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
+配置写在 `config_version: 10`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
 
 ### 2. 跑起来
 
