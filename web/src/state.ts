@@ -97,14 +97,9 @@ export const state = reactive({
   follow: true, // 旧页 live 模式默认开
   forceCollapse: false,
   onlyTools: false,
-  msgSeq: 0,
-  toolSeq: 0,
-  calls: new Map<string, any>(),
-  callNodes: {} as Record<string, any>,
   callEst: {} as Record<string, any>,
   imgAttr: null as any,
   anchors: {} as Record<string, any>,
-  badLines: 0,
   pullError: '',
   polling: false,
   theme: 'light',
@@ -294,7 +289,6 @@ export function revealProject(project: string): void {
   void project
 }
 
-export function renderTimeline(): void {}
 
 /* ---------- 渲染入口注册表：各块组件实现，这里只留挂点（避免循环 import） ---------- */
 

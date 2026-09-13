@@ -84,13 +84,8 @@ function onClickFollow() {
 }
 
 function onClickCollapseThinking() {
+  // 思考块组件 watch forceCollapse 自动收起/恢复（含增量追加进来的）。
   state.forceCollapse = !state.forceCollapse
-  if (state.forceCollapse) {
-    // 作用于消息流里所有思考行（含增量追加进来的）。
-    document.querySelectorAll('details.disclosure-thinking').forEach((d) => {
-      ;(d as HTMLDetailsElement).open = false
-    })
-  }
 }
 
 function onClickOnlyTools() {
@@ -117,6 +112,7 @@ function scrollToBottom() {
 /* 徽标与面包屑：旧页 renderHeader 行为——选中会话后 #header-actions 整体
  * 重建为摘要徽标（mode-badge 从 DOM 移除）；未选中时才是 live 徽标。 */
 const badgeText = computed(() => (state.polling ? '实时' : '实时（已断开）'))
+const badCount = computed(() => state.lines.reduce((n: number, l: any) => n + (l && l.bad ? 1 : 0), 0))
 const headerSummary = computed(() => {
   const cur = state.current
   if (!cur) return ''
@@ -124,7 +120,7 @@ const headerSummary = computed(() => {
   parts.push(cur.messages + ' 条消息')
   if (state.lines.length) parts.push(state.lines.length + ' 行')
   parts.push(fmtSize(cur.size))
-  if (state.badLines) parts.push('坏行 ' + state.badLines)
+  if (badCount.value) parts.push('坏行 ' + badCount.value)
   return parts.join(' · ')
 })
 const curProject = computed(() => (state.current ? state.current.project || projectOf(state.current.id) : ''))
@@ -133,8 +129,8 @@ const sessionTitle = computed(() => (state.current ? sessionTitleOf(state.curren
 /* 横幅：坏行提示与拉取失败共用一条（旧页 updateBanner/setBanner 的语义）。
  * 坏行优先；拉取失败的信息保留到坏行出现或下次成功渲染时。 */
 const bannerText = computed(() => {
-  if (state.badLines > 0) {
-    return '已跳过 ' + state.badLines + ' 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）'
+  if (badCount.value > 0) {
+    return '已跳过 ' + badCount.value + ' 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）'
   }
   return state.pullError
 })
@@ -233,9 +229,8 @@ onBeforeUnmount(() => {
             <template v-else>
               <button class="crumb is-link" type="button" title="在侧栏里定位到这个项目" @click="revealProject(curProject)">{{ curProject }}</button>
               <span class="crumb-sep">›</span>
-              <span class="crumb crumb-current" :title="state.current.id">
-                <InlineMD :text="sessionTitle"></InlineMD>
-              </span>
+              <!-- 会话名本身就是行内 Markdown 渲染根（旧页 nameNode('span','crumb crumb-current',…)），不再多包一层 -->
+              <InlineMD :text="sessionTitle" tag="span" class="crumb crumb-current" :title="state.current.id"></InlineMD>
             </template>
           </nav>
           <div id="header-actions" class="header-actions">

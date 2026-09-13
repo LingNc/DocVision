@@ -6,6 +6,7 @@
  * 真实角色、工具调用与工具结果各占一行不合并。
  */
 import { state, switchView } from '../state'
+import { callMsgLine } from './stream'
 import { countText, countValue, estOf, firstLine, fmtDur, fmtTokens, unitLabel } from './sidebar'
 import { prettyJSON } from './richtext'
 import {
@@ -87,8 +88,9 @@ export function trajectoryRows(): any[] {
       const fromTool = !!imageAfterTool[line.n]
       // 跳回对话里"合并后的那一块"：归到调用就跳那次调用，归到任务就跳任务行，
       // 都没认出来才跳自己这一行。
-      const jumpTo = attr.kind === 'call' && attr.callId && state.callNodes[attr.callId]
-        ? state.callNodes[attr.callId].lineN
+      const callLine = attr.kind === 'call' && attr.callId ? callMsgLine()[attr.callId] : undefined
+      const jumpTo = callLine !== undefined
+        ? callLine
         : (attr.kind === 'task' && attr.taskLineN ? attr.taskLineN : line.n)
       rows.push({
         kind: 'user', tag: '用户', name: '用户',
