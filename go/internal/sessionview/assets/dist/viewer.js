@@ -6796,7 +6796,9 @@
   }
   function switchView(view) {
     state.view = view === "trajectory" ? "trajectory" : "chat";
-    if (state.view === "trajectory") ;
+    if (state.view === "trajectory") {
+      renderTrajectory$1();
+    }
   }
   const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "" });
   function openLightbox(url, ref2) {
@@ -6811,6 +6813,14 @@
   }
   function setBannerText(text) {
     state.pullError = text;
+  }
+  let _renderTrajectory = () => {
+  };
+  function registerRenderTrajectory(fn) {
+    _renderTrajectory = fn;
+  }
+  function renderTrajectory$1() {
+    _renderTrajectory();
   }
   const ROOT_PROJECT = "（根目录）";
   function projectOf(id) {
@@ -6861,6 +6871,13 @@
   function countText(chars, tokens) {
     if (state.unit === "char") return (Number(chars) || 0) + " 字符";
     return "≈ " + fmtTokens(tokens) + " tokens";
+  }
+  function countValue(chars, tokens) {
+    if (state.unit === "char") return String(Number(chars) || 0);
+    return "≈ " + fmtTokens(tokens);
+  }
+  function unitLabel() {
+    return state.unit === "char" ? "字符" : "tokens";
   }
   function usageLines(lines) {
     const out = [];
@@ -7317,6 +7334,14 @@
     }
     appendJSONSpans(parent, pretty);
     return { highlighted: true, note: "" };
+  }
+  function machineBlock(text, cls) {
+    const frag = document.createDocumentFragment();
+    const pre = el("pre", cls);
+    const res = highlightMachine(pre, text);
+    frag.appendChild(pre);
+    if (res.note) frag.appendChild(el("div", "note", res.note));
+    return frag;
   }
   function foldLabel(expanded, lines, chars, tokens) {
     return expanded ? "收起" : "展开全文（" + lines + " 行 / " + countText(chars, tokens) + "）";
@@ -8554,7 +8579,7 @@
       obj = null;
     }
     if (!obj || typeof obj !== "object") return "";
-    const n = String(name).toLowerCase();
+    const n = String(name || "").toLowerCase();
     const pick = (v2) => {
       if (typeof v2 === "string") return v2;
       if (v2 === void 0 || v2 === null) return "";
@@ -9011,7 +9036,7 @@
       stream.appendChild(el$2("div", "empty", timelineEmptyText()));
     }
     updateBanner();
-    if (state.view === "trajectory") ;
+    if (state.view === "trajectory") renderTrajectory$1();
   }
   function appendLines(lines) {
     if (!lines || !lines.length) return;
@@ -9040,7 +9065,7 @@
     updateBanner();
     if (hasMeta) ;
     else if (lines.some((l) => l.t === "usage")) ;
-    if (state.view === "trajectory") ;
+    if (state.view === "trajectory") renderTrajectory$1();
     if (state.follow) scrollToBottom();
   }
   function scrollToBottom() {
@@ -9195,6 +9220,339 @@
     window.setInterval(() => {
       if (!document.hidden) void refreshIndex();
     }, POLL_MS);
+  }
+  const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
+  function nextMsgLine(lines, idx) {
+    for (let i = idx + 1; i < lines.length; i++) {
+      if (lines[i] && !lines[i].bad && lines[i].t === "msg") return lines[i];
+    }
+    return null;
+  }
+  function callDuration(call, resultLine) {
+    if (!call || !call.ts || !resultLine.ts) return 0;
+    const t0 = Date.parse(call.ts);
+    const t1 = Date.parse(resultLine.ts);
+    if (isNaN(t0) || isNaN(t1) || t1 < t0) return 0;
+    return t1 - t0;
+  }
+  function trajectoryRows() {
+    const rows = [];
+    const callOf = {};
+    const imageAfterTool = {};
+    state.lines.forEach((l) => {
+      if (!l || l.bad || l.t !== "msg") return;
+      if (l.role === "assistant") {
+        (l.tool_calls || []).forEach((c) => {
+          const fn = c.function || {};
+          callOf[c.id] = { name: fn.name || "?", ts: l.ts || "", n: l.n, args: String(fn.arguments || "") };
+        });
+      }
+    });
+    state.lines.forEach((line, idx) => {
+      if (!line || line.bad) return;
+      if (line.t === "meta") {
+        rows.push({
+          kind: "meta",
+          tag: "元信息",
+          name: line.kind || "system",
+          summary: "模型 " + (line.model || "—") + " · 提示词 " + countText(String(line.text || "").length, estOf(line).text) + ((line.tools || []).length ? " · 工具 " + line.tools.length : ""),
+          chars: String(line.text || "").length,
+          tokens: estOf(line).text,
+          status: "",
+          detail: { prompt: String(line.text || "") }
+        });
+        return;
+      }
+      if (line.t === "usage") {
+        const st = line.stats || {};
+        rows.push({
+          kind: "usage",
+          tag: "用量",
+          name: "请求" + (st.round ? " #" + st.round : ""),
+          summary: (st.kind || "chat") + " · 输入 " + fmtTokens(st.promptTokens) + "（缓存 " + (st.cachedTokens || 0) + "）· 输出 " + fmtTokens(st.completionTokens) + (st.reasoningTokens ? "（思 " + fmtTokens(st.reasoningTokens) + "）" : ""),
+          chars: "",
+          tokens: 0,
+          status: st.finish || "",
+          time: Number(st.durationMs) || 0,
+          detail: { request: JSON.stringify(st, null, 2) }
+        });
+        return;
+      }
+      if (line.t !== "msg" || !line.role) return;
+      if (line.role === "user" && line.images && line.images.length) {
+        const attr = imageAttributions()[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
+        const fromTool = !!imageAfterTool[line.n];
+        const jumpTo = attr.kind === "call" && attr.callId && state.callNodes[attr.callId] ? state.callNodes[attr.callId].lineN : attr.kind === "task" && attr.taskLineN ? attr.taskLineN : line.n;
+        rows.push({
+          kind: "user",
+          tag: "用户",
+          name: "用户",
+          summary: (fromTool ? "接上一行工具回执 · " : "") + "图片 ×" + line.images.length + " · " + (firstLine(line.text) || "（无正文）") + " · " + attributionText(attr),
+          title: IMAGE_WIRE_TITLE + "\n" + attributionText(attr) + (attr.how === "call-id" ? "（句柄里写了 call id，属于精确匹配）" : attr.how === "tool-name" ? "（句柄里写了工具名，按名称匹配到本轮的调用）" : attr.how === "order" ? "（旧转录没有 call id，按顺序推断；新转录会写上归属）" : attr.how === "task" ? "（这一轮带的是任务自己的图，不归任何工具调用）" : "") + (fromTool ? "\n这一轮的图片就是上一行工具回执投出来的（同一件事的两段 wire 表达，所以两行不合并）" : ""),
+          chars: String(line.text || "").length,
+          tokens: estOf(line).text + estOf(line).images,
+          status: "",
+          jump: jumpTo,
+          images: line.images,
+          detail: { user: String(line.text || "") || "（这一轮没有正文）" }
+        });
+      } else if (line.role === "user") {
+        let fed = 0;
+        const attrs = imageAttributions();
+        Object.keys(attrs).forEach((n) => {
+          const a = attrs[Number(n)];
+          if (a.kind === "task" && a.taskLineN === line.n) fed++;
+        });
+        rows.push({
+          kind: "user",
+          tag: "用户",
+          name: "用户",
+          summary: firstLine(line.text) + (fed ? " · 附件 图片 ×" + fed : ""),
+          title: fed ? "会话开头的原图投喂轮归到了这条任务（对话页里它们收在同一个块里）" : "点击跳到对话里对应的那条消息",
+          chars: String(line.text || "").length,
+          tokens: estOf(line).text,
+          status: "",
+          jump: line.n,
+          detail: { user: String(line.text || "") }
+        });
+      } else if (line.role === "assistant") {
+        if (line.reasoning) {
+          rows.push({
+            kind: "think",
+            tag: "思考",
+            name: "reasoning",
+            summary: firstLine(line.reasoning),
+            chars: line.reasoning.length,
+            tokens: estOf(line).reasoning,
+            status: "",
+            jump: line.n,
+            detail: { thinking: line.reasoning }
+          });
+        }
+        if (line.text) {
+          rows.push({
+            kind: "msg",
+            tag: "助手",
+            name: "AI",
+            summary: firstLine(line.text),
+            chars: line.text.length,
+            tokens: estOf(line).text,
+            status: "",
+            jump: line.n,
+            detail: { message: String(line.text) }
+          });
+        }
+        (line.tool_calls || []).forEach((c, i) => {
+          const fn = c.function || {};
+          const name = fn.name || "(未命名工具)";
+          const args = String(fn.arguments || "");
+          rows.push({
+            kind: "tool",
+            tag: "工具",
+            name,
+            summary: toolSummary(name, fn.arguments),
+            chars: args.length,
+            tokens: estOf(line).calls[i] || 0,
+            status: "",
+            jump: line.n,
+            detail: { input: prettyJSON(args) || args }
+          });
+        });
+      } else if (line.role === "tool") {
+        const info = line.tool_call_id ? callOf[line.tool_call_id] : null;
+        const text = String(line.text || "");
+        const after = nextMsgLine(state.lines, idx);
+        const imageNext = !!(after && after.role === "user" && after.images && after.images.length);
+        if (imageNext) imageAfterTool[after.n] = true;
+        const hint = imageNext ? IMAGE_PLACEHOLDER.test(text) ? " · 图片见下一行用户轮" : " · 图片在下一行用户轮里" : "";
+        rows.push({
+          kind: "result",
+          tag: "结果",
+          name: info ? info.name : "(未配对的工具回执)",
+          summary: firstLine(text) + hint,
+          chars: text.length,
+          tokens: estOf(line).text,
+          title: imageNext ? "这一行是工具回执：tool 消息的 content 只能是文本，随行的图片被回灌在紧随其后的 user 轮里（两行是同一件事，保持两行不合并）" : "点击跳到对话里对应的那条消息",
+          status: classifyResult(text),
+          jump: line.n,
+          time: callDuration(info, line),
+          detail: { output: text }
+        });
+      }
+    });
+    return rows;
+  }
+  const TRAJ_KINDS = [
+    { id: "user", label: "用户" },
+    { id: "msg", label: "助手" },
+    { id: "think", label: "思考" },
+    { id: "tool", label: "工具" },
+    { id: "result", label: "结果" },
+    { id: "meta", label: "元信息" },
+    { id: "usage", label: "用量" }
+  ];
+  function trajVisible(row) {
+    const picked = Object.keys(state.trajKinds).filter((k) => state.trajKinds[k]);
+    if (!picked.length) return true;
+    return picked.indexOf(row.kind) >= 0;
+  }
+  function trajDetailBody(row) {
+    const body = el$2("div", "traj-detail-inner");
+    const labels = {
+      prompt: "系统提示词",
+      thinking: "思考",
+      user: "用户消息",
+      message: "助手消息",
+      input: "输入",
+      output: "输出",
+      request: "用量行"
+    };
+    Object.keys(row.detail || {}).forEach((k) => {
+      const section = el$2("div");
+      section.appendChild(el$2("div", "traj-detail-title", labels[k] || k));
+      const text = String(row.detail[k] || "");
+      if (k === "input" || k === "request" || k === "output") {
+        section.appendChild(machineBlock(text, "code"));
+      } else {
+        section.appendChild(el$2("pre", "code", text));
+      }
+      const actions = el$2("div", "row-actions");
+      actions.appendChild(copyButton(text));
+      section.appendChild(actions);
+      body.appendChild(section);
+    });
+    if (row.images && row.images.length) {
+      body.appendChild(imageStrip({ images: row.images }));
+    }
+    return body;
+  }
+  function renderTrajectory() {
+    const refs = document.getElementById("trajectory");
+    if (!refs) return;
+    clear(refs);
+    if (!state.current) {
+      refs.appendChild(el$2("div", "traj-empty", "左侧选择一个会话后，这里列出它的全部步骤。"));
+      return;
+    }
+    const rows = trajectoryRows();
+    const visible = rows.filter(trajVisible);
+    const toolbar = el$2("div", "traj-toolbar");
+    const inner = el$2("div", "traj-toolbar-inner");
+    const filters = el$2("div", "traj-filters");
+    const allChip = el$2("button", "traj-chip", "全部");
+    allChip.type = "button";
+    allChip.setAttribute("aria-pressed", Object.keys(state.trajKinds).length ? "false" : "true");
+    allChip.addEventListener("click", () => {
+      state.trajKinds = {};
+      renderTrajectory();
+    });
+    filters.appendChild(allChip);
+    TRAJ_KINDS.forEach((k) => {
+      const count = rows.filter((r) => r.kind === k.id).length;
+      if (!count) return;
+      const chip = el$2("button", "traj-chip", k.label + " " + count);
+      chip.type = "button";
+      chip.title = "只看 / 不看「" + k.label + "」";
+      chip.setAttribute("aria-pressed", state.trajKinds[k.id] ? "true" : "false");
+      chip.addEventListener("click", () => {
+        if (state.trajKinds[k.id]) delete state.trajKinds[k.id];
+        else state.trajKinds[k.id] = true;
+        renderTrajectory();
+      });
+      filters.appendChild(chip);
+    });
+    inner.appendChild(filters);
+    inner.appendChild(el$2("span", "traj-count", visible.length + " / " + rows.length + " 步"));
+    toolbar.appendChild(inner);
+    refs.appendChild(toolbar);
+    const scroll = el$2("div", "traj-scroll");
+    if (!visible.length) {
+      scroll.appendChild(el$2("div", "traj-empty", rows.length ? "当前筛选没有匹配的步骤" : "这个会话还没有步骤"));
+      refs.appendChild(scroll);
+      return;
+    }
+    const table = el$2("table", "traj-table");
+    const colgroup = document.createElement("colgroup");
+    [["col-n"], ["col-kind"], ["col-name"], [], ["col-status"], ["col-size"], ["col-time"]].forEach((c) => {
+      const col = document.createElement("col");
+      if (c[0]) col.className = c[0];
+      colgroup.appendChild(col);
+    });
+    table.appendChild(colgroup);
+    const thead = el$2("thead");
+    const hrow = el$2("tr");
+    ["#", "类型", "名称", "摘要", "状态", unitLabel(), "耗时"].forEach((h, i) => {
+      hrow.appendChild(el$2("th", i === 0 || i >= 5 ? "num-head" : null, h));
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    const tbody = el$2("tbody");
+    visible.forEach((row, idx) => {
+      const key = "r" + idx + ":" + (row.jump || row.name);
+      const tr = el$2("tr", "traj-row");
+      tr.setAttribute("data-kind", row.kind);
+      if (row.status === "error") tr.setAttribute("data-error", "true");
+      tr.title = row.title || "点击跳到对话里对应的那条消息";
+      const tdN = el$2("td", "traj-num");
+      const discl = el$2("button", "traj-disclose", state.trajOpen[key] ? "▾" : "▸");
+      discl.type = "button";
+      discl.title = "展开完整输入输出";
+      discl.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        state.trajOpen[key] = !state.trajOpen[key];
+        renderTrajectory();
+      });
+      tdN.appendChild(discl);
+      tdN.appendChild(document.createTextNode(row.jump ? String(row.jump) : "—"));
+      tr.appendChild(tdN);
+      const tdKind = el$2("td");
+      tdKind.appendChild(el$2("span", "kind-tag kind-" + (row.status === "error" ? "error" : row.kind), row.tag));
+      tr.appendChild(tdKind);
+      tr.appendChild(el$2("td", "traj-name", row.name));
+      const tdSum = el$2("td", "traj-summary", row.summary || "—");
+      tdSum.title = row.summary || "";
+      tr.appendChild(tdSum);
+      const statusText = row.status === "error" ? "✗ error" : row.status === "ok" ? "✓ ok" : row.status === "plain" || !row.status ? "—" : row.status;
+      tr.appendChild(el$2(
+        "td",
+        "traj-status " + (row.status === "error" ? "error" : row.status === "ok" ? "ok" : "plain"),
+        statusText
+      ));
+      tr.appendChild(el$2(
+        "td",
+        "traj-num-cell",
+        state.unit === "char" ? row.chars ? String(row.chars) : "—" : row.tokens ? countValue(row.chars, row.tokens) : "—"
+      ));
+      tr.appendChild(el$2("td", "traj-num-cell", row.time ? fmtDur(row.time) : "—"));
+      tr.addEventListener("click", () => {
+        if (row.jump) jumpToLine(row.jump);
+        else {
+          state.trajOpen[key] = !state.trajOpen[key];
+          renderTrajectory();
+        }
+      });
+      tbody.appendChild(tr);
+      if (state.trajOpen[key]) {
+        const dtr = el$2("tr", "traj-detail");
+        const td = el$2("td");
+        td.colSpan = 7;
+        td.appendChild(trajDetailBody(row));
+        dtr.appendChild(td);
+        tbody.appendChild(dtr);
+      }
+    });
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    refs.appendChild(scroll);
+  }
+  function jumpToLine(n) {
+    const node = state.anchors[n];
+    switchView("chat");
+    if (!node) return;
+    node.scrollIntoView({ block: "center" });
+    node.classList.remove("flash");
+    void node.offsetWidth;
+    node.classList.add("flash");
   }
   const _sfc_main$3 = /* @__PURE__ */ defineComponent({
     __name: "InlineMD",
@@ -9817,6 +10175,7 @@
           }
         }
         document.addEventListener("keydown", onKeydown);
+        registerRenderTrajectory(renderTrajectory);
         bootData();
         pollTimer = window.setInterval(() => {
           if (!document.hidden) void refreshIndex();

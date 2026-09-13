@@ -254,7 +254,7 @@ export function toggleTheme(): void {
 export function switchView(view: string): void {
   state.view = view === 'trajectory' ? 'trajectory' : 'chat'
   if (state.view === 'trajectory') {
-    renderTrajectory() // 数据层未到时是空操作
+    renderTrajectory() // 轨迹块注册的实现（未注册时空操作）
   }
 }
 
@@ -300,6 +300,12 @@ export function revealProject(project: string): void {
 
 export function renderTimeline(): void {}
 
-export function renderTrajectory(): void {}
+/* ---------- 渲染入口注册表：各块组件实现，这里只留挂点（避免循环 import） ---------- */
 
-export function renderDetails(): void {}
+let _renderTrajectory: () => void = () => {}
+export function registerRenderTrajectory(fn: () => void): void { _renderTrajectory = fn }
+export function renderTrajectory(): void { _renderTrajectory() }
+
+let _renderDetails: () => void = () => {}
+export function registerRenderDetails(fn: () => void): void { _renderDetails = fn }
+export function renderDetails(): void { _renderDetails() }

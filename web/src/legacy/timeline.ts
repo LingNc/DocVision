@@ -86,7 +86,7 @@ export const IMAGE_WIRE_TITLE = 'user 消息承载图片（tool 消息的 conten
   ' · text + image_url(data:image/jpeg;base64,…)'
 
 // 归属结果按"会话 + 行数"缓存：渲染是增量的，行数变了就重算一遍。
-function imageAttributions(): Record<number, any> {
+export function imageAttributions(): Record<number, any> {
   const sig = (state.current ? state.current.id : '') + ':' + state.lines.length
   if (state.imgAttr && state.imgAttr.sig === sig) return state.imgAttr.map
 
@@ -284,7 +284,7 @@ function thumbImg(ref: string, cls?: string): HTMLImageElement {
   return img
 }
 
-function imageStrip(line: any): HTMLElement {
+export function imageStrip(line: any): HTMLElement {
   const strip = el('div', 'images')
   ;(line.images || []).forEach((ref: string) => { strip.appendChild(thumbImg(ref)) })
   return strip

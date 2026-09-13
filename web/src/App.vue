@@ -30,6 +30,8 @@ import {
 } from './state'
 import { bootData, refreshIndex, revealProject } from './data'
 import { projectOf, sessionTitleOf } from './legacy/sidebar'
+import { registerRenderTrajectory } from './state'
+import { renderTrajectory as renderTraj } from './legacy/trajectory'
 import Sidebar from './components/Sidebar.vue'
 import Timeline from './components/Timeline.vue'
 import InlineMD from './components/InlineMD.vue'
@@ -166,6 +168,7 @@ onMounted(() => {
     }
   }
   document.addEventListener('keydown', onKeydown)
+  registerRenderTrajectory(renderTraj)
   // 数据层：首拉 + 2 秒轮询（页面隐藏时跳过）。
   bootData()
   pollTimer = window.setInterval(() => {
