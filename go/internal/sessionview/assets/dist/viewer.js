@@ -2187,6 +2187,36 @@
     renderFnWithContext._d = true;
     return renderFnWithContext;
   }
+  function withDirectives(vnode, directives) {
+    if (currentRenderingInstance === null) {
+      return vnode;
+    }
+    const instance = getComponentPublicInstance(currentRenderingInstance);
+    const bindings = vnode.dirs || (vnode.dirs = []);
+    for (let i = 0; i < directives.length; i++) {
+      let [dir, value, arg, modifiers = EMPTY_OBJ] = directives[i];
+      if (dir) {
+        if (isFunction(dir)) {
+          dir = {
+            mounted: dir,
+            updated: dir
+          };
+        }
+        if (dir.deep) {
+          traverse(value);
+        }
+        bindings.push({
+          dir,
+          instance,
+          value,
+          oldValue: void 0,
+          arg,
+          modifiers
+        });
+      }
+    }
+    return vnode;
+  }
   function invokeDirectiveHook(vnode, prevVNode, instance, name) {
     const bindings = vnode.dirs;
     const oldBindings = prevVNode && prevVNode.dirs;
@@ -2236,6 +2266,9 @@
       return ctx;
     }
   };
+  function watchEffect(effect2, options) {
+    return doWatch(effect2, null, options);
+  }
   function watch(source, cb, options) {
     return doWatch(source, cb, options);
   }
@@ -2618,7 +2651,7 @@
       $watch: (i) => instanceWatch.bind(i)
     })
   );
-  const hasSetupBinding = (state, key) => state !== EMPTY_OBJ && !state.__isScriptSetup && hasOwn(state, key);
+  const hasSetupBinding = (state2, key) => state2 !== EMPTY_OBJ && !state2.__isScriptSetup && hasOwn(state2, key);
   const PublicInstanceProxyHandlers = {
     get({ _: instance }, key) {
       if (key === "__v_skip") {
@@ -5490,11 +5523,6 @@
   function createTextVNode(text = " ", flag = 0) {
     return createVNode(Text, null, text, flag);
   }
-  function createStaticVNode(content, numberOfNodes) {
-    const vnode = createVNode(Static, null, content);
-    vnode.staticCount = numberOfNodes;
-    return vnode;
-  }
   function normalizeVNode(child) {
     if (child == null || typeof child === "boolean") {
       return createVNode(Comment);
@@ -6325,6 +6353,110 @@
     const camelKey = camelize(key);
     return Array.isArray(props) ? props.some((prop) => camelize(prop) === camelKey) : Object.keys(props).some((prop) => camelize(prop) === camelKey);
   }
+  const getModelAssigner = (vnode) => {
+    const fn = vnode.props["onUpdate:modelValue"] || false;
+    return isArray(fn) ? (value) => invokeArrayFns(fn, value) : fn;
+  };
+  function onCompositionStart(e) {
+    e.target.composing = true;
+  }
+  function onCompositionEnd(e) {
+    const target = e.target;
+    if (target.composing) {
+      target.composing = false;
+      target.dispatchEvent(new Event("input"));
+    }
+  }
+  const assignKey = /* @__PURE__ */ Symbol("_assign");
+  const initialValueKey = /* @__PURE__ */ Symbol("_initialValue");
+  function castValue(value, trim, number) {
+    if (trim) value = value.trim();
+    if (number) value = looseToNumber(value);
+    return value;
+  }
+  const vModelText = {
+    created(el, { modifiers: { lazy, trim, number } }, vnode) {
+      if (el.parentNode) {
+        if (el.type === "text") {
+          el[initialValueKey] = el.defaultValue.replace(/[\r\n]/g, "");
+        } else if (el.type === "textarea") {
+          el[initialValueKey] = el.defaultValue.replace(/\r\n?/g, "\n");
+        }
+      }
+      el[assignKey] = getModelAssigner(vnode);
+      const castToNumber = number || vnode.props && vnode.props.type === "number";
+      addEventListener(el, lazy ? "change" : "input", (e) => {
+        if (e.target.composing) return;
+        el[assignKey](castValue(el.value, trim, castToNumber));
+      });
+      if (trim || castToNumber) {
+        addEventListener(el, "change", () => {
+          el.value = castValue(el.value, trim, castToNumber);
+        });
+      }
+      if (!lazy) {
+        addEventListener(el, "compositionstart", onCompositionStart);
+        addEventListener(el, "compositionend", onCompositionEnd);
+        addEventListener(el, "change", onCompositionEnd);
+      }
+    },
+    // set value on mounted so it's after min/max for type="range"
+    mounted(el, { value, modifiers: { trim, number } }) {
+      const newValue = value == null ? "" : value;
+      const initialValue = el[initialValueKey];
+      delete el[initialValueKey];
+      if (initialValue !== void 0 && (el.type === "text" || el.type === "textarea") && el.value !== initialValue) {
+        el[assignKey](castValue(el.value, trim, number));
+      } else {
+        el.value = newValue;
+      }
+    },
+    beforeUpdate(el, { value, oldValue, modifiers: { lazy, trim, number } }, vnode) {
+      el[assignKey] = getModelAssigner(vnode);
+      if (el.composing) return;
+      const elValue = (number || el.type === "number") && !/^0\d/.test(el.value) ? looseToNumber(el.value) : el.value;
+      const newValue = value == null ? "" : value;
+      if (elValue === newValue) {
+        return;
+      }
+      const rootNode = el.getRootNode();
+      if ((rootNode instanceof Document || rootNode instanceof ShadowRoot) && rootNode.activeElement === el && el.type !== "range") {
+        if (lazy && value === oldValue) {
+          return;
+        }
+        if (trim && el.value.trim() === newValue) {
+          return;
+        }
+      }
+      el.value = newValue;
+    }
+  };
+  const systemModifiers = ["ctrl", "shift", "alt", "meta"];
+  const modifierGuards = {
+    stop: (e) => e.stopPropagation(),
+    prevent: (e) => e.preventDefault(),
+    self: (e) => e.target !== e.currentTarget,
+    ctrl: (e) => !e.ctrlKey,
+    shift: (e) => !e.shiftKey,
+    alt: (e) => !e.altKey,
+    meta: (e) => !e.metaKey,
+    left: (e) => "button" in e && e.button !== 0,
+    middle: (e) => "button" in e && e.button !== 1,
+    right: (e) => "button" in e && e.button !== 2,
+    exact: (e, modifiers) => systemModifiers.some((m) => e[`${m}Key`] && !modifiers.includes(m))
+  };
+  const withModifiers = (fn, modifiers) => {
+    if (!fn) return fn;
+    const cache = fn._withMods || (fn._withMods = {});
+    const cacheKey = modifiers.join(".");
+    return cache[cacheKey] || (cache[cacheKey] = ((event, ...args) => {
+      for (let i = 0; i < modifiers.length; i++) {
+        const guard = modifierGuards[modifiers[i]];
+        if (guard && guard(event, modifiers)) return;
+      }
+      return fn(event, ...args);
+    }));
+  };
   const rendererOptions = /* @__PURE__ */ extend({ patchProp }, nodeOps);
   let renderer;
   function ensureRenderer() {
@@ -6367,61 +6499,426 @@
     }
     return container;
   }
-  const _hoisted_1 = {
-    id: "frame",
-    class: "frame"
-  };
+  const STORE_PREFIX = "dsh.sessionview.";
+  const SIDEBAR_AUTO_COLLAPSE = 1024;
+  const RAIL_W = 56;
+  const SIDEBAR_DEFAULT = 280;
+  const SIDEBAR_MIN = 264;
+  const SIDEBAR_MAX = 420;
+  const DETAILS_DEFAULT = 400;
+  const DETAILS_MIN = 300;
+  const DETAILS_MAX = 520;
+  const CENTER_MIN = 640;
+  function storeGet(key) {
+    try {
+      return window.localStorage.getItem(STORE_PREFIX + key);
+    } catch {
+      return null;
+    }
+  }
+  function storeSet(key, value) {
+    try {
+      window.localStorage.setItem(STORE_PREFIX + key, value);
+    } catch {
+    }
+  }
+  function storeJSON(key, fallback) {
+    const raw = storeGet(key);
+    if (!raw) return fallback;
+    try {
+      const v = JSON.parse(raw);
+      return v && typeof v === "object" ? v : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  const ROOT_PROJECT = "（根目录）";
+  function fmtSize(bytes) {
+    if (!bytes && bytes !== 0) return "—";
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1024 / 1024).toFixed(2) + " MB";
+  }
+  const state = /* @__PURE__ */ reactive({
+    root: "",
+    generated: "",
+    sessions: [],
+    current: null,
+    lines: [],
+    nextFrom: 0,
+    curSize: -1,
+    curMtime: 0,
+    filter: "",
+    follow: true,
+    // 旧页 live 模式默认开
+    forceCollapse: false,
+    onlyTools: false,
+    msgSeq: 0,
+    toolSeq: 0,
+    calls: /* @__PURE__ */ new Map(),
+    callNodes: {},
+    callEst: {},
+    anchors: {},
+    badLines: 0,
+    polling: false,
+    theme: "light",
+    view: "chat",
+    markdown: true,
+    unit: "token",
+    sidebar: SIDEBAR_DEFAULT,
+    details: 0,
+    narrowExpanded: false,
+    narrow: false,
+    collapsed: {},
+    overflow: {},
+    listSig: "",
+    meta: null,
+    trajKinds: {},
+    trajOpen: {}
+  });
+  function clampWidth(px, min, max) {
+    return Math.min(max, Math.max(min, Math.round(px)));
+  }
+  function computeColumns(viewport, sidebar, details) {
+    const s = sidebar === 0 ? RAIL_W : clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX);
+    const d0 = details === 0 ? 0 : clampWidth(details, DETAILS_MIN, DETAILS_MAX);
+    if (s + d0 + CENTER_MIN <= viewport) {
+      return { sidebar: s, center: viewport - s - d0, details: d0 };
+    }
+    const d1 = d0 === 0 ? 0 : Math.max(DETAILS_MIN, viewport - s - CENTER_MIN);
+    if (s + d1 + CENTER_MIN <= viewport) {
+      return { sidebar: s, center: CENTER_MIN, details: d1 };
+    }
+    return { sidebar: s, center: Math.max(0, viewport - s), details: 0 };
+  }
+  const layout = /* @__PURE__ */ reactive({
+    viewport: 0,
+    cols: { sidebar: SIDEBAR_DEFAULT, center: 0, details: 0 },
+    sidebarCollapsed: false,
+    detailsCollapsed: true
+  });
+  function applyLayout() {
+    const viewport = layout.viewport;
+    state.narrow = viewport < SIDEBAR_AUTO_COLLAPSE;
+    const sidebarCollapsed = state.narrow ? !state.narrowExpanded : state.sidebar === 0;
+    const sidebarPref = sidebarCollapsed ? 0 : state.sidebar === 0 ? SIDEBAR_DEFAULT : state.sidebar;
+    layout.cols = computeColumns(viewport, sidebarPref, state.details);
+    layout.sidebarCollapsed = sidebarCollapsed;
+    layout.detailsCollapsed = layout.cols.details === 0;
+  }
+  function sidebarCollapsedNow() {
+    return state.narrow ? !state.narrowExpanded : state.sidebar === 0;
+  }
+  function toggleSidebar() {
+    if (state.narrow) {
+      state.narrowExpanded = !state.narrowExpanded;
+    } else {
+      state.sidebar = state.sidebar === 0 ? SIDEBAR_DEFAULT : 0;
+    }
+    persistLayout();
+    applyLayout();
+  }
+  function toggleDetails() {
+    if (state.details > 0) {
+      state.details = 0;
+    } else {
+      state.details = clampWidth(state.details || DETAILS_DEFAULT, DETAILS_MIN, DETAILS_MAX);
+      const viewport = layout.viewport;
+      const collapsed = sidebarCollapsedNow();
+      const pref = collapsed ? 0 : state.sidebar === 0 ? SIDEBAR_DEFAULT : state.sidebar;
+      if (computeColumns(viewport, pref, state.details).details === 0 && !collapsed) {
+        if (state.narrow) {
+          state.narrowExpanded = false;
+        } else {
+          state.sidebar = 0;
+        }
+      }
+    }
+    persistLayout();
+    applyLayout();
+  }
+  function persistLayout() {
+    storeSet("layout.sidebar", String(state.sidebar));
+    storeSet("layout.details", String(state.details));
+    storeSet("layout.narrowExpanded", state.narrowExpanded ? "1" : "0");
+  }
+  function loadState() {
+    state.collapsed = storeJSON("collapsed", {});
+    state.overflow = storeJSON("overflow", {});
+    state.markdown = storeGet("markdown") !== "0";
+    state.unit = storeGet("unit") === "char" ? "char" : "token";
+    const rawSidebar = storeGet("layout.sidebar");
+    if (rawSidebar !== null) {
+      const sidebar = Number(rawSidebar);
+      if (!isNaN(sidebar) && sidebar >= 0) state.sidebar = sidebar;
+    }
+    const rawDetails = storeGet("layout.details");
+    const details = rawDetails === null ? 0 : Number(rawDetails);
+    state.details = !isNaN(details) && details > 0 ? details : 0;
+    state.narrowExpanded = storeGet("layout.narrowExpanded") === "1";
+  }
+  const THEME_KEY = "theme";
+  const DEFAULT_THEME = "light";
+  function applyTheme(theme) {
+    state.theme = theme === "dark" ? "dark" : DEFAULT_THEME;
+    document.documentElement.setAttribute("data-theme", state.theme);
+  }
+  function storedTheme() {
+    const saved = storeGet(THEME_KEY);
+    return saved === "dark" || saved === "light" ? saved : DEFAULT_THEME;
+  }
+  function toggleTheme() {
+    const next = state.theme === "dark" ? "light" : "dark";
+    applyTheme(next);
+    storeSet(THEME_KEY, next);
+  }
+  function switchView(view) {
+    state.view = view === "trajectory" ? "trajectory" : "chat";
+    if (state.view === "trajectory") ;
+  }
+  const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "" });
+  function closeLightbox() {
+    lightbox.open = false;
+    lightbox.url = "";
+    lightbox.ref = "";
+  }
+  function refreshIndex() {
+    return Promise.resolve();
+  }
+  const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
   const _hoisted_2 = {
+    id: "sidebar-col",
+    class: "sidebar-col"
+  };
+  const _hoisted_3 = { class: "side-search" };
+  const _hoisted_4 = ["data-dragging"];
+  const _hoisted_5 = {
     id: "center-col",
     class: "center-col"
   };
-  const _hoisted_3 = {
+  const _hoisted_6 = {
     id: "center-header",
     class: "center-header"
   };
-  const _hoisted_4 = { class: "tabs-row" };
-  const _hoisted_5 = {
+  const _hoisted_7 = { class: "title-row" };
+  const _hoisted_8 = ["aria-pressed"];
+  const _hoisted_9 = {
+    id: "crumbs",
+    class: "crumbs",
+    "aria-label": "面包屑"
+  };
+  const _hoisted_10 = {
+    key: 0,
+    class: "crumb crumb-current"
+  };
+  const _hoisted_11 = ["title"];
+  const _hoisted_12 = {
+    id: "header-actions",
+    class: "header-actions"
+  };
+  const _hoisted_13 = {
+    key: 0,
+    id: "mode-badge",
+    class: "badge badge-live"
+  };
+  const _hoisted_14 = {
+    key: 1,
+    class: "badge"
+  };
+  const _hoisted_15 = ["title", "aria-pressed"];
+  const _hoisted_16 = { class: "tabs-row" };
+  const _hoisted_17 = {
+    class: "tabs",
+    role: "tablist",
+    "aria-label": "视图"
+  };
+  const _hoisted_18 = ["aria-selected"];
+  const _hoisted_19 = ["aria-selected"];
+  const _hoisted_20 = {
     class: "tab-tools",
     role: "group",
     "aria-label": "显示选项"
   };
+  const _hoisted_21 = ["aria-pressed"];
+  const _hoisted_22 = ["aria-pressed"];
+  const _hoisted_23 = ["aria-pressed"];
+  const _hoisted_24 = ["aria-pressed", "title"];
+  const _hoisted_25 = ["aria-pressed", "title"];
+  const _hoisted_26 = ["aria-pressed", "title"];
+  const _hoisted_27 = { class: "view-area" };
+  const _hoisted_28 = ["data-dragging", "data-hidden"];
+  const _hoisted_29 = {
+    id: "details-col",
+    class: "details-col",
+    "aria-label": "详情"
+  };
+  const _hoisted_30 = { class: "details-head" };
+  const _hoisted_31 = ["src", "alt"];
   const _sfc_main = /* @__PURE__ */ defineComponent({
     __name: "App",
     setup(__props) {
-      const theme = /* @__PURE__ */ ref(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
-      function toggleTheme() {
-        theme.value = theme.value === "dark" ? "light" : "dark";
-        document.documentElement.setAttribute("data-theme", theme.value);
-        try {
-          window.localStorage.setItem("dsh.sessionview.theme", theme.value);
-        } catch {
+      const frame = /* @__PURE__ */ ref(null);
+      const drag = /* @__PURE__ */ ref(null);
+      let dragOrigin = 0;
+      let dragBase = 0;
+      function onDragStart(ev, side) {
+        var _a, _b;
+        ev.preventDefault();
+        dragOrigin = ev.clientX;
+        dragBase = side === "sidebar" ? layout.cols.sidebar : layout.cols.details;
+        drag.value = { side, handle: ev.currentTarget };
+        (_b = (_a = ev.currentTarget).setPointerCapture) == null ? void 0 : _b.call(_a, ev.pointerId);
+      }
+      function onDragMove(ev) {
+        if (!drag.value) return;
+        const dx = ev.clientX - dragOrigin;
+        if (drag.value.side === "sidebar") {
+          state.sidebar = clampWidth(dragBase + dx, SIDEBAR_MIN, SIDEBAR_MAX);
+          if (state.narrow) state.narrowExpanded = true;
+        } else {
+          state.details = clampWidth(dragBase - dx, DETAILS_MIN, DETAILS_MAX);
+        }
+        applyLayout();
+      }
+      function onDragEnd() {
+        if (!drag.value) return;
+        drag.value = null;
+        persistLayout();
+      }
+      function onDragDblClick(side) {
+        if (side === "sidebar") state.sidebar = SIDEBAR_DEFAULT;
+        else state.details = DETAILS_DEFAULT;
+        persistLayout();
+        applyLayout();
+      }
+      function onClickFollow() {
+        state.follow = !state.follow;
+        if (state.follow) scrollToBottom();
+      }
+      function onClickCollapseThinking() {
+        state.forceCollapse = !state.forceCollapse;
+        if (state.forceCollapse) {
+          document.querySelectorAll("details.disclosure-thinking").forEach((d) => {
+            d.open = false;
+          });
         }
       }
+      function onClickOnlyTools() {
+        state.onlyTools = !state.onlyTools;
+      }
+      function onClickMarkdown() {
+        state.markdown = !state.markdown;
+        storeSet("markdown", state.markdown ? "1" : "0");
+      }
+      function onClickUnit() {
+        state.unit = state.unit === "char" ? "token" : "char";
+        storeSet("unit", state.unit);
+        state.listSig = "";
+        refreshList();
+      }
+      function scrollToBottom() {
+        window.setTimeout(() => {
+          const el = document.getElementById("timeline");
+          if (el) el.scrollTop = el.scrollHeight;
+        }, 0);
+      }
+      function onClickSearch() {
+      }
+      function onClickRefresh() {
+        refreshIndex();
+      }
+      const badgeText = computed(() => state.polling ? "实时" : "实时（已断开）");
+      const headerSummary = computed(() => {
+        const cur = state.current;
+        if (!cur) return "";
+        const parts = [];
+        parts.push(cur.messages + " 条消息");
+        if (state.lines.length) parts.push(state.lines.length + " 行");
+        parts.push(fmtSize(cur.size));
+        if (state.badLines) parts.push("坏行 " + state.badLines);
+        return parts.join(" · ");
+      });
+      const curProject = computed(() => state.current ? state.current.project || ROOT_PROJECT : "");
+      const sessionTitle = computed(() => state.current ? state.current.name || state.current.id : "");
+      function onKeydown(ev) {
+        var _a, _b;
+        const tag = (_a = ev.target) == null ? void 0 : _a.tagName;
+        const typing = tag === "INPUT" || tag === "TEXTAREA" || ((_b = ev.target) == null ? void 0 : _b.isContentEditable);
+        if (ev.key === "Escape") closeLightbox();
+        if (typing) return;
+        if (ev.key === "[") toggleSidebar();
+        if (ev.key === "]") toggleDetails();
+      }
+      let ro = null;
+      onMounted(() => {
+        loadState();
+        applyTheme(storedTheme());
+        const el = frame.value;
+        if (el) {
+          layout.viewport = el.clientWidth || window.innerWidth;
+          if (window.ResizeObserver) {
+            ro = new ResizeObserver(() => {
+              layout.viewport = el.clientWidth || window.innerWidth;
+            });
+            ro.observe(el);
+          } else {
+            window.addEventListener("resize", onResize);
+          }
+        }
+        document.addEventListener("keydown", onKeydown);
+      });
+      function onResize() {
+        const el = frame.value;
+        if (el) layout.viewport = el.clientWidth || window.innerWidth;
+      }
+      watchEffect(() => {
+        void layout.viewport;
+        void state.sidebar;
+        void state.details;
+        void state.narrowExpanded;
+        applyLayout();
+      });
+      onBeforeUnmount(() => {
+        ro == null ? void 0 : ro.disconnect();
+        document.removeEventListener("keydown", onKeydown);
+      });
       return (_ctx, _cache) => {
+        var _a, _b;
         return openBlock(), createElementBlock(Fragment, null, [
-          createBaseVNode("div", _hoisted_1, [
-            _cache[5] || (_cache[5] = createBaseVNode("aside", {
-              id: "sidebar-col",
-              class: "sidebar-col"
-            }, [
+          createBaseVNode("div", {
+            id: "frame",
+            ref_key: "frame",
+            ref: frame,
+            class: "frame",
+            style: normalizeStyle({ gridTemplateColumns: `${unref(layout).cols.sidebar}px minmax(0, 1fr) ${unref(layout).cols.details}px` }),
+            "data-sidebar-collapsed": unref(layout).sidebarCollapsed ? "" : void 0,
+            "data-details-collapsed": unref(layout).detailsCollapsed ? "" : void 0,
+            "data-dragging": drag.value ? "" : void 0
+          }, [
+            createBaseVNode("aside", _hoisted_2, [
               createBaseVNode("div", { class: "side-head" }, [
-                createBaseVNode("span", { class: "side-title" }, "工作区"),
+                _cache[14] || (_cache[14] = createBaseVNode("span", { class: "side-title" }, "工作区", -1)),
                 createBaseVNode("button", {
                   id: "refresh",
                   class: "icon-btn",
                   type: "button",
-                  title: "重新扫描会话"
+                  title: "重新扫描会话",
+                  onClick: onClickRefresh
                 }, "⟳")
               ]),
-              createBaseVNode("div", { class: "side-search" }, [
-                createBaseVNode("input", {
+              createBaseVNode("div", _hoisted_3, [
+                withDirectives(createBaseVNode("input", {
                   id: "search",
+                  "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => unref(state).filter = $event),
                   type: "search",
                   placeholder: "过滤：会话名 / 阶段 / 项目…",
-                  autocomplete: "off"
-                })
+                  autocomplete: "off",
+                  onInput: onClickSearch
+                }, null, 544), [
+                  [vModelText, unref(state).filter]
+                ])
               ]),
-              createBaseVNode("div", { class: "side-list-wrap" }, [
+              _cache[15] || (_cache[15] = createBaseVNode("div", { class: "side-list-wrap" }, [
                 createBaseVNode("div", {
                   id: "session-list",
                   class: "session-list",
@@ -6432,12 +6929,12 @@
                   class: "list-fade",
                   "aria-hidden": "true"
                 })
-              ]),
-              createBaseVNode("div", {
+              ], -1)),
+              _cache[16] || (_cache[16] = createBaseVNode("div", {
                 id: "side-totals",
                 class: "side-totals hidden"
-              }),
-              createBaseVNode("div", { class: "side-status" }, [
+              }, null, -1)),
+              _cache[17] || (_cache[17] = createBaseVNode("div", { class: "side-status" }, [
                 createBaseVNode("div", {
                   id: "root-path",
                   class: "root-path",
@@ -6447,89 +6944,203 @@
                   id: "side-foot",
                   class: "side-foot"
                 })
-              ])
-            ], -1)),
-            _cache[6] || (_cache[6] = createBaseVNode("div", {
+              ], -1))
+            ]),
+            createBaseVNode("div", {
               id: "handle-sidebar",
               class: "handle",
               "data-side": "sidebar",
               role: "separator",
               "aria-orientation": "vertical",
-              "aria-label": "调整侧栏宽度"
-            }, null, -1)),
-            createBaseVNode("main", _hoisted_2, [
-              createBaseVNode("header", _hoisted_3, [
-                _cache[2] || (_cache[2] = createStaticVNode('<div class="title-row"><button id="side-toggle" class="icon-btn" type="button" title="折叠 / 展开侧栏" aria-label="折叠或展开侧栏">▤</button><nav id="crumbs" class="crumbs" aria-label="面包屑"></nav><div id="header-actions" class="header-actions"><span id="mode-badge" class="badge badge-muted">—</span></div><button id="details-toggle" class="icon-btn" type="button" title="详情面板（元信息 / 指标）" aria-label="展开或收起详情面板">ⓘ</button></div>', 1)),
-                createBaseVNode("div", _hoisted_4, [
-                  _cache[1] || (_cache[1] = createBaseVNode("div", {
-                    class: "tabs",
-                    role: "tablist",
-                    "aria-label": "视图"
-                  }, [
+              "aria-label": "调整侧栏宽度",
+              style: normalizeStyle({ left: `${unref(layout).cols.sidebar}px` }),
+              "data-dragging": ((_a = drag.value) == null ? void 0 : _a.side) === "sidebar" ? "true" : void 0,
+              onPointerdown: _cache[1] || (_cache[1] = ($event) => onDragStart($event, "sidebar")),
+              onPointermove: onDragMove,
+              onPointerup: onDragEnd,
+              onPointercancel: onDragEnd,
+              onDblclick: _cache[2] || (_cache[2] = ($event) => onDragDblClick("sidebar"))
+            }, null, 44, _hoisted_4),
+            createBaseVNode("main", _hoisted_5, [
+              createBaseVNode("header", _hoisted_6, [
+                createBaseVNode("div", _hoisted_7, [
+                  createBaseVNode("button", {
+                    id: "side-toggle",
+                    class: "icon-btn",
+                    type: "button",
+                    title: "折叠 / 展开侧栏",
+                    "aria-label": "折叠或展开侧栏",
+                    "aria-pressed": unref(layout).sidebarCollapsed ? "false" : "true",
+                    onClick: _cache[3] || (_cache[3] = //@ts-ignore
+                    (...args) => unref(toggleSidebar) && unref(toggleSidebar)(...args))
+                  }, "▤", 8, _hoisted_8),
+                  createBaseVNode("nav", _hoisted_9, [
+                    !unref(state).current ? (openBlock(), createElementBlock("span", _hoisted_10, "未选择会话")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                      createBaseVNode("button", {
+                        class: "crumb is-link",
+                        type: "button",
+                        title: "在侧栏里定位到这个项目",
+                        onClick: _cache[4] || (_cache[4] = ($event) => _ctx.revealProject(curProject.value))
+                      }, toDisplayString(curProject.value), 1),
+                      _cache[18] || (_cache[18] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
+                      createBaseVNode("span", {
+                        class: "crumb crumb-current",
+                        title: unref(state).current.id
+                      }, toDisplayString(sessionTitle.value), 9, _hoisted_11)
+                    ], 64))
+                  ]),
+                  createBaseVNode("div", _hoisted_12, [
+                    !unref(state).current ? (openBlock(), createElementBlock("span", _hoisted_13, toDisplayString(badgeText.value), 1)) : (openBlock(), createElementBlock("span", _hoisted_14, toDisplayString(headerSummary.value), 1))
+                  ]),
+                  createBaseVNode("button", {
+                    id: "details-toggle",
+                    class: "icon-btn",
+                    type: "button",
+                    title: unref(layout).detailsCollapsed ? "详情面板（元信息 / 指标）" : "关闭详情面板",
+                    "aria-label": "展开或收起详情面板",
+                    "aria-pressed": unref(layout).detailsCollapsed ? "false" : "true",
+                    onClick: _cache[5] || (_cache[5] = //@ts-ignore
+                    (...args) => unref(toggleDetails) && unref(toggleDetails)(...args))
+                  }, "ⓘ", 8, _hoisted_15)
+                ]),
+                createBaseVNode("div", _hoisted_16, [
+                  createBaseVNode("div", _hoisted_17, [
                     createBaseVNode("button", {
                       id: "tab-chat",
-                      class: "tab tab-active",
+                      class: normalizeClass(["tab", { "tab-active": unref(state).view === "chat" }]),
                       type: "button",
                       role: "tab",
-                      "aria-selected": "true",
-                      "data-view": "chat"
-                    }, "对话"),
+                      "aria-selected": unref(state).view === "chat" ? "true" : "false",
+                      "data-view": "chat",
+                      onClick: _cache[6] || (_cache[6] = ($event) => unref(switchView)("chat"))
+                    }, "对话", 10, _hoisted_18),
                     createBaseVNode("button", {
                       id: "tab-traj",
-                      class: "tab",
+                      class: normalizeClass(["tab", { "tab-active": unref(state).view === "trajectory" }]),
                       type: "button",
                       role: "tab",
-                      "aria-selected": "false",
-                      "data-view": "trajectory"
-                    }, "轨迹")
-                  ], -1)),
-                  createBaseVNode("div", _hoisted_5, [
-                    _cache[0] || (_cache[0] = createStaticVNode('<button id="follow" class="tab-toggle" type="button" aria-pressed="false" title="新消息到达时自动滚动到底部">自动跟随</button><button id="collapse-thinking" class="tab-toggle" type="button" aria-pressed="false" title="把所有消息的思考过程折叠起来">折叠全部思考</button><button id="only-tools" class="tab-toggle" type="button" aria-pressed="false" title="只显示工具调用与工具结果">仅看工具调用</button><button id="md-toggle" class="tab-toggle" type="button" aria-pressed="true" title="消息正文按 Markdown 渲染（标题 / 列表 / 代码块 / 表格），点击回到纯文本">Markdown</button><button id="unit-toggle" class="tab-toggle" type="button" aria-pressed="true" title="计数按 token 显示（本地估算，带 ≈），点击改为字符">token</button>', 5)),
+                      "aria-selected": unref(state).view === "trajectory" ? "true" : "false",
+                      "data-view": "trajectory",
+                      onClick: _cache[7] || (_cache[7] = ($event) => unref(switchView)("trajectory"))
+                    }, "轨迹", 10, _hoisted_19)
+                  ]),
+                  createBaseVNode("div", _hoisted_20, [
+                    createBaseVNode("button", {
+                      id: "follow",
+                      class: "tab-toggle",
+                      type: "button",
+                      "aria-pressed": unref(state).follow ? "true" : "false",
+                      title: "新消息到达时自动滚动到底部",
+                      onClick: onClickFollow
+                    }, "自动跟随", 8, _hoisted_21),
+                    createBaseVNode("button", {
+                      id: "collapse-thinking",
+                      class: "tab-toggle",
+                      type: "button",
+                      "aria-pressed": unref(state).forceCollapse ? "true" : "false",
+                      title: "把所有消息的思考过程折叠起来",
+                      onClick: onClickCollapseThinking
+                    }, "折叠全部思考", 8, _hoisted_22),
+                    createBaseVNode("button", {
+                      id: "only-tools",
+                      class: "tab-toggle",
+                      type: "button",
+                      "aria-pressed": unref(state).onlyTools ? "true" : "false",
+                      title: "只显示工具调用与工具结果",
+                      onClick: onClickOnlyTools
+                    }, "仅看工具调用", 8, _hoisted_23),
+                    createBaseVNode("button", {
+                      id: "md-toggle",
+                      class: "tab-toggle",
+                      type: "button",
+                      "aria-pressed": unref(state).markdown ? "true" : "false",
+                      title: unref(state).markdown ? "消息正文按 Markdown 渲染（标题 / 列表 / 代码块 / 表格），点击回到纯文本" : "消息正文按纯文本显示（pre-wrap），点击改用 Markdown 渲染",
+                      onClick: onClickMarkdown
+                    }, "Markdown", 8, _hoisted_24),
+                    createBaseVNode("button", {
+                      id: "unit-toggle",
+                      class: "tab-toggle",
+                      type: "button",
+                      "aria-pressed": unref(state).unit === "char" ? "false" : "true",
+                      title: unref(state).unit === "char" ? "计数按字符数显示（精确值），点击改为 token" : "计数按 token 显示（本地估算，带 ≈），点击改为字符",
+                      onClick: onClickUnit
+                    }, toDisplayString(unref(state).unit === "char" ? "字符" : "token"), 9, _hoisted_25),
                     createBaseVNode("button", {
                       id: "theme-toggle",
                       class: "tab-toggle",
                       type: "button",
-                      title: "切换浅色/深色主题",
-                      onClick: toggleTheme
-                    }, toDisplayString(theme.value === "dark" ? "☀ 浅色" : "🌙 深色"), 1)
+                      "aria-pressed": unref(state).theme === "dark" ? "true" : "false",
+                      title: unref(state).theme === "dark" ? "切换为白天模式（浅色，默认）" : "切换为夜间模式（深色）",
+                      onClick: _cache[8] || (_cache[8] = //@ts-ignore
+                      (...args) => unref(toggleTheme) && unref(toggleTheme)(...args))
+                    }, toDisplayString(unref(state).theme === "dark" ? "☀️ 浅色" : "🌙 深色"), 9, _hoisted_26)
                   ])
                 ])
               ]),
-              _cache[3] || (_cache[3] = createBaseVNode("div", {
+              createBaseVNode("div", {
                 id: "banner",
-                class: "banner hidden"
-              }, null, -1)),
-              _cache[4] || (_cache[4] = createBaseVNode("div", { class: "view-area" }, [
+                class: normalizeClass(["banner", { hidden: !unref(state).badLines }])
+              }, null, 2),
+              createBaseVNode("div", _hoisted_27, [
                 createBaseVNode("div", {
                   id: "timeline",
-                  class: "timeline"
-                }),
+                  class: normalizeClass(["timeline", { hidden: unref(state).view !== "chat" }])
+                }, null, 2),
                 createBaseVNode("div", {
                   id: "trajectory",
-                  class: "trajectory hidden"
-                })
-              ], -1))
+                  class: normalizeClass(["trajectory", { hidden: unref(state).view === "chat" }])
+                }, null, 2)
+              ])
             ]),
-            _cache[7] || (_cache[7] = createBaseVNode("div", {
+            createBaseVNode("div", {
               id: "handle-details",
               class: "handle",
               "data-side": "details",
               role: "separator",
               "aria-orientation": "vertical",
-              "aria-label": "调整详情栏宽度"
-            }, null, -1)),
-            _cache[8] || (_cache[8] = createStaticVNode('<aside id="details-col" class="details-col" aria-label="详情"><div class="details-head"><span class="details-title">详情</span><button id="details-close" class="icon-btn" type="button" title="关闭详情面板" aria-label="关闭详情面板">✕</button></div><div id="details-body" class="details-body"></div></aside>', 1))
-          ]),
-          _cache[9] || (_cache[9] = createBaseVNode("div", {
+              "aria-label": "调整详情栏宽度",
+              style: normalizeStyle({ left: `${Math.max(0, unref(layout).viewport - unref(layout).cols.details)}px` }),
+              "data-dragging": ((_b = drag.value) == null ? void 0 : _b.side) === "details" ? "true" : void 0,
+              "data-hidden": unref(layout).detailsCollapsed ? "true" : void 0,
+              onPointerdown: _cache[9] || (_cache[9] = ($event) => onDragStart($event, "details")),
+              onPointermove: onDragMove,
+              onPointerup: onDragEnd,
+              onPointercancel: onDragEnd,
+              onDblclick: _cache[10] || (_cache[10] = ($event) => onDragDblClick("details"))
+            }, null, 44, _hoisted_28),
+            createBaseVNode("aside", _hoisted_29, [
+              createBaseVNode("div", _hoisted_30, [
+                _cache[19] || (_cache[19] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
+                createBaseVNode("button", {
+                  id: "details-close",
+                  class: "icon-btn",
+                  type: "button",
+                  title: "关闭详情面板",
+                  "aria-label": "关闭详情面板",
+                  onClick: _cache[11] || (_cache[11] = ($event) => unref(state).details > 0 && unref(toggleDetails)())
+                }, "✕")
+              ]),
+              _cache[20] || (_cache[20] = createBaseVNode("div", {
+                id: "details-body",
+                class: "details-body"
+              }, null, -1))
+            ])
+          ], 12, _hoisted_1),
+          createBaseVNode("div", {
             id: "lightbox",
-            class: "lightbox hidden"
+            class: normalizeClass(["lightbox", { hidden: !unref(lightbox).open }]),
+            onClick: _cache[13] || (_cache[13] = //@ts-ignore
+            (...args) => unref(closeLightbox) && unref(closeLightbox)(...args))
           }, [
             createBaseVNode("img", {
               id: "lightbox-img",
-              alt: ""
-            }),
-            createBaseVNode("div", { class: "lightbox-hint" }, "点击空白处或按 Esc 关闭")
-          ], -1))
+              src: unref(lightbox).open ? unref(lightbox).url : void 0,
+              alt: unref(lightbox).ref,
+              onClick: _cache[12] || (_cache[12] = withModifiers(() => {
+              }, ["stop"]))
+            }, null, 8, _hoisted_31),
+            _cache[21] || (_cache[21] = createBaseVNode("div", { class: "lightbox-hint" }, "点击空白处或按 Esc 关闭", -1))
+          ], 2)
         ], 64);
       };
     }
