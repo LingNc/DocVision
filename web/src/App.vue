@@ -16,9 +16,6 @@ import {
   lightbox,
   loadState,
   persistLayout,
-  renderDetails,
-  renderTimeline,
-  renderTrajectory,
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
@@ -34,6 +31,7 @@ import {
 import { bootData, refreshIndex, revealProject } from './data'
 import { projectOf, sessionTitleOf } from './legacy/sidebar'
 import Sidebar from './components/Sidebar.vue'
+import Timeline from './components/Timeline.vue'
 import InlineMD from './components/InlineMD.vue'
 
 const frame = ref<HTMLElement | null>(null)
@@ -94,22 +92,17 @@ function onClickCollapseThinking() {
 }
 
 function onClickOnlyTools() {
-  state.onlyTools = !state.onlyTools
-  renderTimeline()
+  state.onlyTools = !state.onlyTools // Timeline.vue 的 watch 负责重渲
 }
 
 function onClickMarkdown() {
   state.markdown = !state.markdown
-  storeSet('markdown', state.markdown ? '1' : '0')
-  renderTimeline()
+  storeSet('markdown', state.markdown ? '1' : '0') // Timeline.vue 的 watch 负责重渲
 }
 
 function onClickUnit() {
   state.unit = state.unit === 'char' ? 'token' : 'char'
-  storeSet('unit', state.unit)
-  renderTimeline()
-  renderTrajectory()
-  renderDetails()
+  storeSet('unit', state.unit) // Timeline.vue 的 watch 负责重渲对话流
 }
 
 function scrollToBottom() {
@@ -266,7 +259,7 @@ onBeforeUnmount(() => {
       </header>
       <div id="banner" class="banner" :class="{ hidden: !bannerText }">{{ bannerText }}</div>
       <div class="view-area">
-        <div id="timeline" class="timeline" :class="{ hidden: state.view !== 'chat' }"></div>
+        <Timeline></Timeline>
         <div id="trajectory" class="trajectory" :class="{ hidden: state.view === 'chat' }"></div>
       </div>
     </main>

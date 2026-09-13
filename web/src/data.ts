@@ -3,7 +3,8 @@
  * 旧页 refreshIndex/applyIndex/selectSession/pullSession 的移植；行数据的
  * 渲染入口（renderTimeline 等）在后续块接上，这里先把数据与状态流跑通。
  */
-import { state, POLL_MS, renderTimeline, scrollToBottomOfTimeline, setBannerText } from './state'
+import { state, POLL_MS, setBannerText } from './state'
+import { renderTimeline, appendLines, scrollToBottom } from './legacy/timeline'
 import { findSession, normalizeLines, indexCallEstimates, projectOf, groupKey, setCollapsed } from './legacy/sidebar'
 
 let pullSeq = 0
@@ -20,13 +21,14 @@ export function revealProject(project: string): void {
     const summary = el.querySelector('.proj-row') as HTMLElement | null
     if (!hit && summary && summary.title === project) hit = el
   })
-  if (!hit) return
-  if (!hit.open) {
-    hit.open = true
-    hit.dataset.open = '1'
+  const target = hit as HTMLDetailsElement | null
+  if (!target) return
+  if (!target.open) {
+    target.open = true
+    target.dataset.open = '1'
     setCollapsed(groupKey('proj', project), false)
   }
-  hit.scrollIntoView({ block: 'nearest' })
+  target.scrollIntoView({ block: 'nearest' })
 }
 
 export function applyIndex(payload: any): void {
@@ -101,7 +103,7 @@ export function pullSession(reset: boolean): Promise<void> {
         state.lines = normalizeLines(payload.lines)
         indexCallEstimates(state.lines)
         renderTimeline()
-        if (state.follow) scrollToBottomOfTimeline()
+        if (state.follow) scrollToBottom()
       } else {
         appendLines(normalizeLines(payload.lines))
       }
@@ -109,11 +111,6 @@ export function pullSession(reset: boolean): Promise<void> {
     .catch((err: Error) => {
       setBannerText('拉取会话失败：' + err.message)
     })
-}
-
-/* 增量追加：块3 的消息流接上后再做真正的"只追加不重建"。 */
-export function appendLines(_lines: any[]): void {
-  renderTimeline()
 }
 
 export function selectSession(id: string): void {
@@ -132,7 +129,7 @@ export function selectSession(id: string): void {
     return
   }
   renderTimeline()
-  pullSession(true).then(() => scrollToBottomOfTimeline())
+  pullSession(true).then(() => scrollToBottom())
 }
 
 /* boot：先拉一次索引并选中第一个活跃会话；然后 2 秒轮询（页面隐藏时跳过）。 */

@@ -8,7 +8,7 @@
  */
 
 export const MD_INLINE =
-  /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g
+  /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/
 
 /* 链接协议白名单：javascript: 之类一律拒绝（返回空 = 只显示文字）。 */
 export function mdSafeURL(url: unknown): string {
@@ -26,17 +26,15 @@ function el(tag: string, cls?: string, text?: string): HTMLElement {
   return node
 }
 
-/* 数学占位：块3 换成 LaTeX → MathML 真转换器；现在抛错走退回路径。 */
-function mdMathML(_tex: string, _display: boolean): HTMLElement {
-  throw new Error('mdMathML not ported yet')
-}
+/* 数学：LaTeX → MathML 转换器在 richtext.ts（块3 移植）；转换器抛错就地
+ * 退回原始 $…$ 文本——一条坏公式不许打断整页渲染。 */
+import { mdMathML } from './richtext'
 
 export function mdInline(parent: Node, text: unknown, depth = 0): void {
   if (depth > 6) {
     parent.appendChild(document.createTextNode(String(text || '')))
     return
   }
-  MD_INLINE.lastIndex = 0
   let rest = String(text === undefined || text === null ? '' : text)
   let guard = 0
   while (rest && guard++ < 800) {
@@ -63,7 +61,7 @@ export function mdInline(parent: Node, text: unknown, depth = 0): void {
       // 数学：$$…$$ 独立显示、$…$ 行内。转换器万一抛错，就地退回原始 $…$ 文本
       // ——一条坏公式不许打断整页渲染。
       try {
-        node = mdMathML(m[10] !== undefined ? m[10] : m[11], m[10] !== undefined)
+        node = mdMathML(m[10] !== undefined ? m[10] : m[11], m[10] !== undefined) as HTMLElement
       } catch {
         node = el('span')
         node.appendChild(document.createTextNode(m[0]))

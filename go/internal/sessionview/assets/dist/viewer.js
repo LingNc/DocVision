@@ -3998,12 +3998,12 @@
       setScopeId: hostSetScopeId = NOOP,
       insertStaticContent: hostInsertStaticContent
     } = options;
-    const patch = (n1, n2, container, anchor = null, parentComponent = null, parentSuspense = null, namespace = void 0, slotScopeIds = null, optimized = !!n2.dynamicChildren) => {
+    const patch = (n1, n2, container, anchor2 = null, parentComponent = null, parentSuspense = null, namespace = void 0, slotScopeIds = null, optimized = !!n2.dynamicChildren) => {
       if (n1 === n2) {
         return;
       }
       if (n1 && !isSameVNodeType(n1, n2)) {
-        anchor = getNextHostNode(n1);
+        anchor2 = getNextHostNode(n1);
         unmount(n1, parentComponent, parentSuspense, true);
         n1 = null;
       }
@@ -4014,14 +4014,14 @@
       const { type, ref: ref3, shapeFlag } = n2;
       switch (type) {
         case Text:
-          processText(n1, n2, container, anchor);
+          processText(n1, n2, container, anchor2);
           break;
         case Comment:
-          processCommentNode(n1, n2, container, anchor);
+          processCommentNode(n1, n2, container, anchor2);
           break;
         case Static:
           if (n1 == null) {
-            mountStaticNode(n2, container, anchor, namespace);
+            mountStaticNode(n2, container, anchor2, namespace);
           }
           break;
         case Fragment:
@@ -4029,7 +4029,7 @@
             n1,
             n2,
             container,
-            anchor,
+            anchor2,
             parentComponent,
             parentSuspense,
             namespace,
@@ -4043,7 +4043,7 @@
               n1,
               n2,
               container,
-              anchor,
+              anchor2,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4055,7 +4055,7 @@
               n1,
               n2,
               container,
-              anchor,
+              anchor2,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4067,7 +4067,7 @@
               n1,
               n2,
               container,
-              anchor,
+              anchor2,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4080,7 +4080,7 @@
               n1,
               n2,
               container,
-              anchor,
+              anchor2,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4096,12 +4096,12 @@
         setRef(n1.ref, null, parentSuspense, n1, true);
       }
     };
-    const processText = (n1, n2, container, anchor) => {
+    const processText = (n1, n2, container, anchor2) => {
       if (n1 == null) {
         hostInsert(
           n2.el = hostCreateText(n2.children),
           container,
-          anchor
+          anchor2
         );
       } else {
         const el2 = n2.el = n1.el;
@@ -4110,46 +4110,46 @@
         }
       }
     };
-    const processCommentNode = (n1, n2, container, anchor) => {
+    const processCommentNode = (n1, n2, container, anchor2) => {
       if (n1 == null) {
         hostInsert(
           n2.el = hostCreateComment(n2.children || ""),
           container,
-          anchor
+          anchor2
         );
       } else {
         n2.el = n1.el;
       }
     };
-    const mountStaticNode = (n2, container, anchor, namespace) => {
+    const mountStaticNode = (n2, container, anchor2, namespace) => {
       [n2.el, n2.anchor] = hostInsertStaticContent(
         n2.children,
         container,
-        anchor,
+        anchor2,
         namespace,
         n2.el,
         n2.anchor
       );
     };
-    const moveStaticNode = ({ el: el2, anchor }, container, nextSibling) => {
+    const moveStaticNode = ({ el: el2, anchor: anchor2 }, container, nextSibling) => {
       let next;
-      while (el2 && el2 !== anchor) {
+      while (el2 && el2 !== anchor2) {
         next = hostNextSibling(el2);
         hostInsert(el2, container, nextSibling);
         el2 = next;
       }
-      hostInsert(anchor, container, nextSibling);
+      hostInsert(anchor2, container, nextSibling);
     };
-    const removeStaticNode = ({ el: el2, anchor }) => {
+    const removeStaticNode = ({ el: el2, anchor: anchor2 }) => {
       let next;
-      while (el2 && el2 !== anchor) {
+      while (el2 && el2 !== anchor2) {
         next = hostNextSibling(el2);
         hostRemove(el2);
         el2 = next;
       }
-      hostRemove(anchor);
+      hostRemove(anchor2);
     };
-    const processElement = (n1, n2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const processElement = (n1, n2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       if (n2.type === "svg") {
         namespace = "svg";
       } else if (n2.type === "math") {
@@ -4159,7 +4159,7 @@
         mountElement(
           n2,
           container,
-          anchor,
+          anchor2,
           parentComponent,
           parentSuspense,
           namespace,
@@ -4188,7 +4188,7 @@
         }
       }
     };
-    const mountElement = (vnode, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const mountElement = (vnode, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       let el2;
       let vnodeHook;
       const { props, shapeFlag, transition, dirs } = vnode;
@@ -4236,7 +4236,7 @@
       if (needCallTransitionHooks) {
         transition.beforeEnter(el2);
       }
-      hostInsert(el2, container, anchor);
+      hostInsert(el2, container, anchor2);
       if ((vnodeHook = props && props.onVnodeMounted) || needCallTransitionHooks || dirs) {
         queuePostRenderEffect(() => {
           try {
@@ -4271,14 +4271,14 @@
         }
       }
     };
-    const mountChildren = (children, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized, start = 0) => {
+    const mountChildren = (children, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized, start = 0) => {
       for (let i = start; i < children.length; i++) {
         const child = children[i] = optimized ? cloneIfMounted(children[i]) : normalizeVNode(children[i]);
         patch(
           null,
           child,
           container,
-          anchor,
+          anchor2,
           parentComponent,
           parentSuspense,
           namespace,
@@ -4436,7 +4436,7 @@
         }
       }
     };
-    const processFragment = (n1, n2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const processFragment = (n1, n2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       const fragmentStartAnchor = n2.el = n1 ? n1.el : hostCreateText("");
       const fragmentEndAnchor = n2.anchor = n1 ? n1.anchor : hostCreateText("");
       let { patchFlag, dynamicChildren, slotScopeIds: fragmentSlotScopeIds } = n2;
@@ -4444,8 +4444,8 @@
         slotScopeIds = slotScopeIds ? slotScopeIds.concat(fragmentSlotScopeIds) : fragmentSlotScopeIds;
       }
       if (n1 == null) {
-        hostInsert(fragmentStartAnchor, container, anchor);
-        hostInsert(fragmentEndAnchor, container, anchor);
+        hostInsert(fragmentStartAnchor, container, anchor2);
+        hostInsert(fragmentEndAnchor, container, anchor2);
         mountChildren(
           // #10007
           // such fragment like `<></>` will be compiled into
@@ -4502,14 +4502,14 @@
         }
       }
     };
-    const processComponent = (n1, n2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const processComponent = (n1, n2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       n2.slotScopeIds = slotScopeIds;
       if (n1 == null) {
         if (n2.shapeFlag & 512) {
           parentComponent.ctx.activate(
             n2,
             container,
-            anchor,
+            anchor2,
             namespace,
             optimized
           );
@@ -4517,7 +4517,7 @@
           mountComponent(
             n2,
             container,
-            anchor,
+            anchor2,
             parentComponent,
             parentSuspense,
             namespace,
@@ -4528,7 +4528,7 @@
         updateComponent(n1, n2, optimized);
       }
     };
-    const mountComponent = (initialVNode, container, anchor, parentComponent, parentSuspense, namespace, optimized) => {
+    const mountComponent = (initialVNode, container, anchor2, parentComponent, parentSuspense, namespace, optimized) => {
       const instance = initialVNode.component = createComponentInstance(
         initialVNode,
         parentComponent,
@@ -4544,7 +4544,7 @@
         parentSuspense && parentSuspense.registerDep(instance, setupRenderEffect, optimized);
         if (!initialVNode.el) {
           const placeholder = instance.subTree = createVNode(Comment);
-          processCommentNode(null, placeholder, container, anchor);
+          processCommentNode(null, placeholder, container, anchor2);
           initialVNode.placeholder = placeholder.el;
         }
       } else {
@@ -4552,7 +4552,7 @@
           instance,
           initialVNode,
           container,
-          anchor,
+          anchor2,
           parentSuspense,
           namespace,
           optimized
@@ -4574,7 +4574,7 @@
         instance.vnode = n2;
       }
     };
-    const setupRenderEffect = (instance, initialVNode, container, anchor, parentSuspense, namespace, optimized) => {
+    const setupRenderEffect = (instance, initialVNode, container, anchor2, parentSuspense, namespace, optimized) => {
       const componentUpdateFn = () => {
         if (!instance.isMounted) {
           let vnodeHook;
@@ -4601,7 +4601,7 @@
               null,
               subTree,
               container,
-              anchor,
+              anchor2,
               instance,
               parentSuspense,
               namespace
@@ -4622,7 +4622,7 @@
             instance.a && queuePostRenderEffect(instance.a, parentSuspense);
           }
           instance.isMounted = true;
-          initialVNode = container = anchor = null;
+          initialVNode = container = anchor2 = null;
         } else {
           let { next, bu, u, parent, vnode } = instance;
           {
@@ -4707,7 +4707,7 @@
       flushPreFlushCbs(instance);
       resetTracking();
     };
-    const patchChildren = (n1, n2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized = false) => {
+    const patchChildren = (n1, n2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized = false) => {
       const c1 = n1 && n1.children;
       const prevShapeFlag = n1 ? n1.shapeFlag : 0;
       const c2 = n2.children;
@@ -4718,7 +4718,7 @@
             c1,
             c2,
             container,
-            anchor,
+            anchor2,
             parentComponent,
             parentSuspense,
             namespace,
@@ -4731,7 +4731,7 @@
             c1,
             c2,
             container,
-            anchor,
+            anchor2,
             parentComponent,
             parentSuspense,
             namespace,
@@ -4755,7 +4755,7 @@
               c1,
               c2,
               container,
-              anchor,
+              anchor2,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4773,7 +4773,7 @@
             mountChildren(
               c2,
               container,
-              anchor,
+              anchor2,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4784,7 +4784,7 @@
         }
       }
     };
-    const patchUnkeyedChildren = (c1, c2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const patchUnkeyedChildren = (c1, c2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       c1 = c1 || EMPTY_ARR;
       c2 = c2 || EMPTY_ARR;
       const oldLength = c1.length;
@@ -4818,7 +4818,7 @@
         mountChildren(
           c2,
           container,
-          anchor,
+          anchor2,
           parentComponent,
           parentSuspense,
           namespace,
@@ -4877,13 +4877,13 @@
       if (i > e1) {
         if (i <= e2) {
           const nextPos = e2 + 1;
-          const anchor = nextPos < l2 ? c2[nextPos].el : parentAnchor;
+          const anchor2 = nextPos < l2 ? c2[nextPos].el : parentAnchor;
           while (i <= e2) {
             patch(
               null,
               c2[i] = optimized ? cloneIfMounted(c2[i]) : normalizeVNode(c2[i]),
               container,
-              anchor,
+              anchor2,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4961,7 +4961,7 @@
           const nextIndex = s2 + i;
           const nextChild = c2[nextIndex];
           const anchorVNode = c2[nextIndex + 1];
-          const anchor = nextIndex + 1 < l2 ? (
+          const anchor2 = nextIndex + 1 < l2 ? (
             // #13559, #14173 fallback to el placeholder for unresolved async component
             anchorVNode.el || resolveAsyncComponentPlaceholder(anchorVNode)
           ) : parentAnchor;
@@ -4970,7 +4970,7 @@
               null,
               nextChild,
               container,
-              anchor,
+              anchor2,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4979,7 +4979,7 @@
             );
           } else if (moved) {
             if (j < 0 || i !== increasingNewIndexSequence[j]) {
-              move(nextChild, container, anchor, 2);
+              move(nextChild, container, anchor2, 2);
             } else {
               j--;
             }
@@ -4987,40 +4987,40 @@
         }
       }
     };
-    const move = (vnode, container, anchor, moveType, parentSuspense = null) => {
+    const move = (vnode, container, anchor2, moveType, parentSuspense = null) => {
       const { el: el2, type, transition, children, shapeFlag } = vnode;
       if (shapeFlag & 6) {
-        move(vnode.component.subTree, container, anchor, moveType);
+        move(vnode.component.subTree, container, anchor2, moveType);
         return;
       }
       if (shapeFlag & 128) {
-        vnode.suspense.move(container, anchor, moveType);
+        vnode.suspense.move(container, anchor2, moveType);
         return;
       }
       if (shapeFlag & 64) {
-        type.move(vnode, container, anchor, internals);
+        type.move(vnode, container, anchor2, internals);
         return;
       }
       if (type === Fragment) {
-        hostInsert(el2, container, anchor);
+        hostInsert(el2, container, anchor2);
         for (let i = 0; i < children.length; i++) {
-          move(children[i], container, anchor, moveType);
+          move(children[i], container, anchor2, moveType);
         }
-        hostInsert(vnode.anchor, container, anchor);
+        hostInsert(vnode.anchor, container, anchor2);
         return;
       }
       if (type === Static) {
-        moveStaticNode(vnode, container, anchor);
+        moveStaticNode(vnode, container, anchor2);
         return;
       }
       const needTransition2 = moveType !== 2 && shapeFlag & 1 && transition;
       if (needTransition2) {
         if (moveType === 0) {
           if (transition.persisted && !el2[leaveCbKey]) {
-            hostInsert(el2, container, anchor);
+            hostInsert(el2, container, anchor2);
           } else {
             transition.beforeEnter(el2);
-            hostInsert(el2, container, anchor);
+            hostInsert(el2, container, anchor2);
             queuePostRenderEffect(() => transition.enter(el2), parentSuspense);
           }
         } else {
@@ -5029,7 +5029,7 @@
             if (vnode.ctx.isUnmounted) {
               hostRemove(el2);
             } else {
-              hostInsert(el2, container, anchor);
+              hostInsert(el2, container, anchor2);
             }
           };
           const performLeave = () => {
@@ -5056,7 +5056,7 @@
           }
         }
       } else {
-        hostInsert(el2, container, anchor);
+        hostInsert(el2, container, anchor2);
       }
     };
     const unmount = (vnode, parentComponent, parentSuspense, doRemove = false, optimized = false) => {
@@ -5144,10 +5144,10 @@
       }
     };
     const remove2 = (vnode) => {
-      const { type, el: el2, anchor, transition } = vnode;
+      const { type, el: el2, anchor: anchor2, transition } = vnode;
       if (type === Fragment) {
         {
-          removeFragment(el2, anchor);
+          removeFragment(el2, anchor2);
         }
         return;
       }
@@ -6034,8 +6034,8 @@
   const doc = typeof document !== "undefined" ? document : null;
   const templateContainer = doc && /* @__PURE__ */ doc.createElement("template");
   const nodeOps = {
-    insert: (child, parent, anchor) => {
-      parent.insertBefore(child, anchor || null);
+    insert: (child, parent, anchor2) => {
+      parent.insertBefore(child, anchor2 || null);
     },
     remove: (child) => {
       const parent = child.parentNode;
@@ -6068,11 +6068,11 @@
     // Reason: innerHTML.
     // Static content here can only come from compiled templates.
     // As long as the user only uses trusted templates, this is safe.
-    insertStaticContent(content, parent, anchor, namespace, start, end) {
-      const before = anchor ? anchor.previousSibling : parent.lastChild;
+    insertStaticContent(content, parent, anchor2, namespace, start, end) {
+      const before = anchor2 ? anchor2.previousSibling : parent.lastChild;
       if (start && (start === end || start.nextSibling)) {
         while (true) {
-          parent.insertBefore(start.cloneNode(true), anchor);
+          parent.insertBefore(start.cloneNode(true), anchor2);
           if (start === end || !(start = start.nextSibling)) break;
         }
       } else {
@@ -6087,13 +6087,13 @@
           }
           template.removeChild(wrapper);
         }
-        parent.insertBefore(template, anchor);
+        parent.insertBefore(template, anchor2);
       }
       return [
         // first
         before ? before.nextSibling : parent.firstChild,
         // last
-        anchor ? anchor.previousSibling : parent.lastChild
+        anchor2 ? anchor2.previousSibling : parent.lastChild
       ];
     }
   };
@@ -6599,6 +6599,8 @@
     return container;
   }
   const POLL_MS = 2e3;
+  const LONG_TEXT_LINES = 20;
+  const SYSTEM_PREVIEW_LINES = 8;
   const STORE_PREFIX = "dsh.sessionview.";
   const SIDEBAR_AUTO_COLLAPSE = 1024;
   const RAIL_W = 56;
@@ -6673,6 +6675,7 @@
     calls: /* @__PURE__ */ new Map(),
     callNodes: {},
     callEst: {},
+    imgAttr: null,
     anchors: {},
     badLines: 0,
     pullError: "",
@@ -6796,16 +6799,15 @@
     if (state.view === "trajectory") ;
   }
   const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "" });
+  function openLightbox(url, ref2) {
+    lightbox.open = true;
+    lightbox.url = url;
+    lightbox.ref = ref2;
+  }
   function closeLightbox() {
     lightbox.open = false;
     lightbox.url = "";
     lightbox.ref = "";
-  }
-  function scrollToBottomOfTimeline() {
-    window.setTimeout(() => {
-      const el2 = document.getElementById("timeline");
-      if (el2) el2.scrollTop = el2.scrollHeight;
-    }, 0);
   }
   function setBannerText(text) {
     state.pullError = text;
@@ -6821,6 +6823,18 @@
     parts.shift();
     return parts.join("/");
   }
+  function firstLine(text, limit) {
+    const s = String(text === void 0 || text === null ? "" : text);
+    const lines = s.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].replace(/\s+/g, " ").trim();
+      if (t) {
+        const max = 96;
+        return t.length > max ? t.slice(0, max) + "…" : t;
+      }
+    }
+    return "";
+  }
   function normalizeLine(line) {
     if (line && line.reasoning === void 0 && line.reasoning_content !== void 0) {
       line.reasoning = line.reasoning_content;
@@ -6831,22 +6845,74 @@
     return (lines || []).map(normalizeLine);
   }
   function fmtTokens(n) {
-    n = Number(n) || 0;
-    if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
-    if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k";
-    return String(n);
+    const v = Number(n) || 0;
+    if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
+    if (v >= 1e3) return (v / 1e3).toFixed(v >= 1e4 ? 0 : 1) + "k";
+    return String(v);
   }
   function fmtDur(ms) {
-    ms = Number(ms) || 0;
-    if (ms < 1e3) return ms + "ms";
-    if (ms < 6e4) return (ms / 1e3).toFixed(1) + "s";
-    const m = Math.floor(ms / 6e4);
-    const sec = Math.round(ms % 6e4 / 1e3);
+    const v = Number(ms) || 0;
+    if (v < 1e3) return v + "ms";
+    if (v < 6e4) return (v / 1e3).toFixed(1) + "s";
+    const m = Math.floor(v / 6e4);
+    const sec = Math.round(v % 6e4 / 1e3);
     return m + "m" + (sec < 10 ? "0" : "") + sec + "s";
   }
   function countText(chars, tokens) {
     if (state.unit === "char") return (Number(chars) || 0) + " 字符";
     return "≈ " + fmtTokens(tokens) + " tokens";
+  }
+  function usageLines(lines) {
+    const out = [];
+    (lines || []).forEach((l) => {
+      if (l && l.t === "usage" && l.stats) out.push(l);
+    });
+    return out;
+  }
+  function aggregate(usages) {
+    if (!usages.length) return null;
+    const agg = {
+      requests: 0,
+      promptTokens: 0,
+      cachedTokens: 0,
+      completionTokens: 0,
+      reasoningTokens: 0,
+      durationMs: 0,
+      ttftMs: 0,
+      genMs: 0,
+      streamed: false,
+      firstTs: "",
+      lastTs: "",
+      perRequest: usages
+    };
+    usages.forEach((l) => {
+      const st = l.stats;
+      agg.requests += 1;
+      agg.promptTokens += Number(st.promptTokens) || 0;
+      agg.cachedTokens += Number(st.cachedTokens) || 0;
+      agg.completionTokens += Number(st.completionTokens) || 0;
+      agg.reasoningTokens += Number(st.reasoningTokens) || 0;
+      const dur = Number(st.durationMs) || 0;
+      const ttft = Number(st.ttftMs) || 0;
+      agg.durationMs += dur;
+      agg.ttftMs += ttft;
+      agg.genMs += Math.max(dur - ttft, 1);
+      if (st.streamed) agg.streamed = true;
+      const ts = l.ts || "";
+      if (ts && (!agg.firstTs || ts < agg.firstTs)) agg.firstTs = ts;
+      if (ts && ts > agg.lastTs) agg.lastTs = ts;
+    });
+    agg.cacheHitPct = agg.promptTokens ? agg.cachedTokens * 100 / agg.promptTokens : 0;
+    agg.avgTtftMs = agg.ttftMs / agg.requests;
+    agg.avgDurationMs = agg.durationMs / agg.requests;
+    agg.outputTps = agg.genMs ? agg.completionTokens * 1e3 / agg.genMs : 0;
+    agg.spanMs = 0;
+    if (agg.firstTs && agg.lastTs) {
+      const t0 = Date.parse(agg.firstTs);
+      const t1 = Date.parse(agg.lastTs);
+      if (!isNaN(t0) && !isNaN(t1) && t1 > t0) agg.spanMs = t1 - t0;
+    }
+    return agg;
   }
   function scanStats(session) {
     const st = session && session.stats;
@@ -6873,6 +6939,10 @@
         if (c && c.id) state.callEst[c.id] = est.calls && est.calls[i] || 0;
       });
     });
+  }
+  const EMPTY_EST = { text: 0, reasoning: 0, calls: [], images: 0, imageCount: 0 };
+  function estOf(line) {
+    return line && line.est ? line.est : EMPTY_EST;
   }
   const STAGE_ORDER = ["vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check"];
   function stageRank(stage) {
@@ -7059,6 +7129,1953 @@
     state.overflow[key] = true;
     storeSet("overflow", JSON.stringify(state.overflow));
   }
+  function el$2(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== void 0 && text !== null) node.textContent = text;
+    return node;
+  }
+  function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+  const MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/;
+  function mdSafeURL(url) {
+    const s = String(url === void 0 || url === null ? "" : url).trim();
+    if (!s) return "";
+    if (/^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(s)) return s;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return "";
+    return s;
+  }
+  function el$1(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== void 0 && text !== null) node.textContent = text;
+    return node;
+  }
+  function mdInline(parent, text, depth = 0) {
+    if (depth > 6) {
+      parent.appendChild(document.createTextNode(String(text || "")));
+      return;
+    }
+    let rest = String(text === void 0 || text === null ? "" : text);
+    let guard = 0;
+    while (rest && guard++ < 800) {
+      const m = MD_INLINE.exec(rest);
+      if (!m) break;
+      if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
+      rest = rest.slice(m.index + m[0].length);
+      let node;
+      if (m[1] !== void 0) {
+        node = el$1("code", "md-inline-code", m[2]);
+      } else if (m[3] !== void 0) {
+        node = el$1("a", "md-link");
+        const href = mdSafeURL(m[4]);
+        if (href) {
+          node.setAttribute("href", href);
+          node.setAttribute("target", "_blank");
+          node.setAttribute("rel", "noopener noreferrer");
+        } else {
+          node.title = "链接协议不受支持，只显示文字";
+        }
+        mdInline(node, m[3], depth + 1);
+      } else if (m[10] !== void 0 || m[11] !== void 0) {
+        try {
+          node = mdMathML(m[10] !== void 0 ? m[10] : m[11], m[10] !== void 0);
+        } catch {
+          node = el$1("span");
+          node.appendChild(document.createTextNode(m[0]));
+        }
+      } else if (m[5] !== void 0 || m[6] !== void 0) {
+        node = el$1("strong");
+        mdInline(node, m[5] !== void 0 ? m[5] : m[6], depth + 1);
+      } else if (m[7] !== void 0) {
+        node = el$1("del");
+        mdInline(node, m[7], depth + 1);
+      } else {
+        node = el$1("em");
+        mdInline(node, m[8] !== void 0 ? m[8] : m[9], depth + 1);
+      }
+      parent.appendChild(node);
+    }
+    if (rest) parent.appendChild(document.createTextNode(rest));
+  }
+  function renderInlineMarkdown(text) {
+    const frag = document.createDocumentFragment();
+    mdInline(frag, text, 0);
+    return frag;
+  }
+  function mdInlineLines(parent, text) {
+    String(text === void 0 || text === null ? "" : text).split("\n").forEach((part, i) => {
+      if (i) parent.appendChild(el$1("br", "md-br"));
+      mdInline(parent, part, 0);
+    });
+  }
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== void 0 && text !== null) node.textContent = text;
+    return node;
+  }
+  function fmtChars(n) {
+    if (!n) return "0 字符";
+    if (n < 1024) return n + " 字符";
+    return (n / 1024).toFixed(1) + " KB";
+  }
+  function prettyJSON(raw) {
+    if (typeof raw !== "string" || !raw.trim()) return "";
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
+  }
+  const JSON_HL_MAX_CHARS = 200 * 1024;
+  const JSON_HL_MAX_LINES = 4e3;
+  const IO_FOLD_LINES = 16;
+  function jsonPretty(raw) {
+    const s = String(raw === void 0 || raw === null ? "" : raw).trim();
+    if (!s || s.charAt(0) !== "{" && s.charAt(0) !== "[") return null;
+    try {
+      return JSON.stringify(JSON.parse(s), null, 2);
+    } catch {
+      return null;
+    }
+  }
+  function countLines(text) {
+    return String(text || "").split("\n").length;
+  }
+  function jsonTooBig(text) {
+    return text.length > JSON_HL_MAX_CHARS || countLines(text) > JSON_HL_MAX_LINES;
+  }
+  function appendJSONSpans(parent, text) {
+    const re = /("(?:\\.|[^"\\])*")\s*:|("(?:\\.|[^"\\])*")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/g;
+    let last = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const cls = m[1] !== void 0 ? "k" : m[2] !== void 0 ? "s" : m[3] !== void 0 ? "b" : "n";
+      parent.appendChild(el("span", cls, m[0]));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+  }
+  function consoleLineClass(line) {
+    if (/^\s*(\$|#)\s+\S/.test(line)) return "cmd";
+    if (/^\+\+\+|^---\s/.test(line)) return "diffhead";
+    if (/^@@/.test(line)) return "hunk";
+    if (/^\+/.test(line)) return "add";
+    if (/^-/.test(line)) return "del";
+    if (/^\s*!/.test(line)) return "bad";
+    if (/Overfull|Underfull/.test(line)) return "warn";
+    return "";
+  }
+  const CONSOLE_TOKENS = /(https?:\/\/[^\s"'<>]+)|((?:\.{0,2}\/|\/)[\w.\-]+\/[\w.\-/]*[\w.\-])|(\b(?:ERROR|Error|error|FAILED|FAIL|Failure|failed|FATAL|Fatal)\b)|(\b(?:WARNING|Warning|warning|WARN|Warn|OVERFULL|Overfull|UNDERFULL|Underfull)\b)|(\b(?:OK|PASS|PASSED|COMPILE OK|SUCCESS|Success|done)\b)/g;
+  function appendConsoleLine(parent, line) {
+    const whole = consoleLineClass(line);
+    if (whole) {
+      parent.appendChild(el("span", whole, line));
+      return;
+    }
+    let last = 0;
+    let m;
+    CONSOLE_TOKENS.lastIndex = 0;
+    while ((m = CONSOLE_TOKENS.exec(line)) !== null) {
+      if (m.index > last) parent.appendChild(document.createTextNode(line.slice(last, m.index)));
+      const cls = m[1] || m[2] ? "path" : m[3] ? "bad" : m[4] ? "warn" : "good";
+      parent.appendChild(el("span", cls, m[0]));
+      last = m.index + m[0].length;
+      if (m[0] === "") break;
+    }
+    if (last < line.length) parent.appendChild(document.createTextNode(line.slice(last)));
+  }
+  function appendConsoleSpans(parent, text) {
+    String(text === void 0 || text === null ? "" : text).split("\n").forEach((line, i) => {
+      if (i) parent.appendChild(document.createTextNode("\n"));
+      appendConsoleLine(parent, line);
+    });
+  }
+  function highlightMachine(parent, raw) {
+    const text = String(raw === void 0 || raw === null ? "" : raw);
+    const pretty = jsonPretty(text);
+    if (pretty === null) {
+      if (jsonTooBig(text)) {
+        parent.textContent = text;
+        return {
+          highlighted: false,
+          note: "内容过大（" + fmtChars(text.length) + "），已按纯文本显示，不做高亮"
+        };
+      }
+      appendConsoleSpans(parent, text);
+      return { highlighted: true, note: "" };
+    }
+    if (jsonTooBig(pretty)) {
+      parent.textContent = pretty;
+      return {
+        highlighted: false,
+        note: "内容过大（" + fmtChars(pretty.length) + "），已按纯文本显示，不做 JSON 高亮"
+      };
+    }
+    appendJSONSpans(parent, pretty);
+    return { highlighted: true, note: "" };
+  }
+  function foldLabel(expanded, lines, chars, tokens) {
+    return expanded ? "收起" : "展开全文（" + lines + " 行 / " + countText(chars, tokens) + "）";
+  }
+  function machineScroll(text, key, extraClass, tokens) {
+    const wrap = el("div", "text-wrap");
+    const raw = String(text === void 0 || text === null ? "" : text);
+    const pretty = jsonPretty(raw);
+    const body = pretty === null ? raw : pretty;
+    const big = jsonTooBig(body);
+    const lines = body.split("\n");
+    const scroll = el("div", "io-scroll");
+    const pre = el("pre", "io-text");
+    let expanded = storeGet("text." + key) === "1";
+    const long = lines.length > IO_FOLD_LINES;
+    const paint = () => {
+      if (big) pre.textContent = body;
+      else if (pretty !== null) appendJSONSpans(pre, body);
+      else appendConsoleSpans(pre, body);
+      scroll.classList.toggle("open", expanded);
+    };
+    paint();
+    scroll.appendChild(pre);
+    wrap.appendChild(scroll);
+    if (big) {
+      const size = tokens ? countText(body.length, tokens) : fmtChars(body.length);
+      wrap.appendChild(el("div", "note", "内容过大（" + size + "），按纯文本显示，不做高亮"));
+    }
+    if (long) {
+      const toggle = el("button", "text-toggle");
+      toggle.type = "button";
+      const label = () => {
+        toggle.textContent = foldLabel(expanded, lines.length, body.length, tokens);
+      };
+      label();
+      toggle.addEventListener("click", () => {
+        expanded = !expanded;
+        storeSet("text." + key, expanded ? "1" : "0");
+        paint();
+        label();
+      });
+      wrap.appendChild(toggle);
+    }
+    return wrap;
+  }
+  function copyButton(text) {
+    const btn = el("button", "text-toggle", "复制");
+    btn.type = "button";
+    btn.addEventListener("click", () => {
+      const done = () => {
+        btn.textContent = "已复制";
+        setTimeout(() => {
+          btn.textContent = "复制";
+        }, 1200);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, () => {
+          if (fallbackCopy(text)) done();
+        });
+      } else if (fallbackCopy(text)) {
+        done();
+      }
+    });
+    return btn;
+  }
+  function fallbackCopy(text) {
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(area);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+  function mdFence(line) {
+    const m = /^\s{0,3}(`{3,}|~{3,})\s*([^\s`]*)\s*$/.exec(line);
+    return m ? { mark: m[1].charAt(0), lang: m[2] || "" } : null;
+  }
+  function mdListMarker(line) {
+    const m = /^([ \t]*)([-*+]|\d{1,3}[.)])\s+(.*)$/.exec(line);
+    if (!m) return null;
+    return {
+      indent: m[1].replace(/\t/g, "  ").length,
+      ordered: /\d/.test(m[2]),
+      text: m[3]
+    };
+  }
+  const MD_HR = /^(?:\*\s*){3,}$|^(?:-\s*){3,}$|^(?:_\s*){3,}$/;
+  const MD_HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
+  function mdSeparatorRow(line) {
+    const s = String(line || "").trim();
+    if (s.indexOf("-") < 0 || s.indexOf("|") < 0) return false;
+    return /^\|?[\s:|-]+\|?$/.test(s);
+  }
+  function mdSplitRow(line) {
+    const s = String(line || "").trim().replace(/^\|/, "").replace(/\|$/, "");
+    return s.split("|").map((c) => c.trim());
+  }
+  function mdBlockStart(line, next) {
+    const t = String(line || "").trim();
+    if (!t) return true;
+    if (mdFence(t) || MD_HEADING.test(t) || MD_HR.test(t)) return true;
+    if (/^\s{0,3}>/.test(String(line)) || mdListMarker(String(line))) return true;
+    return t.indexOf("|") >= 0 && !!next && mdSeparatorRow(next) && mdSplitRow(t).length > 1;
+  }
+  const MATHML_NS = "http://www.w3.org/1998/Math/MathML";
+  const MATH_CHARS = {
+    alpha: "α",
+    beta: "β",
+    gamma: "γ",
+    delta: "δ",
+    epsilon: "ε",
+    varepsilon: "ε",
+    zeta: "ζ",
+    eta: "η",
+    theta: "θ",
+    vartheta: "ϑ",
+    iota: "ι",
+    kappa: "κ",
+    lambda: "λ",
+    mu: "μ",
+    nu: "ν",
+    xi: "ξ",
+    pi: "π",
+    varpi: "ϖ",
+    rho: "ρ",
+    sigma: "σ",
+    varsigma: "ς",
+    tau: "τ",
+    upsilon: "υ",
+    phi: "φ",
+    varphi: "ϕ",
+    chi: "χ",
+    psi: "ψ",
+    omega: "ω",
+    Gamma: "Γ",
+    Delta: "Δ",
+    Theta: "Θ",
+    Lambda: "Λ",
+    Xi: "Ξ",
+    Pi: "Π",
+    Sigma: "Σ",
+    Upsilon: "Υ",
+    Phi: "Φ",
+    Psi: "Ψ",
+    Omega: "Ω"
+  };
+  const MATH_OPS = {
+    pm: "±",
+    mp: "∓",
+    times: "×",
+    div: "÷",
+    cdot: "⋅",
+    ast: "∗",
+    star: "⋆",
+    circ: "∘",
+    bullet: "∙",
+    le: "≤",
+    leq: "≤",
+    ge: "≥",
+    geq: "≥",
+    ne: "≠",
+    neq: "≠",
+    approx: "≈",
+    equiv: "≡",
+    sim: "∼",
+    simeq: "≃",
+    cong: "≅",
+    propto: "∝",
+    ll: "≪",
+    gg: "≫",
+    "in": "∈",
+    notin: "∉",
+    ni: "∋",
+    subset: "⊂",
+    subseteq: "⊆",
+    supset: "⊃",
+    supseteq: "⊇",
+    cup: "∪",
+    cap: "∩",
+    setminus: "∖",
+    emptyset: "∅",
+    varnothing: "∅",
+    forall: "∀",
+    exists: "∃",
+    nexists: "∄",
+    neg: "¬",
+    land: "∧",
+    wedge: "∧",
+    lor: "∨",
+    vee: "∨",
+    oplus: "⊕",
+    otimes: "⊗",
+    perp: "⊥",
+    parallel: "∥",
+    angle: "∠",
+    triangle: "△",
+    square: "□",
+    to: "→",
+    rightarrow: "→",
+    leftarrow: "←",
+    leftrightarrow: "↔",
+    Rightarrow: "⇒",
+    Leftarrow: "⇐",
+    Leftrightarrow: "⇔",
+    mapsto: "↦",
+    implies: "⟹",
+    iff: "⟺",
+    uparrow: "↑",
+    downarrow: "↓",
+    infty: "∞",
+    partial: "∂",
+    nabla: "∇",
+    ell: "ℓ",
+    hbar: "ℏ",
+    imath: "ı",
+    jmath: "ȷ",
+    Re: "ℜ",
+    Im: "ℑ",
+    aleph: "ℵ",
+    wp: "℘",
+    prime: "′",
+    dots: "…",
+    ldots: "…",
+    cdots: "⋯",
+    vdots: "⋮",
+    ddots: "⋱",
+    cases: "{",
+    lbrace: "{",
+    rbrace: "}",
+    langle: "⟨",
+    rangle: "⟩",
+    lceil: "⌈",
+    rceil: "⌉",
+    lfloor: "⌊",
+    rfloor: "⌋",
+    vert: "|",
+    Vert: "‖",
+    backslash: "\\",
+    dagger: "†",
+    ddagger: "‡",
+    S: "§",
+    therefore: "∴",
+    because: "∵",
+    checkmark: "✓",
+    mid: "∣",
+    nmid: "∤",
+    bmod: "mod",
+    pmod: "mod"
+  };
+  const MATH_LETTER_OPS = {
+    sum: "∑",
+    prod: "∏",
+    coprod: "∐",
+    int: "∫",
+    iint: "∬",
+    iiint: "∭",
+    oint: "∮",
+    bigcup: "⋃",
+    bigcap: "⋂",
+    bigoplus: "⨁",
+    bigotimes: "⨂",
+    bigvee: "⋁",
+    bigwedge: "⋀",
+    lim: "lim",
+    limsup: "lim sup",
+    liminf: "lim inf",
+    sup: "sup",
+    inf: "inf",
+    max: "max",
+    min: "min",
+    det: "det",
+    gcd: "gcd",
+    argmax: "arg max",
+    argmin: "arg min"
+  };
+  const MATH_FUNCS = {
+    sin: 1,
+    cos: 1,
+    tan: 1,
+    cot: 1,
+    sec: 1,
+    csc: 1,
+    arcsin: 1,
+    arccos: 1,
+    arctan: 1,
+    sinh: 1,
+    cosh: 1,
+    tanh: 1,
+    coth: 1,
+    log: 1,
+    ln: 1,
+    lg: 1,
+    exp: 1,
+    deg: 1,
+    dim: 1,
+    ker: 1,
+    hom: 1,
+    Pr: 1,
+    sgn: 1,
+    mod: 1
+  };
+  const MATH_BB = {
+    R: "ℝ",
+    N: "ℕ",
+    Z: "ℤ",
+    Q: "ℚ",
+    C: "ℂ",
+    P: "ℙ",
+    H: "ℍ",
+    E: "ᵓc",
+    F: "ᵓd",
+    A: "��",
+    B: "��",
+    D: "��",
+    K: "ᵔ2",
+    L: "ᵓe",
+    M: "ᵔ4",
+    S: "��",
+    U: "��",
+    V: "��",
+    W: "��",
+    X: "��",
+    Y: "��"
+  };
+  const MATH_MATRIX_ENVS = {
+    matrix: "",
+    pmatrix: "()",
+    bmatrix: "[]",
+    vmatrix: "||",
+    Bmatrix: "{}",
+    cases: "{",
+    aligned: "",
+    align: "",
+    gathered: "",
+    array: "",
+    split: ""
+  };
+  const MATH_SPACES = {
+    ",": "0.167em",
+    ":": "0.222em",
+    ";": "0.278em",
+    "!": "-0.167em",
+    quad: "1em",
+    qquad: "2em",
+    thinspace: "0.167em",
+    medspace: "0.222em",
+    thickspace: "0.278em",
+    negthinspace: "-0.167em",
+    space: "0.333em"
+  };
+  const MATH_ACCENTS = {
+    hat: "ˆ",
+    widehat: "ˆ",
+    bar: "¯",
+    overline: "¯",
+    vec: "⃗",
+    tilde: "˜",
+    widetilde: "˜",
+    dot: "˙",
+    ddot: "¨",
+    acute: "´",
+    grave: "`",
+    check: "ˇ",
+    breve: "˘",
+    mathring: "˚"
+  };
+  const MATH_FONTS = {
+    mathrm: "normal",
+    mathbf: "bold",
+    boldsymbol: "bold",
+    mathit: "italic",
+    mathsf: "sans-serif",
+    mathtt: "monospace",
+    mathcal: "script",
+    mathfrak: "fraktur",
+    mathbb: "double-struck",
+    mathnormal: "italic"
+  };
+  function mathEl(tag) {
+    return document.createElementNS(MATHML_NS, tag);
+  }
+  function mathText(tag, str) {
+    const n = mathEl(tag);
+    n.appendChild(document.createTextNode(String(str)));
+    return n;
+  }
+  function mathSymbol(ch) {
+    const n = mathEl("mo");
+    n.appendChild(document.createTextNode(ch));
+    n.setAttribute("stretchy", "false");
+    return n;
+  }
+  function mdMathML(tex, display) {
+    const src = String(tex === void 0 || tex === null ? "" : tex);
+    let pos = 0;
+    const root = mathEl("math");
+    if (display) root.setAttribute("display", "block");
+    root.setAttribute("class", display ? "md-math md-math-block" : "md-math");
+    function isSpace(c) {
+      return c === " " || c === "	" || c === "\n";
+    }
+    function skipSpaces() {
+      while (pos < src.length && isSpace(src[pos])) pos += 1;
+    }
+    function atEndMarker() {
+      return src.charAt(pos) === "\\" && /^\\end\b/.test(src.slice(pos));
+    }
+    function isLetter(c) {
+      return c >= "a" && c <= "z" || c >= "A" && c <= "Z";
+    }
+    function isDigit(c) {
+      return c >= "0" && c <= "9";
+    }
+    function readBraceText() {
+      skipSpaces();
+      if (src.charAt(pos) !== "{") return "";
+      let depth = 0, out = "";
+      const start = pos;
+      for (; pos < src.length; pos += 1) {
+        const c = src[pos];
+        if (c === "{") {
+          depth += 1;
+          if (depth === 1) continue;
+        } else if (c === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            pos += 1;
+            return out;
+          }
+        }
+        out += c;
+      }
+      pos = start;
+      return "";
+    }
+    function readCommandName() {
+      pos += 1;
+      if (pos >= src.length) return "\\";
+      if (isLetter(src[pos])) {
+        const s = pos;
+        while (pos < src.length && isLetter(src[pos])) pos += 1;
+        return src.slice(s, pos);
+      }
+      pos += 1;
+      return src[pos - 1];
+    }
+    function parseGroup() {
+      skipSpaces();
+      if (src.charAt(pos) === "{") {
+        pos += 1;
+        const row = parseExpr();
+        skipSpaces();
+        if (src.charAt(pos) === "}") pos += 1;
+        return row;
+      }
+      return parseAtom();
+    }
+    function argGroup() {
+      const g = parseGroup();
+      if (!g) throw new Error("mdMathML: 参数组缺失");
+      return g;
+    }
+    function attachScript(row, sup) {
+      pos += 1;
+      const arg = argGroup();
+      let base = row.lastChild;
+      if (base) row.removeChild(base);
+      else base = mathEl("mrow");
+      const prev = base.nodeName;
+      let isBig = prev === "mo" && base.getAttribute("largeop") === "true";
+      if (!isBig && (prev === "munder" || prev === "mover") && base.firstChild && base.firstChild.nodeName === "mo" && base.firstChild.getAttribute("largeop") === "true") {
+        isBig = true;
+      }
+      let tag;
+      if (isBig) {
+        if (prev === "munder" && sup || prev === "mover" && !sup) tag = "munderover";
+        else tag = sup ? "mover" : "munder";
+      } else if (prev === "msub" || prev === "msup") {
+        tag = "msubsup";
+      } else {
+        tag = sup ? "msup" : "msub";
+      }
+      const n = mathEl(tag);
+      if (tag === "msubsup" || tag === "munderover") {
+        n.appendChild(base.firstChild);
+        n.appendChild(base.lastChild);
+      } else {
+        n.appendChild(base);
+      }
+      n.appendChild(arg);
+      row.appendChild(n);
+    }
+    function parseMathTable(env) {
+      const table = mathEl("mtable");
+      let row = mathEl("mtr");
+      let guard = 0;
+      while (pos < src.length && guard++ < 2e3) {
+        skipSpaces();
+        if (src.charAt(pos) === "\\" && src.substr(pos, 2) === "\\\\") {
+          pos += 2;
+          table.appendChild(row);
+          row = mathEl("mtr");
+          continue;
+        }
+        if (atEndMarker()) break;
+        if (src.charAt(pos) === "\\" && /^\\hline\b/.test(src.slice(pos))) {
+          readCommandName();
+          continue;
+        }
+        if (src.charAt(pos) === "&") {
+          pos += 1;
+          continue;
+        }
+        const cell = parseExpr();
+        const td = mathEl("mtd");
+        td.appendChild(cell);
+        row.appendChild(td);
+        if (pos >= src.length) break;
+      }
+      if (row.childNodes.length) table.appendChild(row);
+      const delims = MATH_MATRIX_ENVS[env];
+      if (!delims) return table;
+      const wrap = mathEl("mrow");
+      const left = mathEl("mo"), right = mathEl("mo");
+      left.setAttribute("stretchy", "true");
+      right.setAttribute("stretchy", "true");
+      left.appendChild(document.createTextNode(delims.charAt(0)));
+      right.appendChild(document.createTextNode(delims.charAt(1)));
+      wrap.appendChild(left);
+      wrap.appendChild(table);
+      wrap.appendChild(right);
+      return wrap;
+    }
+    function parseCommand() {
+      const name = readCommandName();
+      if (name === "\\") {
+        const br = mathEl("mspace");
+        br.setAttribute("linebreak", "newline");
+        return br;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_SPACES, name)) {
+        const sp = mathEl("mspace");
+        sp.setAttribute("width", MATH_SPACES[name]);
+        return sp;
+      }
+      if (name === "frac" || name === "dfrac" || name === "tfrac") {
+        const f = mathEl("mfrac");
+        f.appendChild(argGroup());
+        f.appendChild(argGroup());
+        return f;
+      }
+      if (name === "sqrt") {
+        skipSpaces();
+        let root2;
+        if (src.charAt(pos) === "[") {
+          let close = src.indexOf("]", pos + 1);
+          if (close < 0) close = src.length;
+          const degSrc = src.slice(pos + 1, close);
+          pos = close + 1;
+          const deg = mathEl("mrow");
+          for (let di = 0; di < degSrc.length; di += 1) {
+            const dc = degSrc.charAt(di);
+            if (isSpace(dc)) continue;
+            deg.appendChild(isDigit(dc) ? mathText("mn", dc) : isLetter(dc) ? mathText("mi", dc) : mathSymbol(dc));
+          }
+          root2 = mathEl("mroot");
+          root2.appendChild(argGroup());
+          root2.appendChild(deg);
+          return root2;
+        }
+        root2 = mathEl("msqrt");
+        root2.appendChild(argGroup());
+        return root2;
+      }
+      if (name === "left" || name === "right" || name === "big" || name === "Big" || name === "bigl" || name === "bigr" || name === "Bigl" || name === "Bigr" || name === "biggl" || name === "biggr" || name === "Biggl" || name === "Biggr") {
+        skipSpaces();
+        let d = src.charAt(pos);
+        if (d === "\\") {
+          const dn = readCommandName();
+          d = Object.prototype.hasOwnProperty.call(MATH_OPS, dn) ? MATH_OPS[dn] : dn;
+        } else {
+          pos += 1;
+          if (d === ".") return mathEl("mspace");
+        }
+        const mo = mathEl("mo");
+        mo.setAttribute("stretchy", name === "left" || name === "right" ? "true" : "false");
+        mo.appendChild(document.createTextNode(d || ""));
+        return mo;
+      }
+      if (name === "begin") {
+        const env = readBraceText();
+        if (!Object.prototype.hasOwnProperty.call(MATH_MATRIX_ENVS, env)) {
+          return mathText("mtext", "\\begin{" + env + "}");
+        }
+        if (env === "array") readBraceText();
+        const built = parseMathTable(env);
+        skipSpaces();
+        if (atEndMarker()) {
+          readCommandName();
+          readBraceText();
+        }
+        return built;
+      }
+      if (name === "text" || name === "textrm" || name === "mbox" || name === "operatorname") {
+        const tx = mathText("mtext", readBraceText());
+        if (name === "operatorname") tx.setAttribute("mathvariant", "normal");
+        return tx;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_FONTS, name)) {
+        const inner = argGroup();
+        inner.setAttribute("mathvariant", MATH_FONTS[name]);
+        if (name === "mathbb") {
+          (function mapBB(node) {
+            for (let i = 0; i < node.childNodes.length; i += 1) {
+              const kid = node.childNodes[i];
+              const ch = kid.textContent;
+              if (kid.nodeType === 3 && ch && ch.length === 1 && MATH_BB[ch]) {
+                kid.textContent = MATH_BB[ch];
+              } else if (kid.childNodes && kid.childNodes.length) {
+                mapBB(kid);
+              }
+            }
+          })(inner);
+        }
+        return inner;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_ACCENTS, name)) {
+        const acc = mathEl("mover");
+        acc.setAttribute("accent", "true");
+        acc.appendChild(argGroup());
+        const am = mathEl("mo");
+        am.appendChild(document.createTextNode(MATH_ACCENTS[name]));
+        acc.appendChild(am);
+        return acc;
+      }
+      if (name === "underline") {
+        const ul = mathEl("munder");
+        ul.setAttribute("accentunder", "true");
+        ul.appendChild(argGroup());
+        const um = mathEl("mo");
+        um.appendChild(document.createTextNode("_"));
+        ul.appendChild(um);
+        return ul;
+      }
+      if (name === "overbrace" || name === "underbrace" || name === "stackrel" || name === "overset" || name === "underset") {
+        const ov = mathEl(name === "underset" || name === "underbrace" ? "munder" : "mover");
+        ov.appendChild(argGroup());
+        ov.appendChild(argGroup());
+        return ov;
+      }
+      if (name === "displaystyle" || name === "textstyle" || name === "limits" || name === "nolimits" || name === "nonumber" || name === "notag" || name === "label" || name === "tag") {
+        if (name === "label" || name === "tag") readBraceText();
+        return null;
+      }
+      if (name === "pmod" || name === "pod") {
+        const pm2 = mathEl("mrow");
+        pm2.appendChild(mathEl("mspace"));
+        pm2.appendChild(mathText("mtext", "("));
+        pm2.appendChild(argGroup());
+        pm2.appendChild(mathText("mtext", ")"));
+        return pm2;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_LETTER_OPS, name)) {
+        const big = MATH_LETTER_OPS[name];
+        const isWord = !/[\u2200-\u22ff\u2a00-\u2aff]/.test(big);
+        const bo = mathEl(isWord ? "mi" : "mo");
+        bo.appendChild(document.createTextNode(big));
+        if (!isWord) {
+          bo.setAttribute("largeop", "true");
+          bo.setAttribute("movablelimits", "true");
+        } else bo.setAttribute("mathvariant", "normal");
+        return bo;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_FUNCS, name)) {
+        const fn = mathText("mi", name);
+        fn.setAttribute("mathvariant", "normal");
+        return fn;
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_CHARS, name)) {
+        return mathText("mi", MATH_CHARS[name]);
+      }
+      if (Object.prototype.hasOwnProperty.call(MATH_OPS, name)) {
+        return mathSymbol(MATH_OPS[name]);
+      }
+      return mathText("mtext", "\\" + name);
+    }
+    function parseAtom() {
+      skipSpaces();
+      const c = src.charAt(pos);
+      if (!c) return null;
+      if (c === "{") {
+        pos += 1;
+        const g = parseExpr();
+        if (src.charAt(pos) === "}") pos += 1;
+        return g;
+      }
+      if (c === "\\") return parseCommand();
+      if (isDigit(c) || c === "." && isDigit(src.charAt(pos + 1))) {
+        const s = pos;
+        while (pos < src.length && (isDigit(src[pos]) || src[pos] === ".")) pos += 1;
+        return mathText("mn", src.slice(s, pos));
+      }
+      if (isLetter(c)) {
+        pos += 1;
+        return mathText("mi", c);
+      }
+      pos += 1;
+      if (c === "~") {
+        const nb = mathEl("mspace");
+        nb.setAttribute("width", "0.333em");
+        return nb;
+      }
+      return mathSymbol(c);
+    }
+    function parseExpr() {
+      const row = mathEl("mrow");
+      let guard = 0;
+      while (pos < src.length && guard++ < 4e3) {
+        skipSpaces();
+        const c = src.charAt(pos);
+        if (!c || c === "}" || c === "&") break;
+        if (c === "\\" && (src.substr(pos, 2) === "\\\\" || atEndMarker())) break;
+        if (c === "^" || c === "_") {
+          attachScript(row, c === "^");
+          continue;
+        }
+        const atom = parseAtom();
+        if (atom) row.appendChild(atom);
+        else if (pos < src.length && src.charAt(pos) === c) pos += 1;
+      }
+      return row;
+    }
+    let body = parseExpr();
+    if (body.childNodes.length === 1 && body.firstChild && body.firstChild.nodeName === "mrow") {
+      body = body.firstChild;
+    }
+    root.appendChild(body);
+    return root;
+  }
+  function mdCodeBlock(code, lang) {
+    const wrap = el("div", "md-code-block");
+    const head = el("div", "md-code-head");
+    head.appendChild(el("span", "md-code-lang", lang || "text"));
+    head.appendChild(copyButton(code));
+    wrap.appendChild(head);
+    const body = el("pre", "md-code-body");
+    const inner = el("code");
+    const res = highlightMachine(inner, code);
+    body.appendChild(inner);
+    wrap.appendChild(body);
+    if (res.note) wrap.appendChild(el("div", "note", res.note));
+    return wrap;
+  }
+  function mdTable(header, rows) {
+    const wrap = el("div", "md-table-wrap");
+    const table = el("table", "md-table");
+    const thead = el("thead");
+    const hrow = el("tr");
+    header.forEach((cell) => {
+      const th = el("th");
+      mdInline(th, cell, 0);
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    const tbody = el("tbody");
+    rows.forEach((cells) => {
+      const tr = el("tr");
+      for (let c = 0; c < header.length; c++) {
+        const td = el("td");
+        mdInline(td, cells[c] === void 0 ? "" : cells[c], 0);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+  function mdListItem(item) {
+    const li = el("li", "md-item");
+    mdInlineLines(li, item.text);
+    return li;
+  }
+  function renderMarkdown(text) {
+    const frag = document.createDocumentFragment();
+    const lines = String(text === void 0 || text === null ? "" : text).replace(/\r\n?/g, "\n").split("\n");
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (!trimmed) {
+        i++;
+        continue;
+      }
+      const fence = mdFence(line);
+      if (fence) {
+        const code = [];
+        i++;
+        const close = new RegExp("^\\s{0,3}" + (fence.mark === "`" ? "`" : "~") + "{3,}\\s*$");
+        while (i < lines.length && !close.test(lines[i])) {
+          code.push(lines[i]);
+          i++;
+        }
+        if (i < lines.length) i++;
+        frag.appendChild(mdCodeBlock(code.join("\n"), fence.lang));
+        continue;
+      }
+      const h = MD_HEADING.exec(trimmed);
+      if (h) {
+        const level = h[1].length;
+        const heading = el("h" + level, "md-h md-h" + level);
+        mdInlineLines(heading, h[2]);
+        frag.appendChild(heading);
+        i++;
+        continue;
+      }
+      if (MD_HR.test(trimmed)) {
+        frag.appendChild(el("hr", "md-hr"));
+        i++;
+        continue;
+      }
+      if (trimmed.indexOf("|") >= 0 && i + 1 < lines.length && mdSeparatorRow(lines[i + 1])) {
+        const header = mdSplitRow(trimmed);
+        if (header.length > 1) {
+          const rows = [];
+          i += 2;
+          while (i < lines.length && lines[i].trim() && lines[i].indexOf("|") >= 0) {
+            rows.push(mdSplitRow(lines[i]));
+            i++;
+          }
+          frag.appendChild(mdTable(header, rows));
+          continue;
+        }
+      }
+      if (/^\s{0,3}>/.test(line)) {
+        const quote = [];
+        while (i < lines.length && /^\s{0,3}>/.test(lines[i])) {
+          quote.push(lines[i].replace(/^\s{0,3}>\s?/, ""));
+          i++;
+        }
+        const bq = el("blockquote", "md-quote");
+        bq.appendChild(renderMarkdown(quote.join("\n")));
+        frag.appendChild(bq);
+        continue;
+      }
+      if (mdListMarker(line)) {
+        const items = [];
+        while (i < lines.length) {
+          const mk = mdListMarker(lines[i]);
+          if (mk) {
+            items.push(mk);
+            i++;
+            continue;
+          }
+          if (items.length && lines[i].trim() && i + 1 <= lines.length && !mdBlockStart(lines[i], lines[i + 1])) {
+            items[items.length - 1].text += "\n" + lines[i].trim();
+            i++;
+            continue;
+          }
+          break;
+        }
+        const baseIndent = items[0].indent;
+        let list = null;
+        let listOrdered = false;
+        let lastLi = null;
+        let sub = null;
+        items.forEach((it) => {
+          if (!list || it.indent <= baseIndent && it.ordered !== listOrdered) {
+            list = el(it.ordered ? "ol" : "ul", "md-list");
+            listOrdered = it.ordered;
+            lastLi = null;
+            sub = null;
+            frag.appendChild(list);
+          }
+          if (it.indent > baseIndent && lastLi) {
+            if (!sub) {
+              sub = el(it.ordered ? "ol" : "ul", "md-list md-sub");
+              lastLi.appendChild(sub);
+            }
+            sub.appendChild(mdListItem(it));
+            return;
+          }
+          sub = null;
+          lastLi = mdListItem(it);
+          list.appendChild(lastLi);
+        });
+        continue;
+      }
+      const buf = [];
+      while (i < lines.length && !mdBlockStart(lines[i], lines[i + 1])) {
+        buf.push(lines[i]);
+        i++;
+      }
+      if (!buf.length) {
+        buf.push(lines[i]);
+        i++;
+      }
+      const para = el("p", "md-p");
+      mdInlineLines(para, buf.join("\n"));
+      frag.appendChild(para);
+    }
+    return frag;
+  }
+  function refBaseName(ref2) {
+    const s = String(ref2 || "").split("?")[0];
+    const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
+  function shortFileName(name) {
+    const s = String(name || "");
+    const dot = s.lastIndexOf(".");
+    const stem = dot > 0 ? s.slice(0, dot) : s;
+    const ext = dot > 0 ? s.slice(dot) : "";
+    if (/^[0-9a-f]{32,}$/i.test(stem)) return stem.slice(0, 8) + ext;
+    return s;
+  }
+  function originalFigureSize(text) {
+    const m = /ORIGINAL\s+FIGURE\s+SIZE\s*:\s*([0-9.]+\s*mm\s*[x×]\s*[0-9.]+\s*mm)/i.exec(String(text || ""));
+    return m ? m[1].replace(/\s+/g, " ") : "";
+  }
+  function imageTurnSummary(line) {
+    const imgs = line && line.images || [];
+    const bits = [imgs.length + " 张图片"];
+    const size = originalFigureSize(line && line.text);
+    if (size) bits.push(size);
+    const names = imgs.map((r) => shortFileName(refBaseName(r)));
+    if (names.length) {
+      bits.push(names.slice(0, 2).join("、") + (names.length > 2 ? " 等 " + names.length + " 个文件" : ""));
+    }
+    return bits.join(" · ");
+  }
+  const IMAGE_HANDLE_RE = /^Tool image output\b/i;
+  const IMAGE_CALL_RE = /\(call\s+([A-Za-z0-9_.:-]+)\)/;
+  const IMAGE_FROM_RE = /\bfrom\s+([A-Za-z0-9_.:-]+)/i;
+  const IMAGE_TOOLS = { view_image: 1, view_pdf: 1 };
+  const IMAGE_RESULT_RE = /^(?:Image\s+\S+|PDF page\s+\S+)[^\n]*\battached\b/im;
+  const IMAGE_WIRE_TITLE = "user 消息承载图片（tool 消息的 content 只能文本，OpenAI 兼容 schema 限制） · text + image_url(data:image/jpeg;base64,…)";
+  function imageAttributions() {
+    const sig = (state.current ? state.current.id : "") + ":" + state.lines.length;
+    if (state.imgAttr && state.imgAttr.sig === sig) return state.imgAttr.map;
+    const calls = [];
+    const idxById = {};
+    state.lines.forEach((line) => {
+      if (!line || line.bad || line.t && line.t !== "msg") return;
+      if (line.role === "assistant") {
+        (line.tool_calls || []).forEach((c) => {
+          (idxById[c.id] = idxById[c.id] || []).push(calls.length);
+          calls.push({
+            id: c.id,
+            name: (c.function || {}).name || "",
+            lineN: line.n,
+            receipt: null,
+            claimed: false,
+            qpos: -1
+          });
+        });
+        return;
+      }
+      if (line.role === "tool") {
+        const idxs = idxById[line.tool_call_id] || [];
+        for (let k = 0; k < idxs.length; k++) {
+          if (calls[idxs[k]].receipt === null) {
+            calls[idxs[k]].receipt = String(line.text || "");
+            break;
+          }
+        }
+      }
+    });
+    const queue2 = [];
+    const candRound = {};
+    const roundLast = {};
+    calls.forEach((c) => {
+      const img = c.receipt === null ? !!IMAGE_TOOLS[c.name] : IMAGE_RESULT_RE.test(c.receipt.trim());
+      if (img) {
+        c.qpos = queue2.length;
+        queue2.push(c);
+        candRound[c.id] = c.lineN;
+        roundLast[c.lineN] = c.id;
+      }
+    });
+    let firstTask = 0;
+    state.lines.forEach((l) => {
+      if (!l || l.bad || l.t && l.t !== "msg") return;
+      if (l.role === "user" && !(l.images && l.images.length) && !firstTask) firstTask = l.n;
+    });
+    const map = {};
+    let qi = 0;
+    const nextUnclaimed = (lineN) => {
+      while (qi < queue2.length && queue2[qi].claimed) qi++;
+      if (qi >= queue2.length || queue2[qi].lineN >= lineN) return null;
+      return queue2[qi];
+    };
+    const claim = (entry, pick, how) => {
+      pick.claimed = true;
+      entry.kind = "call";
+      entry.how = how;
+      entry.callId = pick.id;
+      if (!entry.name) entry.name = pick.name;
+    };
+    state.lines.forEach((line) => {
+      if (!line || line.bad || line.t && line.t !== "msg") return;
+      if (line.role !== "user" || !(line.images && line.images.length)) return;
+      const text = String(line.text || "").trim();
+      const entry = { kind: "none", how: "", callId: "", name: "", lineN: line.n, taskLineN: firstTask };
+      if (text && !IMAGE_HANDLE_RE.test(text)) {
+        entry.kind = "task";
+        entry.how = "task";
+        entry.taskLineN = line.n;
+        map[line.n] = entry;
+        return;
+      }
+      let pick = null;
+      if (IMAGE_HANDLE_RE.test(text)) {
+        const idm = IMAGE_CALL_RE.exec(text);
+        const frm = IMAGE_FROM_RE.exec(text);
+        entry.name = frm ? frm[1] : "";
+        if (idm) {
+          const cands = idxById[idm[1]] || [];
+          for (let k = cands.length - 1; k >= 0; k--) {
+            const ex = calls[cands[k]];
+            if (ex.qpos >= 0 && !ex.claimed && ex.lineN < line.n) {
+              pick = ex;
+              break;
+            }
+          }
+          if (!pick && state.callNodes[idm[1]]) {
+            pick = { id: idm[1], name: entry.name, claimed: false };
+          }
+          if (pick) claim(entry, pick, "call-id");
+        }
+        if (!pick && entry.name) {
+          for (let j = qi; j < queue2.length; j++) {
+            if (queue2[j].lineN >= line.n) break;
+            if (!queue2[j].claimed && queue2[j].name === entry.name) {
+              pick = queue2[j];
+              claim(entry, pick, "tool-name");
+              break;
+            }
+          }
+        }
+      }
+      if (!pick) {
+        pick = nextUnclaimed(line.n);
+        if (pick) claim(entry, pick, "order");
+      }
+      if (!pick) {
+        if (!IMAGE_HANDLE_RE.test(text)) {
+          entry.kind = "task";
+          entry.how = "task";
+          entry.taskLineN = text ? line.n : firstTask || line.n;
+        }
+      }
+      map[line.n] = entry;
+    });
+    state.imgAttr = { sig, map, candRound, roundLast };
+    return map;
+  }
+  function attributionText(attr) {
+    if (!attr) return "";
+    switch (attr.how) {
+      case "call-id":
+        return "归属：call " + attr.callId + (attr.name ? "（" + attr.name + "）" : "");
+      case "tool-name":
+        return "归属：call " + attr.callId + "（按工具名 " + attr.name + " 匹配）";
+      case "order":
+        return "归属：由顺序推断（本轮的 call " + attr.callId + "）";
+      case "task":
+        return "归属：本会话任务（这一段是投喂给任务的原图）";
+      default:
+        return "归属：未识别";
+    }
+  }
+  function collapsibleText(text, previewLines, key, extraClass, tokens) {
+    const wrap = el$2("div", "text-wrap");
+    const lines = String(text === void 0 || text === null ? "" : text).split("\n");
+    const long = lines.length > previewLines;
+    const pre = el$2("pre", "body-text");
+    let expanded = storeGet("text." + key) === "1";
+    const paint = () => {
+      pre.textContent = expanded || !long ? lines.join("\n") : lines.slice(0, previewLines).join("\n");
+      pre.classList.toggle("clamped", long && !expanded);
+    };
+    paint();
+    wrap.appendChild(pre);
+    if (long) {
+      const toggle = el$2("button", "text-toggle");
+      const label = () => {
+        toggle.textContent = foldLabel(expanded, lines.length, String(text).length, tokens);
+      };
+      label();
+      toggle.type = "button";
+      toggle.addEventListener("click", () => {
+        expanded = !expanded;
+        storeSet("text." + key, expanded ? "1" : "0");
+        paint();
+        label();
+      });
+      wrap.appendChild(toggle);
+    }
+    return wrap;
+  }
+  function thumbImg(ref2, cls) {
+    const url = mediaURL(ref2);
+    const img = el$2("img", cls || "thumb");
+    img.src = url;
+    img.alt = ref2;
+    img.loading = "lazy";
+    img.title = ref2;
+    img.addEventListener("click", () => {
+      openLightbox(url, ref2);
+    });
+    return img;
+  }
+  function imageStrip(line) {
+    const strip = el$2("div", "images");
+    (line.images || []).forEach((ref2) => {
+      strip.appendChild(thumbImg(ref2));
+    });
+    return strip;
+  }
+  function markdownText(text, previewLines, key, extraClass, tokens) {
+    const wrap = el$2("div", "text-wrap");
+    const raw = String(text === void 0 || text === null ? "" : text);
+    const body = el$2("div", "md-body");
+    body.appendChild(renderMarkdown(raw));
+    const lines = raw.split("\n");
+    const long = lines.length > previewLines;
+    let expanded = storeGet("text." + key) === "1";
+    const paint = () => {
+      const clamped = long && !expanded;
+      body.classList.toggle("clamped", clamped);
+      body.style.maxHeight = clamped ? previewLines * 24 + "px" : "";
+    };
+    paint();
+    wrap.appendChild(body);
+    if (long) {
+      const toggle = el$2("button", "text-toggle");
+      const label = () => {
+        toggle.textContent = foldLabel(expanded, lines.length, raw.length, tokens);
+      };
+      label();
+      toggle.type = "button";
+      toggle.addEventListener("click", () => {
+        expanded = !expanded;
+        storeSet("text." + key, expanded ? "1" : "0");
+        paint();
+        label();
+      });
+      wrap.appendChild(toggle);
+    }
+    return wrap;
+  }
+  function bodyBlock(text, previewLines, key, extraClass, tokens) {
+    if (!state.markdown) return collapsibleText(text, previewLines, key, extraClass, tokens);
+    return markdownText(text, previewLines, key, extraClass, tokens);
+  }
+  function sessionDir(id) {
+    const i = String(id || "").lastIndexOf("/");
+    return i < 0 ? "" : String(id).slice(0, i);
+  }
+  function mediaURL(ref2) {
+    const tail = String(ref2 || "").replace(/^file:\/\//, "");
+    const rel = joinPath(sessionDir(state.current ? state.current.id : ""), tail);
+    return "/media/" + rel;
+  }
+  function joinPath(...args) {
+    const parts = [];
+    for (const a of args) {
+      const p2 = String(a || "").replace(/^\/+|\/+$/g, "");
+      if (p2) parts.push(p2);
+    }
+    return parts.join("/");
+  }
+  function disclosureLine(cls, name, summary, tail, open) {
+    const details = document.createElement("details");
+    details.className = "disclosure " + cls;
+    details.open = !!open;
+    const head = el$2("summary");
+    const slot = el$2("span", "line-slot");
+    slot.appendChild(el$2("span", "line-caret"));
+    head.appendChild(slot);
+    head.appendChild(el$2("span", "line-name", name));
+    if (summary) {
+      head.appendChild(el$2("span", "line-sep"));
+      const s = el$2("span", "line-summary", summary);
+      s.title = summary;
+      head.appendChild(s);
+    }
+    if (tail) head.appendChild(el$2("span", "line-tail", tail));
+    details.appendChild(head);
+    return details;
+  }
+  function thinkingDisclosure(line) {
+    const remembered = storeGet("thinking." + state.current.id + "." + line.n) === "1";
+    const d = disclosureLine(
+      "disclosure-thinking",
+      "思考",
+      firstLine(line.reasoning),
+      countText(line.reasoning.length, estOf(line).reasoning),
+      !state.forceCollapse && remembered
+    );
+    const body = el$2("div", "thinking-body");
+    const scroll = el$2("div", "reasoning-scroll");
+    scroll.appendChild(el$2("pre", "body-text reasoning-text", line.reasoning));
+    body.appendChild(scroll);
+    d.appendChild(body);
+    d.addEventListener("toggle", () => {
+      if (state.forceCollapse) return;
+      storeSet("thinking." + state.current.id + "." + line.n, d.open ? "1" : "0");
+    });
+    return d;
+  }
+  function toolFamily(name) {
+    const n = String(name).toLowerCase();
+    if (n === "bash" || n === "compile" || n === "python") return "shell";
+    if (n === "submit") return "submit";
+    if (n.indexOf("write") === 0 || n.indexOf("edit") === 0) return "write";
+    if (n.indexOf("grep") === 0 || n.indexOf("doc_search") === 0 || n.indexOf("list_") === 0 || n.indexOf("search") >= 0) return "search";
+    if (n.indexOf("read") === 0 || n.indexOf("view_") === 0 || n.indexOf("image_context") === 0) return "view";
+    return "other";
+  }
+  function toolSummary(name, argsText) {
+    let obj = null;
+    try {
+      obj = JSON.parse(String(argsText || "{}"));
+    } catch {
+      obj = null;
+    }
+    if (!obj || typeof obj !== "object") return "";
+    const n = String(name).toLowerCase();
+    const pick = (v2) => {
+      if (typeof v2 === "string") return v2;
+      if (v2 === void 0 || v2 === null) return "";
+      try {
+        return JSON.stringify(v2);
+      } catch {
+        return "";
+      }
+    };
+    let v = "";
+    if (n === "bash" || n === "python") v = pick(obj.command || obj.code || obj.script);
+    else if (n === "compile") v = pick(obj.path);
+    else if (n.indexOf("grep") === 0 || n.indexOf("search") >= 0 || n === "doc_search") v = pick(obj.pattern || obj.query);
+    else if (n.indexOf("write") === 0 || n.indexOf("read") === 0 || n === "view_pdf" || n === "view_image") v = pick(obj.path);
+    else if (n === "submit") v = pick(obj.path || obj.status);
+    if (!v) {
+      const keys = Object.keys(obj);
+      for (let i = 0; i < keys.length; i++) {
+        const cand = pick(obj[keys[i]]);
+        if (cand) {
+          v = cand;
+          break;
+        }
+      }
+    }
+    v = String(v).split("\n")[0].replace(/\s+/g, " ").trim();
+    return v.length > 90 ? v.slice(0, 90) + "…" : v;
+  }
+  function toolPromptLine(name, argsText) {
+    let obj = null;
+    try {
+      obj = JSON.parse(String(argsText || "{}"));
+    } catch {
+      obj = null;
+    }
+    if (!obj || typeof obj !== "object") return "";
+    const n = String(name).toLowerCase();
+    let v = "";
+    if (n === "bash" || n === "python") v = obj.command || obj.code || "";
+    else if (n.indexOf("grep") === 0 || n === "doc_search" || n.indexOf("search") >= 0) {
+      v = [obj.pattern || obj.query || "", obj.path || ""].filter(Boolean).join("  ");
+    } else if (n === "compile" || n.indexOf("write") === 0 || n.indexOf("edit") === 0 || n.indexOf("read") === 0 || n === "view_pdf" || n === "view_image") {
+      v = obj.path || "";
+    }
+    v = String(v).split("\n")[0].trim();
+    return v.length > 160 ? v.slice(0, 160) + "…" : v;
+  }
+  function cmdPreview(cmd) {
+    const div = el$2("div", "io-cmd");
+    div.appendChild(el$2("span", "cmd-prompt", "$ "));
+    div.appendChild(el$2("span", "cmd-line", cmd));
+    return div;
+  }
+  function classifyResult(text) {
+    const s = String(text || "");
+    if (/REJECTED|文件不存在|失败|error|not found|traceback/i.test(s)) return "error";
+    if (/\bok\s*\(/.test(s)) return "ok";
+    return "plain";
+  }
+  function ioSection(label, text, isError, key, tokens) {
+    const section = el$2("div", "io-section");
+    section.appendChild(el$2("div", "io-label", label));
+    if (text === void 0 || text === null || text === "") {
+      section.appendChild(el$2("div", "io-empty", "（无内容）"));
+      return section;
+    }
+    const wrap = machineScroll(text, key, void 0, tokens);
+    if (isError) {
+      const pre = wrap.querySelector(".io-text");
+      if (pre) pre.setAttribute("data-error", "true");
+    }
+    section.appendChild(wrap);
+    return section;
+  }
+  function toolDisclosure(call) {
+    const fn = call.function || {};
+    const name = fn.name || "(未命名工具)";
+    state.toolSeq++;
+    state.calls.set(call.id, { name, seq: state.toolSeq });
+    const argsText = String(fn.arguments || "");
+    const brief = toolSummary(name, fn.arguments);
+    const argsTokens = callTokensOf(call);
+    const d = disclosureLine(
+      "disclosure-tool fam-" + toolFamily(name),
+      name,
+      brief,
+      countText(argsText.length, argsTokens),
+      storeGet("call." + state.current.id + "." + call.id) === "1"
+    );
+    d.setAttribute("data-call-id", call.id || "");
+    const tail = d.querySelector(".line-tail");
+    const card = el$2("div", "io-card");
+    const cmdLine = toolPromptLine(name, argsText);
+    if (cmdLine) card.appendChild(cmdPreview(cmdLine));
+    card.appendChild(ioSection("输入", prettyJSON(argsText) || "(无参数)", false, "in." + (call.id || ""), argsTokens));
+    const actions = el$2("div", "io-actions");
+    actions.appendChild(copyButton(argsText));
+    card.appendChild(actions);
+    d.appendChild(card);
+    d.addEventListener("toggle", () => {
+      storeSet("call." + state.current.id + "." + call.id, d.open ? "1" : "0");
+    });
+    const node = {
+      details: d,
+      card,
+      summary: brief,
+      tail,
+      argsChars: argsText.length,
+      argsTokens,
+      result: null
+    };
+    if (call.id) state.callNodes[call.id] = node;
+    return node;
+  }
+  function callTokensOf(call) {
+    const est = state.callEst[call.id];
+    return est === void 0 ? 0 : est;
+  }
+  function updateCallTail(node) {
+    if (!node.tail) return;
+    let tail = countText(node.argsChars, node.argsTokens);
+    if (node.result) {
+      const text = String(node.result.line.text || "");
+      tail = countText(node.argsChars, node.argsTokens) + " → " + countText(text.length, estOf(node.result.line).text) + (node.result.status === "error" ? " · error" : node.result.status === "ok" ? " · ok" : "");
+    }
+    if (node.attachments) tail += " · 附件 " + node.attachments + " 张（user 轮）";
+    node.tail.textContent = tail;
+  }
+  function attachResult(node, line) {
+    const text = String(line.text || "");
+    const status = classifyResult(text);
+    node.result = { line, status };
+    node.card.appendChild(el$2("div", "io-divider"));
+    const out = ioSection("输出", text, status === "error", "result." + line.n, estOf(line).text);
+    out.classList.add("out-section");
+    node.card.appendChild(out);
+    const actions = el$2("div", "io-actions");
+    actions.appendChild(copyButton(text));
+    node.card.appendChild(actions);
+    node.details.classList.add("status-" + status);
+    updateCallTail(node);
+    return node;
+  }
+  function addPreview(host, line) {
+    if (!host || !host.details || !host.details.parentNode) return null;
+    let strip = host.preview;
+    if (!strip || !strip.parentNode) {
+      strip = el$2("div", "preview-strip");
+      strip.__items = [];
+      host.preview = strip;
+      const sec = host.details.parentNode;
+      sec.insertBefore(strip, host.details.nextSibling);
+    }
+    strip.__items.push(line);
+    strip.__items.sort((a, b) => a.n - b.n);
+    clear(strip);
+    strip.__items.forEach((l) => {
+      (l.images || []).forEach((ref2) => {
+        strip.appendChild(thumbImg(ref2, "preview-thumb"));
+      });
+    });
+    return strip;
+  }
+  function previewHost(host, attr) {
+    const info = state.imgAttr;
+    if (!info || !attr || !attr.callId) return host;
+    const round = info.candRound ? info.candRound[attr.callId] : void 0;
+    const lastId = round !== void 0 && info.roundLast ? info.roundLast[round] : "";
+    const node = lastId && state.callNodes ? state.callNodes[lastId] : null;
+    return node || host;
+  }
+  function attachImages(host, line, attr) {
+    const imgs = line.images || [];
+    if (!imgs.length) return host;
+    if (host.details) addPreview(previewHost(host, attr), line);
+    const outSec = attr && attr.how === "call-id" && host.card ? host.card.querySelector(".io-section.out-section") : null;
+    if (outSec) {
+      const col = outSec.querySelector(".text-wrap") || outSec;
+      col.appendChild(imageStrip(line));
+      col.appendChild(el$2(
+        "div",
+        "attach-note",
+        "归属：call " + attr.callId + (attr.name ? "（" + attr.name + "，精确匹配）" : "（精确匹配）")
+      ));
+      host.attachments = (host.attachments || 0) + imgs.length;
+      if (host.details) updateCallTail(host);
+      return host;
+    }
+    const box = host.card || host;
+    box.appendChild(el$2("div", "io-divider"));
+    const section = el$2("div", "io-section attach-section");
+    section.appendChild(el$2("div", "io-label", "附件（user 轮）"));
+    const body = el$2("div", "attach-body");
+    if (line.text && line.n !== (attr && attr.taskLineN)) {
+      body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, "imgtext." + line.n, void 0, estOf(line).text));
+    }
+    body.appendChild(imageStrip(line));
+    section.appendChild(body);
+    section.appendChild(el$2(
+      "div",
+      "attach-note",
+      "这一轮是 user 轮发出的（" + (attr && attr.kind === "task" ? "会话开头的原图投喂，作为任务的输入" : "工具的输入/附件") + "）· " + attributionText(attr)
+    ));
+    box.appendChild(section);
+    host.attachments = (host.attachments || 0) + imgs.length;
+    if (host.details) updateCallTail(host);
+    return host;
+  }
+  function standaloneResult(line) {
+    const info = state.calls.get(line.tool_call_id);
+    const name = info ? info.name : "(未配对的工具回执)";
+    const text = String(line.text || "");
+    const status = classifyResult(text);
+    const d = disclosureLine(
+      "disclosure-result status-" + status,
+      name,
+      firstLine(text),
+      countText(text.length, estOf(line).text) + (status === "error" ? " · error" : status === "ok" ? " · ok" : "")
+    );
+    const card = el$2("div", "io-card");
+    card.appendChild(ioSection("输出", text, status === "error", "result." + line.n, estOf(line).text));
+    const actions = el$2("div", "io-actions");
+    actions.appendChild(copyButton(text));
+    card.appendChild(actions);
+    d.appendChild(card);
+    if (!info) {
+      d.title = line.tool_call_id ? "未找到配对的工具调用：id " + line.tool_call_id : "这条回执行没有 tool_call_id，无法与调用配对";
+    }
+    return d;
+  }
+  function imageTurnRow(line, attr) {
+    const imgs = line.images || [];
+    const key = "image." + state.current.id + "." + line.n;
+    const d = disclosureLine(
+      "disclosure-image",
+      "图片（user 轮）",
+      imageTurnSummary(line),
+      imgs.length + " 张",
+      storeGet(key) === "1"
+    );
+    const body = el$2("div", "image-body");
+    if (line.text) {
+      body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, "imgtext." + line.n, void 0, estOf(line).text));
+    }
+    body.appendChild(imageStrip(line));
+    if (attr) body.appendChild(el$2("div", "attach-note", attributionText(attr)));
+    d.appendChild(body);
+    d.title = "这一轮是 user 轮发出的（把图片投给模型），不是人打的字\n" + IMAGE_WIRE_TITLE + "\n" + attributionText(attr) + "\n" + imageTurnSummary(line);
+    d.addEventListener("toggle", () => {
+      storeSet(key, d.open ? "1" : "0");
+    });
+    return d;
+  }
+  function imageTurnSection(line, attr) {
+    const wrap = el$2("section", "msg msg-image");
+    wrap.appendChild(imageTurnRow(line, attr));
+    return wrap;
+  }
+  function systemTurnSection(line) {
+    const msg = el$2("section", "msg msg-system");
+    const head = el$2("div", "sys-line");
+    head.appendChild(el$2("span", "sys-badge", "系统"));
+    head.appendChild(el$2("span", "sys-meta", "user 轮"));
+    head.appendChild(el$2("span", "line-summary", firstLine(line.text)));
+    msg.appendChild(head);
+    const raw = String(line.text || "");
+    if (!raw) {
+      msg.appendChild(el$2("div", "note", "（无正文）"));
+      return msg;
+    }
+    const key = "sys." + state.current.id + "." + line.n;
+    const lines = raw.split("\n");
+    const long = lines.length > SYSTEM_PREVIEW_LINES;
+    let expanded = storeGet("text." + key) === "1";
+    const scroll = el$2("div", "sys-scroll");
+    if (state.markdown) {
+      const md = el$2("div", "md-body sys-md");
+      md.appendChild(renderMarkdown(raw));
+      scroll.appendChild(md);
+    } else {
+      scroll.appendChild(el$2("pre", "body-text sys-text", raw));
+    }
+    const paint = () => {
+      scroll.classList.toggle("folded", long && !expanded);
+      scroll.style.maxHeight = long && !expanded ? SYSTEM_PREVIEW_LINES * 24 + "px" : "var(--code-scroll-h)";
+    };
+    paint();
+    msg.appendChild(scroll);
+    if (long) {
+      const toggle = el$2("button", "text-toggle");
+      toggle.type = "button";
+      const label = () => {
+        toggle.textContent = foldLabel(expanded, lines.length, raw.length, estOf(line).text);
+      };
+      label();
+      toggle.addEventListener("click", () => {
+        expanded = !expanded;
+        storeSet("text." + key, expanded ? "1" : "0");
+        paint();
+        label();
+      });
+      msg.appendChild(toggle);
+    }
+    msg.title = "这一轮是 user 角色发出的任务提示（系统性质，不是人打的字）";
+    return msg;
+  }
+  let pendingTaskImages = {};
+  function anchor(node, line) {
+    if (line && line.n !== void 0) state.anchors[line.n] = node;
+    return node;
+  }
+  function renderLine(line, idx) {
+    if (line.bad) {
+      state.badLines++;
+      updateBanner();
+      return null;
+    }
+    if (line.t && line.t !== "msg") return null;
+    if (!line.role) return null;
+    const isToolCall = line.role === "assistant" && line.tool_calls && line.tool_calls.length > 0;
+    const isImageTurn = line.role === "user" && !!(line.images && line.images.length);
+    if (state.onlyTools && line.role !== "tool" && !isToolCall && !isImageTurn) return null;
+    if (line.role === "user") {
+      if (isImageTurn) {
+        const attr = imageAttributions()[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
+        if (attr.kind === "call" && state.callNodes[attr.callId]) {
+          const callNode = state.callNodes[attr.callId];
+          attachImages(callNode, line, attr);
+          anchor(callNode.details, line);
+          return null;
+        }
+        if (attr.kind === "task" && attr.taskLineN === line.n) {
+          const own = systemTurnSection(line);
+          attachImages(own, line, attr);
+          return anchor(own, line);
+        }
+        if (attr.kind === "task" && attr.taskLineN) {
+          const taskNode = state.anchors[attr.taskLineN];
+          if (taskNode) {
+            attachImages(taskNode, line, attr);
+            return anchor(taskNode, line);
+          }
+          pendingTaskImages[attr.taskLineN] = pendingTaskImages[attr.taskLineN] || [];
+          pendingTaskImages[attr.taskLineN].push({ line, attr });
+          return null;
+        }
+        return anchor(imageTurnSection(line, attr), line);
+      }
+      const msg = systemTurnSection(line);
+      const waiting = pendingTaskImages[line.n];
+      if (waiting && waiting.length) {
+        waiting.forEach((w) => {
+          attachImages(msg, w.line, w.attr);
+        });
+        delete pendingTaskImages[line.n];
+      }
+      return anchor(msg, line);
+    }
+    if (line.role === "tool") {
+      const node = line.tool_call_id ? state.callNodes[line.tool_call_id] : null;
+      if (node) {
+        attachResult(node, line);
+        const lines0 = node.details.getAttribute("data-lines");
+        node.details.setAttribute("data-lines", lines0 ? lines0 + "," + line.n : String(line.n));
+        anchor(node.details, line);
+        return null;
+      }
+      const standalone = el$2("section", "msg msg-tool");
+      standalone.appendChild(standaloneResult(line));
+      return anchor(standalone, line);
+    }
+    if (line.role === "assistant") {
+      const msg = el$2("section", "msg msg-assistant");
+      if (line.reasoning) {
+        msg.appendChild(thinkingDisclosure(line));
+      }
+      if (line.text) {
+        msg.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, "asst." + line.n, void 0, estOf(line).text));
+      }
+      (line.tool_calls || []).forEach((call) => {
+        msg.appendChild(toolDisclosure(call).details);
+      });
+      if (!line.text && !line.reasoning && !(line.tool_calls || []).length) {
+        msg.appendChild(el$2("div", "note", "（空消息）"));
+      }
+      return anchor(msg, line);
+    }
+    const other = el$2("section", "msg msg-other");
+    other.appendChild(bodyBlock(line.text || "(无正文)", LONG_TEXT_LINES, "other." + line.n, void 0, estOf(line).text));
+    return anchor(other, line);
+  }
+  function streamSummary() {
+    if (!state.current) return null;
+    const bar = el$2("div", "stream-summary");
+    const bits = [state.current.messages + " 条消息"];
+    const st = aggregate(usageLines(state.lines));
+    if (st) {
+      bits.push("输入 " + fmtTokens(st.promptTokens) + " / 输出 " + fmtTokens(st.completionTokens));
+      if (st.promptTokens) bits.push("缓存 " + st.cacheHitPct.toFixed(0) + "%");
+      if (st.avgTtftMs) bits.push("首字 " + fmtDur(st.avgTtftMs));
+      const money = fmtCost(state.current.cost);
+      if (money) bits.push(money);
+    }
+    const m = metaState();
+    if (m) bits.push("提示词快照 " + countText(m.promptChars, m.promptTokenEst));
+    bits.forEach((b, i) => {
+      if (i) bar.appendChild(el$2("span", "dot-sep"));
+      bar.appendChild(el$2("span", null, b));
+    });
+    const btn = el$2("button", null, layout.cols.details > 0 ? "收起详情" : "详情 ›");
+    btn.type = "button";
+    btn.addEventListener("click", () => {
+      toggleDetails();
+      btn.textContent = layout.cols.details > 0 ? "收起详情" : "详情 ›";
+    });
+    bar.appendChild(btn);
+    return bar;
+  }
+  function timelineEmptyText() {
+    if (state.onlyTools) return "这个会话没有工具调用记录";
+    if (!state.current) return "左侧选择一个会话开始浏览。";
+    return "这个会话还没有可显示的消息";
+  }
+  function streamNode(container) {
+    return container.querySelector(".stream");
+  }
+  function renderTimeline() {
+    const container = document.getElementById("timeline");
+    if (!container) return;
+    clear(container);
+    pendingTaskImages = {};
+    state.msgSeq = 0;
+    state.toolSeq = 0;
+    state.badLines = 0;
+    state.calls = /* @__PURE__ */ new Map();
+    state.callNodes = {};
+    state.anchors = {};
+    const stream = el$2("div", "stream");
+    container.appendChild(stream);
+    let rendered = 0;
+    const summary = streamSummary();
+    if (summary) {
+      stream.appendChild(summary);
+      rendered++;
+    }
+    state.lines.forEach((line, idx) => {
+      const node = renderLine(line);
+      if (node) {
+        stream.appendChild(node);
+        rendered++;
+      }
+    });
+    if (rendered <= (summary ? 1 : 0)) {
+      stream.appendChild(el$2("div", "empty", timelineEmptyText()));
+    }
+    updateBanner();
+    if (state.view === "trajectory") ;
+  }
+  function appendLines(lines) {
+    if (!lines || !lines.length) return;
+    const container = document.getElementById("timeline");
+    if (!container) return;
+    const stream = streamNode(container);
+    let hasMeta = false;
+    indexCallEstimates(lines);
+    lines.forEach((line) => {
+      state.lines.push(line);
+      if (line.t === "meta") hasMeta = true;
+    });
+    if (!stream) {
+      renderTimeline();
+      return;
+    }
+    const placeholder = stream.querySelector(".empty");
+    state.lines.length - lines.length;
+    lines.forEach((line, idx) => {
+      const node = renderLine(line);
+      if (node) stream.appendChild(node);
+    });
+    if (placeholder && placeholder.parentNode && stream.children.length > 1) {
+      stream.removeChild(placeholder);
+    }
+    updateBanner();
+    if (hasMeta) ;
+    else if (lines.some((l) => l.t === "usage")) ;
+    if (state.view === "trajectory") ;
+    if (state.follow) scrollToBottom();
+  }
+  function scrollToBottom() {
+    const t = document.getElementById("timeline");
+    if (t) t.scrollTop = t.scrollHeight;
+  }
+  function updateBanner() {
+    if (state.badLines > 0) {
+      setBannerText("已跳过 " + state.badLines + " 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）");
+    } else {
+      setBannerText("");
+    }
+  }
+  function metaLines() {
+    const found = [];
+    state.lines.forEach((l) => {
+      if (l.t === "meta") found.push(l);
+    });
+    return found;
+  }
+  function metaState() {
+    const metas = metaLines();
+    if (!metas.length && !metaOf(state.current)) return null;
+    const line = metas.length ? metas[metas.length - 1] : null;
+    if (!line) return null;
+    const scanned = metaOf(state.current);
+    return {
+      line,
+      count: Math.max(metas.length, scanned ? scanned.count : 0),
+      promptChars: String(line.text || "").length,
+      // 本地估算（Go 侧下发）：显示单位是 token 时用它，单位是字符时用上面的
+      // 精确字符数——两个口径都留着，切换开关不用重新拉数据。
+      promptTokenEst: estOf(line).text
+    };
+  }
   let pullSeq = 0;
   function revealProject(project) {
     const wraps = document.querySelectorAll(".proj-group");
@@ -7068,13 +9085,14 @@
       const summary = el2.querySelector(".proj-row");
       if (!hit && summary && summary.title === project) hit = el2;
     });
-    if (!hit) return;
-    if (!hit.open) {
-      hit.open = true;
-      hit.dataset.open = "1";
+    const target = hit;
+    if (!target) return;
+    if (!target.open) {
+      target.open = true;
+      target.dataset.open = "1";
       setCollapsed(groupKey("proj", project), false);
     }
-    hit.scrollIntoView({ block: "nearest" });
+    target.scrollIntoView({ block: "nearest" });
   }
   function applyIndex(payload) {
     state.sessions = payload.sessions || [];
@@ -7138,15 +9156,14 @@
       if (reset) {
         state.lines = normalizeLines(payload.lines);
         indexCallEstimates(state.lines);
-        if (state.follow) scrollToBottomOfTimeline();
+        renderTimeline();
+        if (state.follow) scrollToBottom();
       } else {
         appendLines(normalizeLines(payload.lines));
       }
     }).catch((err) => {
       setBannerText("拉取会话失败：" + err.message);
     });
-  }
-  function appendLines(_lines) {
   }
   function selectSession(id) {
     const s = findSession(id);
@@ -7159,9 +9176,11 @@
     state.meta = null;
     state.trajOpen = {};
     if (!s) {
+      renderTimeline();
       return;
     }
-    pullSession(true).then(() => scrollToBottomOfTimeline());
+    renderTimeline();
+    pullSession(true).then(() => scrollToBottom());
   }
   function bootData() {
     void refreshIndex().then(() => {
@@ -7177,77 +9196,7 @@
       if (!document.hidden) void refreshIndex();
     }, POLL_MS);
   }
-  const MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
-  function mdSafeURL(url) {
-    const s = String(url === void 0 || url === null ? "" : url).trim();
-    if (!s) return "";
-    if (/^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(s)) return s;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return "";
-    return s;
-  }
-  function el(tag, cls, text) {
-    const node = document.createElement(tag);
-    if (cls) node.className = cls;
-    if (text !== void 0 && text !== null) node.textContent = text;
-    return node;
-  }
-  function mdMathML(_tex, _display) {
-    throw new Error("mdMathML not ported yet");
-  }
-  function mdInline(parent, text, depth = 0) {
-    if (depth > 6) {
-      parent.appendChild(document.createTextNode(String(text || "")));
-      return;
-    }
-    MD_INLINE.lastIndex = 0;
-    let rest = String(text === void 0 || text === null ? "" : text);
-    let guard = 0;
-    while (rest && guard++ < 800) {
-      const m = MD_INLINE.exec(rest);
-      if (!m) break;
-      if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
-      rest = rest.slice(m.index + m[0].length);
-      let node;
-      if (m[1] !== void 0) {
-        node = el("code", "md-inline-code", m[2]);
-      } else if (m[3] !== void 0) {
-        node = el("a", "md-link");
-        const href = mdSafeURL(m[4]);
-        if (href) {
-          node.setAttribute("href", href);
-          node.setAttribute("target", "_blank");
-          node.setAttribute("rel", "noopener noreferrer");
-        } else {
-          node.title = "链接协议不受支持，只显示文字";
-        }
-        mdInline(node, m[3], depth + 1);
-      } else if (m[10] !== void 0 || m[11] !== void 0) {
-        try {
-          node = mdMathML(m[10] !== void 0 ? m[10] : m[11], m[10] !== void 0);
-        } catch {
-          node = el("span");
-          node.appendChild(document.createTextNode(m[0]));
-        }
-      } else if (m[5] !== void 0 || m[6] !== void 0) {
-        node = el("strong");
-        mdInline(node, m[5] !== void 0 ? m[5] : m[6], depth + 1);
-      } else if (m[7] !== void 0) {
-        node = el("del");
-        mdInline(node, m[7], depth + 1);
-      } else {
-        node = el("em");
-        mdInline(node, m[8] !== void 0 ? m[8] : m[9], depth + 1);
-      }
-      parent.appendChild(node);
-    }
-    if (rest) parent.appendChild(document.createTextNode(rest));
-  }
-  function renderInlineMarkdown(text) {
-    const frag = document.createDocumentFragment();
-    mdInline(frag, text, 0);
-    return frag;
-  }
-  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$3 = /* @__PURE__ */ defineComponent({
     __name: "InlineMD",
     props: {
       tag: {},
@@ -7348,7 +9297,7 @@
     class: "side-foot"
   };
   const OVERFLOW_LIMIT = 8;
-  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
     __name: "Sidebar",
     setup(__props) {
       const listEl = /* @__PURE__ */ ref(null);
@@ -7573,7 +9522,7 @@
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
                                 ]),
-                                createVNode(_sfc_main$2, {
+                                createVNode(_sfc_main$3, {
                                   tag: "span",
                                   class: "row-title",
                                   text: unref(sessionTitleOf)(s)
@@ -7620,7 +9569,7 @@
                                   class: normalizeClass(["dot", { live: s.live }])
                                 }, null, 2)
                               ]),
-                              createVNode(_sfc_main$2, {
+                              createVNode(_sfc_main$3, {
                                 tag: "span",
                                 class: "row-title",
                                 text: unref(sessionTitleOf)(s)
@@ -7672,6 +9621,23 @@
             createBaseVNode("div", _hoisted_39, toDisplayString(footText.value), 1)
           ])
         ]);
+      };
+    }
+  });
+  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+    __name: "Timeline",
+    setup(__props) {
+      watch(
+        () => [state.current && state.current.id, state.lines, state.markdown, state.onlyTools, state.unit],
+        () => {
+          renderTimeline();
+        }
+      );
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", {
+          id: "timeline",
+          class: normalizeClass(["timeline", { hidden: unref(state).view !== "chat" }])
+        }, null, 2);
       };
     }
   });
@@ -7778,7 +9744,7 @@
       }
       function onClickFollow() {
         state.follow = !state.follow;
-        if (state.follow) scrollToBottom();
+        if (state.follow) scrollToBottom2();
       }
       function onClickCollapseThinking() {
         state.forceCollapse = !state.forceCollapse;
@@ -7799,7 +9765,7 @@
         state.unit = state.unit === "char" ? "token" : "char";
         storeSet("unit", state.unit);
       }
-      function scrollToBottom() {
+      function scrollToBottom2() {
         window.setTimeout(() => {
           const el2 = document.getElementById("timeline");
           if (el2) el2.scrollTop = el2.scrollHeight;
@@ -7885,7 +9851,7 @@
             "data-details-collapsed": unref(layout).detailsCollapsed ? "" : void 0,
             "data-dragging": drag.value ? "" : void 0
           }, [
-            createVNode(_sfc_main$1),
+            createVNode(_sfc_main$2),
             createBaseVNode("div", {
               id: "handle-sidebar",
               class: "handle",
@@ -7927,7 +9893,7 @@
                         class: "crumb crumb-current",
                         title: unref(state).current.id
                       }, [
-                        createVNode(_sfc_main$2, { text: sessionTitle.value }, null, 8, ["text"])
+                        createVNode(_sfc_main$3, { text: sessionTitle.value }, null, 8, ["text"])
                       ], 8, _hoisted_9)
                     ], 64))
                   ]),
@@ -8024,10 +9990,7 @@
                 class: normalizeClass(["banner", { hidden: !bannerText.value }])
               }, toDisplayString(bannerText.value), 3),
               createBaseVNode("div", _hoisted_25, [
-                createBaseVNode("div", {
-                  id: "timeline",
-                  class: normalizeClass(["timeline", { hidden: unref(state).view !== "chat" }])
-                }, null, 2),
+                createVNode(_sfc_main$1),
                 createBaseVNode("div", {
                   id: "trajectory",
                   class: normalizeClass(["trajectory", { hidden: unref(state).view === "chat" }])

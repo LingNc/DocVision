@@ -67,18 +67,18 @@ export function normalizeLines(lines: any[] | null | undefined): any[] {
 /* ---------- 指标短写 ---------- */
 
 export function fmtTokens(n: unknown): string {
-  n = Number(n) || 0
-  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'
-  return String(n)
+  const v = Number(n) || 0
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M'
+  if (v >= 1e3) return (v / 1e3).toFixed(v >= 1e4 ? 0 : 1) + 'k'
+  return String(v)
 }
 
 export function fmtDur(ms: unknown): string {
-  ms = Number(ms) || 0
-  if (ms < 1000) return ms + 'ms'
-  if (ms < 60000) return (ms / 1000).toFixed(1) + 's'
-  const m = Math.floor(ms / 60000)
-  const sec = Math.round((ms % 60000) / 1000)
+  const v = Number(ms) || 0
+  if (v < 1000) return v + 'ms'
+  if (v < 60000) return (v / 1000).toFixed(1) + 's'
+  const m = Math.floor(v / 60000)
+  const sec = Math.round((v % 60000) / 1000)
   return m + 'm' + (sec < 10 ? '0' : '') + sec + 's'
 }
 
@@ -178,6 +178,13 @@ export function indexCallEstimates(lines: any[]): void {
       if (c && c.id) state.callEst[c.id] = (est.calls && est.calls[i]) || 0
     })
   })
+}
+
+/* 一行的本地估算（Go 侧算好下发）：缺字段时全 0，不在这里兜算。 */
+export const EMPTY_EST = { text: 0, reasoning: 0, calls: [] as number[], images: 0, imageCount: 0 }
+
+export function estOf(line: any): { text: number; reasoning: number; calls: number[]; images: number; imageCount: number } {
+  return line && line.est ? line.est : EMPTY_EST
 }
 
 /* ---------- 阶段分组与排序 ---------- */
