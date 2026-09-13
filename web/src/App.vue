@@ -30,12 +30,11 @@ import {
 } from './state'
 import { bootData, refreshIndex, revealProject } from './data'
 import { projectOf, sessionTitleOf } from './legacy/sidebar'
-import { registerRenderDetails } from './state'
-import { renderDetails as renderDet } from './legacy/details'
 import Sidebar from './components/Sidebar.vue'
 import Timeline from './components/Timeline.vue'
 import InlineMD from './components/InlineMD.vue'
 import Trajectory from './components/Trajectory.vue'
+import DetailsPanel from './components/DetailsPanel.vue'
 
 const frame = ref<HTMLElement | null>(null)
 
@@ -150,20 +149,6 @@ function onKeydown(ev: KeyboardEvent) {
   if (ev.key === ']') toggleDetails()
 }
 
-// 详情栏重渲触发（旧页在这些路径上显式调 renderDetails）。
-watch(
-  // 数组多源形式（逐元素比较）：state.current 每次轮询都会被换成新对象，
-  // 用 getter 返回新数组的写法会因引用不同每 2 秒误触发一次重渲。
-  [
-    () => (state.current ? state.current.id : ''),
-    () => state.lines.length,
-    () => state.unit,
-    () => state.markdown,
-    () => state.details,
-  ],
-  () => { renderDet() },
-)
-
 let ro: ResizeObserver | null = null
 let pollTimer = 0
 
@@ -183,7 +168,6 @@ onMounted(() => {
     }
   }
   document.addEventListener('keydown', onKeydown)
-  registerRenderDetails(renderDet)
   // 数据层：首拉 + 2 秒轮询（页面隐藏时跳过）。
   bootData()
   pollTimer = window.setInterval(() => {
@@ -304,7 +288,7 @@ onBeforeUnmount(() => {
         <span class="details-title">详情</span>
         <button id="details-close" class="icon-btn" type="button" title="关闭详情面板" aria-label="关闭详情面板" @click="state.details > 0 && toggleDetails()">✕</button>
       </div>
-      <div id="details-body" class="details-body"></div>
+      <DetailsPanel />
     </aside>
   </div>
   <div id="lightbox" class="lightbox" :class="{ hidden: !lightbox.open }" @click="closeLightbox">

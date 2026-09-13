@@ -193,7 +193,6 @@ export function toggleDetails(): void {
         state.sidebar = 0
       }
     }
-    renderDetails()
   }
   persistLayout()
   applyLayout()
@@ -300,6 +299,3 @@ export function renderTimeline(): void {}
 /* ---------- 渲染入口注册表：各块组件实现，这里只留挂点（避免循环 import） ---------- */
 
 
-let _renderDetails: () => void = () => {}
-export function registerRenderDetails(fn: () => void): void { _renderDetails = fn }
-export function renderDetails(): void { _renderDetails() }
