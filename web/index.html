@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocVision 会话预览</title>
+<script>
+/* 主题在首帧渲染前应用，避免"先白后黑"的闪烁；取不到存储一律回退白天模式。 */
+(function () {
+  var theme = 'light';
+  try {
+    var saved = window.localStorage.getItem('dsh.sessionview.theme');
+    if (saved === 'dark' || saved === 'light') { theme = saved; }
+  } catch (err) { /* file:// 下可能禁用 localStorage：静默用默认值 */ }
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

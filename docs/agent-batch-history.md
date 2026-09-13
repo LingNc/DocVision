@@ -687,3 +687,21 @@ models:
 ### ⑩ 回退 ⑨（用户澄清是误读）
 
 用户看到横幅 `会话预览: [::]:8849` 下方还有一行 `浏览 http://127.0.0.1:8849/`，确认是误读——原写法（Go 双栈通配 + loopback 浏览行）就是要的行为，所以 ⑨ 的 `listenNetwork`（按字面 host 选 tcp4/tcp6）与配套文档一并回退，`preview.host: "0.0.0.0"` 恢复为双栈通配、横幅照实报内核地址。教训：横幅"如实打印内核地址"本身没问题，看到 `[::]` 先看下一行的浏览地址再判断是不是缺陷。
+
+## P5-R1 批（前端迁移重做，`p5/migration-v2` 分支）：旧迁移归档 + 脚手架与 /v2 接线
+
+**背景**：上一轮迁移（另一模型所做，23 个提交）结构与旧页对照全部对上了，但用户判定**观感不对、不符合预期**。经用户决定：这 23 个提交归档到 `archive/p5-attempt1` 分支（**不合并**），master 复位到 `v1.5.0-beta.6`，重做在 `p5/migration-v2` 分支上从零开始。用户明确目标：**效果与旧页一致 + 代码组件化可维护，不要求逐字节复刻**。
+
+**上一轮观感跑偏的根因分析**（对重做的约束）：逐块抽 CSS 时把静态分析误判为"死代码"的规则裁掉了（`.drawer`/`.sheet` 这类类由旧页 JS 动态切换）、CSS 被拆散后层叠顺序变了、布局外壳按想象重画、组件 scoped 样式改写了选择器。所以本轮纪律：**样式表整卷沿用旧页（构建后校验与源一致）、组件一律不写样式**。
+
+**本批改动**：
+- git 手术：`archive/p5-attempt1` 保 23 个旧提交；master reset 到 beta.6；`p5/migration-v2` 自 beta.6 切出。清掉了残留的未跟踪 `web/node_modules`。
+- `web/` 脚手架：Vue 3.5 + Vite 6 + TS，lib 模式单文件 IIFE（`name: DocVisionViewer`）+ 单文件 CSS 落 `go/internal/sessionview/assets/dist/`；**迁移期关压缩**（`minify:false`/`cssMinify:false`）——曾实测 vite 默认把 44121 字节的 CSS 压成 31.65 kB，破坏"与旧页对照"的前提，且报错栈要行号；`scripts/sync-css.mjs`（构建前从旧页资产拷贝样式表）与 `scripts/check-css.mjs`（构建后校验 `dist/viewer.css` 与源逐字节一致）双守卫。
+- `App.vue` 复刻旧页 `viewer.html` 的三栏骨架（含两 `.handle`、表头/页签/六开关、`#lightbox` 常驻），主题开关可用；侧栏/正文/详情内容留空待后续块。
+- Go 侧：`sessionview/v2.go` 新增 `/v2`、`/v2/viewer.{js,css}` 路由（页面壳复用旧页的主题预置脚本防闪；产物缺失时 404 文案提示先 npm build）；`serve.go` 路由表加一条前缀分支。旧页路由与静态导出未动。
+- `.gitignore` 补 `node_modules/`（原 `*` + `!*.*` 的组合会漏放进 node_modules 里带点的文件——上一轮 node_modules 误入库的根因）。
+- 文档：CHANGELOG 把 beta.6 的批次条目从 `[Unreleased]` 归位到新的 `## [v1.5.0-beta.6] - 2026-09-12` 节（随 beta.6 发布的内容此前一直挂在 Unreleased）；AGENTS.md 修正当前标签描述；本节。
+
+**验收证据**：`npm run build`（CSS 44121 字节与源一致）→ `go build` → 8955 端口起服务：`/v2`、`/v2/viewer.js`(205943B)、`/v2/viewer.css` 均 200；无头 chromium dump-dom 见 `#frame`/`#sidebar-col`/`#center-col`/`#details-col`/`#lightbox`/`data-v-app` 齐全；两页 stderr 均无 CONSOLE 报错行。基线截图 `temp/p5run/shot_{old,v2}_base.png`（1600×1000）。
+
+**坑**：① headless chromium 无 `--user-data-dir` 时报 "Failed to create a unique user data directory"，必须显式给；② 服务进程用 `(cmd &)` 起会在 bash 调用结束时被回收，要起一次、同批调用内完成验证；③ `env` 里没有 proxy 变量，首判方向错了——curl 探活优先于猜。

@@ -234,6 +234,8 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case p == "/" || p == "/index.html":
 		v.servePage(w, r)
+	case p == "/v2" || strings.HasPrefix(p, "/v2/"):
+		v.serveV2(w, r, p)
 	case p == "/viewer.css" || p == "/viewer.js":
 		v.serveAsset(w, r, path.Base(p))
 	case p == "/api/index":
