@@ -19,6 +19,9 @@ test*/
 
 config.yaml
 
+# npm 依赖不入库（曾因全忽略+带点反排除的组合把 node_modules 提交过一次）
+node_modules/
+
 !LICENSE
 # Go build artifacts
 go/build/
