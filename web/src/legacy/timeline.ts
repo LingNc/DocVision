@@ -6,6 +6,7 @@
  */
 import { state } from '../state'
 import { estOf, metaOf } from './sidebar'
+import { type Line, type ToolCall, type ImageAttr, type ImageCallEntry } from './types'
 
 /* ---------- 图片轮 / 任务块 ---------- */
 
@@ -33,12 +34,12 @@ function originalFigureSize(text: unknown): string {
 }
 
 // 图片轮的一行摘要：几张 + 原图尺寸（取得到就写）+ 文件名
-export function imageTurnSummary(line: any): string {
+export function imageTurnSummary(line: Line | null | undefined): string {
   const imgs = (line && line.images) || []
   const bits: string[] = [imgs.length + ' 张图片']
   const size = originalFigureSize(line && line.text)
   if (size) bits.push(size)
-  const names = imgs.map((r: any) => shortFileName(refBaseName(r)))
+  const names = imgs.map((r: unknown) => shortFileName(refBaseName(r)))
   if (names.length) {
     bits.push(names.slice(0, 2).join('、') + (names.length > 2 ? ' 等 ' + names.length + ' 个文件' : ''))
   }
@@ -77,7 +78,7 @@ export const IMAGE_WIRE_TITLE = 'user 消息承载图片（tool 消息的 conten
   ' · text + image_url(data:image/jpeg;base64,…)'
 
 // 归属结果按"会话 + 行数"缓存：行数变了（追加/切会话）就重算一遍。
-export function imageAttributions(): Record<number, any> {
+export function imageAttributions(): Record<number, ImageAttr> {
   const sig = (state.current ? state.current.id : '') + ':' + state.lines.length
   if (state.imgAttr && state.imgAttr.sig === sig) return state.imgAttr.map
 
@@ -87,20 +88,20 @@ export function imageAttributions(): Record<number, any> {
    * 因为续跑/重放的转录里同一个 call id 会出现两次，按 id 去重会让重放段的图片
    * 全部认不出归属。
    */
-  const calls: any[] = []
+  const calls: ImageCallEntry[] = []
   const idxById: Record<string, number[]> = {}
-  state.lines.forEach((line: any) => {
+  state.lines.forEach((line: Line) => {
     if (!line || line.bad || (line.t && line.t !== 'msg')) return
     if (line.role === 'assistant') {
-      ;(line.tool_calls || []).forEach((c: any) => {
-        ;(idxById[c.id] = idxById[c.id] || []).push(calls.length)
-        calls.push({ id: c.id, name: (c.function || {}).name || '', lineN: line.n,
+      ;(line.tool_calls || []).forEach((c: ToolCall) => {
+        ;(idxById[c.id || ''] = idxById[c.id || ''] || []).push(calls.length)
+        calls.push({ id: c.id || '', name: (c.function || {}).name || '', lineN: line.n,
           receipt: null, claimed: false, qpos: -1 })
       })
       return
     }
     if (line.role === 'tool') {
-      const idxs = idxById[line.tool_call_id] || []
+      const idxs = idxById[line.tool_call_id || ''] || []
       for (let k = 0; k < idxs.length; k++) {
         if (calls[idxs[k]].receipt === null) {
           calls[idxs[k]].receipt = String(line.text || '')
@@ -110,7 +111,7 @@ export function imageAttributions(): Record<number, any> {
     }
   })
 
-  const queue: any[] = []
+  const queue: ImageCallEntry[] = []
   const candRound: Record<string, number> = {}
   const roundLast: Record<string, string> = {}
   calls.forEach((c) => {
@@ -126,22 +127,22 @@ export function imageAttributions(): Record<number, any> {
   })
 
   let firstTask = 0
-  state.lines.forEach((l: any) => {
+  state.lines.forEach((l: Line) => {
     if (!l || l.bad || (l.t && l.t !== 'msg')) return
     if (l.role === 'user' && !(l.images && l.images.length) && !firstTask) firstTask = l.n
   })
 
-  const map: Record<number, any> = {}
+  const map: Record<number, ImageAttr> = {}
   let qi = 0
   // 只能领**这一行之前**发生过的调用——图片是回执之后才回来的；排在后面的调用
   // 还没发生（会话开头先投图的纯图片行就是这么落到「本会话任务」上的）。
-  const nextUnclaimed = (lineN: number) => {
+  const nextUnclaimed = (lineN: number): ImageCallEntry | null => {
     while (qi < queue.length && queue[qi].claimed) qi++
     if (qi >= queue.length || queue[qi].lineN >= lineN) return null
     return queue[qi]
   }
 
-  const claim = (entry: any, pick: any, how: string) => {
+  const claim = (entry: ImageAttr, pick: ImageCallEntry, how: ImageAttr['how']) => {
     pick.claimed = true
     entry.kind = 'call'
     entry.how = how
@@ -149,12 +150,12 @@ export function imageAttributions(): Record<number, any> {
     if (!entry.name) entry.name = pick.name
   }
 
-  state.lines.forEach((line: any) => {
+  state.lines.forEach((line: Line) => {
     if (!line || line.bad || (line.t && line.t !== 'msg')) return
     if (line.role !== 'user' || !(line.images && line.images.length)) return
 
     const text = String(line.text || '').trim()
-    const entry: any = { kind: 'none', how: '', callId: '', name: '', lineN: line.n, taskLineN: firstTask }
+    const entry: ImageAttr = { kind: 'none', how: '', callId: '', name: '', lineN: line.n, taskLineN: firstTask }
 
     // 有正文又不是句柄 = 这一轮就是**任务本身** → 归本会话任务，FIFO 不许抢它。
     if (text && !IMAGE_HANDLE_RE.test(text)) {
@@ -165,7 +166,7 @@ export function imageAttributions(): Record<number, any> {
       return
     }
 
-    let pick: any = null
+    let pick: ImageCallEntry | null = null
     if (IMAGE_HANDLE_RE.test(text)) {
       const idm = IMAGE_CALL_RE.exec(text)
       const frm = IMAGE_FROM_RE.exec(text)
@@ -180,7 +181,7 @@ export function imageAttributions(): Record<number, any> {
         }
         if (!pick && idxById[idm[1]]) {
           // 不在队列里（那条调用没产图/还没回执）也要认句柄写明的归属。
-          pick = { id: idm[1], name: entry.name, claimed: false }
+          pick = { id: idm[1], name: entry.name || '', lineN: 0, receipt: null, claimed: false, qpos: -1 }
         }
         if (pick) claim(entry, pick, 'call-id')
       }
@@ -211,11 +212,13 @@ export function imageAttributions(): Record<number, any> {
   })
 
   state.imgAttr = { sig, map, candRound, roundLast }
-  return map
+  // 返回缓存里的引用（而非局部 map）：命中/未命中两条路径交给调用方的是
+  // 同一个对象（reactive 包装后引用一致），调用方才能安全做"是否重算"判断。
+  return state.imgAttr.map
 }
 
 // 归属依据的中文说明（对话页的附件脚注与轨迹页共用同一套说法）。
-export function attributionText(attr: any): string {
+export function attributionText(attr: ImageAttr | null | undefined): string {
   if (!attr) return ''
   switch (attr.how) {
     case 'call-id':
@@ -275,11 +278,11 @@ export function toolFamily(name: unknown): string {
  * pattern/query），折叠状态下也能读懂调用过程，不必逐个展开 JSON。
  */
 export function toolSummary(name: unknown, argsText: unknown): string {
-  let obj: any = null
-  try { obj = JSON.parse(String(argsText || '{}')) } catch { obj = null }
+  let obj: Record<string, unknown> | null = null
+  try { obj = JSON.parse(String(argsText || '{}')) as Record<string, unknown> } catch { obj = null }
   if (!obj || typeof obj !== 'object') return ''
   const n = String(name || '').toLowerCase()
-  const pick = (v: any): string => {
+  const pick = (v: unknown): string => {
     if (typeof v === 'string') return v
     if (v === undefined || v === null) return ''
     try { return JSON.stringify(v) } catch { return '' }
@@ -307,11 +310,11 @@ export function toolSummary(name: unknown, argsText: unknown): string {
  * 加一个 `$ ` 前导提示符并加重——输入侧只做这一点，别比输出更花。
  */
 export function toolPromptLine(name: unknown, argsText: unknown): string {
-  let obj: any = null
-  try { obj = JSON.parse(String(argsText || '{}')) } catch { obj = null }
+  let obj: Record<string, unknown> | null = null
+  try { obj = JSON.parse(String(argsText || '{}')) as Record<string, unknown> } catch { obj = null }
   if (!obj || typeof obj !== 'object') return ''
   const n = String(name || '').toLowerCase()
-  let v: any = ''
+  let v: unknown = ''
   if (n === 'bash' || n === 'python') v = obj.command || obj.code || ''
   else if (n.indexOf('grep') === 0 || n === 'doc_search' || n.indexOf('search') >= 0) {
     v = [obj.pattern || obj.query || '', obj.path || ''].filter(Boolean).join('  ')
@@ -319,8 +322,8 @@ export function toolPromptLine(name: unknown, argsText: unknown): string {
     n.indexOf('read') === 0 || n === 'view_pdf' || n === 'view_image') {
     v = obj.path || ''
   }
-  v = String(v).split('\n')[0].trim()
-  return v.length > 160 ? v.slice(0, 160) + '…' : v
+  const out = String(v).split('\n')[0].trim()
+  return out.length > 160 ? out.slice(0, 160) + '…' : out
 }
 
 export function classifyResult(text: unknown): string {
@@ -332,24 +335,31 @@ export function classifyResult(text: unknown): string {
 
 /* ---------- 元信息状态（streamSummary 用；详情栏块复用） ---------- */
 
-function metaLines(): any[] {
-  const found: any[] = []
-  state.lines.forEach((l: any) => { if (l.t === 'meta') found.push(l) })
+interface MetaLineInfo {
+  line: Line
+  count: number
+  promptChars: number
+  /** 本地估算（Go 侧下发）：显示单位是 token 时用它，单位是字符时用
+   *  promptChars 的精确字符数——两个口径都留着，切换开关不用重新拉数据。 */
+  promptTokenEst: number
+}
+
+function metaLines(): Line[] {
+  const found: Line[] = []
+  state.lines.forEach((l: Line) => { if (l.t === 'meta') found.push(l) })
   return found
 }
 
-export function metaState(): any {
+export function metaState(): MetaLineInfo | null {
   const metas = metaLines()
   if (!metas.length && !metaOf(state.current)) return null
   const line = metas.length ? metas[metas.length - 1] : null
   if (!line) return null
-  const scanned = metaOf(state.current)
+  const scanned = metaOf(state.current) as { count?: number } | null
   return {
     line,
-    count: Math.max(metas.length, scanned ? scanned.count : 0),
+    count: Math.max(metas.length, scanned ? scanned.count || 0 : 0),
     promptChars: String(line.text || '').length,
-    // 本地估算（Go 侧下发）：显示单位是 token 时用它，单位是字符时用上面的
-    // 精确字符数——两个口径都留着，切换开关不用重新拉数据。
     promptTokenEst: estOf(line).text,
   }
 }

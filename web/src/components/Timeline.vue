@@ -3,7 +3,7 @@
 // streamModel()（computed 响应式：会话切换 / 行追加 / Markdown / 仅看工具 /
 // 折叠思考 / 图片归属全部自动重算，不再有 renderTimeline 手动重渲链）。
 import { computed, nextTick, onMounted, watch } from 'vue'
-import { state, LONG_TEXT_LINES } from '../state'
+import { state, LONG_TEXT_LINES, clearAnchors } from '../state'
 import { estOf } from '../legacy/sidebar'
 import { streamModel } from '../legacy/stream'
 import StreamSummary from './StreamSummary.vue'
@@ -35,7 +35,7 @@ watch(
   [() => (state.current ? state.current.id : ''), () => state.lines.length],
   async (_, prev) => {
     if (prev[0] && prev[0] !== (state.current ? state.current.id : '')) {
-      state.anchors = {}
+      clearAnchors()
     }
     if (state.follow) {
       await nextTick()

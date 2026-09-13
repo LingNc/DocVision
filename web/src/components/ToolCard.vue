@@ -2,8 +2,8 @@
 // 工具调用卡（旧页 toolDisclosure + attachResult/attachImages 的组件化）：
 // 折叠一行（工具名按家族上色 + 摘要 + 输入→输出计数尾巴），展开是
 // 「输入 / 输出」卡片；回执与归属图片记在 CallItem 上（见 legacy/stream.ts）。
-import { computed, ref, watch } from 'vue'
-import { state, storeGet, storeSet } from '../state'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { state, storeGet, storeSet, registerAnchor, unregisterAnchor } from '../state'
 import { countText, estOf } from '../legacy/sidebar'
 import { prettyJSON } from '../legacy/richtext'
 import { attachNote, callTail, outImageNote, type CallItem } from '../legacy/stream'
@@ -28,11 +28,27 @@ function onToggle() {
   storeSet(props.item.memKey, d && d.open ? '1' : '0')
 }
 
-/* 归并进这张卡片的行（回执/图片轮）锚点 = 这个 details 元素（点轨迹行跳到这里）。 */
+/*
+ * 归并进这张卡片的行（回执/图片轮）锚点 = 这个 details 元素（点轨迹行跳到
+ * 这里）。模型每轮重算、anchorNs 可能增删——记一份已注册集合做差量，
+ * 卸载时全部注销。
+ */
+const d = computed(() => (details.value ? (details.value.$el as HTMLDetailsElement) : null))
+const registered = new Set<number>()
 watch(() => props.item.anchorNs.join(','), () => {
-  const d = details.value && (details.value.$el as HTMLDetailsElement)
-  if (!d) return
-  props.item.anchorNs.forEach((n) => { state.anchors[n] = d })
+  const el = d.value
+  if (!el) return
+  const want = new Set(props.item.anchorNs)
+  registered.forEach((n) => { if (!want.has(n)) { unregisterAnchor(n, el); registered.delete(n) } })
+  props.item.anchorNs.forEach((n) => {
+    if (!registered.has(n)) { registerAnchor(n, el); registered.add(n) }
+  })
+})
+onBeforeUnmount(() => {
+  const el = d.value
+  if (!el) return
+  registered.forEach((n) => unregisterAnchor(n, el))
+  registered.clear()
 })
 
 const tail = computed(() => callTail(props.item))

@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { type Line, type ImageAttr, type Session } from './legacy/types'
 
 /*
  * 全局状态：字段名与旧页 viewer.js 的 state 一一对应，后续按块移植的
@@ -84,12 +85,23 @@ export function relTime(value: string | number): string {
 
 // 类型先宽着走（any）；逐块移植到哪一块，哪一块再收紧类型。
 /* eslint-disable @typescript-eslint/no-explicit-any */
+/*
+ * 行号锚点注册表（**非响应式**，故意不放进 reactive(state)——把 DOM 节点
+ * 包进响应式代理纯属浪费还容易踩坑）。各消息组件挂载时注册自己的根元素、
+ * 卸载时注销；轨迹页 jumpToLine 用它跳回对话。切会话时 clearAnchors()。
+ */
+const anchors = new Map<number, HTMLElement>()
+export function registerAnchor(n: number, el: HTMLElement): void { anchors.set(n, el) }
+export function unregisterAnchor(n: number, el: HTMLElement): void { if (anchors.get(n) === el) anchors.delete(n) }
+export function anchorOf(n: number): HTMLElement | null { return anchors.get(n) || null }
+export function clearAnchors(): void { anchors.clear() }
+
 export const state = reactive({
   root: '',
   generated: '',
-  sessions: [] as any[],
-  current: null as any,
-  lines: [] as any[],
+  sessions: [] as Session[],
+  current: null as Session | null,
+  lines: [] as Line[],
   nextFrom: 0,
   curSize: -1,
   curMtime: 0,
@@ -97,9 +109,8 @@ export const state = reactive({
   follow: true, // 旧页 live 模式默认开
   forceCollapse: false,
   onlyTools: false,
-  callEst: {} as Record<string, any>,
-  imgAttr: null as any,
-  anchors: {} as Record<string, any>,
+  callEst: {} as Record<string, number>,
+  imgAttr: null as { sig: string; map: Record<number, ImageAttr>; candRound: Record<string, number>; roundLast: Record<string, string> } | null,
   pullError: '',
   polling: false,
   theme: 'light',
@@ -113,7 +124,7 @@ export const state = reactive({
   collapsed: {} as Record<string, boolean>,
   overflow: {} as Record<string, boolean>,
   listSig: '',
-  meta: null as any,
+  meta: null as unknown,
   trajKinds: {} as Record<string, boolean>,
   trajOpen: {} as Record<string, boolean>,
 })

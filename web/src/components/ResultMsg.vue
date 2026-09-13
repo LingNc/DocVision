@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 未配对的工具回执（找不到 tool_call_id 对应的调用）：一次调用一行的
 // 例外，单独成行并注明配不上的原因。
-import { computed, onMounted, ref } from 'vue'
-import { state } from '../state'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { state, registerAnchor, unregisterAnchor } from '../state'
 import { countText, estOf, firstLine } from '../legacy/sidebar'
 import { classifyResult } from '../legacy/timeline'
 import type { StreamItem } from '../legacy/stream'
@@ -17,8 +17,12 @@ const text = computed(() => String(line.value.text || ''))
 const status = computed(() => classifyResult(text.value))
 
 const root = ref<HTMLElement | null>(null)
+// 行号锚点（轨迹跳回目标）；卸载时注销，防串台。
 onMounted(() => {
-  if (line.value.n !== undefined) state.anchors[line.value.n] = root.value as HTMLElement
+  if (line.value && root.value) registerAnchor(line.value.n, root.value)
+})
+onBeforeUnmount(() => {
+  if (line.value && root.value) unregisterAnchor(line.value.n, root.value)
 })
 </script>
 

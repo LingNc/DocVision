@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 助手消息：思考块（可选）+ 正文（可选）+ 工具卡（每个 tool_call 一张）。
 // 思考不是独立步骤：轨迹里"思考"行跳回的就是这条消息。
-import { computed, ref, watch, onMounted } from 'vue'
-import { state, storeGet, storeSet, LONG_TEXT_LINES } from '../state'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { state, storeGet, storeSet, LONG_TEXT_LINES, registerAnchor, unregisterAnchor } from '../state'
 import { countText, estOf, firstLine } from '../legacy/sidebar'
 import { type StreamItem } from '../legacy/stream'
 import { openLightbox } from '../state'
@@ -55,9 +55,12 @@ function onThinkToggle() {
 
 const thinkRef = ref<any>(null)
 const root = ref<HTMLElement | null>(null)
+// 本条助手消息是它行号的锚点（轨迹跳回目标）；卸载时注销，防串台。
 onMounted(() => {
-  // 本条助手消息是它行号的锚点（轨迹跳回目标）。
-  if (line.value && line.value.n !== undefined) state.anchors[line.value.n] = root.value as HTMLElement
+  if (line.value && root.value) registerAnchor(line.value.n, root.value)
+})
+onBeforeUnmount(() => {
+  if (line.value && root.value) unregisterAnchor(line.value.n, root.value)
 })
 
 const thinkTail = computed(() =>

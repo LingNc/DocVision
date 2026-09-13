@@ -105,7 +105,7 @@ export function pullSession(reset: boolean): Promise<void> {
       } else {
         const fresh = normalizeLines(payload.lines)
         indexCallEstimates(fresh)
-        fresh.forEach((line: any) => { state.lines.push(line) })
+        fresh.forEach((line) => { state.lines.push(line) })
       }
     })
     .catch((err: Error) => {

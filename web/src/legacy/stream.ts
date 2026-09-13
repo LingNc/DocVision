@@ -11,14 +11,15 @@ import {
   imageAttributions, attributionText, classifyResult, toolFamily, toolSummary, toolPromptLine,
   imageTurnSummary, IMAGE_WIRE_TITLE,
 } from './timeline'
+import { type Line, type ToolCall, type ImageAttr } from './types'
 
-export interface ResultItem { line: any; status: string }
-export interface AttachItem { line: any; attr: any }
+export interface ResultItem { line: Line; status: string }
+export interface AttachItem { line: Line; attr: ImageAttr }
 
 /* 一次工具调用（在对话页里 = 一行卡片）：输入 + 若干回执 + 归属进来的图片。 */
 export interface CallItem {
   key: string
-  call: any
+  call: ToolCall
   id: string
   name: string
   fam: string
@@ -33,21 +34,21 @@ export interface CallItem {
   /** 精确匹配（how=call-id）的图片轮：图 = 这次调用的输出，贴输出正文下方。 */
   outImages: AttachItem[]
   /** 看图类调用的缩略图预览行（"一轮多 view"挂在最后一个 view 行下面）。 */
-  previews: any[]
+  previews: Line[]
   /** 并进这张卡片的行号（回执行 / 图片轮）：锚点与 data-lines 用。 */
   anchorNs: number[]
   lastStatus: string
 }
 
 export type StreamItem =
-  | { type: 'assistant'; key: string; line: any; calls: CallItem[]; empty: boolean }
-  | { type: 'system'; key: string; line: any; raw: string; long: boolean; attachments: AttachItem[] }
-  | { type: 'imageTurn'; key: string; line: any; attr: any }
-  | { type: 'result'; key: string; line: any; paired: boolean }
-  | { type: 'other'; key: string; line: any }
+  | { type: 'assistant'; key: string; line: Line; calls: CallItem[]; empty: boolean }
+  | { type: 'system'; key: string; line: Line; raw: string; long: boolean; attachments: AttachItem[] }
+  | { type: 'imageTurn'; key: string; line: Line; attr: ImageAttr }
+  | { type: 'result'; key: string; line: Line; paired: boolean }
+  | { type: 'other'; key: string; line: Line }
 
-function callItemsOf(line: any, sid: string): CallItem[] {
-  return (line.tool_calls || []).map((call: any) => {
+function callItemsOf(line: Line, sid: string): CallItem[] {
+  return (line.tool_calls || []).map((call: ToolCall): CallItem => {
     const fn = call.function || {}
     const name = fn.name || '(未命名工具)'
     const argsText = String(fn.arguments || '')
@@ -77,8 +78,8 @@ function callItemsOf(line: any, sid: string): CallItem[] {
  * 一次调用的参数估算：由 Go 侧下发（line.est.calls，与 calls 一一对应），
  * 前端只取用、不自己算——两套公式必然漂移。
  */
-function callTokensOf(call: any): number {
-  const est = state.callEst[call.id]
+function callTokensOf(call: ToolCall): number {
+  const est = call.id !== undefined ? state.callEst[call.id] : undefined
   return est === undefined ? 0 : est
 }
 
@@ -112,7 +113,7 @@ export function outImageNote(a: AttachItem): string {
 }
 
 /* 图片轮折叠行的悬浮说明（三行：性质 / wire 事实 / 归属 + 摘要）。 */
-export function imageTurnTitle(line: any, attr: any): string {
+export function imageTurnTitle(line: Line, attr: ImageAttr): string {
   return '这一轮是 user 轮发出的（把图片投给模型），不是人打的字\n' +
     IMAGE_WIRE_TITLE + '\n' + attributionText(attr) + '\n' + imageTurnSummary(line)
 }
@@ -121,7 +122,7 @@ export function imageTurnTitle(line: any, attr: any): string {
  * 缩略图预览挂哪张卡：这一轮里**最后一个**能产图的看图调用（"一轮多 view"）。
  * candRound/roundLast 由归属算法给出，按 callId 查它所在轮的收尾调用。
  */
-function previewTarget(attr: any, callById: Record<string, CallItem>): CallItem | null {
+function previewTarget(attr: ImageAttr | null, callById: Record<string, CallItem>): CallItem | null {
   const info = state.imgAttr
   if (!info || !attr || !attr.callId) return null
   const round = info.candRound ? info.candRound[attr.callId] : undefined
@@ -129,7 +130,7 @@ function previewTarget(attr: any, callById: Record<string, CallItem>): CallItem 
   return (lastId && callById[lastId]) || null
 }
 
-function systemItem(line: any, sid: string): { type: 'system'; key: string; line: any; raw: string; long: boolean; attachments: AttachItem[] } {
+function systemItem(line: Line, sid: string): Extract<StreamItem, { type: 'system' }> {
   const raw = String(line.text || '')
   return {
     type: 'system',
@@ -152,7 +153,7 @@ export function streamModel(): StreamModel {
   const pendingForTask: Record<number, AttachItem[]> = {}
   let bad = 0
 
-  state.lines.forEach((line: any) => {
+  state.lines.forEach((line: Line) => {
     if (!line) return
     if (line.bad) { bad++; return }
     // meta 行不是消息：它由详情栏的元信息块渲染，绝不进消息序列。
@@ -167,7 +168,7 @@ export function streamModel(): StreamModel {
 
     if (line.role === 'user') {
       if (isImageTurn) {
-        const attr = attrs[line.n] || { kind: 'none', how: '', callId: '', taskLineN: 0 }
+        const attr: ImageAttr = attrs[line.n] || { kind: 'none', how: '', callId: '', taskLineN: 0 }
         if (attr.kind === 'call' && callById[attr.callId]) {
           const host = callById[attr.callId]
           // 不论怎么归属，看图类调用的行下面都要挂缩略图预览（折叠态可见）。
@@ -266,10 +267,10 @@ export const FOLD_PREVIEW_LINES = LONG_TEXT_LINES
  */
 export function callMsgLine(): Record<string, number> {
   const map: Record<string, number> = {}
-  state.lines.forEach((line: any) => {
+  state.lines.forEach((line: Line) => {
     if (!line || line.bad || (line.t && line.t !== 'msg')) return
     if (line.role === 'assistant') {
-      ;(line.tool_calls || []).forEach((c: any) => {
+      ;(line.tool_calls || []).forEach((c: ToolCall) => {
         if (c.id && map[c.id] === undefined) map[c.id] = line.n
       })
     }

@@ -763,3 +763,13 @@ models:
 
 1. **验收口径放宽**："不需要逐像素一致，看着一致就可以了。功能上一致就可以。做好组件化的。" —— 逐像素 diff 与 DOM 逐层一致降为参考项，硬门槛只剩功能探针 + 控制台零报错；组件化质量是第一优先级。P5-R2 各块当初按逐像素标准验收（0 像素差）不浪费——那是迁移期保真手段，后续开发不再背这个成本。
 2. **web 开发走分支**："从之前合并回来的那个节点上对于web的开发这边还是放在一个web分支上去开发吧。" —— 建分支 `web/components`（自 `f999b03` 合并节点分出）；原直接提交在 master 上的组件化四块（fed6966/a8384ce/a87473b/a17a61f）随分支走，**master 退回合并节点**。分支操作记录：先 `git branch web/components` 后误在分支上 `reset --hard f999b03`（指针落错侧），纠正为 `checkout master → reset --hard f999b03 → branch -f web/components a17a61f → checkout web/components`；教训：`git reset` 落点只看"当前在哪个分支"，切分支和动指针要分开核对。
+
+### P5-R2 质量批（`web/components` 分支）：类型层 + 单测 + 锚点接口化
+
+按代码评审结论做三项优化（用户认可"组件化质量优先"口径）：
+
+1. **`legacy/types.ts` 类型层**：`Line`（转录行：n/t/bad/role/text/reasoning/tool_calls/images/est…+ unknown 索引签名）、`ToolCall`、`ImageAttr`（归属三态）、`ImageCallEntry`（FIFO 队列条目）、`Session`、`UsageStats`。stream/timeline/trajectory 的 **42 处 `any` 清零**；`estOf()` 收紧成非可选数字面（缺失按 0，不往下游漏 undefined）；`state.lines`/`state.current`/`callEst`/`imgAttr` 全部带型。
+2. **纯函数单测**：vitest（node 环境 + localStorage 打桩），`web/tests/` 23 个用例钉住归属算法的全部规则分支（精确匹配优先/工具名/顺序 FIFO/失败调用不占队/任务不许抢/开头投喂两轮补挂/未识别兜底/轮次索引缓存）与 streamModel（meta/usage 不进流、onlyTools 过滤、回执并卡 lastStatus、配对失败独立行、call-id 无回执退附件、预览条挂轮末 view 卡、callMsgLine）。**23/23 通过**；`package.json` 加 `test` 脚本。
+3. **锚点接口化**：行号→DOM 的映射从 `state.anchors`（reactive，会把 DOM 节点包成响应式代理）挪到 state.ts 模块级 `Map` 注册表：`registerAnchor/unregisterAnchor/anchorOf/clearAnchors`；消息组件 onMounted 注册/onBeforeUnmount 注销，ToolCard 对 anchorNs 做差量增删；trajectory `jumpToLine` 改走 `anchorOf()`。行为探针确认：点轨迹行 → 切回对话 → 对应 `msg-assistant` 节点 flash 高亮。
+
+**真实教训（两次）**：`tsc --noEmit` 不检查 `.vue` 的 script 块，vite 构建也不报——AssistantMsg 漏 `onBeforeUnmount` import、ToolCard/AssistantMsg 漏 `registerAnchor` import，都是**运行时才炸**（`ReferenceError: … is not defined`，整个消息流组件挂掉、页面只剩 1 条消息）。第一次是探针 454 字段跑出 219 处 None 才暴露的，单靠"探针里有值"的条目发现不了——所以控制台零报错必须是每轮验收的固定动作。补了一个自查脚本（grep 各文件用到的 state 模块导出 vs import 面板），归入 web 开发流程；最终全绿：454/454 + 控制台零报错 + 5 场景 0 像素差 + 轨迹跳回行为验证（点行 → 切对话 → 目标节点 flash）。

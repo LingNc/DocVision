@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 图片轮单独成行（配不上调用/任务时的归属未识别图片轮，或没有任务可归）：
 // 与工具行同一套折叠词汇，默认折叠，点开看图。
-import { computed, onMounted, ref, watch } from 'vue'
-import { state, storeGet, storeSet } from '../state'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { state, storeGet, storeSet, registerAnchor, unregisterAnchor } from '../state'
 import { estOf } from '../legacy/sidebar'
 import { attributionText } from '../legacy/timeline'
 import { imageTurnTitle, type StreamItem } from '../legacy/stream'
@@ -23,8 +23,12 @@ function onToggle() {
 }
 
 const root = ref<any>(null)
+// 行号锚点（轨迹跳回目标）；卸载时注销，防串台。
 onMounted(() => {
-  if (line.value.n !== undefined) state.anchors[line.value.n] = root.value?.$el as HTMLElement
+  if (line.value && root.value?.$el) registerAnchor(line.value.n, root.value.$el)
+})
+onBeforeUnmount(() => {
+  if (line.value && root.value?.$el) unregisterAnchor(line.value.n, root.value.$el)
 })
 </script>
 

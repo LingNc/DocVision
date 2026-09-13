@@ -6711,6 +6711,19 @@
     if (secs < 86400) return Math.floor(secs / 3600) + " 小时前";
     return Math.floor(secs / 86400) + " 天前";
   }
+  const anchors = /* @__PURE__ */ new Map();
+  function registerAnchor(n, el2) {
+    anchors.set(n, el2);
+  }
+  function unregisterAnchor(n, el2) {
+    if (anchors.get(n) === el2) anchors.delete(n);
+  }
+  function anchorOf(n) {
+    return anchors.get(n) || null;
+  }
+  function clearAnchors() {
+    anchors.clear();
+  }
   const state = /* @__PURE__ */ reactive({
     root: "",
     generated: "",
@@ -6727,7 +6740,6 @@
     onlyTools: false,
     callEst: {},
     imgAttr: null,
-    anchors: {},
     pullError: "",
     polling: false,
     theme: "light",
@@ -7001,9 +7013,15 @@
       });
     });
   }
-  const EMPTY_EST = { text: 0, reasoning: 0, calls: [], images: 0, imageCount: 0 };
   function estOf(line) {
-    return line && line.est ? line.est : EMPTY_EST;
+    const e = line && line.est;
+    return {
+      text: e && e.text || 0,
+      reasoning: e && e.reasoning || 0,
+      calls: e && e.calls || [],
+      images: e && e.images || 0,
+      imageCount: e && e.imageCount || 0
+    };
   }
   const STAGE_ORDER = ["vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check"];
   function stageRank(stage) {
@@ -8876,9 +8894,9 @@
       if (!line || line.bad || line.t && line.t !== "msg") return;
       if (line.role === "assistant") {
         (line.tool_calls || []).forEach((c) => {
-          (idxById[c.id] = idxById[c.id] || []).push(calls.length);
+          (idxById[c.id || ""] = idxById[c.id || ""] || []).push(calls.length);
           calls.push({
-            id: c.id,
+            id: c.id || "",
             name: (c.function || {}).name || "",
             lineN: line.n,
             receipt: null,
@@ -8889,7 +8907,7 @@
         return;
       }
       if (line.role === "tool") {
-        const idxs = idxById[line.tool_call_id] || [];
+        const idxs = idxById[line.tool_call_id || ""] || [];
         for (let k = 0; k < idxs.length; k++) {
           if (calls[idxs[k]].receipt === null) {
             calls[idxs[k]].receipt = String(line.text || "");
@@ -8956,7 +8974,7 @@
             }
           }
           if (!pick && idxById[idm[1]]) {
-            pick = { id: idm[1], name: entry.name, claimed: false };
+            pick = { id: idm[1], name: entry.name || "", lineN: 0, receipt: null, claimed: false, qpos: -1 };
           }
           if (pick) claim(entry, pick, "call-id");
         }
@@ -8985,7 +9003,7 @@
       map[line.n] = entry;
     });
     state.imgAttr = { sig, map, candRound, roundLast };
-    return map;
+    return state.imgAttr.map;
   }
   function attributionText(attr) {
     if (!attr) return "";
@@ -9081,8 +9099,8 @@
     } else if (n === "compile" || n.indexOf("write") === 0 || n.indexOf("edit") === 0 || n.indexOf("read") === 0 || n === "view_pdf" || n === "view_image") {
       v = obj.path || "";
     }
-    v = String(v).split("\n")[0].trim();
-    return v.length > 160 ? v.slice(0, 160) + "…" : v;
+    const out = String(v).split("\n")[0].trim();
+    return out.length > 160 ? out.slice(0, 160) + "…" : out;
   }
   function classifyResult(text) {
     const s = String(text || "");
@@ -9105,10 +9123,8 @@
     const scanned = metaOf(state.current);
     return {
       line,
-      count: Math.max(metas.length, scanned ? scanned.count : 0),
+      count: Math.max(metas.length, scanned ? scanned.count || 0 : 0),
       promptChars: String(line.text || "").length,
-      // 本地估算（Go 侧下发）：显示单位是 token 时用它，单位是字符时用上面的
-      // 精确字符数——两个口径都留着，切换开关不用重新拉数据。
       promptTokenEst: estOf(line).text
     };
   }
@@ -9139,7 +9155,7 @@
     });
   }
   function callTokensOf(call) {
-    const est = state.callEst[call.id];
+    const est = call.id !== void 0 ? state.callEst[call.id] : void 0;
     return est === void 0 ? 0 : est;
   }
   function callTail(item) {
@@ -9593,15 +9609,33 @@
       });
       function onToggle() {
         if (!props.item.id) return;
-        const d = details.value && details.value.$el;
-        storeSet(props.item.memKey, d && d.open ? "1" : "0");
+        const d2 = details.value && details.value.$el;
+        storeSet(props.item.memKey, d2 && d2.open ? "1" : "0");
       }
+      const d = computed(() => details.value ? details.value.$el : null);
+      const registered = /* @__PURE__ */ new Set();
       watch(() => props.item.anchorNs.join(","), () => {
-        const d = details.value && details.value.$el;
-        if (!d) return;
-        props.item.anchorNs.forEach((n) => {
-          state.anchors[n] = d;
+        const el2 = d.value;
+        if (!el2) return;
+        const want = new Set(props.item.anchorNs);
+        registered.forEach((n) => {
+          if (!want.has(n)) {
+            unregisterAnchor(n, el2);
+            registered.delete(n);
+          }
         });
+        props.item.anchorNs.forEach((n) => {
+          if (!registered.has(n)) {
+            registerAnchor(n, el2);
+            registered.add(n);
+          }
+        });
+      });
+      onBeforeUnmount(() => {
+        const el2 = d.value;
+        if (!el2) return;
+        registered.forEach((n) => unregisterAnchor(n, el2));
+        registered.clear();
       });
       const tail = computed(() => callTail(props.item));
       const prettyArgs = computed(() => prettyJSON(props.item.argsText) || "(无参数)");
@@ -9760,7 +9794,10 @@
       const thinkRef = /* @__PURE__ */ ref(null);
       const root = /* @__PURE__ */ ref(null);
       onMounted(() => {
-        if (line.value && line.value.n !== void 0) state.anchors[line.value.n] = root.value;
+        if (line.value && root.value) registerAnchor(line.value.n, root.value);
+      });
+      onBeforeUnmount(() => {
+        if (line.value && root.value) unregisterAnchor(line.value.n, root.value);
       });
       const thinkTail = computed(() => line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : "");
       return (_ctx, _cache) => {
@@ -9853,7 +9890,10 @@
       }
       const root = /* @__PURE__ */ ref(null);
       onMounted(() => {
-        if (line.value.n !== void 0) state.anchors[line.value.n] = root.value;
+        if (line.value && root.value) registerAnchor(line.value.n, root.value);
+      });
+      onBeforeUnmount(() => {
+        if (line.value && root.value) unregisterAnchor(line.value.n, root.value);
       });
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("section", {
@@ -9934,7 +9974,11 @@
       const root = /* @__PURE__ */ ref(null);
       onMounted(() => {
         var _a;
-        if (line.value.n !== void 0) state.anchors[line.value.n] = (_a = root.value) == null ? void 0 : _a.$el;
+        if (line.value && ((_a = root.value) == null ? void 0 : _a.$el)) registerAnchor(line.value.n, root.value.$el);
+      });
+      onBeforeUnmount(() => {
+        var _a;
+        if (line.value && ((_a = root.value) == null ? void 0 : _a.$el)) unregisterAnchor(line.value.n, root.value.$el);
       });
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("section", _hoisted_1$5, [
@@ -9983,7 +10027,10 @@
       const status = computed(() => classifyResult(text.value));
       const root = /* @__PURE__ */ ref(null);
       onMounted(() => {
-        if (line.value.n !== void 0) state.anchors[line.value.n] = root.value;
+        if (line.value && root.value) registerAnchor(line.value.n, root.value);
+      });
+      onBeforeUnmount(() => {
+        if (line.value && root.value) unregisterAnchor(line.value.n, root.value);
       });
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("section", {
@@ -10047,7 +10094,7 @@
         [() => state.current ? state.current.id : "", () => state.lines.length],
         async (_, prev) => {
           if (prev[0] && prev[0] !== (state.current ? state.current.id : "")) {
-            state.anchors = {};
+            clearAnchors();
           }
           if (state.follow) {
             await nextTick();
@@ -10103,7 +10150,7 @@
     return null;
   }
   function callDuration(call, resultLine) {
-    if (!call || !call.ts || !resultLine.ts) return 0;
+    if (!call || !call.ts || !resultLine || !resultLine.ts) return 0;
     const t0 = Date.parse(call.ts);
     const t1 = Date.parse(resultLine.ts);
     if (isNaN(t0) || isNaN(t1) || t1 < t0) return 0;
@@ -10118,7 +10165,7 @@
       if (l.role === "assistant") {
         (l.tool_calls || []).forEach((c) => {
           const fn = c.function || {};
-          callOf[c.id] = { name: fn.name || "?", ts: l.ts || "", n: l.n, args: String(fn.arguments || "") };
+          callOf[c.id || ""] = { name: fn.name || "?", ts: l.ts || "", n: l.n, args: String(fn.arguments || "") };
         });
       }
     });
@@ -10154,7 +10201,7 @@
       }
       if (line.t !== "msg" || !line.role) return;
       if (line.role === "user" && line.images && line.images.length) {
-        const attr = imageAttributions()[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
+        const attr = imageAttributions()[line.n] || { kind: "none", how: "", callId: "", name: "", lineN: line.n, taskLineN: 0 };
         const fromTool = !!imageAfterTool[line.n];
         const callLine = attr.kind === "call" && attr.callId ? callMsgLine()[attr.callId] : void 0;
         const jumpTo = callLine !== void 0 ? callLine : attr.kind === "task" && attr.taskLineN ? attr.taskLineN : line.n;
@@ -10234,7 +10281,7 @@
           });
         });
       } else if (line.role === "tool") {
-        const info = line.tool_call_id ? callOf[line.tool_call_id] : null;
+        const info = line.tool_call_id ? callOf[line.tool_call_id] || null : null;
         const text = String(line.text || "");
         const after = nextMsgLine(state.lines, idx);
         const imageNext = !!(after && after.role === "user" && after.images && after.images.length);
@@ -10267,7 +10314,7 @@
     { id: "usage", label: "用量" }
   ];
   function jumpToLine(n) {
-    const node = state.anchors[n];
+    const node = anchorOf(n);
     switchView("chat");
     if (!node) return;
     node.scrollIntoView({ block: "center" });

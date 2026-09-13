@@ -4,6 +4,7 @@
  * 视觉规则在整卷样式表里；这里只产数据与文案。
  */
 import { state, storeSet, fmtSize, fmtClock, relTime } from '../state'
+import { type Line, type LineEst } from './types'
 
 export const ROOT_PROJECT = '（根目录）'
 
@@ -53,14 +54,14 @@ export function firstLine(text: unknown, limit?: number): string {
  * The wire format keeps the provider's own field name (reasoning_content);
  * normalising it once here means the render code reads one spelling only.
  */
-export function normalizeLine(line: any): any {
+export function normalizeLine(line: Line): Line {
   if (line && line.reasoning === undefined && line.reasoning_content !== undefined) {
     line.reasoning = line.reasoning_content
   }
   return line
 }
 
-export function normalizeLines(lines: any[] | null | undefined): any[] {
+export function normalizeLines(lines: Line[] | null | undefined): Line[] {
   return (lines || []).map(normalizeLine)
 }
 
@@ -183,8 +184,16 @@ export function indexCallEstimates(lines: any[]): void {
 /* 一行的本地估算（Go 侧算好下发）：缺字段时全 0，不在这里兜算。 */
 export const EMPTY_EST = { text: 0, reasoning: 0, calls: [] as number[], images: 0, imageCount: 0 }
 
-export function estOf(line: any): { text: number; reasoning: number; calls: number[]; images: number; imageCount: number } {
-  return line && line.est ? line.est : EMPTY_EST
+/* 收紧成非可选的数字面：调用方拿到的永远是数字（缺失按 0，不往下游漏 undefined）。 */
+export function estOf(line: Line | null | undefined): { text: number; reasoning: number; calls: number[]; images: number; imageCount: number } {
+  const e = line && line.est
+  return {
+    text: (e && e.text) || 0,
+    reasoning: (e && e.reasoning) || 0,
+    calls: (e && e.calls) || [],
+    images: (e && e.images) || 0,
+    imageCount: (e && e.imageCount) || 0,
+  }
 }
 
 /* ---------- 阶段分组与排序 ---------- */

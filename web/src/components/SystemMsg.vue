@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 系统消息（不带图的 user 行 = harness 任务提示）：安静样式，长提示默认只
 // 露 8 行可「展开全文」；会话开头投喂的原图作为附件段收在同一个块里。
-import { computed, onMounted, ref } from 'vue'
-import { state, storeGet, storeSet, SYSTEM_PREVIEW_LINES } from '../state'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { state, storeGet, storeSet, SYSTEM_PREVIEW_LINES, registerAnchor, unregisterAnchor } from '../state'
 import { estOf, firstLine } from '../legacy/sidebar'
 import { foldLabel } from '../legacy/richtext'
 import { attachNote, type StreamItem } from '../legacy/stream'
@@ -25,9 +25,12 @@ function toggle() {
 }
 
 const root = ref<HTMLElement | null>(null)
+// 任务块是它行号与归并图片轮行号的锚点；卸载时注销，防串台。
 onMounted(() => {
-  // 任务块是它行号与归并图片轮行号的锚点。
-  if (line.value.n !== undefined) state.anchors[line.value.n] = root.value as HTMLElement
+  if (line.value && root.value) registerAnchor(line.value.n, root.value)
+})
+onBeforeUnmount(() => {
+  if (line.value && root.value) unregisterAnchor(line.value.n, root.value)
 })
 </script>
 
