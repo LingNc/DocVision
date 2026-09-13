@@ -265,31 +265,12 @@ export function closeLightbox(): void {
   lightbox.ref = ''
 }
 
-/* ---------- 数据层占位（后续块替换成真实现） ---------- */
-
-/* 旧页 scrollToBottom：把消息流滚到底部（自动跟随/切会话用）。 */
-export function scrollToBottomOfTimeline(): void {
-  window.setTimeout(() => {
-    const el = document.getElementById('timeline')
-    if (el) el.scrollTop = el.scrollHeight
-  }, 0)
-}
+/* ---------- 数据层接口 ---------- */
 
 /* 旧页 setBanner：错误横幅（坏行提示由 updateBanner 逻辑接管，见 App.vue）。 */
 export function setBannerText(text: string): void {
   state.pullError = text
 }
 
-export function refreshIndex(): Promise<void> {
-  return Promise.resolve()
-}
-
-/* 侧栏块实现：展开装着该项目的分组并滚动到位。 */
-export function revealProject(project: string): void {
-  void project
-}
-
-
-/* ---------- 渲染入口注册表：各块组件实现，这里只留挂点（避免循环 import） ---------- */
 
 

@@ -725,3 +725,36 @@ models:
 3. **模块级带 g 的正则是地雷**：移植时照抄旧页要连标志位一起抄——旧页不带 g 是刻意的（mdInline 递归）。
 4. **Vue watch 多源**：见块 6，写进 AGENTS.md 陷阱清单。
 5. 富文本层（~1500 行纯函数）委派子代理并行移植 + 自写 DOM stub 冒烟，效果良好；时间线/详情栏这种跨节点手术的命令式渲染留主线程逐函数对照。
+
+## P5-R2 批（组件化收尾，直接提交 master）：时间线 / 详情栏 / 轨迹全部 Vue 组件化
+
+背景：P5-R1 已把 `web/` 迁成 Vue + 命令式混合体（时间线/详情栏仍是 legacy 命令式 DOM + 薄容器）。本批把剩下三块命令式渲染全部改成**纯 Vue 组件**，视觉零回归。用户原话："继续web开发…很多界面可以用vue组件就写成组件那样方便维护"。
+
+### 架构定调（四块提交，全部在 master）
+
+- **块A `fed6966`**：`Trajectory.vue` + 基础件 `MachineText`/`CopyBtn`/`ImageStrip`。trajectory.ts 退成纯行模型（`trajectoryRows()` + `jumpToLine()`）。
+- **块B `a8384ce`**：`DetailsPanel.vue` + `MdBody.vue`。details.ts 退成纯模型（`sessionKVRows`/`statsModel`/`metaModel`）。
+- **块C `a87473b`**：消息流全家桶——`stream.ts` 的 `streamModel()` 把 `state.lines` 一次扫描成条目模型（assistant 带 calls / system / imageTurn / result / other），原来跨节点手术的 `attachResult`/`attachImages`/`pendingTaskImages` 全部变成**条目归属记账**：工具回执与图片行不再操作别人的 DOM，而是记进对应 CallItem 的 `results`/`attachments`/`outImages`/`previews`，由组件模板渲染。组件：`Timeline`/`AssistantMsg`/`SystemMsg`/`ImageTurn`/`ResultMsg`/`ToolCard`/`StreamSummary`/`Disclosure`/`FoldText`/`IOSection`/`MachineScrollBox`。
+- **块D**：清死代码（state.ts 的数据层占位 stub、timeline.ts 未外用的命名助手转私有）、文档同步。
+
+关键设计点：
+
+1. **命令式叶子组件的 DOM 契约**：`machineScroll` 拆出 `machineScrollInto(host,…)`，让 `MachineScrollBox` 的根节点**自己充当 `.text-wrap`**——否则组件根 div 会插在 `.io-section` 与 `.text-wrap` 之间，结构探针的类名链立刻多出一段 `>`。视觉虽无差，但 DOM 逐层一致才好验收。
+2. **forceCollapse 的真实语义**：旧页「折叠全部思考」开 = 命令式全部合上且**不写记忆**，关 = **什么都不做**（等下次自然重渲才按记忆恢复）。组件化后要在 `watch(forceCollapse)` 里只做单侧动作，不能对称地"关=恢复"。
+3. **自动跟随的自动取消**：旧页 timeline 有个 scroll 监听——手动滚离底部 40px 即把跟随开关按灭。这是页眉「自动跟随」按钮唯一会自己变化的路径，图片会话（长转录自动滚动）一触发就露馅，补上后页眉 0 像素差。
+4. **展开记忆的恢复时机**：旧页整流重渲（会话/行数/Markdown/仅看工具/单位变化）时按记忆恢复思考块开合；组件化后对应成对这些源 watch 一次 `syncThink`，DOM 直改（用户手点 `<details>`）与记忆写入仍由 Disclosure 的 toggle 事件承担。
+
+### 迁移中抓到的真缺陷（全部由探针/像素差逼出）
+
+1. **IOSection 漏 import `MachineScrollBox`** → 模板渲染成未解析的自定义元素，io 文本内容整块消失（probe3c 145/155 diff），**控制台零报错**（unknown element 静默）——内容缺失先查渲染 HTML 再查 console。
+2. **FoldText 的 `str.replace` 误伤**：给 md 分支补 `md-body` 类时，同一写法的 pre 分支（`:class="[extraClass, …]"`）也被整体替换，纯文本态类名混进 `md-body`（probe3d 5 处 diff）。
+3. **面包屑会话名多包一层 span**：旧页 `nameNode('span','crumb crumb-current',…)` 的渲染根就是 crumb 本身；Vue 版先 span 包 InlineMD 再塞进 crumb，行内 Markdown 语义不变但 DOM 多一层，图片会话页眉 61×19 像素差。修法：`<InlineMD tag="span" class="crumb crumb-current">`。
+4. **缩略图预览行漏渲染**：块C 第一版只在 ToolCard 里渲染了结果/附件，details 的**兄弟节点** preview-strip 忘了（probe7b previewStrips 3→0）。
+5. **`str.replace` 全量替换的教训**（同 2）：对出现多次的模板片段做字符串替换前先数出现次数。
+
+### 验收证据
+
+- 结构探针：probe3c（时间线 155 字段）/ probe3d（Markdown 开关 44）/ probe4（思考与折叠交互 20）/ probe5（轨迹 104）/ probe6（详情栏 95）/ probe7b（图片会话灯箱 16）/ probe8（综合验收 20）= **454/454 全一致**。
+- 像素差：5 场景（对话 / 轨迹 / 详情打开 / 深色主题 / 图片会话）**全部 0 像素差**（容差 8，最大通道差 0）。
+- 控制台：25 秒监听零报错。
+- 环境噪声备忘：两页 origin 不同 → localStorage 折叠记忆不同会让侧栏整块像素差，用 `temp/p5run/dumpstore.mjs` 把旧源 6 条界面记忆镜像过去即归零；活跃会话正在写入时侧栏计数会因轮询相位瞬态不同，截图脚本已加"侧栏文本稳定 6 秒"等待。

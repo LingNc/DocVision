@@ -11,13 +11,13 @@ import { estOf, metaOf } from './sidebar'
 
 // 图片引用（file://media/<sha>.jpg 之类）的**文件名**：长哈希只留前 8 位显示，
 // 完整名字在缩略图的 title 与 alt 上（沿用 Go 侧"哈希当不了名字"的同一口径）。
-export function refBaseName(ref: unknown): string {
+function refBaseName(ref: unknown): string {
   const s = String(ref || '').split('?')[0]
   const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'))
   return i >= 0 ? s.slice(i + 1) : s
 }
 
-export function shortFileName(name: unknown): string {
+function shortFileName(name: unknown): string {
   const s = String(name || '')
   const dot = s.lastIndexOf('.')
   const stem = dot > 0 ? s.slice(0, dot) : s
