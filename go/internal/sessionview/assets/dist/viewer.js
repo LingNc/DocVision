@@ -6797,9 +6797,6 @@
   }
   function switchView(view) {
     state.view = view === "trajectory" ? "trajectory" : "chat";
-    if (state.view === "trajectory") {
-      renderTrajectory$1();
-    }
   }
   const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "" });
   function openLightbox(url, ref2) {
@@ -6814,14 +6811,6 @@
   }
   function setBannerText(text) {
     state.pullError = text;
-  }
-  let _renderTrajectory = () => {
-  };
-  function registerRenderTrajectory(fn) {
-    _renderTrajectory = fn;
-  }
-  function renderTrajectory$1() {
-    _renderTrajectory();
   }
   let _renderDetails = () => {
   };
@@ -9046,7 +9035,6 @@
     }
     updateBanner();
     renderDetails$1();
-    if (state.view === "trajectory") renderTrajectory$1();
   }
   function appendLines(lines) {
     if (!lines || !lines.length) return;
@@ -9075,7 +9063,6 @@
     updateBanner();
     if (hasMeta) renderDetails$1();
     else if (lines.some((l) => l.t === "usage")) renderDetails$1();
-    if (state.view === "trajectory") renderTrajectory$1();
     if (state.follow) scrollToBottom();
   }
   function scrollToBottom() {
@@ -9230,339 +9217,6 @@
     window.setInterval(() => {
       if (!document.hidden) void refreshIndex();
     }, POLL_MS);
-  }
-  const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
-  function nextMsgLine(lines, idx) {
-    for (let i = idx + 1; i < lines.length; i++) {
-      if (lines[i] && !lines[i].bad && lines[i].t === "msg") return lines[i];
-    }
-    return null;
-  }
-  function callDuration(call, resultLine) {
-    if (!call || !call.ts || !resultLine.ts) return 0;
-    const t0 = Date.parse(call.ts);
-    const t1 = Date.parse(resultLine.ts);
-    if (isNaN(t0) || isNaN(t1) || t1 < t0) return 0;
-    return t1 - t0;
-  }
-  function trajectoryRows() {
-    const rows = [];
-    const callOf = {};
-    const imageAfterTool = {};
-    state.lines.forEach((l) => {
-      if (!l || l.bad || l.t !== "msg") return;
-      if (l.role === "assistant") {
-        (l.tool_calls || []).forEach((c) => {
-          const fn = c.function || {};
-          callOf[c.id] = { name: fn.name || "?", ts: l.ts || "", n: l.n, args: String(fn.arguments || "") };
-        });
-      }
-    });
-    state.lines.forEach((line, idx) => {
-      if (!line || line.bad) return;
-      if (line.t === "meta") {
-        rows.push({
-          kind: "meta",
-          tag: "元信息",
-          name: line.kind || "system",
-          summary: "模型 " + (line.model || "—") + " · 提示词 " + countText(String(line.text || "").length, estOf(line).text) + ((line.tools || []).length ? " · 工具 " + line.tools.length : ""),
-          chars: String(line.text || "").length,
-          tokens: estOf(line).text,
-          status: "",
-          detail: { prompt: String(line.text || "") }
-        });
-        return;
-      }
-      if (line.t === "usage") {
-        const st = line.stats || {};
-        rows.push({
-          kind: "usage",
-          tag: "用量",
-          name: "请求" + (st.round ? " #" + st.round : ""),
-          summary: (st.kind || "chat") + " · 输入 " + fmtTokens(st.promptTokens) + "（缓存 " + (st.cachedTokens || 0) + "）· 输出 " + fmtTokens(st.completionTokens) + (st.reasoningTokens ? "（思 " + fmtTokens(st.reasoningTokens) + "）" : ""),
-          chars: "",
-          tokens: 0,
-          status: st.finish || "",
-          time: Number(st.durationMs) || 0,
-          detail: { request: JSON.stringify(st, null, 2) }
-        });
-        return;
-      }
-      if (line.t !== "msg" || !line.role) return;
-      if (line.role === "user" && line.images && line.images.length) {
-        const attr = imageAttributions()[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
-        const fromTool = !!imageAfterTool[line.n];
-        const jumpTo = attr.kind === "call" && attr.callId && state.callNodes[attr.callId] ? state.callNodes[attr.callId].lineN : attr.kind === "task" && attr.taskLineN ? attr.taskLineN : line.n;
-        rows.push({
-          kind: "user",
-          tag: "用户",
-          name: "用户",
-          summary: (fromTool ? "接上一行工具回执 · " : "") + "图片 ×" + line.images.length + " · " + (firstLine(line.text) || "（无正文）") + " · " + attributionText(attr),
-          title: IMAGE_WIRE_TITLE + "\n" + attributionText(attr) + (attr.how === "call-id" ? "（句柄里写了 call id，属于精确匹配）" : attr.how === "tool-name" ? "（句柄里写了工具名，按名称匹配到本轮的调用）" : attr.how === "order" ? "（旧转录没有 call id，按顺序推断；新转录会写上归属）" : attr.how === "task" ? "（这一轮带的是任务自己的图，不归任何工具调用）" : "") + (fromTool ? "\n这一轮的图片就是上一行工具回执投出来的（同一件事的两段 wire 表达，所以两行不合并）" : ""),
-          chars: String(line.text || "").length,
-          tokens: estOf(line).text + estOf(line).images,
-          status: "",
-          jump: jumpTo,
-          images: line.images,
-          detail: { user: String(line.text || "") || "（这一轮没有正文）" }
-        });
-      } else if (line.role === "user") {
-        let fed = 0;
-        const attrs = imageAttributions();
-        Object.keys(attrs).forEach((n) => {
-          const a = attrs[Number(n)];
-          if (a.kind === "task" && a.taskLineN === line.n) fed++;
-        });
-        rows.push({
-          kind: "user",
-          tag: "用户",
-          name: "用户",
-          summary: firstLine(line.text) + (fed ? " · 附件 图片 ×" + fed : ""),
-          title: fed ? "会话开头的原图投喂轮归到了这条任务（对话页里它们收在同一个块里）" : "点击跳到对话里对应的那条消息",
-          chars: String(line.text || "").length,
-          tokens: estOf(line).text,
-          status: "",
-          jump: line.n,
-          detail: { user: String(line.text || "") }
-        });
-      } else if (line.role === "assistant") {
-        if (line.reasoning) {
-          rows.push({
-            kind: "think",
-            tag: "思考",
-            name: "reasoning",
-            summary: firstLine(line.reasoning),
-            chars: line.reasoning.length,
-            tokens: estOf(line).reasoning,
-            status: "",
-            jump: line.n,
-            detail: { thinking: line.reasoning }
-          });
-        }
-        if (line.text) {
-          rows.push({
-            kind: "msg",
-            tag: "助手",
-            name: "AI",
-            summary: firstLine(line.text),
-            chars: line.text.length,
-            tokens: estOf(line).text,
-            status: "",
-            jump: line.n,
-            detail: { message: String(line.text) }
-          });
-        }
-        (line.tool_calls || []).forEach((c, i) => {
-          const fn = c.function || {};
-          const name = fn.name || "(未命名工具)";
-          const args = String(fn.arguments || "");
-          rows.push({
-            kind: "tool",
-            tag: "工具",
-            name,
-            summary: toolSummary(name, fn.arguments),
-            chars: args.length,
-            tokens: estOf(line).calls[i] || 0,
-            status: "",
-            jump: line.n,
-            detail: { input: prettyJSON(args) || args }
-          });
-        });
-      } else if (line.role === "tool") {
-        const info = line.tool_call_id ? callOf[line.tool_call_id] : null;
-        const text = String(line.text || "");
-        const after = nextMsgLine(state.lines, idx);
-        const imageNext = !!(after && after.role === "user" && after.images && after.images.length);
-        if (imageNext) imageAfterTool[after.n] = true;
-        const hint = imageNext ? IMAGE_PLACEHOLDER.test(text) ? " · 图片见下一行用户轮" : " · 图片在下一行用户轮里" : "";
-        rows.push({
-          kind: "result",
-          tag: "结果",
-          name: info ? info.name : "(未配对的工具回执)",
-          summary: firstLine(text) + hint,
-          chars: text.length,
-          tokens: estOf(line).text,
-          title: imageNext ? "这一行是工具回执：tool 消息的 content 只能是文本，随行的图片被回灌在紧随其后的 user 轮里（两行是同一件事，保持两行不合并）" : "点击跳到对话里对应的那条消息",
-          status: classifyResult(text),
-          jump: line.n,
-          time: callDuration(info, line),
-          detail: { output: text }
-        });
-      }
-    });
-    return rows;
-  }
-  const TRAJ_KINDS = [
-    { id: "user", label: "用户" },
-    { id: "msg", label: "助手" },
-    { id: "think", label: "思考" },
-    { id: "tool", label: "工具" },
-    { id: "result", label: "结果" },
-    { id: "meta", label: "元信息" },
-    { id: "usage", label: "用量" }
-  ];
-  function trajVisible(row) {
-    const picked = Object.keys(state.trajKinds).filter((k) => state.trajKinds[k]);
-    if (!picked.length) return true;
-    return picked.indexOf(row.kind) >= 0;
-  }
-  function trajDetailBody(row) {
-    const body = el$2("div", "traj-detail-inner");
-    const labels = {
-      prompt: "系统提示词",
-      thinking: "思考",
-      user: "用户消息",
-      message: "助手消息",
-      input: "输入",
-      output: "输出",
-      request: "用量行"
-    };
-    Object.keys(row.detail || {}).forEach((k) => {
-      const section = el$2("div");
-      section.appendChild(el$2("div", "traj-detail-title", labels[k] || k));
-      const text = String(row.detail[k] || "");
-      if (k === "input" || k === "request" || k === "output") {
-        section.appendChild(machineBlock(text, "code"));
-      } else {
-        section.appendChild(el$2("pre", "code", text));
-      }
-      const actions = el$2("div", "row-actions");
-      actions.appendChild(copyButton(text));
-      section.appendChild(actions);
-      body.appendChild(section);
-    });
-    if (row.images && row.images.length) {
-      body.appendChild(imageStrip({ images: row.images }));
-    }
-    return body;
-  }
-  function renderTrajectory() {
-    const refs = document.getElementById("trajectory");
-    if (!refs) return;
-    clear(refs);
-    if (!state.current) {
-      refs.appendChild(el$2("div", "traj-empty", "左侧选择一个会话后，这里列出它的全部步骤。"));
-      return;
-    }
-    const rows = trajectoryRows();
-    const visible = rows.filter(trajVisible);
-    const toolbar = el$2("div", "traj-toolbar");
-    const inner = el$2("div", "traj-toolbar-inner");
-    const filters = el$2("div", "traj-filters");
-    const allChip = el$2("button", "traj-chip", "全部");
-    allChip.type = "button";
-    allChip.setAttribute("aria-pressed", Object.keys(state.trajKinds).length ? "false" : "true");
-    allChip.addEventListener("click", () => {
-      state.trajKinds = {};
-      renderTrajectory();
-    });
-    filters.appendChild(allChip);
-    TRAJ_KINDS.forEach((k) => {
-      const count = rows.filter((r) => r.kind === k.id).length;
-      if (!count) return;
-      const chip = el$2("button", "traj-chip", k.label + " " + count);
-      chip.type = "button";
-      chip.title = "只看 / 不看「" + k.label + "」";
-      chip.setAttribute("aria-pressed", state.trajKinds[k.id] ? "true" : "false");
-      chip.addEventListener("click", () => {
-        if (state.trajKinds[k.id]) delete state.trajKinds[k.id];
-        else state.trajKinds[k.id] = true;
-        renderTrajectory();
-      });
-      filters.appendChild(chip);
-    });
-    inner.appendChild(filters);
-    inner.appendChild(el$2("span", "traj-count", visible.length + " / " + rows.length + " 步"));
-    toolbar.appendChild(inner);
-    refs.appendChild(toolbar);
-    const scroll = el$2("div", "traj-scroll");
-    if (!visible.length) {
-      scroll.appendChild(el$2("div", "traj-empty", rows.length ? "当前筛选没有匹配的步骤" : "这个会话还没有步骤"));
-      refs.appendChild(scroll);
-      return;
-    }
-    const table = el$2("table", "traj-table");
-    const colgroup = document.createElement("colgroup");
-    [["col-n"], ["col-kind"], ["col-name"], [], ["col-status"], ["col-size"], ["col-time"]].forEach((c) => {
-      const col = document.createElement("col");
-      if (c[0]) col.className = c[0];
-      colgroup.appendChild(col);
-    });
-    table.appendChild(colgroup);
-    const thead = el$2("thead");
-    const hrow = el$2("tr");
-    ["#", "类型", "名称", "摘要", "状态", unitLabel(), "耗时"].forEach((h, i) => {
-      hrow.appendChild(el$2("th", i === 0 || i >= 5 ? "num-head" : null, h));
-    });
-    thead.appendChild(hrow);
-    table.appendChild(thead);
-    const tbody = el$2("tbody");
-    visible.forEach((row, idx) => {
-      const key = "r" + idx + ":" + (row.jump || row.name);
-      const tr = el$2("tr", "traj-row");
-      tr.setAttribute("data-kind", row.kind);
-      if (row.status === "error") tr.setAttribute("data-error", "true");
-      tr.title = row.title || "点击跳到对话里对应的那条消息";
-      const tdN = el$2("td", "traj-num");
-      const discl = el$2("button", "traj-disclose", state.trajOpen[key] ? "▾" : "▸");
-      discl.type = "button";
-      discl.title = "展开完整输入输出";
-      discl.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        state.trajOpen[key] = !state.trajOpen[key];
-        renderTrajectory();
-      });
-      tdN.appendChild(discl);
-      tdN.appendChild(document.createTextNode(row.jump ? String(row.jump) : "—"));
-      tr.appendChild(tdN);
-      const tdKind = el$2("td");
-      tdKind.appendChild(el$2("span", "kind-tag kind-" + (row.status === "error" ? "error" : row.kind), row.tag));
-      tr.appendChild(tdKind);
-      tr.appendChild(el$2("td", "traj-name", row.name));
-      const tdSum = el$2("td", "traj-summary", row.summary || "—");
-      tdSum.title = row.summary || "";
-      tr.appendChild(tdSum);
-      const statusText = row.status === "error" ? "✗ error" : row.status === "ok" ? "✓ ok" : row.status === "plain" || !row.status ? "—" : row.status;
-      tr.appendChild(el$2(
-        "td",
-        "traj-status " + (row.status === "error" ? "error" : row.status === "ok" ? "ok" : "plain"),
-        statusText
-      ));
-      tr.appendChild(el$2(
-        "td",
-        "traj-num-cell",
-        state.unit === "char" ? row.chars ? String(row.chars) : "—" : row.tokens ? countValue(row.chars, row.tokens) : "—"
-      ));
-      tr.appendChild(el$2("td", "traj-num-cell", row.time ? fmtDur(row.time) : "—"));
-      tr.addEventListener("click", () => {
-        if (row.jump) jumpToLine(row.jump);
-        else {
-          state.trajOpen[key] = !state.trajOpen[key];
-          renderTrajectory();
-        }
-      });
-      tbody.appendChild(tr);
-      if (state.trajOpen[key]) {
-        const dtr = el$2("tr", "traj-detail");
-        const td = el$2("td");
-        td.colSpan = 7;
-        td.appendChild(trajDetailBody(row));
-        dtr.appendChild(td);
-        tbody.appendChild(dtr);
-      }
-    });
-    table.appendChild(tbody);
-    scroll.appendChild(table);
-    refs.appendChild(scroll);
-  }
-  function jumpToLine(n) {
-    const node = state.anchors[n];
-    switchView("chat");
-    if (!node) return;
-    node.scrollIntoView({ block: "center" });
-    node.classList.remove("flash");
-    void node.offsetWidth;
-    node.classList.add("flash");
   }
   function currentEstimate() {
     const id = state.current ? state.current.id : "";
@@ -9872,7 +9526,7 @@
       host.appendChild(el$2("div", "note", "这个会话没有可显示的详情。"));
     }
   }
-  const _sfc_main$3 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$7 = /* @__PURE__ */ defineComponent({
     __name: "InlineMD",
     props: {
       tag: {},
@@ -9897,52 +9551,52 @@
       };
     }
   });
-  const _hoisted_1$1 = {
+  const _hoisted_1$3 = {
     id: "sidebar-col",
     class: "sidebar-col"
   };
-  const _hoisted_2$1 = { class: "side-head" };
-  const _hoisted_3$1 = { class: "side-search" };
-  const _hoisted_4$1 = { class: "side-list-wrap" };
-  const _hoisted_5$1 = ["data-project"];
-  const _hoisted_6$1 = ["title"];
-  const _hoisted_7$1 = { class: "row-body" };
-  const _hoisted_8$1 = {
+  const _hoisted_2$3 = { class: "side-head" };
+  const _hoisted_3$2 = { class: "side-search" };
+  const _hoisted_4$2 = { class: "side-list-wrap" };
+  const _hoisted_5$2 = ["data-project"];
+  const _hoisted_6$2 = ["title"];
+  const _hoisted_7$2 = { class: "row-body" };
+  const _hoisted_8$2 = {
     key: 0,
     class: "proj-prefix"
   };
-  const _hoisted_9$1 = { class: "proj-title" };
-  const _hoisted_10$1 = { class: "row-meta" };
-  const _hoisted_11$1 = {
+  const _hoisted_9$2 = { class: "proj-title" };
+  const _hoisted_10$2 = { class: "row-meta" };
+  const _hoisted_11$2 = {
     key: 0,
     class: "proj-note",
     title: "这个输出根本身就是一个工程（work/、progress.json 等直接挂在它下面），是引入多项目布局之前的形态；新布局是「输出根/书名/」。"
   };
-  const _hoisted_12$1 = {
+  const _hoisted_12$2 = {
     key: 1,
     class: "dot live"
   };
-  const _hoisted_13$1 = {
+  const _hoisted_13$2 = {
     key: 0,
     class: "proj-progress",
     title: "progress.json 里各阶段的当前状态"
   };
-  const _hoisted_14$1 = ["data-project", "data-stage"];
-  const _hoisted_15$1 = { class: "stage-row" };
-  const _hoisted_16$1 = { class: "row-body" };
-  const _hoisted_17$1 = { class: "row-meta" };
-  const _hoisted_18$1 = ["title"];
-  const _hoisted_19$1 = {
+  const _hoisted_14$2 = ["data-project", "data-stage"];
+  const _hoisted_15$2 = { class: "stage-row" };
+  const _hoisted_16$2 = { class: "row-body" };
+  const _hoisted_17$2 = { class: "row-meta" };
+  const _hoisted_18$2 = ["title"];
+  const _hoisted_19$2 = {
     key: 1,
     class: "dot live"
   };
-  const _hoisted_20$1 = ["data-id", "title", "onClick"];
-  const _hoisted_21$1 = { class: "row-slot" };
-  const _hoisted_22$1 = {
+  const _hoisted_20$2 = ["data-id", "title", "onClick"];
+  const _hoisted_21$2 = { class: "row-slot" };
+  const _hoisted_22$2 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_23$1 = ["title"];
+  const _hoisted_23$2 = ["title"];
   const _hoisted_24$1 = { class: "row-time" };
   const _hoisted_25$1 = { class: "row-actions" };
   const _hoisted_26$1 = ["onClick"];
@@ -9973,7 +9627,7 @@
     class: "side-foot"
   };
   const OVERFLOW_LIMIT = 8;
-  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$6 = /* @__PURE__ */ defineComponent({
     __name: "Sidebar",
     setup(__props) {
       const listEl = /* @__PURE__ */ ref(null);
@@ -10104,8 +9758,8 @@
         setOverflowOpen(okey);
       }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("aside", _hoisted_1$1, [
-          createBaseVNode("div", _hoisted_2$1, [
+        return openBlock(), createElementBlock("aside", _hoisted_1$3, [
+          createBaseVNode("div", _hoisted_2$3, [
             _cache[2] || (_cache[2] = createBaseVNode("span", { class: "side-title" }, "工作区", -1)),
             createBaseVNode("button", {
               id: "refresh",
@@ -10116,7 +9770,7 @@
               (...args) => unref(refreshIndex) && unref(refreshIndex)(...args))
             }, "⟳")
           ]),
-          createBaseVNode("div", _hoisted_3$1, [
+          createBaseVNode("div", _hoisted_3$2, [
             withDirectives(createBaseVNode("input", {
               id: "search",
               "onUpdate:modelValue": _cache[1] || (_cache[1] = ($event) => unref(state).filter = $event),
@@ -10127,7 +9781,7 @@
               [vModelText, unref(state).filter]
             ])
           ]),
-          createBaseVNode("div", _hoisted_4$1, [
+          createBaseVNode("div", _hoisted_4$2, [
             createBaseVNode("div", {
               id: "session-list",
               ref_key: "listEl",
@@ -10149,16 +9803,16 @@
                     _cache[3] || (_cache[3] = createBaseVNode("span", { class: "row-slot" }, [
                       createBaseVNode("span", { class: "row-caret" })
                     ], -1)),
-                    createBaseVNode("span", _hoisted_7$1, [
-                      g.prefix ? (openBlock(), createElementBlock("span", _hoisted_8$1, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
-                      createBaseVNode("span", _hoisted_9$1, toDisplayString(g.title), 1)
+                    createBaseVNode("span", _hoisted_7$2, [
+                      g.prefix ? (openBlock(), createElementBlock("span", _hoisted_8$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
+                      createBaseVNode("span", _hoisted_9$2, toDisplayString(g.title), 1)
                     ]),
-                    createBaseVNode("span", _hoisted_10$1, toDisplayString(g.items.length) + " 个会话", 1),
-                    g.legacy ? (openBlock(), createElementBlock("span", _hoisted_11$1, "旧版单项目")) : createCommentVNode("", true),
-                    g.live ? (openBlock(), createElementBlock("span", _hoisted_12$1)) : createCommentVNode("", true)
-                  ], 8, _hoisted_6$1),
+                    createBaseVNode("span", _hoisted_10$2, toDisplayString(g.items.length) + " 个会话", 1),
+                    g.legacy ? (openBlock(), createElementBlock("span", _hoisted_11$2, "旧版单项目")) : createCommentVNode("", true),
+                    g.live ? (openBlock(), createElementBlock("span", _hoisted_12$2)) : createCommentVNode("", true)
+                  ], 8, _hoisted_6$2),
                   createBaseVNode("div", null, [
-                    g.progress ? (openBlock(), createElementBlock("div", _hoisted_13$1, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
+                    g.progress ? (openBlock(), createElementBlock("div", _hoisted_13$2, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
                     (openBlock(true), createElementBlock(Fragment, null, renderList(g.stages, (sv) => {
                       return openBlock(), createElementBlock(Fragment, {
                         key: sv.stage
@@ -10169,18 +9823,18 @@
                           "data-project": g.name,
                           "data-stage": sv.stage
                         }, [
-                          createBaseVNode("summary", _hoisted_15$1, [
+                          createBaseVNode("summary", _hoisted_15$2, [
                             _cache[4] || (_cache[4] = createBaseVNode("span", { class: "row-slot" }, [
                               createBaseVNode("span", { class: "row-caret" })
                             ], -1)),
-                            createBaseVNode("span", _hoisted_16$1, toDisplayString(sv.title), 1),
-                            createBaseVNode("span", _hoisted_17$1, toDisplayString(sv.items.length) + " 个会话", 1),
+                            createBaseVNode("span", _hoisted_16$2, toDisplayString(sv.title), 1),
+                            createBaseVNode("span", _hoisted_17$2, toDisplayString(sv.items.length) + " 个会话", 1),
                             sv.status ? (openBlock(), createElementBlock("span", {
                               key: 0,
                               class: normalizeClass(["stage-progress", { done: sv.status.done }]),
                               title: sv.status.title
-                            }, toDisplayString(sv.status.text), 11, _hoisted_18$1)) : createCommentVNode("", true),
-                            sv.live ? (openBlock(), createElementBlock("span", _hoisted_19$1)) : createCommentVNode("", true)
+                            }, toDisplayString(sv.status.text), 11, _hoisted_18$2)) : createCommentVNode("", true),
+                            sv.live ? (openBlock(), createElementBlock("span", _hoisted_19$2)) : createCommentVNode("", true)
                           ]),
                           createBaseVNode("div", null, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
@@ -10193,22 +9847,22 @@
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
                               }, [
-                                createBaseVNode("span", _hoisted_21$1, [
+                                createBaseVNode("span", _hoisted_21$2, [
                                   createBaseVNode("span", {
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
                                 ]),
-                                createVNode(_sfc_main$3, {
+                                createVNode(_sfc_main$7, {
                                   tag: "span",
                                   class: "row-title",
                                   text: unref(sessionTitleOf)(s)
                                 }, null, 8, ["text"]),
-                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_22$1, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_22$2, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
                                   class: "row-chip image-chip",
                                   title: unref(imageTipText)(s)
-                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_23$1)) : createCommentVNode("", true),
+                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_23$2)) : createCommentVNode("", true),
                                 createBaseVNode("span", _hoisted_24$1, toDisplayString(unref(relTime)(s.mtime)), 1),
                                 createBaseVNode("span", _hoisted_25$1, [
                                   createBaseVNode("button", {
@@ -10218,7 +9872,7 @@
                                     onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
                                   }, "ⓘ", 8, _hoisted_26$1)
                                 ])
-                              ], 10, _hoisted_20$1);
+                              ], 10, _hoisted_20$2);
                             }), 128)),
                             sv.needOverflow ? (openBlock(), createElementBlock("button", {
                               key: 0,
@@ -10227,7 +9881,7 @@
                               onClick: ($event) => onMoreClick(sv.overflowKey)
                             }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_27$1)) : createCommentVNode("", true)
                           ])
-                        ], 8, _hoisted_14$1)), [
+                        ], 8, _hoisted_14$2)), [
                           [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
                         ]) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                           (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
@@ -10245,7 +9899,7 @@
                                   class: normalizeClass(["dot", { live: s.live }])
                                 }, null, 2)
                               ]),
-                              createVNode(_sfc_main$3, {
+                              createVNode(_sfc_main$7, {
                                 tag: "span",
                                 class: "row-title",
                                 text: unref(sessionTitleOf)(s)
@@ -10277,7 +9931,7 @@
                       ], 64);
                     }), 128))
                   ])
-                ], 8, _hoisted_5$1)), [
+                ], 8, _hoisted_5$2)), [
                   [vCollapse, { key: "proj:" + g.name, want: g.matched ? true : projWantOpen(g), frozen: g.matched }]
                 ]);
               }), 128)),
@@ -10300,7 +9954,7 @@
       };
     }
   });
-  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$5 = /* @__PURE__ */ defineComponent({
     __name: "Timeline",
     setup(__props) {
       watch(
@@ -10322,6 +9976,470 @@
           id: "timeline",
           class: normalizeClass(["timeline", { hidden: unref(state).view !== "chat" }])
         }, null, 2);
+      };
+    }
+  });
+  const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
+  function nextMsgLine(lines, idx) {
+    for (let i = idx + 1; i < lines.length; i++) {
+      if (lines[i] && !lines[i].bad && lines[i].t === "msg") return lines[i];
+    }
+    return null;
+  }
+  function callDuration(call, resultLine) {
+    if (!call || !call.ts || !resultLine.ts) return 0;
+    const t0 = Date.parse(call.ts);
+    const t1 = Date.parse(resultLine.ts);
+    if (isNaN(t0) || isNaN(t1) || t1 < t0) return 0;
+    return t1 - t0;
+  }
+  function trajectoryRows() {
+    const rows = [];
+    const callOf = {};
+    const imageAfterTool = {};
+    state.lines.forEach((l) => {
+      if (!l || l.bad || l.t !== "msg") return;
+      if (l.role === "assistant") {
+        (l.tool_calls || []).forEach((c) => {
+          const fn = c.function || {};
+          callOf[c.id] = { name: fn.name || "?", ts: l.ts || "", n: l.n, args: String(fn.arguments || "") };
+        });
+      }
+    });
+    state.lines.forEach((line, idx) => {
+      if (!line || line.bad) return;
+      if (line.t === "meta") {
+        rows.push({
+          kind: "meta",
+          tag: "元信息",
+          name: line.kind || "system",
+          summary: "模型 " + (line.model || "—") + " · 提示词 " + countText(String(line.text || "").length, estOf(line).text) + ((line.tools || []).length ? " · 工具 " + line.tools.length : ""),
+          chars: String(line.text || "").length,
+          tokens: estOf(line).text,
+          status: "",
+          detail: { prompt: String(line.text || "") }
+        });
+        return;
+      }
+      if (line.t === "usage") {
+        const st = line.stats || {};
+        rows.push({
+          kind: "usage",
+          tag: "用量",
+          name: "请求" + (st.round ? " #" + st.round : ""),
+          summary: (st.kind || "chat") + " · 输入 " + fmtTokens(st.promptTokens) + "（缓存 " + (st.cachedTokens || 0) + "）· 输出 " + fmtTokens(st.completionTokens) + (st.reasoningTokens ? "（思 " + fmtTokens(st.reasoningTokens) + "）" : ""),
+          chars: "",
+          tokens: 0,
+          status: st.finish || "",
+          time: Number(st.durationMs) || 0,
+          detail: { request: JSON.stringify(st, null, 2) }
+        });
+        return;
+      }
+      if (line.t !== "msg" || !line.role) return;
+      if (line.role === "user" && line.images && line.images.length) {
+        const attr = imageAttributions()[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
+        const fromTool = !!imageAfterTool[line.n];
+        const jumpTo = attr.kind === "call" && attr.callId && state.callNodes[attr.callId] ? state.callNodes[attr.callId].lineN : attr.kind === "task" && attr.taskLineN ? attr.taskLineN : line.n;
+        rows.push({
+          kind: "user",
+          tag: "用户",
+          name: "用户",
+          summary: (fromTool ? "接上一行工具回执 · " : "") + "图片 ×" + line.images.length + " · " + (firstLine(line.text) || "（无正文）") + " · " + attributionText(attr),
+          title: IMAGE_WIRE_TITLE + "\n" + attributionText(attr) + (attr.how === "call-id" ? "（句柄里写了 call id，属于精确匹配）" : attr.how === "tool-name" ? "（句柄里写了工具名，按名称匹配到本轮的调用）" : attr.how === "order" ? "（旧转录没有 call id，按顺序推断；新转录会写上归属）" : attr.how === "task" ? "（这一轮带的是任务自己的图，不归任何工具调用）" : "") + (fromTool ? "\n这一轮的图片就是上一行工具回执投出来的（同一件事的两段 wire 表达，所以两行不合并）" : ""),
+          chars: String(line.text || "").length,
+          tokens: estOf(line).text + estOf(line).images,
+          status: "",
+          jump: jumpTo,
+          images: line.images,
+          detail: { user: String(line.text || "") || "（这一轮没有正文）" }
+        });
+      } else if (line.role === "user") {
+        let fed = 0;
+        const attrs = imageAttributions();
+        Object.keys(attrs).forEach((n) => {
+          const a = attrs[Number(n)];
+          if (a.kind === "task" && a.taskLineN === line.n) fed++;
+        });
+        rows.push({
+          kind: "user",
+          tag: "用户",
+          name: "用户",
+          summary: firstLine(line.text) + (fed ? " · 附件 图片 ×" + fed : ""),
+          title: fed ? "会话开头的原图投喂轮归到了这条任务（对话页里它们收在同一个块里）" : "点击跳到对话里对应的那条消息",
+          chars: String(line.text || "").length,
+          tokens: estOf(line).text,
+          status: "",
+          jump: line.n,
+          detail: { user: String(line.text || "") }
+        });
+      } else if (line.role === "assistant") {
+        if (line.reasoning) {
+          rows.push({
+            kind: "think",
+            tag: "思考",
+            name: "reasoning",
+            summary: firstLine(line.reasoning),
+            chars: line.reasoning.length,
+            tokens: estOf(line).reasoning,
+            status: "",
+            jump: line.n,
+            detail: { thinking: line.reasoning }
+          });
+        }
+        if (line.text) {
+          rows.push({
+            kind: "msg",
+            tag: "助手",
+            name: "AI",
+            summary: firstLine(line.text),
+            chars: line.text.length,
+            tokens: estOf(line).text,
+            status: "",
+            jump: line.n,
+            detail: { message: String(line.text) }
+          });
+        }
+        (line.tool_calls || []).forEach((c, i) => {
+          const fn = c.function || {};
+          const name = fn.name || "(未命名工具)";
+          const args = String(fn.arguments || "");
+          rows.push({
+            kind: "tool",
+            tag: "工具",
+            name,
+            summary: toolSummary(name, fn.arguments),
+            chars: args.length,
+            tokens: estOf(line).calls[i] || 0,
+            status: "",
+            jump: line.n,
+            detail: { input: prettyJSON(args) || args }
+          });
+        });
+      } else if (line.role === "tool") {
+        const info = line.tool_call_id ? callOf[line.tool_call_id] : null;
+        const text = String(line.text || "");
+        const after = nextMsgLine(state.lines, idx);
+        const imageNext = !!(after && after.role === "user" && after.images && after.images.length);
+        if (imageNext) imageAfterTool[after.n] = true;
+        const hint = imageNext ? IMAGE_PLACEHOLDER.test(text) ? " · 图片见下一行用户轮" : " · 图片在下一行用户轮里" : "";
+        rows.push({
+          kind: "result",
+          tag: "结果",
+          name: info ? info.name : "(未配对的工具回执)",
+          summary: firstLine(text) + hint,
+          chars: text.length,
+          tokens: estOf(line).text,
+          title: imageNext ? "这一行是工具回执：tool 消息的 content 只能是文本，随行的图片被回灌在紧随其后的 user 轮里（两行是同一件事，保持两行不合并）" : "点击跳到对话里对应的那条消息",
+          status: classifyResult(text),
+          jump: line.n,
+          time: callDuration(info, line),
+          detail: { output: text }
+        });
+      }
+    });
+    return rows;
+  }
+  const TRAJ_KINDS = [
+    { id: "user", label: "用户" },
+    { id: "msg", label: "助手" },
+    { id: "think", label: "思考" },
+    { id: "tool", label: "工具" },
+    { id: "result", label: "结果" },
+    { id: "meta", label: "元信息" },
+    { id: "usage", label: "用量" }
+  ];
+  function jumpToLine(n) {
+    const node = state.anchors[n];
+    switchView("chat");
+    if (!node) return;
+    node.scrollIntoView({ block: "center" });
+    node.classList.remove("flash");
+    void node.offsetWidth;
+    node.classList.add("flash");
+  }
+  const _sfc_main$4 = /* @__PURE__ */ defineComponent({
+    __name: "MachineText",
+    props: {
+      text: {},
+      cls: {},
+      tag: { default: "div" }
+    },
+    setup(__props) {
+      const props = __props;
+      const host = /* @__PURE__ */ ref(null);
+      function render() {
+        const el2 = host.value;
+        if (!el2) return;
+        el2.textContent = "";
+        el2.appendChild(machineBlock(props.text, props.cls));
+      }
+      onMounted(render);
+      watch(() => [props.text, props.cls], render);
+      return (_ctx, _cache) => {
+        return openBlock(), createBlock(resolveDynamicComponent(__props.tag), {
+          ref_key: "host",
+          ref: host
+        }, null, 512);
+      };
+    }
+  });
+  const _sfc_main$3 = /* @__PURE__ */ defineComponent({
+    __name: "CopyBtn",
+    props: {
+      text: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const label = /* @__PURE__ */ ref("复制");
+      let timer = 0;
+      function done() {
+        label.value = "已复制";
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          label.value = "复制";
+        }, 1200);
+      }
+      function copy() {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(props.text).then(done, () => {
+            if (fallbackCopy(props.text)) done();
+          });
+        } else if (fallbackCopy(props.text)) {
+          done();
+        }
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("button", {
+          type: "button",
+          class: "text-toggle",
+          onClick: copy
+        }, toDisplayString(label.value), 1);
+      };
+    }
+  });
+  const _hoisted_1$2 = { class: "images" };
+  const _hoisted_2$2 = ["src", "alt", "title", "onClick"];
+  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
+    __name: "ImageStrip",
+    props: {
+      images: {}
+    },
+    setup(__props) {
+      function show(ref2) {
+        openLightbox(mediaURL(ref2), ref2);
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", _hoisted_1$2, [
+          (openBlock(true), createElementBlock(Fragment, null, renderList(__props.images || [], (img) => {
+            return openBlock(), createElementBlock("img", {
+              key: img,
+              class: "thumb",
+              src: unref(mediaURL)(img),
+              alt: img,
+              loading: "lazy",
+              title: img,
+              onClick: ($event) => show(img)
+            }, null, 8, _hoisted_2$2);
+          }), 128))
+        ]);
+      };
+    }
+  });
+  const _hoisted_1$1 = { class: "traj-toolbar" };
+  const _hoisted_2$1 = { class: "traj-toolbar-inner" };
+  const _hoisted_3$1 = { class: "traj-filters" };
+  const _hoisted_4$1 = ["aria-pressed"];
+  const _hoisted_5$1 = ["title", "aria-pressed", "onClick"];
+  const _hoisted_6$1 = { class: "traj-count" };
+  const _hoisted_7$1 = { class: "traj-scroll" };
+  const _hoisted_8$1 = {
+    key: 0,
+    class: "traj-empty"
+  };
+  const _hoisted_9$1 = {
+    key: 1,
+    class: "traj-table"
+  };
+  const _hoisted_10$1 = { class: "num-head" };
+  const _hoisted_11$1 = ["data-kind", "data-error", "title", "onClick"];
+  const _hoisted_12$1 = { class: "traj-num" };
+  const _hoisted_13$1 = ["onClick"];
+  const _hoisted_14$1 = { class: "traj-name" };
+  const _hoisted_15$1 = ["title"];
+  const _hoisted_16$1 = { class: "traj-num-cell" };
+  const _hoisted_17$1 = { class: "traj-num-cell" };
+  const _hoisted_18$1 = {
+    key: 0,
+    class: "traj-detail"
+  };
+  const _hoisted_19$1 = { colspan: 7 };
+  const _hoisted_20$1 = { class: "traj-detail-inner" };
+  const _hoisted_21$1 = { class: "traj-detail-title" };
+  const _hoisted_22$1 = {
+    key: 1,
+    class: "code"
+  };
+  const _hoisted_23$1 = { class: "row-actions" };
+  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+    __name: "Trajectory",
+    setup(__props) {
+      const rows = computed(() => state.current ? trajectoryRows() : []);
+      const visible = computed(() => rows.value.filter(trajVisible));
+      const kinds = computed(
+        () => TRAJ_KINDS.map((k) => ({ ...k, count: rows.value.filter((r) => r.kind === k.id).length })).filter((k) => k.count > 0)
+      );
+      const allPressed = computed(() => Object.keys(state.trajKinds).length === 0);
+      function trajVisible(row) {
+        const picked = Object.keys(state.trajKinds).filter((k) => state.trajKinds[k]);
+        if (!picked.length) return true;
+        return picked.indexOf(row.kind) >= 0;
+      }
+      function pick(k) {
+        if (state.trajKinds[k]) delete state.trajKinds[k];
+        else state.trajKinds[k] = true;
+      }
+      function sizeCell(row) {
+        return state.unit === "char" ? row.chars ? String(row.chars) : "—" : row.tokens ? countValue(row.chars, row.tokens) : "—";
+      }
+      function statusCell(row) {
+        if (row.status === "error") return { cls: "error", text: "✗ error" };
+        if (row.status === "ok") return { cls: "ok", text: "✓ ok" };
+        return { cls: "plain", text: row.status === "plain" || !row.status ? "—" : row.status };
+      }
+      const DETAIL_LABELS = {
+        prompt: "系统提示词",
+        thinking: "思考",
+        user: "用户消息",
+        message: "助手消息",
+        input: "输入",
+        output: "输出",
+        request: "用量行"
+      };
+      function detailKind(key) {
+        return key === "input" || key === "request" || key === "output" ? "code" : "plain";
+      }
+      function rowKey(row, idx) {
+        return "r" + idx + ":" + (row.jump || row.name);
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", {
+          id: "trajectory",
+          class: normalizeClass(["trajectory", { hidden: unref(state).view === "chat" }])
+        }, [
+          createBaseVNode("div", _hoisted_1$1, [
+            createBaseVNode("div", _hoisted_2$1, [
+              createBaseVNode("div", _hoisted_3$1, [
+                createBaseVNode("button", {
+                  type: "button",
+                  class: "traj-chip",
+                  "aria-pressed": allPressed.value ? "true" : "false",
+                  onClick: _cache[0] || (_cache[0] = ($event) => unref(state).trajKinds = {})
+                }, "全部", 8, _hoisted_4$1),
+                (openBlock(true), createElementBlock(Fragment, null, renderList(kinds.value, (k) => {
+                  return openBlock(), createElementBlock("button", {
+                    key: k.id,
+                    type: "button",
+                    class: "traj-chip",
+                    title: "只看 / 不看「" + k.label + "」",
+                    "aria-pressed": unref(state).trajKinds[k.id] ? "true" : "false",
+                    onClick: ($event) => pick(k.id)
+                  }, toDisplayString(k.label) + " " + toDisplayString(k.count), 9, _hoisted_5$1);
+                }), 128))
+              ]),
+              createBaseVNode("span", _hoisted_6$1, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
+            ])
+          ]),
+          createBaseVNode("div", _hoisted_7$1, [
+            !visible.value.length ? (openBlock(), createElementBlock("div", _hoisted_8$1, toDisplayString(rows.value.length ? "当前筛选没有匹配的步骤" : unref(state).current ? "这个会话还没有步骤" : "左侧选择一个会话后，这里列出它的全部步骤。"), 1)) : (openBlock(), createElementBlock("table", _hoisted_9$1, [
+              _cache[7] || (_cache[7] = createBaseVNode("colgroup", null, [
+                createBaseVNode("col", { class: "col-n" }),
+                createBaseVNode("col", { class: "col-kind" }),
+                createBaseVNode("col", { class: "col-name" }),
+                createBaseVNode("col"),
+                createBaseVNode("col", { class: "col-status" }),
+                createBaseVNode("col", { class: "col-size" }),
+                createBaseVNode("col", { class: "col-time" })
+              ], -1)),
+              createBaseVNode("thead", null, [
+                createBaseVNode("tr", null, [
+                  _cache[1] || (_cache[1] = createBaseVNode("th", { class: "num-head" }, "#", -1)),
+                  _cache[2] || (_cache[2] = createBaseVNode("th", null, "类型", -1)),
+                  _cache[3] || (_cache[3] = createBaseVNode("th", null, "名称", -1)),
+                  _cache[4] || (_cache[4] = createBaseVNode("th", null, "摘要", -1)),
+                  _cache[5] || (_cache[5] = createBaseVNode("th", null, "状态", -1)),
+                  createBaseVNode("th", _hoisted_10$1, toDisplayString(unref(unitLabel)()), 1),
+                  _cache[6] || (_cache[6] = createBaseVNode("th", { class: "num-head" }, "耗时", -1))
+                ])
+              ]),
+              createBaseVNode("tbody", null, [
+                (openBlock(true), createElementBlock(Fragment, null, renderList(visible.value, (row, idx) => {
+                  return openBlock(), createElementBlock(Fragment, {
+                    key: rowKey(row, idx)
+                  }, [
+                    createBaseVNode("tr", {
+                      class: "traj-row",
+                      "data-kind": row.kind,
+                      "data-error": row.status === "error" ? "true" : void 0,
+                      title: row.title || "点击跳到对话里对应的那条消息",
+                      onClick: ($event) => row.jump ? unref(jumpToLine)(row.jump) : unref(state).trajOpen[rowKey(row, idx)] = !unref(state).trajOpen[rowKey(row, idx)]
+                    }, [
+                      createBaseVNode("td", _hoisted_12$1, [
+                        createBaseVNode("button", {
+                          type: "button",
+                          class: "traj-disclose",
+                          title: "展开完整输入输出",
+                          onClick: withModifiers(($event) => unref(state).trajOpen[rowKey(row, idx)] = !unref(state).trajOpen[rowKey(row, idx)], ["stop"])
+                        }, toDisplayString(unref(state).trajOpen[rowKey(row, idx)] ? "▾" : "▸"), 9, _hoisted_13$1),
+                        createTextVNode(toDisplayString(row.jump ? String(row.jump) : "—"), 1)
+                      ]),
+                      createBaseVNode("td", null, [
+                        createBaseVNode("span", {
+                          class: normalizeClass(["kind-tag", row.status === "error" ? "kind-error" : "kind-" + row.kind])
+                        }, toDisplayString(row.tag), 3)
+                      ]),
+                      createBaseVNode("td", _hoisted_14$1, toDisplayString(row.name), 1),
+                      createBaseVNode("td", {
+                        class: "traj-summary",
+                        title: row.summary || ""
+                      }, toDisplayString(row.summary || "—"), 9, _hoisted_15$1),
+                      createBaseVNode("td", {
+                        class: normalizeClass("traj-status " + statusCell(row).cls)
+                      }, toDisplayString(statusCell(row).text), 3),
+                      createBaseVNode("td", _hoisted_16$1, toDisplayString(sizeCell(row)), 1),
+                      createBaseVNode("td", _hoisted_17$1, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
+                    ], 8, _hoisted_11$1),
+                    unref(state).trajOpen[rowKey(row, idx)] ? (openBlock(), createElementBlock("tr", _hoisted_18$1, [
+                      createBaseVNode("td", _hoisted_19$1, [
+                        createBaseVNode("div", _hoisted_20$1, [
+                          (openBlock(true), createElementBlock(Fragment, null, renderList(row.detail || {}, (text, key) => {
+                            return openBlock(), createElementBlock("div", { key }, [
+                              createBaseVNode("div", _hoisted_21$1, toDisplayString(DETAIL_LABELS[key] || key), 1),
+                              detailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$4, {
+                                key: 0,
+                                text: String(text || ""),
+                                cls: "code"
+                              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_22$1, toDisplayString(String(text || "")), 1)),
+                              createBaseVNode("div", _hoisted_23$1, [
+                                createVNode(_sfc_main$3, {
+                                  text: String(text || "")
+                                }, null, 8, ["text"])
+                              ])
+                            ]);
+                          }), 128)),
+                          row.images && row.images.length ? (openBlock(), createBlock(_sfc_main$2, {
+                            key: 0,
+                            images: row.images
+                          }, null, 8, ["images"])) : createCommentVNode("", true)
+                        ])
+                      ])
+                    ])) : createCommentVNode("", true)
+                  ], 64);
+                }), 128))
+              ])
+            ]))
+          ])
+        ], 2);
       };
     }
   });
@@ -10515,7 +10633,6 @@
           }
         }
         document.addEventListener("keydown", onKeydown);
-        registerRenderTrajectory(renderTrajectory);
         registerRenderDetails(renderDetails);
         bootData();
         pollTimer = window.setInterval(() => {
@@ -10551,7 +10668,7 @@
             "data-details-collapsed": unref(layout).detailsCollapsed ? "" : void 0,
             "data-dragging": drag.value ? "" : void 0
           }, [
-            createVNode(_sfc_main$2),
+            createVNode(_sfc_main$6),
             createBaseVNode("div", {
               id: "handle-sidebar",
               class: "handle",
@@ -10593,7 +10710,7 @@
                         class: "crumb crumb-current",
                         title: unref(state).current.id
                       }, [
-                        createVNode(_sfc_main$3, { text: sessionTitle.value }, null, 8, ["text"])
+                        createVNode(_sfc_main$7, { text: sessionTitle.value }, null, 8, ["text"])
                       ], 8, _hoisted_9)
                     ], 64))
                   ]),
@@ -10690,11 +10807,8 @@
                 class: normalizeClass(["banner", { hidden: !bannerText.value }])
               }, toDisplayString(bannerText.value), 3),
               createBaseVNode("div", _hoisted_25, [
-                createVNode(_sfc_main$1),
-                createBaseVNode("div", {
-                  id: "trajectory",
-                  class: normalizeClass(["trajectory", { hidden: unref(state).view === "chat" }])
-                }, null, 2)
+                createVNode(_sfc_main$5),
+                createVNode(_sfc_main$1)
               ])
             ]),
             createBaseVNode("div", {

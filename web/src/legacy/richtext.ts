@@ -239,7 +239,7 @@ export function copyButton(text: string): HTMLButtonElement {
   return btn
 }
 
-function fallbackCopy(text: string): boolean {
+export function fallbackCopy(text: string): boolean {
   try {
     const area = document.createElement('textarea')
     area.value = text

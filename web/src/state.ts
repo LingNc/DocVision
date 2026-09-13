@@ -253,9 +253,6 @@ export function toggleTheme(): void {
 
 export function switchView(view: string): void {
   state.view = view === 'trajectory' ? 'trajectory' : 'chat'
-  if (state.view === 'trajectory') {
-    renderTrajectory() // 轨迹块注册的实现（未注册时空操作）
-  }
 }
 
 /* ---------- 灯箱（旧页 openLightbox/closeLightbox 同名；点击接线在缩略图块） ---------- */
@@ -302,9 +299,6 @@ export function renderTimeline(): void {}
 
 /* ---------- 渲染入口注册表：各块组件实现，这里只留挂点（避免循环 import） ---------- */
 
-let _renderTrajectory: () => void = () => {}
-export function registerRenderTrajectory(fn: () => void): void { _renderTrajectory = fn }
-export function renderTrajectory(): void { _renderTrajectory() }
 
 let _renderDetails: () => void = () => {}
 export function registerRenderDetails(fn: () => void): void { _renderDetails = fn }

@@ -7,7 +7,7 @@
  * 富文本（renderMarkdown / machineScroll / prettyJSON / copyButton）在
  * richtext.ts；数据与文案助手在 sidebar.ts / state.ts。
  */
-import { state, layout, storeGet, storeSet, setBannerText, LONG_TEXT_LINES, SYSTEM_PREVIEW_LINES, renderDetails, renderTrajectory } from '../state'
+import { state, layout, storeGet, storeSet, setBannerText, LONG_TEXT_LINES, SYSTEM_PREVIEW_LINES, renderDetails } from '../state'
 import {
   aggregate, countText, estOf, firstLine, fmtCost, fmtDur, fmtTokens, indexCallEstimates,
   metaOf, usageLines,
@@ -961,7 +961,6 @@ export function renderTimeline(): void {
   }
   updateBanner()
   renderDetails()
-  if (state.view === 'trajectory') renderTrajectory()
 }
 
 export function appendLines(lines: any[]): void {
@@ -992,7 +991,6 @@ export function appendLines(lines: any[]): void {
   updateBanner()
   if (hasMeta) renderDetails()
   else if (lines.some((l: any) => l.t === 'usage')) renderDetails()
-  if (state.view === 'trajectory') renderTrajectory()
   if (state.follow) scrollToBottom()
 }
 

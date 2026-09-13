@@ -30,12 +30,12 @@ import {
 } from './state'
 import { bootData, refreshIndex, revealProject } from './data'
 import { projectOf, sessionTitleOf } from './legacy/sidebar'
-import { registerRenderDetails, registerRenderTrajectory } from './state'
-import { renderTrajectory as renderTraj } from './legacy/trajectory'
+import { registerRenderDetails } from './state'
 import { renderDetails as renderDet } from './legacy/details'
 import Sidebar from './components/Sidebar.vue'
 import Timeline from './components/Timeline.vue'
 import InlineMD from './components/InlineMD.vue'
+import Trajectory from './components/Trajectory.vue'
 
 const frame = ref<HTMLElement | null>(null)
 
@@ -183,7 +183,6 @@ onMounted(() => {
     }
   }
   document.addEventListener('keydown', onKeydown)
-  registerRenderTrajectory(renderTraj)
   registerRenderDetails(renderDet)
   // 数据层：首拉 + 2 秒轮询（页面隐藏时跳过）。
   bootData()
@@ -279,7 +278,7 @@ onBeforeUnmount(() => {
       <div id="banner" class="banner" :class="{ hidden: !bannerText }">{{ bannerText }}</div>
       <div class="view-area">
         <Timeline></Timeline>
-        <div id="trajectory" class="trajectory" :class="{ hidden: state.view === 'chat' }"></div>
+        <Trajectory />
       </div>
     </main>
 
