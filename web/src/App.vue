@@ -2,8 +2,7 @@
 // 迁移纪律：本组件（以及后续所有组件）不写任何样式——视觉全部来自
 // 整卷沿用的旧页样式表（src/styles/viewer.css）。模板结构照
 // go/internal/sessionview/assets/viewer.html 的骨架逐节点复刻。
-// 块 1：三栏骨架的布局求解、拖拽分隔条、侧栏/详情栏折叠、页签切换、
-// 六个开关的状态与落盘、主题、灯箱常驻 DOM。
+// 块 1：三栏骨架交互；块 2：侧栏（数据层 + 分组树）接上。
 import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import {
   applyLayout,
@@ -17,11 +16,9 @@ import {
   lightbox,
   loadState,
   persistLayout,
-  refreshIndex,
   renderDetails,
   renderTimeline,
   renderTrajectory,
-  ROOT_PROJECT,
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
@@ -34,13 +31,16 @@ import {
   toggleSidebar,
   toggleTheme,
 } from './state'
+import { bootData, refreshIndex, revealProject } from './data'
+import { projectOf, sessionTitleOf } from './legacy/sidebar'
+import Sidebar from './components/Sidebar.vue'
+import InlineMD from './components/InlineMD.vue'
 
 const frame = ref<HTMLElement | null>(null)
-const search = ref('')
 
 /* 拖拽分隔条：8px 命中区、pointer capture、松手才落盘、双击回默认宽度。
  * 旧页 wireHandle 的 Vue 形态——同一个处理器给两侧用，base 记拖拽起点列宽。 */
-const drag = ref<{ side: 'sidebar' | 'details'; handle: Element } | null>(null)
+const drag = ref<{ side: 'sidebar' | 'details' } | null>(null)
 let dragOrigin = 0
 let dragBase = 0
 
@@ -48,8 +48,8 @@ function onDragStart(ev: PointerEvent, side: 'sidebar' | 'details') {
   ev.preventDefault()
   dragOrigin = ev.clientX
   dragBase = side === 'sidebar' ? layout.cols.sidebar : layout.cols.details
-  drag.value = { side, handle: ev.currentTarget as Element }
   ;(ev.currentTarget as Element).setPointerCapture?.(ev.pointerId)
+  drag.value = { side }
 }
 
 function onDragMove(ev: PointerEvent) {
@@ -110,9 +110,6 @@ function onClickUnit() {
   renderTimeline()
   renderTrajectory()
   renderDetails()
-  // 侧栏提示里也有计数：签名作废，强制整份重建（轮询守卫不该拦用户换单位）。
-  state.listSig = ''
-  refreshList()
 }
 
 function scrollToBottom() {
@@ -122,16 +119,8 @@ function scrollToBottom() {
   }, 0)
 }
 
-function onClickSearch() {
-  /* 搜索框 v-model 绑 state.filter；列表刷新在侧栏块接线。 */
-}
-
-function onClickRefresh() {
-  refreshIndex()
-}
-
-/* 徽标：旧页 renderHeader 行为——选中会话后 #header-actions 整体重建为
- * 摘要徽标（mode-badge 从 DOM 移除）；未选中时才是 live 徽标。 */
+/* 徽标与面包屑：旧页 renderHeader 行为——选中会话后 #header-actions 整体
+ * 重建为摘要徽标（mode-badge 从 DOM 移除）；未选中时才是 live 徽标。 */
 const badgeText = computed(() => (state.polling ? '实时' : '实时（已断开）'))
 const headerSummary = computed(() => {
   const cur = state.current
@@ -143,9 +132,17 @@ const headerSummary = computed(() => {
   if (state.badLines) parts.push('坏行 ' + state.badLines)
   return parts.join(' · ')
 })
-/* 面包屑：未选中给占位；选中后项目名可点（revealProject 在侧栏块接线）。 */
-const curProject = computed(() => (state.current ? state.current.project || ROOT_PROJECT : ''))
-const sessionTitle = computed(() => (state.current ? state.current.name || state.current.id : ''))
+const curProject = computed(() => (state.current ? state.current.project || projectOf(state.current.id) : ''))
+const sessionTitle = computed(() => (state.current ? sessionTitleOf(state.current) : ''))
+
+/* 横幅：坏行提示与拉取失败共用一条（旧页 updateBanner/setBanner 的语义）。
+ * 坏行优先；拉取失败的信息保留到坏行出现或下次成功渲染时。 */
+const bannerText = computed(() => {
+  if (state.badLines > 0) {
+    return '已跳过 ' + state.badLines + ' 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）'
+  }
+  return state.pullError
+})
 
 /* 按键：Esc 关灯箱；[ 折侧栏、] 折详情（输入时不触发）。 */
 function onKeydown(ev: KeyboardEvent) {
@@ -158,11 +155,11 @@ function onKeydown(ev: KeyboardEvent) {
 }
 
 let ro: ResizeObserver | null = null
+let pollTimer = 0
 
 onMounted(() => {
   loadState()
   applyTheme(storedTheme())
-  // 视口宽度进 reactive：布局求解（watchEffect → applyLayout）随之重跑。
   const el = frame.value
   if (el) {
     layout.viewport = el.clientWidth || window.innerWidth
@@ -176,6 +173,11 @@ onMounted(() => {
     }
   }
   document.addEventListener('keydown', onKeydown)
+  // 数据层：首拉 + 2 秒轮询（页面隐藏时跳过）。
+  bootData()
+  pollTimer = window.setInterval(() => {
+    if (!document.hidden) void refreshIndex()
+  }, 2000)
 })
 
 function onResize() {
@@ -194,6 +196,7 @@ watchEffect(() => {
 
 onBeforeUnmount(() => {
   ro?.disconnect()
+  if (pollTimer) window.clearInterval(pollTimer)
   document.removeEventListener('keydown', onKeydown)
 })
 </script>
@@ -208,24 +211,7 @@ onBeforeUnmount(() => {
     :data-details-collapsed="layout.detailsCollapsed ? '' : undefined"
     :data-dragging="drag ? '' : undefined"
   >
-    <aside id="sidebar-col" class="sidebar-col">
-      <div class="side-head">
-        <span class="side-title">工作区</span>
-        <button id="refresh" class="icon-btn" type="button" title="重新扫描会话" @click="onClickRefresh">⟳</button>
-      </div>
-      <div class="side-search">
-        <input id="search" v-model="state.filter" type="search" placeholder="过滤：会话名 / 阶段 / 项目…" autocomplete="off" @input="onClickSearch">
-      </div>
-      <div class="side-list-wrap">
-        <div id="session-list" class="session-list" role="tree" aria-label="会话列表"></div>
-        <div class="list-fade" aria-hidden="true"></div>
-      </div>
-      <div id="side-totals" class="side-totals hidden"></div>
-      <div class="side-status">
-        <div id="root-path" class="root-path" title="扫描根目录">—</div>
-        <div id="side-foot" class="side-foot"></div>
-      </div>
-    </aside>
+    <Sidebar></Sidebar>
 
     <div
       id="handle-sidebar"
@@ -252,7 +238,9 @@ onBeforeUnmount(() => {
             <template v-else>
               <button class="crumb is-link" type="button" title="在侧栏里定位到这个项目" @click="revealProject(curProject)">{{ curProject }}</button>
               <span class="crumb-sep">›</span>
-              <span class="crumb crumb-current" :title="state.current.id">{{ sessionTitle }}</span>
+              <span class="crumb crumb-current" :title="state.current.id">
+                <InlineMD :text="sessionTitle"></InlineMD>
+              </span>
             </template>
           </nav>
           <div id="header-actions" class="header-actions">
@@ -276,7 +264,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </header>
-      <div id="banner" class="banner" :class="{ hidden: !state.badLines }"></div>
+      <div id="banner" class="banner" :class="{ hidden: !bannerText }">{{ bannerText }}</div>
       <div class="view-area">
         <div id="timeline" class="timeline" :class="{ hidden: state.view !== 'chat' }"></div>
         <div id="trajectory" class="trajectory" :class="{ hidden: state.view === 'chat' }"></div>

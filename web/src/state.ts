@@ -52,8 +52,6 @@ export function storeJSON(key: string, fallback: Record<string, unknown>): Recor
 
 /* ---------- 文案短写（旧页同名函数） ---------- */
 
-export const ROOT_PROJECT = '（根目录）'
-
 export function fmtSize(bytes: number | null | undefined): string {
   if (!bytes && bytes !== 0) return '—'
   if (bytes < 1024) return bytes + ' B'
@@ -106,6 +104,7 @@ export const state = reactive({
   callEst: {} as Record<string, any>,
   anchors: {} as Record<string, any>,
   badLines: 0,
+  pullError: '',
   polling: false,
   theme: 'light',
   view: 'chat',
@@ -275,6 +274,19 @@ export function closeLightbox(): void {
 }
 
 /* ---------- 数据层占位（后续块替换成真实现） ---------- */
+
+/* 旧页 scrollToBottom：把消息流滚到底部（自动跟随/切会话用）。 */
+export function scrollToBottomOfTimeline(): void {
+  window.setTimeout(() => {
+    const el = document.getElementById('timeline')
+    if (el) el.scrollTop = el.scrollHeight
+  }, 0)
+}
+
+/* 旧页 setBanner：错误横幅（坏行提示由 updateBanner 逻辑接管，见 App.vue）。 */
+export function setBannerText(text: string): void {
+  state.pullError = text
+}
 
 export function refreshIndex(): Promise<void> {
   return Promise.resolve()

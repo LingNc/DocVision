@@ -20,8 +20,8 @@
   (key.charCodeAt(2) > 122 || key.charCodeAt(2) < 97);
   const isModelListener = (key) => key.startsWith("onUpdate:");
   const extend = Object.assign;
-  const remove = (arr, el) => {
-    const i = arr.indexOf(el);
+  const remove = (arr, el2) => {
+    const i = arr.indexOf(el2);
     if (i > -1) {
       arr.splice(i, 1);
     }
@@ -2622,7 +2622,91 @@
   function onErrorCaptured(hook, target = currentInstance) {
     injectHook("ec", hook, target);
   }
+  const COMPONENTS = "components";
   const NULL_DYNAMIC_COMPONENT = /* @__PURE__ */ Symbol.for("v-ndc");
+  function resolveDynamicComponent(component) {
+    if (isString(component)) {
+      return resolveAsset(COMPONENTS, component, false) || component;
+    } else {
+      return component || NULL_DYNAMIC_COMPONENT;
+    }
+  }
+  function resolveAsset(type, name, warnMissing = true, maybeSelfReference = false) {
+    const instance = currentRenderingInstance || currentInstance;
+    if (instance) {
+      const Component = instance.type;
+      {
+        const selfName = getComponentName(
+          Component,
+          false
+        );
+        if (selfName && (selfName === name || selfName === camelize(name) || selfName === capitalize(camelize(name)))) {
+          return Component;
+        }
+      }
+      const res = (
+        // local registration
+        // check instance[type] first which is resolved for options API
+        resolve(instance[type] || Component[type], name) || // global registration
+        resolve(instance.appContext[type], name)
+      );
+      if (!res && maybeSelfReference) {
+        return Component;
+      }
+      return res;
+    }
+  }
+  function resolve(registry, name) {
+    return registry && (registry[name] || registry[camelize(name)] || registry[capitalize(camelize(name))]);
+  }
+  function renderList(source, renderItem, cache, index) {
+    let ret;
+    const cached = cache;
+    const sourceIsArray = isArray(source);
+    if (sourceIsArray || isString(source)) {
+      const sourceIsReactiveArray = sourceIsArray && /* @__PURE__ */ isReactive(source);
+      let needsWrap = false;
+      let isReadonlySource = false;
+      if (sourceIsReactiveArray) {
+        needsWrap = !/* @__PURE__ */ isShallow(source);
+        isReadonlySource = /* @__PURE__ */ isReadonly(source);
+        source = shallowReadArray(source);
+      }
+      ret = new Array(source.length);
+      for (let i = 0, l = source.length; i < l; i++) {
+        ret[i] = renderItem(
+          needsWrap ? isReadonlySource ? toReadonly(toReactive(source[i])) : toReactive(source[i]) : source[i],
+          i,
+          void 0,
+          cached
+        );
+      }
+    } else if (typeof source === "number") {
+      {
+        ret = new Array(source);
+        for (let i = 0; i < source; i++) {
+          ret[i] = renderItem(i + 1, i, void 0, cached);
+        }
+      }
+    } else if (isObject(source)) {
+      if (source[Symbol.iterator]) {
+        ret = Array.from(
+          source,
+          (item, i) => renderItem(item, i, void 0, cached)
+        );
+      } else {
+        const keys = Object.keys(source);
+        ret = new Array(keys.length);
+        for (let i = 0, l = keys.length; i < l; i++) {
+          const key = keys[i];
+          ret[i] = renderItem(source[key], key, i, cached);
+        }
+      }
+    } else {
+      ret = [];
+    }
+    return ret;
+  }
   const getPublicInstance = (i) => {
     if (!i) return null;
     if (isStatefulComponent(i)) return getComponentPublicInstance(i);
@@ -3507,22 +3591,22 @@
     }
     return nextProp !== prevProp;
   }
-  function updateHOCHostEl({ vnode, parent, suspense }, el) {
+  function updateHOCHostEl({ vnode, parent, suspense }, el2) {
     while (parent) {
       const root = parent.subTree;
       if (root.suspense && root.suspense.activeBranch === vnode) {
-        root.suspense.vnode.el = root.el = el;
+        root.suspense.vnode.el = root.el = el2;
         vnode = root;
       }
       if (root === vnode) {
-        (vnode = parent.vnode).el = el;
+        (vnode = parent.vnode).el = el2;
         parent = parent.parent;
       } else {
         break;
       }
     }
     if (suspense && suspense.activeBranch === vnode) {
-      suspense.vnode.el = el;
+      suspense.vnode.el = el2;
     }
   }
   const internalObjectProto = {};
@@ -4020,9 +4104,9 @@
           anchor
         );
       } else {
-        const el = n2.el = n1.el;
+        const el2 = n2.el = n1.el;
         if (n2.children !== n1.children) {
-          hostSetText(el, n2.children);
+          hostSetText(el2, n2.children);
         }
       }
     };
@@ -4047,21 +4131,21 @@
         n2.anchor
       );
     };
-    const moveStaticNode = ({ el, anchor }, container, nextSibling) => {
+    const moveStaticNode = ({ el: el2, anchor }, container, nextSibling) => {
       let next;
-      while (el && el !== anchor) {
-        next = hostNextSibling(el);
-        hostInsert(el, container, nextSibling);
-        el = next;
+      while (el2 && el2 !== anchor) {
+        next = hostNextSibling(el2);
+        hostInsert(el2, container, nextSibling);
+        el2 = next;
       }
       hostInsert(anchor, container, nextSibling);
     };
-    const removeStaticNode = ({ el, anchor }) => {
+    const removeStaticNode = ({ el: el2, anchor }) => {
       let next;
-      while (el && el !== anchor) {
-        next = hostNextSibling(el);
-        hostRemove(el);
-        el = next;
+      while (el2 && el2 !== anchor) {
+        next = hostNextSibling(el2);
+        hostRemove(el2);
+        el2 = next;
       }
       hostRemove(anchor);
     };
@@ -4105,21 +4189,21 @@
       }
     };
     const mountElement = (vnode, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
-      let el;
+      let el2;
       let vnodeHook;
       const { props, shapeFlag, transition, dirs } = vnode;
-      el = vnode.el = hostCreateElement(
+      el2 = vnode.el = hostCreateElement(
         vnode.type,
         namespace,
         props && props.is,
         props
       );
       if (shapeFlag & 8) {
-        hostSetElementText(el, vnode.children);
+        hostSetElementText(el2, vnode.children);
       } else if (shapeFlag & 16) {
         mountChildren(
           vnode.children,
-          el,
+          el2,
           null,
           parentComponent,
           parentSuspense,
@@ -4131,15 +4215,15 @@
       if (dirs) {
         invokeDirectiveHook(vnode, null, parentComponent, "created");
       }
-      setScopeId(el, vnode, vnode.scopeId, slotScopeIds, parentComponent);
+      setScopeId(el2, vnode, vnode.scopeId, slotScopeIds, parentComponent);
       if (props) {
         for (const key in props) {
           if (key !== "value" && !isReservedProp(key)) {
-            hostPatchProp(el, key, null, props[key], namespace, parentComponent);
+            hostPatchProp(el2, key, null, props[key], namespace, parentComponent);
           }
         }
         if ("value" in props) {
-          hostPatchProp(el, "value", null, props.value, namespace);
+          hostPatchProp(el2, "value", null, props.value, namespace);
         }
         if (vnodeHook = props.onVnodeBeforeMount) {
           invokeVNodeHook(vnodeHook, parentComponent, vnode);
@@ -4150,27 +4234,27 @@
       }
       const needCallTransitionHooks = needTransition(parentSuspense, transition);
       if (needCallTransitionHooks) {
-        transition.beforeEnter(el);
+        transition.beforeEnter(el2);
       }
-      hostInsert(el, container, anchor);
+      hostInsert(el2, container, anchor);
       if ((vnodeHook = props && props.onVnodeMounted) || needCallTransitionHooks || dirs) {
         queuePostRenderEffect(() => {
           try {
             vnodeHook && invokeVNodeHook(vnodeHook, parentComponent, vnode);
-            needCallTransitionHooks && transition.enter(el);
+            needCallTransitionHooks && transition.enter(el2);
             dirs && invokeDirectiveHook(vnode, null, parentComponent, "mounted");
           } finally {
           }
         }, parentSuspense);
       }
     };
-    const setScopeId = (el, vnode, scopeId, slotScopeIds, parentComponent) => {
+    const setScopeId = (el2, vnode, scopeId, slotScopeIds, parentComponent) => {
       if (scopeId) {
-        hostSetScopeId(el, scopeId);
+        hostSetScopeId(el2, scopeId);
       }
       if (slotScopeIds) {
         for (let i = 0; i < slotScopeIds.length; i++) {
-          hostSetScopeId(el, slotScopeIds[i]);
+          hostSetScopeId(el2, slotScopeIds[i]);
         }
       }
       if (parentComponent) {
@@ -4178,7 +4262,7 @@
         if (vnode === subTree || isSuspense(subTree.type) && (subTree.ssContent === vnode || subTree.ssFallback === vnode)) {
           const parentVNode = parentComponent.vnode;
           setScopeId(
-            el,
+            el2,
             parentVNode,
             parentVNode.scopeId,
             parentVNode.slotScopeIds,
@@ -4204,7 +4288,7 @@
       }
     };
     const patchElement = (n1, n2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
-      const el = n2.el = n1.el;
+      const el2 = n2.el = n1.el;
       let { patchFlag, dynamicChildren, dirs } = n2;
       patchFlag |= n1.patchFlag & 16;
       const oldProps = n1.props || EMPTY_OBJ;
@@ -4228,13 +4312,13 @@
         dynamicChildren = null;
       }
       if (oldProps.innerHTML && newProps.innerHTML == null || oldProps.textContent && newProps.textContent == null) {
-        hostSetElementText(el, "");
+        hostSetElementText(el2, "");
       }
       if (dynamicChildren) {
         patchBlockChildren(
           n1.dynamicChildren,
           dynamicChildren,
-          el,
+          el2,
           parentComponent,
           parentSuspense,
           resolveChildrenNamespace(n2, namespace),
@@ -4244,7 +4328,7 @@
         patchChildren(
           n1,
           n2,
-          el,
+          el2,
           null,
           parentComponent,
           parentSuspense,
@@ -4255,15 +4339,15 @@
       }
       if (patchFlag > 0) {
         if (patchFlag & 16) {
-          patchProps(el, oldProps, newProps, parentComponent, namespace);
+          patchProps(el2, oldProps, newProps, parentComponent, namespace);
         } else {
           if (patchFlag & 2) {
             if (oldProps.class !== newProps.class) {
-              hostPatchProp(el, "class", null, newProps.class, namespace);
+              hostPatchProp(el2, "class", null, newProps.class, namespace);
             }
           }
           if (patchFlag & 4) {
-            hostPatchProp(el, "style", oldProps.style, newProps.style, namespace);
+            hostPatchProp(el2, "style", oldProps.style, newProps.style, namespace);
           }
           if (patchFlag & 8) {
             const propsToUpdate = n2.dynamicProps;
@@ -4272,18 +4356,18 @@
               const prev = oldProps[key];
               const next = newProps[key];
               if (next !== prev || key === "value") {
-                hostPatchProp(el, key, prev, next, namespace, parentComponent);
+                hostPatchProp(el2, key, prev, next, namespace, parentComponent);
               }
             }
           }
         }
         if (patchFlag & 1) {
           if (n1.children !== n2.children) {
-            hostSetElementText(el, n2.children);
+            hostSetElementText(el2, n2.children);
           }
         }
       } else if (!optimized && dynamicChildren == null) {
-        patchProps(el, oldProps, newProps, parentComponent, namespace);
+        patchProps(el2, oldProps, newProps, parentComponent, namespace);
       }
       if ((vnodeHook = newProps.onVnodeUpdated) || dirs) {
         queuePostRenderEffect(() => {
@@ -4323,13 +4407,13 @@
         );
       }
     };
-    const patchProps = (el, oldProps, newProps, parentComponent, namespace) => {
+    const patchProps = (el2, oldProps, newProps, parentComponent, namespace) => {
       if (oldProps !== newProps) {
         if (oldProps !== EMPTY_OBJ) {
           for (const key in oldProps) {
             if (!isReservedProp(key) && !(key in newProps)) {
               hostPatchProp(
-                el,
+                el2,
                 key,
                 oldProps[key],
                 null,
@@ -4344,11 +4428,11 @@
           const next = newProps[key];
           const prev = oldProps[key];
           if (next !== prev && key !== "value") {
-            hostPatchProp(el, key, prev, next, namespace, parentComponent);
+            hostPatchProp(el2, key, prev, next, namespace, parentComponent);
           }
         }
         if ("value" in newProps) {
-          hostPatchProp(el, "value", oldProps.value, newProps.value, namespace);
+          hostPatchProp(el2, "value", oldProps.value, newProps.value, namespace);
         }
       }
     };
@@ -4494,7 +4578,7 @@
       const componentUpdateFn = () => {
         if (!instance.isMounted) {
           let vnodeHook;
-          const { el, props } = initialVNode;
+          const { el: el2, props } = initialVNode;
           const { bm, m, parent, root, type } = instance;
           const isAsyncWrapperVNode = isAsyncWrapper(initialVNode);
           toggleRecurse(instance, false);
@@ -4904,7 +4988,7 @@
       }
     };
     const move = (vnode, container, anchor, moveType, parentSuspense = null) => {
-      const { el, type, transition, children, shapeFlag } = vnode;
+      const { el: el2, type, transition, children, shapeFlag } = vnode;
       if (shapeFlag & 6) {
         move(vnode.component.subTree, container, anchor, moveType);
         return;
@@ -4918,7 +5002,7 @@
         return;
       }
       if (type === Fragment) {
-        hostInsert(el, container, anchor);
+        hostInsert(el2, container, anchor);
         for (let i = 0; i < children.length; i++) {
           move(children[i], container, anchor, moveType);
         }
@@ -4932,26 +5016,26 @@
       const needTransition2 = moveType !== 2 && shapeFlag & 1 && transition;
       if (needTransition2) {
         if (moveType === 0) {
-          if (transition.persisted && !el[leaveCbKey]) {
-            hostInsert(el, container, anchor);
+          if (transition.persisted && !el2[leaveCbKey]) {
+            hostInsert(el2, container, anchor);
           } else {
-            transition.beforeEnter(el);
-            hostInsert(el, container, anchor);
-            queuePostRenderEffect(() => transition.enter(el), parentSuspense);
+            transition.beforeEnter(el2);
+            hostInsert(el2, container, anchor);
+            queuePostRenderEffect(() => transition.enter(el2), parentSuspense);
           }
         } else {
           const { leave, delayLeave, afterLeave } = transition;
           const remove22 = () => {
             if (vnode.ctx.isUnmounted) {
-              hostRemove(el);
+              hostRemove(el2);
             } else {
-              hostInsert(el, container, anchor);
+              hostInsert(el2, container, anchor);
             }
           };
           const performLeave = () => {
-            const wasLeaving = el._isLeaving || !!el[leaveCbKey];
-            if (el._isLeaving) {
-              el[leaveCbKey](
+            const wasLeaving = el2._isLeaving || !!el2[leaveCbKey];
+            if (el2._isLeaving) {
+              el2[leaveCbKey](
                 true
                 /* cancelled */
               );
@@ -4959,20 +5043,20 @@
             if (transition.persisted && !wasLeaving) {
               remove22();
             } else {
-              leave(el, () => {
+              leave(el2, () => {
                 remove22();
                 afterLeave && afterLeave();
               });
             }
           };
           if (delayLeave) {
-            delayLeave(el, remove22, performLeave);
+            delayLeave(el2, remove22, performLeave);
           } else {
             performLeave();
           }
         }
       } else {
-        hostInsert(el, container, anchor);
+        hostInsert(el2, container, anchor);
       }
     };
     const unmount = (vnode, parentComponent, parentSuspense, doRemove = false, optimized = false) => {
@@ -5060,10 +5144,10 @@
       }
     };
     const remove2 = (vnode) => {
-      const { type, el, anchor, transition } = vnode;
+      const { type, el: el2, anchor, transition } = vnode;
       if (type === Fragment) {
         {
-          removeFragment(el, anchor);
+          removeFragment(el2, anchor);
         }
         return;
       }
@@ -5072,14 +5156,14 @@
         return;
       }
       const performRemove = () => {
-        hostRemove(el);
+        hostRemove(el2);
         if (transition && !transition.persisted && transition.afterLeave) {
           transition.afterLeave();
         }
       };
       if (vnode.shapeFlag & 1 && transition && !transition.persisted) {
         const { leave, delayLeave } = transition;
-        const performLeave = () => leave(el, performRemove);
+        const performLeave = () => leave(el2, performRemove);
         if (delayLeave) {
           delayLeave(vnode.el, performRemove, performLeave);
         } else {
@@ -5129,9 +5213,9 @@
       if (vnode.shapeFlag & 128) {
         return vnode.suspense.next();
       }
-      const el = hostNextSibling(vnode.anchor || vnode.el);
-      const teleportEnd = el && el[TeleportEndKey];
-      return teleportEnd ? hostNextSibling(teleportEnd) : el;
+      const el2 = hostNextSibling(vnode.anchor || vnode.el);
+      const teleportEnd = el2 && el2[TeleportEndKey];
+      return teleportEnd ? hostNextSibling(teleportEnd) : el2;
     };
     let isFlushing = false;
     const render = (vnode, container, namespace) => {
@@ -5340,6 +5424,18 @@
       )
     );
   }
+  function createBlock(type, props, children, patchFlag, dynamicProps) {
+    return setupBlock(
+      createVNode(
+        type,
+        props,
+        children,
+        patchFlag,
+        dynamicProps,
+        true
+      )
+    );
+  }
   function isVNode(value) {
     return value ? value.__v_isVNode === true : false;
   }
@@ -5522,6 +5618,9 @@
   }
   function createTextVNode(text = " ", flag = 0) {
     return createVNode(Text, null, text, flag);
+  }
+  function createCommentVNode(text = "", asBlock = false) {
+    return asBlock ? (openBlock(), createBlock(Comment, null, text)) : createVNode(Comment, null, text);
   }
   function normalizeVNode(child) {
     if (child == null || typeof child === "boolean") {
@@ -5945,25 +6044,25 @@
       }
     },
     createElement: (tag, namespace, is, props) => {
-      const el = namespace === "svg" ? doc.createElementNS(svgNS, tag) : namespace === "mathml" ? doc.createElementNS(mathmlNS, tag) : is ? doc.createElement(tag, { is }) : doc.createElement(tag);
+      const el2 = namespace === "svg" ? doc.createElementNS(svgNS, tag) : namespace === "mathml" ? doc.createElementNS(mathmlNS, tag) : is ? doc.createElement(tag, { is }) : doc.createElement(tag);
       if (tag === "select" && props && props.multiple != null) {
-        el.setAttribute("multiple", props.multiple);
+        el2.setAttribute("multiple", props.multiple);
       }
-      return el;
+      return el2;
     },
     createText: (text) => doc.createTextNode(text),
     createComment: (text) => doc.createComment(text),
     setText: (node, text) => {
       node.nodeValue = text;
     },
-    setElementText: (el, text) => {
-      el.textContent = text;
+    setElementText: (el2, text) => {
+      el2.textContent = text;
     },
     parentNode: (node) => node.parentNode,
     nextSibling: (node) => node.nextSibling,
     querySelector: (selector) => doc.querySelector(selector),
-    setScopeId(el, id) {
-      el.setAttribute(id, "");
+    setScopeId(el2, id) {
+      el2.setAttribute(id, "");
     },
     // __UNSAFE__
     // Reason: innerHTML.
@@ -5999,25 +6098,25 @@
     }
   };
   const vtcKey = /* @__PURE__ */ Symbol("_vtc");
-  function patchClass(el, value, isSVG) {
-    const transitionClasses = el[vtcKey];
+  function patchClass(el2, value, isSVG) {
+    const transitionClasses = el2[vtcKey];
     if (transitionClasses) {
       value = (value ? [value, ...transitionClasses] : [...transitionClasses]).join(" ");
     }
     if (value == null) {
-      el.removeAttribute("class");
+      el2.removeAttribute("class");
     } else if (isSVG) {
-      el.setAttribute("class", value);
+      el2.setAttribute("class", value);
     } else {
-      el.className = value;
+      el2.className = value;
     }
   }
   const vShowOriginalDisplay = /* @__PURE__ */ Symbol("_vod");
   const vShowHidden = /* @__PURE__ */ Symbol("_vsh");
   const CSS_VAR_TEXT = /* @__PURE__ */ Symbol("");
   const displayRE = /(?:^|;)\s*display\s*:/;
-  function patchStyle(el, prev, next) {
-    const style = el.style;
+  function patchStyle(el2, prev, next) {
+    const style = el2.style;
     const isCssString = isString(next);
     let hasControlledDisplay = false;
     if (next && !isCssString) {
@@ -6044,7 +6143,7 @@
         const value = next[key];
         if (value != null) {
           if (!shouldPreserveTextareaResizeStyle(
-            el,
+            el2,
             key,
             !isString(prev) && prev ? prev[key] : void 0,
             value
@@ -6066,12 +6165,12 @@
           hasControlledDisplay = displayRE.test(next);
         }
       } else if (prev) {
-        el.removeAttribute("style");
+        el2.removeAttribute("style");
       }
     }
-    if (vShowOriginalDisplay in el) {
-      el[vShowOriginalDisplay] = hasControlledDisplay ? style.display : "";
-      if (el[vShowHidden]) {
+    if (vShowOriginalDisplay in el2) {
+      el2[vShowOriginalDisplay] = hasControlledDisplay ? style.display : "";
+      if (el2[vShowHidden]) {
         style.display = "none";
       }
     }
@@ -6122,56 +6221,56 @@
     }
     return rawName;
   }
-  function shouldPreserveTextareaResizeStyle(el, key, prev, next) {
-    return el.tagName === "TEXTAREA" && (key === "width" || key === "height") && isString(next) && prev === next;
+  function shouldPreserveTextareaResizeStyle(el2, key, prev, next) {
+    return el2.tagName === "TEXTAREA" && (key === "width" || key === "height") && isString(next) && prev === next;
   }
   const xlinkNS = "http://www.w3.org/1999/xlink";
-  function patchAttr(el, key, value, isSVG, instance, isBoolean = isSpecialBooleanAttr(key)) {
+  function patchAttr(el2, key, value, isSVG, instance, isBoolean = isSpecialBooleanAttr(key)) {
     if (isSVG && key.startsWith("xlink:")) {
       if (value == null) {
-        el.removeAttributeNS(xlinkNS, key.slice(6, key.length));
+        el2.removeAttributeNS(xlinkNS, key.slice(6, key.length));
       } else {
-        el.setAttributeNS(xlinkNS, key, value);
+        el2.setAttributeNS(xlinkNS, key, value);
       }
     } else {
       if (value == null || isBoolean && !includeBooleanAttr(value)) {
-        el.removeAttribute(key);
+        el2.removeAttribute(key);
       } else {
-        el.setAttribute(
+        el2.setAttribute(
           key,
           isBoolean ? "" : isSymbol(value) ? String(value) : value
         );
       }
     }
   }
-  function patchDOMProp(el, key, value, parentComponent, attrName) {
+  function patchDOMProp(el2, key, value, parentComponent, attrName) {
     if (key === "innerHTML" || key === "textContent") {
       if (value != null) {
-        el[key] = key === "innerHTML" ? unsafeToTrustedHTML(value) : value;
+        el2[key] = key === "innerHTML" ? unsafeToTrustedHTML(value) : value;
       }
       return;
     }
-    const tag = el.tagName;
+    const tag = el2.tagName;
     if (key === "value" && tag !== "PROGRESS" && // custom elements may use _value internally
     !tag.includes("-")) {
-      const oldValue = tag === "OPTION" ? el.getAttribute("value") || "" : el.value;
+      const oldValue = tag === "OPTION" ? el2.getAttribute("value") || "" : el2.value;
       const newValue = value == null ? (
         // #11647: value should be set as empty string for null and undefined,
         // but <input type="checkbox"> should be set as 'on'.
-        el.type === "checkbox" ? "on" : ""
+        el2.type === "checkbox" ? "on" : ""
       ) : String(value);
-      if (oldValue !== newValue || !("_value" in el)) {
-        el.value = newValue;
+      if (oldValue !== newValue || !("_value" in el2)) {
+        el2.value = newValue;
       }
       if (value == null) {
-        el.removeAttribute(key);
+        el2.removeAttribute(key);
       }
-      el._value = value;
+      el2._value = value;
       return;
     }
     let needRemove = false;
     if (value === "" || value == null) {
-      const type = typeof el[key];
+      const type = typeof el2[key];
       if (type === "boolean") {
         value = includeBooleanAttr(value);
       } else if (value == null && type === "string") {
@@ -6183,20 +6282,20 @@
       }
     }
     try {
-      el[key] = value;
+      el2[key] = value;
     } catch (e) {
     }
-    needRemove && el.removeAttribute(attrName || key);
+    needRemove && el2.removeAttribute(attrName || key);
   }
-  function addEventListener(el, event, handler, options) {
-    el.addEventListener(event, handler, options);
+  function addEventListener(el2, event, handler, options) {
+    el2.addEventListener(event, handler, options);
   }
-  function removeEventListener(el, event, handler, options) {
-    el.removeEventListener(event, handler, options);
+  function removeEventListener(el2, event, handler, options) {
+    el2.removeEventListener(event, handler, options);
   }
   const veiKey = /* @__PURE__ */ Symbol("_vei");
-  function patchEvent(el, rawName, prevValue, nextValue, instance = null) {
-    const invokers = el[veiKey] || (el[veiKey] = {});
+  function patchEvent(el2, rawName, prevValue, nextValue, instance = null) {
+    const invokers = el2[veiKey] || (el2[veiKey] = {});
     const existingInvoker = invokers[rawName];
     if (nextValue && existingInvoker) {
       existingInvoker.value = nextValue;
@@ -6207,9 +6306,9 @@
           nextValue,
           instance
         );
-        addEventListener(el, name, invoker, options);
+        addEventListener(el2, name, invoker, options);
       } else if (existingInvoker) {
-        removeEventListener(el, name, existingInvoker, options);
+        removeEventListener(el2, name, existingInvoker, options);
         invokers[rawName] = void 0;
       }
     }
@@ -6275,43 +6374,43 @@
   }
   const isNativeOn = (key) => key.charCodeAt(0) === 111 && key.charCodeAt(1) === 110 && // lowercase letter
   key.charCodeAt(2) > 96 && key.charCodeAt(2) < 123;
-  const patchProp = (el, key, prevValue, nextValue, namespace, parentComponent) => {
+  const patchProp = (el2, key, prevValue, nextValue, namespace, parentComponent) => {
     const isSVG = namespace === "svg";
     if (key === "class") {
-      patchClass(el, nextValue, isSVG);
+      patchClass(el2, nextValue, isSVG);
     } else if (key === "style") {
-      patchStyle(el, prevValue, nextValue);
+      patchStyle(el2, prevValue, nextValue);
     } else if (isOn(key)) {
       if (!isModelListener(key)) {
-        patchEvent(el, key, prevValue, nextValue, parentComponent);
+        patchEvent(el2, key, prevValue, nextValue, parentComponent);
       }
-    } else if (key[0] === "." ? (key = key.slice(1), true) : key[0] === "^" ? (key = key.slice(1), false) : shouldSetAsProp(el, key, nextValue, isSVG)) {
-      patchDOMProp(el, key, nextValue);
-      if (!el.tagName.includes("-") && (key === "value" || key === "checked" || key === "selected")) {
-        patchAttr(el, key, nextValue, isSVG, parentComponent, key !== "value");
+    } else if (key[0] === "." ? (key = key.slice(1), true) : key[0] === "^" ? (key = key.slice(1), false) : shouldSetAsProp(el2, key, nextValue, isSVG)) {
+      patchDOMProp(el2, key, nextValue);
+      if (!el2.tagName.includes("-") && (key === "value" || key === "checked" || key === "selected")) {
+        patchAttr(el2, key, nextValue, isSVG, parentComponent, key !== "value");
       }
     } else if (
       // #11081 force set props for possible async custom element
-      el._isVueCE && // #12408 check if it's declared prop or it's async custom element
-      (shouldSetAsPropForVueCE(el, key) || // @ts-expect-error _def is private
-      el._def.__asyncLoader && (/[A-Z]/.test(key) || !isString(nextValue)))
+      el2._isVueCE && // #12408 check if it's declared prop or it's async custom element
+      (shouldSetAsPropForVueCE(el2, key) || // @ts-expect-error _def is private
+      el2._def.__asyncLoader && (/[A-Z]/.test(key) || !isString(nextValue)))
     ) {
-      patchDOMProp(el, camelize(key), nextValue, parentComponent, key);
+      patchDOMProp(el2, camelize(key), nextValue, parentComponent, key);
     } else {
       if (key === "true-value") {
-        el._trueValue = nextValue;
+        el2._trueValue = nextValue;
       } else if (key === "false-value") {
-        el._falseValue = nextValue;
+        el2._falseValue = nextValue;
       }
-      patchAttr(el, key, nextValue, isSVG);
+      patchAttr(el2, key, nextValue, isSVG);
     }
   };
-  function shouldSetAsProp(el, key, value, isSVG) {
+  function shouldSetAsProp(el2, key, value, isSVG) {
     if (isSVG) {
       if (key === "innerHTML" || key === "textContent") {
         return true;
       }
-      if (key in el && isNativeOn(key) && isFunction(value)) {
+      if (key in el2 && isNativeOn(key) && isFunction(value)) {
         return true;
       }
       return false;
@@ -6319,20 +6418,20 @@
     if (key === "spellcheck" || key === "draggable" || key === "translate" || key === "autocorrect") {
       return false;
     }
-    if (key === "sandbox" && el.tagName === "IFRAME") {
+    if (key === "sandbox" && el2.tagName === "IFRAME") {
       return false;
     }
     if (key === "form") {
       return false;
     }
-    if (key === "list" && el.tagName === "INPUT") {
+    if (key === "list" && el2.tagName === "INPUT") {
       return false;
     }
-    if (key === "type" && el.tagName === "TEXTAREA") {
+    if (key === "type" && el2.tagName === "TEXTAREA") {
       return false;
     }
     if (key === "width" || key === "height") {
-      const tag = el.tagName;
+      const tag = el2.tagName;
       if (tag === "IMG" || tag === "VIDEO" || tag === "CANVAS" || tag === "SOURCE") {
         return false;
       }
@@ -6340,12 +6439,12 @@
     if (isNativeOn(key) && isString(value)) {
       return false;
     }
-    return key in el;
+    return key in el2;
   }
-  function shouldSetAsPropForVueCE(el, key) {
+  function shouldSetAsPropForVueCE(el2, key) {
     const props = (
       // @ts-expect-error _def is private
-      el._def.props
+      el2._def.props
     );
     if (!props) {
       return false;
@@ -6375,60 +6474,60 @@
     return value;
   }
   const vModelText = {
-    created(el, { modifiers: { lazy, trim, number } }, vnode) {
-      if (el.parentNode) {
-        if (el.type === "text") {
-          el[initialValueKey] = el.defaultValue.replace(/[\r\n]/g, "");
-        } else if (el.type === "textarea") {
-          el[initialValueKey] = el.defaultValue.replace(/\r\n?/g, "\n");
+    created(el2, { modifiers: { lazy, trim, number } }, vnode) {
+      if (el2.parentNode) {
+        if (el2.type === "text") {
+          el2[initialValueKey] = el2.defaultValue.replace(/[\r\n]/g, "");
+        } else if (el2.type === "textarea") {
+          el2[initialValueKey] = el2.defaultValue.replace(/\r\n?/g, "\n");
         }
       }
-      el[assignKey] = getModelAssigner(vnode);
+      el2[assignKey] = getModelAssigner(vnode);
       const castToNumber = number || vnode.props && vnode.props.type === "number";
-      addEventListener(el, lazy ? "change" : "input", (e) => {
+      addEventListener(el2, lazy ? "change" : "input", (e) => {
         if (e.target.composing) return;
-        el[assignKey](castValue(el.value, trim, castToNumber));
+        el2[assignKey](castValue(el2.value, trim, castToNumber));
       });
       if (trim || castToNumber) {
-        addEventListener(el, "change", () => {
-          el.value = castValue(el.value, trim, castToNumber);
+        addEventListener(el2, "change", () => {
+          el2.value = castValue(el2.value, trim, castToNumber);
         });
       }
       if (!lazy) {
-        addEventListener(el, "compositionstart", onCompositionStart);
-        addEventListener(el, "compositionend", onCompositionEnd);
-        addEventListener(el, "change", onCompositionEnd);
+        addEventListener(el2, "compositionstart", onCompositionStart);
+        addEventListener(el2, "compositionend", onCompositionEnd);
+        addEventListener(el2, "change", onCompositionEnd);
       }
     },
     // set value on mounted so it's after min/max for type="range"
-    mounted(el, { value, modifiers: { trim, number } }) {
+    mounted(el2, { value, modifiers: { trim, number } }) {
       const newValue = value == null ? "" : value;
-      const initialValue = el[initialValueKey];
-      delete el[initialValueKey];
-      if (initialValue !== void 0 && (el.type === "text" || el.type === "textarea") && el.value !== initialValue) {
-        el[assignKey](castValue(el.value, trim, number));
+      const initialValue = el2[initialValueKey];
+      delete el2[initialValueKey];
+      if (initialValue !== void 0 && (el2.type === "text" || el2.type === "textarea") && el2.value !== initialValue) {
+        el2[assignKey](castValue(el2.value, trim, number));
       } else {
-        el.value = newValue;
+        el2.value = newValue;
       }
     },
-    beforeUpdate(el, { value, oldValue, modifiers: { lazy, trim, number } }, vnode) {
-      el[assignKey] = getModelAssigner(vnode);
-      if (el.composing) return;
-      const elValue = (number || el.type === "number") && !/^0\d/.test(el.value) ? looseToNumber(el.value) : el.value;
+    beforeUpdate(el2, { value, oldValue, modifiers: { lazy, trim, number } }, vnode) {
+      el2[assignKey] = getModelAssigner(vnode);
+      if (el2.composing) return;
+      const elValue = (number || el2.type === "number") && !/^0\d/.test(el2.value) ? looseToNumber(el2.value) : el2.value;
       const newValue = value == null ? "" : value;
       if (elValue === newValue) {
         return;
       }
-      const rootNode = el.getRootNode();
-      if ((rootNode instanceof Document || rootNode instanceof ShadowRoot) && rootNode.activeElement === el && el.type !== "range") {
+      const rootNode = el2.getRootNode();
+      if ((rootNode instanceof Document || rootNode instanceof ShadowRoot) && rootNode.activeElement === el2 && el2.type !== "range") {
         if (lazy && value === oldValue) {
           return;
         }
-        if (trim && el.value.trim() === newValue) {
+        if (trim && el2.value.trim() === newValue) {
           return;
         }
       }
-      el.value = newValue;
+      el2.value = newValue;
     }
   };
   const systemModifiers = ["ctrl", "shift", "alt", "meta"];
@@ -6499,6 +6598,7 @@
     }
     return container;
   }
+  const POLL_MS = 2e3;
   const STORE_PREFIX = "dsh.sessionview.";
   const SIDEBAR_AUTO_COLLAPSE = 1024;
   const RAIL_W = 56;
@@ -6532,12 +6632,27 @@
       return fallback;
     }
   }
-  const ROOT_PROJECT = "（根目录）";
   function fmtSize(bytes) {
     if (!bytes && bytes !== 0) return "—";
     if (bytes < 1024) return bytes + " B";
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
     return (bytes / 1024 / 1024).toFixed(2) + " MB";
+  }
+  function fmtClock(value) {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return "—";
+    const pad = (n) => (n < 10 ? "0" : "") + n;
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+  function relTime(value) {
+    const t = new Date(value).getTime();
+    if (isNaN(t)) return "—";
+    const secs = Math.round((Date.now() - t) / 1e3);
+    if (secs < 5) return "刚刚";
+    if (secs < 60) return secs + " 秒前";
+    if (secs < 3600) return Math.floor(secs / 60) + " 分钟前";
+    if (secs < 86400) return Math.floor(secs / 3600) + " 小时前";
+    return Math.floor(secs / 86400) + " 天前";
   }
   const state = /* @__PURE__ */ reactive({
     root: "",
@@ -6560,6 +6675,7 @@
     callEst: {},
     anchors: {},
     badLines: 0,
+    pullError: "",
     polling: false,
     theme: "light",
     view: "chat",
@@ -6637,6 +6753,9 @@
     persistLayout();
     applyLayout();
   }
+  function openDetails() {
+    if (state.details === 0) toggleDetails();
+  }
   function persistLayout() {
     storeSet("layout.sidebar", String(state.sidebar));
     storeSet("layout.details", String(state.details));
@@ -6682,78 +6801,944 @@
     lightbox.url = "";
     lightbox.ref = "";
   }
-  function refreshIndex() {
-    return Promise.resolve();
+  function scrollToBottomOfTimeline() {
+    window.setTimeout(() => {
+      const el2 = document.getElementById("timeline");
+      if (el2) el2.scrollTop = el2.scrollHeight;
+    }, 0);
   }
-  const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
-  const _hoisted_2 = {
+  function setBannerText(text) {
+    state.pullError = text;
+  }
+  const ROOT_PROJECT = "（根目录）";
+  function projectOf(id) {
+    const i = String(id || "").indexOf("/");
+    return i <= 0 ? ROOT_PROJECT : String(id).slice(0, i);
+  }
+  function subPathOf(id) {
+    const parts = String(id || "").split("/");
+    parts.pop();
+    parts.shift();
+    return parts.join("/");
+  }
+  function normalizeLine(line) {
+    if (line && line.reasoning === void 0 && line.reasoning_content !== void 0) {
+      line.reasoning = line.reasoning_content;
+    }
+    return line;
+  }
+  function normalizeLines(lines) {
+    return (lines || []).map(normalizeLine);
+  }
+  function fmtTokens(n) {
+    n = Number(n) || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k";
+    return String(n);
+  }
+  function fmtDur(ms) {
+    ms = Number(ms) || 0;
+    if (ms < 1e3) return ms + "ms";
+    if (ms < 6e4) return (ms / 1e3).toFixed(1) + "s";
+    const m = Math.floor(ms / 6e4);
+    const sec = Math.round(ms % 6e4 / 1e3);
+    return m + "m" + (sec < 10 ? "0" : "") + sec + "s";
+  }
+  function countText(chars, tokens) {
+    if (state.unit === "char") return (Number(chars) || 0) + " 字符";
+    return "≈ " + fmtTokens(tokens) + " tokens";
+  }
+  function scanStats(session) {
+    const st = session && session.stats;
+    if (!st || !st.requests) return null;
+    return st;
+  }
+  function fmtCost(cost, unpriced) {
+    if (!cost) return "";
+    return "" + (cost.currency || "") + cost.total.toFixed(2);
+  }
+  function statsSummary(st, session) {
+    if (!st) return "";
+    const parts = ["输入 " + fmtTokens(st.promptTokens) + " · 输出 " + fmtTokens(st.completionTokens)];
+    if (st.promptTokens) parts.push("缓存 " + st.cacheHitPct.toFixed(0) + "%");
+    if (st.avgTtftMs) parts.push("首字 " + fmtDur(st.avgTtftMs));
+    const money = session ? fmtCost(session.cost) : "";
+    if (money) parts.push(money);
+    return parts.join(" · ");
+  }
+  function indexCallEstimates(lines) {
+    (lines || []).forEach((line) => {
+      const est = line.est || {};
+      (line.tool_calls || []).forEach((c, i) => {
+        if (c && c.id) state.callEst[c.id] = est.calls && est.calls[i] || 0;
+      });
+    });
+  }
+  const STAGE_ORDER = ["vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check"];
+  function stageRank(stage) {
+    const i = STAGE_ORDER.indexOf(stage);
+    return i < 0 ? STAGE_ORDER.length : i;
+  }
+  function stageTitleOf(stage) {
+    const map = {
+      vector: "矢量图",
+      style: "样式",
+      chapters: "章节划分",
+      convert: "章节转换",
+      checker: "章节核对",
+      "style-fix": "样式修复",
+      "figure-check": "逐图校验"
+    };
+    return map[stage] || stage || "其他会话";
+  }
+  function progressKeyFor(stage) {
+    if (stage === "vector") return "images";
+    if (stage === "checker" || stage === "style-fix") return "convert";
+    return stage;
+  }
+  function stageStatusText(stages, stage) {
+    if (!stages) return null;
+    const key = progressKeyFor(stage);
+    const v = stages[key];
+    if (v === void 0 || v === null || v === "") return null;
+    const text = String(v);
+    const done = /^(done|ok|true|finished|complete[d]?)$/i.test(text);
+    return { text: done ? "✓ 完成" : text, done, title: "progress.json: " + key + " = " + text };
+  }
+  function projectProgressLine(stages) {
+    if (!stages) return null;
+    const order = ["images", "style", "chapters", "convert", "assemble"];
+    const parts = [];
+    order.forEach((k) => {
+      if (stages[k] === void 0) return;
+      const done = /^(done|ok|true|finished|complete[d]?)$/i.test(String(stages[k]));
+      parts.push(k + (done ? " ✓" : " " + stages[k]));
+    });
+    if (!parts.length) return null;
+    return parts.join(" · ");
+  }
+  function sessionHaystack(s) {
+    const parts = [
+      s.title,
+      s.label,
+      s.id,
+      s.name,
+      s.project,
+      s.stage,
+      s.stageTitle,
+      s.imageName,
+      s.imageType,
+      s.imageCaption,
+      s.imageShort,
+      s.imageFile,
+      s.imageLabel
+    ];
+    if (s.page) parts.push("p" + s.page, "p." + s.page, "页" + s.page, String(s.page));
+    if (s.imageOrder) parts.push("#" + s.imageOrder, "第" + s.imageOrder + "张", String(s.imageOrder));
+    return parts.filter(Boolean).join(" ").toLowerCase();
+  }
+  function imageDisplayName(s) {
+    return s.imageCaption || s.imageLabel || s.imageShort || s.imageName;
+  }
+  function sessionTitleOf(s) {
+    if (s.imageName && (s.page || s.imageOrder || s.imageShort || s.imageLabel || s.imageCaption)) {
+      return (s.stageTitle || "矢量图") + " · " + imageDisplayName(s);
+    }
+    return s.title || s.label || s.name;
+  }
+  function sessionTip(s) {
+    const tip = [sessionTitleOf(s), s.id];
+    const st = scanStats(s);
+    if (st) {
+      tip.push(statsSummary(st, s));
+      tip.push(st.requests + " 次 API 请求 · 输入 " + st.promptTokens + " tokens（其中 " + st.cachedTokens + " 命中前缀缓存）· 输出 " + st.completionTokens + (st.reasoningTokens ? "（思考 " + st.reasoningTokens + "）" : "") + " · 平均耗时 " + fmtDur(st.avgDurationMs) + " · 平均首字 " + fmtDur(st.avgTtftMs) + " · 输出 " + (st.outputTps || 0).toFixed(1) + " tok/s");
+    }
+    const m = metaOf(s);
+    if (m) {
+      tip.push("含系统提示词快照：" + m.count + " 条 t=meta 元信息行，最新一条 " + countText(m.promptChars || 0, m.promptTokenEst) + (m.model ? "（模型 " + m.model + "）" : "") + (m.tools ? "，含 " + m.tools + " 个工具定义" : ""));
+    }
+    if (s.imageName) {
+      tip.push("来源图片: " + imageDisplayName(s) + (s.imageType ? "（" + s.imageType + "）" : "") + (s.page ? "\n第 " + s.page + " 页" : "") + (s.imageOrder ? "\n书内第 " + s.imageOrder + " 张" : "") + (s.imageCaption ? "\n图注: " + s.imageCaption : ""));
+      if (s.imageFile) tip.push("图片文件: " + s.imageFile);
+      if (s.imageName) tip.push("图片哈希: " + s.imageName);
+      if (s.imagePath) tip.push("图片路径: " + s.imagePath);
+    }
+    tip.push("消息 " + s.messages + " 条 · " + fmtSize(s.size) + " · 最后写入 " + fmtClock(s.mtime));
+    const sub = subPathOf(s.id);
+    if (sub) tip.push("目录 " + sub);
+    return tip.join("\n");
+  }
+  function metaOf(session) {
+    return session && session.meta && session.meta.count ? session.meta : null;
+  }
+  function usageChipText(s) {
+    const st = scanStats(s);
+    return st ? fmtTokens(st.promptTokens) + " / " + fmtTokens(st.completionTokens) : "";
+  }
+  function imageChipText(s) {
+    const bits = [];
+    if (s.page) bits.push("p" + s.page);
+    if (s.imageOrder) bits.push("#" + s.imageOrder);
+    if (s.imageType) bits.push(s.imageType);
+    return bits.join("·");
+  }
+  function imageTipText(s) {
+    const bits = [imageDisplayName(s)];
+    if (s.imageFile && s.imageFile !== imageDisplayName(s)) bits.push("文件 " + s.imageFile);
+    if (s.imageName) bits.push("哈希 " + s.imageName);
+    if (s.imagePath) bits.push(s.imagePath);
+    if (s.page) bits.push("第 " + s.page + " 页");
+    if (s.imageOrder) bits.push("书内第 " + s.imageOrder + " 张");
+    if (s.imageType) bits.push(s.imageType);
+    return bits.join("\n");
+  }
+  function buildGroups() {
+    const q = state.filter;
+    let groups = [];
+    const byName = {};
+    state.sessions.forEach((s) => {
+      const name = s.project || projectOf(s.id);
+      let g = byName[name];
+      if (!g) {
+        const cut = name.lastIndexOf("/");
+        g = byName[name] = {
+          name,
+          prefix: cut > 0 ? name.slice(0, cut + 1) : "",
+          title: cut > 0 ? name.slice(cut + 1) : name,
+          legacy: !!s.projectLegacy,
+          items: [],
+          live: 0,
+          matched: false,
+          stages: {}
+        };
+        groups.push(g);
+      }
+      if (s.projectLegacy) g.legacy = true;
+      if (q && sessionHaystack(s).indexOf(q) < 0) return;
+      g.items.push(s);
+      if (s.live) g.live++;
+      const stage = s.stage || "session";
+      let sg = g.stages[stage];
+      if (!sg) sg = g.stages[stage] = { stage, title: stageTitleOf(stage), items: [], live: 0 };
+      sg.items.push(s);
+      if (s.live) sg.live++;
+    });
+    if (q) {
+      groups = groups.filter((g) => g.items.length > 0);
+      groups.forEach((g) => {
+        g.matched = true;
+      });
+    }
+    return groups;
+  }
+  function findSession(id) {
+    let found = null;
+    state.sessions.forEach((s) => {
+      if (s.id === id) found = s;
+    });
+    return found;
+  }
+  function groupKey(kind, name) {
+    return kind + ":" + name;
+  }
+  function isCollapsed(key) {
+    return state.collapsed[key] === true;
+  }
+  function hasCollapseMemory(key) {
+    return Object.prototype.hasOwnProperty.call(state.collapsed, key);
+  }
+  function setCollapsed(key, collapsed) {
+    state.collapsed[key] = !!collapsed;
+    storeSet("collapsed", JSON.stringify(state.collapsed));
+  }
+  function groupWantOpen(key, holdsCurrent) {
+    if (hasCollapseMemory(key)) return !isCollapsed(key);
+    return !!holdsCurrent;
+  }
+  function setOverflowOpen(key, open) {
+    state.overflow[key] = true;
+    storeSet("overflow", JSON.stringify(state.overflow));
+  }
+  let pullSeq = 0;
+  function revealProject(project) {
+    const wraps = document.querySelectorAll(".proj-group");
+    let hit = null;
+    wraps.forEach((w) => {
+      const el2 = w;
+      const summary = el2.querySelector(".proj-row");
+      if (!hit && summary && summary.title === project) hit = el2;
+    });
+    if (!hit) return;
+    if (!hit.open) {
+      hit.open = true;
+      hit.dataset.open = "1";
+      setCollapsed(groupKey("proj", project), false);
+    }
+    hit.scrollIntoView({ block: "nearest" });
+  }
+  function applyIndex(payload) {
+    state.sessions = payload.sessions || [];
+    state.root = payload.root || state.root;
+    state.generated = payload.generated || state.generated;
+    state.listSig = listSigOf();
+  }
+  function listSigOf() {
+    const parts = [state.filter, state.sessions.length];
+    state.sessions.forEach((s) => {
+      parts.push([
+        s.id,
+        s.messages,
+        s.cost ? s.cost.total + (s.cost.currency || "") : "",
+        s.stats ? s.stats.requests : 0,
+        s.projectStages ? JSON.stringify(s.projectStages) : ""
+      ].join("~"));
+    });
+    return parts.join("|");
+  }
+  function refreshIndex() {
+    return fetch("/api/index", { cache: "no-store" }).then((res) => {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }).then((payload) => {
+      applyIndex(payload);
+      state.polling = true;
+      const current = findSession(state.current ? state.current.id : "");
+      if (!current) return;
+      state.current = current;
+      const mtime = new Date(current.mtime).getTime();
+      const changed = current.size !== state.curSize || mtime !== state.curMtime;
+      if (changed && state.curSize >= 0) {
+        state.curMtime = mtime;
+        return pullSession(false);
+      }
+      state.curSize = current.size;
+      state.curMtime = mtime;
+    }).catch(() => {
+      state.polling = false;
+    });
+  }
+  function pullSession(reset) {
+    const s = state.current;
+    if (!s) return Promise.resolve();
+    const from = reset ? 0 : state.nextFrom;
+    const url = "/api/session?id=" + encodeURIComponent(s.id) + "&from=" + from;
+    const seq = ++pullSeq;
+    return fetch(url, { cache: "no-store" }).then((res) => {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }).then((payload) => {
+      if (seq !== pullSeq) return;
+      if (!reset && payload.nextFrom < state.nextFrom) {
+        state.lines = [];
+        state.nextFrom = 0;
+        return pullSession(true);
+      }
+      state.nextFrom = payload.nextFrom;
+      state.curSize = payload.size;
+      if (reset) {
+        state.lines = normalizeLines(payload.lines);
+        indexCallEstimates(state.lines);
+        if (state.follow) scrollToBottomOfTimeline();
+      } else {
+        appendLines(normalizeLines(payload.lines));
+      }
+    }).catch((err) => {
+      setBannerText("拉取会话失败：" + err.message);
+    });
+  }
+  function appendLines(_lines) {
+  }
+  function selectSession(id) {
+    const s = findSession(id);
+    state.current = s;
+    state.lines = [];
+    state.callEst = {};
+    state.nextFrom = 0;
+    state.curSize = -1;
+    state.curMtime = 0;
+    state.meta = null;
+    state.trajOpen = {};
+    if (!s) {
+      return;
+    }
+    pullSession(true).then(() => scrollToBottomOfTimeline());
+  }
+  function bootData() {
+    void refreshIndex().then(() => {
+      if (state.sessions.length && !state.current) {
+        let live = null;
+        state.sessions.forEach((s) => {
+          if (!live && s.live) live = s;
+        });
+        selectSession((live || state.sessions[0]).id);
+      }
+    });
+    window.setInterval(() => {
+      if (!document.hidden) void refreshIndex();
+    }, POLL_MS);
+  }
+  const MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
+  function mdSafeURL(url) {
+    const s = String(url === void 0 || url === null ? "" : url).trim();
+    if (!s) return "";
+    if (/^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(s)) return s;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return "";
+    return s;
+  }
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== void 0 && text !== null) node.textContent = text;
+    return node;
+  }
+  function mdMathML(_tex, _display) {
+    throw new Error("mdMathML not ported yet");
+  }
+  function mdInline(parent, text, depth = 0) {
+    if (depth > 6) {
+      parent.appendChild(document.createTextNode(String(text || "")));
+      return;
+    }
+    MD_INLINE.lastIndex = 0;
+    let rest = String(text === void 0 || text === null ? "" : text);
+    let guard = 0;
+    while (rest && guard++ < 800) {
+      const m = MD_INLINE.exec(rest);
+      if (!m) break;
+      if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
+      rest = rest.slice(m.index + m[0].length);
+      let node;
+      if (m[1] !== void 0) {
+        node = el("code", "md-inline-code", m[2]);
+      } else if (m[3] !== void 0) {
+        node = el("a", "md-link");
+        const href = mdSafeURL(m[4]);
+        if (href) {
+          node.setAttribute("href", href);
+          node.setAttribute("target", "_blank");
+          node.setAttribute("rel", "noopener noreferrer");
+        } else {
+          node.title = "链接协议不受支持，只显示文字";
+        }
+        mdInline(node, m[3], depth + 1);
+      } else if (m[10] !== void 0 || m[11] !== void 0) {
+        try {
+          node = mdMathML(m[10] !== void 0 ? m[10] : m[11], m[10] !== void 0);
+        } catch {
+          node = el("span");
+          node.appendChild(document.createTextNode(m[0]));
+        }
+      } else if (m[5] !== void 0 || m[6] !== void 0) {
+        node = el("strong");
+        mdInline(node, m[5] !== void 0 ? m[5] : m[6], depth + 1);
+      } else if (m[7] !== void 0) {
+        node = el("del");
+        mdInline(node, m[7], depth + 1);
+      } else {
+        node = el("em");
+        mdInline(node, m[8] !== void 0 ? m[8] : m[9], depth + 1);
+      }
+      parent.appendChild(node);
+    }
+    if (rest) parent.appendChild(document.createTextNode(rest));
+  }
+  function renderInlineMarkdown(text) {
+    const frag = document.createDocumentFragment();
+    mdInline(frag, text, 0);
+    return frag;
+  }
+  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
+    __name: "InlineMD",
+    props: {
+      tag: {},
+      text: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const host = /* @__PURE__ */ ref(null);
+      function render() {
+        const el2 = host.value;
+        if (!el2) return;
+        el2.textContent = "";
+        el2.appendChild(renderInlineMarkdown(props.text));
+      }
+      onMounted(render);
+      watch(() => props.text, render);
+      return (_ctx, _cache) => {
+        return openBlock(), createBlock(resolveDynamicComponent(props.tag || "span"), {
+          ref_key: "host",
+          ref: host
+        }, null, 512);
+      };
+    }
+  });
+  const _hoisted_1$1 = {
     id: "sidebar-col",
     class: "sidebar-col"
   };
-  const _hoisted_3 = { class: "side-search" };
-  const _hoisted_4 = ["data-dragging"];
-  const _hoisted_5 = {
+  const _hoisted_2$1 = { class: "side-head" };
+  const _hoisted_3$1 = { class: "side-search" };
+  const _hoisted_4$1 = { class: "side-list-wrap" };
+  const _hoisted_5$1 = ["data-project"];
+  const _hoisted_6$1 = ["title"];
+  const _hoisted_7$1 = { class: "row-body" };
+  const _hoisted_8$1 = {
+    key: 0,
+    class: "proj-prefix"
+  };
+  const _hoisted_9$1 = { class: "proj-title" };
+  const _hoisted_10$1 = { class: "row-meta" };
+  const _hoisted_11$1 = {
+    key: 0,
+    class: "proj-note",
+    title: "这个输出根本身就是一个工程（work/、progress.json 等直接挂在它下面），是引入多项目布局之前的形态；新布局是「输出根/书名/」。"
+  };
+  const _hoisted_12$1 = {
+    key: 1,
+    class: "dot live"
+  };
+  const _hoisted_13$1 = {
+    key: 0,
+    class: "proj-progress",
+    title: "progress.json 里各阶段的当前状态"
+  };
+  const _hoisted_14$1 = ["data-project", "data-stage"];
+  const _hoisted_15$1 = { class: "stage-row" };
+  const _hoisted_16$1 = { class: "row-body" };
+  const _hoisted_17$1 = { class: "row-meta" };
+  const _hoisted_18$1 = ["title"];
+  const _hoisted_19$1 = {
+    key: 1,
+    class: "dot live"
+  };
+  const _hoisted_20$1 = ["data-id", "title", "onClick"];
+  const _hoisted_21$1 = { class: "row-slot" };
+  const _hoisted_22$1 = {
+    key: 0,
+    class: "row-chip usage-chip"
+  };
+  const _hoisted_23$1 = ["title"];
+  const _hoisted_24$1 = { class: "row-time" };
+  const _hoisted_25$1 = { class: "row-actions" };
+  const _hoisted_26$1 = ["onClick"];
+  const _hoisted_27$1 = ["onClick"];
+  const _hoisted_28$1 = ["data-id", "title", "onClick"];
+  const _hoisted_29$1 = { class: "row-slot" };
+  const _hoisted_30 = {
+    key: 0,
+    class: "row-chip usage-chip"
+  };
+  const _hoisted_31 = ["title"];
+  const _hoisted_32 = { class: "row-time" };
+  const _hoisted_33 = { class: "row-actions" };
+  const _hoisted_34 = ["onClick"];
+  const _hoisted_35 = ["onClick"];
+  const _hoisted_36 = {
+    key: 0,
+    class: "empty"
+  };
+  const _hoisted_37 = { class: "side-status" };
+  const _hoisted_38 = {
+    id: "root-path",
+    class: "root-path",
+    title: "扫描根目录"
+  };
+  const _hoisted_39 = {
+    id: "side-foot",
+    class: "side-foot"
+  };
+  const OVERFLOW_LIMIT = 8;
+  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+    __name: "Sidebar",
+    setup(__props) {
+      const listEl = /* @__PURE__ */ ref(null);
+      const groups = computed(() => {
+        return buildGroups().map((g) => {
+          const stages0 = g.items.length ? g.items[0].projectStages : null;
+          const stageKeys = Object.keys(g.stages).sort((a, b) => {
+            const d = stageRank(a) - stageRank(b);
+            return d !== 0 ? d : a < b ? -1 : 1;
+          });
+          const multi = stageKeys.length > 1;
+          const stages = stageKeys.map((stg) => {
+            const sg = g.stages[stg];
+            const items = sg.items.slice().sort((x, y) => {
+              if (x.imageOrder && y.imageOrder && x.imageOrder !== y.imageOrder) return x.imageOrder - y.imageOrder;
+              return y.mtime > x.mtime ? 1 : -1;
+            });
+            const okey = groupKey("overflow", g.name + "/" + stg);
+            const needOverflow = items.length > OVERFLOW_LIMIT;
+            const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter;
+            const shown = openAll ? items : items.slice(0, OVERFLOW_LIMIT);
+            return {
+              stage: stg,
+              title: stageTitleOf(stg),
+              items,
+              live: sg.live,
+              status: stageStatusText(stages0, stg),
+              overflowKey: okey,
+              needOverflow,
+              shown,
+              hiddenCount: items.length - shown.length
+            };
+          });
+          return {
+            name: g.name,
+            prefix: g.prefix,
+            title: g.title,
+            legacy: g.legacy,
+            items: g.items,
+            live: g.live,
+            matched: g.matched,
+            progress: projectProgressLine(stages0),
+            stages,
+            multi
+          };
+        });
+      });
+      const shownCount = computed(() => groups.value.reduce((n, g) => n + g.items.length, 0));
+      const emptyText = computed(() => state.sessions.length ? "没有匹配的会话" : "没有找到 *.jsonl 会话转录");
+      const footText = computed(() => {
+        const live = state.sessions.filter((s) => s.live).length;
+        return groups.value.length + " 个项目 · " + state.sessions.length + " 个会话" + (live ? " · " + live + " 个活跃" : "") + (state.filter ? " · 匹配 " + shownCount.value : "");
+      });
+      const totals = computed(() => {
+        const tot = { requests: 0, prompt: 0, cached: 0, completion: 0, cost: 0, costCurrency: "", unpriced: 0 };
+        state.sessions.forEach((s) => {
+          const st = s.stats;
+          if (!st || !st.requests) return;
+          tot.requests += st.requests;
+          tot.prompt += st.promptTokens;
+          tot.cached += st.cachedTokens;
+          tot.completion += st.completionTokens;
+          if (s.cost) {
+            tot.cost += Number(s.cost.total) || 0;
+            tot.costCurrency = s.cost.currency || tot.costCurrency;
+          } else {
+            tot.unpriced += st.requests;
+          }
+        });
+        return tot;
+      });
+      const totalsText = computed(() => {
+        const tot = totals.value;
+        if (!tot.requests) return "";
+        let money = "";
+        if (tot.cost > 0 || tot.costCurrency) {
+          money = " · 费用 " + (tot.unpriced ? "≥" : "") + tot.costCurrency + tot.cost.toFixed(2);
+        }
+        return "合计 " + tot.requests + " 次请求 · 输入 " + fmtTokens(tot.prompt) + " / 输出 " + fmtTokens(tot.completion) + " tokens" + (tot.prompt ? " · 缓存命中 " + (tot.cached * 100 / tot.prompt).toFixed(0) + "%" : "") + money;
+      });
+      const vCollapse = {
+        mounted(el2, binding) {
+          const { key, want, frozen } = binding.value;
+          el2.open = !!want;
+          el2.dataset.open = want ? "1" : "0";
+          el2.addEventListener("toggle", () => {
+            const now = el2.open ? "1" : "0";
+            if (el2.dataset.open === now) return;
+            el2.dataset.open = now;
+            if (frozen) return;
+            setCollapsed(key, !el2.open);
+          });
+        },
+        updated(el2, binding) {
+          const { want } = binding.value;
+          const flag = want ? "1" : "0";
+          if (el2.dataset.open === flag) return;
+          el2.dataset.open = flag;
+          el2.open = !!want;
+        }
+      };
+      function projWantOpen(g) {
+        const cur = state.current;
+        const curProj = cur ? cur.project || projectOf(cur.id) : "";
+        return groupWantOpen(groupKey("proj", g.name), !!curProj && curProj === g.name);
+      }
+      function stageWantOpen(g, sv) {
+        const cur = state.current;
+        const curProj = cur ? cur.project || projectOf(cur.id) : "";
+        const curStage = cur ? cur.stage || "session" : "";
+        return groupWantOpen(
+          groupKey("stage", g.name + "/" + sv.stage),
+          !!curProj && curProj === g.name && curStage === sv.stage
+        );
+      }
+      function rowTitle(s) {
+        return sessionTip(s);
+      }
+      function onRowClick(s) {
+        selectSession(s.id);
+      }
+      function onInfoClick(ev, s) {
+        ev.stopPropagation();
+        selectSession(s.id);
+        openDetails();
+      }
+      function onMoreClick(okey) {
+        setOverflowOpen(okey);
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("aside", _hoisted_1$1, [
+          createBaseVNode("div", _hoisted_2$1, [
+            _cache[2] || (_cache[2] = createBaseVNode("span", { class: "side-title" }, "工作区", -1)),
+            createBaseVNode("button", {
+              id: "refresh",
+              class: "icon-btn",
+              type: "button",
+              title: "重新扫描会话",
+              onClick: _cache[0] || (_cache[0] = //@ts-ignore
+              (...args) => unref(refreshIndex) && unref(refreshIndex)(...args))
+            }, "⟳")
+          ]),
+          createBaseVNode("div", _hoisted_3$1, [
+            withDirectives(createBaseVNode("input", {
+              id: "search",
+              "onUpdate:modelValue": _cache[1] || (_cache[1] = ($event) => unref(state).filter = $event),
+              type: "search",
+              placeholder: "过滤：会话名 / 阶段 / 项目…",
+              autocomplete: "off"
+            }, null, 512), [
+              [vModelText, unref(state).filter]
+            ])
+          ]),
+          createBaseVNode("div", _hoisted_4$1, [
+            createBaseVNode("div", {
+              id: "session-list",
+              ref_key: "listEl",
+              ref: listEl,
+              class: "session-list",
+              role: "tree",
+              "aria-label": "会话列表"
+            }, [
+              (openBlock(true), createElementBlock(Fragment, null, renderList(groups.value, (g) => {
+                return withDirectives((openBlock(), createElementBlock("details", {
+                  key: g.name,
+                  class: "proj-group",
+                  "data-project": g.name
+                }, [
+                  createBaseVNode("summary", {
+                    class: "proj-row",
+                    title: g.name
+                  }, [
+                    _cache[3] || (_cache[3] = createBaseVNode("span", { class: "row-slot" }, [
+                      createBaseVNode("span", { class: "row-caret" })
+                    ], -1)),
+                    createBaseVNode("span", _hoisted_7$1, [
+                      g.prefix ? (openBlock(), createElementBlock("span", _hoisted_8$1, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
+                      createBaseVNode("span", _hoisted_9$1, toDisplayString(g.title), 1)
+                    ]),
+                    createBaseVNode("span", _hoisted_10$1, toDisplayString(g.items.length) + " 个会话", 1),
+                    g.legacy ? (openBlock(), createElementBlock("span", _hoisted_11$1, "旧版单项目")) : createCommentVNode("", true),
+                    g.live ? (openBlock(), createElementBlock("span", _hoisted_12$1)) : createCommentVNode("", true)
+                  ], 8, _hoisted_6$1),
+                  createBaseVNode("div", null, [
+                    g.progress ? (openBlock(), createElementBlock("div", _hoisted_13$1, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
+                    (openBlock(true), createElementBlock(Fragment, null, renderList(g.stages, (sv) => {
+                      return openBlock(), createElementBlock(Fragment, {
+                        key: sv.stage
+                      }, [
+                        g.multi ? withDirectives((openBlock(), createElementBlock("details", {
+                          key: 0,
+                          class: "stage-group",
+                          "data-project": g.name,
+                          "data-stage": sv.stage
+                        }, [
+                          createBaseVNode("summary", _hoisted_15$1, [
+                            _cache[4] || (_cache[4] = createBaseVNode("span", { class: "row-slot" }, [
+                              createBaseVNode("span", { class: "row-caret" })
+                            ], -1)),
+                            createBaseVNode("span", _hoisted_16$1, toDisplayString(sv.title), 1),
+                            createBaseVNode("span", _hoisted_17$1, toDisplayString(sv.items.length) + " 个会话", 1),
+                            sv.status ? (openBlock(), createElementBlock("span", {
+                              key: 0,
+                              class: normalizeClass(["stage-progress", { done: sv.status.done }]),
+                              title: sv.status.title
+                            }, toDisplayString(sv.status.text), 11, _hoisted_18$1)) : createCommentVNode("", true),
+                            sv.live ? (openBlock(), createElementBlock("span", _hoisted_19$1)) : createCommentVNode("", true)
+                          ]),
+                          createBaseVNode("div", null, [
+                            (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
+                              return openBlock(), createElementBlock("button", {
+                                key: s.id,
+                                class: normalizeClass(["session-row", { active: unref(state).current && unref(state).current.id === s.id }]),
+                                type: "button",
+                                role: "treeitem",
+                                "data-id": s.id,
+                                title: rowTitle(s),
+                                onClick: ($event) => onRowClick(s)
+                              }, [
+                                createBaseVNode("span", _hoisted_21$1, [
+                                  createBaseVNode("span", {
+                                    class: normalizeClass(["dot", { live: s.live }])
+                                  }, null, 2)
+                                ]),
+                                createVNode(_sfc_main$2, {
+                                  tag: "span",
+                                  class: "row-title",
+                                  text: unref(sessionTitleOf)(s)
+                                }, null, 8, ["text"]),
+                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_22$1, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                s.imageName ? (openBlock(), createElementBlock("span", {
+                                  key: 1,
+                                  class: "row-chip image-chip",
+                                  title: unref(imageTipText)(s)
+                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_23$1)) : createCommentVNode("", true),
+                                createBaseVNode("span", _hoisted_24$1, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                createBaseVNode("span", _hoisted_25$1, [
+                                  createBaseVNode("button", {
+                                    class: "icon-btn",
+                                    type: "button",
+                                    title: "打开详情面板（元信息 / 指标）",
+                                    onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
+                                  }, "ⓘ", 8, _hoisted_26$1)
+                                ])
+                              ], 10, _hoisted_20$1);
+                            }), 128)),
+                            sv.needOverflow ? (openBlock(), createElementBlock("button", {
+                              key: 0,
+                              class: "session-overflow",
+                              type: "button",
+                              onClick: ($event) => onMoreClick(sv.overflowKey)
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_27$1)) : createCommentVNode("", true)
+                          ])
+                        ], 8, _hoisted_14$1)), [
+                          [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
+                        ]) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                          (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
+                            return openBlock(), createElementBlock("button", {
+                              key: s.id,
+                              class: normalizeClass(["session-row", { active: unref(state).current && unref(state).current.id === s.id }]),
+                              type: "button",
+                              role: "treeitem",
+                              "data-id": s.id,
+                              title: rowTitle(s),
+                              onClick: ($event) => onRowClick(s)
+                            }, [
+                              createBaseVNode("span", _hoisted_29$1, [
+                                createBaseVNode("span", {
+                                  class: normalizeClass(["dot", { live: s.live }])
+                                }, null, 2)
+                              ]),
+                              createVNode(_sfc_main$2, {
+                                tag: "span",
+                                class: "row-title",
+                                text: unref(sessionTitleOf)(s)
+                              }, null, 8, ["text"]),
+                              unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_30, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                              s.imageName ? (openBlock(), createElementBlock("span", {
+                                key: 1,
+                                class: "row-chip image-chip",
+                                title: unref(imageTipText)(s)
+                              }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_31)) : createCommentVNode("", true),
+                              createBaseVNode("span", _hoisted_32, toDisplayString(unref(relTime)(s.mtime)), 1),
+                              createBaseVNode("span", _hoisted_33, [
+                                createBaseVNode("button", {
+                                  class: "icon-btn",
+                                  type: "button",
+                                  title: "打开详情面板（元信息 / 指标）",
+                                  onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
+                                }, "ⓘ", 8, _hoisted_34)
+                              ])
+                            ], 10, _hoisted_28$1);
+                          }), 128)),
+                          sv.needOverflow ? (openBlock(), createElementBlock("button", {
+                            key: 0,
+                            class: "session-overflow",
+                            type: "button",
+                            onClick: ($event) => onMoreClick(sv.overflowKey)
+                          }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_35)) : createCommentVNode("", true)
+                        ], 64))
+                      ], 64);
+                    }), 128))
+                  ])
+                ], 8, _hoisted_5$1)), [
+                  [vCollapse, { key: "proj:" + g.name, want: g.matched ? true : projWantOpen(g), frozen: g.matched }]
+                ]);
+              }), 128)),
+              !shownCount.value ? (openBlock(), createElementBlock("div", _hoisted_36, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true)
+            ], 512),
+            _cache[5] || (_cache[5] = createBaseVNode("div", {
+              class: "list-fade",
+              "aria-hidden": "true"
+            }, null, -1))
+          ]),
+          createBaseVNode("div", {
+            id: "side-totals",
+            class: normalizeClass(["side-totals", { hidden: !totalsText.value }])
+          }, toDisplayString(totalsText.value), 3),
+          createBaseVNode("div", _hoisted_37, [
+            createBaseVNode("div", _hoisted_38, toDisplayString(unref(state).root || "—"), 1),
+            createBaseVNode("div", _hoisted_39, toDisplayString(footText.value), 1)
+          ])
+        ]);
+      };
+    }
+  });
+  const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
+  const _hoisted_2 = ["data-dragging"];
+  const _hoisted_3 = {
     id: "center-col",
     class: "center-col"
   };
-  const _hoisted_6 = {
+  const _hoisted_4 = {
     id: "center-header",
     class: "center-header"
   };
-  const _hoisted_7 = { class: "title-row" };
-  const _hoisted_8 = ["aria-pressed"];
-  const _hoisted_9 = {
+  const _hoisted_5 = { class: "title-row" };
+  const _hoisted_6 = ["aria-pressed"];
+  const _hoisted_7 = {
     id: "crumbs",
     class: "crumbs",
     "aria-label": "面包屑"
   };
-  const _hoisted_10 = {
+  const _hoisted_8 = {
     key: 0,
     class: "crumb crumb-current"
   };
-  const _hoisted_11 = ["title"];
-  const _hoisted_12 = {
+  const _hoisted_9 = ["title"];
+  const _hoisted_10 = {
     id: "header-actions",
     class: "header-actions"
   };
-  const _hoisted_13 = {
+  const _hoisted_11 = {
     key: 0,
     id: "mode-badge",
     class: "badge badge-live"
   };
-  const _hoisted_14 = {
+  const _hoisted_12 = {
     key: 1,
     class: "badge"
   };
-  const _hoisted_15 = ["title", "aria-pressed"];
-  const _hoisted_16 = { class: "tabs-row" };
-  const _hoisted_17 = {
+  const _hoisted_13 = ["title", "aria-pressed"];
+  const _hoisted_14 = { class: "tabs-row" };
+  const _hoisted_15 = {
     class: "tabs",
     role: "tablist",
     "aria-label": "视图"
   };
-  const _hoisted_18 = ["aria-selected"];
-  const _hoisted_19 = ["aria-selected"];
-  const _hoisted_20 = {
+  const _hoisted_16 = ["aria-selected"];
+  const _hoisted_17 = ["aria-selected"];
+  const _hoisted_18 = {
     class: "tab-tools",
     role: "group",
     "aria-label": "显示选项"
   };
+  const _hoisted_19 = ["aria-pressed"];
+  const _hoisted_20 = ["aria-pressed"];
   const _hoisted_21 = ["aria-pressed"];
-  const _hoisted_22 = ["aria-pressed"];
-  const _hoisted_23 = ["aria-pressed"];
+  const _hoisted_22 = ["aria-pressed", "title"];
+  const _hoisted_23 = ["aria-pressed", "title"];
   const _hoisted_24 = ["aria-pressed", "title"];
-  const _hoisted_25 = ["aria-pressed", "title"];
-  const _hoisted_26 = ["aria-pressed", "title"];
-  const _hoisted_27 = { class: "view-area" };
-  const _hoisted_28 = ["data-dragging", "data-hidden"];
-  const _hoisted_29 = {
+  const _hoisted_25 = { class: "view-area" };
+  const _hoisted_26 = ["data-dragging", "data-hidden"];
+  const _hoisted_27 = {
     id: "details-col",
     class: "details-col",
     "aria-label": "详情"
   };
-  const _hoisted_30 = { class: "details-head" };
-  const _hoisted_31 = ["src", "alt"];
+  const _hoisted_28 = { class: "details-head" };
+  const _hoisted_29 = ["src", "alt"];
   const _sfc_main = /* @__PURE__ */ defineComponent({
     __name: "App",
     setup(__props) {
@@ -6766,8 +7751,8 @@
         ev.preventDefault();
         dragOrigin = ev.clientX;
         dragBase = side === "sidebar" ? layout.cols.sidebar : layout.cols.details;
-        drag.value = { side, handle: ev.currentTarget };
         (_b = (_a = ev.currentTarget).setPointerCapture) == null ? void 0 : _b.call(_a, ev.pointerId);
+        drag.value = { side };
       }
       function onDragMove(ev) {
         if (!drag.value) return;
@@ -6813,19 +7798,12 @@
       function onClickUnit() {
         state.unit = state.unit === "char" ? "token" : "char";
         storeSet("unit", state.unit);
-        state.listSig = "";
-        refreshList();
       }
       function scrollToBottom() {
         window.setTimeout(() => {
-          const el = document.getElementById("timeline");
-          if (el) el.scrollTop = el.scrollHeight;
+          const el2 = document.getElementById("timeline");
+          if (el2) el2.scrollTop = el2.scrollHeight;
         }, 0);
-      }
-      function onClickSearch() {
-      }
-      function onClickRefresh() {
-        refreshIndex();
       }
       const badgeText = computed(() => state.polling ? "实时" : "实时（已断开）");
       const headerSummary = computed(() => {
@@ -6838,8 +7816,14 @@
         if (state.badLines) parts.push("坏行 " + state.badLines);
         return parts.join(" · ");
       });
-      const curProject = computed(() => state.current ? state.current.project || ROOT_PROJECT : "");
-      const sessionTitle = computed(() => state.current ? state.current.name || state.current.id : "");
+      const curProject = computed(() => state.current ? state.current.project || projectOf(state.current.id) : "");
+      const sessionTitle = computed(() => state.current ? sessionTitleOf(state.current) : "");
+      const bannerText = computed(() => {
+        if (state.badLines > 0) {
+          return "已跳过 " + state.badLines + " 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）";
+        }
+        return state.pullError;
+      });
       function onKeydown(ev) {
         var _a, _b;
         const tag = (_a = ev.target) == null ? void 0 : _a.tagName;
@@ -6850,26 +7834,31 @@
         if (ev.key === "]") toggleDetails();
       }
       let ro = null;
+      let pollTimer = 0;
       onMounted(() => {
         loadState();
         applyTheme(storedTheme());
-        const el = frame.value;
-        if (el) {
-          layout.viewport = el.clientWidth || window.innerWidth;
+        const el2 = frame.value;
+        if (el2) {
+          layout.viewport = el2.clientWidth || window.innerWidth;
           if (window.ResizeObserver) {
             ro = new ResizeObserver(() => {
-              layout.viewport = el.clientWidth || window.innerWidth;
+              layout.viewport = el2.clientWidth || window.innerWidth;
             });
-            ro.observe(el);
+            ro.observe(el2);
           } else {
             window.addEventListener("resize", onResize);
           }
         }
         document.addEventListener("keydown", onKeydown);
+        bootData();
+        pollTimer = window.setInterval(() => {
+          if (!document.hidden) void refreshIndex();
+        }, 2e3);
       });
       function onResize() {
-        const el = frame.value;
-        if (el) layout.viewport = el.clientWidth || window.innerWidth;
+        const el2 = frame.value;
+        if (el2) layout.viewport = el2.clientWidth || window.innerWidth;
       }
       watchEffect(() => {
         void layout.viewport;
@@ -6880,6 +7869,7 @@
       });
       onBeforeUnmount(() => {
         ro == null ? void 0 : ro.disconnect();
+        if (pollTimer) window.clearInterval(pollTimer);
         document.removeEventListener("keydown", onKeydown);
       });
       return (_ctx, _cache) => {
@@ -6895,57 +7885,7 @@
             "data-details-collapsed": unref(layout).detailsCollapsed ? "" : void 0,
             "data-dragging": drag.value ? "" : void 0
           }, [
-            createBaseVNode("aside", _hoisted_2, [
-              createBaseVNode("div", { class: "side-head" }, [
-                _cache[14] || (_cache[14] = createBaseVNode("span", { class: "side-title" }, "工作区", -1)),
-                createBaseVNode("button", {
-                  id: "refresh",
-                  class: "icon-btn",
-                  type: "button",
-                  title: "重新扫描会话",
-                  onClick: onClickRefresh
-                }, "⟳")
-              ]),
-              createBaseVNode("div", _hoisted_3, [
-                withDirectives(createBaseVNode("input", {
-                  id: "search",
-                  "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => unref(state).filter = $event),
-                  type: "search",
-                  placeholder: "过滤：会话名 / 阶段 / 项目…",
-                  autocomplete: "off",
-                  onInput: onClickSearch
-                }, null, 544), [
-                  [vModelText, unref(state).filter]
-                ])
-              ]),
-              _cache[15] || (_cache[15] = createBaseVNode("div", { class: "side-list-wrap" }, [
-                createBaseVNode("div", {
-                  id: "session-list",
-                  class: "session-list",
-                  role: "tree",
-                  "aria-label": "会话列表"
-                }),
-                createBaseVNode("div", {
-                  class: "list-fade",
-                  "aria-hidden": "true"
-                })
-              ], -1)),
-              _cache[16] || (_cache[16] = createBaseVNode("div", {
-                id: "side-totals",
-                class: "side-totals hidden"
-              }, null, -1)),
-              _cache[17] || (_cache[17] = createBaseVNode("div", { class: "side-status" }, [
-                createBaseVNode("div", {
-                  id: "root-path",
-                  class: "root-path",
-                  title: "扫描根目录"
-                }, "—"),
-                createBaseVNode("div", {
-                  id: "side-foot",
-                  class: "side-foot"
-                })
-              ], -1))
-            ]),
+            createVNode(_sfc_main$1),
             createBaseVNode("div", {
               id: "handle-sidebar",
               class: "handle",
@@ -6955,15 +7895,15 @@
               "aria-label": "调整侧栏宽度",
               style: normalizeStyle({ left: `${unref(layout).cols.sidebar}px` }),
               "data-dragging": ((_a = drag.value) == null ? void 0 : _a.side) === "sidebar" ? "true" : void 0,
-              onPointerdown: _cache[1] || (_cache[1] = ($event) => onDragStart($event, "sidebar")),
+              onPointerdown: _cache[0] || (_cache[0] = ($event) => onDragStart($event, "sidebar")),
               onPointermove: onDragMove,
               onPointerup: onDragEnd,
               onPointercancel: onDragEnd,
-              onDblclick: _cache[2] || (_cache[2] = ($event) => onDragDblClick("sidebar"))
-            }, null, 44, _hoisted_4),
-            createBaseVNode("main", _hoisted_5, [
-              createBaseVNode("header", _hoisted_6, [
-                createBaseVNode("div", _hoisted_7, [
+              onDblclick: _cache[1] || (_cache[1] = ($event) => onDragDblClick("sidebar"))
+            }, null, 44, _hoisted_2),
+            createBaseVNode("main", _hoisted_3, [
+              createBaseVNode("header", _hoisted_4, [
+                createBaseVNode("div", _hoisted_5, [
                   createBaseVNode("button", {
                     id: "side-toggle",
                     class: "icon-btn",
@@ -6971,26 +7911,28 @@
                     title: "折叠 / 展开侧栏",
                     "aria-label": "折叠或展开侧栏",
                     "aria-pressed": unref(layout).sidebarCollapsed ? "false" : "true",
-                    onClick: _cache[3] || (_cache[3] = //@ts-ignore
+                    onClick: _cache[2] || (_cache[2] = //@ts-ignore
                     (...args) => unref(toggleSidebar) && unref(toggleSidebar)(...args))
-                  }, "▤", 8, _hoisted_8),
-                  createBaseVNode("nav", _hoisted_9, [
-                    !unref(state).current ? (openBlock(), createElementBlock("span", _hoisted_10, "未选择会话")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                  }, "▤", 8, _hoisted_6),
+                  createBaseVNode("nav", _hoisted_7, [
+                    !unref(state).current ? (openBlock(), createElementBlock("span", _hoisted_8, "未选择会话")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                       createBaseVNode("button", {
                         class: "crumb is-link",
                         type: "button",
                         title: "在侧栏里定位到这个项目",
-                        onClick: _cache[4] || (_cache[4] = ($event) => _ctx.revealProject(curProject.value))
+                        onClick: _cache[3] || (_cache[3] = ($event) => unref(revealProject)(curProject.value))
                       }, toDisplayString(curProject.value), 1),
-                      _cache[18] || (_cache[18] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
+                      _cache[13] || (_cache[13] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
                       createBaseVNode("span", {
                         class: "crumb crumb-current",
                         title: unref(state).current.id
-                      }, toDisplayString(sessionTitle.value), 9, _hoisted_11)
+                      }, [
+                        createVNode(_sfc_main$2, { text: sessionTitle.value }, null, 8, ["text"])
+                      ], 8, _hoisted_9)
                     ], 64))
                   ]),
-                  createBaseVNode("div", _hoisted_12, [
-                    !unref(state).current ? (openBlock(), createElementBlock("span", _hoisted_13, toDisplayString(badgeText.value), 1)) : (openBlock(), createElementBlock("span", _hoisted_14, toDisplayString(headerSummary.value), 1))
+                  createBaseVNode("div", _hoisted_10, [
+                    !unref(state).current ? (openBlock(), createElementBlock("span", _hoisted_11, toDisplayString(badgeText.value), 1)) : (openBlock(), createElementBlock("span", _hoisted_12, toDisplayString(headerSummary.value), 1))
                   ]),
                   createBaseVNode("button", {
                     id: "details-toggle",
@@ -6999,12 +7941,12 @@
                     title: unref(layout).detailsCollapsed ? "详情面板（元信息 / 指标）" : "关闭详情面板",
                     "aria-label": "展开或收起详情面板",
                     "aria-pressed": unref(layout).detailsCollapsed ? "false" : "true",
-                    onClick: _cache[5] || (_cache[5] = //@ts-ignore
+                    onClick: _cache[4] || (_cache[4] = //@ts-ignore
                     (...args) => unref(toggleDetails) && unref(toggleDetails)(...args))
-                  }, "ⓘ", 8, _hoisted_15)
+                  }, "ⓘ", 8, _hoisted_13)
                 ]),
-                createBaseVNode("div", _hoisted_16, [
-                  createBaseVNode("div", _hoisted_17, [
+                createBaseVNode("div", _hoisted_14, [
+                  createBaseVNode("div", _hoisted_15, [
                     createBaseVNode("button", {
                       id: "tab-chat",
                       class: normalizeClass(["tab", { "tab-active": unref(state).view === "chat" }]),
@@ -7012,8 +7954,8 @@
                       role: "tab",
                       "aria-selected": unref(state).view === "chat" ? "true" : "false",
                       "data-view": "chat",
-                      onClick: _cache[6] || (_cache[6] = ($event) => unref(switchView)("chat"))
-                    }, "对话", 10, _hoisted_18),
+                      onClick: _cache[5] || (_cache[5] = ($event) => unref(switchView)("chat"))
+                    }, "对话", 10, _hoisted_16),
                     createBaseVNode("button", {
                       id: "tab-traj",
                       class: normalizeClass(["tab", { "tab-active": unref(state).view === "trajectory" }]),
@@ -7021,10 +7963,10 @@
                       role: "tab",
                       "aria-selected": unref(state).view === "trajectory" ? "true" : "false",
                       "data-view": "trajectory",
-                      onClick: _cache[7] || (_cache[7] = ($event) => unref(switchView)("trajectory"))
-                    }, "轨迹", 10, _hoisted_19)
+                      onClick: _cache[6] || (_cache[6] = ($event) => unref(switchView)("trajectory"))
+                    }, "轨迹", 10, _hoisted_17)
                   ]),
-                  createBaseVNode("div", _hoisted_20, [
+                  createBaseVNode("div", _hoisted_18, [
                     createBaseVNode("button", {
                       id: "follow",
                       class: "tab-toggle",
@@ -7032,7 +7974,7 @@
                       "aria-pressed": unref(state).follow ? "true" : "false",
                       title: "新消息到达时自动滚动到底部",
                       onClick: onClickFollow
-                    }, "自动跟随", 8, _hoisted_21),
+                    }, "自动跟随", 8, _hoisted_19),
                     createBaseVNode("button", {
                       id: "collapse-thinking",
                       class: "tab-toggle",
@@ -7040,7 +7982,7 @@
                       "aria-pressed": unref(state).forceCollapse ? "true" : "false",
                       title: "把所有消息的思考过程折叠起来",
                       onClick: onClickCollapseThinking
-                    }, "折叠全部思考", 8, _hoisted_22),
+                    }, "折叠全部思考", 8, _hoisted_20),
                     createBaseVNode("button", {
                       id: "only-tools",
                       class: "tab-toggle",
@@ -7048,7 +7990,7 @@
                       "aria-pressed": unref(state).onlyTools ? "true" : "false",
                       title: "只显示工具调用与工具结果",
                       onClick: onClickOnlyTools
-                    }, "仅看工具调用", 8, _hoisted_23),
+                    }, "仅看工具调用", 8, _hoisted_21),
                     createBaseVNode("button", {
                       id: "md-toggle",
                       class: "tab-toggle",
@@ -7056,7 +7998,7 @@
                       "aria-pressed": unref(state).markdown ? "true" : "false",
                       title: unref(state).markdown ? "消息正文按 Markdown 渲染（标题 / 列表 / 代码块 / 表格），点击回到纯文本" : "消息正文按纯文本显示（pre-wrap），点击改用 Markdown 渲染",
                       onClick: onClickMarkdown
-                    }, "Markdown", 8, _hoisted_24),
+                    }, "Markdown", 8, _hoisted_22),
                     createBaseVNode("button", {
                       id: "unit-toggle",
                       class: "tab-toggle",
@@ -7064,24 +8006,24 @@
                       "aria-pressed": unref(state).unit === "char" ? "false" : "true",
                       title: unref(state).unit === "char" ? "计数按字符数显示（精确值），点击改为 token" : "计数按 token 显示（本地估算，带 ≈），点击改为字符",
                       onClick: onClickUnit
-                    }, toDisplayString(unref(state).unit === "char" ? "字符" : "token"), 9, _hoisted_25),
+                    }, toDisplayString(unref(state).unit === "char" ? "字符" : "token"), 9, _hoisted_23),
                     createBaseVNode("button", {
                       id: "theme-toggle",
                       class: "tab-toggle",
                       type: "button",
                       "aria-pressed": unref(state).theme === "dark" ? "true" : "false",
                       title: unref(state).theme === "dark" ? "切换为白天模式（浅色，默认）" : "切换为夜间模式（深色）",
-                      onClick: _cache[8] || (_cache[8] = //@ts-ignore
+                      onClick: _cache[7] || (_cache[7] = //@ts-ignore
                       (...args) => unref(toggleTheme) && unref(toggleTheme)(...args))
-                    }, toDisplayString(unref(state).theme === "dark" ? "☀️ 浅色" : "🌙 深色"), 9, _hoisted_26)
+                    }, toDisplayString(unref(state).theme === "dark" ? "☀️ 浅色" : "🌙 深色"), 9, _hoisted_24)
                   ])
                 ])
               ]),
               createBaseVNode("div", {
                 id: "banner",
-                class: normalizeClass(["banner", { hidden: !unref(state).badLines }])
-              }, null, 2),
-              createBaseVNode("div", _hoisted_27, [
+                class: normalizeClass(["banner", { hidden: !bannerText.value }])
+              }, toDisplayString(bannerText.value), 3),
+              createBaseVNode("div", _hoisted_25, [
                 createBaseVNode("div", {
                   id: "timeline",
                   class: normalizeClass(["timeline", { hidden: unref(state).view !== "chat" }])
@@ -7102,25 +8044,25 @@
               style: normalizeStyle({ left: `${Math.max(0, unref(layout).viewport - unref(layout).cols.details)}px` }),
               "data-dragging": ((_b = drag.value) == null ? void 0 : _b.side) === "details" ? "true" : void 0,
               "data-hidden": unref(layout).detailsCollapsed ? "true" : void 0,
-              onPointerdown: _cache[9] || (_cache[9] = ($event) => onDragStart($event, "details")),
+              onPointerdown: _cache[8] || (_cache[8] = ($event) => onDragStart($event, "details")),
               onPointermove: onDragMove,
               onPointerup: onDragEnd,
               onPointercancel: onDragEnd,
-              onDblclick: _cache[10] || (_cache[10] = ($event) => onDragDblClick("details"))
-            }, null, 44, _hoisted_28),
-            createBaseVNode("aside", _hoisted_29, [
-              createBaseVNode("div", _hoisted_30, [
-                _cache[19] || (_cache[19] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
+              onDblclick: _cache[9] || (_cache[9] = ($event) => onDragDblClick("details"))
+            }, null, 44, _hoisted_26),
+            createBaseVNode("aside", _hoisted_27, [
+              createBaseVNode("div", _hoisted_28, [
+                _cache[14] || (_cache[14] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
                 createBaseVNode("button", {
                   id: "details-close",
                   class: "icon-btn",
                   type: "button",
                   title: "关闭详情面板",
                   "aria-label": "关闭详情面板",
-                  onClick: _cache[11] || (_cache[11] = ($event) => unref(state).details > 0 && unref(toggleDetails)())
+                  onClick: _cache[10] || (_cache[10] = ($event) => unref(state).details > 0 && unref(toggleDetails)())
                 }, "✕")
               ]),
-              _cache[20] || (_cache[20] = createBaseVNode("div", {
+              _cache[15] || (_cache[15] = createBaseVNode("div", {
                 id: "details-body",
                 class: "details-body"
               }, null, -1))
@@ -7129,17 +8071,17 @@
           createBaseVNode("div", {
             id: "lightbox",
             class: normalizeClass(["lightbox", { hidden: !unref(lightbox).open }]),
-            onClick: _cache[13] || (_cache[13] = //@ts-ignore
+            onClick: _cache[12] || (_cache[12] = //@ts-ignore
             (...args) => unref(closeLightbox) && unref(closeLightbox)(...args))
           }, [
             createBaseVNode("img", {
               id: "lightbox-img",
               src: unref(lightbox).open ? unref(lightbox).url : void 0,
               alt: unref(lightbox).ref,
-              onClick: _cache[12] || (_cache[12] = withModifiers(() => {
+              onClick: _cache[11] || (_cache[11] = withModifiers(() => {
               }, ["stop"]))
-            }, null, 8, _hoisted_31),
-            _cache[21] || (_cache[21] = createBaseVNode("div", { class: "lightbox-hint" }, "点击空白处或按 Esc 关闭", -1))
+            }, null, 8, _hoisted_29),
+            _cache[16] || (_cache[16] = createBaseVNode("div", { class: "lightbox-hint" }, "点击空白处或按 Esc 关闭", -1))
           ], 2)
         ], 64);
       };
