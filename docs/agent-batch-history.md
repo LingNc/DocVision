@@ -705,3 +705,23 @@ models:
 **验收证据**：`npm run build`（CSS 44121 字节与源一致）→ `go build` → 8955 端口起服务：`/v2`、`/v2/viewer.js`(205943B)、`/v2/viewer.css` 均 200；无头 chromium dump-dom 见 `#frame`/`#sidebar-col`/`#center-col`/`#details-col`/`#lightbox`/`data-v-app` 齐全；两页 stderr 均无 CONSOLE 报错行。基线截图 `temp/p5run/shot_{old,v2}_base.png`（1600×1000）。
 
 **坑**：① headless chromium 无 `--user-data-dir` 时报 "Failed to create a unique user data directory"，必须显式给；② 服务进程用 `(cmd &)` 起会在 bash 调用结束时被回收，要起一次、同批调用内完成验证；③ `env` 里没有 proxy 变量，首判方向错了——curl 探活优先于猜。
+
+## P5-R1 批（续）：块 2～7 迁移完成，`p5/migration-v2` 分支
+
+承接上文，按块推进至全部迁移完成。每块一个本地提交（df4b862 / 0ab569a / 6b5b8f0 / 7fcd25c / b320053），验收看家工具是 `temp/p5run/` 里的 harness（`both.mjs` 两页同探针 + `pngdiff.mjs` 截图逐像素 diff，均支持隔离 localStorage 的 preExpr）。
+
+**各块内容与验收**：
+- **块2 侧栏树 + 数据层**（df4b862）：`legacy/sidebar.ts`（旧页侧栏函数照搬区）、`legacy/data` 层 `data.ts`（refreshIndex/pullSession 增量/selectSession/bootData 2 秒轮询 + pullSeq 防串台）、`Sidebar.vue`（proj-group/stage-group/session-row 全套类名 + `v-collapse` 指令 = 旧页 `bindCollapse`：程序化改 open 不写记忆、用户 toggle 才写回）+ `InlineMD.vue`。验收 150/150 字段一致；**真缺陷**：过滤时项目组未强制展开——旧页是 `g.matched ? true : groupWantOpen(...)`，字面 true 优先于折叠记忆，初版错用 groupWantOpen；侧栏区域 0 像素差。
+- **块3 对话正文 + 富文本层**（0ab569a）：`legacy/richtext.ts`（子代理移植 950 行：块级 Markdown/highlightMachine/machineScroll/LaTeX→MathML 转换器；esbuild+DOM stub 冒烟 65 断言）、`legacy/timeline.ts`（renderLine 一族**命令式 DOM 照搬**——图片归属 attachImages 要跨节点手术，虚拟 DOM 不适合表达）、`Timeline.vue` 薄容器。验收：#timeline 范围 31/31 元素全同、交互序列（展开工具卡/仅看工具/Markdown 切换/灯箱 Esc）全链一致、**全页 0 像素差**。两个真缺陷：① `MD_INLINE` 多写 `g` 标志——模块级共享正则 + 递归调用破坏 lastIndex，嵌套行内标记被跳过（旧页特意不带 g），去掉即修；② 详情栏元信息块因探针选择器未限定 `#timeline` 混进计数，定位后确认属块 6。
+- **块4 工具卡/思考块交互**：折叠记忆跨重渲、forceCollapse、io 折叠、复制按钮、家族/状态类 20/20 全同，块 3 已覆盖，无需改码。
+- **块5 轨迹表**（6b5b8f0）：`legacy/trajectory.ts` 逐函数照搬（trajectoryRows 全类型/callDuration/TRAJ_KINDS 筛选/trajDetailBody/jumpToLine+flash）；state.ts 渲染入口改**注册表**（registerRenderTrajectory/renderDetails 挂点）避免循环 import。104/104 全同 + 轨迹页截图 0 像素差。
+- **块6 详情栏**（7fcd25c）：`legacy/details.ts`（会话键值表/指标瓦片双口径/每次请求明细/metaCard+工具 schema）。**真缺陷两处**：① metaCard 摘要漏 `"sha "` 前缀（照搬走样）；② **Vue watch 陷阱**——`watch(() => [a,b,...], cb)` 的 getter 返回新数组只做整体 Object.is 比较，而 `state.current` 每次轮询都被换成新对象 → getter 每 2 秒重跑 → 回调每轮误触发 → 对话流/详情栏整栏重渲把用户展开的折叠冲掉；改**数组多源形式**（逐元素比较）后消除。95/95 全同 + 详情打开态截图 0 像素差。
+- **块7 灯箱**（b320053）：旧页 img 不拦冒泡（点图也会关），块 1 模板误加 `@click.stop`，去掉。矢量图会话 16/16 全同。
+- **整体验收**：多会话切换（chapters↔style，锚点/高亮/自动展开）、明暗两主题截图、键盘 [ ] 折叠、单位切换、轨迹跳回——20/20 全同；**明暗两主题全页截图均 0 像素差**；两页 25 秒控制台零报错。
+
+**坑与教训**：
+1. **旧服务器进程杀不掉**：bash 工具调用结束后 `(cmd &)` 起的进程在沙箱 PID namespace 外，`pkill` 连自己的 shell 一起带走（exit 143）也杀不到它，`ss -tlnp` 看不到 PID——直接换端口（8955 → 8956 → …）比纠缠进程干净。
+2. **探针选择器要限定范围**：`document.querySelectorAll('pre.body-text')` 会把详情栏的 prompt-text/schema-desc 混进对话流的计数，凭空多出 6 处"差异"；限定 `#timeline` 后消失。先怀疑自己的探针再怀疑代码。
+3. **模块级带 g 的正则是地雷**：移植时照抄旧页要连标志位一起抄——旧页不带 g 是刻意的（mdInline 递归）。
+4. **Vue watch 多源**：见块 6，写进 AGENTS.md 陷阱清单。
+5. 富文本层（~1500 行纯函数）委派子代理并行移植 + 自写 DOM stub 冒烟，效果良好；时间线/详情栏这种跨节点手术的命令式渲染留主线程逐函数对照。
