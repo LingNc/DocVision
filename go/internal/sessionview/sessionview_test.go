@@ -1525,6 +1525,12 @@ func TestProjectGroupMultiProjectLayout(t *testing.T) {
 	writeFile(t, legacy2, transcript(`{"t":"msg","role":"user","text":"矢量"}`))
 	writeFile(t, filepath.Join(root, "finally_latex", "progress_items", ".keep"), "")
 
+	// 书直接挂在扫描根下（实际部署的布局）：work/sessions 收转录，是现代
+	// 布局，尽管书目录本身是工作区，也**不**是 legacy（T13：徽标误显）。
+	bookC := jsonl(root, "概率论-根挂", "work", "sessions", "convert_02.jsonl")
+	writeFile(t, bookC, transcript(`{"t":"msg","role":"user","text":"转换2"}`))
+	writeFile(t, filepath.Join(root, "概率论-根挂", ".docvision_project.json"), `{"name":"概率论-根挂"}`)
+
 	// 既不是工作区、也不是结构名的目录：分组退回第一层，不能凭空造组。
 	plain := jsonl(root, "latex_project", "scratch", "notes.jsonl")
 	writeFile(t, plain, transcript(`{"t":"msg","role":"user","text":"随手记"}`))
@@ -1548,6 +1554,8 @@ func TestProjectGroupMultiProjectLayout(t *testing.T) {
 		{"finally_latex/sessions/vector_y.jsonl", "finally_latex", true},
 		// 容器本身不是工作区（书都在子目录里）：只退到容器名，不算 legacy。
 		{"latex_project/scratch/notes.jsonl", "latex_project", false},
+		// 书直接挂根下、转录在 work/sessions/ 里：现代布局，不挂徽标（T13）。
+		{"概率论-根挂/work/sessions/convert_02.jsonl", "概率论-根挂", false},
 	}
 	for _, c := range cases {
 		got, ok := byID[c.id]

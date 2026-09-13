@@ -6,12 +6,12 @@
  * 点击才写回）；选中高亮与行内文案走响应式，轮询不重建 DOM。
  */
 import { computed, ref } from 'vue'
-import { state, openDetails, fmtSize } from '../state'
+import { state, openDetails, fmtSize, storeGet, storeSet } from '../state'
 import {
   buildGroups, groupKey, groupWantOpen, imageChipText, imageTipText,
   projectProgressLine, projectOf,
   relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
-  stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens,
+  stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens, type StageStatus,
 } from '../legacy/sidebar'
 import { selectSession, refreshIndex } from '../data'
 import InlineMD from './InlineMD.vue'
@@ -20,9 +20,20 @@ const OVERFLOW_LIMIT = 8
 
 const listEl = ref<HTMLElement | null>(null)
 
+/*
+ * 方块视图（P8）：矢量图/章节转换动辄几十个会话，列表扫不过来。开了之后
+ * 会话渲染成一排 20px 小方块（逐图会话显示书内序号），悬浮出完整说明，
+ * 记忆落在 localStorage 与折叠记忆同库。
+ */
+const blockView = ref(storeGet('side.blockView') === '1')
+function toggleBlockView() {
+  blockView.value = !blockView.value
+  storeSet('side.blockView', blockView.value ? '1' : '0')
+}
+
 interface StageView {
   stage: string; title: string; items: any[]; live: number
-  status: { text: string; done: boolean; title: string } | null
+  status: StageStatus | null
   overflowKey: string; needOverflow: boolean; shown: any[]
   hiddenCount: number
 }
@@ -54,7 +65,7 @@ const groups = computed<GroupView[]>(() => {
       const shown = openAll ? items : items.slice(0, OVERFLOW_LIMIT)
       return {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
-        status: stageStatusText(stages0, stg),
+        status: stageStatusText(stages0, stg, sg.live),
         overflowKey: okey, needOverflow, shown, hiddenCount: items.length - shown.length,
       }
     })
@@ -175,6 +186,11 @@ function onMoreClick(okey: string) {
   <aside id="sidebar-col" class="sidebar-col">
     <div class="side-head">
       <span class="side-title">工作区</span>
+      <button
+        id="side-view-toggle" class="icon-btn" :class="{ on: blockView }" type="button"
+        :title="blockView ? '切回列表视图' : '切到方块视图（会话多时好扫；悬浮看说明）'"
+        @click="toggleBlockView"
+      >{{ blockView ? '☰' : '▦' }}</button>
       <button id="refresh" class="icon-btn" type="button" title="重新扫描会话" @click="refreshIndex">⟳</button>
     </div>
     <div class="side-search">
@@ -190,7 +206,10 @@ function onMoreClick(okey: string) {
           :data-project="g.name"
         >
           <summary class="proj-row" :title="g.name">
-            <span class="row-slot"><span class="row-caret"></span></span>
+            <span class="row-slot row-folder">
+              <svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+              <svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 3.5h4l1.5 2h7.5v2h-12l-1.5 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M1.5 13.5l1.6-6h12.4l-1.6 6h-12.4Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+            </span>
             <span class="row-body">
               <span v-if="g.prefix" class="proj-prefix">{{ g.prefix }}</span>
               <span class="proj-title">{{ g.title }}</span>
@@ -213,14 +232,26 @@ function onMoreClick(okey: string) {
                   <span class="row-slot"><span class="row-caret"></span></span>
                   <span class="row-body">{{ sv.title }}</span>
                   <span class="row-meta">{{ sv.items.length }} 个会话</span>
-                  <span v-if="sv.status" class="stage-progress" :class="{ done: sv.status.done }" :title="sv.status.title">{{ sv.status.text }}</span>
-                  <span v-if="sv.live" class="dot live"></span>
+                  <span v-if="sv.status" class="stage-progress" :class="sv.status.state" :title="sv.status.title">{{ sv.status.text }}</span>
                 </summary>
-                <div>
+                <div v-if="blockView" class="session-blocks">
+                  <button
+                    v-for="s in sv.items"
+                    :key="s.id"
+                    class="session-block"
+                    :class="{ active: state.current && state.current.id === s.id, live: s.live }"
+                    type="button"
+                    role="treeitem"
+                    :data-id="s.id"
+                    :title="rowTitle(s)"
+                    @click="onRowClick(s)"
+                  >{{ s.imageOrder || '' }}</button>
+                </div>
+                <div v-else>
                   <button
                     v-for="s in sv.shown"
                     :key="s.id"
-                    class="session-row"
+                    class="session-row sub2"
                     :class="{ active: state.current && state.current.id === s.id }"
                     type="button"
                     role="treeitem"
@@ -243,29 +274,44 @@ function onMoreClick(okey: string) {
                 </div>
               </details>
               <template v-else>
-                <button
-                  v-for="s in sv.shown"
-                  :key="s.id"
-                  class="session-row"
-                  :class="{ active: state.current && state.current.id === s.id }"
-                  type="button"
-                  role="treeitem"
-                  :data-id="s.id"
-                  :title="rowTitle(s)"
-                  @click="onRowClick(s)"
-                >
-                  <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                  <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
-                  <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
-                  <span v-if="s.imageName" class="row-chip image-chip" :title="imageTipText(s)">{{ imageChipText(s) }}</span>
-                  <span class="row-time">{{ relTime(s.mtime) }}</span>
-                  <span class="row-actions">
-                    <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, s)">ⓘ</button>
-                  </span>
-                </button>
-                <button v-if="sv.needOverflow" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
-                  更多会话（还有 {{ sv.hiddenCount }} 个）
-                </button>
+                <div v-if="blockView" class="session-blocks">
+                  <button
+                    v-for="s in sv.items"
+                    :key="s.id"
+                    class="session-block"
+                    :class="{ active: state.current && state.current.id === s.id, live: s.live }"
+                    type="button"
+                    role="treeitem"
+                    :data-id="s.id"
+                    :title="rowTitle(s)"
+                    @click="onRowClick(s)"
+                  >{{ s.imageOrder || '' }}</button>
+                </div>
+                <template v-else>
+                  <button
+                    v-for="s in sv.shown"
+                    :key="s.id"
+                    class="session-row sub1"
+                    :class="{ active: state.current && state.current.id === s.id }"
+                    type="button"
+                    role="treeitem"
+                    :data-id="s.id"
+                    :title="rowTitle(s)"
+                    @click="onRowClick(s)"
+                  >
+                    <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
+                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                    <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
+                    <span v-if="s.imageName" class="row-chip image-chip" :title="imageTipText(s)">{{ imageChipText(s) }}</span>
+                    <span class="row-time">{{ relTime(s.mtime) }}</span>
+                    <span class="row-actions">
+                      <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, s)">ⓘ</button>
+                    </span>
+                  </button>
+                  <button v-if="sv.needOverflow" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
+                    更多会话（还有 {{ sv.hiddenCount }} 个）
+                  </button>
+                </template>
               </template>
             </template>
           </div>

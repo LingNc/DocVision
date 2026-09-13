@@ -76,7 +76,7 @@ export function fmtTokens(n: unknown): string {
 
 export function fmtDur(ms: unknown): string {
   const v = Number(ms) || 0
-  if (v < 1000) return v + 'ms'
+  if (v < 1000) return Math.round(v) + 'ms' // 平均值是浮点，别把 991.4705882ms 漏给用户（T12）
   if (v < 60000) return (v / 1000).toFixed(1) + 's'
   const m = Math.floor(v / 60000)
   const sec = Math.round((v % 60000) / 1000)
@@ -220,14 +220,24 @@ export function progressKeyFor(stage: string): string {
   return stage
 }
 
-export function stageStatusText(stages: any, stage: string): { text: string; done: boolean; title: string } | null {
+/* 阶段状态三态：done=绿 / running=绿点脉冲 / else=进行中文本（P8 状态色）。 */
+export interface StageStatus {
+  text: string; state: 'done' | 'running' | 'idle' | 'busy'; title: string
+}
+
+export function stageStatusText(stages: any, stage: string, live?: number): StageStatus | null {
+  // 会话活着 = 这一阶段正在跑，优先于 progress.json 的静态值。
+  if (live) return { text: '运行中', state: 'running', title: '这一阶段还有 ' + live + ' 个会话在实时写入' }
   if (!stages) return null
   const key = progressKeyFor(stage)
   const v = stages[key]
-  if (v === undefined || v === null || v === '') return null
+  if (v === undefined || v === null || v === '') {
+    return { text: '未开始', state: 'idle', title: 'progress.json: ' + key + ' 还没有记录' }
+  }
   const text = String(v)
   const done = /^(done|ok|true|finished|complete[d]?)$/i.test(text)
-  return { text: done ? '✓ 完成' : text, done, title: 'progress.json: ' + key + ' = ' + text }
+  if (done) return { text: '✓ 完成', state: 'done', title: 'progress.json: ' + key + ' = ' + text }
+  return { text, state: 'busy', title: 'progress.json: ' + key + ' = ' + text }
 }
 
 /* 书级进展：progress.json 原样列出各阶段状态（档位1/2 的键略有不同）。 */
@@ -357,13 +367,17 @@ export function buildGroups(): ProjectGroup[] {
         name,
         prefix: cut > 0 ? name.slice(0, cut + 1) : '',
         title: cut > 0 ? name.slice(cut + 1) : name,
-        legacy: !!s.projectLegacy,
+        legacy: false,
         items: [], live: 0, matched: false,
         stages: {},
       }
       groups.push(g)
     }
-    if (s.projectLegacy) g.legacy = true
+    // 「旧版单项目」徽标只属于**根组**（Go 的 RootProject"（根目录）"：输出
+    // 根本身就是工作区）。书组里只要有一笔旧式落点的转录（如
+    // <书>/work/style_session.jsonl 直接收在 work/ 下），组级 OR 会把整组
+    // 误标——新布局的书不该挂这个徽标（T13）。
+    if (s.projectLegacy && name === '（根目录）') g.legacy = true
     if (q && sessionHaystack(s).indexOf(q) < 0) return
     g.items.push(s)
     if (s.live) g.live++

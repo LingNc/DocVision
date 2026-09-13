@@ -342,7 +342,7 @@
 
   function fmtDur(ms) {
     ms = Number(ms) || 0;
-    if (ms < 1000) { return ms + 'ms'; }
+    if (ms < 1000) { return Math.round(ms) + 'ms'; } // 平均值是浮点，别漏 991.4705…ms（T12）
     if (ms < 60000) { return (ms / 1000).toFixed(1) + 's'; }
     var m = Math.floor(ms / 60000);
     var sec = Math.round((ms % 60000) / 1000);
@@ -1897,12 +1897,14 @@
           name: name,
           prefix: cut > 0 ? name.slice(0, cut + 1) : '',
           title: cut > 0 ? name.slice(cut + 1) : name,
-          legacy: !!s.projectLegacy,
+          legacy: false, // 徽标只在根组（见下方 projectLegacy 判断）；组初始化不再 OR（T13）
           items: [], live: 0, matched: false
         };
         groups.push(g);
       }
-      if (s.projectLegacy) { g.legacy = true; }
+      // 「旧版单项目」只属于根组（输出根本身就是工作区）；书组里有一笔
+      // 旧式落点的转录（<书>/work/style_session.jsonl）不该把整组标上（T13）。
+      if (s.projectLegacy && name === '（根目录）') { g.legacy = true; }
       if (q && sessionHaystack(s).indexOf(q) < 0) { return; }
       g.items.push(s);
       if (s.live) { g.live++; }

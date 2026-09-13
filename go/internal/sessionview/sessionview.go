@@ -112,7 +112,16 @@ func (s *scanner) projectGroupFor(root, rel string) ProjectGroup {
 			return ProjectGroup{Name: seg[0] + "/" + seg[1], Legacy: false}
 		}
 	}
-	return ProjectGroup{Name: name, Legacy: isProjectWorkspace(filepath.Join(root, seg[0]))}
+	// 旧版单项目 = 组目录本身是工作区（work/、progress.json 直接挂在它
+	// 下面）。但现代多项目布局的书目录**同样**是工作区——区别在转录的
+	// 落点：现代布局收在工作区自己的 work/sessions/ 或 source/sessions/
+	// 里，旧版是 work/<file>.jsonl、sessions/<file>.jsonl 直接躺着。
+	// 不区分这一点，每本新书都会被误挂「旧版单项目」徽标（T13）。
+	legacy := isProjectWorkspace(filepath.Join(root, seg[0]))
+	if len(seg) >= 3 && (seg[1] == "work" || seg[1] == "source") && seg[2] == "sessions" {
+		legacy = false
+	}
+	return ProjectGroup{Name: name, Legacy: legacy}
 }
 
 // isProjectWorkspace reports whether dir looks like a docvision project

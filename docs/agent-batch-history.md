@@ -773,3 +773,20 @@ models:
 3. **锚点接口化**：行号→DOM 的映射从 `state.anchors`（reactive，会把 DOM 节点包成响应式代理）挪到 state.ts 模块级 `Map` 注册表：`registerAnchor/unregisterAnchor/anchorOf/clearAnchors`；消息组件 onMounted 注册/onBeforeUnmount 注销，ToolCard 对 anchorNs 做差量增删；trajectory `jumpToLine` 改走 `anchorOf()`。行为探针确认：点轨迹行 → 切回对话 → 对应 `msg-assistant` 节点 flash 高亮。
 
 **真实教训（两次）**：`tsc --noEmit` 不检查 `.vue` 的 script 块，vite 构建也不报——AssistantMsg 漏 `onBeforeUnmount` import、ToolCard/AssistantMsg 漏 `registerAnchor` import，都是**运行时才炸**（`ReferenceError: … is not defined`，整个消息流组件挂掉、页面只剩 1 条消息）。第一次是探针 454 字段跑出 219 处 None 才暴露的，单靠"探针里有值"的条目发现不了——所以控制台零报错必须是每轮验收的固定动作。补了一个自查脚本（grep 各文件用到的 state 模块导出 vs import 面板），归入 web 开发流程；最终全绿：454/454 + 控制台零报错 + 5 场景 0 像素差 + 轨迹跳回行为验证（点行 → 切对话 → 目标节点 flash）。
+
+### P8 侧栏仿 DSH 改版 + T12/T13（`web/components` 分支）
+
+**T12（平均首字长浮点）**：`fmtDur` 亚秒分支 `v + 'ms'` 直接漏浮点（用户见 `991.4705882352941ms`）。新旧两页同款修复：`Math.round(v) + 'ms'`。v2 探针 probe5 的 `tiles[3]/value` 从此与旧页（未修）差 1 处——**预期内差异**，453/454。
+
+**T13（旧版单项目徽标误显）**：两层根因，都在"组级 OR"上。
+1. Go `projectGroupFor` 对 `<书名>/work/sessions/…`（现代布局最常见落点）走到兜底分支 `Legacy: isProjectWorkspace(root/书名)`——书目录必然是工作区 → 每本书都误挂徽标。修法：`seg[1]∈{work,source} && seg[2]=='sessions'` 的转录落点是现代布局，强制 `legacy=false`；`work/<file>.jsonl`、`sessions/<file>.jsonl` 直接躺着的仍是旧式。测试补「书直接挂扫描根下」用例（原有测试都是 `容器/书名` 两层，恰好漏掉真实部署的单层形态——教训：**测试布局要照真实部署摆**）。
+2. 前端 `if (s.projectLegacy) g.legacy = true` 组级 OR：一本书里只要有一笔旧式落点（真实数据里 `<书>/work/style_session.jsonl` 就在 work/ 根下），整组又被标回。语义收窄：徽标只属于**根组**（输出根即工作区）；Go 语义（组目录是工作区根）不动，测试不破。新旧两页同修。
+
+**P8 侧栏改版**（样式仍整卷进 `assets/viewer.css`，新旧页共享——但新类名旧页不引用，不影响旧页观感）：
+- **文件夹图标**：项目行槽位换成 DSH 风格内联 SVG 文件夹（展开=打开的文件夹、着色 accent；收起=闭合轮廓），折叠轨道里保留 16px 图标，辨识度比原来的点/箭头好。
+- **层级递进**：阶段行缩进 24px、会话行 40px（`sub1`/`sub2` 类，hover 背景仍全宽）。
+- **阶段状态三态**：`stageStatusText(stages, stage, live)` —— 会话活着 → 「运行中」（绿、优先于 progress.json）；`done` → 「✓ 完成」（绿）；空值 → 「未开始」（暗）；其他值 → 原文（琥珀）。`.running/.busy/.idle` 配色。
+- **会话方块视图**：侧栏头部 ▦/☰ 切换（记忆 `side.blockView`），开启后会话渲染成 20px 方块网格（`session-blocks`），逐图会话块内显示书内序号，活跃=accent 实心、运行中=绿圈；悬浮出 `sessionTip` 全量说明；**不受 8 条 overflow 限制**（方块就是为几十个会话设计的），折叠轨道里隐藏。
+- **响应式**：验证 900px（自动折 56px 轨道，文件夹图标保留）与 1280px（详情栏收起、中栏让步）。
+
+验收：探针 453/454（唯一差异=T12 修复本身）；控制台零报错；单测 23/23；截图逐张读图确认（列表/方块/密集 60 会话/深浅主题/900/1280）。新增 `temp/p5run/shotw.mjs`（指定视口宽高截图）。**沙箱注意：bash 每次调用的 /tmp 是独立 tmpfs，跨调用文件一律写工作区。**
