@@ -3,7 +3,7 @@
 // 整卷沿用的旧页样式表（src/styles/viewer.css）。模板结构照
 // go/internal/sessionview/assets/viewer.html 的骨架逐节点复刻。
 // 块 1：三栏骨架交互；块 2：侧栏（数据层 + 分组树）接上。
-import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import {
   applyLayout,
   applyTheme,
@@ -30,8 +30,9 @@ import {
 } from './state'
 import { bootData, refreshIndex, revealProject } from './data'
 import { projectOf, sessionTitleOf } from './legacy/sidebar'
-import { registerRenderTrajectory } from './state'
+import { registerRenderDetails, registerRenderTrajectory } from './state'
 import { renderTrajectory as renderTraj } from './legacy/trajectory'
+import { renderDetails as renderDet } from './legacy/details'
 import Sidebar from './components/Sidebar.vue'
 import Timeline from './components/Timeline.vue'
 import InlineMD from './components/InlineMD.vue'
@@ -149,6 +150,20 @@ function onKeydown(ev: KeyboardEvent) {
   if (ev.key === ']') toggleDetails()
 }
 
+// 详情栏重渲触发（旧页在这些路径上显式调 renderDetails）。
+watch(
+  // 数组多源形式（逐元素比较）：state.current 每次轮询都会被换成新对象，
+  // 用 getter 返回新数组的写法会因引用不同每 2 秒误触发一次重渲。
+  [
+    () => (state.current ? state.current.id : ''),
+    () => state.lines.length,
+    () => state.unit,
+    () => state.markdown,
+    () => state.details,
+  ],
+  () => { renderDet() },
+)
+
 let ro: ResizeObserver | null = null
 let pollTimer = 0
 
@@ -169,6 +184,7 @@ onMounted(() => {
   }
   document.addEventListener('keydown', onKeydown)
   registerRenderTrajectory(renderTraj)
+  registerRenderDetails(renderDet)
   // 数据层：首拉 + 2 秒轮询（页面隐藏时跳过）。
   bootData()
   pollTimer = window.setInterval(() => {

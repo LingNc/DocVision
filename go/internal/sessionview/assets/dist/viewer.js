@@ -6752,6 +6752,7 @@
           state.sidebar = 0;
         }
       }
+      renderDetails$1();
     }
     persistLayout();
     applyLayout();
@@ -6821,6 +6822,14 @@
   }
   function renderTrajectory$1() {
     _renderTrajectory();
+  }
+  let _renderDetails = () => {
+  };
+  function registerRenderDetails(fn) {
+    _renderDetails = fn;
+  }
+  function renderDetails$1() {
+    _renderDetails();
   }
   const ROOT_PROJECT = "（根目录）";
   function projectOf(id) {
@@ -7337,7 +7346,7 @@
   }
   function machineBlock(text, cls) {
     const frag = document.createDocumentFragment();
-    const pre = el("pre", cls);
+    const pre = el("pre", cls || "code");
     const res = highlightMachine(pre, text);
     frag.appendChild(pre);
     if (res.note) frag.appendChild(el("div", "note", res.note));
@@ -9036,6 +9045,7 @@
       stream.appendChild(el$2("div", "empty", timelineEmptyText()));
     }
     updateBanner();
+    renderDetails$1();
     if (state.view === "trajectory") renderTrajectory$1();
   }
   function appendLines(lines) {
@@ -9063,8 +9073,8 @@
       stream.removeChild(placeholder);
     }
     updateBanner();
-    if (hasMeta) ;
-    else if (lines.some((l) => l.t === "usage")) ;
+    if (hasMeta) renderDetails$1();
+    else if (lines.some((l) => l.t === "usage")) renderDetails$1();
     if (state.view === "trajectory") renderTrajectory$1();
     if (state.follow) scrollToBottom();
   }
@@ -9554,6 +9564,314 @@
     void node.offsetWidth;
     node.classList.add("flash");
   }
+  function currentEstimate() {
+    const id = state.current ? state.current.id : "";
+    const list = state.sessions || [];
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].id === id && list[i].estimate) return list[i].estimate;
+    }
+    return state.current && state.current.estimate || null;
+  }
+  function imageEstimate(lines) {
+    const sum = { count: 0, tokens: 0 };
+    (lines || []).forEach((line) => {
+      const est = estOf(line);
+      sum.count += est.imageCount || 0;
+      sum.tokens += est.images || 0;
+    });
+    return sum;
+  }
+  function detailBlock(title) {
+    const wrap = el$2("section", "detail-block");
+    if (title) wrap.appendChild(el$2("h3", "detail-block-title", title));
+    return wrap;
+  }
+  function kvList(pairs) {
+    const dl = el$2("dl", "detail-kv");
+    pairs.forEach((p2) => {
+      if (p2 === null) return;
+      const dt = el$2("dt", null, p2[0]);
+      const dd = el$2("dd", p2[3] ? "mono" : null);
+      if (p2[1] && p2[1].nodeType) {
+        dd.appendChild(p2[1]);
+      } else if (p2[1] !== void 0 && p2[1] !== null) {
+        dd.textContent = p2[1];
+      }
+      if (p2[2]) dd.title = p2[2];
+      dl.appendChild(dt);
+      dl.appendChild(dd);
+    });
+    return dl;
+  }
+  function nameNode(tag, cls, name) {
+    const node = el$2(tag, cls);
+    node.appendChild(renderInlineMarkdown(name));
+    return node;
+  }
+  function detailsSessionBlock() {
+    const cur = state.current;
+    if (!cur) return null;
+    const block = detailBlock("会话");
+    block.appendChild(kvList([
+      ["项目", cur.project || projectOf(cur.id), cur.id],
+      ["阶段", cur.stageTitle || cur.stage || "—"],
+      ["会话", nameNode("span", "detail-name", sessionTitleOf(cur)), cur.id, true],
+      ["文件", cur.name || "—", cur.path, true],
+      ["消息", cur.messages + " 条 · " + state.lines.length + " 行"],
+      ["大小", fmtSize(cur.size)],
+      ["最后写入", fmtClock(cur.mtime)],
+      cur.imageName ? ["图片", imageDisplayName(cur), imageTipText(cur), true] : null,
+      cur.imageFile ? ["图片文件", cur.imageFile, cur.imageName, true] : null,
+      cur.imagePath ? ["图片路径", cur.imagePath, null, true] : null,
+      cur.imageName && cur.page ? ["页码", "第 " + cur.page + " 页"] : null,
+      cur.imageName && cur.imageOrder ? ["顺序", "书内第 " + cur.imageOrder + " 张"] : null,
+      cur.imageName && cur.imageType ? ["类型", cur.imageType] : null,
+      cur.imageName && cur.imageCaption ? ["图注", cur.imageCaption] : null
+    ]));
+    const sub = subPathOf(cur.id);
+    if (sub) block.appendChild(el$2("div", "stats-sub", "目录：" + sub));
+    return block;
+  }
+  function detailsStatsBlock() {
+    const st = aggregate(usageLines(state.lines));
+    if (!st) return null;
+    const block = detailBlock("指标");
+    const meta = el$2("div", "stats-sub", st.requests + " 次请求 · " + (st.streamed ? "流式" : "非流式") + (st.spanMs ? " · 会话跨度 " + fmtDur(st.spanMs) : ""));
+    block.appendChild(meta);
+    const tiles = el$2("div", "tiles");
+    const tile = (label, value, title) => {
+      const t = el$2("div", "tile");
+      t.appendChild(el$2("div", "tile-value", value));
+      t.appendChild(el$2("div", "tile-label", label));
+      if (title) t.title = title;
+      tiles.appendChild(t);
+    };
+    tile(
+      "输入 tokens",
+      fmtTokens(st.promptTokens),
+      st.promptTokens + " prompt tokens（含缓存命中 " + st.cachedTokens + "）\n厂商实测值：随请求发出的图片 token 已经包含在里面，不单列。"
+    );
+    const imgs = imageEstimate(state.lines);
+    if (imgs.count) {
+      const est = currentEstimate();
+      const per = Math.round(imgs.tokens / imgs.count);
+      const rule = est ? est.rule : "本地估算";
+      const lines = [imgs.count + " 张图片的本地估算合计 ≈ " + fmtTokens(imgs.tokens) + "（每张 ≈ " + fmtTokens(per) + "）", "估算口径：" + rule];
+      let value = "≈ " + fmtTokens(per) + "/张";
+      if (est && est.measuredPerImage) {
+        value = "实测 " + fmtTokens(est.measuredPerImage) + "/张";
+        lines.push("实测 " + fmtTokens(est.measuredPerImage) + "/张：厂商 prompt_tokens 的相邻差值推出的每张均值" + (est.measuredSamples ? "（" + est.measuredSamples + " 步 / " + est.measuredImages + " 张）" : ""));
+        lines.push("本地估算每张 ≈ " + fmtTokens(per) + "（口径：" + rule + "，本会话合计 ≈ " + fmtTokens(imgs.tokens) + "）");
+      } else {
+        lines.push("没有可用的实测样本：本会话的用量行还不足以推出每张实测值（无用量行、或没有一次请求新增图片）");
+      }
+      lines.push("对照：上面的「输入 tokens」是厂商实测的 prompt_tokens，其中已经包含图片 token。");
+      tile("图片 " + imgs.count + " 张", value, lines.join("\n"));
+    }
+    tile(
+      "缓存命中",
+      st.promptTokens ? st.cacheHitPct.toFixed(0) + "%" : "—",
+      "前缀缓存命中率 = Σcached_tokens / Σprompt_tokens（供应商未上报时为 —）"
+    );
+    tile(
+      "输出 tokens",
+      fmtTokens(st.completionTokens),
+      st.completionTokens + " completion tokens" + (st.reasoningTokens ? "，其中思考 " + st.reasoningTokens : "")
+    );
+    tile("平均首字", st.avgTtftMs ? fmtDur(st.avgTtftMs) : "—", '每请求"发出→第一个流式增量"的平均耗时');
+    tile(
+      "输出速度",
+      (st.outputTps || 0).toFixed(1) + " tok/s",
+      "生成速度 = Σ输出 tokens / Σ(请求耗时 − 首字延迟)，不含排队与思考等待"
+    );
+    tile("平均耗时", fmtDur(st.avgDurationMs), "每请求平均墙钟耗时（含思考与工具执行前后的等待）");
+    if (st.reasoningTokens) tile("思考 tokens", fmtTokens(st.reasoningTokens), "reasoning_tokens（思考链）");
+    const sessionCost = state.current && state.current.cost;
+    if (sessionCost) {
+      tile(
+        "费用",
+        fmtCost(sessionCost),
+        '按配置里的 models.*.price 计算：未命中缓存的输入 × input + 命中缓存的输入 × cached + 输出 × output。没配价格的模型不显示金额（¥0 会被读成"没花钱"）。'
+      );
+    }
+    block.appendChild(tiles);
+    const details = document.createElement("details");
+    details.className = "stats-details";
+    details.open = true;
+    const sum = el$2("summary", "schema-head");
+    sum.appendChild(el$2("span", "schema-name", "每次请求明细"));
+    sum.appendChild(el$2("span", "schema-meta", st.requests + " 行"));
+    details.appendChild(sum);
+    const scroll = el$2("div", "stats-scroll");
+    const table = el$2("table", "stats-table");
+    const thead = el$2("tr");
+    ["回合", "首字", "耗时", "输入·缓存", "输出"].forEach((h) => {
+      thead.appendChild(el$2("th", null, h));
+    });
+    table.appendChild(thead);
+    st.perRequest.forEach((l) => {
+      const one = l.stats;
+      const tr = el$2("tr");
+      tr.className = "req-row";
+      const kindLabel = one.kind === "compact" ? "上下文压缩摘要请求" : one.kind === "nudge" ? "空回复后的强制文本请求" : "普通对话回合";
+      tr.title = (l.ts ? fmtClock(l.ts) + "\n" : "") + kindLabel + (one.kind ? "（kind=" + one.kind + "）" : "") + (one.model ? "\n模型 " + one.model : "") + "\n输入 " + one.promptTokens + " tokens（缓存命中 " + one.cachedTokens + "）\n输出 " + one.completionTokens + " tokens" + (one.reasoningTokens ? "（其中思考 " + one.reasoningTokens + "）" : "") + "\n输出速度 " + (one.outputTps || 0).toFixed(1) + " tok/s\n结束原因 " + (one.finish || "—");
+      const cell = (text) => {
+        const td = el$2("td", null, text);
+        tr.appendChild(td);
+        return td;
+      };
+      cell(one.round ? "#" + one.round : "—");
+      cell(one.ttftMs ? fmtDur(one.ttftMs) : "—");
+      cell(one.durationMs ? fmtDur(one.durationMs) : "—");
+      cell(fmtTokens(one.promptTokens) + (one.promptTokens ? " · " + (one.cachedTokens * 100 / one.promptTokens).toFixed(0) + "%" : ""));
+      cell(fmtTokens(one.completionTokens));
+      table.appendChild(tr);
+    });
+    scroll.appendChild(table);
+    details.appendChild(scroll);
+    block.appendChild(details);
+    return block;
+  }
+  function toolSchemaBlock(tool, index) {
+    const d = document.createElement("details");
+    d.className = "tool-schema";
+    const head = el$2("summary", "schema-head");
+    head.appendChild(el$2("span", "schema-index", "#" + (index + 1)));
+    head.appendChild(el$2("span", "schema-name", tool.name || "(未命名工具)"));
+    if (tool.description) {
+      head.appendChild(el$2(
+        "span",
+        "schema-meta",
+        "描述 " + countText(String(tool.description).length, tool.descTokens)
+      ));
+    }
+    if (tool.parameters) {
+      head.appendChild(el$2(
+        "span",
+        "schema-meta",
+        "schema " + countText(String(tool.parameters).length, tool.paramTokens)
+      ));
+    }
+    d.appendChild(head);
+    const body = el$2("div", "schema-body");
+    if (tool.description) {
+      body.appendChild(el$2("pre", "body-text schema-desc", tool.description));
+    }
+    if (tool.parameters) {
+      const pd = document.createElement("details");
+      pd.className = "schema-params";
+      const ph = el$2("summary", "schema-head");
+      ph.appendChild(el$2("span", "schema-name", "parameters"));
+      ph.appendChild(el$2("span", "schema-meta", "JSON · 默认收起"));
+      pd.appendChild(ph);
+      const pbody = el$2("div", "schema-body");
+      pbody.appendChild(machineBlock(String(tool.parameters), "code"));
+      const actions = el$2("div", "row-actions");
+      actions.appendChild(copyButton(String(tool.parameters)));
+      pbody.appendChild(actions);
+      pd.appendChild(pbody);
+      body.appendChild(pd);
+    } else {
+      body.appendChild(el$2("div", "note", "（这条工具定义没有记录 parameters）"));
+    }
+    d.appendChild(body);
+    return d;
+  }
+  function metaCardKey(line) {
+    return "meta." + (state.current ? state.current.id : "") + "." + (line.system_sha || line.n);
+  }
+  function metaCard() {
+    const m = metaState();
+    if (!m) {
+      state.meta = null;
+      return null;
+    }
+    state.meta = m;
+    const line = m.line;
+    const card = document.createElement("details");
+    card.className = "disclosure meta-card";
+    card.open = storeGet(metaCardKey(line)) === "1";
+    const head = el$2("summary");
+    const slot = el$2("span", "line-slot");
+    slot.appendChild(el$2("span", "line-caret"));
+    head.appendChild(slot);
+    head.appendChild(el$2("span", "line-name", "系统提示词（本次运行快照，不参与回放）"));
+    head.appendChild(el$2("span", "line-sep"));
+    const bits = ["模型 " + (line.model || "—")];
+    if (line.session_label) bits.push("会话 " + line.session_label);
+    bits.push("sha " + shortSHA(line.system_sha));
+    bits.push(countText(m.promptChars, m.promptTokenEst));
+    head.appendChild(el$2("span", "line-summary", bits.join(" · ")));
+    card.appendChild(head);
+    const body = el$2("div", "schema-body");
+    const scroll = el$2("div", "prompt-scroll");
+    const promptText = String(line.text || "（这条 meta 行没有正文）");
+    if (jsonPretty(promptText) !== null) {
+      scroll.appendChild(machineBlock(promptText, "body-text prompt-text"));
+    } else if (state.markdown) {
+      const promptMD = el$2("div", "md-body prompt-md");
+      promptMD.appendChild(renderMarkdown(promptText));
+      scroll.appendChild(promptMD);
+    } else {
+      scroll.appendChild(machineBlock(promptText, "body-text prompt-text"));
+    }
+    body.appendChild(scroll);
+    const actions = el$2("div", "row-actions");
+    actions.appendChild(copyButton(String(line.text || "")));
+    body.appendChild(actions);
+    const tools = line.tools || [];
+    const toolsWrap = el$2("div", "meta-tools");
+    toolsWrap.appendChild(el$2(
+      "div",
+      "meta-tools-head",
+      tools.length ? "工具定义 " + tools.length + " 个（parameters 的 JSON 默认收起）" : "工具定义 0 个"
+    ));
+    if (!tools.length) {
+      toolsWrap.appendChild(el$2("div", "note", "这条 meta 行没有记录工具定义。"));
+    }
+    tools.forEach((t, i) => {
+      toolsWrap.appendChild(toolSchemaBlock(t, i));
+    });
+    body.appendChild(toolsWrap);
+    if (m.count > 1) {
+      const note = el$2("div", "note", "共 " + m.count + " 条，显示最新");
+      note.title = "同一个转录里有 " + m.count + " 条 meta 行（多次运行 / 提示词变化各一条），这里显示最后一条。";
+      body.appendChild(note);
+    }
+    card.appendChild(body);
+    card.addEventListener("toggle", () => {
+      storeSet(metaCardKey(line), card.open ? "1" : "0");
+    });
+    return card;
+  }
+  function shortSHA(value) {
+    const s = String(value || "");
+    if (!s) return "—";
+    return s.length > 12 ? s.slice(0, 12) : s;
+  }
+  function renderDetails() {
+    const host = document.getElementById("details-body");
+    if (!host) return;
+    clear(host);
+    const cur = state.current;
+    if (!cur) {
+      host.appendChild(el$2("div", "note", "左侧选择一个会话后，这里显示它的指标与元信息。"));
+      return;
+    }
+    const blocks = [detailsSessionBlock(), detailsStatsBlock()];
+    const meta = metaCard();
+    if (meta) {
+      const block = detailBlock("元信息");
+      block.appendChild(meta);
+      blocks.push(block);
+    }
+    blocks.forEach((b) => {
+      if (b) host.appendChild(b);
+    });
+    if (!blocks[0] && !blocks[1] && !blocks[2]) {
+      host.appendChild(el$2("div", "note", "这个会话没有可显示的详情。"));
+    }
+  }
   const _sfc_main$3 = /* @__PURE__ */ defineComponent({
     __name: "InlineMD",
     props: {
@@ -9986,7 +10304,15 @@
     __name: "Timeline",
     setup(__props) {
       watch(
-        () => [state.current && state.current.id, state.lines, state.markdown, state.onlyTools, state.unit],
+        // 数组多源形式（逐元素比较）：state.current 每次轮询都被换成新对象，
+        // getter 返回新数组的写法会因引用不同每 2 秒误触发一次整流重渲。
+        [
+          () => state.current ? state.current.id : "",
+          () => state.lines.length,
+          () => state.markdown,
+          () => state.onlyTools,
+          () => state.unit
+        ],
         () => {
           renderTimeline();
         }
@@ -10157,6 +10483,20 @@
         if (ev.key === "[") toggleSidebar();
         if (ev.key === "]") toggleDetails();
       }
+      watch(
+        // 数组多源形式（逐元素比较）：state.current 每次轮询都会被换成新对象，
+        // 用 getter 返回新数组的写法会因引用不同每 2 秒误触发一次重渲。
+        [
+          () => state.current ? state.current.id : "",
+          () => state.lines.length,
+          () => state.unit,
+          () => state.markdown,
+          () => state.details
+        ],
+        () => {
+          renderDetails();
+        }
+      );
       let ro = null;
       let pollTimer = 0;
       onMounted(() => {
@@ -10176,6 +10516,7 @@
         }
         document.addEventListener("keydown", onKeydown);
         registerRenderTrajectory(renderTrajectory);
+        registerRenderDetails(renderDetails);
         bootData();
         pollTimer = window.setInterval(() => {
           if (!document.hidden) void refreshIndex();

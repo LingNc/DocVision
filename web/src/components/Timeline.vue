@@ -7,7 +7,15 @@ import { state } from '../state'
 import { renderTimeline } from '../legacy/timeline'
 
 watch(
-  () => [state.current && state.current.id, state.lines, state.markdown, state.onlyTools, state.unit],
+  // 数组多源形式（逐元素比较）：state.current 每次轮询都被换成新对象，
+  // getter 返回新数组的写法会因引用不同每 2 秒误触发一次整流重渲。
+  [
+    () => (state.current ? state.current.id : ''),
+    () => state.lines.length,
+    () => state.markdown,
+    () => state.onlyTools,
+    () => state.unit,
+  ],
   () => { renderTimeline() },
 )
 </script>
