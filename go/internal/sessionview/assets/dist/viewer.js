@@ -10588,7 +10588,7 @@
                         title: "在侧栏里定位到这个项目",
                         onClick: _cache[3] || (_cache[3] = ($event) => unref(revealProject)(curProject.value))
                       }, toDisplayString(curProject.value), 1),
-                      _cache[13] || (_cache[13] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
+                      _cache[12] || (_cache[12] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
                       createBaseVNode("span", {
                         class: "crumb crumb-current",
                         title: unref(state).current.id
@@ -10715,7 +10715,7 @@
             }, null, 44, _hoisted_26),
             createBaseVNode("aside", _hoisted_27, [
               createBaseVNode("div", _hoisted_28, [
-                _cache[14] || (_cache[14] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
+                _cache[13] || (_cache[13] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
                 createBaseVNode("button", {
                   id: "details-close",
                   class: "icon-btn",
@@ -10725,7 +10725,7 @@
                   onClick: _cache[10] || (_cache[10] = ($event) => unref(state).details > 0 && unref(toggleDetails)())
                 }, "✕")
               ]),
-              _cache[15] || (_cache[15] = createBaseVNode("div", {
+              _cache[14] || (_cache[14] = createBaseVNode("div", {
                 id: "details-body",
                 class: "details-body"
               }, null, -1))
@@ -10734,17 +10734,15 @@
           createBaseVNode("div", {
             id: "lightbox",
             class: normalizeClass(["lightbox", { hidden: !unref(lightbox).open }]),
-            onClick: _cache[12] || (_cache[12] = //@ts-ignore
+            onClick: _cache[11] || (_cache[11] = //@ts-ignore
             (...args) => unref(closeLightbox) && unref(closeLightbox)(...args))
           }, [
             createBaseVNode("img", {
               id: "lightbox-img",
               src: unref(lightbox).open ? unref(lightbox).url : void 0,
-              alt: unref(lightbox).ref,
-              onClick: _cache[11] || (_cache[11] = withModifiers(() => {
-              }, ["stop"]))
+              alt: unref(lightbox).ref
             }, null, 8, _hoisted_29),
-            _cache[16] || (_cache[16] = createBaseVNode("div", { class: "lightbox-hint" }, "点击空白处或按 Esc 关闭", -1))
+            _cache[15] || (_cache[15] = createBaseVNode("div", { class: "lightbox-hint" }, "点击空白处或按 Esc 关闭", -1))
           ], 2)
         ], 64);
       };

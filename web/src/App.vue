@@ -309,7 +309,8 @@ onBeforeUnmount(() => {
     </aside>
   </div>
   <div id="lightbox" class="lightbox" :class="{ hidden: !lightbox.open }" @click="closeLightbox">
-    <img id="lightbox-img" :src="lightbox.open ? lightbox.url : undefined" :alt="lightbox.ref" @click.stop>
+    <!-- 旧页 img 不拦冒泡：点图也会冒到灯箱背景关闭（行为保持一致） -->
+    <img id="lightbox-img" :src="lightbox.open ? lightbox.url : undefined" :alt="lightbox.ref">
     <div class="lightbox-hint">点击空白处或按 Esc 关闭</div>
   </div>
 </template>
