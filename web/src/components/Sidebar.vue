@@ -208,7 +208,9 @@ function onMoreClick(okey: string) {
           <summary class="proj-row" :title="g.name">
             <span class="row-slot row-folder">
               <svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-              <svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 3.5h4l1.5 2h7.5v2h-12l-1.5 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M1.5 13.5l1.6-6h12.4l-1.6 6h-12.4Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+              <!-- T19：旧 open 图标背板左斜边与前盖左斜边交叉，选中态左侧看着像被糊住；
+     重画——背板左缘垂直直线（底部只留短 stub），前盖斜边整个在背板内侧，互不穿插。 -->
+<svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
             </span>
             <span class="row-body">
               <span v-if="g.prefix" class="proj-prefix">{{ g.prefix }}</span>

@@ -8741,7 +8741,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-b83fea9c><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-b83fea9c><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b83fea9c></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-b83fea9c><path d="M1.5 3.5h4l1.5 2h7.5v2h-12l-1.5 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b83fea9c></path><path d="M1.5 13.5l1.6-6h12.4l-1.6 6h-12.4Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b83fea9c></path></svg></span>', 1)),
+                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-16630052><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-16630052><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-16630052></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-16630052><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-16630052></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-16630052></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_8$4, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_9$4, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_10$3, toDisplayString(g.title), 1)
@@ -8925,7 +8925,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-b83fea9c"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-16630052"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
