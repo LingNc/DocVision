@@ -823,3 +823,15 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **修法（保持 Vue 组件化）**：IOSection 里插槽内容包进 `.io-extra` 容器，`grid-column: 2` 钉回内容列（`.io-extra { display:flex; column; gap:6px }` 进 base.css 的 io 词汇）。插槽用法不变（ToolCard 仍往默认插槽塞 ImageStrip + attach-note），布局语义与旧页一致：图片在输出正文下方、同一列起排、归属脚注跟随。
 
 **验证**：截图目检竖图（1280×1951 → 276×420）与横图（1200×686 → 520×298）卡片——输入 JSON 全宽高亮、输出文本全宽、图片在内容列、脚注跟随；探针 453/454（唯一差异仍=T12 取整）；控制台零报错；vitest 23/23；sessionview go 测试全绿。附：截图时踩了个 CDP 坑——卡片在闭合 `<details>` 里 rect 全 0，必须先 `details.open=true` 再 scrollIntoView 再截视口。
+
+### T22 方块编号 + 完成状态着色（`web/components` 分支）
+
+**需求**（issue.md T22）：章节转换/章节核对的方块没有编号；方块要能显示完成情况——正常=结束、绿色=进行中、红色=错误终止。
+
+**数据源考察**：progress_items/ 只覆盖图片（矢量会话），章节没有逐项进度；progress.json 是档位级的（stage → done/""），粒度太粗。真正的两个信号都在现成数据里：
+1. **章号**在转录文件名里：`convert_chapter_001.jsonl` / `checker_chapter_001.jsonl`（`chapter[_-]?0*(\d+)$` 提取；"chapter" 一词保证不误读其他会话名里的哈希/日期数字）。
+2. **完成情况**在转录回执里：全部四类 submit 工具的回执都以 `SUBMITTED. ` 开头（tools.go/tools_chapter.go/tools_convert.go），assistant 正常文本只写 "Submitted"——所以 `readStat` 的同一趟流式扫描里加两次**原始行子串检查**（`"role":"tool"` 与 `SUBMITTED`，零额外 JSON 解码）就能得到每会话的结束状态：SawSubmit → done / SawTool&&!SawSubmit → error / 都没有 → pending。真数据验证：glm 项目的两个 convert（COMPILE FAILED / NO MATCHES）正确落红，0911_1 的 8 个只有 meta+user 的 vector 会话正确落暗。
+
+**呈现**（P11 后样式在 Sidebar.vue scoped）：方块文字 = `imageOrder || chapterOrder`；状态类 `err`（红底红字）/ `pend`（opacity .42）只在不 live 时挂——运行中的绿圈优先于一切；正常结束不加类（默认样子就是"已结束"）。悬浮说明补一行状态语义与章号，`sessionHaystack` 补检索词（第N章/chapter N/错误/已提交）。
+
+**验收**：截图目检（glm 章节转换 [红2][红1][暗3]、测试-概率论 章节转换/核对 3 2 1 4）；探针 453/454（唯一差异仍=T12 取整）；控制台零报错；vitest 23/23；sessionview 新增 3 个单测（chapterOrderOf/endStateOf/readStat 回执信号）全绿。

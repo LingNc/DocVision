@@ -260,6 +260,9 @@ export function sessionHaystack(s: any): string {
     s.imageName, s.imageType, s.imageCaption, s.imageShort, s.imageFile, s.imageLabel]
   if (s.page) parts.push('p' + s.page, 'p.' + s.page, '页' + s.page, String(s.page))
   if (s.imageOrder) parts.push('#' + s.imageOrder, '第' + s.imageOrder + '张', String(s.imageOrder))
+  if (s.chapterOrder) parts.push('第' + s.chapterOrder + '章', 'chapter ' + s.chapterOrder, String(s.chapterOrder))
+  if (s.endState === 'error') parts.push('错误', '未提交', 'error')
+  if (s.endState === 'done') parts.push('已提交', '完成', 'done')
   return parts.filter(Boolean).join(' ').toLowerCase()
 }
 
@@ -308,6 +311,12 @@ export function sessionTip(s: any): string {
     if (s.imageName) tip.push('图片哈希: ' + s.imageName)
     if (s.imagePath) tip.push('图片路径: ' + s.imagePath)
   }
+  // T22：状态语义与方块上色一致（绿圈=运行中 / 红=干过活没交 / 暗=没开工）。
+  if (s.chapterOrder) tip.push('第 ' + s.chapterOrder + ' 章')
+  if (s.live) tip.push('状态: 运行中（正在实时写入）')
+  else if (s.endState === 'done') tip.push('状态: 已提交（正常结束）')
+  else if (s.endState === 'error') tip.push('状态: 错误终止（有过工具回执但从没提交成功）')
+  else tip.push('状态: 未开始（还没有任何工具回执）')
   tip.push('消息 ' + s.messages + ' 条 · ' + fmtSize(s.size) + ' · 最后写入 ' + fmtClock(s.mtime))
   const sub = subPathOf(s.id)
   if (sub) tip.push('目录 ' + sub)

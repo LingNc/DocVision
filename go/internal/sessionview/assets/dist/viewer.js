@@ -7100,6 +7100,9 @@
     ];
     if (s.page) parts.push("p" + s.page, "p." + s.page, "页" + s.page, String(s.page));
     if (s.imageOrder) parts.push("#" + s.imageOrder, "第" + s.imageOrder + "张", String(s.imageOrder));
+    if (s.chapterOrder) parts.push("第" + s.chapterOrder + "章", "chapter " + s.chapterOrder, String(s.chapterOrder));
+    if (s.endState === "error") parts.push("错误", "未提交", "error");
+    if (s.endState === "done") parts.push("已提交", "完成", "done");
     return parts.filter(Boolean).join(" ").toLowerCase();
   }
   function imageDisplayName(s) {
@@ -7128,6 +7131,11 @@
       if (s.imageName) tip.push("图片哈希: " + s.imageName);
       if (s.imagePath) tip.push("图片路径: " + s.imagePath);
     }
+    if (s.chapterOrder) tip.push("第 " + s.chapterOrder + " 章");
+    if (s.live) tip.push("状态: 运行中（正在实时写入）");
+    else if (s.endState === "done") tip.push("状态: 已提交（正常结束）");
+    else if (s.endState === "error") tip.push("状态: 错误终止（有过工具回执但从没提交成功）");
+    else tip.push("状态: 未开始（还没有任何工具回执）");
     tip.push("消息 " + s.messages + " 条 · " + fmtSize(s.size) + " · 最后写入 " + fmtClock(s.mtime));
     const sub = subPathOf(s.id);
     if (sub) tip.push("目录 " + sub);
@@ -8733,7 +8741,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-61d97fd3><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-61d97fd3><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-61d97fd3></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-61d97fd3><path d="M1.5 3.5h4l1.5 2h7.5v2h-12l-1.5 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-61d97fd3></path><path d="M1.5 13.5l1.6-6h12.4l-1.6 6h-12.4Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-61d97fd3></path></svg></span>', 1)),
+                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-b83fea9c><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-b83fea9c><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b83fea9c></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-b83fea9c><path d="M1.5 3.5h4l1.5 2h7.5v2h-12l-1.5 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b83fea9c></path><path d="M1.5 13.5l1.6-6h12.4l-1.6 6h-12.4Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b83fea9c></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_8$4, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_9$4, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_10$3, toDisplayString(g.title), 1)
@@ -8770,13 +8778,13 @@
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
-                                class: normalizeClass(["session-block", { active: unref(state).current && unref(state).current.id === s.id, live: s.live }]),
+                                class: normalizeClass(["session-block", { active: unref(state).current && unref(state).current.id === s.id, live: s.live, err: !s.live && s.endState === "error", pend: !s.live && !s.endState }]),
                                 type: "button",
                                 role: "treeitem",
                                 "data-id": s.id,
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
-                              }, toDisplayString(s.imageOrder || ""), 11, _hoisted_21$3);
+                              }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_21$3);
                             }), 128))
                           ])) : (openBlock(), createElementBlock("div", _hoisted_22$3, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
@@ -8830,13 +8838,13 @@
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
-                                class: normalizeClass(["session-block", { active: unref(state).current && unref(state).current.id === s.id, live: s.live }]),
+                                class: normalizeClass(["session-block", { active: unref(state).current && unref(state).current.id === s.id, live: s.live, err: !s.live && s.endState === "error", pend: !s.live && !s.endState }]),
                                 type: "button",
                                 role: "treeitem",
                                 "data-id": s.id,
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
-                              }, toDisplayString(s.imageOrder || ""), 11, _hoisted_32$1);
+                              }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_32$1);
                             }), 128))
                           ])) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
@@ -8917,7 +8925,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-61d97fd3"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-b83fea9c"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

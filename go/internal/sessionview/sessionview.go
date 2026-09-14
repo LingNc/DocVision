@@ -24,6 +24,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -333,6 +334,15 @@ type SessionInfo struct {
 	// Live reports whether the transcript looks like it is being appended to
 	// right now (mtime within LiveWindow).
 	Live bool `json:"live"`
+	// EndState is the per-session completion signal for the sidebar's block
+	// view (T22): "done" = a SUBMIT receipt exists, "error" = work happened
+	// (tool receipts) but nothing was ever submitted, "" = not started yet.
+	// Live overrides both visually (green pulse beats everything).
+	EndState string `json:"endState,omitempty"`
+	// ChapterOrder is the chapter number carried by the transcript file name
+	// ("convert_chapter_003.jsonl" → 3), the block-view badge for chapter
+	// sessions the way ImageOrder numbers per-image ones.
+	ChapterOrder int `json:"chapterOrder,omitempty"`
 	// Stage / StageTitle group sessions by pipeline stage inside a project
 	// ("vector", "convert", "checker", …) — the sidebar's second level.
 	Stage      string `json:"stage,omitempty"`
@@ -697,6 +707,16 @@ type transcriptStat struct {
 	Meta     *MetaInfo
 	// Usage aggregates the t="usage" lines seen in the same single pass.
 	Usage *UsageStats
+	// SawTool / SawSubmit record whether any tool receipt (role=tool) appeared
+	// and whether one of them was a SUBMIT receipt (the canonical completion
+	// signal every submit tool writes: "SUBMITTED. …"). Both are two raw-line
+	// substring checks in the same single pass — no extra decoding. Together
+	// they give the sidebar's block view a per-session end state:
+	//   SawSubmit        → done（正常结束）
+	//   SawTool && !SawSubmit → error（干过活但没交——错误终止/半途而废）
+	//   neither          → pending（领了任务还没开工）
+	SawTool   bool
+	SawSubmit bool
 	// model is the wire model id recorded by a meta or usage line; it decides
 	// which per-image token rule the page quotes (and applies).
 	model string
@@ -776,6 +796,8 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			Bytes:         info.Size(),
 			ModTime:       info.ModTime(),
 			Live:          now.Sub(info.ModTime()) < LiveWindow,
+			EndState:      endStateOf(stat),
+			ChapterOrder:  chapterOrderOf(d.Name()),
 		})
 		return nil
 	})
@@ -817,6 +839,36 @@ func (s *scanner) fileStat(p string, size int64, modTime time.Time) transcriptSt
 	return stat
 }
 
+// endStateOf folds the receipt signals into the block-view completion state.
+func endStateOf(stat transcriptStat) string {
+	switch {
+	case stat.SawSubmit:
+		return "done"
+	case stat.SawTool:
+		return "error"
+	}
+	return ""
+}
+
+// chapterOrderOf extracts the chapter number from a transcript file name
+// ("convert_chapter_003.jsonl" → 3, "checker-chapter-12" → 12); 0 when the
+// name carries none (style/chapters/vector sessions).
+func chapterOrderOf(name string) int {
+	base := strings.TrimSuffix(name, path.Ext(name))
+	if m := chapterOrderRe.FindStringSubmatch(base); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// chapterOrderRe matches the chapter number in convert/checker/style-fix/
+// figure-check transcript names. The "chapter" word keeps it from misreading
+// unrelated digits (hashes, dates) in other session kinds.
+var chapterOrderRe = regexp.MustCompile(`chapter[_-]?0*(\d+)$`)
+
 // readStat streams the file once and counts "t":"msg" lines without building
 // the parsed messages (transcripts are append-only text, so a single pass is
 // enough and nothing is materialised). Meta lines are summarised on the way,
@@ -843,6 +895,15 @@ func readStat(p string) (transcriptStat, error) {
 				switch head.T {
 				case "msg":
 					stat.Messages++
+					// T22：原始行子串检查（零额外解码）——tool 回执行必含
+					// `"role":"tool"`（写入方是紧凑 JSON），submit 回执以
+					// SUBMITTED 开头；assistant 的正常文本只会写 "Submitted"。
+					if strings.Contains(trimmed, `"role":"tool"`) {
+						stat.SawTool = true
+						if strings.Contains(trimmed, "SUBMITTED") {
+							stat.SawSubmit = true
+						}
+					}
 				case "meta":
 					stat.addMeta(trimmed)
 				case "usage":

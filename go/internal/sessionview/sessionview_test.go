@@ -1804,3 +1804,58 @@ func TestViewerCodeTypographyUsesOneToken(t *testing.T) {
 		}
 	}
 }
+
+func TestChapterOrderOf(t *testing.T) {
+	cases := map[string]int{
+		"convert_chapter_001.jsonl": 1,
+		"checker_chapter_012.jsonl": 12,
+		"convert-chapter-3.jsonl":   3,
+		"style-fix_chapter_007.jsonl": 7,
+		"style_session.jsonl":       0,
+		"chapters.jsonl":            0,
+		"vector_x__deadbeef__label.jsonl": 0,
+	}
+	for name, want := range cases {
+		if got := chapterOrderOf(name); got != want {
+			t.Errorf("chapterOrderOf(%q) = %d, want %d", name, got, want)
+		}
+	}
+}
+
+func TestEndStateOf(t *testing.T) {
+	if got := endStateOf(transcriptStat{SawSubmit: true}); got != "done" {
+		t.Errorf("submit → %q, want done", got)
+	}
+	if got := endStateOf(transcriptStat{SawTool: true}); got != "error" {
+		t.Errorf("tool-but-no-submit → %q, want error", got)
+	}
+	if got := endStateOf(transcriptStat{}); got != "" {
+		t.Errorf("no receipts → %q, want empty (pending)", got)
+	}
+}
+
+func TestReadStatReceiptSignals(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "convert_chapter_001.jsonl")
+	body := strings.Join([]string{
+		`{"t":"meta","kind":"session"}`,
+		`{"t":"msg","role":"user","text":"go"}`,
+		`{"t":"msg","role":"tool","tool_call_id":"c1","text":"COMPILE FAILED: l.13"}`,
+		`{"t":"msg","role":"assistant","text":"Submitted: nothing yet"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil { t.Fatal(err) }
+	stat, err := readStat(p)
+	if err != nil { t.Fatal(err) }
+	if !stat.SawTool || stat.SawSubmit {
+		t.Errorf("failed-run transcript: SawTool=%v SawSubmit=%v, want true/false", stat.SawTool, stat.SawSubmit)
+	}
+	if endStateOf(stat) != "error" { t.Errorf("endState = %q, want error", endStateOf(stat)) }
+
+	body2 := strings.Replace(body, `"text":"COMPILE FAILED: l.13"`, `"text":"SUBMITTED. Reply with a one-line confirmation."`, 1)
+	if err := os.WriteFile(p, []byte(body2), 0o644); err != nil { t.Fatal(err) }
+	stat2, err := readStat(p)
+	if err != nil { t.Fatal(err) }
+	if !stat2.SawSubmit || endStateOf(stat2) != "done" {
+		t.Errorf("submitted transcript: endState = %q, want done", endStateOf(stat2))
+	}
+}

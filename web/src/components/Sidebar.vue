@@ -239,13 +239,13 @@ function onMoreClick(okey: string) {
                     v-for="s in sv.items"
                     :key="s.id"
                     class="session-block"
-                    :class="{ active: state.current && state.current.id === s.id, live: s.live }"
+                    :class="{ active: state.current && state.current.id === s.id, live: s.live, err: !s.live && s.endState === 'error', pend: !s.live && !s.endState }"
                     type="button"
                     role="treeitem"
                     :data-id="s.id"
                     :title="rowTitle(s)"
                     @click="onRowClick(s)"
-                  >{{ s.imageOrder || '' }}</button>
+                  >{{ s.imageOrder || s.chapterOrder || '' }}</button>
                 </div>
                 <div v-else>
                   <button
@@ -279,13 +279,13 @@ function onMoreClick(okey: string) {
                     v-for="s in sv.items"
                     :key="s.id"
                     class="session-block"
-                    :class="{ active: state.current && state.current.id === s.id, live: s.live }"
+                    :class="{ active: state.current && state.current.id === s.id, live: s.live, err: !s.live && s.endState === 'error', pend: !s.live && !s.endState }"
                     type="button"
                     role="treeitem"
                     :data-id="s.id"
                     :title="rowTitle(s)"
                     @click="onRowClick(s)"
-                  >{{ s.imageOrder || '' }}</button>
+                  >{{ s.imageOrder || s.chapterOrder || '' }}</button>
                 </div>
                 <template v-else>
                   <button
@@ -686,6 +686,33 @@ details[open] > .proj-row .row-folder .folder.open {
 
 .session-block.live.active {
  border-color: var(--accent); box-shadow: 0 0 0 2px rgba(65, 118, 230, .3); 
+}
+
+/* T22：方块状态着色——红=有过回执但从没提交（错误终止），暗=还没开工；
+   正常结束就是默认样子，运行中绿圈见 .live。 */
+.session-block.err {
+ background: rgba(239, 68, 68, .14);
+ border-color: rgba(239, 68, 68, .55);
+ color: #ef4444;
+}
+
+.session-block.err:hover {
+ background: rgba(239, 68, 68, .24);
+ border-color: #ef4444;
+}
+
+.session-block.err.active {
+ background: var(--accent);
+ border-color: var(--accent);
+ color: #fff;
+}
+
+.session-block.pend {
+ opacity: .42;
+}
+
+.session-block.pend:hover, .session-block.pend.active {
+ opacity: 1;
 }
 
 .icon-btn.on {
