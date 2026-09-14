@@ -50,6 +50,9 @@ export interface TrajRow {
   status: string
   /** 点行跳回对话的目标行号。 */
   jump?: number
+  /** P9 右栏步骤定位键（确定性：kind@jump#序号；append-only 转录下稳定）。
+   *  jump 会撞（工具行都挂在 assistant 消息行上、一条消息可多次调用），不能拿它当身份。 */
+  rid: string
   /** 工具/请求耗时 ms（有就显示，没有不出列）。 */
   time?: number
   /** 带图 user 轮的图片引用（可展开看图）。 */
@@ -208,6 +211,7 @@ export function trajectoryRows(): TrajRow[] {
       })
     }
   })
+  rows.forEach((r, i) => { r.rid = r.kind + '@' + (r.jump ?? 'x') + '#' + i })
   return rows
 }
 

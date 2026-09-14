@@ -57,8 +57,21 @@ function detailKind(key: string): 'code' | 'plain' {
   return key === 'input' || key === 'request' || key === 'output' ? 'code' : 'plain'
 }
 
-function rowKey(row: any, idx: number): string {
-  return 'r' + idx + ':' + (row.jump || row.name)
+function rowKey(row: any, _idx: number): string {
+  return row.rid
+}
+
+/* P9：点行 = 在右侧详情栏看这一步（再点取消）；跳对话收进行内的小按钮。
+ * 用 rid 而不是 jump 定位——jump 是消息行号，一条消息多次调用时会撞。 */
+function selectRow(row: any) {
+  if (!row.jump) return
+  state.trajSelected = state.trajSelected === row.rid ? null : row.rid
+}
+
+function goChat(row: any) {
+  if (!row.jump) return
+  state.trajSelected = row.rid
+  jumpToLine(row.jump)
 }
 </script>
 
@@ -95,11 +108,14 @@ function rowKey(row: any, idx: number): string {
         <tbody>
           <template v-for="(row, idx) in visible" :key="rowKey(row, idx)">
             <tr class="traj-row" :data-kind="row.kind" :data-error="row.status === 'error' ? 'true' : undefined"
-              :title="row.title || '点击跳到对话里对应的那条消息'"
-              @click="row.jump ? jumpToLine(row.jump) : (state.trajOpen[rowKey(row, idx)] = !state.trajOpen[rowKey(row, idx)])">
+              :class="{ selected: row.jump && state.trajSelected === row.rid }"
+              :title="row.title || '点击在右侧详情栏看这一步'"
+              @click="row.jump ? selectRow(row) : (state.trajOpen[row.rid] = !state.trajOpen[row.rid])">
               <td class="traj-num">
                 <button type="button" class="traj-disclose" title="展开完整输入输出"
-                  @click.stop="state.trajOpen[rowKey(row, idx)] = !state.trajOpen[rowKey(row, idx)]">{{ state.trajOpen[rowKey(row, idx)] ? '▾' : '▸' }}</button>{{ row.jump ? String(row.jump) : '—' }}
+                  @click.stop="state.trajOpen[row.rid] = !state.trajOpen[row.rid]">{{ state.trajOpen[row.rid] ? '▾' : '▸' }}</button>{{ row.jump ? String(row.jump) : '—' }}
+                <button v-if="row.jump" type="button" class="traj-gochat" title="跳到对话里对应的那条消息"
+                  @click.stop="goChat(row)">↳</button>
               </td>
               <td><span class="kind-tag" :class="row.status === 'error' ? 'kind-error' : 'kind-' + row.kind">{{ row.tag }}</span></td>
               <td class="traj-name">{{ row.name }}</td>
@@ -108,7 +124,7 @@ function rowKey(row: any, idx: number): string {
               <td class="traj-num-cell">{{ sizeCell(row) }}</td>
               <td class="traj-num-cell">{{ row.time ? fmtDur(row.time) : '—' }}</td>
             </tr>
-            <tr v-if="state.trajOpen[rowKey(row, idx)]" class="traj-detail">
+            <tr v-if="state.trajOpen[row.rid]" class="traj-detail">
               <td :colspan="7">
                 <div class="traj-detail-inner">
                   <div v-for="(text, key) in row.detail || {}" :key="key">
@@ -324,6 +340,39 @@ function rowKey(row: any, idx: number): string {
 
 .traj-disclose:hover {
  background: var(--hover); color: var(--text); 
+}
+
+/* P9：选中行（右侧详情栏正在显示这一步）*/
+.traj-row.selected {
+ background: var(--active);
+}
+
+.traj-row.selected td {
+ background: var(--active);
+}
+
+/* 行内的「跳到对话」小按钮（默认很安静，悬浮显形）*/
+.traj-gochat {
+  width: 16px;
+  height: 18px;
+  margin-left: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: transparent;
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.traj-row:hover .traj-gochat, .traj-gochat:hover {
+ color: var(--accent);
+}
+
+.traj-gochat:hover {
+ background: var(--hover);
 }
 
 .traj-jump {

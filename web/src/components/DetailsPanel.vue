@@ -5,10 +5,12 @@
 import { computed, ref, watch } from 'vue'
 import { state, storeSet } from '../state'
 import { metaModel, META_COUNT_TIP, sessionKVRows, sessionSubPath, statsModel } from '../legacy/details'
+import { trajectoryRows } from '../legacy/trajectory'
 import InlineMD from './InlineMD.vue'
 import MachineText from './MachineText.vue'
 import MdBody from './MdBody.vue'
 import CopyBtn from './CopyBtn.vue'
+import ImageStrip from './ImageStrip.vue'
 
 const kvRows = computed(() => sessionKVRows())
 const subPath = computed(() => sessionSubPath())
@@ -34,12 +36,49 @@ function onMetaToggle(ev: Event) {
 const countTip = computed(() =>
   meta.value?.countNote ? META_COUNT_TIP.replace('{n}', meta.value.countNote.replace(/^共 (\d+) 条.*$/, '$1')) : '',
 )
+
+/* P9：轨迹页选中的步骤——detail/images 与轨迹页就地展开同源（trajectoryRows）。
+ * 仅在轨迹视图显示（对话页有自己的就地展开与行锚点，两处不抢戏）。 */
+const TRAJ_STEP_LABELS: Record<string, string> = {
+  prompt: '系统提示词', thinking: '思考', user: '用户消息', message: '助手消息',
+  input: '输入', output: '输出', request: '用量行',
+}
+const trajStep = computed(() => {
+  if (state.view !== 'trajectory' || state.trajSelected == null || !state.current) return null
+  const row = trajectoryRows().find((r: any) => r.rid === state.trajSelected)
+  return row ? { n: row.jump as number, tag: row.tag as string, name: row.name as string, detail: (row.detail || {}) as Record<string, unknown>, images: (row.images || []) as string[] } : null
+})
+
+function trajDetailKind(key: string): 'code' | 'plain' {
+  return key === 'input' || key === 'request' || key === 'output' ? 'code' : 'plain'
+}
+
+function closeTrajStep() {
+  state.trajSelected = null
+}
 </script>
 
 <template>
   <div id="details-body" class="details-body">
     <div v-if="!state.current" class="note">左侧选择一个会话后，这里显示它的指标与元信息。</div>
     <template v-else>
+      <section v-if="trajStep" class="detail-block traj-step">
+        <h3 class="detail-block-title">
+          步骤 #{{ trajStep.n }}
+          <button type="button" class="icon-btn traj-step-close" title="关闭这一步的详情" @click="closeTrajStep">×</button>
+        </h3>
+        <div class="traj-step-head">
+          <span class="kind-tag">{{ trajStep.tag }}</span>
+          <span class="traj-step-name">{{ trajStep.name }}</span>
+        </div>
+        <div v-for="(text, key) in trajStep.detail" :key="key" class="traj-step-section">
+          <div class="traj-detail-title">{{ TRAJ_STEP_LABELS[key] || key }}</div>
+          <MachineText v-if="trajDetailKind(key as string) === 'code'" :text="String(text || '')" cls="code" />
+          <pre v-else class="code">{{ String(text || '') }}</pre>
+          <div class="row-actions"><CopyBtn :text="String(text || '')" /></div>
+        </div>
+        <ImageStrip v-if="trajStep.images.length" :images="trajStep.images" />
+      </section>
       <section class="detail-block">
         <h3 class="detail-block-title">会话</h3>
         <dl class="detail-kv">
@@ -155,6 +194,32 @@ const countTip = computed(() =>
 
 .details-body .hidden {
  display: none !important; 
+}
+
+/* P9：轨迹步骤详情块 */
+.traj-step-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+
+.traj-step-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.traj-step-close {
+  margin-left: auto;
+}
+
+.traj-step-section {
+  margin-bottom: 8px;
 }
 
 .detail-block {

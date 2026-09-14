@@ -127,6 +127,9 @@ export const state = reactive({
   meta: null as unknown,
   trajKinds: {} as Record<string, boolean>,
   trajOpen: {} as Record<string, boolean>,
+  // P9：轨迹页选中的行（transcript 行号）。选中后右侧详情栏顶部显示该步的
+  // 完整输入/输出/图片；再点同一行取消；跳对话按钮仍走 jumpToLine。
+  trajSelected: null as string | null,
 })
 
 /* ---------- 布局求解（computeColumns 逐行照旧页：纯函数、无迟滞） ---------- */

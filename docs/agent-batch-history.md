@@ -855,3 +855,15 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **CDP 实测**（合成事件 + 数值断言）：锚定误差 <1.5px；35 步放大停在 scale(8)、40 步缩小停在 scale(0.15)；拖拽 translate 精确跟手；拖后不关、微动点击照关、双击复位全过。探针 453/454；控制台零报错；vitest 23/23。
 
 **排错插曲**：断言用的正则没容忍浏览器对 style.transform 的归一化空格（`translate(xpx, ypx)`），前两轮「假失败」——CDP 调试脚本加了 exceptionDetails 输出后定位。
+
+### P9 轨迹点行 → 右侧详情栏看该步（`web/components` 分支）
+
+**需求**（plan.md P9）：类似 DSH，轨迹界面点工具调用行，在右侧边栏看详细信息。
+
+**实现**：行点击从「跳回对话」改为「选中该步」——`state.trajSelected` 存行身份，DetailsPanel 顶部条件渲染「步骤 #N」块（`trajStep` computed：仅轨迹视图 + 有选中时，从 `trajectoryRows()` 取行，detail/images 与轨迹页就地展开同源；类型标签 + 名称 + 各 detail 段（MachineText 代码高亮/纯文本）+ CopyBtn + ImageStrip + × 关闭），会话/指标/元信息块仍在其下（DSH 同款：步骤详情置顶、会话信息跟随）。跳回对话收进行内 `.traj-gochat`（↳，悬浮显形），选中行 `.selected` 高亮；再点同一行取消。
+
+**撞行缺陷（真数据抓到）**：第一版用 `row.jump` 定位步骤——工具行的 jump 是**assistant 消息行号**（call 挂在消息行上），点工具行右栏却显示「助手 AI」；且一条消息多次调用时 jump 还会撞工具行彼此。修法：`TrajRow` 增加**确定性 `rid`**（`kind@jump#序号`，append-only 转录下索引稳定），`trajectoryRows()` 末尾统一赋值；state.trajSelected 存 rid。CDP 复测：点 `list_source_pages` 工具行 → 右栏「工具 list_source_pages · 输入」✓，↳ 跳对话且选中保持 ✓，再点取消 ✓。
+
+**探针同步**：P9 是**有意的新旧行为分叉**（行内多了 ↳ 按钮、行标题换了文案、点行不再跳走）——probe5 的 num 归一化（去 ↳ + trim，浏览器把 style 序列化留尾随空格）、title 文案映射回旧语义；probe8 的跳转改点 `.traj-gochat`（旧页没有该按钮则退回点行本身，两页语义都验「跳回对话」）。全套回到 453/454（唯一已知差异仍 = T12 取整）。
+
+**验收**：截图目检（选中高亮 + 右栏步骤块置顶 + 会话/指标跟随）；CDP 断言（选中/取消/关闭/跳转保持选中）；探针 453/454；控制台零报错；vitest 23/23。
