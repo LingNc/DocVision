@@ -64,3 +64,34 @@ watch(
     </div>
   </div>
 </template>
+
+<style scoped>
+/* ============================ 对话（DSH 的消息形态） ============================ */
+
+.timeline {
+ flex: 1; overflow-y: auto; padding: 16px 24px 80px; 
+}
+
+.stream {
+ max-width: var(--content-w); margin: 0 auto; display: flex; flex-direction: column; 
+}
+
+/* 回合边界**只有一种画法**：8px + 0.5px 虚线 + 8px（--divider-gap）。虚线只出现在
+   section 之间（也就是回合之间），同一条消息里的工具行之间永远只是 --row-gap。 */
+.stream > .msg + .msg {
+  margin-top: var(--divider-gap);
+  padding-top: var(--divider-gap);
+  border-top: .5px dashed var(--border);
+}
+
+.empty {
+ padding: 56px 24px; color: var(--dim); text-align: center; 
+}
+
+/* 原 160 号规则里的 msg-other 半边（msg-system 半边在 SystemMsg.vue） */
+.msg-other .body-text { color: var(--muted); font-size: 13px; }
+
+@media (max-width: 1023px) {
+  .timeline { padding: 12px 12px 60px; }
+}
+</style>

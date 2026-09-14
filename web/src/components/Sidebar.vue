@@ -327,3 +327,726 @@ function onMoreClick(okey: string) {
     </div>
   </aside>
 </template>
+
+<style scoped>
+/* ============================ 侧栏 ============================ */
+
+.side-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 8px 0 12px;
+}
+
+.side-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.frame[data-sidebar-collapsed] .side-title,
+.frame[data-sidebar-collapsed] .side-search,
+.frame[data-sidebar-collapsed] .side-status,
+.frame[data-sidebar-collapsed] .side-totals {
+ display: none; 
+}
+
+.frame[data-sidebar-collapsed] .side-head {
+ padding: 0; justify-content: center; 
+}
+
+.side-search {
+ flex: none; padding: 0 10px 8px; 
+}
+
+.side-search input {
+  width: 100%;
+  height: 28px;
+  background: transparent;
+  border: .5px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 9px;
+}
+
+.side-search input::placeholder {
+ color: var(--caption); 
+}
+
+.side-search input:focus {
+ outline: none; border-color: var(--accent); background: var(--bg); 
+}
+
+.side-list-wrap {
+ position: relative; flex: 1; min-height: 0; display: flex; 
+}
+
+.session-list {
+ flex: 1; overflow-y: auto; padding: 0 6px 20px; 
+}
+
+/* 列表底部的渐隐遮罩（DSH 的 list fade） */
+.list-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 24px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--sidebar-bg));
+}
+
+.frame[data-sidebar-collapsed] .list-fade {
+ display: none; 
+}
+
+/* 组行（项目 / 阶段）= DSH 的 projectRow：34px、padding 0 8px、圆角 8px、
+   左边一个 16px 固定插槽；**没有按层级递增的缩进**。 */
+.proj-group {
+ margin: 0 0 4px; 
+}
+
+.proj-row,
+.stage-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  color: var(--text);
+}
+
+.proj-row::-webkit-details-marker, .stage-row::-webkit-details-marker {
+ display: none; 
+}
+
+.proj-row:hover, .stage-row:hover {
+ background: var(--hover); 
+}
+
+.stage-row {
+ height: 28px; 
+}
+
+.row-slot {
+  flex: none;
+  width: 16px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--caption);
+}
+
+.row-caret {
+  width: 0; height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform .15s var(--ease);
+}
+
+details[open] > summary .row-caret {
+ transform: rotate(90deg); 
+}
+
+.row-body {
+ flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 4px; 
+}
+
+.row-title {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stage-row .row-title {
+ font-size: 12.5px; line-height: 20px; font-weight: 600; color: var(--muted); 
+}
+
+.proj-prefix {
+ flex: none; color: var(--caption); font-family: var(--mono); font-size: 11px; 
+}
+
+.proj-title {
+ min-width: 0; font-size: 14px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+}
+
+.row-meta {
+  flex: none;
+  color: var(--caption);
+  font-size: 12px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.proj-note {
+  flex: none;
+  color: var(--caption);
+  font-size: 10.5px;
+  line-height: 16px;
+  border: .5px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.stage-progress {
+ flex: none; color: var(--caption); font-family: var(--mono); font-size: 10.5px; 
+}
+
+.stage-progress.done {
+ color: var(--ok); 
+}
+
+.proj-progress {
+  padding: 2px 8px 4px;
+  color: var(--caption);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.frame[data-sidebar-collapsed] .proj-progress {
+ display: none; 
+}
+
+/* 会话行 = DSH 的 sessionRow：32px、padding 0 8px、圆角 8px、
+   16px 固定插槽（状态点）、标题 14px/20px 省略号、次要信息与时间 12px 靠右，
+   hover 时时间让位给行内操作按钮。 */
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s;
+}
+
+.session-row:hover {
+ background: var(--hover); 
+}
+
+.session-row.active {
+ background: var(--active); 
+}
+
+.session-row .row-title {
+ flex: 1; margin: 0 6px 0 4px; 
+}
+
+.session-row.active .row-title {
+ font-weight: 500; 
+}
+
+.session-row .row-time {
+ flex: none; margin-left: 8px; color: var(--caption); font-size: 12px; line-height: 20px; 
+}
+
+.session-row .row-chip + .row-chip {
+ margin-left: 6px; 
+}
+
+.session-row .row-actions {
+ display: none; flex: none; align-items: center; gap: 10px; 
+}
+
+.session-row:hover .row-actions {
+ display: inline-flex; 
+}
+
+.session-row:hover .row-time {
+ display: none; 
+}
+
+.session-row .row-chip {
+ color: var(--caption); font-size: 11px; white-space: nowrap; 
+}
+
+.session-row .row-chip.usage-chip {
+ font-family: var(--mono); 
+}
+
+.session-row.active .row-slot {
+ color: var(--accent); 
+}
+
+/* ---- P8 侧栏改版（仿 DSH 的树状侧栏）------------------------------------
+ * 层级递进：项目行不缩进（文件夹图标打头），阶段行缩进一层，会话行再进
+ * 一层；展开的项目用「打开的文件夹」图标。会话方块视图：一格 20px、逐图
+ * 会话带书内序号，悬浮看完整说明，活跃会话实心、运行中有绿圈。 */
+.row-folder .folder {
+ display: none; color: var(--dim); 
+}
+
+.row-folder .folder.closed {
+ display: inline-block; 
+}
+
+details[open] > .proj-row .row-folder .folder.closed {
+ display: none; 
+}
+
+details[open] > .proj-row .row-folder .folder.open {
+ display: inline-block; color: var(--accent); 
+}
+
+.stage-row {
+ padding-left: 24px; 
+}
+
+.stage-progress.running {
+ color: var(--ok); font-weight: 600; 
+}
+
+.stage-progress.busy {
+ color: var(--warn); 
+}
+
+.stage-progress.idle {
+ color: var(--caption); opacity: .72; 
+}
+
+.session-row.sub1 {
+ padding-left: 24px; 
+}
+
+.session-row.sub2 {
+ padding-left: 40px; 
+}
+
+.session-overflow.sub2, .session-overflow.sub1 {
+ padding-left: 40px; 
+}
+
+.session-row.sub1 .session-overflow, .stage-group .session-overflow {
+ padding-left: 40px; 
+}
+
+.session-blocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 4px 10px 8px 40px;
+}
+
+.session-block {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: .5px solid var(--border);
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 19px;
+  text-align: center;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+
+.session-block:hover {
+ background: var(--active); border-color: var(--border-strong); 
+}
+
+.session-block.active {
+ background: var(--accent); border-color: var(--accent); color: #fff; 
+}
+
+.session-block.live {
+ border-color: var(--ok); box-shadow: 0 0 0 2px rgba(34, 197, 94, .22); 
+}
+
+.session-block.live.active {
+ border-color: var(--accent); box-shadow: 0 0 0 2px rgba(65, 118, 230, .3); 
+}
+
+.icon-btn.on {
+ color: var(--accent); 
+}
+
+/* 组内会话过多时只显示前 N 条 + 一个「更多会话」按钮（28px、左内边距 28px） */
+.session-overflow {
+  display: block;
+  width: 100%;
+  height: 28px;
+  padding: 0 12px 0 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--caption);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-overflow:hover {
+ color: var(--muted); background: var(--hover); 
+}
+
+.empty {
+ padding: 16px 12px; color: var(--caption); font-size: 13px; 
+}
+
+/* 侧栏折叠成 56px 轨道：只留插槽（点 / 箭头），标题与次要信息全隐藏。 */
+.frame[data-sidebar-collapsed] .session-list {
+ padding: 0 8px 20px; 
+}
+
+.frame[data-sidebar-collapsed] .proj-row,
+.frame[data-sidebar-collapsed] .stage-row,
+.frame[data-sidebar-collapsed] .session-row {
+ justify-content: center; padding: 0; overflow: hidden; 
+}
+
+.frame[data-sidebar-collapsed] .proj-row .row-body,
+.frame[data-sidebar-collapsed] .stage-row .row-body,
+.frame[data-sidebar-collapsed] .proj-row .row-meta,
+.frame[data-sidebar-collapsed] .stage-row .row-meta,
+.frame[data-sidebar-collapsed] .stage-progress,
+.frame[data-sidebar-collapsed] .proj-note,
+.frame[data-sidebar-collapsed] .session-row .row-title,
+.frame[data-sidebar-collapsed] .session-row .row-time,
+.frame[data-sidebar-collapsed] .session-row .row-actions,
+.frame[data-sidebar-collapsed] .session-row .row-chip {
+ display: none; 
+}
+
+.frame[data-sidebar-collapsed] .session-row .row-slot {
+ width: 20px; 
+}
+
+.frame[data-sidebar-collapsed] .session-blocks {
+ display: none; 
+}
+
+.frame[data-sidebar-collapsed] .row-folder .folder {
+ width: 16px; height: 16px; 
+}
+
+.side-totals {
+  flex: none;
+  border-top: .5px solid var(--border);
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.side-status {
+ flex: none; border-top: .5px solid var(--border); padding: 6px 12px 10px; 
+}
+
+.root-path {
+  color: var(--caption);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.side-foot {
+  color: var(--caption);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================ 中栏头部：面包屑 + 标签页 ============================ */
+
+.center-header {
+  flex: none;
+  position: relative;
+  padding: 12px 28px 0 20px;
+  background: var(--bg);
+}
+
+.center-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: .5px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.title-row {
+ display: flex; align-items: center; min-height: 32px; gap: 0; 
+}
+
+.crumbs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.crumb {
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb.is-link {
+ cursor: pointer; 
+}
+
+.crumb.is-link:hover {
+ background: var(--hover); 
+}
+
+.crumb-current {
+ color: var(--text); font-weight: 600; 
+}
+
+.crumb-sep {
+ flex: none; color: var(--caption); font-size: 14px; line-height: 20px; 
+}
+
+.header-actions {
+ flex: none; display: flex; align-items: center; gap: 8px; margin-left: 20px; 
+}
+
+.header-actions:empty {
+ display: none; 
+}
+
+.tabs-row {
+ display: flex; align-items: flex-end; gap: 12px; 
+}
+
+.tabs {
+ display: flex; gap: 36px; padding-left: 8px; margin-top: 4px; 
+}
+
+.tab {
+  position: relative;
+  padding: 0 0 11px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  height: 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.tab:hover {
+ color: var(--muted); 
+}
+
+.tab-active {
+ color: var(--accent); 
+}
+
+.tab-active::after {
+ background: var(--accent); 
+}
+
+.tab:focus-visible {
+ outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; 
+}
+
+.tab-tools {
+ flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; padding-bottom: 6px; 
+}
+
+.tab-toggle {
+  height: 20px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tab-toggle:hover {
+ color: var(--text); background: var(--hover); 
+}
+
+.tab-toggle[aria-pressed="true"] {
+ color: var(--accent); background: var(--accent-soft); 
+}
+
+.tab-toggle:focus-visible {
+ outline: 1px solid var(--accent); outline-offset: 1px; 
+}
+
+.banner {
+  flex: none;
+  margin: 8px 28px 0 20px;
+  padding: 6px 10px;
+  border: .5px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.view-area {
+ flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; 
+}
+
+/* 组内会话过多时只显示前 N 条 + 一个「更多会话」按钮（28px、左内边距 28px） */
+.session-overflow {
+  display: block;
+  width: 100%;
+  height: 28px;
+  padding: 0 12px 0 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--caption);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-overflow:hover {
+ color: var(--muted); background: var(--hover); 
+}
+
+.empty {
+ padding: 16px 12px; color: var(--caption); font-size: 13px; 
+}
+
+/* 侧栏折叠成 56px 轨道：只留插槽（点 / 箭头），标题与次要信息全隐藏。 */
+.frame[data-sidebar-collapsed] .session-list {
+ padding: 0 8px 20px; 
+}
+
+.frame[data-sidebar-collapsed] .proj-row,
+.frame[data-sidebar-collapsed] .stage-row,
+.frame[data-sidebar-collapsed] .session-row {
+ justify-content: center; padding: 0; overflow: hidden; 
+}
+
+.frame[data-sidebar-collapsed] .proj-row .row-body,
+.frame[data-sidebar-collapsed] .stage-row .row-body,
+.frame[data-sidebar-collapsed] .proj-row .row-meta,
+.frame[data-sidebar-collapsed] .stage-row .row-meta,
+.frame[data-sidebar-collapsed] .stage-progress,
+.frame[data-sidebar-collapsed] .proj-note,
+.frame[data-sidebar-collapsed] .session-row .row-title,
+.frame[data-sidebar-collapsed] .session-row .row-time,
+.frame[data-sidebar-collapsed] .session-row .row-actions,
+.frame[data-sidebar-collapsed] .session-row .row-chip {
+ display: none; 
+}
+
+.frame[data-sidebar-collapsed] .session-row .row-slot {
+ width: 20px; 
+}
+
+.frame[data-sidebar-collapsed] .session-blocks {
+ display: none; 
+}
+
+.frame[data-sidebar-collapsed] .row-folder .folder {
+ width: 16px; height: 16px; 
+}
+
+.side-totals {
+  flex: none;
+  border-top: .5px solid var(--border);
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.side-status {
+ flex: none; border-top: .5px solid var(--border); padding: 6px 12px 10px; 
+}
+
+.root-path {
+  color: var(--caption);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.side-foot {
+  color: var(--caption);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+</style>

@@ -4,9 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "prebuild": "node scripts/sync-css.mjs",
     "build": "vite build",
-    "postbuild": "node scripts/check-css.mjs",
     "dev": "vite",
     "test": "vitest run"
   },

@@ -8726,7 +8726,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder"><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 3.5h4l1.5 2h7.5v2h-12l-1.5 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"></path><path d="M1.5 13.5l1.6-6h12.4l-1.6 6h-12.4Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"></path></svg></span>', 1)),
+                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-61d97fd3><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-61d97fd3><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-61d97fd3></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-61d97fd3><path d="M1.5 3.5h4l1.5 2h7.5v2h-12l-1.5 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-61d97fd3></path><path d="M1.5 13.5l1.6-6h12.4l-1.6 6h-12.4Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-61d97fd3></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_8$4, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_9$4, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_10$3, toDisplayString(g.title), 1)
@@ -8903,6 +8903,14 @@
       };
     }
   });
+  const _export_sfc = (sfc, props) => {
+    const target = sfc.__vccOpts || sfc;
+    for (const [key, val] of props) {
+      target[key] = val;
+    }
+    return target;
+  };
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-61d97fd3"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
@@ -9400,6 +9408,7 @@
       };
     }
   });
+  const StreamSummary = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-a0dfcd77"]]);
   const _hoisted_1$c = ["open"];
   const _hoisted_2$b = { class: "line-name" };
   const _hoisted_3$8 = ["title"];
@@ -9910,6 +9919,7 @@
       };
     }
   });
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-0ef2183e"]]);
   const _hoisted_1$6 = { class: "sys-line" };
   const _hoisted_2$6 = { class: "line-summary" };
   const _hoisted_3$5 = {
@@ -10003,6 +10013,7 @@
       };
     }
   });
+  const SystemMsg = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-b39af669"]]);
   const _hoisted_1$5 = { class: "msg msg-image" };
   const _hoisted_2$5 = { class: "image-body" };
   const _hoisted_3$4 = { class: "attach-note" };
@@ -10065,6 +10076,7 @@
       };
     }
   });
+  const ImageTurn = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-1eee90b4"]]);
   const _hoisted_1$4 = { class: "io-card" };
   const _hoisted_2$4 = { class: "io-actions" };
   const _sfc_main$5 = /* @__PURE__ */ defineComponent({
@@ -10161,18 +10173,18 @@
           class: normalizeClass(["timeline", { hidden: unref(state).view !== "chat" }])
         }, [
           createBaseVNode("div", _hoisted_1$3, [
-            unref(state).current ? (openBlock(), createBlock(_sfc_main$h, { key: 0 })) : createCommentVNode("", true),
+            unref(state).current ? (openBlock(), createBlock(StreamSummary, { key: 0 })) : createCommentVNode("", true),
             (openBlock(true), createElementBlock(Fragment, null, renderList(model.value.items, (item) => {
               return openBlock(), createElementBlock(Fragment, {
                 key: item.key
               }, [
-                item.type === "assistant" ? (openBlock(), createBlock(_sfc_main$8, {
+                item.type === "assistant" ? (openBlock(), createBlock(AssistantMsg, {
                   key: 0,
                   item
-                }, null, 8, ["item"])) : item.type === "system" ? (openBlock(), createBlock(_sfc_main$7, {
+                }, null, 8, ["item"])) : item.type === "system" ? (openBlock(), createBlock(SystemMsg, {
                   key: 1,
                   item
-                }, null, 8, ["item"])) : item.type === "imageTurn" ? (openBlock(), createBlock(_sfc_main$6, {
+                }, null, 8, ["item"])) : item.type === "imageTurn" ? (openBlock(), createBlock(ImageTurn, {
                   key: 2,
                   item
                 }, null, 8, ["item"])) : item.type === "result" ? (openBlock(), createBlock(_sfc_main$5, {
@@ -10194,6 +10206,7 @@
       };
     }
   });
+  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-7459a444"]]);
   const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
   function nextMsgLine(lines, idx) {
     for (let i = idx + 1; i < lines.length; i++) {
@@ -10597,6 +10610,7 @@
       };
     }
   });
+  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-0baa803c"]]);
   function currentEstimate() {
     const id = state.current ? state.current.id : "";
     const list = state.sessions || [];
@@ -11015,6 +11029,7 @@
       };
     }
   });
+  const DetailsPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-73d1336a"]]);
   const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
   const _hoisted_2 = ["data-dragging"];
   const _hoisted_3 = {
@@ -11220,7 +11235,7 @@
             "data-details-collapsed": unref(layout).detailsCollapsed ? "" : void 0,
             "data-dragging": drag.value ? "" : void 0
           }, [
-            createVNode(_sfc_main$i),
+            createVNode(Sidebar),
             createBaseVNode("div", {
               id: "handle-sidebar",
               class: "handle",
@@ -11359,8 +11374,8 @@
                 class: normalizeClass(["banner", { hidden: !bannerText.value }])
               }, toDisplayString(bannerText.value), 3),
               createBaseVNode("div", _hoisted_24, [
-                createVNode(_sfc_main$4),
-                createVNode(_sfc_main$2)
+                createVNode(Timeline),
+                createVNode(Trajectory)
               ])
             ]),
             createBaseVNode("div", {
@@ -11391,7 +11406,7 @@
                   onClick: _cache[10] || (_cache[10] = ($event) => unref(state).details > 0 && unref(toggleDetails)())
                 }, "✕")
               ]),
-              createVNode(_sfc_main$1)
+              createVNode(DetailsPanel)
             ])
           ], 12, _hoisted_1),
           createBaseVNode("div", {
@@ -11411,5 +11426,6 @@
       };
     }
   });
-  createApp(_sfc_main).mount("#app");
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-ea444b58"]]);
+  createApp(App).mount("#app");
 })();

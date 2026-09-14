@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 迁移纪律：本组件（以及后续所有组件）不写任何样式——视觉全部来自
-// 整卷沿用的旧页样式表（src/styles/viewer.css）。模板结构照
+// 全局样式在 styles/base.css（token/共享词汇），本组件样式在文件尾 <style scoped>。模板结构照
 // go/internal/sessionview/assets/viewer.html 的骨架逐节点复刻。
 // 块 1：三栏骨架交互；块 2：侧栏（数据层 + 分组树）接上。
 import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
@@ -292,3 +292,281 @@ onBeforeUnmount(() => {
     <div class="lightbox-hint">点击空白处或按 Esc 关闭</div>
   </div>
 </template>
+
+<style scoped>
+/* ============================ 三栏骨架（DSH AppFrame） ============================ */
+
+.frame {
+  position: relative;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 0px;
+  grid-template-rows: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  transition: grid-template-columns .18s var(--ease);
+}
+
+.frame[data-dragging] {
+ transition: none; cursor: col-resize; user-select: none; 
+}
+
+@media (prefers-reduced-motion: reduce) {
+ .frame { transition: none; } 
+}
+
+.sidebar-col {
+  grid-column: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--sidebar-bg);
+  border-right: .5px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.frame[data-sidebar-collapsed] .sidebar-col {
+ border-right-color: transparent; 
+}
+
+.center-col {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.details-col {
+  grid-column: 3;
+  min-width: 0;
+  overflow: hidden;
+  border-left: .5px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.frame[data-details-collapsed] .details-col {
+ border-left-color: transparent; 
+}
+
+/* 8px 命中区、居中 4px 偏移 —— 与 DSH 的 DragHandle 一致 */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  margin-left: -4px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+  transition: left .18s var(--ease), right .18s var(--ease);
+}
+
+.frame[data-dragging] .handle {
+ transition: none; 
+}
+
+@media (prefers-reduced-motion: reduce) {
+ .handle { transition: none; } 
+}
+
+.handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+  border-radius: 3px;
+  background: var(--border-strong);
+  opacity: 0;
+  transition: opacity .14s var(--ease);
+}
+
+.handle:hover::after, .handle[data-dragging="true"]::after {
+ opacity: 1; background: var(--accent); 
+}
+
+.handle[data-hidden="true"] {
+ display: none; 
+}
+
+/* ============================ 中栏头部：面包屑 + 标签页 ============================ */
+
+.center-header {
+  flex: none;
+  position: relative;
+  padding: 12px 28px 0 20px;
+  background: var(--bg);
+}
+
+.center-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: .5px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.title-row {
+ display: flex; align-items: center; min-height: 32px; gap: 0; 
+}
+
+.crumbs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.crumb {
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb.is-link {
+ cursor: pointer; 
+}
+
+.crumb.is-link:hover {
+ background: var(--hover); 
+}
+
+.crumb-current {
+ color: var(--text); font-weight: 600; 
+}
+
+.crumb-sep {
+ flex: none; color: var(--caption); font-size: 14px; line-height: 20px; 
+}
+
+.header-actions {
+ flex: none; display: flex; align-items: center; gap: 8px; margin-left: 20px; 
+}
+
+.header-actions:empty {
+ display: none; 
+}
+
+.tabs-row {
+ display: flex; align-items: flex-end; gap: 12px; 
+}
+
+.tabs {
+ display: flex; gap: 36px; padding-left: 8px; margin-top: 4px; 
+}
+
+.tab {
+  position: relative;
+  padding: 0 0 11px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  height: 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.tab:hover {
+ color: var(--muted); 
+}
+
+.tab-active {
+ color: var(--accent); 
+}
+
+.tab-active::after {
+ background: var(--accent); 
+}
+
+.tab:focus-visible {
+ outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; 
+}
+
+.tab-tools {
+ flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; padding-bottom: 6px; 
+}
+
+.tab-toggle {
+  height: 20px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tab-toggle:hover {
+ color: var(--text); background: var(--hover); 
+}
+
+.tab-toggle[aria-pressed="true"] {
+ color: var(--accent); background: var(--accent-soft); 
+}
+
+.tab-toggle:focus-visible {
+ outline: 1px solid var(--accent); outline-offset: 1px; 
+}
+
+.banner {
+  flex: none;
+  margin: 8px 28px 0 20px;
+  padding: 6px 10px;
+  border: .5px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.view-area {
+ flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; 
+}
+
+@media (max-width: 1023px) {
+  .center-header { padding: 10px 16px 0 12px; }
+  .tab-tools { gap: 0; }
+}
+</style>

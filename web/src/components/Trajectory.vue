@@ -127,3 +127,287 @@ function rowKey(row: any, idx: number): string {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* ============================ 轨迹（DSH Trajectory 的表） ============================ */
+
+.trajectory {
+ flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; 
+}
+
+.traj-toolbar {
+  flex: none;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  height: 32px;
+  border-bottom: .5px solid var(--border);
+  background: var(--bg);
+}
+
+.traj-toolbar-inner {
+ display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 12px; 
+}
+
+.traj-filters {
+ display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: hidden; 
+}
+
+.traj-chip {
+  flex: none;
+  height: 20px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--caption);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.traj-chip:hover {
+ color: var(--text); background: var(--hover); 
+}
+
+.traj-chip[aria-pressed="true"] {
+ color: var(--accent); background: var(--accent-soft); 
+}
+
+.traj-count {
+ flex: none; margin-left: auto; color: var(--caption); font-size: 12px; font-variant-numeric: tabular-nums; 
+}
+
+.traj-scroll {
+ flex: 1; min-height: 0; overflow: auto; 
+}
+
+.traj-table {
+ table-layout: fixed; width: 100%; border-spacing: 0; font-size: 12px; color: var(--text); 
+}
+
+.traj-table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: .5px solid var(--border);
+  background: var(--sidebar-bg);
+  color: var(--dim);
+  font-weight: 500;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.traj-table td {
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: .5px solid var(--hairline);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.traj-table tbody tr.traj-row {
+ cursor: pointer; position: relative; 
+}
+
+.traj-table tbody tr.traj-row:hover {
+ background: var(--hover); 
+}
+
+.traj-table tbody tr.traj-row.selected {
+ background: var(--active); 
+}
+
+.traj-table tbody tr.traj-row[data-error="true"] td:first-child {
+ box-shadow: inset 3px 0 0 var(--err); 
+}
+
+.traj-table tbody tr.traj-row.selected td:first-child {
+ box-shadow: inset 3px 0 0 var(--accent); 
+}
+
+.col-n {
+ width: 46px; 
+}
+
+.col-kind {
+ width: 78px; 
+}
+
+.col-name {
+ width: 150px; 
+}
+
+.col-status {
+ width: 66px; 
+}
+
+.col-size {
+ width: 72px; 
+}
+
+.col-time {
+ width: 72px; 
+}
+
+/* 数字列的表头与数值一起右对齐（#、字符、耗时） */
+.traj-table th.num-head {
+ text-align: right; 
+}
+
+.traj-num {
+ color: var(--caption); font-family: var(--mono); font-size: 11px; text-align: right; 
+}
+
+.traj-name {
+ font-family: var(--mono); font-size: 12px; color: var(--muted); 
+}
+
+.traj-summary {
+ color: var(--muted); 
+}
+
+.traj-table tbody tr[data-kind="tool"] .traj-summary,
+.traj-table tbody tr[data-kind="result"] .traj-summary {
+ font-family: var(--mono); font-size: 11.5px; 
+}
+
+.traj-table tbody tr[data-kind="think"] .traj-summary {
+ color: var(--dim); font-style: normal; 
+}
+
+.traj-num-cell {
+ text-align: right; color: var(--caption); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 11px; 
+}
+
+.traj-status {
+ font-size: 11.5px; 
+}
+
+.traj-status.ok {
+ color: var(--ok); 
+}
+
+.traj-status.error {
+ color: var(--err); 
+}
+
+.traj-status.plain {
+ color: var(--caption); 
+}
+
+.traj-disclose {
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--caption);
+  font: inherit;
+  font-size: 10px;
+  line-height: 18px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.traj-disclose:hover {
+ background: var(--hover); color: var(--text); 
+}
+
+.traj-jump {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+}
+
+.traj-table tbody tr.traj-row:hover .traj-jump {
+ opacity: 1; 
+}
+
+/* 种类标签（照 DSH 的 kindTag：10px / 650 字重 / 4px 圆角 / 19px 高） */
+.kind-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .035em;
+  line-height: 16px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.kind-user {
+ color: var(--kind-user-fg); background: var(--kind-user-bg); 
+}
+
+.kind-msg {
+ color: var(--kind-msg-fg); background: var(--kind-msg-bg); 
+}
+
+.kind-think {
+ color: var(--kind-think-fg); background: var(--kind-think-bg); 
+}
+
+.kind-tool {
+ color: var(--kind-tool-fg); background: var(--kind-tool-bg); 
+}
+
+.kind-error {
+ color: var(--kind-err-fg); background: var(--kind-err-bg); 
+}
+
+.kind-meta {
+ color: var(--kind-meta-fg); background: var(--kind-meta-bg); 
+}
+
+.kind-result {
+ color: var(--kind-tool-fg); background: var(--kind-tool-bg); 
+}
+
+.kind-usage {
+ color: var(--kind-usage-fg); background: var(--kind-usage-bg); 
+}
+
+.traj-detail > td {
+ height: auto; padding: 0; white-space: normal; overflow: visible; background: var(--surface-2); 
+}
+
+.traj-detail-inner {
+ padding: 8px 8px 12px 54px; display: flex; flex-direction: column; gap: 8px; 
+}
+
+.traj-detail-title {
+ color: var(--caption); font-size: 11px; 
+}
+
+.traj-empty {
+ padding: 40px 24px; color: var(--dim); text-align: center; 
+}
+
+@media (max-width: 1023px) {
+  .col-name { width: 110px; }
+  .col-status { width: 56px; }
+  .col-size { width: 58px; }
+  .col-time { width: 58px; }
+}
+</style>

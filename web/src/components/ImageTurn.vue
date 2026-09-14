@@ -53,3 +53,9 @@ onBeforeUnmount(() => {
     </Disclosure>
   </section>
 </template>
+
+<style scoped>
+.image-body {
+ padding: 4px 0 6px 22px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; 
+}
+</style>

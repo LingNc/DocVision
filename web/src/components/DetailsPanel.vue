@@ -131,3 +131,171 @@ const countTip = computed(() =>
     </template>
   </div>
 </template>
+
+<style scoped>
+/* ============================ 详情栏 ============================ */
+
+.details-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  border-bottom: .5px solid var(--border);
+}
+
+.details-title {
+ flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .2px; 
+}
+
+.details-body {
+ flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px 40px; 
+}
+
+.details-body .hidden {
+ display: none !important; 
+}
+
+.detail-block {
+ margin: 0 0 18px; 
+}
+
+.detail-block-title {
+  margin: 0 0 6px;
+  color: var(--caption);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  text-transform: none;
+}
+
+.detail-kv {
+ display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 2px 10px; font-size: 12px; line-height: 20px; 
+}
+
+.detail-kv dt {
+ color: var(--caption); 
+}
+
+.detail-kv dd {
+ margin: 0; color: var(--text); word-break: break-all; 
+}
+
+.detail-kv dd.mono {
+ font-family: var(--mono); font-size: 11.5px; 
+}
+
+.tiles {
+ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--border); border: .5px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; 
+}
+
+.tile {
+ background: var(--bg); padding: 7px 9px; min-width: 0; 
+}
+
+.tile-value {
+ font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+}
+
+.tile-label {
+ color: var(--caption); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+}
+
+.stats-table {
+ width: 100%; border-collapse: collapse; font-size: 11px; 
+}
+
+.stats-table th, .stats-table td {
+ padding: 3px 5px; text-align: right; border-bottom: .5px solid var(--hairline); font-variant-numeric: tabular-nums; white-space: nowrap; 
+}
+
+.stats-table th:first-child, .stats-table td:first-child {
+ text-align: left; 
+}
+
+.stats-table th {
+ color: var(--caption); font-weight: 500; 
+}
+
+.stats-table tbody tr:hover {
+ background: var(--hover); 
+}
+
+.stats-scroll {
+ max-height: 300px; overflow: auto; 
+}
+
+.stats-sub {
+ color: var(--caption); font-size: 11px; line-height: 18px; margin-top: 6px; 
+}
+
+.meta-card {
+ border: 0; background: transparent; 
+}
+
+.meta-card > summary {
+ padding: 4px 0; 
+}
+
+.meta-card .line-name {
+ color: var(--muted); 
+}
+
+.meta-tools {
+ margin-top: 8px; 
+}
+
+.meta-tools-head {
+ color: var(--caption); font-size: 11px; padding: 2px 0 6px; 
+}
+
+.tool-schema {
+ border-top: .5px solid var(--hairline); 
+}
+
+.tool-schema > summary {
+ padding: 5px 0; 
+}
+
+.schema-head {
+ display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; list-style: none; 
+}
+
+.schema-head::-webkit-details-marker {
+ display: none; 
+}
+
+.schema-index {
+ color: var(--caption); font-family: var(--mono); font-size: 10.5px; 
+}
+
+.schema-name {
+ font-family: var(--mono); font-weight: 600; font-size: 11.5px; 
+}
+
+.schema-meta {
+ color: var(--caption); font-size: 10.5px; 
+}
+
+.schema-body {
+ padding: 2px 0 8px; 
+}
+
+.schema-desc {
+ margin: 0 0 6px; color: var(--muted); font-size: 11.5px; line-height: 18px; font-family: var(--sans); 
+}
+
+.schema-params {
+ margin: 0; 
+}
+
+.schema-params > .schema-body {
+ padding-top: 4px; 
+}
+
+/* 详情栏里的系统提示词：比消息正文小一号，标题仍用正文色 */
+.prompt-md {
+ font-size: 12.5px; line-height: 20px; color: var(--muted); 
+}
+</style>

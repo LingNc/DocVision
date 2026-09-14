@@ -97,3 +97,47 @@ const thinkTail = computed(() =>
     <div v-if="item.empty" class="note">（空消息）</div>
   </section>
 </template>
+
+<style scoped>
+/* 助手消息 = 左对齐、全宽、无气泡无边框 */
+.msg-assistant {
+ align-items: stretch; 
+}
+
+.msg-assistant .body-text {
+ font-size: 14px; line-height: 24px; 
+}
+
+/* 展开后思考缩进 22px、13px/20px */
+.thinking-body {
+ padding: 4px 0 6px 22px; 
+}
+
+.thinking-body .reasoning-text {
+ color: var(--dim); 
+}
+
+/* 看图类调用（view_image / view_pdf）的**缩略图预览行**（第 D 条）：紧跟在那一行
+   工具调用下面，**折叠态就可见**（所以它是 <details> 的兄弟节点，不在卡片里）。
+   一轮里调了多次 view 时，这一轮的缩略图全部并排挂在这一轮**最后一个** view 行下，
+   顺序按转录先后；超宽就换行。缩进 20px 与工具行里的名称对齐。 */
+.preview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-left: 20px;
+}
+
+.preview-strip img {
+  width: auto;
+  height: auto;
+  max-width: var(--preview-w);
+  max-height: var(--preview-h);
+  border: .5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: zoom-in;
+}
+</style>

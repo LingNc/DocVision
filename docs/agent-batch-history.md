@@ -794,3 +794,14 @@ models:
 ### 用户口径更新（P8 批末）：旧页正式冻结
 
 P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**为旧页改代码。用户明确：迁移已完成，旧页不再维护，之后 bug 也不修，一切改动只做 v2。样式表 `assets/viewer.css` 仍整卷共享（sync-css/check-css 纪律不变），新类名旧页不引用即可，无需再为旧页观感让步。旧页继续存在的意义只剩两样：探针对照基准 + 用户还没切过去的入口。
+
+### P11 CSS Vue 化（`web/components` 分支）
+
+**做了什么**：把 1368 行的整卷 `viewer.css` 按归属拆分——全局基础样式进 `web/src/styles/base.css`（token/深色主题/重置/滚动条/通用小件 `.icon-btn`/`.badge`/`.dot`/跨组件共享词汇 `.msg`/`.line-*`/`.disclosure`/`.io-*`/`.code`+高亮色板/`.images`/`.flash`/`.lightbox`/md 正文词汇），组件私有样式进各 SFC 的 `<style scoped>`（App=三栏骨架+中栏头部、Sidebar、Timeline、StreamSummary、SystemMsg、AssistantMsg、ImageTurn、Trajectory、DetailsPanel；FoldText/MdBody 的规则因是共享词汇/作用于 v-html 内容，整块归 base）。旧页资产 `assets/viewer.css` 从此**冻结**（保持 46355 字节原样，旧页继续可用）；`sync-css.mjs`/`check-css.mjs` 退役删除（字节守卫的前提——两页共享同一份样式——已不复存在）。
+
+**为什么共享词汇必须放全局（三个实测陷阱，都由探针/逐元素对比抓出）**：
+1. **跨组件类放 scoped 会静默丢样式**：`.line-*`/`.disclosure` 被 7 个组件使用，最初放 FoldText scoped 后，SystemMsg 自己模板里的 `.line-summary` 匹配不上，行高 20→24、系统消息 +8px——探针 probe8 的 `followOff` 因此翻转（详情栏重开后内容多高 48px>40px 阈值，自动跟随被滚离逻辑取消）。教训：**先 grep 类名的组件分布再决定归属**。
+2. **`:deep()` 会反转原文件的优先级次序**：md 正文规则经 MdBody scoped 的 `:deep()` 下发后，每条选择器都追加 `[data-v]`，`.md-p`（原 0,1,0）与 `.md-body > *:last-child`（原 0,2,0）被拉平成同分值、按书写顺序决胜 → `.md-p` 的 margin-bottom 8px 复活（`.md-body > *:first-child` 的 `:deep(> …)` 与同元素选择器 `.md-body.clamped` 也一并失配）。而 **v-html 生成的 DOM 根本不带 scope 属性**——md 正文整块退回全局（md-* 类名自命名空间化，无碰撞风险）。
+3. **对照测量前先对齐 localStorage**：两个端口 origin 的界面记忆（侧栏/详情栏展开与宽度）让 timeline 宽度差 176px，逐元素高度对比全是环境噪声——"每条消息 +12px"里真差异只有来自陷阱 1/2 的那部分。
+
+**验收**：探针 453/454（唯一差异=T12 的 `tiles[3]/value` 取整，旧参照 8955 是冻结前二进制）；控制台零报错；vitest 23/23；`go test ./internal/sessionview/` 全绿（sessionview 的浏览器测试对页面断言不受影响）；截图目检列表/方块/轨迹/深色主题与 P8 构建一致（dist CSS 58.6KB vs 46.4KB，膨胀来自 scoped 属性复写）。

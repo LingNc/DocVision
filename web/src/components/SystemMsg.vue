@@ -70,3 +70,60 @@ onBeforeUnmount(() => {
     </template>
   </section>
 </template>
+
+<style scoped>
+/* 消息全部**左对齐**，没有右侧气泡：在这个工具里 role:"user" 行其实是 harness
+   自己发的一轮（见 docs/commands.md 的"消息形态"），所以——
+   · 不带图的 user 行 = 系统消息（安静样式 + 「系统 · user 轮」标签，默认只露
+     前 8 行，可展开全文并内滚）；
+   · 带图的 user 行 = 把图片投给模型的那一轮，作为对应工具的输入/附件收在
+     同一次调用的块里（配不上才单独一行折叠行）。 */
+.msg-system {
+ align-items: stretch; 
+}
+
+.sys-line {
+ display: flex; align-items: center; gap: 8px; min-width: 0; 
+}
+
+.sys-badge {
+  flex: none;
+  font-size: 11.5px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--caption);
+}
+
+.sys-meta {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--chip-text);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.sys-line :deep(.line-summary) {
+ min-width: 0; color: var(--dim); font-size: 12px; 
+}
+
+/* 系统消息正文：默认露前 8 行（渐隐），展开后限高内滚——与思考/工具同一套 */
+.sys-scroll {
+ overflow: auto; 
+}
+
+.sys-scroll.folded {
+  overflow: hidden;
+  mask-image: linear-gradient(180deg, #000 72%, transparent);
+}
+
+.msg-system .body-text {
+ color: var(--muted); 
+}
+
+/* 原 160 号规则里的 msg-system 半边 */
+.msg-system .body-text { color: var(--muted); font-size: 13px; }
+</style>

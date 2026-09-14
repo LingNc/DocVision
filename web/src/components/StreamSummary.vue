@@ -34,3 +34,40 @@ const detailsBtn = computed(() => (layout.cols.details > 0 ? '收起详情' : '�
     <button type="button" @click="toggleDetails">{{ detailsBtn }}</button>
   </div>
 </template>
+
+<style scoped>
+/* 消息流开头只留一行极简摘要（指标与元信息都在右侧详情面板里） */
+.stream-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-h);
+  color: var(--caption);
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+.stream-summary .dot-sep {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  display: inline-block;
+}
+
+.stream-summary button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.stream-summary button:hover {
+ text-decoration: underline; 
+}
+</style>
