@@ -60,9 +60,8 @@
   --attach-img-h: 420px;
   /* 看图类调用行下面的**缩略图预览**（第 D 条）：不大不小 —— 高不超过 108px、
      宽不超过 240px，保持原比例（不裁切、不拉伸、不留空框）。 */
-  /* T18：预览缩略图收小一档（原 108/240 会把折叠流撑出大段空档，横图尤其占高） */
-  --preview-h: 72px;
-  --preview-w: 160px;
+  --preview-h: 108px;
+  --preview-w: 240px;
   --dot-live: #22c55e;
   /* 轨迹表的种类标签（照 DSH 的 kindTag 上色：用户=业务主色、工具=琥珀、错误=红） */
   --kind-user-fg: #4176e6;
@@ -246,6 +245,16 @@ html, body {
    绝不能沿用「输入/输出」那套 `label | 内容` 两列网格——归属脚注是这一段的第三个
    子元素，在网格里会掉到第二行第一列并把第一列撑到脚注那么宽，于是说明文字被推到
    右边、图片被挤成一小条（用户看到的就是这个）。 */
+/* 插槽内容（输出图片 + 归属小字）钉在内容列：旧页把它们 append 进 .text-wrap
+   （第二列单元格），组件化后经 slot 成为网格直接子元素会掉进第一列（T18）。 */
+.io-section > .io-extra {
+  grid-column: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
 .io-section.attach-section {
   display: flex;
   flex-direction: column;

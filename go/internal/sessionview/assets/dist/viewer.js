@@ -2885,6 +2885,13 @@
       return Reflect.defineProperty(target, key, descriptor);
     }
   };
+  function useSlots() {
+    return getContext().slots;
+  }
+  function getContext(calledFunctionName) {
+    const i = getCurrentInstance();
+    return i.setupContext || (i.setupContext = createSetupContext(i));
+  }
   function normalizePropsOrEmits(props) {
     return isArray(props) ? props.reduce(
       (normalized, p2) => (normalized[p2] = null, normalized),
@@ -8462,7 +8469,7 @@
     class: "sidebar-col"
   };
   const _hoisted_2$d = { class: "side-head" };
-  const _hoisted_3$9 = ["title"];
+  const _hoisted_3$a = ["title"];
   const _hoisted_4$7 = { class: "side-search" };
   const _hoisted_5$6 = { class: "side-list-wrap" };
   const _hoisted_6$6 = ["data-project"];
@@ -8686,7 +8693,7 @@
               type: "button",
               title: blockView.value ? "切回列表视图" : "切到方块视图（会话多时好扫；悬浮看说明）",
               onClick: toggleBlockView
-            }, toDisplayString(blockView.value ? "☰" : "▦"), 11, _hoisted_3$9),
+            }, toDisplayString(blockView.value ? "☰" : "▦"), 11, _hoisted_3$a),
             createBaseVNode("button", {
               id: "refresh",
               class: "icon-btn",
@@ -9411,7 +9418,7 @@
   const StreamSummary = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-a0dfcd77"]]);
   const _hoisted_1$c = ["open"];
   const _hoisted_2$b = { class: "line-name" };
-  const _hoisted_3$8 = ["title"];
+  const _hoisted_3$9 = ["title"];
   const _hoisted_4$6 = {
     key: 1,
     class: "line-tail"
@@ -9441,7 +9448,7 @@
               createBaseVNode("span", {
                 class: "line-summary",
                 title: __props.summary
-              }, toDisplayString(__props.summary), 9, _hoisted_3$8)
+              }, toDisplayString(__props.summary), 9, _hoisted_3$9)
             ], 64)) : createCommentVNode("", true),
             __props.tail ? (openBlock(), createElementBlock("span", _hoisted_4$6, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
           ]),
@@ -9554,6 +9561,10 @@
     key: 0,
     class: "io-empty"
   };
+  const _hoisted_3$8 = {
+    key: 2,
+    class: "io-extra"
+  };
   const _sfc_main$c = /* @__PURE__ */ defineComponent({
     __name: "IOSection",
     props: {
@@ -9565,6 +9576,7 @@
       tokens: {}
     },
     setup(__props) {
+      const slots = useSlots();
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("div", {
           class: normalizeClass(["io-section", { "out-section": __props.out }])
@@ -9577,7 +9589,9 @@
             tokens: __props.tokens,
             error: __props.error
           }, null, 8, ["text", "mem-key", "tokens", "error"])),
-          renderSlot(_ctx.$slots, "default")
+          unref(slots).default ? (openBlock(), createElementBlock("div", _hoisted_3$8, [
+            renderSlot(_ctx.$slots, "default")
+          ])) : createCommentVNode("", true)
         ], 2);
       };
     }
