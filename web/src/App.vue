@@ -15,6 +15,8 @@ import {
   layout,
   lightbox,
   loadState,
+  resetLightbox,
+  zoomLightbox,
   persistLayout,
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
@@ -143,6 +145,47 @@ function onKeydown(ev: KeyboardEvent) {
   if (typing) return
   if (ev.key === '[') toggleSidebar()
   if (ev.key === ']') toggleDetails()
+}
+
+/* P6 灯箱交互：滚轮缩放（围绕鼠标点）、按住拖动平移、双击复位；
+ * 拖动过就吞掉 click（原「点击关闭」只在未拖动的纯点击上生效）。 */
+let lbDrag: { x: number; y: number; tx: number; ty: number; moved: boolean } | null = null
+
+function onLbWheel(ev: WheelEvent) {
+  ev.preventDefault()
+  const target = (ev.currentTarget as HTMLElement).querySelector('#lightbox-img') as HTMLElement | null
+  if (!target) return
+  zoomLightbox(ev.deltaY > 0 ? 0.9 : 1 / 0.9, ev.clientX, ev.clientY, target.getBoundingClientRect())
+}
+
+function onLbPointerdown(ev: PointerEvent) {
+  if (ev.button !== 0) return
+  lbDrag = { x: ev.clientX, y: ev.clientY, tx: lightbox.tx, ty: lightbox.ty, moved: false }
+  ;(ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId)
+}
+
+function onLbPointermove(ev: PointerEvent) {
+  if (!lbDrag) return
+  const dx = ev.clientX - lbDrag.x
+  const dy = ev.clientY - lbDrag.y
+  if (!lbDrag.moved && Math.hypot(dx, dy) > 3) lbDrag.moved = true
+  if (lbDrag.moved) {
+    lightbox.tx = lbDrag.tx + dx
+    lightbox.ty = lbDrag.ty + dy
+  }
+}
+
+function onLbPointerup() {
+  lbDrag = null
+}
+
+function onLbClick() {
+  if (!lbDrag) closeLightbox()
+}
+
+function onLbDblclick(ev: MouseEvent) {
+  ev.preventDefault()
+  resetLightbox()
 }
 
 let ro: ResizeObserver | null = null
@@ -286,10 +329,13 @@ onBeforeUnmount(() => {
       <DetailsPanel />
     </aside>
   </div>
-  <div id="lightbox" class="lightbox" :class="{ hidden: !lightbox.open }" @click="closeLightbox">
-    <!-- 旧页 img 不拦冒泡：点图也会冒到灯箱背景关闭（行为保持一致） -->
-    <img id="lightbox-img" :src="lightbox.open ? lightbox.url : undefined" :alt="lightbox.ref">
-    <div class="lightbox-hint">点击空白处或按 Esc 关闭</div>
+  <div id="lightbox" class="lightbox" :class="{ hidden: !lightbox.open }" @click="onLbClick"
+    @wheel="onLbWheel" @pointerdown="onLbPointerdown" @pointermove="onLbPointermove"
+    @pointerup="onLbPointerup" @pointercancel="onLbPointerup" @dblclick="onLbDblclick">
+    <!-- 旧页 img 不拦冒泡：点图也会冒到灯箱背景关闭（行为保持一致；P6 拖动过则不关） -->
+    <img id="lightbox-img" :src="lightbox.open ? lightbox.url : undefined" :alt="lightbox.ref"
+      :style="{ transform: 'translate(' + lightbox.tx + 'px,' + lightbox.ty + 'px) scale(' + lightbox.scale + ')' }">
+    <div class="lightbox-hint">滚轮缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭</div>
   </div>
 </template>
 

@@ -541,7 +541,18 @@ html, body {
 }
 
 .lightbox img {
- max-width: 92vw; max-height: 86vh; border-radius: var(--radius-sm); 
+ max-width: 92vw; max-height: 86vh; border-radius: var(--radius-sm);
+ transform-origin: center;
+ will-change: transform;
+}
+
+/* P6：拖动平移时光标示意（>1 倍才有「图比窗口大」的语义） */
+.lightbox.dragging {
+ cursor: grabbing;
+}
+
+.lightbox.dragging img {
+ cursor: grabbing;
 }
 
 .lightbox-hint {

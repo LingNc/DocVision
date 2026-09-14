@@ -1154,7 +1154,7 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
 }
 
 /* ============================ 三栏骨架（DSH AppFrame） ============================ */
-.frame[data-v-ea444b58] {
+.frame[data-v-92016ca1] {
   position: relative;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 0px;
@@ -1164,14 +1164,14 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   background: var(--bg);
   transition: grid-template-columns .18s var(--ease);
 }
-.frame[data-dragging][data-v-ea444b58] {
+.frame[data-dragging][data-v-92016ca1] {
  transition: none; cursor: col-resize; user-select: none;
 }
 @media (prefers-reduced-motion: reduce) {
-.frame[data-v-ea444b58] { transition: none;
+.frame[data-v-92016ca1] { transition: none;
 }
 }
-.sidebar-col[data-v-ea444b58] {
+.sidebar-col[data-v-92016ca1] {
   grid-column: 1;
   min-width: 0;
   overflow: hidden;
@@ -1180,10 +1180,10 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   display: flex;
   flex-direction: column;
 }
-.frame[data-sidebar-collapsed] .sidebar-col[data-v-ea444b58] {
+.frame[data-sidebar-collapsed] .sidebar-col[data-v-92016ca1] {
  border-right-color: transparent;
 }
-.center-col[data-v-ea444b58] {
+.center-col[data-v-92016ca1] {
   grid-column: 2;
   min-width: 0;
   overflow: hidden;
@@ -1191,7 +1191,7 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   flex-direction: column;
   background: var(--bg);
 }
-.details-col[data-v-ea444b58] {
+.details-col[data-v-92016ca1] {
   grid-column: 3;
   min-width: 0;
   overflow: hidden;
@@ -1200,12 +1200,12 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   display: flex;
   flex-direction: column;
 }
-.frame[data-details-collapsed] .details-col[data-v-ea444b58] {
+.frame[data-details-collapsed] .details-col[data-v-92016ca1] {
  border-left-color: transparent;
 }
 
 /* 8px 命中区、居中 4px 偏移 —— 与 DSH 的 DragHandle 一致 */
-.handle[data-v-ea444b58] {
+.handle[data-v-92016ca1] {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -1216,14 +1216,14 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   touch-action: none;
   transition: left .18s var(--ease), right .18s var(--ease);
 }
-.frame[data-dragging] .handle[data-v-ea444b58] {
+.frame[data-dragging] .handle[data-v-92016ca1] {
  transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
-.handle[data-v-ea444b58] { transition: none;
+.handle[data-v-92016ca1] { transition: none;
 }
 }
-.handle[data-v-ea444b58]::after {
+.handle[data-v-92016ca1]::after {
   content: "";
   position: absolute;
   top: 50%;
@@ -1236,21 +1236,21 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   opacity: 0;
   transition: opacity .14s var(--ease);
 }
-.handle[data-v-ea444b58]:hover::after, .handle[data-dragging="true"][data-v-ea444b58]::after {
+.handle[data-v-92016ca1]:hover::after, .handle[data-dragging="true"][data-v-92016ca1]::after {
  opacity: 1; background: var(--accent);
 }
-.handle[data-hidden="true"][data-v-ea444b58] {
+.handle[data-hidden="true"][data-v-92016ca1] {
  display: none;
 }
 
 /* ============================ 中栏头部：面包屑 + 标签页 ============================ */
-.center-header[data-v-ea444b58] {
+.center-header[data-v-92016ca1] {
   flex: none;
   position: relative;
   padding: 12px 28px 0 20px;
   background: var(--bg);
 }
-.center-header[data-v-ea444b58]::after {
+.center-header[data-v-92016ca1]::after {
   content: "";
   position: absolute;
   left: 0;
@@ -1260,10 +1260,10 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   background: var(--border);
   pointer-events: none;
 }
-.title-row[data-v-ea444b58] {
+.title-row[data-v-92016ca1] {
  display: flex; align-items: center; min-height: 32px; gap: 0;
 }
-.crumbs[data-v-ea444b58] {
+.crumbs[data-v-92016ca1] {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -1272,7 +1272,7 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   white-space: nowrap;
   overflow: hidden;
 }
-.crumb[data-v-ea444b58] {
+.crumb[data-v-92016ca1] {
   max-width: 220px;
   padding: 4px 8px;
   border: 0;
@@ -1286,31 +1286,31 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.crumb.is-link[data-v-ea444b58] {
+.crumb.is-link[data-v-92016ca1] {
  cursor: pointer;
 }
-.crumb.is-link[data-v-ea444b58]:hover {
+.crumb.is-link[data-v-92016ca1]:hover {
  background: var(--hover);
 }
-.crumb-current[data-v-ea444b58] {
+.crumb-current[data-v-92016ca1] {
  color: var(--text); font-weight: 600;
 }
-.crumb-sep[data-v-ea444b58] {
+.crumb-sep[data-v-92016ca1] {
  flex: none; color: var(--caption); font-size: 14px; line-height: 20px;
 }
-.header-actions[data-v-ea444b58] {
+.header-actions[data-v-92016ca1] {
  flex: none; display: flex; align-items: center; gap: 8px; margin-left: 20px;
 }
-.header-actions[data-v-ea444b58]:empty {
+.header-actions[data-v-92016ca1]:empty {
  display: none;
 }
-.tabs-row[data-v-ea444b58] {
+.tabs-row[data-v-92016ca1] {
  display: flex; align-items: flex-end; gap: 12px;
 }
-.tabs[data-v-ea444b58] {
+.tabs[data-v-92016ca1] {
  display: flex; gap: 36px; padding-left: 8px; margin-top: 4px;
 }
-.tab[data-v-ea444b58] {
+.tab[data-v-92016ca1] {
   position: relative;
   padding: 0 0 11px;
   border: 0;
@@ -1322,7 +1322,7 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   line-height: 16px;
   cursor: pointer;
 }
-.tab[data-v-ea444b58]::after {
+.tab[data-v-92016ca1]::after {
   content: "";
   position: absolute;
   left: 0;
@@ -1332,22 +1332,22 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   border-radius: 2px;
   background: transparent;
 }
-.tab[data-v-ea444b58]:hover {
+.tab[data-v-92016ca1]:hover {
  color: var(--muted);
 }
-.tab-active[data-v-ea444b58] {
+.tab-active[data-v-92016ca1] {
  color: var(--accent);
 }
-.tab-active[data-v-ea444b58]::after {
+.tab-active[data-v-92016ca1]::after {
  background: var(--accent);
 }
-.tab[data-v-ea444b58]:focus-visible {
+.tab[data-v-92016ca1]:focus-visible {
  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px;
 }
-.tab-tools[data-v-ea444b58] {
+.tab-tools[data-v-92016ca1] {
  flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; padding-bottom: 6px;
 }
-.tab-toggle[data-v-ea444b58] {
+.tab-toggle[data-v-92016ca1] {
   height: 20px;
   padding: 0 7px;
   border: 0;
@@ -1363,16 +1363,16 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   align-items: center;
   gap: 4px;
 }
-.tab-toggle[data-v-ea444b58]:hover {
+.tab-toggle[data-v-92016ca1]:hover {
  color: var(--text); background: var(--hover);
 }
-.tab-toggle[aria-pressed="true"][data-v-ea444b58] {
+.tab-toggle[aria-pressed="true"][data-v-92016ca1] {
  color: var(--accent); background: var(--accent-soft);
 }
-.tab-toggle[data-v-ea444b58]:focus-visible {
+.tab-toggle[data-v-92016ca1]:focus-visible {
  outline: 1px solid var(--accent); outline-offset: 1px;
 }
-.banner[data-v-ea444b58] {
+.banner[data-v-92016ca1] {
   flex: none;
   margin: 8px 28px 0 20px;
   padding: 6px 10px;
@@ -1383,13 +1383,13 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
   color: var(--muted);
   font-size: 12px;
 }
-.view-area[data-v-ea444b58] {
+.view-area[data-v-92016ca1] {
  flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
 }
 @media (max-width: 1023px) {
-.center-header[data-v-ea444b58] { padding: 10px 16px 0 12px;
+.center-header[data-v-92016ca1] { padding: 10px 16px 0 12px;
 }
-.tab-tools[data-v-ea444b58] { gap: 0;
+.tab-tools[data-v-92016ca1] { gap: 0;
 }
 }
 /*
@@ -1935,7 +1935,18 @@ html, body {
 }
 
 .lightbox img {
- max-width: 92vw; max-height: 86vh; border-radius: var(--radius-sm); 
+ max-width: 92vw; max-height: 86vh; border-radius: var(--radius-sm);
+ transform-origin: center;
+ will-change: transform;
+}
+
+/* P6：拖动平移时光标示意（>1 倍才有「图比窗口大」的语义） */
+.lightbox.dragging {
+ cursor: grabbing;
+}
+
+.lightbox.dragging img {
+ cursor: grabbing;
 }
 
 .lightbox-hint {

@@ -845,3 +845,13 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **修法**：重画 open 图标的两个 path——背板从右上起笔、左缘走**垂直直线**（`M14.5 8V5.5a1…H2.5a1…v9a1…h2.2`，底部只留短 stub 与前盖衔接），前盖是纯平行四边形（`M4.9 14.5 6.7 7.5h7.7l-1.8 7Z`）整个落在背板内侧；两条斜边不再有任何交叉。closed 图标不动。
 
 **验收**：96px 放大对照（左右侧线条干净、与 closed 图标的 tab 造型一致）+ 侧栏 14px 实测截图；探针 453/454；控制台零报错；vitest 23/23。
+
+### P6 灯箱滚轮缩放（`web/components` 分支）
+
+**需求**（plan.md P6）：点击图片进入的预览界面，增加滚轮缩放。
+
+**实现**：state.ts 灯箱加 `scale/tx/ty`（`translate(tx,ty) scale(s)`、origin 中心）——`zoomLightbox` 以鼠标点为锚（`t' = t + p·(s−s')`，p 为光标相对图像中心偏移），钳制 0.15–8 倍；App.vue 灯箱根接 wheel/pointer/dblclick——按住拖动平移（Pointer Capture），**拖动过吞掉 click**（原「点击关闭」只在微动 <3px 的纯点击上生效，行为向后兼容），双击复位。Esc 关闭沿用。
+
+**CDP 实测**（合成事件 + 数值断言）：锚定误差 <1.5px；35 步放大停在 scale(8)、40 步缩小停在 scale(0.15)；拖拽 translate 精确跟手；拖后不关、微动点击照关、双击复位全过。探针 453/454；控制台零报错；vitest 23/23。
+
+**排错插曲**：断言用的正则没容忍浏览器对 style.transform 的归一化空格（`translate(xpx, ypx)`），前两轮「假失败」——CDP 调试脚本加了 exceptionDetails 输出后定位。

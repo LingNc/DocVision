@@ -260,20 +260,49 @@ export function switchView(view: string): void {
   state.view = view === 'trajectory' ? 'trajectory' : 'chat'
 }
 
-/* ---------- 灯箱（旧页 openLightbox/closeLightbox 同名；点击接线在缩略图块） ---------- */
+/* ---------- 灯箱（旧页 openLightbox/closeLightbox 同名；点击接线在缩略图块） ----------
+ * P6：滚轮缩放（围绕鼠标点）+ 按住拖动平移 + 双击复位。transform 走
+ * translate(tx,ty) scale(s)、origin 默认中心；锚点换算见 zoomLightbox。 */
 
-export const lightbox = reactive({ open: false, url: '', ref: '' })
+export const lightbox = reactive({ open: false, url: '', ref: '', scale: 1, tx: 0, ty: 0 })
 
 export function openLightbox(url: string, ref: string): void {
   lightbox.open = true
   lightbox.url = url
   lightbox.ref = ref
+  lightbox.scale = 1
+  lightbox.tx = 0
+  lightbox.ty = 0
 }
 
 export function closeLightbox(): void {
   lightbox.open = false
   lightbox.url = ''
   lightbox.ref = ''
+  lightbox.scale = 1
+  lightbox.tx = 0
+  lightbox.ty = 0
+}
+
+/** 滚轮缩放：factor<1 放大。锚点 = 鼠标相对图像中心的偏移 p，
+ *  要求缩放后同一内容点仍停在鼠标下：t' = t + p·(s − s')。 */
+export function zoomLightbox(factor: number, mx: number, my: number, rect: DOMRect): void {
+  const s0 = lightbox.scale
+  const s1 = Math.min(8, Math.max(0.15, s0 * factor))
+  if (s1 === s0) return
+  const cx = rect.left + rect.width / 2
+  const cy = rect.top + rect.height / 2
+  const px = (mx - cx - lightbox.tx) / s0
+  const py = (my - cy - lightbox.ty) / s0
+  lightbox.tx += px * (s0 - s1)
+  lightbox.ty += py * (s0 - s1)
+  lightbox.scale = s1
+}
+
+export function resetLightbox(): void {
+  lightbox.scale = 1
+  lightbox.tx = 0
+  lightbox.ty = 0
 }
 
 /* ---------- 数据层接口 ---------- */

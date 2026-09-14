@@ -6871,16 +6871,39 @@
   function switchView(view) {
     state.view = view === "trajectory" ? "trajectory" : "chat";
   }
-  const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "" });
+  const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "", scale: 1, tx: 0, ty: 0 });
   function openLightbox(url, ref2) {
     lightbox.open = true;
     lightbox.url = url;
     lightbox.ref = ref2;
+    lightbox.scale = 1;
+    lightbox.tx = 0;
+    lightbox.ty = 0;
   }
   function closeLightbox() {
     lightbox.open = false;
     lightbox.url = "";
     lightbox.ref = "";
+    lightbox.scale = 1;
+    lightbox.tx = 0;
+    lightbox.ty = 0;
+  }
+  function zoomLightbox(factor, mx, my, rect) {
+    const s0 = lightbox.scale;
+    const s1 = Math.min(8, Math.max(0.15, s0 * factor));
+    if (s1 === s0) return;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const px = (mx - cx - lightbox.tx) / s0;
+    const py = (my - cy - lightbox.ty) / s0;
+    lightbox.tx += px * (s0 - s1);
+    lightbox.ty += py * (s0 - s1);
+    lightbox.scale = s1;
+  }
+  function resetLightbox() {
+    lightbox.scale = 1;
+    lightbox.tx = 0;
+    lightbox.ty = 0;
   }
   function setBannerText(text) {
     state.pullError = text;
@@ -11205,6 +11228,38 @@
         if (ev.key === "[") toggleSidebar();
         if (ev.key === "]") toggleDetails();
       }
+      let lbDrag = null;
+      function onLbWheel(ev) {
+        ev.preventDefault();
+        const target = ev.currentTarget.querySelector("#lightbox-img");
+        if (!target) return;
+        zoomLightbox(ev.deltaY > 0 ? 0.9 : 1 / 0.9, ev.clientX, ev.clientY, target.getBoundingClientRect());
+      }
+      function onLbPointerdown(ev) {
+        if (ev.button !== 0) return;
+        lbDrag = { x: ev.clientX, y: ev.clientY, tx: lightbox.tx, ty: lightbox.ty, moved: false };
+        ev.currentTarget.setPointerCapture(ev.pointerId);
+      }
+      function onLbPointermove(ev) {
+        if (!lbDrag) return;
+        const dx = ev.clientX - lbDrag.x;
+        const dy = ev.clientY - lbDrag.y;
+        if (!lbDrag.moved && Math.hypot(dx, dy) > 3) lbDrag.moved = true;
+        if (lbDrag.moved) {
+          lightbox.tx = lbDrag.tx + dx;
+          lightbox.ty = lbDrag.ty + dy;
+        }
+      }
+      function onLbPointerup() {
+        lbDrag = null;
+      }
+      function onLbClick() {
+        if (!lbDrag) closeLightbox();
+      }
+      function onLbDblclick(ev) {
+        ev.preventDefault();
+        resetLightbox();
+      }
       let ro = null;
       let pollTimer = 0;
       onMounted(() => {
@@ -11294,7 +11349,7 @@
                         title: "在侧栏里定位到这个项目",
                         onClick: _cache[3] || (_cache[3] = ($event) => unref(revealProject)(curProject.value))
                       }, toDisplayString(curProject.value), 1),
-                      _cache[12] || (_cache[12] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
+                      _cache[11] || (_cache[11] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
                       createVNode(_sfc_main$j, {
                         text: sessionTitle.value,
                         tag: "span",
@@ -11418,7 +11473,7 @@
             }, null, 44, _hoisted_25),
             createBaseVNode("aside", _hoisted_26, [
               createBaseVNode("div", _hoisted_27, [
-                _cache[13] || (_cache[13] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
+                _cache[12] || (_cache[12] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
                 createBaseVNode("button", {
                   id: "details-close",
                   class: "icon-btn",
@@ -11434,20 +11489,26 @@
           createBaseVNode("div", {
             id: "lightbox",
             class: normalizeClass(["lightbox", { hidden: !unref(lightbox).open }]),
-            onClick: _cache[11] || (_cache[11] = //@ts-ignore
-            (...args) => unref(closeLightbox) && unref(closeLightbox)(...args))
+            onClick: onLbClick,
+            onWheel: onLbWheel,
+            onPointerdown: onLbPointerdown,
+            onPointermove: onLbPointermove,
+            onPointerup: onLbPointerup,
+            onPointercancel: onLbPointerup,
+            onDblclick: onLbDblclick
           }, [
             createBaseVNode("img", {
               id: "lightbox-img",
               src: unref(lightbox).open ? unref(lightbox).url : void 0,
-              alt: unref(lightbox).ref
-            }, null, 8, _hoisted_28),
-            _cache[14] || (_cache[14] = createBaseVNode("div", { class: "lightbox-hint" }, "点击空白处或按 Esc 关闭", -1))
-          ], 2)
+              alt: unref(lightbox).ref,
+              style: normalizeStyle({ transform: "translate(" + unref(lightbox).tx + "px," + unref(lightbox).ty + "px) scale(" + unref(lightbox).scale + ")" })
+            }, null, 12, _hoisted_28),
+            _cache[13] || (_cache[13] = createBaseVNode("div", { class: "lightbox-hint" }, "滚轮缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭", -1))
+          ], 34)
         ], 64);
       };
     }
   });
-  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-ea444b58"]]);
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-92016ca1"]]);
   createApp(App).mount("#app");
 })();
