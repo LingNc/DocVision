@@ -6,6 +6,7 @@
 ## [Unreleased]
 
 ### Added
+- **预览缩略图收小一档（T18）**：view 类调用下的缩略图 token `--preview-h` 108→72px、`--preview-w` 240→160px，折叠态的对话流不再被横图撑出大段空档（仅 v2，旧页冻结）。
 - **CSS Vue 化（P11，`web/components` 分支）**：整卷 `viewer.css` 按归属拆分——全局基础样式进 `web/src/styles/base.css`（token/深色主题/通用小件/跨组件共享词汇/灯箱），组件私有样式进各 SFC 的 `<style scoped>`；旧页资产 `assets/viewer.css` 冻结（旧页继续可用），`sync-css`/`check-css` 字节守卫退役。
 - **侧栏仿 DSH 改版（P8，`web/components` 分支）**：项目行文件夹图标（展开=打开态着色）、层级递进缩进（阶段 24px / 会话 40px）、阶段状态三态徽标（运行中=绿 / ✓ 完成 / 未开始=暗 / 其他=琥珀）、**会话方块视图**（侧栏头部 ▦ 切换：20px 方块网格、逐图会话带书内序号、活跃实心 / 运行中绿圈、悬浮看完整说明，几十个会话的矢量图/章节转换阶段好扫了）；900px 自动折轨道时文件夹图标保留。修复「旧版单项目」徽标误挂到每个新布局书组（两层根因：Go 分组把 `书/work/sessions/…` 落点当旧式 + 前端组级 OR 一笔旧式转录就标整组——徽标现只挂输出根即工作区的根组）；平均首字/平均耗时亚秒值取整（不再出现 `991.4705…ms`）。新旧两页同步修复。
 - **前端模型层类型化 + 纯函数单测（P5-R2 质量批，`web/components` 分支）**：转录行与会话的 TS 类型（`legacy/types.ts` 的 `Line`/`ToolCall`/`ImageAttr`/`Session`），stream/timeline/trajectory 的 42 处 `any` 清零、`estOf()` 收紧成非可选数字面；vitest 单测（`npm test`）钉住图片归属算法全部分支（精确匹配/工具名/FIFO/失败调用不占队/任务不许抢/未识别兜底）与消息流条目化（meta/usage 不进流、回执并卡、配对失败独立行、预览条挂轮末 view 卡），23/23 通过；行号锚点改走**非响应式注册表**（不再把 DOM 节点包进 reactive）。
