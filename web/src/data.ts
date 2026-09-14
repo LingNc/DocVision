@@ -5,6 +5,7 @@
  */
 import { state, POLL_MS, setBannerText } from './state'
 import { findSession, normalizeLines, indexCallEstimates, groupKey, setCollapsed } from './legacy/sidebar'
+import type { PartialInfo } from './legacy/types'
 
 let pullSeq = 0
 
@@ -98,6 +99,9 @@ export function pullSession(reset: boolean): Promise<void> {
       }
       state.nextFrom = payload.nextFrom
       state.curSize = payload.size
+      // P7：流式快照跟随当前会话——消息完整落盘后服务端不再返回 partial，
+      // 这里同步置空，快照卡片自然消失。
+      state.partial = (payload.partial as PartialInfo | undefined) || null
       if (reset) {
         state.lines = normalizeLines(payload.lines)
         indexCallEstimates(state.lines)
@@ -117,6 +121,7 @@ export function selectSession(id: string): void {
   const s = findSession(id)
   state.current = s
   state.lines = []
+  state.partial = null
   state.callEst = {}
   state.nextFrom = 0
   state.curSize = -1

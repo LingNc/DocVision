@@ -52,6 +52,8 @@ onBeforeUnmount(() => {
 })
 
 const tail = computed(() => callTail(props.item))
+/* P7：没有回执且会话 live 才算「运行中」；会话死了的悬空调用不转圈。 */
+const live = computed(() => !!state.current?.live)
 const prettyArgs = computed(() => prettyJSON(props.item.argsText) || '(无参数)')
 </script>
 
@@ -59,6 +61,7 @@ const prettyArgs = computed(() => prettyJSON(props.item.argsText) || '(无参数
   <Disclosure
     ref="details"
     :cls="'disclosure-tool fam-' + item.fam + (item.lastStatus ? ' status-' + item.lastStatus : '')"
+    :running="!item.lastStatus && live"
     :name="item.name"
     :summary="item.brief"
     :tail="tail"

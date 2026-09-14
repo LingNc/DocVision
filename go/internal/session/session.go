@@ -1,6 +1,7 @@
 package session
 
 import (
+	"time"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -185,6 +186,8 @@ func (s *Session) appendTranscript(msg ChatMessage) {
 	if err := s.transcript.Append(msg); err != nil && s.logger != nil {
 		s.logger.Debug(s.tid, "[session:"+s.label+"] transcript 写入失败:", err)
 	}
+	// P7: the full message is on disk now — the streaming snapshot is stale.
+	s.transcript.ClearPartial()
 }
 
 // recordUsage appends one t="usage" line for the request that just finished,
@@ -526,6 +529,13 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		if s.logger.DebugEnabled() {
 			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api request (%s messages=%d est_tokens=%d tools=%v)",
 				s.label, toolRounds+1, s.client.RequestSummary(req), len(s.messages), s.EstimatedTokens(), useTools))
+		}
+		// P7: progressive snapshots land in <transcript>.partial while this
+		// request streams; every transcript append clears it again.
+		if s.transcript != nil {
+			req.StreamHook = func(phase, text string) {
+				_ = s.transcript.WritePartial(PartialRecord{Phase: phase, Text: text, Ts: time.Now().UnixMilli()})
+			}
 		}
 		resp, sentinel, status := s.client.CallWithRetry(req)
 		s.APIRequests++

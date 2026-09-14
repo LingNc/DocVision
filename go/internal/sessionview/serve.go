@@ -308,6 +308,18 @@ type sessionResponse struct {
 	Lines    []Line `json:"lines"`
 	NextFrom int    `json:"nextFrom"`
 	Bytes    int64  `json:"size"`
+	// Partial (P7) is the live streaming snapshot of the message currently
+	// being generated: <transcript>.partial, written by the running session
+	// and removed the moment the full message lands. nil when absent.
+	Partial *PartialInfo `json:"partial,omitempty"`
+}
+
+// PartialInfo mirrors session.PartialRecord (kept local so the preview
+// package does not import the session package).
+type PartialInfo struct {
+	Phase string `json:"phase"`
+	Text  string `json:"text"`
+	Ts    int64  `json:"ts"`
 }
 
 func (v *viewerServer) serveSession(w http.ResponseWriter, r *http.Request) {
@@ -343,7 +355,14 @@ func (v *viewerServer) serveSession(w http.ResponseWriter, r *http.Request) {
 	if lines == nil {
 		lines = []Line{}
 	}
-	writeJSON(w, sessionResponse{ID: id, Lines: lines, NextFrom: next, Bytes: found.Bytes})
+	var partial *PartialInfo
+	if data, err := os.ReadFile(found.Path + ".partial"); err == nil {
+		var p PartialInfo
+		if json.Unmarshal(data, &p) == nil && p.Text != "" {
+			partial = &p
+		}
+	}
+	writeJSON(w, sessionResponse{ID: id, Lines: lines, NextFrom: next, Bytes: found.Bytes, Partial: partial})
 }
 
 // serveFile serves /media/... and /file/... straight from the scan root. The

@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { type Line, type ImageAttr, type Session } from './legacy/types'
+import { type Line, type ImageAttr, type Session, type PartialInfo } from './legacy/types'
 
 /*
  * 全局状态：字段名与旧页 viewer.js 的 state 一一对应，后续按块移植的
@@ -130,6 +130,9 @@ export const state = reactive({
   // P9：轨迹页选中的行（transcript 行号）。选中后右侧详情栏顶部显示该步的
   // 完整输入/输出/图片；再点同一行取消；跳对话按钮仍走 jumpToLine。
   trajSelected: null as string | null,
+  // P7：当前会话的流式快照（<转录>.partial；消息完整落盘即消失）。
+  // 轮询时只在「当前会话正在 live」时读取，切会话/非 live 清空。
+  partial: null as PartialInfo | null,
 })
 
 /* ---------- 布局求解（computeColumns 逐行照旧页：纯函数、无迟滞） ---------- */

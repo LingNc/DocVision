@@ -8,6 +8,8 @@ defineProps<{
   summary?: string
   tail?: string
   open?: boolean
+  /** P7：调用还没回执且会话 live——摘要行显示「运行中」spinner。 */
+  running?: boolean
 }>()
 </script>
 
@@ -20,6 +22,9 @@ defineProps<{
         <span class="line-sep" />
         <span class="line-summary" :title="summary">{{ summary }}</span>
       </template>
+      <span v-if="running" class="line-running" title="这个调用还没有收到回执，正在执行">
+        <span class="running-dot" />运行中
+      </span>
       <span v-if="tail" class="line-tail">{{ tail }}</span>
     </summary>
     <slot />

@@ -668,6 +668,55 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
  text-decoration: underline;
 }
 
+.partial-tail[data-v-37ec04a0] {
+  border: .5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: var(--hover);
+}
+.pt-head[data-v-37ec04a0] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.pt-label[data-v-37ec04a0] {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ok);
+}
+.pt-age[data-v-37ec04a0] {
+  font-size: 11px;
+  color: var(--caption);
+}
+.pt-spinner[data-v-37ec04a0] {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--ok);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: pt-spin-37ec04a0 .8s linear infinite;
+}
+@keyframes pt-spin-37ec04a0 {
+to { transform: rotate(360deg);
+}
+}
+.pt-text[data-v-37ec04a0] {
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pt-caret[data-v-37ec04a0] {
+  color: var(--ok);
+  animation: pt-blink-37ec04a0 1s steps(2) infinite;
+}
+@keyframes pt-blink-37ec04a0 {
+50% { opacity: 0;
+}
+}
+
 /* 助手消息 = 左对齐、全宽、无气泡无边框 */
 .msg-assistant[data-v-0ef2183e] {
  align-items: stretch;
@@ -762,29 +811,29 @@ details[open] > .proj-row .row-folder .folder.open[data-v-16630052] {
 }
 
 /* ============================ 对话（DSH 的消息形态） ============================ */
-.timeline[data-v-7459a444] {
+.timeline[data-v-bf27149a] {
  flex: 1; overflow-y: auto; padding: 16px 24px 80px;
 }
-.stream[data-v-7459a444] {
+.stream[data-v-bf27149a] {
  max-width: var(--content-w); margin: 0 auto; display: flex; flex-direction: column;
 }
 
 /* 回合边界**只有一种画法**：8px + 0.5px 虚线 + 8px（--divider-gap）。虚线只出现在
    section 之间（也就是回合之间），同一条消息里的工具行之间永远只是 --row-gap。 */
-.stream > .msg + .msg[data-v-7459a444] {
+.stream > .msg + .msg[data-v-bf27149a] {
   margin-top: var(--divider-gap);
   padding-top: var(--divider-gap);
   border-top: .5px dashed var(--border);
 }
-.empty[data-v-7459a444] {
+.empty[data-v-bf27149a] {
  padding: 56px 24px; color: var(--dim); text-align: center;
 }
 
 /* 原 160 号规则里的 msg-other 半边（msg-system 半边在 SystemMsg.vue） */
-.msg-other .body-text[data-v-7459a444] { color: var(--muted); font-size: 13px;
+.msg-other .body-text[data-v-bf27149a] { color: var(--muted); font-size: 13px;
 }
 @media (max-width: 1023px) {
-.timeline[data-v-7459a444] { padding: 12px 12px 60px;
+.timeline[data-v-bf27149a] { padding: 12px 12px 60px;
 }
 }
 

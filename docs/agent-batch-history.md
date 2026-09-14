@@ -867,3 +867,23 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **探针同步**：P9 是**有意的新旧行为分叉**（行内多了 ↳ 按钮、行标题换了文案、点行不再跳走）——probe5 的 num 归一化（去 ↳ + trim，浏览器把 style 序列化留尾随空格）、title 文案映射回旧语义；probe8 的跳转改点 `.traj-gochat`（旧页没有该按钮则退回点行本身，两页语义都验「跳回对话」）。全套回到 453/454（唯一已知差异仍 = T12 取整）。
 
 **验收**：截图目检（选中高亮 + 右栏步骤块置顶 + 会话/指标跟随）；CDP 断言（选中/取消/关闭/跳转保持选中）；探针 453/454；控制台零报错；vitest 23/23。
+
+### P7 实时流式状态（`web/components` 分支，Go + web 两侧）
+
+**需求**（plan.md P7）：对话实时进行时能看到流式状态——输出一个字一个字的出、工具调用也是。
+
+**为什么走磁盘 sidecar 而不是内存广播**：转录是整行落盘的 append-only JSONL（`Append(msg)` 在消息完整后才写）；且 `docvision sessions` 预览服务可能是**独立进程**，看不到跑会话进程的内存。所以选 `<转录>.partial` sidecar：会话进程流式期间节流覆写、完整消息落盘即删，任何进程都能读。
+
+**Go 侧**：
+1. `chatstream` 已有 `OnContent`/`OnReasoning` delta 回调；`client.readStream` 在两个回调里累积 `strings.Builder`，**~150ms 节流**调 `req.StreamHook(phase, tail)`（尾部截断 16KB）。hook 挂在 `ChatRequest` 上（`json:"-"`）——**每请求作用域**，并发会话共享一个 client 也不会互相覆盖（ 比 client 字段安全）。
+2. `TranscriptWriter.WritePartial`（tmp + rename 原子覆写）/ `ClearPartial`；`appendTranscript` 每次追加后清 sidecar（完整消息已落盘、快照过期），`Close` 也清（会话中途消失不能留过期快照）。session.Run 里给每个请求接上 hook。
+3. `sessionview` 的 `/api/session` 响应加 `partial` 字段（读 `<path>.partial`，空文本视为无）。
+4. 单测 `TestPartialSidecar`：覆写无 tmp 残留、清干净、Close 清。
+
+**Web 侧**：
+- `PartialTail.vue`：live 会话消息流末尾的实时卡片——「思考中/输出中」+ spinner + 新鲜度 + 累积文本尾部（>4KB 截头）+ 闪烁光标 `▍`；等宽安静样式、**不做 Markdown 解析**（半截 Markdown 渲染会闪）。data.ts 轮询增量接口时同步 `state.partial`（服务端不返回即置空，卡片自然消失；selectSession 清）。
+- 工具运行 spinner：`Disclosure` 加 `running` prop（摘要行绿色「运行中」），ToolCard 传 `!item.lastStatus && live`——没回执且会话 live 才转圈；死会话的悬空调用不转圈。
+
+**验证**：workspace 内 fixture（真数据盘只读，模拟 live 会话：mtime 60s 窗口内 + 手写 .partial）端到端——API 返回 partial ✓、UI「输出中/思考中」卡片 ✓、删 sidecar 后卡片消失 ✓、call_2/call_3（无回执）转圈而 call_1（有回执）不转 ✓；截图目检。探针 453/454（唯一已知差异仍=T12）；控制台零报错；vitest 23/23；go test 全绿。
+
+**排错插曲**：① `pkill -f 'dv3 sessions.*8990'` 匹配到**自己这条命令行**把刚起的服务器杀了（exit 143）——换端口号重起；② python 批量改 props 的静默 no-op（reconstruct 字符串不匹配也不报错）导致 `running?: boolean` 没加进去，第一轮 fixture 测试全 false——用 `edit` 工具按精确文本修。真数据盘 `/home/share` 对本 shell 是只读挂载，测试 fixture 放 workspace。

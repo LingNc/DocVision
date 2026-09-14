@@ -142,3 +142,53 @@ func TestTranscriptMetaLine(t *testing.T) {
 		t.Fatalf("新增 meta 行后回放仍应只有 1 条消息，实际 %d", len(msgs))
 	}
 }
+
+// P7: partial sidecar —— WritePartial 原子覆写、ClearPartial 清干净、
+// Close 顺手清（会话中途消失也不能留下过期快照）。
+func TestPartialSidecar(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	w, err := NewTranscript(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WritePartial(PartialRecord{Phase: "reasoning", Text: "思考中…", Ts: 123}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path + ".partial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p PartialRecord
+	if err := json.Unmarshal(data, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Phase != "reasoning" || p.Text != "思考中…" {
+		t.Fatalf("unexpected partial: %+v", p)
+	}
+	// 覆写：tmp 文件不能残留
+	if err := w.WritePartial(PartialRecord{Phase: "content", Text: "输出中", Ts: 456}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path + ".partial.tmp"); !os.IsNotExist(err) {
+		t.Fatalf("tmp file left behind: %v", err)
+	}
+	// Append 一条消息后 sidecar 应被清（真实流程经 appendTranscript，这里直接验证语义）
+	if err := w.Append(ChatMessage{Role: "assistant", Content: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	w.ClearPartial()
+	if _, err := os.Stat(path + ".partial"); !os.IsNotExist(err) {
+		t.Fatalf("partial not cleared: %v", err)
+	}
+	// Close 也要清：再写一个然后 Close
+	if err := w.WritePartial(PartialRecord{Phase: "content", Text: "x", Ts: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path + ".partial"); !os.IsNotExist(err) {
+		t.Fatalf("partial survived Close: %v", err)
+	}
+}

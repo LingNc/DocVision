@@ -98,6 +98,13 @@ export interface ImageCallEntry {
 }
 
 /** 侧栏/详情层的会话条目（列表接口下发；字段多、读取得散，先收公共面）。 */
+/** P7：/api/session 的 partial 快照（<转录>.partial sidecar 的内容）。 */
+export interface PartialInfo {
+  phase: 'content' | 'reasoning'
+  text: string
+  ts: number
+}
+
 export interface Session {
   id: string
   /** 相对路径第一段 = 项目名（projectOf 的结果，接口直接给）。 */

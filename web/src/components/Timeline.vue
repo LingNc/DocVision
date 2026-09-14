@@ -7,6 +7,7 @@ import { state, LONG_TEXT_LINES, clearAnchors } from '../state'
 import { estOf } from '../legacy/sidebar'
 import { streamModel } from '../legacy/stream'
 import StreamSummary from './StreamSummary.vue'
+import PartialTail from './PartialTail.vue'
 import AssistantMsg from './AssistantMsg.vue'
 import SystemMsg from './SystemMsg.vue'
 import ImageTurn from './ImageTurn.vue'
@@ -60,7 +61,9 @@ watch(
             :preview-lines="LONG_TEXT_LINES" :tokens="estOf(item.line).text" />
         </section>
       </template>
-      <div v-if="!model.items.length" class="empty">{{ emptyText }}</div>
+      <div v-if="!model.items.length && !state.partial" class="empty">{{ emptyText }}</div>
+      <!-- P7：流式尾——当前会话正在生成的那条消息的实时快照 -->
+      <PartialTail v-if="state.current && state.current.live && state.partial" :partial="state.partial" />
     </div>
   </div>
 </template>

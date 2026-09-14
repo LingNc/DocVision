@@ -166,6 +166,11 @@ type ChatRequest struct {
 	// conversation always reaches the SAME upstream channel, which is what
 	// keeps the vendor's prefix cache (per upstream key) warm across turns.
 	User string `json:"user,omitempty"`
+	// StreamHook (P7) receives throttled progressive snapshots of the
+	// streaming message ("content" / "reasoning" + accumulated text, tail
+	// capped). Per-request field: concurrent sessions sharing one client
+	// must not overwrite each other's hook.
+	StreamHook func(phase, text string) `json:"-"`
 }
 
 // ChatMessage is one message in a conversation. Content is either a
@@ -301,7 +306,7 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 		if err2 != nil {
 			return nil, cause
 		}
-		return c.decode(resp2, false, time.Now())
+		return c.decode(resp2, false, time.Now(), nil)
 	}
 
 	start := time.Now()
@@ -321,7 +326,7 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 		}
 		return nil, httpErr
 	}
-	return c.decode(resp, payload.Stream, start)
+	return c.decode(resp, payload.Stream, start, req.StreamHook)
 }
 
 // buildBody marshals the effective payload and merges the configured
@@ -415,10 +420,10 @@ func (c *Client) post(raw []byte, stream bool) (*http.Response, error) {
 }
 
 // decode turns an HTTP response into a ChatResponse (streamed or not).
-func (c *Client) decode(resp *http.Response, stream bool, start time.Time) (*ChatResponse, error) {
+func (c *Client) decode(resp *http.Response, stream bool, start time.Time, hook func(phase, text string)) (*ChatResponse, error) {
 	defer resp.Body.Close()
 	if stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return c.readStream(resp, start)
+		return c.readStream(resp, start, hook)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -467,7 +472,7 @@ func shouldFallbackToNonStream(err error) bool {
 
 // readStream collects an SSE response into a ChatResponse, logging
 // throttled progress in debug mode so a long thinking phase is visible.
-func (c *Client) readStream(resp *http.Response, start time.Time) (*ChatResponse, error) {
+func (c *Client) readStream(resp *http.Response, start time.Time, hook func(phase, text string)) (*ChatResponse, error) {
 	var lastLog time.Time
 	var contentChars, reasoningChars int
 	var ttft time.Duration
@@ -488,17 +493,40 @@ func (c *Client) readStream(resp *http.Response, start time.Time) (*ChatResponse
 		c.log.Trace(0, fmt.Sprintf("[stream] %s: elapsed=%s content=%d chars reasoning=%d chars",
 			c.model, now.Sub(start).Round(time.Second), contentChars, reasoningChars))
 	}
+	// P7: progressive partial snapshots. Throttled to ~150ms and tail-capped
+	// so the sidecar write stays cheap even on fast, long streams.
+	var contentBuf, reasoningBuf strings.Builder
+	var lastHook time.Time
+	emit := func(phase string, buf *strings.Builder) {
+		if hook == nil || buf.Len() == 0 {
+			return
+		}
+		now := time.Now()
+		if now.Sub(lastHook) < 150*time.Millisecond {
+			return
+		}
+		lastHook = now
+		text := buf.String()
+		if len(text) > 16*1024 {
+			text = text[len(text)-16*1024:]
+		}
+		hook(phase, text)
+	}
 	res, err := chatstream.Collect(resp.Body, chatstream.Options{
 		IdleTimeout: c.streamIdle,
 		OnContent: func(s string) {
 			markFirst()
 			contentChars += len(s)
 			progress()
+			contentBuf.WriteString(s)
+			emit("content", &contentBuf)
 		},
 		OnReasoning: func(s string) {
 			markFirst()
 			reasoningChars += len(s)
 			progress()
+			reasoningBuf.WriteString(s)
+			emit("reasoning", &reasoningBuf)
 		},
 	})
 	if err != nil {
