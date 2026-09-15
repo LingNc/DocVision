@@ -48,13 +48,6 @@ func (m ImageMeasure) String() string {
 		m.WidthMM, m.HeightMM, part, m.PixelsW, m.PixelsH, m.DPI, m.AspectStr)
 }
 
-// redrawSizeHint is the drawing-session-only tail appended after the size
-// facts (T17): "Redraw it at that size — do NOT scale it up to the page."
-// only means something where the model actually redraws the figure; style /
-// convert / checker sessions just look at images, and the sentence was
-// pure noise there.
-const redrawSizeHint = " Redraw it at that size — do NOT scale it up to the page."
-
 // AspectOnly is the fallback hint when the MinerU parse is unavailable
 // (the ratio is still known from the bitmap itself).
 func (m ImageMeasure) AspectOnly() string {

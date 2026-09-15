@@ -59,12 +59,12 @@ func writeV2PageHTML(w http.ResponseWriter, page string) {
 }
 
 // serveV2 routes the v2 page on both mounts: "/" (the primary, old viewer
-// retired) and the legacy "/v2" alias. Asset requests are answered from
+// retired). Asset requests are answered from
 // assets/dist by basename so both prefixes work.
 func (v *viewerServer) serveV2(w http.ResponseWriter, r *http.Request, p string) {
 	base := path.Base(p)
 	switch {
-	case p == "/" || p == "/index.html" || p == "/v2" || p == "/v2/" || p == "/v2/index.html":
+	case p == "/" || p == "/index.html":
 		writeV2PageHTML(w, v2Page)
 	case base == "viewer.js" || base == "viewer.css":
 		v.serveV2Asset(w, base)

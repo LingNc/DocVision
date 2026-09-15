@@ -291,8 +291,9 @@ func usageGenMS(durationMS, ttftMS int64) int64 {
 // LiveWindow is how recent a transcript's mtime must be for the viewer to
 // show it as "being written right now". The writer Syncs after every message,
 // so a running session keeps its mtime fresh; 60s is long enough to survive a
-// slow model turn and short enough to mean "this session is probably alive".
-const LiveWindow = 60 * time.Second
+// slow model turn (thinking + rate-limit backoff routinely exceed a minute
+// without any append) and still short enough to mean "probably alive".
+const LiveWindow = 3 * time.Minute
 
 // SessionInfo describes one transcript file found under the scan root.
 type SessionInfo struct {
@@ -796,7 +797,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			Bytes:         info.Size(),
 			ModTime:       info.ModTime(),
 			Live:          now.Sub(info.ModTime()) < LiveWindow,
-			EndState:      endStateOf(stat),
+			EndState:      liveEndState(endStateOf(stat), now.Sub(info.ModTime()) < LiveWindow),
 			ChapterOrder:  chapterOrderOf(d.Name()),
 		})
 		return nil
@@ -837,6 +838,18 @@ func (s *scanner) fileStat(p string, size int64, modTime time.Time) transcriptSt
 	s.counts[p] = countEntry{size: size, modTime: modTime, stat: stat}
 	s.mu.Unlock()
 	return stat
+}
+
+// liveEndState 压掉运行中会话的 error 终态：SawTool && !SawSubmit 本意是
+// "干过活但没交——错误终止/半途而废"，但正在等模型回复（思考/限流退避）的
+// 会话同样是"干过活还没交"。live 的绿脉冲原本盖住视觉，60s 窗口一掉红色就
+// 露出来、下一笔写入又变绿——"运行中/失败来回跳"即是它。live（含窗口内
+// 余晖）期间 error 不算数；done 是真提交，保留。
+func liveEndState(state string, live bool) string {
+	if live && state == "error" {
+		return ""
+	}
+	return state
 }
 
 // endStateOf folds the receipt signals into the block-view completion state.

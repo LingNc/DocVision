@@ -232,9 +232,9 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p := r.URL.Path
 	switch {
-	// v2 是唯一界面（"/"），"/v2" 只是旧书签的别名；"/viewer.{css,js}" 是
+	// v2 是唯一界面（"/"）；"/viewer.{css,js}" 是
 	// Vue 构建产物。旧页三件套已随退役删除。
-	case p == "/" || p == "/index.html" || p == "/v2" || strings.HasPrefix(p, "/v2/"):
+	case p == "/" || p == "/index.html":
 		v.serveV2(w, r, p)
 	case p == "/viewer.css" || p == "/viewer.js":
 		v.serveV2Asset(w, path.Base(p))

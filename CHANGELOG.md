@@ -34,6 +34,8 @@
 
 ### Fixed
 
+- **修复：运行中会话的"运行中/失败"来回跳**——`SawTool && !SawSubmit` 的 error 终态本意是"干过活但没交"，但正在等模型回复（思考/限流退避）的会话同样是这个形态；live 绿脉冲一盖看不出，60 秒 live 窗口一过（模型一轮很容易超）红色就露出来、下一笔写入又变绿。现在 live 窗口放宽到 3 分钟、live 期间 error 终态一律不报（done 是真提交保留）。
+
 - **预览页轮询定时器去重**：`bootData()` 与 App.vue 各自注册了一份 2s 轮询 `setInterval`（v2 上位时补静态守卫时遗留），live 页实际每秒打 4 次 `/api/index` 全树扫描——运行刚启动（samba 冷缓存、扫描慢）时请求堆积，页面迟迟拿不到首份数据，表现为侧栏瞬态空白（刷新恢复）。现在轮询只在 App.vue 注册一份（页面隐藏跳过、卸载可清理）；另给 Vue 挂全局 `errorHandler`，今后任何组件渲染异常都会在控制台带组件链打 `[app]` 前缀日志，不再静默白屏。
 
 ## [v1.5.0-beta.6] - 2026-09-12
@@ -47,6 +49,9 @@
 - **`config.example.yaml` 重写成"讲编辑方法"的示例**：`estimate` 三种方法（`pixels`/`fixed`/`none`）各自的含义与参数、`models.<条目>.image_tokens` 的逐键优先级链（条目键 → `estimate` 键 → 代码默认）、`extends` 的三种真实用法（同一模型不同参数、跨模型共享 endpoint/key、角色复用同一条目）与深合并语义/报错行为、以及 `price` 的继承规则，都逐条带短注释写清；`go/internal/config/default.yaml`（`docvision init` 模板）保持精简可跑但新键全部出现，两份模板的键面由 `TestConfigTemplateKeyParity` 钉住一致（值可不同）。
 
 ### Changed
+
+- **`/v2` 别名彻底删除**：迁移期保留的旧书签别名不再响应（404），`/` 是唯一入口。
+- **view_image 回执只报测量事实**：T17 把「Redraw it at that size — do NOT scale it up to the page.」收进作图会话后，经查 figure.system.md 的硬要求（保持原印刷尺寸/比例、不得放大到整页）与首轮 ORIGINAL_SIZE 已完整覆盖该指令，每次看图回执再复读一遍纯属冗余（一次会话最多 30 次看图 ≈ 450 tokens 噪声）——回执只保留 ORIGINAL FIGURE SIZE 测量数据，指令句删除。
 
 - **配置文件有问题启动即停（T26）**：`docvision sessions` 是唯一还带"配置读失败继续跑"降级的命令（打一行提示后用默认目录/端口/折算规则照常服务）——现在与其它命令对齐，配置加载出错（解析/校验错误、`--config` 指名的文件不存在）直接报错终止；"无配置"场景由启动期自动创建默认配置兜住。帮助文本与文档中"无配置则当前目录"的降级描述一并移除。
 

@@ -1019,3 +1019,13 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **排查**（未能在复现环境重现：用户自己的 8849 服务器 + 同一棵树 + 同一份二进制 dist，headless Chrome 下 120s soak/选中会话/改视口/localStorage 边缘键面全部正常，侧栏 840 节点稳定）：代码走查发现 **`bootData()`（data.ts，df4b862 起）与 App.vue onMounted（6e73833 补静态守卫时加的 `if (!state.staticMode)` 分支）各自注册了一份 2s 轮询 `setInterval`**——live 页实际每秒 4 次 `/api/index` 全树扫描。运行刚启动时 samba 冷缓存、扫描慢（用户控制台的 Slow-network intervention 佐证），请求堆积、首份数据迟迟不到，叠加扩展注入干扰，构成最贴合"最开始启动时有、之后没有、刷新恢复"的解释。
 
 **修复**：① 轮询只在 App.vue 注册一份（pollTimer 可清理、页面隐藏跳过），data.ts 的 bootData 只保留首拉与首选中；② Vue 挂全局 `app.config.errorHandler`——今后组件渲染异常会在控制台打 `[app] Vue 错误（info）组件链: …`，消灭"静默白屏无法归因"。验收：web 构建后 dv5 重编译，8998 真机 60s+ 侧栏稳定、控制台零报错；vitest 24/24；sessionview 14.5s 全绿。
+
+### 三项跟进：view_image 冗余句删除 + /v2 别名删除 + 运行中"失败"闪烁修复（用户三问）
+
+**问 1（view_image 额外内容）**：T17 把「Redraw it at that size — do NOT scale it up to the page.」收进作图会话后，用户问是否冗余。核查：`latex_figure.system.md` 硬要求（保持原印刷尺寸/比例、不得放大到整页）+ 首轮 user 提示的 `ORIGINAL_SIZE` 测量行已完整覆盖该指令——**回执每次看图复读一遍确实冗余**（一次作图会话最多 30 次看图 ≈ 450 tokens 噪声），且违背"提示词只减不增"。**删除**该句与 `redrawSizeHint` 常量，回执只保留 ORIGINAL FIGURE SIZE 测量事实（mm/px/dpi）。
+
+**问 2（/v2 没删干净）**：确认 6e73833 留了 `/v2` 旧书签别名。按用户要求彻底删除（serve.go/v2.go 路由收窄到 `/` 与 `/index.html`），实测 `/v2`、`/v2/` → 404，`/`、`/index.html` → 200。AGENTS.md 与 commands.md 同步。
+
+**问 3（会话"运行中/失败"来回跳）**：两层根因——① `LiveWindow = 60s`（mtime 距今 60s 内才算 live），模型一轮思考+限流退避很容易超 60s 不写转录，绿点掉成暗；② 更要命的是 `SawTool && !SawSubmit → endState=error`（"干过活但没交"），**运行中的会话天然就是这个形态**——live 绿脉冲一盖看不出，窗口一过红色就露出来、下一笔写入又变绿，正是用户看到的"显示红色好像失败了过一会就好"。修复：LiveWindow 60s→3min（覆盖慢轮次）；live（含窗口内余晖）期间 error 终态一律压掉（`liveEndState`），done 是真提交保留。sessionview/latex 全绿。
+
+**注**：途中 `gofmt -w .` 把无关文件的 doc-comment 规整出格式噪声（Go 新版行为），已还原——只提交本批真实改动。

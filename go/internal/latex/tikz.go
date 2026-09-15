@@ -73,10 +73,10 @@ func RunTikZSession(
 		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg),
 			SoftMax: cfgImageMax, WarnRatio: cfgWarnRatio,
 			Measure: func() string {
-				if m := measureHint(env.CurrentImgAbs); m != "" {
-					return m + redrawSizeHint // T17：只在作图会话要求"按原尺寸重画"
-				}
-				return ""
+				// 只回测量事实（mm/px/dpi）；"按原尺寸重画"的指令由
+				// figure.system.md（要求 21-23）与首轮 ORIGINAL_SIZE 说一次就够，
+				// 每次看图都复读一遍是纯冗余（30 次看图 ≈ 450 tokens 噪声）。
+				return measureHint(env.CurrentImgAbs)
 			}},
 	}, log, tid, "tikz")
 
