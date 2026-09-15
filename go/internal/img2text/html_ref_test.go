@@ -15,6 +15,8 @@ func TestImageRefReBothDialects(t *testing.T) {
 		{"![alt](images/def.jpeg)", "images/def.jpeg"},
 		{"before ![](images/ghi.png) after", "images/ghi.png"},
 		{"<img src='images/00138580021bbb45516586596c4ff9215146968448a9fd6175dfcf7f9cc29bce.jpg'/>", "images/00138580021bbb45516586596c4ff9215146968448a9fd6175dfcf7f9cc29bce.jpg"},
+		// T24：双引号 + 自闭合（logs/finally 历史遗留里出现的形态）也要匹配。
+		{"<img src=\"images/2e2b.jpg\"/>", "images/2e2b.jpg"},
 		{"<img width='10' src='images/xyz.jpg'>", "images/xyz.jpg"},
 		{"<img src='images/foo.jpg' alt='bar'>", "images/foo.jpg"},
 		{"<img SRC='images/upper.JPG' />", "images/upper.JPG"},

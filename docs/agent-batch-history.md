@@ -949,3 +949,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **实现**（config/merge.go，加载期 YAML 节点层）：`extendsRef` 升级为 `extendsRefs`（标量=单基座不变；序列=多基座，逐项校验非空条目名）；解析循环的账本改 `map[string][]string`，一个条目在**所有基座都解析完**后才合并；折叠语义 = `acc = p1`，逐个 `applyExtends(copy(pᵢ), acc)`（后面的基座赢），最后 `applyExtends(entry, acc)`（条目自己的键最高）——折叠在 **shallowMapCopy** 上进行（applyExtends 会重写 child.Content，直接拿父条目当 child 会把文档里的基座改掉）。循环检测 `extendsChain` 升级多边版（优先沿未解析的父链走）。knownkeys 的继承归因同步多父。合并语义不变：仍是**条目键级**（嵌套 map 整块替换，TestExtendsDeepMergeSemantics 钉着）。
 
 **测试**：新增列表顺序覆盖（base_url/model/api_timeout/request_body 整块替换）、链式 + 列表混用（`extends: [mid, base]`，base 在后覆盖 mid）、空列表报错、列表含不存在条目报错。config 全套 + 全仓 go test 15 包全绿。config_version 不需要 bump（extends 键已在 v10，只是值形态扩展）。
+
+### T24 审计：img2text `<img src>` 处理与 finally 遗留（master，同批）
+
+**需求**：img2text 的 `<img src>` 引用是否还有处理不到位的；`logs/finally/` 里是否有遗留。
+
+**审计**：`logs/finally/` 扫出 6 个文件、43 个 `<img src="images/<书>/<hash>.jpg"/>` 未替换引用——全部出自 **2026-08-11** 的产物；HTML `<img>` 支持（markdown + HTML 双方言识别、organize 替换）是 **2026-08-29**（4955747）才加的。现行正则对遗留的全部形态（单/双引号、`/>` 自闭合、带其它属性）实测匹配；现行产物（latex_project 各书 out）扫描 **0 遗留**。结论：**现行代码无缺口**，旧文件重跑对应书即可消化。守护测试补双引号自闭合用例。
