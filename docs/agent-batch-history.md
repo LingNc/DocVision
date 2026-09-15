@@ -933,3 +933,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **病灶**：runner.go writer 的 `__INVALID_RESPONSE__` 分支（`StatusRetry` 汇聚点——`[IMG_MERMAID_INVALID]`/`[IMG_INVALID_FORMAT]` 都走这）`warnCount++` + `LogWarning`；而每个 goroutine 已经先打过 `✗ FAILED`（error 级）——两级日志一个 error 一个 warning，analyze/CSV 按 warning 归类，口径打架。
 
 **修法**：该分支改 `errorCount++` + `LogError`；**跳过不落进度、下轮重试的语义不变**（不嵌垃圾进最终 md 是对的）。docs/commands.md 的 img2text 状态表同步改「错误（跳过重试）」。验证：img2text 测试全绿。
+
+### T11：档位1 紧凑控制台进度行消失（master，与 T14/T15 同批）
+
+**用户发现**：终端 CLI 下 classify 等阶段一行进度都没有（"之前还有"）。
+
+**根因**：`cd1dec9`（实时进度改每人一行块）在 `paintLiveLocked`/`Finalize` 里加了 `if l.quiet { return }`——而 RunBook 紧凑模式（非 `--verbose`）正是 `SetQuiet(true)`。于是档位1 全程的 LiveRow（classify/process/style/convert/checker 进度行）与阶段终态行全被静音；quiet 的本意是压**明细日志行**（会话轮次/工具调用），不该压进度块本身。档位2 img2text 不受影响（进度行是它自己 `fmt.Fprint` 打的，不走 LiveRow）。
+
+**修法**：去掉两处 quiet 早退——quiet 下 LiveRow 照常渲染、Finalize 终态行照打（滚动缓冲留得住阶段结果）；临时验证测试（管道捕获 stdout）确认 quiet 下进度行与终态行都上屏，随后删除（行为由回归测试兜底）。

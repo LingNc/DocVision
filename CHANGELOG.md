@@ -6,6 +6,7 @@
 ## [Unreleased]
 
 ### Added
+- **修复：档位1 紧凑控制台进度行消失（T11）**——quiet 只压明细日志行，不再抑制实时进度块（classify/process/style/convert 的 LiveRow 与阶段终态行重新上屏）。
 - **修复：img2text 校验失败被降级为警告（T15）**——mermaid/格式校验未通过的项（`Skipped invalid response … will retry next run`）从警告改记**错误**（日志 error 级 + 进度行 errors 计数），跳过与下轮重试的语义不变；警告只留给可自动纠正的事。
 - **修复：档位1 convert 阶段偶发进程崩溃（T14）**——多章并发首次解析模型时 `clientFor` 无锁并发写 clients/models，触发 `fatal error: concurrent map writes`；改为互斥锁收口（clientFor/modelOf/hasModel），`-race` 并发测试钉住。
 - **缩略图开关（P13）**：页签行右端新增「缩略图」开关（Markdown 旁）——控制看图调用下的缩略图预览行显隐；默认开、选择记在 `localStorage`（`showThumbs`），重开页面保持。

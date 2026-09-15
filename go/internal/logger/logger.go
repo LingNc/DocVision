@@ -338,10 +338,8 @@ func (r *LiveRow) Finalize(text string) {
 			break
 		}
 	}
-	if l.quiet {
-		l.liveDrawn = 0
-		return
-	}
+	// T11：quiet（紧凑控制台）只压**明细日志行**，不压进度块——compact 模式
+	// 的意义就是"只看阶段进度"，Finalize 的终态行照打（滚动缓冲里留得住）。
 	l.eraseLiveLocked()
 	if text != "" && (l.tty || !already) {
 		fmt.Fprintln(os.Stdout, text)
@@ -404,9 +402,9 @@ func (l *Logger) eraseLiveLocked() {
 // previous block occupied; for a pipe it appends one line per CHANGE (so a
 // captured log keeps a chronological record without每秒重画).
 func (l *Logger) paintLiveLocked() {
-	if l.quiet {
-		return
-	}
+	// T11：quiet 不再抑制进度块——RunBook 的紧凑模式靠 LiveRow 显示
+	// classify/convert/style 进度；quiet 只负责压明细日志行。
+
 	if !l.tty {
 		for _, e := range l.liveRows {
 			if e.text == "" || e.text == e.printed {
