@@ -173,20 +173,8 @@ function closeTrajStep() {
 
 <style scoped>
 /* ============================ 详情栏 ============================ */
-
-.details-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 8px 0 14px;
-  border-bottom: .5px solid var(--border);
-}
-
-.details-title {
- flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .2px; 
-}
+/* .details-head/.details-title 在 App.vue 渲染——规则放 App 的 scoped 块
+ * （P11 陷阱①：scoped 样式跟组件走，元素在别的组件里就匹配不上）。 */
 
 .details-body {
  flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px 40px; 

@@ -147,9 +147,12 @@ function onKeydown(ev: KeyboardEvent) {
   if (ev.key === ']') toggleDetails()
 }
 
-/* P6 灯箱交互：滚轮缩放（围绕鼠标点）、按住拖动平移、双击复位；
- * 拖动过就吞掉 click（原「点击关闭」只在未拖动的纯点击上生效）。 */
+/* P6 灯箱交互：滚轮缩放（围绕鼠标点）、按住拖动平移、双击复位。
+ * 「点击关闭」与「双击复位」天然冲突（双击 = 两次 click）——单击延迟 260ms
+ * 再关，第二击落在窗口内就按双击复位处理；拖动过的 pointer 序列吞掉 click。 */
 let lbDrag: { x: number; y: number; tx: number; ty: number; moved: boolean } | null = null
+let lbClickTimer: ReturnType<typeof setTimeout> | null = null
+let lbSuppressClick = false
 
 function onLbWheel(ev: WheelEvent) {
   ev.preventDefault()
@@ -176,15 +179,22 @@ function onLbPointermove(ev: PointerEvent) {
 }
 
 function onLbPointerup() {
+  lbSuppressClick = lbDrag?.moved === true
   lbDrag = null
 }
 
 function onLbClick() {
-  if (!lbDrag) closeLightbox()
+  if (lbSuppressClick) {
+    lbSuppressClick = false
+    return
+  }
+  if (lbClickTimer) return // 双击的第二次 click——交给 dblclick 处理
+  lbClickTimer = setTimeout(() => { lbClickTimer = null; closeLightbox() }, 260)
 }
 
 function onLbDblclick(ev: MouseEvent) {
   ev.preventDefault()
+  if (lbClickTimer) { clearTimeout(lbClickTimer); lbClickTimer = null }
   resetLightbox()
 }
 
@@ -382,6 +392,21 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+/* 详情栏头部（元素在本组件渲染；样式曾在 DetailsPanel 的 scoped 里丢匹配） */
+.details-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  border-bottom: .5px solid var(--border);
+}
+
+.details-title {
+ flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .2px;
 }
 
 .details-col {

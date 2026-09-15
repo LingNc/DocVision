@@ -11238,7 +11238,7 @@
       };
     }
   });
-  const DetailsPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-fbc1d95d"]]);
+  const DetailsPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-176fd06c"]]);
   const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
   const _hoisted_2 = ["data-dragging"];
   const _hoisted_3 = {
@@ -11393,6 +11393,8 @@
         if (ev.key === "]") toggleDetails();
       }
       let lbDrag = null;
+      let lbClickTimer = null;
+      let lbSuppressClick = false;
       function onLbWheel(ev) {
         ev.preventDefault();
         const target = ev.currentTarget.querySelector("#lightbox-img");
@@ -11415,13 +11417,26 @@
         }
       }
       function onLbPointerup() {
+        lbSuppressClick = (lbDrag == null ? void 0 : lbDrag.moved) === true;
         lbDrag = null;
       }
       function onLbClick() {
-        if (!lbDrag) closeLightbox();
+        if (lbSuppressClick) {
+          lbSuppressClick = false;
+          return;
+        }
+        if (lbClickTimer) return;
+        lbClickTimer = setTimeout(() => {
+          lbClickTimer = null;
+          closeLightbox();
+        }, 260);
       }
       function onLbDblclick(ev) {
         ev.preventDefault();
+        if (lbClickTimer) {
+          clearTimeout(lbClickTimer);
+          lbClickTimer = null;
+        }
         resetLightbox();
       }
       let ro = null;
@@ -11673,6 +11688,6 @@
       };
     }
   });
-  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-92016ca1"]]);
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-c4cb02de"]]);
   createApp(App).mount("#app");
 })();
