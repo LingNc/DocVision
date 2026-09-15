@@ -6757,6 +6757,8 @@
     theme: "light",
     view: "chat",
     markdown: true,
+    showThumbs: true,
+    // P13：工具卡下的缩略图预览行显隐（页签行「缩略图」开关，记忆 showThumbs）
     unit: "token",
     sidebar: SIDEBAR_DEFAULT,
     details: 0,
@@ -6848,6 +6850,7 @@
     state.collapsed = storeJSON("collapsed", {});
     state.overflow = storeJSON("overflow", {});
     state.markdown = storeGet("markdown") !== "0";
+    state.showThumbs = storeGet("showThumbs") !== "0";
     state.unit = storeGet("unit") === "char" ? "char" : "token";
     const rawSidebar = storeGet("layout.sidebar");
     if (rawSidebar !== null) {
@@ -8554,7 +8557,7 @@
   const _hoisted_26$2 = ["title"];
   const _hoisted_27$2 = { class: "row-time" };
   const _hoisted_28$2 = { class: "row-actions" };
-  const _hoisted_29$1 = ["onClick"];
+  const _hoisted_29$2 = ["onClick"];
   const _hoisted_30$1 = ["onClick"];
   const _hoisted_31$1 = {
     key: 0,
@@ -8851,7 +8854,7 @@
                                     type: "button",
                                     title: "打开详情面板（元信息 / 指标）",
                                     onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                  }, "ⓘ", 8, _hoisted_29$1)
+                                  }, "ⓘ", 8, _hoisted_29$2)
                                 ])
                               ], 10, _hoisted_23$3);
                             }), 128)),
@@ -10014,7 +10017,7 @@
               key: c.key
             }, [
               createVNode(_sfc_main$9, { item: c }, null, 8, ["item"]),
-              previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_4$4, [
+              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_4$4, [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(previewThumbs(c), (t) => {
                   return openBlock(), createElementBlock("img", {
                     key: t.ref,
@@ -10034,7 +10037,7 @@
       };
     }
   });
-  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-0ef2183e"]]);
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-d357b38b"]]);
   const _hoisted_1$6 = { class: "sys-line" };
   const _hoisted_2$6 = { class: "line-summary" };
   const _hoisted_3$5 = {
@@ -10951,7 +10954,7 @@
     class: "detail-block"
   };
   const _hoisted_28$1 = ["open"];
-  const _hoisted_29 = { class: "line-summary" };
+  const _hoisted_29$1 = { class: "line-summary" };
   const _hoisted_30 = { class: "schema-body" };
   const _hoisted_31 = { class: "prompt-scroll" };
   const _hoisted_32 = { class: "row-actions" };
@@ -11165,7 +11168,7 @@
                   ], -1)),
                   _cache[4] || (_cache[4] = createBaseVNode("span", { class: "line-name" }, "系统提示词（本次运行快照，不参与回放）", -1)),
                   _cache[5] || (_cache[5] = createBaseVNode("span", { class: "line-sep" }, null, -1)),
-                  createBaseVNode("span", _hoisted_29, toDisplayString(meta.value.bits), 1)
+                  createBaseVNode("span", _hoisted_29$1, toDisplayString(meta.value.bits), 1)
                 ]),
                 createBaseVNode("div", _hoisted_30, [
                   createBaseVNode("div", _hoisted_31, [
@@ -11294,15 +11297,16 @@
   const _hoisted_21 = ["aria-pressed", "title"];
   const _hoisted_22 = ["aria-pressed", "title"];
   const _hoisted_23 = ["aria-pressed", "title"];
-  const _hoisted_24 = { class: "view-area" };
-  const _hoisted_25 = ["data-dragging", "data-hidden"];
-  const _hoisted_26 = {
+  const _hoisted_24 = ["aria-pressed", "title"];
+  const _hoisted_25 = { class: "view-area" };
+  const _hoisted_26 = ["data-dragging", "data-hidden"];
+  const _hoisted_27 = {
     id: "details-col",
     class: "details-col",
     "aria-label": "详情"
   };
-  const _hoisted_27 = { class: "details-head" };
-  const _hoisted_28 = ["src", "alt"];
+  const _hoisted_28 = { class: "details-head" };
+  const _hoisted_29 = ["src", "alt"];
   const _sfc_main = /* @__PURE__ */ defineComponent({
     __name: "App",
     setup(__props) {
@@ -11349,6 +11353,10 @@
       }
       function onClickOnlyTools() {
         state.onlyTools = !state.onlyTools;
+      }
+      function onClickThumbs() {
+        state.showThumbs = !state.showThumbs;
+        storeSet("showThumbs", state.showThumbs ? "1" : "0");
       }
       function onClickMarkdown() {
         state.markdown = !state.markdown;
@@ -11607,13 +11615,21 @@
                       onClick: onClickMarkdown
                     }, "Markdown", 8, _hoisted_21),
                     createBaseVNode("button", {
+                      id: "thumb-toggle",
+                      class: "tab-toggle",
+                      type: "button",
+                      "aria-pressed": unref(state).showThumbs ? "true" : "false",
+                      title: unref(state).showThumbs ? "显示看图调用下的缩略图预览行，点击隐藏" : "已隐藏缩略图预览行，点击显示",
+                      onClick: onClickThumbs
+                    }, "缩略图", 8, _hoisted_22),
+                    createBaseVNode("button", {
                       id: "unit-toggle",
                       class: "tab-toggle",
                       type: "button",
                       "aria-pressed": unref(state).unit === "char" ? "false" : "true",
                       title: unref(state).unit === "char" ? "计数按字符数显示（精确值），点击改为 token" : "计数按 token 显示（本地估算，带 ≈），点击改为字符",
                       onClick: onClickUnit
-                    }, toDisplayString(unref(state).unit === "char" ? "字符" : "token"), 9, _hoisted_22),
+                    }, toDisplayString(unref(state).unit === "char" ? "字符" : "token"), 9, _hoisted_23),
                     createBaseVNode("button", {
                       id: "theme-toggle",
                       class: "tab-toggle",
@@ -11622,7 +11638,7 @@
                       title: unref(state).theme === "dark" ? "切换为白天模式（浅色，默认）" : "切换为夜间模式（深色）",
                       onClick: _cache[7] || (_cache[7] = //@ts-ignore
                       (...args) => unref(toggleTheme) && unref(toggleTheme)(...args))
-                    }, toDisplayString(unref(state).theme === "dark" ? "☀️ 浅色" : "🌙 深色"), 9, _hoisted_23)
+                    }, toDisplayString(unref(state).theme === "dark" ? "☀️ 浅色" : "🌙 深色"), 9, _hoisted_24)
                   ])
                 ])
               ]),
@@ -11630,7 +11646,7 @@
                 id: "banner",
                 class: normalizeClass(["banner", { hidden: !bannerText.value }])
               }, toDisplayString(bannerText.value), 3),
-              createBaseVNode("div", _hoisted_24, [
+              createBaseVNode("div", _hoisted_25, [
                 createVNode(Timeline),
                 createVNode(Trajectory)
               ])
@@ -11650,9 +11666,9 @@
               onPointerup: onDragEnd,
               onPointercancel: onDragEnd,
               onDblclick: _cache[9] || (_cache[9] = ($event) => onDragDblClick("details"))
-            }, null, 44, _hoisted_25),
-            createBaseVNode("aside", _hoisted_26, [
-              createBaseVNode("div", _hoisted_27, [
+            }, null, 44, _hoisted_26),
+            createBaseVNode("aside", _hoisted_27, [
+              createBaseVNode("div", _hoisted_28, [
                 _cache[12] || (_cache[12] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
                 createBaseVNode("button", {
                   id: "details-close",
@@ -11682,13 +11698,13 @@
               src: unref(lightbox).open ? unref(lightbox).url : void 0,
               alt: unref(lightbox).ref,
               style: normalizeStyle({ transform: "translate(" + unref(lightbox).tx + "px," + unref(lightbox).ty + "px) scale(" + unref(lightbox).scale + ")" })
-            }, null, 12, _hoisted_28),
+            }, null, 12, _hoisted_29),
             _cache[13] || (_cache[13] = createBaseVNode("div", { class: "lightbox-hint" }, "滚轮缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭", -1))
           ], 34)
         ], 64);
       };
     }
   });
-  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-c4cb02de"]]);
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-6861655c"]]);
   createApp(App).mount("#app");
 })();

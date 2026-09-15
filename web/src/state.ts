@@ -116,6 +116,7 @@ export const state = reactive({
   theme: 'light',
   view: 'chat',
   markdown: true,
+  showThumbs: true, // P13：工具卡下的缩略图预览行显隐（页签行「缩略图」开关，记忆 showThumbs）
   unit: 'token',
   sidebar: SIDEBAR_DEFAULT,
   details: 0,
@@ -226,6 +227,7 @@ export function loadState(): void {
   state.collapsed = storeJSON('collapsed', {}) as Record<string, boolean>
   state.overflow = storeJSON('overflow', {}) as Record<string, boolean>
   state.markdown = storeGet('markdown') !== '0'
+  state.showThumbs = storeGet('showThumbs') !== '0'
   state.unit = storeGet('unit') === 'char' ? 'char' : 'token'
   // Number(null) === 0：必须先判"存没存过"，否则首次访问会把侧栏读成折叠轨道。
   const rawSidebar = storeGet('layout.sidebar')

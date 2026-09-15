@@ -94,6 +94,11 @@ function onClickOnlyTools() {
   state.onlyTools = !state.onlyTools // Timeline.vue 的 watch 负责重渲
 }
 
+function onClickThumbs() {
+  state.showThumbs = !state.showThumbs
+  storeSet('showThumbs', state.showThumbs ? '1' : '0') // AssistantMsg 的 v-if 响应式跟随
+}
+
 function onClickMarkdown() {
   state.markdown = !state.markdown
   storeSet('markdown', state.markdown ? '1' : '0') // Timeline.vue 的 watch 负责重渲
@@ -302,6 +307,7 @@ onBeforeUnmount(() => {
             <button id="collapse-thinking" class="tab-toggle" type="button" :aria-pressed="state.forceCollapse ? 'true' : 'false'" title="把所有消息的思考过程折叠起来" @click="onClickCollapseThinking">折叠全部思考</button>
             <button id="only-tools" class="tab-toggle" type="button" :aria-pressed="state.onlyTools ? 'true' : 'false'" title="只显示工具调用与工具结果" @click="onClickOnlyTools">仅看工具调用</button>
             <button id="md-toggle" class="tab-toggle" type="button" :aria-pressed="state.markdown ? 'true' : 'false'" :title="state.markdown ? '消息正文按 Markdown 渲染（标题 / 列表 / 代码块 / 表格），点击回到纯文本' : '消息正文按纯文本显示（pre-wrap），点击改用 Markdown 渲染'" @click="onClickMarkdown">Markdown</button>
+            <button id="thumb-toggle" class="tab-toggle" type="button" :aria-pressed="state.showThumbs ? 'true' : 'false'" :title="state.showThumbs ? '显示看图调用下的缩略图预览行，点击隐藏' : '已隐藏缩略图预览行，点击显示'" @click="onClickThumbs">缩略图</button>
             <button id="unit-toggle" class="tab-toggle" type="button" :aria-pressed="state.unit === 'char' ? 'false' : 'true'" :title="state.unit === 'char' ? '计数按字符数显示（精确值），点击改为 token' : '计数按 token 显示（本地估算，带 ≈），点击改为字符'" @click="onClickUnit">{{ state.unit === 'char' ? '字符' : 'token' }}</button>
             <button id="theme-toggle" class="tab-toggle" type="button" :aria-pressed="state.theme === 'dark' ? 'true' : 'false'" :title="state.theme === 'dark' ? '切换为白天模式（浅色，默认）' : '切换为夜间模式（深色）'" @click="toggleTheme">{{ state.theme === 'dark' ? '☀️ 浅色' : '🌙 深色' }}</button>
           </div>

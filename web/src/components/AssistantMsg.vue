@@ -89,7 +89,7 @@ const thinkTail = computed(() =>
       :preview-lines="LONG_TEXT_LINES" :tokens="estOf(line).text" />
     <template v-for="c in item.calls" :key="c.key">
       <ToolCard :item="c" />
-      <div v-if="previewThumbs(c).length" class="preview-strip">
+      <div v-if="state.showThumbs && previewThumbs(c).length" class="preview-strip">
         <img v-for="t in previewThumbs(c)" :key="t.ref" class="preview-thumb"
           :src="t.url" :alt="t.ref" loading="lazy" :title="t.ref" @click="show(t.ref, t.url)">
       </div>

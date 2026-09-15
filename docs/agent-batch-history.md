@@ -909,3 +909,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 用户验收截图：be53f9a 矢量图会话里 image_context 的**结果行内容正常**（`image 4 of 4 in this document: …`）却挂着红 error。定位：`classifyResult` **全文**扫 `/REJECTED|文件不存在|失败|error|not found|traceback/i`，而 image_context 的回执会**引用图片周围的书中正文**——正文里「在第一次失败的条件下」命中「失败」。全仓扫描定量：24 条全文命中的工具回执里 **11 条是这类误报**（首行干净、错误词来自引用正文），其余 13 条是 COMPILE FAILED / TOOL ERROR 等真错误（它们的「Error:」在第二行，靠正文命中才被判出来）。
 
 **修法**：错误判定只看**回执首行**（`s.split('\n',1)[0]`），并把 `COMPILE FAILED` 前缀显式加进标记词（否则编译失败会漏报——vitest 新用例先抓到了这一点）。影响面：streamModel 工具卡、trajectory 结果行、ResultMsg、details 步骤块共用 classifyResult，一处修全修。旧页冻结不动（仍有误报，属预期分叉）。be53f9a 会话 CDP 实测：image_context 结果行 `data-error` 消失、状态恢复「—」；探针 453/454（style_session 探针路径没踩到误报行，无需归一化）、vitest 24/24、控制台零报错。
+
+### P13 缩略图开关（`web/components`，web 迁移线收尾项）
+
+**需求**（plan.md P13）：UI 增加一个功能，选择是否展示缩略图。
+
+**实现**（三行改动，照 Markdown 开关的既有模式）：① `state.showThumbs`（默认 true）+ `loadState` 读 `storeGet('showThumbs') !== '0'`；② App.vue 页签行右端（Markdown 旁）加「缩略图」`tab-toggle`（id `thumb-toggle`、aria-pressed、悬浮说明），点击翻状态并 `storeSet`；③ AssistantMsg 的 preview-strip `v-if` 加 `state.showThumbs &&`——纯响应式跟随，无需手动重渲链。v2-only（旧页冻结不加）。
+
+**验证**：CDP——默认 23 条 preview-strip → 关 0 条（aria-pressed=false、`dsh.sessionview.showThumbs=0` 落盘）→ 开 23 条恢复；**重载后仍 0 条**（loadState 读回记忆），再点恢复 23。截图目检开关位置与高亮态。探针 453/454（默认开，与旧页基准无分叉）、vitest 24/24、控制台零报错。这是 web 迁移线最后一个 plan 项——完成后 `web/components` 非快进合回 master（用户批准）。
