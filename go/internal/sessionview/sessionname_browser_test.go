@@ -163,23 +163,8 @@ const sessionNameProbeJS = `
       push('detailBlocks', blocksIn(dd));
       push('chatCodeStyle', styleOf('.md-body .md-inline-code'));
       push('nameCodeStyle', styleOf('.row-title .md-inline-code'));
-      // 轮询路径：静态模式下"重新扫描"走的也是 refreshIndex -> refreshList，
-      // 签名没变时只该走 patchList()。给行与渲染出来的 <strong> 打上记号，刷两次
-      // 再回来看：记号还在（节点没被重建）才算没破坏列表签名守卫。
-      marked.setAttribute('data-keep', '1');
-      var keepStrong = mt.querySelector('strong');
-      if (keepStrong) { keepStrong.setAttribute('data-keep', '1'); }
-      // 先把根目录那行改掉：刷新真的跑了才会被 refreshIndex 写回根路径，
-      // 否则下面两条"没被重建"的断言就是空转。
-      document.getElementById('root-path').textContent = 'probe';
-      document.getElementById('refresh').click();
-      document.getElementById('refresh').click();
-      push('refreshRan', document.getElementById('root-path').textContent === 'probe' ? 'no' : 'yes');
-      push('keepRow', (marked.getAttribute('data-keep') || 'gone') + '/' +
-        (document.body.contains(marked) && document.body.contains(mt) ? 'attached' : 'detached'));
-      push('keepStrong', (keepStrong ? (keepStrong.getAttribute('data-keep') || 'gone') : 'no-strong') + '/' +
-        (keepStrong && document.body.contains(keepStrong) ? 'attached' : 'detached'));
-      push('keepText', mt.textContent);
+      // （旧页的"轮询不重建"签名守卫已随旧页退役：v2 的侧栏是 Vue keyed
+      // 列表，节点复用由框架保证，静态快照也没有轮询/手动刷新可点。）
       var o = document.createElement('div');
       o.id = 'name-probe';
       o.textContent = out.join(' ;; ');
@@ -192,23 +177,34 @@ const sessionNameSearchProbeJS = `
       var out = [];
       var input = document.getElementById('search');
       var push = function (k, v) { out.push(k + '=' + String(v).replace(/\s+/g, ' ').trim()); };
-      var probe = function (k, q) {
-        input.value = q;
+      // v2（Vue）的过滤重渲走异步调度：逐词输入后让出事件循环再数行数。
+      var queries = [
+        ['q1', '**粗体**'],
+        ['q2', '` + tickPh + `code` + tickPh + `'],
+        ['q3', '粗体'],
+        ['q4', '斜体'],
+        ['q5', '这个词不存在']
+      ];
+      var step = function (i) {
+        if (i >= queries.length) {
+          input.value = '';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          var o = document.createElement('div');
+          o.id = 'name-probe';
+          o.textContent = out.join(' ;; ');
+          document.body.appendChild(o);
+          return;
+        }
+        var q = queries[i];
+        input.value = q[1];
         input.dispatchEvent(new Event('input', { bubbles: true }));
-        push(k, document.querySelectorAll('.session-row').length +
-          (document.querySelector('.session-row[data-id$="@MARK@"]') ? '/命中' : '/未命中'));
+        setTimeout(function () {
+          push(q[0], document.querySelectorAll('.session-row').length +
+            (document.querySelector('.session-row[data-id$="@MARK@"]') ? '/命中' : '/未命中'));
+          step(i + 1);
+        }, 60);
       };
-      probe('q1', '**粗体**');
-      probe('q2', '` + tickPh + `code` + tickPh + `');
-      probe('q3', '粗体');
-      probe('q4', '斜体');
-      probe('q5', '这个词不存在');
-      input.value = '';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      var o = document.createElement('div');
-      o.id = 'name-probe';
-      o.textContent = out.join(' ;; ');
-      document.body.appendChild(o);
+      step(0);
 `
 
 // tickPh 是装载探针脚本时的反引号占位符。
@@ -374,20 +370,6 @@ func TestViewerSessionNameMarkdownInChromium(t *testing.T) {
 		t.Errorf("名字里的 code 样式 = %q，页面其它行内 code = %q（必须同一套 token）", name, chat)
 	}
 
-	// ⑩ 轮询不重建：刷新两次（签名没变 → patchList）后，行与渲染出来的
-	//    <strong> 还是原来那个节点，名字文本也没变。
-	if got := nameProbeValue(t, dom, "refreshRan"); got != "yes" {
-		t.Fatal("重新扫描没有真的跑（下面的断言会空转）")
-	}
-	if got := nameProbeValue(t, dom, "keepRow"); got != "1/attached" {
-		t.Errorf("刷新后侧栏行被重建了（%s）：渲染不能进列表签名/patchList", got)
-	}
-	if got := nameProbeValue(t, dom, "keepStrong"); got != "1/attached" {
-		t.Errorf("刷新后名字里的 <strong> 被重建了（%s）", got)
-	}
-	if got := nameProbeValue(t, dom, "keepText"); got != markedText {
-		t.Errorf("刷新后的名字文本 = %q，期望 %q", got, markedText)
-	}
 }
 
 // TestViewerSessionNameSearchInChromium 钉住"搜索仍按原始文本匹配"：渲染把
@@ -415,68 +397,3 @@ func TestViewerSessionNameSearchInChromium(t *testing.T) {
 // 行内渲染只有一个入口且复用 mdInline、不碰块级解析；三处显示位置共用同一个
 // 落点；渲染既不进列表签名也不进 patchList（轮询不会因此重建侧栏 DOM）；
 // 搜索串仍是原始字段；没有为会话名新造样式。
-func TestViewerSessionNameSourceRules(t *testing.T) {
-	js := readAsset(t, "viewer.js")
-	css := readAsset(t, "viewer.css")
-
-	inline := jsFunc(t, js, "renderInlineMarkdown")
-	if !strings.Contains(inline, "mdInline(frag, text, 0);") {
-		t.Error("行内渲染没有复用既有的 mdInline")
-	}
-	if strings.Contains(inline, "mdInlineLines") || strings.Contains(inline, "renderMarkdown(") {
-		t.Error("行内渲染混进了块级路径（会造出 <br>/<p> 之类的块级元素）")
-	}
-	if !strings.Contains(inline, "document.createDocumentFragment()") {
-		t.Error("行内渲染没有返回 DocumentFragment")
-	}
-	if n := strings.Count(js, "function mdInline("); n != 1 {
-		t.Errorf("行内渲染器有 %d 份实现，期望 1（复用，不写第二套）", n)
-	}
-	if !strings.Contains(jsFunc(t, js, "nameNode"), "node.appendChild(renderInlineMarkdown(name));") {
-		t.Error("会话名的落点没有走行内渲染入口")
-	}
-
-	// 三处显示位置 + 悬浮说明（悬浮说明仍是原始字符串）。
-	for _, want := range []string{
-		"row.appendChild(nameNode('span', 'row-title', sessionTitleOf(s)));",
-		"var name = nameNode('span', 'crumb crumb-current', sessionTitleOf(cur));",
-		"['会话', nameNode('span', 'detail-name', sessionTitleOf(cur)), cur.id, true],",
-		"var tip = [sessionTitleOf(s), s.id];",
-		"row.title = sessionTip(s);",
-		"if (p[1] && p[1].nodeType) {",
-		"dd.appendChild(p[1]);",
-	} {
-		if !strings.Contains(js, want) {
-			t.Errorf("会话名的显示位置/悬浮说明缺 %q", want)
-		}
-	}
-	if !strings.Contains(jsFunc(t, js, "sessionTitleOf"), "return s.title || s.label || s.name;") {
-		t.Error("sessionTitleOf 不再返回先截断定好的那个字符串")
-	}
-
-	// 渲染不进轮询：签名与最小修补都不碰名字节点（名字只在整表重建时造一次）。
-	for _, name := range []string{"listSignature", "patchList"} {
-		body := jsFunc(t, js, name)
-		for _, bad := range []string{"renderInlineMarkdown", "nameNode", "row-title", "sessionTitleOf"} {
-			if strings.Contains(body, bad) {
-				t.Errorf("%s 里出现了 %s：轮询会因此重建侧栏 DOM", name, bad)
-			}
-		}
-	}
-	if !strings.Contains(jsFunc(t, js, "sessionHaystack"), "s.name") {
-		t.Error("搜索串不再是原始字段（渲染不该影响过滤结果）")
-	}
-
-	// 没有为会话名新造样式：名字里的 code 落到共用的 .md-inline-code。
-	for _, bad := range []string{".row-title code", ".crumb code", ".detail-name"} {
-		if strings.Contains(css, bad) {
-			t.Errorf("样式表里出现了 %s：会话名不该另造一套字号/颜色", bad)
-		}
-	}
-	rule := cssRule(t, css, ".md-inline-code")
-	for _, want := range []string{"font-size: var(--code-font);", "line-height: var(--code-line);"} {
-		if !strings.Contains(rule, want) {
-			t.Errorf("行内 code 没有用 --code-font/--code-line 那套 token：缺 %q", want)
-		}
-	}
-}

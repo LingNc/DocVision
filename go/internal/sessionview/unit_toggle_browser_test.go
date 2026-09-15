@@ -60,20 +60,23 @@ const unitProbeJS = `
       push('trajHead', trajHead());
       push('trajCell', trajCell());
       document.getElementById('tab-chat').click();
+      // v2 是 Vue：点击后的重渲走异步调度队列，必须让出事件循环再读第二态
+      //（旧页是同步重画，点完立刻读是可行的——迁移后不行）。
       document.getElementById('unit-toggle').click();
-      push('toggle2', firstText('#unit-toggle'));
-      push('tail2', firstText('.disclosure-tool .line-tail'));
-      push('fold2', firstText('.text-toggle'));
-      push('thinking2', firstText('.disclosure-thinking .line-tail'));
-      push('inTile2', tile('输入 tokens'));
-      document.getElementById('tab-traj').click();
-      push('trajHead2', trajHead());
-      push('trajCell2', trajCell());
-      document.getElementById('tab-chat').click();
-      var out = document.createElement('div');
-      out.id = 'unit-probe';
-      out.textContent = probe.join(' ;; ');
-      document.body.appendChild(out);
+      setTimeout(function () {
+        push('toggle2', firstText('#unit-toggle'));
+        push('tail2', firstText('.disclosure-tool .line-tail'));
+        push('fold2', firstText('.text-toggle'));
+        push('thinking2', firstText('.disclosure-thinking .line-tail'));
+        push('inTile2', tile('输入 tokens'));
+        document.getElementById('tab-traj').click();
+        push('trajHead2', trajHead());
+        push('trajCell2', trajCell());
+        var out = document.createElement('div');
+        out.id = 'unit-probe';
+        out.textContent = probe.join(' ;; ');
+        document.body.appendChild(out);
+      }, 120);
 `
 
 // unitProbe 把一个探针字段从渲染后的 DOM 里取出来。

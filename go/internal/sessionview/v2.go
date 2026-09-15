@@ -1,16 +1,28 @@
 package sessionview
 
 import (
+	"embed"
 	"fmt"
 	"net/http"
 	"path"
+	"strings"
 )
 
-// v2Page is the shell the rebuilt viewer mounts into. It reuses the classic
-// page's theme pre-script (applied before first paint so there is no flash)
-// and loads the embedded Vue bundle from /v2/viewer.{css,js}. The classic
-// viewer keeps / untouched — this is a side route for the migration.
-const v2Page = `<!DOCTYPE html>
+// The web/ build (single-file IIFE + single-file CSS) lands in assets/dist
+// and is embedded on purpose: //go:embed is a compile-time directive, so a
+// missing file fails the build rather than the page.
+//
+//go:embed assets/*
+var assets embed.FS
+
+/*
+ * v2Page 是 Vue 版查看器的页面壳（旧页三件套退役后它就是唯一界面）。
+ * 主题预置脚本在首帧渲染前应用，避免"先白后黑"的闪烁；资源走根路径
+ * /viewer.{css,js}（构建产物从 assets/dist 内嵌伺服）。/v2 子树保留为
+ * 别名：旧书签与 muscle memory 不断，伺服的内容与根路径完全一致。
+ * 静态导出（WriteStaticHTML）复用同一壳，把 CSS/JS/数据全部内联。
+ */
+const v2PageHead = `<!DOCTYPE html>
 <html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
@@ -27,25 +39,35 @@ const v2Page = `<!DOCTYPE html>
   document.documentElement.setAttribute('data-theme', theme);
 })();
 </script>
-<link rel="stylesheet" href="/v2/viewer.css">
+`
+
+// v2Page 是实时模式的完整 HTML：资源外链，数据走 /api/*。
+const v2Page = v2PageHead + `<link rel="stylesheet" href="/viewer.css">
 </head>
 <body>
 <div id="app"></div>
-<script src="/v2/viewer.js"></script>
+<script src="/viewer.js"></script>
 </body>
 </html>
 `
 
-// serveV2 routes the /v2 subtree: the rebuilt viewer's page and its two
-// embedded build files. Everything else under /v2 is a miss.
+// writeV2PageHTML 输出页面（live 或 static 共用响应头逻辑）。
+func writeV2PageHTML(w http.ResponseWriter, page string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	fmt.Fprint(w, page)
+}
+
+// serveV2 routes the v2 page on both mounts: "/" (the primary, old viewer
+// retired) and the legacy "/v2" alias. Asset requests are answered from
+// assets/dist by basename so both prefixes work.
 func (v *viewerServer) serveV2(w http.ResponseWriter, r *http.Request, p string) {
-	switch p {
-	case "/v2", "/v2/", "/v2/index.html":
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		fmt.Fprint(w, v2Page)
-	case "/v2/viewer.js", "/v2/viewer.css":
-		v.serveV2Asset(w, path.Base(p))
+	base := path.Base(p)
+	switch {
+	case p == "/" || p == "/index.html" || p == "/v2" || p == "/v2/" || p == "/v2/index.html":
+		writeV2PageHTML(w, v2Page)
+	case base == "viewer.js" || base == "viewer.css":
+		v.serveV2Asset(w, base)
 	default:
 		http.NotFound(w, r)
 	}
@@ -57,7 +79,7 @@ func (v *viewerServer) serveV2(w http.ResponseWriter, r *http.Request, p string)
 func (v *viewerServer) serveV2Asset(w http.ResponseWriter, name string) {
 	data, err := assets.ReadFile("assets/dist/" + name)
 	if err != nil {
-		http.Error(w, "v2 构建产物缺失：先在 web/ 里执行 npm run build 并提交 dist", http.StatusNotFound)
+		http.Error(w, "构建产物缺失：先在 web/ 里执行 npm run build 并提交 dist", http.StatusNotFound)
 		return
 	}
 	switch path.Ext(name) {
@@ -68,4 +90,28 @@ func (v *viewerServer) serveV2Asset(w http.ResponseWriter, name string) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprint(w, string(data))
+}
+
+// staticPage renders the self-contained snapshot: same shell, inlined CSS/JS
+// and the #dsh-data block the Vue data layer boots from instead of /api.
+func staticPage(data string) (string, error) {
+	css, err := assets.ReadFile("assets/dist/viewer.css")
+	if err != nil {
+		return "", fmt.Errorf("会话预览: 读取构建样式失败: %w", err)
+	}
+	js, err := assets.ReadFile("assets/dist/viewer.js")
+	if err != nil {
+		return "", fmt.Errorf("会话预览: 读取构建脚本失败: %w", err)
+	}
+	var b strings.Builder
+	b.WriteString(v2PageHead)
+	b.WriteString("<style>\n")
+	b.Write(css)
+	b.WriteString("\n</style>\n</head>\n<body>\n<div id=\"app\"></div>\n")
+	b.WriteString(`<script type="application/json" id="dsh-data">`)
+	b.WriteString(data)
+	b.WriteString("</script>\n<script>\n")
+	b.Write(js)
+	b.WriteString("\n</script>\n</body>\n</html>\n")
+	return b.String(), nil
 }

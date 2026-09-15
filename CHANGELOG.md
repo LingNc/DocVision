@@ -6,6 +6,7 @@
 ## [Unreleased]
 
 ### Added
+- **预览页 v2 上位为唯一界面，旧页退役**：`/` 直出 Vue 版查看器，`/v2` 保留为旧书签别名（内容相同）；旧页三件套（`assets/viewer.{html,css,js}`）删除；静态导出切到 v2 壳（内嵌 dist CSS/JS + `#dsh-data`，`file://` 直接可开，顶部横幅标「静态快照 · 生成于 …」，图片按相对路径寻址），web 数据层新增静态模式（不轮询、无 `/api` 请求）。
 - **view_image 回执去冗余（T17）**——「Redraw it at that size — do NOT scale it up to the page.」只在**作图会话**追加（style/convert/checker 等只看图的会话不再收到这句）；预算提醒不再回显 64 位哈希文件名，改说 `view_image on this image`。
 - **img2text mermaid 嵌入统一 `[Image]` 锚（T16）**——mermaid 嵌入前先给一行 `[Image]( alt文本 )`（markdown alt 或 `<img>` alt 属性，缺失时用 `mermaid`），再跟代码块；模型输出未闭合的 ``` 围栏在嵌入前自动补齐。
 - **收集引用图片不再「看起来卡死」（T10）**——缺失图片触发的 mineru 目录索引扫描改为**并行**（12 路，网络盘上 167 目录/7.5 万文件从分钟级显著缩短），扫描期间每 2 秒报「已扫描 N/M 个目录」进度，扫描前先打印缺失数与目录数说明在做什么。

@@ -244,6 +244,9 @@ function sessionDir(id: string): string {
 export function mediaURL(ref: unknown): string {
   const tail = String(ref || '').replace(/^file:\/\//, '')
   const rel = joinPath(sessionDir(state.current ? state.current.id : ''), tail)
+  // 静态快照：图片直接相对导出页寻址（mediaRoot 已含到扫描根的相对路径），
+  // file:// 下没有 /media 路由。
+  if (state.staticMode) return (state.mediaRoot || '') + rel
   return '/media/' + rel
 }
 

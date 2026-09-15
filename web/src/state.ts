@@ -99,6 +99,10 @@ export function clearAnchors(): void { anchors.clear() }
 export const state = reactive({
   root: '',
   generated: '',
+  // 静态快照模式（sessions --export 的单文件产物）：#dsh-data 携带全部会话
+  // 行与 mediaRoot，无轮询、无 /api。mediaRoot 是导出页到扫描根的相对路径。
+  staticMode: false,
+  mediaRoot: ':',
   sessions: [] as Session[],
   current: null as Session | null,
   lines: [] as Line[],

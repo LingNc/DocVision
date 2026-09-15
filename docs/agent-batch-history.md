@@ -975,3 +975,17 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **需求**：① 「Redraw it at that size — do NOT scale it up to the page.」不必要；② 预算提醒里的 64 位哈希文件名太长，说"当前这张图"即可。
 
 **实现**：① `ImageMeasure.String()` 只保留尺寸事实（mm/像素/dpi/页宽占比），redraw 指令抽成 `redrawSizeHint` 常量、只由**作图会话**（tikz.go 的 Measure 闭包）追加——style/convert/checker/终审这些只看图的会话不再被这句误导性指令打扰（它们不重画任何东西）。② `view_image` 预算标签 `view_image on <basename>` → `view_image on this image`（去重键仍是完整路径，每图至多提醒一次的语义不变；`view_pdf` 保留页码——那是有信息量的）。
+
+### 预览页 v2 上位：`/` 即 v2，旧页退役（master）
+
+**用户指令**：web 从 v2 挪到根路径，退役老版本 UI。
+
+**路由**（serve.go/v2.go）：`/`、`/index.html`、`/v2`、`/v2/*` 全部走 v2 页（别名零成本保旧书签）；`/viewer.{css,js}` 从 `assets/dist` 伺服；老页 `servePage`/`serveAsset`/`renderPage` 删除；老资产三件套（viewer.html/viewer.css/viewer.js）`git rm`。embed 声明挪进 v2.go。
+
+**静态导出移植**（page.go 重写为 `staticDataBlock` + v2.go `staticPage`）：同一 v2 壳，`<style>`/`<script>` 内嵌 dist 产物 + `#dsh-data`（`SetEscapeHTML(true)` 语义保留）。web 侧：`state.staticMode/mediaRoot`；`bootStatic()` 读 `#dsh-data` 直接装 60 会话数据（不轮询）；`selectSession` 静态分支从内存取行；`mediaURL` 静态分支 = `mediaRoot + rel`（`file://` 没有 `/media` 路由）；`App.vue` 挂载时静态模式不起轮询定时器（否则 file:// 每 2 秒空打 /api）；横幅替代旧徽标声明快照身份。
+
+**测试大扫除**：11 个钉在老 viewer.js/html/css 源码上的"源码契约"测试整函数删除（单元开关/会话名/DSH 结构/主题资产/JSON 高亮等——v2 的等价行为由 vitest 24 例 + Chromium 真渲染测试把守）。存活测试的适配：`TestViewerUnitToggleInChromium` 第二阶段读取挪进 `setTimeout`（Vue 重渲异步，旧页同步重画的前提失效）；缩略图行邻接断言改 `</details>\s*<div[^>]*class="preview-strip[ "]`（scoped CSS 的 data-v 属性在 class 前）；间距 token 测试读 dist 样式、豁免 PartialTail 流式卡的 220px（P7 验收的独立高度）；live 页断言改 v2 壳标识（theme 预置脚本 + `#app`）；`TestViewerSessionName…` 的"轮询不重建"⑩ 块退役（静态 v2 无刷新机制，节点复用由 Vue keyed diff 保证）；搜索探针改逐词 setTimeout 异步链。
+
+**真机验证**（CDP 9333 + 真实 latex_project 60 会话）：`/` 与 `/v2` 均 200、控制台零报错；点会话行 24 消息/35 工具卡/31 图，单位开关即时切换；静态导出（20MB 单文件）file:// 打开 60 会话、横幅「静态快照 · 生成于 …」、图片 **119/119 全部加载**（mediaRoot 相对路径 `../../../../…/latex_project/…` 解析正确）、零报错。go test 15 包 + vitest 24 例全绿。
+
+**坑**：① 反引号正则里写 ``` 会终止 Go raw string（fenceLineRe 用解释串拼接，build 立即抓到）；② Chrome 封禁 8997 端口（ERR_UNSAFE_PORT），探针换 8998；③ bash 工具调用结束会回收 `(cmd &)` 起的进程——服务器要用受管后台任务；④ vue dist 属性顺序是 `data-v` 在 `class` 前，字面量 `class="…">` 匹配会漏。

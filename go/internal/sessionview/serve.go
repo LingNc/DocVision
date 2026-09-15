@@ -232,12 +232,12 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p := r.URL.Path
 	switch {
-	case p == "/" || p == "/index.html":
-		v.servePage(w, r)
-	case p == "/v2" || strings.HasPrefix(p, "/v2/"):
+	// v2 是唯一界面（"/"），"/v2" 只是旧书签的别名；"/viewer.{css,js}" 是
+	// Vue 构建产物。旧页三件套已随退役删除。
+	case p == "/" || p == "/index.html" || p == "/v2" || strings.HasPrefix(p, "/v2/"):
 		v.serveV2(w, r, p)
 	case p == "/viewer.css" || p == "/viewer.js":
-		v.serveAsset(w, r, path.Base(p))
+		v.serveV2Asset(w, path.Base(p))
 	case p == "/api/index":
 		v.serveIndex(w)
 	case p == "/api/session":
@@ -247,32 +247,6 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
-}
-
-func (v *viewerServer) servePage(w http.ResponseWriter, r *http.Request) {
-	page, err := renderPage(renderOptions{})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	fmt.Fprint(w, page)
-}
-
-func (v *viewerServer) serveAsset(w http.ResponseWriter, r *http.Request, name string) {
-	data, err := assets.ReadFile("assets/" + name)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	switch path.Ext(name) {
-	case ".css":
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	default:
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	}
-	fmt.Fprint(w, string(data))
 }
 
 // indexResponse is what the page polls every couple of seconds: enough to

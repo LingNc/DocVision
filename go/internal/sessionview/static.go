@@ -1,8 +1,6 @@
 package sessionview
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -77,17 +75,11 @@ func WriteStaticHTML(root, outPath string, sessions []SessionInfo) error {
 		payload.Sessions = append(payload.Sessions, staticSession{SessionInfo: s, Lines: lines})
 	}
 
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	// SetEscapeHTML keeps a transcript from closing the surrounding <script>
-	// element: a tool result containing "</script>" would otherwise end the
-	// data block and turn the page into injected markup.
-	enc.SetEscapeHTML(true)
-	if err := enc.Encode(payload); err != nil {
-		return fmt.Errorf("会话预览: 序列化会话数据失败: %w", err)
+	data, err := staticDataBlock(payload)
+	if err != nil {
+		return err
 	}
-
-	page, err := renderPage(renderOptions{data: json.RawMessage(bytes.TrimRight(buf.Bytes(), "\n"))})
+	page, err := staticPage(data)
 	if err != nil {
 		return err
 	}

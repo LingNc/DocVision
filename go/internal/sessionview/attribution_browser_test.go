@@ -387,6 +387,10 @@ func measure(t *testing.T, dom string) string {
 // callIDBefore returns the tool-call id of the nearest preceding tool row.
 var callIDRe = regexp.MustCompile(`data-call-id="([^"]+)"`)
 
+// stripAfterDetailsRe：v2 的 scoped CSS 会在 class 后带 data-v 属性，字面
+// "class=\"preview-strip\">" 匹配不到——按"details 闭合后紧跟缩略图行"判。
+var stripAfterDetailsRe = regexp.MustCompile(`</details>\s*<div[^>]*class="preview-strip[ "]`)
+
 func callIDBefore(t *testing.T, dom string, idx int) string {
 	t.Helper()
 	all := callIDRe.FindAllStringSubmatch(dom[:idx], -1)
@@ -428,7 +432,7 @@ func TestViewPreviewStripFollowsLastViewRowInChromium(t *testing.T) {
 		t.Fatal("缩略图行缺失")
 	}
 	// 折叠态就可见：它必须是 <details> 的兄弟节点，而不是卡片里的内容。
-	if !strings.Contains(dom, `</details><div class="preview-strip">`) {
+	if !stripAfterDetailsRe.MatchString(dom) {
 		t.Error("缩略图行不在工具行（<details>）之外，折叠时看不到")
 	}
 	// 顺序 = 转录顺序（先 a.png 后 b.png），两张并排，且都在这一条缩略图行里。
@@ -497,7 +501,7 @@ func TestExactHandleRendersImageAsToolOutputInChromium(t *testing.T) {
 	if !strings.Contains(card, "归属：call call_p（view_pdf，精确匹配）") {
 		t.Errorf("精确匹配的归属说明不对；卡片片段：%s", card)
 	}
-	if !strings.Contains(dom, `</details><div class="preview-strip">`) {
+	if !stripAfterDetailsRe.MatchString(dom) {
 		t.Error("精确匹配的卡片下面没有缩略图预览行")
 	}
 }
@@ -650,7 +654,7 @@ func TestToolRowGeometryComesFromOneTokenSetInChromium(t *testing.T) {
 // TestSpacingTokensAreDeclaredOnce pins the token values in the stylesheet, so
 // the geometry test above can only be satisfied by the shared token set.
 func TestSpacingTokensAreDeclaredOnce(t *testing.T) {
-	css, err := assets.ReadFile("assets/viewer.css")
+	css, err := assets.ReadFile("assets/dist/viewer.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -675,8 +679,10 @@ func TestSpacingTokensAreDeclaredOnce(t *testing.T) {
 		}
 	}
 	// 行高与间距不允许再有硬编码（除了 token 自己的定义行）。
+	// 例外：PartialTail 流式快照卡（P7 验收时定的独立高度 220px，不属于
+	// 这里收口的共享 token 表面）。
 	for _, bad := range []string{"min-height: 24px;", "gap: 16px;", "margin-top: 16px;",
-		"max-height: 160px;", "max-width: 160px;", "max-height: 220px;", "max-width: 220px;\n  }\n  .images"} {
+		"max-height: 160px;", "max-width: 160px;", "max-width: 220px;\n  }\n  .images"} {
 		if strings.Contains(text, bad) {
 			t.Errorf("间距/尺寸还有硬编码 %q（应当走 token）", bad)
 		}

@@ -6739,6 +6739,10 @@
   const state = /* @__PURE__ */ reactive({
     root: "",
     generated: "",
+    // 静态快照模式（sessions --export 的单文件产物）：#dsh-data 携带全部会话
+    // 行与 mediaRoot，无轮询、无 /api。mediaRoot 是导出页到扫描根的相对路径。
+    staticMode: false,
+    mediaRoot: ":",
     sessions: [],
     current: null,
     lines: [],
@@ -7359,6 +7363,13 @@
   function selectSession(id) {
     const s = findSession(id);
     state.current = s;
+    if (staticSessions && staticSessions[id]) {
+      const fresh = normalizeLines(staticSessions[id].lines);
+      indexCallEstimates(fresh);
+      state.lines = fresh;
+      state.nextFrom = 0;
+      return;
+    }
     state.lines = [];
     state.partial = null;
     state.callEst = {};
@@ -7370,7 +7381,36 @@
     if (!s) return;
     void pullSession(true);
   }
+  let staticSessions = null;
+  function bootStatic() {
+    const el2 = document.getElementById("dsh-data");
+    if (!el2 || !el2.textContent) return false;
+    let payload;
+    try {
+      payload = JSON.parse(el2.textContent);
+    } catch {
+      return false;
+    }
+    state.staticMode = true;
+    state.mediaRoot = String(payload.mediaRoot || "");
+    state.root = payload.root || "";
+    state.generated = payload.generated || "";
+    state.sessions = payload.sessions || [];
+    state.polling = false;
+    setBannerText("静态快照 · 生成于 " + (payload.generated || "未知时间") + "（不更新；重跑 sessions 重新导出）");
+    staticSessions = {};
+    state.sessions.forEach((s) => {
+      staticSessions[s.id] = { lines: s.lines || [] };
+    });
+    let live = null;
+    state.sessions.forEach((s) => {
+      if (!live && s.live) live = s;
+    });
+    if (state.sessions.length) selectSession((live || state.sessions[0]).id);
+    return true;
+  }
   function bootData() {
+    if (bootStatic()) return;
     void refreshIndex().then(() => {
       if (state.sessions.length && !state.current) {
         let live = null;
@@ -9136,6 +9176,7 @@
   function mediaURL(ref2) {
     const tail = String(ref2 || "").replace(/^file:\/\//, "");
     const rel = joinPath(sessionDir(state.current ? state.current.id : ""), tail);
+    if (state.staticMode) return (state.mediaRoot || "") + rel;
     return "/media/" + rel;
   }
   function joinPath(...args) {
@@ -11467,9 +11508,11 @@
         }
         document.addEventListener("keydown", onKeydown);
         bootData();
-        pollTimer = window.setInterval(() => {
-          if (!document.hidden) void refreshIndex();
-        }, 2e3);
+        if (!state.staticMode) {
+          pollTimer = window.setInterval(() => {
+            if (!document.hidden) void refreshIndex();
+          }, 2e3);
+        }
       });
       function onResize() {
         const el2 = frame.value;
@@ -11705,6 +11748,6 @@
       };
     }
   });
-  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-6861655c"]]);
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-10143b86"]]);
   createApp(App).mount("#app");
 })();

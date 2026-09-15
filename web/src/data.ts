@@ -120,6 +120,14 @@ export function pullSession(reset: boolean): Promise<void> {
 export function selectSession(id: string): void {
   const s = findSession(id)
   state.current = s
+  if (staticSessions && staticSessions[id]) {
+    // 静态快照：行已在手，不走 /api。
+    const fresh = normalizeLines(staticSessions[id].lines as never[])
+    indexCallEstimates(fresh)
+    state.lines = fresh
+    state.nextFrom = 0
+    return
+  }
   state.lines = []
   state.partial = null
   state.callEst = {}
@@ -134,8 +142,44 @@ export function selectSession(id: string): void {
   void pullSession(true)
 }
 
-/* boot：先拉一次索引并选中第一个活跃会话；然后 2 秒轮询（页面隐藏时跳过）。 */
+/*
+ * 静态快照：页面带 #dsh-data 块时整个数据层离线——会话行已在 JSON 里，
+ * mediaRoot 前缀拼图，不拉 /api、不轮询。live 分支与它互斥。
+ */
+let staticSessions: Record<string, { lines: unknown[] }> | null = null
+
+function bootStatic(): boolean {
+  const el = document.getElementById('dsh-data')
+  if (!el || !el.textContent) return false
+  let payload: any
+  try {
+    payload = JSON.parse(el.textContent)
+  } catch {
+    return false
+  }
+  state.staticMode = true
+  state.mediaRoot = String(payload.mediaRoot || '')
+  state.root = payload.root || ''
+  state.generated = payload.generated || ''
+  state.sessions = payload.sessions || []
+  // 静态快照没有轮询：badge 语义保持「不在线」，快照身份用 banner 声明。
+  state.polling = false
+  setBannerText('静态快照 · 生成于 ' + (payload.generated || '未知时间') + '（不更新；重跑 sessions 重新导出）')
+  staticSessions = {}
+  state.sessions.forEach((s: any) => {
+    staticSessions![s.id] = { lines: s.lines || [] }
+  })
+  let live: any = null
+  state.sessions.forEach((s: any) => {
+    if (!live && s.live) live = s
+  })
+  if (state.sessions.length) selectSession((live || state.sessions[0]).id)
+  return true
+}
+
+/* boot：静态快照直接装数据；live 先拉一次索引并选中第一个活跃会话，然后 2 秒轮询（页面隐藏时跳过）。 */
 export function bootData(): void {
+  if (bootStatic()) return
   void refreshIndex().then(() => {
     if (state.sessions.length && !state.current) {
       let live: any = null

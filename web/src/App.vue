@@ -222,11 +222,13 @@ onMounted(() => {
     }
   }
   document.addEventListener('keydown', onKeydown)
-  // 数据层：首拉 + 2 秒轮询（页面隐藏时跳过）。
+  // 数据层：首拉 + 2 秒轮询（页面隐藏时跳过）。静态快照没有 /api，不轮询。
   bootData()
-  pollTimer = window.setInterval(() => {
-    if (!document.hidden) void refreshIndex()
-  }, 2000)
+  if (!state.staticMode) {
+    pollTimer = window.setInterval(() => {
+      if (!document.hidden) void refreshIndex()
+    }, 2000)
+  }
 })
 
 function onResize() {
