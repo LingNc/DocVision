@@ -6,6 +6,7 @@
 ## [Unreleased]
 
 ### Added
+- **`extends` 支持多重基座（T25）**：`models.<条目>.extends` 接受条目名列表（`extends: [a, b]`）——按书写顺序合并、后面的基座覆盖前面的，条目自己的键覆盖所有基座；单个字符串写法语义不变，列表基座可自身 extends（链式 + 多重混用），空列表/不存在的条目名加载期报错。
 - **修复：档位1 紧凑控制台进度行消失（T11）**——quiet 只压明细日志行，不再抑制实时进度块（classify/process/style/convert 的 LiveRow 与阶段终态行重新上屏）。
 - **修复：img2text 校验失败被降级为警告（T15）**——mermaid/格式校验未通过的项（`Skipped invalid response … will retry next run`）从警告改记**错误**（日志 error 级 + 进度行 errors 计数），跳过与下轮重试的语义不变；警告只留给可自动纠正的事。
 - **修复：档位1 convert 阶段偶发进程崩溃（T14）**——多章并发首次解析模型时 `clientFor` 无锁并发写 clients/models，触发 `fatal error: concurrent map writes`；改为互斥锁收口（clientFor/modelOf/hasModel），`-race` 并发测试钉住。

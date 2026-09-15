@@ -941,3 +941,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **根因**：`cd1dec9`（实时进度改每人一行块）在 `paintLiveLocked`/`Finalize` 里加了 `if l.quiet { return }`——而 RunBook 紧凑模式（非 `--verbose`）正是 `SetQuiet(true)`。于是档位1 全程的 LiveRow（classify/process/style/convert/checker 进度行）与阶段终态行全被静音；quiet 的本意是压**明细日志行**（会话轮次/工具调用），不该压进度块本身。档位2 img2text 不受影响（进度行是它自己 `fmt.Fprint` 打的，不走 LiveRow）。
 
 **修法**：去掉两处 quiet 早退——quiet 下 LiveRow 照常渲染、Finalize 终态行照打（滚动缓冲留得住阶段结果）；临时验证测试（管道捕获 stdout）确认 quiet 下进度行与终态行都上屏，随后删除（行为由回归测试兜底）。
+
+### T25：`extends` 支持多重基座（master，T14/T15/T11 同批）
+
+**需求**：`extends: [a, b]` 按顺序后面覆盖前面（用户示例里连写两个 `extends:` 键——YAML 重复键直接报错，所以列表是唯一可行形态）。
+
+**实现**（config/merge.go，加载期 YAML 节点层）：`extendsRef` 升级为 `extendsRefs`（标量=单基座不变；序列=多基座，逐项校验非空条目名）；解析循环的账本改 `map[string][]string`，一个条目在**所有基座都解析完**后才合并；折叠语义 = `acc = p1`，逐个 `applyExtends(copy(pᵢ), acc)`（后面的基座赢），最后 `applyExtends(entry, acc)`（条目自己的键最高）——折叠在 **shallowMapCopy** 上进行（applyExtends 会重写 child.Content，直接拿父条目当 child 会把文档里的基座改掉）。循环检测 `extendsChain` 升级多边版（优先沿未解析的父链走）。knownkeys 的继承归因同步多父。合并语义不变：仍是**条目键级**（嵌套 map 整块替换，TestExtendsDeepMergeSemantics 钉着）。
+
+**测试**：新增列表顺序覆盖（base_url/model/api_timeout/request_body 整块替换）、链式 + 列表混用（`extends: [mid, base]`，base 在后覆盖 mid）、空列表报错、列表含不存在条目报错。config 全套 + 全仓 go test 15 包全绿。config_version 不需要 bump（extends 键已在 v10，只是值形态扩展）。

@@ -604,3 +604,81 @@ func TestValidateDataProblemsUnchangedForExtendsFreeConfig(t *testing.T) {
 		}
 	}
 }
+
+// T25：extends 支持列表（多重继承）——按书写顺序后面的基座覆盖前面的，
+// 条目自己的键覆盖所有基座；单个字符串写法语义不变。
+func TestExtendsListOverridesInOrder(t *testing.T) {
+	cfg := mustLoadConfig(t, `
+mineru:
+  token: "abc"
+models:
+  a:
+    base_url: "https://a.example/v1"
+    model: "model-a"
+    api_timeout: 111
+    request_body: {top_p: 0.1, temperature: 0.1}
+  b:
+    base_url: "https://b.example/v1"
+    model: "model-b"
+    request_body: {top_p: 0.2}
+  multi:
+    extends: [a, b]
+    request_body: {temperature: 0.9}
+`)
+	m := cfg.Models["multi"]
+	if m.BaseURL != "https://b.example/v1" {
+		t.Fatalf("后面的基座应覆盖前面的 base_url: %q", m.BaseURL)
+	}
+	if m.Model != "model-b" {
+		t.Fatalf("后面的基座应覆盖前面的 model: %q", m.Model)
+	}
+	if m.APITimeout != 111 {
+		t.Fatalf("只有前一个基座有的键应保留 api_timeout: %d", m.APITimeout)
+	}
+	// 合并是**条目键级**的（嵌套 map 整块替换，见 TestExtendsDeepMergeSemantics）：
+	// 条目自己写了 request_body 就整块用自己的，基座的键不漏进来。
+	if _, leaked := m.RequestBody["top_p"]; leaked {
+		t.Fatalf("条目自己写了 request_body，基座的键不该漏进来: %+v", m.RequestBody)
+	}
+	if m.RequestBody["temperature"] != 0.9 {
+		t.Fatalf("条目自己的键覆盖所有基座 temperature: %v", m.RequestBody["temperature"])
+	}
+}
+
+// T25：列表基座可以自身 extends（链式 + 多重混用）；空列表报错。
+func TestExtendsListChainAndEmpty(t *testing.T) {
+	cfg := mustLoadConfig(t, `
+mineru:
+  token: "abc"
+models:
+  base:
+    api_timeout: 60
+  mid:
+    extends: base
+    api_timeout: 120
+  leaf:
+    extends: [mid, base]
+`)
+	if got := cfg.Models["leaf"].APITimeout; got != 60 {
+		t.Fatalf("列表顺序：base 在后应覆盖 mid 的 api_timeout: %d", got)
+	}
+	if _, err := writeConfig(t, `
+mineru:
+  token: "abc"
+models:
+  x:
+    extends: []
+`); err == nil || !strings.Contains(err.Error(), "列表不能为空") {
+		t.Fatalf("空 extends 列表应报错，得到: %v", err)
+	}
+	if _, err := writeConfig(t, `
+mineru:
+  token: "abc"
+models:
+  a: {model: "m"}
+  x:
+    extends: [a, "ghost"]
+`); err == nil || !strings.Contains(err.Error(), "不存在") {
+		t.Fatalf("列表里不存在的基座应报错，得到: %v", err)
+	}
+}

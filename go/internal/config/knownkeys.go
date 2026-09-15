@@ -46,8 +46,10 @@ func unknownKeys(data []byte) ([]unknownKey, error) {
 			if entry.Kind != yaml.MappingNode {
 				continue
 			}
-			if parent, ok, err := extendsRef(models.Content[i].Value, entry); err == nil && ok {
-				extendsOf[parent] = append(extendsOf[parent], models.Content[i].Value)
+			if parents, ok, err := extendsRefs(models.Content[i].Value, entry); err == nil && ok {
+				for _, parent := range parents {
+					extendsOf[parent] = append(extendsOf[parent], models.Content[i].Value)
+				}
 			}
 		}
 	}

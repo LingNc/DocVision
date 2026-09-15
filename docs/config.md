@@ -60,7 +60,7 @@
 | `img2text.output_language` | AI 描述输出语言（"Chinese"/"English"） | Chinese |
 | `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body/stream/thinking…） | - |
 | `models.<name>` | 每个专用 AI 的独立配置，空字段继承 `models.text`；`max_tokens`/`temperature` 作为该模型未指定时的兜底；GLM 可用 `tool_stream: true`（工具参数随流返回）与 `thinking.clear_thinking: false`（保留式思考） | - |
-| `models.<条目>.extends` | 命名基座：本条目继承另一个 `models:` 条目的键（加载期在 YAML 节点层深合并）。语义见下方「`extends`：命名基座」一节 | 未设置 |
+| `models.<条目>.extends` | 命名基座：本条目继承另一个 `models:` 条目的键（加载期在 YAML 节点层合并）；也接受**条目名列表** `extends: [a, b]`——按书写顺序合并、后面的基座覆盖前面的，条目自己的键覆盖所有基座（YAML 重复键本身会报错，多重继承必须用列表）。语义见下方「`extends`：命名基座」一节 | 未设置 |
 | `models.<条目>.price.*` | 单价四键。条目**一项费率都没写**时继承 `models.text` 的费率；写了任意一项就用自己这一份。两个条目发往**同一个 wire 模型名**却配了不同单价 → 加载期报错 | 继承 `models.text`（或全 0 = 未配置） |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
 | `latex.sessions.{drawing,style,chapter,convert,checker}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |

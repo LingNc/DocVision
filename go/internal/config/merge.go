@@ -63,19 +63,19 @@ func mergeModelExtends(root *yaml.Node) error {
 
 	// extendsOf remembers every declared reference even after the key is
 	// consumed from the document, because cycle reports need the raw edges.
-	extendsOf := map[string]string{}
+	extendsOf := map[string][]string{}
 	for i := 0; i+1 < len(models.Content); i += 2 {
 		name := models.Content[i].Value
 		entry := models.Content[i+1]
 		if entry.Kind != yaml.MappingNode {
 			continue
 		}
-		parent, ok, err := extendsRef(name, entry)
+		parents, ok, err := extendsRefs(name, entry)
 		if err != nil {
 			return err
 		}
 		if ok {
-			extendsOf[name] = parent
+			extendsOf[name] = parents
 		}
 	}
 
@@ -90,19 +90,45 @@ func mergeModelExtends(root *yaml.Node) error {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			parentName := extendsOf[name]
-			parent, ok := lookupModel(models, parentName)
-			if !ok {
-				return fmt.Errorf("models.%s.%s: 引用的基座条目 %q 不存在（先定义 `%s:`，再让别的条目 `%s: %s`）",
-					name, extendsKey, parentName, parentName, extendsKey, parentName)
+			parents := extendsOf[name]
+			ready, firstMissing := true, ""
+			for _, parentName := range parents {
+				parent, ok := lookupModel(models, parentName)
+				if !ok {
+					return fmt.Errorf("models.%s.%s: 引用的基座条目 %q 不存在（先定义 `%s:`，再让别的条目 `%s: %s`）",
+						name, extendsKey, parentName, parentName, extendsKey, parentName)
+				}
+				// The parent still carries its own extends key from an earlier
+				// pass? Then it has not been resolved yet — wait for a later pass.
+				if hasKey(parent, extendsKey) {
+					ready = false
+					break
+				}
+				_ = firstMissing
 			}
-			// The parent still carries its own extends key from an earlier pass?
-			// Then it has not been resolved yet — wait for a later pass.
-			if hasKey(parent, extendsKey) {
+			if !ready {
 				continue
 			}
+			// T25 多基座：按书写顺序折叠——后面的基座覆盖前面的。折叠在一个
+			// **浅拷贝**上进行（applyExtends 会重写 child.Content，直接用父条目
+			// 节点会把文档里的基座改掉）：acc = p1；acc = pᵢ 覆盖 acc；最后条目
+			// 自己的键覆盖所有基座。
+			first, ok0 := lookupModel(models, parents[0])
+			if !ok0 {
+				// ready 循环已确认存在；防御性兜底。
+				return fmt.Errorf("models.%s.%s: 引用的基座条目 %q 不存在", name, extendsKey, parents[0])
+			}
+			acc := shallowMapCopy(first)
+			for _, parentName := range parents[1:] {
+				pn, _ := lookupModel(models, parentName)
+				tmp := shallowMapCopy(pn)
+				if err := applyExtends(tmp, acc); err != nil {
+					return fmt.Errorf("models.%s.%s: %w", name, extendsKey, err)
+				}
+				acc = tmp
+			}
 			child, _ := lookupModel(models, name)
-			if err := applyExtends(child, parent); err != nil {
+			if err := applyExtends(child, acc); err != nil {
 				return fmt.Errorf("models.%s.%s: %w", name, extendsKey, err)
 			}
 			delete(extendsOf, name)
@@ -130,14 +156,49 @@ func mergeModelExtends(root *yaml.Node) error {
 // error rather than a silent no-op, because the entry then looks inherited
 // while every key actually comes from the code defaults.
 func extendsRef(name string, entry *yaml.Node) (string, bool, error) {
+	refs, ok, err := extendsRefs(name, entry)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return refs[0], true, nil
+}
+
+// extendsRefs reads one entry's extends key. T25：除了单个条目名，还接受**列表**
+// ——按书写顺序合并、后面的基座覆盖前面的，条目自己的键覆盖所有基座（YAML 的
+// 重复键会直接报错，多重继承因此必须写成列表）。A present-but-empty value is an
+// error (the key was written, so the user clearly meant something).
+func extendsRefs(name string, entry *yaml.Node) ([]string, bool, error) {
 	key, value := mapNodeEntry(entry, extendsKey)
 	if key == nil {
-		return "", false, nil
+		return nil, false, nil
 	}
-	if value.Kind != yaml.ScalarNode || value.Tag != "!!str" || strings.TrimSpace(value.Value) == "" {
-		return "", false, fmt.Errorf("models.%s.%s: 必须写成另一个 models 条目的名字（字符串，不能为空）", name, extendsKey)
+	switch value.Kind {
+	case yaml.SequenceNode:
+		if len(value.Content) == 0 {
+			return nil, false, fmt.Errorf("models.%s.%s: 列表不能为空（删掉这个键，或写至少一个条目名）", name, extendsKey)
+		}
+		out := make([]string, 0, len(value.Content))
+		for i, it := range value.Content {
+			if it.Kind != yaml.ScalarNode || strings.TrimSpace(it.Value) == "" {
+				return nil, false, fmt.Errorf("models.%s.%s: 列表第 %d 项必须是另一个 models 条目的名字（非空字符串）", name, extendsKey, i+1)
+			}
+			out = append(out, strings.TrimSpace(it.Value))
+		}
+		return out, true, nil
+	default:
+		if value.Kind != yaml.ScalarNode || strings.TrimSpace(value.Value) == "" {
+			return nil, false, fmt.Errorf("models.%s.%s: 必须写成另一个 models 条目的名字（字符串或条目名列表，不能为空）", name, extendsKey)
+		}
+		return []string{strings.TrimSpace(value.Value)}, true, nil
 	}
-	return strings.TrimSpace(value.Value), true, nil
+}
+
+// shallowMapCopy copies a models entry's mapping shell (sharing key/value
+// nodes) so multi-extends folding never mutates the parent entries in place.
+func shallowMapCopy(n *yaml.Node) *yaml.Node {
+	c := &yaml.Node{Kind: yaml.MappingNode, Tag: yamlMapTag}
+	c.Content = append(c.Content, n.Content...)
+	return c
 }
 
 // applyExtends writes the parent's keys into the child in place, keeping the
@@ -187,13 +248,27 @@ func isNullNode(n *yaml.Node) bool {
 }
 
 // extendsChain renders the closed walk from name back to itself, e.g.
-// "a → b → a".
-func extendsChain(start string, edges map[string]string) string {
+// "a → b → a". With multi-parent edges it follows the first parent that is
+// still unresolved (that is where the cycle lives).
+func extendsChain(start string, edges map[string][]string) string {
 	parts := []string{start}
 	cur := start
 	for i := 0; i <= len(edges); i++ {
-		next, ok := edges[cur]
+		parents, ok := edges[cur]
 		if !ok {
+			break
+		}
+		next := ""
+		for _, p := range parents {
+			if _, hanging := edges[p]; hanging {
+				next = p
+				break
+			}
+		}
+		if next == "" && len(parents) > 0 {
+			next = parents[0]
+		}
+		if next == "" {
 			break
 		}
 		parts = append(parts, next)
