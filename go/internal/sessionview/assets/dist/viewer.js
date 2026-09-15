@@ -9210,7 +9210,8 @@
   }
   function classifyResult(text) {
     const s = String(text || "");
-    if (/REJECTED|文件不存在|失败|error|not found|traceback/i.test(s)) return "error";
+    const head = s.split("\n", 1)[0];
+    if (/REJECTED|文件不存在|失败|error|not found|traceback|COMPILE FAILED/i.test(head)) return "error";
     if (/\bok\s*\(/.test(s)) return "ok";
     return "plain";
   }

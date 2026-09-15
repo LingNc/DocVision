@@ -903,3 +903,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **①「详情」标题样式没了**：截图目检 + `getComputedStyle` 定位到 `.details-title` 计算样式全丢。根因是 **P11 scoped 陷阱①的又一例**：`.details-head`/`.details-title` 的规则在拆样式时写进了 **DetailsPanel.vue** 的 scoped 块，但这两个元素由 **App.vue** 渲染——`data-v` 属性对不上，规则整条失配（构建期与控制台都不报错）。修法：规则搬进 App.vue 的 scoped 块，DetailsPanel 里留一行注释指路。验证：computed `600/13px/muted` ✓ + 截图目检 ✓。
 
 **②双击复位 vs 点击退出冲突**：单击立即关灯箱 → 双击的第一击就把灯箱关了，双击复位永远触发不了。修法：**单击延迟 ~260ms 裁决**——窗口内来第二击按双击（复位、保持打开），否则关；拖动过的 pointer 序列吞 click 的判定从「click 时 lbDrag 已被 pointerup 清掉」改成 **pointerup 时定格 `lbSuppressClick`**（顺手钉死拖拽后误关竞态）。CDP 验证：滚轮放大→双击复位且保持打开 ✓→单击 ~620ms 内关 ✓。探针 `probe7b.imgClickKeeps` 一度出现差异（旧页点图立即关=False / 新页 250ms 时仍开=True）——查明是**探针 settle 只有 250ms、赶在 260ms 关闭定时器前**的计时假象，语义（点图冒泡关闭）没变；探针该处等 450ms 后两页对齐（453/454 基线保持，唯一已知差异仍 = T12）。
+
+### T20 补刀：image_context「正常回执被标 error」根因与修复（`web/components`）
+
+用户验收截图：be53f9a 矢量图会话里 image_context 的**结果行内容正常**（`image 4 of 4 in this document: …`）却挂着红 error。定位：`classifyResult` **全文**扫 `/REJECTED|文件不存在|失败|error|not found|traceback/i`，而 image_context 的回执会**引用图片周围的书中正文**——正文里「在第一次失败的条件下」命中「失败」。全仓扫描定量：24 条全文命中的工具回执里 **11 条是这类误报**（首行干净、错误词来自引用正文），其余 13 条是 COMPILE FAILED / TOOL ERROR 等真错误（它们的「Error:」在第二行，靠正文命中才被判出来）。
+
+**修法**：错误判定只看**回执首行**（`s.split('\n',1)[0]`），并把 `COMPILE FAILED` 前缀显式加进标记词（否则编译失败会漏报——vitest 新用例先抓到了这一点）。影响面：streamModel 工具卡、trajectory 结果行、ResultMsg、details 步骤块共用 classifyResult，一处修全修。旧页冻结不动（仍有误报，属预期分叉）。be53f9a 会话 CDP 实测：image_context 结果行 `data-error` 消失、状态恢复「—」；探针 453/454（style_session 探针路径没踩到误报行，无需归一化）、vitest 24/24、控制台零报错。

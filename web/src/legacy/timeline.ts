@@ -328,7 +328,13 @@ export function toolPromptLine(name: unknown, argsText: unknown): string {
 
 export function classifyResult(text: unknown): string {
   const s = String(text || '')
-  if (/REJECTED|文件不存在|失败|error|not found|traceback/i.test(s)) return 'error'
+  // 错误判定只看**首行**：工具回执的错误都是前缀式标记（TOOL ERROR / COMPILE
+  // FAILED / Traceback / REJECTED / 文件不存在…；COMPILE 的 Error: 在第二行，
+  // 所以 FAILED 前缀必须显式在列）。全文扫关键词会把回执引用的正文误报成
+  // error——image_context 的回执引到书中「在第一次失败的条件下」就中招
+  // （用户验收截图，矢量图会话 24 条命中里 11 条是这类误报）。
+  const head = s.split('\n', 1)[0]
+  if (/REJECTED|文件不存在|失败|error|not found|traceback|COMPILE FAILED/i.test(head)) return 'error'
   if (/\bok\s*\(/.test(s)) return 'ok'
   return 'plain'
 }

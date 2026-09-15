@@ -164,6 +164,21 @@ describe('工具卡文案算法', () => {
     expect(classifyResult('done')).toBe('plain')
   })
 
+  it('classifyResult：错误标记只在**首行**生效（T23 反馈：回执引用正文里的「失败」不再误报）', () => {
+    // 首行干净、后文引到正文关键词 → plain
+    expect(
+      classifyResult(
+        'image 4 of 4 in this document: images/书/be53.jpg\n   259 | 在第一次失败的条件下, 第二次通过的概率分别为 $\\frac{2}{3}$'
+      )
+    ).toBe('plain')
+    expect(classifyResult('image 1 of 1: images/a.jpg\nline with error inside code sample')).toBe('plain')
+    // 首行就带标记 → error（COMPILE FAILED / Traceback / REJECTED / not found）
+    expect(classifyResult('COMPILE FAILED. Fix figure.tex and call compile again.\nError:\nl.18')).toBe('error')
+    expect(classifyResult('Traceback (most recent call last):\n  File "x.py"')).toBe('error')
+    expect(classifyResult('REJECTED: 布局不符')).toBe('error')
+    expect(classifyResult('bash: foo: command not found')).toBe('error')
+  })
+
   it('toolSummary：按工具族挑关键参数，兜底第一个字符串', () => {
     expect(toolSummary('bash', '{"command":"ls -la","cwd":"/x"}')).toBe('ls -la')
     expect(toolSummary('write', '{"path":"a/b.md","content":"long"}')).toBe('a/b.md')

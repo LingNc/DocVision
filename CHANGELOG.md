@@ -6,6 +6,7 @@
 ## [Unreleased]
 
 ### Added
+- **修复：工具回执被误标 error**——状态判定改为只看回执**首行**（错误都是前缀式标记：TOOL ERROR / COMPILE FAILED / Traceback / REJECTED / 文件不存在…）；原先全文扫关键词，image_context 的回执引用书中正文「在第一次失败的条件下」就被误报成 error（矢量图会话 24 条命中里 11 条是这类误报）。
 - **修复：详情栏头部「详情」标题样式丢失**——P11 拆样式时 `.details-head/.details-title` 写进了 DetailsPanel 的 scoped 块，元素却由 App 渲染，scope 属性对不上导致整条规则失配；搬回 App 的 scoped 块（P11 陷阱①又一例）。
 - **修复：灯箱「点击关闭」与「双击复位」冲突**——单击现在延迟 ~260ms 裁决（窗口内第二击按双击复位处理），拖动过的 pointer 序列吞 click 的判定改为 pointerup 时定格；点图冒泡关闭的语义不变、只慢一拍。
 - **压缩检查点 DSH 化（T21）**：压缩替换注释改为「marker 行 + `<compacted-summary>` 说明文字与 XML 包裹 + `<summary>` 摘要」——给继续工作的模型明确语义（背景、不复述、直接接着干）；注入角色仍是 user 轮（system 不能插在会话中间，会破坏消息序规则与前缀缓存，DSH 同样以 user 注入）。首行 marker 不变，续跑折叠（HasPrefix）新旧注释都认。
