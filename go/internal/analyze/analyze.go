@@ -83,6 +83,8 @@ func Run(cfg *config.Config, opts RunOptions) error {
 		PrintLatexProgressFooter(opts.LatexOutDir)
 	} else {
 		printProgressFooter(inputDir, progressRoot, finallyDir, logPaths)
+		// P12：mermaid 升级修复会话的触发统计（有才打印）。
+		PrintMermaidFixNote(logPaths)
 	}
 
 	if opts.OutputCSV != "" {

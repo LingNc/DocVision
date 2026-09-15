@@ -42,7 +42,7 @@ AI 结果带 `[IMG_TYPE: <类型>]` 标签，写入 `finally/` 的 markdown 时�
 
 img2text 的图片描述**只出 Mermaid**（外加表格、正文、公式、代码块）：矢量图重画是 `docvision latex` 档位 1 作图会话的职责。若模型无视提示词仍返回 ```` ```latex ```` / ```` ```tikz ```` 绘图代码块，该响应按**无效响应**处理——跳过、下轮重试，日志里附截断后的模型原文与"期望格式"一行摘要。
 
-Mermaid 校验由 `tools.mermaid.*`（off/auto/strict、CLI 命令、修正次数、超时）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。
+Mermaid 校验由 `tools.mermaid.*`（off/auto/strict、CLI 命令、修正次数、超时）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。修正次数用完还有一道**升级修复会话**（P12，`tools.mermaid.session_*`）：虚拟工作区里编辑 submit.md、submit 过 mmdc 检查，错误累计切备选模型，详见 docs/config.md。
 
 ## latex 档位2 文本图嵌入
 

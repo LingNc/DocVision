@@ -4,8 +4,9 @@
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
 ## [Unreleased]
-
 ### Added
+
+- **Mermaid 升级修复会话**（`tools.mermaid.session_rounds` / `session_errors` / `fallback_model`，P12）：img2text 就地修复轮用完后，模型获得一个虚拟工作区（出错的响应在 `submit.md`，工具 `write_file`/`grep`/`view_image`/`submit`），submit 跑 mmdc 语法检查，编译错误累计到上限自动清上下文切备选模型再试；提交/检查次数默认 6。工作区与 JSONL 转录保留在 `progress_items/mermaid_fix/<图>/` 供诊断，`analyze` 报告触发统计。
 - **预览页 v2 上位为唯一界面，旧页退役**：`/` 直出 Vue 版查看器，`/v2` 保留为旧书签别名（内容相同）；旧页三件套（`assets/viewer.{html,css,js}`）删除；静态导出切到 v2 壳（内嵌 dist CSS/JS + `#dsh-data`，`file://` 直接可开，顶部横幅标「静态快照 · 生成于 …」，图片按相对路径寻址），web 数据层新增静态模式（不轮询、无 `/api` 请求）。
 - **view_image 回执去冗余（T17）**——「Redraw it at that size — do NOT scale it up to the page.」只在**作图会话**追加（style/convert/checker 等只看图的会话不再收到这句）；预算提醒不再回显 64 位哈希文件名，改说 `view_image on this image`。
 - **img2text mermaid 嵌入统一 `[Image]` 锚（T16）**——mermaid 嵌入前先给一行 `[Image]( alt文本 )`（markdown alt 或 `<img>` alt 属性，缺失时用 `mermaid`），再跟代码块；模型输出未闭合的 ``` 围栏在嵌入前自动补齐。

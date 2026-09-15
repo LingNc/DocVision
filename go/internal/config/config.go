@@ -524,6 +524,11 @@ type ToolsConfig struct {
 		Command     string `yaml:"command"`      // Mermaid CLI command
 		FixAttempts *int   `yaml:"fix_attempts"` // 0 = unlimited (in-code cap)
 		Timeout     int    `yaml:"timeout"`      // seconds per validation
+		// P12：就地修复轮用完后的**升级修复会话**（虚拟工作区 + submit +
+		// 编译检查）。session_rounds ≤ 0 = 关闭升级会话（维持旧的跳过+下轮重试）。
+		SessionRounds *int   `yaml:"session_rounds"` // 会话提交/检查次数上限（默认 6）
+		SessionErrors *int   `yaml:"session_errors"` // 编译错误累计上限，满了切备选模型（默认 3）
+		FallbackModel string `yaml:"fallback_model"` // 备选兜底模型（models.<条目名>；空 = 原模型清上下文重来）
 	} `yaml:"mermaid"`
 	// Bash configures the session bash tool used by the latex AI
 	// sessions: whether commands run inside the bubblewrap sandbox and
@@ -624,6 +629,10 @@ type OptionsConfig struct {
 	MermaidCommand     string  `yaml:"-"` // set from tools.mermaid.command
 	MermaidFixAttempts *int    `yaml:"-"` // set from tools.mermaid.fix_attempts
 	MermaidTimeout     int     `yaml:"-"` // set from tools.mermaid.timeout
+	// P12 升级修复会话（tools.mermaid.session_*）。
+	MermaidSessionRounds *int    `yaml:"-"` // set from tools.mermaid.session_rounds
+	MermaidSessionErrors *int    `yaml:"-"` // set from tools.mermaid.session_errors
+	MermaidFallbackModel string  `yaml:"-"` // set from tools.mermaid.fallback_model
 	MaxTokens          int     `yaml:"max_tokens"`
 	// LogLevel: info (default), debug or trace. Debug writes every AI
 	// request/response summary, prompt and tool result into the log
@@ -1008,6 +1017,9 @@ func setDefaults(cfg *Config) {
 	cfg.Options.MermaidCommand = cfg.Tools.Mermaid.Command
 	cfg.Options.MermaidFixAttempts = cfg.Tools.Mermaid.FixAttempts
 	cfg.Options.MermaidTimeout = cfg.Tools.Mermaid.Timeout
+	cfg.Options.MermaidSessionRounds = cfg.Tools.Mermaid.SessionRounds
+	cfg.Options.MermaidSessionErrors = cfg.Tools.Mermaid.SessionErrors
+	cfg.Options.MermaidFallbackModel = cfg.Tools.Mermaid.FallbackModel
 	if cfg.Options.Concurrency == 0 {
 		cfg.Options.Concurrency = 10
 	}

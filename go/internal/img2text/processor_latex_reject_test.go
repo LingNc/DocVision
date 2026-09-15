@@ -80,7 +80,7 @@ func TestProcessOneImage_RejectsLatexDrawingBlockWithRawOutput(t *testing.T) {
 
 	result, status, raw := ProcessOneImage(
 		newTestClient(t, ms.server.URL), imagesDir, "images/数据结构/a.jpg", "数据结构",
-		lines, lineIdx, l, 1, opts,
+		lines, lineIdx, l, 1, opts, nil,
 	)
 	if status != StatusRetry {
 		t.Fatalf("status = %q, want %q (result=%q)", status, StatusRetry, result)
@@ -141,7 +141,7 @@ func TestProcessOneImage_AcceptsMermaid(t *testing.T) {
 	}
 	result, status, _ := ProcessOneImage(
 		newTestClient(t, ms.server.URL), imagesDir, "images/书/b.jpg", "书",
-		lines, lineIdx, l, 1, opts,
+		lines, lineIdx, l, 1, opts, nil,
 	)
 	if status != StatusOK {
 		t.Fatalf("status = %q, want ok (result=%q)", status, result)

@@ -126,6 +126,10 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 	client := NewAIClient(mc)
 	client.SetLogger(logger)
 
+	// P12：升级修复会话配置（就地修复轮用完后启用）。备选模型在加载期解析，
+	// 解析失败视同未配置（保持原模型清上下文重来的行为）。
+	fixCfg := resolveMermaidFixConfig(cfg, mc, imagesDir)
+
 	// Discover markdown files (sorted, like Python's sorted(...)).
 	mdFiles, err := filepath.Glob(filepath.Join(outputDir, "*.md"))
 	if err != nil {
@@ -260,7 +264,7 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 			logger.SetQuiet(true)
 		}
 		runWorkers(client, pending, imagesDir, mdCache, progressRoot,
-			logger, &progressData, &progressMu, cfg.Options, opts.Quiet)
+			logger, &progressData, &progressMu, cfg.Options, opts.Quiet, fixCfg)
 		if opts.Quiet {
 			logger.SetQuiet(false)
 		}
@@ -409,6 +413,7 @@ func runWorkers(
 	progressMu *sync.Mutex,
 	opts config.OptionsConfig,
 	quiet bool,
+	fixCfg *MermaidFixConfig,
 ) {
 	results := make(chan runResult, len(pending))
 	var wg sync.WaitGroup
@@ -544,7 +549,7 @@ func runWorkers(
 			r, status, raw := ProcessOneImage(
 				client, imagesDir, tt.imgPath, subject,
 				entry.lines, tt.lineIdx,
-				logger, tid, opts,
+				logger, tid, opts, fixCfg,
 			)
 			elapsed := time.Since(startTime).Seconds()
 			elapsedStr := strconv.FormatFloat(elapsed, 'f', 2, 64)
@@ -805,4 +810,38 @@ func splitImgTypePrefix(result string) (string, string) {
 	body = strings.TrimPrefix(body, "\r")
 	body = strings.TrimPrefix(body, "\n")
 	return typ, body
+}
+
+// resolveMermaidFixConfig 从 tools.mermaid.session_* 组装升级修复会话配置。
+// 返回 nil 表示功能关闭（session_rounds ≤ 0）。工作区根 = <finally>/progress_items/
+// mermaid_fix/，具体到图的工作区由调用方按图 Key 懒创建（并发下每图独立、无共享；
+// submit.md / compile_error.log / 转录都留在里面，出错现场可诊断、下轮可续用）。
+func resolveMermaidFixConfig(cfg *config.Config, mc config.ModelConfig, imagesDir string) *MermaidFixConfig {
+	rounds := resolveMermaidSessionRounds(cfg.Tools.Mermaid.SessionRounds)
+	if rounds <= 0 {
+		return nil
+	}
+	fix := &MermaidFixConfig{
+		Rounds:        rounds,
+		ErrorLimit:    resolveMermaidSessionErrors(cfg.Tools.Mermaid.SessionErrors),
+		FallbackModel: strings.TrimSpace(cfg.Tools.Mermaid.FallbackModel),
+		Command:       cfg.Tools.Mermaid.Command,
+		Timeout:       time.Duration(cfg.Tools.Mermaid.Timeout) * time.Second,
+		Primary:       mc,
+		ImagesDir:     imagesDir,
+		WorkspaceRoot: filepath.Join(cfg.Paths.FinallyDir, "progress_items", "mermaid_fix"),
+	}
+	if fix.Timeout <= 0 {
+		fix.Timeout = 30 * time.Second
+	}
+	if fix.FallbackModel != "" {
+		fb, ok := cfg.ResolveModel(fix.FallbackModel)
+		if ok {
+			fix.Fallback = fb
+		} else {
+			// 备选条目不存在：退回原模型清上下文重来（FallbackModel 清空）。
+			fix.FallbackModel = ""
+		}
+	}
+	return fix
 }

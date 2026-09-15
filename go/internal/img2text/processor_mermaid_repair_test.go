@@ -209,7 +209,7 @@ func TestCallAIWithTools_ValidMermaidSingleRequest(t *testing.T) {
 
 	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
-		validator, buildMermaidRepairMessage,
+		validator, buildMermaidRepairMessage, nil,
 	)
 	if status != StatusOK {
 		t.Fatalf("status = %q, want %q", status, StatusOK)
@@ -271,7 +271,7 @@ func TestCallAIWithTools_RepairSucceedsSameSession(t *testing.T) {
 
 	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
-		validator, buildMermaidRepairMessage,
+		validator, buildMermaidRepairMessage, nil,
 	)
 	if status != StatusOK {
 		t.Fatalf("status = %q, want %q", status, StatusOK)
@@ -367,7 +367,7 @@ func TestCallAIWithTools_RepairBudgetExhausted(t *testing.T) {
 
 	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
-		validator, buildMermaidRepairMessage,
+		validator, buildMermaidRepairMessage, nil,
 	)
 	if status != StatusRetry {
 		t.Fatalf("status = %q, want %q", status, StatusRetry)
@@ -404,6 +404,54 @@ func TestCallAIWithTools_RepairBudgetExhausted(t *testing.T) {
 				t.Fatalf("call %d fix prompt must not inline the full previous response", i)
 			}
 		}
+	}
+}
+
+// Scenario (9): 就地修复轮用尽后 fixSession 钩子接管——钩子收到最后一份出错
+// 响应与校验错误，其成功结果原样返回（StatusOK），模型不再被打扰。
+func TestCallAIWithTools_FixSessionHookTakesOver(t *testing.T) {
+	bad := "[IMG_TYPE: flowchart]\n```mermaid\nBROKEN\n```"
+	fixed := "[IMG_TYPE: mermaid]\n```mermaid\ngraph TD\nA-->B\n```"
+	validator := func(string) MermaidValidationResult {
+		return MermaidValidationResult{
+			HasMermaid: true,
+			Available:  true,
+			Error:      "block 1: parse error",
+		}
+	}
+	ms := newMockChatServer(t, func(idx int, _ recordedRequest) (int, string) {
+		return http.StatusOK, responseText(bad)
+	})
+	hookGot := map[string]string{}
+	hookCalls := 0
+	fixSession := func(prevResult, validationError string) (string, bool) {
+		hookCalls++
+		hookGot["prev"] = prevResult
+		hookGot["err"] = validationError
+		return fixed, true
+	}
+
+	client := newTestClient(t, ms.server.URL)
+	l := newTestLogger(t)
+	budget := 1
+	opts := config.OptionsConfig{
+		MaxRetries:         3,
+		MermaidValidation:  "auto",
+		MermaidFixAttempts: &budget,
+	}
+
+	result, status, _ := CallAIWithTools(
+		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
+		validator, buildMermaidRepairMessage, fixSession,
+	)
+	if status != StatusOK {
+		t.Fatalf("status = %q, want %q", status, StatusOK)
+	}
+	if result != fixed {
+		t.Fatalf("result = %q, want the fix session's product", result)
+	}
+	if hookCalls != 1 || hookGot["prev"] != bad || hookGot["err"] != "block 1: parse error" {
+		t.Fatalf("hook calls=%d got=%+v", hookCalls, hookGot)
 	}
 }
 
@@ -500,7 +548,7 @@ func TestCallAIWithTools_ToolCallsDuringRepair(t *testing.T) {
 
 	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
-		validator, buildMermaidRepairMessage,
+		validator, buildMermaidRepairMessage, nil,
 	)
 	if status != StatusOK {
 		t.Fatalf("status = %q, want %q", status, StatusOK)
@@ -619,7 +667,7 @@ func TestCallAIWithTools_ToolRoundsExhaustedNoTools(t *testing.T) {
 
 	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
-		validator, buildMermaidRepairMessage,
+		validator, buildMermaidRepairMessage, nil,
 	)
 	if status != StatusOK {
 		t.Fatalf("status = %q, want %q", status, StatusOK)
@@ -688,7 +736,7 @@ func TestCallAIWithTools_StrictUnavailableSentinel(t *testing.T) {
 
 	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
-		validator, buildMermaidRepairMessage,
+		validator, buildMermaidRepairMessage, nil,
 	)
 	if status != StatusRetry {
 		t.Fatalf("status = %q, want %q", status, StatusRetry)
@@ -729,7 +777,7 @@ func TestCallAIWithTools_AutoUnavailableAccept(t *testing.T) {
 
 	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
-		validator, buildMermaidRepairMessage,
+		validator, buildMermaidRepairMessage, nil,
 	)
 	if status != StatusOK {
 		t.Fatalf("status = %q, want %q", status, StatusOK)
@@ -779,7 +827,7 @@ func TestCallAIWithTools_FormatFixNilValidator(t *testing.T) {
 	result, status, _ := CallAIWithTools(
 		client, "imgdata", []string{}, 0, l, 0, opts,
 		"Fix the prefix to start with [IMG_TYPE:",
-		nil, nil, // <-- the format-fix wiring: nil validator + nil builder
+		nil, nil, nil, // <-- the format-fix wiring: nil validator + nil builder + nil fix session
 	)
 	if status != StatusOK {
 		t.Fatalf("status = %q, want %q", status, StatusOK)

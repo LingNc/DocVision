@@ -54,6 +54,14 @@ type MermaidValidatorFunc func(response string) MermaidValidationResult
 // the conversation already contains it).
 type MermaidRepairPromptBuilder func(currentResult, validationError string) string
 
+// unsafeWorkspaceRe 把文件系统不安全/跨平台的字符压掉（工作区子目录名）。
+var unsafeWorkspaceRe = regexp.MustCompile(`[^\p{L}\p{N}._-]+`)
+
+// MermaidFixFunc 是就地修复轮用完后的**升级修复会话**钩子（P12）：接收最后一份
+// 出错响应与校验错误，返回修复后的完整响应与会话是否成功。nil = 不升级（维持
+// 旧的"跳过、下轮重试"）。
+type MermaidFixFunc func(prevResult, validationError string) (string, bool)
+
 // systemPromptWithExtra appends the caller-provided working-memory
 // instruction (e.g. the latex watermark memory) to the base prompt.
 func systemPromptWithExtra(opts config.OptionsConfig) string {
@@ -124,6 +132,7 @@ func CallAIWithTools(
 	customUserText string,
 	validator MermaidValidatorFunc,
 	repairPromptBuilder MermaidRepairPromptBuilder,
+	fixSession MermaidFixFunc,
 ) (string, string, string) {
 	// Request/retry controls now live on the client (resolved from
 	// the model config); legacy options.* act as fallbacks there.
@@ -383,6 +392,15 @@ func CallAIWithTools(
 					"Mermaid validation failed after %d repair round(s) for %s: %s. Raw output: %s",
 					repairBudget, imgPathFromIdx(lines, imgLineIdx), validation.Error, snippet(currentResult),
 				))
+				// P12：就地修复轮用完 → 升级修复会话（虚拟工作区 + submit +
+				// mmdc 检查 + 错误累计切备选模型）。未配置（fixSession 为 nil
+				// 或 rounds≤0）时维持旧的"跳过、下轮重试"。
+				if fixSession != nil {
+					logger.Log(tid, "  [mermaid-fix] 就地修复轮用尽，启动升级修复会话")
+					if fixed, ok := fixSession(currentResult, validation.Error); ok {
+						return fixed, StatusOK, fixed
+					}
+				}
 				return sentinelMermaid, StatusRetry, currentResult
 			}
 			if repairPromptBuilder == nil {
@@ -758,6 +776,7 @@ func ProcessOneImage(
 	logger *logger.Logger,
 	tid int,
 	opts config.OptionsConfig,
+	fixCfg *MermaidFixConfig,
 ) (string, string, string) {
 	imgFile, err := resolveImageFile(imagesDir, imgPath, subject)
 	if err != nil {
@@ -790,10 +809,22 @@ func ProcessOneImage(
 		repairBuilder = buildMermaidRepairMessage
 	}
 
+	var fixSession MermaidFixFunc
+	if fixCfg != nil && fixCfg.Rounds > 0 {
+		// 每图一个工作区子目录（并发 worker 互不共享）：键 = subject + 图片名，
+		// 非法字符压成 '_'。同一图下轮重试时续用同一目录（出错现场保留）。
+		key := subject + "_" + filepath.Base(imgPath)
+		key = unsafeWorkspaceRe.ReplaceAllString(key, "_")
+		ws := filepath.Join(fixCfg.WorkspaceRoot, key)
+		fixSession = func(prevResult, validationError string) (string, bool) {
+			return mermaidFixSessionInDir(fixCfg, ws, prevResult, validationError, logger, tid)
+		}
+	}
+
 	result, status, lastRaw := CallAIWithTools(
 		client, imgBase64, lines, imgLineIdx,
 		logger, tid, opts, "",
-		validator, repairBuilder,
+		validator, repairBuilder, fixSession,
 	)
 	if status != StatusOK {
 		// result is a sentinel; lastRaw (the model's own text) is what
@@ -844,7 +875,7 @@ func ProcessOneImage(
 		fixed, fixStatus, fixRaw := CallAIWithTools(
 			client, imgBase64, nil, 0,
 			logger, tid, opts, fixMsg,
-			nil, nil,
+			nil, nil, nil,
 		)
 		if fixRaw != "" {
 			fixed = strings.TrimSpace(fixed)

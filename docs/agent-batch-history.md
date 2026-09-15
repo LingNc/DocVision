@@ -995,3 +995,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **用户指出**：① config.example.yaml 没加多重基座的样例；② issue 里的写法（同一键写两次 `extends:`）与实现的列表形式不一致，要改说明。
 
 **改动**：① config.example.yaml 的 extends 注释块（②）补列表形式说明 + models 段加 `vision-heavy: extends: ["gateway-a", "heavy"]` 实例（heavy 链 gateway-b，最终连接走 gateway-b、模型 deepseek-v4.1，gateway-a 只剩 tool_stream 生效——正好演示"后面的基座覆盖前面的"）；default.yaml 注释补一行。② docs/issue.md T25 保留用户原始写法并注明 YAML 重复键不可行、给出列表等价写法；docs/config.md 详述节加列表示例。③ `TestConfigTemplateKeyParity`：extends 的标量/列表是值形态差异不算键面差异（归一化统一记 extends），另加原文守卫"config.example.yaml 必须含 `extends: [`"——新能力在模板里必须有处可学。整份 example.yaml 加载实测零告警（无价格冲突/未知键）。
+
+### P12：Mermaid 升级修复会话（master）
+
+**计划原文**：img2text 普通模型处理复杂图时经历 3 次 mermaid 修复会话仍失败 → 升级：出错的 mermaid 存 submit.md、给虚拟工作区 + 提交功能（类似 latex 流程），工具 write/grep/看原图 + submit（跑 mermaid 语法检查，能过就行）；按设置的错误上限累计编译错误（提交也检查）后清上下文进备选模型（可配置，兜底），出错结果文件保留；会话检查次数上限新设置默认 6；日志整理、analyze 工具调用计入、统计触发后备的会话数。
+
+**实现**：① `tools.mermaid` 新增 `session_rounds`（默认 6，≤0 关闭）/`session_errors`（默认 3）/`fallback_model`（models 条目名，不存在则退回原模型清上下文重来）——现有块加键不 bump `CurrentConfigVersion`（新块才需要）。② `img2text/mermaid_session.go`：工作区 `progress_items/mermaid_fix/<subject>_<图名>/`（每图独立、并发无共享、下轮续用），submit.md 收出错完整响应，工具 `write_file`（唯一可写文件）/`grep`（submit.md+compile_error.log，行号+计数）/`view_image`（原图 base64 回执）/`submit`（ValidateMermaid 全块检查）；错误累计到 `session_errors` 置 escalated，第一段会话结束且 escalated → 第二段全新会话（清上下文、`fallback_model` 的 ModelConfig、工作区文件保留）；submit/检查次数两段合计受 `session_rounds` 约束（submit 工具自守）；两段各留 `session-stage{0,1}.jsonl` 转录。③ 处理器接线：`CallAIWithTools` 新增 `fixSession MermaidFixFunc` 参数，repairBudget 用尽分支先试升级会话、成功返回 StatusOK（修好不跳过），失败/未配置维持旧的 sentinel+StatusRetry；`ProcessOneImage` 新增 `fixCfg *MermaidFixConfig`，每图按 key 拼工作区子目录。④ runner `resolveMermaidFixConfig` 一次性解析（Timeout 默认 30s、备选加载期 ResolveModel）。⑤ analyze/mermaidfix.go：扫文本日志两行标记，进度摘要后打印「mermaid 升级修复会话: 启动 N 次，其中 M 次触发备选模型」；会话文本日志统一 `[ToolCall] <名> · <摘要>` 行（PatternToolCall 照常统计）。⑥ 会话内提示词就地成文（单一使用点，不进 prompts 注册表）。
+
+**测试**：`mermaid_session_test.go` 9 例——假 mmdc（内容含 BROKEN 即失败）下 submit 成功/无块计错/错误累计触发升级/轮次封顶/write+grep/resolve 归一化/关闭开关/401 端点失败路径（快失败，submit.md 现场保留）/runner 解析器（含备选解析成功与失败两态）；`processor_mermaid_repair_test.go` 加场景 9：budget 用尽后钩子收到 (出错响应, 校验错误) 且其结果原样返回 StatusOK。全仓 15 包 ok 0 FAIL；config.example.yaml 加载零告警（dv5 重建后复验）。

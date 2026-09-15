@@ -25,6 +25,18 @@
 | `tools.mermaid.command` | Mermaid CLI 命令 | mmdc |
 | `tools.mermaid.fix_attempts` | Mermaid 独立修正次数（0=无限，受安全上限保护） | 3 |
 | `tools.mermaid.timeout` | 单次 Mermaid 校验超时（秒） | 30 |
+| `tools.mermaid.session_rounds` | 升级修复会话的提交/检查次数上限（两段合计；≤0 = 关闭升级会话，维持旧的"跳过、下轮重试"） | 6 |
+| `tools.mermaid.session_errors` | 升级会话内编译错误累计上限，满了清上下文切备选模型 | 3 |
+| `tools.mermaid.fallback_model` | 备选兜底模型（`models.<条目名>`；条目不存在或留空 = 原模型清上下文重来） | （空） |
+**升级修复会话（P12）**：就地修复轮（`fix_attempts`，同一对话里追加修复消息）用完后，
+模型拿到一个**虚拟工作区**：出错的完整响应落在 `submit.md`，配 `write_file`（重写）、
+`grep`（查 submit.md / compile_error.log）、`view_image`（看原图）、`submit`（跑 mmdc
+检查）四个工具，能过语法检查即可。工作区在 `<finally>/progress_items/mermaid_fix/<图>/`，
+submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可诊断、下轮可续用。
+编译错误累计到 `session_errors` 就**清上下文**、换 `fallback_model`（未配置则原模型）
+从头再来；提交/检查次数两段合计受 `session_rounds` 约束。会话走标准会话基础设施
+（JSONL 转录、工具轮次软上限、压缩），`analyze` 按文本日志的 `[ToolCall]` 行统计工具
+调用，并在进度摘要后报告「启动 N 次 / 触发备选 M 次」。
 | `tools.bash.sandbox` | 会话 bash 是否用 bubblewrap 内核沙箱（沙箱里只有本会话的挂载表；缺 bwrap 自动回退并记警告） | true |
 | `tools.bash.max_output` | 会话 bash 工具返回给模型的字符上限 | 5000 |
 | `tools.python.enabled` | 是否给会话 bash 提供 Python 环境 | true |
