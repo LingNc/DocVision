@@ -661,10 +661,19 @@ func TestEmbedBlockFor(t *testing.T) {
 		{"plain text", "[IMG_TYPE: text]\n这是一段说明文字。", "\n\n这是一段说明文字。\n\n"},
 		{"latex math", "[IMG_TYPE: latex]\n$$E=mc^2$$", "\n\n$$E=mc^2$$\n\n"},
 		{"table", "[IMG_TYPE: table]\n| a | b |\n| - | - |", "\n\n| a | b |\n| - | - |\n\n"},
-		{"mermaid passthrough", "[IMG_TYPE: flowchart]\n```mermaid\ngraph TD; A-->B\n```", "\n\n```mermaid\ngraph TD; A-->B\n```\n\n"},
-		{"bare mermaid body gets a fence", "[IMG_TYPE: mermaid]\ngraph TD; A-->B", "\n\n```mermaid\ngraph TD; A-->B\n```\n\n"},
+		// T16：mermaid 嵌入带 [Image]( 描述 ) 前缀（无 alt 时用 mermaid）。
+		{"mermaid passthrough", "[IMG_TYPE: flowchart]\n```mermaid\ngraph TD; A-->B\n```", "\n\n[Image]( mermaid )\n\n```mermaid\ngraph TD; A-->B\n```\n\n"},
+		{"bare mermaid body gets a fence", "[IMG_TYPE: mermaid]\ngraph TD; A-->B", "\n\n[Image]( mermaid )\n\n```mermaid\ngraph TD; A-->B\n```\n\n"},
+		{"mermaid unclosed fence gets closed", "[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B", "\n\n[Image]( mermaid )\n\n```mermaid\ngraph TD; A-->B\n```\n\n"},
 		{"visual default", "[IMG_TYPE: screenshot]\n一个 IDE 截图。", "\n\n[Image]( 一个 IDE 截图。 )\n\n"},
 		{"missing prefix", "普通文本", "\n\n[Image]( 普通文本 )\n\n"},
+	}
+	// T16：带 alt 的引用单独走 embedBlockForRef。
+	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "![流程图](images/x/abc.jpg)"); got != "\n\n[Image]( 流程图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
+		t.Errorf("mermaid with alt: got %q", got)
+	}
+	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "<img src=\"images/x/abc.jpg\" alt=\"柱状图\">"); got != "\n\n[Image]( 柱状图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
+		t.Errorf("mermaid with html alt: got %q", got)
 	}
 	for _, tc := range cases {
 		if got := embedBlockFor(tc.result); got != tc.want {

@@ -357,7 +357,7 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 
 		nc := entry.content
 		for _, r := range reps {
-			nc = nc[:r.off.Start] + embedBlockFor(r.item.Result) + nc[r.off.End:]
+			nc = nc[:r.off.Start] + embedBlockForRef(r.item.Result, entry.content[r.off.Start:r.off.End]) + nc[r.off.End:]
 		}
 		// Only write when the rebuilt content differs from what is already
 		// on disk. Files whose images were fully processed in earlier rounds
@@ -728,6 +728,14 @@ func resolveSeed(seedStr string) (int64, int64) {
 //   - mermaid embeds as its (already validated) code block;
 //   - remaining visual types keep a readable [Image]( description ).
 func embedBlockFor(result string) string {
+	return embedBlockForRef(result, "")
+}
+
+// embedBlockForRef 与 embedBlockFor 相同，mermaid 分支额外用原始图片引用里
+// 的 alt 文本当 [Image] 前缀的描述（T16）：mermaid 也是视觉内容的一种，最终
+// 文件里先有一个统一的 `[Image]( 描述 )` 锚，后面才跟 ```mermaid 代码块；
+// 模型偶尔吞掉结尾围栏，嵌入前补齐，避免破坏后续 markdown。
+func embedBlockForRef(result, ref string) string {
 	typ, body := splitImgTypePrefix(result)
 	body = strings.TrimSpace(body)
 	switch {
@@ -735,15 +743,49 @@ func embedBlockFor(result string) string {
 		typ == "table" || typ == "code":
 		return "\n\n" + body + "\n\n"
 	case typ == "mermaid", strings.Contains(body, "```mermaid"):
-		// A body that already IS a mermaid code block embeds verbatim; a
-		// bare diagram body (legacy progress data) gets the fence.
-		if strings.HasPrefix(body, "```") {
-			return "\n\n" + body + "\n\n"
+		label := altOfRef(ref)
+		if label == "" {
+			label = "mermaid"
 		}
-		return "\n\n```mermaid\n" + body + "\n```\n\n"
+		if !strings.HasPrefix(body, "```") {
+			// A bare diagram body (legacy progress data) gets the fence.
+			return "\n\n[Image]( " + label + " )\n\n```mermaid\n" + body + "\n```\n\n"
+		}
+		return "\n\n[Image]( " + label + " )\n\n" + ensureClosedFence(body) + "\n\n"
 	default:
 		return "\n\n[Image]( " + body + " )\n\n"
 	}
+}
+
+// htmlAltRe extracts the alt attribute of an <img> reference.
+var htmlAltRe = regexp.MustCompile(`(?i)\balt=["']([^"']*)["']`)
+
+// fenceLineRe counts markdown fence lines (``` or ```lang at line start).
+var fenceLineRe = regexp.MustCompile("(?m)^\\s*" + "```" + "(?:[a-zA-Z0-9_-]+)?\\s*$")
+
+// altOfRef pulls a human-readable alt from the original image reference:
+// markdown `![alt](…)` → alt; `<img … alt="…">` → the attribute; else "".
+func altOfRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "![") {
+		if i := strings.Index(ref, "]("); i > 2 {
+			return strings.TrimSpace(ref[2:i])
+		}
+		return ""
+	}
+	if m := htmlAltRe.FindStringSubmatch(ref); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+// ensureClosedFence appends a closing fence when the body has an odd number
+// of fence lines (T16: the model sometimes swallows the trailing ```).
+func ensureClosedFence(body string) string {
+	if len(fenceLineRe.FindAllString(body, -1))%2 == 1 {
+		body += "\n```"
+	}
+	return body
 }
 
 // Missing or malformed prefixes return ("", whole input) and the

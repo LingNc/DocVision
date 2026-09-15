@@ -961,3 +961,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **现象**：`[3/4] 收集引用的图片` 后长时间无输出。**量化现场**：`mineru_output` 191 个目录（167 个含 images），**约 7.5 万张图**；缺失图片触发 `buildImageSourceIndex` 时在 **samba 网络盘**上**串行** `os.ReadDir` 全部目录，期间零输出——不是死了，是看不见的慢。
 
 **修法**：① 索引扫描改**并行**（12 路信号量限流，逐目录 goroutine，互斥锁合并局部 map）；② 扫描中每 2 秒打 `已扫描 N/M 个目录...`（仅真的画过进度才补换行，快扫完不残留空行）；③ 触发扫描前先打印「有 N 张图片缺失，正在扫描 M 个 mineru 目录建索引（并行）」——让等待有解释。T5（逐张核对慢）此前已在 df2ef2c 修过（全部在盘就跳过），本批处理的是「确实缺图时」的索引构建路径。
+
+### T16：mermaid 嵌入统一 `[Image]` 锚 + 围栏闭合防御（master，同批）
+
+**需求**：mermaid 类型的嵌入也应有 `[Image]( … )` 前缀（后面才是 ```mermaid 代码块）；"多多少少还有一点标签没有闭合的问题"。
+
+**实现**（runner.go）：`embedBlockFor` → `embedBlockForRef(result, ref)`——嵌入点把**原始图片引用**（替换循环里 `entry.content[off.Start:off.End]`，右到左替换时切片仍指向原文）传进来；`altOfRef` 从 markdown `![alt](…)` 或 `<img alt="…">` 抽描述（缺失退 "mermaid"）；mermaid 分支输出 `[Image]( 描述 )` 锚行 + 代码块。`ensureClosedFence` 数围栏行（`^\s*```(?:lang)?\s*$`）奇数则补结尾 ```——吞尾围栏的模型输出不再污染后续 markdown。反引号正则里写 ``` 会终止 raw string literal——用解释串拼接（build 立刻抓到）。其余类型嵌入方式不变。
+
+**测试**：TestEmbedBlockFor 更新 + mermaid-with-alt（markdown/html 两种引用）+ 未闭合围栏补齐用例；全仓 15 包绿。
