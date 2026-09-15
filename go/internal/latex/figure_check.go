@@ -46,7 +46,7 @@ func (r *Runner) newFigureChecker(tid int, imgFile, name string, maxRounds int) 
 	if modelName == "" {
 		modelName = "verifier"
 	}
-	if _, ok := r.models[modelName]; !ok {
+	if !r.hasModel(modelName) {
 		// 没配这个模型：退回作图模型（它至少是能看图的），并在日志里说清楚，
 		// 免得"校验开着却从没跑过"变成谜。
 		r.log.LogWarning(tid, "[figure-check] models 里没有", modelName, "条目，改用作图模型:", r.cfg.Latex.DrawingModel)
@@ -67,7 +67,7 @@ func (r *Runner) newFigureChecker(tid int, imgFile, name string, maxRounds int) 
 	}
 	tuning := r.cfg.LatexSession("checker")
 	hook, closeRow := r.livePhaseRow("figure-check:"+name, "figure-check:"+name)
-	sess := session.NewSession(r.clientFor(modelName), r.models[modelName], tuning,
+	sess := session.NewSession(r.clientFor(modelName), r.modelOf(modelName), tuning,
 		renderPrompt(prompts.Must(prompts.FigureCheckSystem), tuning, r.outputLang()),
 		[]session.Tool{submit}, r.log, tid, "figure-check:"+name)
 	sess.SetProgressHook(hook)

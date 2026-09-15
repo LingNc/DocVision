@@ -179,7 +179,7 @@ func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool
 func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 	r.log.LogWarning(0, "[assemble] 全书编译失败，启动修复会话:", firstErr)
 	client := r.clientFor(r.cfg.Latex.ConvertModel)
-	modelCfg := r.models[r.cfg.Latex.ConvertModel]
+	modelCfg := r.modelOf(r.cfg.Latex.ConvertModel)
 	tuning := r.cfg.LatexSession("convert")
 	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "book", Log: r.log, Tid: 1}
 	submit := &SubmitDoneTool{Label: "the build fix"}
@@ -224,7 +224,7 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 	r.log.Log(0, "[final-review] 启动终审会话（上限", strconv.Itoa(rounds), "轮）")
 	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "final-review", Log: r.log, Tid: 1}
 	submit := &SubmitDoneTool{Label: "the final review"}
-	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
+	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.modelOf(r.cfg.Latex.ConvertModel),
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.FinalReviewSystem), r.cfg.LatexSession("convert"), r.outputLang()),
 		r.bookSessionTools(proj, buildDir, compile, submit), r.log, 1, "final-review")
 	liveHook, liveClose := r.livePhaseRow("assemble/final-review", "final-review")

@@ -343,7 +343,7 @@ func (r *Runner) stylePhase(proj string) error {
 	}
 
 	client := r.clientFor(r.cfg.Latex.StyleModel)
-	modelCfg := r.models[r.cfg.Latex.StyleModel]
+	modelCfg := r.modelOf(r.cfg.Latex.StyleModel)
 	// style 会话的内置 max_tokens 默认即 32768（cls+manual+example 较大），
 	// 用户显式配置 latex.sessions.style.max_tokens 时以配置为准。
 	tuning := r.cfg.LatexSession("style")
@@ -511,7 +511,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 	_ = os.WriteFile(bufferPath, []byte("# split buffer\n"), 0o644)
 
 	client := r.clientFor(r.cfg.Latex.ChapterModel)
-	modelCfg := r.models[r.cfg.Latex.ChapterModel]
+	modelCfg := r.modelOf(r.cfg.Latex.ChapterModel)
 	tuning := r.cfg.LatexSession("chapter")
 	submit := &SubmitSplitTool{}
 	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_chapters")
@@ -885,7 +885,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	}
 
 	client := r.clientFor(r.cfg.Latex.ConvertModel)
-	modelCfg := r.models[r.cfg.Latex.ConvertModel]
+	modelCfg := r.modelOf(r.cfg.Latex.ConvertModel)
 	tuning := r.cfg.LatexSession("convert")
 	// 手册不在首条消息里内联：它就在会话工作区里（work:manual.md）以及
 	// project:style/manual.md，内联 11k 字符会跟着每轮请求重发。
@@ -1314,7 +1314,7 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 		submit,
 	}
 	tools = append(tools, r.sourcePageTools()...)
-	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.models[r.cfg.Latex.ConvertModel],
+	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.modelOf(r.cfg.Latex.ConvertModel),
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.StyleFixSystem), r.cfg.LatexSession("convert"), r.outputLang()), tools, r.log, tid, "style-fix:"+base)
 	liveHook, liveClose := r.livePhaseRow("style-fix:"+base, "style-fix:"+base)
 	sess.SetProgressHook(liveHook)
@@ -1421,7 +1421,7 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	workDir := filepath.Join(proj, "work", "style")
 
 	client := r.clientFor(r.cfg.Latex.StyleModel)
-	modelCfg := r.models[r.cfg.Latex.StyleModel]
+	modelCfg := r.modelOf(r.cfg.Latex.StyleModel)
 	tuning := r.cfg.LatexSession("style")
 
 	// 工具集与原样式会话**同一份**（构造器共享，见 styleSessionTools）。

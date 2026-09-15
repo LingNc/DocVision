@@ -917,3 +917,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **实现**（三行改动，照 Markdown 开关的既有模式）：① `state.showThumbs`（默认 true）+ `loadState` 读 `storeGet('showThumbs') !== '0'`；② App.vue 页签行右端（Markdown 旁）加「缩略图」`tab-toggle`（id `thumb-toggle`、aria-pressed、悬浮说明），点击翻状态并 `storeSet`；③ AssistantMsg 的 preview-strip `v-if` 加 `state.showThumbs &&`——纯响应式跟随，无需手动重渲链。v2-only（旧页冻结不加）。
 
 **验证**：CDP——默认 23 条 preview-strip → 关 0 条（aria-pressed=false、`dsh.sessionview.showThumbs=0` 落盘）→ 开 23 条恢复；**重载后仍 0 条**（loadState 读回记忆），再点恢复 23。截图目检开关位置与高亮态。探针 453/454（默认开，与旧页基准无分叉）、vitest 24/24、控制台零报错。这是 web 迁移线最后一个 plan 项——完成后 `web/components` 非快进合回 master（用户批准）。
+
+### T14 崩溃修复：clientFor 并发写 map（master，post-merge 第一批）
+
+**用户崩溃栈**：`fatal error: concurrent map writes` @ `runner.go:328 clientFor` ← `convertOneChapter`（book.go:887）← convertPhase goroutine。convert 阶段每章一个 goroutine，各章**首次**解析到自己那章的模型（convert_01/02/03…）时同时写 `r.clients`/`r.models`——写写碰撞直接 fatal，整次运行作废。
+
+**修法**：`Runner` 加 `cfgMu sync.Mutex`；**全部 16 处** `r.clients[...]`/`r.models[...]` 裸访问收口成三扇门——`clientFor`（懒创建，锁内）、`modelOf`（读，锁内）、`hasModel`（存在性探测，figure-check 回退用，锁内）。读点也必须收口：Go map 读到一半被并发写同样 fatal。批量替换时正则曾误伤 `r.models[name] = mc` 赋值行与 modelOf 自身（`return r.modelOf(name)` 无限递归）——go vet 立刻抓出，逐一修回；教训：**map 访问批量改写后必须核对函数体内部的自引用**。
+
+**验证**：新增 `TestClientForConcurrentAccess`（8 goroutine × 8 模型名并发 clientFor/modelOf/hasModel，`-race`）通过；全仓 latex/session/sessionview 测试绿。

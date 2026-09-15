@@ -6,6 +6,7 @@
 ## [Unreleased]
 
 ### Added
+- **修复：档位1 convert 阶段偶发进程崩溃（T14）**——多章并发首次解析模型时 `clientFor` 无锁并发写 clients/models，触发 `fatal error: concurrent map writes`；改为互斥锁收口（clientFor/modelOf/hasModel），`-race` 并发测试钉住。
 - **缩略图开关（P13）**：页签行右端新增「缩略图」开关（Markdown 旁）——控制看图调用下的缩略图预览行显隐；默认开、选择记在 `localStorage`（`showThumbs`），重开页面保持。
 - **修复：工具回执被误标 error**——状态判定改为只看回执**首行**（错误都是前缀式标记：TOOL ERROR / COMPILE FAILED / Traceback / REJECTED / 文件不存在…）；原先全文扫关键词，image_context 的回执引用书中正文「在第一次失败的条件下」就被误报成 error（矢量图会话 24 条命中里 11 条是这类误报）。
 - **修复：详情栏头部「详情」标题样式丢失**——P11 拆样式时 `.details-head/.details-title` 写进了 DetailsPanel 的 scoped 块，元素却由 App 渲染，scope 属性对不上导致整条规则失配；搬回 App 的 scoped 块（P11 陷阱①又一例）。

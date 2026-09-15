@@ -32,7 +32,7 @@ func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, t
 		checkerName = r.cfg.Latex.ConvertModel
 	}
 	client := r.clientFor(checkerName)
-	modelCfg := r.models[checkerName]
+	modelCfg := r.modelOf(checkerName)
 	tuning := r.cfg.LatexSession("checker")
 
 	mounts := []Mount{{Name: "check", Dir: view}}

@@ -173,6 +173,12 @@ type Runner struct {
 	clients map[string]*session.Client
 	models  map[string]config.ModelConfig
 
+	// cfgMu guards the lazily-filled clients/models maps: chapter conversion
+	// and image processing run concurrently, and a map write during a map
+	// read fatals the whole process (T14: "fatal error: concurrent map
+	// writes" out of clientFor). clientFor and modelOf are the only doors.
+	cfgMu sync.Mutex
+
 	wm       *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
 	inline   bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
 	docIndex *DocIndex        // 原始文档只读索引（doc_search/原书页面）
@@ -318,6 +324,8 @@ func (r *Runner) keepSessionFile(path string) {
 }
 
 func (r *Runner) clientFor(name string) *session.Client {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
 	if c, ok := r.clients[name]; ok {
 		return c
 	}
@@ -327,6 +335,24 @@ func (r *Runner) clientFor(name string) *session.Client {
 	r.clients[name] = c
 	r.models[name] = mc
 	return c
+}
+
+// modelOf reads the resolved model config for name (zero value when the
+// name was never resolved through clientFor). All direct r.models reads
+// go through here so concurrent clientFor writes cannot race them (T14).
+func (r *Runner) modelOf(name string) config.ModelConfig {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	return r.models[name]
+}
+
+// hasModel reports whether name has been resolved already (T14: guarded
+// existence check for callers that only probe, e.g. figure-check fallback).
+func (r *Runner) hasModel(name string) bool {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	_, ok := r.models[name]
+	return ok
 }
 
 // RunImages executes the level-2 pipeline: classify every image, then
@@ -689,7 +715,7 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 
 	client := r.clientFor(r.cfg.Latex.ClassifierModel)
-	modelCfg := r.models[r.cfg.Latex.ClassifierModel]
+	modelCfg := r.modelOf(r.cfg.Latex.ClassifierModel)
 	classifyExtra := r.wm.Block()
 
 	// 只对尚未分类的任务调用分类会话（fallback 重试等已带 Class
@@ -1106,7 +1132,7 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	contextText += strings.Join(img2text.GetContextLines(mf.lines, t.lineIdx,
 		r.cfg.Options.MaxContextLinesUp, r.cfg.Options.MaxContextLinesDown), "\n")
 
-	modelCfg := r.models[r.cfg.Latex.DrawingModel]
+	modelCfg := r.modelOf(r.cfg.Latex.DrawingModel)
 	client := r.clientFor(r.cfg.Latex.DrawingModel)
 	tuning := r.cfg.LatexSession("drawing")
 

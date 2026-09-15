@@ -22,7 +22,7 @@
 ```
 [X] T12. 这边平均首字延迟没有给保留几位小数吗？“991.4705882352941ms 平均首字”。
 [X] T13. 那个项目右边旧版单项目还在新项目上有显示（显示的有点问题），并且这边输入输出的token和几分钟前挨得有点近了
-[ ] T14. 程序直接崩溃了
+[X] T14. 程序直接崩溃了（根因：convert/checker 并发阶段各自首次解析模型时 `clientFor` 无锁并发写 `clients/models` 两张 map——fatal concurrent map writes。修复：`Runner.cfgMu` 互斥，clientFor/modelOf/hasModel 三扇门收口全部 16 处裸访问；`-race` 并发测试 TestClientForConcurrentAccess 钉死。）
 ```log
 === LaTeX 档位 1：全书转换 ===
 [23:14:08][T00] [project] 项目工作区: latex_project/2026年李艳芳预测三套卷数一（项目名 "2026年李艳芳预测三套卷数一"，输出根 latex_project）
@@ -224,3 +224,29 @@ created by mineru-tools/internal/latex.(*Runner).convertPhase in goroutine 1
 [X] T22. 章节转换/章节核对为什么没有编号，在那个小方块上。还有小方块上应该也能显示这个块的一个完成情况吧，根据背景或者小圆圈绿色正在进行之类的。正常就是已经结束，红色可能是错误终止的。或者按照背景颜色来。
 [X] T23. 在ui界面的轨迹中，点击用户的展开那边，会界面突然跳会到上面的地方，而不是原地展开。（另修：`classifyResult` 全文扫关键词把 image_context 正常回执里引用的书中正文「第一次失败」误报成 error——改为只看回执首行，COMPILE FAILED 前缀显式在列；be53f9a 会话实测恢复「—」。P9 重做轨迹交互后已消：▸ 展开原地（CDP 实测 scrollTop delta=0）、点行=右栏选中不再跳对话页；用户看到的是 P9 之前「点行=跳回对话并滚动锚点」的旧行为。）
 [ ] T24. 对于img2text中的有 <img src> 的图片是否还有处理不到位的？你看看finally里面是否还有遗留的？
+[ ] T25. 支持对extends的复写吗？按照顺序后面覆盖前面，例如:
+
+```yaml
+  thinking:
+    thinking:
+      type: enabled
+      clear_thinking: false
+    reasoning_effort: high
+  nothinking:
+    thinking:
+      type: disabled
+  dsv4.1:
+    image_tokens:
+      method: fixed
+      tokens: 1024
+    model: "deepseek-v4.1-flash-expires-on-0910"
+    price:
+      input: 1
+      cached: 0.02
+      output: 4
+      currency: "¥"
+    extends: "thinking"
+  drawing:
+    extends: "dsv4.1"
+    extends: "nothinking"
+```

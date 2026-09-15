@@ -102,7 +102,7 @@ func (r *Runner) detectWatermarkPhase(samples []watermarkSample) {
 func (r *Runner) runWatermarkDetection(samples []watermarkSample) *WatermarkMemory {
 	wm := &WatermarkMemory{}
 	client := r.clientFor(r.cfg.Latex.ClassifierModel)
-	modelCfg := r.models[r.cfg.Latex.ClassifierModel]
+	modelCfg := r.modelOf(r.cfg.Latex.ClassifierModel)
 
 	// 1) Recurring image refs across ALL documents — a watermark crop
 	// repeats far more often than any content figure.
