@@ -72,7 +72,12 @@ func RunTikZSession(
 		// 原图:每次看图都附带"印刷尺寸/像素/有效 dpi"测量 + 软预算提醒。
 		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg),
 			SoftMax: cfgImageMax, WarnRatio: cfgWarnRatio,
-			Measure: func() string { return measureHint(env.CurrentImgAbs) }}, // 与自动测量等价，这里是避免重复回溯
+			Measure: func() string {
+				if m := measureHint(env.CurrentImgAbs); m != "" {
+					return m + redrawSizeHint // T17：只在作图会话要求"按原尺寸重画"
+				}
+				return ""
+			}},
 	}, log, tid, "tikz")
 
 	// 原图位图尺寸 → 宽高比：模型只看渲染图，无法判断物理大小，

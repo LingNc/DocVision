@@ -969,3 +969,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **实现**（runner.go）：`embedBlockFor` → `embedBlockForRef(result, ref)`——嵌入点把**原始图片引用**（替换循环里 `entry.content[off.Start:off.End]`，右到左替换时切片仍指向原文）传进来；`altOfRef` 从 markdown `![alt](…)` 或 `<img alt="…">` 抽描述（缺失退 "mermaid"）；mermaid 分支输出 `[Image]( 描述 )` 锚行 + 代码块。`ensureClosedFence` 数围栏行（`^\s*```(?:lang)?\s*$`）奇数则补结尾 ```——吞尾围栏的模型输出不再污染后续 markdown。反引号正则里写 ``` 会终止 raw string literal——用解释串拼接（build 立刻抓到）。其余类型嵌入方式不变。
 
 **测试**：TestEmbedBlockFor 更新 + mermaid-with-alt（markdown/html 两种引用）+ 未闭合围栏补齐用例；全仓 15 包绿。
+
+### T17：view_image 回执去冗余（master，同批收官）
+
+**需求**：① 「Redraw it at that size — do NOT scale it up to the page.」不必要；② 预算提醒里的 64 位哈希文件名太长，说"当前这张图"即可。
+
+**实现**：① `ImageMeasure.String()` 只保留尺寸事实（mm/像素/dpi/页宽占比），redraw 指令抽成 `redrawSizeHint` 常量、只由**作图会话**（tikz.go 的 Measure 闭包）追加——style/convert/checker/终审这些只看图的会话不再被这句误导性指令打扰（它们不重画任何东西）。② `view_image` 预算标签 `view_image on <basename>` → `view_image on this image`（去重键仍是完整路径，每图至多提醒一次的语义不变；`view_pdf` 保留页码——那是有信息量的）。

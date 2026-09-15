@@ -107,7 +107,8 @@ func (t *ViewImageTool) budgetOnce(full string, used int) string {
 	if t.warned == nil {
 		t.warned = map[string]bool{}
 	}
-	return viewBudgetNoteOnce(t.warned, full, "view_image on "+filepath.Base(full), used, t.SoftMax, t.WarnRatio)
+	// T17：不回显 64 位哈希文件名——预算是对"当前这张图"说的。
+	return viewBudgetNoteOnce(t.warned, full, "view_image on this image", used, t.SoftMax, t.WarnRatio)
 }
 
 // measureNote reports the original figure's printed size. Callers with a
