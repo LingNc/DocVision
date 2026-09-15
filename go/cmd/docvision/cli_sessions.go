@@ -102,7 +102,7 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
                     路径（../）。
 
 示例：
-  docvision sessions                            # 扫描配置里的根目录（无配置则当前目录），生成 <根目录>/sessions.html
+  docvision sessions                            # 扫描配置里的根目录，生成 <根目录>/sessions.html
   docvision sessions --dir ~/PDF2MD             # 指定扫描根目录
   docvision sessions --list                     # 只在终端列出扫到的会话
   docvision sessions --list --unit char         # 提示词列改回精确字符数
@@ -116,14 +116,16 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 			// 页面里那些 ≈ token 用哪套图片折算规则（estimate 块）。
 			// 价格来自配置里的 models.*.price（每个模型一份费率），没有配置
 			// 就整篇不显示金额：¥0 会被读成"这次没花钱"。
-			cfg, cfgErr := loadConfigWithFlag(cmd)
-			prices := map[string]config.PriceConfig{}
-			if cfgErr != nil {
-				// 读不到配置就只是没有价格、目录退回当前目录，不该挡住查看会话。
-				fmt.Fprintln(os.Stderr, "提示：读取配置失败，本次不显示金额、--dir 退回当前目录：", cfgErr)
-			} else {
-				prices = cfg.ModelPrices()
+			cfg, err := loadConfigWithFlag(cmd)
+			if err != nil {
+				// T26：配置文件有问题（解析/校验错误、--config 指名的文件不存在）
+				// 必须**报错终止**，绝不带着坏配置继续跑——错误的目录、端口与
+				// 图片 token 折算规则会悄悄给出误导性的结果。（"没有任何配置文件"
+				// 的情况在 PersistentPreRunE 已被自动创建默认配置兜住，正常到不了
+				// 这里。）
+				return fmt.Errorf("读取配置失败（按 T26 启动即停，不再降级继续）: %w", err)
 			}
+			prices := cfg.ModelPrices()
 
 			root, dirSource := sessionsRoot(cmd, cfg, startDir)
 
@@ -158,7 +160,7 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 					Addr:       addr,
 					DirSource:  dirSource,
 					AddrSource: addrSource,
-					ConfigNote: sessionsConfigNote(cfg, cfgErr),
+					ConfigNote: sessionsConfigNote(cfg),
 				})
 			}
 
@@ -261,17 +263,14 @@ func sessionsAddr(cmd *cobra.Command, cfg *config.Config) (string, string) {
 	return sessionview.DefaultAddr, "内置默认"
 }
 
-// sessionsConfigNote renders the config line: the file that applied, "未找到"
-// when none did, or the path plus "读取失败" when it exists but could not be
-// loaded (the two cases must not look alike — the first is a fresh directory,
-// the second is a broken config).
-func sessionsConfigNote(cfg *config.Config, err error) string {
+// sessionsConfigNote renders the config line: the file that applied, or "未找到"
+// only as a defensive branch（T26 起配置读失败即终止，不会再出现"路径在但读不了"）。
+func sessionsConfigNote(cfg *config.Config) string {
+	// T26 之后配置读失败即终止，走到这里的 cfg 一定非空；cfg == nil 的分支只
+	// 剩防御意义。
 	used := configPathUsed()
 	if cfg != nil {
 		return used
-	}
-	if err != nil && used != "未找到" {
-		return used + "（读取失败）"
 	}
 	return "未找到"
 }

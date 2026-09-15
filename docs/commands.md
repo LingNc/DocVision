@@ -123,7 +123,7 @@ Mermaid 校验由 `tools.mermaid.*`（off/auto/strict、CLI 命令、修正次�
 **实时模式不会再把侧栏刷回去**：每 2 秒的轮询先算一遍**列表签名**（会话 id 顺序 + 消息数 + 费用 + 请求数 + 项目的 `progress.json` 快照 + 过滤词）——签名没变就只做"最小修补"（改相对时间、活跃圆点、用量 chip、悬浮说明与选中高亮），**一个 DOM 节点都不新建/搬动**，于是手动折叠的组、滚动位置、悬停状态都不会被冲掉。签名变了（真的多了会话 / 用了新 token / 改了进展）才重建，重建后按记忆还原各组的展开状态并恢复 `scrollTop`。折叠状态与溢出按钮的记忆键属于**视图状态**，刻意不进签名——否则点一下组头就会让整份列表作废重建。`mtime`/`live` 同理不进签名（它们每 2 秒都可能变，唯一的可见表现是行尾时间与活跃圆点，修补即可）。
 
 ```bash
-docvision sessions                           # 扫描配置里的根目录（paths.latex_project；无配置则当前目录），生成 <根目录>/sessions.html
+docvision sessions                           # 扫描配置里的根目录（paths.latex_project），生成 <根目录>/sessions.html
 docvision sessions --dir /path/to/PDF2MD      # 指定扫描根目录（最优先）
 docvision sessions --list                     # 只在终端列出会话（阶段/消息数/提示词/用量/大小/修改时间/路径）
 docvision sessions --serve                    # 本地实时预览（地址取配置 preview.host/port）

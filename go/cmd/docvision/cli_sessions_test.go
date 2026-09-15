@@ -133,15 +133,38 @@ func TestSessionsConfigNote(t *testing.T) {
 	defer func() { resolvedConfigPath = saved }()
 
 	resolvedConfigPath = "/tmp/x/config.yaml"
-	if got := sessionsConfigNote(&config.Config{}, nil); got != "/tmp/x/config.yaml" {
+	if got := sessionsConfigNote(&config.Config{}); got != "/tmp/x/config.yaml" {
 		t.Errorf("读到配置时 = %q", got)
 	}
-	if got := sessionsConfigNote(nil, os.ErrNotExist); got != "/tmp/x/config.yaml（读取失败）" {
-		t.Errorf("配置读不了时 = %q", got)
-	}
 	resolvedConfigPath = ""
-	if got := sessionsConfigNote(nil, os.ErrNotExist); got != "未找到" {
+	if got := sessionsConfigNote(nil); got != "未找到" {
 		t.Errorf("没有配置时 = %q", got)
+	}
+}
+
+// TestSessionsBrokenConfigAborts 钉住 T26：配置文件存在但损坏（这里用
+// extends 引用不存在的条目，就是用户现场那类错误）时，sessions 必须**返回错误
+// 终止**，而不是打一行提示后带着默认目录/端口继续跑。
+func TestSessionsBrokenConfigAborts(t *testing.T) {
+	saved := resolvedConfigPath
+	savedWd, _ := os.Getwd()
+	defer func() {
+		resolvedConfigPath = saved
+		_ = os.Chdir(savedWd)
+	}()
+
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(broken, []byte("models:\n  drawing:\n    extends: nothinking\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.LoadConfig(broken); err == nil {
+		t.Fatal("预置条件失败：这份配置应当加载报错")
+	}
+	resolvedConfigPath = broken
+	cmd, _ := sessionsCmdFor(t)
+	if err := cmd.RunE(cmd, nil); err == nil {
+		t.Fatal("sessions 对损坏的配置应报错终止（T26）")
 	}
 }
 
@@ -544,7 +567,18 @@ func TestSessionsListInvalidUnitFailsTheCommand(t *testing.T) {
 	os.Stderr = devnull
 	defer func() { os.Stderr = oldErr }()
 
+	// T26 起配置读失败直接终止，本命令要走到 --unit 校验就必须先有份能加载的
+	// 配置（T26 测试同款的最小配置），并给裸命令补上 --config 持久旗标。
+	validCfg := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(validCfg, []byte("config_version: 10\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	saved := resolvedConfigPath
+	defer func() { resolvedConfigPath = saved }()
+	resolvedConfigPath = validCfg
+
 	cmd := newSessionsCmd()
+	cmd.PersistentFlags().StringP("config", "c", "", "配置文件路径（测试桩）")
 	cmd.SilenceUsage, cmd.SilenceErrors = true, true
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)

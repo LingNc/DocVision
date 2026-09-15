@@ -44,6 +44,8 @@
 
 ### Changed
 
+- **配置文件有问题启动即停（T26）**：`docvision sessions` 是唯一还带"配置读失败继续跑"降级的命令（打一行提示后用默认目录/端口/折算规则照常服务）——现在与其它命令对齐，配置加载出错（解析/校验错误、`--config` 指名的文件不存在）直接报错终止；"无配置"场景由启动期自动创建默认配置兜住。帮助文本与文档中"无配置则当前目录"的降级描述一并移除。
+
 - **`models.<条目>.price` 没写任何费率时继承 `models.text` 的费率**：同一个网关下的模型不必重复三行数字；条目写了任意一项费率就用自己那一份（不逐项混用），全 0 仍是「未配置」、费用报告整块不显示金额。
 - **`ResolveModel` 不再把 `models.text` 的 map 头直接赋给条目**：`thinking` / `request_body` 现在拷一份（`validateThinkingTypes` 的就地纠正同样改成写回自己的副本）。原先"只改某个条目"会连带改到 `models.text` 与所有引用者——`extends` 会让这个共享面成倍放大。
 - **图片 token 的本地估算改为"两种方法、可按模型各选一套"**：`estimate` 块不再只有一个"像素折算"口径，而是 `method`（`pixels` / `fixed` / `none`）+ 共用参数 `tokens` / `px_per_token` / `min_tokens` / `max_tokens`（键 `estimate.image_px_per_token` / `image_tokens_min` / `image_tokens_max` / `image_tokens_fallback` 被这四项取代，`config_version` 8→9）。同一个模型可以在自己的条目下写 `image_tokens:` 只覆盖要改的键（其余继承顶层 `estimate`，没配的条目完全跟全局走），因为同一个模型族里"按张固定计费"与"按像素折算"的端点会同时存在：实测 `glm-5.3-flash-official` 上 2.88M 像素的页面渲染约 3697 token（≈780 px/token），而 `deepseek-v4.1-flash` 上大图饱和在 ≈1050 token/张。默认仍是 `pixels 750 / 85 / 4096`（与上一版一致，老配置的估算数字不变），`method: fixed` 的默认 `tokens` 是 1100。

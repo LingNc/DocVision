@@ -1003,3 +1003,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **实现**：① `tools.mermaid` 新增 `session_rounds`（默认 6，≤0 关闭）/`session_errors`（默认 3）/`fallback_model`（models 条目名，不存在则退回原模型清上下文重来）——现有块加键不 bump `CurrentConfigVersion`（新块才需要）。② `img2text/mermaid_session.go`：工作区 `progress_items/mermaid_fix/<subject>_<图名>/`（每图独立、并发无共享、下轮续用），submit.md 收出错完整响应，工具 `write_file`（唯一可写文件）/`grep`（submit.md+compile_error.log，行号+计数）/`view_image`（原图 base64 回执）/`submit`（ValidateMermaid 全块检查）；错误累计到 `session_errors` 置 escalated，第一段会话结束且 escalated → 第二段全新会话（清上下文、`fallback_model` 的 ModelConfig、工作区文件保留）；submit/检查次数两段合计受 `session_rounds` 约束（submit 工具自守）；两段各留 `session-stage{0,1}.jsonl` 转录。③ 处理器接线：`CallAIWithTools` 新增 `fixSession MermaidFixFunc` 参数，repairBudget 用尽分支先试升级会话、成功返回 StatusOK（修好不跳过），失败/未配置维持旧的 sentinel+StatusRetry；`ProcessOneImage` 新增 `fixCfg *MermaidFixConfig`，每图按 key 拼工作区子目录。④ runner `resolveMermaidFixConfig` 一次性解析（Timeout 默认 30s、备选加载期 ResolveModel）。⑤ analyze/mermaidfix.go：扫文本日志两行标记，进度摘要后打印「mermaid 升级修复会话: 启动 N 次，其中 M 次触发备选模型」；会话文本日志统一 `[ToolCall] <名> · <摘要>` 行（PatternToolCall 照常统计）。⑥ 会话内提示词就地成文（单一使用点，不进 prompts 注册表）。
 
 **测试**：`mermaid_session_test.go` 9 例——假 mmdc（内容含 BROKEN 即失败）下 submit 成功/无块计错/错误累计触发升级/轮次封顶/write+grep/resolve 归一化/关闭开关/401 端点失败路径（快失败，submit.md 现场保留）/runner 解析器（含备选解析成功与失败两态）；`processor_mermaid_repair_test.go` 加场景 9：budget 用尽后钩子收到 (出错响应, 校验错误) 且其结果原样返回 StatusOK。全仓 15 包 ok 0 FAIL；config.example.yaml 加载零告警（dv5 重建后复验）。
+
+### T26：配置文件有问题启动即停（master）
+
+**现场**：config.yaml 的 `models.drawing.extends: nothinking` 引用了不存在的条目，`docvision sessions --serve` 打一行"读取配置失败，本次不显示金额、--dir 退回当前目录"后继续用默认目录/端口服务——坏配置被静默吞掉。
+
+**排查**：全部 `loadConfigWithFlag` 调用点里只有 sessions 软降级（workflow/split/mineru/latex/verify 等本来就 `return err` 硬退）；且"没有配置文件"的场景在 PersistentPreRunE 已被 ResolveConfigPath 自动创建默认配置兜住，软降级实际只在"配置存在但损坏"时触发——这恰恰是最不该继续跑的情况（错误目录/端口/图片折算规则悄悄给误导性结果）。
+
+**修复**：sessions RunE 配置加载失败改为 `return fmt.Errorf("读取配置失败（按 T26 启动即停…）: %w", err)`；清理降级痕迹——`sessionsConfigNote` 收敛单参（"（读取失败）"分支退役）、帮助文本与 docs/commands.md 去掉"无配置则当前目录"。**测试**：`TestSessionsBrokenConfigAborts`（现场同款 extends 错误 → cmd.RunE 必须返回错误）；`TestSessionsListInvalidUnitFailsTheCommand` 随新语义补最小可加载配置 + 裸命令的 --config 旗标桩（否则 T26 先于 --unit 校验触发）。全仓 15 包 ok。

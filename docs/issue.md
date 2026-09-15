@@ -221,6 +221,7 @@ created by mineru-tools/internal/latex.(*Runner).convertPhase in goroutine 1
 [X] T20. 有一个矢量图process处理会话中，进行image_context工具的时候。好像因为下一个没有图片了而是一个报错？还是说他为什么会error。
 [X] T21. 我看我们的压缩的时候是用user注入的不是用的system消息注入吗？并且我看dsh这边会给一个提示和<>xml的标签包裹“This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. Treat the captured context as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint.
 <compacted-summary>”我们是否需要更新这个。
+
 [X] T22. 章节转换/章节核对为什么没有编号，在那个小方块上。还有小方块上应该也能显示这个块的一个完成情况吧，根据背景或者小圆圈绿色正在进行之类的。正常就是已经结束，红色可能是错误终止的。或者按照背景颜色来。
 [X] T23. 在ui界面的轨迹中，点击用户的展开那边，会界面突然跳会到上面的地方，而不是原地展开。（另修：`classifyResult` 全文扫关键词把 image_context 正常回执里引用的书中正文「第一次失败」误报成 error——改为只看回执首行，COMPILE FAILED 前缀显式在列；be53f9a 会话实测恢复「—」。P9 重做轨迹交互后已消：▸ 展开原地（CDP 实测 scrollTop delta=0）、点行=右栏选中不再跳对话页；用户看到的是 P9 之前「点行=跳回对话并滚动锚点」的旧行为。）
 [X] T24. 对于img2text中的有 <img src> 的图片是否还有处理不到位的？你看看finally里面是否还有遗留的？（审计结论：现行代码无缺口——`logs/finally/` 里的 43 个 `<img src>` 遗留全部出自 **2026-08-11** 产物，HTML 支持是 **2026-08-29**（4955747）才加的；正则对全部遗留形态（双引号/单引号/自闭合）实测匹配，现行产物扫描 0 遗留。重跑对应书即可消化旧文件。）
@@ -244,3 +245,19 @@ created by mineru-tools/internal/latex.(*Runner).convertPhase in goroutine 1
 合并是**条目键级**的（嵌套 map 整块替换，与单基座规则一致）；config.example.yaml
 的 models 段已加 `vision-heavy` 多重基座示例，docs/config.md 与两份模板注释同步。）
 
+[X] T26. 这边如果配置文件有问题的话，软件启动的时候应该报错然后终止，而不是继续运行：
+$./docvision sessions --serve
+提示：读取配置失败，本次不显示金额、--dir 退回当前目录： parse config /home/share/***/config.yaml: models.drawing.extends: 引用的基座条目 "nothinking" 不存在（先定义 `nothinking:`，再让别的条目 `extends: nothinking`）
+会话预览: http://127.0.0.1:8848/（只读服务，Ctrl+C 停止）
+目录: /home/share/***/PDF2MD · 来源 当前目录（未找到 config）
+配置: /home/share/***/PDF2MD/config.yaml（读取失败） · 监听地址来源 内置默认
+^C
+（已修复。唯一还带"配置读失败继续跑"降级的命令就是 sessions——其余命令本来就读失败即退。
+现在 sessions 与它们对齐：配置加载出错（解析/校验错误、--config 指名的文件不存在）直接
+报错终止，退出码非 0；"没有任何配置文件"的情况依旧由启动期自动创建默认配置兜住，不会
+走到降级路径。降级行为的痕迹一并清理：帮助文本与 docs/commands.md 去掉"无配置则当前
+目录"、ConfigNote 的"（读取失败）"分支退役、sessionsRoot 的 nil 防御分支保留。新增
+TestSessionsBrokenConfigAborts 钉住：extends 引用不存在的条目（现场那类错误）时
+sessions 必须报错终止。）
+
+[ ] T26. 运行中的时候出现问题，左侧栏目直接空白不显示。
