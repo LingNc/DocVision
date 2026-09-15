@@ -192,3 +192,21 @@ func TestPartialSidecar(t *testing.T) {
 		t.Fatalf("partial survived Close: %v", err)
 	}
 }
+
+// T21：检查点注释 = DSH 式——首行 marker（续跑折叠靠 HasPrefix 认它）+
+// <compacted-summary> 说明与 XML 包裹 + <summary> 内嵌摘要。
+func TestCheckpointNote(t *testing.T) {
+	note := checkpointNote("摘要正文")
+	if !strings.HasPrefix(note, "=== COMPRESSED SESSION CONTEXT") {
+		t.Fatalf("note 必须以 marker 开头（续跑折叠依赖）: %q", note[:60])
+	}
+	for _, want := range []string{"<compacted-summary>", "</compacted-summary>", "<summary>", "</summary>", "摘要正文", "without restating it"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("note 缺少 %q", want)
+		}
+	}
+	// LoadTranscript 的折叠判定兼容新旧两种形态
+	if !strings.HasPrefix(note, compactedMarker) || !strings.HasPrefix("=== COMPRESSED SESSION CONTEXT (auto-generated; the earlier turns were summarised) ===\n旧", compactedMarker) {
+		t.Fatal("marker 前缀判定应同时兼容新旧 note")
+	}
+}

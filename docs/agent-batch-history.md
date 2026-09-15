@@ -887,3 +887,13 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **验证**：workspace 内 fixture（真数据盘只读，模拟 live 会话：mtime 60s 窗口内 + 手写 .partial）端到端——API 返回 partial ✓、UI「输出中/思考中」卡片 ✓、删 sidecar 后卡片消失 ✓、call_2/call_3（无回执）转圈而 call_1（有回执）不转 ✓；截图目检。探针 453/454（唯一已知差异仍=T12）；控制台零报错；vitest 23/23；go test 全绿。
 
 **排错插曲**：① `pkill -f 'dv3 sessions.*8990'` 匹配到**自己这条命令行**把刚起的服务器杀了（exit 143）——换端口号重起；② python 批量改 props 的静默 no-op（reconstruct 字符串不匹配也不报错）导致 `running?: boolean` 没加进去，第一轮 fixture 测试全 false——用 `edit` 工具按精确文本修。真数据盘 `/home/share` 对本 shell 是只读挂载，测试 fixture 放 workspace。
+
+### T20 + T21 排查与压缩检查点 DSH 化（`web/components` 分支，Go 侧小改）
+
+**T20「image_context 为什么 error」——定性：不是 image_context，也不存在边界报错。**
+全量扫描 5 个矢量会话目录（0911_1 / 测试-概率论 / 2026书…）：17 次 `image_context` 调用**全部成功**（回执形如 `image N of M in this document: …`）；代码上 `ImageContextTool` 对首/尾图边界返回 `(none)`（build() 对 i<0 / i>=len(refs) 直接给 "(none)"），只有「目标图在 markdown 里找不到 / 空目标且未绑定当前图」才报错——与「下一张没图了」无关。
+用户看到的那条红 error 是 **`view_image`**（`vector_测试-概率论__220c0aa…__geometric_figure.jsonl` 行 94）：模型把 64 位哈希文件名**敲错了**（`…deb97319f5d19c44db` 写成 `…deb97333f5d19c44db`），工具按既有语义如实回报 `TOOL ERROR: 文件不存在 …（请用图片文件名或 markdown 中的引用路径）`——UI 的轨迹/状态列标红是 `classifyResult` 命中「文件不存在」，显示正确，无需修复。
+
+**T21「压缩是不是 user 注入 + DSH 的提示与 XML 包裹」——两点：**
+1. 注入角色**就是 user**，且这是对的：system 消息插在会话中间违反多数 provider 的消息序规则、也会打断前缀缓存；DSH 的压缩检查点同样以 user 轮注入。不改。
+2. 补齐 DSH 式包裹：`compact()` 的替换注释从裸摘要改为 **marker 行 + `<compacted-summary>` 说明文字（"This is an automatically generated checkpoint… build on it without restating it. Continue the task directly…"）+ `<summary>` 摘要**。首行 `=== COMPRESSED SESSION CONTEXT` marker 不动——`LoadTranscript` 续跑折叠靠 `HasPrefix(marker)` 认注释，新旧两种形态都兼容。新增单测 `TestCheckpointNote`。
