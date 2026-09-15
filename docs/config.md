@@ -150,6 +150,17 @@ models:
     extends: "drawing"       # 基座自己也可以 extends 别人（链式），逐级往上找
 ```
 
+**多重基座**：`extends` 也接受**条目名列表**——按书写顺序合并、后面的基座覆盖
+前面的，条目自己的键覆盖所有基座（YAML 不允许同一键写两次，多重继承必须用列表）；
+列表里的基座同样可以自身 extends（链式 + 多重混用）：
+
+```yaml
+models:
+  vision-heavy:
+    extends: ["gateway-a", "heavy"]   # heavy 的键覆盖 gateway-a 的，自己再补差异
+    max_tokens: 32768
+```
+
 **合并语义**（在 YAML 节点层、解码之前按条目键合并）：
 
 | 情况 | 结果 |

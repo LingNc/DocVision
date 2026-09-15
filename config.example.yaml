@@ -234,7 +234,10 @@ estimate:
 #                        → 整块替换，不做半合并
 #    基座可以是另一条 extends 出来的条目（链式解析），成环/指向不存在的条目/
 #    自引用在加载期直接报错，并打印完整链（如 `a → b → c → a`）。
-#    一套 key/endpoint 被多个角色共用时，这就是唯一要改的地方。
+#    **多重基座**：extends 也可以是**条目名列表** `extends: [a, b]`——按书写顺序
+#    合并、后面的基座覆盖前面的，条目自己的键覆盖所有基座（YAML 不允许同一个键
+#    写两次，多重继承必须用列表）。列表里的基座同样可以自身 extends（链式+多重
+#    混用）。一套 key/endpoint 被多个角色共用时，这就是唯一要改的地方。
 #
 # ③ 单价（price）：条目自己写了任意一项就用自己这一份；一项都没写则继承
 #    models.text 的费率（同一个网关下的模型不必重复三行数字）。全 0 = 未配置，
@@ -305,6 +308,14 @@ models:
     extends: "gateway-b"
     api_timeout: 900            # 单张图/单章可能很慢，覆盖基座的默认
     max_tokens: 65536
+
+  # ---- 多重基座：extends 用列表，后面的基座覆盖前面的 ----
+  #（等价于"先继承 gateway-a，再用 heavy 覆盖网关/模型/思考/价格"：
+  #  heavy 链到 gateway-b，所以最终连接走 gateway-b、模型 deepseek-v4.1，
+  #  gateway-a 只剩下 heavy 链没写的 tool_stream 生效）
+  vision-heavy:
+    extends: ["gateway-a", "heavy"]
+    max_tokens: 32768           # 条目自己的键最高，覆盖所有基座
 
   # ---- 角色复用同一条目：四个角色都指向 gateway-a 的同一套配置 ----
   classifier:

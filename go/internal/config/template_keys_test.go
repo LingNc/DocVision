@@ -44,6 +44,12 @@ func templateKeyPaths(t *testing.T, path string) (map[string]bool, map[string]bo
 		}
 		sub := map[string]bool{}
 		collectKeys(entry, "", sub)
+		// extends 的标量与列表是**值形态**差异（单基座 vs 多重基座），不算键面
+		// 差异：统一记成 extends，否则两份模板一份演示列表、一份演示标量就过不了。
+		if sub[extendsKey+"[]"] {
+			delete(sub, extendsKey+"[]")
+			sub[extendsKey] = true
+		}
 		for k := range sub {
 			entries[k] = true
 		}
@@ -98,6 +104,15 @@ func TestConfigTemplateKeyParity(t *testing.T) {
 		t.Fatalf("两份模板的 models 条目键面不一致：%v", diff)
 	}
 	// 示例必须把 extends 演示出来，否则这个新能力在模板里无处可学。
+	// T25：多重基座（列表形式）同样必须在 config.example.yaml 里有样例
+	//（extends[] 在键面归一化时被折成 extends，列表形态从原文判断）。
+	raw, rerr := os.ReadFile("../../../config.example.yaml")
+	if rerr != nil {
+		t.Fatalf("读 config.example.yaml: %v", rerr)
+	}
+	if !strings.Contains(string(raw), "extends: [") {
+		t.Error("config.example.yaml 里没有演示多重基座（extends: [a, b] 列表形式）")
+	}
 	for _, want := range []string{extendsKey, "image_tokens.method", "image_tokens.tokens", "image_tokens.px_per_token", "image_tokens.min_tokens", "image_tokens.max_tokens"} {
 		if !exampleEntries[want] {
 			t.Errorf("config.example.yaml 里没有演示 %s", want)

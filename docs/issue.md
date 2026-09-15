@@ -227,26 +227,20 @@ created by mineru-tools/internal/latex.(*Runner).convertPhase in goroutine 1
 [X] T25. 支持对extends的复写吗？按照顺序后面覆盖前面，例如:
 
 ```yaml
-  thinking:
-    thinking:
-      type: enabled
-      clear_thinking: false
-    reasoning_effort: high
-  nothinking:
-    thinking:
-      type: disabled
-  dsv4.1:
-    image_tokens:
-      method: fixed
-      tokens: 1024
-    model: "deepseek-v4.1-flash-expires-on-0910"
-    price:
-      input: 1
-      cached: 0.02
-      output: 4
-      currency: "¥"
-    extends: "thinking"
   drawing:
     extends: "dsv4.1"
     extends: "nothinking"
 ```
+（已实现。注：上面这种**同一键写两次**的写法 YAML 解析器直接报错（duplicate key），
+不可行——实现为**列表形式**，语义与示例一致：按书写顺序合并、后面的基座覆盖前面的，
+条目自己的键覆盖所有基座；列表基座可自身 extends（链式+多重混用），空列表/不存在的
+条目名/成环加载期报错：
+
+```yaml
+  drawing:
+    extends: ["dsv4.1", "nothinking"]   # nothinking 的键覆盖 dsv4.1 的
+    model: "deepseek-v4.1-flash"
+```
+合并是**条目键级**的（嵌套 map 整块替换，与单基座规则一致）；config.example.yaml
+的 models 段已加 `vision-heavy` 多重基座示例，docs/config.md 与两份模板注释同步。）
+

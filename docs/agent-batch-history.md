@@ -989,3 +989,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **真机验证**（CDP 9333 + 真实 latex_project 60 会话）：`/` 与 `/v2` 均 200、控制台零报错；点会话行 24 消息/35 工具卡/31 图，单位开关即时切换；静态导出（20MB 单文件）file:// 打开 60 会话、横幅「静态快照 · 生成于 …」、图片 **119/119 全部加载**（mediaRoot 相对路径 `../../../../…/latex_project/…` 解析正确）、零报错。go test 15 包 + vitest 24 例全绿。
 
 **坑**：① 反引号正则里写 ``` 会终止 Go raw string（fenceLineRe 用解释串拼接，build 立即抓到）；② Chrome 封禁 8997 端口（ERR_UNSAFE_PORT），探针换 8998；③ bash 工具调用结束会回收 `(cmd &)` 起的进程——服务器要用受管后台任务；④ vue dist 属性顺序是 `data-v` 在 `class` 前，字面量 `class="…">` 匹配会漏。
+
+### T25 补遗：样例配置补多重基座示例 + issue 描述改为列表形式（master）
+
+**用户指出**：① config.example.yaml 没加多重基座的样例；② issue 里的写法（同一键写两次 `extends:`）与实现的列表形式不一致，要改说明。
+
+**改动**：① config.example.yaml 的 extends 注释块（②）补列表形式说明 + models 段加 `vision-heavy: extends: ["gateway-a", "heavy"]` 实例（heavy 链 gateway-b，最终连接走 gateway-b、模型 deepseek-v4.1，gateway-a 只剩 tool_stream 生效——正好演示"后面的基座覆盖前面的"）；default.yaml 注释补一行。② docs/issue.md T25 保留用户原始写法并注明 YAML 重复键不可行、给出列表等价写法；docs/config.md 详述节加列表示例。③ `TestConfigTemplateKeyParity`：extends 的标量/列表是值形态差异不算键面差异（归一化统一记 extends），另加原文守卫"config.example.yaml 必须含 `extends: [`"——新能力在模板里必须有处可学。整份 example.yaml 加载实测零告警（无价格冲突/未知键）。

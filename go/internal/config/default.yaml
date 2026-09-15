@@ -228,7 +228,8 @@ models:
       max_tokens: 4096          # pixels：单张上限
   # 命名基座：一套 key/endpoint 被多个角色复用的写法。extends 在加载期按条目键
   # 深合并，本条目只写"差异键"，没写的键取基座（基座没写的再取 models.text /
-  # 代码默认）；详情与覆盖规则见 config.example.yaml 与 docs/config.md。
+  # 代码默认）；也可以给列表 `extends: [a, b]`（多重基座，后面的覆盖前面的）。
+  # 详情与覆盖规则见 config.example.yaml 与 docs/config.md。
   heavy:
     extends: "text"             # 换网关/换模型时只改这一条基座
     model: "deepseek-v4.1"
