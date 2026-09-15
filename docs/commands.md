@@ -67,7 +67,7 @@ Mermaid 校验由 `tools.mermaid.*`（off/auto/strict、CLI 命令、修正次�
 | 分类 | 含义 | 日志里的样子 |
 | --- | --- | --- |
 | 成功 | 结果已写盘 | `✓ [1.2s] DONE [IMG_TYPE: …]` |
-| 警告 | 校验未通过或格式不符，**已被跳过、下轮重试**（进度文件不落盘） | `✗ … FAILED [IMG_MERMAID_INVALID]` / `[IMG_INVALID_FORMAT]`，随后一行 `Skipped invalid response … will retry next run` |
+| 错误（跳过重试） | 校验未通过或格式不符，**已被跳过、下轮重试**（进度文件不落盘），按**错误**计——警告只留给可自动纠正的事 | `✗ … FAILED [IMG_MERMAID_INVALID]` / `[IMG_INVALID_FORMAT]`，随后一行 `Skipped invalid response … will retry next run`（error 级） |
 | 失败 | 硬错误（API/网络/图片缺失等），需要人处理 | `✗ … FAILED [IMG_API_ERROR: …]` 等其它哨兵 |
 
 警告**不是失败**：img2text 的进度行把两者分列（`errors: N, warns: M`），`analyze` 报告与按文件摘要同样分列显示，并注明"下轮重试"；进度摘要里的“无效条目”也带同一句说明，并给出"若下轮全部补上"的可达完成率。

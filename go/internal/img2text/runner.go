@@ -452,8 +452,10 @@ func runWorkers(
 		for r := range results {
 			count++
 			if r.result == "__INVALID_RESPONSE__" {
-				warnCount++
-				logger.LogWarning(0, fmt.Sprintf(
+				// T15：校验未通过（mermaid/格式不符）是**错误**不是警告——警告
+				// 只留给可自动纠正的事；这些项仍跳过不落进度、下轮重试。
+				errorCount++
+				logger.LogError(0, fmt.Sprintf(
 					"Skipped invalid response for %s, will retry next run. %s. Raw output: %s",
 					r.imgPath, expectedFormatHint, snippet(r.rawSnippet),
 				))

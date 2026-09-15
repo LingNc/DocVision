@@ -925,3 +925,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **修法**：`Runner` 加 `cfgMu sync.Mutex`；**全部 16 处** `r.clients[...]`/`r.models[...]` 裸访问收口成三扇门——`clientFor`（懒创建，锁内）、`modelOf`（读，锁内）、`hasModel`（存在性探测，figure-check 回退用，锁内）。读点也必须收口：Go map 读到一半被并发写同样 fatal。批量替换时正则曾误伤 `r.models[name] = mc` 赋值行与 modelOf 自身（`return r.modelOf(name)` 无限递归）——go vet 立刻抓出，逐一修回；教训：**map 访问批量改写后必须核对函数体内部的自引用**。
 
 **验证**：新增 `TestClientForConcurrentAccess`（8 goroutine × 8 模型名并发 clientFor/modelOf/hasModel，`-race`）通过；全仓 latex/session/sessionview 测试绿。
+
+### T15：img2text 校验失败从「警告」改记「错误」（master，T14 同批）
+
+**用户发现**：img2text 最终文件里，所有被标「警告」的图都没嵌入——但查日志发现它们是 mermaid 校验**未通过**（真错误），却被显示成警告。口径裁定：警告只留给**可自动纠正**的事（如流式降级重试）；校验未通过 = 错误。
+
+**病灶**：runner.go writer 的 `__INVALID_RESPONSE__` 分支（`StatusRetry` 汇聚点——`[IMG_MERMAID_INVALID]`/`[IMG_INVALID_FORMAT]` 都走这）`warnCount++` + `LogWarning`；而每个 goroutine 已经先打过 `✗ FAILED`（error 级）——两级日志一个 error 一个 warning，analyze/CSV 按 warning 归类，口径打架。
+
+**修法**：该分支改 `errorCount++` + `LogError`；**跳过不落进度、下轮重试的语义不变**（不嵌垃圾进最终 md 是对的）。docs/commands.md 的 img2text 状态表同步改「错误（跳过重试）」。验证：img2text 测试全绿。
