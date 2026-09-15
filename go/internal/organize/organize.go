@@ -7,6 +7,10 @@
 package organize
 
 import (
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"fmt"
 	"os"
 	"path/filepath"
@@ -374,6 +378,8 @@ func step3CollectImages(allDirs []string, outputDir, imagesDir string) error {
 		}
 
 		if !indexBuilt {
+			fmt.Printf("    有 %d 张图片缺失，正在扫描 %d 个 mineru 目录建索引（并行）...\n",
+				len(missingTargets), len(allDirs))
 			imgSourceMap = buildImageSourceIndex(allDirs)
 			indexBuilt = true
 			indexScanCounter++
@@ -631,29 +637,74 @@ func rewriteImagePaths(mdFile, content, subject string) error {
 // so step3 can resolve each referenced image to a source path. First-seen
 // wins, matching the Python implementation's `if img_file.name not in
 // img_source_map` semantics. The supportedExts filter is applied here.
+// buildImageSourceIndex maps image basename -> source path across every
+// mineru output directory. On a network share (the usual deployment) the
+// directory listings dominate: 167 dirs / ~75k files over SMB took minutes
+// when listed serially, with no output at all (T10: "会卡很久"). Now the
+// listings run in parallel and a progress line reports movement — a slow
+// scan the user can see is not a hang.
 func buildImageSourceIndex(allDirs []string) map[string]string {
 	idx := make(map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 12) // cap concurrent listings; network dirs like some parallelism
+	var scanned atomic.Int64
+	var drew atomic.Bool
+	total := len(allDirs)
+	progressDone := make(chan struct{})
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-progressDone:
+				return
+			case <-t.C:
+				drew.Store(true)
+				fmt.Printf("    已扫描 %d/%d 个目录...\r", scanned.Load(), total)
+			}
+		}
+	}()
 	for _, d := range allDirs {
-		srcImages := filepath.Join(d, "images")
-		if !util.DirExists(srcImages) {
-			continue
-		}
-		entries, err := os.ReadDir(srcImages)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !e.Type().IsRegular() {
-				continue
+		wg.Add(1)
+		go func(d string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			srcImages := filepath.Join(d, "images")
+			if !util.DirExists(srcImages) {
+				scanned.Add(1)
+				return
 			}
-			if !supportedExts[strings.ToLower(filepath.Ext(e.Name()))] {
-				continue
+			entries, err := os.ReadDir(srcImages)
+			if err != nil {
+				scanned.Add(1)
+				return
 			}
-			if _, ok := idx[e.Name()]; ok {
-				continue
+			local := make(map[string]string, len(entries))
+			for _, e := range entries {
+				if !e.Type().IsRegular() {
+					continue
+				}
+				if !supportedExts[strings.ToLower(filepath.Ext(e.Name()))] {
+					continue
+				}
+				local[e.Name()] = filepath.Join(srcImages, e.Name())
 			}
-			idx[e.Name()] = filepath.Join(srcImages, e.Name())
-		}
+			mu.Lock()
+			for k, v := range local {
+				if _, ok := idx[k]; !ok {
+					idx[k] = v
+				}
+			}
+			mu.Unlock()
+			scanned.Add(1)
+		}(d)
+	}
+	wg.Wait()
+	close(progressDone)
+	if drew.Load() {
+		fmt.Println()
 	}
 	return idx
 }
