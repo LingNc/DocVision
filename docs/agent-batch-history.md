@@ -1011,3 +1011,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **排查**：全部 `loadConfigWithFlag` 调用点里只有 sessions 软降级（workflow/split/mineru/latex/verify 等本来就 `return err` 硬退）；且"没有配置文件"的场景在 PersistentPreRunE 已被 ResolveConfigPath 自动创建默认配置兜住，软降级实际只在"配置存在但损坏"时触发——这恰恰是最不该继续跑的情况（错误目录/端口/图片折算规则悄悄给误导性结果）。
 
 **修复**：sessions RunE 配置加载失败改为 `return fmt.Errorf("读取配置失败（按 T26 启动即停…）: %w", err)`；清理降级痕迹——`sessionsConfigNote` 收敛单参（"（读取失败）"分支退役）、帮助文本与 docs/commands.md 去掉"无配置则当前目录"。**测试**：`TestSessionsBrokenConfigAborts`（现场同款 extends 错误 → cmd.RunE 必须返回错误）；`TestSessionsListInvalidUnitFailsTheCommand` 随新语义补最小可加载配置 + 裸命令的 --config 旗标桩（否则 T26 先于 --unit 校验触发）。全仓 15 包 ok。
+
+### 修复：预览页轮询定时器双份注册（用户报告"运行启动时侧栏整列空白"）
+
+**现场**：档位1 vector 运行刚启动时，预览页左侧栏整列纯白（连「工作区」头部都没有），刷新恢复、之后不再复现；用户控制台仅有 Adobe Acrobat 扩展 content script 的 `getUserMedia` TypeError 与 Slow-network intervention——页面自身代码零报错。
+
+**排查**（未能在复现环境重现：用户自己的 8849 服务器 + 同一棵树 + 同一份二进制 dist，headless Chrome 下 120s soak/选中会话/改视口/localStorage 边缘键面全部正常，侧栏 840 节点稳定）：代码走查发现 **`bootData()`（data.ts，df4b862 起）与 App.vue onMounted（6e73833 补静态守卫时加的 `if (!state.staticMode)` 分支）各自注册了一份 2s 轮询 `setInterval`**——live 页实际每秒 4 次 `/api/index` 全树扫描。运行刚启动时 samba 冷缓存、扫描慢（用户控制台的 Slow-network intervention 佐证），请求堆积、首份数据迟迟不到，叠加扩展注入干扰，构成最贴合"最开始启动时有、之后没有、刷新恢复"的解释。
+
+**修复**：① 轮询只在 App.vue 注册一份（pollTimer 可清理、页面隐藏跳过），data.ts 的 bootData 只保留首拉与首选中；② Vue 挂全局 `app.config.errorHandler`——今后组件渲染异常会在控制台打 `[app] Vue 错误（info）组件链: …`，消灭"静默白屏无法归因"。验收：web 构建后 dv5 重编译，8998 真机 60s+ 侧栏稳定、控制台零报错；vitest 24/24；sessionview 14.5s 全绿。

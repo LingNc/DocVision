@@ -3271,7 +3271,7 @@
       const installedPlugins = /* @__PURE__ */ new WeakSet();
       const pluginCleanupFns = [];
       let isMounted = false;
-      const app = context.app = {
+      const app2 = context.app = {
         _uid: uid$1++,
         _component: rootComponent,
         _props: rootProps,
@@ -3288,12 +3288,12 @@
           if (installedPlugins.has(plugin)) ;
           else if (plugin && isFunction(plugin.install)) {
             installedPlugins.add(plugin);
-            plugin.install(app, ...options);
+            plugin.install(app2, ...options);
           } else if (isFunction(plugin)) {
             installedPlugins.add(plugin);
-            plugin(app, ...options);
+            plugin(app2, ...options);
           } else ;
-          return app;
+          return app2;
         },
         mixin(mixin) {
           {
@@ -3301,25 +3301,25 @@
               context.mixins.push(mixin);
             }
           }
-          return app;
+          return app2;
         },
         component(name, component) {
           if (!component) {
             return context.components[name];
           }
           context.components[name] = component;
-          return app;
+          return app2;
         },
         directive(name, directive) {
           if (!directive) {
             return context.directives[name];
           }
           context.directives[name] = directive;
-          return app;
+          return app2;
         },
         mount(rootContainer, isHydrate, namespace) {
           if (!isMounted) {
-            const vnode = app._ceVNode || createVNode(rootComponent, rootProps);
+            const vnode = app2._ceVNode || createVNode(rootComponent, rootProps);
             vnode.appContext = context;
             if (namespace === true) {
               namespace = "svg";
@@ -3330,8 +3330,8 @@
               render(vnode, rootContainer, namespace);
             }
             isMounted = true;
-            app._container = rootContainer;
-            rootContainer.__vue_app__ = app;
+            app2._container = rootContainer;
+            rootContainer.__vue_app__ = app2;
             return getComponentPublicInstance(vnode.component);
           }
         },
@@ -3342,20 +3342,20 @@
           if (isMounted) {
             callWithAsyncErrorHandling(
               pluginCleanupFns,
-              app._instance,
+              app2._instance,
               16
             );
-            render(null, app._container);
-            delete app._container.__vue_app__;
+            render(null, app2._container);
+            delete app2._container.__vue_app__;
           }
         },
         provide(key, value) {
           context.provides[key] = value;
-          return app;
+          return app2;
         },
         runWithContext(fn) {
           const lastApp = currentApp;
-          currentApp = app;
+          currentApp = app2;
           try {
             return fn();
           } finally {
@@ -3363,7 +3363,7 @@
           }
         }
       };
-      return app;
+      return app2;
     };
   }
   let currentApp = null;
@@ -6629,12 +6629,12 @@
     return renderer || (renderer = createRenderer(rendererOptions));
   }
   const createApp = ((...args) => {
-    const app = ensureRenderer().createApp(...args);
-    const { mount } = app;
-    app.mount = (containerOrSelector) => {
+    const app2 = ensureRenderer().createApp(...args);
+    const { mount } = app2;
+    app2.mount = (containerOrSelector) => {
       const container = normalizeContainer(containerOrSelector);
       if (!container) return;
-      const component = app._component;
+      const component = app2._component;
       if (!isFunction(component) && !component.render && !component.template) {
         component.template = container.innerHTML;
       }
@@ -6648,7 +6648,7 @@
       }
       return proxy;
     };
-    return app;
+    return app2;
   });
   function resolveRootNamespace(container) {
     if (container instanceof SVGElement) {
@@ -6665,7 +6665,6 @@
     }
     return container;
   }
-  const POLL_MS = 2e3;
   const LONG_TEXT_LINES = 20;
   const SYSTEM_PREVIEW_LINES = 8;
   const STORE_PREFIX = "dsh.sessionview.";
@@ -7420,9 +7419,6 @@
         selectSession((live || state.sessions[0]).id);
       }
     });
-    window.setInterval(() => {
-      if (!document.hidden) void refreshIndex();
-    }, POLL_MS);
   }
   function el$1(tag, cls, text) {
     const node = document.createElement(tag);
@@ -11749,5 +11745,17 @@
     }
   });
   const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-10143b86"]]);
-  createApp(App).mount("#app");
+  const app = createApp(App);
+  app.config.errorHandler = (err, instance, info) => {
+    var _a, _b;
+    const chain = [];
+    let cur = instance;
+    while (cur) {
+      const name = ((_a = cur.$options) == null ? void 0 : _a.name) || ((_b = cur.$options) == null ? void 0 : _b._componentTag) || "(anonymous)";
+      chain.unshift(name);
+      cur = cur.$parent ?? null;
+    }
+    console.error("[app] Vue 错误（" + info + "）组件链: " + chain.join(" > "), err);
+  };
+  app.mount("#app");
 })();

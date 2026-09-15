@@ -3,7 +3,7 @@
  * 旧页 refreshIndex/applyIndex/selectSession/pullSession 的移植；渲染由
  * Timeline.vue / DetailsPanel.vue 的 computed 响应式接管，这里只管数据流。
  */
-import { state, POLL_MS, setBannerText } from './state'
+import { state, setBannerText } from './state'
 import { findSession, normalizeLines, indexCallEstimates, groupKey, setCollapsed } from './legacy/sidebar'
 import type { PartialInfo } from './legacy/types'
 
@@ -177,7 +177,10 @@ function bootStatic(): boolean {
   return true
 }
 
-/* boot：静态快照直接装数据；live 先拉一次索引并选中第一个活跃会话，然后 2 秒轮询（页面隐藏时跳过）。 */
+/* boot：静态快照直接装数据；live 先拉一次索引并选中第一个活跃会话。
+ * 轮询定时器只在 App.vue 注册一份（pollTimer，页面隐藏时跳过、可随卸载清理）——
+ * 这里不再自建 interval：曾经两份并存，live 页每秒打 4 次 /api/index 全树扫描，
+ * 运行刚启动（samba 冷缓存）时请求堆积，页面迟迟拿不到首份数据。 */
 export function bootData(): void {
   if (bootStatic()) return
   void refreshIndex().then(() => {
@@ -189,7 +192,4 @@ export function bootData(): void {
       selectSession((live || state.sessions[0]).id)
     }
   })
-  window.setInterval(() => {
-    if (!document.hidden) void refreshIndex()
-  }, POLL_MS)
 }
