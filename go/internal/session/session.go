@@ -1,6 +1,7 @@
 package session
 
 import (
+	"time"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -185,6 +186,8 @@ func (s *Session) appendTranscript(msg ChatMessage) {
 	if err := s.transcript.Append(msg); err != nil && s.logger != nil {
 		s.logger.Debug(s.tid, "[session:"+s.label+"] transcript 写入失败:", err)
 	}
+	// P7: the full message is on disk now — the streaming snapshot is stale.
+	s.transcript.ClearPartial()
 }
 
 // recordUsage appends one t="usage" line for the request that just finished,
@@ -526,6 +529,13 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		if s.logger.DebugEnabled() {
 			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api request (%s messages=%d est_tokens=%d tools=%v)",
 				s.label, toolRounds+1, s.client.RequestSummary(req), len(s.messages), s.EstimatedTokens(), useTools))
+		}
+		// P7: progressive snapshots land in <transcript>.partial while this
+		// request streams; every transcript append clears it again.
+		if s.transcript != nil {
+			req.StreamHook = func(phase, text string) {
+				_ = s.transcript.WritePartial(PartialRecord{Phase: phase, Text: text, Ts: time.Now().UnixMilli()})
+			}
 		}
 		resp, sentinel, status := s.client.CallWithRetry(req)
 		s.APIRequests++
@@ -996,8 +1006,20 @@ func (s *Session) maybeCompact() error {
 }
 
 // compactedMarker prefixes the replacement note written by compact; it is
-// also used to collapse a transcript on resume (see LoadTranscript).
+// also used to collapse a transcript on resume (see LoadTranscript) — keep
+// it as the note's FIRST line so both new and old notes stay detectable.
 const compactedMarker = "=== COMPRESSED SESSION CONTEXT"
+
+// checkpointNote renders the compaction replacement note (T21): DSH 式检查点
+// ——说明文字 + XML 标签包裹，给继续工作的模型明确语义（这是背景、不要复述、
+// 直接接着干），不再只是裸摘要。首行 marker 供 LoadTranscript 的 HasPrefix 折叠。
+func checkpointNote(summary string) string {
+	return compactedMarker + " ===\n<compacted-summary>\n" +
+		"This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. " +
+		"Treat the captured context as established background and build on it without restating it. " +
+		"Continue the task directly from the messages that follow, without acknowledging this checkpoint.\n\n" +
+		"<summary>\n" + summary + "\n</summary>\n</compacted-summary>"
+}
 
 // compactKeepTail is how many of the most recent messages stay verbatim
 // across a compaction; everything between the original task and this tail
@@ -1085,7 +1107,7 @@ func (s *Session) compact() (bool, error) {
 	}
 
 	s.recordUsage(resp, s.rounds, "compact")
-	note := compactedMarker + " (auto-generated; the earlier turns were summarised) ===\n" + summary
+	note := checkpointNote(summary)
 	rebuilt := make([]ChatMessage, 0, headEnd+1+len(tail))
 	rebuilt = append(rebuilt, s.messages[:headEnd]...)
 	rebuilt = append(rebuilt, ChatMessage{Role: "user", Content: note})

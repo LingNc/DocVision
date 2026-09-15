@@ -183,6 +183,16 @@ export function foldLabel(expanded: boolean, lines: number, chars: number, token
  */
 export function machineScroll(text: unknown, key: string, extraClass?: string, tokens?: number): HTMLElement {
   const wrap = el('div', 'text-wrap')
+  machineScrollInto(wrap, text, key, extraClass, tokens)
+  return wrap
+}
+
+/*
+ * 同 machineScroll，但把内容填进**调用方提供的** .text-wrap 宿主（组件的根
+ * 节点自己当 text-wrap，DOM 链条与命令式版本逐层一致，不多出包装层）。
+ */
+export function machineScrollInto(host: HTMLElement, text: unknown, key: string, extraClass?: string, tokens?: number): void {
+  const wrap = host
   const raw = String(text === undefined || text === null ? '' : text)
   const pretty = jsonPretty(raw)
   const body = pretty === null ? raw : pretty
@@ -222,7 +232,6 @@ export function machineScroll(text: unknown, key: string, extraClass?: string, t
     })
     wrap.appendChild(toggle)
   }
-  return wrap
 }
 
 export function copyButton(text: string): HTMLButtonElement {
@@ -239,7 +248,7 @@ export function copyButton(text: string): HTMLButtonElement {
   return btn
 }
 
-function fallbackCopy(text: string): boolean {
+export function fallbackCopy(text: string): boolean {
   try {
     const area = document.createElement('textarea')
     area.value = text

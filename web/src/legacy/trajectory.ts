@@ -5,57 +5,86 @@
  * 输入输出（不离开这个标签页）。**保持真实 wire 结构**：一行一步、类型照
  * 真实角色、工具调用与工具结果各占一行不合并。
  */
-import { state, switchView } from '../state'
+import { state, switchView, anchorOf } from '../state'
+import { callMsgLine } from './stream'
 import { countText, countValue, estOf, firstLine, fmtDur, fmtTokens, unitLabel } from './sidebar'
-import { el, clear } from './dom'
-import { machineBlock, prettyJSON, copyButton } from './richtext'
+import { prettyJSON } from './richtext'
 import {
-  attributionText, classifyResult, imageAttributions, imageStrip, IMAGE_WIRE_TITLE, toolSummary,
+  attributionText, classifyResult, imageAttributions, IMAGE_WIRE_TITLE, toolSummary,
 } from './timeline'
+import { type Line, type ToolCall, type ImageAttr, type ImageCallEntry } from './types'
 
 // 图片占位标记：工具回执正文里如果写了这一笔（调试日志里的形状），说明图片在
 // 紧随其后的 user 轮里。我们自己的转录通常只有紧邻关系，所以两种都认。
 export const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i
 
-function nextMsgLine(lines: any[], idx: number): any {
+function nextMsgLine(lines: Line[], idx: number): Line | null {
   for (let i = idx + 1; i < lines.length; i++) {
     if (lines[i] && !lines[i].bad && lines[i].t === 'msg') return lines[i]
   }
   return null
 }
 
+interface CallInfo { name: string; ts: string; n: number; args: string }
+
 // 工具耗时 = 结果行时间戳 − 调用行时间戳（两边都有 ts 才算，不编数字）。
-function callDuration(call: any, resultLine: any): number {
-  if (!call || !call.ts || !resultLine.ts) return 0
+function callDuration(call: CallInfo | null, resultLine: Line | null): number {
+  if (!call || !call.ts || !resultLine || !resultLine.ts) return 0
   const t0 = Date.parse(call.ts)
   const t1 = Date.parse(resultLine.ts)
   if (isNaN(t0) || isNaN(t1) || t1 < t0) return 0
   return t1 - t0
 }
 
-export function trajectoryRows(): any[] {
-  const rows: any[] = []
-  const callOf: Record<string, any> = {}
+/*
+ * 一行轨迹。字段随类型（kind）差异大——公共面收紧，专属字段可选；
+ * detail 是展开区的内容块（键 = 展开区小标题）。
+ */
+export interface TrajRow {
+  kind: string
+  tag: string
+  name: string
+  summary: string
+  chars: number | string
+  tokens: number
+  status: string
+  /** 点行跳回对话的目标行号。 */
+  jump?: number
+  /** P9 右栏步骤定位键（确定性：kind@jump#序号；append-only 转录下稳定）。
+   *  jump 会撞（工具行都挂在 assistant 消息行上、一条消息可多次调用），不能拿它当身份。 */
+  rid: string
+  /** 工具/请求耗时 ms（有就显示，没有不出列）。 */
+  time?: number
+  /** 带图 user 轮的图片引用（可展开看图）。 */
+  images?: string[]
+  /** 展开区内容（悬浮说明单列 title）。 */
+  title?: string
+  detail: Record<string, string>
+}
+
+export function trajectoryRows(): TrajRow[] {
+  const rows: TrajRow[] = []
+  const callOf: Record<string, CallInfo> = {}
   // 哪些带图 user 轮的图片是**上一行工具回执**投出来的（两行互相提示，但不合并）。
   const imageAfterTool: Record<number, boolean> = {}
-  state.lines.forEach((l: any) => {
+  state.lines.forEach((l: Line) => {
     if (!l || l.bad || l.t !== 'msg') return
     if (l.role === 'assistant') {
-      ;(l.tool_calls || []).forEach((c: any) => {
+      ;(l.tool_calls || []).forEach((c: ToolCall) => {
         const fn = c.function || {}
-        callOf[c.id] = { name: fn.name || '?', ts: l.ts || '', n: l.n, args: String(fn.arguments || '') }
+        callOf[c.id || ''] = { name: fn.name || '?', ts: l.ts || '', n: l.n, args: String(fn.arguments || '') }
       })
     }
   })
 
-  state.lines.forEach((line: any, idx: number) => {
+  state.lines.forEach((line: Line, idx: number) => {
     if (!line || line.bad) return
     if (line.t === 'meta') {
       rows.push({
         kind: 'meta', tag: '元信息', name: line.kind || 'system',
         summary: '模型 ' + (line.model || '—') + ' · 提示词 ' +
           countText(String(line.text || '').length, estOf(line).text) +
-          ((line.tools || []).length ? ' · 工具 ' + line.tools.length : ''),
+          ((line.tools || []).length ? ' · 工具 ' + line.tools!.length : ''),
         chars: String(line.text || '').length,
         tokens: estOf(line).text,
         status: '', detail: { prompt: String(line.text || '') },
@@ -84,12 +113,14 @@ export function trajectoryRows(): any[] {
      *   · 点行跳回对话里**合并后的那一块**（对话是合并的，轨迹是真实的）。
      */
     if (line.role === 'user' && line.images && line.images.length) {
-      const attr = imageAttributions()[line.n] || { kind: 'none', how: '', callId: '', taskLineN: 0 }
+      const attr: ImageAttr = imageAttributions()[line.n] ||
+        { kind: 'none', how: '', callId: '', name: '', lineN: line.n, taskLineN: 0 }
       const fromTool = !!imageAfterTool[line.n]
       // 跳回对话里"合并后的那一块"：归到调用就跳那次调用，归到任务就跳任务行，
       // 都没认出来才跳自己这一行。
-      const jumpTo = attr.kind === 'call' && attr.callId && state.callNodes[attr.callId]
-        ? state.callNodes[attr.callId].lineN
+      const callLine = attr.kind === 'call' && attr.callId ? callMsgLine()[attr.callId] : undefined
+      const jumpTo = callLine !== undefined
+        ? callLine
         : (attr.kind === 'task' && attr.taskLineN ? attr.taskLineN : line.n)
       rows.push({
         kind: 'user', tag: '用户', name: '用户',
@@ -143,7 +174,7 @@ export function trajectoryRows(): any[] {
           status: '', jump: line.n, detail: { message: String(line.text) },
         })
       }
-      ;(line.tool_calls || []).forEach((c: any, i: number) => {
+      ;(line.tool_calls || []).forEach((c: ToolCall, i: number) => {
         const fn = c.function || {}
         const name = fn.name || '(未命名工具)'
         const args = String(fn.arguments || '')
@@ -158,7 +189,7 @@ export function trajectoryRows(): any[] {
     } else if (line.role === 'tool') {
       // 工具结果**独立成行**（轨迹就是让人看清真实结构的）：配对得上的用调用名，
       // 配不上的注明，不并进调用行。
-      const info = line.tool_call_id ? callOf[line.tool_call_id] : null
+      const info = line.tool_call_id ? callOf[line.tool_call_id] || null : null
       const text = String(line.text || '')
       const after = nextMsgLine(state.lines, idx)
       const imageNext = !!(after && after.role === 'user' && after.images && after.images.length)
@@ -180,11 +211,12 @@ export function trajectoryRows(): any[] {
       })
     }
   })
+  rows.forEach((r, i) => { r.rid = r.kind + '@' + (r.jump ?? 'x') + '#' + i })
   return rows
 }
 
 /* 轨迹的类型 chip 按**转录里的真实角色**列（对话页是合并后的呈现，两者语义不同）。 */
-const TRAJ_KINDS = [
+export const TRAJ_KINDS = [
   { id: 'user', label: '用户' },
   { id: 'msg', label: '助手' },
   { id: 'think', label: '思考' },
@@ -194,167 +226,9 @@ const TRAJ_KINDS = [
   { id: 'usage', label: '用量' },
 ]
 
-function trajVisible(row: any): boolean {
-  const picked = Object.keys(state.trajKinds).filter((k) => state.trajKinds[k])
-  if (!picked.length) return true
-  return picked.indexOf(row.kind) >= 0
-}
-
-function trajDetailBody(row: any): HTMLElement {
-  const body = el('div', 'traj-detail-inner')
-  const labels: Record<string, string> = {
-    prompt: '系统提示词', thinking: '思考', user: '用户消息', message: '助手消息',
-    input: '输入', output: '输出', request: '用量行',
-  }
-  Object.keys(row.detail || {}).forEach((k) => {
-    const section = el('div')
-    section.appendChild(el('div', 'traj-detail-title', labels[k] || k))
-    const text = String(row.detail[k] || '')
-    // 输入 / 输出 / 用量行与对话页同源：JSON 高亮，其余纯文本。
-    if (k === 'input' || k === 'request' || k === 'output') {
-      section.appendChild(machineBlock(text, 'code'))
-    } else {
-      section.appendChild(el('pre', 'code', text))
-    }
-    const actions = el('div', 'row-actions')
-    actions.appendChild(copyButton(text))
-    section.appendChild(actions)
-    body.appendChild(section)
-  })
-  // 图片轮的展开区里也要能看到图（点图进灯箱，与对话页同一个灯箱）。
-  if (row.images && row.images.length) {
-    body.appendChild(imageStrip({ images: row.images }))
-  }
-  return body
-}
-
-export function renderTrajectory(): void {
-  const refs = document.getElementById('trajectory')
-  if (!refs) return
-  clear(refs)
-  if (!state.current) {
-    refs.appendChild(el('div', 'traj-empty', '左侧选择一个会话后，这里列出它的全部步骤。'))
-    return
-  }
-  const rows = trajectoryRows()
-  const visible = rows.filter(trajVisible)
-
-  const toolbar = el('div', 'traj-toolbar')
-  const inner = el('div', 'traj-toolbar-inner')
-  const filters = el('div', 'traj-filters')
-  const allChip = el('button', 'traj-chip', '全部') as HTMLButtonElement
-  allChip.type = 'button'
-  allChip.setAttribute('aria-pressed', Object.keys(state.trajKinds).length ? 'false' : 'true')
-  allChip.addEventListener('click', () => {
-    state.trajKinds = {}
-    renderTrajectory()
-  })
-  filters.appendChild(allChip)
-  TRAJ_KINDS.forEach((k) => {
-    const count = rows.filter((r) => r.kind === k.id).length
-    if (!count) return
-    const chip = el('button', 'traj-chip', k.label + ' ' + count) as HTMLButtonElement
-    chip.type = 'button'
-    chip.title = '只看 / 不看「' + k.label + '」'
-    chip.setAttribute('aria-pressed', state.trajKinds[k.id] ? 'true' : 'false')
-    chip.addEventListener('click', () => {
-      if (state.trajKinds[k.id]) delete state.trajKinds[k.id]
-      else state.trajKinds[k.id] = true
-      renderTrajectory()
-    })
-    filters.appendChild(chip)
-  })
-  inner.appendChild(filters)
-  inner.appendChild(el('span', 'traj-count', visible.length + ' / ' + rows.length + ' 步'))
-  toolbar.appendChild(inner)
-  refs.appendChild(toolbar)
-
-  const scroll = el('div', 'traj-scroll')
-  if (!visible.length) {
-    scroll.appendChild(el('div', 'traj-empty', rows.length ? '当前筛选没有匹配的步骤' : '这个会话还没有步骤'))
-    refs.appendChild(scroll)
-    return
-  }
-
-  const table = el('table', 'traj-table')
-  const colgroup = document.createElement('colgroup')
-  ;[['col-n'], ['col-kind'], ['col-name'], [], ['col-status'], ['col-size'], ['col-time']].forEach((c) => {
-    const col = document.createElement('col')
-    if (c[0]) col.className = c[0]
-    colgroup.appendChild(col)
-  })
-  table.appendChild(colgroup)
-  const thead = el('thead')
-  const hrow = el('tr')
-  ;['#', '类型', '名称', '摘要', '状态', unitLabel(), '耗时'].forEach((h, i) => {
-    hrow.appendChild(el('th', (i === 0 || i >= 5) ? 'num-head' : null, h))
-  })
-  thead.appendChild(hrow)
-  table.appendChild(thead)
-
-  const tbody = el('tbody')
-  visible.forEach((row, idx) => {
-    const key = 'r' + idx + ':' + (row.jump || row.name)
-    const tr = el('tr', 'traj-row')
-    tr.setAttribute('data-kind', row.kind)
-    if (row.status === 'error') tr.setAttribute('data-error', 'true')
-    tr.title = row.title || '点击跳到对话里对应的那条消息'
-
-    const tdN = el('td', 'traj-num')
-    const discl = el('button', 'traj-disclose', state.trajOpen[key] ? '▾' : '▸') as HTMLButtonElement
-    discl.type = 'button'
-    discl.title = '展开完整输入输出'
-    discl.addEventListener('click', (ev) => {
-      ev.stopPropagation()
-      state.trajOpen[key] = !state.trajOpen[key]
-      renderTrajectory()
-    })
-    tdN.appendChild(discl)
-    tdN.appendChild(document.createTextNode(row.jump ? String(row.jump) : '—'))
-    tr.appendChild(tdN)
-
-    const tdKind = el('td')
-    tdKind.appendChild(el('span', 'kind-tag kind-' + (row.status === 'error' ? 'error' : row.kind), row.tag))
-    tr.appendChild(tdKind)
-
-    tr.appendChild(el('td', 'traj-name', row.name))
-    const tdSum = el('td', 'traj-summary', row.summary || '—')
-    tdSum.title = row.summary || ''
-    tr.appendChild(tdSum)
-    const statusText = row.status === 'error' ? '✗ error'
-      : row.status === 'ok' ? '✓ ok'
-      : (row.status === 'plain' || !row.status) ? '—' : row.status
-    tr.appendChild(el('td', 'traj-status ' + (row.status === 'error' ? 'error' : row.status === 'ok' ? 'ok' : 'plain'),
-      statusText))
-    tr.appendChild(el('td', 'traj-num-cell',
-      state.unit === 'char'
-        ? (row.chars ? String(row.chars) : '—')
-        : (row.tokens ? countValue(row.chars, row.tokens) : '—')))
-    tr.appendChild(el('td', 'traj-num-cell', row.time ? fmtDur(row.time) : '—'))
-
-    tr.addEventListener('click', () => {
-      if (row.jump) jumpToLine(row.jump)
-      else { state.trajOpen[key] = !state.trajOpen[key]; renderTrajectory() }
-    })
-    tbody.appendChild(tr)
-
-    if (state.trajOpen[key]) {
-      const dtr = el('tr', 'traj-detail')
-      const td = el('td') as HTMLTableCellElement
-      td.colSpan = 7
-      td.appendChild(trajDetailBody(row))
-      dtr.appendChild(td)
-      tbody.appendChild(dtr)
-    }
-  })
-  table.appendChild(tbody)
-  scroll.appendChild(table)
-  refs.appendChild(scroll)
-}
-
 /* 轨迹 → 对话：切回对话标签页并滚到那一条，落点短暂高亮。 */
 export function jumpToLine(n: number): void {
-  const node = state.anchors[n]
+  const node = anchorOf(n)
   switchView('chat')
   if (!node) return
   node.scrollIntoView({ block: 'center' })

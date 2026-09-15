@@ -725,3 +725,195 @@ models:
 3. **模块级带 g 的正则是地雷**：移植时照抄旧页要连标志位一起抄——旧页不带 g 是刻意的（mdInline 递归）。
 4. **Vue watch 多源**：见块 6，写进 AGENTS.md 陷阱清单。
 5. 富文本层（~1500 行纯函数）委派子代理并行移植 + 自写 DOM stub 冒烟，效果良好；时间线/详情栏这种跨节点手术的命令式渲染留主线程逐函数对照。
+
+## P5-R2 批（组件化收尾，直接提交 master）：时间线 / 详情栏 / 轨迹全部 Vue 组件化
+
+背景：P5-R1 已把 `web/` 迁成 Vue + 命令式混合体（时间线/详情栏仍是 legacy 命令式 DOM + 薄容器）。本批把剩下三块命令式渲染全部改成**纯 Vue 组件**，视觉零回归。用户原话："继续web开发…很多界面可以用vue组件就写成组件那样方便维护"。
+
+### 架构定调（四块提交，全部在 master）
+
+- **块A `fed6966`**：`Trajectory.vue` + 基础件 `MachineText`/`CopyBtn`/`ImageStrip`。trajectory.ts 退成纯行模型（`trajectoryRows()` + `jumpToLine()`）。
+- **块B `a8384ce`**：`DetailsPanel.vue` + `MdBody.vue`。details.ts 退成纯模型（`sessionKVRows`/`statsModel`/`metaModel`）。
+- **块C `a87473b`**：消息流全家桶——`stream.ts` 的 `streamModel()` 把 `state.lines` 一次扫描成条目模型（assistant 带 calls / system / imageTurn / result / other），原来跨节点手术的 `attachResult`/`attachImages`/`pendingTaskImages` 全部变成**条目归属记账**：工具回执与图片行不再操作别人的 DOM，而是记进对应 CallItem 的 `results`/`attachments`/`outImages`/`previews`，由组件模板渲染。组件：`Timeline`/`AssistantMsg`/`SystemMsg`/`ImageTurn`/`ResultMsg`/`ToolCard`/`StreamSummary`/`Disclosure`/`FoldText`/`IOSection`/`MachineScrollBox`。
+- **块D**：清死代码（state.ts 的数据层占位 stub、timeline.ts 未外用的命名助手转私有）、文档同步。
+
+关键设计点：
+
+1. **命令式叶子组件的 DOM 契约**：`machineScroll` 拆出 `machineScrollInto(host,…)`，让 `MachineScrollBox` 的根节点**自己充当 `.text-wrap`**——否则组件根 div 会插在 `.io-section` 与 `.text-wrap` 之间，结构探针的类名链立刻多出一段 `>`。视觉虽无差，但 DOM 逐层一致才好验收。
+2. **forceCollapse 的真实语义**：旧页「折叠全部思考」开 = 命令式全部合上且**不写记忆**，关 = **什么都不做**（等下次自然重渲才按记忆恢复）。组件化后要在 `watch(forceCollapse)` 里只做单侧动作，不能对称地"关=恢复"。
+3. **自动跟随的自动取消**：旧页 timeline 有个 scroll 监听——手动滚离底部 40px 即把跟随开关按灭。这是页眉「自动跟随」按钮唯一会自己变化的路径，图片会话（长转录自动滚动）一触发就露馅，补上后页眉 0 像素差。
+4. **展开记忆的恢复时机**：旧页整流重渲（会话/行数/Markdown/仅看工具/单位变化）时按记忆恢复思考块开合；组件化后对应成对这些源 watch 一次 `syncThink`，DOM 直改（用户手点 `<details>`）与记忆写入仍由 Disclosure 的 toggle 事件承担。
+
+### 迁移中抓到的真缺陷（全部由探针/像素差逼出）
+
+1. **IOSection 漏 import `MachineScrollBox`** → 模板渲染成未解析的自定义元素，io 文本内容整块消失（probe3c 145/155 diff），**控制台零报错**（unknown element 静默）——内容缺失先查渲染 HTML 再查 console。
+2. **FoldText 的 `str.replace` 误伤**：给 md 分支补 `md-body` 类时，同一写法的 pre 分支（`:class="[extraClass, …]"`）也被整体替换，纯文本态类名混进 `md-body`（probe3d 5 处 diff）。
+3. **面包屑会话名多包一层 span**：旧页 `nameNode('span','crumb crumb-current',…)` 的渲染根就是 crumb 本身；Vue 版先 span 包 InlineMD 再塞进 crumb，行内 Markdown 语义不变但 DOM 多一层，图片会话页眉 61×19 像素差。修法：`<InlineMD tag="span" class="crumb crumb-current">`。
+4. **缩略图预览行漏渲染**：块C 第一版只在 ToolCard 里渲染了结果/附件，details 的**兄弟节点** preview-strip 忘了（probe7b previewStrips 3→0）。
+5. **`str.replace` 全量替换的教训**（同 2）：对出现多次的模板片段做字符串替换前先数出现次数。
+
+### 验收证据
+
+- 结构探针：probe3c（时间线 155 字段）/ probe3d（Markdown 开关 44）/ probe4（思考与折叠交互 20）/ probe5（轨迹 104）/ probe6（详情栏 95）/ probe7b（图片会话灯箱 16）/ probe8（综合验收 20）= **454/454 全一致**。
+- 像素差：5 场景（对话 / 轨迹 / 详情打开 / 深色主题 / 图片会话）**全部 0 像素差**（容差 8，最大通道差 0）。
+- 控制台：25 秒监听零报错。
+- 环境噪声备忘：两页 origin 不同 → localStorage 折叠记忆不同会让侧栏整块像素差，用 `temp/p5run/dumpstore.mjs` 把旧源 6 条界面记忆镜像过去即归零；活跃会话正在写入时侧栏计数会因轮询相位瞬态不同，截图脚本已加"侧栏文本稳定 6 秒"等待。
+
+### P5-R2 收尾用户反馈（两条新口径，随 `web/components` 分支落地）
+
+1. **验收口径放宽**："不需要逐像素一致，看着一致就可以了。功能上一致就可以。做好组件化的。" —— 逐像素 diff 与 DOM 逐层一致降为参考项，硬门槛只剩功能探针 + 控制台零报错；组件化质量是第一优先级。P5-R2 各块当初按逐像素标准验收（0 像素差）不浪费——那是迁移期保真手段，后续开发不再背这个成本。
+2. **web 开发走分支**："从之前合并回来的那个节点上对于web的开发这边还是放在一个web分支上去开发吧。" —— 建分支 `web/components`（自 `f999b03` 合并节点分出）；原直接提交在 master 上的组件化四块（fed6966/a8384ce/a87473b/a17a61f）随分支走，**master 退回合并节点**。分支操作记录：先 `git branch web/components` 后误在分支上 `reset --hard f999b03`（指针落错侧），纠正为 `checkout master → reset --hard f999b03 → branch -f web/components a17a61f → checkout web/components`；教训：`git reset` 落点只看"当前在哪个分支"，切分支和动指针要分开核对。
+
+### P5-R2 质量批（`web/components` 分支）：类型层 + 单测 + 锚点接口化
+
+按代码评审结论做三项优化（用户认可"组件化质量优先"口径）：
+
+1. **`legacy/types.ts` 类型层**：`Line`（转录行：n/t/bad/role/text/reasoning/tool_calls/images/est…+ unknown 索引签名）、`ToolCall`、`ImageAttr`（归属三态）、`ImageCallEntry`（FIFO 队列条目）、`Session`、`UsageStats`。stream/timeline/trajectory 的 **42 处 `any` 清零**；`estOf()` 收紧成非可选数字面（缺失按 0，不往下游漏 undefined）；`state.lines`/`state.current`/`callEst`/`imgAttr` 全部带型。
+2. **纯函数单测**：vitest（node 环境 + localStorage 打桩），`web/tests/` 23 个用例钉住归属算法的全部规则分支（精确匹配优先/工具名/顺序 FIFO/失败调用不占队/任务不许抢/开头投喂两轮补挂/未识别兜底/轮次索引缓存）与 streamModel（meta/usage 不进流、onlyTools 过滤、回执并卡 lastStatus、配对失败独立行、call-id 无回执退附件、预览条挂轮末 view 卡、callMsgLine）。**23/23 通过**；`package.json` 加 `test` 脚本。
+3. **锚点接口化**：行号→DOM 的映射从 `state.anchors`（reactive，会把 DOM 节点包成响应式代理）挪到 state.ts 模块级 `Map` 注册表：`registerAnchor/unregisterAnchor/anchorOf/clearAnchors`；消息组件 onMounted 注册/onBeforeUnmount 注销，ToolCard 对 anchorNs 做差量增删；trajectory `jumpToLine` 改走 `anchorOf()`。行为探针确认：点轨迹行 → 切回对话 → 对应 `msg-assistant` 节点 flash 高亮。
+
+**真实教训（两次）**：`tsc --noEmit` 不检查 `.vue` 的 script 块，vite 构建也不报——AssistantMsg 漏 `onBeforeUnmount` import、ToolCard/AssistantMsg 漏 `registerAnchor` import，都是**运行时才炸**（`ReferenceError: … is not defined`，整个消息流组件挂掉、页面只剩 1 条消息）。第一次是探针 454 字段跑出 219 处 None 才暴露的，单靠"探针里有值"的条目发现不了——所以控制台零报错必须是每轮验收的固定动作。补了一个自查脚本（grep 各文件用到的 state 模块导出 vs import 面板），归入 web 开发流程；最终全绿：454/454 + 控制台零报错 + 5 场景 0 像素差 + 轨迹跳回行为验证（点行 → 切对话 → 目标节点 flash）。
+
+### P8 侧栏仿 DSH 改版 + T12/T13（`web/components` 分支）
+
+**T12（平均首字长浮点）**：`fmtDur` 亚秒分支 `v + 'ms'` 直接漏浮点（用户见 `991.4705882352941ms`）。新旧两页同款修复：`Math.round(v) + 'ms'`。v2 探针 probe5 的 `tiles[3]/value` 从此与旧页（未修）差 1 处——**预期内差异**，453/454。
+
+**T13（旧版单项目徽标误显）**：两层根因，都在"组级 OR"上。
+1. Go `projectGroupFor` 对 `<书名>/work/sessions/…`（现代布局最常见落点）走到兜底分支 `Legacy: isProjectWorkspace(root/书名)`——书目录必然是工作区 → 每本书都误挂徽标。修法：`seg[1]∈{work,source} && seg[2]=='sessions'` 的转录落点是现代布局，强制 `legacy=false`；`work/<file>.jsonl`、`sessions/<file>.jsonl` 直接躺着的仍是旧式。测试补「书直接挂扫描根下」用例（原有测试都是 `容器/书名` 两层，恰好漏掉真实部署的单层形态——教训：**测试布局要照真实部署摆**）。
+2. 前端 `if (s.projectLegacy) g.legacy = true` 组级 OR：一本书里只要有一笔旧式落点（真实数据里 `<书>/work/style_session.jsonl` 就在 work/ 根下），整组又被标回。语义收窄：徽标只属于**根组**（输出根即工作区）；Go 语义（组目录是工作区根）不动，测试不破。新旧两页同修。
+
+**P8 侧栏改版**（样式仍整卷进 `assets/viewer.css`，新旧页共享——但新类名旧页不引用，不影响旧页观感）：
+- **文件夹图标**：项目行槽位换成 DSH 风格内联 SVG 文件夹（展开=打开的文件夹、着色 accent；收起=闭合轮廓），折叠轨道里保留 16px 图标，辨识度比原来的点/箭头好。
+- **层级递进**：阶段行缩进 24px、会话行 40px（`sub1`/`sub2` 类，hover 背景仍全宽）。
+- **阶段状态三态**：`stageStatusText(stages, stage, live)` —— 会话活着 → 「运行中」（绿、优先于 progress.json）；`done` → 「✓ 完成」（绿）；空值 → 「未开始」（暗）；其他值 → 原文（琥珀）。`.running/.busy/.idle` 配色。
+- **会话方块视图**：侧栏头部 ▦/☰ 切换（记忆 `side.blockView`），开启后会话渲染成 20px 方块网格（`session-blocks`），逐图会话块内显示书内序号，活跃=accent 实心、运行中=绿圈；悬浮出 `sessionTip` 全量说明；**不受 8 条 overflow 限制**（方块就是为几十个会话设计的），折叠轨道里隐藏。
+- **响应式**：验证 900px（自动折 56px 轨道，文件夹图标保留）与 1280px（详情栏收起、中栏让步）。
+
+验收：探针 453/454（唯一差异=T12 修复本身）；控制台零报错；单测 23/23；截图逐张读图确认（列表/方块/密集 60 会话/深浅主题/900/1280）。新增 `temp/p5run/shotw.mjs`（指定视口宽高截图）。**沙箱注意：bash 每次调用的 /tmp 是独立 tmpfs，跨调用文件一律写工作区。**
+
+### 用户口径更新（P8 批末）：旧页正式冻结
+
+P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**为旧页改代码。用户明确：迁移已完成，旧页不再维护，之后 bug 也不修，一切改动只做 v2。样式表 `assets/viewer.css` 仍整卷共享（sync-css/check-css 纪律不变），新类名旧页不引用即可，无需再为旧页观感让步。旧页继续存在的意义只剩两样：探针对照基准 + 用户还没切过去的入口。
+
+### P11 CSS Vue 化（`web/components` 分支）
+
+**做了什么**：把 1368 行的整卷 `viewer.css` 按归属拆分——全局基础样式进 `web/src/styles/base.css`（token/深色主题/重置/滚动条/通用小件 `.icon-btn`/`.badge`/`.dot`/跨组件共享词汇 `.msg`/`.line-*`/`.disclosure`/`.io-*`/`.code`+高亮色板/`.images`/`.flash`/`.lightbox`/md 正文词汇），组件私有样式进各 SFC 的 `<style scoped>`（App=三栏骨架+中栏头部、Sidebar、Timeline、StreamSummary、SystemMsg、AssistantMsg、ImageTurn、Trajectory、DetailsPanel；FoldText/MdBody 的规则因是共享词汇/作用于 v-html 内容，整块归 base）。旧页资产 `assets/viewer.css` 从此**冻结**（保持 46355 字节原样，旧页继续可用）；`sync-css.mjs`/`check-css.mjs` 退役删除（字节守卫的前提——两页共享同一份样式——已不复存在）。
+
+**为什么共享词汇必须放全局（三个实测陷阱，都由探针/逐元素对比抓出）**：
+1. **跨组件类放 scoped 会静默丢样式**：`.line-*`/`.disclosure` 被 7 个组件使用，最初放 FoldText scoped 后，SystemMsg 自己模板里的 `.line-summary` 匹配不上，行高 20→24、系统消息 +8px——探针 probe8 的 `followOff` 因此翻转（详情栏重开后内容多高 48px>40px 阈值，自动跟随被滚离逻辑取消）。教训：**先 grep 类名的组件分布再决定归属**。
+2. **`:deep()` 会反转原文件的优先级次序**：md 正文规则经 MdBody scoped 的 `:deep()` 下发后，每条选择器都追加 `[data-v]`，`.md-p`（原 0,1,0）与 `.md-body > *:last-child`（原 0,2,0）被拉平成同分值、按书写顺序决胜 → `.md-p` 的 margin-bottom 8px 复活（`.md-body > *:first-child` 的 `:deep(> …)` 与同元素选择器 `.md-body.clamped` 也一并失配）。而 **v-html 生成的 DOM 根本不带 scope 属性**——md 正文整块退回全局（md-* 类名自命名空间化，无碰撞风险）。
+3. **对照测量前先对齐 localStorage**：两个端口 origin 的界面记忆（侧栏/详情栏展开与宽度）让 timeline 宽度差 176px，逐元素高度对比全是环境噪声——"每条消息 +12px"里真差异只有来自陷阱 1/2 的那部分。
+
+**验收**：探针 453/454（唯一差异=T12 的 `tiles[3]/value` 取整，旧参照 8955 是冻结前二进制）；控制台零报错；vitest 23/23；`go test ./internal/sessionview/` 全绿（sessionview 的浏览器测试对页面断言不受影响）；截图目检列表/方块/轨迹/深色主题与 P8 构建一致（dist CSS 58.6KB vs 46.4KB，膨胀来自 scoped 属性复写）。
+
+### T18 预览缩略图收小（`web/components` 分支，P11 后续）
+
+**现象**：view 类调用下的缩略图预览行把折叠流撑出大段空档——横图（如 1300×460）按 `max-width:240px` 约束后仍占 240×86，折叠态的对话里每个 view 调用上下多出 ~86-108px，视觉上「挤压上下文本、图片贴最左」。先对比了 v2（8981）与生产 8849（旧页）的同会话同图：两边几何**逐项相同**（240×86、x=532、缩进 20px、折叠行 24px）——「和 v1 不同」是更早版本的印象，实际是这组 token 从引入起就偏大。
+
+**修法**：只动 v2 的 `base.css` token（P11 后旧页资产冻结，两页不再被同一份样式绑死）——`--preview-h: 108px→72px`、`--preview-w: 240px→160px`。横图 1300×460 → 160×58，竖图最高 72px；缩进 20px（与工具名对齐）保持。灯箱可看原大图，职责不变。
+
+**验收**：探针 453/454（唯一差异仍=T12 取整）；控制台零报错；实测宽图样例 160×58/160×69/143×72。
+
+### T18 修正：真正的根因是 IOSection 插槽掉进网格第一列（`web/components` 分支）
+
+**上一小节的结论错了**：「缩略图收小」不是用户要的——用户澄清：缩略图（108/240）本来就没问题，出问题的是**展开的工具卡片内部**——图片和文字拥挤、图片贴最左边。token 已回滚到 108/240。
+
+**真根因**：旧页把精确匹配的输出图片 append 进 `.text-wrap`（`col.appendChild(imageStrip(line))`，注释原话「text-wrap 里、滚动区之外」）——`.text-wrap` 是 io-section 网格的第二列单元格，图片自然从文字列 x 起排。组件化时 `<ImageStrip>` 经 IOSection 默认插槽成为 `.io-section` 的**直接子元素**，网格自动布局把它排到第二行**第一列**（标签列）：图片贴最左、`max-content` 的第一列被图片宽度撑开（竖图 276px、横图 520px）、「输出」文字被挤进右侧窄条——用户截图里的「文字挤成一条 + 图片在最左」就是它。
+
+**修法（保持 Vue 组件化）**：IOSection 里插槽内容包进 `.io-extra` 容器，`grid-column: 2` 钉回内容列（`.io-extra { display:flex; column; gap:6px }` 进 base.css 的 io 词汇）。插槽用法不变（ToolCard 仍往默认插槽塞 ImageStrip + attach-note），布局语义与旧页一致：图片在输出正文下方、同一列起排、归属脚注跟随。
+
+**验证**：截图目检竖图（1280×1951 → 276×420）与横图（1200×686 → 520×298）卡片——输入 JSON 全宽高亮、输出文本全宽、图片在内容列、脚注跟随；探针 453/454（唯一差异仍=T12 取整）；控制台零报错；vitest 23/23；sessionview go 测试全绿。附：截图时踩了个 CDP 坑——卡片在闭合 `<details>` 里 rect 全 0，必须先 `details.open=true` 再 scrollIntoView 再截视口。
+
+### T22 方块编号 + 完成状态着色（`web/components` 分支）
+
+**需求**（issue.md T22）：章节转换/章节核对的方块没有编号；方块要能显示完成情况——正常=结束、绿色=进行中、红色=错误终止。
+
+**数据源考察**：progress_items/ 只覆盖图片（矢量会话），章节没有逐项进度；progress.json 是档位级的（stage → done/""），粒度太粗。真正的两个信号都在现成数据里：
+1. **章号**在转录文件名里：`convert_chapter_001.jsonl` / `checker_chapter_001.jsonl`（`chapter[_-]?0*(\d+)$` 提取；"chapter" 一词保证不误读其他会话名里的哈希/日期数字）。
+2. **完成情况**在转录回执里：全部四类 submit 工具的回执都以 `SUBMITTED. ` 开头（tools.go/tools_chapter.go/tools_convert.go），assistant 正常文本只写 "Submitted"——所以 `readStat` 的同一趟流式扫描里加两次**原始行子串检查**（`"role":"tool"` 与 `SUBMITTED`，零额外 JSON 解码）就能得到每会话的结束状态：SawSubmit → done / SawTool&&!SawSubmit → error / 都没有 → pending。真数据验证：glm 项目的两个 convert（COMPILE FAILED / NO MATCHES）正确落红，0911_1 的 8 个只有 meta+user 的 vector 会话正确落暗。
+
+**呈现**（P11 后样式在 Sidebar.vue scoped）：方块文字 = `imageOrder || chapterOrder`；状态类 `err`（红底红字）/ `pend`（opacity .42）只在不 live 时挂——运行中的绿圈优先于一切；正常结束不加类（默认样子就是"已结束"）。悬浮说明补一行状态语义与章号，`sessionHaystack` 补检索词（第N章/chapter N/错误/已提交）。
+
+**验收**：截图目检（glm 章节转换 [红2][红1][暗3]、测试-概率论 章节转换/核对 3 2 1 4）；探针 453/454（唯一差异仍=T12 取整）；控制台零报错；vitest 23/23；sessionview 新增 3 个单测（chapterOrderOf/endStateOf/readStat 回执信号）全绿。
+
+### T19 文件夹图标左遮挡（`web/components` 分支）
+
+**需求**（issue.md T19）：文件夹图标在被选中（展开）时左侧有点遮挡。
+
+**根因**：把 open/closed 两个 SVG 放大到 96px 截图目检——closed 没问题；**open 图标的背板左斜边（`h-12l-1.5 6` 的收尾斜线）与前盖左斜边（`M1.5 13.5l1.6-6` 的起笔斜线）相互交叉**，交叉区在图标左下形成一团乱线，14px 下看就是"左侧被糊住/遮挡"。
+
+**修法**：重画 open 图标的两个 path——背板从右上起笔、左缘走**垂直直线**（`M14.5 8V5.5a1…H2.5a1…v9a1…h2.2`，底部只留短 stub 与前盖衔接），前盖是纯平行四边形（`M4.9 14.5 6.7 7.5h7.7l-1.8 7Z`）整个落在背板内侧；两条斜边不再有任何交叉。closed 图标不动。
+
+**验收**：96px 放大对照（左右侧线条干净、与 closed 图标的 tab 造型一致）+ 侧栏 14px 实测截图；探针 453/454；控制台零报错；vitest 23/23。
+
+### P6 灯箱滚轮缩放（`web/components` 分支）
+
+**需求**（plan.md P6）：点击图片进入的预览界面，增加滚轮缩放。
+
+**实现**：state.ts 灯箱加 `scale/tx/ty`（`translate(tx,ty) scale(s)`、origin 中心）——`zoomLightbox` 以鼠标点为锚（`t' = t + p·(s−s')`，p 为光标相对图像中心偏移），钳制 0.15–8 倍；App.vue 灯箱根接 wheel/pointer/dblclick——按住拖动平移（Pointer Capture），**拖动过吞掉 click**（原「点击关闭」只在微动 <3px 的纯点击上生效，行为向后兼容），双击复位。Esc 关闭沿用。
+
+**CDP 实测**（合成事件 + 数值断言）：锚定误差 <1.5px；35 步放大停在 scale(8)、40 步缩小停在 scale(0.15)；拖拽 translate 精确跟手；拖后不关、微动点击照关、双击复位全过。探针 453/454；控制台零报错；vitest 23/23。
+
+**排错插曲**：断言用的正则没容忍浏览器对 style.transform 的归一化空格（`translate(xpx, ypx)`），前两轮「假失败」——CDP 调试脚本加了 exceptionDetails 输出后定位。
+
+### P9 轨迹点行 → 右侧详情栏看该步（`web/components` 分支）
+
+**需求**（plan.md P9）：类似 DSH，轨迹界面点工具调用行，在右侧边栏看详细信息。
+
+**实现**：行点击从「跳回对话」改为「选中该步」——`state.trajSelected` 存行身份，DetailsPanel 顶部条件渲染「步骤 #N」块（`trajStep` computed：仅轨迹视图 + 有选中时，从 `trajectoryRows()` 取行，detail/images 与轨迹页就地展开同源；类型标签 + 名称 + 各 detail 段（MachineText 代码高亮/纯文本）+ CopyBtn + ImageStrip + × 关闭），会话/指标/元信息块仍在其下（DSH 同款：步骤详情置顶、会话信息跟随）。跳回对话收进行内 `.traj-gochat`（↳，悬浮显形），选中行 `.selected` 高亮；再点同一行取消。
+
+**撞行缺陷（真数据抓到）**：第一版用 `row.jump` 定位步骤——工具行的 jump 是**assistant 消息行号**（call 挂在消息行上），点工具行右栏却显示「助手 AI」；且一条消息多次调用时 jump 还会撞工具行彼此。修法：`TrajRow` 增加**确定性 `rid`**（`kind@jump#序号`，append-only 转录下索引稳定），`trajectoryRows()` 末尾统一赋值；state.trajSelected 存 rid。CDP 复测：点 `list_source_pages` 工具行 → 右栏「工具 list_source_pages · 输入」✓，↳ 跳对话且选中保持 ✓，再点取消 ✓。
+
+**探针同步**：P9 是**有意的新旧行为分叉**（行内多了 ↳ 按钮、行标题换了文案、点行不再跳走）——probe5 的 num 归一化（去 ↳ + trim，浏览器把 style 序列化留尾随空格）、title 文案映射回旧语义；probe8 的跳转改点 `.traj-gochat`（旧页没有该按钮则退回点行本身，两页语义都验「跳回对话」）。全套回到 453/454（唯一已知差异仍 = T12 取整）。
+
+**验收**：截图目检（选中高亮 + 右栏步骤块置顶 + 会话/指标跟随）；CDP 断言（选中/取消/关闭/跳转保持选中）；探针 453/454；控制台零报错；vitest 23/23。
+
+### P7 实时流式状态（`web/components` 分支，Go + web 两侧）
+
+**需求**（plan.md P7）：对话实时进行时能看到流式状态——输出一个字一个字的出、工具调用也是。
+
+**为什么走磁盘 sidecar 而不是内存广播**：转录是整行落盘的 append-only JSONL（`Append(msg)` 在消息完整后才写）；且 `docvision sessions` 预览服务可能是**独立进程**，看不到跑会话进程的内存。所以选 `<转录>.partial` sidecar：会话进程流式期间节流覆写、完整消息落盘即删，任何进程都能读。
+
+**Go 侧**：
+1. `chatstream` 已有 `OnContent`/`OnReasoning` delta 回调；`client.readStream` 在两个回调里累积 `strings.Builder`，**~150ms 节流**调 `req.StreamHook(phase, tail)`（尾部截断 16KB）。hook 挂在 `ChatRequest` 上（`json:"-"`）——**每请求作用域**，并发会话共享一个 client 也不会互相覆盖（ 比 client 字段安全）。
+2. `TranscriptWriter.WritePartial`（tmp + rename 原子覆写）/ `ClearPartial`；`appendTranscript` 每次追加后清 sidecar（完整消息已落盘、快照过期），`Close` 也清（会话中途消失不能留过期快照）。session.Run 里给每个请求接上 hook。
+3. `sessionview` 的 `/api/session` 响应加 `partial` 字段（读 `<path>.partial`，空文本视为无）。
+4. 单测 `TestPartialSidecar`：覆写无 tmp 残留、清干净、Close 清。
+
+**Web 侧**：
+- `PartialTail.vue`：live 会话消息流末尾的实时卡片——「思考中/输出中」+ spinner + 新鲜度 + 累积文本尾部（>4KB 截头）+ 闪烁光标 `▍`；等宽安静样式、**不做 Markdown 解析**（半截 Markdown 渲染会闪）。data.ts 轮询增量接口时同步 `state.partial`（服务端不返回即置空，卡片自然消失；selectSession 清）。
+- 工具运行 spinner：`Disclosure` 加 `running` prop（摘要行绿色「运行中」），ToolCard 传 `!item.lastStatus && live`——没回执且会话 live 才转圈；死会话的悬空调用不转圈。
+
+**验证**：workspace 内 fixture（真数据盘只读，模拟 live 会话：mtime 60s 窗口内 + 手写 .partial）端到端——API 返回 partial ✓、UI「输出中/思考中」卡片 ✓、删 sidecar 后卡片消失 ✓、call_2/call_3（无回执）转圈而 call_1（有回执）不转 ✓；截图目检。探针 453/454（唯一已知差异仍=T12）；控制台零报错；vitest 23/23；go test 全绿。
+
+**排错插曲**：① `pkill -f 'dv3 sessions.*8990'` 匹配到**自己这条命令行**把刚起的服务器杀了（exit 143）——换端口号重起；② python 批量改 props 的静默 no-op（reconstruct 字符串不匹配也不报错）导致 `running?: boolean` 没加进去，第一轮 fixture 测试全 false——用 `edit` 工具按精确文本修。真数据盘 `/home/share` 对本 shell 是只读挂载，测试 fixture 放 workspace。
+
+### T20 + T21 排查与压缩检查点 DSH 化（`web/components` 分支，Go 侧小改）
+
+**T20「image_context 为什么 error」——定性：不是 image_context，也不存在边界报错。**
+全量扫描 5 个矢量会话目录（0911_1 / 测试-概率论 / 2026书…）：17 次 `image_context` 调用**全部成功**（回执形如 `image N of M in this document: …`）；代码上 `ImageContextTool` 对首/尾图边界返回 `(none)`（build() 对 i<0 / i>=len(refs) 直接给 "(none)"），只有「目标图在 markdown 里找不到 / 空目标且未绑定当前图」才报错——与「下一张没图了」无关。
+用户看到的那条红 error 是 **`view_image`**（`vector_测试-概率论__220c0aa…__geometric_figure.jsonl` 行 94）：模型把 64 位哈希文件名**敲错了**（`…deb97319f5d19c44db` 写成 `…deb97333f5d19c44db`），工具按既有语义如实回报 `TOOL ERROR: 文件不存在 …（请用图片文件名或 markdown 中的引用路径）`——UI 的轨迹/状态列标红是 `classifyResult` 命中「文件不存在」，显示正确，无需修复。
+
+**T21「压缩是不是 user 注入 + DSH 的提示与 XML 包裹」——两点：**
+1. 注入角色**就是 user**，且这是对的：system 消息插在会话中间违反多数 provider 的消息序规则、也会打断前缀缓存；DSH 的压缩检查点同样以 user 轮注入。不改。
+2. 补齐 DSH 式包裹：`compact()` 的替换注释从裸摘要改为 **marker 行 + `<compacted-summary>` 说明文字（"This is an automatically generated checkpoint… build on it without restating it. Continue the task directly…"）+ `<summary>` 摘要**。首行 `=== COMPRESSED SESSION CONTEXT` marker 不动——`LoadTranscript` 续跑折叠靠 `HasPrefix(marker)` 认注释，新旧两种形态都兼容。新增单测 `TestCheckpointNote`。
+
+### 详情标题样式回归 + 灯箱点击/双击冲突（验收反馈两连修，`web/components`）
+
+**①「详情」标题样式没了**：截图目检 + `getComputedStyle` 定位到 `.details-title` 计算样式全丢。根因是 **P11 scoped 陷阱①的又一例**：`.details-head`/`.details-title` 的规则在拆样式时写进了 **DetailsPanel.vue** 的 scoped 块，但这两个元素由 **App.vue** 渲染——`data-v` 属性对不上，规则整条失配（构建期与控制台都不报错）。修法：规则搬进 App.vue 的 scoped 块，DetailsPanel 里留一行注释指路。验证：computed `600/13px/muted` ✓ + 截图目检 ✓。
+
+**②双击复位 vs 点击退出冲突**：单击立即关灯箱 → 双击的第一击就把灯箱关了，双击复位永远触发不了。修法：**单击延迟 ~260ms 裁决**——窗口内来第二击按双击（复位、保持打开），否则关；拖动过的 pointer 序列吞 click 的判定从「click 时 lbDrag 已被 pointerup 清掉」改成 **pointerup 时定格 `lbSuppressClick`**（顺手钉死拖拽后误关竞态）。CDP 验证：滚轮放大→双击复位且保持打开 ✓→单击 ~620ms 内关 ✓。探针 `probe7b.imgClickKeeps` 一度出现差异（旧页点图立即关=False / 新页 250ms 时仍开=True）——查明是**探针 settle 只有 250ms、赶在 260ms 关闭定时器前**的计时假象，语义（点图冒泡关闭）没变；探针该处等 450ms 后两页对齐（453/454 基线保持，唯一已知差异仍 = T12）。
+
+### T20 补刀：image_context「正常回执被标 error」根因与修复（`web/components`）
+
+用户验收截图：be53f9a 矢量图会话里 image_context 的**结果行内容正常**（`image 4 of 4 in this document: …`）却挂着红 error。定位：`classifyResult` **全文**扫 `/REJECTED|文件不存在|失败|error|not found|traceback/i`，而 image_context 的回执会**引用图片周围的书中正文**——正文里「在第一次失败的条件下」命中「失败」。全仓扫描定量：24 条全文命中的工具回执里 **11 条是这类误报**（首行干净、错误词来自引用正文），其余 13 条是 COMPILE FAILED / TOOL ERROR 等真错误（它们的「Error:」在第二行，靠正文命中才被判出来）。
+
+**修法**：错误判定只看**回执首行**（`s.split('\n',1)[0]`），并把 `COMPILE FAILED` 前缀显式加进标记词（否则编译失败会漏报——vitest 新用例先抓到了这一点）。影响面：streamModel 工具卡、trajectory 结果行、ResultMsg、details 步骤块共用 classifyResult，一处修全修。旧页冻结不动（仍有误报，属预期分叉）。be53f9a 会话 CDP 实测：image_context 结果行 `data-error` 消失、状态恢复「—」；探针 453/454（style_session 探针路径没踩到误报行，无需归一化）、vitest 24/24、控制台零报错。
+
+### P13 缩略图开关（`web/components`，web 迁移线收尾项）
+
+**需求**（plan.md P13）：UI 增加一个功能，选择是否展示缩略图。
+
+**实现**（三行改动，照 Markdown 开关的既有模式）：① `state.showThumbs`（默认 true）+ `loadState` 读 `storeGet('showThumbs') !== '0'`；② App.vue 页签行右端（Markdown 旁）加「缩略图」`tab-toggle`（id `thumb-toggle`、aria-pressed、悬浮说明），点击翻状态并 `storeSet`；③ AssistantMsg 的 preview-strip `v-if` 加 `state.showThumbs &&`——纯响应式跟随，无需手动重渲链。v2-only（旧页冻结不加）。
+
+**验证**：CDP——默认 23 条 preview-strip → 关 0 条（aria-pressed=false、`dsh.sessionview.showThumbs=0` 落盘）→ 开 23 条恢复；**重载后仍 0 条**（loadState 读回记忆），再点恢复 23。截图目检开关位置与高亮态。探针 453/454（默认开，与旧页基准无分叉）、vitest 24/24、控制台零报错。这是 web 迁移线最后一个 plan 项——完成后 `web/components` 非快进合回 master（用户批准）。

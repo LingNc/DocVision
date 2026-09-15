@@ -2707,6 +2707,61 @@
     }
     return ret;
   }
+  function renderSlot(slots, name, props, fallback, noSlotted, branchKey) {
+    if (props == null) props = {};
+    if (currentRenderingInstance.ce || currentRenderingInstance.parent && isAsyncWrapper(currentRenderingInstance.parent) && currentRenderingInstance.parent.ce) {
+      const slotProps = props;
+      const hasProps = Object.keys(slotProps).length > 0;
+      return openBlock(), createBlock(
+        Fragment,
+        null,
+        [createVNode("slot", slotProps, fallback)],
+        hasProps ? -2 : 64
+      );
+    }
+    let slot = slots[name];
+    if (slot && slot._c) {
+      slot._d = false;
+    }
+    const prevStackSize = blockStack.length;
+    openBlock();
+    let rendered;
+    try {
+      const validSlotContent = slot && ensureValidVNode(slot(props));
+      const slotKey = props.key || branchKey || // slot content array of a dynamic conditional slot may have a branch
+      // key attached in the `createSlots` helper, respect that
+      validSlotContent && validSlotContent.key;
+      rendered = createBlock(
+        Fragment,
+        {
+          key: (slotKey && !isSymbol(slotKey) ? slotKey : `_${name}`) + // #7256 force differentiate fallback content from actual content
+          (!validSlotContent && fallback ? "_fb" : "")
+        },
+        validSlotContent || (fallback ? fallback() : []),
+        validSlotContent && slots._ === 1 ? 64 : -2
+      );
+    } catch (err) {
+      for (let i = blockStack.length; i > prevStackSize; i--) closeBlock();
+      throw err;
+    } finally {
+      if (slot && slot._c) {
+        slot._d = true;
+      }
+    }
+    if (rendered.scopeId) {
+      rendered.slotScopeIds = [rendered.scopeId + "-s"];
+    }
+    return rendered;
+  }
+  function ensureValidVNode(vnodes) {
+    return vnodes.some((child) => {
+      if (!isVNode(child)) return true;
+      if (child.type === Comment) return false;
+      if (child.type === Fragment && !ensureValidVNode(child.children))
+        return false;
+      return true;
+    }) ? vnodes : null;
+  }
   const getPublicInstance = (i) => {
     if (!i) return null;
     if (isStatefulComponent(i)) return getComponentPublicInstance(i);
@@ -2830,6 +2885,13 @@
       return Reflect.defineProperty(target, key, descriptor);
     }
   };
+  function useSlots() {
+    return getContext().slots;
+  }
+  function getContext(calledFunctionName) {
+    const i = getCurrentInstance();
+    return i.setupContext || (i.setupContext = createSetupContext(i));
+  }
   function normalizePropsOrEmits(props) {
     return isArray(props) ? props.reduce(
       (normalized, p2) => (normalized[p2] = null, normalized),
@@ -3998,12 +4060,12 @@
       setScopeId: hostSetScopeId = NOOP,
       insertStaticContent: hostInsertStaticContent
     } = options;
-    const patch = (n1, n2, container, anchor2 = null, parentComponent = null, parentSuspense = null, namespace = void 0, slotScopeIds = null, optimized = !!n2.dynamicChildren) => {
+    const patch = (n1, n2, container, anchor = null, parentComponent = null, parentSuspense = null, namespace = void 0, slotScopeIds = null, optimized = !!n2.dynamicChildren) => {
       if (n1 === n2) {
         return;
       }
       if (n1 && !isSameVNodeType(n1, n2)) {
-        anchor2 = getNextHostNode(n1);
+        anchor = getNextHostNode(n1);
         unmount(n1, parentComponent, parentSuspense, true);
         n1 = null;
       }
@@ -4014,14 +4076,14 @@
       const { type, ref: ref3, shapeFlag } = n2;
       switch (type) {
         case Text:
-          processText(n1, n2, container, anchor2);
+          processText(n1, n2, container, anchor);
           break;
         case Comment:
-          processCommentNode(n1, n2, container, anchor2);
+          processCommentNode(n1, n2, container, anchor);
           break;
         case Static:
           if (n1 == null) {
-            mountStaticNode(n2, container, anchor2, namespace);
+            mountStaticNode(n2, container, anchor, namespace);
           }
           break;
         case Fragment:
@@ -4029,7 +4091,7 @@
             n1,
             n2,
             container,
-            anchor2,
+            anchor,
             parentComponent,
             parentSuspense,
             namespace,
@@ -4043,7 +4105,7 @@
               n1,
               n2,
               container,
-              anchor2,
+              anchor,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4055,7 +4117,7 @@
               n1,
               n2,
               container,
-              anchor2,
+              anchor,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4067,7 +4129,7 @@
               n1,
               n2,
               container,
-              anchor2,
+              anchor,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4080,7 +4142,7 @@
               n1,
               n2,
               container,
-              anchor2,
+              anchor,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4096,12 +4158,12 @@
         setRef(n1.ref, null, parentSuspense, n1, true);
       }
     };
-    const processText = (n1, n2, container, anchor2) => {
+    const processText = (n1, n2, container, anchor) => {
       if (n1 == null) {
         hostInsert(
           n2.el = hostCreateText(n2.children),
           container,
-          anchor2
+          anchor
         );
       } else {
         const el2 = n2.el = n1.el;
@@ -4110,46 +4172,46 @@
         }
       }
     };
-    const processCommentNode = (n1, n2, container, anchor2) => {
+    const processCommentNode = (n1, n2, container, anchor) => {
       if (n1 == null) {
         hostInsert(
           n2.el = hostCreateComment(n2.children || ""),
           container,
-          anchor2
+          anchor
         );
       } else {
         n2.el = n1.el;
       }
     };
-    const mountStaticNode = (n2, container, anchor2, namespace) => {
+    const mountStaticNode = (n2, container, anchor, namespace) => {
       [n2.el, n2.anchor] = hostInsertStaticContent(
         n2.children,
         container,
-        anchor2,
+        anchor,
         namespace,
         n2.el,
         n2.anchor
       );
     };
-    const moveStaticNode = ({ el: el2, anchor: anchor2 }, container, nextSibling) => {
+    const moveStaticNode = ({ el: el2, anchor }, container, nextSibling) => {
       let next;
-      while (el2 && el2 !== anchor2) {
+      while (el2 && el2 !== anchor) {
         next = hostNextSibling(el2);
         hostInsert(el2, container, nextSibling);
         el2 = next;
       }
-      hostInsert(anchor2, container, nextSibling);
+      hostInsert(anchor, container, nextSibling);
     };
-    const removeStaticNode = ({ el: el2, anchor: anchor2 }) => {
+    const removeStaticNode = ({ el: el2, anchor }) => {
       let next;
-      while (el2 && el2 !== anchor2) {
+      while (el2 && el2 !== anchor) {
         next = hostNextSibling(el2);
         hostRemove(el2);
         el2 = next;
       }
-      hostRemove(anchor2);
+      hostRemove(anchor);
     };
-    const processElement = (n1, n2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const processElement = (n1, n2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       if (n2.type === "svg") {
         namespace = "svg";
       } else if (n2.type === "math") {
@@ -4159,7 +4221,7 @@
         mountElement(
           n2,
           container,
-          anchor2,
+          anchor,
           parentComponent,
           parentSuspense,
           namespace,
@@ -4188,7 +4250,7 @@
         }
       }
     };
-    const mountElement = (vnode, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const mountElement = (vnode, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       let el2;
       let vnodeHook;
       const { props, shapeFlag, transition, dirs } = vnode;
@@ -4236,7 +4298,7 @@
       if (needCallTransitionHooks) {
         transition.beforeEnter(el2);
       }
-      hostInsert(el2, container, anchor2);
+      hostInsert(el2, container, anchor);
       if ((vnodeHook = props && props.onVnodeMounted) || needCallTransitionHooks || dirs) {
         queuePostRenderEffect(() => {
           try {
@@ -4271,14 +4333,14 @@
         }
       }
     };
-    const mountChildren = (children, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized, start = 0) => {
+    const mountChildren = (children, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized, start = 0) => {
       for (let i = start; i < children.length; i++) {
         const child = children[i] = optimized ? cloneIfMounted(children[i]) : normalizeVNode(children[i]);
         patch(
           null,
           child,
           container,
-          anchor2,
+          anchor,
           parentComponent,
           parentSuspense,
           namespace,
@@ -4436,7 +4498,7 @@
         }
       }
     };
-    const processFragment = (n1, n2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const processFragment = (n1, n2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       const fragmentStartAnchor = n2.el = n1 ? n1.el : hostCreateText("");
       const fragmentEndAnchor = n2.anchor = n1 ? n1.anchor : hostCreateText("");
       let { patchFlag, dynamicChildren, slotScopeIds: fragmentSlotScopeIds } = n2;
@@ -4444,8 +4506,8 @@
         slotScopeIds = slotScopeIds ? slotScopeIds.concat(fragmentSlotScopeIds) : fragmentSlotScopeIds;
       }
       if (n1 == null) {
-        hostInsert(fragmentStartAnchor, container, anchor2);
-        hostInsert(fragmentEndAnchor, container, anchor2);
+        hostInsert(fragmentStartAnchor, container, anchor);
+        hostInsert(fragmentEndAnchor, container, anchor);
         mountChildren(
           // #10007
           // such fragment like `<></>` will be compiled into
@@ -4502,14 +4564,14 @@
         }
       }
     };
-    const processComponent = (n1, n2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const processComponent = (n1, n2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       n2.slotScopeIds = slotScopeIds;
       if (n1 == null) {
         if (n2.shapeFlag & 512) {
           parentComponent.ctx.activate(
             n2,
             container,
-            anchor2,
+            anchor,
             namespace,
             optimized
           );
@@ -4517,7 +4579,7 @@
           mountComponent(
             n2,
             container,
-            anchor2,
+            anchor,
             parentComponent,
             parentSuspense,
             namespace,
@@ -4528,7 +4590,7 @@
         updateComponent(n1, n2, optimized);
       }
     };
-    const mountComponent = (initialVNode, container, anchor2, parentComponent, parentSuspense, namespace, optimized) => {
+    const mountComponent = (initialVNode, container, anchor, parentComponent, parentSuspense, namespace, optimized) => {
       const instance = initialVNode.component = createComponentInstance(
         initialVNode,
         parentComponent,
@@ -4544,7 +4606,7 @@
         parentSuspense && parentSuspense.registerDep(instance, setupRenderEffect, optimized);
         if (!initialVNode.el) {
           const placeholder = instance.subTree = createVNode(Comment);
-          processCommentNode(null, placeholder, container, anchor2);
+          processCommentNode(null, placeholder, container, anchor);
           initialVNode.placeholder = placeholder.el;
         }
       } else {
@@ -4552,7 +4614,7 @@
           instance,
           initialVNode,
           container,
-          anchor2,
+          anchor,
           parentSuspense,
           namespace,
           optimized
@@ -4574,7 +4636,7 @@
         instance.vnode = n2;
       }
     };
-    const setupRenderEffect = (instance, initialVNode, container, anchor2, parentSuspense, namespace, optimized) => {
+    const setupRenderEffect = (instance, initialVNode, container, anchor, parentSuspense, namespace, optimized) => {
       const componentUpdateFn = () => {
         if (!instance.isMounted) {
           let vnodeHook;
@@ -4601,7 +4663,7 @@
               null,
               subTree,
               container,
-              anchor2,
+              anchor,
               instance,
               parentSuspense,
               namespace
@@ -4622,7 +4684,7 @@
             instance.a && queuePostRenderEffect(instance.a, parentSuspense);
           }
           instance.isMounted = true;
-          initialVNode = container = anchor2 = null;
+          initialVNode = container = anchor = null;
         } else {
           let { next, bu, u, parent, vnode } = instance;
           {
@@ -4707,7 +4769,7 @@
       flushPreFlushCbs(instance);
       resetTracking();
     };
-    const patchChildren = (n1, n2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized = false) => {
+    const patchChildren = (n1, n2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized = false) => {
       const c1 = n1 && n1.children;
       const prevShapeFlag = n1 ? n1.shapeFlag : 0;
       const c2 = n2.children;
@@ -4718,7 +4780,7 @@
             c1,
             c2,
             container,
-            anchor2,
+            anchor,
             parentComponent,
             parentSuspense,
             namespace,
@@ -4731,7 +4793,7 @@
             c1,
             c2,
             container,
-            anchor2,
+            anchor,
             parentComponent,
             parentSuspense,
             namespace,
@@ -4755,7 +4817,7 @@
               c1,
               c2,
               container,
-              anchor2,
+              anchor,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4773,7 +4835,7 @@
             mountChildren(
               c2,
               container,
-              anchor2,
+              anchor,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4784,7 +4846,7 @@
         }
       }
     };
-    const patchUnkeyedChildren = (c1, c2, container, anchor2, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
+    const patchUnkeyedChildren = (c1, c2, container, anchor, parentComponent, parentSuspense, namespace, slotScopeIds, optimized) => {
       c1 = c1 || EMPTY_ARR;
       c2 = c2 || EMPTY_ARR;
       const oldLength = c1.length;
@@ -4818,7 +4880,7 @@
         mountChildren(
           c2,
           container,
-          anchor2,
+          anchor,
           parentComponent,
           parentSuspense,
           namespace,
@@ -4877,13 +4939,13 @@
       if (i > e1) {
         if (i <= e2) {
           const nextPos = e2 + 1;
-          const anchor2 = nextPos < l2 ? c2[nextPos].el : parentAnchor;
+          const anchor = nextPos < l2 ? c2[nextPos].el : parentAnchor;
           while (i <= e2) {
             patch(
               null,
               c2[i] = optimized ? cloneIfMounted(c2[i]) : normalizeVNode(c2[i]),
               container,
-              anchor2,
+              anchor,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4961,7 +5023,7 @@
           const nextIndex = s2 + i;
           const nextChild = c2[nextIndex];
           const anchorVNode = c2[nextIndex + 1];
-          const anchor2 = nextIndex + 1 < l2 ? (
+          const anchor = nextIndex + 1 < l2 ? (
             // #13559, #14173 fallback to el placeholder for unresolved async component
             anchorVNode.el || resolveAsyncComponentPlaceholder(anchorVNode)
           ) : parentAnchor;
@@ -4970,7 +5032,7 @@
               null,
               nextChild,
               container,
-              anchor2,
+              anchor,
               parentComponent,
               parentSuspense,
               namespace,
@@ -4979,7 +5041,7 @@
             );
           } else if (moved) {
             if (j < 0 || i !== increasingNewIndexSequence[j]) {
-              move(nextChild, container, anchor2, 2);
+              move(nextChild, container, anchor, 2);
             } else {
               j--;
             }
@@ -4987,40 +5049,40 @@
         }
       }
     };
-    const move = (vnode, container, anchor2, moveType, parentSuspense = null) => {
+    const move = (vnode, container, anchor, moveType, parentSuspense = null) => {
       const { el: el2, type, transition, children, shapeFlag } = vnode;
       if (shapeFlag & 6) {
-        move(vnode.component.subTree, container, anchor2, moveType);
+        move(vnode.component.subTree, container, anchor, moveType);
         return;
       }
       if (shapeFlag & 128) {
-        vnode.suspense.move(container, anchor2, moveType);
+        vnode.suspense.move(container, anchor, moveType);
         return;
       }
       if (shapeFlag & 64) {
-        type.move(vnode, container, anchor2, internals);
+        type.move(vnode, container, anchor, internals);
         return;
       }
       if (type === Fragment) {
-        hostInsert(el2, container, anchor2);
+        hostInsert(el2, container, anchor);
         for (let i = 0; i < children.length; i++) {
-          move(children[i], container, anchor2, moveType);
+          move(children[i], container, anchor, moveType);
         }
-        hostInsert(vnode.anchor, container, anchor2);
+        hostInsert(vnode.anchor, container, anchor);
         return;
       }
       if (type === Static) {
-        moveStaticNode(vnode, container, anchor2);
+        moveStaticNode(vnode, container, anchor);
         return;
       }
       const needTransition2 = moveType !== 2 && shapeFlag & 1 && transition;
       if (needTransition2) {
         if (moveType === 0) {
           if (transition.persisted && !el2[leaveCbKey]) {
-            hostInsert(el2, container, anchor2);
+            hostInsert(el2, container, anchor);
           } else {
             transition.beforeEnter(el2);
-            hostInsert(el2, container, anchor2);
+            hostInsert(el2, container, anchor);
             queuePostRenderEffect(() => transition.enter(el2), parentSuspense);
           }
         } else {
@@ -5029,7 +5091,7 @@
             if (vnode.ctx.isUnmounted) {
               hostRemove(el2);
             } else {
-              hostInsert(el2, container, anchor2);
+              hostInsert(el2, container, anchor);
             }
           };
           const performLeave = () => {
@@ -5056,7 +5118,7 @@
           }
         }
       } else {
-        hostInsert(el2, container, anchor2);
+        hostInsert(el2, container, anchor);
       }
     };
     const unmount = (vnode, parentComponent, parentSuspense, doRemove = false, optimized = false) => {
@@ -5144,10 +5206,10 @@
       }
     };
     const remove2 = (vnode) => {
-      const { type, el: el2, anchor: anchor2, transition } = vnode;
+      const { type, el: el2, anchor, transition } = vnode;
       if (type === Fragment) {
         {
-          removeFragment(el2, anchor2);
+          removeFragment(el2, anchor);
         }
         return;
       }
@@ -5619,6 +5681,11 @@
   function createTextVNode(text = " ", flag = 0) {
     return createVNode(Text, null, text, flag);
   }
+  function createStaticVNode(content, numberOfNodes) {
+    const vnode = createVNode(Static, null, content);
+    vnode.staticCount = numberOfNodes;
+    return vnode;
+  }
   function createCommentVNode(text = "", asBlock = false) {
     return asBlock ? (openBlock(), createBlock(Comment, null, text)) : createVNode(Comment, null, text);
   }
@@ -6034,8 +6101,8 @@
   const doc = typeof document !== "undefined" ? document : null;
   const templateContainer = doc && /* @__PURE__ */ doc.createElement("template");
   const nodeOps = {
-    insert: (child, parent, anchor2) => {
-      parent.insertBefore(child, anchor2 || null);
+    insert: (child, parent, anchor) => {
+      parent.insertBefore(child, anchor || null);
     },
     remove: (child) => {
       const parent = child.parentNode;
@@ -6068,11 +6135,11 @@
     // Reason: innerHTML.
     // Static content here can only come from compiled templates.
     // As long as the user only uses trusted templates, this is safe.
-    insertStaticContent(content, parent, anchor2, namespace, start, end) {
-      const before = anchor2 ? anchor2.previousSibling : parent.lastChild;
+    insertStaticContent(content, parent, anchor, namespace, start, end) {
+      const before = anchor ? anchor.previousSibling : parent.lastChild;
       if (start && (start === end || start.nextSibling)) {
         while (true) {
-          parent.insertBefore(start.cloneNode(true), anchor2);
+          parent.insertBefore(start.cloneNode(true), anchor);
           if (start === end || !(start = start.nextSibling)) break;
         }
       } else {
@@ -6087,13 +6154,13 @@
           }
           template.removeChild(wrapper);
         }
-        parent.insertBefore(template, anchor2);
+        parent.insertBefore(template, anchor);
       }
       return [
         // first
         before ? before.nextSibling : parent.firstChild,
         // last
-        anchor2 ? anchor2.previousSibling : parent.lastChild
+        anchor ? anchor.previousSibling : parent.lastChild
       ];
     }
   };
@@ -6656,6 +6723,19 @@
     if (secs < 86400) return Math.floor(secs / 3600) + " 小时前";
     return Math.floor(secs / 86400) + " 天前";
   }
+  const anchors = /* @__PURE__ */ new Map();
+  function registerAnchor(n, el2) {
+    anchors.set(n, el2);
+  }
+  function unregisterAnchor(n, el2) {
+    if (anchors.get(n) === el2) anchors.delete(n);
+  }
+  function anchorOf(n) {
+    return anchors.get(n) || null;
+  }
+  function clearAnchors() {
+    anchors.clear();
+  }
   const state = /* @__PURE__ */ reactive({
     root: "",
     generated: "",
@@ -6670,19 +6750,15 @@
     // 旧页 live 模式默认开
     forceCollapse: false,
     onlyTools: false,
-    msgSeq: 0,
-    toolSeq: 0,
-    calls: /* @__PURE__ */ new Map(),
-    callNodes: {},
     callEst: {},
     imgAttr: null,
-    anchors: {},
-    badLines: 0,
     pullError: "",
     polling: false,
     theme: "light",
     view: "chat",
     markdown: true,
+    showThumbs: true,
+    // P13：工具卡下的缩略图预览行显隐（页签行「缩略图」开关，记忆 showThumbs）
     unit: "token",
     sidebar: SIDEBAR_DEFAULT,
     details: 0,
@@ -6693,7 +6769,13 @@
     listSig: "",
     meta: null,
     trajKinds: {},
-    trajOpen: {}
+    trajOpen: {},
+    // P9：轨迹页选中的行（transcript 行号）。选中后右侧详情栏顶部显示该步的
+    // 完整输入/输出/图片；再点同一行取消；跳对话按钮仍走 jumpToLine。
+    trajSelected: null,
+    // P7：当前会话的流式快照（<转录>.partial；消息完整落盘即消失）。
+    // 轮询时只在「当前会话正在 live」时读取，切会话/非 live 清空。
+    partial: null
   });
   function clampWidth(px, min, max) {
     return Math.min(max, Math.max(min, Math.round(px)));
@@ -6752,7 +6834,6 @@
           state.sidebar = 0;
         }
       }
-      renderDetails$1();
     }
     persistLayout();
     applyLayout();
@@ -6769,6 +6850,7 @@
     state.collapsed = storeJSON("collapsed", {});
     state.overflow = storeJSON("overflow", {});
     state.markdown = storeGet("markdown") !== "0";
+    state.showThumbs = storeGet("showThumbs") !== "0";
     state.unit = storeGet("unit") === "char" ? "char" : "token";
     const rawSidebar = storeGet("layout.sidebar");
     if (rawSidebar !== null) {
@@ -6797,39 +6879,43 @@
   }
   function switchView(view) {
     state.view = view === "trajectory" ? "trajectory" : "chat";
-    if (state.view === "trajectory") {
-      renderTrajectory$1();
-    }
   }
-  const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "" });
+  const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "", scale: 1, tx: 0, ty: 0 });
   function openLightbox(url, ref2) {
     lightbox.open = true;
     lightbox.url = url;
     lightbox.ref = ref2;
+    lightbox.scale = 1;
+    lightbox.tx = 0;
+    lightbox.ty = 0;
   }
   function closeLightbox() {
     lightbox.open = false;
     lightbox.url = "";
     lightbox.ref = "";
+    lightbox.scale = 1;
+    lightbox.tx = 0;
+    lightbox.ty = 0;
+  }
+  function zoomLightbox(factor, mx, my, rect) {
+    const s0 = lightbox.scale;
+    const s1 = Math.min(8, Math.max(0.15, s0 * factor));
+    if (s1 === s0) return;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const px = (mx - cx - lightbox.tx) / s0;
+    const py = (my - cy - lightbox.ty) / s0;
+    lightbox.tx += px * (s0 - s1);
+    lightbox.ty += py * (s0 - s1);
+    lightbox.scale = s1;
+  }
+  function resetLightbox() {
+    lightbox.scale = 1;
+    lightbox.tx = 0;
+    lightbox.ty = 0;
   }
   function setBannerText(text) {
     state.pullError = text;
-  }
-  let _renderTrajectory = () => {
-  };
-  function registerRenderTrajectory(fn) {
-    _renderTrajectory = fn;
-  }
-  function renderTrajectory$1() {
-    _renderTrajectory();
-  }
-  let _renderDetails = () => {
-  };
-  function registerRenderDetails(fn) {
-    _renderDetails = fn;
-  }
-  function renderDetails$1() {
-    _renderDetails();
   }
   const ROOT_PROJECT = "（根目录）";
   function projectOf(id) {
@@ -6842,13 +6928,18 @@
     parts.shift();
     return parts.join("/");
   }
+  function shortSHA(value) {
+    const s = String(value || "");
+    if (!s) return "—";
+    return s.length > 12 ? s.slice(0, 12) : s;
+  }
   function firstLine(text, limit) {
     const s = String(text === void 0 || text === null ? "" : text);
     const lines = s.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const t = lines[i].replace(/\s+/g, " ").trim();
       if (t) {
-        const max = 96;
+        const max = limit || 96;
         return t.length > max ? t.slice(0, max) + "…" : t;
       }
     }
@@ -6871,7 +6962,7 @@
   }
   function fmtDur(ms) {
     const v = Number(ms) || 0;
-    if (v < 1e3) return v + "ms";
+    if (v < 1e3) return Math.round(v) + "ms";
     if (v < 6e4) return (v / 1e3).toFixed(1) + "s";
     const m = Math.floor(v / 6e4);
     const sec = Math.round(v % 6e4 / 1e3);
@@ -6966,9 +7057,15 @@
       });
     });
   }
-  const EMPTY_EST = { text: 0, reasoning: 0, calls: [], images: 0, imageCount: 0 };
   function estOf(line) {
-    return line && line.est ? line.est : EMPTY_EST;
+    const e = line && line.est;
+    return {
+      text: e && e.text || 0,
+      reasoning: e && e.reasoning || 0,
+      calls: e && e.calls || [],
+      images: e && e.images || 0,
+      imageCount: e && e.imageCount || 0
+    };
   }
   const STAGE_ORDER = ["vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check"];
   function stageRank(stage) {
@@ -6992,14 +7089,18 @@
     if (stage === "checker" || stage === "style-fix") return "convert";
     return stage;
   }
-  function stageStatusText(stages, stage) {
+  function stageStatusText(stages, stage, live) {
+    if (live) return { text: "运行中", state: "running", title: "这一阶段还有 " + live + " 个会话在实时写入" };
     if (!stages) return null;
     const key = progressKeyFor(stage);
     const v = stages[key];
-    if (v === void 0 || v === null || v === "") return null;
+    if (v === void 0 || v === null || v === "") {
+      return { text: "未开始", state: "idle", title: "progress.json: " + key + " 还没有记录" };
+    }
     const text = String(v);
     const done = /^(done|ok|true|finished|complete[d]?)$/i.test(text);
-    return { text: done ? "✓ 完成" : text, done, title: "progress.json: " + key + " = " + text };
+    if (done) return { text: "✓ 完成", state: "done", title: "progress.json: " + key + " = " + text };
+    return { text, state: "busy", title: "progress.json: " + key + " = " + text };
   }
   function projectProgressLine(stages) {
     if (!stages) return null;
@@ -7031,6 +7132,9 @@
     ];
     if (s.page) parts.push("p" + s.page, "p." + s.page, "页" + s.page, String(s.page));
     if (s.imageOrder) parts.push("#" + s.imageOrder, "第" + s.imageOrder + "张", String(s.imageOrder));
+    if (s.chapterOrder) parts.push("第" + s.chapterOrder + "章", "chapter " + s.chapterOrder, String(s.chapterOrder));
+    if (s.endState === "error") parts.push("错误", "未提交", "error");
+    if (s.endState === "done") parts.push("已提交", "完成", "done");
     return parts.filter(Boolean).join(" ").toLowerCase();
   }
   function imageDisplayName(s) {
@@ -7059,6 +7163,11 @@
       if (s.imageName) tip.push("图片哈希: " + s.imageName);
       if (s.imagePath) tip.push("图片路径: " + s.imagePath);
     }
+    if (s.chapterOrder) tip.push("第 " + s.chapterOrder + " 章");
+    if (s.live) tip.push("状态: 运行中（正在实时写入）");
+    else if (s.endState === "done") tip.push("状态: 已提交（正常结束）");
+    else if (s.endState === "error") tip.push("状态: 错误终止（有过工具回执但从没提交成功）");
+    else tip.push("状态: 未开始（还没有任何工具回执）");
     tip.push("消息 " + s.messages + " 条 · " + fmtSize(s.size) + " · 最后写入 " + fmtClock(s.mtime));
     const sub = subPathOf(s.id);
     if (sub) tip.push("目录 " + sub);
@@ -7101,7 +7210,7 @@
           name,
           prefix: cut > 0 ? name.slice(0, cut + 1) : "",
           title: cut > 0 ? name.slice(cut + 1) : name,
-          legacy: !!s.projectLegacy,
+          legacy: false,
           items: [],
           live: 0,
           matched: false,
@@ -7109,7 +7218,7 @@
         };
         groups.push(g);
       }
-      if (s.projectLegacy) g.legacy = true;
+      if (s.projectLegacy && name === "（根目录）") g.legacy = true;
       if (q && sessionHaystack(s).indexOf(q) < 0) return;
       g.items.push(s);
       if (s.live) g.live++;
@@ -7155,88 +7264,127 @@
     state.overflow[key] = true;
     storeSet("overflow", JSON.stringify(state.overflow));
   }
-  function el$2(tag, cls, text) {
-    const node = document.createElement(tag);
-    if (cls) node.className = cls;
-    if (text !== void 0 && text !== null) node.textContent = text;
-    return node;
-  }
-  function clear(node) {
-    while (node.firstChild) node.removeChild(node.firstChild);
-  }
-  const MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/;
-  function mdSafeURL(url) {
-    const s = String(url === void 0 || url === null ? "" : url).trim();
-    if (!s) return "";
-    if (/^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(s)) return s;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return "";
-    return s;
-  }
-  function el$1(tag, cls, text) {
-    const node = document.createElement(tag);
-    if (cls) node.className = cls;
-    if (text !== void 0 && text !== null) node.textContent = text;
-    return node;
-  }
-  function mdInline(parent, text, depth = 0) {
-    if (depth > 6) {
-      parent.appendChild(document.createTextNode(String(text || "")));
-      return;
+  let pullSeq = 0;
+  function revealProject(project) {
+    const wraps = document.querySelectorAll(".proj-group");
+    let hit = null;
+    wraps.forEach((w) => {
+      const el2 = w;
+      const summary = el2.querySelector(".proj-row");
+      if (!hit && summary && summary.title === project) hit = el2;
+    });
+    const target = hit;
+    if (!target) return;
+    if (!target.open) {
+      target.open = true;
+      target.dataset.open = "1";
+      setCollapsed(groupKey("proj", project), false);
     }
-    let rest = String(text === void 0 || text === null ? "" : text);
-    let guard = 0;
-    while (rest && guard++ < 800) {
-      const m = MD_INLINE.exec(rest);
-      if (!m) break;
-      if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
-      rest = rest.slice(m.index + m[0].length);
-      let node;
-      if (m[1] !== void 0) {
-        node = el$1("code", "md-inline-code", m[2]);
-      } else if (m[3] !== void 0) {
-        node = el$1("a", "md-link");
-        const href = mdSafeURL(m[4]);
-        if (href) {
-          node.setAttribute("href", href);
-          node.setAttribute("target", "_blank");
-          node.setAttribute("rel", "noopener noreferrer");
-        } else {
-          node.title = "链接协议不受支持，只显示文字";
-        }
-        mdInline(node, m[3], depth + 1);
-      } else if (m[10] !== void 0 || m[11] !== void 0) {
-        try {
-          node = mdMathML(m[10] !== void 0 ? m[10] : m[11], m[10] !== void 0);
-        } catch {
-          node = el$1("span");
-          node.appendChild(document.createTextNode(m[0]));
-        }
-      } else if (m[5] !== void 0 || m[6] !== void 0) {
-        node = el$1("strong");
-        mdInline(node, m[5] !== void 0 ? m[5] : m[6], depth + 1);
-      } else if (m[7] !== void 0) {
-        node = el$1("del");
-        mdInline(node, m[7], depth + 1);
-      } else {
-        node = el$1("em");
-        mdInline(node, m[8] !== void 0 ? m[8] : m[9], depth + 1);
+    target.scrollIntoView({ block: "nearest" });
+  }
+  function applyIndex(payload) {
+    state.sessions = payload.sessions || [];
+    state.root = payload.root || state.root;
+    state.generated = payload.generated || state.generated;
+    state.listSig = listSigOf();
+  }
+  function listSigOf() {
+    const parts = [state.filter, state.sessions.length];
+    state.sessions.forEach((s) => {
+      parts.push([
+        s.id,
+        s.messages,
+        s.cost ? s.cost.total + (s.cost.currency || "") : "",
+        s.stats ? s.stats.requests : 0,
+        s.projectStages ? JSON.stringify(s.projectStages) : ""
+      ].join("~"));
+    });
+    return parts.join("|");
+  }
+  function refreshIndex() {
+    return fetch("/api/index", { cache: "no-store" }).then((res) => {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }).then((payload) => {
+      applyIndex(payload);
+      state.polling = true;
+      const current = findSession(state.current ? state.current.id : "");
+      if (!current) return;
+      state.current = current;
+      const mtime = new Date(current.mtime).getTime();
+      const changed = current.size !== state.curSize || mtime !== state.curMtime;
+      if (changed && state.curSize >= 0) {
+        state.curMtime = mtime;
+        return pullSession(false);
       }
-      parent.appendChild(node);
-    }
-    if (rest) parent.appendChild(document.createTextNode(rest));
-  }
-  function renderInlineMarkdown(text) {
-    const frag = document.createDocumentFragment();
-    mdInline(frag, text, 0);
-    return frag;
-  }
-  function mdInlineLines(parent, text) {
-    String(text === void 0 || text === null ? "" : text).split("\n").forEach((part, i) => {
-      if (i) parent.appendChild(el$1("br", "md-br"));
-      mdInline(parent, part, 0);
+      state.curSize = current.size;
+      state.curMtime = mtime;
+    }).catch(() => {
+      state.polling = false;
     });
   }
-  function el(tag, cls, text) {
+  function pullSession(reset) {
+    const s = state.current;
+    if (!s) return Promise.resolve();
+    const from = reset ? 0 : state.nextFrom;
+    const url = "/api/session?id=" + encodeURIComponent(s.id) + "&from=" + from;
+    const seq = ++pullSeq;
+    return fetch(url, { cache: "no-store" }).then((res) => {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }).then((payload) => {
+      if (seq !== pullSeq) return;
+      if (!reset && payload.nextFrom < state.nextFrom) {
+        state.lines = [];
+        state.nextFrom = 0;
+        return pullSession(true);
+      }
+      state.nextFrom = payload.nextFrom;
+      state.curSize = payload.size;
+      state.partial = payload.partial || null;
+      if (reset) {
+        state.lines = normalizeLines(payload.lines);
+        indexCallEstimates(state.lines);
+      } else {
+        const fresh = normalizeLines(payload.lines);
+        indexCallEstimates(fresh);
+        fresh.forEach((line) => {
+          state.lines.push(line);
+        });
+      }
+    }).catch((err) => {
+      setBannerText("拉取会话失败：" + err.message);
+    });
+  }
+  function selectSession(id) {
+    const s = findSession(id);
+    state.current = s;
+    state.lines = [];
+    state.partial = null;
+    state.callEst = {};
+    state.nextFrom = 0;
+    state.curSize = -1;
+    state.curMtime = 0;
+    state.meta = null;
+    state.trajOpen = {};
+    if (!s) return;
+    void pullSession(true);
+  }
+  function bootData() {
+    void refreshIndex().then(() => {
+      if (state.sessions.length && !state.current) {
+        let live = null;
+        state.sessions.forEach((s) => {
+          if (!live && s.live) live = s;
+        });
+        selectSession((live || state.sessions[0]).id);
+      }
+    });
+    window.setInterval(() => {
+      if (!document.hidden) void refreshIndex();
+    }, POLL_MS);
+  }
+  function el$1(tag, cls, text) {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
     if (text !== void 0 && text !== null) node.textContent = text;
@@ -7280,7 +7428,7 @@
     while ((m = re.exec(text)) !== null) {
       if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
       const cls = m[1] !== void 0 ? "k" : m[2] !== void 0 ? "s" : m[3] !== void 0 ? "b" : "n";
-      parent.appendChild(el("span", cls, m[0]));
+      parent.appendChild(el$1("span", cls, m[0]));
       last = m.index + m[0].length;
     }
     if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
@@ -7299,7 +7447,7 @@
   function appendConsoleLine(parent, line) {
     const whole = consoleLineClass(line);
     if (whole) {
-      parent.appendChild(el("span", whole, line));
+      parent.appendChild(el$1("span", whole, line));
       return;
     }
     let last = 0;
@@ -7308,7 +7456,7 @@
     while ((m = CONSOLE_TOKENS.exec(line)) !== null) {
       if (m.index > last) parent.appendChild(document.createTextNode(line.slice(last, m.index)));
       const cls = m[1] || m[2] ? "path" : m[3] ? "bad" : m[4] ? "warn" : "good";
-      parent.appendChild(el("span", cls, m[0]));
+      parent.appendChild(el$1("span", cls, m[0]));
       last = m.index + m[0].length;
       if (m[0] === "") break;
     }
@@ -7346,24 +7494,24 @@
   }
   function machineBlock(text, cls) {
     const frag = document.createDocumentFragment();
-    const pre = el("pre", cls || "code");
+    const pre = el$1("pre", cls || "code");
     const res = highlightMachine(pre, text);
     frag.appendChild(pre);
-    if (res.note) frag.appendChild(el("div", "note", res.note));
+    if (res.note) frag.appendChild(el$1("div", "note", res.note));
     return frag;
   }
   function foldLabel(expanded, lines, chars, tokens) {
     return expanded ? "收起" : "展开全文（" + lines + " 行 / " + countText(chars, tokens) + "）";
   }
-  function machineScroll(text, key, extraClass, tokens) {
-    const wrap = el("div", "text-wrap");
+  function machineScrollInto(host, text, key, extraClass, tokens) {
+    const wrap = host;
     const raw = String(text === void 0 || text === null ? "" : text);
     const pretty = jsonPretty(raw);
     const body = pretty === null ? raw : pretty;
     const big = jsonTooBig(body);
     const lines = body.split("\n");
-    const scroll = el("div", "io-scroll");
-    const pre = el("pre", "io-text");
+    const scroll = el$1("div", "io-scroll");
+    const pre = el$1("pre", "io-text");
     let expanded = storeGet("text." + key) === "1";
     const long = lines.length > IO_FOLD_LINES;
     const paint = () => {
@@ -7377,10 +7525,10 @@
     wrap.appendChild(scroll);
     if (big) {
       const size = tokens ? countText(body.length, tokens) : fmtChars(body.length);
-      wrap.appendChild(el("div", "note", "内容过大（" + size + "），按纯文本显示，不做高亮"));
+      wrap.appendChild(el$1("div", "note", "内容过大（" + size + "），按纯文本显示，不做高亮"));
     }
     if (long) {
-      const toggle = el("button", "text-toggle");
+      const toggle = el$1("button", "text-toggle");
       toggle.type = "button";
       const label = () => {
         toggle.textContent = foldLabel(expanded, lines.length, body.length, tokens);
@@ -7394,10 +7542,9 @@
       });
       wrap.appendChild(toggle);
     }
-    return wrap;
   }
   function copyButton(text) {
-    const btn = el("button", "text-toggle", "复制");
+    const btn = el$1("button", "text-toggle", "复制");
     btn.type = "button";
     btn.addEventListener("click", () => {
       const done = () => {
@@ -8098,36 +8245,36 @@
     return root;
   }
   function mdCodeBlock(code, lang) {
-    const wrap = el("div", "md-code-block");
-    const head = el("div", "md-code-head");
-    head.appendChild(el("span", "md-code-lang", lang || "text"));
+    const wrap = el$1("div", "md-code-block");
+    const head = el$1("div", "md-code-head");
+    head.appendChild(el$1("span", "md-code-lang", lang || "text"));
     head.appendChild(copyButton(code));
     wrap.appendChild(head);
-    const body = el("pre", "md-code-body");
-    const inner = el("code");
+    const body = el$1("pre", "md-code-body");
+    const inner = el$1("code");
     const res = highlightMachine(inner, code);
     body.appendChild(inner);
     wrap.appendChild(body);
-    if (res.note) wrap.appendChild(el("div", "note", res.note));
+    if (res.note) wrap.appendChild(el$1("div", "note", res.note));
     return wrap;
   }
   function mdTable(header, rows) {
-    const wrap = el("div", "md-table-wrap");
-    const table = el("table", "md-table");
-    const thead = el("thead");
-    const hrow = el("tr");
+    const wrap = el$1("div", "md-table-wrap");
+    const table = el$1("table", "md-table");
+    const thead = el$1("thead");
+    const hrow = el$1("tr");
     header.forEach((cell) => {
-      const th = el("th");
+      const th = el$1("th");
       mdInline(th, cell, 0);
       hrow.appendChild(th);
     });
     thead.appendChild(hrow);
     table.appendChild(thead);
-    const tbody = el("tbody");
+    const tbody = el$1("tbody");
     rows.forEach((cells) => {
-      const tr = el("tr");
+      const tr = el$1("tr");
       for (let c = 0; c < header.length; c++) {
-        const td = el("td");
+        const td = el$1("td");
         mdInline(td, cells[c] === void 0 ? "" : cells[c], 0);
         tr.appendChild(td);
       }
@@ -8138,7 +8285,7 @@
     return wrap;
   }
   function mdListItem(item) {
-    const li = el("li", "md-item");
+    const li = el$1("li", "md-item");
     mdInlineLines(li, item.text);
     return li;
   }
@@ -8169,14 +8316,14 @@
       const h = MD_HEADING.exec(trimmed);
       if (h) {
         const level = h[1].length;
-        const heading = el("h" + level, "md-h md-h" + level);
+        const heading = el$1("h" + level, "md-h md-h" + level);
         mdInlineLines(heading, h[2]);
         frag.appendChild(heading);
         i++;
         continue;
       }
       if (MD_HR.test(trimmed)) {
-        frag.appendChild(el("hr", "md-hr"));
+        frag.appendChild(el$1("hr", "md-hr"));
         i++;
         continue;
       }
@@ -8199,7 +8346,7 @@
           quote.push(lines[i].replace(/^\s{0,3}>\s?/, ""));
           i++;
         }
-        const bq = el("blockquote", "md-quote");
+        const bq = el$1("blockquote", "md-quote");
         bq.appendChild(renderMarkdown(quote.join("\n")));
         frag.appendChild(bq);
         continue;
@@ -8227,7 +8374,7 @@
         let sub = null;
         items.forEach((it) => {
           if (!list || it.indent <= baseIndent && it.ordered !== listOrdered) {
-            list = el(it.ordered ? "ol" : "ul", "md-list");
+            list = el$1(it.ordered ? "ol" : "ul", "md-list");
             listOrdered = it.ordered;
             lastLi = null;
             sub = null;
@@ -8235,7 +8382,7 @@
           }
           if (it.indent > baseIndent && lastLi) {
             if (!sub) {
-              sub = el(it.ordered ? "ol" : "ul", "md-list md-sub");
+              sub = el$1(it.ordered ? "ol" : "ul", "md-list md-sub");
               lastLi.appendChild(sub);
             }
             sub.appendChild(mdListItem(it));
@@ -8256,1623 +8403,85 @@
         buf.push(lines[i]);
         i++;
       }
-      const para = el("p", "md-p");
+      const para = el$1("p", "md-p");
       mdInlineLines(para, buf.join("\n"));
       frag.appendChild(para);
     }
     return frag;
   }
-  function refBaseName(ref2) {
-    const s = String(ref2 || "").split("?")[0];
-    const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
-    return i >= 0 ? s.slice(i + 1) : s;
-  }
-  function shortFileName(name) {
-    const s = String(name || "");
-    const dot = s.lastIndexOf(".");
-    const stem = dot > 0 ? s.slice(0, dot) : s;
-    const ext = dot > 0 ? s.slice(dot) : "";
-    if (/^[0-9a-f]{32,}$/i.test(stem)) return stem.slice(0, 8) + ext;
+  const MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/;
+  function mdSafeURL(url) {
+    const s = String(url === void 0 || url === null ? "" : url).trim();
+    if (!s) return "";
+    if (/^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(s)) return s;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return "";
     return s;
   }
-  function originalFigureSize(text) {
-    const m = /ORIGINAL\s+FIGURE\s+SIZE\s*:\s*([0-9.]+\s*mm\s*[x×]\s*[0-9.]+\s*mm)/i.exec(String(text || ""));
-    return m ? m[1].replace(/\s+/g, " ") : "";
-  }
-  function imageTurnSummary(line) {
-    const imgs = line && line.images || [];
-    const bits = [imgs.length + " 张图片"];
-    const size = originalFigureSize(line && line.text);
-    if (size) bits.push(size);
-    const names = imgs.map((r) => shortFileName(refBaseName(r)));
-    if (names.length) {
-      bits.push(names.slice(0, 2).join("、") + (names.length > 2 ? " 等 " + names.length + " 个文件" : ""));
-    }
-    return bits.join(" · ");
-  }
-  const IMAGE_HANDLE_RE = /^Tool image output\b/i;
-  const IMAGE_CALL_RE = /\(call\s+([A-Za-z0-9_.:-]+)\)/;
-  const IMAGE_FROM_RE = /\bfrom\s+([A-Za-z0-9_.:-]+)/i;
-  const IMAGE_TOOLS = { view_image: 1, view_pdf: 1 };
-  const IMAGE_RESULT_RE = /^(?:Image\s+\S+|PDF page\s+\S+)[^\n]*\battached\b/im;
-  const IMAGE_WIRE_TITLE = "user 消息承载图片（tool 消息的 content 只能文本，OpenAI 兼容 schema 限制） · text + image_url(data:image/jpeg;base64,…)";
-  function imageAttributions() {
-    const sig = (state.current ? state.current.id : "") + ":" + state.lines.length;
-    if (state.imgAttr && state.imgAttr.sig === sig) return state.imgAttr.map;
-    const calls = [];
-    const idxById = {};
-    state.lines.forEach((line) => {
-      if (!line || line.bad || line.t && line.t !== "msg") return;
-      if (line.role === "assistant") {
-        (line.tool_calls || []).forEach((c) => {
-          (idxById[c.id] = idxById[c.id] || []).push(calls.length);
-          calls.push({
-            id: c.id,
-            name: (c.function || {}).name || "",
-            lineN: line.n,
-            receipt: null,
-            claimed: false,
-            qpos: -1
-          });
-        });
-        return;
-      }
-      if (line.role === "tool") {
-        const idxs = idxById[line.tool_call_id] || [];
-        for (let k = 0; k < idxs.length; k++) {
-          if (calls[idxs[k]].receipt === null) {
-            calls[idxs[k]].receipt = String(line.text || "");
-            break;
-          }
-        }
-      }
-    });
-    const queue2 = [];
-    const candRound = {};
-    const roundLast = {};
-    calls.forEach((c) => {
-      const img = c.receipt === null ? !!IMAGE_TOOLS[c.name] : IMAGE_RESULT_RE.test(c.receipt.trim());
-      if (img) {
-        c.qpos = queue2.length;
-        queue2.push(c);
-        candRound[c.id] = c.lineN;
-        roundLast[c.lineN] = c.id;
-      }
-    });
-    let firstTask = 0;
-    state.lines.forEach((l) => {
-      if (!l || l.bad || l.t && l.t !== "msg") return;
-      if (l.role === "user" && !(l.images && l.images.length) && !firstTask) firstTask = l.n;
-    });
-    const map = {};
-    let qi = 0;
-    const nextUnclaimed = (lineN) => {
-      while (qi < queue2.length && queue2[qi].claimed) qi++;
-      if (qi >= queue2.length || queue2[qi].lineN >= lineN) return null;
-      return queue2[qi];
-    };
-    const claim = (entry, pick, how) => {
-      pick.claimed = true;
-      entry.kind = "call";
-      entry.how = how;
-      entry.callId = pick.id;
-      if (!entry.name) entry.name = pick.name;
-    };
-    state.lines.forEach((line) => {
-      if (!line || line.bad || line.t && line.t !== "msg") return;
-      if (line.role !== "user" || !(line.images && line.images.length)) return;
-      const text = String(line.text || "").trim();
-      const entry = { kind: "none", how: "", callId: "", name: "", lineN: line.n, taskLineN: firstTask };
-      if (text && !IMAGE_HANDLE_RE.test(text)) {
-        entry.kind = "task";
-        entry.how = "task";
-        entry.taskLineN = line.n;
-        map[line.n] = entry;
-        return;
-      }
-      let pick = null;
-      if (IMAGE_HANDLE_RE.test(text)) {
-        const idm = IMAGE_CALL_RE.exec(text);
-        const frm = IMAGE_FROM_RE.exec(text);
-        entry.name = frm ? frm[1] : "";
-        if (idm) {
-          const cands = idxById[idm[1]] || [];
-          for (let k = cands.length - 1; k >= 0; k--) {
-            const ex = calls[cands[k]];
-            if (ex.qpos >= 0 && !ex.claimed && ex.lineN < line.n) {
-              pick = ex;
-              break;
-            }
-          }
-          if (!pick && state.callNodes[idm[1]]) {
-            pick = { id: idm[1], name: entry.name, claimed: false };
-          }
-          if (pick) claim(entry, pick, "call-id");
-        }
-        if (!pick && entry.name) {
-          for (let j = qi; j < queue2.length; j++) {
-            if (queue2[j].lineN >= line.n) break;
-            if (!queue2[j].claimed && queue2[j].name === entry.name) {
-              pick = queue2[j];
-              claim(entry, pick, "tool-name");
-              break;
-            }
-          }
-        }
-      }
-      if (!pick) {
-        pick = nextUnclaimed(line.n);
-        if (pick) claim(entry, pick, "order");
-      }
-      if (!pick) {
-        if (!IMAGE_HANDLE_RE.test(text)) {
-          entry.kind = "task";
-          entry.how = "task";
-          entry.taskLineN = text ? line.n : firstTask || line.n;
-        }
-      }
-      map[line.n] = entry;
-    });
-    state.imgAttr = { sig, map, candRound, roundLast };
-    return map;
-  }
-  function attributionText(attr) {
-    if (!attr) return "";
-    switch (attr.how) {
-      case "call-id":
-        return "归属：call " + attr.callId + (attr.name ? "（" + attr.name + "）" : "");
-      case "tool-name":
-        return "归属：call " + attr.callId + "（按工具名 " + attr.name + " 匹配）";
-      case "order":
-        return "归属：由顺序推断（本轮的 call " + attr.callId + "）";
-      case "task":
-        return "归属：本会话任务（这一段是投喂给任务的原图）";
-      default:
-        return "归属：未识别";
-    }
-  }
-  function collapsibleText(text, previewLines, key, extraClass, tokens) {
-    const wrap = el$2("div", "text-wrap");
-    const lines = String(text === void 0 || text === null ? "" : text).split("\n");
-    const long = lines.length > previewLines;
-    const pre = el$2("pre", "body-text");
-    let expanded = storeGet("text." + key) === "1";
-    const paint = () => {
-      pre.textContent = expanded || !long ? lines.join("\n") : lines.slice(0, previewLines).join("\n");
-      pre.classList.toggle("clamped", long && !expanded);
-    };
-    paint();
-    wrap.appendChild(pre);
-    if (long) {
-      const toggle = el$2("button", "text-toggle");
-      const label = () => {
-        toggle.textContent = foldLabel(expanded, lines.length, String(text).length, tokens);
-      };
-      label();
-      toggle.type = "button";
-      toggle.addEventListener("click", () => {
-        expanded = !expanded;
-        storeSet("text." + key, expanded ? "1" : "0");
-        paint();
-        label();
-      });
-      wrap.appendChild(toggle);
-    }
-    return wrap;
-  }
-  function thumbImg(ref2, cls) {
-    const url = mediaURL(ref2);
-    const img = el$2("img", cls || "thumb");
-    img.src = url;
-    img.alt = ref2;
-    img.loading = "lazy";
-    img.title = ref2;
-    img.addEventListener("click", () => {
-      openLightbox(url, ref2);
-    });
-    return img;
-  }
-  function imageStrip(line) {
-    const strip = el$2("div", "images");
-    (line.images || []).forEach((ref2) => {
-      strip.appendChild(thumbImg(ref2));
-    });
-    return strip;
-  }
-  function markdownText(text, previewLines, key, extraClass, tokens) {
-    const wrap = el$2("div", "text-wrap");
-    const raw = String(text === void 0 || text === null ? "" : text);
-    const body = el$2("div", "md-body");
-    body.appendChild(renderMarkdown(raw));
-    const lines = raw.split("\n");
-    const long = lines.length > previewLines;
-    let expanded = storeGet("text." + key) === "1";
-    const paint = () => {
-      const clamped = long && !expanded;
-      body.classList.toggle("clamped", clamped);
-      body.style.maxHeight = clamped ? previewLines * 24 + "px" : "";
-    };
-    paint();
-    wrap.appendChild(body);
-    if (long) {
-      const toggle = el$2("button", "text-toggle");
-      const label = () => {
-        toggle.textContent = foldLabel(expanded, lines.length, raw.length, tokens);
-      };
-      label();
-      toggle.type = "button";
-      toggle.addEventListener("click", () => {
-        expanded = !expanded;
-        storeSet("text." + key, expanded ? "1" : "0");
-        paint();
-        label();
-      });
-      wrap.appendChild(toggle);
-    }
-    return wrap;
-  }
-  function bodyBlock(text, previewLines, key, extraClass, tokens) {
-    if (!state.markdown) return collapsibleText(text, previewLines, key, extraClass, tokens);
-    return markdownText(text, previewLines, key, extraClass, tokens);
-  }
-  function sessionDir(id) {
-    const i = String(id || "").lastIndexOf("/");
-    return i < 0 ? "" : String(id).slice(0, i);
-  }
-  function mediaURL(ref2) {
-    const tail = String(ref2 || "").replace(/^file:\/\//, "");
-    const rel = joinPath(sessionDir(state.current ? state.current.id : ""), tail);
-    return "/media/" + rel;
-  }
-  function joinPath(...args) {
-    const parts = [];
-    for (const a of args) {
-      const p2 = String(a || "").replace(/^\/+|\/+$/g, "");
-      if (p2) parts.push(p2);
-    }
-    return parts.join("/");
-  }
-  function disclosureLine(cls, name, summary, tail, open) {
-    const details = document.createElement("details");
-    details.className = "disclosure " + cls;
-    details.open = !!open;
-    const head = el$2("summary");
-    const slot = el$2("span", "line-slot");
-    slot.appendChild(el$2("span", "line-caret"));
-    head.appendChild(slot);
-    head.appendChild(el$2("span", "line-name", name));
-    if (summary) {
-      head.appendChild(el$2("span", "line-sep"));
-      const s = el$2("span", "line-summary", summary);
-      s.title = summary;
-      head.appendChild(s);
-    }
-    if (tail) head.appendChild(el$2("span", "line-tail", tail));
-    details.appendChild(head);
-    return details;
-  }
-  function thinkingDisclosure(line) {
-    const remembered = storeGet("thinking." + state.current.id + "." + line.n) === "1";
-    const d = disclosureLine(
-      "disclosure-thinking",
-      "思考",
-      firstLine(line.reasoning),
-      countText(line.reasoning.length, estOf(line).reasoning),
-      !state.forceCollapse && remembered
-    );
-    const body = el$2("div", "thinking-body");
-    const scroll = el$2("div", "reasoning-scroll");
-    scroll.appendChild(el$2("pre", "body-text reasoning-text", line.reasoning));
-    body.appendChild(scroll);
-    d.appendChild(body);
-    d.addEventListener("toggle", () => {
-      if (state.forceCollapse) return;
-      storeSet("thinking." + state.current.id + "." + line.n, d.open ? "1" : "0");
-    });
-    return d;
-  }
-  function toolFamily(name) {
-    const n = String(name).toLowerCase();
-    if (n === "bash" || n === "compile" || n === "python") return "shell";
-    if (n === "submit") return "submit";
-    if (n.indexOf("write") === 0 || n.indexOf("edit") === 0) return "write";
-    if (n.indexOf("grep") === 0 || n.indexOf("doc_search") === 0 || n.indexOf("list_") === 0 || n.indexOf("search") >= 0) return "search";
-    if (n.indexOf("read") === 0 || n.indexOf("view_") === 0 || n.indexOf("image_context") === 0) return "view";
-    return "other";
-  }
-  function toolSummary(name, argsText) {
-    let obj = null;
-    try {
-      obj = JSON.parse(String(argsText || "{}"));
-    } catch {
-      obj = null;
-    }
-    if (!obj || typeof obj !== "object") return "";
-    const n = String(name || "").toLowerCase();
-    const pick = (v2) => {
-      if (typeof v2 === "string") return v2;
-      if (v2 === void 0 || v2 === null) return "";
-      try {
-        return JSON.stringify(v2);
-      } catch {
-        return "";
-      }
-    };
-    let v = "";
-    if (n === "bash" || n === "python") v = pick(obj.command || obj.code || obj.script);
-    else if (n === "compile") v = pick(obj.path);
-    else if (n.indexOf("grep") === 0 || n.indexOf("search") >= 0 || n === "doc_search") v = pick(obj.pattern || obj.query);
-    else if (n.indexOf("write") === 0 || n.indexOf("read") === 0 || n === "view_pdf" || n === "view_image") v = pick(obj.path);
-    else if (n === "submit") v = pick(obj.path || obj.status);
-    if (!v) {
-      const keys = Object.keys(obj);
-      for (let i = 0; i < keys.length; i++) {
-        const cand = pick(obj[keys[i]]);
-        if (cand) {
-          v = cand;
-          break;
-        }
-      }
-    }
-    v = String(v).split("\n")[0].replace(/\s+/g, " ").trim();
-    return v.length > 90 ? v.slice(0, 90) + "…" : v;
-  }
-  function toolPromptLine(name, argsText) {
-    let obj = null;
-    try {
-      obj = JSON.parse(String(argsText || "{}"));
-    } catch {
-      obj = null;
-    }
-    if (!obj || typeof obj !== "object") return "";
-    const n = String(name).toLowerCase();
-    let v = "";
-    if (n === "bash" || n === "python") v = obj.command || obj.code || "";
-    else if (n.indexOf("grep") === 0 || n === "doc_search" || n.indexOf("search") >= 0) {
-      v = [obj.pattern || obj.query || "", obj.path || ""].filter(Boolean).join("  ");
-    } else if (n === "compile" || n.indexOf("write") === 0 || n.indexOf("edit") === 0 || n.indexOf("read") === 0 || n === "view_pdf" || n === "view_image") {
-      v = obj.path || "";
-    }
-    v = String(v).split("\n")[0].trim();
-    return v.length > 160 ? v.slice(0, 160) + "…" : v;
-  }
-  function cmdPreview(cmd) {
-    const div = el$2("div", "io-cmd");
-    div.appendChild(el$2("span", "cmd-prompt", "$ "));
-    div.appendChild(el$2("span", "cmd-line", cmd));
-    return div;
-  }
-  function classifyResult(text) {
-    const s = String(text || "");
-    if (/REJECTED|文件不存在|失败|error|not found|traceback/i.test(s)) return "error";
-    if (/\bok\s*\(/.test(s)) return "ok";
-    return "plain";
-  }
-  function ioSection(label, text, isError, key, tokens) {
-    const section = el$2("div", "io-section");
-    section.appendChild(el$2("div", "io-label", label));
-    if (text === void 0 || text === null || text === "") {
-      section.appendChild(el$2("div", "io-empty", "（无内容）"));
-      return section;
-    }
-    const wrap = machineScroll(text, key, void 0, tokens);
-    if (isError) {
-      const pre = wrap.querySelector(".io-text");
-      if (pre) pre.setAttribute("data-error", "true");
-    }
-    section.appendChild(wrap);
-    return section;
-  }
-  function toolDisclosure(call) {
-    const fn = call.function || {};
-    const name = fn.name || "(未命名工具)";
-    state.toolSeq++;
-    state.calls.set(call.id, { name, seq: state.toolSeq });
-    const argsText = String(fn.arguments || "");
-    const brief = toolSummary(name, fn.arguments);
-    const argsTokens = callTokensOf(call);
-    const d = disclosureLine(
-      "disclosure-tool fam-" + toolFamily(name),
-      name,
-      brief,
-      countText(argsText.length, argsTokens),
-      storeGet("call." + state.current.id + "." + call.id) === "1"
-    );
-    d.setAttribute("data-call-id", call.id || "");
-    const tail = d.querySelector(".line-tail");
-    const card = el$2("div", "io-card");
-    const cmdLine = toolPromptLine(name, argsText);
-    if (cmdLine) card.appendChild(cmdPreview(cmdLine));
-    card.appendChild(ioSection("输入", prettyJSON(argsText) || "(无参数)", false, "in." + (call.id || ""), argsTokens));
-    const actions = el$2("div", "io-actions");
-    actions.appendChild(copyButton(argsText));
-    card.appendChild(actions);
-    d.appendChild(card);
-    d.addEventListener("toggle", () => {
-      storeSet("call." + state.current.id + "." + call.id, d.open ? "1" : "0");
-    });
-    const node = {
-      details: d,
-      card,
-      summary: brief,
-      tail,
-      argsChars: argsText.length,
-      argsTokens,
-      result: null
-    };
-    if (call.id) state.callNodes[call.id] = node;
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== void 0 && text !== null) node.textContent = text;
     return node;
   }
-  function callTokensOf(call) {
-    const est = state.callEst[call.id];
-    return est === void 0 ? 0 : est;
-  }
-  function updateCallTail(node) {
-    if (!node.tail) return;
-    let tail = countText(node.argsChars, node.argsTokens);
-    if (node.result) {
-      const text = String(node.result.line.text || "");
-      tail = countText(node.argsChars, node.argsTokens) + " → " + countText(text.length, estOf(node.result.line).text) + (node.result.status === "error" ? " · error" : node.result.status === "ok" ? " · ok" : "");
-    }
-    if (node.attachments) tail += " · 附件 " + node.attachments + " 张（user 轮）";
-    node.tail.textContent = tail;
-  }
-  function attachResult(node, line) {
-    const text = String(line.text || "");
-    const status = classifyResult(text);
-    node.result = { line, status };
-    node.card.appendChild(el$2("div", "io-divider"));
-    const out = ioSection("输出", text, status === "error", "result." + line.n, estOf(line).text);
-    out.classList.add("out-section");
-    node.card.appendChild(out);
-    const actions = el$2("div", "io-actions");
-    actions.appendChild(copyButton(text));
-    node.card.appendChild(actions);
-    node.details.classList.add("status-" + status);
-    updateCallTail(node);
-    return node;
-  }
-  function addPreview(host, line) {
-    if (!host || !host.details || !host.details.parentNode) return null;
-    let strip = host.preview;
-    if (!strip || !strip.parentNode) {
-      strip = el$2("div", "preview-strip");
-      strip.__items = [];
-      host.preview = strip;
-      const sec = host.details.parentNode;
-      sec.insertBefore(strip, host.details.nextSibling);
-    }
-    strip.__items.push(line);
-    strip.__items.sort((a, b) => a.n - b.n);
-    clear(strip);
-    strip.__items.forEach((l) => {
-      (l.images || []).forEach((ref2) => {
-        strip.appendChild(thumbImg(ref2, "preview-thumb"));
-      });
-    });
-    return strip;
-  }
-  function previewHost(host, attr) {
-    const info = state.imgAttr;
-    if (!info || !attr || !attr.callId) return host;
-    const round = info.candRound ? info.candRound[attr.callId] : void 0;
-    const lastId = round !== void 0 && info.roundLast ? info.roundLast[round] : "";
-    const node = lastId && state.callNodes ? state.callNodes[lastId] : null;
-    return node || host;
-  }
-  function attachImages(host, line, attr) {
-    const imgs = line.images || [];
-    if (!imgs.length) return host;
-    if (host.details) addPreview(previewHost(host, attr), line);
-    const outSec = attr && attr.how === "call-id" && host.card ? host.card.querySelector(".io-section.out-section") : null;
-    if (outSec) {
-      const col = outSec.querySelector(".text-wrap") || outSec;
-      col.appendChild(imageStrip(line));
-      col.appendChild(el$2(
-        "div",
-        "attach-note",
-        "归属：call " + attr.callId + (attr.name ? "（" + attr.name + "，精确匹配）" : "（精确匹配）")
-      ));
-      host.attachments = (host.attachments || 0) + imgs.length;
-      if (host.details) updateCallTail(host);
-      return host;
-    }
-    const box = host.card || host;
-    box.appendChild(el$2("div", "io-divider"));
-    const section = el$2("div", "io-section attach-section");
-    section.appendChild(el$2("div", "io-label", "附件（user 轮）"));
-    const body = el$2("div", "attach-body");
-    if (line.text && line.n !== (attr && attr.taskLineN)) {
-      body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, "imgtext." + line.n, void 0, estOf(line).text));
-    }
-    body.appendChild(imageStrip(line));
-    section.appendChild(body);
-    section.appendChild(el$2(
-      "div",
-      "attach-note",
-      "这一轮是 user 轮发出的（" + (attr && attr.kind === "task" ? "会话开头的原图投喂，作为任务的输入" : "工具的输入/附件") + "）· " + attributionText(attr)
-    ));
-    box.appendChild(section);
-    host.attachments = (host.attachments || 0) + imgs.length;
-    if (host.details) updateCallTail(host);
-    return host;
-  }
-  function standaloneResult(line) {
-    const info = state.calls.get(line.tool_call_id);
-    const name = info ? info.name : "(未配对的工具回执)";
-    const text = String(line.text || "");
-    const status = classifyResult(text);
-    const d = disclosureLine(
-      "disclosure-result status-" + status,
-      name,
-      firstLine(text),
-      countText(text.length, estOf(line).text) + (status === "error" ? " · error" : status === "ok" ? " · ok" : "")
-    );
-    const card = el$2("div", "io-card");
-    card.appendChild(ioSection("输出", text, status === "error", "result." + line.n, estOf(line).text));
-    const actions = el$2("div", "io-actions");
-    actions.appendChild(copyButton(text));
-    card.appendChild(actions);
-    d.appendChild(card);
-    if (!info) {
-      d.title = line.tool_call_id ? "未找到配对的工具调用：id " + line.tool_call_id : "这条回执行没有 tool_call_id，无法与调用配对";
-    }
-    return d;
-  }
-  function imageTurnRow(line, attr) {
-    const imgs = line.images || [];
-    const key = "image." + state.current.id + "." + line.n;
-    const d = disclosureLine(
-      "disclosure-image",
-      "图片（user 轮）",
-      imageTurnSummary(line),
-      imgs.length + " 张",
-      storeGet(key) === "1"
-    );
-    const body = el$2("div", "image-body");
-    if (line.text) {
-      body.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, "imgtext." + line.n, void 0, estOf(line).text));
-    }
-    body.appendChild(imageStrip(line));
-    if (attr) body.appendChild(el$2("div", "attach-note", attributionText(attr)));
-    d.appendChild(body);
-    d.title = "这一轮是 user 轮发出的（把图片投给模型），不是人打的字\n" + IMAGE_WIRE_TITLE + "\n" + attributionText(attr) + "\n" + imageTurnSummary(line);
-    d.addEventListener("toggle", () => {
-      storeSet(key, d.open ? "1" : "0");
-    });
-    return d;
-  }
-  function imageTurnSection(line, attr) {
-    const wrap = el$2("section", "msg msg-image");
-    wrap.appendChild(imageTurnRow(line, attr));
-    return wrap;
-  }
-  function systemTurnSection(line) {
-    const msg = el$2("section", "msg msg-system");
-    const head = el$2("div", "sys-line");
-    head.appendChild(el$2("span", "sys-badge", "系统"));
-    head.appendChild(el$2("span", "sys-meta", "user 轮"));
-    head.appendChild(el$2("span", "line-summary", firstLine(line.text)));
-    msg.appendChild(head);
-    const raw = String(line.text || "");
-    if (!raw) {
-      msg.appendChild(el$2("div", "note", "（无正文）"));
-      return msg;
-    }
-    const key = "sys." + state.current.id + "." + line.n;
-    const lines = raw.split("\n");
-    const long = lines.length > SYSTEM_PREVIEW_LINES;
-    let expanded = storeGet("text." + key) === "1";
-    const scroll = el$2("div", "sys-scroll");
-    if (state.markdown) {
-      const md = el$2("div", "md-body sys-md");
-      md.appendChild(renderMarkdown(raw));
-      scroll.appendChild(md);
-    } else {
-      scroll.appendChild(el$2("pre", "body-text sys-text", raw));
-    }
-    const paint = () => {
-      scroll.classList.toggle("folded", long && !expanded);
-      scroll.style.maxHeight = long && !expanded ? SYSTEM_PREVIEW_LINES * 24 + "px" : "var(--code-scroll-h)";
-    };
-    paint();
-    msg.appendChild(scroll);
-    if (long) {
-      const toggle = el$2("button", "text-toggle");
-      toggle.type = "button";
-      const label = () => {
-        toggle.textContent = foldLabel(expanded, lines.length, raw.length, estOf(line).text);
-      };
-      label();
-      toggle.addEventListener("click", () => {
-        expanded = !expanded;
-        storeSet("text." + key, expanded ? "1" : "0");
-        paint();
-        label();
-      });
-      msg.appendChild(toggle);
-    }
-    msg.title = "这一轮是 user 角色发出的任务提示（系统性质，不是人打的字）";
-    return msg;
-  }
-  let pendingTaskImages = {};
-  function anchor(node, line) {
-    if (line && line.n !== void 0) state.anchors[line.n] = node;
-    return node;
-  }
-  function renderLine(line, idx) {
-    if (line.bad) {
-      state.badLines++;
-      updateBanner();
-      return null;
-    }
-    if (line.t && line.t !== "msg") return null;
-    if (!line.role) return null;
-    const isToolCall = line.role === "assistant" && line.tool_calls && line.tool_calls.length > 0;
-    const isImageTurn = line.role === "user" && !!(line.images && line.images.length);
-    if (state.onlyTools && line.role !== "tool" && !isToolCall && !isImageTurn) return null;
-    if (line.role === "user") {
-      if (isImageTurn) {
-        const attr = imageAttributions()[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
-        if (attr.kind === "call" && state.callNodes[attr.callId]) {
-          const callNode = state.callNodes[attr.callId];
-          attachImages(callNode, line, attr);
-          anchor(callNode.details, line);
-          return null;
-        }
-        if (attr.kind === "task" && attr.taskLineN === line.n) {
-          const own = systemTurnSection(line);
-          attachImages(own, line, attr);
-          return anchor(own, line);
-        }
-        if (attr.kind === "task" && attr.taskLineN) {
-          const taskNode = state.anchors[attr.taskLineN];
-          if (taskNode) {
-            attachImages(taskNode, line, attr);
-            return anchor(taskNode, line);
-          }
-          pendingTaskImages[attr.taskLineN] = pendingTaskImages[attr.taskLineN] || [];
-          pendingTaskImages[attr.taskLineN].push({ line, attr });
-          return null;
-        }
-        return anchor(imageTurnSection(line, attr), line);
-      }
-      const msg = systemTurnSection(line);
-      const waiting = pendingTaskImages[line.n];
-      if (waiting && waiting.length) {
-        waiting.forEach((w) => {
-          attachImages(msg, w.line, w.attr);
-        });
-        delete pendingTaskImages[line.n];
-      }
-      return anchor(msg, line);
-    }
-    if (line.role === "tool") {
-      const node = line.tool_call_id ? state.callNodes[line.tool_call_id] : null;
-      if (node) {
-        attachResult(node, line);
-        const lines0 = node.details.getAttribute("data-lines");
-        node.details.setAttribute("data-lines", lines0 ? lines0 + "," + line.n : String(line.n));
-        anchor(node.details, line);
-        return null;
-      }
-      const standalone = el$2("section", "msg msg-tool");
-      standalone.appendChild(standaloneResult(line));
-      return anchor(standalone, line);
-    }
-    if (line.role === "assistant") {
-      const msg = el$2("section", "msg msg-assistant");
-      if (line.reasoning) {
-        msg.appendChild(thinkingDisclosure(line));
-      }
-      if (line.text) {
-        msg.appendChild(bodyBlock(line.text, LONG_TEXT_LINES, "asst." + line.n, void 0, estOf(line).text));
-      }
-      (line.tool_calls || []).forEach((call) => {
-        msg.appendChild(toolDisclosure(call).details);
-      });
-      if (!line.text && !line.reasoning && !(line.tool_calls || []).length) {
-        msg.appendChild(el$2("div", "note", "（空消息）"));
-      }
-      return anchor(msg, line);
-    }
-    const other = el$2("section", "msg msg-other");
-    other.appendChild(bodyBlock(line.text || "(无正文)", LONG_TEXT_LINES, "other." + line.n, void 0, estOf(line).text));
-    return anchor(other, line);
-  }
-  function streamSummary() {
-    if (!state.current) return null;
-    const bar = el$2("div", "stream-summary");
-    const bits = [state.current.messages + " 条消息"];
-    const st = aggregate(usageLines(state.lines));
-    if (st) {
-      bits.push("输入 " + fmtTokens(st.promptTokens) + " / 输出 " + fmtTokens(st.completionTokens));
-      if (st.promptTokens) bits.push("缓存 " + st.cacheHitPct.toFixed(0) + "%");
-      if (st.avgTtftMs) bits.push("首字 " + fmtDur(st.avgTtftMs));
-      const money = fmtCost(state.current.cost);
-      if (money) bits.push(money);
-    }
-    const m = metaState();
-    if (m) bits.push("提示词快照 " + countText(m.promptChars, m.promptTokenEst));
-    bits.forEach((b, i) => {
-      if (i) bar.appendChild(el$2("span", "dot-sep"));
-      bar.appendChild(el$2("span", null, b));
-    });
-    const btn = el$2("button", null, layout.cols.details > 0 ? "收起详情" : "详情 ›");
-    btn.type = "button";
-    btn.addEventListener("click", () => {
-      toggleDetails();
-      btn.textContent = layout.cols.details > 0 ? "收起详情" : "详情 ›";
-    });
-    bar.appendChild(btn);
-    return bar;
-  }
-  function timelineEmptyText() {
-    if (state.onlyTools) return "这个会话没有工具调用记录";
-    if (!state.current) return "左侧选择一个会话开始浏览。";
-    return "这个会话还没有可显示的消息";
-  }
-  function streamNode(container) {
-    return container.querySelector(".stream");
-  }
-  function renderTimeline() {
-    const container = document.getElementById("timeline");
-    if (!container) return;
-    clear(container);
-    pendingTaskImages = {};
-    state.msgSeq = 0;
-    state.toolSeq = 0;
-    state.badLines = 0;
-    state.calls = /* @__PURE__ */ new Map();
-    state.callNodes = {};
-    state.anchors = {};
-    const stream = el$2("div", "stream");
-    container.appendChild(stream);
-    let rendered = 0;
-    const summary = streamSummary();
-    if (summary) {
-      stream.appendChild(summary);
-      rendered++;
-    }
-    state.lines.forEach((line, idx) => {
-      const node = renderLine(line);
-      if (node) {
-        stream.appendChild(node);
-        rendered++;
-      }
-    });
-    if (rendered <= (summary ? 1 : 0)) {
-      stream.appendChild(el$2("div", "empty", timelineEmptyText()));
-    }
-    updateBanner();
-    renderDetails$1();
-    if (state.view === "trajectory") renderTrajectory$1();
-  }
-  function appendLines(lines) {
-    if (!lines || !lines.length) return;
-    const container = document.getElementById("timeline");
-    if (!container) return;
-    const stream = streamNode(container);
-    let hasMeta = false;
-    indexCallEstimates(lines);
-    lines.forEach((line) => {
-      state.lines.push(line);
-      if (line.t === "meta") hasMeta = true;
-    });
-    if (!stream) {
-      renderTimeline();
+  function mdInline(parent, text, depth = 0) {
+    if (depth > 6) {
+      parent.appendChild(document.createTextNode(String(text || "")));
       return;
     }
-    const placeholder = stream.querySelector(".empty");
-    state.lines.length - lines.length;
-    lines.forEach((line, idx) => {
-      const node = renderLine(line);
-      if (node) stream.appendChild(node);
-    });
-    if (placeholder && placeholder.parentNode && stream.children.length > 1) {
-      stream.removeChild(placeholder);
-    }
-    updateBanner();
-    if (hasMeta) renderDetails$1();
-    else if (lines.some((l) => l.t === "usage")) renderDetails$1();
-    if (state.view === "trajectory") renderTrajectory$1();
-    if (state.follow) scrollToBottom();
-  }
-  function scrollToBottom() {
-    const t = document.getElementById("timeline");
-    if (t) t.scrollTop = t.scrollHeight;
-  }
-  function updateBanner() {
-    if (state.badLines > 0) {
-      setBannerText("已跳过 " + state.badLines + " 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）");
-    } else {
-      setBannerText("");
-    }
-  }
-  function metaLines() {
-    const found = [];
-    state.lines.forEach((l) => {
-      if (l.t === "meta") found.push(l);
-    });
-    return found;
-  }
-  function metaState() {
-    const metas = metaLines();
-    if (!metas.length && !metaOf(state.current)) return null;
-    const line = metas.length ? metas[metas.length - 1] : null;
-    if (!line) return null;
-    const scanned = metaOf(state.current);
-    return {
-      line,
-      count: Math.max(metas.length, scanned ? scanned.count : 0),
-      promptChars: String(line.text || "").length,
-      // 本地估算（Go 侧下发）：显示单位是 token 时用它，单位是字符时用上面的
-      // 精确字符数——两个口径都留着，切换开关不用重新拉数据。
-      promptTokenEst: estOf(line).text
-    };
-  }
-  let pullSeq = 0;
-  function revealProject(project) {
-    const wraps = document.querySelectorAll(".proj-group");
-    let hit = null;
-    wraps.forEach((w) => {
-      const el2 = w;
-      const summary = el2.querySelector(".proj-row");
-      if (!hit && summary && summary.title === project) hit = el2;
-    });
-    const target = hit;
-    if (!target) return;
-    if (!target.open) {
-      target.open = true;
-      target.dataset.open = "1";
-      setCollapsed(groupKey("proj", project), false);
-    }
-    target.scrollIntoView({ block: "nearest" });
-  }
-  function applyIndex(payload) {
-    state.sessions = payload.sessions || [];
-    state.root = payload.root || state.root;
-    state.generated = payload.generated || state.generated;
-    state.listSig = listSigOf();
-  }
-  function listSigOf() {
-    const parts = [state.filter, state.sessions.length];
-    state.sessions.forEach((s) => {
-      parts.push([
-        s.id,
-        s.messages,
-        s.cost ? s.cost.total + (s.cost.currency || "") : "",
-        s.stats ? s.stats.requests : 0,
-        s.projectStages ? JSON.stringify(s.projectStages) : ""
-      ].join("~"));
-    });
-    return parts.join("|");
-  }
-  function refreshIndex() {
-    return fetch("/api/index", { cache: "no-store" }).then((res) => {
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      return res.json();
-    }).then((payload) => {
-      applyIndex(payload);
-      state.polling = true;
-      const current = findSession(state.current ? state.current.id : "");
-      if (!current) return;
-      state.current = current;
-      const mtime = new Date(current.mtime).getTime();
-      const changed = current.size !== state.curSize || mtime !== state.curMtime;
-      if (changed && state.curSize >= 0) {
-        state.curMtime = mtime;
-        return pullSession(false);
-      }
-      state.curSize = current.size;
-      state.curMtime = mtime;
-    }).catch(() => {
-      state.polling = false;
-    });
-  }
-  function pullSession(reset) {
-    const s = state.current;
-    if (!s) return Promise.resolve();
-    const from = reset ? 0 : state.nextFrom;
-    const url = "/api/session?id=" + encodeURIComponent(s.id) + "&from=" + from;
-    const seq = ++pullSeq;
-    return fetch(url, { cache: "no-store" }).then((res) => {
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      return res.json();
-    }).then((payload) => {
-      if (seq !== pullSeq) return;
-      if (!reset && payload.nextFrom < state.nextFrom) {
-        state.lines = [];
-        state.nextFrom = 0;
-        return pullSession(true);
-      }
-      state.nextFrom = payload.nextFrom;
-      state.curSize = payload.size;
-      if (reset) {
-        state.lines = normalizeLines(payload.lines);
-        indexCallEstimates(state.lines);
-        renderTimeline();
-        if (state.follow) scrollToBottom();
+    let rest = String(text === void 0 || text === null ? "" : text);
+    let guard = 0;
+    while (rest && guard++ < 800) {
+      const m = MD_INLINE.exec(rest);
+      if (!m) break;
+      if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
+      rest = rest.slice(m.index + m[0].length);
+      let node;
+      if (m[1] !== void 0) {
+        node = el("code", "md-inline-code", m[2]);
+      } else if (m[3] !== void 0) {
+        node = el("a", "md-link");
+        const href = mdSafeURL(m[4]);
+        if (href) {
+          node.setAttribute("href", href);
+          node.setAttribute("target", "_blank");
+          node.setAttribute("rel", "noopener noreferrer");
+        } else {
+          node.title = "链接协议不受支持，只显示文字";
+        }
+        mdInline(node, m[3], depth + 1);
+      } else if (m[10] !== void 0 || m[11] !== void 0) {
+        try {
+          node = mdMathML(m[10] !== void 0 ? m[10] : m[11], m[10] !== void 0);
+        } catch {
+          node = el("span");
+          node.appendChild(document.createTextNode(m[0]));
+        }
+      } else if (m[5] !== void 0 || m[6] !== void 0) {
+        node = el("strong");
+        mdInline(node, m[5] !== void 0 ? m[5] : m[6], depth + 1);
+      } else if (m[7] !== void 0) {
+        node = el("del");
+        mdInline(node, m[7], depth + 1);
       } else {
-        appendLines(normalizeLines(payload.lines));
+        node = el("em");
+        mdInline(node, m[8] !== void 0 ? m[8] : m[9], depth + 1);
       }
-    }).catch((err) => {
-      setBannerText("拉取会话失败：" + err.message);
+      parent.appendChild(node);
+    }
+    if (rest) parent.appendChild(document.createTextNode(rest));
+  }
+  function renderInlineMarkdown(text) {
+    const frag = document.createDocumentFragment();
+    mdInline(frag, text, 0);
+    return frag;
+  }
+  function mdInlineLines(parent, text) {
+    String(text === void 0 || text === null ? "" : text).split("\n").forEach((part, i) => {
+      if (i) parent.appendChild(el("br", "md-br"));
+      mdInline(parent, part, 0);
     });
   }
-  function selectSession(id) {
-    const s = findSession(id);
-    state.current = s;
-    state.lines = [];
-    state.callEst = {};
-    state.nextFrom = 0;
-    state.curSize = -1;
-    state.curMtime = 0;
-    state.meta = null;
-    state.trajOpen = {};
-    if (!s) {
-      renderTimeline();
-      return;
-    }
-    renderTimeline();
-    pullSession(true).then(() => scrollToBottom());
-  }
-  function bootData() {
-    void refreshIndex().then(() => {
-      if (state.sessions.length && !state.current) {
-        let live = null;
-        state.sessions.forEach((s) => {
-          if (!live && s.live) live = s;
-        });
-        selectSession((live || state.sessions[0]).id);
-      }
-    });
-    window.setInterval(() => {
-      if (!document.hidden) void refreshIndex();
-    }, POLL_MS);
-  }
-  const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
-  function nextMsgLine(lines, idx) {
-    for (let i = idx + 1; i < lines.length; i++) {
-      if (lines[i] && !lines[i].bad && lines[i].t === "msg") return lines[i];
-    }
-    return null;
-  }
-  function callDuration(call, resultLine) {
-    if (!call || !call.ts || !resultLine.ts) return 0;
-    const t0 = Date.parse(call.ts);
-    const t1 = Date.parse(resultLine.ts);
-    if (isNaN(t0) || isNaN(t1) || t1 < t0) return 0;
-    return t1 - t0;
-  }
-  function trajectoryRows() {
-    const rows = [];
-    const callOf = {};
-    const imageAfterTool = {};
-    state.lines.forEach((l) => {
-      if (!l || l.bad || l.t !== "msg") return;
-      if (l.role === "assistant") {
-        (l.tool_calls || []).forEach((c) => {
-          const fn = c.function || {};
-          callOf[c.id] = { name: fn.name || "?", ts: l.ts || "", n: l.n, args: String(fn.arguments || "") };
-        });
-      }
-    });
-    state.lines.forEach((line, idx) => {
-      if (!line || line.bad) return;
-      if (line.t === "meta") {
-        rows.push({
-          kind: "meta",
-          tag: "元信息",
-          name: line.kind || "system",
-          summary: "模型 " + (line.model || "—") + " · 提示词 " + countText(String(line.text || "").length, estOf(line).text) + ((line.tools || []).length ? " · 工具 " + line.tools.length : ""),
-          chars: String(line.text || "").length,
-          tokens: estOf(line).text,
-          status: "",
-          detail: { prompt: String(line.text || "") }
-        });
-        return;
-      }
-      if (line.t === "usage") {
-        const st = line.stats || {};
-        rows.push({
-          kind: "usage",
-          tag: "用量",
-          name: "请求" + (st.round ? " #" + st.round : ""),
-          summary: (st.kind || "chat") + " · 输入 " + fmtTokens(st.promptTokens) + "（缓存 " + (st.cachedTokens || 0) + "）· 输出 " + fmtTokens(st.completionTokens) + (st.reasoningTokens ? "（思 " + fmtTokens(st.reasoningTokens) + "）" : ""),
-          chars: "",
-          tokens: 0,
-          status: st.finish || "",
-          time: Number(st.durationMs) || 0,
-          detail: { request: JSON.stringify(st, null, 2) }
-        });
-        return;
-      }
-      if (line.t !== "msg" || !line.role) return;
-      if (line.role === "user" && line.images && line.images.length) {
-        const attr = imageAttributions()[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
-        const fromTool = !!imageAfterTool[line.n];
-        const jumpTo = attr.kind === "call" && attr.callId && state.callNodes[attr.callId] ? state.callNodes[attr.callId].lineN : attr.kind === "task" && attr.taskLineN ? attr.taskLineN : line.n;
-        rows.push({
-          kind: "user",
-          tag: "用户",
-          name: "用户",
-          summary: (fromTool ? "接上一行工具回执 · " : "") + "图片 ×" + line.images.length + " · " + (firstLine(line.text) || "（无正文）") + " · " + attributionText(attr),
-          title: IMAGE_WIRE_TITLE + "\n" + attributionText(attr) + (attr.how === "call-id" ? "（句柄里写了 call id，属于精确匹配）" : attr.how === "tool-name" ? "（句柄里写了工具名，按名称匹配到本轮的调用）" : attr.how === "order" ? "（旧转录没有 call id，按顺序推断；新转录会写上归属）" : attr.how === "task" ? "（这一轮带的是任务自己的图，不归任何工具调用）" : "") + (fromTool ? "\n这一轮的图片就是上一行工具回执投出来的（同一件事的两段 wire 表达，所以两行不合并）" : ""),
-          chars: String(line.text || "").length,
-          tokens: estOf(line).text + estOf(line).images,
-          status: "",
-          jump: jumpTo,
-          images: line.images,
-          detail: { user: String(line.text || "") || "（这一轮没有正文）" }
-        });
-      } else if (line.role === "user") {
-        let fed = 0;
-        const attrs = imageAttributions();
-        Object.keys(attrs).forEach((n) => {
-          const a = attrs[Number(n)];
-          if (a.kind === "task" && a.taskLineN === line.n) fed++;
-        });
-        rows.push({
-          kind: "user",
-          tag: "用户",
-          name: "用户",
-          summary: firstLine(line.text) + (fed ? " · 附件 图片 ×" + fed : ""),
-          title: fed ? "会话开头的原图投喂轮归到了这条任务（对话页里它们收在同一个块里）" : "点击跳到对话里对应的那条消息",
-          chars: String(line.text || "").length,
-          tokens: estOf(line).text,
-          status: "",
-          jump: line.n,
-          detail: { user: String(line.text || "") }
-        });
-      } else if (line.role === "assistant") {
-        if (line.reasoning) {
-          rows.push({
-            kind: "think",
-            tag: "思考",
-            name: "reasoning",
-            summary: firstLine(line.reasoning),
-            chars: line.reasoning.length,
-            tokens: estOf(line).reasoning,
-            status: "",
-            jump: line.n,
-            detail: { thinking: line.reasoning }
-          });
-        }
-        if (line.text) {
-          rows.push({
-            kind: "msg",
-            tag: "助手",
-            name: "AI",
-            summary: firstLine(line.text),
-            chars: line.text.length,
-            tokens: estOf(line).text,
-            status: "",
-            jump: line.n,
-            detail: { message: String(line.text) }
-          });
-        }
-        (line.tool_calls || []).forEach((c, i) => {
-          const fn = c.function || {};
-          const name = fn.name || "(未命名工具)";
-          const args = String(fn.arguments || "");
-          rows.push({
-            kind: "tool",
-            tag: "工具",
-            name,
-            summary: toolSummary(name, fn.arguments),
-            chars: args.length,
-            tokens: estOf(line).calls[i] || 0,
-            status: "",
-            jump: line.n,
-            detail: { input: prettyJSON(args) || args }
-          });
-        });
-      } else if (line.role === "tool") {
-        const info = line.tool_call_id ? callOf[line.tool_call_id] : null;
-        const text = String(line.text || "");
-        const after = nextMsgLine(state.lines, idx);
-        const imageNext = !!(after && after.role === "user" && after.images && after.images.length);
-        if (imageNext) imageAfterTool[after.n] = true;
-        const hint = imageNext ? IMAGE_PLACEHOLDER.test(text) ? " · 图片见下一行用户轮" : " · 图片在下一行用户轮里" : "";
-        rows.push({
-          kind: "result",
-          tag: "结果",
-          name: info ? info.name : "(未配对的工具回执)",
-          summary: firstLine(text) + hint,
-          chars: text.length,
-          tokens: estOf(line).text,
-          title: imageNext ? "这一行是工具回执：tool 消息的 content 只能是文本，随行的图片被回灌在紧随其后的 user 轮里（两行是同一件事，保持两行不合并）" : "点击跳到对话里对应的那条消息",
-          status: classifyResult(text),
-          jump: line.n,
-          time: callDuration(info, line),
-          detail: { output: text }
-        });
-      }
-    });
-    return rows;
-  }
-  const TRAJ_KINDS = [
-    { id: "user", label: "用户" },
-    { id: "msg", label: "助手" },
-    { id: "think", label: "思考" },
-    { id: "tool", label: "工具" },
-    { id: "result", label: "结果" },
-    { id: "meta", label: "元信息" },
-    { id: "usage", label: "用量" }
-  ];
-  function trajVisible(row) {
-    const picked = Object.keys(state.trajKinds).filter((k) => state.trajKinds[k]);
-    if (!picked.length) return true;
-    return picked.indexOf(row.kind) >= 0;
-  }
-  function trajDetailBody(row) {
-    const body = el$2("div", "traj-detail-inner");
-    const labels = {
-      prompt: "系统提示词",
-      thinking: "思考",
-      user: "用户消息",
-      message: "助手消息",
-      input: "输入",
-      output: "输出",
-      request: "用量行"
-    };
-    Object.keys(row.detail || {}).forEach((k) => {
-      const section = el$2("div");
-      section.appendChild(el$2("div", "traj-detail-title", labels[k] || k));
-      const text = String(row.detail[k] || "");
-      if (k === "input" || k === "request" || k === "output") {
-        section.appendChild(machineBlock(text, "code"));
-      } else {
-        section.appendChild(el$2("pre", "code", text));
-      }
-      const actions = el$2("div", "row-actions");
-      actions.appendChild(copyButton(text));
-      section.appendChild(actions);
-      body.appendChild(section);
-    });
-    if (row.images && row.images.length) {
-      body.appendChild(imageStrip({ images: row.images }));
-    }
-    return body;
-  }
-  function renderTrajectory() {
-    const refs = document.getElementById("trajectory");
-    if (!refs) return;
-    clear(refs);
-    if (!state.current) {
-      refs.appendChild(el$2("div", "traj-empty", "左侧选择一个会话后，这里列出它的全部步骤。"));
-      return;
-    }
-    const rows = trajectoryRows();
-    const visible = rows.filter(trajVisible);
-    const toolbar = el$2("div", "traj-toolbar");
-    const inner = el$2("div", "traj-toolbar-inner");
-    const filters = el$2("div", "traj-filters");
-    const allChip = el$2("button", "traj-chip", "全部");
-    allChip.type = "button";
-    allChip.setAttribute("aria-pressed", Object.keys(state.trajKinds).length ? "false" : "true");
-    allChip.addEventListener("click", () => {
-      state.trajKinds = {};
-      renderTrajectory();
-    });
-    filters.appendChild(allChip);
-    TRAJ_KINDS.forEach((k) => {
-      const count = rows.filter((r) => r.kind === k.id).length;
-      if (!count) return;
-      const chip = el$2("button", "traj-chip", k.label + " " + count);
-      chip.type = "button";
-      chip.title = "只看 / 不看「" + k.label + "」";
-      chip.setAttribute("aria-pressed", state.trajKinds[k.id] ? "true" : "false");
-      chip.addEventListener("click", () => {
-        if (state.trajKinds[k.id]) delete state.trajKinds[k.id];
-        else state.trajKinds[k.id] = true;
-        renderTrajectory();
-      });
-      filters.appendChild(chip);
-    });
-    inner.appendChild(filters);
-    inner.appendChild(el$2("span", "traj-count", visible.length + " / " + rows.length + " 步"));
-    toolbar.appendChild(inner);
-    refs.appendChild(toolbar);
-    const scroll = el$2("div", "traj-scroll");
-    if (!visible.length) {
-      scroll.appendChild(el$2("div", "traj-empty", rows.length ? "当前筛选没有匹配的步骤" : "这个会话还没有步骤"));
-      refs.appendChild(scroll);
-      return;
-    }
-    const table = el$2("table", "traj-table");
-    const colgroup = document.createElement("colgroup");
-    [["col-n"], ["col-kind"], ["col-name"], [], ["col-status"], ["col-size"], ["col-time"]].forEach((c) => {
-      const col = document.createElement("col");
-      if (c[0]) col.className = c[0];
-      colgroup.appendChild(col);
-    });
-    table.appendChild(colgroup);
-    const thead = el$2("thead");
-    const hrow = el$2("tr");
-    ["#", "类型", "名称", "摘要", "状态", unitLabel(), "耗时"].forEach((h, i) => {
-      hrow.appendChild(el$2("th", i === 0 || i >= 5 ? "num-head" : null, h));
-    });
-    thead.appendChild(hrow);
-    table.appendChild(thead);
-    const tbody = el$2("tbody");
-    visible.forEach((row, idx) => {
-      const key = "r" + idx + ":" + (row.jump || row.name);
-      const tr = el$2("tr", "traj-row");
-      tr.setAttribute("data-kind", row.kind);
-      if (row.status === "error") tr.setAttribute("data-error", "true");
-      tr.title = row.title || "点击跳到对话里对应的那条消息";
-      const tdN = el$2("td", "traj-num");
-      const discl = el$2("button", "traj-disclose", state.trajOpen[key] ? "▾" : "▸");
-      discl.type = "button";
-      discl.title = "展开完整输入输出";
-      discl.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        state.trajOpen[key] = !state.trajOpen[key];
-        renderTrajectory();
-      });
-      tdN.appendChild(discl);
-      tdN.appendChild(document.createTextNode(row.jump ? String(row.jump) : "—"));
-      tr.appendChild(tdN);
-      const tdKind = el$2("td");
-      tdKind.appendChild(el$2("span", "kind-tag kind-" + (row.status === "error" ? "error" : row.kind), row.tag));
-      tr.appendChild(tdKind);
-      tr.appendChild(el$2("td", "traj-name", row.name));
-      const tdSum = el$2("td", "traj-summary", row.summary || "—");
-      tdSum.title = row.summary || "";
-      tr.appendChild(tdSum);
-      const statusText = row.status === "error" ? "✗ error" : row.status === "ok" ? "✓ ok" : row.status === "plain" || !row.status ? "—" : row.status;
-      tr.appendChild(el$2(
-        "td",
-        "traj-status " + (row.status === "error" ? "error" : row.status === "ok" ? "ok" : "plain"),
-        statusText
-      ));
-      tr.appendChild(el$2(
-        "td",
-        "traj-num-cell",
-        state.unit === "char" ? row.chars ? String(row.chars) : "—" : row.tokens ? countValue(row.chars, row.tokens) : "—"
-      ));
-      tr.appendChild(el$2("td", "traj-num-cell", row.time ? fmtDur(row.time) : "—"));
-      tr.addEventListener("click", () => {
-        if (row.jump) jumpToLine(row.jump);
-        else {
-          state.trajOpen[key] = !state.trajOpen[key];
-          renderTrajectory();
-        }
-      });
-      tbody.appendChild(tr);
-      if (state.trajOpen[key]) {
-        const dtr = el$2("tr", "traj-detail");
-        const td = el$2("td");
-        td.colSpan = 7;
-        td.appendChild(trajDetailBody(row));
-        dtr.appendChild(td);
-        tbody.appendChild(dtr);
-      }
-    });
-    table.appendChild(tbody);
-    scroll.appendChild(table);
-    refs.appendChild(scroll);
-  }
-  function jumpToLine(n) {
-    const node = state.anchors[n];
-    switchView("chat");
-    if (!node) return;
-    node.scrollIntoView({ block: "center" });
-    node.classList.remove("flash");
-    void node.offsetWidth;
-    node.classList.add("flash");
-  }
-  function currentEstimate() {
-    const id = state.current ? state.current.id : "";
-    const list = state.sessions || [];
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].id === id && list[i].estimate) return list[i].estimate;
-    }
-    return state.current && state.current.estimate || null;
-  }
-  function imageEstimate(lines) {
-    const sum = { count: 0, tokens: 0 };
-    (lines || []).forEach((line) => {
-      const est = estOf(line);
-      sum.count += est.imageCount || 0;
-      sum.tokens += est.images || 0;
-    });
-    return sum;
-  }
-  function detailBlock(title) {
-    const wrap = el$2("section", "detail-block");
-    if (title) wrap.appendChild(el$2("h3", "detail-block-title", title));
-    return wrap;
-  }
-  function kvList(pairs) {
-    const dl = el$2("dl", "detail-kv");
-    pairs.forEach((p2) => {
-      if (p2 === null) return;
-      const dt = el$2("dt", null, p2[0]);
-      const dd = el$2("dd", p2[3] ? "mono" : null);
-      if (p2[1] && p2[1].nodeType) {
-        dd.appendChild(p2[1]);
-      } else if (p2[1] !== void 0 && p2[1] !== null) {
-        dd.textContent = p2[1];
-      }
-      if (p2[2]) dd.title = p2[2];
-      dl.appendChild(dt);
-      dl.appendChild(dd);
-    });
-    return dl;
-  }
-  function nameNode(tag, cls, name) {
-    const node = el$2(tag, cls);
-    node.appendChild(renderInlineMarkdown(name));
-    return node;
-  }
-  function detailsSessionBlock() {
-    const cur = state.current;
-    if (!cur) return null;
-    const block = detailBlock("会话");
-    block.appendChild(kvList([
-      ["项目", cur.project || projectOf(cur.id), cur.id],
-      ["阶段", cur.stageTitle || cur.stage || "—"],
-      ["会话", nameNode("span", "detail-name", sessionTitleOf(cur)), cur.id, true],
-      ["文件", cur.name || "—", cur.path, true],
-      ["消息", cur.messages + " 条 · " + state.lines.length + " 行"],
-      ["大小", fmtSize(cur.size)],
-      ["最后写入", fmtClock(cur.mtime)],
-      cur.imageName ? ["图片", imageDisplayName(cur), imageTipText(cur), true] : null,
-      cur.imageFile ? ["图片文件", cur.imageFile, cur.imageName, true] : null,
-      cur.imagePath ? ["图片路径", cur.imagePath, null, true] : null,
-      cur.imageName && cur.page ? ["页码", "第 " + cur.page + " 页"] : null,
-      cur.imageName && cur.imageOrder ? ["顺序", "书内第 " + cur.imageOrder + " 张"] : null,
-      cur.imageName && cur.imageType ? ["类型", cur.imageType] : null,
-      cur.imageName && cur.imageCaption ? ["图注", cur.imageCaption] : null
-    ]));
-    const sub = subPathOf(cur.id);
-    if (sub) block.appendChild(el$2("div", "stats-sub", "目录：" + sub));
-    return block;
-  }
-  function detailsStatsBlock() {
-    const st = aggregate(usageLines(state.lines));
-    if (!st) return null;
-    const block = detailBlock("指标");
-    const meta = el$2("div", "stats-sub", st.requests + " 次请求 · " + (st.streamed ? "流式" : "非流式") + (st.spanMs ? " · 会话跨度 " + fmtDur(st.spanMs) : ""));
-    block.appendChild(meta);
-    const tiles = el$2("div", "tiles");
-    const tile = (label, value, title) => {
-      const t = el$2("div", "tile");
-      t.appendChild(el$2("div", "tile-value", value));
-      t.appendChild(el$2("div", "tile-label", label));
-      if (title) t.title = title;
-      tiles.appendChild(t);
-    };
-    tile(
-      "输入 tokens",
-      fmtTokens(st.promptTokens),
-      st.promptTokens + " prompt tokens（含缓存命中 " + st.cachedTokens + "）\n厂商实测值：随请求发出的图片 token 已经包含在里面，不单列。"
-    );
-    const imgs = imageEstimate(state.lines);
-    if (imgs.count) {
-      const est = currentEstimate();
-      const per = Math.round(imgs.tokens / imgs.count);
-      const rule = est ? est.rule : "本地估算";
-      const lines = [imgs.count + " 张图片的本地估算合计 ≈ " + fmtTokens(imgs.tokens) + "（每张 ≈ " + fmtTokens(per) + "）", "估算口径：" + rule];
-      let value = "≈ " + fmtTokens(per) + "/张";
-      if (est && est.measuredPerImage) {
-        value = "实测 " + fmtTokens(est.measuredPerImage) + "/张";
-        lines.push("实测 " + fmtTokens(est.measuredPerImage) + "/张：厂商 prompt_tokens 的相邻差值推出的每张均值" + (est.measuredSamples ? "（" + est.measuredSamples + " 步 / " + est.measuredImages + " 张）" : ""));
-        lines.push("本地估算每张 ≈ " + fmtTokens(per) + "（口径：" + rule + "，本会话合计 ≈ " + fmtTokens(imgs.tokens) + "）");
-      } else {
-        lines.push("没有可用的实测样本：本会话的用量行还不足以推出每张实测值（无用量行、或没有一次请求新增图片）");
-      }
-      lines.push("对照：上面的「输入 tokens」是厂商实测的 prompt_tokens，其中已经包含图片 token。");
-      tile("图片 " + imgs.count + " 张", value, lines.join("\n"));
-    }
-    tile(
-      "缓存命中",
-      st.promptTokens ? st.cacheHitPct.toFixed(0) + "%" : "—",
-      "前缀缓存命中率 = Σcached_tokens / Σprompt_tokens（供应商未上报时为 —）"
-    );
-    tile(
-      "输出 tokens",
-      fmtTokens(st.completionTokens),
-      st.completionTokens + " completion tokens" + (st.reasoningTokens ? "，其中思考 " + st.reasoningTokens : "")
-    );
-    tile("平均首字", st.avgTtftMs ? fmtDur(st.avgTtftMs) : "—", '每请求"发出→第一个流式增量"的平均耗时');
-    tile(
-      "输出速度",
-      (st.outputTps || 0).toFixed(1) + " tok/s",
-      "生成速度 = Σ输出 tokens / Σ(请求耗时 − 首字延迟)，不含排队与思考等待"
-    );
-    tile("平均耗时", fmtDur(st.avgDurationMs), "每请求平均墙钟耗时（含思考与工具执行前后的等待）");
-    if (st.reasoningTokens) tile("思考 tokens", fmtTokens(st.reasoningTokens), "reasoning_tokens（思考链）");
-    const sessionCost = state.current && state.current.cost;
-    if (sessionCost) {
-      tile(
-        "费用",
-        fmtCost(sessionCost),
-        '按配置里的 models.*.price 计算：未命中缓存的输入 × input + 命中缓存的输入 × cached + 输出 × output。没配价格的模型不显示金额（¥0 会被读成"没花钱"）。'
-      );
-    }
-    block.appendChild(tiles);
-    const details = document.createElement("details");
-    details.className = "stats-details";
-    details.open = true;
-    const sum = el$2("summary", "schema-head");
-    sum.appendChild(el$2("span", "schema-name", "每次请求明细"));
-    sum.appendChild(el$2("span", "schema-meta", st.requests + " 行"));
-    details.appendChild(sum);
-    const scroll = el$2("div", "stats-scroll");
-    const table = el$2("table", "stats-table");
-    const thead = el$2("tr");
-    ["回合", "首字", "耗时", "输入·缓存", "输出"].forEach((h) => {
-      thead.appendChild(el$2("th", null, h));
-    });
-    table.appendChild(thead);
-    st.perRequest.forEach((l) => {
-      const one = l.stats;
-      const tr = el$2("tr");
-      tr.className = "req-row";
-      const kindLabel = one.kind === "compact" ? "上下文压缩摘要请求" : one.kind === "nudge" ? "空回复后的强制文本请求" : "普通对话回合";
-      tr.title = (l.ts ? fmtClock(l.ts) + "\n" : "") + kindLabel + (one.kind ? "（kind=" + one.kind + "）" : "") + (one.model ? "\n模型 " + one.model : "") + "\n输入 " + one.promptTokens + " tokens（缓存命中 " + one.cachedTokens + "）\n输出 " + one.completionTokens + " tokens" + (one.reasoningTokens ? "（其中思考 " + one.reasoningTokens + "）" : "") + "\n输出速度 " + (one.outputTps || 0).toFixed(1) + " tok/s\n结束原因 " + (one.finish || "—");
-      const cell = (text) => {
-        const td = el$2("td", null, text);
-        tr.appendChild(td);
-        return td;
-      };
-      cell(one.round ? "#" + one.round : "—");
-      cell(one.ttftMs ? fmtDur(one.ttftMs) : "—");
-      cell(one.durationMs ? fmtDur(one.durationMs) : "—");
-      cell(fmtTokens(one.promptTokens) + (one.promptTokens ? " · " + (one.cachedTokens * 100 / one.promptTokens).toFixed(0) + "%" : ""));
-      cell(fmtTokens(one.completionTokens));
-      table.appendChild(tr);
-    });
-    scroll.appendChild(table);
-    details.appendChild(scroll);
-    block.appendChild(details);
-    return block;
-  }
-  function toolSchemaBlock(tool, index) {
-    const d = document.createElement("details");
-    d.className = "tool-schema";
-    const head = el$2("summary", "schema-head");
-    head.appendChild(el$2("span", "schema-index", "#" + (index + 1)));
-    head.appendChild(el$2("span", "schema-name", tool.name || "(未命名工具)"));
-    if (tool.description) {
-      head.appendChild(el$2(
-        "span",
-        "schema-meta",
-        "描述 " + countText(String(tool.description).length, tool.descTokens)
-      ));
-    }
-    if (tool.parameters) {
-      head.appendChild(el$2(
-        "span",
-        "schema-meta",
-        "schema " + countText(String(tool.parameters).length, tool.paramTokens)
-      ));
-    }
-    d.appendChild(head);
-    const body = el$2("div", "schema-body");
-    if (tool.description) {
-      body.appendChild(el$2("pre", "body-text schema-desc", tool.description));
-    }
-    if (tool.parameters) {
-      const pd = document.createElement("details");
-      pd.className = "schema-params";
-      const ph = el$2("summary", "schema-head");
-      ph.appendChild(el$2("span", "schema-name", "parameters"));
-      ph.appendChild(el$2("span", "schema-meta", "JSON · 默认收起"));
-      pd.appendChild(ph);
-      const pbody = el$2("div", "schema-body");
-      pbody.appendChild(machineBlock(String(tool.parameters), "code"));
-      const actions = el$2("div", "row-actions");
-      actions.appendChild(copyButton(String(tool.parameters)));
-      pbody.appendChild(actions);
-      pd.appendChild(pbody);
-      body.appendChild(pd);
-    } else {
-      body.appendChild(el$2("div", "note", "（这条工具定义没有记录 parameters）"));
-    }
-    d.appendChild(body);
-    return d;
-  }
-  function metaCardKey(line) {
-    return "meta." + (state.current ? state.current.id : "") + "." + (line.system_sha || line.n);
-  }
-  function metaCard() {
-    const m = metaState();
-    if (!m) {
-      state.meta = null;
-      return null;
-    }
-    state.meta = m;
-    const line = m.line;
-    const card = document.createElement("details");
-    card.className = "disclosure meta-card";
-    card.open = storeGet(metaCardKey(line)) === "1";
-    const head = el$2("summary");
-    const slot = el$2("span", "line-slot");
-    slot.appendChild(el$2("span", "line-caret"));
-    head.appendChild(slot);
-    head.appendChild(el$2("span", "line-name", "系统提示词（本次运行快照，不参与回放）"));
-    head.appendChild(el$2("span", "line-sep"));
-    const bits = ["模型 " + (line.model || "—")];
-    if (line.session_label) bits.push("会话 " + line.session_label);
-    bits.push("sha " + shortSHA(line.system_sha));
-    bits.push(countText(m.promptChars, m.promptTokenEst));
-    head.appendChild(el$2("span", "line-summary", bits.join(" · ")));
-    card.appendChild(head);
-    const body = el$2("div", "schema-body");
-    const scroll = el$2("div", "prompt-scroll");
-    const promptText = String(line.text || "（这条 meta 行没有正文）");
-    if (jsonPretty(promptText) !== null) {
-      scroll.appendChild(machineBlock(promptText, "body-text prompt-text"));
-    } else if (state.markdown) {
-      const promptMD = el$2("div", "md-body prompt-md");
-      promptMD.appendChild(renderMarkdown(promptText));
-      scroll.appendChild(promptMD);
-    } else {
-      scroll.appendChild(machineBlock(promptText, "body-text prompt-text"));
-    }
-    body.appendChild(scroll);
-    const actions = el$2("div", "row-actions");
-    actions.appendChild(copyButton(String(line.text || "")));
-    body.appendChild(actions);
-    const tools = line.tools || [];
-    const toolsWrap = el$2("div", "meta-tools");
-    toolsWrap.appendChild(el$2(
-      "div",
-      "meta-tools-head",
-      tools.length ? "工具定义 " + tools.length + " 个（parameters 的 JSON 默认收起）" : "工具定义 0 个"
-    ));
-    if (!tools.length) {
-      toolsWrap.appendChild(el$2("div", "note", "这条 meta 行没有记录工具定义。"));
-    }
-    tools.forEach((t, i) => {
-      toolsWrap.appendChild(toolSchemaBlock(t, i));
-    });
-    body.appendChild(toolsWrap);
-    if (m.count > 1) {
-      const note = el$2("div", "note", "共 " + m.count + " 条，显示最新");
-      note.title = "同一个转录里有 " + m.count + " 条 meta 行（多次运行 / 提示词变化各一条），这里显示最后一条。";
-      body.appendChild(note);
-    }
-    card.appendChild(body);
-    card.addEventListener("toggle", () => {
-      storeSet(metaCardKey(line), card.open ? "1" : "0");
-    });
-    return card;
-  }
-  function shortSHA(value) {
-    const s = String(value || "");
-    if (!s) return "—";
-    return s.length > 12 ? s.slice(0, 12) : s;
-  }
-  function renderDetails() {
-    const host = document.getElementById("details-body");
-    if (!host) return;
-    clear(host);
-    const cur = state.current;
-    if (!cur) {
-      host.appendChild(el$2("div", "note", "左侧选择一个会话后，这里显示它的指标与元信息。"));
-      return;
-    }
-    const blocks = [detailsSessionBlock(), detailsStatsBlock()];
-    const meta = metaCard();
-    if (meta) {
-      const block = detailBlock("元信息");
-      block.appendChild(meta);
-      blocks.push(block);
-    }
-    blocks.forEach((b) => {
-      if (b) host.appendChild(b);
-    });
-    if (!blocks[0] && !blocks[1] && !blocks[2]) {
-      host.appendChild(el$2("div", "note", "这个会话没有可显示的详情。"));
-    }
-  }
-  const _sfc_main$3 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$k = /* @__PURE__ */ defineComponent({
     __name: "InlineMD",
     props: {
       tag: {},
@@ -9897,86 +8506,99 @@
       };
     }
   });
-  const _hoisted_1$1 = {
+  const _hoisted_1$f = {
     id: "sidebar-col",
     class: "sidebar-col"
   };
-  const _hoisted_2$1 = { class: "side-head" };
-  const _hoisted_3$1 = { class: "side-search" };
-  const _hoisted_4$1 = { class: "side-list-wrap" };
-  const _hoisted_5$1 = ["data-project"];
-  const _hoisted_6$1 = ["title"];
-  const _hoisted_7$1 = { class: "row-body" };
-  const _hoisted_8$1 = {
+  const _hoisted_2$e = { class: "side-head" };
+  const _hoisted_3$b = ["title"];
+  const _hoisted_4$8 = { class: "side-search" };
+  const _hoisted_5$8 = { class: "side-list-wrap" };
+  const _hoisted_6$6 = ["data-project"];
+  const _hoisted_7$5 = ["title"];
+  const _hoisted_8$4 = { class: "row-body" };
+  const _hoisted_9$4 = {
     key: 0,
     class: "proj-prefix"
   };
-  const _hoisted_9$1 = { class: "proj-title" };
-  const _hoisted_10$1 = { class: "row-meta" };
-  const _hoisted_11$1 = {
+  const _hoisted_10$3 = { class: "proj-title" };
+  const _hoisted_11$3 = { class: "row-meta" };
+  const _hoisted_12$3 = {
     key: 0,
     class: "proj-note",
     title: "这个输出根本身就是一个工程（work/、progress.json 等直接挂在它下面），是引入多项目布局之前的形态；新布局是「输出根/书名/」。"
   };
-  const _hoisted_12$1 = {
+  const _hoisted_13$3 = {
     key: 1,
     class: "dot live"
   };
-  const _hoisted_13$1 = {
+  const _hoisted_14$3 = {
     key: 0,
     class: "proj-progress",
     title: "progress.json 里各阶段的当前状态"
   };
-  const _hoisted_14$1 = ["data-project", "data-stage"];
-  const _hoisted_15$1 = { class: "stage-row" };
-  const _hoisted_16$1 = { class: "row-body" };
-  const _hoisted_17$1 = { class: "row-meta" };
-  const _hoisted_18$1 = ["title"];
-  const _hoisted_19$1 = {
-    key: 1,
-    class: "dot live"
+  const _hoisted_15$3 = ["data-project", "data-stage"];
+  const _hoisted_16$3 = { class: "stage-row" };
+  const _hoisted_17$3 = { class: "row-body" };
+  const _hoisted_18$3 = { class: "row-meta" };
+  const _hoisted_19$3 = ["title"];
+  const _hoisted_20$3 = {
+    key: 0,
+    class: "session-blocks"
   };
-  const _hoisted_20$1 = ["data-id", "title", "onClick"];
-  const _hoisted_21$1 = { class: "row-slot" };
-  const _hoisted_22$1 = {
+  const _hoisted_21$3 = ["data-id", "title", "onClick"];
+  const _hoisted_22$3 = { key: 1 };
+  const _hoisted_23$3 = ["data-id", "title", "onClick"];
+  const _hoisted_24$3 = { class: "row-slot" };
+  const _hoisted_25$2 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_23$1 = ["title"];
-  const _hoisted_24$1 = { class: "row-time" };
-  const _hoisted_25$1 = { class: "row-actions" };
-  const _hoisted_26$1 = ["onClick"];
-  const _hoisted_27$1 = ["onClick"];
-  const _hoisted_28$1 = ["data-id", "title", "onClick"];
-  const _hoisted_29$1 = { class: "row-slot" };
-  const _hoisted_30 = {
+  const _hoisted_26$2 = ["title"];
+  const _hoisted_27$2 = { class: "row-time" };
+  const _hoisted_28$2 = { class: "row-actions" };
+  const _hoisted_29$2 = ["onClick"];
+  const _hoisted_30$1 = ["onClick"];
+  const _hoisted_31$1 = {
+    key: 0,
+    class: "session-blocks"
+  };
+  const _hoisted_32$1 = ["data-id", "title", "onClick"];
+  const _hoisted_33$1 = ["data-id", "title", "onClick"];
+  const _hoisted_34$1 = { class: "row-slot" };
+  const _hoisted_35$1 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_31 = ["title"];
-  const _hoisted_32 = { class: "row-time" };
-  const _hoisted_33 = { class: "row-actions" };
-  const _hoisted_34 = ["onClick"];
-  const _hoisted_35 = ["onClick"];
-  const _hoisted_36 = {
+  const _hoisted_36$1 = ["title"];
+  const _hoisted_37$1 = { class: "row-time" };
+  const _hoisted_38$1 = { class: "row-actions" };
+  const _hoisted_39$1 = ["onClick"];
+  const _hoisted_40$1 = ["onClick"];
+  const _hoisted_41$1 = {
     key: 0,
     class: "empty"
   };
-  const _hoisted_37 = { class: "side-status" };
-  const _hoisted_38 = {
+  const _hoisted_42$1 = { class: "side-status" };
+  const _hoisted_43$1 = {
     id: "root-path",
     class: "root-path",
     title: "扫描根目录"
   };
-  const _hoisted_39 = {
+  const _hoisted_44$1 = {
     id: "side-foot",
     class: "side-foot"
   };
   const OVERFLOW_LIMIT = 8;
-  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$j = /* @__PURE__ */ defineComponent({
     __name: "Sidebar",
     setup(__props) {
       const listEl = /* @__PURE__ */ ref(null);
+      const blockView = /* @__PURE__ */ ref(storeGet("side.blockView") === "1");
+      function toggleBlockView() {
+        blockView.value = !blockView.value;
+        storeSet("side.blockView", blockView.value ? "1" : "0");
+      }
       const groups = computed(() => {
         return buildGroups().map((g) => {
           const stages0 = g.items.length ? g.items[0].projectStages : null;
@@ -10000,7 +8622,7 @@
               title: stageTitleOf(stg),
               items,
               live: sg.live,
-              status: stageStatusText(stages0, stg),
+              status: stageStatusText(stages0, stg, sg.live),
               overflowKey: okey,
               needOverflow,
               shown,
@@ -10104,9 +8726,16 @@
         setOverflowOpen(okey);
       }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("aside", _hoisted_1$1, [
-          createBaseVNode("div", _hoisted_2$1, [
+        return openBlock(), createElementBlock("aside", _hoisted_1$f, [
+          createBaseVNode("div", _hoisted_2$e, [
             _cache[2] || (_cache[2] = createBaseVNode("span", { class: "side-title" }, "工作区", -1)),
+            createBaseVNode("button", {
+              id: "side-view-toggle",
+              class: normalizeClass(["icon-btn", { on: blockView.value }]),
+              type: "button",
+              title: blockView.value ? "切回列表视图" : "切到方块视图（会话多时好扫；悬浮看说明）",
+              onClick: toggleBlockView
+            }, toDisplayString(blockView.value ? "☰" : "▦"), 11, _hoisted_3$b),
             createBaseVNode("button", {
               id: "refresh",
               class: "icon-btn",
@@ -10116,7 +8745,7 @@
               (...args) => unref(refreshIndex) && unref(refreshIndex)(...args))
             }, "⟳")
           ]),
-          createBaseVNode("div", _hoisted_3$1, [
+          createBaseVNode("div", _hoisted_4$8, [
             withDirectives(createBaseVNode("input", {
               id: "search",
               "onUpdate:modelValue": _cache[1] || (_cache[1] = ($event) => unref(state).filter = $event),
@@ -10127,7 +8756,7 @@
               [vModelText, unref(state).filter]
             ])
           ]),
-          createBaseVNode("div", _hoisted_4$1, [
+          createBaseVNode("div", _hoisted_5$8, [
             createBaseVNode("div", {
               id: "session-list",
               ref_key: "listEl",
@@ -10146,19 +8775,17 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[3] || (_cache[3] = createBaseVNode("span", { class: "row-slot" }, [
-                      createBaseVNode("span", { class: "row-caret" })
-                    ], -1)),
-                    createBaseVNode("span", _hoisted_7$1, [
-                      g.prefix ? (openBlock(), createElementBlock("span", _hoisted_8$1, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
-                      createBaseVNode("span", _hoisted_9$1, toDisplayString(g.title), 1)
+                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-16630052><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-16630052><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-16630052></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-16630052><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-16630052></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-16630052></path></svg></span>', 1)),
+                    createBaseVNode("span", _hoisted_8$4, [
+                      g.prefix ? (openBlock(), createElementBlock("span", _hoisted_9$4, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
+                      createBaseVNode("span", _hoisted_10$3, toDisplayString(g.title), 1)
                     ]),
-                    createBaseVNode("span", _hoisted_10$1, toDisplayString(g.items.length) + " 个会话", 1),
-                    g.legacy ? (openBlock(), createElementBlock("span", _hoisted_11$1, "旧版单项目")) : createCommentVNode("", true),
-                    g.live ? (openBlock(), createElementBlock("span", _hoisted_12$1)) : createCommentVNode("", true)
-                  ], 8, _hoisted_6$1),
+                    createBaseVNode("span", _hoisted_11$3, toDisplayString(g.items.length) + " 个会话", 1),
+                    g.legacy ? (openBlock(), createElementBlock("span", _hoisted_12$3, "旧版单项目")) : createCommentVNode("", true),
+                    g.live ? (openBlock(), createElementBlock("span", _hoisted_13$3)) : createCommentVNode("", true)
+                  ], 8, _hoisted_7$5),
                   createBaseVNode("div", null, [
-                    g.progress ? (openBlock(), createElementBlock("div", _hoisted_13$1, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
+                    g.progress ? (openBlock(), createElementBlock("div", _hoisted_14$3, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
                     (openBlock(true), createElementBlock(Fragment, null, renderList(g.stages, (sv) => {
                       return openBlock(), createElementBlock(Fragment, {
                         key: sv.stage
@@ -10169,119 +8796,144 @@
                           "data-project": g.name,
                           "data-stage": sv.stage
                         }, [
-                          createBaseVNode("summary", _hoisted_15$1, [
+                          createBaseVNode("summary", _hoisted_16$3, [
                             _cache[4] || (_cache[4] = createBaseVNode("span", { class: "row-slot" }, [
                               createBaseVNode("span", { class: "row-caret" })
                             ], -1)),
-                            createBaseVNode("span", _hoisted_16$1, toDisplayString(sv.title), 1),
-                            createBaseVNode("span", _hoisted_17$1, toDisplayString(sv.items.length) + " 个会话", 1),
+                            createBaseVNode("span", _hoisted_17$3, toDisplayString(sv.title), 1),
+                            createBaseVNode("span", _hoisted_18$3, toDisplayString(sv.items.length) + " 个会话", 1),
                             sv.status ? (openBlock(), createElementBlock("span", {
                               key: 0,
-                              class: normalizeClass(["stage-progress", { done: sv.status.done }]),
+                              class: normalizeClass(["stage-progress", sv.status.state]),
                               title: sv.status.title
-                            }, toDisplayString(sv.status.text), 11, _hoisted_18$1)) : createCommentVNode("", true),
-                            sv.live ? (openBlock(), createElementBlock("span", _hoisted_19$1)) : createCommentVNode("", true)
+                            }, toDisplayString(sv.status.text), 11, _hoisted_19$3)) : createCommentVNode("", true)
                           ]),
-                          createBaseVNode("div", null, [
+                          blockView.value ? (openBlock(), createElementBlock("div", _hoisted_20$3, [
+                            (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
+                              return openBlock(), createElementBlock("button", {
+                                key: s.id,
+                                class: normalizeClass(["session-block", { active: unref(state).current && unref(state).current.id === s.id, live: s.live, err: !s.live && s.endState === "error", pend: !s.live && !s.endState }]),
+                                type: "button",
+                                role: "treeitem",
+                                "data-id": s.id,
+                                title: rowTitle(s),
+                                onClick: ($event) => onRowClick(s)
+                              }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_21$3);
+                            }), 128))
+                          ])) : (openBlock(), createElementBlock("div", _hoisted_22$3, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
-                                class: normalizeClass(["session-row", { active: unref(state).current && unref(state).current.id === s.id }]),
+                                class: normalizeClass(["session-row sub2", { active: unref(state).current && unref(state).current.id === s.id }]),
                                 type: "button",
                                 role: "treeitem",
                                 "data-id": s.id,
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
                               }, [
-                                createBaseVNode("span", _hoisted_21$1, [
+                                createBaseVNode("span", _hoisted_24$3, [
                                   createBaseVNode("span", {
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
                                 ]),
-                                createVNode(_sfc_main$3, {
+                                createVNode(_sfc_main$k, {
                                   tag: "span",
                                   class: "row-title",
                                   text: unref(sessionTitleOf)(s)
                                 }, null, 8, ["text"]),
-                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_22$1, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_25$2, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
                                   class: "row-chip image-chip",
                                   title: unref(imageTipText)(s)
-                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_23$1)) : createCommentVNode("", true),
-                                createBaseVNode("span", _hoisted_24$1, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                createBaseVNode("span", _hoisted_25$1, [
+                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_26$2)) : createCommentVNode("", true),
+                                createBaseVNode("span", _hoisted_27$2, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                createBaseVNode("span", _hoisted_28$2, [
                                   createBaseVNode("button", {
                                     class: "icon-btn",
                                     type: "button",
                                     title: "打开详情面板（元信息 / 指标）",
                                     onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                  }, "ⓘ", 8, _hoisted_26$1)
+                                  }, "ⓘ", 8, _hoisted_29$2)
                                 ])
-                              ], 10, _hoisted_20$1);
+                              ], 10, _hoisted_23$3);
                             }), 128)),
                             sv.needOverflow ? (openBlock(), createElementBlock("button", {
                               key: 0,
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_27$1)) : createCommentVNode("", true)
-                          ])
-                        ], 8, _hoisted_14$1)), [
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_30$1)) : createCommentVNode("", true)
+                          ]))
+                        ], 8, _hoisted_15$3)), [
                           [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
                         ]) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
-                          (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
-                            return openBlock(), createElementBlock("button", {
-                              key: s.id,
-                              class: normalizeClass(["session-row", { active: unref(state).current && unref(state).current.id === s.id }]),
+                          blockView.value ? (openBlock(), createElementBlock("div", _hoisted_31$1, [
+                            (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
+                              return openBlock(), createElementBlock("button", {
+                                key: s.id,
+                                class: normalizeClass(["session-block", { active: unref(state).current && unref(state).current.id === s.id, live: s.live, err: !s.live && s.endState === "error", pend: !s.live && !s.endState }]),
+                                type: "button",
+                                role: "treeitem",
+                                "data-id": s.id,
+                                title: rowTitle(s),
+                                onClick: ($event) => onRowClick(s)
+                              }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_32$1);
+                            }), 128))
+                          ])) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                            (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
+                              return openBlock(), createElementBlock("button", {
+                                key: s.id,
+                                class: normalizeClass(["session-row sub1", { active: unref(state).current && unref(state).current.id === s.id }]),
+                                type: "button",
+                                role: "treeitem",
+                                "data-id": s.id,
+                                title: rowTitle(s),
+                                onClick: ($event) => onRowClick(s)
+                              }, [
+                                createBaseVNode("span", _hoisted_34$1, [
+                                  createBaseVNode("span", {
+                                    class: normalizeClass(["dot", { live: s.live }])
+                                  }, null, 2)
+                                ]),
+                                createVNode(_sfc_main$k, {
+                                  tag: "span",
+                                  class: "row-title",
+                                  text: unref(sessionTitleOf)(s)
+                                }, null, 8, ["text"]),
+                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_35$1, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                s.imageName ? (openBlock(), createElementBlock("span", {
+                                  key: 1,
+                                  class: "row-chip image-chip",
+                                  title: unref(imageTipText)(s)
+                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_36$1)) : createCommentVNode("", true),
+                                createBaseVNode("span", _hoisted_37$1, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                createBaseVNode("span", _hoisted_38$1, [
+                                  createBaseVNode("button", {
+                                    class: "icon-btn",
+                                    type: "button",
+                                    title: "打开详情面板（元信息 / 指标）",
+                                    onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
+                                  }, "ⓘ", 8, _hoisted_39$1)
+                                ])
+                              ], 10, _hoisted_33$1);
+                            }), 128)),
+                            sv.needOverflow ? (openBlock(), createElementBlock("button", {
+                              key: 0,
+                              class: "session-overflow",
                               type: "button",
-                              role: "treeitem",
-                              "data-id": s.id,
-                              title: rowTitle(s),
-                              onClick: ($event) => onRowClick(s)
-                            }, [
-                              createBaseVNode("span", _hoisted_29$1, [
-                                createBaseVNode("span", {
-                                  class: normalizeClass(["dot", { live: s.live }])
-                                }, null, 2)
-                              ]),
-                              createVNode(_sfc_main$3, {
-                                tag: "span",
-                                class: "row-title",
-                                text: unref(sessionTitleOf)(s)
-                              }, null, 8, ["text"]),
-                              unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_30, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
-                              s.imageName ? (openBlock(), createElementBlock("span", {
-                                key: 1,
-                                class: "row-chip image-chip",
-                                title: unref(imageTipText)(s)
-                              }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_31)) : createCommentVNode("", true),
-                              createBaseVNode("span", _hoisted_32, toDisplayString(unref(relTime)(s.mtime)), 1),
-                              createBaseVNode("span", _hoisted_33, [
-                                createBaseVNode("button", {
-                                  class: "icon-btn",
-                                  type: "button",
-                                  title: "打开详情面板（元信息 / 指标）",
-                                  onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                }, "ⓘ", 8, _hoisted_34)
-                              ])
-                            ], 10, _hoisted_28$1);
-                          }), 128)),
-                          sv.needOverflow ? (openBlock(), createElementBlock("button", {
-                            key: 0,
-                            class: "session-overflow",
-                            type: "button",
-                            onClick: ($event) => onMoreClick(sv.overflowKey)
-                          }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_35)) : createCommentVNode("", true)
+                              onClick: ($event) => onMoreClick(sv.overflowKey)
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_40$1)) : createCommentVNode("", true)
+                          ], 64))
                         ], 64))
                       ], 64);
                     }), 128))
                   ])
-                ], 8, _hoisted_5$1)), [
+                ], 8, _hoisted_6$6)), [
                   [vCollapse, { key: "proj:" + g.name, want: g.matched ? true : projWantOpen(g), frozen: g.matched }]
                 ]);
               }), 128)),
-              !shownCount.value ? (openBlock(), createElementBlock("div", _hoisted_36, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true)
+              !shownCount.value ? (openBlock(), createElementBlock("div", _hoisted_41$1, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true)
             ], 512),
             _cache[5] || (_cache[5] = createBaseVNode("div", {
               class: "list-fade",
@@ -10292,39 +8944,2305 @@
             id: "side-totals",
             class: normalizeClass(["side-totals", { hidden: !totalsText.value }])
           }, toDisplayString(totalsText.value), 3),
-          createBaseVNode("div", _hoisted_37, [
-            createBaseVNode("div", _hoisted_38, toDisplayString(unref(state).root || "—"), 1),
-            createBaseVNode("div", _hoisted_39, toDisplayString(footText.value), 1)
+          createBaseVNode("div", _hoisted_42$1, [
+            createBaseVNode("div", _hoisted_43$1, toDisplayString(unref(state).root || "—"), 1),
+            createBaseVNode("div", _hoisted_44$1, toDisplayString(footText.value), 1)
           ])
         ]);
       };
     }
   });
-  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
-    __name: "Timeline",
+  const _export_sfc = (sfc, props) => {
+    const target = sfc.__vccOpts || sfc;
+    for (const [key, val] of props) {
+      target[key] = val;
+    }
+    return target;
+  };
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-16630052"]]);
+  function refBaseName(ref2) {
+    const s = String(ref2 || "").split("?")[0];
+    const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
+  function shortFileName(name) {
+    const s = String(name || "");
+    const dot = s.lastIndexOf(".");
+    const stem = dot > 0 ? s.slice(0, dot) : s;
+    const ext = dot > 0 ? s.slice(dot) : "";
+    if (/^[0-9a-f]{32,}$/i.test(stem)) return stem.slice(0, 8) + ext;
+    return s;
+  }
+  function originalFigureSize(text) {
+    const m = /ORIGINAL\s+FIGURE\s+SIZE\s*:\s*([0-9.]+\s*mm\s*[x×]\s*[0-9.]+\s*mm)/i.exec(String(text || ""));
+    return m ? m[1].replace(/\s+/g, " ") : "";
+  }
+  function imageTurnSummary(line) {
+    const imgs = line && line.images || [];
+    const bits = [imgs.length + " 张图片"];
+    const size = originalFigureSize(line && line.text);
+    if (size) bits.push(size);
+    const names = imgs.map((r) => shortFileName(refBaseName(r)));
+    if (names.length) {
+      bits.push(names.slice(0, 2).join("、") + (names.length > 2 ? " 等 " + names.length + " 个文件" : ""));
+    }
+    return bits.join(" · ");
+  }
+  const IMAGE_HANDLE_RE = /^Tool image output\b/i;
+  const IMAGE_CALL_RE = /\(call\s+([A-Za-z0-9_.:-]+)\)/;
+  const IMAGE_FROM_RE = /\bfrom\s+([A-Za-z0-9_.:-]+)/i;
+  const IMAGE_TOOLS = { view_image: 1, view_pdf: 1 };
+  const IMAGE_RESULT_RE = /^(?:Image\s+\S+|PDF page\s+\S+)[^\n]*\battached\b/im;
+  const IMAGE_WIRE_TITLE = "user 消息承载图片（tool 消息的 content 只能文本，OpenAI 兼容 schema 限制） · text + image_url(data:image/jpeg;base64,…)";
+  function imageAttributions() {
+    const sig = (state.current ? state.current.id : "") + ":" + state.lines.length;
+    if (state.imgAttr && state.imgAttr.sig === sig) return state.imgAttr.map;
+    const calls = [];
+    const idxById = {};
+    state.lines.forEach((line) => {
+      if (!line || line.bad || line.t && line.t !== "msg") return;
+      if (line.role === "assistant") {
+        (line.tool_calls || []).forEach((c) => {
+          (idxById[c.id || ""] = idxById[c.id || ""] || []).push(calls.length);
+          calls.push({
+            id: c.id || "",
+            name: (c.function || {}).name || "",
+            lineN: line.n,
+            receipt: null,
+            claimed: false,
+            qpos: -1
+          });
+        });
+        return;
+      }
+      if (line.role === "tool") {
+        const idxs = idxById[line.tool_call_id || ""] || [];
+        for (let k = 0; k < idxs.length; k++) {
+          if (calls[idxs[k]].receipt === null) {
+            calls[idxs[k]].receipt = String(line.text || "");
+            break;
+          }
+        }
+      }
+    });
+    const queue2 = [];
+    const candRound = {};
+    const roundLast = {};
+    calls.forEach((c) => {
+      const img = c.receipt === null ? !!IMAGE_TOOLS[c.name] : IMAGE_RESULT_RE.test(c.receipt.trim());
+      if (img) {
+        c.qpos = queue2.length;
+        queue2.push(c);
+        candRound[c.id] = c.lineN;
+        roundLast[c.lineN] = c.id;
+      }
+    });
+    let firstTask = 0;
+    state.lines.forEach((l) => {
+      if (!l || l.bad || l.t && l.t !== "msg") return;
+      if (l.role === "user" && !(l.images && l.images.length) && !firstTask) firstTask = l.n;
+    });
+    const map = {};
+    let qi = 0;
+    const nextUnclaimed = (lineN) => {
+      while (qi < queue2.length && queue2[qi].claimed) qi++;
+      if (qi >= queue2.length || queue2[qi].lineN >= lineN) return null;
+      return queue2[qi];
+    };
+    const claim = (entry, pick, how) => {
+      pick.claimed = true;
+      entry.kind = "call";
+      entry.how = how;
+      entry.callId = pick.id;
+      if (!entry.name) entry.name = pick.name;
+    };
+    state.lines.forEach((line) => {
+      if (!line || line.bad || line.t && line.t !== "msg") return;
+      if (line.role !== "user" || !(line.images && line.images.length)) return;
+      const text = String(line.text || "").trim();
+      const entry = { kind: "none", how: "", callId: "", name: "", lineN: line.n, taskLineN: firstTask };
+      if (text && !IMAGE_HANDLE_RE.test(text)) {
+        entry.kind = "task";
+        entry.how = "task";
+        entry.taskLineN = line.n;
+        map[line.n] = entry;
+        return;
+      }
+      let pick = null;
+      if (IMAGE_HANDLE_RE.test(text)) {
+        const idm = IMAGE_CALL_RE.exec(text);
+        const frm = IMAGE_FROM_RE.exec(text);
+        entry.name = frm ? frm[1] : "";
+        if (idm) {
+          const cands = idxById[idm[1]] || [];
+          for (let k = cands.length - 1; k >= 0; k--) {
+            const ex = calls[cands[k]];
+            if (ex.qpos >= 0 && !ex.claimed && ex.lineN < line.n) {
+              pick = ex;
+              break;
+            }
+          }
+          if (!pick && idxById[idm[1]]) {
+            pick = { id: idm[1], name: entry.name || "", lineN: 0, receipt: null, claimed: false, qpos: -1 };
+          }
+          if (pick) claim(entry, pick, "call-id");
+        }
+        if (!pick && entry.name) {
+          for (let j = qi; j < queue2.length; j++) {
+            if (queue2[j].lineN >= line.n) break;
+            if (!queue2[j].claimed && queue2[j].name === entry.name) {
+              pick = queue2[j];
+              claim(entry, pick, "tool-name");
+              break;
+            }
+          }
+        }
+      }
+      if (!pick) {
+        pick = nextUnclaimed(line.n);
+        if (pick) claim(entry, pick, "order");
+      }
+      if (!pick) {
+        if (!IMAGE_HANDLE_RE.test(text)) {
+          entry.kind = "task";
+          entry.how = "task";
+          entry.taskLineN = text ? line.n : firstTask || line.n;
+        }
+      }
+      map[line.n] = entry;
+    });
+    state.imgAttr = { sig, map, candRound, roundLast };
+    return state.imgAttr.map;
+  }
+  function attributionText(attr) {
+    if (!attr) return "";
+    switch (attr.how) {
+      case "call-id":
+        return "归属：call " + attr.callId + (attr.name ? "（" + attr.name + "）" : "");
+      case "tool-name":
+        return "归属：call " + attr.callId + "（按工具名 " + attr.name + " 匹配）";
+      case "order":
+        return "归属：由顺序推断（本轮的 call " + attr.callId + "）";
+      case "task":
+        return "归属：本会话任务（这一段是投喂给任务的原图）";
+      default:
+        return "归属：未识别";
+    }
+  }
+  function sessionDir(id) {
+    const i = String(id || "").lastIndexOf("/");
+    return i < 0 ? "" : String(id).slice(0, i);
+  }
+  function mediaURL(ref2) {
+    const tail = String(ref2 || "").replace(/^file:\/\//, "");
+    const rel = joinPath(sessionDir(state.current ? state.current.id : ""), tail);
+    return "/media/" + rel;
+  }
+  function joinPath(...args) {
+    const parts = [];
+    for (const a of args) {
+      const p2 = String(a || "").replace(/^\/+|\/+$/g, "");
+      if (p2) parts.push(p2);
+    }
+    return parts.join("/");
+  }
+  function toolFamily(name) {
+    const n = String(name).toLowerCase();
+    if (n === "bash" || n === "compile" || n === "python") return "shell";
+    if (n === "submit") return "submit";
+    if (n.indexOf("write") === 0 || n.indexOf("edit") === 0) return "write";
+    if (n.indexOf("grep") === 0 || n.indexOf("doc_search") === 0 || n.indexOf("list_") === 0 || n.indexOf("search") >= 0) return "search";
+    if (n.indexOf("read") === 0 || n.indexOf("view_") === 0 || n.indexOf("image_context") === 0) return "view";
+    return "other";
+  }
+  function toolSummary(name, argsText) {
+    let obj = null;
+    try {
+      obj = JSON.parse(String(argsText || "{}"));
+    } catch {
+      obj = null;
+    }
+    if (!obj || typeof obj !== "object") return "";
+    const n = String(name || "").toLowerCase();
+    const pick = (v2) => {
+      if (typeof v2 === "string") return v2;
+      if (v2 === void 0 || v2 === null) return "";
+      try {
+        return JSON.stringify(v2);
+      } catch {
+        return "";
+      }
+    };
+    let v = "";
+    if (n === "bash" || n === "python") v = pick(obj.command || obj.code || obj.script);
+    else if (n === "compile") v = pick(obj.path);
+    else if (n.indexOf("grep") === 0 || n.indexOf("search") >= 0 || n === "doc_search") v = pick(obj.pattern || obj.query);
+    else if (n.indexOf("write") === 0 || n.indexOf("read") === 0 || n === "view_pdf" || n === "view_image") v = pick(obj.path);
+    else if (n === "submit") v = pick(obj.path || obj.status);
+    if (!v) {
+      const keys = Object.keys(obj);
+      for (let i = 0; i < keys.length; i++) {
+        const cand = pick(obj[keys[i]]);
+        if (cand) {
+          v = cand;
+          break;
+        }
+      }
+    }
+    v = String(v).split("\n")[0].replace(/\s+/g, " ").trim();
+    return v.length > 90 ? v.slice(0, 90) + "…" : v;
+  }
+  function toolPromptLine(name, argsText) {
+    let obj = null;
+    try {
+      obj = JSON.parse(String(argsText || "{}"));
+    } catch {
+      obj = null;
+    }
+    if (!obj || typeof obj !== "object") return "";
+    const n = String(name).toLowerCase();
+    let v = "";
+    if (n === "bash" || n === "python") v = obj.command || obj.code || "";
+    else if (n.indexOf("grep") === 0 || n === "doc_search" || n.indexOf("search") >= 0) {
+      v = [obj.pattern || obj.query || "", obj.path || ""].filter(Boolean).join("  ");
+    } else if (n === "compile" || n.indexOf("write") === 0 || n.indexOf("edit") === 0 || n.indexOf("read") === 0 || n === "view_pdf" || n === "view_image") {
+      v = obj.path || "";
+    }
+    const out = String(v).split("\n")[0].trim();
+    return out.length > 160 ? out.slice(0, 160) + "…" : out;
+  }
+  function classifyResult(text) {
+    const s = String(text || "");
+    const head = s.split("\n", 1)[0];
+    if (/REJECTED|文件不存在|失败|error|not found|traceback|COMPILE FAILED/i.test(head)) return "error";
+    if (/\bok\s*\(/.test(s)) return "ok";
+    return "plain";
+  }
+  function metaLines() {
+    const found = [];
+    state.lines.forEach((l) => {
+      if (l.t === "meta") found.push(l);
+    });
+    return found;
+  }
+  function metaState() {
+    const metas = metaLines();
+    if (!metas.length && !metaOf(state.current)) return null;
+    const line = metas.length ? metas[metas.length - 1] : null;
+    if (!line) return null;
+    const scanned = metaOf(state.current);
+    return {
+      line,
+      count: Math.max(metas.length, scanned ? scanned.count || 0 : 0),
+      promptChars: String(line.text || "").length,
+      promptTokenEst: estOf(line).text
+    };
+  }
+  function callItemsOf(line, sid) {
+    return (line.tool_calls || []).map((call) => {
+      const fn = call.function || {};
+      const name = fn.name || "(未命名工具)";
+      const argsText = String(fn.arguments || "");
+      const argsTokens = callTokensOf(call);
+      return {
+        key: call.id || "call" + line.n + "-" + (line.tool_calls || []).indexOf(call),
+        call,
+        id: call.id || "",
+        name,
+        fam: toolFamily(name),
+        argsText,
+        argsTokens,
+        brief: toolSummary(name, fn.arguments),
+        cmdLine: toolPromptLine(name, fn.arguments),
+        memKey: "call." + sid + "." + call.id,
+        results: [],
+        attachments: [],
+        outImages: [],
+        previews: [],
+        anchorNs: [],
+        lastStatus: ""
+      };
+    });
+  }
+  function callTokensOf(call) {
+    const est = call.id !== void 0 ? state.callEst[call.id] : void 0;
+    return est === void 0 ? 0 : est;
+  }
+  function callTail(item) {
+    let tail = countText(item.argsText.length, item.argsTokens);
+    const last = item.results[item.results.length - 1];
+    if (last) {
+      const text = String(last.line.text || "");
+      tail = countText(item.argsText.length, item.argsTokens) + " → " + countText(text.length, estOf(last.line).text) + (last.status === "error" ? " · error" : last.status === "ok" ? " · ok" : "");
+    }
+    const attachments = item.attachments.reduce((s, a) => s + (a.line.images || []).length, 0) + item.outImages.reduce((s, a) => s + (a.line.images || []).length, 0);
+    if (attachments) tail += " · 附件 " + attachments + " 张（user 轮）";
+    return tail;
+  }
+  function attachNote(a) {
+    return "这一轮是 user 轮发出的（" + (a.attr && a.attr.kind === "task" ? "会话开头的原图投喂，作为任务的输入" : "工具的输入/附件") + "）· " + attributionText(a.attr);
+  }
+  function outImageNote(a) {
+    const attr = a.attr;
+    return "归属：call " + attr.callId + (attr.name ? "（" + attr.name + "，精确匹配）" : "（精确匹配）");
+  }
+  function imageTurnTitle(line, attr) {
+    return "这一轮是 user 轮发出的（把图片投给模型），不是人打的字\n" + IMAGE_WIRE_TITLE + "\n" + attributionText(attr) + "\n" + imageTurnSummary(line);
+  }
+  function previewTarget(attr, callById) {
+    const info = state.imgAttr;
+    if (!info || !attr || !attr.callId) return null;
+    const round = info.candRound ? info.candRound[attr.callId] : void 0;
+    const lastId = round !== void 0 && info.roundLast ? info.roundLast[round] : "";
+    return lastId && callById[lastId] || null;
+  }
+  function systemItem(line, sid) {
+    const raw = String(line.text || "");
+    return {
+      type: "system",
+      key: "sys" + line.n,
+      line,
+      raw,
+      long: raw.split("\n").length > SYSTEM_PREVIEW_LINES,
+      attachments: []
+    };
+  }
+  function streamModel() {
+    const attrs = imageAttributions();
+    const sid = state.current ? state.current.id : "";
+    const items = [];
+    const callById = {};
+    const taskByN = {};
+    const pendingForTask = {};
+    let bad = 0;
+    state.lines.forEach((line) => {
+      if (!line) return;
+      if (line.bad) {
+        bad++;
+        return;
+      }
+      if (line.t && line.t !== "msg") return;
+      if (!line.role) return;
+      const isToolCall = line.role === "assistant" && line.tool_calls && line.tool_calls.length > 0;
+      const isImageTurn = line.role === "user" && !!(line.images && line.images.length);
+      if (state.onlyTools && line.role !== "tool" && !isToolCall && !isImageTurn) return;
+      if (line.role === "user") {
+        if (isImageTurn) {
+          const attr = attrs[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
+          if (attr.kind === "call" && callById[attr.callId]) {
+            const host = callById[attr.callId];
+            const target = previewTarget(attr, callById) || host;
+            target.previews.push(line);
+            if (attr.how === "call-id") {
+              host.outImages.push({ line, attr });
+            } else {
+              host.attachments.push({ line, attr });
+            }
+            host.anchorNs.push(line.n);
+            return;
+          }
+          if (attr.kind === "task" && attr.taskLineN === line.n) {
+            const own2 = systemItem(line);
+            own2.attachments.push({ line, attr });
+            items.push(own2);
+            taskByN[line.n] = own2;
+            return;
+          }
+          if (attr.kind === "task" && attr.taskLineN) {
+            const task = taskByN[attr.taskLineN];
+            if (task) {
+              task.attachments.push({ line, attr });
+              return;
+            }
+            (pendingForTask[attr.taskLineN] = pendingForTask[attr.taskLineN] || []).push({ line, attr });
+            return;
+          }
+          items.push({ type: "imageTurn", key: "img" + line.n, line, attr });
+          return;
+        }
+        const own = systemItem(line);
+        items.push(own);
+        taskByN[line.n] = own;
+        return;
+      }
+      if (line.role === "tool") {
+        const node = line.tool_call_id ? callById[line.tool_call_id] : null;
+        if (node) {
+          const status = classifyResult(String(line.text || ""));
+          node.results.push({ line, status });
+          node.lastStatus = status;
+          node.anchorNs.push(line.n);
+          return;
+        }
+        items.push({ type: "result", key: "res" + line.n, line, paired: false });
+        return;
+      }
+      if (line.role === "assistant") {
+        const calls = callItemsOf(line, sid);
+        calls.forEach((c) => {
+          if (c.id) callById[c.id] = c;
+        });
+        items.push({
+          type: "assistant",
+          key: "asst" + line.n,
+          line,
+          calls,
+          empty: !line.text && !line.reasoning && !(line.tool_calls || []).length
+        });
+        return;
+      }
+      items.push({ type: "other", key: "other" + line.n, line });
+    });
+    Object.values(callById).forEach((c) => {
+      if (c.outImages.length && !c.results.length) {
+        c.attachments.push(...c.outImages);
+        c.outImages = [];
+      }
+    });
+    Object.keys(pendingForTask).forEach((n) => {
+      const task = taskByN[Number(n)];
+      if (task) task.attachments.push(...pendingForTask[Number(n)]);
+    });
+    return { items, bad };
+  }
+  function callMsgLine() {
+    const map = {};
+    state.lines.forEach((line) => {
+      if (!line || line.bad || line.t && line.t !== "msg") return;
+      if (line.role === "assistant") {
+        (line.tool_calls || []).forEach((c) => {
+          if (c.id && map[c.id] === void 0) map[c.id] = line.n;
+        });
+      }
+    });
+    return map;
+  }
+  const _hoisted_1$e = { class: "stream-summary" };
+  const _hoisted_2$d = {
+    key: 0,
+    class: "dot-sep"
+  };
+  const _sfc_main$i = /* @__PURE__ */ defineComponent({
+    __name: "StreamSummary",
     setup(__props) {
+      const bits = computed(() => {
+        if (!state.current) return [];
+        const out = [state.current.messages + " 条消息"];
+        const st = aggregate(usageLines(state.lines));
+        if (st) {
+          out.push("输入 " + fmtTokens(st.promptTokens) + " / 输出 " + fmtTokens(st.completionTokens));
+          if (st.promptTokens) out.push("缓存 " + st.cacheHitPct.toFixed(0) + "%");
+          if (st.avgTtftMs) out.push("首字 " + fmtDur(st.avgTtftMs));
+          const money = fmtCost(state.current.cost);
+          if (money) out.push(money);
+        }
+        const m = metaState();
+        if (m) out.push("提示词快照 " + countText(m.promptChars, m.promptTokenEst));
+        return out;
+      });
+      const detailsBtn = computed(() => layout.cols.details > 0 ? "收起详情" : "详情 ›");
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", _hoisted_1$e, [
+          (openBlock(true), createElementBlock(Fragment, null, renderList(bits.value, (b, i) => {
+            return openBlock(), createElementBlock(Fragment, { key: i }, [
+              i ? (openBlock(), createElementBlock("span", _hoisted_2$d)) : createCommentVNode("", true),
+              createBaseVNode("span", null, toDisplayString(b), 1)
+            ], 64);
+          }), 128)),
+          createBaseVNode("button", {
+            type: "button",
+            onClick: _cache[0] || (_cache[0] = //@ts-ignore
+            (...args) => unref(toggleDetails) && unref(toggleDetails)(...args))
+          }, toDisplayString(detailsBtn.value), 1)
+        ]);
+      };
+    }
+  });
+  const StreamSummary = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-a0dfcd77"]]);
+  const _hoisted_1$d = ["data-phase"];
+  const _hoisted_2$c = { class: "pt-head" };
+  const _hoisted_3$a = { class: "pt-label" };
+  const _hoisted_4$7 = { class: "pt-age" };
+  const _hoisted_5$7 = { class: "code pt-text" };
+  const _sfc_main$h = /* @__PURE__ */ defineComponent({
+    __name: "PartialTail",
+    props: {
+      partial: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const phaseLabel = computed(() => props.partial.phase === "reasoning" ? "思考中" : "输出中");
+      const age = computed(() => {
+        const sec = Math.max(0, Math.round((Date.now() - props.partial.ts) / 1e3));
+        return sec < 5 ? "刚刚" : sec + " 秒前";
+      });
+      const text = computed(() => {
+        const t = props.partial.text || "";
+        return t.length > 4e3 ? "…" + t.slice(-4e3) : t;
+      });
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("section", {
+          class: "msg partial-tail",
+          "data-phase": __props.partial.phase
+        }, [
+          createBaseVNode("div", _hoisted_2$c, [
+            _cache[0] || (_cache[0] = createBaseVNode("span", {
+              class: "pt-spinner",
+              "aria-hidden": "true"
+            }, null, -1)),
+            createBaseVNode("span", _hoisted_3$a, toDisplayString(phaseLabel.value), 1),
+            createBaseVNode("span", _hoisted_4$7, toDisplayString(age.value), 1)
+          ]),
+          createBaseVNode("pre", _hoisted_5$7, [
+            createTextVNode(toDisplayString(text.value), 1),
+            _cache[1] || (_cache[1] = createBaseVNode("span", {
+              class: "pt-caret",
+              "aria-hidden": "true"
+            }, "▍", -1))
+          ])
+        ], 8, _hoisted_1$d);
+      };
+    }
+  });
+  const PartialTail = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-37ec04a0"]]);
+  const _hoisted_1$c = ["open"];
+  const _hoisted_2$b = { class: "line-name" };
+  const _hoisted_3$9 = ["title"];
+  const _hoisted_4$6 = {
+    key: 1,
+    class: "line-running",
+    title: "这个调用还没有收到回执，正在执行"
+  };
+  const _hoisted_5$6 = {
+    key: 2,
+    class: "line-tail"
+  };
+  const _sfc_main$g = /* @__PURE__ */ defineComponent({
+    __name: "Disclosure",
+    props: {
+      cls: {},
+      name: {},
+      summary: {},
+      tail: {},
+      open: { type: Boolean },
+      running: { type: Boolean }
+    },
+    setup(__props) {
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("details", {
+          class: normalizeClass(["disclosure", __props.cls]),
+          open: !!__props.open
+        }, [
+          createBaseVNode("summary", null, [
+            _cache[2] || (_cache[2] = createBaseVNode("span", { class: "line-slot" }, [
+              createBaseVNode("span", { class: "line-caret" })
+            ], -1)),
+            createBaseVNode("span", _hoisted_2$b, toDisplayString(__props.name), 1),
+            __props.summary ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+              _cache[0] || (_cache[0] = createBaseVNode("span", { class: "line-sep" }, null, -1)),
+              createBaseVNode("span", {
+                class: "line-summary",
+                title: __props.summary
+              }, toDisplayString(__props.summary), 9, _hoisted_3$9)
+            ], 64)) : createCommentVNode("", true),
+            __props.running ? (openBlock(), createElementBlock("span", _hoisted_4$6, [..._cache[1] || (_cache[1] = [
+              createBaseVNode("span", { class: "running-dot" }, null, -1),
+              createTextVNode("运行中 ", -1)
+            ])])) : createCommentVNode("", true),
+            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_5$6, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
+          ]),
+          renderSlot(_ctx.$slots, "default")
+        ], 10, _hoisted_1$c);
+      };
+    }
+  });
+  const _sfc_main$f = /* @__PURE__ */ defineComponent({
+    __name: "MdBody",
+    props: {
+      text: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const host = /* @__PURE__ */ ref(null);
+      function render() {
+        const el2 = host.value;
+        if (!el2) return;
+        el2.textContent = "";
+        el2.appendChild(renderMarkdown(props.text));
+      }
+      onMounted(render);
+      watch(() => props.text, render);
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", {
+          ref_key: "host",
+          ref: host
+        }, null, 512);
+      };
+    }
+  });
+  const _hoisted_1$b = { class: "text-wrap" };
+  const _sfc_main$e = /* @__PURE__ */ defineComponent({
+    __name: "FoldText",
+    props: {
+      text: {},
+      memKey: {},
+      previewLines: { default: LONG_TEXT_LINES },
+      extraClass: {},
+      tokens: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const raw = computed(() => String(props.text ?? ""));
+      const allLines = computed(() => raw.value.split("\n"));
+      const long = computed(() => allLines.value.length > props.previewLines);
+      const expanded = /* @__PURE__ */ ref(storeGet("text." + props.memKey) === "1");
+      const label = computed(() => foldLabel(expanded.value, allLines.value.length, raw.value.length, props.tokens));
+      const shown = computed(() => expanded.value || !long.value ? allLines.value.join("\n") : allLines.value.slice(0, props.previewLines).join("\n"));
+      function toggle() {
+        expanded.value = !expanded.value;
+        storeSet("text." + props.memKey, expanded.value ? "1" : "0");
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", _hoisted_1$b, [
+          unref(state).markdown ? (openBlock(), createBlock(_sfc_main$f, {
+            key: 0,
+            text: raw.value,
+            class: normalizeClass(["md-body", __props.extraClass, { clamped: long.value && !expanded.value }]),
+            style: normalizeStyle(long.value && !expanded.value ? { maxHeight: __props.previewLines * 24 + "px" } : void 0)
+          }, null, 8, ["text", "class", "style"])) : (openBlock(), createElementBlock("pre", {
+            key: 1,
+            class: normalizeClass(["body-text", [__props.extraClass, { clamped: long.value && !expanded.value }]])
+          }, toDisplayString(shown.value), 3)),
+          long.value ? (openBlock(), createElementBlock("button", {
+            key: 2,
+            type: "button",
+            class: "text-toggle",
+            onClick: toggle
+          }, toDisplayString(label.value), 1)) : createCommentVNode("", true)
+        ]);
+      };
+    }
+  });
+  const _sfc_main$d = /* @__PURE__ */ defineComponent({
+    __name: "MachineScrollBox",
+    props: {
+      text: {},
+      memKey: {},
+      tokens: {},
+      error: { type: Boolean }
+    },
+    setup(__props) {
+      const props = __props;
+      const host = /* @__PURE__ */ ref(null);
+      function render() {
+        const el2 = host.value;
+        if (!el2) return;
+        el2.textContent = "";
+        machineScrollInto(el2, props.text, props.memKey, void 0, props.tokens);
+        if (props.error) {
+          const pre = el2.querySelector(".io-text");
+          if (pre) pre.setAttribute("data-error", "true");
+        }
+      }
+      onMounted(render);
+      watch(() => [props.text, props.memKey, props.tokens, props.error], render);
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", {
+          ref_key: "host",
+          ref: host,
+          class: "text-wrap"
+        }, null, 512);
+      };
+    }
+  });
+  const _hoisted_1$a = { class: "io-label" };
+  const _hoisted_2$a = {
+    key: 0,
+    class: "io-empty"
+  };
+  const _hoisted_3$8 = {
+    key: 2,
+    class: "io-extra"
+  };
+  const _sfc_main$c = /* @__PURE__ */ defineComponent({
+    __name: "IOSection",
+    props: {
+      label: {},
+      text: {},
+      error: { type: Boolean },
+      out: { type: Boolean },
+      memKey: {},
+      tokens: {}
+    },
+    setup(__props) {
+      const slots = useSlots();
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", {
+          class: normalizeClass(["io-section", { "out-section": __props.out }])
+        }, [
+          createBaseVNode("div", _hoisted_1$a, toDisplayString(__props.label), 1),
+          __props.text === void 0 || __props.text === null || __props.text === "" ? (openBlock(), createElementBlock("div", _hoisted_2$a, "（无内容）")) : (openBlock(), createBlock(_sfc_main$d, {
+            key: 1,
+            text: __props.text,
+            "mem-key": __props.memKey || "",
+            tokens: __props.tokens,
+            error: __props.error
+          }, null, 8, ["text", "mem-key", "tokens", "error"])),
+          unref(slots).default ? (openBlock(), createElementBlock("div", _hoisted_3$8, [
+            renderSlot(_ctx.$slots, "default")
+          ])) : createCommentVNode("", true)
+        ], 2);
+      };
+    }
+  });
+  const _hoisted_1$9 = { class: "images" };
+  const _hoisted_2$9 = ["src", "alt", "title", "onClick"];
+  const _sfc_main$b = /* @__PURE__ */ defineComponent({
+    __name: "ImageStrip",
+    props: {
+      images: {}
+    },
+    setup(__props) {
+      function show(ref2) {
+        openLightbox(mediaURL(ref2), ref2);
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", _hoisted_1$9, [
+          (openBlock(true), createElementBlock(Fragment, null, renderList(__props.images || [], (img) => {
+            return openBlock(), createElementBlock("img", {
+              key: img,
+              class: "thumb",
+              src: unref(mediaURL)(img),
+              alt: img,
+              loading: "lazy",
+              title: img,
+              onClick: ($event) => show(img)
+            }, null, 8, _hoisted_2$9);
+          }), 128))
+        ]);
+      };
+    }
+  });
+  const _sfc_main$a = /* @__PURE__ */ defineComponent({
+    __name: "CopyBtn",
+    props: {
+      text: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const label = /* @__PURE__ */ ref("复制");
+      let timer = 0;
+      function done() {
+        label.value = "已复制";
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          label.value = "复制";
+        }, 1200);
+      }
+      function copy() {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(props.text).then(done, () => {
+            if (fallbackCopy(props.text)) done();
+          });
+        } else if (fallbackCopy(props.text)) {
+          done();
+        }
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("button", {
+          type: "button",
+          class: "text-toggle",
+          onClick: copy
+        }, toDisplayString(label.value), 1);
+      };
+    }
+  });
+  const _hoisted_1$8 = { class: "io-card" };
+  const _hoisted_2$8 = {
+    key: 0,
+    class: "io-cmd"
+  };
+  const _hoisted_3$7 = { class: "cmd-line" };
+  const _hoisted_4$5 = { class: "io-actions" };
+  const _hoisted_5$5 = { class: "attach-note" };
+  const _hoisted_6$5 = { class: "io-actions" };
+  const _hoisted_7$4 = { class: "io-section attach-section" };
+  const _hoisted_8$3 = { class: "attach-body" };
+  const _hoisted_9$3 = { class: "attach-note" };
+  const _sfc_main$9 = /* @__PURE__ */ defineComponent({
+    __name: "ToolCard",
+    props: {
+      item: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const details = /* @__PURE__ */ ref(null);
+      const open = /* @__PURE__ */ ref(storeGet(props.item.memKey) === "1");
+      watch(() => props.item.memKey, () => {
+        open.value = storeGet(props.item.memKey) === "1";
+      });
+      function onToggle() {
+        if (!props.item.id) return;
+        const d2 = details.value && details.value.$el;
+        storeSet(props.item.memKey, d2 && d2.open ? "1" : "0");
+      }
+      const d = computed(() => details.value ? details.value.$el : null);
+      const registered = /* @__PURE__ */ new Set();
+      watch(() => props.item.anchorNs.join(","), () => {
+        const el2 = d.value;
+        if (!el2) return;
+        const want = new Set(props.item.anchorNs);
+        registered.forEach((n) => {
+          if (!want.has(n)) {
+            unregisterAnchor(n, el2);
+            registered.delete(n);
+          }
+        });
+        props.item.anchorNs.forEach((n) => {
+          if (!registered.has(n)) {
+            registerAnchor(n, el2);
+            registered.add(n);
+          }
+        });
+      });
+      onBeforeUnmount(() => {
+        const el2 = d.value;
+        if (!el2) return;
+        registered.forEach((n) => unregisterAnchor(n, el2));
+        registered.clear();
+      });
+      const tail = computed(() => callTail(props.item));
+      const live = computed(() => {
+        var _a;
+        return !!((_a = state.current) == null ? void 0 : _a.live);
+      });
+      const prettyArgs = computed(() => prettyJSON(props.item.argsText) || "(无参数)");
+      return (_ctx, _cache) => {
+        return openBlock(), createBlock(_sfc_main$g, {
+          ref_key: "details",
+          ref: details,
+          cls: "disclosure-tool fam-" + __props.item.fam + (__props.item.lastStatus ? " status-" + __props.item.lastStatus : ""),
+          running: !__props.item.lastStatus && live.value,
+          name: __props.item.name,
+          summary: __props.item.brief,
+          tail: tail.value,
+          open: open.value,
+          "data-call-id": __props.item.id || "",
+          "data-lines": __props.item.anchorNs.join(",") || void 0,
+          onToggle
+        }, {
+          default: withCtx(() => [
+            createBaseVNode("div", _hoisted_1$8, [
+              __props.item.cmdLine ? (openBlock(), createElementBlock("div", _hoisted_2$8, [
+                _cache[0] || (_cache[0] = createBaseVNode("span", { class: "cmd-prompt" }, "$ ", -1)),
+                createBaseVNode("span", _hoisted_3$7, toDisplayString(__props.item.cmdLine), 1)
+              ])) : createCommentVNode("", true),
+              createVNode(_sfc_main$c, {
+                label: "输入",
+                text: prettyArgs.value,
+                "mem-key": "in." + (__props.item.id || ""),
+                tokens: __props.item.argsTokens
+              }, null, 8, ["text", "mem-key", "tokens"]),
+              createBaseVNode("div", _hoisted_4$5, [
+                createVNode(_sfc_main$a, {
+                  text: __props.item.argsText
+                }, null, 8, ["text"])
+              ]),
+              (openBlock(true), createElementBlock(Fragment, null, renderList(__props.item.results, (r, ri) => {
+                return openBlock(), createElementBlock(Fragment, {
+                  key: r.line.n
+                }, [
+                  _cache[1] || (_cache[1] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
+                  createVNode(_sfc_main$c, {
+                    label: "输出",
+                    text: String(r.line.text || ""),
+                    error: r.status === "error",
+                    "mem-key": "result." + r.line.n,
+                    tokens: unref(estOf)(r.line).text,
+                    out: ""
+                  }, {
+                    default: withCtx(() => [
+                      ri === 0 ? (openBlock(true), createElementBlock(Fragment, { key: 0 }, renderList(__props.item.outImages, (a) => {
+                        return openBlock(), createElementBlock(Fragment, {
+                          key: a.line.n
+                        }, [
+                          createVNode(_sfc_main$b, {
+                            images: a.line.images
+                          }, null, 8, ["images"]),
+                          createBaseVNode("div", _hoisted_5$5, toDisplayString(unref(outImageNote)(a)), 1)
+                        ], 64);
+                      }), 128)) : createCommentVNode("", true)
+                    ]),
+                    _: 2
+                  }, 1032, ["text", "error", "mem-key", "tokens"]),
+                  createBaseVNode("div", _hoisted_6$5, [
+                    createVNode(_sfc_main$a, {
+                      text: String(r.line.text || "")
+                    }, null, 8, ["text"])
+                  ])
+                ], 64);
+              }), 128)),
+              (openBlock(true), createElementBlock(Fragment, null, renderList(__props.item.attachments, (a) => {
+                return openBlock(), createElementBlock(Fragment, {
+                  key: a.line.n
+                }, [
+                  _cache[3] || (_cache[3] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
+                  createBaseVNode("div", _hoisted_7$4, [
+                    _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
+                    createBaseVNode("div", _hoisted_8$3, [
+                      a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$e, {
+                        key: 0,
+                        text: String(a.line.text || ""),
+                        "mem-key": "imgtext." + a.line.n,
+                        "preview-lines": _ctx.FOLD_PREVIEW_LINES,
+                        tokens: unref(estOf)(a.line).text
+                      }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])) : createCommentVNode("", true),
+                      createVNode(_sfc_main$b, {
+                        images: a.line.images
+                      }, null, 8, ["images"])
+                    ]),
+                    createBaseVNode("div", _hoisted_9$3, toDisplayString(unref(attachNote)(a)), 1)
+                  ])
+                ], 64);
+              }), 128))
+            ])
+          ]),
+          _: 1
+        }, 8, ["cls", "running", "name", "summary", "tail", "open", "data-call-id", "data-lines"]);
+      };
+    }
+  });
+  const _hoisted_1$7 = { class: "thinking-body" };
+  const _hoisted_2$7 = { class: "reasoning-scroll" };
+  const _hoisted_3$6 = { class: "body-text reasoning-text" };
+  const _hoisted_4$4 = {
+    key: 0,
+    class: "preview-strip"
+  };
+  const _hoisted_5$4 = ["src", "alt", "title", "onClick"];
+  const _hoisted_6$4 = {
+    key: 2,
+    class: "note"
+  };
+  const _sfc_main$8 = /* @__PURE__ */ defineComponent({
+    __name: "AssistantMsg",
+    props: {
+      item: {}
+    },
+    setup(__props) {
+      function previewThumbs(call) {
+        const out = [];
+        call.previews.slice().sort((a, b) => a.n - b.n).forEach((l) => {
+          (l.images || []).forEach((ref2) => {
+            out.push({ ref: ref2, url: mediaURL(ref2) });
+          });
+        });
+        return out;
+      }
+      function show(ref2, url) {
+        openLightbox(url, ref2);
+      }
+      const props = __props;
+      const line = computed(() => props.item.line);
+      const thinkOpen = /* @__PURE__ */ ref(false);
+      const thinkMemKey = computed(() => "thinking." + state.current.id + "." + line.value.n);
+      function syncThink() {
+        thinkOpen.value = storeGet(thinkMemKey.value) === "1";
+      }
+      syncThink();
       watch(
-        // 数组多源形式（逐元素比较）：state.current 每次轮询都被换成新对象，
-        // getter 返回新数组的写法会因引用不同每 2 秒误触发一次整流重渲。
         [
-          () => state.current ? state.current.id : "",
+          () => state.current && state.current.id,
+          () => line.value && line.value.n,
           () => state.lines.length,
           () => state.markdown,
           () => state.onlyTools,
           () => state.unit
         ],
-        () => {
-          renderTimeline();
+        syncThink
+      );
+      watch(() => state.forceCollapse, (on) => {
+        if (on) thinkOpen.value = false;
+      });
+      function onThinkToggle() {
+        if (state.forceCollapse) return;
+        const l = line.value;
+        const d = thinkRef.value && thinkRef.value.$el;
+        storeSet("thinking." + state.current.id + "." + l.n, d && d.open ? "1" : "0");
+      }
+      const thinkRef = /* @__PURE__ */ ref(null);
+      const root = /* @__PURE__ */ ref(null);
+      onMounted(() => {
+        if (line.value && root.value) registerAnchor(line.value.n, root.value);
+      });
+      onBeforeUnmount(() => {
+        if (line.value && root.value) unregisterAnchor(line.value.n, root.value);
+      });
+      const thinkTail = computed(() => line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : "");
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("section", {
+          ref_key: "root",
+          ref: root,
+          class: "msg msg-assistant"
+        }, [
+          line.value.reasoning ? (openBlock(), createBlock(_sfc_main$g, {
+            key: 0,
+            ref_key: "thinkRef",
+            ref: thinkRef,
+            cls: "disclosure-thinking",
+            name: "思考",
+            summary: unref(firstLine)(line.value.reasoning),
+            tail: thinkTail.value,
+            open: thinkOpen.value,
+            onToggle: onThinkToggle
+          }, {
+            default: withCtx(() => [
+              createBaseVNode("div", _hoisted_1$7, [
+                createBaseVNode("div", _hoisted_2$7, [
+                  createBaseVNode("pre", _hoisted_3$6, toDisplayString(line.value.reasoning), 1)
+                ])
+              ])
+            ]),
+            _: 1
+          }, 8, ["summary", "tail", "open"])) : createCommentVNode("", true),
+          line.value.text ? (openBlock(), createBlock(_sfc_main$e, {
+            key: 1,
+            text: String(line.value.text),
+            "mem-key": "asst." + line.value.n,
+            "preview-lines": unref(LONG_TEXT_LINES),
+            tokens: unref(estOf)(line.value).text
+          }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])) : createCommentVNode("", true),
+          (openBlock(true), createElementBlock(Fragment, null, renderList(__props.item.calls, (c) => {
+            return openBlock(), createElementBlock(Fragment, {
+              key: c.key
+            }, [
+              createVNode(_sfc_main$9, { item: c }, null, 8, ["item"]),
+              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_4$4, [
+                (openBlock(true), createElementBlock(Fragment, null, renderList(previewThumbs(c), (t) => {
+                  return openBlock(), createElementBlock("img", {
+                    key: t.ref,
+                    class: "preview-thumb",
+                    src: t.url,
+                    alt: t.ref,
+                    loading: "lazy",
+                    title: t.ref,
+                    onClick: ($event) => show(t.ref, t.url)
+                  }, null, 8, _hoisted_5$4);
+                }), 128))
+              ])) : createCommentVNode("", true)
+            ], 64);
+          }), 128)),
+          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_6$4, "（空消息）")) : createCommentVNode("", true)
+        ], 512);
+      };
+    }
+  });
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-d357b38b"]]);
+  const _hoisted_1$6 = { class: "sys-line" };
+  const _hoisted_2$6 = { class: "line-summary" };
+  const _hoisted_3$5 = {
+    key: 0,
+    class: "note"
+  };
+  const _hoisted_4$3 = {
+    key: 1,
+    class: "body-text sys-text"
+  };
+  const _hoisted_5$3 = { class: "io-section attach-section" };
+  const _hoisted_6$3 = { class: "attach-body" };
+  const _hoisted_7$3 = { class: "attach-note" };
+  const _sfc_main$7 = /* @__PURE__ */ defineComponent({
+    __name: "SystemMsg",
+    props: {
+      item: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const line = computed(() => props.item.line);
+      const raw = computed(() => String(line.value.text || ""));
+      const expanded = /* @__PURE__ */ ref(storeGet("text.sys." + state.current.id + "." + line.value.n) === "1");
+      const lines = computed(() => raw.value.split("\n"));
+      const long = computed(() => lines.value.length > SYSTEM_PREVIEW_LINES);
+      const label = computed(() => foldLabel(expanded.value, lines.value.length, raw.value.length, estOf(line.value).text));
+      function toggle() {
+        expanded.value = !expanded.value;
+        storeSet("text.sys." + state.current.id + "." + line.value.n, expanded.value ? "1" : "0");
+      }
+      const root = /* @__PURE__ */ ref(null);
+      onMounted(() => {
+        if (line.value && root.value) registerAnchor(line.value.n, root.value);
+      });
+      onBeforeUnmount(() => {
+        if (line.value && root.value) unregisterAnchor(line.value.n, root.value);
+      });
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("section", {
+          ref_key: "root",
+          ref: root,
+          class: "msg msg-system",
+          title: "这一轮是 user 角色发出的任务提示（系统性质，不是人打的字）"
+        }, [
+          createBaseVNode("div", _hoisted_1$6, [
+            _cache[0] || (_cache[0] = createBaseVNode("span", { class: "sys-badge" }, "系统", -1)),
+            _cache[1] || (_cache[1] = createBaseVNode("span", { class: "sys-meta" }, "user 轮", -1)),
+            createBaseVNode("span", _hoisted_2$6, toDisplayString(unref(firstLine)(line.value.text)), 1)
+          ]),
+          !raw.value ? (openBlock(), createElementBlock("div", _hoisted_3$5, "（无正文）")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+            createBaseVNode("div", {
+              class: normalizeClass(["sys-scroll", { folded: long.value && !expanded.value }]),
+              style: normalizeStyle({ maxHeight: long.value && !expanded.value ? unref(SYSTEM_PREVIEW_LINES) * 24 + "px" : "var(--code-scroll-h)" })
+            }, [
+              unref(state).markdown ? (openBlock(), createBlock(_sfc_main$f, {
+                key: 0,
+                text: raw.value,
+                class: "md-body sys-md"
+              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_4$3, toDisplayString(raw.value), 1))
+            ], 6),
+            long.value ? (openBlock(), createElementBlock("button", {
+              key: 0,
+              type: "button",
+              class: "text-toggle",
+              onClick: toggle
+            }, toDisplayString(label.value), 1)) : createCommentVNode("", true)
+          ], 64)),
+          (openBlock(true), createElementBlock(Fragment, null, renderList(__props.item.attachments, (a) => {
+            return openBlock(), createElementBlock(Fragment, {
+              key: a.line.n
+            }, [
+              _cache[3] || (_cache[3] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
+              createBaseVNode("div", _hoisted_5$3, [
+                _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
+                createBaseVNode("div", _hoisted_6$3, [
+                  a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$e, {
+                    key: 0,
+                    text: String(a.line.text || ""),
+                    "mem-key": "imgtext." + a.line.n,
+                    tokens: unref(estOf)(a.line).text
+                  }, null, 8, ["text", "mem-key", "tokens"])) : createCommentVNode("", true),
+                  createVNode(_sfc_main$b, {
+                    images: a.line.images
+                  }, null, 8, ["images"])
+                ]),
+                createBaseVNode("div", _hoisted_7$3, toDisplayString(unref(attachNote)(a)), 1)
+              ])
+            ], 64);
+          }), 128))
+        ], 512);
+      };
+    }
+  });
+  const SystemMsg = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-b39af669"]]);
+  const _hoisted_1$5 = { class: "msg msg-image" };
+  const _hoisted_2$5 = { class: "image-body" };
+  const _hoisted_3$4 = { class: "attach-note" };
+  const _sfc_main$6 = /* @__PURE__ */ defineComponent({
+    __name: "ImageTurn",
+    props: {
+      item: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const line = computed(() => props.item.line);
+      const memKey = computed(() => "image." + state.current.id + "." + line.value.n);
+      const open = /* @__PURE__ */ ref(storeGet(memKey.value) === "1");
+      watch(memKey, () => {
+        open.value = storeGet(memKey.value) === "1";
+      });
+      function onToggle() {
+        const d = root.value && root.value.$el;
+        storeSet(memKey.value, d && d.open ? "1" : "0");
+      }
+      const root = /* @__PURE__ */ ref(null);
+      onMounted(() => {
+        var _a;
+        if (line.value && ((_a = root.value) == null ? void 0 : _a.$el)) registerAnchor(line.value.n, root.value.$el);
+      });
+      onBeforeUnmount(() => {
+        var _a;
+        if (line.value && ((_a = root.value) == null ? void 0 : _a.$el)) unregisterAnchor(line.value.n, root.value.$el);
+      });
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("section", _hoisted_1$5, [
+          createVNode(_sfc_main$g, {
+            ref_key: "root",
+            ref: root,
+            cls: "disclosure-image",
+            name: "图片（user 轮）",
+            summary: _ctx.imageTurnSummary(line.value),
+            tail: (line.value.images || []).length + " 张",
+            open: open.value,
+            title: unref(imageTurnTitle)(line.value, __props.item.attr),
+            onToggle
+          }, {
+            default: withCtx(() => [
+              createBaseVNode("div", _hoisted_2$5, [
+                line.value.text ? (openBlock(), createBlock(_sfc_main$e, {
+                  key: 0,
+                  text: String(line.value.text),
+                  "mem-key": "imgtext." + line.value.n,
+                  tokens: unref(estOf)(line.value).text
+                }, null, 8, ["text", "mem-key", "tokens"])) : createCommentVNode("", true),
+                createVNode(_sfc_main$b, {
+                  images: line.value.images
+                }, null, 8, ["images"]),
+                createBaseVNode("div", _hoisted_3$4, toDisplayString(unref(attributionText)(__props.item.attr)), 1)
+              ])
+            ]),
+            _: 1
+          }, 8, ["summary", "tail", "open", "title"])
+        ]);
+      };
+    }
+  });
+  const ImageTurn = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-1eee90b4"]]);
+  const _hoisted_1$4 = { class: "io-card" };
+  const _hoisted_2$4 = { class: "io-actions" };
+  const _sfc_main$5 = /* @__PURE__ */ defineComponent({
+    __name: "ResultMsg",
+    props: {
+      item: {}
+    },
+    setup(__props) {
+      const props = __props;
+      const line = computed(() => props.item.line);
+      const text = computed(() => String(line.value.text || ""));
+      const status = computed(() => classifyResult(text.value));
+      const root = /* @__PURE__ */ ref(null);
+      onMounted(() => {
+        if (line.value && root.value) registerAnchor(line.value.n, root.value);
+      });
+      onBeforeUnmount(() => {
+        if (line.value && root.value) unregisterAnchor(line.value.n, root.value);
+      });
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("section", {
+          ref_key: "root",
+          ref: root,
+          class: "msg msg-tool"
+        }, [
+          createVNode(_sfc_main$g, {
+            cls: "disclosure-result status-" + status.value,
+            name: "(未配对的工具回执)",
+            summary: unref(firstLine)(text.value),
+            tail: unref(countText)(text.value.length, unref(estOf)(line.value).text) + (status.value === "error" ? " · error" : status.value === "ok" ? " · ok" : ""),
+            title: !__props.item.paired ? line.value.tool_call_id ? "未找到配对的工具调用：id " + line.value.tool_call_id : "这条回执行没有 tool_call_id，无法与调用配对" : void 0
+          }, {
+            default: withCtx(() => [
+              createBaseVNode("div", _hoisted_1$4, [
+                createVNode(_sfc_main$c, {
+                  label: "输出",
+                  text: text.value,
+                  error: status.value === "error",
+                  "mem-key": "result." + line.value.n,
+                  tokens: unref(estOf)(line.value).text
+                }, null, 8, ["text", "error", "mem-key", "tokens"]),
+                createBaseVNode("div", _hoisted_2$4, [
+                  createVNode(_sfc_main$a, { text: text.value }, null, 8, ["text"])
+                ])
+              ])
+            ]),
+            _: 1
+          }, 8, ["cls", "summary", "tail", "title"])
+        ], 512);
+      };
+    }
+  });
+  const _hoisted_1$3 = { class: "stream" };
+  const _hoisted_2$3 = {
+    key: 4,
+    class: "msg msg-other"
+  };
+  const _hoisted_3$3 = {
+    key: 1,
+    class: "empty"
+  };
+  const _sfc_main$4 = /* @__PURE__ */ defineComponent({
+    __name: "Timeline",
+    setup(__props) {
+      const model = computed(() => streamModel());
+      const emptyText = computed(() => {
+        if (state.onlyTools) return "这个会话没有工具调用记录";
+        if (!state.current) return "左侧选择一个会话开始浏览。";
+        return "这个会话还没有可显示的消息";
+      });
+      onMounted(() => {
+        const t = document.getElementById("timeline");
+        t == null ? void 0 : t.addEventListener("scroll", () => {
+          const near = t.scrollHeight - t.scrollTop - t.clientHeight < 40;
+          if (!near && state.follow) state.follow = false;
+        });
+      });
+      watch(
+        [() => state.current ? state.current.id : "", () => state.lines.length],
+        async (_, prev) => {
+          if (prev[0] && prev[0] !== (state.current ? state.current.id : "")) {
+            clearAnchors();
+          }
+          if (state.follow) {
+            await nextTick();
+            const t = document.getElementById("timeline");
+            if (t) t.scrollTop = t.scrollHeight;
+          }
         }
       );
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("div", {
           id: "timeline",
           class: normalizeClass(["timeline", { hidden: unref(state).view !== "chat" }])
-        }, null, 2);
+        }, [
+          createBaseVNode("div", _hoisted_1$3, [
+            unref(state).current ? (openBlock(), createBlock(StreamSummary, { key: 0 })) : createCommentVNode("", true),
+            (openBlock(true), createElementBlock(Fragment, null, renderList(model.value.items, (item) => {
+              return openBlock(), createElementBlock(Fragment, {
+                key: item.key
+              }, [
+                item.type === "assistant" ? (openBlock(), createBlock(AssistantMsg, {
+                  key: 0,
+                  item
+                }, null, 8, ["item"])) : item.type === "system" ? (openBlock(), createBlock(SystemMsg, {
+                  key: 1,
+                  item
+                }, null, 8, ["item"])) : item.type === "imageTurn" ? (openBlock(), createBlock(ImageTurn, {
+                  key: 2,
+                  item
+                }, null, 8, ["item"])) : item.type === "result" ? (openBlock(), createBlock(_sfc_main$5, {
+                  key: 3,
+                  item
+                }, null, 8, ["item"])) : (openBlock(), createElementBlock("section", _hoisted_2$3, [
+                  createVNode(_sfc_main$e, {
+                    text: String(item.line.text || "(无正文)"),
+                    "mem-key": "other." + item.line.n,
+                    "preview-lines": unref(LONG_TEXT_LINES),
+                    tokens: unref(estOf)(item.line).text
+                  }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])
+                ]))
+              ], 64);
+            }), 128)),
+            !model.value.items.length && !unref(state).partial ? (openBlock(), createElementBlock("div", _hoisted_3$3, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true),
+            unref(state).current && unref(state).current.live && unref(state).partial ? (openBlock(), createBlock(PartialTail, {
+              key: 2,
+              partial: unref(state).partial
+            }, null, 8, ["partial"])) : createCommentVNode("", true)
+          ])
+        ], 2);
       };
     }
   });
+  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-bf27149a"]]);
+  const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
+  function nextMsgLine(lines, idx) {
+    for (let i = idx + 1; i < lines.length; i++) {
+      if (lines[i] && !lines[i].bad && lines[i].t === "msg") return lines[i];
+    }
+    return null;
+  }
+  function callDuration(call, resultLine) {
+    if (!call || !call.ts || !resultLine || !resultLine.ts) return 0;
+    const t0 = Date.parse(call.ts);
+    const t1 = Date.parse(resultLine.ts);
+    if (isNaN(t0) || isNaN(t1) || t1 < t0) return 0;
+    return t1 - t0;
+  }
+  function trajectoryRows() {
+    const rows = [];
+    const callOf = {};
+    const imageAfterTool = {};
+    state.lines.forEach((l) => {
+      if (!l || l.bad || l.t !== "msg") return;
+      if (l.role === "assistant") {
+        (l.tool_calls || []).forEach((c) => {
+          const fn = c.function || {};
+          callOf[c.id || ""] = { name: fn.name || "?", ts: l.ts || "", n: l.n, args: String(fn.arguments || "") };
+        });
+      }
+    });
+    state.lines.forEach((line, idx) => {
+      if (!line || line.bad) return;
+      if (line.t === "meta") {
+        rows.push({
+          kind: "meta",
+          tag: "元信息",
+          name: line.kind || "system",
+          summary: "模型 " + (line.model || "—") + " · 提示词 " + countText(String(line.text || "").length, estOf(line).text) + ((line.tools || []).length ? " · 工具 " + line.tools.length : ""),
+          chars: String(line.text || "").length,
+          tokens: estOf(line).text,
+          status: "",
+          detail: { prompt: String(line.text || "") }
+        });
+        return;
+      }
+      if (line.t === "usage") {
+        const st = line.stats || {};
+        rows.push({
+          kind: "usage",
+          tag: "用量",
+          name: "请求" + (st.round ? " #" + st.round : ""),
+          summary: (st.kind || "chat") + " · 输入 " + fmtTokens(st.promptTokens) + "（缓存 " + (st.cachedTokens || 0) + "）· 输出 " + fmtTokens(st.completionTokens) + (st.reasoningTokens ? "（思 " + fmtTokens(st.reasoningTokens) + "）" : ""),
+          chars: "",
+          tokens: 0,
+          status: st.finish || "",
+          time: Number(st.durationMs) || 0,
+          detail: { request: JSON.stringify(st, null, 2) }
+        });
+        return;
+      }
+      if (line.t !== "msg" || !line.role) return;
+      if (line.role === "user" && line.images && line.images.length) {
+        const attr = imageAttributions()[line.n] || { kind: "none", how: "", callId: "", name: "", lineN: line.n, taskLineN: 0 };
+        const fromTool = !!imageAfterTool[line.n];
+        const callLine = attr.kind === "call" && attr.callId ? callMsgLine()[attr.callId] : void 0;
+        const jumpTo = callLine !== void 0 ? callLine : attr.kind === "task" && attr.taskLineN ? attr.taskLineN : line.n;
+        rows.push({
+          kind: "user",
+          tag: "用户",
+          name: "用户",
+          summary: (fromTool ? "接上一行工具回执 · " : "") + "图片 ×" + line.images.length + " · " + (firstLine(line.text) || "（无正文）") + " · " + attributionText(attr),
+          title: IMAGE_WIRE_TITLE + "\n" + attributionText(attr) + (attr.how === "call-id" ? "（句柄里写了 call id，属于精确匹配）" : attr.how === "tool-name" ? "（句柄里写了工具名，按名称匹配到本轮的调用）" : attr.how === "order" ? "（旧转录没有 call id，按顺序推断；新转录会写上归属）" : attr.how === "task" ? "（这一轮带的是任务自己的图，不归任何工具调用）" : "") + (fromTool ? "\n这一轮的图片就是上一行工具回执投出来的（同一件事的两段 wire 表达，所以两行不合并）" : ""),
+          chars: String(line.text || "").length,
+          tokens: estOf(line).text + estOf(line).images,
+          status: "",
+          jump: jumpTo,
+          images: line.images,
+          detail: { user: String(line.text || "") || "（这一轮没有正文）" }
+        });
+      } else if (line.role === "user") {
+        let fed = 0;
+        const attrs = imageAttributions();
+        Object.keys(attrs).forEach((n) => {
+          const a = attrs[Number(n)];
+          if (a.kind === "task" && a.taskLineN === line.n) fed++;
+        });
+        rows.push({
+          kind: "user",
+          tag: "用户",
+          name: "用户",
+          summary: firstLine(line.text) + (fed ? " · 附件 图片 ×" + fed : ""),
+          title: fed ? "会话开头的原图投喂轮归到了这条任务（对话页里它们收在同一个块里）" : "点击跳到对话里对应的那条消息",
+          chars: String(line.text || "").length,
+          tokens: estOf(line).text,
+          status: "",
+          jump: line.n,
+          detail: { user: String(line.text || "") }
+        });
+      } else if (line.role === "assistant") {
+        if (line.reasoning) {
+          rows.push({
+            kind: "think",
+            tag: "思考",
+            name: "reasoning",
+            summary: firstLine(line.reasoning),
+            chars: line.reasoning.length,
+            tokens: estOf(line).reasoning,
+            status: "",
+            jump: line.n,
+            detail: { thinking: line.reasoning }
+          });
+        }
+        if (line.text) {
+          rows.push({
+            kind: "msg",
+            tag: "助手",
+            name: "AI",
+            summary: firstLine(line.text),
+            chars: line.text.length,
+            tokens: estOf(line).text,
+            status: "",
+            jump: line.n,
+            detail: { message: String(line.text) }
+          });
+        }
+        (line.tool_calls || []).forEach((c, i) => {
+          const fn = c.function || {};
+          const name = fn.name || "(未命名工具)";
+          const args = String(fn.arguments || "");
+          rows.push({
+            kind: "tool",
+            tag: "工具",
+            name,
+            summary: toolSummary(name, fn.arguments),
+            chars: args.length,
+            tokens: estOf(line).calls[i] || 0,
+            status: "",
+            jump: line.n,
+            detail: { input: prettyJSON(args) || args }
+          });
+        });
+      } else if (line.role === "tool") {
+        const info = line.tool_call_id ? callOf[line.tool_call_id] || null : null;
+        const text = String(line.text || "");
+        const after = nextMsgLine(state.lines, idx);
+        const imageNext = !!(after && after.role === "user" && after.images && after.images.length);
+        if (imageNext) imageAfterTool[after.n] = true;
+        const hint = imageNext ? IMAGE_PLACEHOLDER.test(text) ? " · 图片见下一行用户轮" : " · 图片在下一行用户轮里" : "";
+        rows.push({
+          kind: "result",
+          tag: "结果",
+          name: info ? info.name : "(未配对的工具回执)",
+          summary: firstLine(text) + hint,
+          chars: text.length,
+          tokens: estOf(line).text,
+          title: imageNext ? "这一行是工具回执：tool 消息的 content 只能是文本，随行的图片被回灌在紧随其后的 user 轮里（两行是同一件事，保持两行不合并）" : "点击跳到对话里对应的那条消息",
+          status: classifyResult(text),
+          jump: line.n,
+          time: callDuration(info, line),
+          detail: { output: text }
+        });
+      }
+    });
+    rows.forEach((r, i) => {
+      r.rid = r.kind + "@" + (r.jump ?? "x") + "#" + i;
+    });
+    return rows;
+  }
+  const TRAJ_KINDS = [
+    { id: "user", label: "用户" },
+    { id: "msg", label: "助手" },
+    { id: "think", label: "思考" },
+    { id: "tool", label: "工具" },
+    { id: "result", label: "结果" },
+    { id: "meta", label: "元信息" },
+    { id: "usage", label: "用量" }
+  ];
+  function jumpToLine(n) {
+    const node = anchorOf(n);
+    switchView("chat");
+    if (!node) return;
+    node.scrollIntoView({ block: "center" });
+    node.classList.remove("flash");
+    void node.offsetWidth;
+    node.classList.add("flash");
+  }
+  const _sfc_main$3 = /* @__PURE__ */ defineComponent({
+    __name: "MachineText",
+    props: {
+      text: {},
+      cls: {},
+      tag: { default: "div" }
+    },
+    setup(__props) {
+      const props = __props;
+      const host = /* @__PURE__ */ ref(null);
+      function render() {
+        const el2 = host.value;
+        if (!el2) return;
+        el2.textContent = "";
+        el2.appendChild(machineBlock(props.text, props.cls));
+      }
+      onMounted(render);
+      watch(() => [props.text, props.cls], render);
+      return (_ctx, _cache) => {
+        return openBlock(), createBlock(resolveDynamicComponent(__props.tag), {
+          ref_key: "host",
+          ref: host
+        }, null, 512);
+      };
+    }
+  });
+  const _hoisted_1$2 = { class: "traj-toolbar" };
+  const _hoisted_2$2 = { class: "traj-toolbar-inner" };
+  const _hoisted_3$2 = { class: "traj-filters" };
+  const _hoisted_4$2 = ["aria-pressed"];
+  const _hoisted_5$2 = ["title", "aria-pressed", "onClick"];
+  const _hoisted_6$2 = { class: "traj-count" };
+  const _hoisted_7$2 = { class: "traj-scroll" };
+  const _hoisted_8$2 = {
+    key: 0,
+    class: "traj-empty"
+  };
+  const _hoisted_9$2 = {
+    key: 1,
+    class: "traj-table"
+  };
+  const _hoisted_10$2 = { class: "num-head" };
+  const _hoisted_11$2 = ["data-kind", "data-error", "title", "onClick"];
+  const _hoisted_12$2 = { class: "traj-num" };
+  const _hoisted_13$2 = ["onClick"];
+  const _hoisted_14$2 = ["onClick"];
+  const _hoisted_15$2 = { class: "traj-name" };
+  const _hoisted_16$2 = ["title"];
+  const _hoisted_17$2 = { class: "traj-num-cell" };
+  const _hoisted_18$2 = { class: "traj-num-cell" };
+  const _hoisted_19$2 = {
+    key: 0,
+    class: "traj-detail"
+  };
+  const _hoisted_20$2 = { colspan: 7 };
+  const _hoisted_21$2 = { class: "traj-detail-inner" };
+  const _hoisted_22$2 = { class: "traj-detail-title" };
+  const _hoisted_23$2 = {
+    key: 1,
+    class: "code"
+  };
+  const _hoisted_24$2 = { class: "row-actions" };
+  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
+    __name: "Trajectory",
+    setup(__props) {
+      const rows = computed(() => state.current ? trajectoryRows() : []);
+      const visible = computed(() => rows.value.filter(trajVisible));
+      const kinds = computed(
+        () => TRAJ_KINDS.map((k) => ({ ...k, count: rows.value.filter((r) => r.kind === k.id).length })).filter((k) => k.count > 0)
+      );
+      const allPressed = computed(() => Object.keys(state.trajKinds).length === 0);
+      function trajVisible(row) {
+        const picked = Object.keys(state.trajKinds).filter((k) => state.trajKinds[k]);
+        if (!picked.length) return true;
+        return picked.indexOf(row.kind) >= 0;
+      }
+      function pick(k) {
+        if (state.trajKinds[k]) delete state.trajKinds[k];
+        else state.trajKinds[k] = true;
+      }
+      function sizeCell(row) {
+        return state.unit === "char" ? row.chars ? String(row.chars) : "—" : row.tokens ? countValue(row.chars, row.tokens) : "—";
+      }
+      function statusCell(row) {
+        if (row.status === "error") return { cls: "error", text: "✗ error" };
+        if (row.status === "ok") return { cls: "ok", text: "✓ ok" };
+        return { cls: "plain", text: row.status === "plain" || !row.status ? "—" : row.status };
+      }
+      const DETAIL_LABELS = {
+        prompt: "系统提示词",
+        thinking: "思考",
+        user: "用户消息",
+        message: "助手消息",
+        input: "输入",
+        output: "输出",
+        request: "用量行"
+      };
+      function detailKind(key) {
+        return key === "input" || key === "request" || key === "output" ? "code" : "plain";
+      }
+      function rowKey(row, _idx) {
+        return row.rid;
+      }
+      function selectRow(row) {
+        if (!row.jump) return;
+        state.trajSelected = state.trajSelected === row.rid ? null : row.rid;
+      }
+      function goChat(row) {
+        if (!row.jump) return;
+        state.trajSelected = row.rid;
+        jumpToLine(row.jump);
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", {
+          id: "trajectory",
+          class: normalizeClass(["trajectory", { hidden: unref(state).view === "chat" }])
+        }, [
+          createBaseVNode("div", _hoisted_1$2, [
+            createBaseVNode("div", _hoisted_2$2, [
+              createBaseVNode("div", _hoisted_3$2, [
+                createBaseVNode("button", {
+                  type: "button",
+                  class: "traj-chip",
+                  "aria-pressed": allPressed.value ? "true" : "false",
+                  onClick: _cache[0] || (_cache[0] = ($event) => unref(state).trajKinds = {})
+                }, "全部", 8, _hoisted_4$2),
+                (openBlock(true), createElementBlock(Fragment, null, renderList(kinds.value, (k) => {
+                  return openBlock(), createElementBlock("button", {
+                    key: k.id,
+                    type: "button",
+                    class: "traj-chip",
+                    title: "只看 / 不看「" + k.label + "」",
+                    "aria-pressed": unref(state).trajKinds[k.id] ? "true" : "false",
+                    onClick: ($event) => pick(k.id)
+                  }, toDisplayString(k.label) + " " + toDisplayString(k.count), 9, _hoisted_5$2);
+                }), 128))
+              ]),
+              createBaseVNode("span", _hoisted_6$2, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
+            ])
+          ]),
+          createBaseVNode("div", _hoisted_7$2, [
+            !visible.value.length ? (openBlock(), createElementBlock("div", _hoisted_8$2, toDisplayString(rows.value.length ? "当前筛选没有匹配的步骤" : unref(state).current ? "这个会话还没有步骤" : "左侧选择一个会话后，这里列出它的全部步骤。"), 1)) : (openBlock(), createElementBlock("table", _hoisted_9$2, [
+              _cache[7] || (_cache[7] = createBaseVNode("colgroup", null, [
+                createBaseVNode("col", { class: "col-n" }),
+                createBaseVNode("col", { class: "col-kind" }),
+                createBaseVNode("col", { class: "col-name" }),
+                createBaseVNode("col"),
+                createBaseVNode("col", { class: "col-status" }),
+                createBaseVNode("col", { class: "col-size" }),
+                createBaseVNode("col", { class: "col-time" })
+              ], -1)),
+              createBaseVNode("thead", null, [
+                createBaseVNode("tr", null, [
+                  _cache[1] || (_cache[1] = createBaseVNode("th", { class: "num-head" }, "#", -1)),
+                  _cache[2] || (_cache[2] = createBaseVNode("th", null, "类型", -1)),
+                  _cache[3] || (_cache[3] = createBaseVNode("th", null, "名称", -1)),
+                  _cache[4] || (_cache[4] = createBaseVNode("th", null, "摘要", -1)),
+                  _cache[5] || (_cache[5] = createBaseVNode("th", null, "状态", -1)),
+                  createBaseVNode("th", _hoisted_10$2, toDisplayString(unref(unitLabel)()), 1),
+                  _cache[6] || (_cache[6] = createBaseVNode("th", { class: "num-head" }, "耗时", -1))
+                ])
+              ]),
+              createBaseVNode("tbody", null, [
+                (openBlock(true), createElementBlock(Fragment, null, renderList(visible.value, (row, idx) => {
+                  return openBlock(), createElementBlock(Fragment, {
+                    key: rowKey(row)
+                  }, [
+                    createBaseVNode("tr", {
+                      class: normalizeClass(["traj-row", { selected: row.jump && unref(state).trajSelected === row.rid }]),
+                      "data-kind": row.kind,
+                      "data-error": row.status === "error" ? "true" : void 0,
+                      title: row.title || "点击在右侧详情栏看这一步",
+                      onClick: ($event) => row.jump ? selectRow(row) : unref(state).trajOpen[row.rid] = !unref(state).trajOpen[row.rid]
+                    }, [
+                      createBaseVNode("td", _hoisted_12$2, [
+                        createBaseVNode("button", {
+                          type: "button",
+                          class: "traj-disclose",
+                          title: "展开完整输入输出",
+                          onClick: withModifiers(($event) => unref(state).trajOpen[row.rid] = !unref(state).trajOpen[row.rid], ["stop"])
+                        }, toDisplayString(unref(state).trajOpen[row.rid] ? "▾" : "▸"), 9, _hoisted_13$2),
+                        createTextVNode(toDisplayString(row.jump ? String(row.jump) : "—") + " ", 1),
+                        row.jump ? (openBlock(), createElementBlock("button", {
+                          key: 0,
+                          type: "button",
+                          class: "traj-gochat",
+                          title: "跳到对话里对应的那条消息",
+                          onClick: withModifiers(($event) => goChat(row), ["stop"])
+                        }, "↳", 8, _hoisted_14$2)) : createCommentVNode("", true)
+                      ]),
+                      createBaseVNode("td", null, [
+                        createBaseVNode("span", {
+                          class: normalizeClass(["kind-tag", row.status === "error" ? "kind-error" : "kind-" + row.kind])
+                        }, toDisplayString(row.tag), 3)
+                      ]),
+                      createBaseVNode("td", _hoisted_15$2, toDisplayString(row.name), 1),
+                      createBaseVNode("td", {
+                        class: "traj-summary",
+                        title: row.summary || ""
+                      }, toDisplayString(row.summary || "—"), 9, _hoisted_16$2),
+                      createBaseVNode("td", {
+                        class: normalizeClass("traj-status " + statusCell(row).cls)
+                      }, toDisplayString(statusCell(row).text), 3),
+                      createBaseVNode("td", _hoisted_17$2, toDisplayString(sizeCell(row)), 1),
+                      createBaseVNode("td", _hoisted_18$2, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
+                    ], 10, _hoisted_11$2),
+                    unref(state).trajOpen[row.rid] ? (openBlock(), createElementBlock("tr", _hoisted_19$2, [
+                      createBaseVNode("td", _hoisted_20$2, [
+                        createBaseVNode("div", _hoisted_21$2, [
+                          (openBlock(true), createElementBlock(Fragment, null, renderList(row.detail || {}, (text, key) => {
+                            return openBlock(), createElementBlock("div", { key }, [
+                              createBaseVNode("div", _hoisted_22$2, toDisplayString(DETAIL_LABELS[key] || key), 1),
+                              detailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$3, {
+                                key: 0,
+                                text: String(text || ""),
+                                cls: "code"
+                              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_23$2, toDisplayString(String(text || "")), 1)),
+                              createBaseVNode("div", _hoisted_24$2, [
+                                createVNode(_sfc_main$a, {
+                                  text: String(text || "")
+                                }, null, 8, ["text"])
+                              ])
+                            ]);
+                          }), 128)),
+                          row.images && row.images.length ? (openBlock(), createBlock(_sfc_main$b, {
+                            key: 0,
+                            images: row.images
+                          }, null, 8, ["images"])) : createCommentVNode("", true)
+                        ])
+                      ])
+                    ])) : createCommentVNode("", true)
+                  ], 64);
+                }), 128))
+              ])
+            ]))
+          ])
+        ], 2);
+      };
+    }
+  });
+  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-0d6b1c96"]]);
+  function currentEstimate() {
+    const id = state.current ? state.current.id : "";
+    const list = state.sessions || [];
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].id === id && list[i].estimate) return list[i].estimate;
+    }
+    return state.current && state.current.estimate || null;
+  }
+  function imageEstimate(lines) {
+    const sum = { count: 0, tokens: 0 };
+    (lines || []).forEach((line) => {
+      const est = estOf(line);
+      sum.count += est.imageCount || 0;
+      sum.tokens += est.images || 0;
+    });
+    return sum;
+  }
+  function sessionKVRows() {
+    const cur = state.current;
+    if (!cur) return [];
+    const rows = [
+      { k: "项目", v: cur.project || projectOf(cur.id), title: cur.id },
+      { k: "阶段", v: cur.stageTitle || cur.stage || "—" },
+      { k: "会话", md: sessionTitleOf(cur), title: cur.id, mono: true },
+      { k: "文件", v: cur.name || "—", title: cur.path, mono: true },
+      { k: "消息", v: cur.messages + " 条 · " + state.lines.length + " 行" },
+      { k: "大小", v: fmtSize(cur.size) },
+      { k: "最后写入", v: fmtClock(cur.mtime) }
+    ];
+    if (cur.imageName) rows.push({ k: "图片", v: imageDisplayName(cur), title: imageTipText(cur), mono: true });
+    if (cur.imageFile) rows.push({ k: "图片文件", v: cur.imageFile, title: cur.imageName, mono: true });
+    if (cur.imagePath) rows.push({ k: "图片路径", v: cur.imagePath, mono: true });
+    if (cur.imageName && cur.page) rows.push({ k: "页码", v: "第 " + cur.page + " 页" });
+    if (cur.imageName && cur.imageOrder) rows.push({ k: "顺序", v: "书内第 " + cur.imageOrder + " 张" });
+    if (cur.imageName && cur.imageType) rows.push({ k: "类型", v: cur.imageType });
+    if (cur.imageName && cur.imageCaption) rows.push({ k: "图注", v: cur.imageCaption });
+    return rows;
+  }
+  function sessionSubPath() {
+    const cur = state.current;
+    return cur ? subPathOf(cur.id) : "";
+  }
+  function statsModel() {
+    const st = aggregate(usageLines(state.lines));
+    if (!st) return null;
+    const sub = st.requests + " 次请求 · " + (st.streamed ? "流式" : "非流式") + (st.spanMs ? " · 会话跨度 " + fmtDur(st.spanMs) : "");
+    const tiles = [];
+    tiles.push({
+      label: "输入 tokens",
+      value: fmtTokens(st.promptTokens),
+      title: st.promptTokens + " prompt tokens（含缓存命中 " + st.cachedTokens + "）\n厂商实测值：随请求发出的图片 token 已经包含在里面，不单列。"
+    });
+    const imgs = imageEstimate(state.lines);
+    if (imgs.count) {
+      const est = currentEstimate();
+      const per = Math.round(imgs.tokens / imgs.count);
+      const rule = est ? est.rule : "本地估算";
+      const lines = [imgs.count + " 张图片的本地估算合计 ≈ " + fmtTokens(imgs.tokens) + "（每张 ≈ " + fmtTokens(per) + "）", "估算口径：" + rule];
+      let value = "≈ " + fmtTokens(per) + "/张";
+      if (est && est.measuredPerImage) {
+        value = "实测 " + fmtTokens(est.measuredPerImage) + "/张";
+        lines.push("实测 " + fmtTokens(est.measuredPerImage) + "/张：厂商 prompt_tokens 的相邻差值推出的每张均值" + (est.measuredSamples ? "（" + est.measuredSamples + " 步 / " + est.measuredImages + " 张）" : ""));
+        lines.push("本地估算每张 ≈ " + fmtTokens(per) + "（口径：" + rule + "，本会话合计 ≈ " + fmtTokens(imgs.tokens) + "）");
+      } else {
+        lines.push("没有可用的实测样本：本会话的用量行还不足以推出每张实测值（无用量行、或没有一次请求新增图片）");
+      }
+      lines.push("对照：上面的「输入 tokens」是厂商实测的 prompt_tokens，其中已经包含图片 token。");
+      tiles.push({ label: "图片 " + imgs.count + " 张", value, title: lines.join("\n") });
+    }
+    tiles.push({
+      label: "缓存命中",
+      value: st.promptTokens ? st.cacheHitPct.toFixed(0) + "%" : "—",
+      title: "前缀缓存命中率 = Σcached_tokens / Σprompt_tokens（供应商未上报时为 —）"
+    });
+    tiles.push({
+      label: "输出 tokens",
+      value: fmtTokens(st.completionTokens),
+      title: st.completionTokens + " completion tokens" + (st.reasoningTokens ? "，其中思考 " + st.reasoningTokens : "")
+    });
+    tiles.push({ label: "平均首字", value: st.avgTtftMs ? fmtDur(st.avgTtftMs) : "—", title: '每请求"发出→第一个流式增量"的平均耗时' });
+    tiles.push({
+      label: "输出速度",
+      value: (st.outputTps || 0).toFixed(1) + " tok/s",
+      title: "生成速度 = Σ输出 tokens / Σ(请求耗时 − 首字延迟)，不含排队与思考等待"
+    });
+    tiles.push({ label: "平均耗时", value: fmtDur(st.avgDurationMs), title: "每请求平均墙钟耗时（含思考与工具执行前后的等待）" });
+    if (st.reasoningTokens) tiles.push({ label: "思考 tokens", value: fmtTokens(st.reasoningTokens), title: "reasoning_tokens（思考链）" });
+    const sessionCost = state.current && state.current.cost;
+    if (sessionCost) {
+      tiles.push({
+        label: "费用",
+        value: fmtCost(sessionCost),
+        title: '按配置里的 models.*.price 计算：未命中缓存的输入 × input + 命中缓存的输入 × cached + 输出 × output。没配价格的模型不显示金额（¥0 会被读成"没花钱"）。'
+      });
+    }
+    const rows = st.perRequest.map((l) => {
+      const one = l.stats;
+      const kindLabel = one.kind === "compact" ? "上下文压缩摘要请求" : one.kind === "nudge" ? "空回复后的强制文本请求" : "普通对话回合";
+      return {
+        cells: [
+          one.round ? "#" + one.round : "—",
+          one.ttftMs ? fmtDur(one.ttftMs) : "—",
+          one.durationMs ? fmtDur(one.durationMs) : "—",
+          fmtTokens(one.promptTokens) + (one.promptTokens ? " · " + (one.cachedTokens * 100 / one.promptTokens).toFixed(0) + "%" : ""),
+          fmtTokens(one.completionTokens)
+        ],
+        title: (l.ts ? fmtClock(l.ts) + "\n" : "") + kindLabel + (one.kind ? "（kind=" + one.kind + "）" : "") + (one.model ? "\n模型 " + one.model : "") + "\n输入 " + one.promptTokens + " tokens（缓存命中 " + one.cachedTokens + "）\n输出 " + one.completionTokens + " tokens" + (one.reasoningTokens ? "（其中思考 " + one.reasoningTokens + "）" : "") + "\n输出速度 " + (one.outputTps || 0).toFixed(1) + " tok/s\n结束原因 " + (one.finish || "—")
+      };
+    });
+    return { sub, tiles, cols: ["回合", "首字", "耗时", "输入·缓存", "输出"], rows, rowCount: st.requests };
+  }
+  function toolSchemas(line) {
+    return (line.tools || []).map((t) => ({
+      name: t.name || "(未命名工具)",
+      desc: t.description ? String(t.description) : "",
+      params: t.parameters ? String(t.parameters) : "",
+      descCount: t.description ? "描述 " + countText(String(t.description).length, t.descTokens) : "",
+      paramCount: t.parameters ? "schema " + countText(String(t.parameters).length, t.paramTokens) : ""
+    }));
+  }
+  function metaCardKey(line) {
+    return "meta." + (state.current ? state.current.id : "") + "." + (line.system_sha || line.n);
+  }
+  function metaModel() {
+    const m = metaState();
+    if (!m) return null;
+    const line = m.line;
+    const bits = ["模型 " + (line.model || "—")];
+    if (line.session_label) bits.push("会话 " + line.session_label);
+    bits.push("sha " + shortSHA(line.system_sha));
+    bits.push(countText(m.promptChars, m.promptTokenEst));
+    const promptText = String(line.text || "（这条 meta 行没有正文）");
+    let mode = "plain";
+    if (jsonPretty(promptText) !== null) mode = "json";
+    else if (state.markdown) mode = "md";
+    const tools = toolSchemas(line);
+    return {
+      key: metaCardKey(line),
+      open: storeGet(metaCardKey(line)) === "1",
+      bits: bits.join(" · "),
+      promptText,
+      copyText: String(line.text || ""),
+      mode,
+      tools,
+      toolsHead: tools.length ? "工具定义 " + tools.length + " 个（parameters 的 JSON 默认收起）" : "工具定义 0 个",
+      countNote: m.count > 1 ? "共 " + m.count + " 条，显示最新" : ""
+    };
+  }
+  const META_COUNT_TIP = "同一个转录里有 {n} 条 meta 行（多次运行 / 提示词变化各一条），这里显示最后一条。";
+  const _hoisted_1$1 = {
+    id: "details-body",
+    class: "details-body"
+  };
+  const _hoisted_2$1 = {
+    key: 0,
+    class: "note"
+  };
+  const _hoisted_3$1 = {
+    key: 0,
+    class: "detail-block traj-step"
+  };
+  const _hoisted_4$1 = { class: "detail-block-title" };
+  const _hoisted_5$1 = { class: "traj-step-head" };
+  const _hoisted_6$1 = { class: "kind-tag" };
+  const _hoisted_7$1 = { class: "traj-step-name" };
+  const _hoisted_8$1 = { class: "traj-detail-title" };
+  const _hoisted_9$1 = {
+    key: 1,
+    class: "code"
+  };
+  const _hoisted_10$1 = { class: "row-actions" };
+  const _hoisted_11$1 = { class: "detail-block" };
+  const _hoisted_12$1 = { class: "detail-kv" };
+  const _hoisted_13$1 = ["title"];
+  const _hoisted_14$1 = {
+    key: 0,
+    class: "stats-sub"
+  };
+  const _hoisted_15$1 = {
+    key: 1,
+    class: "detail-block"
+  };
+  const _hoisted_16$1 = { class: "stats-sub" };
+  const _hoisted_17$1 = { class: "tiles" };
+  const _hoisted_18$1 = ["title"];
+  const _hoisted_19$1 = { class: "tile-value" };
+  const _hoisted_20$1 = { class: "tile-label" };
+  const _hoisted_21$1 = {
+    class: "stats-details",
+    open: ""
+  };
+  const _hoisted_22$1 = { class: "schema-head" };
+  const _hoisted_23$1 = { class: "schema-meta" };
+  const _hoisted_24$1 = { class: "stats-scroll" };
+  const _hoisted_25$1 = { class: "stats-table" };
+  const _hoisted_26$1 = ["title"];
+  const _hoisted_27$1 = {
+    key: 2,
+    class: "detail-block"
+  };
+  const _hoisted_28$1 = ["open"];
+  const _hoisted_29$1 = { class: "line-summary" };
+  const _hoisted_30 = { class: "schema-body" };
+  const _hoisted_31 = { class: "prompt-scroll" };
+  const _hoisted_32 = { class: "row-actions" };
+  const _hoisted_33 = { class: "meta-tools" };
+  const _hoisted_34 = { class: "meta-tools-head" };
+  const _hoisted_35 = {
+    key: 0,
+    class: "note"
+  };
+  const _hoisted_36 = { class: "schema-head" };
+  const _hoisted_37 = { class: "schema-index" };
+  const _hoisted_38 = { class: "schema-name" };
+  const _hoisted_39 = {
+    key: 0,
+    class: "schema-meta"
+  };
+  const _hoisted_40 = {
+    key: 1,
+    class: "schema-meta"
+  };
+  const _hoisted_41 = { class: "schema-body" };
+  const _hoisted_42 = {
+    key: 0,
+    class: "body-text schema-desc"
+  };
+  const _hoisted_43 = {
+    key: 1,
+    class: "schema-params"
+  };
+  const _hoisted_44 = { class: "schema-body" };
+  const _hoisted_45 = { class: "row-actions" };
+  const _hoisted_46 = {
+    key: 2,
+    class: "note"
+  };
+  const _hoisted_47 = ["title"];
+  const _hoisted_48 = {
+    key: 3,
+    class: "note"
+  };
+  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+    __name: "DetailsPanel",
+    setup(__props) {
+      const kvRows = computed(() => sessionKVRows());
+      const subPath = computed(() => sessionSubPath());
+      const stats = computed(() => statsModel());
+      const meta = computed(() => metaModel());
+      const metaOpen = /* @__PURE__ */ ref(false);
+      watch(
+        () => {
+          var _a;
+          return (_a = meta.value) == null ? void 0 : _a.key;
+        },
+        () => {
+          var _a;
+          metaOpen.value = !!((_a = meta.value) == null ? void 0 : _a.open);
+        },
+        { immediate: true }
+      );
+      function onMetaToggle(ev) {
+        const m = meta.value;
+        if (!m) return;
+        const open = ev.target.open;
+        metaOpen.value = open;
+        storeSet(m.key, open ? "1" : "0");
+      }
+      const countTip = computed(
+        () => {
+          var _a;
+          return ((_a = meta.value) == null ? void 0 : _a.countNote) ? META_COUNT_TIP.replace("{n}", meta.value.countNote.replace(/^共 (\d+) 条.*$/, "$1")) : "";
+        }
+      );
+      const TRAJ_STEP_LABELS = {
+        prompt: "系统提示词",
+        thinking: "思考",
+        user: "用户消息",
+        message: "助手消息",
+        input: "输入",
+        output: "输出",
+        request: "用量行"
+      };
+      const trajStep = computed(() => {
+        if (state.view !== "trajectory" || state.trajSelected == null || !state.current) return null;
+        const row = trajectoryRows().find((r) => r.rid === state.trajSelected);
+        return row ? { n: row.jump, tag: row.tag, name: row.name, detail: row.detail || {}, images: row.images || [] } : null;
+      });
+      function trajDetailKind(key) {
+        return key === "input" || key === "request" || key === "output" ? "code" : "plain";
+      }
+      function closeTrajStep() {
+        state.trajSelected = null;
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", _hoisted_1$1, [
+          !unref(state).current ? (openBlock(), createElementBlock("div", _hoisted_2$1, "左侧选择一个会话后，这里显示它的指标与元信息。")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+            trajStep.value ? (openBlock(), createElementBlock("section", _hoisted_3$1, [
+              createBaseVNode("h3", _hoisted_4$1, [
+                createTextVNode(" 步骤 #" + toDisplayString(trajStep.value.n) + " ", 1),
+                createBaseVNode("button", {
+                  type: "button",
+                  class: "icon-btn traj-step-close",
+                  title: "关闭这一步的详情",
+                  onClick: closeTrajStep
+                }, "×")
+              ]),
+              createBaseVNode("div", _hoisted_5$1, [
+                createBaseVNode("span", _hoisted_6$1, toDisplayString(trajStep.value.tag), 1),
+                createBaseVNode("span", _hoisted_7$1, toDisplayString(trajStep.value.name), 1)
+              ]),
+              (openBlock(true), createElementBlock(Fragment, null, renderList(trajStep.value.detail, (text, key) => {
+                return openBlock(), createElementBlock("div", {
+                  key,
+                  class: "traj-step-section"
+                }, [
+                  createBaseVNode("div", _hoisted_8$1, toDisplayString(TRAJ_STEP_LABELS[key] || key), 1),
+                  trajDetailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$3, {
+                    key: 0,
+                    text: String(text || ""),
+                    cls: "code"
+                  }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_9$1, toDisplayString(String(text || "")), 1)),
+                  createBaseVNode("div", _hoisted_10$1, [
+                    createVNode(_sfc_main$a, {
+                      text: String(text || "")
+                    }, null, 8, ["text"])
+                  ])
+                ]);
+              }), 128)),
+              trajStep.value.images.length ? (openBlock(), createBlock(_sfc_main$b, {
+                key: 0,
+                images: trajStep.value.images
+              }, null, 8, ["images"])) : createCommentVNode("", true)
+            ])) : createCommentVNode("", true),
+            createBaseVNode("section", _hoisted_11$1, [
+              _cache[0] || (_cache[0] = createBaseVNode("h3", { class: "detail-block-title" }, "会话", -1)),
+              createBaseVNode("dl", _hoisted_12$1, [
+                (openBlock(true), createElementBlock(Fragment, null, renderList(kvRows.value, (row) => {
+                  return openBlock(), createElementBlock(Fragment, {
+                    key: row.k
+                  }, [
+                    createBaseVNode("dt", null, toDisplayString(row.k), 1),
+                    createBaseVNode("dd", {
+                      class: normalizeClass(row.mono ? "mono" : void 0),
+                      title: row.title || void 0
+                    }, [
+                      row.md ? (openBlock(), createBlock(_sfc_main$k, {
+                        key: 0,
+                        text: row.md,
+                        tag: "span",
+                        class: "detail-name"
+                      }, null, 8, ["text"])) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                        createTextVNode(toDisplayString(row.v), 1)
+                      ], 64))
+                    ], 10, _hoisted_13$1)
+                  ], 64);
+                }), 128))
+              ]),
+              subPath.value ? (openBlock(), createElementBlock("div", _hoisted_14$1, "目录：" + toDisplayString(subPath.value), 1)) : createCommentVNode("", true)
+            ]),
+            stats.value ? (openBlock(), createElementBlock("section", _hoisted_15$1, [
+              _cache[2] || (_cache[2] = createBaseVNode("h3", { class: "detail-block-title" }, "指标", -1)),
+              createBaseVNode("div", _hoisted_16$1, toDisplayString(stats.value.sub), 1),
+              createBaseVNode("div", _hoisted_17$1, [
+                (openBlock(true), createElementBlock(Fragment, null, renderList(stats.value.tiles, (t) => {
+                  return openBlock(), createElementBlock("div", {
+                    key: t.label,
+                    class: "tile",
+                    title: t.title || void 0
+                  }, [
+                    createBaseVNode("div", _hoisted_19$1, toDisplayString(t.value), 1),
+                    createBaseVNode("div", _hoisted_20$1, toDisplayString(t.label), 1)
+                  ], 8, _hoisted_18$1);
+                }), 128))
+              ]),
+              createBaseVNode("details", _hoisted_21$1, [
+                createBaseVNode("summary", _hoisted_22$1, [
+                  _cache[1] || (_cache[1] = createBaseVNode("span", { class: "schema-name" }, "每次请求明细", -1)),
+                  createBaseVNode("span", _hoisted_23$1, toDisplayString(stats.value.rowCount) + " 行", 1)
+                ]),
+                createBaseVNode("div", _hoisted_24$1, [
+                  createBaseVNode("table", _hoisted_25$1, [
+                    createBaseVNode("tr", null, [
+                      (openBlock(true), createElementBlock(Fragment, null, renderList(stats.value.cols, (h) => {
+                        return openBlock(), createElementBlock("th", { key: h }, toDisplayString(h), 1);
+                      }), 128))
+                    ]),
+                    (openBlock(true), createElementBlock(Fragment, null, renderList(stats.value.rows, (r, i) => {
+                      return openBlock(), createElementBlock("tr", {
+                        key: i,
+                        class: "req-row",
+                        title: r.title
+                      }, [
+                        (openBlock(true), createElementBlock(Fragment, null, renderList(r.cells, (c, j) => {
+                          return openBlock(), createElementBlock("td", { key: j }, toDisplayString(c), 1);
+                        }), 128))
+                      ], 8, _hoisted_26$1);
+                    }), 128))
+                  ])
+                ])
+              ])
+            ])) : createCommentVNode("", true),
+            meta.value ? (openBlock(), createElementBlock("section", _hoisted_27$1, [
+              _cache[7] || (_cache[7] = createBaseVNode("h3", { class: "detail-block-title" }, "元信息", -1)),
+              createBaseVNode("details", {
+                class: "disclosure meta-card",
+                open: metaOpen.value,
+                onToggle: onMetaToggle
+              }, [
+                createBaseVNode("summary", null, [
+                  _cache[3] || (_cache[3] = createBaseVNode("span", { class: "line-slot" }, [
+                    createBaseVNode("span", { class: "line-caret" })
+                  ], -1)),
+                  _cache[4] || (_cache[4] = createBaseVNode("span", { class: "line-name" }, "系统提示词（本次运行快照，不参与回放）", -1)),
+                  _cache[5] || (_cache[5] = createBaseVNode("span", { class: "line-sep" }, null, -1)),
+                  createBaseVNode("span", _hoisted_29$1, toDisplayString(meta.value.bits), 1)
+                ]),
+                createBaseVNode("div", _hoisted_30, [
+                  createBaseVNode("div", _hoisted_31, [
+                    meta.value.mode === "json" ? (openBlock(), createBlock(_sfc_main$3, {
+                      key: 0,
+                      text: meta.value.promptText,
+                      cls: "body-text prompt-text"
+                    }, null, 8, ["text"])) : meta.value.mode === "md" ? (openBlock(), createBlock(_sfc_main$f, {
+                      key: 1,
+                      text: meta.value.promptText,
+                      class: "md-body prompt-md"
+                    }, null, 8, ["text"])) : (openBlock(), createBlock(_sfc_main$3, {
+                      key: 2,
+                      text: meta.value.promptText,
+                      cls: "body-text prompt-text"
+                    }, null, 8, ["text"]))
+                  ]),
+                  createBaseVNode("div", _hoisted_32, [
+                    createVNode(_sfc_main$a, {
+                      text: meta.value.copyText
+                    }, null, 8, ["text"])
+                  ]),
+                  createBaseVNode("div", _hoisted_33, [
+                    createBaseVNode("div", _hoisted_34, toDisplayString(meta.value.toolsHead), 1),
+                    !meta.value.tools.length ? (openBlock(), createElementBlock("div", _hoisted_35, "这条 meta 行没有记录工具定义。")) : createCommentVNode("", true),
+                    (openBlock(true), createElementBlock(Fragment, null, renderList(meta.value.tools, (t, i) => {
+                      return openBlock(), createElementBlock("details", {
+                        key: i,
+                        class: "tool-schema"
+                      }, [
+                        createBaseVNode("summary", _hoisted_36, [
+                          createBaseVNode("span", _hoisted_37, "#" + toDisplayString(i + 1), 1),
+                          createBaseVNode("span", _hoisted_38, toDisplayString(t.name), 1),
+                          t.descCount ? (openBlock(), createElementBlock("span", _hoisted_39, toDisplayString(t.descCount), 1)) : createCommentVNode("", true),
+                          t.paramCount ? (openBlock(), createElementBlock("span", _hoisted_40, toDisplayString(t.paramCount), 1)) : createCommentVNode("", true)
+                        ]),
+                        createBaseVNode("div", _hoisted_41, [
+                          t.desc ? (openBlock(), createElementBlock("pre", _hoisted_42, toDisplayString(t.desc), 1)) : createCommentVNode("", true),
+                          t.params ? (openBlock(), createElementBlock("details", _hoisted_43, [
+                            _cache[6] || (_cache[6] = createBaseVNode("summary", { class: "schema-head" }, [
+                              createBaseVNode("span", { class: "schema-name" }, "parameters"),
+                              createBaseVNode("span", { class: "schema-meta" }, "JSON · 默认收起")
+                            ], -1)),
+                            createBaseVNode("div", _hoisted_44, [
+                              createVNode(_sfc_main$3, {
+                                text: t.params,
+                                cls: "code"
+                              }, null, 8, ["text"]),
+                              createBaseVNode("div", _hoisted_45, [
+                                createVNode(_sfc_main$a, {
+                                  text: t.params
+                                }, null, 8, ["text"])
+                              ])
+                            ])
+                          ])) : (openBlock(), createElementBlock("div", _hoisted_46, "（这条工具定义没有记录 parameters）"))
+                        ])
+                      ]);
+                    }), 128))
+                  ]),
+                  meta.value.countNote ? (openBlock(), createElementBlock("div", {
+                    key: 0,
+                    class: "note",
+                    title: countTip.value
+                  }, toDisplayString(meta.value.countNote), 9, _hoisted_47)) : createCommentVNode("", true)
+                ])
+              ], 40, _hoisted_28$1)
+            ])) : createCommentVNode("", true),
+            !kvRows.value.length && !stats.value && !meta.value ? (openBlock(), createElementBlock("div", _hoisted_48, "这个会话没有可显示的详情。")) : createCommentVNode("", true)
+          ], 64))
+        ]);
+      };
+    }
+  });
+  const DetailsPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-176fd06c"]]);
   const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
   const _hoisted_2 = ["data-dragging"];
   const _hoisted_3 = {
@@ -10346,37 +11264,37 @@
     key: 0,
     class: "crumb crumb-current"
   };
-  const _hoisted_9 = ["title"];
-  const _hoisted_10 = {
+  const _hoisted_9 = {
     id: "header-actions",
     class: "header-actions"
   };
-  const _hoisted_11 = {
+  const _hoisted_10 = {
     key: 0,
     id: "mode-badge",
     class: "badge badge-live"
   };
-  const _hoisted_12 = {
+  const _hoisted_11 = {
     key: 1,
     class: "badge"
   };
-  const _hoisted_13 = ["title", "aria-pressed"];
-  const _hoisted_14 = { class: "tabs-row" };
-  const _hoisted_15 = {
+  const _hoisted_12 = ["title", "aria-pressed"];
+  const _hoisted_13 = { class: "tabs-row" };
+  const _hoisted_14 = {
     class: "tabs",
     role: "tablist",
     "aria-label": "视图"
   };
+  const _hoisted_15 = ["aria-selected"];
   const _hoisted_16 = ["aria-selected"];
-  const _hoisted_17 = ["aria-selected"];
-  const _hoisted_18 = {
+  const _hoisted_17 = {
     class: "tab-tools",
     role: "group",
     "aria-label": "显示选项"
   };
+  const _hoisted_18 = ["aria-pressed"];
   const _hoisted_19 = ["aria-pressed"];
   const _hoisted_20 = ["aria-pressed"];
-  const _hoisted_21 = ["aria-pressed"];
+  const _hoisted_21 = ["aria-pressed", "title"];
   const _hoisted_22 = ["aria-pressed", "title"];
   const _hoisted_23 = ["aria-pressed", "title"];
   const _hoisted_24 = ["aria-pressed", "title"];
@@ -10428,18 +11346,17 @@
       }
       function onClickFollow() {
         state.follow = !state.follow;
-        if (state.follow) scrollToBottom2();
+        if (state.follow) scrollToBottom();
       }
       function onClickCollapseThinking() {
         state.forceCollapse = !state.forceCollapse;
-        if (state.forceCollapse) {
-          document.querySelectorAll("details.disclosure-thinking").forEach((d) => {
-            d.open = false;
-          });
-        }
       }
       function onClickOnlyTools() {
         state.onlyTools = !state.onlyTools;
+      }
+      function onClickThumbs() {
+        state.showThumbs = !state.showThumbs;
+        storeSet("showThumbs", state.showThumbs ? "1" : "0");
       }
       function onClickMarkdown() {
         state.markdown = !state.markdown;
@@ -10449,13 +11366,14 @@
         state.unit = state.unit === "char" ? "token" : "char";
         storeSet("unit", state.unit);
       }
-      function scrollToBottom2() {
+      function scrollToBottom() {
         window.setTimeout(() => {
           const el2 = document.getElementById("timeline");
           if (el2) el2.scrollTop = el2.scrollHeight;
         }, 0);
       }
       const badgeText = computed(() => state.polling ? "实时" : "实时（已断开）");
+      const badCount = computed(() => state.lines.reduce((n, l) => n + (l && l.bad ? 1 : 0), 0));
       const headerSummary = computed(() => {
         const cur = state.current;
         if (!cur) return "";
@@ -10463,14 +11381,14 @@
         parts.push(cur.messages + " 条消息");
         if (state.lines.length) parts.push(state.lines.length + " 行");
         parts.push(fmtSize(cur.size));
-        if (state.badLines) parts.push("坏行 " + state.badLines);
+        if (badCount.value) parts.push("坏行 " + badCount.value);
         return parts.join(" · ");
       });
       const curProject = computed(() => state.current ? state.current.project || projectOf(state.current.id) : "");
       const sessionTitle = computed(() => state.current ? sessionTitleOf(state.current) : "");
       const bannerText = computed(() => {
-        if (state.badLines > 0) {
-          return "已跳过 " + state.badLines + " 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）";
+        if (badCount.value > 0) {
+          return "已跳过 " + badCount.value + " 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）";
         }
         return state.pullError;
       });
@@ -10483,20 +11401,53 @@
         if (ev.key === "[") toggleSidebar();
         if (ev.key === "]") toggleDetails();
       }
-      watch(
-        // 数组多源形式（逐元素比较）：state.current 每次轮询都会被换成新对象，
-        // 用 getter 返回新数组的写法会因引用不同每 2 秒误触发一次重渲。
-        [
-          () => state.current ? state.current.id : "",
-          () => state.lines.length,
-          () => state.unit,
-          () => state.markdown,
-          () => state.details
-        ],
-        () => {
-          renderDetails();
+      let lbDrag = null;
+      let lbClickTimer = null;
+      let lbSuppressClick = false;
+      function onLbWheel(ev) {
+        ev.preventDefault();
+        const target = ev.currentTarget.querySelector("#lightbox-img");
+        if (!target) return;
+        zoomLightbox(ev.deltaY > 0 ? 0.9 : 1 / 0.9, ev.clientX, ev.clientY, target.getBoundingClientRect());
+      }
+      function onLbPointerdown(ev) {
+        if (ev.button !== 0) return;
+        lbDrag = { x: ev.clientX, y: ev.clientY, tx: lightbox.tx, ty: lightbox.ty, moved: false };
+        ev.currentTarget.setPointerCapture(ev.pointerId);
+      }
+      function onLbPointermove(ev) {
+        if (!lbDrag) return;
+        const dx = ev.clientX - lbDrag.x;
+        const dy = ev.clientY - lbDrag.y;
+        if (!lbDrag.moved && Math.hypot(dx, dy) > 3) lbDrag.moved = true;
+        if (lbDrag.moved) {
+          lightbox.tx = lbDrag.tx + dx;
+          lightbox.ty = lbDrag.ty + dy;
         }
-      );
+      }
+      function onLbPointerup() {
+        lbSuppressClick = (lbDrag == null ? void 0 : lbDrag.moved) === true;
+        lbDrag = null;
+      }
+      function onLbClick() {
+        if (lbSuppressClick) {
+          lbSuppressClick = false;
+          return;
+        }
+        if (lbClickTimer) return;
+        lbClickTimer = setTimeout(() => {
+          lbClickTimer = null;
+          closeLightbox();
+        }, 260);
+      }
+      function onLbDblclick(ev) {
+        ev.preventDefault();
+        if (lbClickTimer) {
+          clearTimeout(lbClickTimer);
+          lbClickTimer = null;
+        }
+        resetLightbox();
+      }
       let ro = null;
       let pollTimer = 0;
       onMounted(() => {
@@ -10515,8 +11466,6 @@
           }
         }
         document.addEventListener("keydown", onKeydown);
-        registerRenderTrajectory(renderTrajectory);
-        registerRenderDetails(renderDetails);
         bootData();
         pollTimer = window.setInterval(() => {
           if (!document.hidden) void refreshIndex();
@@ -10551,7 +11500,7 @@
             "data-details-collapsed": unref(layout).detailsCollapsed ? "" : void 0,
             "data-dragging": drag.value ? "" : void 0
           }, [
-            createVNode(_sfc_main$2),
+            createVNode(Sidebar),
             createBaseVNode("div", {
               id: "handle-sidebar",
               class: "handle",
@@ -10588,17 +11537,17 @@
                         title: "在侧栏里定位到这个项目",
                         onClick: _cache[3] || (_cache[3] = ($event) => unref(revealProject)(curProject.value))
                       }, toDisplayString(curProject.value), 1),
-                      _cache[12] || (_cache[12] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
-                      createBaseVNode("span", {
+                      _cache[11] || (_cache[11] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
+                      createVNode(_sfc_main$k, {
+                        text: sessionTitle.value,
+                        tag: "span",
                         class: "crumb crumb-current",
                         title: unref(state).current.id
-                      }, [
-                        createVNode(_sfc_main$3, { text: sessionTitle.value }, null, 8, ["text"])
-                      ], 8, _hoisted_9)
+                      }, null, 8, ["text", "title"])
                     ], 64))
                   ]),
-                  createBaseVNode("div", _hoisted_10, [
-                    !unref(state).current ? (openBlock(), createElementBlock("span", _hoisted_11, toDisplayString(badgeText.value), 1)) : (openBlock(), createElementBlock("span", _hoisted_12, toDisplayString(headerSummary.value), 1))
+                  createBaseVNode("div", _hoisted_9, [
+                    !unref(state).current ? (openBlock(), createElementBlock("span", _hoisted_10, toDisplayString(badgeText.value), 1)) : (openBlock(), createElementBlock("span", _hoisted_11, toDisplayString(headerSummary.value), 1))
                   ]),
                   createBaseVNode("button", {
                     id: "details-toggle",
@@ -10609,10 +11558,10 @@
                     "aria-pressed": unref(layout).detailsCollapsed ? "false" : "true",
                     onClick: _cache[4] || (_cache[4] = //@ts-ignore
                     (...args) => unref(toggleDetails) && unref(toggleDetails)(...args))
-                  }, "ⓘ", 8, _hoisted_13)
+                  }, "ⓘ", 8, _hoisted_12)
                 ]),
-                createBaseVNode("div", _hoisted_14, [
-                  createBaseVNode("div", _hoisted_15, [
+                createBaseVNode("div", _hoisted_13, [
+                  createBaseVNode("div", _hoisted_14, [
                     createBaseVNode("button", {
                       id: "tab-chat",
                       class: normalizeClass(["tab", { "tab-active": unref(state).view === "chat" }]),
@@ -10621,7 +11570,7 @@
                       "aria-selected": unref(state).view === "chat" ? "true" : "false",
                       "data-view": "chat",
                       onClick: _cache[5] || (_cache[5] = ($event) => unref(switchView)("chat"))
-                    }, "对话", 10, _hoisted_16),
+                    }, "对话", 10, _hoisted_15),
                     createBaseVNode("button", {
                       id: "tab-traj",
                       class: normalizeClass(["tab", { "tab-active": unref(state).view === "trajectory" }]),
@@ -10630,9 +11579,9 @@
                       "aria-selected": unref(state).view === "trajectory" ? "true" : "false",
                       "data-view": "trajectory",
                       onClick: _cache[6] || (_cache[6] = ($event) => unref(switchView)("trajectory"))
-                    }, "轨迹", 10, _hoisted_17)
+                    }, "轨迹", 10, _hoisted_16)
                   ]),
-                  createBaseVNode("div", _hoisted_18, [
+                  createBaseVNode("div", _hoisted_17, [
                     createBaseVNode("button", {
                       id: "follow",
                       class: "tab-toggle",
@@ -10640,7 +11589,7 @@
                       "aria-pressed": unref(state).follow ? "true" : "false",
                       title: "新消息到达时自动滚动到底部",
                       onClick: onClickFollow
-                    }, "自动跟随", 8, _hoisted_19),
+                    }, "自动跟随", 8, _hoisted_18),
                     createBaseVNode("button", {
                       id: "collapse-thinking",
                       class: "tab-toggle",
@@ -10648,7 +11597,7 @@
                       "aria-pressed": unref(state).forceCollapse ? "true" : "false",
                       title: "把所有消息的思考过程折叠起来",
                       onClick: onClickCollapseThinking
-                    }, "折叠全部思考", 8, _hoisted_20),
+                    }, "折叠全部思考", 8, _hoisted_19),
                     createBaseVNode("button", {
                       id: "only-tools",
                       class: "tab-toggle",
@@ -10656,7 +11605,7 @@
                       "aria-pressed": unref(state).onlyTools ? "true" : "false",
                       title: "只显示工具调用与工具结果",
                       onClick: onClickOnlyTools
-                    }, "仅看工具调用", 8, _hoisted_21),
+                    }, "仅看工具调用", 8, _hoisted_20),
                     createBaseVNode("button", {
                       id: "md-toggle",
                       class: "tab-toggle",
@@ -10664,7 +11613,15 @@
                       "aria-pressed": unref(state).markdown ? "true" : "false",
                       title: unref(state).markdown ? "消息正文按 Markdown 渲染（标题 / 列表 / 代码块 / 表格），点击回到纯文本" : "消息正文按纯文本显示（pre-wrap），点击改用 Markdown 渲染",
                       onClick: onClickMarkdown
-                    }, "Markdown", 8, _hoisted_22),
+                    }, "Markdown", 8, _hoisted_21),
+                    createBaseVNode("button", {
+                      id: "thumb-toggle",
+                      class: "tab-toggle",
+                      type: "button",
+                      "aria-pressed": unref(state).showThumbs ? "true" : "false",
+                      title: unref(state).showThumbs ? "显示看图调用下的缩略图预览行，点击隐藏" : "已隐藏缩略图预览行，点击显示",
+                      onClick: onClickThumbs
+                    }, "缩略图", 8, _hoisted_22),
                     createBaseVNode("button", {
                       id: "unit-toggle",
                       class: "tab-toggle",
@@ -10690,11 +11647,8 @@
                 class: normalizeClass(["banner", { hidden: !bannerText.value }])
               }, toDisplayString(bannerText.value), 3),
               createBaseVNode("div", _hoisted_25, [
-                createVNode(_sfc_main$1),
-                createBaseVNode("div", {
-                  id: "trajectory",
-                  class: normalizeClass(["trajectory", { hidden: unref(state).view === "chat" }])
-                }, null, 2)
+                createVNode(Timeline),
+                createVNode(Trajectory)
               ])
             ]),
             createBaseVNode("div", {
@@ -10715,7 +11669,7 @@
             }, null, 44, _hoisted_26),
             createBaseVNode("aside", _hoisted_27, [
               createBaseVNode("div", _hoisted_28, [
-                _cache[13] || (_cache[13] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
+                _cache[12] || (_cache[12] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
                 createBaseVNode("button", {
                   id: "details-close",
                   class: "icon-btn",
@@ -10725,28 +11679,32 @@
                   onClick: _cache[10] || (_cache[10] = ($event) => unref(state).details > 0 && unref(toggleDetails)())
                 }, "✕")
               ]),
-              _cache[14] || (_cache[14] = createBaseVNode("div", {
-                id: "details-body",
-                class: "details-body"
-              }, null, -1))
+              createVNode(DetailsPanel)
             ])
           ], 12, _hoisted_1),
           createBaseVNode("div", {
             id: "lightbox",
             class: normalizeClass(["lightbox", { hidden: !unref(lightbox).open }]),
-            onClick: _cache[11] || (_cache[11] = //@ts-ignore
-            (...args) => unref(closeLightbox) && unref(closeLightbox)(...args))
+            onClick: onLbClick,
+            onWheel: onLbWheel,
+            onPointerdown: onLbPointerdown,
+            onPointermove: onLbPointermove,
+            onPointerup: onLbPointerup,
+            onPointercancel: onLbPointerup,
+            onDblclick: onLbDblclick
           }, [
             createBaseVNode("img", {
               id: "lightbox-img",
               src: unref(lightbox).open ? unref(lightbox).url : void 0,
-              alt: unref(lightbox).ref
-            }, null, 8, _hoisted_29),
-            _cache[15] || (_cache[15] = createBaseVNode("div", { class: "lightbox-hint" }, "点击空白处或按 Esc 关闭", -1))
-          ], 2)
+              alt: unref(lightbox).ref,
+              style: normalizeStyle({ transform: "translate(" + unref(lightbox).tx + "px," + unref(lightbox).ty + "px) scale(" + unref(lightbox).scale + ")" })
+            }, null, 12, _hoisted_29),
+            _cache[13] || (_cache[13] = createBaseVNode("div", { class: "lightbox-hint" }, "滚轮缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭", -1))
+          ], 34)
         ], 64);
       };
     }
   });
-  createApp(_sfc_main).mount("#app");
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-6861655c"]]);
+  createApp(App).mount("#app");
 })();

@@ -126,13 +126,56 @@ func NewTranscript(path string) (*TranscriptWriter, error) {
 	return w, nil
 }
 
-// Close releases the underlying file.
+// Close releases the underlying file. A leftover partial snapshot would
+// otherwise make the preview page show a "streaming" tail for a session
+// that is already gone.
 func (w *TranscriptWriter) Close() error {
+	w.ClearPartial()
 	if w.file != nil {
 		return w.file.Close()
 	}
 	return nil
 }
+
+// P7 流式快照（sidecar）：<transcript>.partial，唯一内容是「当前正在流式
+// 生成的那条消息」的最新进度。转录本身仍是整行落盘的 append-only JSONL——
+// partial 是临时覆写文件，消息完整落盘即删；预览进程与跑会话的进程不必是
+// 同一个，所以走磁盘而不是内存广播。
+
+// PartialRecord is the JSON payload of the sidecar file.
+type PartialRecord struct {
+	Phase string `json:"phase"` // "content" | "reasoning"
+	Text  string `json:"text"`  // accumulated text so far (tail-capped upstream)
+	Ts    int64  `json:"ts"`    // unix millis, for the viewer to show freshness
+}
+
+// WritePartial atomically replaces the sidecar (tmp file + rename: a
+// concurrent reader must never see a half-written JSON).
+func (w *TranscriptWriter) WritePartial(p PartialRecord) error {
+	if w == nil {
+		return nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	tmp := w.partialPath() + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, w.partialPath())
+}
+
+// ClearPartial removes the sidecar; a missing file is not an error.
+func (w *TranscriptWriter) ClearPartial() {
+	if w == nil {
+		return
+	}
+	os.Remove(w.partialPath())
+	os.Remove(w.partialPath() + ".tmp")
+}
+
+func (w *TranscriptWriter) partialPath() string { return w.path + ".partial" }
 
 // ToolSnapshot is one tool definition as sent to the API.
 type ToolSnapshot struct {

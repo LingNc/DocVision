@@ -1,0 +1,858 @@
+/*
+ * DocVision 会话预览页样式。
+ *
+ * 取向：**照 DSH（DeepSeek Harness）Web GUI 的结构组织方式重做**，不是换配色。
+ * 骨架是三栏 grid（侧栏 | 中栏 | 详情栏）+ 两条可拖拽分隔条；中栏头部是
+ * 「面包屑 + 标签页」；轨迹是一张真正的表；侧栏行是 DSH 的固定高度两级行。
+ * 面与面之间只靠 0.5px 发丝边框和极浅的底色差分，正文就是正文（不套卡片），
+ * 只有机器内容（工具输入输出、JSON、思考、系统提示词）才进等宽块。
+ *
+ * 配色与间距全部走 CSS 变量：白天默认（:root），夜间是 dark 覆盖块，
+ * 切换主题只改根元素一个属性。
+ */
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --sidebar-bg: #f9fafb;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --hover: rgba(38, 49, 72, .06);
+  --hover-solid: #f1f3f5;
+  --active: #e9ecf2;
+  --border: rgba(0, 0, 0, .10);
+  --border-strong: rgba(0, 0, 0, .16);
+  --hairline: rgba(0, 0, 0, .07);
+  --text: #0f1115;
+  --muted: #61666b;
+  --dim: #81858c;
+  --caption: #979da6;
+  --accent: #4176e6;
+  --accent-soft: #e4edfd;
+  --ok: #15803d;
+  --err: #dc2626;
+  --warn: #b45309;
+  --chip: rgba(0, 0, 0, .06);
+  --chip-text: #545557;
+  --code-bg: #f9fafb;
+  --code-text: #0f1115;
+  --scroll-thumb: #e5e5e5;
+  --key: #0f766e;
+  --str: #9a3412;
+  --num: #6d28d9;
+  --bool: #b91c1c;
+  --radius: 12px;
+  --radius-sm: 8px;
+  /* 机器内容（工具输入/输出、思考正文、JSON、行内 code、代码块）**只有一套刻度**：
+     等宽 + 11px/19px（DSH 的 markdown code block 就是这个刻度），限高与思考块同值。
+     次级说明文字（`25 → 72 字符`、ok/error 之类）才用 12px。 */
+  --code-font: 11px;
+  --code-line: 19px;
+  --code-scroll-h: 340px;
+  /* 对话页的**行高与间距只有这一组值**（工具行/思考行/图片行/系统行共用，不因
+     "有没有回执、有没有附件、ok 还是 error"而变）：折叠行 24px；同一条消息里相邻
+     折叠行间隔 6px；回合边界（两个 section 之间）= 8px + 0.5px 虚线 + 8px。
+     测试（attribution_browser_test.go）按这组 token 钉死。 */
+  --row-h: 24px;
+  --row-gap: 6px;
+  --divider-gap: 8px;
+  /* 图片（附件段 / 图片轮）：按原比例、左对齐、可点开灯箱，尺寸只走这两个 token */
+  --attach-img-w: 520px;
+  --attach-img-h: 420px;
+  /* 看图类调用行下面的**缩略图预览**（第 D 条）：不大不小 —— 高不超过 108px、
+     宽不超过 240px，保持原比例（不裁切、不拉伸、不留空框）。 */
+  --preview-h: 108px;
+  --preview-w: 240px;
+  --dot-live: #22c55e;
+  /* 轨迹表的种类标签（照 DSH 的 kindTag 上色：用户=业务主色、工具=琥珀、错误=红） */
+  --kind-user-fg: #4176e6;
+  --kind-user-bg: #e8effc;
+  --kind-msg-fg: #6b4ea8;
+  --kind-msg-bg: #f0ebfa;
+  --kind-think-fg: #61666b;
+  --kind-think-bg: #f1f3f5;
+  --kind-tool-fg: #b45309;
+  --kind-tool-bg: #fdf1e0;
+  --kind-err-fg: #dc2626;
+  --kind-err-bg: #fdeaea;
+  --kind-meta-fg: #7f8287;
+  --kind-meta-bg: #f5f6f7;
+  --kind-usage-fg: #0f766e;
+  --kind-usage-bg: #e4f4f1;
+  /* 工具家族配色（跑 / 写 / 看 / 搜 / 提交） */
+  --fam-shell: #dd8629;
+  --fam-write: #4176e6;
+  --fam-view: #16a34a;
+  --fam-search: #8b5cf6;
+  --fam-submit: #e0503f;
+  --mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  /* 中栏内容列：DSH 是 clamp(680px, 列宽 * .64, 920px)，回退 748px */
+  --content-w: clamp(680px, 64%, 920px);
+  --ease: cubic-bezier(.4, 0, .2, 1);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #151517;
+  --sidebar-bg: #1b1b1c;
+  --surface: #232324;
+  --surface-2: #2c2c2e;
+  --hover: rgba(255, 255, 255, .08);
+  --hover-solid: #2c2c2e;
+  --active: #292929;
+  --border: rgba(255, 255, 255, .12);
+  --border-strong: rgba(255, 255, 255, .16);
+  --hairline: rgba(255, 255, 255, .09);
+  --text: #f9fafb;
+  --muted: #cfd3d6;
+  --dim: #adb2b8;
+  --caption: #979da6;
+  --accent: #5686fe;
+  --accent-soft: rgba(255, 255, 255, .14);
+  --ok: #4ade80;
+  --err: #f87171;
+  --warn: #fbbf24;
+  --chip: rgba(255, 255, 255, .07);
+  --chip-text: #cfd3d6;
+  --code-bg: #1b1b1c;
+  --code-text: #f9fafb;
+  --scroll-thumb: #545557;
+  --key: #7dd3c0;
+  --str: #fdba74;
+  --num: #c4b5fd;
+  --bool: #fca5a5;
+  --kind-user-fg: #679efe;
+  --kind-user-bg: rgba(86, 134, 254, .16);
+  --kind-msg-fg: #c4b5fd;
+  --kind-msg-bg: rgba(196, 181, 253, .14);
+  --kind-think-fg: #adb2b8;
+  --kind-think-bg: rgba(255, 255, 255, .07);
+  --kind-tool-fg: #fbbf24;
+  --kind-tool-bg: rgba(251, 191, 36, .14);
+  --kind-err-fg: #f87171;
+  --kind-err-bg: rgba(248, 113, 113, .14);
+  --kind-meta-fg: #979da6;
+  --kind-meta-bg: rgba(255, 255, 255, .06);
+  --kind-usage-fg: #7dd3c0;
+  --kind-usage-bg: rgba(125, 211, 192, .14);
+  --fam-shell: #f0b45f;
+  --fam-write: #679efe;
+  --fam-view: #4ade80;
+  --fam-search: #c4b5fd;
+  --fam-submit: #f87171;
+}
+
+* {
+ box-sizing: border-box; 
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/24px var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+ width: 8px; height: 8px; 
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 4px;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-thumb:hover {
+ background: var(--dim); background-clip: padding-box; border: 2px solid transparent; 
+}
+
+::-webkit-scrollbar-track {
+ background: transparent; 
+}
+
+.hidden {
+ display: none !important; 
+}
+
+/* ============================ 通用小件 ============================ */
+
+.icon-btn {
+  appearance: none;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+
+.icon-btn:hover {
+ background: var(--hover); color: var(--text); 
+}
+
+.icon-btn:focus-visible {
+ outline: 2px solid var(--accent); outline-offset: 1px; 
+}
+
+.badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--chip-text);
+  background: var(--chip);
+  border-radius: 999px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.badge-live {
+ color: var(--ok); background: transparent; 
+}
+
+.badge-muted {
+ color: var(--dim); background: transparent; 
+}
+
+.dot {
+ width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); flex: 0 0 auto; 
+}
+
+.dot.live {
+ background: var(--dot-live); box-shadow: 0 0 0 3px rgba(34, 197, 94, .18); 
+}
+
+.msg {
+ display: flex; flex-direction: column; gap: var(--row-gap); 
+}
+
+.attach-note {
+ color: var(--caption); font-size: 11.5px; text-align: left; 
+}
+
+/* 并进调用卡片的附件段（与「输入 / 输出」同一张卡片的第三段）：**单列块**，左对齐。
+   绝不能沿用「输入/输出」那套 `label | 内容` 两列网格——归属脚注是这一段的第三个
+   子元素，在网格里会掉到第二行第一列并把第一列撑到脚注那么宽，于是说明文字被推到
+   右边、图片被挤成一小条（用户看到的就是这个）。 */
+/* 插槽内容（输出图片 + 归属小字）钉在内容列：旧页把它们 append 进 .text-wrap
+   （第二列单元格），组件化后经 slot 成为网格直接子元素会掉进第一列（T18）。 */
+.io-section > .io-extra {
+  grid-column: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.io-section.attach-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.io-section.attach-section .io-label {
+ position: static; 
+}
+
+.attach-body {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.text-wrap {
+ position: relative; 
+}
+
+.body-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--text);
+}
+
+.body-text.clamped {
+ mask-image: linear-gradient(180deg, #000 74%, transparent); 
+}
+
+.prompt-text {
+ font-family: var(--mono); font-size: var(--code-font); line-height: var(--code-line); color: var(--muted); 
+}
+
+.reasoning-text {
+ font-family: var(--mono); font-size: var(--code-font); line-height: var(--code-line); color: var(--dim); 
+}
+
+.text-toggle {
+  margin-top: 4px;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.text-toggle:hover {
+ text-decoration: underline; 
+}
+
+.reasoning-scroll, .prompt-scroll {
+ max-height: var(--code-scroll-h); overflow: auto; 
+}
+
+/* 展开后是「输入 / 输出」两段的卡片：0.5px 边框、代码底色、12px 圆角、260px 内滚 */
+.io-card {
+  margin: 4px 0 4px 4px;
+  border: .5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.io-section {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 14px;
+  align-items: baseline;
+  padding: 10px 14px;
+}
+
+.io-label {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  color: var(--caption);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+}
+
+.io-text {
+  min-width: 0;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: var(--code-font);
+  line-height: var(--code-line);
+  color: var(--code-text);
+}
+
+/* 工具展开区的正文与思考块同款：限高内滚 + 超出给「展开全文」 */
+.io-scroll {
+ max-height: var(--code-scroll-h); overflow: auto; 
+}
+
+.io-scroll.open {
+ max-height: none; 
+}
+
+/* 工具输入的"命令行首行"：JSON 之外的一点强调（$ 提示符 + 加重） */
+.io-cmd {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 0;
+  font-family: var(--mono);
+  font-size: var(--code-font);
+  line-height: var(--code-line);
+  min-width: 0;
+}
+
+.io-cmd .cmd-prompt {
+ flex: none; color: var(--ok); font-weight: 600; 
+}
+
+.io-cmd .cmd-line {
+ min-width: 0; color: var(--text); font-weight: 600; word-break: break-all; 
+}
+
+.io-text[data-error="true"] {
+ color: var(--err); 
+}
+
+.io-divider {
+ flex: none; height: .5px; background: var(--border); 
+}
+
+.io-empty {
+ color: var(--caption); font-size: 12px; 
+}
+
+.io-actions {
+ display: flex; gap: 8px; padding: 0 14px 8px; 
+}
+
+.code {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--code-bg);
+  border: .5px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: var(--code-font);
+  line-height: var(--code-line);
+  color: var(--code-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* JSON 高亮：键名 / 字符串 / 数字 / 字面量（容器在这里枚举，单字母类不外溢） */
+.code .k, .io-text .k, .md-code-body .k, .prompt-text .k {
+ color: var(--key); 
+}
+
+.code .s, .io-text .s, .md-code-body .s, .prompt-text .s {
+ color: var(--str); 
+}
+
+.code .n, .io-text .n, .md-code-body .n, .prompt-text .n {
+ color: var(--num); 
+}
+
+.code .b, .io-text .b, .md-code-body .b, .prompt-text .b {
+ color: var(--bool); 
+}
+
+/* 非 JSON 的机器内容：命令行 / diff / 日志 / 状态词 / 路径（只用既有色板） */
+.cmd-line, .code .cmd, .io-text .cmd {
+ color: var(--text); font-weight: 600; 
+}
+
+.code .diffhead, .io-text .diffhead {
+ color: var(--caption); 
+}
+
+.code .hunk, .io-text .hunk {
+ color: var(--accent); 
+}
+
+.code .add, .io-text .add {
+ color: var(--ok); 
+}
+
+.code .del, .io-text .del {
+ color: var(--err); 
+}
+
+.code .bad, .io-text .bad {
+ color: var(--err); font-weight: 600; 
+}
+
+.code .warn, .io-text .warn {
+ color: var(--warn); 
+}
+
+.code .good, .io-text .good {
+ color: var(--ok); 
+}
+
+.code .path, .io-text .path {
+ color: var(--accent); 
+}
+
+.row-actions {
+ display: flex; gap: 8px; margin-top: 4px; 
+}
+
+.row-actions button {
+  appearance: none;
+  border: .5px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.row-actions button:hover {
+ background: var(--hover); color: var(--text); border-color: var(--border-strong); 
+}
+
+.images {
+ display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; 
+}
+
+/* 图片一律**左对齐、按原比例**，尺寸只有一组 token（附件段与图片轮共用）：宽不超过
+   520px、高不超过 420px，绝不撑出容器、也绝不裁切（宽高都不写死，所以没有空框）。 */
+.images img {
+  width: auto;
+  height: auto;
+  max-width: min(100%, var(--attach-img-w));
+  max-height: var(--attach-img-h);
+  border: .5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: zoom-in;
+}
+
+.note {
+ color: var(--caption); font-size: 11.5px; 
+}
+
+/* 跳转落地时的短暂高亮（轨迹 → 对话） */
+@keyframes flash-in {
+  0% { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+
+.flash {
+ animation: flash-in 1.4s var(--ease); border-radius: var(--radius-sm); 
+}
+
+/* ============================ 灯箱 ============================ */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, .82);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: zoom-out;
+}
+
+.lightbox img {
+ max-width: 92vw; max-height: 86vh; border-radius: var(--radius-sm);
+ transform-origin: center;
+ will-change: transform;
+}
+
+/* P6：拖动平移时光标示意（>1 倍才有「图比窗口大」的语义） */
+.lightbox.dragging {
+ cursor: grabbing;
+}
+
+.lightbox.dragging img {
+ cursor: grabbing;
+}
+
+.lightbox-hint {
+ color: #cfd3d6; font-size: 12px; 
+}
+
+/* 图片轮自己的折叠行（配不上调用时）：展开后是缩略图 + 那一轮的正文 */
+.disclosure-image > summary .line-name {
+ color: var(--fam-view); 
+}
+
+/* 折叠行（思考 / 工具调用）= 一行：16px 图标位 + 名称 13px + 2px 圆点 + 摘要 13px 省略号 */
+.disclosure {
+ display: flex; flex-direction: column; 
+}
+
+.disclosure > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--row-h);
+  padding: 2px 4px 2px 0;
+  border-radius: 6px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.disclosure > summary::-webkit-details-marker {
+ display: none; 
+}
+
+.disclosure > summary:hover {
+ background: var(--hover); 
+}
+
+.disclosure > summary:focus-visible {
+ outline: 2px solid var(--accent); outline-offset: -2px; 
+}
+
+.line-slot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--caption);
+}
+
+.line-caret {
+  width: 0; height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform .15s var(--ease);
+}
+
+details[open] > summary .line-caret {
+ transform: rotate(90deg); 
+}
+
+.line-icon {
+ font-size: 11px; line-height: 1; 
+}
+
+.line-name {
+ flex: none; font-size: 13px; line-height: 20px; color: var(--muted); font-weight: 400; 
+}
+
+.line-sep {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: var(--caption);
+}
+
+.line-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.line-tail {
+ flex: none; margin-left: 8px; color: var(--caption); font-size: 12px; font-family: var(--mono); 
+}
+
+.disclosure-thinking > summary .line-name {
+ color: var(--dim); 
+}
+
+/* 工具名按家族着色（跑 / 写 / 看 / 搜 / 提交），不用左侧色条 */
+.fam-shell > summary .line-name {
+ color: var(--fam-shell); 
+}
+
+.fam-write > summary .line-name {
+ color: var(--fam-write); 
+}
+
+.fam-view > summary .line-name {
+ color: var(--fam-view); 
+}
+
+.fam-search > summary .line-name {
+ color: var(--fam-search); 
+}
+
+.fam-submit > summary .line-name {
+ color: var(--fam-submit); 
+}
+
+.disclosure.status-error > summary .line-name {
+ color: var(--err); 
+}
+
+.disclosure.status-ok > summary .line-name {
+ color: var(--ok); 
+}
+
+/* ============================ Markdown 正文（自带渲染器） ============================ */
+
+/* 消息正文的 Markdown 预览（渲染器是同页脚本里的 renderMarkdown）。块级元素自己
+   管间距；长文本折叠沿用 .clamped 的渐隐遮罩；圆角/等宽/代码底色全部沿用既有
+   token（--radius / --mono / --code-bg），不引入新的配色体系。 */
+.md-body {
+  white-space: normal;
+  word-break: break-word;
+  font-size: 14px;
+  line-height: 24px;
+  color: var(--text);
+}
+
+.md-body.clamped {
+ overflow: hidden; mask-image: linear-gradient(180deg, #000 74%, transparent); 
+}
+
+.md-body > *:first-child {
+ margin-top: 0; 
+}
+
+.md-body > *:last-child {
+ margin-bottom: 0; 
+}
+
+.md-p {
+ margin: 0 0 8px; 
+}
+
+.md-h {
+ margin: 14px 0 6px; font-weight: 650; line-height: 1.35; 
+}
+
+.md-h1 {
+ font-size: 19px; 
+}
+
+.md-h2 {
+ font-size: 17px; 
+}
+
+.md-h3 {
+ font-size: 15.5px; 
+}
+
+.md-h4, .md-h5, .md-h6 {
+ font-size: 14px; color: var(--muted); 
+}
+
+.md-list {
+ margin: 0 0 8px; padding-left: 22px; 
+}
+
+.md-list .md-list {
+ margin: 2px 0 0; 
+}
+
+/* 一级嵌套 */
+.md-item {
+ margin: 2px 0; 
+}
+
+.md-quote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--muted);
+}
+
+.md-hr {
+ margin: 12px 0; border: 0; border-top: .5px solid var(--border); 
+}
+
+.md-inline-code {
+  font-family: var(--mono);
+  font-size: var(--code-font);
+  line-height: var(--code-line);
+  background: var(--chip);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.md-link {
+ color: var(--accent); text-decoration: none; 
+}
+
+.md-link:hover {
+ text-decoration: underline; 
+}
+
+.md-table-wrap {
+ margin: 0 0 10px; max-width: 100%; overflow-x: auto; 
+}
+
+.md-table {
+ border-collapse: collapse; font-size: 13px; 
+}
+
+.md-table th, .md-table td {
+  border: .5px solid var(--border);
+  padding: 4px 10px;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.md-table th {
+ background: var(--surface-2); font-weight: 600; 
+}
+
+/* 代码块 = 顶部 banner（语言名 + 复制按钮）+ 等宽正文；圆角照 --radius，
+   内容 11px/19px，单块最大高度内滚——与工具 IO 卡片同一套做法。 */
+.md-code-block {
+  margin: 0 0 10px;
+  border: .5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.md-code-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 8px 0 12px;
+  border-bottom: .5px solid var(--border);
+}
+
+.md-code-lang {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  color: var(--caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.md-code-head button {
+          /* 复制按钮：照抄工具 IO 卡片那一套 */
+  margin: 0;
+  appearance: none;
+  border: .5px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.md-code-head button:hover {
+ background: var(--hover); color: var(--text); border-color: var(--border-strong); 
+}
+
+.md-code-body {
+  margin: 0;
+  padding: 10px 14px;
+  max-height: 260px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: var(--code-font);
+  line-height: var(--code-line);
+  color: var(--code-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.md-code-body code {
+ font: inherit; background: transparent; padding: 0; 
+}

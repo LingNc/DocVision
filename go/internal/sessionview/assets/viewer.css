@@ -436,13 +436,60 @@ details[open] > summary .row-caret { transform: rotate(90deg); }
 .session-row.active { background: var(--active); }
 .session-row .row-title { flex: 1; margin: 0 6px 0 4px; }
 .session-row.active .row-title { font-weight: 500; }
-.session-row .row-time { flex: none; color: var(--caption); font-size: 12px; line-height: 20px; }
+.session-row .row-time { flex: none; margin-left: 8px; color: var(--caption); font-size: 12px; line-height: 20px; }
+.session-row .row-chip + .row-chip { margin-left: 6px; }
 .session-row .row-actions { display: none; flex: none; align-items: center; gap: 10px; }
 .session-row:hover .row-actions { display: inline-flex; }
 .session-row:hover .row-time { display: none; }
 .session-row .row-chip { color: var(--caption); font-size: 11px; white-space: nowrap; }
 .session-row .row-chip.usage-chip { font-family: var(--mono); }
 .session-row.active .row-slot { color: var(--accent); }
+
+/* ---- P8 侧栏改版（仿 DSH 的树状侧栏）------------------------------------
+ * 层级递进：项目行不缩进（文件夹图标打头），阶段行缩进一层，会话行再进
+ * 一层；展开的项目用「打开的文件夹」图标。会话方块视图：一格 20px、逐图
+ * 会话带书内序号，悬浮看完整说明，活跃会话实心、运行中有绿圈。 */
+.row-folder .folder { display: none; color: var(--dim); }
+.row-folder .folder.closed { display: inline-block; }
+details[open] > .proj-row .row-folder .folder.closed { display: none; }
+details[open] > .proj-row .row-folder .folder.open { display: inline-block; color: var(--accent); }
+
+.stage-row { padding-left: 24px; }
+.stage-progress.running { color: var(--ok); font-weight: 600; }
+.stage-progress.busy { color: var(--warn); }
+.stage-progress.idle { color: var(--caption); opacity: .72; }
+.session-row.sub1 { padding-left: 24px; }
+.session-row.sub2 { padding-left: 40px; }
+.session-overflow.sub2, .session-overflow.sub1 { padding-left: 40px; }
+.session-row.sub1 .session-overflow, .stage-group .session-overflow { padding-left: 40px; }
+
+.session-blocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 4px 10px 8px 40px;
+}
+.session-block {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: .5px solid var(--border);
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 19px;
+  text-align: center;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.session-block:hover { background: var(--active); border-color: var(--border-strong); }
+.session-block.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.session-block.live { border-color: var(--ok); box-shadow: 0 0 0 2px rgba(34, 197, 94, .22); }
+.session-block.live.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(65, 118, 230, .3); }
+.icon-btn.on { color: var(--accent); }
 
 /* 组内会话过多时只显示前 N 条 + 一个「更多会话」按钮（28px、左内边距 28px） */
 .session-overflow {
@@ -479,6 +526,8 @@ details[open] > summary .row-caret { transform: rotate(90deg); }
 .frame[data-sidebar-collapsed] .session-row .row-actions,
 .frame[data-sidebar-collapsed] .session-row .row-chip { display: none; }
 .frame[data-sidebar-collapsed] .session-row .row-slot { width: 20px; }
+.frame[data-sidebar-collapsed] .session-blocks { display: none; }
+.frame[data-sidebar-collapsed] .row-folder .folder { width: 16px; height: 16px; }
 
 .side-totals {
   flex: none;

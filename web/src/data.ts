@@ -1,11 +1,11 @@
 /*
  * 数据层：/api/index 轮询（2 秒、带列表签名守卫）与 /api/session 增量拉取。
- * 旧页 refreshIndex/applyIndex/selectSession/pullSession 的移植；行数据的
- * 渲染入口（renderTimeline 等）在后续块接上，这里先把数据与状态流跑通。
+ * 旧页 refreshIndex/applyIndex/selectSession/pullSession 的移植；渲染由
+ * Timeline.vue / DetailsPanel.vue 的 computed 响应式接管，这里只管数据流。
  */
 import { state, POLL_MS, setBannerText } from './state'
-import { renderTimeline, appendLines, scrollToBottom } from './legacy/timeline'
-import { findSession, normalizeLines, indexCallEstimates, projectOf, groupKey, setCollapsed } from './legacy/sidebar'
+import { findSession, normalizeLines, indexCallEstimates, groupKey, setCollapsed } from './legacy/sidebar'
+import type { PartialInfo } from './legacy/types'
 
 let pullSeq = 0
 
@@ -99,13 +99,17 @@ export function pullSession(reset: boolean): Promise<void> {
       }
       state.nextFrom = payload.nextFrom
       state.curSize = payload.size
+      // P7：流式快照跟随当前会话——消息完整落盘后服务端不再返回 partial，
+      // 这里同步置空，快照卡片自然消失。
+      state.partial = (payload.partial as PartialInfo | undefined) || null
       if (reset) {
         state.lines = normalizeLines(payload.lines)
         indexCallEstimates(state.lines)
-        renderTimeline()
-        if (state.follow) scrollToBottom()
+        // 滚动与重渲由 Timeline.vue 的 watch（会话 id / 行数）接管
       } else {
-        appendLines(normalizeLines(payload.lines))
+        const fresh = normalizeLines(payload.lines)
+        indexCallEstimates(fresh)
+        fresh.forEach((line) => { state.lines.push(line) })
       }
     })
     .catch((err: Error) => {
@@ -117,19 +121,17 @@ export function selectSession(id: string): void {
   const s = findSession(id)
   state.current = s
   state.lines = []
+  state.partial = null
   state.callEst = {}
   state.nextFrom = 0
   state.curSize = -1
   state.curMtime = 0
   state.meta = null
   state.trajOpen = {}
-  // 高亮走响应式；不重建侧栏（展开状态与滚动位置不被打断）。
-  if (!s) {
-    renderTimeline()
-    return
-  }
-  renderTimeline()
-  pullSession(true).then(() => scrollToBottom())
+  // 高亮与消息流重建都走响应式（Timeline computed）；不重建侧栏
+  // （展开状态与滚动位置不被打断）。滚动由 Timeline 的 watch 接管。
+  if (!s) return
+  void pullSession(true)
 }
 
 /* boot：先拉一次索引并选中第一个活跃会话；然后 2 秒轮询（页面隐藏时跳过）。 */

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 迁移纪律：本组件（以及后续所有组件）不写任何样式——视觉全部来自
-// 整卷沿用的旧页样式表（src/styles/viewer.css）。模板结构照
+// 全局样式在 styles/base.css（token/共享词汇），本组件样式在文件尾 <style scoped>。模板结构照
 // go/internal/sessionview/assets/viewer.html 的骨架逐节点复刻。
 // 块 1：三栏骨架交互；块 2：侧栏（数据层 + 分组树）接上。
 import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
@@ -15,6 +15,8 @@ import {
   layout,
   lightbox,
   loadState,
+  resetLightbox,
+  zoomLightbox,
   persistLayout,
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
@@ -30,12 +32,11 @@ import {
 } from './state'
 import { bootData, refreshIndex, revealProject } from './data'
 import { projectOf, sessionTitleOf } from './legacy/sidebar'
-import { registerRenderDetails, registerRenderTrajectory } from './state'
-import { renderTrajectory as renderTraj } from './legacy/trajectory'
-import { renderDetails as renderDet } from './legacy/details'
 import Sidebar from './components/Sidebar.vue'
 import Timeline from './components/Timeline.vue'
 import InlineMD from './components/InlineMD.vue'
+import Trajectory from './components/Trajectory.vue'
+import DetailsPanel from './components/DetailsPanel.vue'
 
 const frame = ref<HTMLElement | null>(null)
 
@@ -85,17 +86,17 @@ function onClickFollow() {
 }
 
 function onClickCollapseThinking() {
+  // 思考块组件 watch forceCollapse 自动收起/恢复（含增量追加进来的）。
   state.forceCollapse = !state.forceCollapse
-  if (state.forceCollapse) {
-    // 作用于消息流里所有思考行（含增量追加进来的）。
-    document.querySelectorAll('details.disclosure-thinking').forEach((d) => {
-      ;(d as HTMLDetailsElement).open = false
-    })
-  }
 }
 
 function onClickOnlyTools() {
   state.onlyTools = !state.onlyTools // Timeline.vue 的 watch 负责重渲
+}
+
+function onClickThumbs() {
+  state.showThumbs = !state.showThumbs
+  storeSet('showThumbs', state.showThumbs ? '1' : '0') // AssistantMsg 的 v-if 响应式跟随
 }
 
 function onClickMarkdown() {
@@ -118,6 +119,7 @@ function scrollToBottom() {
 /* 徽标与面包屑：旧页 renderHeader 行为——选中会话后 #header-actions 整体
  * 重建为摘要徽标（mode-badge 从 DOM 移除）；未选中时才是 live 徽标。 */
 const badgeText = computed(() => (state.polling ? '实时' : '实时（已断开）'))
+const badCount = computed(() => state.lines.reduce((n: number, l: any) => n + (l && l.bad ? 1 : 0), 0))
 const headerSummary = computed(() => {
   const cur = state.current
   if (!cur) return ''
@@ -125,7 +127,7 @@ const headerSummary = computed(() => {
   parts.push(cur.messages + ' 条消息')
   if (state.lines.length) parts.push(state.lines.length + ' 行')
   parts.push(fmtSize(cur.size))
-  if (state.badLines) parts.push('坏行 ' + state.badLines)
+  if (badCount.value) parts.push('坏行 ' + badCount.value)
   return parts.join(' · ')
 })
 const curProject = computed(() => (state.current ? state.current.project || projectOf(state.current.id) : ''))
@@ -134,8 +136,8 @@ const sessionTitle = computed(() => (state.current ? sessionTitleOf(state.curren
 /* 横幅：坏行提示与拉取失败共用一条（旧页 updateBanner/setBanner 的语义）。
  * 坏行优先；拉取失败的信息保留到坏行出现或下次成功渲染时。 */
 const bannerText = computed(() => {
-  if (state.badLines > 0) {
-    return '已跳过 ' + state.badLines + ' 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）'
+  if (badCount.value > 0) {
+    return '已跳过 ' + badCount.value + ' 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）'
   }
   return state.pullError
 })
@@ -150,19 +152,56 @@ function onKeydown(ev: KeyboardEvent) {
   if (ev.key === ']') toggleDetails()
 }
 
-// 详情栏重渲触发（旧页在这些路径上显式调 renderDetails）。
-watch(
-  // 数组多源形式（逐元素比较）：state.current 每次轮询都会被换成新对象，
-  // 用 getter 返回新数组的写法会因引用不同每 2 秒误触发一次重渲。
-  [
-    () => (state.current ? state.current.id : ''),
-    () => state.lines.length,
-    () => state.unit,
-    () => state.markdown,
-    () => state.details,
-  ],
-  () => { renderDet() },
-)
+/* P6 灯箱交互：滚轮缩放（围绕鼠标点）、按住拖动平移、双击复位。
+ * 「点击关闭」与「双击复位」天然冲突（双击 = 两次 click）——单击延迟 260ms
+ * 再关，第二击落在窗口内就按双击复位处理；拖动过的 pointer 序列吞掉 click。 */
+let lbDrag: { x: number; y: number; tx: number; ty: number; moved: boolean } | null = null
+let lbClickTimer: ReturnType<typeof setTimeout> | null = null
+let lbSuppressClick = false
+
+function onLbWheel(ev: WheelEvent) {
+  ev.preventDefault()
+  const target = (ev.currentTarget as HTMLElement).querySelector('#lightbox-img') as HTMLElement | null
+  if (!target) return
+  zoomLightbox(ev.deltaY > 0 ? 0.9 : 1 / 0.9, ev.clientX, ev.clientY, target.getBoundingClientRect())
+}
+
+function onLbPointerdown(ev: PointerEvent) {
+  if (ev.button !== 0) return
+  lbDrag = { x: ev.clientX, y: ev.clientY, tx: lightbox.tx, ty: lightbox.ty, moved: false }
+  ;(ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId)
+}
+
+function onLbPointermove(ev: PointerEvent) {
+  if (!lbDrag) return
+  const dx = ev.clientX - lbDrag.x
+  const dy = ev.clientY - lbDrag.y
+  if (!lbDrag.moved && Math.hypot(dx, dy) > 3) lbDrag.moved = true
+  if (lbDrag.moved) {
+    lightbox.tx = lbDrag.tx + dx
+    lightbox.ty = lbDrag.ty + dy
+  }
+}
+
+function onLbPointerup() {
+  lbSuppressClick = lbDrag?.moved === true
+  lbDrag = null
+}
+
+function onLbClick() {
+  if (lbSuppressClick) {
+    lbSuppressClick = false
+    return
+  }
+  if (lbClickTimer) return // 双击的第二次 click——交给 dblclick 处理
+  lbClickTimer = setTimeout(() => { lbClickTimer = null; closeLightbox() }, 260)
+}
+
+function onLbDblclick(ev: MouseEvent) {
+  ev.preventDefault()
+  if (lbClickTimer) { clearTimeout(lbClickTimer); lbClickTimer = null }
+  resetLightbox()
+}
 
 let ro: ResizeObserver | null = null
 let pollTimer = 0
@@ -183,8 +222,6 @@ onMounted(() => {
     }
   }
   document.addEventListener('keydown', onKeydown)
-  registerRenderTrajectory(renderTraj)
-  registerRenderDetails(renderDet)
   // 数据层：首拉 + 2 秒轮询（页面隐藏时跳过）。
   bootData()
   pollTimer = window.setInterval(() => {
@@ -250,9 +287,8 @@ onBeforeUnmount(() => {
             <template v-else>
               <button class="crumb is-link" type="button" title="在侧栏里定位到这个项目" @click="revealProject(curProject)">{{ curProject }}</button>
               <span class="crumb-sep">›</span>
-              <span class="crumb crumb-current" :title="state.current.id">
-                <InlineMD :text="sessionTitle"></InlineMD>
-              </span>
+              <!-- 会话名本身就是行内 Markdown 渲染根（旧页 nameNode('span','crumb crumb-current',…)），不再多包一层 -->
+              <InlineMD :text="sessionTitle" tag="span" class="crumb crumb-current" :title="state.current.id"></InlineMD>
             </template>
           </nav>
           <div id="header-actions" class="header-actions">
@@ -271,6 +307,7 @@ onBeforeUnmount(() => {
             <button id="collapse-thinking" class="tab-toggle" type="button" :aria-pressed="state.forceCollapse ? 'true' : 'false'" title="把所有消息的思考过程折叠起来" @click="onClickCollapseThinking">折叠全部思考</button>
             <button id="only-tools" class="tab-toggle" type="button" :aria-pressed="state.onlyTools ? 'true' : 'false'" title="只显示工具调用与工具结果" @click="onClickOnlyTools">仅看工具调用</button>
             <button id="md-toggle" class="tab-toggle" type="button" :aria-pressed="state.markdown ? 'true' : 'false'" :title="state.markdown ? '消息正文按 Markdown 渲染（标题 / 列表 / 代码块 / 表格），点击回到纯文本' : '消息正文按纯文本显示（pre-wrap），点击改用 Markdown 渲染'" @click="onClickMarkdown">Markdown</button>
+            <button id="thumb-toggle" class="tab-toggle" type="button" :aria-pressed="state.showThumbs ? 'true' : 'false'" :title="state.showThumbs ? '显示看图调用下的缩略图预览行，点击隐藏' : '已隐藏缩略图预览行，点击显示'" @click="onClickThumbs">缩略图</button>
             <button id="unit-toggle" class="tab-toggle" type="button" :aria-pressed="state.unit === 'char' ? 'false' : 'true'" :title="state.unit === 'char' ? '计数按字符数显示（精确值），点击改为 token' : '计数按 token 显示（本地估算，带 ≈），点击改为字符'" @click="onClickUnit">{{ state.unit === 'char' ? '字符' : 'token' }}</button>
             <button id="theme-toggle" class="tab-toggle" type="button" :aria-pressed="state.theme === 'dark' ? 'true' : 'false'" :title="state.theme === 'dark' ? '切换为白天模式（浅色，默认）' : '切换为夜间模式（深色）'" @click="toggleTheme">{{ state.theme === 'dark' ? '☀️ 浅色' : '🌙 深色' }}</button>
           </div>
@@ -279,7 +316,7 @@ onBeforeUnmount(() => {
       <div id="banner" class="banner" :class="{ hidden: !bannerText }">{{ bannerText }}</div>
       <div class="view-area">
         <Timeline></Timeline>
-        <div id="trajectory" class="trajectory" :class="{ hidden: state.view === 'chat' }"></div>
+        <Trajectory />
       </div>
     </main>
 
@@ -305,12 +342,308 @@ onBeforeUnmount(() => {
         <span class="details-title">详情</span>
         <button id="details-close" class="icon-btn" type="button" title="关闭详情面板" aria-label="关闭详情面板" @click="state.details > 0 && toggleDetails()">✕</button>
       </div>
-      <div id="details-body" class="details-body"></div>
+      <DetailsPanel />
     </aside>
   </div>
-  <div id="lightbox" class="lightbox" :class="{ hidden: !lightbox.open }" @click="closeLightbox">
-    <!-- 旧页 img 不拦冒泡：点图也会冒到灯箱背景关闭（行为保持一致） -->
-    <img id="lightbox-img" :src="lightbox.open ? lightbox.url : undefined" :alt="lightbox.ref">
-    <div class="lightbox-hint">点击空白处或按 Esc 关闭</div>
+  <div id="lightbox" class="lightbox" :class="{ hidden: !lightbox.open }" @click="onLbClick"
+    @wheel="onLbWheel" @pointerdown="onLbPointerdown" @pointermove="onLbPointermove"
+    @pointerup="onLbPointerup" @pointercancel="onLbPointerup" @dblclick="onLbDblclick">
+    <!-- 旧页 img 不拦冒泡：点图也会冒到灯箱背景关闭（行为保持一致；P6 拖动过则不关） -->
+    <img id="lightbox-img" :src="lightbox.open ? lightbox.url : undefined" :alt="lightbox.ref"
+      :style="{ transform: 'translate(' + lightbox.tx + 'px,' + lightbox.ty + 'px) scale(' + lightbox.scale + ')' }">
+    <div class="lightbox-hint">滚轮缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭</div>
   </div>
 </template>
+
+<style scoped>
+/* ============================ 三栏骨架（DSH AppFrame） ============================ */
+
+.frame {
+  position: relative;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 0px;
+  grid-template-rows: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  transition: grid-template-columns .18s var(--ease);
+}
+
+.frame[data-dragging] {
+ transition: none; cursor: col-resize; user-select: none; 
+}
+
+@media (prefers-reduced-motion: reduce) {
+ .frame { transition: none; } 
+}
+
+.sidebar-col {
+  grid-column: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--sidebar-bg);
+  border-right: .5px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.frame[data-sidebar-collapsed] .sidebar-col {
+ border-right-color: transparent; 
+}
+
+.center-col {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* 详情栏头部（元素在本组件渲染；样式曾在 DetailsPanel 的 scoped 里丢匹配） */
+.details-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  border-bottom: .5px solid var(--border);
+}
+
+.details-title {
+ flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .2px;
+}
+
+.details-col {
+  grid-column: 3;
+  min-width: 0;
+  overflow: hidden;
+  border-left: .5px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.frame[data-details-collapsed] .details-col {
+ border-left-color: transparent; 
+}
+
+/* 8px 命中区、居中 4px 偏移 —— 与 DSH 的 DragHandle 一致 */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  margin-left: -4px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+  transition: left .18s var(--ease), right .18s var(--ease);
+}
+
+.frame[data-dragging] .handle {
+ transition: none; 
+}
+
+@media (prefers-reduced-motion: reduce) {
+ .handle { transition: none; } 
+}
+
+.handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 34px;
+  transform: translate(-50%, -50%);
+  border-radius: 3px;
+  background: var(--border-strong);
+  opacity: 0;
+  transition: opacity .14s var(--ease);
+}
+
+.handle:hover::after, .handle[data-dragging="true"]::after {
+ opacity: 1; background: var(--accent); 
+}
+
+.handle[data-hidden="true"] {
+ display: none; 
+}
+
+/* ============================ 中栏头部：面包屑 + 标签页 ============================ */
+
+.center-header {
+  flex: none;
+  position: relative;
+  padding: 12px 28px 0 20px;
+  background: var(--bg);
+}
+
+.center-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: .5px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.title-row {
+ display: flex; align-items: center; min-height: 32px; gap: 0; 
+}
+
+.crumbs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.crumb {
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb.is-link {
+ cursor: pointer; 
+}
+
+.crumb.is-link:hover {
+ background: var(--hover); 
+}
+
+.crumb-current {
+ color: var(--text); font-weight: 600; 
+}
+
+.crumb-sep {
+ flex: none; color: var(--caption); font-size: 14px; line-height: 20px; 
+}
+
+.header-actions {
+ flex: none; display: flex; align-items: center; gap: 8px; margin-left: 20px; 
+}
+
+.header-actions:empty {
+ display: none; 
+}
+
+.tabs-row {
+ display: flex; align-items: flex-end; gap: 12px; 
+}
+
+.tabs {
+ display: flex; gap: 36px; padding-left: 8px; margin-top: 4px; 
+}
+
+.tab {
+  position: relative;
+  padding: 0 0 11px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  height: 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.tab:hover {
+ color: var(--muted); 
+}
+
+.tab-active {
+ color: var(--accent); 
+}
+
+.tab-active::after {
+ background: var(--accent); 
+}
+
+.tab:focus-visible {
+ outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; 
+}
+
+.tab-tools {
+ flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; padding-bottom: 6px; 
+}
+
+.tab-toggle {
+  height: 20px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tab-toggle:hover {
+ color: var(--text); background: var(--hover); 
+}
+
+.tab-toggle[aria-pressed="true"] {
+ color: var(--accent); background: var(--accent-soft); 
+}
+
+.tab-toggle:focus-visible {
+ outline: 1px solid var(--accent); outline-offset: 1px; 
+}
+
+.banner {
+  flex: none;
+  margin: 8px 28px 0 20px;
+  padding: 6px 10px;
+  border: .5px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.view-area {
+ flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; 
+}
+
+@media (max-width: 1023px) {
+  .center-header { padding: 10px 16px 0 12px; }
+  .tab-tools { gap: 0; }
+}
+</style>

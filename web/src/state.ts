@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { type Line, type ImageAttr, type Session, type PartialInfo } from './legacy/types'
 
 /*
  * 全局状态：字段名与旧页 viewer.js 的 state 一一对应，后续按块移植的
@@ -84,12 +85,23 @@ export function relTime(value: string | number): string {
 
 // 类型先宽着走（any）；逐块移植到哪一块，哪一块再收紧类型。
 /* eslint-disable @typescript-eslint/no-explicit-any */
+/*
+ * 行号锚点注册表（**非响应式**，故意不放进 reactive(state)——把 DOM 节点
+ * 包进响应式代理纯属浪费还容易踩坑）。各消息组件挂载时注册自己的根元素、
+ * 卸载时注销；轨迹页 jumpToLine 用它跳回对话。切会话时 clearAnchors()。
+ */
+const anchors = new Map<number, HTMLElement>()
+export function registerAnchor(n: number, el: HTMLElement): void { anchors.set(n, el) }
+export function unregisterAnchor(n: number, el: HTMLElement): void { if (anchors.get(n) === el) anchors.delete(n) }
+export function anchorOf(n: number): HTMLElement | null { return anchors.get(n) || null }
+export function clearAnchors(): void { anchors.clear() }
+
 export const state = reactive({
   root: '',
   generated: '',
-  sessions: [] as any[],
-  current: null as any,
-  lines: [] as any[],
+  sessions: [] as Session[],
+  current: null as Session | null,
+  lines: [] as Line[],
   nextFrom: 0,
   curSize: -1,
   curMtime: 0,
@@ -97,19 +109,14 @@ export const state = reactive({
   follow: true, // 旧页 live 模式默认开
   forceCollapse: false,
   onlyTools: false,
-  msgSeq: 0,
-  toolSeq: 0,
-  calls: new Map<string, any>(),
-  callNodes: {} as Record<string, any>,
-  callEst: {} as Record<string, any>,
-  imgAttr: null as any,
-  anchors: {} as Record<string, any>,
-  badLines: 0,
+  callEst: {} as Record<string, number>,
+  imgAttr: null as { sig: string; map: Record<number, ImageAttr>; candRound: Record<string, number>; roundLast: Record<string, string> } | null,
   pullError: '',
   polling: false,
   theme: 'light',
   view: 'chat',
   markdown: true,
+  showThumbs: true, // P13：工具卡下的缩略图预览行显隐（页签行「缩略图」开关，记忆 showThumbs）
   unit: 'token',
   sidebar: SIDEBAR_DEFAULT,
   details: 0,
@@ -118,9 +125,15 @@ export const state = reactive({
   collapsed: {} as Record<string, boolean>,
   overflow: {} as Record<string, boolean>,
   listSig: '',
-  meta: null as any,
+  meta: null as unknown,
   trajKinds: {} as Record<string, boolean>,
   trajOpen: {} as Record<string, boolean>,
+  // P9：轨迹页选中的行（transcript 行号）。选中后右侧详情栏顶部显示该步的
+  // 完整输入/输出/图片；再点同一行取消；跳对话按钮仍走 jumpToLine。
+  trajSelected: null as string | null,
+  // P7：当前会话的流式快照（<转录>.partial；消息完整落盘即消失）。
+  // 轮询时只在「当前会话正在 live」时读取，切会话/非 live 清空。
+  partial: null as PartialInfo | null,
 })
 
 /* ---------- 布局求解（computeColumns 逐行照旧页：纯函数、无迟滞） ---------- */
@@ -193,7 +206,6 @@ export function toggleDetails(): void {
         state.sidebar = 0
       }
     }
-    renderDetails()
   }
   persistLayout()
   applyLayout()
@@ -215,6 +227,7 @@ export function loadState(): void {
   state.collapsed = storeJSON('collapsed', {}) as Record<string, boolean>
   state.overflow = storeJSON('overflow', {}) as Record<string, boolean>
   state.markdown = storeGet('markdown') !== '0'
+  state.showThumbs = storeGet('showThumbs') !== '0'
   state.unit = storeGet('unit') === 'char' ? 'char' : 'token'
   // Number(null) === 0：必须先判"存没存过"，否则首次访问会把侧栏读成折叠轨道。
   const rawSidebar = storeGet('layout.sidebar')
@@ -253,59 +266,59 @@ export function toggleTheme(): void {
 
 export function switchView(view: string): void {
   state.view = view === 'trajectory' ? 'trajectory' : 'chat'
-  if (state.view === 'trajectory') {
-    renderTrajectory() // 轨迹块注册的实现（未注册时空操作）
-  }
 }
 
-/* ---------- 灯箱（旧页 openLightbox/closeLightbox 同名；点击接线在缩略图块） ---------- */
+/* ---------- 灯箱（旧页 openLightbox/closeLightbox 同名；点击接线在缩略图块） ----------
+ * P6：滚轮缩放（围绕鼠标点）+ 按住拖动平移 + 双击复位。transform 走
+ * translate(tx,ty) scale(s)、origin 默认中心；锚点换算见 zoomLightbox。 */
 
-export const lightbox = reactive({ open: false, url: '', ref: '' })
+export const lightbox = reactive({ open: false, url: '', ref: '', scale: 1, tx: 0, ty: 0 })
 
 export function openLightbox(url: string, ref: string): void {
   lightbox.open = true
   lightbox.url = url
   lightbox.ref = ref
+  lightbox.scale = 1
+  lightbox.tx = 0
+  lightbox.ty = 0
 }
 
 export function closeLightbox(): void {
   lightbox.open = false
   lightbox.url = ''
   lightbox.ref = ''
+  lightbox.scale = 1
+  lightbox.tx = 0
+  lightbox.ty = 0
 }
 
-/* ---------- 数据层占位（后续块替换成真实现） ---------- */
-
-/* 旧页 scrollToBottom：把消息流滚到底部（自动跟随/切会话用）。 */
-export function scrollToBottomOfTimeline(): void {
-  window.setTimeout(() => {
-    const el = document.getElementById('timeline')
-    if (el) el.scrollTop = el.scrollHeight
-  }, 0)
+/** 滚轮缩放：factor<1 放大。锚点 = 鼠标相对图像中心的偏移 p，
+ *  要求缩放后同一内容点仍停在鼠标下：t' = t + p·(s − s')。 */
+export function zoomLightbox(factor: number, mx: number, my: number, rect: DOMRect): void {
+  const s0 = lightbox.scale
+  const s1 = Math.min(8, Math.max(0.15, s0 * factor))
+  if (s1 === s0) return
+  const cx = rect.left + rect.width / 2
+  const cy = rect.top + rect.height / 2
+  const px = (mx - cx - lightbox.tx) / s0
+  const py = (my - cy - lightbox.ty) / s0
+  lightbox.tx += px * (s0 - s1)
+  lightbox.ty += py * (s0 - s1)
+  lightbox.scale = s1
 }
+
+export function resetLightbox(): void {
+  lightbox.scale = 1
+  lightbox.tx = 0
+  lightbox.ty = 0
+}
+
+/* ---------- 数据层接口 ---------- */
 
 /* 旧页 setBanner：错误横幅（坏行提示由 updateBanner 逻辑接管，见 App.vue）。 */
 export function setBannerText(text: string): void {
   state.pullError = text
 }
 
-export function refreshIndex(): Promise<void> {
-  return Promise.resolve()
-}
 
-/* 侧栏块实现：展开装着该项目的分组并滚动到位。 */
-export function revealProject(project: string): void {
-  void project
-}
 
-export function renderTimeline(): void {}
-
-/* ---------- 渲染入口注册表：各块组件实现，这里只留挂点（避免循环 import） ---------- */
-
-let _renderTrajectory: () => void = () => {}
-export function registerRenderTrajectory(fn: () => void): void { _renderTrajectory = fn }
-export function renderTrajectory(): void { _renderTrajectory() }
-
-let _renderDetails: () => void = () => {}
-export function registerRenderDetails(fn: () => void): void { _renderDetails = fn }
-export function renderDetails(): void { _renderDetails() }

@@ -1525,6 +1525,12 @@ func TestProjectGroupMultiProjectLayout(t *testing.T) {
 	writeFile(t, legacy2, transcript(`{"t":"msg","role":"user","text":"矢量"}`))
 	writeFile(t, filepath.Join(root, "finally_latex", "progress_items", ".keep"), "")
 
+	// 书直接挂在扫描根下（实际部署的布局）：work/sessions 收转录，是现代
+	// 布局，尽管书目录本身是工作区，也**不**是 legacy（T13：徽标误显）。
+	bookC := jsonl(root, "概率论-根挂", "work", "sessions", "convert_02.jsonl")
+	writeFile(t, bookC, transcript(`{"t":"msg","role":"user","text":"转换2"}`))
+	writeFile(t, filepath.Join(root, "概率论-根挂", ".docvision_project.json"), `{"name":"概率论-根挂"}`)
+
 	// 既不是工作区、也不是结构名的目录：分组退回第一层，不能凭空造组。
 	plain := jsonl(root, "latex_project", "scratch", "notes.jsonl")
 	writeFile(t, plain, transcript(`{"t":"msg","role":"user","text":"随手记"}`))
@@ -1548,6 +1554,8 @@ func TestProjectGroupMultiProjectLayout(t *testing.T) {
 		{"finally_latex/sessions/vector_y.jsonl", "finally_latex", true},
 		// 容器本身不是工作区（书都在子目录里）：只退到容器名，不算 legacy。
 		{"latex_project/scratch/notes.jsonl", "latex_project", false},
+		// 书直接挂根下、转录在 work/sessions/ 里：现代布局，不挂徽标（T13）。
+		{"概率论-根挂/work/sessions/convert_02.jsonl", "概率论-根挂", false},
 	}
 	for _, c := range cases {
 		got, ok := byID[c.id]
@@ -1794,5 +1802,60 @@ func TestViewerCodeTypographyUsesOneToken(t *testing.T) {
 		if strings.Contains(cssRule(t, css, sel), "11.5px") || strings.Contains(cssRule(t, css, sel), "12.5px") {
 			t.Errorf("%s 还留着分叉的字号", sel)
 		}
+	}
+}
+
+func TestChapterOrderOf(t *testing.T) {
+	cases := map[string]int{
+		"convert_chapter_001.jsonl": 1,
+		"checker_chapter_012.jsonl": 12,
+		"convert-chapter-3.jsonl":   3,
+		"style-fix_chapter_007.jsonl": 7,
+		"style_session.jsonl":       0,
+		"chapters.jsonl":            0,
+		"vector_x__deadbeef__label.jsonl": 0,
+	}
+	for name, want := range cases {
+		if got := chapterOrderOf(name); got != want {
+			t.Errorf("chapterOrderOf(%q) = %d, want %d", name, got, want)
+		}
+	}
+}
+
+func TestEndStateOf(t *testing.T) {
+	if got := endStateOf(transcriptStat{SawSubmit: true}); got != "done" {
+		t.Errorf("submit → %q, want done", got)
+	}
+	if got := endStateOf(transcriptStat{SawTool: true}); got != "error" {
+		t.Errorf("tool-but-no-submit → %q, want error", got)
+	}
+	if got := endStateOf(transcriptStat{}); got != "" {
+		t.Errorf("no receipts → %q, want empty (pending)", got)
+	}
+}
+
+func TestReadStatReceiptSignals(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "convert_chapter_001.jsonl")
+	body := strings.Join([]string{
+		`{"t":"meta","kind":"session"}`,
+		`{"t":"msg","role":"user","text":"go"}`,
+		`{"t":"msg","role":"tool","tool_call_id":"c1","text":"COMPILE FAILED: l.13"}`,
+		`{"t":"msg","role":"assistant","text":"Submitted: nothing yet"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil { t.Fatal(err) }
+	stat, err := readStat(p)
+	if err != nil { t.Fatal(err) }
+	if !stat.SawTool || stat.SawSubmit {
+		t.Errorf("failed-run transcript: SawTool=%v SawSubmit=%v, want true/false", stat.SawTool, stat.SawSubmit)
+	}
+	if endStateOf(stat) != "error" { t.Errorf("endState = %q, want error", endStateOf(stat)) }
+
+	body2 := strings.Replace(body, `"text":"COMPILE FAILED: l.13"`, `"text":"SUBMITTED. Reply with a one-line confirmation."`, 1)
+	if err := os.WriteFile(p, []byte(body2), 0o644); err != nil { t.Fatal(err) }
+	stat2, err := readStat(p)
+	if err != nil { t.Fatal(err) }
+	if !stat2.SawSubmit || endStateOf(stat2) != "done" {
+		t.Errorf("submitted transcript: endState = %q, want done", endStateOf(stat2))
 	}
 }
