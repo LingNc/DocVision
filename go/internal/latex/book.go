@@ -119,9 +119,16 @@ func (r *Runner) livePhaseRowAt(id, label string, start time.Time) (hook func(ro
 				close(stop)
 				ticker.Stop()
 				<-done // 汇合：已在途的一帧不得画在清行之后
-				// 行是"会消失的"：阶段结束时从实时块里摘掉，最后由调用方
-				// （或下面这句）把定格行作为普通行留在滚动区里。
+				// 行是"会消失的"：阶段结束时从实时块里摘掉。T28：
+				// 把定格行（轮次/工具调用/已用）作为普通行留在滚动区——
+				// 每个跑过的流程在终端上都留着最终状态，下一个流程开新
+				// 行实时刷，不会被顶掉。
 				row.Remove()
+				mu.Lock()
+				finalText := fmt.Sprintf("[%s] 轮次 %d · 工具调用 %d · 已用 %s",
+					label, rounds, tools, fmtDuration(time.Since(start)))
+				mu.Unlock()
+				r.log.PrintConsole(finalText)
 			})
 		}
 }

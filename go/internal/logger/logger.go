@@ -494,9 +494,8 @@ func (l *Logger) PrintConsole(line string) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.quiet {
-		return
-	}
+	// T28：不做 quiet 门禁——PrintConsole 的全部调用点（阶段说明行、进度
+	// 行定格、最终汇总）都是"必须让用户看见"的行；quiet 只压 Log() 明细。
 	l.eraseLiveLocked()
 	fmt.Print(line)
 	l.paintLiveLocked()

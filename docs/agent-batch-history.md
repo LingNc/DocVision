@@ -1202,3 +1202,16 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### 文档
 - docs/latex.md 档位1 第 4 步补终审回写/跳过说明；CHANGELOG [Unreleased] Fixed 一条；AGENTS.md 档位1 流程与续跑语义条目同步；批次历史（本批）。
+
+### 补充（同日，T28 第二轮）
+
+- 用户澄清 T28 真意：终端上每个流程的 `[type] 轮次 N · 工具调用 M · 已用 Xs` 行完成后应**定格保留**，下一个流程另起新行——此前 `fin()` 只把行从实时块摘掉，终态直接消失。
+- 实现：`livePhaseRowAt` 的 `fin()` 在 `row.Remove()` 后把定格行 `PrintConsole` 进滚动区（36 个 checker 行随完成逐个定格）。
+- 顺藤摸出真 bug：`PrintConsole` 被 `l.quiet` 门禁，而紧凑模式（RunBook `SetQuiet(true)`）下 quiet 恰为 true——**阶段说明行（note/phaseNote）、最终汇总、本批续跑摘要全都从未上过屏**（T11 只把 `Log()` 明细压掉了，门禁却同时吞了专用显示通道）。修复 = 去掉 PrintConsole 的 quiet 门禁（调用点全部是必须显示的行），注释写明 quiet 只压 Log() 明细。
+- 验证：`go test ./...` 全绿；人工走查：紧凑模式下 style → chapters → convert → checker×36 → assemble 每行终态留在滚动区，实时块只含当前行。
+
+### 用户问"convert/checker 之后的流程去哪了"（答疑批次）
+
+- 原设计仍在：convert 逐章（问题打回同一会话修）→ checker 逐章核对 → **styleFeedbackLoop** 收集 36 份工作汇报，**多数**报告 cls/手册问题才打回原样式会话修样式并重跑 convert（少数派留给 checker/终审）→ assemble（编译失败→修复会话）→ 终审 → out/。
+- 李艳芳这本书的实际情况（日志 22825 行）：36 份汇报、4 份有问题 = 少数派（4×2 ≤ 36）→ 按设计**不打回**，所以没有 style-feedback 会话；全书一次编译通过 → 没有修复会话；终审跑了但**旧二进制不写转录**（上一批已修，待部署）——所以 UI 到 checker 就"没了"。style 会话转录在 `work/style_session.jsonl` 一直在。
+- 给用户的关键事实：昨晚+今晚两轮终审（72+63 轮）的转录是真没写过、无法恢复；新二进制部署后终审/修复会话都会有转录进 WebUI。
