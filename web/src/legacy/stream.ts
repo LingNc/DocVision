@@ -21,6 +21,8 @@ export interface CallItem {
   key: string
   call: ToolCall
   id: string
+  /** P10：所在 assistant 行的轮次哈希（报障时引用，轨迹页同源）。 */
+  h?: string
   name: string
   fam: string
   argsText: string
@@ -57,6 +59,7 @@ function callItemsOf(line: Line, sid: string): CallItem[] {
       key: call.id || 'call' + line.n + '-' + (line.tool_calls || []).indexOf(call),
       call,
       id: call.id || '',
+      h: line.h,
       name,
       fam: toolFamily(name),
       argsText,
@@ -96,6 +99,7 @@ export function callTail(item: CallItem): string {
   const attachments = item.attachments.reduce((s, a) => s + ((a.line.images || []).length), 0) +
     item.outImages.reduce((s, a) => s + ((a.line.images || []).length), 0)
   if (attachments) tail += ' · 附件 ' + attachments + ' 张（user 轮）'
+  if (item.h) tail += ' · h=' + item.h // P10：轮次哈希，报障可引用
   return tail
 }
 

@@ -59,6 +59,8 @@ export interface Line {
   /** 带图 user 轮的图片引用（file://media/<sha>.jpg 之类）。 */
   images?: string[]
   ts?: string
+  /** P10：轮次内容哈希（会话写入端落盘的 h，12 hex），报障定位用。 */
+  h?: string
   est?: LineEst
   /** meta 行：模型名 / 工具清单 / meta 种类。 */
   kind?: string
@@ -107,6 +109,8 @@ export interface PartialInfo {
 
 export interface Session {
   id: string
+  /** P10：转录文件内容哈希（12 hex），详情栏「会话哈希」展示。 */
+  sha?: string
   /** 相对路径第一段 = 项目名（projectOf 的结果，接口直接给）。 */
   project?: string
   stage?: string

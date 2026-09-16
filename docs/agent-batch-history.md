@@ -1029,3 +1029,18 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **问 3（会话"运行中/失败"来回跳）**：两层根因——① `LiveWindow = 60s`（mtime 距今 60s 内才算 live），模型一轮思考+限流退避很容易超 60s 不写转录，绿点掉成暗；② 更要命的是 `SawTool && !SawSubmit → endState=error`（"干过活但没交"），**运行中的会话天然就是这个形态**——live 绿脉冲一盖看不出，窗口一过红色就露出来、下一笔写入又变绿，正是用户看到的"显示红色好像失败了过一会就好"。修复：LiveWindow 60s→3min（覆盖慢轮次）；live（含窗口内余晖）期间 error 终态一律压掉（`liveEndState`），done 是真提交保留。sessionview/latex 全绿。
 
 **注**：途中 `gofmt -w .` 把无关文件的 doc-comment 规整出格式噪声（Go 新版行为），已还原——只提交本批真实改动。
+
+### P10 轮次/会话哈希 + T28/T29 续跑收口（用户点单）
+
+**P10（plan.md）——每轮内部哈希 + 每会话哈希**：
+- `session/transcript.go`：`transcriptLine` 增 `h`（12 hex SHA-256 over role/正文/call id/调用参数/思维链——内容派生，重放同哈希），`Append` 落盘时计算；`roundHash` 单测钉稳定性与落盘。
+- 预览管道：sessionview `Line` 透传 `h`；`transcriptStat` 在同一单遍扫描里算整文件 SHA（12 hex，按 size+mtime 缓存），`SessionInfo.SHA` 下发。
+- UI：工具卡尾部 `· h=xxxx`（stream.ts callTail）、轨迹行展开区「轮次哈希」（trajectory.ts roundDetail，5 类行全覆盖）、详情栏会话块「会话哈希」行。旧转录无字段照常显示。
+
+**T28——续跑"几乎重新开一场"**：用户在 [style] 续跑时看到 `轮次 0 · 工具调用 0 · 已用 11.0s`，且实际已 submit 的会话又重新跑了。修复：
+- 计数续接：`LoadTranscriptStats`（新）在回放时统计压缩点之后的助手轮数/工具回执数/首尾时间跨度/最后一次已收账 submit 调用（名字+参数），`session.SeedCounters` 回填；`livePhaseRowAt` 让"已用"从「现在 − 历史活跃跨度」起步（进程死亡间隔不计）。
+- 已提交重放：`latex/resume.go` `replaySubmit` 用转录里记录的参数重放 submit 工具（submit 工具是对持久工作区的纯状态写入，重放即精确复现提交），style/convert/chapters/tikz 四个续跑点接线——重放成功则跳过 Run 直接走提交后处理（style 进 example 编译段、convert 走 checker 段、chapters 走校验写盘、tikz 直接完成）。
+
+**T29——续跑插内容**：此前 tikz/convert 续跑都把"continuation 提示"当 user 轮插入、tikz 还重附原图。修复：`session.Run` 空参（UserText 空 + 无图）= 纯续行，不追加任何消息；`resumeUserText` 判定——历史以 tool 回执收尾（含合成的悬空占位回执）就不插内容，只有模型自己停了（最后是普通 assistant 文本）才发最小推动。悬空调用（进程死在回执落盘前）由 `LoadTranscriptStats` 合成 `INTERRUPTED` 占位回执，保证重放历史 wire 合法（否则续跑第一次请求 400）。回放从最近压缩检查点开始是 `LoadTranscript` 既有语义（T29 之问的答案），已写入 docs/commands.md。
+
+**验证**：Go 新增 3 测试（roundHash 稳定+落盘、ResumeStats 统计/悬空合成/提交识别、多提交取最后），`go test ./...` 全绿；web 构建 + vitest 24/24；真机（合成转录 + latex_project 实树）：详情栏「会话哈希」出列、/v2 404、控制台零报错（favicon 404 为浏览器默认请求）；轮次哈希 UI 依赖新写入的 h 行，下一次真实运行即显示。

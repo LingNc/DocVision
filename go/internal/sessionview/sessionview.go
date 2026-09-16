@@ -14,6 +14,9 @@
 package sessionview
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+
 	"bufio"
 	"bytes"
 	"encoding/json"
@@ -332,6 +335,9 @@ type SessionInfo struct {
 	Bytes int64 `json:"size"`
 	// ModTime is the transcript mtime, shown as relative time.
 	ModTime time.Time `json:"mtime"`
+	// SHA is the transcript's content fingerprint (P10, 12 hex) — shown in
+	// the details panel so a reported problem pins the exact session state.
+	SHA string `json:"sha,omitempty"`
 	// Live reports whether the transcript looks like it is being appended to
 	// right now (mtime within LiveWindow).
 	Live bool `json:"live"`
@@ -706,6 +712,10 @@ type countEntry struct {
 type transcriptStat struct {
 	Messages int
 	Meta     *MetaInfo
+	// SHA is the content hash of the whole transcript file (P10, 12 hex of
+	// SHA-256 over the raw bytes) — the session's fingerprint at this size/
+	// mtime; a user can quote it to pin the exact state they saw.
+	SHA string
 	// Usage aggregates the t="usage" lines seen in the same single pass.
 	Usage *UsageStats
 	// SawTool / SawSubmit record whether any tool receipt (role=tool) appeared
@@ -796,6 +806,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			Estimate:      estimateInfoFor(stat),
 			Bytes:         info.Size(),
 			ModTime:       info.ModTime(),
+			SHA:           stat.SHA,
 			Live:          now.Sub(info.ModTime()) < LiveWindow,
 			EndState:      liveEndState(endStateOf(stat), now.Sub(info.ModTime()) < LiveWindow),
 			ChapterOrder:  chapterOrderOf(d.Name()),
@@ -894,9 +905,11 @@ func readStat(p string) (transcriptStat, error) {
 	}
 	defer f.Close()
 	br := bufio.NewReaderSize(f, 64*1024)
+	h := sha256.New()
 	var stat transcriptStat
 	for {
 		text, rerr := br.ReadString('\n')
+		h.Write([]byte(text))
 		trimmed := strings.TrimSpace(text)
 		if trimmed != "" {
 			// Only the type is decoded for every line: messages are the vast
@@ -926,6 +939,7 @@ func readStat(p string) (transcriptStat, error) {
 		}
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {
+				stat.SHA = hex.EncodeToString(h.Sum(nil))[:12]
 				return stat, nil
 			}
 			return stat, rerr
@@ -1335,6 +1349,7 @@ type transcriptLine struct {
 	Calls     []session.ToolCall `json:"tool_calls,omitempty"`
 	CallID    string             `json:"tool_call_id,omitempty"`
 	Reasoning string             `json:"reasoning_content,omitempty"`
+	H         string             `json:"h,omitempty"`
 
 	// ---- t == "meta" lines only ----
 	Kind         string           `json:"kind,omitempty"`

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"mineru-tools/internal/config"
@@ -59,6 +58,7 @@ func RunTikZSession(
 	engineIsXe := strings.Contains(strings.ToLower(comp.engine), "xe") ||
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
+	submitFig := &SubmitFigureTool{State: state}
 	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.FigureSystem), tuning, env.OutputLang), []session.Tool{
 		&WriteWorkFileTool{Root: scratch},
 		&EditWorkFileTool{Root: scratch},
@@ -67,7 +67,7 @@ func RunTikZSession(
 		&CompileFigureTool{Comp: comp, State: state, EngineIsXe: engineIsXe, Log: log, Tid: tid},
 		// 看图预算（软，提醒不拦截）：tools.view.pdf_max / warn_ratio。
 		&ViewPDFTool{Root: scratch, Comp: comp, SoftMax: cfgPdfMax, WarnRatio: cfgWarnRatio},
-		&SubmitFigureTool{State: state},
+		submitFig,
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
 		// 原图:每次看图都附带"印刷尺寸/像素/有效 dpi"测量 + 软预算提醒。
 		&ViewImageTool{Root: env.ImagesDir, Subject: imageSubject(env.CurrentImg),
@@ -104,25 +104,39 @@ func RunTikZSession(
 
 	// 会话转录（JSONL）：每条消息实时追加，图片以 file:// 媒体引用存储。
 	// 若此前运行在同一张图上中断（进程被杀 / 网络断连），恢复历史上下文
-	// 继续会话，避免从零重烧 token。
+	// 继续会话，避免从零重烧 token。T28/T29：轮次/工具数/已用从历史继续；
+	// 已提交的重放收账直接完成；历史能自己续（tool 回执收尾）就不再插入
+	// 任何 user 内容，原图也不重附。
 	sessDir := filepath.Join(outDir, "sessions")
 	trPath := filepath.Join(sessDir, "vector_"+texBase+".jsonl")
-	if msgs, err := session.LoadTranscript(trPath); err != nil {
+	resumeSkip := false
+	var imgs []string
+	if msgs, st, err := session.LoadTranscriptStats(trPath); err != nil {
 		log.LogWarning(tid, "[tikz] 转录读取失败（忽略，按全新会话继续）:", err)
 	} else if len(msgs) > 0 {
 		sess.SetMessages(msgs)
+		sess.SeedCounters(st.Rounds, st.Tools)
 		if tr, err := session.NewTranscript(trPath); err == nil {
 			sess.SetTranscript(tr)
 			defer tr.Close()
-			log.Log(tid, "[tikz] 恢复中断的会话:", filepath.Base(trPath), "(", strconv.Itoa(len(msgs)), "条历史消息 )")
-			initial = "The session was interrupted earlier. Continue from where you left off: check your last compile result, fix figure.tex if needed, and call submit once the preview faithfully matches the original image."
+		}
+		resumeLog(log, tid, "tikz", filepath.Base(trPath), msgs, st)
+		if replaySubmit(log, tid, "tikz", submitFig, st) {
+			state.submitted = true
+			resumeSkip = true
+		} else {
+			initial = resumeUserText(msgs, "The session was interrupted earlier. Continue from where you left off: check your last compile result, fix figure.tex if needed, and call submit once the preview faithfully matches the original image.")
 		}
 	} else if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
+		imgs = []string{imgBase64}
 	}
 
-	_, runErr := sess.Run(session.RunOptions{UserText: initial, Images: []string{imgBase64}})
+	var runErr error
+	if !resumeSkip {
+		_, runErr = sess.Run(session.RunOptions{UserText: initial, Images: imgs})
+	}
 	result := TikZResult{Rounds: sess.ToolInvoked}
 	if runErr != nil {
 		result.Reason = "会话错误: " + runErr.Error()

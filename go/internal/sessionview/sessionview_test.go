@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -1008,12 +1008,12 @@ func cssRule(t *testing.T, css, sel string) string {
 // 复制按钮仍然只拿原始文本，超大内容退回纯文本。
 func TestChapterOrderOf(t *testing.T) {
 	cases := map[string]int{
-		"convert_chapter_001.jsonl": 1,
-		"checker_chapter_012.jsonl": 12,
-		"convert-chapter-3.jsonl":   3,
-		"style-fix_chapter_007.jsonl": 7,
-		"style_session.jsonl":       0,
-		"chapters.jsonl":            0,
+		"convert_chapter_001.jsonl":       1,
+		"checker_chapter_012.jsonl":       12,
+		"convert-chapter-3.jsonl":         3,
+		"style-fix_chapter_007.jsonl":     7,
+		"style_session.jsonl":             0,
+		"chapters.jsonl":                  0,
 		"vector_x__deadbeef__label.jsonl": 0,
 	}
 	for name, want := range cases {
@@ -1044,18 +1044,28 @@ func TestReadStatReceiptSignals(t *testing.T) {
 		`{"t":"msg","role":"tool","tool_call_id":"c1","text":"COMPILE FAILED: l.13"}`,
 		`{"t":"msg","role":"assistant","text":"Submitted: nothing yet"}`,
 	}, "\n") + "\n"
-	if err := os.WriteFile(p, []byte(body), 0o644); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	stat, err := readStat(p)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !stat.SawTool || stat.SawSubmit {
 		t.Errorf("failed-run transcript: SawTool=%v SawSubmit=%v, want true/false", stat.SawTool, stat.SawSubmit)
 	}
-	if endStateOf(stat) != "error" { t.Errorf("endState = %q, want error", endStateOf(stat)) }
+	if endStateOf(stat) != "error" {
+		t.Errorf("endState = %q, want error", endStateOf(stat))
+	}
 
 	body2 := strings.Replace(body, `"text":"COMPILE FAILED: l.13"`, `"text":"SUBMITTED. Reply with a one-line confirmation."`, 1)
-	if err := os.WriteFile(p, []byte(body2), 0o644); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(p, []byte(body2), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	stat2, err := readStat(p)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !stat2.SawSubmit || endStateOf(stat2) != "done" {
 		t.Errorf("submitted transcript: endState = %q, want done", endStateOf(stat2))
 	}

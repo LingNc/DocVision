@@ -9285,6 +9285,7 @@
         key: call.id || "call" + line.n + "-" + (line.tool_calls || []).indexOf(call),
         call,
         id: call.id || "",
+        h: line.h,
         name,
         fam: toolFamily(name),
         argsText,
@@ -9314,6 +9315,7 @@
     }
     const attachments = item.attachments.reduce((s, a) => s + (a.line.images || []).length, 0) + item.outImages.reduce((s, a) => s + (a.line.images || []).length, 0);
     if (attachments) tail += " · 附件 " + attachments + " 张（user 轮）";
+    if (item.h) tail += " · h=" + item.h;
     return tail;
   }
   function attachNote(a) {
@@ -10380,6 +10382,10 @@
     if (isNaN(t0) || isNaN(t1) || t1 < t0) return 0;
     return t1 - t0;
   }
+  function roundDetail(line, base) {
+    const h = typeof line.h === "string" && line.h ? line.h : "";
+    return h ? { ...base, "轮次哈希": h } : base;
+  }
   function trajectoryRows() {
     const rows = [];
     const callOf = {};
@@ -10440,7 +10446,7 @@
           status: "",
           jump: jumpTo,
           images: line.images,
-          detail: { user: String(line.text || "") || "（这一轮没有正文）" }
+          detail: roundDetail(line, { user: String(line.text || "") || "（这一轮没有正文）" })
         });
       } else if (line.role === "user") {
         let fed = 0;
@@ -10459,7 +10465,7 @@
           tokens: estOf(line).text,
           status: "",
           jump: line.n,
-          detail: { user: String(line.text || "") }
+          detail: roundDetail(line, { user: String(line.text || "") })
         });
       } else if (line.role === "assistant") {
         if (line.reasoning) {
@@ -10472,7 +10478,7 @@
             tokens: estOf(line).reasoning,
             status: "",
             jump: line.n,
-            detail: { thinking: line.reasoning }
+            detail: roundDetail(line, { thinking: line.reasoning })
           });
         }
         if (line.text) {
@@ -10485,7 +10491,7 @@
             tokens: estOf(line).text,
             status: "",
             jump: line.n,
-            detail: { message: String(line.text) }
+            detail: roundDetail(line, { message: String(line.text) })
           });
         }
         (line.tool_calls || []).forEach((c, i) => {
@@ -10501,7 +10507,7 @@
             tokens: estOf(line).calls[i] || 0,
             status: "",
             jump: line.n,
-            detail: { input: prettyJSON(args) || args }
+            detail: roundDetail(line, { input: prettyJSON(args) || args })
           });
         });
       } else if (line.role === "tool") {
@@ -10522,7 +10528,7 @@
           status: classifyResult(text),
           jump: line.n,
           time: callDuration(info, line),
-          detail: { output: text }
+          detail: roundDetail(line, { output: text })
         });
       }
     });
@@ -10817,7 +10823,8 @@
       { k: "文件", v: cur.name || "—", title: cur.path, mono: true },
       { k: "消息", v: cur.messages + " 条 · " + state.lines.length + " 行" },
       { k: "大小", v: fmtSize(cur.size) },
-      { k: "最后写入", v: fmtClock(cur.mtime) }
+      { k: "最后写入", v: fmtClock(cur.mtime) },
+      ...cur.sha ? [{ k: "会话哈希", v: cur.sha, title: "转录文件内容哈希（P10）——报障时引用它可精确定位当时的状态", mono: true }] : []
     ];
     if (cur.imageName) rows.push({ k: "图片", v: imageDisplayName(cur), title: imageTipText(cur), mono: true });
     if (cur.imageFile) rows.push({ k: "图片文件", v: cur.imageFile, title: cur.imageName, mono: true });

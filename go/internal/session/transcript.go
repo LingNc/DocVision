@@ -40,6 +40,13 @@ type transcriptLine struct {
 	// full chain back and it is also a precondition for prefix caching.
 	Reasoning string `json:"reasoning_content,omitempty"`
 
+	// H is the round's internal content hash (P10, 12 hex of SHA-256 over
+	// role/text/call-id/calls/reasoning), written at append time so a
+	// problem round can be referenced and grepped ("轮次 h=ab12cd34ef56
+	// 出错了") without re-deriving anything. Old transcripts simply have
+	// no h.
+	H string `json:"h,omitempty"`
+
 	// ---- t == "meta" lines only (never replayed) ----
 	// A meta line records WHAT the model was told at the start of this run
 	// (system prompt + the tool definitions that were sent). It is written
@@ -342,6 +349,7 @@ func (w *TranscriptWriter) Append(msg ChatMessage) error {
 	}
 	line.Calls = msg.ToolCalls
 	line.Reasoning = msg.ReasoningContent
+	line.H = roundHash(line)
 	data, err := json.Marshal(line)
 	if err != nil {
 		return err
@@ -350,6 +358,28 @@ func (w *TranscriptWriter) Append(msg ChatMessage) error {
 		return err
 	}
 	return w.file.Sync()
+}
+
+// roundHash derives the stable per-round identity (P10): SHA-256 over the
+// role, text, call id, tool-call arguments and reasoning, cut to 12 hex.
+// Content-derived on purpose — the same round in a re-dumped transcript
+// hashes the same, so a hash reported by a user is greppable forever.
+func roundHash(line transcriptLine) string {
+	h := sha256.New()
+	h.Write([]byte(line.Role))
+	h.Write([]byte{0})
+	h.Write([]byte(line.Text))
+	h.Write([]byte{0})
+	h.Write([]byte(line.CallID))
+	h.Write([]byte{0})
+	for _, c := range line.Calls {
+		h.Write([]byte(c.Function.Name))
+		h.Write([]byte{0})
+		h.Write([]byte(c.Function.Arguments))
+		h.Write([]byte{0})
+	}
+	h.Write([]byte(line.Reasoning))
+	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 var dataURLRe = regexp.MustCompile(`^data:([^;]+);base64,(.*)$`)
@@ -394,15 +424,49 @@ func fileExistsT(p string) bool {
 // references are read back as base64 data URLs so the messages are
 // wire-ready. Returns nil, nil when the file does not exist.
 func LoadTranscript(path string) ([]ChatMessage, error) {
+	msgs, _, err := LoadTranscriptStats(path)
+	return msgs, err
+}
+
+// ResumeStats summarizes a persisted transcript for a session about to
+// resume from it (T28): the counters let the resumed run continue the
+// console progress row (轮次/工具调用/已用) instead of restarting at 0,
+// and Submitted tells the caller the work was already handed in.
+type ResumeStats struct {
+	// Rounds is the number of assistant turns in the transcript
+	// (continues Session.rounds).
+	Rounds int
+	// Tools is the number of executed tool calls (role=tool receipts;
+	// continues Session.ToolInvoked).
+	Tools int
+	// Active is the span first-write → last-write of the transcript: the
+	// best available approximation of the session's accumulated working
+	// time (dead-process gaps are excluded by anchoring at the resume
+	// moment, not wall-clock since the first line).
+	Active time.Duration
+	// SubmitName / SubmitArgs describe the LAST submit* call that actually
+	// produced a tool receipt; empty when the transcript holds none.
+	SubmitName string
+	SubmitArgs string
+}
+
+// LoadTranscriptStats is LoadTranscript plus the resume summary (T28).
+// Dangling assistant tool_calls (process died between the call write and
+// the receipt write) get a synthetic receipt so the replayed history is
+// wire-valid and the model can simply retry the call.
+func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, ResumeStats{}, nil
 		}
-		return nil, err
+		return nil, ResumeStats{}, err
 	}
 	baseDir := filepath.Dir(path)
 	var msgs []ChatMessage
+	var firstTS, lastTS time.Time
+	submitCalls := map[string]string{} // call id → name (submit*)
+	receipts := map[string]bool{}
 	for _, ln := range strings.Split(string(data), "\n") {
 		ln = strings.TrimSpace(ln)
 		if ln == "" {
@@ -410,10 +474,16 @@ func LoadTranscript(path string) ([]ChatMessage, error) {
 		}
 		var line transcriptLine
 		if err := json.Unmarshal([]byte(ln), &line); err != nil {
-			return nil, fmt.Errorf("transcript %s: %w", path, err)
+			return nil, ResumeStats{}, fmt.Errorf("transcript %s: %w", path, err)
 		}
 		if line.T != "msg" {
 			continue
+		}
+		if ts, perr := parseStamp(line.TS); perr == nil {
+			if firstTS.IsZero() {
+				firstTS = ts
+			}
+			lastTS = ts
 		}
 		msg := ChatMessage{Role: line.Role, ToolCallID: line.CallID, ToolCalls: line.Calls, ReasoningContent: line.Reasoning}
 		switch {
@@ -425,7 +495,7 @@ func LoadTranscript(path string) ([]ChatMessage, error) {
 			for _, ref := range line.Images {
 				payload, mime, err := readMediaRef(baseDir, ref)
 				if err != nil {
-					return nil, err
+					return nil, ResumeStats{}, err
 				}
 				parts = append(parts, map[string]interface{}{
 					"type":      "image_url",
@@ -444,6 +514,16 @@ func LoadTranscript(path string) ([]ChatMessage, error) {
 		default:
 			msg.Content = line.Text
 		}
+		if msg.Role == "assistant" {
+			for _, c := range msg.ToolCalls {
+				if strings.HasPrefix(c.Function.Name, "submit") {
+					submitCalls[c.ID] = c.Function.Name
+				}
+			}
+		}
+		if msg.Role == "tool" && msg.ToolCallID != "" {
+			receipts[msg.ToolCallID] = true
+		}
 		msgs = append(msgs, msg)
 	}
 	// Compaction is append-only on disk: everything before the newest
@@ -458,7 +538,68 @@ func LoadTranscript(path string) ([]ChatMessage, error) {
 	if last > 0 {
 		msgs = msgs[last:]
 	}
-	return msgs, nil
+	// 统计口径与压缩点一致：只数压缩点之后的轮次。
+	stats := ResumeStats{}
+	for _, m := range msgs {
+		switch m.Role {
+		case "assistant":
+			stats.Rounds++
+		case "tool":
+			stats.Tools++
+			if submitCalls[m.ToolCallID] != "" {
+				stats.SubmitName = submitCalls[m.ToolCallID]
+			}
+		}
+	}
+	// 最后一个 submit 调用的参数（重放提交用）。
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role != "assistant" {
+			continue
+		}
+		for _, c := range m.ToolCalls {
+			if c.Function.Name == stats.SubmitName && receipts[c.ID] {
+				stats.SubmitArgs = c.Function.Arguments
+			}
+		}
+		if stats.SubmitArgs != "" {
+			break
+		}
+	}
+	if !firstTS.IsZero() && !lastTS.IsZero() && lastTS.After(firstTS) {
+		stats.Active = lastTS.Sub(firstTS)
+	}
+	// Dangling assistant tool_calls（进程死在回执落盘前）合成一条占位
+	// 回执：否则重放的历史在 wire 上非法（tool_calls 后面必须跟 tool），
+	// 续跑第一次请求就会 400。
+	received := map[string]bool{}
+	for _, m := range msgs {
+		if m.Role == "tool" && m.ToolCallID != "" {
+			received[m.ToolCallID] = true
+		}
+	}
+	var fixed []ChatMessage
+	for _, m := range msgs {
+		fixed = append(fixed, m)
+		if m.Role != "assistant" {
+			continue
+		}
+		for _, c := range m.ToolCalls {
+			if !received[c.ID] {
+				fixed = append(fixed, ChatMessage{Role: "tool", ToolCallID: c.ID,
+					Content: "INTERRUPTED: the process died before this tool could run. Call it again if it is still needed."})
+			}
+		}
+	}
+	return fixed, stats, nil
+}
+
+// parseStamp reads the RFC3339 milli timestamp of a transcript line.
+func parseStamp(ts string) (time.Time, error) {
+	if ts == "" {
+		return time.Time{}, fmt.Errorf("empty ts")
+	}
+	return time.Parse(time.RFC3339Nano, ts)
 }
 
 func readMediaRef(baseDir, ref string) (string, string, error) {

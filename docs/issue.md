@@ -246,12 +246,11 @@ created by mineru-tools/internal/latex.(*Runner).convertPhase in goroutine 1
 的 models 段已加 `vision-heavy` 多重基座示例，docs/config.md 与两份模板注释同步。）
 
 [X] T26. 这边如果配置文件有问题的话，软件启动的时候应该报错然后终止，而不是继续运行：
-$./docvision sessions --serve
+\$./docvision sessions --serve
 提示：读取配置失败，本次不显示金额、--dir 退回当前目录： parse config /home/share/***/config.yaml: models.drawing.extends: 引用的基座条目 "nothinking" 不存在（先定义 `nothinking:`，再让别的条目 `extends: nothinking`）
 会话预览: http://127.0.0.1:8848/（只读服务，Ctrl+C 停止）
 目录: /home/share/***/PDF2MD · 来源 当前目录（未找到 config）
 配置: /home/share/***/PDF2MD/config.yaml（读取失败） · 监听地址来源 内置默认
-^C
 （已修复。唯一还带"配置读失败继续跑"降级的命令就是 sessions——其余命令本来就读失败即退。
 现在 sessions 与它们对齐：配置加载出错（解析/校验错误、--config 指名的文件不存在）直接
 报错终止，退出码非 0；"没有任何配置文件"的情况依旧由启动期自动创建默认配置兜住，不会
@@ -260,4 +259,268 @@ $./docvision sessions --serve
 TestSessionsBrokenConfigAborts 钉住：extends 引用不存在的条目（现场那类错误）时
 sessions 必须报错终止。）
 
-[ ] T26. 运行中的时候出现问题，左侧栏目直接空白不显示。
+[ ] T27. 运行中的时候出现问题，左侧栏目直接空白不显示。
+找到报错了，在会话发生切换的时候创建新的分组（比如style处理完毕开始下一个的时候就会出现这个空白）
+```console
+Uncaught TypeError: Cannot read properties of undefined (reading 'getUserMedia')
+    at content.js:448:37897
+    at content.js:3376:39713
+viewer.js:2011 ReferenceError: isOverflowOpen is not defined
+    at viewer.js:8658:29
+    at Array.map (<anonymous>)
+    at viewer.js:8650:36
+    at Array.map (<anonymous>)
+    at ComputedRefImpl.fn (viewer.js:8643:30)
+    at refreshComputed (viewer.js:613:31)
+    at isDirty (viewer.js:584:70)
+    at ReactiveEffect.runIfDirty (viewer.js:496:11)
+    at callWithErrorHandling (viewer.js:1953:35)
+    at flushJobs (viewer.js:2128:11)
+logError @ viewer.js:2011
+express-utils.js:18 [Intervention] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/browser/css/fonts/AdobeClean-Regular.otf
+express-utils.js:18 [Intervention] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/browser/css/fonts/AdobeClean-Bold.otf
+4viewer.js:2011 ReferenceError: isOverflowOpen is not defined
+    at viewer.js:8658:29
+    at Array.map (<anonymous>)
+    at viewer.js:8650:36
+    at Array.map (<anonymous>)
+    at ComputedRefImpl.fn (viewer.js:8643:30)
+    at refreshComputed (viewer.js:613:31)
+    at get value (viewer.js:1630:7)
+    at Proxy.<anonymous> (viewer.js:8808:86)
+    at renderComponentRoot (viewer.js:3506:18)
+    at ReactiveEffect.componentUpdateFn [as fn] (viewer.js:4721:28)
+logError @ viewer.js:2011
+viewer.js:2011 ReferenceError: isOverflowOpen is not defined
+    at viewer.js:8658:29
+    at Array.map (<anonymous>)
+    at viewer.js:8650:36
+    at Array.map (<anonymous>)
+    at ComputedRefImpl.fn (viewer.js:8643:30)
+    at refreshComputed (viewer.js:613:31)
+    at get value (viewer.js:1630:7)
+    at Proxy.<anonymous> (viewer.js:8808:86)
+    at renderComponentRoot (viewer.js:3506:18)
+    at ReactiveEffect.componentUpdateFn [as fn] (viewer.js:4721:28)
+logError @ viewer.js:2011
+handleError @ viewer.js:2005
+renderComponentRoot @ viewer.js:3540
+componentUpdateFn @ viewer.js:4721
+run @ viewer.js:464
+runIfDirty @ viewer.js:497
+callWithErrorHandling @ viewer.js:1953
+flushJobs @ viewer.js:2128
+Promise.then
+queueFlush @ viewer.js:2056
+queueJob @ viewer.js:2051
+effect2.scheduler @ viewer.js:4757
+trigger @ viewer.js:487
+endBatch @ viewer.js:545
+trigger @ viewer.js:866
+set @ viewer.js:1180
+applyIndex @ viewer.js:7290
+（匿名） @ viewer.js:7313
+Promise.then
+refreshIndex @ viewer.js:7312
+（匿名） @ viewer.js:11513
+viewer.js:2011 ReferenceError: isOverflowOpen is not defined
+    at viewer.js:8658:29
+    at Array.map (<anonymous>)
+    at viewer.js:8650:36
+    at Array.map (<anonymous>)
+    at ComputedRefImpl.fn (viewer.js:8643:30)
+    at refreshComputed (viewer.js:613:31)
+    at get value (viewer.js:1630:7)
+    at Proxy.<anonymous> (viewer.js:8808:86)
+    at renderComponentRoot (viewer.js:3506:18)
+    at ReactiveEffect.componentUpdateFn [as fn] (viewer.js:4721:28)
+logError @ viewer.js:2011
+handleError @ viewer.js:2005
+renderComponentRoot @ viewer.js:3540
+componentUpdateFn @ viewer.js:4721
+run @ viewer.js:464
+runIfDirty @ viewer.js:497
+callWithErrorHandling @ viewer.js:1953
+flushJobs @ viewer.js:2128
+Promise.then
+queueFlush @ viewer.js:2056
+queueJob @ viewer.js:2051
+effect2.scheduler @ viewer.js:4757
+trigger @ viewer.js:487
+endBatch @ viewer.js:545
+trigger @ viewer.js:866
+set @ viewer.js:1180
+applyIndex @ viewer.js:7290
+（匿名） @ viewer.js:7313
+Promise.then
+refreshIndex @ viewer.js:7312
+（匿名） @ viewer.js:7424
+viewer.js:2011 ReferenceError: isOverflowOpen is not defined
+    at viewer.js:8658:29
+    at Array.map (<anonymous>)
+    at viewer.js:8650:36
+    at Array.map (<anonymous>)
+    at ComputedRefImpl.fn (viewer.js:8643:30)
+    at refreshComputed (viewer.js:613:31)
+    at get value (viewer.js:1630:7)
+    at Proxy.<anonymous> (viewer.js:8808:86)
+    at renderComponentRoot (viewer.js:3506:18)
+    at ReactiveEffect.componentUpdateFn [as fn] (viewer.js:4721:28)
+logError @ viewer.js:2011
+handleError @ viewer.js:2005
+renderComponentRoot @ viewer.js:3540
+componentUpdateFn @ viewer.js:4721
+run @ viewer.js:464
+runIfDirty @ viewer.js:497
+callWithErrorHandling @ viewer.js:1953
+flushJobs @ viewer.js:2128
+Promise.then
+queueFlush @ viewer.js:2056
+queueJob @ viewer.js:2051
+effect2.scheduler @ viewer.js:4757
+trigger @ viewer.js:487
+endBatch @ viewer.js:545
+trigger @ viewer.js:866
+set @ viewer.js:1180
+applyIndex @ viewer.js:7290
+（匿名） @ viewer.js:7313
+Promise.then
+refreshIndex @ viewer.js:7312
+（匿名） @ viewer.js:11513
+viewer.js:2011 ReferenceError: isOverflowOpen is not defined
+    at viewer.js:8658:29
+    at Array.map (<anonymous>)
+    at viewer.js:8650:36
+    at Array.map (<anonymous>)
+    at ComputedRefImpl.fn (viewer.js:8643:30)
+    at refreshComputed (viewer.js:613:31)
+    at get value (viewer.js:1630:7)
+    at Proxy.<anonymous> (viewer.js:8808:86)
+    at renderComponentRoot (viewer.js:3506:18)
+    at ReactiveEffect.componentUpdateFn [as fn] (viewer.js:4721:28)
+viewer.js:2011 ReferenceError: isOverflowOpen is not defined
+    at viewer.js:8658:29
+    at Array.map (<anonymous>)
+    at viewer.js:8650:36
+    at Array.map (<anonymous>)
+    at ComputedRefImpl.fn (viewer.js:8643:30)
+    at refreshComputed (viewer.js:613:31)
+    at get value (viewer.js:1630:7)
+    at Proxy.<anonymous> (viewer.js:8808:86)
+    at renderComponentRoot (viewer.js:3506:18)
+    at ReactiveEffect.componentUpdateFn [as fn] (viewer.js:4721:28)
+logError @ viewer.js:2011
+handleError @ viewer.js:2005
+renderComponentRoot @ viewer.js:3540
+componentUpdateFn @ viewer.js:4721
+run @ viewer.js:464
+runIfDirty @ viewer.js:497
+callWithErrorHandling @ viewer.js:1953
+flushJobs @ viewer.js:2128
+Promise.then
+queueFlush @ viewer.js:2056
+queueJob @ viewer.js:2051
+effect2.scheduler @ viewer.js:4757
+trigger @ viewer.js:487
+endBatch @ viewer.js:545
+trigger @ viewer.js:866
+set @ viewer.js:1180
+applyIndex @ viewer.js:7290
+（匿名） @ viewer.js:7313
+Promise.then
+refreshIndex @ viewer.js:7312
+（匿名） @ viewer.js:7424
+2viewer.js:2011 ReferenceError: isOverflowOpen is not defined
+    at viewer.js:8658:29
+    at Array.map (<anonymous>)
+    at viewer.js:8650:36
+    at Array.map (<anonymous>)
+    at ComputedRefImpl.fn (viewer.js:8643:30)
+    at refreshComputed (viewer.js:613:31)
+    at get value (viewer.js:1630:7)
+    at Proxy.<anonymous> (viewer.js:8808:86)
+    at renderComponentRoot (viewer.js:3506:18)
+    at ReactiveEffect.componentUpdateFn [as fn] (viewer.js:4721:28)
+logError @ viewer.js:2011
+handleError @ viewer.js:2005
+renderComponentRoot @ viewer.js:3540
+componentUpdateFn @ viewer.js:4721
+run @ viewer.js:464
+runIfDirty @ viewer.js:497
+callWithErrorHandling @ viewer.js:1953
+flushJobs @ viewer.js:2128
+Promise.then
+queueFlush @ viewer.js:2056
+queueJob @ viewer.js:2051
+effect2.scheduler @ viewer.js:4757
+trigger @ viewer.js:487
+endBatch @ viewer.js:545
+trigger @ viewer.js:866
+set @ viewer.js:1180
+applyIndex @ viewer.js:7290
+（匿名） @ viewer.js:7313
+Promise.then
+refreshIndex @ viewer.js:7312
+（匿名） @ viewer.js:11513
+2viewer.js:2011 ReferenceError: isOverflowOpen is not defined
+    at viewer.js:8658:29
+    at Array.map (<anonymous>)
+    at viewer.js:8650:36
+    at Array.map (<anonymous>)
+    at ComputedRefImpl.fn (viewer.js:8643:30)
+    at refreshComputed (viewer.js:613:31)
+    at get value (viewer.js:1630:7)
+    at Proxy.<anonymous> (viewer.js:8808:86)
+    at renderComponentRoot (viewer.js:3506:18)
+    at ReactiveEffect.componentUpdateFn [as fn] (viewer.js:4721:28)
+```
+
+[X] T28. 是否应该这边在重新续上的时候展示一下前面已经完成的步骤，而不是直接从这个要续的地方开始。还有就是续上的会话不应该从轮次0开始吧，按照他的会话之前进展到哪里了和已经用时到哪里了都直接连贯上。可以看到我是在这个 [style]上续的，这里实际上已经submit提交了，但是剩了最后一个轮次回复，但是这边几乎等于重新开了，没有直接结束，出现问题了。
+```log
+完成!
+调试模式：请求参数/提示词/响应统计写入日志文件
+=== LaTeX 档位 1：全书转换 ===
+[23:06:10][T00] [project] 项目工作区: latex_project/2026年李艳芳预测三套卷数一（项目名 "2026年李艳芳预测三套卷数一"，输出根 latex_project）
+[style] 轮次 0 · 工具调用 0 · 已用 11.0s
+```
+并且好像每次会把前面的运行过的给顶掉：（这里之前的style和拆分章节的都没有了）
+```bash
+完成!
+调试模式：请求参数/提示词/响应统计写入日志文件
+=== LaTeX 档位 1：全书转换 ===
+[23:06:10][T00] [project] 项目工作区: latex_project/2026年李艳芳预测三套卷数一（项目名 "2026年李艳芳预测三套卷数一"，输出根 latex_project）
+[convert] 16/36 44.44% (done: 16, errors: 0, running: 5, 9m30s)
+[convert:chapter_001] 轮次 91 · 工具调用 98 · 已用 9m30s
+[convert:chapter_010] 轮次 48 · 工具调用 64 · 已用 7m26s
+[convert:chapter_019] 轮次 26 · 工具调用 38 · 已用 2m39s
+[convert:chapter_020] 轮次 15 · 工具调用 18 · 已用 1m57s
+[convert:chapter_021] 轮次 25 · 工具调用 31 · 已用 1m36s
+[checker:chapter_020] 轮次 0 · 工具调用 0 · 已用 1m07s
+[checker:chapter_021] 轮次 0 · 工具调用 0 · 已用 27.0s
+[checker:chapter_019] 轮次 0 · 工具调用 0 · 已用 18.0s
+```
+
+[X] T29. 在续跑会话的时候还存在一个问题。（修复：历史以 tool 回执收尾原样续行不插内容、不重附原图；悬空调用合成占位回执；回放从最近压缩检查点开始——LoadTranscript 既有语义，文档写明。你看我们的日志这边，在继续的时候插入了一个user的会话内容？但是这边应该不应该插入任何内容了吧？这边好像在最后加上了一个系统提示词？并且之前的会话有记录从哪里开始是压缩之后的吗？会话是应该从最近一次的压缩的地方开始吧？而不是全部发送上去。然后这边大概率应该不需要新加入什么提示词吧？直接就可以继续了。除非了他自己终止了没有任何工具调用的情况。一般也是这个会话结束了，而不是没有submit的情况，这种有单独处理。
+[ ] T30. 有时候ai的输出中会意外的泄露一些
+“<thinking>Page 12 (set 3, page 4): 解答题 format: "(20)(本题满分 12 分)" then body with indentation. Page number "— 4 —" centered at bottom.
+Let me look at page 10 (the figures page) and page 13 (answer page 1) closely. Also check the footer style of set-1 pages ("— 1 —").</thinking>
+Let me look at the figure page (page 10) closely.”
+类似这样的情况，不是在reason_effort中的，这边可以在ui上单独做一个折叠界面折叠这个比较原始的思考模式，可以展开收上的。保证在视觉上不容易污染观看体验。
+[ ] T31. 有时候缓存命中偶尔掉一下不知道为什么，还有时候没有缓存命中，是否是我们的会话这边存在一些问题。
+[ ] T32. 有时候ai会发出这样的工具调用请求，这边是否应该也做一下兼容，并且给出一个比如xml工具调用情况？
+```xml
+<parameter=path>
+check:parts/
+</parameter>
+</function>
+</tool_call>
+```
+具体情况看我们的日志。
+[ ] T33. 这是什么报错？在最后一步好像这边终止了。
+```bash
+=== LaTeX 档位 1：全书转换 ===
+[23:06:10][T00] [project] 项目工作区: latex_project/2026年李艳芳预测三套卷数一（项目名 "2026年李艳芳预测三套卷数一"，输出根 latex_project）
+[convert] 36/36 100.00% (done: 36, errors: 0, running: 0, 19m56s)
+phase assemble: open latex_project/2026年李艳芳预测三套卷数一/out/REPORT.md: no such file or directory
+lingnc@debian41:/home/share/samba-share/PDF2MD
+```

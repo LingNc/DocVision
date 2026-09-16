@@ -1,11 +1,11 @@
 package session
 
 import (
-	"time"
 	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"mineru-tools/internal/config"
 	"mineru-tools/internal/logger"
@@ -323,6 +323,14 @@ func (s *Session) SetMessages(msgs []ChatMessage) {
 	s.messages = out
 }
 
+// SeedCounters preloads the progress counters from a resumed transcript
+// (T28): the console live row (轮次/工具调用) then continues the session's
+// own history instead of restarting at 0 for every interrupted run.
+func (s *Session) SeedCounters(rounds, tools int) {
+	s.rounds = rounds
+	s.ToolInvoked = tools
+}
+
 // RunOptions describes one logical user turn.
 type RunOptions struct {
 	// UserText is the user message body.
@@ -408,8 +416,15 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 	// Run() is an entire agentic session here, so checking only here
 	// meant checking once, at the smallest the conversation ever is.
 
+	// T29：UserText 与 Images 全空 = 纯续行——不插入任何新内容，把现有
+	// 历史（通常以 tool 回执收尾）原样发给模型，让它接着干。续跑的会话
+	// 不该被塞进一段新的 user 轮（更不该重附原图）。
+	skipUserTurn := strings.TrimSpace(opts.UserText) == "" && len(opts.Images) == 0
+
 	userMsg := ChatMessage{Role: "user"}
-	if len(opts.Images) > 0 {
+	if skipUserTurn {
+		// nothing to append
+	} else if len(opts.Images) > 0 {
 		parts := []map[string]interface{}{}
 		if strings.TrimSpace(opts.UserText) != "" {
 			parts = append(parts, map[string]interface{}{"type": "text", "text": opts.UserText})
@@ -425,8 +440,10 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 	} else {
 		userMsg.Content = opts.UserText
 	}
-	s.messages = append(s.messages, userMsg)
-	s.appendTranscript(userMsg)
+	if !skipUserTurn {
+		s.messages = append(s.messages, userMsg)
+		s.appendTranscript(userMsg)
+	}
 
 	// Debug tracing: full prompts and every tool exchange land in the
 	// log file (never the console) when debug mode is on.

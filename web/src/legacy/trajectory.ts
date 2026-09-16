@@ -62,6 +62,12 @@ export interface TrajRow {
   detail: Record<string, string>
 }
 
+/* P10：轮次内容哈希（写入端落盘的 h）随行展示——报障时能精确指出哪一轮。 */
+function roundDetail(line: Line, base: Record<string, string>): Record<string, string> {
+  const h = typeof line.h === 'string' && line.h ? line.h : ''
+  return h ? { ...base, '轮次哈希': h } : base
+}
+
 export function trajectoryRows(): TrajRow[] {
   const rows: TrajRow[] = []
   const callOf: Record<string, CallInfo> = {}
@@ -136,7 +142,7 @@ export function trajectoryRows(): TrajRow[] {
         tokens: estOf(line).text + estOf(line).images,
         status: '', jump: jumpTo,
         images: line.images,
-        detail: { user: String(line.text || '') || '（这一轮没有正文）' },
+        detail: roundDetail(line, { user: String(line.text || '') || '（这一轮没有正文）' }),
       })
     } else if (line.role === 'user') {
       // 会话开头的原图投喂轮归到这条任务上：轨迹里也点明"它带着附件"。
@@ -155,7 +161,7 @@ export function trajectoryRows(): TrajRow[] {
         chars: String(line.text || '').length,
         tokens: estOf(line).text,
         status: '', jump: line.n,
-        detail: { user: String(line.text || '') },
+        detail: roundDetail(line, { user: String(line.text || '') }),
       })
     } else if (line.role === 'assistant') {
       if (line.reasoning) {
@@ -163,7 +169,7 @@ export function trajectoryRows(): TrajRow[] {
           kind: 'think', tag: '思考', name: 'reasoning',
           summary: firstLine(line.reasoning), chars: line.reasoning.length,
           tokens: estOf(line).reasoning,
-          status: '', jump: line.n, detail: { thinking: line.reasoning },
+          status: '', jump: line.n, detail: roundDetail(line, { thinking: line.reasoning }),
         })
       }
       if (line.text) {
@@ -171,7 +177,7 @@ export function trajectoryRows(): TrajRow[] {
           kind: 'msg', tag: '助手', name: 'AI',
           summary: firstLine(line.text), chars: line.text.length,
           tokens: estOf(line).text,
-          status: '', jump: line.n, detail: { message: String(line.text) },
+          status: '', jump: line.n, detail: roundDetail(line, { message: String(line.text) }),
         })
       }
       ;(line.tool_calls || []).forEach((c: ToolCall, i: number) => {
@@ -183,7 +189,7 @@ export function trajectoryRows(): TrajRow[] {
           summary: toolSummary(name, fn.arguments), chars: args.length,
           tokens: estOf(line).calls[i] || 0,
           status: '', jump: line.n,
-          detail: { input: prettyJSON(args) || args },
+          detail: roundDetail(line, { input: prettyJSON(args) || args }),
         })
       })
     } else if (line.role === 'tool') {
@@ -207,7 +213,7 @@ export function trajectoryRows(): TrajRow[] {
           : '点击跳到对话里对应的那条消息',
         status: classifyResult(text), jump: line.n,
         time: callDuration(info, line),
-        detail: { output: text },
+        detail: roundDetail(line, { output: text }),
       })
     }
   })

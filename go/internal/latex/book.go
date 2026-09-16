@@ -66,10 +66,16 @@ func fmtDuration(d time.Duration) string {
 // alternating with both timers running, because the single live slot held
 // whichever owner had drawn last).
 func (r *Runner) livePhaseRow(id, label string) (hook func(rounds, tools int), fin func()) {
+	return r.livePhaseRowAt(id, label, time.Now())
+}
+
+// livePhaseRowAt 是 livePhaseRow 的续跑形态（T28）：start 可以前移到
+// 「现在 − 转录历史活跃跨度」，让"已用"从上次中断处继续累计，而不是
+// 每次续跑都从十几秒看起来像重新开了一场。
+func (r *Runner) livePhaseRowAt(id, label string, start time.Time) (hook func(rounds, tools int), fin func()) {
 	if r.consoleVerbose {
 		return func(int, int) {}, func() {}
 	}
-	start := time.Now()
 	var mu sync.Mutex
 	var rounds, tools int
 	row := r.log.LiveRow(id)
@@ -363,16 +369,21 @@ func (r *Runner) stylePhase(proj string) error {
 	tools := r.styleSessionTools(proj, workDir, sourceDir, "style", bashTmp, submit)
 
 	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "style")
-	liveHook, liveClose := r.livePhaseRow("style", "style")
-	sess.SetProgressHook(liveHook)
-	defer liveClose()
+	var styleHook func(rounds, tools int)
+	styleFin := func() {}
+	styleStart := time.Now()
 	// 会话上下文实时持久化（JSONL 转录，图片走 file:// 引用）：样式
 	// 反馈回路直接复用这个上下文打回（不开新会话，避免丢失信息）；
 	// 运行中断时下次从转录恢复，不重烧 token。成功/失败路径都会保存
 	// 最新状态。
 	ctxPath := filepath.Join(proj, "work", "style_session.jsonl")
+	styleResumed := false
+	styleResumeSkip := false
+	var styleMsgs []session.ChatMessage
 	if legacyMsgs, lerr := loadSessionContext(ctxPath); lerr == nil && len(legacyMsgs) > 0 {
 		// 上次运行中断（phase 未标 done）→ 从历史上下文续跑。
+		styleResumed = true
+		styleMsgs = legacyMsgs
 		sess.SetMessages(legacyMsgs)
 		_, statErr := os.Stat(ctxPath)
 		freshTranscript := os.IsNotExist(statErr)
@@ -387,11 +398,24 @@ func (r *Runner) stylePhase(proj string) error {
 				}
 			}
 		}
-		r.log.Log(1, "[style] 恢复中断的样式会话 (", strconv.Itoa(len(legacyMsgs)), "条历史消息 )")
+		if _, st, serr := session.LoadTranscriptStats(ctxPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+			styleStart = time.Now().Add(-st.Active)
+			resumeLog(r.log, 1, "style", filepath.Base(ctxPath), legacyMsgs, st)
+			if replaySubmit(r.log, 1, "style", submit, st) {
+				styleResumeSkip = true
+			}
+		} else {
+			// 旧版单 JSON 上下文：至少轮次/工具数照常显示（估算历史条数）。
+			r.log.Log(1, "[style] 恢复中断的样式会话 (", strconv.Itoa(len(legacyMsgs)), "条历史消息 )")
+		}
 	} else if tr, terr := session.NewTranscript(ctxPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
 	}
+	styleHook, styleFin = r.livePhaseRowAt("style", "style", styleStart)
+	sess.SetProgressHook(styleHook)
+	defer styleFin()
 	defer func() {
 		if err := saveSessionContext(sess, ctxPath); err != nil {
 			r.log.LogWarning(1, "[style] 会话上下文保存失败:", err)
@@ -412,14 +436,24 @@ func (r *Runner) stylePhase(proj string) error {
 	defer cleanScratch()
 
 	var lastExampleCompile string
+	if styleResumed && !styleResumeSkip {
+		// T29：历史能自己续（tool 回执收尾）就不插入新内容；模型自己停了
+		// 才发一句最小推动。
+		initial = resumeUserText(styleMsgs, "The session was interrupted earlier. Continue from where you left off: check your workspace state, finish the cls/manual/example, and call submit_style once everything is consistent.")
+	}
+	replayRunPending := styleResumeSkip // 重放已提交：第一轮跳过 Run 直接走提交后处理
 	for attempt := 0; attempt <= r.cfg.Latex.Compile.MaxFixRounds; attempt++ {
-		userText := initial
-		if attempt > 0 {
-			userText = "The example failed to compile:\n" + lastExampleCompile +
-				"\n\nFix the cls/example and call submit_style again with the corrected package."
-		}
-		if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
-			return fmt.Errorf("样式会话失败: %w", err)
+		if replayRunPending {
+			replayRunPending = false
+		} else {
+			userText := initial
+			if attempt > 0 {
+				userText = "The example failed to compile:\n" + lastExampleCompile +
+					"\n\nFix the cls/example and call submit_style again with the corrected package."
+			}
+			if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
+				return fmt.Errorf("样式会话失败: %w", err)
+			}
 		}
 		if !submit.Set {
 			return fmt.Errorf("样式会话未提交 submit_style")
@@ -526,15 +560,24 @@ func (r *Runner) chaptersPhase(proj string) error {
 	// 划分会话也带转录：大部头一本书可能分多次跑，中断后从转录续上。
 	// （转录里的 book.md 内容以 file:// 引用，恢复时自动还原。）
 	trChap := filepath.Join(proj, "work", "sessions", "chapters.jsonl")
-	if msgsCh, errC := session.LoadTranscript(trChap); errC == nil && len(msgsCh) > 0 {
+	chaptersSkip := false
+	chaptersStart := time.Now()
+	var chapterMsgs []session.ChatMessage
+	if msgsCh, st, errC := session.LoadTranscriptStats(trChap); errC == nil && len(msgsCh) > 0 {
 		sess.SetMessages(msgsCh)
-		r.log.Log(1, "[chapters] 恢复中断的划分会话 (", strconv.Itoa(len(msgsCh)), "条历史消息 )")
+		sess.SeedCounters(st.Rounds, st.Tools)
+		chapterMsgs = msgsCh
+		chaptersStart = time.Now().Add(-st.Active)
+		resumeLog(r.log, 1, "chapters", filepath.Base(trChap), msgsCh, st)
+		if replaySubmit(r.log, 1, "chapters", submit, st) {
+			chaptersSkip = true
+		}
 	}
 	if tr, errT := session.NewTranscript(trChap); errT == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
 	}
-	liveHook, liveClose := r.livePhaseRow("chapters", "chapters")
+	liveHook, liveClose := r.livePhaseRowAt("chapters", "chapters", chaptersStart)
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 
@@ -551,13 +594,21 @@ func (r *Runner) chaptersPhase(proj string) error {
 		"TOTAL_LINES": strconv.Itoa(totalLines),
 	})
 
+	if len(chapterMsgs) > 0 && !chaptersSkip {
+		initial = resumeUserText(chapterMsgs, "The session was interrupted earlier. Continue from where you left off and call submit_split with the final chapter ranges.")
+	}
+	replayRunPending := chaptersSkip // 重放已提交：第一轮跳过 Run 直接走校验写盘
 	for attempt := 0; attempt < 3; attempt++ {
-		userText := initial
-		if attempt > 0 {
-			userText = "Your split was rejected: " + r.lastSplitError + "\nFix the ranges and call submit_split again."
-		}
-		if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
-			return fmt.Errorf("章节划分会话失败: %w", err)
+		if replayRunPending {
+			replayRunPending = false
+		} else {
+			userText := initial
+			if attempt > 0 {
+				userText = "Your split was rejected: " + r.lastSplitError + "\nFix the ranges and call submit_split again."
+			}
+			if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
+				return fmt.Errorf("章节划分会话失败: %w", err)
+			}
 		}
 		if !submit.Set {
 			return fmt.Errorf("章节划分会话未提交 submit_split")
@@ -937,23 +988,30 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	// 每章一行实时行：并发的 4 章并排显示各自的轮次/工具数/已用时间，
 	// 谁跑完谁那行消失（用户要的"箭头指过去看每个子会话状态"）。聚合进度
 	// 行是另一行（id "convert"），两者互不覆盖。
-	convHook, convClose := r.livePhaseRow("convert:"+base, "convert:"+base)
-	sess.SetProgressHook(convHook)
-	defer convClose()
-
 	// 会话转录（JSONL，图片走 file:// 引用）：单章转换中断后（进程被
 	// 杀 / 网络断连）下次从转录恢复上下文继续，不重烧 token。
 	// 中断续跑时才回放转录（resuming 已确认工作树也在）。
 	resumed := false
+	resumeSkip := false
+	convertStart := time.Now()
+	var resumeMsgs []session.ChatMessage
 	if resuming {
-		if msgs, err := session.LoadTranscript(trPath); err != nil {
+		if msgs, st, err := session.LoadTranscriptStats(trPath); err != nil {
 			r.log.LogWarning(tid, "[convert] 转录读取失败（忽略，按全新会话继续）:", err)
 		} else if len(msgs) > 0 {
 			sess.SetMessages(msgs)
-			resumed = true
-			r.log.Log(tid, "[convert] 恢复中断的转换会话:", base, "(", strconv.Itoa(len(msgs)), "条历史消息 )")
+			sess.SeedCounters(st.Rounds, st.Tools)
+			resumed, resumeMsgs = true, msgs
+			resumeLog(r.log, tid, "convert", base, msgs, st)
+			if replaySubmit(r.log, tid, "convert:"+base, submit, st) {
+				resumeSkip = true
+			}
+			convertStart = time.Now().Add(-st.Active)
 		}
 	}
+	convHook, convClose := r.livePhaseRowAt("convert:"+base, "convert:"+base, convertStart)
+	sess.SetProgressHook(convHook)
+	defer convClose()
 	if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -973,11 +1031,15 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		initial += "\n\n" + r.watermarkGuidance("WATERMARK: exclude watermark artifacts from the .tex output (repeated decorative overlay text such as institution marks, faint background strings). Skip such content entirely - do not typeset it.")
 	}
 
-	if resumed {
-		initial = "The session was interrupted earlier. Continue from where you left off: read your last written .tex state (read_file), finish the conversion, compile until clean, then submit."
+	if resumed && !resumeSkip {
+		// T29：历史以 tool 回执收尾就原样续行（不插内容、不重发任务提示）；
+		// 只有模型自己停了才发一句最小推动。
+		initial = resumeUserText(resumeMsgs, "The session was interrupted earlier. Continue from where you left off: read your last written .tex state (read_file), finish the conversion, compile until clean, then submit.")
 	}
-	if _, err := sess.Run(session.RunOptions{UserText: initial}); err != nil {
-		return fmt.Errorf("会话失败: %w", err)
+	if !resumeSkip {
+		if _, err := sess.Run(session.RunOptions{UserText: initial}); err != nil {
+			return fmt.Errorf("会话失败: %w", err)
+		}
 	}
 	if !submit.Submitted {
 		// Accept a chapter that compiles clean even without an explicit
