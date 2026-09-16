@@ -1108,3 +1108,17 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **验证**：新增 `anthropic_test.go` 4 例——端到端（httptest 网关断言路径/双头/无 Authorization/system 提升/工具 input_schema/tool_use/tool_result/图片 base64 source/应答全通道/缓存映射/finish 映射）、tool_choice none、4xx 不重试（401 一次过）、ResolveModel 继承 api；`go test ./...` 全绿；模板键面一致性测试通过（两模板同步加 `api: openai` 行）。
 
 **文档**：config.md 增 `models.text.api` 行；default.yaml/config.example.yaml 同步加 `api:` 行；sessions.md 模型注册表条目补 api；README「AI 模型」一行补 anthropic；plan.md P4 标 [X]；CHANGELOG [Unreleased] Added 一条。
+
+## 第四十三批（2026-09-16）
+
+用户指出 P4 原文是「response/anthropic 两个接口」，上一批只做了 anthropic——补 OpenAI **Responses API**（`/v1/responses`，gpt-5/o 系新协议）。
+
+**实现**（`go/internal/session/responses.go`，新增）：
+- `models.*.<条目>.api: responses` → POST {base_url}/responses（Bearer 认证，与 OpenAI 线路同头）。只走非流式；固定 `store:false` + 全量 input 回传（无状态回放，不用服务端存储/previous_response_id 链）。
+- 请求翻译：system → 顶层 `instructions`；assistant 轮 → output_text message 项 + reasoning 项（ReasoningContent 原样放回 `encrypted_content`，decode 存回的加密链因此可回放）+ function_call 项（arguments 保持 JSON **字符串**，Responses API 线格式如此）；tool 回执 → function_call_output 项；user 多模态 → input_text + input_image（data: URL 直接收）；工具 → {type:function,name,description,parameters}；tool_choice 直接收 "auto"/"none" 字符串；`max_tokens` → `max_output_tokens`；固定 `include:["reasoning.encrypted_content"]`（加密思考约半小时级有效期，长间隔续跑可能失效——协议固有约束，文档写明）；reasoning_effort/thinking 配置透传为 `reasoning` 顶层字段。
+- 应答翻译：output items → Content/ReasoningContent(encrypted 优先，退回 summary 文本)/ToolCalls；`input_tokens_details.cached_tokens` → PromptTokensDetails.CachedTokens（缓存命中统计照常）；status=failed/error → 错误；finish 映射（有 function_call → tool_calls、incomplete_reason=max_output_tokens → length、其余 stop）。
+- 重试/4xx 不重试分类与另两条线路共用（错误统一 "HTTP %d: body" 形式）。
+
+**验证**：新增 `responses_test.go` 4 例——端到端（路径/Bearer/instructions/store:false/include/工具形状/function_call 与 function_call_output 往返/图片 input_image/应答全通道含 encrypted 思考回放/缓存映射/finish 映射）、incomplete→length、failed status 报错、reasoning_effort 透传；`go test ./...` 全绿；模板键面一致性通过（两模板 api 注释同步更新）。
+
+**文档**：config.md 的 models.text.api 行扩为三协议（写明加密思考有效期限制）；default.yaml/config.example.yaml 注释更新；sessions.md 模型注册表行补 responses；README「AI 模型」一行补 Responses API；CHANGELOG 上一条 P4 条目更名并扩写；plan.md P4 行补 responses（与 P16 等用户编辑一同留在工作区）。

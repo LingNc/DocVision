@@ -54,7 +54,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking），原样合并到请求体顶层 | 见示例 |
-| `models.text.api` | 线路协议：`openai`（默认，OpenAI 兼容 `/chat/completions`）或 `anthropic`（Anthropic Messages API——`base_url` 指到 `/v1`，如 `https://api.anthropic.com/v1`，Claude 及各类兼容网关；该线路**只走非流式**，自动带 `x-api-key`/`anthropic-version` 头，应答的 `cache_read_input_tokens` 计入缓存命中、`stop_reason` 翻译为 finish_reason） | `openai` |
+| `models.text.api` | 线路协议：`openai`（默认，OpenAI 兼容 `/chat/completions`）、`anthropic`（Anthropic Messages API，`base_url` 指到 `/v1`，自动带 `x-api-key`/`anthropic-version` 头）或 `responses`（OpenAI Responses API，`/v1/responses`，gpt-5/o 系；固定 `store:false` 全量回传，加密思考链请求 `reasoning.encrypted_content` 回放——**加密思考约半小时级有效期**，长间隔续跑可能失效）。后两条线路**只走非流式**；三者都把应答的缓存读计入命中率、stop_reason 翻译为 finish_reason | `openai` |
 | `options.log_level` | 日志等级：info / debug / trace（debug 记请求响应摘要与最终内容，trace 再加流式分片） | info |
 | `models.text.stream` | 是否流式接收（SSE）；不写即 true。厂商不支持时自动回退一次非流式 | true |
 | `models.text.api_stream_idle_timeout` | 流式模式下两个数据块之间的最大间隔（秒），超时判定卡住；0 取 `api_timeout` | 0 |

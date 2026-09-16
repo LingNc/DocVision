@@ -55,9 +55,11 @@ type ModelConfig struct {
 	Model       string                 `yaml:"model"`
 	RequestBody map[string]interface{} `yaml:"request_body"`
 	// API selects the wire protocol of this entry's endpoint: "openai"
-	// (default, /chat/completions) or "anthropic" (/v1/messages — the
+	// (default, /chat/completions), "anthropic" (/v1/messages — the
 	// Anthropic Messages API, Claude and the many Anthropic-compatible
-	// gateways). Anthropic entries are answered non-streaming for now.
+	// gateways) or "responses" (/v1/responses — the OpenAI Responses
+	// API, gpt-5/o-series and compatible gateways). Anthropic/Responses
+	// entries are answered non-streaming for now.
 	API string `yaml:"api"`
 	// Price is this entry's billing rate. All-zero = unknown, and every
 	// cost report then says "未配置价格" instead of inventing ¥0. A model entry

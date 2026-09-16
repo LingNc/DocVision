@@ -308,6 +308,23 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 		return c.decodeAnthropicResponse(resp, start)
 	}
 
+	// P4：OpenAI Responses API 适配（/v1/responses，gpt-5/o 系新协议）。
+	// 同样只走非流式；store:false + 全量 input 回传（无状态回放）。
+	if c.api == "responses" {
+		payload.Stream = false
+		raw, err := c.buildResponsesBody(&payload)
+		if err != nil {
+			return nil, err
+		}
+		c.logCacheProbe(&payload, raw)
+		start := time.Now()
+		resp, err := c.postResponses(raw)
+		if err != nil {
+			return nil, err
+		}
+		return c.decodeResponsesResponse(resp, start)
+	}
+
 	raw, err := c.buildBody(&payload)
 	if err != nil {
 		return nil, err
