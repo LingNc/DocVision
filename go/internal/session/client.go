@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -737,6 +738,81 @@ func NormalizeToolCallTypes(msg *ChatMessage) {
 			msg.ToolCalls[i].Type = "function"
 		}
 	}
+}
+
+var (
+	// 完整的 XML 工具调用块（非贪婪、跨行）——整块删除。
+	leakedToolXMLBlock = regexp.MustCompile(`(?s)<tool_call>.*?</tool_call>`)
+	// 单独的协议标签行，含 <parameter=path> 这种"标签名即参数名"的
+	// 非标准写法（Qwen 系模型常见）。
+	leakedToolXMLTagLine = regexp.MustCompile(`^\s*</?(?:tool_call|function|parameter)(?:[=\s][^>\n]*)?>?\s*$`)
+)
+
+// StripLeakedToolXML 清掉模型随 tool_calls 一起写进 content 的原始
+// XML 协议残片（T32）。真实调用已走 tool_calls 通道正常执行，正文里
+// 重复的残片只会污染回放历史与转录 UI，实测形态：
+//
+//	<parameter=path>
+//	check:parts/
+//	</parameter>
+//	</function>
+//	</tool_call>
+//
+// 只在消息确实携带工具调用时动手；纯文本回复里讨论协议格式的不碰。
+// 删除规则：先整块删 <tool_call>…</tool_call>，再删成行的协议标签，
+// 被标签行上下夹住的短行是标签体内的值（如 check:parts/），一并清掉。
+func StripLeakedToolXML(msg *ChatMessage) {
+	if len(msg.ToolCalls) == 0 {
+		return
+	}
+	s, ok := msg.Content.(string)
+	if !ok || !strings.Contains(s, "<") {
+		return
+	}
+	if !containsAny(s, "tool_call", "parameter=", "function=") {
+		return
+	}
+	s = leakedToolXMLBlock.ReplaceAllString(s, "")
+	lines := strings.Split(s, "\n")
+	removed := make([]bool, len(lines))
+	anyTag := false
+	for i, ln := range lines {
+		if leakedToolXMLTagLine.MatchString(ln) {
+			removed[i] = true
+			anyTag = true
+		}
+	}
+	if anyTag {
+		// nearestNonBlank 找 i 方向上最近的一行非空行（跳过空行），
+		// 返回它的下标；越界返回 -1。
+		nearestNonBlank := func(i, step int) int {
+			for j := i + step; j >= 0 && j < len(lines); j += step {
+				if strings.TrimSpace(lines[j]) != "" {
+					return j
+				}
+			}
+			return -1
+		}
+		for i := range lines {
+			if removed[i] || strings.TrimSpace(lines[i]) == "" {
+				continue
+			}
+			// 文本边界（-1）也算"被标签包围"：残片可以贴在最前面。
+			above := nearestNonBlank(i, -1)
+			below := nearestNonBlank(i, 1)
+			if (above == -1 || removed[above]) && (below == -1 || removed[below]) {
+				removed[i] = true
+			}
+		}
+		var keep []string
+		for i, ln := range lines {
+			if !removed[i] {
+				keep = append(keep, ln)
+			}
+		}
+		s = strings.Join(keep, "\n")
+	}
+	msg.Content = strings.TrimSpace(s)
 }
 
 func truncate(s string, n int) string {

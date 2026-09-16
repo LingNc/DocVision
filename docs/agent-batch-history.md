@@ -1044,3 +1044,20 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **T29——续跑插内容**：此前 tikz/convert 续跑都把"continuation 提示"当 user 轮插入、tikz 还重附原图。修复：`session.Run` 空参（UserText 空 + 无图）= 纯续行，不追加任何消息；`resumeUserText` 判定——历史以 tool 回执收尾（含合成的悬空占位回执）就不插内容，只有模型自己停了（最后是普通 assistant 文本）才发最小推动。悬空调用（进程死在回执落盘前）由 `LoadTranscriptStats` 合成 `INTERRUPTED` 占位回执，保证重放历史 wire 合法（否则续跑第一次请求 400）。回放从最近压缩检查点开始是 `LoadTranscript` 既有语义（T29 之问的答案），已写入 docs/commands.md。
 
 **验证**：Go 新增 3 测试（roundHash 稳定+落盘、ResumeStats 统计/悬空合成/提交识别、多提交取最后），`go test ./...` 全绿；web 构建 + vitest 24/24；真机（合成转录 + latex_project 实树）：详情栏「会话哈希」出列、/v2 404、控制台零报错（favicon 404 为浏览器默认请求）；轮次哈希 UI 依赖新写入的 h 行，下一次真实运行即显示。
+
+## 第三十九批（2026-09-16）：T27 侧栏空白双根因 + T32 XML 协议残片兼容 + T33 assemble 交付中止
+
+用户跑完《2026年李艳芳预测三套卷数一》（36 章，style/images/chapters/convert 全绿）后报三个问题，本批逐个排查修复。
+
+**T27——侧栏空白，两个独立根因**（用户现象："运行中左侧栏目直接空白"）：
+1. `Sidebar.vue` 的 `groups` computed 里调用 `isOverflowOpen(okey)`，但 import 列表只导了 `setOverflowOpen` 漏了 `isOverflowOpen`——vite 不类型检查，构建期与控制台的静默性同"组件未 import"陷阱；某阶段会话数 >8（overflow 分支）即 `ReferenceError`，整个侧栏 computed 崩掉 → 空白。这正是"style 处理完开始下一阶段、会话变多时空白"的现场（convert 36 个会话）。
+2. `sessionview.UsageStats.CacheHitPct` 带 `omitempty`，零缓存命中的会话（cachedTokens=0 → pct=0）被从 `/api/index` 省略 → 前端 `statsSummary` 的 `st.cacheHitPct.toFixed(0)` 崩渲染。本次运行 **28/138 个会话**命中（checker 会话全是零缓存）。历史项目全靠命中率 >0 才没炸——潜伏数据形状雷。
+修复：① Sidebar.vue 补导入 `isOverflowOpen`；② `CacheHitPct` 语义本就注释为"0 when unknown"，去掉 `omitempty` 恒下发。教训：前端对 API 字段直接 `.toFixed()` 的地方都要警惕 omitempty；侧边栏是单 computed 无错误边界，一个字段崩=整栏空白（errorHandler 只负责归因记录）。
+
+**T32——XML 工具调用残片**：日志实测样本（`logs/latex_20260915_230610.log` 23:48:58，checker_chapter_023 round 1，Qwen3.5-27B，`tool_stream=true`）：模型随 tool_calls 把原始 XML 残片写进 content（`<parameter=path>\ncheck:parts/\n</parameter>\n</function>\n</tool_call>`，恰好 70 字符），真实调用已按 tool_calls 通道正常解析执行（3 个工具全部成功）——残片只是重复，但会进回放历史（污染前缀）与转录（污染 UI）。全库 jsonl 只有这一处。修复（双端）：Go 侧 `session.StripLeakedToolXML`——消息带 tool_calls 时才动手（纯文本回复里讨论协议格式的不碰），删完整 `<tool_call>…</tool_call>` 块 + 成行的协议标签 + 被标签行上下夹住的"标签体内的值"行（`check:parts/`）；在 session.Run 两条工具路径（useTools / 预算耗尽兜底）`NormalizeToolCallTypes` 之后调用，落盘与进历史同时生效。web 侧 `splitProtocolLeak`（legacy/stream.ts，规则与 Go 同构）兜旧转录：残片从正文剥出，AssistantMsg 渲染成默认收起的「XML 协议残片」折叠块（等宽小字，说明"调用已正常解析执行"）。
+
+**T33——`phase assemble: open …/out/REPORT.md: no such file or directory`**：convert 36/36 完成后整本书在最后一步中止。根因：`deliverBook` 先 `RemoveAll(outDir)` 再 `filepath.Walk` 拷贝，但**只在遇到目录项时** `MkdirAll`——顶层文件按字典序排在目录前（`REPORT.md` 大写 R=0x52 < `chapters` 小写 c=0x63），Walk 的第一个顶层项是文件时，`copyFile` 写进一个已被删掉的 `out/` 直接 ENOENT。style 包自带 REPORT.md（每次都有）→ **这是每次都炸的潜伏 bug**：核查历史项目，`测试-概率论_ds4.1` 等全部 out/ 是空的（assemble 从未成功交付过，用户没注意）。修复：`RemoveAll` 后立刻 `MkdirAll(outDir)`，补单测 `TestDeliverBookRecreatesOutDir`（顶层文件 + 目录混合布局复刻现场）。已跑完的书重跑 `docvision latex`（done 阶段自动跳过）即完成交付。
+
+**验证**：Go `go test ./...` 全绿（新增 TestStripLeakedToolXML 4 例、TestDeliverBookRecreatesOutDir）；web vitest 27/27（新增 splitProtocolLeak 3 例）；真机 dv5 挂 latex_project 实树 CDP 探针：修复前复现崩溃（`statsSummary … 'toFixed'` ×5，侧栏 0 组）→ 修复后 7 项目组/23 阶段组渲染、「更多会话（还有 28 个）」overflow 展开正常（isOverflowOpen 路径实走）、checker_chapter_023 会话内「XML 协议残片」折叠块出现且默认收起、正文无污染、控制台零报错。
+
+**文档**：issue.md T27/T32/T33 标 [X]（含根因注记）；CHANGELOG [Unreleased] Added（T32）+ Fixed（T27/T33）；AGENTS.md 命令面/会话基础设施要点同步；docs/commands.md 新增「XML 协议残片（T32）」小节。README 与 --help 无涉未动。

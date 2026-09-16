@@ -578,6 +578,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 
 		if len(choice.Message.ToolCalls) > 0 && useTools {
 			NormalizeToolCallTypes(&choice.Message)
+			StripLeakedToolXML(&choice.Message)
 			s.messages = append(s.messages, choice.Message)
 			s.appendTranscript(choice.Message)
 
@@ -644,6 +645,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 					s.label, toolRounds+1, len(choice.Message.ToolCalls)))
 			}
 			NormalizeToolCallTypes(&choice.Message)
+			StripLeakedToolXML(&choice.Message)
 			s.messages = append(s.messages, choice.Message)
 			s.appendTranscript(choice.Message)
 			for _, tc := range choice.Message.ToolCalls {

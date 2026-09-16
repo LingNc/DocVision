@@ -10,7 +10,7 @@ import { state, openDetails, fmtSize, storeGet, storeSet } from '../state'
 import {
   buildGroups, groupKey, groupWantOpen, imageChipText, imageTipText,
   projectProgressLine, projectOf,
-  relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
+  isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
   stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens, type StageStatus,
 } from '../legacy/sidebar'
 import { selectSession, refreshIndex } from '../data'

@@ -208,7 +208,9 @@ type UsageStats struct {
 	// AvgDurationMS is the aggregate average request duration.
 	AvgDurationMS int64 `json:"avgDurationMs,omitempty"`
 	// CacheHitPct is 100*CachedTokens/PromptTokens (0 when unknown).
-	CacheHitPct float64 `json:"cacheHitPct,omitempty"`
+	// 不带 omitempty：前端 sidebar/details 直接 .toFixed()，0 命中率被省略
+	// 时会 undefined 崩掉整栏渲染（T27 实测：28 个零缓存会话空白侧栏）。
+	CacheHitPct float64 `json:"cacheHitPct"`
 	// OutputTPS is completion tokens per second of *generation* time
 	// (duration minus TTFT, so queueing/thinking latency is not counted as
 	// generation), summed over the covered requests.

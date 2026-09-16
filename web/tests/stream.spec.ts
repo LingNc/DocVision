@@ -166,3 +166,24 @@ describe('streamModel：callMsgLine', () => {
     expect(callMsgLine()).toEqual({ c1: 1 })
   })
 })
+
+describe('splitProtocolLeak（T32）', () => {
+  it('纯残片整体剥出（含标签体内的值行）', async () => {
+    const { splitProtocolLeak } = await import('../src/legacy/stream')
+    const r = splitProtocolLeak('<parameter=path>\ncheck:parts/\n</parameter>\n</function>\n</tool_call>')
+    expect(r.main).toBe('')
+    expect(r.leak).toContain('<parameter=path>')
+    expect(r.leak).toContain('check:parts/')
+  })
+  it('完整 XML 块混在正文里：块删除、正文保留', async () => {
+    const { splitProtocolLeak } = await import('../src/legacy/stream')
+    const r = splitProtocolLeak('Let me check:\n<tool_call>\n<function=read_file>\n<parameter=path>\nwork/x.md\n</parameter>\n</function>\n</tool_call>\ndone')
+    expect(r.main).toBe('Let me check:\n\ndone')
+    expect(r.leak).toBe('')
+  })
+  it('正常正文不受影响', async () => {
+    const { splitProtocolLeak } = await import('../src/legacy/stream')
+    const r = splitProtocolLeak('Reading the chapter file first.')
+    expect(r).toEqual({ main: 'Reading the chapter file first.', leak: '' })
+  })
+})

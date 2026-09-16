@@ -275,6 +275,13 @@ func deliverBook(buildDir, outDir string) error {
 	if err := os.RemoveAll(outDir); err != nil {
 		return err
 	}
+	// RemoveAll 连目录本身一起删掉，必须立即重建：Walk 只在"遇到目录项"
+	// 时才 MkdirAll，而顶层文件按字典序排在目录前面时（REPORT.md 大写 R
+	// < chapters 小写 c），copyFile 会写进一个不存在的 out/ 直接 ENOENT——
+	// 整本书在最后一步交付时中止（T33）。
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
 	skipExt := map[string]bool{
 		".aux": true, ".log": true, ".out": true, ".toc": true, ".fls": true,
 		".fdb_latexmk": true, ".bbl": true, ".blg": true, ".nav": true,

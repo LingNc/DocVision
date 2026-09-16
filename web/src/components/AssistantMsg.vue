@@ -4,7 +4,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { state, storeGet, storeSet, LONG_TEXT_LINES, registerAnchor, unregisterAnchor } from '../state'
 import { countText, estOf, firstLine } from '../legacy/sidebar'
-import { type StreamItem } from '../legacy/stream'
+import { type StreamItem, splitProtocolLeak } from '../legacy/stream'
 import { openLightbox } from '../state'
 import { mediaURL } from '../legacy/timeline'
 import Disclosure from './Disclosure.vue'
@@ -65,6 +65,9 @@ onBeforeUnmount(() => {
 
 const thinkTail = computed(() =>
   line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : '')
+
+// T32：旧转录正文中混入的 XML 工具调用残片剥出来折叠展示（新转录 Go 侧已清洗）。
+const body = computed(() => splitProtocolLeak(String((line.value && line.value.text) || '')))
 </script>
 
 <template>
@@ -85,8 +88,16 @@ const thinkTail = computed(() =>
         </div>
       </div>
     </Disclosure>
-    <FoldText v-if="line.text" :text="String(line.text)" :mem-key="'asst.' + line.n"
+    <FoldText v-if="body.main" :text="body.main" :mem-key="'asst.' + line.n"
       :preview-lines="LONG_TEXT_LINES" :tokens="estOf(line).text" />
+    <Disclosure
+      v-if="body.leak"
+      cls="disclosure-leak"
+      name="XML 协议残片"
+      summary="模型直出的原始工具调用文本（调用已正常解析执行）"
+    >
+      <div class="leak-body"><pre class="body-text">{{ body.leak }}</pre></div>
+    </Disclosure>
     <template v-for="c in item.calls" :key="c.key">
       <ToolCard :item="c" />
       <div v-if="state.showThumbs && previewThumbs(c).length" class="preview-strip">
@@ -105,7 +116,21 @@ const thinkTail = computed(() =>
 }
 
 .msg-assistant .body-text {
- font-size: 14px; line-height: 24px; 
+ font-size: 14px; line-height: 24px;
+}
+
+/* XML 协议残片（T32）：折叠块展开体，等宽小字、与思考块同款缩进。 */
+.leak-body {
+ padding: 4px 0 6px 22px;
+}
+
+.leak-body .body-text {
+ font-family: var(--mono, monospace);
+ font-size: var(--code-font, 11px);
+ line-height: var(--code-line, 19px);
+ color: var(--dim);
+ white-space: pre-wrap;
+ margin: 0;
 }
 
 /* 展开后思考缩进 22px、13px/20px */

@@ -49,6 +49,49 @@ export type StreamItem =
   | { type: 'result'; key: string; line: Line; paired: boolean }
   | { type: 'other'; key: string; line: Line }
 
+/*
+ * T32 兼容：旧转录里模型把原始 XML 工具调用残片写进了 assistant 正文
+ * （真实调用已按 tool_calls 正常解析执行），形态如
+ *   <parameter=path>
+ *   check:parts/
+ *   </parameter>
+ *   </function>
+ *   </tool_call>
+ * 新转录由 Go 侧 StripLeakedToolXML 落盘前清掉，这里只兜旧数据：
+ * 把残片从正文里剥出来，UI 折叠展示（AssistantMsg），不污染阅读。
+ * 规则与 Go 侧一致：删完整 <tool_call>…</tool_call> 块，删成行的协议
+ * 标签，被标签行上下夹住的短行是标签体内的值，一并归入残片。
+ */
+const LEAK_TAG_LINE = /^\s*<\/?(?:tool_call|function|parameter)(?:[=\s][^>\n]*)?>?\s*$/
+export function splitProtocolLeak(text: string): { main: string; leak: string } {
+  if (!text.includes('<') || !/(?:tool_call|parameter=|function=)/.test(text)) {
+    return { main: text, leak: '' }
+  }
+  const noBlocks = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+  const lines = noBlocks.split('\n')
+  const removed: boolean[] = lines.map((ln) => LEAK_TAG_LINE.test(ln))
+  if (!removed.some(Boolean)) {
+    return noBlocks === text ? { main: text, leak: '' } : { main: noBlocks, leak: '' }
+  }
+  // 被标签行（或文本边界）上下夹住的非空行 = 标签体内的值，归入残片。
+  const nearestNonBlank = (i: number, step: number): number => {
+    for (let j = i + step; j >= 0 && j < lines.length; j += step) {
+      if (lines[j].trim() !== '') return j
+    }
+    return -1
+  }
+  lines.forEach((ln, i) => {
+    if (removed[i] || ln.trim() === '') return
+    const above = nearestNonBlank(i, -1)
+    const below = nearestNonBlank(i, 1)
+    if ((above === -1 || removed[above]) && (below === -1 || removed[below])) removed[i] = true
+  })
+  const mainLines: string[] = []
+  const leakLines: string[] = []
+  lines.forEach((ln, i) => (removed[i] ? leakLines : mainLines).push(ln))
+  return { main: mainLines.join('\n').trim(), leak: leakLines.join('\n').trim() }
+}
+
 function callItemsOf(line: Line, sid: string): CallItem[] {
   return (line.tool_calls || []).map((call: ToolCall): CallItem => {
     const fn = call.function || {}

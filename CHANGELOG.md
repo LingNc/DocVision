@@ -6,6 +6,7 @@
 ## [Unreleased]
 ### Added
 
+- **XML 工具调用残片兼容（T32）**：模型偶发把原始 XML 工具调用文本（`<parameter=path>…</parameter></function></tool_call>`）写进回复正文——真实调用已按 `tool_calls` 通道正常解析执行，残片只是重复。Go 侧 `StripLeakedToolXML` 在落盘/进历史前剥离（不再污染回放前缀与转录）；旧转录由前端剥出后折叠成「XML 协议残片」块（默认收起、可展开看原文）。
 - **轮次与会话哈希（P10）**：转录每条 `t=msg` 行带 `h` 字段（该轮内容的 SHA-256 短哈希，12 hex，内容派生、重放一致）——对话页工具卡尾部以 `· h=xxxx` 显示、轨迹页行展开区有「轮次哈希」条目，报障时"会话 X 的 h=ab12cd34ef56 轮回复异常"可直接 grep 转录定位；右侧详情栏「会话」块新增「会话哈希」（整个转录文件的内容指纹，钉死用户看到问题那一刻的会话状态）。旧转录无此字段照常显示。
 
 - **Mermaid 升级修复会话**（`tools.mermaid.session_rounds` / `session_errors` / `fallback_model`，P12）：img2text 就地修复轮用完后，模型获得一个虚拟工作区（出错的响应在 `submit.md`，工具 `write_file`/`grep`/`view_image`/`submit`），submit 跑 mmdc 语法检查，编译错误累计到上限自动清上下文切备选模型再试；提交/检查次数默认 6。工作区与 JSONL 转录保留在 `progress_items/mermaid_fix/<图>/` 供诊断，`analyze` 报告触发统计。
@@ -36,6 +37,8 @@
 
 ### Fixed
 
+- **修复：侧栏运行中空白（T27）**——两个独立根因：① `Sidebar.vue` 调用 `isOverflowOpen` 但 import 列表漏了它，某阶段会话数 >8（overflow 分支）即 `ReferenceError` 崩掉整个侧栏 computed——正是"style 处理完开始下一阶段、会话变多时空白"的现场；② `cacheHitPct` 为 0（零缓存命中）时被 `omitempty` 从 `/api/index` 省略，前端 `statsSummary` 直接 `.toFixed()` 又崩渲染（本次运行 28 个零缓存会话命中，历史项目全靠缓存命中>0 才没炸）。修复：补上导入；`cacheHitPct` 语义即"0 when unknown"，去掉 `omitempty` 恒下发。真机探针：7 项目组/23 阶段组渲染、「更多会话」展开正常、控制台零报错。
+- **修复：全书最后一步交付中止（T33）**——`phase assemble: open …/out/REPORT.md: no such file or directory`：`deliverBook` 先 `RemoveAll(out/)` 再 Walk 拷贝，但只在**遇到目录项**时才 `MkdirAll`——顶层文件按字典序排在目录前（`REPORT.md` 大写 R < `chapters` 小写 c），第一个顶层文件拷进不存在的 `out/` 直接 ENOENT，整本书在最后一步中止。潜伏 bug：历史所有项目的 `out/` 其实都是空的。修复为删除后立刻重建 `out/`，补单测钉住（顶层文件 + 目录混合布局）。已跑完的书重跑 `docvision latex`（已完成阶段自动跳过）即完成交付。
 - **修复：续跑会话"几乎重新开一场"（T28）**——恢复时控制台进度行从历史继续（轮次/工具调用计数回填 + "已用"前移到「现在 − 转录活跃跨度」，进程死亡间隔不计）；转录里已经 submit 过的（进程死在提交后的收尾路上）**重放那次提交调用直接完成本阶段**（style/convert/chapters/tikz 四类续跑点全覆盖），不再让已交卷的会话重新跑。
 - **修复：续跑往会话里插内容（T29）**——历史以 tool 回执收尾时**原样续行**（`session.Run` 空参：不追加 user 轮、不重附原图），只有模型自己停了（最后是普通回复）才发一句最小推动；转录结束在"调用已写、回执未落盘"的悬空点上时回放侧合成占位回执保证 wire 合法；回放本就从最近压缩检查点开始（COMPRESSED 标记之前的不再重发，此次在文档中写明）。
 

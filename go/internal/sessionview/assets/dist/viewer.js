@@ -7263,6 +7263,9 @@
     if (hasCollapseMemory(key)) return !isCollapsed(key);
     return !!holdsCurrent;
   }
+  function isOverflowOpen(key) {
+    return state.overflow[key] === true;
+  }
   function setOverflowOpen(key, open) {
     state.overflow[key] = true;
     storeSet("overflow", JSON.stringify(state.overflow));
@@ -8551,8 +8554,8 @@
   const _hoisted_4$8 = { class: "side-search" };
   const _hoisted_5$8 = { class: "side-list-wrap" };
   const _hoisted_6$6 = ["data-project"];
-  const _hoisted_7$5 = ["title"];
-  const _hoisted_8$4 = { class: "row-body" };
+  const _hoisted_7$6 = ["title"];
+  const _hoisted_8$5 = { class: "row-body" };
   const _hoisted_9$4 = {
     key: 0,
     class: "proj-prefix"
@@ -8811,15 +8814,15 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-16630052><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-16630052><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-16630052></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-16630052><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-16630052></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-16630052></path></svg></span>', 1)),
-                    createBaseVNode("span", _hoisted_8$4, [
+                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-be5f344a><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-be5f344a><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-be5f344a></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-be5f344a><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-be5f344a></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-be5f344a></path></svg></span>', 1)),
+                    createBaseVNode("span", _hoisted_8$5, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_9$4, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_10$3, toDisplayString(g.title), 1)
                     ]),
                     createBaseVNode("span", _hoisted_11$3, toDisplayString(g.items.length) + " 个会话", 1),
                     g.legacy ? (openBlock(), createElementBlock("span", _hoisted_12$3, "旧版单项目")) : createCommentVNode("", true),
                     g.live ? (openBlock(), createElementBlock("span", _hoisted_13$3)) : createCommentVNode("", true)
-                  ], 8, _hoisted_7$5),
+                  ], 8, _hoisted_7$6),
                   createBaseVNode("div", null, [
                     g.progress ? (openBlock(), createElementBlock("div", _hoisted_14$3, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
                     (openBlock(true), createElementBlock(Fragment, null, renderList(g.stages, (sv) => {
@@ -8995,7 +8998,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-16630052"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-be5f344a"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
@@ -9274,6 +9277,34 @@
       promptChars: String(line.text || "").length,
       promptTokenEst: estOf(line).text
     };
+  }
+  const LEAK_TAG_LINE = /^\s*<\/?(?:tool_call|function|parameter)(?:[=\s][^>\n]*)?>?\s*$/;
+  function splitProtocolLeak(text) {
+    if (!text.includes("<") || !/(?:tool_call|parameter=|function=)/.test(text)) {
+      return { main: text, leak: "" };
+    }
+    const noBlocks = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "");
+    const lines = noBlocks.split("\n");
+    const removed = lines.map((ln) => LEAK_TAG_LINE.test(ln));
+    if (!removed.some(Boolean)) {
+      return noBlocks === text ? { main: text, leak: "" } : { main: noBlocks, leak: "" };
+    }
+    const nearestNonBlank = (i, step) => {
+      for (let j = i + step; j >= 0 && j < lines.length; j += step) {
+        if (lines[j].trim() !== "") return j;
+      }
+      return -1;
+    };
+    lines.forEach((ln, i) => {
+      if (removed[i] || ln.trim() === "") return;
+      const above = nearestNonBlank(i, -1);
+      const below = nearestNonBlank(i, 1);
+      if ((above === -1 || removed[above]) && (below === -1 || removed[below])) removed[i] = true;
+    });
+    const mainLines = [];
+    const leakLines = [];
+    lines.forEach((ln, i) => (removed[i] ? leakLines : mainLines).push(ln));
+    return { main: mainLines.join("\n").trim(), leak: leakLines.join("\n").trim() };
   }
   function callItemsOf(line, sid) {
     return (line.tool_calls || []).map((call) => {
@@ -9805,8 +9836,8 @@
   const _hoisted_4$5 = { class: "io-actions" };
   const _hoisted_5$5 = { class: "attach-note" };
   const _hoisted_6$5 = { class: "io-actions" };
-  const _hoisted_7$4 = { class: "io-section attach-section" };
-  const _hoisted_8$3 = { class: "attach-body" };
+  const _hoisted_7$5 = { class: "io-section attach-section" };
+  const _hoisted_8$4 = { class: "attach-body" };
   const _hoisted_9$3 = { class: "attach-note" };
   const _sfc_main$9 = /* @__PURE__ */ defineComponent({
     __name: "ToolCard",
@@ -9926,9 +9957,9 @@
                   key: a.line.n
                 }, [
                   _cache[3] || (_cache[3] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
-                  createBaseVNode("div", _hoisted_7$4, [
+                  createBaseVNode("div", _hoisted_7$5, [
                     _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
-                    createBaseVNode("div", _hoisted_8$3, [
+                    createBaseVNode("div", _hoisted_8$4, [
                       a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$e, {
                         key: 0,
                         text: String(a.line.text || ""),
@@ -9954,13 +9985,15 @@
   const _hoisted_1$7 = { class: "thinking-body" };
   const _hoisted_2$7 = { class: "reasoning-scroll" };
   const _hoisted_3$6 = { class: "body-text reasoning-text" };
-  const _hoisted_4$4 = {
+  const _hoisted_4$4 = { class: "leak-body" };
+  const _hoisted_5$4 = { class: "body-text" };
+  const _hoisted_6$4 = {
     key: 0,
     class: "preview-strip"
   };
-  const _hoisted_5$4 = ["src", "alt", "title", "onClick"];
-  const _hoisted_6$4 = {
-    key: 2,
+  const _hoisted_7$4 = ["src", "alt", "title", "onClick"];
+  const _hoisted_8$3 = {
+    key: 3,
     class: "note"
   };
   const _sfc_main$8 = /* @__PURE__ */ defineComponent({
@@ -10018,6 +10051,7 @@
         if (line.value && root.value) unregisterAnchor(line.value.n, root.value);
       });
       const thinkTail = computed(() => line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : "");
+      const body = computed(() => splitProtocolLeak(String(line.value && line.value.text || "")));
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("section", {
           ref_key: "root",
@@ -10044,19 +10078,32 @@
             ]),
             _: 1
           }, 8, ["summary", "tail", "open"])) : createCommentVNode("", true),
-          line.value.text ? (openBlock(), createBlock(_sfc_main$e, {
+          body.value.main ? (openBlock(), createBlock(_sfc_main$e, {
             key: 1,
-            text: String(line.value.text),
+            text: body.value.main,
             "mem-key": "asst." + line.value.n,
             "preview-lines": unref(LONG_TEXT_LINES),
             tokens: unref(estOf)(line.value).text
           }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])) : createCommentVNode("", true),
+          body.value.leak ? (openBlock(), createBlock(_sfc_main$g, {
+            key: 2,
+            cls: "disclosure-leak",
+            name: "XML 协议残片",
+            summary: "模型直出的原始工具调用文本（调用已正常解析执行）"
+          }, {
+            default: withCtx(() => [
+              createBaseVNode("div", _hoisted_4$4, [
+                createBaseVNode("pre", _hoisted_5$4, toDisplayString(body.value.leak), 1)
+              ])
+            ]),
+            _: 1
+          })) : createCommentVNode("", true),
           (openBlock(true), createElementBlock(Fragment, null, renderList(__props.item.calls, (c) => {
             return openBlock(), createElementBlock(Fragment, {
               key: c.key
             }, [
               createVNode(_sfc_main$9, { item: c }, null, 8, ["item"]),
-              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_4$4, [
+              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_6$4, [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(previewThumbs(c), (t) => {
                   return openBlock(), createElementBlock("img", {
                     key: t.ref,
@@ -10066,17 +10113,17 @@
                     loading: "lazy",
                     title: t.ref,
                     onClick: ($event) => show(t.ref, t.url)
-                  }, null, 8, _hoisted_5$4);
+                  }, null, 8, _hoisted_7$4);
                 }), 128))
               ])) : createCommentVNode("", true)
             ], 64);
           }), 128)),
-          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_6$4, "（空消息）")) : createCommentVNode("", true)
+          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_8$3, "（空消息）")) : createCommentVNode("", true)
         ], 512);
       };
     }
   });
-  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-d357b38b"]]);
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-2c3e5afb"]]);
   const _hoisted_1$6 = { class: "sys-line" };
   const _hoisted_2$6 = { class: "line-summary" };
   const _hoisted_3$5 = {
