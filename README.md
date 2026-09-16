@@ -27,7 +27,7 @@ PDF 文件 -> 分割 -> MinerU API 解析 -> 整理文件 -> AI 图片转文本 
 
 - **Go 1.25+**（见 `go/go.mod`；模块在 `go/`）；历史 Python 版本已归档，不再维护
 - **MinerU API token**（[mineru.net](https://mineru.net)），在配置里填 `mineru.token`
-- **AI 模型**：任何 OpenAI 兼容的 Chat Completions 端点，在 `models:` 注册表里配置
+- **AI 模型**：任何 OpenAI 兼容的 Chat Completions 端点，或 Anthropic Messages API 端点（`models.*.api: anthropic`），在 `models:` 注册表里配置
 - **可选**：[Mermaid CLI](https://github.com/mermaid-js/mermaid-cli)（校验 AI 输出的 Mermaid 图，需 Node.js/npm）、TeX Live（`docvision latex` 编译与图片矢量化需要 xelatex 等引擎）
 
 ## 安装与构建

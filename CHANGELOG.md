@@ -6,6 +6,7 @@
 ## [Unreleased]
 ### Added
 
+- **Anthropic Messages API 适配（P4）**：`models.*.<条目>.api: anthropic` 的模型条目改走 Anthropic Messages API（`POST {base_url}/messages`，`base_url` 指到 `/v1`，如 `https://api.anthropic.com/v1`）——Claude 及各类 Anthropic 兼容网关可用。请求自动带 `x-api-key`/`anthropic-version` 头；system 提升为顶层字段，assistant 的思考/文本/工具调用翻译为 thinking/text/tool_use 内容块，工具回执翻译为 tool_result、图片为 base64 source，`user` 路由字段对应 `metadata.user_id`；应答的 `cache_read_input_tokens` 计入前缀缓存命中、`stop_reason` 翻译为 finish_reason、`cache_creation_input_tokens` 计入输入——会话层统计、[cache-probe] 指纹、转录用量照常工作。**该线路只走非流式**（流式/实时快照专属能力不适用），重试/4xx 分类与 OpenAI 线路一致。img2text 逐图分析的独立客户端暂仍为 OpenAI 兼容线路。
 - **原始思考块标注（T30 视觉区分）**：「原始思考」/「XML 协议残片」折叠块名称右侧新增琥珀色徽标（漏进正文 / 协议残片），与正常「思考」块一眼区分。
 - **空回复推动请求改「Continue.」+ 明细不再像重开（T35）**：模型空回复时的推动文案从 "Provide your final answer now." 精简为一个词 "Continue."；「请求号从 1 重算、输入变少」查明是显示假象——nudge 请求与同轮同号、输入 tokens 变小是 tool_choice=none 时厂商不把工具表计入（历史上下文完整带上，139 个真实转录无一重开），预览页请求明细的 nudge 行现标「#N·续」并附说明。
 - **灯箱触屏化（P14）**：双指捏合缩放（中点为锚、按初始距离比绝对缩放）、双击在 1×/2.2× 间切换，右下角常驻缩小/百分比/放大/1:1 控件（手机没有滚轮），灯箱 touch-action:none 禁掉浏览器默认手势；折叠侧栏轨道行 28px 呼吸、hover 圆角高亮。

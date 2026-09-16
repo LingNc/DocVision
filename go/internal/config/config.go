@@ -54,6 +54,11 @@ type ModelConfig struct {
 	APIKey      string                 `yaml:"api_key"`
 	Model       string                 `yaml:"model"`
 	RequestBody map[string]interface{} `yaml:"request_body"`
+	// API selects the wire protocol of this entry's endpoint: "openai"
+	// (default, /chat/completions) or "anthropic" (/v1/messages — the
+	// Anthropic Messages API, Claude and the many Anthropic-compatible
+	// gateways). Anthropic entries are answered non-streaming for now.
+	API string `yaml:"api"`
 	// Price is this entry's billing rate. All-zero = unknown, and every
 	// cost report then says "未配置价格" instead of inventing ¥0. A model entry
 	// that sets none of the three rates inherits models.text's rates (models
@@ -1333,6 +1338,9 @@ func (c *Config) ResolveModel(name string) (ModelConfig, bool) {
 	}
 	if entry.Model == "" {
 		entry.Model = fallback.Model
+	}
+	if entry.API == "" {
+		entry.API = fallback.API
 	}
 	if entry.RequestBody == nil {
 		// 深拷贝：直接把 fallback 的 map 头赋过来，会让"只改条目"的操作

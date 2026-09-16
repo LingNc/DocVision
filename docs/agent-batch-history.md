@@ -1091,3 +1091,20 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **验证**：vitest 31/31；`go test ./...`（session/prompts/latex/sessionview/img2text 全 ok）；真机 CDP 探针（合成转录，含 thinking 泄漏 + nudge 用量行）：「原始思考」块带「漏进正文」徽标渲染、正文干净、请求明细出现 `#1·续` 行、控制台零报错。
 
 **文档**：issue.md T35 标 [X]（记完整排查证据）；plan.md P14/P15 标 [X]（P14 注明本轮范围）；CHANGELOG [Unreleased] Added 四条；AGENTS.md 残片要点补徽标、灯箱要点补触屏；docs/commands.md 残片折叠节补徽标说明、灯箱手势、请求明细 nudge「#N·续」说明。
+
+## 第四十二批（2026-09-16）
+
+用户要求：① 上一批 commit 格式与之前不一致，按既有格式（`type(scope): 标题` + 分块正文）重新提交；② 完成 P4（增加 anthropic api 接口）。
+
+**commit 格式修正**：第四十一批（16 文件）`git reset --soft HEAD~1` 后以 `feat(session/web): …` 格式重新提交（cdc2887），与 f4c33e6/78f2d1b 等一致。
+
+**P4——Anthropic Messages API 适配**（`go/internal/session/anthropic.go`，新增）：
+- `models.*.<条目>.api: anthropic`（新配置字段，继承规则同 base_url——条目不写继承 models.text）→ 客户端改走 `POST {base_url}/messages`（base_url 指到 /v1），自动带 `x-api-key` + `anthropic-version: 2023-06-01`，不发 Authorization 头。
+- 请求翻译：system 消息提升为顶层 `system`（Anthropic 不允许 system 出现在 messages）；assistant 轮的 ReasoningContent/Content/ToolCalls → thinking/text/tool_use 内容块（tool_use 的 input 由 arguments JSON 解码，非法 JSON 原样上交）；tool 回执 → user 轮 tool_result 块；user 多模态 parts → text + image 块（data: URL 拆 base64 source，http URL 走 url source）；OpenAI `user` 路由字段 → `metadata.user_id`；tool_choice "none" → `{type:"none"}`；thinking 配置与 request_body 照旧顶层合并。
+- 应答翻译：content blocks → Content/ReasoningContent/ToolCalls；`cache_read_input_tokens` → PromptTokensDetails.CachedTokens、`cache_creation_input_tokens` 计入输入（会话层缓存统计与 [cache-probe] 照常工作）；stop_reason → finish_reason 词汇（tool_use/max_tokens/end_turn → tool_calls/length/stop）。
+- **只走非流式**：ChatCompletion 对 anthropic 强制 stream=false，一次 JSON 应答（P7 实时快照这类流式专属能力不适用）；重试/4xx 不重试分类与 OpenAI 线路共用（错误统一为 "HTTP %d: body" 形式）。
+- img2text 逐图分析的独立 AIClient 暂仍为 OpenAI 兼容线路（复用 session.Client 是更大重构，留待后续）。
+
+**验证**：新增 `anthropic_test.go` 4 例——端到端（httptest 网关断言路径/双头/无 Authorization/system 提升/工具 input_schema/tool_use/tool_result/图片 base64 source/应答全通道/缓存映射/finish 映射）、tool_choice none、4xx 不重试（401 一次过）、ResolveModel 继承 api；`go test ./...` 全绿；模板键面一致性测试通过（两模板同步加 `api: openai` 行）。
+
+**文档**：config.md 增 `models.text.api` 行；default.yaml/config.example.yaml 同步加 `api:` 行；sessions.md 模型注册表条目补 api；README「AI 模型」一行补 anthropic；plan.md P4 标 [X]；CHANGELOG [Unreleased] Added 一条。

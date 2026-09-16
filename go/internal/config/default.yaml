@@ -216,6 +216,7 @@ models:
     api_stream_idle_timeout: 0  # 流式：两个数据块之间的最大间隔（秒），0 = 用 api_timeout
     api_max_retries: 3          # API retry count for non-rate-limit errors
     rate_limit_retries: 20      # 429 限流重试上限（退避封顶 60s；余额/配额类错误不走重试，直接报错）
+    api: openai                 # 线路协议：openai（默认，/chat/completions）| anthropic（/v1/messages，Claude 及兼容网关；只走非流式）
     stream: true                # 默认流式（SSE）：长思考/长输出期间持续有进展，不再静默等待
     # 思考（思维链）控制：顶层字段，不要写进 request_body.extra_body
     thinking:

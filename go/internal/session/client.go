@@ -31,6 +31,7 @@ type Client struct {
 	baseURL     string
 	apiKey      string
 	model       string
+	api         string // wire protocol: "openai" (default) or "anthropic"
 	requestBody map[string]interface{}
 	log         *logger.Logger // optional; logs retry/backoff waits and stream progress when set
 
@@ -96,6 +97,7 @@ func NewClient(cfg config.ModelConfig) *Client {
 		baseURL:         strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:          cfg.APIKey,
 		model:           cfg.Model,
+		api:             strings.ToLower(strings.TrimSpace(cfg.API)),
 		requestBody:     cfg.RequestBody,
 		thinking:        cfg.Thinking,
 		reasoningEffort: cfg.ReasoningEffort,
@@ -288,6 +290,24 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 		payload.Temperature = c.temperature
 	}
 
+	// P4：Anthropic Messages API 适配（/v1/messages）。适配器只实现了
+	// 非流式路径——请求被强制 stream=false，以一次 JSON 应答返回（同样
+	// 带 thinking/tool_use/usage，P7 实时快照这类流式专属能力不适用）。
+	if c.Anthropic() {
+		payload.Stream = false
+		raw, err := c.buildAnthropicBody(&payload)
+		if err != nil {
+			return nil, err
+		}
+		c.logCacheProbe(&payload, raw)
+		start := time.Now()
+		resp, err := c.postAnthropic(raw)
+		if err != nil {
+			return nil, err
+		}
+		return c.decodeAnthropicResponse(resp, start)
+	}
+
 	raw, err := c.buildBody(&payload)
 	if err != nil {
 		return nil, err
@@ -329,6 +349,10 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 	}
 	return c.decode(resp, payload.Stream, start, req.StreamHook)
 }
+
+// Anthropic reports whether this client speaks the Anthropic Messages
+// API (models.*.<条目>.api: anthropic) instead of OpenAI chat completions.
+func (c *Client) Anthropic() bool { return c.api == "anthropic" }
 
 // buildBody marshals the effective payload and merges the configured
 // request_body plus the vendor top-level fields (thinking,
