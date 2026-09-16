@@ -79,11 +79,26 @@ func (r *Runner) assemblePhase(proj string) error {
 	for _, f := range texs {
 		fmt.Fprintf(&in, "\\input{chapters/%s}\n", filepath.Base(f))
 	}
+	// 续跑短路（T39）：上次终审成功时已把终审产物（修订后的章节 +
+	// main.tex/frontmatter 等顶层文件）回写 work/final_review/ 与
+	// work/chapters/。若这些文件自上次终审后没变（convert 没重跑），
+	// 重建出的树与上次终审后的一致，直接沿用持久化状态、跳过终审会话。
+	frCurrent := finalReviewStateCurrent(proj)
+
 	mainTex := "\\documentclass{" + clsName + "}\n" +
 		"\\graphicspath{{figures/}}\n" +
 		"\\begin{document}\n" + in.String() + "\\end{document}\n"
 	if err := os.WriteFile(filepath.Join(buildDir, "main.tex"), []byte(mainTex), 0o644); err != nil {
 		return err
+	}
+	if frCurrent {
+		// 用回写的终审版 main.tex/顶层文件覆盖刚生成的骨架。
+		if err := applyFinalReviewState(proj, buildDir); err != nil {
+			r.log.LogWarning(0, "[final-review] 恢复终审产物失败，改为重跑终审:", err)
+			frCurrent = false
+		} else {
+			r.log.Log(0, "[final-review] 章节未变且上次终审已回写——沿用终审产物，跳过终审会话")
+		}
 	}
 
 	// Compile (2 passes for TOC/refs).
@@ -103,7 +118,7 @@ func (r *Runner) assemblePhase(proj string) error {
 	}
 	// 汇总/终审会话：核对成品 PDF（封面/目录/顺序/页码/图表/版面）、
 	// 整理目录结构，并重新构建 —— 它以 submit 作为"全书定稿"的标记。
-	if r.cfg.Latex.Compile.FinalReviewEnabled() && fileExists(filepath.Join(buildDir, "main.pdf")) {
+	if r.cfg.Latex.Compile.FinalReviewEnabled() && !frCurrent && fileExists(filepath.Join(buildDir, "main.pdf")) {
 		if err := r.finalReview(proj, buildDir, texs); err != nil {
 			r.log.LogWarning(0, "[final-review] 终审会话未通过（保留已编译全书）:", err)
 			r.phaseNote()("[final-review] 终审未通过（保留已编译全书）")
@@ -186,6 +201,19 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 	tools := r.bookSessionTools(proj, buildDir, compile, submit)
 	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.FixSystem), tuning, r.outputLang()), tools, r.log, 1, "fix")
 
+	// 转录挂到 work/sessions/（T39）：修复会话在 WebUI 可见、进成本表。
+	// 构建树每次 assemble 都重建，上一轮的 edit 无法在新树上续用——
+	// 所以不回放历史、计数从头来，只把旧转录归档成 *_prev 保留可查。
+	trPath := filepath.Join(proj, "work", "sessions", "book_fix.jsonl")
+	archivePrevTranscript(trPath)
+	if tr, terr := session.NewTranscript(trPath); terr == nil {
+		sess.SetTranscript(tr)
+		defer tr.Close()
+	}
+	fixHook, fixClose := r.livePhaseRow("assemble/fix", "fix")
+	sess.SetProgressHook(fixHook)
+	defer fixClose()
+
 	lastErr := firstErr
 	for attempt := 0; attempt < r.cfg.Latex.Compile.MaxFixRounds; attempt++ {
 		userText := "The full-book compile failed:\n\n" + truncateStr(lastErr, 8000) +
@@ -227,7 +255,18 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.modelOf(r.cfg.Latex.ConvertModel),
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.FinalReviewSystem), r.cfg.LatexSession("convert"), r.outputLang()),
 		r.bookSessionTools(proj, buildDir, compile, submit), r.log, 1, "final-review")
-	liveHook, liveClose := r.livePhaseRow("assemble/final-review", "final-review")
+	// 转录挂到 work/sessions/final_review.jsonl（T39）：终审会话在 WebUI
+	// 可见、进成本表。构建树每次 assemble 都重建，上一轮终审的编辑无法
+	// 直接续用——成功后会回写 work/（见 persistFinalReviewState），续跑时
+	// 章节未变则整段跳过；章节变了才重开一场（旧转录归档成 *_prev）。
+	trPath := filepath.Join(proj, "work", "sessions", "final_review.jsonl")
+	archivePrevTranscript(trPath)
+	frStart := time.Now()
+	if tr, terr := session.NewTranscript(trPath); terr == nil {
+		sess.SetTranscript(tr)
+		defer tr.Close()
+	}
+	liveHook, liveClose := r.livePhaseRowAt("assemble/final-review", "final-review", frStart)
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 
@@ -257,6 +296,13 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 		if res.OK {
 			if !submit.Submitted {
 				r.log.LogWarning(0, "[final-review] 会话未显式提交，但全书编译通过，予以采纳")
+			}
+			// 终审对构建树的整理（章节修订/frontmatter/main.tex 钩子）
+			// 回写 work/：assemble 每次重建构建树，不回写的话续跑只能把
+			// 几十轮终审从头再烧一遍（T39 的真实事故：进程死在终审完成
+			// 后的收尾路上，下一跑全书重审 72→63 轮）。
+			if err := persistFinalReviewState(proj, buildDir); err != nil {
+				r.log.LogWarning(0, "[final-review] 回写终审产物失败（不影响交付，但续跑会重审）:", err)
 			}
 			finalPages, _ := pdfPageCount(filepath.Join(buildDir, "main.pdf"))
 			r.log.Log(0, "[final-review] 终审完成，全书页数:", strconv.Itoa(finalPages))

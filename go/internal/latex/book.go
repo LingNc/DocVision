@@ -215,12 +215,30 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		}
 	}
 
+	// 续跑摘要（T28/T39）：压缩模式下控制台只看得到"从哪续上"， Completed
+	// 阶段一行都不少地列出来，用户不用翻上一次运行的日志。日志文件同步
+	// 记一份——note 只上控制台，不进文件。
+	if !opts.Restart && opts.Step == "" {
+		var done []string
+		for _, p := range []string{"style", "images", "chapters", "convert", "assemble"} {
+			if prog2Field(prog, p) == "done" {
+				done = append(done, p)
+			}
+		}
+		if len(done) > 0 {
+			msg := "[book] 续跑：已完成 " + strings.Join(done, " / ") + "，只跑剩余阶段"
+			note(msg)
+			r.log.Log(0, msg)
+		}
+	}
+
 	runPhase := func(name string, fn func() error) error {
 		// images 阶段不做 phase 级跳过：RunImages 自身就是增量的
 		// （done 跳过、fallback 重试），phase 级 done 标记会让上次
 		// 失败（fallback）的图片永远得不到重试。
 		if name != "images" && prog2Field(prog, name) == "done" && !opts.Restart && opts.Step == "" {
 			note("[book] phase %s already done, skipping", name)
+			r.log.Log(0, "[book] phase "+name+" already done, skipping")
 			return nil
 		}
 		if opts.Step != "" && opts.Step != name {

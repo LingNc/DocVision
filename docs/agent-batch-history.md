@@ -1170,3 +1170,35 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - `go test ./...` 全绿（analyze/config/img2text/sessionview 及全部包）；`TestConfigTemplateKeyParity` 通过（两模板同步 v11 + preview 键 + fix_attempts: -1）。
 - analyze 真实日志复核数字见上；预览探针见上。
 - 注：运行目录二进制部署仍被 8849 服务占用阻塞（ETXTBSY），等用户停服务后 `cp temp/p5run/dv5`。
+
+## 第四十五批（2026-09-16，晚）
+
+### 起因
+- 用户报「T28 依然没修复」+ T39（issue.md:541）：续跑时会话从上一次最后轮次开始算、章节核对里有红色错误结束/没开始的会话却进了下一阶段、**final-review 没有进入会话（WebUI）**、续跑时已完成的部分不显示。
+
+### 先看日志再动手（用户要求）
+- 最新 `latex_20260916_184221.log`（1679 行）：18:42 启动 → images Already done → compile:book OK → **直接进 final-review**（round 1、messages=2 全新会话）→ 63 轮提交 → assemble 完成。全程无 style/chapters/convert/checker 行。
+- 对照 `latex_20260915_230610.log`：昨晚 23:06 的运行早已跑到 final-review（round 1 全新、72 轮、00:04:52「终审完成，全书页数: 15」）——**日志在终审完成后立刻终止**：没有 `[assemble] 全书编译完成`、没有成本表、`progress.json` 没落 assemble:done（进程死在收尾路上）。昨晚终审改的 4 个章节 + frontmatter.tex + main.tex 钩子全在 build/ 树里，而 `assemblePhase` 每次运行都清空重建 build/——**终审产物从未回写 work/**。
+- 证据：`find -name '*.jsonl' -newermt 今天` 在项目下零命中（终审 63 轮没留任何转录）；`work/sessions/` 无 final-review 文件；成本表无 final-review 行（成本表从转录统计）；今晚 `out/main.tex` 比生成模板多 `\input{frontmatter.tex}`，`work/chapters/chapter_001/019/027/033.tex` 与 out 版 diff 非空（终审修订全丢在 build 树里）。
+- 结论：「轮次 19」那行是昨晚终端的进度行（昨晚终审在 ~1m04s 时正过 round 19），用户的 T28 痛感实为终审每次续跑都**从零重开**（显示与历史断裂）。
+
+### 修复
+1. **finalReview/fixSession 挂转录**（`work/sessions/final_review.jsonl`、`book_fix.jsonl`）：WebUI 可见、进成本表；final-review 用 `livePhaseRowAt` 带起始时间。旧转录经 `archivePrevTranscript` 归档成 `*_prev.jsonl` 保留可查——**不回放历史**：build/ 每次重建，回放对已不存在的编辑是误导（修复会话同理，只归档不重放）。
+2. **终审产物回写 + 指纹短路**（新 `finalreview_state.go`）：终审编译通过后 `persistFinalReviewState` 把构建树里的章节 .tex（递归）回写 `work/chapters/`、顶层 .tex（main.tex + frontmatter 等）存 `work/final_review/`，并对「work/chapters + work/final_review」算 SHA-256 指纹写入 `state.sha256`。续跑时 `finalReviewStateCurrent` 重算指纹：一致 → `applyFinalReviewState` 用终审版 main.tex/顶层文件覆盖生成的骨架、**整段跳过终审会话**；不一致（convert 重跑/手改）→ 照常重审。修复会话**不做**回写/短路（它的编辑面太大，且修复结果本来就以"编译通过"即时判定）。
+3. **续跑摘要**（book.go）：非 Restart/非 Step 时开头打印「[book] 续跑：已完成 X / Y，只跑剩余阶段」（控制台 + 日志文件各一份，note 原本只上控制台）；每个被跳过的 phase 补一行日志（此前压缩模式下日志里完全看不到跳过）。
+4. **阶段词表**：`fix`→「全书修复」、`final-review`→「终审」，进 StageOrder（成本表/侧栏分组）。
+
+### 数据回填
+- 用同一 `persistFinalReviewState` 对李艳芳项目以 `out/` 为构建树回填（一次性测试，已删）：`work/final_review/{main,frontmatter,example,standalone}.tex + state.sha256` 就位，`work/chapters/chapter_019.tex` 等 4 个修订已同步——新二进制下次续跑该项目**直接跳过终审**。
+
+### 遗留（如实记录）
+- checker 会话失败/未提交**降级为通过**是既有设计（transport 故障不该卡书；编译与终审是硬闸门），`checkChapter` 注释写明了。用户 T39 观察到「红色错误结束却进入下一阶段」即此——本次未改语义，只在回复中向用户说明，要不要改成阻断待用户定。
+- 修复会话（fix）无短路：进程死在修复中途→续跑从 scratch 重修（正确性优先，成本有界）。
+- 静态 `work/final_review` 里的 example/standalone.tex 一并持久化无害（apply 时覆盖同名文件，内容一致）。
+
+### 验证
+- 新增 `finalreview_state_test.go` 3 例（回写→指纹一致→apply 覆盖 main.tex→改章节指纹失效；归档往返）；`go test ./...` 全绿；二进制重建 `temp/p5run/dv5`。
+- 真实项目回填后 `finalReviewStateCurrent` = true（下次 assemble 将打印「沿用终审产物，跳过终审会话」）。
+
+### 文档
+- docs/latex.md 档位1 第 4 步补终审回写/跳过说明；CHANGELOG [Unreleased] Fixed 一条；AGENTS.md 档位1 流程与续跑语义条目同步；批次历史（本批）。

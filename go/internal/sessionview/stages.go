@@ -16,7 +16,7 @@ import (
 // StageOrder is the pipeline order used to sort stage groups; a stage that is
 // not listed sorts last (alphabetically), so an unknown session file can never
 // push itself to the top of a book's sidebar.
-var StageOrder = []string{"vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check", "mermaid-fix", "img2text"}
+var StageOrder = []string{"vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check", "fix", "final-review", "mermaid-fix", "img2text"}
 
 // StageTitles maps a stage key to its short Chinese display name.
 var StageTitles = map[string]string{
@@ -27,6 +27,8 @@ var StageTitles = map[string]string{
 	"checker":      "章节核对",
 	"style-fix":    "样式修复",
 	"figure-check": "逐图校验",
+	"fix":          "全书修复",
+	"final-review": "终审",
 	// T37 img2text 会话（progress_items 附加根）：升级修复 = mermaid 校验
 	// 失败后的虚拟工作区会话；逐图分析 = preview.img2text_all 的 debug 转录。
 	"mermaid-fix": "升级修复",

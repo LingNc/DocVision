@@ -4,6 +4,10 @@
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
 ## [Unreleased]
+### Fixed
+
+- **续跑不再重烧终审/修复会话，终审产物可续（T28/T39）**：终审会话（final-review）与全书修复会话（fix）此前**不挂转录**——WebUI 里看不到、成本表没有行、续跑时毫无记忆。真实事故：一次运行终审 72 轮完成、进程死在收尾路上（progress.json 没落盘），续跑把终审从头烧了 63 轮（¥）才交差。现两会话都挂 `work/sessions/final_review.jsonl` / `book_fix.jsonl`（WebUI 可见、计成本，阶段词表新增「终审」「全书修复」）；终审成功后把树内修改（章节修订 + 新增顶层 .tex + main.tex 钩子）**回写** `work/chapters/` 与 `work/final_review/` 并记内容指纹，续跑时指纹一致（convert 之后没动过）直接沿用终审产物、整段跳过，指纹不一致（convert 重跑/手改）才重审且旧转录归档 `*_prev.jsonl` 不回放——回放对已重建的树是误导。另：续跑开头现在列一句「已完成 X / Y，只跑剩余阶段」，每个被跳过的 phase 也补一行日志（此前压缩模式下控制台与日志都看不到已完成的部分）。
+
 ### Added
 
 - **img2text 会话进预览 + 首次失败即升级（T36/T37）**：`preview.img2text: true`（配置 v11 新增）时，会话预览的扫描根之外**附加扫描** `<finally>/progress_items/`——mermaid **升级修复会话**（`mermaid_fix/<书>_<图>/session-stage*.jsonl`）按书分组（`img2text · <书>`）、组内按图名稳定排序编号（`#N ·` 标题 + 方块视图序号，8 位哈希短名、撞车升 12 位）、走侧栏既有搜索；失败的修复工作区**默认保留**在盘上，保持可见。`/media`/`/file` 逐根尝试主根与附加根（resolveUnderRoot 只查越界不查存在，须确认文件真实存在才命中）。`preview.img2text_all: true`（**debug**）再让 `docvision img2text` 给**每一张图**记录会话转录（`sessions/<md>/<图>.jsonl`，复用 session 引擎的 JSONL/媒体格式）——记录挂在 AIClient 的逐任务结构体拷贝上，从单调增长的对话里用"已见消息游标"重建 wire 转录，不影响共享客户端的并发。**Mermaid 默认改为首次校验失败直接升级修复会话**（`tools.mermaid.fix_attempts` 默认 3 → 未写/`-1`，`0` 仍为受安全上限保护的无限就地修复，`N>0` 保留旧行为），不再先烧 3 轮就地修复。
