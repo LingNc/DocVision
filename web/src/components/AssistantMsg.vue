@@ -70,8 +70,9 @@ const thinkTail = computed(() =>
 // （新转录 Go 侧已清洗：MoveLeakedThinking / StripLeakedToolXML）。
 const body = computed(() => splitLeaks(String((line.value && line.value.text) || '')))
 const leakName = (b: LeakBlock) => (b.kind === 'thinking' ? '原始思考' : 'XML 协议残片')
+const leakBadge = (b: LeakBlock) => (b.kind === 'thinking' ? '漏进正文' : '协议残片')
 const leakSummary = (b: LeakBlock) =>
-  b.kind === 'thinking' ? '思考内容漏进了正文（原始输出）' : '模型直出的原始工具调用文本（调用已正常解析执行）'
+  b.kind === 'thinking' ? '思考内容漏进了正文（原始输出，非 reasoning 通道）' : '模型直出的原始工具调用文本（调用已正常解析执行）'
 </script>
 
 <template>
@@ -99,6 +100,7 @@ const leakSummary = (b: LeakBlock) =>
       :key="'leak' + i"
       cls="disclosure-leak"
       :name="leakName(b)"
+      :badge="leakBadge(b)"
       :summary="leakSummary(b)"
     >
       <div class="leak-body"><pre class="body-text">{{ b.text }}</pre></div>

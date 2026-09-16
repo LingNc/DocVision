@@ -317,6 +317,21 @@ export function resetLightbox(): void {
   lightbox.ty = 0
 }
 
+/** P14：把缩放设到绝对值 s（锚点 = 视口坐标 (mx,my)，换算同 zoomLightbox）。
+ *  触屏双指捏合用——捏合过程要绝对距离比而不是滚轮式累乘。 */
+export function setLightboxScale(s: number, mx: number, my: number, rect: DOMRect): void {
+  const s0 = lightbox.scale
+  const s1 = Math.min(8, Math.max(0.15, s))
+  if (s1 === s0) return
+  const cx = rect.left + rect.width / 2
+  const cy = rect.top + rect.height / 2
+  const px = (mx - cx - lightbox.tx) / s0
+  const py = (my - cy - lightbox.ty) / s0
+  lightbox.tx += px * (s0 - s1)
+  lightbox.ty += py * (s0 - s1)
+  lightbox.scale = s1
+}
+
 /* ---------- 数据层接口 ---------- */
 
 /* 旧页 setBanner：错误横幅（坏行提示由 updateBanner 逻辑接管，见 App.vue）。 */

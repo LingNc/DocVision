@@ -770,11 +770,30 @@ details[open] > .proj-row .row-folder .folder.open {
 }
 
 .frame[data-sidebar-collapsed] .session-row .row-slot {
- width: 20px; 
+ width: 20px;
+}
+
+/* P14：折叠轨道里行的可发现性——行留一点纵向呼吸、hover/active 圆角高亮，
+   当前会话保持 var(--active) 底，扫一眼就能定位（悬浮仍有 title 全文）。 */
+.frame[data-sidebar-collapsed] .proj-row,
+.frame[data-sidebar-collapsed] .stage-row,
+.frame[data-sidebar-collapsed] .session-row {
+ min-height: 28px;
+ border-radius: 8px;
+}
+
+.frame[data-sidebar-collapsed] .proj-row:hover,
+.frame[data-sidebar-collapsed] .stage-row:hover,
+.frame[data-sidebar-collapsed] .session-row:hover {
+ background: var(--hover);
+}
+
+.frame[data-sidebar-collapsed] .session-row.active {
+ background: var(--active);
 }
 
 .frame[data-sidebar-collapsed] .session-blocks {
- display: none; 
+ display: none;
 }
 
 .frame[data-sidebar-collapsed] .row-folder .folder {
@@ -1034,11 +1053,30 @@ details[open] > .proj-row .row-folder .folder.open {
 }
 
 .frame[data-sidebar-collapsed] .session-row .row-slot {
- width: 20px; 
+ width: 20px;
+}
+
+/* P14：折叠轨道里行的可发现性——行留一点纵向呼吸、hover/active 圆角高亮，
+   当前会话保持 var(--active) 底，扫一眼就能定位（悬浮仍有 title 全文）。 */
+.frame[data-sidebar-collapsed] .proj-row,
+.frame[data-sidebar-collapsed] .stage-row,
+.frame[data-sidebar-collapsed] .session-row {
+ min-height: 28px;
+ border-radius: 8px;
+}
+
+.frame[data-sidebar-collapsed] .proj-row:hover,
+.frame[data-sidebar-collapsed] .stage-row:hover,
+.frame[data-sidebar-collapsed] .session-row:hover {
+ background: var(--hover);
+}
+
+.frame[data-sidebar-collapsed] .session-row.active {
+ background: var(--active);
 }
 
 .frame[data-sidebar-collapsed] .session-blocks {
- display: none; 
+ display: none;
 }
 
 .frame[data-sidebar-collapsed] .row-folder .folder {

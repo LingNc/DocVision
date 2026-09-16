@@ -16,6 +16,7 @@ import {
   lightbox,
   loadState,
   resetLightbox,
+  setLightboxScale,
   zoomLightbox,
   persistLayout,
   SIDEBAR_DEFAULT,
@@ -154,39 +155,93 @@ function onKeydown(ev: KeyboardEvent) {
 
 /* P6 灯箱交互：滚轮缩放（围绕鼠标点）、按住拖动平移、双击复位。
  * 「点击关闭」与「双击复位」天然冲突（双击 = 两次 click）——单击延迟 260ms
- * 再关，第二击落在窗口内就按双击复位处理；拖动过的 pointer 序列吞掉 click。 */
-let lbDrag: { x: number; y: number; tx: number; ty: number; moved: boolean } | null = null
+ * 再关，第二击落在窗口内就按双击复位处理；拖动过的 pointer 序列吞掉 click。
+ * P14：pointer 事件天然统一鼠标/触屏——双指按下进入捏合缩放（以双指中点
+ * 为锚、按初始距离比绝对缩放），触屏上连点两下在 1× 与 2.2× 间切换。 */
+const lbPointers = new Map<number, { x: number; y: number }>()
+let lbPan: { id: number; x: number; y: number; tx: number; ty: number; moved: boolean } | null = null
+let lbPinch: { d0: number; s0: number; cx: number; cy: number; rect: DOMRect } | null = null
+let lbLastTap = 0
 let lbClickTimer: ReturnType<typeof setTimeout> | null = null
 let lbSuppressClick = false
 
+function lbImgRect(host: HTMLElement): DOMRect | null {
+  const el = host.querySelector('#lightbox-img')
+  return el ? (el as HTMLElement).getBoundingClientRect() : null
+}
+
 function onLbWheel(ev: WheelEvent) {
   ev.preventDefault()
-  const target = (ev.currentTarget as HTMLElement).querySelector('#lightbox-img') as HTMLElement | null
-  if (!target) return
-  zoomLightbox(ev.deltaY > 0 ? 0.9 : 1 / 0.9, ev.clientX, ev.clientY, target.getBoundingClientRect())
+  const rect = lbImgRect(ev.currentTarget as HTMLElement)
+  if (!rect) return
+  zoomLightbox(ev.deltaY > 0 ? 0.9 : 1 / 0.9, ev.clientX, ev.clientY, rect)
 }
 
 function onLbPointerdown(ev: PointerEvent) {
-  if (ev.button !== 0) return
-  lbDrag = { x: ev.clientX, y: ev.clientY, tx: lightbox.tx, ty: lightbox.ty, moved: false }
-  ;(ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId)
-}
-
-function onLbPointermove(ev: PointerEvent) {
-  if (!lbDrag) return
-  const dx = ev.clientX - lbDrag.x
-  const dy = ev.clientY - lbDrag.y
-  if (!lbDrag.moved && Math.hypot(dx, dy) > 3) lbDrag.moved = true
-  if (lbDrag.moved) {
-    lightbox.tx = lbDrag.tx + dx
-    lightbox.ty = lbDrag.ty + dy
+  if (ev.button !== 0 && ev.pointerType === 'mouse') return
+  const host = ev.currentTarget as HTMLElement
+  host.setPointerCapture(ev.pointerId)
+  lbPointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY })
+  if (lbPointers.size === 2) {
+    // 双指：进入捏合，放弃平移候选。
+    const [a, b] = [...lbPointers.values()]
+    const rect = lbImgRect(host)
+    if (rect) {
+      lbPinch = { d0: Math.max(8, Math.hypot(a.x - b.x, a.y - b.y)), s0: lightbox.scale, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, rect }
+      lbPan = null
+    }
+  } else if (lbPointers.size === 1) {
+    lbPan = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, tx: lightbox.tx, ty: lightbox.ty, moved: false }
   }
 }
 
-function onLbPointerup() {
-  lbSuppressClick = lbDrag?.moved === true
-  lbDrag = null
+function onLbPointermove(ev: PointerEvent) {
+  if (!lbPointers.has(ev.pointerId)) return
+  lbPointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY })
+  const host = ev.currentTarget as HTMLElement
+  if (lbPinch && lbPointers.size >= 2) {
+    const [a, b] = [...lbPointers.values()]
+    const d = Math.max(8, Math.hypot(a.x - b.x, a.y - b.y))
+    // 锚点跟手：双指中点当前位置。
+    setLightboxScale(lbPinch.s0 * (d / lbPinch.d0), (a.x + b.x) / 2, (a.y + b.y) / 2, lbPinch.rect)
+    return
+  }
+  if (lbPan && lbPan.id === ev.pointerId) {
+    const dx = ev.clientX - lbPan.x
+    const dy = ev.clientY - lbPan.y
+    if (!lbPan.moved && Math.hypot(dx, dy) > 3) lbPan.moved = true
+    if (lbPan.moved) {
+      lightbox.tx = lbPan.tx + dx
+      lightbox.ty = lbPan.ty + dy
+    }
+  }
 }
+
+function onLbPointerup(ev: PointerEvent) {
+  const wasPan = lbPan && lbPan.id === ev.pointerId ? lbPan : null
+  lbPointers.delete(ev.pointerId)
+  if (lbPointers.size < 2) lbPinch = null
+  if (wasPan) {
+    lbSuppressClick = wasPan.moved === true
+    // 触屏轻点（未拖动）：连点两下 = 缩放/复位切换（鼠标双击走 dblclick）。
+    if (!wasPan.moved && ev.pointerType !== 'mouse') {
+      const now = Date.now()
+      const host = ev.currentTarget as HTMLElement
+      const rect = lbImgRect(host)
+      if (now - lbLastTap < 320 && rect) {
+        lbLastTap = 0
+        if (lightbox.scale > 1.5) resetLightbox()
+        else setLightboxScale(2.2, ev.clientX, ev.clientY, rect)
+      } else {
+        lbLastTap = now
+      }
+    }
+    lbPan = null
+  }
+}
+
+let ro: ResizeObserver | null = null
+let pollTimer = 0
 
 function onLbClick() {
   if (lbSuppressClick) {
@@ -203,8 +258,21 @@ function onLbDblclick(ev: MouseEvent) {
   resetLightbox()
 }
 
-let ro: ResizeObserver | null = null
-let pollTimer = 0
+/* P14：右下角缩放控件（触屏没有滚轮；按钮 @click.stop 避免触发「点空白关闭」）。 */
+function lbZoomBtn(factor: number, ev: MouseEvent) {
+  ev.stopPropagation()
+  const host = document.getElementById('lightbox')
+  const rect = host ? lbImgRect(host) : null
+  if (!rect) return
+  const cx = rect.left + rect.width / 2
+  const cy = rect.top + rect.height / 2
+  zoomLightbox(factor, cx, cy, rect)
+}
+
+function lbReset(ev: MouseEvent) {
+  ev.stopPropagation()
+  resetLightbox()
+}
 
 onMounted(() => {
   loadState()
@@ -353,7 +421,13 @@ onBeforeUnmount(() => {
     <!-- 旧页 img 不拦冒泡：点图也会冒到灯箱背景关闭（行为保持一致；P6 拖动过则不关） -->
     <img id="lightbox-img" :src="lightbox.open ? lightbox.url : undefined" :alt="lightbox.ref"
       :style="{ transform: 'translate(' + lightbox.tx + 'px,' + lightbox.ty + 'px) scale(' + lightbox.scale + ')' }">
-    <div class="lightbox-hint">滚轮缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭</div>
+    <div class="lightbox-hint">滚轮 / 双指缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭</div>
+    <div class="lightbox-zoom" @click.stop @dblclick.stop>
+      <button class="icon-btn" type="button" title="缩小" aria-label="缩小" @click="lbZoomBtn(1.25, $event)">−</button>
+      <span class="lightbox-scale">{{ Math.round(lightbox.scale * 100) }}%</span>
+      <button class="icon-btn" type="button" title="放大" aria-label="放大" @click="lbZoomBtn(0.8, $event)">＋</button>
+      <button class="icon-btn" type="button" title="复位 100%" aria-label="复位缩放" @click="lbReset($event)">1:1</button>
+    </div>
   </div>
 </template>
 

@@ -6,6 +6,10 @@
 ## [Unreleased]
 ### Added
 
+- **原始思考块标注（T30 视觉区分）**：「原始思考」/「XML 协议残片」折叠块名称右侧新增琥珀色徽标（漏进正文 / 协议残片），与正常「思考」块一眼区分。
+- **空回复推动请求改「Continue.」+ 明细不再像重开（T35）**：模型空回复时的推动文案从 "Provide your final answer now." 精简为一个词 "Continue."；「请求号从 1 重算、输入变少」查明是显示假象——nudge 请求与同轮同号、输入 tokens 变小是 tool_choice=none 时厂商不把工具表计入（历史上下文完整带上，139 个真实转录无一重开），预览页请求明细的 nudge 行现标「#N·续」并附说明。
+- **灯箱触屏化（P14）**：双指捏合缩放（中点为锚、按初始距离比绝对缩放）、双击在 1×/2.2× 间切换，右下角常驻缩小/百分比/放大/1:1 控件（手机没有滚轮），灯箱 touch-action:none 禁掉浏览器默认手势；折叠侧栏轨道行 28px 呼吸、hover 圆角高亮。
+- **checker 提示词收敛（P15）**：系统提示词明确——可见回复不是交付物，不要写大段的核对比较分析，读、决定、submit 即可。
 - **XML 工具调用残片兼容（T32）**：模型偶发把原始 XML 工具调用文本（`<parameter=path>…</parameter></function></tool_call>`）写进回复正文——真实调用已按 `tool_calls` 通道正常解析执行，残片只是重复。Go 侧 `StripLeakedToolXML` 在落盘/进历史前剥离（不再污染回放前缀与转录）；旧转录由前端剥出后折叠成「XML 协议残片」块（默认收起、可展开看原文）。
 - **正文残片统一折叠（T30/T34）**：两类新残片与 T32 同法处理——① reasoning 通道关闭时模型把 `<thinking>…</thinking>` 漏进正文（T30）：Go 侧 `MoveLeakedThinking` 整块移到 `ReasoningContent`（UI 本来就把它渲染成可折叠思考块，GLM 保留式思考回传也走该通道），旧转录前端剥出折成「原始思考」块；② 其余 XML 残片不猜语义（T34）：完整 `<tool_call>…</tool_call>` 块保留为可展开块、成行协议标签（含 thinking 开合标签）剥出折叠，「夹值行」只认上面是开标签的形态——残片后面跟着的正常正文不会被误吃。全部默认收起。
 - **cache-probe 加 head 预览（T31 排查）**：debug 日志的 `[cache-probe]` 行在 `head_sha` 后追加请求体前 256B 的转义预览。T31 结论：缓存大面积未命中**不是会话侧问题**——checker（Qwen/Qwen3.5-27B）9/161 命中 vs convert（deepseek-v4.1）723/760 命中，同结构请求纯 Provider 差异（各轮 head_sha 逐字节一致、命中与未命中的并发无差异）；Provider 若声称"你们前缀变了"，拿这 256B 对质即可。

@@ -1073,3 +1073,21 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **验证**：Go `go test ./...` 全绿（TestMoveLeakedThinking 6 例、TestStripLeakedToolXML 加防回归例）；vitest 31/31（新增 splitLeaks 4 例）；真机 CDP 探针（合成转录含 thinking 泄漏 + XML 残片）：「原始思考」「XML 协议残片」两块并存、默认收起、正文干净、控制台零报错。
 
 **文档**：issue.md T30/T31/T34 标 [X]（T31 记完整排查结论与证据）；CHANGELOG [Unreleased] Added 三条；AGENTS.md 会话基础设施要点改为「正文残片清洗（T30/T32/T34）」；docs/commands.md 的 T32 小节扩写为「正文残片折叠（T30/T32/T34）」。
+
+## 第四十一批（2026-09-16）
+
+用户要求：① 保留式思考折叠块要与正常思考区分开标注；② 做 T35、P14、P15。
+
+**T30 视觉区分——「原始思考」徽标**：Disclosure 组件新增可选 `badge` prop（名称右侧琥珀小胶囊，样式 `--warn` 主题色）。AssistantMsg 的残片块带标注：「原始思考 · 漏进正文」「XML 协议残片 · 协议残片」，与正常「思考」块一眼区分。
+
+**T35——空回复推动请求**：两个子问题分别处理：
+1. **提示太长** → `session.Run` 空回复推动文案从 "Provide your final answer now." 精简为 "**Continue.**"（messages 与转录同步）。
+2. **「提示之后会话重开、输入变少」→ 查明是显示假象，不是真重开**。证据：对运行目录全部 139 个转录做 round 序列扫描，无一重开；5 个含 nudge 的用量行全在 checker（如 checker_chapter_020：#1 普通 1354 → #1 nudge 563）。nudge 请求 `tool_choice=none` 时厂商（Qwen）不把工具表计入 `prompt_tokens`（差值≈checker 三工具 schema），**历史上下文完整带上**，模型后续正常。处理：预览页请求明细 nudge 行显示「#N·续」、kind 说明改「空回复后的推动请求（同轮续发，未重开会话）」，悬浮说明显式解释 token 变小的缘由。
+
+**P14（本轮范围）——灯箱触屏化 + 折叠轨道美化**：灯箱（App.vue pointer 处理重写为多指跟踪）支持**双指捏合缩放**（双指中点为锚、按初始距离比经 `setLightboxScale` 绝对缩放）、**触屏双击 1×/2.2× 切换**（鼠标双击复位语义不变）、右下角常驻 缩小/百分比/放大/1:1 控件（`@click.stop` 不触发点空白关闭），灯箱 `touch-action:none` 禁浏览器默认手势；折叠侧栏轨道行 28px 纵向呼吸、hover 圆角高亮、当前会话 active 底保留。
+
+**P15——checker 提示词收敛**：`latex_checker.system.md` 末尾加一句——可见回复不是交付物，不要写大段的核对比较分析，读、决定、submit 即可（用户明确要求的提示词修改，保持一行最小增量）。
+
+**验证**：vitest 31/31；`go test ./...`（session/prompts/latex/sessionview/img2text 全 ok）；真机 CDP 探针（合成转录，含 thinking 泄漏 + nudge 用量行）：「原始思考」块带「漏进正文」徽标渲染、正文干净、请求明细出现 `#1·续` 行、控制台零报错。
+
+**文档**：issue.md T35 标 [X]（记完整排查证据）；plan.md P14/P15 标 [X]（P14 注明本轮范围）；CHANGELOG [Unreleased] Added 四条；AGENTS.md 残片要点补徽标、灯箱要点补触屏；docs/commands.md 残片折叠节补徽标说明、灯箱手势、请求明细 nudge「#N·续」说明。

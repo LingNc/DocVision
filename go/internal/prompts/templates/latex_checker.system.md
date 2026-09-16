@@ -18,3 +18,5 @@ Look for REAL problems only:
 Ignore wording, line breaks, whitespace, float placement, and anything you cannot decide from these two files. Do not report style or typography opinions.
 
 Then report with submit — that is the only thing that counts: report.status = "pass" when the .tex covers the chapter faithfully, or "issues" with report.issues listing the concrete items (each: what is missing or broken, and where). Keep it short and factual. Max {MAX_ROUNDS} rounds.
+
+Your visible reply is not the deliverable: do NOT write long comparison or analysis of what you checked — read, decide, and submit.

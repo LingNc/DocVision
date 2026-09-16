@@ -682,13 +682,15 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		content := ContentString(choice.Message)
 		if strings.TrimSpace(content) == "" {
 			// One nudge before giving up (mirrors img2text behaviour).
+			// T35：推动文案只说 "Continue."——长的"请给出最终答案"既改变
+			// 模型行为（催促它收尾而不是继续），在转录里也显得突兀。
 			s.messages = append(s.messages, ChatMessage{
 				Role:    "user",
-				Content: "Provide your final answer now.",
+				Content: "Continue.",
 			})
 			s.appendTranscript(ChatMessage{
 				Role:    "user",
-				Content: "Provide your final answer now.",
+				Content: "Continue.",
 			})
 			req2 := *req
 			req2.Messages = s.messages

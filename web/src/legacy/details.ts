@@ -128,10 +128,12 @@ export function statsModel(): { sub: string; tiles: Tile[]; cols: string[]; rows
   const rows = st.perRequest.map((l: any) => {
     const one = l.stats
     const kindLabel = one.kind === 'compact' ? '上下文压缩摘要请求'
-      : one.kind === 'nudge' ? '空回复后的强制文本请求' : '普通对话回合'
+      : one.kind === 'nudge' ? '空回复后的推动请求（同轮续发，未重开会话）' : '普通对话回合'
     return {
       cells: [
-        one.round ? '#' + one.round : '—',
+        // T35：nudge 与同轮同号，请求明细里标成「#N·续」，输入 tokens 因
+        // 工具表不计入而变小——不是上下文丢失/重开，悬浮说明里讲清。
+        one.round ? '#' + one.round + (one.kind === 'nudge' ? '·续' : '') : '—',
         one.ttftMs ? fmtDur(one.ttftMs) : '—',
         one.durationMs ? fmtDur(one.durationMs) : '—',
         fmtTokens(one.promptTokens) +
@@ -142,6 +144,7 @@ export function statsModel(): { sub: string; tiles: Tile[]; cols: string[]; rows
         (one.kind ? '（kind=' + one.kind + '）' : '') +
         (one.model ? '\n模型 ' + one.model : '') +
         '\n输入 ' + one.promptTokens + ' tokens（缓存命中 ' + one.cachedTokens + '）' +
+        (one.kind === 'nudge' ? '\n注：推动请求禁用了工具调用，部分厂商此时不把工具表计入输入 tokens，故数字比同轮前一次小——历史上下文是完整带上的。' : '') +
         '\n输出 ' + one.completionTokens + ' tokens' +
         (one.reasoningTokens ? '（其中思考 ' + one.reasoningTokens + '）' : '') +
         '\n输出速度 ' + (one.outputTps || 0).toFixed(1) + ' tok/s' +

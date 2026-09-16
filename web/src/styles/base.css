@@ -538,6 +538,39 @@ html, body {
   justify-content: center;
   gap: 12px;
   cursor: zoom-out;
+  /* P14：触屏双指捏合/拖动由页面自己处理，禁掉浏览器默认手势（整页缩放/滚动）。 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* P14：右下角缩放控件（手机没有滚轮；点击不冒泡到「点空白关闭」）。 */
+.lightbox-zoom {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(20, 22, 24, .72);
+  border: .5px solid rgba(255, 255, 255, .18);
+}
+
+.lightbox-zoom .icon-btn {
+  color: #e8eaec;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.lightbox-zoom .lightbox-scale {
+  color: #cfd3d6;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: center;
 }
 
 .lightbox img {

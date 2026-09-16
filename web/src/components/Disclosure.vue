@@ -10,6 +10,8 @@ defineProps<{
   open?: boolean
   /** P7：调用还没回执且会话 live——摘要行显示「运行中」spinner。 */
   running?: boolean
+  /** 名称右侧的小徽标（如正文残片块的来源标注）。 */
+  badge?: string
 }>()
 </script>
 
@@ -18,6 +20,7 @@ defineProps<{
     <summary>
       <span class="line-slot"><span class="line-caret" /></span>
       <span class="line-name">{{ name }}</span>
+      <span v-if="badge" class="line-badge">{{ badge }}</span>
       <template v-if="summary">
         <span class="line-sep" />
         <span class="line-summary" :title="summary">{{ summary }}</span>
@@ -30,3 +33,19 @@ defineProps<{
     <slot />
   </details>
 </template>
+
+<style scoped>
+/* 残片徽标：琥珀小胶囊，把「原始思考 / XML 协议残片」和正常思考块一眼区分开。 */
+.line-badge {
+  flex: none;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: .5px solid var(--border);
+  background: color-mix(in srgb, var(--warn, #d97706) 12%, transparent);
+  color: var(--warn, #b45309);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+</style>

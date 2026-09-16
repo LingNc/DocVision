@@ -2748,7 +2748,7 @@
         slot._d = true;
       }
     }
-    if (rendered.scopeId) {
+    if (!noSlotted && rendered.scopeId) {
       rendered.slotScopeIds = [rendered.scopeId + "-s"];
     }
     return rendered;
@@ -6917,6 +6917,18 @@
     lightbox.tx = 0;
     lightbox.ty = 0;
   }
+  function setLightboxScale(s, mx, my, rect) {
+    const s0 = lightbox.scale;
+    const s1 = Math.min(8, Math.max(0.15, s));
+    if (s1 === s0) return;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const px = (mx - cx - lightbox.tx) / s0;
+    const py = (my - cy - lightbox.ty) / s0;
+    lightbox.tx += px * (s0 - s1);
+    lightbox.ty += py * (s0 - s1);
+    lightbox.scale = s1;
+  }
   function setBannerText(text) {
     state.pullError = text;
   }
@@ -8553,7 +8565,7 @@
   const _hoisted_3$b = ["title"];
   const _hoisted_4$8 = { class: "side-search" };
   const _hoisted_5$8 = { class: "side-list-wrap" };
-  const _hoisted_6$6 = ["data-project"];
+  const _hoisted_6$7 = ["data-project"];
   const _hoisted_7$6 = ["title"];
   const _hoisted_8$5 = { class: "row-body" };
   const _hoisted_9$4 = {
@@ -8597,7 +8609,7 @@
   const _hoisted_27$2 = { class: "row-time" };
   const _hoisted_28$2 = { class: "row-actions" };
   const _hoisted_29$2 = ["onClick"];
-  const _hoisted_30$1 = ["onClick"];
+  const _hoisted_30$2 = ["onClick"];
   const _hoisted_31$1 = {
     key: 0,
     class: "session-blocks"
@@ -8814,7 +8826,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-be5f344a><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-be5f344a><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-be5f344a></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-be5f344a><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-be5f344a></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-be5f344a></path></svg></span>', 1)),
+                    _cache[3] || (_cache[3] = createStaticVNode('<span class="row-slot row-folder" data-v-0090e6d6><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0090e6d6><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0090e6d6></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0090e6d6><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-0090e6d6></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0090e6d6></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_8$5, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_9$4, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_10$3, toDisplayString(g.title), 1)
@@ -8902,7 +8914,7 @@
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_30$1)) : createCommentVNode("", true)
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_30$2)) : createCommentVNode("", true)
                           ]))
                         ], 8, _hoisted_15$3)), [
                           [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
@@ -8968,7 +8980,7 @@
                       ], 64);
                     }), 128))
                   ])
-                ], 8, _hoisted_6$6)), [
+                ], 8, _hoisted_6$7)), [
                   [vCollapse, { key: "proj:" + g.name, want: g.matched ? true : projWantOpen(g), frozen: g.matched }]
                 ]);
               }), 128)),
@@ -8998,7 +9010,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-be5f344a"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-0090e6d6"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
@@ -9587,14 +9599,18 @@
   const PartialTail = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-37ec04a0"]]);
   const _hoisted_1$c = ["open"];
   const _hoisted_2$b = { class: "line-name" };
-  const _hoisted_3$9 = ["title"];
-  const _hoisted_4$6 = {
-    key: 1,
+  const _hoisted_3$9 = {
+    key: 0,
+    class: "line-badge"
+  };
+  const _hoisted_4$6 = ["title"];
+  const _hoisted_5$6 = {
+    key: 2,
     class: "line-running",
     title: "这个调用还没有收到回执，正在执行"
   };
-  const _hoisted_5$6 = {
-    key: 2,
+  const _hoisted_6$6 = {
+    key: 3,
     class: "line-tail"
   };
   const _sfc_main$g = /* @__PURE__ */ defineComponent({
@@ -9605,7 +9621,8 @@
       summary: {},
       tail: {},
       open: { type: Boolean },
-      running: { type: Boolean }
+      running: { type: Boolean },
+      badge: {}
     },
     setup(__props) {
       return (_ctx, _cache) => {
@@ -9618,24 +9635,26 @@
               createBaseVNode("span", { class: "line-caret" })
             ], -1)),
             createBaseVNode("span", _hoisted_2$b, toDisplayString(__props.name), 1),
-            __props.summary ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+            __props.badge ? (openBlock(), createElementBlock("span", _hoisted_3$9, toDisplayString(__props.badge), 1)) : createCommentVNode("", true),
+            __props.summary ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
               _cache[0] || (_cache[0] = createBaseVNode("span", { class: "line-sep" }, null, -1)),
               createBaseVNode("span", {
                 class: "line-summary",
                 title: __props.summary
-              }, toDisplayString(__props.summary), 9, _hoisted_3$9)
+              }, toDisplayString(__props.summary), 9, _hoisted_4$6)
             ], 64)) : createCommentVNode("", true),
-            __props.running ? (openBlock(), createElementBlock("span", _hoisted_4$6, [..._cache[1] || (_cache[1] = [
+            __props.running ? (openBlock(), createElementBlock("span", _hoisted_5$6, [..._cache[1] || (_cache[1] = [
               createBaseVNode("span", { class: "running-dot" }, null, -1),
               createTextVNode("运行中 ", -1)
             ])])) : createCommentVNode("", true),
-            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_5$6, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
+            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_6$6, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
           ]),
-          renderSlot(_ctx.$slots, "default")
+          renderSlot(_ctx.$slots, "default", {}, void 0, true)
         ], 10, _hoisted_1$c);
       };
     }
   });
+  const Disclosure = /* @__PURE__ */ _export_sfc(_sfc_main$g, [["__scopeId", "data-v-ae59d4af"]]);
   const _sfc_main$f = /* @__PURE__ */ defineComponent({
     __name: "MdBody",
     props: {
@@ -9898,7 +9917,7 @@
       });
       const prettyArgs = computed(() => prettyJSON(props.item.argsText) || "(无参数)");
       return (_ctx, _cache) => {
-        return openBlock(), createBlock(_sfc_main$g, {
+        return openBlock(), createBlock(Disclosure, {
           ref_key: "details",
           ref: details,
           cls: "disclosure-tool fam-" + __props.item.fam + (__props.item.lastStatus ? " status-" + __props.item.lastStatus : ""),
@@ -10063,14 +10082,15 @@
       const thinkTail = computed(() => line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : "");
       const body = computed(() => splitLeaks(String(line.value && line.value.text || "")));
       const leakName = (b) => b.kind === "thinking" ? "原始思考" : "XML 协议残片";
-      const leakSummary = (b) => b.kind === "thinking" ? "思考内容漏进了正文（原始输出）" : "模型直出的原始工具调用文本（调用已正常解析执行）";
+      const leakBadge = (b) => b.kind === "thinking" ? "漏进正文" : "协议残片";
+      const leakSummary = (b) => b.kind === "thinking" ? "思考内容漏进了正文（原始输出，非 reasoning 通道）" : "模型直出的原始工具调用文本（调用已正常解析执行）";
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("section", {
           ref_key: "root",
           ref: root,
           class: "msg msg-assistant"
         }, [
-          line.value.reasoning ? (openBlock(), createBlock(_sfc_main$g, {
+          line.value.reasoning ? (openBlock(), createBlock(Disclosure, {
             key: 0,
             ref_key: "thinkRef",
             ref: thinkRef,
@@ -10098,10 +10118,11 @@
             tokens: unref(estOf)(line.value).text
           }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])) : createCommentVNode("", true),
           (openBlock(true), createElementBlock(Fragment, null, renderList(body.value.blocks, (b, i) => {
-            return openBlock(), createBlock(_sfc_main$g, {
+            return openBlock(), createBlock(Disclosure, {
               key: "leak" + i,
               cls: "disclosure-leak",
               name: leakName(b),
+              badge: leakBadge(b),
               summary: leakSummary(b)
             }, {
               default: withCtx(() => [
@@ -10110,7 +10131,7 @@
                 ])
               ]),
               _: 2
-            }, 1032, ["name", "summary"]);
+            }, 1032, ["name", "badge", "summary"]);
           }), 128)),
           (openBlock(true), createElementBlock(Fragment, null, renderList(__props.item.calls, (c) => {
             return openBlock(), createElementBlock(Fragment, {
@@ -10137,7 +10158,7 @@
       };
     }
   });
-  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-84db9398"]]);
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-28f984a6"]]);
   const _hoisted_1$6 = { class: "sys-line" };
   const _hoisted_2$6 = { class: "line-summary" };
   const _hoisted_3$5 = {
@@ -10263,7 +10284,7 @@
       });
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("section", _hoisted_1$5, [
-          createVNode(_sfc_main$g, {
+          createVNode(Disclosure, {
             ref_key: "root",
             ref: root,
             cls: "disclosure-image",
@@ -10320,7 +10341,7 @@
           ref: root,
           class: "msg msg-tool"
         }, [
-          createVNode(_sfc_main$g, {
+          createVNode(Disclosure, {
             cls: "disclosure-result status-" + status.value,
             name: "(未配对的工具回执)",
             summary: unref(firstLine)(text.value),
@@ -10955,16 +10976,18 @@
     }
     const rows = st.perRequest.map((l) => {
       const one = l.stats;
-      const kindLabel = one.kind === "compact" ? "上下文压缩摘要请求" : one.kind === "nudge" ? "空回复后的强制文本请求" : "普通对话回合";
+      const kindLabel = one.kind === "compact" ? "上下文压缩摘要请求" : one.kind === "nudge" ? "空回复后的推动请求（同轮续发，未重开会话）" : "普通对话回合";
       return {
         cells: [
-          one.round ? "#" + one.round : "—",
+          // T35：nudge 与同轮同号，请求明细里标成「#N·续」，输入 tokens 因
+          // 工具表不计入而变小——不是上下文丢失/重开，悬浮说明里讲清。
+          one.round ? "#" + one.round + (one.kind === "nudge" ? "·续" : "") : "—",
           one.ttftMs ? fmtDur(one.ttftMs) : "—",
           one.durationMs ? fmtDur(one.durationMs) : "—",
           fmtTokens(one.promptTokens) + (one.promptTokens ? " · " + (one.cachedTokens * 100 / one.promptTokens).toFixed(0) + "%" : ""),
           fmtTokens(one.completionTokens)
         ],
-        title: (l.ts ? fmtClock(l.ts) + "\n" : "") + kindLabel + (one.kind ? "（kind=" + one.kind + "）" : "") + (one.model ? "\n模型 " + one.model : "") + "\n输入 " + one.promptTokens + " tokens（缓存命中 " + one.cachedTokens + "）\n输出 " + one.completionTokens + " tokens" + (one.reasoningTokens ? "（其中思考 " + one.reasoningTokens + "）" : "") + "\n输出速度 " + (one.outputTps || 0).toFixed(1) + " tok/s\n结束原因 " + (one.finish || "—")
+        title: (l.ts ? fmtClock(l.ts) + "\n" : "") + kindLabel + (one.kind ? "（kind=" + one.kind + "）" : "") + (one.model ? "\n模型 " + one.model : "") + "\n输入 " + one.promptTokens + " tokens（缓存命中 " + one.cachedTokens + "）" + (one.kind === "nudge" ? "\n注：推动请求禁用了工具调用，部分厂商此时不把工具表计入输入 tokens，故数字比同轮前一次小——历史上下文是完整带上的。" : "") + "\n输出 " + one.completionTokens + " tokens" + (one.reasoningTokens ? "（其中思考 " + one.reasoningTokens + "）" : "") + "\n输出速度 " + (one.outputTps || 0).toFixed(1) + " tok/s\n结束原因 " + (one.finish || "—")
       };
     });
     return { sub, tiles, cols: ["回合", "首字", "耗时", "输入·缓存", "输出"], rows, rowCount: st.requests };
@@ -11060,7 +11083,7 @@
   };
   const _hoisted_28$1 = ["open"];
   const _hoisted_29$1 = { class: "line-summary" };
-  const _hoisted_30 = { class: "schema-body" };
+  const _hoisted_30$1 = { class: "schema-body" };
   const _hoisted_31 = { class: "prompt-scroll" };
   const _hoisted_32 = { class: "row-actions" };
   const _hoisted_33 = { class: "meta-tools" };
@@ -11275,7 +11298,7 @@
                   _cache[5] || (_cache[5] = createBaseVNode("span", { class: "line-sep" }, null, -1)),
                   createBaseVNode("span", _hoisted_29$1, toDisplayString(meta.value.bits), 1)
                 ]),
-                createBaseVNode("div", _hoisted_30, [
+                createBaseVNode("div", _hoisted_30$1, [
                   createBaseVNode("div", _hoisted_31, [
                     meta.value.mode === "json" ? (openBlock(), createBlock(_sfc_main$3, {
                       key: 0,
@@ -11412,6 +11435,7 @@
   };
   const _hoisted_28 = { class: "details-head" };
   const _hoisted_29 = ["src", "alt"];
+  const _hoisted_30 = { class: "lightbox-scale" };
   const _sfc_main = /* @__PURE__ */ defineComponent({
     __name: "App",
     setup(__props) {
@@ -11506,34 +11530,81 @@
         if (ev.key === "[") toggleSidebar();
         if (ev.key === "]") toggleDetails();
       }
-      let lbDrag = null;
+      const lbPointers = /* @__PURE__ */ new Map();
+      let lbPan = null;
+      let lbPinch = null;
+      let lbLastTap = 0;
       let lbClickTimer = null;
       let lbSuppressClick = false;
+      function lbImgRect(host) {
+        const el2 = host.querySelector("#lightbox-img");
+        return el2 ? el2.getBoundingClientRect() : null;
+      }
       function onLbWheel(ev) {
         ev.preventDefault();
-        const target = ev.currentTarget.querySelector("#lightbox-img");
-        if (!target) return;
-        zoomLightbox(ev.deltaY > 0 ? 0.9 : 1 / 0.9, ev.clientX, ev.clientY, target.getBoundingClientRect());
+        const rect = lbImgRect(ev.currentTarget);
+        if (!rect) return;
+        zoomLightbox(ev.deltaY > 0 ? 0.9 : 1 / 0.9, ev.clientX, ev.clientY, rect);
       }
       function onLbPointerdown(ev) {
-        if (ev.button !== 0) return;
-        lbDrag = { x: ev.clientX, y: ev.clientY, tx: lightbox.tx, ty: lightbox.ty, moved: false };
-        ev.currentTarget.setPointerCapture(ev.pointerId);
-      }
-      function onLbPointermove(ev) {
-        if (!lbDrag) return;
-        const dx = ev.clientX - lbDrag.x;
-        const dy = ev.clientY - lbDrag.y;
-        if (!lbDrag.moved && Math.hypot(dx, dy) > 3) lbDrag.moved = true;
-        if (lbDrag.moved) {
-          lightbox.tx = lbDrag.tx + dx;
-          lightbox.ty = lbDrag.ty + dy;
+        if (ev.button !== 0 && ev.pointerType === "mouse") return;
+        const host = ev.currentTarget;
+        host.setPointerCapture(ev.pointerId);
+        lbPointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+        if (lbPointers.size === 2) {
+          const [a, b] = [...lbPointers.values()];
+          const rect = lbImgRect(host);
+          if (rect) {
+            lbPinch = { d0: Math.max(8, Math.hypot(a.x - b.x, a.y - b.y)), s0: lightbox.scale, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, rect };
+            lbPan = null;
+          }
+        } else if (lbPointers.size === 1) {
+          lbPan = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, tx: lightbox.tx, ty: lightbox.ty, moved: false };
         }
       }
-      function onLbPointerup() {
-        lbSuppressClick = (lbDrag == null ? void 0 : lbDrag.moved) === true;
-        lbDrag = null;
+      function onLbPointermove(ev) {
+        if (!lbPointers.has(ev.pointerId)) return;
+        lbPointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+        ev.currentTarget;
+        if (lbPinch && lbPointers.size >= 2) {
+          const [a, b] = [...lbPointers.values()];
+          const d = Math.max(8, Math.hypot(a.x - b.x, a.y - b.y));
+          setLightboxScale(lbPinch.s0 * (d / lbPinch.d0), (a.x + b.x) / 2, (a.y + b.y) / 2, lbPinch.rect);
+          return;
+        }
+        if (lbPan && lbPan.id === ev.pointerId) {
+          const dx = ev.clientX - lbPan.x;
+          const dy = ev.clientY - lbPan.y;
+          if (!lbPan.moved && Math.hypot(dx, dy) > 3) lbPan.moved = true;
+          if (lbPan.moved) {
+            lightbox.tx = lbPan.tx + dx;
+            lightbox.ty = lbPan.ty + dy;
+          }
+        }
       }
+      function onLbPointerup(ev) {
+        const wasPan = lbPan && lbPan.id === ev.pointerId ? lbPan : null;
+        lbPointers.delete(ev.pointerId);
+        if (lbPointers.size < 2) lbPinch = null;
+        if (wasPan) {
+          lbSuppressClick = wasPan.moved === true;
+          if (!wasPan.moved && ev.pointerType !== "mouse") {
+            const now = Date.now();
+            const host = ev.currentTarget;
+            const rect = lbImgRect(host);
+            if (now - lbLastTap < 320 && rect) {
+              lbLastTap = 0;
+              if (lightbox.scale > 1.5) resetLightbox();
+              else setLightboxScale(2.2, ev.clientX, ev.clientY, rect);
+            } else {
+              lbLastTap = now;
+            }
+          }
+          lbPan = null;
+        }
+      }
+      let ro = null;
+      let pollTimer = 0;
       function onLbClick() {
         if (lbSuppressClick) {
           lbSuppressClick = false;
@@ -11553,8 +11624,19 @@
         }
         resetLightbox();
       }
-      let ro = null;
-      let pollTimer = 0;
+      function lbZoomBtn(factor, ev) {
+        ev.stopPropagation();
+        const host = document.getElementById("lightbox");
+        const rect = host ? lbImgRect(host) : null;
+        if (!rect) return;
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        zoomLightbox(factor, cx, cy, rect);
+      }
+      function lbReset(ev) {
+        ev.stopPropagation();
+        resetLightbox();
+      }
       onMounted(() => {
         loadState();
         applyTheme(storedTheme());
@@ -11644,7 +11726,7 @@
                         title: "在侧栏里定位到这个项目",
                         onClick: _cache[3] || (_cache[3] = ($event) => unref(revealProject)(curProject.value))
                       }, toDisplayString(curProject.value), 1),
-                      _cache[11] || (_cache[11] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
+                      _cache[16] || (_cache[16] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
                       createVNode(_sfc_main$k, {
                         text: sessionTitle.value,
                         tag: "span",
@@ -11776,7 +11858,7 @@
             }, null, 44, _hoisted_26),
             createBaseVNode("aside", _hoisted_27, [
               createBaseVNode("div", _hoisted_28, [
-                _cache[12] || (_cache[12] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
+                _cache[17] || (_cache[17] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
                 createBaseVNode("button", {
                   id: "details-close",
                   class: "icon-btn",
@@ -11806,13 +11888,43 @@
               alt: unref(lightbox).ref,
               style: normalizeStyle({ transform: "translate(" + unref(lightbox).tx + "px," + unref(lightbox).ty + "px) scale(" + unref(lightbox).scale + ")" })
             }, null, 12, _hoisted_29),
-            _cache[13] || (_cache[13] = createBaseVNode("div", { class: "lightbox-hint" }, "滚轮缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭", -1))
+            _cache[18] || (_cache[18] = createBaseVNode("div", { class: "lightbox-hint" }, "滚轮 / 双指缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭", -1)),
+            createBaseVNode("div", {
+              class: "lightbox-zoom",
+              onClick: _cache[14] || (_cache[14] = withModifiers(() => {
+              }, ["stop"])),
+              onDblclick: _cache[15] || (_cache[15] = withModifiers(() => {
+              }, ["stop"]))
+            }, [
+              createBaseVNode("button", {
+                class: "icon-btn",
+                type: "button",
+                title: "缩小",
+                "aria-label": "缩小",
+                onClick: _cache[11] || (_cache[11] = ($event) => lbZoomBtn(1.25, $event))
+              }, "−"),
+              createBaseVNode("span", _hoisted_30, toDisplayString(Math.round(unref(lightbox).scale * 100)) + "%", 1),
+              createBaseVNode("button", {
+                class: "icon-btn",
+                type: "button",
+                title: "放大",
+                "aria-label": "放大",
+                onClick: _cache[12] || (_cache[12] = ($event) => lbZoomBtn(0.8, $event))
+              }, "＋"),
+              createBaseVNode("button", {
+                class: "icon-btn",
+                type: "button",
+                title: "复位 100%",
+                "aria-label": "复位缩放",
+                onClick: _cache[13] || (_cache[13] = ($event) => lbReset($event))
+              }, "1:1")
+            ], 32)
           ], 34)
         ], 64);
       };
     }
   });
-  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-10143b86"]]);
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-7abb92ff"]]);
   const app = createApp(App);
   app.config.errorHandler = (err, instance, info) => {
     var _a, _b;
