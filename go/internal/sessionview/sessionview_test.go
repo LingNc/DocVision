@@ -386,7 +386,7 @@ func TestServeAPI(t *testing.T) {
 	// path validation were missing.
 	writeFile(t, filepath.Join(base, "outside-secret.txt"), "secret")
 
-	srv := httptest.NewServer(newViewerServer(root))
+	srv := httptest.NewServer(newViewerServer(root, nil))
 	defer srv.Close()
 
 	get := func(path string) (*http.Response, string) {
@@ -823,7 +823,7 @@ func TestServeAPIMetaAndProject(t *testing.T) {
 		`{"t":"meta","kind":"system","session_label":"style","model":"glm-4.6","system_sha":"ab12cd34deadbeef","text":"系统提示词","tools":[{"name":"read_file","description":"读文件","parameters":{"type":"object"}}]}`,
 		`{"t":"msg","role":"user","text":"分析样式"}`,
 	))
-	srv := httptest.NewServer(newViewerServer(root))
+	srv := httptest.NewServer(newViewerServer(root, nil))
 	defer srv.Close()
 
 	getJSON := func(path string, out any) {

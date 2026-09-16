@@ -99,7 +99,9 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
                     /api/index，当前会话有新行
                     就按行号增量追加渲染（保持滚动位置，打开"自动跟随"则滚到底部），
                     适合边跑流程边看会话。服务只读，只提供根目录内的文件并拒绝越界
-                    路径（../）。
+                    路径（../）。preview.img2text: true 时侧栏额外列出 img2text 的
+                    升级修复/逐图会话（按书分组、编号、可搜索；转录在 <finally>/
+                    progress_items/ 下，由该配置项控制显隐）。
 
 示例：
   docvision sessions                            # 扫描配置里的根目录，生成 <根目录>/sessions.html
@@ -139,7 +141,8 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 				return err
 			}
 
-			sessions, err := sessionview.Scan(root)
+			extras := sessionsExtras(cfg)
+			sessions, err := sessionview.ScanWith(root, extras)
 			if err != nil {
 				return err
 			}
@@ -161,6 +164,7 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 					DirSource:  dirSource,
 					AddrSource: addrSource,
 					ConfigNote: sessionsConfigNote(cfg),
+					Extras:     extras,
 				})
 			}
 
@@ -240,6 +244,22 @@ func sessionsRoot(cmd *cobra.Command, cfg *config.Config, startDir string) (stri
 		return startDir, "当前目录（config 里没有 " + key + "）"
 	}
 	return startDir, "当前目录（未找到 config）"
+}
+
+// sessionsExtras builds the T37 img2text extra scan roots from
+// preview.img2text: the img2text pipeline keeps its sessions under
+// <finally>/progress_items/{mermaid_fix,sessions}/, outside the latex
+// scan root, so the viewer needs them as an extra directory. Disabled
+// (or no finally dir) = no extras.
+func sessionsExtras(cfg *config.Config) []sessionview.ScanExtra {
+	if cfg == nil || !cfg.Preview.Img2Text {
+		return nil
+	}
+	dir := filepath.Join(cfg.Paths.FinallyDir, "progress_items")
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return nil
+	}
+	return []sessionview.ScanExtra{{Dir: dir, Kind: "img2text"}}
 }
 
 // sessionsAddr decides the listen address and says where it came from:

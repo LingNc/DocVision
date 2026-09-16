@@ -263,8 +263,14 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		if opts.Quiet {
 			logger.SetQuiet(true)
 		}
+		// T37 debug：preview.img2text_all = 每张图都记录会话转录。
+		recordAll := cfg.Preview.Img2TextAll
+		if recordAll {
+			logger.Log(0, "T37 debug: preview.img2text_all 开启，逐图会话转录写入",
+				filepath.Join(progressRoot, "sessions"))
+		}
 		runWorkers(client, pending, imagesDir, mdCache, progressRoot,
-			logger, &progressData, &progressMu, cfg.Options, opts.Quiet, fixCfg)
+			logger, &progressData, &progressMu, cfg.Options, opts.Quiet, fixCfg, recordAll)
 		if opts.Quiet {
 			logger.SetQuiet(false)
 		}
@@ -414,6 +420,9 @@ func runWorkers(
 	opts config.OptionsConfig,
 	quiet bool,
 	fixCfg *MermaidFixConfig,
+	// recordAll (T37 debug, preview.img2text_all) writes one transcript
+	// per image task under progressRoot/sessions/<md>/<图>.jsonl.
+	recordAll bool,
 ) {
 	results := make(chan runResult, len(pending))
 	var wg sync.WaitGroup
@@ -546,11 +555,30 @@ func runWorkers(
 				return
 			}
 			subject := strings.TrimSuffix(tt.mdName, filepath.Ext(tt.mdName))
+			// T37 debug：preview.img2text_all 时给本任务挂一张逐图转录。
+			// client 是共享指针，这里拷一份结构体、只换 record——http
+			// 客户端与配置都是只读共享，逐任务互不影响。
+			taskClient := client
+			var rec *ExchangeRecorder
+			if recordAll {
+				tpath := transcriptPathFor(progressRoot, tt.mdName, tt.imgPath)
+				if r, err := NewExchangeRecorder(tpath, tt.key, client.Model(), ""); err != nil {
+					logger.LogWarning(tid, "  [recorder] 转录创建失败:", err)
+				} else {
+					rec = r
+					c := *client
+					c.SetRecorder(rec.Record)
+					taskClient = &c
+				}
+			}
 			r, status, raw := ProcessOneImage(
-				client, imagesDir, tt.imgPath, subject,
+				taskClient, imagesDir, tt.imgPath, subject,
 				entry.lines, tt.lineIdx,
 				logger, tid, opts, fixCfg,
 			)
+			if rec != nil {
+				_ = rec.Close()
+			}
 			elapsed := time.Since(startTime).Seconds()
 			elapsedStr := strconv.FormatFloat(elapsed, 'f', 2, 64)
 			isErr := false

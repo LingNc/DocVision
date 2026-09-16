@@ -437,6 +437,16 @@ type PreviewConfig struct {
 	// cannot tell "key absent" from "written as 0". The kernel-pick path is the
 	// command line's --port 0; the banner prints whatever net.Listen bound.
 	Port int `yaml:"port"`
+	// Img2Text (T37) adds the img2text upgrade-fix sessions
+	// (progress_items/mermaid_fix/*/session-*.jsonl) to the preview
+	// sidebar: grouped per book, numbered, searchable. Failed / errored
+	// fix sessions are kept on disk by default, so they stay visible.
+	Img2Text bool `yaml:"img2text"`
+	// Img2TextAll (T37, debug mode) records a transcript for EVERY
+	// per-image img2text analysis under progress_items/sessions/<md>/ and
+	// shows those in the preview too. Off by default: one transcript per
+	// image is a lot of disk and I/O on a 100+ images/book run.
+	Img2TextAll bool `yaml:"img2text_all"`
 }
 
 // Addr renders host:port for net.Listen. Host "" = loopback. Port 0 means
@@ -674,7 +684,9 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
-const CurrentConfigVersion = 10
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all
+// 两个键（新子块级开关）。
+const CurrentConfigVersion = 11
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -1049,8 +1061,11 @@ func setDefaults(cfg *Config) {
 	if cfg.Options.MermaidCommand == "" {
 		cfg.Options.MermaidCommand = "mmdc"
 	}
+	// T37：nil 保持 nil——resolver 把 nil/负值解释为 0 轮就地修复，
+	// 首次校验失败直接进升级修复会话。想回到旧行为就显式写
+	// tools.mermaid.fix_attempts: 3。
 	if cfg.Options.MermaidFixAttempts == nil {
-		cfg.Options.MermaidFixAttempts = intPtr(3)
+		// 保持 nil（= 首次失败即升级）。
 	}
 	if cfg.Options.MermaidTimeout == 0 {
 		cfg.Options.MermaidTimeout = 30

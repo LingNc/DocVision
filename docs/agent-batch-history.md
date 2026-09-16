@@ -1122,3 +1122,51 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **验证**：新增 `responses_test.go` 4 例——端到端（路径/Bearer/instructions/store:false/include/工具形状/function_call 与 function_call_output 往返/图片 input_image/应答全通道含 encrypted 思考回放/缓存映射/finish 映射）、incomplete→length、failed status 报错、reasoning_effort 透传；`go test ./...` 全绿；模板键面一致性通过（两模板 api 注释同步更新）。
 
 **文档**：config.md 的 models.text.api 行扩为三协议（写明加密思考有效期限制）；default.yaml/config.example.yaml 注释更新；sessions.md 模型注册表行补 responses；README「AI 模型」一行补 Responses API；CHANGELOG 上一条 P4 条目更名并扩写；plan.md P4 行补 responses（与 P16 等用户编辑一同留在工作区）。
+
+## 第四十四批（2026-09-16）
+
+### 起因
+- issue.md T36：【错误与警告分类统计】把 `mermaid_invalid`/`invalid_format`（及 `empty_response`）打成「警告（下轮重试）」，与 img2text 进度行（T15 起 errors 计数）、`Skipped invalid` 的 error 级日志自相矛盾；要求这些"下轮重试"类算**错误**，警告只留给"程序修正后结果仍可用"的偏离（用户举例：输出带前缀文字、程序剥掉前缀留下标准 `[IMG_TYPE:` 输出——对应 processor 已有的 `Unexpected prefix before '[IMG_TYPE:'` 警告日志）。
+- issue.md T37：mermaid 失败升级会话前不再做 3 轮就地修复，**首次输出失败即升级**；升级修复会话（及 debug 下全部逐图会话）要在会话预览 UI 按书分组、可搜索、带图片编号；失败/警告/错误的会话默认保留；全部逐图会话仅 debug 模式开启。
+
+### 先看最新日志再动手（用户要求）
+- `logs/img2text_20260916_130807.log`（13989 行）：`Skipped invalid` 7 条全部 error 级（T15 已就位）；`[WARNING]` 73 条主要是 `[ConnRetry]` 36、就地修复轮 `(1/3)(2/3)(3/3)` 23、`[ToolCall] invalid arguments` 1、前缀剥离 0（用户怀疑的纠正类本次未出现）；4 个 `mermaid_fix` 升级工作区（日志含「就地修复轮用尽，启动升级修复会话」→「升级会话未能修复（跳过、下轮重试）；工作区保留」）。结论：T36 只剩 analyze 包口径没翻；T37 的"3 轮"证据就是 `(N/3)` 日志行。
+
+### T36：analyze 错误/警告口径对齐
+- `analyze/session.go`：删 `retryableErrorTypes`/`isRetryableError`；`retriesNextRun()`（mermaid_invalid/invalid_format/empty_response）只喂报告的 `失败（跳过、下轮重试）` 标注。`StatusWarning` 语义改写：警告 = ✓ DONE 且会话期间出现过 `[WARNING]` 行（程序自纠正、结果可用）。
+- `analyze/parser.go`：`startEvent` 加 `warning` 标记，扫描循环识别 `[WARNING]` 行挂到当前 START；去掉"校验/格式失败降级为 warning"分支（失败一律 `StatusFailed`）；成功关闭带 warning → `StatusWarning`。失败关闭即使带 warning 也仍是失败。
+- `analyze/stats.go`：`StatusWarning` 不再进 failures/错误分布（它没有 ErrorType，自纠正成功项）。
+- `analyze/report.go`、`roundfiles.go`：警告行改写「输出有偏离但已被程序纠正，结果可用」；分类统计三类标 `失败（跳过、下轮重试）`，其余 `失败`。
+- 测试：`parser_test.go`（imgA/imgB 从警告改失败；三分统计重写）、`report_warning_test.go` 重写（构造器加 retryFail 桶：`[WARNING]+✓ DONE` = 自纠正警告；新增/改 4 个用例）。
+- **真实日志复核**：`dv5 analyze --logfile img2text_20260916_130807.log` → `empty_response: 24 [失败（跳过、下轮重试）] / mermaid_invalid: 4 [失败（跳过、下轮重试）] / invalid_format: 3 [失败（跳过、下轮重试）] / unknown: 1 [失败]`——与用户贴的期望口径完全一致。
+
+### T37-A：首次校验失败即升级
+- `img2text/processor.go` `resolveMermaidRepairBudget`：nil/负值 → **0 轮**（首次失败直接 fixSession 升级，T37 默认）；>0 → N 轮就地修复；0 → 无限（安全上限 100 不变）。删 `mermaidDefaultFixBudget=3`。0 轮时日志改「Mermaid validation failed on first output …」+「[mermaid-fix] 首次校验失败，直接启动升级修复会话」。
+- `config.go`：`MermaidFixAttempts` 缺省不再填 3（保持 nil = 新默认）；模板 `fix_attempts: 3` → `-1` 并注释三档语义；docs/config.md 表格与 P12 段落同步。
+- 测试：预算 resolver 4 例重写；`TestCallAIWithTools_RepairSucceedsSameSession` 显式 `intPtr(3)`（钉旧路径）；新增 `TestCallAIWithTools_FirstFailureSkipsInPlace`（默认 nil → 只发 1 次请求、status retry、哨兵 mermaid）。
+- 注意：`format_fix_attempts`（缺 `[IMG_TYPE:` 前缀的格式修复）不在本次范围，保持 1 次。
+
+### T37-B：img2text 会话进预览（配置 v11）
+- `config.go`：`PreviewConfig` 新增 `img2text`/`img2text_all`（新子块键）→ **CurrentConfigVersion 10→11**（回答了用户"版本号是否该升级"：api: 字段级新增不用升，本次 preview 子块必须升）；两模板 config_version: 11 + preview 两个新键；README `config_version: 11` 行；docs/config.md 三行。
+- `sessionview/scan_extra.go`（新）：`ScanExtra{Dir,Kind}`；`scanner.extras`；img2text 布局识别——`mermaid_fix/<书>_<图>/session*.jsonl` → 项目 `img2text · <书>`、阶段 `mermaid-fix`（stages.go StageTitles 补「升级修复」+ StageOrder），`sessions/<md>/<图>.jsonl` → 阶段 `img2text`（「逐图分析」）；**组内按图名稳定排序编号**（`#N ·` 标题前缀 + ChapterOrder 喂方块视图；哈希短名 8 位、撞车升 12 位，与矢量图同词汇）。ID 加 `img2text:` 前缀防撞车。
+- **两个真实 bug**：① `img2TextEntry.info` 曾指向 append 中途的切片元素，后续 append 扩容 → 指针悬空，编号 pass 改了副本（书B 生效书A 失效）——改按 ID 回指 out 下标；② `newViewerServer` 里 `copy(ex, ex)` 笔误 → scanner 拿到空 extras（本地 ScanWith 单测全过、HTTP 探针 0 条，e2e 才暴露）——`copy(ex, extras)`。
+- `serve.go`：`StartWith(root,addr,extras)`/`ServeOptions.Extras`；`serveFile` 逐根尝试主根+附加根——**`resolveUnderRoot` 只查越界不查存在**，主根对任何相对路径都"命中"会 404 掉附加根的 media：改为逐根 open、都不存在才 404、全部越界才 400。media 服务单测钉住。
+- 接线：`cli_sessions`（静态导出与 --serve 共用 `sessionsExtras(cfg)`，`preview.img2text` 时附加 `<finally>/progress_items`）+ `cli_latex startPreview`。
+- **真实数据探针**（临时端口 18925 + 探针配置）：`img2text · 27政治苏一命题点高清图谱` 组下 4 个升级修复会话，`#1..#4 · 升级修复 · 0fc1091d.jpg` 式标题，`/api/session?id=img2text:...` 200。chdir 到配置目录的既有行为意味着探针配置必须用绝对路径（用户真实配置在运行目录、不受影响）。
+
+### T37-C：debug 全量逐图转录（preview.img2text_all）
+- `img2text/recorder.go`（新）：`ExchangeRecorder` 复用 session 引擎 `TranscriptWriter`（同一 JSONL/媒体格式，预览直接渲染）；`Record(req,resp)` 利用 img2text 对话**单调增长**（每轮重放全部历史）的性质，用"已见消息游标"差量持久化 + 回写 assistant 应答与 usage 行——不碰 processor 内部。
+- `img2text/client.go`：`AIClient` 加 `record func(req,resp)` + `SetRecorder`；`ChatCompletion` 包装内层实现，成功且带 choices 时回调。
+- `img2text/runner.go`：`runWorkers` 加 `recordAll`；逐任务**结构体拷贝** client（http 客户端/配置只读共享）挂 recorder，转录落 `<finally>/progress_items/sessions/<md>/<图>.jsonl`；创建失败只警告不中断分析。
+- 测试：`recorder_test.go`（两轮差量：meta+9 行、user 恰 2 次、usage 2 条）。
+
+### 真实缺陷记录
+- `copy(ex, ex)` 笔误：纯函数层（ScanWith）测试覆盖不到 HTTP 装配层，必须以真实服务探针兜底。
+- 指针悬空的 append 扩容陷阱：同一教训第二次（第一次是 runconfig 时代）——**别保存指向正在 append 的切片的元素指针**。
+- 探针配置踩 chdir：PersistentPreRunE chdir 到配置文件所在目录，相对 paths.* 全失效——探针配置一律绝对路径。
+- 静态导出路径尚未验证附加根 media 重写（live 服务是主目标；如静态导出要用 img2text 会话再补）。
+
+### 验证
+- `go test ./...` 全绿（analyze/config/img2text/sessionview 及全部包）；`TestConfigTemplateKeyParity` 通过（两模板同步 v11 + preview 键 + fix_attempts: -1）。
+- analyze 真实日志复核数字见上；预览探针见上。
+- 注：运行目录二进制部署仍被 8849 服务占用阻塞（ETXTBSY），等用户停服务后 `cp temp/p5run/dv5`。

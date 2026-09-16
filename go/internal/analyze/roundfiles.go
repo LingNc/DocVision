@@ -81,7 +81,7 @@ func PrintRoundFileSummary(logName string, sessions []Session) {
 	fmt.Printf("  涉及文件数:   %d\n", len(names))
 	fmt.Printf("  图片任务数:   %d\n", totImg)
 	fmt.Printf("  成功:         %d (%.1f%%)\n", totOK, rate)
-	fmt.Printf("  警告:         %d —— 校验未通过/格式不符，已跳过，下轮重试（不是失败）\n", totWarn)
+	fmt.Printf("  警告:         %d —— 输出有偏离但已被程序纠正，结果可用\n", totWarn)
 	fmt.Printf("  失败:         %d\n", totFail)
 	fmt.Printf("  未完成:       %d\n", totIncomplete)
 

@@ -37,6 +37,9 @@ type ServeOptions struct {
 	// OpenBrowser is honoured for callers that want it; the CLI deliberately
 	// leaves it false and lets the user click the printed URL.
 	OpenBrowser bool
+	// Extras are additional scan directories (T37 img2text sessions),
+	// each rendered with its own grouping rules.
+	Extras []ScanExtra
 }
 
 // Bound is where the viewer actually listens, as net.Listen reported it — not
@@ -60,7 +63,7 @@ type Bound struct {
 //
 // It prints the banner once the listener is actually up.
 func Serve(opt ServeOptions) error {
-	bound, stop, err := Start(opt.Root, opt.Addr)
+	bound, stop, err := StartWith(opt.Root, opt.Addr, opt.Extras)
 	if err != nil {
 		return err
 	}
@@ -127,6 +130,11 @@ func configNote(note string) string {
 // addr "" = DefaultAddr; port 0 = the kernel picks one, so the returned Bound
 // is the authoritative address.
 func Start(root, addr string) (bound Bound, stopped <-chan struct{}, err error) {
+	return StartWith(root, addr, nil)
+}
+
+// StartWith is Start plus extra scan directories (T37 img2text sessions).
+func StartWith(root, addr string, extras []ScanExtra) (bound Bound, stopped <-chan struct{}, err error) {
 	if addr == "" {
 		addr = DefaultAddr
 	}
@@ -146,7 +154,7 @@ func Start(root, addr string) (bound Bound, stopped <-chan struct{}, err error) 
 		return Bound{}, nil, fmt.Errorf("会话预览: 监听 %s 失败（端口可能已被占用，请换一个端口）: %w", addr, err)
 	}
 	srv := &http.Server{
-		Handler:           newViewerServer(rootAbs),
+		Handler:           newViewerServer(rootAbs, extras),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	done := make(chan struct{})
@@ -212,12 +220,28 @@ func openInBrowser(url string) {
 // endpoints and a read-only file route. Everything is derived from the scan
 // root and nothing is ever written.
 type viewerServer struct {
-	root string
-	scan *scanner
+	root  string
+	extra []string
+	scan  *scanner
 }
 
-func newViewerServer(root string) *viewerServer {
-	return &viewerServer{root: root, scan: &scanner{root: root}}
+// newViewerServer builds the read-only viewer. extras are the absolute
+// directories of T37 img2text sessions; they are scanned for sessions
+// and allowed as media roots (their transcripts reference sibling media/
+// dirs that live outside the main root).
+func newViewerServer(root string, extras []ScanExtra) *viewerServer {
+	ex := make([]ScanExtra, len(extras))
+	copy(ex, extras)
+	extraDirs := make([]string, 0, len(extras))
+	for _, e := range extras {
+		if e.Dir == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(e.Dir); err == nil {
+			extraDirs = append(extraDirs, abs)
+		}
+	}
+	return &viewerServer{root: root, extra: extraDirs, scan: &scanner{root: root, extras: ex}}
 }
 
 // ServeHTTP routes by hand instead of using http.ServeMux: ServeMux rewrites
@@ -350,13 +374,37 @@ func (v *viewerServer) serveFile(w http.ResponseWriter, r *http.Request) {
 	default:
 		rel = strings.TrimPrefix(r.URL.Path, "/file/")
 	}
-	abs, ok := resolveUnderRoot(v.root, rel)
-	if !ok {
-		http.Error(w, "拒绝越界路径", http.StatusBadRequest)
-		return
+	// T37：主根之外，img2text 附加根的 media/ 也要能取（转录里的
+	// file://media/ 引用以转录所在目录为基）。resolveUnderRoot 只查越界、
+	// 不查存在——主根对任何相对路径都"命中"——所以逐根尝试时要确认文件
+	// 真的存在，全部根都没有才 404；全部越界才拒。
+	var f *os.File
+	for _, root := range append([]string{v.root}, v.extra...) {
+		abs, ok := resolveUnderRoot(root, rel)
+		if !ok {
+			continue
+		}
+		candidate, err := os.Open(abs)
+		if err != nil {
+			continue
+		}
+		f = candidate
+		break
 	}
-	f, err := os.Open(abs)
-	if err != nil {
+	if f == nil {
+		// 区分"存在但越界"（400）与"哪儿都没有"（404）：前者说明请求
+		// 本身不合法，后者只是文件缺失。
+		allowed := false
+		for _, root := range append([]string{v.root}, v.extra...) {
+			if _, ok := resolveUnderRoot(root, rel); ok {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			http.Error(w, "拒绝越界路径", http.StatusBadRequest)
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}

@@ -43,6 +43,18 @@ type AIClient struct {
 	// Retry controls resolved from ModelConfig / legacy options.
 	MaxRetries       int // API retry count for non-rate-limit errors
 	RateLimitRetries int // rate-limit retry cap (fallback: in-code cap)
+
+	// record (T37 debug) receives every completed (request, response)
+	// exchange. It is set on a per-task STRUCT COPY of the shared client
+	// (see runner.go), so concurrent image tasks each own their
+	// recorder; the shared client itself never has one.
+	record func(req *ChatRequest, resp *ChatResponse)
+}
+
+// SetRecorder attaches a T37 debug transcript recorder. Intended for
+// per-task copies of the client, not the shared one.
+func (c *AIClient) SetRecorder(fn func(req *ChatRequest, resp *ChatResponse)) {
+	c.record = fn
 }
 
 // SetLogger attaches a logger for stream-progress debug lines.
@@ -217,7 +229,17 @@ type ChatResponseChoice struct {
 // The client owns the transport policy: it forces req.Stream to the
 // configured mode, fills per-model max_tokens/temperature fallbacks,
 // and merges vendor top-level fields (thinking, reasoning_effort).
+// ChatCompletion executes one chat completion and, when a T37 recorder
+// is attached, hands it the completed exchange.
 func (c *AIClient) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
+	resp, err := c.chatCompletion(req)
+	if err == nil && c.record != nil && resp != nil && len(resp.Choices) > 0 {
+		c.record(req, resp)
+	}
+	return resp, err
+}
+
+func (c *AIClient) chatCompletion(req *ChatRequest) (*ChatResponse, error) {
 	payload := *req
 	payload.Stream = c.stream
 	if payload.MaxTokens <= 0 {

@@ -11,7 +11,7 @@ import (
 // 留空则继承 models.text 的模型名。
 func TestModelPricesKeyedByWireModelName(t *testing.T) {
 	src := []byte(`
-config_version: 10
+config_version: 11
 models:
   text:
     base_url: "https://x/v1"

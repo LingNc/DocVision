@@ -36,10 +36,6 @@ const (
 // never produces valid Mermaid syntax.
 const mermaidFixSafetyCap = 100
 
-// mermaidDefaultFixBudget is used when the operator leaves
-// MermaidFixAttempts unset or sets it to a negative value.
-const mermaidDefaultFixBudget = 3
-
 // MermaidValidatorFunc runs Mermaid validation against a candidate
 // assistant response. Callers wire it from ProcessOneImage using
 // ValidateMermaid + the resolved MermaidCommand/timeout. Returning
@@ -388,15 +384,27 @@ func CallAIWithTools(
 			return sentinelMermaid, StatusRetry, currentResult
 		case actionRepair:
 			if repairAttempts >= repairBudget {
-				logger.LogError(tid, fmt.Sprintf(
-					"Mermaid validation failed after %d repair round(s) for %s: %s. Raw output: %s",
-					repairBudget, imgPathFromIdx(lines, imgLineIdx), validation.Error, snippet(currentResult),
-				))
+				if repairBudget == 0 {
+					// T37：不做就地修复轮，首次失败直接升级会话。
+					logger.LogError(tid, fmt.Sprintf(
+						"Mermaid validation failed on first output for %s: %s. Raw output: %s",
+						imgPathFromIdx(lines, imgLineIdx), validation.Error, snippet(currentResult),
+					))
+				} else {
+					logger.LogError(tid, fmt.Sprintf(
+						"Mermaid validation failed after %d repair round(s) for %s: %s. Raw output: %s",
+						repairBudget, imgPathFromIdx(lines, imgLineIdx), validation.Error, snippet(currentResult),
+					))
+				}
 				// P12：就地修复轮用完 → 升级修复会话（虚拟工作区 + submit +
 				// mmdc 检查 + 错误累计切备选模型）。未配置（fixSession 为 nil
 				// 或 rounds≤0）时维持旧的"跳过、下轮重试"。
 				if fixSession != nil {
-					logger.Log(tid, "  [mermaid-fix] 就地修复轮用尽，启动升级修复会话")
+					if repairBudget == 0 {
+						logger.Log(tid, "  [mermaid-fix] 首次校验失败，直接启动升级修复会话")
+					} else {
+						logger.Log(tid, "  [mermaid-fix] 就地修复轮用尽，启动升级修复会话")
+					}
 					if fixed, ok := fixSession(currentResult, validation.Error); ok {
 						return fixed, StatusOK, fixed
 					}
@@ -440,13 +448,14 @@ func logRejectedDrawingBlock(l *logger.Logger, tid int, content string, lines []
 // resolveMermaidRepairBudget normalises the user-facing
 // MermaidFixAttempts field into a concrete retry budget:
 //
-//	nil  -> default 3
-//	>0   -> the configured value
-//	0    -> explicit unlimited, clamped by mermaidFixSafetyCap
-//	<0   -> misconfiguration, default 3
+//	nil or <0 -> 0 rounds: T37 — the first validation failure goes
+//	           straight to the upgraded fix session (no in-place
+//	           "fix this syntax" rounds at all)
+//	>0        -> the configured number of in-place repair rounds
+//	0         -> explicit unlimited, clamped by mermaidFixSafetyCap
 func resolveMermaidRepairBudget(cfg *int) int {
 	if cfg == nil {
-		return mermaidDefaultFixBudget
+		return 0
 	}
 	if *cfg > 0 {
 		return *cfg
@@ -454,7 +463,7 @@ func resolveMermaidRepairBudget(cfg *int) int {
 	if *cfg == 0 {
 		return mermaidFixSafetyCap
 	}
-	return mermaidDefaultFixBudget
+	return 0
 }
 
 // mermaidAction enumerates the decisions decideMermaidAction can make.

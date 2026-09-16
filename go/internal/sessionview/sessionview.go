@@ -348,6 +348,10 @@ type SessionInfo struct {
 	// (tool receipts) but nothing was ever submitted, "" = not started yet.
 	// Live overrides both visually (green pulse beats everything).
 	EndState string `json:"endState,omitempty"`
+	// ImgShortKeep (T37) is the hash-keep length the img2text grouping
+	// picked for this session's short image name (8, escalated to 12 on
+	// collision). Zero = default 8. Server-side only.
+	ImgShortKeep int `json:"-"`
 	// ChapterOrder is the chapter number carried by the transcript file name
 	// ("convert_chapter_003.jsonl" → 3), the block-view badge for chapter
 	// sessions the way ImageOrder numbers per-image ones.
@@ -675,12 +679,21 @@ func Scan(root string) ([]SessionInfo, error) {
 	return (&scanner{root: root}).scan()
 }
 
+// ScanWith scans root plus every extra directory (T37 img2text sessions).
+func ScanWith(root string, extras []ScanExtra) ([]SessionInfo, error) {
+	return (&scanner{root: root, extras: extras}).scan()
+}
+
 // scanner caches per-file message counts between scans so the live server's
 // 2-second polling does not re-read transcripts that did not change.
 type scanner struct {
 	root   string
-	mu     sync.Mutex
-	counts map[string]countEntry
+	extras []ScanExtra
+	// img2Text accumulates the sessions found in img2text extra roots
+	// during one scan, so the numbering pass can index them per group.
+	img2Text []img2TextEntry
+	mu       sync.Mutex
+	counts   map[string]countEntry
 	// ws caches "is this directory a project workspace" between polls.
 	ws map[string]bool
 }
@@ -818,6 +831,10 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 	if walkErr != nil {
 		return nil, walkErr
 	}
+
+	s.img2Text = s.img2Text[:0]
+	out = s.scanExtras(out, now)
+	s.numberImg2Text(out)
 
 	s.enrichSessions(root, out)
 	sort.Slice(out, func(i, j int) bool {

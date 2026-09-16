@@ -14,6 +14,7 @@ type startEvent struct {
 	matched   bool        // already claimed by a close line
 	close     *closeEvent // set when matched
 	toolCalls int         // tool calls observed while this session was open
+	warning   bool        // a [WARNING] line appeared while this session was open
 }
 
 // closeEvent is one ✓ DONE / ✗ FAILED line.
@@ -118,6 +119,16 @@ func AnalyzeLog(logPath string) ([]Session, error) {
 			if idx, ok := lastStart[tid]; ok {
 				tl.starts[idx].toolCalls++
 			}
+			continue
+		}
+		// [WARNING] while a session is open = the runner corrected a
+		// deviation and still delivered (T36): stripped prose before
+		// "[IMG_TYPE:", a transient retry that recovered, … A FAILED
+		// close stays a failure regardless — warnings never override it.
+		if PatternWarning.MatchString(line) {
+			if idx, ok := lastStart[tid]; ok {
+				tl.starts[idx].warning = true
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -146,17 +157,15 @@ func AnalyzeLog(logPath string) ([]Session, error) {
 					s.Elapsed = ce.elapsed
 					s.ImgType = ce.imgType
 					if ce.failed {
+						// T36：校验/格式失败（mermaid_invalid /
+						// invalid_format / empty_response）是没有产出
+						// 的失败，"下轮重试"不改变定性——警告只留给
+						// 成功路上的程序自纠正。
 						s.Status = StatusFailed
 						s.ErrorMsg = ce.errMsg
 						s.ErrorType = ClassifyError(s.ErrorMsg)
-						// Validation / format failures are skipped and
-						// retried next run: they are warnings, not
-						// failures. Reclassifying here (rather than
-						// downstream) keeps every consumer — report,
-						// per-file summary, CSV — consistent.
-						if isRetryableError(s.ErrorType) {
-							s.Status = StatusWarning
-						}
+					} else if se.warning {
+						s.Status = StatusWarning
 					}
 				} else {
 					s.Status = StatusIncomplete

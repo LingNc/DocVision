@@ -267,6 +267,9 @@ func TestCallAIWithTools_RepairSucceedsSameSession(t *testing.T) {
 	opts := config.OptionsConfig{
 		MaxRetries:        3,
 		MermaidValidation: "auto",
+		// 显式给 3 轮就地修复预算：这个用例钉的是"就地修复成功"路径；
+		// 默认（nil）语义见 TestCallAIWithTools_FirstFailureSkipsInPlace。
+		MermaidFixAttempts: intPtr(3),
 	}
 
 	result, status, _ := CallAIWithTools(
@@ -333,6 +336,51 @@ func TestCallAIWithTools_RepairSucceedsSameSession(t *testing.T) {
 	}
 	if !strings.Contains(fixContent, "Your previous response contains invalid Mermaid syntax") {
 		t.Fatalf("fix message missing the standard prefix, got %q", fixContent)
+	}
+}
+
+// T37：默认（MermaidFixAttempts 未设置 = nil）不再做就地修复轮——
+// 首次校验失败直接返回 retry（调用方随即升级修复会话），整个流程只
+// 发出 1 次 API 请求。
+func TestCallAIWithTools_FirstFailureSkipsInPlace(t *testing.T) {
+	bad := "[IMG_TYPE: flowchart]\n```mermaid\nBROKEN\n```"
+
+	validator := func(string) MermaidValidationResult {
+		return MermaidValidationResult{
+			HasMermaid: true,
+			Available:  true,
+			Error:      "block 1: SyntaxError at line 1",
+		}
+	}
+
+	ms := newMockChatServer(t, func(idx int, _ recordedRequest) (int, string) {
+		if idx != 0 {
+			t.Errorf("unexpected second in-place request idx=%d (T37: first failure must not retry in place)", idx)
+			return http.StatusInternalServerError, `{"error":"unexpected"}`
+		}
+		return http.StatusOK, responseText(bad)
+	})
+
+	client := newTestClient(t, ms.server.URL)
+	l := newTestLogger(t)
+	opts := config.OptionsConfig{
+		MaxRetries:        3,
+		MermaidValidation: "auto",
+		// MermaidFixAttempts 保持 nil = T37 默认：0 轮就地修复。
+	}
+
+	result, status, _ := CallAIWithTools(
+		client, "imgdata", []string{"L0"}, 0, l, 0, opts, "",
+		validator, buildMermaidRepairMessage, nil,
+	)
+	if status != StatusRetry {
+		t.Fatalf("status = %q, want %q (first failure goes straight to retry/upgrade)", status, StatusRetry)
+	}
+	if result != sentinelMermaid {
+		t.Fatalf("result = %q, want %q", result, sentinelMermaid)
+	}
+	if got := len(ms.calls()); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
 	}
 }
 
@@ -465,10 +513,11 @@ func TestResolveMermaidRepairBudget(t *testing.T) {
 		in   *int
 		want int
 	}{
-		{"nil defaults to 3", nil, mermaidDefaultFixBudget},
+		// T37：默认（nil / 负值）= 0 轮就地修复，首次失败直接升级会话。
+		{"nil -> first-failure upgrade", nil, 0},
+		{"negative -> first-failure upgrade", intPtr(-2), 0},
 		{"positive uses value", intPtr(5), 5},
 		{"zero -> safety cap", intPtr(0), mermaidFixSafetyCap},
-		{"negative -> default", intPtr(-2), mermaidDefaultFixBudget},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -478,11 +527,8 @@ func TestResolveMermaidRepairBudget(t *testing.T) {
 		})
 	}
 
-	// Also confirm the constants match the documented contract so a
+	// Also confirm the safety cap matches the documented contract so a
 	// future refactor doesn't silently change the upper bound.
-	if mermaidDefaultFixBudget != 3 {
-		t.Fatalf("mermaidDefaultFixBudget = %d, want 3", mermaidDefaultFixBudget)
-	}
 	if mermaidFixSafetyCap != 100 {
 		t.Fatalf("mermaidFixSafetyCap = %d, want 100", mermaidFixSafetyCap)
 	}

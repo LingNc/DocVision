@@ -59,8 +59,10 @@ func TestAnalyzeLog_RetryableBeforeNextStartSameTID(t *testing.T) {
 		t.Fatalf("expected 4 sessions, got %d (%v)", len(sessions), sessions)
 	}
 	want := map[string]string{
-		"ch1.md::images/imgA.jpg": StatusWarning,
-		"ch1.md::images/imgB.jpg": StatusWarning,
+		// T36：校验/格式失败（mermaid_invalid / invalid_format）是
+		// 失败（下轮重试），不是警告。
+		"ch1.md::images/imgA.jpg": StatusFailed,
+		"ch1.md::images/imgB.jpg": StatusFailed,
 		"ch1.md::images/imgC.jpg": StatusFailed,
 		"ch1.md::images/imgD.jpg": StatusSuccess,
 	}
@@ -91,31 +93,31 @@ func TestComputeStatistics_SeparatesWarningsFromFailures(t *testing.T) {
 	sessions := []Session{
 		{Key: "a.md::images/1.jpg", TID: "1", Status: StatusSuccess},
 		{Key: "a.md::images/2.jpg", TID: "1", Status: StatusSuccess},
-		{Key: "a.md::images/3.jpg", TID: "2", Status: StatusWarning, ErrorType: "mermaid_invalid"},
-		{Key: "a.md::images/4.jpg", TID: "2", Status: StatusWarning, ErrorType: "mermaid_invalid"},
-		{Key: "a.md::images/5.jpg", TID: "2", Status: StatusWarning, ErrorType: "mermaid_invalid"},
-		{Key: "a.md::images/6.jpg", TID: "2", Status: StatusFailed, ErrorType: "api_error"},
-		{Key: "a.md::images/7.jpg", TID: "3", Status: StatusIncomplete},
+		// T36：警告 = 程序自纠正后结果仍可用（不再有 ErrorType）。
+		{Key: "a.md::images/3.jpg", TID: "2", Status: StatusWarning},
+		{Key: "a.md::images/4.jpg", TID: "2", Status: StatusWarning},
+		{Key: "a.md::images/5.jpg", TID: "2", Status: StatusWarning},
+		// 校验/格式失败是失败（下轮重试），进错误分布。
+		{Key: "a.md::images/6.jpg", TID: "2", Status: StatusFailed, ErrorType: "mermaid_invalid"},
+		{Key: "a.md::images/7.jpg", TID: "2", Status: StatusFailed, ErrorType: "api_error"},
+		{Key: "a.md::images/8.jpg", TID: "3", Status: StatusIncomplete},
 	}
 
 	st := ComputeStatistics(sessions, nil)
-	if st.Total != 7 || st.Success != 2 || st.Warning != 3 || st.Failed != 1 || st.Incomplete != 1 {
+	if st.Total != 8 || st.Success != 2 || st.Warning != 3 || st.Failed != 2 || st.Incomplete != 1 {
 		t.Fatalf("counts: total=%d success=%d warning=%d failed=%d incomplete=%d",
 			st.Total, st.Success, st.Warning, st.Failed, st.Incomplete)
 	}
-	if got, want := st.SuccessRate, 2.0/7.0*100; got < want-0.01 || got > want+0.01 {
+	if got, want := st.SuccessRate, 2.0/8.0*100; got < want-0.01 || got > want+0.01 {
 		t.Fatalf("SuccessRate = %.2f, want %.2f", got, want)
 	}
-	if got, want := st.WarningRate, 3.0/7.0*100; got < want-0.01 || got > want+0.01 {
+	if got, want := st.WarningRate, 3.0/8.0*100; got < want-0.01 || got > want+0.01 {
 		t.Fatalf("WarningRate = %.2f, want %.2f", got, want)
 	}
-	// Warnings appear in the distribution (so the report explains them)
-	// but never in the failure count.
-	if st.ErrorDistribution["mermaid_invalid"] != 3 {
-		t.Fatalf("warning distribution = %v", st.ErrorDistribution)
-	}
-	if st.ErrorDistribution["api_error"] != 1 {
-		t.Fatalf("failure distribution = %v", st.ErrorDistribution)
+	// T36：警告（自纠正）不进错误分布；失败才进。
+	if len(st.ErrorDistribution) != 2 || st.ErrorDistribution["mermaid_invalid"] != 1 ||
+		st.ErrorDistribution["api_error"] != 1 {
+		t.Fatalf("error distribution = %v", st.ErrorDistribution)
 	}
 }
 

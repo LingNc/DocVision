@@ -50,8 +50,10 @@ ai:
 	if cfg.Options.MaxTokens != 65536 {
 		t.Errorf("MaxTokens default = %d", cfg.Options.MaxTokens)
 	}
+	// T37：MermaidFixAttempts 默认 nil（resolver 解释为 0 轮就地修复、
+	// 首次失败直接升级修复会话）；显式写 3 才回到旧的 3 轮就地修复。
 	if cfg.Options.MermaidValidation != "auto" || cfg.Options.MermaidCommand != "mmdc" ||
-		cfg.Options.MermaidFixAttempts == nil || *cfg.Options.MermaidFixAttempts != 3 || cfg.Options.MermaidTimeout != 30 {
+		cfg.Options.MermaidFixAttempts != nil || cfg.Options.MermaidTimeout != 30 {
 		var attempts int
 		if cfg.Options.MermaidFixAttempts != nil {
 			attempts = *cfg.Options.MermaidFixAttempts
@@ -266,11 +268,9 @@ func TestLoadConfig_MermaidFixAttemptsOmittedUsesDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.Options.MermaidFixAttempts == nil {
-		t.Fatal("MermaidFixAttempts = nil, want non-nil pointer to 3")
-	}
-	if *cfg.Options.MermaidFixAttempts != 3 {
-		t.Fatalf("*MermaidFixAttempts = %d, want 3", *cfg.Options.MermaidFixAttempts)
+	// T37：省略 = nil = 首次失败即升级（resolver 的 nil 分支）；不再默认 3。
+	if cfg.Options.MermaidFixAttempts != nil {
+		t.Fatalf("MermaidFixAttempts = %v, want nil (T37 default)", *cfg.Options.MermaidFixAttempts)
 	}
 }
 

@@ -440,7 +440,17 @@ func startPreview(cfg *config.Config, log *logger.Logger) func() {
 	if cfg.Latex.Level == 2 {
 		root = cfg.Paths.LatexOutput
 	}
-	bound, stopped, err := sessionview.Start(root, cfg.Preview.Addr())
+	// T37：preview.img2text 时把 img2text 的 progress_items 也挂进侧栏
+	//（按书分组、编号、可搜索；失败的升级会话默认保留可见）。
+	var extras []sessionview.ScanExtra
+	if cfg.Preview.Img2Text {
+		if dir := filepath.Join(cfg.Paths.FinallyDir, "progress_items"); dir != "" {
+			if st, serr := os.Stat(dir); serr == nil && st.IsDir() {
+				extras = append(extras, sessionview.ScanExtra{Dir: dir, Kind: "img2text"})
+			}
+		}
+	}
+	bound, stopped, err := sessionview.StartWith(root, cfg.Preview.Addr(), extras)
 	if err != nil {
 		log.LogWarning(0, "[preview] 会话预览服务未启动:", err)
 		return nil

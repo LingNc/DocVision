@@ -5,13 +5,15 @@ import "regexp"
 
 // Status constants for session lifecycle.
 //
-// StatusWarning is a fourth, distinct outcome: the item did NOT produce
-// a usable result, but the runner deliberately discarded it and it will
-// be retried next run ("Skipped invalid response … will retry next
-// run"), so the progress line counts it under `warns`, not `errors`.
-// Reporting it as a failure is what made `docvision analyze` print
-// "失败 39 / 成功率 51.9%" for a run whose own progress line said
-// "errors: 0, warns: 39".
+// StatusWarning is a fourth, distinct outcome (T36): the item DID
+// produce a usable result, but the runner had to correct a deviation
+// along the way and said so with a [WARNING] log line — e.g. the model
+// answered with leading prose and the runner stripped everything before
+// "[IMG_TYPE:". Warnings never block the result. What used to count as
+// warning — validation/format failures that are skipped and retried next
+// run (mermaid_invalid / invalid_format / empty_response) — is a FAILURE
+// per T36: the item produced nothing usable, and "will retry" does not
+// make it a warning.
 const (
 	StatusPending    = "pending"
 	StatusSuccess    = "success"
@@ -20,20 +22,15 @@ const (
 	StatusIncomplete = "incomplete"
 )
 
-// retryableErrorTypes are the classified error types the runner treats
-// as "skipped, will retry": a validation failure (Mermaid syntax) or a
-// response that did not match the required format. Both come back as
-// __INVALID_RESPONSE__ and increment the warn counter, never the error
-// counter — see runWorkers' writer goroutine.
-var retryableErrorTypes = map[string]bool{
-	"mermaid_invalid": true,
-	"invalid_format":  true,
-}
-
-// isRetryableError reports whether an error type is one the runner
-// retries on the next run.
-func isRetryableError(errType string) bool {
-	return retryableErrorTypes[errType]
+// retriesNextRun marks the classified error types whose items are
+// skipped and retried on the next run. They are still failures (T36);
+// the flag only feeds the report's annotation.
+func retriesNextRun(errType string) bool {
+	switch errType {
+	case "mermaid_invalid", "invalid_format", "empty_response":
+		return true
+	}
+	return false
 }
 
 // Session represents a single image's processing session in the log.

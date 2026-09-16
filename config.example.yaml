@@ -12,7 +12,7 @@
 #   3. 未知键不生效：拼错一个键名不会有任何报错，启动时只会给一行"未知配置键"
 #      告警（`docvision setup` 保存时会把它拦下来）。
 
-config_version: 10
+config_version: 11
 
 # MinerU API Configuration
 mineru:
@@ -161,7 +161,7 @@ tools:
   mermaid:
     validation: "auto"          # off, auto, strict; auto warns and skips if mmdc is missing
     command: "mmdc"             # Mermaid CLI command
-    fix_attempts: 3             # Mermaid-only repair attempts (0 = unlimited, capped by safety limit)
+    fix_attempts: -1            # T37: -1(默认/未写) = 首次校验失败直接升级修复会话；0 = 无限就地修复(安全上限保护)；N>0 = N 轮就地修复后再升级
     timeout: 30                 # Mermaid validation timeout in seconds
     # P12：升级修复会话——就地修复轮用完后，给模型一个虚拟工作区（submit.md +
     # write_file/grep/view_image + submit 提交检查），能过 mmdc 语法检查即可。
@@ -187,6 +187,8 @@ preview:
   enabled: false                 # true = 跑 docvision latex 时自动启动会话预览服务（只读，浏览器里看每个会话实时进度）
   host: "127.0.0.1"              # 监听地址；0.0.0.0 会让局域网内可访问（转录含全书内容，默认只本机）
   port: 8848                     # 端口（配置里不写或写 0 都取默认 8848；命令行 --port 0 = 由内核挑一个空闲端口）
+  img2text: false                # T37: true = 预览侧栏额外显示 img2text 升级修复会话（progress_items/mermaid_fix，按书分组、编号、可搜索；失败的默认保留）
+  img2text_all: false            # T37 debug: true = 逐图分析的每一张都记录转录并显示（progress_items/sessions/<md>/，量大，仅调试用）
 
 # ----------------------------------------------------------------
 # 本地 token 估算（estimate）

@@ -19,13 +19,13 @@ func PrintReport(stats *Statistics, logPath string, showThreads bool) {
 	fmt.Println("\n【基础统计】")
 	fmt.Printf("  总图片数:      %d\n", stats.Total)
 	fmt.Printf("  成功:          %d (%.1f%%)\n", stats.Success, stats.SuccessRate)
-	fmt.Printf("  警告:          %d (%.1f%%) —— 校验未通过/格式不符，已跳过，下轮重试（不是失败）\n",
+	fmt.Printf("  警告:          %d (%.1f%%) —— 输出有偏离但已被程序纠正，结果可用（如剥离 '[IMG_TYPE:' 前的 prose）\n",
 		stats.Warning, stats.WarningRate)
 	fmt.Printf("  失败:          %d\n", stats.Failed)
 	fmt.Printf("  未完成:        %d\n", stats.Incomplete)
 	fmt.Printf("  线程数:        %d\n", stats.ThreadCount)
 	if stats.Warning > 0 {
-		fmt.Println("  说明:          警告项不计入失败；它们没有写出结果，重新运行 img2text 即会再试一次")
+		fmt.Println("  说明:          警告项已成功写出；纠正过程记在日志的 [WARNING] 行里")
 	}
 
 	if stats.ToolCalls != nil {
@@ -115,8 +115,8 @@ func PrintReport(stats *Statistics, logPath string, showThreads bool) {
 		sort.Slice(pairs, func(i, j int) bool { return pairs[i].v > pairs[j].v })
 		for _, p := range pairs {
 			kind := "失败"
-			if isRetryableError(p.k) {
-				kind = "警告（下轮重试）"
+			if retriesNextRun(p.k) {
+				kind = "失败（跳过、下轮重试）"
 			}
 			fmt.Printf("  %-20s: %4d  [%s]\n", p.k, p.v, kind)
 		}

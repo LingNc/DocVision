@@ -23,13 +23,14 @@
 | `tools.context.max_calls` | 单图最大上下文扩展请求次数 | 5 |
 | `tools.mermaid.validation` | Mermaid 校验模式（off/auto/strict） | auto |
 | `tools.mermaid.command` | Mermaid CLI 命令 | mmdc |
-| `tools.mermaid.fix_attempts` | Mermaid 独立修正次数（0=无限，受安全上限保护） | 3 |
+| `tools.mermaid.fix_attempts` | Mermaid 就地修复轮数：`-1`（默认/未写）= **首次校验失败直接升级修复会话**；`0` = 无限就地修复（受安全上限保护）；`N>0` = N 轮就地修复后再升级 | -1 |
 | `tools.mermaid.timeout` | 单次 Mermaid 校验超时（秒） | 30 |
 | `tools.mermaid.session_rounds` | 升级修复会话的提交/检查次数上限（两段合计；≤0 = 关闭升级会话，维持旧的"跳过、下轮重试"） | 6 |
 | `tools.mermaid.session_errors` | 升级会话内编译错误累计上限，满了清上下文切备选模型 | 3 |
 | `tools.mermaid.fallback_model` | 备选兜底模型（`models.<条目名>`；条目不存在或留空 = 原模型清上下文重来） | （空） |
-**升级修复会话（P12）**：就地修复轮（`fix_attempts`，同一对话里追加修复消息）用完后，
-模型拿到一个**虚拟工作区**：出错的完整响应落在 `submit.md`，配 `write_file`（重写）、
+**升级修复会话（P12）**：默认（T37，`fix_attempts` 未写或 `-1`）**首次校验失败即升级**
+——不做就地修复轮；显式写 `N>0` 时先在同一对话里追加 N 轮修复消息、用尽后再升级。
+升级时模型拿到一个**虚拟工作区**：出错的完整响应落在 `submit.md`，配 `write_file`（重写）、
 `grep`（查 submit.md / compile_error.log）、`view_image`（看原图）、`submit`（跑 mmdc
 检查）四个工具，能过语法检查即可。工作区在 `<finally>/progress_items/mermaid_fix/<图>/`，
 submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可诊断、下轮可续用。
@@ -110,10 +111,12 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **10**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 10 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **11**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 11 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |
+| `preview.img2text` | T37：预览侧栏额外显示 **img2text 升级修复会话**（`<finally>/progress_items/mermaid_fix/<书>_<图>/` 的转录），按书分组、组内按图名稳定排序编号（`#N ·`）、走侧栏既有搜索；失败的修复工作区**默认保留**可见。img2text 产物在 latex 扫描根之外，本项是看到它们的唯一开关 | false |
+| `preview.img2text_all` | T37 **debug**：`docvision img2text` 跑时为**每一张图**记录会话转录（`<finally>/progress_items/sessions/<md>/<图>.jsonl`，与升级修复会话同格式、同分组同编号），同样由 `preview.img2text` 展示。量很大（一书上百张），只建议调试时开 | false |
 | `estimate.method` | **本地估算**的图片计量方法：`pixels`（按尺寸折算）/ `fixed`（每张固定值）/ `none`（本地按 0 计） | "pixels" |
 | `estimate.tokens` | `method: fixed` 时每张的固定值；`method: pixels` 下**取不到尺寸**（未知格式/文件读不到）时也用它 | 1100 |
 | `estimate.px_per_token` | `method: pixels` 的折算比例：单张图片 token ≈ `宽×高 / 本项` | 750 |

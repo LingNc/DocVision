@@ -388,7 +388,7 @@ models:
 // 同一个基座，wire 名与价格完全一致 —— 这不是冲突。
 func TestExtendsSameWireSamePriceOK(t *testing.T) {
 	cfg := mustLoadConfig(t, `
-config_version: 10
+config_version: 11
 mineru: {token: "abc"}
 models:
   text: {base_url: "https://gateway.example/v1", api_key: "sk-base", model: "Qwen/Qwen3.5-27B"}
@@ -412,7 +412,7 @@ models:
 		}
 	}
 	if problems := ValidateData([]byte(`
-config_version: 10
+config_version: 11
 mineru: {token: "abc"}
 models:
   text: {base_url: "https://gateway.example/v1", api_key: "sk-base", model: "Qwen/Qwen3.5-27B"}
@@ -428,7 +428,7 @@ models:
 // （docvision setup 走的那条路）不会把它当未知键。
 func TestExtendsIsAKnownField(t *testing.T) {
 	body := `
-config_version: 10
+config_version: 11
 mineru: {token: "abc"}
 models:
   text: {base_url: "https://gateway.example/v1", api_key: "sk-base", model: "wire-base"}
@@ -444,7 +444,7 @@ models:
 // 块里写错的键"：错误正文里的路径要是真的能找到那一行的条目。
 func TestExtendsUnknownKeyInBaseIsStillCaught(t *testing.T) {
 	body := `
-config_version: 10
+config_version: 11
 mineru: {token: "abc"}
 models:
   text: {base_url: "https://gateway.example/v1", api_key: "sk-base", model: "wire-base"}
@@ -505,7 +505,7 @@ func TestUnknownKeyWarningLines(t *testing.T) {
 // reflect.DeepEqual，包含 v1.5.0-beta.5 那条既有的继承用例。
 func TestNoExtendsBehaviourUnchanged(t *testing.T) {
 	body := []byte(`
-config_version: 10
+config_version: 11
 mineru:
   api_base_url: "https://mineru.net/api/v4"
   token: "abc"

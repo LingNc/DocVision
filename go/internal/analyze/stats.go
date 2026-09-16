@@ -105,11 +105,9 @@ func ComputeStatistics(sessions []Session, percentiles []int) *Statistics {
 			stats.Success++
 			successes = append(successes, s)
 		case StatusWarning:
+			// T36：警告 = 程序自纠正后结果仍可用（✓ DONE 且过程中有
+			// [WARNING]）。它不是失败、不进错误分布。
 			stats.Warning++
-			// A validation/format failure still carries an error type
-			// (mermaid_invalid / invalid_format); keep it in the
-			// distribution so the report can explain the warnings.
-			failures = append(failures, s)
 		case StatusFailed:
 			stats.Failed++
 			failures = append(failures, s)
