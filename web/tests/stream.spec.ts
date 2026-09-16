@@ -175,15 +175,44 @@ describe('splitProtocolLeak（T32）', () => {
     expect(r.leak).toContain('<parameter=path>')
     expect(r.leak).toContain('check:parts/')
   })
-  it('完整 XML 块混在正文里：块删除、正文保留', async () => {
+  it('完整 XML 块混在正文里：块剥出折叠、正文保留', async () => {
     const { splitProtocolLeak } = await import('../src/legacy/stream')
     const r = splitProtocolLeak('Let me check:\n<tool_call>\n<function=read_file>\n<parameter=path>\nwork/x.md\n</parameter>\n</function>\n</tool_call>\ndone')
     expect(r.main).toBe('Let me check:\n\ndone')
-    expect(r.leak).toBe('')
+    expect(r.leak).toContain('<tool_call>')
   })
   it('正常正文不受影响', async () => {
     const { splitProtocolLeak } = await import('../src/legacy/stream')
     const r = splitProtocolLeak('Reading the chapter file first.')
     expect(r).toEqual({ main: 'Reading the chapter file first.', leak: '' })
+  })
+})
+
+describe('splitLeaks（T30/T34）', () => {
+  it('思考块整块剥出为 thinking 类（T30）', async () => {
+    const { splitLeaks } = await import('../src/legacy/stream')
+    const r = splitLeaks('<thinking>Page 12: 解答题 format. Let me look at page 10.</thinking>\nLet me look at the figure page (page 10) closely.')
+    expect(r.main).toBe('Let me look at the figure page (page 10) closely.')
+    expect(r.blocks).toHaveLength(1)
+    expect(r.blocks[0].kind).toBe('thinking')
+    expect(r.blocks[0].text).toContain('Page 12')
+  })
+  it('<think> 拼写同样认', async () => {
+    const { splitLeaks } = await import('../src/legacy/stream')
+    const r = splitLeaks('<think>hmm</think>done')
+    expect(r.main).toBe('done')
+    expect(r.blocks[0]).toEqual({ kind: 'thinking', text: 'hmm' })
+  })
+  it('思考块与 XML 残片混在一条里：各自归类、正文保留（T34）', async () => {
+    const { splitLeaks } = await import('../src/legacy/stream')
+    const r = splitLeaks('a\n<thinking>t1</thinking>\nb\n<parameter=path>\nx\n</parameter>\n</tool_call>\nc')
+    expect(r.main).toBe('a\n\nb\nc')   // 块删除留空行；残片后的正文 c 不被吃掉
+    expect(r.blocks.map((b) => b.kind)).toEqual(['thinking', 'xml'])
+  })
+  it('正常正文不受影响', async () => {
+    const { splitLeaks } = await import('../src/legacy/stream')
+    const r = splitLeaks('普通回复，没有残片。')
+    expect(r.blocks).toHaveLength(0)
+    expect(r.main).toBe('普通回复，没有残片。')
   })
 })

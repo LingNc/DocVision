@@ -565,6 +565,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			return "", fmt.Errorf("empty response (no choices)")
 		}
 		choice := resp.Choices[0]
+		MoveLeakedThinking(&choice.Message)
 		if s.logger.DebugEnabled() {
 			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api response (%.1fs, stream=%v finish=%s content=%d chars reasoning=%d chars tools=%d %s)",
 				s.label, toolRounds+1, resp.Elapsed.Seconds(), resp.Streamed, dash(resp.FinishReason),
@@ -708,6 +709,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			if len(resp2.Choices) == 0 {
 				return "", fmt.Errorf("empty response after nudge")
 			}
+			MoveLeakedThinking(&resp2.Choices[0].Message)
 			if s.logger.DebugEnabled() {
 				s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] nudge response (%.1fs, stream=%v finish=%s content=%d chars %s)",
 					s.label, resp2.Elapsed.Seconds(), resp2.Streamed, dash(resp2.FinishReason),

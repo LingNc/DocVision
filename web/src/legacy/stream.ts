@@ -50,46 +50,74 @@ export type StreamItem =
   | { type: 'other'; key: string; line: Line }
 
 /*
- * T32 兼容：旧转录里模型把原始 XML 工具调用残片写进了 assistant 正文
- * （真实调用已按 tool_calls 正常解析执行），形态如
- *   <parameter=path>
- *   check:parts/
- *   </parameter>
- *   </function>
- *   </tool_call>
- * 新转录由 Go 侧 StripLeakedToolXML 落盘前清掉，这里只兜旧数据：
- * 把残片从正文里剥出来，UI 折叠展示（AssistantMsg），不污染阅读。
- * 规则与 Go 侧一致：删完整 <tool_call>…</tool_call> 块，删成行的协议
- * 标签，被标签行上下夹住的短行是标签体内的值，一并归入残片。
+ * T30/T32/T34 兼容：旧转录里模型会把"不属于正文的东西"写进 assistant
+ * content——
+ *  T32  原始 XML 工具调用残片（真实调用已按 tool_calls 正常解析执行）：
+ *         <parameter=path>
+ *         check:parts/
+ *         </parameter>
+ *         </function>
+ *         </tool_call>
+ *  T30  思考块漏进正文（reasoning 通道关闭时的 GLM/Qwen 原始输出）：
+ *         <thinking>…</thinking>
+ *  T34  其余 XML 残片：不猜语义、不当成工具调用，只作为 XML 折叠展示。
+ * 新转录由 Go 侧落盘前清洗（StripLeakedToolXML / MoveLeakedThinking），
+ * 这里只兜旧数据：把残片从正文剥出来，UI 折叠展示，不污染阅读。
+ * 正则一律函数内联（模块级正则禁 g 标志，共享 lastIndex 会炸递归）。
  */
-const LEAK_TAG_LINE = /^\s*<\/?(?:tool_call|function|parameter)(?:[=\s][^>\n]*)?>?\s*$/
-export function splitProtocolLeak(text: string): { main: string; leak: string } {
-  if (!text.includes('<') || !/(?:tool_call|parameter=|function=)/.test(text)) {
-    return { main: text, leak: '' }
-  }
-  const noBlocks = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
-  const lines = noBlocks.split('\n')
-  const removed: boolean[] = lines.map((ln) => LEAK_TAG_LINE.test(ln))
-  if (!removed.some(Boolean)) {
-    return noBlocks === text ? { main: text, leak: '' } : { main: noBlocks, leak: '' }
-  }
-  // 被标签行（或文本边界）上下夹住的非空行 = 标签体内的值，归入残片。
-  const nearestNonBlank = (i: number, step: number): number => {
-    for (let j = i + step; j >= 0 && j < lines.length; j += step) {
-      if (lines[j].trim() !== '') return j
-    }
-    return -1
-  }
-  lines.forEach((ln, i) => {
-    if (removed[i] || ln.trim() === '') return
-    const above = nearestNonBlank(i, -1)
-    const below = nearestNonBlank(i, 1)
-    if ((above === -1 || removed[above]) && (below === -1 || removed[below])) removed[i] = true
+export interface LeakBlock { kind: 'thinking' | 'xml'; text: string }
+
+/* 成行协议标签：工具调用族（T32）+ 思考开合标签（T30 未闭合时）。 */
+const LEAK_TAG_LINE = /^\s*<\/?(?:tool_call|function|parameter|thinking|think)(?:[=\s][^>\n]*)?>?\s*$/
+
+export function splitLeaks(text: string): { main: string; blocks: LeakBlock[] } {
+  const blocks: LeakBlock[] = []
+  if (!text.includes('<')) return { main: text, blocks }
+  // 完整思考块（T30）：整块剥出，保留为 thinking 类。
+  let s = text.replace(/<(thinking|think)>([\s\S]*?)<\/\1>/g, (_m, _t, body: string) => {
+    blocks.push({ kind: 'thinking', text: body.trim() })
+    return ''
   })
-  const mainLines: string[] = []
-  const leakLines: string[] = []
-  lines.forEach((ln, i) => (removed[i] ? leakLines : mainLines).push(ln))
-  return { main: mainLines.join('\n').trim(), leak: leakLines.join('\n').trim() }
+  // 完整工具调用块（T32）：剥出为 xml 类。
+  s = s.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, (m) => {
+    blocks.push({ kind: 'xml', text: m.trim() })
+    return ''
+  })
+  if (!/(?:tool_call|parameter=|function=|<\/?think)/.test(s)) {
+    return { main: s === text ? text : s.trim(), blocks }
+  }
+  const lines = s.split('\n')
+  const removed: boolean[] = lines.map((ln) => LEAK_TAG_LINE.test(ln))
+  if (removed.some(Boolean)) {
+    // 被标签行（或文本边界）上下夹住的非空行 = 标签体内的值，归入残片。
+    const nearestNonBlank = (i: number, step: number): number => {
+      for (let j = i + step; j >= 0 && j < lines.length; j += step) {
+        if (lines[j].trim() !== '') return j
+      }
+      return -1
+    }
+    lines.forEach((ln, i) => {
+      if (removed[i] || ln.trim() === '') return
+      // 标签体内的值行：上面最近的是**开标签**（</…> 闭合标签不算——残片
+      // 后面跟着的正常正文不能被吃掉），下面最近的是标签行或文本边界。
+      const above = nearestNonBlank(i, -1)
+      const below = nearestNonBlank(i, 1)
+      if (above >= 0 && removed[above] && !lines[above].trim().startsWith('</') &&
+        (below === -1 || removed[below])) removed[i] = true
+    })
+    const mainLines: string[] = []
+    const leakLines: string[] = []
+    lines.forEach((ln, i) => (removed[i] ? leakLines : mainLines).push(ln))
+    if (leakLines.join('\n').trim()) blocks.push({ kind: 'xml', text: leakLines.join('\n').trim() })
+    s = mainLines.join('\n')
+  }
+  return { main: s.trim(), blocks }
+}
+
+/* 旧入口兼容（T32 批引入）：leak = 全部残片文本拼接。 */
+export function splitProtocolLeak(text: string): { main: string; leak: string } {
+  const r = splitLeaks(text)
+  return { main: r.main, leak: r.blocks.map((b) => b.text).join('\n\n') }
 }
 
 function callItemsOf(line: Line, sid: string): CallItem[] {

@@ -7,6 +7,8 @@
 ### Added
 
 - **XML 工具调用残片兼容（T32）**：模型偶发把原始 XML 工具调用文本（`<parameter=path>…</parameter></function></tool_call>`）写进回复正文——真实调用已按 `tool_calls` 通道正常解析执行，残片只是重复。Go 侧 `StripLeakedToolXML` 在落盘/进历史前剥离（不再污染回放前缀与转录）；旧转录由前端剥出后折叠成「XML 协议残片」块（默认收起、可展开看原文）。
+- **正文残片统一折叠（T30/T34）**：两类新残片与 T32 同法处理——① reasoning 通道关闭时模型把 `<thinking>…</thinking>` 漏进正文（T30）：Go 侧 `MoveLeakedThinking` 整块移到 `ReasoningContent`（UI 本来就把它渲染成可折叠思考块，GLM 保留式思考回传也走该通道），旧转录前端剥出折成「原始思考」块；② 其余 XML 残片不猜语义（T34）：完整 `<tool_call>…</tool_call>` 块保留为可展开块、成行协议标签（含 thinking 开合标签）剥出折叠，「夹值行」只认上面是开标签的形态——残片后面跟着的正常正文不会被误吃。全部默认收起。
+- **cache-probe 加 head 预览（T31 排查）**：debug 日志的 `[cache-probe]` 行在 `head_sha` 后追加请求体前 256B 的转义预览。T31 结论：缓存大面积未命中**不是会话侧问题**——checker（Qwen/Qwen3.5-27B）9/161 命中 vs convert（deepseek-v4.1）723/760 命中，同结构请求纯 Provider 差异（各轮 head_sha 逐字节一致、命中与未命中的并发无差异）；Provider 若声称"你们前缀变了"，拿这 256B 对质即可。
 - **轮次与会话哈希（P10）**：转录每条 `t=msg` 行带 `h` 字段（该轮内容的 SHA-256 短哈希，12 hex，内容派生、重放一致）——对话页工具卡尾部以 `· h=xxxx` 显示、轨迹页行展开区有「轮次哈希」条目，报障时"会话 X 的 h=ab12cd34ef56 轮回复异常"可直接 grep 转录定位；右侧详情栏「会话」块新增「会话哈希」（整个转录文件的内容指纹，钉死用户看到问题那一刻的会话状态）。旧转录无此字段照常显示。
 
 - **Mermaid 升级修复会话**（`tools.mermaid.session_rounds` / `session_errors` / `fallback_model`，P12）：img2text 就地修复轮用完后，模型获得一个虚拟工作区（出错的响应在 `submit.md`，工具 `write_file`/`grep`/`view_image`/`submit`），submit 跑 mmdc 语法检查，编译错误累计到上限自动清上下文切备选模型再试；提交/检查次数默认 6。工作区与 JSONL 转录保留在 `progress_items/mermaid_fix/<图>/` 供诊断，`analyze` 报告触发统计。

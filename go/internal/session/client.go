@@ -398,8 +398,8 @@ func (c *Client) logCacheProbe(payload *ChatRequest, raw []byte) {
 	} else if payload.ToolChoice != nil {
 		choice = fmt.Sprintf("%v", payload.ToolChoice)
 	}
-	c.log.Debug(0, fmt.Sprintf("[cache-probe] body=%dB head_sha=%x tools=%s tool_choice=%s messages=%d user=%q",
-		len(raw), sum[:8], tools, choice, len(payload.Messages), payload.User))
+	c.log.Debug(0, fmt.Sprintf("[cache-probe] body=%dB head_sha=%x head=%.256q tools=%s tool_choice=%s messages=%d user=%q",
+		len(raw), sum[:8], string(head), tools, choice, len(payload.Messages), payload.User))
 }
 
 // post performs the HTTP call with the transport matching the mode.
@@ -797,10 +797,13 @@ func StripLeakedToolXML(msg *ChatMessage) {
 			if removed[i] || strings.TrimSpace(lines[i]) == "" {
 				continue
 			}
-			// 文本边界（-1）也算"被标签包围"：残片可以贴在最前面。
+			// 标签体内的值行：上面最近的是**开标签**（</…> 闭合标签不算——
+			// 残片后面跟着的正常正文不能被吃掉），下面最近的是标签行或
+			// 文本边界（残片可以贴在正文最后）。
 			above := nearestNonBlank(i, -1)
 			below := nearestNonBlank(i, 1)
-			if (above == -1 || removed[above]) && (below == -1 || removed[below]) {
+			if above >= 0 && removed[above] && !strings.HasPrefix(strings.TrimSpace(lines[above]), "</") &&
+				(below == -1 || removed[below]) {
 				removed[i] = true
 			}
 		}
@@ -813,6 +816,50 @@ func StripLeakedToolXML(msg *ChatMessage) {
 		s = strings.Join(keep, "\n")
 	}
 	msg.Content = strings.TrimSpace(s)
+}
+
+// leakedThinkingRe matches raw <thinking>…</thinking> / <think>…</think>
+// blocks that leak into the content stream when the reasoning channel is off
+// (T30). Non-greedy, DOTALL, both spellings (GLM vs Qwen style). RE2 has no
+// backreferences, so the two spellings are two alternatives (submatch 1 or 2
+// tells which one matched).
+var leakedThinkingRe = regexp.MustCompile(`(?s)<thinking>(.*?)</thinking>|<think>(.*?)</think>`)
+
+// MoveLeakedThinking moves raw <thinking> blocks that leaked into an
+// assistant message's content over to ReasoningContent (T30). The UI renders
+// reasoning as a collapsible thinking block, and GLM's retained-thinking
+// replay expects thinking in its own channel — either way it does not belong
+// in the visible reply text. Only complete blocks are moved; the remaining
+// content is left untouched.
+func MoveLeakedThinking(msg *ChatMessage) {
+	if msg.Role != "assistant" {
+		return
+	}
+	s, ok := msg.Content.(string)
+	if !ok || !strings.Contains(s, "<think") {
+		return
+	}
+	var moved []string
+	clean := leakedThinkingRe.ReplaceAllStringFunc(s, func(m string) string {
+		sub := leakedThinkingRe.FindStringSubmatch(m)
+		if len(sub) > 2 {
+			body := sub[1]
+			if body == "" {
+				body = sub[2]
+			}
+			moved = append(moved, strings.TrimSpace(body))
+		}
+		return ""
+	})
+	if len(moved) == 0 {
+		return
+	}
+	msg.Content = strings.TrimSpace(clean)
+	joined := strings.Join(moved, "\n\n")
+	if strings.TrimSpace(msg.ReasoningContent) != "" {
+		joined = strings.TrimSpace(msg.ReasoningContent) + "\n\n" + joined
+	}
+	msg.ReasoningContent = joined
 }
 
 func truncate(s string, n int) string {

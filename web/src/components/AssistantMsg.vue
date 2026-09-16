@@ -4,7 +4,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { state, storeGet, storeSet, LONG_TEXT_LINES, registerAnchor, unregisterAnchor } from '../state'
 import { countText, estOf, firstLine } from '../legacy/sidebar'
-import { type StreamItem, splitProtocolLeak } from '../legacy/stream'
+import { type StreamItem, splitLeaks, type LeakBlock } from '../legacy/stream'
 import { openLightbox } from '../state'
 import { mediaURL } from '../legacy/timeline'
 import Disclosure from './Disclosure.vue'
@@ -66,8 +66,12 @@ onBeforeUnmount(() => {
 const thinkTail = computed(() =>
   line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : '')
 
-// T32：旧转录正文中混入的 XML 工具调用残片剥出来折叠展示（新转录 Go 侧已清洗）。
-const body = computed(() => splitProtocolLeak(String((line.value && line.value.text) || '')))
+// T30/T32/T34：旧转录正文里混入的残片（思考块/XML）剥出来折叠展示
+// （新转录 Go 侧已清洗：MoveLeakedThinking / StripLeakedToolXML）。
+const body = computed(() => splitLeaks(String((line.value && line.value.text) || '')))
+const leakName = (b: LeakBlock) => (b.kind === 'thinking' ? '原始思考' : 'XML 协议残片')
+const leakSummary = (b: LeakBlock) =>
+  b.kind === 'thinking' ? '思考内容漏进了正文（原始输出）' : '模型直出的原始工具调用文本（调用已正常解析执行）'
 </script>
 
 <template>
@@ -91,12 +95,13 @@ const body = computed(() => splitProtocolLeak(String((line.value && line.value.t
     <FoldText v-if="body.main" :text="body.main" :mem-key="'asst.' + line.n"
       :preview-lines="LONG_TEXT_LINES" :tokens="estOf(line).text" />
     <Disclosure
-      v-if="body.leak"
+      v-for="(b, i) in body.blocks"
+      :key="'leak' + i"
       cls="disclosure-leak"
-      name="XML 协议残片"
-      summary="模型直出的原始工具调用文本（调用已正常解析执行）"
+      :name="leakName(b)"
+      :summary="leakSummary(b)"
     >
-      <div class="leak-body"><pre class="body-text">{{ body.leak }}</pre></div>
+      <div class="leak-body"><pre class="body-text">{{ b.text }}</pre></div>
     </Disclosure>
     <template v-for="c in item.calls" :key="c.key">
       <ToolCard :item="c" />

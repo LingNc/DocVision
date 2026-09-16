@@ -25,6 +25,11 @@ func TestStripLeakedToolXML(t *testing.T) {
 			want: "Let me check:\n\ndone", // 块删除留下一个空行，Markdown 渲染无害
 		},
 		{
+			name: "残片后面跟着正文：正文保留（不被当标签值吃掉）",
+			in:   "<parameter=path>\nx\n</parameter>\n</tool_call>\ndone",
+			want: "done",
+		},
+		{
 			name: "正常带工具调用的正文不受影响",
 			in:   "Reading the chapter file first.",
 			want: "Reading the chapter file first.",
@@ -45,5 +50,60 @@ func TestStripLeakedToolXML(t *testing.T) {
 	StripLeakedToolXML(&plain)
 	if got := ContentString(plain); got != plain.Content {
 		t.Fatalf("text-only reply mutated: %q", got)
+	}
+}
+
+// T30：reasoning 通道关闭时，模型把 <thinking>…</thinking> 漏进正文——
+// 整块移到 ReasoningContent（UI 折叠展示、GLM 保留式思考回传走原通道）。
+func TestMoveLeakedThinking(t *testing.T) {
+	cases := []struct {
+		name     string
+		in       string
+		wantText string
+		wantRsn  string
+	}{
+		{
+			name:     "整块移到思维链、正文保留",
+			in:       "<thinking>Page 12: 解答题 format.</thinking>\nLet me look at the figure page closely.",
+			wantText: "Let me look at the figure page closely.",
+			wantRsn:  "Page 12: 解答题 format.",
+		},
+		{
+			name:     "think 拼写同样认（Qwen 风格）",
+			in:       "<think>hmm</think>done",
+			wantText: "done",
+			wantRsn:  "hmm",
+		},
+		{
+			name:     "多块合并、已有思维链续在后面",
+			in:       "<thinking>t1</thinking>mid<thinking>t2</thinking>",
+			wantText: "mid",
+			wantRsn:  "t1\n\nt2",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := ChatMessage{Role: "assistant", Content: c.in}
+			MoveLeakedThinking(&m)
+			if got := ContentString(m); got != c.wantText {
+				t.Fatalf("text = %q, want %q", got, c.wantText)
+			}
+			if m.ReasoningContent != c.wantRsn {
+				t.Fatalf("reasoning = %q, want %q", m.ReasoningContent, c.wantRsn)
+			}
+		})
+	}
+
+	// user 消息不碰。
+	u := ChatMessage{Role: "user", Content: "<thinking>x</thinking>"}
+	MoveLeakedThinking(&u)
+	if got := ContentString(u); got != "<thinking>x</thinking>" {
+		t.Fatalf("user msg mutated: %q", got)
+	}
+	// 没有泄漏时不写 reasoning_content。
+	plain := ChatMessage{Role: "assistant", Content: "ordinary reply"}
+	MoveLeakedThinking(&plain)
+	if plain.ReasoningContent != "" {
+		t.Fatalf("reasoning set without leak: %q", plain.ReasoningContent)
 	}
 }

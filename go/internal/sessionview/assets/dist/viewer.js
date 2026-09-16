@@ -9278,33 +9278,43 @@
       promptTokenEst: estOf(line).text
     };
   }
-  const LEAK_TAG_LINE = /^\s*<\/?(?:tool_call|function|parameter)(?:[=\s][^>\n]*)?>?\s*$/;
-  function splitProtocolLeak(text) {
-    if (!text.includes("<") || !/(?:tool_call|parameter=|function=)/.test(text)) {
-      return { main: text, leak: "" };
-    }
-    const noBlocks = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "");
-    const lines = noBlocks.split("\n");
-    const removed = lines.map((ln) => LEAK_TAG_LINE.test(ln));
-    if (!removed.some(Boolean)) {
-      return noBlocks === text ? { main: text, leak: "" } : { main: noBlocks, leak: "" };
-    }
-    const nearestNonBlank = (i, step) => {
-      for (let j = i + step; j >= 0 && j < lines.length; j += step) {
-        if (lines[j].trim() !== "") return j;
-      }
-      return -1;
-    };
-    lines.forEach((ln, i) => {
-      if (removed[i] || ln.trim() === "") return;
-      const above = nearestNonBlank(i, -1);
-      const below = nearestNonBlank(i, 1);
-      if ((above === -1 || removed[above]) && (below === -1 || removed[below])) removed[i] = true;
+  const LEAK_TAG_LINE = /^\s*<\/?(?:tool_call|function|parameter|thinking|think)(?:[=\s][^>\n]*)?>?\s*$/;
+  function splitLeaks(text) {
+    const blocks = [];
+    if (!text.includes("<")) return { main: text, blocks };
+    let s = text.replace(/<(thinking|think)>([\s\S]*?)<\/\1>/g, (_m, _t, body) => {
+      blocks.push({ kind: "thinking", text: body.trim() });
+      return "";
     });
-    const mainLines = [];
-    const leakLines = [];
-    lines.forEach((ln, i) => (removed[i] ? leakLines : mainLines).push(ln));
-    return { main: mainLines.join("\n").trim(), leak: leakLines.join("\n").trim() };
+    s = s.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, (m) => {
+      blocks.push({ kind: "xml", text: m.trim() });
+      return "";
+    });
+    if (!/(?:tool_call|parameter=|function=|<\/?think)/.test(s)) {
+      return { main: s === text ? text : s.trim(), blocks };
+    }
+    const lines = s.split("\n");
+    const removed = lines.map((ln) => LEAK_TAG_LINE.test(ln));
+    if (removed.some(Boolean)) {
+      const nearestNonBlank = (i, step) => {
+        for (let j = i + step; j >= 0 && j < lines.length; j += step) {
+          if (lines[j].trim() !== "") return j;
+        }
+        return -1;
+      };
+      lines.forEach((ln, i) => {
+        if (removed[i] || ln.trim() === "") return;
+        const above = nearestNonBlank(i, -1);
+        const below = nearestNonBlank(i, 1);
+        if (above >= 0 && removed[above] && !lines[above].trim().startsWith("</") && (below === -1 || removed[below])) removed[i] = true;
+      });
+      const mainLines = [];
+      const leakLines = [];
+      lines.forEach((ln, i) => (removed[i] ? leakLines : mainLines).push(ln));
+      if (leakLines.join("\n").trim()) blocks.push({ kind: "xml", text: leakLines.join("\n").trim() });
+      s = mainLines.join("\n");
+    }
+    return { main: s.trim(), blocks };
   }
   function callItemsOf(line, sid) {
     return (line.tool_calls || []).map((call) => {
@@ -9993,7 +10003,7 @@
   };
   const _hoisted_7$4 = ["src", "alt", "title", "onClick"];
   const _hoisted_8$3 = {
-    key: 3,
+    key: 2,
     class: "note"
   };
   const _sfc_main$8 = /* @__PURE__ */ defineComponent({
@@ -10051,7 +10061,9 @@
         if (line.value && root.value) unregisterAnchor(line.value.n, root.value);
       });
       const thinkTail = computed(() => line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : "");
-      const body = computed(() => splitProtocolLeak(String(line.value && line.value.text || "")));
+      const body = computed(() => splitLeaks(String(line.value && line.value.text || "")));
+      const leakName = (b) => b.kind === "thinking" ? "原始思考" : "XML 协议残片";
+      const leakSummary = (b) => b.kind === "thinking" ? "思考内容漏进了正文（原始输出）" : "模型直出的原始工具调用文本（调用已正常解析执行）";
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("section", {
           ref_key: "root",
@@ -10085,19 +10097,21 @@
             "preview-lines": unref(LONG_TEXT_LINES),
             tokens: unref(estOf)(line.value).text
           }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])) : createCommentVNode("", true),
-          body.value.leak ? (openBlock(), createBlock(_sfc_main$g, {
-            key: 2,
-            cls: "disclosure-leak",
-            name: "XML 协议残片",
-            summary: "模型直出的原始工具调用文本（调用已正常解析执行）"
-          }, {
-            default: withCtx(() => [
-              createBaseVNode("div", _hoisted_4$4, [
-                createBaseVNode("pre", _hoisted_5$4, toDisplayString(body.value.leak), 1)
-              ])
-            ]),
-            _: 1
-          })) : createCommentVNode("", true),
+          (openBlock(true), createElementBlock(Fragment, null, renderList(body.value.blocks, (b, i) => {
+            return openBlock(), createBlock(_sfc_main$g, {
+              key: "leak" + i,
+              cls: "disclosure-leak",
+              name: leakName(b),
+              summary: leakSummary(b)
+            }, {
+              default: withCtx(() => [
+                createBaseVNode("div", _hoisted_4$4, [
+                  createBaseVNode("pre", _hoisted_5$4, toDisplayString(b.text), 1)
+                ])
+              ]),
+              _: 2
+            }, 1032, ["name", "summary"]);
+          }), 128)),
           (openBlock(true), createElementBlock(Fragment, null, renderList(__props.item.calls, (c) => {
             return openBlock(), createElementBlock(Fragment, {
               key: c.key
@@ -10123,7 +10137,7 @@
       };
     }
   });
-  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-2c3e5afb"]]);
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-84db9398"]]);
   const _hoisted_1$6 = { class: "sys-line" };
   const _hoisted_2$6 = { class: "line-summary" };
   const _hoisted_3$5 = {

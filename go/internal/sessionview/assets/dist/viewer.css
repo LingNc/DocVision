@@ -718,18 +718,18 @@ to { transform: rotate(360deg);
 }
 
 /* 助手消息 = 左对齐、全宽、无气泡无边框 */
-.msg-assistant[data-v-2c3e5afb] {
+.msg-assistant[data-v-84db9398] {
  align-items: stretch;
 }
-.msg-assistant .body-text[data-v-2c3e5afb] {
+.msg-assistant .body-text[data-v-84db9398] {
  font-size: 14px; line-height: 24px;
 }
 
 /* XML 协议残片（T32）：折叠块展开体，等宽小字、与思考块同款缩进。 */
-.leak-body[data-v-2c3e5afb] {
+.leak-body[data-v-84db9398] {
  padding: 4px 0 6px 22px;
 }
-.leak-body .body-text[data-v-2c3e5afb] {
+.leak-body .body-text[data-v-84db9398] {
  font-family: var(--mono, monospace);
  font-size: var(--code-font, 11px);
  line-height: var(--code-line, 19px);
@@ -739,10 +739,10 @@ to { transform: rotate(360deg);
 }
 
 /* 展开后思考缩进 22px、13px/20px */
-.thinking-body[data-v-2c3e5afb] {
+.thinking-body[data-v-84db9398] {
  padding: 4px 0 6px 22px;
 }
-.thinking-body .reasoning-text[data-v-2c3e5afb] {
+.thinking-body .reasoning-text[data-v-84db9398] {
  color: var(--dim);
 }
 
@@ -750,7 +750,7 @@ to { transform: rotate(360deg);
    工具调用下面，**折叠态就可见**（所以它是 <details> 的兄弟节点，不在卡片里）。
    一轮里调了多次 view 时，这一轮的缩略图全部并排挂在这一轮**最后一个** view 行下，
    顺序按转录先后；超宽就换行。缩进 20px 与工具行里的名称对齐。 */
-.preview-strip[data-v-2c3e5afb] {
+.preview-strip[data-v-84db9398] {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -758,7 +758,7 @@ to { transform: rotate(360deg);
   gap: 8px;
   padding-left: 20px;
 }
-.preview-strip img[data-v-2c3e5afb] {
+.preview-strip img[data-v-84db9398] {
   width: auto;
   height: auto;
   max-width: var(--preview-w);

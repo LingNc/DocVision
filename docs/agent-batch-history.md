@@ -1061,3 +1061,15 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **验证**：Go `go test ./...` 全绿（新增 TestStripLeakedToolXML 4 例、TestDeliverBookRecreatesOutDir）；web vitest 27/27（新增 splitProtocolLeak 3 例）；真机 dv5 挂 latex_project 实树 CDP 探针：修复前复现崩溃（`statsSummary … 'toFixed'` ×5，侧栏 0 组）→ 修复后 7 项目组/23 阶段组渲染、「更多会话（还有 28 个）」overflow 展开正常（isOverflowOpen 路径实走）、checker_chapter_023 会话内「XML 协议残片」折叠块出现且默认收起、正文无污染、控制台零报错。
 
 **文档**：issue.md T27/T32/T33 标 [X]（含根因注记）；CHANGELOG [Unreleased] Added（T32）+ Fixed（T27/T33）；AGENTS.md 命令面/会话基础设施要点同步；docs/commands.md 新增「XML 协议残片（T32）」小节。README 与 --help 无涉未动。
+
+## 第四十批（2026-09-16）：T30 思考泄漏折叠 + T31 缓存命中排查 + T34 XML 残片统一渲染
+
+**T30——`<thinking>` 漏进正文**：用户样本为 style 阶段现场（reasoning 通道开启时也有漏）。修法双端：Go 侧 `session.MoveLeakedThinking`（client.go）——assistant 消息的 `<thinking>…</thinking>`/`<think>…</think>` 整块移到 `ReasoningContent`（UI 渲染成可折叠思考块，GLM 保留式思考回传也走该通道），在 session.Run 主循环与 nudge 响应两处接入，先于 debug 日志（日志与落盘一致）；RE2 无反向引用，两种拼写写成两个分支。web 侧旧转录由 `splitLeaks` 剥出折成「原始思考」块（默认收起）。
+
+**T31——缓存命中"偶尔掉一下/没有命中"**：定量排查（《预测三套卷数一》138 会话 952 次请求）——convert（deepseek-v4.1）：723 命中 / 37 未命中（首轮冷启动 + 少量抖动）；checker（Qwen/Qwen3.5-27B）：**9 命中 / 161 未命中**。三个排除法：① 同会话各轮 head_sha 逐字节一致、36 个 checker 会话共享同一 head（cache-probe 指纹）——我们的前缀完全稳定；② 命中/未命中的平均并发请求数 98.2 vs 100.3——不是并发挤占；③ 同结构请求换模型即高命中——**Provider 差异**（Qwen3.5-27B 部署的前缀缓存近乎不工作，偶发命中一两轮符合缓存容量/LRU 特征）。结论：非会话侧问题，治本只能换缓存友好的模型/服务商。顺手把 `[cache-probe]` 日志加了 head 前 256B 转义预览（`%.256q`），Provider 若声称"你们前缀变了"可 byte 级对质。
+
+**T34——其余 XML 残片"作为 XML 渲染"**：前端 `splitProtocolLeak` 升级为 `splitLeaks`（stream.ts，纯函数）：返回 `{main, blocks:[{kind,text}]}`，kind = thinking | xml。完整 `<tool_call>…</tool_call>` 块不再静默删、保留为可展开块；成行协议标签集扩展 thinking/think 开合标签；**夹值行规则收紧**——只认"上面最近的是开标签（非 `</`）"，修掉了原实现会把残片后面的正文也吃掉的边界缺陷（Go 的 `StripLeakedToolXML` 同步收紧 + 双侧补防回归用例）。AssistantMsg 按 kind 渲染「原始思考」/「XML 协议残片」Disclosure。`splitProtocolLeak` 保留为兼容包装。
+
+**验证**：Go `go test ./...` 全绿（TestMoveLeakedThinking 6 例、TestStripLeakedToolXML 加防回归例）；vitest 31/31（新增 splitLeaks 4 例）；真机 CDP 探针（合成转录含 thinking 泄漏 + XML 残片）：「原始思考」「XML 协议残片」两块并存、默认收起、正文干净、控制台零报错。
+
+**文档**：issue.md T30/T31/T34 标 [X]（T31 记完整排查结论与证据）；CHANGELOG [Unreleased] Added 三条；AGENTS.md 会话基础设施要点改为「正文残片清洗（T30/T32/T34）」；docs/commands.md 的 T32 小节扩写为「正文残片折叠（T30/T32/T34）」。

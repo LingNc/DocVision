@@ -501,12 +501,12 @@ refreshIndex @ viewer.js:7312
 ```
 
 [X] T29. 在续跑会话的时候还存在一个问题。（修复：历史以 tool 回执收尾原样续行不插内容、不重附原图；悬空调用合成占位回执；回放从最近压缩检查点开始——LoadTranscript 既有语义，文档写明。你看我们的日志这边，在继续的时候插入了一个user的会话内容？但是这边应该不应该插入任何内容了吧？这边好像在最后加上了一个系统提示词？并且之前的会话有记录从哪里开始是压缩之后的吗？会话是应该从最近一次的压缩的地方开始吧？而不是全部发送上去。然后这边大概率应该不需要新加入什么提示词吧？直接就可以继续了。除非了他自己终止了没有任何工具调用的情况。一般也是这个会话结束了，而不是没有submit的情况，这种有单独处理。
-[ ] T30. 有时候ai的输出中会意外的泄露一些
+[X] T30. 有时候ai的输出中会意外的泄露一些（2026-09-16 修复：reasoning 通道关闭时模型把 `<thinking>…</thinking>` 漏进正文——Go 侧 `MoveLeakedThinking` 整块移到 ReasoningContent（UI 本来就把它渲染成可折叠思考块、GLM 保留式思考回传也走该通道），旧转录由前端剥出折成「原始思考」块（默认收起）。真机探针验证两种折叠块并存、正文干净、控制台零报错。）
 “<thinking>Page 12 (set 3, page 4): 解答题 format: "(20)(本题满分 12 分)" then body with indentation. Page number "— 4 —" centered at bottom.
 Let me look at page 10 (the figures page) and page 13 (answer page 1) closely. Also check the footer style of set-1 pages ("— 1 —").</thinking>
 Let me look at the figure page (page 10) closely.”
 类似这样的情况，不是在reason_effort中的，这边可以在ui上单独做一个折叠界面折叠这个比较原始的思考模式，可以展开收上的。保证在视觉上不容易污染观看体验。
-[ ] T31. 有时候缓存命中偶尔掉一下不知道为什么，还有时候没有缓存命中，是否是我们的会话这边存在一些问题。
+[X] T31. 有时候缓存命中偶尔掉一下不知道为什么，还有时候没有缓存命中，是否是我们的会话这边存在的一些问题。（2026-09-16 排查结论：**不是会话侧问题，是模型部署侧的前缀缓存行为**。证据：① 同一会话各轮 head_sha 逐字节一致、全部 checker 会话共享同一 head；② 同结构请求在 deepseek-v4.1（convert）上命中 723/760，在 Qwen/Qwen3.5-27B（checker）上只有 9/161——纯 Provider 差异；③ 命中/未命中的平均并发几乎相同（98 vs 100），排除并发挤占；④ checker 偶尔连续命中一两轮又掉，符合 Provider 缓存容量/LRU 特征。治本只能换缓存友好的模型/服务商；debug 日志的 [cache-probe] 已加 head 前 256B 预览，Provider 若声称"你们前缀变了"可拿它 byte 级对质。）
 [X] T32. 有时候ai会发出这样的工具调用请求，这边是否应该也做一下兼容，并且给出一个比如xml工具调用情况？（2026-09-16 修复：模型把原始 XML 工具调用残片写进 content（真实调用已按 tool_calls 正常解析执行）——Go 侧 `StripLeakedToolXML` 落盘前剥离（不进回放历史/转录），旧转录由前端 `splitProtocolLeak` 剥出折叠成「XML 协议残片」块（默认收起）。实测样本来自 checker_chapter_023 round 1。）
 ```xml
 <parameter=path>
@@ -524,3 +524,5 @@ check:parts/
 phase assemble: open latex_project/2026年李艳芳预测三套卷数一/out/REPORT.md: no such file or directory
 lingnc@debian41:/home/share/samba-share/PDF2MD
 ```
+[X] T34. 还有一些xml的残片，也可以这边渲染一下。可以不认为是工具调用的残片，只是说作为xml来渲染（2026-09-16 修复：前端 `splitLeaks` 统一剥残片——完整 `<tool_call>…</tool_call>` 块也保留为可展开块（不再静默删）、思考块归「原始思考」类、其余成行协议标签（含 thinking 开合标签）归「XML 协议残片」类，全部默认收起；夹值行只认"上面是开标签"的形态，残片后面的正文不会被吃掉。）
+[ ] T35. 对于一些输出有中断没有进行提交的，这边应该提示一个Continue.就可以了不需要提示太长。并且我看这边提示之后输入的会话好像重新开始计算了？而不是连带上下文一起？比如checker里面的。这是咋回事？我看他的会话请求的号从1开始计算了并且输入的内容变少了，后面ai好像不知道要干什么了？
