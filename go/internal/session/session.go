@@ -459,6 +459,7 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 	}
 
 	toolRounds := 0
+	emptyRetry := 0
 	// maxRounds <= 0 means unlimited (user opted out of any cap).
 	maxRounds := s.tuning.MaxToolRounds
 	// Soft round budget: from warnFrom the session starts reporting how
@@ -566,6 +567,19 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		}
 		choice := resp.Choices[0]
 		MoveLeakedThinking(&choice.Message)
+		// T50 退化空响应重试：厂商在高压/异常时可能回一条 finish=length、
+		// 0 completion token、无内容/无思考/无工具调用的空消息（真实案例：
+		// mermaid-fix 升级会话两轮全空直接 "empty final answer" 失败）。
+		// 这种响应不携带任何可用信息，走 nudge 只会再收一次同样的退化
+		// 响应；原样重发一次（每次 Run 上限 1 次），仍退化才落 nudge/报错。
+		if emptyRetry == 0 && degenerateEmptyResponse(resp, &choice) {
+			emptyRetry++
+			if s.logger.DebugEnabled() {
+				s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: degenerate empty response (finish=%s, completion=0), retrying once",
+					s.label, toolRounds+1, dash(resp.FinishReason)))
+			}
+			continue
+		}
 		if s.logger.DebugEnabled() {
 			s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: api response (%.1fs, stream=%v finish=%s content=%d chars reasoning=%d chars tools=%d %s)",
 				s.label, toolRounds+1, resp.Elapsed.Seconds(), resp.Streamed, dash(resp.FinishReason),
@@ -727,6 +741,24 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 		}
 		return content, nil
 	}
+}
+
+// degenerateEmptyResponse reports a provider response that carries no
+// usable signal at all: no content, no reasoning, no tool calls, and the
+// usage block shows zero completion tokens (the vendor returned nothing).
+// Distinct from a legitimately empty text reply (finish=stop with real
+// output tokens), which the nudge path handles.
+func degenerateEmptyResponse(resp *ChatResponse, choice *ChatResponseChoice) bool {
+	if len(choice.Message.ToolCalls) > 0 {
+		return false
+	}
+	if strings.TrimSpace(ContentString(choice.Message)) != "" {
+		return false
+	}
+	if strings.TrimSpace(choice.Message.ReasoningContent) != "" {
+		return false
+	}
+	return resp.Usage != nil && resp.Usage.CompletionTokens == 0
 }
 
 // executeTool dispatches one tool call, logging and error-wrapping.

@@ -5,6 +5,8 @@ package img2text
 // "BROKEN" 时退出 1，否则退出 0。
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -267,3 +269,110 @@ func TestResolveMermaidFixConfig(t *testing.T) {
 // intPtr3 与本文件其它 intPtr 助手同职责（避免与 repair 测试文件的 intPtr 冲突
 // 就不复用名字了——同包内函数名唯一）。
 func intPtr3(v int) *int { return &v }
+
+// T50：会话本身失败（模型退化空响应、API 错误）或提醒后仍未提交时，同样升级
+// 备选模型段——原先只有编译错误累计才升级，会话失败会让备选模型形同虚设。
+
+// fixSSEToolCall / fixSSEText 组装升级修复测试用的流式应答。
+func fixSSEToolCall(w http.ResponseWriter, id, name, args string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":%q,\"type\":\"function\",\"function\":{\"name\":%q,\"arguments\":%q}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":10,\"total_tokens\":110}}\n\n", id, name, args)
+	io.WriteString(w, "data: [DONE]\n\n")
+}
+
+func fixSSEText(w http.ResponseWriter, text string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":%q},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":3,\"total_tokens\":103}}\n\n", text)
+	io.WriteString(w, "data: [DONE]\n\n")
+}
+
+// degenerateServer 总是返回 finish=length、0 completion token 的空响应
+// （现场 Qwen 网关在高压下对 mermaid-fix 会话的真实行为）。
+func degenerateServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":1447,\"completion_tokens\":0,\"total_tokens\":1447}}\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+}
+
+func TestMermaidFixSessionFailureEscalates(t *testing.T) {
+	st, ws := newFixState(t, 6, 3)
+	srv := degenerateServer(t)
+	defer srv.Close()
+	st.cfg.Primary = config.ModelConfig{Model: "m1", BaseURL: srv.URL, APIKey: "k"}
+	st.cfg.Fallback = config.ModelConfig{Model: "m2", BaseURL: srv.URL, APIKey: "k"}
+	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte("BROKEN doc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if st.runOneStage(st.cfg.Primary, ws, 0, "parse error") {
+		t.Fatal("stage 0 should fail against the degenerate server")
+	}
+	if !st.escalated {
+		t.Fatal("escalated=false, want true after a failed session (T50)")
+	}
+}
+
+func TestMermaidFixSessionFailureNoFallbackStays(t *testing.T) {
+	st, ws := newFixState(t, 6, 3)
+	srv := degenerateServer(t)
+	defer srv.Close()
+	st.cfg.Primary = config.ModelConfig{Model: "m1", BaseURL: srv.URL, APIKey: "k"}
+	st.cfg.Fallback = config.ModelConfig{} // 未配置 fallback_model
+	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte("BROKEN doc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if st.runOneStage(st.cfg.Primary, ws, 0, "parse error") {
+		t.Fatal("stage 0 should fail against the degenerate server")
+	}
+	if st.escalated {
+		t.Fatal("escalated=true without a fallback model — stage 1 would run a zero ModelConfig")
+	}
+	if !hasFallbackModel(st.cfg) {
+		t.Log("hasFallbackModel correctly reports no fallback")
+	} else {
+		t.Fatal("hasFallbackModel=true for a zero ModelConfig")
+	}
+}
+
+// 端到端：原模型段退化失败 → 备选模型段 write_file + submit 成功。
+func TestMermaidFixFallbackStageSucceeds(t *testing.T) {
+	fakeMMDC(t)
+	bad := degenerateServer(t)
+	defer bad.Close()
+	var step int
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		step++
+		switch step {
+		case 1:
+			fixSSEToolCall(w, "c1", "write_file", "{\"content\":\"[IMG_TYPE: mermaid]\\n```mermaid\\ngraph TD\\nA-->B\\n```\"}")
+		case 2:
+			fixSSEToolCall(w, "c2", "submit", "{}")
+		default:
+			fixSSEText(w, "done")
+		}
+	}))
+	defer good.Close()
+
+	ws := t.TempDir()
+	cfg := &MermaidFixConfig{
+		Rounds:        6,
+		ErrorLimit:    3,
+		FallbackModel: "bigmodel",
+		Command:       "mmdc",
+		Timeout:       5 * time.Second,
+		Primary:       config.ModelConfig{Model: "m1", BaseURL: bad.URL, APIKey: "k"},
+		Fallback:      config.ModelConfig{Model: "m2", BaseURL: good.URL, APIKey: "k"},
+	}
+	final, ok := mermaidFixSessionInDir(cfg, ws, "BROKEN prev", "parse error", newTestLogger(t), 0)
+	if !ok {
+		t.Fatal("fallback stage should have fixed the document")
+	}
+	if !contains(final, "graph TD") {
+		t.Fatalf("final = %q", final)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "session-stage1.jsonl")); err != nil {
+		t.Fatalf("stage-1 transcript missing: %v", err)
+	}
+}

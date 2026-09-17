@@ -114,6 +114,11 @@ func mermaidFixSessionInDir(cfg *MermaidFixConfig, workspace, prevResult, valida
 	modelCfg := cfg.Primary
 	for stage := 0; stage < 2; stage++ {
 		if stage == 1 {
+			// 没有配置可解析的 fallback_model 时备选段没有模型可用
+			// （cfg.Fallback 是零值），直接结束，不空跑一个坏客户端。
+			if !hasFallbackModel(cfg) {
+				break
+			}
 			// 备选段：清上下文（全新会话），工作区文件（submit.md +
 			// compile_error.log + 前一段转录）原样保留。
 			modelCfg = cfg.Fallback
@@ -176,7 +181,21 @@ func (st *mermaidFixSessionState) runOneStage(modelCfg config.ModelConfig, ws st
 			UserText: "You have NOT called submit yet. Fix " + mermaidFixSubmitFile + " (write_file), then call submit.",
 		})
 	}
+	if !st.submitted && !st.escalated && hasFallbackModel(st.cfg) {
+		// T50：会话失败（模型退化空响应、API 错误）或提醒后仍未提交，
+		// 都没有经过编译错误累计——原先这类失败直接放弃，备选模型形同
+		// 虚设。同样升级备选段：清上下文、工作区文件保留，更强的兜底
+		// 模型拿同一份 submit.md 再修。
+		st.escalated = true
+		st.log.LogError(st.tid, "  [mermaid-fix] 本段会话未能完成，进入备选模型（fallback=", st.cfg.FallbackModel, "）；上下文清空、工作区文件保留")
+	}
 	return st.submitted
+}
+
+// hasFallbackModel 报告备选段是否有模型可用（配置了能解析的
+// fallback_model；未配置时 cfg.Fallback 是零值 ModelConfig）。
+func hasFallbackModel(cfg *MermaidFixConfig) bool {
+	return cfg != nil && (cfg.Fallback.Model != "" || cfg.Fallback.BaseURL != "")
 }
 
 // systemPrompt 是修复会话的系统提示词。只有这一个使用点、一次成文，不进 prompts
