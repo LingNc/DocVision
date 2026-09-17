@@ -52,6 +52,11 @@ const (
 	CheckerSystem     = "latex_checker.system"
 	FigureCheckSystem = "latex_figurecheck.system"
 
+	// T43 风格修复大循环的三个会话。
+	StyleFixIntegrateSystem = "latex_stylefix_integrate.system"
+	StyleFixAssessSystem    = "latex_stylefix_assess.system"
+	StyleFixBlockSystem     = "latex_stylefix_block.system"
+
 	// 各会话的首次用户提示词（静态文案进模板，动态数据用占位符传入）。
 	StyleUser       = "latex_style.user"
 	ChaptersUser    = "latex_chapters.user"
@@ -114,6 +119,18 @@ var registry = []Template{
 		Name: ConvertSystem, File: "latex_convert.system.md",
 		Vars:        []string{"MAX_ROUNDS"},
 		MustMention: []string{"compile", "doc_search", "edit_file", "grep", "list_source_pages", "read_file", "submit", "view_image", "view_pdf", "write_file"},
+	},
+	{
+		Name: StyleFixIntegrateSystem, File: "latex_stylefix_integrate.system.md",
+		MustMention: []string{"submit_problems"},
+	},
+	{
+		Name: StyleFixAssessSystem, File: "latex_stylefix_assess.system.md",
+		MustMention: []string{"grep", "read_file", "submit_blocks"},
+	},
+	{
+		Name: StyleFixBlockSystem, File: "latex_stylefix_block.system.md",
+		MustMention: []string{"compile", "edit_file", "read_file", "submit", "write_file"},
 	},
 	{
 		Name: StyleFixSystem, File: "latex_stylefix.system.md",

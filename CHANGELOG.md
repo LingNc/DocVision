@@ -4,6 +4,14 @@
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
 ## [Unreleased]
+### Added
+
+- **风格修复大循环（T43，替换多数派打回）**：任何章节的工作汇报报告 cls/手册问题（不再要求多数派）即进入修复流程——① 整合会话把各章汇报整合成**不重复的问题清单**（`submit_problems`，固定格式）；② 风格修复会话（**复用原样式会话上下文**，信息不丢失）修 cls/手册并编译 example 验证；③ 影响评估会话按问题**划分章节块**（`submit_blocks`，样式问题常是全局性的，可 grep 全部章节圈定真实影响面）；④ 每块一个并行**分块修复会话**在临时工作区里做定位修改（wrapper 编译验证、逐章汇报是否解决、绝不重做）；仍有问题进入下一轮，上限 `latex.style_fix.max_rounds`（默认 3，负数=关闭）。块会话失败退回单章增量修复，再失败删产物重转换。各会话转录落 `work/sessions/stylefix_*.jsonl`。配置版本 11→12。
+
+### Changed
+
+- **章节划分默认改中等（T45）**：`latex.chapter_granularity` 三档 large/medium/small，默认从 `small` 改为 `medium`（按本书自动给出最合理的拆分——不拆太细、也不太大块；配置里已显式写 `small` 的老配置不受影响）。
+
 ### Fixed
 
 - **成品 PDF 书签与跳转（T49）**：cls 不加载 hyperref（kyexam.cls 实测）导致成品 PDF 无书签无跳转——assemble 编译前对 main.tex **幂等注入** `hyperref`（bookmarksnumbered/bookmarksopen/hidelinks）与逐章 `\pdfbookmark`（锚在每个 `\input{chapters/…}` 前，书签文字取划分阶段 md 的首个标题行、缺失退 base 名）；骨架版与终审持久化版 main.tex 都过这道注入；**main.tex 已带任何 \pdfbookmark/\bookmark 时视为终审会话已接管**（终审提示词新增第 5 项：按本书实际结构检查书签面板、可重分层级/用 \addcontentsline、替换时删掉基线锚点），只补 hyperref 不再注入基线锚点。真实 kyexam.cls 端到端编译验证：书签字典 `/Outlines` + UTF-16 标题 + GoTo 跳转正确生成。

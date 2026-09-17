@@ -1265,3 +1265,23 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### 验证
 - `go test ./...` 全绿；dv5 重建。文档：CHANGELOG Fixed 三条、docs/latex.md 档位1 第 4 步同步、AGENTS.md 档位1 流程条目同步。
+
+## 第四十八批（2026-09-17，第三批：T45/T43）
+
+### T45 章节划分三档，默认改中等
+- `chapter_granularity` 现有 small/large 两档，新增 **medium（默认）**：提示词要求按这本书自动给出最合理拆分（通常一个顶层章一个文件，明显过大才再拆；绝不拆太细、绝不留超大块、绝不拆碎小节）。
+- 同步：config.go 校验/默认值、两份配置模板、docs/config.md。已显式写 `small` 的老配置不受影响（只改缺省值）。
+
+### T43 风格修复大循环（替换多数派打回）
+- 旧行为：>50% 章节汇报样式问题才打回原样式会话（上限 2 轮），之后只对报问题的章节跑单章增量修复。用户要求：任何汇报问题都应进入修复，且要 整合→修复→评估影响→分块并行修→循环 的完整闭环。
+- 新实现 `stylefix.go`：
+  1. **整合会话**（stylefix_integrate）：纯文本会话，把各章汇报整合成不重复问题清单，新工具 `submit_problems`（固定格式：id/title/detail/chapters）。
+  2. **风格修复会话**（stylefix_style_r<N>）：**复用原样式会话上下文**（`work/style_session.jsonl`——按用户"衡量一下"的口径选复用：信息不丢失 vs 缓存失效只是成本），提交后写回 cls/手册并编译 example 验证。
+  3. **影响评估会话**（stylefix_assess_r<N>）：只读挂载整个项目，可 grep 全部章节 .tex 圈定每个问题的真实影响面（样式问题常全局），`submit_blocks` 交出分块（每块带问题编号与章节范围，同问题的章归一块）。
+  4. **分块修复会话**（stylefix-blk-r<N>-<i>，并发=latex.concurrency）：临时工作区（样式包+块内章节+图片软链+每章 wrapper），定位修改绝不重做，compile 验证后 `submit` 逐章汇报 resolved；产物拷回 work/chapters/，汇报回写 work/reports/<章>.md。
+  5. 任一章未解决 → style-fN+1 下一轮；上限 `latex.style_fix.max_rounds`（默认 3，负数=关闭）；块会话失败的章退回既有单章 fixChapterStyle，再失败删产物重转换。
+- 新配置块 `latex.style_fix.max_rounds` → **配置版本 11→12**（config.go/default.yaml/config.example.yaml/README 示例行/docs/config.md 同步；测试固件 config_version 同步；temp/config_new.yaml 改写固件同步）。
+- 新提示词模板 3 个（integrate/assess/block system），注册表 + MustMention 守护。
+- 删除：旧 styleFeedbackLoop（多数派门 + 内嵌单章修复循环，约 230 行）与 maxStyleFeedbackRounds 常量；maxCheckerRounds 常量保留（原被误删，已恢复）。
+- 测试：stylefix_test.go 4 例（submit_problems/submit_blocks/submit 块结论/collectIssueReports）；全仓 go test 绿。
+- 遗留（如实记录）：stylefix 会话无断点续跑重放（中断后整轮重来，成本有界）；整合会话只跑一次、问题清单跨轮复用（修复轮之间问题集假定不变）。

@@ -1,6 +1,6 @@
 # DocVision Configuration
 
-config_version: 11
+config_version: 12
 # Copy this file to config.yaml and fill in your credentials.
 
 # MinerU API Configuration
@@ -73,7 +73,9 @@ latex:
   checker_model: "checker"
   insert_image_description: false # 档位2：raster 保留原图时是否再嵌入一段 AI 解释文本
                                   # （档位1 不受此开关控制：raster 总是带 DESCRIBE 解释块）
-  chapter_granularity: "small"   # 档位1 章节拆分粒度：small=按小节拆分（默认）/ large=按大章整体拆分
+  chapter_granularity: "medium"  # 档位1 章节拆分粒度：large=大章整体 / medium=按本书自动给出最合理拆分（默认，不拆太细也不太大块）/ small=按小节拆分
+  style_fix:                      # 档位1 风格修复大循环（T43）：任何章节汇报手册/样式问题即进入
+    max_rounds: 3                 # 整合→风格修复→影响评估→分块修复 循环上限（默认 3；负数=关闭）
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: false # 保留会话转录 JSONL（成功会话默认清理）；debug 日志下必定保留

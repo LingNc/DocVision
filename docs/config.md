@@ -84,7 +84,8 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.sessions.*.compaction_at` | 触发自动压缩的窗口占用比例（0-1），不写默认 0.85（所有会话一致，不是只继承 drawing） | 0.85 |
 | `latex.concurrency` | 档位1/档位2 的会话级并发（classify / 档位2 process / 档位1 逐章 convert / style-fix 共用；style、chapters、assemble、终审是单会话） | 3 |
 | `latex.insert_image_description` | 档位2 专用：raster 保留原图时是否嵌入 AI 解释文本（`[Image]( … )`）；档位1 不受它控制（总是生成解释块） | false |
-| `latex.chapter_granularity` | 档位1 章节拆分粒度：small=按小节拆分 / large=按大章整体拆分 | small |
+| `latex.style_fix.max_rounds` | 风格修复大循环上限（任何章节汇报样式问题即进入 整合→风格修复→影响评估→分块修复 循环；负数=关闭） | 3 |
+| `latex.chapter_granularity` | 档位1 章节拆分粒度：large=大章整体 / medium=按本书自动给出最合理拆分（不拆太细也不太大块）/ small=按小节拆分 | medium |
 | `latex.keep_temp_dirs` | 保留 `<项目>/work/temp/` 下的临时工作目录（拆章沙箱、逐章转换/修复工作区 `conv_<章>`、矢量图工作区） | false |
 | `latex.keep_session_records` | 保留成功会话的 JSONL 转录（与上一项独立）；debug 日志下两项都必定保留 | false |
 | `latex.compile.engine` | 编译引擎（pdflatex / xelatex / lualatex） | xelatex |

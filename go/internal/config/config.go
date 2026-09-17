@@ -270,9 +270,18 @@ type LatexConfig struct {
 	// flag controls whether confirmed TikZ figures embed the code
 	// block instead of the compiled PDF link. Default false.
 	InsertImageDescription bool `yaml:"insert_image_description"`
-	// ChapterGranularity controls the level-1 chapter split: "small"
-	// (default) splits at section level into coherent self-contained
-	// units; "large" keeps each whole top-level chapter as one file.
+	// StyleFix 是转换后风格修复大循环（T43）：任何章节汇报手册/样式问题
+	// 即进入 整合→风格修复→影响评估→分块修复 的循环。
+	StyleFix struct {
+		// MaxRounds 风格修复循环上限（默认 3；负数=关闭）。
+		MaxRounds int `yaml:"max_rounds"`
+	} `yaml:"style_fix"`
+
+	// ChapterGranularity controls the level-1 chapter split: "large"
+	// keeps each whole top-level chapter as one file; "medium" (default)
+	// lets the splitter pick the most sensible size for THIS book (never
+	// too fine, never too big); "small" splits at section level into
+	// coherent self-contained units.
 	ChapterGranularity string `yaml:"chapter_granularity"`
 
 	// RemoveWatermark: when true, LaTeX sessions are instructed to detect
@@ -684,9 +693,9 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）
 // 两个键（新子块级开关）。
-const CurrentConfigVersion = 11
+const CurrentConfigVersion = 12
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -915,9 +924,9 @@ func priceSummary(p PriceConfig) string {
 
 func validatePaths(cfg *Config) error {
 	switch cfg.Latex.ChapterGranularity {
-	case "", "small", "large":
+	case "", "small", "medium", "large":
 	default:
-		return fmt.Errorf("latex.chapter_granularity 必须为 small 或 large（当前 %q）", cfg.Latex.ChapterGranularity)
+		return fmt.Errorf("latex.chapter_granularity 必须为 small/medium/large（当前 %q）", cfg.Latex.ChapterGranularity)
 	}
 	if cfg.Tools.Bash.MaxOutput < 0 {
 		return fmt.Errorf("tools.bash.max_output 不能为负（当前 %d）", cfg.Tools.Bash.MaxOutput)
@@ -1124,7 +1133,10 @@ func setDefaults(cfg *Config) {
 	defaultSessionTuning(&cfg.Latex.Sessions.Chapter)
 	defaultSessionTuning(&cfg.Latex.Sessions.Convert)
 	if cfg.Latex.ChapterGranularity == "" {
-		cfg.Latex.ChapterGranularity = "small"
+		cfg.Latex.ChapterGranularity = "medium"
+	}
+	if cfg.Latex.StyleFix.MaxRounds == 0 {
+		cfg.Latex.StyleFix.MaxRounds = 3
 	}
 
 	// Verify defaults (feature is OFF unless explicitly enabled).

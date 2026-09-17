@@ -608,11 +608,15 @@ func (r *Runner) chaptersPhase(proj string) error {
 
 	granularity := r.cfg.Latex.ChapterGranularity
 	if granularity == "" {
-		granularity = "small"
+		granularity = "medium"
 	}
-	gran := "SMALL granularity (default): one chapter = one SECTION. Split at the finest heading level that yields coherent, self-contained units (a top-level chapter containing several sections becomes several files). Never split mid-section."
+	// T45：三档——large=大章整体；medium（默认）=按这本书自动给出最合理的
+	// 拆分（不拆太细、也不太大块）；small=小节级。
+	gran := "MEDIUM granularity (default): choose the most sensible split for THIS book — one file per coherent mid-size unit (typically a top-level chapter, split further ONLY when it is clearly too big for one conversion pass). Never split too fine (no per-paragraph fragments) and never leave one oversized block. Never split mid-section."
 	if granularity == "large" {
 		gran = "LARGE granularity: one chapter = one TOP-LEVEL chapter of the book. Never split a top-level chapter into pieces; if a chapter is huge, it stays one file (the converter handles it)."
+	} else if granularity == "small" {
+		gran = "SMALL granularity: one chapter = one SECTION. Split at the finest heading level that yields coherent, self-contained units (a top-level chapter containing several sections becomes several files). Never split mid-section."
 	}
 	initial := prompts.Render(prompts.ChaptersUser, map[string]string{
 		"GRANULARITY": gran,
@@ -1440,227 +1444,10 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 }
 
 // ------------------------------------------------------------------
-// phase: style feedback loop (cls/手册 打回)
-// ------------------------------------------------------------------
-
-// maxStyleFeedbackRounds caps how many times conversion results can be
-// sent back to the original style session.
-const maxStyleFeedbackRounds = 2
-
 // maxCheckerRounds caps how many times a checker verdict is fed back to
 // the SAME conversion session before the chapter is discarded and
 // re-converted with a fresh session.
 const maxCheckerRounds = 3
-
-// styleFeedbackLoop aggregates the per-chapter work reports (工作汇报,
-// written in real time at submit). When a MAJORITY reports cls/manual
-// conformance problems, the ORIGINAL style session context (persisted
-// to work/style_session.json at style phase) is restored — no new
-// context, so no information is lost — and asked to fix the style
-// package. Afterwards every converted chapter is discarded and
-// convertPhase re-runs with FRESH sessions (new context by design).
-func (r *Runner) styleFeedbackLoop(proj string, round int) error {
-	reportsDir := filepath.Join(proj, "work", "reports")
-	files, _ := filepath.Glob(filepath.Join(reportsDir, "*.md"))
-	if len(files) == 0 {
-		return nil
-	}
-	var issueFiles []string
-	var b strings.Builder
-	for _, f := range files {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			continue
-		}
-		if strings.Contains(string(data), "- 结论: 存在问题") {
-			issueFiles = append(issueFiles, f)
-			b.WriteString("\n--- " + filepath.Base(f) + " ---\n")
-			b.Write(data)
-			b.WriteString("\n")
-		}
-	}
-	r.log.Log(0, "[style-feedback] 工作汇报:", strconv.Itoa(len(files)), "份，其中",
-		strconv.Itoa(len(issueFiles)), "份报告 cls/手册问题")
-	r.phaseNote()("[style-feedback] 工作汇报 %d 份，其中 %d 份报告 cls/手册问题",
-		len(files), len(issueFiles))
-	if len(issueFiles)*2 <= len(files) {
-		return nil // 少数派：不算样式包问题，留给 checker/终审处理
-	}
-	if round >= maxStyleFeedbackRounds {
-		r.log.LogWarning(0, "[style-feedback] 已达最大打回轮数(",
-			strconv.Itoa(maxStyleFeedbackRounds), ")，跳过打回")
-		r.phaseNote()("[style-feedback] 已达最大打回轮数(%d)，跳过打回", maxStyleFeedbackRounds)
-		return nil
-	}
-	r.log.LogWarning(0, "[style-feedback] 多数章节报告样式问题 — 打回原样式会话（第",
-		strconv.Itoa(round+1), "轮）")
-	r.phaseNote()("[style-feedback] 多数章节报告样式问题 — 打回原样式会话（第 %d 轮）", round+1)
-
-	ctxPath := filepath.Join(proj, "work", "style_session.jsonl")
-	msgs, err := loadSessionContext(ctxPath)
-	if err != nil {
-		r.log.LogWarning(0, "[style-feedback] 样式会话上下文不可用，跳过打回:", err)
-		return nil
-	}
-	sourceDir := filepath.Join(proj, "source")
-	styleDir := filepath.Join(proj, "style")
-	manualPath := filepath.Join(styleDir, "manual.md")
-	workDir := filepath.Join(proj, "work", "style")
-
-	client := r.clientFor(r.cfg.Latex.StyleModel)
-	modelCfg := r.modelOf(r.cfg.Latex.StyleModel)
-	tuning := r.cfg.LatexSession("style")
-
-	// 工具集与原样式会话**同一份**（构造器共享，见 styleSessionTools）。
-	submit := &SubmitStyleTool{Workspace: workDir}
-	feedbackBashTmp, cleanFeedbackBash := r.sessionBashTemp(proj, "bash_style_feedback")
-	defer cleanFeedbackBash()
-	tools := r.styleSessionTools(proj, workDir, sourceDir, "style-feedback", feedbackBashTmp, submit)
-
-	// 复用原样式会话的上下文（转录里只有 user/assistant/tool，没有 system
-	// 行），因此这里必须重新挂上同一份系统提示词——否则打回的这一轮
-	// 完全没有系统提示（模板、挂载说明、水印要求全部丢失）。
-	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "style-feedback")
-	liveHook, liveClose := r.livePhaseRow("style-feedback", "style-feedback")
-	sess.SetProgressHook(liveHook)
-	defer liveClose()
-	sess.SetMessages(msgs)
-
-	feedback := "The conversion phase finished: the MAJORITY of chapter conversion agents reported that the class/manual did NOT satisfy the book's real formatting." +
-		" Their work reports follow (固定格式，结论: 存在问题 = issues):" + b.String() +
-		"\n\nThe actual submitted chapters are in the project workspace under work/chapters/ — read any of them with read_file {path:\"work/chapters/<name>.tex\"} to see how the class was used in practice (this is the real submission, the reports above are its summary)." +
-		"\n\nRe-inspect the relevant original pages (list_source_pages -> view_pdf on the source mount), fix the cls/manual/example so these problems cannot recur, then submit_style with the corrected package."
-	if _, err := sess.Run(session.RunOptions{UserText: feedback}); err != nil {
-		return fmt.Errorf("样式反馈会话失败: %w", err)
-	}
-	if err := saveSessionContext(sess, ctxPath); err != nil {
-		r.log.LogWarning(1, "[style-feedback] 会话上下文回写失败:", err)
-	}
-	if !submit.Set {
-		return fmt.Errorf("样式反馈会话未提交 submit_style")
-	}
-	clsName := classNameOf(submit.Cls)
-	if clsName == "" {
-		return fmt.Errorf("样式反馈提交的 cls 缺少 \\ProvidesClass{...}")
-	}
-	if err := os.WriteFile(filepath.Join(styleDir, clsName+".cls"), []byte(submit.Cls), 0o644); err != nil {
-		return err
-	}
-	_ = os.WriteFile(filepath.Join(styleDir, "manual.md"), []byte(submit.Manual), 0o644)
-	_ = os.WriteFile(filepath.Join(styleDir, "example.tex"), []byte(submit.Example), 0o644)
-	r.writeStyleExtras(styleDir, submit)
-
-	scratch, cleanFBScratch, err := r.tempDir(proj, "style-feedback")
-	if err != nil {
-		return err
-	}
-	defer cleanFBScratch()
-	if err := copyFile(filepath.Join(styleDir, clsName+".cls"), filepath.Join(scratch, clsName+".cls")); err != nil {
-		return err
-	}
-	if err := copyFile(filepath.Join(styleDir, "example.tex"), filepath.Join(scratch, "example.tex")); err != nil {
-		return err
-	}
-	copyStyleExtras(styleDir, scratch, submit, clsName)
-	start := time.Now()
-	res := r.comp.Compile(scratch, "example.tex")
-	LogCompileResult(r.log, 1, "style-feedback", res, time.Since(start))
-	if !res.OK {
-		return fmt.Errorf("样式反馈 example 编译失败: %s", res.Err)
-	}
-	r.log.Log(1, "[style-feedback] 更新后的 example 编译通过:", clsName+".cls")
-
-	// 定向修复：只重做"报告样式问题"或"新 cls 下编译不过"的章节，
-	// 其余章节产物保留（省 token）。每章先跑一个并发子会话做增量修复
-	// （不是重新转换），修复失败才退回整章重转换。
-	chapWork := filepath.Join(proj, "work", "chapters")
-	var redo []string
-	for _, f := range issueFiles {
-		base := strings.TrimSuffix(filepath.Base(f), ".md")
-		if fileExists(filepath.Join(chapWork, base+".tex")) {
-			redo = append(redo, base)
-		}
-	}
-	// 新 cls 下编译不过的章节也必须重做。
-	allTex, _ := filepath.Glob(filepath.Join(chapWork, "*.tex"))
-	for _, t := range allTex {
-		base := strings.TrimSuffix(filepath.Base(t), ".tex")
-		if sliceHas(redo, base) {
-			continue
-		}
-		scratch, cleanChk, serr := r.chapterScratch(proj, clsName, base, "convchk")
-		if serr != nil {
-			continue
-		}
-		data, rerr := os.ReadFile(t)
-		if rerr == nil {
-			_ = os.WriteFile(filepath.Join(scratch, base+".tex"), data, 0o644)
-			res := r.comp.Compile(scratch, base+"_wrapper.tex")
-			if !res.OK {
-				redo = append(redo, base)
-				r.log.LogWarning(0, "[style-feedback] 新样式下编译失败，需重做:", base)
-			}
-		}
-		cleanChk()
-	}
-	if len(redo) == 0 {
-		r.log.Log(0, "[style-feedback] 样式包已更新，没有章节需要重做")
-		_ = os.RemoveAll(reportsDir)
-		return nil
-	}
-	r.log.Log(0, "[style-feedback] 样式包已更新，重做", strconv.Itoa(len(redo)), "个章节:",
-		strings.Join(redo, ", "))
-	r.phaseNote()("[style-feedback] 样式包已更新，重做 %d 章", len(redo))
-
-	// 并发子会话做增量样式修复；失败者删除产物，退回整章重转换。
-	chapDir := filepath.Join(proj, "chapters")
-	conc := r.cfg.Latex.Concurrency
-	if conc <= 0 {
-		conc = 3
-	}
-	tidPool := make(chan int, conc)
-	for i := 1; i <= conc; i++ {
-		tidPool <- i
-	}
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var fallback []string
-	for _, base := range redo {
-		wg.Add(1)
-		tid := <-tidPool
-		go func(b string, tid int) {
-			defer wg.Done()
-			defer func() { tidPool <- tid }()
-			chapPath := filepath.Join(chapDir, b+".md")
-			issues := ""
-			if data, err := os.ReadFile(filepath.Join(reportsDir, b+".md")); err == nil {
-				issues = string(data)
-			}
-			if err := r.fixChapterStyle(proj, clsName, manualPath, chapPath, filepath.Join(proj, "work"), b, issues, tid); err != nil {
-				r.log.LogWarning(tid, "[style-fix]", b, "增量修复失败，将整章重转换:", err)
-				mu.Lock()
-				fallback = append(fallback, b)
-				mu.Unlock()
-			} else {
-				r.log.Log(tid, "[style-fix]", b, "修复完成")
-			}
-		}(base, tid)
-	}
-	wg.Wait()
-
-	// 失败的章节：删除产物 + 转录，交给 convertPhase 用全新会话重转换。
-	for _, b := range fallback {
-		_ = os.RemoveAll(filepath.Join(chapWork, b+".tex"))
-		_ = os.RemoveAll(filepath.Join(chapWork, b))
-		r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+b+".jsonl"))
-	}
-	_ = os.RemoveAll(reportsDir)
-	if len(fallback) == 0 {
-		return nil
-	}
-	r.log.Log(0, "[style-feedback]", strconv.Itoa(len(fallback)), "章需要整章重转换")
-	return r.convertPhase(proj, round+1)
-}
 
 // sliceHas reports whether the slice contains want.
 func sliceHas(s []string, want string) bool {
