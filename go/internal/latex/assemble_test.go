@@ -103,3 +103,26 @@ func TestPreflightAssemble(t *testing.T) {
 		t.Error("missing asset must not resolve")
 	}
 }
+
+// T49：终审会话已按书的结构布置书签时，基线锚点不再注入（只补 hyperref）。
+func TestEnsurePDFBookmarksYieldsToAI(t *testing.T) {
+	proj := t.TempDir()
+	build := t.TempDir()
+	main := "\\documentclass{kyexam}\n\\begin{document}\n" +
+		"\\bookmark[level=0,dest=chap1]{第一套}\n\\input{chapters/chapter_001.tex}\n\\end{document}\n"
+	mainPath := filepath.Join(build, "main.tex")
+	if err := os.WriteFile(mainPath, []byte(main), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensurePDFBookmarks(proj, build); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(mainPath)
+	s := string(got)
+	if strings.Contains(s, "bk:chapter_001") {
+		t.Errorf("baseline anchor must not be added when AI bookmarks exist:\n%s", s)
+	}
+	if !strings.Contains(s, "hyperref") {
+		t.Error("hyperref should still be injected when missing")
+	}
+}

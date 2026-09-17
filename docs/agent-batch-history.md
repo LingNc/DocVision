@@ -1257,6 +1257,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 骨架与终审持久化版 main.tex 都过同一注入（`ensurePDFBookmarks`），已有 hyperref 不重复加、已有锚点不重复加（幂等单测）。
 - 端到端验证：真实 kyexam.cls + xelatex 两遍编译，`/Outlines` + `/PageMode /UseOutlines` + UTF-16 书签标题 + GoTo 跳转均在成品 PDF（首轮字节级检查被对象流压缩骗过，qpdf --qdf 解压确认）。
 - 注意（如实记录）：`\pdfbookmark` 锚点在 `\input` 前执行，章节若以 \clearpage 起页，书签落在前一页尾——极端情况下跳转偏一页；逐书 cls 行为不同，可后续视实际 PDF 再调。
+- 用户定调（同日补充）：书签不应固定为"一章一条"——基线锚点保底，**结构交给终审会话按书的实际情况布置**（final-review 提示词新增第 5 项：检查书签面板、可重分层级/\addcontentsline、替换时删基线锚点）；main.tex 已带任何 \pdfbookmark/\bookmark 时注入器只补 hyperref、不再加基线锚点（`aiOwnsBookmarks` 守卫 + 单测）。
 
 ### T44 assemble 资源盘点
 - 编译前一行盘点：cls 就位与否、章节/figures/images 文件数、逐章 `.tex` 的 `\includegraphics` 引用在 build 树的解析数（buildDir / figures/ / chapters/ 三个候选位置），缺失逐条告警不中止。

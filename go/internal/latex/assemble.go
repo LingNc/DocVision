@@ -470,6 +470,10 @@ func ensurePDFBookmarks(proj, buildDir string) error {
 	}
 	main := string(data)
 	hasHyperref := strings.Contains(main, "hyperref")
+	// 终审会话可以自己按书的结构布置书签（提示词已告知此职责）——main.tex
+	// 里只要已有任何 \pdfbookmark/\bookmark 行，就视为 AI 已接手，只补
+	// hyperref、不再注入基线锚点（避免与 AI 的层级书签重复）。
+	aiOwnsBookmarks := strings.Contains(main, "\\pdfbookmark") || strings.Contains(main, "\\bookmark")
 
 	var b strings.Builder
 	changed := false
@@ -482,7 +486,7 @@ func ensurePDFBookmarks(proj, buildDir string) error {
 			changed = true
 			continue
 		}
-		if base := chapterInputBase(trimmed); base != "" {
+		if base := chapterInputBase(trimmed); base != "" && !aiOwnsBookmarks {
 			anchor := "bk:" + base
 			if !strings.Contains(main, "{"+anchor+"}") {
 				fmt.Fprintf(&b, "\\pdfbookmark[0]{%s}{%s}\n", escapeBookmark(chapterBookmarkTitle(proj, base)), anchor)
