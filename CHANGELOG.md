@@ -6,6 +6,9 @@
 ## [Unreleased]
 ### Fixed
 
+- **成品 PDF 书签与跳转（T49）**：cls 不加载 hyperref（kyexam.cls 实测）导致成品 PDF 无书签无跳转——assemble 编译前对 main.tex **幂等注入** `hyperref`（bookmarksnumbered/bookmarksopen/hidelinks）与逐章 `\pdfbookmark`（锚在每个 `\input{chapters/…}` 前，书签文字取划分阶段 md 的首个标题行、缺失退 base 名）；骨架版与终审持久化版 main.tex 都过这道注入。真实 kyexam.cls 端到端编译验证：书签字典 `/Outlines` + UTF-16 标题 + GoTo 跳转正确生成。
+- **最终 PDF 复制到项目根外侧（T42）**：assemble 交付后 `book.pdf` 另复制一份到 `<latex_project>/<项目名>.pdf`（日志给路径），不用翻进工作区找成品；复制失败只告警。
+- **assemble 资源盘点（T44）**：编译前打印一行盘点 `[assemble] 资源盘点: cls=✓ · 章节 N · figures M 文件 · images K 文件 · 插图引用 X/Y 就位 [OK|有问题]`，每章 `.tex` 里的 `\includegraphics` 引用逐条在 build 树解析，缺失逐条告警（不中止——缺图不该毁掉整本书）。
 - **checker 必须拿到结论才收尾（T46）**：checker 会话**出错就结束/没交结论就视为通过**的降级路径太容易触发——真实项目 36 章里 6 章（008/014/020/024/028/030） checker 空转（同 T50 厂商退化空响应），当时直接"视为通过"。现为两轮尝试：每轮漏 submit 先按 tikz 同款提醒一次，本轮仍拿不到结论（会话错误/提醒后未提交）**重开一轮全新核对会话**（同一转录续写）；两轮都失败才降级通过（compile 与终审仍是硬关卡），并明确打 warning。
 - **费用表中文阶段名错位（T40）**：`[cost]` 表 `%-11s` 按字节补空格，「全书修复」等中文阶段名显示宽 2 倍导致整列错位——改按显示宽度补齐（CJK 按 2 列）。另：latex 命令挂来的日志分析没有 img2text 逐图会话是正常情况，空结果提示改为说明口径（指向 [cost] 表与矢量化进度汇总），不再用 img2text 的"未解析到图片处理会话"误导。全书转换的阶段留痕（每阶段一行终态 + 跳过行）已由 T28 续修复，随新二进制生效。
 - **会话扫描并行化（T38）**：预览页首轮 `/api/index` 的转录统计（消息数 + 内容 SHA + 用量聚合）从 WalkDir 内串行改为 **16 路并发**——网络盘（samba）上每次 open/read 的往返 latency 是冷启动慢的主因（暖缓存实测 138 会话串行 5.9s/其中 user 仅 0.5s），并发后 wall time 近似单次 latency 而不是 latency × 文件数。

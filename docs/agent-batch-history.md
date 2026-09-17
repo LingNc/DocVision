@@ -1246,3 +1246,21 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### 验证
 - `go test ./...` 全绿；`dv5` 重建（含本会话全部提交）。
 - 遗留：T41 的 6 章若要补核对，重跑 convert/checker 阶段即可（增量）；新二进制待用户停 8849 后部署。
+
+## 第四十七批（2026-09-17，第二批：T42/T49/T44）
+
+### T42 最终 PDF 复制到外层
+- assemble 交付后把 `out/book.pdf` 另复制到 `<latex_project>/<项目名>.pdf`，日志给路径；失败只告警（交付不受影响）。
+
+### T49 成品 PDF 书签与跳转
+- 根因：kyexam.cls 不加载 hyperref，成品 PDF 无书签无跳转。assemble 编译前对 main.tex **幂等注入** hyperref（bookmarksnumbered/bookmarksopen/hidelinks）+ 逐章 `\pdfbookmark`（锚在 `\input{chapters/…}` 前，文字取划分 md 首个标题行、缺失退 base 名；`_ % & # \` 转义）。
+- 骨架与终审持久化版 main.tex 都过同一注入（`ensurePDFBookmarks`），已有 hyperref 不重复加、已有锚点不重复加（幂等单测）。
+- 端到端验证：真实 kyexam.cls + xelatex 两遍编译，`/Outlines` + `/PageMode /UseOutlines` + UTF-16 书签标题 + GoTo 跳转均在成品 PDF（首轮字节级检查被对象流压缩骗过，qpdf --qdf 解压确认）。
+- 注意（如实记录）：`\pdfbookmark` 锚点在 `\input` 前执行，章节若以 \clearpage 起页，书签落在前一页尾——极端情况下跳转偏一页；逐书 cls 行为不同，可后续视实际 PDF 再调。
+
+### T44 assemble 资源盘点
+- 编译前一行盘点：cls 就位与否、章节/figures/images 文件数、逐章 `.tex` 的 `\includegraphics` 引用在 build 树的解析数（buildDir / figures/ / chapters/ 三个候选位置），缺失逐条告警不中止。
+- 测试：preflight 单测（存在引用解析、缺失不解析）。
+
+### 验证
+- `go test ./...` 全绿；dv5 重建。文档：CHANGELOG Fixed 三条、docs/latex.md 档位1 第 4 步同步、AGENTS.md 档位1 流程条目同步。

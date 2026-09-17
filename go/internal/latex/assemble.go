@@ -74,6 +74,12 @@ func (r *Runner) assemblePhase(proj string) error {
 		return err
 	}
 
+	// T44：assemble 资源盘点——编译前列出 build 树就位了什么、缺什么：
+	// cls/figures/images/章节的文件数，以及每章 .tex 里的 \includegraphics
+	// 引用是否都能在 build 树解析到（缺失逐条告警，不中止——缺图不该毁掉
+	// 跑了一刻钟的 assemble，但要让人一眼看出结构对不对）。
+	r.preflightAssemble(buildDir, clsName)
+
 	// main.tex.
 	var in strings.Builder
 	for _, f := range texs {
@@ -99,6 +105,14 @@ func (r *Runner) assemblePhase(proj string) error {
 		} else {
 			r.log.Log(0, "[final-review] 章节未变且上次终审已回写——沿用终审产物，跳过终审会话")
 		}
+	}
+
+	// T49：成品 PDF 要可导航（书签 + 跳转点）。cls 通常不加载 hyperref
+	// （kyexam.cls 实测就没有），骨架与终审版 main.tex 都可能是——编译前
+	// 幂等地补上 hyperref 与逐章 \pdfbookmark（章节标题取划分阶段 md 的
+	// 首个标题行，缺失退 base 名）。
+	if err := ensurePDFBookmarks(proj, buildDir); err != nil {
+		r.log.LogWarning(0, "[assemble] PDF 书签注入失败（不影响编译）:", err)
 	}
 
 	// Compile (2 passes for TOC/refs).
@@ -156,6 +170,15 @@ func (r *Runner) assemblePhase(proj string) error {
 		return err
 	}
 	_ = copyFile(filepath.Join(proj, "standalone.tex"), filepath.Join(outDir, "standalone.tex"))
+
+	// T42：最终 PDF 同时复制到项目根外侧（<latex_project>/<项目名>.pdf），
+	// 不用翻进工作区找成品；失败只告警（out/ 里的交付不受影响）。
+	outer := filepath.Join(filepath.Dir(proj), filepath.Base(proj)+".pdf")
+	if err := copyFile(filepath.Join(outDir, "book.pdf"), outer); err != nil {
+		r.log.LogWarning(0, "[assemble] 复制最终 PDF 到项目根外侧失败:", err)
+	} else {
+		r.log.Log(0, "[assemble] 最终 PDF 已复制到:", outer)
+	}
 
 	r.log.Log(0, "[assemble] 全书编译完成:", filepath.Join(outDir, "book.pdf"))
 	r.log.Log(0, "[assemble] 单文件版:", filepath.Join(proj, "standalone.tex"))
@@ -432,3 +455,152 @@ func copyDirReport(src, dst string) (skipped []string, err error) {
 	})
 	return skipped, err
 }
+
+// ---------- T49：PDF 书签 ----------
+
+// ensurePDFBookmarks 让成品 PDF 可导航：向 build/main.tex 幂等注入
+// hyperref（若整个文档还没加载）与逐章 \pdfbookmark（放在每个
+// \input{chapters/…} 前面，锚点 bk:<base>）。骨架版与终审持久化版
+// main.tex 都过这里——两边都没 hyperref 时都能补上，已有的不重复加。
+func ensurePDFBookmarks(proj, buildDir string) error {
+	mainPath := filepath.Join(buildDir, "main.tex")
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		return err
+	}
+	main := string(data)
+	hasHyperref := strings.Contains(main, "hyperref")
+
+	var b strings.Builder
+	changed := false
+	for _, line := range strings.SplitAfter(main, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !hasHyperref && strings.HasPrefix(trimmed, "\\documentclass") {
+			b.WriteString(line)
+			b.WriteString("\\usepackage[bookmarksnumbered,bookmarksopen,hidelinks]{hyperref}\n")
+			hasHyperref = true
+			changed = true
+			continue
+		}
+		if base := chapterInputBase(trimmed); base != "" {
+			anchor := "bk:" + base
+			if !strings.Contains(main, "{"+anchor+"}") {
+				fmt.Fprintf(&b, "\\pdfbookmark[0]{%s}{%s}\n", escapeBookmark(chapterBookmarkTitle(proj, base)), anchor)
+				changed = true
+			}
+		}
+		b.WriteString(line)
+	}
+	if !changed {
+		return nil
+	}
+	return os.WriteFile(mainPath, []byte(b.String()), 0o644)
+}
+
+// chapterInputBase 识别 "\input{chapters/<base>.tex}" 行，返回 base。
+func chapterInputBase(line string) string {
+	const pre = "\\input{chapters/"
+	if !strings.HasPrefix(line, pre) || !strings.HasSuffix(line, "}") {
+		return ""
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(line, pre), "}")
+	if strings.ContainsAny(name, "/\\{}") {
+		return ""
+	}
+	return strings.TrimSuffix(name, ".tex")
+}
+
+// chapterBookmarkTitle 取划分阶段的章节 md 首个标题行作书签文字；
+// 找不到时退回 base 名（chapter_003）。
+func chapterBookmarkTitle(proj, base string) string {
+	for _, dir := range []string{filepath.Join(proj, "chapters"), filepath.Join(proj, "work", "chapters")} {
+		data, err := os.ReadFile(filepath.Join(dir, base+".md"))
+		if err != nil {
+			continue
+		}
+		for _, ln := range strings.Split(string(data), "\n") {
+			ln = strings.TrimSpace(ln)
+			if strings.HasPrefix(ln, "#") {
+				return strings.TrimSpace(strings.TrimLeft(ln, "#"))
+			}
+			if ln != "" {
+				break // 首个非空行不是标题就不再找（避免误取正文）
+			}
+		}
+	}
+	return base
+}
+
+// escapeBookmark 转义 pdfbookmark 参数里的 LaTeX 特殊字符。
+func escapeBookmark(s string) string {
+	s = strings.ReplaceAll(s, "\\", "/")
+	for _, c := range []string{"%", "&", "#", "_"} {
+		s = strings.ReplaceAll(s, c, "\\"+c)
+	}
+	return s
+}
+
+// ---------- T44：assemble 资源盘点 ----------
+
+// preflightAssemble 在进入编译前盘点 build 树：cls/figures/images/章节
+// 各就位多少文件，以及逐章 .tex 的 \includegraphics 引用能否在树内解析。
+// 缺失逐条告警但不中止（缺图不该中止整本书，见 T33 同款理由）。
+func (r *Runner) preflightAssemble(buildDir, clsName string) {
+	countDir := func(rel string) int {
+		n := 0
+		root := filepath.Join(buildDir, rel)
+		_ = filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				n++
+			}
+			return nil
+		})
+		return n
+	}
+	figures := countDir("figures")
+	images := countDir("images")
+	texs, _ := filepath.Glob(filepath.Join(buildDir, "chapters", "*.tex"))
+	clsOK := fileExists(filepath.Join(buildDir, clsName+".cls"))
+
+	// \includegraphics（可带 [选项]）引用解析检查。
+	total, missing := 0, []string{}
+	for _, tex := range texs {
+		data, err := os.ReadFile(tex)
+		if err != nil {
+			continue
+		}
+		for _, m := range includeGraphicsRe.FindAllStringSubmatch(string(data), -1) {
+			total++
+			rel := m[1]
+			// 章节 .tex 在 buildDir/chapters/ 下；graphicspath 声明 figures/，
+			// 引用也可能是相对 chapters/ 或树内绝对相对路径（images/…）。
+			cands := []string{
+				filepath.Join(buildDir, rel),
+				filepath.Join(buildDir, "figures", rel),
+				filepath.Join(filepath.Dir(tex), rel),
+			}
+			found := false
+			for _, c := range cands {
+				if fileExists(c) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				missing = append(missing, filepath.Base(tex)+": "+rel)
+			}
+		}
+	}
+	state := "OK"
+	if !clsOK || len(missing) > 0 {
+		state = "有问题"
+	}
+	r.log.Log(0, fmt.Sprintf("[assemble] 资源盘点: cls=%v · 章节 %d · figures %d 文件 · images %d 文件 · 插图引用 %d/%d 就位 [%s]",
+		clsOK, len(texs), figures, images, total-len(missing), total, state))
+	for _, m := range missing {
+		r.log.LogWarning(0, "[assemble] 插图引用解析不到:", m)
+	}
+}
+
+// includeGraphicsRe 抽 \includegraphics[…]{path} 的路径。
+var includeGraphicsRe = regexp.MustCompile(`\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}`)
