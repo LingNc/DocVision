@@ -126,3 +126,33 @@ func TestEnsurePDFBookmarksYieldsToAI(t *testing.T) {
 		t.Error("hyperref should still be injected when missing")
 	}
 }
+
+// T49：书签层级来自章节 md 首个标题的 # 数（#=0 层，##=1 层，clamp 0..3）。
+func TestBookmarkLevelFollowsHeadingDepth(t *testing.T) {
+	proj := t.TempDir()
+	build := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(proj, "chapters"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(proj, "chapters", "chapter_001.md"), []byte("# 第一章 大章\n"), 0o644)
+	os.WriteFile(filepath.Join(proj, "chapters", "chapter_002.md"), []byte("## 1.1 小节\n"), 0o644)
+	os.WriteFile(filepath.Join(proj, "chapters", "chapter_003.md"), []byte("#### 1.1.1.1 太深\n"), 0o644)
+	main := "\\documentclass{c}\n\\begin{document}\n" +
+		"\\input{chapters/chapter_001.tex}\n\\input{chapters/chapter_002.tex}\n\\input{chapters/chapter_003.tex}\n\\end{document}\n"
+	mainPath := filepath.Join(build, "main.tex")
+	os.WriteFile(mainPath, []byte(main), 0o644)
+	if err := ensurePDFBookmarks(proj, build); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(mainPath)
+	s := string(got)
+	for _, want := range []string{
+		"\\pdfbookmark[0]{第一章 大章}{bk:chapter_001}",
+		"\\pdfbookmark[1]{1.1 小节}{bk:chapter_002}",
+		"\\pdfbookmark[3]{1.1.1.1 太深}{bk:chapter_003}",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+}

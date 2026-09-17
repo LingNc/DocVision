@@ -489,7 +489,8 @@ func ensurePDFBookmarks(proj, buildDir string) error {
 		if base := chapterInputBase(trimmed); base != "" && !aiOwnsBookmarks {
 			anchor := "bk:" + base
 			if !strings.Contains(main, "{"+anchor+"}") {
-				fmt.Fprintf(&b, "\\pdfbookmark[0]{%s}{%s}\n", escapeBookmark(chapterBookmarkTitle(proj, base)), anchor)
+				title, level := chapterBookmarkTitle(proj, base)
+				fmt.Fprintf(&b, "\\pdfbookmark[%d]{%s}{%s}\n", level, escapeBookmark(title), anchor)
 				changed = true
 			}
 		}
@@ -514,9 +515,10 @@ func chapterInputBase(line string) string {
 	return strings.TrimSuffix(name, ".tex")
 }
 
-// chapterBookmarkTitle 取划分阶段的章节 md 首个标题行作书签文字；
-// 找不到时退回 base 名（chapter_003）。
-func chapterBookmarkTitle(proj, base string) string {
+// chapterBookmarkTitle 取划分阶段的章节 md 首个标题行作书签文字与层级
+// （转换单元按 markdown 标题边界拆分，首个标题的 # 数就是它在书里的真实
+// 层级——#=0 层、##=1 层，clamp 到 0..3）。找不到时退回 base 名、0 层。
+func chapterBookmarkTitle(proj, base string) (string, int) {
 	for _, dir := range []string{filepath.Join(proj, "chapters"), filepath.Join(proj, "work", "chapters")} {
 		data, err := os.ReadFile(filepath.Join(dir, base+".md"))
 		if err != nil {
@@ -525,14 +527,22 @@ func chapterBookmarkTitle(proj, base string) string {
 		for _, ln := range strings.Split(string(data), "\n") {
 			ln = strings.TrimSpace(ln)
 			if strings.HasPrefix(ln, "#") {
-				return strings.TrimSpace(strings.TrimLeft(ln, "#"))
+				hashes := len(ln) - len(strings.TrimLeft(ln, "#"))
+				level := hashes - 1
+				if level < 0 {
+					level = 0
+				}
+				if level > 3 {
+					level = 3
+				}
+				return strings.TrimSpace(strings.TrimLeft(ln, "#")), level
 			}
 			if ln != "" {
 				break // 首个非空行不是标题就不再找（避免误取正文）
 			}
 		}
 	}
-	return base
+	return base, 0
 }
 
 // escapeBookmark 转义 pdfbookmark 参数里的 LaTeX 特殊字符。
