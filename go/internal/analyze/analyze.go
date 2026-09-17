@@ -59,7 +59,14 @@ func Run(cfg *config.Config, opts RunOptions) error {
 	}
 
 	if len(allSessions) == 0 {
-		fmt.Println("日志中未解析到图片处理会话（可能所有任务之前已完成）")
+		if opts.LatexOutDir != "" {
+			// T40：latex 命令挂来的日志分析没有 img2text 逐图会话是正常
+			// 情况（档位流程不产生这种记录），别用 img2text 口径误导。
+			fmt.Println("本次 LaTeX 运行没有 img2text 逐图处理会话（档位流程不含逐图分析，属正常）；" +
+				"各阶段用量与费用见上方 [cost] 表，图片矢量化进度见下方汇总")
+		} else {
+			fmt.Println("日志中未解析到图片处理会话（可能所有任务之前已完成）")
+		}
 	}
 
 	var stats *Statistics

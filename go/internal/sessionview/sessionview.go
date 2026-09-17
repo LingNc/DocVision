@@ -778,6 +778,18 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 
 	var out []SessionInfo
 	now := time.Now()
+	// T38：WalkDir 只收集候选文件，真正的读文件（readStat：消息数 + 内容
+	// SHA + 用量聚合）放到 walk 之后**并行**做。网络盘（samba）上每次
+	// open/read 的往返 latency 是秒级扫描的主因，串行读 138 个转录会把
+	// 首页 /api/index 拖住很久；并发后 wall time 近似 latency 而不是
+	// latency × 文件数。会话顺序按下标保留。
+	type candidate struct {
+		full string
+		name string
+		size int64
+		mt   time.Time
+	}
+	var candidates []candidate
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// Skip what we cannot read and keep going: one broken branch of
@@ -800,36 +812,62 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		if ierr != nil {
 			return nil
 		}
-		rel, rerr := filepath.Rel(root, p)
+		candidates = append(candidates, candidate{full: p, name: d.Name(), size: info.Size(), mt: info.ModTime()})
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+
+	stats := make([]transcriptStat, len(candidates))
+	var wg sync.WaitGroup
+	workers := 16
+	if len(candidates) < workers {
+		workers = len(candidates)
+	}
+	jobs := make(chan int)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				stats[i] = s.fileStat(candidates[i].full, candidates[i].size, candidates[i].mt)
+			}
+		}()
+	}
+	for i := range candidates {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
+	for i, c := range candidates {
+		rel, rerr := filepath.Rel(root, c.full)
 		if rerr != nil {
-			return nil
+			continue
 		}
 		rel = filepath.ToSlash(rel)
-		stat := s.fileStat(p, info.Size(), info.ModTime())
+		stat := stats[i]
 		grp := s.projectGroupFor(root, rel)
 		out = append(out, SessionInfo{
 			ID:            rel,
 			Label:         LabelFor(rel),
 			Title:         TitleFor(rel),
-			Name:          d.Name(),
-			Path:          p,
+			Name:          c.name,
+			Path:          c.full,
 			Project:       grp.Name,
 			ProjectLegacy: grp.Legacy,
 			Messages:      stat.Messages,
 			Meta:          stat.Meta,
 			Stats:         stat.Usage,
 			Estimate:      estimateInfoFor(stat),
-			Bytes:         info.Size(),
-			ModTime:       info.ModTime(),
+			Bytes:         c.size,
+			ModTime:       c.mt,
 			SHA:           stat.SHA,
-			Live:          now.Sub(info.ModTime()) < LiveWindow,
-			EndState:      liveEndState(endStateOf(stat), now.Sub(info.ModTime()) < LiveWindow),
-			ChapterOrder:  chapterOrderOf(d.Name()),
+			Live:          now.Sub(c.mt) < LiveWindow,
+			EndState:      liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow),
+			ChapterOrder:  chapterOrderOf(c.name),
 		})
-		return nil
-	})
-	if walkErr != nil {
-		return nil, walkErr
 	}
 
 	s.img2Text = s.img2Text[:0]

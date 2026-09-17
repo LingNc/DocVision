@@ -41,8 +41,8 @@ func (r *Runner) CostReport(proj string) {
 
 	images, pages := projectScale(proj)
 	r.log.Log(0, "[cost] ===== AI 用量与费用（按阶段） =====")
-	r.log.Log(0, fmt.Sprintf("[cost] %-11s %5s %6s %11s %8s %11s %10s",
-		"阶段", "会话", "请求", "输入tokens", "缓存命中", "输出tokens", "费用"))
+	r.log.Log(0, fmt.Sprintf("[cost] %s %5s %6s %11s %8s %11s %10s",
+		padStage("阶段", 11), "会话", "请求", "输入tokens", "缓存命中", "输出tokens", "费用"))
 	var reqs, in, cached, out int
 	var money float64
 	currency := ""
@@ -59,8 +59,8 @@ func (r *Runner) CostReport(proj string) {
 				currency = row.Currency
 			}
 		}
-		r.log.Log(0, fmt.Sprintf("[cost] %-11s %5d %6d %11s %8s %11s %s%s",
-			row.Stage, row.Sessions, row.Requests,
+		r.log.Log(0, fmt.Sprintf("[cost] %s %5d %6d %11s %8s %11s %s%s",
+			padStage(row.Stage, 11), row.Sessions, row.Requests,
 			sessionview.HumanCount(row.PromptTokens), cache,
 			sessionview.HumanCount(row.Completion), cost, unpricedMark(row)))
 		reqs += row.Requests
@@ -79,8 +79,8 @@ func (r *Runner) CostReport(proj string) {
 	if currency != "" {
 		totalMoney = fmt.Sprintf("%s%.2f", currency, money)
 	}
-	r.log.Log(0, fmt.Sprintf("[cost] %-11s %5d %6d %11s %8s %11s %s",
-		"合计", len(sessions), reqs, sessionview.HumanCount(in),
+	r.log.Log(0, fmt.Sprintf("[cost] %s %5d %6d %11s %8s %11s %s",
+		padStage("合计", 11), len(sessions), reqs, sessionview.HumanCount(in),
 		pct(cached, in), sessionview.HumanCount(out), totalMoney))
 	if reqs > 0 {
 		r.log.Log(0, "[cost] 平均每次请求:", avg, "；缓存命中", pct(cached, in))
@@ -179,4 +179,22 @@ func perUnit(label string, n int, currency string, money float64) string {
 		return label + "未配价（models.<条目>.price 里补单价后才有数字）"
 	}
 	return fmt.Sprintf("%s%s%.4f", label, currency, money/float64(n))
+}
+
+// padStage 把阶段名补齐到给定**显示宽度**（CJK/全角字符按 2 列计）。
+// fmt 的 %-Ns 按字节补空格，中文阶段名（「全书修复」= 8 列）会和 ASCII
+// 阶段名（vector=6 列）错开——T40 的"日志没有对齐"即此。
+func padStage(s string, width int) string {
+	w := 0
+	for _, r := range s {
+		if r >= 0x2E80 { // CJK 部首起的一律按宽字符计（阶段名只有中英文）
+			w += 2
+		} else {
+			w++
+		}
+	}
+	if w >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-w)
 }

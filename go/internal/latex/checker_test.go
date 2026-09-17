@@ -208,3 +208,55 @@ func TestCheckerReadOnlyMountRejectsWrite(t *testing.T) {
 		t.Fatalf("checker 工具集 = %v, want [read_file grep]", names)
 	}
 }
+
+// T46：checker 必须以一个结论收尾，不能"出错就结束"——
+// 会话错误/漏 submit 时先提醒、再重开一轮全新会话，两轮都失败才降级通过。
+
+// degenerateJSON 返回 finish=length、0 completion token 的空响应
+//（厂商网关在高压下的真实退化行为）。
+func degenerateJSON(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"length"}],"usage":{"prompt_tokens":100,"completion_tokens":0,"total_tokens":100}}`)
+}
+
+func TestCheckerRetriesAfterSessionFailure(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	var calls atomic.Int32
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		n := calls.Add(1)
+		if n <= 2 {
+			// 第 1 轮尝试：退化空响应（含重发 1 次 + nudge 共 2 次请求）。
+			degenerateJSON(w)
+			return
+		}
+		// 第 2 轮尝试（重开）：正常提交 pass。
+		jsonToolReply(w, "submit", `{"status":"pass","report":"ok"}`)
+	})
+	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0)
+	if !ok {
+		t.Fatalf("want pass after retry, got issues: %q", issues)
+	}
+	if calls.Load() < 3 {
+		t.Fatalf("requests = %d, want >= 3 (degenerate round + retry round)", calls.Load())
+	}
+}
+
+func TestCheckerDegradesOnlyAfterTwoAttempts(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	var calls atomic.Int32
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		calls.Add(1)
+		degenerateJSON(w)
+	})
+	ok, _ := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0)
+	if !ok {
+		t.Fatal("two failed attempts should still degrade to pass (compile/final review are the hard gates)")
+	}
+	// 每轮最多 3 次请求（原始 + 重发 + nudge），两轮 = 6。
+	if n := calls.Load(); n > 6 {
+		t.Fatalf("requests = %d, want <= 6", n)
+	}
+	if n := calls.Load(); n < 4 {
+		t.Fatalf("requests = %d, want >= 4 (two full attempts)", n)
+	}
+}

@@ -36,29 +36,7 @@ func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, t
 	tuning := r.cfg.LatexSession("checker")
 
 	mounts := []Mount{{Name: "check", Dir: view}}
-	submit := &SubmitDoneTool{
-		Label:         "the review of chapter " + base,
-		RequireReport: true, // 结论就用这个交（不落盘：写不写 .checker 由 runner 决定）
-	}
-	tools := []session.Tool{
-		&ReadFileTool{Mounts: mounts},
-		&GrepTool{Mounts: mounts},
-		submit,
-	}
-	sess := session.NewSession(client, modelCfg, tuning,
-		renderPrompt(prompts.Must(prompts.CheckerSystem), tuning, r.outputLang()),
-		tools, r.log, tid, "checker:"+base)
-
 	trPath := filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
-	if tr, err := session.NewTranscript(trPath); err == nil {
-		sess.SetTranscript(tr)
-		defer tr.Close()
-	}
-	// checker 会话也进实时块：用户要看得到"谁进了 checker、跑到哪了"，
-	// 而且 checker 是并发跑的，必须有自己的行而不是挤在转换行里。
-	chkHook, chkClose := r.livePhaseRow("checker:"+base, "checker:"+base)
-	sess.SetProgressHook(chkHook)
-	defer chkClose()
 	userText := prompts.Render(prompts.CheckerUser, map[string]string{
 		"CHAPTER_MD":  "check:" + base + ".md",
 		"CHAPTER_TEX": "check:" + base + ".tex",
@@ -67,23 +45,73 @@ func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, t
 	if r.cfg.Latex.RemoveWatermark {
 		userText += "\n\nWatermark note: if watermark-like content (institution marks, faint background text) is absent from the .tex, that is CORRECT — watermark removal is enabled. Do not report it as missing content."
 	}
-	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
-		r.log.LogWarning(tid, "[checker]", base, "会话失败，视为通过:", err)
+
+	// T46：核对必须以一个结论收尾，不能"出错就结束"。两轮尝试：
+	// 每轮先正常跑；模型漏了 submit 就按 tikz/mermaid-fix 同款提醒一次；
+	// 本轮仍拿不到结论（会话错误 / 提醒后仍未提交）再重开一轮全新会话。
+	// 两轮都失败才按既有降级语义视为通过（compile 与终审仍是硬关卡）。
+	const checkerAttempts = 2
+	for attempt := 1; attempt <= checkerAttempts; attempt++ {
+		if attempt > 1 {
+			r.log.LogWarning(tid, "[checker]", base, "第 1 次核对未拿到结论，重开核对会话（第 2/2 次）")
+		}
+		submit := &SubmitDoneTool{
+			Label:         "the review of chapter " + base,
+			RequireReport: true, // 结论就用这个交（不落盘：写不写 .checker 由 runner 决定）
+		}
+		tools := []session.Tool{
+			&ReadFileTool{Mounts: mounts},
+			&GrepTool{Mounts: mounts},
+			submit,
+		}
+		sess := session.NewSession(client, modelCfg, tuning,
+			renderPrompt(prompts.Must(prompts.CheckerSystem), tuning, r.outputLang()),
+			tools, r.log, tid, "checker:"+base)
+		var tr *session.TranscriptWriter
+		if w, err := session.NewTranscript(trPath); err == nil {
+			tr = w
+			sess.SetTranscript(w)
+		}
+		// checker 会话也进实时块：用户要看得到"谁进了 checker、跑到哪了"，
+		// 而且 checker 是并发跑的，必须有自己的行而不是挤在转换行里。
+		chkHook, chkClose := r.livePhaseRow("checker:"+base, "checker:"+base)
+		sess.SetProgressHook(chkHook)
+		_, runErr := sess.Run(session.RunOptions{UserText: userText})
+		chkClose()
+		if runErr == nil && !submit.Submitted {
+			// 与 tikz 会话同款：模型漏了 submit 就提醒一次。
+			r.log.LogWarning(tid, "[checker]", base, "会话结束但未提交结论，发送提交提醒")
+			_, runErr = sess.Run(session.RunOptions{
+				UserText: "You have NOT called submit yet. Re-read the chapter files if needed, then call submit with your verdict.",
+			})
+		}
+		if tr != nil {
+			// 本轮写完即关；重试轮在同一转录上重新打开续写
+			// （append-only，meta 按哈希去重），一章的核对历史保持在一个文件里。
+			tr.Close()
+			tr = nil
+		}
+		if runErr != nil {
+			r.log.LogWarning(tid, "[checker]", base, "会话错误:", runErr)
+			continue
+		}
+		if !submit.Submitted {
+			r.log.LogWarning(tid, "[checker]", base, "提醒后仍未提交结论")
+			continue
+		}
+		if submit.Status == "issues" {
+			issues := strings.TrimSpace(submit.Issues)
+			if issues == "" {
+				issues = "the checker reported problems but gave no description"
+			}
+			r.keepSessionFile(trPath)
+			return false, issues
+		}
 		r.keepSessionFile(trPath)
 		return true, ""
 	}
+	r.log.LogWarning(tid, "[checker]", base, checkerAttempts, "次核对均未拿到结论，视为通过")
 	r.keepSessionFile(trPath)
-	if !submit.Submitted {
-		r.log.LogWarning(tid, "[checker]", base, "未提交结论，视为通过")
-		return true, ""
-	}
-	if submit.Status == "issues" {
-		issues := strings.TrimSpace(submit.Issues)
-		if issues == "" {
-			issues = "the checker reported problems but gave no description"
-		}
-		return false, issues
-	}
 	return true, ""
 }
 

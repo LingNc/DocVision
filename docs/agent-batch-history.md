@@ -1215,3 +1215,34 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 原设计仍在：convert 逐章（问题打回同一会话修）→ checker 逐章核对 → **styleFeedbackLoop** 收集 36 份工作汇报，**多数**报告 cls/手册问题才打回原样式会话修样式并重跑 convert（少数派留给 checker/终审）→ assemble（编译失败→修复会话）→ 终审 → out/。
 - 李艳芳这本书的实际情况（日志 22825 行）：36 份汇报、4 份有问题 = 少数派（4×2 ≤ 36）→ 按设计**不打回**，所以没有 style-feedback 会话；全书一次编译通过 → 没有修复会话；终审跑了但**旧二进制不写转录**（上一批已修，待部署）——所以 UI 到 checker 就"没了"。style 会话转录在 `work/style_session.jsonl` 一直在。
 - 给用户的关键事实：昨晚+今晚两轮终审（72+63 轮）的转录是真没写过、无法恢复；新二进制部署后终审/修复会话都会有转录进 WebUI。
+
+## 第四十六批（2026-09-17，第一批 issue 清理：T50/T40/T38/T46/T41）
+
+### T50 升级会话「消息为空」根因 + 三层修复（提交 4bca64d）
+- **现场**：`finally/progress_items/mermaid_fix/` 4 个升级修复会话的转录全是 7 行骨架——assistant 消息无 content/reasoning/tool_calls，usage 行 `finish_reason=length`、`completion_tokens=0`，两轮全空（第 2 轮还是 T35 之前的旧 nudge 文案），日志报 `empty final answer`。
+- **排查**：复刻同结构请求（同模型/工具/流式/tool_stream/enable_thinking/max_tokens=65536/真实系统提示词）探测网关**全部正常**——非确定性，指向厂商网关在高压下（现场并发 ~10、限流退避不断）的退化响应。
+- **修复**：① `session.Run` 对退化空响应（无内容/无思考/无工具调用 + completion=0）**原样重发一次**，仍退化才落既有 nudge/报错；有真实输出 token 的空回复不误抢 nudge 路径。② mermaid-fix **会话失败或提醒后未提交也升级备选模型段**（原先只有编译错误累计才升级）。③ 未配置可解析 `fallback_model` 时不再进备选段（零值 ModelConfig 防空跑）。
+- **测试**：`degenerate_retry_test.go` 3 例（重试成功/重试后仍退化=3 次请求/helper 边界）+ mermaid 3 例（失败升级/无备选不升级/端到端备选段成功）。
+
+### T40 日志对齐 + 日志分析口径
+- `[cost]` 表 `%-11s` 按字节补空格 → 中文阶段名（显示宽 2 倍）整列错位：新增 `padStage` 按显示宽度补齐（CJK 按 2 列），表头/数据行/合计行三处同改 + 单测。
+- latex 命令的空分析结果不再说「未解析到图片处理会话」（img2text 口径误导），改为说明"档位流程无逐图会话属正常"并指向 [cost] 表与矢量化汇总。
+- 「全书转换没有逐步留痕」核实为**旧二进制现场**（T28 续的冻结行/跳过行已在本代码，待部署）。
+
+### T38 sessions --serve 启动慢
+- 实测：banner 即时上屏（新旧二进制同），暖缓存 `--list` 138 会话 5.9s 其中 user 仅 0.5s——**gap 是 samba 网络往返**；`latex_project` 2762 文件、`finally/progress_items` 16788 文件（仅 4 个 extras jsonl）。冷启动慢 = 串行 open/read × latency，无法稳定复现。
+- 修复：扫描的转录统计（readStat：消息数+SHA+用量聚合）从 WalkDir 回调内**串行**改为收集候选后 **16 路并发**（每会话带 (size,mtime) 缓存不变，顺序按下标保留）；extras 扫描保持串行（现场仅 4 文件，如实记录）。
+
+### T46 checker 必须拿到结论才收尾
+- 旧行为：Run 出错或未提交 → 直接「视为通过」。真实项目审计（见 T41）显示 6/36 章 checker 空转即此路径。
+- 新行为：**两轮尝试**——每轮漏 submit 先按 tikz 同款提醒一次；本轮仍无结论（会话错误/提醒后未提交）重开一轮全新核对会话（同一转录续写，一章一个文件）；两轮都失败才降级通过并打 warning。compile 与终审仍是硬关卡，降级语义不变。
+- 测试：`checker_test.go` 2 例（退化会话→重试轮成功 / 两轮全退化→降级且请求数 ≤6）。
+
+### T41 checker 提出问题是否解决的审计结论（不改代码）
+- 李艳芳项目 36 章 checker 转录逐一解析（submit 参数嵌套 `report.status`）：**30 章 pass、0 章 issues、6 章无结论**（008/014/020/024/028/030）——checker 从未提出过问题，故无"未解决的问题"。
+- 6 章无结论的根因 = **T50 同款退化空响应**（ch008 日志实证：round 1 用时 136.5s、content=0/completion=0，旧 nudge 也无工具调用）——已被本批修复覆盖。
+- 如实提醒：checker 全 pass 不代表排版质量（它只对照 md 核内容完整性），质量把关实际由终审完成（72 轮发现并修复问题）。
+
+### 验证
+- `go test ./...` 全绿；`dv5` 重建（含本会话全部提交）。
+- 遗留：T41 的 6 章若要补核对，重跑 convert/checker 阶段即可（增量）；新二进制待用户停 8849 后部署。
