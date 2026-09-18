@@ -143,7 +143,7 @@ tools:
     timeout: 30                 # Mermaid validation timeout in seconds
     # P12：升级修复会话——就地修复轮用完后，给模型一个虚拟工作区（submit.md +
     # write_file/grep/view_image + submit 提交检查），能过 mmdc 语法检查即可。
-    session_rounds: 6           # 提交/检查次数上限（两段会话合计；≤0 = 关闭升级会话）
+    session_rounds: 32          # 提交/检查次数上限（两段会话合计；修一张复杂图常要十几轮；≤0 = 关闭升级会话）
     session_errors: 3           # 编译错误累计上限，满了清上下文切备选模型
     fallback_model: ""          # 备选兜底模型（models.<条目名>；留空 = 原模型清上下文重来）
   bash:                         # 会话 bash 工具（latex AI 会话用）

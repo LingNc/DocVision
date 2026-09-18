@@ -25,7 +25,7 @@
 | `tools.mermaid.command` | Mermaid CLI 命令 | mmdc |
 | `tools.mermaid.fix_attempts` | Mermaid 就地修复轮数：`-1`（默认/未写）= **首次校验失败直接升级修复会话**；`0` = 无限就地修复（受安全上限保护）；`N>0` = N 轮就地修复后再升级 | -1 |
 | `tools.mermaid.timeout` | 单次 Mermaid 校验超时（秒） | 30 |
-| `tools.mermaid.session_rounds` | 升级修复会话的提交/检查次数上限（两段合计；≤0 = 关闭升级会话，维持旧的"跳过、下轮重试"） | 6 |
+| `tools.mermaid.session_rounds` | 升级修复会话的提交/检查次数上限（两段合计；≤0 = 关闭升级会话，维持旧的"跳过、下轮重试"） | 32 |
 | `tools.mermaid.session_errors` | 升级会话内编译错误累计上限，满了清上下文切备选模型 | 3 |
 | `tools.mermaid.fallback_model` | 备选兜底模型（`models.<条目名>`；条目不存在或留空 = 原模型清上下文重来） | （空） |
 **升级修复会话（P12）**：默认（T37，`fix_attempts` 未写或 `-1`）**首次校验失败即升级**

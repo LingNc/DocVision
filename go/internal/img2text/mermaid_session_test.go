@@ -12,10 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/logger"
 )
 
 // fakeMMDC installs a shell script named mmdc that exits 1 when any
@@ -59,7 +61,7 @@ func TestMermaidFixSubmitOK(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte(good), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	submit := st.tools()[3].(*mermaidSubmitTool)
+	submit := st.tools()[4].(*mermaidSubmitTool)
 	res, err := submit.Execute("{}")
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +79,7 @@ func TestMermaidFixSubmitNoMermaidCounts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte("no block here"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	submit := st.tools()[3].(*mermaidSubmitTool)
+	submit := st.tools()[4].(*mermaidSubmitTool)
 	if _, err := submit.Execute("{}"); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +97,7 @@ func TestMermaidFixErrorBudgetTriggersEscalation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte("no block"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	submit := st.tools()[3].(*mermaidSubmitTool)
+	submit := st.tools()[4].(*mermaidSubmitTool)
 	for i := 1; i <= 3; i++ {
 		if _, err := submit.Execute("{}"); err != nil {
 			t.Fatal(err)
@@ -118,7 +120,7 @@ func TestMermaidFixRoundsCap(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte("no block"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	submit := st.tools()[3].(*mermaidSubmitTool)
+	submit := st.tools()[4].(*mermaidSubmitTool)
 	for i := 0; i < 5; i++ {
 		if _, err := submit.Execute("{}"); err != nil {
 			t.Fatal(err)
@@ -133,7 +135,7 @@ func TestMermaidFixWriteAndGrep(t *testing.T) {
 	st, ws := newFixState(t, 6, 3)
 	tools := st.tools()
 	write := tools[0].(*mermaidWriteTool)
-	grep := tools[1].(*mermaidGrepTool)
+	grep := tools[2].(*mermaidGrepTool)
 	if _, err := write.Execute(`{"content":"[IMG_TYPE: mermaid]\nBROKEN"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -375,4 +377,94 @@ func TestMermaidFixFallbackStageSucceeds(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(ws, "session-stage1.jsonl")); err != nil {
 		t.Fatalf("stage-1 transcript missing: %v", err)
 	}
+}
+
+// T52：edit_file 精准编辑（唯一匹配才改）。
+func TestMermaidEditTool(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, mermaidFixSubmitFile)
+	os.WriteFile(path, []byte("mindmap\n  root((a))\n    child\n"), 0o644)
+	st := &mermaidFixSessionState{ws: dir, log: discardTestLogger(t), cfg: &MermaidFixConfig{Rounds: 32, ErrorLimit: 3}}
+	tool := &mermaidEditTool{st: st, path: path}
+
+	// 正常替换
+	res, err := tool.Execute(`{"find":"child","replace":"child2"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if !strings.Contains(string(got), "child2") {
+		t.Fatalf("edit not applied: %s", got)
+	}
+	_ = res
+
+	// 不存在 → NOT FOUND
+	res, _ = tool.Execute(`{"find":"nope","replace":"x"}`)
+	if !strings.Contains(res.Text, "NOT FOUND") {
+		t.Errorf("want NOT FOUND, got %s", res.Text)
+	}
+
+	// 多处出现 → AMBIGUOUS
+	os.WriteFile(path, []byte("a x b x c"), 0o644)
+	res, _ = tool.Execute(`{"find":"x","replace":"y"}`)
+	if !strings.Contains(res.Text, "AMBIGUOUS") {
+		t.Errorf("want AMBIGUOUS, got %s", res.Text)
+	}
+}
+
+// T52：转录轮转——旧运行改名 .prev1.jsonl，新运行从干净文件开始。
+func TestRotateTranscript(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "session-stage0.jsonl")
+	os.WriteFile(p, []byte("old"), 0o644)
+	rotateTranscript(p)
+	if _, err := os.Stat(filepath.Join(dir, "session-stage0.prev1.jsonl")); err != nil {
+		t.Fatal("prev1 not created")
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatal("old transcript should be renamed away")
+	}
+	// 第二次轮转：prev1 → prev2
+	os.WriteFile(p, []byte("newer"), 0o644)
+	rotateTranscript(p)
+	for _, name := range []string{"session-stage0.prev1.jsonl", "session-stage0.prev2.jsonl"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s missing", name)
+		}
+	}
+	// 空文件不轮转
+	empty := filepath.Join(dir, "session-stage1.jsonl")
+	os.WriteFile(empty, nil, 0o644)
+	rotateTranscript(empty)
+	if _, err := os.Stat(empty); err != nil {
+		t.Error("empty transcript must not rotate")
+	}
+}
+
+// T52：检查次数耗尽的拒绝文案说明是预算而非校验失败。
+func TestSubmitBudgetExhaustedMessage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, mermaidFixSubmitFile)
+	os.WriteFile(path, []byte("```mermaid\ngraph TD\na-->b\n```\n"), 0o644)
+	st := &mermaidFixSessionState{ws: dir, log: discardTestLogger(t), cfg: &MermaidFixConfig{Rounds: 6, ErrorLimit: 3}}
+	st.checks = 6
+	tool := &mermaidSubmitTool{st: st, path: path}
+	res, err := tool.Execute(`{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "exhausted") || !strings.Contains(res.Text, "budget") {
+		t.Errorf("reject text should explain the budget: %s", res.Text)
+	}
+}
+
+// discardTestLogger 返回一个静默 logger（测试用）。
+func discardTestLogger(t *testing.T) *logger.Logger {
+	t.Helper()
+	l, err := logger.NewLogger("", "", 2)
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	t.Cleanup(func() { l.Close() })
+	return l
 }

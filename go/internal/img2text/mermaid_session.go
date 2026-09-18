@@ -25,8 +25,9 @@ import (
 
 const (
 	// mermaidSessionRoundsDefault 是 tools.mermaid.session_rounds 未设置时的
-	// 检查次数上限。≤ 0 = 关闭升级会话（维持旧的跳过+下轮重试）。
-	mermaidSessionRoundsDefault = 6
+	// 检查次数上限（T52：用户定 32——修一张复杂图经常要十几轮）。≤ 0 = 关闭
+	// 升级会话（维持旧的跳过+下轮重试）。
+	mermaidSessionRoundsDefault = 32
 	// mermaidSessionErrorsDefault 是 tools.mermaid.session_errors 未设置时的
 	// 编译错误累计上限。
 	mermaidSessionErrorsDefault = 3
@@ -165,6 +166,7 @@ func (st *mermaidFixSessionState) runOneStage(modelCfg config.ModelConfig, ws st
 	}
 	sess := session.NewSession(client, modelCfg, tuning, st.systemPrompt(), st.tools(), st.log, st.tid, "mermaid-fix")
 	trPath := filepath.Join(ws, "session-stage"+fmt.Sprint(stage)+".jsonl")
+	rotateTranscript(trPath) // T52：上次运行的转录改名 prevN，两次运行不混排
 	if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -178,7 +180,7 @@ func (st *mermaidFixSessionState) runOneStage(modelCfg config.ModelConfig, ws st
 		// 与 tikz 会话同款：模型漏了 submit 就提醒一次。
 		st.log.LogWarning(st.tid, "  [mermaid-fix] 会话结束但未提交，发送提交提醒")
 		_, _ = sess.Run(session.RunOptions{
-			UserText: "You have NOT called submit yet. Fix " + mermaidFixSubmitFile + " (write_file), then call submit.",
+			UserText: "You have NOT called submit yet. Fix " + mermaidFixSubmitFile + " (edit_file / write_file), then call submit.",
 		})
 	}
 	if !st.submitted && !st.escalated && hasFallbackModel(st.cfg) {
@@ -203,7 +205,7 @@ func hasFallbackModel(cfg *MermaidFixConfig) bool {
 func (st *mermaidFixSessionState) systemPrompt() string {
 	return "You are fixing a Mermaid diagram that failed syntax validation. " +
 		"The broken document is in your workspace as " + mermaidFixSubmitFile + ". " +
-		"Edit it with write_file until it passes, then call submit. " +
+		"Edit it with edit_file (targeted find/replace) or write_file (full rewrite) until it passes, then call submit. " +
 		"Requirements: keep it a Mermaid diagram that renders the SAME content as before — " +
 		"fix syntax, do not invent or drop nodes; do not switch to LaTeX/TikZ or any other format; " +
 		"use view_image to look at the original figure whenever unsure. " +
@@ -219,17 +221,19 @@ func (st *mermaidFixSessionState) taskPrompt(fallback bool, validationError stri
 	}
 	b.WriteString("The document " + mermaidFixSubmitFile + " in your workspace failed Mermaid validation:\n")
 	b.WriteString(validationError + "\n\n")
-	b.WriteString("Fix it (write_file rewrites " + mermaidFixSubmitFile + "), use grep to re-read the current file or the last error, view_image for the original figure, then submit. ")
+	b.WriteString("Fix it (edit_file for targeted find/replace, write_file rewrites " + mermaidFixSubmitFile + " whole), use grep to re-read the current file or the last error, view_image for the original figure, then submit. ")
 	b.WriteString(fmt.Sprintf("At most %d submit/check attempts in total; each failed submit counts one compile error and %d errors force a fallback-model escalation.\n",
 		st.cfg.Rounds-st.checks, st.cfg.ErrorLimit))
 	return b.String()
 }
 
-// tools 组装会话工具：write_file / grep / view_image / submit。
+// tools 组装会话工具：write_file / edit_file / grep / view_image / submit。
+// T52：补 edit_file——原先只能 write_file 整篇重写，改一处也要全量重写。
 func (st *mermaidFixSessionState) tools() []session.Tool {
 	ws := st.ws
 	return []session.Tool{
 		&mermaidWriteTool{st: st, path: filepath.Join(ws, mermaidFixSubmitFile)},
+		&mermaidEditTool{st: st, path: filepath.Join(ws, mermaidFixSubmitFile)},
 		&mermaidGrepTool{st: st, dir: ws},
 		&mermaidViewTool{st: st},
 		&mermaidSubmitTool{st: st, path: filepath.Join(ws, mermaidFixSubmitFile)},
@@ -393,7 +397,8 @@ func (t *mermaidSubmitTool) Execute(argsJSON string) (session.ToolResult, error)
 		return session.ToolResult{Text: "Already submitted successfully."}, nil
 	}
 	if st.checks >= st.cfg.Rounds {
-		return session.ToolResult{Text: "REJECTED: no check attempts left."}, nil
+		return session.ToolResult{Text: fmt.Sprintf("REJECTED: check attempts exhausted (%d/%d). The session is out of submit budget — this is a budget limit, not a validation result; the last compile error (if any) is in %s.",
+			st.checks, st.cfg.Rounds, mermaidFixErrorFile)}, nil
 	}
 	data, err := os.ReadFile(t.path)
 	if err != nil {
@@ -456,4 +461,80 @@ func finalResponseFromDocument(doc string) string {
 		return doc
 	}
 	return "[IMG_TYPE: mermaid]\n" + doc
+}
+
+// ---------- edit_file（T52） ----------
+
+// mermaidEditTool 对 submit.md 做精准 find/replace（修复一处不必整篇重写）。
+type mermaidEditTool struct {
+	st   *mermaidFixSessionState
+	path string
+}
+
+func (t *mermaidEditTool) Name() string { return "edit_file" }
+
+func (t *mermaidEditTool) Definition() map[string]any {
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name":        "edit_file",
+		"description": "Replace one exact text span in " + mermaidFixSubmitFile + ". Prefer this over write_file for small fixes.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"find":    map[string]any{"type": "string", "description": "The exact text to find (must appear exactly once)."},
+				"replace": map[string]any{"type": "string", "description": "The replacement text."},
+			},
+			"required": []string{"find", "replace"},
+		},
+	}}
+}
+
+func (t *mermaidEditTool) Execute(argsJSON string) (session.ToolResult, error) {
+	var args struct {
+		Find    string `json:"find"`
+		Replace string `json:"replace"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return session.ToolResult{}, err
+	}
+	if args.Find == "" {
+		return session.ToolResult{}, fmt.Errorf("find 为空")
+	}
+	data, err := os.ReadFile(t.path)
+	if err != nil {
+		return session.ToolResult{Text: "NOT FOUND: " + mermaidFixSubmitFile + "（先 write_file 写入）"}, nil
+	}
+	body := string(data)
+	n := strings.Count(body, args.Find)
+	if n == 0 {
+		return session.ToolResult{Text: "NOT FOUND: find 的原文在 " + mermaidFixSubmitFile + " 里不存在（先 grep 确认当前内容）"}, nil
+	}
+	if n > 1 {
+		return session.ToolResult{Text: fmt.Sprintf("AMBIGUOUS: find 的原文出现了 %d 次——加长到唯一匹配再试", n)}, nil
+	}
+	if err := os.WriteFile(t.path, []byte(strings.Replace(body, args.Find, args.Replace, 1)), 0o644); err != nil {
+		return session.ToolResult{}, err
+	}
+	t.st.logTool("edit_file", fmt.Sprintf("%d→%d 字节 → %s", len(args.Find), len(args.Replace), mermaidFixSubmitFile))
+	return session.ToolResult{Text: "OK: edited. Call submit when ready."}, nil
+}
+
+// rotateTranscript 把上次运行留下的同名转录改名为 <名>.prev<N>.jsonl
+// （T52：同一图的多次升级运行原先 append 进同一文件，预览里新旧消息
+// 混排无法区分）。最多保留 3 份历史，更旧的滚掉。
+func rotateTranscript(trPath string) {
+	if st, err := os.Stat(trPath); err != nil || st.Size() == 0 {
+		return
+	}
+	// prevN 插在 .jsonl 之前：预览页按 *.jsonl 扫描，历史运行以独立会话
+	// 行出现（session-stage0.prev1.jsonl = 上一次运行），新旧不再混排。
+	prevName := func(i int) string {
+		return strings.TrimSuffix(trPath, ".jsonl") + ".prev" + fmt.Sprint(i) + ".jsonl"
+	}
+	_ = os.Remove(prevName(3))
+	for i := 2; i >= 1; i-- {
+		if _, err := os.Stat(prevName(i)); err == nil {
+			_ = os.Rename(prevName(i), prevName(i+1))
+		}
+	}
+	_ = os.Rename(trPath, prevName(1))
 }

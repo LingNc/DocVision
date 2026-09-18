@@ -552,7 +552,7 @@ type ToolsConfig struct {
 		Timeout     int    `yaml:"timeout"`      // seconds per validation
 		// P12：就地修复轮用完后的**升级修复会话**（虚拟工作区 + submit +
 		// 编译检查）。session_rounds ≤ 0 = 关闭升级会话（维持旧的跳过+下轮重试）。
-		SessionRounds *int   `yaml:"session_rounds"` // 会话提交/检查次数上限（默认 6）
+		SessionRounds *int   `yaml:"session_rounds"` // 会话提交/检查次数上限（默认 32）
 		SessionErrors *int   `yaml:"session_errors"` // 编译错误累计上限，满了切备选模型（默认 3）
 		FallbackModel string `yaml:"fallback_model"` // 备选兜底模型（models.<条目名>；空 = 原模型清上下文重来）
 	} `yaml:"mermaid"`

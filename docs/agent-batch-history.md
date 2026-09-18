@@ -1294,3 +1294,19 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 删除：旧 styleFeedbackLoop（多数派门 + 内嵌单章修复循环，约 230 行）与 maxStyleFeedbackRounds 常量；maxCheckerRounds 常量保留（原被误删，已恢复）。
 - 测试：stylefix_test.go 4 例（submit_problems/submit_blocks/submit 块结论/collectIssueReports）；全仓 go test 绿。
 - 遗留（如实记录）：stylefix 会话无断点续跑重放（中断后整轮重来，成本有界）；整合会话只跑一次、问题清单跨轮复用（修复轮之间问题集假定不变）。
+
+## 第四十九批（2026-09-17，T52 mermaid 升级会话整修）
+
+### 现场证据（finally/progress_items/mermaid_fix/ 4 个升级会话）
+- 工具确实只有 write_file/grep/view_image/submit——没有 edit_file，改一处要整篇重写。
+- 「submit 总是 error 即使已经没有报错」= 检查预算耗尽后的拒绝（`REJECTED: no check attempts left.`，Rounds=6 用满），文案没说清是预算而非校验失败；真校验记录（compile_error.log 里 mmdc 解析错误）是有的。
+- 「UI 里这次的和上次的混在一起」= 同一图的多次升级运行 append 进同一 session-stageN.jsonl，新旧消息混排。
+- 「空回复/Provide your final answer now → 第二次才 Continue」= 两层提醒（session 引擎空回复提醒 vs 会话层未提交提醒），根因（厂商退化空响应）已由 T50 修。
+
+### 改动
+- **edit_file 工具**（find/replace，唯一匹配才改；多处→AMBIGUOUS、没有→NOT FOUND）；系统/任务/nudge 提示词同步提及。
+- **session_rounds 默认 6→32**（用户指定；注意：配置文件里显式写了 6 的不会自动变——runtime config.yaml 需要手改或删行）。
+- **转录轮转**：rotateTranscript——旧运行改名 `session-stageN.prev<M>.jsonl`（.prevN 插在 .jsonl 前，预览扫描 *.jsonl 会把它显示为独立会话），保留 3 份。
+- **预算耗尽拒绝文案**改说人话（exhausted N/M + 指向 compile_error.log）。
+- 预算提醒机制答疑（不改代码）：剩余轮次是一条**原位替换**的 user 消息（reminderIdx），不堆积、前缀缓存友好——不附加在工具回执里是因为回执是历史的一部分、改写历史回执会让模型把过期数字当事实。
+- 测试：edit_file 3 例、轮转 3 例、耗尽文案 1 例；全仓 15 包绿；dv5 重建。
