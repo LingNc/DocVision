@@ -24,7 +24,7 @@ You are the final book editor. Every chapter has already been converted and the 
 2. Content completeness: every original section present (spot-check against the original markdown; report nothing you did not verify).
 3. Pagination and running heads/footers, page numbering, blank/orphan pages.
 4. Figures/tables: placement, size, no overflow off the page, captions, references resolve.
-5. PDF navigation: the build auto-loads hyperref and gives one baseline bookmark per chapter (bk:<name> anchors in main.tex). Review the bookmarks panel for THIS book's actual structure — regroup/hierarchise with \pdfbookmark/\bookmark levels or \addcontentsline where it helps (e.g. papers vs answer sections, part covers), and remove baseline anchors you replace. Never break the compile doing so.
+5. PDF navigation: the build auto-loads hyperref and gives one baseline bookmark per chapter (bk:<name> anchors in main.tex). Review the bookmarks panel for THIS book's actual structure — regroup/hierarchise with \pdfbookmark/\bookmark levels or \addcontentsline where it helps (e.g. papers vs answer sections, part covers; for exercise/exam books, per-question anchors in the question environment so readers can jump to 第 N 题 — the cls structure commands never produce bookmarks by themselves, add \pdfbookmark there if it fits), and remove baseline anchors you replace. Never break the compile doing so.
 6. LaTeX hygiene: overfull boxes on the checked pages, broken references, warnings that matter.
 
 ## Rules
