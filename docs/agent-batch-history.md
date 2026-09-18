@@ -1310,3 +1310,13 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **预算耗尽拒绝文案**改说人话（exhausted N/M + 指向 compile_error.log）。
 - 预算提醒机制答疑（不改代码）：剩余轮次是一条**原位替换**的 user 消息（reminderIdx），不堆积、前缀缓存友好——不附加在工具回执里是因为回执是历史的一部分、改写历史回执会让模型把过期数字当事实。
 - 测试：edit_file 3 例、轮转 3 例、耗尽文案 1 例；全仓 15 包绿；dv5 重建。
+
+## 第五十批（2026-09-17，T47 审计 + T48 绘图语义）
+
+### T47 会话留痕审计（结论：多轮会话全覆盖）
+- 代码审计：latex+img2text 共 14 个 NewSession 点，**全部挂 JSONL 转录**（style/chapters/convert/checker/stylefix×4/book_fix/final_review/vector(tikz)/figure_check/mermaid-fix）。vector 作图转录在 `<书>/source/sessions/vector_*.jsonl`，在预览根内、WebUI 可见。
+- 无转录的都是**一次性调用而非会话**：classify 分类、img2text 逐图分析（量太大，由 preview.img2text_all debug 开关打开）。mermaid_fix 转录一直写，进 UI 由 preview.img2text 控制。
+- 结论：T47 目标已满足，无缺漏要补。
+
+### T48 绘图语义理解
+- figure.system 第 2 步与核心规则补一句：先理解图表达什么（立体图形/几何构造/上下文所述关系），用匹配构造画（3D→tikz-3dplot/透视坐标，几何→tkz-euclide），不描摹投影像素。提示词增量 2 句，未动其他。

@@ -6,6 +6,9 @@
 ## [Unreleased]
 ### Added
 
+- **作图会话先理解图义再下笔（T48）**：figure.system 工作流第 2 步与核心规则补充——先弄清这张图**表达什么**（立体图形/几何构造/上下文所述关系），用匹配的构造来画（3D 场景→tikz-3dplot/透视坐标，几何作图→tkz-euclide 式构造），不做投影像素描摹。
+
+
 - **mermaid 升级修复会话增强（T52）**：① 新增 `edit_file` 工具（find/replace 精准编辑，原先只能 write_file 整篇重写）；② 提交/检查次数默认上限 6→**32**（修一张复杂图常要十几轮；注意：配置里已显式写 6 的需自行改大）；③ 同一图的多次升级运行转录自动**轮转**（旧的改名 `session-stageN.prev<M>.jsonl`，预览里新旧分开、不再混排）；④ "no check attempts left" 拒绝文案改说人话（说明是检查预算耗尽而非校验失败，指向 compile_error.log）。
 
 
