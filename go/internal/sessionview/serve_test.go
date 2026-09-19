@@ -1,7 +1,10 @@
 package sessionview
 
 import (
+	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,4 +131,46 @@ func supportsWildcardBind() bool {
 	}
 	_ = ln.Close()
 	return true
+}
+
+// P18：/api/img2text-progress 返回板块数据；无 img2text 根时返回空。
+func TestServeImg2TextProgressAPI(t *testing.T) {
+	root := t.TempDir()
+	prog := t.TempDir()
+	os.MkdirAll(filepath.Join(prog, "书.md"), 0o755)
+	os.WriteFile(filepath.Join(prog, "书.md", "original.md"), []byte("![a](images/书/a1.jpg)\n![b](images/书/b2.jpg)\n"), 0o644)
+	os.MkdirAll(filepath.Join(prog, "书"), 0o755)
+	os.WriteFile(filepath.Join(prog, "书", "images_a1.jpg.json"), []byte(`{"result":"[IMG_TYPE: x]"}`), 0o644)
+
+	srv := httptest.NewServer(newViewerServer(root, []ScanExtra{{Dir: prog, Kind: "img2text"}}))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/api/img2text-progress")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Books []Img2TextBook `json:"books"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Books) != 1 || body.Books[0].Done != 1 || body.Books[0].Pending != 1 {
+		t.Fatalf("books = %+v", body.Books)
+	}
+
+	// 无 img2text 根：books 为空（null 或 [] 都接受）。
+	srv2 := httptest.NewServer(newViewerServer(root, nil))
+	defer srv2.Close()
+	resp2, _ := http.Get(srv2.URL + "/api/img2text-progress")
+	defer resp2.Body.Close()
+	var body2 struct {
+		Books []Img2TextBook `json:"books"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&body2); err != nil {
+		t.Fatal(err)
+	}
+	if len(body2.Books) != 0 {
+		t.Errorf("want empty, got %+v", body2.Books)
+	}
 }

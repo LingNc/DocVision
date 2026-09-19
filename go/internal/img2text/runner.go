@@ -263,10 +263,11 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		if opts.Quiet {
 			logger.SetQuiet(true)
 		}
-		// T37 debug：preview.img2text_all = 每张图都记录会话转录。
-		recordAll := cfg.Preview.Img2TextAll
+		// P18：逐图分析转录默认记录（preview.img2text_all，默认 true；
+		// 调试完不想堆文件可显式 false）。升级修复会话总是记录、不受此键管。
+		recordAll := cfg.Preview.Img2TextAll == nil || *cfg.Preview.Img2TextAll
 		if recordAll {
-			logger.Log(0, "T37 debug: preview.img2text_all 开启，逐图会话转录写入",
+			logger.Log(0, "逐图会话转录写入（preview.img2text_all 可关）",
 				filepath.Join(progressRoot, "sessions"))
 		}
 		runWorkers(client, pending, imagesDir, mdCache, progressRoot,
@@ -420,7 +421,7 @@ func runWorkers(
 	opts config.OptionsConfig,
 	quiet bool,
 	fixCfg *MermaidFixConfig,
-	// recordAll (T37 debug, preview.img2text_all) writes one transcript
+	// recordAll (P18, preview.img2text_all 默认 true) writes one transcript
 	// per image task under progressRoot/sessions/<md>/<图>.jsonl.
 	recordAll bool,
 ) {

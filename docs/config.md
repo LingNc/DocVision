@@ -116,8 +116,8 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |
-| `preview.img2text` | T37：预览侧栏额外显示 **img2text 升级修复会话**（`<finally>/progress_items/mermaid_fix/<书>_<图>/` 的转录），按书分组、组内按图名稳定排序编号（`#N ·`）、走侧栏既有搜索；失败的修复工作区**默认保留**可见。img2text 产物在 latex 扫描根之外，本项是看到它们的唯一开关 | false |
-| `preview.img2text_all` | T37 **debug**：`docvision img2text` 跑时为**每一张图**记录会话转录（`<finally>/progress_items/sessions/<md>/<图>.jsonl`，与升级修复会话同格式、同分组同编号），同样由 `preview.img2text` 展示。量很大（一书上百张），只建议调试时开 | false |
+| `preview.img2text` | T37：预览侧栏额外显示 **img2text 升级修复会话**（`<finally>/progress_items/mermaid_fix/<书>_<图>/` 的转录），按书分组、组内按图名稳定排序编号（`#N ·`）、走侧栏既有搜索；失败的修复工作区**默认保留**可见。img2text 产物在 latex 扫描根之外，本项是看到它们的唯一开关；P18 起 WebUI 有独立 img2text 板块（板块切换 + 每图进度状态） | false |
+| `preview.img2text_all` | 逐图分析也记录会话转录（`<finally>/progress_items/sessions/<md>/<图>.jsonl`，P18 起在 WebUI img2text 板块展示）；调试完不想堆文件可关。**升级修复会话总是记录、不受此键管** | true |
 | `estimate.method` | **本地估算**的图片计量方法：`pixels`（按尺寸折算）/ `fixed`（每张固定值）/ `none`（本地按 0 计） | "pixels" |
 | `estimate.tokens` | `method: fixed` 时每张的固定值；`method: pixels` 下**取不到尺寸**（未知格式/文件读不到）时也用它 | 1100 |
 | `estimate.px_per_token` | `method: pixels` 的折算比例：单张图片 token ≈ `宽×高 / 本项` | 750 |

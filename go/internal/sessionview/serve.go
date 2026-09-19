@@ -223,6 +223,10 @@ type viewerServer struct {
 	root  string
 	extra []string
 	scan  *scanner
+	// img2textRoot is the progress_items directory behind the img2text
+	// extra root ("" when preview.img2text is off); /api/img2text-progress
+	// scans it for the P18 progress board.
+	img2textRoot string
 }
 
 // newViewerServer builds the read-only viewer. extras are the absolute
@@ -241,7 +245,18 @@ func newViewerServer(root string, extras []ScanExtra) *viewerServer {
 			extraDirs = append(extraDirs, abs)
 		}
 	}
-	return &viewerServer{root: root, extra: extraDirs, scan: &scanner{root: root, extras: ex}}
+	// P18：img2text 板块的进度数据源 = progress_items 根（img2text extra
+	// 的 Dir 就是它）。
+	img2textRoot := ""
+	for _, e := range extras {
+		if e.Kind == "img2text" && e.Dir != "" {
+			if abs, err := filepath.Abs(e.Dir); err == nil {
+				img2textRoot = abs
+			}
+			break
+		}
+	}
+	return &viewerServer{root: root, extra: extraDirs, scan: &scanner{root: root, extras: ex}, img2textRoot: img2textRoot}
 }
 
 // ServeHTTP routes by hand instead of using http.ServeMux: ServeMux rewrites
@@ -266,11 +281,24 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		v.serveIndex(w)
 	case p == "/api/session":
 		v.serveSession(w, r)
+	case p == "/api/img2text-progress":
+		v.serveImg2TextProgress(w)
 	case strings.HasPrefix(p, "/media/"), strings.HasPrefix(p, "/file/"):
 		v.serveFile(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// serveImg2TextProgress reports the P18 img2text progress board: per-book
+// per-image status built from the progress_items tree (empty when no
+// img2text extra root is configured).
+func (v *viewerServer) serveImg2TextProgress(w http.ResponseWriter) {
+	books := ScanImg2TextProgress(v.img2textRoot)
+	if books == nil {
+		books = []Img2TextBook{}
+	}
+	writeJSON(w, map[string]any{"books": books})
 }
 
 // indexResponse is what the page polls every couple of seconds: enough to

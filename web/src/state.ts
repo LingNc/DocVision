@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { type Line, type ImageAttr, type Session, type PartialInfo } from './legacy/types'
+import { type Line, type ImageAttr, type Session, type PartialInfo, type Img2TextBook } from './legacy/types'
 
 /*
  * 全局状态：字段名与旧页 viewer.js 的 state 一一对应，后续按块移植的
@@ -138,6 +138,11 @@ export const state = reactive({
   // P7：当前会话的流式快照（<转录>.partial；消息完整落盘即消失）。
   // 轮询时只在「当前会话正在 live」时读取，切会话/非 live 清空。
   partial: null as PartialInfo | null,
+  // P18：侧栏板块——'latex'（board 为空的会话）| 'img2text'（board==="img2text"）。
+  // 选中态落盘 localStorage（键 side.board），默认 latex。
+  board: 'latex' as string,
+  // P18：/api/img2text-progress 的按书进度（独立 ~5s 轮询；preview.img2text 未开时为空）。
+  img2textProgress: [] as Img2TextBook[],
 })
 
 /* ---------- 布局求解（computeColumns 逐行照旧页：纯函数、无迟滞） ---------- */
@@ -243,6 +248,14 @@ export function loadState(): void {
   const details = rawDetails === null ? 0 : Number(rawDetails)
   state.details = !isNaN(details) && details > 0 ? details : 0
   state.narrowExpanded = storeGet('layout.narrowExpanded') === '1'
+  // P18：板块记忆（仅 latex/img2text 两个合法值，其他一律回落 latex）。
+  state.board = storeGet('side.board') === 'img2text' ? 'img2text' : 'latex'
+}
+
+/* P18：切板块并落盘（Sidebar 的板块切换器调用）。 */
+export function setBoard(board: string): void {
+  state.board = board === 'img2text' ? 'img2text' : 'latex'
+  storeSet('side.board', state.board)
 }
 
 /* ---------- 主题（旧页 applyTheme/storedTheme/toggleTheme 同名） ---------- */

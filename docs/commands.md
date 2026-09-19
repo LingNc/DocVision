@@ -42,7 +42,7 @@ AI 结果带 `[IMG_TYPE: <类型>]` 标签，写入 `finally/` 的 markdown 时�
 
 img2text 的图片描述**只出 Mermaid**（外加表格、正文、公式、代码块）：矢量图重画是 `docvision latex` 档位 1 作图会话的职责。若模型无视提示词仍返回 ```` ```latex ```` / ```` ```tikz ```` 绘图代码块，该响应按**无效响应**处理——跳过、下轮重试，日志里附截断后的模型原文与"期望格式"一行摘要。
 
-Mermaid 校验由 `tools.mermaid.*`（off/auto/strict、CLI 命令、就地修复轮数、超时）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。**首次校验失败即升级**（T37，默认 `fix_attempts: -1`）：模型直接拿到一道**升级修复会话**（P12，`tools.mermaid.session_*`）——虚拟工作区里编辑 submit.md、submit 过 mmdc 检查，错误累计切备选模型，详见 docs/config.md。升级会话的转录落在 `<finally>/progress_items/mermaid_fix/<书>_<图>/`，`preview.img2text: true` 时按书分组、编号进会话预览侧栏（失败的工作区默认保留可见）；`preview.img2text_all: true`（debug）再为每张图的常规分析各记一份转录（`progress_items/sessions/<md>/`）。
+Mermaid 校验由 `tools.mermaid.*`（off/auto/strict、CLI 命令、就地修复轮数、超时）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。**首次校验失败即升级**（T37，默认 `fix_attempts: -1`）：模型直接拿到一道**升级修复会话**（P12，`tools.mermaid.session_*`）——虚拟工作区里编辑 submit.md、submit 过 mmdc 检查，错误累计切备选模型，详见 docs/config.md。升级会话的转录落在 `<finally>/progress_items/mermaid_fix/<书>_<图>/`，`preview.img2text: true` 时按书分组、编号进会话预览的 **img2text 板块**（失败的工作区默认保留可见）；`preview.img2text_all`（默认 true）再为每张图的常规分析各记一份转录（`progress_items/sessions/<md>/`）。
 
 ## latex 档位2 文本图嵌入
 
@@ -142,7 +142,7 @@ docvision sessions --cost                     # 只打印按阶段的用量/费�
 
 想在**跑 latex 的同时**看，不必另开终端：把 `preview.enabled` 打开（默认关闭），`docvision latex` 启动时会自己拉起同一份只读服务并把确切 URL 打进日志（地址/端口用 `preview.host`/`preview.port`；要临时改端口用 `--port`，`--port 0` = 由内核挑一个空闲端口；根目录取该档位的输出根 `<latex_project>` / `<latex_output>`），运行结束后随进程退出。详见 `docs/config.md` 的 `preview` 三项。
 
-`docvision sessions --serve` 用的是**同一份配置**：扫描根默认取 `paths.latex_project`（档位2 用 `paths.latex_output`，与上面自动预览的根同源），监听地址默认取 `preview.host`/`preview.port`；`preview.img2text: true` 时另外扫描 `<finally>/progress_items/`（img2text 的升级修复/逐图会话，按书分组、组内编号、可搜索），这些转录在 latex 扫描根之外，本项是看到它们的唯一开关；优先级是 `--dir` > 配置 > 当前目录、`--addr` > `--port` > 配置 > 内置默认。启动时打印扫到的目录、用的配置文件与**实际绑定到的监听地址**，每一项后面都跟着来源（`config paths.latex_project` / `--dir` / `config preview.host/port` / `--port` / `--addr` / `内置默认`）：监听地址取 `net.Listen` 回报的地址，所以 `preview.host: 0.0.0.0` 会照实打印 `0.0.0.0:8849`（双栈机器上可能是 `[::]:8849`）、端口写 `0` 时打印内核实际分配的端口，而不是配置里写的那个；绑定通配地址时额外多一行 `浏览 http://127.0.0.1:<端口>/`（`http://0.0.0.0/…` 不是能打开的页面），loopback 绑定时这一行不出现。扫到的目录不存在时退回当前目录并写明原因。
+`docvision sessions --serve` 用的是**同一份配置**：扫描根默认取 `paths.latex_project`（档位2 用 `paths.latex_output`，与上面自动预览的根同源），监听地址默认取 `preview.host`/`preview.port`；`preview.img2text: true` 时另外扫描 `<finally>/progress_items/`（img2text 的升级修复/逐图会话，按书分组、组内编号、可搜索），这些转录在 latex 扫描根之外，本项是看到它们的唯一开关；P18 起预览页侧栏顶部有 **LaTeX / img2text 板块切换**，img2text 板块顶部显示每本书的进度概览（完成/修复/升级/待处理计数与分段进度条，数据来自 `/api/img2text-progress`，从 progress_items 树推导、不看日志）；优先级是 `--dir` > 配置 > 当前目录、`--addr` > `--port` > 配置 > 内置默认。启动时打印扫到的目录、用的配置文件与**实际绑定到的监听地址**，每一项后面都跟着来源（`config paths.latex_project` / `--dir` / `config preview.host/port` / `--port` / `--addr` / `内置默认`）：监听地址取 `net.Listen` 回报的地址，所以 `preview.host: 0.0.0.0` 会照实打印 `0.0.0.0:8849`（双栈机器上可能是 `[::]:8849`）、端口写 `0` 时打印内核实际分配的端口，而不是配置里写的那个；绑定通配地址时额外多一行 `浏览 http://127.0.0.1:<端口>/`（`http://0.0.0.0/…` 不是能打开的页面），loopback 绑定时这一行不出现。扫到的目录不存在时退回当前目录并写明原因。
 
 两种模式的区别：
 

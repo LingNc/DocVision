@@ -889,3 +889,95 @@ details[open] > summary .line-caret {
 .md-code-body code {
  font: inherit; background: transparent; padding: 0; 
 }
+
+/* ============================ P18：img2text 进度概览 ============================
+ * 侧栏 img2text 板块顶部的按书进度区：每本书一块——书名 + 分段进度条
+ * （done=绿 / escalated=琥珀 / pending=暗）+ 计数行。纯 CSS，无库。 */
+.i2t-overview {
+  margin: 0 2px 8px;
+  border: .5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 6px 8px;
+}
+
+.i2t-book {
+  padding: 4px 0 6px;
+}
+
+.i2t-book + .i2t-book {
+  border-top: .5px solid var(--border);
+}
+
+.i2t-book-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  line-height: 18px;
+}
+
+.i2t-book-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.i2t-book-count {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.i2t-bar {
+  display: flex;
+  height: 6px;
+  margin: 5px 0 4px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--hover);
+}
+
+.i2t-seg {
+  display: block;
+  height: 100%;
+}
+
+.i2t-seg.i2t-done {
+  background: var(--ok);
+}
+
+.i2t-seg.i2t-esc {
+  background: var(--warn);
+}
+
+.i2t-seg.i2t-pend {
+  background: var(--dim);
+  opacity: .35;
+}
+
+.i2t-book-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--caption);
+}
+
+.i2t-book-meta .i2t-meta-done {
+  color: var(--ok);
+}
+
+.i2t-book-meta .i2t-meta-esc {
+  color: var(--warn);
+}
+
+.frame[data-sidebar-collapsed] .i2t-overview {
+  display: none;
+}

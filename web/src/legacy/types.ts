@@ -132,5 +132,23 @@ export interface Session {
   /** 方块视图的完成信号（T22）：done=交过 / error=干过活没交 / ''=还没开工；运行中由 live 表达。 */
   endState?: 'done' | 'error' | ''
   imageType?: string
+  /** P18：板块标记——img2text 来源的会话带 "img2text"，主根（latex）会话无此字段。 */
+  board?: string
   [k: string]: unknown
+}
+
+/** P18：/api/img2text-progress 的一张图。 */
+export interface Img2TextItem {
+  name: string
+  status: 'done' | 'escalated' | 'pending' | string
+}
+
+/** P18：/api/img2text-progress 的一本书（进度概览区逐书渲染）。 */
+export interface Img2TextBook {
+  book: string
+  total: number
+  done: number
+  escalated: number
+  pending: number
+  items?: Img2TextItem[]
 }

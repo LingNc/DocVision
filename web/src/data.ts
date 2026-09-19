@@ -177,12 +177,30 @@ function bootStatic(): boolean {
   return true
 }
 
+/*
+ * P18：img2text 进度概览（/api/img2text-progress）。preview.img2text 未开时
+ * books 为空/ null；失败静默（概览区只是附属信息，不打横幅）。轮询节奏跟随
+ * App.vue 的独立 ~5s 定时器，静态快照模式不拉。
+ */
+export function refreshImg2TextProgress(): Promise<void> {
+  return fetch('/api/img2text-progress', { cache: 'no-store' })
+    .then((res) => {
+      if (!res.ok) throw new Error('HTTP ' + res.status)
+      return res.json()
+    })
+    .then((payload) => {
+      state.img2textProgress = (payload && payload.books) || []
+    })
+    .catch(() => { /* 静默：保持上一次数据 */ })
+}
+
 /* boot：静态快照直接装数据；live 先拉一次索引并选中第一个活跃会话。
  * 轮询定时器只在 App.vue 注册一份（pollTimer，页面隐藏时跳过、可随卸载清理）——
  * 这里不再自建 interval：曾经两份并存，live 页每秒打 4 次 /api/index 全树扫描，
  * 运行刚启动（samba 冷缓存）时请求堆积，页面迟迟拿不到首份数据。 */
 export function bootData(): void {
   if (bootStatic()) return
+  void refreshImg2TextProgress()
   void refreshIndex().then(() => {
     if (state.sessions.length && !state.current) {
       let live: any = null

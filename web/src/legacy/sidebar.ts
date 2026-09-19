@@ -361,11 +361,25 @@ export interface ProjectGroup {
   stages: Record<string, StageGroup>
 }
 
+/* ---------- P18：板块（board）过滤 ----------
+
+ * latex 板块 = board 字段为空/缺失的会话；img2text 板块 = board==="img2text"。
+ * 其余未知取值按 latex 归位（Go 侧目前只有这一种标记）。 */
+
+export function sessionBoard(s: { board?: string } | null | undefined): string {
+  return s && s.board === 'img2text' ? 'img2text' : 'latex'
+}
+
+export function filterByBoard<T extends { board?: string }>(sessions: T[] | null | undefined, board: string): T[] {
+  const b = board === 'img2text' ? 'img2text' : 'latex'
+  return (sessions || []).filter((s) => sessionBoard(s) === b)
+}
+
 export function buildGroups(): ProjectGroup[] {
   const q = state.filter
   let groups: ProjectGroup[] = []
   const byName: Record<string, ProjectGroup> = {}
-  state.sessions.forEach((s: any) => {
+  filterByBoard(state.sessions, state.board).forEach((s: any) => {
     const name = s.project || projectOf(s.id)
     let g = byName[name]
     if (!g) {

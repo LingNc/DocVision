@@ -1320,3 +1320,13 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T48 绘图语义理解
 - figure.system 第 2 步与核心规则补一句：先理解图表达什么（立体图形/几何构造/上下文所述关系），用匹配构造画（3D→tikz-3dplot/透视坐标，几何→tkz-euclide），不描摹投影像素。提示词增量 2 句，未动其他。
+
+## 第五十一批（2026-09-19，P18 img2text 进 WebUI 独立板块）
+
+- **Go 数据面**：
+  - `SessionInfo.Board`（img2text 来源会话打 "img2text"）；新 API `/api/img2text-progress`（serve.go 路由 + viewerServer.img2textRoot = progress_items 根）。
+  - `ScanImg2TextProgress`（img2text_progress.go）：从 progress_items 树推导每书每图状态，**真实布局实测钉住**——`<md>.md/original.md` 是书的 markdown 副本（目录名保留 .md 后缀！第一版把它当文件全踩空）；逐图 json 在 `<md>/`，命名新旧两种（`images_<hash>.jpg.json` / `images_<md>_<hash>.jpg.json`）；mermaid_fix/<md>_<图>/ = 升级工作区。四态：done / **fixed**（有结果且留过修复工作区=修复成功）/ escalated（只有工作区没结果）/ pending（无记录——失败跳过与未跑不可区分，如实报"待处理"）。真实数据验证：80 本书，27政治 64 图 = 60 done + 4 fixed（与 mermaid_fix 4 个工作区精确对上）。
+  - `preview.img2text_all` 按用户决定**保留并默认 true**（nil→true，改 *bool）：控制逐图分析转录记录；升级修复会话始终记录不受其管。
+- **web（子代理实施，父代理复验）**：Sidebar 头部板块切换（LaTeX/img2text，`side.board` 落盘，无 img2text 数据时隐藏并强制回落 latex）；img2text 板块顶部每书进度概览（分段进度条 done 绿/fixed 青/escalated 琥珀/pending 暗 + 计数）；buildGroups 先按 board 过滤；独立 5s 轮询。vitest 36/36（新增 board.spec 5 条）。
+- 验证：go test 15 包绿 + httptest 冒烟（有根/无根两种）；真实 progress_items 扫描数字如上。运行目录的端到端冒烟被 sandbox 拦（sessions 命令要写 sessions.html 静态导出到 latex_project/），留待部署后目检。
+- plan.md P18 标 [X][ ]。

@@ -451,11 +451,12 @@ type PreviewConfig struct {
 	// sidebar: grouped per book, numbered, searchable. Failed / errored
 	// fix sessions are kept on disk by default, so they stay visible.
 	Img2Text bool `yaml:"img2text"`
-	// Img2TextAll (T37, debug mode) records a transcript for EVERY
-	// per-image img2text analysis under progress_items/sessions/<md>/ and
-	// shows those in the preview too. Off by default: one transcript per
-	// image is a lot of disk and I/O on a 100+ images/book run.
-	Img2TextAll bool `yaml:"img2text_all"`
+	// Img2TextAll (T37) records a transcript for EVERY per-image img2text
+	// analysis under progress_items/sessions/<md>/ (P18: shown in the web
+	// img2text board). Default TRUE (P18：用户定的——记录是常态）；显式
+	// false 关闭逐图转录（调试完不需要堆文件时）。升级修复会话的转录
+	// 不受此键控制，总是记录。
+	Img2TextAll *bool `yaml:"img2text_all"`
 }
 
 // Addr renders host:port for net.Listen. Host "" = loopback. Port 0 means

@@ -324,6 +324,9 @@ type SessionInfo struct {
 	// session sits inside a per-book project workspace of the multi-project
 	// layout (see projectGroupFor).
 	Project string `json:"project"`
+	// Board (P18) is "img2text" for sessions from the img2text extra root
+	// (empty = the latex/main board).
+	Board string `json:"board,omitempty"`
 	// ProjectLegacy marks a group whose directory is itself a workspace root,
 	// i.e. the pre-multi-project layout. The sidebar labels it so an old
 	// project is not mistaken for a book of the new layout.

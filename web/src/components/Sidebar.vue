@@ -5,20 +5,50 @@
  * v-collapse 指令（旧页 bindCollapse：程序化改 open 不写记忆，只有用户
  * 点击才写回）；选中高亮与行内文案走响应式，轮询不重建 DOM。
  */
-import { computed, ref } from 'vue'
-import { state, openDetails, fmtSize, storeGet, storeSet } from '../state'
+import { computed, ref, watchEffect } from 'vue'
+import { state, openDetails, fmtSize, storeGet, storeSet, setBoard } from '../state'
 import {
-  buildGroups, groupKey, groupWantOpen, imageChipText, imageTipText,
+  buildGroups, filterByBoard, groupKey, groupWantOpen, imageChipText, imageTipText,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
   stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens, type StageStatus,
 } from '../legacy/sidebar'
 import { selectSession, refreshIndex } from '../data'
 import InlineMD from './InlineMD.vue'
+import type { Img2TextBook } from '../legacy/types'
 
 const OVERFLOW_LIMIT = 8
 
 const listEl = ref<HTMLElement | null>(null)
+
+/*
+ * P18：板块切换（LaTeX / img2text）。仅当存在 img2text 会话或 progress books
+ * 非空时才显示切换器，否则隐藏保持现状；板块本身在 state.board，切换只影响
+ * 侧栏显示哪些项目组（过滤在 buildGroups 里做）。
+ */
+const showBoardSwitch = computed(() => {
+  if (state.img2textProgress.length > 0) return true
+  return state.sessions.some((s: any) => s.board === 'img2text')
+})
+
+/* 板块被隐藏时（比如 preview.img2text 关掉后重开页面）强制回落 latex，
+ * 否则用户会停在一张永远空白的 img2text 板块上。 */
+watchEffect(() => {
+  if (!showBoardSwitch.value && state.board !== 'latex') setBoard('latex')
+})
+
+/* 当前板块下的会话总数（脚注计数按板块口径）。 */
+const boardSessionCount = computed(() => filterByBoard(state.sessions, state.board).length)
+
+/* img2text 进度概览：只在 img2text 板块且有数据时显示。 */
+const progressBooks = computed<Img2TextBook[]>(() =>
+  state.board === 'img2text' ? state.img2textProgress : []
+)
+
+function barPct(part: number, total: number): string {
+  if (!total) return '0'
+  return ((part * 100) / total).toFixed(1)
+}
 
 /*
  * 方块视图（P8）：矢量图/章节转换动辄几十个会话，列表扫不过来。开了之后
@@ -82,8 +112,8 @@ const shownCount = computed(() => groups.value.reduce((n, g) => n + g.items.leng
 const emptyText = computed(() => (state.sessions.length ? '没有匹配的会话' : '没有找到 *.jsonl 会话转录'))
 
 const footText = computed(() => {
-  const live = state.sessions.filter((s: any) => s.live).length
-  return groups.value.length + ' 个项目 · ' + state.sessions.length + ' 个会话' +
+  const live = filterByBoard(state.sessions, state.board).filter((s: any) => s.live).length
+  return groups.value.length + ' 个项目 · ' + boardSessionCount.value + ' 个会话' +
     (live ? ' · ' + live + ' 个活跃' : '') + (state.filter ? ' · 匹配 ' + shownCount.value : '')
 })
 
@@ -193,11 +223,43 @@ function onMoreClick(okey: string) {
       >{{ blockView ? '☰' : '▦' }}</button>
       <button id="refresh" class="icon-btn" type="button" title="重新扫描会话" @click="refreshIndex">⟳</button>
     </div>
+    <div v-if="showBoardSwitch" class="board-tabs" role="group" aria-label="板块">
+      <button
+        id="board-latex" class="tab-toggle" type="button"
+        :aria-pressed="state.board === 'latex' ? 'true' : 'false'"
+        title="LaTeX 板块：主根（latex）会话"
+        @click="setBoard('latex')"
+      >LaTeX</button>
+      <button
+        id="board-img2text" class="tab-toggle" type="button"
+        :aria-pressed="state.board === 'img2text' ? 'true' : 'false'"
+        title="img2text 板块：逐图文字化会话与进度"
+        @click="setBoard('img2text')"
+      >img2text</button>
+    </div>
     <div class="side-search">
       <input id="search" v-model="state.filter" type="search" placeholder="过滤：会话名 / 阶段 / 项目…" autocomplete="off">
     </div>
     <div class="side-list-wrap">
       <div id="session-list" ref="listEl" class="session-list" role="tree" aria-label="会话列表">
+        <div v-if="progressBooks.length" class="i2t-overview" aria-label="img2text 进度概览">
+          <div v-for="b in progressBooks" :key="b.book" class="i2t-book">
+            <div class="i2t-book-head">
+              <span class="i2t-book-name" :title="b.book">{{ b.book }}</span>
+              <span class="i2t-book-count">{{ b.done }}/{{ b.total }}</span>
+            </div>
+            <div class="i2t-bar" role="img" :aria-label="'完成 ' + b.done + ' · 升级 ' + b.escalated + ' · 待处理 ' + b.pending">
+              <span class="i2t-seg i2t-done" :style="{ width: barPct(b.done, b.total) + '%' }"></span>
+              <span class="i2t-seg i2t-esc" :style="{ width: barPct(b.escalated, b.total) + '%' }"></span>
+              <span class="i2t-seg i2t-pend" :style="{ width: barPct(b.pending, b.total) + '%' }"></span>
+            </div>
+            <div class="i2t-book-meta">
+              <span class="i2t-meta-done">完成 {{ b.done }}</span>
+              <span v-if="b.escalated" class="i2t-meta-esc">升级 {{ b.escalated }}</span>
+              <span v-if="b.pending" class="i2t-meta-pend">待处理 {{ b.pending }}</span>
+            </div>
+          </div>
+        </div>
         <details
           v-for="g in groups"
           :key="g.name"
@@ -366,6 +428,26 @@ function onMoreClick(okey: string) {
 
 .side-search {
  flex: none; padding: 0 10px 8px; 
+}
+
+/* P18：板块切换行（LaTeX / img2text）——按钮本体沿用 .tab-toggle 词汇。 */
+.board-tabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 0 10px 8px;
+}
+
+.board-tabs .tab-toggle {
+  flex: 1;
+  justify-content: center;
+  height: 22px;
+  border: .5px solid var(--border);
+  border-radius: 6px;
+}
+
+.frame[data-sidebar-collapsed] .board-tabs {
+  display: none;
 }
 
 .side-search input {

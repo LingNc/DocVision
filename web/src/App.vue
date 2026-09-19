@@ -31,7 +31,7 @@ import {
   toggleSidebar,
   toggleTheme,
 } from './state'
-import { bootData, refreshIndex, revealProject } from './data'
+import { bootData, refreshIndex, refreshImg2TextProgress, revealProject } from './data'
 import { projectOf, sessionTitleOf } from './legacy/sidebar'
 import Sidebar from './components/Sidebar.vue'
 import Timeline from './components/Timeline.vue'
@@ -242,6 +242,7 @@ function onLbPointerup(ev: PointerEvent) {
 
 let ro: ResizeObserver | null = null
 let pollTimer = 0
+let i2tTimer = 0
 
 function onLbClick() {
   if (lbSuppressClick) {
@@ -296,6 +297,10 @@ onMounted(() => {
     pollTimer = window.setInterval(() => {
       if (!document.hidden) void refreshIndex()
     }, 2000)
+    // P18：img2text 进度概览走独立的 ~5s 轮询（节奏比会话列表慢一档）。
+    i2tTimer = window.setInterval(() => {
+      if (!document.hidden) void refreshImg2TextProgress()
+    }, 5000)
   }
 })
 
@@ -316,6 +321,7 @@ watchEffect(() => {
 onBeforeUnmount(() => {
   ro?.disconnect()
   if (pollTimer) window.clearInterval(pollTimer)
+  if (i2tTimer) window.clearInterval(i2tTimer)
   document.removeEventListener('keydown', onKeydown)
 })
 </script>

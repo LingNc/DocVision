@@ -138,6 +138,7 @@ func img2TextSessionInfo(p, rel, name string, info fs.FileInfo, stat transcriptS
 	return SessionInfo{
 		// Prefix the ID so it can never collide with a main-root rel path.
 		ID:            "img2text:" + rel,
+		Board:         "img2text",
 		Label:         label,
 		Title:         title,
 		Name:          name,

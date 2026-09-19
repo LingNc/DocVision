@@ -4,6 +4,9 @@
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
 ## [Unreleased]
+### Added
+
+- **P18 img2text 进 WebUI 独立板块**：预览页侧栏顶部新增「LaTeX / img2text」板块切换（`side.board` 落盘记忆）；img2text 板块顶部显示每本书的**进度概览**（逐图四态：done 绿 / fixed 修复成功 / escalated 升级未修好 琥珀 / pending 暗，分段进度条 + 计数，数据来自新 API `/api/img2text-progress`，从 progress_items 树推导、不读日志）；逐图分析转录改为**默认记录**（`preview.img2text_all` 默认 true，调试完可显式 false 关闭；升级修复会话始终记录）。方块视图/搜索在 img2text 板块同样可用。
 
 ## [v1.5.0-beta.8] - 2026-09-17
 ### Added
