@@ -464,7 +464,20 @@ func runWorkers(
 
 		progressOut := bufio.NewWriter(os.Stdout)
 
-		for r := range results {
+		// T53：running 计数原先只在有结果到达时刷新——2 张图各跑几分钟时
+		// 进度行一直停在初始的 running: 0。抽循环体为 handle，主循环改成
+		// select：results 到达照常处理，2s 心跳重印当前计数（含 running）。
+		reprint := func() {
+			if quiet && total > 0 {
+				fmt.Fprint(progressOut, "\r"+progressLine(doneCount, total, doneCount-errorCount,
+					errorCount, warnCount, int(running.Load())))
+				progressOut.Flush()
+			}
+		}
+		heartbeat := time.NewTicker(2 * time.Second)
+		defer heartbeat.Stop()
+
+		handle := func(r runResult) {
 			count++
 			if r.result == "__INVALID_RESPONSE__" {
 				// T15：校验未通过（mermaid/格式不符）是**错误**不是警告——警告
@@ -474,12 +487,12 @@ func runWorkers(
 					"Skipped invalid response for %s, will retry next run. %s. Raw output: %s",
 					r.imgPath, expectedFormatHint, snippet(r.rawSnippet),
 				))
-				continue
+				return
 			}
 			parts := strings.SplitN(r.key, "::", 2)
 			if len(parts) != 2 {
 				logger.LogError(0, "Invalid key format:", r.key)
-				continue
+				return
 			}
 			mdName := parts[0]
 			imgRel := parts[1]
@@ -517,13 +530,20 @@ func runWorkers(
 			logger.Log(0, "RESULT:\n"+preview)
 			logger.Log(0, strings.Repeat("-", 50))
 
-			if quiet && total > 0 {
-				// Print progress with 2-decimal precision on every update.
-				fmt.Fprint(progressOut, "\r"+progressLine(doneCount, total, doneCount-errorCount,
-					errorCount, warnCount, int(running.Load())))
-				progressOut.Flush()
+			reprint()
+		}
+		for {
+			select {
+			case <-heartbeat.C:
+				reprint()
+			case r, open := <-results:
+				if !open {
+					goto drained
+				}
+				handle(r)
 			}
 		}
+	drained:
 		if quiet && total > 0 {
 			// Final progress line (ensure 100% is printed).
 			fmt.Fprint(progressOut, "\r"+progressLine(total, total, doneCount-errorCount,

@@ -206,6 +206,7 @@ func (st *mermaidFixSessionState) systemPrompt() string {
 	return "You are fixing a Mermaid diagram that failed syntax validation. " +
 		"The broken document is in your workspace as " + mermaidFixSubmitFile + ". " +
 		"Edit it with edit_file (targeted find/replace) or write_file (full rewrite) until it passes, then call submit. " +
+		"read_file reads any workspace file (submit.md, compile_error.log) in full or by line range. " +
 		"Requirements: keep it a Mermaid diagram that renders the SAME content as before — " +
 		"fix syntax, do not invent or drop nodes; do not switch to LaTeX/TikZ or any other format; " +
 		"use view_image to look at the original figure whenever unsure. " +
@@ -227,13 +228,14 @@ func (st *mermaidFixSessionState) taskPrompt(fallback bool, validationError stri
 	return b.String()
 }
 
-// tools 组装会话工具：write_file / edit_file / grep / view_image / submit。
+// tools 组装会话工具：write_file / edit_file / read_file / grep / view_image / submit。
 // T52：补 edit_file——原先只能 write_file 整篇重写，改一处也要全量重写。
 func (st *mermaidFixSessionState) tools() []session.Tool {
 	ws := st.ws
 	return []session.Tool{
 		&mermaidWriteTool{st: st, path: filepath.Join(ws, mermaidFixSubmitFile)},
 		&mermaidEditTool{st: st, path: filepath.Join(ws, mermaidFixSubmitFile)},
+		&mermaidReadTool{st: st},
 		&mermaidGrepTool{st: st, dir: ws},
 		&mermaidViewTool{st: st},
 		&mermaidSubmitTool{st: st, path: filepath.Join(ws, mermaidFixSubmitFile)},
@@ -420,7 +422,9 @@ func (t *mermaidSubmitTool) Execute(argsJSON string) (session.ToolResult, error)
 	st.final = finalResponseFromDocument(string(data))
 	st.logTool("submit", "OK")
 	st.log.Log(st.tid, "  [mermaid-fix] 提交通过（", st.checks, "次检查 /", st.errors, "次编译错误）")
-	return session.ToolResult{Text: "OK: the Mermaid diagram passed validation. You are done."}, nil
+	// "SUBMITTED." 前缀是预览侧栏判定 done 终态的规范信号（T53：原先
+	// "OK: ..." 让成功会话在方块视图里显示成红色 error）。
+	return session.ToolResult{Text: "SUBMITTED. The Mermaid diagram passed validation. You are done."}, nil
 }
 
 // recordError 记一次编译错误：落盘、计数、到上限时标记升级（备选段已升级过就不再切）。
@@ -537,4 +541,67 @@ func rotateTranscript(trPath string) {
 		}
 	}
 	_ = os.Rename(trPath, prevName(1))
+}
+
+// ---------- read_file（T53） ----------
+
+// mermaidReadTool 读工作区里的任意文件（submit.md、compile_error.log），
+// 支持全部或行区间。grep 只能按模式找，模型要看"当前全文/某段"时需要它。
+type mermaidReadTool struct {
+	st *mermaidFixSessionState
+}
+
+func (t *mermaidReadTool) Name() string { return "read_file" }
+
+func (t *mermaidReadTool) Definition() map[string]any {
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name":        "read_file",
+		"description": "Read a workspace file (e.g. " + mermaidFixSubmitFile + " or " + mermaidFixErrorFile + "), optionally a 1-based inclusive line range.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":       map[string]any{"type": "string", "description": "File name in the workspace."},
+				"start_line": map[string]any{"type": "integer", "description": "First line (1-based, optional)."},
+				"end_line":   map[string]any{"type": "integer", "description": "Last line (inclusive, optional)."},
+			},
+			"required": []string{"path"},
+		},
+	}}
+}
+
+func (t *mermaidReadTool) Execute(argsJSON string) (session.ToolResult, error) {
+	var args struct {
+		Path  string `json:"path"`
+		Start int    `json:"start_line"`
+		End   int    `json:"end_line"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return session.ToolResult{}, err
+	}
+	name := filepath.Base(strings.TrimSpace(args.Path)) // 工作区内扁平文件名
+	if name == "." || name == "" {
+		return session.ToolResult{}, fmt.Errorf("path 为空")
+	}
+	data, err := os.ReadFile(filepath.Join(t.st.ws, name))
+	if err != nil {
+		return session.ToolResult{Text: "NOT FOUND: " + name}, nil
+	}
+	lines := strings.Split(string(data), "\n")
+	start, end := 1, len(lines)
+	if args.Start > 0 {
+		start = args.Start
+	}
+	if args.End > 0 && args.End < end {
+		end = args.End
+	}
+	if start > end || start > len(lines) {
+		return session.ToolResult{Text: fmt.Sprintf("行区间无效（文件共 %d 行）", len(lines))}, nil
+	}
+	body := strings.Join(lines[start-1:end], "\n")
+	const maxOut = 12000
+	if len(body) > maxOut {
+		body = body[:maxOut] + fmt.Sprintf("\n…（截断，共 %d 行；用 start_line/end_line 读局部）", len(lines))
+	}
+	t.st.logTool("read_file", fmt.Sprintf("%s 行 %d-%d", name, start, end))
+	return session.ToolResult{Text: body}, nil
 }

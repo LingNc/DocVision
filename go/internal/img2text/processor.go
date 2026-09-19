@@ -826,7 +826,12 @@ func ProcessOneImage(
 		key = unsafeWorkspaceRe.ReplaceAllString(key, "_")
 		ws := filepath.Join(fixCfg.WorkspaceRoot, key)
 		fixSession = func(prevResult, validationError string) (string, bool) {
-			return mermaidFixSessionInDir(fixCfg, ws, prevResult, validationError, logger, tid)
+			// fixCfg 是全部 worker 共享的——复制一份按本图设置 ImgPath，
+			// 否则 view_image 拿到空路径、解析出 images 目录本身而 decode
+			// 失败（T53 真实事故：模型在修复会话里从没看到过原图）。
+			fc := *fixCfg
+			fc.ImgPath = imgPath
+			return mermaidFixSessionInDir(&fc, ws, prevResult, validationError, logger, tid)
 		}
 	}
 
@@ -921,11 +926,14 @@ func ProcessOneImage(
 // an absolute path under imagesDir. The Python reference splits the path
 // on the first "/" and joins with images_dir; we mirror that semantics.
 func resolveImageFile(imagesDir, imgPath, subject string) (string, error) {
+	if strings.TrimSpace(imgPath) == "" {
+		return "", os.ErrNotExist // 空路径会 join 出 imagesDir 自身（是目录）
+	}
 	rel := imgPath
 	if i := strings.Index(imgPath, "/"); i >= 0 {
 		rel = imgPath[i+1:]
 	}
-	if full := filepath.Join(imagesDir, rel); pathExists(full) {
+	if full := filepath.Join(imagesDir, rel); fileExists(full) {
 		return full, nil
 	}
 	// Fallback: the markdown may reference a bare "images/foo.jpg" while
@@ -933,7 +941,7 @@ func resolveImageFile(imagesDir, imgPath, subject string) (string, error) {
 	// happens when organize's incremental path kept an unnormalised
 	// markdown on a rerun (see organize.step3CollectImages).
 	if subject != "" {
-		if alt := filepath.Join(imagesDir, subject, filepath.Base(imgPath)); pathExists(alt) {
+		if alt := filepath.Join(imagesDir, subject, filepath.Base(imgPath)); fileExists(alt) {
 			return alt, nil
 		}
 	}
@@ -944,6 +952,14 @@ func resolveImageFile(imagesDir, imgPath, subject string) (string, error) {
 func pathExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+// fileExists reports whether p exists and is a regular file (a directory
+// passing an existence check used to be returned as an "image" and only
+// failed at decode time with a confusing message).
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }
 
 // dash renders an empty string as "-" for log lines.

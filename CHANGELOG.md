@@ -4,7 +4,16 @@
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
 ## [Unreleased]
+### Fixed
+
+- **T53 mermaid 升级会话 view_image 从没看过原图**：`fixCfg.ImgPath` 从未按图赋值（全部 worker 共享同一配置），空路径被解析成 images 目录本身、decode 报 unknown format——升级为按任务复制配置并填入本图路径；`resolveImageFile` 同时加固（空路径/目录不再蒙混成"图片"）。
+- **T53 升级会话成功却在 UI 显示红色 error**：submit 成功回执是 "OK: ..."，而侧栏终态判定认规范前缀 "SUBMITTED."——回执改为规范前缀。
+- **T53 进度行 running 卡 0**：img2text 进度行原先只在有结果到达时刷新（2 张图跑几分钟就一直停在 `[0/2] running: 0`）——writer 循环加 2s 心跳重印当前计数。
+
 ### Added
+
+- **T53 升级修复会话补 read_file 工具**（读 submit.md/compile_error.log，全文或行区间）——原先只有 grep 可查内容。
+
 
 - **P18 img2text 进 WebUI 独立板块**：预览页侧栏顶部新增「LaTeX / img2text」板块切换（`side.board` 落盘记忆）；img2text 板块顶部显示每本书的**进度概览**（逐图四态：done 绿 / fixed 修复成功 / escalated 升级未修好 琥珀 / pending 暗，分段进度条 + 计数，数据来自新 API `/api/img2text-progress`，从 progress_items 树推导、不读日志）；逐图分析转录改为**默认记录**（`preview.img2text_all` 默认 true，调试完可显式 false 关闭；升级修复会话始终记录）。方块视图/搜索在 img2text 板块同样可用。
 

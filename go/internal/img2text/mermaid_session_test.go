@@ -61,7 +61,7 @@ func TestMermaidFixSubmitOK(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte(good), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	submit := st.tools()[4].(*mermaidSubmitTool)
+	submit := st.tools()[5].(*mermaidSubmitTool)
 	res, err := submit.Execute("{}")
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestMermaidFixSubmitNoMermaidCounts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte("no block here"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	submit := st.tools()[4].(*mermaidSubmitTool)
+	submit := st.tools()[5].(*mermaidSubmitTool)
 	if _, err := submit.Execute("{}"); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestMermaidFixErrorBudgetTriggersEscalation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte("no block"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	submit := st.tools()[4].(*mermaidSubmitTool)
+	submit := st.tools()[5].(*mermaidSubmitTool)
 	for i := 1; i <= 3; i++ {
 		if _, err := submit.Execute("{}"); err != nil {
 			t.Fatal(err)
@@ -120,7 +120,7 @@ func TestMermaidFixRoundsCap(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, mermaidFixSubmitFile), []byte("no block"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	submit := st.tools()[4].(*mermaidSubmitTool)
+	submit := st.tools()[5].(*mermaidSubmitTool)
 	for i := 0; i < 5; i++ {
 		if _, err := submit.Execute("{}"); err != nil {
 			t.Fatal(err)
@@ -135,7 +135,7 @@ func TestMermaidFixWriteAndGrep(t *testing.T) {
 	st, ws := newFixState(t, 6, 3)
 	tools := st.tools()
 	write := tools[0].(*mermaidWriteTool)
-	grep := tools[2].(*mermaidGrepTool)
+	grep := tools[3].(*mermaidGrepTool)
 	if _, err := write.Execute(`{"content":"[IMG_TYPE: mermaid]\nBROKEN"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -467,4 +467,55 @@ func discardTestLogger(t *testing.T) *logger.Logger {
 	}
 	t.Cleanup(func() { l.Close() })
 	return l
+}
+
+// T53：read_file 工具（全文/行区间/不存在/区间越界）。
+func TestMermaidReadTool(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, mermaidFixSubmitFile), []byte("l1\nl2\nl3\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, mermaidFixErrorFile), []byte("err-line\n"), 0o644)
+	st := &mermaidFixSessionState{ws: dir, log: discardTestLogger(t), cfg: &MermaidFixConfig{}}
+	tool := &mermaidReadTool{st: st}
+
+	res, err := tool.Execute(`{"path":"submit.md"}`)
+	if err != nil || res.Text != "l1\nl2\nl3\n" {
+		t.Fatalf("full read: %q err=%v", res.Text, err)
+	}
+	res, _ = tool.Execute(`{"path":"submit.md","start_line":2,"end_line":3}`)
+	if res.Text != "l2\nl3" {
+		t.Errorf("range read: %q", res.Text)
+	}
+	res, _ = tool.Execute(`{"path":"compile_error.log"}`)
+	if res.Text != "err-line\n" {
+		t.Errorf("error log: %q", res.Text)
+	}
+	res, _ = tool.Execute(`{"path":"nope.txt"}`)
+	if !strings.Contains(res.Text, "NOT FOUND") {
+		t.Errorf("missing: %q", res.Text)
+	}
+	res, _ = tool.Execute(`{"path":"submit.md","start_line":99}`)
+	if !strings.Contains(res.Text, "无效") {
+		t.Errorf("oob: %q", res.Text)
+	}
+}
+
+// T53：resolveImageFile 拒绝空路径与目录（原先空 ImgPath 会把 images
+// 目录本身当图片返回，decode 才报 unknown format）。
+func TestResolveImageFileGuards(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := resolveImageFile(dir, "", ""); err == nil {
+		t.Error("empty path must fail")
+	}
+	sub := filepath.Join(dir, "sub")
+	os.MkdirAll(sub, 0o755)
+	// 目录存在但不是文件 → 不接受
+	if _, err := resolveImageFile(dir, "images/sub", ""); err == nil {
+		t.Error("directory must not be accepted")
+	}
+	// 真文件正常
+	os.WriteFile(filepath.Join(sub, "a.jpg"), []byte("x"), 0o644)
+	got, err := resolveImageFile(dir, "images/sub/a.jpg", "")
+	if err != nil || got != filepath.Join(sub, "a.jpg") {
+		t.Errorf("real file: %q err=%v", got, err)
+	}
 }
