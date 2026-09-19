@@ -1330,3 +1330,13 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **web（子代理实施，父代理复验）**：Sidebar 头部板块切换（LaTeX/img2text，`side.board` 落盘，无 img2text 数据时隐藏并强制回落 latex）；img2text 板块顶部每书进度概览（分段进度条 done 绿/fixed 青/escalated 琥珀/pending 暗 + 计数）；buildGroups 先按 board 过滤；独立 5s 轮询。vitest 36/36（新增 board.spec 5 条）。
 - 验证：go test 15 包绿 + httptest 冒烟（有根/无根两种）；真实 progress_items 扫描数字如上。运行目录的端到端冒烟被 sandbox 拦（sessions 命令要写 sessions.html 静态导出到 latex_project/），留待部署后目检。
 - plan.md P18 标 [X][ ]。
+
+## 第五十二批（2026-09-19，T53 升级会话整修 + 调用链聚合）
+
+### 真实缺陷（全部有转录证据）
+- **view_image 从没看过原图**：4 个真实升级会话里 view_image 全部回执 `image decode failed: decode image output/images: image: unknown format`——`MermaidFixConfig.ImgPath` 从未按图赋值（fixCfg 全 worker 共享），空路径被 resolveImageFile 解析成 images 目录本身（目录也过存在性检查），decode 才炸。修法：闭包内复制配置按任务填 ImgPath；resolveImageFile 拒绝空路径/目录。
+- **成功会话显示红色 error**：mermaid submit 成功回执是 "OK: ..."，侧栏终态判定认规范前缀 "SUBMITTED."（latex 全部工具都用它）——手写工具漂移的代价，已对齐。
+- **running 卡 0**：进度行只在结果到达时重印，2 张图跑几分钟就停在 `[0/2] running: 0`——writer 循环 select 化 + 2s 心跳。
+- **缺 read_file**：只有 grep 能看内容，补 read_file（全文/行区间，读 submit.md/compile_error.log）。
+- **同图多次会话平级罗列**：web 侧按图聚链（归一 `<hash>.<ext>`：sessions 剥 images_/<md>_ 前缀、mermaid_fix 按最后下划线拆），主行=最新、「历史 N」展开器带记忆、方块视图一链一块；归一失败平铺兜底。子代理实施（51 条 vitest 全绿），父代理复验构建。
+- 工具复用答疑：mermaid 会话工具是手写简化版（工作区模型不同，未复用 tools_work.go）；本次 SUBMITTED 前缀漂移即其代价，已记录。

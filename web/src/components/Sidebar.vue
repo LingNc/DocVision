@@ -8,10 +8,12 @@
 import { computed, ref, watchEffect } from 'vue'
 import { state, openDetails, fmtSize, storeGet, storeSet, setBoard } from '../state'
 import {
-  buildGroups, filterByBoard, groupKey, groupWantOpen, imageChipText, imageTipText,
+  buildGroups, buildImg2TextChains, filterByBoard, groupKey, groupWantOpen,
+  imageChipText, imageTipText, img2textMemberTag,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
-  stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens, type StageStatus,
+  stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens,
+  type SessionChain, type StageStatus,
 } from '../legacy/sidebar'
 import { selectSession, refreshIndex } from '../data'
 import InlineMD from './InlineMD.vue'
@@ -72,9 +74,14 @@ interface GroupView {
   items: any[]; live: number; matched: boolean
   progress: string | null
   stages: StageView[]; multi: boolean
+  /* T53：img2text 板块（无过滤词时）按图聚合的调用链；null = 走阶段层。 */
+  chains: SessionChain[] | null
+  chainSingles: any[]
 }
 
 const groups = computed<GroupView[]>(() => {
+  // 搜索时保持平铺（历史会话能被搜到、照常命中），不做链聚合——取舍见 T53。
+  const chaining = state.board === 'img2text' && !state.filter
   return buildGroups().map((g) => {
     const stages0 = g.items.length ? (g.items[0] as any).projectStages : null
     const stageKeys = Object.keys(g.stages).sort((a, b) => {
@@ -99,11 +106,18 @@ const groups = computed<GroupView[]>(() => {
         overflowKey: okey, needOverflow, shown, hiddenCount: items.length - shown.length,
       }
     })
+    let chains: SessionChain[] | null = null
+    let chainSingles: any[] = []
+    if (chaining) {
+      const built = buildImg2TextChains(g.items)
+      chains = built.chains
+      chainSingles = built.singles
+    }
     return {
       name: g.name, prefix: g.prefix, title: g.title, legacy: g.legacy,
       items: g.items, live: g.live, matched: g.matched,
       progress: projectProgressLine(stages0),
-      stages, multi,
+      stages, multi, chains, chainSingles,
     }
   })
 })
@@ -197,6 +211,25 @@ function rowTitle(s: any): string {
   return sessionTip(s)
 }
 
+/* ---------- T53：img2text 调用链 ---------- */
+
+/* 历史折叠默认收起；当前选中的会话在链里（含历史）时自动展开，手动收起过则不展开。 */
+function chainWantOpen(g: GroupView, c: SessionChain): boolean {
+  const cur: any = state.current
+  const holds = !!cur && c.items.some((s) => s.id === cur.id)
+  return groupWantOpen(groupKey('chain', g.name + '/' + c.key), holds)
+}
+
+/* 方块视图一块一链：悬浮说明列出链上全部会话（新 → 旧）。 */
+function chainTip(c: SessionChain): string {
+  const lines = [sessionTip(c.main)]
+  if (c.rest.length) {
+    lines.push('—— 调用链（共 ' + c.items.length + ' 次会话，新 → 旧）——')
+    c.items.forEach((s) => lines.push(img2textMemberTag(s.id) + ' · ' + sessionTitleOf(s)))
+  }
+  return lines.join('\n')
+}
+
 function onRowClick(s: any) {
   selectSession(s.id)
 }
@@ -284,6 +317,93 @@ function onMoreClick(okey: string) {
           </summary>
           <div>
             <div v-if="g.progress" class="proj-progress" title="progress.json 里各阶段的当前状态">{{ g.progress }}</div>
+            <!-- T53：img2text 板块按图聚合成调用链——主行是最新一次会话，
+                 旁边的「历史 N」展开器点开看该图的全部历史会话。 -->
+            <template v-if="g.chains">
+              <div v-if="blockView" class="session-blocks">
+                <button
+                  v-for="c in g.chains"
+                  :key="c.key"
+                  class="session-block"
+                  :class="{ active: state.current && c.items.some((s) => s.id === (state.current as any).id), live: c.live > 0, err: !c.live && c.main.endState === 'error', pend: !c.live && !c.main.endState }"
+                  type="button"
+                  role="treeitem"
+                  :data-id="c.main.id"
+                  :title="chainTip(c)"
+                  @click="onRowClick(c.main)"
+                >{{ c.main.imageOrder || c.main.chapterOrder || '' }}</button>
+              </div>
+              <template v-else>
+                <div v-for="c in g.chains" :key="c.key" class="chain">
+                  <button
+                    class="session-row sub1"
+                    :class="{ active: state.current && state.current.id === c.main.id }"
+                    type="button"
+                    role="treeitem"
+                    :data-id="c.main.id"
+                    :title="chainTip(c)"
+                    @click="onRowClick(c.main)"
+                  >
+                    <span class="row-slot"><span class="dot" :class="{ live: c.live > 0 }"></span></span>
+                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(c.main)"></InlineMD>
+                    <span v-if="usageChipText(c.main)" class="row-chip usage-chip">{{ usageChipText(c.main) }}</span>
+                    <span class="row-time">{{ relTime(c.main.mtime) }}</span>
+                    <span class="row-actions">
+                      <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, c.main)">ⓘ</button>
+                    </span>
+                  </button>
+                  <details
+                    v-if="c.rest.length"
+                    v-collapse="{ key: 'chain:' + g.name + '/' + c.key, want: chainWantOpen(g, c), frozen: false }"
+                    class="chain-hist"
+                  >
+                    <summary class="chain-hist-row" :title="'同一张图的全部历史会话（新 → 旧）：逐图分析 → stage0 → stage1 → prev 轮转'">
+                      <span class="row-slot"><span class="row-caret"></span></span>
+                      <span class="chain-hist-label">历史 {{ c.rest.length }}</span>
+                    </summary>
+                    <button
+                      v-for="s in c.rest"
+                      :key="s.id"
+                      class="session-row sub2"
+                      :class="{ active: state.current && state.current.id === s.id }"
+                      type="button"
+                      role="treeitem"
+                      :data-id="s.id"
+                      :title="rowTitle(s)"
+                      @click="onRowClick(s)"
+                    >
+                      <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
+                      <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                      <span class="row-chip chain-tag">{{ img2textMemberTag(s.id) }}</span>
+                      <span class="row-time">{{ relTime(s.mtime) }}</span>
+                      <span class="row-actions">
+                        <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, s)">ⓘ</button>
+                      </span>
+                    </button>
+                  </details>
+                </div>
+                <button
+                  v-for="s in g.chainSingles"
+                  :key="s.id"
+                  class="session-row sub1"
+                  :class="{ active: state.current && state.current.id === s.id }"
+                  type="button"
+                  role="treeitem"
+                  :data-id="s.id"
+                  :title="rowTitle(s)"
+                  @click="onRowClick(s)"
+                >
+                  <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
+                  <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                  <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
+                  <span class="row-time">{{ relTime(s.mtime) }}</span>
+                  <span class="row-actions">
+                    <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, s)">ⓘ</button>
+                  </span>
+                </button>
+              </template>
+            </template>
+            <template v-if="!g.chains">
             <template v-for="sv in g.stages" :key="sv.stage">
               <details
                 v-if="g.multi"
@@ -377,6 +497,7 @@ function onMoreClick(okey: string) {
                   </button>
                 </template>
               </template>
+            </template>
             </template>
           </div>
         </details>
@@ -801,6 +922,67 @@ details[open] > .proj-row .row-folder .folder.open {
 
 .icon-btn.on {
  color: var(--accent); 
+}
+
+/* ---- T53：img2text 调用链（同图会话聚合） ------------------------------
+ * 主行是最新一次会话；下面挂一个「历史 N」展开器（details），点开出该图的
+ * 全部历史会话（逐图分析 → stage0 → stage1 → prev 轮转），行内带来源标签。 */
+.chain-hist {
+  margin: 0;
+}
+
+.chain-hist-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px 0 40px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  color: var(--caption);
+  font-size: 12px;
+}
+
+.chain-hist-row::-webkit-details-marker {
+  display: none;
+}
+
+.chain-hist-row:hover {
+  background: var(--hover);
+  color: var(--muted);
+}
+
+.chain-hist-row .row-slot {
+  height: 16px;
+}
+
+.chain-hist-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chain-hist .session-row.sub2 {
+  padding-left: 56px;
+}
+
+.row-chip.chain-tag {
+  flex: none;
+  color: var(--caption);
+  font-size: 11px;
+  white-space: nowrap;
+  border: .5px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 16px;
+  margin-left: 6px;
+}
+
+.frame[data-sidebar-collapsed] .chain-hist {
+  display: none;
 }
 
 /* 组内会话过多时只显示前 N 条 + 一个「更多会话」按钮（28px、左内边距 28px） */

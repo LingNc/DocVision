@@ -375,6 +375,137 @@ export function filterByBoard<T extends { board?: string }>(sessions: T[] | null
   return (sessions || []).filter((s) => sessionBoard(s) === b)
 }
 
+/* ---------- T53：img2text 调用链（同一张图的多次会话聚合成一组） ----------
+ *
+ * img2text 板块的会话 ID 两种形态：
+ *   img2text:sessions/<md>/<图名>.jsonl                        —— 逐图分析
+ *   img2text:mermaid_fix/<md>_<图名>/session-stageN[.prevM].jsonl —— 升级修复/轮转
+ * 链键 = 归一后的图片文件名（<hash>.<ext>）：sessions 的去掉 images_ 前缀和
+ * <md>_ 前缀；mermaid_fix 的按最后一个下划线拆（图片名是内容哈希、本身不含
+ * 下划线，书/图分界就是最后一个 _，md 名含下划线也不怕）。归一失败退回原始段，
+ * 保证同图的 stage0/stage1/prevN 至少按来源各成一条链，绝不散列。 */
+
+export interface Img2TextRef {
+  kind: 'analyze' | 'fix'
+  img: string   // 归一后的图片文件名（链键）
+  stage: number // fix: 0/1…；analyze: -1
+  prev: number  // 轮转序号：0=当前，1=prev1（上一次），2=prev2（上上次）…
+}
+
+export function parseImg2TextId(id: string): Img2TextRef | null {
+  const PREFIX = 'img2text:'
+  if (!id || id.indexOf(PREFIX) !== 0) return null
+  const segs = id.slice(PREFIX.length).split('/')
+  if (segs.length !== 3) return null
+  if (segs[0] === 'mermaid_fix') {
+    const m = /^session-stage(\d+)(?:\.prev(\d+))?\.jsonl$/.exec(segs[2])
+    if (!m) return null
+    const dir = segs[1]
+    let img = dir
+    const i = dir.lastIndexOf('_')
+    if (i > 0 && i < dir.length - 1) img = dir.slice(i + 1)
+    return { kind: 'fix', img, stage: parseInt(m[1], 10), prev: m[2] ? parseInt(m[2], 10) : 0 }
+  }
+  if (segs[0] === 'sessions') {
+    let stem = segs[2]
+    if (!/\.jsonl$/i.test(stem)) return null
+    stem = stem.slice(0, -'.jsonl'.length)
+    if (!stem) return null
+    const dot = segs[1].lastIndexOf('.')
+    const md = dot > 0 ? segs[1].slice(0, dot) : segs[1]
+    let img = stem
+    if (img.indexOf('images_') === 0) img = img.slice('images_'.length)
+    if (md && img.indexOf(md + '_') === 0) img = img.slice(md.length + 1)
+    if (!img) img = stem
+    return { kind: 'analyze', img, stage: -1, prev: 0 }
+  }
+  return null
+}
+
+/* 历史列表里每条会话的来源小标签：逐图分析 / stage0 / stage1 · 上一次 … */
+export function img2textMemberTag(id: string): string {
+  const r = parseImg2TextId(id)
+  if (!r) return ''
+  if (r.kind === 'analyze') return '逐图分析'
+  let t = 'stage' + r.stage
+  if (r.prev === 1) t += ' · 上一次'
+  else if (r.prev === 2) t += ' · 上上次'
+  else if (r.prev > 2) t += ' · prev' + r.prev
+  return t
+}
+
+function mtimeMs(s: any): number {
+  const t = Date.parse((s && s.mtime) || '')
+  return isNaN(t) ? 0 : t
+}
+
+/*
+ * 链内排序：最新在前。主键 mtime 降序；并列时 stage 编号大的新、
+ * 轮转序号小的新（当前运行 > prev1 > prev2），最后按 id 保底确定性。
+ */
+export function sortChainMembers(items: any[]): any[] {
+  return (items || []).slice().sort((a, b) => {
+    const d = mtimeMs(b) - mtimeMs(a)
+    if (d) return d
+    const ra = parseImg2TextId(a && a.id)
+    const rb = parseImg2TextId(b && b.id)
+    const sa = ra ? ra.stage : -2
+    const sb = rb ? rb.stage : -2
+    if (sa !== sb) return sb - sa
+    const pa = ra ? ra.prev : 0
+    const pb = rb ? rb.prev : 0
+    if (pa !== pb) return pa - pb
+    const ia = String((a && a.id) || '')
+    const ib = String((b && b.id) || '')
+    return ia < ib ? -1 : ia > ib ? 1 : 0
+  })
+}
+
+export interface SessionChain {
+  key: string      // 链键（归一图片名，项目内唯一）
+  img: string
+  main: any        // 最新一次会话（主行）
+  rest: any[]      // 历史（次新 → 最旧）
+  items: any[]     // main + rest
+  live: number
+}
+
+function chainBookOrder(c: SessionChain): number {
+  // 书内序号取全体成员的**最小**正 chapterOrder（逐图分析的编号是书的扫描
+  // 顺序；修复段另有一套编号，取最小值让同图各段挨在一起、链间按书序排）。
+  let best = Infinity
+  c.items.forEach((s) => {
+    const n = Number(s && s.chapterOrder) || 0
+    if (n > 0 && n < best) best = n
+  })
+  return best
+}
+
+/* 把一组 img2text 会话按图片聚成链；解析不了 ID 的进 singles（原样罗列）。 */
+export function buildImg2TextChains(items: any[]): { chains: SessionChain[]; singles: any[] } {
+  const byImg: Record<string, any[]> = {}
+  const singles: any[] = []
+  ;(items || []).forEach((s) => {
+    const r = s && parseImg2TextId(s.id)
+    if (!r) { singles.push(s); return }
+    ;(byImg[r.img] = byImg[r.img] || []).push(s)
+  })
+  const chains: SessionChain[] = Object.keys(byImg).map((img) => {
+    const members = sortChainMembers(byImg[img])
+    let live = 0
+    members.forEach((s) => { if (s.live) live++ })
+    return { key: img, img, main: members[0], rest: members.slice(1), items: members, live }
+  })
+  chains.sort((a, b) => {
+    const oa = chainBookOrder(a)
+    const ob = chainBookOrder(b)
+    if (oa !== ob) return oa - ob
+    return a.img < b.img ? -1 : a.img > b.img ? 1 : 0
+  })
+  singles.sort((a, b) => mtimeMs(b) - mtimeMs(a))
+  return { chains, singles }
+}
+
 export function buildGroups(): ProjectGroup[] {
   const q = state.filter
   let groups: ProjectGroup[] = []
