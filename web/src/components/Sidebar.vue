@@ -8,6 +8,7 @@
 import { computed, ref, watchEffect } from 'vue'
 import { state, openDetails, fmtSize, storeGet, storeSet, setBoard } from '../state'
 import {
+  bookDominantState, bookTip, booksHeadText,
   buildGroups, buildImg2TextChains, filterByBoard, groupKey, groupWantOpen,
   imageChipText, imageTipText, img2textMemberTag,
   projectProgressLine, projectOf,
@@ -50,6 +51,34 @@ const progressBooks = computed<Img2TextBook[]>(() =>
 function barPct(part: number, total: number): string {
   if (!total) return '0'
   return ((part * 100) / total).toFixed(1)
+}
+
+/*
+ * T54：进度概览整块可折叠（像项目组的 <details> 一样），记忆 key
+ * 「overview:img2text」，首次无记忆默认折叠（书多时省空间），用户展开后记
+ * 住。头部行 = 标题 + 聚合「N/M 书完成」。
+ */
+function overviewWantOpen(): boolean {
+  return groupWantOpen('overview:img2text', false)
+}
+
+const overviewHeadText = computed(() => booksHeadText(progressBooks.value))
+
+/*
+ * T54：概览区内的列表/方块两种视图，与侧栏头部 ▦ 同一图标词汇但状态独立
+ * 记忆（i2t.overviewBlocks）。块视图一书一块，颜色取主导状态
+ * （escalated>pending>fixed>done），点块把搜索框填上书名、借既有过滤跳到
+ * 该书的会话组（比"选中该书第一个会话"简单：不依赖进度条目与会话的对齐）。
+ */
+const overviewBlocks = ref(storeGet('i2t.overviewBlocks') === '1')
+function toggleOverviewBlocks() {
+  overviewBlocks.value = !overviewBlocks.value
+  storeSet('i2t.overviewBlocks', overviewBlocks.value ? '1' : '0')
+}
+
+function onOverviewBookClick(b: Img2TextBook) {
+  const stem = b.book.replace(/\.md$/i, '')
+  state.filter = stem.toLowerCase()
 }
 
 /*
@@ -275,24 +304,55 @@ function onMoreClick(okey: string) {
     </div>
     <div class="side-list-wrap">
       <div id="session-list" ref="listEl" class="session-list" role="tree" aria-label="会话列表">
-        <div v-if="progressBooks.length" class="i2t-overview" aria-label="img2text 进度概览">
-          <div v-for="b in progressBooks" :key="b.book" class="i2t-book">
-            <div class="i2t-book-head">
-              <span class="i2t-book-name" :title="b.book">{{ b.book }}</span>
-              <span class="i2t-book-count">{{ b.done }}/{{ b.total }}</span>
-            </div>
-            <div class="i2t-bar" role="img" :aria-label="'完成 ' + b.done + ' · 升级 ' + b.escalated + ' · 待处理 ' + b.pending">
-              <span class="i2t-seg i2t-done" :style="{ width: barPct(b.done, b.total) + '%' }"></span>
-              <span class="i2t-seg i2t-esc" :style="{ width: barPct(b.escalated, b.total) + '%' }"></span>
-              <span class="i2t-seg i2t-pend" :style="{ width: barPct(b.pending, b.total) + '%' }"></span>
-            </div>
-            <div class="i2t-book-meta">
-              <span class="i2t-meta-done">完成 {{ b.done }}</span>
-              <span v-if="b.escalated" class="i2t-meta-esc">升级 {{ b.escalated }}</span>
-              <span v-if="b.pending" class="i2t-meta-pend">待处理 {{ b.pending }}</span>
-            </div>
+        <details
+          v-if="progressBooks.length"
+          v-collapse="{ key: 'overview:img2text', want: overviewWantOpen(), frozen: false }"
+          class="i2t-overview"
+          aria-label="img2text 进度概览"
+        >
+          <summary class="i2t-ov-head" title="img2text 逐书进度概览（点击折叠/展开，状态会被记住）">
+            <span class="row-slot"><span class="row-caret"></span></span>
+            <span class="i2t-ov-title">进度概览</span>
+            <span class="i2t-ov-agg">{{ overviewHeadText }}</span>
+            <button
+              class="icon-btn" :class="{ on: overviewBlocks }" type="button"
+              :title="overviewBlocks ? '概览切回列表视图' : '概览切到方块视图（一书一块，色块按主导状态；点块搜该书的会话）'"
+              @click.stop="toggleOverviewBlocks"
+            >{{ overviewBlocks ? '☰' : '▦' }}</button>
+          </summary>
+          <div v-if="overviewBlocks" class="i2t-blocks">
+            <button
+              v-for="b in progressBooks"
+              :key="b.book"
+              class="i2t-block"
+              :class="'i2t-' + bookDominantState(b)"
+              type="button"
+              :title="bookTip(b)"
+              :aria-label="b.book + '：完成 ' + b.done + ' · 修复 ' + b.fixed + ' · 升级 ' + b.escalated + ' · 待处理 ' + b.pending"
+              @click="onOverviewBookClick(b)"
+            ></button>
           </div>
-        </div>
+          <template v-else>
+            <div v-for="b in progressBooks" :key="b.book" class="i2t-book">
+              <div class="i2t-book-head">
+                <span class="i2t-book-name" :title="b.book">{{ b.book }}</span>
+                <span class="i2t-book-count">{{ b.done }}/{{ b.total }}</span>
+              </div>
+              <div class="i2t-bar" role="img" :aria-label="'完成 ' + b.done + ' · 修复 ' + b.fixed + ' · 升级 ' + b.escalated + ' · 待处理 ' + b.pending">
+                <span class="i2t-seg i2t-done" :style="{ width: barPct(b.done, b.total) + '%' }"></span>
+                <span class="i2t-seg i2t-fixed" :style="{ width: barPct(b.fixed, b.total) + '%' }"></span>
+                <span class="i2t-seg i2t-esc" :style="{ width: barPct(b.escalated, b.total) + '%' }"></span>
+                <span class="i2t-seg i2t-pend" :style="{ width: barPct(b.pending, b.total) + '%' }"></span>
+              </div>
+              <div class="i2t-book-meta">
+                <span class="i2t-meta-done">完成 {{ b.done }}</span>
+                <span v-if="b.fixed" class="i2t-meta-fixed">修复 {{ b.fixed }}</span>
+                <span v-if="b.escalated" class="i2t-meta-esc">升级 {{ b.escalated }}</span>
+                <span v-if="b.pending" class="i2t-meta-pend">待处理 {{ b.pending }}</span>
+              </div>
+            </div>
+          </template>
+        </details>
         <details
           v-for="g in groups"
           :key="g.name"

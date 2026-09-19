@@ -1340,3 +1340,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **缺 read_file**：只有 grep 能看内容，补 read_file（全文/行区间，读 submit.md/compile_error.log）。
 - **同图多次会话平级罗列**：web 侧按图聚链（归一 `<hash>.<ext>`：sessions 剥 images_/<md>_ 前缀、mermaid_fix 按最后下划线拆），主行=最新、「历史 N」展开器带记忆、方块视图一链一块；归一失败平铺兜底。子代理实施（51 条 vitest 全绿），父代理复验构建。
 - 工具复用答疑：mermaid 会话工具是手写简化版（工作区模型不同，未复用 tools_work.go）；本次 SUBMITTED 前缀漂移即其代价，已记录。
+
+## 第五十三批（2026-09-19，T54 进度概览折叠 + 块视图）
+
+- 用户反馈：80 本书的进度概览列表太长。改为整块可折叠（头部「进度概览 + N/M 书完成」聚合行，v-collapse 记忆、默认折叠）；列表支持行式/方块切换（独立记忆 i2t.overviewBlocks），块视图按最重状态着色（escalated>pending>fixed>done）、点块填搜索框跳书。
+- 顺手补漏：前端概览条此前只有 done/esc/pend 三段——P18 后端后加的 fixed 第四态前端没跟上，本次补齐（青段 + 「修复 N」计数 + types.ts 字段）。
+- 子代理实施（vitest 58/58 全绿含新 7 条），父代理复验 go build。T54 标 [X][ ]。

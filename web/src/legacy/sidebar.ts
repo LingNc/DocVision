@@ -4,7 +4,7 @@
  * 视觉规则在整卷样式表里；这里只产数据与文案。
  */
 import { state, storeSet, fmtSize, fmtClock, relTime } from '../state'
-import { type Line, type LineEst } from './types'
+import { type Line, type LineEst, type Img2TextBook } from './types'
 
 export const ROOT_PROJECT = '（根目录）'
 
@@ -551,10 +551,44 @@ export function buildGroups(): ProjectGroup[] {
 
 export function findSession(id: string): any {
   let found: any = null
-  state.sessions.forEach((s: any) => {
+  state.sessions.forEach((s) => {
     if (s.id === id) found = s
   })
   return found
+}
+
+/* ---------- T54：img2text 进度概览（块主导色 / 聚合文案） ---------- */
+
+export type I2tDominantState = 'escalated' | 'pending' | 'fixed' | 'done'
+
+/*
+ * 块视图里一本书一个色块：取"最重"的状态——升级未修好(琥珀) > 待处理(暗) >
+ * 修复(青) > 全完成(绿)。多状态并存时问题色优先，一眼看到哪本要管。
+ */
+export function bookDominantState(b: Pick<Img2TextBook, 'done' | 'fixed' | 'escalated' | 'pending'>): I2tDominantState {
+  if (b.escalated > 0) return 'escalated'
+  if (b.pending > 0) return 'pending'
+  if (b.fixed > 0) return 'fixed'
+  return 'done'
+}
+
+export const I2T_STATE_TEXT: Record<I2tDominantState, string> = {
+  done: '全部完成', fixed: '有修复', escalated: '有升级未修好', pending: '有待处理',
+}
+
+/* 块悬浮说明：书名 + 四态计数 + done/total。 */
+export function bookTip(b: Img2TextBook): string {
+  return b.book + '\n' +
+    '完成 ' + b.done + ' · 修复 ' + b.fixed + ' · 升级 ' + b.escalated + ' · 待处理 ' + b.pending +
+    '（' + b.done + '/' + b.total + '）\n主导状态：' + I2T_STATE_TEXT[bookDominantState(b)] +
+    '\n点击在侧栏里搜这本书的会话'
+}
+
+/* 概览头部聚合：「12/15 书完成」（完成 = done+fixed 覆盖了 total）。 */
+export function booksHeadText(books: Img2TextBook[]): string {
+  const list = books || []
+  const full = list.filter((b) => b.total > 0 && b.done + b.fixed >= b.total).length
+  return full + '/' + list.length + ' 书完成'
 }
 
 /* ---------- 折叠 / 溢出记忆（旧页同名） ---------- */

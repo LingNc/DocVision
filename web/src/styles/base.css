@@ -63,6 +63,8 @@
   --preview-h: 108px;
   --preview-w: 240px;
   --dot-live: #22c55e;
+  /* T54：img2text 进度概览的「修复(fixed)」态——青色，与 done 绿区分开。 */
+  --i2t-fixed: #0d9488;
   /* 轨迹表的种类标签（照 DSH 的 kindTag 上色：用户=业务主色、工具=琥珀、错误=红） */
   --kind-user-fg: #4176e6;
   --kind-user-bg: #e8effc;
@@ -140,6 +142,7 @@ html[data-theme="dark"] {
   --fam-view: #4ade80;
   --fam-search: #c4b5fd;
   --fam-submit: #f87171;
+  --i2t-fixed: #2dd4bf;
 }
 
 * {
@@ -892,13 +895,98 @@ details[open] > summary .line-caret {
 
 /* ============================ P18：img2text 进度概览 ============================
  * 侧栏 img2text 板块顶部的按书进度区：每本书一块——书名 + 分段进度条
- * （done=绿 / escalated=琥珀 / pending=暗）+ 计数行。纯 CSS，无库。 */
+ * （done=绿 / fixed=青 / escalated=琥珀 / pending=暗）+ 计数行。纯 CSS，无库。
+ * T54：整块做成 <details> 可折叠（头部一行：标题 + 聚合「N/M 书完成」），
+ * 内部支持列表/方块两种视图（块视图一书一个色块，颜色按主导状态）。 */
 .i2t-overview {
   margin: 0 2px 8px;
   border: .5px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   padding: 6px 8px;
+}
+
+.i2t-ov-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  color: var(--muted);
+}
+
+.i2t-ov-head::-webkit-details-marker {
+  display: none;
+}
+
+.i2t-ov-head:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.i2t-ov-head .row-slot {
+  height: 16px;
+}
+
+.i2t-ov-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.i2t-ov-agg {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.i2t-blocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 2px 2px;
+}
+
+.i2t-block {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: .5px solid var(--border);
+  border-radius: 6px;
+  background: var(--hover);
+  cursor: pointer;
+  transition: filter .12s, border-color .12s;
+}
+
+.i2t-block:hover {
+  filter: brightness(1.15);
+  border-color: var(--border-strong);
+}
+
+.i2t-block.i2t-done {
+  background: var(--ok);
+}
+
+.i2t-block.i2t-fixed {
+  background: var(--i2t-fixed);
+}
+
+.i2t-block.i2t-escalated {
+  background: var(--warn);
+}
+
+.i2t-block.i2t-pending {
+  background: var(--dim);
+  opacity: .45;
 }
 
 .i2t-book {
@@ -953,6 +1041,10 @@ details[open] > summary .line-caret {
   background: var(--ok);
 }
 
+.i2t-seg.i2t-fixed {
+  background: var(--i2t-fixed);
+}
+
 .i2t-seg.i2t-esc {
   background: var(--warn);
 }
@@ -972,6 +1064,10 @@ details[open] > summary .line-caret {
 
 .i2t-book-meta .i2t-meta-done {
   color: var(--ok);
+}
+
+.i2t-book-meta .i2t-meta-fixed {
+  color: var(--i2t-fixed);
 }
 
 .i2t-book-meta .i2t-meta-esc {
