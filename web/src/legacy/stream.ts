@@ -114,6 +114,47 @@ export function splitLeaks(text: string): { main: string; blocks: LeakBlock[] } 
   return { main: s.trim(), blocks }
 }
 
+/*
+ * T56：img2text 逐图分析会话的**旧转录**里，user 消息的 text 字段是一整段
+ * JSON 数组字符串（写盘时的 bug，Go 侧已修、新转录正常）：
+ *   [{"text":"The image to describe is at line 1038. ..."},{"type":"image_url",
+ *     "image_url":{"url":"data:image/jpeg;base64,/9j/..."}}]
+ * 预览页会把这段 JSON 原文显示出来、图片完全不可见。这里做旧格式归一：
+ * 能解析成 part 数组（元素含 text 字段或 image_url 字段）且**确实带图**时，
+ * 拆出「文本段按序拼接 + data: URL 图片列表」，由 streamModel 把它当作
+ * "任务行自己带图"（附件缩略图/灯箱链路复用 ImageTurn 一套）；
+ * 解析失败、不是 part 数组、或没有图 → 一律原样（返回 null），正常消息零影响。
+ */
+export interface LegacyParts { text: string; images: string[] }
+
+export function parseLegacyImageParts(text: string): LegacyParts | null {
+  const s = String(text || '').trim()
+  if (!s.startsWith('[{')) return null
+  let arr: unknown
+  try { arr = JSON.parse(s) } catch { return null }
+  if (!Array.isArray(arr) || !arr.length) return null
+  const texts: string[] = []
+  const images: string[] = []
+  for (const p of arr) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return null
+    const o = p as Record<string, unknown>
+    if (typeof o.text === 'string') {
+      if (o.text) texts.push(o.text)
+      continue
+    }
+    const iu = o.image_url as Record<string, unknown> | undefined
+    // 只认 data: URL（可直接作 <img src>）；其他形态不是我们认识的旧格式，原样。
+    if (iu && typeof iu === 'object' && typeof iu.url === 'string' && iu.url.startsWith('data:image/')) {
+      images.push(iu.url)
+      continue
+    }
+    return null
+  }
+  // 没拆出图就不动它（这段归一就是为了救"图片不可见"的旧转录）。
+  if (!images.length) return null
+  return { text: texts.join('\n'), images }
+}
+
 /* 旧入口兼容（T32 批引入）：leak = 全部残片文本拼接。 */
 export function splitProtocolLeak(text: string): { main: string; leak: string } {
   const r = splitLeaks(text)
@@ -238,12 +279,22 @@ export function streamModel(): StreamModel {
     const isToolCall = line.role === 'assistant' && line.tool_calls && line.tool_calls.length > 0
     // 带图的 user 行是"把图片投给模型"的那一轮（图片投喂 / 工具回执），
     // 不是用户的话，所以「仅看工具调用」里也要看得见它。
-    const isImageTurn = line.role === 'user' && !!(line.images && line.images.length)
+    // T56：旧转录的 user 行 text 是 part 数组 JSON 字符串时先归一（拆文本+图）。
+    const legacyParts = line.role === 'user' && !(line.images && line.images.length)
+      ? parseLegacyImageParts(String(line.text || ''))
+      : null
+    const isImageTurn = line.role === 'user' &&
+      (!!(line.images && line.images.length) || !!legacyParts)
     if (state.onlyTools && line.role !== 'tool' && !isToolCall && !isImageTurn) return
 
     if (line.role === 'user') {
+      // 归一后的生效行：正文=拼接文本，图=拆出的 data: URL（原 line 不动）。
+      const eff: Line = legacyParts ? { ...line, text: legacyParts.text, images: legacyParts.images } : line
       if (isImageTurn) {
-        const attr: ImageAttr = attrs[line.n] || { kind: 'none', how: '', callId: '', taskLineN: 0 }
+        // 旧格式归一的行：图就是这条任务提示自己的附件，归属明确（本会话任务）。
+        const attr: ImageAttr = legacyParts
+          ? { kind: 'task', how: 'task', callId: '', lineN: line.n, taskLineN: line.n }
+          : (attrs[line.n] || { kind: 'none', how: '', callId: '', taskLineN: 0 })
         if (attr.kind === 'call' && callById[attr.callId]) {
           const host = callById[attr.callId]
           // 不论怎么归属，看图类调用的行下面都要挂缩略图预览（折叠态可见）。
@@ -260,8 +311,8 @@ export function streamModel(): StreamModel {
         }
         if (attr.kind === 'task' && attr.taskLineN === line.n) {
           // 任务行自己带图：图片作为它的附件收在同一个块里。
-          const own = systemItem(line, sid)
-          own.attachments.push({ line, attr })
+          const own = systemItem(eff, sid)
+          own.attachments.push({ line: eff, attr })
           items.push(own)
           taskByN[line.n] = own
           return

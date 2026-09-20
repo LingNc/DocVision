@@ -242,7 +242,10 @@ function sessionDir(id: string): string {
 }
 
 export function mediaURL(ref: unknown): string {
-  const tail = String(ref || '').replace(/^file:\/\//, '')
+  const raw = String(ref || '')
+  // T56：旧格式归一拆出的内联图片（data: URL）与绝对 URL 直接使用，不走 /media 寻址。
+  if (raw.startsWith('data:') || /^https?:\/\//.test(raw)) return raw
+  const tail = raw.replace(/^file:\/\//, '')
   const rel = joinPath(sessionDir(state.current ? state.current.id : ''), tail)
   // 静态快照：图片直接相对导出页寻址（mediaRoot 已含到扫描根的相对路径），
   // file:// 下没有 /media 路由。

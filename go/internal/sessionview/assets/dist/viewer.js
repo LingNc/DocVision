@@ -9673,7 +9673,9 @@
     return i < 0 ? "" : String(id).slice(0, i);
   }
   function mediaURL(ref2) {
-    const tail = String(ref2 || "").replace(/^file:\/\//, "");
+    const raw = String(ref2 || "");
+    if (raw.startsWith("data:") || /^https?:\/\//.test(raw)) return raw;
+    const tail = raw.replace(/^file:\/\//, "");
     const rel = joinPath(sessionDir(state.current ? state.current.id : ""), tail);
     if (state.staticMode) return (state.mediaRoot || "") + rel;
     return "/media/" + rel;
@@ -9816,6 +9818,35 @@
     }
     return { main: s.trim(), blocks };
   }
+  function parseLegacyImageParts(text) {
+    const s = String(text || "").trim();
+    if (!s.startsWith("[{")) return null;
+    let arr;
+    try {
+      arr = JSON.parse(s);
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(arr) || !arr.length) return null;
+    const texts = [];
+    const images = [];
+    for (const p2 of arr) {
+      if (!p2 || typeof p2 !== "object" || Array.isArray(p2)) return null;
+      const o = p2;
+      if (typeof o.text === "string") {
+        if (o.text) texts.push(o.text);
+        continue;
+      }
+      const iu = o.image_url;
+      if (iu && typeof iu === "object" && typeof iu.url === "string" && iu.url.startsWith("data:image/")) {
+        images.push(iu.url);
+        continue;
+      }
+      return null;
+    }
+    if (!images.length) return null;
+    return { text: texts.join("\n"), images };
+  }
   function callItemsOf(line, sid) {
     return (line.tool_calls || []).map((call) => {
       const fn = call.function || {};
@@ -9904,11 +9935,13 @@
       if (line.t && line.t !== "msg") return;
       if (!line.role) return;
       const isToolCall = line.role === "assistant" && line.tool_calls && line.tool_calls.length > 0;
-      const isImageTurn = line.role === "user" && !!(line.images && line.images.length);
+      const legacyParts = line.role === "user" && !(line.images && line.images.length) ? parseLegacyImageParts(String(line.text || "")) : null;
+      const isImageTurn = line.role === "user" && (!!(line.images && line.images.length) || !!legacyParts);
       if (state.onlyTools && line.role !== "tool" && !isToolCall && !isImageTurn) return;
       if (line.role === "user") {
+        const eff = legacyParts ? { ...line, text: legacyParts.text, images: legacyParts.images } : line;
         if (isImageTurn) {
-          const attr = attrs[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
+          const attr = legacyParts ? { kind: "task", how: "task", callId: "", lineN: line.n, taskLineN: line.n } : attrs[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
           if (attr.kind === "call" && callById[attr.callId]) {
             const host = callById[attr.callId];
             const target = previewTarget(attr, callById) || host;
@@ -9922,8 +9955,8 @@
             return;
           }
           if (attr.kind === "task" && attr.taskLineN === line.n) {
-            const own2 = systemItem(line);
-            own2.attachments.push({ line, attr });
+            const own2 = systemItem(eff);
+            own2.attachments.push({ line: eff, attr });
             items.push(own2);
             taskByN[line.n] = own2;
             return;
