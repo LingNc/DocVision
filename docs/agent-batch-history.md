@@ -1390,3 +1390,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 - **T59 空回复无重试**：逐图分析路径的空响应（0 choices/全空）直接记 EMPTY_RESPONSE 等下轮。在 doCallWithRetryFull 加重试层：isDegenerateResponse 判定（无 choices 或 全空 content 且无工具调用）→ 原样重发 ≤2 次（字节一致保前缀缓存），仍空才算失败。与 T50 会话层自救是同一现象的两次露面。
 - **T58 运行中书不可见**：进度板加 running 态——sessions/<md>.md/<图>.jsonl（含 prevN 归一）在活动窗口内被写过且无结果。web：蓝色脉冲段 + 进行中计数 + 方块最优先着色。子代理实施（vitest 90/90），父代理复验。
+
+## 第五十六批补（2026-09-20，latex 看图丢图回归修复）
+
+- 用户报新 latex 会话无缩略图/无分组差异/思考块疑问。查证：① 丢图是 T56（2067210）引入的真实回归——flattenParts 断言 flip（string-map→any-map）与 toolImageContent 产物不符，静默跳过。9-12 老转录有图、9-20 新转录无图即为时间证据。修复：产物改 any-map + 断言双形态兼容；回归测试 TestAppendToolImageTurnStoresImage 钉两种形态（此类断言此前零覆盖才致回归）。② 分组无异常：/api/index 实测该书 7 条会话 stage=vector 全对，单阶段项目按设计平铺显示。③ "思考块"：gpt-5.6-luna 的 reasoning_content 只有加密摘要头（**Planning TikZ creation** 一行）——厂商行为，非格式不兼容，无需 response_format 切换。

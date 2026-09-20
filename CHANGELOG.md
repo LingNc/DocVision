@@ -6,6 +6,7 @@
 ## [Unreleased]
 ### Fixed
 
+- **latex 看图回传丢图（T56 回归）**：T56 重构展平逻辑时把 `image_url` 的类型断言从 `map[string]string` 换成 `map[string]interface{}`，与 `toolImageContent` 的实际形态不符且失败被静默跳过——9-20 起新 latex 会话的 view_image/view_pdf 缩略图全部消失（存量老转录不受影响）。两种 map 形态现在都认，回归测试钉住。
 - **T59 空回复不重试**：逐图分析遇到厂商退化空响应（0 choices / 全空无工具调用）原先直接记失败等下轮；现在在重试层原样重发（保前缀缓存），次数共用 `api_max_retries`（默认 3），仍空才算 `[IMG_EMPTY_RESPONSE]`。
 - **跨行 `$$…$$` 公式不渲染（预览页）**：行内数学正则逐行扫描，跨行显示块永远匹配不到——块级解析补上 `collectMathBlock`（单行/多行/未闭合三种形态，坏公式回退原文），渲染为居中显示块。
 - **T56 逐图会话显示三修**：① 成功会话方块爆红——一次性逐图分析不调 submit，模型偶尔调 getmorecontext 即被误判 error；完成信号补上 assistant 行的 `[IMG_TYPE:` 标记。② user 消息显示成原始 JSON——multipart 内容经 json 往返变成 `[]interface{}`，落盘分支不认、整体序列化；已展平（文本拼接 + 图片存媒体引用），存量旧转录由前端归一拆出文本与图片缩略图。③ img2text 会话图片 404——媒体 URL 拼上了 ID 的 `img2text:` 前缀（T57）。
