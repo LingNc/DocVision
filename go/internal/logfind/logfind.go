@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // logPatterns are the primary log filename prefixes of every pipeline
@@ -52,24 +55,61 @@ func find(dir string) ([]string, error) {
 	return files, nil
 }
 
-// FindLatest returns the filename-sorted latest primary log.
+// logNameTimeRe extracts the timestamp embedded in a primary log name
+// (img2text_20260916_184221.log / latex_20260916_184221.log). Sorting by
+// raw filename mixes the pipeline prefix into chronological order
+// ("img2text_" < "latex_" lexicographically), which made `analyze -r 0`
+// always pick the newest LATEX log even when the latest run was img2text
+// (T55). Sort by the embedded time instead, name as tiebreak.
+var logNameTimeRe = regexp.MustCompile(`(?:img2text|latex)_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.log`)
+
+// LogNameTime parses the timestamp embedded in a primary log filename.
+func LogNameTime(path string) (time.Time, bool) {
+	m := logNameTimeRe.FindStringSubmatch(filepath.Base(path))
+	if m == nil {
+		return time.Time{}, false
+	}
+	var v [6]int
+	for i := 1; i <= 6; i++ {
+		v[i-1], _ = strconv.Atoi(m[i])
+	}
+	return time.Date(v[0], time.Month(v[1]), v[2], v[3], v[4], v[5], 0, time.Local), true
+}
+
+// SortByTime sorts primary log paths oldest-first by embedded timestamp
+// (filename as tiebreak) and returns the sorted slice in place.
+func SortByTime(files []string) []string {
+	sort.SliceStable(files, func(i, j int) bool {
+		ti, okI := LogNameTime(files[i])
+		tj, okJ := LogNameTime(files[j])
+		switch {
+		case okI && okJ && !ti.Equal(tj):
+			return ti.Before(tj)
+		case okI != okJ:
+			return okI // 有时间的排前面
+		}
+		return files[i] < files[j]
+	})
+	return files
+}
+
+// FindLatest returns the time-sorted latest primary log.
 func FindLatest(dir string) (string, error) {
 	files, err := find(dir)
 	if err != nil {
 		return "", err
 	}
-	sort.Strings(files)
+	SortByTime(files)
 	return files[len(files)-1], nil
 }
 
-// FindAll returns all primary logs in ascending filename order.
+// FindAll returns all primary logs in ascending embedded-time order.
 func FindAll(dir string) ([]string, error) {
 	files, err := find(dir)
 	if err != nil {
 		return nil, err
 	}
-	sort.Strings(files)
-	return files, nil
+	return SortByTime(files), nil
 }
 
 // FindLatestWithFallback returns the latest primary log found in primaryDir.
@@ -80,7 +120,7 @@ func FindAll(dir string) ([]string, error) {
 func FindLatestWithFallback(primaryDir, legacyDir string) (string, error) {
 	files, err := find(primaryDir)
 	if err == nil {
-		sort.Strings(files)
+		SortByTime(files)
 		return files[len(files)-1], nil
 	}
 	if legacyDir == "" || legacyDir == primaryDir {
@@ -90,7 +130,7 @@ func FindLatestWithFallback(primaryDir, legacyDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("no primary pipeline log in %s and fallback %s", primaryDir, legacyDir)
 	}
-	sort.Strings(files)
+	SortByTime(files)
 	return files[len(files)-1], nil
 }
 
@@ -110,6 +150,5 @@ func FindAllWithFallback(primaryDir, legacyDir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no primary img2text_*.log in %s and fallback %s", primaryDir, legacyDir)
 	}
-	sort.Strings(files)
-	return files, nil
+	return SortByTime(files), nil
 }

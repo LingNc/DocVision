@@ -1,10 +1,10 @@
 package analyze
 
 import (
+	"mineru-tools/internal/logfind"
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -197,11 +197,13 @@ func selectLogsByTime(paths []string, from, to time.Time) []string {
 	return out
 }
 
-// sortNewestFirst returns a newest-first copy of paths.
+// sortNewestFirst returns a newest-first copy of paths, ordered by the
+// timestamp embedded in the log name (T55: raw filename order sorted every
+// latex_ log after every img2text_ log regardless of date).
 func sortNewestFirst(paths []string) []string {
 	sorted := make([]string, len(paths))
 	copy(sorted, paths)
-	sort.Strings(sorted)
+	logfind.SortByTime(sorted)
 	for i, j := 0, len(sorted)-1; i < j; i, j = i+1, j-1 {
 		sorted[i], sorted[j] = sorted[j], sorted[i]
 	}

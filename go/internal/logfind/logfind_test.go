@@ -262,3 +262,26 @@ func TestFindAllWithFallback_NoDuplicateMerge(t *testing.T) {
 		t.Fatalf("expected primary-only result, got %v", files)
 	}
 }
+
+// T55：两种前缀混合时按内嵌时间排序，不按前缀字母（原先
+// "img2text_" < "latex_" 让 analyze -r 0 永远拿到 latex 最新日志）。
+func TestSortByTimeMixedPrefixes(t *testing.T) {
+	files := []string{
+		"a/latex_20260910_100000.log",
+		"a/img2text_20260919_130000.log", // 最新
+		"a/latex_20260916_184221.log",
+		"a/img2text_20260915_090000.log",
+	}
+	SortByTime(files)
+	want := []string{
+		"a/latex_20260910_100000.log",
+		"a/img2text_20260915_090000.log",
+		"a/latex_20260916_184221.log",
+		"a/img2text_20260919_130000.log",
+	}
+	for i := range want {
+		if files[i] != want[i] {
+			t.Fatalf("sorted = %v, want %v", files, want)
+		}
+	}
+}

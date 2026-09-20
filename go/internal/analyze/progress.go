@@ -2,13 +2,14 @@ package analyze
 
 import (
 	"bufio"
-	"encoding/json"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"mineru-tools/internal/logfind"
 )
@@ -56,21 +57,35 @@ func CheckProgressItems(progressRoot string) (completed, invalid int) {
 		return 0, 0
 	}
 	matches, _ := filepath.Glob(filepath.Join(progressRoot, "**", "*.json"))
-	for _, f := range matches {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			invalid++
-			continue
-		}
-		var doc struct {
-			Result  string `json:"result"`
-			ImgPath string `json:"img_path"`
-		}
-		if err := json.Unmarshal(data, &doc); err != nil {
-			invalid++
-			continue
-		}
-		if strings.Contains(doc.Result, "[IMG_TYPE:") && doc.Result != "__INVALID_RESPONSE__" {
+	if len(matches) == 0 {
+		return 0, 0
+	}
+	// T55：一万多个 json 全量 ReadFile+Unmarshal 在 samba 盘上每次 analyze
+	// 都要等很久。并发读 + 只做字节级判定（progress json 的 result 字段是
+	// 顶层字符串，"[IMG_TYPE:" 出现即完成、"__INVALID_RESPONSE__" 哨兵单独
+	// 剔除），不再反序列化。
+	type verdict struct{ done bool }
+	verdicts := make([]verdict, len(matches))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 16)
+	for i, f := range matches {
+		wg.Add(1)
+		go func(i int, f string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			data, err := os.ReadFile(f)
+			if err != nil {
+				return
+			}
+			if bytes.Contains(data, []byte("[IMG_TYPE:")) && !bytes.Contains(data, []byte("__INVALID_RESPONSE__")) {
+				verdicts[i].done = true
+			}
+		}(i, f)
+	}
+	wg.Wait()
+	for _, v := range verdicts {
+		if v.done {
 			completed++
 		} else {
 			invalid++
@@ -80,12 +95,25 @@ func CheckProgressItems(progressRoot string) (completed, invalid int) {
 }
 
 // GetProblematicImages returns image paths from logPath that are followed by
-// at least one [ERROR] or [WARNING] line before the next image line.
+// at least one [ERROR] line before the next image line. [WARNING] does NOT
+// count (T55): warnings are corrected successes (T36 — the output deviated
+// but the program fixed it and the result was written), so warning images
+// are 良品, not problems.
 func GetProblematicImages(logPath string) []string {
-	problematic := map[string]struct{}{}
+	errImgs, _ := ScanLogIssueImages(logPath)
+	return errImgs
+}
+
+// ScanLogIssueImages splits the per-image issue scan into two sets: images
+// followed by ≥1 [ERROR] line (真问题) and images followed by [WARNING] only
+// (自纠正成功，单独统计供"警告数"展示). Images in both classes land in the
+// error set only.
+func ScanLogIssueImages(logPath string) (errImgs, warnImgs []string) {
+	errSet := map[string]struct{}{}
+	warnSet := map[string]struct{}{}
 	f, err := os.Open(logPath)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer f.Close()
 
@@ -102,26 +130,38 @@ func GetProblematicImages(logPath string) []string {
 			continue
 		}
 		current := m[1]
-		hasError := false
+		hasErr, hasWarn := false, false
 		j := i + 1
 		for j < len(lines) && imageLineRef.FindStringSubmatch(lines[j]) == nil {
-			if strings.Contains(lines[j], "[ERROR]") || strings.Contains(lines[j], "[WARNING]") {
-				hasError = true
+			if strings.Contains(lines[j], "[ERROR]") {
+				hasErr = true
+			} else if strings.Contains(lines[j], "[WARNING]") {
+				hasWarn = true
 			}
 			j++
 		}
-		if hasError {
-			problematic[current] = struct{}{}
+		if hasErr {
+			errSet[current] = struct{}{}
+			delete(warnSet, current)
+		} else if hasWarn {
+			if _, bad := errSet[current]; !bad {
+				warnSet[current] = struct{}{}
+			}
 		}
 		i = j - 1
 	}
 
-	out := make([]string, 0, len(problematic))
-	for k := range problematic {
-		out = append(out, k)
+	errImgs = make([]string, 0, len(errSet))
+	for k := range errSet {
+		errImgs = append(errImgs, k)
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(errImgs)
+	warnImgs = make([]string, 0, len(warnSet))
+	for k := range warnSet {
+		warnImgs = append(warnImgs, k)
+	}
+	sort.Strings(warnImgs)
+	return errImgs, warnImgs
 }
 
 // PrintProgressReport prints a progress-only summary (no log statistics).

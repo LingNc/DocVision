@@ -1346,3 +1346,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 用户反馈：80 本书的进度概览列表太长。改为整块可折叠（头部「进度概览 + N/M 书完成」聚合行，v-collapse 记忆、默认折叠）；列表支持行式/方块切换（独立记忆 i2t.overviewBlocks），块视图按最重状态着色（escalated>pending>fixed>done）、点块填搜索框跳书。
 - 顺手补漏：前端概览条此前只有 done/esc/pend 三段——P18 后端后加的 fixed 第四态前端没跟上，本次补齐（青段 + 「修复 N」计数 + types.ts 字段）。
 - 子代理实施（vitest 58/58 全绿含新 7 条），父代理复验 go build。T54 标 [X][ ]。
+
+## 第五十四批（2026-09-19，T55 analyze 三修）
+
+- **`-r 0` 选错日志**（真实证据：用户最新一次是 img2text 运行，analyze 却分析 latex_20260916_184221.log）：logfind/analyze 一律按文件名字符串排序，"img2text_" 字典序恒小于 "latex_"，时间再新也排在前面。修法：按文件名内嵌时间排序（logfind.SortByTime 供 FindLatest/FindAll/WithFallback 与 analyze.sortNewestFirst 共用）。
+- **慢**：进度摘要 CheckProgressItems 全量 ReadFile+Unmarshal 1.1 万个 json（samba 盘）。改并发（16 路）字节扫描（"[IMG_TYPE:" 出现且非 __INVALID_RESPONSE__ 即完成），实测 0.2s 出全表。
+- **良品率口径**（用户定）：良品 = 完成且无 ERROR 且无 WARNING（警告自纠正成功但影响良品率）；另报错误率（[ERROR] 图占比）与警告张数。ScanLogIssueImages 把原 GetProblematicImages 拆成两集合（同图兼有 ERROR 只算错误），旧接口保留只剩错误集。
+- 测试：混合前缀排序钉住、ERROR/WARNING 拆分钉住；真实运行验证 -r 0 选中 img2text_20260919_204549.log。

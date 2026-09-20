@@ -166,24 +166,44 @@ func printProgressFooter(inputDir, progressRoot, finallyDir string, logPaths []s
 		fmt.Printf("  完成率: %.2f%%\n", float64(completed)/float64(totalImages)*100)
 	}
 	if completed > 0 {
-		problem := map[string]struct{}{}
+		// T55（用户定的口径）：良品 = 完成且无 ERROR 且无 WARNING——
+		// 警告虽是自纠正成功（T36），但影响良品率；错误单独报错误率。
+		// 没有逐图完成路径可对账，分子按问题图数保守扣减（跨日志去重后
+		// 仍按上界扣）。
+		errSet := map[string]struct{}{}
+		warnSet := map[string]struct{}{}
 		for _, lf := range logPaths {
-			for _, p := range GetProblematicImages(lf) {
-				problem[p] = struct{}{}
+			errs, warns := ScanLogIssueImages(lf)
+			for _, p := range errs {
+				errSet[p] = struct{}{}
+				delete(warnSet, p)
+			}
+			for _, p := range warns {
+				if _, bad := errSet[p]; !bad {
+					warnSet[p] = struct{}{}
+				}
 			}
 		}
-		good := completed
-		if len(problem) > 0 {
-			// Without the completed paths, fall back to a conservative
-			// estimate (assume the worst case for the footer).
-			if len(problem) > completed {
-				good = 0
-			} else {
-				good = completed - len(problem)
+		bad := len(errSet)
+		warned := len(warnSet)
+		if bad+warned > completed {
+			// 上界钳制：问题图数不超过完成数（优先扣错误）。
+			warned = completed - bad
+			if warned < 0 {
+				warned = 0
+				bad = completed
 			}
 		}
-		fmt.Printf("  良品率: %.2f%% (%d/%d)\n",
+		good := completed - bad - warned
+		fmt.Printf("  良品率: %.2f%% (%d/%d，已扣除错误与警告)\n",
 			float64(good)/float64(completed)*100, good, completed)
+		if bad > 0 {
+			fmt.Printf("  错误率: %.2f%% (%d/%d，日志中有 [ERROR] 的图)\n",
+				float64(bad)/float64(completed)*100, bad, completed)
+		}
+		if warned > 0 {
+			fmt.Printf("  警告: %d 张（自纠正成功，但从良品率中扣除）\n", warned)
+		}
 	}
 }
 
