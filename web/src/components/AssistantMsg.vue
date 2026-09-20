@@ -4,7 +4,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { state, storeGet, storeSet, LONG_TEXT_LINES, registerAnchor, unregisterAnchor } from '../state'
 import { countText, estOf, firstLine } from '../legacy/sidebar'
-import { type StreamItem, splitLeaks, type LeakBlock } from '../legacy/stream'
+import { type StreamItem, splitLeaks, isEncryptedSummary, type LeakBlock } from '../legacy/stream'
 import { openLightbox } from '../state'
 import { mediaURL } from '../legacy/timeline'
 import Disclosure from './Disclosure.vue'
@@ -66,6 +66,10 @@ onBeforeUnmount(() => {
 const thinkTail = computed(() =>
   line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : '')
 
+/* gpt-5 系：reasoning_content 是厂商加密摘要头（非明文思维链），标题行加 🔒 标记。
+ * 摘要仍是有效信息，正文照常显示；展开/折叠行为不变。 */
+const thinkEncrypted = computed(() => isEncryptedSummary(line.value && line.value.reasoning))
+
 // T30/T32/T34：旧转录正文里混入的残片（思考块/XML）剥出来折叠展示
 // （新转录 Go 侧已清洗：MoveLeakedThinking / StripLeakedToolXML）。
 const body = computed(() => splitLeaks(String((line.value && line.value.text) || '')))
@@ -82,6 +86,7 @@ const leakSummary = (b: LeakBlock) =>
       ref="thinkRef"
       cls="disclosure-thinking"
       name="思考"
+      :encrypted="thinkEncrypted"
       :summary="firstLine(line.reasoning)"
       :tail="thinkTail"
       :open="thinkOpen"

@@ -12,6 +12,8 @@ defineProps<{
   running?: boolean
   /** 名称右侧的小徽标（如正文残片块的来源标注）。 */
   badge?: string
+  /** gpt-5 系加密摘要头（reasoning_content 非明文思维链）：名称后加 🔒「加密摘要」。 */
+  encrypted?: boolean
 }>()
 </script>
 
@@ -21,6 +23,7 @@ defineProps<{
       <span class="line-slot"><span class="line-caret" /></span>
       <span class="line-name">{{ name }}</span>
       <span v-if="badge" class="line-badge">{{ badge }}</span>
+      <span v-if="encrypted" class="line-lock" title="厂商加密摘要头（reasoning_content 不是明文思维链）">🔒 加密摘要</span>
       <template v-if="summary">
         <span class="line-sep" />
         <span class="line-summary" :title="summary">{{ summary }}</span>

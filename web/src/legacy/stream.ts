@@ -115,6 +115,25 @@ export function splitLeaks(text: string): { main: string; blocks: LeakBlock[] } 
 }
 
 /*
+ * OpenAI gpt-5 系模型的 reasoning_content 不是明文思维链，而是厂商**加密
+ * 摘要头**：单行短文本，形如 `**Planning TikZ creation**`、
+ * `**Inspecting original image attachment**`（可多条 `**A****B**` 连写，
+ * 或带少量正文）。判定（显示层用，纯函数）：
+ *   去除首尾空白后 ≤200 字符、不含空行分隔的多段落（允许 \n 单换行）、
+ *   且以 `**…**` 摘要形态为主（至少含一段 **…**，去掉所有 **…** 段后
+ *   剩下的非空白正文 ≤20 字符）。
+ * 长思维链、多段落明文、空文本一律 false。
+ */
+export function isEncryptedSummary(text: string | null | undefined): boolean {
+  const t = String(text || '').trim()
+  if (!t || t.length > 200) return false
+  if (/\n[ \t]*\n/.test(t)) return false
+  if (!t.includes('**')) return false
+  const rest = t.replace(/\*\*[^*\n]+\*\*/g, '').trim()
+  return rest.length <= 20
+}
+
+/*
  * T56：img2text 逐图分析会话的**旧转录**里，user 消息的 text 字段是一整段
  * JSON 数组字符串（写盘时的 bug，Go 侧已修、新转录正常）：
  *   [{"text":"The image to describe is at line 1038. ..."},{"type":"image_url",

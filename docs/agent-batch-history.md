@@ -1394,3 +1394,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ## 第五十六批补（2026-09-20，latex 看图丢图回归修复）
 
 - 用户报新 latex 会话无缩略图/无分组差异/思考块疑问。查证：① 丢图是 T56（2067210）引入的真实回归——flattenParts 断言 flip（string-map→any-map）与 toolImageContent 产物不符，静默跳过。9-12 老转录有图、9-20 新转录无图即为时间证据。修复：产物改 any-map + 断言双形态兼容；回归测试 TestAppendToolImageTurnStoresImage 钉两种形态（此类断言此前零覆盖才致回归）。② 分组无异常：/api/index 实测该书 7 条会话 stage=vector 全对，单阶段项目按设计平铺显示。③ "思考块"：gpt-5.6-luna 的 reasoning_content 只有加密摘要头（**Planning TikZ creation** 一行）——厂商行为，非格式不兼容，无需 response_format 切换。
+
+## 第五十六批补二（2026-09-20，加密思考摘要显示兼容）
+
+- gpt-5.6-luna 的 reasoning_content 只有 `**Planning TikZ creation**` 式加密摘要头，用户误以为思考块空。isEncryptedSummary 纯函数判定（≤200 字符、无空行多段落、**…** 段为主），思考块标题加 🔒「加密摘要」胶囊；Disclosure 加可选 encrypted prop，其余调用方零变化。子代理实施（vitest 97/97），父代理复验。

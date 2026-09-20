@@ -8843,7 +8843,7 @@
   };
   const _hoisted_5$9 = ["aria-pressed"];
   const _hoisted_6$8 = ["aria-pressed"];
-  const _hoisted_7$6 = { class: "side-search" };
+  const _hoisted_7$7 = { class: "side-search" };
   const _hoisted_8$5 = { class: "side-list-wrap" };
   const _hoisted_9$4 = {
     key: 0,
@@ -9221,7 +9221,7 @@
               onClick: _cache[2] || (_cache[2] = ($event) => unref(setBoard)("img2text"))
             }, "img2text", 8, _hoisted_6$8)
           ])) : createCommentVNode("", true),
-          createBaseVNode("div", _hoisted_7$6, [
+          createBaseVNode("div", _hoisted_7$7, [
             withDirectives(createBaseVNode("input", {
               id: "search",
               "onUpdate:modelValue": _cache[3] || (_cache[3] = ($event) => unref(state).filter = $event),
@@ -9957,6 +9957,14 @@
     }
     return { main: s.trim(), blocks };
   }
+  function isEncryptedSummary(text) {
+    const t = String(text || "").trim();
+    if (!t || t.length > 200) return false;
+    if (/\n[ \t]*\n/.test(t)) return false;
+    if (!t.includes("**")) return false;
+    const rest = t.replace(/\*\*[^*\n]+\*\*/g, "").trim();
+    return rest.length <= 20;
+  }
   function parseLegacyImageParts(text) {
     const s = String(text || "").trim();
     if (!s.startsWith("[{")) return null;
@@ -10263,14 +10271,19 @@
     key: 0,
     class: "line-badge"
   };
-  const _hoisted_4$7 = ["title"];
-  const _hoisted_5$7 = {
-    key: 2,
+  const _hoisted_4$7 = {
+    key: 1,
+    class: "line-lock",
+    title: "厂商加密摘要头（reasoning_content 不是明文思维链）"
+  };
+  const _hoisted_5$7 = ["title"];
+  const _hoisted_6$7 = {
+    key: 3,
     class: "line-running",
     title: "这个调用还没有收到回执，正在执行"
   };
-  const _hoisted_6$7 = {
-    key: 3,
+  const _hoisted_7$6 = {
+    key: 4,
     class: "line-tail"
   };
   const _sfc_main$h = /* @__PURE__ */ defineComponent({
@@ -10282,7 +10295,8 @@
       tail: {},
       open: { type: Boolean },
       running: { type: Boolean },
-      badge: {}
+      badge: {},
+      encrypted: { type: Boolean }
     },
     setup(__props) {
       return (_ctx, _cache) => {
@@ -10296,25 +10310,26 @@
             ], -1)),
             createBaseVNode("span", _hoisted_2$c, toDisplayString(__props.name), 1),
             __props.badge ? (openBlock(), createElementBlock("span", _hoisted_3$a, toDisplayString(__props.badge), 1)) : createCommentVNode("", true),
-            __props.summary ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+            __props.encrypted ? (openBlock(), createElementBlock("span", _hoisted_4$7, "🔒 加密摘要")) : createCommentVNode("", true),
+            __props.summary ? (openBlock(), createElementBlock(Fragment, { key: 2 }, [
               _cache[0] || (_cache[0] = createBaseVNode("span", { class: "line-sep" }, null, -1)),
               createBaseVNode("span", {
                 class: "line-summary",
                 title: __props.summary
-              }, toDisplayString(__props.summary), 9, _hoisted_4$7)
+              }, toDisplayString(__props.summary), 9, _hoisted_5$7)
             ], 64)) : createCommentVNode("", true),
-            __props.running ? (openBlock(), createElementBlock("span", _hoisted_5$7, [..._cache[1] || (_cache[1] = [
+            __props.running ? (openBlock(), createElementBlock("span", _hoisted_6$7, [..._cache[1] || (_cache[1] = [
               createBaseVNode("span", { class: "running-dot" }, null, -1),
               createTextVNode("运行中 ", -1)
             ])])) : createCommentVNode("", true),
-            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_6$7, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
+            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_7$6, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
           ]),
           renderSlot(_ctx.$slots, "default", {}, void 0, true)
         ], 10, _hoisted_1$d);
       };
     }
   });
-  const Disclosure = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-ae59d4af"]]);
+  const Disclosure = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-5dfa0673"]]);
   const _sfc_main$g = /* @__PURE__ */ defineComponent({
     __name: "MdBody",
     props: {
@@ -10740,6 +10755,7 @@
         if (line.value && root.value) unregisterAnchor(line.value.n, root.value);
       });
       const thinkTail = computed(() => line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : "");
+      const thinkEncrypted = computed(() => isEncryptedSummary(line.value && line.value.reasoning));
       const body = computed(() => splitLeaks(String(line.value && line.value.text || "")));
       const leakName = (b) => b.kind === "thinking" ? "原始思考" : "XML 协议残片";
       const leakBadge = (b) => b.kind === "thinking" ? "漏进正文" : "协议残片";
@@ -10756,6 +10772,7 @@
             ref: thinkRef,
             cls: "disclosure-thinking",
             name: "思考",
+            encrypted: thinkEncrypted.value,
             summary: unref(firstLine)(line.value.reasoning),
             tail: thinkTail.value,
             open: thinkOpen.value,
@@ -10769,7 +10786,7 @@
               ])
             ]),
             _: 1
-          }, 8, ["summary", "tail", "open"])) : createCommentVNode("", true),
+          }, 8, ["encrypted", "summary", "tail", "open"])) : createCommentVNode("", true),
           body.value.main ? (openBlock(), createBlock(_sfc_main$f, {
             key: 1,
             text: body.value.main,
@@ -10818,7 +10835,7 @@
       };
     }
   });
-  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-28f984a6"]]);
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-30f932fa"]]);
   const _hoisted_1$7 = { class: "sys-line" };
   const _hoisted_2$7 = { class: "line-summary" };
   const _hoisted_3$6 = {

@@ -687,6 +687,21 @@ details[open] > summary .line-caret {
  flex: none; margin-left: 8px; color: var(--caption); font-size: 12px; font-family: var(--mono); 
 }
 
+/* gpt-5 系加密摘要头标记（🔒 加密摘要）：思考块标题行的小标签，
+   提示 reasoning_content 是厂商加密摘要而非明文思维链。 */
+.line-lock {
+  flex: none;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: .5px solid var(--border);
+  background: var(--surface-2);
+  color: var(--caption);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
 .disclosure-thinking > summary .line-name {
  color: var(--dim); 
 }
