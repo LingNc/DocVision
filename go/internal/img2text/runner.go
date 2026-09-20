@@ -583,6 +583,10 @@ func runWorkers(
 			var rec *ExchangeRecorder
 			if recordAll {
 				tpath := transcriptPathFor(progressRoot, tt.mdName, tt.imgPath)
+				// 与 mermaid_fix 同款轮转：上次运行的转录改名 prevN——
+				// NewTranscript 是 append 模式，不轮转会让多次运行混在
+				// 一个文件里，"一张图的历次调用历史"也无从看起（T56 追问）。
+				rotateTranscript(tpath)
 				if r, err := NewExchangeRecorder(tpath, tt.key, client.Model(), ""); err != nil {
 					logger.LogWarning(tid, "  [recorder] 转录创建失败:", err)
 				} else {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"time"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -165,6 +166,10 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 					AddrSource: addrSource,
 					ConfigNote: sessionsConfigNote(cfg),
 					Extras:     extras,
+					Render: sessionview.RenderConfig{
+						Command: cfg.Tools.Mermaid.Command,
+						Timeout: time.Duration(cfg.Tools.Mermaid.Timeout) * time.Second,
+					},
 				})
 			}
 

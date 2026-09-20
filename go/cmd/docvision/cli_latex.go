@@ -450,7 +450,11 @@ func startPreview(cfg *config.Config, log *logger.Logger) func() {
 			}
 		}
 	}
-	bound, stopped, err := sessionview.StartWith(root, cfg.Preview.Addr(), extras)
+	bound, stopped, err := sessionview.StartWithRender(root, cfg.Preview.Addr(), extras,
+		sessionview.RenderConfig{
+			Command: cfg.Tools.Mermaid.Command,
+			Timeout: time.Duration(cfg.Tools.Mermaid.Timeout) * time.Second,
+		})
 	if err != nil {
 		log.LogWarning(0, "[preview] 会话预览服务未启动:", err)
 		return nil

@@ -1,6 +1,10 @@
 package sessionview
 
 import (
+	"io"
+	"encoding/hex"
+	"crypto/sha256"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -40,6 +44,8 @@ type ServeOptions struct {
 	// Extras are additional scan directories (T37 img2text sessions),
 	// each rendered with its own grouping rules.
 	Extras []ScanExtra
+	// Render configures the /api/mermaid preview endpoint (T56).
+	Render RenderConfig
 }
 
 // Bound is where the viewer actually listens, as net.Listen reported it — not
@@ -63,7 +69,7 @@ type Bound struct {
 //
 // It prints the banner once the listener is actually up.
 func Serve(opt ServeOptions) error {
-	bound, stop, err := StartWith(opt.Root, opt.Addr, opt.Extras)
+	bound, stop, err := StartWithRender(opt.Root, opt.Addr, opt.Extras, opt.Render)
 	if err != nil {
 		return err
 	}
@@ -135,6 +141,20 @@ func Start(root, addr string) (bound Bound, stopped <-chan struct{}, err error) 
 
 // StartWith is Start plus extra scan directories (T37 img2text sessions).
 func StartWith(root, addr string, extras []ScanExtra) (bound Bound, stopped <-chan struct{}, err error) {
+	return StartWithRender(root, addr, extras, RenderConfig{})
+}
+
+// RenderConfig carries what the /api/mermaid endpoint needs to render
+// diagram previews (T56): the mermaid-cli command ("" = mmdc on PATH;
+// empty-after-LookPath = endpoint reports unavailable and the page falls
+// back to showing the code block) and the per-render timeout.
+type RenderConfig struct {
+	Command string
+	Timeout time.Duration
+}
+
+// StartWithRender is StartWith plus the mermaid render configuration.
+func StartWithRender(root, addr string, extras []ScanExtra, rc RenderConfig) (bound Bound, stopped <-chan struct{}, err error) {
 	if addr == "" {
 		addr = DefaultAddr
 	}
@@ -154,7 +174,7 @@ func StartWith(root, addr string, extras []ScanExtra) (bound Bound, stopped <-ch
 		return Bound{}, nil, fmt.Errorf("会话预览: 监听 %s 失败（端口可能已被占用，请换一个端口）: %w", addr, err)
 	}
 	srv := &http.Server{
-		Handler:           newViewerServer(rootAbs, extras),
+		Handler:           newViewerServer(rootAbs, extras, rc),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	done := make(chan struct{})
@@ -226,14 +246,16 @@ type viewerServer struct {
 	// img2textRoot is the progress_items directory behind the img2text
 	// extra root ("" when preview.img2text is off); /api/img2text-progress
 	// scans it for the P18 progress board.
-	img2textRoot string
+	img2textRoot  string
+	mermaidCmd    string
+	mermaidTimeout time.Duration
 }
 
 // newViewerServer builds the read-only viewer. extras are the absolute
 // directories of T37 img2text sessions; they are scanned for sessions
 // and allowed as media roots (their transcripts reference sibling media/
 // dirs that live outside the main root).
-func newViewerServer(root string, extras []ScanExtra) *viewerServer {
+func newViewerServer(root string, extras []ScanExtra, rc ...RenderConfig) *viewerServer {
 	ex := make([]ScanExtra, len(extras))
 	copy(ex, extras)
 	extraDirs := make([]string, 0, len(extras))
@@ -256,7 +278,12 @@ func newViewerServer(root string, extras []ScanExtra) *viewerServer {
 			break
 		}
 	}
-	return &viewerServer{root: root, extra: extraDirs, scan: &scanner{root: root, extras: ex}, img2textRoot: img2textRoot}
+	v := &viewerServer{root: root, extra: extraDirs, scan: &scanner{root: root, extras: ex}, img2textRoot: img2textRoot}
+	if len(rc) > 0 {
+		v.mermaidCmd = rc[0].Command
+		v.mermaidTimeout = rc[0].Timeout
+	}
+	return v
 }
 
 // ServeHTTP routes by hand instead of using http.ServeMux: ServeMux rewrites
@@ -264,9 +291,10 @@ func newViewerServer(root string, extras []ScanExtra) *viewerServer {
 // turn a traversal attempt into a redirect instead of the explicit rejection
 // this local tool wants.
 func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead &&
+		!(r.Method == http.MethodPost && r.URL.Path == "/api/mermaid") {
 		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "只读服务：仅支持 GET/HEAD", http.StatusMethodNotAllowed)
+		http.Error(w, "只读服务：仅支持 GET/HEAD（/api/mermaid 接受 POST）", http.StatusMethodNotAllowed)
 		return
 	}
 	p := r.URL.Path
@@ -283,6 +311,8 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		v.serveSession(w, r)
 	case p == "/api/img2text-progress":
 		v.serveImg2TextProgress(w)
+	case p == "/api/mermaid":
+		v.serveMermaid(w, r)
 	case strings.HasPrefix(p, "/media/"), strings.HasPrefix(p, "/file/"):
 		v.serveFile(w, r)
 	default:
@@ -492,4 +522,84 @@ func writeJSON(w http.ResponseWriter, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(true)
 	_ = enc.Encode(v)
+}
+
+// ---------- /api/mermaid（T56 图表预览） ----------
+
+// serveMermaid renders one mermaid diagram source to SVG via mermaid-cli and
+// caches it by content hash under the user cache dir. The page POSTs the
+// fenced block's source; on any failure it falls back to showing the code
+// block, so errors here are reported in-band instead of as HTTP failures.
+func (v *viewerServer) serveMermaid(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	fail := func(msg string) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": msg})
+	}
+	command := v.mermaidCmd
+	if command == "" {
+		command = "mmdc"
+	}
+	if _, err := exec.LookPath(command); err != nil {
+		fail("mermaid 渲染器不可用: " + err.Error())
+		return
+	}
+	var req struct {
+		Source string `json:"source"`
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 256*1024))
+	if err != nil || json.Unmarshal(body, &req) != nil || strings.TrimSpace(req.Source) == "" {
+		fail("请求格式不对")
+		return
+	}
+	sum := sha256.Sum256([]byte(req.Source))
+	hash := hex.EncodeToString(sum[:])[:24]
+
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = os.TempDir()
+	}
+	cacheDir = filepath.Join(cacheDir, "docvision-mermaid")
+	cached := filepath.Join(cacheDir, hash+".svg")
+	if data, err := os.ReadFile(cached); err == nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "svg": string(data)})
+		return
+	}
+
+	work, err := os.MkdirTemp("", "docvision-mermaid-web-")
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	defer os.RemoveAll(work)
+	in := filepath.Join(work, "in.mmd")
+	out := filepath.Join(work, "out.svg")
+	if err := os.WriteFile(in, []byte(req.Source+"\n"), 0o600); err != nil {
+		fail(err.Error())
+		return
+	}
+	timeout := v.mermaidTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, command, "-i", in, "-o", out, "-b", "transparent")
+	output, runErr := cmd.CombinedOutput()
+	if runErr != nil {
+		msg := strings.TrimSpace(string(output))
+		if msg == "" {
+			msg = runErr.Error()
+		}
+		fail(msg)
+		return
+	}
+	svg, err := os.ReadFile(out)
+	if err != nil {
+		fail("渲染产物读取失败: " + err.Error())
+		return
+	}
+	if os.MkdirAll(cacheDir, 0o755) == nil {
+		_ = os.WriteFile(cached, svg, 0o644) // 缓存失败只影响下次速度
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "svg": string(svg)})
 }
