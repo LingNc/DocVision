@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"bufio"
+	"encoding/json"
 	"bytes"
 	"fmt"
 	"os"
@@ -52,6 +53,23 @@ func CountImagesPerMD(inputDir string) map[string]int {
 // CheckProgressItems scans every JSON file under progressRoot. A file counts
 // as "completed" when its "result" field contains "[IMG_TYPE:" and is not the
 // sentinel "__INVALID_RESPONSE__". Returns completed, invalid counts.
+// progressStatsCacheFile is the incremental verdict cache kept inside
+// progressRoot. Keyed by relative path with (mtime,size) as the invalidator:
+// unchanged files reuse the cached verdict, only new/changed files are read
+// (T55 追问：samba 盘上每次全量读一万多个 json 太慢——现在稳定状态下
+// analyze 只做 stat 级索引）。
+const progressStatsCacheFile = ".progress_stats.json"
+
+type progressStatsCache struct {
+	Files map[string]progressStatsEntry `json:"files"`
+}
+
+type progressStatsEntry struct {
+	Mtime int64 `json:"m"`
+	Size  int64 `json:"s"`
+	Done  bool  `json:"d"`
+}
+
 func CheckProgressItems(progressRoot string) (completed, invalid int) {
 	if _, err := os.Stat(progressRoot); err != nil {
 		return 0, 0
@@ -60,34 +78,98 @@ func CheckProgressItems(progressRoot string) (completed, invalid int) {
 	if len(matches) == 0 {
 		return 0, 0
 	}
-	// T55：一万多个 json 全量 ReadFile+Unmarshal 在 samba 盘上每次 analyze
-	// 都要等很久。并发读 + 只做字节级判定（progress json 的 result 字段是
-	// 顶层字符串，"[IMG_TYPE:" 出现即完成、"__INVALID_RESPONSE__" 哨兵单独
-	// 剔除），不再反序列化。
-	type verdict struct{ done bool }
-	verdicts := make([]verdict, len(matches))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 16)
+
+	// 载入旧缓存（没有/损坏都当作空）。
+	cache := progressStatsCache{Files: map[string]progressStatsEntry{}}
+	if data, err := os.ReadFile(filepath.Join(progressRoot, progressStatsCacheFile)); err == nil {
+		_ = json.Unmarshal(data, &cache)
+		if cache.Files == nil {
+			cache.Files = map[string]progressStatsEntry{}
+		}
+	}
+
+	type job struct {
+		idx  int
+		path string
+		rel  string
+	}
+	jobs := make([]job, 0, 256)
+	results := make([]bool, len(matches))
+	seen := make([]bool, len(matches)) // 有定论（缓存或新读）
 	for i, f := range matches {
+		if filepath.Base(f) == progressStatsCacheFile {
+			continue
+		}
+		st, err := os.Stat(f)
+		if err != nil {
+			continue // invalid，不算完成
+		}
+		rel, rerr := filepath.Rel(progressRoot, f)
+		if rerr != nil {
+			rel = f
+		}
+		if e, ok := cache.Files[rel]; ok && e.Mtime == st.ModTime().Unix() && e.Size == st.Size() {
+			results[i] = e.Done
+			seen[i] = true
+			continue
+		}
+		jobs = append(jobs, job{i, f, rel})
+	}
+
+	// 只读变化的文件（首次/缓存缺失时=全部，之后≈0）。并发 64：samba
+	// 延迟高，小文件多读并发收益大。
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 64)
+	newVerdicts := make(map[string]progressStatsEntry, len(jobs))
+	var mu sync.Mutex
+	for _, j := range jobs {
 		wg.Add(1)
-		go func(i int, f string) {
+		go func(j job) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			data, err := os.ReadFile(f)
-			if err != nil {
-				return
+			data, err := os.ReadFile(j.path)
+			done := err == nil && bytes.Contains(data, []byte("[IMG_TYPE:")) && !bytes.Contains(data, []byte("__INVALID_RESPONSE__"))
+			results[j.idx] = done
+			seen[j.idx] = true
+			st, _ := os.Stat(j.path)
+			if st != nil {
+				mu.Lock()
+				newVerdicts[j.rel] = progressStatsEntry{Mtime: st.ModTime().Unix(), Size: st.Size(), Done: done}
+				mu.Unlock()
 			}
-			if bytes.Contains(data, []byte("[IMG_TYPE:")) && !bytes.Contains(data, []byte("__INVALID_RESPONSE__")) {
-				verdicts[i].done = true
-			}
-		}(i, f)
+		}(j)
 	}
 	wg.Wait()
-	for _, v := range verdicts {
-		if v.done {
+
+	// 合并回缓存并落盘（失败静默——只影响下次速度）。
+	for rel, e := range newVerdicts {
+		cache.Files[rel] = e
+	}
+	// 清掉已消失文件的旧条目，防缓存无限胀大。
+	live := make(map[string]bool, len(matches))
+	for _, f := range matches {
+		if rel, rerr := filepath.Rel(progressRoot, f); rerr == nil {
+			live[rel] = true
+		}
+	}
+	for rel := range cache.Files {
+		if !live[rel] {
+			delete(cache.Files, rel)
+		}
+	}
+	if data, err := json.Marshal(cache); err == nil {
+		tmp := filepath.Join(progressRoot, progressStatsCacheFile+".tmp")
+		if os.WriteFile(tmp, data, 0o644) == nil {
+			_ = os.Rename(tmp, filepath.Join(progressRoot, progressStatsCacheFile))
+		}
+	}
+
+	for i := range matches {
+		switch {
+		case seen[i] && results[i]:
 			completed++
-		} else {
+		default:
 			invalid++
 		}
 	}

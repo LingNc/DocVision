@@ -6,7 +6,7 @@
 ## [Unreleased]
 ### Fixed
 
-- **T55 analyze 三修**：① `-r 0` 永远选到 latex 最新日志——日志排序按文件名字符串，`img2text_` 字典序总在 `latex_` 前；改为按文件名内嵌时间排序。② 进度摘要每次全量反序列化一万多个进度 json（samba 盘上很慢）——改并发字节扫描。③ 良品率口径：良品 = 完成且无 ERROR 且无 WARNING（警告影响良品率，用户口径），另报**错误率**（日志中有 `[ERROR]` 的图）与警告张数。
+- **T55 analyze 三修**：① `-r 0` 永远选到 latex 最新日志——日志排序按文件名字符串，`img2text_` 字典序总在 `latex_` 前；改为按文件名内嵌时间排序。② 进度摘要每次全量反序列化一万多个进度 json（samba 盘上很慢）——改并发字节扫描 + **增量缓存**（`progress_items/.progress_stats.json` 按 mtime+大小记忆判定，稳定状态下只做 stat 级索引，不再重读文件）。③ 良品率口径：良品 = 完成且无 ERROR 且无 WARNING（警告影响良品率，用户口径），另报**错误率**（日志中有 `[ERROR]` 的图）与警告张数。
 - **T53 mermaid 升级会话 view_image 从没看过原图**：`fixCfg.ImgPath` 从未按图赋值（全部 worker 共享同一配置），空路径被解析成 images 目录本身、decode 报 unknown format——升级为按任务复制配置并填入本图路径；`resolveImageFile` 同时加固（空路径/目录不再蒙混成"图片"）。
 - **T53 升级会话成功却在 UI 显示红色 error**：submit 成功回执是 "OK: ..."，而侧栏终态判定认规范前缀 "SUBMITTED."——回执改为规范前缀。
 - **T53 进度行 running 卡 0**：img2text 进度行原先只在有结果到达时刷新（2 张图跑几分钟就一直停在 `[0/2] running: 0`）——writer 循环加 2s 心跳重印当前计数。

@@ -1353,3 +1353,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **慢**：进度摘要 CheckProgressItems 全量 ReadFile+Unmarshal 1.1 万个 json（samba 盘）。改并发（16 路）字节扫描（"[IMG_TYPE:" 出现且非 __INVALID_RESPONSE__ 即完成），实测 0.2s 出全表。
 - **良品率口径**（用户定）：良品 = 完成且无 ERROR 且无 WARNING（警告自纠正成功但影响良品率）；另报错误率（[ERROR] 图占比）与警告张数。ScanLogIssueImages 把原 GetProblematicImages 拆成两集合（同图兼有 ERROR 只算错误），旧接口保留只剩错误集。
 - 测试：混合前缀排序钉住、ERROR/WARNING 拆分钉住；真实运行验证 -r 0 选中 img2text_20260919_204549.log。
+
+## 第五十四批补（2026-09-19，进度摘要增量缓存）
+
+- 追问"每次都要全部索引一下吗"：加 `progress_items/.progress_stats.json` 判定缓存（路径→(mtime,size,done)），未变文件复用判定、只读新增/变化的；已消失文件条目清理防胀大；并发度 16→64。实测本机 samba 冷/热均 ~0.27s；用户侧"非常慢"的主因是运行目录还跑着旧串行二进制，部署后生效。
