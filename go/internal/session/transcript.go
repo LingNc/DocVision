@@ -323,21 +323,26 @@ func (w *TranscriptWriter) Append(msg ChatMessage) error {
 	case string:
 		line.Text = c
 	case []map[string]interface{}:
-		var b strings.Builder
-		for _, part := range c {
-			if t, ok := part["text"].(string); ok {
-				b.WriteString(t)
-				continue
-			}
-			if iu, ok := part["image_url"].(map[string]string); ok {
-				ref, err := w.storeImage(iu["url"])
-				if err != nil {
-					return err
-				}
-				line.Images = append(line.Images, ref)
+		var ferr error
+		line.Text, line.Images, ferr = w.flattenParts(c)
+		if ferr != nil {
+			return ferr
+		}
+	case []interface{}:
+		// json.Marshal/Unmarshal 往返后的 multipart 内容会落在这里
+		// （T56：img2text 逐图转录的 user 消息曾被整个序列化成 JSON
+		// 字符串落盘，预览页只能看到原文）。
+		parts := make([]map[string]interface{}, 0, len(c))
+		for _, el := range c {
+			if m, ok := el.(map[string]interface{}); ok {
+				parts = append(parts, m)
 			}
 		}
-		line.Text = b.String()
+		var ferr error
+		line.Text, line.Images, ferr = w.flattenParts(parts)
+		if ferr != nil {
+			return ferr
+		}
 	case nil:
 		// assistant tool_calls-only turn
 	default:
@@ -380,6 +385,29 @@ func roundHash(line transcriptLine) string {
 	}
 	h.Write([]byte(line.Reasoning))
 	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// flattenParts extracts the text segments and stores every image_url part
+// as a media file, returning the joined text and the media references.
+func (w *TranscriptWriter) flattenParts(parts []map[string]interface{}) (string, []string, error) {
+	var b strings.Builder
+	var images []string
+	for _, part := range parts {
+		if t, ok := part["text"].(string); ok {
+			b.WriteString(t)
+			continue
+		}
+		if iu, ok := part["image_url"].(map[string]interface{}); ok {
+			if u, ok2 := iu["url"].(string); ok2 {
+				ref, err := w.storeImage(u)
+				if err != nil {
+					return "", nil, err
+				}
+				images = append(images, ref)
+			}
+		}
+	}
+	return b.String(), images, nil
 }
 
 var dataURLRe = regexp.MustCompile(`^data:([^;]+);base64,(.*)$`)

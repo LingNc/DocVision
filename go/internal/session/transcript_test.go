@@ -210,3 +210,34 @@ func TestCheckpointNote(t *testing.T) {
 		t.Fatal("marker 前缀判定应同时兼容新旧 note")
 	}
 }
+
+// T56：multipart 内容经 json 往返后是 []interface{}——必须拆出文本并把
+// image_url 存成媒体文件，而不是整体序列化成 JSON 字符串落盘。
+func TestAppendMultipartAfterJSONRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	tr, err := NewTranscript(filepath.Join(dir, "s.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 模拟 img2text recorder 的 json.Marshal/Unmarshal 往返结果
+	content := []interface{}{
+		map[string]interface{}{"type": "text", "text": "描述这张图"},
+		map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{
+			"url": "data:image/jpeg;base64,/9j/4AAQSkZJRg=="}},
+	}
+	if err := tr.Append(ChatMessage{Role: "user", Content: content}); err != nil {
+		t.Fatal(err)
+	}
+	tr.Close()
+	data, _ := os.ReadFile(filepath.Join(dir, "s.jsonl"))
+	line := string(data)
+	if strings.Contains(line, `"image_url"`) {
+		t.Errorf("multipart array leaked as raw JSON: %.200s", line)
+	}
+	if !strings.Contains(line, "描述这张图") {
+		t.Errorf("text part missing: %.200s", line)
+	}
+	if !strings.Contains(line, "file://media/") {
+		t.Errorf("image not stored as media ref: %.200s", line)
+	}
+}

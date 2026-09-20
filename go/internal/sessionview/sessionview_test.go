@@ -1070,3 +1070,17 @@ func TestReadStatReceiptSignals(t *testing.T) {
 		t.Errorf("submitted transcript: endState = %q, want done", endStateOf(stat2))
 	}
 }
+
+// T56：一次性 img2text 逐图会话的完成信号是 assistant 的 [IMG_TYPE:，
+// 调过 getmorecontext 工具也不能再误判 error。
+func TestEndStateTypedDone(t *testing.T) {
+	if got := endStateOf(transcriptStat{SawTool: true, SawTyped: true}); got != "done" {
+		t.Errorf("tool+typed = %q, want done", got)
+	}
+	if got := endStateOf(transcriptStat{SawTyped: true}); got != "done" {
+		t.Errorf("typed only = %q, want done", got)
+	}
+	if got := endStateOf(transcriptStat{SawTool: true}); got != "error" {
+		t.Errorf("tool only = %q, want error", got)
+	}
+}

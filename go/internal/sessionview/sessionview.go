@@ -744,8 +744,13 @@ type transcriptStat struct {
 	//   SawSubmit        → done（正常结束）
 	//   SawTool && !SawSubmit → error（干过活但没交——错误终止/半途而废）
 	//   neither          → pending（领了任务还没开工）
+	// T56：img2text 逐图分析是一次性会话，完成信号不是 SUBMIT 而是最终
+	// 答案里的 "[IMG_TYPE:" 标记——模型偶尔调 getmorecontext 工具时会被
+	// "SawTool && !SawSubmit" 误判成 error（方块视图整片爆红）。
+	// SawTyped = assistant 行含 [IMG_TYPE:，与 SawSubmit 同为 done 信号。
 	SawTool   bool
 	SawSubmit bool
+	SawTyped  bool
 	// model is the wire model id recorded by a meta or usage line; it decides
 	// which per-image token rule the page quotes (and applies).
 	model string
@@ -926,7 +931,7 @@ func liveEndState(state string, live bool) string {
 // endStateOf folds the receipt signals into the block-view completion state.
 func endStateOf(stat transcriptStat) string {
 	switch {
-	case stat.SawSubmit:
+	case stat.SawSubmit || stat.SawTyped:
 		return "done"
 	case stat.SawTool:
 		return "error"
@@ -989,6 +994,9 @@ func readStat(p string) (transcriptStat, error) {
 						if strings.Contains(trimmed, "SUBMITTED") {
 							stat.SawSubmit = true
 						}
+					}
+					if strings.Contains(trimmed, `"role":"assistant"`) && strings.Contains(trimmed, "[IMG_TYPE:") {
+						stat.SawTyped = true
 					}
 				case "meta":
 					stat.addMeta(trimmed)
