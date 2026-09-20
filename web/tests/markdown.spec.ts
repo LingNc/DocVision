@@ -1,8 +1,8 @@
-// T58：跨行 $$…$$ 显示数学块识别（renderMarkdown 本体要 DOM，纯函数在此钉住）。
+// 跨行 $$…$$ 显示数学块识别（renderMarkdown 本体要 DOM，纯函数在此钉住）。
 import { describe, expect, test } from 'vitest'
 import { collectMathBlock } from '../src/legacy/richtext'
 
-describe('T58 collectMathBlock', () => {
+describe('collectMathBlock', () => {
   test('多行 $$ 块：去壳源码 + 块后下标', () => {
     const r = collectMathBlock(['前文', '$$', 'x+1=2', '$$', '后文'], 1)
     expect(r).toEqual({ src: '\nx+1=2\n', next: 4 })

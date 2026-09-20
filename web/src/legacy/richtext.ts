@@ -848,7 +848,7 @@ export function mdListItem(item: { text: string }): HTMLElement {
  * 返回 DocumentFragment（调用方直接 appendChild 即可）。
  */
 /*
- * collectMathBlock 识别 $$ 起手的显示数学块（T58：跨行 $$…$$ 在行内
+ * collectMathBlock 识别 $$ 起手的显示数学块（跨行 $$…$$ 在行内
  * 正则逐行扫描下永远匹配不到，曾原样显示）。命中返回去壳源码与块后
  * 第一行下标；单行 $$…$$（长度 > 3 且同起同收）与多行两种形态都认。
  * 纯函数，便于单测（node 环境无 DOM，renderMarkdown 本体不可测）。
@@ -899,7 +899,7 @@ export function renderMarkdown(text: unknown): DocumentFragment {
     }
 
     // 显示数学块：$$ 起手的多行（或单行 $$…$$）整体走 MathML——行内
-    // 正则逐行扫描永远匹配不到跨行 $$，曾让双 $ 公式原样显示（T58）。
+    // 正则逐行扫描永远匹配不到跨行 $$，曾让双 $ 公式原样显示。
     const mathBlock = collectMathBlock(lines, i)
     if (mathBlock) {
       const src = mathBlock.src
