@@ -893,6 +893,31 @@ details[open] > summary .line-caret {
  font: inherit; background: transparent; padding: 0; 
 }
 
+/* T56 追加：mermaid 代码块的图表预览位（代码块下方；SVG 由后端 /api/mermaid
+ * 渲染，前端零依赖）。渲染中/失败只有一行小字，成功内联 SVG 并可点进灯箱。 */
+.md-mermaid {
+  border-top: .5px dashed var(--border);
+  padding: 8px 14px 10px;
+  background: var(--surface);
+}
+
+.md-mermaid-note {
+  font-size: 12px;
+  color: var(--caption);
+}
+
+.md-mermaid-svg {
+  cursor: zoom-in;
+  overflow: auto;
+  max-height: 420px;
+  text-align: center;
+}
+
+.md-mermaid-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
 /* ============================ P18：img2text 进度概览 ============================
  * 侧栏 img2text 板块顶部的按书进度区：每本书一块——书名 + 分段进度条
  * （done=绿 / fixed=青 / escalated=琥珀 / pending=暗）+ 计数行。纯 CSS，无库。

@@ -16,6 +16,7 @@
 import { mdInline, mdInlineLines } from './markdown'
 import { storeGet, storeSet } from '../state'
 import { countText } from './sidebar'
+import { mermaidPreviewAvailable, mermaidPreviewBlock } from './mermaid'
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
   const node = document.createElement(tag)
@@ -800,6 +801,11 @@ export function mdCodeBlock(code: string, lang: string): HTMLElement {
   body.appendChild(inner)
   wrap.appendChild(body)
   if (res.note) wrap.appendChild(el('div', 'note', res.note))
+  // T56 追加：```mermaid 块在下方挂图表预览（后端 /api/mermaid 渲染，零依赖）；
+  // 静态快照没有 API，只显示代码块。
+  if (String(lang || '').trim().toLowerCase() === 'mermaid' && mermaidPreviewAvailable()) {
+    wrap.appendChild(mermaidPreviewBlock(code))
+  }
   return wrap
 }
 

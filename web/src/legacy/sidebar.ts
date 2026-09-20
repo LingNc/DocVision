@@ -407,17 +407,19 @@ export function parseImg2TextId(id: string): Img2TextRef | null {
     return { kind: 'fix', img, stage: parseInt(m[1], 10), prev: m[2] ? parseInt(m[2], 10) : 0 }
   }
   if (segs[0] === 'sessions') {
-    let stem = segs[2]
-    if (!/\.jsonl$/i.test(stem)) return null
-    stem = stem.slice(0, -'.jsonl'.length)
-    if (!stem) return null
+    // T57：逐图转录也做 prevN 轮转（<图>.prev1.jsonl = 上一次运行，与
+    // mermaid_fix 的 session-stage0.prev1.jsonl 同款规则；无后缀 = 当前）。
+    const m = /^(.*?)(?:\.prev(\d+))?\.jsonl$/i.exec(segs[2])
+    if (!m || !m[1]) return null
+    const stem = m[1]
+    const prev = m[2] ? parseInt(m[2], 10) : 0
     const dot = segs[1].lastIndexOf('.')
     const md = dot > 0 ? segs[1].slice(0, dot) : segs[1]
     let img = stem
     if (img.indexOf('images_') === 0) img = img.slice('images_'.length)
     if (md && img.indexOf(md + '_') === 0) img = img.slice(md.length + 1)
     if (!img) img = stem
-    return { kind: 'analyze', img, stage: -1, prev: 0 }
+    return { kind: 'analyze', img, stage: -1, prev }
   }
   return null
 }
@@ -426,8 +428,7 @@ export function parseImg2TextId(id: string): Img2TextRef | null {
 export function img2textMemberTag(id: string): string {
   const r = parseImg2TextId(id)
   if (!r) return ''
-  if (r.kind === 'analyze') return '逐图分析'
-  let t = 'stage' + r.stage
+  let t = r.kind === 'analyze' ? '逐图分析' : 'stage' + r.stage
   if (r.prev === 1) t += ' · 上一次'
   else if (r.prev === 2) t += ' · 上上次'
   else if (r.prev > 2) t += ' · prev' + r.prev

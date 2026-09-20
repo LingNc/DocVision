@@ -6,13 +6,16 @@
 ## [Unreleased]
 ### Fixed
 
-- **T55 analyze 三修**：① `-r 0` 永远选到 latex 最新日志——日志排序按文件名字符串，`img2text_` 字典序总在 `latex_` 前；改为按文件名内嵌时间排序。② 进度摘要每次全量反序列化一万多个进度 json（samba 盘上很慢）——改并发字节扫描 + **增量缓存**（`progress_items/.progress_stats.json` 按 mtime+大小记忆判定，稳定状态下只做 stat 级索引，不再重读文件）。③ 良品率口径：良品 = 完成且无 ERROR 且无 WARNING（警告影响良品率，用户口径），另报**错误率**（日志中有 `[ERROR]` 的图）与警告张数。
+- **T56 逐图会话显示三修**：① 成功会话方块爆红——一次性逐图分析不调 submit，模型偶尔调 getmorecontext 即被误判 error；完成信号补上 assistant 行的 `[IMG_TYPE:` 标记。② user 消息显示成原始 JSON——multipart 内容经 json 往返变成 `[]interface{}`，落盘分支不认、整体序列化；已展平（文本拼接 + 图片存媒体引用），存量旧转录由前端归一拆出文本与图片缩略图。③ img2text 会话图片 404——媒体 URL 拼上了 ID 的 `img2text:` 前缀（T57）。
+- **T55 analyze 三修：① `-r 0` 永远选到 latex 最新日志——日志排序按文件名字符串，`img2text_` 字典序总在 `latex_` 前；改为按文件名内嵌时间排序。② 进度摘要每次全量反序列化一万多个进度 json（samba 盘上很慢）——改并发字节扫描 + **增量缓存**（`progress_items/.progress_stats.json` 按 mtime+大小记忆判定，稳定状态下只做 stat 级索引，不再重读文件）。③ 良品率口径：良品 = 完成且无 ERROR 且无 WARNING（警告影响良品率，用户口径），另报**错误率**（日志中有 `[ERROR]` 的图）与警告张数。
 - **T53 mermaid 升级会话 view_image 从没看过原图**：`fixCfg.ImgPath` 从未按图赋值（全部 worker 共享同一配置），空路径被解析成 images 目录本身、decode 报 unknown format——升级为按任务复制配置并填入本图路径；`resolveImageFile` 同时加固（空路径/目录不再蒙混成"图片"）。
 - **T53 升级会话成功却在 UI 显示红色 error**：submit 成功回执是 "OK: ..."，而侧栏终态判定认规范前缀 "SUBMITTED."——回执改为规范前缀。
 - **T53 进度行 running 卡 0**：img2text 进度行原先只在有结果到达时刷新（2 张图跑几分钟就一直停在 `[0/2] running: 0`）——writer 循环加 2s 心跳重印当前计数。
 
 ### Added
 
+- **T56 mermaid 图表预览**：```mermaid 代码块下方直接渲染 SVG（新 API `POST /api/mermaid`，mmdc 渲染、内容哈希缓存；不可用/失败/静态模式回退为代码块），点击进灯箱缩放。
+- **一张图的历次调用历史**：逐图分析转录与升级会话同款 prevN 轮转（不再 append 混排），侧栏调用链把 prevN 归为同一图片的历史（「·上一次/·上上次」）。
 - **T54 img2text 进度概览可折叠 + 列表/方块切换**：概览区整块可折叠（头部行显示「N/M 书完成」聚合，记忆落盘、书多默认折叠）；书列表支持行式/方块两视图（独立记忆 `i2t.overviewBlocks`）——块视图一书一色块按最重状态着色（升级>待处理>修复>完成），悬浮给四态明细，点块填搜索框跳到该书；进度条补上 fixed 青色段与「修复 N」计数（前端此前漏了 P18 后端新增的第四态）。
 - **T53 img2text 板块按图聚合调用链**：同一张图的所有会话（逐图分析 → 升级 stage0 → stage1 → 历史轮转 prevN）在侧栏聚成一条链——主行=最新一次（可点进），「历史 N」展开器看全部（来源标签 chip：逐图分析/stageN/·上一次…）；链键把 `images_[<md>_]<hash>.<ext>` 与 mermaid_fix 的 `<md>_<hash>.<ext>` 归一到同一图片，归一失败的会话原样平铺；方块视图一链一块。搜索时保持平铺（历史照常命中）。修复了"同一图片多次会话平级罗列分不清先后"的问题。
 - **T53 升级修复会话补 read_file 工具**（读 submit.md/compile_error.log，全文或行区间）——原先只有 grep 可查内容。

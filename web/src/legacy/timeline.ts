@@ -237,8 +237,12 @@ export function attributionText(attr: ImageAttr | null | undefined): string {
 /* ---------- 媒体路径 ---------- */
 
 function sessionDir(id: string): string {
-  const i = String(id || '').lastIndexOf('/')
-  return i < 0 ? '' : String(id).slice(0, i)
+  // T57：附加根会话 ID 带板块前缀（scan_extra 加的 "img2text:"），它不是磁盘
+  // 路径的一部分——不剥掉会让 /media/<目录>/<file> 拼成 /media/img2text:… 404。
+  // 通用剥法：开头的 <小写字母数字>: 一段一律视为前缀（latex 会话 ID 无冒号，不受影响）。
+  const s = String(id || '').replace(/^[a-z0-9]+:/, '')
+  const i = s.lastIndexOf('/')
+  return i < 0 ? '' : s.slice(0, i)
 }
 
 export function mediaURL(ref: unknown): string {

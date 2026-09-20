@@ -7244,25 +7244,24 @@
       return { kind: "fix", img, stage: parseInt(m[1], 10), prev: m[2] ? parseInt(m[2], 10) : 0 };
     }
     if (segs[0] === "sessions") {
-      let stem = segs[2];
-      if (!/\.jsonl$/i.test(stem)) return null;
-      stem = stem.slice(0, -".jsonl".length);
-      if (!stem) return null;
+      const m = /^(.*?)(?:\.prev(\d+))?\.jsonl$/i.exec(segs[2]);
+      if (!m || !m[1]) return null;
+      const stem = m[1];
+      const prev = m[2] ? parseInt(m[2], 10) : 0;
       const dot = segs[1].lastIndexOf(".");
       const md = dot > 0 ? segs[1].slice(0, dot) : segs[1];
       let img = stem;
       if (img.indexOf("images_") === 0) img = img.slice("images_".length);
       if (md && img.indexOf(md + "_") === 0) img = img.slice(md.length + 1);
       if (!img) img = stem;
-      return { kind: "analyze", img, stage: -1, prev: 0 };
+      return { kind: "analyze", img, stage: -1, prev };
     }
     return null;
   }
   function img2textMemberTag(id) {
     const r = parseImg2TextId(id);
     if (!r) return "";
-    if (r.kind === "analyze") return "逐图分析";
-    let t = "stage" + r.stage;
+    let t = r.kind === "analyze" ? "逐图分析" : "stage" + r.stage;
     if (r.prev === 1) t += " · 上一次";
     else if (r.prev === 2) t += " · 上上次";
     else if (r.prev > 2) t += " · prev" + r.prev;
@@ -7577,6 +7576,78 @@
         selectSession((live || state.sessions[0]).id);
       }
     });
+  }
+  const mermaidCache = /* @__PURE__ */ new Map();
+  async function defaultPoster(source) {
+    const resp = await fetch("/api/mermaid", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source }),
+      cache: "no-store"
+    });
+    const data = await resp.json().catch(() => null);
+    if (data && data.ok && typeof data.svg === "string" && data.svg) {
+      return { ok: true, svg: data.svg };
+    }
+    return { ok: false, svg: "" };
+  }
+  async function renderMermaid(source, poster) {
+    const key = String(source || "");
+    const hit = mermaidCache.get(key);
+    if (hit) return hit;
+    const post = defaultPoster;
+    let entry;
+    try {
+      entry = await post(key);
+    } catch {
+      entry = { ok: false, svg: "" };
+    }
+    mermaidCache.set(key, entry);
+    return entry;
+  }
+  function svgElement(svg) {
+    try {
+      const doc2 = new DOMParser().parseFromString(svg, "image/svg+xml");
+      const node = doc2.documentElement;
+      if (!node || node.tagName.toLowerCase() !== "svg") return null;
+      if (node.getElementsByTagName("parsererror").length) return null;
+      return document.importNode(node, true);
+    } catch {
+      return null;
+    }
+  }
+  function mermaidPreviewBlock(source) {
+    const wrap = document.createElement("div");
+    wrap.className = "md-mermaid";
+    const note = document.createElement("div");
+    note.className = "md-mermaid-note";
+    note.textContent = "渲染中…";
+    wrap.appendChild(note);
+    void renderMermaid(source).then((entry) => {
+      if (!wrap.isConnected) return;
+      if (!entry.ok) {
+        note.textContent = "预览不可用";
+        return;
+      }
+      const svgNode = svgElement(entry.svg);
+      if (!svgNode) {
+        note.textContent = "预览不可用";
+        return;
+      }
+      wrap.removeChild(note);
+      const holder = document.createElement("div");
+      holder.className = "md-mermaid-svg";
+      holder.title = "点击放大查看";
+      holder.appendChild(svgNode);
+      holder.addEventListener("click", () => {
+        openLightbox("data:image/svg+xml;charset=utf-8," + encodeURIComponent(entry.svg), "mermaid 图表");
+      });
+      wrap.appendChild(holder);
+    });
+    return wrap;
+  }
+  function mermaidPreviewAvailable() {
+    return !state.staticMode;
   }
   function el$1(tag, cls, text) {
     const node = document.createElement(tag);
@@ -8450,6 +8521,9 @@
     body.appendChild(inner);
     wrap.appendChild(body);
     if (res.note) wrap.appendChild(el$1("div", "note", res.note));
+    if (String(lang || "").trim().toLowerCase() === "mermaid" && mermaidPreviewAvailable()) {
+      wrap.appendChild(mermaidPreviewBlock(code));
+    }
     return wrap;
   }
   function mdTable(header, rows) {
@@ -9669,8 +9743,9 @@
     }
   }
   function sessionDir(id) {
-    const i = String(id || "").lastIndexOf("/");
-    return i < 0 ? "" : String(id).slice(0, i);
+    const s = String(id || "").replace(/^[a-z0-9]+:/, "");
+    const i = s.lastIndexOf("/");
+    return i < 0 ? "" : s.slice(0, i);
   }
   function mediaURL(ref2) {
     const raw = String(ref2 || "");

@@ -1357,3 +1357,23 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ## 第五十四批补（2026-09-19，进度摘要增量缓存）
 
 - 追问"每次都要全部索引一下吗"：加 `progress_items/.progress_stats.json` 判定缓存（路径→(mtime,size,done)），未变文件复用判定、只读新增/变化的；已消失文件条目清理防胀大；并发度 16→64。实测本机 samba 冷/热均 ~0.27s；用户侧"非常慢"的主因是运行目录还跑着旧串行二进制，部署后生效。
+
+## 第五十五批（2026-09-19，T56/T57 逐图会话显示链整修）
+
+### 真实缺陷（均有真实转录/请求证据）
+- **方块爆红**：逐图分析是一次性会话（成功信号 = 答案里的 [IMG_TYPE:），模型偶尔调 getmorecontext（真实转录回执 "Added 10 lines above and 10 lines below"）即满足 SawTool && !SawSubmit 误判 error。补 SawTyped 信号。
+- **user 消息显示原始 JSON**：Append 的 multipart 分支只认 []map，recorder 的 json 往返产出 []interface{} → 整块序列化落盘。抽 flattenParts 两态通吃；存量旧转录前端 parseLegacyImageParts 归一（拆文本+图片缩略图，归属钉"本会话任务"）。
+- **img2text 会话图片 404（T57）**：mediaURL 用会话 ID 拼路径，img2text: 前缀没剥 → /media/img2text:mermaid_fix/... 不存在。sessionDir 通用剥前缀。
+- **历次调用历史没地方看**：逐图转录 NewTranscript 是 append 模式，多次运行混排一个文件。改 prevN 轮转（与 mermaid_fix 同款），web 链解析 sessions/<md>/<图>.prevN.jsonl 归并同图历史。
+- **mermaid 预览（T56 追加）**：POST /api/mermaid（mmdc + sha256 缓存于用户缓存目录，实测首渲数秒/缓存 0.6s；坏源码 in-band ok:false）；前端 ```mermaid 块下挂 SVG（DOMParser，不碰 innerHTML），点击编 data URL 进现有灯箱，失败/静态模式回退代码块+一行小字。
+- 两子代理分别实施 web 两批（68→80 条 vitest 全绿），父代理复验构建与端点实测。
+
+## 第五十五批（2026-09-19，T56/T57 逐图会话显示链整修）
+
+### 真实缺陷（均有真实转录/请求证据）
+- **方块爆红**：逐图分析是一次性会话（成功信号 = 答案里的 [IMG_TYPE:），模型偶尔调 getmorecontext（真实转录回执 "Added 10 lines above and 10 lines below"）即满足 SawTool && !SawSubmit 误判 error。补 SawTyped 信号。
+- **user 消息显示原始 JSON**：Append 的 multipart 分支只认 []map，recorder 的 json 往返产出 []interface{} → 整块序列化落盘。抽 flattenParts 两态通吃；存量旧转录前端 parseLegacyImageParts 归一（拆文本+图片缩略图，归属钉"本会话任务"）。
+- **img2text 会话图片 404（T57）**：mediaURL 用会话 ID 拼路径，img2text: 前缀没剥 → /media/img2text:mermaid_fix/... 不存在。sessionDir 通用剥前缀。
+- **历次调用历史没地方看**：逐图转录 NewTranscript 是 append 模式，多次运行混排一个文件。改 prevN 轮转（与 mermaid_fix 同款），web 链解析 sessions/<md>/<图>.prevN.jsonl 归并同图历史。
+- **mermaid 预览（T56 追加）**：POST /api/mermaid（mmdc + sha256 缓存于用户缓存目录，实测首渲数秒/缓存 0.6s；坏源码 in-band ok:false）；前端 mermaid 围栏块下挂 SVG（DOMParser，不碰 innerHTML），点击编 data URL 进现有灯箱，失败/静态模式回退代码块+一行小字。
+- 两子代理分别实施 web 两批（68→80 条 vitest 全绿），父代理复验构建与端点实测。
