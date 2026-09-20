@@ -202,7 +202,7 @@ func TestToolImageHandleText(t *testing.T) {
 	if content[0]["type"] != "text" || content[1]["type"] != "image_url" {
 		t.Errorf("content 形状不对: %v", content)
 	}
-	url, _ := content[1]["image_url"].(map[string]string)
+	url, _ := content[1]["image_url"].(map[string]interface{})
 	if url["url"] != "data:image/png;base64,aGk=" {
 		t.Errorf("data URI = %q", url["url"])
 	}

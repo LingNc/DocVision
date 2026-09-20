@@ -397,9 +397,16 @@ func (w *TranscriptWriter) flattenParts(parts []map[string]interface{}) (string,
 			b.WriteString(t)
 			continue
 		}
-		if iu, ok := part["image_url"].(map[string]interface{}); ok {
-			if u, ok2 := iu["url"].(string); ok2 {
-				ref, err := w.storeImage(u)
+		if iu, ok := part["image_url"]; ok {
+			var url string
+			switch m := iu.(type) {
+			case map[string]interface{}:
+				url, _ = m["url"].(string)
+			case map[string]string:
+				url = m["url"]
+			}
+			if url != "" {
+				ref, err := w.storeImage(url)
 				if err != nil {
 					return "", nil, err
 				}

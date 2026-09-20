@@ -390,7 +390,7 @@ func toolImageHandleText(v visionTurn) string {
 func toolImageContent(v visionTurn) []map[string]interface{} {
 	return []map[string]interface{}{
 		{"type": "text", "text": toolImageHandleText(v)},
-		{"type": "image_url", "image_url": map[string]string{
+		{"type": "image_url", "image_url": map[string]interface{}{
 			"url": "data:" + v.mime + ";base64," + v.b64,
 		}},
 	}

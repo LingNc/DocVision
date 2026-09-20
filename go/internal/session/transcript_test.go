@@ -241,3 +241,35 @@ func TestAppendMultipartAfterJSONRoundTrip(t *testing.T) {
 		t.Errorf("image not stored as media ref: %.200s", line)
 	}
 }
+
+// 回归钉（2026-09-20）：latex view_image/view_pdf 视觉回传的 user 行必须落
+// images——T56 重构把断言从 map[string]string 换成 map[string]interface{}，
+// 静默丢图一整类（存量老转录有图、新转录无图）。两种 map 形态都要认。
+func TestAppendToolImageTurnStoresImage(t *testing.T) {
+	for name, content := range map[string]any{
+		"string-map（toolImageContent 形态）": []map[string]interface{}{
+			{"type": "text", "text": "Tool image output from view_image (call call_X) (for your visual review):"},
+			{"type": "image_url", "image_url": map[string]string{"url": "data:image/png;base64,aGVsbG8="}},
+		},
+		"any-map（JSON 往返形态）": []map[string]interface{}{
+			{"type": "text", "text": "Tool image output from view_image (call call_X) (for your visual review):"},
+			{"type": "image_url", "image_url": map[string]interface{}{"url": "data:image/png;base64,aGVsbG8="}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := t.TempDir() + "/t.jsonl"
+			w, err := NewTranscript(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Append(ChatMessage{Role: "user", Content: content}); err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			raw, _ := os.ReadFile(p)
+			if !strings.Contains(string(raw), `"images":["file://media/`) {
+				t.Fatalf("images 丢失:\n%s", raw)
+			}
+		})
+	}
+}
