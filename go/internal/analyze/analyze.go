@@ -195,14 +195,14 @@ func printProgressFooter(inputDir, progressRoot, finallyDir string, logPaths []s
 			}
 		}
 		good := completed - bad - warned
-		fmt.Printf("  良品率: %.2f%% (%d/%d，已扣除错误与警告)\n",
+		fmt.Printf("  良品率: %.2f%% (%d/%d)\n",
 			float64(good)/float64(completed)*100, good, completed)
 		if bad > 0 {
-			fmt.Printf("  错误率: %.2f%% (%d/%d，日志中有 [ERROR] 的图)\n",
+			fmt.Printf("  错误率: %.2f%% (%d/%d)\n",
 				float64(bad)/float64(completed)*100, bad, completed)
 		}
 		if warned > 0 {
-			fmt.Printf("  警告: %d 张（自纠正成功，但从良品率中扣除）\n", warned)
+			fmt.Printf("  警告: %d 张\n", warned)
 		}
 	}
 }
