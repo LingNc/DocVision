@@ -890,3 +890,27 @@ func TestCallAIWithTools_FormatFixNilValidator(t *testing.T) {
 		t.Fatalf("validator invocations = %d, want 0 (customUserText path must skip validation)", validatorCalls)
 	}
 }
+
+// T59：厂商退化空响应（0 choices / 全空）在重试层按可重试错误处理。
+func TestIsDegenerateResponse(t *testing.T) {
+	if !isDegenerateResponse(nil) {
+		t.Error("nil resp should be degenerate")
+	}
+	if !isDegenerateResponse(&ChatResponse{}) {
+		t.Error("0 choices should be degenerate")
+	}
+	empty := &ChatResponse{Choices: []ChatResponseChoice{{}}}
+	if !isDegenerateResponse(empty) {
+		t.Error("empty content no tools should be degenerate")
+	}
+	withText := &ChatResponse{Choices: []ChatResponseChoice{{Message: ChatMessage{Content: "x"}}}}
+	if isDegenerateResponse(withText) {
+		t.Error("content present = not degenerate")
+	}
+	withTool := &ChatResponse{Choices: []ChatResponseChoice{{Message: ChatMessage{
+		ToolCalls: []ToolCall{{ID: "c1"}},
+	}}}}
+	if isDegenerateResponse(withTool) {
+		t.Error("tool calls present = not degenerate")
+	}
+}

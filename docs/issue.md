@@ -637,5 +637,6 @@ user 轮
 [{"text":"The image to describe is at line 1038. Context: [1028 to 1043] (10↑, 5↓).\n```\n[L1028…
 [{"text":"The image to describe is at line 1038. Context: [1028 to 1043] (10↑, 5↓).\n\n[L1028] ## - 否定之否定规律（回答发展往哪里去的问题即发展的方向问题）\n[L1029] \n[L1030] ## 1. 辨证发展过程内容\n[L1031] \n[L1032] (1) 否定: 事物的辩证发展过程经过第一次否定, 使矛盾得到初步解决。\n[L1033] \n[L1034] (2)
 ```
-[X][ ] T57. 在img2text升级会话中，view image这边无法加载他的图像在webui界面无法渲染。
+[X][T] T57. 在img2text升级会话中，view image这边无法加载他的图像在webui界面无法渲染。
 [ ][ ] T58. 当正在运行的时候书在img2text中上面进度那边没有显示出当前正在进行的书的进度？
+[ ][ ] T59. 对于空回复的错误在img2text这边没有做重试处理吗？

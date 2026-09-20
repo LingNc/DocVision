@@ -670,6 +670,7 @@ func doCallWithRetryFull(
 ) (*ChatResponse, string, string) {
 	retry := 0
 	rateLimitRetry := 0
+	emptyRetry := 0
 	round := 0
 	for {
 		round++
@@ -680,6 +681,15 @@ func doCallWithRetryFull(
 		}
 		resp, err := client.ChatCompletion(req)
 		if err == nil {
+			// T59：厂商偶发退化空响应（0 choices / 全空 content 无工具调用）
+			// 不是模型的"回答"，按可重试错误处理——原样重发（请求字节
+			// 一致保住前缀缓存），最多再试 2 次，仍空才算 EMPTY_RESPONSE。
+			if emptyRetry < 2 && isDegenerateResponse(resp) {
+				emptyRetry++
+				logger.LogWarning(tid, "  [EmptyResponse] 空响应，重发", emptyRetry, "/2")
+				time.Sleep(time.Duration(emptyRetry) * 2 * time.Second)
+				continue
+			}
 			if logger.DebugEnabled() {
 				content, reasoning, tools := 0, resp.ReasoningChars, 0
 				if len(resp.Choices) > 0 {
@@ -1022,4 +1032,16 @@ func debugContent(content any) string {
 		}
 		return truncate(string(raw), 2000)
 	}
+}
+
+// isDegenerateResponse reports the vendor-degenerate shapes T50/T59 cover:
+// zero choices, or a choice with no content, no reasoning and no tool calls
+// (finish=length/0-completion junk). Such a reply carries no model intent,
+// so it is retried like a transport error instead of being judged.
+func isDegenerateResponse(resp *ChatResponse) bool {
+	if resp == nil || len(resp.Choices) == 0 {
+		return true
+	}
+	m := resp.Choices[0].Message
+	return strings.TrimSpace(contentString(m)) == "" && len(m.ToolCalls) == 0
 }

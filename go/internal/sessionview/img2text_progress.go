@@ -13,6 +13,7 @@
 package sessionview
 
 import (
+	"time"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,9 +25,11 @@ import (
 type Img2TextItem struct {
 	// Name is the image file base name (as referenced from the md).
 	Name string `json:"name"`
-	// Status: done | fixed | escalated | pending。
+	// Status: done | fixed | escalated | pending | running。
 	// fixed = 有结果且留过升级修复工作区（修好了）；escalated = 只有修复
-	// 工作区没有结果（升级也未修好）。
+	// 工作区没有结果（升级也未修好）。running（T58）= 还没出结果，但该图
+	// 的转录文件在最近一个活动窗口内被写过（正在处理中的旁证——
+	// progress_items 树是这里唯一的数据源，不读日志）。
 	Status string `json:"status"`
 }
 
@@ -40,6 +43,7 @@ type Img2TextBook struct {
 	Fixed     int            `json:"fixed"`
 	Escalated int            `json:"escalated"`
 	Pending   int            `json:"pending"`
+	Running   int            `json:"running"`
 	Items     []Img2TextItem `json:"items"`
 }
 
@@ -92,6 +96,29 @@ func ScanImg2TextProgress(progressRoot string) []Img2TextBook {
 				}
 			}
 		}
+		// running（T58）：sessions/<md>.md/<图>.jsonl（及 prevN）在活动
+		// 窗口内被写过，且该图尚无结果。逐图转录名与结果 json 同名（去
+		// 前缀后都是 <hash>.<ext>[.prevN].jsonl）。
+		runSet := map[string]bool{}
+		sessDir := filepath.Join(progressRoot, "sessions", book+".md")
+		if sess, serr := os.ReadDir(sessDir); serr == nil {
+			for _, sf := range sess {
+				if sf.IsDir() || !strings.HasSuffix(sf.Name(), ".jsonl") {
+					continue
+				}
+				fi, ferr := sf.Info()
+				if ferr != nil || time.Since(fi.ModTime()) > LiveWindow {
+					continue
+				}
+				img := strings.TrimSuffix(sf.Name(), ".jsonl")
+				if k := strings.LastIndex(img, ".prev"); k > 0 {
+					img = img[:k]
+				}
+				img = strings.TrimPrefix(img, "images_")
+				img = strings.TrimPrefix(img, book+"_")
+				runSet[img] = true
+			}
+		}
 		// escalated: mermaid_fix/<md>_<imgfile>/ workspace.
 		fixDir := filepath.Join(progressRoot, "mermaid_fix")
 		if fixes, ferr := os.ReadDir(fixDir); ferr == nil {
@@ -112,13 +139,13 @@ func ScanImg2TextProgress(progressRoot string) []Img2TextBook {
 				continue
 			}
 			seen[img] = true
-			b.Items = append(b.Items, Img2TextItem{Name: img, Status: itemStatus(doneSet, escSet, img)})
+			b.Items = append(b.Items, Img2TextItem{Name: img, Status: itemStatus(doneSet, escSet, runSet, img)})
 		}
 		// Result/fix entries whose ref is not in the md (stale renames) still
 		// show up, appended at the end.
 		for img := range doneSet {
 			if !seen[img] {
-				b.Items = append(b.Items, Img2TextItem{Name: img, Status: itemStatus(doneSet, escSet, img)})
+				b.Items = append(b.Items, Img2TextItem{Name: img, Status: itemStatus(doneSet, escSet, runSet, img)})
 			}
 		}
 		for img := range escSet {
@@ -135,6 +162,8 @@ func ScanImg2TextProgress(progressRoot string) []Img2TextBook {
 				b.Fixed++
 			case "escalated":
 				b.Escalated++
+			case "running":
+				b.Running++
 			default:
 				b.Pending++
 			}
@@ -147,7 +176,7 @@ func ScanImg2TextProgress(progressRoot string) []Img2TextBook {
 
 // itemStatus resolves one image's board status. done+fix workspace = fixed
 // (修复成功，值得在板块上区分出来——它构成"修复记录"视角）。
-func itemStatus(done, esc map[string]bool, img string) string {
+func itemStatus(done, esc, run map[string]bool, img string) string {
 	switch {
 	case done[img] && esc[img]:
 		return "fixed"
@@ -155,6 +184,8 @@ func itemStatus(done, esc map[string]bool, img string) string {
 		return "done"
 	case esc[img]:
 		return "escalated"
+	case run[img]:
+		return "running"
 	}
 	return "pending"
 }
