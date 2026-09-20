@@ -550,6 +550,31 @@ export function buildGroups(): ProjectGroup[] {
   return groups
 }
 
+/* 中栏「历史」页签的数据源：给定会话 id，返回它所在 img2text 调用链的全部
+ * 成员（sortChainMembers 排序：新 → 旧）；不属于任何链 / 单成员链 / 不可
+ * 解析的 id 一律返回 null（此时「历史」页签不出现）。纯函数：直接对传入的
+ * sessions 数组扫描，不读全局 state，调用方用 computed 按引用缓存。 */
+export function chainOfSession(sessions: any[], id: string | null | undefined): any[] | null {
+  if (!id) return null
+  const self = parseImg2TextId(id)
+  if (!self) return null
+  // 链是按项目聚的（侧栏 buildGroups 里每组各自 buildImg2TextChains）：
+  // 同一内容哈希的图出现在两本书里时各成一条链，不能跨项目混并。
+  let proj = ''
+  ;(sessions || []).forEach((s) => {
+    if (s && s.id === id) proj = s.project || projectOf(s.id)
+  })
+  const members: any[] = []
+  ;(sessions || []).forEach((s) => {
+    const r = s && parseImg2TextId(s.id)
+    if (!r || r.img !== self.img) return
+    if ((s.project || projectOf(s.id)) !== proj) return
+    members.push(s)
+  })
+  if (members.length < 2) return null
+  return sortChainMembers(members)
+}
+
 export function findSession(id: string): any {
   let found: any = null
   state.sessions.forEach((s) => {

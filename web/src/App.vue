@@ -32,12 +32,13 @@ import {
   toggleTheme,
 } from './state'
 import { bootData, refreshIndex, refreshImg2TextProgress, revealProject } from './data'
-import { projectOf, sessionTitleOf } from './legacy/sidebar'
+import { projectOf, sessionTitleOf, chainOfSession } from './legacy/sidebar'
 import Sidebar from './components/Sidebar.vue'
 import Timeline from './components/Timeline.vue'
 import InlineMD from './components/InlineMD.vue'
 import Trajectory from './components/Trajectory.vue'
 import DetailsPanel from './components/DetailsPanel.vue'
+import HistoryPanel from './components/HistoryPanel.vue'
 
 const frame = ref<HTMLElement | null>(null)
 
@@ -133,6 +134,17 @@ const headerSummary = computed(() => {
 })
 const curProject = computed(() => (state.current ? state.current.project || projectOf(state.current.id) : ''))
 const sessionTitle = computed(() => (state.current ? sessionTitleOf(state.current) : ''))
+
+/* 「历史」页签：当前会话属于某条成员数 > 1 的 img2text 调用链时出现。
+ * computed 依赖 state.sessions（轮询整体换新数组）与当前会话 id，避免每帧
+ * 全量重算；切到链外会话时视图回落「对话」。 */
+const currentChain = computed(() => chainOfSession(state.sessions, state.current ? state.current.id : null))
+watch(
+  () => (state.current ? state.current.id : null),
+  () => {
+    if (state.view === 'history' && !currentChain.value) switchView('chat')
+  },
+)
 
 /* 横幅：坏行提示与拉取失败共用一条（旧页 updateBanner/setBanner 的语义）。
  * 坏行优先；拉取失败的信息保留到坏行出现或下次成功渲染时。 */
@@ -377,6 +389,7 @@ onBeforeUnmount(() => {
           <div class="tabs" role="tablist" aria-label="视图">
             <button id="tab-chat" class="tab" :class="{ 'tab-active': state.view === 'chat' }" type="button" role="tab" :aria-selected="state.view === 'chat' ? 'true' : 'false'" data-view="chat" @click="switchView('chat')">对话</button>
             <button id="tab-traj" class="tab" :class="{ 'tab-active': state.view === 'trajectory' }" type="button" role="tab" :aria-selected="state.view === 'trajectory' ? 'true' : 'false'" data-view="trajectory" @click="switchView('trajectory')">轨迹</button>
+            <button v-if="currentChain" id="tab-history" class="tab" :class="{ 'tab-active': state.view === 'history' }" type="button" role="tab" :aria-selected="state.view === 'history' ? 'true' : 'false'" data-view="history" @click="switchView('history')">历史 {{ currentChain.length }}</button>
           </div>
           <div class="tab-tools" role="group" aria-label="显示选项">
             <button id="follow" class="tab-toggle" type="button" :aria-pressed="state.follow ? 'true' : 'false'" title="新消息到达时自动滚动到底部" @click="onClickFollow">自动跟随</button>
@@ -393,6 +406,7 @@ onBeforeUnmount(() => {
       <div class="view-area">
         <Timeline></Timeline>
         <Trajectory />
+        <HistoryPanel />
       </div>
     </main>
 

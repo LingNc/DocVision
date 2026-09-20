@@ -1381,3 +1381,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ## 第五十五批补（2026-09-19，T58 跨行 $$ 公式不渲染）
 
 - 用户报会话里双 $ 公式原样显示。根因：数学渲染全在行内正则 MD_INLINE，而 mdInlineLines 逐行扫描——跨行 $$…$$ 永远匹配不到。修法：renderMarkdown 块级循环加 collectMathBlock（$$ 起手识别：单行同起同收/多行/未闭合吃到文末；裸 $$$$ 不算），mdBlockStart 同步认 $$（防列表懒续行吞掉）；坏公式 try/catch 回退原文。node 测试环境无 DOM——识别逻辑抽纯函数钉 5 条 vitest。
+
+## 第五十五批补二（2026-09-19，中栏「历史」页签）
+
+- 用户找不到侧栏的链历史入口，提议页签化。实现：chainOfSession(sessions,id) 纯函数（按项目聚链防跨书同哈希混并，>1 成员才成链）+ HistoryPanel.vue + App.vue 第三个页签（computed 按 sessions 引用缓存，watch 标量 getter 避开数组多源陷阱；切到链外会话回落「对话」；历史页内点行切换停留在历史页）。vitest 88/88。子代理实施、父代理复验。

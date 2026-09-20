@@ -76,7 +76,7 @@ function goChat(row: any) {
 </script>
 
 <template>
-  <div id="trajectory" class="trajectory" :class="{ hidden: state.view === 'chat' }">
+  <div id="trajectory" class="trajectory" :class="{ hidden: state.view !== 'trajectory' }">
     <div class="traj-toolbar">
       <div class="traj-toolbar-inner">
         <div class="traj-filters">

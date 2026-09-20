@@ -282,7 +282,7 @@ export function toggleTheme(): void {
 /* ---------- 视图切换（对话 / 轨迹；旧页 switchView 同名） ---------- */
 
 export function switchView(view: string): void {
-  state.view = view === 'trajectory' ? 'trajectory' : 'chat'
+  state.view = view === 'trajectory' || view === 'history' ? view : 'chat'
 }
 
 /* ---------- 灯箱（旧页 openLightbox/closeLightbox 同名；点击接线在缩略图块） ----------

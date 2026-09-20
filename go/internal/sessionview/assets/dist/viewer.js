@@ -6891,7 +6891,7 @@
     storeSet(THEME_KEY, next);
   }
   function switchView(view) {
-    state.view = view === "trajectory" ? "trajectory" : "chat";
+    state.view = view === "trajectory" || view === "history" ? view : "chat";
   }
   const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "", scale: 1, tx: 0, ty: 0 });
   function openLightbox(url, ref2) {
@@ -7362,6 +7362,24 @@
       });
     }
     return groups;
+  }
+  function chainOfSession(sessions, id) {
+    if (!id) return null;
+    const self2 = parseImg2TextId(id);
+    if (!self2) return null;
+    let proj = "";
+    (sessions || []).forEach((s) => {
+      if (s && s.id === id) proj = s.project || projectOf(s.id);
+    });
+    const members = [];
+    (sessions || []).forEach((s) => {
+      const r = s && parseImg2TextId(s.id);
+      if (!r || r.img !== self2.img) return;
+      if ((s.project || projectOf(s.id)) !== proj) return;
+      members.push(s);
+    });
+    if (members.length < 2) return null;
+    return sortChainMembers(members);
   }
   function findSession(id) {
     let found = null;
@@ -8784,7 +8802,7 @@
       mdInline(parent, part, 0);
     });
   }
-  const _sfc_main$k = /* @__PURE__ */ defineComponent({
+  const _sfc_main$l = /* @__PURE__ */ defineComponent({
     __name: "InlineMD",
     props: {
       tag: {},
@@ -8809,20 +8827,20 @@
       };
     }
   });
-  const _hoisted_1$f = {
+  const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"
   };
-  const _hoisted_2$e = { class: "side-head" };
-  const _hoisted_3$b = ["title"];
-  const _hoisted_4$8 = {
+  const _hoisted_2$f = { class: "side-head" };
+  const _hoisted_3$c = ["title"];
+  const _hoisted_4$9 = {
     key: 0,
     class: "board-tabs",
     role: "group",
     "aria-label": "板块"
   };
-  const _hoisted_5$8 = ["aria-pressed"];
-  const _hoisted_6$7 = ["aria-pressed"];
+  const _hoisted_5$9 = ["aria-pressed"];
+  const _hoisted_6$8 = ["aria-pressed"];
   const _hoisted_7$6 = { class: "side-search" };
   const _hoisted_8$5 = { class: "side-list-wrap" };
   const _hoisted_9$4 = {
@@ -8873,7 +8891,7 @@
     class: "proj-note",
     title: "这个输出根本身就是一个工程（work/、progress.json 等直接挂在它下面），是引入多项目布局之前的形态；新布局是「输出根/书名/」。"
   };
-  const _hoisted_31$1 = {
+  const _hoisted_31$2 = {
     key: 1,
     class: "dot live"
   };
@@ -8973,7 +8991,7 @@
     class: "side-foot"
   };
   const OVERFLOW_LIMIT = 8;
-  const _sfc_main$j = /* @__PURE__ */ defineComponent({
+  const _sfc_main$k = /* @__PURE__ */ defineComponent({
     __name: "Sidebar",
     setup(__props) {
       const listEl = /* @__PURE__ */ ref(null);
@@ -9160,8 +9178,8 @@
         setOverflowOpen(okey);
       }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("aside", _hoisted_1$f, [
-          createBaseVNode("div", _hoisted_2$e, [
+        return openBlock(), createElementBlock("aside", _hoisted_1$g, [
+          createBaseVNode("div", _hoisted_2$f, [
             _cache[4] || (_cache[4] = createBaseVNode("span", { class: "side-title" }, "工作区", -1)),
             createBaseVNode("button", {
               id: "side-view-toggle",
@@ -9169,7 +9187,7 @@
               type: "button",
               title: blockView.value ? "切回列表视图" : "切到方块视图（会话多时好扫；悬浮看说明）",
               onClick: toggleBlockView
-            }, toDisplayString(blockView.value ? "☰" : "▦"), 11, _hoisted_3$b),
+            }, toDisplayString(blockView.value ? "☰" : "▦"), 11, _hoisted_3$c),
             createBaseVNode("button", {
               id: "refresh",
               class: "icon-btn",
@@ -9179,7 +9197,7 @@
               (...args) => unref(refreshIndex) && unref(refreshIndex)(...args))
             }, "⟳")
           ]),
-          showBoardSwitch.value ? (openBlock(), createElementBlock("div", _hoisted_4$8, [
+          showBoardSwitch.value ? (openBlock(), createElementBlock("div", _hoisted_4$9, [
             createBaseVNode("button", {
               id: "board-latex",
               class: "tab-toggle",
@@ -9187,7 +9205,7 @@
               "aria-pressed": unref(state).board === "latex" ? "true" : "false",
               title: "LaTeX 板块：主根（latex）会话",
               onClick: _cache[1] || (_cache[1] = ($event) => unref(setBoard)("latex"))
-            }, "LaTeX", 8, _hoisted_5$8),
+            }, "LaTeX", 8, _hoisted_5$9),
             createBaseVNode("button", {
               id: "board-img2text",
               class: "tab-toggle",
@@ -9195,7 +9213,7 @@
               "aria-pressed": unref(state).board === "img2text" ? "true" : "false",
               title: "img2text 板块：逐图文字化会话与进度",
               onClick: _cache[2] || (_cache[2] = ($event) => unref(setBoard)("img2text"))
-            }, "img2text", 8, _hoisted_6$7)
+            }, "img2text", 8, _hoisted_6$8)
           ])) : createCommentVNode("", true),
           createBaseVNode("div", _hoisted_7$6, [
             withDirectives(createBaseVNode("input", {
@@ -9304,7 +9322,7 @@
                     ]),
                     createBaseVNode("span", _hoisted_29$2, toDisplayString(g.items.length) + " 个会话", 1),
                     g.legacy ? (openBlock(), createElementBlock("span", _hoisted_30$2, "旧版单项目")) : createCommentVNode("", true),
-                    g.live ? (openBlock(), createElementBlock("span", _hoisted_31$1)) : createCommentVNode("", true)
+                    g.live ? (openBlock(), createElementBlock("span", _hoisted_31$2)) : createCommentVNode("", true)
                   ], 8, _hoisted_25$2),
                   createBaseVNode("div", null, [
                     g.progress ? (openBlock(), createElementBlock("div", _hoisted_32$1, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
@@ -9340,7 +9358,7 @@
                                   class: normalizeClass(["dot", { live: c.live > 0 }])
                                 }, null, 2)
                               ]),
-                              createVNode(_sfc_main$k, {
+                              createVNode(_sfc_main$l, {
                                 tag: "span",
                                 class: "row-title",
                                 text: unref(sessionTitleOf)(c.main)
@@ -9378,7 +9396,7 @@
                                       class: normalizeClass(["dot", { live: s.live }])
                                     }, null, 2)
                                   ]),
-                                  createVNode(_sfc_main$k, {
+                                  createVNode(_sfc_main$l, {
                                     tag: "span",
                                     class: "row-title",
                                     text: unref(sessionTitleOf)(s)
@@ -9415,7 +9433,7 @@
                                 class: normalizeClass(["dot", { live: s.live }])
                               }, null, 2)
                             ]),
-                            createVNode(_sfc_main$k, {
+                            createVNode(_sfc_main$l, {
                               tag: "span",
                               class: "row-title",
                               text: unref(sessionTitleOf)(s)
@@ -9484,7 +9502,7 @@
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
                                 ]),
-                                createVNode(_sfc_main$k, {
+                                createVNode(_sfc_main$l, {
                                   tag: "span",
                                   class: "row-title",
                                   text: unref(sessionTitleOf)(s)
@@ -9544,7 +9562,7 @@
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
                                 ]),
-                                createVNode(_sfc_main$k, {
+                                createVNode(_sfc_main$l, {
                                   tag: "span",
                                   class: "row-title",
                                   text: unref(sessionTitleOf)(s)
@@ -9607,7 +9625,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-62dee339"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-62dee339"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
@@ -10140,12 +10158,12 @@
     });
     return map;
   }
-  const _hoisted_1$e = { class: "stream-summary" };
-  const _hoisted_2$d = {
+  const _hoisted_1$f = { class: "stream-summary" };
+  const _hoisted_2$e = {
     key: 0,
     class: "dot-sep"
   };
-  const _sfc_main$i = /* @__PURE__ */ defineComponent({
+  const _sfc_main$j = /* @__PURE__ */ defineComponent({
     __name: "StreamSummary",
     setup(__props) {
       const bits = computed(() => {
@@ -10165,10 +10183,10 @@
       });
       const detailsBtn = computed(() => layout.cols.details > 0 ? "收起详情" : "详情 ›");
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("div", _hoisted_1$e, [
+        return openBlock(), createElementBlock("div", _hoisted_1$f, [
           (openBlock(true), createElementBlock(Fragment, null, renderList(bits.value, (b, i) => {
             return openBlock(), createElementBlock(Fragment, { key: i }, [
-              i ? (openBlock(), createElementBlock("span", _hoisted_2$d)) : createCommentVNode("", true),
+              i ? (openBlock(), createElementBlock("span", _hoisted_2$e)) : createCommentVNode("", true),
               createBaseVNode("span", null, toDisplayString(b), 1)
             ], 64);
           }), 128)),
@@ -10181,13 +10199,13 @@
       };
     }
   });
-  const StreamSummary = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-a0dfcd77"]]);
-  const _hoisted_1$d = ["data-phase"];
-  const _hoisted_2$c = { class: "pt-head" };
-  const _hoisted_3$a = { class: "pt-label" };
-  const _hoisted_4$7 = { class: "pt-age" };
-  const _hoisted_5$7 = { class: "code pt-text" };
-  const _sfc_main$h = /* @__PURE__ */ defineComponent({
+  const StreamSummary = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-a0dfcd77"]]);
+  const _hoisted_1$e = ["data-phase"];
+  const _hoisted_2$d = { class: "pt-head" };
+  const _hoisted_3$b = { class: "pt-label" };
+  const _hoisted_4$8 = { class: "pt-age" };
+  const _hoisted_5$8 = { class: "code pt-text" };
+  const _sfc_main$i = /* @__PURE__ */ defineComponent({
     __name: "PartialTail",
     props: {
       partial: {}
@@ -10208,43 +10226,43 @@
           class: "msg partial-tail",
           "data-phase": __props.partial.phase
         }, [
-          createBaseVNode("div", _hoisted_2$c, [
+          createBaseVNode("div", _hoisted_2$d, [
             _cache[0] || (_cache[0] = createBaseVNode("span", {
               class: "pt-spinner",
               "aria-hidden": "true"
             }, null, -1)),
-            createBaseVNode("span", _hoisted_3$a, toDisplayString(phaseLabel.value), 1),
-            createBaseVNode("span", _hoisted_4$7, toDisplayString(age.value), 1)
+            createBaseVNode("span", _hoisted_3$b, toDisplayString(phaseLabel.value), 1),
+            createBaseVNode("span", _hoisted_4$8, toDisplayString(age.value), 1)
           ]),
-          createBaseVNode("pre", _hoisted_5$7, [
+          createBaseVNode("pre", _hoisted_5$8, [
             createTextVNode(toDisplayString(text.value), 1),
             _cache[1] || (_cache[1] = createBaseVNode("span", {
               class: "pt-caret",
               "aria-hidden": "true"
             }, "▍", -1))
           ])
-        ], 8, _hoisted_1$d);
+        ], 8, _hoisted_1$e);
       };
     }
   });
-  const PartialTail = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-37ec04a0"]]);
-  const _hoisted_1$c = ["open"];
-  const _hoisted_2$b = { class: "line-name" };
-  const _hoisted_3$9 = {
+  const PartialTail = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-37ec04a0"]]);
+  const _hoisted_1$d = ["open"];
+  const _hoisted_2$c = { class: "line-name" };
+  const _hoisted_3$a = {
     key: 0,
     class: "line-badge"
   };
-  const _hoisted_4$6 = ["title"];
-  const _hoisted_5$6 = {
+  const _hoisted_4$7 = ["title"];
+  const _hoisted_5$7 = {
     key: 2,
     class: "line-running",
     title: "这个调用还没有收到回执，正在执行"
   };
-  const _hoisted_6$6 = {
+  const _hoisted_6$7 = {
     key: 3,
     class: "line-tail"
   };
-  const _sfc_main$g = /* @__PURE__ */ defineComponent({
+  const _sfc_main$h = /* @__PURE__ */ defineComponent({
     __name: "Disclosure",
     props: {
       cls: {},
@@ -10265,28 +10283,28 @@
             _cache[2] || (_cache[2] = createBaseVNode("span", { class: "line-slot" }, [
               createBaseVNode("span", { class: "line-caret" })
             ], -1)),
-            createBaseVNode("span", _hoisted_2$b, toDisplayString(__props.name), 1),
-            __props.badge ? (openBlock(), createElementBlock("span", _hoisted_3$9, toDisplayString(__props.badge), 1)) : createCommentVNode("", true),
+            createBaseVNode("span", _hoisted_2$c, toDisplayString(__props.name), 1),
+            __props.badge ? (openBlock(), createElementBlock("span", _hoisted_3$a, toDisplayString(__props.badge), 1)) : createCommentVNode("", true),
             __props.summary ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
               _cache[0] || (_cache[0] = createBaseVNode("span", { class: "line-sep" }, null, -1)),
               createBaseVNode("span", {
                 class: "line-summary",
                 title: __props.summary
-              }, toDisplayString(__props.summary), 9, _hoisted_4$6)
+              }, toDisplayString(__props.summary), 9, _hoisted_4$7)
             ], 64)) : createCommentVNode("", true),
-            __props.running ? (openBlock(), createElementBlock("span", _hoisted_5$6, [..._cache[1] || (_cache[1] = [
+            __props.running ? (openBlock(), createElementBlock("span", _hoisted_5$7, [..._cache[1] || (_cache[1] = [
               createBaseVNode("span", { class: "running-dot" }, null, -1),
               createTextVNode("运行中 ", -1)
             ])])) : createCommentVNode("", true),
-            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_6$6, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
+            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_6$7, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
           ]),
           renderSlot(_ctx.$slots, "default", {}, void 0, true)
-        ], 10, _hoisted_1$c);
+        ], 10, _hoisted_1$d);
       };
     }
   });
-  const Disclosure = /* @__PURE__ */ _export_sfc(_sfc_main$g, [["__scopeId", "data-v-ae59d4af"]]);
-  const _sfc_main$f = /* @__PURE__ */ defineComponent({
+  const Disclosure = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-ae59d4af"]]);
+  const _sfc_main$g = /* @__PURE__ */ defineComponent({
     __name: "MdBody",
     props: {
       text: {}
@@ -10310,8 +10328,8 @@
       };
     }
   });
-  const _hoisted_1$b = { class: "text-wrap" };
-  const _sfc_main$e = /* @__PURE__ */ defineComponent({
+  const _hoisted_1$c = { class: "text-wrap" };
+  const _sfc_main$f = /* @__PURE__ */ defineComponent({
     __name: "FoldText",
     props: {
       text: {},
@@ -10333,8 +10351,8 @@
         storeSet("text." + props.memKey, expanded.value ? "1" : "0");
       }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("div", _hoisted_1$b, [
-          unref(state).markdown ? (openBlock(), createBlock(_sfc_main$f, {
+        return openBlock(), createElementBlock("div", _hoisted_1$c, [
+          unref(state).markdown ? (openBlock(), createBlock(_sfc_main$g, {
             key: 0,
             text: raw.value,
             class: normalizeClass(["md-body", __props.extraClass, { clamped: long.value && !expanded.value }]),
@@ -10353,7 +10371,7 @@
       };
     }
   });
-  const _sfc_main$d = /* @__PURE__ */ defineComponent({
+  const _sfc_main$e = /* @__PURE__ */ defineComponent({
     __name: "MachineScrollBox",
     props: {
       text: {},
@@ -10385,16 +10403,16 @@
       };
     }
   });
-  const _hoisted_1$a = { class: "io-label" };
-  const _hoisted_2$a = {
+  const _hoisted_1$b = { class: "io-label" };
+  const _hoisted_2$b = {
     key: 0,
     class: "io-empty"
   };
-  const _hoisted_3$8 = {
+  const _hoisted_3$9 = {
     key: 2,
     class: "io-extra"
   };
-  const _sfc_main$c = /* @__PURE__ */ defineComponent({
+  const _sfc_main$d = /* @__PURE__ */ defineComponent({
     __name: "IOSection",
     props: {
       label: {},
@@ -10410,24 +10428,24 @@
         return openBlock(), createElementBlock("div", {
           class: normalizeClass(["io-section", { "out-section": __props.out }])
         }, [
-          createBaseVNode("div", _hoisted_1$a, toDisplayString(__props.label), 1),
-          __props.text === void 0 || __props.text === null || __props.text === "" ? (openBlock(), createElementBlock("div", _hoisted_2$a, "（无内容）")) : (openBlock(), createBlock(_sfc_main$d, {
+          createBaseVNode("div", _hoisted_1$b, toDisplayString(__props.label), 1),
+          __props.text === void 0 || __props.text === null || __props.text === "" ? (openBlock(), createElementBlock("div", _hoisted_2$b, "（无内容）")) : (openBlock(), createBlock(_sfc_main$e, {
             key: 1,
             text: __props.text,
             "mem-key": __props.memKey || "",
             tokens: __props.tokens,
             error: __props.error
           }, null, 8, ["text", "mem-key", "tokens", "error"])),
-          unref(slots).default ? (openBlock(), createElementBlock("div", _hoisted_3$8, [
+          unref(slots).default ? (openBlock(), createElementBlock("div", _hoisted_3$9, [
             renderSlot(_ctx.$slots, "default")
           ])) : createCommentVNode("", true)
         ], 2);
       };
     }
   });
-  const _hoisted_1$9 = { class: "images" };
-  const _hoisted_2$9 = ["src", "alt", "title", "onClick"];
-  const _sfc_main$b = /* @__PURE__ */ defineComponent({
+  const _hoisted_1$a = { class: "images" };
+  const _hoisted_2$a = ["src", "alt", "title", "onClick"];
+  const _sfc_main$c = /* @__PURE__ */ defineComponent({
     __name: "ImageStrip",
     props: {
       images: {}
@@ -10437,7 +10455,7 @@
         openLightbox(mediaURL(ref2), ref2);
       }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("div", _hoisted_1$9, [
+        return openBlock(), createElementBlock("div", _hoisted_1$a, [
           (openBlock(true), createElementBlock(Fragment, null, renderList(__props.images || [], (img) => {
             return openBlock(), createElementBlock("img", {
               key: img,
@@ -10447,13 +10465,13 @@
               loading: "lazy",
               title: img,
               onClick: ($event) => show(img)
-            }, null, 8, _hoisted_2$9);
+            }, null, 8, _hoisted_2$a);
           }), 128))
         ]);
       };
     }
   });
-  const _sfc_main$a = /* @__PURE__ */ defineComponent({
+  const _sfc_main$b = /* @__PURE__ */ defineComponent({
     __name: "CopyBtn",
     props: {
       text: {}
@@ -10487,19 +10505,19 @@
       };
     }
   });
-  const _hoisted_1$8 = { class: "io-card" };
-  const _hoisted_2$8 = {
+  const _hoisted_1$9 = { class: "io-card" };
+  const _hoisted_2$9 = {
     key: 0,
     class: "io-cmd"
   };
-  const _hoisted_3$7 = { class: "cmd-line" };
-  const _hoisted_4$5 = { class: "io-actions" };
-  const _hoisted_5$5 = { class: "attach-note" };
-  const _hoisted_6$5 = { class: "io-actions" };
+  const _hoisted_3$8 = { class: "cmd-line" };
+  const _hoisted_4$6 = { class: "io-actions" };
+  const _hoisted_5$6 = { class: "attach-note" };
+  const _hoisted_6$6 = { class: "io-actions" };
   const _hoisted_7$5 = { class: "io-section attach-section" };
   const _hoisted_8$4 = { class: "attach-body" };
   const _hoisted_9$3 = { class: "attach-note" };
-  const _sfc_main$9 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$a = /* @__PURE__ */ defineComponent({
     __name: "ToolCard",
     props: {
       item: {}
@@ -10562,19 +10580,19 @@
           onToggle
         }, {
           default: withCtx(() => [
-            createBaseVNode("div", _hoisted_1$8, [
-              __props.item.cmdLine ? (openBlock(), createElementBlock("div", _hoisted_2$8, [
+            createBaseVNode("div", _hoisted_1$9, [
+              __props.item.cmdLine ? (openBlock(), createElementBlock("div", _hoisted_2$9, [
                 _cache[0] || (_cache[0] = createBaseVNode("span", { class: "cmd-prompt" }, "$ ", -1)),
-                createBaseVNode("span", _hoisted_3$7, toDisplayString(__props.item.cmdLine), 1)
+                createBaseVNode("span", _hoisted_3$8, toDisplayString(__props.item.cmdLine), 1)
               ])) : createCommentVNode("", true),
-              createVNode(_sfc_main$c, {
+              createVNode(_sfc_main$d, {
                 label: "输入",
                 text: prettyArgs.value,
                 "mem-key": "in." + (__props.item.id || ""),
                 tokens: __props.item.argsTokens
               }, null, 8, ["text", "mem-key", "tokens"]),
-              createBaseVNode("div", _hoisted_4$5, [
-                createVNode(_sfc_main$a, {
+              createBaseVNode("div", _hoisted_4$6, [
+                createVNode(_sfc_main$b, {
                   text: __props.item.argsText
                 }, null, 8, ["text"])
               ]),
@@ -10583,7 +10601,7 @@
                   key: r.line.n
                 }, [
                   _cache[1] || (_cache[1] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
-                  createVNode(_sfc_main$c, {
+                  createVNode(_sfc_main$d, {
                     label: "输出",
                     text: String(r.line.text || ""),
                     error: r.status === "error",
@@ -10596,17 +10614,17 @@
                         return openBlock(), createElementBlock(Fragment, {
                           key: a.line.n
                         }, [
-                          createVNode(_sfc_main$b, {
+                          createVNode(_sfc_main$c, {
                             images: a.line.images
                           }, null, 8, ["images"]),
-                          createBaseVNode("div", _hoisted_5$5, toDisplayString(unref(outImageNote)(a)), 1)
+                          createBaseVNode("div", _hoisted_5$6, toDisplayString(unref(outImageNote)(a)), 1)
                         ], 64);
                       }), 128)) : createCommentVNode("", true)
                     ]),
                     _: 2
                   }, 1032, ["text", "error", "mem-key", "tokens"]),
-                  createBaseVNode("div", _hoisted_6$5, [
-                    createVNode(_sfc_main$a, {
+                  createBaseVNode("div", _hoisted_6$6, [
+                    createVNode(_sfc_main$b, {
                       text: String(r.line.text || "")
                     }, null, 8, ["text"])
                   ])
@@ -10620,14 +10638,14 @@
                   createBaseVNode("div", _hoisted_7$5, [
                     _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
                     createBaseVNode("div", _hoisted_8$4, [
-                      a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$e, {
+                      a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$f, {
                         key: 0,
                         text: String(a.line.text || ""),
                         "mem-key": "imgtext." + a.line.n,
                         "preview-lines": _ctx.FOLD_PREVIEW_LINES,
                         tokens: unref(estOf)(a.line).text
                       }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])) : createCommentVNode("", true),
-                      createVNode(_sfc_main$b, {
+                      createVNode(_sfc_main$c, {
                         images: a.line.images
                       }, null, 8, ["images"])
                     ]),
@@ -10642,12 +10660,12 @@
       };
     }
   });
-  const _hoisted_1$7 = { class: "thinking-body" };
-  const _hoisted_2$7 = { class: "reasoning-scroll" };
-  const _hoisted_3$6 = { class: "body-text reasoning-text" };
-  const _hoisted_4$4 = { class: "leak-body" };
-  const _hoisted_5$4 = { class: "body-text" };
-  const _hoisted_6$4 = {
+  const _hoisted_1$8 = { class: "thinking-body" };
+  const _hoisted_2$8 = { class: "reasoning-scroll" };
+  const _hoisted_3$7 = { class: "body-text reasoning-text" };
+  const _hoisted_4$5 = { class: "leak-body" };
+  const _hoisted_5$5 = { class: "body-text" };
+  const _hoisted_6$5 = {
     key: 0,
     class: "preview-strip"
   };
@@ -10656,7 +10674,7 @@
     key: 2,
     class: "note"
   };
-  const _sfc_main$8 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$9 = /* @__PURE__ */ defineComponent({
     __name: "AssistantMsg",
     props: {
       item: {}
@@ -10733,15 +10751,15 @@
             onToggle: onThinkToggle
           }, {
             default: withCtx(() => [
-              createBaseVNode("div", _hoisted_1$7, [
-                createBaseVNode("div", _hoisted_2$7, [
-                  createBaseVNode("pre", _hoisted_3$6, toDisplayString(line.value.reasoning), 1)
+              createBaseVNode("div", _hoisted_1$8, [
+                createBaseVNode("div", _hoisted_2$8, [
+                  createBaseVNode("pre", _hoisted_3$7, toDisplayString(line.value.reasoning), 1)
                 ])
               ])
             ]),
             _: 1
           }, 8, ["summary", "tail", "open"])) : createCommentVNode("", true),
-          body.value.main ? (openBlock(), createBlock(_sfc_main$e, {
+          body.value.main ? (openBlock(), createBlock(_sfc_main$f, {
             key: 1,
             text: body.value.main,
             "mem-key": "asst." + line.value.n,
@@ -10757,8 +10775,8 @@
               summary: leakSummary(b)
             }, {
               default: withCtx(() => [
-                createBaseVNode("div", _hoisted_4$4, [
-                  createBaseVNode("pre", _hoisted_5$4, toDisplayString(b.text), 1)
+                createBaseVNode("div", _hoisted_4$5, [
+                  createBaseVNode("pre", _hoisted_5$5, toDisplayString(b.text), 1)
                 ])
               ]),
               _: 2
@@ -10768,8 +10786,8 @@
             return openBlock(), createElementBlock(Fragment, {
               key: c.key
             }, [
-              createVNode(_sfc_main$9, { item: c }, null, 8, ["item"]),
-              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_6$4, [
+              createVNode(_sfc_main$a, { item: c }, null, 8, ["item"]),
+              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_6$5, [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(previewThumbs(c), (t) => {
                   return openBlock(), createElementBlock("img", {
                     key: t.ref,
@@ -10789,21 +10807,21 @@
       };
     }
   });
-  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-28f984a6"]]);
-  const _hoisted_1$6 = { class: "sys-line" };
-  const _hoisted_2$6 = { class: "line-summary" };
-  const _hoisted_3$5 = {
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-28f984a6"]]);
+  const _hoisted_1$7 = { class: "sys-line" };
+  const _hoisted_2$7 = { class: "line-summary" };
+  const _hoisted_3$6 = {
     key: 0,
     class: "note"
   };
-  const _hoisted_4$3 = {
+  const _hoisted_4$4 = {
     key: 1,
     class: "body-text sys-text"
   };
-  const _hoisted_5$3 = { class: "io-section attach-section" };
-  const _hoisted_6$3 = { class: "attach-body" };
+  const _hoisted_5$4 = { class: "io-section attach-section" };
+  const _hoisted_6$4 = { class: "attach-body" };
   const _hoisted_7$3 = { class: "attach-note" };
-  const _sfc_main$7 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$8 = /* @__PURE__ */ defineComponent({
     __name: "SystemMsg",
     props: {
       item: {}
@@ -10834,21 +10852,21 @@
           class: "msg msg-system",
           title: "这一轮是 user 角色发出的任务提示（系统性质，不是人打的字）"
         }, [
-          createBaseVNode("div", _hoisted_1$6, [
+          createBaseVNode("div", _hoisted_1$7, [
             _cache[0] || (_cache[0] = createBaseVNode("span", { class: "sys-badge" }, "系统", -1)),
             _cache[1] || (_cache[1] = createBaseVNode("span", { class: "sys-meta" }, "user 轮", -1)),
-            createBaseVNode("span", _hoisted_2$6, toDisplayString(unref(firstLine)(line.value.text)), 1)
+            createBaseVNode("span", _hoisted_2$7, toDisplayString(unref(firstLine)(line.value.text)), 1)
           ]),
-          !raw.value ? (openBlock(), createElementBlock("div", _hoisted_3$5, "（无正文）")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+          !raw.value ? (openBlock(), createElementBlock("div", _hoisted_3$6, "（无正文）")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
             createBaseVNode("div", {
               class: normalizeClass(["sys-scroll", { folded: long.value && !expanded.value }]),
               style: normalizeStyle({ maxHeight: long.value && !expanded.value ? unref(SYSTEM_PREVIEW_LINES) * 24 + "px" : "var(--code-scroll-h)" })
             }, [
-              unref(state).markdown ? (openBlock(), createBlock(_sfc_main$f, {
+              unref(state).markdown ? (openBlock(), createBlock(_sfc_main$g, {
                 key: 0,
                 text: raw.value,
                 class: "md-body sys-md"
-              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_4$3, toDisplayString(raw.value), 1))
+              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_4$4, toDisplayString(raw.value), 1))
             ], 6),
             long.value ? (openBlock(), createElementBlock("button", {
               key: 0,
@@ -10862,16 +10880,16 @@
               key: a.line.n
             }, [
               _cache[3] || (_cache[3] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
-              createBaseVNode("div", _hoisted_5$3, [
+              createBaseVNode("div", _hoisted_5$4, [
                 _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
-                createBaseVNode("div", _hoisted_6$3, [
-                  a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$e, {
+                createBaseVNode("div", _hoisted_6$4, [
+                  a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$f, {
                     key: 0,
                     text: String(a.line.text || ""),
                     "mem-key": "imgtext." + a.line.n,
                     tokens: unref(estOf)(a.line).text
                   }, null, 8, ["text", "mem-key", "tokens"])) : createCommentVNode("", true),
-                  createVNode(_sfc_main$b, {
+                  createVNode(_sfc_main$c, {
                     images: a.line.images
                   }, null, 8, ["images"])
                 ]),
@@ -10883,11 +10901,11 @@
       };
     }
   });
-  const SystemMsg = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-b39af669"]]);
-  const _hoisted_1$5 = { class: "msg msg-image" };
-  const _hoisted_2$5 = { class: "image-body" };
-  const _hoisted_3$4 = { class: "attach-note" };
-  const _sfc_main$6 = /* @__PURE__ */ defineComponent({
+  const SystemMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-b39af669"]]);
+  const _hoisted_1$6 = { class: "msg msg-image" };
+  const _hoisted_2$6 = { class: "image-body" };
+  const _hoisted_3$5 = { class: "attach-note" };
+  const _sfc_main$7 = /* @__PURE__ */ defineComponent({
     __name: "ImageTurn",
     props: {
       item: {}
@@ -10914,7 +10932,7 @@
         if (line.value && ((_a = root.value) == null ? void 0 : _a.$el)) unregisterAnchor(line.value.n, root.value.$el);
       });
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("section", _hoisted_1$5, [
+        return openBlock(), createElementBlock("section", _hoisted_1$6, [
           createVNode(Disclosure, {
             ref_key: "root",
             ref: root,
@@ -10927,17 +10945,17 @@
             onToggle
           }, {
             default: withCtx(() => [
-              createBaseVNode("div", _hoisted_2$5, [
-                line.value.text ? (openBlock(), createBlock(_sfc_main$e, {
+              createBaseVNode("div", _hoisted_2$6, [
+                line.value.text ? (openBlock(), createBlock(_sfc_main$f, {
                   key: 0,
                   text: String(line.value.text),
                   "mem-key": "imgtext." + line.value.n,
                   tokens: unref(estOf)(line.value).text
                 }, null, 8, ["text", "mem-key", "tokens"])) : createCommentVNode("", true),
-                createVNode(_sfc_main$b, {
+                createVNode(_sfc_main$c, {
                   images: line.value.images
                 }, null, 8, ["images"]),
-                createBaseVNode("div", _hoisted_3$4, toDisplayString(unref(attributionText)(__props.item.attr)), 1)
+                createBaseVNode("div", _hoisted_3$5, toDisplayString(unref(attributionText)(__props.item.attr)), 1)
               ])
             ]),
             _: 1
@@ -10946,10 +10964,10 @@
       };
     }
   });
-  const ImageTurn = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-1eee90b4"]]);
-  const _hoisted_1$4 = { class: "io-card" };
-  const _hoisted_2$4 = { class: "io-actions" };
-  const _sfc_main$5 = /* @__PURE__ */ defineComponent({
+  const ImageTurn = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-1eee90b4"]]);
+  const _hoisted_1$5 = { class: "io-card" };
+  const _hoisted_2$5 = { class: "io-actions" };
+  const _sfc_main$6 = /* @__PURE__ */ defineComponent({
     __name: "ResultMsg",
     props: {
       item: {}
@@ -10980,16 +10998,16 @@
             title: !__props.item.paired ? line.value.tool_call_id ? "未找到配对的工具调用：id " + line.value.tool_call_id : "这条回执行没有 tool_call_id，无法与调用配对" : void 0
           }, {
             default: withCtx(() => [
-              createBaseVNode("div", _hoisted_1$4, [
-                createVNode(_sfc_main$c, {
+              createBaseVNode("div", _hoisted_1$5, [
+                createVNode(_sfc_main$d, {
                   label: "输出",
                   text: text.value,
                   error: status.value === "error",
                   "mem-key": "result." + line.value.n,
                   tokens: unref(estOf)(line.value).text
                 }, null, 8, ["text", "error", "mem-key", "tokens"]),
-                createBaseVNode("div", _hoisted_2$4, [
-                  createVNode(_sfc_main$a, { text: text.value }, null, 8, ["text"])
+                createBaseVNode("div", _hoisted_2$5, [
+                  createVNode(_sfc_main$b, { text: text.value }, null, 8, ["text"])
                 ])
               ])
             ]),
@@ -10999,16 +11017,16 @@
       };
     }
   });
-  const _hoisted_1$3 = { class: "stream" };
-  const _hoisted_2$3 = {
+  const _hoisted_1$4 = { class: "stream" };
+  const _hoisted_2$4 = {
     key: 4,
     class: "msg msg-other"
   };
-  const _hoisted_3$3 = {
+  const _hoisted_3$4 = {
     key: 1,
     class: "empty"
   };
-  const _sfc_main$4 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$5 = /* @__PURE__ */ defineComponent({
     __name: "Timeline",
     setup(__props) {
       const model = computed(() => streamModel());
@@ -11042,7 +11060,7 @@
           id: "timeline",
           class: normalizeClass(["timeline", { hidden: unref(state).view !== "chat" }])
         }, [
-          createBaseVNode("div", _hoisted_1$3, [
+          createBaseVNode("div", _hoisted_1$4, [
             unref(state).current ? (openBlock(), createBlock(StreamSummary, { key: 0 })) : createCommentVNode("", true),
             (openBlock(true), createElementBlock(Fragment, null, renderList(model.value.items, (item) => {
               return openBlock(), createElementBlock(Fragment, {
@@ -11057,11 +11075,11 @@
                 }, null, 8, ["item"])) : item.type === "imageTurn" ? (openBlock(), createBlock(ImageTurn, {
                   key: 2,
                   item
-                }, null, 8, ["item"])) : item.type === "result" ? (openBlock(), createBlock(_sfc_main$5, {
+                }, null, 8, ["item"])) : item.type === "result" ? (openBlock(), createBlock(_sfc_main$6, {
                   key: 3,
                   item
-                }, null, 8, ["item"])) : (openBlock(), createElementBlock("section", _hoisted_2$3, [
-                  createVNode(_sfc_main$e, {
+                }, null, 8, ["item"])) : (openBlock(), createElementBlock("section", _hoisted_2$4, [
+                  createVNode(_sfc_main$f, {
                     text: String(item.line.text || "(无正文)"),
                     "mem-key": "other." + item.line.n,
                     "preview-lines": unref(LONG_TEXT_LINES),
@@ -11070,7 +11088,7 @@
                 ]))
               ], 64);
             }), 128)),
-            !model.value.items.length && !unref(state).partial ? (openBlock(), createElementBlock("div", _hoisted_3$3, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true),
+            !model.value.items.length && !unref(state).partial ? (openBlock(), createElementBlock("div", _hoisted_3$4, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true),
             unref(state).current && unref(state).current.live && unref(state).partial ? (openBlock(), createBlock(PartialTail, {
               key: 2,
               partial: unref(state).partial
@@ -11080,7 +11098,7 @@
       };
     }
   });
-  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-bf27149a"]]);
+  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-bf27149a"]]);
   const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
   function nextMsgLine(lines, idx) {
     for (let i = idx + 1; i < lines.length; i++) {
@@ -11268,7 +11286,7 @@
     void node.offsetWidth;
     node.classList.add("flash");
   }
-  const _sfc_main$3 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$4 = /* @__PURE__ */ defineComponent({
     __name: "MachineText",
     props: {
       text: {},
@@ -11294,12 +11312,12 @@
       };
     }
   });
-  const _hoisted_1$2 = { class: "traj-toolbar" };
-  const _hoisted_2$2 = { class: "traj-toolbar-inner" };
-  const _hoisted_3$2 = { class: "traj-filters" };
-  const _hoisted_4$2 = ["aria-pressed"];
-  const _hoisted_5$2 = ["title", "aria-pressed", "onClick"];
-  const _hoisted_6$2 = { class: "traj-count" };
+  const _hoisted_1$3 = { class: "traj-toolbar" };
+  const _hoisted_2$3 = { class: "traj-toolbar-inner" };
+  const _hoisted_3$3 = { class: "traj-filters" };
+  const _hoisted_4$3 = ["aria-pressed"];
+  const _hoisted_5$3 = ["title", "aria-pressed", "onClick"];
+  const _hoisted_6$3 = { class: "traj-count" };
   const _hoisted_7$2 = { class: "traj-scroll" };
   const _hoisted_8$2 = {
     key: 0,
@@ -11330,7 +11348,7 @@
     class: "code"
   };
   const _hoisted_24$2 = { class: "row-actions" };
-  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$3 = /* @__PURE__ */ defineComponent({
     __name: "Trajectory",
     setup(__props) {
       const rows = computed(() => state.current ? trajectoryRows() : []);
@@ -11383,17 +11401,17 @@
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("div", {
           id: "trajectory",
-          class: normalizeClass(["trajectory", { hidden: unref(state).view === "chat" }])
+          class: normalizeClass(["trajectory", { hidden: unref(state).view !== "trajectory" }])
         }, [
-          createBaseVNode("div", _hoisted_1$2, [
-            createBaseVNode("div", _hoisted_2$2, [
-              createBaseVNode("div", _hoisted_3$2, [
+          createBaseVNode("div", _hoisted_1$3, [
+            createBaseVNode("div", _hoisted_2$3, [
+              createBaseVNode("div", _hoisted_3$3, [
                 createBaseVNode("button", {
                   type: "button",
                   class: "traj-chip",
                   "aria-pressed": allPressed.value ? "true" : "false",
                   onClick: _cache[0] || (_cache[0] = ($event) => unref(state).trajKinds = {})
-                }, "全部", 8, _hoisted_4$2),
+                }, "全部", 8, _hoisted_4$3),
                 (openBlock(true), createElementBlock(Fragment, null, renderList(kinds.value, (k) => {
                   return openBlock(), createElementBlock("button", {
                     key: k.id,
@@ -11402,10 +11420,10 @@
                     title: "只看 / 不看「" + k.label + "」",
                     "aria-pressed": unref(state).trajKinds[k.id] ? "true" : "false",
                     onClick: ($event) => pick(k.id)
-                  }, toDisplayString(k.label) + " " + toDisplayString(k.count), 9, _hoisted_5$2);
+                  }, toDisplayString(k.label) + " " + toDisplayString(k.count), 9, _hoisted_5$3);
                 }), 128))
               ]),
-              createBaseVNode("span", _hoisted_6$2, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
+              createBaseVNode("span", _hoisted_6$3, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
             ])
           ]),
           createBaseVNode("div", _hoisted_7$2, [
@@ -11480,19 +11498,19 @@
                           (openBlock(true), createElementBlock(Fragment, null, renderList(row.detail || {}, (text, key) => {
                             return openBlock(), createElementBlock("div", { key }, [
                               createBaseVNode("div", _hoisted_22$2, toDisplayString(DETAIL_LABELS[key] || key), 1),
-                              detailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$3, {
+                              detailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$4, {
                                 key: 0,
                                 text: String(text || ""),
                                 cls: "code"
                               }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_23$2, toDisplayString(String(text || "")), 1)),
                               createBaseVNode("div", _hoisted_24$2, [
-                                createVNode(_sfc_main$a, {
+                                createVNode(_sfc_main$b, {
                                   text: String(text || "")
                                 }, null, 8, ["text"])
                               ])
                             ]);
                           }), 128)),
-                          row.images && row.images.length ? (openBlock(), createBlock(_sfc_main$b, {
+                          row.images && row.images.length ? (openBlock(), createBlock(_sfc_main$c, {
                             key: 0,
                             images: row.images
                           }, null, 8, ["images"])) : createCommentVNode("", true)
@@ -11508,7 +11526,7 @@
       };
     }
   });
-  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-0d6b1c96"]]);
+  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-54a24f80"]]);
   function currentEstimate() {
     const id = state.current ? state.current.id : "";
     const list = state.sessions || [];
@@ -11661,21 +11679,21 @@
     };
   }
   const META_COUNT_TIP = "同一个转录里有 {n} 条 meta 行（多次运行 / 提示词变化各一条），这里显示最后一条。";
-  const _hoisted_1$1 = {
+  const _hoisted_1$2 = {
     id: "details-body",
     class: "details-body"
   };
-  const _hoisted_2$1 = {
+  const _hoisted_2$2 = {
     key: 0,
     class: "note"
   };
-  const _hoisted_3$1 = {
+  const _hoisted_3$2 = {
     key: 0,
     class: "detail-block traj-step"
   };
-  const _hoisted_4$1 = { class: "detail-block-title" };
-  const _hoisted_5$1 = { class: "traj-step-head" };
-  const _hoisted_6$1 = { class: "kind-tag" };
+  const _hoisted_4$2 = { class: "detail-block-title" };
+  const _hoisted_5$2 = { class: "traj-step-head" };
+  const _hoisted_6$2 = { class: "kind-tag" };
   const _hoisted_7$1 = { class: "traj-step-name" };
   const _hoisted_8$1 = { class: "traj-detail-title" };
   const _hoisted_9$1 = {
@@ -11715,7 +11733,7 @@
   const _hoisted_28$1 = ["open"];
   const _hoisted_29$1 = { class: "line-summary" };
   const _hoisted_30$1 = { class: "schema-body" };
-  const _hoisted_31 = { class: "prompt-scroll" };
+  const _hoisted_31$1 = { class: "prompt-scroll" };
   const _hoisted_32 = { class: "row-actions" };
   const _hoisted_33 = { class: "meta-tools" };
   const _hoisted_34 = { class: "meta-tools-head" };
@@ -11754,7 +11772,7 @@
     key: 3,
     class: "note"
   };
-  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
     __name: "DetailsPanel",
     setup(__props) {
       const kvRows = computed(() => sessionKVRows());
@@ -11807,10 +11825,10 @@
         state.trajSelected = null;
       }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("div", _hoisted_1$1, [
-          !unref(state).current ? (openBlock(), createElementBlock("div", _hoisted_2$1, "左侧选择一个会话后，这里显示它的指标与元信息。")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
-            trajStep.value ? (openBlock(), createElementBlock("section", _hoisted_3$1, [
-              createBaseVNode("h3", _hoisted_4$1, [
+        return openBlock(), createElementBlock("div", _hoisted_1$2, [
+          !unref(state).current ? (openBlock(), createElementBlock("div", _hoisted_2$2, "左侧选择一个会话后，这里显示它的指标与元信息。")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+            trajStep.value ? (openBlock(), createElementBlock("section", _hoisted_3$2, [
+              createBaseVNode("h3", _hoisted_4$2, [
                 createTextVNode(" 步骤 #" + toDisplayString(trajStep.value.n) + " ", 1),
                 createBaseVNode("button", {
                   type: "button",
@@ -11819,8 +11837,8 @@
                   onClick: closeTrajStep
                 }, "×")
               ]),
-              createBaseVNode("div", _hoisted_5$1, [
-                createBaseVNode("span", _hoisted_6$1, toDisplayString(trajStep.value.tag), 1),
+              createBaseVNode("div", _hoisted_5$2, [
+                createBaseVNode("span", _hoisted_6$2, toDisplayString(trajStep.value.tag), 1),
                 createBaseVNode("span", _hoisted_7$1, toDisplayString(trajStep.value.name), 1)
               ]),
               (openBlock(true), createElementBlock(Fragment, null, renderList(trajStep.value.detail, (text, key) => {
@@ -11829,19 +11847,19 @@
                   class: "traj-step-section"
                 }, [
                   createBaseVNode("div", _hoisted_8$1, toDisplayString(TRAJ_STEP_LABELS[key] || key), 1),
-                  trajDetailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$3, {
+                  trajDetailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$4, {
                     key: 0,
                     text: String(text || ""),
                     cls: "code"
                   }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_9$1, toDisplayString(String(text || "")), 1)),
                   createBaseVNode("div", _hoisted_10$1, [
-                    createVNode(_sfc_main$a, {
+                    createVNode(_sfc_main$b, {
                       text: String(text || "")
                     }, null, 8, ["text"])
                   ])
                 ]);
               }), 128)),
-              trajStep.value.images.length ? (openBlock(), createBlock(_sfc_main$b, {
+              trajStep.value.images.length ? (openBlock(), createBlock(_sfc_main$c, {
                 key: 0,
                 images: trajStep.value.images
               }, null, 8, ["images"])) : createCommentVNode("", true)
@@ -11858,7 +11876,7 @@
                       class: normalizeClass(row.mono ? "mono" : void 0),
                       title: row.title || void 0
                     }, [
-                      row.md ? (openBlock(), createBlock(_sfc_main$k, {
+                      row.md ? (openBlock(), createBlock(_sfc_main$l, {
                         key: 0,
                         text: row.md,
                         tag: "span",
@@ -11930,23 +11948,23 @@
                   createBaseVNode("span", _hoisted_29$1, toDisplayString(meta.value.bits), 1)
                 ]),
                 createBaseVNode("div", _hoisted_30$1, [
-                  createBaseVNode("div", _hoisted_31, [
-                    meta.value.mode === "json" ? (openBlock(), createBlock(_sfc_main$3, {
+                  createBaseVNode("div", _hoisted_31$1, [
+                    meta.value.mode === "json" ? (openBlock(), createBlock(_sfc_main$4, {
                       key: 0,
                       text: meta.value.promptText,
                       cls: "body-text prompt-text"
-                    }, null, 8, ["text"])) : meta.value.mode === "md" ? (openBlock(), createBlock(_sfc_main$f, {
+                    }, null, 8, ["text"])) : meta.value.mode === "md" ? (openBlock(), createBlock(_sfc_main$g, {
                       key: 1,
                       text: meta.value.promptText,
                       class: "md-body prompt-md"
-                    }, null, 8, ["text"])) : (openBlock(), createBlock(_sfc_main$3, {
+                    }, null, 8, ["text"])) : (openBlock(), createBlock(_sfc_main$4, {
                       key: 2,
                       text: meta.value.promptText,
                       cls: "body-text prompt-text"
                     }, null, 8, ["text"]))
                   ]),
                   createBaseVNode("div", _hoisted_32, [
-                    createVNode(_sfc_main$a, {
+                    createVNode(_sfc_main$b, {
                       text: meta.value.copyText
                     }, null, 8, ["text"])
                   ]),
@@ -11972,12 +11990,12 @@
                               createBaseVNode("span", { class: "schema-meta" }, "JSON · 默认收起")
                             ], -1)),
                             createBaseVNode("div", _hoisted_44, [
-                              createVNode(_sfc_main$3, {
+                              createVNode(_sfc_main$4, {
                                 text: t.params,
                                 cls: "code"
                               }, null, 8, ["text"]),
                               createBaseVNode("div", _hoisted_45, [
-                                createVNode(_sfc_main$a, {
+                                createVNode(_sfc_main$b, {
                                   text: t.params
                                 }, null, 8, ["text"])
                               ])
@@ -12001,7 +12019,71 @@
       };
     }
   });
-  const DetailsPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-176fd06c"]]);
+  const DetailsPanel = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-176fd06c"]]);
+  const _hoisted_1$1 = {
+    key: 0,
+    class: "history-empty"
+  };
+  const _hoisted_2$1 = {
+    key: 1,
+    class: "history-list"
+  };
+  const _hoisted_3$1 = { class: "history-head" };
+  const _hoisted_4$1 = ["title", "onClick"];
+  const _hoisted_5$1 = { class: "row-chip chain-tag history-tag" };
+  const _hoisted_6$1 = { class: "history-time" };
+  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+    __name: "HistoryPanel",
+    setup(__props) {
+      const members = computed(() => chainOfSession(state.sessions, state.current ? state.current.id : null));
+      function endStateText(s) {
+        if (s.live) return "运行中";
+        if (s.endState === "done") return "已完成";
+        if (s.endState === "error") return "错误";
+        return "未完成";
+      }
+      function endStateCls(s) {
+        if (s.live) return "live";
+        if (s.endState === "done") return "done";
+        if (s.endState === "error") return "error";
+        return "pend";
+      }
+      function onRowClick(s) {
+        selectSession(s.id);
+      }
+      return (_ctx, _cache) => {
+        return openBlock(), createElementBlock("div", {
+          id: "history",
+          class: normalizeClass(["history", { hidden: unref(state).view !== "history" }])
+        }, [
+          !members.value ? (openBlock(), createElementBlock("div", _hoisted_1$1, "当前会话不属于任何 img2text 调用链")) : (openBlock(), createElementBlock("div", _hoisted_2$1, [
+            createBaseVNode("div", _hoisted_3$1, "这张图的全部会话（" + toDisplayString(members.value.length) + "，新 → 旧）", 1),
+            (openBlock(true), createElementBlock(Fragment, null, renderList(members.value, (s) => {
+              return openBlock(), createElementBlock("button", {
+                key: s.id,
+                class: normalizeClass(["history-row", { active: unref(state).current && unref(state).current.id === s.id }]),
+                type: "button",
+                title: s.id,
+                onClick: ($event) => onRowClick(s)
+              }, [
+                createBaseVNode("span", _hoisted_5$1, toDisplayString(unref(img2textMemberTag)(s.id)), 1),
+                createVNode(_sfc_main$l, {
+                  tag: "span",
+                  class: "history-title",
+                  text: unref(sessionTitleOf)(s)
+                }, null, 8, ["text"]),
+                createBaseVNode("span", {
+                  class: normalizeClass(["history-state", endStateCls(s)])
+                }, toDisplayString(endStateText(s)), 3),
+                createBaseVNode("span", _hoisted_6$1, toDisplayString(unref(relTime)(s.mtime)), 1)
+              ], 10, _hoisted_4$1);
+            }), 128))
+          ]))
+        ], 2);
+      };
+    }
+  });
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-0e17a4e8"]]);
   const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
   const _hoisted_2 = ["data-dragging"];
   const _hoisted_3 = {
@@ -12045,28 +12127,29 @@
   };
   const _hoisted_15 = ["aria-selected"];
   const _hoisted_16 = ["aria-selected"];
-  const _hoisted_17 = {
+  const _hoisted_17 = ["aria-selected"];
+  const _hoisted_18 = {
     class: "tab-tools",
     role: "group",
     "aria-label": "显示选项"
   };
-  const _hoisted_18 = ["aria-pressed"];
   const _hoisted_19 = ["aria-pressed"];
   const _hoisted_20 = ["aria-pressed"];
-  const _hoisted_21 = ["aria-pressed", "title"];
+  const _hoisted_21 = ["aria-pressed"];
   const _hoisted_22 = ["aria-pressed", "title"];
   const _hoisted_23 = ["aria-pressed", "title"];
   const _hoisted_24 = ["aria-pressed", "title"];
-  const _hoisted_25 = { class: "view-area" };
-  const _hoisted_26 = ["data-dragging", "data-hidden"];
-  const _hoisted_27 = {
+  const _hoisted_25 = ["aria-pressed", "title"];
+  const _hoisted_26 = { class: "view-area" };
+  const _hoisted_27 = ["data-dragging", "data-hidden"];
+  const _hoisted_28 = {
     id: "details-col",
     class: "details-col",
     "aria-label": "详情"
   };
-  const _hoisted_28 = { class: "details-head" };
-  const _hoisted_29 = ["src", "alt"];
-  const _hoisted_30 = { class: "lightbox-scale" };
+  const _hoisted_29 = { class: "details-head" };
+  const _hoisted_30 = ["src", "alt"];
+  const _hoisted_31 = { class: "lightbox-scale" };
   const _sfc_main = /* @__PURE__ */ defineComponent({
     __name: "App",
     setup(__props) {
@@ -12146,6 +12229,13 @@
       });
       const curProject = computed(() => state.current ? state.current.project || projectOf(state.current.id) : "");
       const sessionTitle = computed(() => state.current ? sessionTitleOf(state.current) : "");
+      const currentChain = computed(() => chainOfSession(state.sessions, state.current ? state.current.id : null));
+      watch(
+        () => state.current ? state.current.id : null,
+        () => {
+          if (state.view === "history" && !currentChain.value) switchView("chat");
+        }
+      );
       const bannerText = computed(() => {
         if (badCount.value > 0) {
           return "已跳过 " + badCount.value + " 行坏数据（无法解析为 JSON，可能是一次写入中途读到的不完整行）";
@@ -12362,8 +12452,8 @@
                         title: "在侧栏里定位到这个项目",
                         onClick: _cache[3] || (_cache[3] = ($event) => unref(revealProject)(curProject.value))
                       }, toDisplayString(curProject.value), 1),
-                      _cache[16] || (_cache[16] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
-                      createVNode(_sfc_main$k, {
+                      _cache[17] || (_cache[17] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
+                      createVNode(_sfc_main$l, {
                         text: sessionTitle.value,
                         tag: "span",
                         class: "crumb crumb-current",
@@ -12404,9 +12494,19 @@
                       "aria-selected": unref(state).view === "trajectory" ? "true" : "false",
                       "data-view": "trajectory",
                       onClick: _cache[6] || (_cache[6] = ($event) => unref(switchView)("trajectory"))
-                    }, "轨迹", 10, _hoisted_16)
+                    }, "轨迹", 10, _hoisted_16),
+                    currentChain.value ? (openBlock(), createElementBlock("button", {
+                      key: 0,
+                      id: "tab-history",
+                      class: normalizeClass(["tab", { "tab-active": unref(state).view === "history" }]),
+                      type: "button",
+                      role: "tab",
+                      "aria-selected": unref(state).view === "history" ? "true" : "false",
+                      "data-view": "history",
+                      onClick: _cache[7] || (_cache[7] = ($event) => unref(switchView)("history"))
+                    }, "历史 " + toDisplayString(currentChain.value.length), 11, _hoisted_17)) : createCommentVNode("", true)
                   ]),
-                  createBaseVNode("div", _hoisted_17, [
+                  createBaseVNode("div", _hoisted_18, [
                     createBaseVNode("button", {
                       id: "follow",
                       class: "tab-toggle",
@@ -12414,7 +12514,7 @@
                       "aria-pressed": unref(state).follow ? "true" : "false",
                       title: "新消息到达时自动滚动到底部",
                       onClick: onClickFollow
-                    }, "自动跟随", 8, _hoisted_18),
+                    }, "自动跟随", 8, _hoisted_19),
                     createBaseVNode("button", {
                       id: "collapse-thinking",
                       class: "tab-toggle",
@@ -12422,7 +12522,7 @@
                       "aria-pressed": unref(state).forceCollapse ? "true" : "false",
                       title: "把所有消息的思考过程折叠起来",
                       onClick: onClickCollapseThinking
-                    }, "折叠全部思考", 8, _hoisted_19),
+                    }, "折叠全部思考", 8, _hoisted_20),
                     createBaseVNode("button", {
                       id: "only-tools",
                       class: "tab-toggle",
@@ -12430,7 +12530,7 @@
                       "aria-pressed": unref(state).onlyTools ? "true" : "false",
                       title: "只显示工具调用与工具结果",
                       onClick: onClickOnlyTools
-                    }, "仅看工具调用", 8, _hoisted_20),
+                    }, "仅看工具调用", 8, _hoisted_21),
                     createBaseVNode("button", {
                       id: "md-toggle",
                       class: "tab-toggle",
@@ -12438,7 +12538,7 @@
                       "aria-pressed": unref(state).markdown ? "true" : "false",
                       title: unref(state).markdown ? "消息正文按 Markdown 渲染（标题 / 列表 / 代码块 / 表格），点击回到纯文本" : "消息正文按纯文本显示（pre-wrap），点击改用 Markdown 渲染",
                       onClick: onClickMarkdown
-                    }, "Markdown", 8, _hoisted_21),
+                    }, "Markdown", 8, _hoisted_22),
                     createBaseVNode("button", {
                       id: "thumb-toggle",
                       class: "tab-toggle",
@@ -12446,7 +12546,7 @@
                       "aria-pressed": unref(state).showThumbs ? "true" : "false",
                       title: unref(state).showThumbs ? "显示看图调用下的缩略图预览行，点击隐藏" : "已隐藏缩略图预览行，点击显示",
                       onClick: onClickThumbs
-                    }, "缩略图", 8, _hoisted_22),
+                    }, "缩略图", 8, _hoisted_23),
                     createBaseVNode("button", {
                       id: "unit-toggle",
                       class: "tab-toggle",
@@ -12454,16 +12554,16 @@
                       "aria-pressed": unref(state).unit === "char" ? "false" : "true",
                       title: unref(state).unit === "char" ? "计数按字符数显示（精确值），点击改为 token" : "计数按 token 显示（本地估算，带 ≈），点击改为字符",
                       onClick: onClickUnit
-                    }, toDisplayString(unref(state).unit === "char" ? "字符" : "token"), 9, _hoisted_23),
+                    }, toDisplayString(unref(state).unit === "char" ? "字符" : "token"), 9, _hoisted_24),
                     createBaseVNode("button", {
                       id: "theme-toggle",
                       class: "tab-toggle",
                       type: "button",
                       "aria-pressed": unref(state).theme === "dark" ? "true" : "false",
                       title: unref(state).theme === "dark" ? "切换为白天模式（浅色，默认）" : "切换为夜间模式（深色）",
-                      onClick: _cache[7] || (_cache[7] = //@ts-ignore
+                      onClick: _cache[8] || (_cache[8] = //@ts-ignore
                       (...args) => unref(toggleTheme) && unref(toggleTheme)(...args))
-                    }, toDisplayString(unref(state).theme === "dark" ? "☀️ 浅色" : "🌙 深色"), 9, _hoisted_24)
+                    }, toDisplayString(unref(state).theme === "dark" ? "☀️ 浅色" : "🌙 深色"), 9, _hoisted_25)
                   ])
                 ])
               ]),
@@ -12471,9 +12571,10 @@
                 id: "banner",
                 class: normalizeClass(["banner", { hidden: !bannerText.value }])
               }, toDisplayString(bannerText.value), 3),
-              createBaseVNode("div", _hoisted_25, [
+              createBaseVNode("div", _hoisted_26, [
                 createVNode(Timeline),
-                createVNode(Trajectory)
+                createVNode(Trajectory),
+                createVNode(HistoryPanel)
               ])
             ]),
             createBaseVNode("div", {
@@ -12486,22 +12587,22 @@
               style: normalizeStyle({ left: `${Math.max(0, unref(layout).viewport - unref(layout).cols.details)}px` }),
               "data-dragging": ((_b = drag.value) == null ? void 0 : _b.side) === "details" ? "true" : void 0,
               "data-hidden": unref(layout).detailsCollapsed ? "true" : void 0,
-              onPointerdown: _cache[8] || (_cache[8] = ($event) => onDragStart($event, "details")),
+              onPointerdown: _cache[9] || (_cache[9] = ($event) => onDragStart($event, "details")),
               onPointermove: onDragMove,
               onPointerup: onDragEnd,
               onPointercancel: onDragEnd,
-              onDblclick: _cache[9] || (_cache[9] = ($event) => onDragDblClick("details"))
-            }, null, 44, _hoisted_26),
-            createBaseVNode("aside", _hoisted_27, [
-              createBaseVNode("div", _hoisted_28, [
-                _cache[17] || (_cache[17] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
+              onDblclick: _cache[10] || (_cache[10] = ($event) => onDragDblClick("details"))
+            }, null, 44, _hoisted_27),
+            createBaseVNode("aside", _hoisted_28, [
+              createBaseVNode("div", _hoisted_29, [
+                _cache[18] || (_cache[18] = createBaseVNode("span", { class: "details-title" }, "详情", -1)),
                 createBaseVNode("button", {
                   id: "details-close",
                   class: "icon-btn",
                   type: "button",
                   title: "关闭详情面板",
                   "aria-label": "关闭详情面板",
-                  onClick: _cache[10] || (_cache[10] = ($event) => unref(state).details > 0 && unref(toggleDetails)())
+                  onClick: _cache[11] || (_cache[11] = ($event) => unref(state).details > 0 && unref(toggleDetails)())
                 }, "✕")
               ]),
               createVNode(DetailsPanel)
@@ -12523,13 +12624,13 @@
               src: unref(lightbox).open ? unref(lightbox).url : void 0,
               alt: unref(lightbox).ref,
               style: normalizeStyle({ transform: "translate(" + unref(lightbox).tx + "px," + unref(lightbox).ty + "px) scale(" + unref(lightbox).scale + ")" })
-            }, null, 12, _hoisted_29),
-            _cache[18] || (_cache[18] = createBaseVNode("div", { class: "lightbox-hint" }, "滚轮 / 双指缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭", -1)),
+            }, null, 12, _hoisted_30),
+            _cache[19] || (_cache[19] = createBaseVNode("div", { class: "lightbox-hint" }, "滚轮 / 双指缩放 · 拖动平移 · 双击复位 · 点击空白或 Esc 关闭", -1)),
             createBaseVNode("div", {
               class: "lightbox-zoom",
-              onClick: _cache[14] || (_cache[14] = withModifiers(() => {
+              onClick: _cache[15] || (_cache[15] = withModifiers(() => {
               }, ["stop"])),
-              onDblclick: _cache[15] || (_cache[15] = withModifiers(() => {
+              onDblclick: _cache[16] || (_cache[16] = withModifiers(() => {
               }, ["stop"]))
             }, [
               createBaseVNode("button", {
@@ -12537,22 +12638,22 @@
                 type: "button",
                 title: "缩小",
                 "aria-label": "缩小",
-                onClick: _cache[11] || (_cache[11] = ($event) => lbZoomBtn(1.25, $event))
+                onClick: _cache[12] || (_cache[12] = ($event) => lbZoomBtn(1.25, $event))
               }, "−"),
-              createBaseVNode("span", _hoisted_30, toDisplayString(Math.round(unref(lightbox).scale * 100)) + "%", 1),
+              createBaseVNode("span", _hoisted_31, toDisplayString(Math.round(unref(lightbox).scale * 100)) + "%", 1),
               createBaseVNode("button", {
                 class: "icon-btn",
                 type: "button",
                 title: "放大",
                 "aria-label": "放大",
-                onClick: _cache[12] || (_cache[12] = ($event) => lbZoomBtn(0.8, $event))
+                onClick: _cache[13] || (_cache[13] = ($event) => lbZoomBtn(0.8, $event))
               }, "＋"),
               createBaseVNode("button", {
                 class: "icon-btn",
                 type: "button",
                 title: "复位 100%",
                 "aria-label": "复位缩放",
-                onClick: _cache[13] || (_cache[13] = ($event) => lbReset($event))
+                onClick: _cache[14] || (_cache[14] = ($event) => lbReset($event))
               }, "1:1")
             ], 32)
           ], 34)
@@ -12560,7 +12661,7 @@
       };
     }
   });
-  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-3030e666"]]);
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-8be275b1"]]);
   const app = createApp(App);
   app.config.errorHandler = (err, instance, info) => {
     var _a, _b;

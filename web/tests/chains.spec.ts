@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  parseImg2TextId, img2textMemberTag, sortChainMembers, buildImg2TextChains,
+  parseImg2TextId, img2textMemberTag, sortChainMembers, buildImg2TextChains, chainOfSession,
 } from '../src/legacy/sidebar'
 
 const HASH = 'aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaaaaaabbbb'
@@ -158,5 +158,42 @@ describe('T53 buildImg2TextChains 折叠分组', () => {
     const { chains, singles } = buildImg2TextChains([])
     expect(chains).toEqual([])
     expect(singles).toEqual([])
+  })
+})
+
+/* 中栏「历史」页签的数据源：当前会话 id → 所在链成员列表（>1 才成链）。 */
+describe('chainOfSession 按会话查链', () => {
+  const items = [
+    sess(`img2text:sessions/书A.md/${HASH}.jpg.jsonl`, '2026-01-01T00:00:00Z', { project: 'out/书A' }),
+    sess(`img2text:mermaid_fix/书A_${HASH}.jpg/session-stage0.jsonl`, '2026-01-02T00:00:00Z', { project: 'out/书A' }),
+    sess(`img2text:mermaid_fix/书A_${HASH}.jpg/session-stage1.jsonl`, '2026-01-03T00:00:00Z', { project: 'out/书A' }),
+    sess(`img2text:sessions/书A.md/${HASH2}.jpg.jsonl`, '2026-01-01T00:00:00Z', { project: 'out/书A' }), // 单成员
+    sess('work/sessions/style_session.jsonl', '2026-01-01T00:00:00Z'), // 非 img2text
+  ]
+
+  it('链成员 id → 返回全链（新→旧排序）', () => {
+    const chain = chainOfSession(items, `img2text:mermaid_fix/书A_${HASH}.jpg/session-stage0.jsonl`)
+    expect(chain).not.toBeNull()
+    expect(chain!.length).toBe(3)
+    expect(chain!.map((s) => s.id.split('/').pop())).toEqual([
+      'session-stage1.jsonl', 'session-stage0.jsonl', `${HASH}.jpg.jsonl`,
+    ])
+  })
+
+  it('单成员链 / 链外会话 / 空 id → null', () => {
+    expect(chainOfSession(items, `img2text:sessions/书A.md/${HASH2}.jpg.jsonl`)).toBeNull()
+    expect(chainOfSession(items, 'work/sessions/style_session.jsonl')).toBeNull()
+    expect(chainOfSession(items, null)).toBeNull()
+    expect(chainOfSession(items, '')).toBeNull()
+    expect(chainOfSession([], `img2text:sessions/书A.md/${HASH}.jpg.jsonl`)).toBeNull()
+  })
+
+  it('同一图片哈希跨项目不混链（链按项目聚）', () => {
+    const other = sess(`img2text:sessions/书B.md/${HASH}.jpg.jsonl`, '2026-01-04T00:00:00Z', { project: 'out/书B' })
+    const chain = chainOfSession([...items, other], `img2text:sessions/书A.md/${HASH}.jpg.jsonl`)
+    expect(chain!.length).toBe(3)
+    expect(chain!.some((s) => s.id.includes('书B'))).toBe(false)
+    // 书B 只有一个成员 → 不成链
+    expect(chainOfSession([...items, other], other.id)).toBeNull()
   })
 })
