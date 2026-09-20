@@ -1385,3 +1385,8 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ## 第五十五批补二（2026-09-19，中栏「历史」页签）
 
 - 用户找不到侧栏的链历史入口，提议页签化。实现：chainOfSession(sessions,id) 纯函数（按项目聚链防跨书同哈希混并，>1 成员才成链）+ HistoryPanel.vue + App.vue 第三个页签（computed 按 sessions 引用缓存，watch 标量 getter 避开数组多源陷阱；切到链外会话回落「对话」；历史页内点行切换停留在历史页）。vitest 88/88。子代理实施、父代理复验。
+
+## 第五十六批（2026-09-20，T58/T59）
+
+- **T59 空回复无重试**：逐图分析路径的空响应（0 choices/全空）直接记 EMPTY_RESPONSE 等下轮。在 doCallWithRetryFull 加重试层：isDegenerateResponse 判定（无 choices 或 全空 content 且无工具调用）→ 原样重发 ≤2 次（字节一致保前缀缓存），仍空才算失败。与 T50 会话层自救是同一现象的两次露面。
+- **T58 运行中书不可见**：进度板加 running 态——sessions/<md>.md/<图>.jsonl（含 prevN 归一）在活动窗口内被写过且无结果。web：蓝色脉冲段 + 进行中计数 + 方块最优先着色。子代理实施（vitest 90/90），父代理复验。

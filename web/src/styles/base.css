@@ -65,6 +65,8 @@
   --dot-live: #22c55e;
   /* T54：img2text 进度概览的「修复(fixed)」态——青色，与 done 绿区分开。 */
   --i2t-fixed: #0d9488;
+  /* T58：「进行中(running)」态——蓝色（与业务主色同族），配脉冲动画。 */
+  --i2t-running: #4176e6;
   /* 轨迹表的种类标签（照 DSH 的 kindTag 上色：用户=业务主色、工具=琥珀、错误=红） */
   --kind-user-fg: #4176e6;
   --kind-user-bg: #e8effc;
@@ -143,6 +145,7 @@ html[data-theme="dark"] {
   --fam-search: #c4b5fd;
   --fam-submit: #f87171;
   --i2t-fixed: #2dd4bf;
+  --i2t-running: #5686fe;
 }
 
 * {
@@ -920,7 +923,7 @@ details[open] > summary .line-caret {
 
 /* ============================ P18：img2text 进度概览 ============================
  * 侧栏 img2text 板块顶部的按书进度区：每本书一块——书名 + 分段进度条
- * （done=绿 / fixed=青 / escalated=琥珀 / pending=暗）+ 计数行。纯 CSS，无库。
+ * （done=绿 / fixed=青 / escalated=琥珀 / running=蓝脉冲 / pending=暗）+ 计数行。纯 CSS，无库。
  * T54：整块做成 <details> 可折叠（头部一行：标题 + 聚合「N/M 书完成」），
  * 内部支持列表/方块两种视图（块视图一书一个色块，颜色按主导状态）。 */
 .i2t-overview {
@@ -1014,6 +1017,21 @@ details[open] > summary .line-caret {
   opacity: .45;
 }
 
+/* T58：running（进行中）——蓝色 + 克制的呼吸脉冲，正在跑的书一眼可见。 */
+@keyframes i2t-run-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .55; }
+}
+
+.i2t-block.i2t-running {
+  background: var(--i2t-running);
+  animation: i2t-run-pulse 1.6s ease-in-out infinite;
+}
+
+.i2t-block.i2t-running:hover {
+  animation-play-state: paused;
+}
+
 .i2t-book {
   padding: 4px 0 6px;
 }
@@ -1074,6 +1092,11 @@ details[open] > summary .line-caret {
   background: var(--warn);
 }
 
+.i2t-seg.i2t-run {
+  background: var(--i2t-running);
+  animation: i2t-run-pulse 1.6s ease-in-out infinite;
+}
+
 .i2t-seg.i2t-pend {
   background: var(--dim);
   opacity: .35;
@@ -1097,6 +1120,10 @@ details[open] > summary .line-caret {
 
 .i2t-book-meta .i2t-meta-esc {
   color: var(--warn);
+}
+
+.i2t-book-meta .i2t-meta-run {
+  color: var(--i2t-running);
 }
 
 .frame[data-sidebar-collapsed] .i2t-overview {

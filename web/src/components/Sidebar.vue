@@ -328,7 +328,7 @@ function onMoreClick(okey: string) {
               :class="'i2t-' + bookDominantState(b)"
               type="button"
               :title="bookTip(b)"
-              :aria-label="b.book + '：完成 ' + b.done + ' · 修复 ' + b.fixed + ' · 升级 ' + b.escalated + ' · 待处理 ' + b.pending"
+              :aria-label="b.book + '：完成 ' + b.done + ' · 修复 ' + b.fixed + ' · 升级 ' + b.escalated + ' · 进行中 ' + b.running + ' · 待处理 ' + b.pending"
               @click="onOverviewBookClick(b)"
             ></button>
           </div>
@@ -338,16 +338,18 @@ function onMoreClick(okey: string) {
                 <span class="i2t-book-name" :title="b.book">{{ b.book }}</span>
                 <span class="i2t-book-count">{{ b.done }}/{{ b.total }}</span>
               </div>
-              <div class="i2t-bar" role="img" :aria-label="'完成 ' + b.done + ' · 修复 ' + b.fixed + ' · 升级 ' + b.escalated + ' · 待处理 ' + b.pending">
+              <div class="i2t-bar" role="img" :aria-label="'完成 ' + b.done + ' · 修复 ' + b.fixed + ' · 升级 ' + b.escalated + ' · 进行中 ' + b.running + ' · 待处理 ' + b.pending">
                 <span class="i2t-seg i2t-done" :style="{ width: barPct(b.done, b.total) + '%' }"></span>
                 <span class="i2t-seg i2t-fixed" :style="{ width: barPct(b.fixed, b.total) + '%' }"></span>
                 <span class="i2t-seg i2t-esc" :style="{ width: barPct(b.escalated, b.total) + '%' }"></span>
+                <span class="i2t-seg i2t-run" :style="{ width: barPct(b.running, b.total) + '%' }"></span>
                 <span class="i2t-seg i2t-pend" :style="{ width: barPct(b.pending, b.total) + '%' }"></span>
               </div>
               <div class="i2t-book-meta">
                 <span class="i2t-meta-done">完成 {{ b.done }}</span>
                 <span v-if="b.fixed" class="i2t-meta-fixed">修复 {{ b.fixed }}</span>
                 <span v-if="b.escalated" class="i2t-meta-esc">升级 {{ b.escalated }}</span>
+                <span v-if="b.running" class="i2t-meta-run">进行中 {{ b.running }}</span>
                 <span v-if="b.pending" class="i2t-meta-pend">待处理 {{ b.pending }}</span>
               </div>
             </div>

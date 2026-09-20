@@ -140,7 +140,7 @@ export interface Session {
 /** P18：/api/img2text-progress 的一张图。 */
 export interface Img2TextItem {
   name: string
-  status: 'done' | 'fixed' | 'escalated' | 'pending' | string
+  status: 'done' | 'fixed' | 'escalated' | 'running' | 'pending' | string
 }
 
 /** P18：/api/img2text-progress 的一本书（进度概览区逐书渲染）。 */
@@ -151,6 +151,8 @@ export interface Img2TextBook {
   /** fixed = 升级后修好的（有结果且留过修复工作区）；与 done 同属"已完成"。 */
   fixed: number
   escalated: number
+  /** T58：转录在活动窗口内被写过、尚无结果——这张图正在处理中。 */
+  running: number
   pending: number
   items?: Img2TextItem[]
 }

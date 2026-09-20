@@ -585,13 +585,15 @@ export function findSession(id: string): any {
 
 /* ---------- T54：img2text 进度概览（块主导色 / 聚合文案） ---------- */
 
-export type I2tDominantState = 'escalated' | 'pending' | 'fixed' | 'done'
+export type I2tDominantState = 'running' | 'escalated' | 'pending' | 'fixed' | 'done'
 
 /*
- * 块视图里一本书一个色块：取"最重"的状态——升级未修好(琥珀) > 待处理(暗) >
- * 修复(青) > 全完成(绿)。多状态并存时问题色优先，一眼看到哪本要管。
+ * 块视图里一本书一个色块：取"最重"的状态——T58 起正在跑(running，蓝)最优先，
+ * 正在处理中的书一眼可见；之后才是 升级未修好(琥珀) > 待处理(暗) >
+ * 修复(青) > 全完成(绿)。
  */
-export function bookDominantState(b: Pick<Img2TextBook, 'done' | 'fixed' | 'escalated' | 'pending'>): I2tDominantState {
+export function bookDominantState(b: Pick<Img2TextBook, 'done' | 'fixed' | 'escalated' | 'pending' | 'running'>): I2tDominantState {
+  if (b.running > 0) return 'running'
   if (b.escalated > 0) return 'escalated'
   if (b.pending > 0) return 'pending'
   if (b.fixed > 0) return 'fixed'
@@ -599,13 +601,13 @@ export function bookDominantState(b: Pick<Img2TextBook, 'done' | 'fixed' | 'esca
 }
 
 export const I2T_STATE_TEXT: Record<I2tDominantState, string> = {
-  done: '全部完成', fixed: '有修复', escalated: '有升级未修好', pending: '有待处理',
+  done: '全部完成', fixed: '有修复', escalated: '有升级未修好', pending: '有待处理', running: '正在处理中',
 }
 
-/* 块悬浮说明：书名 + 四态计数 + done/total。 */
+/* 块悬浮说明：书名 + 五态计数 + done/total。 */
 export function bookTip(b: Img2TextBook): string {
   return b.book + '\n' +
-    '完成 ' + b.done + ' · 修复 ' + b.fixed + ' · 升级 ' + b.escalated + ' · 待处理 ' + b.pending +
+    '完成 ' + b.done + ' · 修复 ' + b.fixed + ' · 升级 ' + b.escalated + ' · 进行中 ' + b.running + ' · 待处理 ' + b.pending +
     '（' + b.done + '/' + b.total + '）\n主导状态：' + I2T_STATE_TEXT[bookDominantState(b)] +
     '\n点击在侧栏里搜这本书的会话'
 }

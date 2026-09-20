@@ -1,13 +1,14 @@
 /*
  * T54：img2text 进度概览的纯函数——块视图的主导色判定（最重状态优先：
- * escalated > pending > fixed > done）、块悬浮说明与概览头部聚合文案。
+ * running > escalated > pending > fixed > done，T58 起 running 最优先）、
+ * 块悬浮说明与概览头部聚合文案。
  */
 import { describe, it, expect } from 'vitest'
 import { bookDominantState, bookTip, booksHeadText } from '../src/legacy/sidebar'
 import type { Img2TextBook } from '../src/legacy/types'
 
 function book(extra: Partial<Img2TextBook>): Img2TextBook {
-  return { book: '书A', total: 10, done: 10, fixed: 0, escalated: 0, pending: 0, ...extra }
+  return { book: '书A', total: 10, done: 10, fixed: 0, escalated: 0, running: 0, pending: 0, ...extra }
 }
 
 describe('T54 bookDominantState 块主导色', () => {
@@ -30,15 +31,24 @@ describe('T54 bookDominantState 块主导色', () => {
   it('全零（total 0 的空书）按 done 兜底', () => {
     expect(bookDominantState(book({ total: 0, done: 0 }))).toBe('done')
   })
+
+  it('T58 running 最优先：只要有正在跑的就是 running（蓝），压过升级/待处理', () => {
+    expect(bookDominantState(book({ done: 8, running: 2 }))).toBe('running')
+    expect(bookDominantState(book({ done: 3, fixed: 2, pending: 4, escalated: 1, running: 1 }))).toBe('running')
+  })
+
+  it('T58 running 为 0 时不影响原优先级', () => {
+    expect(bookDominantState(book({ done: 3, fixed: 2, pending: 4, escalated: 1, running: 0 }))).toBe('escalated')
+  })
 })
 
 describe('T54 bookTip / booksHeadText', () => {
-  it('块悬浮说明带书名、四态计数与 done/total', () => {
-    const tip = bookTip(book({ book: '27政治.md', done: 60, fixed: 4, escalated: 1, pending: 2, total: 67 }))
+  it('块悬浮说明带书名、五态计数与 done/total', () => {
+    const tip = bookTip(book({ book: '27政治.md', done: 60, fixed: 4, escalated: 1, running: 3, pending: 2, total: 70 }))
     expect(tip).toContain('27政治.md')
-    expect(tip).toContain('完成 60 · 修复 4 · 升级 1 · 待处理 2')
-    expect(tip).toContain('（60/67）')
-    expect(tip).toContain('有升级未修好')
+    expect(tip).toContain('完成 60 · 修复 4 · 升级 1 · 进行中 3 · 待处理 2')
+    expect(tip).toContain('（60/70）')
+    expect(tip).toContain('正在处理中')
   })
 
   it('头部聚合：done+fixed 覆盖 total 才算完成的书', () => {
