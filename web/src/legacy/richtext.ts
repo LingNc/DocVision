@@ -309,6 +309,7 @@ export function mdBlockStart(line: unknown, next: string | undefined): boolean {
   const t = String(line || '').trim()
   if (!t) return true
   if (mdFence(t) || MD_HEADING.test(t) || MD_HR.test(t)) return true
+  if (t.startsWith('$$')) return true // 显示数学块
   if (/^\s{0,3}>/.test(String(line)) || mdListMarker(String(line))) return true
   return t.indexOf('|') >= 0 && !!next && mdSeparatorRow(next) && mdSplitRow(t).length > 1
 }
@@ -846,6 +847,35 @@ export function mdListItem(item: { text: string }): HTMLElement {
  * 块级解析：围栏代码块 → 标题 → 水平线 → 表格 → 引用 → 列表 → 段落。
  * 返回 DocumentFragment（调用方直接 appendChild 即可）。
  */
+/*
+ * collectMathBlock 识别 $$ 起手的显示数学块（T58：跨行 $$…$$ 在行内
+ * 正则逐行扫描下永远匹配不到，曾原样显示）。命中返回去壳源码与块后
+ * 第一行下标；单行 $$…$$（长度 > 3 且同起同收）与多行两种形态都认。
+ * 纯函数，便于单测（node 环境无 DOM，renderMarkdown 本体不可测）。
+ */
+export function collectMathBlock(lines: string[], i: number): { src: string; next: number } | null {
+  const first = String(lines[i] || '').trim()
+  if (!first.startsWith('$$')) return null
+  if (first.length > 3 && first.endsWith('$$')) {
+    const src = first.slice(2, -2)
+    return src.trim() ? { src, next: i + 1 } : null // 裸 $$$$ 不是数学块
+  }
+  const buf: string[] = [first.slice(2)]
+  let j = i + 1
+  while (j < lines.length) {
+    const l = lines[j]
+    const k = l.indexOf('$$')
+    if (k >= 0) {
+      buf.push(l.slice(0, k))
+      return { src: buf.join('\n'), next: j + 1 }
+    }
+    buf.push(l)
+    j++
+  }
+  // 未闭合：按到文末收尾（与围栏代码块"没闭合吃到文末"同款宽容）。
+  return { src: buf.join('\n'), next: j }
+}
+
 export function renderMarkdown(text: unknown): DocumentFragment {
   const frag = document.createDocumentFragment()
   const lines = String(text === undefined || text === null ? '' : text).replace(/\r\n?/g, '\n').split('\n')
@@ -865,6 +895,22 @@ export function renderMarkdown(text: unknown): DocumentFragment {
       while (i < lines.length && !close.test(lines[i])) { code.push(lines[i]); i++ }
       if (i < lines.length) i++
       frag.appendChild(mdCodeBlock(code.join('\n'), fence.lang))
+      continue
+    }
+
+    // 显示数学块：$$ 起手的多行（或单行 $$…$$）整体走 MathML——行内
+    // 正则逐行扫描永远匹配不到跨行 $$，曾让双 $ 公式原样显示（T58）。
+    const mathBlock = collectMathBlock(lines, i)
+    if (mathBlock) {
+      const src = mathBlock.src
+      i = mathBlock.next
+      const div = el('div', 'md-math-display')
+      try {
+        div.appendChild(mdMathML(src, true))
+      } catch {
+        div.textContent = '$$' + src + '$$' // 坏公式退回原文
+      }
+      frag.appendChild(div)
       continue
     }
 

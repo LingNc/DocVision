@@ -1377,3 +1377,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **历次调用历史没地方看**：逐图转录 NewTranscript 是 append 模式，多次运行混排一个文件。改 prevN 轮转（与 mermaid_fix 同款），web 链解析 sessions/<md>/<图>.prevN.jsonl 归并同图历史。
 - **mermaid 预览（T56 追加）**：POST /api/mermaid（mmdc + sha256 缓存于用户缓存目录，实测首渲数秒/缓存 0.6s；坏源码 in-band ok:false）；前端 mermaid 围栏块下挂 SVG（DOMParser，不碰 innerHTML），点击编 data URL 进现有灯箱，失败/静态模式回退代码块+一行小字。
 - 两子代理分别实施 web 两批（68→80 条 vitest 全绿），父代理复验构建与端点实测。
+
+## 第五十五批补（2026-09-19，T58 跨行 $$ 公式不渲染）
+
+- 用户报会话里双 $ 公式原样显示。根因：数学渲染全在行内正则 MD_INLINE，而 mdInlineLines 逐行扫描——跨行 $$…$$ 永远匹配不到。修法：renderMarkdown 块级循环加 collectMathBlock（$$ 起手识别：单行同起同收/多行/未闭合吃到文末；裸 $$$$ 不算），mdBlockStart 同步认 $$（防列表懒续行吞掉）；坏公式 try/catch 回退原文。node 测试环境无 DOM——识别逻辑抽纯函数钉 5 条 vitest。

@@ -7871,6 +7871,7 @@
     const t = String(line || "").trim();
     if (!t) return true;
     if (mdFence(t) || MD_HEADING.test(t) || MD_HR.test(t)) return true;
+    if (t.startsWith("$$")) return true;
     if (/^\s{0,3}>/.test(String(line)) || mdListMarker(String(line))) return true;
     return t.indexOf("|") >= 0 && !!next && mdSeparatorRow(next) && mdSplitRow(t).length > 1;
   }
@@ -8557,6 +8558,27 @@
     mdInlineLines(li, item.text);
     return li;
   }
+  function collectMathBlock(lines, i) {
+    const first = String(lines[i] || "").trim();
+    if (!first.startsWith("$$")) return null;
+    if (first.length > 3 && first.endsWith("$$")) {
+      const src = first.slice(2, -2);
+      return src.trim() ? { src, next: i + 1 } : null;
+    }
+    const buf = [first.slice(2)];
+    let j = i + 1;
+    while (j < lines.length) {
+      const l = lines[j];
+      const k = l.indexOf("$$");
+      if (k >= 0) {
+        buf.push(l.slice(0, k));
+        return { src: buf.join("\n"), next: j + 1 };
+      }
+      buf.push(l);
+      j++;
+    }
+    return { src: buf.join("\n"), next: j };
+  }
   function renderMarkdown(text) {
     const frag = document.createDocumentFragment();
     const lines = String(text === void 0 || text === null ? "" : text).replace(/\r\n?/g, "\n").split("\n");
@@ -8579,6 +8601,19 @@
         }
         if (i < lines.length) i++;
         frag.appendChild(mdCodeBlock(code.join("\n"), fence.lang));
+        continue;
+      }
+      const mathBlock = collectMathBlock(lines, i);
+      if (mathBlock) {
+        const src = mathBlock.src;
+        i = mathBlock.next;
+        const div = el$1("div", "md-math-display");
+        try {
+          div.appendChild(mdMathML(src, true));
+        } catch {
+          div.textContent = "$$" + src + "$$";
+        }
+        frag.appendChild(div);
         continue;
       }
       const h = MD_HEADING.exec(trimmed);
