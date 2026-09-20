@@ -683,10 +683,11 @@ func doCallWithRetryFull(
 		if err == nil {
 			// T59：厂商偶发退化空响应（0 choices / 全空 content 无工具调用）
 			// 不是模型的"回答"，按可重试错误处理——原样重发（请求字节
-			// 一致保住前缀缓存），最多再试 2 次，仍空才算 EMPTY_RESPONSE。
-			if emptyRetry < 2 && isDegenerateResponse(resp) {
+			// 一致保住前缀缓存），次数与 API 错误共用 api_max_retries
+			// （默认 3），仍空才算 EMPTY_RESPONSE。
+			if emptyRetry < maxAPIRetries && isDegenerateResponse(resp) {
 				emptyRetry++
-				logger.LogWarning(tid, "  [EmptyResponse] 空响应，重发", emptyRetry, "/2")
+				logger.LogWarning(tid, "  [EmptyResponse] 空响应，重发", emptyRetry, "/", maxAPIRetries)
 				time.Sleep(time.Duration(emptyRetry) * 2 * time.Second)
 				continue
 			}
