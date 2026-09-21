@@ -340,9 +340,13 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		}
 
 		outPath := filepath.Join(finallyDir, name)
+		// P21 页码标记：对齐在原始 md（entry.content，图片引用还在）上做，
+		// mineru_output 没有对应产物时 plan 为 nil、静默跳过。
+		plan := planPageMarks(cfg.Paths.MineruOutput, name, entry.lines)
 		if len(reps) == 0 {
+			out, _ := plan.applyTo(entry.content, entry.lines, entry.starts, nil)
 			if !util.FileExists(outPath) {
-				if err := os.WriteFile(outPath, []byte(entry.content), 0o644); err != nil {
+				if err := os.WriteFile(outPath, []byte(out), 0o644); err != nil {
 					logger.LogError(0, "  [", name, "] write failed:", err)
 				}
 			}
@@ -786,14 +790,16 @@ func resolveSeed(seedStr string) (int64, int64) {
 //   - mermaid embeds as its (already validated) code block;
 //   - remaining visual types keep a readable [Image]( description ).
 func embedBlockFor(result string) string {
-	return embedBlockForRef(result, "")
+	return embedBlockForRef(result, "", 0)
 }
 
 // embedBlockForRef 与 embedBlockFor 相同，mermaid 分支额外用原始图片引用里
 // 的 alt 文本当 [Image] 前缀的描述（T16）：mermaid 也是视觉内容的一种，最终
 // 文件里先有一个统一的 `[Image]( 描述 )` 锚，后面才跟 ```mermaid 代码块；
 // 模型偶尔吞掉结尾围栏，嵌入前补齐，避免破坏后续 markdown。
-func embedBlockForRef(result, ref string) string {
+// page > 0（P21，原始 md 对齐出的图片所在 PDF 全局页码）时把页码附进锚：
+// `[Image]( 描述 · P.42 )`；text/table/code 直接嵌入的没有锚，不加。
+func embedBlockForRef(result, ref string, page int) string {
 	typ, body := splitImgTypePrefix(result)
 	body = strings.TrimSpace(body)
 	switch {
@@ -801,18 +807,32 @@ func embedBlockForRef(result, ref string) string {
 		typ == "table" || typ == "code":
 		return "\n\n" + body + "\n\n"
 	case typ == "mermaid", strings.Contains(body, "```mermaid"):
-		label := altOfRef(ref)
-		if label == "" {
-			label = "mermaid"
-		}
-		if !strings.HasPrefix(body, "```") {
-			// A bare diagram body (legacy progress data) gets the fence.
-			return "\n\n[Image]( " + label + " )\n\n```mermaid\n" + body + "\n```\n\n"
-		}
-		return "\n\n[Image]( " + label + " )\n\n" + ensureClosedFence(body) + "\n\n"
+		return "\n\n" + imageAnchorText(altOfRef(ref), page) + "\n\n" +
+			ensureClosedFence(withMermaidFence(body)) + "\n\n"
 	default:
-		return "\n\n[Image]( " + body + " )\n\n"
+		return "\n\n" + imageAnchorText(body, page) + "\n\n"
 	}
+}
+
+// imageAnchorText renders the `[Image]( 描述 · P.N )` embed anchor; the
+// page suffix is only appended when the page is known (page > 0).
+func imageAnchorText(label string, page int) string {
+	if label == "" {
+		label = "mermaid"
+	}
+	if page > 0 {
+		return "[Image]( " + label + " · P." + strconv.Itoa(page) + " )"
+	}
+	return "[Image]( " + label + " )"
+}
+
+// withMermaidFence wraps a bare diagram body (legacy progress data) in a
+// mermaid fence; a body that already carries its fence is kept as-is.
+func withMermaidFence(body string) string {
+	if !strings.HasPrefix(body, "```") {
+		return "```mermaid\n" + body + "\n```"
+	}
+	return body
 }
 
 // htmlAltRe extracts the alt attribute of an <img> reference.

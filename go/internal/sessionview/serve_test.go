@@ -162,7 +162,10 @@ func TestServeImg2TextProgressAPI(t *testing.T) {
 	// 无 img2text 根：books 为空（null 或 [] 都接受）。
 	srv2 := httptest.NewServer(newViewerServer(root, nil))
 	defer srv2.Close()
-	resp2, _ := http.Get(srv2.URL + "/api/img2text-progress")
+	resp2, err := http.Get(srv2.URL + "/api/img2text-progress")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp2.Body.Close()
 	var body2 struct {
 		Books []Img2TextBook `json:"books"`
