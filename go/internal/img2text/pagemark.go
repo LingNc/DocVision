@@ -460,9 +460,44 @@ func (p *pageMarkPlan) pageAt(starts []int, pos int) int {
 // applyTo inserts the marker lines into the FINAL rewritten content.
 // shifts carries the (offset, delta) of every embed replacement already
 // applied. Returns the content and how many marker lines were inserted.
-func (p *pageMarkPlan) applyTo(content string, lines []string, starts []int, shifts []embedShift) (string, int) {
+func (p *pageMarkPlan) applyTo(content string, lines []string, starts []int, shifts []embedShift) (string, []pageMark) {
 	if p == nil {
-		return content, 0
+		return content, nil
 	}
-	return insertPageMarks(content, pageMarkPositions(lines, p.linePages), starts, shifts)
+	marks := pageMarkPositions(lines, p.linePages)
+	out, _ := insertPageMarks(content, marks, starts, shifts)
+	return out, marks
+}
+
+// pageMarkAudit is the runtime self-check printed next to the mark count:
+// the marker pages must stay inside the book's page range and strictly
+// increase. Anything else means the alignment drifted and the log says so
+// instead of silently shipping wrong page numbers.
+type pageMarkAudit struct {
+	MaxPage    int // 该书总页数（部件偏移 + 末页）
+	OutOfRange int // 越界标记数
+	Backward   int // 页码非递增（回退/重复）标记数
+}
+
+func (p *pageMarkPlan) audit(marks []pageMark) pageMarkAudit {
+	a := pageMarkAudit{}
+	if p == nil {
+		return a
+	}
+	for _, x := range p.anchors {
+		if x.page > a.MaxPage {
+			a.MaxPage = x.page
+		}
+	}
+	prev := 0
+	for _, m := range marks {
+		if a.MaxPage > 0 && m.page > a.MaxPage {
+			a.OutOfRange++
+		}
+		if prev > 0 && m.page <= prev {
+			a.Backward++
+		}
+		prev = m.page
+	}
+	return a
 }

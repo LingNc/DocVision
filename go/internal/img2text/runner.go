@@ -381,8 +381,13 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		// P21：embed 改写完成后做一遍行级页码标记插入（一次扫描在
 		// pagemark.go 内完成围栏顺延与去重；embed 的字节偏移用 delta 平移）。
 		nc, marks := plan.applyTo(nc, entry.lines, entry.starts, shifts)
-		if marks > 0 {
-			logger.Log(0, "  页码标记:", strconv.Itoa(marks), "处")
+		if len(marks) > 0 {
+			aud := plan.audit(marks)
+			line := "  页码标记: " + strconv.Itoa(len(marks)) + " 处 / " + strconv.Itoa(aud.MaxPage) + " 页"
+			if aud.OutOfRange > 0 || aud.Backward > 0 {
+				line += fmt.Sprintf(" ⚠ 自检异常: 越界 %d / 回退 %d", aud.OutOfRange, aud.Backward)
+			}
+			logger.Log(0, line)
 		}
 		// Only write when the rebuilt content differs from what is already
 		// on disk. Files whose images were fully processed in earlier rounds

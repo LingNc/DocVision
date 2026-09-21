@@ -190,7 +190,8 @@ func TestPageMarkPlanEndToEnd(t *testing.T) {
 	emb := embedBlockForRef("[IMG_TYPE: screenshot]\n一张图。", content[refStart:refEnd], page)
 	shifts := []embedShift{{start: refStart, delta: len(emb) - (refEnd - refStart)}}
 	nc := content[:refStart] + emb + content[refEnd:]
-	nc, n := plan.applyTo(nc, lines, starts, shifts)
+	nc, marks := plan.applyTo(nc, lines, starts, shifts)
+	n := len(marks)
 	if n != 2 {
 		t.Fatalf("expected 2 markers (page 2 at line 2, page 3 at line 5), got %d:\n%s", n, nc)
 	}
@@ -213,7 +214,8 @@ func TestPlanPageMarksWithoutMinerU(t *testing.T) {
 	}
 	// nil plan 的 applyTo 必须是安全 no-op。
 	var plan *pageMarkPlan
-	out, n := plan.applyTo("原文", []string{"原文"}, []int{0, 3}, nil)
+	out, marks := plan.applyTo("原文", []string{"原文"}, []int{0, 3}, nil)
+	n := len(marks)
 	if n != 0 || out != "原文" {
 		t.Fatalf("nil plan applyTo must be a no-op, got %q, %d marks", out, n)
 	}
