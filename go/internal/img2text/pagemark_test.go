@@ -1,6 +1,7 @@
 package img2text
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -215,5 +216,36 @@ func TestPlanPageMarksWithoutMinerU(t *testing.T) {
 	out, n := plan.applyTo("原文", []string{"原文"}, []int{0, 3}, nil)
 	if n != 0 || out != "原文" {
 		t.Fatalf("nil plan applyTo must be a no-op, got %q, %d marks", out, n)
+	}
+}
+
+// 回归（2026-09-20 真实数据）：书名带 [a4]/[正度纸] 时 Glob 把方括号当
+// 字符类，content_list 永远找不到 → 整本书 0 标记。ReadDir 版本必须认。
+func TestPageContentListPathBracketName(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "[a4] 大雪深埋_part1")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "abc_content_list.json"), []byte("[]"), 0o644)
+	os.WriteFile(filepath.Join(dir, "abc_content_list_v2.json"), []byte("[]"), 0o644)
+	got := pageContentListPath(dir)
+	if got == "" || strings.Contains(got, "_v2") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// 回归（2026-09-20 真实数据）：目录行的"第三章 认识论……029"曾一路匹配到
+// body 里的同名章节标题锚点，指针狂奔全书（P.2 后直接 P.243）。前向搜索
+// 窗口必须把这种远距离误配挡掉——目录行继承未知页，不产生标记。
+func TestAlignPagesWindowBlocksTOCRunaway(t *testing.T) {
+	anchors := []pageAnchor{{kind: "text", text: "封面", page: 1}}
+	// 200 个远端锚（模拟 body 章节标题），页码 2..201
+	for i := 2; i <= 201; i++ {
+		anchors = append(anchors, pageAnchor{kind: "text",
+			text: pageNormalize(fmt.Sprintf("第%d章 认识论", i)), page: i})
+	}
+	lines := []string{"# 目录", "第三章 认识论……029", "正文开始"}
+	pg := alignPages(lines, anchors)
+	if pg[1] != 0 {
+		t.Fatalf("目录行不该匹配到远端锚点: %v", pg)
 	}
 }

@@ -90,16 +90,25 @@ func pagePartDirs(mineruOutput, mdName string) []string {
 // pageContentListPath picks the part's content list (skips the heavier v2),
 // same rule as contentListPath in latex/docindex.go.
 func pageContentListPath(dir string) string {
-	matches, _ := filepath.Glob(filepath.Join(dir, "*_content_list.json"))
-	for _, m := range matches {
-		if !strings.Contains(filepath.Base(m), "_v2") {
-			return m
+	// 不用 Glob：书名常带 [a4]/[正度纸] 这类方括号，Glob 会把它当字符
+	// 类解析而静默失配（李-范/大雪深埋全部 0 锚点的根因）。
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var first string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), "_content_list.json") {
+			continue
+		}
+		if !strings.Contains(e.Name(), "_v2") {
+			return filepath.Join(dir, e.Name())
+		}
+		if first == "" {
+			first = filepath.Join(dir, e.Name())
 		}
 	}
-	if len(matches) > 0 {
-		return matches[0]
-	}
-	return ""
+	return first
 }
 
 // pageNormalize strips ALL whitespace (spaces are OCR noise; the md line
@@ -208,14 +217,23 @@ func anchorTextMatch(anchor, line string) bool {
 // the known page (1-based) for every line, 0 = unknown (the caller lets
 // such a line inherit the previous known page). A hit advances the anchor
 // pointer so the same anchor never matches twice.
+// alignScanWindow bounds how far ahead one md line may reach for an
+// anchor. Without it a TOC line ("第三章 认识论……029") matches the BODY
+// heading anchor thousands of entries later and drags the pointer through
+// the whole book — the "第 2 页后直接跳 243 页" symptom. A true next block
+// sits within a few dozen anchors (tables/images between are counted too).
+const alignScanWindow = 60
+
 func alignPages(lines []string, anchors []pageAnchor) []int {
 	pages := make([]int, len(lines))
 	ai := 0
+	last := 0 // 上一个已确认的页码；匹配不得回退（文档顺序页码非降）
 	for i, line := range lines {
 		if m := imageRefRe.FindStringSubmatch(line); m != nil {
 			base := filepath.Base(m[1])
-			if j := findImageAnchor(anchors, ai, base); j >= 0 {
+			if j := findImageAnchor(anchors, ai, base); j >= 0 && anchors[j].page >= last {
 				pages[i] = anchors[j].page
+				last = pages[i]
 				ai = j + 1
 			}
 			continue
@@ -224,12 +242,17 @@ func alignPages(lines []string, anchors []pageAnchor) []int {
 		if norm == "" {
 			continue
 		}
-		for j := ai; j < len(anchors); j++ {
-			if anchors[j].kind != "text" {
+		end := ai + alignScanWindow
+		if end > len(anchors) {
+			end = len(anchors)
+		}
+		for j := ai; j < end; j++ {
+			if anchors[j].kind != "text" || anchors[j].page < last {
 				continue
 			}
 			if anchorTextMatch(anchors[j].text, norm) {
 				pages[i] = anchors[j].page
+				last = pages[i]
 				ai = j + 1
 				break
 			}
