@@ -1,12 +1,21 @@
 name: Release
 
+# 版本阶梯（RULE.md）：vX.Y.Z-dev.N（开发）→ vX.Y.Z-beta.N（最终非功能性
+# 开发与修复）→ vX.Y.Z-alpha.N（收尾验证，几乎无问题）→ vX.Y.Z（正式版）。
+#
+# 自动发布：推 alpha 标签或正式版标签即构建并发布（正式版标 Latest，
+# alpha 发预发布）。dev 与 beta 标签推送只做构建验证、**不发 release**——
+# 需要发布时用 workflow_dispatch 手动选标签跑一次（P23）。
 on:
   push:
     tags:
       - "v*.*.*"
-  # 发布只由"推标签"驱动，不提供手动触发：手动 workflow_dispatch 会在
-  # Actions 历史里留下与真实发布无关的记录。（历史上曾用 dispatch 给老标签
-  # 补发预发布，现已取消；需要补发就重新推一个标签。）
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要构建并发布的标签（如 v1.6.0-beta.2）；留空 = 只验证当前分支构建"
+        required: false
+        default: ""
 permissions:
   contents: write
 
@@ -14,8 +23,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
+      # dispatch 未选标签时验证当前分支；选了标签就构建那个标签。
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      # 推标签事件：dev / beta 不自动发布（alpha 与正式版发布）。
+      AUTO_PUBLISH: ${{ github.event_name == 'push' && !contains(github.ref_name, '-dev') && !contains(github.ref_name, '-beta') }}
     steps:
+      - name: Skip auto publish for dev/beta tags
+        if: github.event_name == 'push' && !env.AUTO_PUBLISH
+        run: |
+          echo "标签 ${RELEASE_TAG} 属于 dev/beta 中间线：不自动发布。"
+          echo "需要发布时到 Actions → Release → Run workflow 手动填入该标签。"
+          exit 0
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -58,14 +77,12 @@ jobs:
             cp CHANGELOG.md /tmp/release_body.md
           fi
 
-      # Tags containing "-" (v1.5.0-beta.1, v0.1.2-rc1) publish as GitHub
-      # *pre-releases*: binaries are built and attached exactly like a clean
-      # tag, but the release is never marked Latest, so the stable line stays
-      # authoritative. Clean tags (v1.5.0) publish as a normal release and are
-      # explicitly marked Latest — GitHub otherwise badges whichever release
-      # was published *last*, which once put "Latest" on v1.0.1 even though
-      # v1.1.0 was newer.
+      # 含 "-" 的标签（alpha/beta/dev）发 GitHub *pre-release*：产物齐备但
+      # 不标 Latest，正式版线始终权威；干净标签（v1.6.0）发正式 release 并
+      # 显式标 Latest——GitHub 否则会把最近发布的 release 当 Latest。
       - name: Create GitHub Release
+        # dispatch 只有明确填了 tag 才发布（空 tag = 仅构建验证）。
+        if: env.AUTO_PUBLISH == 'true' || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
         uses: softprops/action-gh-release@v2
         with:
           # Required for workflow_dispatch: the action otherwise reads the tag
