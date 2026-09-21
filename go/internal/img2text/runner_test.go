@@ -669,11 +669,18 @@ func TestEmbedBlockFor(t *testing.T) {
 		{"missing prefix", "普通文本", "\n\n[Image]( 普通文本 )\n\n"},
 	}
 	// T16：带 alt 的引用单独走 embedBlockForRef。
-	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "![流程图](images/x/abc.jpg)"); got != "\n\n[Image]( 流程图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
+	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "![流程图](images/x/abc.jpg)", 0); got != "\n\n[Image]( 流程图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
 		t.Errorf("mermaid with alt: got %q", got)
 	}
-	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "<img src=\"images/x/abc.jpg\" alt=\"柱状图\">"); got != "\n\n[Image]( 柱状图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
+	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "<img src=\"images/x/abc.jpg\" alt=\"柱状图\">", 0); got != "\n\n[Image]( 柱状图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
 		t.Errorf("mermaid with html alt: got %q", got)
+	}
+	// P21：页码已知时 [Image] 锚附加 · P.N；text 直接嵌入的不加。
+	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "![流程图](images/x/abc.jpg)", 42); got != "\n\n[Image]( 流程图 · P.42 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
+		t.Errorf("mermaid with page: got %q", got)
+	}
+	if got := embedBlockForRef("[IMG_TYPE: text]\n正文。", "![x](images/x/a.jpg)", 7); got != "\n\n正文。\n\n" {
+		t.Errorf("text embed must not carry page: got %q", got)
 	}
 	for _, tc := range cases {
 		if got := embedBlockFor(tc.result); got != tc.want {

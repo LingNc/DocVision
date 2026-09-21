@@ -371,8 +371,18 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		sort.Slice(reps, func(i, j int) bool { return reps[i].off.Start > reps[j].off.Start })
 
 		nc := entry.content
+		shifts := make([]embedShift, 0, len(reps))
 		for _, r := range reps {
-			nc = nc[:r.off.Start] + embedBlockForRef(r.item.Result, entry.content[r.off.Start:r.off.End]) + nc[r.off.End:]
+			ref := entry.content[r.off.Start:r.off.End]
+			emb := embedBlockForRef(r.item.Result, ref, plan.pageAt(entry.starts, r.off.Start))
+			shifts = append(shifts, embedShift{start: r.off.Start, delta: len(emb) - len(ref)})
+			nc = nc[:r.off.Start] + emb + nc[r.off.End:]
+		}
+		// P21：embed 改写完成后做一遍行级页码标记插入（一次扫描在
+		// pagemark.go 内完成围栏顺延与去重；embed 的字节偏移用 delta 平移）。
+		nc, marks := plan.applyTo(nc, entry.lines, entry.starts, shifts)
+		if marks > 0 {
+			logger.Log(0, "  页码标记:", strconv.Itoa(marks), "处")
 		}
 		// Only write when the rebuilt content differs from what is already
 		// on disk. Files whose images were fully processed in earlier rounds

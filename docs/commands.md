@@ -40,6 +40,8 @@ AI 结果带 `[IMG_TYPE: <类型>]` 标签，写入 `finally/` 的 markdown 时�
 | mermaid | `[Image]( alt文本 )` 锚行（无 alt 则 `mermaid`）+ 代码块直接嵌入；模型漏写的结尾围栏嵌入前自动补齐（Mermaid 校验不通过会回炉修复，修复不了则按无效响应跳过、下轮重试） |
 | 其余视觉类型（截图/照片/复杂图等） | `[Image]( 可读描述 )` |
 
+**页码标记（P21）**：`mineru_output/` 里有该书的 MinerU 产物时，img2text 在改写完成的 markdown 里按原始内容分页插入独立行 `[P. <页码>]`（页码为跨部件的全局 1-based 页，与 latex 的 doc_search/view_pdf 同一套页码），方便后续 AI 向用户指明位置：文本行按规范化包含匹配对齐 `*_content_list.json` 的 text 条目，图片引用按文件名对齐 image 条目（`[Image]( 描述 · P.42 )` 锚也顺带带上页码）；页码发生**递增**时在新页第一行前插入标记，代码围栏内的插入点顺延到围栏结束后。未命中/继承的行不打断标记序列；找不到 mineru 产物（老数据）时静默跳过，不加任何标记。
+
 img2text 的图片描述**只出 Mermaid**（外加表格、正文、公式、代码块）：矢量图重画是 `docvision latex` 档位 1 作图会话的职责。若模型无视提示词仍返回 ```` ```latex ```` / ```` ```tikz ```` 绘图代码块，该响应按**无效响应**处理——跳过、下轮重试，日志里附截断后的模型原文与"期望格式"一行摘要。
 
 Mermaid 校验由 `tools.mermaid.*`（off/auto/strict、CLI 命令、就地修复轮数、超时）控制；`[IMG_TYPE:]` 标签本身仍保留在进度数据中用于统计与断点续传。**首次校验失败即升级**（T37，默认 `fix_attempts: -1`）：模型直接拿到一道**升级修复会话**（P12，`tools.mermaid.session_*`）——虚拟工作区里编辑 submit.md、submit 过 mmdc 检查，错误累计切备选模型，详见 docs/config.md。升级会话的转录落在 `<finally>/progress_items/mermaid_fix/<书>_<图>/`，`preview.img2text: true` 时按书分组、编号进会话预览的 **img2text 板块**（失败的工作区默认保留可见）；`preview.img2text_all`（默认 true）再为每张图的常规分析各记一份转录（`progress_items/sessions/<md>/`）。

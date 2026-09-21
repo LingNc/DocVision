@@ -1398,3 +1398,18 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ## 第五十六批补二（2026-09-20，加密思考摘要显示兼容）
 
 - gpt-5.6-luna 的 reasoning_content 只有 `**Planning TikZ creation**` 式加密摘要头，用户误以为思考块空。isEncryptedSummary 纯函数判定（≤200 字符、无空行多段落、**…** 段为主），思考块标题加 🔒「加密摘要」胶囊；Disclosure 加可选 encrypted prop，其余调用方零变化。子代理实施（vitest 97/97），父代理复验。
+
+## 第五十七批（2026-09-20，P21 页码标记 + P23 发布线改革 + dev 分支）
+
+### P21 img2text md 分页页码标记
+- 数据源查实：mineru_output 部件目录的 *_content_list.json 每条目带 page_idx（真数据是字符串形态），图片条目 img_path 可对齐 md 图片引用。
+- pagemark.go：锚点扫描（docPartDirs 同款逻辑本地复制，不 import latex）+ 行级对齐（图片行按文件名、文本行去空白互相包含；短锚只认全等；未命中继承上一页）+ 递增处插 `[P. N]` 独立行（围栏内顺延、同位置去重）+ 图片 embed 锚加 `· P.42`。
+- 真实数据冒烟（只读）：50 本书 25,621 处标记，非空行覆盖率 47.1%，每本标记数≈书页数（399 页书 370 处）；2 本无产物静默跳过。
+- 取舍：embed（字节替换）与标记（行级）分两遍、delta 平移 offset；幂等靠从原始 md 重建 + 字节一致跳过。
+
+### P23 发布线改革
+- dev 分支建立（本地领先 origin 的 5 提交即 T56~加密摘要全在 dev；本地 master 回对 origin=beta.8）。
+- release.yml：alpha/正式版标签自动发布；dev/beta 标签只构建验证；workflow_dispatch 手动选标签发布。
+- 远端：Release v1.5.0-beta.4 已删（标签保留）；现在 Release 只剩 v1.0.1/v1.1.0。
+- beta.5/beta.6 CI 失败根因：sessionview 的 chromium 渲染测试在 runner 挂死 10 分钟 → 加 2 分钟超时跳过护栏。
+- RULE.md 版本阶梯表 + AGENTS.md 发布线纪律同步；CHANGELOG 跨正式版汇总规则入 RULE。
