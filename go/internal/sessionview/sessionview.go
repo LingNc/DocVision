@@ -578,11 +578,20 @@ func LabelFor(rel string) string {
 		return "style"
 	case "chapters":
 		return "chapters"
+	// T62：装配期会话以前全落进「会话」桶、标题就是裸文件名（book_fix /
+	// final_review / stylefix_*），侧栏里是一排不知所谓的「会话」。书修复
+	// 与终审各成阶段；stylefix_* 与 style_fix_ 同属样式修复阶段。
+	case "book_fix":
+		return "fix:book_fix"
+	case "final_review":
+		return "final-review:final_review"
 	}
 	for _, p := range []struct{ prefix, label string }{
 		{"convert_", "convert"},
 		{"checker_", "checker"},
 		{"style_fix_", "style-fix"},
+		{"stylefix_", "style-fix"},
+		{"stylefix-", "style-fix"},
 		{"vector_", "vector"},
 		{"figure_check_", "figure-check"},
 	} {
@@ -620,6 +629,10 @@ func TitleFor(rel string) string {
 		return "样式修复 · " + subject
 	case "figure-check":
 		return "逐图校验 · " + subject
+	case "fix":
+		return "全书修复" // T62：装配失败修复会话（book_fix）
+	case "final-review":
+		return "终审" // T62：终审会话（final_review）
 	case "会话":
 		return subject
 	}

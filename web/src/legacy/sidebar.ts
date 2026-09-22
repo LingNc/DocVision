@@ -198,7 +198,7 @@ export function estOf(line: Line | null | undefined): { text: number; reasoning:
 
 /* ---------- 阶段分组与排序 ---------- */
 
-export const STAGE_ORDER = ['vector', 'style', 'chapters', 'convert', 'checker', 'style-fix', 'figure-check']
+export const STAGE_ORDER = ['vector', 'style', 'chapters', 'convert', 'checker', 'style-fix', 'figure-check', 'fix', 'final-review']
 
 export function stageRank(stage: string): number {
   const i = STAGE_ORDER.indexOf(stage)
@@ -209,6 +209,7 @@ export function stageTitleOf(stage: string): string {
   const map: Record<string, string> = {
     vector: '矢量图', style: '样式', chapters: '章节划分', convert: '章节转换',
     checker: '章节核对', 'style-fix': '样式修复', 'figure-check': '逐图校验',
+    fix: '全书修复', 'final-review': '终审',
   }
   return map[stage] || stage || '其他会话'
 }
@@ -238,6 +239,33 @@ export function stageStatusText(stages: any, stage: string, live?: number): Stag
   const done = /^(done|ok|true|finished|complete[d]?)$/i.test(text)
   if (done) return { text: '✓ 完成', state: 'done', title: 'progress.json: ' + key + ' = ' + text }
   return { text, state: 'busy', title: 'progress.json: ' + key + ' = ' + text }
+}
+
+/* ---------- T63：convert/checker 阶段聚合 ----------
+ * 逐章/逐章核对会话几十个，做完之后一行行列着全是噪音。聚合规则：
+ *  - 该阶段有 live 会话（正在跑）→ 只显示 live 行，并发一目了然；
+ *  - 全部结束 → 不显示会话行，只留阶段头的「N 章 · 完成 M」；
+ *  - 有错误收场的会话永远保留（错误不能藏）；
+ *  - 搜索过滤时不聚合（命中的历史会话要能点进去）。
+ * 返回 null = 该阶段不聚合（原样显示）。 */
+export interface StageAggregate {
+  total: number; done: number; live: number; err: number
+  rows: any[]            // 聚合后实际显示的会话行
+  head: string           // 阶段头文案（替代「N 个会话」）
+}
+export function stageChapterAggregate(stage: string, items: any[], filtered: boolean): StageAggregate | null {
+  if (stage !== 'convert' && stage !== 'checker') return null
+  if (filtered) return null
+  const total = (items || []).length
+  if (!total) return null
+  const live = items.filter((s) => s && s.live)
+  const done = items.filter((s) => s && s.endState === 'done').length
+  const errs = items.filter((s) => s && !s.live && s.endState === 'error')
+  const rows = live.length ? live : errs
+  const bits = [total + ' 章', '完成 ' + done]
+  if (live.length) bits.push('运行 ' + live.length)
+  if (errs.length) bits.push('错误 ' + errs.length)
+  return { total, done, live: live.length, err: errs.length, rows, head: bits.join(' · ') }
 }
 
 /* 书级进展：progress.json 原样列出各阶段状态（档位1/2 的键略有不同）。 */

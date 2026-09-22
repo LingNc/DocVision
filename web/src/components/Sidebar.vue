@@ -13,8 +13,8 @@ import {
   imageChipText, imageTipText, img2textMemberTag,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
-  stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens,
-  type SessionChain, type StageStatus,
+  stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens, stageChapterAggregate,
+  type SessionChain, type StageStatus, type StageAggregate,
 } from '../legacy/sidebar'
 import { selectSession, refreshIndex } from '../data'
 import InlineMD from './InlineMD.vue'
@@ -97,6 +97,8 @@ interface StageView {
   status: StageStatus | null
   overflowKey: string; needOverflow: boolean; shown: any[]
   hiddenCount: number
+  /* T63：convert/checker 聚合（null = 不聚合原样显示）。 */
+  agg: StageAggregate | null
 }
 interface GroupView {
   name: string; prefix: string; title: string; legacy: boolean
@@ -125,14 +127,18 @@ const groups = computed<GroupView[]>(() => {
         if (x.imageOrder && y.imageOrder && x.imageOrder !== y.imageOrder) return x.imageOrder - y.imageOrder
         return y.mtime > x.mtime ? 1 : -1
       })
+      // T63：convert/checker 聚合——跑动时只显 live 行，全完成只剩阶段头。
+      const agg = stageChapterAggregate(stg, items, !!state.filter)
+      const shown0 = agg ? agg.rows : items
       const okey = groupKey('overflow', g.name + '/' + stg)
-      const needOverflow = items.length > OVERFLOW_LIMIT
+      const needOverflow = !agg && shown0.length > OVERFLOW_LIMIT
       const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter
-      const shown = openAll ? items : items.slice(0, OVERFLOW_LIMIT)
+      const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT)
       return {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
-        overflowKey: okey, needOverflow, shown, hiddenCount: items.length - shown.length,
+        overflowKey: okey, needOverflow, shown, hiddenCount: shown0.length - shown.length,
+        agg,
       }
     })
     let chains: SessionChain[] | null = null
@@ -477,12 +483,12 @@ function onMoreClick(okey: string) {
                 <summary class="stage-row">
                   <span class="row-slot"><span class="row-caret"></span></span>
                   <span class="row-body">{{ sv.title }}</span>
-                  <span class="row-meta">{{ sv.items.length }} 个会话</span>
+                  <span class="row-meta">{{ sv.agg ? sv.agg.head : sv.items.length + ' 个会话' }}</span>
                   <span v-if="sv.status" class="stage-progress" :class="sv.status.state" :title="sv.status.title">{{ sv.status.text }}</span>
                 </summary>
                 <div v-if="blockView" class="session-blocks">
                   <button
-                    v-for="s in sv.items"
+                    v-for="s in (sv.agg ? sv.agg.rows : sv.items)"
                     :key="s.id"
                     class="session-block"
                     :class="{ active: state.current && state.current.id === s.id, live: s.live, err: !s.live && s.endState === 'error', pend: !s.live && !s.endState }"

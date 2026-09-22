@@ -186,11 +186,16 @@ func (t *SubmitBlocksTool) Execute(argsJSON string) (session.ToolResult, error) 
 
 // SubmitBlockFixTool 收分块修复会话的逐章结论。提交后代码把工作区里
 // 块内章节的 .tex 与 parts 目录拷回 work/chapters/。
+// T66：提交必须带 checked_problem_ids（工作区 list.md 里全部问题 id），
+// 少勾一个就打回——清单勾选由代码核对，不靠模型自觉。
 type SubmitBlockFixTool struct {
 	// ChapterResults: chapter base → 是否已解决（false=仍有问题）。
 	ChapterResults map[string]bool
 	Notes          map[string]string
+	CheckedIDs     []string // 提交时勾选的问题 id
 	Submitted      bool
+	// Assigned 是本块要修的问题 id（代码在会话启动前注入）。
+	Assigned []string
 }
 
 func (t *SubmitBlockFixTool) Name() string { return "submit" }
@@ -198,7 +203,7 @@ func (t *SubmitBlockFixTool) Name() string { return "submit" }
 func (t *SubmitBlockFixTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name": "submit",
-		"description": "Submit the fixed chapters of this block. chapters: [{chapter (base name, e.g. chapter_003), resolved (true/false), note}] — one entry per chapter in your block.",
+		"description": "Submit the fixed chapters of this block. chapters: [{chapter (base name, e.g. chapter_003), resolved (true/false), note}] — one entry per chapter in your block. checked_problem_ids must list EVERY problem id from your list.md (all of them, resolved or not) — a missing id REJECTS the submit.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -211,8 +216,9 @@ func (t *SubmitBlockFixTool) Definition() map[string]any {
 					},
 					"required": []string{"chapter", "resolved"},
 				}},
+				"checked_problem_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			},
-			"required": []string{"chapters"},
+			"required": []string{"chapters", "checked_problem_ids"},
 		},
 	}}
 }
@@ -225,6 +231,25 @@ func (t *SubmitBlockFixTool) Execute(argsJSON string) (session.ToolResult, error
 	items, ok := args["chapters"].([]interface{})
 	if !ok || len(items) == 0 {
 		return session.ToolResult{Text: "REJECTED: chapters must be a non-empty array."}, nil
+	}
+	// T66：勾选核对——本块清单里的每个问题都必须出现在 checked_problem_ids。
+	checked := map[string]bool{}
+	if ids, ok := args["checked_problem_ids"].([]interface{}); ok {
+		for _, v := range ids {
+			if s, ok := v.(string); ok {
+				checked[s] = true
+			}
+		}
+	}
+	var missing []string
+	for _, id := range t.Assigned {
+		if !checked[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		return session.ToolResult{Text: "REJECTED: list.md 中这些问题未勾选: " + strings.Join(missing, ", ") +
+			" — 把每个问题修完并在 list.md 里勾成 [x]，再把全部 id 放进 checked_problem_ids 重新提交。"}, nil
 	}
 	t.ChapterResults, t.Notes = map[string]bool{}, map[string]string{}
 	for _, it := range items {
@@ -240,8 +265,18 @@ func (t *SubmitBlockFixTool) Execute(argsJSON string) (session.ToolResult, error
 	if len(t.ChapterResults) == 0 {
 		return session.ToolResult{Text: "REJECTED: no valid chapter entries."}, nil
 	}
+	t.CheckedIDs = keysOf(checked)
 	t.Submitted = true
 	return session.ToolResult{Text: "SUBMITTED. Reply with a one-line confirmation and nothing else."}, nil
+}
+
+func keysOf(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // collectIssueReports 汇总工作汇报，返回 (报告总数, 有问题的报告 base→内容)。
@@ -317,22 +352,41 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 }
 
 // styleFixIntegrate 跑问题整合会话。
+// T64：会话有一个虚拟工作区 work/stylefix_integrate/——各章工作汇报按
+// reports/<章>.md 落盘，配 read/grep/write/edit 文件工具，模型自己翻、
+// 自己整理，不再靠一条巨型 user 消息灌全文。
+// T67：整合完成后由代码生成未打钩的 list.md（清单勾选的起点）。
 func (r *Runner) styleFixIntegrate(proj string, issues map[string]string) ([]StyleProblem, error) {
-	var b strings.Builder
+	// 虚拟工作区：汇报原文落盘（持久目录，跨轮可查）。
+	wsDir := filepath.Join(proj, "work", "stylefix_integrate")
+	reportsDir := filepath.Join(wsDir, "reports")
+	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
+		return nil, err
+	}
 	keys := make([]string, 0, len(issues))
 	for k := range issues {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		b.WriteString("\n--- " + k + " ---\n")
-		b.WriteString(issues[k])
-		b.WriteString("\n")
+		_ = os.WriteFile(filepath.Join(reportsDir, k+".md"), []byte(issues[k]), 0o644)
 	}
 
 	submit := &SubmitProblemsTool{}
-	tools := []session.Tool{submit}
-	sess := session.NewSession(r.clientFor(r.cfg.Latex.StyleModel), r.modelOf(r.cfg.Latex.StyleModel),
+	mounts := []Mount{{Name: "work", Dir: wsDir}}
+	tools := []session.Tool{
+		&ReadFileTool{Mounts: mounts},
+		&GrepTool{Mounts: mounts},
+		&WriteWorkFileTool{Root: wsDir, AnyExt: true},
+		&EditWorkFileTool{Root: wsDir},
+		submit,
+	}
+	// T65：integrate_model 单独配模型；空则沿用 style 模型。
+	modelKey := r.cfg.Latex.StyleFix.IntegrateModel
+	if modelKey == "" {
+		modelKey = r.cfg.Latex.StyleModel
+	}
+	sess := session.NewSession(r.clientFor(modelKey), r.modelOf(modelKey),
 		r.cfg.LatexSession("style"), renderPrompt(prompts.Must(prompts.StyleFixIntegrateSystem), r.cfg.LatexSession("style"), r.outputLang()),
 		tools, r.log, 1, "stylefix-integrate")
 	trPath := filepath.Join(proj, "work", "sessions", "stylefix_integrate.jsonl")
@@ -344,8 +398,9 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string) ([]Sty
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 
-	userText := "These are the work reports from the chapter conversion sessions that flagged style/manual problems:\n" + b.String() +
-		"\nConsolidate them into a de-duplicated problem list and call submit_problems."
+	userText := fmt.Sprintf("The work reports from the chapter conversion sessions that flagged style/manual problems are in your workspace at work:reports/<chapter>.md (%d files). "+
+		"Read/grep them, consolidate into a de-duplicated problem list, and call submit_problems. "+
+		"You may keep your own working notes in the workspace (e.g. problems.md).", len(keys))
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}
@@ -353,7 +408,21 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string) ([]Sty
 		return nil, fmt.Errorf("整合会话未提交 submit_problems")
 	}
 	r.keepSessionFile(trPath)
+	// T67：生成未打钩清单（分块会话的 list.md 由它派生）。
+	if err := os.WriteFile(filepath.Join(wsDir, "list.md"), []byte(renderProblemListMD(submit.Problems)), 0o644); err != nil {
+		r.log.LogWarning(1, "[style-fix] list.md 写入失败:", err)
+	}
 	return submit.Problems, nil
+}
+
+// renderProblemListMD 生成未打钩的 Markdown 清单（T67）。
+func renderProblemListMD(problems []StyleProblem) string {
+	var b strings.Builder
+	b.WriteString("# 本轮样式问题清单（未打钩）\n\n")
+	for _, p := range problems {
+		fmt.Fprintf(&b, "- [ ] %s %s — %s\n", p.ID, p.Title, p.Detail)
+	}
+	return b.String()
 }
 
 // styleFixStyleSession 跑一轮风格修复会话（复用原样式会话上下文）。
@@ -371,7 +440,7 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	tuning := r.cfg.LatexSession("style")
 
 	submit := &SubmitStyleTool{Workspace: workDir}
-	tag := fmt.Sprintf("style-fix-style-r%d", round)
+	tag := fmt.Sprintf("stylefix-style-r%d", round)
 	bashTmp, cleanBash := r.sessionBashTemp(proj, "bash_stylefix")
 	defer cleanBash()
 	tools := r.styleSessionTools(proj, workDir, filepath.Join(proj, "source"), tag, bashTmp, submit)
@@ -628,14 +697,21 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 		_ = os.WriteFile(filepath.Join(work, base+"_wrapper.tex"), []byte(wrapper), 0o644)
 	}
 
+	// T66：本块的未打钩清单——提交时 checked_problem_ids 必须全覆盖。
+	listMD := "# 本块修复清单（修复完把 [ ] 勾成 [x]）\n\n" +
+		"# List of problems for THIS block — tick every line off as you resolve it\n\n" + probText
+	_ = os.WriteFile(filepath.Join(work, "list.md"), []byte(listMD), 0o644)
+
 	mounts := []Mount{{Name: "work", Dir: work}}
-	submit := &SubmitBlockFixTool{}
+	submit := &SubmitBlockFixTool{Assigned: block.ProblemIDs}
 	tools := []session.Tool{
 		&ReadFileTool{Mounts: mounts},
 		&EditWorkFileTool{Root: work},
 		&WriteWorkFileTool{Root: work, AnyExt: true},
 		&GrepTool{Mounts: mounts},
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
+		// T68：分块修复会话也要能看编译出的 PDF（真实运行中曾想看不能看）。
+		&ViewPDFTool{Mounts: mounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&CompileTexTool{Comp: r.comp, Root: work, Log: r.log, Tid: tid, Tag: tag},
 		submit,
 	}
@@ -654,7 +730,8 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	userText := "Style problems to fix in this block:\n" + probText +
 		"\nYour chapters (in work:chapters/): " + strings.Join(block.Chapters, ", ") +
 		"\nThe class and manual in your workspace are the REVISED versions. Make minimal, targeted edits — never re-convert. " +
-		"Compile each chapter's wrapper (<base>_wrapper.tex) to verify, then submit with one entry per chapter."
+		"Compile each chapter's wrapper (<base>_wrapper.tex) to verify (view_pdf the result if in doubt), " +
+		"tick every problem off in work:list.md, then submit with one entry per chapter AND checked_problem_ids covering every id in list.md."
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, nil, err
 	}

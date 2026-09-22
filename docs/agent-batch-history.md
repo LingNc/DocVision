@@ -1433,3 +1433,13 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - MD_INLINE 增加 `\(…\)`（行内，组 12）与 `\[…\]`（显示，组 13）；collectMathBlock/mdBlockStart 认 `\[` 块（单行/多行/未闭合同 $$ 三形态；裸 `$$$$` 与 `\[\]` 退 null 语义保持）。
 - 真实数据：某书.md 有 `\(kA\)` 等 2 处此类形式。
 - 测试：markdown.spec +6、encrypted-summary.spec +3，全仓 vitest 106 绿；npm build + go build（embed）过。
+
+## 第五十九批（2026-09-22，T62~T68）
+
+- **T62**：book_fix/final_review/stylefix_*（含 stylefix- 连字符变体）在 LabelFor 全落「会话」桶、标题是裸文件名。补映射：book_fix→fix 阶段「全书修复」、final_review→final-review「终审」、stylefix_*→style-fix「样式修复 · …」；web STAGE_ORDER/stageTitleOf 同步。
+- **T63**：convert/checker 阶段聚合（stageChapterAggregate）——跑动只列 live 行（并发可见）、全完成收行、阶段头「N 章 · 完成 M · 运行 K · 错误 E」、错误会话保留、搜索不聚合；块视图同规则。
+- **T64/T67**：整合会话虚拟工作区 `work/stylefix_integrate/`（reports/<章>.md 落盘 + read/grep/write/edit），整合后代码生成未打钩 list.md；style 会话 tag 统一 stylefix-style-rN。
+- **T65**：`latex.style_fix.integrate_model`（空=沿用 style 模型）；config 两模板 + docs/config.md 同步（键在既有块内，无版本 bump）。
+- **T66**：块工作区放未打钩 list.md；SubmitBlockFixTool 增加 checked_problem_ids 必填、代码核对全覆盖，缺勾 REJECTED（3 条测试钉住）。
+- **T68**：分块修复会话补 ViewPDFTool（book_fix/终审/单章修复原本就有）。
+- 验证：go build + config/latex/sessionview 测试全绿；vitest 112 绿（+6）；npm build 过。

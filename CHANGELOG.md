@@ -18,6 +18,11 @@
 ### Added
 
 - **img2text 页码标记（P21）**：`mineru_output/` 有该书 MinerU 产物时，最终 markdown 按原始内容分页插入独立行 `[P. <页码>]`（跨部件全局 1-based 页码，与 latex doc_search/view_pdf 同一套），方便后续 AI 向用户指明位置——文本行规范化包含匹配 content_list 的 text 条目、图片引用按文件名对齐 image 条目（`[Image]( 描述 · P.42 )` 锚顺带带页码）；页码递增时在新页首行前插标记，围栏内顺延到围栏后，找不到 mineru 产物静默跳过。不加新配置项。
+- **章节/核对会话聚合显示（T62/T63）**：装配期会话（book_fix/final_review/stylefix_*）各归其阶段、不再落「会话」桶；章节转换/章节核对阶段聚合显示——跑动时只列正在运行的会话（并发一目了然），全完成收起会话行、阶段头直接给「N 章 · 完成 M · 运行 K」，错误会话始终保留，搜索时不过聚合。
+- **stylefix-integrate 工作区化（T64/T67）**：整合会话配虚拟工作区（各章汇报按 `reports/<章>.md` 落盘 + read/grep/write/edit），代码在整合后生成未打钩 `list.md`；style 修复会话标签统一为 `stylefix-style-rN`。
+- **修复清单勾选核对（T66）**：分块修复会话工作区放未打钩 `list.md`，提交必须带 `checked_problem_ids` 覆盖全部问题 id，缺一个即打回。
+- **integrate 独立模型（T65）**：新配置 `latex.style_fix.integrate_model`（空 = 沿用 style 模型）。
+- **分块修复会话补 view_pdf（T68）**：修复中可直接查看编译出的 PDF。
 - **思考块 Markdown 渲染（T60）**：思考/加密摘要展开正文改走 Markdown 渲染（加密摘要的每条 `**内容**` 各自成行）；折叠态标题剥掉裸露的 `**` 星号。
 - **LaTeX 括号形式公式（T61）**：行内 `\(…\)` 与显示 `\[…\]` 此前原样显示，现与 `$…$` / `$$…$$` 同等渲染为 MathML。
 - **发布线改革（P23）**：新版本阶梯 dev.N → beta.N → alpha.N → 正式版在 dev 分支推进；仅 alpha 与正式版标签自动构建发布，dev/beta 只做构建验证、需要时手动触发；master 只收正式版。v1.5.0-beta.4 的 GitHub Release 已按此清理。

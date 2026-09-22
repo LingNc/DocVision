@@ -275,6 +275,9 @@ type LatexConfig struct {
 	StyleFix struct {
 		// MaxRounds 风格修复循环上限（默认 3；负数=关闭）。
 		MaxRounds int `yaml:"max_rounds"`
+		// IntegrateModel 问题整合会话（stylefix-integrate）单独用的模型；
+		// 空 = 沿用 style 模型（T65）。
+		IntegrateModel string `yaml:"integrate_model"`
 	} `yaml:"style_fix"`
 
 	// ChapterGranularity controls the level-1 chapter split: "large"
