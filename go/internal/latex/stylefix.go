@@ -1,6 +1,7 @@
 package latex
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -117,9 +118,13 @@ func (t *SubmitProblemsTool) Execute(argsJSON string) (session.ToolResult, error
 }
 
 // SubmitBlocksTool 收评估会话的修复块划分。
+// 与整合会话同一套提交方式：会话在自己的虚拟工作区里 write/edit
+// blocks.json（可多次编辑、随时查看），最后 submit_blocks 不带参数——
+// 工具从工作区读 blocks.json（结构内联传参也兼容，二选一）。
 type SubmitBlocksTool struct {
-	Blocks []StyleBlock
-	Set    bool
+	Blocks    []StyleBlock
+	Set       bool
+	Workspace string // 虚拟工作区根（blocks.json 所在目录）；空 = 必须内联传参
 }
 
 func (t *SubmitBlocksTool) Name() string { return "submit_blocks" }
@@ -127,7 +132,7 @@ func (t *SubmitBlocksTool) Name() string { return "submit_blocks" }
 func (t *SubmitBlocksTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name": "submit_blocks",
-		"description": "Submit the chapter fix blocks. Each block: {title, problem_ids, chapters} — group chapters that share the same problems into ONE block; every affected chapter must appear in exactly one block.",
+		"description": "Submit the chapter fix blocks. Write/edit them in work:blocks.json first ({\"blocks\": [{title, problem_ids, chapters}...]}) — group chapters that share the same problems into ONE block; every affected chapter must appear in exactly one block), then call this with NO arguments to submit from the file. Passing the same structure inline also works.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -141,7 +146,6 @@ func (t *SubmitBlocksTool) Definition() map[string]any {
 					"required": []string{"title", "problem_ids", "chapters"},
 				}},
 			},
-			"required": []string{"blocks"},
 		},
 	}}
 }
@@ -152,6 +156,18 @@ func (t *SubmitBlocksTool) Execute(argsJSON string) (session.ToolResult, error) 
 		return session.ToolResult{}, err
 	}
 	items, ok := args["blocks"].([]interface{})
+	if (!ok || len(items) == 0) && t.Workspace != "" {
+		// 无内联参数：从工作区 blocks.json 读（会话可反复编辑后再提交）。
+		if data, rerr := os.ReadFile(filepath.Join(t.Workspace, "blocks.json")); rerr == nil {
+			fileArgs, perr := parseJSONObject(string(data))
+			if perr != nil {
+				return session.ToolResult{Text: "REJECTED: work:blocks.json 不是合法 JSON 对象: " + perr.Error() + " — 修正后重新提交。"}, nil
+			}
+			items, ok = fileArgs["blocks"].([]interface{})
+		} else {
+			return session.ToolResult{Text: "REJECTED: 未传 blocks 且工作区没有 blocks.json — 先 write_file blocks.json（或内联传参）再提交。"}, nil
+		}
+	}
 	if !ok || len(items) == 0 {
 		return session.ToolResult{Text: "REJECTED: blocks must be a non-empty array."}, nil
 	}
@@ -435,8 +451,13 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	styleDir := filepath.Join(proj, "style")
 	workDir := filepath.Join(proj, "work", "style")
 
-	client := r.clientFor(r.cfg.Latex.StyleModel)
-	modelCfg := r.modelOf(r.cfg.Latex.StyleModel)
+	// T70：stylefix_style_model 独立配模型；空 = 沿用 style 模型。
+	styleKey := r.cfg.Latex.StyleFix.StyleFixStyleModel
+	if styleKey == "" {
+		styleKey = r.cfg.Latex.StyleModel
+	}
+	client := r.clientFor(styleKey)
+	modelCfg := r.modelOf(styleKey)
 	tuning := r.cfg.LatexSession("style")
 
 	submit := &SubmitStyleTool{Workspace: workDir}
@@ -525,15 +546,28 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	}
 	sort.Strings(issueList)
 
-	submit := &SubmitBlocksTool{}
-	mounts := []Mount{{Name: "project", Dir: proj}}
+	// T64 同款：评估/分组会话有自己的虚拟工作区——blocks.json 由会话
+	// write/edit（可多次修改、随时查看），submit_blocks 从文件读。
+	wsDir := filepath.Join(proj, "work", "stylefix_assess")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		return nil, err
+	}
+	submit := &SubmitBlocksTool{Workspace: wsDir}
+	mounts := []Mount{{Name: "project", Dir: proj}, {Name: "work", Dir: wsDir}}
 	tools := []session.Tool{
 		&ReadFileTool{Mounts: mounts},
 		&GrepTool{Mounts: mounts},
+		&WriteWorkFileTool{Root: wsDir, AnyExt: true},
+		&EditWorkFileTool{Root: wsDir},
 		submit,
 	}
 	tag := fmt.Sprintf("stylefix-assess-r%d", round)
-	sess := session.NewSession(r.clientFor(r.cfg.Latex.StyleModel), r.modelOf(r.cfg.Latex.StyleModel),
+	// T70：stylefix_assess_model 独立配模型；空 = 沿用 style 模型。
+	assessKey := r.cfg.Latex.StyleFix.StyleFixAssessModel
+	if assessKey == "" {
+		assessKey = r.cfg.Latex.StyleModel
+	}
+	sess := session.NewSession(r.clientFor(assessKey), r.modelOf(assessKey),
 		r.cfg.LatexSession("style"), renderPrompt(prompts.Must(prompts.StyleFixAssessSystem), r.cfg.LatexSession("style"), r.outputLang()),
 		tools, r.log, 1, tag)
 	trPath := filepath.Join(proj, "work", "sessions", fmt.Sprintf("stylefix_assess_r%d.jsonl", round))
@@ -548,7 +582,7 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	userText := "Problem list:\n" + plist.String() +
 		"\nChapters that explicitly reported problems: " + strings.Join(issueList, ", ") +
 		"\nAll converted chapters: " + strings.Join(chapterNames, ", ") +
-		"\nTheir .tex files are readable at project:work/chapters/<name>.tex. Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks and call submit_blocks."
+		"\nTheir .tex files are readable at project:work/chapters/<name>.tex. Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks: write/edit work:blocks.json (you may revise it as many times as you like), then call submit_blocks with NO arguments to submit from the file."
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}
@@ -556,6 +590,10 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 		return nil, fmt.Errorf("评估会话未提交 submit_blocks")
 	}
 	r.keepSessionFile(trPath)
+	// blocks.json 最终版回存工作区（会话编辑的最终态，跨轮可查）。
+	if data, err := json.Marshal(map[string]any{"blocks": submit.Blocks}); err == nil {
+		_ = os.WriteFile(filepath.Join(wsDir, "blocks.json"), data, 0o644)
+	}
 	return submit.Blocks, nil
 }
 
@@ -715,7 +753,12 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 		&CompileTexTool{Comp: r.comp, Root: work, Log: r.log, Tid: tid, Tag: tag},
 		submit,
 	}
-	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.modelOf(r.cfg.Latex.ConvertModel),
+	// T70：stylefix_block_model 独立配模型；空 = 沿用 convert 模型。
+	blockKey := r.cfg.Latex.StyleFix.StyleFixBlockModel
+	if blockKey == "" {
+		blockKey = r.cfg.Latex.ConvertModel
+	}
+	sess := session.NewSession(r.clientFor(blockKey), r.modelOf(blockKey),
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.StyleFixBlockSystem), r.cfg.LatexSession("convert"), r.outputLang()),
 		tools, r.log, tid, tag)
 	trPath := filepath.Join(proj, "work", "sessions", tag+".jsonl")

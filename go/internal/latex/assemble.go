@@ -216,8 +216,13 @@ func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool
 // project (multi-file, resources) and verify the PDF itself.
 func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 	r.log.LogWarning(0, "[assemble] 全书编译失败，启动修复会话:", firstErr)
-	client := r.clientFor(r.cfg.Latex.ConvertModel)
-	modelCfg := r.modelOf(r.cfg.Latex.ConvertModel)
+	// T70：bookfix_model 独立配模型；空 = 沿用 convert 模型。
+	fixKey := r.cfg.Latex.StyleFix.BookFixModel
+	if fixKey == "" {
+		fixKey = r.cfg.Latex.ConvertModel
+	}
+	client := r.clientFor(fixKey)
+	modelCfg := r.modelOf(fixKey)
 	tuning := r.cfg.LatexSession("convert")
 	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "book", Log: r.log, Tid: 1}
 	submit := &SubmitDoneTool{Label: "the build fix"}
@@ -275,7 +280,12 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 	r.log.Log(0, "[final-review] 启动终审会话（上限", strconv.Itoa(rounds), "轮）")
 	compile := &CompileTexTool{Comp: r.comp, Root: buildDir, MainFile: "main.tex", Tag: "final-review", Log: r.log, Tid: 1}
 	submit := &SubmitDoneTool{Label: "the final review"}
-	sess := session.NewSession(r.clientFor(r.cfg.Latex.ConvertModel), r.modelOf(r.cfg.Latex.ConvertModel),
+	// T70：final_review_model 独立配模型；空 = 沿用 convert 模型。
+	frKey := r.cfg.Latex.StyleFix.FinalReviewModel
+	if frKey == "" {
+		frKey = r.cfg.Latex.ConvertModel
+	}
+	sess := session.NewSession(r.clientFor(frKey), r.modelOf(frKey),
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.FinalReviewSystem), r.cfg.LatexSession("convert"), r.outputLang()),
 		r.bookSessionTools(proj, buildDir, compile, submit), r.log, 1, "final-review")
 	// 转录挂到 work/sessions/final_review.jsonl（T39）：终审会话在 WebUI

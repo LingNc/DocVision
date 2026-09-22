@@ -76,7 +76,12 @@ latex:
   chapter_granularity: "medium"  # 档位1 章节拆分粒度：large=大章整体 / medium=按本书自动给出最合理拆分（默认，不拆太细也不太大块）/ small=按小节拆分
   style_fix:                      # 档位1 风格修复大循环（T43）：任何章节汇报手册/样式问题即进入
     max_rounds: 3                 # 整合→风格修复→影响评估→分块修复 循环上限（默认 3；负数=关闭）
-    integrate_model: ""           # 问题整合会话（stylefix-integrate）单独用的模型 （空=沿用 style 模型，T65）
+    integrate_model: "integrate"  # 问题整合会话（stylefix-integrate）单独用的模型（T65；models.integrate 默认 extends style）
+    stylefix_style_model: "stylefix-style"    # 风格修复会话独立模型（T70；默认沿用 style）
+    stylefix_assess_model: "stylefix-assess"  # 影响评估/分组会话独立模型（T70；默认沿用 style）
+    stylefix_block_model: "stylefix-block"    # 分块修复会话独立模型（T70；默认沿用 convert）
+    bookfix_model: "bookfix"                  # 构建修复会话（book_fix）独立模型（T70；默认沿用 convert）
+    final_review_model: "final-review"        # 终审会话独立模型（T70；默认沿用 convert）
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: false # 保留会话转录 JSONL（成功会话默认清理）；debug 日志下必定保留
@@ -271,3 +276,16 @@ models:
     model: "Qwen/Qwen3.6-27B"
   verifier:
     model: "glm-5.3-flash"       # AI 校验模型（需视觉能力）
+  # ---- T70：修复链各会话独立条目——默认全部 extends 原角色 = 行为不变 ----
+  integrate:                     # 问题整合会话（stylefix-integrate）
+    extends: "style"
+  stylefix-style:                # 风格修复会话（stylefix_style_rN）
+    extends: "style"
+  stylefix-assess:               # 影响评估/分组会话（stylefix_assess_rN）
+    extends: "style"
+  stylefix-block:                # 分块修复会话（stylefix-blk-rN-i）
+    extends: "convert"
+  bookfix:                       # 构建修复会话（book_fix）
+    extends: "convert"
+  final-review:                  # 终审会话（final_review）
+    extends: "convert"

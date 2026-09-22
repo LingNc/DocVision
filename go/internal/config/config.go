@@ -278,6 +278,13 @@ type LatexConfig struct {
 		// IntegrateModel 问题整合会话（stylefix-integrate）单独用的模型；
 		// 空 = 沿用 style 模型（T65）。
 		IntegrateModel string `yaml:"integrate_model"`
+		// T70：修复链各会话独立模型键（models: 注册对应条目，模板默认
+		// extends 自原角色条目 = 行为不变）。空 = 回退到原角色模型。
+		StyleFixStyleModel  string `yaml:"stylefix_style_model"`
+		StyleFixAssessModel string `yaml:"stylefix_assess_model"`
+		StyleFixBlockModel  string `yaml:"stylefix_block_model"`
+		BookFixModel        string `yaml:"bookfix_model"`
+		FinalReviewModel    string `yaml:"final_review_model"`
 	} `yaml:"style_fix"`
 
 	// ChapterGranularity controls the level-1 chapter split: "large"

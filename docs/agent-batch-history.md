@@ -1448,3 +1448,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - `img2text.page_marks`（默认 true，P21 行为不变）+ `img2text.page_marks_rewrite`（默认 false）。
 - runner Final pass：rewrite=false 时已交付的 finally 文件按**原有风格**处理——原来没页码的（hasPageMarks 判定）plan 置 nil 不回注，增量更新照写；删掉 finally 结果重跑才按 page_marks 开关注入。
 - 两键 *bool 形态（与 img2text_all 同款），nil = 默认；测试 hasPageMarks（独立行语义）+ 默认值语义。
+
+### T70 修复链会话独立模型 + 评估会话 blocks.json 可编辑提交
+- 五个模型键进 `latex.style_fix` 块（stylefix_style/assess/block、bookfix、final_review），空 = 回退原角色模型（style/convert）；`integrate_model` 模板默认 `""` → `"integrate"`。
+- models 注册表新增 6 条目（integrate/stylefix-style/stylefix-assess/stylefix-block/bookfix/final-review），全部 `extends` 自原角色 = 行为不变；模板插入时曾把 verifier 的 image_tokens 挤进 final-review（TestTemplatesResolveImageEstimatePerRole 抓住），已复位。
+- **真实缺陷（extendAll pass 上限收缩饥饿）**：`mergeModelExtends` 循环上限写 `pass <= len(extendsOf)`，len 随每轮 resolve 收缩——字母序排最前的 bookfix 每轮都赶在父条目 convert 解析前被检查，最后一轮被砍 → 误报「循环继承（bookfix → convert）」。复现链：bookfix → convert → heavy → text（bookfix 字母序在 convert 前，且前面还有 gateway/style 撑高初始计数）。修：上限循环前取定 `totalExtends`；回归测试钉住（误报 + 真环仍报出）。
+- 评估/分组会话（stylefix_assess_rN）获得虚拟工作区 `work/stylefix_assess/`：blocks.json 由会话 write/edit、`submit_blocks` 无参从文件读（内联仍兼容）；Workspace 为空时必须内联。blocks.json 最终态回存工作区。测试：TestSubmitBlocksFromWorkspace（文件读/空工作区拒/坏 JSON 拒）。

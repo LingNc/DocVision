@@ -82,7 +82,11 @@ func mergeModelExtends(root *yaml.Node) error {
 	// A child can only be merged once its parent is already a complete map, so
 	// run passes until nothing changes. Names are visited in sorted order to
 	// keep the result independent of map iteration order.
-	for pass := 0; pass <= len(extendsOf); pass++ {
+	// pass 上限必须在循环前取定：len(extendsOf) 随每轮 resolve 收缩，会让
+	// 字母序排在前面的条目（每轮都赶在父条目之前被检查）在最后一轮被砍掉，
+	// 被误报成循环继承（实测 bookfix → convert）。
+	totalExtends := len(extendsOf)
+	for pass := 0; pass <= totalExtends; pass++ {
 		progress := false
 		names := make([]string, 0, len(extendsOf))
 		for name := range extendsOf {
