@@ -8,7 +8,7 @@
  */
 
 export const MD_INLINE =
-  /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/
+  /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$|\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/
 
 /* 链接协议白名单：javascript: 之类一律拒绝（返回空 = 只显示文字）。 */
 export function mdSafeURL(url: unknown): string {
@@ -57,11 +57,15 @@ export function mdInline(parent: Node, text: unknown, depth = 0): void {
         node.title = '链接协议不受支持，只显示文字'
       }
       mdInline(node, m[3], depth + 1)
-    } else if (m[10] !== undefined || m[11] !== undefined) {
-      // 数学：$$…$$ 独立显示、$…$ 行内。转换器万一抛错，就地退回原始 $…$ 文本
-      // ——一条坏公式不许打断整页渲染。
+    } else if (m[10] !== undefined || m[11] !== undefined ||
+               m[12] !== undefined || m[13] !== undefined) {
+      // 数学：$$…$$ 与 \[…\] 独立显示、$…$ 与 \(…\) 行内（T61：LaTeX 括号
+      // 形式 \(\Omega\) 曾原样显示）。转换器万一抛错，就地退回原始文本——
+      // 一条坏公式不许打断整页渲染。
+      const dispSrc = m[10] !== undefined ? m[10] : m[13]
+      const inlineSrc = m[11] !== undefined ? m[11] : m[12]
       try {
-        node = mdMathML(m[10] !== undefined ? m[10] : m[11], m[10] !== undefined) as HTMLElement
+        node = mdMathML(dispSrc !== undefined ? dispSrc : inlineSrc, dispSrc !== undefined) as HTMLElement
       } catch {
         node = el('span')
         node.appendChild(document.createTextNode(m[0]))

@@ -7891,7 +7891,7 @@
     const t = String(line || "").trim();
     if (!t) return true;
     if (mdFence(t) || MD_HEADING.test(t) || MD_HR.test(t)) return true;
-    if (t.startsWith("$$")) return true;
+    if (t.startsWith("$$") || t.startsWith("\\[")) return true;
     if (/^\s{0,3}>/.test(String(line)) || mdListMarker(String(line))) return true;
     return t.indexOf("|") >= 0 && !!next && mdSeparatorRow(next) && mdSplitRow(t).length > 1;
   }
@@ -8580,8 +8580,11 @@
   }
   function collectMathBlock(lines, i) {
     const first = String(lines[i] || "").trim();
-    if (!first.startsWith("$$")) return null;
-    if (first.length > 3 && first.endsWith("$$")) {
+    if (!first.startsWith("$$") && !first.startsWith("\\[")) return null;
+    const bracket = first.startsWith("\\[");
+    const minLen = bracket ? 4 : 3;
+    const closeMark = bracket ? "\\]" : "$$";
+    if (first.length > minLen && first.endsWith(closeMark)) {
       const src = first.slice(2, -2);
       return src.trim() ? { src, next: i + 1 } : null;
     }
@@ -8589,7 +8592,7 @@
     let j = i + 1;
     while (j < lines.length) {
       const l = lines[j];
-      const k = l.indexOf("$$");
+      const k = l.indexOf(closeMark);
       if (k >= 0) {
         buf.push(l.slice(0, k));
         return { src: buf.join("\n"), next: j + 1 };
@@ -8732,7 +8735,7 @@
     }
     return frag;
   }
-  const MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/;
+  const MD_INLINE = /(`+)([^`]*?)\1|\[([^\]]*)\]\(([^)\s]*)\)|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*\n]+)\*|_([^_\n]+)_|\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$|\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/;
   function mdSafeURL(url) {
     const s = String(url === void 0 || url === null ? "" : url).trim();
     if (!s) return "";
@@ -8772,9 +8775,11 @@
           node.title = "链接协议不受支持，只显示文字";
         }
         mdInline(node, m[3], depth + 1);
-      } else if (m[10] !== void 0 || m[11] !== void 0) {
+      } else if (m[10] !== void 0 || m[11] !== void 0 || m[12] !== void 0 || m[13] !== void 0) {
+        const dispSrc = m[10] !== void 0 ? m[10] : m[13];
+        const inlineSrc = m[11] !== void 0 ? m[11] : m[12];
         try {
-          node = mdMathML(m[10] !== void 0 ? m[10] : m[11], m[10] !== void 0);
+          node = mdMathML(dispSrc !== void 0 ? dispSrc : inlineSrc, dispSrc !== void 0);
         } catch {
           node = el("span");
           node.appendChild(document.createTextNode(m[0]));
@@ -8844,7 +8849,7 @@
   const _hoisted_5$9 = ["aria-pressed"];
   const _hoisted_6$8 = ["aria-pressed"];
   const _hoisted_7$7 = { class: "side-search" };
-  const _hoisted_8$5 = { class: "side-list-wrap" };
+  const _hoisted_8$4 = { class: "side-list-wrap" };
   const _hoisted_9$4 = {
     key: 0,
     class: "i2t-overview",
@@ -9232,7 +9237,7 @@
               [vModelText, unref(state).filter]
             ])
           ]),
-          createBaseVNode("div", _hoisted_8$5, [
+          createBaseVNode("div", _hoisted_8$4, [
             createBaseVNode("div", {
               id: "session-list",
               ref_key: "listEl",
@@ -9965,6 +9970,10 @@
     const rest = t.replace(/\*\*[^*\n]+\*\*/g, "").trim();
     return rest.length <= 20;
   }
+  function encryptedHeadline(text) {
+    const line = String(text || "").split("\n").map((l) => l.trim()).find((l) => l) || "";
+    return line.replace(/\*\*/g, "").trim();
+  }
   function parseLegacyImageParts(text) {
     const s = String(text || "").trim();
     if (!s.startsWith("[{")) return null;
@@ -10541,7 +10550,7 @@
   const _hoisted_5$6 = { class: "attach-note" };
   const _hoisted_6$6 = { class: "io-actions" };
   const _hoisted_7$5 = { class: "io-section attach-section" };
-  const _hoisted_8$4 = { class: "attach-body" };
+  const _hoisted_8$3 = { class: "attach-body" };
   const _hoisted_9$3 = { class: "attach-note" };
   const _sfc_main$a = /* @__PURE__ */ defineComponent({
     __name: "ToolCard",
@@ -10663,7 +10672,7 @@
                   _cache[3] || (_cache[3] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
                   createBaseVNode("div", _hoisted_7$5, [
                     _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
-                    createBaseVNode("div", _hoisted_8$4, [
+                    createBaseVNode("div", _hoisted_8$3, [
                       a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$f, {
                         key: 0,
                         text: String(a.line.text || ""),
@@ -10687,16 +10696,15 @@
     }
   });
   const _hoisted_1$8 = { class: "thinking-body" };
-  const _hoisted_2$8 = { class: "reasoning-scroll" };
-  const _hoisted_3$7 = { class: "body-text reasoning-text" };
-  const _hoisted_4$5 = { class: "leak-body" };
-  const _hoisted_5$5 = { class: "body-text" };
-  const _hoisted_6$5 = {
+  const _hoisted_2$8 = { class: "reasoning-scroll reasoning-md" };
+  const _hoisted_3$7 = { class: "leak-body" };
+  const _hoisted_4$5 = { class: "body-text" };
+  const _hoisted_5$5 = {
     key: 0,
     class: "preview-strip"
   };
-  const _hoisted_7$4 = ["src", "alt", "title", "onClick"];
-  const _hoisted_8$3 = {
+  const _hoisted_6$5 = ["src", "alt", "title", "onClick"];
+  const _hoisted_7$4 = {
     key: 2,
     class: "note"
   };
@@ -10756,6 +10764,7 @@
       });
       const thinkTail = computed(() => line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : "");
       const thinkEncrypted = computed(() => isEncryptedSummary(line.value && line.value.reasoning));
+      const thinkSummary = computed(() => thinkEncrypted.value ? encryptedHeadline(line.value && line.value.reasoning) : firstLine(line.value && line.value.reasoning));
       const body = computed(() => splitLeaks(String(line.value && line.value.text || "")));
       const leakName = (b) => b.kind === "thinking" ? "原始思考" : "XML 协议残片";
       const leakBadge = (b) => b.kind === "thinking" ? "漏进正文" : "协议残片";
@@ -10773,7 +10782,7 @@
             cls: "disclosure-thinking",
             name: "思考",
             encrypted: thinkEncrypted.value,
-            summary: unref(firstLine)(line.value.reasoning),
+            summary: thinkSummary.value,
             tail: thinkTail.value,
             open: thinkOpen.value,
             onToggle: onThinkToggle
@@ -10781,7 +10790,9 @@
             default: withCtx(() => [
               createBaseVNode("div", _hoisted_1$8, [
                 createBaseVNode("div", _hoisted_2$8, [
-                  createBaseVNode("pre", _hoisted_3$7, toDisplayString(line.value.reasoning), 1)
+                  createVNode(_sfc_main$g, {
+                    text: line.value.reasoning
+                  }, null, 8, ["text"])
                 ])
               ])
             ]),
@@ -10803,8 +10814,8 @@
               summary: leakSummary(b)
             }, {
               default: withCtx(() => [
-                createBaseVNode("div", _hoisted_4$5, [
-                  createBaseVNode("pre", _hoisted_5$5, toDisplayString(b.text), 1)
+                createBaseVNode("div", _hoisted_3$7, [
+                  createBaseVNode("pre", _hoisted_4$5, toDisplayString(b.text), 1)
                 ])
               ]),
               _: 2
@@ -10815,7 +10826,7 @@
               key: c.key
             }, [
               createVNode(_sfc_main$a, { item: c }, null, 8, ["item"]),
-              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_6$5, [
+              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_5$5, [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(previewThumbs(c), (t) => {
                   return openBlock(), createElementBlock("img", {
                     key: t.ref,
@@ -10825,17 +10836,17 @@
                     loading: "lazy",
                     title: t.ref,
                     onClick: ($event) => show(t.ref, t.url)
-                  }, null, 8, _hoisted_7$4);
+                  }, null, 8, _hoisted_6$5);
                 }), 128))
               ])) : createCommentVNode("", true)
             ], 64);
           }), 128)),
-          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_8$3, "（空消息）")) : createCommentVNode("", true)
+          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_7$4, "（空消息）")) : createCommentVNode("", true)
         ], 512);
       };
     }
   });
-  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-30f932fa"]]);
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-85108861"]]);
   const _hoisted_1$7 = { class: "sys-line" };
   const _hoisted_2$7 = { class: "line-summary" };
   const _hoisted_3$6 = {

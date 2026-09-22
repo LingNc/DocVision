@@ -4,11 +4,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { state, storeGet, storeSet, LONG_TEXT_LINES, registerAnchor, unregisterAnchor } from '../state'
 import { countText, estOf, firstLine } from '../legacy/sidebar'
-import { type StreamItem, splitLeaks, isEncryptedSummary, type LeakBlock } from '../legacy/stream'
+import { type StreamItem, splitLeaks, isEncryptedSummary, encryptedHeadline, type LeakBlock } from '../legacy/stream'
 import { openLightbox } from '../state'
 import { mediaURL } from '../legacy/timeline'
 import Disclosure from './Disclosure.vue'
 import FoldText from './FoldText.vue'
+import MdBody from './MdBody.vue'
 import ToolCard from './ToolCard.vue'
 
 /* 看图调用的缩略图预览行：折叠态就可见，是 details 的**兄弟节点**；
@@ -67,8 +68,12 @@ const thinkTail = computed(() =>
   line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : '')
 
 /* gpt-5 系：reasoning_content 是厂商加密摘要头（非明文思维链），标题行加 🔒 标记。
- * 摘要仍是有效信息，正文照常显示；展开/折叠行为不变。 */
+ * 摘要仍是有效信息，正文照常显示；展开/折叠行为不变。
+ * T60：折叠态标题剥掉 `**` 星号（原样显示像排版坏了）；展开态正文走 Markdown
+ * 渲染——加密摘要的每条 `**内容**` 行各自成段分行，普通思考的 Markdown 同样生效。 */
 const thinkEncrypted = computed(() => isEncryptedSummary(line.value && line.value.reasoning))
+const thinkSummary = computed(() =>
+  thinkEncrypted.value ? encryptedHeadline(line.value && line.value.reasoning) : firstLine(line.value && line.value.reasoning))
 
 // T30/T32/T34：旧转录正文里混入的残片（思考块/XML）剥出来折叠展示
 // （新转录 Go 侧已清洗：MoveLeakedThinking / StripLeakedToolXML）。
@@ -87,14 +92,14 @@ const leakSummary = (b: LeakBlock) =>
       cls="disclosure-thinking"
       name="思考"
       :encrypted="thinkEncrypted"
-      :summary="firstLine(line.reasoning)"
+      :summary="thinkSummary"
       :tail="thinkTail"
       :open="thinkOpen"
       @toggle="onThinkToggle"
     >
       <div class="thinking-body">
-        <div class="reasoning-scroll">
-          <pre class="body-text reasoning-text">{{ line.reasoning }}</pre>
+        <div class="reasoning-scroll reasoning-md">
+          <MdBody :text="line.reasoning" />
         </div>
       </div>
     </Disclosure>
@@ -145,13 +150,15 @@ const leakSummary = (b: LeakBlock) =>
  margin: 0;
 }
 
-/* 展开后思考缩进 22px、13px/20px */
+/* 展开后思考缩进 22px；T60 起正文走 Markdown 渲染（MdBody 落 DOM 元素，
+ * 颜色/字号设在包裹层上继承——scoped 选择器够不到 MdBody 生成的节点）。 */
 .thinking-body {
- padding: 4px 0 6px 22px; 
+ padding: 4px 0 6px 22px;
 }
 
-.thinking-body .reasoning-text {
- color: var(--dim); 
+.thinking-body .reasoning-md {
+ color: var(--dim);
+ font-size: 13px;
 }
 
 /* 看图类调用（view_image / view_pdf）的**缩略图预览行**（第 D 条）：紧跟在那一行

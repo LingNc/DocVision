@@ -309,7 +309,7 @@ export function mdBlockStart(line: unknown, next: string | undefined): boolean {
   const t = String(line || '').trim()
   if (!t) return true
   if (mdFence(t) || MD_HEADING.test(t) || MD_HR.test(t)) return true
-  if (t.startsWith('$$')) return true // 显示数学块
+  if (t.startsWith('$$') || t.startsWith('\\[')) return true // 显示数学块（T61 认 \[…\] 形式）
   if (/^\s{0,3}>/.test(String(line)) || mdListMarker(String(line))) return true
   return t.indexOf('|') >= 0 && !!next && mdSeparatorRow(next) && mdSplitRow(t).length > 1
 }
@@ -855,16 +855,21 @@ export function mdListItem(item: { text: string }): HTMLElement {
  */
 export function collectMathBlock(lines: string[], i: number): { src: string; next: number } | null {
   const first = String(lines[i] || '').trim()
-  if (!first.startsWith('$$')) return null
-  if (first.length > 3 && first.endsWith('$$')) {
+  if (!first.startsWith('$$') && !first.startsWith('\\[')) return null
+  const bracket = first.startsWith('\\[') // T61：\[…\] 显示块与 $$ 同构
+  // 单行同起同收：$$…$$（长度 > 3，裸 $$$$ 落进来 src 为空 → null）/
+  // \[…\]（长度 > 4）；单行收尾在同线上才算单行块。
+  const minLen = bracket ? 4 : 3
+  const closeMark = bracket ? '\\]' : '$$'
+  if (first.length > minLen && first.endsWith(closeMark)) {
     const src = first.slice(2, -2)
-    return src.trim() ? { src, next: i + 1 } : null // 裸 $$$$ 不是数学块
+    return src.trim() ? { src, next: i + 1 } : null
   }
   const buf: string[] = [first.slice(2)]
   let j = i + 1
   while (j < lines.length) {
     const l = lines[j]
-    const k = l.indexOf('$$')
+    const k = l.indexOf(closeMark)
     if (k >= 0) {
       buf.push(l.slice(0, k))
       return { src: buf.join('\n'), next: j + 1 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isEncryptedSummary } from '../src/legacy/stream'
+import { isEncryptedSummary , encryptedHeadline } from '../src/legacy/stream'
 
 describe('isEncryptedSummary（gpt-5 系加密摘要头判定）', () => {
   it('真摘要头（单行 **…**）→ true', () => {
@@ -38,5 +38,19 @@ describe('isEncryptedSummary（gpt-5 系加密摘要头判定）', () => {
     expect(isEncryptedSummary('   \n  ')).toBe(false)
     expect(isEncryptedSummary(null)).toBe(false)
     expect(isEncryptedSummary(undefined)).toBe(false)
+  })
+})
+
+// T60：加密摘要折叠态标题剥 `**` 星号；展开态正文走 Markdown 渲染。
+describe('encryptedHeadline（T60）', () => {
+  it('剥掉 ** 星号、取首个非空行', () => {
+    expect(encryptedHeadline('**Planning TikZ creation**\n**Second**')).toBe('Planning TikZ creation')
+  })
+  it('带缩进的行也认', () => {
+    expect(encryptedHeadline('\n  **Wrapped in bold**  ')).toBe('Wrapped in bold')
+  })
+  it('空文本 → 空串', () => {
+    expect(encryptedHeadline('')).toBe('')
+    expect(encryptedHeadline(undefined)).toBe('')
   })
 })

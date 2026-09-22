@@ -134,6 +134,19 @@ export function isEncryptedSummary(text: string | null | undefined): boolean {
 }
 
 /*
+ * T60：加密摘要的**折叠态标题**——原样 firstLine 会把 `**…**` 星号裸露在
+ * 外（"**Planning TikZ creation**"），看着像排版坏了。取第一个非空行、
+ * 剥掉 `**` 标记后作为纯文本标题；展开态走 Markdown 渲染，加粗语义保留。
+ */
+export function encryptedHeadline(text: string | null | undefined): string {
+  const line = String(text || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l) || ''
+  return line.replace(/\*\*/g, '').trim()
+}
+
+/*
  * T56：img2text 逐图分析会话的**旧转录**里，user 消息的 text 字段是一整段
  * JSON 数组字符串（写盘时的 bug，Go 侧已修、新转录正常）：
  *   [{"text":"The image to describe is at line 1038. ..."},{"type":"image_url",

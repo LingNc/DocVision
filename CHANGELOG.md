@@ -18,6 +18,8 @@
 ### Added
 
 - **img2text 页码标记（P21）**：`mineru_output/` 有该书 MinerU 产物时，最终 markdown 按原始内容分页插入独立行 `[P. <页码>]`（跨部件全局 1-based 页码，与 latex doc_search/view_pdf 同一套），方便后续 AI 向用户指明位置——文本行规范化包含匹配 content_list 的 text 条目、图片引用按文件名对齐 image 条目（`[Image]( 描述 · P.42 )` 锚顺带带页码）；页码递增时在新页首行前插标记，围栏内顺延到围栏后，找不到 mineru 产物静默跳过。不加新配置项。
+- **思考块 Markdown 渲染（T60）**：思考/加密摘要展开正文改走 Markdown 渲染（加密摘要的每条 `**内容**` 各自成行）；折叠态标题剥掉裸露的 `**` 星号。
+- **LaTeX 括号形式公式（T61）**：行内 `\(…\)` 与显示 `\[…\]` 此前原样显示，现与 `$…$` / `$$…$$` 同等渲染为 MathML。
 - **发布线改革（P23）**：新版本阶梯 dev.N → beta.N → alpha.N → 正式版在 dev 分支推进；仅 alpha 与正式版标签自动构建发布，dev/beta 只做构建验证、需要时手动触发；master 只收正式版。v1.5.0-beta.4 的 GitHub Release 已按此清理。
 
 - **T56 mermaid 图表预览**：```mermaid 代码块下方直接渲染 SVG（新 API `POST /api/mermaid`，mmdc 渲染、内容哈希缓存；不可用/失败/静态模式回退为代码块），点击进灯箱缩放。

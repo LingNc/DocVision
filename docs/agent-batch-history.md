@@ -1422,3 +1422,14 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### P21 自检日志 + 正确性抽查（同日）
 - 日志升级：`页码标记: N 处 / M 页`（M=该书部件页数上限），越界/回退时附 `⚠ 自检异常`（pageMarkPlan.audit）。
 - 正确性抽查（1000题解析册，1882 行文本行 vs content_list 真实 page_idx）：初轮 47% 一致是我的对账脚本太粗——把目录行对到 body 标题（程序已用窗口修掉这个错，脚本没有）；剔除每页重复的页眉/模板行 + 严格唯一匹配后 **91% 一致（671/730）**；剩余 59 行全是"全书重复出现的标题/公式行"（如"第9章 一元函数积分学的计算"在子目录和正文各出现一次），我的脚本取首个锚点判定、程序按阅读顺序指针取的是正确那次——抽查脚本的局限，非程序错误。
+
+## 第五十八批（2026-09-22，T60/T61 web 渲染）
+
+### T60 思考块 Markdown 渲染
+- AssistantMsg 思考正文从 `<pre>` 原文改为 MdBody（renderMarkdown）——加密摘要的 `**内容**` 各自成段分行、普通思考的 Markdown 语法生效；颜色/字号设在 `.reasoning-md` 包裹层继承（scoped 够不到 MdBody DOM 节点，已知陷阱）。
+- 折叠态标题：加密摘要走新 `encryptedHeadline()`（首个非空行剥 `**`），不再裸露星号；普通思考仍 firstLine。
+
+### T61 LaTeX 括号形式
+- MD_INLINE 增加 `\(…\)`（行内，组 12）与 `\[…\]`（显示，组 13）；collectMathBlock/mdBlockStart 认 `\[` 块（单行/多行/未闭合同 $$ 三形态；裸 `$$$$` 与 `\[\]` 退 null 语义保持）。
+- 真实数据：某书.md 有 `\(kA\)` 等 2 处此类形式。
+- 测试：markdown.spec +6、encrypted-summary.spec +3，全仓 vitest 106 绿；npm build + go build（embed）过。
