@@ -18,6 +18,7 @@
 ### Added
 
 - **img2text 页码标记（P21）**：`mineru_output/` 有该书 MinerU 产物时，最终 markdown 按原始内容分页插入独立行 `[P. <页码>]`（跨部件全局 1-based 页码，与 latex doc_search/view_pdf 同一套），方便后续 AI 向用户指明位置——文本行规范化包含匹配 content_list 的 text 条目、图片引用按文件名对齐 image 条目（`[Image]( 描述 · P.42 )` 锚顺带带页码）；页码递增时在新页首行前插标记，围栏内顺延到围栏后，找不到 mineru 产物静默跳过。不加新配置项。
+- **页码注入开关（T69）**：新配置 `img2text.page_marks`（默认 true）与 `img2text.page_marks_rewrite`（默认 false）——已交付的 finally 文件保持原有风格，原本没页码的不回注成页码版；删掉 finally 结果重跑才按开关注入。
 - **章节/核对会话聚合显示（T62/T63）**：装配期会话（book_fix/final_review/stylefix_*）各归其阶段、不再落「会话」桶；章节转换/章节核对阶段聚合显示——跑动时只列正在运行的会话（并发一目了然），全完成收起会话行、阶段头直接给「N 章 · 完成 M · 运行 K」，错误会话始终保留，搜索时不过聚合。
 - **stylefix-integrate 工作区化（T64/T67）**：整合会话配虚拟工作区（各章汇报按 `reports/<章>.md` 落盘 + read/grep/write/edit），代码在整合后生成未打钩 `list.md`；style 修复会话标签统一为 `stylefix-style-rN`。
 - **修复清单勾选核对（T66）**：分块修复会话工作区放未打钩 `list.md`，提交必须带 `checked_problem_ids` 覆盖全部问题 id，缺一个即打回。

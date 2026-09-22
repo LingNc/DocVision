@@ -343,6 +343,14 @@ type Img2TextConfig struct {
 	Concurrency       int    `yaml:"concurrency"`
 	OutputLanguage    string `yaml:"output_language"`
 	FormatFixAttempts int    `yaml:"format_fix_attempts"`
+
+	// PageMarks（T69）控制 md 产物是否注入分页页码标记（[P. N] 独立行 +
+	// 图片锚 · P.N），默认 true（P21 行为）。PageMarksRewrite（T69）为
+	// false（默认）时已交付的 finally 文件**保持原有风格**——原本没页码
+	// 的不回注成页码版（增量更新照写、页码不新增）；删掉 finally 结果
+	// 重跑才按 PageMarks 开关注入。
+	PageMarks        *bool `yaml:"page_marks"`
+	PageMarksRewrite *bool `yaml:"page_marks_rewrite"`
 }
 
 // VerifyConfig configures the AI verification pass (核对输出的每张图与

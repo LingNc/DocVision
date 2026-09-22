@@ -1443,3 +1443,8 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **T66**：块工作区放未打钩 list.md；SubmitBlockFixTool 增加 checked_problem_ids 必填、代码核对全覆盖，缺勾 REJECTED（3 条测试钉住）。
 - **T68**：分块修复会话补 ViewPDFTool（book_fix/终审/单章修复原本就有）。
 - 验证：go build + config/latex/sessionview 测试全绿；vitest 112 绿（+6）；npm build 过。
+
+### T69 页码注入开关（同日第五十九批补）
+- `img2text.page_marks`（默认 true，P21 行为不变）+ `img2text.page_marks_rewrite`（默认 false）。
+- runner Final pass：rewrite=false 时已交付的 finally 文件按**原有风格**处理——原来没页码的（hasPageMarks 判定）plan 置 nil 不回注，增量更新照写；删掉 finally 结果重跑才按 page_marks 开关注入。
+- 两键 *bool 形态（与 img2text_all 同款），nil = 默认；测试 hasPageMarks（独立行语义）+ 默认值语义。

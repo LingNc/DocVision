@@ -69,6 +69,8 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.text.rate_limit_retries` | 429 限流重试上限（指数退避封顶 60s）。**只管真限流**：余额不足/配额类错误直接判定并立即返回，不消耗这里的重试次数 | 20 |
 | `img2text.concurrency` | AI 图片转文本并发数（原 `options.concurrency`，两处等价） | 10 |
 | `img2text.format_fix_attempts` | 格式修复重试次数（0 禁用，1 表示重试一次）；**只能写在 `img2text` 下**，`options.format_fix_attempts` 已不生效 | 1 |
+| `img2text.page_marks` | md 产物注入分页页码标记（`[P. N]` 独立行 + 图片锚 `· P.N`；T69） | true |
+| `img2text.page_marks_rewrite` | false = 已交付的 finally 文件保持原有风格（原本没页码的不回注成页码版，增量更新照写）；删掉 finally 结果重跑才按 `page_marks` 开关注入 | false |
 | `img2text.max_tokens` | img2text 单次请求最大输出（`max_tokens`）（原 `options.max_tokens`，两处等价） | 65536 |
 | `img2text.temperature` | img2text 采样温度 | 0.10 |
 | `img2text.output_language` | AI 描述输出语言（"Chinese"/"English"） | Chinese |

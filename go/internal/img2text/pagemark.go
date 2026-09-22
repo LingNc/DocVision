@@ -36,6 +36,17 @@ import (
 // is never duplicated at the same position.
 var pageMarkRe = regexp.MustCompile(`^\[P\. \d+\]$`)
 
+// hasPageMarks reports whether an md file already carries page markers
+// (T69: 已交付文件不回注成页码版——原来没页码的保持没页码)。
+func hasPageMarks(content []byte) bool {
+	for _, line := range strings.Split(string(content), "\n") {
+		if pageMarkRe.MatchString(strings.TrimSpace(line)) {
+			return true
+		}
+	}
+	return false
+}
+
 // pageAnchor is one ordered anchor from the MinerU content lists.
 type pageAnchor struct {
 	kind string // "text" | "image"

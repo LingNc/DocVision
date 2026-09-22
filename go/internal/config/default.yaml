@@ -120,6 +120,8 @@ img2text:
   format_fix_attempts: 1       # 0=disable, 1=one retry for missing [IMG_TYPE:]
   max_tokens: 65536
   model: "text"                # models: 中的条目名；留空用 models.text
+  page_marks: true               # md 产物注入分页页码标记（[P. N] 独立行 + 图片锚 · P.N；默认 true，T69）
+  page_marks_rewrite: false      # false=已交付的 finally 文件保持原有风格（没页码的不回注成页码版；删掉结果重跑才按开关注入）
 
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------

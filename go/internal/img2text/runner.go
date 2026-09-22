@@ -340,9 +340,26 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		}
 
 		outPath := filepath.Join(finallyDir, name)
+		// T69：页码注入两开关。page_marks（默认 true）总开关；
+		// page_marks_rewrite（默认 false）管已交付文件——false 时
+		// finally/ 里已有内容的文件按**原有风格**增量更新，原本没页码的
+		// 不回注成页码版；删掉 finally 结果重跑才按开关注入。
+		pageMarks := cfg.Img2Text.PageMarks == nil || *cfg.Img2Text.PageMarks
+		rewriteMarks := cfg.Img2Text.PageMarksRewrite != nil && *cfg.Img2Text.PageMarksRewrite
+		existing, existingErr := os.ReadFile(outPath)
+		hadFile := existingErr == nil
 		// P21 页码标记：对齐在原始 md（entry.content，图片引用还在）上做，
 		// mineru_output 没有对应产物时 plan 为 nil、静默跳过。
 		plan := planPageMarks(cfg.Paths.MineruOutput, name, entry.lines)
+		if !pageMarks {
+			plan = nil
+		} else if hadFile && !rewriteMarks {
+			// 已交付文件 + 不回注：保留原文件的页码风格——有页码就照常
+			// 对齐增量更新（重建即含标记），没页码就不加标记。
+			if !hasPageMarks(existing) {
+				plan = nil
+			}
+		}
 		if len(reps) == 0 {
 			out, _ := plan.applyTo(entry.content, entry.lines, entry.starts, nil)
 			if !util.FileExists(outPath) {
