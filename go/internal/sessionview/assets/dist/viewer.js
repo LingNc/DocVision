@@ -7450,6 +7450,27 @@
     state.overflow[key] = true;
     storeSet("overflow", JSON.stringify(state.overflow));
   }
+  function styleFixPhaseKey(label) {
+    const m = /^(?:style-fix:)?(integrate|style_r(\d+)|assess_r(\d+)|blk-r(\d+)-(\d+))$/.exec(String(label || ""));
+    if (!m) return null;
+    if (m[1] === "integrate") return { phase: 1, round: 0, blk: 0 };
+    if (m[2] !== void 0) return { phase: 2, round: +m[2], blk: 0 };
+    if (m[3] !== void 0) return { phase: 3, round: +m[3], blk: 0 };
+    return { phase: 4, round: +m[4], blk: +m[5] };
+  }
+  function stylefixCompare(a, b) {
+    const ka = styleFixPhaseKey(a && a.label);
+    const kb = styleFixPhaseKey(b && b.label);
+    if (ka && kb) {
+      if (ka.phase !== kb.phase) return ka.phase - kb.phase;
+      if (ka.round !== kb.round) return ka.round - kb.round;
+      if (ka.blk !== kb.blk) return ka.blk - kb.blk;
+      return 0;
+    }
+    if (ka) return -1;
+    if (kb) return 1;
+    return 0;
+  }
   let pullSeq = 0;
   function revealProject(project) {
     const wraps = document.querySelectorAll(".proj-group");
@@ -7655,14 +7676,47 @@
   function mermaidPreviewBlock(source) {
     const wrap = document.createElement("div");
     wrap.className = "md-mermaid";
+    const bar = document.createElement("div");
+    bar.className = "md-mermaid-bar";
+    const toggle = document.createElement("button");
+    toggle.className = "md-mermaid-toggle icon-btn";
+    toggle.type = "button";
+    bar.appendChild(toggle);
+    wrap.appendChild(bar);
+    const chart = document.createElement("div");
+    chart.className = "md-mermaid-view md-mermaid-chart";
     const note = document.createElement("div");
     note.className = "md-mermaid-note";
     note.textContent = "渲染中…";
-    wrap.appendChild(note);
+    chart.appendChild(note);
+    const src = document.createElement("div");
+    src.className = "md-mermaid-view md-mermaid-src";
+    const pre = document.createElement("pre");
+    pre.className = "md-code-body";
+    pre.textContent = source;
+    src.appendChild(pre);
+    let showingChart = true;
+    const sync = () => {
+      toggle.textContent = showingChart ? "源码" : "图表";
+      toggle.title = showingChart ? "查看源码" : "查看渲染图表";
+      chart.style.display = showingChart ? "" : "none";
+      src.style.display = showingChart ? "none" : "";
+    };
+    toggle.addEventListener("click", () => {
+      showingChart = !showingChart;
+      sync();
+    });
+    sync();
+    wrap.appendChild(chart);
+    wrap.appendChild(src);
     void renderMermaid(source).then((entry) => {
       if (!wrap.isConnected) return;
       if (!entry.ok) {
         note.textContent = "预览不可用";
+        if (showingChart) {
+          showingChart = false;
+          sync();
+        }
         return;
       }
       const svgNode = svgElement(entry.svg);
@@ -7670,7 +7724,7 @@
         note.textContent = "预览不可用";
         return;
       }
-      wrap.removeChild(note);
+      note.remove();
       const holder = document.createElement("div");
       holder.className = "md-mermaid-svg";
       holder.title = "点击放大查看";
@@ -7678,7 +7732,7 @@
       holder.addEventListener("click", () => {
         openLightbox("data:image/svg+xml;charset=utf-8," + encodeURIComponent(entry.svg), "mermaid 图表");
       });
-      wrap.appendChild(holder);
+      chart.appendChild(holder);
     });
     return wrap;
   }
@@ -8552,15 +8606,16 @@
     head.appendChild(el$1("span", "md-code-lang", lang || "text"));
     head.appendChild(copyButton(code));
     wrap.appendChild(head);
+    if (String(lang || "").trim().toLowerCase() === "mermaid" && mermaidPreviewAvailable()) {
+      wrap.appendChild(mermaidPreviewBlock(code));
+      return wrap;
+    }
     const body = el$1("pre", "md-code-body");
     const inner = el$1("code");
     const res = highlightMachine(inner, code);
     body.appendChild(inner);
     wrap.appendChild(body);
     if (res.note) wrap.appendChild(el$1("div", "note", res.note));
-    if (String(lang || "").trim().toLowerCase() === "mermaid" && mermaidPreviewAvailable()) {
-      wrap.appendChild(mermaidPreviewBlock(code));
-    }
     return wrap;
   }
   function mdTable(header, rows) {
@@ -9068,6 +9123,14 @@
             const sg = g.stages[stg];
             const items = sg.items.slice().sort((x, y) => {
               if (x.imageOrder && y.imageOrder && x.imageOrder !== y.imageOrder) return x.imageOrder - y.imageOrder;
+              const ka = styleFixPhaseKey(x && x.label);
+              const kb = styleFixPhaseKey(y && y.label);
+              if (ka && kb) {
+                const c = stylefixCompare(x, y);
+                if (c !== 0) return c;
+                return y.mtime > x.mtime ? 1 : -1;
+              }
+              if (ka || kb) return ka ? -1 : 1;
               return y.mtime > x.mtime ? 1 : -1;
             });
             const agg = stageChapterAggregate(stg, items, !!state.filter);
@@ -9350,7 +9413,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-740a496f><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-740a496f><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-740a496f></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-740a496f><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-740a496f></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-740a496f></path></svg></span>', 1)),
+                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-0561132e><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0561132e><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0561132e></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0561132e><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-0561132e></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0561132e></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9660,7 +9723,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-740a496f"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-0561132e"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

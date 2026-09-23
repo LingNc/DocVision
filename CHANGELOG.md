@@ -18,6 +18,14 @@
 ### Added
 
 - **img2text 页码标记（P21）**：`mineru_output/` 有该书 MinerU 产物时，最终 markdown 按原始内容分页插入独立行 `[P. <页码>]`（跨部件全局 1-based 页码，与 latex doc_search/view_pdf 同一套），方便后续 AI 向用户指明位置——文本行规范化包含匹配 content_list 的 text 条目、图片引用按文件名对齐 image 条目（`[Image]( 描述 · P.42 )` 锚顺带带页码）；页码递增时在新页首行前插标记，围栏内顺延到围栏后，找不到 mineru 产物静默跳过。不加新配置项。
+- **修复循环环节标题与排序（T78）**：style-fix 阶段的会话按 问题整合 → 样式修复 → 评估分派 → 分块修复 环节排序，同环节按轮次/块号；标题改为中文点名（「问题整合」「样式修复 · 第N轮」「评估分派 · 第N轮」「分块修复 · 第N轮 · 块i」）。
+- **img2text 会话编号按图片走（T77）**：同一张图的逐图分析与升级修复成员共用同一个 `#N` 书内序号——旧法给修复组单独从 #1 起算，链外层徽标取最新成员的编号，不同链会撞同一个 #1。
+- **转录不再重复记录工具调用（T76）**：get_more_context 轮的 tool_calls 助手回复此前在响应落盘后、又作为下一轮请求尾巴重写一遍，webui 里同一调用显示两次。
+- **会话运行状态更准（T74）**：转录已以 SUBMIT 回执 / `[IMG_TYPE:` 定型答案收尾的会话一律不再算"运行中"（此前提交后还要绿满 3 分钟窗口才熄灭）；提交后又有新写入（重跑）恢复正常判定。
+- **mermaid 预览 图表/源码 切换（T73）**：预览右上角一键切换，同一时刻只显示一种视图；渲染失败自动落在源码视图；非静态快照不再上下重复展示源码和图表。
+- **img2text 修复会话提示词不再空指 compile_error.log（T72）**：该文件只在出现过编译错误后才落盘——提示词按实际存在与否提及，全新升级工作区不再诱导模型去读一个不存在的文件。
+- **analyze 质量口径改为"最终一轮"（T75）**：每张图以时间最晚日志里的最后一次出现判定良/误/警——历史轮报错、后来重试修好的图不再计入错误率；无效条目单独列出，不再悄悄消失在比率外。
+- **终端费用表对齐（T71）**：表头中文列名按显示宽度（CJK 2 列）右对齐，与 ASCII 数据列对齐。
 - **修复链会话独立模型（T70）**：`latex.style_fix.stylefix_style_model / stylefix_assess_model / stylefix_block_model / bookfix_model / final_review_model` 五个键各自指定会话模型；`models:` 注册表默认新增 `integrate`/`stylefix-style`/`stylefix-assess`/`stylefix-block`/`bookfix`/`final-review` 条目，全部 `extends` 自原角色条目 = 默认行为不变；`integrate_model` 模板默认从空改为 `integrate`（T65 键启用）。
 - **评估/分组会话可编辑提交（T70）**：影响评估会话获得自己的虚拟工作区 `work/stylefix_assess/`——`blocks.json` 由会话 write/edit（可反复修改），`submit_blocks` 无参从文件读取提交（内联传参仍兼容）；顺带修复 `models.extends` 解析在「子条目字母序排在父条目前 + 多层链」时误报循环继承的缺陷。
 - **页码注入开关（T69）**：新配置 `img2text.page_marks`（默认 true）与 `img2text.page_marks_rewrite`（默认 false）——已交付的 finally 文件保持原有风格，原本没页码的不回注成页码版；删掉 finally 结果重跑才按开关注入。

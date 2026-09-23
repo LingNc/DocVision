@@ -699,3 +699,33 @@ export function listSignature(): string {
 }
 
 export { relTime }
+
+/* ---------- T78：style-fix 阶段内排序 ----------
+ * 修复循环的环节顺序 = 问题整合(1) → 样式修复(2) → 评估分派(3) → 分块修复(4)；
+ * 同环节内按轮次、块号升序（历史轮在前），再按修改时间新→旧兜底。
+ * Go 侧 label 形态：style-fix:integrate / :style_r1 / :assess_r1 / :blk-r1-3。 */
+export interface StyleFixPhaseKey { phase: number; round: number; blk: number }
+
+export function styleFixPhaseKey(label: string | undefined | null): StyleFixPhaseKey | null {
+  const m = /^(?:style-fix:)?(integrate|style_r(\d+)|assess_r(\d+)|blk-r(\d+)-(\d+))$/.exec(String(label || ''))
+  if (!m) return null
+  if (m[1] === 'integrate') return { phase: 1, round: 0, blk: 0 }
+  if (m[2] !== undefined) return { phase: 2, round: +m[2], blk: 0 }
+  if (m[3] !== undefined) return { phase: 3, round: +m[3], blk: 0 }
+  return { phase: 4, round: +m[4], blk: +m[5] }
+}
+
+export function stylefixCompare(a: any, b: any): number {
+  const ka = styleFixPhaseKey(a && a.label)
+  const kb = styleFixPhaseKey(b && b.label)
+  if (ka && kb) {
+    if (ka.phase !== kb.phase) return ka.phase - kb.phase
+    if (ka.round !== kb.round) return ka.round - kb.round
+    if (ka.blk !== kb.blk) return ka.blk - kb.blk
+    return 0
+  }
+  // 一边能解析一边不能：解析得到的按环节排前面，未知的排后面
+  if (ka) return -1
+  if (kb) return 1
+  return 0
+}

@@ -166,26 +166,19 @@ func printProgressFooter(inputDir, progressRoot, finallyDir string, logPaths []s
 		fmt.Printf("  完成率: %.2f%%\n", float64(completed)/float64(totalImages)*100)
 	}
 	if completed > 0 {
-		// T55（用户定的口径）：良品 = 完成且无 ERROR 且无 WARNING——
-		// 警告虽是自纠正成功（T36），但影响良品率；错误单独报错误率。
-		// 没有逐图完成路径可对账，分子按问题图数保守扣减（跨日志去重后
-		// 仍按上界扣）。
-		errSet := map[string]struct{}{}
-		warnSet := map[string]struct{}{}
-		for _, lf := range logPaths {
-			errs, warns := ScanLogIssueImages(lf)
-			for _, p := range errs {
-				errSet[p] = struct{}{}
-				delete(warnSet, p)
-			}
-			for _, p := range warns {
-				if _, bad := errSet[p]; !bad {
-					warnSet[p] = struct{}{}
-				}
+		// T55（用户定的口径）：良品 = 完成且无 ERROR 且无 WARNING。
+		// T75（最终一轮口径）：每张图在**时间最晚的日志里的最后一次出现**
+		// 决定判定——历史轮次报错、后来重试修好的图不再计入错误率；但
+		// 只扫最新一份日志会漏掉最终轮的问题，所以扫全部日志、按图取终态。
+		verdicts := FinalImageVerdicts(logPaths)
+		bad, warned := 0, 0
+		for _, v := range verdicts {
+			if v.Err {
+				bad++
+			} else if v.Warn {
+				warned++
 			}
 		}
-		bad := len(errSet)
-		warned := len(warnSet)
 		if bad+warned > completed {
 			// 上界钳制：问题图数不超过完成数（优先扣错误）。
 			warned = completed - bad
@@ -203,6 +196,9 @@ func printProgressFooter(inputDir, progressRoot, finallyDir string, logPaths []s
 		}
 		if warned > 0 {
 			fmt.Printf("  警告: %d 张\n", warned)
+		}
+		if invalid > 0 {
+			fmt.Printf("  无效（校验未过、下轮重试）: %d 张——不计入上面按已交付算的比率\n", invalid)
 		}
 	}
 }

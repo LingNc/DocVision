@@ -153,7 +153,7 @@ func img2TextSessionInfo(p, rel, name string, info fs.FileInfo, stat transcriptS
 		Bytes:         info.Size(),
 		ModTime:       info.ModTime(),
 		SHA:           stat.SHA,
-		Live:          now.Sub(info.ModTime()) < LiveWindow,
+		Live:          liveNow(stat, info.ModTime(), now),
 		EndState:      liveEndState(endStateOf(stat), now.Sub(info.ModTime()) < LiveWindow),
 		ChapterOrder:  -1, // set by the numbering pass below
 	}, imgKey, true
@@ -184,11 +184,15 @@ func shortImgName(img string) string {
 	return shortImageName(base, ext, imageShortKeep)
 }
 
-// numberImg2Text assigns each img2text session its index inside its
-// project+stage group (sorted by the full image file name — stable and
-// searchable; the hash order is not the book's page order) and prefixes
-// the title with "#N ·". ChapterOrder feeds the block-view badge. It
-// mutates `out` in place, looked up by ID.
+// numberImg2Text assigns each img2text IMAGE its index inside its project
+// (sorted by the full image file name — stable and searchable; the hash
+// order is not the book's page order) and prefixes every session title with
+// "#N ·". ChapterOrder feeds the block-view badge.
+// T77：编号按**图片**走而不是按 项目+阶段——同一张图的逐图分析与升级修复
+// 成员共用同一个书内序号。旧法给修复组单独从 #1 起算，而链的外层徽标取
+// 最新成员（往往是修复会话）的编号，两张不同的链会同时显示 #1。
+// 短名撞车升级（8→12 位→全名）同样按项目内的**去重图片**算——同图的
+// 分析与修复成员本来就该显示同一个短名。
 func (s *scanner) numberImg2Text(out []SessionInfo) {
 	if len(s.img2Text) == 0 {
 		return
@@ -197,38 +201,54 @@ func (s *scanner) numberImg2Text(out []SessionInfo) {
 	for i := range out {
 		idxByID[out[i].ID] = i
 	}
-	groups := map[string][]img2TextEntry{}
+	projOf := map[string]string{}          // 会话 ID → 项目
+	keyOf := map[string]string{}           // 会话 ID → 图片键
+	imgsOf := map[string]map[string]bool{} // 项目 → 去重图片键
+	members := map[string][]string{}       // 项目\x00图片 → 会话 ID（保序）
 	for _, e := range s.img2Text {
 		i, ok := idxByID[e.id]
 		if !ok {
 			continue
 		}
-		k := out[i].Project + "\x00" + out[i].Stage
-		groups[k] = append(groups[k], e)
+		proj := out[i].Project
+		projOf[e.id] = proj
+		keyOf[e.id] = e.key
+		if imgsOf[proj] == nil {
+			imgsOf[proj] = map[string]bool{}
+		}
+		imgsOf[proj][e.key] = true
+		k := proj + "\x00" + e.key
+		members[k] = append(members[k], e.id)
 	}
-	for key, g := range groups {
-		sort.Slice(g, func(i, j int) bool { return g[i].key < g[j].key })
-		stage := out[idxByID[g[0].id]].Stage
+	shortAt := func(key string, keep int) string {
+		base := key
+		ext := ""
+		if i := strings.LastIndex(key, "."); i > 0 {
+			base, ext = key[:i], key[i:]
+		}
+		return shortImageName(base, ext, keep)
+	}
+	for proj, set := range imgsOf {
+		imgs := make([]string, 0, len(set))
+		for k := range set {
+			imgs = append(imgs, k)
+		}
+		sort.Strings(imgs)
 		// 8 位短名撞车的升级 12 位、再撞写全名（与矢量图会话同一套
-		// 词汇，见 stages.go assignShortImageNames）。
-		shortAt := func(e img2TextEntry, keep int) string {
-			base := e.key
-			ext := ""
-			if i := strings.LastIndex(e.key, "."); i > 0 {
-				base, ext = e.key[:i], e.key[i:]
-			}
-			return shortImageName(base, ext, keep)
+		// 词汇，见 stages.go assignShortImageNames）；粒度 = 项目内去重图片。
+		keepOf := map[string]int{}
+		for _, k := range imgs {
+			keepOf[k] = imageShortKeep
 		}
 		for keep := imageShortKeep; keep <= imageShortFallbackKeep; keep += imageShortFallbackKeep - imageShortKeep {
 			counts := map[string]int{}
-			for _, e := range g {
-				counts[shortAt(e, keep)]++
+			for _, k := range imgs {
+				counts[shortAt(k, keep)]++
 			}
 			collided := false
-			for _, e := range g {
-				if counts[shortAt(e, keep)] > 1 {
-					i := idxByID[e.id]
-					out[i].ImgShortKeep = keep + (imageShortFallbackKeep - imageShortKeep)
+			for _, k := range imgs {
+				if counts[shortAt(k, keep)] > 1 {
+					keepOf[k] = keep + (imageShortFallbackKeep - imageShortKeep)
 					collided = true
 				}
 			}
@@ -236,21 +256,25 @@ func (s *scanner) numberImg2Text(out []SessionInfo) {
 				break
 			}
 		}
-		_ = key
-		for n, e := range g {
-			i := idxByID[e.id]
-			out[i].ChapterOrder = n + 1
-			keep := out[i].ImgShortKeep
-			if keep == 0 {
-				keep = imageShortKeep
+		for n, k := range imgs {
+			for _, id := range members[proj+"\x00"+k] {
+				i := idxByID[id]
+				out[i].ChapterOrder = n + 1
+				keep := keepOf[k]
+				if keep < imageShortKeep {
+					keep = imageShortKeep
+				}
+				name := shortAt(k, keep)
+				if out[i].Stage == "mermaid-fix" {
+					name = "升级修复 · " + name
+				} else {
+					name = "逐图 · " + name
+				}
+				out[i].Title = fmt.Sprintf("#%d · %s", n+1, name)
+				if keep > imageShortKeep {
+					out[i].ImgShortKeep = keep
+				}
 			}
-			name := shortImageName(g[n].key[:len(g[n].key)-len(filepath.Ext(g[n].key))], filepath.Ext(g[n].key), keep)
-			if stage == "mermaid-fix" {
-				name = "升级修复 · " + name
-			} else {
-				name = "逐图 · " + name
-			}
-			out[i].Title = fmt.Sprintf("#%d · %s", n+1, name)
 		}
 	}
 }

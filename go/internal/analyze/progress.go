@@ -324,3 +324,80 @@ func PrintProgressReport(inputDir, progressRoot, logsDir, finallyDir string) {
 		fmt.Printf("  无错误/警告: %d/%d (%.2f%%)\n", good, completed, rate)
 	}
 }
+
+
+// ImageVerdict 是一张图在全部日志里的**最终一轮**质量判定（T75）：
+// 每张图以其在时间最晚日志里的最后一次出现为准——历史轮次的错误/警告
+// 若已被后续重试修复（最后一轮干净），就不再计入错误率/警告数；反过来
+// 只看最新一份日志会漏掉最终轮仍在的问题。
+type ImageVerdict struct {
+	Err   bool
+	Warn  bool
+	Order int // 该判定来自第几份日志（按 mtime 升序），调试用
+}
+
+// FinalImageVerdicts 按**文件 mtime 升序**扫描全部日志，返回每张图的最终判定。
+// 同一份日志内多次出现的图，取最后一次出现的块结果（后面覆盖前面）。
+func FinalImageVerdicts(logPaths []string) map[string]ImageVerdict {
+	paths := append([]string(nil), logPaths...)
+	type withTime struct {
+		path string
+		mt   int64
+	}
+	ordered := make([]withTime, 0, len(paths))
+	for _, p := range paths {
+		st, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		ordered = append(ordered, withTime{p, st.ModTime().UnixNano()})
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].mt < ordered[j].mt })
+
+	final := map[string]ImageVerdict{}
+	for order, o := range ordered {
+		for img, v := range scanFileVerdicts(o.path) {
+			v.Order = order
+			final[img] = v
+		}
+	}
+	return final
+}
+
+// scanFileVerdicts 扫单份日志：每张图取该文件里**最后一次**出现的块结果。
+func scanFileVerdicts(logPath string) map[string]ImageVerdict {
+	out := map[string]ImageVerdict{}
+	f, err := os.Open(logPath)
+	if err != nil {
+		return out
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 16*1024*1024)
+	var cur string
+	var v ImageVerdict
+	flush := func() {
+		if cur != "" {
+			out[cur] = v
+		}
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if m := imageLineRef.FindStringSubmatch(line); m != nil {
+			flush()
+			cur = m[1]
+			v = ImageVerdict{}
+			continue
+		}
+		if cur == "" {
+			continue
+		}
+		if strings.Contains(line, "[ERROR]") {
+			v.Err = true
+		} else if strings.Contains(line, "[WARNING]") {
+			v.Warn = true
+		}
+	}
+	flush()
+	return out
+}

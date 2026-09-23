@@ -49,8 +49,9 @@ func TestExchangeRecorder_ReconstructsTranscript(t *testing.T) {
 		t.Fatalf("read transcript: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	// meta + (system, user, assistant) + (fix user, assistant) + 2 usage
-	if len(lines) != 9 {
+	// T76：助手回复计入游标——req2 尾巴里的 assistant 不再重写。
+	// meta + (system, user) + assistant + (fix user) + assistant + 2 usage = 8
+	if len(lines) != 8 {
 		t.Fatalf("lines = %d, want 9:\n%s", len(lines), raw)
 	}
 	if !strings.Contains(lines[0], `"t":"meta"`) {

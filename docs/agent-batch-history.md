@@ -1454,3 +1454,13 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - models 注册表新增 6 条目（integrate/stylefix-style/stylefix-assess/stylefix-block/bookfix/final-review），全部 `extends` 自原角色 = 行为不变；模板插入时曾把 verifier 的 image_tokens 挤进 final-review（TestTemplatesResolveImageEstimatePerRole 抓住），已复位。
 - **真实缺陷（extendAll pass 上限收缩饥饿）**：`mergeModelExtends` 循环上限写 `pass <= len(extendsOf)`，len 随每轮 resolve 收缩——字母序排最前的 bookfix 每轮都赶在父条目 convert 解析前被检查，最后一轮被砍 → 误报「循环继承（bookfix → convert）」。复现链：bookfix → convert → heavy → text（bookfix 字母序在 convert 前，且前面还有 gateway/style 撑高初始计数）。修：上限循环前取定 `totalExtends`；回归测试钉住（误报 + 真环仍报出）。
 - 评估/分组会话（stylefix_assess_rN）获得虚拟工作区 `work/stylefix_assess/`：blocks.json 由会话 write/edit、`submit_blocks` 无参从文件读（内联仍兼容）；Workspace 为空时必须内联。blocks.json 最终态回存工作区。测试：TestSubmitBlocksFromWorkspace（文件读/空工作区拒/坏 JSON 拒）。
+
+### T71–T78 终端对齐 / 修复会话提示词 / webui 五连修
+- **T71**：费用表表头 `%Ns` 按 rune 数补位，中文表头（会话=4 列）配 `%Nd` ASCII 数据错位。`padLeftWide`（显示宽右对齐）修表头；`padStage` 泛化成 `padWide(left bool)`。
+- **T72**：`compile_error.log` 只在 `recordError` 后落盘；全新升级工作区只有 submit.md，但 systemPrompt/taskPrompt 无条件宣称它存在 → 模型照读必报 not found。改 `hasErrorFile()` 条件化提及；grep 工具描述去掉具体文件名列表。
+- **T75**：旧口径 `ScanLogIssueImages` 任意日志报过错就永久计坏（修好的也扣），或只扫最新日志漏掉终态问题。新增 `FinalImageVerdicts`：日志按 mtime 升序扫描、每图取**最后一次出现**的块结果为终态；footer 增列「无效（下轮重试）： N 张」。
+- **T73**：`mermaidPreviewBlock` 自带 bar+toggle（源码/图表，右上角 icon-btn），双视图同一时刻只显一个；渲染失败自动切源码视图；`mdCodeBlock` 对 mermaid+可用预览时不再渲染源码正文（复制按钮仍在块头）。
+- **T74**：`LiveWindow=3min` 余晖让已提交会话仍显运行中。`readStat` 新增 `EndsWithSubmit/EndsWithTyped`（流式扫过时维护：SUBMITTED/[IMG_TYPE: 置位、后续任何 msg 行复位），`liveNow()` = mtime 新鲜 && 未以完成信号收尾。
+- **T76（真实缺陷）**：`ExchangeRecorder.seen` 只数请求消息——get_more_context 轮的 tool_calls 助手回复在响应时落盘、又在下一轮请求尾巴处被重写（webui 工具调用显示两次）。游标在追加响应后 +1。老测试 ReconstructsTranscript 期望 9 行改 8 行。
+- **T77（真实缺陷）**：`numberImg2Text` 按 项目+阶段 分组编号——升级修复组从 #1 重新起算，链外层徽标取最新成员（修复会话）的号 → 两链同显 #1。改为按**图片**编号（项目内图片排序、同图全体成员同号），短名撞车升级同样按去重图片算。
+- **T78**：Go `TitleFor` 对 style-fix 四类 subject（integrate/style_rN/assess_rN/blk-rN-i）给中文点名（`styleFixPhase`）；web `stylefixCompare` 阶段内排序（整合→修复→评估→分块，同环节轮次/块号升序）。fix→final-review 阶段序已在 STAGE_ORDER 里正确（fix=7 < final-review=8），复认无误。

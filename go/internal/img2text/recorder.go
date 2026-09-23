@@ -26,7 +26,7 @@ import (
 type ExchangeRecorder struct {
 	mu   sync.Mutex
 	tr   *session.TranscriptWriter
-	seen int // messages of previous requests already persisted
+	seen int // messages already persisted（请求 + 已落盘的助手回复都算）
 }
 
 // NewExchangeRecorder opens (creating if needed) the transcript for one
@@ -53,6 +53,9 @@ func (r *ExchangeRecorder) Close() error {
 // Record persists one completed exchange. req.Messages[:seen] were
 // already written by previous calls; the tail is new (tool receipts,
 // fix prompts), then the assistant reply and its usage line.
+// T76：游标必须把**上一轮的助手回复**也记进去——get_more_context 轮的
+// tool_calls 回复既在响应时落盘，又是下一轮请求的第 seen 条，原游标会让
+// 它在转录里出现两遍（webui 里工具调用显示两次）。
 func (r *ExchangeRecorder) Record(req *ChatRequest, resp *ChatResponse) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -64,6 +67,7 @@ func (r *ExchangeRecorder) Record(req *ChatRequest, resp *ChatResponse) {
 	r.seen = len(msgs)
 	if len(resp.Choices) > 0 {
 		_ = r.tr.Append(toSessionMessages([]ChatMessage{resp.Choices[0].Message})[0])
+		r.seen++ // 助手回复已落盘；下一轮请求会把它带在尾巴里，跳过
 	}
 	if resp.Usage != nil {
 		reasoning := 0

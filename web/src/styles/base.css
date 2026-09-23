@@ -924,6 +924,24 @@ details[open] > summary .line-caret {
   color: var(--caption);
 }
 
+/* T73：预览右上角 图表/源码 切换条 + 两种视图。 */
+.md-mermaid-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
+.md-mermaid-toggle {
+  font-size: 11px;
+  color: var(--caption);
+}
+
+.md-mermaid-src .md-code-body {
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+}
+
 .md-mermaid-svg {
   cursor: zoom-in;
   overflow: auto;

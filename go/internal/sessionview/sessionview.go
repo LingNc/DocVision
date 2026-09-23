@@ -298,7 +298,17 @@ func usageGenMS(durationMS, ttftMS int64) int64 {
 // so a running session keeps its mtime fresh; 60s is long enough to survive a
 // slow model turn (thinking + rate-limit backoff routinely exceed a minute
 // without any append) and still short enough to mean "probably alive".
+// T74：mtime 新鲜只是必要条件——转录已经以 SUBMIT 回执 / [IMG_TYPE: 定型
+// 答案收尾的会话一律不算运行中（否则提交后还要绿 3 分钟才熄灭）。
 const LiveWindow = 3 * time.Minute
+
+// liveNow 汇总 T74 规则：mtime 在窗口内**且**没有以完成信号收尾。
+func liveNow(stat transcriptStat, modTime, now time.Time) bool {
+	if stat.EndsWithSubmit || stat.EndsWithTyped {
+		return false
+	}
+	return now.Sub(modTime) < LiveWindow
+}
 
 // SessionInfo describes one transcript file found under the scan root.
 type SessionInfo struct {
@@ -626,6 +636,11 @@ func TitleFor(rel string) string {
 	case "checker":
 		return "核对 · " + subject
 	case "style-fix":
+		// T78：修复循环内各环节用中文点名并带序号——整合 → 样式修复 →
+		// 评估分派 → 并行分块，侧栏里一眼看出进行到哪一步、第几轮。
+		if ph := styleFixPhase(subject); ph != nil {
+			return ph.Display
+		}
 		return "样式修复 · " + subject
 	case "figure-check":
 		return "逐图校验 · " + subject
@@ -637,6 +652,57 @@ func TitleFor(rel string) string {
 		return subject
 	}
 	return label
+}
+
+// StyleFixPhase 描述样式修复循环里一个会话在其环节中的位置（T78）。
+type StyleFixPhase struct {
+	Phase  int    // 1=问题整合 2=样式修复 3=评估分派 4=分块修复；0=未识别
+	Round  int    // style/assess/blk 的轮次 rN；integrate 无轮次=0
+	Block  int    // blk 的块号 i；其余=0
+	Display string // 侧栏标题
+}
+
+// styleFixPhase 解析 style-fix 会话的 subject（integrate / style_r1 /
+// assess_r1 / blk-r1-3），给出排序键与中文显示名。
+func styleFixPhase(subject string) *StyleFixPhase {
+	if subject == "integrate" {
+		return &StyleFixPhase{Phase: 1, Display: "问题整合"}
+	}
+	if m := styleFixRoundRe("style")(subject); m != nil {
+		return &StyleFixPhase{Phase: 2, Round: m[1], Display: fmt.Sprintf("样式修复 · 第%d轮", m[1])}
+	}
+	if m := styleFixRoundRe("assess")(subject); m != nil {
+		return &StyleFixPhase{Phase: 3, Round: m[1], Display: fmt.Sprintf("评估分派 · 第%d轮", m[1])}
+	}
+	if m := regexp.MustCompile(`^blk-r(\d+)-(\d+)$`).FindStringSubmatch(subject); m != nil {
+		r, b := atoi(m[1]), atoi(m[2])
+		return &StyleFixPhase{Phase: 4, Round: r, Block: b,
+			Display: fmt.Sprintf("分块修复 · 第%d轮 · 块%d", r, b)}
+	}
+	return nil
+}
+
+// styleFixRoundRe 匹配 <kind>_r<N>（style_r1 / assess_r1）。
+func styleFixRoundRe(kind string) func(string) []int {
+	re := regexp.MustCompile(`^` + kind + `_r(\d+)$`)
+	return func(s string) []int {
+		m := re.FindStringSubmatch(s)
+		if m == nil {
+			return nil
+		}
+		return []int{0, atoi(m[1])}
+	}
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 // transcriptStem returns the transcript's file name without its extension.
@@ -764,6 +830,11 @@ type transcriptStat struct {
 	SawTool   bool
 	SawSubmit bool
 	SawTyped  bool
+	// T74：转录是否**以**完成信号收尾——EndsWithSubmit = 最后一行实质内容
+	// 是 SUBMIT 回执；EndsWithTyped = 收尾是 [IMG_TYPE: 定型答案。两者为真
+	// 时会话已经结束，即使 mtime 还在 LiveWindow 内也不再算"运行中"。
+	EndsWithSubmit bool
+	EndsWithTyped  bool
 	// model is the wire model id recorded by a meta or usage line; it decides
 	// which per-image token rule the page quotes (and applies).
 	model string
@@ -885,7 +956,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			Bytes:         c.size,
 			ModTime:       c.mt,
 			SHA:           stat.SHA,
-			Live:          now.Sub(c.mt) < LiveWindow,
+			Live:          liveNow(stat, c.mt, now),
 			EndState:      liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow),
 			ChapterOrder:  chapterOrderOf(c.name),
 		})
@@ -1006,10 +1077,20 @@ func readStat(p string) (transcriptStat, error) {
 						stat.SawTool = true
 						if strings.Contains(trimmed, "SUBMITTED") {
 							stat.SawSubmit = true
+							stat.EndsWithSubmit = true
+							stat.EndsWithTyped = false
+						} else {
+							stat.EndsWithSubmit = false
 						}
+					} else {
+						stat.EndsWithSubmit = false
 					}
 					if strings.Contains(trimmed, `"role":"assistant"`) && strings.Contains(trimmed, "[IMG_TYPE:") {
 						stat.SawTyped = true
+						stat.EndsWithTyped = true
+						stat.EndsWithSubmit = false
+					} else {
+						stat.EndsWithTyped = false
 					}
 				case "meta":
 					stat.addMeta(trimmed)

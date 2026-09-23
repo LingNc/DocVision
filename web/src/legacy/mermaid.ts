@@ -90,15 +90,56 @@ export function svgElement(svg: string): SVGSVGElement | null {
 export function mermaidPreviewBlock(source: string): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'md-mermaid'
+  // T73：右上角 图表/源码 切换——同一时刻只显示一种视图，不再上下同时
+  // 摆渲染图和源码；源码视图带复制按钮，图表视图点击进灯箱。
+  const bar = document.createElement('div')
+  bar.className = 'md-mermaid-bar'
+  const toggle = document.createElement('button')
+  toggle.className = 'md-mermaid-toggle icon-btn'
+  toggle.type = 'button'
+  bar.appendChild(toggle)
+  wrap.appendChild(bar)
+
+  const chart = document.createElement('div')
+  chart.className = 'md-mermaid-view md-mermaid-chart'
   const note = document.createElement('div')
   note.className = 'md-mermaid-note'
   note.textContent = '渲染中…'
-  wrap.appendChild(note)
+  chart.appendChild(note)
+
+  const src = document.createElement('div')
+  src.className = 'md-mermaid-view md-mermaid-src'
+  const pre = document.createElement('pre')
+  pre.className = 'md-code-body'
+  pre.textContent = source
+  src.appendChild(pre)
+
+  let showingChart = true
+  const sync = () => {
+    toggle.textContent = showingChart ? '源码' : '图表'
+    toggle.title = showingChart ? '查看源码' : '查看渲染图表'
+    chart.style.display = showingChart ? '' : 'none'
+    src.style.display = showingChart ? 'none' : ''
+  }
+  toggle.addEventListener('click', () => {
+    showingChart = !showingChart
+    sync()
+  })
+  sync()
+
+  wrap.appendChild(chart)
+  wrap.appendChild(src)
+
   void renderMermaid(source).then((entry) => {
     // 组件可能已卸载/重渲，预览位不在树上就别再动它。
     if (!wrap.isConnected) return
     if (!entry.ok) {
       note.textContent = '预览不可用'
+      // 渲染失败时直接落在源码视图，别让用户再点一下才看到内容。
+      if (showingChart) {
+        showingChart = false
+        sync()
+      }
       return
     }
     const svgNode = svgElement(entry.svg)
@@ -106,7 +147,7 @@ export function mermaidPreviewBlock(source: string): HTMLElement {
       note.textContent = '预览不可用'
       return
     }
-    wrap.removeChild(note)
+    note.remove()
     const holder = document.createElement('div')
     holder.className = 'md-mermaid-svg'
     holder.title = '点击放大查看'
@@ -114,7 +155,7 @@ export function mermaidPreviewBlock(source: string): HTMLElement {
     holder.addEventListener('click', () => {
       openLightbox('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(entry.svg), 'mermaid 图表')
     })
-    wrap.appendChild(holder)
+    chart.appendChild(holder)
   })
   return wrap
 }

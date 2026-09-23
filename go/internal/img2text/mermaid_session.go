@@ -194,6 +194,16 @@ func (st *mermaidFixSessionState) runOneStage(modelCfg config.ModelConfig, ws st
 	return st.submitted
 }
 
+// hasErrorFile 报告工作区里是否已有 compile_error.log（T72：没有就不在
+// 提示词里提它——全新升级工作区只有 submit.md，提了模型就会去读、必报错）。
+func (st *mermaidFixSessionState) hasErrorFile() bool {
+	if st.ws == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(st.ws, mermaidFixErrorFile))
+	return err == nil
+}
+
 // hasFallbackModel 报告备选段是否有模型可用（配置了能解析的
 // fallback_model；未配置时 cfg.Fallback 是零值 ModelConfig）。
 func hasFallbackModel(cfg *MermaidFixConfig) bool {
@@ -203,10 +213,16 @@ func hasFallbackModel(cfg *MermaidFixConfig) bool {
 // systemPrompt 是修复会话的系统提示词。只有这一个使用点、一次成文，不进 prompts
 // 注册表（该表收的是跨会话复用的模板；MustMention 黑名单也不涉及）。
 func (st *mermaidFixSessionState) systemPrompt() string {
+	// T72：compile_error.log 只在出现过编译错误后才落盘——提示词按实际
+	// 存在与否提及，否则全新升级工作区里模型照读必报 not found。
+	files := mermaidFixSubmitFile
+	if st.hasErrorFile() {
+		files += ", " + mermaidFixErrorFile
+	}
 	return "You are fixing a Mermaid diagram that failed syntax validation. " +
 		"The broken document is in your workspace as " + mermaidFixSubmitFile + ". " +
 		"Edit it with edit_file (targeted find/replace) or write_file (full rewrite) until it passes, then call submit. " +
-		"read_file reads any workspace file (submit.md, compile_error.log) in full or by line range. " +
+		"read_file reads any workspace file (" + files + ") in full or by line range. " +
 		"Requirements: keep it a Mermaid diagram that renders the SAME content as before — " +
 		"fix syntax, do not invent or drop nodes; do not switch to LaTeX/TikZ or any other format; " +
 		"use view_image to look at the original figure whenever unsure. " +
@@ -218,7 +234,12 @@ func (st *mermaidFixSessionState) taskPrompt(fallback bool, validationError stri
 	var b strings.Builder
 	if fallback {
 		b.WriteString(fmt.Sprintf("The previous fix session also failed after %d compile errors. ", st.cfg.ErrorLimit))
-		b.WriteString("The context was cleared; the workspace files (submit.md, compile_error.log) are unchanged.\n\n")
+		// T72：compile_error.log 同样按实际存在与否提及。
+		files := mermaidFixSubmitFile
+		if st.hasErrorFile() {
+			files += ", " + mermaidFixErrorFile
+		}
+		b.WriteString("The context was cleared; the workspace files (" + files + ") are unchanged.\n\n")
 	}
 	b.WriteString("The document " + mermaidFixSubmitFile + " in your workspace failed Mermaid validation:\n")
 	b.WriteString(validationError + "\n\n")
@@ -299,7 +320,7 @@ func (t *mermaidGrepTool) Name() string { return "grep" }
 func (t *mermaidGrepTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "grep",
-		"description": "Search the workspace files (" + mermaidFixSubmitFile + ", " + mermaidFixErrorFile + ") for a regular expression. Returns matching lines with line numbers.",
+		"description": "Search the workspace files for a regular expression. Returns matching lines with line numbers.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{

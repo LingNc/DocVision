@@ -11,6 +11,7 @@ import {
   bookDominantState, bookTip, booksHeadText,
   buildGroups, buildImg2TextChains, filterByBoard, groupKey, groupWantOpen,
   imageChipText, imageTipText, img2textMemberTag,
+  styleFixPhaseKey, stylefixCompare,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
   stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens, stageChapterAggregate,
@@ -125,6 +126,16 @@ const groups = computed<GroupView[]>(() => {
       // 逐图会话按"书里的顺序"排，而不是按修改时间。
       const items = sg.items.slice().sort((x: any, y: any) => {
         if (x.imageOrder && y.imageOrder && x.imageOrder !== y.imageOrder) return x.imageOrder - y.imageOrder
+        // T78：style-fix 阶段按修复循环环节排序（整合→样式修复→评估分派→分块），
+        // 同环节按轮次/块号；两端都解析不出才落到修改时间。
+        const ka = styleFixPhaseKey(x && x.label)
+        const kb = styleFixPhaseKey(y && y.label)
+        if (ka && kb) {
+          const c = stylefixCompare(x, y)
+          if (c !== 0) return c
+          return y.mtime > x.mtime ? 1 : -1
+        }
+        if (ka || kb) return ka ? -1 : 1
         return y.mtime > x.mtime ? 1 : -1
       })
       // T63：convert/checker 聚合——跑动时只显 live 行，全完成只剩阶段头。

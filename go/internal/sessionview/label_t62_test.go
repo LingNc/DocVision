@@ -8,10 +8,10 @@ func TestLabelForAssemblySessions(t *testing.T) {
 	cases := []struct{ rel, label, title string }{
 		{"work/sessions/book_fix.jsonl", "fix:book_fix", "全书修复"},
 		{"work/sessions/final_review.jsonl", "final-review:final_review", "终审"},
-		{"work/sessions/stylefix_integrate.jsonl", "style-fix:integrate", "样式修复 · integrate"},
-		{"work/sessions/stylefix_style_r1.jsonl", "style-fix:style_r1", "样式修复 · style_r1"},
-		{"work/sessions/stylefix_assess_r1.jsonl", "style-fix:assess_r1", "样式修复 · assess_r1"},
-		{"work/sessions/stylefix-blk-r1-2.jsonl", "style-fix:blk-r1-2", "样式修复 · blk-r1-2"},
+		{"work/sessions/stylefix_integrate.jsonl", "style-fix:integrate", "问题整合"},
+		{"work/sessions/stylefix_style_r1.jsonl", "style-fix:style_r1", "样式修复 · 第1轮"},
+		{"work/sessions/stylefix_assess_r1.jsonl", "style-fix:assess_r1", "评估分派 · 第1轮"},
+		{"work/sessions/stylefix-blk-r1-2.jsonl", "style-fix:blk-r1-2", "分块修复 · 第1轮 · 块2"},
 		{"work/sessions/convert_chapter_001.jsonl", "convert:chapter_001", "转换 · chapter_001"},
 	}
 	for _, c := range cases {

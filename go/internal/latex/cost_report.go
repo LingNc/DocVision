@@ -41,8 +41,13 @@ func (r *Runner) CostReport(proj string) {
 
 	images, pages := projectScale(proj)
 	r.log.Log(0, "[cost] ===== AI 用量与费用（按阶段） =====")
-	r.log.Log(0, fmt.Sprintf("[cost] %s %5s %6s %11s %8s %11s %10s",
-		padStage("阶段", 11), "会话", "请求", "输入tokens", "缓存命中", "输出tokens", "费用"))
+	// T71：表头也走显示宽对齐——fmt 的 %Ns 按 rune 数补位，中文表头
+	// （会话=4 列）配 ASCII 数据（%5d=5 列）会整体错开；数值列右对齐。
+	r.log.Log(0, fmt.Sprintf("[cost] %s %s %s %s %s %s %s",
+		padStage("阶段", 11),
+		padLeftWide("会话", 5), padLeftWide("请求", 6),
+		padLeftWide("输入tokens", 11), padLeftWide("缓存命中", 8),
+		padLeftWide("输出tokens", 11), padLeftWide("费用", 10)))
 	var reqs, in, cached, out int
 	var money float64
 	currency := ""
@@ -185,6 +190,16 @@ func perUnit(label string, n int, currency string, money float64) string {
 // fmt 的 %-Ns 按字节补空格，中文阶段名（「全书修复」= 8 列）会和 ASCII
 // 阶段名（vector=6 列）错开——T40 的"日志没有对齐"即此。
 func padStage(s string, width int) string {
+	return padWide(s, width, false)
+}
+
+// padLeftWide 把 s 右对齐补齐到给定**显示宽度**（左侧补空格）——表头的
+// 中文列名与下方的数值列（%Nd 右对齐）对齐用（T71）。
+func padLeftWide(s string, width int) string {
+	return padWide(s, width, true)
+}
+
+func padWide(s string, width int, left bool) string {
 	w := 0
 	for _, r := range s {
 		if r >= 0x2E80 { // CJK 部首起的一律按宽字符计（阶段名只有中英文）
@@ -196,5 +211,9 @@ func padStage(s string, width int) string {
 	if w >= width {
 		return s
 	}
-	return s + strings.Repeat(" ", width-w)
+	pad := strings.Repeat(" ", width-w)
+	if left {
+		return pad + s
+	}
+	return s + pad
 }

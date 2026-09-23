@@ -794,6 +794,12 @@ export function mdCodeBlock(code: string, lang: string): HTMLElement {
   head.appendChild(el('span', 'md-code-lang', lang || 'text'))
   head.appendChild(copyButton(code))
   wrap.appendChild(head)
+  // T73：```mermaid 且预览可用（非静态快照）时，图表预览块自带 源码/图表
+  // 切换（右上角）——源码视图收进预览块，不再上下重复展示两份内容。
+  if (String(lang || '').trim().toLowerCase() === 'mermaid' && mermaidPreviewAvailable()) {
+    wrap.appendChild(mermaidPreviewBlock(code))
+    return wrap
+  }
   const body = el('pre', 'md-code-body')
   const inner = el('code')
   // 代码块内容也走机器文本渲染：```json 做 JSON 高亮，```bash / ```diff / ```log
@@ -802,11 +808,6 @@ export function mdCodeBlock(code: string, lang: string): HTMLElement {
   body.appendChild(inner)
   wrap.appendChild(body)
   if (res.note) wrap.appendChild(el('div', 'note', res.note))
-  // T56 追加：```mermaid 块在下方挂图表预览（后端 /api/mermaid 渲染，零依赖）；
-  // 静态快照没有 API，只显示代码块。
-  if (String(lang || '').trim().toLowerCase() === 'mermaid' && mermaidPreviewAvailable()) {
-    wrap.appendChild(mermaidPreviewBlock(code))
-  }
   return wrap
 }
 
