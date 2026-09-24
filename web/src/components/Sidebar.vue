@@ -95,6 +95,7 @@ function toggleBlockView() {
 
 interface StageView {
   aggCollapsed?: boolean // T79：聚合后零行、提供「展开全部」时的文案
+  blockRows?: any[]      // T79/T80：方块视图行——展开后也要能显示（agg.rows 为空时）
   stage: string; title: string; items: any[]; live: number
   status: StageStatus | null
   overflowKey: string; needOverflow: boolean; shown: any[]
@@ -140,20 +141,23 @@ const groups = computed<GroupView[]>(() => {
         return y.mtime > x.mtime ? 1 : -1
       })
       // T63：convert/checker 聚合——跑动时只显 live 行，全完成只剩阶段头。
-      // T79：聚合后零行（全完成、无错误）给一个手动展开入口——用户要能点回
-      // 去看具体章节会话；与「更多会话」共用 overflow 记忆键，展开状态落盘。
+      // T79：聚合后零行（全完成、无错误）给一个手动展开入口——collapsed 时
+      // 列表为空、渲染「展开全部 N 章」按钮；expanded 后显示全部 items。
+      // （首版写成 aggCollapsed 翻转后落回 agg.rows——展开后依然空白。）
       const agg = stageChapterAggregate(stg, items, !!state.filter)
       const okey = groupKey('overflow', g.name + '/' + stg)
-      const aggCollapsed = !!agg && agg.rows.length === 0 && !isOverflowOpen(okey) && !state.filter
-      const shown0 = aggCollapsed ? items : (agg ? agg.rows : items)
-      const needOverflow = (!agg && shown0.length > OVERFLOW_LIMIT) || aggCollapsed
+      const collapsed = !!agg && agg.rows.length === 0
+      const expanded = collapsed && (isOverflowOpen(okey) || !!state.filter)
+      const shown0 = !collapsed ? (agg ? agg.rows : items) : (expanded ? items : [])
+      const needOverflow = (!agg && shown0.length > OVERFLOW_LIMIT) || (collapsed && !expanded)
       const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter
       const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT)
       return {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
         overflowKey: okey, needOverflow, shown, hiddenCount: shown0.length - shown.length,
-        agg, aggCollapsed,
+        agg, aggCollapsed: collapsed && !expanded,
+        blockRows: shown0,
       }
     })
     let chains: SessionChain[] | null = null
@@ -503,7 +507,7 @@ function onMoreClick(okey: string) {
                 </summary>
                 <div v-if="blockView" class="session-blocks">
                   <button
-                    v-for="s in (sv.agg ? sv.agg.rows : sv.items)"
+                    v-for="s in (sv.blockRows !== undefined ? sv.blockRows : (sv.agg ? sv.agg.rows : sv.items))"
                     :key="s.id"
                     class="session-block"
                     :class="{ active: state.current && state.current.id === s.id, live: s.live, err: !s.live && s.endState === 'error', pend: !s.live && !s.endState }"

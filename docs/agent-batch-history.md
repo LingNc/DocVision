@@ -1467,3 +1467,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T79 聚合阶段手动展开入口
 - T63 聚合后零行（全完成+无错误）时阶段下没有任何会话行、也无展开入口——用户以为会话丢了。改 Sidebar.vue：aggCollapsed 时渲染「展开全部 N 章（已聚合，点击展开）」按钮，与 overflow 共用记忆键（展开状态落盘）。
+
+### T80/T81 聚合展开修复 + 页码审计降噪
+- T80（T79 的真实缺陷）：`aggCollapsed` 翻转 false 后 shown0 落回 agg.rows（空），「展开全部」点了还是空白；方块视图直接读 agg.rows 同病。改 collapsed/expanded 两态显式建模 + blockRows 走完整列表。
+- T81：Final pass 每文件都打「页码标记: N 处」审计行，实际写入按字节比对全部跳过——用户读成"每轮全量重打"。内容 unchanged 时抑制审计行（bytes.Equal 预检），只有真写入才报。

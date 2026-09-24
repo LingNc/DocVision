@@ -398,7 +398,11 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		// P21：embed 改写完成后做一遍行级页码标记插入（一次扫描在
 		// pagemark.go 内完成围栏顺延与去重；embed 的字节偏移用 delta 平移）。
 		nc, marks := plan.applyTo(nc, entry.lines, entry.starts, shifts)
-		if len(marks) > 0 {
+		// T81：重建结果与盘上逐字节相同时，写入本来就跳过——页码审计行
+		// 也不打（否则每轮全量刷一遍「页码标记: N 处」像是把所有文件重打
+		// 了一遍；实际什么都没写）。只有真要写入的文件才报审计。
+		unchanged := hadFile && bytes.Equal(existing, []byte(nc))
+		if len(marks) > 0 && !unchanged {
 			aud := plan.audit(marks)
 			line := "  页码标记: " + strconv.Itoa(len(marks)) + " 处 / " + strconv.Itoa(aud.MaxPage) + " 页"
 			if aud.OutOfRange > 0 || aud.Backward > 0 {
