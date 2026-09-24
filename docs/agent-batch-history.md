@@ -1464,3 +1464,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **T76（真实缺陷）**：`ExchangeRecorder.seen` 只数请求消息——get_more_context 轮的 tool_calls 助手回复在响应时落盘、又在下一轮请求尾巴处被重写（webui 工具调用显示两次）。游标在追加响应后 +1。老测试 ReconstructsTranscript 期望 9 行改 8 行。
 - **T77（真实缺陷）**：`numberImg2Text` 按 项目+阶段 分组编号——升级修复组从 #1 重新起算，链外层徽标取最新成员（修复会话）的号 → 两链同显 #1。改为按**图片**编号（项目内图片排序、同图全体成员同号），短名撞车升级同样按去重图片算。
 - **T78**：Go `TitleFor` 对 style-fix 四类 subject（integrate/style_rN/assess_rN/blk-rN-i）给中文点名（`styleFixPhase`）；web `stylefixCompare` 阶段内排序（整合→修复→评估→分块，同环节轮次/块号升序）。fix→final-review 阶段序已在 STAGE_ORDER 里正确（fix=7 < final-review=8），复认无误。
+
+### T79 聚合阶段手动展开入口
+- T63 聚合后零行（全完成+无错误）时阶段下没有任何会话行、也无展开入口——用户以为会话丢了。改 Sidebar.vue：aggCollapsed 时渲染「展开全部 N 章（已聚合，点击展开）」按钮，与 overflow 共用记忆键（展开状态落盘）。

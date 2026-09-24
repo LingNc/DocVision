@@ -9134,9 +9134,10 @@
               return y.mtime > x.mtime ? 1 : -1;
             });
             const agg = stageChapterAggregate(stg, items, !!state.filter);
-            const shown0 = agg ? agg.rows : items;
             const okey = groupKey("overflow", g.name + "/" + stg);
-            const needOverflow = !agg && shown0.length > OVERFLOW_LIMIT;
+            const aggCollapsed = !!agg && agg.rows.length === 0 && !isOverflowOpen(okey) && !state.filter;
+            const shown0 = aggCollapsed ? items : agg ? agg.rows : items;
+            const needOverflow = !agg && shown0.length > OVERFLOW_LIMIT || aggCollapsed;
             const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter;
             const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT);
             return {
@@ -9149,7 +9150,8 @@
               needOverflow,
               shown,
               hiddenCount: shown0.length - shown.length,
-              agg
+              agg,
+              aggCollapsed
             };
           });
           let chains = null;
@@ -9413,7 +9415,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-0561132e><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0561132e><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0561132e></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0561132e><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-0561132e></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0561132e></path></svg></span>', 1)),
+                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-9dbc8160><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-9dbc8160><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-9dbc8160></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-9dbc8160><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-9dbc8160></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-9dbc8160></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9627,7 +9629,7 @@
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_72)) : createCommentVNode("", true)
+                            }, toDisplayString(sv.aggCollapsed ? "展开全部 " + sv.items.length + " 章（已聚合，点击展开）" : "更多会话（还有 " + sv.hiddenCount + " 个）"), 9, _hoisted_72)) : createCommentVNode("", true)
                           ]))
                         ], 8, _hoisted_57)), [
                           [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
@@ -9687,7 +9689,7 @@
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_82)) : createCommentVNode("", true)
+                            }, toDisplayString(sv.aggCollapsed ? "展开全部 " + sv.items.length + " 章（已聚合，点击展开）" : "更多会话（还有 " + sv.hiddenCount + " 个）"), 9, _hoisted_82)) : createCommentVNode("", true)
                           ], 64))
                         ], 64))
                       ], 64);
@@ -9723,7 +9725,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-0561132e"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-9dbc8160"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

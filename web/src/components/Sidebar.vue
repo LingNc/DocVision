@@ -94,6 +94,7 @@ function toggleBlockView() {
 }
 
 interface StageView {
+  aggCollapsed?: boolean // T79：聚合后零行、提供「展开全部」时的文案
   stage: string; title: string; items: any[]; live: number
   status: StageStatus | null
   overflowKey: string; needOverflow: boolean; shown: any[]
@@ -139,17 +140,20 @@ const groups = computed<GroupView[]>(() => {
         return y.mtime > x.mtime ? 1 : -1
       })
       // T63：convert/checker 聚合——跑动时只显 live 行，全完成只剩阶段头。
+      // T79：聚合后零行（全完成、无错误）给一个手动展开入口——用户要能点回
+      // 去看具体章节会话；与「更多会话」共用 overflow 记忆键，展开状态落盘。
       const agg = stageChapterAggregate(stg, items, !!state.filter)
-      const shown0 = agg ? agg.rows : items
       const okey = groupKey('overflow', g.name + '/' + stg)
-      const needOverflow = !agg && shown0.length > OVERFLOW_LIMIT
+      const aggCollapsed = !!agg && agg.rows.length === 0 && !isOverflowOpen(okey) && !state.filter
+      const shown0 = aggCollapsed ? items : (agg ? agg.rows : items)
+      const needOverflow = (!agg && shown0.length > OVERFLOW_LIMIT) || aggCollapsed
       const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter
       const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT)
       return {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
         overflowKey: okey, needOverflow, shown, hiddenCount: shown0.length - shown.length,
-        agg,
+        agg, aggCollapsed,
       }
     })
     let chains: SessionChain[] | null = null
@@ -532,7 +536,7 @@ function onMoreClick(okey: string) {
                     </span>
                   </button>
                   <button v-if="sv.needOverflow" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
-                    更多会话（还有 {{ sv.hiddenCount }} 个）
+                    {{ sv.aggCollapsed ? '展开全部 ' + sv.items.length + ' 章（已聚合，点击展开）' : '更多会话（还有 ' + sv.hiddenCount + ' 个）' }}
                   </button>
                 </div>
               </details>
@@ -572,7 +576,7 @@ function onMoreClick(okey: string) {
                     </span>
                   </button>
                   <button v-if="sv.needOverflow" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
-                    更多会话（还有 {{ sv.hiddenCount }} 个）
+                    {{ sv.aggCollapsed ? '展开全部 ' + sv.items.length + ' 章（已聚合，点击展开）' : '更多会话（还有 ' + sv.hiddenCount + ' 个）' }}
                   </button>
                 </template>
               </template>
