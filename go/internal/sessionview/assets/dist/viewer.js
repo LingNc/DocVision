@@ -9135,10 +9135,10 @@
             });
             const agg = stageChapterAggregate(stg, items, !!state.filter);
             const okey = groupKey("overflow", g.name + "/" + stg);
-            const collapsed = !!agg && agg.rows.length === 0;
-            const expanded = collapsed && (isOverflowOpen(okey) || !!state.filter);
-            const shown0 = !collapsed ? agg ? agg.rows : items : expanded ? items : [];
-            const needOverflow = !agg && shown0.length > OVERFLOW_LIMIT || collapsed && !expanded;
+            const expanded = !!agg && (isOverflowOpen(okey) || !!state.filter);
+            const shown0 = expanded ? items : agg ? agg.rows : items;
+            const canExpand = !!agg && agg.rows.length < items.length;
+            const needOverflow = !agg && shown0.length > OVERFLOW_LIMIT || canExpand && !expanded;
             const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter;
             const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT);
             return {
@@ -9152,7 +9152,7 @@
               shown,
               hiddenCount: shown0.length - shown.length,
               agg,
-              aggCollapsed: collapsed && !expanded,
+              aggCollapsed: canExpand && !expanded,
               blockRows: shown0
             };
           });
@@ -9417,7 +9417,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-8dba25a0><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-8dba25a0><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-8dba25a0></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-8dba25a0><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-8dba25a0></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-8dba25a0></path></svg></span>', 1)),
+                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-5177f541><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5177f541><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5177f541></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5177f541><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-5177f541></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5177f541></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9727,7 +9727,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-8dba25a0"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-5177f541"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

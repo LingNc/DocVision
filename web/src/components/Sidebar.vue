@@ -141,22 +141,23 @@ const groups = computed<GroupView[]>(() => {
         return y.mtime > x.mtime ? 1 : -1
       })
       // T63：convert/checker 聚合——跑动时只显 live 行，全完成只剩阶段头。
-      // T79：聚合后零行（全完成、无错误）给一个手动展开入口——collapsed 时
-      // 列表为空、渲染「展开全部 N 章」按钮；expanded 后显示全部 items。
-      // （首版写成 aggCollapsed 翻转后落回 agg.rows——展开后依然空白。）
+      // T79/T82：聚合后给一个手动展开入口——零行（全完成、无错误）或只有
+      // 运行/错误行（完成的章节被聚合掉）都渲染「展开全部 N 章」按钮，
+      // expanded 后显示全部 items。（T80 教训：翻转后不许落回 agg.rows。）
       const agg = stageChapterAggregate(stg, items, !!state.filter)
       const okey = groupKey('overflow', g.name + '/' + stg)
-      const collapsed = !!agg && agg.rows.length === 0
-      const expanded = collapsed && (isOverflowOpen(okey) || !!state.filter)
-      const shown0 = !collapsed ? (agg ? agg.rows : items) : (expanded ? items : [])
-      const needOverflow = (!agg && shown0.length > OVERFLOW_LIMIT) || (collapsed && !expanded)
+      const expanded = !!agg && (isOverflowOpen(okey) || !!state.filter)
+      const shown0 = expanded ? items : (agg ? agg.rows : items)
+      // 聚合吞掉了一些行（零行也算全吞）→ 需要展开按钮
+      const canExpand = !!agg && agg.rows.length < items.length
+      const needOverflow = (!agg && shown0.length > OVERFLOW_LIMIT) || (canExpand && !expanded)
       const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter
       const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT)
       return {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
         overflowKey: okey, needOverflow, shown, hiddenCount: shown0.length - shown.length,
-        agg, aggCollapsed: collapsed && !expanded,
+        agg, aggCollapsed: canExpand && !expanded,
         blockRows: shown0,
       }
     })

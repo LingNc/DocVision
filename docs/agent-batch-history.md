@@ -1471,3 +1471,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T80/T81 聚合展开修复 + 页码审计降噪
 - T80（T79 的真实缺陷）：`aggCollapsed` 翻转 false 后 shown0 落回 agg.rows（空），「展开全部」点了还是空白；方块视图直接读 agg.rows 同病。改 collapsed/expanded 两态显式建模 + blockRows 走完整列表。
 - T81：Final pass 每文件都打「页码标记: N 处」审计行，实际写入按字节比对全部跳过——用户读成"每轮全量重打"。内容 unchanged 时抑制审计行（bytes.Equal 预检），只有真写入才报。
+
+### T82 聚合部分可见时的展开入口
+- T79/T80 只覆盖「聚合后零行」。真实数据（2026年李艳芳预测三套卷数一_1：checker 30 完成+2 错误+4 无终态）下 agg.rows=2 行错误 → 非零行 → 无展开按钮，用户看到「章节核对下只有 2 行」以为又没显示。改 canExpand = agg.rows.length < items.length（零行与部分行统一），expanded 走完整 items。
