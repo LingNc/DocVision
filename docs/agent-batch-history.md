@@ -1477,3 +1477,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T83 方块视图聚合空白
 - 「展开全部」按钮此前只在列表视图（v-else 分支）渲染；方块视图（v-if=blockView）分支只有 .session-blocks 网格——聚合阶段（agg.rows 空/部分）就是空白，用户截图实测。方块视图分支补同一按钮（v-if=blockView && aggCollapsed）；实测：0 块 + 按钮 → 点开 3 块。顺带 convert/checker 加 chapterOrder 升序（块标签曾按 mtime 乱序 2/1/3）。
+
+### T84 缺包检测兜底（真实案例）
+- 测试-概率论终审会话：模型 bash 里 `try: import pypdf except ImportError as e: print('no pypdf', e)`——输出只有裸的 "No module named 'pypdf'"，`moduleErrorRe` 要求 `ModuleNotFoundError:`/`ImportError:` 前缀 → 自动安装没触发，模型改用 mutool 绕路。加 moduleErrorBareRe 兜底（误伤面：文本内容恰好含该短语 → 最多多装一个包）。
+- 顺带查明该终审会话的真实结局：round 66 工具回执后的下一次 API 请求失败（endState=error），assemble 按设计告警「终审未通过（保留已编译全书）」并照常交付 out/——不是"提前退出"的设计行为。失败原因打在运行终端，转录不含错误行。

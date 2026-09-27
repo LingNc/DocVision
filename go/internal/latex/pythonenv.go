@@ -548,10 +548,24 @@ func (p *PythonEnv) MissingModule(output string) string {
 			return m[1]
 		}
 	}
+	// T84：模型自己 except ImportError 后只打印了 str(e)（如
+	// "no pypdf No module named 'pypdf'"）——没有异常类名前缀，第一条
+	// 正则匹配不到，自动安装就不触发。兜底认裸的 "No module named 'x'"
+	// 行。误伤面：cat/grep 出包含该短语的文本内容——最多多装一个包，
+	// 可接受。
+	for _, line := range strings.Split(output, "\n") {
+		if m := moduleErrorBareRe.FindStringSubmatch(line); m != nil {
+			return m[1]
+		}
+	}
 	return ""
 }
 
 var moduleErrorRe = regexp.MustCompile(`(?:ModuleNotFoundError|ImportError): No module named '?([A-Za-z0-9_.\-]+)'?`)
+
+// moduleErrorBareRe 兜底：裸的 "No module named 'x'"（模型捕获异常后
+// 只打印 str(e) 时异常类名丢失）。
+var moduleErrorBareRe = regexp.MustCompile(`No module named '?([A-Za-z0-9_.\-]+)'?`)
 
 // NoteFor installs a module the session was missing and returns the text
 // appended to the tool result ("" when nothing was done).
