@@ -1474,3 +1474,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T82 聚合部分可见时的展开入口
 - T79/T80 只覆盖「聚合后零行」。真实数据（2026年李艳芳预测三套卷数一_1：checker 30 完成+2 错误+4 无终态）下 agg.rows=2 行错误 → 非零行 → 无展开按钮，用户看到「章节核对下只有 2 行」以为又没显示。改 canExpand = agg.rows.length < items.length（零行与部分行统一），expanded 走完整 items。
+
+### T83 方块视图聚合空白
+- 「展开全部」按钮此前只在列表视图（v-else 分支）渲染；方块视图（v-if=blockView）分支只有 .session-blocks 网格——聚合阶段（agg.rows 空/部分）就是空白，用户截图实测。方块视图分支补同一按钮（v-if=blockView && aggCollapsed）；实测：0 块 + 按钮 → 点开 3 块。顺带 convert/checker 加 chapterOrder 升序（块标签曾按 mtime 乱序 2/1/3）。

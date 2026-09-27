@@ -128,6 +128,8 @@ const groups = computed<GroupView[]>(() => {
       // 逐图会话按"书里的顺序"排，而不是按修改时间。
       const items = sg.items.slice().sort((x: any, y: any) => {
         if (x.imageOrder && y.imageOrder && x.imageOrder !== y.imageOrder) return x.imageOrder - y.imageOrder
+        // convert/checker 按章节号排（块视图与列表视图同序，不再是 mtime 乱序）
+        if ((stg === 'convert' || stg === 'checker') && x.chapterOrder && y.chapterOrder && x.chapterOrder !== y.chapterOrder) return x.chapterOrder - y.chapterOrder
         // T78：style-fix 阶段按修复循环环节排序（整合→样式修复→评估分派→分块），
         // 同环节按轮次/块号；两端都解析不出才落到修改时间。
         const ka = styleFixPhaseKey(x && x.label)
@@ -519,6 +521,11 @@ function onMoreClick(okey: string) {
                     @click="onRowClick(s)"
                   >{{ s.imageOrder || s.chapterOrder || '' }}</button>
                 </div>
+                <!-- T83：方块视图下聚合阶段同样给「展开全部」入口——之前该按钮只在
+                     列表视图渲染，方块视图里聚合阶段就是一片空白无从展开。 -->
+                <button v-if="blockView && sv.aggCollapsed" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
+                  展开全部 {{ sv.items.length }} 章（已聚合，点击展开）
+                </button>
                 <div v-else>
                   <button
                     v-for="s in sv.shown"
