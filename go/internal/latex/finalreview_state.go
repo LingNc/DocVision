@@ -98,10 +98,32 @@ func hashFinalReviewInputs(proj string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// statePartialHashFile 是**中断态**指纹（T85）：终审/全书修复会话失败
+// 时也把当时的树改动回写，但写进单独的指纹文件——完成态（state.sha256）
+// 只认成功跑完的。续跑时部分态指纹一致 → 恢复半成品编辑 + 续跑转录，
+// 而不是把几十轮会话从头再烧一遍。
+const statePartialHashFile = "state.partial.sha256"
+
 // persistFinalReviewState writes the final-review session's tree edits back
 // into the workspace and records the content fingerprint. Called only after
 // the post-review compile passed.
 func persistFinalReviewState(proj, buildDir string) error {
+	if err := writeFinalReviewTree(proj, buildDir, stateHashFile); err != nil {
+		return err
+	}
+	// 完成态覆盖中断态：这次跑完了，上次失败的半成品指纹作废。
+	_ = os.Remove(filepath.Join(proj, "work", finalReviewStateDir, statePartialHashFile))
+	return nil
+}
+
+// persistFinalReviewPartial 在会话**失败**时回写当时的树改动（T85）。
+// 与完成态同一套拷贝，但指纹落在 statePartialHashFile——它只解锁
+// "恢复 + 续跑"，绝不会让 finalReviewStateCurrent 误判成"已完成"。
+func persistFinalReviewPartial(proj, buildDir string) error {
+	return writeFinalReviewTree(proj, buildDir, statePartialHashFile)
+}
+
+func writeFinalReviewTree(proj, buildDir, hashFile string) error {
 	stateDir := filepath.Join(proj, "work", finalReviewStateDir)
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return err
@@ -151,7 +173,24 @@ func persistFinalReviewState(proj, buildDir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(stateDir, stateHashFile), []byte(sum+"\n"), 0o644)
+	return os.WriteFile(filepath.Join(stateDir, hashFile), []byte(sum+"\n"), 0o644)
+}
+
+// finalReviewPartialCurrent reports whether the INTERRUPTED run's persisted
+// edits still match the workspace (same fingerprint semantics as the
+// complete-state check, but against state.partial.sha256). True ⇒ the
+// rebuilt tree can be restored to the point the failed session reached and
+// its transcript resumed.
+func finalReviewPartialCurrent(proj string) bool {
+	stored, err := os.ReadFile(filepath.Join(proj, "work", finalReviewStateDir, statePartialHashFile))
+	if err != nil {
+		return false
+	}
+	cur, err := hashFinalReviewInputs(proj)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(stored)) == cur
 }
 
 // finalReviewStateCurrent reports whether the persisted final-review state

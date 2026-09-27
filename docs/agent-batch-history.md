@@ -1481,3 +1481,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T84 缺包检测兜底（真实案例）
 - 测试-概率论终审会话：模型 bash 里 `try: import pypdf except ImportError as e: print('no pypdf', e)`——输出只有裸的 "No module named 'pypdf'"，`moduleErrorRe` 要求 `ModuleNotFoundError:`/`ImportError:` 前缀 → 自动安装没触发，模型改用 mutool 绕路。加 moduleErrorBareRe 兜底（误伤面：文本内容恰好含该短语 → 最多多装一个包）。
 - 顺带查明该终审会话的真实结局：round 66 工具回执后的下一次 API 请求失败（endState=error），assemble 按设计告警「终审未通过（保留已编译全书）」并照常交付 out/——不是"提前退出"的设计行为。失败原因打在运行终端，转录不含错误行。
+
+### T85 终审/全书修复续跑（真实事故驱动）
+- 真实事故：测试-概率论终审跑到 66 轮、正在查书签重复（已发现 bk:chapter1.0 vs chapter.1 重复），round 67 的 API 请求失败 → 会话 error 收场。assemble 按设计告警「终审未通过（保留已编译全书）」照常交付 out/，但下次重跑终审从 0 重烧。
+- 改法：新增中断态 `work/final_review/state.partial.sha256`——失败时（Run 返回 error）把当时 build 树的章节/顶层 .tex 回写 work/（与完成态同一套拷贝，指纹落不同文件）；assemble 入口指纹一致 → applyFinalReviewState 恢复顶层编辑 + finalReview/fixSession 带 resume=true 走 LoadTranscriptStats/SetMessages/SeedCounters/replaySubmit（convert 同款），历史以 tool 回执收尾时 resumeUserText 返回空、原样续行不插话术。完成态写入时清掉部分态指纹。测试 TestFinalReviewPartialState 钉住四态（部分态不触发完成跳过/章节变化失效/完成覆盖清部分态/完成态为真）。
+- 顺带回填了事故现场：build/ 树还在（三章编辑与 work/ 不一致），用一次性 env-gated 测试把中断态写进 测试-概率论/work/final_review/（已验证指纹与章节同步），用户部署新版后重跑即可续跑那 66 轮。
+- 「所有会话续跑」现状盘点：convert/样式/章节划分/矢量图早已续跑；checker 按章粒度 verdict 续跑；style-fix 循环有 blocks.json 等状态文件；本次补上 fix+final_review 两个空档。

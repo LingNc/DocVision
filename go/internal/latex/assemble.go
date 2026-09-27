@@ -90,6 +90,9 @@ func (r *Runner) assemblePhase(proj string) error {
 	// work/chapters/。若这些文件自上次终审后没变（convert 没重跑），
 	// 重建出的树与上次终审后的一致，直接沿用持久化状态、跳过终审会话。
 	frCurrent := finalReviewStateCurrent(proj)
+	// T85：上次终审/修复会话**失败**时落的中断态——指纹一致就把半成品
+	// 编辑恢复到重建树里，会话从转录续跑（见 finalReview/fixSession）。
+	frPartial := !frCurrent && finalReviewPartialCurrent(proj)
 
 	mainTex := "\\documentclass{" + clsName + "}\n" +
 		"\\graphicspath{{figures/}}\n" +
@@ -104,6 +107,15 @@ func (r *Runner) assemblePhase(proj string) error {
 			frCurrent = false
 		} else {
 			r.log.Log(0, "[final-review] 章节未变且上次终审已回写——沿用终审产物，跳过终审会话")
+		}
+	} else if frPartial {
+		// 中断态：顶层 .tex（终审加的 frontmatter 等）恢复进构建树；
+		// 章节改动已在 work/chapters（构建拷贝自动带上）。
+		if err := applyFinalReviewState(proj, buildDir); err != nil {
+			r.log.LogWarning(0, "[final-review] 恢复中断态失败，改为全新会话:", err)
+			frPartial = false
+		} else {
+			r.log.Log(0, "[final-review] 检测到上次中断的终审/修复产物——恢复编辑现场，会话将续跑")
 		}
 	}
 
@@ -125,7 +137,7 @@ func (r *Runner) assemblePhase(proj string) error {
 		// 编译失败是正常的工作状态（会话需要编译才能看到报错），
 		// 不是阶段失败：交给修复会话在构建树里迭代。修复会话最终
 		// 也没能让它编译通过时才告警，产物照样交付。
-		if err := r.fixSession(proj, buildDir, res.Err); err != nil {
+		if err := r.fixSession(proj, buildDir, res.Err, frPartial); err != nil {
 			r.log.LogWarning(0, "[assemble] 修复会话未能在上限内让全书编译通过:", err)
 			r.phaseNote()("[assemble] 修复未完成，交付现有产物")
 		}
@@ -133,7 +145,7 @@ func (r *Runner) assemblePhase(proj string) error {
 	// 汇总/终审会话：核对成品 PDF（封面/目录/顺序/页码/图表/版面）、
 	// 整理目录结构，并重新构建 —— 它以 submit 作为"全书定稿"的标记。
 	if r.cfg.Latex.Compile.FinalReviewEnabled() && !frCurrent && fileExists(filepath.Join(buildDir, "main.pdf")) {
-		if err := r.finalReview(proj, buildDir, texs); err != nil {
+		if err := r.finalReview(proj, buildDir, texs, frPartial); err != nil {
 			r.log.LogWarning(0, "[final-review] 终审会话未通过（保留已编译全书）:", err)
 			r.phaseNote()("[final-review] 终审未通过（保留已编译全书）")
 		}
@@ -214,7 +226,7 @@ func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool
 // session on the build tree: read/write/edit/grep/bash + compile +
 // view_pdf/view_image + fonts, so it can restructure the assembled
 // project (multi-file, resources) and verify the PDF itself.
-func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
+func (r *Runner) fixSession(proj, buildDir, firstErr string, resume bool) error {
 	r.log.LogWarning(0, "[assemble] 全书编译失败，启动修复会话:", firstErr)
 	// T70：bookfix_model 独立配模型；空 = 沿用 convert 模型。
 	fixKey := r.cfg.Latex.StyleFix.BookFixModel
@@ -230,26 +242,55 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.FixSystem), tuning, r.outputLang()), tools, r.log, 1, "fix")
 
 	// 转录挂到 work/sessions/（T39）：修复会话在 WebUI 可见、进成本表。
-	// 构建树每次 assemble 都重建，上一轮的 edit 无法在新树上续用——
-	// 所以不回放历史、计数从头来，只把旧转录归档成 *_prev 保留可查。
+	// T85：上次失败时已把当时的树改动回写成中断态并在本次恢复了——
+	// 转录可以续跑（与 convert 同一套 LoadTranscriptStats 模式），不再
+	// 把几十轮修复从头再烧；无中断态（或转录读不出来）才归档重来。
 	trPath := filepath.Join(proj, "work", "sessions", "book_fix.jsonl")
-	archivePrevTranscript(trPath)
+	resumed := false
+	resumeSkip := false
+	fixStart := time.Now()
+	var resumeMsgs []session.ChatMessage
+	if resume {
+		if msgs, st, err := session.LoadTranscriptStats(trPath); err != nil {
+			r.log.LogWarning(0, "[fix] 转录读取失败（忽略，按全新会话继续）:", err)
+		} else if len(msgs) > 0 {
+			sess.SetMessages(msgs)
+			sess.SeedCounters(st.Rounds, st.Tools)
+			resumed, resumeMsgs = true, msgs
+			resumeLog(r.log, 1, "fix", trPath, msgs, st)
+			if replaySubmit(r.log, 1, "fix", submit, st) {
+				resumeSkip = true
+			}
+			fixStart = time.Now().Add(-st.Active)
+		}
+	}
+	if !resumed {
+		archivePrevTranscript(trPath)
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
 	}
-	fixHook, fixClose := r.livePhaseRow("assemble/fix", "fix")
+	fixHook, fixClose := r.livePhaseRowAt("assemble/fix", "fix", fixStart)
 	sess.SetProgressHook(fixHook)
 	defer fixClose()
 
 	lastErr := firstErr
-	for attempt := 0; attempt < r.cfg.Latex.Compile.MaxFixRounds; attempt++ {
+	for attempt := 0; attempt < r.cfg.Latex.Compile.MaxFixRounds && !resumeSkip; attempt++ {
 		userText := "The full-book compile failed:\n\n" + truncateStr(lastErr, 8000) +
 			"\n\nRead the failing file, apply a minimal edit_file, then compile {path: \"main.tex\"} (engine \"latexmk\" for a full multi-pass build) and check the result with view_pdf."
 		if attempt > 0 {
 			userText = "Still failing:\n\n" + truncateStr(lastErr, 8000)
 		}
+		if resumed && attempt == 0 {
+			userText = resumeUserText(resumeMsgs, "The session was interrupted earlier (an API error or a killed process). The build tree has been restored to the exact state your edits left it in. Continue from where you left off: re-run compile {path: \"main.tex\"} to confirm the current state, finish the remaining fixes, then submit.")
+		}
 		if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
+			// T85：失败时把当前的树改动落成中断态——下次运行恢复现场
+			// 并从转录续跑，不从头重烧。
+			if perr := persistFinalReviewPartial(proj, buildDir); perr != nil {
+				r.log.LogWarning(0, "[fix] 回写中断态失败（续跑将从头开始）:", perr)
+			}
 			return fmt.Errorf("修复会话失败: %w", err)
 		}
 		if compile.LastOK {
@@ -272,7 +313,7 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string) error {
 // and does the final consolidation — front matter, TOC, chapter order,
 // page numbering, figure placement, layout — then recompiles. Capped by
 // latex.compile.max_fix_rounds.
-func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
+func (r *Runner) finalReview(proj, buildDir string, texs []string, resume bool) error {
 	rounds := r.cfg.Latex.Compile.MaxFixRounds
 	if rounds <= 0 {
 		rounds = 1
@@ -289,12 +330,33 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.FinalReviewSystem), r.cfg.LatexSession("convert"), r.outputLang()),
 		r.bookSessionTools(proj, buildDir, compile, submit), r.log, 1, "final-review")
 	// 转录挂到 work/sessions/final_review.jsonl（T39）：终审会话在 WebUI
-	// 可见、进成本表。构建树每次 assemble 都重建，上一轮终审的编辑无法
-	// 直接续用——成功后会回写 work/（见 persistFinalReviewState），续跑时
-	// 章节未变则整段跳过；章节变了才重开一场（旧转录归档成 *_prev）。
+	// 可见、进成本表。T39 完成态：成功后回写 work/，续跑章节未变整段
+	// 跳过。T85 中断态：失败时同样回写（state.partial.sha256），本次
+	// 已把半成品编辑恢复进构建树 → 转录续跑（与 convert 同一套
+	// LoadTranscriptStats 模式），几十轮终审不再从头重烧；只有全新书
+	// 或章节变了才归档旧转录（*_prev）重开一场。
 	trPath := filepath.Join(proj, "work", "sessions", "final_review.jsonl")
-	archivePrevTranscript(trPath)
+	resumed := false
+	resumeSkip := false
 	frStart := time.Now()
+	var resumeMsgs []session.ChatMessage
+	if resume {
+		if msgs, st, err := session.LoadTranscriptStats(trPath); err != nil {
+			r.log.LogWarning(0, "[final-review] 转录读取失败（忽略，按全新会话继续）:", err)
+		} else if len(msgs) > 0 {
+			sess.SetMessages(msgs)
+			sess.SeedCounters(st.Rounds, st.Tools)
+			resumed, resumeMsgs = true, msgs
+			resumeLog(r.log, 1, "final-review", trPath, msgs, st)
+			if replaySubmit(r.log, 1, "final-review", submit, st) {
+				resumeSkip = true
+			}
+			frStart = time.Now().Add(-st.Active)
+		}
+	}
+	if !resumed {
+		archivePrevTranscript(trPath)
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -320,7 +382,15 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string) error {
 			userText = "The book still does not compile after your last edits:\n\n" + truncateStr(lastErr, 8000) +
 				"\n\nFix it (edit_file / bash), compile {path:\"main.tex\", engine:\"latexmk\"}, verify with view_pdf, then submit."
 		}
+		if resumed && attempt == 0 && !resumeSkip {
+			userText = resumeUserText(resumeMsgs, "The session was interrupted earlier (an API error or a killed process). The build tree has been restored to the exact state your edits left it in (chapters and top-level .tex files are all preserved). Continue from where you left off: re-check with compile {path:\"main.tex\"} and view_pdf, finish the remaining review, then submit.")
+		}
 		if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
+			// T85：失败时把当前的树改动落成中断态——下次运行恢复现场
+			// 并从转录续跑。
+			if perr := persistFinalReviewPartial(proj, buildDir); perr != nil {
+				r.log.LogWarning(0, "[final-review] 回写中断态失败（续跑将从头开始）:", perr)
+			}
 			return fmt.Errorf("终审会话失败: %w", err)
 		}
 		start := time.Now()
