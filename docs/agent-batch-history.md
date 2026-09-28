@@ -1516,3 +1516,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T90 撤掉侧栏会话聚合（用户纠偏）
 - 用户问"这个聚合为什么要有？我没说过这个功能"——查实：T63 原文说的是终端进度行（"结束就消失这些实时的信息"），侧栏折叠是实现时的扩大解释。T79/T80/T82/T83/T87/T88/T89 一整串"会话看不到/控件难看"全源于此。撤掉：Sidebar stageViews 不再按 agg.rows 折叠，shown0=items 恒成立，超 8 条回老「更多会话」；方块视图直接铺满 items；agg 只留阶段头汇总文案（stageChapterAggregate 保留，rows 字段不再被侧栏消费）。干净 profile 实测四态全对（列表 3 行 / 36 章 8+更多→36 / 方块 36 块直铺）。
 - 探针教训二连：① localStorage 按 origin 记忆——同一 profile 跑两轮探针，上一轮的 blockView/overflow 记忆会污染下一轮"初始状态"（probe10 误判源头）；② 每次探针前先核调试端口上的浏览器身份。
+
+### T91 矢量图 3D 引导强化（真实证据驱动）
+- 用户观察：几轮跑下来 3D 立体图不少、却没一个用 3D 包。实测取证：李艳芳_2 与某测试卷里 4 个标记为 3D 的矢量图，figure.tex 全只用了 usetikzlibrary{calc}——模型在手算斜二测投影。根因：提示词里 "3D scenes -> tikz-3dplot / perspective coordinates" 埋在 step 2 长句的括号里，压不住"描投影"的默认习惯。修法：点名真实 API（tdplotsetmaincoords + tdplot_main_coords 坐标系 / perspective 库）并明令禁止 calc 手投 3D。xelatex + tikz-3dplot 冒烟编译通过（texlive 2026 全量自带）。环境包清单：tikz-3dplot / perspective 库 / pgfplots / tkz-euclide 均可用；pst-solides3d 虽装但 PSTricks 走 dvips，与本管线不兼容，别用。
