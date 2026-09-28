@@ -711,3 +711,5 @@ user 轮
 [X][ ] T86. progress.json 标 assemble done 但上次终审中断时，续跑短路直接跳过 assemble——T85 的续跑逻辑根本走不到。改：中断态仍与当前工作区一致时不跳过、重跑 assemble 续跑终审。
 
 [X][T] T87. 方块视图下侧栏块和会话列表同时出现（重复渲染）——T83 的「展开全部」按钮插在 v-if/v-else 之间断开了条件链，列表区变成无条件渲染。改：按钮收进 v-if 分支的 template 里。
+
+[X][ ] T88. 方块视图：① 全书修复/终审阶段状态显示「未开始」（progressKeyFor 没把 fix/final-review 映射到 assemble 键）；② 样式修复/装配等会话块无编号（无 imageOrder/chapterOrder），按排序位置补编号。
