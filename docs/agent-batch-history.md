@@ -1509,3 +1509,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### plan.md 入册 + 提示词瘦身（用户口径澄清）
 - 用户澄清：goal 工具的设计要求应记进**我们侧管理的 docs/plan.md**（计划档案，与 issue.md 分工，可从会话记录恢复）——runtime 存储用 JSON/md 皆可。plan.md 早已存在（P1–P26，旗标语义见 P17：第一旗 Agent 完成态 ~/X、第二旗开发者审核 T/F——T87 的 [X][T] 来源即此）；补记 P27（problems+goal 工具设计，已随 18dafac 实现）。
 - 提示词瘦身（用户：能描述清楚即可，无非必要不加）：integrate 模板删掉 goal 说明与工具操作枚举（工具描述自带）；assess/block 去掉 op 枚举；Go 侧 userText 删掉"提交会被拒"的预告（打回回执本身点名缺失项）。AGENTS 一致性规则把 plan.md 与旗标语义入册。
+
+### T89 mermaid 代码块控件同行
+- 用户截图：代码块头部「复制」（带框按钮）与预览块自带一行的「源码」（裸文本钮）上下两行右浮、样式不一。修：mermaidPreviewBlock 接受 head 参数把切换钮挂进代码块头部（顺序 语言 | 源码/图表 | 复制），头部 .md-code-head button 样式天然同套；旧 .md-mermaid-bar 仅在无 head 时兜底。无真实 mermaid 转录可测，伪造单会话项目 + headless 探针实测：头部两钮同样式（1px border/8px radius/同高）、预览块无独立控件行。

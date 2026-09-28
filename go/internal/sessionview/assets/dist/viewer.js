@@ -7674,16 +7674,20 @@
       return null;
     }
   }
-  function mermaidPreviewBlock(source) {
+  function mermaidPreviewBlock(source, head) {
     const wrap = document.createElement("div");
     wrap.className = "md-mermaid";
-    const bar = document.createElement("div");
-    bar.className = "md-mermaid-bar";
     const toggle = document.createElement("button");
-    toggle.className = "md-mermaid-toggle icon-btn";
+    toggle.className = "md-mermaid-toggle";
     toggle.type = "button";
-    bar.appendChild(toggle);
-    wrap.appendChild(bar);
+    if (head) {
+      head.appendChild(toggle);
+    } else {
+      const bar = document.createElement("div");
+      bar.className = "md-mermaid-bar";
+      bar.appendChild(toggle);
+      wrap.appendChild(bar);
+    }
     const chart = document.createElement("div");
     chart.className = "md-mermaid-view md-mermaid-chart";
     const note = document.createElement("div");
@@ -8605,12 +8609,13 @@
     const wrap = el$1("div", "md-code-block");
     const head = el$1("div", "md-code-head");
     head.appendChild(el$1("span", "md-code-lang", lang || "text"));
-    head.appendChild(copyButton(code));
     wrap.appendChild(head);
     if (String(lang || "").trim().toLowerCase() === "mermaid" && mermaidPreviewAvailable()) {
-      wrap.appendChild(mermaidPreviewBlock(code));
+      wrap.appendChild(mermaidPreviewBlock(code, head));
+      head.appendChild(copyButton(code));
       return wrap;
     }
+    head.appendChild(copyButton(code));
     const body = el$1("pre", "md-code-body");
     const inner = el$1("code");
     const res = highlightMachine(inner, code);

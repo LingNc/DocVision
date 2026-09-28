@@ -792,14 +792,16 @@ export function mdCodeBlock(code: string, lang: string): HTMLElement {
   const wrap = el('div', 'md-code-block')
   const head = el('div', 'md-code-head')
   head.appendChild(el('span', 'md-code-lang', lang || 'text'))
-  head.appendChild(copyButton(code))
   wrap.appendChild(head)
   // T73：```mermaid 且预览可用（非静态快照）时，图表预览块自带 源码/图表
-  // 切换（右上角）——源码视图收进预览块，不再上下重复展示两份内容。
+  // 切换——T89 起切换钮进代码块头部（源码/图表 在左、复制常驻最右），
+  // 源码视图收进预览块，不再上下重复展示两份内容。
   if (String(lang || '').trim().toLowerCase() === 'mermaid' && mermaidPreviewAvailable()) {
-    wrap.appendChild(mermaidPreviewBlock(code))
+    wrap.appendChild(mermaidPreviewBlock(code, head))
+    head.appendChild(copyButton(code))
     return wrap
   }
+  head.appendChild(copyButton(code))
   const body = el('pre', 'md-code-body')
   const inner = el('code')
   // 代码块内容也走机器文本渲染：```json 做 JSON 高亮，```bash / ```diff / ```log

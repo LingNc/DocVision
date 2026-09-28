@@ -87,18 +87,23 @@ export function svgElement(svg: string): SVGSVGElement | null {
  * 点击进现有灯箱（SVG 编成 data: URL 喂 <img>，滚轮缩放/拖动/复位全套沿用）；
  * 失败静默——只留一行小字「预览不可用」，代码块本体不受影响。
  */
-export function mermaidPreviewBlock(source: string): HTMLElement {
+export function mermaidPreviewBlock(source: string, head?: HTMLElement): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'md-mermaid'
-  // T73：右上角 图表/源码 切换——同一时刻只显示一种视图，不再上下同时
-  // 摆渲染图和源码；源码视图带复制按钮，图表视图点击进灯箱。
-  const bar = document.createElement('div')
-  bar.className = 'md-mermaid-bar'
+  // T73：图表/源码 切换——同一时刻只显示一种视图。T89：切换钮收进代码块
+  // 头部（与「复制」同一行同一套按钮样式），不再自起一行——此前头部
+  // 「复制」+ 预览块自带一行「源码」，两行右浮控件样式不一，很难看。
   const toggle = document.createElement('button')
-  toggle.className = 'md-mermaid-toggle icon-btn'
+  toggle.className = 'md-mermaid-toggle'
   toggle.type = 'button'
-  bar.appendChild(toggle)
-  wrap.appendChild(bar)
+  if (head) {
+    head.appendChild(toggle)
+  } else {
+    const bar = document.createElement('div')
+    bar.className = 'md-mermaid-bar'
+    bar.appendChild(toggle)
+    wrap.appendChild(bar)
+  }
 
   const chart = document.createElement('div')
   chart.className = 'md-mermaid-view md-mermaid-chart'
