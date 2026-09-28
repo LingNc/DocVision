@@ -1487,3 +1487,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 改法：新增中断态 `work/final_review/state.partial.sha256`——失败时（Run 返回 error）把当时 build 树的章节/顶层 .tex 回写 work/（与完成态同一套拷贝，指纹落不同文件）；assemble 入口指纹一致 → applyFinalReviewState 恢复顶层编辑 + finalReview/fixSession 带 resume=true 走 LoadTranscriptStats/SetMessages/SeedCounters/replaySubmit（convert 同款），历史以 tool 回执收尾时 resumeUserText 返回空、原样续行不插话术。完成态写入时清掉部分态指纹。测试 TestFinalReviewPartialState 钉住四态（部分态不触发完成跳过/章节变化失效/完成覆盖清部分态/完成态为真）。
 - 顺带回填了事故现场：build/ 树还在（三章编辑与 work/ 不一致），用一次性 env-gated 测试把中断态写进 测试-概率论/work/final_review/（已验证指纹与章节同步），用户部署新版后重跑即可续跑那 66 轮。
 - 「所有会话续跑」现状盘点：convert/样式/章节划分/矢量图早已续跑；checker 按章粒度 verdict 续跑；style-fix 循环有 blocks.json 等状态文件；本次补上 fix+final_review 两个空档。
+
+### issue.md 条目损坏事故（自查自修）
+- T78–T85 条目文本一度消失：给 issue 打勾/加条目的 python 脚本用**裸子串锚点** `s.replace("[X][ ] T78.", …)`——匹配到整行的行首，把原行剩余文本挤到新条目之后；多批滚动后 T78/T79/T81–T84 全变空行、全部文字压进 T85 一行。用户两次察觉（"少了那么多内容"→ 当时误判为 master/dev 分支差；"T84 怎么没有问题"→ 定位根因）。已把各文本拆回各行（`da059e0`），T1–T85 无缺号。**教训：改 issue.md 一律用带行尾/整行的锚点，或直接行级读写。**
