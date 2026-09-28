@@ -96,6 +96,7 @@ function toggleBlockView() {
 interface StageView {
   aggCollapsed?: boolean // T79：聚合后零行、提供「展开全部」时的文案
   blockRows?: any[]      // T79/T80：方块视图行——展开后也要能显示（agg.rows 为空时）
+  noBy?: Record<string, number> // T88：块编号——无 imageOrder/chapterOrder 的会话按排序位置编号
   stage: string; title: string; items: any[]; live: number
   status: StageStatus | null
   overflowKey: string; needOverflow: boolean; shown: any[]
@@ -155,12 +156,17 @@ const groups = computed<GroupView[]>(() => {
       const needOverflow = (!agg && shown0.length > OVERFLOW_LIMIT) || (canExpand && !expanded)
       const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter
       const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT)
+      // T88：块编号——矢量/章节会话用各自的 imageOrder/chapterOrder；
+      // 修复链/装配会话两种都没有，按排序后的位置从 1 编，方块视图里
+      // 能指着编号选会话。
+      const noBy: Record<string, number> = {}
+      items.forEach((s: any, i: number) => { noBy[s.id] = s.imageOrder || s.chapterOrder || (i + 1) })
       return {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
         overflowKey: okey, needOverflow, shown, hiddenCount: shown0.length - shown.length,
         agg, aggCollapsed: canExpand && !expanded,
-        blockRows: shown0,
+        blockRows: shown0, noBy,
       }
     })
     let chains: SessionChain[] | null = null
@@ -520,7 +526,7 @@ function onMoreClick(okey: string) {
                     :data-id="s.id"
                     :title="rowTitle(s)"
                     @click="onRowClick(s)"
-                  >{{ s.imageOrder || s.chapterOrder || '' }}</button>
+                  >{{ sv.noBy ? (sv.noBy[s.id] ?? '') : (s.imageOrder || s.chapterOrder || '') }}</button>
                 </div>
                 <!-- T83：方块视图下聚合阶段同样给「展开全部」入口。按钮必须
                      与块容器同属一个 v-if 分支（T87 事故：插在 v-if/v-else

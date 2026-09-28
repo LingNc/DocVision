@@ -218,6 +218,9 @@ export function stageTitleOf(stage: string): string {
 export function progressKeyFor(stage: string): string {
   if (stage === 'vector') return 'images'
   if (stage === 'checker' || stage === 'style-fix') return 'convert'
+  // T88：fix/final-review 是 assemble 阶段内的会话，progress.json 没有
+  // 它们自己的键——不映射的话阶段状态永远是「未开始」（其实早做完了）。
+  if (stage === 'fix' || stage === 'final-review') return 'assemble'
   return stage
 }
 

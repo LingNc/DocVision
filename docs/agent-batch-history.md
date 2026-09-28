@@ -1497,3 +1497,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T87 方块视图重复渲染（T83 的 Vue 条件链事故）
 - 用户截图：方块视图下块网格和会话列表同时出现。根因：T83 把「展开全部」按钮插在 v-if="blockView" 的块容器与 v-else 的列表容器之间，v-else 失配后列表区无条件渲染。修法：块容器+按钮一起收进 <template v-if>，v-else 保持相邻。教训记档：v-if/v-else 之间不许插任何节点，插按钮要用 template 包裹同分支。
 - 验证教训：headless 浏览器探针曾被僵尸 chromium（旧 profile、占同一调试端口）劫持——localStorage 里 side.blockView=1 + overflow 记忆让探针读到的全是旧状态；以后探针前必须确认调试端口上的是当前那个实例（job_list 核对）。
+
+### T88 阶段状态映射 + 块编号
+- fix/final-review 是 assemble 阶段内的会话，progress.json 无对应键 → progressKeyFor 落回原名查不到 → 永远「未开始」。映射到 assemble；测试钉 done/idle 两态。
+- 块编号此前只认 imageOrder/chapterOrder，style-fix 与装配会话块全空；StageView 构建时按排序位置补 noBy（有号的照旧）。

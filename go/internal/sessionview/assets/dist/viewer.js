@@ -7114,6 +7114,7 @@
   function progressKeyFor(stage) {
     if (stage === "vector") return "images";
     if (stage === "checker" || stage === "style-fix") return "convert";
+    if (stage === "fix" || stage === "final-review") return "assemble";
     return stage;
   }
   function stageStatusText(stages, stage, live) {
@@ -9140,6 +9141,10 @@
             const needOverflow = !agg && shown0.length > OVERFLOW_LIMIT || canExpand && !expanded;
             const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter;
             const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT);
+            const noBy = {};
+            items.forEach((s, i) => {
+              noBy[s.id] = s.imageOrder || s.chapterOrder || i + 1;
+            });
             return {
               stage: stg,
               title: stageTitleOf(stg),
@@ -9152,7 +9157,8 @@
               hiddenCount: shown0.length - shown.length,
               agg,
               aggCollapsed: canExpand && !expanded,
-              blockRows: shown0
+              blockRows: shown0,
+              noBy
             };
           });
           let chains = null;
@@ -9416,7 +9422,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-f0790f3a><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-f0790f3a><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-f0790f3a></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-f0790f3a><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-f0790f3a></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-f0790f3a></path></svg></span>', 1)),
+                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-cdbea743><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-cdbea743><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-cdbea743></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-cdbea743><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-cdbea743></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-cdbea743></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9586,7 +9592,7 @@
                                   "data-id": s.id,
                                   title: rowTitle(s),
                                   onClick: ($event) => onRowClick(s)
-                                }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_63);
+                                }, toDisplayString(sv.noBy ? sv.noBy[s.id] ?? "" : s.imageOrder || s.chapterOrder || ""), 11, _hoisted_63);
                               }), 128))
                             ]),
                             sv.aggCollapsed ? (openBlock(), createElementBlock("button", {
@@ -9734,7 +9740,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-f0790f3a"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-cdbea743"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
