@@ -9025,13 +9025,10 @@
   const _hoisted_59 = { class: "row-body" };
   const _hoisted_60 = { class: "row-meta" };
   const _hoisted_61 = ["title"];
-  const _hoisted_62 = {
-    key: 0,
-    class: "session-blocks"
-  };
+  const _hoisted_62 = { class: "session-blocks" };
   const _hoisted_63 = ["data-id", "title", "onClick"];
   const _hoisted_64 = ["onClick"];
-  const _hoisted_65 = { key: 2 };
+  const _hoisted_65 = { key: 1 };
   const _hoisted_66 = ["data-id", "title", "onClick"];
   const _hoisted_67 = { class: "row-slot" };
   const _hoisted_68 = {
@@ -9419,7 +9416,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-8c0c2b40><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-8c0c2b40><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-8c0c2b40></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-8c0c2b40><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-8c0c2b40></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-8c0c2b40></path></svg></span>', 1)),
+                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-f0790f3a><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-f0790f3a><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-f0790f3a></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-f0790f3a><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-f0790f3a></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-f0790f3a></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9578,25 +9575,27 @@
                               title: sv.status.title
                             }, toDisplayString(sv.status.text), 11, _hoisted_61)) : createCommentVNode("", true)
                           ]),
-                          blockView.value ? (openBlock(), createElementBlock("div", _hoisted_62, [
-                            (openBlock(true), createElementBlock(Fragment, null, renderList(sv.blockRows !== void 0 ? sv.blockRows : sv.agg ? sv.agg.rows : sv.items, (s) => {
-                              return openBlock(), createElementBlock("button", {
-                                key: s.id,
-                                class: normalizeClass(["session-block", { active: unref(state).current && unref(state).current.id === s.id, live: s.live, err: !s.live && s.endState === "error", pend: !s.live && !s.endState }]),
-                                type: "button",
-                                role: "treeitem",
-                                "data-id": s.id,
-                                title: rowTitle(s),
-                                onClick: ($event) => onRowClick(s)
-                              }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_63);
-                            }), 128))
-                          ])) : createCommentVNode("", true),
-                          blockView.value && sv.aggCollapsed ? (openBlock(), createElementBlock("button", {
-                            key: 1,
-                            class: "session-overflow",
-                            type: "button",
-                            onClick: ($event) => onMoreClick(sv.overflowKey)
-                          }, " 展开全部 " + toDisplayString(sv.items.length) + " 章（已聚合，点击展开） ", 9, _hoisted_64)) : (openBlock(), createElementBlock("div", _hoisted_65, [
+                          blockView.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+                            createBaseVNode("div", _hoisted_62, [
+                              (openBlock(true), createElementBlock(Fragment, null, renderList(sv.blockRows !== void 0 ? sv.blockRows : sv.agg ? sv.agg.rows : sv.items, (s) => {
+                                return openBlock(), createElementBlock("button", {
+                                  key: s.id,
+                                  class: normalizeClass(["session-block", { active: unref(state).current && unref(state).current.id === s.id, live: s.live, err: !s.live && s.endState === "error", pend: !s.live && !s.endState }]),
+                                  type: "button",
+                                  role: "treeitem",
+                                  "data-id": s.id,
+                                  title: rowTitle(s),
+                                  onClick: ($event) => onRowClick(s)
+                                }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_63);
+                              }), 128))
+                            ]),
+                            sv.aggCollapsed ? (openBlock(), createElementBlock("button", {
+                              key: 0,
+                              class: "session-overflow",
+                              type: "button",
+                              onClick: ($event) => onMoreClick(sv.overflowKey)
+                            }, " 展开全部 " + toDisplayString(sv.items.length) + " 章（已聚合，点击展开） ", 9, _hoisted_64)) : createCommentVNode("", true)
+                          ], 64)) : (openBlock(), createElementBlock("div", _hoisted_65, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9735,7 +9734,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-8c0c2b40"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-f0790f3a"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

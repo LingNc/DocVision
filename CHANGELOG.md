@@ -18,6 +18,7 @@
 ### Added
 
 - **img2text 页码标记（P21）**：`mineru_output/` 有该书 MinerU 产物时，最终 markdown 按原始内容分页插入独立行 `[P. <页码>]`（跨部件全局 1-based 页码，与 latex doc_search/view_pdf 同一套），方便后续 AI 向用户指明位置——文本行规范化包含匹配 content_list 的 text 条目、图片引用按文件名对齐 image 条目（`[Image]( 描述 · P.42 )` 锚顺带带页码）；页码递增时在新页首行前插标记，围栏内顺延到围栏后，找不到 mineru 产物静默跳过。不加新配置项。
+- **方块视图不再块+列表重复渲染（T87）**：T83 的展开按钮插在 v-if/v-else 之间断开了 Vue 条件链，列表区变成无条件渲染——按钮收进同一 v-if 分支。
 - **assemble done 不再掩盖中断的终审（T86）**：progress.json 的 assemble done 是"失败也照常交付"写下的，续跑短路会整段跳过、终审续跑走不到——现在中断态与当前工作区一致时不跳过、自动重跑续上。
 - **终审/全书修复会话可续跑（T85）**：assemble 的修复与终审会话失败时把当时的树改动回写成中断态（`work/final_review/state.partial.sha256`），重跑指纹一致即恢复编辑现场、从转录接着跑（与 convert 同一套续跑语义；历史以工具回执收尾时原样续行）——此前失败直接归档旧转录从头重烧。完成态语义不变（`state.sha256` 只在成功时写，章节变了照旧整段重审）。
 - **Python 缺包自动安装兜底（T84）**：模型自己捕获 ImportError 后只打印 str(e)（无 `ModuleNotFoundError:` 前缀）时也能识别 "No module named 'x'"，照常宿主侧安装并提示重试。

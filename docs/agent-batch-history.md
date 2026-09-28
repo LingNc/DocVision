@@ -1493,3 +1493,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T86 assemble done 掩盖中断终审（T85 盲点）
 - 用户实测：部署 T85 后重跑仍"phase assemble already done, skipping"——assemble done 标记正是失败运行（告警交付）写下的，续跑短路在 phase 层就跳过了，走不到 finalReview 的 resume。加 assembleNeedsResume 门：assemble 标 done 但中断态（state.partial.sha256）与当前工作区一致且完成态不成立 → 不跳过、重跑 assemble 续跑终审。测试 TestAssembleNeedsResume 钉四态（无状态/中断/完成/终审关闭）。
+
+### T87 方块视图重复渲染（T83 的 Vue 条件链事故）
+- 用户截图：方块视图下块网格和会话列表同时出现。根因：T83 把「展开全部」按钮插在 v-if="blockView" 的块容器与 v-else 的列表容器之间，v-else 失配后列表区无条件渲染。修法：块容器+按钮一起收进 <template v-if>，v-else 保持相邻。教训记档：v-if/v-else 之间不许插任何节点，插按钮要用 template 包裹同分支。
+- 验证教训：headless 浏览器探针曾被僵尸 chromium（旧 profile、占同一调试端口）劫持——localStorage 里 side.blockView=1 + overflow 记忆让探针读到的全是旧状态；以后探针前必须确认调试端口上的是当前那个实例（job_list 核对）。

@@ -508,7 +508,8 @@ function onMoreClick(okey: string) {
                   <span class="row-meta">{{ sv.agg ? sv.agg.head : sv.items.length + ' 个会话' }}</span>
                   <span v-if="sv.status" class="stage-progress" :class="sv.status.state" :title="sv.status.title">{{ sv.status.text }}</span>
                 </summary>
-                <div v-if="blockView" class="session-blocks">
+                <template v-if="blockView">
+                <div class="session-blocks">
                   <button
                     v-for="s in (sv.blockRows !== undefined ? sv.blockRows : (sv.agg ? sv.agg.rows : sv.items))"
                     :key="s.id"
@@ -521,11 +522,13 @@ function onMoreClick(okey: string) {
                     @click="onRowClick(s)"
                   >{{ s.imageOrder || s.chapterOrder || '' }}</button>
                 </div>
-                <!-- T83：方块视图下聚合阶段同样给「展开全部」入口——之前该按钮只在
-                     列表视图渲染，方块视图里聚合阶段就是一片空白无从展开。 -->
-                <button v-if="blockView && sv.aggCollapsed" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
+                <!-- T83：方块视图下聚合阶段同样给「展开全部」入口。按钮必须
+                     与块容器同属一个 v-if 分支（T87 事故：插在 v-if/v-else
+                     之间会断开链条，列表区变成无条件渲染、块和列表同时出现）。 -->
+                <button v-if="sv.aggCollapsed" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
                   展开全部 {{ sv.items.length }} 章（已聚合，点击展开）
                 </button>
+                </template>
                 <div v-else>
                   <button
                     v-for="s in sv.shown"
