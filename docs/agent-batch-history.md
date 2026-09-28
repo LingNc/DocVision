@@ -1501,3 +1501,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T88 阶段状态映射 + 块编号
 - fix/final-review 是 assemble 阶段内的会话，progress.json 无对应键 → progressKeyFor 落回原名查不到 → 永远「未开始」。映射到 assemble；测试钉 done/idle 两态。
 - 块编号此前只认 imageOrder/chapterOrder，style-fix 与装配会话块全空；StageView 构建时按排序位置补 noBy（有号的照旧）。
+
+### T64 重构：问题清单工具化 + goal 计划工具（用户重设计）
+- 用户重设计：① 整合会话 submit 不再内联大 problems 数组（问题多时一次输出不全；且转录里那份参数 JSON 还会被模型在总结消息里复述一遍，看着像"重复提交"——实为正常复述，新设计下提交参数不再携带清单，观感问题消失）；② 清单不塞进样式/评估/分块会话提示词，改用 problems 工具（list/get/search/check）随用随查；③ 提交时代码核对勾选——样式会话全勾、分块会话勾本块；④ 新 goal 工具（plan.md 计划清单，增删改勾、有序、持久化，压缩后找回进度），提交前计划必须清空；⑤ 写权限只有整合会话有（add/update/delete，无 check），下游只读+打勾。
+- 实现：ProblemStore（work/style_fix/problems.json，带锁——分块会话并行打勾）+ ProblemsTool（权限双模）+ GoalTool（plan.md 读写回环）+ goalGate；SubmitProblemsTool 改无参收账（读存储校验非空+字段齐），SubmitStyleTool 加 Gate 钩子（原样式会话不受影响），SubmitBlockFixTool 勾选核对从参数改为读存储（T66 checked_problem_ids 退役），T67 list.md 退役。提示词三模板 + 注册表 MustMention 同步。测试：TestProblemsTool（权限/增删改查勾/持久化/id 不复用）、TestGoalTool（有序/Pending/plan.md 回读）、TestSubmitProblemsTool/TestSubmitBlockFixRequiresAllChecked 重写为存储语义（含 goal 门）。

@@ -657,6 +657,8 @@ user 轮
 [convert:chapter_003] 轮次 122 · 工具调用 141 · 已用 17m19s
 ```
 [X][F] T64. [stylefix-integrate] 这个会话名字是stylefix?还是style-fix和其他的一致。然后就是它好像工具不是很充足，因为汇报的问题可能非常多需要他整理，这边应该也提供读文件，写文件编辑文件，grep查看他们所有提交的，虚拟一个专门的小工作区？把那个style的submit内容整理和汇总为一个文件或者多个文件。然后这边他编辑一个submit.md文件来操作他的最终提交内容，方便多次编辑和查看。或者说submit.json里面和之前的结构一样，方便操作？和提取list。
+
+（重构：问题清单不再内联 submit 也不塞进各会话提示词——共享存储 work/style_fix/problems.json + problems 工具（整合会话独占 add/update/delete 写权限且无打勾；下游会话只能 list/get/search/check），submit_problems 无参收账；下游提交时代码核对存储勾选（样式=全部、分块=本块），不打勾就 REJECTED；另给每个会话 goal 工具（plan.md 计划清单，增删改勾，提交前必须清空）；T66 的 checked_problem_ids 与 T67 的 list.md 退役。）
 [X][ ] T65. 对于integrate这个会话可以在配置中单独设置其使用的模型，这一步。
 [X][ ] T66. 在stylefix会话中给定工作区里面一个虚拟的list.md的清单，里面是这次要修复的任务清单，在修复会话提交的时候也要选择提交这个list（打钩之后的）会核对是否完全打钩完成。
 [X][ ] T67. 可以将每个章节报告汇总合并的会话中，这边生成未打钩的list.md的版本。

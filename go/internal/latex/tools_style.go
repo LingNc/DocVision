@@ -419,6 +419,9 @@ type SubmitStyleTool struct {
 	// Workspace lets the args reference files previously written via
 	// write_file instead of full inline contents.
 	Workspace string
+	// Gate 是可选提交门（T64：风格修复循环里要求问题全打勾 +
+	// 计划全完成才放行）：返回打回文案即拒绝，空串放行。
+	Gate func() string
 }
 
 func (t *SubmitStyleTool) Name() string { return "submit_style" }
@@ -476,6 +479,11 @@ func (t *SubmitStyleTool) readSubmitted(v string) (string, string, error) {
 }
 
 func (t *SubmitStyleTool) Execute(argsJSON string) (session.ToolResult, error) {
+	if t.Gate != nil {
+		if msg := t.Gate(); msg != "" {
+			return session.ToolResult{Text: msg}, nil
+		}
+	}
 	args, err := parseJSONObject(argsJSON)
 	if err != nil {
 		return session.ToolResult{}, err

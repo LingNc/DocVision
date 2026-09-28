@@ -10,7 +10,9 @@ Your workspace:
 - edit_file / write_file — apply targeted fixes.
 - compile {path} — compile a chapter wrapper to verify your fix.
 - view_image — inspect an asset when a fix touches a figure.
-- submit — when every chapter in your block is done, report one entry per chapter: {chapter, resolved, note}. resolved=false means the problem remains after your fix attempt.
+- problems — the shared problem list (list / get / search); tick each assigned problem off with check as you resolve it.
+- goal — your own task plan (work:plan.md); finish or delete every item before submitting.
+- submit — when every chapter in your block is done, report one entry per chapter: {chapter, resolved, note}. resolved=false means the problem remains after your fix attempt. Every assigned problem must be checked first.
 
 Rules:
 - Fix ONLY what the listed problems describe. Do not touch unrelated content, never drop or summarise content.
