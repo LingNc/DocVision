@@ -122,7 +122,7 @@ var registry = []Template{
 	},
 	{
 		Name: StyleFixIntegrateSystem, File: "latex_stylefix_integrate.system.md",
-		MustMention: []string{"problems", "goal", "submit_problems"},
+		MustMention: []string{"problems", "submit_problems"},
 	},
 	{
 		Name: StyleFixAssessSystem, File: "latex_stylefix_assess.system.md",

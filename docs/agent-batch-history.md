@@ -1505,3 +1505,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T64 重构：问题清单工具化 + goal 计划工具（用户重设计）
 - 用户重设计：① 整合会话 submit 不再内联大 problems 数组（问题多时一次输出不全；且转录里那份参数 JSON 还会被模型在总结消息里复述一遍，看着像"重复提交"——实为正常复述，新设计下提交参数不再携带清单，观感问题消失）；② 清单不塞进样式/评估/分块会话提示词，改用 problems 工具（list/get/search/check）随用随查；③ 提交时代码核对勾选——样式会话全勾、分块会话勾本块；④ 新 goal 工具（plan.md 计划清单，增删改勾、有序、持久化，压缩后找回进度），提交前计划必须清空；⑤ 写权限只有整合会话有（add/update/delete，无 check），下游只读+打勾。
 - 实现：ProblemStore（work/style_fix/problems.json，带锁——分块会话并行打勾）+ ProblemsTool（权限双模）+ GoalTool（plan.md 读写回环）+ goalGate；SubmitProblemsTool 改无参收账（读存储校验非空+字段齐），SubmitStyleTool 加 Gate 钩子（原样式会话不受影响），SubmitBlockFixTool 勾选核对从参数改为读存储（T66 checked_problem_ids 退役），T67 list.md 退役。提示词三模板 + 注册表 MustMention 同步。测试：TestProblemsTool（权限/增删改查勾/持久化/id 不复用）、TestGoalTool（有序/Pending/plan.md 回读）、TestSubmitProblemsTool/TestSubmitBlockFixRequiresAllChecked 重写为存储语义（含 goal 门）。
+
+### plan.md 入册 + 提示词瘦身（用户口径澄清）
+- 用户澄清：goal 工具的设计要求应记进**我们侧管理的 docs/plan.md**（计划档案，与 issue.md 分工，可从会话记录恢复）——runtime 存储用 JSON/md 皆可。plan.md 早已存在（P1–P26，旗标语义见 P17：第一旗 Agent 完成态 ~/X、第二旗开发者审核 T/F——T87 的 [X][T] 来源即此）；补记 P27（problems+goal 工具设计，已随 18dafac 实现）。
+- 提示词瘦身（用户：能描述清楚即可，无非必要不加）：integrate 模板删掉 goal 说明与工具操作枚举（工具描述自带）；assess/block 去掉 op 枚举；Go 侧 userText 删掉"提交会被拒"的预告（打回回执本身点名缺失项）。AGENTS 一致性规则把 plan.md 与旗标语义入册。

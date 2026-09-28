@@ -410,8 +410,7 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 	defer liveClose()
 
 	userText := fmt.Sprintf("The work reports from the chapter conversion sessions that flagged style/manual problems are in your workspace at work:reports/<chapter>.md (%d files). "+
-		"Read/grep them, then build the consolidated, de-duplicated problem list with the problems tool (add one by one — you do NOT need to output everything at once). "+
-		"Plan your work with the goal tool if useful, and call submit_problems when the list is complete.", len(keys))
+		"Read/grep them, then build the consolidated, de-duplicated problem list with the problems tool (add one by one), and call submit_problems when the list is complete.", len(keys))
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}
@@ -471,9 +470,8 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	}
 
 	feedback := fmt.Sprintf("The chapter conversion phase finished and %d style/manual problems were consolidated. "+
-		"They are NOT pasted here — use the problems tool (list / get / search) to see them. "+
-		"Fix the cls/manual/example so these problems cannot recur, tick each one off with problems check as you resolve it, then submit_style. "+
-		"Your submit is rejected until every problem is checked and your goal plan is complete.", len(problems))
+		"They are NOT pasted here — use the problems tool to see them. "+
+		"Fix the cls/manual/example so these problems cannot recur, tick each one off with problems check as you resolve it, then submit_style.", len(problems))
 	if _, err := sess.Run(session.RunOptions{UserText: feedback}); err != nil {
 		return fmt.Errorf("风格修复会话失败: %w", err)
 	}
@@ -751,12 +749,11 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	defer liveClose()
 
 	userText := "Style problems assigned to this block: " + strings.Join(block.ProblemIDs, ", ") +
-		" — use the problems tool (get / search) to read each one's full detail; they are NOT pasted here." +
+		" — use the problems tool to read each one's full detail; they are NOT pasted here." +
 		"\nYour chapters (in work:chapters/): " + strings.Join(block.Chapters, ", ") +
 		"\nThe class and manual in your workspace are the REVISED versions. Make minimal, targeted edits — never re-convert. " +
 		"Compile each chapter's wrapper (<base>_wrapper.tex) to verify (view_pdf the result if in doubt), " +
-		"tick every assigned problem off with problems check as you resolve it, then submit with one entry per chapter. " +
-		"Your submit is rejected until every assigned problem is checked and your goal plan is complete."
+		"tick every assigned problem off with problems check as you resolve it, then submit with one entry per chapter."
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, nil, err
 	}
