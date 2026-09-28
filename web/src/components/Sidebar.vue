@@ -94,8 +94,6 @@ function toggleBlockView() {
 }
 
 interface StageView {
-  aggCollapsed?: boolean // T79：聚合后零行、提供「展开全部」时的文案
-  blockRows?: any[]      // T79/T80：方块视图行——展开后也要能显示（agg.rows 为空时）
   noBy?: Record<string, number> // T88：块编号——无 imageOrder/chapterOrder 的会话按排序位置编号
   stage: string; title: string; items: any[]; live: number
   status: StageStatus | null
@@ -143,17 +141,14 @@ const groups = computed<GroupView[]>(() => {
         if (ka || kb) return ka ? -1 : 1
         return y.mtime > x.mtime ? 1 : -1
       })
-      // T63：convert/checker 聚合——跑动时只显 live 行，全完成只剩阶段头。
-      // T79/T82：聚合后给一个手动展开入口——零行（全完成、无错误）或只有
-      // 运行/错误行（完成的章节被聚合掉）都渲染「展开全部 N 章」按钮，
-      // expanded 后显示全部 items。（T80 教训：翻转后不许落回 agg.rows。）
+      // T63 的聚合本意只针对**终端**进度行；侧栏折叠是我当时的扩大解释，
+      // 用户从未要过（还引发 T79–T90 一串"会话看不到"的事故）。侧栏回到
+      // 老规矩：行全列、超 8 条给「更多会话」；agg 只留阶段头汇总文案
+      // （"8 章 · 完成 8"），方块视图本来就是为多会话扫视设计的。
       const agg = stageChapterAggregate(stg, items, !!state.filter)
       const okey = groupKey('overflow', g.name + '/' + stg)
-      const expanded = !!agg && (isOverflowOpen(okey) || !!state.filter)
-      const shown0 = expanded ? items : (agg ? agg.rows : items)
-      // 聚合吞掉了一些行（零行也算全吞）→ 需要展开按钮
-      const canExpand = !!agg && agg.rows.length < items.length
-      const needOverflow = (!agg && shown0.length > OVERFLOW_LIMIT) || (canExpand && !expanded)
+      const shown0 = items
+      const needOverflow = shown0.length > OVERFLOW_LIMIT
       const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter
       const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT)
       // T88：块编号——矢量/章节会话用各自的 imageOrder/chapterOrder；
@@ -165,8 +160,7 @@ const groups = computed<GroupView[]>(() => {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
         overflowKey: okey, needOverflow, shown, hiddenCount: shown0.length - shown.length,
-        agg, aggCollapsed: canExpand && !expanded,
-        blockRows: shown0, noBy,
+        agg, noBy,
       }
     })
     let chains: SessionChain[] | null = null
@@ -517,7 +511,7 @@ function onMoreClick(okey: string) {
                 <template v-if="blockView">
                 <div class="session-blocks">
                   <button
-                    v-for="s in (sv.blockRows !== undefined ? sv.blockRows : (sv.agg ? sv.agg.rows : sv.items))"
+                    v-for="s in sv.items"
                     :key="s.id"
                     class="session-block"
                     :class="{ active: state.current && state.current.id === s.id, live: s.live, err: !s.live && s.endState === 'error', pend: !s.live && !s.endState }"
@@ -528,12 +522,6 @@ function onMoreClick(okey: string) {
                     @click="onRowClick(s)"
                   >{{ sv.noBy ? (sv.noBy[s.id] ?? '') : (s.imageOrder || s.chapterOrder || '') }}</button>
                 </div>
-                <!-- T83：方块视图下聚合阶段同样给「展开全部」入口。按钮必须
-                     与块容器同属一个 v-if 分支（T87 事故：插在 v-if/v-else
-                     之间会断开链条，列表区变成无条件渲染、块和列表同时出现）。 -->
-                <button v-if="sv.aggCollapsed" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
-                  展开全部 {{ sv.items.length }} 章（已聚合，点击展开）
-                </button>
                 </template>
                 <div v-else>
                   <button
@@ -557,7 +545,7 @@ function onMoreClick(okey: string) {
                     </span>
                   </button>
                   <button v-if="sv.needOverflow" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
-                    {{ sv.aggCollapsed ? '展开全部 ' + sv.items.length + ' 章（已聚合，点击展开）' : '更多会话（还有 ' + sv.hiddenCount + ' 个）' }}
+                    更多会话（还有 {{ sv.hiddenCount }} 个）
                   </button>
                 </div>
               </details>
@@ -597,7 +585,7 @@ function onMoreClick(okey: string) {
                     </span>
                   </button>
                   <button v-if="sv.needOverflow" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
-                    {{ sv.aggCollapsed ? '展开全部 ' + sv.items.length + ' 章（已聚合，点击展开）' : '更多会话（还有 ' + sv.hiddenCount + ' 个）' }}
+                    更多会话（还有 {{ sv.hiddenCount }} 个）
                   </button>
                 </template>
               </template>
@@ -988,6 +976,7 @@ details[open] > .proj-row .row-folder .folder.open {
 .session-block.active {
  background: var(--accent); border-color: var(--accent); color: #fff; 
 }
+
 
 .session-block.live {
  border-color: var(--ok); box-shadow: 0 0 0 2px rgba(34, 197, 94, .22); 

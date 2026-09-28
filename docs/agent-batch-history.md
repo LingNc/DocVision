@@ -1512,3 +1512,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T89 mermaid 代码块控件同行
 - 用户截图：代码块头部「复制」（带框按钮）与预览块自带一行的「源码」（裸文本钮）上下两行右浮、样式不一。修：mermaidPreviewBlock 接受 head 参数把切换钮挂进代码块头部（顺序 语言 | 源码/图表 | 复制），头部 .md-code-head button 样式天然同套；旧 .md-mermaid-bar 仅在无 head 时兜底。无真实 mermaid 转录可测，伪造单会话项目 + headless 探针实测：头部两钮同样式（1px border/8px radius/同高）、预览块无独立控件行。
+
+### T90 撤掉侧栏会话聚合（用户纠偏）
+- 用户问"这个聚合为什么要有？我没说过这个功能"——查实：T63 原文说的是终端进度行（"结束就消失这些实时的信息"），侧栏折叠是实现时的扩大解释。T79/T80/T82/T83/T87/T88/T89 一整串"会话看不到/控件难看"全源于此。撤掉：Sidebar stageViews 不再按 agg.rows 折叠，shown0=items 恒成立，超 8 条回老「更多会话」；方块视图直接铺满 items；agg 只留阶段头汇总文案（stageChapterAggregate 保留，rows 字段不再被侧栏消费）。干净 profile 实测四态全对（列表 3 行 / 36 章 8+更多→36 / 方块 36 块直铺）。
+- 探针教训二连：① localStorage 按 origin 记忆——同一 profile 跑两轮探针，上一轮的 blockView/overflow 记忆会污染下一轮"初始状态"（probe10 误判源头）；② 每次探针前先核调试端口上的浏览器身份。
