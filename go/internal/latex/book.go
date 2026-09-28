@@ -244,9 +244,18 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		// （done 跳过、fallback 重试），phase 级 done 标记会让上次
 		// 失败（fallback）的图片永远得不到重试。
 		if name != "images" && prog2Field(prog, name) == "done" && !opts.Restart && opts.Step == "" {
-			note("[book] phase %s already done, skipping", name)
-			r.log.Log(0, "[book] phase "+name+" already done, skipping")
-			return nil
+			// T85：assemble 标 done 但上次终审其实**中断**（失败也照常交付
+			// 的语义会写下 done）——中断态仍与当前工作区一致时不能跳过，
+			// 要重跑 assemble 把终审续上。
+			if name == "assemble" && r.assembleNeedsResume(proj) {
+				msg := "[book] assemble 标为 done，但检测到上次终审中断——重跑 assemble 续跑终审"
+				note(msg)
+				r.log.Log(0, msg)
+			} else {
+				note("[book] phase %s already done, skipping", name)
+				r.log.Log(0, "[book] phase "+name+" already done, skipping")
+				return nil
+			}
 		}
 		if opts.Step != "" && opts.Step != name {
 			return nil

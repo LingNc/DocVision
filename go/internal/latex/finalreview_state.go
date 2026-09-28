@@ -210,6 +210,21 @@ func finalReviewStateCurrent(proj string) bool {
 	return strings.TrimSpace(string(stored)) == cur
 }
 
+// assembleNeedsResume reports whether progress.json's "assemble: done" is a
+// lie left by the deliver-anyway semantics: the final review was INTERRUPTED
+// (partial state written at failure, T85) and the workspace still matches
+// that interrupted snapshot. True ⇒ the assemble phase must re-run and
+// resume the review instead of being skipped as done.
+func (r *Runner) assembleNeedsResume(proj string) bool {
+	if !r.cfg.Latex.Compile.FinalReviewEnabled() {
+		return false
+	}
+	if finalReviewStateCurrent(proj) {
+		return false // 完成态：真做完了
+	}
+	return finalReviewPartialCurrent(proj)
+}
+
 // applyFinalReviewState overlays the persisted final-review top-level files
 // (main.tex and friends) onto a freshly built build dir. Chapter files need
 // no action: persistFinalReviewState already wrote them into work/chapters,

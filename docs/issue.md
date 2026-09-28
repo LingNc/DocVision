@@ -705,3 +705,5 @@ user 轮
 [X][ ] T84. 会话 bash 里模型自己 except ImportError 后只打印 str(e)（"no pypdf No module named 'pypdf'"，无异常类名前缀），自动 pip 安装的检测正则认不出来、不触发安装。
 
 [X][ ] T85. 终审/全书修复会话失败不可续跑——旧转录直接归档 *_prev，几十轮从头重烧。改：失败时回写中断态（state.partial.sha256 + 树改动回 work/），重跑指纹一致即恢复编辑现场并从转录续跑（T28/T29 同一套续跑语义）。
+
+[X][ ] T86. progress.json 标 assemble done 但上次终审中断时，续跑短路直接跳过 assemble——T85 的续跑逻辑根本走不到。改：中断态仍与当前工作区一致时不跳过、重跑 assemble 续跑终审。

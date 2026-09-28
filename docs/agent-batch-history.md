@@ -1490,3 +1490,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### issue.md 条目损坏事故（自查自修）
 - T78–T85 条目文本一度消失：给 issue 打勾/加条目的 python 脚本用**裸子串锚点** `s.replace("[X][ ] T78.", …)`——匹配到整行的行首，把原行剩余文本挤到新条目之后；多批滚动后 T78/T79/T81–T84 全变空行、全部文字压进 T85 一行。用户两次察觉（"少了那么多内容"→ 当时误判为 master/dev 分支差；"T84 怎么没有问题"→ 定位根因）。已把各文本拆回各行（`da059e0`），T1–T85 无缺号。**教训：改 issue.md 一律用带行尾/整行的锚点，或直接行级读写。**
+
+### T86 assemble done 掩盖中断终审（T85 盲点）
+- 用户实测：部署 T85 后重跑仍"phase assemble already done, skipping"——assemble done 标记正是失败运行（告警交付）写下的，续跑短路在 phase 层就跳过了，走不到 finalReview 的 resume。加 assembleNeedsResume 门：assemble 标 done 但中断态（state.partial.sha256）与当前工作区一致且完成态不成立 → 不跳过、重跑 assemble 续跑终审。测试 TestAssembleNeedsResume 钉四态（无状态/中断/完成/终审关闭）。
