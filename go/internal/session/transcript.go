@@ -65,9 +65,6 @@ type transcriptLine struct {
 	// Transcripts written before this field existed simply have no ts.
 	TS string `json:"ts,omitempty"`
 
-	// Entry 是 models.<条目名>（usage 行查价键，T101；旧转录无此字段）。
-	Entry string `json:"entry,omitempty"`
-
 	// ---- t == "usage" lines only (never replayed) ----
 	// One usage line per completed API request, so the preview page (and any
 	// script reading the JSONL) can compute input/output tokens, prefix-cache
@@ -277,9 +274,6 @@ func (w *TranscriptWriter) readLastMetaHash() string {
 // UsageRecord is the per-request accounting appended as a t="usage" line.
 type UsageRecord struct {
 	Model string
-	// Entry 是 models.<条目名>：费用查价优先按它（厂商模型名一改，历史
-	// 转录的 model 字段就查无此价；条目名稳定，T101）。
-	Entry string
 	// Kind names the request inside the session: "" for an ordinary turn,
 	// "nudge" (forced text answer after an empty reply) or "compact"
 	// (context summarisation). Token totals must include all of them: a
@@ -316,7 +310,6 @@ func (w *TranscriptWriter) AppendUsage(u UsageRecord) error {
 		TS:              nowStamp(),
 		Kind:            u.Kind,
 		Model:           u.Model,
-		Entry:           u.Entry,
 		Stream:          &stream,
 		Round:           u.Round,
 		PromptTokens:    u.PromptTokens,

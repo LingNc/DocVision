@@ -416,7 +416,7 @@ func (c *Config) ModelPrices() map[string]PriceConfig {
 		return out
 	}
 	def := c.Models["text"].Model
-	for key, mc := range c.Models {
+	for _, mc := range c.Models {
 		if !mc.Price.Configured() {
 			continue
 		}
@@ -428,9 +428,6 @@ func (c *Config) ModelPrices() map[string]PriceConfig {
 			continue
 		}
 		out[name] = mc.Price
-		// T101：条目名也作键——usage 行带 entry，按条目名查价在厂商
-		// 模型名改名后依然命中。
-		out[key] = mc.Price
 	}
 	if len(out) == 0 {
 		return map[string]PriceConfig{}

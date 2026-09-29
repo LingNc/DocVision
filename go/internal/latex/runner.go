@@ -331,7 +331,6 @@ func (r *Runner) clientFor(name string) *session.Client {
 	}
 	mc, _ := r.cfg.ResolveModel(name)
 	c := session.NewClient(mc)
-	c.SetEntry(name) // T101：费用按条目名查价（厂商模型名改名不丢价）
 	c.SetLogger(r.log)
 	r.clients[name] = c
 	r.models[name] = mc

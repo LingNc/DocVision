@@ -211,7 +211,6 @@ func (s *Session) recordUsage(resp *ChatResponse, round int, kind string) {
 	}
 	rec := UsageRecord{
 		Model:    s.client.Model(),
-		Entry:    s.client.Entry(),
 		Stream:   resp.Streamed,
 		Round:    round,
 		Kind:     kind,
@@ -420,6 +419,7 @@ func (s *Session) appendToolImage(v visionTurn) {
 // (t=meta kind=run_end): 会话为什么停——正常收尾、终态提交、还是 API 错误——
 // 从此写在转录里（用户实测：终审中途停了但转录没有任何报错原因）。
 func (s *Session) Run(opts RunOptions) (out string, err error) {
+	s.noteFrozenPrice()
 	defer func() {
 		if s.transcript == nil {
 			return
@@ -431,6 +431,27 @@ func (s *Session) Run(opts RunOptions) (out string, err error) {
 		_ = s.transcript.AppendNote("run_end", fields)
 	}()
 	return s.run(opts)
+}
+
+// noteFrozenPrice 把"这个会话用什么模型、当时的费率"冻进转录
+// （t=meta kind=price）：费用按转录里冻的价算，不依赖跑报表那一刻的
+// 配置——用户会多次改配置，历史会话的价格不该跟着变（T101 第二版）。
+// 中途终止换模型续跑 = 新会话对象再冻一条，聚合按模型分桶各自计价。
+func (s *Session) noteFrozenPrice() {
+	if s.transcript == nil || s.client == nil {
+		return
+	}
+	p := s.client.Price()
+	if !p.Configured() {
+		return
+	}
+	_ = s.transcript.AppendNote("price", map[string]any{
+		"model":    s.client.Model(),
+		"input":    p.Input,
+		"cached":   p.CachedRate(), // 冻有效值（未配 cached 时 = input）
+		"output":   p.Output,
+		"currency": p.Currency,
+	})
 }
 
 func (s *Session) run(opts RunOptions) (string, error) {

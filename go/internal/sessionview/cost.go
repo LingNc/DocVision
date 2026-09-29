@@ -34,37 +34,55 @@ func (c *CostStats) add(o CostStats) {
 // SessionCost prices one session's usage against the price table. ok is false
 // when the session's model has no rate — the caller then shows no money at all
 // (and counts the requests as unpriced) instead of inventing ¥0.
-func SessionCost(st *UsageStats, prices map[string]config.PriceConfig) (*CostStats, bool) {
-	if st == nil || len(prices) == 0 {
-		return nil, false
+// SessionCost 按模型分桶计价（T101 第二版）：每个模型桶用**转录里冻的
+// 费率**（t=meta kind=price，会话开始那一刻的快照）——跑报表时的配置
+// 改了也不影响历史会话；旧转录没有冻结行才退回当下配置按厂商名查。
+// 返回累计费用、是否至少一桶有价、无价的请求数（费用只是下界）。
+func SessionCost(st *UsageStats, frozen, prices map[string]config.PriceConfig) (*CostStats, bool, int) {
+	if st == nil || st.Requests == 0 {
+		return nil, false, 0
 	}
-	// The aggregate carries one Model field (the last one seen) and no
-	// per-request breakdown, so a session that switched models mid-flight is
-	// priced with the model its last request used — documented, and rare
-	// (each pipeline session is bound to one registry entry).
-	// T101：查价优先按 models 条目名（usage 行 T101 起带 entry）——厂商
-	// 模型名一改，按 model 查就"查无此价"；旧转录没有 entry 退回 model。
-	key := st.Entry
-	if key == "" {
-		key = st.Model
+	rateFor := func(model string) (config.PriceConfig, bool) {
+		if p, ok := frozen[model]; ok && p.Configured() {
+			return p, true
+		}
+		if p, ok := prices[model]; ok && p.Configured() {
+			return p, true
+		}
+		return config.PriceConfig{}, false
 	}
-	p, ok := prices[key]
-	if (!ok || !p.Configured()) && st.Entry != "" && st.Entry != st.Model {
-		// 条目名也没配价时，再按厂商名兜一次（条目改名、厂商名未变的情形）。
-		p, ok = prices[st.Model]
+	// 分桶；老聚合路径（无桶）退化成"最后一个模型"单桶。
+	buckets := st.ByModel
+	if len(buckets) == 0 {
+		buckets = map[string]*UsageStats{st.Model: st}
 	}
-	if !ok || !p.Configured() {
-		return nil, false
+	var total CostStats
+	found := false
+	unpriced := 0
+	for model, b := range buckets {
+		p, ok := rateFor(model)
+		if !ok {
+			unpriced += b.Requests
+			continue
+		}
+		found = true
+		if total.Currency == "" {
+			total.Currency = p.Currency
+		}
+		fresh := b.PromptTokens - b.CachedTokens
+		if fresh < 0 {
+			fresh = 0
+		}
+		total.Input += float64(fresh)*p.Input/1e6 + float64(b.CachedTokens)*p.CachedRate()/1e6
+		total.Output += float64(b.Completion) * p.Output / 1e6
 	}
-	c := &CostStats{Currency: p.Currency}
-	fresh := st.PromptTokens - st.CachedTokens
-	if fresh < 0 {
-		fresh = 0
+	if !found {
+		return nil, false, unpriced
 	}
-	c.Input = round6((float64(fresh)*p.Input + float64(st.CachedTokens)*p.CachedRate()) / 1e6)
-	c.Output = round6(float64(st.Completion) * p.Output / 1e6)
-	c.Total = round6(c.Input + c.Output)
-	return c, true
+	total.Input = round6(total.Input)
+	total.Output = round6(total.Output)
+	total.Total = round6(total.Input + total.Output)
+	return &total, true, unpriced
 }
 
 // currencyOf picks a display currency for the "unpriced" case: the table's
@@ -89,7 +107,8 @@ func currencyOf(prices map[string]config.PriceConfig) string {
 // total was told about them.
 func ApplyPrices(sessions []SessionInfo, prices map[string]config.PriceConfig) {
 	for i := range sessions {
-		cost, ok := SessionCost(sessions[i].Stats, prices)
+		cost, ok, unpriced := SessionCost(sessions[i].Stats, sessions[i].Prices, prices)
+		sessions[i].Unpriced = unpriced
 		if !ok {
 			sessions[i].Cost = nil
 			continue
@@ -165,11 +184,12 @@ func StageCosts(sessions []SessionInfo) []StageCost {
 		}
 		if s.Cost != nil {
 			row.Cost += s.Cost.Total
-			row.Currency = s.Cost.Currency
-		} else if s.Stats != nil && s.Stats.Requests > 0 {
-			// 有调用但没配价格：金额只是下界，报告里必须说出来。
-			row.Unpriced += s.Stats.Requests
+			if row.Currency == "" {
+				row.Currency = s.Cost.Currency
+			}
 		}
+		// 有调用但没配价格（整桶或部分桶）：金额只是下界，报告里必须说出来。
+		row.Unpriced += s.Unpriced
 	}
 	out := make([]StageCost, 0, len(order))
 	for _, stage := range order {
@@ -193,9 +213,7 @@ func StageCosts(sessions []SessionInfo) []StageCost {
 func UnpricedRequests(sessions []SessionInfo) int {
 	n := 0
 	for _, s := range sessions {
-		if s.Cost == nil && s.Stats != nil {
-			n += s.Stats.Requests
-		}
+		n += s.Unpriced
 	}
 	return n
 }

@@ -20,7 +20,7 @@ func priceTable() map[string]config.PriceConfig {
 // 按原价算会虚高十倍，把未命中部分按缓存价算会凭空打折。
 func TestSessionCostSplitsCacheAndOutput(t *testing.T) {
 	st := &UsageStats{Requests: 2, PromptTokens: 1_000_000, CachedTokens: 900_000, Completion: 100_000, Model: "m-cheap"}
-	cost, ok := SessionCost(st, priceTable())
+	cost, ok, _ := SessionCost(st, nil, priceTable())
 	if !ok || cost == nil {
 		t.Fatal("配了价格就必须算出成本")
 	}
@@ -31,7 +31,7 @@ func TestSessionCostSplitsCacheAndOutput(t *testing.T) {
 	}
 	// 没配 cached 时按 input 计（宁可高估）：m-big 的 900k 缓存部分按 2 元算。
 	st2 := &UsageStats{Requests: 1, PromptTokens: 1_000_000, CachedTokens: 900_000, Completion: 0, Model: "m-big"}
-	cost2, _ := SessionCost(st2, priceTable())
+	cost2, _, _ := SessionCost(st2, nil, priceTable())
 	want2 := (0.1 + 0.9) * 2
 	if diff := cost2.Total - want2; diff > 1e-9 || diff < -1e-9 {
 		t.Fatalf("未配 cached 时应按 input 价：got %v want %v", cost2.Total, want2)
@@ -118,7 +118,7 @@ func TestUsageAggregateKeepsModelName(t *testing.T) {
 		t.Fatalf("聚合必须带上 model（费用报告靠它查价），got %+v", st.Usage)
 	}
 	prices := map[string]config.PriceConfig{"wire-A": {Input: 1, Cached: 0.1, Output: 4, Currency: "¥"}}
-	cost, ok := SessionCost(st.Usage, prices)
+	cost, ok, _ := SessionCost(st.Usage, st.Prices, prices)
 	if !ok || cost == nil || cost.Total <= 0 {
 		t.Fatalf("配了价格就该算出金额，got %+v ok=%v", cost, ok)
 	}
@@ -153,5 +153,54 @@ func TestScanThenPriceExposesCostInJSON(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"label":"convert:chapter_001"`) {
 		t.Fatalf("阶段标签变了，费用报告的分组会跟着变: %s", data)
+	}
+}
+
+// T101 第二版：转录里冻的费率优先于当下配置——配置改了（哪怕删了），
+// 历史会话仍按冻结价算；冻结行里没有的模型才退回配置表。
+func TestFrozenPriceWinsOverConfig(t *testing.T) {
+	st := &UsageStats{Requests: 1, PromptTokens: 1_000_000, Completion: 0, Model: "m-cheap"}
+	frozen := map[string]config.PriceConfig{
+		"m-cheap": {Input: 10, Output: 40, Currency: "¥"},
+	}
+	cost, ok, _ := SessionCost(st, frozen, priceTable())
+	if !ok || cost.Total != 10 {
+		t.Fatalf("冻结价必须赢过配置价：got %v (ok=%v), want 10", cost.Total, ok)
+	}
+	// 配置表里删掉该模型也能算（纯靠冻结行）。
+	cost2, ok2, _ := SessionCost(st, frozen, map[string]config.PriceConfig{})
+	if !ok2 || cost2.Total != 10 {
+		t.Fatalf("无配置时冻结价照样算：got %v (ok=%v)", cost2, ok2)
+	}
+	// 冻结行没有、配置有：退回配置（旧转录路径）。
+	cost3, ok3, _ := SessionCost(st, map[string]config.PriceConfig{}, priceTable())
+	if !ok3 || cost3.Total != 1 {
+		t.Fatalf("无冻结行退回配置：got %v (ok=%v)", cost3, ok3)
+	}
+}
+
+// 换模型续跑的会话按模型分桶、各自费率（冻结或配置）计价。
+func TestCostSplitsByModel(t *testing.T) {
+	st := &UsageStats{Requests: 2, Model: "m-big"}
+	st.add(UsageStats{Requests: 1, PromptTokens: 1_000_000, Model: "m-cheap"})
+	st.add(UsageStats{Requests: 1, PromptTokens: 1_000_000, Model: "m-big"})
+	cost, ok, unpriced := SessionCost(st, nil, priceTable())
+	if !ok {
+		t.Fatal("两个模型都有价")
+	}
+	// m-cheap 1M×1元 + m-big 1M×2元
+	if diff := cost.Total - 3; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("分桶计价：got %v want 3", cost.Total)
+	}
+	if unpriced != 0 {
+		t.Fatalf("不该有无价请求：%d", unpriced)
+	}
+	// 其中一个模型没价：只算有价桶，无价桶计入 unpriced。
+	st2 := &UsageStats{}
+	st2.add(UsageStats{Requests: 1, PromptTokens: 1_000_000, Model: "m-cheap"})
+	st2.add(UsageStats{Requests: 3, PromptTokens: 3_000_000, Model: "unknown"})
+	cost2, ok2, un2 := SessionCost(st2, nil, priceTable())
+	if !ok2 || cost2.Total != 1 || un2 != 3 {
+		t.Fatalf("部分无价：cost=%v ok=%v unpriced=%d, want 1/true/3", cost2, ok2, un2)
 	}
 }

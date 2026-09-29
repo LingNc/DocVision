@@ -35,6 +35,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"mineru-tools/internal/config"
 	"mineru-tools/internal/session"
 )
 
@@ -226,8 +227,6 @@ type UsageStats struct {
 	// Round / Model / Finish describe a single request (empty in aggregates).
 	Round  int    `json:"round,omitempty"`
 	Model  string `json:"model,omitempty"`
-	// Entry 是 models.<条目名>（T101 查价键；旧转录无此字段退回 Model）。
-	Entry  string `json:"entry,omitempty"`
 	Finish string `json:"finish,omitempty"`
 	// Kind names the request inside its session: "" ordinary turn,
 	// "nudge" (forced text answer) or "compact" (context summarisation).
@@ -235,10 +234,30 @@ type UsageStats struct {
 
 	// genMS accumulates generation time for OutputTPS; not serialised.
 	genMS int64
+	// ByModel 按厂商模型名分桶（T101 第二版：换模型续跑的会话按各自
+	// 冻结费率计价）；不序列化，仅费用统计用。
+	ByModel map[string]*UsageStats `json:"-"`
 }
 
 // add folds another set of counters (one request or another aggregate) in.
 func (u *UsageStats) add(o UsageStats) {
+	u.addFlat(o)
+	if o.Model != "" {
+		u.Model = o.Model
+		if u.ByModel == nil {
+			u.ByModel = map[string]*UsageStats{}
+		}
+		b := u.ByModel[o.Model]
+		if b == nil {
+			b = &UsageStats{Model: o.Model}
+			u.ByModel[o.Model] = b
+		}
+		b.addFlat(o) // 扁平累加，桶内不再递归分桶
+	}
+}
+
+// addFlat 只做计数累加（不含 ByModel 分桶与 Model 覆盖）——add 与桶内共用。
+func (u *UsageStats) addFlat(o UsageStats) {
 	u.Requests += o.Requests
 	u.PromptTokens += o.PromptTokens
 	u.CachedTokens += o.CachedTokens
@@ -255,12 +274,6 @@ func (u *UsageStats) add(o UsageStats) {
 	}
 	if o.LastTS > u.LastTS {
 		u.LastTS = o.LastTS
-	}
-	if o.Model != "" {
-		u.Model = o.Model
-	}
-	if o.Entry != "" {
-		u.Entry = o.Entry
 	}
 }
 
@@ -368,6 +381,10 @@ type SessionInfo struct {
 	EndState string `json:"endState,omitempty"`
 	// RunEndError 会话结局错误（t=meta run_end）：详情栏与排查钉死因。
 	RunEndError string `json:"runEndError,omitempty"`
+	// Prices 转录里冻的费率（t=meta kind=price，T101 第二版）；
+	// Unpriced 是没有费率可查的请求数（费用只是下界）。
+	Prices   map[string]config.PriceConfig `json:"-"`
+	Unpriced int                           `json:"unpriced,omitempty"`
 	// ImgShortKeep (T37) is the hash-keep length the img2text grouping
 	// picked for this session's short image name (8, escalated to 12 on
 	// collision). Zero = default 8. Server-side only.
@@ -819,6 +836,9 @@ type transcriptStat struct {
 	// RunEndError 是最近一条 t=meta kind=run_end 的错误文本（会话层 T94
 	// 起每次 Run 结束都落结局）——空 = 正常收尾或旧转录没有结局行。
 	RunEndError string
+	// Prices 是转录里 t=meta kind=price 冻的费率（model → 费率，同模型
+	// 后写胜）——费用按冻的价算，不依赖跑报表时的配置（T101 第二版）。
+	Prices map[string]config.PriceConfig
 	// SHA is the content hash of the whole transcript file (P10, 12 hex of
 	// SHA-256 over the raw bytes) — the session's fingerprint at this size/
 	// mtime; a user can quote it to pin the exact state they saw.
@@ -969,6 +989,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			Live:          liveNow(stat, c.mt, now),
 			EndState:      liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow),
 			RunEndError:   stat.RunEndError,
+			Prices:        stat.Prices,
 			ChapterOrder:  chapterOrderOf(c.name),
 		})
 	}
@@ -1107,6 +1128,23 @@ func readStat(p string) (transcriptStat, error) {
 					}
 				case "meta":
 					stat.addMeta(trimmed)
+					if strings.Contains(trimmed, `"kind":"price"`) {
+						var rec struct {
+							Model    string  `json:"model"`
+							Input    float64 `json:"input"`
+							Cached   float64 `json:"cached"`
+							Output   float64 `json:"output"`
+							Currency string  `json:"currency"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.Model != "" {
+							if stat.Prices == nil {
+								stat.Prices = map[string]config.PriceConfig{}
+							}
+							stat.Prices[rec.Model] = config.PriceConfig{
+								Input: rec.Input, Cached: rec.Cached, Output: rec.Output, Currency: rec.Currency,
+							}
+						}
+					}
 					if strings.Contains(trimmed, `"kind":"run_end"`) {
 						var rec struct {
 							OK    *bool  `json:"ok"`
@@ -1147,7 +1185,6 @@ func (stat *transcriptStat) addUsage(line string) {
 		// 少了它每次会话都"查无此价"，金额永远是 0（真实缺陷：聚合里漏字段，
 		// 于是配好的价格一个也用不上）。
 		Model:           rec.Model,
-		Entry:           rec.Entry,
 		PromptTokens:    rec.PromptTokens,
 		CachedTokens:    rec.CachedTokens,
 		Completion:      rec.Completion,
@@ -1542,8 +1579,6 @@ type transcriptLine struct {
 	Kind         string           `json:"kind,omitempty"`
 	SessionLabel string           `json:"session_label,omitempty"`
 	Model        string           `json:"model,omitempty"`
-	// Entry 是 models.<条目名>（usage 行查价键，T101）。
-	Entry string `json:"entry,omitempty"`
 	SysHash      string           `json:"system_sha,omitempty"`
 	Tools        []transcriptTool `json:"tools,omitempty"`
 
