@@ -19,6 +19,10 @@ type ToolResult struct {
 	Text        string
 	ImageBase64 string
 	ImageMIME   string // default "image/png"
+	// Terminal (T92)：本次回执即会话终点（submit 类工具收账成功时置位）——
+	// 回执落盘后 Run 直接返回，不再等模型收尾。否则模型提交后往往回一条
+	// 空消息，触发 "Continue." 空转一轮白烧 token，转录里还多两条废话。
+	Terminal bool
 }
 
 // Tool is one pluggable capability of a session. Sessions own a tool
@@ -603,12 +607,16 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 			// so an interleaved user turn makes the next request fail with
 			// "insufficient tool messages following tool_calls message".
 			var vision []visionTurn
+			terminalText := ""
 
 			for _, tc := range choice.Message.ToolCalls {
 				if s.logger.DebugEnabled() {
 					s.logger.Debug(s.tid, "[session:"+s.label+"] tool call:", tc.Function.Name, tc.Function.Arguments)
 				}
 				result := s.executeTool(tc)
+				if result.Terminal {
+					terminalText = result.Text
+				}
 				if s.logger.DebugEnabled() {
 					out := result.Text
 					if len(out) > 2000 {
@@ -648,6 +656,10 @@ func (s *Session) Run(opts RunOptions) (string, error) {
 				s.appendToolImage(v)
 			}
 			toolRounds++
+			// T92：终态回执（submit 收账）——直接结束会话，不再空转一轮。
+			if terminalText != "" {
+				return terminalText, nil
+			}
 			continue
 		}
 

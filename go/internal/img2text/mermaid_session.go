@@ -445,7 +445,7 @@ func (t *mermaidSubmitTool) Execute(argsJSON string) (session.ToolResult, error)
 	st.log.Log(st.tid, "  [mermaid-fix] 提交通过（", st.checks, "次检查 /", st.errors, "次编译错误）")
 	// "SUBMITTED." 前缀是预览侧栏判定 done 终态的规范信号（T53：原先
 	// "OK: ..." 让成功会话在方块视图里显示成红色 error）。
-	return session.ToolResult{Text: "SUBMITTED. The Mermaid diagram passed validation. You are done."}, nil
+	return session.ToolResult{Text: "SUBMITTED. The Mermaid diagram passed validation. You are done.", Terminal: true}, nil
 }
 
 // recordError 记一次编译错误：落盘、计数、到上限时标记升级（备选段已升级过就不再切）。

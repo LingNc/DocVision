@@ -195,7 +195,7 @@ var registry = []Template{
 	},
 	{
 		Name: ConvertUser, File: "latex_convert.user.md",
-		Vars: []string{"CHAPTER_FILE", "TEX_PATH", "CHAPTER_PREVIEW"},
+		Vars: []string{"CHAPTER_FILE", "TEX_PATH"},
 	},
 	{
 		Name: StyleFixUser, File: "latex_stylefix.user.md",

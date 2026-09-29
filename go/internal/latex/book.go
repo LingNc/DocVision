@@ -397,10 +397,12 @@ func (r *Runner) stylePhase(proj string) error {
 	// so later turns edit diffs instead of re-emitting full contents.
 	workDir := filepath.Join(proj, "work", "style")
 	_ = os.MkdirAll(workDir, 0o755)
-	submit := &SubmitStyleTool{Workspace: workDir}
+	goal := NewGoalTool(filepath.Join(workDir, "plan.md"))
+	submit := &SubmitStyleTool{Workspace: workDir, Gate: func() string { return goalGate(goal) }}
 	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_style")
 	defer cleanBashTmp()
 	tools := r.styleSessionTools(proj, workDir, sourceDir, "style", bashTmp, submit)
+	tools = append(tools, goal)
 
 	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "style")
 	var styleHook func(rounds, tools int)
@@ -581,7 +583,8 @@ func (r *Runner) chaptersPhase(proj string) error {
 	client := r.clientFor(r.cfg.Latex.ChapterModel)
 	modelCfg := r.modelOf(r.cfg.Latex.ChapterModel)
 	tuning := r.cfg.LatexSession("chapter")
-	submit := &SubmitSplitTool{}
+	goal := NewGoalTool(filepath.Join(sandbox, "plan.md"))
+	submit := &SubmitSplitTool{Root: sandbox, Gate: func() string { return goalGate(goal) }}
 	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_chapters")
 	defer cleanBashTmp()
 	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.ChaptersSystem), tuning, r.outputLang()), []session.Tool{
@@ -589,6 +592,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 		&ReadFileTool{Root: sandbox},
 		&WorkBashTool{Root: sandbox, Mounts: r.sessionMounts(kindChapters, sandbox), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		&EditWorkFileTool{Root: sandbox},
+		goal,
 		submit,
 	}, r.log, 1, "chapters")
 	// 划分会话也带转录：大部头一本书可能分多次跑，中断后从转录续上。
@@ -633,7 +637,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 	})
 
 	if len(chapterMsgs) > 0 && !chaptersSkip {
-		initial = resumeUserText(chapterMsgs, "The session was interrupted earlier. Continue from where you left off and call submit_split with the final chapter ranges.")
+		initial = resumeUserText(chapterMsgs, "The session was interrupted earlier. Continue from where you left off, write split.json and call submit_split.")
 	}
 	replayRunPending := chaptersSkip // 重放已提交：第一轮跳过 Run 直接走校验写盘
 	for attempt := 0; attempt < 3; attempt++ {
@@ -642,7 +646,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 		} else {
 			userText := initial
 			if attempt > 0 {
-				userText = "Your split was rejected: " + r.lastSplitError + "\nFix the ranges and call submit_split again."
+				userText = "Your split was rejected: " + r.lastSplitError + "\nFix split.json and call submit_split again."
 			}
 			if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 				return fmt.Errorf("章节划分会话失败: %w", err)
@@ -991,11 +995,13 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	}
 	defer cleanWork()
 
+	goal := NewGoalTool(filepath.Join(work, "plan.md"))
 	submit := &SubmitChapterTool{
 		WorkRoot:   work,
 		SubmitRoot: filepath.Join(workDir, "chapters"),
 		Base:       base,
 		ReportPath: filepath.Join(workDir, "reports", base+".md"), // 工作汇报（实时落盘）
+		Gate:       func() string { return goalGate(goal) },
 	}
 	// 挂载表：work = 本章临时工作区（唯一可写），project/source = 只读。
 	convertMounts := r.sessionMounts(kindConvert, work)
@@ -1014,6 +1020,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		&CompileChapterTool{Comp: r.comp, Dir: work, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex", Log: r.log, Tid: 1},
 		&WorkBashTool{Mounts: convertMounts, Root: work, TmpDir: bashTmp,
 			MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
+		goal,
 		submit,
 	}
 	// 原始文档只读工具：片段→原 PDF 页定位（doc_search）+ 原书页面索引/
@@ -1055,14 +1062,11 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		defer tr.Close()
 	}
 
-	chapData, err := os.ReadFile(chapPath)
-	if err != nil {
-		return err
-	}
+	// T93：首条消息不再内联章节前 2000 字符——该 md 本就是会话第一步
+	// 必读的文件，内联只会跟着每轮请求重发。
 	initial := prompts.Render(prompts.ConvertUser, map[string]string{
-		"CHAPTER_FILE":    "chapter markdown path: project:chapters/" + base + ".md",
-		"CHAPTER_PREVIEW": truncateRunes(string(chapData), 2000),
-		"TEX_PATH":        "Write it as work:" + base + ".tex (extra \\input parts go in the folder work:" + base + "/), compile until clean, then submit those TWO paths.",
+		"CHAPTER_FILE": "chapter markdown path: project:chapters/" + base + ".md",
+		"TEX_PATH":     "Write it as work:" + base + ".tex (extra \\input parts go in the folder work:" + base + "/), compile until clean, then submit those TWO paths.",
 	})
 
 	if r.cfg.Latex.RemoveWatermark {

@@ -203,7 +203,7 @@ func (t *SubmitFigureTool) Execute(argsJSON string) (session.ToolResult, error) 
 	t.State.submitted = true
 	t.State.finalCode = code
 	t.State.uncertain = strings.Contains(code, "[?]")
-	return session.ToolResult{Text: "SUBMITTED. The figure is accepted. Reply with a one-line confirmation and nothing else."}, nil
+	return session.ToolResult{Text: "SUBMITTED. The figure is accepted.", Terminal: true}, nil
 }
 
 // buildStandalone wraps TikZ body code in a compilable standalone

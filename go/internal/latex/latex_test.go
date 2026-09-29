@@ -120,6 +120,46 @@ func TestSubmitSplitToolValidation(t *testing.T) {
 	}
 }
 
+// T92：submit_split 改读独立文件 split.json（内联 chapters 只留 replay
+// 通道）；成功回执是终态（Terminal），Gate 先于一切。
+func TestSubmitSplitToolFile(t *testing.T) {
+	dir := t.TempDir()
+	tool := &SubmitSplitTool{Root: dir}
+
+	// 文件不存在 → 拒绝并指路
+	res, err := tool.Execute(`{}`)
+	if err != nil || !strings.Contains(res.Text, "split.json") {
+		t.Fatalf("缺文件必须拒绝并提到 split.json: err=%v res=%q", err, res.Text)
+	}
+
+	// Gate 先拦
+	tool.Gate = func() string { return "REJECTED: gate says no" }
+	if err := os.WriteFile(filepath.Join(dir, "split.json"),
+		[]byte(`{"chapters":[{"title":"a","start_line":1,"end_line":10}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, _ = tool.Execute(`{}`)
+	if res.Text != "REJECTED: gate says no" || tool.Set {
+		t.Fatalf("Gate 必须先拦: res=%q set=%v", res.Text, tool.Set)
+	}
+	tool.Gate = nil
+
+	// 正常：读文件解析 + Terminal
+	res, err = tool.Execute(`{}`)
+	if err != nil || !tool.Set || len(tool.Chapters) != 1 {
+		t.Fatalf("文件式提交失败: err=%v set=%v n=%d", err, tool.Set, len(tool.Chapters))
+	}
+	if !res.Terminal {
+		t.Fatal("submit 成功回执必须是终态（Terminal）")
+	}
+
+	// 旧转录 replay：内联 chapters 仍收
+	tool2 := &SubmitSplitTool{Root: dir}
+	if _, err := tool2.Execute(`{"chapters":[{"title":"x","start_line":1,"end_line":5}]}`); err != nil || !tool2.Set {
+		t.Fatalf("内联 replay 通道坏了: err=%v set=%v", err, tool2.Set)
+	}
+}
+
 func TestResolveInside(t *testing.T) {
 	full, err := resolveInside("/tmp/proj", "chapters/a.md")
 	if err != nil || !strings.HasSuffix(full, "chapters/a.md") {

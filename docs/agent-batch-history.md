@@ -1519,3 +1519,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T91 矢量图 3D 引导强化（真实证据驱动）
 - 用户观察：几轮跑下来 3D 立体图不少、却没一个用 3D 包。实测取证：李艳芳_2 与某测试卷里 4 个标记为 3D 的矢量图，figure.tex 全只用了 usetikzlibrary{calc}——模型在手算斜二测投影。根因：提示词里 "3D scenes -> tikz-3dplot / perspective coordinates" 埋在 step 2 长句的括号里，压不住"描投影"的默认习惯。修法：点名真实 API（tdplotsetmaincoords + tdplot_main_coords 坐标系 / perspective 库）并明令禁止 calc 手投 3D。xelatex + tikz-3dplot 冒烟编译通过（texlive 2026 全量自带）。环境包清单：tikz-3dplot / perspective 库 / pgfplots / tkz-euclide 均可用；pst-solides3d 虽装但 PSTricks 走 dvips，与本管线不兼容，别用。
+
+### T92 章节划分三连修 + T93 + P27[F]（真实证据驱动）
+- **"Continue 空转"根因**：submit_split 收账后会话不终止，模型视任务已完成回**空消息** → T35 的空回复自救机制发 "Continue." 再烧一轮 → 模型再憋一句废话收尾。修：ToolResult 加 Terminal 字段，submit 类工具成功回执置位、Run 落回执后直接返回。覆盖 submit_split/SubmitChapterTool/SubmitDoneTool（checker/figure-check/assemble×2）/SubmitFigureTool/SubmitBlockFixTool/SubmitProblemsTool/mermaid 修复；SubmitStyleTool 不置位（提交后还有 test-compile，失败要打回续跑）。figure_check 测试同步改成"一次校验一个请求"。
+- **"重复 json / 章节双倍"排查**：某测试卷 chapters 会话的 submit args 3204 字符、51 章区间连续无重复（书名"30+5+15"=50 套卷+1 引言=51，数字正确）；buffer.md 只是工作笔记。用户在 webui 看到的"重复"= 同一份清单在 edit_file(buffer) 与 submit args 各出现一次。修：submit_split 改读沙箱 split.json 独立文件（无参提交，path 可覆盖）；内联 chapters 参数保留但只在 replay 通道（旧转录续跑重放 args 用），工具定义不再暴露。提示词同步（chapters system/user）。
+- **P27[F] 打回项**：goal 工具铺到 style 主会话 / 章节划分 / 章节转换（各带 plan.md + 提交门 goalGate；stylefix 各会话 T64 已有）。
+- **T93**：convert 首条消息删掉章节前 2000 字符内联预览（CHAPTER_PREVIEW 占位符退役）——该 md 是会话必读输入，内联每轮重发。

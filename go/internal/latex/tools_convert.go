@@ -252,7 +252,7 @@ func (t *SubmitDoneTool) Execute(argsJSON string) (session.ToolResult, error) {
 			}
 		}
 	}
-	return session.ToolResult{Text: "SUBMITTED. Reply with a one-line confirmation and nothing else."}, nil
+	return session.ToolResult{Text: "SUBMITTED.", Terminal: true}, nil
 }
 
 // SubmitChapterTool is the convert session's submit: the chapter is
@@ -276,6 +276,8 @@ type SubmitChapterTool struct {
 	// ReportOptional drops the mandatory 工作汇报 (the style-fix session
 	// only has to hand in an adapted chapter).
 	ReportOptional bool
+	// Gate 是可选提交门（P27：goal 计划清空才放行）；返回打回文案即拒绝。
+	Gate func() string
 }
 
 func (t *SubmitChapterTool) Name() string { return "submit" }
@@ -315,6 +317,11 @@ func (t *SubmitChapterTool) Definition() map[string]any {
 }
 
 func (t *SubmitChapterTool) Execute(argsJSON string) (session.ToolResult, error) {
+	if t.Gate != nil {
+		if msg := t.Gate(); msg != "" {
+			return session.ToolResult{Text: msg}, nil
+		}
+	}
 	args, err := parseJSONObject(argsJSON)
 	if err != nil {
 		return session.ToolResult{}, err
@@ -385,8 +392,8 @@ func (t *SubmitChapterTool) Execute(argsJSON string) (session.ToolResult, error)
 			}
 		}
 	}
-	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. chapters/%s and chapters/%s/ (%d files) are in the book. Reply with a one-line confirmation and nothing else.",
-		wantTex, wantDir, t.Placed)}, nil
+	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. chapters/%s and chapters/%s/ (%d files) are in the book.",
+		wantTex, wantDir, t.Placed), Terminal: true}, nil
 }
 
 // renderWorkReport renders the fixed-format 工作汇报 file. The "结论:"

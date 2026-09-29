@@ -102,7 +102,7 @@ func (t *SubmitProblemsTool) Execute(argsJSON string) (session.ToolResult, error
 		return session.ToolResult{Text: "REJECTED: 这些问题缺 title/detail: " + strings.Join(bad, ", ")}, nil
 	}
 	t.Set = true
-	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. %d problems recorded.", len(ids))}, nil
+	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. %d problems recorded.", len(ids)), Terminal: true}, nil
 }
 
 // SubmitBlocksTool 收评估会话的修复块划分。
@@ -189,7 +189,7 @@ func (t *SubmitBlocksTool) Execute(argsJSON string) (session.ToolResult, error) 
 		out = append(out, b)
 	}
 	t.Blocks, t.Set = out, true
-	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. %d blocks recorded.", len(out))}, nil
+	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. %d blocks recorded.", len(out)), Terminal: true}, nil
 }
 
 // SubmitBlockFixTool 收分块修复会话的逐章结论。提交后代码把工作区里
@@ -266,7 +266,7 @@ func (t *SubmitBlockFixTool) Execute(argsJSON string) (session.ToolResult, error
 		return session.ToolResult{Text: "REJECTED: no valid chapter entries."}, nil
 	}
 	t.Submitted = true
-	return session.ToolResult{Text: "SUBMITTED. Reply with a one-line confirmation and nothing else."}, nil
+	return session.ToolResult{Text: "SUBMITTED.", Terminal: true}, nil
 }
 
 func keysOf(m map[string]bool) []string {

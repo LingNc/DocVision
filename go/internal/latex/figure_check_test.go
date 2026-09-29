@@ -59,12 +59,13 @@ func TestFigureCheckSendsBothImagesAndReadsVerdict(t *testing.T) {
 	r, _ := figureCheckRunner(t, func(w http.ResponseWriter, req *http.Request) {
 		raw, _ := io.ReadAll(req.Body)
 		bodies = append(bodies, string(raw))
-		// 一次 check = 一个会话回合：先给工具调用（submit），拿到工具结果后
-		// 再给一句收尾文本。第 1 次请求判 issues，第 3 次（第二轮校验）判 pass。
+		// 一次 check = 一个请求：submit 是终态回执（T92），收账后会话直接
+		// 结束，不再有收尾文本回合。第 1 次请求判 issues，第 2 次（第二轮
+		// 校验）判 pass。
 		switch len(bodies) {
 		case 1:
 			jsonToolReply(w, "submit", `{"report":{"status":"issues","issues":"missing axis label on the y axis"}}`)
-		case 3:
+		case 2:
 			jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
 		default:
 			jsonReply(w, "Noted.")
@@ -87,8 +88,8 @@ func TestFigureCheckSendsBothImagesAndReadsVerdict(t *testing.T) {
 		t.Fatal("第二轮 pass 必须判通过")
 	}
 
-	if len(bodies) < 3 {
-		t.Fatalf("两轮校验至少各一次请求（含收尾回合），got %d", len(bodies))
+	if len(bodies) < 2 {
+		t.Fatalf("两轮校验各一次请求，got %d", len(bodies))
 	}
 	var first map[string]any
 	if err := json.Unmarshal([]byte(bodies[0]), &first); err != nil {
@@ -104,8 +105,8 @@ func TestFigureCheckSendsBothImagesAndReadsVerdict(t *testing.T) {
 		t.Fatalf("提示词里没提原图/重画图的比较: %.400s", text)
 	}
 	// 第二轮要说明"这是同一比较的第 2 轮（对方已尝试修正）"。
-	if !strings.Contains(bodies[2], "round") {
-		t.Fatalf("后续轮次必须说明是同一比较的下一轮: %.300s", bodies[2])
+	if !strings.Contains(bodies[1], "round") {
+		t.Fatalf("后续轮次必须说明是同一比较的下一轮: %.300s", bodies[1])
 	}
 }
 
