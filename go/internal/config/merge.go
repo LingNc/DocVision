@@ -29,16 +29,18 @@ const (
 // (override).
 //
 // Semantics of the merge (child = the entry that writes `extends`, parent = the
-// entry it names). The merge runs on the ENTRY mapping, key by key over the
-// entry's own keys (model / base_url / api_key / price / thinking / …) — it does
-// not descend into a value the child wrote itself:
+// entry it names) — RECURSIVE: maps deep-merge key by key at any depth
+// (2026-09-29 用户口径：price 复写一条 input 不该把 output/currency 打回默认)：
 //
 //	key absent in child      inherits the parent's value
-//	key present in child     the child's value wins wholesale — including a map
-//	                         value like request_body (a nested block is never
-//	                         half-merged: the child writes the block it wants)
-//	                         and including a list (lists are NOT concatenated)
-//	key: null                deletes an inherited key ("explicit clear")
+//	key present in child     the child's value wins — and when BOTH sides are
+//	                         maps (price / request_body / thinking / …) they
+//	                         merge key by key recursively, so overriding
+//	                         price.input keeps the parent's cached/output/
+//	                         currency; a list is still replaced wholesale
+//	                         (lists are NOT concatenated)
+//	key: null                deletes an inherited key ("explicit clear"),
+//	                         works at any depth (price.cached: null)
 //	explicit 0 / false / ""  counts as an override — the criterion is whether
 //	                         the key is present, not whether the value is non-zero
 //
@@ -225,6 +227,16 @@ func applyExtends(child, parent *yaml.Node) error {
 		}
 		if isNullNode(v) {
 			// `key: null` = explicit clear: the key stays absent after the merge.
+			continue
+		}
+		// 两侧都是 map → 递归深合并（子键级覆盖），否则 child 的值整体赢。
+		if pv := mapNodeValue(parent, k.Value); pv != nil &&
+			v.Kind == yaml.MappingNode && pv.Kind == yaml.MappingNode {
+			merged := shallowMapCopy(v)
+			if err := applyExtends(merged, pv); err != nil {
+				return err
+			}
+			out.Content = append(out.Content, k, merged)
 			continue
 		}
 		out.Content = append(out.Content, k, v)

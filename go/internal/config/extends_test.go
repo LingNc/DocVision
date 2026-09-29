@@ -69,14 +69,13 @@ models:
 	if child.APITimeout != 600 {
 		t.Errorf("child.api_timeout = %d，期望继承基座的 600", child.APITimeout)
 	}
-	// 深合并发生在**条目这一层**：child 自己写了一份 request_body，整块替换，
-	// 基座的键不会漏进来（要合并的是"条目键"，不是任意嵌套 map —— 深层 map 的
-	// 逐键继承由 ResolveModel/ResolveImageEstimate 负责）。
+	// 深合并是**递归**的（2026-09-29 用户口径）：child 写了 request_body.top_p，
+	// 只覆盖这一个子键，基座的其他子键照样继承。
 	if child.RequestBody["top_p"] != 0.5 {
-		t.Errorf("child.request_body = %+v，期望整体替换", child.RequestBody)
+		t.Errorf("child.request_body = %+v，期望自己写的子键赢", child.RequestBody)
 	}
-	if _, leaked := child.RequestBody["enable_thinking"]; leaked {
-		t.Errorf("child 自己写了 request_body，基座的键不该漏进来: %+v", child.RequestBody)
+	if child.RequestBody["enable_thinking"] != false {
+		t.Errorf("child 没写的子键应继承基座: %+v", child.RequestBody)
 	}
 	// 基座自己的 map 不受影响。
 	if base.RequestBody["top_p"] != 0.9 {
@@ -635,10 +634,9 @@ models:
 	if m.APITimeout != 111 {
 		t.Fatalf("只有前一个基座有的键应保留 api_timeout: %d", m.APITimeout)
 	}
-	// 合并是**条目键级**的（嵌套 map 整块替换，见 TestExtendsDeepMergeSemantics）：
-	// 条目自己写了 request_body 就整块用自己的，基座的键不漏进来。
-	if _, leaked := m.RequestBody["top_p"]; leaked {
-		t.Fatalf("条目自己写了 request_body，基座的键不该漏进来: %+v", m.RequestBody)
+	// 嵌套 map 递归深合并：条目自己写的子键赢，没写的子键从基座继承。
+	if m.RequestBody["top_p"] != 0.2 {
+		t.Fatalf("后基座的子键应赢过前基座（0.2）: %+v", m.RequestBody)
 	}
 	if m.RequestBody["temperature"] != 0.9 {
 		t.Fatalf("条目自己的键覆盖所有基座 temperature: %v", m.RequestBody["temperature"])
@@ -680,5 +678,30 @@ models:
     extends: [a, "ghost"]
 `); err == nil || !strings.Contains(err.Error(), "不存在") {
 		t.Fatalf("列表里不存在的基座应报错，得到: %v", err)
+	}
+}
+
+// T102：price 块逐子键深合并——复写 input 一条，cached/output/currency 必须
+// 从基座继承，而不是整块替换打回零值（用户的真实场景）。
+func TestExtendsPriceDeepMergesSubkeys(t *testing.T) {
+	cfg := mustLoadConfig(t, `
+mineru:
+  token: "abc"
+models:
+  text: {model: "wire-base"}
+  base:
+    model: "wire-a"
+    price: {input: 1.0, cached: 0.1, output: 4.0, currency: "¥"}
+  child:
+    extends: base
+    model: "wire-b"
+    price: {input: 2.0}
+`)
+	p := cfg.Models["child"].Price
+	if p.Input != 2.0 {
+		t.Fatalf("复写的 input 应赢: %+v", p)
+	}
+	if p.Cached != 0.1 || p.Output != 4.0 || p.Currency != "¥" {
+		t.Fatalf("没写的子键应从基座继承（cached=0.1 output=4.0 currency=¥）: %+v", p)
 	}
 }
