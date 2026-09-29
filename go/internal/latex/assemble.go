@@ -294,12 +294,18 @@ func (r *Runner) fixSession(proj, buildDir, firstErr string, resume bool) error 
 			return fmt.Errorf("修复会话失败: %w", err)
 		}
 		if compile.LastOK {
+			if !r.remindSubmit(sess, 1, "[assemble]", "fix", "submit", func() bool { return submit.Submitted }) {
+				return fmt.Errorf("修复会话编译通过但未显式提交（已提醒两次）")
+			}
 			return nil
 		}
 		start := time.Now()
 		res := r.comp.CompileFull(buildDir, "main.tex")
 		LogCompileResult(r.log, 1, "book-fix", res, time.Since(start))
 		if res.OK {
+			if !r.remindSubmit(sess, 1, "[assemble]", "fix", "submit", func() bool { return submit.Submitted }) {
+				return fmt.Errorf("修复会话编译通过但未显式提交（已提醒两次）")
+			}
 			return nil
 		}
 		lastErr = res.Err
@@ -397,8 +403,12 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string, resume bool) 
 		res := r.comp.CompileFull(buildDir, "main.tex")
 		LogCompileResult(r.log, 1, "final-review", res, time.Since(start))
 		if res.OK {
-			if !submit.Submitted {
-				r.log.LogWarning(0, "[final-review] 会话未显式提交，但全书编译通过，予以采纳")
+			if !r.remindSubmit(sess, 1, "[final-review]", "final-review", "submit", func() bool { return submit.Submitted }) {
+				// 编译通过但模型不提交：回写中断态后判失败，续跑从现场接着要提交。
+				if perr := persistFinalReviewPartial(proj, buildDir); perr != nil {
+					r.log.LogWarning(0, "[final-review] 回写中断态失败:", perr)
+				}
+				return fmt.Errorf("终审会话编译通过但未显式提交（已提醒两次）")
 			}
 			// 终审对构建树的整理（章节修订/frontmatter/main.tex 钩子）
 			// 回写 work/：assemble 每次重建构建树，不回写的话续跑只能把

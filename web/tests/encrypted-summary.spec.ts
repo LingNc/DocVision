@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isEncryptedSummary , encryptedHeadline } from '../src/legacy/stream'
+import { isEncryptedSummary , encryptedHeadline, encryptedSummaryBody } from '../src/legacy/stream'
 
 describe('isEncryptedSummary（gpt-5 系加密摘要头判定）', () => {
   it('真摘要头（单行 **…**）→ true', () => {
@@ -52,5 +52,21 @@ describe('encryptedHeadline（T60）', () => {
   it('空文本 → 空串', () => {
     expect(encryptedHeadline('')).toBe('')
     expect(encryptedHeadline(undefined)).toBe('')
+  })
+})
+
+// T95：展开态把同行连写的多条摘要拆成各自一行
+describe('encryptedSummaryBody（T95）', () => {
+  it('相邻 **…** 连写拆行', () => {
+    expect(encryptedSummaryBody('**Planning TikZ creation****Inspecting image**'))
+      .toBe('**Planning TikZ creation**\n**Inspecting image**')
+  })
+  it('已有换行的保持、段外短文独立成行', () => {
+    expect(encryptedSummaryBody('**A**\n**B** tail note'))
+      .toBe('**A**\n**B**\ntail note')
+  })
+  it('单条原样、空文本原样', () => {
+    expect(encryptedSummaryBody('**Only one**')).toBe('**Only one**')
+    expect(encryptedSummaryBody('')).toBe('')
   })
 })

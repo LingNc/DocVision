@@ -10068,6 +10068,22 @@
     const line = String(text || "").split("\n").map((l) => l.trim()).find((l) => l) || "";
     return line.replace(/\*\*/g, "").trim();
   }
+  function encryptedSummaryBody(text) {
+    const t = String(text || "");
+    const parts = [];
+    const re = /\*\*[^*\n]+\*\*/g;
+    let last = 0;
+    let m;
+    while (m = re.exec(t)) {
+      const between = t.slice(last, m.index).trim();
+      if (between) parts.push(between);
+      parts.push(m[0]);
+      last = m.index + m[0].length;
+    }
+    const tail = t.slice(last).trim();
+    if (tail) parts.push(tail);
+    return parts.length ? parts.join("\n") : t;
+  }
   function parseLegacyImageParts(text) {
     const s = String(text || "").trim();
     if (!s.startsWith("[{")) return null;
@@ -10859,6 +10875,7 @@
       const thinkTail = computed(() => line.value && line.value.reasoning ? countText(line.value.reasoning.length, estOf(line.value).reasoning) : "");
       const thinkEncrypted = computed(() => isEncryptedSummary(line.value && line.value.reasoning));
       const thinkSummary = computed(() => thinkEncrypted.value ? encryptedHeadline(line.value && line.value.reasoning) : firstLine(line.value && line.value.reasoning));
+      const thinkBody = computed(() => thinkEncrypted.value ? encryptedSummaryBody(line.value && line.value.reasoning) : String(line.value && line.value.reasoning || ""));
       const body = computed(() => splitLeaks(String(line.value && line.value.text || "")));
       const leakName = (b) => b.kind === "thinking" ? "原始思考" : "XML 协议残片";
       const leakBadge = (b) => b.kind === "thinking" ? "漏进正文" : "协议残片";
@@ -10884,9 +10901,7 @@
             default: withCtx(() => [
               createBaseVNode("div", _hoisted_1$8, [
                 createBaseVNode("div", _hoisted_2$8, [
-                  createVNode(_sfc_main$g, {
-                    text: line.value.reasoning
-                  }, null, 8, ["text"])
+                  createVNode(_sfc_main$g, { text: thinkBody.value }, null, 8, ["text"])
                 ])
               ])
             ]),
@@ -10940,7 +10955,7 @@
       };
     }
   });
-  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-85108861"]]);
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-a034e634"]]);
   const _hoisted_1$7 = { class: "sys-line" };
   const _hoisted_2$7 = { class: "line-summary" };
   const _hoisted_3$6 = {

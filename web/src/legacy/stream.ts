@@ -147,6 +147,29 @@ export function encryptedHeadline(text: string | null | undefined): string {
 }
 
 /*
+ * T95：厂商常把多条加密摘要在**同一行连写**（`**A****B****C**`），Markdown
+ * 会把它们渲染成一个段落连在一起，看不清条数。展开态按段拆行：相邻
+ * `**…**` 之间补换行，段外的零散短文（判定允许 ≤20 字符）也独立成行。
+ * 只对 isEncryptedSummary 判定过的文本使用；普通思维链原样不动。
+ */
+export function encryptedSummaryBody(text: string | null | undefined): string {
+  const t = String(text || '')
+  const parts: string[] = []
+  const re = /\*\*[^*\n]+\*\*/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(t))) {
+    const between = t.slice(last, m.index).trim()
+    if (between) parts.push(between)
+    parts.push(m[0])
+    last = m.index + m[0].length
+  }
+  const tail = t.slice(last).trim()
+  if (tail) parts.push(tail)
+  return parts.length ? parts.join('\n') : t
+}
+
+/*
  * T56：img2text 逐图分析会话的**旧转录**里，user 消息的 text 字段是一整段
  * JSON 数组字符串（写盘时的 bug，Go 侧已修、新转录正常）：
  *   [{"text":"The image to describe is at line 1038. ..."},{"type":"image_url",

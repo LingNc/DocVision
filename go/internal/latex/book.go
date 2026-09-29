@@ -491,8 +491,8 @@ func (r *Runner) stylePhase(proj string) error {
 				return fmt.Errorf("样式会话失败: %w", err)
 			}
 		}
-		if !submit.Set {
-			return fmt.Errorf("样式会话未提交 submit_style")
+		if !r.remindSubmit(sess, 1, "[style]", "style", "submit_style", func() bool { return submit.Set }) {
+			return fmt.Errorf("样式会话未提交 submit_style（已提醒两次）")
 		}
 
 		// Persist + test-compile the example.
@@ -658,8 +658,8 @@ func (r *Runner) chaptersPhase(proj string) error {
 				return fmt.Errorf("章节划分会话失败: %w", err)
 			}
 		}
-		if !submit.Set {
-			return fmt.Errorf("章节划分会话未提交 submit_split")
+		if !r.remindSubmit(sess, 1, "[chapters]", "chapters", "submit_split", func() bool { return submit.Set }) {
+			return fmt.Errorf("章节划分会话未提交 submit_split（已提醒两次）")
 		}
 		if err := validateSplit(submit.Chapters, totalLines); err != nil {
 			r.lastSplitError = err.Error()
@@ -1089,20 +1089,11 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 			return fmt.Errorf("会话失败: %w", err)
 		}
 	}
-	if !submit.Submitted {
-		// 必须显式提交（用户口径）：模型提前收尾漏了 submit 就提醒续跑
-		// （同 checker/tikz 的提醒语义），最多两次；仍不提交判失败——
-		// 不再静默采纳"编译通过但没提交"的产物（T92 前 chapter_003 事故：
-		// 模型漏调 submit，章节被悄悄收下，界面看不出未提交）。
-		for remind := 0; remind < 2 && !submit.Submitted; remind++ {
-			r.log.LogWarning(tid, "[convert]", base, "会话结束但未提交，发送提交提醒")
-			if _, err := sess.Run(session.RunOptions{UserText: "You have NOT submitted yet — the chapter is only accepted after an explicit submit. Call submit now with your chapter .tex path (and parts folder if any). If the last compile failed, fix and compile first, then submit."}); err != nil {
-				return fmt.Errorf("提交提醒轮会话失败: %w", err)
-			}
-		}
-		if !submit.Submitted {
-			return fmt.Errorf("会话未提交（已提醒两次）")
-		}
+	if !r.remindSubmit(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted }) {
+		// 必须显式提交（用户口径）：提前收尾漏了 submit 就提醒续跑（最多两次），
+		// 仍不提交判失败——不再静默采纳"编译通过但没提交"的产物
+		// （chapter_003 事故：模型漏调 submit，章节被悄悄收下，界面看不出）。
+		return fmt.Errorf("会话未提交（已提醒两次）")
 	}
 	if !fileExists(texPath) {
 		return fmt.Errorf("会话已提交但没有写出 .tex")
@@ -1652,4 +1643,18 @@ func writeFontsReadme(fontsDir string) {
 - 一个字体家族的多个字重各自单独成文件（Regular / Bold / Italic ...）。
 `
 	_ = os.WriteFile(readme, []byte(content), 0o644)
+}
+
+// remindSubmit 统一"必须显式提交"语义（用户口径，T94 扩展到全部会话）：
+// 会话提前收尾没提交 → 提醒续跑最多两次 → 仍未提交返回 false（调用方判失败）。
+// 提醒轮在同一会话里续跑——前面写好的文件都还在，补上 submit 即可。
+func (r *Runner) remindSubmit(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool) bool {
+	for remind := 0; remind < 2 && !submitted(); remind++ {
+		r.log.LogWarning(tid, tag, label, "会话结束但未提交，发送提交提醒")
+		if _, err := sess.Run(session.RunOptions{UserText: "You have NOT submitted yet — the result only counts after an explicit " + submitTool + " call. Call " + submitTool + " now (fix and compile first if something is still broken)."}); err != nil {
+			r.log.LogWarning(tid, tag, label, "提交提醒轮失败:", err)
+			return false
+		}
+	}
+	return submitted()
 }

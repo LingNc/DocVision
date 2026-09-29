@@ -4,7 +4,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { state, storeGet, storeSet, LONG_TEXT_LINES, registerAnchor, unregisterAnchor } from '../state'
 import { countText, estOf, firstLine } from '../legacy/sidebar'
-import { type StreamItem, splitLeaks, isEncryptedSummary, encryptedHeadline, type LeakBlock } from '../legacy/stream'
+import { type StreamItem, splitLeaks, isEncryptedSummary, encryptedHeadline, encryptedSummaryBody, type LeakBlock } from '../legacy/stream'
 import { openLightbox } from '../state'
 import { mediaURL } from '../legacy/timeline'
 import Disclosure from './Disclosure.vue'
@@ -74,6 +74,9 @@ const thinkTail = computed(() =>
 const thinkEncrypted = computed(() => isEncryptedSummary(line.value && line.value.reasoning))
 const thinkSummary = computed(() =>
   thinkEncrypted.value ? encryptedHeadline(line.value && line.value.reasoning) : firstLine(line.value && line.value.reasoning))
+// T95：展开态正文——加密摘要连写的多条 `**…**` 拆成各自一行
+const thinkBody = computed(() =>
+  thinkEncrypted.value ? encryptedSummaryBody(line.value && line.value.reasoning) : String((line.value && line.value.reasoning) || ''))
 
 // T30/T32/T34：旧转录正文里混入的残片（思考块/XML）剥出来折叠展示
 // （新转录 Go 侧已清洗：MoveLeakedThinking / StripLeakedToolXML）。
@@ -99,7 +102,7 @@ const leakSummary = (b: LeakBlock) =>
     >
       <div class="thinking-body">
         <div class="reasoning-scroll reasoning-md">
-          <MdBody :text="line.reasoning" />
+          <MdBody :text="thinkBody" />
         </div>
       </div>
     </Disclosure>

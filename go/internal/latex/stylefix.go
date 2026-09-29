@@ -410,12 +410,12 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 	defer liveClose()
 
 	userText := fmt.Sprintf("The work reports from the chapter conversion sessions that flagged style/manual problems are in your workspace at work:reports/<chapter>.md (%d files). "+
-		"Read/grep them, then build the consolidated, de-duplicated problem list with the problems tool (add one by one), and call submit_problems when the list is complete.", len(keys))
+		"Read/grep them, then build the consolidated, de-duplicated problem list with the problems tool (one add call can take several items), and call submit_problems when the list is complete.", len(keys))
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}
-	if !submit.Set {
-		return nil, fmt.Errorf("整合会话未提交 submit_problems")
+	if !r.remindSubmit(sess, 1, "[style-fix]", "integrate", "submit_problems", func() bool { return submit.Set }) {
+		return nil, fmt.Errorf("整合会话未提交 submit_problems（已提醒两次）")
 	}
 	r.keepSessionFile(trPath)
 	store.mu.Lock()
@@ -478,8 +478,8 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	if err := saveSessionContext(sess, ctxPath); err != nil {
 		r.log.LogWarning(1, "[style-fix] 会话上下文回写失败:", err)
 	}
-	if !submit.Set {
-		return fmt.Errorf("风格修复会话未提交 submit_style")
+	if !r.remindSubmit(sess, 1, "[style-fix]", "style", "submit_style", func() bool { return submit.Set }) {
+		return fmt.Errorf("风格修复会话未提交 submit_style（已提醒两次）")
 	}
 	clsName := classNameOf(submit.Cls)
 	if clsName == "" {
@@ -575,8 +575,8 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}
-	if !submit.Set {
-		return nil, fmt.Errorf("评估会话未提交 submit_blocks")
+	if !r.remindSubmit(sess, 1, "[style-fix]", "blocks", "submit_blocks", func() bool { return submit.Set }) {
+		return nil, fmt.Errorf("评估会话未提交 submit_blocks（已提醒两次）")
 	}
 	r.keepSessionFile(trPath)
 	// blocks.json 最终版回存工作区（会话编辑的最终态，跨轮可查）。

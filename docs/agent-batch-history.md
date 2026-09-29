@@ -1537,3 +1537,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T94 转换必须显式提交
 - 用户口径："这边都要求必须要显式submit，没有的话提前结束就和正常的那个一样 Continue / 提示还没 submit"。删掉 convert 的静默兜底（未提交但编译通过→采纳），改为：Run 后未提交 → 提醒轮（sess.Run 续跑，文案指明"只有显式 submit 才算交"）最多两次 → 仍未提交判失败。与 checker（T46）/tikz 的提醒语义对齐。chapter_003 案例就此定性：模型把「熵」打成「熜」+ bash 只读挂载是过程噪音，真正问题是漏 submit 被兜底掩盖。
+
+### T94 扩展：全会话显式提交 + T95 加密摘要拆行 + issue 重编号
+- 用户口径"都应该是需要显式提交的其他会话也是"：抽 Runner.remindSubmit（提醒两轮→false 判失败），铺到 style/chapters（原来是硬失败无提醒）/stylefix 三会话（整合/风格/评估）/assemble 修复与终审。终审的"编译通过予以采纳"静默兜底删除（失败前回写中断态，续跑从现场接着要提交）。修复会话编译通过后同样要补 submit。
+- issue.md 用户新条目与既有编号碰撞（T90/T91/T94 各撞一次）→ 重编号为 T95（加密摘要换行，已做）/T96（章节划分文件提交，已实现标 X）/T97（style 覆盖面检查，待办）。
+- T95：encryptedSummaryBody（stream.ts）——相邻 **…** 段间补换行、段外短文独立成行，AssistantMsg 展开态用它；折叠态标题逻辑不变。vitest 123 全绿。
+- 顺手修过时文案：整合会话 userText "add one by one" → 批量说明。
