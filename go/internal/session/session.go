@@ -211,6 +211,7 @@ func (s *Session) recordUsage(resp *ChatResponse, round int, kind string) {
 	}
 	rec := UsageRecord{
 		Model:    s.client.Model(),
+		Entry:    s.client.Entry(),
 		Stream:   resp.Streamed,
 		Round:    round,
 		Kind:     kind,

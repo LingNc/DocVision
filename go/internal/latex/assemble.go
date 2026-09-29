@@ -147,7 +147,13 @@ func (r *Runner) assemblePhase(proj string) error {
 	if r.cfg.Latex.Compile.FinalReviewEnabled() && !frCurrent && fileExists(filepath.Join(buildDir, "main.pdf")) {
 		if err := r.finalReview(proj, buildDir, texs, frPartial); err != nil {
 			r.log.LogWarning(0, "[final-review] 终审会话未通过（保留已编译全书）:", err)
-			r.phaseNote()("[final-review] 终审未通过（保留已编译全书）")
+			// T101：阶段行也带上原因——警告行混在滚动区里容易被忽略，
+			// 用户盯着的是定格的阶段行。
+			reason := strings.SplitN(err.Error(), "\n", 2)[0]
+			if len(reason) > 160 {
+				reason = reason[:160] + "…"
+			}
+			r.phaseNote()("[final-review] 终审未通过（保留已编译全书）：" + reason)
 		}
 	} else if r.cfg.Latex.Compile.FinalReviewEnabled() {
 		r.log.LogWarning(0, "[final-review] 没有可用的全书 PDF，跳过终审")

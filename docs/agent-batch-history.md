@@ -1557,3 +1557,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T100 续跑纯续行 + 终审中断实锤
 - run_end 机制立刻见效：终审续跑 2 秒死于 `api error: [SESSION_INSUFFICIENT_BALANCE]`（余额不足）——第一次 16:44 的中断同类，当时没机制只能猜。用户需充值。
 - 用户口径"续跑不需要插 user 内容"：resumeUserText 改为非空历史一律返回空（纯续行）。依据：回复中断时死掉的回复不落盘，转录末尾必是 user/tool；assistant 文本收尾 = 模型自己停了，"没提交"由 remindSubmit 两轮提醒兜底（T94 已铺全会话）。
+
+### T101 终审失败原因上行 + 查价按条目名
+- 用户 CLI 实测两问：①终审失败只显示"未通过"无原因——原因本来在 LogWarning 滚动行，用户盯的是定格阶段行→phaseNote 直接拼原因（截 160 字符）；②费用表从全配价变成大面积未配价——根因是用户在两次运行之间（15:36）把 gpt-5.6-luna 改名 gpt-6-luna，第一次运行的进程内存里还是旧配置所以 16:44 报表正常，18:11 新进程按新配置查价，1553 条 convert usage 行的厂商名查无此价。修：usage 行带 entry（models 条目名，clientFor 唯一设置点），SessionCost 查价 entry 优先、厂商名兜底；ModelPrices 条目名也作键。旧转录无 entry 字段行为不变（要重配价需给旧厂商名补一个条目）。

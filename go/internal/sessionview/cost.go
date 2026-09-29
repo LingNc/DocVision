@@ -42,7 +42,17 @@ func SessionCost(st *UsageStats, prices map[string]config.PriceConfig) (*CostSta
 	// per-request breakdown, so a session that switched models mid-flight is
 	// priced with the model its last request used — documented, and rare
 	// (each pipeline session is bound to one registry entry).
-	p, ok := prices[st.Model]
+	// T101：查价优先按 models 条目名（usage 行 T101 起带 entry）——厂商
+	// 模型名一改，按 model 查就"查无此价"；旧转录没有 entry 退回 model。
+	key := st.Entry
+	if key == "" {
+		key = st.Model
+	}
+	p, ok := prices[key]
+	if (!ok || !p.Configured()) && st.Entry != "" && st.Entry != st.Model {
+		// 条目名也没配价时，再按厂商名兜一次（条目改名、厂商名未变的情形）。
+		p, ok = prices[st.Model]
+	}
 	if !ok || !p.Configured() {
 		return nil, false
 	}

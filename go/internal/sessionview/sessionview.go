@@ -226,6 +226,8 @@ type UsageStats struct {
 	// Round / Model / Finish describe a single request (empty in aggregates).
 	Round  int    `json:"round,omitempty"`
 	Model  string `json:"model,omitempty"`
+	// Entry 是 models.<条目名>（T101 查价键；旧转录无此字段退回 Model）。
+	Entry  string `json:"entry,omitempty"`
 	Finish string `json:"finish,omitempty"`
 	// Kind names the request inside its session: "" ordinary turn,
 	// "nudge" (forced text answer) or "compact" (context summarisation).
@@ -256,6 +258,9 @@ func (u *UsageStats) add(o UsageStats) {
 	}
 	if o.Model != "" {
 		u.Model = o.Model
+	}
+	if o.Entry != "" {
+		u.Entry = o.Entry
 	}
 }
 
@@ -1142,6 +1147,7 @@ func (stat *transcriptStat) addUsage(line string) {
 		// 少了它每次会话都"查无此价"，金额永远是 0（真实缺陷：聚合里漏字段，
 		// 于是配好的价格一个也用不上）。
 		Model:           rec.Model,
+		Entry:           rec.Entry,
 		PromptTokens:    rec.PromptTokens,
 		CachedTokens:    rec.CachedTokens,
 		Completion:      rec.Completion,
@@ -1536,6 +1542,8 @@ type transcriptLine struct {
 	Kind         string           `json:"kind,omitempty"`
 	SessionLabel string           `json:"session_label,omitempty"`
 	Model        string           `json:"model,omitempty"`
+	// Entry 是 models.<条目名>（usage 行查价键，T101）。
+	Entry string `json:"entry,omitempty"`
 	SysHash      string           `json:"system_sha,omitempty"`
 	Tools        []transcriptTool `json:"tools,omitempty"`
 

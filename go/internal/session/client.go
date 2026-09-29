@@ -31,6 +31,9 @@ type Client struct {
 	baseURL     string
 	apiKey      string
 	model       string
+	// entry 是 models.<条目名>（费用统计按它查价——厂商模型名一改就丢价，
+	// 条目名稳定；T101）。
+	entry       string
 	api         string // wire protocol: "openai" (default) or "anthropic"
 	requestBody map[string]interface{}
 	log         *logger.Logger // optional; logs retry/backoff waits and stream progress when set
@@ -113,6 +116,12 @@ func NewClient(cfg config.ModelConfig) *Client {
 
 // Model returns the configured model name.
 func (c *Client) Model() string { return c.model }
+
+// Entry 返回 models.<条目名>（空 = 未设置）。clientFor 是唯一设置点。
+func (c *Client) Entry() string { return c.entry }
+
+// SetEntry 记录该客户端来自哪个 models 条目（费用统计用）。
+func (c *Client) SetEntry(name string) { c.entry = name }
 
 // Streaming reports whether this client uses SSE streaming.
 func (c *Client) Streaming() bool { return c.stream }
