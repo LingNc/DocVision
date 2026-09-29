@@ -39,13 +39,14 @@ func replaySubmit(log *logger.Logger, tid int, tag string, tool session.Tool, st
 // by itself with NO new content ("" → session.Run sends nothing); only a
 // session the model stopped mid-flight gets the nudge text.
 func resumeUserText(msgs []session.ChatMessage, nudge string) string {
+	// 用户口径（2026-09-29）：续跑一律不插 user 内容、原样续行——
+	// 回复一半中断的转录末尾本来就是 user/tool（死掉的回复不落盘），
+	// 没 submit 的由 remindSubmit 提醒兜底；插一段"你被中断过"反而
+	// 稀释上下文。空历史（全新会话）才用首句任务文本。
 	if len(msgs) == 0 {
 		return nudge
 	}
-	if msgs[len(msgs)-1].Role == "tool" {
-		return ""
-	}
-	return nudge
+	return ""
 }
 
 // resumeLog summarizes the loaded history the way the console shows it, so

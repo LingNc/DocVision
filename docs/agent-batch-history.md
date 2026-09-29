@@ -1553,3 +1553,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T98 blocks 工具化 + T99 会话结局落盘 + 存储默认开
 - 用户三问：①blocks.json 写入工具化→BlocksTool（同族：批量、每章一块当场拒、edit 逃生舱、submit 终审），评估会话接线+提示词+注册表同步；②终审中断无报错原因——实测转录 164 条消息停在 16:44 的 view_pdf 图片输出（第 63 轮），API/进程死亡从不进转录→AppendNote(run_end) + Run 包装 defer 落结局，web 轨迹单行「run_end · 会话结局」、详情栏「结局」行、endState 见到 run_end error 直接判 error；③keep_session_records 默认 false→true（显式 false 才清理），default.yaml/docs/config.md/代码注释同步，temp_keep 测试适配新默认。
+
+### T100 续跑纯续行 + 终审中断实锤
+- run_end 机制立刻见效：终审续跑 2 秒死于 `api error: [SESSION_INSUFFICIENT_BALANCE]`（余额不足）——第一次 16:44 的中断同类，当时没机制只能猜。用户需充值。
+- 用户口径"续跑不需要插 user 内容"：resumeUserText 改为非空历史一律返回空（纯续行）。依据：回复中断时死掉的回复不落盘，转录末尾必是 user/tool；assistant 文本收尾 = 模型自己停了，"没提交"由 remindSubmit 两轮提醒兜底（T94 已铺全会话）。
