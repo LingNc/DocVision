@@ -579,11 +579,16 @@ func (r *Runner) chaptersPhase(proj string) error {
 	}
 	bufferPath := filepath.Join(sandbox, "buffer.md")
 	_ = os.WriteFile(bufferPath, []byte("# split buffer\n"), 0o644)
+	// split.json 预置空划分：split 工具的结构化操作与 edit_file 裸改都
+	// 从同一份文件出发（edit 直改是逃生舱，工具每次操作前重读文件）。
+	splitPath := filepath.Join(sandbox, "split.json")
+	_ = os.WriteFile(splitPath, []byte("{\"chapters\": []}\n"), 0o644)
 
 	client := r.clientFor(r.cfg.Latex.ChapterModel)
 	modelCfg := r.modelOf(r.cfg.Latex.ChapterModel)
 	tuning := r.cfg.LatexSession("chapter")
 	goal := NewGoalTool(filepath.Join(sandbox, "plan.md"))
+	split := NewSplitTool(splitPath)
 	submit := &SubmitSplitTool{Root: sandbox, Gate: func() string { return goalGate(goal) }}
 	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_chapters")
 	defer cleanBashTmp()
@@ -593,6 +598,7 @@ func (r *Runner) chaptersPhase(proj string) error {
 		&WorkBashTool{Root: sandbox, Mounts: r.sessionMounts(kindChapters, sandbox), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		&EditWorkFileTool{Root: sandbox},
 		goal,
+		split,
 		submit,
 	}, r.log, 1, "chapters")
 	// 划分会话也带转录：大部头一本书可能分多次跑，中断后从转录续上。

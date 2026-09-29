@@ -113,7 +113,7 @@ var registry = []Template{
 	},
 	{
 		Name: ChaptersSystem, File: "latex_chapters.system.md",
-		MustMention: []string{"bash", "edit_file", "grep", "read_file", "submit", "submit_split"},
+		MustMention: []string{"bash", "edit_file", "grep", "read_file", "split", "submit", "submit_split"},
 	},
 	{
 		Name: ConvertSystem, File: "latex_convert.system.md",

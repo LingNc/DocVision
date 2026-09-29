@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 
 	"mineru-tools/internal/session"
 )
@@ -39,9 +41,10 @@ func (t *SubmitSplitTool) Name() string { return "submit_split" }
 func (t *SubmitSplitTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name": "submit_split",
-		"description": "Submit the final chapter split. Write it to split.json first (write_file/edit_file): " +
-			`a JSON object {"chapters": [{"title", "start_line", "end_line"}, ...]} — an ordered list of 1-based inclusive line ranges covering the whole file without gaps or overlaps. ` +
-			`Then call submit_split (no arguments needed; "path" overrides the default split.json).`,
+		"description": "Submit the final chapter split, read from split.json. Maintain that file with the split tool " +
+			"(structured add/update/delete, validated on every op) — editing split.json directly with edit_file also works. " +
+			`Format: {"chapters": [{"title", "start_line", "end_line"}, ...]}, ordered 1-based inclusive ranges covering the whole file without gaps or overlaps. ` +
+			`Call submit_split with no arguments when done ("path" overrides the default split.json).`,
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -107,4 +110,197 @@ func (t *SubmitSplitTool) Execute(argsJSON string) (session.ToolResult, error) {
 	}
 	t.Chapters, t.Set = out, true
 	return session.ToolResult{Text: "SUBMITTED. The split will be validated for full coverage.", Terminal: true}, nil
+}
+
+// ------------------------------------------------------------------
+// split 工具（problems/goal 同族，用户拍板）：章节划分不进 write_file
+// 裸写 JSON——逐条增量操作（list/add/update/delete/clear），每次操作
+// 即校验字段与重叠，列表始终按 start_line 排序落盘 split.json。
+// submit_split 仍读同一份文件做全覆盖终审。每次 Execute 先重读文件：
+// 模型若用 bash 绕过工具改文件也能被看见。
+// ------------------------------------------------------------------
+
+type SplitTool struct {
+	path string
+	mu   sync.Mutex
+}
+
+func NewSplitTool(path string) *SplitTool { return &SplitTool{path: path} }
+
+func (t *SplitTool) Name() string { return "split" }
+
+func (t *SplitTool) Definition() map[string]any {
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name": "split",
+		"description": "Maintain the chapter split (persisted to split.json). " +
+			"ops: list, add {title, start_line, end_line}, add_many {chapters: [...]} (bulk, all-or-nothing), " +
+			"update {n, title?, start_line?, end_line?}, update_many {chapters: [{n, ...}, ...]}, delete {n}, clear. " +
+			"Entries are 1-based inclusive line ranges, kept sorted by start_line; overlapping a neighbour is rejected on the spot. " +
+			"When the list covers the whole file with no gaps, call submit_split.",
+		"parameters": map[string]any{"type": "object", "properties": map[string]any{
+			"op":         map[string]any{"type": "string", "enum": []string{"list", "add", "add_many", "update", "update_many", "delete", "clear"}},
+			"chapters":   map[string]any{"type": "array", "description": "add_many: [{title,start_line,end_line},...]; update_many: [{n,title?,start_line?,end_line?},...]"},
+			"n":          map[string]any{"type": "integer"},
+			"title":      map[string]any{"type": "string"},
+			"start_line": map[string]any{"type": "integer"},
+			"end_line":   map[string]any{"type": "integer"},
+		}, "required": []string{"op"}},
+	}}
+}
+
+func (t *SplitTool) loadLocked() []ChapterRange {
+	var obj struct {
+		Chapters []ChapterRange `json:"chapters"`
+	}
+	if data, err := os.ReadFile(t.path); err == nil {
+		_ = json.Unmarshal(data, &obj)
+	}
+	return obj.Chapters
+}
+
+func (t *SplitTool) saveLocked(chs []ChapterRange) {
+	data, _ := json.MarshalIndent(map[string]any{"chapters": chs}, "", "  ")
+	_ = os.WriteFile(t.path, append(data, '\n'), 0o644)
+}
+
+// validateEntry 校验单条；overlap 时对邻居逐条查（excl 是 update 时自己的下标）。
+func validateEntry(list []ChapterRange, c ChapterRange, excl int) string {
+	if strings.TrimSpace(c.Title) == "" || c.StartLine < 1 || c.EndLine < c.StartLine {
+		return fmt.Sprintf("条目非法（title 非空、1<=start_line<=end_line）: %+v", c)
+	}
+	for i, o := range list {
+		if i == excl {
+			continue
+		}
+		if c.StartLine <= o.EndLine && o.StartLine <= c.EndLine {
+			return fmt.Sprintf("与第 %d 条重叠（%d-%d 与 %d-%d）——先调整邻居再来。", i+1, c.StartLine, c.EndLine, o.StartLine, o.EndLine)
+		}
+	}
+	return ""
+}
+
+func sortSplit(chs []ChapterRange) {
+	sort.Slice(chs, func(i, j int) bool { return chs[i].StartLine < chs[j].StartLine })
+}
+
+func (t *SplitTool) Execute(argsJSON string) (session.ToolResult, error) {
+	args, err := parseJSONObject(argsJSON)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	list := t.loadLocked()
+
+	render := func() string {
+		if len(list) == 0 {
+			return "split.json 为空。"
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d 章:\n", len(list))
+		for i, c := range list {
+			fmt.Fprintf(&b, "%d. [%d-%d] %s\n", i+1, c.StartLine, c.EndLine, c.Title)
+		}
+		return b.String()
+	}
+
+	switch strArg(args, "op") {
+	case "list":
+		return session.ToolResult{Text: render()}, nil
+	case "clear":
+		t.saveLocked(nil)
+		return session.ToolResult{Text: "OK. split.json 已清空。"}, nil
+	case "delete":
+		n := intArg(args, "n", 0)
+		if n < 1 || n > len(list) {
+			return session.ToolResult{Text: fmt.Sprintf("REJECTED: n 超出范围（当前 %d 条）。", len(list))}, nil
+		}
+		list = append(list[:n-1], list[n:]...)
+		t.saveLocked(list)
+		return session.ToolResult{Text: "OK.\n" + render()}, nil
+	case "add_many", "update_many":
+		raw, _ := args["chapters"].([]interface{})
+		if len(raw) == 0 {
+			return session.ToolResult{Text: "REJECTED: chapters 必须是章节数组（add_many 收 {title,start_line,end_line}，update_many 收 {n,...}）。"}, nil
+		}
+		work := append([]ChapterRange(nil), list...)
+		touched := map[int]bool{}
+		for i, it := range raw {
+			m, ok := it.(map[string]interface{})
+			if !ok {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个元素不是对象。", i+1)}, nil
+			}
+			var c ChapterRange
+			excl := -1
+			if strArg(args, "op") == "add_many" {
+				c = ChapterRange{Title: strArg(m, "title"), StartLine: intArg(m, "start_line", 0), EndLine: intArg(m, "end_line", 0)}
+			} else {
+				n := intArg(m, "n", 0)
+				if n < 1 || n > len(work) {
+					return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个元素 n=%d 超出范围（当前 %d 条）——整批未动。", i+1, n, len(work))}, nil
+				}
+				if touched[n] {
+					return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 条被 update 了两次——整批未动。", n)}, nil
+				}
+				touched[n] = true
+				excl = n - 1
+				c = work[excl]
+				if v := strArg(m, "title"); v != "" {
+					c.Title = v
+				}
+				if v := intArg(m, "start_line", 0); v > 0 {
+					c.StartLine = v
+				}
+				if v := intArg(m, "end_line", 0); v > 0 {
+					c.EndLine = v
+				}
+			}
+			if msg := validateEntry(work, c, excl); msg != "" {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个元素: %s——整批未动。", i+1, msg)}, nil
+			}
+			if excl >= 0 {
+				work[excl] = c
+			} else {
+				work = append(work, c)
+				sortSplit(work) // 让后续元素的重叠检查看到已插入的新条目
+			}
+		}
+		sortSplit(work)
+		t.saveLocked(work)
+		return session.ToolResult{Text: fmt.Sprintf("OK. 批量 %d 条已应用。\n", len(raw)) + func() string { list = work; return render() }()}, nil
+	case "add", "update":
+		var c ChapterRange
+		excl := -1
+		if strArg(args, "op") == "add" {
+			c = ChapterRange{Title: strArg(args, "title"), StartLine: intArg(args, "start_line", 0), EndLine: intArg(args, "end_line", 0)}
+		} else {
+			n := intArg(args, "n", 0)
+			if n < 1 || n > len(list) {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: n 超出范围（当前 %d 条）。", len(list))}, nil
+			}
+			excl = n - 1
+			c = list[excl]
+			if v := strArg(args, "title"); v != "" {
+				c.Title = v
+			}
+			if v := intArg(args, "start_line", 0); v > 0 {
+				c.StartLine = v
+			}
+			if v := intArg(args, "end_line", 0); v > 0 {
+				c.EndLine = v
+			}
+		}
+		if msg := validateEntry(list, c, excl); msg != "" {
+			return session.ToolResult{Text: "REJECTED: " + msg}, nil
+		}
+		if excl >= 0 {
+			list[excl] = c
+		} else {
+			list = append(list, c)
+		}
+		sortSplit(list)
+		t.saveLocked(list)
+		return session.ToolResult{Text: "OK.\n" + render()}, nil
+	}
+	return session.ToolResult{Text: "REJECTED: 未知 op（list/add/update/delete/clear）。"}, nil
 }

@@ -1525,3 +1525,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **"重复 json / 章节双倍"排查**：某测试卷 chapters 会话的 submit args 3204 字符、51 章区间连续无重复（书名"30+5+15"=50 套卷+1 引言=51，数字正确）；buffer.md 只是工作笔记。用户在 webui 看到的"重复"= 同一份清单在 edit_file(buffer) 与 submit args 各出现一次。修：submit_split 改读沙箱 split.json 独立文件（无参提交，path 可覆盖）；内联 chapters 参数保留但只在 replay 通道（旧转录续跑重放 args 用），工具定义不再暴露。提示词同步（chapters system/user）。
 - **P27[F] 打回项**：goal 工具铺到 style 主会话 / 章节划分 / 章节转换（各带 plan.md + 提交门 goalGate；stylefix 各会话 T64 已有）。
 - **T93**：convert 首条消息删掉章节前 2000 字符内联预览（CHAPTER_PREVIEW 占位符退役）——该 md 是会话必读输入，内联每轮重发。
+
+### T92 续：split 结构化工具（用户补两条讨论结论）
+- 用户指出此前讨论的是"要不要给 split.json 配 problems 同款编辑工具"，我跳步用了裸 write_file。补上：SplitTool（tools_chapter.go）ops=list/add/add_many/update/update_many/delete/clear，逐条或批量（全量预检、任一非法整批拒绝、批内自重叠也能查出——add_many 每插一条就重排序再验下一条）；用户补充"50 章不该 50 次调用"→ 批量 op 由此而来。
+- 用户第二条："json 裸文件应该可以用 edit 编辑"——不加 write_file/edit_file 封锁，edit_file 直改保留为逃生舱；SplitTool 每次 Execute 先重读文件（loadLocked），外部直改立即可见，乱写 JSON 由 submit_split 终审拒绝兜底。沙箱预置空 split.json。提示词与注册表 MustMention 同步。测试：ops/批量/直改可见性三组。
