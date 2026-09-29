@@ -95,7 +95,7 @@ latex:
     final_review_model: "final-review"        # 终审会话独立模型（T70；默认沿用 convert）
   concurrency: 3                 # 会话级并发（classify / 逐章 convert / style-fix 共用）
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
-  keep_session_records: false # 保留会话转录 JSONL（成功会话默认清理）；debug 日志下必定保留
+  keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）
@@ -247,8 +247,9 @@ estimate:
 #      · 没写的键     → 取基座的值
 #      · 写了任意值   → 用你写的值（包括显式 0 / false / "" 都算覆盖）
 #      · 写了 null    → 显式清空，基座那个键不会生效
-#      · 列表          → 整体替换，不拼接；map 值（request_body/thinking 这种整块）
-#                        → 整块替换，不做半合并
+#      · 列表          → 整体替换，不拼接；map 值（price/request_body/thinking 这种）
+#                        → 逐子键递归深合并（复写 price.input 一条，cached/output/
+#                        currency 照样继承；深层写 null 也可清空）
 #    基座可以是另一条 extends 出来的条目（链式解析），成环/指向不存在的条目/
 #    自引用在加载期直接报错，并打印完整链（如 `a → b → c → a`）。
 #    **多重基座**：extends 也可以是**条目名列表** `extends: [a, b]`——按书写顺序
@@ -259,8 +260,8 @@ estimate:
 # ③ 单价（price）：条目自己写了任意一项就用自己这一份；一项都没写则继承
 #    models.text 的费率（同一个网关下的模型不必重复三行数字）。全 0 = 未配置，
 #    费用报告整块不显示金额——绝不用 ¥0 冒充"没花钱"。
-#    两个条目发往**同一个 wire 模型名**却配了不同单价，加载期直接报错：转录只记
-#    wire 名，费用报告无法判断该用哪一份。
+#    两个条目发往**同一个 wire 模型名**却配了不同单价，加载期直接报错：会话开始
+#    时费率按 wire 名冻进转录，同名不同价无法判断该冻哪一份。
 #
 # 注意区分两套规则：`extends` 只看"键是否出现"（显式 0 也算覆盖）；而条目没写的
 # 字段继承 models.text 时看的是**零值**（写了 0 就等于没写，继续往上回落）。
