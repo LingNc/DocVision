@@ -107,11 +107,10 @@ type ProblemsTool struct {
 func (t *ProblemsTool) Name() string { return "problems" }
 
 func (t *ProblemsTool) Definition() map[string]any {
-	desc := "View the style-problem list. ops: list (id/title/status/chapters, no detail), get {id} (full incl. detail), search {query}."
+	desc := "View the style-problem list. ops: list (id/title/status/chapters, no detail), get {id} or {ids: [...]} (full incl. detail), search {query}."
 	if t.Write {
 		desc = "Manage the style-problem list. ops: list, get {id}, search {query}, " +
-			"add {title, detail, chapters[]} or {items: [{title, detail, ...}, ...]} (one or many at once; ids auto-assigned P1, P2, ...), " +
-			"update {id, title?, detail?, chapters?}, delete {id}."
+			"add {title, detail, chapters[]} or {items: [...]}, update {id, ...} or {items: [{id, ...}, ...]}, delete {id} or {ids: [...]} — all take one or many at once; add ids auto-assigned P1, P2, ..."
 	} else {
 		desc += " check {ids: [...]} / {id, checked: false} marks problems resolved/unresolved — tick each one off as you finish it."
 	}
@@ -164,12 +163,24 @@ func (t *ProblemsTool) Execute(argsJSON string) (session.ToolResult, error) {
 		return session.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
 
 	case "get":
-		i := s.findLocked(strArg(args, "id"))
-		if i < 0 {
-			return session.ToolResult{Text: "REJECTED: 没有这个 id — 先 list 看现有问题。"}, nil
+		// 单条 {id} 或批量 {ids:[...]}。
+		ids := strSliceArg(args, "ids")
+		if v := strArg(args, "id"); v != "" {
+			ids = append(ids, v)
 		}
-		p := s.Problems[i]
-		return session.ToolResult{Text: summary(p) + "\n\n" + p.Detail}, nil
+		if len(ids) == 0 {
+			return session.ToolResult{Text: "REJECTED: get 需要 id 或 ids。"}, nil
+		}
+		var out []string
+		for _, id := range ids {
+			i := s.findLocked(id)
+			if i < 0 {
+				return session.ToolResult{Text: "REJECTED: 没有 id " + id + " — 先 list 看现有问题。"}, nil
+			}
+			p := s.Problems[i]
+			out = append(out, summary(p)+"\n\n"+p.Detail)
+		}
+		return session.ToolResult{Text: strings.Join(out, "\n\n---\n\n")}, nil
 
 	case "search":
 		q := strings.ToLower(strArg(args, "query"))
@@ -235,38 +246,82 @@ func (t *ProblemsTool) Execute(argsJSON string) (session.ToolResult, error) {
 		if !t.Write {
 			return session.ToolResult{Text: "REJECTED: 本会话没有问题清单的写权限。"}, nil
 		}
-		i := s.findLocked(strArg(args, "id"))
-		if i < 0 {
-			return session.ToolResult{Text: "REJECTED: 没有这个 id。"}, nil
+		// 单条 {id, ...} 或批量 {items:[{id, ...}, ...]}（任一非法整批不动）。
+		raw, _ := args["items"].([]interface{})
+		if len(raw) == 0 {
+			raw = []interface{}{args}
 		}
-		if v := strArg(args, "title"); v != "" {
-			s.Problems[i].Title = v
+		type edit struct {
+			idx      int
+			title    string
+			detail   string
+			chapters []string
 		}
-		if v := strArg(args, "detail"); v != "" {
-			s.Problems[i].Detail = v
+		var edits []edit
+		for i, it := range raw {
+			m, ok := it.(map[string]interface{})
+			if !ok {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: items 第 %d 个元素不是对象——整批未动。", i+1)}, nil
+			}
+			j := s.findLocked(strArg(m, "id"))
+			if j < 0 {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 条的 id 不存在——整批未动。", i+1)}, nil
+			}
+			edits = append(edits, edit{j, strArg(m, "title"), strArg(m, "detail"), strSliceArg(m, "chapters")})
 		}
-		if vs := strSliceArg(args, "chapters"); len(vs) > 0 {
-			s.Problems[i].Chapters = vs
+		var ids []string
+		for _, e := range edits {
+			if e.title != "" {
+				s.Problems[e.idx].Title = e.title
+			}
+			if e.detail != "" {
+				s.Problems[e.idx].Detail = e.detail
+			}
+			if len(e.chapters) > 0 {
+				s.Problems[e.idx].Chapters = e.chapters
+			}
+			ids = append(ids, s.Problems[e.idx].ID)
 		}
 		if err := s.saveLocked(); err != nil {
 			return session.ToolResult{}, err
 		}
-		return session.ToolResult{Text: "已更新 " + s.Problems[i].ID + "。"}, nil
+		return session.ToolResult{Text: "已更新 " + strings.Join(ids, ", ") + "。"}, nil
 
 	case "delete":
 		if !t.Write {
 			return session.ToolResult{Text: "REJECTED: 本会话没有问题清单的写权限。"}, nil
 		}
-		i := s.findLocked(strArg(args, "id"))
-		if i < 0 {
-			return session.ToolResult{Text: "REJECTED: 没有这个 id。"}, nil
+		// 单条 {id} 或批量 {ids:[...]}（任一不存在整批不动）。
+		ids := strSliceArg(args, "ids")
+		if v := strArg(args, "id"); v != "" {
+			ids = append(ids, v)
 		}
-		id := s.Problems[i].ID
-		s.Problems = append(s.Problems[:i], s.Problems[i+1:]...)
+		if len(ids) == 0 {
+			return session.ToolResult{Text: "REJECTED: delete 需要 id 或 ids。"}, nil
+		}
+		for _, id := range ids {
+			if s.findLocked(id) < 0 {
+				return session.ToolResult{Text: "REJECTED: 没有 id " + id + "——整批未动。"}, nil
+			}
+		}
+		var kept []StyleProblem
+		for _, p := range s.Problems {
+			drop := false
+			for _, id := range ids {
+				if p.ID == id {
+					drop = true
+					break
+				}
+			}
+			if !drop {
+				kept = append(kept, p)
+			}
+		}
+		s.Problems = kept
 		if err := s.saveLocked(); err != nil {
 			return session.ToolResult{}, err
 		}
-		return session.ToolResult{Text: "已删除 " + id + "。"}, nil
+		return session.ToolResult{Text: "已删除 " + strings.Join(ids, ", ") + "。"}, nil
 
 	case "check":
 		if t.Write {
@@ -360,7 +415,7 @@ func (t *GoalTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name": "goal",
 		"description": "Your own task plan (persisted to work:plan.md, survives context compaction). " +
-			"ops: list, add {text} or {items: [...]} (one or many at once), update {n, text}, delete {n}, check {n} or {ns: [...]} / {checked: false}. " +
+			"ops: list, add {text} or {items: [...]}, update {n, text} or {items: [{n, text}, ...]}, delete {n} or {ns: [...]}, check {n} or {ns: [...]} / {checked: false} — every op takes one or many at once. " +
 			"Tasks are numbered 1..N top to bottom. All tasks must be checked or deleted before you submit.",
 		"parameters": map[string]any{"type": "object", "properties": map[string]any{
 			"op":      map[string]any{"type": "string", "enum": []string{"list", "add", "update", "delete", "check"}},
@@ -445,23 +500,66 @@ func (t *GoalTool) Execute(argsJSON string) (session.ToolResult, error) {
 		t.saveLocked()
 		return session.ToolResult{Text: fmt.Sprintf("已添加 %d 项（共 %d 项）。", len(texts), len(t.Items))}, nil
 	case "update":
-		i, ok := idx()
-		if !ok {
-			return session.ToolResult{Text: "REJECTED: n 超出范围。"}, nil
+		// 单条 {n, text} 或批量 {items:[{n,text},...]}（任一非法整批不动）。
+		raw, _ := args["items"].([]interface{})
+		if len(raw) == 0 {
+			raw = []interface{}{args}
 		}
-		if text := strArg(args, "text"); text != "" {
-			t.Items[i].Text = text
+		type edit struct {
+			idx  int
+			text string
+		}
+		var edits []edit
+		for i, it := range raw {
+			m, ok := it.(map[string]interface{})
+			if !ok {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: items 第 %d 个元素不是对象——整批未动。", i+1)}, nil
+			}
+			n := intArg(m, "n", 0)
+			text := strArg(m, "text")
+			if n < 1 || n > len(t.Items) || text == "" {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个元素 n 越界或 text 为空——整批未动。", i+1)}, nil
+			}
+			edits = append(edits, edit{n - 1, text})
+		}
+		for _, e := range edits {
+			t.Items[e.idx].Text = e.text
 		}
 		t.saveLocked()
-		return session.ToolResult{Text: "已更新第 " + strconv.Itoa(i+1) + " 项。"}, nil
+		return session.ToolResult{Text: fmt.Sprintf("已更新 %d 项。", len(edits))}, nil
 	case "delete":
-		i, ok := idx()
-		if !ok {
-			return session.ToolResult{Text: "REJECTED: n 超出范围。"}, nil
+		// 单条 {n} 或批量 {ns:[...]}（任一越界整批不动）。
+		var ns []int
+		if raw, ok := args["ns"].([]interface{}); ok {
+			for _, v := range raw {
+				if f, ok := v.(float64); ok {
+					ns = append(ns, int(f))
+				}
+			}
+		} else if i, ok := idx(); ok {
+			ns = []int{i + 1}
 		}
-		t.Items = append(t.Items[:i], t.Items[i+1:]...)
+		if len(ns) == 0 {
+			return session.ToolResult{Text: "REJECTED: delete 需要 n（单条）或 ns 数组（多条）。"}, nil
+		}
+		for _, n := range ns {
+			if n < 1 || n > len(t.Items) {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: n=%d 超出范围（当前 %d 项）——整批未动。", n, len(t.Items))}, nil
+			}
+		}
+		drop := map[int]bool{}
+		for _, n := range ns {
+			drop[n-1] = true
+		}
+		var kept []GoalItem
+		for i, it := range t.Items {
+			if !drop[i] {
+				kept = append(kept, it)
+			}
+		}
+		t.Items = kept
 		t.saveLocked()
-		return session.ToolResult{Text: "已删除第 " + strconv.Itoa(i+1) + " 项。"}, nil
+		return session.ToolResult{Text: fmt.Sprintf("已删除 %d 项。", len(ns))}, nil
 	case "check":
 		// 单条 {n} 或批量 {ns:[...]}，一次勾掉多条（用户实测模型逐条刷调用）。
 		checked := true

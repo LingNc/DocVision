@@ -106,3 +106,19 @@ func TestSplitToolSeesDirectEdits(t *testing.T) {
 		t.Fatalf("坏 JSON 必须被 submit 拒: %s", res2.Text)
 	}
 }
+
+// delete 批量：{ns:[...]} 一次删多条，越界整批不动。
+func TestSplitToolDeleteMany(t *testing.T) {
+	dir := t.TempDir()
+	sp := NewSplitTool(filepath.Join(dir, "split.json"))
+	if _, err := sp.Execute(`{"op":"add","chapters":[{"title":"a","start_line":1,"end_line":10},{"title":"b","start_line":11,"end_line":20},{"title":"c","start_line":21,"end_line":30}]}`); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := sp.Execute(`{"op":"delete","ns":[1,3]}`)
+	if !strings.Contains(res.Text, "2 章") && strings.Contains(res.Text, "1. [11-20] b") == false {
+		t.Fatalf("批量删失败: %s", res.Text)
+	}
+	if res, _ := sp.Execute(`{"op":"delete","ns":[9]}`); !strings.Contains(res.Text, "整批未动") {
+		t.Fatalf("越界必须整批拒: %s", res.Text)
+	}
+}

@@ -134,13 +134,14 @@ func (t *SplitTool) Definition() map[string]any {
 		"name": "split",
 		"description": "Maintain the chapter split (persisted to split.json). " +
 			"ops: list, add {title, start_line, end_line} or {chapters: [...]} (one or many at once, batch is all-or-nothing), " +
-			"update {n, ...} or {chapters: [{n, ...}, ...]}, delete {n}, clear. " +
+			"update {n, ...} or {chapters: [{n, ...}, ...]}, delete {n} or {ns: [...]}, clear. " +
 			"Entries are 1-based inclusive line ranges, kept sorted by start_line; overlapping a neighbour is rejected on the spot. " +
 			"When the list covers the whole file with no gaps, call submit_split.",
 		"parameters": map[string]any{"type": "object", "properties": map[string]any{
 			"op":         map[string]any{"type": "string", "enum": []string{"list", "add", "update", "delete", "clear"}},
 			"chapters":   map[string]any{"type": "array", "description": "batch form: add=[{title,start_line,end_line},...]; update=[{n,...},...]"},
 			"n":          map[string]any{"type": "integer"},
+			"ns":         map[string]any{"type": "array", "items": map[string]any{"type": "integer"}},
 			"title":      map[string]any{"type": "string"},
 			"start_line": map[string]any{"type": "integer"},
 			"end_line":   map[string]any{"type": "integer"},
@@ -211,11 +212,36 @@ func (t *SplitTool) Execute(argsJSON string) (session.ToolResult, error) {
 		t.saveLocked(nil)
 		return session.ToolResult{Text: "OK. split.json 已清空。"}, nil
 	case "delete":
-		n := intArg(args, "n", 0)
-		if n < 1 || n > len(list) {
-			return session.ToolResult{Text: fmt.Sprintf("REJECTED: n 超出范围（当前 %d 条）。", len(list))}, nil
+		// 单条 {n} 或批量 {ns:[...]}（任一越界整批不动）。
+		var ns []int
+		if raw, ok := args["ns"].([]interface{}); ok {
+			for _, v := range raw {
+				if f, ok := v.(float64); ok {
+					ns = append(ns, int(f))
+				}
+			}
+		} else if n := intArg(args, "n", 0); n > 0 {
+			ns = []int{n}
 		}
-		list = append(list[:n-1], list[n:]...)
+		if len(ns) == 0 {
+			return session.ToolResult{Text: "REJECTED: delete 需要 n（单条）或 ns 数组（多条）。"}, nil
+		}
+		for _, n := range ns {
+			if n < 1 || n > len(list) {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: n=%d 超出范围（当前 %d 条）——整批未动。", n, len(list))}, nil
+			}
+		}
+		drop := map[int]bool{}
+		for _, n := range ns {
+			drop[n-1] = true
+		}
+		var kept []ChapterRange
+		for i, c := range list {
+			if !drop[i] {
+				kept = append(kept, c)
+			}
+		}
+		list = kept
 		t.saveLocked(list)
 		return session.ToolResult{Text: "OK.\n" + render()}, nil
 	case "add", "update":

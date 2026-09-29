@@ -161,3 +161,37 @@ func TestGoalTool(t *testing.T) {
 		t.Fatalf("pending = %v", g.Pending())
 	}
 }
+
+// problems 批量形：get {ids}/update {items}/delete {ids}。
+func TestProblemsToolBatchOps(t *testing.T) {
+	dir := t.TempDir()
+	store := loadProblemStore(filepath.Join(dir, "problems.json"))
+	tool := &ProblemsTool{Store: store, Write: true}
+	exec := func(args string) string {
+		res, err := tool.Execute(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Text
+	}
+	exec(`{"op":"add","items":[{"title":"a","detail":"da"},{"title":"b","detail":"db"},{"title":"c","detail":"dc"}]}`)
+	// get 批量
+	if out := exec(`{"op":"get","ids":["P1","P3"]}`); !strings.Contains(out, "da") || !strings.Contains(out, "dc") || strings.Contains(out, "db") {
+		t.Fatalf("get 批量 = %q", out)
+	}
+	// update 批量
+	exec(`{"op":"update","items":[{"id":"P1","title":"A2"},{"id":"P2","detail":"db2"}]}`)
+	if out := exec(`{"op":"get","id":"P1"}`); !strings.Contains(out, "A2") {
+		t.Fatalf("update 批量没生效: %q", out)
+	}
+	// update 批量里坏 id 整批不动
+	exec(`{"op":"update","items":[{"id":"P3","title":"C2"},{"id":"P9","title":"x"}]}`)
+	if out := exec(`{"op":"get","id":"P3"}`); strings.Contains(out, "C2") {
+		t.Fatalf("坏 id 应整批拒绝: %q", out)
+	}
+	// delete 批量
+	exec(`{"op":"delete","ids":["P1","P2"]}`)
+	if out := exec(`{"op":"list"}`); strings.Contains(out, "P1") || strings.Contains(out, "P2") || !strings.Contains(out, "P3") {
+		t.Fatalf("delete 批量 = %q", out)
+	}
+}

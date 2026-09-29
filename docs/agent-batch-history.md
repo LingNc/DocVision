@@ -1547,3 +1547,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### goal check 批量（用户截图实测）
 - 截图证据：整合会话 goal·check 连打 6 次单条（22→16 tokens/次纯浪费）。check 现收 {n} 或 {ns:[...]}，越界整次拒绝。problems check 本就收 {ids:[...]}；add 三工具都收数组——模型仍逐条 add 是它按读到的汇报顺序边读边加，工具描述里已写明批量形态，提示词只减不增不再加句。
 - 截图里第一次 submit_problems 的 error 徽标 = goal 提交门拦截（还有没勾的计划），勾完后第二次提交成功——门按设计工作。
+
+### 三清单工具批量面补齐
+- 用户问"能提供多个的都是否正确提供了"→ 审计缺口：problems get/update/delete、goal update/delete、split delete 原本只收单条。全部补齐批量形（ids/ns/items/chapters 数组），批量全量预检、整批原子。测试：goal 批量 add/check、problems 批量 get/update/delete、split 批量 add/delete。
