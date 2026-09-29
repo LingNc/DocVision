@@ -360,11 +360,12 @@ func (t *GoalTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name": "goal",
 		"description": "Your own task plan (persisted to work:plan.md, survives context compaction). " +
-			"ops: list, add {text} or {items: [...]} (one or many at once), update {n, text}, delete {n}, check {n} / {n, checked: false}. " +
+			"ops: list, add {text} or {items: [...]} (one or many at once), update {n, text}, delete {n}, check {n} or {ns: [...]} / {checked: false}. " +
 			"Tasks are numbered 1..N top to bottom. All tasks must be checked or deleted before you submit.",
 		"parameters": map[string]any{"type": "object", "properties": map[string]any{
 			"op":      map[string]any{"type": "string", "enum": []string{"list", "add", "update", "delete", "check"}},
 			"n":       map[string]any{"type": "integer"},
+			"ns":      map[string]any{"type": "array", "items": map[string]any{"type": "integer"}},
 			"text":    map[string]any{"type": "string"},
 			"items":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			"checked": map[string]any{"type": "boolean"},
@@ -462,17 +463,34 @@ func (t *GoalTool) Execute(argsJSON string) (session.ToolResult, error) {
 		t.saveLocked()
 		return session.ToolResult{Text: "已删除第 " + strconv.Itoa(i+1) + " 项。"}, nil
 	case "check":
-		i, ok := idx()
-		if !ok {
-			return session.ToolResult{Text: "REJECTED: n 超出范围。"}, nil
-		}
+		// 单条 {n} 或批量 {ns:[...]}，一次勾掉多条（用户实测模型逐条刷调用）。
 		checked := true
 		if v, isB := args["checked"].(bool); isB {
 			checked = v
 		}
-		t.Items[i].Checked = checked
+		var ns []int
+		if raw, ok := args["ns"].([]interface{}); ok {
+			for _, v := range raw {
+				if f, ok := v.(float64); ok {
+					ns = append(ns, int(f))
+				}
+			}
+		} else if i, ok := idx(); ok {
+			ns = []int{i + 1}
+		}
+		if len(ns) == 0 {
+			return session.ToolResult{Text: "REJECTED: check 需要 n（单条）或 ns 数组（多条）。"}, nil
+		}
+		for _, n := range ns {
+			if n < 1 || n > len(t.Items) {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: n=%d 超出范围（当前 %d 项）——本次调用未生效。", n, len(t.Items))}, nil
+			}
+		}
+		for _, n := range ns {
+			t.Items[n-1].Checked = checked
+		}
 		t.saveLocked()
-		return session.ToolResult{Text: "已更新第 " + strconv.Itoa(i+1) + " 项状态。"}, nil
+		return session.ToolResult{Text: fmt.Sprintf("已更新 %d 项状态。", len(ns))}, nil
 	}
 	return session.ToolResult{Text: "REJECTED: 未知 op。"}, nil
 }

@@ -1543,3 +1543,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - issue.md 用户新条目与既有编号碰撞（T90/T91/T94 各撞一次）→ 重编号为 T95（加密摘要换行，已做）/T96（章节划分文件提交，已实现标 X）/T97（style 覆盖面检查，待办）。
 - T95：encryptedSummaryBody（stream.ts）——相邻 **…** 段间补换行、段外短文独立成行，AssistantMsg 展开态用它；折叠态标题逻辑不变。vitest 123 全绿。
 - 顺手修过时文案：整合会话 userText "add one by one" → 批量说明。
+
+### goal check 批量（用户截图实测）
+- 截图证据：整合会话 goal·check 连打 6 次单条（22→16 tokens/次纯浪费）。check 现收 {n} 或 {ns:[...]}，越界整次拒绝。problems check 本就收 {ids:[...]}；add 三工具都收数组——模型仍逐条 add 是它按读到的汇报顺序边读边加，工具描述里已写明批量形态，提示词只减不增不再加句。
+- 截图里第一次 submit_problems 的 error 徽标 = goal 提交门拦截（还有没勾的计划），勾完后第二次提交成功——门按设计工作。

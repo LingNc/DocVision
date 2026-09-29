@@ -142,7 +142,21 @@ func TestGoalTool(t *testing.T) {
 	if len(g2.Pending()) != 1 {
 		t.Fatalf("读回 pending = %v", g2.Pending())
 	}
-	exec(`{"op":"delete","n":2}`)
+	// 批量 add + 批量 check（一次调用多条，模型不必逐条刷）。
+	// 此刻清单：1 读汇报[x] 2 整合清单[ ] 3 任务A 4 任务B 5 任务C
+	exec(`{"op":"add","items":["任务A","任务B","任务C"]}`)
+	if pend := g.Pending(); len(pend) != 4 {
+		t.Fatalf("批量 add 后 pending = %v", pend)
+	}
+	exec(`{"op":"check","ns":[3,4]}`)
+	if pend := g.Pending(); len(pend) != 2 || !strings.Contains(pend[1], "任务C") {
+		t.Fatalf("批量 check 后 pending = %v", pend)
+	}
+	if out := exec(`{"op":"check","ns":[99]}`); !strings.Contains(out, "REJECTED") {
+		t.Fatalf("越界批量 check 必须拒: %q", out)
+	}
+	exec(`{"op":"delete","n":2}`) // 整合清单
+	exec(`{"op":"delete","n":4}`) // 任务C
 	if len(g.Pending()) != 0 {
 		t.Fatalf("pending = %v", g.Pending())
 	}
