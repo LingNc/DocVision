@@ -1187,10 +1187,12 @@ func (s *Session) compact() (bool, error) {
 
 	s.snapshotRequest(instruction)
 	req := &ChatRequest{
-		Model:       s.client.Model(),
-		Messages:    append(append([]ChatMessage{}, s.messages...), ChatMessage{Role: "user", Content: instruction}),
-		MaxTokens:   8192,
-		Temperature: 0.1,
+		Model:    s.client.Model(),
+		Messages: append(append([]ChatMessage{}, s.messages...), ChatMessage{Role: "user", Content: instruction}),
+		MaxTokens: 8192,
+		// 温度不硬编码（曾写死 0.1 想要"确定的摘要"）：只允许 temperature=1
+		// 的模型（kimi-k2.8 等）会直接 400、压缩失败拖死会话（真实缺陷，
+		// 终审 SESSION_API_ERROR）。留 0 = 用该模型条目配置的温度。
 	}
 	if s.logger.DebugEnabled() {
 		s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] [compact] summary request (append-only, %s messages=%d keep_tail=%d)",
