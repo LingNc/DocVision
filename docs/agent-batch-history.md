@@ -1572,3 +1572,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T104 view_image AltRoots（终审直看原位图）
 - 用户要补"终审 view_image 看不到原书位图"的缺口：ViewImageTool 加 AltRoots（label+dir 只读备选根），resolve 在 Root 失败后按 clean / source+clean / source/images+去前缀 三形态试备选根，裸名也做唯一匹配；Root 优先、备选根越界拒绝。bookSessionTools 挂 {project, 窄视图根}，book_fix 与 final_review 同时获得。测试覆盖三写法/优先级/越界。
+
+### T105 多页/多图参数调研（结论：不改）
+- 用户问 view_pdf/view_image 要不要加多页/多图参数。真实数据统计（259 会话、4816 工具回合、1291 view 调用）：一轮并发多次看图 316 回合（42%），view_pdf 并发 862 次 ≈ 2.7 页/轮——模型已经靠 wire 层一轮多调用自然批量。加参数 = 同一能力的第二种表达，代价是回执归属 1:1 配平、FIFO、按文件预算全部要改。维持现状。

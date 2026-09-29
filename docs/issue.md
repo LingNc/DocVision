@@ -726,6 +726,7 @@ user 轮
 
 [X][ ] T94. 章节转换必须显式 submit：模型提前收尾没提交就结束（chapter_003 实例），不能静默采纳——没提交就提醒续跑（最多两次），仍不提交判失败。（已修：删掉"编译通过即采纳"的静默兜底，改提醒→失败，语义同 checker/tikz 的提交提醒。）
 [X][ ] T98. 评估分派会话写 blocks.json 也工具化（与 split/problems/goal 同族）：blocks 工具 list/add/update/delete/clear，单条或 blocks 数组批量，每章只能属于一块当场拒；edit_file 直改保留逃生舱；submit_blocks 无参终审。
+[X][ ] T105. view_pdf/view_image 是否需要"一次调用看多页/多图"参数？（结论：不需要。真实转录 259 会话/1291 次看图调用中，一轮并发多次看图的回合占 42%（view_pdf 并发 862 次，平均 2.7 页/轮）——wire 层一轮多工具调用已满足批量需求；加参数只会让回执归属、FIFO 配平、看图预算全部复杂化。）
 [X][ ] T104. 终审（及 book_fix）会话的 view_image 看不到原书位图文件本身——根是 build 树，原位图在 project:source/images 下。（已修：view_image 加 AltRoots，终审/修复会话挂 project 只读根，md 引用/项目相对路径/裸名三种写法都解析，Root 优先、越界拒绝。）
 [X][ ] T103. 配置温度是 1 但终审死于"invalid temperature: only 1 is allowed"——压缩摘要请求硬编码了 temperature=0.1，绕过模型条目配置。（已修：摘要请求不再写死温度，用条目配置值。）
 [X][ ] T102. extends 覆盖带子内容的键（如 price 四条）时，复写一条应该只覆盖那一条，而不是整个子键被替换、剩下三条回归默认。（已修：嵌套 map 逐子键递归深合并。）
