@@ -110,20 +110,21 @@ func (t *ProblemsTool) Definition() map[string]any {
 	desc := "View the style-problem list. ops: list (id/title/status/chapters, no detail), get {id} (full incl. detail), search {query}."
 	if t.Write {
 		desc = "Manage the style-problem list. ops: list, get {id}, search {query}, " +
-			"add {title, detail, chapters[]} (id auto-assigned P1, P2, ...), update {id, title?, detail?, chapters?}, delete {id}. " +
-			"Build the list incrementally with add — you do NOT need to output everything at once."
+			"add {title, detail, chapters[]} or {items: [{title, detail, ...}, ...]} (one or many at once; ids auto-assigned P1, P2, ...), " +
+			"update {id, title?, detail?, chapters?}, delete {id}."
 	} else {
 		desc += " check {ids: [...]} / {id, checked: false} marks problems resolved/unresolved — tick each one off as you finish it."
 	}
 	props := map[string]any{
-		"op":      map[string]any{"type": "string", "enum": []string{"list", "get", "search", "add", "update", "delete", "check"}},
-		"id":      map[string]any{"type": "string"},
-		"ids":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-		"query":   map[string]any{"type": "string"},
-		"title":   map[string]any{"type": "string"},
-		"detail":  map[string]any{"type": "string"},
+		"op":       map[string]any{"type": "string", "enum": []string{"list", "get", "search", "add", "update", "delete", "check"}},
+		"id":       map[string]any{"type": "string"},
+		"ids":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"query":    map[string]any{"type": "string"},
+		"title":    map[string]any{"type": "string"},
+		"detail":   map[string]any{"type": "string"},
+		"items":    map[string]any{"type": "array", "description": "add 批量形: [{title, detail, chapters?}, ...]"},
 		"chapters": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-		"checked": map[string]any{"type": "boolean"},
+		"checked":  map[string]any{"type": "boolean"},
 	}
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "problems",
@@ -190,22 +191,45 @@ func (t *ProblemsTool) Execute(argsJSON string) (session.ToolResult, error) {
 		if !t.Write {
 			return session.ToolResult{Text: "REJECTED: 本会话没有问题清单的写权限（只有整合会话能增删改；你只能查看和打勾）。"}, nil
 		}
-		title, detail := strArg(args, "title"), strArg(args, "detail")
-		if title == "" || detail == "" {
-			return session.ToolResult{Text: "REJECTED: add 需要 title 和 detail。"}, nil
+		// 单条 {title, detail, ...} 或批量 {items:[{...},...]}（任一非法整批不动）。
+		raw, _ := args["items"].([]interface{})
+		if len(raw) == 0 {
+			raw = []interface{}{args}
 		}
-		id := strArg(args, "id")
-		if id == "" {
-			id = s.nextIDLocked()
-		} else if s.findLocked(id) >= 0 {
-			return session.ToolResult{Text: "REJECTED: id " + id + " 已存在——用 update 修改，或不传 id 自动分配。"}, nil
+		type draft struct {
+			id      string
+			problem StyleProblem
 		}
-		p := StyleProblem{ID: id, Title: title, Detail: detail, Chapters: strSliceArg(args, "chapters")}
-		s.Problems = append(s.Problems, p)
+		var drafts []draft
+		for i, it := range raw {
+			m, ok := it.(map[string]interface{})
+			if !ok {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: items 第 %d 个元素不是对象——整批未动。", i+1)}, nil
+			}
+			title, detail := strArg(m, "title"), strArg(m, "detail")
+			if title == "" || detail == "" {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 条缺 title 或 detail——整批未动。", i+1)}, nil
+			}
+			id := strArg(m, "id")
+			if id != "" && s.findLocked(id) >= 0 {
+				return session.ToolResult{Text: "REJECTED: id " + id + " 已存在——用 update 修改，或不传 id 自动分配。整批未动。"}, nil
+			}
+			drafts = append(drafts, draft{id, StyleProblem{Title: title, Detail: detail, Chapters: strSliceArg(m, "chapters")}})
+		}
+		var ids []string
+		for _, d := range drafts {
+			id := d.id
+			if id == "" {
+				id = s.nextIDLocked()
+			}
+			d.problem.ID = id
+			s.Problems = append(s.Problems, d.problem)
+			ids = append(ids, id)
+		}
 		if err := s.saveLocked(); err != nil {
 			return session.ToolResult{}, err
 		}
-		return session.ToolResult{Text: "已记录 " + id + "（共 " + strconv.Itoa(len(s.Problems)) + " 个）。"}, nil
+		return session.ToolResult{Text: "已记录 " + strings.Join(ids, ", ") + "（共 " + strconv.Itoa(len(s.Problems)) + " 个）。"}, nil
 
 	case "update":
 		if !t.Write {
@@ -336,12 +360,13 @@ func (t *GoalTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name": "goal",
 		"description": "Your own task plan (persisted to work:plan.md, survives context compaction). " +
-			"ops: list, add {text} (appends to the bottom), update {n, text}, delete {n}, check {n} / {n, checked: false}. " +
+			"ops: list, add {text} or {items: [...]} (one or many at once), update {n, text}, delete {n}, check {n} / {n, checked: false}. " +
 			"Tasks are numbered 1..N top to bottom. All tasks must be checked or deleted before you submit.",
 		"parameters": map[string]any{"type": "object", "properties": map[string]any{
 			"op":      map[string]any{"type": "string", "enum": []string{"list", "add", "update", "delete", "check"}},
 			"n":       map[string]any{"type": "integer"},
 			"text":    map[string]any{"type": "string"},
+			"items":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			"checked": map[string]any{"type": "boolean"},
 		}, "required": []string{"op"}},
 	}}
@@ -405,13 +430,19 @@ func (t *GoalTool) Execute(argsJSON string) (session.ToolResult, error) {
 		}
 		return session.ToolResult{Text: strings.TrimRight(b.String(), "\n")}, nil
 	case "add":
-		text := strArg(args, "text")
-		if text == "" {
-			return session.ToolResult{Text: "REJECTED: add 需要 text。"}, nil
+		// 单条 {text} 或多条 {items:[...]} 一次调用加完。
+		texts := strSliceArg(args, "items")
+		if v := strArg(args, "text"); v != "" {
+			texts = append(texts, v)
 		}
-		t.Items = append(t.Items, GoalItem{Text: text})
+		if len(texts) == 0 {
+			return session.ToolResult{Text: "REJECTED: add 需要 text（单条）或 items 数组（多条）。"}, nil
+		}
+		for _, txt := range texts {
+			t.Items = append(t.Items, GoalItem{Text: txt})
+		}
 		t.saveLocked()
-		return session.ToolResult{Text: "已添加第 " + strconv.Itoa(len(t.Items)) + " 项。"}, nil
+		return session.ToolResult{Text: fmt.Sprintf("已添加 %d 项（共 %d 项）。", len(texts), len(t.Items))}, nil
 	case "update":
 		i, ok := idx()
 		if !ok {

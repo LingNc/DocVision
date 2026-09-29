@@ -133,13 +133,13 @@ func (t *SplitTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name": "split",
 		"description": "Maintain the chapter split (persisted to split.json). " +
-			"ops: list, add {title, start_line, end_line}, add_many {chapters: [...]} (bulk, all-or-nothing), " +
-			"update {n, title?, start_line?, end_line?}, update_many {chapters: [{n, ...}, ...]}, delete {n}, clear. " +
+			"ops: list, add {title, start_line, end_line} or {chapters: [...]} (one or many at once, batch is all-or-nothing), " +
+			"update {n, ...} or {chapters: [{n, ...}, ...]}, delete {n}, clear. " +
 			"Entries are 1-based inclusive line ranges, kept sorted by start_line; overlapping a neighbour is rejected on the spot. " +
 			"When the list covers the whole file with no gaps, call submit_split.",
 		"parameters": map[string]any{"type": "object", "properties": map[string]any{
-			"op":         map[string]any{"type": "string", "enum": []string{"list", "add", "add_many", "update", "update_many", "delete", "clear"}},
-			"chapters":   map[string]any{"type": "array", "description": "add_many: [{title,start_line,end_line},...]; update_many: [{n,title?,start_line?,end_line?},...]"},
+			"op":         map[string]any{"type": "string", "enum": []string{"list", "add", "update", "delete", "clear"}},
+			"chapters":   map[string]any{"type": "array", "description": "batch form: add=[{title,start_line,end_line},...]; update=[{n,...},...]"},
 			"n":          map[string]any{"type": "integer"},
 			"title":      map[string]any{"type": "string"},
 			"start_line": map[string]any{"type": "integer"},
@@ -218,10 +218,11 @@ func (t *SplitTool) Execute(argsJSON string) (session.ToolResult, error) {
 		list = append(list[:n-1], list[n:]...)
 		t.saveLocked(list)
 		return session.ToolResult{Text: "OK.\n" + render()}, nil
-	case "add_many", "update_many":
+	case "add", "update":
+		// 单条直接给字段；批量给 chapters 数组（全量预检、任一非法整批不动）。
 		raw, _ := args["chapters"].([]interface{})
 		if len(raw) == 0 {
-			return session.ToolResult{Text: "REJECTED: chapters 必须是章节数组（add_many 收 {title,start_line,end_line}，update_many 收 {n,...}）。"}, nil
+			raw = []interface{}{args} // 单条：参数本体即条目
 		}
 		work := append([]ChapterRange(nil), list...)
 		touched := map[int]bool{}
@@ -232,7 +233,7 @@ func (t *SplitTool) Execute(argsJSON string) (session.ToolResult, error) {
 			}
 			var c ChapterRange
 			excl := -1
-			if strArg(args, "op") == "add_many" {
+			if strArg(args, "op") == "add" {
 				c = ChapterRange{Title: strArg(m, "title"), StartLine: intArg(m, "start_line", 0), EndLine: intArg(m, "end_line", 0)}
 			} else {
 				n := intArg(m, "n", 0)
@@ -267,39 +268,7 @@ func (t *SplitTool) Execute(argsJSON string) (session.ToolResult, error) {
 		}
 		sortSplit(work)
 		t.saveLocked(work)
-		return session.ToolResult{Text: fmt.Sprintf("OK. 批量 %d 条已应用。\n", len(raw)) + func() string { list = work; return render() }()}, nil
-	case "add", "update":
-		var c ChapterRange
-		excl := -1
-		if strArg(args, "op") == "add" {
-			c = ChapterRange{Title: strArg(args, "title"), StartLine: intArg(args, "start_line", 0), EndLine: intArg(args, "end_line", 0)}
-		} else {
-			n := intArg(args, "n", 0)
-			if n < 1 || n > len(list) {
-				return session.ToolResult{Text: fmt.Sprintf("REJECTED: n 超出范围（当前 %d 条）。", len(list))}, nil
-			}
-			excl = n - 1
-			c = list[excl]
-			if v := strArg(args, "title"); v != "" {
-				c.Title = v
-			}
-			if v := intArg(args, "start_line", 0); v > 0 {
-				c.StartLine = v
-			}
-			if v := intArg(args, "end_line", 0); v > 0 {
-				c.EndLine = v
-			}
-		}
-		if msg := validateEntry(list, c, excl); msg != "" {
-			return session.ToolResult{Text: "REJECTED: " + msg}, nil
-		}
-		if excl >= 0 {
-			list[excl] = c
-		} else {
-			list = append(list, c)
-		}
-		sortSplit(list)
-		t.saveLocked(list)
+		list = work
 		return session.ToolResult{Text: "OK.\n" + render()}, nil
 	}
 	return session.ToolResult{Text: "REJECTED: 未知 op（list/add/update/delete/clear）。"}, nil

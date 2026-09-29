@@ -19,6 +19,7 @@
 
 - **img2text 页码标记（P21）**：`mineru_output/` 有该书 MinerU 产物时，最终 markdown 按原始内容分页插入独立行 `[P. <页码>]`（跨部件全局 1-based 页码，与 latex doc_search/view_pdf 同一套），方便后续 AI 向用户指明位置——文本行规范化包含匹配 content_list 的 text 条目、图片引用按文件名对齐 image 条目（`[Image]( 描述 · P.42 )` 锚顺带带页码）；页码递增时在新页首行前插标记，围栏内顺延到围栏后，找不到 mineru 产物静默跳过。不加新配置项。
 - **submit 回执即会话终态（T92）**：`ToolResult.Terminal`——submit 类工具收账成功后 Run 直接结束，不再等模型收尾（此前模型提交后常回空消息，触发 "Continue." 空转一轮）；覆盖章节划分/转换/作图/核对/风格修复/mermaid 修复的全部 submit；样式包 submit 例外（提交后还要 test-compile，失败打回续跑）。
+- **problems/goal/split 三清单工具瘦身（用户口径）**：`add` 统一收单条或数组（goal `{text}`/`{items:[...]}`、problems `{title,detail}`/`{items:[...]}`、split 单条/`{chapters:[...]}`），不再有独立的 add_many/update_many——一次调用建多条，不用逐条刷工具调用。
 - **章节划分：split 结构化工具 + split.json 独立文件提交（T92）**：新增 `split` 工具（problems/goal 同族）——list/add/add_many/update/update_many/delete/clear 逐条或批量维护划分，每次操作即校验（重叠当场拒、自动按行号排序），批量一把加不必 50 次调用；`edit_file` 裸改 split.json 保留为逃生舱（工具每次操作前重读文件，直改立即可见）；submit_split 无参读文件终审全覆盖，内联 chapters 参数仅留作旧转录 replay 通道。
 - **goal 计划工具铺到样式/章节划分/章节转换会话（P27 打回项）**：三会话各带 goal 工具，提交门要求计划清空。
 - **章节转换首条消息不再内联章节前 2000 字符预览（T93）**：该 md 本就是会话第一步必读文件，内联每轮重发纯浪费。

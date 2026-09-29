@@ -47,21 +47,21 @@ func TestSplitToolOps(t *testing.T) {
 	}
 }
 
-// add_many：批量一把加（50 章不用 50 次调用）；任一非法整批拒绝。
+// add 批量形（{chapters:[...]}）：一把加（50 章不用 50 次调用）；任一非法整批拒绝。
 func TestSplitToolAddMany(t *testing.T) {
 	dir := t.TempDir()
 	sp := NewSplitTool(filepath.Join(dir, "split.json"))
 
-	bulk := `{"op":"add_many","chapters":[
+	bulk := `{"op":"add","chapters":[
 		{"title":"a","start_line":1,"end_line":10},
 		{"title":"b","start_line":11,"end_line":20},
 		{"title":"c","start_line":21,"end_line":30}]}`
 	res, err := sp.Execute(bulk)
-	if err != nil || strings.Contains(res.Text, "REJECTED") || !strings.Contains(res.Text, "批量 3 条") {
+	if err != nil || strings.Contains(res.Text, "REJECTED") || !strings.Contains(res.Text, "3 章") {
 		t.Fatalf("批量加失败: err=%v res=%s", err, res.Text)
 	}
 	// 批内自重叠 → 整批未动
-	bad := `{"op":"add_many","chapters":[
+	bad := `{"op":"add","chapters":[
 		{"title":"d","start_line":31,"end_line":40},
 		{"title":"e","start_line":35,"end_line":45}]}`
 	res, _ = sp.Execute(bad)
@@ -73,7 +73,7 @@ func TestSplitToolAddMany(t *testing.T) {
 		t.Fatalf("整批拒绝后必须还是 3 条: %s", res.Text)
 	}
 	// update_many
-	res, _ = sp.Execute(`{"op":"update_many","chapters":[{"n":1,"title":"A2"},{"n":3,"title":"C"}]}`)
+	res, _ = sp.Execute(`{"op":"update","chapters":[{"n":1,"title":"A2"},{"n":3,"title":"C"}]}`)
 	if strings.Contains(res.Text, "REJECTED") || !strings.Contains(res.Text, "1. [1-10] A2") || !strings.Contains(res.Text, "3. [21-30] C") {
 		t.Fatalf("批量改失败: %s", res.Text)
 	}

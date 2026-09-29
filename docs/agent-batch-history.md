@@ -1529,3 +1529,8 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T92 续：split 结构化工具（用户补两条讨论结论）
 - 用户指出此前讨论的是"要不要给 split.json 配 problems 同款编辑工具"，我跳步用了裸 write_file。补上：SplitTool（tools_chapter.go）ops=list/add/add_many/update/update_many/delete/clear，逐条或批量（全量预检、任一非法整批拒绝、批内自重叠也能查出——add_many 每插一条就重排序再验下一条）；用户补充"50 章不该 50 次调用"→ 批量 op 由此而来。
 - 用户第二条："json 裸文件应该可以用 edit 编辑"——不加 write_file/edit_file 封锁，edit_file 直改保留为逃生舱；SplitTool 每次 Execute 先重读文件（loadLocked），外部直改立即可见，乱写 JSON 由 submit_split 终审拒绝兜底。沙箱预置空 split.json。提示词与注册表 MustMention 同步。测试：ops/批量/直改可见性三组。
+
+### 三清单工具瘦身 + chapter_003 未提交采纳说明
+- 用户口径：goal/problems/split 别那么复杂——add 统一单批量合一（单条字段 或 items/chapters 数组一次加多条），删掉独立的 add_many/update_many；之前模型建 50 条清单要刷 50 次调用。整批仍是全量预检、任一非法整批不动。
+- chapter_003 "报错没提交却完成了"：不是 bug——模型编译干净后漏调 submit 直接收尾，runner 有意的兜底语义"未显式提交但编译通过 → 予以采纳"（convert-check 编译是硬关卡）。会话中报的错误是模型把文件名里的「熵」打成「熜」导致 view_pdf 找不到文件、以及 bash 在只读挂载 mkdir——都被工具干净拒绝，会话绕开后正常完成。
+- 用户要求删某测试卷的 stylefix_integrate/stylefix_style_r1 转录（旧二进制产物，2 次 SUBMITTED + Continue 空转）：本机 samba 是只读挂载，删不了，已把确切路径交给用户手动删。
