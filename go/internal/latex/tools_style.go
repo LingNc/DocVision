@@ -44,6 +44,10 @@ type ViewImageTool struct {
 	// same file name under two books) are REJECTED with the candidates
 	// listed, never silently guessed.
 	BareSearch bool
+	// AltRoots 是额外的只读搜索根（label+dir）：Root 里找不到再按原样
+	// 路径试这些根——终审/修复会话用它直看项目里的原书位图
+	// （project:source/images/<书>/<file>），不必翻原书页（T104）。
+	AltRoots []AltRoot
 	// SoftMax / WarnRatio implement the view budget for ONE image file:
 	// from ceil(SoftMax*WarnRatio) looks at that file on, the result
 	// carries a short reminder of how many views are left, and past
@@ -150,7 +154,7 @@ func (t *ViewImageTool) Name() string { return "view_image" }
 func (t *ViewImageTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "view_image",
-		"description": "LOOK at an image (pixels). path is the image as it appears in the markdown (images/<subject>/foo.jpg) or just its file name (foo.jpg); it is joined to this document's image folder — a wrong name is reported as an error. Compiled PDFs are NOT images: inspect them with view_pdf. Optionally crop a region by percentages (left/top/right/bottom, 0-100) and scale it up for detail inspection. For TEXT context around an image use image_context instead.",
+		"description": "LOOK at an image (pixels). path is the image as it appears in the markdown (images/<subject>/foo.jpg) or just its file name (foo.jpg); it is joined to this document's image folder — a wrong name is reported as an error. Project source bitmaps also resolve (source/images/<subject>/foo.jpg) when the session mounts them. Compiled PDFs are NOT images: inspect them with view_pdf. Optionally crop a region by percentages (left/top/right/bottom, 0-100) and scale it up for detail inspection. For TEXT context around an image use image_context instead.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -271,11 +275,38 @@ func (t *ViewImageTool) resolve(rel string) (string, error) {
 	if escapeErr != nil {
 		return "", escapeErr
 	}
+	// AltRoots（T104）：原样路径、"source/"+原样、"source/images/"+去前缀
+	// 三种形态都试——模型可能写 images/<书>/<f> 或 source/images/<书>/<f>。
+	for _, alt := range t.AltRoots {
+		altAbs, err := filepath.Abs(alt.Dir)
+		if err != nil {
+			continue
+		}
+		for _, cand := range []string{clean, filepath.Join("source", clean), filepath.Join("source", "images", sub)} {
+			full := filepath.Join(alt.Dir, cand)
+			fullAbs, err := filepath.Abs(full)
+			if err != nil {
+				continue
+			}
+			if !strings.HasPrefix(fullAbs, altAbs+string(filepath.Separator)) {
+				continue
+			}
+			if fileExists(full) {
+				return full, nil
+			}
+		}
+	}
 	if t.BareSearch && !strings.Contains(filepath.ToSlash(clean), "/") {
 		if full, err := t.searchBare(clean); err == nil {
 			return full, nil
 		} else if err != errBareMissing {
 			return "", err
+		}
+		// AltRoots 里也做一次裸名唯一匹配（原书位图，T104）。
+		for _, alt := range t.AltRoots {
+			if full, err := t.searchBareIn(filepath.Join(alt.Dir, "source", "images"), clean); err == nil {
+				return full, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("文件不存在: %s（%s）", rel, t.missingHint(rel))
@@ -292,6 +323,12 @@ func (t *ViewImageTool) searchBare(name string) (string, error) {
 	if t.Subject != "" {
 		root = filepath.Join(t.Root, t.Subject)
 	}
+	return t.searchBareIn(root, name)
+}
+
+// searchBareIn 在指定根下做深度受限的裸名唯一匹配（searchBare 与
+// AltRoots 搜索共用，T104）。
+func (t *ViewImageTool) searchBareIn(root, name string) (string, error) {
 	// 深度受限的遍历（不跟随目录软链）：Subject="images" 时目标在
 	// <书>/<file>（深 2），没有 Subject 的 build 树里在 images/<书>/<file>
 	// （深 3），再深就不是"图片资源"了。

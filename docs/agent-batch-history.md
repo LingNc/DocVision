@@ -1569,3 +1569,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T103 压缩摘要温度硬编码事故
 - 终审死于 `compaction failed: invalid temperature: only 1 is allowed`：摘要请求写死 Temperature=0.1（求"确定的摘要"），>0 不会回落到条目配置，kimi-k2.8 网关只收 1 → 400 不可重试 → 会话失败。修：留 0 走条目配置。排查中发现 runner/verify 两处 Temperature: 0.0 本就是"用配置值"语义（<=0 回落），无需动。
+
+### T104 view_image AltRoots（终审直看原位图）
+- 用户要补"终审 view_image 看不到原书位图"的缺口：ViewImageTool 加 AltRoots（label+dir 只读备选根），resolve 在 Root 失败后按 clean / source+clean / source/images+去前缀 三形态试备选根，裸名也做唯一匹配；Root 优先、备选根越界拒绝。bookSessionTools 挂 {project, 窄视图根}，book_fix 与 final_review 同时获得。测试覆盖三写法/优先级/越界。

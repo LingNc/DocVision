@@ -219,7 +219,9 @@ func (r *Runner) bookSessionTools(proj, buildDir string, compile *CompileTexTool
 		&WorkBashTool{Root: buildDir, Mounts: r.sessionMounts(kindBook, buildDir), TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		compile,
 		&ViewPDFTool{Mounts: r.sessionMounts(kindBook, buildDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ViewImageTool{Root: buildDir, BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
+		// T104：project AltRoot——终审/修复可直接看原书位图
+		// （project:source/images/<书>/<file>），不必翻原书页。
+		&ViewImageTool{Root: buildDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}, BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		&ListFontsTool{FontsDir: r.cfg.Paths.Fonts},
 		submit,
 	}
