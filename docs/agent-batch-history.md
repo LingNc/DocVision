@@ -1534,3 +1534,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 用户口径：goal/problems/split 别那么复杂——add 统一单批量合一（单条字段 或 items/chapters 数组一次加多条），删掉独立的 add_many/update_many；之前模型建 50 条清单要刷 50 次调用。整批仍是全量预检、任一非法整批不动。
 - chapter_003 "报错没提交却完成了"：不是 bug——模型编译干净后漏调 submit 直接收尾，runner 有意的兜底语义"未显式提交但编译通过 → 予以采纳"（convert-check 编译是硬关卡）。会话中报的错误是模型把文件名里的「熵」打成「熜」导致 view_pdf 找不到文件、以及 bash 在只读挂载 mkdir——都被工具干净拒绝，会话绕开后正常完成。
 - 用户要求删某测试卷的 stylefix_integrate/stylefix_style_r1 转录（旧二进制产物，2 次 SUBMITTED + Continue 空转）：本机 samba 是只读挂载，删不了，已把确切路径交给用户手动删。
+
+### T94 转换必须显式提交
+- 用户口径："这边都要求必须要显式submit，没有的话提前结束就和正常的那个一样 Continue / 提示还没 submit"。删掉 convert 的静默兜底（未提交但编译通过→采纳），改为：Run 后未提交 → 提醒轮（sess.Run 续跑，文案指明"只有显式 submit 才算交"）最多两次 → 仍未提交判失败。与 checker（T46）/tikz 的提醒语义对齐。chapter_003 案例就此定性：模型把「熵」打成「熜」+ bash 只读挂载是过程噪音，真正问题是漏 submit 被兜底掩盖。

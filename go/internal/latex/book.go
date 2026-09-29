@@ -1090,21 +1090,19 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		}
 	}
 	if !submit.Submitted {
-		// Accept a chapter that compiles clean even without an explicit
-		// submit (rounds may have run out): the same two paths are placed.
-		if !fileExists(filepath.Join(work, base+".tex")) {
-			return fmt.Errorf("会话未提交且未写出 .tex")
+		// 必须显式提交（用户口径）：模型提前收尾漏了 submit 就提醒续跑
+		// （同 checker/tikz 的提醒语义），最多两次；仍不提交判失败——
+		// 不再静默采纳"编译通过但没提交"的产物（T92 前 chapter_003 事故：
+		// 模型漏调 submit，章节被悄悄收下，界面看不出未提交）。
+		for remind := 0; remind < 2 && !submit.Submitted; remind++ {
+			r.log.LogWarning(tid, "[convert]", base, "会话结束但未提交，发送提交提醒")
+			if _, err := sess.Run(session.RunOptions{UserText: "You have NOT submitted yet — the chapter is only accepted after an explicit submit. Call submit now with your chapter .tex path (and parts folder if any). If the last compile failed, fix and compile first, then submit."}); err != nil {
+				return fmt.Errorf("提交提醒轮会话失败: %w", err)
+			}
 		}
-		start := time.Now()
-		res := r.comp.Compile(work, base+"_wrapper.tex")
-		LogCompileResult(r.log, tid, "convert-check", res, time.Since(start))
-		if !res.OK {
-			return fmt.Errorf("会话未提交且编译失败: %s", res.Err)
+		if !submit.Submitted {
+			return fmt.Errorf("会话未提交（已提醒两次）")
 		}
-		if _, perr := placeChapterFiles(work, filepath.Join(workDir, "chapters"), base); perr != nil {
-			return perr
-		}
-		r.log.LogWarning(tid, "[convert]", base, "未显式提交，但编译通过，予以采纳")
 	}
 	if !fileExists(texPath) {
 		return fmt.Errorf("会话已提交但没有写出 .tex")
