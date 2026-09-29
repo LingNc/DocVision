@@ -126,7 +126,7 @@ var registry = []Template{
 	},
 	{
 		Name: StyleFixAssessSystem, File: "latex_stylefix_assess.system.md",
-		MustMention: []string{"grep", "problems", "read_file", "submit_blocks"},
+		MustMention: []string{"blocks", "grep", "problems", "read_file", "submit_blocks"},
 	},
 	{
 		Name: StyleFixBlockSystem, File: "latex_stylefix_block.system.md",

@@ -105,6 +105,186 @@ func (t *SubmitProblemsTool) Execute(argsJSON string) (session.ToolResult, error
 	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. %d problems recorded.", len(ids)), Terminal: true}, nil
 }
 
+// BlocksTool 维护评估会话的 blocks.json（split/problems/goal 同族）：
+// 逐条或批量操作、每次操作即校验（标题/章节非空、章节跨块重复当场拒），
+// 落盘 {"blocks":[...]}；edit_file 直改保留为逃生舱（每次操作前重读文件），
+// submit_blocks 无参终审。
+type BlocksTool struct {
+	path string
+	mu   sync.Mutex
+}
+
+func NewBlocksTool(path string) *BlocksTool { return &BlocksTool{path: path} }
+
+func (t *BlocksTool) Name() string { return "blocks" }
+
+func (t *BlocksTool) Definition() map[string]any {
+	return map[string]any{"type": "function", "function": map[string]any{
+		"name": "blocks",
+		"description": "Maintain the fix-block partition (persisted to blocks.json). " +
+			"ops: list, add {title, problem_ids, chapters} or {blocks: [...]}, update {n, ...} or {blocks: [{n, ...}, ...]}, delete {n} or {ns: [...]}, clear — every op takes one or many at once. " +
+			"A chapter may appear in only ONE block (duplicates are rejected on the spot). When done, call submit_blocks.",
+		"parameters": map[string]any{"type": "object", "properties": map[string]any{
+			"op":          map[string]any{"type": "string", "enum": []string{"list", "add", "update", "delete", "clear"}},
+			"n":           map[string]any{"type": "integer"},
+			"ns":          map[string]any{"type": "array", "items": map[string]any{"type": "integer"}},
+			"title":       map[string]any{"type": "string"},
+			"problem_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"chapters":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"blocks":      map[string]any{"type": "array", "description": "batch form: add=[{title,problem_ids,chapters},...]; update=[{n,...},...]"},
+		}, "required": []string{"op"}},
+	}}
+}
+
+func (t *BlocksTool) loadLocked() []StyleBlock {
+	var obj struct {
+		Blocks []StyleBlock `json:"blocks"`
+	}
+	if data, err := os.ReadFile(t.path); err == nil {
+		_ = json.Unmarshal(data, &obj)
+	}
+	return obj.Blocks
+}
+
+func (t *BlocksTool) saveLocked(blocks []StyleBlock) {
+	data, _ := json.MarshalIndent(map[string]any{"blocks": blocks}, "", "  ")
+	_ = os.WriteFile(t.path, append(data, '\n'), 0o644)
+}
+
+// validateBlock 校验单条；excl 是 update 时自己的下标（跨块查重跳过自己）。
+func validateBlock(list []StyleBlock, b StyleBlock, excl int) string {
+	if strings.TrimSpace(b.Title) == "" || len(b.Chapters) == 0 {
+		return fmt.Sprintf("块非法（title 非空、chapters 至少一章）: %+v", b)
+	}
+	seen := map[string]bool{}
+	for _, c := range b.Chapters {
+		if seen[c] {
+			return fmt.Sprintf("块内章节重复: %s", c)
+		}
+		seen[c] = true
+	}
+	for i, o := range list {
+		if i == excl {
+			continue
+		}
+		for _, c := range b.Chapters {
+			for _, oc := range o.Chapters {
+				if c == oc {
+					return fmt.Sprintf("章节 %s 已在第 %d 块（%s）里——每章只能属于一块。", c, i+1, o.Title)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func (t *BlocksTool) Execute(argsJSON string) (session.ToolResult, error) {
+	args, err := parseJSONObject(argsJSON)
+	if err != nil {
+		return session.ToolResult{}, err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	list := t.loadLocked()
+
+	render := func() string {
+		if len(list) == 0 {
+			return "blocks.json 为空。"
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d 块:\n", len(list))
+		for i, bl := range list {
+			fmt.Fprintf(&b, "%d. %s · 问题 %s · 章节 %s\n", i+1, bl.Title, strings.Join(bl.ProblemIDs, ","), strings.Join(bl.Chapters, ","))
+		}
+		return b.String()
+	}
+
+	switch strArg(args, "op") {
+	case "list":
+		return session.ToolResult{Text: render()}, nil
+	case "clear":
+		t.saveLocked(nil)
+		return session.ToolResult{Text: "OK. blocks.json 已清空。"}, nil
+	case "delete":
+		var ns []int
+		if raw, ok := args["ns"].([]interface{}); ok {
+			for _, v := range raw {
+				if f, ok := v.(float64); ok {
+					ns = append(ns, int(f))
+				}
+			}
+		} else if n := intArg(args, "n", 0); n > 0 {
+			ns = []int{n}
+		}
+		if len(ns) == 0 {
+			return session.ToolResult{Text: "REJECTED: delete 需要 n（单条）或 ns 数组（多条）。"}, nil
+		}
+		for _, n := range ns {
+			if n < 1 || n > len(list) {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: n=%d 超出范围（当前 %d 块）——整批未动。", n, len(list))}, nil
+			}
+		}
+		drop := map[int]bool{}
+		for _, n := range ns {
+			drop[n-1] = true
+		}
+		var kept []StyleBlock
+		for i, bl := range list {
+			if !drop[i] {
+				kept = append(kept, bl)
+			}
+		}
+		list = kept
+		t.saveLocked(list)
+		return session.ToolResult{Text: "OK.\n" + render()}, nil
+	case "add", "update":
+		raw, _ := args["blocks"].([]interface{})
+		if len(raw) == 0 {
+			raw = []interface{}{args}
+		}
+		work := append([]StyleBlock(nil), list...)
+		for i, it := range raw {
+			m, ok := it.(map[string]interface{})
+			if !ok {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个元素不是对象——整批未动。", i+1)}, nil
+			}
+			var b StyleBlock
+			excl := -1
+			if strArg(args, "op") == "add" {
+				b = StyleBlock{Title: strArg(m, "title"), ProblemIDs: strSliceArg(m, "problem_ids"), Chapters: strSliceArg(m, "chapters")}
+			} else {
+				n := intArg(m, "n", 0)
+				if n < 1 || n > len(work) {
+					return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个元素 n=%d 超出范围（当前 %d 块）——整批未动。", i+1, n, len(work))}, nil
+				}
+				excl = n - 1
+				b = work[excl]
+				if v := strArg(m, "title"); v != "" {
+					b.Title = v
+				}
+				if vs := strSliceArg(m, "problem_ids"); len(vs) > 0 {
+					b.ProblemIDs = vs
+				}
+				if vs := strSliceArg(m, "chapters"); len(vs) > 0 {
+					b.Chapters = vs
+				}
+			}
+			if msg := validateBlock(work, b, excl); msg != "" {
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个元素: %s——整批未动。", i+1, msg)}, nil
+			}
+			if excl >= 0 {
+				work[excl] = b
+			} else {
+				work = append(work, b)
+			}
+		}
+		t.saveLocked(work)
+		list = work
+		return session.ToolResult{Text: "OK.\n" + render()}, nil
+	}
+	return session.ToolResult{Text: "REJECTED: 未知 op（list/add/update/delete/clear）。"}, nil
+}
+
 // SubmitBlocksTool 收评估会话的修复块划分。
 // 与整合会话同一套提交方式：会话在自己的虚拟工作区里 write/edit
 // blocks.json（可多次编辑、随时查看），最后 submit_blocks 不带参数——
@@ -539,6 +719,7 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 		return nil, err
 	}
 	goal := NewGoalTool(filepath.Join(wsDir, "plan.md"))
+	blocks := NewBlocksTool(filepath.Join(wsDir, "blocks.json"))
 	submit := &SubmitBlocksTool{Workspace: wsDir, Goal: goal}
 	mounts := []Mount{{Name: "project", Dir: proj}, {Name: "work", Dir: wsDir}}
 	tools := []session.Tool{
@@ -548,6 +729,7 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 		&EditWorkFileTool{Root: wsDir},
 		&ProblemsTool{Store: store},
 		goal,
+		blocks,
 		submit,
 	}
 	tag := fmt.Sprintf("stylefix-assess-r%d", round)
@@ -571,7 +753,7 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	userText := fmt.Sprintf("The consolidated style-problem list (%d problems) is available through the problems tool (list / get / search) — it is NOT pasted here.", len(problems)) +
 		"\nChapters that explicitly reported problems: " + strings.Join(issueList, ", ") +
 		"\nAll converted chapters: " + strings.Join(chapterNames, ", ") +
-		"\nTheir .tex files are readable at project:work/chapters/<name>.tex. Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks: write/edit work:blocks.json (you may revise it as many times as you like), then call submit_blocks with NO arguments to submit from the file."
+		"\nTheir .tex files are readable at project:work/chapters/<name>.tex. Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks with the blocks tool (or edit work:blocks.json directly — both land in the same file), then call submit_blocks with NO arguments to submit from the file."
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}

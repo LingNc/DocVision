@@ -84,7 +84,7 @@ latex:
     final_review_model: "final-review"        # 终审会话独立模型（T70；默认沿用 convert）
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
-  keep_session_records: false # 保留会话转录 JSONL（成功会话默认清理）；debug 日志下必定保留
+  keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）

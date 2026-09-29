@@ -83,11 +83,17 @@ func TestDebugAlwaysKeeps(t *testing.T) {
 	if _, err := os.Stat(tr); err != nil {
 		t.Errorf("debug must keep the transcript: %v", err)
 	}
-	// and without debug the default removes it
+	// 默认保留（2026-09 起默认全开）；显式 false 才清理
 	r2 := keepTestRunner(t)
 	r2.keepSessionFile(tr)
+	if _, err := os.Stat(tr); err != nil {
+		t.Errorf("默认必须保留转录: %v", err)
+	}
+	off2 := false
+	r3 := keepTestRunner(t, nil, &off2)
+	r3.keepSessionFile(tr)
 	if _, err := os.Stat(tr); !os.IsNotExist(err) {
-		t.Errorf("transcript must be removed by default, stat err = %v", err)
+		t.Errorf("显式 false 必须清理转录, stat err = %v", err)
 	}
 }
 

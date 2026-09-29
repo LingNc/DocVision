@@ -203,7 +203,9 @@ func (c LatexConfig) KeepTempDirsEnabled() bool {
 // KeepSessionRecordsEnabled reports whether session transcripts are kept
 // after a successful session (default false).
 func (c LatexConfig) KeepSessionRecordsEnabled() bool {
-	return c.KeepSessionRecords != nil && *c.KeepSessionRecords
+	// 默认保留（用户口径 2026-09-29：会话记录默认全开，不再只在 debug
+	// 下保留）——显式写 false 才关。
+	return c.KeepSessionRecords == nil || *c.KeepSessionRecords
 }
 
 // BashSandboxEnabled reports whether session bash runs inside the
@@ -314,8 +316,8 @@ type LatexConfig struct {
 	// inspected afterwards. Debug logging implies keeping them.
 	KeepTempDirs *bool `yaml:"keep_temp_dirs"`
 	// KeepSessionRecords keeps the session transcripts (JSONL) after a
-	// session succeeds. Independent from KeepTempDirs: some users want
-	// every conversation on disk. Debug logging implies keeping them.
+	// session succeeds. Default ON (explicit false disables); independent
+	// from KeepTempDirs. Debug logging implies keeping them.
 	KeepSessionRecords *bool `yaml:"keep_session_records"`
 	// BashSandbox is the deprecated location of tools.bash.sandbox; kept so
 	// existing configs keep working (resolved by Config.BashSandboxEnabled).

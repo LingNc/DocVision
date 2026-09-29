@@ -361,6 +361,8 @@ type SessionInfo struct {
 	// (tool receipts) but nothing was ever submitted, "" = not started yet.
 	// Live overrides both visually (green pulse beats everything).
 	EndState string `json:"endState,omitempty"`
+	// RunEndError 会话结局错误（t=meta run_end）：详情栏与排查钉死因。
+	RunEndError string `json:"runEndError,omitempty"`
 	// ImgShortKeep (T37) is the hash-keep length the img2text grouping
 	// picked for this session's short image name (8, escalated to 12 on
 	// collision). Zero = default 8. Server-side only.
@@ -809,6 +811,9 @@ type countEntry struct {
 type transcriptStat struct {
 	Messages int
 	Meta     *MetaInfo
+	// RunEndError 是最近一条 t=meta kind=run_end 的错误文本（会话层 T94
+	// 起每次 Run 结束都落结局）——空 = 正常收尾或旧转录没有结局行。
+	RunEndError string
 	// SHA is the content hash of the whole transcript file (P10, 12 hex of
 	// SHA-256 over the raw bytes) — the session's fingerprint at this size/
 	// mtime; a user can quote it to pin the exact state they saw.
@@ -958,6 +963,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			SHA:           stat.SHA,
 			Live:          liveNow(stat, c.mt, now),
 			EndState:      liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow),
+			RunEndError:   stat.RunEndError,
 			ChapterOrder:  chapterOrderOf(c.name),
 		})
 	}
@@ -1017,6 +1023,8 @@ func endStateOf(stat transcriptStat) string {
 	switch {
 	case stat.SawSubmit || stat.SawTyped:
 		return "done"
+	case stat.RunEndError != "":
+		return "error"
 	case stat.SawTool:
 		return "error"
 	}
@@ -1094,6 +1102,17 @@ func readStat(p string) (transcriptStat, error) {
 					}
 				case "meta":
 					stat.addMeta(trimmed)
+					if strings.Contains(trimmed, `"kind":"run_end"`) {
+						var rec struct {
+							OK    *bool  `json:"ok"`
+							Error string `json:"error"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.OK != nil && !*rec.OK {
+							stat.RunEndError = rec.Error
+						} else if rec.OK != nil && *rec.OK {
+							stat.RunEndError = ""
+						}
+					}
 				case "usage":
 					stat.addUsage(trimmed)
 				}

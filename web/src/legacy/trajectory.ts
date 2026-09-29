@@ -86,6 +86,18 @@ export function trajectoryRows(): TrajRow[] {
   state.lines.forEach((line: Line, idx: number) => {
     if (!line || line.bad) return
     if (line.t === 'meta') {
+      // run_end（会话结局，T94）：不是提示词快照，单独成句
+      if (line.kind === 'run_end') {
+        const ok = line.ok !== false
+        rows.push({
+          kind: 'meta', tag: '元信息', name: 'run_end · 会话结局',
+          summary: ok ? '正常结束' : '错误终止：' + String(line.error || ''),
+          chars: String(line.error || '').length,
+          tokens: 0,
+          status: ok ? 'ok' : 'error', detail: ok ? undefined : { error: String(line.error || '') },
+        })
+        return
+      }
       rows.push({
         kind: 'meta', tag: '元信息', name: line.kind || 'system',
         summary: '模型 ' + (line.model || '—') + ' · 提示词 ' +

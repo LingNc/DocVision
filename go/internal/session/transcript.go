@@ -230,6 +230,24 @@ func (w *TranscriptWriter) AppendMeta(kind, label, model, system string, tools [
 	return nil
 }
 
+// AppendNote 写一条自由形态的 t="meta" 记录行（永不回放）——会话结局
+// （run_end：ok/error）等诊断信息，转录自此能回答"它为什么停了"。
+func (w *TranscriptWriter) AppendNote(kind string, fields map[string]any) error {
+	if w == nil || w.file == nil {
+		return nil
+	}
+	obj := map[string]any{"t": "meta", "kind": kind, "ts": time.Now().Format(time.RFC3339)}
+	for k, v := range fields {
+		obj[k] = v
+	}
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return err
+	}
+	_, err = w.file.Write(append(data, '\n'))
+	return err
+}
+
 // lastMetaHash remembers the (kind, system hash) of the meta line written by
 // THIS writer, so re-attaching a transcript for a resumed run does not
 // duplicate an unchanged prompt.

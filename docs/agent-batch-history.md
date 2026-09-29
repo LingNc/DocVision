@@ -1550,3 +1550,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### 三清单工具批量面补齐
 - 用户问"能提供多个的都是否正确提供了"→ 审计缺口：problems get/update/delete、goal update/delete、split delete 原本只收单条。全部补齐批量形（ids/ns/items/chapters 数组），批量全量预检、整批原子。测试：goal 批量 add/check、problems 批量 get/update/delete、split 批量 add/delete。
+
+### T98 blocks 工具化 + T99 会话结局落盘 + 存储默认开
+- 用户三问：①blocks.json 写入工具化→BlocksTool（同族：批量、每章一块当场拒、edit 逃生舱、submit 终审），评估会话接线+提示词+注册表同步；②终审中断无报错原因——实测转录 164 条消息停在 16:44 的 view_pdf 图片输出（第 63 轮），API/进程死亡从不进转录→AppendNote(run_end) + Run 包装 defer 落结局，web 轨迹单行「run_end · 会话结局」、详情栏「结局」行、endState 见到 run_end error 直接判 error；③keep_session_records 默认 false→true（显式 false 才清理），default.yaml/docs/config.md/代码注释同步，temp_keep 测试适配新默认。

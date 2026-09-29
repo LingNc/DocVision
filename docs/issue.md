@@ -725,4 +725,6 @@ user 轮
 [X][ ] T93. 对于章节转换的user第一次的提示词是否还需要附加这个他要转换章节的前2000字符？这个是否有冗余？因为他后面还会去读取的根据需要？
 
 [X][ ] T94. 章节转换必须显式 submit：模型提前收尾没提交就结束（chapter_003 实例），不能静默采纳——没提交就提醒续跑（最多两次），仍不提交判失败。（已修：删掉"编译通过即采纳"的静默兜底，改提醒→失败，语义同 checker/tikz 的提交提醒。）
+[X][ ] T98. 评估分派会话写 blocks.json 也工具化（与 split/problems/goal 同族）：blocks 工具 list/add/update/delete/clear，单条或 blocks 数组批量，每章只能属于一块当场拒；edit_file 直改保留逃生舱；submit_blocks 无参终审。
+[X][ ] T99. 终审中途停了但转录里没有报错原因——会话层的错误（API 失败/进程被杀）从不进转录。修：每次 Run 结束落一条 t=meta kind=run_end（ok/error+原因），轨迹页单行展示、详情栏「结局」、readStat 读到 run_end error 直接判 error 态；同时 keep_session_records 默认改为开（会话记录不再只在 debug 下保留）。
 [ ][ ] T97. 我看style总是转换的时候这边会存在比如封面的图像，整体样式还有一些特殊的结构，还有某些重复性的特殊结构没有专门去做的情况，我感觉这边需要检查一下。style应当考虑充分并且提供满足的要求风格和排版命令。

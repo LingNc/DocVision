@@ -11281,6 +11281,20 @@
     state.lines.forEach((line, idx) => {
       if (!line || line.bad) return;
       if (line.t === "meta") {
+        if (line.kind === "run_end") {
+          const ok = line.ok !== false;
+          rows.push({
+            kind: "meta",
+            tag: "元信息",
+            name: "run_end · 会话结局",
+            summary: ok ? "正常结束" : "错误终止：" + String(line.error || ""),
+            chars: String(line.error || "").length,
+            tokens: 0,
+            status: ok ? "ok" : "error",
+            detail: ok ? void 0 : { error: String(line.error || "") }
+          });
+          return;
+        }
         rows.push({
           kind: "meta",
           tag: "元信息",
@@ -11703,7 +11717,8 @@
       { k: "消息", v: cur.messages + " 条 · " + state.lines.length + " 行" },
       { k: "大小", v: fmtSize(cur.size) },
       { k: "最后写入", v: fmtClock(cur.mtime) },
-      ...cur.sha ? [{ k: "会话哈希", v: cur.sha, title: "转录文件内容哈希（P10）——报障时引用它可精确定位当时的状态", mono: true }] : []
+      ...cur.sha ? [{ k: "会话哈希", v: cur.sha, title: "转录文件内容哈希（P10）——报障时引用它可精确定位当时的状态", mono: true }] : [],
+      ...cur.runEndError ? [{ k: "结局", v: "错误终止：" + String(cur.runEndError), title: "t=meta run_end 记录：会话为什么停（T94）" }] : []
     ];
     if (cur.imageName) rows.push({ k: "图片", v: imageDisplayName(cur), title: imageTipText(cur), mono: true });
     if (cur.imageFile) rows.push({ k: "图片文件", v: cur.imageFile, title: cur.imageName, mono: true });

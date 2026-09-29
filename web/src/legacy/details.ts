@@ -46,6 +46,7 @@ export function sessionKVRows(): KVRow[] {
     { k: '大小', v: fmtSize(cur.size) },
     { k: '最后写入', v: fmtClock(cur.mtime) },
     ...(cur.sha ? [{ k: '会话哈希', v: cur.sha, title: '转录文件内容哈希（P10）——报障时引用它可精确定位当时的状态', mono: true }] : []),
+    ...(cur.runEndError ? [{ k: '结局', v: '错误终止：' + String(cur.runEndError), title: 't=meta run_end 记录：会话为什么停（T94）' }] : []),
   ]
   if (cur.imageName) rows.push({ k: '图片', v: imageDisplayName(cur), title: imageTipText(cur), mono: true })
   if (cur.imageFile) rows.push({ k: '图片文件', v: cur.imageFile, title: cur.imageName, mono: true })

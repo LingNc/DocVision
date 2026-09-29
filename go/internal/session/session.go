@@ -415,7 +415,24 @@ func (s *Session) appendToolImage(v visionTurn) {
 // tool calls, feeds results back, and repeats until the model produces
 // a final text answer or the tool budget is exhausted (at which point
 // it forces a no-tools final reply). Returns the final assistant text.
-func (s *Session) Run(opts RunOptions) (string, error) {
+// Run runs one agentic bout and records its outcome into the transcript
+// (t=meta kind=run_end): 会话为什么停——正常收尾、终态提交、还是 API 错误——
+// 从此写在转录里（用户实测：终审中途停了但转录没有任何报错原因）。
+func (s *Session) Run(opts RunOptions) (out string, err error) {
+	defer func() {
+		if s.transcript == nil {
+			return
+		}
+		fields := map[string]any{"ok": err == nil}
+		if err != nil {
+			fields["error"] = err.Error()
+		}
+		_ = s.transcript.AppendNote("run_end", fields)
+	}()
+	return s.run(opts)
+}
+
+func (s *Session) run(opts RunOptions) (string, error) {
 	// The context guard lives INSIDE the request loop (see below): one
 	// Run() is an entire agentic session here, so checking only here
 	// meant checking once, at the smallest the conversation ever is.

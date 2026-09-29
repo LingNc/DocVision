@@ -7,6 +7,6 @@ Rules:
 2. Group chapters sharing the same problems into ONE block — one session will fix one block.
 3. Every affected chapter appears in exactly ONE block.
 4. Keep blocks small enough to fix in one session (a handful of chapters); a problem that hits everything may need several blocks with the same problem id.
-5. Call submit_blocks with {title, problem_ids, chapters} per block.
+5. Maintain the partition with the blocks tool (list/add/update/delete/clear — single entries or a blocks array; every op is validated, a chapter may appear in only one block), then call submit_blocks with no arguments.
 
 Never fix anything yourself — you only partition.

@@ -66,6 +66,9 @@ export interface Line {
   kind?: string
   model?: string
   tools?: string[]
+  /** run_end 结局行（t=meta kind=run_end）：ok=false 时 error 是终止原因。 */
+  ok?: boolean
+  error?: string
   /** usage 行：实测用量块。 */
   stats?: UsageStats
   [k: string]: unknown
