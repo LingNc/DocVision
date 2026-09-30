@@ -97,6 +97,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.keep_temp_dirs` | 保留 `<项目>/work/temp/` 下的临时工作目录（拆章沙箱、逐章转换/修复工作区 `conv_<章>`、矢量图工作区） | false |
 | `latex.keep_session_records` | 保留成功会话的 JSONL 转录（与上一项独立）；debug 日志下两项都必定保留 | true（旧版默认 false） |
 | `latex.style_pilot` | 样式试点（T97 重量档）：样式阶段后，选材会话拼一份代表全书特色内容的最小样例（md 行段 + 原书页），试转会话用样式包转换并对照原书核对，修订会话（新上下文）据此定稿 cls，然后才划分章节 | true |
+| `latex.pilot_select_model` / `pilot_trial_model` / `pilot_revise_model` | 样式试点三个子会话的独立模型键（T108；`models:` 需注册对应条目，模板默认 `pilot-select` extends chapter、`pilot-trial` extends convert、`pilot-revise` extends style） | 空 = 回退 chapter / convert / style |
 | `latex.compile.engine` | 编译引擎（pdflatex / xelatex / lualatex） | xelatex |
 | `latex.compile.timeout` | 单次编译超时（秒） | 120 |
 | `latex.compile.raster_command` | PDF 栅格化工具 | pdftoppm |

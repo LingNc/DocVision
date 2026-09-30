@@ -78,9 +78,17 @@ export function refreshIndex(): Promise<void> {
 }
 
 /* 增量拉取：reset=true 从头拉（选中新会话）；false 从 nextFrom 续。 */
+// T107：增量拉取在飞锁——响应慢于轮询节拍（网络挂载上 ReadSession 全量
+// 读一遍，>2s 很常见）时两个 pull 以同一 from 先后发出，先发的先落地、
+// 后发的 seq 仍是最大值不被丢弃，同一段行追加两次（真实缺陷：工具输出
+// 整段翻倍）。reset（切会话）不受锁约束，靠 pullSeq 丢弃旧结果。
+let pullInFlight = false
+
 export function pullSession(reset: boolean): Promise<void> {
   const s = state.current
   if (!s) return Promise.resolve()
+  if (!reset && pullInFlight) return Promise.resolve()
+  pullInFlight = true
   const from = reset ? 0 : state.nextFrom
   const url = '/api/session?id=' + encodeURIComponent(s.id) + '&from=' + from
   const seq = ++pullSeq
@@ -114,6 +122,9 @@ export function pullSession(reset: boolean): Promise<void> {
     })
     .catch((err: Error) => {
       setBannerText('拉取会话失败：' + err.message)
+    })
+    .finally(() => {
+      pullInFlight = false
     })
 }
 

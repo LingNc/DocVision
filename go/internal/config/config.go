@@ -278,6 +278,12 @@ type LatexConfig struct {
 	// flag controls whether confirmed TikZ figures embed the code
 	// block instead of the compiled PDF link. Default false.
 	InsertImageDescription bool `yaml:"insert_image_description"`
+	// 样式试点（T97）三个子会话的独立模型键（T108；models: 注册对应
+	// 条目，模板默认 extends 自原角色 = 行为不变）。空 = 回退：
+	// 选材→chapter、试转→convert、修订→style。
+	PilotSelectModel string `yaml:"pilot_select_model"`
+	PilotTrialModel  string `yaml:"pilot_trial_model"`
+	PilotReviseModel string `yaml:"pilot_revise_model"`
 	// StyleFix 是转换后风格修复大循环（T43）：任何章节汇报手册/样式问题
 	// 即进入 整合→风格修复→影响评估→分块修复 的循环。
 	StyleFix struct {
@@ -725,9 +731,9 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目
 // 两个键（新子块级开关）。
-const CurrentConfigVersion = 12
+const CurrentConfigVersion = 13
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.

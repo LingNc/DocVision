@@ -175,7 +175,7 @@ var registry = []Template{
 	},
 	{
 		Name: StylePilotSelectSystem, File: "latex_style_pilot_select.system.md",
-		MustMention: []string{"doc_search", "list_source_pages", "read_file", "submit", "view_pdf", "write_file"},
+		MustMention: []string{"doc_search", "list_source_pages", "pilot_spec", "read_file", "submit", "view_pdf"},
 	},
 	{
 		Name: StylePilotSelectUser, File: "latex_style_pilot_select.user.md",

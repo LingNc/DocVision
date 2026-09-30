@@ -1586,3 +1586,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T97 pilot v2 重构（用户定稿）
 - 用户否定 v1（转真实第一章+复用样式会话）：试点应全部属于样式阶段内部——选材会话（小会话，同章节划分地位）挑全书代表性内容（md 行段+PDF 页，不论完整章节，产 spec.json）→ 拼 sample.md → 试转会话（convert 模型，对照选中页核对，汇报类缺口）→ 修订会话定稿 cls（**新上下文**，用户明确"无需复用之前的会话"）。之后才 chapters/convert。实现：pilot.go 重写，三个独立转录 style_pilot_{select,trial,revise}.jsonl；行段/页码越界裁剪警告；试转与修订各一次编译打回机会；marker 幂等。修 SubmitDoneTool 无 Gate/Set 字段的接线错误；MustMention 只收工具名（spec.json/sample.tex 不是工具）；buildPilotSample 漏 MkdirAll；测试 Runner 需要真 logger（nil log 在 LogWarning 崩溃）。
+
+### T107 预览输出翻倍 + T108 试点模型注册与选材结构化
+- T107 证据：转录里 split list 回执 text 字段只存一份（"16 章"出现 1 次）、add 输入 16 条 title 不重复——排除数据层。根因在前端：pullSession 无在飞锁，2s 轮询节拍内响应未回（samba 上 ReadSession 全量读）时第二个拉取以同一 from 发出，先发先落地、后发 seq 仍为最大值不被 pullSeq 守卫丢弃 → 同段行追加两次。修：pullInFlight 锁，reset 不受约束。
+- T108：latex.pilot_select/trial/revise_model 三键（空回退 chapter/convert/style）+ models 注册 pilot-* 条目 extends 原角色；CurrentConfigVersion 12→13（两个模板+README 行+docs/config.md+测试夹具 temp/config_new.yaml 同步——后者是 ValidateFile 严格校验钉住的文件，版本不匹配会红）。选材改 pilot_spec 结构化工具（T108，同 split 家族：操作即校验、批量原子、每次 Execute 重读文件防 bash 绕过）。

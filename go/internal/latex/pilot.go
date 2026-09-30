@@ -6,7 +6,8 @@ package latex
 // 三个子会话（都不复用彼此/原样式会话的上下文，各自独立转录）：
 //
 //	1. 选材会话：从全书挑"有代表性/有特点"的内容——md 行段 + 原书 PDF
-//	   页，不论是否完整章节，产出 work/style/pilot/spec.json；
+//	   页，不论是否完整章节，pilot_spec 工具落盘 work/style/pilot/
+//	   spec.json（T108，与 split/problems 同族，不裸写 JSON）；
 //	2. 试转会话：把拼合出的 sample.md 用当前样式包转成 sample.tex、
 //	   编译、对照选中的原书页核对到贴合为止；
 //	3. 修订会话：拿试转产物与原书页修订 cls/manual/example，交出的
@@ -16,7 +17,6 @@ package latex
 // 绝不挡后续阶段；marker 也让中断续跑不重复 pilot。
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,16 +108,20 @@ func (r *Runner) pilotSelectSession(proj, mainMD string) (*pilotSpec, error) {
 	if err := os.MkdirAll(pilotDir, 0o755); err != nil {
 		return nil, err
 	}
-	client := r.clientFor(r.cfg.Latex.StyleModel)
-	modelCfg := r.modelOf(r.cfg.Latex.StyleModel)
+	selectKey := r.cfg.Latex.PilotSelectModel // T108：空 = 沿用章节划分模型
+	if selectKey == "" {
+		selectKey = r.cfg.Latex.ChapterModel
+	}
+	client := r.clientFor(selectKey)
+	modelCfg := r.modelOf(selectKey)
 	tuning := r.cfg.LatexSession("style")
 	goal := NewGoalTool(filepath.Join(pilotDir, "plan_select.md"))
 	submit := &SubmitDoneTool{Label: "the pilot selection"}
+	specTool := NewPilotSpecTool(filepath.Join(pilotDir, "spec.json"), filepath.Join(proj, "source"))
 	tools := []session.Tool{
 		&ReadFileTool{Root: pilotDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
-		&WriteWorkFileTool{Root: pilotDir},
-		&EditWorkFileTool{Root: pilotDir},
 		&GrepTool{Root: pilotDir, AltRoots: []AltRoot{{Label: "project", Dir: r.projectRoot()}}},
+		specTool,
 		&ViewPDFTool{Root: pilotDir, Mounts: r.sessionMounts(kindStyle, pilotDir), Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		goal, submit,
 	}
@@ -149,21 +153,14 @@ func (r *Runner) pilotSelectSession(proj, mainMD string) (*pilotSpec, error) {
 		if fileExists(filepath.Join(pilotDir, "spec.json")) {
 			break
 		}
-		userText = "You submitted but spec.json does not exist — write the selection to spec.json with write_file, then submit again."
+		userText = "You submitted but the selection is empty — add your md ranges and pdf pages with pilot_spec, then submit again."
 		submit.Submitted = false
 	}
-	data, err := os.ReadFile(filepath.Join(pilotDir, "spec.json"))
-	if err != nil {
-		return nil, fmt.Errorf("spec.json 读取失败: %w", err)
-	}
-	var spec pilotSpec
-	if err := json.Unmarshal(data, &spec); err != nil {
-		return nil, fmt.Errorf("spec.json 不是合法 JSON: %w", err)
-	}
+	spec := specFromTool(specTool.loadLocked())
 	if len(spec.MDRanges) == 0 || len(spec.PDFPages) == 0 {
-		return nil, fmt.Errorf("spec.json 需要至少一条 md_ranges 与一条 pdf_pages")
+		return nil, fmt.Errorf("选材需要至少一条 md 行段与一条 pdf 页集合")
 	}
-	return &spec, nil
+	return spec, nil
 }
 
 // buildPilotSample 把 spec 拼成 pilot/sample.md（越界行段/页码裁剪并
@@ -255,8 +252,12 @@ func (r *Runner) pilotTrialSession(proj, samplePath, pagesDesc string) error {
 		}
 	}
 
-	client := r.clientFor(r.cfg.Latex.ConvertModel)
-	modelCfg := r.modelOf(r.cfg.Latex.ConvertModel)
+	trialKey := r.cfg.Latex.PilotTrialModel // T108：空 = 沿用转换模型
+	if trialKey == "" {
+		trialKey = r.cfg.Latex.ConvertModel
+	}
+	client := r.clientFor(trialKey)
+	modelCfg := r.modelOf(trialKey)
 	tuning := r.cfg.LatexSession("convert")
 	goal := NewGoalTool(filepath.Join(work, "plan.md"))
 	submit := &SubmitDoneTool{Label: "the pilot conversion"}
@@ -326,8 +327,12 @@ func (r *Runner) pilotTrialSession(proj, samplePath, pagesDesc string) error {
 func (r *Runner) pilotReviseSession(proj, pagesDesc string) error {
 	workDir := filepath.Join(proj, "work", "style")
 	styleDir := filepath.Join(proj, "style")
-	client := r.clientFor(r.cfg.Latex.StyleModel)
-	modelCfg := r.modelOf(r.cfg.Latex.StyleModel)
+	reviseKey := r.cfg.Latex.PilotReviseModel // T108：空 = 沿用样式模型
+	if reviseKey == "" {
+		reviseKey = r.cfg.Latex.StyleModel
+	}
+	client := r.clientFor(reviseKey)
+	modelCfg := r.modelOf(reviseKey)
 	tuning := r.cfg.LatexSession("style")
 	goal := NewGoalTool(filepath.Join(workDir, "plan.md"))
 	submit := &SubmitStyleTool{Workspace: workDir, Gate: func() string { return goalGate(goal) }}

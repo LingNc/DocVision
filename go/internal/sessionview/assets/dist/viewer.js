@@ -7531,9 +7531,12 @@
       state.polling = false;
     });
   }
+  let pullInFlight = false;
   function pullSession(reset) {
     const s = state.current;
     if (!s) return Promise.resolve();
+    if (!reset && pullInFlight) return Promise.resolve();
+    pullInFlight = true;
     const from = reset ? 0 : state.nextFrom;
     const url = "/api/session?id=" + encodeURIComponent(s.id) + "&from=" + from;
     const seq = ++pullSeq;
@@ -7562,6 +7565,8 @@
       }
     }).catch((err) => {
       setBannerText("拉取会话失败：" + err.message);
+    }).finally(() => {
+      pullInFlight = false;
     });
   }
   function selectSession(id) {

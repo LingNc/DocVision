@@ -78,3 +78,40 @@ func TestBuildPilotSample(t *testing.T) {
 		t.Fatal("全无效行段必须报错")
 	}
 }
+
+// T108：pilot_spec 工具——操作即校验（md 文件必须存在、行段/页码合法）、
+// 批量原子、转换回 pilotSpec 两数组。
+func TestPilotSpecTool(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "book.md"), []byte("a\nb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewPilotSpecTool(filepath.Join(dir, "spec.json"), src)
+
+	// 不存在的 md 文件当场拒。
+	res, _ := tool.Execute(`{"op":"add","kind":"md","file":"missing.md","start":1,"end":5}`)
+	if !strings.HasPrefix(res.Text, "REJECTED") {
+		t.Fatalf("不存在的 md 必须拒: %s", res.Text)
+	}
+	// 批量：一条 md + 一条 pdf。
+	res, _ = tool.Execute(`{"op":"add","items":[{"kind":"md","file":"book.md","start":1,"end":2},{"kind":"pdf","file":"book.pdf","pages":[3,1]}]}`)
+	if !strings.HasPrefix(res.Text, "OK") {
+		t.Fatalf("批量 add 失败: %s", res.Text)
+	}
+	spec := specFromTool(tool.loadLocked())
+	if len(spec.MDRanges) != 1 || spec.MDRanges[0].End != 2 {
+		t.Fatalf("md_ranges 不对: %+v", spec.MDRanges)
+	}
+	if len(spec.PDFPages) != 1 || spec.PDFPages[0].Pages[0] != 1 {
+		t.Fatalf("pdf_pages 不对（页码应排序）: %+v", spec.PDFPages)
+	}
+	// delete 越界整批不动。
+	res, _ = tool.Execute(`{"op":"delete","ns":[1,9]}`)
+	if !strings.HasPrefix(res.Text, "REJECTED") || len(tool.loadLocked()) != 2 {
+		t.Fatalf("越界 delete 必须整批不动: %s", res.Text)
+	}
+}

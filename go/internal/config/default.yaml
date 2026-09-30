@@ -1,6 +1,6 @@
 # DocVision Configuration
 
-config_version: 12
+config_version: 13
 # Copy this file to config.yaml and fill in your credentials.
 
 # MinerU API Configuration
@@ -86,6 +86,9 @@ latex:
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留
   style_pilot: true         # 样式试点：选材→试转→修订后再划分章节（T97）；false 关闭
+  pilot_select_model: "pilot-select"   # 试点选材会话独立模型（T108；models.pilot-select 默认 extends chapter）
+  pilot_trial_model: "pilot-trial"     # 试点试转会话独立模型（T108；models.pilot-trial 默认 extends convert）
+  pilot_revise_model: "pilot-revise"   # 试点样式修订会话独立模型（T108；models.pilot-revise 默认 extends style）
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）
@@ -290,3 +293,10 @@ models:
     extends: "convert"
   final-review:                  # 终审会话（final_review）
     extends: "convert"
+  # ---- T108：样式试点三个子会话独立条目——默认 extends 原角色 = 行为不变 ----
+  pilot-select:                  # 试点选材会话（pilot-select）
+    extends: "chapter"
+  pilot-trial:                   # 试点试转会话（pilot-trial）
+    extends: "convert"
+  pilot-revise:                  # 试点样式修订会话（pilot-revise）
+    extends: "style"

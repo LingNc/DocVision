@@ -727,6 +727,10 @@ user 轮
 [X][ ] T96. 章节划分会话中，最终的submit应该不要直接输出json格式的内容，而是模型可以将结果写入一个json文件可以编辑可以追加的方便修改而不是一次性生成。也可以仿照后面的goal和problems工具，借助一个工具来进行操作，可以通过这个工具来批量添加和写入读取操作这个json的文件类似键值对这样的。或者说就是按照我们最终的形式去写入追加等，这边可以自动给他排序提供搜索功能，这两个可以考虑讨论一下那个更好。（已实现：split 结构化工具——list/add/update/delete/clear、add 收单条或 chapters 数组批量、操作即校验、重叠当场拒、自动按行号排序；edit_file 直改 split.json 保留为逃生舱；submit_split 无参读文件终审。）
 [X][ ] T97. 我看style总是转换的时候这边会存在比如封面的图像，整体样式还有一些特殊的结构，还有某些重复性的特殊结构没有专门去做的情况，我感觉这边需要检查一下。style应当考虑充分并且提供满足的要求风格和排版命令。对于style的构建应该尽可能的找到和写出整本书的后续章节内的共同样式和符合的一致发写法，能够提供简单的指令接口和控制排版的方式以供后面的章节使用，可以在第一个章节上测试一下效果再来优化style风格建设，抽象出共同的接口和排版，能够保证整本书后续可以使用这些接口而不用过多的修改就可以整体保持统一和方便书写和使用。（已修：①style 提示词盘点清单补封面/前置页/重复性特殊结构，cls 必须为每种重复结构定义专门命令或环境、example.tex 改为复刻全书结构最密的真实一页；②重量档样式试点（用户定稿 v2：属于样式阶段内部、章节划分之前，与真实章节无关）：latex.style_pilot 默认开——选材会话挑代表性内容拼最小样例（md 行段+原书页，不论完整章节）→试转会话转换并对照原书核对→修订会话（新上下文，不复用原样式会话）定稿 cls，之后正常走章节划分与转换。）
 [X][ ] T106. 详情栏系统提示词快照变"没有正文/工具定义 0 个"——T99/T101 的 price/run_end 也是 t=meta，addMeta 没按 kind 过滤，最新 meta 行（price）把 system 快照覆盖成空。（已修：只有 kind=system 或无 kind 的旧行才更新快照。）
+[X][ ] T107. 预览页工具输出偶发整段翻倍（split list 回执渲染两遍）：转录干净（回执/输入各一份），根因是前端 pullSession 无在飞锁——响应慢于 2s 轮询节拍时两个增量拉取以同一 from 先后发出，先发的先落地、后发的 seq 仍是最大值不被丢弃，同一段行追加两次。
+  （已修：data.ts 增加 pullInFlight 在飞锁，非 reset 拉取在飞即跳过，reset（切会话）不受锁约束仍靠 pullSeq 丢弃旧结果。）
+[X][ ] T108. 样式试点模型注册与选材结构化：pilot 三个子会话此前硬编码沿用 style/convert 模型；选材要 write_file 裸写 spec.json。
+  （已修：latex.pilot_select/trial/revise_model 三个独立键（空回退 chapter/convert/style），models 注册 pilot-select/trial/revise 条目默认 extends 对应角色；配置版本 bump 12→13；选材改 pilot_spec 结构化工具（list/add/update/delete/clear，md 文件存在性与行段/页码操作即校验、批量原子，落盘 spec.json），同 split/problems 家族。）
 [X][ ] T98. 评估分派会话写 blocks.json 也工具化（与 split/problems/goal 同族）：blocks 工具 list/add/update/delete/clear，单条或 blocks 数组批量，每章只能属于一块当场拒；edit_file 直改保留逃生舱；submit_blocks 无参终审。
 [X][ ] T99. 终审中途停了但转录里没有报错原因——会话层的错误（API 失败/进程被杀）从不进转录。修：每次 Run 结束落一条 t=meta kind=run_end（ok/error+原因），轨迹页单行展示、详情栏「结局」、readStat 读到 run_end error 直接判 error 态；同时 keep_session_records 默认改为开（会话记录不再只在 debug 下保留）。
 [X][ ] T100. 续跑不应该插 user 内容，直接传回会话内容即可（回复一半中断/没提交除外——没提交由提醒机制兜底）。（已修：resumeUserText 非空历史一律空参续行。）
