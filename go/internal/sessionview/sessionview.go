@@ -619,6 +619,13 @@ func LabelFor(rel string) string {
 		return "fix:book_fix"
 	case "final_review":
 		return "final-review:final_review"
+	// T110：样式试点三个子会话归入样式阶段（不再是散「会话」桶）。
+	case "style_pilot_select":
+		return "style:pilot_select"
+	case "style_pilot_trial":
+		return "style:pilot_trial"
+	case "style_pilot_revise":
+		return "style:pilot_revise"
 	}
 	for _, p := range []struct{ prefix, label string }{
 		{"convert_", "convert"},
@@ -653,6 +660,17 @@ func TitleFor(rel string) string {
 		return label
 	}
 	switch stage {
+	case "style":
+		// T110：样式阶段内试点会话的中文点名（与主样式会话同组）。
+		switch subject {
+		case "pilot_select":
+			return "样式 · 试点选材"
+		case "pilot_trial":
+			return "样式 · 试点试转"
+		case "pilot_revise":
+			return "样式 · 试点修订"
+		}
+		return "样式 · " + subject
 	case "convert":
 		return "转换 · " + subject
 	case "vector":

@@ -1593,3 +1593,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T109 无图片书籍中断
 - 证据：用户终端——images done (0.0s) → style FAILED "source 目录中没有处理后的 markdown"。根因 rebuildPhase `if len(reps)==0 { continue }`，全书 0 图时 md 永不落盘 proj/source。双重陷阱：坏项目 book progress 里 images=done，续跑跳过 images 阶段，单修 rebuildPhase 也救不回来——RunBook 增加 style 前 ensureSourceMD 兜底补拷。
+
+### T110 试点会话分组与排序
+- style_pilot_* 三转录没进 LabelFor 的归类表 → 散「会话」桶；组内默认 mtime 降序，试点修订（最后写完）排在试点选材（最先执行）前。修：Go LabelFor/TitleFor 归 style 阶段并出中文点名（样式 · 试点选材/试转/修订），label_t62_test 加钉；web Sidebar.vue 的 style 组加 stylePilotOrder 执行顺序排序（主样式会话 0 → 选材 1 → 试转 2 → 修订 3），块视图编号随之按执行顺序编。

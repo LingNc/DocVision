@@ -13,6 +13,10 @@ func TestLabelForAssemblySessions(t *testing.T) {
 		{"work/sessions/stylefix_assess_r1.jsonl", "style-fix:assess_r1", "评估分派 · 第1轮"},
 		{"work/sessions/stylefix-blk-r1-2.jsonl", "style-fix:blk-r1-2", "分块修复 · 第1轮 · 块2"},
 		{"work/sessions/convert_chapter_001.jsonl", "convert:chapter_001", "转换 · chapter_001"},
+		// T110：试点三会话归样式阶段。
+		{"work/sessions/style_pilot_select.jsonl", "style:pilot_select", "样式 · 试点选材"},
+		{"work/sessions/style_pilot_trial.jsonl", "style:pilot_trial", "样式 · 试点试转"},
+		{"work/sessions/style_pilot_revise.jsonl", "style:pilot_revise", "样式 · 试点修订"},
 	}
 	for _, c := range cases {
 		if got := LabelFor(c.rel); got != c.label {

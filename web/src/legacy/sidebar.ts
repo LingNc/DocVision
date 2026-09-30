@@ -224,6 +224,13 @@ export function progressKeyFor(stage: string): string {
   return stage
 }
 
+/* T110：样式阶段内试点会话的执行顺序（主样式会话 → 选材 → 试转 → 修订），
+ * 未知标签回 -1（交给 mtime 兜底）。 */
+export function stylePilotOrder(label: string): number {
+  const m: Record<string, number> = { style: 0, 'style:pilot_select': 1, 'style:pilot_trial': 2, 'style:pilot_revise': 3 }
+  return m[label || 'style'] ?? -1
+}
+
 /* 阶段状态三态：done=绿 / running=绿点脉冲 / else=进行中文本（P8 状态色）。 */
 export interface StageStatus {
   text: string; state: 'done' | 'running' | 'idle' | 'busy'; title: string

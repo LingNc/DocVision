@@ -7117,6 +7117,10 @@
     if (stage === "fix" || stage === "final-review") return "assemble";
     return stage;
   }
+  function stylePilotOrder(label) {
+    const m = { style: 0, "style:pilot_select": 1, "style:pilot_trial": 2, "style:pilot_revise": 3 };
+    return m[label || "style"] ?? -1;
+  }
   function stageStatusText(stages, stage, live) {
     if (live) return { text: "运行中", state: "running", title: "这一阶段还有 " + live + " 个会话在实时写入" };
     if (!stages) return null;
@@ -9135,6 +9139,11 @@
             const items = sg.items.slice().sort((x, y) => {
               if (x.imageOrder && y.imageOrder && x.imageOrder !== y.imageOrder) return x.imageOrder - y.imageOrder;
               if ((stg === "convert" || stg === "checker") && x.chapterOrder && y.chapterOrder && x.chapterOrder !== y.chapterOrder) return x.chapterOrder - y.chapterOrder;
+              if (stg === "style") {
+                const pa = stylePilotOrder(x && x.label);
+                const pb = stylePilotOrder(y && y.label);
+                if (pa !== pb && pa >= 0 && pb >= 0) return pa - pb;
+              }
               const ka = styleFixPhaseKey(x && x.label);
               const kb = styleFixPhaseKey(y && y.label);
               if (ka && kb) {
@@ -9430,7 +9439,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-1b49aacc><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-1b49aacc><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-1b49aacc></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-1b49aacc><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-1b49aacc></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-1b49aacc></path></svg></span>', 1)),
+                    _cache[7] || (_cache[7] = createStaticVNode('<span class="row-slot row-folder" data-v-18112c90><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-18112c90><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-18112c90></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-18112c90><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-18112c90></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-18112c90></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9740,7 +9749,7 @@
     }
     return target;
   };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-1b49aacc"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-18112c90"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
