@@ -1590,3 +1590,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T107 预览输出翻倍 + T108 试点模型注册与选材结构化
 - T107 证据：转录里 split list 回执 text 字段只存一份（"16 章"出现 1 次）、add 输入 16 条 title 不重复——排除数据层。根因在前端：pullSession 无在飞锁，2s 轮询节拍内响应未回（samba 上 ReadSession 全量读）时第二个拉取以同一 from 发出，先发先落地、后发 seq 仍为最大值不被 pullSeq 守卫丢弃 → 同段行追加两次。修：pullInFlight 锁，reset 不受约束。
 - T108：latex.pilot_select/trial/revise_model 三键（空回退 chapter/convert/style）+ models 注册 pilot-* 条目 extends 原角色；CurrentConfigVersion 12→13（两个模板+README 行+docs/config.md+测试夹具 temp/config_new.yaml 同步——后者是 ValidateFile 严格校验钉住的文件，版本不匹配会红）。选材改 pilot_spec 结构化工具（T108，同 split 家族：操作即校验、批量原子、每次 Execute 重读文件防 bash 绕过）。
+
+### T109 无图片书籍中断
+- 证据：用户终端——images done (0.0s) → style FAILED "source 目录中没有处理后的 markdown"。根因 rebuildPhase `if len(reps)==0 { continue }`，全书 0 图时 md 永不落盘 proj/source。双重陷阱：坏项目 book progress 里 images=done，续跑跳过 images 阶段，单修 rebuildPhase 也救不回来——RunBook 增加 style 前 ensureSourceMD 兜底补拷。

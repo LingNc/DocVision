@@ -1254,8 +1254,18 @@ func (r *Runner) rebuildPhase(mdCache map[string]*mdFile, prog map[string]*image
 			}
 		}
 		if len(reps) == 0 {
+			// T109：无图片引用的书没有任何替换——但产物树（档位1 的
+			// proj/source）仍然需要这份 md，否则 style 阶段报
+			// "source 目录中没有处理后的 markdown" 中断全流程。
+			outPath := filepath.Join(outDir, name)
+			if !fileExists(outPath) {
+				if err := os.WriteFile(outPath, []byte(mf.content), 0o644); err != nil {
+					r.log.LogError(0, "  写入失败:", name, err)
+				} else {
+					r.log.Log(0, "  Saved:", name, "(no images)")
+				}
+			}
 			continue
-			// no replacements for this file
 		}
 		sort.Slice(reps, func(i, j int) bool { return reps[i].off[0] > reps[j].off[0] })
 

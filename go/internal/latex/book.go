@@ -295,6 +295,9 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	r.buildPDFViewQuiet(opts.SourceDir, opts.Files)
 	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
 	r.checkPageAlignment()
+	// T109：无图片的书老版本不会把 md 落进 source/，且 images 已标 done
+	// 续跑时被跳过——style 前确保 source/ 有 md，没有就从原 md 补拷。
+	r.ensureSourceMD(proj, opts.SourceDir, opts.Files)
 
 	err = runPhase("style", func() error {
 		if err := r.stylePhase(proj); err != nil {
@@ -325,6 +328,26 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		return err
 	}
 	return runPhase("assemble", func() error { return r.assemblePhase(proj) })
+}
+
+// ensureSourceMD 兜底：proj/source 下没有任何 md 时，从原始 MinerU 输出
+// 把（过滤后的）md 原样补拷过来（T109）。
+func (r *Runner) ensureSourceMD(proj, srcDir string, files []string) {
+	if srcDir == "" {
+		srcDir = r.cfg.Paths.OutputDir
+	}
+	mds, _ := filepath.Glob(filepath.Join(proj, "source", "*.md"))
+	if len(mds) > 0 {
+		return
+	}
+	srcs, _ := filepath.Glob(filepath.Join(srcDir, "*.md"))
+	sort.Strings(srcs)
+	srcs = filterFiles(srcs, files)
+	for _, f := range srcs {
+		dst := filepath.Join(proj, "source", filepath.Base(f))
+		copyFile(f, dst)
+		r.log.Log(1, "[book] source 缺 md，已从原始输出补拷:", filepath.Base(f))
+	}
 }
 
 func prog2Field(p bookProgress, name string) string {

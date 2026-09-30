@@ -731,6 +731,8 @@ user 轮
   （已修：data.ts 增加 pullInFlight 在飞锁，非 reset 拉取在飞即跳过，reset（切会话）不受锁约束仍靠 pullSeq 丢弃旧结果。）
 [X][ ] T108. 样式试点模型注册与选材结构化：pilot 三个子会话此前硬编码沿用 style/convert 模型；选材要 write_file 裸写 spec.json。
   （已修：latex.pilot_select/trial/revise_model 三个独立键（空回退 chapter/convert/style），models 注册 pilot-select/trial/revise 条目默认 extends 对应角色；配置版本 bump 12→13；选材改 pilot_spec 结构化工具（list/add/update/delete/clear，md 文件存在性与行段/页码操作即校验、批量原子，落盘 spec.json），同 split/problems 家族。）
+[X][ ] T109. 无图片的 PDF 直接中断：rebuildPhase 只在有替换时把 md 写进 proj/source，全书 0 图 → source/ 没有 md → style 阶段报"source 目录中没有处理后的 markdown"。且坏项目 images 已标 done，续跑跳过该阶段，永远补不上。
+  （已修：①rebuildPhase 无替换时把原 md 原样写入产物树；②RunBook 在 style 前 ensureSourceMD 兜底——source/ 无 md 就从原始输出补拷，老坏项目续跑自愈。）
 [X][ ] T98. 评估分派会话写 blocks.json 也工具化（与 split/problems/goal 同族）：blocks 工具 list/add/update/delete/clear，单条或 blocks 数组批量，每章只能属于一块当场拒；edit_file 直改保留逃生舱；submit_blocks 无参终审。
 [X][ ] T99. 终审中途停了但转录里没有报错原因——会话层的错误（API 失败/进程被杀）从不进转录。修：每次 Run 结束落一条 t=meta kind=run_end（ok/error+原因），轨迹页单行展示、详情栏「结局」、readStat 读到 run_end error 直接判 error 态；同时 keep_session_records 默认改为开（会话记录不再只在 debug 下保留）。
 [X][ ] T100. 续跑不应该插 user 内容，直接传回会话内容即可（回复一半中断/没提交除外——没提交由提醒机制兜底）。（已修：resumeUserText 非空历史一律空参续行。）

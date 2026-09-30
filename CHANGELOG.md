@@ -6,6 +6,7 @@
 ## [Unreleased]
 ### Fixed
 
+- **无图片的 PDF 走档位1 直接中断（T109）**：`rebuildPhase` 只在有图片替换时把 md 写进 `proj/source`，全书 0 图 → source/ 没有 md → style 阶段报"source 目录中没有处理后的 markdown"；且坏项目 images 已标 done、续跑跳过该阶段永远补不上。现在无替换时也把原 md 落盘，且 RunBook 在 style 前兜底补拷（老坏项目续跑自愈）。
 - **预览页工具输出偶发整段翻倍（T107）**：`pullSession` 增量拉取没有在飞锁——响应慢于 2s 轮询节拍时（网络挂载上 ReadSession 全量读一遍很常见）两个拉取以同一 `from` 先后发出，先发的先落地、后发的 seq 仍是最大值不被丢弃，同一段行追加两次（split list 回执渲染两遍）；现在非 reset 拉取在飞即跳过。
 
 - **latex 看图回传丢图（T56 回归）**：T56 重构展平逻辑时把 `image_url` 的类型断言从 `map[string]string` 换成 `map[string]interface{}`，与 `toolImageContent` 的实际形态不符且失败被静默跳过——9-20 起新 latex 会话的 view_image/view_pdf 缩略图全部消失（存量老转录不受影响）。两种 map 形态现在都认，回归测试钉住。
