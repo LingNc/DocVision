@@ -325,9 +325,10 @@ type LatexConfig struct {
 	// session succeeds. Default ON (explicit false disables); independent
 	// from KeepTempDirs. Debug logging implies keeping them.
 	KeepSessionRecords *bool `yaml:"keep_session_records"`
-	// StylePilot（T97 重量档）：章节划分后先用新样式包试转第一章、复用
-	// 样式会话上下文对照原书修订 cls/manual，再转换其余章节；cls 变了
-	// 则首章重转。默认开（显式 false 关闭）。
+	// StylePilot（T97 重量档）：样式阶段后跑样式试点——选材会话拼一
+	// 份代表全书特色内容的最小样例（md 行段 + 原书页），试转会话用
+	// 样式包转换并对照原书核对，修订会话（新会话）据此定稿 cls。
+	// 默认开（显式 false 关闭）。
 	StylePilot *bool `yaml:"style_pilot"`
 	// BashSandbox is the deprecated location of tools.bash.sandbox; kept so
 	// existing configs keep working (resolved by Config.BashSandboxEnabled).

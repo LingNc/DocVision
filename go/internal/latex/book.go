@@ -296,7 +296,16 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
 	r.checkPageAlignment()
 
-	err = runPhase("style", func() error { return r.stylePhase(proj) })
+	err = runPhase("style", func() error {
+		if err := r.stylePhase(proj); err != nil {
+			return err
+		}
+		// T97 重量档：选材→试转→样式修订（失败只警告，不挡后续阶段）。
+		if r.cfg.Latex.LatexStylePilotEnabled() {
+			r.stylePilotPhase(proj)
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -309,10 +318,6 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		// 前置检查：样式包完整 + 图片全部处理完毕，有问题直接停。
 		if err := r.preflightConvert(proj); err != nil {
 			return err
-		}
-		// T97 重量档：首章试转 + 样式修订（失败只警告，不挡主流程）。
-		if r.cfg.Latex.LatexStylePilotEnabled() {
-			r.pilotPhase(proj)
 		}
 		return r.convertPhase(proj, 0)
 	})

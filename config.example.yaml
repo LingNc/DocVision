@@ -96,7 +96,7 @@ latex:
   concurrency: 3                 # 会话级并发（classify / 逐章 convert / style-fix 共用）
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留
-  style_pilot: true # 首章试转 + 样式会话修订 cls 后再转其余章节（T97 重量档；样式问题在进入全书转换前暴露）
+  style_pilot: true # 样式试点（T97 重量档）：选材拼样例 → 试转核对 → 修订定稿 cls，然后才划分章节；样式问题在进入全书转换前暴露
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）

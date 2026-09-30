@@ -85,7 +85,7 @@ latex:
   concurrency: 3                 # 会话级并发（重于 img2text，默认 3）
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留
-  style_pilot: true         # 首章试转+样式修订后再转换其余章节（T97）；false 关闭
+  style_pilot: true         # 样式试点：选材→试转→修订后再划分章节（T97）；false 关闭
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）

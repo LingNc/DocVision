@@ -1583,3 +1583,6 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 真实产物核查（该书）：cls 已有 42 命令/环境但封面只有颜色无 titlepage 接口，封面图散进 chapter_001 当普通插图。
 - 轻量档（提示词最小修正）：盘点清单补封面/前置页/重复结构；cls 必须为每种重复结构定义专门命令/环境；example.tex 复刻全书结构最密的真实一页。
 - 重量档（latex.style_pilot 默认开）：chapters 后、convert 前插 pilot——convertOneChapter 试转首章（含 checker），产物铺进 work/style/pilot/（cls 副本同目录可编译），复用样式会话上下文（同 stylefix 复用模式）对照原书修订并再交 submit_style；修订后 example 必须编译过（一次打回机会）；cls/manual 指纹变了→作废首章产物（主转换重转），没变→保留（convertPhase 按产物跳过）。marker 文件 pilot.done 防重复/防失败死循环；任何失败只警告不挡主流程。转录 pilot_style.jsonl。
+
+### T97 pilot v2 重构（用户定稿）
+- 用户否定 v1（转真实第一章+复用样式会话）：试点应全部属于样式阶段内部——选材会话（小会话，同章节划分地位）挑全书代表性内容（md 行段+PDF 页，不论完整章节，产 spec.json）→ 拼 sample.md → 试转会话（convert 模型，对照选中页核对，汇报类缺口）→ 修订会话定稿 cls（**新上下文**，用户明确"无需复用之前的会话"）。之后才 chapters/convert。实现：pilot.go 重写，三个独立转录 style_pilot_{select,trial,revise}.jsonl；行段/页码越界裁剪警告；试转与修订各一次编译打回机会；marker 幂等。修 SubmitDoneTool 无 Gate/Set 字段的接线错误；MustMention 只收工具名（spec.json/sample.tex 不是工具）；buildPilotSample 漏 MkdirAll；测试 Runner 需要真 logger（nil log 在 LogWarning 崩溃）。

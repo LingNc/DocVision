@@ -58,8 +58,12 @@ const (
 	StyleFixBlockSystem     = "latex_stylefix_block.system"
 
 	// 各会话的首次用户提示词（静态文案进模板，动态数据用占位符传入）。
-	StyleUser       = "latex_style.user"
-	StylePilotUser  = "latex_style_pilot.user"
+	StyleUser              = "latex_style.user"
+	StylePilotSelectSystem = "latex_style_pilot_select.system"
+	StylePilotSelectUser   = "latex_style_pilot_select.user"
+	StylePilotTrialSystem  = "latex_style_pilot_trial.system"
+	StylePilotTrialUser    = "latex_style_pilot_trial.user"
+	StylePilotReviseUser   = "latex_style_pilot_revise.user"
 	ChaptersUser    = "latex_chapters.user"
 	ConvertUser     = "latex_convert.user"
 	CheckerUser     = "latex_checker.user"
@@ -170,9 +174,27 @@ var registry = []Template{
 		MustMention: []string{"doc_search", "list_source_pages", "read_file", "submit_style", "view_image"},
 	},
 	{
-		Name: StylePilotUser, File: "latex_style_pilot.user.md",
-		Vars:        []string{"CHAPTER"},
-		MustMention: []string{"compile", "submit_style", "view_pdf"},
+		Name: StylePilotSelectSystem, File: "latex_style_pilot_select.system.md",
+		MustMention: []string{"doc_search", "list_source_pages", "read_file", "submit", "view_pdf", "write_file"},
+	},
+	{
+		Name: StylePilotSelectUser, File: "latex_style_pilot_select.user.md",
+		Vars:        []string{"MAIN_MD"},
+		MustMention: []string{"submit"},
+	},
+	{
+		Name: StylePilotTrialSystem, File: "latex_style_pilot_trial.system.md",
+		MustMention: []string{"compile", "submit", "view_pdf"},
+	},
+	{
+		Name: StylePilotTrialUser, File: "latex_style_pilot_trial.user.md",
+		Vars:        []string{"CLS", "PAGES"},
+		MustMention: []string{"submit"},
+	},
+	{
+		Name: StylePilotReviseUser, File: "latex_style_pilot_revise.user.md",
+		Vars:        []string{"PAGES"},
+		MustMention: []string{"submit_style"},
 	},
 	{
 		Name: ChaptersUser, File: "latex_chapters.user.md",
