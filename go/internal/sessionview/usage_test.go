@@ -114,3 +114,24 @@ func TestScanWithoutUsageHasNoStats(t *testing.T) {
 		t.Fatalf("旧转录不该有指标: %+v", infos)
 	}
 }
+
+// T106 回归：price/run_end 也是 t=meta——它们不得覆盖 system 行的提示词快照
+// （曾把详情栏抹成"没有正文 / 工具定义 0 个"）。
+func TestMetaSnapshotIgnoresNonSystemKinds(t *testing.T) {
+	var st transcriptStat
+	st.addMeta(`{"t":"meta","kind":"system","model":"m","text":"系统提示词全文","tools":[{},{}]}`)
+	st.addMeta(`{"t":"meta","kind":"price","model":"m","input":1}`)
+	st.addMeta(`{"t":"meta","kind":"run_end","ok":true}`)
+	if st.Meta.PromptChars == 0 || st.Meta.Tools != 2 {
+		t.Fatalf("非 system meta 行污染了快照: %+v", st.Meta)
+	}
+	if st.Meta.Count != 3 {
+		t.Fatalf("Count 应计全部 meta 行: %d", st.Meta.Count)
+	}
+	// 无 kind 的旧行仍按 system 处理（兼容）。
+	var old transcriptStat
+	old.addMeta(`{"t":"meta","model":"m","text":"旧格式","tools":[{}]}`)
+	if old.Meta.PromptChars == 0 || old.Meta.Tools != 1 {
+		t.Fatalf("旧格式 meta 行应照常被采纳: %+v", old.Meta)
+	}
+}

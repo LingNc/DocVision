@@ -59,6 +59,7 @@ const (
 
 	// 各会话的首次用户提示词（静态文案进模板，动态数据用占位符传入）。
 	StyleUser       = "latex_style.user"
+	StylePilotUser  = "latex_style_pilot.user"
 	ChaptersUser    = "latex_chapters.user"
 	ConvertUser     = "latex_convert.user"
 	CheckerUser     = "latex_checker.user"
@@ -167,6 +168,11 @@ var registry = []Template{
 		Name: StyleUser, File: "latex_style.user.md",
 		Vars:        []string{"MAIN_MD"},
 		MustMention: []string{"doc_search", "list_source_pages", "read_file", "submit_style", "view_image"},
+	},
+	{
+		Name: StylePilotUser, File: "latex_style_pilot.user.md",
+		Vars:        []string{"CHAPTER"},
+		MustMention: []string{"compile", "submit_style", "view_pdf"},
 	},
 	{
 		Name: ChaptersUser, File: "latex_chapters.user.md",

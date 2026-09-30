@@ -1278,6 +1278,7 @@ func measuredImageTokens(samples []imageUsageSample) (perImage, steps, images in
 // data the viewer cannot explain.
 func (stat *transcriptStat) addMeta(line string) {
 	var rec struct {
+		Kind         string            `json:"kind"`
 		Model        string            `json:"model"`
 		SessionLabel string            `json:"session_label"`
 		SysHash      string            `json:"system_sha"`
@@ -1291,6 +1292,12 @@ func (stat *transcriptStat) addMeta(line string) {
 		stat.Meta = &MetaInfo{}
 	}
 	stat.Meta.Count++
+	// 只有 kind=system（或无 kind 的旧行）才更新提示词快照——price/run_end
+	// 也是 t=meta，没有 text/tools，若照样覆盖会把详情栏的提示词快照
+	// 抹成"没有正文 / 工具定义 0 个"（T99/T101 引入的真实回归）。
+	if rec.Kind != "" && rec.Kind != "system" {
+		return
+	}
 	stat.Meta.PromptChars = utf8.RuneCountInString(rec.Text)
 	stat.Meta.PromptTokenEst = session.TextTokens(rec.Text)
 	stat.Meta.Model = rec.Model

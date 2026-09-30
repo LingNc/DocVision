@@ -310,6 +310,10 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		if err := r.preflightConvert(proj); err != nil {
 			return err
 		}
+		// T97 重量档：首章试转 + 样式修订（失败只警告，不挡主流程）。
+		if r.cfg.Latex.LatexStylePilotEnabled() {
+			r.pilotPhase(proj)
+		}
 		return r.convertPhase(proj, 0)
 	})
 	if err != nil {

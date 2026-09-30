@@ -96,6 +96,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.chapter_granularity` | 档位1 章节拆分粒度：large=大章整体 / medium=按本书自动给出最合理拆分（不拆太细也不太大块）/ small=按小节拆分 | medium |
 | `latex.keep_temp_dirs` | 保留 `<项目>/work/temp/` 下的临时工作目录（拆章沙箱、逐章转换/修复工作区 `conv_<章>`、矢量图工作区） | false |
 | `latex.keep_session_records` | 保留成功会话的 JSONL 转录（与上一项独立）；debug 日志下两项都必定保留 | true（旧版默认 false） |
+| `latex.style_pilot` | 首章试转 + 样式修订（T97 重量档）：章节划分后先用新样式包转换第一章，复用样式会话上下文对照原书修订 cls/manual，再转换其余章节；cls 变了首章自动重转 | true |
 | `latex.compile.engine` | 编译引擎（pdflatex / xelatex / lualatex） | xelatex |
 | `latex.compile.timeout` | 单次编译超时（秒） | 120 |
 | `latex.compile.raster_command` | PDF 栅格化工具 | pdftoppm |

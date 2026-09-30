@@ -202,6 +202,12 @@ func (c LatexConfig) KeepTempDirsEnabled() bool {
 
 // KeepSessionRecordsEnabled reports whether session transcripts are kept
 // after a successful session (default false).
+// LatexStylePilotEnabled reports whether the pilot chapter pass runs
+// (default ON; explicit false disables).
+func (c LatexConfig) LatexStylePilotEnabled() bool {
+	return c.StylePilot == nil || *c.StylePilot
+}
+
 func (c LatexConfig) KeepSessionRecordsEnabled() bool {
 	// 默认保留（用户口径 2026-09-29：会话记录默认全开，不再只在 debug
 	// 下保留）——显式写 false 才关。
@@ -319,6 +325,10 @@ type LatexConfig struct {
 	// session succeeds. Default ON (explicit false disables); independent
 	// from KeepTempDirs. Debug logging implies keeping them.
 	KeepSessionRecords *bool `yaml:"keep_session_records"`
+	// StylePilot（T97 重量档）：章节划分后先用新样式包试转第一章、复用
+	// 样式会话上下文对照原书修订 cls/manual，再转换其余章节；cls 变了
+	// 则首章重转。默认开（显式 false 关闭）。
+	StylePilot *bool `yaml:"style_pilot"`
 	// BashSandbox is the deprecated location of tools.bash.sandbox; kept so
 	// existing configs keep working (resolved by Config.BashSandboxEnabled).
 	BashSandbox *bool `yaml:"bash_sandbox"`

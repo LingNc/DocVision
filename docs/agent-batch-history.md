@@ -1575,3 +1575,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 
 ### T105 多页/多图参数调研（结论：不改）
 - 用户问 view_pdf/view_image 要不要加多页/多图参数。真实数据统计（259 会话、4816 工具回合、1291 view 调用）：一轮并发多次看图 316 回合（42%），view_pdf 并发 862 次 ≈ 2.7 页/轮——模型已经靠 wire 层一轮多调用自然批量。加参数 = 同一能力的第二种表达，代价是回执归属 1:1 配平、FIFO、按文件预算全部要改。维持现状。
+
+### T106 meta 快照污染回归
+- 用户截图：详情栏"系统提示词"变"（这条 meta 行没有正文）/工具定义 0 个。根因：T99/T101 的 price/run_end 复用 t=meta，readStat 的 addMeta 不按 kind 过滤，最新 meta（price 行）把 system 快照覆盖成空。修：仅 kind=system（或无 kind 旧行）更新快照，Count 仍计全部。回归测试 TestMetaSnapshotIgnoresNonSystemKinds。
+
+### T97 样式覆盖 + 首章试点（pilot）
+- 真实产物核查（该书）：cls 已有 42 命令/环境但封面只有颜色无 titlepage 接口，封面图散进 chapter_001 当普通插图。
+- 轻量档（提示词最小修正）：盘点清单补封面/前置页/重复结构；cls 必须为每种重复结构定义专门命令/环境；example.tex 复刻全书结构最密的真实一页。
+- 重量档（latex.style_pilot 默认开）：chapters 后、convert 前插 pilot——convertOneChapter 试转首章（含 checker），产物铺进 work/style/pilot/（cls 副本同目录可编译），复用样式会话上下文（同 stylefix 复用模式）对照原书修订并再交 submit_style；修订后 example 必须编译过（一次打回机会）；cls/manual 指纹变了→作废首章产物（主转换重转），没变→保留（convertPhase 按产物跳过）。marker 文件 pilot.done 防重复/防失败死循环；任何失败只警告不挡主流程。转录 pilot_style.jsonl。
