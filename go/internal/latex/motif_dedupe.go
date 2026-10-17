@@ -118,7 +118,20 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	for _, s := range pool {
 		vis = append(vis, VisualMotifSample{Key: s.task.key(), Image: s.image})
 	}
-	groups := FindVisualMotifCandidates(vis)
+	// 桶也用组内闸门那套"居中重合"判据（T130）：逐对相似度在小图标上会把
+	// 一个连通片切两半（该书 90 张同标记进了桶、另外 10 张落进"未分配"），
+	// 桶与闸门因此长期是两套结论。大插图/无前景的图拿不到覆盖率，仍只走逐对
+	// 相似度，避免稀疏图形互相"有点像"造成误并。
+	alignShiftPct := r.cfg.Latex.DedupeAlignShift
+	if alignShiftPct <= 0 {
+		alignShiftPct = motifAlignDefaultShift
+	}
+	groups, alignMerges := FindVisualMotifCandidatesAligned(vis, r.motifAlignMin(), alignShiftPct)
+	if alignMerges > 0 {
+		r.log.Log(0, fmt.Sprintf("[dedupe] 居中重合额外并进 %d 对（桶与组内闸门同一判据）", alignMerges))
+	} else if alignMerges < 0 {
+		r.log.LogWarning(0, fmt.Sprintf("[dedupe] 小图标超过 %d 张，桶退回逐对相似度判据（居中重合太慢）", motifAlignBucketMax))
+	}
 	advisory := make(map[string]motifAdvisory)
 	for gi, group := range groups {
 		for _, key := range group.Members {

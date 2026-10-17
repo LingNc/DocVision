@@ -1723,3 +1723,13 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **Go 实现与 Python 的偏差（真实发现）**：同一批图，Go 侧 center=`<sha2>`（与 Python 的中心一致）、中位 0.898、最差 0.602；Python 侧最差 0.647。差在算墨阈值与 JPEG 解码的边界像素——阈值 705 时最差掉到 0.548（低于门槛，会多丢一张），改成 690 后回到 0.602。**最差那张正好压在 0.60 边缘**，注释与 issue 里都写明：代价是多画一张，不会丢内容。
 - **测试**：`TestMotifAlignCoverageNormalizesScaleAndPosition`（同一标记半尺寸 + 移位 ≥0.75，不搜平移时明显更差）、`TestMotifAlignOverlapRejectsDifferentShape`（实心块 <0.60）、`TestMotifAlignShiftCells`（0/0.01/0.10/0.25/0.50/0.90）、`TestMotifAlignFilterKeepsAlignedDropsOthers`（并进异形图要被拒、代表图取内容最全者）、`TestMotifAlignFilterFallsBackWithoutCoverage`（1×1 图退回逐对判据）。合成夹具的笔画粗细随半径等比——固定 1px 线条放大 2× 后相对变粗，第一版夹具因此只有 0.279（人造差异，不是判据问题）。
 - **验证**：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 14 包全绿（latex 16.6s、img2text 12.0s、sessionview 16.6s）；`go vet ./internal/latex/ ./internal/config/` 干净。
+
+### T130 / P50 相似桶也用「居中重合」判据（2026-10-18 第十批续）
+
+- **用户追问**：看完 300 dpi 的 100 张总览后问「不是用全部 300 的图做的吗？这样的话感觉比之前那个相似度的弄起来更加准确和可控？」——事实是聚类确实在全部 130 份不同内容（= 388 条引用）上做的，但**桶**（谁进同一个会话）仍走旧的单链 `MotifSimilarTo`，于是桶里只有 90 张、**另外 10 张同标记图落在"未分配"**；闸门却是新判据。用户选「桶也改用居中重合（限小图标）」。
+- **实现**：`FindVisualMotifCandidatesAligned(samples, alignMin, shiftPct)` —— 逐对相似度之后，再对"拿得到覆盖率的小图标"（`motifAlignCoverage`：前景外接框 ≤ 200×200、整图 ≤ 4M 像素）做一轮 union：重合度 ≥ `dedupe_align_min` 且 **墨迹占比差 ≤ 0.12、长宽比差 ≤ 0.35**（两处廉价预筛，挡掉绝大多数不可能同源的配对）就并进同一个桶。`alignMin <= 0` 退回旧入口；参与比较的小图标 **> 400 张**时整条判据退回旧行为并返回 `-1`，dedupe 阶段打一行 `[WARNING] 小图标超过 400 张，桶退回逐对相似度判据（居中重合太慢）`。
+- **实测（该书 130 份内容，含 30 张负样本）**：旧判据 **1 组 `[90]`**，用时 184ms；新判据 **5 组 `[100 3 2 2 2]`**（额外并进 15 对），**最大组 100 张里混入非本组 0 张**，用时 1.36s。3 张/2 张的小组正是波形图、3D 坐标图、交换图那几个簇，与 Python 侧的聚类一致。
+- **为什么只限小图标**：32 格软覆盖对稀疏图形没有鉴别力——跨书负样本（其它书的插图）与这个中心的最佳重合度实测 0.72–0.80，如果对任意大图用 0.6 门槛会直接误并；图标类（≤200px 内容框）才在"同源/异源"之间有 0.6 附近的间隔。
+- **测试**：`TestFindVisualMotifCandidatesAlignedLinksSquashedVariant`（水平压扁 28% 的同标记：`|Δaspect| > 0.18` 让旧判据拒掉、居中重合并进来；结构不同的方块仍分开；夹具若恰好能过旧判据则 `t.Skip` 说明原因）、`TestFindVisualMotifCandidatesAlignedDisabledMatchesLegacy`。
+- **配置**：没有新增键——复用 `latex.dedupe_align_min` / `latex.dedupe_align_shift`（T129 已进配置 v18）。
+- 验证：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 14 包全绿（latex 11.0s、img2text 12.0s、sessionview 16.7s）。

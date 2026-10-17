@@ -28,12 +28,38 @@ const (
 	motifMaxWidth  = 70
 	motifMaxHeight = 70
 	motifGrid      = 20
+	// motifAlignBucketMax 是"桶也用居中重合判据"时允许参与两两比较的小图标
+	// 数量上限；超过它退回逐对相似度（见 findAlignedMotifPairs）。
+	motifAlignBucketMax = 400
 )
 
 // FindVisualMotifCandidates returns exact-content groups and conservative
 // visually-similar groups. It performs no replacement, persistence, or model
 // calls; callers must independently verify candidates before using them.
+// FindVisualMotifCandidatesAligned 在逐对相似度之外，额外把**小图标类**里
+// "居中重合度"达标的图并进同一个桶（T130）。动机：逐对相似度在小图标上会
+// 把一个连通片切成两半（该书 90 张同标记只进了桶、另外 10 张落进"未分配"），
+// 于是桶和组内闸门用的是两套结论；这里让桶也用闸门那套判据。
+//
+// 只有拿得到覆盖率的图（前景外接框 ≤ 200×200 像素、整图 ≤ 4M 像素）参与这条
+// 判据——大插图/照片/公式继续只走逐对相似度，避免"任意稀疏图形在 32 格里都
+// 有点像"的误并。alignMin ≤ 0 时行为与 FindVisualMotifCandidates 完全一致。
+func FindVisualMotifCandidatesAligned(samples []VisualMotifSample, alignMin, shiftPct float64) ([]VisualMotifGroup, int) {
+	if alignMin <= 0 {
+		groups, _ := findVisualMotifCandidates(samples, 0, 0)
+		return groups, 0
+	}
+	return findVisualMotifCandidates(samples, alignMin, motifAlignShiftCells(shiftPct))
+}
+
+// FindVisualMotifCandidates 是"只走逐对相似度"的旧入口（测试与无须桶对齐的
+// 调用方使用）。
 func FindVisualMotifCandidates(samples []VisualMotifSample) []VisualMotifGroup {
+	groups, _ := findVisualMotifCandidates(samples, 0, 0)
+	return groups
+}
+
+func findVisualMotifCandidates(samples []VisualMotifSample, alignMin float64, shiftCells int) ([]VisualMotifGroup, int) {
 	valid := make([]VisualMotifSample, 0, len(samples))
 	seen := map[string]bool{}
 	for _, s := range samples {
@@ -56,11 +82,13 @@ func FindVisualMotifCandidates(samples []VisualMotifSample) []VisualMotifGroup {
 		}
 		return x
 	}
-	union := func(a, b int) {
+	union := func(a, b int) bool {
 		a, b = find(a), find(b)
-		if a != b {
-			parent[b] = a
+		if a == b {
+			return false
 		}
+		parent[b] = a
+		return true
 	}
 
 	// Pixel fingerprints and shape/colour features are pure functions of the
@@ -90,6 +118,10 @@ func FindVisualMotifCandidates(samples []VisualMotifSample) []VisualMotifGroup {
 				union(i, j)
 			}
 		}
+	}
+	alignMerges := 0
+	if alignMin > 0 {
+		alignMerges = findAlignedMotifPairs(valid, alignMin, shiftCells, union)
 	}
 
 	groups := map[int][]string{}
@@ -125,7 +157,7 @@ func FindVisualMotifCandidates(samples []VisualMotifSample) []VisualMotifGroup {
 		out = append(out, VisualMotifGroup{Members: members, Exact: isExact})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Members[0] < out[j].Members[0] })
-	return out
+	return out, alignMerges
 }
 
 func rgbaFingerprint(img image.Image) ([32]byte, bool) {
@@ -546,4 +578,48 @@ func absFloat(v float64) float64 {
 		return -v
 	}
 	return v
+}
+
+// findAlignedMotifPairs 把"小图标类"里居中重合度达标的图并在一个桶里。
+//
+// 先做两个廉价预筛再算平移搜索下的软重合度：墨迹占比差 > 0.12 或长宽比差
+// > 0.35 的图不可能是同一枚标记，直接跳过——真数据里 130 份内容两两比较只要
+// 2 秒量级，去掉预筛会慢一个数量级。
+func findAlignedMotifPairs(valid []VisualMotifSample, alignMin float64, shiftCells int, union func(a, b int) bool) int {
+	covs := make([]motifAlignImage, len(valid))
+	ok := make([]bool, len(valid))
+	covered := 0
+	for i := range valid {
+		covs[i], ok[i] = motifAlignCoverage(valid[i].Image)
+		if ok[i] {
+			covered++
+		}
+	}
+	// 成本上限：这条判据是 O(图标数²) × 平移次数。130 份内容实测 1.4s，
+	// 600 份就是半小时量级——超过上限时退回旧判据并返回 -1，由调用方打一行
+	// 警告，而不是让"启动时的桶扫描"变成几分钟的黑盒等待。
+	if covered > motifAlignBucketMax {
+		return -1
+	}
+	merged := 0
+	for i := range valid {
+		if !ok[i] {
+			continue
+		}
+		for j := i + 1; j < len(valid); j++ {
+			if !ok[j] {
+				continue
+			}
+			if absFloat(covs[i].inkFrac-covs[j].inkFrac) > 0.12 {
+				continue
+			}
+			if absFloat(covs[i].aspect-covs[j].aspect) > 0.35 {
+				continue
+			}
+			if covs[i].overlap(covs[j], shiftCells) >= alignMin && union(i, j) {
+				merged++
+			}
+		}
+	}
+	return merged
 }

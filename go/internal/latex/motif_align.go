@@ -46,8 +46,10 @@ const (
 
 // motifAlignImage 是一张图归一化后的软覆盖网格。
 type motifAlignImage struct {
-	grid []float64
-	area int // 前景外接框的像素面积，用来挑"内容最全"的代表图
+	grid    []float64
+	area    int     // 前景外接框的像素面积，用来挑"内容最全"的代表图
+	aspect  float64 // 内容框宽/高
+	inkFrac float64 // 网格里的墨迹总量（去重前预筛用）
 }
 
 // motifAlignCoverage 按前景外接框把图压缩成 32×32 的软覆盖网格。
@@ -75,7 +77,7 @@ func motifAlignCoverage(img image.Image) (motifAlignImage, bool) {
 	if w*h > motifAlignMaxArea {
 		return motifAlignImage{}, false
 	}
-	out := motifAlignImage{grid: make([]float64, motifAlignGrid*motifAlignGrid), area: w * h}
+	out := motifAlignImage{grid: make([]float64, motifAlignGrid*motifAlignGrid), area: w * h, aspect: float64(w) / float64(h)}
 	for gy := 0; gy < motifAlignGrid; gy++ {
 		y0 := minY + gy*h/motifAlignGrid
 		y1 := minY + (gy+1)*h/motifAlignGrid
@@ -102,6 +104,10 @@ func motifAlignCoverage(img image.Image) (motifAlignImage, bool) {
 			}
 		}
 	}
+	for _, v := range out.grid {
+		out.inkFrac += v
+	}
+	out.inkFrac /= float64(len(out.grid))
 	return out, true
 }
 

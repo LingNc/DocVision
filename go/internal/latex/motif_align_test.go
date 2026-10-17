@@ -207,3 +207,94 @@ func TestMotifAlignFilterFallsBackWithoutCoverage(t *testing.T) {
 		t.Fatalf("identical dots must pass the fallback gate, safe=%d dropped=%d", len(safe), dropped)
 	}
 }
+
+// squashX 把图按水平比例压扁：形状还是那个形状，长宽比变了——旧的逐对判据
+// 用 |Δaspect| ≤ 0.18 硬门槛，压扁 28% 就会被拒；居中重合判据只看重合度。
+func squashX(src image.Image, factor float64) *image.RGBA {
+	b := src.Bounds()
+	w := int(float64(b.Dx()) * factor)
+	if w < 8 {
+		w = 8
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, w, b.Dy()))
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < w; x++ {
+			sx := b.Min.X + int(float64(x)/factor)
+			if sx >= b.Max.X {
+				sx = b.Max.X - 1
+			}
+			dst.Set(x, y, src.At(sx, b.Min.Y+y))
+		}
+	}
+	return dst
+}
+
+// 桶也走"居中重合"判据：压扁过的同一标记会被逐对相似度漏掉（长宽比门槛），
+// 但重合度达标，所以应当并进同一个桶；结构不同的图仍然分开。
+func TestFindVisualMotifCandidatesAlignedLinksSquashedVariant(t *testing.T) {
+	base := whiteCanvas(70, 96)
+	drawDiamond(base, 35, 30, 18)
+	squashed := squashX(base, 0.72)
+
+	block := whiteCanvas(70, 96)
+	for y := 24; y < 70; y++ {
+		for x := 24; x < 46; x++ {
+			block.Set(x, y, color.RGBA{A: 255})
+		}
+	}
+
+	samples := []VisualMotifSample{
+		{Key: "a-base", Image: base},
+		{Key: "b-squashed", Image: squashed},
+		{Key: "c-block", Image: block},
+	}
+	// 前提：逐对相似度确实漏掉了压扁版（否则这个测试证明不了桶判据的改动）。
+	legacy := FindVisualMotifCandidates(samples)
+	for _, g := range legacy {
+		if containsKey(g.Members, "a-base") && containsKey(g.Members, "b-squashed") {
+			t.Skip("夹具里的压扁版仍然过逐对判据（阈值可能被调过），本测试不适用")
+		}
+	}
+
+	groups, merges := FindVisualMotifCandidatesAligned(samples, 0.60, 0.10)
+	if merges < 1 {
+		t.Fatalf("居中重合应当并进至少一对，got %d", merges)
+	}
+	joined := false
+	for _, g := range groups {
+		if containsKey(g.Members, "a-base") && containsKey(g.Members, "b-squashed") {
+			joined = true
+		}
+		if containsKey(g.Members, "c-block") {
+			t.Fatalf("结构不同的图被并进桶: %v", g.Members)
+		}
+	}
+	if !joined {
+		t.Fatalf("压扁版必须与基准同桶，got %v", groups)
+	}
+}
+
+// alignMin<=0 时必须与旧入口完全一致（配置关掉这条判据的退路）。
+func TestFindVisualMotifCandidatesAlignedDisabledMatchesLegacy(t *testing.T) {
+	base := whiteCanvas(70, 96)
+	drawDiamond(base, 35, 30, 18)
+	squashed := squashX(base, 0.72)
+	samples := []VisualMotifSample{
+		{Key: "a", Image: base},
+		{Key: "b", Image: squashed},
+	}
+	legacy := FindVisualMotifCandidates(samples)
+	got, merges := FindVisualMotifCandidatesAligned(samples, 0, 0)
+	if merges != 0 || len(got) != len(legacy) {
+		t.Fatalf("alignMin=0 必须退回旧行为: got %d groups / merges=%d, want %d", len(got), merges, len(legacy))
+	}
+}
+
+func containsKey(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
