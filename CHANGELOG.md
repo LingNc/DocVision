@@ -124,6 +124,8 @@
 - **章节划分默认改中等（T45）**：`latex.chapter_granularity` 三档 large/medium/small，默认从 `small` 改为 `medium`（按本书自动给出最合理的拆分——不拆太细、也不太大块；配置里已显式写 `small` 的老配置不受影响）。
 
 ### Fixed
+- **整组核验不再因为混类把整组作废（T119）**：同一张图会被 classify 判成 vector/raster/text（真实事故：336 张确认相同的图 = raster 159 / vector 155 / text 22），旧校验要求"全员 vector"于是整组被拒，352 张候选一张都没合并、process 逐图重画 388 张。现在组的类别取**组内占比最大的 classify 结果**（并列时 vector > raster > text）：多数为矢量图则整组合并（含少量非矢量成员），多数不是矢量图则把组内矢量成员单独合并成一张重画、其余保持独立；日志写明组类别与合并/独立张数。相似度闸门与"每张都要亲眼看"的证据要求不变。
+
 
 - **成品 PDF 书签与跳转（T49）**：cls 不加载 hyperref（kyexam.cls 实测）导致成品 PDF 无书签无跳转——assemble 编译前对 main.tex **幂等注入** `hyperref`（bookmarksnumbered/bookmarksopen/hidelinks）与逐章 `\pdfbookmark`（锚在每个 `\input{chapters/…}` 前，书签文字取划分阶段 md 的首个标题行、缺失退 base 名）；骨架版与终审持久化版 main.tex 都过这道注入；**main.tex 已带任何 \pdfbookmark/\bookmark 时视为终审会话已接管**（终审提示词新增第 5 项：按本书实际结构检查书签面板、可重分层级/用 \addcontentsline、替换时删掉基线锚点），只补 hyperref 不再注入基线锚点。真实 kyexam.cls 端到端编译验证：书签字典 `/Outlines` + UTF-16 标题 + GoTo 跳转正确生成。
 - **最终 PDF 复制到项目根外侧（T42）**：assemble 交付后 `book.pdf` 另复制一份到 `<latex_project>/<项目名>.pdf`（日志给路径），不用翻进工作区找成品；复制失败只告警。
