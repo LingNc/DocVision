@@ -11,10 +11,15 @@ import (
 )
 
 // writeConfig drops a config body in a temp dir and loads it.
+// cfgVer 把夹具里的 {{cfgver}} 换成当前 schema 版本。版本号每次 bump 都会让
+// 写死数字的夹具集体过期（T127 撞过一次：5 个文件里散着 16），所以夹具一律
+// 用占位符。
+func cfgVer(s string) string { return strings.ReplaceAll(s, "{{cfgver}}", itoa(CurrentConfigVersion)) }
+
 func writeConfig(t *testing.T, body string) (*Config, error) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(cfgVer(body)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return LoadConfig(path)
@@ -387,7 +392,7 @@ models:
 // 同一个基座，wire 名与价格完全一致 —— 这不是冲突。
 func TestExtendsSameWireSamePriceOK(t *testing.T) {
 	cfg := mustLoadConfig(t, `
-config_version: 16
+config_version: {{cfgver}}
 mineru: {token: "abc"}
 models:
   text: {base_url: "https://gateway.example/v1", api_key: "sk-base", model: "Qwen/Qwen3.5-27B"}
@@ -410,15 +415,15 @@ models:
 			t.Fatalf("%s 的 price 没继承: %+v", role, m.Price)
 		}
 	}
-	if problems := ValidateData([]byte(`
-config_version: 16
+	if problems := ValidateData([]byte(cfgVer(`
+config_version: {{cfgver}}
 mineru: {token: "abc"}
 models:
   text: {base_url: "https://gateway.example/v1", api_key: "sk-base", model: "Qwen/Qwen3.5-27B"}
   heavy: {model: "deepseek-v4.1", price: {input: 1, output: 4}}
   drawing: {extends: heavy}
   convert: {extends: heavy}
-`)); len(problems) != 0 {
+`))); len(problems) != 0 {
 		t.Fatalf("同名同价的 extends 结构应当通过严格校验: %v", problems)
 	}
 }
@@ -426,14 +431,14 @@ models:
 // TestExtendsIsAKnownField 钉住 extends 是 ModelConfig 的真字段：严格校验
 // （docvision setup 走的那条路）不会把它当未知键。
 func TestExtendsIsAKnownField(t *testing.T) {
-	body := `
-config_version: 16
+	body := cfgVer(`
+config_version: {{cfgver}}
 mineru: {token: "abc"}
 models:
   text: {base_url: "https://gateway.example/v1", api_key: "sk-base", model: "wire-base"}
   base: {model: "wire-big"}
   drawing: {extends: base}
-`
+`)
 	if problems := ValidateData([]byte(body)); len(problems) != 0 {
 		t.Fatalf("extends 被当成未知键了（KnownFields 严格解码）: %v", problems)
 	}
@@ -442,14 +447,14 @@ models:
 // TestExtendsUnknownKeyInBaseIsStillCaught 严格校验必须能定位到"被合并进来的
 // 块里写错的键"：错误正文里的路径要是真的能找到那一行的条目。
 func TestExtendsUnknownKeyInBaseIsStillCaught(t *testing.T) {
-	body := `
-config_version: 16
+	body := cfgVer(`
+config_version: {{cfgver}}
 mineru: {token: "abc"}
 models:
   text: {base_url: "https://gateway.example/v1", api_key: "sk-base", model: "wire-base"}
   base: {model: "wire-big", thinking_typ: enabled}
   drawing: {extends: base}
-`
+`)
 	problems := strings.Join(ValidateData([]byte(body)), "\n")
 	if !strings.Contains(problems, "thinking_typ") {
 		t.Fatalf("基座里写错的键没被报出来: %q", problems)
@@ -503,8 +508,8 @@ func TestUnknownKeyWarningLines(t *testing.T) {
 // 配置走新加载器（节点合并 + 解码）与参照路径（直接解码 + setDefaults）必须
 // reflect.DeepEqual，包含 v1.5.0-beta.5 那条既有的继承用例。
 func TestNoExtendsBehaviourUnchanged(t *testing.T) {
-	body := []byte(`
-config_version: 16
+	body := []byte(cfgVer(`
+config_version: {{cfgver}}
 mineru:
   api_base_url: "https://mineru.net/api/v4"
   token: "abc"
@@ -542,7 +547,7 @@ models:
   verifier:
     model: "glm-5.3-flash"
     image_tokens: {max_tokens: 8192}
-`)
+`))
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
@@ -558,6 +563,10 @@ models:
 		t.Fatal(err)
 	}
 	setDefaults(ref)
+	// dedupe_concurrency 的默认值只能靠"键有没有出现"决定（0 是有效取值 =
+	// 串行），所以它不在 setDefaults 里、而在加载器解码后的节点判断里：这份
+	// 夹具没写这个键，参照路径必须补上同一个默认值才算等价（T127）。
+	ref.Latex.DedupeConcurrency = 2
 	if err := validateThinkingTypes(ref); err != nil {
 		t.Fatal(err)
 	}

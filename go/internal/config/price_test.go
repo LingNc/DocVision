@@ -11,7 +11,7 @@ import (
 // 留空则继承 models.text 的模型名。
 func TestModelPricesKeyedByWireModelName(t *testing.T) {
 	src := []byte(`
-config_version: 16
+config_version: {{cfgver}}
 models:
   text:
     base_url: "https://x/v1"
@@ -29,7 +29,7 @@ models:
 `)
 	dir := t.TempDir()
 	path := dir + "/config.yaml"
-	if err := os.WriteFile(path, src, 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(cfgVer(string(src))), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadConfig(path)

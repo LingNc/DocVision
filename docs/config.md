@@ -56,6 +56,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 |--------|------|--------|
 | `latex.dedupe_group_session_over` | 相似桶成员数超过该值时**该桶独占一个核验会话**；较小的桶可以互相合并进同一会话；`0` = 整池一个会话（旧行为） | 50 |
 | `latex.dedupe_batch_images` | 一个核验会话最多处理多少张图（小桶合并时的容量上限） | 150 |
+| `latex.dedupe_concurrency` | 同时跑几个桶核验会话。桶之间互不依赖（各自只看自己桶里的图、写自己的 `groups.json`），整理会话仍等它们全部结束；**未写该键时为 2**，`0`/`1` = 串行（旧行为）。每个会话都带着自己的图片历史，调高会成倍放大峰值内存与限流压力 | 2（键缺席时） |
 | `latex.dedupe_model` | 档位1 classify 后整组相似图工具核验会话的模型注册表键；留空回退 `text`，须支持看图和工具调用；随附模板为 `dedupe`，继承 `text` | 空（回退 text） |
 | `models.dedupe` | 随附模板的独立去重模型条目，可用 extends 指向 text 或自行指定视觉模型 | 未设置（模板继承 text） |
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking），原样合并到请求体顶层 | 见示例 |
@@ -129,7 +130,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **16**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 15 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **17**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 15 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |

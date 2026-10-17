@@ -1,6 +1,6 @@
 # DocVision Configuration
 
-config_version: 16
+config_version: 17
 # Copy this file to config.yaml and fill in your credentials.
 
 # MinerU API Configuration
@@ -73,6 +73,10 @@ latex:
   # 统一归位（看关键图即可，不重看全组）。0 = 整池一个会话（旧行为）。
   dedupe_group_session_over: 50
   dedupe_batch_images: 150      # 单会话图片上限（小桶合并时的容量）
+  # 同时跑几个桶核验会话：桶之间互不依赖（各自只看自己的图），整理会话仍等它们
+  # 全部结束；0 = 串行（旧行为），未写该键时为 2。每个会话都带着自己的图片历史，
+  # 调高会成倍放大峰值内存与限流压力。
+  dedupe_concurrency: 2
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）

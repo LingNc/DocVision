@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
+	"sync/atomic"
 )
 
 const motifDedupeVersion = "visual-motif-v2-tools"
@@ -152,20 +154,34 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		saveProgress(progDir, c.progress)
 	}
 	scopes, unassigned := r.motifBucketScopes(pool, advisory)
-	failed := 0
 	steps := len(scopes) + 1
-	progress.verify(0, steps, len(pool), failed)
+	progress.verify(0, steps, len(pool), 0)
+	// 桶之间互不依赖（每个会话只看自己桶里的图、写自己的 groups.json），所以
+	// 可以并发；上限来自 latex.dedupe_concurrency，0/负数 = 串行（旧行为）。
+	// 并发不能改变结论：结果按 scope 顺序收回，整理会话仍等它们全部结束。
+	limit := r.cfg.Latex.DedupeConcurrency
+	if limit < 1 {
+		limit = 1
+	}
+	var started, finished, failCount atomic.Int64
+	results := runMotifScopes(scopes, limit, func(sc *motifScope) ([]motifAppliedGroup, bool) {
+		n := started.Add(1)
+		r.log.Log(0, fmt.Sprintf("[dedupe] 核验会话 %d/%d 开始：%d 张图（%d 个相似桶，并发上限 %d）",
+			n, len(scopes), len(sc.Members), len(sc.Prefill), limit))
+		got, ok := r.runMotifScope(sc, outDir)
+		if !ok {
+			failCount.Add(1)
+		}
+		progress.verify(int(finished.Add(1)), steps, len(pool), int(failCount.Load()))
+		return got, ok
+	})
 	// applied keeps the groups that survived every gate, so the final
 	// consolidation session is only offered real representatives.
 	var applied []motifAppliedGroup
-	for si, sc := range scopes {
-		progress.verify(si, steps, len(pool), failed)
-		r.log.Log(0, fmt.Sprintf("[dedupe] 核验会话 %d/%d：%d 张图（%d 个相似桶）", si+1, steps, len(sc.Members), len(sc.Prefill)))
-		got, ok := r.runMotifScope(sc, outDir, &failed)
-		if ok {
-			applied = append(applied, got...)
-		}
+	for _, got := range results {
+		applied = append(applied, got...)
 	}
+	failed := int(failCount.Load())
 	// 绝大多数图片和别的图没有关系（桶是例外），所以未分配的图默认保持独立：
 	// 只有本地相似度确实把它和某个已确认组的关键图连起来时，才值得再开一个
 	// 整理会话，而且会话里只出现这些候选 + 关键图。
@@ -174,9 +190,11 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		progress.verify(len(scopes), steps, len(pool), failed)
 		r.log.Log(0, fmt.Sprintf("[dedupe] 整理会话：%d 张未分配图可能属于 %d 个已确认组（只比对关键图）", len(candidates), len(keys)))
 		sc := &motifScope{Label: "dedupe-整理", Members: candidates, Keys: keys, KeyBase: len(candidates)}
-		got, ok := r.runMotifScope(sc, outDir, &failed)
+		got, ok := r.runMotifScope(sc, outDir)
 		if ok {
 			applied = append(applied, got...)
+		} else {
+			failed++
 		}
 	} else if len(unassigned) > 0 {
 		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张未分配图与任何已确认组都不相似，保持独立处理", len(unassigned)))
@@ -275,11 +293,45 @@ func motifProgressDir(outDir string) string {
 	return filepath.Join(outDir, "progress_items")
 }
 
+// runMotifScopes runs the bucket sessions, at most limit at a time, and returns
+// their groups index-aligned with scopes (nil for a session that failed). limit
+// <= 1 runs them one after another. Completion order must never leak into the
+// result: the downstream consolidation session walks `applied`, and identical
+// input has to produce identical sessions.
+func runMotifScopes(scopes []*motifScope, limit int, run func(*motifScope) ([]motifAppliedGroup, bool)) [][]motifAppliedGroup {
+	out := make([][]motifAppliedGroup, len(scopes))
+	if len(scopes) == 0 {
+		return out
+	}
+	if limit <= 1 {
+		for i, sc := range scopes {
+			if got, ok := run(sc); ok {
+				out[i] = got
+			}
+		}
+		return out
+	}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, limit)
+	for i, sc := range scopes {
+		wg.Add(1)
+		go func(i int, sc *motifScope) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if got, ok := run(sc); ok {
+				out[i] = got // 每个 goroutine 只写自己的槽位
+			}
+		}(i, sc)
+	}
+	wg.Wait()
+	return out
+}
+
 // runMotifScope runs one session and applies whatever survives the gates.
-func (r *Runner) runMotifScope(sc *motifScope, outDir string, failed *int) ([]motifAppliedGroup, bool) {
+func (r *Runner) runMotifScope(sc *motifScope, outDir string) ([]motifAppliedGroup, bool) {
 	verdict, err := r.verifyMotifScope(sc, outDir)
 	if err != nil {
-		*failed++
 		r.log.LogWarning(0, "[dedupe] 核验会话失败，该批图片保持独立；process 将逐图处理:", err)
 		return nil, false
 	}
