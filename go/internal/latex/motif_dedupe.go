@@ -175,6 +175,16 @@ type motifAppliedGroup struct {
 	Class   string
 }
 
+// motifProgressDir is the single place 档位1 stores per-image progress.
+// outDir is the project's source directory (<proj>/source) — the same value
+// classify and process use — so the progress files sit directly under it.
+// It used to be filepath.Dir(outDir), one level too high: dedupe verdicts
+// landed in <proj>/progress_items where process never reads them, so a
+// resumed run re-verified every image instead of resuming (T120).
+func motifProgressDir(outDir string) string {
+	return filepath.Join(outDir, "progress_items")
+}
+
 // runMotifScope runs one session and applies whatever survives the gates.
 func (r *Runner) runMotifScope(sc *motifScope, outDir string, failed *int) ([]motifAppliedGroup, bool) {
 	verdict, err := r.verifyMotifScope(sc, outDir)
@@ -183,7 +193,7 @@ func (r *Runner) runMotifScope(sc *motifScope, outDir string, failed *int) ([]mo
 		r.log.LogWarning(0, "[dedupe] 核验会话失败，该批图片保持独立；process 将逐图处理:", err)
 		return nil, false
 	}
-	progDir := filepath.Join(filepath.Dir(outDir), "progress_items")
+	progDir := motifProgressDir(outDir)
 	for _, c := range sc.Members {
 		c.progress.DedupeChecked = true
 		saveProgress(progDir, c.progress)

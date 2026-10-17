@@ -53,3 +53,8 @@
   - 一个组里 classify 会给出不同类别（同一张图也可能是 vector/raster/text 混判），组的类别取**占比最大的那个**，不能因为有混类就把整组作废。
   - 多数类是矢量图：整组共用一张重画（含组内少量非矢量成员）。多数类不是矢量图：这些图本来不需要重画，但组里的矢量成员仍然合并成一张，其余保持独立。
   - 相似度闸门与「每张都要亲眼看」的证据要求不变：宁可漏掉重复，也不能合并后丢信息。
+
+## P39 图片进度目录只有一个（用户提问触发）
+
+  - 用户问「progress_items 不应该是 388 个图吗？怎么是 352」——档位1 的进度目录是 `<proj>/source/progress_items`（classify/process 都读它），dedupe 的核验标记过去被 `filepath.Dir(outDir)` 多取了一层父目录，写进 `<proj>/progress_items`。两个目录并存会让"已核验"状态只在内存里有效：续跑时全部丢失、整本书重新核验。
+  - 约定：进度目录的路径只由 `motifProgressDir(outDir)` 给出，任何阶段都不得自己拼 `filepath.Dir(outDir)`；档位2 的 `progress_items`（项目根，`outDir == proj`）语义不变。

@@ -458,3 +458,13 @@ func TestMotifGroupClassUsesMajority(t *testing.T) {
 		t.Fatalf("vector subset = %d, nonVector = %d", len(vec), nonVectorCount(mk("raster", "vector", "text", "vector")))
 	}
 }
+
+// T120：档位1 的 outDir 就是 <proj>/source，progress 必须写在它下面。
+// 曾经用 filepath.Dir(outDir) 算成 <proj>，dedupe 的核验标记与等价关系
+// 全落进 process 不读的目录（真实事故：352 条标记孤零零躺在项目根）。
+func TestMotifProgressDirIsUnderSource(t *testing.T) {
+	outDir := filepath.Join("/tmp", "book", "source")
+	if got, want := motifProgressDir(outDir), filepath.Join(outDir, "progress_items"); got != want {
+		t.Fatalf("motifProgressDir = %q, want %q", got, want)
+	}
+}

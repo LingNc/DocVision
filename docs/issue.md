@@ -765,3 +765,6 @@ user 轮
 
 [X][ ] T119. 整组核验把 336 张确认相同的图整组拒掉了：组 `[1..336]`（用户逐张看过、确认同一张图）被判「含非矢量图，保持独立（只有全部为矢量图的组才复用同一张重画）」，两个会话共 352 张候选**一张都没合并**，随后 process 逐图重画 388 张。根因是 classify 对同一张图给出不同类别（该组 raster 159 / vector 155 / text 22），而旧校验要求"全员 vector"，混类就直接作废整组——同一张图被画了 155 次。
   （已改：组类别按组内**占比最大的 classify 结果**判定（并列时 vector > raster > text）；多数类是矢量图 → 整组合并（含少量非矢量成员），多数类不是矢量图 → 把组内的矢量成员单独合并成一张重画、其余保持独立。日志写明组类别与合并/独立的张数。新增 `TestMotifGroupClassUsesMajority`。）
+
+[X][ ] T120. 项目里出现两套图片进度目录，dedupe 的核验标记写错了地方：某项目根有 `progress_items/`（352 条，全部 `dedupe_checked: true`），而 classify 与 process 读写的真目录是 `source/progress_items/`（388 条）。352 = 336（大桶会话）+ 16（小桶会话），正是进入核验会话的那些图；36 张未分配图没进会话所以不在里面。根因是 `runMotifScope` 用 `filepath.Join(filepath.Dir(outDir), "progress_items")` 定位进度目录——档位1 的 `outDir` 已经是 `<proj>/source`，再取一层父目录就落到 `<proj>/`，与 `loadProgress` 读的目录不是同一个。
+  （已修：新增 `motifProgressDir(outDir)` 作为唯一来源，直接返回 `<outDir>/progress_items`；`saveProgress` 的核验标记与 `applyMotifEquivalenceWithKey` 的等价关系都写回 process 真正读的目录。同一次运行内等价关系一直生效（内存里的 prog 是共享的），但**续跑时标记全丢、dedupe 会把整本书重新核验一遍**，这是这个 bug 的实际代价。回归测试 `TestMotifProgressDirIsUnderSource`。运行时也按此纠正：某项目恢复 `source/progress_items` 的 388 条分类结果（`class`/`label`/`class_reason` 保留，`status` 回落 `classified`，`dedupe_*`/`tikz_*`/`content` 等下游字段清空），删掉项目根那份 352 条的错位目录。）
