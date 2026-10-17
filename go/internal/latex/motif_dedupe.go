@@ -11,15 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
-
-	"mineru-tools/internal/img2text"
-	"mineru-tools/internal/prompts"
-	"mineru-tools/internal/session"
 )
 
-const motifDedupeVersion = "visual-motif-v1"
-const motifDedupeBatchSize = 10
+const motifDedupeVersion = "visual-motif-v2-tools"
 
 // motifCandidate keeps a decoded input and its progress record together for
 // one book-level verification pass.
@@ -35,9 +29,12 @@ type motifCandidate struct {
 // process. Similarity only proposes candidates; a vision session must confirm
 // each non-byte-identical group before any drawing result is shared.
 func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress, progDir, outDir string) {
+	progress := newMotifProgress(r.log, len(tasks))
+	defer progress.finish()
 	var samples []motifCandidate
 	byKey := make(map[string]*motifCandidate)
-	for _, t := range tasks {
+	for ti, t := range tasks {
+		progress.scan(ti+1, len(tasks))
 		p := prog[t.key()]
 		if p == nil || p.Class == "" || p.Absorbed {
 			continue
@@ -104,6 +101,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		return
 	}
 	r.log.Log(0, "[dedupe] 相似候选组", fmt.Sprint(len(groups)), "个；先由视觉会话核验，未确认的图片仍独立处理")
+	failed := 0
 	for gi, group := range groups {
 		members := make([]*motifCandidate, 0, len(group.Members))
 		for _, key := range group.Members {
@@ -112,76 +110,50 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 			}
 		}
 		if len(members) < 2 || !motifGroupHasVector(members) {
+			progress.verify(gi+1, len(groups), len(members), failed)
 			continue
 		}
-		// Each verification batch shares an anchor. Prefer an existing
-		// vector artifact, then the most common pixel appearance, rather
-		// than an arbitrary lexicographically first filename.
-		frequencies := map[[32]byte]int{}
+		sort.Slice(members, func(i, j int) bool { return members[i].task.key() < members[j].task.key() })
+		progress.verify(gi, len(groups), len(members), failed)
+		allChecked := true
 		for _, c := range members {
-			if h, ok := rgbaFingerprint(c.image); ok {
-				frequencies[h]++
+			if !c.progress.DedupeChecked {
+				allChecked = false
+				break
 			}
 		}
-		sort.Slice(members, func(i, j int) bool {
-			a, b := members[i], members[j]
-			aDone := a.progress.Class == ClassVector && a.progress.Status == "done" && a.progress.TikzCode != ""
-			bDone := b.progress.Class == ClassVector && b.progress.Status == "done" && b.progress.TikzCode != ""
-			if aDone != bDone {
-				return aDone
-			}
-			aVec, bVec := a.progress.Class == ClassVector, b.progress.Class == ClassVector
-			if aVec != bVec {
-				return aVec
-			}
-			ha, _ := rgbaFingerprint(a.image)
-			hb, _ := rgbaFingerprint(b.image)
-			if frequencies[ha] != frequencies[hb] {
-				return frequencies[ha] > frequencies[hb]
-			}
-			return a.task.key() < b.task.key()
-		})
-		if group.Exact {
-			applyMotifEquivalence(members, progDir)
+		if allChecked {
+			progress.verify(gi+1, len(groups), len(members), failed)
 			continue
 		}
-		for bi, batch := range motifCandidateBatches(members, motifDedupeBatchSize) {
-			allChecked := true
-			for _, c := range batch {
-				if !c.progress.DedupeChecked || c.progress.DedupeVersion != motifDedupeVersion || c.progress.DedupeSourceHash != c.sourceHash {
-					allChecked = false
-					break
-				}
-			}
-			if allChecked {
-				continue
-			}
-			verdictGroups, err := r.verifyMotifCandidates(batch, outDir, gi, bi)
-			if err != nil {
-				r.log.LogWarning(0, "[dedupe] AI 核验失败，候选保持独立:", err)
-				continue
-			}
-			for _, c := range batch {
+		for _, c := range members {
+			c.progress.EquivalentTo = ""
+			c.progress.DedupeLeaderHash = ""
+			c.progress.SharedTex = ""
+			c.progress.DedupeChecked = false
+			saveProgress(progDir, c.progress)
+		}
+		// Whole candidate groups share one context, not arbitrary batches of 10.
+		verdictGroups, err := r.verifyMotifCandidates(members, outDir, gi, 0)
+		if err != nil {
+			failed++
+			r.log.LogWarning(0, "[dedupe] AI 核验失败，候选保持独立:", err)
+		} else {
+			for _, c := range members {
 				c.progress.DedupeChecked = true
 				saveProgress(progDir, c.progress)
 			}
 			for _, ids := range verdictGroups {
 				equivalent := make([]*motifCandidate, 0, len(ids))
 				for _, id := range ids {
-					equivalent = append(equivalent, batch[id-1])
+					equivalent = append(equivalent, members[id-1])
 				}
 				if motifGroupHasVector(equivalent) {
-					var anchor *motifCandidate
-					for _, c := range equivalent {
-						if c == batch[0] && c.progress.Class == ClassVector {
-							anchor = c
-							break
-						}
-					}
-					applyMotifEquivalenceWithAnchor(equivalent, progDir, anchor)
+					applyMotifEquivalence(equivalent, progDir)
 				}
 			}
 		}
+		progress.verify(gi+1, len(groups), len(members), failed)
 	}
 }
 
@@ -194,82 +166,7 @@ func motifGroupHasVector(members []*motifCandidate) bool {
 	return false
 }
 
-func motifCandidateBatches(members []*motifCandidate, max int) [][]*motifCandidate {
-	if len(members) <= max {
-		return [][]*motifCandidate{members}
-	}
-	if max < 3 {
-		max = 3
-	}
-	var batches [][]*motifCandidate
-	for start := 1; start < len(members); start += max - 1 {
-		end := start + max - 1
-		if end > len(members) {
-			end = len(members)
-		}
-		batch := []*motifCandidate{members[0]}
-		batch = append(batch, members[start:end]...)
-		batches = append(batches, batch)
-	}
-	return batches
-}
-
-func (r *Runner) verifyMotifCandidates(batch []*motifCandidate, outDir string, groupIndex, batchIndex int) ([][]int, error) {
-	if len(batch) < 2 {
-		return nil, nil
-	}
-	images := make([]string, 0, len(batch))
-	var imageList strings.Builder
-	for i, c := range batch {
-		b64, err := img2text.ImageToBase64(c.path, 1280)
-		if err != nil {
-			return nil, fmt.Errorf("read candidate %s: %w", c.task.imgPath, err)
-		}
-		images = append(images, b64)
-		fmt.Fprintf(&imageList, "%d. %s\n", i+1, c.task.imgPath)
-	}
-
-	modelName := r.cfg.Latex.DedupeModel
-	if modelName == "" {
-		modelName = r.cfg.Latex.ClassifierModel
-	} else if _, ok := r.cfg.ResolveModel(modelName); !ok {
-		r.log.LogWarning(0, "[dedupe] 未配置独立模型，回退分类模型:", modelName)
-		modelName = r.cfg.Latex.ClassifierModel
-	}
-	client := r.clientFor(modelName)
-	modelCfg := r.modelOf(modelName)
-	tuning := r.cfg.LatexSession("classifier")
-	hashInput := fmt.Sprintf("%d:%d", groupIndex, batchIndex)
-	for _, c := range batch {
-		hashInput += "\n" + c.task.key() + ":" + c.sourceHash
-	}
-	idHash := sha256.Sum256([]byte(hashInput))
-	label := "motif-dedupe:" + hex.EncodeToString(idHash[:6])
-	sess := session.NewSession(client, modelCfg, tuning, prompts.Must(prompts.DedupeSystem), nil, r.log, 1, label)
-	// Transcripts are kept even when ordinary drawing records are disabled:
-	// group verdicts are needed for audit and for the LaTeX sessions viewer.
-	sessionsDir := filepath.Join(outDir, "sessions")
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create dedupe session directory: %w", err)
-	}
-	tr, err := session.NewTranscript(filepath.Join(sessionsDir, "motif_dedupe_"+hex.EncodeToString(idHash[:8])+".jsonl"))
-	if err != nil {
-		return nil, fmt.Errorf("create dedupe transcript: %w", err)
-	}
-	sess.SetTranscript(tr)
-	defer tr.Close()
-	answer, err := sess.Run(session.RunOptions{UserText: prompts.Render(prompts.DedupeUser, map[string]string{"IMAGES": imageList.String()}), Images: images})
-	if err != nil {
-		return nil, err
-	}
-	return parseMotifGroups(answer, len(batch))
-}
-
 func applyMotifEquivalence(members []*motifCandidate, progDir string) {
-	applyMotifEquivalenceWithAnchor(members, progDir, nil)
-}
-
-func applyMotifEquivalenceWithAnchor(members []*motifCandidate, progDir string, anchor *motifCandidate) {
 	if len(members) < 2 {
 		return
 	}
@@ -277,12 +174,6 @@ func applyMotifEquivalenceWithAnchor(members []*motifCandidate, progDir string, 
 	// a stable key so retries cannot select a different leader.
 	sort.Slice(members, func(i, j int) bool {
 		a, b := members[i], members[j]
-		if a == anchor {
-			return true
-		}
-		if b == anchor {
-			return false
-		}
 		aVector, bVector := a.progress.Class == ClassVector, b.progress.Class == ClassVector
 		if aVector != bVector {
 			return aVector
@@ -401,7 +292,7 @@ func parseMotifGroups(reply string, count int) ([][]int, error) {
 	var out [][]int
 	for _, item := range raw {
 		values, ok := item.([]any)
-		if !ok || len(values) < 2 {
+		if !ok || len(values) == 0 {
 			return nil, fmt.Errorf("invalid equivalence group")
 		}
 		ids := make([]int, 0, len(values))
@@ -414,7 +305,9 @@ func parseMotifGroups(reply string, count int) ([][]int, error) {
 			seen[id] = true
 			ids = append(ids, id)
 		}
-		out = append(out, ids)
+		if len(ids) > 1 {
+			out = append(out, ids)
+		}
 	}
 	return out, nil
 }

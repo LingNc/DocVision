@@ -750,3 +750,5 @@ user 轮
 [process 0/223] 0.00% (done: 0, errors: 0, fallback: 0, raster: 0
 [process 1/223] 0.45% (done: 1, errors: 0, fallback: 0, raster: 0”
   （已修：先从 pending 排除已有分类记录，再建立 classify 进度行；本次待分类为 0 时按已分类总数显示 `[classify N/N] 100.00% … done`，避免残留错误的 `[classify 0/N]`。仅改 LaTeX 档位1 的 classifyPhase；回归测试覆盖续跑全已分类。）
+[X][ ] T113. LaTeX 相似图核验必须复用既有只读工具会话基础设施：完整候选组使用一个上下文，不直接把全量图片内容塞进提示词，模型通过 read_file/grep/view_image 检查并显式 submit；Web 阶段需排在 vector 前，CLI 需显示 dedupe 进度，默认模型回退 text。（已修：整组候选工作区、编号联系图、严格看图证据和显式 submit；失败关闭，不合并。）
+[X][ ] T114. Web 右侧系统提示词元信息被 price/run_end meta 行覆盖，显示“没有正文/工具定义 0 个”；前后端只应选择 system 快照（兼容旧无 kind）。（已修：Go/Vue 均按 kind 过滤并有回归测试。）

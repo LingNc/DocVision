@@ -264,7 +264,7 @@ type LatexConfig struct {
 	// Model registry keys used by each specialised session. Empty
 	// values fall back to the top-level ai block.
 	ClassifierModel string `yaml:"classifier_model"`
-	DedupeModel     string `yaml:"dedupe_model"` // 档位1视觉重复图核验；空回退 classifier_model
+	DedupeModel     string `yaml:"dedupe_model"` // 档位1视觉重复图核验；空回退 text
 	DrawingModel    string `yaml:"drawing_model"`
 	StyleModel      string `yaml:"style_model"`
 	ChapterModel    string `yaml:"chapter_model"`
@@ -733,7 +733,7 @@ type PathsConfig struct {
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
 // CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe。
-// 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 classifier。
+// 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 text。
 const CurrentConfigVersion = 14
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
@@ -1496,7 +1496,7 @@ func (c *Config) ResolveImageEstimate(name string) EstimateConfig {
 const checkerDefaultToolRounds = 50
 
 // LatexSession returns the tuning block for a named latex session
-// (drawing / style / chapter / convert / checker), applying the shared
+// (drawing / style / chapter / convert / checker / dedupe), applying the shared
 // defaults. The checker block is the exception: any field it leaves at
 // zero inherits the convert block (an explicit negative max_tool_rounds
 // still means "unlimited").
@@ -1511,6 +1511,8 @@ func (c *Config) LatexSession(name string) SessionTuning {
 		s = c.Latex.Sessions.Chapter
 	case "convert":
 		s = c.Latex.Sessions.Convert
+	case "dedupe":
+		s = c.Latex.Sessions.Drawing
 	case "checker":
 		s = c.Latex.Sessions.Checker
 		explicitRounds := s.MaxToolRounds

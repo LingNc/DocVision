@@ -1602,5 +1602,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - T112 根因：`classifyPhase` 在从 pending 过滤已分类记录前先创建进度行并记录「待分类 223 张」，续跑全部已分类时残留 `[classify 0/223]`。改成过滤后再创建 liveProgress、为零打印跳过，避免初始化不需要的 classifier；新增 LaTeX 专用回归测试，不改变 process 的分母和已存记录。issue 原 T98–105 落在 T110 后，已按条目整体排序 1–112；用户新补的两条由重复 T106/T107 顺延 T111/T112，原条目内容保留。
 
 ### T111 / P31 落地：视觉候选 → 独立核验 → 单图元多引用
-- 只读真实书籍二次取样：早期仅检查白底、单连通的保守候选在 363 张小图中检出 **0**（扫描书离散笔画/JPEG 背景所致），不能假称已经去重。补充主色轮廓候选及额外蓝色像素过滤后，用可选 `DOCVISION_MOTIF_CASE` 只读测试得到最大候选组 **336/363**；候选仍不等于等价：逐批传原图给独立视觉 AI 会话辨别相同整张图，题号/多色细节不合并，核验失败原样独立处理。模型 `latex.dedupe_model` / `models.dedupe`（v13→14）；转录 source/sessions/motif_dedupe_*.jsonl 进预览独立阶段。
+- 只读真实书籍二次取样：早期仅检查白底、单连通的保守候选在 363 张小图中检出 **0**（扫描书离散笔画/JPEG 背景所致），不能假称已经去重。补充主色轮廓候选及额外蓝色像素过滤后，用可选 `DOCVISION_MOTIF_CASE` 只读测试得到最大候选组 **336/363**；候选仍不等于等价：旧实现曾逐批传原图给独立视觉 AI 会话辨别相同整张图，题号/多色细节不合并，核验失败原样独立处理。模型 `latex.dedupe_model` / `models.dedupe`（v13→14）；转录 source/sessions/motif_dedupe_*.jsonl 进预览独立阶段。
 - 每个原图自己的进度 JSON 记录代表键、源/代表图摘要和核验状态；process 仅对代表图调用绘制会话，确认成品后才给从图落成品；source/figures/motif_*.tex 是裸 TikZ 片段（旧 tikz/*.tex 是完整 standalone 文档，不能直接 input），Markdown 保留每个原图 LINK，在 fenced latex 引用此片段；章节工作区与装配原来已转运 figures/，章节转换模板显式约束保留 input。无原书运行写入；兼容档位2原链。T112 根据用户反馈全分类续跑显示 N/N 100% done，**不添加「（续跑）」后缀**。
+
+### T113–T114 整组去重工具会话与系统提示词元信息修复
+- 根因与修正：旧 dedupe 把候选拆成每批10张、把图片直接作为请求附件、没有既有 read_file/grep/view_image/submit 工具和显式提交；现在每个完整候选组只建一个独立会话，挂载只读 `candidates/` 工作区，初始消息仅给 manifest，编号联系图按展示页生成，模型按需看图并由 submit 严格校验已看过的 1-based 成员，任何核验失败均保持独立。336张大组仅按联系图分页展示，不拆上下文。
+- Web 侧 `metaState` 原先取最后任意 meta，price/run_end 会覆盖 system 快照；现在 Go/Vue 均只选 `kind=system` 或旧无 kind 行。dedupe 阶段从稳定转录名/标签归类并排在 vector 前；CLI 新增 `[dedupe]` 扫描、整组核验和失败计数进度。dedupe 模型默认回退 `text`，并通过 `LatexSession("dedupe")` 复用现有 drawing tuning。
+- 验证证据：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 通过；`go build ./...` 通过；Web `npm test` 129 tests 通过，`npm run build` 通过；新增整组工具会话、336张联系图证据门禁和 system meta 回归测试。某项目按已确认无备份范围清除非 style 生成状态，保留 style、style 试点产物与 `source/images`，脚本指纹校验通过。

@@ -108,6 +108,7 @@ var retiredNames = []string{
 var registry = []Template{
 	{
 		Name: DedupeSystem, File: "latex_dedupe.system.md",
+		MustMention: []string{"read_file", "grep", "view_image", "submit"},
 	},
 	{
 		Name: ClassifierSystem, File: "latex_classifier.system.md",

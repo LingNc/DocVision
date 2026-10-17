@@ -66,7 +66,7 @@ latex:
   # may declare their own base_url / api_key / model / request_body
   # (empty fields inherit the models.text default entry).
   classifier_model: "classifier" # 图像分类 AI（text/vector/raster 标记）
-  dedupe_model: "dedupe"         # 档位1相似矢量图核验会话（默认 extends classifier）
+  dedupe_model: "dedupe"         # 档位1相似图核验工具会话（默认 extends text）
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
@@ -269,7 +269,7 @@ models:
   classifier:
     model: "Qwen/Qwen3.6-27B"    # 要求具备视觉能力
   dedupe:
-    extends: "classifier"        # T111：相似矢量图逐组 AI 核验（必须具备视觉能力）
+    extends: "text"              # T111：整组相似图工具核验（text 须具备视觉能力）
   drawing:
     extends: "heavy"             # 只写差异：其余（key/单价/thinking/请求控制）全部继承
     tool_stream: true            # GLM 工具流式输出（stream:true 时随流返回工具参数）

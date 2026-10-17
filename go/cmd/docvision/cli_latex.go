@@ -53,7 +53,7 @@ func newLatexCmd() *cobra.Command {
   档位2 输出**不含任何 <!-- DOCVISION-* --> 注释**，失败只记日志与 progress.json。
 
 档位 1（latex.level: 1）——全书 LaTeX，产物是 cls + 分章 .tex + 编译好的 PDF：
-  images   图片处理（classify → 相似候选 AI 核验（dedupe_model 可单配）→ process（确认等价的图元只绘一次、各处引用；题号不同不合并）→ 矢量代码块/文本/raster 按骨架嵌入 md，
+  images   图片处理（classify → 整组相似候选工具核验（dedupe_model 可单配，默认 text；看图/submit，CLI 显示 dedupe 进度）→ process（确认等价的图元只绘一次、各处引用；题号不同不合并）→ 矢量代码块/文本/raster 按骨架嵌入 md，
            注释首行闭合，CONTENT:/LINK: 字段在注释外）
   style    样式分析 AI 读全书 md + 原书扫描页，产出 book.cls + 使用手册 + 案例，
            在工作区里反复 compile/view_pdf 自查后 submit

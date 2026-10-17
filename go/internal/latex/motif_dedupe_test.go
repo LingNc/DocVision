@@ -1,6 +1,8 @@
 package latex
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +18,7 @@ import (
 func TestParseMotifGroupsRejectsInvalidAndProtectsAnnotations(t *testing.T) {
 	for _, bad := range []string{
 		`{"groups":[[1,2],[2,3]]}`, `{"groups":[[1,4]]}`,
-		`{"groups":[[1,1]]}`, `{"groups":[[1]]}`, `{"groups":[[1,2.5]]}`,
+		`{"groups":[[1,1]]}`, `{"groups":[[]]}`, `{"groups":[[1,2.5]]}`,
 		`{"groups":"1,2"}`, `not json`,
 	} {
 		if _, err := parseMotifGroups(bad, 3); err == nil {
@@ -100,55 +102,104 @@ func TestSharedMotifEmbedUsesOneInput(t *testing.T) {
 }
 
 func TestVerifyMotifCandidatesIndependentVisionSession(t *testing.T) {
-	var requestBody string
+	var requests []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body, _ := io.ReadAll(req.Body)
-		requestBody = string(body)
-		jsonReply(w, `{"groups":[[1,2]]}`)
+		requests = append(requests, string(body))
+		switch len(requests) {
+		case 1:
+			jsonToolReply(w, "read_file", `{"path":"candidates:manifest.md"}`)
+		case 2:
+			jsonToolReply(w, "view_image", `{"path":"sheets/001.png"}`)
+		default:
+			jsonToolReply(w, "submit", `{"groups":[[1,2,3,4,5,6,7,8,9,10,11,12]]}`)
+		}
 	}))
 	defer srv.Close()
 	r := keepTestRunner(t)
 	stream := false
-	r.cfg.Latex.DedupeModel = "dedupe"
-	r.cfg.Latex.ClassifierModel = "classifier"
-	r.cfg.Models = map[string]config.ModelConfig{
-		"dedupe":     {BaseURL: srv.URL, APIKey: "key", Model: "dedupe-vision", Stream: &stream},
-		"classifier": {BaseURL: srv.URL, APIKey: "key", Model: "classifier-vision", Stream: &stream},
-	}
+	r.cfg.Latex.DedupeModel = ""
+	r.cfg.Models = map[string]config.ModelConfig{"text": {BaseURL: srv.URL, APIKey: "key", Model: "text-vision", Stream: &stream}}
 	r.clients = map[string]*session.Client{}
 	r.models = map[string]config.ModelConfig{}
 	root := t.TempDir()
 	a := tinyPNG(t, filepath.Join(root, "a.png"))
-	b := tinyPNG(t, filepath.Join(root, "b.png"))
-	members := []*motifCandidate{
-		{task: &task{mdName: "book.md", imgPath: "a.png"}, path: a, sourceHash: "ha"},
-		{task: &task{mdName: "book.md", imgPath: "b.png"}, path: b, sourceHash: "hb"},
+	var members []*motifCandidate
+	for i := 0; i < 12; i++ {
+		members = append(members, &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("original-%d.png", i+1)}, path: a, sourceHash: fmt.Sprint(i)})
 	}
 	groups, err := r.verifyMotifCandidates(members, root, 0, 0)
-	if err != nil || len(groups) != 1 || len(groups[0]) != 2 {
+	if err != nil || len(groups) != 1 || len(groups[0]) != 12 {
 		t.Fatalf("verdict=%v err=%v", groups, err)
 	}
-	if strings.Count(requestBody, `"type":"image_url"`) != 2 || !strings.Contains(requestBody, "dedupe-vision") || !strings.Contains(requestBody, "b.png") {
-		t.Fatalf("dedupe must see both originals and use its own model: %.650s", requestBody)
+	if len(requests) != 3 {
+		t.Fatalf("whole group must use one tool session: %d requests", len(requests))
+	}
+	if strings.Contains(requests[0], `"type":"image_url"`) || !strings.Contains(requests[0], "text-vision") || !strings.Contains(requests[0], "12 images") {
+		t.Fatalf("initial message must contain full manifest, not attachments: %.900s", requests[0])
+	}
+	if !strings.Contains(requests[2], `"type":"image_url"`) {
+		t.Fatal("view_image receipt must provide actual visual input")
 	}
 	transcripts, err := filepath.Glob(filepath.Join(root, "sessions", "motif_dedupe_*.jsonl"))
 	if err != nil || len(transcripts) != 1 {
-		t.Fatalf("viewer transcript=%v err=%v", transcripts, err)
+		t.Fatalf("transcripts=%v err=%v", transcripts, err)
+	}
+	data, _ := os.ReadFile(transcripts[0])
+	for _, want := range []string{`"kind":"system"`, `"name":"view_image"`, `"name":"submit"`, `SUBMITTED.`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("transcript missing %s", want)
+		}
 	}
 }
 
-func TestMotifCandidatesBatchesIncludeAnchor(t *testing.T) {
-	members := make([]*motifCandidate, 23)
+func TestMotifWholeGroup336Images(t *testing.T) {
+	root := t.TempDir()
+	path := tinyPNG(t, filepath.Join(root, "original.png"))
+	img, err := decodeImage(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := make([]*motifCandidate, 336)
 	for i := range members {
-		members[i] = &motifCandidate{task: &task{imgPath: string(rune('a' + i))}}
+		members[i] = &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("image-%d.png", i+1)}, path: path, image: img}
 	}
-	batches := motifCandidateBatches(members, 10)
-	if len(batches) != 3 || len(batches[0]) != 10 || len(batches[1]) != 10 || len(batches[2]) != 5 {
-		t.Fatalf("batches=%v", batches)
+	covered, err := prepareMotifView(filepath.Join(root, "view"), members)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, b := range batches {
-		if b[0] != members[0] {
-			t.Fatal("cross-batch canonical anchor lost")
+	seen := map[int]bool{}
+	view := &motifViewTool{base: &ViewImageTool{Root: filepath.Join(root, "view")}, covered: covered, seen: seen}
+	for i := 1; i <= 6; i++ {
+		res, err := view.Execute(fmt.Sprintf(`{"path":"sheets/%03d.png"}`, i))
+		if err != nil || res.ImageBase64 == "" {
+			t.Fatalf("sheet %d: %v", i, err)
 		}
+	}
+	if len(seen) != 336 {
+		t.Fatalf("viewed %d/336", len(seen))
+	}
+	ids := make([]int, 336)
+	for i := range ids {
+		ids[i] = i + 1
+	}
+	raw, _ := json.Marshal(map[string]any{"groups": [][]int{ids}})
+	submit := &motifSubmitTool{count: 336, seen: seen}
+	res, err := submit.Execute(string(raw))
+	if err != nil || !res.Terminal || len(submit.groups) != 1 || len(submit.groups[0]) != 336 {
+		t.Fatalf("whole group lost: %v %v", submit.groups, err)
+	}
+}
+
+func TestMotifSubmitRequiresVisualEvidence(t *testing.T) {
+	tool := &motifSubmitTool{count: 3, seen: map[int]bool{1: true}}
+	res, err := tool.Execute(`{"groups":[[1,2]]}`)
+	if err != nil || res.Terminal || tool.done.Submitted || !strings.Contains(res.Text, "REJECTED") {
+		t.Fatalf("unseen merge accepted: %+v %v", res, err)
+	}
+	tool.seen[2] = true
+	res, err = tool.Execute(`{"groups":[[1,2],[3]]}`)
+	if err != nil || !res.Terminal || !tool.done.Submitted || len(tool.groups) != 1 {
+		t.Fatalf("valid split rejected: %+v %v", res, err)
 	}
 }

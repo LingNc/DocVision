@@ -7093,6 +7093,11 @@
     };
   }
   const STAGE_ORDER = ["dedupe", "vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check", "fix", "final-review"];
+  function sessionStageOf(s) {
+    const name = (s.name || s.id || "").replace(/\\/g, "/").split("/").pop() || "";
+    if (/^motif_dedupe_.+\.jsonl$/.test(name) || /^(?:dedupe|motif-dedupe):/.test(s.label || "")) return "dedupe";
+    return s.stage || "session";
+  }
   function stageRank(stage) {
     const i = STAGE_ORDER.indexOf(stage);
     return i < 0 ? STAGE_ORDER.length : i;
@@ -7371,7 +7376,7 @@
       if (q && sessionHaystack(s).indexOf(q) < 0) return;
       g.items.push(s);
       if (s.live) g.live++;
-      const stage = s.stage || "session";
+      const stage = sessionStageOf(s);
       let sg = g.stages[stage];
       if (!sg) sg = g.stages[stage] = { stage, title: stageTitleOf(stage), items: [], live: 0 };
       sg.items.push(s);
@@ -10016,7 +10021,7 @@
   function metaLines() {
     const found = [];
     state.lines.forEach((l) => {
-      if (l.t === "meta") found.push(l);
+      if (l.t === "meta" && (!l.kind || l.kind === "system")) found.push(l);
     });
     return found;
   }

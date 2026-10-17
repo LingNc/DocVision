@@ -6,6 +6,9 @@
 ## [Unreleased]
 ### Fixed
 
+- **整组相似图工具核验及阶段反馈（T113 / P32）**：移除10张分批和初始全量附图；每个完整候选组复用既有会话、read_file/grep/view_image 与显式终态 submit，提供编号联系图及原图按需检查。默认 dedupe 模型继承 text；新增安静模式也可见的扫描/核验进度。Web 从稳定转录身份恢复 dedupe 分组，排在矢量图前，兼容旧通用阶段标签。
+- **右栏系统提示词元信息仍显示“没有正文”（T114）**：Go 摘要已过滤 price/run_end，但 Vue 的 metaState 仍取最后任意 meta，覆盖了真实 system 快照；现在前端也仅选择 kind=system（兼容旧无 kind）及其工具定义。
+
 - **LaTeX 图片续跑分类进度误报（T112）**：已分类但尚待 process 的图片此前先画 `[classify 0/N]`、报「待分类 N 张」，随后筛掉已分类任务却未清除旧行；现在显示 `[classify N/N] 100% … done`，并注明无需重新调用分类模型。
 
 - **样式试点会话归入样式阶段（T110）**：`style_pilot_select/trial/revise` 三个试点转录此前落在侧栏散「会话」桶；现在归入样式阶段（「样式 · 试点选材/试转/修订」），且组内按执行顺序排（主样式会话 → 选材 → 试转 → 修订），不再被 mtime 倒置。
@@ -23,7 +26,7 @@
 
 ### Added
 
-- **档位1相似矢量图核验与单图元复用（T111 / P31，配置 v14）**：classify 后、process 前按像素与保守彩色轮廓生成候选，由 `latex.dedupe_model` 的独立视觉会话核验非同内容组；转录在会话预览「相似图核验」。只将被确认的同一图元关联进各自 progress_items，按代表图作图一次，所有引用共用 `figures/motif_*.tex`；蓝色题号、额外组件保留原图与独立位置，核验失败退回逐图。随附模板的 `models.dedupe` 默认继承分类视觉模型，配置版本升级到 14。
+- **档位1相似矢量图核验与单图元复用（T111 / P31，配置 v14）**：classify 后、process 前按像素与保守彩色轮廓生成候选，由 `latex.dedupe_model` 的独立视觉会话核验非同内容组；转录在会话预览「相似图核验」。只将被确认的同一图元关联进各自 progress_items，按代表图作图一次，所有引用共用 `figures/motif_*.tex`；蓝色题号、额外组件保留原图与独立位置，核验失败退回逐图。随附模板的 `models.dedupe` 默认继承 text（T113 调整，须支持视觉），配置版本升级到 14。
 
 - **img2text 页码标记（P21）**：`mineru_output/` 有该书 MinerU 产物时，最终 markdown 按原始内容分页插入独立行 `[P. <页码>]`（跨部件全局 1-based 页码，与 latex doc_search/view_pdf 同一套），方便后续 AI 向用户指明位置——文本行规范化包含匹配 content_list 的 text 条目、图片引用按文件名对齐 image 条目（`[Image]( 描述 · P.42 )` 锚顺带带页码）；页码递增时在新页首行前插标记，围栏内顺延到围栏后，找不到 mineru 产物静默跳过。不加新配置项。
 - **submit 回执即会话终态（T92）**：`ToolResult.Terminal`——submit 类工具收账成功后 Run 直接结束，不再等模型收尾（此前模型提交后常回空消息，触发 "Continue." 空转一轮）；覆盖章节划分/转换/作图/核对/风格修复/mermaid 修复的全部 submit；样式包 submit 例外（提交后还要 test-compile，失败打回续跑）。

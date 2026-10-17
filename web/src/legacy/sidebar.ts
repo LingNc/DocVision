@@ -200,6 +200,14 @@ export function estOf(line: Line | null | undefined): { text: number; reasoning:
 
 export const STAGE_ORDER = ['dedupe', 'vector', 'style', 'chapters', 'convert', 'checker', 'style-fix', 'figure-check', 'fix', 'final-review']
 
+/* 旧预览索引/静态导出可能还没有新阶段字段；已知核验转录名是稳定身份，
+ * 不能因旧服务下发 stage=会话 而永远落进最后的「其他会话」组。 */
+export function sessionStageOf(s: { stage?: string; label?: string; id?: string; name?: string }): string {
+  const name = (s.name || s.id || '').replace(/\\/g, '/').split('/').pop() || ''
+  if (/^motif_dedupe_.+\.jsonl$/.test(name) || /^(?:dedupe|motif-dedupe):/.test(s.label || '')) return 'dedupe'
+  return s.stage || 'session'
+}
+
 export function stageRank(stage: string): number {
   const i = STAGE_ORDER.indexOf(stage)
   return i < 0 ? STAGE_ORDER.length : i
@@ -575,7 +583,7 @@ export function buildGroups(): ProjectGroup[] {
     g.items.push(s)
     if (s.live) g.live++
     // 阶段子组：项目内按流程阶段再分一层（组头带会话数与 progress.json 状态）。
-    const stage = s.stage || 'session'
+    const stage = sessionStageOf(s)
     let sg = g.stages[stage]
     if (!sg) sg = g.stages[stage] = { stage, title: stageTitleOf(stage), items: [], live: 0 }
     sg.items.push(s)

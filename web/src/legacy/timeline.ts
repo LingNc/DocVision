@@ -362,7 +362,7 @@ interface MetaLineInfo {
 
 function metaLines(): Line[] {
   const found: Line[] = []
-  state.lines.forEach((l: Line) => { if (l.t === 'meta') found.push(l) })
+  state.lines.forEach((l: Line) => { if (l.t === 'meta' && (!l.kind || l.kind === 'system')) found.push(l) })
   return found
 }
 
