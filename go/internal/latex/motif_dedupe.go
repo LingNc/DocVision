@@ -97,24 +97,20 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		vis = append(vis, VisualMotifSample{Key: s.task.key(), Image: s.image})
 	}
 	groups := FindVisualMotifCandidates(vis)
-	if len(groups) == 0 {
-		return
-	}
-	pool := make([]*motifCandidate, 0, len(byKey))
-	seen := make(map[string]bool, len(byKey))
-	for _, group := range groups {
+	advisory := make(map[string]motifAdvisory)
+	for gi, group := range groups {
 		for _, key := range group.Members {
-			if seen[key] {
-				continue
-			}
-			if c := byKey[key]; c != nil {
-				pool = append(pool, c)
-				seen[key] = true
-			}
+			advisory[key] = motifAdvisory{Group: gi + 1, Exact: group.Exact}
 		}
 	}
-	r.log.Log(0, "[dedupe] 相似候选组", fmt.Sprint(len(groups)), "个，候选池", fmt.Sprint(len(pool)), "张；交由一个视觉会话做最终结构分组")
-	if len(pool) < 2 || !motifGroupHasVector(pool) {
+	// Similarity is an advisory index only. The AI sees every classified image,
+	// including images that the local detector failed to pair with a neighbour.
+	pool := make([]*motifCandidate, 0, len(samples))
+	for i := range samples {
+		pool = append(pool, &samples[i])
+	}
+	r.log.Log(0, "[dedupe] 初始相似候选", fmt.Sprint(len(groups)), "组，命中", fmt.Sprint(len(advisory)), "/", fmt.Sprint(len(pool)), "张；AI 全量核验")
+	if len(pool) < 2 {
 		return
 	}
 	sort.Slice(pool, func(i, j int) bool { return pool[i].task.key() < pool[j].task.key() })
@@ -135,7 +131,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 			c.progress.DedupeChecked = false
 			saveProgress(progDir, c.progress)
 		}
-		verdictGroups, err := r.verifyMotifCandidates(pool, outDir, 0, 0)
+		verdictGroups, err := r.verifyMotifCandidates(pool, outDir, 0, 0, advisory)
 		if err != nil {
 			failed++
 			r.log.LogWarning(0, "[dedupe] AI 核验失败，候选保持独立；process 将逐图处理候选图片:", err)
@@ -154,7 +150,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 					}
 					equivalent = append(equivalent, pool[id-1])
 				}
-				if valid && motifGroupHasVector(equivalent) {
+				if valid && motifGroupAllVector(equivalent) {
 					applyMotifEquivalence(equivalent, progDir)
 				}
 			}
@@ -163,13 +159,16 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	progress.verify(1, 1, len(pool), failed)
 }
 
-func motifGroupHasVector(members []*motifCandidate) bool {
+func motifGroupAllVector(members []*motifCandidate) bool {
+	if len(members) < 2 {
+		return false
+	}
 	for _, c := range members {
-		if c.progress.Class == ClassVector {
-			return true
+		if c == nil || c.progress == nil || c.progress.Class != ClassVector {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func applyMotifEquivalence(members []*motifCandidate, progDir string) {

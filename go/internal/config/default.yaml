@@ -1,6 +1,6 @@
 # DocVision Configuration
 
-config_version: 14
+config_version: 15
 # Copy this file to config.yaml and fill in your credentials.
 
 # MinerU API Configuration
@@ -99,7 +99,7 @@ latex:
     final_review: true           # 全书编译通过后再跑一次终审会话（汇总/整理/重编译）
   sessions:                      # 每个 AI 会话的独立调优
     drawing:
-      context_limit: 131072      # 上下文窗口（tokens，默认 128K，可改 64K/256K 等）
+      context_limit: 0          # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
       max_tokens: 16384        # 单次请求最大输出（不含厂商单独计费的思维链预算）
       compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩（先本地裁剪，仍超才花 AI 摘要）
@@ -107,15 +107,19 @@ latex:
       tool_rounds_grace: 20      # 达到 max_tool_rounds 后仍允许的工具轮次（之后才真正禁用工具）
       prune_tool_chars: 4096     # 本地裁剪：超长工具结果留"前半+后1/4"（0=默认4096，负=从不裁剪）
       keep_images: 3             # 本地裁剪时保留最近几张图（负=全部保留）
+    dedupe:
+      context_limit: 0          # 0=会话不设上限；模型上限写在 models.<name>.context_limit
+      max_tokens: 32768         # 单次请求输出上限；与模型 max_tokens 取较小正值
+      max_tool_rounds: 0        # 0=不限制
     style:
-      context_limit: 262144      # 样式分析建议更大窗口（256K）
+      context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
       max_tokens: 32768
     chapter:
-      context_limit: 131072
+      context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
     convert:
-      context_limit: 131072
+      context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128            # 0 = 真正不限制（无安全上限）
     checker:                     # 每章核对会话（只读两个文件 + 一个文件夹；工具只有 read_file/grep/submit）
       max_tool_rounds: 50       # 默认 50 轮（不继承 convert 的 128；其余字段仍继承 convert）
@@ -216,6 +220,9 @@ models:
     base_url: "https://your-api-proxy.com/v1"
     api_key: "sk-YOUR-API-KEY-HERE"
     model: "Qwen/Qwen3.6-27B"
+    context_limit: 0             # 模型上下文上限；0=不限制
+    max_images: 0                 # 单次请求图片上限；0=不限制
+    max_tokens: 0                 # 模型单次输出上限；0=不限制，与会话配置取较小值
     # 计费单价（元/百万 tokens；用于 docvision sessions --cost 与 latex 跑完的
     # 费用表）。不写任何一项 = 继承 models.text 的费率；models.text 自己也不写
     # 才叫"未配置"，费用报告整块不显示金额——绝不显示 ¥0 冒充"没花钱"。

@@ -238,3 +238,50 @@ func TestMotifGroupsIncrementalOperations(t *testing.T) {
 		t.Fatalf("invalid batch changed state: %v", got)
 	}
 }
+
+// 相似度只作参考：advisory 文件写出初始组与像素一致标记，manifest 每行带
+// similarity_hint；未命中相似度的图片同样出现在全量清单里。
+func TestMotifAdvisoryIsReferenceOnly(t *testing.T) {
+	root := t.TempDir()
+	a := tinyPNG(t, filepath.Join(root, "a.png"))
+	img, err := decodeImage(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := tinyPNG(t, filepath.Join(root, "b.png"))
+	imgB, err := decodeImage(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := []*motifCandidate{
+		{task: &task{mdName: "book.md", imgPath: "a.png"}, path: a, image: img, sourceHash: "ha", progress: &imageProgress{Class: ClassVector}},
+		{task: &task{mdName: "book.md", imgPath: "b.png"}, path: b, image: imgB, sourceHash: "hb", progress: &imageProgress{Class: ClassVector}},
+		{task: &task{mdName: "book.md", imgPath: "c.png"}, path: a, image: img, sourceHash: "hc", progress: &imageProgress{Class: ClassVector}},
+	}
+	advisory := map[string]motifAdvisory{
+		members[0].task.key(): {Group: 1, Exact: true},
+		members[1].task.key(): {Group: 1},
+	}
+	if _, err := prepareMotifViewWithAdvisory(filepath.Join(root, "view"), members, advisory); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "view", "similarity_advisory.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"initial_group": 1`) || !strings.Contains(string(raw), `"pool_size": 3`) {
+		t.Fatalf("advisory JSON missing group/pool data: %s", raw)
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, "view", "manifest.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(manifest)
+	if !strings.Contains(text, "similarity_hint=group-1:exact-pixels") {
+		t.Fatalf("manifest missing exact hint: %s", text)
+	}
+	// 第三张没有相似提示，但必须仍在全量清单里（不被排除）。
+	if !strings.Contains(text, "3. originals/000003.png") || !strings.Contains(text, "similarity_hint=none") {
+		t.Fatalf("unmatched image must stay in the pool: %s", text)
+	}
+}

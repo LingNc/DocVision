@@ -89,7 +89,12 @@ func (t *motifSubmitTool) Execute(raw string) (session.ToolResult, error) {
 	return t.done.Execute(`{}`) // reuse the normal terminal submit receipt
 }
 
-func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string, groupIndex, batchIndex int) ([][]int, error) {
+type motifAdvisory struct {
+	Group int  `json:"initial_group,omitempty"`
+	Exact bool `json:"exact_content,omitempty"`
+}
+
+func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string, groupIndex, batchIndex int, hints ...map[string]motifAdvisory) ([][]int, error) {
 	if len(members) < 2 {
 		return nil, nil
 	}
@@ -103,15 +108,23 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	sessionsDir := filepath.Join(outDir, "sessions")
 	view := filepath.Join(sessionsDir, "motif_dedupe_"+id+".work")
 	seen := map[int]bool{}
-	covered, err := prepareMotifView(view, members)
+	var advisory map[string]motifAdvisory
+	if len(hints) > 0 {
+		advisory = hints[0]
+	}
+	covered, err := prepareMotifViewWithAdvisory(view, members, advisory)
 	if err != nil {
 		return nil, err
 	}
 	mounts := []Mount{{Name: "candidates", Dir: view}}
+	bashMounts := []Mount{{Name: "work", Dir: view}}
 	imageTool := &motifViewTool{base: &ViewImageTool{Root: view, BareSearch: true, SoftMax: r.cfg.Tools.View.ImageMax, WarnRatio: r.cfg.Tools.View.WarnRatio}, covered: covered, seen: seen}
 	groupTool := NewMotifGroupsTool(filepath.Join(view, "groups.json"), len(members))
 	submit := &motifSubmitTool{groups: groupTool, seen: seen}
-	tools := []session.Tool{&ReadFileTool{Mounts: mounts}, &GrepTool{Mounts: mounts}, imageTool, groupTool, submit}
+	bashTmp, cleanBash := r.sessionBashTemp(filepath.Dir(outDir), "bash_dedupe")
+	defer cleanBash()
+	bash := &WorkBashTool{Root: view, Mounts: bashMounts, TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(filepath.Dir(outDir)), Log: r.log, Tid: 1}
+	tools := []session.Tool{&ReadFileTool{Mounts: mounts}, &GrepTool{Mounts: mounts}, bash, imageTool, groupTool, submit}
 	modelName := r.cfg.Latex.DedupeModel
 	if modelName == "" {
 		modelName = "text"
@@ -137,7 +150,7 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	hook, closeRow := r.livePhaseRow(label, label)
 	defer closeRow()
 	sess.SetProgressHook(hook)
-	user := prompts.Render(prompts.DedupeUser, map[string]string{"IMAGES": fmt.Sprintf("candidates:manifest.md (%d images; complete candidate pool; edit candidates:groups.json with motif_groups)", len(members))})
+	user := prompts.Render(prompts.DedupeUser, map[string]string{"IMAGES": fmt.Sprintf("candidates:manifest.md (%d images; complete image pool; candidates:similarity_advisory.json is advisory only; edit candidates:groups.json with motif_groups)", len(members))})
 	_, runErr := sess.Run(session.RunOptions{UserText: user})
 	for attempts := 0; runErr == nil && !submit.done.Submitted && attempts < 2; attempts++ {
 		_, runErr = sess.Run(session.RunOptions{UserText: "You have NOT called submit yet. Review the persisted groups.json if needed, then call submit with no arguments."})
@@ -152,6 +165,10 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 }
 
 func prepareMotifView(root string, members []*motifCandidate) (map[string][]int, error) {
+	return prepareMotifViewWithAdvisory(root, members, nil)
+}
+
+func prepareMotifViewWithAdvisory(root string, members []*motifCandidate, advisory map[string]motifAdvisory) (map[string][]int, error) {
 	originals := filepath.Join(root, "originals")
 	sheets := filepath.Join(root, "sheets")
 	if err := os.MkdirAll(originals, 0755); err != nil {
@@ -171,7 +188,7 @@ func prepareMotifView(root string, members []*motifCandidate) (map[string][]int,
 		}
 	}
 	var manifest strings.Builder
-	manifest.WriteString("# Complete candidate group\n\nSimilarity is only a proposal. Inspect all details before grouping; different numbers/labels/colors remain separate. Read originals for uncertain sheet tiles.\n\n## Originals\n\n")
+	manifest.WriteString("# Complete image pool\n\nAll classified images are available to the AI. Local similarity is advisory only: it may suggest an initial group, but it never excludes an image or proves equivalence. Inspect details before grouping; different numbers/labels/colors remain separate. Read originals for uncertain sheet tiles.\n\n## Originals\n\n")
 	for i, c := range members {
 		ext := filepath.Ext(c.path)
 		rel := fmt.Sprintf("originals/%06d%s", i+1, ext)
@@ -190,9 +207,16 @@ func prepareMotifView(root string, members []*motifCandidate) (map[string][]int,
 			}
 		}
 		covered[dest] = ids
-		fmt.Fprintf(&manifest, "%d. %s | %s | %s\n", i+1, rel, c.task.mdName, c.task.imgPath)
+		advice := "none"
+		if a, ok := advisory[c.task.key()]; ok && a.Group > 0 {
+			advice = fmt.Sprintf("group-%d", a.Group)
+			if a.Exact {
+				advice += ":exact-pixels"
+			}
+		}
+		fmt.Fprintf(&manifest, "%d. %s | %s | %s | similarity_hint=%s\n", i+1, rel, c.task.mdName, c.task.imgPath, advice)
 	}
-	manifest.WriteString("\n## Numbered contact sheets\n\nEach tile is labeled with its original ID. Sheets are views of the same complete group, not separate sessions or fixed-size equivalence groups.\n\n")
+	manifest.WriteString("\n## Numbered contact sheets\n\nEach tile is labeled with its original ID. Sheets are views of the complete image pool, not separate sessions or fixed-size equivalence groups.\n\n")
 	// 64 views per sheet is a display layout only; all sheets stay in ONE session.
 	for start := 0; start < len(members); start += 64 {
 		end := start + 64
@@ -258,6 +282,36 @@ func prepareMotifView(root string, members []*motifCandidate) (map[string][]int,
 		fmt.Fprintf(&manifest, "- %s: IDs %d–%d\n", rel, start+1, end)
 	}
 	if err := os.WriteFile(filepath.Join(root, "manifest.md"), []byte(manifest.String()), 0644); err != nil {
+		return nil, err
+	}
+	items := make([]map[string]any, 0, len(members))
+	for i, c := range members {
+		a := advisory[c.task.key()]
+		// A candidate may legitimately carry no progress record (e.g. a caller
+		// building the view directly); never panic while writing the advisory.
+		class := ""
+		if c.progress != nil {
+			class = c.progress.Class
+		}
+		items = append(items, map[string]any{
+			"id":            i + 1,
+			"key":           c.task.key(),
+			"initial_group": a.Group,
+			"exact_content": a.Exact,
+			"class":         class,
+			"source_hash":   c.sourceHash,
+		})
+	}
+	advisoryJSON := map[string]any{
+		"description": "Local similarity is advisory only; the complete image pool remains available to the AI.",
+		"pool_size":   len(members),
+		"items":       items,
+	}
+	data, err := json.MarshalIndent(advisoryJSON, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(root, "similarity_advisory.json"), append(data, '\n'), 0644); err != nil {
 		return nil, err
 	}
 	return covered, nil

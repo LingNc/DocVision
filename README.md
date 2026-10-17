@@ -81,9 +81,9 @@ models:
     model: "your-vision-model"
 ```
 
-配置写在 `config_version: 14`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
+配置写在 `config_version: 15`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
 
-档位1图片阶段先分类，再由独立工具会话核验整组相似候选（默认沿用 text，按需看图、显式 submit，CLI 显示 dedupe 进度），确认后共享单份 TeX 图元；不同题号保持独立。模型选项与续跑细节见 [LaTeX 输出](docs/latex.md) 和 [配置参考](docs/config.md)。
+档位1图片阶段先分类，再由独立工具会话对**全部图片**做整组核验（本地相似度只作参考写入 manifest/advisory JSON，会话可用 `read_file`/`grep`/`bash`+Python/`view_image`，用 `motif_groups` 增量维护分组并显式 submit；确认后仅全员 vector 的组共享单份 TeX 图元，不同题号保持独立）。模型平台能力写在 `models.<条目>.context_limit`/`max_images`/`max_tokens`，与会话侧配置取较小值。模型选项与续跑细节见 [LaTeX 输出](docs/latex.md) 和 [配置参考](docs/config.md)。
 
 ### 2. 跑起来
 

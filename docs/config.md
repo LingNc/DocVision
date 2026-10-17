@@ -79,11 +79,14 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body/stream/thinking…） | - |
 | `models.<name>` | 每个专用 AI 的独立配置，空字段继承 `models.text`；`max_tokens`/`temperature` 作为该模型未指定时的兜底；GLM 可用 `tool_stream: true`（工具参数随流返回）与 `thinking.clear_thinking: false`（保留式思考） | - |
 | `models.<条目>.extends` | 命名基座：本条目继承另一个 `models:` 条目的键（加载期在 YAML 节点层合并）；也接受**条目名列表** `extends: [a, b]`——按书写顺序合并、后面的基座覆盖前面的，条目自己的键覆盖所有基座（YAML 重复键本身会报错，多重继承必须用列表）。语义见下方「`extends`：命名基座」一节 | 未设置 |
-| `models.<条目>.price.*` | 单价四键。条目**一项费率都没写**时继承 `models.text` 的费率；写了任意一项就用自己这一份。两个条目发往**同一个 wire 模型名**却配了不同单价 → 加载期报错 | 继承 `models.text`（或全 0 = 未配置） |
+| `models.<条目>.context_limit` | 模型/平台上下文窗口（tokens）；0=模型侧不设本地上限。会话实际值与 `latex.sessions.<session>.context_limit` 取较小的正值 | 0（不限制） |
+| `models.<条目>.max_tokens` | 模型/平台单次请求最大输出；0=模型侧不设上限。会话实际值与 `latex.sessions.<session>.max_tokens` 取较小的正值 | 0（不限制） |
+| `models.<条目>.max_images` | 模型/平台单次请求允许携带的图片数；0=不限制。超过时会话在请求前把最旧图片替换成可重新查看的文字提示 | 0（不限制） |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
-| `latex.sessions.{drawing,style,chapter,convert,checker}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |
-| `latex.sessions.*.context_limit` | 会话上下文窗口（tokens），达到阈值自动 AI 压缩 | 131072 |
-| `latex.sessions.*.max_tokens` | 该会话**单次请求最大输出**（不含厂商单独计费的思维链预算）：drawing 16384、style 内置 32768、其余 16384（随附模板示例把 drawing/style 写成 131072） | 16384 / style 32768 |
+| `latex.sessions.{drawing,style,chapter,convert,checker,dedupe}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |
+| `latex.sessions.*.context_limit` | 会话上下文窗口（tokens）；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值 | 0（不限制） |
+| `latex.sessions.*.max_tokens` | 会话单次请求最大输出；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值 | 16384（style 32768） |
+| `latex.sessions.*.keep_images` | 本地历史裁剪策略，不是平台图片上限；上下文裁剪时保留最近多少条带图消息。平台上限请配置 `models.<name>.max_images` | 3 |
 | `latex.sessions.*.temperature` | 该会话采样温度（同 `models.<name>.temperature`，会话配置优先） | 未设置 |
 | `latex.sessions.*.compaction_at` | 触发自动压缩的窗口占用比例（0-1），不写默认 0.85（所有会话一致，不是只继承 drawing） | 0.85 |
 | `latex.concurrency` | 档位1/档位2 的会话级并发（classify / 档位2 process / 档位1 逐章 convert / style-fix 共用；style、chapters、assemble、终审是单会话） | 3 |
@@ -124,7 +127,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **14**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 14 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **15**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 15 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |

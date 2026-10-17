@@ -752,3 +752,9 @@ user 轮
   （已修：先从 pending 排除已有分类记录，再建立 classify 进度行；本次待分类为 0 时按已分类总数显示 `[classify N/N] 100.00% … done`，避免残留错误的 `[classify 0/N]`。仅改 LaTeX 档位1 的 classifyPhase；回归测试覆盖续跑全已分类。）
 [X][ ] T113. LaTeX 相似图核验必须复用既有只读工具会话基础设施：完整候选组使用一个上下文，不直接把全量图片内容塞进提示词，模型通过 read_file/grep/view_image 检查并显式 submit；Web 阶段需排在 vector 前，CLI 需显示 dedupe 进度，默认模型回退 text。（已修：整组候选工作区、编号联系图、严格看图证据和显式 submit；失败关闭，不合并。）
 [X][ ] T114. Web 右侧系统提示词元信息被 price/run_end meta 行覆盖，显示“没有正文/工具定义 0 个”；前后端只应选择 system 快照（兼容旧无 kind）。（已修：Go/Vue 均按 kind 过滤并有回归测试。）
+[X][ ] T115. 整组核验因平台单请求图片上限直接失败：单次请求超过平台允许的图片数时服务端返回 400 `invalid_media: too many images in request`，整个 dedupe 会话终止、零分组确认（该书实跑 352 张候选全部退回逐图处理）。
+  （已修：模型条目新增 `models.<名>.max_images` 声明平台上限，会话在每次请求前把最旧的带图消息换成可重新 view_image 的文字提示；实测当前平台 qwen3.8-27b 为 8 张。）
+[X][ ] T116. 相似度预筛把未命中的图片永久排除出核验：388 张分类图只有 352 张进入 AI 候选池，其余图片即使结构相同也不会被发现，等于让本地阈值决定了最终去重结果。
+  （已修：全部已分类图片进入同一个核验会话；相似度只写进 manifest 的 `similarity_hint` 与 `similarity_advisory.json` 作参考；最终组要求全员 vector 才建立共享。）
+[X][ ] T117. 会话在工具预算耗尽后可能无限空转：模型无视 `tool_choice: none` 一直返回工具调用时，那段"补跑工具以保证 wire 合法"的分支没有任何上限，会话永不返回（此前被 128K 上下文默认值掩盖——上下文一超就尝试压缩、压缩请求失败顺手结束了会话）。默认上下文改为不限制后立刻暴露：`TestCheckerRetriesAfterSessionFailure` 挂死 45s 以上。
+  （已修：预算耗尽后最多补跑 2 轮工具，仍被要求调用工具就返回错误 `model kept calling tools after the tool-round budget was exhausted`；回归测试 `TestToolCallsAfterBudgetAreBounded` 钉住请求数上限。）

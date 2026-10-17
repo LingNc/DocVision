@@ -48,16 +48,17 @@ const ToolRoundsSafetyCap = 200
 // context window and automatic AI-driven compaction. A Session is NOT
 // safe for concurrent use; each worker builds its own.
 type Session struct {
-	client   *Client
-	modelCfg config.ModelConfig
-	tuning   config.SessionTuning
-	system   string
-	messages []ChatMessage
-	tools    []Tool
-	toolDefs []map[string]any
-	logger   *logger.Logger
-	tid      int
-	label    string
+	client    *Client
+	modelCfg  config.ModelConfig
+	tuning    config.SessionTuning
+	maxImages int
+	system    string
+	messages  []ChatMessage
+	tools     []Tool
+	toolDefs  []map[string]any
+	logger    *logger.Logger
+	tid       int
+	label     string
 
 	// stats for logging / analysis
 	APIRequests int
@@ -252,16 +253,18 @@ func NewSession(
 	for _, t := range tools {
 		defs = append(defs, t.Definition())
 	}
+	tuning = modelCfg.ApplyModelLimits(tuning)
 	s := &Session{
-		client:   client,
-		modelCfg: modelCfg,
-		tuning:   tuning,
-		system:   system,
-		tools:    tools,
-		toolDefs: defs,
-		logger:   log,
-		tid:      tid,
-		label:    label,
+		client:    client,
+		modelCfg:  modelCfg,
+		tuning:    tuning,
+		maxImages: modelCfg.MaxImages,
+		system:    system,
+		tools:     tools,
+		toolDefs:  defs,
+		logger:    log,
+		tid:       tid,
+		label:     label,
 	}
 	if system != "" {
 		s.messages = append(s.messages, ChatMessage{Role: "system", Content: system})
@@ -503,6 +506,12 @@ func (s *Session) run(opts RunOptions) (string, error) {
 
 	toolRounds := 0
 	emptyRetry := 0
+	// Some providers ignore tool_choice: none and keep returning tool calls
+	// after the round budget is spent. Those calls are executed once so the
+	// transcript stays wire-valid, but the model must not be able to spin
+	// forever: after this many post-budget rounds the session fails.
+	postBudgetRounds := 0
+	const postBudgetToolRounds = 2
 	// maxRounds <= 0 means unlimited (user opted out of any cap).
 	maxRounds := s.tuning.MaxToolRounds
 	// Soft round budget: from warnFrom the session starts reporting how
@@ -538,6 +547,11 @@ func (s *Session) run(opts RunOptions) (string, error) {
 	}
 
 	for {
+		// Provider image limits are model-level, not session tuning. Older
+		// image-bearing messages are replaced by text before every request.
+		if n := s.pruneModelImages(); n > 0 {
+			s.logf("[images] model max_images=%d; pruned %d image(s) before request", s.maxImages, n)
+		}
 		// Context guard INSIDE the loop, i.e. before EVERY model request.
 		//
 		// It used to be called once per Run(), and for these sessions one
@@ -706,6 +720,10 @@ func (s *Session) run(opts RunOptions) (string, error) {
 		// tool_choice: none): execute them anyway so the transcript stays
 		// valid, then force a text-only answer next round.
 		if len(choice.Message.ToolCalls) > 0 && len(s.tools) > 0 && !opts.ForceNoTools {
+			postBudgetRounds++
+			if postBudgetRounds > postBudgetToolRounds {
+				return "", fmt.Errorf("model kept calling tools after the tool-round budget was exhausted (%d extra rounds)", postBudgetToolRounds)
+			}
 			if s.logger.DebugEnabled() {
 				s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: %d tool call(s) after the tool budget — executing them to keep the transcript valid",
 					s.label, toolRounds+1, len(choice.Message.ToolCalls)))
@@ -1035,6 +1053,66 @@ func (s *Session) pruneHistory() int {
 	return changed
 }
 
+// pruneModelImages enforces the provider limit configured on the model. It is
+// intentionally separate from SessionTuning.KeepImages: the latter is a local
+// history-retention preference, while this is a hard per-request provider cap.
+func (s *Session) pruneModelImages() int {
+	if s.maxImages <= 0 {
+		return 0
+	}
+	total := 0
+	for _, m := range s.messages {
+		total += messageImageCount(m)
+	}
+	if total <= s.maxImages {
+		return 0
+	}
+	removed := 0
+	for i := range s.messages {
+		if total <= s.maxImages {
+			break
+		}
+		n := stripMessageImages(&s.messages[i])
+		if n > 0 {
+			total -= n
+			removed += n
+		}
+	}
+	return removed
+}
+
+func stripMessageImages(m *ChatMessage) int {
+	parts, ok := m.Content.([]map[string]interface{})
+	if !ok {
+		return 0
+	}
+	var b strings.Builder
+	imgs := 0
+	for _, part := range parts {
+		if t, ok := part["text"].(string); ok && t != "" {
+			b.WriteString(t)
+			b.WriteString("\n")
+			continue
+		}
+		if isImagePart(part) {
+			imgs++
+		}
+	}
+	if imgs == 0 {
+		return 0
+	}
+	m.Content = strings.TrimSpace(b.String() + fmt.Sprintf("\n[%d image(s) omitted by the model's max_images request limit; call view_image/view_pdf again if needed.]", imgs))
+	return imgs
+}
+
+func isImagePart(part map[string]interface{}) bool {
+	if _, ok := part["image_url"].(map[string]string); ok {
+		return true
+	}
+	_, ok := part["image_url"].(map[string]interface{})
+	return ok
+}
+
 // hasImage reports whether a message carries an attached image.
 func hasImage(m ChatMessage) bool {
 	parts, ok := m.Content.([]map[string]interface{})
@@ -1042,7 +1120,7 @@ func hasImage(m ChatMessage) bool {
 		return false
 	}
 	for _, part := range parts {
-		if _, ok := part["image_url"].(map[string]string); ok {
+		if isImagePart(part) {
 			return true
 		}
 	}
@@ -1055,7 +1133,7 @@ func hasImage(m ChatMessage) bool {
 func (s *Session) maybeCompact() error {
 	limit := s.tuning.ContextLimit
 	if limit <= 0 {
-		limit = 131072
+		return nil
 	}
 	at := s.tuning.CompactionAt
 	if at <= 0 || at > 1 {
@@ -1187,8 +1265,8 @@ func (s *Session) compact() (bool, error) {
 
 	s.snapshotRequest(instruction)
 	req := &ChatRequest{
-		Model:    s.client.Model(),
-		Messages: append(append([]ChatMessage{}, s.messages...), ChatMessage{Role: "user", Content: instruction}),
+		Model:     s.client.Model(),
+		Messages:  append(append([]ChatMessage{}, s.messages...), ChatMessage{Role: "user", Content: instruction}),
 		MaxTokens: 8192,
 		// 温度不硬编码（曾写死 0.1 想要"确定的摘要"）：只允许 temperature=1
 		// 的模型（kimi-k2.8 等）会直接 400、压缩失败拖死会话（真实缺陷，

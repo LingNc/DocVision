@@ -75,14 +75,13 @@ type ModelConfig struct {
 	// models.text still applies underneath.
 	Extends string `yaml:"extends"`
 	// MaxTokens / Temperature are the per-model completion budget and
-	// sampling temperature. They act as the fallback used when a
-	// session or single-shot call does not set its own value
-	// (latex.sessions.<session>.max_tokens always wins for sessions).
+	// sampling temperature. MaxTokens zero inherits models.text for the legacy
+	// model behavior; context/image limits above are explicit-only.
 	MaxTokens   int     `yaml:"max_tokens"`
 	Temperature float64 `yaml:"temperature"`
-	// Per-model API/request controls. Zero values inherit models.text
-	// (via ResolveModel) and finally the built-in defaults
-	// (400s read / 60s connect / 3 retries / 100 rate-limit cap).
+	// API/request fields with zero values inherit models.text. Model limits are
+	// intentionally explicit per entry: a Qwen image cap must not silently
+	// become a cap for an unrelated GPT/GLM entry.
 	APITimeout        int `yaml:"api_timeout"`
 	APIConnectTimeout int `yaml:"api_connect_timeout"`
 	APIMaxRetries     int `yaml:"api_max_retries"`
@@ -113,6 +112,12 @@ type ModelConfig struct {
 	// (GLM-5.2+: max|xhigh|high|medium|low|minimal|none; only effective
 	// while thinking is enabled).
 	ReasoningEffort string `yaml:"reasoning_effort"`
+	// ContextLimit is the provider/model context window in tokens. Zero means
+	// no local model-side limit; it is not inherited from models.text.
+	ContextLimit int `yaml:"context_limit"`
+	// MaxImages is the provider/model maximum number of image parts accepted in
+	// one request. Zero means unlimited; it is not inherited from models.text.
+	MaxImages int `yaml:"max_images"`
 	// ImageTokens overrides the top-level estimate: block for THIS model only
 	// (same keys: method/tokens/px_per_token/min_tokens/max_tokens). Unset keys
 	// inherit the estimate block, and anything unset there uses the code
@@ -138,9 +143,9 @@ var validReasoningEfforts = map[string]bool{
 
 // SessionTuning tunes one AI session type (context window, tool budget).
 type SessionTuning struct {
-	// ContextLimit is the session context window in tokens. When the
-	// estimated conversation size approaches this limit the session
-	// auto-compacts (AI summarisation). Default 131072 (128K).
+	// ContextLimit is the session context window in tokens. Zero means
+	// unlimited; when both the session and resolved model configure a positive
+	// limit, the effective value is the smaller one.
 	ContextLimit int `yaml:"context_limit"`
 	// MaxToolRounds caps tool-calling rounds inside one session turn.
 	MaxToolRounds int `yaml:"max_tool_rounds"`
@@ -346,6 +351,7 @@ type LatexConfig struct {
 	// Sessions tunes each specialised AI session independently.
 	Sessions struct {
 		Drawing SessionTuning `yaml:"drawing"`
+		Dedupe  SessionTuning `yaml:"dedupe"`
 		Style   SessionTuning `yaml:"style"`
 		Chapter SessionTuning `yaml:"chapter"`
 		Convert SessionTuning `yaml:"convert"`
@@ -732,9 +738,9 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe。
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优。
 // 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 text。
-const CurrentConfigVersion = 14
+const CurrentConfigVersion = 15
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -1286,11 +1292,8 @@ func intPtr(v int) *int {
 	return &v
 }
 
-// defaultSessionTuning fills zero-valued SessionTuning fields.
+// defaultSessionTuning fills fields whose code defaults are non-zero.
 func defaultSessionTuning(s *SessionTuning) {
-	if s.ContextLimit == 0 {
-		s.ContextLimit = 131072 // 128K
-	}
 	// MaxToolRounds: <=0 means unlimited (no safety cap). The 128 default
 	//	 lives in the config templates, not here — an explicit 0 in the user's
 	//	 config must stay 0.
@@ -1512,7 +1515,7 @@ func (c *Config) LatexSession(name string) SessionTuning {
 	case "convert":
 		s = c.Latex.Sessions.Convert
 	case "dedupe":
-		s = c.Latex.Sessions.Drawing
+		s = c.Latex.Sessions.Dedupe
 	case "checker":
 		s = c.Latex.Sessions.Checker
 		explicitRounds := s.MaxToolRounds
@@ -1530,7 +1533,19 @@ func (c *Config) LatexSession(name string) SessionTuning {
 	return s
 }
 
-// inheritSessionTuning fills every zero field of dst from base. Zero
+// ApplyModelLimits combines session-level tuning with the resolved model's
+// provider limits. Zero means unlimited on either side; when both are
+// positive, the smaller value wins.
+func (m ModelConfig) ApplyModelLimits(s SessionTuning) SessionTuning {
+	if m.ContextLimit > 0 && (s.ContextLimit <= 0 || m.ContextLimit < s.ContextLimit) {
+		s.ContextLimit = m.ContextLimit
+	}
+	if m.MaxTokens > 0 && (s.MaxTokens <= 0 || m.MaxTokens < s.MaxTokens) {
+		s.MaxTokens = m.MaxTokens
+	}
+	return s
+}
+
 // means "not configured" for the inherited fields; a caller that wants
 // unlimited tool rounds in an inheriting block must write a negative
 // max_tool_rounds.
