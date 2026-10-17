@@ -431,40 +431,30 @@ func TestMotifMergeGateRejectsDissimilarMembers(t *testing.T) {
 	}
 }
 
-// 相似度会传递（A~B、B~C 连成一条链），真实事故里 336 张图被并成一个"桶"，
-// 逼着模型逐张看了 336 次还注定过不了合并闸门。非逐像素桶超过上限就切成
-// seed 锚定的子桶；逐像素桶是可靠的，保持完整。
-func TestSplitChainedMotifBuckets(t *testing.T) {
-	var fuzzy []string
-	for i := 0; i < 336; i++ {
-		fuzzy = append(fuzzy, fmt.Sprintf("k%03d", i))
-	}
-	groups := []VisualMotifGroup{
-		{Members: fuzzy, Exact: false},
-		{Members: []string{"a", "b", "c"}, Exact: true},
-		{Members: []string{"x", "y"}, Exact: false},
-	}
-	got := splitChainedMotifBuckets(groups, 50)
-	var total int
-	for _, g := range got {
-		if len(g.Members) > 50 {
-			t.Fatalf("fuzzy bucket not split: %d", len(g.Members))
+// 用户规则：组类别按组内占比最大的 classify 结果判定。同一张图会被 classify
+// 判成 vector/raster/text 三种（真实事故：336 张同图 = vector 155 / raster
+// 159 / text 22），不能因为混类就整组作废。
+func TestMotifGroupClassUsesMajority(t *testing.T) {
+	mk := func(classes ...string) []*motifCandidate {
+		out := make([]*motifCandidate, 0, len(classes))
+		for _, c := range classes {
+			out = append(out, &motifCandidate{progress: &imageProgress{Class: c}})
 		}
-		if g.Exact && len(g.Members) != 3 {
-			t.Fatalf("exact bucket must stay whole: %v", g.Members)
-		}
-		total += len(g.Members)
+		return out
 	}
-	if total != 336+3+2 {
-		t.Fatalf("members lost: %d", total)
+	if got := motifGroupClass(mk("raster", "vector", "vector", "text")); got != ClassVector {
+		t.Fatalf("majority should be vector, got %q", got)
 	}
-	// 逐像素桶即便超过上限也不切（切了只会多画几张）。
-	big := make([]string, 120)
-	for i := range big {
-		big[i] = fmt.Sprintf("e%03d", i)
+	if got := motifGroupClass(mk("raster", "raster", "vector")); got != ClassRaster {
+		t.Fatalf("majority should be raster, got %q", got)
 	}
-	got = splitChainedMotifBuckets([]VisualMotifGroup{{Members: big, Exact: true}}, 50)
-	if len(got) != 1 || len(got[0].Members) != 120 {
-		t.Fatalf("exact bucket must not be split: %d groups", len(got))
+	// 平票时优先 vector：有能力作图时才值得合并。
+	if got := motifGroupClass(mk("raster", "vector")); got != ClassVector {
+		t.Fatalf("tie should prefer vector, got %q", got)
+	}
+	// 多数不是矢量图时，组里的矢量成员仍要拿出来合并，其余保持独立。
+	vec := motifVectorSubset(mk("raster", "vector", "text", "vector"))
+	if len(vec) != 2 || nonVectorCount(mk("raster", "vector", "text", "vector")) != 2 {
+		t.Fatalf("vector subset = %d, nonVector = %d", len(vec), nonVectorCount(mk("raster", "vector", "text", "vector")))
 	}
 }

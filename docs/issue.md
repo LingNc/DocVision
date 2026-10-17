@@ -762,3 +762,6 @@ user 轮
 [X][ ] T118. 整组核验在真实运行里既没看见差异、又把全部图片交成了一个组：联系图（sheets/*.png 每张拼 64 格）让模型只调 7 次 view_image 就"看过"388 张，而缩略格里的题号/下标根本看不出来；`groups.json` 最终是 `[[1..388]]` 一组且不要求任何代表图，因"全员 vector"校验失败而全部退回逐图处理（用户观察到的"还在对所有的进行 process 处理"）。
   （已改：删除联系图，证据只能来自逐张 `originals/NNNNNN.*` 未裁剪的看图；按相似桶预填 `groups.json` 作为起点；每组必须选 `key`（代表图），submit 在缺 key 时直接打回；按 `latex.dedupe_group_session_over` 给大桶单独开会话、小桶按 `latex.dedupe_batch_images` 合并成整理会话；`MotifSimilarTo` 兜底——与代表图相似度不足的成员即使被 AI 并进组也保持独立。新增 `TestVerifyMotifCandidatesIndependentVisionSession`、`TestMotifPoolPrefillsBucketsWithoutContactSheets`、`TestMotifScopesFollowBucketSize`、`TestMotifMergeGateRejectsDissimilarMembers`。）
 
+
+[X][ ] T119. 整组核验把 336 张确认相同的图整组拒掉了：组 `[1..336]`（用户逐张看过、确认同一张图）被判「含非矢量图，保持独立（只有全部为矢量图的组才复用同一张重画）」，两个会话共 352 张候选**一张都没合并**，随后 process 逐图重画 388 张。根因是 classify 对同一张图给出不同类别（该组 raster 159 / vector 155 / text 22），而旧校验要求"全员 vector"，混类就直接作废整组——同一张图被画了 155 次。
+  （已改：组类别按组内**占比最大的 classify 结果**判定（并列时 vector > raster > text）；多数类是矢量图 → 整组合并（含少量非矢量成员），多数类不是矢量图 → 把组内的矢量成员单独合并成一张重画、其余保持独立。日志写明组类别与合并/独立的张数。新增 `TestMotifGroupClassUsesMajority`。）

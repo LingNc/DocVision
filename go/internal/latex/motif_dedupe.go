@@ -97,12 +97,6 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		vis = append(vis, VisualMotifSample{Key: s.task.key(), Image: s.image})
 	}
 	groups := FindVisualMotifCandidates(vis)
-	// Union-find chains similarity transitively: A~B, B~C lands A with C even
-	// when A and C are unrelated, which once turned 336 figures into one
-	// "bucket" and burned a whole session on a group that could not survive the
-	// merge gate. Exact-pixel buckets are reliable and stay whole; fuzzy buckets
-	// are re-anchored on a seed so a bucket really means "similar to each other".
-	groups = splitChainedMotifBuckets(groups, r.cfg.Latex.DedupeGroupSessionOver)
 	advisory := make(map[string]motifAdvisory)
 	for gi, group := range groups {
 		for _, key := range group.Members {
@@ -173,39 +167,6 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	progress.verify(steps, steps, len(pool), failed)
 }
 
-// splitChainedMotifBuckets cuts over-large fuzzy buckets into seed-anchored
-// sub-buckets of at most `limit` images. Buckets of pixel-identical images are
-// kept intact: they are exact, and splitting them would only cost extra drawings.
-func splitChainedMotifBuckets(groups []VisualMotifGroup, limit int) []VisualMotifGroup {
-	if limit <= 0 {
-		limit = 50
-	}
-	out := make([]VisualMotifGroup, 0, len(groups))
-	for _, g := range groups {
-		if g.Exact || len(g.Members) <= limit {
-			out = append(out, g)
-			continue
-		}
-		// Similarity is not transitive, so a long chain must not become one
-		// group. Keep the first `limit` members (the detector emits them in
-		// cluster order) and push the rest into their own sub-bucket, which the
-		// AI can still merge across sessions only if it really is the same
-		// figure — the merge gate stays the final authority either way.
-		for start := 0; start < len(g.Members); start += limit {
-			end := start + limit
-			if end > len(g.Members) {
-				end = len(g.Members)
-			}
-			part := g.Members[start:end]
-			if len(part) < 2 {
-				continue // a lone tail is not a bucket; leave it unassigned
-			}
-			out = append(out, VisualMotifGroup{Members: part, Exact: g.Exact})
-		}
-	}
-	return out
-}
-
 // motifAppliedGroup is a confirmed group: only Key is redrawn, every other
 // member reuses that drawing.
 type motifAppliedGroup struct {
@@ -243,9 +204,26 @@ func (r *Runner) runMotifScope(sc *motifScope, outDir string, failed *int) ([]mo
 			continue
 		}
 		key := motifScopeCandidate(sc, g.Key)
-		if !motifGroupAllVector(cands) {
-			r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 含非矢量图，保持独立（只有全部为矢量图的组才复用同一张重画）", g.Members))
-			continue
+		// 组的类别按组内占比最大的 classify 结果判定（用户规则）。classify 对
+		// 同一张图会给出不同类别，混类不代表"不是同一张图"，整组作废会让真正
+		// 的重复图白白各画一遍——真实事故：336 张同图被整组拒掉。
+		groupClass := motifGroupClass(cands)
+		if groupClass != ClassVector {
+			// 多数不是矢量图：这些图不需要重画，但组里的矢量图仍然值得合并成
+			// 一张，否则同一张图会被画 N 次。
+			vec := motifVectorSubset(cands)
+			if len(vec) < 2 {
+				r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 的多数类别是 %s，不需要重画，保持独立", g.Members, groupClass))
+				continue
+			}
+			r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 的多数类别是 %s，其中 %d 张矢量图合并为一张重画，其余 %d 张保持独立",
+				g.Members, groupClass, len(vec), len(cands)-len(vec)))
+			cands = vec
+			if key == nil || !motifContains(vec, key) {
+				key = vec[0]
+			}
+		} else if !motifGroupAllVector(cands) {
+			r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 的多数类别是矢量图，其中 %d 张非矢量图也按同一张图合并", g.Members, nonVectorCount(cands)))
 		}
 		// Safety gate (user policy: 宁漏不误判). The AI may only narrow a
 		// group, never widen it beyond what the similarity detector itself
@@ -399,6 +377,45 @@ func (r *Runner) motifBucketScopes(pool []*motifCandidate, advisory map[string]m
 	}
 	flush()
 	return scopes, unassigned
+}
+
+// motifGroupClass 返回组内成员占比最大的 classify 类别（并列时按
+// vector > raster > text 取前者，保证有作图能力时优先合并）。
+func motifGroupClass(members []*motifCandidate) string {
+	counts := map[string]int{}
+	for _, c := range members {
+		if c == nil || c.progress == nil {
+			continue
+		}
+		counts[c.progress.Class]++
+	}
+	best, bestN := "", 0
+	for _, cls := range []string{ClassVector, ClassRaster, ClassText} {
+		if counts[cls] > bestN {
+			best, bestN = cls, counts[cls]
+		}
+	}
+	return best
+}
+
+func motifVectorSubset(members []*motifCandidate) []*motifCandidate {
+	out := make([]*motifCandidate, 0, len(members))
+	for _, c := range members {
+		if c != nil && c.progress != nil && c.progress.Class == ClassVector {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func nonVectorCount(members []*motifCandidate) int {
+	n := 0
+	for _, c := range members {
+		if c == nil || c.progress == nil || c.progress.Class != ClassVector {
+			n++
+		}
+	}
+	return n
 }
 
 func motifGroupAllVector(members []*motifCandidate) bool {
