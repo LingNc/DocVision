@@ -277,11 +277,18 @@ type LatexConfig struct {
 	DedupeBatchImages int `yaml:"dedupe_batch_images"`
 	// DedupeConcurrency: 同时跑几个桶核验会话。桶之间互不依赖（各自只看自己
 	// 的图），整理会话仍等它们全部结束；0 = 串行（旧行为）。未写该键时默认 2。
-	DedupeConcurrency int    `yaml:"dedupe_concurrency"`
-	DrawingModel      string `yaml:"drawing_model"`
-	StyleModel        string `yaml:"style_model"`
-	ChapterModel      string `yaml:"chapter_model"`
-	ConvertModel      string `yaml:"convert_model"`
+	DedupeConcurrency int `yaml:"dedupe_concurrency"`
+	// DedupeAlignMin: 组内合并的重合度门槛（0-1）。成员与组中心的"居中重合度"
+	// 达标才共用一张成品；未写该键时默认 0.60。
+	DedupeAlignMin float64 `yaml:"dedupe_align_min"`
+	// DedupeAlignShift: 比较两张图时允许的平移上限，按内容框边长的比例（0-0.5）。
+	// 实测 0.10 已经饱和（再放大不改变任何一对的结论、只更慢）；未写该键时
+	// 默认 0.10。
+	DedupeAlignShift float64 `yaml:"dedupe_align_shift"`
+	DrawingModel     string  `yaml:"drawing_model"`
+	StyleModel       string  `yaml:"style_model"`
+	ChapterModel     string  `yaml:"chapter_model"`
+	ConvertModel     string  `yaml:"convert_model"`
 	// CheckerModel reviews converted chapters (text model, e.g. a
 	// small/fast model from the registry). Empty falls back to
 	// convert_model.
@@ -746,9 +753,9 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）。
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）。
 // 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 text。
-const CurrentConfigVersion = 17
+const CurrentConfigVersion = 18
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -835,6 +842,15 @@ func LoadConfigData(data []byte, path string) (*Config, error) {
 	// 解码前的节点层还分得清（与 models.*.extends 同一条理由）。
 	if latex := mapNodeValue(documentRoot(&doc), "latex"); mapNodeValue(latex, "dedupe_concurrency") == nil {
 		cfg.Latex.DedupeConcurrency = 2
+	}
+	// 0 是有效取值（不搜平移 / 全放行），所以"没写"只能在节点层判定。
+	if latex := mapNodeValue(documentRoot(&doc), "latex"); latex != nil {
+		if mapNodeValue(latex, "dedupe_align_min") == nil {
+			cfg.Latex.DedupeAlignMin = 0.60
+		}
+		if mapNodeValue(latex, "dedupe_align_shift") == nil {
+			cfg.Latex.DedupeAlignShift = 0.10
+		}
 	}
 
 	checkConfigVersion(cfg)

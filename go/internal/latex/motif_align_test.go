@@ -1,0 +1,209 @@
+package latex
+
+import (
+	"image"
+	"image/color"
+	"testing"
+
+	"mineru-tools/internal/config"
+)
+
+// drawDiamond 在 img 上画一枚"菱形 + Z + 竖线底座"的标记，笔画粗细与半径成
+// 比例——真实书里的同标记图片是重采样出来的，笔画宽度跟着缩放；固定 1px 的
+// 线条在 2× 缩放下相对粗细会翻倍，那是不真实的人造差异。
+func drawDiamond(img *image.RGBA, cx, cy, r int) {
+	stroke := r / 5
+	if stroke < 1 {
+		stroke = 1
+	}
+	in := func(x, y int) bool {
+		return x >= 0 && y >= 0 && x < img.Bounds().Dx() && y < img.Bounds().Dy()
+	}
+	ink := func(x, y int) {
+		if in(x, y) {
+			img.Set(x, y, color.RGBA{A: 255})
+		}
+	}
+	// 菱形边框：|dx|+|dy| ≈ r。
+	for y := cy - r - stroke; y <= cy+r+stroke; y++ {
+		for x := cx - r - stroke; x <= cx+r+stroke; x++ {
+			d := abs(x-cx) + abs(y-cy)
+			if abs(d-r) <= stroke/2 {
+				ink(x, y)
+			}
+		}
+	}
+	// 内部的 Z：上下两条横杠 + 一条斜杠。
+	bar := func(yline int) {
+		for y := yline - stroke/2; y <= yline+stroke/2; y++ {
+			for x := cx - r/2; x <= cx+r/2; x++ {
+				ink(x, y)
+			}
+		}
+	}
+	bar(cy - r/2)
+	bar(cy + r/2)
+	d0 := r / 2
+	for t := 0; t <= 2*d0; t++ {
+		x := cx + d0 - t
+		y := cy - d0 + t
+		for yy := y - stroke/2; yy <= y+stroke/2; yy++ {
+			for xx := x - stroke/2; xx <= x+stroke/2; xx++ {
+				ink(xx, yy)
+			}
+		}
+	}
+	// 底座：竖线 + 一横。
+	for y := cy + r; y <= cy+2*r; y++ {
+		for x := cx - stroke/2; x <= cx+stroke/2; x++ {
+			ink(x, y)
+		}
+	}
+	for x := cx - r/2; x <= cx+r/2; x++ {
+		for y := cy + 2*r - stroke/2; y <= cy+2*r; y++ {
+			ink(x, y)
+		}
+	}
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func whiteCanvas(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	return img
+}
+
+// 同一枚标记缩小 + 挪位置 + 换画布尺寸，内容框归一化之后必须仍然重合得上：
+// 这正是旧的逐对相似度做不到、而"居中重合"要解决的事。
+func TestMotifAlignCoverageNormalizesScaleAndPosition(t *testing.T) {
+	big := whiteCanvas(120, 140)
+	drawDiamond(big, 60, 60, 22)
+
+	small := whiteCanvas(90, 100)
+	drawDiamond(small, 30, 25, 11)
+
+	cb, ok := motifAlignCoverage(big)
+	if !ok {
+		t.Fatal("big canvas must have coverage")
+	}
+	cs, ok := motifAlignCoverage(small)
+	if !ok {
+		t.Fatal("small canvas must have coverage")
+	}
+	if v := cb.overlap(cs, motifAlignShiftCells(0.10)); v < 0.75 {
+		t.Fatalf("same mark at half scale shifted must overlap, got %.3f", v)
+	}
+	// 完全不搜平移时，位置差会明显拉低重合度——证明搜索不是装饰。
+	if v := cb.overlap(cs, 0); v >= 0.95 {
+		t.Fatalf("no-shift comparison should be worse, got %.3f", v)
+	}
+}
+
+// 结构不同的图（实心方块 vs 菱形标记）必须被拒。
+func TestMotifAlignOverlapRejectsDifferentShape(t *testing.T) {
+	mark := whiteCanvas(80, 100)
+	drawDiamond(mark, 40, 30, 18)
+
+	block := whiteCanvas(80, 100)
+	for y := 20; y < 70; y++ {
+		for x := 30; x < 55; x++ {
+			block.Set(x, y, color.RGBA{A: 255})
+		}
+	}
+	cm, ok := motifAlignCoverage(mark)
+	if !ok {
+		t.Fatal("mark needs coverage")
+	}
+	cbk, ok := motifAlignCoverage(block)
+	if !ok {
+		t.Fatal("block needs coverage")
+	}
+	if v := cm.overlap(cbk, motifAlignShiftCells(0.10)); v >= 0.60 {
+		t.Fatalf("different shape must stay below the default threshold, got %.3f", v)
+	}
+}
+
+// 平移上限按内容框边长的比例配置，夹在 0..16 格。
+func TestMotifAlignShiftCells(t *testing.T) {
+	cases := map[float64]int{0: 0, 0.01: 0, 0.10: 3, 0.25: 8, 0.50: 16, 0.90: 16}
+	for pct, want := range cases {
+		if got := motifAlignShiftCells(pct); got != want {
+			t.Errorf("motifAlignShiftCells(%v)=%d want %d", pct, got, want)
+		}
+	}
+}
+
+// 组内闸门：模型把"同一枚标记的缩放/移位版"并进组里，闸门要认；把异形图
+// 并进来，闸门要拒；模型的 key 达标时保留它。
+func TestMotifAlignFilterKeepsAlignedDropsOthers(t *testing.T) {
+	r := &Runner{cfg: &config.Config{Latex: config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10}}}
+
+	keyImg := whiteCanvas(60, 80)
+	drawDiamond(keyImg, 30, 22, 14)
+
+	nearImg := whiteCanvas(72, 90)
+	drawDiamond(nearImg, 36, 26, 15) // 稍大一点、位置不同
+
+	otherImg := whiteCanvas(60, 80)
+	for y := 18; y < 60; y++ {
+		for x := 18; x < 42; x++ {
+			otherImg.Set(x, y, color.RGBA{A: 255})
+		}
+	}
+
+	key := &motifCandidate{image: keyImg}
+	near := &motifCandidate{image: nearImg}
+	other := &motifCandidate{image: otherImg}
+
+	safe, chosen, dropped, worst, aligned := r.motifAlignFilter([]*motifCandidate{key, near, other}, key)
+	if !aligned {
+		t.Fatal("small icon-like images must take the align path")
+	}
+	if !motifContains(safe, key) || !motifContains(safe, near) {
+		t.Fatalf("aligned variant must be kept, safe=%v", len(safe))
+	}
+	if motifContains(safe, other) || dropped != 1 {
+		t.Fatalf("different shape must be dropped, dropped=%d", dropped)
+	}
+	// 代表图取合格成员里内容框最大的一张（"覆盖了必要内容"），模型选的 key
+	// 只有在面积够全时才被保留——这里 near 略大，所以代表图应当是 near。
+	if chosen != near {
+		t.Fatalf("representative must be the most complete member, got %p", chosen)
+	}
+	if worst < 0.60 {
+		t.Fatalf("worst kept member must be above the threshold, got %.3f", worst)
+	}
+}
+
+// 全是大图/点阵拿不到覆盖率时退回逐对相似度：行为与旧闸门一致。
+func TestMotifAlignFilterFallsBackWithoutCoverage(t *testing.T) {
+	r := &Runner{cfg: &config.Config{Latex: config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10}}}
+	dot := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	dot.Set(0, 0, color.RGBA{A: 255})
+	a := &motifCandidate{image: dot}
+	b := &motifCandidate{image: dot}
+	safe, _, dropped, _, aligned := r.motifAlignFilter([]*motifCandidate{a, b}, a)
+	if aligned {
+		t.Fatal("1x1 images have no coverage, must fall back")
+	}
+	if len(safe) != 2 || dropped != 0 {
+		t.Fatalf("identical dots must pass the fallback gate, safe=%d dropped=%d", len(safe), dropped)
+	}
+}

@@ -185,7 +185,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	// 绝大多数图片和别的图没有关系（桶是例外），所以未分配的图默认保持独立：
 	// 只有本地相似度确实把它和某个已确认组的关键图连起来时，才值得再开一个
 	// 整理会话，而且会话里只出现这些候选 + 关键图。
-	candidates, keys := motifConsolidationCandidates(unassigned, applied)
+	candidates, keys := r.motifConsolidationCandidates(unassigned, applied)
 	if len(candidates) > 0 && len(keys) > 0 {
 		progress.verify(len(scopes), steps, len(pool), failed)
 		r.log.Log(0, fmt.Sprintf("[dedupe] 整理会话：%d 张未分配图可能属于 %d 个已确认组（只比对关键图）", len(candidates), len(keys)))
@@ -377,21 +377,19 @@ func (r *Runner) runMotifScope(sc *motifScope, outDir string) ([]motifAppliedGro
 		} else if !motifGroupAllVector(cands) {
 			r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 的多数类别是矢量图，其中 %d 张非矢量图也按同一张图合并", g.Members, nonVectorCount(cands)))
 		}
-		// Safety gate (user policy: 宁漏不误判). The AI may only narrow a
-		// group, never widen it beyond what the similarity detector itself
-		// considers a candidate: a member that is not similar to the key is
-		// kept independent even if the model merged it, because sharing one
-		// drawing would silently delete the real difference.
-		safe := make([]*motifCandidate, 0, len(cands))
-		dropped := 0
-		for _, c := range cands {
-			if key != nil && c != key && !MotifSimilarTo(c.image, key.image) {
-				dropped++
-				continue
-			}
-			safe = append(safe, c)
+		// 组内闸门（T129，用户口径：宁漏不误判，但"重合得上"的要合）。
+		// 以组中心为基准比较"内容框居中 + 平移搜索"的软重合度：达标的成员
+		// 共用一张成品，不达标的保持独立。旧的逐对相似度在 28×38 这种小图上
+		// 极其脆弱——中心差半个像素，硬 mask 的 IoU 就从 0.9 掉到 0.3，实测
+		// 同一枚标记只认了 21/90；居中重合后同一批图最差 0.647。
+		safe, chosen, dropped, worst, aligned := r.motifAlignFilter(cands, key)
+		if chosen != nil {
+			key = chosen
 		}
-		if dropped > 0 {
+		if aligned {
+			r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 居中重合校验：合并 %d 张（最差重合度 %.2f），%d 张不足保持独立",
+				g.Members, len(safe), worst, dropped))
+		} else if dropped > 0 {
 			r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 里有 %d 张与代表图相似度不足，已保持独立（宁可漏掉重复，也不能合并后丢信息）", g.Members, dropped))
 		}
 		if len(safe) < 2 {
@@ -425,7 +423,21 @@ func motifScopeCandidate(sc *motifScope, id int) *motifCandidate {
 // keys using the same local similarity as the bucket detector. In a normal book
 // almost nothing is similar to anything else, so this usually returns nothing
 // and no extra session runs at all.
+func (r *Runner) motifConsolidationCandidates(unassigned []*motifCandidate, applied []motifAppliedGroup) ([]*motifCandidate, []*motifCandidate) {
+	return motifConsolidationCandidatesWith(unassigned, applied, r.motifMergeAllowed)
+}
+
+// motifConsolidationCandidates 是严格版（只认逐对相似度）：给测试与"没有配置"
+// 的调用方保留的入口；真正跑流程走 (*Runner).motifConsolidationCandidates，
+// 它多认一条"居中重合"判据（T129：会话外的 10 张同标记图片就是靠这条才被
+// 送进整理会话的）。
 func motifConsolidationCandidates(unassigned []*motifCandidate, applied []motifAppliedGroup) ([]*motifCandidate, []*motifCandidate) {
+	return motifConsolidationCandidatesWith(unassigned, applied, func(a, b *motifCandidate) bool {
+		return MotifSimilarTo(a.image, b.image)
+	})
+}
+
+func motifConsolidationCandidatesWith(unassigned []*motifCandidate, applied []motifAppliedGroup, allow func(a, b *motifCandidate) bool) ([]*motifCandidate, []*motifCandidate) {
 	if len(unassigned) == 0 || len(applied) == 0 {
 		return nil, nil
 	}
@@ -441,7 +453,7 @@ func motifConsolidationCandidates(unassigned []*motifCandidate, applied []motifA
 	var cands []*motifCandidate
 	for _, c := range unassigned {
 		for _, k := range keys {
-			if MotifSimilarTo(c.image, k.image) {
+			if allow(c, k) {
 				cands = append(cands, c)
 				break
 			}

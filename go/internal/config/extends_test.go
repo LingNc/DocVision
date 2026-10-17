@@ -567,6 +567,8 @@ models:
 	// 串行），所以它不在 setDefaults 里、而在加载器解码后的节点判断里：这份
 	// 夹具没写这个键，参照路径必须补上同一个默认值才算等价（T127）。
 	ref.Latex.DedupeConcurrency = 2
+	ref.Latex.DedupeAlignMin = 0.60
+	ref.Latex.DedupeAlignShift = 0.10
 	if err := validateThinkingTypes(ref); err != nil {
 		t.Fatal(err)
 	}
