@@ -270,11 +270,10 @@ type LatexConfig struct {
 	// values fall back to the top-level ai block.
 	ClassifierModel string `yaml:"classifier_model"`
 	DedupeModel     string `yaml:"dedupe_model"` // 档位1视觉重复图核验；空回退 text
-	// DedupeGroupSessionOver: a similarity bucket with more members than this
-	// gets its own verification session (0 = 整池一个会话，旧行为).
+	// DedupeGroupSessionOver: 一个相似桶超过这么多张就自己独占一个核验会话；
+	// 较小的桶可以互相合并进同一个会话（0 = 整池一个会话，旧行为）.
 	DedupeGroupSessionOver int `yaml:"dedupe_group_session_over"`
-	// DedupeBatchImages: how many images one consolidation session may cover
-	// when small buckets and ungrouped images are packed together.
+	// DedupeBatchImages: 一个核验会话最多处理多少张图（合并小桶时的上限）.
 	DedupeBatchImages int `yaml:"dedupe_batch_images"`
 	DrawingModel    string `yaml:"drawing_model"`
 	StyleModel      string `yaml:"style_model"`
@@ -1200,10 +1199,10 @@ func setDefaults(cfg *Config) {
 
 	// Figure check defaults (feature is OFF unless explicitly enabled).
 	if cfg.Latex.DedupeGroupSessionOver == 0 {
-		cfg.Latex.DedupeGroupSessionOver = 10
+		cfg.Latex.DedupeGroupSessionOver = 50
 	}
 	if cfg.Latex.DedupeBatchImages == 0 {
-		cfg.Latex.DedupeBatchImages = 40
+		cfg.Latex.DedupeBatchImages = 150
 	}
 	if cfg.Latex.FigureCheck.Model == "" {
 		cfg.Latex.FigureCheck.Model = "verifier"

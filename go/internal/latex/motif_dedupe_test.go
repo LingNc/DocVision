@@ -187,7 +187,7 @@ func TestMotifPoolPrefillsBucketsWithoutContactSheets(t *testing.T) {
 		}
 	}
 	view := filepath.Join(root, "view")
-	if err := prepareMotifViewWithAdvisory(view, members, advisory); err != nil {
+	if err := prepareMotifScopeView(view, &motifScope{Members: members, Advisory: advisory, Prefill: motifPrefillBuckets(members, advisory)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(view, "sheets")); !os.IsNotExist(err) {
@@ -282,14 +282,14 @@ func TestMotifAdvisoryIsReferenceOnly(t *testing.T) {
 		members[0].task.key(): {Group: 1, Exact: true},
 		members[1].task.key(): {Group: 1},
 	}
-	if err := prepareMotifViewWithAdvisory(filepath.Join(root, "view"), members, advisory); err != nil {
+	if err := prepareMotifScopeView(filepath.Join(root, "view"), &motifScope{Members: members, Advisory: advisory, Prefill: motifPrefillBuckets(members, advisory)}); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, "view", "similarity_advisory.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"initial_group": 1`) || !strings.Contains(string(raw), `"pool_size": 3`) {
+	if !strings.Contains(string(raw), `"initial_group": 1`) || !strings.Contains(string(raw), `"session_images": 3`) {
 		t.Fatalf("advisory JSON missing group/pool data: %s", raw)
 	}
 	manifest, err := os.ReadFile(filepath.Join(root, "view", "manifest.md"))
@@ -297,18 +297,18 @@ func TestMotifAdvisoryIsReferenceOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(manifest)
-	if !strings.Contains(text, "bucket 1 — 2 image(s)") {
+	if !strings.Contains(text, "### bucket 1 (2 images)") {
 		t.Fatalf("manifest missing the initial bucket: %s", text)
 	}
 	// 第三张没有相似提示，但必须仍在全量清单里（不被排除）。
-	if !strings.Contains(text, "## Images with no similarity hint (1)") || !strings.Contains(text, "3. originals/000003.png") {
+	if !strings.Contains(text, "## All images in this session") || !strings.Contains(text, "3. originals/000003.png | ") || !strings.Contains(text, "similarity_hint=none") {
 		t.Fatalf("unmatched image must stay in the pool: %s", text)
 	}
 }
 
 // 按相似组分配会话：大桶单独一个会话，小桶与未命中图按 dedupe_batch_images 合并；
 // 0 表示退回"整池一个会话"。
-func TestMotifScopesFollowBucketSize(t *testing.T) {
+func TestMotifBucketScopesFollowBucketSize(t *testing.T) {
 	r := keepTestRunner(t)
 	mk := func(n int) []*motifCandidate {
 		out := make([]*motifCandidate, n)
@@ -317,45 +317,80 @@ func TestMotifScopesFollowBucketSize(t *testing.T) {
 		}
 		return out
 	}
-	pool := mk(30)
+	pool := mk(120)
 	advisory := map[string]motifAdvisory{}
 	for i, c := range pool {
 		switch {
-		case i < 12: // 大桶：超过阈值 10，独立成会话
+		case i < 60: // 超过 50：独占一个会话
 			advisory[c.task.key()] = motifAdvisory{Group: 1}
-		case i < 16: // 小桶
+		case i < 70: // 小桶，可与其它小桶合并
 			advisory[c.task.key()] = motifAdvisory{Group: 2}
+		case i < 80:
+			advisory[c.task.key()] = motifAdvisory{Group: 3}
 		}
+		// 其余 40 张没有任何相似桶 -> 未分配
 	}
-	r.cfg.Latex.DedupeGroupSessionOver = 10
-	r.cfg.Latex.DedupeBatchImages = 40
-	scopes := r.motifScopes(pool, advisory)
-	if len(scopes) != 2 || len(scopes[0]) != 12 || len(scopes[1]) != 18 {
-		sizes := make([]int, len(scopes))
-		for i, s := range scopes {
-			sizes[i] = len(s)
-		}
-		t.Fatalf("scopes=%v, want [12 18]", sizes)
+	r.cfg.Latex.DedupeGroupSessionOver = 50
+	r.cfg.Latex.DedupeBatchImages = 150
+	scopes, unassigned := r.motifBucketScopes(pool, advisory)
+	if len(unassigned) != 40 {
+		t.Fatalf("unassigned=%d, want 40", len(unassigned))
 	}
-	// 批量上限生效：小桶 + 未命中图超过上限时再拆一个整理会话。
+	if len(scopes) != 2 {
+		t.Fatalf("scopes=%d, want 2 (large bucket + packed small buckets)", len(scopes))
+	}
+	if len(scopes[0].Members) != 60 || len(scopes[0].Prefill) != 1 {
+		t.Fatalf("large bucket must own a session: %d members, %d prefill", len(scopes[0].Members), len(scopes[0].Prefill))
+	}
+	if len(scopes[1].Members) != 20 || len(scopes[1].Prefill) != 2 {
+		t.Fatalf("small buckets must be packed together: %d members, %d prefill", len(scopes[1].Members), len(scopes[1].Prefill))
+	}
+	// 单会话容量上限：小桶加起来超过 dedupe_batch_images 时再拆一个会话。
 	r.cfg.Latex.DedupeBatchImages = 10
-	scopes = r.motifScopes(pool, advisory)
-	total := 0
-	for _, s := range scopes {
-		total += len(s)
-		if len(s) > 12 { // 大桶自己 12 张，整理会话不得超过 10
-			if len(s) > 10 {
-				t.Fatalf("consolidation scope too large: %d", len(s))
-			}
+	scopes, _ = r.motifBucketScopes(pool, advisory)
+	for _, sc := range scopes {
+		if len(sc.Members) > 60 {
+			t.Fatalf("bucket session exceeded its bucket: %d", len(sc.Members))
 		}
 	}
-	if total != 30 {
-		t.Fatalf("scopes lost images: %d/30", total)
+	total := 0
+	for _, sc := range scopes {
+		total += len(sc.Members)
 	}
-	// 0 = 旧行为：整池一个会话。
+	if total != 80 {
+		t.Fatalf("bucket members lost: %d/80", total)
+	}
+	// 0 = 旧行为：整池一个会话，没有"未分配"概念。
 	r.cfg.Latex.DedupeGroupSessionOver = 0
-	if scopes = r.motifScopes(pool, advisory); len(scopes) != 1 || len(scopes[0]) != 30 {
-		t.Fatalf("group_session_over=0 must keep one session, got %d", len(scopes))
+	scopes, unassigned = r.motifBucketScopes(pool, advisory)
+	if len(scopes) != 1 || len(scopes[0].Members) != 120 || len(unassigned) != 0 {
+		t.Fatalf("group_session_over=0 must keep one session, got %d scopes / %d unassigned", len(scopes), len(unassigned))
+	}
+}
+
+// 整理会话只拿"可能属于已确认组"的未分配图 + 关键图；正常书里大多数图彼此
+// 无关，所以通常一个候选都没有，也就不开这个会话。
+func TestMotifConsolidationOnlyTakesLocalCandidates(t *testing.T) {
+	root := t.TempDir()
+	path := tinyPNG(t, filepath.Join(root, "a.png"))
+	img, err := decodeImage(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := &motifCandidate{task: &task{mdName: "book.md", imgPath: "key.png"}, path: path, image: img}
+	like := &motifCandidate{task: &task{mdName: "book.md", imgPath: "like.png"}, path: path, image: img}
+	other := &motifCandidate{task: &task{mdName: "book.md", imgPath: "other.png"}, path: path}
+	applied := []motifAppliedGroup{{Key: key, Members: []*motifCandidate{key, like}}}
+	cands, keys := motifConsolidationCandidates([]*motifCandidate{like, other}, applied)
+	if len(keys) != 1 || len(cands) != 1 || cands[0] != like {
+		t.Fatalf("candidates=%v keys=%v", cands, keys)
+	}
+	// 没有已确认组 / 没有未分配图 -> 不开会话。
+	if c, k := motifConsolidationCandidates(nil, applied); c != nil || k != nil {
+		t.Fatal("no unassigned images must not open a consolidation session")
+	}
+	if c, k := motifConsolidationCandidates([]*motifCandidate{other}, nil); c != nil || k != nil {
+		t.Fatal("no confirmed groups must not open a consolidation session")
 	}
 }
 

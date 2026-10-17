@@ -132,132 +132,231 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		c.progress.DedupeChecked = false
 		saveProgress(progDir, c.progress)
 	}
-	scopes := r.motifScopes(pool, advisory)
+	scopes, unassigned := r.motifBucketScopes(pool, advisory)
 	failed := 0
-	verified := 0
-	for si, scope := range scopes {
-		progress.verify(si, len(scopes), len(pool), failed)
-		r.log.Log(0, fmt.Sprintf("[dedupe] 核验会话 %d/%d：%d 张图", si+1, len(scopes), len(scope)))
-		verdict, err := r.verifyMotifCandidates(scope, outDir, si, 0, advisory)
-		if err != nil {
-			failed++
-			r.log.LogWarning(0, "[dedupe] 核验会话失败，该批图片保持独立；process 将逐图处理:", err)
-			continue
-		}
-		verified += len(scope)
-		for _, c := range scope {
-			c.progress.DedupeChecked = true
-			saveProgress(progDir, c.progress)
-		}
-		for _, g := range verdict {
-			equivalent := make([]*motifCandidate, 0, len(g.Members))
-			valid := true
-			for _, id := range g.Members {
-				if id < 1 || id > len(scope) {
-					valid = false
-					break
-				}
-				equivalent = append(equivalent, scope[id-1])
-			}
-			if !valid {
-				continue
-			}
-			if !motifGroupAllVector(equivalent) {
-				r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 含非矢量图，保持独立（只有全部为矢量图的组才复用同一张重画）", g.Members))
-				continue
-			}
-			var key *motifCandidate
-			if g.Key >= 1 && g.Key <= len(scope) {
-				key = scope[g.Key-1]
-			}
-			// Safety gate (user policy: 宁漏不误判). The AI may only narrow a
-			// group, never widen it beyond what the similarity detector itself
-			// considers a candidate: a member that is not similar to the key is
-			// kept independent even if the model merged it, because sharing one
-			// drawing would silently delete the real difference.
-			safe := make([]*motifCandidate, 0, len(equivalent))
-			dropped := 0
-			for _, c := range equivalent {
-				if key != nil && c != key && !MotifSimilarTo(c.image, key.image) {
-					dropped++
-					continue
-				}
-				safe = append(safe, c)
-			}
-			if dropped > 0 {
-				r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 里有 %d 张与代表图相似度不足，已保持独立（宁可漏掉重复，也不能合并后丢信息）", g.Members, dropped))
-			}
-			if len(safe) < 2 {
-				continue
-			}
-			applyMotifEquivalenceWithKey(safe, key, progDir)
+	steps := len(scopes) + 1
+	progress.verify(0, steps, len(pool), failed)
+	// applied keeps the groups that survived every gate, so the final
+	// consolidation session is only offered real representatives.
+	var applied []motifAppliedGroup
+	for si, sc := range scopes {
+		progress.verify(si, steps, len(pool), failed)
+		r.log.Log(0, fmt.Sprintf("[dedupe] 核验会话 %d/%d：%d 张图（%d 个相似桶）", si+1, steps, len(sc.Members), len(sc.Prefill)))
+		got, ok := r.runMotifScope(sc, outDir, &failed)
+		if ok {
+			applied = append(applied, got...)
 		}
 	}
-	progress.verify(1, len(scopes), len(pool), failed)
-	_ = verified
+	// 绝大多数图片和别的图没有关系（桶是例外），所以未分配的图默认保持独立：
+	// 只有本地相似度确实把它和某个已确认组的关键图连起来时，才值得再开一个
+	// 整理会话，而且会话里只出现这些候选 + 关键图。
+	candidates, keys := motifConsolidationCandidates(unassigned, applied)
+	if len(candidates) > 0 && len(keys) > 0 {
+		progress.verify(len(scopes), steps, len(pool), failed)
+		r.log.Log(0, fmt.Sprintf("[dedupe] 整理会话：%d 张未分配图可能属于 %d 个已确认组（只比对关键图）", len(candidates), len(keys)))
+		sc := &motifScope{Label: "dedupe-整理", Members: candidates, Keys: keys, KeyBase: len(candidates)}
+		got, ok := r.runMotifScope(sc, outDir, &failed)
+		if ok {
+			applied = append(applied, got...)
+		}
+	} else if len(unassigned) > 0 {
+		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张未分配图与任何已确认组都不相似，保持独立处理", len(unassigned)))
+	}
+	progress.verify(steps, steps, len(pool), failed)
 }
 
-// motifScopes splits the pool into verification sessions. A similarity bucket
-// larger than latex.dedupe_group_session_over gets its own session (a 300-image
-// bucket needs many rounds of one-by-one viewing and would drown everything
-// else); the remaining small buckets and standalone images are packed into
-// consolidation sessions of at most latex.dedupe_batch_images images, where
-// cross-bucket merges can still be decided. Setting group_over to 0 restores
-// the previous behaviour: one session for the whole pool.
-func (r *Runner) motifScopes(pool []*motifCandidate, advisory map[string]motifAdvisory) [][]*motifCandidate {
+// motifAppliedGroup is a confirmed group: only Key is redrawn, every other
+// member reuses that drawing.
+type motifAppliedGroup struct {
+	Key     *motifCandidate
+	Members []*motifCandidate
+	Class   string
+}
+
+// runMotifScope runs one session and applies whatever survives the gates.
+func (r *Runner) runMotifScope(sc *motifScope, outDir string, failed *int) ([]motifAppliedGroup, bool) {
+	verdict, err := r.verifyMotifScope(sc, outDir)
+	if err != nil {
+		*failed++
+		r.log.LogWarning(0, "[dedupe] 核验会话失败，该批图片保持独立；process 将逐图处理:", err)
+		return nil, false
+	}
+	progDir := filepath.Join(filepath.Dir(outDir), "progress_items")
+	for _, c := range sc.Members {
+		c.progress.DedupeChecked = true
+		saveProgress(progDir, c.progress)
+	}
+	var out []motifAppliedGroup
+	for _, g := range verdict {
+		cands := make([]*motifCandidate, 0, len(g.Members))
+		valid := true
+		for _, id := range g.Members {
+			c := motifScopeCandidate(sc, id)
+			if c == nil {
+				valid = false
+				break
+			}
+			cands = append(cands, c)
+		}
+		if !valid {
+			continue
+		}
+		key := motifScopeCandidate(sc, g.Key)
+		if !motifGroupAllVector(cands) {
+			r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 含非矢量图，保持独立（只有全部为矢量图的组才复用同一张重画）", g.Members))
+			continue
+		}
+		// Safety gate (user policy: 宁漏不误判). The AI may only narrow a
+		// group, never widen it beyond what the similarity detector itself
+		// considers a candidate: a member that is not similar to the key is
+		// kept independent even if the model merged it, because sharing one
+		// drawing would silently delete the real difference.
+		safe := make([]*motifCandidate, 0, len(cands))
+		dropped := 0
+		for _, c := range cands {
+			if key != nil && c != key && !MotifSimilarTo(c.image, key.image) {
+				dropped++
+				continue
+			}
+			safe = append(safe, c)
+		}
+		if dropped > 0 {
+			r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 里有 %d 张与代表图相似度不足，已保持独立（宁可漏掉重复，也不能合并后丢信息）", g.Members, dropped))
+		}
+		if len(safe) < 2 {
+			continue
+		}
+		applyMotifEquivalenceWithKey(safe, key, progDir)
+		cls := ""
+		if key != nil && key.progress != nil {
+			cls = key.progress.Class
+		}
+		out = append(out, motifAppliedGroup{Key: key, Members: safe, Class: cls})
+	}
+	return out, true
+}
+
+func motifScopeCandidate(sc *motifScope, id int) *motifCandidate {
+	if id <= 0 {
+		return nil
+	}
+	if id <= len(sc.Members) {
+		return sc.Members[id-1]
+	}
+	if k := id - len(sc.Members) - 1; k >= 0 && k < len(sc.Keys) {
+		return sc.Keys[k]
+	}
+	return nil
+}
+
+// motifConsolidationCandidates pairs unassigned images with confirmed group
+// keys using the same local similarity as the bucket detector. In a normal book
+// almost nothing is similar to anything else, so this usually returns nothing
+// and no extra session runs at all.
+func motifConsolidationCandidates(unassigned []*motifCandidate, applied []motifAppliedGroup) ([]*motifCandidate, []*motifCandidate) {
+	if len(unassigned) == 0 || len(applied) == 0 {
+		return nil, nil
+	}
+	keys := make([]*motifCandidate, 0, len(applied))
+	seen := map[*motifCandidate]bool{}
+	for _, g := range applied {
+		if g.Key == nil || seen[g.Key] {
+			continue
+		}
+		seen[g.Key] = true
+		keys = append(keys, g.Key)
+	}
+	var cands []*motifCandidate
+	for _, c := range unassigned {
+		for _, k := range keys {
+			if MotifSimilarTo(c.image, k.image) {
+				cands = append(cands, c)
+				break
+			}
+		}
+	}
+	if len(cands) == 0 {
+		return nil, nil
+	}
+	return cands, keys
+}
+
+// motifBucketScopes decides which images each verification session gets.
+// A bucket larger than latex.dedupe_group_session_over owns its session; smaller
+// buckets are packed together while a session stays within
+// latex.dedupe_batch_images. Images in no bucket are NOT put into those sessions:
+// in a normal book most figures are unrelated, so they are unassigned and only
+// checked once against the confirmed keys (see motifConsolidationCandidates).
+func (r *Runner) motifBucketScopes(pool []*motifCandidate, advisory map[string]motifAdvisory) ([]*motifScope, []*motifCandidate) {
 	over := r.cfg.Latex.DedupeGroupSessionOver
 	perBatch := r.cfg.Latex.DedupeBatchImages
-	if over <= 0 {
-		return [][]*motifCandidate{pool}
-	}
 	if perBatch <= 0 {
-		perBatch = 40
+		perBatch = 150
+	}
+	if over <= 0 {
+		sc := &motifScope{Members: pool, Advisory: advisory, Prefill: motifPrefillBuckets(pool, advisory)}
+		return []*motifScope{sc}, nil
 	}
 	buckets := map[int][]*motifCandidate{}
-	var loose []*motifCandidate
+	var nos []int
+	var unassigned []*motifCandidate
 	for _, c := range pool {
 		if a, ok := advisory[c.task.key()]; ok && a.Group > 0 {
+			if _, seen := buckets[a.Group]; !seen {
+				nos = append(nos, a.Group)
+			}
 			buckets[a.Group] = append(buckets[a.Group], c)
-		} else {
-			loose = append(loose, c)
+			continue
 		}
-	}
-	nos := make([]int, 0, len(buckets))
-	for g := range buckets {
-		nos = append(nos, g)
+		unassigned = append(unassigned, c)
 	}
 	sort.Ints(nos)
-	var scopes [][]*motifCandidate
+	var scopes []*motifScope
 	var pending []*motifCandidate
+	var pendingGroups []int
 	flush := func() {
-		if len(pending) > 0 {
-			scopes = append(scopes, pending)
-			pending = nil
+		if len(pending) == 0 {
+			return
 		}
+		idx := map[*motifCandidate]int{}
+		for i, c := range pending {
+			idx[c] = i + 1
+		}
+		sc := &motifScope{Members: pending, Advisory: advisory}
+		for _, g := range pendingGroups {
+			ids := make([]int, 0, len(buckets[g]))
+			for _, c := range buckets[g] {
+				if id, ok := idx[c]; ok {
+					ids = append(ids, id)
+				}
+			}
+			if len(ids) >= 2 {
+				sort.Ints(ids)
+				sc.Prefill = append(sc.Prefill, MotifGroup{Members: ids})
+			}
+		}
+		scopes = append(scopes, sc)
+		pending, pendingGroups = nil, nil
 	}
 	for _, g := range nos {
 		members := buckets[g]
 		if len(members) > over {
 			flush()
-			scopes = append(scopes, members)
+			ids := make([]int, len(members))
+			for i := range members {
+				ids[i] = i + 1
+			}
+			scopes = append(scopes, &motifScope{Members: members, Advisory: advisory, Prefill: []MotifGroup{{Members: ids}}})
 			continue
 		}
 		if len(pending)+len(members) > perBatch {
 			flush()
 		}
 		pending = append(pending, members...)
-	}
-	for _, c := range loose {
-		if len(pending)+1 > perBatch {
-			flush()
-		}
-		pending = append(pending, c)
+		pendingGroups = append(pendingGroups, g)
 	}
 	flush()
-	if len(scopes) == 0 && len(pool) > 0 {
-		return [][]*motifCandidate{pool}
-	}
-	return scopes
+	return scopes, unassigned
 }
 
 func motifGroupAllVector(members []*motifCandidate) bool {

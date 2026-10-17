@@ -78,12 +78,12 @@ latex:
   # 这几个角色键本身不参与任何"继承与覆盖"，它们只是指针。
   classifier_model: "classifier" # 图像分类 AI（text/vector/raster 标记）
   dedupe_model: "dedupe"         # 档位1整组工具核验（models.dedupe 默认 extends text）
-  # 按相似组分配核验会话：某个相似桶成员数 > dedupe_group_session_over 时单独开一个
-  # 会话（大桶要逐张看图，塞在一个上下文里会被其它图淹没）；其余小桶与未命中的图
-  # 按 dedupe_batch_images 张一批合并进"整理会话"，跨桶合并仍可在批内判断。
-  # 0 = 不拆分（整池一个会话，旧行为）。
-  dedupe_group_session_over: 10
-  dedupe_batch_images: 40        # 一个整理会话最多覆盖多少张图
+  # 按相似组分配核验会话：某个相似桶超过 dedupe_group_session_over 张就自己独占
+  # 一个会话；较小的桶可以互相合并进同一个会话，但一个会话最多 dedupe_batch_images 张。
+  # 没有命中任何相似桶的图先标记"未分配"，最后交给一个整理会话拿各组的**关键图**
+  # 统一归位（看关键图即可，不重看全组）。0 = 整池一个会话（旧行为）。
+  dedupe_group_session_over: 50
+  dedupe_batch_images: 150      # 单会话图片上限（小桶合并时的容量）
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）

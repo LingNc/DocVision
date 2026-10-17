@@ -23,6 +23,10 @@ import (
 type motifViewTool struct {
 	base *ViewImageTool
 	seen map[int]bool
+	// keyOffset is len(Members): keys/000001.ext is id keyOffset+1. Used by the
+	// final consolidation session, where existing groups are referenced by their
+	// key image instead of by re-reading every member.
+	keyOffset int
 }
 
 func (t *motifViewTool) Name() string               { return t.base.Name() }
@@ -46,28 +50,32 @@ func (t *motifViewTool) Execute(raw string) (session.ToolResult, error) {
 	}
 	uncropped := pctArg(args, "left", 0) == 0 && pctArg(args, "top", 0) == 0 && pctArg(args, "right", 100) == 100 && pctArg(args, "bottom", 100) == 100
 	if uncropped && result.ImageBase64 != "" {
-		if id := motifOriginalID(full); id > 0 {
+		if id := motifScopeID(full, t.keyOffset); id > 0 {
 			t.seen[id] = true
 		}
 	}
 	return result, nil
 }
 
-// motifOriginalID reads the 1-based id out of originals/000123.jpg.
-func motifOriginalID(path string) int {
+// motifScopeID maps a work-dir path back to its 1-based session id:
+// originals/000123.jpg -> 123, keys/000004.jpg -> keyOffset+4.
+func motifScopeID(path string, keyOffset int) int {
 	base := filepath.Base(path)
 	dot := strings.IndexByte(base, '.')
 	if dot <= 0 {
-		return 0
-	}
-	if filepath.Base(filepath.Dir(path)) != "originals" {
 		return 0
 	}
 	id, err := strconv.Atoi(base[:dot])
 	if err != nil || id < 1 {
 		return 0
 	}
-	return id
+	switch filepath.Base(filepath.Dir(path)) {
+	case "originals":
+		return id
+	case "keys":
+		return keyOffset + id
+	}
+	return 0
 }
 
 type motifSubmitTool struct {
@@ -109,31 +117,70 @@ type motifAdvisory struct {
 	Exact bool `json:"exact_content,omitempty"`
 }
 
+// motifScope is one verification session: its own image set, the ids the AI may
+// use, the starting groups (similarity buckets) and, for the final consolidation
+// session, the key images of the groups established by earlier sessions.
+type motifScope struct {
+	Label    string
+	Members  []*motifCandidate // ids 1..len(Members)
+	Keys     []*motifCandidate // ids keyOffset+1.. (existing groups, by key)
+	Prefill  []MotifGroup
+	Advisory map[string]motifAdvisory
+	// KeyBase is len(Members); keys occupy ids KeyBase+1.. and stand for groups
+	// confirmed by earlier sessions.
+	KeyBase int
+	// Groups lets the manifest describe what each key stands for.
+	Groups []motifScopeGroup
+}
+
+// motifScopeGroup is the description of an already-confirmed group, shown to the
+// consolidation session so it can place an unassigned image by looking at the
+// key image only.
+type motifScopeGroup struct {
+	KeyID   int
+	Members []int
+	Label   string
+	Class   string
+}
+
 func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string, groupIndex, batchIndex int, hints ...map[string]motifAdvisory) ([]MotifGroup, error) {
-	if len(members) < 2 {
+	var advisory map[string]motifAdvisory
+	if len(hints) > 0 {
+		advisory = hints[0]
+	}
+	scope := &motifScope{Members: members, Advisory: advisory, Prefill: motifPrefillBuckets(members, advisory)}
+	return r.verifyMotifScope(scope, outDir)
+}
+
+func (r *Runner) verifyMotifScope(sc *motifScope, outDir string) ([]MotifGroup, error) {
+	total := len(sc.Members) + len(sc.Keys)
+	if total < 2 {
 		return nil, nil
 	}
 	var identity strings.Builder
 	identity.WriteString(motifDedupeVersion)
-	for _, c := range members {
-		fmt.Fprintf(&identity, "\n%s:%s", c.task.key(), c.sourceHash)
+	for _, c := range sc.Members {
+		fmt.Fprintf(&identity, "\nm:%s:%s", c.task.key(), c.sourceHash)
+	}
+	for _, c := range sc.Keys {
+		fmt.Fprintf(&identity, "\nk:%s:%s", c.task.key(), c.sourceHash)
 	}
 	sum := sha256.Sum256([]byte(identity.String()))
 	id := hex.EncodeToString(sum[:8])
 	sessionsDir := filepath.Join(outDir, "sessions")
 	view := filepath.Join(sessionsDir, "motif_dedupe_"+id+".work")
 	seen := map[int]bool{}
-	var advisory map[string]motifAdvisory
-	if len(hints) > 0 {
-		advisory = hints[0]
-	}
-	if err := prepareMotifViewWithAdvisory(view, members, advisory); err != nil {
+	if err := prepareMotifScopeView(view, sc); err != nil {
 		return nil, err
 	}
 	mounts := []Mount{{Name: "candidates", Dir: view}}
 	bashMounts := []Mount{{Name: "work", Dir: view}}
-	imageTool := &motifViewTool{base: &ViewImageTool{Root: view, BareSearch: true, SoftMax: r.cfg.Tools.View.ImageMax, WarnRatio: r.cfg.Tools.View.WarnRatio}, seen: seen}
-	groupTool := NewMotifGroupsTool(filepath.Join(view, "groups.json"), len(members))
+	imageTool := &motifViewTool{
+		base:      &ViewImageTool{Root: view, BareSearch: true, SoftMax: r.cfg.Tools.View.ImageMax, WarnRatio: r.cfg.Tools.View.WarnRatio},
+		seen:      seen,
+		keyOffset: len(sc.Members),
+	}
+	groupTool := NewMotifGroupsTool(filepath.Join(view, "groups.json"), total)
 	submit := &motifSubmitTool{groups: groupTool, seen: seen}
 	bashTmp, cleanBash := r.sessionBashTemp(filepath.Dir(outDir), "bash_dedupe")
 	defer cleanBash()
@@ -149,10 +196,13 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	tuning := r.cfg.LatexSession("dedupe")
 	// Every merge needs its own originals opened one by one (no contact sheets),
 	// so the round budget has to cover the pool instead of a handful of sheets.
-	if tuning.MaxToolRounds > 0 && tuning.MaxToolRounds < len(members)+16 {
-		tuning.MaxToolRounds = len(members) + 16
+	if tuning.MaxToolRounds > 0 && tuning.MaxToolRounds < total+16 {
+		tuning.MaxToolRounds = total + 16
 	}
 	label := "dedupe:" + id
+	if sc.Label != "" {
+		label = sc.Label + ":" + id
+	}
 	sess := session.NewSession(r.clientFor(modelName), r.modelOf(modelName), tuning,
 		renderPrompt(prompts.Must(prompts.DedupeSystem), tuning, r.outputLang()), tools, r.log, 1, label)
 	tr, err := session.NewTranscript(filepath.Join(sessionsDir, "motif_dedupe_"+id+".jsonl"))
@@ -164,7 +214,7 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	hook, closeRow := r.livePhaseRow(label, label)
 	defer closeRow()
 	sess.SetProgressHook(hook)
-	user := prompts.Render(prompts.DedupeUser, map[string]string{"IMAGES": fmt.Sprintf("candidates:manifest.md (%d images; complete image pool; candidates:similarity_advisory.json is advisory only; edit candidates:groups.json with motif_groups)", len(members))})
+	user := prompts.Render(prompts.DedupeUser, map[string]string{"IMAGES": fmt.Sprintf("candidates:manifest.md (%d images in this session; similarity buckets are a starting point; edit candidates:groups.json with motif_groups; every group needs key)", total)})
 	_, runErr := sess.Run(session.RunOptions{UserText: user})
 	for attempts := 0; runErr == nil && !submit.done.Submitted && attempts < 2; attempts++ {
 		_, runErr = sess.Run(session.RunOptions{UserText: "You have NOT called submit yet. Review the persisted groups.json if needed, then call submit with no arguments."})
@@ -178,91 +228,126 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	return submit.groups.Groups()
 }
 
-func prepareMotifViewWithAdvisory(root string, members []*motifCandidate, advisory map[string]motifAdvisory) error {
+// motifPrefillBuckets turns the local similarity buckets that lie entirely
+// inside this session into its starting groups. Keys stay 0: the AI must pick
+// the representative.
+func motifPrefillBuckets(members []*motifCandidate, advisory map[string]motifAdvisory) []MotifGroup {
+	buckets := map[int][]int{}
+	var nos []int
+	for i, c := range members {
+		a := advisory[c.task.key()]
+		if a.Group <= 0 {
+			continue
+		}
+		if _, ok := buckets[a.Group]; !ok {
+			nos = append(nos, a.Group)
+		}
+		buckets[a.Group] = append(buckets[a.Group], i+1)
+	}
+	sort.Ints(nos)
+	out := make([]MotifGroup, 0, len(nos))
+	for _, g := range nos {
+		if len(buckets[g]) < 2 {
+			continue
+		}
+		out = append(out, MotifGroup{Members: buckets[g]})
+	}
+	return out
+}
+
+// prepareMotifScopeView materialises one session's workspace: originals for its
+// members, keys/ for the group representatives it may attach images to, the
+// manifest, and the pre-filled starting groups. No contact sheets.
+func prepareMotifScopeView(root string, sc *motifScope) error {
 	originals := filepath.Join(root, "originals")
 	if err := os.MkdirAll(originals, 0755); err != nil {
 		return err
 	}
-	// Initial similarity buckets are the STARTING grouping, not a verdict: they
-	// are pre-filled into groups.json so the AI verifies/splits them instead of
-	// inventing a grouping from scratch (and instead of dumping every image into
-	// one bucket). Images without a similarity hint stay independent.
-	initial := map[int][]int{}
-	var standalone []int
-	for i, c := range members {
-		id := i + 1
-		ext := filepath.Ext(c.path)
-		rel := fmt.Sprintf("originals/%06d%s", id, ext)
-		dest := filepath.Join(root, filepath.FromSlash(rel))
-		if !fileExists(dest) {
-			if err := linkAbs(c.path, dest); err != nil {
-				if err := copyFile(c.path, dest); err != nil {
-					return err
+	link := func(src, dst string) error {
+		if fileExists(dst) {
+			return nil
+		}
+		if err := linkAbs(src, dst); err != nil {
+			return copyFile(src, dst)
+		}
+		return nil
+	}
+	for i, c := range sc.Members {
+		if err := link(c.path, filepath.Join(root, "originals", fmt.Sprintf("%06d%s", i+1, filepath.Ext(c.path)))); err != nil {
+			return err
+		}
+	}
+	keysDir := filepath.Join(root, "keys")
+	if len(sc.Keys) > 0 {
+		if err := os.MkdirAll(keysDir, 0755); err != nil {
+			return err
+		}
+	}
+	for i, c := range sc.Keys {
+		if err := link(c.path, filepath.Join(keysDir, fmt.Sprintf("%06d%s", i+1, filepath.Ext(c.path)))); err != nil {
+			return err
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("# Images in this verification session\n\n")
+	b.WriteString("Similarity buckets below are a STARTING grouping (already written into `groups.json`); they can be split, and cross-bucket merges are allowed.\n\n")
+	b.WriteString("There are NO contact sheets: open each original with `view_image` (`originals/000123.jpg`). A merge is only accepted for images you opened yourself, uncropped. Every group needs `key` = its single most representative member. A missed duplicate is acceptable; merging two different drawings loses content.\n\n")
+	if len(sc.Prefill) > 0 {
+		b.WriteString("## Starting buckets\n\n")
+		for i, g := range sc.Prefill {
+			fmt.Fprintf(&b, "### bucket %d (%d images)\n\n", i+1, len(g.Members))
+			for _, id := range g.Members {
+				c := sc.Members[id-1]
+				fmt.Fprintf(&b, "- %d. originals/%06d%s | %s | %s | class=%s\n", id, id, filepath.Ext(c.path), c.task.mdName, c.task.imgPath, motifClassOf(c))
+			}
+			b.WriteString("\n")
+		}
+	}
+	if len(sc.Members) > 0 {
+		b.WriteString("## All images in this session\n\n")
+		for i, c := range sc.Members {
+			hint := "none"
+			if a := sc.Advisory[c.task.key()]; a.Group > 0 {
+				hint = fmt.Sprintf("bucket-%d", a.Group)
+				if a.Exact {
+					hint += ":exact-pixels"
 				}
 			}
+			fmt.Fprintf(&b, "- %d. originals/%06d%s | %s | %s | class=%s | similarity_hint=%s\n", i+1, i+1, filepath.Ext(c.path), c.task.mdName, c.task.imgPath, motifClassOf(c), hint)
 		}
-		if a, ok := advisory[c.task.key()]; ok && a.Group > 0 {
-			initial[a.Group] = append(initial[a.Group], id)
-		} else {
-			standalone = append(standalone, id)
-		}
+		b.WriteString("\n")
 	}
-	groupNos := make([]int, 0, len(initial))
-	for g := range initial {
-		groupNos = append(groupNos, g)
-	}
-	sort.Ints(groupNos)
-
-	var manifest strings.Builder
-	manifest.WriteString("# Complete image pool\n\n")
-	manifest.WriteString("Every classified image is listed below. The local similarity buckets are a STARTING grouping: they are already written into `groups.json`, and they are only a hint — they may contain different images (split them) or miss a match (merge across buckets). Never treat a bucket as proof.\n\n")
-	manifest.WriteString("There are NO contact sheets. To judge anything you must open the individual original with `view_image` (`originals/000123.jpg`); a merge is only accepted for images you opened yourself, uncropped.\n\n")
-
-	if len(groupNos) > 0 {
-		manifest.WriteString("## Initial similarity buckets (pre-filled in groups.json)\n\n")
-	}
-	for _, g := range groupNos {
-		ids := initial[g]
-		exact := false
-		for _, id := range ids {
-			if a := advisory[members[id-1].task.key()]; a.Exact {
-				exact = true
-				break
+	if len(sc.Keys) > 0 {
+		off := len(sc.Members)
+		b.WriteString("## Existing groups (by key image)\n\n")
+		b.WriteString("Each `keys/` file is the representative of a group confirmed earlier. To place an image into one of these groups, add it to that key's group: `{\"op\":\"add\",\"group\":[<image id>, <key id>],\"key\":<key id>}`. Use the key id for groups you keep as they are; do not add members you never looked at.\n\n")
+		for i, c := range sc.Keys {
+			desc := motifScopeGroup{KeyID: off + i + 1}
+			for _, g := range sc.Groups {
+				if g.KeyID == desc.KeyID {
+					desc = g
+					break
+				}
 			}
+			fmt.Fprintf(&b, "- key id %d. keys/%06d%s | %s | %s | class=%s", desc.KeyID, i+1, filepath.Ext(c.path), c.task.mdName, c.task.imgPath, motifClassOf(c))
+			if desc.Label != "" {
+				fmt.Fprintf(&b, " | group=%s", desc.Label)
+			}
+			if len(desc.Members) > 0 {
+				fmt.Fprintf(&b, " | members=%d", len(desc.Members))
+			}
+			b.WriteString("\n")
 		}
-		kind := "visually similar"
-		if exact {
-			kind = "byte-identical pixels somewhere in the bucket"
-		}
-		fmt.Fprintf(&manifest, "### bucket %d — %d image(s), %s\n\n", g, len(ids), kind)
-		for _, id := range ids {
-			c := members[id-1]
-			fmt.Fprintf(&manifest, "- %d. originals/%06d%s | %s | %s | class=%s\n", id, id, filepath.Ext(c.path), c.task.mdName, c.task.imgPath, motifClassOf(c))
-		}
-		manifest.WriteString("\n")
+		b.WriteString("\n")
 	}
-	if len(standalone) > 0 {
-		fmt.Fprintf(&manifest, "## Images with no similarity hint (%d)\n\nThey are independent by default, but they may still belong to a bucket above — merge them if the drawing really is the same structure.\n\n", len(standalone))
-		for _, id := range standalone {
-			c := members[id-1]
-			fmt.Fprintf(&manifest, "- %d. originals/%06d%s | %s | %s | class=%s\n", id, id, filepath.Ext(c.path), c.task.mdName, c.task.imgPath, motifClassOf(c))
-		}
-		manifest.WriteString("\n")
-	}
-	if err := os.WriteFile(filepath.Join(root, "manifest.md"), []byte(manifest.String()), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.md"), []byte(b.String()), 0644); err != nil {
 		return err
 	}
 
-	// Persist the starting grouping so `motif_groups list` shows real work to
-	// verify, and so a resumed session keeps the structure.
-	start := make([]MotifGroup, 0, len(groupNos))
-	for _, g := range groupNos {
-		if len(initial[g]) < 2 {
-			continue
-		}
-		// Key stays 0 on purpose: the AI must pick the representative, and
-		// submit refuses while any group still has key=0.
-		start = append(start, MotifGroup{Members: initial[g]})
+	start := sc.Prefill
+	if start == nil {
+		start = []MotifGroup{}
 	}
 	payload, err := json.MarshalIndent(map[string]any{"groups": start}, "", "  ")
 	if err != nil {
@@ -272,9 +357,9 @@ func prepareMotifViewWithAdvisory(root string, members []*motifCandidate, adviso
 		return err
 	}
 
-	items := make([]map[string]any, 0, len(members))
-	for i, c := range members {
-		a := advisory[c.task.key()]
+	items := make([]map[string]any, 0, len(sc.Members))
+	for i, c := range sc.Members {
+		a := sc.Advisory[c.task.key()]
 		items = append(items, map[string]any{
 			"id":            i + 1,
 			"key":           c.task.key(),
@@ -285,10 +370,10 @@ func prepareMotifViewWithAdvisory(root string, members []*motifCandidate, adviso
 		})
 	}
 	advisoryJSON := map[string]any{
-		"description": "Local similarity is advisory only. The AI decides the final structural groups; images with no hint are still eligible.",
-		"pool_size":   len(members),
-		"buckets":     len(groupNos),
-		"items":       items,
+		"description":      "Local similarity is advisory only. The AI decides the final structural groups; images with no hint are still eligible.",
+		"session_images":   len(sc.Members),
+		"existing_key_ids": len(sc.Keys),
+		"items":            items,
 	}
 	data, err := json.MarshalIndent(advisoryJSON, "", "  ")
 	if err != nil {
@@ -304,6 +389,5 @@ func motifClassOf(c *motifCandidate) string {
 	return c.progress.Class
 }
 
-func prepareMotifView(root string, members []*motifCandidate) error {
-	return prepareMotifViewWithAdvisory(root, members, nil)
-}
+// motifScopeID maps a work-dir path back to its 1-based session id:
+// originals/000123.jpg -> 123, keys/000004.jpg -> keyOffset+4.

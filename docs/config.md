@@ -54,6 +54,8 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
+| `latex.dedupe_group_session_over` | 相似桶成员数超过该值时**该桶独占一个核验会话**；较小的桶可以互相合并进同一会话；`0` = 整池一个会话（旧行为） | 50 |
+| `latex.dedupe_batch_images` | 一个核验会话最多处理多少张图（小桶合并时的容量上限） | 150 |
 | `latex.dedupe_model` | 档位1 classify 后整组相似图工具核验会话的模型注册表键；留空回退 `text`，须支持看图和工具调用；随附模板为 `dedupe`，继承 `text` | 空（回退 text） |
 | `models.dedupe` | 随附模板的独立去重模型条目，可用 extends 指向 text 或自行指定视觉模型 | 未设置（模板继承 text） |
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking），原样合并到请求体顶层 | 见示例 |
