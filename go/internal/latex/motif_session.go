@@ -23,6 +23,11 @@ import (
 type motifViewTool struct {
 	base *ViewImageTool
 	seen map[int]bool
+	// dbPath mirrors `seen` into the session workspace. The submit gate lives in
+	// memory, but a resumed session replays its transcript instead of re-showing
+	// images, so without the file every resumed run would be rejected with
+	// "image N has not been inspected" (T121).
+	dbPath string
 	// keyOffset is len(Members): keys/000001.ext is id keyOffset+1. Used by the
 	// final consolidation session, where existing groups are referenced by their
 	// key image instead of by re-reading every member.
@@ -50,11 +55,52 @@ func (t *motifViewTool) Execute(raw string) (session.ToolResult, error) {
 	}
 	uncropped := pctArg(args, "left", 0) == 0 && pctArg(args, "top", 0) == 0 && pctArg(args, "right", 100) == 100 && pctArg(args, "bottom", 100) == 100
 	if uncropped && result.ImageBase64 != "" {
-		if id := motifScopeID(full, t.keyOffset); id > 0 {
+		if id := motifScopeID(full, t.keyOffset); id > 0 && !t.seen[id] {
 			t.seen[id] = true
+			t.saveSeen()
 		}
 	}
 	return result, nil
+}
+
+// saveSeen persists the evidence set so an interrupted verification session can
+// keep the images it already looked at (T121). Best effort: a failed write only
+// costs a re-inspection.
+func (t *motifViewTool) saveSeen() {
+	if t.dbPath == "" {
+		return
+	}
+	ids := make([]int, 0, len(t.seen))
+	for id := range t.seen {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	payload, err := json.MarshalIndent(map[string]any{"inspected": ids}, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(t.dbPath, append(payload, '\n'), 0644)
+}
+
+// loadMotifSeen restores the evidence set written by saveSeen.
+func loadMotifSeen(path string) map[int]bool {
+	seen := map[int]bool{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return seen
+	}
+	var doc struct {
+		Inspected []int `json:"inspected"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return seen
+	}
+	for _, id := range doc.Inspected {
+		if id > 0 {
+			seen[id] = true
+		}
+	}
+	return seen
 }
 
 // motifScopeID maps a work-dir path back to its 1-based session id:
@@ -168,16 +214,21 @@ func (r *Runner) verifyMotifScope(sc *motifScope, outDir string) ([]MotifGroup, 
 	sum := sha256.Sum256([]byte(identity.String()))
 	id := hex.EncodeToString(sum[:8])
 	sessionsDir := filepath.Join(outDir, "sessions")
+	trPath := filepath.Join(sessionsDir, "motif_dedupe_"+id+".jsonl")
 	view := filepath.Join(sessionsDir, "motif_dedupe_"+id+".work")
-	seen := map[int]bool{}
 	if err := prepareMotifScopeView(view, sc); err != nil {
 		return nil, err
 	}
+	// Evidence already collected in a previous process counts: the same id means
+	// the same image set (the id is a hash of every member's source hash).
+	seenFile := filepath.Join(view, "seen.json")
+	seen := loadMotifSeen(seenFile)
 	mounts := []Mount{{Name: "candidates", Dir: view}}
 	bashMounts := []Mount{{Name: "work", Dir: view}}
 	imageTool := &motifViewTool{
 		base:      &ViewImageTool{Root: view, BareSearch: true, SoftMax: r.cfg.Tools.View.ImageMax, WarnRatio: r.cfg.Tools.View.WarnRatio},
 		seen:      seen,
+		dbPath:    seenFile,
 		keyOffset: len(sc.Members),
 	}
 	groupTool := NewMotifGroupsTool(filepath.Join(view, "groups.json"), total)
@@ -205,7 +256,7 @@ func (r *Runner) verifyMotifScope(sc *motifScope, outDir string) ([]MotifGroup, 
 	}
 	sess := session.NewSession(r.clientFor(modelName), r.modelOf(modelName), tuning,
 		renderPrompt(prompts.Must(prompts.DedupeSystem), tuning, r.outputLang()), tools, r.log, 1, label)
-	tr, err := session.NewTranscript(filepath.Join(sessionsDir, "motif_dedupe_"+id+".jsonl"))
+	tr, err := session.NewTranscript(trPath)
 	if err != nil {
 		return nil, err
 	}
@@ -215,12 +266,30 @@ func (r *Runner) verifyMotifScope(sc *motifScope, outDir string) ([]MotifGroup, 
 	defer closeRow()
 	sess.SetProgressHook(hook)
 	user := prompts.Render(prompts.DedupeUser, map[string]string{"IMAGES": fmt.Sprintf("candidates:manifest.md (%d images in this session; similarity buckets are a starting point; edit candidates:groups.json with motif_groups; every group needs key)", total)})
-	_, runErr := sess.Run(session.RunOptions{UserText: user})
-	for attempts := 0; runErr == nil && !submit.done.Submitted && attempts < 2; attempts++ {
-		_, runErr = sess.Run(session.RunOptions{UserText: "You have NOT called submit yet. Review the persisted groups.json if needed, then call submit with no arguments."})
+	// 中断续跑（T121）：同一张图集必然落到同一个转录名，所以"有没有历史"就是
+	// "上次是不是被中断了"。走与其他会话完全相同的续跑路径——回放历史、计数
+	// 接着数、已 submit 的直接收账（不再请求模型），未提交的原样续行。
+	resumed := false
+	if msgs, st, lerr := session.LoadTranscriptStats(trPath); lerr != nil {
+		r.log.LogWarning(0, "[dedupe] 转录读取失败（按全新会话继续）:", lerr)
+	} else if len(msgs) > 0 {
+		sess.SetMessages(msgs)
+		sess.SeedCounters(st.Rounds, st.Tools)
+		resumeLog(r.log, 0, label, filepath.Base(trPath), msgs, st)
+		if replaySubmit(r.log, 0, label, submit, st) {
+			resumed = true
+		} else {
+			user = resumeUserText(msgs, user)
+		}
 	}
-	if runErr != nil {
-		return nil, runErr
+	if !resumed {
+		_, runErr := sess.Run(session.RunOptions{UserText: user})
+		for attempts := 0; runErr == nil && !submit.done.Submitted && attempts < 2; attempts++ {
+			_, runErr = sess.Run(session.RunOptions{UserText: "You have NOT called submit yet. Review the persisted groups.json if needed, then call submit with no arguments."})
+		}
+		if runErr != nil {
+			return nil, runErr
+		}
 	}
 	if !submit.done.Submitted {
 		return nil, fmt.Errorf("dedupe session ended without submit")
@@ -345,16 +414,22 @@ func prepareMotifScopeView(root string, sc *motifScope) error {
 		return err
 	}
 
-	start := sc.Prefill
-	if start == nil {
-		start = []MotifGroup{}
-	}
-	payload, err := json.MarshalIndent(map[string]any{"groups": start}, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(root, "groups.json"), append(payload, '\n'), 0644); err != nil {
-		return err
+	// Pre-fill only when nothing is persisted yet: a re-entered (resumed) session
+	// must find the grouping it had already built, otherwise the restart silently
+	// throws away the model's motif_groups edits (T121).
+	groupsPath := filepath.Join(root, "groups.json")
+	if !fileExists(groupsPath) {
+		start := sc.Prefill
+		if start == nil {
+			start = []MotifGroup{}
+		}
+		payload, err := json.MarshalIndent(map[string]any{"groups": start}, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(groupsPath, append(payload, '\n'), 0644); err != nil {
+			return err
+		}
 	}
 
 	items := make([]map[string]any, 0, len(sc.Members))

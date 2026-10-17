@@ -63,27 +63,42 @@ func FindVisualMotifCandidates(samples []VisualMotifSample) []VisualMotifGroup {
 		}
 	}
 
-	exact := map[[32]byte]int{}
+	// Pixel fingerprints and shape/colour features are pure functions of the
+	// pixels, so they are computed ONCE per image here. The pairwise loop below
+	// is O(N²): rebuilding both feature sets for every pair cost ~150k rebuilds
+	// on a 388-image book (20s of CPU at every run start) while the verdicts are
+	// identical to computing them inline.
+	features := make([]motifFeatureSet, len(valid))
 	for i, s := range valid {
-		if h, ok := rgbaFingerprint(s.Image); ok {
-			if j, exists := exact[h]; exists {
-				union(i, j)
-			} else {
-				exact[h] = i
-			}
+		features[i] = computeMotifFeatureSet(s.Image)
+	}
+	exact := map[[32]byte]int{}
+	for i := range valid {
+		if !features[i].rgbaOK {
+			continue
+		}
+		h := features[i].rgba
+		if j, exists := exact[h]; exists {
+			union(i, j)
+		} else {
+			exact[h] = i
 		}
 	}
 	for i := range valid {
 		for j := i + 1; j < len(valid); j++ {
-			if visualMotifSimilar(valid[i].Image, valid[j].Image) {
+			if motifFeatureSetSimilar(features[i], features[j]) {
 				union(i, j)
 			}
 		}
 	}
 
 	groups := map[int][]string{}
+	rootRep := map[int]int{} // root → representative index (for Exact)
 	for i, s := range valid {
 		root := find(i)
+		if _, ok := rootRep[root]; !ok {
+			rootRep[root] = i
+		}
 		groups[root] = append(groups[root], s.Key)
 	}
 	out := make([]VisualMotifGroup, 0, len(groups))
@@ -92,17 +107,15 @@ func FindVisualMotifCandidates(samples []VisualMotifSample) []VisualMotifGroup {
 			continue
 		}
 		sort.Strings(members)
-		isExact := true
-		first := valid[root].Image
-		h, ok := rgbaFingerprint(first)
-		if !ok {
-			isExact = false
-		}
-		for _, key := range members {
-			for _, s := range valid {
-				if s.Key == key {
-					sh, sok := rgbaFingerprint(s.Image)
-					if !sok || sh != h {
+		rep := features[rootRep[root]]
+		isExact := rep.rgbaOK
+		if isExact {
+			for _, key := range members {
+				for i, s := range valid {
+					if s.Key != key {
+						continue
+					}
+					if !features[i].rgbaOK || features[i].rgba != rep.rgba {
 						isExact = false
 					}
 					break
@@ -188,15 +201,60 @@ func MotifSimilarTo(a, b image.Image) bool {
 	if motifPixelIdentical(a, b) {
 		return true
 	}
-	return visualMotifSimilar(a, b) || chromaticMotifSimilar(a, b)
+	fa, fb := computeMotifFeatureSet(a), computeMotifFeatureSet(b)
+	if motifFeatureSetSimilar(fa, fb) {
+		return true
+	}
+	// The gate is a superset of the detector: a pair whose strict shape/colour
+	// test failed may still be merged on the looser chromatic evidence.
+	return fa.chromOK && fb.chromOK && chromaticFeatureSimilar(fa.chrom, fb.chrom)
+}
+
+// motifFeatureSet is everything the detector needs to know about one image:
+// the exact-pixel fingerprint plus the two shape/colour feature sets. Building
+// it is the expensive part (it walks every pixel up to 4 times), so callers that
+// compare one image against many others build it once and reuse it.
+type motifFeatureSet struct {
+	rgba     [32]byte
+	rgbaOK   bool
+	visual   motifFeatureData
+	visualOK bool
+	chrom    chromaticFeature
+	chromOK  bool
+}
+
+func computeMotifFeatureSet(img image.Image) motifFeatureSet {
+	if img == nil {
+		return motifFeatureSet{}
+	}
+	var f motifFeatureSet
+	f.rgba, f.rgbaOK = rgbaFingerprint(img)
+	f.visual, f.visualOK = motifFeature(img)
+	f.chrom, f.chromOK = chromaticMotifFeature(img)
+	return f
+}
+
+// motifFeatureSetSimilar is the detector's pairwise predicate, identical to
+// visualMotifSimilar(a, b) || chromaticMotifSimilar(a, b) on the same images.
+func motifFeatureSetSimilar(a, b motifFeatureSet) bool {
+	if a.visualOK && b.visualOK {
+		return visualFeatureSimilar(a.visual, b.visual)
+	}
+	if !a.chromOK || !b.chromOK {
+		return false
+	}
+	return chromaticFeatureSimilar(a.chrom, b.chrom)
 }
 
 func visualMotifSimilar(a, b image.Image) bool {
-	ma, oka := motifFeature(a)
-	mb, okb := motifFeature(b)
-	if !oka || !okb {
-		return chromaticMotifSimilar(a, b)
-	}
+	return motifFeatureSetSimilar(computeMotifFeatureSet(a), computeMotifFeatureSet(b))
+}
+
+// visualFeatureSimilar compares two already-extracted feature sets. Feature
+// extraction is deliberately NOT repeated here: the detector calls this for
+// every pair, and re-deriving the features per pair made a 388-image scan burn
+// 20s of CPU.
+func visualFeatureSimilar(ma, mb motifFeatureData) bool {
 	if ma.aspect < 0.55 || ma.aspect > 1.8 || mb.aspect < 0.55 || mb.aspect > 1.8 {
 		return false
 	}
@@ -226,7 +284,14 @@ func visualMotifSimilar(a, b image.Image) bool {
 func chromaticMotifSimilar(a, b image.Image) bool {
 	ma, oka := chromaticMotifFeature(a)
 	mb, okb := chromaticMotifFeature(b)
-	if !oka || !okb || ma.hue != mb.hue || absFloat(ma.aspect-mb.aspect) > 0.36 {
+	if !oka || !okb {
+		return false
+	}
+	return chromaticFeatureSimilar(ma, mb)
+}
+
+func chromaticFeatureSimilar(ma, mb chromaticFeature) bool {
+	if ma.hue != mb.hue || absFloat(ma.aspect-mb.aspect) > 0.36 {
 		return false
 	}
 	intersect, union := 0, 0
