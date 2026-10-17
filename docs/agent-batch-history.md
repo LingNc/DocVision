@@ -1733,3 +1733,14 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **测试**：`TestFindVisualMotifCandidatesAlignedLinksSquashedVariant`（水平压扁 28% 的同标记：`|Δaspect| > 0.18` 让旧判据拒掉、居中重合并进来；结构不同的方块仍分开；夹具若恰好能过旧判据则 `t.Skip` 说明原因）、`TestFindVisualMotifCandidatesAlignedDisabledMatchesLegacy`。
 - **配置**：没有新增键——复用 `latex.dedupe_align_min` / `latex.dedupe_align_shift`（T129 已进配置 v18）。
 - 验证：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 14 包全绿（latex 11.0s、img2text 12.0s、sessionview 16.7s）。
+
+### T131 / P51 小图标本地自动归组 + 代表图取"典型里最全"（2026-10-18 第十批续二）
+
+- **用户追问**：看完 100 张 300dpi 总览后问「旧的相似度能否更宽泛一点，尽可能多的把其他的纳入一个桶，然后按照我们 0.6 判据给聚合最终的？这样的话小插图就不用我们的这个 dedupe 的会话了，只有大一点的用这个会话。是这样不？还有就是最标准的覆盖范围全的那个 key 你是怎么选的？应该是选 1.0 的那个作为我们这个组的中心 key」——同时点出「我们这个桶不是才 90 个吗还漏了 10 个超过 60 分的内容？」（那是上一轮旧二进制留下的 `manifest.md`/`groups.json`；T130 已把桶改成 100，见该条）。
+- **事实澄清**：桶（T130）确实是"宽召回 + 0.6 收口"，但**所有已分类图仍然全部进会话**——"小图不开会话"没有实现；大图这条路不能放宽（0.6 软覆盖对稀疏图形没鉴别力，跨书负样本 0.72–0.80）。
+- **用户选定**：① 「≥0.75 自动定组，0.60–0.75 进会话」；② 代表图「分数 ≥ 0.95 的成员里挑内容框最大」。
+- **实现**：新增配置 `latex.dedupe_icon_auto`（未写时 0.75，`0` = 关闭，配置 v19）。`(*Runner).motifAutoIconGroups` 在桶分配之前运行：只取**矢量**图（非矢量不重画，合并只会多一次丢内容的机会）、内容框 ≤ `motifAutoIconMaxArea = 20000` 像素（约 141×141；再大就是插图，自动合并风险不对等）；按 ≥ 阈值连通成片，片内先算中心（平均重合度最高）再在"典型成员"（≥ `motifAlignTypical = 0.95`）里取内容框最大的当代表图，逐成员对代表图复核，**对代表图不达标的成员退回池子交会话**；达标的直接 `applyMotifEquivalenceWithKey` 落盘（`DedupeChecked` 一并置真，续跑走 allChecked 快路径）。自动组也进 `applied`，所以整理会话会把"0.60–0.75 的那批"按 0.6 挂回同一个代表图；`motifAdoptCopies` 仍按完整 leaders 对账，逐字节副本照旧跟随。
+- **两处实测发现**：① 一开始按"种子星形"成组（每张与第一张比），100 张同标记被切成 79/11/5/4 四组、等于多画 3 张——改成连通片 + 代表图复核后是 1 组 86 张；② 不设面积上限时，两张内容框 68335 像素的相似插图被自动并成一组（`9c206fd` 那对），加上 20000 上限后它们回到会话。
+- **代表图规则（T131 用户口径）**：`motifAlignFilter` 先看"典型成员"（与组中心 ≥ 0.95）里内容框最大的那张；没有这样的成员才退回旧顺序（模型 key 达标且够全 → 合格里最大框 → 组中心）。实测该书：原规则选 `<sha1>`（0.707、框 1102），新规则选 `<sha2>`（1.000、框 1064）——正是用户说的"1.0 的那个作中心"。
+- **测试**：`TestMotifAutoIconGroupsOnlyHighOverlapVectors`（0.60–0.75 的压扁版必须留在池子——夹具的压缩系数由度量自己搜出来，避免夹具与阈值脱钩；非矢量与超过面积上限的图不自动合并；`dedupe_icon_auto: 0` 时全部交会话）、`TestMotifAlignFilterPrefersTypicalLargestMember`（内容框最大但形状不同的实心块不许当代表图）。
+- 验证：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 14 包全绿（config 0.08s、latex 14.1s）。

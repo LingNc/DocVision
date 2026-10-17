@@ -166,6 +166,16 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		c.progress.DedupeChecked = false
 		saveProgress(progDir, c.progress)
 	}
+	// 已经"重合到几乎没有疑问"的小图标直接本地定组，不再送核验会话（T131，
+	// 用户口径：≥ dedupe_icon_auto 自动、0.60–0.75 交会话）。逐字节副本在
+	// 最后一步跟着代表图走，所以这里拿 leaders 而不是缩水后的 pool 去对账。
+	leaders := pool
+	autoGroups, remaining, autoMerged := r.motifAutoIconGroups(leaders, progDir)
+	if len(autoGroups) > 0 {
+		r.log.Log(0, fmt.Sprintf("[dedupe] 居中重合 ≥ %.2f 的 %d 张图标自动归为 %d 组，不进核验会话（%d 张代表图照常重画）",
+			r.motifIconAutoMin(), autoMerged, len(autoGroups), len(autoGroups)))
+		pool = remaining
+	}
 	scopes, unassigned := r.motifBucketScopes(pool, advisory)
 	steps := len(scopes) + 1
 	progress.verify(0, steps, len(pool), 0)
@@ -190,7 +200,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	})
 	// applied keeps the groups that survived every gate, so the final
 	// consolidation session is only offered real representatives.
-	var applied []motifAppliedGroup
+	applied := append([]motifAppliedGroup{}, autoGroups...)
 	for _, got := range results {
 		applied = append(applied, got...)
 	}
@@ -228,11 +238,11 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		mergedMembers += len(g.Members)
 	}
 	r.log.Log(0, fmt.Sprintf("[dedupe] 小结：核验会话 %d 个 + 整理会话 %d 个；合并 %d 组（%d 张不同内容共用代表图，其余 %d 张独立重画）",
-		len(scopes), consolSessions, mergedGroups, mergedMembers, len(pool)-mergedMembers))
+		len(scopes), consolSessions, mergedGroups, mergedMembers, len(leaders)-mergedMembers))
 	// 副本没有进会话（字节相同，进会话只是把同一张图重复看一遍），它们的
 	// 结论在最后一步补上：跟着各自代表图走——代表图被合并就一起合并，代表
 	// 图独立就一起独立，反正本来就是同一张图片。
-	if n := motifAdoptCopies(pool, copies, byTaskKey, progDir); n > 0 {
+	if n := motifAdoptCopies(leaders, copies, byTaskKey, progDir); n > 0 {
 		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张逐字节重复的图片跟随代表图，不重复作图", n))
 	}
 	progress.verify(steps, steps, len(pool), failed)
@@ -286,6 +296,144 @@ func motifAdoptCopies(leaders []*motifCandidate, copies map[*motifCandidate][]*m
 		}
 	}
 	return linked
+}
+
+// motifAutoIconGroups 把"重合到几乎没有疑问"的小图标直接本地合并成组，不再
+// 送核验会话（T131）。用户口径：≥ `latex.dedupe_icon_auto`（默认 0.75）自动
+// 定组，0.60–0.75 之间仍进会话逐张核验——分数在 0.6 附近是连续铺开的，不设
+// 这个更高的自动门槛就等于"一张都不给模型看"。
+//
+// 只处理**矢量图**：非矢量图本来就不重画，合并它们省不下作图、只会多一次
+// 内容丢失的机会（T118 的"宁可漏不可误判"）。代表图与组内闸门同一规则——
+// 在"典型成员"（与种子重合度 ≥ motifAlignTypical）里取内容框最大者。
+func (r *Runner) motifAutoIconGroups(cands []*motifCandidate, progDir string) (applied []motifAppliedGroup, remaining []*motifCandidate, merged int) {
+	min := r.motifIconAutoMin()
+	if min <= 0 {
+		return nil, cands, 0
+	}
+	shift := r.motifAlignShift()
+	cov := make([]motifAlignImage, len(cands))
+	ok := make([]bool, len(cands))
+	for i, c := range cands {
+		if c == nil || c.image == nil || c.progress == nil || c.progress.Class != ClassVector {
+			continue
+		}
+		v, good := motifAlignCoverage(c.image)
+		// 自动合并只给"真的小"的图标：内容框 ≤ motifAutoIconMaxArea（约 141×141）。
+		// 再大就是插图了，两个相似的插图直接合并没经过任何审校，风险不对等
+		// ——它们照旧进核验会话。
+		if good && v.area <= motifAutoIconMaxArea {
+			cov[i], ok[i] = v, true
+		}
+	}
+	// 先按 ≥min 连成连通片（单链，和桶的判据一致），再对每个片选代表图、
+	// 逐成员对代表图复核——这样同一枚标记不会因为"种子选得偏"被切成好几个组
+	// （实测该书 100 张会切 79/11/5/4 四段，等于多画 3 张）。
+	parent := make([]int, len(cands))
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(x int) int {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	for i := 0; i < len(cands); i++ {
+		if !ok[i] {
+			continue
+		}
+		for j := i + 1; j < len(cands); j++ {
+			if !ok[j] {
+				continue
+			}
+			if cov[i].overlap(cov[j], shift) < min {
+				continue
+			}
+			ri, rj := find(i), find(j)
+			if ri != rj {
+				parent[rj] = ri
+			}
+		}
+	}
+	groups := map[int][]int{}
+	for i := range cands {
+		if ok[i] {
+			root := find(i)
+			groups[root] = append(groups[root], i)
+		}
+	}
+	used := make([]bool, len(cands))
+	for i := 0; i < len(cands); i++ {
+		if !ok[i] {
+			continue
+		}
+		root := find(i)
+		members, seen := groups[root], used[root]
+		if seen || len(members) < 2 {
+			continue
+		}
+		used[root] = true
+		// 代表图：典型成员（对种子片里任意成员都算"典型"用中心口径太绕，这里
+		// 直接用"与片内其他成员平均重合度最高"的成员当中心，再在 ≥0.95 的
+		// 那一批里取内容框最大者）——与组内闸门同一套规则。
+		center, bestMean := -1, -1.0
+		for _, m := range members {
+			sum, n := 0.0, 0
+			for _, o := range members {
+				if o == m {
+					continue
+				}
+				sum += cov[m].overlap(cov[o], shift)
+				n++
+			}
+			if n > 0 && sum/float64(n) > bestMean {
+				bestMean, center = sum/float64(n), m
+			}
+		}
+		if center < 0 {
+			continue
+		}
+		leader, bestArea, bestScore := -1, -1, -1.0
+		for _, m := range members {
+			v := cov[m].overlap(cov[center], shift)
+			if v < motifAlignTypical {
+				continue
+			}
+			if cov[m].area > bestArea || (cov[m].area == bestArea && v > bestScore) {
+				leader, bestArea, bestScore = m, cov[m].area, v
+			}
+		}
+		if leader < 0 {
+			leader = center
+		}
+		group := make([]*motifCandidate, 0, len(members))
+		for _, m := range members {
+			if m != leader && cov[m].overlap(cov[leader], shift) < min {
+				continue // 对代表图不达标的退回池子，交给会话
+			}
+			group = append(group, cands[m])
+			used[m] = true
+		}
+		if len(group) < 2 {
+			for _, m := range members {
+				used[m] = false
+			}
+			continue
+		}
+		applyMotifEquivalenceWithKey(group, cands[leader], progDir)
+		applied = append(applied, motifAppliedGroup{Key: cands[leader], Members: group, Class: ClassVector})
+		merged += len(group)
+	}
+	remaining = make([]*motifCandidate, 0, len(cands))
+	for i, c := range cands {
+		if !ok[i] || !used[i] {
+			remaining = append(remaining, c)
+		}
+	}
+	return applied, remaining, merged
 }
 
 // motifAppliedGroup is a confirmed group: only Key is redrawn, every other

@@ -1,6 +1,6 @@
 # DocVision Configuration
 
-config_version: 18
+config_version: 19
 # Copy this file to config.yaml and fill in your credentials.
 
 # MinerU API Configuration
@@ -83,6 +83,10 @@ latex:
   # 任何一对的结论、只更慢）；未写这两个键时为 0.60 / 0.10。
   dedupe_align_min: 0.60
   dedupe_align_shift: 0.10
+  # 小图标"本地自动归组"的重合度门槛（0-1）。与组中心重合度达到它的图标
+  # 直接合并、不进核验会话（省掉逐张看图）；0.60–0.75 之间仍送会话核验。
+  # 0 = 关闭自动归组，所有图标都交会话。未写该键时为 0.75。
+  dedupe_icon_auto: 0.75
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）

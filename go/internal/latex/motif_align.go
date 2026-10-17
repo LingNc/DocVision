@@ -30,6 +30,9 @@ const (
 	// motifAlignDefaultShift 是默认平移上限（占内容框边长的比例）。
 	// 实测 10% 已经饱和：再放大只增加耗时，不改变任何一对的结论。
 	motifAlignDefaultShift = 0.10
+	// motifAlignTypical 是"典型成员"的门槛：与组中心重合度达到它的成员才算
+	// "大多数图都长这样"。代表图只从这一批里挑（T131）——既典型又内容最全。
+	motifAlignTypical = 0.95
 	// motifAlignMaxPixels 限制参与该判据的图：一张 4M 像素的书页扫描件没有
 	// 必要走"图标重合"，而且逐像素取 mask 的内存代价不值得。超限的图退回
 	// 旧的逐对相似度判据。
@@ -37,6 +40,10 @@ const (
 	// motifAlignMaxArea 限制前景外接框面积。大图即使总像素不多（细长条）
 	// 也不适合拿来做图标重合。
 	motifAlignMaxArea = 200_000
+	// motifAutoIconMaxArea 是"自动归组"允许的最大内容框面积（约 141×141）：
+	// 自动合并意味着不再有人看原图，只留给真正的小图标；再大的图（两个长得
+	// 像的插图）继续走核验会话。
+	motifAutoIconMaxArea = 20_000
 	// motifAlignInkSum 是"算墨"的阈值（R+G+B 之和）。这里比 foregroundMask
 	// 的 720 更紧一点：JPEG 纸面噪声（灰阶 236-239）会把内容框撑到整张图，
 	// 归一化随即失真——实测同一批图，阈值 240 时组内最差重合度从 0.647 掉到
@@ -182,6 +189,22 @@ func (r *Runner) motifAlignMin() float64 {
 	return v
 }
 
+// motifIconAutoMin 返回"小图标本地自动归组"的门槛；0 = 关闭自动归组，
+// 全部交核验会话（T131）。默认值由配置加载填（0.75），Runner 零值即关闭。
+func (r *Runner) motifIconAutoMin() float64 {
+	if r == nil || r.cfg == nil {
+		return 0
+	}
+	v := r.cfg.Latex.DedupeIconAuto
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
 // motifAlignShift 是当前配置的平移格数。
 func (r *Runner) motifAlignShift() int {
 	pct := r.cfg.Latex.DedupeAlignShift
@@ -284,8 +307,23 @@ func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) 
 		}
 		dropped++
 	}
-	// 代表图：模型的 key 达标且内容足够全就尊重它，否则挑内容最全的合格成员。
-	if key != nil && motifContains(safe, key) && len(covered[key].grid) > 0 {
+	// 代表图：先看"既典型又全"的那一批（T131 用户口径）——与组中心重合度
+	// ≥ motifAlignTypical 的成员里挑内容框最大的，这样代表图既是大多数图都
+	// 符合的样子，又不会因为某张被裁掉一角而让整组重画缺内容。没有这样的
+	// 成员时退回旧顺序：模型点名的 key（达标且内容够全）→ 合格成员里内容框
+	// 最大 → 组中心。
+	chosen = nil
+	bestArea, bestScore := -1, -1.0
+	for _, c := range safe {
+		cov, ok := covered[c]
+		if !ok || scores[c] < motifAlignTypical {
+			continue
+		}
+		if cov.area > bestArea || (cov.area == bestArea && scores[c] > bestScore) {
+			bestArea, bestScore, chosen = cov.area, scores[c], c
+		}
+	}
+	if chosen == nil && key != nil && motifContains(safe, key) && len(covered[key].grid) > 0 {
 		maxArea := 0
 		for _, c := range safe {
 			if cov, ok := covered[c]; ok && cov.area > maxArea {
@@ -297,7 +335,7 @@ func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) 
 		}
 	}
 	if chosen == nil {
-		bestArea, bestScore := -1, -1.0
+		bestArea, bestScore = -1, -1.0
 		for _, c := range safe {
 			cov, ok := covered[c]
 			if !ok {

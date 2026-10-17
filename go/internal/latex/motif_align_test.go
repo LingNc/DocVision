@@ -298,3 +298,125 @@ func containsKey(list []string, want string) bool {
 	}
 	return false
 }
+
+// 小图标本地自动归组（T131）：≥0.75 的图标不进会话，0.60–0.75 的仍留在池子里
+// 交会话；非矢量图永远不自动合并；门槛 0 = 全部交会话。
+func TestMotifAutoIconGroupsOnlyHighOverlapVectors(t *testing.T) {
+	dir := t.TempDir()
+	r := &Runner{cfg: &config.Config{Latex: config.LatexConfig{
+		DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75,
+	}}}
+	mk := func(name string, img image.Image, class string) *motifCandidate {
+		tk := &task{mdName: "book.md", imgPath: "images/" + name}
+		p := &imageProgress{Key: tk.key(), MDName: tk.mdName, ImgPath: tk.imgPath, Class: class, Status: "classified"}
+		return &motifCandidate{task: tk, progress: p, image: img, sourceHash: "hash-" + name}
+	}
+	base := whiteCanvas(70, 96)
+	drawDiamond(base, 35, 30, 18)
+	near := whiteCanvas(72, 98)
+	drawDiamond(near, 36, 30, 19) // 同一枚，略大一点
+
+	rBase := &Runner{cfg: r.cfg}
+	cb, okB := motifAlignCoverage(base)
+	cn, okN := motifAlignCoverage(near)
+	if !okB || !okN {
+		t.Fatal("夹具必须是小图标")
+	}
+	shift := rBase.motifAlignShift()
+	if v := cb.overlap(cn, shift); v < 0.75 {
+		t.Fatalf("夹具不合适：略大那枚对基准只有 %.3f（应 ≥0.75）", v)
+	}
+	// 找一个"压扁到 0.60–0.75 之间"的版本：这类图正好是用户口径里"仍要送
+	// 会话核验"的那一批，自动归组不能把它们吞掉。具体压多少交给度量自己决定，
+	// 免得夹具和阈值脱钩。
+	var far image.Image
+	farScore, farFactor := 0.0, 0.0
+	for _, f := range []float64{0.62, 0.58, 0.54, 0.50, 0.46, 0.42, 0.38} {
+		cand := squashX(base, f)
+		cov, ok := motifAlignCoverage(cand)
+		if !ok {
+			continue
+		}
+		v := cb.overlap(cov, shift)
+		if v >= 0.60 && v < 0.75 {
+			far, farScore, farFactor = cand, v, f
+			break
+		}
+	}
+	if far == nil {
+		t.Skip("没有找到落在 0.60–0.75 区间的压扁版本（夹具不适用）")
+	}
+	t.Logf("中间档夹具：压扁系数 %.2f、重合度 %.3f（应留在池子里交会话）", farFactor, farScore)
+
+	a := mk("a.jpg", base, ClassVector)
+	b := mk("b.jpg", near, ClassVector)
+	c := mk("c.jpg", far, ClassVector)
+	raster := mk("d.jpg", near, ClassRaster) // 和基准几乎一致，但不是矢量图
+	big := mk("e.jpg", whiteCanvas(400, 500), ClassVector)
+
+	applied, remaining, merged := r.motifAutoIconGroups([]*motifCandidate{a, b, c, raster, big}, dir)
+	if len(applied) != 1 {
+		t.Fatalf("应当只有一组自动合并，got %d", len(applied))
+	}
+	g := applied[0]
+	if len(g.Members) != 2 || !motifContains(g.Members, a) || !motifContains(g.Members, b) {
+		t.Fatalf("自动合并的成员不对: %d", len(g.Members))
+	}
+	if merged != 2 {
+		t.Fatalf("merged=%d want 2", merged)
+	}
+	if g.Key == nil || g.Key.progress.Class != ClassVector {
+		t.Fatalf("代表图必须是矢量图")
+	}
+	for _, keep := range []*motifCandidate{c, raster, big} {
+		if !motifContains(remaining, keep) {
+			t.Fatalf("%s 不该被自动合并（应留在池子里）", keep.task.imgPath)
+		}
+	}
+	// 0 = 关闭：什么都不自动合并。
+	r0 := &Runner{cfg: &config.Config{Latex: config.LatexConfig{DedupeIconAuto: 0}}}
+	if applied0, remaining0, merged0 := r0.motifAutoIconGroups([]*motifCandidate{a, b}, dir); len(applied0) != 0 || merged0 != 0 || len(remaining0) != 2 {
+		t.Fatalf("DedupeIconAuto=0 必须全部交会话: applied=%d merged=%d remaining=%d", len(applied0), merged0, len(remaining0))
+	}
+}
+
+// 代表图规则（T131）：在"典型成员"（与组中心 ≥0.95）里挑内容框最大的那张，
+// 而不是无条件挑全场最大，也不是固定用模型点的 key。
+func TestMotifAlignFilterPrefersTypicalLargestMember(t *testing.T) {
+	r := &Runner{cfg: &config.Config{Latex: config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10}}}
+	typicalSmall := whiteCanvas(60, 80)
+	drawDiamond(typicalSmall, 30, 26, 14) // 典型：与中心完全重合
+	typicalBig := whiteCanvas(66, 88)
+	drawDiamond(typicalBig, 33, 28, 15) // 稍大一点，仍属"典型"
+	oddBig := whiteCanvas(80, 96)
+	for y := 14; y < 84; y++ { // 实心块：内容框最大，但形状和菱形完全不是一回事
+		for x := 26; x < 54; x++ {
+			oddBig.Set(x, y, color.RGBA{A: 255})
+		}
+	}
+
+	safe, chosen, _, _, _ := r.motifAlignFilter([]*motifCandidate{
+		{image: typicalSmall}, {image: typicalBig}, {image: oddBig},
+	}, &motifCandidate{image: typicalBig})
+	if chosen == nil {
+		t.Fatal("必须有代表图")
+	}
+	cb, _ := motifAlignCoverage(typicalBig)
+	cs, _ := motifAlignCoverage(typicalSmall)
+	co, _ := motifAlignCoverage(oddBig)
+	if chosen.image != typicalBig {
+		t.Fatalf("代表图应当是典型成员里内容框最大的那张（typicalBig），实际选中了别的")
+	}
+	if chosen.image == oddBig {
+		t.Fatal("内容框最大但形状不同的那张不该当代表图")
+	}
+	if len(safe) < 2 {
+		t.Fatalf("典型成员必须都被保留，got %d", len(safe))
+	}
+	if cb.area <= cs.area {
+		t.Fatalf("夹具不合适：typicalBig 的内容框应更大 (%d vs %d)", cb.area, cs.area)
+	}
+	if co.area <= cb.area {
+		t.Fatalf("夹具不合适：oddBig 的内容框应最大 (%d vs %d)", co.area, cb.area)
+	}
+}

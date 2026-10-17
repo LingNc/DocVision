@@ -569,6 +569,7 @@ models:
 	ref.Latex.DedupeConcurrency = 2
 	ref.Latex.DedupeAlignMin = 0.60
 	ref.Latex.DedupeAlignShift = 0.10
+	ref.Latex.DedupeIconAuto = 0.75
 	if err := validateThinkingTypes(ref); err != nil {
 		t.Fatal(err)
 	}
