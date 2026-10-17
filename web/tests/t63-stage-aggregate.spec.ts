@@ -54,14 +54,14 @@ describe('T111 去重核验阶段', () => {
       const groups = buildGroups()
       const stages = Object.keys(groups[0].stages).sort((a, b) => stageRank(a) - stageRank(b))
       expect(stages).toEqual(['dedupe', 'vector'])
-      expect(groups[0].stages.dedupe.title).toBe('相似图核验')
+      expect(groups[0].stages.dedupe.title).toBe('整组核验')
       expect(groups[0].stages.dedupe.items).toHaveLength(1)
     } finally {
       Object.assign(state, previous)
     }
   })
   test('列在矢量作图之前且有中文标题', () => {
-    expect(stageTitleOf('dedupe')).toBe('相似图核验')
+    expect(stageTitleOf('dedupe')).toBe('整组核验')
     expect(stageRank('dedupe')).toBeLessThan(stageRank('vector'))
   })
 })

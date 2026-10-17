@@ -40,7 +40,7 @@ func TestEnrichSessionsAddsStageProgressAndImageIdentity(t *testing.T) {
 		byLabel[s.Label] = s
 	}
 	dedupe := byLabel["dedupe:aabbcc001122"]
-	if dedupe.Stage != "dedupe" || dedupe.StageTitle != "相似图核验" || dedupe.ImageName != "" {
+	if dedupe.Stage != "dedupe" || dedupe.StageTitle != "整组核验" || dedupe.ImageName != "" {
 		t.Fatalf("核验会话应在独立阶段且不能误作逐图会话: %+v", dedupe)
 	}
 	vec, ok := byLabel["vector:Venn diagram"]

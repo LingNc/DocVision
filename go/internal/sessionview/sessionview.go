@@ -675,7 +675,7 @@ func TitleFor(rel string) string {
 	case "convert":
 		return "转换 · " + subject
 	case "dedupe":
-		return "相似图核验 · " + subject
+		return "整组核验"
 	case "vector":
 		return "矢量图 · " + subject
 	case "checker":

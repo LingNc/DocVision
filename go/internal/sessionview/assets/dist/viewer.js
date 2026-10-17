@@ -7104,7 +7104,7 @@
   }
   function stageTitleOf(stage) {
     const map = {
-      dedupe: "相似图核验",
+      dedupe: "整组核验",
       vector: "矢量图",
       style: "样式",
       chapters: "章节划分",

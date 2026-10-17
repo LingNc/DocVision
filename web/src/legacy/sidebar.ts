@@ -215,7 +215,7 @@ export function stageRank(stage: string): number {
 
 export function stageTitleOf(stage: string): string {
   const map: Record<string, string> = {
-    dedupe: '相似图核验', vector: '矢量图', style: '样式', chapters: '章节划分', convert: '章节转换',
+    dedupe: '整组核验', vector: '矢量图', style: '样式', chapters: '章节划分', convert: '章节转换',
     checker: '章节核对', 'style-fix': '样式修复', 'figure-check': '逐图校验',
     fix: '全书修复', 'final-review': '终审',
   }

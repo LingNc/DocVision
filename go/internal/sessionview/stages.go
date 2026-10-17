@@ -20,7 +20,7 @@ var StageOrder = []string{"dedupe", "vector", "style", "chapters", "convert", "c
 
 // StageTitles maps a stage key to its short Chinese display name.
 var StageTitles = map[string]string{
-	"dedupe":       "相似图核验",
+	"dedupe":       "整组核验",
 	"vector":       "矢量图",
 	"style":        "样式",
 	"chapters":     "章节划分",

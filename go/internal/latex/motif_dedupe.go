@@ -138,7 +138,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		verdictGroups, err := r.verifyMotifCandidates(pool, outDir, 0, 0)
 		if err != nil {
 			failed++
-			r.log.LogWarning(0, "[dedupe] AI 核验失败，候选保持独立:", err)
+			r.log.LogWarning(0, "[dedupe] AI 核验失败，候选保持独立；process 将逐图处理候选图片:", err)
 		} else {
 			for _, c := range pool {
 				c.progress.DedupeChecked = true
