@@ -129,6 +129,10 @@ type motifSubmitTool struct {
 	done   SubmitDoneTool
 	groups *MotifGroupsTool
 	seen   map[int]bool
+	// prefill is the number of similarity buckets that were staged in
+	// groups.json before the model touched it. Only used to tell the truth in
+	// the receipt of a 0-group submit: "you cleared the starting buckets too".
+	prefill int
 }
 
 func (t *motifSubmitTool) Name() string { return "submit" }
@@ -156,7 +160,28 @@ func (t *motifSubmitTool) Execute(raw string) (session.ToolResult, error) {
 			}
 		}
 	}
+	if len(groups) == 0 {
+		// "SUBMITTED." alone reads like success, and a 0-group submit is a
+		// success — of a decision whose consequence the model never sees. State
+		// it: this was the T126 failure (a prefilled 90-image bucket cleared,
+		// 0 groups submitted, the log said nothing, 130 images redrawn alone).
+		res, err := t.done.Execute(`{}`) // reuse the normal terminal submit receipt
+		if err != nil {
+			return res, err
+		}
+		res.Text = strings.TrimSpace(res.Text) + " " + t.zeroGroupNote()
+		return res, nil
+	}
 	return t.done.Execute(`{}`) // reuse the normal terminal submit receipt
+}
+
+// zeroGroupNote spells out what a 0-group submit means downstream.
+func (t *motifSubmitTool) zeroGroupNote() string {
+	note := fmt.Sprintf("0 组：本次一张都不合并，本会话 %d 张图全部按独立处理（谁也不会共用别人的成品）。", t.groups.count)
+	if t.prefill > 0 {
+		note += fmt.Sprintf(" 起始预填的 %d 个相似桶同样被清空了，代码不会替你恢复——只有你 add 回去的组才算数。", t.prefill)
+	}
+	return note
 }
 
 type motifAdvisory struct {
@@ -233,11 +258,19 @@ func (r *Runner) verifyMotifScope(sc *motifScope, outDir string) ([]MotifGroup, 
 		keyOffset: len(sc.Members),
 	}
 	groupTool := NewMotifGroupsTool(filepath.Join(view, "groups.json"), total)
-	submit := &motifSubmitTool{groups: groupTool, seen: seen}
+	compareFiles := make([]string, 0, total)
+	for i, c := range sc.Members {
+		compareFiles = append(compareFiles, fmt.Sprintf("originals/%06d%s", i+1, filepath.Ext(c.path)))
+	}
+	for i, c := range sc.Keys {
+		compareFiles = append(compareFiles, fmt.Sprintf("keys/%06d%s", i+1, filepath.Ext(c.path)))
+	}
+	compare := &motifCompareTool{root: view, files: compareFiles}
+	submit := &motifSubmitTool{groups: groupTool, seen: seen, prefill: len(sc.Prefill)}
 	bashTmp, cleanBash := r.sessionBashTemp(filepath.Dir(outDir), "bash_dedupe")
 	defer cleanBash()
 	bash := &WorkBashTool{Root: view, Mounts: bashMounts, TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(filepath.Dir(outDir)), Log: r.log, Tid: 1}
-	tools := []session.Tool{&ReadFileTool{Mounts: mounts}, &GrepTool{Mounts: mounts}, bash, imageTool, groupTool, submit}
+	tools := []session.Tool{&ReadFileTool{Mounts: mounts}, &GrepTool{Mounts: mounts}, bash, imageTool, compare, groupTool, submit}
 	modelName := r.cfg.Latex.DedupeModel
 	if modelName == "" {
 		modelName = "text"

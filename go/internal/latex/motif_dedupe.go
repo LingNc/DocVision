@@ -183,6 +183,21 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	} else if len(applied) == 0 {
 		r.log.Log(0, "[dedupe] 本次没有通过校验的分组，跳过整理会话；process 将逐图处理")
 	}
+	// 会话进度行的 N/M 只说明"第 M 步走到第 N 步"，其中最后一步是整理会话
+	// ——它依赖前面会话交出的 key，所以永远是串行、而且可能压根没开。T126
+	// 的日志只剩 [dedupe 2/2]，看起来像"两个会话都跑完了"，实际是 0 组合并。
+	// 这一行把实际发生的事写死：开了几个会话、合并了几组、几张图独立。
+	consolSessions := 0
+	if len(candidates) > 0 && len(keys) > 0 {
+		consolSessions = 1
+	}
+	mergedGroups, mergedMembers := 0, 0
+	for _, g := range applied {
+		mergedGroups++
+		mergedMembers += len(g.Members)
+	}
+	r.log.Log(0, fmt.Sprintf("[dedupe] 小结：核验会话 %d 个 + 整理会话 %d 个；合并 %d 组（%d 张不同内容共用代表图，其余 %d 张独立重画）",
+		len(scopes), consolSessions, mergedGroups, mergedMembers, len(pool)-mergedMembers))
 	// 副本没有进会话（字节相同，进会话只是把同一张图重复看一遍），它们的
 	// 结论在最后一步补上：跟着各自代表图走——代表图被合并就一起合并，代表
 	// 图独立就一起独立，反正本来就是同一张图片。

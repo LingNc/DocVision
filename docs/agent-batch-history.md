@@ -1671,3 +1671,24 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **前置事实**：这句话描述的是 T122 之前的代码；T122（P41）已把特征改成每图算一次（388 张 20.49s→0.31s），T124（P43）再把候选池按文件字节收缩。某项目本轮实测：**130 份不同内容，`decode=49.6ms detector=213.3ms`**（C(130,2)=8385 对，候选 1 组 90 张）。
 - **结论（记在 `docs/plan.md` P44，含触发条件）**：不上 GPU。① 0.2s 不在关键路径（同阶段模型会话以分钟计）；② 工作量是 ≤70px 缩略图上的整数比较，一次 CUDA 初始化 + H2D 拷贝就超过全程耗时；③ 会给零依赖的 Go 单文件二进制硬塞 CUDA/驱动依赖；④ 复杂度在**对数**不在单对成本，GPU 不改 O(N²)。真的变慢时的顺序是 CPU 侧先砍对数（指纹分桶 / 尺寸与墨迹密度预筛 / 早退）再按 goroutine 分片；重新评估的触发条件写死为「检测 >2s 或不同内容数 >2000」。
 - 验证：临时测量测试 `zz_reps_bench_test.go` 用完即删，无代码改动。
+
+### T125 / P45 motif_groups 缺「组内增删」与「只换代表图」（2026-10-18 第六批）
+
+- **用户观察**：「这个 motifgroup 的工具功能好像少了一点，比如从某个组中去除某个或者某些，或者向某组中添加某个或者某些？你看他们调用的，好像一直是清空再重写？」核对属实。
+- **工具原有 op**：`list` / `add`（只能整组建）/ `update`（整组替换成员）/ `delete` / `clear`——**没有任何组内增删**，`update` 还必须连成员一起重发。
+- **转录证据（三条独立会话）**：① 2031 会话 `motif_dedupe_1e6808206d35d6d7` 为了给一组 336 张的图指定 `key`，先发 `{"op":"update","n":1,"key":1}`，被 `REJECTED: update 需要 group 或 members。` 打回；下一轮只好发 `{"op":"update","n":1,"group":[1..336],"key":1}`，把 336 个 ID 原样重打一遍（约 1.3k tokens，且抄漏就是**静默掉成员**）。② 0016 会话 `clear` 之后用 90 次独立 `add` 一个个建组（每调用只放 1 个成员）。③ 本轮 live 会话 00:18–00:26 的调用序列是 `list` → `clear` → `list` → `add{group:[1..51],key:1}` → `clear` → `list`，连自己刚建的 51 张组也一起清掉了。clear+重写不是模型懒，是工具没给别的路。
+- **修复**：`motif_groups` 新增两个 op 并放宽一个分支——`remove {n,ids:[...]}`（从第 n 组移出指定 ID，任一 ID 不在该组即整批拒绝；移走 key 则 key 清空并在回执里点名重新指定；移完不足 2 张则该组自动解散、剩余 ID 回到独立状态）、`append {n,ids:[...]}`（把 ID 加进第 n 组，已被别的组占用的 ID 整批拒绝并指出占用的组号，已在组内的算无变化不重复追加）、`update {n,key}`（只给 key 时**成员原样保留**，只换代表图）。三者与既有 op 一致：先整批校验、失败一个字都不写、成功立即落盘并回显全部分组。
+- **提示词**：`latex_dedupe.user.md` 里那句 `motif_groups maintains groups.json (list/add/update/delete);` 的 op 括号是过期副本（工具描述才是权威），按「只减不增」删成 `motif_groups maintains groups.json;`（687→662 字节），没有新增任何指导。
+- **测试**：新增 `TestMotifGroupsMemberLevelEdits` 覆盖 append 排序与幂等、跨组占用拒绝、remove 保留 key、只换 key 不动成员、移走 key 后回落未指定、整批原子性、剩 1 张自动解散。写测试时**先抓到一个真实缺陷**：解散分支只渲染结果、忘了 `saveLocked`，回执说"已解散"而文件没变——测试立刻红，补上落盘后转绿。
+- 验证：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 14 包全绿（latex 13.2s、img2text 12.0s）。
+
+### T126 / P46 0 组提交、clear 与进度行的沉默（2026-10-18 第七批）
+
+- **用户观察**：「他都看了好多了然后最后还看了一下 list 为空还提交了？这个是为啥？」——新跑的会话看完了 90 张，然后清空分组、交回 0 组。
+- **现场（转录 `motif_dedupe_ff7046e3467d7552`，390 行）**：`read_file(candidates:manifest.md)` → 90 次 `view_image`（全是未裁剪 `originals/NNNNNN.jpg`，证据一个不缺）→ `motif_groups list` → `clear`（00:18:40）→ `add{group:[1..51],key:1}`（00:22:46 → `OK. 1 个分组 key=1 [1..51]`）→ `clear`（00:23:45，正文写「A broad group was accidentally staged … finish with no merges unless exact identity is established」）→ `list`（00:26:42，空）→ `submit {}`（00:26:48 → `SUBMITTED.`）。工具计数：`read_file` 1、`view_image` 90、`motif_groups` 6、`bash` 1、`grep` 1、`submit` 1。运行日志只有 `[dedupe] 本次没有通过校验的分组，跳过整理会话；process 将逐图处理`，紧接着 `[process] 待处理 130 张`。
+- **事实核对**：这 90 张就是同一个菱形 Z 标记，只差缩放/压扁/裁切。按本地探测器同一口径（std 归一化 64×64 灰度，MAD + union-find）复算：`thr=12 → 6 簇 [58,23,4,3,1,1]`、`thr=20 → 1 簇 90 张`、`thr=30 → 1 簇 90 张`。正确结果是 **1 组 90 张**（其中 vector 45 / raster 37 / text 8，按 P38 组类别取多数 → raster，实际只有 45 张 vector 成员共享一份重画）。模型不是没看，是**看了也判不出来**，而且它自己的推理是错的。
+- **四条叠加的根因**：① 提示词把 `crop` 写进「任何可见差异都不能合并」，这 90 张正是同一标记的不同裁切；② T118 删掉联系图后没有任何并排比较手段，逐张看图的模型只能靠记忆对比上一张，而"换个比例看"是记忆最不可靠的地方；③ 预填的桶是**一个 90 成员、key 留空的组**，看着像"模型必须为它背书"，而当时 `clear` 是唯一能撤销的动作（T125 落地前没有组内增删），于是清空→重建 51 张→再清空；④ `submit {}` 与 `clear` 的回执都只有一个状态词，`[dedupe 2/2]` 又像"两个会话都跑完了"，130 张逐张重画的后果在日志里没有任何痕迹。
+- **用户定的口径（三条方案）**：A 把后果写进回执/小结（做）、B 改提示词里 `crop` 那句（**不做**，原话「可见差异的话这个很难说，因为有的裁剪确实不能合并有的无效裁剪确实可以」）、C 并排比较图（做）。`latex_dedupe.system.md` 里那条 `crop` 规则一个字没动，只把「there are no contact sheets」那句补成「`compare_images` 可以把已看过的 2–4 张并排（不是证据），没有联系图」——这是新增工具必须同步 `MustMention` 的最小改动。
+- **代码改动**：① 新文件 `internal/latex/motif_compare.go`：`motifCompareTool{root, files}`，`files` 由 `verifyMotifScope` 按 `originals/NNNNNN.<ext>`（成员）+ `keys/NNNNNN.<ext>`（关键图）拼出，**顺序与 id 完全一致**（`motifScopeID` 的 keyOffset 语义），所以 `motif_groups` 用的 id 就是比较图里标的 id。`Execute` 校验 2–4 个整数 id、越界/重复/非整数一律 `REJECTED`；每格 470×420 内等比缩放（`xdraw.CatmullRom`，小图放大不用 nearest，避免块状化被误读成"笔画不同"），格上 3× 放大标 id、灰框标出真实图幅，2 列布局，白底；回执给出每张 `宽×高px aspect x.xx` 与「每格都缩放到填满画框、图上大小不可比，只有这些数字可比」，并写明这不是证据。② `motifSubmitTool` 增加 `prefill` 字段：0 组时在 `SUBMITTED.` 后追加「0 组：本次一张都不合并，本会话 N 张图全部按独立处理」+（若预填过）「起始预填的 K 个相似桶同样被清空了，代码不会替你恢复」。③ `motif_groups` 的 `clear` 回执改成报数 + 点名 `remove {n,ids}`/`update {n,key}`，空表也照实说「本来就是空的」。④ `motif_dedupe.go` 在会话之后、副本处理之前打一行 `[dedupe] 小结：核验会话 N 个 + 整理会话 M 个；合并 K 组（X 张不同内容共用代表图，其余 Y 张独立重画）`。
+- **测试**：新增 `TestMotifCompareImagesRendersPanes`（3 个 id → 2×2 画布尺寸、回执里的像素与长宽比）、`TestMotifCompareImagesRejectsBadIDs`（1 个/5 个/越界/重复/非整数全拒）、`TestMotifCompareImagesIsNotEvidence`（比过两张之后 submit 同一组仍 `REJECTED`，`seen` 依然为空）、`TestMotifSubmitZeroGroupsStatesConsequence`、`TestMotifGroupsClearReportsDropped`。
+- 验证：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 14 包全绿（latex 21.6s、img2text 12.0s）；`go vet ./internal/latex/` 干净。

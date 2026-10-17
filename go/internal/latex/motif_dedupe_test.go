@@ -259,6 +259,74 @@ func TestMotifGroupsIncrementalOperations(t *testing.T) {
 	}
 }
 
+// 组内增删与「只换 key」：核验是边看边改的，能只动成员/代表就不该逼模型把整组
+// ID 重打一遍（2031 会话为了给 336 张的组指定 key，只好把 336 个 ID 重发一次）。
+func TestMotifGroupsMemberLevelEdits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "groups.json")
+	tool := NewMotifGroupsTool(path, 8)
+	run := func(raw, want, notWant string) {
+		t.Helper()
+		res, err := tool.Execute(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		if want != "" && !strings.Contains(res.Text, want) {
+			t.Fatalf("%s: want %q in %q", raw, want, res.Text)
+		}
+		if notWant != "" && strings.Contains(res.Text, notWant) {
+			t.Fatalf("%s: unexpected %q in %q", raw, notWant, res.Text)
+		}
+	}
+	state := func() []MotifGroup {
+		t.Helper()
+		got, err := tool.Groups()
+		if err != nil {
+			t.Fatalf("groups: %v", err)
+		}
+		return got
+	}
+
+	run(`{"op":"add","group":[1,2,3],"key":2}`, "key=2", "")
+	run(`{"op":"append","n":1,"ids":[4,5]}`, "现 5 张", "")
+	if got := state(); len(got) != 1 || len(got[0].Members) != 5 || got[0].Members[4] != 5 || got[0].Key != 2 {
+		t.Fatalf("append: %+v", got)
+	}
+	// 已经在组里的 ID 不算错，也不重复追加
+	run(`{"op":"append","n":1,"ids":[3]}`, "没有变化", "")
+	if got := state(); len(got[0].Members) != 5 {
+		t.Fatalf("duplicate append changed state: %+v", got)
+	}
+	// 一个 ID 只能属于一个组
+	run(`{"op":"add","group":[6,7],"key":6}`, "key=6", "")
+	run(`{"op":"append","n":2,"ids":[5]}`, "已在第 1 组", "")
+	// 组内移除不影响别的组与代表图
+	run(`{"op":"remove","n":1,"ids":[4]}`, "剩 4 张", "")
+	if got := state(); len(got[0].Members) != 4 || got[0].Key != 2 || len(got[1].Members) != 2 {
+		t.Fatalf("remove: %+v", got)
+	}
+	// 只换代表图：成员一个都不用重打
+	run(`{"op":"update","n":1,"key":5}`, "key=5", "")
+	if got := state(); got[0].Key != 5 || len(got[0].Members) != 4 {
+		t.Fatalf("key-only update: %+v", got)
+	}
+	// 移走代表图：key 回落到未指定，回执点名要重选
+	run(`{"op":"remove","n":1,"ids":[5]}`, "重新指定", "")
+	if got := state(); got[0].Key != 0 || len(got[0].Members) != 3 {
+		t.Fatalf("remove key: %+v", got)
+	}
+	// 整批原子：有一个 ID 不在该组就整批不动
+	before := state()
+	run(`{"op":"remove","n":1,"ids":[1,7]}`, "不在第 1 组", "")
+	if after := state(); len(after[0].Members) != len(before[0].Members) {
+		t.Fatalf("rejected remove changed state: %+v", after)
+	}
+	// 移空到只剩 1 张：该组解散（单张本来就不需要分组）
+	run(`{"op":"remove","n":1,"ids":[1,3]}`, "解散该组", "")
+	if got := state(); len(got) != 1 || got[0].Members[0] != 6 {
+		t.Fatalf("dissolve: %+v", got)
+	}
+}
+
 // 相似度只作参考：advisory 文件写出初始组与像素一致标记，manifest 每行带
 // similarity_hint；未命中相似度的图片同样出现在全量清单里。
 func TestMotifAdvisoryIsReferenceOnly(t *testing.T) {
