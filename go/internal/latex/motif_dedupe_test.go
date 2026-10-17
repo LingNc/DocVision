@@ -468,3 +468,69 @@ func TestMotifProgressDirIsUnderSource(t *testing.T) {
 		t.Fatalf("motifProgressDir = %q, want %q", got, want)
 	}
 }
+
+// 逐字节一致 = 同一张图片：同一份文件被引用 N 遍时，只看一份就够了。
+// 这里钉住"收缩"的行为——代表图按 task key 顺序取第一张，其余进副本表。
+func TestMotifContentLeadersCollapseIdenticalBytes(t *testing.T) {
+	mk := func(name, hash string) *motifCandidate {
+		return &motifCandidate{task: &task{mdName: "book.md", imgPath: name}, sourceHash: hash, progress: &imageProgress{}}
+	}
+	pool := []*motifCandidate{
+		mk("a.png", "same-1"),
+		mk("b.png", "same-2"),
+		mk("c.png", "same-1"),
+		mk("d.png", "same-1"),
+		mk("e.png", "same-2"),
+	}
+	leaders, copies := motifContentLeaders(pool)
+	if len(leaders) != 2 || leaders[0] != pool[0] || leaders[1] != pool[1] {
+		t.Fatalf("leaders=%v, want first occurrence of each content", leaders)
+	}
+	if len(copies[pool[0]]) != 2 || len(copies[pool[1]]) != 1 {
+		t.Fatalf("copies: %d / %d, want 2 / 1", len(copies[pool[0]]), len(copies[pool[1]]))
+	}
+	// 内容全相同的极端情形也不能丢：只剩一个代表，其余全是副本。
+	leaders, copies = motifContentLeaders([]*motifCandidate{mk("a.png", "h"), mk("b.png", "h"), mk("c.png", "h")})
+	if len(leaders) != 1 || len(copies[leaders[0]]) != 2 {
+		t.Fatalf("one content must keep one representative: %d leaders, %d copies", len(leaders), len(copies[leaders[0]]))
+	}
+}
+
+// 副本不参与核验，结论在最后补：代表图被合并就跟着同一个 leader，代表图独立
+// 就跟着代表图本身；两者都属于"同一张图片"，不存在误判风险。
+func TestMotifAdoptCopiesFollowsRepresentativeVerdict(t *testing.T) {
+	progDir := t.TempDir()
+	mk := func(name, hash, class string) *motifCandidate {
+		tk := &task{mdName: "book.md", imgPath: name}
+		return &motifCandidate{task: tk, sourceHash: hash, progress: &imageProgress{Key: tk.key(), MDName: tk.mdName, ImgPath: tk.imgPath, Class: class}}
+	}
+	merged := mk("merged.png", "h-merged", ClassVector)
+	key := mk("key.png", "h-key", ClassVector)
+	alone := mk("alone.png", "h-alone", ClassRaster)
+	// 代表图 merged 已被并进 key 的组里（applyMotifEquivalenceWithKey 会写这条关系）。
+	merged.progress.EquivalentTo = key.task.key()
+	byKey := map[string]*motifCandidate{merged.task.key(): merged, key.task.key(): key, alone.task.key(): alone}
+	copyOfMerged := mk("merged-copy.png", "h-merged", ClassVector)
+	copyOfAlone := mk("alone-copy.png", "h-alone", ClassRaster)
+	copies := map[*motifCandidate][]*motifCandidate{merged: {copyOfMerged}, alone: {copyOfAlone}}
+	if n := motifAdoptCopies([]*motifCandidate{merged, key, alone}, copies, byKey, progDir); n != 2 {
+		t.Fatalf("adopted=%d, want 2", n)
+	}
+	if copyOfMerged.progress.EquivalentTo != key.task.key() || copyOfMerged.progress.DedupeLeaderHash != "h-key" {
+		t.Fatalf("copy must follow the representative's leader: %+v", copyOfMerged.progress)
+	}
+	if copyOfAlone.progress.EquivalentTo != alone.task.key() || copyOfAlone.progress.DedupeLeaderHash != "h-alone" {
+		t.Fatalf("copy of an independent image must follow it: %+v", copyOfAlone.progress)
+	}
+	for _, c := range []*motifCandidate{copyOfMerged, copyOfAlone} {
+		if !c.progress.DedupeChecked || c.progress.DedupeSourceHash != c.sourceHash {
+			t.Fatalf("copy must be recorded as resolved: %+v", c.progress)
+		}
+	}
+	// 落盘才算数：续跑与 process 都从 progress_items 读等价关系。
+	loaded := map[string]*imageProgress{}
+	loadProgress(progDir, loaded)
+	if got := loaded[copyOfMerged.task.key()]; got == nil || got.EquivalentTo != key.task.key() {
+		t.Fatalf("copy verdict not persisted: %+v", got)
+	}
+}

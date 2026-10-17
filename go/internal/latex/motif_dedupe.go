@@ -92,8 +92,28 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 			saveProgress(progDir, p)
 		}
 	}
-	vis := make([]VisualMotifSample, 0, len(samples))
-	for _, s := range samples {
+	// Similarity is an advisory index only. The AI sees every classified image,
+	// including images that the local detector failed to pair with a neighbour.
+	pool := make([]*motifCandidate, 0, len(samples))
+	for i := range samples {
+		pool = append(pool, &samples[i])
+	}
+	sort.Slice(pool, func(i, j int) bool { return pool[i].task.key() < pool[j].task.key() })
+	byTaskKey := make(map[string]*motifCandidate, len(pool))
+	for _, c := range pool {
+		byTaskKey[c.task.key()] = c
+	}
+	// 逐字节一致的图在书里常常出现几十次：同一张图被 PDF 引用 N 遍，只是提取
+	// 时各拿了一个名字。字节完全相同就是同一张图片，既不用问模型、也不用看 N
+	// 遍——只留一份进核验会话，其余副本跟着代表图的结论走。这里没有放宽相似度
+	// （"宁可漏"针对的是要看图的相似判断），字节相同不存在看错的可能。
+	pool, copies := motifContentLeaders(pool)
+	repeats := 0
+	for _, dups := range copies {
+		repeats += len(dups)
+	}
+	vis := make([]VisualMotifSample, 0, len(pool))
+	for _, s := range pool {
 		vis = append(vis, VisualMotifSample{Key: s.task.key(), Image: s.image})
 	}
 	groups := FindVisualMotifCandidates(vis)
@@ -103,17 +123,15 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 			advisory[key] = motifAdvisory{Group: gi + 1, Exact: group.Exact}
 		}
 	}
-	// Similarity is an advisory index only. The AI sees every classified image,
-	// including images that the local detector failed to pair with a neighbour.
-	pool := make([]*motifCandidate, 0, len(samples))
-	for i := range samples {
-		pool = append(pool, &samples[i])
-	}
-	r.log.Log(0, "[dedupe] 初始相似候选", fmt.Sprint(len(groups)), "组，命中", fmt.Sprint(len(advisory)), "/", fmt.Sprint(len(pool)), "张；AI 分组核验")
+	r.log.Log(0, fmt.Sprintf("[dedupe] 初始相似候选 %d 组，命中 %d / %d 张不同内容；逐字节重复 %d 张不进会话，自动跟随代表图",
+		len(groups), len(advisory), len(pool), repeats))
 	if len(pool) < 2 {
+		// 全池只有一种内容：不需要核验，其余副本直接跟随这一张。
+		if n := motifAdoptCopies(pool, copies, byTaskKey, progDir); n > 0 {
+			r.log.Log(0, fmt.Sprintf("[dedupe] 全部候选图逐字节一致，%d 张跟随 %s", n, pool[0].task.key()))
+		}
 		return
 	}
-	sort.Slice(pool, func(i, j int) bool { return pool[i].task.key() < pool[j].task.key() })
 	allChecked := true
 	for _, c := range pool {
 		if !c.progress.DedupeChecked {
@@ -122,6 +140,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		}
 	}
 	if allChecked {
+		motifAdoptCopies(pool, copies, byTaskKey, progDir)
 		progress.verify(1, 1, len(pool), 0)
 		return
 	}
@@ -164,7 +183,63 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	} else if len(applied) == 0 {
 		r.log.Log(0, "[dedupe] 本次没有通过校验的分组，跳过整理会话；process 将逐图处理")
 	}
+	// 副本没有进会话（字节相同，进会话只是把同一张图重复看一遍），它们的
+	// 结论在最后一步补上：跟着各自代表图走——代表图被合并就一起合并，代表
+	// 图独立就一起独立，反正本来就是同一张图片。
+	if n := motifAdoptCopies(pool, copies, byTaskKey, progDir); n > 0 {
+		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张逐字节重复的图片跟随代表图，不重复作图", n))
+	}
 	progress.verify(steps, steps, len(pool), failed)
+}
+
+// motifContentLeaders splits the pool into one representative per distinct file
+// content. Byte equality is proof of identity here: the copies are the very same
+// bytes, so inspecting/redrawing one of them covers all of them. Only the
+// survivors of the AI verification ever reach a session.
+func motifContentLeaders(pool []*motifCandidate) ([]*motifCandidate, map[*motifCandidate][]*motifCandidate) {
+	copies := map[*motifCandidate][]*motifCandidate{}
+	index := make(map[string]*motifCandidate, len(pool))
+	leaders := make([]*motifCandidate, 0, len(pool))
+	for _, c := range pool {
+		if leader, ok := index[c.sourceHash]; ok {
+			copies[leader] = append(copies[leader], c)
+			continue
+		}
+		index[c.sourceHash] = c
+		leaders = append(leaders, c)
+	}
+	return leaders, copies
+}
+
+// motifAdoptCopies links every byte-identical copy to whatever its representative
+// settled on: the representative's leader when the AI merged it, the
+// representative itself otherwise. A copy is never given a different verdict than
+// its own bytes, and DedupeChecked is safe to set without a view because the
+// representative's picture was inspected (or its independence accepted).
+func motifAdoptCopies(leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, byTaskKey map[string]*motifCandidate, progDir string) int {
+	linked := 0
+	for _, rep := range leaders {
+		dups := copies[rep]
+		if len(dups) == 0 {
+			continue
+		}
+		leader := rep
+		if rep.progress.EquivalentTo != "" {
+			if l := byTaskKey[rep.progress.EquivalentTo]; l != nil {
+				leader = l
+			}
+		}
+		for _, c := range dups {
+			c.progress.EquivalentTo = leader.task.key()
+			c.progress.DedupeLeaderHash = leader.sourceHash
+			c.progress.DedupeVersion = motifDedupeVersion
+			c.progress.DedupeSourceHash = c.sourceHash
+			c.progress.DedupeChecked = true
+			saveProgress(progDir, c.progress)
+			linked++
+		}
+	}
+	return linked
 }
 
 // motifAppliedGroup is a confirmed group: only Key is redrawn, every other
