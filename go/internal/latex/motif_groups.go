@@ -11,6 +11,15 @@ import (
 	"mineru-tools/internal/session"
 )
 
+// MotifGroup is one final structural group. Key is the representative the AI
+// picked as the most characteristic member: the one the shared drawing is made
+// from, and the one every other member is compared against. A group without a
+// key is incomplete — reducing N drawings to one requires naming which one.
+type MotifGroup struct {
+	Key     int   `json:"key"`
+	Members []int `json:"members"`
+}
+
 // MotifGroupsTool is the editable, persisted staging area for a large AI
 // grouping job. It mirrors split/goal semantics: every mutation is validated
 // before the JSON file changes, so a long review can be resumed and corrected
@@ -28,28 +37,42 @@ func (t *MotifGroupsTool) Name() string { return "motif_groups" }
 func (t *MotifGroupsTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "motif_groups",
-		"description": "Maintain final structural image groups in groups.json. ops: list, add {group:[ids]} or {groups:[[ids],...]}, update {n,group}, delete {n} or {ns:[...]}, clear. IDs are 1-based candidate-pool indices; a member may occur in at most one group. Mutations are validated and persisted immediately. When finished, call submit with no groups argument.",
+		"description": "Maintain final structural image groups in groups.json. ops: list, add {group:[ids],key} or {groups:[{members:[ids],key}]}, update {n,group,key}, delete {n} or {ns:[...]}, clear. IDs are 1-based pool indices; a member may occur in at most one group. Every group needs key = the single most representative member (the one that gets redrawn; others reuse it). Mutations are validated and persisted immediately. When finished, call submit with no groups argument.",
 		"parameters": map[string]any{"type": "object", "properties": map[string]any{
 			"op":     map[string]any{"type": "string", "enum": []string{"list", "add", "update", "delete", "clear"}},
 			"group":  map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 1}},
 			"groups": map[string]any{"type": "array", "items": map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 1}}},
+			"key":    map[string]any{"type": "integer", "minimum": 1, "description": "代表图/关键成员 ID，必须是该组成员"},
 			"n":      map[string]any{"type": "integer", "minimum": 1},
 			"ns":     map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 1}},
 		}, "required": []string{"op"}},
 	}}
 }
 
-func (t *MotifGroupsTool) loadLocked() [][]int {
+func (t *MotifGroupsTool) loadLocked() []MotifGroup {
 	var obj struct {
-		Groups [][]int `json:"groups"`
+		Groups []MotifGroup `json:"groups"`
 	}
 	data, err := os.ReadFile(t.path)
-	if err == nil {
-		_ = json.Unmarshal(data, &obj)
+	if err == nil && json.Unmarshal(data, &obj) == nil {
+		return obj.Groups
 	}
-	return obj.Groups
+	// Tolerate the pre-key schema ([[ids],...]) so an interrupted older run can
+	// resume: those groups simply have no key yet and cannot be submitted until
+	// one is chosen.
+	var legacy struct {
+		Groups [][]int `json:"groups"`
+	}
+	if err == nil && json.Unmarshal(data, &legacy) == nil {
+		out := make([]MotifGroup, 0, len(legacy.Groups))
+		for _, g := range legacy.Groups {
+			out = append(out, MotifGroup{Members: g})
+		}
+		return out
+	}
+	return nil
 }
-func (t *MotifGroupsTool) saveLocked(groups [][]int) error {
+func (t *MotifGroupsTool) saveLocked(groups []MotifGroup) error {
 	data, err := json.MarshalIndent(map[string]any{"groups": groups}, "", "  ")
 	if err != nil {
 		return err
@@ -74,12 +97,24 @@ func normalizeMotifGroup(raw []int, count int) ([]int, error) {
 	sort.Ints(out)
 	return out, nil
 }
-func validateMotifGroups(groups [][]int, count int) error {
+func validateMotifGroups(groups []MotifGroup, count int) error {
 	used := map[int]int{}
 	for i, g := range groups {
-		ng, err := normalizeMotifGroup(g, count)
+		ng, err := normalizeMotifGroup(g.Members, count)
 		if err != nil {
 			return fmt.Errorf("第 %d 组：%w", i+1, err)
+		}
+		if g.Key != 0 {
+			found := false
+			for _, id := range ng {
+				if id == g.Key {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("第 %d 组：key %d 不在该组里（key 必须是组内最有代表性的一张）", i+1, g.Key)
+			}
 		}
 		for _, id := range ng {
 			if prev, ok := used[id]; ok {
@@ -90,18 +125,36 @@ func validateMotifGroups(groups [][]int, count int) error {
 	}
 	return nil
 }
-func renderMotifGroups(groups [][]int) string {
+
+// validateMotifGroupShape enforces the one thing that makes a group useful:
+// a chosen representative. Putting the whole pool in a single group is allowed
+// (the user explicitly wants that possible) as long as one member is named as
+// the key: process then draws only that key and every other member reuses it.
+func validateMotifGroupShape(groups []MotifGroup, count int) error {
+	for i, g := range groups {
+		if g.Key == 0 {
+			return fmt.Errorf("第 %d 组还没有 key：请挑出该组最有代表性的一张作为 key（其余成员之后直接复用它的图，只有 key 会被重画）", i+1)
+		}
+	}
+	return nil
+}
+
+func renderMotifGroups(groups []MotifGroup) string {
 	if len(groups) == 0 {
 		return "groups.json 为空，当前没有暂存分组。"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d 个分组：\n", len(groups))
 	for i, g := range groups {
-		fmt.Fprintf(&b, "%d. %v\n", i+1, g)
+		key := "key=? (必须指定)"
+		if g.Key != 0 {
+			key = fmt.Sprintf("key=%d", g.Key)
+		}
+		fmt.Fprintf(&b, "%d. %s %v\n", i+1, key, g.Members)
 	}
 	return b.String()
 }
-func (t *MotifGroupsTool) Groups() ([][]int, error) {
+func (t *MotifGroupsTool) Groups() ([]MotifGroup, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	groups := t.loadLocked()
@@ -150,7 +203,7 @@ func (t *MotifGroupsTool) Execute(raw string) (session.ToolResult, error) {
 			}
 			drop[n-1] = true
 		}
-		kept := make([][]int, 0, len(groups))
+		kept := make([]MotifGroup, 0, len(groups))
 		for i, g := range groups {
 			if !drop[i] {
 				kept = append(kept, g)
@@ -161,12 +214,48 @@ func (t *MotifGroupsTool) Execute(raw string) (session.ToolResult, error) {
 		}
 		return session.ToolResult{Text: "OK.\n" + renderMotifGroups(kept)}, nil
 	case "add", "update":
-		work := make([][]int, len(groups))
+		work := make([]MotifGroup, len(groups))
 		for i, g := range groups {
-			work[i] = append([]int(nil), g...)
+			work[i] = MotifGroup{Key: g.Key, Members: append([]int(nil), g.Members...)}
 		}
-		var raws []any
+		parseGroup := func(raw any) (MotifGroup, string) {
+			var ids []int
+			key := 0
+			switch v := raw.(type) {
+			case []any: // legacy: bare id array, no key yet
+				for _, item := range v {
+					f, ok := item.(float64)
+					if !ok {
+						return MotifGroup{}, "group ID 必须是整数，整批未动。"
+					}
+					ids = append(ids, int(f))
+				}
+			case map[string]any:
+				members, _ := v["members"].([]any)
+				if members == nil {
+					members, _ = v["group"].([]any)
+				}
+				for _, item := range members {
+					f, ok := item.(float64)
+					if !ok {
+						return MotifGroup{}, "members ID 必须是整数，整批未动。"
+					}
+					ids = append(ids, int(f))
+				}
+				if f, ok := v["key"].(float64); ok {
+					key = int(f)
+				}
+			default:
+				return MotifGroup{}, "group 既不是 ID 数组也不是 {members,key} 对象，整批未动。"
+			}
+			members, e := normalizeMotifGroup(ids, t.count)
+			if e != nil {
+				return MotifGroup{}, e.Error() + "，整批未动。"
+			}
+			return MotifGroup{Key: key, Members: members}, ""
+		}
 		if op == "add" {
+			var raws []any
 			if v, ok := args["groups"].([]any); ok && len(v) > 0 {
 				raws = v
 			} else if v, ok := args["group"].([]any); ok {
@@ -174,22 +263,17 @@ func (t *MotifGroupsTool) Execute(raw string) (session.ToolResult, error) {
 			} else {
 				return session.ToolResult{Text: "REJECTED: add 需要 group 或 groups。"}, nil
 			}
+			topKey := intArg(args, "key", 0)
+			if topKey > 0 && len(raws) > 1 {
+				return session.ToolResult{Text: "REJECTED: 顶层 key 只能配合单个 group；批量请让每个 group 自带 key，整批未动。"}, nil
+			}
 			for i, rawGroup := range raws {
-				vals, ok := rawGroup.([]any)
-				if !ok {
-					return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个 group 不是数组，整批未动。", i+1)}, nil
+				g, msg := parseGroup(rawGroup)
+				if msg != "" {
+					return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 组：%s", i+1, msg)}, nil
 				}
-				ids := make([]int, 0, len(vals))
-				for _, v := range vals {
-					f, ok := v.(float64)
-					if !ok {
-						return session.ToolResult{Text: "REJECTED: group ID 必须是整数，整批未动。"}, nil
-					}
-					ids = append(ids, int(f))
-				}
-				g, e := normalizeMotifGroup(ids, t.count)
-				if e != nil {
-					return session.ToolResult{Text: "REJECTED: " + e.Error() + "，整批未动。"}, nil
+				if _, isMap := rawGroup.(map[string]any); !isMap && topKey > 0 {
+					g.Key = topKey
 				}
 				work = append(work, g)
 			}
@@ -198,21 +282,29 @@ func (t *MotifGroupsTool) Execute(raw string) (session.ToolResult, error) {
 			if n < 1 || n > len(work) {
 				return session.ToolResult{Text: "REJECTED: update n 超出范围，整批未动。"}, nil
 			}
-			vals, ok := args["group"].([]any)
+			raw, ok := args["group"]
 			if !ok {
-				return session.ToolResult{Text: "REJECTED: update 需要 group。"}, nil
+				raw = args["members"]
 			}
-			ids := make([]int, 0, len(vals))
-			for _, v := range vals {
-				f, ok := v.(float64)
-				if !ok {
-					return session.ToolResult{Text: "REJECTED: group ID 必须是整数，整批未动。"}, nil
+			if raw == nil {
+				return session.ToolResult{Text: "REJECTED: update 需要 group 或 members。"}, nil
+			}
+			g, msg := parseGroup(raw)
+			if msg != "" {
+				return session.ToolResult{Text: "REJECTED: " + msg}, nil
+			}
+			if k := intArg(args, "key", 0); k > 0 {
+				g.Key = k
+			} else if g.Key == 0 {
+				// Keep the previously chosen representative across member edits,
+				// but drop it when that member is no longer part of the group.
+				prev := work[n-1].Key
+				for _, id := range g.Members {
+					if id == prev {
+						g.Key = prev
+						break
+					}
 				}
-				ids = append(ids, int(f))
-			}
-			g, e := normalizeMotifGroup(ids, t.count)
-			if e != nil {
-				return session.ToolResult{Text: "REJECTED: " + e.Error() + "，整批未动。"}, nil
 			}
 			work[n-1] = g
 		}

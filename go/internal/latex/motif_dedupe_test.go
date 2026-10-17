@@ -3,6 +3,9 @@ package latex
 import (
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -109,10 +112,11 @@ func TestVerifyMotifCandidatesIndependentVisionSession(t *testing.T) {
 		switch len(requests) {
 		case 1:
 			jsonToolReply(w, "read_file", `{"path":"candidates:manifest.md"}`)
-		case 2:
-			jsonToolReply(w, "view_image", `{"path":"sheets/001.png"}`)
-		case 3:
-			jsonToolReply(w, "motif_groups", `{"op":"add","group":[1,2,3,4,5,6,7,8,9,10,11,12]}`)
+		case 2, 3, 4:
+			// Evidence must come from individual originals: no contact sheets exist.
+			jsonToolReply(w, "view_image", fmt.Sprintf(`{"path":"originals/%06d.png"}`, len(requests)-1))
+		case 5:
+			jsonToolReply(w, "motif_groups", `{"op":"add","group":[1,2,3],"key":2}`)
 		default:
 			jsonToolReply(w, "submit", `{}`)
 		}
@@ -131,17 +135,27 @@ func TestVerifyMotifCandidatesIndependentVisionSession(t *testing.T) {
 		members = append(members, &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("original-%d.png", i+1)}, path: a, sourceHash: fmt.Sprint(i)})
 	}
 	groups, err := r.verifyMotifCandidates(members, root, 0, 0)
-	if err != nil || len(groups) != 1 || len(groups[0]) != 12 {
+	if err != nil || len(groups) != 1 || len(groups[0].Members) != 3 || groups[0].Key != 2 {
 		t.Fatalf("verdict=%v err=%v", groups, err)
 	}
-	if len(requests) != 4 {
-		t.Fatalf("whole group must use one tool session: %d requests", len(requests))
+	if len(requests) != 6 {
+		t.Fatalf("one tool session expected: %d requests", len(requests))
 	}
-	if strings.Contains(requests[0], `"type":"image_url"`) || !strings.Contains(requests[0], "text-vision") || !strings.Contains(requests[0], "12 images") {
-		t.Fatalf("initial message must contain full manifest, not attachments: %.900s", requests[0])
+	if strings.Contains(requests[0], `"type":"image_url"`) || !strings.Contains(requests[0], "12 images") {
+		t.Fatalf("initial message must contain the manifest, not attachments: %.900s", requests[0])
 	}
-	if !strings.Contains(requests[2], `"type":"image_url"`) {
+	imageSeen := false
+	for _, r := range requests[1:] {
+		if strings.Contains(r, `"type":"image_url"`) {
+			imageSeen = true
+			break
+		}
+	}
+	if !imageSeen {
 		t.Fatal("view_image receipt must provide actual visual input")
+	}
+	if strings.Contains(requests[0], "sheets/") {
+		t.Fatal("contact sheets must not be advertised any more")
 	}
 	transcripts, err := filepath.Glob(filepath.Join(root, "sessions", "motif_dedupe_*.jsonl"))
 	if err != nil || len(transcripts) != 1 {
@@ -155,7 +169,9 @@ func TestVerifyMotifCandidatesIndependentVisionSession(t *testing.T) {
 	}
 }
 
-func TestMotifWholeGroup336Images(t *testing.T) {
+// 相似桶直接预填进 groups.json（key 留空由 AI 选），并且不再生成联系图：
+// 证据只能来自逐张原图，避免"看几张拼图就声称看过几百张"。
+func TestMotifPoolPrefillsBucketsWithoutContactSheets(t *testing.T) {
 	root := t.TempDir()
 	path := tinyPNG(t, filepath.Join(root, "original.png"))
 	img, err := decodeImage(path)
@@ -163,37 +179,40 @@ func TestMotifWholeGroup336Images(t *testing.T) {
 		t.Fatal(err)
 	}
 	members := make([]*motifCandidate, 336)
+	advisory := map[string]motifAdvisory{}
 	for i := range members {
-		members[i] = &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("image-%d.png", i+1)}, path: path, image: img}
+		members[i] = &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("image-%d.png", i+1)}, path: path, image: img, progress: &imageProgress{Class: ClassVector}}
+		if i < 12 {
+			advisory[members[i].task.key()] = motifAdvisory{Group: 1, Exact: true}
+		}
 	}
-	covered, err := prepareMotifView(filepath.Join(root, "view"), members)
+	view := filepath.Join(root, "view")
+	if err := prepareMotifViewWithAdvisory(view, members, advisory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(view, "sheets")); !os.IsNotExist(err) {
+		t.Fatalf("contact sheets must not be generated: %v", err)
+	}
+	var stored struct {
+		Groups []MotifGroup `json:"groups"`
+	}
+	raw, err := os.ReadFile(filepath.Join(view, "groups.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Groups) != 1 || len(stored.Groups[0].Members) != 12 || stored.Groups[0].Key != 0 {
+		t.Fatalf("buckets must be pre-filled with an unset key: %s", raw)
+	}
 	seen := map[int]bool{}
-	view := &motifViewTool{base: &ViewImageTool{Root: filepath.Join(root, "view")}, covered: covered, seen: seen}
-	for i := 1; i <= 6; i++ {
-		res, err := view.Execute(fmt.Sprintf(`{"path":"sheets/%03d.png"}`, i))
-		if err != nil || res.ImageBase64 == "" {
-			t.Fatalf("sheet %d: %v", i, err)
-		}
+	vt := &motifViewTool{base: &ViewImageTool{Root: view}, seen: seen}
+	if res, err := vt.Execute(`{"path":"originals/000001.png"}`); err != nil || res.ImageBase64 == "" {
+		t.Fatalf("view original: %v", err)
 	}
-	if len(seen) != 336 {
-		t.Fatalf("viewed %d/336", len(seen))
-	}
-	ids := make([]int, 336)
-	for i := range ids {
-		ids[i] = i + 1
-	}
-	raw, _ := json.Marshal(map[string]any{"group": ids, "op": "add"})
-	groupTool := NewMotifGroupsTool(filepath.Join(root, "groups.json"), 336)
-	if res, err := groupTool.Execute(string(raw)); err != nil || strings.Contains(res.Text, "REJECTED") {
-		t.Fatalf("stage whole group: %+v %v", res, err)
-	}
-	submit := &motifSubmitTool{groups: groupTool, seen: seen}
-	res, err := submit.Execute(`{}`)
-	if err != nil || !res.Terminal || !submit.done.Submitted {
-		t.Fatalf("whole group lost: %v %v", res.Text, err)
+	if len(seen) != 1 || !seen[1] {
+		t.Fatalf("viewing one original must mark exactly that id: %v", seen)
 	}
 }
 
@@ -201,7 +220,7 @@ func TestMotifSubmitRequiresVisualEvidence(t *testing.T) {
 	root := t.TempDir()
 	groups := NewMotifGroupsTool(filepath.Join(root, "groups.json"), 3)
 	tool := &motifSubmitTool{groups: groups, seen: map[int]bool{1: true}}
-	res, err := groups.Execute(`{"op":"add","group":[1,2]}`)
+	res, err := groups.Execute(`{"op":"add","group":[1,2],"key":1}`)
 	if err != nil || strings.Contains(res.Text, "REJECTED") {
 		t.Fatalf("stage group failed: %+v %v", res, err)
 	}
@@ -219,14 +238,15 @@ func TestMotifSubmitRequiresVisualEvidence(t *testing.T) {
 func TestMotifGroupsIncrementalOperations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "groups.json")
 	tool := NewMotifGroupsTool(path, 6)
-	for _, raw := range []string{`{"op":"add","group":[1,2]}`, `{"op":"add","group":[3,4]}`, `{"op":"update","n":2,"group":[3,5]}`, `{"op":"delete","n":1}`} {
+	for _, raw := range []string{`{"op":"add","group":[1,2],"key":1}`, `{"op":"add","group":[3,4],"key":4}`, `{"op":"update","n":2,"group":[3,5]}`, `{"op":"delete","n":1}`} {
 		res, err := tool.Execute(raw)
 		if err != nil || strings.Contains(res.Text, "REJECTED") {
 			t.Fatalf("op %s: %+v %v", raw, res, err)
 		}
 	}
 	got, err := tool.Groups()
-	if err != nil || len(got) != 1 || len(got[0]) != 2 || got[0][0] != 3 || got[0][1] != 5 {
+	// key 4 was replaced by a member edit, so the representative is unset again
+	if err != nil || len(got) != 1 || len(got[0].Members) != 2 || got[0].Members[0] != 3 || got[0].Members[1] != 5 || got[0].Key != 0 {
 		t.Fatalf("groups=%v err=%v", got, err)
 	}
 	res, err := tool.Execute(`{"op":"add","groups":[[5,6],[2,2]]}`)
@@ -234,7 +254,7 @@ func TestMotifGroupsIncrementalOperations(t *testing.T) {
 		t.Fatalf("invalid batch accepted: %+v %v", res, err)
 	}
 	got, _ = tool.Groups()
-	if len(got) != 1 || got[0][0] != 3 || got[0][1] != 5 {
+	if len(got) != 1 || got[0].Members[0] != 3 || got[0].Members[1] != 5 {
 		t.Fatalf("invalid batch changed state: %v", got)
 	}
 }
@@ -262,7 +282,7 @@ func TestMotifAdvisoryIsReferenceOnly(t *testing.T) {
 		members[0].task.key(): {Group: 1, Exact: true},
 		members[1].task.key(): {Group: 1},
 	}
-	if _, err := prepareMotifViewWithAdvisory(filepath.Join(root, "view"), members, advisory); err != nil {
+	if err := prepareMotifViewWithAdvisory(filepath.Join(root, "view"), members, advisory); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, "view", "similarity_advisory.json"))
@@ -277,11 +297,101 @@ func TestMotifAdvisoryIsReferenceOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(manifest)
-	if !strings.Contains(text, "similarity_hint=group-1:exact-pixels") {
-		t.Fatalf("manifest missing exact hint: %s", text)
+	if !strings.Contains(text, "bucket 1 — 2 image(s)") {
+		t.Fatalf("manifest missing the initial bucket: %s", text)
 	}
 	// 第三张没有相似提示，但必须仍在全量清单里（不被排除）。
-	if !strings.Contains(text, "3. originals/000003.png") || !strings.Contains(text, "similarity_hint=none") {
+	if !strings.Contains(text, "## Images with no similarity hint (1)") || !strings.Contains(text, "3. originals/000003.png") {
 		t.Fatalf("unmatched image must stay in the pool: %s", text)
+	}
+}
+
+// 按相似组分配会话：大桶单独一个会话，小桶与未命中图按 dedupe_batch_images 合并；
+// 0 表示退回"整池一个会话"。
+func TestMotifScopesFollowBucketSize(t *testing.T) {
+	r := keepTestRunner(t)
+	mk := func(n int) []*motifCandidate {
+		out := make([]*motifCandidate, n)
+		for i := range out {
+			out[i] = &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("i%d.png", i)}}
+		}
+		return out
+	}
+	pool := mk(30)
+	advisory := map[string]motifAdvisory{}
+	for i, c := range pool {
+		switch {
+		case i < 12: // 大桶：超过阈值 10，独立成会话
+			advisory[c.task.key()] = motifAdvisory{Group: 1}
+		case i < 16: // 小桶
+			advisory[c.task.key()] = motifAdvisory{Group: 2}
+		}
+	}
+	r.cfg.Latex.DedupeGroupSessionOver = 10
+	r.cfg.Latex.DedupeBatchImages = 40
+	scopes := r.motifScopes(pool, advisory)
+	if len(scopes) != 2 || len(scopes[0]) != 12 || len(scopes[1]) != 18 {
+		sizes := make([]int, len(scopes))
+		for i, s := range scopes {
+			sizes[i] = len(s)
+		}
+		t.Fatalf("scopes=%v, want [12 18]", sizes)
+	}
+	// 批量上限生效：小桶 + 未命中图超过上限时再拆一个整理会话。
+	r.cfg.Latex.DedupeBatchImages = 10
+	scopes = r.motifScopes(pool, advisory)
+	total := 0
+	for _, s := range scopes {
+		total += len(s)
+		if len(s) > 12 { // 大桶自己 12 张，整理会话不得超过 10
+			if len(s) > 10 {
+				t.Fatalf("consolidation scope too large: %d", len(s))
+			}
+		}
+	}
+	if total != 30 {
+		t.Fatalf("scopes lost images: %d/30", total)
+	}
+	// 0 = 旧行为：整池一个会话。
+	r.cfg.Latex.DedupeGroupSessionOver = 0
+	if scopes = r.motifScopes(pool, advisory); len(scopes) != 1 || len(scopes[0]) != 30 {
+		t.Fatalf("group_session_over=0 must keep one session, got %d", len(scopes))
+	}
+}
+
+// 代码侧的保守闸门：与代表图相似度不足的成员即使被 AI 并进组里，也保持独立
+// （宁可漏掉重复，也不能合并后丢信息）。
+func TestMotifMergeGateRejectsDissimilarMembers(t *testing.T) {
+	root := t.TempDir()
+	same := tinyPNG(t, filepath.Join(root, "same.png"))
+	img, err := decodeImage(same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 一张完全不同结构的图：纯色大块横条，与 tinyPNG 的点阵毫无相似度。
+	otherPath := filepath.Join(root, "other.png")
+	other := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for y := 0; y < 64; y++ {
+		for x := 0; x < 64; x++ {
+			other.Set(x, y, color.RGBA{R: 255, A: 255})
+		}
+	}
+	f, err := os.Create(otherPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, other); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	otherImg, err := decodeImage(otherPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if MotifSimilarTo(img, otherImg) {
+		t.Fatal("dissimilar images must not pass the merge gate")
+	}
+	if !MotifSimilarTo(img, img) {
+		t.Fatal("identical images must pass the merge gate")
 	}
 }

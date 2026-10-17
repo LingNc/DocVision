@@ -758,3 +758,7 @@ user 轮
   （已修：全部已分类图片进入同一个核验会话；相似度只写进 manifest 的 `similarity_hint` 与 `similarity_advisory.json` 作参考；最终组要求全员 vector 才建立共享。）
 [X][ ] T117. 会话在工具预算耗尽后可能无限空转：模型无视 `tool_choice: none` 一直返回工具调用时，那段"补跑工具以保证 wire 合法"的分支没有任何上限，会话永不返回（此前被 128K 上下文默认值掩盖——上下文一超就尝试压缩、压缩请求失败顺手结束了会话）。默认上下文改为不限制后立刻暴露：`TestCheckerRetriesAfterSessionFailure` 挂死 45s 以上。
   （已修：预算耗尽后最多补跑 2 轮工具，仍被要求调用工具就返回错误 `model kept calling tools after the tool-round budget was exhausted`；回归测试 `TestToolCallsAfterBudgetAreBounded` 钉住请求数上限。）
+
+[X][ ] T118. 整组核验在真实运行里既没看见差异、又把全部图片交成了一个组：联系图（sheets/*.png 每张拼 64 格）让模型只调 7 次 view_image 就"看过"388 张，而缩略格里的题号/下标根本看不出来；`groups.json` 最终是 `[[1..388]]` 一组且不要求任何代表图，因"全员 vector"校验失败而全部退回逐图处理（用户观察到的"还在对所有的进行 process 处理"）。
+  （已改：删除联系图，证据只能来自逐张 `originals/NNNNNN.*` 未裁剪的看图；按相似桶预填 `groups.json` 作为起点；每组必须选 `key`（代表图），submit 在缺 key 时直接打回；按 `latex.dedupe_group_session_over` 给大桶单独开会话、小桶按 `latex.dedupe_batch_images` 合并成整理会话；`MotifSimilarTo` 兜底——与代表图相似度不足的成员即使被 AI 并进组也保持独立。新增 `TestVerifyMotifCandidatesIndependentVisionSession`、`TestMotifPoolPrefillsBucketsWithoutContactSheets`、`TestMotifScopesFollowBucketSize`、`TestMotifMergeGateRejectsDissimilarMembers`。）
+

@@ -270,6 +270,12 @@ type LatexConfig struct {
 	// values fall back to the top-level ai block.
 	ClassifierModel string `yaml:"classifier_model"`
 	DedupeModel     string `yaml:"dedupe_model"` // 档位1视觉重复图核验；空回退 text
+	// DedupeGroupSessionOver: a similarity bucket with more members than this
+	// gets its own verification session (0 = 整池一个会话，旧行为).
+	DedupeGroupSessionOver int `yaml:"dedupe_group_session_over"`
+	// DedupeBatchImages: how many images one consolidation session may cover
+	// when small buckets and ungrouped images are packed together.
+	DedupeBatchImages int `yaml:"dedupe_batch_images"`
 	DrawingModel    string `yaml:"drawing_model"`
 	StyleModel      string `yaml:"style_model"`
 	ChapterModel    string `yaml:"chapter_model"`
@@ -738,9 +744,9 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优。
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）。
 // 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 text。
-const CurrentConfigVersion = 15
+const CurrentConfigVersion = 16
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -1193,6 +1199,12 @@ func setDefaults(cfg *Config) {
 	}
 
 	// Figure check defaults (feature is OFF unless explicitly enabled).
+	if cfg.Latex.DedupeGroupSessionOver == 0 {
+		cfg.Latex.DedupeGroupSessionOver = 10
+	}
+	if cfg.Latex.DedupeBatchImages == 0 {
+		cfg.Latex.DedupeBatchImages = 40
+	}
 	if cfg.Latex.FigureCheck.Model == "" {
 		cfg.Latex.FigureCheck.Model = "verifier"
 	}

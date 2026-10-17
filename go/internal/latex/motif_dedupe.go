@@ -109,13 +109,11 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	for i := range samples {
 		pool = append(pool, &samples[i])
 	}
-	r.log.Log(0, "[dedupe] 初始相似候选", fmt.Sprint(len(groups)), "组，命中", fmt.Sprint(len(advisory)), "/", fmt.Sprint(len(pool)), "张；AI 全量核验")
+	r.log.Log(0, "[dedupe] 初始相似候选", fmt.Sprint(len(groups)), "组，命中", fmt.Sprint(len(advisory)), "/", fmt.Sprint(len(pool)), "张；AI 分组核验")
 	if len(pool) < 2 {
 		return
 	}
 	sort.Slice(pool, func(i, j int) bool { return pool[i].task.key() < pool[j].task.key() })
-	failed := 0
-	progress.verify(0, 1, len(pool), failed)
 	allChecked := true
 	for _, c := range pool {
 		if !c.progress.DedupeChecked {
@@ -123,40 +121,143 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 			break
 		}
 	}
-	if !allChecked {
-		for _, c := range pool {
-			c.progress.EquivalentTo = ""
-			c.progress.DedupeLeaderHash = ""
-			c.progress.SharedTex = ""
-			c.progress.DedupeChecked = false
-			saveProgress(progDir, c.progress)
-		}
-		verdictGroups, err := r.verifyMotifCandidates(pool, outDir, 0, 0, advisory)
+	if allChecked {
+		progress.verify(1, 1, len(pool), 0)
+		return
+	}
+	for _, c := range pool {
+		c.progress.EquivalentTo = ""
+		c.progress.DedupeLeaderHash = ""
+		c.progress.SharedTex = ""
+		c.progress.DedupeChecked = false
+		saveProgress(progDir, c.progress)
+	}
+	scopes := r.motifScopes(pool, advisory)
+	failed := 0
+	verified := 0
+	for si, scope := range scopes {
+		progress.verify(si, len(scopes), len(pool), failed)
+		r.log.Log(0, fmt.Sprintf("[dedupe] 核验会话 %d/%d：%d 张图", si+1, len(scopes), len(scope)))
+		verdict, err := r.verifyMotifCandidates(scope, outDir, si, 0, advisory)
 		if err != nil {
 			failed++
-			r.log.LogWarning(0, "[dedupe] AI 核验失败，候选保持独立；process 将逐图处理候选图片:", err)
-		} else {
-			for _, c := range pool {
-				c.progress.DedupeChecked = true
-				saveProgress(progDir, c.progress)
-			}
-			for _, ids := range verdictGroups {
-				equivalent := make([]*motifCandidate, 0, len(ids))
-				valid := true
-				for _, id := range ids {
-					if id < 1 || id > len(pool) {
-						valid = false
-						break
-					}
-					equivalent = append(equivalent, pool[id-1])
+			r.log.LogWarning(0, "[dedupe] 核验会话失败，该批图片保持独立；process 将逐图处理:", err)
+			continue
+		}
+		verified += len(scope)
+		for _, c := range scope {
+			c.progress.DedupeChecked = true
+			saveProgress(progDir, c.progress)
+		}
+		for _, g := range verdict {
+			equivalent := make([]*motifCandidate, 0, len(g.Members))
+			valid := true
+			for _, id := range g.Members {
+				if id < 1 || id > len(scope) {
+					valid = false
+					break
 				}
-				if valid && motifGroupAllVector(equivalent) {
-					applyMotifEquivalence(equivalent, progDir)
-				}
+				equivalent = append(equivalent, scope[id-1])
 			}
+			if !valid {
+				continue
+			}
+			if !motifGroupAllVector(equivalent) {
+				r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 含非矢量图，保持独立（只有全部为矢量图的组才复用同一张重画）", g.Members))
+				continue
+			}
+			var key *motifCandidate
+			if g.Key >= 1 && g.Key <= len(scope) {
+				key = scope[g.Key-1]
+			}
+			// Safety gate (user policy: 宁漏不误判). The AI may only narrow a
+			// group, never widen it beyond what the similarity detector itself
+			// considers a candidate: a member that is not similar to the key is
+			// kept independent even if the model merged it, because sharing one
+			// drawing would silently delete the real difference.
+			safe := make([]*motifCandidate, 0, len(equivalent))
+			dropped := 0
+			for _, c := range equivalent {
+				if key != nil && c != key && !MotifSimilarTo(c.image, key.image) {
+					dropped++
+					continue
+				}
+				safe = append(safe, c)
+			}
+			if dropped > 0 {
+				r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 里有 %d 张与代表图相似度不足，已保持独立（宁可漏掉重复，也不能合并后丢信息）", g.Members, dropped))
+			}
+			if len(safe) < 2 {
+				continue
+			}
+			applyMotifEquivalenceWithKey(safe, key, progDir)
 		}
 	}
-	progress.verify(1, 1, len(pool), failed)
+	progress.verify(1, len(scopes), len(pool), failed)
+	_ = verified
+}
+
+// motifScopes splits the pool into verification sessions. A similarity bucket
+// larger than latex.dedupe_group_session_over gets its own session (a 300-image
+// bucket needs many rounds of one-by-one viewing and would drown everything
+// else); the remaining small buckets and standalone images are packed into
+// consolidation sessions of at most latex.dedupe_batch_images images, where
+// cross-bucket merges can still be decided. Setting group_over to 0 restores
+// the previous behaviour: one session for the whole pool.
+func (r *Runner) motifScopes(pool []*motifCandidate, advisory map[string]motifAdvisory) [][]*motifCandidate {
+	over := r.cfg.Latex.DedupeGroupSessionOver
+	perBatch := r.cfg.Latex.DedupeBatchImages
+	if over <= 0 {
+		return [][]*motifCandidate{pool}
+	}
+	if perBatch <= 0 {
+		perBatch = 40
+	}
+	buckets := map[int][]*motifCandidate{}
+	var loose []*motifCandidate
+	for _, c := range pool {
+		if a, ok := advisory[c.task.key()]; ok && a.Group > 0 {
+			buckets[a.Group] = append(buckets[a.Group], c)
+		} else {
+			loose = append(loose, c)
+		}
+	}
+	nos := make([]int, 0, len(buckets))
+	for g := range buckets {
+		nos = append(nos, g)
+	}
+	sort.Ints(nos)
+	var scopes [][]*motifCandidate
+	var pending []*motifCandidate
+	flush := func() {
+		if len(pending) > 0 {
+			scopes = append(scopes, pending)
+			pending = nil
+		}
+	}
+	for _, g := range nos {
+		members := buckets[g]
+		if len(members) > over {
+			flush()
+			scopes = append(scopes, members)
+			continue
+		}
+		if len(pending)+len(members) > perBatch {
+			flush()
+		}
+		pending = append(pending, members...)
+	}
+	for _, c := range loose {
+		if len(pending)+1 > perBatch {
+			flush()
+		}
+		pending = append(pending, c)
+	}
+	flush()
+	if len(scopes) == 0 && len(pool) > 0 {
+		return [][]*motifCandidate{pool}
+	}
+	return scopes
 }
 
 func motifGroupAllVector(members []*motifCandidate) bool {
@@ -172,25 +273,35 @@ func motifGroupAllVector(members []*motifCandidate) bool {
 }
 
 func applyMotifEquivalence(members []*motifCandidate, progDir string) {
+	applyMotifEquivalenceWithKey(members, nil, progDir)
+}
+
+// applyMotifEquivalenceWithKey makes exactly one member the shared drawing.
+// When the AI named a key, that member is the one process will draw and every
+// other member only references its output — "process 只处理最模板的那张，其余
+// 位置全部替换成这张". Falling back to the old stability ordering keeps resumed
+// runs deterministic when no key is available.
+func applyMotifEquivalenceWithKey(members []*motifCandidate, key *motifCandidate, progDir string) {
 	if len(members) < 2 {
 		return
 	}
-	// Prefer a vector-classified drawing and its completed artifact, then use
-	// a stable key so retries cannot select a different leader.
-	sort.Slice(members, func(i, j int) bool {
-		a, b := members[i], members[j]
-		aVector, bVector := a.progress.Class == ClassVector, b.progress.Class == ClassVector
-		if aVector != bVector {
-			return aVector
-		}
-		aDone := a.progress.Status == "done" && a.progress.FigPDF != ""
-		bDone := b.progress.Status == "done" && b.progress.FigPDF != ""
-		if aDone != bDone {
-			return aDone
-		}
-		return a.task.key() < b.task.key()
-	})
-	leader := members[0]
+	leader := key
+	if leader == nil || !motifContains(members, leader) {
+		sort.Slice(members, func(i, j int) bool {
+			a, b := members[i], members[j]
+			aVector, bVector := a.progress.Class == ClassVector, b.progress.Class == ClassVector
+			if aVector != bVector {
+				return aVector
+			}
+			aDone := a.progress.Status == "done" && a.progress.FigPDF != ""
+			bDone := b.progress.Status == "done" && b.progress.FigPDF != ""
+			if aDone != bDone {
+				return aDone
+			}
+			return a.task.key() < b.task.key()
+		})
+		leader = members[0]
+	}
 	for _, c := range members {
 		if c == leader {
 			c.progress.EquivalentTo = ""
@@ -204,6 +315,15 @@ func applyMotifEquivalence(members []*motifCandidate, progDir string) {
 		c.progress.DedupeChecked = true
 		saveProgress(progDir, c.progress)
 	}
+}
+
+func motifContains(members []*motifCandidate, want *motifCandidate) bool {
+	for _, c := range members {
+		if c == want {
+			return true
+		}
+	}
+	return false
 }
 
 // applyMotifArtifacts materializes each confirmed follower from its leader
@@ -229,6 +349,34 @@ func applyMotifArtifacts(tasks []*task, prog map[string]*imageProgress, progDir,
 		p.SVGFail = leader.SVGFail
 		p.Error = ""
 		saveProgress(progDir, p)
+	}
+}
+
+// clearUnresolvedMotifLinks drops follower->leader links whose leader never
+// produced a drawing (failed, or produced nothing). Followers are otherwise
+// skipped by process forever and their figure would silently disappear from the
+// book; unlinking means the next run draws them independently. Costing an extra
+// drawing is fine, losing a figure is not.
+func (r *Runner) clearUnresolvedMotifLinks(tasks []*task, prog map[string]*imageProgress, progDir string) {
+	cleared := 0
+	for _, t := range tasks {
+		p := prog[t.key()]
+		if p == nil || p.EquivalentTo == "" {
+			continue
+		}
+		leader := prog[p.EquivalentTo]
+		if leader != nil && leader.Status == "done" && leader.TikzCode != "" && leader.EquivalentTo == "" {
+			continue
+		}
+		p.EquivalentTo = ""
+		p.DedupeLeaderHash = ""
+		p.SharedTex = ""
+		saveProgress(progDir, p)
+		cleared++
+	}
+	if cleared > 0 {
+		// 不静默：这些图会保持/回退为独立处理，本次不假装已完成。
+		r.log.LogWarning(0, fmt.Sprintf("%d 张图跟随的代表图没有产出成品，已解除跟随，下次运行将单独处理", cleared))
 	}
 }
 

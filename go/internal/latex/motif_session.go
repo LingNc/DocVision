@@ -5,12 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/color"
-	"image/draw"
-	"image/png"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -19,13 +16,13 @@ import (
 )
 
 // motifViewTool delegates to the normal view_image implementation. Only a
-// successful, uncropped image receipt is evidence for a merge; exact pixels
-// share evidence. Contact sheets keep a 300-image group inspectable in one
-// context without forcing 300 image attachments into the initial user turn.
+// successful, uncropped view of an individual original counts as evidence for a
+// merge. There are deliberately NO contact sheets: a stitched overview makes
+// small differences (题号、下标、箭头) invisible, and it let a model "inspect"
+// hundreds of images with a handful of calls.
 type motifViewTool struct {
-	base    *ViewImageTool
-	covered map[string][]int
-	seen    map[int]bool
+	base *ViewImageTool
+	seen map[int]bool
 }
 
 func (t *motifViewTool) Name() string               { return t.base.Name() }
@@ -48,14 +45,29 @@ func (t *motifViewTool) Execute(raw string) (session.ToolResult, error) {
 		return result, err
 	}
 	uncropped := pctArg(args, "left", 0) == 0 && pctArg(args, "top", 0) == 0 && pctArg(args, "right", 100) == 100 && pctArg(args, "bottom", 100) == 100
-	// Sheets are 768px wide; the default 1280 view preserves every tile.
-	zoom := intArg(args, "zoom", 1280)
-	if uncropped && (zoom <= 0 || zoom >= 768) && result.ImageBase64 != "" {
-		for _, id := range t.covered[full] {
+	if uncropped && result.ImageBase64 != "" {
+		if id := motifOriginalID(full); id > 0 {
 			t.seen[id] = true
 		}
 	}
 	return result, nil
+}
+
+// motifOriginalID reads the 1-based id out of originals/000123.jpg.
+func motifOriginalID(path string) int {
+	base := filepath.Base(path)
+	dot := strings.IndexByte(base, '.')
+	if dot <= 0 {
+		return 0
+	}
+	if filepath.Base(filepath.Dir(path)) != "originals" {
+		return 0
+	}
+	id, err := strconv.Atoi(base[:dot])
+	if err != nil || id < 1 {
+		return 0
+	}
+	return id
 }
 
 type motifSubmitTool struct {
@@ -79,10 +91,13 @@ func (t *motifSubmitTool) Execute(raw string) (session.ToolResult, error) {
 	if err != nil {
 		return session.ToolResult{Text: "REJECTED: " + err.Error()}, nil
 	}
+	if err := validateMotifGroupShape(groups, t.groups.count); err != nil {
+		return session.ToolResult{Text: "REJECTED: " + err.Error()}, nil
+	}
 	for _, group := range groups {
-		for _, id := range group {
+		for _, id := range group.Members {
 			if !t.seen[id] {
-				return session.ToolResult{Text: fmt.Sprintf("REJECTED: image %d has not been inspected. Use view_image on its original or uncropped numbered contact sheet, or omit its group.", id)}, nil
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: image %d has not been inspected. Open originals/%06d.* yourself with view_image (uncropped) before merging it; contact sheets no longer exist, and a group you never looked at is not evidence.", id, id)}, nil
 			}
 		}
 	}
@@ -94,7 +109,7 @@ type motifAdvisory struct {
 	Exact bool `json:"exact_content,omitempty"`
 }
 
-func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string, groupIndex, batchIndex int, hints ...map[string]motifAdvisory) ([][]int, error) {
+func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string, groupIndex, batchIndex int, hints ...map[string]motifAdvisory) ([]MotifGroup, error) {
 	if len(members) < 2 {
 		return nil, nil
 	}
@@ -112,13 +127,12 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	if len(hints) > 0 {
 		advisory = hints[0]
 	}
-	covered, err := prepareMotifViewWithAdvisory(view, members, advisory)
-	if err != nil {
+	if err := prepareMotifViewWithAdvisory(view, members, advisory); err != nil {
 		return nil, err
 	}
 	mounts := []Mount{{Name: "candidates", Dir: view}}
 	bashMounts := []Mount{{Name: "work", Dir: view}}
-	imageTool := &motifViewTool{base: &ViewImageTool{Root: view, BareSearch: true, SoftMax: r.cfg.Tools.View.ImageMax, WarnRatio: r.cfg.Tools.View.WarnRatio}, covered: covered, seen: seen}
+	imageTool := &motifViewTool{base: &ViewImageTool{Root: view, BareSearch: true, SoftMax: r.cfg.Tools.View.ImageMax, WarnRatio: r.cfg.Tools.View.WarnRatio}, seen: seen}
 	groupTool := NewMotifGroupsTool(filepath.Join(view, "groups.json"), len(members))
 	submit := &motifSubmitTool{groups: groupTool, seen: seen}
 	bashTmp, cleanBash := r.sessionBashTemp(filepath.Dir(outDir), "bash_dedupe")
@@ -133,8 +147,8 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 		modelName = "text"
 	}
 	tuning := r.cfg.LatexSession("dedupe")
-	// A whole book motif group can contain hundreds of distinct crops. Contact
-	// sheets reduce tool use, but never truncate the candidate inventory/context.
+	// Every merge needs its own originals opened one by one (no contact sheets),
+	// so the round budget has to cover the pool instead of a handful of sheets.
 	if tuning.MaxToolRounds > 0 && tuning.MaxToolRounds < len(members)+16 {
 		tuning.MaxToolRounds = len(members) + 16
 	}
@@ -164,170 +178,132 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	return submit.groups.Groups()
 }
 
-func prepareMotifView(root string, members []*motifCandidate) (map[string][]int, error) {
-	return prepareMotifViewWithAdvisory(root, members, nil)
-}
-
-func prepareMotifViewWithAdvisory(root string, members []*motifCandidate, advisory map[string]motifAdvisory) (map[string][]int, error) {
+func prepareMotifViewWithAdvisory(root string, members []*motifCandidate, advisory map[string]motifAdvisory) error {
 	originals := filepath.Join(root, "originals")
-	sheets := filepath.Join(root, "sheets")
 	if err := os.MkdirAll(originals, 0755); err != nil {
-		return nil, err
+		return err
 	}
-	if err := os.MkdirAll(sheets, 0755); err != nil {
-		return nil, err
-	}
-	covered := map[string][]int{}
-	pixelGroups := map[[32]byte][]int{}
+	// Initial similarity buckets are the STARTING grouping, not a verdict: they
+	// are pre-filled into groups.json so the AI verifies/splits them instead of
+	// inventing a grouping from scratch (and instead of dumping every image into
+	// one bucket). Images without a similarity hint stay independent.
+	initial := map[int][]int{}
+	var standalone []int
 	for i, c := range members {
-		if c.image != nil {
-			h, ok := rgbaFingerprint(c.image)
-			if ok {
-				pixelGroups[h] = append(pixelGroups[h], i+1)
-			}
-		}
-	}
-	var manifest strings.Builder
-	manifest.WriteString("# Complete image pool\n\nAll classified images are available to the AI. Local similarity is advisory only: it may suggest an initial group, but it never excludes an image or proves equivalence. Inspect details before grouping; different numbers/labels/colors remain separate. Read originals for uncertain sheet tiles.\n\n## Originals\n\n")
-	for i, c := range members {
+		id := i + 1
 		ext := filepath.Ext(c.path)
-		rel := fmt.Sprintf("originals/%06d%s", i+1, ext)
+		rel := fmt.Sprintf("originals/%06d%s", id, ext)
 		dest := filepath.Join(root, filepath.FromSlash(rel))
 		if !fileExists(dest) {
 			if err := linkAbs(c.path, dest); err != nil {
 				if err := copyFile(c.path, dest); err != nil {
-					return nil, err
+					return err
 				}
 			}
 		}
-		ids := []int{i + 1}
-		if c.image != nil {
-			if h, ok := rgbaFingerprint(c.image); ok {
-				ids = pixelGroups[h]
-			}
-		}
-		covered[dest] = ids
-		advice := "none"
 		if a, ok := advisory[c.task.key()]; ok && a.Group > 0 {
-			advice = fmt.Sprintf("group-%d", a.Group)
-			if a.Exact {
-				advice += ":exact-pixels"
-			}
+			initial[a.Group] = append(initial[a.Group], id)
+		} else {
+			standalone = append(standalone, id)
 		}
-		fmt.Fprintf(&manifest, "%d. %s | %s | %s | similarity_hint=%s\n", i+1, rel, c.task.mdName, c.task.imgPath, advice)
 	}
-	manifest.WriteString("\n## Numbered contact sheets\n\nEach tile is labeled with its original ID. Sheets are views of the complete image pool, not separate sessions or fixed-size equivalence groups.\n\n")
-	// 64 views per sheet is a display layout only; all sheets stay in ONE session.
-	for start := 0; start < len(members); start += 64 {
-		end := start + 64
-		if end > len(members) {
-			end = len(members)
+	groupNos := make([]int, 0, len(initial))
+	for g := range initial {
+		groupNos = append(groupNos, g)
+	}
+	sort.Ints(groupNos)
+
+	var manifest strings.Builder
+	manifest.WriteString("# Complete image pool\n\n")
+	manifest.WriteString("Every classified image is listed below. The local similarity buckets are a STARTING grouping: they are already written into `groups.json`, and they are only a hint — they may contain different images (split them) or miss a match (merge across buckets). Never treat a bucket as proof.\n\n")
+	manifest.WriteString("There are NO contact sheets. To judge anything you must open the individual original with `view_image` (`originals/000123.jpg`); a merge is only accepted for images you opened yourself, uncropped.\n\n")
+
+	if len(groupNos) > 0 {
+		manifest.WriteString("## Initial similarity buckets (pre-filled in groups.json)\n\n")
+	}
+	for _, g := range groupNos {
+		ids := initial[g]
+		exact := false
+		for _, id := range ids {
+			if a := advisory[members[id-1].task.key()]; a.Exact {
+				exact = true
+				break
+			}
 		}
-		rows := (end - start + 7) / 8
-		sheet := image.NewRGBA(image.Rect(0, 0, 768, rows*112))
-		draw.Draw(sheet, sheet.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
-		ids := []int{}
-		for i := start; i < end; i++ {
-			img := members[i].image
-			if img == nil {
-				var err error
-				img, err = decodeImage(members[i].path)
-				if err != nil {
-					return nil, err
-				}
-			}
-			b := img.Bounds()
-			w, h := b.Dx(), b.Dy()
-			if w == 0 || h == 0 {
-				return nil, fmt.Errorf("empty candidate image %d", i+1)
-			}
-			tile := (i - start)
-			x0 := (tile % 8) * 96
-			y0 := (tile / 8) * 112
-			tw, th := 88, 88
-			if w > h {
-				th = h * 88 / w
-			} else {
-				tw = w * 88 / h
-			}
-			if tw < 1 {
-				tw = 1
-			}
-			if th < 1 {
-				th = 1
-			}
-			for y := 0; y < th; y++ {
-				for x := 0; x < tw; x++ {
-					sheet.Set(x0+4+x, y0+20+y, img.At(b.Min.X+x*w/tw, b.Min.Y+y*h/th))
-				}
-			}
-			drawMotifID(sheet, x0+4, y0+3, i+1)
-			ids = append(ids, i+1)
+		kind := "visually similar"
+		if exact {
+			kind = "byte-identical pixels somewhere in the bucket"
 		}
-		rel := fmt.Sprintf("sheets/%03d.png", start/64+1)
-		full := filepath.Join(root, filepath.FromSlash(rel))
-		f, err := os.Create(full)
-		if err != nil {
-			return nil, err
+		fmt.Fprintf(&manifest, "### bucket %d — %d image(s), %s\n\n", g, len(ids), kind)
+		for _, id := range ids {
+			c := members[id-1]
+			fmt.Fprintf(&manifest, "- %d. originals/%06d%s | %s | %s | class=%s\n", id, id, filepath.Ext(c.path), c.task.mdName, c.task.imgPath, motifClassOf(c))
 		}
-		encErr := png.Encode(f, sheet)
-		closeErr := f.Close()
-		if encErr != nil {
-			return nil, encErr
+		manifest.WriteString("\n")
+	}
+	if len(standalone) > 0 {
+		fmt.Fprintf(&manifest, "## Images with no similarity hint (%d)\n\nThey are independent by default, but they may still belong to a bucket above — merge them if the drawing really is the same structure.\n\n", len(standalone))
+		for _, id := range standalone {
+			c := members[id-1]
+			fmt.Fprintf(&manifest, "- %d. originals/%06d%s | %s | %s | class=%s\n", id, id, filepath.Ext(c.path), c.task.mdName, c.task.imgPath, motifClassOf(c))
 		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		covered[full] = ids
-		fmt.Fprintf(&manifest, "- %s: IDs %d–%d\n", rel, start+1, end)
+		manifest.WriteString("\n")
 	}
 	if err := os.WriteFile(filepath.Join(root, "manifest.md"), []byte(manifest.String()), 0644); err != nil {
-		return nil, err
+		return err
 	}
+
+	// Persist the starting grouping so `motif_groups list` shows real work to
+	// verify, and so a resumed session keeps the structure.
+	start := make([]MotifGroup, 0, len(groupNos))
+	for _, g := range groupNos {
+		if len(initial[g]) < 2 {
+			continue
+		}
+		// Key stays 0 on purpose: the AI must pick the representative, and
+		// submit refuses while any group still has key=0.
+		start = append(start, MotifGroup{Members: initial[g]})
+	}
+	payload, err := json.MarshalIndent(map[string]any{"groups": start}, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(root, "groups.json"), append(payload, '\n'), 0644); err != nil {
+		return err
+	}
+
 	items := make([]map[string]any, 0, len(members))
 	for i, c := range members {
 		a := advisory[c.task.key()]
-		// A candidate may legitimately carry no progress record (e.g. a caller
-		// building the view directly); never panic while writing the advisory.
-		class := ""
-		if c.progress != nil {
-			class = c.progress.Class
-		}
 		items = append(items, map[string]any{
 			"id":            i + 1,
 			"key":           c.task.key(),
 			"initial_group": a.Group,
 			"exact_content": a.Exact,
-			"class":         class,
+			"class":         motifClassOf(c),
 			"source_hash":   c.sourceHash,
 		})
 	}
 	advisoryJSON := map[string]any{
-		"description": "Local similarity is advisory only; the complete image pool remains available to the AI.",
+		"description": "Local similarity is advisory only. The AI decides the final structural groups; images with no hint are still eligible.",
 		"pool_size":   len(members),
+		"buckets":     len(groupNos),
 		"items":       items,
 	}
 	data, err := json.MarshalIndent(advisoryJSON, "", "  ")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := os.WriteFile(filepath.Join(root, "similarity_advisory.json"), append(data, '\n'), 0644); err != nil {
-		return nil, err
-	}
-	return covered, nil
+	return os.WriteFile(filepath.Join(root, "similarity_advisory.json"), append(data, '\n'), 0644)
 }
 
-// A tiny numeric label avoids introducing a font or external rendering tool.
-func drawMotifID(dst *image.RGBA, x, y, id int) {
-	digits := []string{"111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001", "111100111001111", "111100111101111", "111001001001001", "111101111101111", "111101111001111"}
-	for n, ch := range strconv.Itoa(id) {
-		pattern := digits[int(ch-'0')]
-		for row := 0; row < 5; row++ {
-			for col := 0; col < 3; col++ {
-				if pattern[row*3+col] == '1' {
-					draw.Draw(dst, image.Rect(x+n*8+col*2, y+row*2, x+n*8+col*2+2, y+row*2+2), image.NewUniform(color.Black), image.Point{}, draw.Src)
-				}
-			}
-		}
+func motifClassOf(c *motifCandidate) string {
+	if c == nil || c.progress == nil {
+		return ""
 	}
+	return c.progress.Class
+}
+
+func prepareMotifView(root string, members []*motifCandidate) error {
+	return prepareMotifViewWithAdvisory(root, members, nil)
 }

@@ -139,6 +139,58 @@ func rgbaFingerprint(img image.Image) ([32]byte, bool) {
 	return sum, true
 }
 
+// motifMergeTolerance is the per-channel difference still treated as identical
+// pixels; it only absorbs JPEG recompression noise.
+const motifMergeTolerance = 2
+
+// motifPixelIdentical reports whether two images have identical pixels (JPEG
+// noise tolerated).
+func motifPixelIdentical(a, b image.Image) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	ba, bb := a.Bounds(), b.Bounds()
+	if ba.Dx() != bb.Dx() || ba.Dy() != bb.Dy() {
+		return false
+	}
+	for y := 0; y < ba.Dy(); y++ {
+		for x := 0; x < ba.Dx(); x++ {
+			ar, ag, ab, aa := a.At(ba.Min.X+x, ba.Min.Y+y).RGBA()
+			br, bg, bb2, ba2 := b.At(bb.Min.X+x, bb.Min.Y+y).RGBA()
+			if channelDiff(ar, br) > motifMergeTolerance ||
+				channelDiff(ag, bg) > motifMergeTolerance ||
+				channelDiff(ab, bb2) > motifMergeTolerance ||
+				channelDiff(aa, ba2) > motifMergeTolerance {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func channelDiff(a, b uint32) int {
+	if a > b {
+		return int((a - b) >> 8)
+	}
+	return int((b - a) >> 8)
+}
+
+// MotifSimilarTo reports whether a merge between two images is even allowed.
+// This is the SAME similarity the detector uses to build candidate buckets, so
+// the AI can split buckets and merge across them, but it cannot declare two
+// images with unrelated content to be one drawing. Pixel-identical images are
+// always allowed. Missing a duplicate only costs one extra drawing; merging two
+// different pictures deletes real content, so the gate stays conservative.
+func MotifSimilarTo(a, b image.Image) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if motifPixelIdentical(a, b) {
+		return true
+	}
+	return visualMotifSimilar(a, b) || chromaticMotifSimilar(a, b)
+}
+
 func visualMotifSimilar(a, b image.Image) bool {
 	ma, oka := motifFeature(a)
 	mb, okb := motifFeature(b)

@@ -522,6 +522,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose)
 	if r.inline {
 		applyMotifArtifacts(all, prog, progDir, outDir)
+		r.clearUnresolvedMotifLinks(all, prog, progDir)
 		materializeSharedMotifTeX(all, prog, progDir, outDir)
 	}
 

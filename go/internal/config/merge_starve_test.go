@@ -9,7 +9,7 @@ import (
 // 条目每轮都赶在父条目解析前被检查，最后一轮被砍掉 → 误报循环继承。
 // 结构：bookfix 字母序在 convert 前，链深 2（bookfix → convert → heavy → text）。
 func TestExtendsStarvedPassRegression(t *testing.T) {
-	yamlDoc := `config_version: 15
+	yamlDoc := `config_version: 16
 mineru:
   api_base_url: "x"
   token: "t"
