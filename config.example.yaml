@@ -12,7 +12,7 @@
 #   3. 未知键不生效：拼错一个键名不会有任何报错，启动时只会给一行"未知配置键"
 #      告警（`docvision setup` 保存时会把它拦下来）。
 
-config_version: 13
+config_version: 14
 
 # MinerU API Configuration
 mineru:
@@ -77,6 +77,7 @@ latex:
   # 想换模型只改 registry 里那一条条目，不用动这一节。
   # 这几个角色键本身不参与任何"继承与覆盖"，它们只是指针。
   classifier_model: "classifier" # 图像分类 AI（text/vector/raster 标记）
+  dedupe_model: "dedupe"         # 档位1相似图核验（models.dedupe 默认 extends classifier）
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
@@ -343,6 +344,8 @@ models:
   # ---- 角色复用同一条目：四个角色都指向 gateway-a 的同一套配置 ----
   classifier:
     extends: "gateway-a"
+  dedupe:
+    extends: "classifier"        # 相似矢量图核验，默认沿用 classifier 的视觉能力
   style:
     extends: "gateway-a"
     image_tokens:               # 只有它需要更高的图片 token 上限

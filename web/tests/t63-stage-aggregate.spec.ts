@@ -33,6 +33,13 @@ describe('stageChapterAggregate（T63）', () => {
   })
 })
 
+describe('T111 去重核验阶段', () => {
+  test('列在矢量作图之前且有中文标题', () => {
+    expect(stageTitleOf('dedupe')).toBe('相似图核验')
+    expect(stageRank('dedupe')).toBeLessThan(stageRank('vector'))
+  })
+})
+
 describe('T62 阶段表', () => {
   test('fix / final-review 有排名与标题', () => {
     expect(stageTitleOf('fix')).toBe('全书修复')

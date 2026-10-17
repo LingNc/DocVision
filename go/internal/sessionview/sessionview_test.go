@@ -39,6 +39,7 @@ func TestLabelForAndTitleFor(t *testing.T) {
 		label string
 		title string
 	}{
+		{"source/sessions/motif_dedupe_aabbcc001122.jsonl", "dedupe:aabbcc001122", "相似图核验 · aabbcc001122"},
 		{"work/style_session.jsonl", "style", "样式"},
 		{"work/sessions/chapters.jsonl", "chapters", "章节划分"},
 		{"work/sessions/convert_chapter_01.jsonl", "convert:chapter_01", "转换 · chapter_01"},

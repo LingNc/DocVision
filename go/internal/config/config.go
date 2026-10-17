@@ -264,6 +264,7 @@ type LatexConfig struct {
 	// Model registry keys used by each specialised session. Empty
 	// values fall back to the top-level ai block.
 	ClassifierModel string `yaml:"classifier_model"`
+	DedupeModel     string `yaml:"dedupe_model"` // 档位1视觉重复图核验；空回退 classifier_model
 	DrawingModel    string `yaml:"drawing_model"`
 	StyleModel      string `yaml:"style_model"`
 	ChapterModel    string `yaml:"chapter_model"`
@@ -694,10 +695,10 @@ type OptionsConfig struct {
 	MermaidFixAttempts *int    `yaml:"-"` // set from tools.mermaid.fix_attempts
 	MermaidTimeout     int     `yaml:"-"` // set from tools.mermaid.timeout
 	// P12 升级修复会话（tools.mermaid.session_*）。
-	MermaidSessionRounds *int    `yaml:"-"` // set from tools.mermaid.session_rounds
-	MermaidSessionErrors *int    `yaml:"-"` // set from tools.mermaid.session_errors
-	MermaidFallbackModel string  `yaml:"-"` // set from tools.mermaid.fallback_model
-	MaxTokens          int     `yaml:"max_tokens"`
+	MermaidSessionRounds *int   `yaml:"-"` // set from tools.mermaid.session_rounds
+	MermaidSessionErrors *int   `yaml:"-"` // set from tools.mermaid.session_errors
+	MermaidFallbackModel string `yaml:"-"` // set from tools.mermaid.fallback_model
+	MaxTokens            int    `yaml:"max_tokens"`
 	// LogLevel: info (default), debug or trace. Debug writes every AI
 	// request/response summary, prompt and tool result into the log
 	// file; trace additionally records per-chunk stream traffic and raw
@@ -731,9 +732,9 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目
-// 两个键（新子块级开关）。
-const CurrentConfigVersion = 13
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe。
+// 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 classifier。
+const CurrentConfigVersion = 14
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.

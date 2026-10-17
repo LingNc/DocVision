@@ -198,7 +198,7 @@ export function estOf(line: Line | null | undefined): { text: number; reasoning:
 
 /* ---------- 阶段分组与排序 ---------- */
 
-export const STAGE_ORDER = ['vector', 'style', 'chapters', 'convert', 'checker', 'style-fix', 'figure-check', 'fix', 'final-review']
+export const STAGE_ORDER = ['dedupe', 'vector', 'style', 'chapters', 'convert', 'checker', 'style-fix', 'figure-check', 'fix', 'final-review']
 
 export function stageRank(stage: string): number {
   const i = STAGE_ORDER.indexOf(stage)
@@ -207,7 +207,7 @@ export function stageRank(stage: string): number {
 
 export function stageTitleOf(stage: string): string {
   const map: Record<string, string> = {
-    vector: '矢量图', style: '样式', chapters: '章节划分', convert: '章节转换',
+    dedupe: '相似图核验', vector: '矢量图', style: '样式', chapters: '章节划分', convert: '章节转换',
     checker: '章节核对', 'style-fix': '样式修复', 'figure-check': '逐图校验',
     fix: '全书修复', 'final-review': '终审',
   }
@@ -216,7 +216,7 @@ export function stageTitleOf(stage: string): string {
 
 /* progress.json 里的键是档位级的，阶段名与它并不一一对应。 */
 export function progressKeyFor(stage: string): string {
-  if (stage === 'vector') return 'images'
+  if (stage === 'dedupe' || stage === 'vector') return 'images'
   if (stage === 'checker' || stage === 'style-fix') return 'convert'
   // T88：fix/final-review 是 assemble 阶段内的会话，progress.json 没有
   // 它们自己的键——不映射的话阶段状态永远是「未开始」（其实早做完了）。

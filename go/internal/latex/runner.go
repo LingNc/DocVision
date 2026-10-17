@@ -126,25 +126,31 @@ func (r *Runner) outputLang() string {
 
 // imageProgress is the per-image persisted state (断点续传).
 type imageProgress struct {
-	Key        string   `json:"key"`
-	MDName     string   `json:"md"`
-	ImgPath    string   `json:"img"`
-	Class      string   `json:"class,omitempty"`
-	Label      string   `json:"label,omitempty"`
-	Reason     string   `json:"class_reason,omitempty"`
-	Status     string   `json:"status"` // classified | done | error
-	Content    string   `json:"content,omitempty"`
-	TikzCode   string   `json:"tikz_code,omitempty"`
-	FigPDF     string   `json:"figure_pdf,omitempty"`
-	FigPNG     string   `json:"figure_png,omitempty"`
-	FigSVG     string   `json:"figure_svg,omitempty"`
-	Kept       bool     `json:"original_kept,omitempty"`
-	SVGFail    bool     `json:"svg_failed,omitempty"`  // vector ok but dvisvgm failed (degraded to PNG/PDF link)
-	Styled     bool     `json:"styled,omitempty"`      // styled-text image (needs book-level restyle)
-	StyleNote  string   `json:"style_note,omitempty"`  // what the styling looks like
-	Absorbed   bool     `json:"absorbed,omitempty"`    // cross-page continuation merged into an earlier figure
-	MergedRefs []string `json:"merged_refs,omitempty"` // refs absorbed by THIS combined figure
-	Error      string   `json:"error,omitempty"`
+	Key              string   `json:"key"`
+	MDName           string   `json:"md"`
+	ImgPath          string   `json:"img"`
+	Class            string   `json:"class,omitempty"`
+	Label            string   `json:"label,omitempty"`
+	Reason           string   `json:"class_reason,omitempty"`
+	Status           string   `json:"status"` // classified | done | error
+	Content          string   `json:"content,omitempty"`
+	TikzCode         string   `json:"tikz_code,omitempty"`
+	FigPDF           string   `json:"figure_pdf,omitempty"`
+	FigPNG           string   `json:"figure_png,omitempty"`
+	FigSVG           string   `json:"figure_svg,omitempty"`
+	Kept             bool     `json:"original_kept,omitempty"`
+	SVGFail          bool     `json:"svg_failed,omitempty"`         // vector ok but dvisvgm failed (degraded to PNG/PDF link)
+	Styled           bool     `json:"styled,omitempty"`             // styled-text image (needs book-level restyle)
+	StyleNote        string   `json:"style_note,omitempty"`         // what the styling looks like
+	Absorbed         bool     `json:"absorbed,omitempty"`           // cross-page continuation merged into an earlier figure
+	MergedRefs       []string `json:"merged_refs,omitempty"`        // refs absorbed by THIS combined figure
+	EquivalentTo     string   `json:"equivalent_to,omitempty"`      // verified canonical task key; never an absorbed ref
+	DedupeChecked    bool     `json:"dedupe_checked,omitempty"`     // AI reviewed (including rejected members)
+	DedupeLeaderHash string   `json:"dedupe_leader_hash,omitempty"` // source bytes at time of equivalence verification
+	DedupeSourceHash string   `json:"dedupe_source_hash,omitempty"` // invalidates verdict if original bytes change
+	DedupeVersion    string   `json:"dedupe_version,omitempty"`
+	SharedTex        string   `json:"shared_tex,omitempty"` // raw reusable body (not standalone)
+	Error            string   `json:"error,omitempty"`
 }
 
 // mdFile caches one scanned markdown file.
@@ -507,8 +513,17 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 		return nil
 	}
 
+	// 档位1：分类完成后、逐图作图前再核对相似图；档位2原有流程不变。
+	if r.inline {
+		r.motifDedupePhase(all, prog, progDir, outDir)
+		applyMotifArtifacts(pending, prog, progDir, outDir)
+	}
 	// Phase 2: per-class processing.
 	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose)
+	if r.inline {
+		applyMotifArtifacts(all, prog, progDir, outDir)
+		materializeSharedMotifTeX(all, prog, progDir, outDir)
+	}
 
 	if !verbose {
 		r.log.SetQuiet(prevQuiet)
@@ -711,8 +726,12 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 	total = len(toClassify)
 	if total == 0 {
-		// 续跑已分类但尚未处理的图片时，不创建 0/N 的错误进度行。
-		r.log.PrintConsole(fmt.Sprintf("[classify] 已分类，跳过（待处理 %d 张，本次待分类 0 张）", len(pending)))
+		// 续跑时 pending 都已有分类结果：显示分类阶段已完成，而非创建
+		// 错误的 0/N live 行；待处理总数仍由后续 process 行独立统计。
+		n := len(pending)
+		line := fmt.Sprintf("[classify %d/%d] 100.00%% (failed: 0, running: 0) done", n, n)
+		r.log.PrintConsole(line)
+		r.log.Log(0, "[classify] 已分类，跳过模型请求；待处理", strconv.Itoa(n), "张")
 		return
 	}
 	r.log.Log(0, "[classify] 待分类", strconv.Itoa(total), "张，并发", strconv.Itoa(conc), "（latex.concurrency）")
@@ -858,8 +877,8 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		mu.Lock()
 		p, ok := prog[t.key()]
 		mu.Unlock()
-		if !ok || p.Class == "" {
-			continue // not classified yet
+		if !ok || p.Class == "" || (r.inline && p.EquivalentTo != "" && prog[p.EquivalentTo] != nil) {
+			continue // unclassified or verified follower, materialized after leader
 		}
 		total++
 	}
@@ -880,7 +899,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	})
 	defer progLive.Close()
 	if total > 0 {
-		r.log.Log(0, "[process] 待处理", strconv.Itoa(len(pending)), "张，并发", strconv.Itoa(conc), "（latex.concurrency）")
+		r.log.Log(0, "[process] 待处理", strconv.Itoa(total), "张，并发", strconv.Itoa(conc), "（latex.concurrency）")
 	}
 
 	aborted := false
@@ -889,8 +908,8 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		p, ok := prog[t.key()]
 		apiErrs, successes := apiErr, okCount
 		mu.Unlock()
-		if !ok || p.Class == "" {
-			continue // not classified yet
+		if !ok || p.Class == "" || (r.inline && p.EquivalentTo != "" && prog[p.EquivalentTo] != nil) {
+			continue // unclassified or verified follower
 		}
 		// 连续接口/会话错误且一张都没成功：明显不是图的问题（配置、额度、
 		// 端点），再逐张重试只是空转——停在这里，剩下的保持未处理状态，
@@ -1374,7 +1393,11 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 				if ok {
 					head += "LINK: [vector](" + rel + ")\n"
 				}
-				return strings.TrimRight(head, "\n") + "\n```latex\n" + p.TikzCode + "\n```"
+				code := p.TikzCode
+				if p.SharedTex != "" && fileExists(filepath.Join(outDir, filepath.FromSlash(p.SharedTex))) {
+					code = "\\input{" + p.SharedTex + "}"
+				}
+				return strings.TrimRight(head, "\n") + "\n```latex\n" + code + "\n```"
 			}
 			if p.Content != "" {
 				return p.Content

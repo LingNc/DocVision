@@ -7092,13 +7092,14 @@
       imageCount: e && e.imageCount || 0
     };
   }
-  const STAGE_ORDER = ["vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check", "fix", "final-review"];
+  const STAGE_ORDER = ["dedupe", "vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check", "fix", "final-review"];
   function stageRank(stage) {
     const i = STAGE_ORDER.indexOf(stage);
     return i < 0 ? STAGE_ORDER.length : i;
   }
   function stageTitleOf(stage) {
     const map = {
+      dedupe: "相似图核验",
       vector: "矢量图",
       style: "样式",
       chapters: "章节划分",
@@ -7112,7 +7113,7 @@
     return map[stage] || stage || "其他会话";
   }
   function progressKeyFor(stage) {
-    if (stage === "vector") return "images";
+    if (stage === "dedupe" || stage === "vector") return "images";
     if (stage === "checker" || stage === "style-fix") return "convert";
     if (stage === "fix" || stage === "final-review") return "assemble";
     return stage;

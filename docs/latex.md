@@ -17,7 +17,10 @@
 
 **档位 1（`latex.level: 1`）—— 全书 LaTeX**
 
-续跑 images 阶段时，`Already done: N | to process: M` 表示本轮仍需 process 的图；`classify` 只统计其中**尚无分类记录**的图，若全部已分类则明确显示跳过（不显示错误的 `0/M`），随后 `process` 对本轮待处理图独立计数（T112）。
+续跑 images 阶段时，`Already done: N | to process: M` 表示本轮仍需 process 的图；`classify` 只统计其中**尚无分类记录**的图，若全部已分类则显示 `[classify M/M] 100% … done`，随后 `process` 对本轮实际待处理任务独立计数（T112）。
+
+**相似图核验（T111，仅档位1）**：classify 后、process 前，从已分类图中按完全一致内容或保守视觉相似度找候选（仅包含 vector 成员的组才可共享）；相似组由独立视觉会话（`latex.dedupe_model`，未配时退回 classifier_model）核验，逐个核对数字、标签、颜色及额外图元。不能确认同图的条目仍独立作图；带蓝色题号的裁图不得与纯 z 标识合并。等价关系及原图摘要写回各自的 `source/progress_items/<md>/*.json`（`equivalent_to`、`dedupe_source_hash` 等），中断重跑可继续。已确认的代表图仅开启一次作图会话，其余引用保留原图 LINK 与原位置，生成一份 `source/figures/motif_*.tex` 原始代码片段，在 Markdown/章节 TeX 各处 `\input` 引用；图像发生变化或核验失败则不复用。核验会话转录在 `source/sessions/motif_dedupe_*.jsonl`，Web 会话预览「相似图核验」阶段可查看。档位2不启用此步骤。
+
 
 1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/<项目名>/work/style/`），用 `list_source_pages` 取原书页索引（源 PDF / 页范围 / 全局页号 / OCR 推导的章节起点），再用 `view_pdf {path:"source:<file>.pdf", page:N}` **按需渲染** MinerU 保留的原始扫描页（支持裁剪放大）、`view_image` 看提取图、`read_file`/`grep` 读解析文本，分析全书样式后用 `write_file`/`edit_file` 增量起草（`example.tex` 的图**直接用 md 里已有的 LaTeX**：`<!-- DOCVISION-VECTOR -->` 下面那个 ```latex 围栏就是这本书真正的图代码，复制它比重新画一张更省心智、也更贴合实际成品），再 `submit_style` **按工作区路径**提交 `book.cls` + 使用手册 + 案例（`{cls, manual, example, extra[], report}`：`extra` 可带上类需要的任何附属文件——helper `.sty`、TikZ 样式、字体表——会连同示例一起进试编译；`report` 写进 `style/REPORT.md`；示例自动试编译，失败回炉）。`submit_style` **只收工作区路径**，没有内联内容兼容（工具形态不该对模型保留历史包袱，且"路径还是内容"的启发式曾把一行 `## Vector figure style` 误判为文件名）；参数里带换行内容会被拒绝并提示先 `write_file` 再交路径。字体通过 `list_fonts` 查看；缺字体时在提交报告与手册里列出清单，由用户按文件名手动放进 `paths.fonts`（编译环境已注入 `TEXINPUTS`/`OSFONTDIR`，无需装系统字体）
 2. **章节划分 AI**（`models.chapter`）：`grep`/`read_file`/`bash` + `buffer.md` 工作记忆缓冲区（分析结论增量写入、跨轮保留），按行号划分章节（结构化提交，全覆盖校验）
