@@ -430,3 +430,41 @@ func TestMotifMergeGateRejectsDissimilarMembers(t *testing.T) {
 		t.Fatal("identical images must pass the merge gate")
 	}
 }
+
+// 相似度会传递（A~B、B~C 连成一条链），真实事故里 336 张图被并成一个"桶"，
+// 逼着模型逐张看了 336 次还注定过不了合并闸门。非逐像素桶超过上限就切成
+// seed 锚定的子桶；逐像素桶是可靠的，保持完整。
+func TestSplitChainedMotifBuckets(t *testing.T) {
+	var fuzzy []string
+	for i := 0; i < 336; i++ {
+		fuzzy = append(fuzzy, fmt.Sprintf("k%03d", i))
+	}
+	groups := []VisualMotifGroup{
+		{Members: fuzzy, Exact: false},
+		{Members: []string{"a", "b", "c"}, Exact: true},
+		{Members: []string{"x", "y"}, Exact: false},
+	}
+	got := splitChainedMotifBuckets(groups, 50)
+	var total int
+	for _, g := range got {
+		if len(g.Members) > 50 {
+			t.Fatalf("fuzzy bucket not split: %d", len(g.Members))
+		}
+		if g.Exact && len(g.Members) != 3 {
+			t.Fatalf("exact bucket must stay whole: %v", g.Members)
+		}
+		total += len(g.Members)
+	}
+	if total != 336+3+2 {
+		t.Fatalf("members lost: %d", total)
+	}
+	// 逐像素桶即便超过上限也不切（切了只会多画几张）。
+	big := make([]string, 120)
+	for i := range big {
+		big[i] = fmt.Sprintf("e%03d", i)
+	}
+	got = splitChainedMotifBuckets([]VisualMotifGroup{{Members: big, Exact: true}}, 50)
+	if len(got) != 1 || len(got[0].Members) != 120 {
+		t.Fatalf("exact bucket must not be split: %d groups", len(got))
+	}
+}

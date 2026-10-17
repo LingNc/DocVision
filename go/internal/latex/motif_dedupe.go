@@ -97,6 +97,12 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		vis = append(vis, VisualMotifSample{Key: s.task.key(), Image: s.image})
 	}
 	groups := FindVisualMotifCandidates(vis)
+	// Union-find chains similarity transitively: A~B, B~C lands A with C even
+	// when A and C are unrelated, which once turned 336 figures into one
+	// "bucket" and burned a whole session on a group that could not survive the
+	// merge gate. Exact-pixel buckets are reliable and stay whole; fuzzy buckets
+	// are re-anchored on a seed so a bucket really means "similar to each other".
+	groups = splitChainedMotifBuckets(groups, r.cfg.Latex.DedupeGroupSessionOver)
 	advisory := make(map[string]motifAdvisory)
 	for gi, group := range groups {
 		for _, key := range group.Members {
@@ -161,8 +167,43 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		}
 	} else if len(unassigned) > 0 {
 		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张未分配图与任何已确认组都不相似，保持独立处理", len(unassigned)))
+	} else if len(applied) == 0 {
+		r.log.Log(0, "[dedupe] 本次没有通过校验的分组，跳过整理会话；process 将逐图处理")
 	}
 	progress.verify(steps, steps, len(pool), failed)
+}
+
+// splitChainedMotifBuckets cuts over-large fuzzy buckets into seed-anchored
+// sub-buckets of at most `limit` images. Buckets of pixel-identical images are
+// kept intact: they are exact, and splitting them would only cost extra drawings.
+func splitChainedMotifBuckets(groups []VisualMotifGroup, limit int) []VisualMotifGroup {
+	if limit <= 0 {
+		limit = 50
+	}
+	out := make([]VisualMotifGroup, 0, len(groups))
+	for _, g := range groups {
+		if g.Exact || len(g.Members) <= limit {
+			out = append(out, g)
+			continue
+		}
+		// Similarity is not transitive, so a long chain must not become one
+		// group. Keep the first `limit` members (the detector emits them in
+		// cluster order) and push the rest into their own sub-bucket, which the
+		// AI can still merge across sessions only if it really is the same
+		// figure — the merge gate stays the final authority either way.
+		for start := 0; start < len(g.Members); start += limit {
+			end := start + limit
+			if end > len(g.Members) {
+				end = len(g.Members)
+			}
+			part := g.Members[start:end]
+			if len(part) < 2 {
+				continue // a lone tail is not a bucket; leave it unassigned
+			}
+			out = append(out, VisualMotifGroup{Members: part, Exact: g.Exact})
+		}
+	}
+	return out
 }
 
 // motifAppliedGroup is a confirmed group: only Key is redrawn, every other
@@ -224,6 +265,7 @@ func (r *Runner) runMotifScope(sc *motifScope, outDir string, failed *int) ([]mo
 			r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 里有 %d 张与代表图相似度不足，已保持独立（宁可漏掉重复，也不能合并后丢信息）", g.Members, dropped))
 		}
 		if len(safe) < 2 {
+			r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v（%d 张）与代表图的相似度都不够，整组不合并，其中 %d 张保持独立", g.Members, len(cands), len(cands)))
 			continue
 		}
 		applyMotifEquivalenceWithKey(safe, key, progDir)
