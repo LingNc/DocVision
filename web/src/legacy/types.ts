@@ -134,6 +134,8 @@ export interface Session {
   chapterOrder?: number
   /** 方块视图的完成信号（T22）：done=交过 / error=干过活没交 / ''=还没开工；运行中由 live 表达。 */
   endState?: 'done' | 'error' | ''
+  /** T99 的 t=meta kind=run_end：error 时是终止原因（Go 侧 RunEndError）。 */
+  runEndError?: string
   imageType?: string
   /** P18：板块标记——img2text 来源的会话带 "img2text"，主根（latex）会话无此字段。 */
   board?: string

@@ -64,6 +64,16 @@ watch(
       <div v-if="!model.items.length && !state.partial" class="empty">{{ emptyText }}</div>
       <!-- P7：流式尾——当前会话正在生成的那条消息的实时快照 -->
       <PartialTail v-if="state.current && state.current.live && state.partial" :partial="state.partial" />
+      <!-- 会话结局（t=meta kind=run_end，T99）：meta 行按设计不进消息流，于是
+           "报错终止"的会话在对话页看起来就是个空会话——原因只能去 jsonl 里找。
+           这里把终止原因直接放在对话末尾；正常结束不占位，运行中也不占位。 -->
+      <section
+        v-if="state.current && !state.current.live && state.current.runEndError"
+        class="msg msg-end"
+      >
+        <div class="end-title">会话结局 · 错误终止</div>
+        <div class="end-detail">{{ state.current.runEndError }}</div>
+      </section>
     </div>
   </div>
 </template>
@@ -93,6 +103,20 @@ watch(
 
 /* 原 160 号规则里的 msg-other 半边（msg-system 半边在 SystemMsg.vue） */
 .msg-other .body-text { color: var(--muted); font-size: 13px; }
+
+/* 会话结局（run_end ok=false）：一句原因，红边框 + 安静底色，不抢正文。 */
+.msg-end {
+  border-left: 3px solid var(--err);
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.msg-end .end-title { font-size: 12px; color: var(--err); font-weight: 600; }
+.msg-end .end-detail {
+  margin-top: 4px; font-family: var(--mono);
+  font-size: var(--code-font); line-height: var(--code-line);
+  word-break: break-word; white-space: pre-wrap; color: var(--text);
+}
 
 @media (max-width: 1023px) {
   .timeline { padding: 12px 12px 60px; }
