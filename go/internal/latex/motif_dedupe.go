@@ -100,61 +100,67 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	if len(groups) == 0 {
 		return
 	}
-	r.log.Log(0, "[dedupe] 相似候选组", fmt.Sprint(len(groups)), "个；先由视觉会话核验，未确认的图片仍独立处理")
-	failed := 0
-	for gi, group := range groups {
-		members := make([]*motifCandidate, 0, len(group.Members))
+	pool := make([]*motifCandidate, 0, len(byKey))
+	seen := make(map[string]bool, len(byKey))
+	for _, group := range groups {
 		for _, key := range group.Members {
+			if seen[key] {
+				continue
+			}
 			if c := byKey[key]; c != nil {
-				members = append(members, c)
+				pool = append(pool, c)
+				seen[key] = true
 			}
 		}
-		if len(members) < 2 || !motifGroupHasVector(members) {
-			progress.verify(gi+1, len(groups), len(members), failed)
-			continue
+	}
+	r.log.Log(0, "[dedupe] 相似候选组", fmt.Sprint(len(groups)), "个，候选池", fmt.Sprint(len(pool)), "张；交由一个视觉会话做最终结构分组")
+	if len(pool) < 2 || !motifGroupHasVector(pool) {
+		return
+	}
+	sort.Slice(pool, func(i, j int) bool { return pool[i].task.key() < pool[j].task.key() })
+	failed := 0
+	progress.verify(0, 1, len(pool), failed)
+	allChecked := true
+	for _, c := range pool {
+		if !c.progress.DedupeChecked {
+			allChecked = false
+			break
 		}
-		sort.Slice(members, func(i, j int) bool { return members[i].task.key() < members[j].task.key() })
-		progress.verify(gi, len(groups), len(members), failed)
-		allChecked := true
-		for _, c := range members {
-			if !c.progress.DedupeChecked {
-				allChecked = false
-				break
-			}
-		}
-		if allChecked {
-			progress.verify(gi+1, len(groups), len(members), failed)
-			continue
-		}
-		for _, c := range members {
+	}
+	if !allChecked {
+		for _, c := range pool {
 			c.progress.EquivalentTo = ""
 			c.progress.DedupeLeaderHash = ""
 			c.progress.SharedTex = ""
 			c.progress.DedupeChecked = false
 			saveProgress(progDir, c.progress)
 		}
-		// Whole candidate groups share one context, not arbitrary batches of 10.
-		verdictGroups, err := r.verifyMotifCandidates(members, outDir, gi, 0)
+		verdictGroups, err := r.verifyMotifCandidates(pool, outDir, 0, 0)
 		if err != nil {
 			failed++
 			r.log.LogWarning(0, "[dedupe] AI 核验失败，候选保持独立:", err)
 		} else {
-			for _, c := range members {
+			for _, c := range pool {
 				c.progress.DedupeChecked = true
 				saveProgress(progDir, c.progress)
 			}
 			for _, ids := range verdictGroups {
 				equivalent := make([]*motifCandidate, 0, len(ids))
+				valid := true
 				for _, id := range ids {
-					equivalent = append(equivalent, members[id-1])
+					if id < 1 || id > len(pool) {
+						valid = false
+						break
+					}
+					equivalent = append(equivalent, pool[id-1])
 				}
-				if motifGroupHasVector(equivalent) {
+				if valid && motifGroupHasVector(equivalent) {
 					applyMotifEquivalence(equivalent, progDir)
 				}
 			}
 		}
-		progress.verify(gi+1, len(groups), len(members), failed)
 	}
+	progress.verify(1, 1, len(pool), failed)
 }
 
 func motifGroupHasVector(members []*motifCandidate) bool {

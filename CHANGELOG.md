@@ -27,6 +27,7 @@
 ### Added
 
 - **档位1相似矢量图核验与单图元复用（T111 / P31，配置 v14）**：classify 后、process 前按像素与保守彩色轮廓生成候选，由 `latex.dedupe_model` 的独立视觉会话核验非同内容组；转录在会话预览「相似图核验」。只将被确认的同一图元关联进各自 progress_items，按代表图作图一次，所有引用共用 `figures/motif_*.tex`；蓝色题号、额外组件保留原图与独立位置，核验失败退回逐图。随附模板的 `models.dedupe` 默认继承 text（T113 调整，须支持视觉），配置版本升级到 14。
+- **档位1 dedupe 候选池与增量分组（P33）**：像素/视觉相似度仅生成高召回初始候选，不直接创建等价关系；所有候选交给一个 AI 会话跨初始桶按结构分组。新增 `motif_groups` 工具持久化 `groups.json`，支持 list/add/update/delete/clear，最终无参数 `submit` 读取并校验已查看证据后提交，适合数百张候选的长时间核验。
 
 - **img2text 页码标记（P21）**：`mineru_output/` 有该书 MinerU 产物时，最终 markdown 按原始内容分页插入独立行 `[P. <页码>]`（跨部件全局 1-based 页码，与 latex doc_search/view_pdf 同一套），方便后续 AI 向用户指明位置——文本行规范化包含匹配 content_list 的 text 条目、图片引用按文件名对齐 image 条目（`[Image]( 描述 · P.42 )` 锚顺带带页码）；页码递增时在新页首行前插标记，围栏内顺延到围栏后，找不到 mineru 产物静默跳过。不加新配置项。
 - **submit 回执即会话终态（T92）**：`ToolResult.Terminal`——submit 类工具收账成功后 Run 直接结束，不再等模型收尾（此前模型提交后常回空消息，触发 "Continue." 空转一轮）；覆盖章节划分/转换/作图/核对/风格修复/mermaid 修复的全部 submit；样式包 submit 例外（提交后还要 test-compile，失败打回续跑）。

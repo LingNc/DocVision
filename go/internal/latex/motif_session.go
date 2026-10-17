@@ -60,33 +60,32 @@ func (t *motifViewTool) Execute(raw string) (session.ToolResult, error) {
 
 type motifSubmitTool struct {
 	done   SubmitDoneTool
-	count  int
+	groups *MotifGroupsTool
 	seen   map[int]bool
-	groups [][]int
 }
 
 func (t *motifSubmitTool) Name() string { return "submit" }
 func (t *motifSubmitTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name": "submit", "description": "Submit verified equivalent image groups. Every grouped image must have been inspected with view_image (original or numbered contact sheet). Omitted or singleton IDs stay independent; uncertain images must not be merged.",
-		"parameters": map[string]any{"type": "object", "properties": map[string]any{
-			"groups": map[string]any{"type": "array", "items": map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 1, "maximum": t.count}}},
-		}, "required": []string{"groups"}},
+		"name": "submit", "description": "Submit the persisted motif_groups result. Call motif_groups list first and inspect every member of each stored group with view_image; omitted images remain independent.",
+		"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
 	}}
 }
 func (t *motifSubmitTool) Execute(raw string) (session.ToolResult, error) {
-	groups, err := parseMotifGroups(raw, t.count)
+	if _, err := parseJSONObject(raw); err != nil {
+		return session.ToolResult{}, err
+	}
+	groups, err := t.groups.Groups()
 	if err != nil {
 		return session.ToolResult{Text: "REJECTED: " + err.Error()}, nil
 	}
 	for _, group := range groups {
 		for _, id := range group {
 			if !t.seen[id] {
-				return session.ToolResult{Text: fmt.Sprintf("REJECTED: image %d has not been inspected. Use view_image on its original or uncropped numbered contact sheet, or omit it.", id)}, nil
+				return session.ToolResult{Text: fmt.Sprintf("REJECTED: image %d has not been inspected. Use view_image on its original or uncropped numbered contact sheet, or omit its group.", id)}, nil
 			}
 		}
 	}
-	t.groups = groups
 	return t.done.Execute(`{}`) // reuse the normal terminal submit receipt
 }
 
@@ -110,8 +109,9 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	}
 	mounts := []Mount{{Name: "candidates", Dir: view}}
 	imageTool := &motifViewTool{base: &ViewImageTool{Root: view, BareSearch: true, SoftMax: r.cfg.Tools.View.ImageMax, WarnRatio: r.cfg.Tools.View.WarnRatio}, covered: covered, seen: seen}
-	submit := &motifSubmitTool{count: len(members), seen: seen}
-	tools := []session.Tool{&ReadFileTool{Mounts: mounts}, &GrepTool{Mounts: mounts}, imageTool, submit}
+	groupTool := NewMotifGroupsTool(filepath.Join(view, "groups.json"), len(members))
+	submit := &motifSubmitTool{groups: groupTool, seen: seen}
+	tools := []session.Tool{&ReadFileTool{Mounts: mounts}, &GrepTool{Mounts: mounts}, imageTool, groupTool, submit}
 	modelName := r.cfg.Latex.DedupeModel
 	if modelName == "" {
 		modelName = "text"
@@ -137,10 +137,10 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	hook, closeRow := r.livePhaseRow(label, label)
 	defer closeRow()
 	sess.SetProgressHook(hook)
-	user := prompts.Render(prompts.DedupeUser, map[string]string{"IMAGES": fmt.Sprintf("candidates:manifest.md (%d images; entire candidate group)", len(members))})
+	user := prompts.Render(prompts.DedupeUser, map[string]string{"IMAGES": fmt.Sprintf("candidates:manifest.md (%d images; complete candidate pool; edit candidates:groups.json with motif_groups)", len(members))})
 	_, runErr := sess.Run(session.RunOptions{UserText: user})
 	for attempts := 0; runErr == nil && !submit.done.Submitted && attempts < 2; attempts++ {
-		_, runErr = sess.Run(session.RunOptions{UserText: user})
+		_, runErr = sess.Run(session.RunOptions{UserText: "You have NOT called submit yet. Review the persisted groups.json if needed, then call submit with no arguments."})
 	}
 	if runErr != nil {
 		return nil, runErr
@@ -148,7 +148,7 @@ func (r *Runner) verifyMotifCandidates(members []*motifCandidate, outDir string,
 	if !submit.done.Submitted {
 		return nil, fmt.Errorf("dedupe session ended without submit")
 	}
-	return submit.groups, nil
+	return submit.groups.Groups()
 }
 
 func prepareMotifView(root string, members []*motifCandidate) (map[string][]int, error) {

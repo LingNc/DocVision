@@ -1609,3 +1609,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 根因与修正：旧 dedupe 把候选拆成每批10张、把图片直接作为请求附件、没有既有 read_file/grep/view_image/submit 工具和显式提交；现在每个完整候选组只建一个独立会话，挂载只读 `candidates/` 工作区，初始消息仅给 manifest，编号联系图按展示页生成，模型按需看图并由 submit 严格校验已看过的 1-based 成员，任何核验失败均保持独立。336张大组仅按联系图分页展示，不拆上下文。
 - Web 侧 `metaState` 原先取最后任意 meta，price/run_end 会覆盖 system 快照；现在 Go/Vue 均只选 `kind=system` 或旧无 kind 行。dedupe 阶段从稳定转录名/标签归类并排在 vector 前；CLI 新增 `[dedupe]` 扫描、整组核验和失败计数进度。dedupe 模型默认回退 `text`，并通过 `LatexSession("dedupe")` 复用现有 drawing tuning。
 - 验证证据：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 通过；`go build ./...` 通过；Web `npm test` 129 tests 通过，`npm run build` 通过；新增整组工具会话、336张联系图证据门禁和 system meta 回归测试。某项目按已确认无备份范围清除非 style 生成状态，保留 style、style 试点产物与 `source/images`，脚本指纹校验通过。
+
+### P33 候选池与增量结构分组
+- 相似度计算继续只负责初始高召回候选；`motifDedupePhase` 将所有初始候选桶汇总到一个候选池，再交给单一 AI 会话跨桶判断结构分组。AI 不再需要一次性提交几百个 ID。
+- 新增 `motif_groups` 结构化工具和候选工作区 `groups.json`：支持 `list/add/update/delete/clear`，每次修改即时校验范围、重复 ID、跨组归属并原子保持旧状态；最终 `submit` 无参数读取 JSON，并对所有已分组成员执行看图证据门禁，失败关闭。

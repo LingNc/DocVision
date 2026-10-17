@@ -111,8 +111,10 @@ func TestVerifyMotifCandidatesIndependentVisionSession(t *testing.T) {
 			jsonToolReply(w, "read_file", `{"path":"candidates:manifest.md"}`)
 		case 2:
 			jsonToolReply(w, "view_image", `{"path":"sheets/001.png"}`)
+		case 3:
+			jsonToolReply(w, "motif_groups", `{"op":"add","group":[1,2,3,4,5,6,7,8,9,10,11,12]}`)
 		default:
-			jsonToolReply(w, "submit", `{"groups":[[1,2,3,4,5,6,7,8,9,10,11,12]]}`)
+			jsonToolReply(w, "submit", `{}`)
 		}
 	}))
 	defer srv.Close()
@@ -132,7 +134,7 @@ func TestVerifyMotifCandidatesIndependentVisionSession(t *testing.T) {
 	if err != nil || len(groups) != 1 || len(groups[0]) != 12 {
 		t.Fatalf("verdict=%v err=%v", groups, err)
 	}
-	if len(requests) != 3 {
+	if len(requests) != 4 {
 		t.Fatalf("whole group must use one tool session: %d requests", len(requests))
 	}
 	if strings.Contains(requests[0], `"type":"image_url"`) || !strings.Contains(requests[0], "text-vision") || !strings.Contains(requests[0], "12 images") {
@@ -183,23 +185,56 @@ func TestMotifWholeGroup336Images(t *testing.T) {
 	for i := range ids {
 		ids[i] = i + 1
 	}
-	raw, _ := json.Marshal(map[string]any{"groups": [][]int{ids}})
-	submit := &motifSubmitTool{count: 336, seen: seen}
-	res, err := submit.Execute(string(raw))
-	if err != nil || !res.Terminal || len(submit.groups) != 1 || len(submit.groups[0]) != 336 {
-		t.Fatalf("whole group lost: %v %v", submit.groups, err)
+	raw, _ := json.Marshal(map[string]any{"group": ids, "op": "add"})
+	groupTool := NewMotifGroupsTool(filepath.Join(root, "groups.json"), 336)
+	if res, err := groupTool.Execute(string(raw)); err != nil || strings.Contains(res.Text, "REJECTED") {
+		t.Fatalf("stage whole group: %+v %v", res, err)
+	}
+	submit := &motifSubmitTool{groups: groupTool, seen: seen}
+	res, err := submit.Execute(`{}`)
+	if err != nil || !res.Terminal || !submit.done.Submitted {
+		t.Fatalf("whole group lost: %v %v", res.Text, err)
 	}
 }
 
 func TestMotifSubmitRequiresVisualEvidence(t *testing.T) {
-	tool := &motifSubmitTool{count: 3, seen: map[int]bool{1: true}}
-	res, err := tool.Execute(`{"groups":[[1,2]]}`)
+	root := t.TempDir()
+	groups := NewMotifGroupsTool(filepath.Join(root, "groups.json"), 3)
+	tool := &motifSubmitTool{groups: groups, seen: map[int]bool{1: true}}
+	res, err := groups.Execute(`{"op":"add","group":[1,2]}`)
+	if err != nil || strings.Contains(res.Text, "REJECTED") {
+		t.Fatalf("stage group failed: %+v %v", res, err)
+	}
+	res, err = tool.Execute(`{}`)
 	if err != nil || res.Terminal || tool.done.Submitted || !strings.Contains(res.Text, "REJECTED") {
 		t.Fatalf("unseen merge accepted: %+v %v", res, err)
 	}
 	tool.seen[2] = true
-	res, err = tool.Execute(`{"groups":[[1,2],[3]]}`)
-	if err != nil || !res.Terminal || !tool.done.Submitted || len(tool.groups) != 1 {
-		t.Fatalf("valid split rejected: %+v %v", res, err)
+	res, err = tool.Execute(`{}`)
+	if err != nil || !res.Terminal || !tool.done.Submitted {
+		t.Fatalf("valid staged group rejected: %+v %v", res, err)
+	}
+}
+
+func TestMotifGroupsIncrementalOperations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "groups.json")
+	tool := NewMotifGroupsTool(path, 6)
+	for _, raw := range []string{`{"op":"add","group":[1,2]}`, `{"op":"add","group":[3,4]}`, `{"op":"update","n":2,"group":[3,5]}`, `{"op":"delete","n":1}`} {
+		res, err := tool.Execute(raw)
+		if err != nil || strings.Contains(res.Text, "REJECTED") {
+			t.Fatalf("op %s: %+v %v", raw, res, err)
+		}
+	}
+	got, err := tool.Groups()
+	if err != nil || len(got) != 1 || len(got[0]) != 2 || got[0][0] != 3 || got[0][1] != 5 {
+		t.Fatalf("groups=%v err=%v", got, err)
+	}
+	res, err := tool.Execute(`{"op":"add","groups":[[5,6],[2,2]]}`)
+	if err != nil || !strings.Contains(res.Text, "REJECTED") {
+		t.Fatalf("invalid batch accepted: %+v %v", res, err)
+	}
+	got, _ = tool.Groups()
+	if len(got) != 1 || got[0][0] != 3 || got[0][1] != 5 {
+		t.Fatalf("invalid batch changed state: %v", got)
 	}
 }
