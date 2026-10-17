@@ -667,25 +667,12 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	// 进度只统计本次要处理的部分："Already done: N | to process: M" 那行
 	// 已经把断点续传的基数说过一次，混进进度线会让续跑一上来就 97.93%
 	// （用户："只看这次的 to process"）。
-	total, done, failed, running := len(pending), 0, 0, 0
+	total, done, failed, running := 0, 0, 0, 0
 	var progLive *liveProgress
 	progress := func() {
 		if progLive != nil {
 			progLive.render()
 		}
-	}
-	progLive = newLiveProgressRow(r.log, "classify", func() string {
-		if verbose || total == 0 {
-			return ""
-		}
-		mu.Lock()
-		d, f, rn := done, failed, running
-		mu.Unlock()
-		return classifyProgressText(d, total, f, rn)
-	})
-	defer progLive.Close()
-	if total > 0 {
-		r.log.Log(0, "[classify] 待分类", strconv.Itoa(len(pending)), "张，并发", strconv.Itoa(conc), "（latex.concurrency）")
 	}
 
 	// 水印图片引用：直接预标记 absorbed（重建时删除引用），
@@ -714,10 +701,6 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 		total = len(pending)
 	}
 
-	client := r.clientFor(r.cfg.Latex.ClassifierModel)
-	modelCfg := r.modelOf(r.cfg.Latex.ClassifierModel)
-	classifyExtra := r.wm.Block()
-
 	// 只对尚未分类的任务调用分类会话（fallback 重试等已带 Class
 	// 的条目直接进 process，不再重复分类，进度计数也不虚报）。
 	toClassify := make([]*task, 0, len(pending))
@@ -727,10 +710,27 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 		}
 	}
 	total = len(toClassify)
-	if total > 0 {
-		// 分类会话也耗时：先打出 0/N 起始行，第一张完成前控制台不空白。
-		progress()
+	if total == 0 {
+		// 续跑已分类但尚未处理的图片时，不创建 0/N 的错误进度行。
+		r.log.PrintConsole(fmt.Sprintf("[classify] 已分类，跳过（待处理 %d 张，本次待分类 0 张）", len(pending)))
+		return
 	}
+	r.log.Log(0, "[classify] 待分类", strconv.Itoa(total), "张，并发", strconv.Itoa(conc), "（latex.concurrency）")
+	progLive = newLiveProgressRow(r.log, "classify", func() string {
+		if verbose {
+			return ""
+		}
+		mu.Lock()
+		d, f, rn := done, failed, running
+		mu.Unlock()
+		return classifyProgressText(d, total, f, rn)
+	})
+	defer progLive.Close()
+	// 第一张完成之前即显示 0/N，N 只包括尚未分类的任务。
+	progress()
+	client := r.clientFor(r.cfg.Latex.ClassifierModel)
+	modelCfg := r.modelOf(r.cfg.Latex.ClassifierModel)
+	classifyExtra := r.wm.Block()
 
 	for _, t := range toClassify {
 		wg.Add(1)

@@ -17,6 +17,8 @@
 
 **档位 1（`latex.level: 1`）—— 全书 LaTeX**
 
+续跑 images 阶段时，`Already done: N | to process: M` 表示本轮仍需 process 的图；`classify` 只统计其中**尚无分类记录**的图，若全部已分类则明确显示跳过（不显示错误的 `0/M`），随后 `process` 对本轮待处理图独立计数（T112）。
+
 1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/<项目名>/work/style/`），用 `list_source_pages` 取原书页索引（源 PDF / 页范围 / 全局页号 / OCR 推导的章节起点），再用 `view_pdf {path:"source:<file>.pdf", page:N}` **按需渲染** MinerU 保留的原始扫描页（支持裁剪放大）、`view_image` 看提取图、`read_file`/`grep` 读解析文本，分析全书样式后用 `write_file`/`edit_file` 增量起草（`example.tex` 的图**直接用 md 里已有的 LaTeX**：`<!-- DOCVISION-VECTOR -->` 下面那个 ```latex 围栏就是这本书真正的图代码，复制它比重新画一张更省心智、也更贴合实际成品），再 `submit_style` **按工作区路径**提交 `book.cls` + 使用手册 + 案例（`{cls, manual, example, extra[], report}`：`extra` 可带上类需要的任何附属文件——helper `.sty`、TikZ 样式、字体表——会连同示例一起进试编译；`report` 写进 `style/REPORT.md`；示例自动试编译，失败回炉）。`submit_style` **只收工作区路径**，没有内联内容兼容（工具形态不该对模型保留历史包袱，且"路径还是内容"的启发式曾把一行 `## Vector figure style` 误判为文件名）；参数里带换行内容会被拒绝并提示先 `write_file` 再交路径。字体通过 `list_fonts` 查看；缺字体时在提交报告与手册里列出清单，由用户按文件名手动放进 `paths.fonts`（编译环境已注入 `TEXINPUTS`/`OSFONTDIR`，无需装系统字体）
 2. **章节划分 AI**（`models.chapter`）：`grep`/`read_file`/`bash` + `buffer.md` 工作记忆缓冲区（分析结论增量写入、跨轮保留），按行号划分章节（结构化提交，全覆盖校验）
    **逐图校验（`latex.figure_check`，默认关闭）**：打开后每次 `submit` 都再用一个**能看图**的模型把"重画图 ↔ 原图"比一遍（两张图同时进会话，工具只有 `submit`）；不一致就把问题清单打回**同一个作图会话**继续修（上下文还在），最多 `max_rounds` 轮（默认 2），仍不合格记警告照常交付。校验会话转录落在 `work/sessions/figure_check_<图>.jsonl`。
