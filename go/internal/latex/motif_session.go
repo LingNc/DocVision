@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -273,6 +274,13 @@ func (r *Runner) verifyMotifScope(sc *motifScope, outDir string) ([]MotifGroup, 
 	if msgs, st, lerr := session.LoadTranscriptStats(trPath); lerr != nil {
 		r.log.LogWarning(0, "[dedupe] 转录读取失败（按全新会话继续）:", lerr)
 	} else if len(msgs) > 0 {
+		// 证据也要跟着历史回来：seen.json 是最快的路径，但旧版本跑出来的转
+		// 录没有这个文件，压缩点之后的回放也可能漏掉早期的看图调用——转录
+		// 里的看图表征同样是证据，必须并入，否则重放的 submit 会被判"没看过"。
+		for id := range motifEvidenceFromMessages(msgs, view, len(sc.Members)) {
+			seen[id] = true
+		}
+		imageTool.saveSeen()
 		sess.SetMessages(msgs)
 		sess.SeedCounters(st.Rounds, st.Tools)
 		resumeLog(r.log, 0, label, filepath.Base(trPath), msgs, st)
@@ -464,5 +472,80 @@ func motifClassOf(c *motifCandidate) string {
 	return c.progress.Class
 }
 
-// motifScopeID maps a work-dir path back to its 1-based session id:
-// originals/000123.jpg -> 123, keys/000004.jpg -> keyOffset+4.
+// motifReceiptRe matches the receipt view_image prints for a successful view:
+// "Image originals/000123.png (crop 0%,0%-100%,100%, width 1280px) attached."
+var motifReceiptRe = regexp.MustCompile(`^Image (\S+) \(crop (\d+)%,(\d+)%-(\d+)%,(\d+)%, width \d+px\) attached\.`)
+
+// motifEvidenceFromMessages rebuilds the "already inspected" set from a replayed
+// transcript. seen.json is the fast path, but a transcript recorded before that
+// file existed (older binary), or one whose early turns were dropped by
+// compaction, still carries the proof in its receipts — resume must not lose
+// evidence it can see. Only an uncropped view of an individual original counts,
+// exactly like the live tool, so the gate itself is not weakened.
+func motifEvidenceFromMessages(msgs []session.ChatMessage, view string, keyOffset int) map[int]bool {
+	seen := map[int]bool{}
+	for _, m := range msgs {
+		if m.Role != "tool" {
+			continue
+		}
+		for _, line := range strings.Split(session.ContentString(m), "\n") {
+			path, ok := motifUncroppedReceipt(strings.TrimSpace(line))
+			if !ok {
+				continue
+			}
+			if id := motifReceiptID(view, path, keyOffset); id > 0 {
+				seen[id] = true
+			}
+		}
+	}
+	return seen
+}
+
+// motifUncroppedReceipt returns the viewed path when the line is a full-frame
+// receipt. %.0f prints whole percentages, so a full frame is always 0,0-100,100.
+func motifUncroppedReceipt(line string) (string, bool) {
+	m := motifReceiptRe.FindStringSubmatch(line)
+	if m == nil {
+		return "", false
+	}
+	if m[2] != "0" || m[3] != "0" || m[4] != "100" || m[5] != "100" {
+		return "", false
+	}
+	return strings.TrimPrefix(m[1], "candidates:"), true
+}
+
+// motifReceiptID maps a receipt path to its session id. Models may name the file
+// as originals/000123.png or as a bare 000123.png (view_image resolves bare names
+// inside the workspace), so a bare name is looked up on disk.
+func motifReceiptID(view, path string, keyOffset int) int {
+	if id := motifScopeID(path, keyOffset); id > 0 {
+		return id
+	}
+	base := filepath.Base(path)
+	if strings.ContainsAny(base, "/\\") {
+		return 0
+	}
+	for _, dir := range []string{"originals", "keys"} {
+		if _, err := os.Stat(filepath.Join(view, dir, base)); err != nil {
+			continue
+		}
+		return motifDirID(dir, base, keyOffset)
+	}
+	return 0
+}
+
+// motifDirID applies the numbering of motifScopeID inside a known subdirectory.
+func motifDirID(dir, base string, keyOffset int) int {
+	dot := strings.IndexByte(base, '.')
+	if dot <= 0 {
+		return 0
+	}
+	id, err := strconv.Atoi(base[:dot])
+	if err != nil || id < 1 {
+		return 0
+	}
+	if dir == "keys" {
+		return keyOffset + id
+	}
+	return id
+}

@@ -70,7 +70,10 @@ type Session struct {
 	lastCompactTokens int
 	// contextNoteStep is the last growth threshold already logged (0/50/80).
 	contextNoteStep int
-	Prunes          int
+	// budgetTrimmed records that the output budget was already shrunk to fit
+	// the window, so the explanation is logged once instead of every round.
+	budgetTrimmed bool
+	Prunes        int
 
 	// 本地估算与厂商实测的标定。textTokens 数不出厂商侧真实开销
 	// （reasoning_content/tool_calls/图片像素编码/每轮包装），实测
@@ -570,7 +573,7 @@ func (s *Session) run(opts RunOptions) (string, error) {
 		req := &ChatRequest{
 			Model:       s.client.Model(),
 			Messages:    s.messages,
-			MaxTokens:   s.tuning.MaxTokens,
+			MaxTokens:   s.outputBudget(),
 			Temperature: s.tuning.Temperature,
 			User:        s.user,
 		}
@@ -940,6 +943,47 @@ func (s *Session) observePromptSize(estBefore, actual int) {
 // prompt_tokens。③ 是"下一次请求至少这么大"的硬下限——本地估算漏算的
 // 开销（图片按像素编码、每轮包装）再多，厂商的数字不会骗人。裁剪或压缩
 // 之后历史真的变小了，这两个值都会被清掉/重算，所以不会把旧的大值钉住。
+// outputBudget 把本轮的 max_tokens 压到窗口装得下的程度。
+//
+// 厂商的窗口是 prompt + max_tokens 之和，而 max_tokens 是固定配置：真实
+// 事故（2026-10-17 某项目整组核验）窗口 262144、max_tokens=131072，会话
+// 聊了十几分钟把 prompt 推到 13 万以上，于是每一轮都被 400 打回——
+// "This model's maximum context length is 262144 tokens. However, you
+// requested 131072 output tokens and your prompt contains at least 131073
+// input tokens"。压缩阈值只管输入规模，管不到"输入 + 输出"这条硬上限，
+// 所以必须在这里让路：输入越大，输出预算越小。
+func (s *Session) outputBudget() int {
+	out := sessionOutputBudget(s.tuning.MaxTokens, s.tuning.ContextLimit, s.CurrentTokens())
+	if out < s.tuning.MaxTokens && !s.budgetTrimmed {
+		s.budgetTrimmed = true
+		s.logf("[context] 输出预算 %d → %d：窗口 %d、当前上下文 %d（厂商按 prompt+max_tokens 计窗口）",
+			s.tuning.MaxTokens, out, s.tuning.ContextLimit, s.CurrentTokens())
+	}
+	return out
+}
+
+// sessionOutputBudget is the pure rule behind outputBudget: leave the
+// configured budget alone when it already fits, otherwise give the input the
+// room it needs. maxOut <= 0 or limit <= 0 means "no cap configured".
+func sessionOutputBudget(maxOut, limit, prompt int) int {
+	if maxOut <= 0 || limit <= 0 {
+		return maxOut
+	}
+	// 留 2%（至少 1024）给估算误差：本地估算比厂商实测小是常态。
+	margin := limit / 50
+	if margin < 1024 {
+		margin = 1024
+	}
+	avail := limit - prompt - margin
+	if avail < 512 {
+		avail = 512
+	}
+	if avail >= maxOut {
+		return maxOut
+	}
+	return avail
+}
+
 func (s *Session) CurrentTokens() int {
 	est := s.EstimatedTokens()
 	best := est
