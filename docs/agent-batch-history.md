@@ -1751,3 +1751,12 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **T133**：用户问「dedupe 的中间结果（重合度扫描）没有输出到某个目录吗？续跑还是要再过一遍，而且每次都不一样」。排查出三条：① 规则改动会让进会话的池子变化，而会话身份是"成员集哈希"，所以 11:15 的 `ff7046e3` 与 11:28 的 `c3cdddf1`/`eadf1649` 是两套会话（11:28 换的是带 T130 桶 + T131 自动归组的二进制，池子 130→77）；11:36/11:37 都是 `轮次 0`（`dedupe_checked` 全真，allChecked 快路径）。② classify 数字 388→364→360 不是丢图（md 引用、图片文件、progress 都还是 388），只是"本次还要处理"的张数在变小。③ 结论只落在会话工作区与每图 progress 里，桶与分数不落盘。
 - 实现：`<proj>/source/dedupe/groups.json` + `report.md`，带"输入 + 规则"指纹；写盘失败只警告。测试 `TestWriteMotifArtifactsRecordsFinalGroups`（组/成员/副本/独立/指纹/报告文案）、`TestMotifArtifactFingerprintStable`（顺序无关、规则变则变）。
 - 验证：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 13 包全绿。
+
+### T135 / T138 / T139 dedupe 判据定稿 + 未进会话图挂靠（2026-10-18 第十二批）
+
+- **判据（T138）**：软墨量 `w = 1−通道/255`（不二值化）+ RGB 三通道平均 Σmin/Σmax；画布 `S = clamp(P90(内容框长边), 24, 512)` 按池自适应；内容框**居中贴进 S×S 且不缩放**；网格 `G = 32, 64, …` 逐级翻倍到放得进 S 的最细一级，粗层只把平移搜到位，**判定分取最终（最细）那一级**（用户：「判定层就是逐级搜索的最终结果，不要固定一个 G=多少的层」）。删掉旧的固定 32×32 + 归一化缩放：缩放会抹平尺寸差（同图缩到 0.72× 也能并），细网格才能分开只差一个符号的交换图（内容框 171×390：G=32 得 0.765、G=256 得 0.373）。
+- **配置（T138/T139）**：新增 `latex.dedupe_align_grid`（`32` 固定格数或 `0.95S` 画布比例，表示最细一级，`ParseAlignGrid` 夹在 `[8,1024]`）、`dedupe_align_typical`（0.95）、`dedupe_attach_min`（0.60）、`dedupe_icon_max_area`（200000 px²）、`dedupe_bucket_max`（400）；`CurrentConfigVersion` → 20，两份模板与 README/`docs/config.md` 同步。
+- **挂靠（T135/T139）**：`motifAttachLeftovers` 在收尾前把未进任何核验会话、`DedupeChecked=false`、无 `equivalent_to`、内容框 ≤ `dedupe_icon_max_area` 的图逐张与已确认组的关键图比居中重合度，最高且 ≥ `dedupe_attach_min` 的组收编，产物标 `source=attached`；每张最多一个锚点（同分按 `applied` 顺序）故不成环，会话结论不覆盖。
+- **诊断（T139）**：`pairs.csv` 增 `align_level`/`canvas`/`skip`（`too_large`/`no_content_box`）三列，能直接看出这对用了哪一级网格、多大画布、为什么没走判据。
+- **真实数据（该书 130 份不同内容，T139 复测）**：同标记 100 张两两 4950 对 min 0.462 / p10 0.542 / 中位 0.610 / ≥0.60 2851 对 / ≥0.75 232 对（对比 T137 缩放版：中位 0.760、96/100 ≥0.60）；30 张不同内容 435 对 min 0.002 / 中位 0.048 / **max 0.607**；A/B 交换对 0.378。结论：不缩放后同标记分数整体下移，`0.75` 自动档只吃约 4.7% 的对，主力是 0.60–0.75 核验会话 + `attached` 挂靠，且 0.60 门槛正压在不同内容的最大值上——所以自动路径继续由 0.75 把守、误并留在会话里可复核。
+- **测试**：重写 4 个依赖缩放不变性的旧 fixture（squash 变体现在明确不并，跨尺寸交给会话/挂靠），新增 S 自适应/位置偏移/回退/挂靠等用例；`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 13 包全绿，`go build ./...` 干净。
