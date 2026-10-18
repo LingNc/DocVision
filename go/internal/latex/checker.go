@@ -17,14 +17,24 @@ import (
 // does not touch the book.
 //
 // Hard problems are returned to the caller, which feeds them back to the
-// SAME conversion session (its context is still live, so it is the
-// cheapest and most accurate fixer). Transport/validation problems
-// degrade to (true, "") — compile and the final assembly review remain
-// the hard gates.
+// SAME conversion session. Ordinary chapters retain the historical transport
+// fallback; recursive nodes use strict mode and fail closed on missing verdicts.
 func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, tid int) (bool, string) {
-	view := ensureCheckerView(proj, base, chapPath, texPath, partsPath)
+	return r.checkChapterAt(proj, base, chapPath, texPath, partsPath, tid, "", "", false)
+}
+
+func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string, tid int, transcriptPath, viewPath string, strict bool) (bool, string) {
+	view := viewPath
+	if view == "" {
+		view = ensureCheckerView(proj, base, chapPath, texPath, partsPath)
+	} else {
+		view = ensureCheckerViewAt(viewPath, base, chapPath, texPath, partsPath)
+	}
 	if view == "" {
 		r.log.LogWarning(tid, "[checker]", base, "无法准备只读视图，跳过核对")
+		if strict {
+			return false, "checker 只读视图无法准备"
+		}
 		return true, ""
 	}
 	checkerName := r.cfg.Latex.CheckerModel
@@ -36,7 +46,10 @@ func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, t
 	tuning := r.cfg.LatexSession("checker")
 
 	mounts := []Mount{{Name: "check", Dir: view}}
-	trPath := filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
+	trPath := transcriptPath
+	if trPath == "" {
+		trPath = filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
+	}
 	userText := prompts.Render(prompts.CheckerUser, map[string]string{
 		"CHAPTER_MD":  "check:" + base + ".md",
 		"CHAPTER_TEX": "check:" + base + ".tex",
@@ -76,14 +89,20 @@ func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, t
 		// 而且 checker 是并发跑的，必须有自己的行而不是挤在转换行里。
 		chkHook, chkClose := r.livePhaseRow("checker:"+base, "checker:"+base)
 		sess.SetProgressHook(chkHook)
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
+		release := r.acquireChapterSlot()
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		_, runErr := sess.Run(session.RunOptions{UserText: userText})
+		release()
 		chkClose()
 		if runErr == nil && !submit.Submitted {
 			// 与 tikz 会话同款：模型漏了 submit 就提醒一次。
 			r.log.LogWarning(tid, "[checker]", base, "会话结束但未提交结论，发送提交提醒")
+			release = r.acquireChapterSlot()
 			_, runErr = sess.Run(session.RunOptions{
 				UserText: "You have NOT called submit yet. Re-read the chapter files if needed, then call submit with your verdict.",
 			})
+			release()
 		}
 		if tr != nil {
 			// 本轮写完即关；重试轮在同一转录上重新打开续写
@@ -93,6 +112,14 @@ func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, t
 		}
 		if runErr != nil {
 			r.log.LogWarning(tid, "[checker]", base, "会话错误:", runErr)
+			if strict && isSessionAPIError(runErr.Error()) {
+				if tr != nil {
+					tr.Close()
+					tr = nil
+				}
+				r.keepCheckerTranscript(trPath, strict)
+				return false, "checker API failure: " + runErr.Error()
+			}
 			continue
 		}
 		if !submit.Submitted {
@@ -104,15 +131,30 @@ func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, t
 			if issues == "" {
 				issues = "the checker reported problems but gave no description"
 			}
-			r.keepSessionFile(trPath)
+			r.keepCheckerTranscript(trPath, strict)
 			return false, issues
 		}
-		r.keepSessionFile(trPath)
+		if submit.Status != "pass" {
+			r.log.LogWarning(tid, "[checker]", base, "提交了未知结论状态:", submit.Status)
+			continue
+		}
+		r.keepCheckerTranscript(trPath, strict)
 		return true, ""
 	}
-	r.log.LogWarning(tid, "[checker]", base, checkerAttempts, "次核对均未拿到结论，视为通过")
-	r.keepSessionFile(trPath)
+	r.log.LogWarning(tid, "[checker]", base, checkerAttempts, "次核对均未拿到结论")
+	r.keepCheckerTranscript(trPath, strict)
+	if strict {
+		return false, "checker 多次未能提交结论"
+	}
 	return true, ""
+}
+
+func (r *Runner) keepCheckerTranscript(path string, strict bool) {
+	if strict {
+		r.log.Log(0, "[checker] 保留递归节点核对转录:", path)
+		return
+	}
+	r.keepSessionFile(path)
 }
 
 // ensureCheckerView materialises the checker's read-only view: exactly
@@ -123,7 +165,13 @@ func ensureCheckerView(proj, base, chapPath, texPath, partsPath string) string {
 	if proj == "" || base == "" {
 		return ""
 	}
-	dir := filepath.Join(proj, "work", "views", "checker_"+base)
+	return ensureCheckerViewAt(filepath.Join(proj, "work", "views", "checker_"+base), base, chapPath, texPath, partsPath)
+}
+
+func ensureCheckerViewAt(dir, base, chapPath, texPath, partsPath string) string {
+	if dir == "" || base == "" {
+		return ""
+	}
 	_ = os.RemoveAll(dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return ""

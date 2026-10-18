@@ -935,6 +935,114 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 	return r.styleFeedbackLoop(proj, fbRound)
 }
 
+func (r *Runner) acquireChapterSlot() func() {
+	r.chapterSlotsOnce.Do(func() {
+		limit := r.cfg.Latex.Concurrency
+		if limit < 1 {
+			limit = 3
+		}
+		r.chapterSlots = make(chan struct{}, limit)
+	})
+	r.chapterSlots <- struct{}{}
+	return func() { <-r.chapterSlots }
+}
+
+func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, parentBase, parentWork, workDir string, idx, tid int, parent chapterNodeConfig, children []ChapterSubdivision) error {
+	data, err := os.ReadFile(chapPath)
+	if err != nil {
+		return fmt.Errorf("读取父章节失败: %w", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	parentParts := filepath.Join(parentWork, parentBase, "children")
+	if err := os.RemoveAll(parentParts); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(parentParts, 0o755); err != nil {
+		return err
+	}
+	limit := r.cfg.Latex.Concurrency
+	if limit < 1 {
+		limit = 3
+	}
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var failures []string
+	for i, child := range children {
+		id := fmt.Sprintf("child_%02d", i+1)
+		chapter := child
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			childRoot := filepath.Join(parentWork, "_subdivision", id)
+			nodeRoot := filepath.Join(childRoot, "node")
+			inputDir := filepath.Join(childRoot, "input")
+			if err := os.MkdirAll(inputDir, 0o755); err != nil {
+				mu.Lock()
+				failures = append(failures, id+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			childMD := filepath.Join(inputDir, "chapter.md")
+			if err := os.WriteFile(childMD, []byte(chapterSubrange(lines, chapter)), 0o644); err != nil {
+				mu.Lock()
+				failures = append(failures, id+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			childBase := parentBase + "_" + id
+			childOut := filepath.Join(nodeRoot, "result")
+			childNode := chapterNodeConfig{
+				Base: childBase, Depth: parent.Depth + 1, InputMount: "input", InputRef: "chapter.md",
+				NodeRoot:       nodeRoot,
+				TranscriptPath: filepath.Join(nodeRoot, "sessions", "convert.jsonl"),
+				SubmitRoot:     childOut,
+				ReportPath:     filepath.Join(nodeRoot, "reports", "conversion.md"),
+				StrictChecker:  true,
+			}
+			if err := r.convertChapterNode(proj, clsName, manualPath, childMD, workDir, idx, tid, false, childNode); err != nil {
+				mu.Lock()
+				failures = append(failures, id+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			if err := copyFile(filepath.Join(childOut, childBase+".tex"), filepath.Join(parentParts, childBase+".tex")); err != nil {
+				mu.Lock()
+				failures = append(failures, id+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			if fileExists(filepath.Join(childOut, childBase)) {
+				if err := copyDir(filepath.Join(childOut, childBase), filepath.Join(parentParts, childBase)); err != nil {
+					mu.Lock()
+					failures = append(failures, id+": "+err.Error())
+					mu.Unlock()
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if len(failures) > 0 {
+		sort.Strings(failures)
+		return fmt.Errorf("子章节转换或 checker 失败；父章节禁止提交: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+func writeChapterChildrenManifest(work, base string, children []ChapterSubdivision) error {
+	var b strings.Builder
+	b.WriteString("# 已核验子章节\n\n")
+	for i, child := range children {
+		id := fmt.Sprintf("child_%02d", i+1)
+		artifactBase := base + "_" + id
+		fmt.Fprintf(&b, "%d. %s（Markdown 行 %d-%d）\n   - TeX: %s/children/%s.tex\n   - Parts: %s/children/%s/\n   - Conversion report: %s/_subdivision/%s/node/reports/conversion.md\n   - Conversion transcript: %s/_subdivision/%s/node/sessions/convert.jsonl\n   - Checker transcript: %s/_subdivision/%s/node/sessions/checker.jsonl\n", i+1, child.Title, child.StartLine, child.EndLine, base, artifactBase, base, artifactBase, base, id, base, id, base, id)
+	}
+	return os.WriteFile(filepath.Join(work, "_subdivision", "children-manifest.md"), []byte(b.String()), 0o644)
+}
+
 // writeStyleExtras persists the files a submit_style call shipped
 // besides cls/manual/example (helper .sty, TikZ style files, font
 // tables…) into the style package, preserving relative paths, and
@@ -1007,8 +1115,64 @@ func classNameOfFile(styleDir string) string {
 // therefore never leak into the book.
 func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool) error {
 	base := strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
-	texPath := filepath.Join(workDir, "chapters", base+".tex")
-	if fileExists(texPath) {
+	node := chapterNodeConfig{
+		InputMount: "project", InputRef: "chapters/" + base + ".md",
+		NodeRoot:       filepath.Join(proj, "work", "temp", "conv_"+base),
+		TranscriptPath: filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"),
+		SubmitRoot:     filepath.Join(workDir, "chapters"),
+		ReportPath:     filepath.Join(workDir, "reports", base+".md"),
+	}
+	return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, retry, node)
+}
+
+type chapterNodeConfig struct {
+	Base            string
+	Depth           int
+	InputMount      string
+	InputRef        string
+	NodeRoot        string
+	TranscriptPath  string
+	SubmitRoot      string
+	FinalSubmitRoot string
+	ReportPath      string
+	StrictChecker   bool
+}
+
+func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool, node chapterNodeConfig) error {
+	base := node.Base
+	if base == "" {
+		base = strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
+	}
+	if node.TranscriptPath == "" {
+		node.TranscriptPath = filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")
+	}
+	if node.NodeRoot == "" {
+		node.NodeRoot = filepath.Join(proj, "work", "temp", "conv_"+base)
+	}
+	if node.SubmitRoot == "" {
+		node.SubmitRoot = filepath.Join(workDir, "chapters")
+	}
+	if node.ReportPath == "" {
+		node.ReportPath = filepath.Join(workDir, "reports", base+".md")
+	}
+	if node.FinalSubmitRoot == "" {
+		node.FinalSubmitRoot = node.SubmitRoot
+	}
+	mdData, readErr := os.ReadFile(chapPath)
+	if readErr != nil {
+		return fmt.Errorf("读取章节 Markdown 失败: %w", readErr)
+	}
+	lineCount := len(strings.Split(string(mdData), "\n"))
+	splitTool := &RequestChapterSplitTool{Root: filepath.Join(node.NodeRoot, "work", "_subdivision"), TotalLine: lineCount, Depth: node.Depth}
+	if err := splitTool.Restore(); err != nil {
+		return err
+	}
+	if splitTool.Restored {
+		node.SubmitRoot = filepath.Join(node.NodeRoot, "integrated-stage")
+		node.StrictChecker = true
+	}
+	texPath := filepath.Join(node.SubmitRoot, base+".tex")
+	if node.Depth == 0 && fileExists(filepath.Join(node.FinalSubmitRoot, base+".tex")) {
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")
 		// 产物已写出的章节不再需要会话转录。
 		r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
@@ -1024,25 +1188,31 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 
 	// 本章会话的临时工作区；只有"转录与工作树都在"才算中断续跑（否则
 	// 回放一段没有文件的历史只会让会话空转，不如重来）。
-	trPath := filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")
-	workRoot := filepath.Join(proj, "work", "temp", "conv_"+base, "work")
+	trPath := node.TranscriptPath
+	workRoot := filepath.Join(node.NodeRoot, "work")
 	resuming := fileExists(trPath) && fileExists(workRoot)
-	work, cleanWork, err := r.chapterWorkTree(proj, clsName, base, resuming, "")
+	work, cleanWork, err := r.chapterWorkTreeAt(proj, clsName, base, node.NodeRoot, resuming, "")
 	if err != nil {
 		return err
 	}
-	defer cleanWork()
+	defer func() { cleanWork() }()
+	if node.Depth > 0 || splitTool.Restored {
+		cleanWork = func() {}
+	}
 
 	goal := NewGoalTool(filepath.Join(work, "plan.md"))
 	submit := &SubmitChapterTool{
 		WorkRoot:   work,
-		SubmitRoot: filepath.Join(workDir, "chapters"),
+		SubmitRoot: node.SubmitRoot,
 		Base:       base,
-		ReportPath: filepath.Join(workDir, "reports", base+".md"), // 工作汇报（实时落盘）
+		ReportPath: node.ReportPath,
 		Gate:       func() string { return goalGate(goal) },
 	}
 	// 挂载表：work = 本章临时工作区（唯一可写），project/source = 只读。
 	convertMounts := r.sessionMounts(kindConvert, work)
+	if node.InputMount == "input" {
+		convertMounts = append(convertMounts, Mount{Name: "input", Dir: filepath.Dir(chapPath)})
+	}
 	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_"+base)
 	defer cleanBashTmp()
 	tools := []session.Tool{
@@ -1061,6 +1231,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		goal,
 		submit,
 	}
+	tools = append(tools, splitTool)
 	// 原始文档只读工具：片段→原 PDF 页定位（doc_search）+ 原书页面索引/
 	// 逐页内容（list_source_pages）；原书 PDF 通过 view_pdf 的 source
 	// 挂载查看。
@@ -1103,7 +1274,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	// T93：首条消息不再内联章节前 2000 字符——该 md 本就是会话第一步
 	// 必读的文件，内联只会跟着每轮请求重发。
 	initial := prompts.Render(prompts.ConvertUser, map[string]string{
-		"CHAPTER_FILE": "chapter markdown path: project:chapters/" + base + ".md",
+		"CHAPTER_FILE": "chapter markdown path: " + node.InputMount + ":" + node.InputRef,
 		"TEX_PATH":     "Write it as work:" + base + ".tex (extra \\input parts go in the folder work:" + base + "/), compile until clean, then submit those TWO paths.",
 	})
 
@@ -1116,9 +1287,51 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		// 只有模型自己停了才发一句最小推动。
 		initial = resumeUserText(resumeMsgs, "The session was interrupted earlier. Continue from where you left off: read your last written .tex state (read_file), finish the conversion, compile until clean, then submit.")
 	}
-	if !resumeSkip {
-		if _, err := sess.Run(session.RunOptions{UserText: initial}); err != nil {
-			return fmt.Errorf("会话失败: %w", err)
+	if !resumeSkip && !splitTool.Requested {
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
+		release := r.acquireChapterSlot()
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+		_, runErr := sess.Run(session.RunOptions{UserText: initial})
+		release()
+		if runErr != nil {
+			return fmt.Errorf("会话失败: %w", runErr)
+		}
+	}
+	if splitTool.Requested && submit.Submitted && !splitTool.Restored {
+		_ = os.Remove(texPath)
+		_ = os.RemoveAll(filepath.Join(node.SubmitRoot, base))
+		return fmt.Errorf("父章节不能在请求细分的同一轮提交；子章节和 checker 尚未完成")
+	}
+	promoteSubmitRoot := ""
+	if splitTool.Restored {
+		promoteSubmitRoot = node.FinalSubmitRoot
+	}
+	if splitTool.Requested && !submit.Submitted {
+		cleanWork = func() {}
+		promoteSubmitRoot = node.FinalSubmitRoot
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "waiting_children", "children": len(splitTool.Children)})
+		stageRoot := filepath.Join(node.NodeRoot, "integrated-stage")
+		_ = os.RemoveAll(stageRoot)
+		if err := os.MkdirAll(stageRoot, 0o755); err != nil {
+			return err
+		}
+		node.SubmitRoot = stageRoot
+		node.StrictChecker = true
+		submit.SubmitRoot = stageRoot
+		texPath = filepath.Join(stageRoot, base+".tex")
+		if err := r.convertChapterChildren(proj, clsName, manualPath, chapPath, base, work, workDir, idx, tid, node, splitTool.Children); err != nil {
+			return err
+		}
+		if err := writeChapterChildrenManifest(work, base, splitTool.Children); err != nil {
+			return err
+		}
+		integrationText := "All child chapters have passed their individual checkers. Read work:_subdivision/children-manifest.md and every listed child .tex/parts file. Integrate them in source order into work:" + base + ".tex and work:" + base + "/, preserving all content and references. Compile the parent wrapper, verify the complete parent chapter, then submit the parent paths with its report. Do not submit child files as independent book chapters."
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+		release := r.acquireChapterSlot()
+		_, runErr := sess.Run(session.RunOptions{UserText: integrationText})
+		release()
+		if runErr != nil {
+			return fmt.Errorf("父章节整合会话失败: %w", runErr)
 		}
 	}
 	if !r.remindSubmit(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted }) {
@@ -1137,30 +1350,56 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	// context is still live, so it is the cheapest and most accurate
 	// fixer), up to maxCheckerRounds rounds; only then the chapter is
 	// discarded and re-converted with a fresh session.
-	ok, issues := r.checkChapter(proj, base, chapPath, texPath, filepath.Join(workDir, "chapters", base), tid)
+	checkerTranscript := ""
+	checkerView := ""
+	if node.Depth > 0 || promoteSubmitRoot != "" {
+		checkerTranscript = filepath.Join(node.NodeRoot, "sessions", "checker.jsonl")
+		checkerView = filepath.Join(node.NodeRoot, "checker-view")
+	}
+	partsPath := filepath.Join(node.SubmitRoot, base)
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, tid, checkerTranscript, checkerView, node.StrictChecker)
+	if !ok && node.StrictChecker && isSessionAPIError(issues) {
+		return fmt.Errorf("递归章节 checker 会话失败（可更换 checker 模型后续跑）: %s", issues)
+	}
 	for round := 0; !ok && round < maxCheckerRounds; round++ {
 		r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
 		r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
 		msg := "The checker reviewed your submitted chapter and found problems that must be fixed:\n" + issues +
 			"\n\nFix it in your workspace (edit_file/write_file), compile until clean, then submit the two paths again."
-		if _, err := sess.Run(session.RunOptions{UserText: msg}); err != nil {
-			r.log.LogWarning(tid, "[checker]", base, "反馈轮失败:", err)
+		release := r.acquireChapterSlot()
+		_, runErr := sess.Run(session.RunOptions{UserText: msg})
+		release()
+		if runErr != nil {
+			r.log.LogWarning(tid, "[checker]", base, "反馈轮失败:", runErr)
 			break
 		}
-		ok, issues = r.checkChapter(proj, base, chapPath, texPath, filepath.Join(workDir, "chapters", base), tid)
+		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, tid, checkerTranscript, checkerView, node.StrictChecker)
+		if !ok && node.StrictChecker && isSessionAPIError(issues) {
+			return fmt.Errorf("递归章节 checker 会话失败（可更换 checker 模型后续跑）: %s", issues)
+		}
 	}
 	if ok {
 		r.log.Log(tid, "[checker]", base, "通过")
 		_ = os.Remove(texPath + ".checker")
+		if promoteSubmitRoot != "" {
+			if _, err := placeChapterFiles(node.SubmitRoot, promoteSubmitRoot, base); err != nil {
+				return fmt.Errorf("父章节 checker 通过但提升产物失败: %w", err)
+			}
+		}
 	} else {
 		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
+		if node.StrictChecker {
+			return fmt.Errorf("递归章节 checker 未通过，结果未提升: %s", issues)
+		}
 		if !retry {
 			r.log.LogWarning(tid, "[checker]", base, strconv.Itoa(maxCheckerRounds)+" 轮反馈后仍有问题 — 作废产物，改用全新会话重转换")
 			r.phaseNote()("[checker] %s 反馈 %d 轮未过 — 重转换", base, maxCheckerRounds)
 			_ = os.Remove(texPath)
-			_ = os.RemoveAll(filepath.Join(workDir, "chapters", base))
-			r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
-			return r.convertOneChapter(proj, clsName, manualPath, chapPath, workDir, idx, tid, true)
+			_ = os.RemoveAll(filepath.Join(node.SubmitRoot, base))
+			if !node.StrictChecker {
+				r.keepSessionFile(trPath)
+			}
+			return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, true, node)
 		}
 		r.log.LogWarning(tid, "[checker]", base, "重转换后仍未过（已记录，供终审处理）:", issues)
 	}
@@ -1197,20 +1436,28 @@ func (r *Runner) sessionMounts(kind sessionKind, workDir string) []Mount {
 	// work/sessions, work/reports, doc_index.json, pages/, build/ and out/
 	// are not part of it.
 	if r.projDir != "" {
-		r.projView = ensureProjectView(r.projDir)
-		if r.projView != "" {
-			mounts = append(mounts, Mount{Name: "project", Dir: r.projView})
+		if view := r.projectView(); view != "" {
+			mounts = append(mounts, Mount{Name: "project", Dir: view})
 		}
 	}
 	mounts = append(mounts, r.pdfView.Mounts()...)
 	return mounts
 }
 
+func (r *Runner) projectView() string {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	if r.projView == "" && r.projDir != "" {
+		r.projView = ensureProjectView(r.projDir)
+	}
+	return r.projView
+}
+
 // projectRoot is the directory a session reads as "the project": the
 // narrow view when available, otherwise the project root (degraded).
 func (r *Runner) projectRoot() string {
-	if r.projView != "" {
-		return r.projView
+	if view := r.projectView(); view != "" {
+		return view
 	}
 	if r.projDir != "" {
 		if v := ensureProjectView(r.projDir); v != "" {
@@ -1250,7 +1497,10 @@ func (r *Runner) sourcePageTools() []session.Tool {
 // holding an already converted chapter to start from (the style-fix
 // session adapts the existing chapter instead of re-converting).
 func (r *Runner) chapterWorkTree(proj, clsName, base string, resume bool, seed string) (string, func(), error) {
-	root := filepath.Join(proj, "work", "temp", "conv_"+base)
+	return r.chapterWorkTreeAt(proj, clsName, base, filepath.Join(proj, "work", "temp", "conv_"+base), resume, seed)
+}
+
+func (r *Runner) chapterWorkTreeAt(proj, clsName, base, root string, resume bool, seed string) (string, func(), error) {
 	if !resume {
 		_ = os.RemoveAll(root)
 	}
@@ -1422,7 +1672,7 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	if err != nil {
 		return err
 	}
-	defer cleanWork()
+	defer func() { cleanWork() }()
 	// 手册不内联：它在会话工作区里（work:manual.md）与 project:style/manual.md。
 	_ = manualPath
 
@@ -1683,8 +1933,11 @@ func writeFontsReadme(fontsDir string) {
 func (r *Runner) remindSubmit(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool) bool {
 	for remind := 0; remind < 2 && !submitted(); remind++ {
 		r.log.LogWarning(tid, tag, label, "会话结束但未提交，发送提交提醒")
-		if _, err := sess.Run(session.RunOptions{UserText: "You have NOT submitted yet — the result only counts after an explicit " + submitTool + " call. Call " + submitTool + " now (fix and compile first if something is still broken)."}); err != nil {
-			r.log.LogWarning(tid, tag, label, "提交提醒轮失败:", err)
+		release := r.acquireChapterSlot()
+		_, runErr := sess.Run(session.RunOptions{UserText: "You have NOT submitted yet — the result only counts after an explicit " + submitTool + " call. Call " + submitTool + " now (fix and compile first if something is still broken)."})
+		release()
+		if runErr != nil {
+			r.log.LogWarning(tid, tag, label, "提交提醒轮失败:", runErr)
 			return false
 		}
 	}

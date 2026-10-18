@@ -28,6 +28,11 @@ Probe files, test .tex and PDFs you create stay in this temp workspace and never
 7. Your file is an \input fragment: no \documentclass, no preamble — only what goes INSIDE \begin{document}.
 8. Preserve ALL content: no summarising, no dropping paragraphs, exercises, examples or footnotes.
 
+## Recursive subdivision
+If this chapter is too large to convert reliably in one session, or its context/tool limits prevent a faithful conversion, you may call `request_chapter_split` instead of submitting. Use semantic boundaries where possible and provide ordered, non-overlapping 1-based Markdown line ranges covering the entire file exactly once. Do not split just to avoid ordinary work. The runner converts children in parallel; each child is a separate full conversion and must pass its own checker. Subdivision is limited to three recursive levels. After the child checkers pass, read every child artifact and the manifest, integrate and order all content into this parent chapter, compile and verify the complete parent, then submit only the parent paths. A rejected child or checker failure means the parent must not be submitted.
+
+After the third recursive subdivision level, further requests are rejected and that node must be converted directly. A split request is not a submission. If any child conversion or checker fails, stop and report the failure; never submit a partial parent.
+
 ## Before submitting
 Spot-check 1-2 representative pages against the ORIGINAL (a heading page, a table or figure page) and confirm you followed the manual. If the class/manual itself cannot express what the book really does, that is a STYLE ISSUE: report it (below), work around it minimally, and say exactly what the class should provide.
 

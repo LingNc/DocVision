@@ -146,6 +146,14 @@ func (s *Session) SetTranscript(w *TranscriptWriter) {
 	s.recordPromptMeta()
 }
 
+// AppendTranscriptNote records runner-owned lifecycle state without replaying it.
+func (s *Session) AppendTranscriptNote(kind string, fields map[string]any) error {
+	if s == nil || s.transcript == nil {
+		return nil
+	}
+	return s.transcript.AppendNote(kind, fields)
+}
+
 // recordPromptMeta writes the "what was the model told" meta line: the
 // system prompt of THIS run plus the tool definitions that go with it.
 // Rationale: the transcript deliberately stores no system message (the

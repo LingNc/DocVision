@@ -203,6 +203,11 @@ type Runner struct {
 	python     *PythonEnv
 	pythonOnce sync.Once
 
+	// chapterSlots bounds simultaneously active conversion/checker sessions
+	// across the entire recursive tree, not once per parent node.
+	chapterSlotsOnce sync.Once
+	chapterSlots     chan struct{}
+
 	// consoleVerbose mirrors the book-run --verbose flag: when false
 	// (compact mode) the convert phase shows a single [convert k/N]
 	// progress line instead of streaming every session event.

@@ -64,7 +64,9 @@ func newLatexCmd() *cobra.Command {
            project:converted/、project:reports/ 参考；工具
            compile/view_pdf/view_image/doc_search；每章产物交 checker 会话核对
            （只读两个文件 + 一个文件夹，read_file/grep/submit，默认 50 轮），
-           硬性问题回同一会话最多 3 轮，仍不过才换新会话重转换一次
+           硬性问题回同一会话最多 3 轮；普通章节仍按既有策略重转换
+            章节过大或难以可靠处理时可结构化申请细分（最多 3 层），子章节并行转换并必须明确通过 checker；
+            父级按序整合后先暂存核对，checker 通过才晋级，失败会阻止父级结果提交
   feedback 多数章节报 cls/手册问题时打回原样式会话；样式包更新后只对
            「报问题」或「新 cls 下编译不过」的章节并发跑样式修复子会话（不重转换）
   assemble 汇总编译全书 PDF（latexmk 多遍），失败进入修复会话；

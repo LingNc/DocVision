@@ -129,7 +129,7 @@ var registry = []Template{
 	{
 		Name: ConvertSystem, File: "latex_convert.system.md",
 		Vars:        []string{"MAX_ROUNDS"},
-		MustMention: []string{"compile", "doc_search", "edit_file", "grep", "list_source_pages", "read_file", "submit", "view_image", "view_pdf", "write_file"},
+		MustMention: []string{"compile", "doc_search", "edit_file", "grep", "list_source_pages", "read_file", "request_chapter_split", "submit", "view_image", "view_pdf", "write_file"},
 	},
 	{
 		Name: StyleFixIntegrateSystem, File: "latex_stylefix_integrate.system.md",

@@ -213,7 +213,7 @@ func TestCheckerReadOnlyMountRejectsWrite(t *testing.T) {
 // 会话错误/漏 submit 时先提醒、再重开一轮全新会话，两轮都失败才降级通过。
 
 // degenerateJSON 返回 finish=length、0 completion token 的空响应
-//（厂商网关在高压下的真实退化行为）。
+// （厂商网关在高压下的真实退化行为）。
 func degenerateJSON(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"length"}],"usage":{"prompt_tokens":100,"completion_tokens":0,"total_tokens":100}}`)
@@ -238,6 +238,39 @@ func TestCheckerRetriesAfterSessionFailure(t *testing.T) {
 	}
 	if calls.Load() < 3 {
 		t.Fatalf("requests = %d, want >= 3 (degenerate round + retry round)", calls.Load())
+	}
+}
+
+func TestCheckerStrictModeAcceptsExplicitPass(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
+	})
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0,
+		filepath.Join(proj, "nested", "sessions", "checker.jsonl"), filepath.Join(proj, "nested", "checker-view"), true)
+	if !ok || issues != "" {
+		t.Fatalf("explicit pass rejected: ok=%v issues=%q", ok, issues)
+	}
+}
+
+func TestCheckerStrictModeFailsClosedWithoutConclusion(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	var calls atomic.Int32
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		calls.Add(1)
+		jsonReply(w, "done")
+	})
+	transcript := filepath.Join(proj, "nested", "sessions", "checker.jsonl")
+	view := filepath.Join(proj, "nested", "checker-view")
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0, transcript, view, true)
+	if ok || issues == "" {
+		t.Fatalf("strict checker accepted missing verdict: ok=%v issues=%q", ok, issues)
+	}
+	if !fileExists(transcript) {
+		t.Fatal("nested checker transcript was not persisted")
+	}
+	if calls.Load() < 2 {
+		t.Fatalf("checker requests = %d, want retry after missing verdict", calls.Load())
 	}
 }
 
