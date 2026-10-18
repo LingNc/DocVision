@@ -245,6 +245,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	if n := motifAdoptCopies(leaders, copies, byTaskKey, progDir); n > 0 {
 		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张逐字节重复的图片跟随代表图，不重复作图", n))
 	}
+	r.writeMotifArtifacts(outDir, leaders, copies, applied, len(autoGroups))
 	progress.verify(steps, steps, len(pool), failed)
 }
 

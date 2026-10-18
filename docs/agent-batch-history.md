@@ -1744,3 +1744,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **代表图规则（T131 用户口径）**：`motifAlignFilter` 先看"典型成员"（与组中心 ≥ 0.95）里内容框最大的那张；没有这样的成员才退回旧顺序（模型 key 达标且够全 → 合格里最大框 → 组中心）。实测该书：原规则选 `<sha1>`（0.707、框 1102），新规则选 `<sha2>`（1.000、框 1064）——正是用户说的"1.0 的那个作中心"。
 - **测试**：`TestMotifAutoIconGroupsOnlyHighOverlapVectors`（0.60–0.75 的压扁版必须留在池子——夹具的压缩系数由度量自己搜出来，避免夹具与阈值脱钩；非矢量与超过面积上限的图不自动合并；`dedupe_icon_auto: 0` 时全部交会话）、`TestMotifAlignFilterPrefersTypicalLargestMember`（内容框最大但形状不同的实心块不许当代表图）。
 - 验证：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 14 包全绿（config 0.08s、latex 14.1s）。
+
+### T132 / P52 + T133 / P53 并排比较图算证据、dedupe 结果落盘（2026-10-18 第十一批）
+
+- **T132**：用户口径「四个合并一起的也算看过吧，对于模型来说」。并排的 2–4 张都是完整原图（等比缩放、无裁剪），所以 `compare_images` 现在把并排的每个 id 记进 `seen`、满足 `submit` 的逐张门禁，并与 `view_image` 共用 `saveMotifSeen`/`seen.json`；提示词里那句 "it is not evidence" 改成"并排看等于逐张看过"。上限仍是 4 张、id 由模型点名，不提供整桶联系图（T118）。
+- **T133**：用户问「dedupe 的中间结果（重合度扫描）没有输出到某个目录吗？续跑还是要再过一遍，而且每次都不一样」。排查出三条：① 规则改动会让进会话的池子变化，而会话身份是"成员集哈希"，所以 11:15 的 `ff7046e3` 与 11:28 的 `c3cdddf1`/`eadf1649` 是两套会话（11:28 换的是带 T130 桶 + T131 自动归组的二进制，池子 130→77）；11:36/11:37 都是 `轮次 0`（`dedupe_checked` 全真，allChecked 快路径）。② classify 数字 388→364→360 不是丢图（md 引用、图片文件、progress 都还是 388），只是"本次还要处理"的张数在变小。③ 结论只落在会话工作区与每图 progress 里，桶与分数不落盘。
+- 实现：`<proj>/source/dedupe/groups.json` + `report.md`，带"输入 + 规则"指纹；写盘失败只警告。测试 `TestWriteMotifArtifactsRecordsFinalGroups`（组/成员/副本/独立/指纹/报告文案）、`TestMotifArtifactFingerprintStable`（顺序无关、规则变则变）。
+- 验证：`GOCACHE=/tmp/dsh-gocache go test ./internal/...` 13 包全绿。
