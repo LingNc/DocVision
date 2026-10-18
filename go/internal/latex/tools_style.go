@@ -697,12 +697,20 @@ func scaleToWidth(img image.Image, target int) image.Image {
 	return out
 }
 
-func encodeJPEGBase64(img image.Image) (string, error) {
+func encodeJPEGBytes(img image.Image) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 88}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func encodeJPEGBase64(img image.Image) (string, error) {
+	data, err := encodeJPEGBytes(img)
+	if err != nil {
 		return "", err
 	}
-	return b64Encode(buf.Bytes()), nil
+	return b64Encode(data), nil
 }
 
 func pctArg(args map[string]interface{}, key string, def float64) float64 {

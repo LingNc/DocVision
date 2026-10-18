@@ -15,7 +15,14 @@ import (
 	"sync/atomic"
 )
 
-const motifDedupeVersion = "visual-motif-v2-tools"
+// motifDedupeVersion 是"结论语义"的版本：合并判据或分组口径一变就要改，
+// 否则旧 groups.json / 旧 dedupe_checked 仍会通过复用闸门，跑的还是上一版的分组。
+// v2-tools → v3 之间改了两处判定：① class 不再把组拆成"只并 vector 成员"
+// （T147）；② 同一个相似桶里被切成多块的组按关键图折成一组（T149）。
+// v3 → v4 再改一处：复核时离组中心不够、但对组内某个已达标成员仍达标的成员
+// 随组带入（T152）——同一张图换分辨率/长宽比与中心的分数会偏低，上一版把它
+// 退回独立，续跑会一直沿用那份"多画几张"的旧结论。
+const motifDedupeVersion = "visual-motif-v4"
 
 // motifCandidate keeps a decoded input and its progress record together for
 // one book-level verification pass.
@@ -25,6 +32,50 @@ type motifCandidate struct {
 	image      image.Image
 	path       string
 	sourceHash string
+	// cov 缓存这张图的内容框（T151）：逐对重合度、组内闸门、组间收口、挂靠
+	// 每一步都要它，而从整张像素重求前景框是这条链路里最贵的一步（每张约
+	// 1.4ms，100 张的桶上光闸门就要重算上百遍）。像素是只读的，算一次就够。
+	cov  *motifCoverageOnce
+	feat *motifFeatureOnce
+}
+
+// motifFeatureOnce 是 motifCandidate 上的一次性特征缓存（同样用指针，理由同上）。
+type motifFeatureOnce struct {
+	once sync.Once
+	set  motifFeatureSet
+}
+
+// motifCoverageOnce 是 motifCandidate 上的一次性内容框缓存。用指针而不是值：
+// 候选结构会被复制（切片扩容），复制一个 sync.Once 是未定义行为。
+type motifCoverageOnce struct {
+	once sync.Once
+	img  motifAlignImage
+	ok   bool
+}
+
+// features 返回这张图的逐对特征（纯函数，只依赖像素）。特征比内容框贵
+// （一张约 1.6ms），扫描与逐对明细两边都要用，同样算一次就够了。
+func (c *motifCandidate) features() motifFeatureSet {
+	if c == nil || c.image == nil {
+		return motifFeatureSet{}
+	}
+	if c.feat == nil {
+		c.feat = &motifFeatureOnce{}
+	}
+	c.feat.once.Do(func() { c.feat.set = computeMotifFeatureSet(c.image) })
+	return c.feat.set
+}
+
+// coverage 返回这张图的内容框覆盖率（纯函数，只依赖像素）。
+func (c *motifCandidate) coverage() (motifAlignImage, bool) {
+	if c == nil || c.image == nil {
+		return motifAlignImage{}, false
+	}
+	if c.cov == nil {
+		c.cov = &motifCoverageOnce{}
+	}
+	c.cov.once.Do(func() { c.cov.img, c.cov.ok = motifAlignCoverage(c.image) })
+	return c.cov.img, c.cov.ok
 }
 
 // motifDedupePhase is deliberately after image classification and before
@@ -149,7 +200,27 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	if alignShiftPct <= 0 {
 		alignShiftPct = motifAlignDefaultShift
 	}
-	groups, alignMerges := FindVisualMotifCandidatesAligned(vis, r.motifAlignMin(), alignShiftPct)
+	// 桶扫描与逐对明细只取决于输入内容与判据，却占了整条扫描的绝大部分时间，
+	// 所以连结论一起落盘（T153）：续跑时键对得上就直接读回来，不重扫、不重算。
+	scanDir := motifArtifactDir(outDir)
+	hashList := make([]string, len(hashed))
+	for i, h := range hashed {
+		hashList[i] = h.Hash
+	}
+	scanKey := r.motifScanKey(hashList)
+	var scanCache *motifScanCache
+	var groups []VisualMotifGroup
+	var alignMerges int
+	if c := r.loadMotifScanCache(scanDir, scanKey); c != nil {
+		if g := c.groupsFor(pool); g != nil {
+			scanCache, groups, alignMerges = c, g, c.Merges
+			r.log.Log(0, fmt.Sprintf("[dedupe] 沿用 source/dedupe/scan.json（键 %s）：%d 个桶、%d 对逐对明细，跳过桶扫描与逐对重算",
+				scanKey, len(c.Buckets), len(c.Pairs)))
+		}
+	}
+	if groups == nil {
+		groups, alignMerges = FindVisualMotifCandidatesAligned(vis, r.motifAlignMin(), alignShiftPct)
+	}
 	if alignMerges > 0 {
 		r.log.Log(0, fmt.Sprintf("[dedupe] 居中重合额外并进 %d 对（桶与组内闸门同一判据）", alignMerges))
 	} else if alignMerges < 0 {
@@ -194,6 +265,10 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	// 最后一步跟着代表图走，所以这里拿 leaders 而不是缩水后的 pool 去对账。
 	leaders := pool
 	autoGroups, remaining, autoMerged := r.motifAutoIconGroups(leaders, progDir)
+	// 显式标出处：后面组间收口会把组重新排序、合并，index 位置不再能说明来源。
+	for i := range autoGroups {
+		autoGroups[i].Source = "auto"
+	}
 	if len(autoGroups) > 0 {
 		r.log.Log(0, fmt.Sprintf("[dedupe] 居中重合 ≥ %.2f 的 %d 张图标自动归为 %d 组，不进核验会话（%d 张代表图照常重画）",
 			r.motifIconAutoMin(), autoMerged, len(autoGroups), len(autoGroups)))
@@ -212,7 +287,14 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	for _, c := range unassigned {
 		loose = append(loose, c.task.key())
 	}
-	r.writeMotifMetrics(outDir, vis, groups, loose, repeats)
+	var cachedPairs map[string]motifScanPair
+	if scanCache != nil {
+		cachedPairs = scanCache.Pairs
+	}
+	alignScores, scannedPairs := r.writeMotifMetrics(outDir, pool, groups, loose, repeats, cachedPairs)
+	if scannedPairs != nil {
+		r.saveMotifScanCache(scanDir, scanKey, alignMerges, groups, scannedPairs)
+	}
 	// 中间进度行的分母只数**真的开着的**核验会话：整理会话要不要开，得等
 	// 这些会话交出代表图才知道，先算进去就等于预告一个可能不存在的第 M 步。
 	steps := len(scopes)
@@ -272,6 +354,21 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张没进会话的图挂靠到已确认组（重合度 ≥ %.2f，记 source=attached）", n, r.motifAttachMin()))
 		applied = append(applied, extra...)
 	}
+	// T149：同一连通片里的图会被 ≥ dedupe_icon_auto 的自动定组切成好几块，
+	// 会话又可能把剩下的并成另一块——这些块之间其实还是同一张图（关键图彼此
+	// 照样达标）。不折起来，同一枚图就会有好几个中心、各画一遍。用户口径：
+	// 自动定组只是"这几张不用再看"，不是"这就成一单独的分组"；剩下的要并进
+	// 已经确认的组里，所以最后一步必须按关键图把组与组收一次口。
+	bucketOf := make(map[*motifCandidate]int, len(leaders))
+	for _, c := range leaders {
+		if a, ok := advisory[c.task.key()]; ok && a.Group > 0 {
+			bucketOf[c] = a.Group
+		}
+	}
+	if out, nfold, added := r.motifFoldGroups(applied, bucketOf, progDir); nfold > 0 {
+		applied = out
+		r.log.Log(0, fmt.Sprintf("[dedupe] 组间收口：折掉 %d 个组（多并进 %d 张），剩 %d 组", nfold, added, len(applied)))
+	}
 	// 会话进度行的 N/M 只说明"第 M 步走到第 N 步"，其中最后一步是整理会话
 	// ——它依赖前面会话交出的 key，所以永远是串行、而且可能压根没开。T126
 	// 的日志只剩 [dedupe 2/2]，看起来像"两个会话都跑完了"，实际是 0 组合并。
@@ -293,7 +390,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	if n := motifAdoptCopies(leaders, copies, byTaskKey, progDir); n > 0 {
 		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张逐字节重复的图片跟随代表图，不重复作图", n))
 	}
-	r.writeMotifArtifacts(outDir, leaders, copies, applied, len(autoGroups))
+	r.writeMotifArtifacts(outDir, leaders, copies, applied, alignScores)
 	// 收尾的进度行说的是**实际开了几个会话**：整理会话没开就不该多算一格
 	// （T126 的 [dedupe 2/2] 曾经看起来像"两个会话都跑完了"）。
 	total := len(scopes) + consolSessions
@@ -377,7 +474,7 @@ func (r *Runner) motifAttachLeftovers(leaders []*motifCandidate, applied []motif
 			grouped[m] = true
 		}
 		grouped[g.Key] = true
-		if cov, ok := motifAlignCoverage(g.Key.image); ok {
+		if cov, ok := g.Key.coverage(); ok {
 			anchors = append(anchors, anchor{key: g.Key, cov: cov, cls: g.Class})
 		}
 	}
@@ -394,7 +491,7 @@ func (r *Runner) motifAttachLeftovers(leaders []*motifCandidate, applied []motif
 		if grouped[c] || c.progress.DedupeChecked || c.progress.EquivalentTo != "" {
 			continue
 		}
-		cov, ok := motifAlignCoverage(c.image)
+		cov, ok := c.coverage()
 		if !ok || cov.area > motifAlignIconMaxArea {
 			continue
 		}
@@ -421,6 +518,161 @@ func (r *Runner) motifAttachLeftovers(leaders []*motifCandidate, applied []motif
 	return attached, extra
 }
 
+// motifFoldGroups 是最后一道"组与组"的收口（T149）。同一个相似桶里的图会被
+// ≥ dedupe_icon_auto 的自动定组切成好几块，会话再把剩下的并成另一块——这些块
+// 其实还是同一张图（关键图彼此照样达标）。不折起来，同一枚图就会有好几个中心、
+// 各重画一遍：用户口径是"自动定组只说明这几张不用再看，不是各自成为一个分组"，
+// 桶里剩下的要并进已经确认的组，一个桶最后就是一个组、一张代表图。
+//
+// 只在**同一个相似桶**内折（跨桶不动，别把两个只是碰巧有点像的图案并掉），
+// 且要求两块的关键图本身也达标（motifMergeAllowed，与建桶、组内闸门同一口径）。
+// 成员照各块已经确认的结论**原样收编**，不再拿新中心重新闸一遍——成员已经过
+// 会话/组内闸门，这里再筛一次只会把同一张图拆回好几份（T149 之前的实测：19 块
+// 折起来后按新中心重筛会甩掉 10 张，等于同一枚图还是画两遍）。
+// 返回折完的组、被折掉的组数、多并进来的张数。
+func (r *Runner) motifFoldGroups(applied []motifAppliedGroup, bucketOf map[*motifCandidate]int, progDir string) (out []motifAppliedGroup, folded, added int) {
+	n := len(applied)
+	if n < 2 {
+		return applied, 0, 0
+	}
+	parent := make([]int, n)
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(x int) int {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	overlap := map[[2]int]float64{}
+	score := func(i, j int) float64 {
+		k := [2]int{i, j}
+		if j < i {
+			k = [2]int{j, i}
+		}
+		if v, ok := overlap[k]; ok {
+			return v
+		}
+		v := 0.0
+		a, b := applied[k[0]].Key, applied[k[1]].Key
+		if a != nil && b != nil {
+			if ca, ok := a.coverage(); ok {
+				if cb, ok2 := b.coverage(); ok2 {
+					v = ca.overlap(cb, r.motifAlignShift())
+				}
+			}
+		}
+		overlap[k] = v
+		return v
+	}
+	for i := 0; i < n; i++ {
+		if applied[i].Key == nil {
+			continue
+		}
+		for j := i + 1; j < n; j++ {
+			if applied[j].Key == nil {
+				continue
+			}
+			// 跨桶不折：桶是 0.60 连通的候选集合，出了桶就没有"同一张图"的前提。
+			if bucketOf[applied[i].Key] == 0 || bucketOf[applied[i].Key] != bucketOf[applied[j].Key] {
+				continue
+			}
+			if !r.motifMergeAllowed(applied[i].Key, applied[j].Key) {
+				continue
+			}
+			ri, rj := find(i), find(j)
+			if ri != rj {
+				parent[rj] = ri
+			}
+		}
+	}
+	parts := map[int][]int{}
+	order := make([]int, 0, n)
+	for i := 0; i < n; i++ {
+		root := find(i)
+		if _, ok := parts[root]; !ok {
+			order = append(order, root)
+		}
+		parts[root] = append(parts[root], i)
+	}
+	out = make([]motifAppliedGroup, 0, n)
+	for _, root := range order {
+		idx := parts[root]
+		if len(idx) < 2 {
+			out = append(out, applied[idx[0]])
+			continue
+		}
+		// 中心图在**各块的代表图**里挑：它们本来就都是"典型且内容够全"的那张，
+		// 拿它们两两比一遍（块数很少，几组到几十组）比在几百个成员上做 O(n²)
+		// 便宜得多。与其余代表图平均重合度最高的那块留下当中心。
+		center, bestMean := idx[0], -1.0
+		for _, i := range idx {
+			sum, cnt := 0.0, 0
+			for _, j := range idx {
+				if i == j {
+					continue
+				}
+				sum += score(i, j)
+				cnt++
+			}
+			mean := 0.0
+			if cnt > 0 {
+				mean = sum / float64(cnt)
+			}
+			if mean > bestMean {
+				bestMean, center = mean, i
+			}
+		}
+		var members []*motifCandidate
+		origin := map[*motifCandidate]int{}
+		for _, i := range idx {
+			for _, m := range applied[i].Members {
+				if m == nil || motifContains(members, m) {
+					continue
+				}
+				origin[m] = i
+				members = append(members, m)
+			}
+		}
+		// 代表图规则与组内闸门一致：在"与中心够像"（≥ motifAlignTypical）的成员
+		// 里取内容框最大者——既典型又最全。没有达标的就仍用中心那块的代表图。
+		chosen, bestArea := applied[center].Key, -1
+		for _, m := range members {
+			cov, ok := m.coverage()
+			if !ok {
+				continue
+			}
+			cc, ok := chosen.coverage()
+			if !ok || cov.overlap(cc, r.motifAlignShift()) < motifAlignTypical {
+				continue
+			}
+			if cov.area > bestArea {
+				chosen, bestArea = m, cov.area
+			}
+		}
+		class := motifGroupClass(members)
+		motifApplyGroupClass(chosen, class, progDir)
+		applyMotifEquivalenceWithKey(members, chosen, progDir)
+		if class == "" && chosen.progress != nil {
+			class = chosen.progress.Class
+		}
+		home := origin[chosen]
+		for _, m := range members {
+			if origin[m] != home {
+				added++
+			}
+		}
+		r.log.Log(0, fmt.Sprintf("[dedupe] 组间收口：同桶的 %d 个组折成 1 组（%d 张，中心图 %s）",
+			len(idx), len(members), chosen.task.imgPath))
+		out = append(out, motifAppliedGroup{Key: chosen, Members: members, Class: class, Source: "folded"})
+		folded += len(idx) - 1
+	}
+	return out, folded, added
+}
+
 // motifAutoIconGroups 把"重合到几乎没有疑问"的小图标直接本地合并成组，不再
 // 送核验会话（T131）。用户口径：≥ `latex.dedupe_icon_auto`（默认 0.75）自动
 // 定组，0.60–0.75 之间仍进会话逐张核验——分数在 0.6 附近是连续铺开的，不设
@@ -445,7 +697,7 @@ func (r *Runner) motifAutoIconGroups(cands []*motifCandidate, progDir string) (a
 		if c == nil || c.image == nil || c.progress == nil {
 			continue
 		}
-		v, good := motifAlignCoverage(c.image)
+		v, good := c.coverage()
 		// 自动合并只给"真的小"的图标：内容框 ≤ motifAutoIconMaxArea（约 141×141）。
 		// 再大就是插图了，两个相似的插图直接合并没经过任何审校，风险不对等
 		// ——它们照旧进核验会话。
@@ -550,8 +802,15 @@ func (r *Runner) motifAutoIconGroups(cands []*motifCandidate, progDir string) (a
 			}
 			continue
 		}
+		// 自动定组同样不看 class（能不能合并只看重合度），组的类别按组内
+		// 占比最大的 classify 结果落在中心图上。
+		cls := motifGroupClass(group)
+		motifApplyGroupClass(cands[leader], cls, progDir)
 		applyMotifEquivalenceWithKey(group, cands[leader], progDir)
-		applied = append(applied, motifAppliedGroup{Key: cands[leader], Members: group, Class: ClassVector})
+		if cls == "" {
+			cls = ClassVector
+		}
+		applied = append(applied, motifAppliedGroup{Key: cands[leader], Members: group, Class: cls})
 		merged += len(group)
 	}
 	remaining = make([]*motifCandidate, 0, len(cands))
@@ -569,8 +828,9 @@ type motifAppliedGroup struct {
 	Key     *motifCandidate
 	Members []*motifCandidate
 	Class   string
-	// Source 是这组的来源，空 = 按位置推断（autoGroups 之前 = auto，其余 =
-	// session）；"attached" 是 T135 的挂靠组（本地重合度达标、没进会话）。
+	// Source 是这组的来源：auto＝本地 ≥ dedupe_icon_auto 直接定组、session＝
+	// 核验会话、"attached"＝T135 的挂靠组（本地重合度达标、没进会话）、
+	// "folded"＝T149 组间收口折出来的组。写 groups.json 前一定已经有值。
 	Source string
 }
 
@@ -647,39 +907,34 @@ func (r *Runner) runMotifScope(sc *motifScope, outDir string) ([]motifAppliedGro
 			continue
 		}
 		key := motifScopeCandidate(sc, g.Key)
-		// 组的类别按组内占比最大的 classify 结果判定（用户规则）。classify 对
-		// 同一张图会给出不同类别，混类不代表"不是同一张图"，整组作废会让真正
-		// 的重复图白白各画一遍——真实事故：336 张同图被整组拒掉。
+		// class 不参与合并判定（用户口径，T147）。classify 对同一张图会给出
+		// 不同类别（vector/raster/text 都见过），混类不代表"不是同一张图"。
+		// 整组按同一张图合并；组的类别只取组内占比最大的 classify 结果、落在
+		// 中心图上，决定这张图按哪一类处理（vector 重画 / raster 保留原图）。
+		// 上一版在这里写的是"多数不是矢量图就只合并组里矢量的那几张"，等于让
+		// class 直接决定合并范围：非矢量的成员各自保持独立、各自重画一遍，与
+		// "class 不参与判决、只用来定中心图的类型"直接矛盾。
 		groupClass := motifGroupClass(cands)
-		if groupClass != ClassVector {
-			// 多数不是矢量图：这些图不需要重画，但组里的矢量图仍然值得合并成
-			// 一张，否则同一张图会被画 N 次。
-			vec := motifVectorSubset(cands)
-			if len(vec) < 2 {
-				r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 的多数类别是 %s，不需要重画，保持独立", g.Members, groupClass))
-				continue
-			}
-			r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 的多数类别是 %s，其中 %d 张矢量图合并为一张重画，其余 %d 张保持独立",
-				g.Members, groupClass, len(vec), len(cands)-len(vec)))
-			cands = vec
-			if key == nil || !motifContains(vec, key) {
-				key = vec[0]
-			}
-		} else if !motifGroupAllVector(cands) {
-			r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 的多数类别是矢量图，其中 %d 张非矢量图也按同一张图合并", g.Members, nonVectorCount(cands)))
+		if n := nonVectorCount(cands); n > 0 {
+			r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 的类别按占比最大取 %s（%d 张非矢量图也按同一张图合并）",
+				g.Members, groupClass, n))
 		}
 		// 组内闸门（T129，用户口径：宁漏不误判，但"重合得上"的要合）。
 		// 以组中心为基准比较"内容框居中 + 平移搜索"的软重合度：达标的成员
 		// 共用一张成品，不达标的保持独立。旧的逐对相似度在 28×38 这种小图上
 		// 极其脆弱——中心差半个像素，硬 mask 的 IoU 就从 0.9 掉到 0.3，实测
 		// 同一枚标记只认了 21/90；居中重合后同一批图最差 0.647。
-		safe, chosen, dropped, worst, aligned := r.motifAlignFilter(cands, key)
+		safe, chosen, dropped, worst, aligned, carried := r.motifAlignFilter(cands, key)
 		if chosen != nil {
 			key = chosen
 		}
 		if aligned {
-			r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 居中重合校验：合并 %d 张（最差重合度 %.2f），%d 张不足保持独立",
-				g.Members, len(safe), worst, dropped))
+			msg := fmt.Sprintf("[dedupe] 组 %v 居中重合校验：合并 %d 张（最差重合度 %.2f），%d 张不足保持独立",
+				g.Members, len(safe), worst, dropped)
+			if carried > 0 {
+				msg += fmt.Sprintf("（其中 %d 张离中心不足、与组内成员达标，随组带入）", carried)
+			}
+			r.log.Log(0, msg)
 		} else if dropped > 0 {
 			r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v 里有 %d 张与代表图相似度不足，已保持独立（宁可漏掉重复，也不能合并后丢信息）", g.Members, dropped))
 		}
@@ -687,12 +942,16 @@ func (r *Runner) runMotifScope(sc *motifScope, outDir string) ([]motifAppliedGro
 			r.log.LogWarning(0, fmt.Sprintf("[dedupe] 组 %v（%d 张）与代表图的相似度都不够，整组不合并，其中 %d 张保持独立", g.Members, len(cands), len(cands)))
 			continue
 		}
+		if motifApplyGroupClass(key, groupClass, progDir) {
+			r.log.Log(0, fmt.Sprintf("[dedupe] 组 %v 的中心图按组内占比最大的类别定为 %s（%s）",
+				g.Members, groupClass, motifClassEffect(groupClass)))
+		}
 		applyMotifEquivalenceWithKey(safe, key, progDir)
 		cls := ""
 		if key != nil && key.progress != nil {
 			cls = key.progress.Class
 		}
-		out = append(out, motifAppliedGroup{Key: key, Members: safe, Class: cls})
+		out = append(out, motifAppliedGroup{Key: key, Members: safe, Class: cls, Source: "session"})
 	}
 	return out, true
 }
@@ -849,7 +1108,8 @@ func (r *Runner) motifBucketScopes(pool []*motifCandidate, advisory map[string]m
 }
 
 // motifGroupClass 返回组内成员占比最大的 classify 类别（并列时按
-// vector > raster > text 取前者，保证有作图能力时优先合并）。
+// vector > raster > text 取前者）。这个值只用来定中心图的类型，不参与
+// 合并判定。
 func motifGroupClass(members []*motifCandidate) string {
 	counts := map[string]int{}
 	for _, c := range members {
@@ -867,16 +1127,6 @@ func motifGroupClass(members []*motifCandidate) string {
 	return best
 }
 
-func motifVectorSubset(members []*motifCandidate) []*motifCandidate {
-	out := make([]*motifCandidate, 0, len(members))
-	for _, c := range members {
-		if c != nil && c.progress != nil && c.progress.Class == ClassVector {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
 func nonVectorCount(members []*motifCandidate) int {
 	n := 0
 	for _, c := range members {
@@ -887,16 +1137,31 @@ func nonVectorCount(members []*motifCandidate) int {
 	return n
 }
 
-func motifGroupAllVector(members []*motifCandidate) bool {
-	if len(members) < 2 {
+// motifApplyGroupClass 把组的类别落到中心图上——组的类别按组内占比最大的
+// classify 结果定，这个类别属于中心图（用户口径），决定这张图按哪一类处理。
+// 已经画出成品的不动：续跑时不能把既有成品改回"保留原图"。
+func motifApplyGroupClass(key *motifCandidate, class, progDir string) bool {
+	if key == nil || key.progress == nil || class == "" || key.progress.Class == class {
 		return false
 	}
-	for _, c := range members {
-		if c == nil || c.progress == nil || c.progress.Class != ClassVector {
-			return false
-		}
+	if key.progress.Status == "done" && key.progress.TikzCode != "" {
+		return false
 	}
+	key.progress.Class = class
+	saveProgress(progDir, key.progress)
 	return true
+}
+
+// motifClassEffect 把类别翻成"这张图会怎么处理"，只用于日志。
+func motifClassEffect(class string) string {
+	switch class {
+	case ClassVector:
+		return "重画一张，组内其余位置复用"
+	case ClassRaster:
+		return "保留原图，组内其余位置共用这张原图"
+	default:
+		return "按文本图处理"
+	}
 }
 
 func applyMotifEquivalence(members []*motifCandidate, progDir string) {
@@ -955,14 +1220,34 @@ func motifContains(members []*motifCandidate, want *motifCandidate) bool {
 
 // applyMotifArtifacts materializes each confirmed follower from its leader
 // without deleting the follower's task, image reference, or progress record.
+// 代表图是矢量图时把成品（TikZ + 图 PDF/PNG/SVG）搬过来；代表图不是矢量图
+// （组的类别按多数取成 raster/text）时没有成品，但同一组的图就是同一张图，
+// 把代表图的标签与解释文本搬过来——否则跟随者被 process 跳过、只剩一条
+// LINK，图上没有任何说明。
 func applyMotifArtifacts(tasks []*task, prog map[string]*imageProgress, progDir, outDir string) {
 	for _, t := range tasks {
 		p := prog[t.key()]
-		if p == nil || (p.Status == "done" && p.Class == ClassVector && p.TikzCode != "") || p.EquivalentTo == "" {
+		if p == nil || p.EquivalentTo == "" || (p.Status == "done" && (p.Content != "" || (p.Class == ClassVector && p.TikzCode != ""))) {
 			continue
 		}
 		leader := prog[p.EquivalentTo]
-		if leader == nil || leader.EquivalentTo != "" || leader.Class != ClassVector || leader.Status != "done" || leader.TikzCode == "" || leader.FigPDF == "" || !fileExists(filepath.Join(outDir, filepath.FromSlash(leader.FigPDF))) {
+		if leader == nil || leader.EquivalentTo != "" || leader.Status != "done" {
+			continue
+		}
+		if leader.Class != ClassVector {
+			if leader.Content == "" {
+				continue
+			}
+			p.Class = leader.Class
+			p.Label = leader.Label
+			p.Content = leader.Content
+			p.Status = "done"
+			p.Kept = leader.Kept
+			p.Error = ""
+			saveProgress(progDir, p)
+			continue
+		}
+		if leader.TikzCode == "" || leader.FigPDF == "" || !fileExists(filepath.Join(outDir, filepath.FromSlash(leader.FigPDF))) {
 			continue
 		}
 		p.Class = ClassVector
@@ -984,6 +1269,8 @@ func applyMotifArtifacts(tasks []*task, prog map[string]*imageProgress, progDir,
 // skipped by process forever and their figure would silently disappear from the
 // book; unlinking means the next run draws them independently. Costing an extra
 // drawing is fine, losing a figure is not.
+// 代表图是 raster/text（组的类别按多数定成这样）时本来就没有成品，跟随者
+// 复用它的原图与解释文本，不能当成"代表图没产出"把链接清掉。
 func (r *Runner) clearUnresolvedMotifLinks(tasks []*task, prog map[string]*imageProgress, progDir string) {
 	cleared := 0
 	for _, t := range tasks {
@@ -992,7 +1279,7 @@ func (r *Runner) clearUnresolvedMotifLinks(tasks []*task, prog map[string]*image
 			continue
 		}
 		leader := prog[p.EquivalentTo]
-		if leader != nil && leader.Status == "done" && leader.TikzCode != "" && leader.EquivalentTo == "" {
+		if leader != nil && leader.Status == "done" && leader.EquivalentTo == "" && (leader.Class != ClassVector || leader.TikzCode != "") {
 			continue
 		}
 		p.EquivalentTo = ""

@@ -59,7 +59,8 @@ func TestMotifCanonScoreSynthetic(t *testing.T) {
 	}
 	same, _ := motifCanonFromImage(canonTestImage(120, 160, 0))
 	other, _ := motifCanonFromImage(canonTestImage(120, 160, 1))
-	canvas := motifCanonCanvas([]motifCanonImage{a, same, other})
+	// 画布按每一对取（见 motifAlignImage.overlap）：这里三张同尺寸，取任一即可。
+	canvas := a.maxSide()
 	s := canvas * 95 / 100
 	if s1, _, _, g := motifCanonScore(a, same, canvas, s); s1 < 0.999 || g < motifCanonMinG {
 		t.Errorf("同一张图自比 = %.3f（g=%d），应 ≈1", s1, g)
@@ -90,19 +91,6 @@ func TestMotifCanonScoreSynthetic(t *testing.T) {
 	}
 	if s2, _, _, _ := motifCanonScore(a, pv, canvas, s); s2 < 0.99 {
 		t.Errorf("白边平移后重合度 %.3f，应 ≈1（居中贴入失效）", s2)
-	}
-}
-
-func TestMotifCanonCanvas(t *testing.T) {
-	imgs := []motifCanonImage{{w: 30, h: 40}, {w: 70, h: 60}, {w: 200, h: 100}}
-	if got := motifCanonCanvas(imgs); got != 200 {
-		t.Errorf("P90 = %d，期望 200", got)
-	}
-	if got := motifCanonCanvas([]motifCanonImage{{w: 5, h: 5}}); got != motifCanonMinS {
-		t.Errorf("太小应夹到 %d，得到 %d", motifCanonMinS, got)
-	}
-	if got := motifCanonCanvas([]motifCanonImage{{w: 4000, h: 900}}); got != motifCanonMaxS {
-		t.Errorf("太大应夹到 %d，得到 %d", motifCanonMaxS, got)
 	}
 }
 

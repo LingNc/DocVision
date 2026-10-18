@@ -638,10 +638,7 @@ func findAlignedMotifPairs(valid []VisualMotifSample, uniq []int, alignMin float
 			if !ok[j] || covs[j].area > motifAlignIconMaxArea {
 				continue
 			}
-			if absFloat(covs[i].inkFrac-covs[j].inkFrac) > 0.12 {
-				continue
-			}
-			if absFloat(covs[i].aspect-covs[j].aspect) > 0.35 {
+			if !motifAlignWorthScore(covs[i], covs[j]) {
 				continue
 			}
 			if find(uniq[i]) == find(uniq[j]) {

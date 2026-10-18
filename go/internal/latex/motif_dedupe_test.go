@@ -85,6 +85,43 @@ func TestMotifEquivalenceOneArtifactAndRetainedRefs(t *testing.T) {
 	}
 }
 
+// T147：组的类别按组内占比最大的 class 落在中心图上。多数是 raster 时这组
+// 不重画，跟随者仍然要被安排明白——共用代表图那一张原图与同一段解释文本，
+// 不能因为"代表图没有 TikZ 成品"就把跟随链接清掉、把图变成只有 LINK 的空块。
+func TestMotifRasterLeaderKeepsFollowers(t *testing.T) {
+	dir := t.TempDir()
+	progDir := filepath.Join(dir, "progress_items")
+	a := &task{mdName: "book.md", imgPath: "images/book/a.jpg"}
+	b := &task{mdName: "book.md", imgPath: "images/book/b.jpg"}
+	pa := &imageProgress{Key: a.key(), MDName: a.mdName, ImgPath: a.imgPath, Class: ClassRaster,
+		Status: "done", Label: "图1", Content: "同一张图", Kept: true}
+	pb := &imageProgress{Key: b.key(), MDName: b.mdName, ImgPath: b.imgPath, Class: ClassVector, Status: "classified"}
+	pb.EquivalentTo = a.key()
+	pb.DedupeChecked = true
+	prog := map[string]*imageProgress{a.key(): pa, b.key(): pb}
+	applyMotifArtifacts([]*task{a, b}, prog, progDir, dir)
+	if pb.Status != "done" || pb.Content != pa.Content || pb.Label != pa.Label || pb.TikzCode != "" {
+		t.Fatalf("raster follower not materialized: %+v", pb)
+	}
+	// 跟随者的类别跟组一致（组是 raster），process 不会再单独处理它。
+	if pb.Class != ClassRaster {
+		t.Fatalf("follower class = %q, want raster", pb.Class)
+	}
+	r := testRunner(t, true)
+	r.clearUnresolvedMotifLinks([]*task{a, b}, prog, progDir)
+	if pb.EquivalentTo != a.key() {
+		t.Fatalf("link to a finished raster leader must survive, got %q", pb.EquivalentTo)
+	}
+	// 代表图是矢量图却没产出成品时，链接仍然要清掉（否则这张图会消失）。
+	pa.Class = ClassVector
+	pa.Content = ""
+	pa.TikzCode = ""
+	r.clearUnresolvedMotifLinks([]*task{a, b}, prog, progDir)
+	if pb.EquivalentTo != "" {
+		t.Fatal("a vector leader without a drawing must not keep its followers")
+	}
+}
+
 func TestSharedMotifEmbedUsesOneInput(t *testing.T) {
 	r := testRunner(t, true)
 	root := t.TempDir()
@@ -502,6 +539,110 @@ func TestMotifMergeGateRejectsDissimilarMembers(t *testing.T) {
 // 用户规则：组类别按组内占比最大的 classify 结果判定。同一张图会被 classify
 // 判成 vector/raster/text 三种（真实事故：336 张同图 = vector 155 / raster
 // 159 / text 22），不能因为混类就整组作废。
+// TestMotifFoldGroupsFoldsSameMotif 钉住 T149：同一片里的图被 ≥0.75 的自动
+// 定组切成两块、剩下的再被会话并成一块，最后必须按关键图折成一组——否则同一
+// 枚图会有好几个中心，各画一遍（19 个组的关键图两两都 ≥0.60 就是这么来的）。
+func TestMotifFoldGroupsFoldsSameMotif(t *testing.T) {
+	r := testRunner(t, true)
+	r.cfg.Latex = config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75}
+	progDir := filepath.Join(t.TempDir(), "progress_items")
+	mk := func(name string, w, h, cx, cy, rad int) *motifCandidate {
+		img := whiteCanvas(w, h)
+		drawDiamond(img, cx, cy, rad)
+		task := &task{mdName: "b.md", imgPath: "images/b/" + name}
+		return &motifCandidate{task: task, image: img, sourceHash: "hash-" + name,
+			progress: &imageProgress{Key: task.key(), MDName: task.mdName, ImgPath: task.imgPath, Class: ClassVector}}
+	}
+	a, b := mk("a.jpg", 70, 96, 35, 30, 18), mk("b.jpg", 72, 98, 36, 30, 19)
+	c, d := mk("c.jpg", 71, 97, 35, 30, 18), mk("d.jpg", 73, 99, 36, 31, 19)
+	applied := []motifAppliedGroup{
+		{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"},
+		{Key: c, Members: []*motifCandidate{c, d}, Class: ClassVector, Source: "session"},
+	}
+	out, folded, added := r.motifFoldGroups(applied, map[*motifCandidate]int{a: 1, b: 1, c: 1, d: 1}, progDir)
+	if folded != 1 || len(out) != 1 {
+		t.Fatalf("两块同一枚图应当折成一组：folded=%d out=%d", folded, len(out))
+	}
+	if out[0].Source != "folded" || len(out[0].Members) != 4 {
+		t.Fatalf("折出来的组来源/成员不对：%s %d", out[0].Source, len(out[0].Members))
+	}
+	if added < 2 {
+		t.Fatalf("应当把另一块并进来（added=%d）", added)
+	}
+	key := out[0].Key
+	if !motifContains(out[0].Members, key) {
+		t.Fatal("中心图必须在成员里——process 只重画中心图，不在成员里等于丢图")
+	}
+	for _, m := range out[0].Members {
+		if m == key {
+			if m.progress.EquivalentTo != "" {
+				t.Fatalf("中心图不该跟随自己: %q", m.progress.EquivalentTo)
+			}
+			continue
+		}
+		if m.progress.EquivalentTo != key.task.key() {
+			t.Fatalf("成员应当跟随折出来的中心图：%q != %q", m.progress.EquivalentTo, key.task.key())
+		}
+	}
+}
+
+// TestMotifFoldGroupsKeepsDistinctApart 保证收口只折"关键图确实达标"的组：
+// 明显不同的两块不许折在一起。
+func TestMotifFoldGroupsKeepsDistinctApart(t *testing.T) {
+	r := testRunner(t, true)
+	r.cfg.Latex = config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75}
+	progDir := filepath.Join(t.TempDir(), "progress_items")
+	diamond := func(name string) *motifCandidate {
+		img := whiteCanvas(70, 96)
+		drawDiamond(img, 35, 30, 18)
+		task := &task{mdName: "b.md", imgPath: "images/b/" + name}
+		return &motifCandidate{task: task, image: img, sourceHash: "hash-" + name,
+			progress: &imageProgress{Key: task.key(), MDName: task.mdName, ImgPath: task.imgPath, Class: ClassVector}}
+	}
+	dot := func(name string) *motifCandidate {
+		img := whiteCanvas(70, 96)
+		drawDiamond(img, 35, 46, 3)
+		task := &task{mdName: "b.md", imgPath: "images/b/" + name}
+		return &motifCandidate{task: task, image: img, sourceHash: "hash-" + name,
+			progress: &imageProgress{Key: task.key(), MDName: task.mdName, ImgPath: task.imgPath, Class: ClassVector}}
+	}
+	a, b := diamond("a.jpg"), diamond("b.jpg")
+	c, d := dot("c.jpg"), dot("d.jpg")
+	applied := []motifAppliedGroup{
+		{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"},
+		{Key: c, Members: []*motifCandidate{c, d}, Class: ClassVector, Source: "session"},
+	}
+	out, folded, _ := r.motifFoldGroups(applied, map[*motifCandidate]int{a: 1, b: 1, c: 1, d: 1}, progDir)
+	if folded != 0 || len(out) != 2 {
+		t.Fatalf("不同的两块不该折在一起：folded=%d out=%d", folded, len(out))
+	}
+}
+
+// TestMotifFoldGroupsStaysInsideBucket 钉住收口的边界：只在同一个相似桶里折。
+// 桶是 0.60 连通的候选集合，桶外两块哪怕关键图碰巧达标也不算"同一张图"，
+// 否则两个只是有点像的图案会被并成一张、少画一张真图。
+func TestMotifFoldGroupsStaysInsideBucket(t *testing.T) {
+	r := testRunner(t, true)
+	r.cfg.Latex = config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75}
+	progDir := filepath.Join(t.TempDir(), "progress_items")
+	mk := func(name string, rad int) *motifCandidate {
+		img := whiteCanvas(70, 96)
+		drawDiamond(img, 35, 30, rad)
+		task := &task{mdName: "b.md", imgPath: "images/b/" + name}
+		return &motifCandidate{task: task, image: img, sourceHash: "hash-" + name,
+			progress: &imageProgress{Key: task.key(), MDName: task.mdName, ImgPath: task.imgPath, Class: ClassVector}}
+	}
+	a, b, c, d := mk("a.jpg", 18), mk("b.jpg", 19), mk("c.jpg", 18), mk("d.jpg", 19)
+	applied := []motifAppliedGroup{
+		{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"},
+		{Key: c, Members: []*motifCandidate{c, d}, Class: ClassVector, Source: "session"},
+	}
+	out, folded, _ := r.motifFoldGroups(applied, map[*motifCandidate]int{a: 1, b: 1, c: 2, d: 2}, progDir)
+	if folded != 0 || len(out) != 2 {
+		t.Fatalf("跨桶不该折：folded=%d out=%d", folded, len(out))
+	}
+}
+
 func TestMotifGroupClassUsesMajority(t *testing.T) {
 	mk := func(classes ...string) []*motifCandidate {
 		out := make([]*motifCandidate, 0, len(classes))
@@ -516,14 +657,40 @@ func TestMotifGroupClassUsesMajority(t *testing.T) {
 	if got := motifGroupClass(mk("raster", "raster", "vector")); got != ClassRaster {
 		t.Fatalf("majority should be raster, got %q", got)
 	}
-	// 平票时优先 vector：有能力作图时才值得合并。
+	// 平票时优先 vector。
 	if got := motifGroupClass(mk("raster", "vector")); got != ClassVector {
 		t.Fatalf("tie should prefer vector, got %q", got)
 	}
-	// 多数不是矢量图时，组里的矢量成员仍要拿出来合并，其余保持独立。
-	vec := motifVectorSubset(mk("raster", "vector", "text", "vector"))
-	if len(vec) != 2 || nonVectorCount(mk("raster", "vector", "text", "vector")) != 2 {
-		t.Fatalf("vector subset = %d, nonVector = %d", len(vec), nonVectorCount(mk("raster", "vector", "text", "vector")))
+	// class 不参与合并判定（T147）：只有"组的类别落在中心图上"这一处用它，
+	// 所以这里只需要非矢量成员能被数出来（用于日志），不存在"按 class 挑选
+	// 合并范围"的辅助函数了。
+	if n := nonVectorCount(mk("raster", "vector", "text", "vector")); n != 2 {
+		t.Fatalf("nonVector = %d, want 2", n)
+	}
+}
+
+// T147：组的类别落在中心图上——多数是 raster 就按原图保留，多数是 vector
+// 就重画；已经画出成品的不动（续跑不能把既有的重画改成"保留原图"）。
+func TestMotifApplyGroupClassSetsCenter(t *testing.T) {
+	dir := t.TempDir()
+	prog := &imageProgress{Key: "a", Class: ClassVector}
+	if !motifApplyGroupClass(&motifCandidate{progress: prog}, ClassRaster, dir) {
+		t.Fatal("class should follow the majority")
+	}
+	if prog.Class != ClassRaster {
+		t.Fatalf("center class = %q, want raster", prog.Class)
+	}
+	// 同一个类别不重复写盘。
+	if motifApplyGroupClass(&motifCandidate{progress: prog}, ClassRaster, dir) {
+		t.Fatal("same class must be a no-op")
+	}
+	// 已经画出成品的不降级。
+	done := &imageProgress{Key: "b", Class: ClassVector, Status: "done", TikzCode: "\\draw (0,0) circle (1);"}
+	if motifApplyGroupClass(&motifCandidate{progress: done}, ClassRaster, dir) {
+		t.Fatal("an existing drawing must not be downgraded to raster")
+	}
+	if done.Class != ClassVector {
+		t.Fatalf("finished center class = %q, want vector", done.Class)
 	}
 }
 

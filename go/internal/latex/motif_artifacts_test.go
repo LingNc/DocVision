@@ -36,8 +36,8 @@ func TestWriteMotifArtifactsRecordsFinalGroups(t *testing.T) {
 	c := &motifCandidate{task: &task{mdName: "b.md", imgPath: "images/b/c.jpg"}, progress: &imageProgress{Class: ClassVector}, image: other, sourceHash: "hash-c"}
 	leaders := []*motifCandidate{a, b, c}
 	copies := map[*motifCandidate][]*motifCandidate{b: {b2}}
-	applied := []motifAppliedGroup{{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector}}
-	r.writeMotifArtifacts(outDir, leaders, copies, applied, 1)
+	applied := []motifAppliedGroup{{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"}}
+	r.writeMotifArtifacts(outDir, leaders, copies, applied, nil)
 
 	dir := filepath.Join(outDir, "dedupe")
 	data, err := os.ReadFile(filepath.Join(dir, "groups.json"))
@@ -80,6 +80,89 @@ func TestWriteMotifArtifactsRecordsFinalGroups(t *testing.T) {
 		t.Fatalf("必须写出 report.md: %v", err)
 	}
 	for _, want := range []string{"不同内容 3 份", "本地自动", "指纹"} {
+		if !strings.Contains(string(report), want) {
+			t.Fatalf("report.md 缺少 %q:\n%s", want, report)
+		}
+	}
+}
+
+// T150：分组结论要能在浏览器里手点一遍——review.html 把代表图、成员图、独立图
+// 都排出来，缩略图内嵌（离线可看），点开是原图的相对链接。
+func TestWriteMotifReviewLinksSelectedImages(t *testing.T) {
+	outDir := t.TempDir()
+	r := &Runner{cfg: &config.Config{Latex: config.LatexConfig{
+		DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75,
+	}}}
+	base := whiteCanvas(70, 96)
+	drawDiamond(base, 35, 30, 18)
+	near := whiteCanvas(72, 98)
+	drawDiamond(near, 36, 30, 19)
+	other := whiteCanvas(90, 120)
+	for y := 20; y < 90; y++ {
+		for x := 30; x < 60; x++ {
+			other.Set(x, y, color.RGBA{A: 255})
+		}
+	}
+	mk := func(name, hash string, img image.Image) *motifCandidate {
+		return &motifCandidate{
+			task:       &task{mdName: "b.md", imgPath: "images/b/" + name},
+			progress:   &imageProgress{Class: ClassVector},
+			image:      img,
+			sourceHash: hash,
+		}
+	}
+	a := mk("a.jpg", strings.Repeat("a", 64), base)
+	b := mk("b.jpg", strings.Repeat("b", 64), near)
+	c := mk("c.jpg", strings.Repeat("c", 64), other)
+	applied := []motifAppliedGroup{{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"}}
+	r.writeMotifArtifacts(outDir, []*motifCandidate{a, b, c}, nil, applied, nil)
+
+	data, err := os.ReadFile(filepath.Join(motifArtifactDir(outDir), "review.html"))
+	if err != nil {
+		t.Fatalf("必须写出 review.html: %v", err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"../images/b/a.jpg",        // 代表图：点开原图
+		"../images/b/b.jpg",        // 成员图也要能点开
+		"../images/b/c.jpg",        // 独立图也要能点开
+		"thumbs/aaaaaaaaaaaa.jpg",  // 列表里用缩略图（T154：不再内嵌 base64）
+		"id=\"lb\"",                // 页内灯箱
+		"data-all=\"open\"",        // 全部展开
+		"<details class=\"group\"", // 分组默认收起（没有 open 属性）
+		"独立", "组内最低分",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("review.html 缺少 %q", want)
+		}
+	}
+	if strings.Contains(page, "data:image/jpeg;base64,") {
+		t.Fatal("review.html 不该再内嵌 base64 缩略图")
+	}
+	if strings.Contains(page, "<details class=\"group\" open") {
+		t.Fatal("分组默认应当收起")
+	}
+	thumb := filepath.Join(motifArtifactDir(outDir), "thumbs", "aaaaaaaaaaaa.jpg")
+	if st, err := os.Stat(thumb); err != nil || st.Size() == 0 {
+		t.Fatalf("必须写出缩略图 %s: %v", thumb, err)
+	}
+
+	// T154：页面里的图片与缩略图都是链接（相对路径），一个 base64 都没有；
+	// 会话预览页直接重发这份文件、只补一个 <base>，所以这里不再有第二份渲染。
+	for _, want := range []string{"data-full=\"../images/b/a.jpg\"", "data-orig=\"../images/b/a.jpg\""} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("review.html 缺少 %q", want)
+		}
+	}
+	if strings.Contains(page, "<img src=\"data:") {
+		t.Fatal("缩略图不该内嵌到页面里")
+	}
+	// report.md 也要能直接点开图（以前只有文件名）。
+	report, err := os.ReadFile(filepath.Join(motifArtifactDir(outDir), "report.md"))
+	if err != nil {
+		t.Fatalf("必须写出 report.md: %v", err)
+	}
+	for _, want := range []string{"](../images/b/a.jpg)", "review.html"} {
 		if !strings.Contains(string(report), want) {
 			t.Fatalf("report.md 缺少 %q:\n%s", want, report)
 		}
@@ -130,8 +213,8 @@ func TestMotifReuseDedupeValidatesConclusions(t *testing.T) {
 	c := mk("c.jpg", "hash-c", other)
 	leaders := []*motifCandidate{a, b, c}
 	copies := map[*motifCandidate][]*motifCandidate{b: {b2}}
-	applied := []motifAppliedGroup{{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector}}
-	r.writeMotifArtifacts(outDir, leaders, copies, applied, 1)
+	applied := []motifAppliedGroup{{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"}}
+	r.writeMotifArtifacts(outDir, leaders, copies, applied, nil)
 
 	// 复核 dedupe 收尾写进 progress 的结论（代表图自指为空、成员指向代表图）。
 	settle := func(item *motifCandidate, leader *motifCandidate) {
@@ -179,10 +262,18 @@ func TestMotifReuseDedupeValidatesConclusions(t *testing.T) {
 	if _, ok := r.motifReuseDedupe(outDir, prog, extra); ok {
 		t.Fatal("多了图必须重扫")
 	}
-	// 核验标记被清掉（比如有人重跑了 classify）→ 结论不再可信。
-	prog[c.task.key()].DedupeChecked = false
+	// 结论被清掉（比如有人重跑了 classify）→ 结论不再可信。有跟随关系的图
+	// 少一份标记就必须重扫；独立图没有关系可丢，只看摘要对不对（T148：以前
+	// 连独立图也要求标记，而那些图根本没候选、永远拿不到标记，于是每次续跑
+	// 都整池重算、把同样的会话再放一遍）。
+	prog[a.task.key()].DedupeChecked = false
 	if _, ok := r.motifReuseDedupe(outDir, prog, hashed); ok {
 		t.Fatal("结论被清掉必须重扫")
+	}
+	prog[a.task.key()].DedupeChecked = true
+	prog[c.task.key()].DedupeChecked = false
+	if _, ok := r.motifReuseDedupe(outDir, prog, hashed); !ok {
+		t.Fatal("独立图没有关系可丢，摘要对得上就该沿用")
 	}
 	prog[c.task.key()].DedupeChecked = true
 	// 跟随关系丢了 → 同样重扫。
@@ -195,5 +286,33 @@ func TestMotifReuseDedupeValidatesConclusions(t *testing.T) {
 	r.cfg.Latex.DedupeIconAuto = 0.80
 	if _, ok := r.motifReuseDedupe(outDir, prog, hashed); ok {
 		t.Fatal("规则变了必须重扫")
+	}
+}
+
+// 「组内最低分」可能低于入组门槛（成员是跟组内某个成员达标进来的、或组间收口
+// 时随代表图带入），这一页得自己说清楚，不然看表的人会以为判据出了偏差。
+func TestMotifArtifactReportExplainsBelowMinMember(t *testing.T) {
+	art := motifArtifact{
+		BuiltAt: "2026-01-01 00:00", Refs: 3, Distinct: 2, Fingerprint: "abc",
+		Rules: motifArtifactRules{AlignMin: 0.60, AlignShift: 0.10, IconAuto: 0.75},
+		Groups: []motifArtifactGroup{{
+			Key: "images/b/a.jpg", KeyImage: "images/b/a.jpg", Class: ClassVector, Source: "session",
+			Members: []motifArtifactRef{
+				{Ref: "images/b/a.jpg", Image: "images/b/a.jpg", AlignScore: 1},
+				{Ref: "images/b/b.jpg", Image: "images/b/b.jpg", AlignScore: 0.55},
+			},
+		}},
+		Independent: []motifArtifactRef{{Ref: "images/b/c.jpg", Image: "images/b/c.jpg"}},
+	}
+	report := motifArtifactReport(art)
+	if !strings.Contains(report, "0.550") {
+		t.Fatalf("表里要给组内最低分：\n%s", report)
+	}
+	if !strings.Contains(report, "换个分辨率") {
+		t.Fatalf("低于门槛时要有一句解释：\n%s", report)
+	}
+	art.Groups[0].Members[1].AlignScore = 0.90
+	if off := motifArtifactReport(art); strings.Contains(off, "换个分辨率") {
+		t.Fatalf("都达标时不该出现这句解释：\n%s", off)
 	}
 }

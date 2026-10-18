@@ -197,7 +197,7 @@ func TestMotifAlignFilterKeepsAlignedDropsOthers(t *testing.T) {
 	near := &motifCandidate{image: nearImg}
 	other := &motifCandidate{image: otherImg}
 
-	safe, chosen, dropped, worst, aligned := r.motifAlignFilter([]*motifCandidate{key, near, other}, key)
+	safe, chosen, dropped, worst, aligned, _ := r.motifAlignFilter([]*motifCandidate{key, near, other}, key)
 	if !aligned {
 		t.Fatal("small icon-like images must take the align path")
 	}
@@ -224,7 +224,7 @@ func TestMotifAlignFilterFallsBackWithoutCoverage(t *testing.T) {
 	dot.Set(0, 0, color.RGBA{A: 255})
 	a := &motifCandidate{image: dot}
 	b := &motifCandidate{image: dot}
-	safe, _, dropped, _, aligned := r.motifAlignFilter([]*motifCandidate{a, b}, a)
+	safe, _, dropped, _, aligned, _ := r.motifAlignFilter([]*motifCandidate{a, b}, a)
 	if aligned {
 		t.Fatal("1x1 images have no coverage, must fall back")
 	}
@@ -469,7 +469,7 @@ func TestMotifAlignFilterPrefersTypicalLargestMember(t *testing.T) {
 		}
 	}
 
-	safe, chosen, _, _, _ := r.motifAlignFilter([]*motifCandidate{
+	safe, chosen, _, _, _, _ := r.motifAlignFilter([]*motifCandidate{
 		{image: typicalSmall}, {image: typicalBig}, {image: oddBig},
 	}, &motifCandidate{image: typicalBig})
 	if chosen == nil {
@@ -547,5 +547,64 @@ func TestMotifAttachLeftoversOnlyUnseenImages(t *testing.T) {
 	unseen.progress.DedupeChecked = false
 	if n, _ := r.motifAttachLeftovers([]*motifCandidate{key, unseen}, applied, dir); n != 1 {
 		t.Fatalf("完全一致（1.00）在门槛 1.0 下仍应挂靠，got %d", n)
+	}
+}
+
+// 离组中心不足门槛、但与组内某个成员达标的那张要随组带入（会话已经把它并进
+// 这一组了，判据不该因为"中心恰好不是它最像的那张"就把它踢成独立图）。
+func TestMotifAlignFilterCarriesMemberMatchingAnotherMember(t *testing.T) {
+	r := &Runner{cfg: &config.Config{Latex: config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10}}}
+	mk := func(rad int) *motifCandidate {
+		img := whiteCanvas(64, 84)
+		drawDiamond(img, 32, 22, rad)
+		return &motifCandidate{image: img}
+	}
+	// 同一枚图在书里出现多次（三次引用，内容完全相同），中心被钉在这一档上；
+	// 另有两档更小的变体：中间那档与中心达标（~0.62），最小那档与中心只有
+	// ~0.46、却与中间那档达标（~0.66）。
+	key, key2, key3 := mk(14), mk(14), mk(14)
+	mid, small := mk(13), mk(12)
+	safe, chosen, dropped, _, aligned, carried := r.motifAlignFilter([]*motifCandidate{key, key2, key3, mid, small}, key)
+	if !aligned {
+		t.Fatal("小图标必须走居中重合判据")
+	}
+	if carried != 1 || dropped != 0 {
+		t.Fatalf("离中心不足但与成员达标的那张要带入: carried=%d dropped=%d", carried, dropped)
+	}
+	if !motifContains(safe, key) || !motifContains(safe, key2) || !motifContains(safe, key3) ||
+		!motifContains(safe, mid) || !motifContains(safe, small) {
+		t.Fatalf("五张都该在组里，safe=%d", len(safe))
+	}
+	if chosen == small {
+		t.Fatal("离中心不足的成员不能当代表图")
+	}
+}
+
+// motifCarryOver 只管"跟已经达标的成员比一次"：带进来的成员不能当跳板，否则
+// 0.60 的相似链会把整条链并成一张图。
+func TestMotifCarryOverDoesNotRelay(t *testing.T) {
+	a := &motifCandidate{}
+	b := &motifCandidate{}
+	c := &motifCandidate{}
+	scores := map[string]float64{
+		"a|b": 0.70, // b 与已达标成员 a 达标 → 带入
+		"b|c": 0.70, // c 只与 b 达标；b 是带进来的，不能当跳板
+		"a|c": 0.30,
+	}
+	score := func(x, y *motifCandidate) (float64, bool) {
+		if v, ok := scores["a|b"]; ok && ((x == a && y == b) || (x == b && y == a)) {
+			return v, true
+		}
+		if v, ok := scores["b|c"]; ok && ((x == b && y == c) || (x == c && y == b)) {
+			return v, true
+		}
+		if v, ok := scores["a|c"]; ok && ((x == a && y == c) || (x == c && y == a)) {
+			return v, true
+		}
+		return 0, false
+	}
+	kept, carried := motifCarryOver([]*motifCandidate{b, c}, []*motifCandidate{a}, score, 0.60)
+	if carried != 1 || len(kept) != 1 || kept[0] != b {
+		t.Fatalf("只该带入与 a 达标的那张: carried=%d kept=%v", carried, len(kept))
 	}
 }

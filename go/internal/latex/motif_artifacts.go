@@ -142,13 +142,25 @@ func (r *Runner) motifReuseDedupe(outDir string, prog map[string]*imageProgress,
 		return zero, false
 	}
 	covered := make(map[string]bool, len(hashed))
-	check := func(item motifArtifactRef) bool {
+	// reviewed = 这条结论必须带着核验标记与版本落过盘。独立条目例外：它没有
+	// 任何跟随关系可对，证据就是"这次扫到的摘要 == groups.json 记的摘要"，
+	// 指纹与覆盖检查已经保证输入没变。要求它们也有标记是个死结——没候选、
+	// 没进会话的图永远拿不到标记，于是 100% 的续跑都要整池重算（T148）。
+	check := func(item motifArtifactRef, reviewed bool) bool {
 		p := prog[item.Ref]
-		if p == nil || !p.DedupeChecked || p.DedupeVersion != motifDedupeVersion {
+		if p == nil {
 			return false
 		}
-		if item.Hash != "" && (p.DedupeSourceHash != item.Hash || want[item.Ref] != item.Hash) {
+		if item.Hash != "" && want[item.Ref] != item.Hash {
 			return false
+		}
+		if reviewed {
+			if !p.DedupeChecked || p.DedupeVersion != motifDedupeVersion {
+				return false
+			}
+			if item.Hash != "" && p.DedupeSourceHash != item.Hash {
+				return false
+			}
 		}
 		covered[item.Ref] = true
 		return true
@@ -171,7 +183,7 @@ func (r *Runner) motifReuseDedupe(outDir string, prog map[string]*imageProgress,
 	}
 	for _, g := range art.Groups {
 		for _, m := range g.Members {
-			if !check(m) || !checkCopies(m.Duplicates) {
+			if !check(m, true) || !checkCopies(m.Duplicates) {
 				return zero, false
 			}
 			p := prog[m.Ref]
@@ -187,7 +199,7 @@ func (r *Runner) motifReuseDedupe(outDir string, prog map[string]*imageProgress,
 		}
 	}
 	for _, m := range art.Independent {
-		if !check(m) || !checkCopies(m.Duplicates) {
+		if !check(m, false) || !checkCopies(m.Duplicates) {
 			return zero, false
 		}
 		if p := prog[m.Ref]; p.EquivalentTo != "" || p.DedupeLeaderHash != "" {
@@ -206,17 +218,19 @@ func (r *Runner) motifReuseDedupe(outDir string, prog map[string]*imageProgress,
 }
 
 // writeMotifArtifacts 把本次 dedupe 的最终结论写进 <proj>/source/dedupe/。
-func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, autoCount int) {
+//
+// scores 是逐对明细那一趟已经算好的重合度（T151）：组内这几百分原本又要重算
+// 一遍，现在直接查表，查不到（前筛/预算挡掉的）才现算。
+func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, scores map[string]float64) {
 	dir := motifArtifactDir(outDir)
 	rules := r.motifCurrentRules()
+	probe := &motifReviewProbe{scores: scores, shift: r.motifAlignShift(), budget: motifReviewProbeBudget}
 	hashes := make([]string, 0, len(leaders))
 	ref := func(c *motifCandidate, key *motifCandidate) motifArtifactRef {
 		item := motifArtifactRef{Ref: c.task.key(), Image: c.task.imgPath, Hash: c.sourceHash, Class: c.progress.Class}
-		if key != nil && key.image != nil && c.image != nil {
-			if a, ok := motifAlignCoverage(c.image); ok {
-				if b, ok2 := motifAlignCoverage(key.image); ok2 {
-					item.AlignScore = round3(a.overlap(b, r.motifAlignShift()))
-				}
+		if key != nil {
+			if v, ok := probe.of(c, key); ok {
+				item.AlignScore = round3(v)
 			}
 		}
 		for _, d := range copies[c] {
@@ -238,16 +252,15 @@ func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, c
 		art.Refs += 1 + len(copies[c])
 	}
 	inGroup := map[*motifCandidate]bool{}
-	for i, g := range applied {
+	for _, g := range applied {
 		if g.Key == nil {
 			continue
 		}
-		source := "session"
-		if i < autoCount {
-			source = "auto"
-		}
-		if g.Source != "" {
-			source = g.Source
+		// 出处由组自己带（auto/session/attached/folded）：组间收口会重排、
+		// 合并组，index 位置不再能说明来源（T149）。
+		source := g.Source
+		if source == "" {
+			source = "session"
 		}
 		group := motifArtifactGroup{Key: g.Key.task.key(), KeyImage: g.Key.task.imgPath, Class: g.Key.progress.Class, Source: source}
 		for _, m := range g.Members {
@@ -272,6 +285,9 @@ func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, c
 		}
 	}
 	_ = os.WriteFile(filepath.Join(dir, "report.md"), []byte(motifArtifactReport(art)), 0o644)
+	if err := r.writeMotifReview(dir, leaders, copies, applied, probe.scores); err != nil {
+		r.logWarning("[dedupe] review.html 写盘失败（不影响结论，图和分数仍可从 groups.json 看）:", err)
+	}
 	r.logInfo(fmt.Sprintf("[dedupe] 结果已落盘：%s（%d 份不同内容、%d 组、%d 份独立）",
 		filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(dir)), "dedupe")), art.Distinct, len(art.Groups), len(art.Independent)))
 }
@@ -284,7 +300,9 @@ func motifArtifactReport(art motifArtifact) string {
 	fmt.Fprintf(&b, "- 引用 %d 条 → 不同内容 %d 份\n", art.Refs, art.Distinct)
 	fmt.Fprintf(&b, "- 判据：与组中心重合 ≥ %.2f、平移 %.0f%%、本地自动定组 %.2f（0 = 关闭）\n", art.Rules.AlignMin, art.Rules.AlignShift*100, art.Rules.IconAuto)
 	fmt.Fprintf(&b, "- 指纹：`%s`（输入与规则没变时，重跑得到的就是这张表）\n", art.Fingerprint)
-	fmt.Fprintf(&b, "- 分组 %d 个、独立 %d 份\n\n", len(art.Groups), len(art.Independent))
+	fmt.Fprintf(&b, "- 分组 %d 个、独立 %d 份\n", len(art.Groups), len(art.Independent))
+	b.WriteString("- 看图：同目录的 `review.html`（浏览器打开，缩略图点开就是原图；本页的图片链接也是相对路径）\n\n")
+	belowMin := false
 	if len(art.Groups) > 0 {
 		b.WriteString("## 分组\n\n| # | 张数 | 代表图 | 类别 | 来源 | 组内最低分 |\n|---|------|--------|------|------|------------|\n")
 	}
@@ -302,17 +320,23 @@ func motifArtifactReport(art motifArtifact) string {
 		low := "—"
 		if have {
 			low = fmt.Sprintf("%.3f", minScore)
+			if minScore < art.Rules.AlignMin {
+				belowMin = true
+			}
 		}
-		origin := map[string]string{"auto": "本地自动（≥阈值）", "session": "核验会话", "attached": "挂靠已有组"}[g.Source]
+		origin := map[string]string{"auto": "本地自动（≥阈值）", "session": "核验会话", "attached": "挂靠已有组", "folded": "组间收口"}[g.Source]
 		if origin == "" {
 			origin = g.Source
 		}
-		fmt.Fprintf(&b, "| %d | %d | `%s` | %s | %s | %s |\n", i+1, len(g.Members), g.KeyImage, g.Class, origin, low)
+		fmt.Fprintf(&b, "| %d | %d | %s | %s | %s | %s |\n", i+1, len(g.Members), motifImageLink(g.KeyImage), g.Class, origin, low)
+	}
+	if belowMin {
+		fmt.Fprintf(&b, "\n> 「组内最低分」是**与代表图**的分数，可能低于 %.2f 的入组门槛：同一张图换个分辨率/长宽比，与代表图的分数会明显偏低，判据只要求它当时与组里**某个已确认成员**达标；组间收口时成员随代表图一起带入、也不再重判。逐对分数见 `metrics/pairs.csv`。\n", art.Rules.AlignMin)
 	}
 	if len(art.Independent) > 0 {
 		fmt.Fprintf(&b, "\n## 独立（%d 份）\n\n", len(art.Independent))
 		for _, m := range art.Independent {
-			fmt.Fprintf(&b, "- `%s` %s\n", m.Image, m.Class)
+			fmt.Fprintf(&b, "- %s %s\n", motifImageLink(m.Image), m.Class)
 		}
 	}
 	return b.String()
@@ -330,6 +354,16 @@ func (r *Runner) logWarning(msg string, args ...any) {
 		return
 	}
 	r.log.LogWarning(0, append([]any{msg}, args...)...)
+}
+
+// motifImageLink 把 md 里的图片引用写成相对 report.md 的链接：report.md 在
+// <proj>/source/dedupe/，图片引用相对 <proj>/source/，所以加一层 ..／。
+func motifImageLink(imgPath string) string {
+	p := filepath.ToSlash(strings.TrimSpace(imgPath))
+	if p == "" {
+		return "—"
+	}
+	return fmt.Sprintf("[`%s`](../%s)", p, strings.TrimPrefix(p, "/"))
 }
 
 func round3(v float64) float64 {

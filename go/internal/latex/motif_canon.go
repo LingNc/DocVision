@@ -3,7 +3,6 @@ package latex
 import (
 	"image"
 	"math"
-	"sort"
 )
 
 // 居中重合判据（T138 定稿）：软墨量、S 自适应、不缩放、逐级搜索，
@@ -12,7 +11,6 @@ const (
 	motifCanonInkLevel = 0.2  // 内容框阈值：软墨量 > 0.2 视为有墨
 	motifCanonMinS     = 24   // 画布边长下限
 	motifCanonMaxS     = 512  // 画布边长上限
-	motifCanonPct      = 0.90 // 池内取 P90
 	motifCanonMinG     = 32   // 最粗一级
 	motifCanonRefine   = 2    // 细层搜索窗口（格）
 	motifCanonMaxG     = 1024 // 最细一级上限
@@ -82,33 +80,6 @@ func motifCanonFromImage(img image.Image) (motifCanonImage, bool) {
 		copy(px[y*cw*3:(y+1)*cw*3], raw[src:src+cw*3])
 	}
 	return motifCanonImage{px: px, w: cw, h: ch}, true
-}
-
-// motifCanonCanvas 按池子算画布边长 S：P90(内容框长边)，夹在 [24, 512]。
-func motifCanonCanvas(imgs []motifCanonImage) int {
-	if len(imgs) == 0 {
-		return motifCanonMinS
-	}
-	sides := make([]int, len(imgs))
-	for i, im := range imgs {
-		sides[i] = im.maxSide()
-	}
-	sort.Ints(sides)
-	idx := int(math.Ceil(motifCanonPct*float64(len(sides)))) - 1
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(sides) {
-		idx = len(sides) - 1
-	}
-	s := sides[idx]
-	if s < motifCanonMinS {
-		s = motifCanonMinS
-	}
-	if s > motifCanonMaxS {
-		s = motifCanonMaxS
-	}
-	return s
 }
 
 // motifCanonGrid 把内容框居中贴进 S×S 后按 G×G 分箱，格子取格内软墨量均值

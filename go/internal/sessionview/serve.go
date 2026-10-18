@@ -307,6 +307,10 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		v.serveV2Asset(w, path.Base(p))
 	case p == "/api/index":
 		v.serveIndex(w)
+	case p == "/dedupe":
+		// T154：dedupe 复查页（/dedupe?project=<项目>），侧栏整组核验阶段行上的
+		// 按钮直接点开这一页。
+		v.serveDedupeReview(w, r)
 	case p == "/api/session":
 		v.serveSession(w, r)
 	case p == "/api/img2text-progress":
@@ -339,6 +343,9 @@ type indexResponse struct {
 	// Every session carries its own per-image estimate rule (SessionInfo.
 	// Estimate): with per-model rules there is no single page-wide one.
 	Sessions []SessionInfo `json:"sessions"`
+	// DedupeReviews 是"有复查页可看"的项目名（T154）：侧栏据此在整组核验
+	// 阶段行上决定要不要挂按钮，不猜文件在不在。
+	DedupeReviews []string `json:"dedupeReviews,omitempty"`
 }
 
 func (v *viewerServer) serveIndex(w http.ResponseWriter) {
@@ -351,9 +358,10 @@ func (v *viewerServer) serveIndex(w http.ResponseWriter) {
 		sessions = []SessionInfo{}
 	}
 	writeJSON(w, indexResponse{
-		Root:      v.root,
-		Generated: time.Now().Format(time.RFC3339),
-		Sessions:  sessions,
+		Root:          v.root,
+		Generated:     time.Now().Format(time.RFC3339),
+		Sessions:      sessions,
+		DedupeReviews: v.dedupeReviewProjects(sessions),
 	})
 }
 

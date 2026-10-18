@@ -17,8 +17,9 @@ import (
 // 现在的判据（T138 定稿，逐条对应 issue.md）：
 //  1. **非二值化**：每像素取软墨量 w = 1 − 通道/255（三通道各自算），
 //     内容框 = 软墨量 > 0.2 的外接框；
-//  2. **S 自适应**：画布边长 S = clamp(P90(内容框长边), 24, 512)，按一次
-//     比较用到的图集（池/组）算；
+//  2. **S 自适应**：画布边长 S = clamp(max(this, that) 的内容框长边, 24, 512)，
+//     **按每一对**算（不按池子取 P90——同一池子里混着 28×38 的小图标和整页
+//     截图时，P90 会让小图标在画布里只占一角，重合度被系统性压低）；
 //  3. **不缩放**：内容框居中贴进 S×S，保持原有尺寸与比例；
 //  4. **逐级搜索**：G = 32, 64, … 到最细一级；0 级全窗 ±10%，之后以上一层
 //     的解（换算成本层格号，即 2×）为中心 ±2 格，不再扩窗（T143）；
@@ -42,6 +43,10 @@ const (
 	// motifAlignMaxPixels 限制参与该判据的图：一张 4M 像素的书页扫描件没有
 	// 必要走"图标重合"。
 	motifAlignMaxPixels = 4_000_000
+	// 预筛阈值：墨量占比差 > 0.12 或长宽比差 > 0.35 的两张小图标，平移搜完也
+	// 不可能重合（T130 起用于桶扫描，T151 起逐对明细同一口径）。
+	motifAlignInkFracMax = 0.12
+	motifAlignAspectMax  = 0.35
 	// motifAutoIconMaxArea 是"自动归组"允许的最大内容框面积（约 141×141）：
 	// 自动合并意味着不再有人看原图，只留给真正的小图标。
 	motifAutoIconMaxArea = 20_000
@@ -125,26 +130,21 @@ func motifAlignCoverage(img image.Image) (motifAlignImage, bool) {
 	}, true
 }
 
-// overlapDetail 同 overlap，另外给判定层的格数 G 和画布边长 S（写 metrics 用）。
-func (a motifAlignImage) overlapDetail(b motifAlignImage, shiftCells int) (score float64, g, canvas int) {
-	canvas = a.canon.maxSide()
-	if s := b.canon.maxSide(); s > canvas {
-		canvas = s
-	}
-	if canvas < motifCanonMinS {
-		canvas = motifCanonMinS
-	}
-	if canvas > motifCanonMaxS {
-		canvas = motifCanonMaxS
-	}
-	pct := float64(shiftCells) / float64(motifAlignGrid)
-	score, _, _, g = motifCanonScoreShift(a.canon, b.canon, canvas, motifAlignFinest(canvas), pct)
-	return score, g, canvas
+// motifAlignDetail 是一次居中重合度比较的完整过程量（T146 写进 metrics 用）：
+// 除了分数，还留下判定层、画布、逐级搜出来的平移量与级数——调阈值或怀疑
+// "某一对为什么只有 0.6"时，光看分数无法判断是尺寸差异还是平移没搜对。
+type motifAlignDetail struct {
+	Score  float64
+	Level  int // 判定层的格数 G
+	Canvas int // 画布边长 S（这一对取两者内容框长边的较大者）
+	Levels int // 一共搜了几级（32 → … → 判定层）
+	ShiftY int // 判定层上的平移格数：内容框相对居中位置往下/右挪几格
+	ShiftX int
 }
 
-// overlap 算两张图的居中重合度：S 取两者内容框长边的较大者（同一批图里
-// 就是池子的尺子），平移上限按 shiftCells/32 的比例（0.10 → 9.4%）。
-func (a motifAlignImage) overlap(b motifAlignImage, shiftCells int) float64 {
+// motifPairCanvas 是一对图共用的画布边长：取两者内容框长边的较大者，
+// 夹在 [motifCanonMinS, motifCanonMaxS]（同一批图里这就是池子的尺子）。
+func motifPairCanvas(a, b motifAlignImage) int {
 	canvas := a.canon.maxSide()
 	if s := b.canon.maxSide(); s > canvas {
 		canvas = s
@@ -155,6 +155,42 @@ func (a motifAlignImage) overlap(b motifAlignImage, shiftCells int) float64 {
 	if canvas > motifCanonMaxS {
 		canvas = motifCanonMaxS
 	}
+	return canvas
+}
+
+// motifAlignWorthScore 是"这一对值得算一次居中重合"的廉价前筛：墨量占比差或
+// 长宽比差太远的两张图，把平移搜完也不可能是同一枚标记。桶扫描（T130）与逐对
+// 明细（T151）共用同一口径，两处结果才解释得通。
+func motifAlignWorthScore(a, b motifAlignImage) bool {
+	if absFloat(a.inkFrac-b.inkFrac) > motifAlignInkFracMax {
+		return false
+	}
+	return absFloat(a.aspect-b.aspect) <= motifAlignAspectMax
+}
+
+// motifAlignCost 估一对图的打分代价（画布² × 级数），逐对明细按它记账。
+func motifAlignCost(a, b motifAlignImage) int {
+	canvas := motifPairCanvas(a, b)
+	return canvas * canvas * len(motifCanonLevels(canvas, motifAlignFinest(canvas)))
+}
+
+// overlapDetail 同 overlap，另外给出判定层、画布、平移量与级数（写 metrics 用）。
+func (a motifAlignImage) overlapDetail(b motifAlignImage, shiftCells int) motifAlignDetail {
+	canvas := motifPairCanvas(a, b)
+	finest := motifAlignFinest(canvas)
+	pct := float64(shiftCells) / float64(motifAlignGrid)
+	score, dy, dx, g := motifCanonScoreShift(a.canon, b.canon, canvas, finest, pct)
+	return motifAlignDetail{
+		Score: score, Level: g, Canvas: canvas,
+		Levels: len(motifCanonLevels(canvas, finest)),
+		ShiftY: dy, ShiftX: dx,
+	}
+}
+
+// overlap 算两张图的居中重合度：S 取两者内容框长边的较大者（同一批图里
+// 就是池子的尺子），平移上限按 shiftCells/32 的比例（0.10 → 9.4%）。
+func (a motifAlignImage) overlap(b motifAlignImage, shiftCells int) float64 {
+	canvas := motifPairCanvas(a, b)
 	pct := float64(shiftCells) / float64(motifAlignGrid)
 	score, _, _, _ := motifCanonScoreShift(a.canon, b.canon, canvas, motifAlignFinest(canvas), pct)
 	return score
@@ -269,8 +305,8 @@ func (r *Runner) motifMergeAllowed(a, b *motifCandidate) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if ca, ok := motifAlignCoverage(a.image); ok {
-		if cb, ok := motifAlignCoverage(b.image); ok {
+	if ca, ok := a.coverage(); ok {
+		if cb, ok := b.coverage(); ok {
 			if ca.overlap(cb, r.motifAlignShift()) >= r.motifAlignMin() {
 				return true
 			}
@@ -284,12 +320,12 @@ func (r *Runner) motifMergeAllowed(a, b *motifCandidate) bool {
 // 代表图优先用模型指定的 key（它看过图），但要求它自己达标且内容框足够完整
 // （≥ 合格成员最大面积的 90%），否则取合格成员里内容框最大的一张——那才是
 // "覆盖了必要内容"的那张。
-func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) (safe []*motifCandidate, chosen *motifCandidate, dropped int, worst float64, aligned bool) {
+func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) (safe []*motifCandidate, chosen *motifCandidate, dropped int, worst float64, aligned bool, carried int) {
 	min := r.motifAlignMin()
 	shift := r.motifAlignShift()
 	covered := map[*motifCandidate]motifAlignImage{}
 	for _, c := range cands {
-		if cov, ok := motifAlignCoverage(c.image); ok {
+		if cov, ok := c.coverage(); ok {
 			covered[c] = cov
 		}
 	}
@@ -303,29 +339,45 @@ func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) 
 			}
 			safe = append(safe, c)
 		}
-		return safe, key, dropped, 0, false
+		return safe, key, dropped, 0, false, 0
 	}
-	// 组中心 = 与其余成员平均重合度最高的那张。
+	// 组中心 = 与其余成员平均重合度最高的那张。顺手把两两重合度留下来：
+	// 下面"离中心不足、但组内成员之间达标"的那几张要复用它，不再重算一遍。
 	center := (*motifCandidate)(nil)
 	bestMean := -1.0
 	scores := map[*motifCandidate]float64{}
-	// 按 cands 的顺序遍历：并列时先出现的胜出，结果与 map 迭代顺序无关。
+	order := make([]*motifCandidate, 0, len(covered))
 	for _, c := range cands {
-		cov, ok := covered[c]
-		if !ok {
-			continue
+		if _, ok := covered[c]; ok {
+			order = append(order, c)
 		}
-		sum, n := 0.0, 0
-		for o, oc := range covered {
+	}
+	at := make(map[*motifCandidate]int, len(order))
+	for i, c := range order {
+		at[c] = i
+	}
+	pairs := make([][]float64, len(order))
+	for i := range pairs {
+		pairs[i] = make([]float64, len(order))
+		// 对角线是"自己跟自己"的重合度，与逐对判据一致取 1：组中心落在自己
+		// 那一格上，若留 0 会把中心本身判成"离中心不足"。
+		pairs[i][i] = 1
+	}
+	// 按 cands 的顺序遍历：并列时先出现的胜出，结果与 map 迭代顺序无关。
+	for i, c := range order {
+		cov := covered[c]
+		sum := 0.0
+		for j, o := range order {
 			if o == c {
 				continue
 			}
-			sum += cov.overlap(oc, shift)
-			n++
+			v := cov.overlap(covered[o], shift)
+			pairs[i][j], pairs[j][i] = v, v
+			sum += v
 		}
 		mean := 0.0
-		if n > 0 {
-			mean = sum / float64(n)
+		if len(order) > 1 {
+			mean = sum / float64(len(order)-1)
 		}
 		scores[c] = mean
 		if mean > bestMean {
@@ -333,12 +385,13 @@ func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) 
 		}
 	}
 	// 逐个成员与中心比；大图成员用逐对相似度对中心判定。
+	var below []*motifCandidate
 	for _, c := range cands {
-		if cov, ok := covered[c]; ok {
-			v := cov.overlap(covered[center], shift)
+		if _, ok := covered[c]; ok {
+			v := pairs[at[c]][at[center]]
 			scores[c] = v
 			if v < min {
-				dropped++
+				below = append(below, c)
 				continue
 			}
 			safe = append(safe, c)
@@ -355,6 +408,32 @@ func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) 
 		}
 		dropped++
 	}
+	// 会话把这张图并进了这一组、但它离组中心不足门槛时，别急着判它独立：同一
+	// 张图换个分辨率/长宽比，与中心的分数会明显偏低，可它与组内**某个已经达标
+	// 的成员**往往照样够分（实测：4 张离中心 0.52–0.64，与组内成员 0.686–0.812，
+	// 四张确实是同一枚图）。带上来的成员不参与代表图挑选（它离中心不够，代表
+	// 不了这一组）。
+	carriedSet := map[*motifCandidate]bool{}
+	if len(below) > 0 && len(safe) > 0 {
+		score := func(a, b *motifCandidate) (float64, bool) {
+			ia, ok := at[a]
+			if !ok {
+				return 0, false
+			}
+			ib, ok := at[b]
+			if !ok {
+				return 0, false
+			}
+			return pairs[ia][ib], true
+		}
+		kept, n := motifCarryOver(below, safe, score, min)
+		for _, c := range kept {
+			safe = append(safe, c)
+			carriedSet[c] = true
+		}
+		carried = n
+	}
+	dropped += len(below) - carried
 	// 代表图：先看"既典型又全"的那一批（T131 用户口径）——与组中心重合度
 	// ≥ motifAlignTypical 的成员里挑内容框最大的，这样代表图既是大多数图都
 	// 符合的样子，又不会因为某张被裁掉一角而让整组重画缺内容。没有这样的
@@ -364,7 +443,7 @@ func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) 
 	bestArea, bestScore := -1, -1.0
 	for _, c := range safe {
 		cov, ok := covered[c]
-		if !ok || scores[c] < r.motifAlignTypical() {
+		if !ok || carriedSet[c] || scores[c] < r.motifAlignTypical() {
 			continue
 		}
 		if cov.area > bestArea || (cov.area == bestArea && scores[c] > bestScore) {
@@ -374,7 +453,7 @@ func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) 
 	if chosen == nil && key != nil && motifContains(safe, key) && covered[key].canon.w > 0 {
 		maxArea := 0
 		for _, c := range safe {
-			if cov, ok := covered[c]; ok && cov.area > maxArea {
+			if cov, ok := covered[c]; ok && !carriedSet[c] && cov.area > maxArea {
 				maxArea = cov.area
 			}
 		}
@@ -386,7 +465,7 @@ func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) 
 		bestArea, bestScore = -1, -1.0
 		for _, c := range safe {
 			cov, ok := covered[c]
-			if !ok {
+			if !ok || carriedSet[c] {
 				continue
 			}
 			if cov.area > bestArea || (cov.area == bestArea && scores[c] > bestScore) {
@@ -397,5 +476,23 @@ func (r *Runner) motifAlignFilter(cands []*motifCandidate, key *motifCandidate) 
 	if chosen == nil {
 		chosen = center
 	}
-	return safe, chosen, dropped, worst, true
+	return safe, chosen, dropped, worst, true, carried
+}
+
+// motifCarryOver 从"离组中心不足门槛"的成员里挑出仍可随组带入的那几张：只要
+// 与 safe 里**原本就达标**的某个成员够分就带上（score 给两两重合度，拿不到就
+// 当不够）。只跟安全集合的初始部分比、不拿带进来的成员当跳板——0.60 这个门槛
+// 是可传递的（同一枚图换分辨率/长宽比会掉分），任由接力会把整条相似链并成一张
+// 图。safe 只读不改，由调用方决定怎么并入。
+func motifCarryOver(below, safe []*motifCandidate, score func(a, b *motifCandidate) (float64, bool), min float64) (kept []*motifCandidate, carried int) {
+	for _, c := range below {
+		for _, s := range safe {
+			if v, ok := score(c, s); ok && v >= min {
+				kept = append(kept, c)
+				carried++
+				break
+			}
+		}
+	}
+	return kept, carried
 }
