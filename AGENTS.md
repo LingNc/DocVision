@@ -38,6 +38,7 @@
 - **批次收尾一致性检查（强制清单）**：每批提交前逐项核对——① `docs/issue.md`（问题清单）与 `docs/plan.md`（计划/设计要求档案，用户提出的设计意图记这里、可从会话记录恢复）：用户提出的每个问题/计划都有条目（issue=`T<N>`、plan=`P<N>`），编号严格递增无缺号；**旗标语义**（plan.md P17）：第一个 `[ ]`=Agent 完成态（`~` 在做 / `X` 完成），第二个 `[ ]`=开发者审核（`T` 通过 / `F` 打回）；**插入新条目必须用带行尾或整行的锚点**（裸子串锚点曾把 T78–T85 挤成一行）；② 该批所有 T/P 号在 issue.md/plan.md、CHANGELOG.md、`docs/agent-batch-history.md` 都有记录（漏一个视为批次不完整）；③ 功能/工具/配置变更按「文档同步」规则落到 README/docs/`--help`/配置模板；④ 受影响条目同步本文件「维护内容」的现状要点；⑤ 全量测试绿（`GOCACHE=/tmp/dsh-gocache go test ./internal/...`；web 改动 `npm test`）。**会话内的任务清单工具（todo）在批次结束回复用户前清空**——残留的待办会让用户以为活没干完。
 - **不要替用户部署（用户指定，2026-10-18）**：代码改完只提交，**不要**构建/复制 `docvision` 二进制到运行目录（`/home/share/samba-share/PDF2MD`、`运行目录` 或任何其他位置），也不要替用户重启服务或更新他的 `config.yaml`——部署与配置由用户自己做（他有 `build.sh` / `go/Makefile` 带版本号打戳）。需要验证时只在仓库内 `go build` + 跑测试。
 - **清理运行时项目（用户指定）**：用户说"删掉非样式/某阶段的部分"时，**保留 `progress_items` 里的分类结果**（`class`/`status` 等）——classify 是逐图模型请求，删了就得整本重跑；只清 process/dedupe 相关字段（`equivalent_to`/`dedupe_leader_hash`/`shared_tex`/`dedupe_checked`/`tikz_code`/`fig_*`/`error`）与下游产物（`build/`、`chapters/`、`out/`、`source/figures|tikz`、`work/temp|views|media|pdfview`、`sessions` 里的对应转录）。删除前先确认没有正在运行的 `docvision latex`。
+- **issue 与 plan 分工（用户指定，2026-10-18）**：`docs/plan.md`（P 号）**只记全新功能**；对已有功能的优化、修正、判据调整、阈值重标定、配置项细化等**一律只进 `docs/issue.md`（T 号）**。**同一件事不要两边都写**——写之前先问"这是新功能还是对老功能的改进"。
 - **文档审计**：大改动后（或用户要求时）做一次只读审计——`README.md` + 全部 `--help` 文本 + 配置模板 vs 代码事实，产出"过期／缺失／仍准确"三段清单，再定点修补；禁止整体重写文档。
 
 
