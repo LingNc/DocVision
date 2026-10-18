@@ -50,8 +50,8 @@ func TestWriteMotifArtifactsRecordsFinalGroups(t *testing.T) {
 	if art.Refs != 4 || art.Distinct != 3 {
 		t.Fatalf("引用/不同内容计数不对: refs=%d distinct=%d", art.Refs, art.Distinct)
 	}
-	if len(art.Groups) != 1 || !art.Groups[0].Auto {
-		t.Fatalf("应当记录 1 个本地自动定组: %+v", art.Groups)
+	if len(art.Groups) != 1 || art.Groups[0].Source != "auto" {
+		t.Fatalf("应当记录 1 个本地自动定组（source=auto）: %+v", art.Groups)
 	}
 	if got := len(art.Groups[0].Members); got != 2 {
 		t.Fatalf("组成员应为 2，got %d", got)

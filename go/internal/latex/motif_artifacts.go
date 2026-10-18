@@ -43,11 +43,13 @@ type motifArtifactRules struct {
 }
 
 type motifArtifactGroup struct {
-	Key      string             `json:"key"`
-	KeyImage string             `json:"key_image"`
-	Class    string             `json:"class"`
-	Auto     bool               `json:"auto"`
-	Members  []motifArtifactRef `json:"members"`
+	Key      string `json:"key"`
+	KeyImage string `json:"key_image"`
+	Class    string `json:"class"`
+	// Source 标出处：auto＝本地 ≥ dedupe_icon_auto 直接定组、session＝核验
+	// 会话里定的、attached＝后期挂靠到已有组（T134/P55）。复查时一眼看出。
+	Source  string             `json:"source"`
+	Members []motifArtifactRef `json:"members"`
 }
 
 type motifArtifactRef struct {
@@ -118,7 +120,11 @@ func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, c
 		if g.Key == nil {
 			continue
 		}
-		group := motifArtifactGroup{Key: g.Key.task.key(), KeyImage: g.Key.task.imgPath, Class: g.Key.progress.Class, Auto: i < autoCount}
+		source := "session"
+		if i < autoCount {
+			source = "auto"
+		}
+		group := motifArtifactGroup{Key: g.Key.task.key(), KeyImage: g.Key.task.imgPath, Class: g.Key.progress.Class, Source: source}
 		for _, m := range g.Members {
 			inGroup[m] = true
 			group.Members = append(group.Members, ref(m, g.Key))
@@ -172,9 +178,9 @@ func motifArtifactReport(art motifArtifact) string {
 		if have {
 			low = fmt.Sprintf("%.3f", minScore)
 		}
-		origin := "核验会话"
-		if g.Auto {
-			origin = "本地自动（≥阈值）"
+		origin := map[string]string{"auto": "本地自动（≥阈值）", "session": "核验会话", "attached": "挂靠已有组"}[g.Source]
+		if origin == "" {
+			origin = g.Source
 		}
 		fmt.Fprintf(&b, "| %d | %d | `%s` | %s | %s | %s |\n", i+1, len(g.Members), g.KeyImage, g.Class, origin, low)
 	}
