@@ -19,6 +19,7 @@ func TestEnrichSessionsAddsStageProgressAndImageIdentity(t *testing.T) {
 	mustWrite(t, filepath.Join(proj, "work", "style_session.jsonl"), `{"t":"msg","message":{"role":"user","content":"x"}}`+"\n")
 	mustWrite(t, filepath.Join(proj, "source", "sessions", "vector_book__abc123__Venn_diagram.jsonl"), `{"t":"msg","message":{"role":"user","content":"x"}}`+"\n")
 	mustWrite(t, filepath.Join(proj, "work", "sessions", "figure_check_book__abc123__Venn_diagram.jsonl"), `{"t":"msg","message":{"role":"user","content":"x"}}`+"\n")
+	mustWrite(t, filepath.Join(proj, "source", "sessions", "motif_dedupe_aabbcc001122.jsonl"), `{"t":"msg","message":{"role":"user","content":"verify"}}`+"\n")
 	// progress.json：档位级状态
 	mustWrite(t, filepath.Join(proj, "progress.json"), `{"style":"done","images":"done","chapters":"running","convert":"","assemble":""}`+"\n")
 	// doc_index：图片块带 img/page/type/text
@@ -37,6 +38,10 @@ func TestEnrichSessionsAddsStageProgressAndImageIdentity(t *testing.T) {
 	byLabel := map[string]SessionInfo{}
 	for _, s := range sessions {
 		byLabel[s.Label] = s
+	}
+	dedupe := byLabel["dedupe:aabbcc001122"]
+	if dedupe.Stage != "dedupe" || dedupe.StageTitle != "整组核验" || dedupe.ImageName != "" {
+		t.Fatalf("核验会话应在独立阶段且不能误作逐图会话: %+v", dedupe)
 	}
 	vec, ok := byLabel["vector:Venn diagram"]
 	if !ok {
@@ -79,13 +84,25 @@ func TestEnrichSessionsAddsStageProgressAndImageIdentity(t *testing.T) {
 	for _, r := range sum {
 		order = append(order, r.Stage)
 	}
-	want := []string{"vector", "style", "convert", "checker", "figure-check"}
+	want := []string{"dedupe", "vector", "style", "convert", "checker", "figure-check"}
 	if len(order) != len(want) {
 		t.Fatalf("阶段分组 = %v, want %v", order, want)
 	}
 	for i := range want {
 		if order[i] != want[i] {
 			t.Fatalf("阶段必须按流程顺序: got %v want %v", order, want)
+		}
+	}
+}
+
+func TestDedupeStageUsesStableTranscriptIdentity(t *testing.T) {
+	for _, s := range []SessionInfo{
+		{ID: "book/source/sessions/motif_dedupe_aabbcc.jsonl", Label: "会话:motif_dedupe_aabbcc"},
+		{Label: "motif-dedupe:aabbcc"},
+		{Label: "dedupe:aabbcc"},
+	} {
+		if got := StageOf(s); got != "dedupe" {
+			t.Fatalf("核验会话阶段 = %q: %+v", got, s)
 		}
 	}
 }

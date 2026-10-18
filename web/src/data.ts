@@ -33,6 +33,7 @@ export function revealProject(project: string): void {
 
 export function applyIndex(payload: any): void {
   state.sessions = payload.sessions || []
+  state.dedupeReviews = payload.dedupeReviews || []
   state.root = payload.root || state.root
   state.generated = payload.generated || state.generated
   // Vue 的响应式列表会做 keyed 更新：签名没变时算出的 groups 不变，DOM 不动；

@@ -33,3 +33,4 @@ logs/
 logs/
 
 build.sh
+clean_project.sh

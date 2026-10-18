@@ -54,6 +54,19 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
+| `latex.dedupe_group_session_over` | 相似桶成员数超过该值时**该桶独占一个核验会话**；较小的桶可以互相合并进同一会话；`0` = 整池一个会话（旧行为） | 50 |
+| `latex.dedupe_batch_images` | 一个核验会话最多处理多少张图（小桶合并时的容量上限） | 150 |
+| `latex.dedupe_concurrency` | 同时跑几个桶核验会话。桶之间互不依赖（各自只看自己桶里的图、写自己的 `groups.json`），整理会话仍等它们全部结束；**未写该键时为 2**，`0`/`1` = 串行（旧行为）。每个会话都带着自己的图片历史，调高会成倍放大峰值内存与限流压力 | 2（键缺席时） |
+| `latex.dedupe_align_min` | 组内合并的**居中重合度**门槛（0–1）：成员把内容框**居中贴进 S×S 软墨量画布**（S = 池内 P90(内容框长边) 夹在 24–512；**不缩放、不二值化**，格值 = 格内平均软墨量 `1−通道/255`），按 `latex.dedupe_align_shift`·S（默认 0.10）平移搜索，网格 `G` 由 32 逐级翻倍到放得进 S 的最细一级，**判定分取最细一级**的三通道平均 Σmin/Σmax；与组中心达标才共用一张成品，其余保持独立。该书 130 份不同内容实测（T138 定稿后复测）：同标记 100 张两两 4950 对 min 0.462 / 中位 0.610 / ≥0.60 2851 对 / ≥0.75 232 对；30 张不同内容 435 对 max 0.607。**未写该键时为 0.60** | 0.60（键缺席时） |
+| `latex.dedupe_align_shift` | 居中重合比较时允许的平移上限，按内容框**边长比例**（0–0.5）。实测 0.10 已饱和（0.10/0.20/0.30/0.40/0.50 结论完全一致，只是比较次数从 49 涨到 1089），0 = 不搜平移（小图上会把同源图判散）。**未写该键时为 0.10** | 0.10（键缺席时） |
+| `latex.dedupe_icon_auto` | 小图标**本地自动归组**的重合度门槛（0–1）：与组中心重合度达到它的图标直接合并、不进核验会话；0.60–0.75 仍逐张核验。只对矢量小图标生效（前景框 ≤200×200 像素），**0 = 关闭自动归组**。**未写该键时为 0.75** | 0.75（键缺席时） |
+| `latex.dedupe_align_grid` | 逐级搜索**最细一级（判定用的那一级）**的格数：整数 = 固定格数（如 `128`）；`0.95S` = 内容框画布边长 S 的 0.95 倍（S 自适应；**推荐**，固定 32 会把"只差一个符号"的图平均成同一张）。级数从 32 起逐级翻倍到它为止 | `"0.95S"`（键缺席时） |
+| `latex.dedupe_align_typical` | "典型成员"门槛（0–1）：与组中心重合度达到它的成员里，取内容框最大者当代表图 | 0.95（键缺席时） |
+| `latex.dedupe_attach_min` | 未入桶的图**挂靠**已确认组的门槛（0–1）。挂靠只跟着组走、不改变组本身；**0 = 关闭挂靠** | 0.60（键缺席时） |
+| `latex.dedupe_icon_max_area` | 小图标面积上限（像素，宽×高），超过它的图只走逐对相似度、不进重合度归并 | 20000（键缺席时） |
+| `latex.dedupe_bucket_max` | 参与重合度归并的小图标最大张数，超过就退回逐对相似度并警告 | 400（键缺席时） |
+| `latex.dedupe_model` | 档位1 classify 后整组相似图工具核验会话的模型注册表键；留空回退 `text`，须支持看图和工具调用；随附模板为 `dedupe`，继承 `text` | 空（回退 text） |
+| `models.dedupe` | 随附模板的独立去重模型条目，可用 extends 指向 text 或自行指定视觉模型 | 未设置（模板继承 text） |
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking），原样合并到请求体顶层 | 见示例 |
 | `models.text.api` | 线路协议：`openai`（默认，OpenAI 兼容 `/chat/completions`）、`anthropic`（Anthropic Messages API，`base_url` 指到 `/v1`，自动带 `x-api-key`/`anthropic-version` 头）或 `responses`（OpenAI Responses API，`/v1/responses`，gpt-5/o 系；固定 `store:false` 全量回传，加密思考链请求 `reasoning.encrypted_content` 回放——**加密思考约半小时级有效期**，长间隔续跑可能失效）。后两条线路**只走非流式**；三者都把应答的缓存读计入命中率、stop_reason 翻译为 finish_reason | `openai` |
 | `options.log_level` | 日志等级：info / debug / trace（debug 记请求响应摘要与最终内容，trace 再加流式分片） | info |
@@ -77,11 +90,14 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.text` | **必填**：img2text 等基础流程的默认模型（base_url/api_key/model/request_body/stream/thinking…） | - |
 | `models.<name>` | 每个专用 AI 的独立配置，空字段继承 `models.text`；`max_tokens`/`temperature` 作为该模型未指定时的兜底；GLM 可用 `tool_stream: true`（工具参数随流返回）与 `thinking.clear_thinking: false`（保留式思考） | - |
 | `models.<条目>.extends` | 命名基座：本条目继承另一个 `models:` 条目的键（加载期在 YAML 节点层合并）；也接受**条目名列表** `extends: [a, b]`——按书写顺序合并、后面的基座覆盖前面的，条目自己的键覆盖所有基座（YAML 重复键本身会报错，多重继承必须用列表）。语义见下方「`extends`：命名基座」一节 | 未设置 |
-| `models.<条目>.price.*` | 单价四键。条目**一项费率都没写**时继承 `models.text` 的费率；写了任意一项就用自己这一份。两个条目发往**同一个 wire 模型名**却配了不同单价 → 加载期报错 | 继承 `models.text`（或全 0 = 未配置） |
+| `models.<条目>.context_limit` | 模型/平台上下文窗口（tokens）；0=模型侧不设本地上限。会话实际值与 `latex.sessions.<session>.context_limit` 取较小的正值 | 0（不限制） |
+| `models.<条目>.max_tokens` | 模型/平台单次请求最大输出；0=模型侧不设上限。会话实际值与 `latex.sessions.<session>.max_tokens` 取较小的正值 | 0（不限制） |
+| `models.<条目>.max_images` | 模型/平台单次请求允许携带的图片数；0=不限制。超过时会话在请求前把最旧图片替换成可重新查看的文字提示 | 0（不限制） |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
-| `latex.sessions.{drawing,style,chapter,convert,checker}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |
-| `latex.sessions.*.context_limit` | 会话上下文窗口（tokens），达到阈值自动 AI 压缩 | 131072 |
-| `latex.sessions.*.max_tokens` | 该会话**单次请求最大输出**（不含厂商单独计费的思维链预算）：drawing 16384、style 内置 32768、其余 16384（随附模板示例把 drawing/style 写成 131072） | 16384 / style 32768 |
+| `latex.sessions.{drawing,style,chapter,convert,checker,dedupe}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |
+| `latex.sessions.*.context_limit` | 会话上下文窗口（tokens）；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值 | 0（不限制） |
+| `latex.sessions.*.max_tokens` | 会话单次请求最大输出；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值 | 16384（style 32768） |
+| `latex.sessions.*.keep_images` | 本地历史裁剪策略，不是平台图片上限；上下文裁剪时保留最近多少条带图消息。平台上限请配置 `models.<name>.max_images` | 3 |
 | `latex.sessions.*.temperature` | 该会话采样温度（同 `models.<name>.temperature`，会话配置优先） | 未设置 |
 | `latex.sessions.*.compaction_at` | 触发自动压缩的窗口占用比例（0-1），不写默认 0.85（所有会话一致，不是只继承 drawing） | 0.85 |
 | `latex.concurrency` | 档位1/档位2 的会话级并发（classify / 档位2 process / 档位1 逐章 convert / style-fix 共用；style、chapters、assemble、终审是单会话） | 3 |
@@ -122,7 +138,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **13**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 13 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **19**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 15 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |

@@ -210,6 +210,15 @@ func semanticChecks(cfg *Config) []string {
 				p = append(p, fmt.Sprintf("%s.thinking 缺少 type（enabled|disabled）", label))
 			}
 		}
+		if m.ContextLimit < 0 {
+			p = append(p, fmt.Sprintf("%s.context_limit 不能为负", label))
+		}
+		if m.MaxImages < 0 {
+			p = append(p, fmt.Sprintf("%s.max_images 不能为负", label))
+		}
+		if m.MaxTokens < 0 {
+			p = append(p, fmt.Sprintf("%s.max_tokens 不能为负", label))
+		}
 		if m.APIStreamIdleTimeout < 0 {
 			p = append(p, fmt.Sprintf("%s.api_stream_idle_timeout 不能为负", label))
 		}

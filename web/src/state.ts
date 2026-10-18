@@ -104,6 +104,9 @@ export const state = reactive({
   staticMode: false,
   mediaRoot: ':',
   sessions: [] as Session[],
+  // T154：有 dedupe 复查页的项目名（/dedupe?project=… 可打开），侧栏整组核验
+  // 阶段行的「复查」按钮据此显隐；不参与列表签名，按钮出现不影响侧栏重建。
+  dedupeReviews: [] as string[],
   current: null as Session | null,
   lines: [] as Line[],
   nextFrom: 0,

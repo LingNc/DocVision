@@ -198,7 +198,15 @@ export function estOf(line: Line | null | undefined): { text: number; reasoning:
 
 /* ---------- 阶段分组与排序 ---------- */
 
-export const STAGE_ORDER = ['vector', 'style', 'chapters', 'convert', 'checker', 'style-fix', 'figure-check', 'fix', 'final-review']
+export const STAGE_ORDER = ['dedupe', 'vector', 'style', 'chapters', 'convert', 'checker', 'style-fix', 'figure-check', 'fix', 'final-review']
+
+/* 旧预览索引/静态导出可能还没有新阶段字段；已知核验转录名是稳定身份，
+ * 不能因旧服务下发 stage=会话 而永远落进最后的「其他会话」组。 */
+export function sessionStageOf(s: { stage?: string; label?: string; id?: string; name?: string }): string {
+  const name = (s.name || s.id || '').replace(/\\/g, '/').split('/').pop() || ''
+  if (/^motif_dedupe_.+\.jsonl$/.test(name) || /^(?:dedupe|motif-dedupe):/.test(s.label || '')) return 'dedupe'
+  return s.stage || 'session'
+}
 
 export function stageRank(stage: string): number {
   const i = STAGE_ORDER.indexOf(stage)
@@ -207,7 +215,7 @@ export function stageRank(stage: string): number {
 
 export function stageTitleOf(stage: string): string {
   const map: Record<string, string> = {
-    vector: '矢量图', style: '样式', chapters: '章节划分', convert: '章节转换',
+    dedupe: '整组核验', vector: '矢量图', style: '样式', chapters: '章节划分', convert: '章节转换',
     checker: '章节核对', 'style-fix': '样式修复', 'figure-check': '逐图校验',
     fix: '全书修复', 'final-review': '终审',
   }
@@ -216,7 +224,7 @@ export function stageTitleOf(stage: string): string {
 
 /* progress.json 里的键是档位级的，阶段名与它并不一一对应。 */
 export function progressKeyFor(stage: string): string {
-  if (stage === 'vector') return 'images'
+  if (stage === 'dedupe' || stage === 'vector') return 'images'
   if (stage === 'checker' || stage === 'style-fix') return 'convert'
   // T88：fix/final-review 是 assemble 阶段内的会话，progress.json 没有
   // 它们自己的键——不映射的话阶段状态永远是「未开始」（其实早做完了）。
@@ -575,7 +583,7 @@ export function buildGroups(): ProjectGroup[] {
     g.items.push(s)
     if (s.live) g.live++
     // 阶段子组：项目内按流程阶段再分一层（组头带会话数与 progress.json 状态）。
-    const stage = s.stage || 'session'
+    const stage = sessionStageOf(s)
     let sg = g.stages[stage]
     if (!sg) sg = g.stages[stage] = { stage, title: stageTitleOf(stage), items: [], live: 0 }
     sg.items.push(s)

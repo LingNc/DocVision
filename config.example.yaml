@@ -12,7 +12,7 @@
 #   3. 未知键不生效：拼错一个键名不会有任何报错，启动时只会给一行"未知配置键"
 #      告警（`docvision setup` 保存时会把它拦下来）。
 
-config_version: 13
+config_version: 20
 
 # MinerU API Configuration
 mineru:
@@ -77,6 +77,38 @@ latex:
   # 想换模型只改 registry 里那一条条目，不用动这一节。
   # 这几个角色键本身不参与任何"继承与覆盖"，它们只是指针。
   classifier_model: "classifier" # 图像分类 AI（text/vector/raster 标记）
+  dedupe_model: "dedupe"         # 档位1整组工具核验（models.dedupe 默认 extends text）
+  # 按相似组分配核验会话：某个相似桶超过 dedupe_group_session_over 张就自己独占
+  # 一个会话；较小的桶可以互相合并进同一个会话，但一个会话最多 dedupe_batch_images 张。
+  # 没有命中任何相似桶的图先标记"未分配"，最后交给一个整理会话拿各组的**关键图**
+  # 统一归位（看关键图即可，不重看全组）。0 = 整池一个会话（旧行为）。
+  dedupe_group_session_over: 50
+  dedupe_batch_images: 150      # 单会话图片上限（小桶合并时的容量）
+  # 同时跑几个桶核验会话：桶之间互不依赖（各自只看自己的图），整理会话仍等它们
+  # 全部结束；0 = 串行（旧行为），未写该键时为 2。每个会话都带着自己的图片历史，
+  # 调高会成倍放大峰值内存与限流压力。
+  dedupe_concurrency: 2
+  # 组内合并判据：把成员按前景外接框居中归一化后允许小幅平移，取软覆盖率
+  # （格内前景面积占比，不二值化）的最大重合度；与组中心重合度达标才共用一张
+  # 成品，其余保持独立。0.10 = 平移上限为内容框边长的 10%（实测再放大不改变
+  # 任何一对的结论、只更慢）；未写这两个键时为 0.60 / 0.10。
+  dedupe_align_min: 0.60
+  dedupe_align_shift: 0.10
+  # 小图标"本地自动归组"的重合度门槛（0-1）。与组中心重合度达到它的图标
+  # 直接合并、不进核验会话（省掉逐张看图）；0.60–0.75 之间仍送会话核验。
+  # 0 = 关闭自动归组，所有图标都交会话。未写该键时为 0.75。
+  dedupe_icon_auto: 0.75
+  # 逐级搜索最细一级（判定用的那一级）的格数：整数=固定格数；"0.95S"=内容框
+  # 画布边长的 0.95 倍（S 自适应，推荐——固定 32 会把"只差一个符号"的图平均成
+  # 同一张）。级数从 32 起逐级翻倍到它为止。未写时 "0.95S"。
+  dedupe_align_grid: "0.95S"
+  # "典型成员"门槛：与组中心重合度达到它的成员里取内容框最大者当代表图。
+  dedupe_align_typical: 0.95
+  # 未入桶的图挂靠已确认组的门槛；0 = 关闭挂靠。未写时 0.60。
+  dedupe_attach_min: 0.60
+  # 小图标面积上限（像素，宽×高）与参与重合度归并的最大张数。
+  dedupe_icon_max_area: 200000
+  dedupe_bucket_max: 400
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
@@ -112,7 +144,7 @@ latex:
   # 它没写的字段继承 convert（轮数除外，内置 50）。
   sessions:
     drawing:
-      context_limit: 131072      # 上下文窗口（tokens，默认 128K，可改 64K/256K 等）
+      context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
       max_tokens: 131072
       compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩（先本地裁剪，仍超才花 AI 摘要）
@@ -120,15 +152,19 @@ latex:
       tool_rounds_grace: 20      # 达到 max_tool_rounds 后仍允许的工具轮次（之后才真正禁用工具）
       prune_tool_chars: 4096     # 本地裁剪：超长工具结果留"前半+后1/4"（0=默认4096，负=从不裁剪）
       keep_images: 3             # 本地裁剪时保留最近几张图（负=全部保留）
+    dedupe:
+      context_limit: 0          # 0=会话不设上限；模型上限写在 models.<name>.context_limit
+      max_tokens: 32768         # 单次请求输出上限；与模型 max_tokens 取较小正值
+      max_tool_rounds: 0        # 0=不限制
     style:
-      context_limit: 262144      # 样式分析建议更大窗口（256K）
+      context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
       max_tokens: 131072
     chapter:
-      context_limit: 131072
+      context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
     convert:
-      context_limit: 131072
+      context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
     checker:                     # 每章核对会话（只读两个文件 + 一个文件夹；工具只有 read_file/grep/submit）
       max_tool_rounds: 50       # 默认 50 轮（不继承 convert 的 128；其余字段仍继承 convert）
@@ -274,6 +310,9 @@ models:
     base_url: "https://your-api-proxy.com/v1"
     api_key: "sk-YOUR-API-KEY-HERE"
     model: "Qwen/Qwen3.6-27B"
+    context_limit: 0             # 模型上下文上限；0=不限制
+    max_images: 0                 # 单次请求图片上限；0=不限制
+    max_tokens: 0                 # 模型单次输出上限；0=不限制，与会话配置取较小值
     price:                       # 计费单价（元/百万 tokens）
       input: 0                   # 未命中前缀缓存的输入单价
       cached: 0                  # 命中前缀缓存的输入单价；不填/0 按 input 计（宁可高估）
@@ -343,6 +382,8 @@ models:
   # ---- 角色复用同一条目：四个角色都指向 gateway-a 的同一套配置 ----
   classifier:
     extends: "gateway-a"
+  dedupe:
+    extends: "text"              # 整组相似图工具核验，text 须支持看图
   style:
     extends: "gateway-a"
     image_tokens:               # 只有它需要更高的图片 token 上限

@@ -25,7 +25,7 @@ func TestClassifyPhaseResumeAllClassified(t *testing.T) {
 		prog[task.key()] = &imageProgress{Class: ClassVector, Status: "classified"}
 	}
 	out := captureStdout(t, func() { r.classifyPhase(tasks, nil, prog, dir, false) })
-	if !strings.Contains(out, "本次待分类 0 张") || strings.Contains(out, "[classify 0/") {
+	if !strings.Contains(out, "[classify 2/2] 100.00%") || !strings.Contains(out, ") done") || strings.Contains(out, "[classify 0/") {
 		t.Fatalf("unexpected classify resume progress: %q", out)
 	}
 }

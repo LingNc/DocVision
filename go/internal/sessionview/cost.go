@@ -121,7 +121,15 @@ func ApplyPrices(sessions []SessionInfo, prices map[string]config.PriceConfig) {
 // "convert" for "convert:chapter_002"). It is the grouping key of the cost
 // report: one row per stage is what "按阶段统计" means.
 func StageOf(s SessionInfo) string {
+	// A cached/legacy label may still say "会话:motif_dedupe_...".
+	// The transcript filename is authoritative for this newly added stage.
+	if strings.HasPrefix(LabelFor(s.ID), "dedupe:") {
+		return "dedupe"
+	}
 	label := s.Label
+	if strings.HasPrefix(label, "motif-dedupe:") {
+		return "dedupe"
+	}
 	if label == "" {
 		label = LabelFor(s.ID)
 	}

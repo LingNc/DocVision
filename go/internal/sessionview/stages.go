@@ -16,10 +16,11 @@ import (
 // StageOrder is the pipeline order used to sort stage groups; a stage that is
 // not listed sorts last (alphabetically), so an unknown session file can never
 // push itself to the top of a book's sidebar.
-var StageOrder = []string{"vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check", "fix", "final-review", "mermaid-fix", "img2text"}
+var StageOrder = []string{"dedupe", "vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check", "fix", "final-review", "mermaid-fix", "img2text"}
 
 // StageTitles maps a stage key to its short Chinese display name.
 var StageTitles = map[string]string{
+	"dedupe":       "整组核验",
 	"vector":       "矢量图",
 	"style":        "样式",
 	"chapters":     "章节划分",

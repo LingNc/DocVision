@@ -10,7 +10,7 @@ import (
 func writeThinkingCfg(t *testing.T, body string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(cfgVer(body)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return p
@@ -22,7 +22,7 @@ func writeThinkingCfg(t *testing.T, body string) string {
 // 纠正成 disabled，并在 stderr 告警（配置照旧能跑）。
 func TestThinkingTypeTypoIsRepairedAndWarns(t *testing.T) {
 	p := writeThinkingCfg(t, `
-config_version: 7
+config_version: {{cfgver}}
 models:
   drawing: { model: m, base_url: http://x/v1, thinking: { type: disable } }
   convert: { model: m, base_url: http://x/v1, thinking: { type: ENABLE } }
@@ -43,7 +43,7 @@ models:
 // 不要跑一整轮全是 fallback。
 func TestThinkingTypeUnknownIsFatal(t *testing.T) {
 	p := writeThinkingCfg(t, `
-config_version: 7
+config_version: {{cfgver}}
 models:
   drawing: { model: m, base_url: http://x/v1, thinking: { type: disableddd } }
 `)
@@ -61,7 +61,7 @@ models:
 // TestThinkingTypeValidValuesKeepWorking: adaptive / enabled / disabled 原样通过。
 func TestThinkingTypeValidValuesKeepWorking(t *testing.T) {
 	p := writeThinkingCfg(t, `
-config_version: 7
+config_version: {{cfgver}}
 models:
   text: { model: m, base_url: http://x/v1, thinking: { type: adaptive } }
   style: { model: m, base_url: http://x/v1, thinking: { enabled: true } }

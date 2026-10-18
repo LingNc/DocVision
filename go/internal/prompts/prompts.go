@@ -40,6 +40,7 @@ var files embed.FS
 const (
 	// LaTeX level-1 / level-2 sessions.
 	ClassifierSystem  = "latex_classifier.system"
+	DedupeSystem      = "latex_dedupe.system"
 	FigureSystem      = "latex_figure.system"
 	StyleSystem       = "latex_style.system"
 	ChaptersSystem    = "latex_chapters.system"
@@ -58,20 +59,21 @@ const (
 	StyleFixBlockSystem     = "latex_stylefix_block.system"
 
 	// 各会话的首次用户提示词（静态文案进模板，动态数据用占位符传入）。
+	DedupeUser             = "latex_dedupe.user"
 	StyleUser              = "latex_style.user"
 	StylePilotSelectSystem = "latex_style_pilot_select.system"
 	StylePilotSelectUser   = "latex_style_pilot_select.user"
 	StylePilotTrialSystem  = "latex_style_pilot_trial.system"
 	StylePilotTrialUser    = "latex_style_pilot_trial.user"
 	StylePilotReviseUser   = "latex_style_pilot_revise.user"
-	ChaptersUser    = "latex_chapters.user"
-	ConvertUser     = "latex_convert.user"
-	CheckerUser     = "latex_checker.user"
-	FigureCheckUser = "latex_figurecheck.user"
-	StyleFixUser    = "latex_stylefix.user"
-	FinalReviewUser = "latex_finalreview.user"
-	FigureUser      = "latex_figure.user"
-	Img2TextUser    = "img2text.user"
+	ChaptersUser           = "latex_chapters.user"
+	ConvertUser            = "latex_convert.user"
+	CheckerUser            = "latex_checker.user"
+	FigureCheckUser        = "latex_figurecheck.user"
+	StyleFixUser           = "latex_stylefix.user"
+	FinalReviewUser        = "latex_finalreview.user"
+	FigureUser             = "latex_figure.user"
+	Img2TextUser           = "img2text.user"
 
 	// img2text (image understanding) sessions.
 	Img2TextSystem = "img2text.system"
@@ -104,6 +106,10 @@ var retiredNames = []string{
 }
 
 var registry = []Template{
+	{
+		Name: DedupeSystem, File: "latex_dedupe.system.md",
+		MustMention: []string{"bash", "read_file", "grep", "view_image", "compare_images", "motif_groups", "submit"},
+	},
 	{
 		Name: ClassifierSystem, File: "latex_classifier.system.md",
 	},
@@ -167,6 +173,10 @@ var registry = []Template{
 	},
 	{
 		Name: TextOnlySystem, File: "img2text_textonly.system.md",
+	},
+	{
+		Name: DedupeUser, File: "latex_dedupe.user.md",
+		Vars: []string{"IMAGES"},
 	},
 	{
 		Name: StyleUser, File: "latex_style.user.md",

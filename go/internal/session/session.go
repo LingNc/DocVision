@@ -48,16 +48,17 @@ const ToolRoundsSafetyCap = 200
 // context window and automatic AI-driven compaction. A Session is NOT
 // safe for concurrent use; each worker builds its own.
 type Session struct {
-	client   *Client
-	modelCfg config.ModelConfig
-	tuning   config.SessionTuning
-	system   string
-	messages []ChatMessage
-	tools    []Tool
-	toolDefs []map[string]any
-	logger   *logger.Logger
-	tid      int
-	label    string
+	client    *Client
+	modelCfg  config.ModelConfig
+	tuning    config.SessionTuning
+	maxImages int
+	system    string
+	messages  []ChatMessage
+	tools     []Tool
+	toolDefs  []map[string]any
+	logger    *logger.Logger
+	tid       int
+	label     string
 
 	// stats for logging / analysis
 	APIRequests int
@@ -69,7 +70,10 @@ type Session struct {
 	lastCompactTokens int
 	// contextNoteStep is the last growth threshold already logged (0/50/80).
 	contextNoteStep int
-	Prunes          int
+	// budgetTrimmed records that the output budget was already shrunk to fit
+	// the window, so the explanation is logged once instead of every round.
+	budgetTrimmed bool
+	Prunes        int
 
 	// 本地估算与厂商实测的标定。textTokens 数不出厂商侧真实开销
 	// （reasoning_content/tool_calls/图片像素编码/每轮包装），实测
@@ -252,16 +256,18 @@ func NewSession(
 	for _, t := range tools {
 		defs = append(defs, t.Definition())
 	}
+	tuning = modelCfg.ApplyModelLimits(tuning)
 	s := &Session{
-		client:   client,
-		modelCfg: modelCfg,
-		tuning:   tuning,
-		system:   system,
-		tools:    tools,
-		toolDefs: defs,
-		logger:   log,
-		tid:      tid,
-		label:    label,
+		client:    client,
+		modelCfg:  modelCfg,
+		tuning:    tuning,
+		maxImages: modelCfg.MaxImages,
+		system:    system,
+		tools:     tools,
+		toolDefs:  defs,
+		logger:    log,
+		tid:       tid,
+		label:     label,
 	}
 	if system != "" {
 		s.messages = append(s.messages, ChatMessage{Role: "system", Content: system})
@@ -503,6 +509,12 @@ func (s *Session) run(opts RunOptions) (string, error) {
 
 	toolRounds := 0
 	emptyRetry := 0
+	// Some providers ignore tool_choice: none and keep returning tool calls
+	// after the round budget is spent. Those calls are executed once so the
+	// transcript stays wire-valid, but the model must not be able to spin
+	// forever: after this many post-budget rounds the session fails.
+	postBudgetRounds := 0
+	const postBudgetToolRounds = 2
 	// maxRounds <= 0 means unlimited (user opted out of any cap).
 	maxRounds := s.tuning.MaxToolRounds
 	// Soft round budget: from warnFrom the session starts reporting how
@@ -538,6 +550,11 @@ func (s *Session) run(opts RunOptions) (string, error) {
 	}
 
 	for {
+		// Provider image limits are model-level, not session tuning. Older
+		// image-bearing messages are replaced by text before every request.
+		if n := s.pruneModelImages(); n > 0 {
+			s.logf("[images] model max_images=%d; pruned %d image(s) before request", s.maxImages, n)
+		}
 		// Context guard INSIDE the loop, i.e. before EVERY model request.
 		//
 		// It used to be called once per Run(), and for these sessions one
@@ -556,7 +573,7 @@ func (s *Session) run(opts RunOptions) (string, error) {
 		req := &ChatRequest{
 			Model:       s.client.Model(),
 			Messages:    s.messages,
-			MaxTokens:   s.tuning.MaxTokens,
+			MaxTokens:   s.outputBudget(),
 			Temperature: s.tuning.Temperature,
 			User:        s.user,
 		}
@@ -706,6 +723,10 @@ func (s *Session) run(opts RunOptions) (string, error) {
 		// tool_choice: none): execute them anyway so the transcript stays
 		// valid, then force a text-only answer next round.
 		if len(choice.Message.ToolCalls) > 0 && len(s.tools) > 0 && !opts.ForceNoTools {
+			postBudgetRounds++
+			if postBudgetRounds > postBudgetToolRounds {
+				return "", fmt.Errorf("model kept calling tools after the tool-round budget was exhausted (%d extra rounds)", postBudgetToolRounds)
+			}
 			if s.logger.DebugEnabled() {
 				s.logger.Debug(s.tid, fmt.Sprintf("[session:%s] round %d: %d tool call(s) after the tool budget — executing them to keep the transcript valid",
 					s.label, toolRounds+1, len(choice.Message.ToolCalls)))
@@ -922,6 +943,47 @@ func (s *Session) observePromptSize(estBefore, actual int) {
 // prompt_tokens。③ 是"下一次请求至少这么大"的硬下限——本地估算漏算的
 // 开销（图片按像素编码、每轮包装）再多，厂商的数字不会骗人。裁剪或压缩
 // 之后历史真的变小了，这两个值都会被清掉/重算，所以不会把旧的大值钉住。
+// outputBudget 把本轮的 max_tokens 压到窗口装得下的程度。
+//
+// 厂商的窗口是 prompt + max_tokens 之和，而 max_tokens 是固定配置：真实
+// 事故（2026-10-17 某项目整组核验）窗口 262144、max_tokens=131072，会话
+// 聊了十几分钟把 prompt 推到 13 万以上，于是每一轮都被 400 打回——
+// "This model's maximum context length is 262144 tokens. However, you
+// requested 131072 output tokens and your prompt contains at least 131073
+// input tokens"。压缩阈值只管输入规模，管不到"输入 + 输出"这条硬上限，
+// 所以必须在这里让路：输入越大，输出预算越小。
+func (s *Session) outputBudget() int {
+	out := sessionOutputBudget(s.tuning.MaxTokens, s.tuning.ContextLimit, s.CurrentTokens())
+	if out < s.tuning.MaxTokens && !s.budgetTrimmed {
+		s.budgetTrimmed = true
+		s.logf("[context] 输出预算 %d → %d：窗口 %d、当前上下文 %d（厂商按 prompt+max_tokens 计窗口）",
+			s.tuning.MaxTokens, out, s.tuning.ContextLimit, s.CurrentTokens())
+	}
+	return out
+}
+
+// sessionOutputBudget is the pure rule behind outputBudget: leave the
+// configured budget alone when it already fits, otherwise give the input the
+// room it needs. maxOut <= 0 or limit <= 0 means "no cap configured".
+func sessionOutputBudget(maxOut, limit, prompt int) int {
+	if maxOut <= 0 || limit <= 0 {
+		return maxOut
+	}
+	// 留 2%（至少 1024）给估算误差：本地估算比厂商实测小是常态。
+	margin := limit / 50
+	if margin < 1024 {
+		margin = 1024
+	}
+	avail := limit - prompt - margin
+	if avail < 512 {
+		avail = 512
+	}
+	if avail >= maxOut {
+		return maxOut
+	}
+	return avail
+}
+
 func (s *Session) CurrentTokens() int {
 	est := s.EstimatedTokens()
 	best := est
@@ -1035,6 +1097,66 @@ func (s *Session) pruneHistory() int {
 	return changed
 }
 
+// pruneModelImages enforces the provider limit configured on the model. It is
+// intentionally separate from SessionTuning.KeepImages: the latter is a local
+// history-retention preference, while this is a hard per-request provider cap.
+func (s *Session) pruneModelImages() int {
+	if s.maxImages <= 0 {
+		return 0
+	}
+	total := 0
+	for _, m := range s.messages {
+		total += messageImageCount(m)
+	}
+	if total <= s.maxImages {
+		return 0
+	}
+	removed := 0
+	for i := range s.messages {
+		if total <= s.maxImages {
+			break
+		}
+		n := stripMessageImages(&s.messages[i])
+		if n > 0 {
+			total -= n
+			removed += n
+		}
+	}
+	return removed
+}
+
+func stripMessageImages(m *ChatMessage) int {
+	parts, ok := m.Content.([]map[string]interface{})
+	if !ok {
+		return 0
+	}
+	var b strings.Builder
+	imgs := 0
+	for _, part := range parts {
+		if t, ok := part["text"].(string); ok && t != "" {
+			b.WriteString(t)
+			b.WriteString("\n")
+			continue
+		}
+		if isImagePart(part) {
+			imgs++
+		}
+	}
+	if imgs == 0 {
+		return 0
+	}
+	m.Content = strings.TrimSpace(b.String() + fmt.Sprintf("\n[%d image(s) omitted by the model's max_images request limit; call view_image/view_pdf again if needed.]", imgs))
+	return imgs
+}
+
+func isImagePart(part map[string]interface{}) bool {
+	if _, ok := part["image_url"].(map[string]string); ok {
+		return true
+	}
+	_, ok := part["image_url"].(map[string]interface{})
+	return ok
+}
+
 // hasImage reports whether a message carries an attached image.
 func hasImage(m ChatMessage) bool {
 	parts, ok := m.Content.([]map[string]interface{})
@@ -1042,7 +1164,7 @@ func hasImage(m ChatMessage) bool {
 		return false
 	}
 	for _, part := range parts {
-		if _, ok := part["image_url"].(map[string]string); ok {
+		if isImagePart(part) {
 			return true
 		}
 	}
@@ -1055,7 +1177,7 @@ func hasImage(m ChatMessage) bool {
 func (s *Session) maybeCompact() error {
 	limit := s.tuning.ContextLimit
 	if limit <= 0 {
-		limit = 131072
+		return nil
 	}
 	at := s.tuning.CompactionAt
 	if at <= 0 || at > 1 {
@@ -1187,8 +1309,8 @@ func (s *Session) compact() (bool, error) {
 
 	s.snapshotRequest(instruction)
 	req := &ChatRequest{
-		Model:    s.client.Model(),
-		Messages: append(append([]ChatMessage{}, s.messages...), ChatMessage{Role: "user", Content: instruction}),
+		Model:     s.client.Model(),
+		Messages:  append(append([]ChatMessage{}, s.messages...), ChatMessage{Role: "user", Content: instruction}),
 		MaxTokens: 8192,
 		// 温度不硬编码（曾写死 0.1 想要"确定的摘要"）：只允许 temperature=1
 		// 的模型（kimi-k2.8 等）会直接 400、压缩失败拖死会话（真实缺陷，

@@ -1,0 +1,819 @@
+package latex
+
+import (
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"mineru-tools/internal/config"
+	"mineru-tools/internal/session"
+)
+
+func TestParseMotifGroupsRejectsInvalidAndProtectsAnnotations(t *testing.T) {
+	for _, bad := range []string{
+		`{"groups":[[1,2],[2,3]]}`, `{"groups":[[1,4]]}`,
+		`{"groups":[[1,1]]}`, `{"groups":[[]]}`, `{"groups":[[1,2.5]]}`,
+		`{"groups":"1,2"}`, `not json`,
+	} {
+		if _, err := parseMotifGroups(bad, 3); err == nil {
+			t.Errorf("accepted unsafe verdict %s", bad)
+		}
+	}
+	got, err := parseMotifGroups(`{"groups":[[1,2]]}`, 3)
+	if err != nil || len(got) != 1 || len(got[0]) != 2 {
+		t.Fatalf("groups=%v err=%v", got, err)
+	}
+	// The third (numbered) image remains independent when omitted by AI.
+	if got[0][0] != 1 || got[0][1] != 2 {
+		t.Fatalf("wrong group: %v", got)
+	}
+}
+
+func TestMotifEquivalenceOneArtifactAndRetainedRefs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "figures"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	tex := `\begin{tikzpicture}\node{z};\end{tikzpicture}`
+	a := &task{mdName: "book.md", imgPath: "images/book/a.jpg"}
+	b := &task{mdName: "book.md", imgPath: "images/book/b.jpg"}
+	c := &task{mdName: "book.md", imgPath: "images/book/numbered.jpg"}
+	pa := &imageProgress{Key: a.key(), MDName: a.mdName, ImgPath: a.imgPath, Class: ClassVector, Status: "classified"}
+	pb := &imageProgress{Key: b.key(), MDName: b.mdName, ImgPath: b.imgPath, Class: ClassVector, Status: "classified"}
+	pc := &imageProgress{Key: c.key(), MDName: c.mdName, ImgPath: c.imgPath, Class: ClassVector, Status: "classified"}
+	ca := &motifCandidate{task: a, progress: pa, sourceHash: "hash-a"}
+	cb := &motifCandidate{task: b, progress: pb, sourceHash: "hash-b"}
+	applyMotifEquivalence([]*motifCandidate{cb, ca}, filepath.Join(dir, "progress_items"))
+	if pb.EquivalentTo != a.key() || pc.EquivalentTo != "" || pb.DedupeLeaderHash != "hash-a" {
+		t.Fatalf("unsafe relationships: %+v %+v", pb, pc)
+	}
+	pa.Status = "done"
+	pa.TikzCode = tex
+	pa.FigPDF = "figures/leader.pdf"
+	if err := os.WriteFile(filepath.Join(dir, "figures", "leader.pdf"), []byte("PDF"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	prog := map[string]*imageProgress{a.key(): pa, b.key(): pb, c.key(): pc}
+	applyMotifArtifacts([]*task{a, b, c}, prog, filepath.Join(dir, "progress_items"), dir)
+	if pb.Status != "done" || pb.TikzCode != tex || pb.Absorbed || pc.Status != "classified" {
+		t.Fatalf("artifacts lost refs: %+v %+v", pb, pc)
+	}
+	materializeSharedMotifTeX([]*task{a, b, c}, prog, filepath.Join(dir, "progress_items"), dir)
+	if pa.SharedTex == "" || pa.SharedTex != pb.SharedTex || pc.SharedTex != "" {
+		t.Fatalf("shared paths: %+v %+v %+v", pa, pb, pc)
+	}
+	bytes, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(pa.SharedTex)))
+	if err != nil || strings.TrimSpace(string(bytes)) != tex {
+		t.Fatalf("shared body=%q err=%v", bytes, err)
+	}
+	if strings.Contains(string(bytes), `\documentclass`) {
+		t.Fatal("standalone wrapper is unsafe inside chapters")
+	}
+	loaded := map[string]*imageProgress{}
+	loadProgress(filepath.Join(dir, "progress_items"), loaded)
+	if loaded[b.key()].EquivalentTo != a.key() || loaded[b.key()].SharedTex != pa.SharedTex {
+		t.Fatalf("resume relation lost: %+v", loaded[b.key()])
+	}
+}
+
+// T147：组的类别按组内占比最大的 class 落在中心图上。多数是 raster 时这组
+// 不重画，跟随者仍然要被安排明白——共用代表图那一张原图与同一段解释文本，
+// 不能因为"代表图没有 TikZ 成品"就把跟随链接清掉、把图变成只有 LINK 的空块。
+func TestMotifRasterLeaderKeepsFollowers(t *testing.T) {
+	dir := t.TempDir()
+	progDir := filepath.Join(dir, "progress_items")
+	a := &task{mdName: "book.md", imgPath: "images/book/a.jpg"}
+	b := &task{mdName: "book.md", imgPath: "images/book/b.jpg"}
+	pa := &imageProgress{Key: a.key(), MDName: a.mdName, ImgPath: a.imgPath, Class: ClassRaster,
+		Status: "done", Label: "图1", Content: "同一张图", Kept: true}
+	pb := &imageProgress{Key: b.key(), MDName: b.mdName, ImgPath: b.imgPath, Class: ClassVector, Status: "classified"}
+	pb.EquivalentTo = a.key()
+	pb.DedupeChecked = true
+	prog := map[string]*imageProgress{a.key(): pa, b.key(): pb}
+	applyMotifArtifacts([]*task{a, b}, prog, progDir, dir)
+	if pb.Status != "done" || pb.Content != pa.Content || pb.Label != pa.Label || pb.TikzCode != "" {
+		t.Fatalf("raster follower not materialized: %+v", pb)
+	}
+	// 跟随者的类别跟组一致（组是 raster），process 不会再单独处理它。
+	if pb.Class != ClassRaster {
+		t.Fatalf("follower class = %q, want raster", pb.Class)
+	}
+	r := testRunner(t, true)
+	r.clearUnresolvedMotifLinks([]*task{a, b}, prog, progDir)
+	if pb.EquivalentTo != a.key() {
+		t.Fatalf("link to a finished raster leader must survive, got %q", pb.EquivalentTo)
+	}
+	// 代表图是矢量图却没产出成品时，链接仍然要清掉（否则这张图会消失）。
+	pa.Class = ClassVector
+	pa.Content = ""
+	pa.TikzCode = ""
+	r.clearUnresolvedMotifLinks([]*task{a, b}, prog, progDir)
+	if pb.EquivalentTo != "" {
+		t.Fatal("a vector leader without a drawing must not keep its followers")
+	}
+}
+
+func TestSharedMotifEmbedUsesOneInput(t *testing.T) {
+	r := testRunner(t, true)
+	root := t.TempDir()
+	shared := "figures/motif_cafe.tex"
+	if err := os.MkdirAll(filepath.Join(root, "figures"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, shared), []byte(`\begin{tikzpicture}\end{tikzpicture}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"images/book/a.png", "images/book/b.png"} {
+		p := &imageProgress{Class: ClassVector, TikzCode: `\begin{tikzpicture}\end{tikzpicture}`, SharedTex: shared, ImgPath: path}
+		block := r.embedBlock(p, "book.md", root)
+		if !strings.Contains(block, `\input{`+shared+"}") || strings.Contains(block, `\begin{tikzpicture}`) {
+			t.Fatalf("shared resource not reused for %s: %s", path, block)
+		}
+	}
+}
+
+func TestVerifyMotifCandidatesIndependentVisionSession(t *testing.T) {
+	var requests []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, _ := io.ReadAll(req.Body)
+		requests = append(requests, string(body))
+		switch len(requests) {
+		case 1:
+			jsonToolReply(w, "read_file", `{"path":"candidates:manifest.md"}`)
+		case 2, 3, 4:
+			// Evidence must come from individual originals: no contact sheets exist.
+			jsonToolReply(w, "view_image", fmt.Sprintf(`{"path":"originals/%06d.png"}`, len(requests)-1))
+		case 5:
+			jsonToolReply(w, "motif_groups", `{"op":"add","group":[1,2,3],"key":2}`)
+		default:
+			jsonToolReply(w, "submit", `{}`)
+		}
+	}))
+	defer srv.Close()
+	r := keepTestRunner(t)
+	stream := false
+	r.cfg.Latex.DedupeModel = ""
+	r.cfg.Models = map[string]config.ModelConfig{"text": {BaseURL: srv.URL, APIKey: "key", Model: "text-vision", Stream: &stream}}
+	r.clients = map[string]*session.Client{}
+	r.models = map[string]config.ModelConfig{}
+	root := t.TempDir()
+	a := tinyPNG(t, filepath.Join(root, "a.png"))
+	var members []*motifCandidate
+	for i := 0; i < 12; i++ {
+		members = append(members, &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("original-%d.png", i+1)}, path: a, sourceHash: fmt.Sprint(i)})
+	}
+	groups, err := r.verifyMotifCandidates(members, root, 0, 0)
+	if err != nil || len(groups) != 1 || len(groups[0].Members) != 3 || groups[0].Key != 2 {
+		t.Fatalf("verdict=%v err=%v", groups, err)
+	}
+	if len(requests) != 6 {
+		t.Fatalf("one tool session expected: %d requests", len(requests))
+	}
+	if strings.Contains(requests[0], `"type":"image_url"`) || !strings.Contains(requests[0], "12 images") {
+		t.Fatalf("initial message must contain the manifest, not attachments: %.900s", requests[0])
+	}
+	imageSeen := false
+	for _, r := range requests[1:] {
+		if strings.Contains(r, `"type":"image_url"`) {
+			imageSeen = true
+			break
+		}
+	}
+	if !imageSeen {
+		t.Fatal("view_image receipt must provide actual visual input")
+	}
+	if strings.Contains(requests[0], "sheets/") {
+		t.Fatal("contact sheets must not be advertised any more")
+	}
+	transcripts, err := filepath.Glob(filepath.Join(root, "sessions", "motif_dedupe_*.jsonl"))
+	if err != nil || len(transcripts) != 1 {
+		t.Fatalf("transcripts=%v err=%v", transcripts, err)
+	}
+	data, _ := os.ReadFile(transcripts[0])
+	for _, want := range []string{`"kind":"system"`, `"name":"view_image"`, `"name":"submit"`, `SUBMITTED.`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("transcript missing %s", want)
+		}
+	}
+}
+
+// 相似桶直接预填进 groups.json（key 留空由 AI 选），并且不再生成联系图：
+// 证据只能来自逐张原图，避免"看几张拼图就声称看过几百张"。
+func TestMotifPoolPrefillsBucketsWithoutContactSheets(t *testing.T) {
+	root := t.TempDir()
+	path := tinyPNG(t, filepath.Join(root, "original.png"))
+	img, err := decodeImage(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := make([]*motifCandidate, 336)
+	advisory := map[string]motifAdvisory{}
+	for i := range members {
+		members[i] = &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("image-%d.png", i+1)}, path: path, image: img, progress: &imageProgress{Class: ClassVector}}
+		if i < 12 {
+			advisory[members[i].task.key()] = motifAdvisory{Group: 1, Exact: true}
+		}
+	}
+	view := filepath.Join(root, "view")
+	if err := prepareMotifScopeView(view, &motifScope{Members: members, Advisory: advisory, Prefill: motifPrefillBuckets(members, advisory)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(view, "sheets")); !os.IsNotExist(err) {
+		t.Fatalf("contact sheets must not be generated: %v", err)
+	}
+	var stored struct {
+		Groups []MotifGroup `json:"groups"`
+	}
+	raw, err := os.ReadFile(filepath.Join(view, "groups.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Groups) != 1 || len(stored.Groups[0].Members) != 12 || stored.Groups[0].Key != 0 {
+		t.Fatalf("buckets must be pre-filled with an unset key: %s", raw)
+	}
+	seen := map[int]bool{}
+	vt := &motifViewTool{base: &ViewImageTool{Root: view}, seen: seen}
+	if res, err := vt.Execute(`{"path":"originals/000001.png"}`); err != nil || res.ImageBase64 == "" {
+		t.Fatalf("view original: %v", err)
+	}
+	if len(seen) != 1 || !seen[1] {
+		t.Fatalf("viewing one original must mark exactly that id: %v", seen)
+	}
+}
+
+func TestMotifSubmitRequiresVisualEvidence(t *testing.T) {
+	root := t.TempDir()
+	groups := NewMotifGroupsTool(filepath.Join(root, "groups.json"), 3)
+	tool := &motifSubmitTool{groups: groups, seen: map[int]bool{1: true}}
+	res, err := groups.Execute(`{"op":"add","group":[1,2],"key":1}`)
+	if err != nil || strings.Contains(res.Text, "REJECTED") {
+		t.Fatalf("stage group failed: %+v %v", res, err)
+	}
+	res, err = tool.Execute(`{}`)
+	if err != nil || res.Terminal || tool.done.Submitted || !strings.Contains(res.Text, "REJECTED") {
+		t.Fatalf("unseen merge accepted: %+v %v", res, err)
+	}
+	tool.seen[2] = true
+	res, err = tool.Execute(`{}`)
+	if err != nil || !res.Terminal || !tool.done.Submitted {
+		t.Fatalf("valid staged group rejected: %+v %v", res, err)
+	}
+}
+
+func TestMotifGroupsIncrementalOperations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "groups.json")
+	tool := NewMotifGroupsTool(path, 6)
+	for _, raw := range []string{`{"op":"add","group":[1,2],"key":1}`, `{"op":"add","group":[3,4],"key":4}`, `{"op":"update","n":2,"group":[3,5]}`, `{"op":"delete","n":1}`} {
+		res, err := tool.Execute(raw)
+		if err != nil || strings.Contains(res.Text, "REJECTED") {
+			t.Fatalf("op %s: %+v %v", raw, res, err)
+		}
+	}
+	got, err := tool.Groups()
+	// key 4 was replaced by a member edit, so the representative is unset again
+	if err != nil || len(got) != 1 || len(got[0].Members) != 2 || got[0].Members[0] != 3 || got[0].Members[1] != 5 || got[0].Key != 0 {
+		t.Fatalf("groups=%v err=%v", got, err)
+	}
+	res, err := tool.Execute(`{"op":"add","groups":[[5,6],[2,2]]}`)
+	if err != nil || !strings.Contains(res.Text, "REJECTED") {
+		t.Fatalf("invalid batch accepted: %+v %v", res, err)
+	}
+	got, _ = tool.Groups()
+	if len(got) != 1 || got[0].Members[0] != 3 || got[0].Members[1] != 5 {
+		t.Fatalf("invalid batch changed state: %v", got)
+	}
+}
+
+// 组内增删与「只换 key」：核验是边看边改的，能只动成员/代表就不该逼模型把整组
+// ID 重打一遍（2031 会话为了给 336 张的组指定 key，只好把 336 个 ID 重发一次）。
+func TestMotifGroupsMemberLevelEdits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "groups.json")
+	tool := NewMotifGroupsTool(path, 8)
+	run := func(raw, want, notWant string) {
+		t.Helper()
+		res, err := tool.Execute(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		if want != "" && !strings.Contains(res.Text, want) {
+			t.Fatalf("%s: want %q in %q", raw, want, res.Text)
+		}
+		if notWant != "" && strings.Contains(res.Text, notWant) {
+			t.Fatalf("%s: unexpected %q in %q", raw, notWant, res.Text)
+		}
+	}
+	state := func() []MotifGroup {
+		t.Helper()
+		got, err := tool.Groups()
+		if err != nil {
+			t.Fatalf("groups: %v", err)
+		}
+		return got
+	}
+
+	run(`{"op":"add","group":[1,2,3],"key":2}`, "key=2", "")
+	run(`{"op":"append","n":1,"ids":[4,5]}`, "现 5 张", "")
+	if got := state(); len(got) != 1 || len(got[0].Members) != 5 || got[0].Members[4] != 5 || got[0].Key != 2 {
+		t.Fatalf("append: %+v", got)
+	}
+	// 已经在组里的 ID 不算错，也不重复追加
+	run(`{"op":"append","n":1,"ids":[3]}`, "没有变化", "")
+	if got := state(); len(got[0].Members) != 5 {
+		t.Fatalf("duplicate append changed state: %+v", got)
+	}
+	// 一个 ID 只能属于一个组
+	run(`{"op":"add","group":[6,7],"key":6}`, "key=6", "")
+	run(`{"op":"append","n":2,"ids":[5]}`, "已在第 1 组", "")
+	// 组内移除不影响别的组与代表图
+	run(`{"op":"remove","n":1,"ids":[4]}`, "剩 4 张", "")
+	if got := state(); len(got[0].Members) != 4 || got[0].Key != 2 || len(got[1].Members) != 2 {
+		t.Fatalf("remove: %+v", got)
+	}
+	// 只换代表图：成员一个都不用重打
+	run(`{"op":"update","n":1,"key":5}`, "key=5", "")
+	if got := state(); got[0].Key != 5 || len(got[0].Members) != 4 {
+		t.Fatalf("key-only update: %+v", got)
+	}
+	// 移走代表图：key 回落到未指定，回执点名要重选
+	run(`{"op":"remove","n":1,"ids":[5]}`, "重新指定", "")
+	if got := state(); got[0].Key != 0 || len(got[0].Members) != 3 {
+		t.Fatalf("remove key: %+v", got)
+	}
+	// 整批原子：有一个 ID 不在该组就整批不动
+	before := state()
+	run(`{"op":"remove","n":1,"ids":[1,7]}`, "不在第 1 组", "")
+	if after := state(); len(after[0].Members) != len(before[0].Members) {
+		t.Fatalf("rejected remove changed state: %+v", after)
+	}
+	// 移空到只剩 1 张：该组解散（单张本来就不需要分组）
+	run(`{"op":"remove","n":1,"ids":[1,3]}`, "解散该组", "")
+	if got := state(); len(got) != 1 || got[0].Members[0] != 6 {
+		t.Fatalf("dissolve: %+v", got)
+	}
+}
+
+// 相似度只作参考：advisory 文件写出初始组与像素一致标记，manifest 每行带
+// similarity_hint；未命中相似度的图片同样出现在全量清单里。
+func TestMotifAdvisoryIsReferenceOnly(t *testing.T) {
+	root := t.TempDir()
+	a := tinyPNG(t, filepath.Join(root, "a.png"))
+	img, err := decodeImage(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := tinyPNG(t, filepath.Join(root, "b.png"))
+	imgB, err := decodeImage(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := []*motifCandidate{
+		{task: &task{mdName: "book.md", imgPath: "a.png"}, path: a, image: img, sourceHash: "ha", progress: &imageProgress{Class: ClassVector}},
+		{task: &task{mdName: "book.md", imgPath: "b.png"}, path: b, image: imgB, sourceHash: "hb", progress: &imageProgress{Class: ClassVector}},
+		{task: &task{mdName: "book.md", imgPath: "c.png"}, path: a, image: img, sourceHash: "hc", progress: &imageProgress{Class: ClassVector}},
+	}
+	advisory := map[string]motifAdvisory{
+		members[0].task.key(): {Group: 1, Exact: true},
+		members[1].task.key(): {Group: 1},
+	}
+	if err := prepareMotifScopeView(filepath.Join(root, "view"), &motifScope{Members: members, Advisory: advisory, Prefill: motifPrefillBuckets(members, advisory)}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "view", "similarity_advisory.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"initial_group": 1`) || !strings.Contains(string(raw), `"session_images": 3`) {
+		t.Fatalf("advisory JSON missing group/pool data: %s", raw)
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, "view", "manifest.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(manifest)
+	if !strings.Contains(text, "### bucket 1 (2 images)") {
+		t.Fatalf("manifest missing the initial bucket: %s", text)
+	}
+	// 第三张没有相似提示，但必须仍在全量清单里（不被排除）。
+	if !strings.Contains(text, "## All images in this session") || !strings.Contains(text, "3. originals/000003.png | ") || !strings.Contains(text, "similarity_hint=none") {
+		t.Fatalf("unmatched image must stay in the pool: %s", text)
+	}
+}
+
+// 按相似组分配会话：大桶单独一个会话，小桶与未命中图按 dedupe_batch_images 合并；
+// 0 表示退回"整池一个会话"。
+func TestMotifBucketScopesFollowBucketSize(t *testing.T) {
+	r := keepTestRunner(t)
+	mk := func(n int) []*motifCandidate {
+		out := make([]*motifCandidate, n)
+		for i := range out {
+			out[i] = &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("i%d.png", i)}}
+		}
+		return out
+	}
+	pool := mk(120)
+	advisory := map[string]motifAdvisory{}
+	for i, c := range pool {
+		switch {
+		case i < 60: // 超过 50：独占一个会话
+			advisory[c.task.key()] = motifAdvisory{Group: 1}
+		case i < 70: // 小桶，可与其它小桶合并
+			advisory[c.task.key()] = motifAdvisory{Group: 2}
+		case i < 80:
+			advisory[c.task.key()] = motifAdvisory{Group: 3}
+		}
+		// 其余 40 张没有任何相似桶 -> 未分配
+	}
+	r.cfg.Latex.DedupeGroupSessionOver = 50
+	r.cfg.Latex.DedupeBatchImages = 150
+	scopes, unassigned := r.motifBucketScopes(pool, advisory, nil)
+	if len(unassigned) != 40 {
+		t.Fatalf("unassigned=%d, want 40", len(unassigned))
+	}
+	if len(scopes) != 2 {
+		t.Fatalf("scopes=%d, want 2 (large bucket + packed small buckets)", len(scopes))
+	}
+	if len(scopes[0].Members) != 60 || len(scopes[0].Prefill) != 1 {
+		t.Fatalf("large bucket must own a session: %d members, %d prefill", len(scopes[0].Members), len(scopes[0].Prefill))
+	}
+	if len(scopes[1].Members) != 20 || len(scopes[1].Prefill) != 2 {
+		t.Fatalf("small buckets must be packed together: %d members, %d prefill", len(scopes[1].Members), len(scopes[1].Prefill))
+	}
+	// 单会话容量上限：小桶加起来超过 dedupe_batch_images 时再拆一个会话。
+	r.cfg.Latex.DedupeBatchImages = 10
+	scopes, _ = r.motifBucketScopes(pool, advisory, nil)
+	for _, sc := range scopes {
+		if len(sc.Members) > 60 {
+			t.Fatalf("bucket session exceeded its bucket: %d", len(sc.Members))
+		}
+	}
+	total := 0
+	for _, sc := range scopes {
+		total += len(sc.Members)
+	}
+	if total != 80 {
+		t.Fatalf("bucket members lost: %d/80", total)
+	}
+	// 0 = 旧行为：整池一个会话，没有"未分配"概念。
+	r.cfg.Latex.DedupeGroupSessionOver = 0
+	scopes, unassigned = r.motifBucketScopes(pool, advisory, nil)
+	if len(scopes) != 1 || len(scopes[0].Members) != 120 || len(unassigned) != 0 {
+		t.Fatalf("group_session_over=0 must keep one session, got %d scopes / %d unassigned", len(scopes), len(unassigned))
+	}
+}
+
+// 整理会话只拿"可能属于已确认组"的未分配图 + 关键图；正常书里大多数图彼此
+// 无关，所以通常一个候选都没有，也就不开这个会话。
+func TestMotifConsolidationOnlyTakesLocalCandidates(t *testing.T) {
+	root := t.TempDir()
+	path := tinyPNG(t, filepath.Join(root, "a.png"))
+	img, err := decodeImage(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := &motifCandidate{task: &task{mdName: "book.md", imgPath: "key.png"}, path: path, image: img}
+	like := &motifCandidate{task: &task{mdName: "book.md", imgPath: "like.png"}, path: path, image: img}
+	other := &motifCandidate{task: &task{mdName: "book.md", imgPath: "other.png"}, path: path}
+	applied := []motifAppliedGroup{{Key: key, Members: []*motifCandidate{key, like}}}
+	cands, keys := motifConsolidationCandidates([]*motifCandidate{like, other}, applied)
+	if len(keys) != 1 || len(cands) != 1 || cands[0] != like {
+		t.Fatalf("candidates=%v keys=%v", cands, keys)
+	}
+	// 没有已确认组 / 没有未分配图 -> 不开会话。
+	if c, k := motifConsolidationCandidates(nil, applied); c != nil || k != nil {
+		t.Fatal("no unassigned images must not open a consolidation session")
+	}
+	if c, k := motifConsolidationCandidates([]*motifCandidate{other}, nil); c != nil || k != nil {
+		t.Fatal("no confirmed groups must not open a consolidation session")
+	}
+}
+
+// 代码侧的保守闸门：与代表图相似度不足的成员即使被 AI 并进组里，也保持独立
+// （宁可漏掉重复，也不能合并后丢信息）。
+func TestMotifMergeGateRejectsDissimilarMembers(t *testing.T) {
+	root := t.TempDir()
+	same := tinyPNG(t, filepath.Join(root, "same.png"))
+	img, err := decodeImage(same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 一张完全不同结构的图：纯色大块横条，与 tinyPNG 的点阵毫无相似度。
+	otherPath := filepath.Join(root, "other.png")
+	other := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for y := 0; y < 64; y++ {
+		for x := 0; x < 64; x++ {
+			other.Set(x, y, color.RGBA{R: 255, A: 255})
+		}
+	}
+	f, err := os.Create(otherPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, other); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	otherImg, err := decodeImage(otherPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if MotifSimilarTo(img, otherImg) {
+		t.Fatal("dissimilar images must not pass the merge gate")
+	}
+	if !MotifSimilarTo(img, img) {
+		t.Fatal("identical images must pass the merge gate")
+	}
+}
+
+// 用户规则：组类别按组内占比最大的 classify 结果判定。同一张图会被 classify
+// 判成 vector/raster/text 三种（真实事故：336 张同图 = vector 155 / raster
+// 159 / text 22），不能因为混类就整组作废。
+// TestMotifFoldGroupsFoldsSameMotif 钉住 T149：同一片里的图被 ≥0.75 的自动
+// 定组切成两块、剩下的再被会话并成一块，最后必须按关键图折成一组——否则同一
+// 枚图会有好几个中心，各画一遍（19 个组的关键图两两都 ≥0.60 就是这么来的）。
+func TestMotifFoldGroupsFoldsSameMotif(t *testing.T) {
+	r := testRunner(t, true)
+	r.cfg.Latex = config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75}
+	progDir := filepath.Join(t.TempDir(), "progress_items")
+	mk := func(name string, w, h, cx, cy, rad int) *motifCandidate {
+		img := whiteCanvas(w, h)
+		drawDiamond(img, cx, cy, rad)
+		task := &task{mdName: "b.md", imgPath: "images/b/" + name}
+		return &motifCandidate{task: task, image: img, sourceHash: "hash-" + name,
+			progress: &imageProgress{Key: task.key(), MDName: task.mdName, ImgPath: task.imgPath, Class: ClassVector}}
+	}
+	a, b := mk("a.jpg", 70, 96, 35, 30, 18), mk("b.jpg", 72, 98, 36, 30, 19)
+	c, d := mk("c.jpg", 71, 97, 35, 30, 18), mk("d.jpg", 73, 99, 36, 31, 19)
+	applied := []motifAppliedGroup{
+		{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"},
+		{Key: c, Members: []*motifCandidate{c, d}, Class: ClassVector, Source: "session"},
+	}
+	out, folded, added := r.motifFoldGroups(applied, map[*motifCandidate]int{a: 1, b: 1, c: 1, d: 1}, progDir)
+	if folded != 1 || len(out) != 1 {
+		t.Fatalf("两块同一枚图应当折成一组：folded=%d out=%d", folded, len(out))
+	}
+	if out[0].Source != "folded" || len(out[0].Members) != 4 {
+		t.Fatalf("折出来的组来源/成员不对：%s %d", out[0].Source, len(out[0].Members))
+	}
+	if added < 2 {
+		t.Fatalf("应当把另一块并进来（added=%d）", added)
+	}
+	key := out[0].Key
+	if !motifContains(out[0].Members, key) {
+		t.Fatal("中心图必须在成员里——process 只重画中心图，不在成员里等于丢图")
+	}
+	for _, m := range out[0].Members {
+		if m == key {
+			if m.progress.EquivalentTo != "" {
+				t.Fatalf("中心图不该跟随自己: %q", m.progress.EquivalentTo)
+			}
+			continue
+		}
+		if m.progress.EquivalentTo != key.task.key() {
+			t.Fatalf("成员应当跟随折出来的中心图：%q != %q", m.progress.EquivalentTo, key.task.key())
+		}
+	}
+}
+
+// TestMotifFoldGroupsKeepsDistinctApart 保证收口只折"关键图确实达标"的组：
+// 明显不同的两块不许折在一起。
+func TestMotifFoldGroupsKeepsDistinctApart(t *testing.T) {
+	r := testRunner(t, true)
+	r.cfg.Latex = config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75}
+	progDir := filepath.Join(t.TempDir(), "progress_items")
+	diamond := func(name string) *motifCandidate {
+		img := whiteCanvas(70, 96)
+		drawDiamond(img, 35, 30, 18)
+		task := &task{mdName: "b.md", imgPath: "images/b/" + name}
+		return &motifCandidate{task: task, image: img, sourceHash: "hash-" + name,
+			progress: &imageProgress{Key: task.key(), MDName: task.mdName, ImgPath: task.imgPath, Class: ClassVector}}
+	}
+	dot := func(name string) *motifCandidate {
+		img := whiteCanvas(70, 96)
+		drawDiamond(img, 35, 46, 3)
+		task := &task{mdName: "b.md", imgPath: "images/b/" + name}
+		return &motifCandidate{task: task, image: img, sourceHash: "hash-" + name,
+			progress: &imageProgress{Key: task.key(), MDName: task.mdName, ImgPath: task.imgPath, Class: ClassVector}}
+	}
+	a, b := diamond("a.jpg"), diamond("b.jpg")
+	c, d := dot("c.jpg"), dot("d.jpg")
+	applied := []motifAppliedGroup{
+		{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"},
+		{Key: c, Members: []*motifCandidate{c, d}, Class: ClassVector, Source: "session"},
+	}
+	out, folded, _ := r.motifFoldGroups(applied, map[*motifCandidate]int{a: 1, b: 1, c: 1, d: 1}, progDir)
+	if folded != 0 || len(out) != 2 {
+		t.Fatalf("不同的两块不该折在一起：folded=%d out=%d", folded, len(out))
+	}
+}
+
+// TestMotifFoldGroupsStaysInsideBucket 钉住收口的边界：只在同一个相似桶里折。
+// 桶是 0.60 连通的候选集合，桶外两块哪怕关键图碰巧达标也不算"同一张图"，
+// 否则两个只是有点像的图案会被并成一张、少画一张真图。
+func TestMotifFoldGroupsStaysInsideBucket(t *testing.T) {
+	r := testRunner(t, true)
+	r.cfg.Latex = config.LatexConfig{DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75}
+	progDir := filepath.Join(t.TempDir(), "progress_items")
+	mk := func(name string, rad int) *motifCandidate {
+		img := whiteCanvas(70, 96)
+		drawDiamond(img, 35, 30, rad)
+		task := &task{mdName: "b.md", imgPath: "images/b/" + name}
+		return &motifCandidate{task: task, image: img, sourceHash: "hash-" + name,
+			progress: &imageProgress{Key: task.key(), MDName: task.mdName, ImgPath: task.imgPath, Class: ClassVector}}
+	}
+	a, b, c, d := mk("a.jpg", 18), mk("b.jpg", 19), mk("c.jpg", 18), mk("d.jpg", 19)
+	applied := []motifAppliedGroup{
+		{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"},
+		{Key: c, Members: []*motifCandidate{c, d}, Class: ClassVector, Source: "session"},
+	}
+	out, folded, _ := r.motifFoldGroups(applied, map[*motifCandidate]int{a: 1, b: 1, c: 2, d: 2}, progDir)
+	if folded != 0 || len(out) != 2 {
+		t.Fatalf("跨桶不该折：folded=%d out=%d", folded, len(out))
+	}
+}
+
+func TestMotifGroupClassUsesMajority(t *testing.T) {
+	mk := func(classes ...string) []*motifCandidate {
+		out := make([]*motifCandidate, 0, len(classes))
+		for _, c := range classes {
+			out = append(out, &motifCandidate{progress: &imageProgress{Class: c}})
+		}
+		return out
+	}
+	if got := motifGroupClass(mk("raster", "vector", "vector", "text")); got != ClassVector {
+		t.Fatalf("majority should be vector, got %q", got)
+	}
+	if got := motifGroupClass(mk("raster", "raster", "vector")); got != ClassRaster {
+		t.Fatalf("majority should be raster, got %q", got)
+	}
+	// 平票时优先 vector。
+	if got := motifGroupClass(mk("raster", "vector")); got != ClassVector {
+		t.Fatalf("tie should prefer vector, got %q", got)
+	}
+	// class 不参与合并判定（T147）：只有"组的类别落在中心图上"这一处用它，
+	// 所以这里只需要非矢量成员能被数出来（用于日志），不存在"按 class 挑选
+	// 合并范围"的辅助函数了。
+	if n := nonVectorCount(mk("raster", "vector", "text", "vector")); n != 2 {
+		t.Fatalf("nonVector = %d, want 2", n)
+	}
+}
+
+// T147：组的类别落在中心图上——多数是 raster 就按原图保留，多数是 vector
+// 就重画；已经画出成品的不动（续跑不能把既有的重画改成"保留原图"）。
+func TestMotifApplyGroupClassSetsCenter(t *testing.T) {
+	dir := t.TempDir()
+	prog := &imageProgress{Key: "a", Class: ClassVector}
+	if !motifApplyGroupClass(&motifCandidate{progress: prog}, ClassRaster, dir) {
+		t.Fatal("class should follow the majority")
+	}
+	if prog.Class != ClassRaster {
+		t.Fatalf("center class = %q, want raster", prog.Class)
+	}
+	// 同一个类别不重复写盘。
+	if motifApplyGroupClass(&motifCandidate{progress: prog}, ClassRaster, dir) {
+		t.Fatal("same class must be a no-op")
+	}
+	// 已经画出成品的不降级。
+	done := &imageProgress{Key: "b", Class: ClassVector, Status: "done", TikzCode: "\\draw (0,0) circle (1);"}
+	if motifApplyGroupClass(&motifCandidate{progress: done}, ClassRaster, dir) {
+		t.Fatal("an existing drawing must not be downgraded to raster")
+	}
+	if done.Class != ClassVector {
+		t.Fatalf("finished center class = %q, want vector", done.Class)
+	}
+}
+
+// T120：档位1 的 outDir 就是 <proj>/source，progress 必须写在它下面。
+// 曾经用 filepath.Dir(outDir) 算成 <proj>，dedupe 的核验标记与等价关系
+// 全落进 process 不读的目录（真实事故：352 条标记孤零零躺在项目根）。
+func TestMotifProgressDirIsUnderSource(t *testing.T) {
+	outDir := filepath.Join("/tmp", "book", "source")
+	if got, want := motifProgressDir(outDir), filepath.Join(outDir, "progress_items"); got != want {
+		t.Fatalf("motifProgressDir = %q, want %q", got, want)
+	}
+}
+
+// 逐字节一致 = 同一张图片：同一份文件被引用 N 遍时，只看一份就够了。
+// 这里钉住"收缩"的行为——代表图按 task key 顺序取第一张，其余进副本表。
+func TestMotifContentLeadersCollapseIdenticalBytes(t *testing.T) {
+	mk := func(name, hash string) *motifCandidate {
+		return &motifCandidate{task: &task{mdName: "book.md", imgPath: name}, sourceHash: hash, progress: &imageProgress{}}
+	}
+	pool := []*motifCandidate{
+		mk("a.png", "same-1"),
+		mk("b.png", "same-2"),
+		mk("c.png", "same-1"),
+		mk("d.png", "same-1"),
+		mk("e.png", "same-2"),
+	}
+	leaders, copies := motifContentLeaders(pool)
+	if len(leaders) != 2 || leaders[0] != pool[0] || leaders[1] != pool[1] {
+		t.Fatalf("leaders=%v, want first occurrence of each content", leaders)
+	}
+	if len(copies[pool[0]]) != 2 || len(copies[pool[1]]) != 1 {
+		t.Fatalf("copies: %d / %d, want 2 / 1", len(copies[pool[0]]), len(copies[pool[1]]))
+	}
+	// 内容全相同的极端情形也不能丢：只剩一个代表，其余全是副本。
+	leaders, copies = motifContentLeaders([]*motifCandidate{mk("a.png", "h"), mk("b.png", "h"), mk("c.png", "h")})
+	if len(leaders) != 1 || len(copies[leaders[0]]) != 2 {
+		t.Fatalf("one content must keep one representative: %d leaders, %d copies", len(leaders), len(copies[leaders[0]]))
+	}
+}
+
+// 副本不参与核验，结论在最后补：代表图被合并就跟着同一个 leader，代表图独立
+// 就跟着代表图本身；两者都属于"同一张图片"，不存在误判风险。
+func TestMotifAdoptCopiesFollowsRepresentativeVerdict(t *testing.T) {
+	progDir := t.TempDir()
+	mk := func(name, hash, class string) *motifCandidate {
+		tk := &task{mdName: "book.md", imgPath: name}
+		return &motifCandidate{task: tk, sourceHash: hash, progress: &imageProgress{Key: tk.key(), MDName: tk.mdName, ImgPath: tk.imgPath, Class: class}}
+	}
+	merged := mk("merged.png", "h-merged", ClassVector)
+	key := mk("key.png", "h-key", ClassVector)
+	alone := mk("alone.png", "h-alone", ClassRaster)
+	// 代表图 merged 已被并进 key 的组里（applyMotifEquivalenceWithKey 会写这条关系）。
+	merged.progress.EquivalentTo = key.task.key()
+	byKey := map[string]*motifCandidate{merged.task.key(): merged, key.task.key(): key, alone.task.key(): alone}
+	copyOfMerged := mk("merged-copy.png", "h-merged", ClassVector)
+	copyOfAlone := mk("alone-copy.png", "h-alone", ClassRaster)
+	copies := map[*motifCandidate][]*motifCandidate{merged: {copyOfMerged}, alone: {copyOfAlone}}
+	if n := motifAdoptCopies([]*motifCandidate{merged, key, alone}, copies, byKey, progDir); n != 2 {
+		t.Fatalf("adopted=%d, want 2", n)
+	}
+	if copyOfMerged.progress.EquivalentTo != key.task.key() || copyOfMerged.progress.DedupeLeaderHash != "h-key" {
+		t.Fatalf("copy must follow the representative's leader: %+v", copyOfMerged.progress)
+	}
+	if copyOfAlone.progress.EquivalentTo != alone.task.key() || copyOfAlone.progress.DedupeLeaderHash != "h-alone" {
+		t.Fatalf("copy of an independent image must follow it: %+v", copyOfAlone.progress)
+	}
+	for _, c := range []*motifCandidate{copyOfMerged, copyOfAlone} {
+		if !c.progress.DedupeChecked || c.progress.DedupeSourceHash != c.sourceHash {
+			t.Fatalf("copy must be recorded as resolved: %+v", c.progress)
+		}
+	}
+	// 落盘才算数：续跑与 process 都从 progress_items 读等价关系。
+	loaded := map[string]*imageProgress{}
+	loadProgress(progDir, loaded)
+	if got := loaded[copyOfMerged.task.key()]; got == nil || got.EquivalentTo != key.task.key() {
+		t.Fatalf("copy verdict not persisted: %+v", got)
+	}
+}
+
+// 大桶的会话边界按"自动定组之前"的桶大小判（T142）：100 张的桶里 76 张已经
+// 被本地定组、会话池只剩 24 张，它仍然是自己的会话——按剩余数量看会掉到 50 以
+// 下，被并进小桶的批次，于是用户看到"最大的相似度组和别的图混在一个会话里"，
+// 本该单独出现的第二个会话也没了。
+func TestMotifBucketScopeUsesOriginalSize(t *testing.T) {
+	r := keepTestRunner(t)
+	mk := func(n int) []*motifCandidate {
+		out := make([]*motifCandidate, n)
+		for i := range out {
+			out[i] = &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("i%d.png", i)}}
+		}
+		return out
+	}
+	pool := mk(26)
+	advisory := map[string]motifAdvisory{}
+	for i, c := range pool {
+		g := 1
+		if i >= 24 {
+			g = 2
+		}
+		advisory[c.task.key()] = motifAdvisory{Group: g}
+	}
+	r.cfg.Latex.DedupeGroupSessionOver = 50
+	r.cfg.Latex.DedupeBatchImages = 150
+	full := map[int]int{1: 100, 2: 2}
+	scopes, unassigned := r.motifBucketScopes(pool, advisory, full)
+	if len(unassigned) != 0 {
+		t.Fatalf("unassigned=%d, want 0", len(unassigned))
+	}
+	if len(scopes) != 2 {
+		t.Fatalf("大桶必须独占会话、小桶单独一批：scopes=%d", len(scopes))
+	}
+	if len(scopes[0].Members) != 24 || len(scopes[1].Members) != 2 {
+		t.Fatalf("会话成员不对：大桶剩 %d（want 24）、小桶 %d（want 2）",
+			len(scopes[0].Members), len(scopes[1].Members))
+	}
+	// 整个桶都被本地定组（会话池里一张不剩）时不开空会话。
+	scopes, _ = r.motifBucketScopes(pool[24:], advisory, full)
+	if len(scopes) != 1 || len(scopes[0].Members) != 2 {
+		t.Fatalf("空桶不该开会话：scopes=%d", len(scopes))
+	}
+	// 拿不到原始桶大小时退回"按池内剩余数量"判（旧行为，不改变其它调用方）。
+	scopes, _ = r.motifBucketScopes(pool, advisory, nil)
+	if len(scopes) != 1 || len(scopes[0].Members) != 26 {
+		t.Fatalf("无原始大小时应按剩余数量合并：scopes=%d", len(scopes))
+	}
+}

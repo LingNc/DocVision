@@ -628,6 +628,7 @@ func LabelFor(rel string) string {
 		return "style:pilot_revise"
 	}
 	for _, p := range []struct{ prefix, label string }{
+		{"motif_dedupe_", "dedupe"},
 		{"convert_", "convert"},
 		{"checker_", "checker"},
 		{"style_fix_", "style-fix"},
@@ -673,6 +674,8 @@ func TitleFor(rel string) string {
 		return "样式 · " + subject
 	case "convert":
 		return "转换 · " + subject
+	case "dedupe":
+		return "整组核验"
 	case "vector":
 		return "矢量图 · " + subject
 	case "checker":
@@ -698,9 +701,9 @@ func TitleFor(rel string) string {
 
 // StyleFixPhase 描述样式修复循环里一个会话在其环节中的位置（T78）。
 type StyleFixPhase struct {
-	Phase  int    // 1=问题整合 2=样式修复 3=评估分派 4=分块修复；0=未识别
-	Round  int    // style/assess/blk 的轮次 rN；integrate 无轮次=0
-	Block  int    // blk 的块号 i；其余=0
+	Phase   int    // 1=问题整合 2=样式修复 3=评估分派 4=分块修复；0=未识别
+	Round   int    // style/assess/blk 的轮次 rN；integrate 无轮次=0
+	Block   int    // blk 的块号 i；其余=0
 	Display string // 侧栏标题
 }
 

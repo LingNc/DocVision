@@ -271,6 +271,16 @@ function stageWantOpen(g: GroupView, sv: StageView): boolean {
     !!curProj && curProj === g.name && curStage === sv.stage)
 }
 
+/* T154：整组核验阶段行上的「复查」入口——dedupe 的结论（每组一张卡片、点缩略图
+   看大图）由预览服务从 source/dedupe/review.html 发出；索引里报了项目才挂按钮。 */
+function dedupeReviewURL(name: string): string {
+  return '/dedupe?project=' + encodeURIComponent(name)
+}
+
+function hasDedupeReview(name: string): boolean {
+  return state.dedupeReviews.indexOf(name) >= 0
+}
+
 function rowTitle(s: any): string {
   return sessionTip(s)
 }
@@ -514,6 +524,16 @@ function onMoreClick(okey: string) {
                   <span class="row-body">{{ sv.title }}</span>
                   <span class="row-meta">{{ sv.agg ? sv.agg.head : sv.items.length + ' 个会话' }}</span>
                   <span v-if="sv.status" class="stage-progress" :class="sv.status.state" :title="sv.status.title">{{ sv.status.text }}</span>
+                  <span v-if="sv.stage === 'dedupe' && hasDedupeReview(g.name)" class="row-actions">
+                    <a
+                      class="icon-btn"
+                      :href="dedupeReviewURL(g.name)"
+                      target="_blank"
+                      rel="noopener"
+                      title="打开复查页：每组一张卡片，点缩略图看大图（新标签）"
+                      @click.stop
+                    >复查</a>
+                  </span>
                 </summary>
                 <template v-if="blockView">
                 <div class="session-blocks">
@@ -743,6 +763,21 @@ function onMoreClick(okey: string) {
 
 .stage-row {
  height: 28px; 
+}
+
+/* 复查入口常显：悬停才出现的按钮在触屏与键盘下都点不到，而它只是两个字的
+   小链接，一直露着更好找；用强调色 + 胶囊底让它一眼看出可点。 */
+.stage-row .row-actions {
+ display: inline-flex; flex: none; align-items: center;
+}
+
+.stage-row .row-actions .icon-btn {
+ font-size: 11px; height: 18px; padding: 0 7px; white-space: nowrap;
+ border-radius: 9px; color: var(--accent); background: var(--accent-soft);
+}
+
+.stage-row .row-actions .icon-btn:hover {
+ background: var(--accent); color: #fff;
 }
 
 .row-slot {
@@ -1129,6 +1164,7 @@ details[open] > .proj-row .row-folder .folder.open {
 .frame[data-sidebar-collapsed] .session-row .row-title,
 .frame[data-sidebar-collapsed] .session-row .row-time,
 .frame[data-sidebar-collapsed] .session-row .row-actions,
+.frame[data-sidebar-collapsed] .stage-row .row-actions,
 .frame[data-sidebar-collapsed] .session-row .row-chip {
  display: none; 
 }
@@ -1412,6 +1448,7 @@ details[open] > .proj-row .row-folder .folder.open {
 .frame[data-sidebar-collapsed] .session-row .row-title,
 .frame[data-sidebar-collapsed] .session-row .row-time,
 .frame[data-sidebar-collapsed] .session-row .row-actions,
+.frame[data-sidebar-collapsed] .stage-row .row-actions,
 .frame[data-sidebar-collapsed] .session-row .row-chip {
  display: none; 
 }

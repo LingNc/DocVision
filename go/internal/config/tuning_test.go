@@ -75,6 +75,22 @@ func TestStyleSessionBuiltinBudget(t *testing.T) {
 	}
 }
 
+func TestModelLimitsUseSmallestPositiveValue(t *testing.T) {
+	model := ModelConfig{ContextLimit: 262144, MaxTokens: 8192, MaxImages: 8}
+	got := model.ApplyModelLimits(SessionTuning{ContextLimit: 307200, MaxTokens: 32768})
+	if got.ContextLimit != 262144 || got.MaxTokens != 8192 {
+		t.Fatalf("effective limits = %+v, want context 262144 and max_tokens 8192", got)
+	}
+	got = model.ApplyModelLimits(SessionTuning{})
+	if got.ContextLimit != 262144 || got.MaxTokens != 8192 {
+		t.Fatalf("model-only limits = %+v", got)
+	}
+	unlimited := (ModelConfig{}).ApplyModelLimits(SessionTuning{})
+	if unlimited.ContextLimit != 0 || unlimited.MaxTokens != 0 {
+		t.Fatalf("zero model/session limits must remain unlimited: %+v", unlimited)
+	}
+}
+
 func TestModelStreamDefaultsAndInheritance(t *testing.T) {
 	cfg := &Config{}
 	cfg.Models = map[string]ModelConfig{
