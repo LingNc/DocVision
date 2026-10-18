@@ -121,7 +121,7 @@ func findVisualMotifCandidates(samples []VisualMotifSample, alignMin float64, sh
 	}
 	alignMerges := 0
 	if alignMin > 0 {
-		// 像素完全相同的图只比一份（T140）：该书那本书 388 条引用只有 130 份
+		// 像素完全相同的图只比一份（T140）：该书 388 条引用只有 130 份
 		// 不同内容，同一份内容在全池里像素一致，重合度结论必然相同，三份重复
 		// 比较纯属浪费。这里只取内容代表参与扫描——上面的 exact 指纹合并已经
 		// 把副本并进代表所在的桶，分组结果不变。
