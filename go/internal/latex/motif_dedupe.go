@@ -304,9 +304,10 @@ func motifAdoptCopies(leaders []*motifCandidate, copies map[*motifCandidate][]*m
 // 定组，0.60–0.75 之间仍进会话逐张核验——分数在 0.6 附近是连续铺开的，不设
 // 这个更高的自动门槛就等于"一张都不给模型看"。
 //
-// 只处理**矢量图**：非矢量图本来就不重画，合并它们省不下作图、只会多一次
-// 内容丢失的机会（T118 的"宁可漏不可误判"）。代表图与组内闸门同一规则——
-// 在"典型成员"（与种子重合度 ≥ motifAlignTypical）里取内容框最大者。
+// 不看 class（T134）：vector/raster/text 标签对 dedupe 没有参考价值，图标这类
+// 内容在 classify 里本来就有随机性；组的类别只取组内占比最大的 class，供后续
+// 阶段参考。代表图与组内闸门同一规则——在"典型成员"（与种子重合度 ≥
+// motifAlignTypical）里取内容框最大者。
 func (r *Runner) motifAutoIconGroups(cands []*motifCandidate, progDir string) (applied []motifAppliedGroup, remaining []*motifCandidate, merged int) {
 	min := r.motifIconAutoMin()
 	if min <= 0 {
@@ -316,7 +317,10 @@ func (r *Runner) motifAutoIconGroups(cands []*motifCandidate, progDir string) (a
 	cov := make([]motifAlignImage, len(cands))
 	ok := make([]bool, len(cands))
 	for i, c := range cands {
-		if c == nil || c.image == nil || c.progress == nil || c.progress.Class != ClassVector {
+		// 不看 class（T134，用户口径）：vector/raster/text 对"是不是同一枚图标"
+		// 没有参考价值，classify 本身带随机性；它只在最后决定"这个组按哪类
+		// 处理"，不能当成能不能合并的条件。
+		if c == nil || c.image == nil || c.progress == nil {
 			continue
 		}
 		v, good := motifAlignCoverage(c.image)

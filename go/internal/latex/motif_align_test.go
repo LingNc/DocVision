@@ -301,7 +301,7 @@ func containsKey(list []string, want string) bool {
 
 // 小图标本地自动归组（T131）：≥0.75 的图标不进会话，0.60–0.75 的仍留在池子里
 // 交会话；非矢量图永远不自动合并；门槛 0 = 全部交会话。
-func TestMotifAutoIconGroupsOnlyHighOverlapVectors(t *testing.T) {
+func TestMotifAutoIconGroupsIgnoresClass(t *testing.T) {
 	dir := t.TempDir()
 	r := &Runner{cfg: &config.Config{Latex: config.LatexConfig{
 		DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75,
@@ -351,7 +351,7 @@ func TestMotifAutoIconGroupsOnlyHighOverlapVectors(t *testing.T) {
 	a := mk("a.jpg", base, ClassVector)
 	b := mk("b.jpg", near, ClassVector)
 	c := mk("c.jpg", far, ClassVector)
-	raster := mk("d.jpg", near, ClassRaster) // 和基准几乎一致，但不是矢量图
+	raster := mk("d.jpg", near, ClassRaster) // 和基准几乎一致，但 class 不是矢量图
 	big := mk("e.jpg", whiteCanvas(400, 500), ClassVector)
 
 	applied, remaining, merged := r.motifAutoIconGroups([]*motifCandidate{a, b, c, raster, big}, dir)
@@ -359,16 +359,19 @@ func TestMotifAutoIconGroupsOnlyHighOverlapVectors(t *testing.T) {
 		t.Fatalf("应当只有一组自动合并，got %d", len(applied))
 	}
 	g := applied[0]
-	if len(g.Members) != 2 || !motifContains(g.Members, a) || !motifContains(g.Members, b) {
-		t.Fatalf("自动合并的成员不对: %d", len(g.Members))
+	// T134：class 不再是合并条件。raster 那张和基准几乎一致，必须一起并进去，
+	// 组的类别（后面取占比最大的 class）不影响这一步。
+	if len(g.Members) != 3 || !motifContains(g.Members, a) || !motifContains(g.Members, b) || !motifContains(g.Members, raster) {
+		t.Fatalf("自动合并的成员不对（class 不该拦合并）: %d", len(g.Members))
 	}
-	if merged != 2 {
-		t.Fatalf("merged=%d want 2", merged)
+	if merged != 3 {
+		t.Fatalf("merged=%d want 3", merged)
 	}
-	if g.Key == nil || g.Key.progress.Class != ClassVector {
-		t.Fatalf("代表图必须是矢量图")
+	if g.Key == nil {
+		t.Fatal("必须选出代表图")
 	}
-	for _, keep := range []*motifCandidate{c, raster, big} {
+	// 0.60–0.75 那张和大图仍必须留在池子里交会话。
+	for _, keep := range []*motifCandidate{c, big} {
 		if !motifContains(remaining, keep) {
 			t.Fatalf("%s 不该被自动合并（应留在池子里）", keep.task.imgPath)
 		}
