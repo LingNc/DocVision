@@ -177,6 +177,12 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		pool = remaining
 	}
 	scopes, unassigned := r.motifBucketScopes(pool, advisory)
+	// 中间量落盘（T136）：初始相似度分组 + 逐对特征相似/居中重合 + 桶归属。
+	var loose []string
+	for _, c := range unassigned {
+		loose = append(loose, c.task.key())
+	}
+	r.writeMotifMetrics(outDir, vis, groups, loose, repeats)
 	steps := len(scopes) + 1
 	progress.verify(0, steps, len(pool), 0)
 	// 桶之间互不依赖（每个会话只看自己桶里的图、写自己的 groups.json），所以

@@ -40,3 +40,19 @@
 - `source/progress_items/<md>/<img>.json`：每份的状态与 `equivalent_to`（真源）。
 - `source/dedupe/groups.json`：最终分组（组、代表图、成员、对代表图的重合度、类别、`source`＝auto/session/attached、副本）+ 输入与规则指纹。
 - `source/dedupe/report.md`：一页汇总。
+
+## 中间量落盘（T136）
+
+`<proj>/source/dedupe/metrics/`：
+
+- `pairs.csv`：逐对一行 —— `feature_similar`（最初那套逐对相似度判据，0/1）、`align`（居中重合度，0–1，拿不到覆盖率留空）、`same_bucket`（最终是否同桶）。份数是平方关系：该书 130 份 ≈ 8385 行。
+- `buckets.json`：桶 → 成员、未分配份、逐字节副本数。
+
+注意两套判据都在用，别再混着说（也答了「最初那个相似度分组还在不在」）：
+
+1. **初始相似度分组**（`motifFeatureSetSimilar`，逐对 0/1 判据，含像素指纹/形状/主色）——一直存在，就是“最初算的那个”；
+2. **居中重合归并**（T130，`align ≥ dedupe_align_min`）——在 1 的基础上**并进桶**，所以**桶 = 1 ∪ 2**（`FindVisualMotifCandidatesAligned`）。
+
+## 网格为什么是 32×32
+
+`motifAlignGrid = 32` 是**固定的**，不随图片大小变：前景内容框先归一化成 32×32 软覆盖，再比格。固定格子数是为了让“一张 80px 的图标”和“一张 800px 的同图”用同一把尺子，代价是小图信息被压缩（32 格 ≈ 每格 3% 边长）。它**不按图片尺寸自适应**，因为自适应会让阈值在不同图上含义不同（大图格子更细 → 噪声更多 → 同一个 0.60 在大图上更严）。
