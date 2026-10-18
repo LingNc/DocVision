@@ -2,6 +2,7 @@ package latex
 
 import (
 	"encoding/json"
+	"image"
 	"image/color"
 	"os"
 	"path/filepath"
@@ -95,5 +96,104 @@ func TestMotifArtifactFingerprintStable(t *testing.T) {
 	}
 	if motifArtifactFingerprint(rules, h1) == motifArtifactFingerprint(motifArtifactRules{AlignMin: 0.7, AlignShift: 0.1, IconAuto: 0.75}, h1) {
 		t.Fatal("规则变了指纹必须变")
+	}
+}
+
+// 续跑不该重扫（T141）：输入与规则没变、每一条结论都还在 progress 里对得上，
+// 就整段跳过；图片换掉、少一张、结论被清掉都必须重扫（宁可重算，不能不认账）。
+func TestMotifReuseDedupeValidatesConclusions(t *testing.T) {
+	outDir := t.TempDir()
+	r := &Runner{cfg: &config.Config{Latex: config.LatexConfig{
+		DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeIconAuto: 0.75,
+	}}}
+	base := whiteCanvas(70, 96)
+	drawDiamond(base, 35, 30, 18)
+	near := whiteCanvas(72, 98)
+	drawDiamond(near, 36, 30, 19)
+	other := whiteCanvas(90, 120)
+	for y := 20; y < 90; y++ {
+		for x := 30; x < 60; x++ {
+			other.Set(x, y, color.RGBA{A: 255})
+		}
+	}
+	mk := func(name, hash string, img image.Image) *motifCandidate {
+		return &motifCandidate{
+			task:       &task{mdName: "b.md", imgPath: "images/b/" + name},
+			progress:   &imageProgress{Class: ClassVector},
+			image:      img,
+			sourceHash: hash,
+		}
+	}
+	a := mk("a.jpg", "hash-a", base)
+	b := mk("b.jpg", "hash-b", near)
+	b2 := mk("b2.jpg", "hash-b", near)
+	c := mk("c.jpg", "hash-c", other)
+	leaders := []*motifCandidate{a, b, c}
+	copies := map[*motifCandidate][]*motifCandidate{b: {b2}}
+	applied := []motifAppliedGroup{{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector}}
+	r.writeMotifArtifacts(outDir, leaders, copies, applied, 1)
+
+	// 复核 dedupe 收尾写进 progress 的结论（代表图自指为空、成员指向代表图）。
+	settle := func(item *motifCandidate, leader *motifCandidate) {
+		item.progress.DedupeChecked = true
+		item.progress.DedupeVersion = motifDedupeVersion
+		item.progress.DedupeSourceHash = item.sourceHash
+		if leader == nil {
+			item.progress.EquivalentTo = ""
+			item.progress.DedupeLeaderHash = ""
+			return
+		}
+		item.progress.EquivalentTo = leader.task.key()
+		item.progress.DedupeLeaderHash = leader.sourceHash
+	}
+	settle(a, nil)
+	settle(b, a)
+	settle(c, nil)
+	settle(b2, a)
+	prog := map[string]*imageProgress{}
+	hashed := []motifHashedDedupe{}
+	for _, item := range []*motifCandidate{a, b, b2, c} {
+		prog[item.task.key()] = item.progress
+		hashed = append(hashed, motifHashedDedupe{Key: item.task.key(), Hash: item.sourceHash})
+	}
+
+	art, ok := r.motifReuseDedupe(outDir, prog, hashed)
+	if !ok {
+		t.Fatal("输入与规则都没变、结论齐全时必须能复用")
+	}
+	if art.Distinct != 3 || len(art.Groups) != 1 {
+		t.Fatalf("复用的结论不对：distinct=%d groups=%d", art.Distinct, len(art.Groups))
+	}
+
+	// 图片内容变了（同一路径、新摘要）→ 指纹失配。
+	changed := append([]motifHashedDedupe{}, hashed...)
+	changed[3].Hash = "hash-z"
+	if _, ok := r.motifReuseDedupe(outDir, prog, changed); ok {
+		t.Fatal("输入变了必须重扫")
+	}
+	// 少了一张图 / 多了一张图 → 覆盖不全。
+	if _, ok := r.motifReuseDedupe(outDir, prog, hashed[:3]); ok {
+		t.Fatal("图少了必须重扫")
+	}
+	extra := append(append([]motifHashedDedupe{}, hashed...), motifHashedDedupe{Key: "b.md|images/b/d.jpg", Hash: "hash-d"})
+	if _, ok := r.motifReuseDedupe(outDir, prog, extra); ok {
+		t.Fatal("多了图必须重扫")
+	}
+	// 核验标记被清掉（比如有人重跑了 classify）→ 结论不再可信。
+	prog[c.task.key()].DedupeChecked = false
+	if _, ok := r.motifReuseDedupe(outDir, prog, hashed); ok {
+		t.Fatal("结论被清掉必须重扫")
+	}
+	prog[c.task.key()].DedupeChecked = true
+	// 跟随关系丢了 → 同样重扫。
+	prog[b.task.key()].EquivalentTo = ""
+	if _, ok := r.motifReuseDedupe(outDir, prog, hashed); ok {
+		t.Fatal("跟随关系丢了必须重扫")
+	}
+	prog[b.task.key()].EquivalentTo = a.task.key()
+	// 规则变了（阈值）→ 指纹失配。
+	r.cfg.Latex.DedupeIconAuto = 0.80
+	if _, ok := r.motifReuseDedupe(outDir, prog, hashed); ok {
+		t.Fatal("规则变了必须重扫")
 	}
 }

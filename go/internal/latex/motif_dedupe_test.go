@@ -400,7 +400,7 @@ func TestMotifBucketScopesFollowBucketSize(t *testing.T) {
 	}
 	r.cfg.Latex.DedupeGroupSessionOver = 50
 	r.cfg.Latex.DedupeBatchImages = 150
-	scopes, unassigned := r.motifBucketScopes(pool, advisory)
+	scopes, unassigned := r.motifBucketScopes(pool, advisory, nil)
 	if len(unassigned) != 40 {
 		t.Fatalf("unassigned=%d, want 40", len(unassigned))
 	}
@@ -415,7 +415,7 @@ func TestMotifBucketScopesFollowBucketSize(t *testing.T) {
 	}
 	// 单会话容量上限：小桶加起来超过 dedupe_batch_images 时再拆一个会话。
 	r.cfg.Latex.DedupeBatchImages = 10
-	scopes, _ = r.motifBucketScopes(pool, advisory)
+	scopes, _ = r.motifBucketScopes(pool, advisory, nil)
 	for _, sc := range scopes {
 		if len(sc.Members) > 60 {
 			t.Fatalf("bucket session exceeded its bucket: %d", len(sc.Members))
@@ -430,7 +430,7 @@ func TestMotifBucketScopesFollowBucketSize(t *testing.T) {
 	}
 	// 0 = 旧行为：整池一个会话，没有"未分配"概念。
 	r.cfg.Latex.DedupeGroupSessionOver = 0
-	scopes, unassigned = r.motifBucketScopes(pool, advisory)
+	scopes, unassigned = r.motifBucketScopes(pool, advisory, nil)
 	if len(scopes) != 1 || len(scopes[0].Members) != 120 || len(unassigned) != 0 {
 		t.Fatalf("group_session_over=0 must keep one session, got %d scopes / %d unassigned", len(scopes), len(unassigned))
 	}
@@ -600,5 +600,53 @@ func TestMotifAdoptCopiesFollowsRepresentativeVerdict(t *testing.T) {
 	loadProgress(progDir, loaded)
 	if got := loaded[copyOfMerged.task.key()]; got == nil || got.EquivalentTo != key.task.key() {
 		t.Fatalf("copy verdict not persisted: %+v", got)
+	}
+}
+
+// 大桶的会话边界按"自动定组之前"的桶大小判（T142）：100 张的桶里 76 张已经
+// 被本地定组、会话池只剩 24 张，它仍然是自己的会话——按剩余数量看会掉到 50 以
+// 下，被并进小桶的批次，于是用户看到"最大的相似度组和别的图混在一个会话里"，
+// 本该单独出现的第二个会话也没了。
+func TestMotifBucketScopeUsesOriginalSize(t *testing.T) {
+	r := keepTestRunner(t)
+	mk := func(n int) []*motifCandidate {
+		out := make([]*motifCandidate, n)
+		for i := range out {
+			out[i] = &motifCandidate{task: &task{mdName: "book.md", imgPath: fmt.Sprintf("i%d.png", i)}}
+		}
+		return out
+	}
+	pool := mk(26)
+	advisory := map[string]motifAdvisory{}
+	for i, c := range pool {
+		g := 1
+		if i >= 24 {
+			g = 2
+		}
+		advisory[c.task.key()] = motifAdvisory{Group: g}
+	}
+	r.cfg.Latex.DedupeGroupSessionOver = 50
+	r.cfg.Latex.DedupeBatchImages = 150
+	full := map[int]int{1: 100, 2: 2}
+	scopes, unassigned := r.motifBucketScopes(pool, advisory, full)
+	if len(unassigned) != 0 {
+		t.Fatalf("unassigned=%d, want 0", len(unassigned))
+	}
+	if len(scopes) != 2 {
+		t.Fatalf("大桶必须独占会话、小桶单独一批：scopes=%d", len(scopes))
+	}
+	if len(scopes[0].Members) != 24 || len(scopes[1].Members) != 2 {
+		t.Fatalf("会话成员不对：大桶剩 %d（want 24）、小桶 %d（want 2）",
+			len(scopes[0].Members), len(scopes[1].Members))
+	}
+	// 整个桶都被本地定组（会话池里一张不剩）时不开空会话。
+	scopes, _ = r.motifBucketScopes(pool[24:], advisory, full)
+	if len(scopes) != 1 || len(scopes[0].Members) != 2 {
+		t.Fatalf("空桶不该开会话：scopes=%d", len(scopes))
+	}
+	// 拿不到原始桶大小时退回"按池内剩余数量"判（旧行为，不改变其它调用方）。
+	scopes, _ = r.motifBucketScopes(pool, advisory, nil)
+	if len(scopes) != 1 || len(scopes[0].Members) != 26 {
+		t.Fatalf("无原始大小时应按剩余数量合并：scopes=%d", len(scopes))
 	}
 }

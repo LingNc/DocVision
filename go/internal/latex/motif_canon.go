@@ -264,6 +264,12 @@ func motifCanonScore(a, b motifCanonImage, canvas, finest int) (score float64, d
 }
 
 // motifCanonScoreShift 同 motifCanonScore，但可指定 0 级搜索窗（占格数的比例）。
+//
+// 逐级搜索的窗口约定（用户口径，T143）：0 级没有上一级可继承，以 0 为中心开
+// ±shiftPct·G 的窗（平移预算）；此后每一级把上一级的解**换算到本层格号**
+// （粗格 g 的一个格子 = 细格 2g 的 2×2 个格子，所以中心 = 2×上一层解），
+// 只在这个中心周围 ±motifCanonRefine 格里找——不再有任何"顶到边缘就扩窗"。
+// 粗层只负责把平移找准，分数与平移都取最终（最细）一级的解。
 func motifCanonScoreShift(a, b motifCanonImage, canvas, finest int, shiftPct float64) (score float64, dy, dx, g int) {
 	if shiftPct <= 0 {
 		shiftPct = 0.10
@@ -283,32 +289,19 @@ func motifCanonScoreShift(a, b motifCanonImage, canvas, finest int, shiftPct flo
 			}
 			cx, cy = 0, 0
 		}
-		// 解落在窗口边缘就扩窗重搜（最多扩到全窗）。
-		for tries := 0; tries < 4; tries++ {
-			bs, by, bx := -1.0, cy, cx
-			for y := cy - win; y <= cy+win; y++ {
-				for x := cx - win; x <= cx+win; x++ {
-					s := motifCanonOverlap(ga, gb, gi, y, x)
-					if s > bs {
-						bs, by, bx = s, y, x
-					}
+		if win > gi {
+			win = gi
+		}
+		bs, by, bx := -1.0, cy, cx
+		for y := cy - win; y <= cy+win; y++ {
+			for x := cx - win; x <= cx+win; x++ {
+				s := motifCanonOverlap(ga, gb, gi, y, x)
+				if s > bs {
+					bs, by, bx = s, y, x
 				}
 			}
-			if win >= gi && tries < 3 {
-				// 已经全窗，接受。
-				best, shiftY, shiftX = bs, by, bx
-				break
-			}
-			atEdge := (by == cy-win || by == cy+win || bx == cx-win || bx == cx+win) && win < gi
-			best, shiftY, shiftX = bs, by, bx
-			if !atEdge {
-				break
-			}
-			win *= 2
-			if win > gi {
-				win = gi
-			}
 		}
+		best, shiftY, shiftX = bs, by, bx
 		g = gi
 	}
 	return best, shiftY, shiftX, g

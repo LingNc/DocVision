@@ -23,8 +23,9 @@ import (
 //	  report.md     给人看的一页汇总
 //
 // 它只是**派生产物**：进程重启后的真源仍是 progress_items（每图的
-// equivalent_to），这里落盘是为了可复查、可交给下游按组操作，也方便以后拿
-// 指纹直接跳过重算。写失败不影响流程（dedupe 的结论已经在 progress 里了）。
+// equivalent_to），这里落盘是为了可复查、可交给下游按组操作，并且给续跑一张
+// "免重算凭证"——T141 起 `motifReuseDedupe` 拿指纹 + progress 对账，对得上就
+// 整段跳过扫描与会话。写失败不影响流程（dedupe 的结论已经在 progress 里了）。
 type motifArtifact struct {
 	Version     string               `json:"version"`
 	BuiltAt     string               `json:"built_at"`
@@ -79,14 +80,135 @@ func motifArtifactFingerprint(rules motifArtifactRules, hashes []string) string 
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// writeMotifArtifacts 把本次 dedupe 的最终结论写进 <proj>/source/dedupe/。
-func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, autoCount int) {
-	dir := motifArtifactDir(outDir)
-	rules := motifArtifactRules{
+// motifHashedDedupe 是"只读字节、不解码"的预扫描结果：复用判据只需要每张图
+// 的内容摘要（T141）。
+type motifHashedDedupe struct {
+	Key  string
+	Hash string
+}
+
+// motifCurrentRules 与 writeMotifArtifacts 取同一套值，保证写盘与复用判据的
+// 指纹口径一致。
+func (r *Runner) motifCurrentRules() motifArtifactRules {
+	return motifArtifactRules{
 		AlignMin:   round3(r.motifAlignMin()),
 		AlignShift: round3(r.cfg.Latex.DedupeAlignShift),
 		IconAuto:   round3(r.motifIconAutoMin()),
 	}
+}
+
+// motifReuseDedupe 判断上一次落盘的结论能不能整段沿用（T141）。三个条件缺一
+// 不可：① 版本与规则（阈值/平移/自动定组）没变；② 输入没变——指纹只吃"每份
+// 不同内容的内容摘要 + 规则"，所以图片被换掉会立刻失配；③ 表里每一条结论都还
+// 在 progress 里对得上（ref 存在、摘要一致、核验标记在、跟随关系与代表图一致），
+// 且条目覆盖了本次的每一张图（多一张少一张都要重扫）。
+//
+// 之所以需要：池子里只要还有一张图没被核验（典型是"跟谁都不像、也没进会话"
+// 的那批），allChecked 就永远为假，于是每次续跑都要重新解码全池、重算几万对
+// 重合度、再把同样的会话放一遍。结论本来就按图存在 progress 里，缺的只是
+// "这次输入和规则还是同一套"的证明。
+func (r *Runner) motifReuseDedupe(outDir string, prog map[string]*imageProgress, hashed []motifHashedDedupe) (motifArtifact, bool) {
+	var zero motifArtifact
+	data, err := os.ReadFile(filepath.Join(motifArtifactDir(outDir), "groups.json"))
+	if err != nil {
+		return zero, false
+	}
+	var art motifArtifact
+	if err := json.Unmarshal(data, &art); err != nil {
+		return zero, false
+	}
+	if art.Version != motifDedupeVersion {
+		return zero, false
+	}
+	rules := r.motifCurrentRules()
+	if art.Rules != rules {
+		return zero, false
+	}
+	distinct := make([]string, 0, len(hashed))
+	seen := make(map[string]bool, len(hashed))
+	want := make(map[string]string, len(hashed))
+	for _, h := range hashed {
+		want[h.Key] = h.Hash
+		if seen[h.Hash] {
+			continue
+		}
+		seen[h.Hash] = true
+		distinct = append(distinct, h.Hash)
+	}
+	if art.Refs != len(hashed) || art.Distinct != len(distinct) {
+		return zero, false
+	}
+	if art.Fingerprint != motifArtifactFingerprint(rules, distinct) {
+		return zero, false
+	}
+	covered := make(map[string]bool, len(hashed))
+	check := func(item motifArtifactRef) bool {
+		p := prog[item.Ref]
+		if p == nil || !p.DedupeChecked || p.DedupeVersion != motifDedupeVersion {
+			return false
+		}
+		if item.Hash != "" && (p.DedupeSourceHash != item.Hash || want[item.Ref] != item.Hash) {
+			return false
+		}
+		covered[item.Ref] = true
+		return true
+	}
+	// 副本没有单独的 hash 字段（字节必然与它的代表图相同），只能验跟随关系：
+	// 指向的那张图确实存在、摘要与记录的 leader hash 一致。
+	checkCopies := func(dups []string) bool {
+		for _, d := range dups {
+			p := prog[d]
+			if p == nil || !p.DedupeChecked || p.EquivalentTo == "" || p.DedupeLeaderHash == "" {
+				return false
+			}
+			leader := prog[p.EquivalentTo]
+			if leader == nil || leader.DedupeSourceHash != p.DedupeLeaderHash {
+				return false
+			}
+			covered[d] = true
+		}
+		return true
+	}
+	for _, g := range art.Groups {
+		for _, m := range g.Members {
+			if !check(m) || !checkCopies(m.Duplicates) {
+				return zero, false
+			}
+			p := prog[m.Ref]
+			if m.Ref == g.Key {
+				if p.EquivalentTo != "" || p.DedupeLeaderHash != "" {
+					return zero, false
+				}
+				continue
+			}
+			if p.EquivalentTo != g.Key || p.DedupeLeaderHash == "" {
+				return zero, false
+			}
+		}
+	}
+	for _, m := range art.Independent {
+		if !check(m) || !checkCopies(m.Duplicates) {
+			return zero, false
+		}
+		if p := prog[m.Ref]; p.EquivalentTo != "" || p.DedupeLeaderHash != "" {
+			return zero, false
+		}
+	}
+	if len(covered) != len(hashed) {
+		return zero, false
+	}
+	for _, h := range hashed {
+		if !covered[h.Key] {
+			return zero, false
+		}
+	}
+	return art, true
+}
+
+// writeMotifArtifacts 把本次 dedupe 的最终结论写进 <proj>/source/dedupe/。
+func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, autoCount int) {
+	dir := motifArtifactDir(outDir)
+	rules := r.motifCurrentRules()
 	hashes := make([]string, 0, len(leaders))
 	ref := func(c *motifCandidate, key *motifCandidate) motifArtifactRef {
 		item := motifArtifactRef{Ref: c.task.key(), Image: c.task.imgPath, Hash: c.sourceHash, Class: c.progress.Class}

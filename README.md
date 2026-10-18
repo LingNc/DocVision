@@ -142,6 +142,7 @@ docvision workflow -c my.yaml
 | [docs/commands.md](docs/commands.md) | 全部命令与参数、img2text/档位2 嵌入格式、`analyze` 选项、`sessions` 预览页与指标 |
 | [docs/config.md](docs/config.md) | 配置项全表（`mineru` / `paths` / `models` / `latex` / `tools` / `sessions` / `preview` / `estimate` / `verify`）与默认值 |
 | [docs/latex.md](docs/latex.md) | LaTeX 档位1/档位2 全流程、`latex` 用法与阶段控制、项目目录布局、原书检索工具、AI 核对 |
+| [docs/dedupe-algorithm.md](docs/dedupe-algorithm.md) | dedupe（图片整组核验）从扫描到落盘的完整流程、居中重合度的算法细节、阈值与实测数字 |
 | [docs/sessions.md](docs/sessions.md) | 会话基础设施（上下文窗口/压缩/转录）、提示词管理、会话沙箱与挂载表、调试日志 |
 | [docs/dev.md](docs/dev.md) | 代码目录结构、CI/CD、历史 Python 实现 |
 | [docs/agent-batch-history.md](docs/agent-batch-history.md) | 每一批改动的原始记录（含真实缺陷、证据数字与设计理由） |

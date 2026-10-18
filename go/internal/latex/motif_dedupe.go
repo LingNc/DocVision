@@ -33,8 +33,17 @@ type motifCandidate struct {
 func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress, progDir, outDir string) {
 	progress := newMotifProgress(r.log, len(tasks))
 	defer progress.finish()
-	var samples []motifCandidate
-	byKey := make(map[string]*motifCandidate)
+	// 第一遍只读字节、算摘要，不解码（T141）：上一次的结论还完整、输入与规则
+	// 也没变时，整段跳过——不再解码 388 张图、不再算几万对重合度、也不再回放
+	// 会话。"续跑又要扫一遍候选"的代价因此从分钟级降到读一遍文件。
+	type pending struct {
+		task *task
+		prog *imageProgress
+		path string
+		hash string
+	}
+	var pend []pending
+	var hashed []motifHashedDedupe
 	for ti, t := range tasks {
 		progress.scan(ti+1, len(tasks))
 		p := prog[t.key()]
@@ -46,36 +55,49 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 			r.log.LogWarning(0, "[dedupe] 候选图片不可读，保留独立处理:", t.imgPath, err)
 			continue
 		}
-		f, err := os.Open(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
-			r.log.LogWarning(0, "[dedupe] 候选图片不可读，保留独立处理:", t.imgPath, err)
+			r.log.LogWarning(0, "[dedupe] 候选图片可读性检查失败，保留独立处理:", t.imgPath, err)
+			continue
+		}
+		sum := sha256.Sum256(data)
+		h := hex.EncodeToString(sum[:])
+		pend = append(pend, pending{task: t, prog: p, path: path, hash: h})
+		hashed = append(hashed, motifHashedDedupe{Key: t.key(), Hash: h})
+	}
+	if art, ok := r.motifReuseDedupe(outDir, prog, hashed); ok {
+		r.log.Log(0, fmt.Sprintf("[dedupe] 输入与规则未变（指纹 %s），沿用 source/dedupe/groups.json：%d 份不同内容、%d 组，跳过扫描与核验会话",
+			art.Fingerprint, art.Distinct, len(art.Groups)))
+		progress.verify(1, 1, len(pend), 0)
+		return
+	}
+	var samples []motifCandidate
+	byKey := make(map[string]*motifCandidate)
+	for _, it := range pend {
+		f, err := os.Open(it.path)
+		if err != nil {
+			r.log.LogWarning(0, "[dedupe] 候选图片不可读，保留独立处理:", it.task.imgPath, err)
 			continue
 		}
 		img, _, decErr := image.Decode(f)
 		_ = f.Close()
 		if decErr != nil {
-			r.log.LogWarning(0, "[dedupe] 图片解码失败，保留独立处理:", t.imgPath, decErr)
+			r.log.LogWarning(0, "[dedupe] 图片解码失败，保留独立处理:", it.task.imgPath, decErr)
 			continue
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			r.log.LogWarning(0, "[dedupe] 图片摘要读取失败，保留独立处理:", t.imgPath, err)
-			continue
-		}
-		sum := sha256.Sum256(data)
-		sourceHash := hex.EncodeToString(sum[:])
-		if p.DedupeSourceHash != sourceHash || p.DedupeVersion != motifDedupeVersion {
+		p := it.prog
+		if p.DedupeSourceHash != it.hash || p.DedupeVersion != motifDedupeVersion {
 			p.EquivalentTo = ""
 			p.DedupeLeaderHash = ""
 			p.SharedTex = ""
 			p.DedupeChecked = false
-			p.DedupeSourceHash = sourceHash
+			p.DedupeSourceHash = it.hash
 			p.DedupeVersion = motifDedupeVersion
 			saveProgress(progDir, p)
 		}
-		c := &motifCandidate{task: t, progress: p, image: img, path: path, sourceHash: sourceHash}
+		c := &motifCandidate{task: it.task, progress: p, image: img, path: it.path, sourceHash: it.hash}
 		samples = append(samples, *c)
-		byKey[t.key()] = c
+		byKey[it.task.key()] = c
 	}
 	if len(samples) < 2 {
 		return
@@ -177,15 +199,26 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 			r.motifIconAutoMin(), autoMerged, len(autoGroups), len(autoGroups)))
 		pool = remaining
 	}
-	scopes, unassigned := r.motifBucketScopes(pool, advisory)
+	// 桶的原始大小（自动定组之前），会话边界按它判（T142 见 motifBucketScopes）。
+	bucketFull := map[int]int{}
+	for _, c := range leaders {
+		if a, ok := advisory[c.task.key()]; ok && a.Group > 0 {
+			bucketFull[a.Group]++
+		}
+	}
+	scopes, unassigned := r.motifBucketScopes(pool, advisory, bucketFull)
 	// 中间量落盘（T136）：初始相似度分组 + 逐对特征相似/居中重合 + 桶归属。
 	var loose []string
 	for _, c := range unassigned {
 		loose = append(loose, c.task.key())
 	}
 	r.writeMotifMetrics(outDir, vis, groups, loose, repeats)
-	steps := len(scopes) + 1
-	progress.verify(0, steps, len(pool), 0)
+	// 中间进度行的分母只数**真的开着的**核验会话：整理会话要不要开，得等
+	// 这些会话交出代表图才知道，先算进去就等于预告一个可能不存在的第 M 步。
+	steps := len(scopes)
+	if steps > 0 {
+		progress.verify(0, steps, len(pool), 0)
+	}
 	// 桶之间互不依赖（每个会话只看自己桶里的图、写自己的 groups.json），所以
 	// 可以并发；上限来自 latex.dedupe_concurrency，0/负数 = 串行（旧行为）。
 	// 并发不能改变结论：结果按 scope 顺序收回，整理会话仍等它们全部结束。
@@ -217,7 +250,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	// 整理会话，而且会话里只出现这些候选 + 关键图。
 	candidates, keys := r.motifConsolidationCandidates(unassigned, applied)
 	if len(candidates) > 0 && len(keys) > 0 {
-		progress.verify(len(scopes), steps, len(pool), failed)
+		progress.verify(len(scopes), len(scopes)+1, len(pool), failed)
 		r.log.Log(0, fmt.Sprintf("[dedupe] 整理会话：%d 张未分配图可能属于 %d 个已确认组（只比对关键图）", len(candidates), len(keys)))
 		sc := &motifScope{Label: "dedupe-整理", Members: candidates, Keys: keys, KeyBase: len(candidates)}
 		got, ok := r.runMotifScope(sc, outDir)
@@ -261,7 +294,13 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张逐字节重复的图片跟随代表图，不重复作图", n))
 	}
 	r.writeMotifArtifacts(outDir, leaders, copies, applied, len(autoGroups))
-	progress.verify(steps, steps, len(pool), failed)
+	// 收尾的进度行说的是**实际开了几个会话**：整理会话没开就不该多算一格
+	// （T126 的 [dedupe 2/2] 曾经看起来像"两个会话都跑完了"）。
+	total := len(scopes) + consolSessions
+	if total < 1 {
+		total = 1
+	}
+	progress.verify(total, total, len(pool), failed)
 }
 
 // motifContentLeaders splits the pool into one representative per distinct file
@@ -723,7 +762,7 @@ func motifConsolidationCandidatesWith(unassigned []*motifCandidate, applied []mo
 // latex.dedupe_batch_images. Images in no bucket are NOT put into those sessions:
 // in a normal book most figures are unrelated, so they are unassigned and only
 // checked once against the confirmed keys (see motifConsolidationCandidates).
-func (r *Runner) motifBucketScopes(pool []*motifCandidate, advisory map[string]motifAdvisory) ([]*motifScope, []*motifCandidate) {
+func (r *Runner) motifBucketScopes(pool []*motifCandidate, advisory map[string]motifAdvisory, full map[int]int) ([]*motifScope, []*motifCandidate) {
 	over := r.cfg.Latex.DedupeGroupSessionOver
 	perBatch := r.cfg.Latex.DedupeBatchImages
 	if perBatch <= 0 {
@@ -774,9 +813,23 @@ func (r *Runner) motifBucketScopes(pool []*motifCandidate, advisory map[string]m
 		scopes = append(scopes, sc)
 		pending, pendingGroups = nil, nil
 	}
+	// 一个桶该不该独占会话，看的是它在**自动定组之前**有多大（T142）：大桶里
+	// 重合度 ≥ dedupe_icon_auto 的成员会被本地定组、从会话池里拿掉，剩下的十
+	// 几张按"剩余数量"看就不再是大桶，于是被并进小桶的批次——用户看到的是
+	// "最大的那个相似度组和别的图混在同一个会话里"，本该单独出现的第二个会话
+	// 也没了。按原始桶大小判断，大桶永远独占自己的会话（剩余为 0 就跳过）。
+	width := func(g int) int {
+		if n, ok := full[g]; ok {
+			return n
+		}
+		return len(buckets[g])
+	}
 	for _, g := range nos {
 		members := buckets[g]
-		if len(members) > over {
+		if len(members) == 0 {
+			continue
+		}
+		if width(g) > over {
 			flush()
 			ids := make([]int, len(members))
 			for i := range members {

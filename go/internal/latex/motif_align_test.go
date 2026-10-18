@@ -1,8 +1,10 @@
 package latex
 
 import (
+	"fmt"
 	"image"
 	"image/color"
+	"strings"
 	"testing"
 
 	"mineru-tools/internal/config"
@@ -309,6 +311,60 @@ func TestFindVisualMotifCandidatesAlignedDisabledMatchesLegacy(t *testing.T) {
 	got, merges := FindVisualMotifCandidatesAligned(samples, 0, 0)
 	if merges != 0 || len(got) != len(legacy) {
 		t.Fatalf("alignMin=0 必须退回旧行为: got %d groups / merges=%d, want %d", len(got), merges, len(legacy))
+	}
+}
+
+// 像素完全相同的副本只参与一次扫描（T140），且"是否达标"并行算、union 串行
+// 做——重跑必须给出逐字一致的分组（并行不能引入顺序抖动）。
+func TestFindVisualMotifCandidatesAlignedCopiesStableAcrossRuns(t *testing.T) {
+	base := whiteCanvas(70, 96)
+	drawDiamond(base, 35, 30, 18)
+	moved := whiteCanvas(70, 96)
+	drawDiamond(moved, 36, 31, 18)
+	block := whiteCanvas(70, 96)
+	for y := 24; y < 70; y++ {
+		for x := 24; x < 46; x++ {
+			block.Set(x, y, color.RGBA{A: 255})
+		}
+	}
+	var samples []VisualMotifSample
+	for i := 0; i < 3; i++ {
+		samples = append(samples,
+			VisualMotifSample{Key: fmt.Sprintf("a-copy-%d", i), Image: base},
+			VisualMotifSample{Key: fmt.Sprintf("b-copy-%d", i), Image: moved},
+			VisualMotifSample{Key: fmt.Sprintf("c-copy-%d", i), Image: block},
+		)
+	}
+	var first []string
+	for run := 0; run < 5; run++ {
+		groups, merges := FindVisualMotifCandidatesAligned(samples, 0.60, 0.10)
+		if merges < 1 {
+			t.Fatalf("run %d: 居中重合应当并进至少一对，got %d", run, merges)
+		}
+		var got []string
+		for _, g := range groups {
+			got = append(got, strings.Join(g.Members, ","))
+		}
+		if run == 0 {
+			first = got
+			continue
+		}
+		if strings.Join(got, "|") != strings.Join(first, "|") {
+			t.Fatalf("并行扫描的分组必须稳定: run %d = %v, run 0 = %v", run, got, first)
+		}
+	}
+	// 同一枚标记的三份副本 + 挪了 1px 的那份都在同一个组里。
+	joined := false
+	for _, g := range first {
+		if strings.Contains(g, "a-copy-0") && strings.Contains(g, "b-copy-0") && strings.Contains(g, "a-copy-2") {
+			joined = true
+		}
+		if strings.Contains(g, "c-copy-0") && strings.Contains(g, "a-copy-0") {
+			t.Fatalf("不同形状的图不该并进同一组: %v", first)
+		}
+	}
+	if !joined {
+		t.Fatalf("副本与原图必须同组，got %v", first)
 	}
 }
 

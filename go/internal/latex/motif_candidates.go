@@ -5,7 +5,10 @@ import (
 	"encoding/binary"
 	"image"
 	"image/color"
+	"runtime"
 	"sort"
+	"sync"
+	"sync/atomic"
 )
 
 // VisualMotifSample is an image that an upstream caller has already selected
@@ -118,7 +121,22 @@ func findVisualMotifCandidates(samples []VisualMotifSample, alignMin float64, sh
 	}
 	alignMerges := 0
 	if alignMin > 0 {
-		alignMerges = findAlignedMotifPairs(valid, alignMin, shiftCells, union)
+		// 像素完全相同的图只比一份（T140）：该书那本书 388 条引用只有 130 份
+		// 不同内容，同一份内容在全池里像素一致，重合度结论必然相同，三份重复
+		// 比较纯属浪费。这里只取内容代表参与扫描——上面的 exact 指纹合并已经
+		// 把副本并进代表所在的桶，分组结果不变。
+		uniq := make([]int, 0, len(valid))
+		seenContent := map[[32]byte]bool{}
+		for i := range valid {
+			if features[i].rgbaOK {
+				if seenContent[features[i].rgba] {
+					continue
+				}
+				seenContent[features[i].rgba] = true
+			}
+			uniq = append(uniq, i)
+		}
+		alignMerges = findAlignedMotifPairs(valid, uniq, alignMin, shiftCells, find, union)
 	}
 
 	groups := map[int][]string{}
@@ -577,39 +595,47 @@ func absFloat(v float64) float64 {
 	return v
 }
 
+// motifAlignWorkers 是重合度扫描的并行度上限（纯函数比较，结果与串行一致）。
+const motifAlignWorkers = 8
+
 // findAlignedMotifPairs 把"小图标类"里居中重合度达标的图并在一个桶里。
 //
+// uniq 是参与扫描的**内容代表**下标（像素完全相同的副本已合并，见调用方）。
 // 先做两个廉价预筛再算平移搜索下的软重合度：墨迹占比差 > 0.12 或长宽比差
-// > 0.35 的图不可能是同一枚标记，直接跳过——真数据里 130 份内容两两比较只要
-// 2 秒量级，去掉预筛会慢一个数量级。
-func findAlignedMotifPairs(valid []VisualMotifSample, alignMin float64, shiftCells int, union func(a, b int) bool) int {
-	covs := make([]motifAlignImage, len(valid))
-	ok := make([]bool, len(valid))
+// > 0.35 的图不可能是同一枚标记，直接跳过；已经在同一个桶里的图也跳过（并集
+// 已包含这条边）。
+//
+// 剩下的逐对"是否达标"是纯函数、互不依赖，按 CPU 数并行算，再按原顺序串行
+// union——Union-Find 的合并顺序与并发前一致，分组结果不变（T140）。
+func findAlignedMotifPairs(valid []VisualMotifSample, uniq []int, alignMin float64, shiftCells int, find func(int) int, union func(a, b int) bool) int {
+	covs := make([]motifAlignImage, len(uniq))
+	ok := make([]bool, len(uniq))
 	covered := 0
-	for i := range valid {
-		covs[i], ok[i] = motifAlignCoverage(valid[i].Image)
-		if ok[i] {
+	for p, i := range uniq {
+		covs[p], ok[p] = motifAlignCoverage(valid[i].Image)
+		if ok[p] {
 			covered++
 		}
 	}
-	// 成本上限：这条判据是 O(图标数²) × 平移次数。130 份内容实测 1.4s，
-	// 600 份就是半小时量级——超过上限时退回旧判据并返回 -1，由调用方打一行
-	// 警告，而不是让"启动时的桶扫描"变成几分钟的黑盒等待。
+	// 成本上限：这条判据是 O(图标数²) × 平移次数。超过上限时退回旧判据并
+	// 返回 -1，由调用方打一行警告，而不是让"启动时的桶扫描"变成几分钟的
+	// 黑盒等待。
 	if covered > motifAlignBucketMax {
 		return -1
 	}
-	merged := 0
-	for i := range valid {
+	type alignedPair struct{ a, b int32 } // 在 uniq 里的下标
+	cand := make([]alignedPair, 0, 64)
+	for i := range uniq {
 		if !ok[i] {
 			continue
 		}
-		for j := i + 1; j < len(valid); j++ {
-			if !ok[j] {
-				continue
-			}
-			// 只有"小图标"走这条判据（T130）：内容框超过上限的图是插图，
-			// 两个长得像的插图直接合并没人看过，风险不对等。
-			if covs[i].area > motifAlignIconMaxArea || covs[j].area > motifAlignIconMaxArea {
+		// 只有"小图标"走这条判据（T130）：内容框超过上限的图是插图，
+		// 两个长得像的插图直接合并没人看过，风险不对等。
+		if covs[i].area > motifAlignIconMaxArea {
+			continue
+		}
+		for j := i + 1; j < len(uniq); j++ {
+			if !ok[j] || covs[j].area > motifAlignIconMaxArea {
 				continue
 			}
 			if absFloat(covs[i].inkFrac-covs[j].inkFrac) > 0.12 {
@@ -618,9 +644,41 @@ func findAlignedMotifPairs(valid []VisualMotifSample, alignMin float64, shiftCel
 			if absFloat(covs[i].aspect-covs[j].aspect) > 0.35 {
 				continue
 			}
-			if covs[i].overlap(covs[j], shiftCells) >= alignMin && union(i, j) {
-				merged++
+			if find(uniq[i]) == find(uniq[j]) {
+				continue
 			}
+			cand = append(cand, alignedPair{int32(i), int32(j)})
+		}
+	}
+	hits := make([]bool, len(cand))
+	workers := runtime.NumCPU()
+	if workers > motifAlignWorkers {
+		workers = motifAlignWorkers
+	}
+	if workers > len(cand) {
+		workers = len(cand)
+	}
+	var next int64
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				k := int(atomic.AddInt64(&next, 1)) - 1
+				if k >= len(cand) {
+					return
+				}
+				p := cand[k]
+				hits[k] = covs[p.a].overlap(covs[p.b], shiftCells) >= alignMin
+			}
+		}()
+	}
+	wg.Wait()
+	merged := 0
+	for k, p := range cand {
+		if hits[k] && union(uniq[p.a], uniq[p.b]) {
+			merged++
 		}
 	}
 	return merged
