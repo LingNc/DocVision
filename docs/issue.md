@@ -853,4 +853,59 @@ user 轮
   实测（该书 130 份不同内容 / 7503 对可算分数的对）：7458 对分数变化，**最大降幅 0.416**，升的最多 +0.014（旧值取自 13:50 那次运行的 `pairs.csv`，可能混有更早一版二进制的口径，这一对没深究——窗口变小在算法上不可能让分数升高，应是旧值本身偏高）；跌破 0.60 的 40 对、跌破 0.75 的 **0 对**；桶 `[102,2]` → `[100,2]`（少了 2 张连回大桶的边）；≥0.75 的本地自动组**逐组不变**（18 组、组大小完全一致）；生产入口 `FindVisualMotifCandidatesAligned` 从 13 次合并降到 11 次、仍 2 组，全池扫描 3.5s → **2.3s**。结论：这是 T140 里"留作以后单独一批"的那个改动，代价可控（2 张从大桶落进未分配，仍由挂靠/会话兜住），换来判据与用户约定一致 + 扫描再快 ~35%。
 
 [X][ ] T144. 用户要一份"从头到尾的完整流程报告"。用户：「然后就是你再完整的详细的，写一个我们这个dedupe从最开始到最终结束的完整过程的详细报告包括里面的算法详细步骤。」→ 新增 `docs/dedupe-algorithm.md`：12 步全景、逐步细节（逐字节收缩、指纹复用、逐对相似度、居中重合扫描、自动定组、会话作用域、核验/整理会话与复核、挂靠、副本跟随、落盘与续跑）、居中重合度的算法步骤（内容框/软墨量/画布/贴图/分箱/逐级搜索/打分）、阈值总表、该书实测数字、已知不完美；`docs/dedupe.md`、`docs/latex.md`、`README.md` 文档索引各加一行指过去。
-  写文档时核对出一处**代码/文档不一致**（未改代码）：文档写画布 `S` 按池 `clamp(P90(内容框长边), 24, 512)`，`motifCanonCanvas` 也实现了并有单测，但**生产代码没有调用它**——`motifAlignImage.overlap/overlapDetail` 实际按**每一对**取 `max(a.maxSide, b.maxSide)` 再夹 24–512。本书两种口径都落在 41 附近（图标尺寸集中）所以指标没暴露差异；跨尺寸池子上会有系统性差别。留待用户定：把 `motifCanonCanvas` 接进生产（按池算一次、逐对复用），还是把文档改成实际口径。
+  写文档时核对出一处**代码/文档不一致**（未改代码）：文档写画布 `S` 按池 `clamp(P90(内容框长边), 24, 512)`，`motifCanonCanvas` 也实现了并有单测，但**生产代码没有调用它**——`motifAlignImage.overlap/overlapDetail` 实际按**每一对**取 `max(a.maxSide, b.maxSide)` 再夹 24–512。本书两种口径都落在 41 附近（图标尺寸集中）所以指标没暴露差异；跨尺寸池子上会有系统性差别。当时的两个选项（接进生产 / 改成实际口径）由用户在本批定为后者（见 T145）：画布本来就该按每一对算，池级 P90 在跨尺寸池子上会把小图的分数系统性压低。
+
+[X][ ] T145. 画布口径与平移口径的文档对齐（T144 收尾的"已知不完美 1"）。用户批下来的候选 1+3：删死代码、把文档改成代码事实。
+  ① **画布**：`motifCanonCanvas`（池级 `clamp(P90(内容框长边), 24, 512)`）有实现、有单测、**没有生产调用点**——`motifAlignImage.overlapDetail` 实际按**每一对**取 `clamp(max(a.maxSide, b.maxSide), 24, 512)`。删掉 `motifCanonCanvas` + 只被它用的 `motifCanonPct` + `sort` import，`motifCanonMinS`/`motifCanonMaxS` 留着（`overlap`/`overlapDetail` 在用）；`TestMotifCanonCanvas` 一并删除，`TestMotifCanonScoreSynthetic` 改成 `canvas := a.maxSide()` 并注明画布按每一对取。文档（`docs/dedupe-algorithm.md` §2.4/§4、`docs/dedupe.md`）改成逐对口径并写清理由：同一池子里混着小图标和整页截图时，池级 P90 会让小图标在画布里只占一角、重合度被系统性压低。
+  ② **平移累计**：文档写"中心 = 2×上一层解"容易被读成"相对 0 级的 `2^k·d₀`"。代码里每一级接的是**上一层自己选中的那一格**（上一层在 ±2 格内挪过，所以中心是逐级累计的 2×）。实测 729 对里 693 对两种口径算出的分数不同、最大差 0.072、判定翻转 **0** 对——口径差别真实存在但没有改变过任何一个结论，故只改文档措辞、不改代码。
+  ③ 顺带把"画布 `S`"在两份文档里的定义抄成同一句，`AGENTS.md` 现状要点同步。
+
+[X][ ] T146. `metrics/pairs.csv` 只有分数，看不出"这一对为什么是 0.6"。用户批的候选 4：把过程量写进指标，避免以后调阈值时只能靠重跑 Python 猜。
+  改：`overlapDetail` 的返回值从 `(score, g, canvas)` 扩成结构体 `motifAlignDetail{Score, Level, Canvas, Levels, ShiftY, ShiftX}`（它只有一个调用点，即 `writeMotifMetrics`，所以扩签名安全）：`Levels = len(motifCanonLevels(canvas, motifAlignFinest(canvas)))`（一共搜了几级），`ShiftY/ShiftX` 是 `motifCanonScoreShift` 早就算好、原来被 `_` 丢掉的判定层平移格数。CSV 从 `a,b,feature_similar,align,align_level,canvas,skip,same_bucket` 扩成 `a,b,feature_similar,align,align_level,canvas,levels,shift_y,shift_x,skip,same_bucket`，跳过（`too_large`/`no_content_box`）的对这三列留 0；表头注释与两份文档同步。
+  新增 `TestMotifMetricsPairsTraceColumns`（表头列名与列数、算得出分数的对必须带 `levels`/`canvas`/`align_level`、内容框一致的两张图 `shift` 必须是 0、能算分的对不许带 `skip`）。没有改判据、没有改阈值，历史 `pairs.csv` 只是少三列。
+
+[X][ ] T147. **class 又参与合并判决了**——用户：「我们不是说了不看 class 跟 class 没有关系……这一个组如果选好了，这个组就是认为同一张图了，然后按照之前判断的 class 类型选择其中占比最大的就给这个组定上类型（准确说是中心图）……我看你说的 AI 判 22 张同组，但多数 class 是 raster → 只并 7 张 vector。class 竟然还是参与判决了。」
+  核对：`motifAutoIconGroups`（自动定组）从 T134 起已经不按 class 过滤，但**会话复核**那条路还留着旧分支——`runMotifScope` 收账时若组内多数不是 `vector`，就把该组交给"只合并组内 vector 成员"的旧逻辑（`motifVectorSubset`/`motifGroupAllVector`），其余成员被打回独立。实测那次运行：一个大桶的会话组 22 张被判成"多数 raster"，最终只并了 7 张矢量图，另外 15 张保持独立，日志原文是「组 [...] 的多数类别是 raster，其中 7 张矢量图合并为一张重画，其余 15 张保持独立」——而其中一张被标成 raster 的成员对该组代表图的 `align` 是 **1.000**（逐字节同图，只是 classify 给了不同类别）。
+  改：删掉整个 class 分支与 `motifVectorSubset`/`motifGroupAllVector`；两条路（自动定组、会话复核）统一成"整组按同一张图合并"，`groupClass := motifGroupClass(cands)`（组内占比最大的 class）只用来给**中心图**定类型（`motifApplyGroupClass`，日志「中心图按组内占比最大的类别定为 …」）。代码注释写清"class 不得作为合并闸门"的原因：同一张图在不同页/不同次 classify 会给出不同类别，混类不代表不是同一张图。
+  预期效果：那次运行的 22 张会话组应整组合并（代表图按多数类 raster 保留原图），整书重画数 64 → 预计 48（后来的组间收口 T149 又把它降到 31）（18 个自动组 + 2 个会话组 + 28 张独立）；18 个小自动组不变——那是**指标口径**问题（见 T146 与 `docs/dedupe-algorithm.md` §4 第 3 条），不是 class。
+  合并语义变了，旧结论就必须作废：`motifDedupeVersion` 从 `visual-motif-v2-tools` 升到 `visual-motif-v3`（与 T149 同一批升级，一次 bump 覆盖两处语义变化）——否则上一版跑出的 `groups.json` 与逐图 `dedupe_checked` 仍会通过复用闸门（输入与阈值都没变），续跑跑的还是被 class 切碎的那份分组。
+  新增 `TestMotifGroupClassUsesMajority`、`TestMotifApplyGroupClassSetsCenter`、`TestMotifRasterLeaderKeepsFollowers`。
+
+[X][ ] T148. 复用闸门永远命中不了，续跑整池重算。整组核验那次 14:47 的续跑又跑了 ~35s 全量扫描（日志里「居中重合额外并进 11 对」、两个会话的记录都重放了一遍），而输入与规则根本没变。
+  根因：`motifReuseDedupe` 要求 `groups.json` 覆盖的全部引用都带 `dedupe_checked`，但**没有候选、没进任何会话的图永远不会被打上这个标记**（它不参与合并，也就没人给它盖章）。于是"每条引用都 checked"这个前提在任何一次真实运行里都不成立，T141 的快路径形同虚设。
+  改：闸门分两级——有跟随关系（组内成员 / 已合并）的引用必须验 `DedupeChecked` + 版本 + `dedupe_source_hash`；**独立**引用只验摘要与 `groups.json` 记录一致（指纹与覆盖检查已经证明输入没变，独立图没有任何关系要对，也就没有"旧结论"会过期）。仍要求 `covered` 覆盖全部引用条数不变。
+  新增/改写 `TestMotifReuseDedupeValidatesConclusions`（组代表图结论被清掉必须重扫；独立图没有 `dedupe_checked` 也必须能复用）。
+
+[X][ ] T149. 同一个桶被切成十几个组，同一枚图各画一遍。用户：「我说的那个100的桶，独立出大于0.75的相似度的，是作为不需要进入会话中去看的了，剩下的那些是看需不需要合并入大于0.75的那个分组，而不是独立为一个分组…所以最终的要绘制的图最多31张」——自动定组只表示这几张**不用再看**，不是各自成为一个最终分组；桶里剩下的要并进已经确认的组，一个桶最后就是一个组、一张代表图。
+  核对：`applied` 里的组**从来没有彼此合并过**——`motifAttachLeftovers` 只管"没进过任何会话的图"，会话给出的结论各自成组。实测该书最大的桶（100 份不同内容）被自动定组切成 18 块、会话再交出一块，`groups.json` 里是 **19 个组、19 个中心图**，同一枚图会被重画 19 遍；而 19 个关键图两两 **171/171 对全部达标**（无跳过）且在 0.60 上连成**恰好一个连通片**——它们本来就是同一张图。
+  改：`applied` 之后加一道"组间收口" `motifFoldGroups`（顺序：会话 → 挂靠 → 收口 → 副本跟随 → 落盘）。判据：**同一个相似桶内**（桶号来自 `metrics/buckets.json` 的 `initial_group`，跨桶不折——桶是 0.60 连通的候选集合，出了桶就没有"同一张图"的前提）且两块的关键图本身达标（`motifMergeAllowed`，与建桶、组内闸门同一口径）就连成一片、折成一组；中心图在**各块的代表图**里按"与其余代表图平均重合度最高"挑（块数很少，比在几百个成员上做 O(n²) 便宜得多），代表图再按组内闸门同一规则换成"与中心 ≥ `dedupe_align_typical` 的成员里内容框最大者"；组类别仍取组内占比最大的 class 落在中心图上。
+  **成员原样收编，不拿新中心重闸一遍**：成员各自已经过会话/组内闸门，再筛一次只会把同一张图拆回好几份——先按"过新中心闸门"实现过一版，实测 19 块里 85 个成员只有 75 个对新中心达标，剩下 10 张被退回独立，等于同一枚图还是画两遍。
+  预期效果（该书 130 份不同内容、桶 `[100,2]`、未分配 28）：100 份的那个桶折成 **1 组**，最终要绘制的图 = 1 + 2 + 28 = **31 张**（与用户口径一致；T147 修复前是 48，再往前 64）。`groups.json`/`report.md` 里这些组标 `source=folded`；`motifDedupeVersion` 一次升到 `visual-motif-v3`（与 T147 同一批，一次 bump 覆盖两处语义变化），旧结论照旧作废。
+  新增 `TestMotifFoldGroupsFoldsSameMotif`（两块同一枚图折成一组、代表图在成员里、其余成员跟随新代表图）、`TestMotifFoldGroupsKeepsDistinctApart`（明显不同的两块不折）、`TestMotifFoldGroupsStaysInsideBucket`（关键图达标但不在同一个桶也不折）。
+
+[X][ ] T150. 分组结论只能从 `groups.json` 里读，看不到"选中的到底是不是同一张图"。用户：「并且有没有在dedupe里面链接一下选过的图片，我想手动看一下。但是这边我看不了。」
+  改：新增 `motif_review.go`，落盘时多写一页 `<proj>/source/dedupe/review.html`——每组一张卡片，代表图标 `★`、成员按 `groups.json` 的顺序排成缩略图网格，缩略图宽 160px、JPEG q=88 内嵌成 data URI（离线双击就能看，不依赖任何服务），点缩略图在新标签打开 `../images/…` 原图；独立图单独一块。缩略图有解码预算（`motifReviewProbeBudget` 约 2 亿像素），超预算的图退回只给链接、不占内存。`report.md` 里的代表图与独立图也从"文件名"改成 Markdown 相对链接（`[`a.jpg`](../images/a.jpg)`），两页互为索引。
+  实测该书：388 条引用 / 130 份不同内容 → `review.html` 452 KB，落盘（groups.json + report.md + review.html + metrics）合计 859ms。
+  新增 `TestWriteMotifReviewLinksSelectedImages`（代表图/成员/独立图的链接、缩略图是内嵌 data URI）。
+
+[X][ ] T151. 扫描候选要 30 多秒，上百张图就这么慢，上千张不敢想。用户：「这个扫描候选的时候目前需要33s关键路径是什么？哪里是瓶颈？100多张图都要30多秒有的时候我们这边会有上千张图。」
+  定位（该书 388 条引用 / 130 份不同内容）：33s 里 **26.2s 全花在写 `metrics/pairs.csv` 的逐对打分上**——那一步对全部 7503 对算居中重合度，其中 99% 是跨桶、大画布的对（画布 283–512 的单对 12–19ms），对"怎么分桶、怎么分组"没有任何影响。真正决定结论的只有同桶内的对。
+  改（判据一条没动）：① 分数复用——`writeMotifMetrics` 直接吃扫描阶段已经算过的分数（`motifPairRef` 只补算没算过的对），不再重算一遍；② 覆盖率与特征各算一次，进同一次遍历；③ 预筛下沉成公共函数，被预筛掉的对记 `skip=prefilter`（以前是算完再丢掉）；④ 打分并行（上限 `motifAlignWorkers`）、按"一对值多少"排序（小画布/同桶先算）；⑤ 全程一笔成本预算 `motifMetricsCostBudget`（1.2e9 单位，超出记 `skip=pair_cap`），上千张池子上这段也有上限、不会无限膨胀。
+  实测同样 388/130：逐对打分 26.2s → **3.4s**，整段候选扫描 ~33s → **~7.0s**（读+哈希 5ms、解码 388 张 60ms、特征 130 份 206ms、覆盖率 177ms、特征对 4ms、桶扫描 2.2–2.4s、逐对指标 3.4s、落盘 0.9s）。`pairs.csv` 仍是一对一行（8385 行）：6160 行有分数、1343 行 `prefilter`、882 行 `too_large`；有分数的对中位 0.597、≥0.60 的 2976 对、≥0.75 的 232 对（旧版对 7503 对算分，中位 0.578）。
+
+[X][ ] T152. 会话已经确认"这一组是同一张图"，复核却把组里 4 张退回独立——重跑还是 35 张，不是 31 张。用户：「我重新跑了是35张……我感觉这次应该分类的是对着的」
+  核对：这 4 张都在核验会话的 `motif_groups` 里（`manifest.md` 逐张看过、会话给了 `key`），落盘却是独立图。原因是 2.7 的复核只拿成员与**组中心**比 `align ≥ 0.60`，而这 4 张离中心只有 0.52–0.64（同一枚图换分辨率/长宽比，与中心的分数明显偏低），可它们与组内**某个已经达标的成员**是 0.686–0.812。复核把"离中心不足"直接判成独立，又已经把 `dedupe_checked` 写成了真，收尾的挂靠再没有机会碰它们（`motifAttachLeftovers` 只处理没核验过的图），于是永远独立。
+  改：复核时保留这一轮已经算出的两两分数矩阵（原来算完就丢），离中心不足的成员再与**已经达标的成员**比一次（≥ `dedupe_align_min` 就随组带入）；只比一轮、不拿带入的成员当跳板（0.60 的相似是传递的，任由接力会把整条相似链并成一张图），带入的成员也不参与代表图挑选（它离中心不够、代表不了这一组），日志附「（其中 N 张离中心不足、与组内成员达标，随组带入）」。判据本身（`motifAlignFilter` 的返回值多一个 `carried`）与阈值都没动。
+  同时把「组内最低分」的口径写清：`report.md` 出现低于门槛的成员时加一句脚注——它是**与代表图**的分数，入组要求是"与组里某个已确认成员达标"，组间收口时成员随代表图一起带入、不再重判；逐对证据在 `metrics/pairs.csv`。
+  结论语义变了就必须作废旧结论：`motifDedupeVersion` 从 `visual-motif-v3` 升到 `visual-motif-v4`，否则续跑的复用闸门（版本 + 规则指纹 + 输入摘要全对就沿用 `groups.json`）会继续端出那份 35 张的旧分组，改动等于没生效。
+  预期效果：该书 35 张 → **31 张**（1 个折出来的组 + 2 张 + 28 份独立），与 T149 的用户口径一致。新增 `TestMotifAlignFilterCarriesMemberMatchingAnotherMember`（三档尺寸：离中心 0.46、与组内另一档 0.66 的那张要带入、且不能当代表图）、`TestMotifCarryOverDoesNotRelay`（带进来的不能当跳板）、`TestMotifArtifactReportExplainsBelowMinMember`（低于门槛时必须有那句解释、都达标时不许出现）。
+
+[X][ ] T153. 原样续跑还要重算一遍桶扫描与逐对指标（~7s），可这些都是同一批输入上完全确定的中间量。用户：「接着做那两个还没做的」（T151 已把 33s 压到 ~7.0s，其中桶扫描 2.17–2.39s、逐对指标 3.36s 都是"照同一套规则再算一遍"）。
+  改：扫描的中间量落盘成 `<proj>/source/dedupe/scan.json`——分桶结果（每桶成员 + 是否自动定组）与逐对明细（分数/判定层/画布/级数/平移两向），键是「版本 + 判定相关配置（`align_min`/`shift`/`icon_auto`/`typical`/`grid`/`icon_max_area`/`bucket_max`）+ 排序去重后的内容哈希集」的 sha256 前 16 位。阶段开头先试读：键对上、且池里每个内容都在缓存里有记录，就整段跳过桶扫描与逐对打分（日志「沿用 source/dedupe/scan.json（键 …）：N 个桶、M 对逐对明细，跳过桶扫描与逐对重算」）；键对不上照常全量重算并覆写。桶数超上限（`dedupe_bucket_max`）而根本没做桶扫描的那次，`merges` 记成 -1，续跑打印的分桶数与首跑一致。
+  这只是纯缓存、判据一条没动，所以 **`motifDedupeVersion` 不动**（产物与不缓存时逐字节相同，测试钉住）；结构变化只升内部格式号 `motifScanCacheFormat`。缓存读坏/缺项一律当没命中，绝不用来改结论。实测同一批图续跑 ~7.0s → **~1.3s**。
+  新增 `TestMotifScanCacheReuseIsOutputNeutral`（缓存命中的产物与全量重算逐字节一致）、`TestMotifScanCacheKeyFollowsCriteria`（改判定配置/换一张图都必须换键）、`TestMotifScanCacheCorruptIsIgnored`（坏缓存只当未命中）。
+
+[X][ ] T154. 看图页只能离线双击，图片全内嵌 base64、分组默认全展开、点图打不开。用户：「生成的那个dedupe的review.html我觉得可以和那个web界面放一起。就是在核对会话那边里面有个按钮可以点就能打开预览这个界面。并且访问的这个里面的图片不用base64嵌入，而是连接，每个分组可以收起来或者展开查看，点击能看大图，再点一下可以回去，并且支持缩放就和web界面那样。文件夹里面review也保留。（但是目前review点击里面图片打不开，并且分组默认展开有的分组比较大，还有就是图片都是base64而不是链接，到图片的位置，有点浪费空间）」
+  **点图打不开**的根因：旧页把缩略图写成 `target="_blank"` 指向 `data:image/jpeg;base64,…`，浏览器拒绝顶层导航到 data URL，点了没有任何反应。
+  改：① 会话预览服务新增 `GET /dedupe?project=<项目名>`，服务的就是磁盘上那一份 `source/dedupe/review.html`（页内渲染器只有一份，`sessionview` 不重复实现），只在 `<head>` 后注入一行 `<base href="/media/<项目>/source/dedupe/">`，让页面里的相对链接（`../images/…`、`thumbs/…`）落到既有的 `/media` 路由上；没有这一页（整组核验没跑完）时回 404 并说明原因。`/api/index` 多一个 `dedupeReviews` 项目名列表（只列真有这一页的项目）。② 侧栏「整组核验」阶段行加一个常显的「复查」胶囊（新标签打开；不复用"悬停才出现"的行内按钮样式——触屏与键盘都点不到）。③ 页面本身：缩略图改成普通 `<img src="thumbs/<内容哈希前 12 位>.jpg">`，不再写 base64，分组**默认收起**（收起的组浏览器根本不发图片请求，几百张的池子打开就是一行行摘要），`全部展开`/`全部收起`，点缩略图在**页内灯箱**打开（滚轮/双指缩放、拖动平移、`+`/`−`/复位、再点一下或 Esc 关闭），`onerror` 退回原图链接；磁盘上的 `review.html` 照旧保留、离线双击仍能看。④ 判据/分组结果零变化，`review.html` 只是展示层。
+  验证（测试夹具，24 条图片引用 / 2 组 + 8 张独立）：收起状态 **0 个图片请求**，`全部展开` 后 24/24 加载完成、无 HTTP ≥400；点缩略图 → 灯箱 100% → 滚轮 → 152% → 拖动平移 → 点在图上关闭 → 再开、Esc 关闭，全程控制台无脚本报错；侧栏「整组核验」行上的「复查」胶囊 → 新标签 `/dedupe?project=…`（不误触外层行折叠）。新增 `TestServeDedupeReviewPage`（注入 `<base>`、缩略图与原图 URL 都 200、未知项目 404、路径穿越 400、`dedupeReviews` 只列有页面的项目）。
