@@ -124,6 +124,9 @@ func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, c
 		if i < autoCount {
 			source = "auto"
 		}
+		if g.Source != "" {
+			source = g.Source
+		}
 		group := motifArtifactGroup{Key: g.Key.task.key(), KeyImage: g.Key.task.imgPath, Class: g.Key.progress.Class, Source: source}
 		for _, m := range g.Members {
 			inGroup[m] = true

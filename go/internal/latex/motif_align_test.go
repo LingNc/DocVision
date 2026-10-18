@@ -438,3 +438,58 @@ func TestMotifAlignFilterPrefersTypicalLargestMember(t *testing.T) {
 		t.Fatalf("夹具不合适：oddBig 的内容框应最大 (%d vs %d)", co.area, cb.area)
 	}
 }
+
+// T135：没进会话、也没有等价结论的图，若与已确认组的代表图重合度 ≥
+// dedupe_attach_min，就挂靠过去（source=attached）；会话看过并判过独立的图
+// 不改判，结构不同的图也不挂。
+func TestMotifAttachLeftoversOnlyUnseenImages(t *testing.T) {
+	dir := t.TempDir()
+	r := &Runner{cfg: &config.Config{Latex: config.LatexConfig{
+		DedupeAlignMin: 0.60, DedupeAlignShift: 0.10, DedupeAttachMin: 0.60, DedupeIconMaxArea: 200000,
+	}}}
+	mk := func(name string, img image.Image, class string) *motifCandidate {
+		tk := &task{mdName: "book.md", imgPath: "images/" + name}
+		p := &imageProgress{Key: tk.key(), MDName: tk.mdName, ImgPath: tk.imgPath, Class: class, Status: "classified"}
+		return &motifCandidate{task: tk, progress: p, image: img, sourceHash: "hash-" + name}
+	}
+	base := whiteCanvas(70, 96)
+	drawDiamond(base, 35, 30, 18)
+	dup := whiteCanvas(70, 96)
+	drawDiamond(dup, 35, 30, 18) // 同一枚（内容完全一致，重合度 1.00）
+	block := whiteCanvas(70, 96)
+	for y := 24; y < 70; y++ {
+		for x := 24; x < 46; x++ {
+			block.Set(x, y, color.RGBA{A: 255})
+		}
+	}
+	key := mk("k.jpg", base, ClassVector)
+	unseen := mk("u.jpg", dup, ClassVector)
+	other := mk("o.jpg", block, ClassVector)
+	seen := mk("s.jpg", dup, ClassRaster)
+	seen.progress.DedupeChecked = true // 会话看过：不改判
+
+	applied := []motifAppliedGroup{{Key: key, Members: []*motifCandidate{key}, Class: ClassVector}}
+	n, extra := r.motifAttachLeftovers([]*motifCandidate{key, unseen, other, seen}, applied, dir)
+	if n != 1 || len(extra) != 1 {
+		t.Fatalf("应当只挂靠 1 张，got n=%d extra=%d", n, len(extra))
+	}
+	if unseen.progress.EquivalentTo != key.task.key() || !unseen.progress.DedupeChecked {
+		t.Fatalf("挂靠后必须指向代表图并标记已核验: %q checked=%v", unseen.progress.EquivalentTo, unseen.progress.DedupeChecked)
+	}
+	if extra[0].Source != "attached" || extra[0].Key != key {
+		t.Fatalf("挂靠组必须记 source=attached 且锚点是已确认组: %+v", extra[0])
+	}
+	if other.progress.EquivalentTo != "" {
+		t.Fatal("结构不同的图不能挂靠")
+	}
+	if seen.progress.EquivalentTo != "" {
+		t.Fatal("会话判过的图不能被挂靠改判")
+	}
+	// 门槛可配：抬到 1.01（夹到 1.0）时，只有完全一致的图能挂上。
+	r.cfg.Latex.DedupeAttachMin = 1.0
+	unseen.progress.EquivalentTo = ""
+	unseen.progress.DedupeChecked = false
+	if n, _ := r.motifAttachLeftovers([]*motifCandidate{key, unseen}, applied, dir); n != 1 {
+		t.Fatalf("完全一致（1.00）在门槛 1.0 下仍应挂靠，got %d", n)
+	}
+}

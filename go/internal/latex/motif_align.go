@@ -125,6 +125,23 @@ func motifAlignCoverage(img image.Image) (motifAlignImage, bool) {
 	}, true
 }
 
+// overlapDetail 同 overlap，另外给判定层的格数 G 和画布边长 S（写 metrics 用）。
+func (a motifAlignImage) overlapDetail(b motifAlignImage, shiftCells int) (score float64, g, canvas int) {
+	canvas = a.canon.maxSide()
+	if s := b.canon.maxSide(); s > canvas {
+		canvas = s
+	}
+	if canvas < motifCanonMinS {
+		canvas = motifCanonMinS
+	}
+	if canvas > motifCanonMaxS {
+		canvas = motifCanonMaxS
+	}
+	pct := float64(shiftCells) / float64(motifAlignGrid)
+	score, _, _, g = motifCanonScoreShift(a.canon, b.canon, canvas, motifAlignFinest(canvas), pct)
+	return score, g, canvas
+}
+
 // overlap 算两张图的居中重合度：S 取两者内容框长边的较大者（同一批图里
 // 就是池子的尺子），平移上限按 shiftCells/32 的比例（0.10 → 9.4%）。
 func (a motifAlignImage) overlap(b motifAlignImage, shiftCells int) float64 {

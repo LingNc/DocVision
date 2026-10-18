@@ -231,6 +231,14 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	} else if len(applied) == 0 {
 		r.log.Log(0, "[dedupe] 本次没有通过校验的分组，跳过整理会话；process 将逐图处理")
 	}
+	// T135：会话看过并判为独立的图**不改判**，但那些压根没进会话（本地没有
+	// 候选、也没被整理会话问过）的图，若与某个已确认组的代表图重合度仍达标，
+	// 就直接挂靠过去——它们是同一枚图标，只是几何差异让不缩放的判据差了一点，
+	// 单独重画没有意义。
+	if n, extra := r.motifAttachLeftovers(leaders, applied, progDir); n > 0 {
+		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张没进会话的图挂靠到已确认组（重合度 ≥ %.2f，记 source=attached）", n, r.motifAttachMin()))
+		applied = append(applied, extra...)
+	}
 	// 会话进度行的 N/M 只说明"第 M 步走到第 N 步"，其中最后一步是整理会话
 	// ——它依赖前面会话交出的 key，所以永远是串行、而且可能压根没开。T126
 	// 的日志只剩 [dedupe 2/2]，看起来像"两个会话都跑完了"，实际是 0 组合并。
@@ -304,6 +312,74 @@ func motifAdoptCopies(leaders []*motifCandidate, copies map[*motifCandidate][]*m
 		}
 	}
 	return linked
+}
+
+// motifAttachLeftovers 把"没进过会话、也没有等价结论"的图和已确认组的代表图
+// 比一遍，达标的挂靠过去（T135）。只认会话确认过的 key 作锚点，一次只挂一个
+// 组（取最高分，并列时按 applied 顺序先出现者），所以不存在两组合并成环的
+// 问题；会话做过判断的图（DedupeChecked）一律跳过——模型看过的东西不推翻。
+func (r *Runner) motifAttachLeftovers(leaders []*motifCandidate, applied []motifAppliedGroup, progDir string) (int, []motifAppliedGroup) {
+	min := r.motifAttachMin()
+	if min <= 0 {
+		return 0, nil
+	}
+	type anchor struct {
+		key *motifCandidate
+		cov motifAlignImage
+		cls string
+	}
+	var anchors []anchor
+	grouped := map[*motifCandidate]bool{}
+	for _, g := range applied {
+		if g.Key == nil {
+			continue
+		}
+		for _, m := range g.Members {
+			grouped[m] = true
+		}
+		grouped[g.Key] = true
+		if cov, ok := motifAlignCoverage(g.Key.image); ok {
+			anchors = append(anchors, anchor{key: g.Key, cov: cov, cls: g.Class})
+		}
+	}
+	if len(anchors) == 0 {
+		return 0, nil
+	}
+	shift := r.motifAlignShift()
+	var extra []motifAppliedGroup
+	attached := 0
+	for _, c := range leaders {
+		if c == nil || c.image == nil || c.progress == nil {
+			continue
+		}
+		if grouped[c] || c.progress.DedupeChecked || c.progress.EquivalentTo != "" {
+			continue
+		}
+		cov, ok := motifAlignCoverage(c.image)
+		if !ok || cov.area > motifAlignIconMaxArea {
+			continue
+		}
+		var best *anchor
+		bestScore := min
+		for i := range anchors {
+			v := cov.overlap(anchors[i].cov, shift)
+			if v > bestScore || (best == nil && v >= min) {
+				best, bestScore = &anchors[i], v
+			}
+		}
+		if best == nil {
+			continue
+		}
+		c.progress.EquivalentTo = best.key.task.key()
+		c.progress.DedupeLeaderHash = best.key.sourceHash
+		c.progress.DedupeVersion = motifDedupeVersion
+		c.progress.DedupeSourceHash = c.sourceHash
+		c.progress.DedupeChecked = true
+		saveProgress(progDir, c.progress)
+		extra = append(extra, motifAppliedGroup{Key: best.key, Members: []*motifCandidate{c}, Class: best.cls, Source: "attached"})
+		attached++
+	}
+	return attached, extra
 }
 
 // motifAutoIconGroups 把"重合到几乎没有疑问"的小图标直接本地合并成组，不再
@@ -454,6 +530,9 @@ type motifAppliedGroup struct {
 	Key     *motifCandidate
 	Members []*motifCandidate
 	Class   string
+	// Source 是这组的来源，空 = 按位置推断（autoGroups 之前 = auto，其余 =
+	// session）；"attached" 是 T135 的挂靠组（本地重合度达标、没进会话）。
+	Source string
 }
 
 // motifProgressDir is the single place 档位1 stores per-image progress.

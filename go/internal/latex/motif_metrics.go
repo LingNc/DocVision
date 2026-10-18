@@ -42,22 +42,29 @@ func (r *Runner) writeMotifMetrics(outDir string, vis []VisualMotifSample, group
 	}
 	shift := r.motifAlignShift()
 	var b strings.Builder
-	b.WriteString("a,b,feature_similar,align,same_bucket\n")
+	b.WriteString("a,b,feature_similar,align,align_level,canvas,skip,same_bucket\n")
 	for i := 0; i < n; i++ {
 		for j := i + 1; j < n; j++ {
 			fs := 0
 			if motifFeatureSetSimilar(feat[i], feat[j]) {
 				fs = 1
 			}
-			align := ""
-			if ok[i] && ok[j] {
-				align = fmt.Sprintf("%.3f", cov[i].overlap(cov[j], shift))
+			align, level, canvas, skip := "", 0, 0, ""
+			switch {
+			case !ok[i] || !ok[j]:
+				// 大图/无前景的图拿不到内容框，退回逐对相似度（T138 ⑥）。
+				skip = "no_content_box"
+			case cov[i].area > motifAlignIconMaxArea || cov[j].area > motifAlignIconMaxArea:
+				skip = "too_large"
+			default:
+				s, g, c := cov[i].overlapDetail(cov[j], shift)
+				align, level, canvas = fmt.Sprintf("%.3f", s), g, c
 			}
 			same := 0
 			if bi, oki := bucketOf[vis[i].Key]; oki && bi == bucketOf[vis[j].Key] {
 				same = 1
 			}
-			fmt.Fprintf(&b, "%s,%s,%d,%s,%d\n", keys[i], keys[j], fs, align, same)
+			fmt.Fprintf(&b, "%s,%s,%d,%s,%d,%d,%s,%d\n", keys[i], keys[j], fs, align, level, canvas, skip, same)
 		}
 	}
 	if err := os.WriteFile(filepath.Join(dir, "pairs.csv"), []byte(b.String()), 0o644); err != nil {
