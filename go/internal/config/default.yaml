@@ -1,6 +1,6 @@
 # DocVision Configuration
 
-config_version: 19
+config_version: 20
 # Copy this file to config.yaml and fill in your credentials.
 
 # MinerU API Configuration
@@ -87,6 +87,17 @@ latex:
   # 直接合并、不进核验会话（省掉逐张看图）；0.60–0.75 之间仍送会话核验。
   # 0 = 关闭自动归组，所有图标都交会话。未写该键时为 0.75。
   dedupe_icon_auto: 0.75
+  # 逐级搜索最细一级（判定用的那一级）的格数：整数=固定格数；"0.95S"=内容框
+  # 画布边长的 0.95 倍（S 自适应，推荐——固定 32 会把"只差一个符号"的图平均成
+  # 同一张）。级数从 32 起逐级翻倍到它为止。未写时 "0.95S"。
+  dedupe_align_grid: "0.95S"
+  # "典型成员"门槛：与组中心重合度达到它的成员里取内容框最大者当代表图。
+  dedupe_align_typical: 0.95
+  # 未入桶的图挂靠已确认组的门槛；0 = 关闭挂靠。未写时 0.60。
+  dedupe_attach_min: 0.60
+  # 小图标面积上限（像素，宽×高）与参与重合度归并的最大张数。
+  dedupe_icon_max_area: 20000
+  dedupe_bucket_max: 400
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）

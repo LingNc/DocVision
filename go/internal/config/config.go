@@ -289,6 +289,23 @@ type LatexConfig struct {
 	// 达到它的图标直接合并、不进核验会话；0 = 关闭自动归组（全部交会话）。
 	// 未写该键时默认 0.75（比 dedupe_align_min 高，0.60–0.75 之间仍送会话）。
 	DedupeIconAuto float64 `yaml:"dedupe_icon_auto"`
+	// DedupeAlignGrid: 逐级搜索**最细一级（判定用的那一级）**的格数。两种写法：
+	// 整数 = 固定格数（如 "128"）；"0.95S" = 内容框画布边长 S 的 0.95 倍
+	// （S 自适应，避免粗网格把符号差异平均掉）。级数由 32 起逐级翻倍到它为止，
+	// 更细的层没有。未写该键时默认 "0.95S"。
+	DedupeAlignGrid string `yaml:"dedupe_align_grid"`
+	// DedupeAlignTypical: "典型成员"门槛（0-1）：与组中心重合度达到它的成员里
+	// 取内容框最大者当代表图。未写该键时默认 0.95。
+	DedupeAlignTypical float64 `yaml:"dedupe_align_typical"`
+	// DedupeAttachMin: 未入桶的图"挂靠"已确认组的门槛（0-1）。挂靠只跟着组走、
+	// 不改变组本身；0 = 关闭挂靠。未写该键时默认 0.60。
+	DedupeAttachMin float64 `yaml:"dedupe_attach_min"`
+	// DedupeIconMaxArea: 小图标面积上限（像素，宽×高）。超过它的图只走逐对
+	// 相似度，不进重合度归并。未写该键时默认 20000（约 141×141）。
+	DedupeIconMaxArea int `yaml:"dedupe_icon_max_area"`
+	// DedupeBucketMax: 最多多少张小图标参与重合度归并；超过就退回逐对相似度
+	// 并警告（避免 O(n²) 拖住整本书）。未写该键时默认 400。
+	DedupeBucketMax int `yaml:"dedupe_bucket_max"`
 	DrawingModel   string  `yaml:"drawing_model"`
 	StyleModel     string  `yaml:"style_model"`
 	ChapterModel   string  `yaml:"chapter_model"`
@@ -757,9 +774,9 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）; 19 (T131)：latex 新增 dedupe_icon_auto（小图标本地自动归组的门槛，未写时 0.75、0 = 关闭，全部交核验会话）。
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）; 19 (T131)：latex 新增 dedupe_icon_auto（小图标本地自动归组的门槛，未写时 0.75、0 = 关闭，全部交核验会话）; 20 (T138/T135)：latex 新增 dedupe_align_grid（判据网格，整数或 "0.95S"）/ dedupe_align_typical / dedupe_attach_min / dedupe_icon_max_area / dedupe_bucket_max。
 // 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 text。
-const CurrentConfigVersion = 19
+const CurrentConfigVersion = 20
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -857,6 +874,21 @@ func LoadConfigData(data []byte, path string) (*Config, error) {
 		}
 		if mapNodeValue(latex, "dedupe_icon_auto") == nil {
 			cfg.Latex.DedupeIconAuto = 0.75
+		}
+		if mapNodeValue(latex, "dedupe_align_grid") == nil {
+			cfg.Latex.DedupeAlignGrid = "0.95S"
+		}
+		if mapNodeValue(latex, "dedupe_align_typical") == nil {
+			cfg.Latex.DedupeAlignTypical = 0.95
+		}
+		if mapNodeValue(latex, "dedupe_attach_min") == nil {
+			cfg.Latex.DedupeAttachMin = 0.60
+		}
+		if mapNodeValue(latex, "dedupe_icon_max_area") == nil {
+			cfg.Latex.DedupeIconMaxArea = 20000
+		}
+		if mapNodeValue(latex, "dedupe_bucket_max") == nil {
+			cfg.Latex.DedupeBucketMax = 400
 		}
 	}
 
