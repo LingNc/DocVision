@@ -7,6 +7,7 @@ import (
 	"image/draw"
 	"math"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	xdraw "golang.org/x/image/draw"
@@ -27,11 +28,10 @@ import (
 // A side-by-side view makes the shared structure visible; the numbers in the
 // receipt (pixel size, aspect) make the scale/crop differences explicit.
 //
-// It is deliberately an AID, not evidence: this tool has no access to the `seen`
-// set, so looking at a comparison can never satisfy the "every member must be
-// inspected individually and uncropped" gate on submit. Nor is it a contact
-// sheet: it takes at most 4 ids the model itself names (never a whole bucket),
-// so it cannot be used to "inspect" hundreds of images with a handful of calls.
+// 它算证据（T132，用户口径）：并排的每一张都是原图等比缩放、没有裁剪，模型
+// 确实看见了它们——所以"比过 2–4 张"等于"看过这 2–4 张"，会记进 seen。前提
+// 是它上限只有 4 张、且 id 由模型自己点名：绝不能变成"用几张联系图声称看过
+// 上百张"（T118 的教训针对的正是那种整桶拼图）。
 type motifCompareTool struct {
 	// root is the session workspace (the same tree view_image sees).
 	root string
@@ -39,6 +39,11 @@ type motifCompareTool struct {
 	// first (originals/NNNNNN.ext), then keys (keys/NNNNNN.ext), so the ids
 	// are the very ids used by motif_groups and by the submit gate.
 	files []string
+	// seen is the per-image evidence set, shared with view_image and the
+	// submit gate; dbPath mirrors it into the session workspace so a resumed
+	// session keeps the evidence it already collected.
+	seen   map[int]bool
+	dbPath string
 }
 
 const (
@@ -55,7 +60,7 @@ func (t *motifCompareTool) Name() string { return "compare_images" }
 func (t *motifCompareTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "compare_images",
-		"description": "Render 2-4 images of this session side by side in one picture (one box each, aspect preserved, no distortion) to compare a detail that is hard to judge one image at a time. ids are the same 1-based ids motif_groups uses (keys/000004 counts as its member id). This is a comparison aid only: it does not count as inspecting anything, so every member still needs its own uncropped view_image before it can be merged.",
+		"description": "Render 2-4 images of this session side by side in one picture (one box each, aspect preserved, no distortion). ids are the same 1-based ids motif_groups uses (keys/000004 counts as its member id). Every image in the picture is shown whole and unscaled-to-fit, so looking at it counts as having inspected each of them.",
 		"parameters": map[string]any{"type": "object", "properties": map[string]any{
 			"ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 1}, "description": "2-4 session ids to place side by side, left to right then top to bottom"},
 		}, "required": []string{"ids"}},
@@ -133,13 +138,36 @@ func (t *motifCompareTool) Execute(argsJSON string) (session.ToolResult, error) 
 	if err != nil {
 		return session.ToolResult{}, err
 	}
+	// 并排图里的每一张都是完整原图（等比缩放、无裁剪），所以这张图算证据：
+	// 看见它等于看见了其中的每一张（T132）。
+	if t.seen != nil {
+		changed := false
+		for _, p := range panes {
+			if !t.seen[p.id] {
+				t.seen[p.id] = true
+				changed = true
+			}
+		}
+		if changed {
+			saveMotifSeen(t.dbPath, t.seen)
+		}
+	}
 	return session.ToolResult{
 		Text: fmt.Sprintf(
-			"Compared %d images in one picture (%s). Each pane is %d×%d px, aspect preserved and no distortion; every image was scaled to fill its box, so on-picture size is NOT comparable — the numbers above are. This is a comparison aid, not evidence: it does not count as inspecting anything, and every member still needs its own uncropped view_image before it can be merged.",
-			len(panes), where.String(), motifCompareBoxW, motifCompareBoxH),
+			"Compared %d images in one picture (%s). Each pane is %d×%d px, aspect preserved and no distortion; every image was scaled to fill its box, so on-picture size is NOT comparable — the numbers above are. Every image above is shown whole and uncropped, so this counts as having inspected all %d of them (ids %s).",
+			len(panes), where.String(), motifCompareBoxW, motifCompareBoxH, len(panes), idList(ids)),
 		ImageBase64: b64,
 		ImageMIME:   "image/jpeg",
 	}, nil
+}
+
+// idList 把面板 id 组成 "1, 3, 4" 的样子，写进回执让人和模型都看得懂哪些算看过。
+func idList(ids []int) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, strconv.Itoa(id))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func sep(i int) string {

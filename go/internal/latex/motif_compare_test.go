@@ -71,7 +71,7 @@ func TestMotifCompareImagesRendersPanes(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Compared 3 images", "1: 40×30px aspect 1.33", "3: 25×50px aspect 0.50", "2: 60×20px aspect 3.00",
-		"not evidence",
+		"counts as having inspected all 3 of them",
 	} {
 		if !strings.Contains(res.Text, want) {
 			t.Fatalf("receipt missing %q: %s", want, res.Text)
@@ -104,8 +104,10 @@ func TestMotifCompareImagesRejectsBadIDs(t *testing.T) {
 	}
 }
 
-// 比较图不是证据：它不写 seen，所以"比过两张"绝不能换来一次合并许可。
-func TestMotifCompareImagesIsNotEvidence(t *testing.T) {
+// 比较图算证据（T132 用户口径）：并排的每一张都是完整原图，所以"比过这两张"
+// 就是"看过这两张"——submit 的逐张门禁应当被满足。上限仍是 4 张、id 由模型
+// 自己点名，不会退化成"用联系图声称看过整桶"。
+func TestMotifCompareImagesCountsAsSeen(t *testing.T) {
 	view := t.TempDir()
 	sizedPNG(t, filepath.Join(view, "originals", "000001.png"), 12, 10, color.RGBA{10, 10, 10, 255})
 	sizedPNG(t, filepath.Join(view, "originals", "000002.png"), 12, 10, color.RGBA{20, 20, 20, 255})
@@ -114,17 +116,25 @@ func TestMotifCompareImagesIsNotEvidence(t *testing.T) {
 		t.Fatalf("stage group: %+v %v", res, err)
 	}
 	seen := map[int]bool{}
-	compare := &motifCompareTool{root: view, files: []string{"originals/000001.png", "originals/000002.png"}}
-	if res, err := compare.Execute(`{"ids":[1,2]}`); err != nil || res.ImageBase64 == "" {
-		t.Fatalf("compare: %+v %v", res, err)
+	seenFile := filepath.Join(view, "seen.json")
+	compare := &motifCompareTool{root: view, files: []string{"originals/000001.png", "originals/000002.png"}, seen: seen, dbPath: seenFile}
+	cres, cerr := compare.Execute(`{"ids":[1,2]}`)
+	if cerr != nil || cres.ImageBase64 == "" {
+		t.Fatalf("compare: %+v %v", cres, cerr)
 	}
-	if len(seen) != 0 {
-		t.Fatalf("compare_images must not record evidence: %v", seen)
+	if !seen[1] || !seen[2] {
+		t.Fatalf("compare_images 必须把并排的每张都记为看过: %v", seen)
+	}
+	if !strings.Contains(cres.Text, "counts as having inspected all 2") {
+		t.Fatalf("回执必须说明这张图算证据: %s", cres.Text)
+	}
+	if data, err := os.ReadFile(seenFile); err != nil || !strings.Contains(string(data), "2") {
+		t.Fatalf("证据必须落盘（续跑要用）: %q %v", data, err)
 	}
 	submit := &motifSubmitTool{groups: groups, seen: seen}
 	res, err := submit.Execute(`{}`)
-	if err != nil || !strings.Contains(res.Text, "REJECTED") || submit.done.Submitted {
-		t.Fatalf("a comparison must not satisfy the per-image gate: %+v %v", res, err)
+	if err != nil || !submit.done.Submitted {
+		t.Fatalf("看完并排图之后逐张门禁应当满足: %+v %v", res, err)
 	}
 }
 

@@ -67,12 +67,16 @@ func (t *motifViewTool) Execute(raw string) (session.ToolResult, error) {
 // saveSeen persists the evidence set so an interrupted verification session can
 // keep the images it already looked at (T121). Best effort: a failed write only
 // costs a re-inspection.
-func (t *motifViewTool) saveSeen() {
-	if t.dbPath == "" {
+func (t *motifViewTool) saveSeen() { saveMotifSeen(t.dbPath, t.seen) }
+
+// saveMotifSeen 是 evidence 落盘的唯一实现：view_image 与 compare_images 都写
+// 同一个 seen.json，续跑时才不会把"看过"判成"没看过"。
+func saveMotifSeen(dbPath string, seen map[int]bool) {
+	if dbPath == "" {
 		return
 	}
-	ids := make([]int, 0, len(t.seen))
-	for id := range t.seen {
+	ids := make([]int, 0, len(seen))
+	for id := range seen {
 		ids = append(ids, id)
 	}
 	sort.Ints(ids)
@@ -80,7 +84,7 @@ func (t *motifViewTool) saveSeen() {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(t.dbPath, append(payload, '\n'), 0644)
+	_ = os.WriteFile(dbPath, append(payload, '\n'), 0644)
 }
 
 // loadMotifSeen restores the evidence set written by saveSeen.
@@ -265,7 +269,7 @@ func (r *Runner) verifyMotifScope(sc *motifScope, outDir string) ([]MotifGroup, 
 	for i, c := range sc.Keys {
 		compareFiles = append(compareFiles, fmt.Sprintf("keys/%06d%s", i+1, filepath.Ext(c.path)))
 	}
-	compare := &motifCompareTool{root: view, files: compareFiles}
+	compare := &motifCompareTool{root: view, files: compareFiles, seen: seen, dbPath: seenFile}
 	submit := &motifSubmitTool{groups: groupTool, seen: seen, prefill: len(sc.Prefill)}
 	bashTmp, cleanBash := r.sessionBashTemp(filepath.Dir(outDir), "bash_dedupe")
 	defer cleanBash()
