@@ -305,11 +305,11 @@ type LatexConfig struct {
 	DedupeIconMaxArea int `yaml:"dedupe_icon_max_area"`
 	// DedupeBucketMax: 最多多少张小图标参与重合度归并；超过就退回逐对相似度
 	// 并警告（避免 O(n²) 拖住整本书）。未写该键时默认 400。
-	DedupeBucketMax int `yaml:"dedupe_bucket_max"`
-	DrawingModel   string  `yaml:"drawing_model"`
-	StyleModel     string  `yaml:"style_model"`
-	ChapterModel   string  `yaml:"chapter_model"`
-	ConvertModel   string  `yaml:"convert_model"`
+	DedupeBucketMax int    `yaml:"dedupe_bucket_max"`
+	DrawingModel    string `yaml:"drawing_model"`
+	StyleModel      string `yaml:"style_model"`
+	ChapterModel    string `yaml:"chapter_model"`
+	ConvertModel    string `yaml:"convert_model"`
 	// CheckerModel reviews converted chapters (text model, e.g. a
 	// small/fast model from the registry). Empty falls back to
 	// convert_model.
@@ -885,7 +885,7 @@ func LoadConfigData(data []byte, path string) (*Config, error) {
 			cfg.Latex.DedupeAttachMin = 0.60
 		}
 		if mapNodeValue(latex, "dedupe_icon_max_area") == nil {
-			cfg.Latex.DedupeIconMaxArea = 20000
+			cfg.Latex.DedupeIconMaxArea = 200000
 		}
 		if mapNodeValue(latex, "dedupe_bucket_max") == nil {
 			cfg.Latex.DedupeBucketMax = 400

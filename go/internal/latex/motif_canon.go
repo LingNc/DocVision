@@ -260,6 +260,14 @@ func motifCanonLevels(canvas, finest int) []int {
 // motifCanonScore 算两张图的居中重合度：逐级由粗到细搜索平移，返回最终
 // （最细）一级的分数与平移量、该级格数。
 func motifCanonScore(a, b motifCanonImage, canvas, finest int) (score float64, dy, dx, g int) {
+	return motifCanonScoreShift(a, b, canvas, finest, 0.10)
+}
+
+// motifCanonScoreShift 同 motifCanonScore，但可指定 0 级搜索窗（占格数的比例）。
+func motifCanonScoreShift(a, b motifCanonImage, canvas, finest int, shiftPct float64) (score float64, dy, dx, g int) {
+	if shiftPct <= 0 {
+		shiftPct = 0.10
+	}
 	levels := motifCanonLevels(canvas, finest)
 	shiftX, shiftY := 0, 0
 	best := 0.0
@@ -269,7 +277,7 @@ func motifCanonScore(a, b motifCanonImage, canvas, finest int) (score float64, d
 		win := motifCanonRefine
 		cx, cy := shiftX*2, shiftY*2
 		if li == 0 {
-			win = int(math.Round(0.10 * float64(gi)))
+			win = int(math.Round(shiftPct * float64(gi)))
 			if win < 1 {
 				win = 1
 			}

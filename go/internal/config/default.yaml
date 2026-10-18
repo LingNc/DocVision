@@ -96,7 +96,7 @@ latex:
   # 未入桶的图挂靠已确认组的门槛；0 = 关闭挂靠。未写时 0.60。
   dedupe_attach_min: 0.60
   # 小图标面积上限（像素，宽×高）与参与重合度归并的最大张数。
-  dedupe_icon_max_area: 20000
+  dedupe_icon_max_area: 200000
   dedupe_bucket_max: 400
   drawing_model: "drawing"       # TikZ 作图 AI（编译-核对-提交会话）
   style_model: "style"           # 档位1：全书样式分析 AI（cls+手册+案例）

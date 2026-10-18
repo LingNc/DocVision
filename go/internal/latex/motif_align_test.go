@@ -90,29 +90,52 @@ func whiteCanvas(w, h int) *image.RGBA {
 	return img
 }
 
-// 同一枚标记缩小 + 挪位置 + 换画布尺寸，内容框归一化之后必须仍然重合得上：
-// 这正是旧的逐对相似度做不到、而"居中重合"要解决的事。
-func TestMotifAlignCoverageNormalizesScaleAndPosition(t *testing.T) {
+// 同一枚标记放在不同画布、位置差上一两个像素，软覆盖 + 逐级平移搜索必须仍然
+// 认得出来（这正是旧版逐对相似度做不到、而"居中重合"要解决的事）。
+// 注意：T137/T138 定稿后判据**不缩放**——尺寸差一倍的图不再走这条判据，交给
+// 会话挂靠（T135）；这里钉的是"同尺寸、位置偏移"这一档。
+func TestMotifAlignCoverageToleratessPositionOffset(t *testing.T) {
 	big := whiteCanvas(120, 140)
-	drawDiamond(big, 60, 60, 22)
+	drawDiamond(big, 60, 60, 18)
 
-	small := whiteCanvas(90, 100)
-	drawDiamond(small, 30, 25, 11)
+	shifted := whiteCanvas(120, 140)
+	drawDiamond(shifted, 62, 61, 18) // 内容框尺寸相同，只挪了 (2,1)
 
 	cb, ok := motifAlignCoverage(big)
 	if !ok {
 		t.Fatal("big canvas must have coverage")
 	}
-	cs, ok := motifAlignCoverage(small)
+	cs, ok := motifAlignCoverage(shifted)
 	if !ok {
-		t.Fatal("small canvas must have coverage")
+		t.Fatal("shifted canvas must have coverage")
 	}
-	if v := cb.overlap(cs, motifAlignShiftCells(0.10)); v < 0.75 {
-		t.Fatalf("same mark at half scale shifted must overlap, got %.3f", v)
+	if cb.area != cs.area {
+		t.Fatalf("夹具不合适：内容框面积 %d vs %d（应相同）", cb.area, cs.area)
 	}
-	// 完全不搜平移时，位置差会明显拉低重合度——证明搜索不是装饰。
-	if v := cb.overlap(cs, 0); v >= 0.95 {
-		t.Fatalf("no-shift comparison should be worse, got %.3f", v)
+	// 内容框裁掉画布上的位置差：同一枚标记换位置后应当几乎完全重合。
+	if v := cb.overlap(cs, motifAlignShiftCells(0.10)); v < 0.99 {
+		t.Fatalf("同尺寸、只挪位置的图必须完全重合，got %.3f", v)
+	}
+	// 平移搜索真的在起作用：内容框尺寸差 1px 的一对，搜平移不会比不搜差。
+	bigger := whiteCanvas(120, 140)
+	drawDiamond(bigger, 60, 60, 19)
+	cg, ok := motifAlignCoverage(bigger)
+	if !ok {
+		t.Fatal("bigger canvas must have coverage")
+	}
+	withSearch := cb.overlap(cg, motifAlignShiftCells(0.10))
+	if noSearch := cb.overlap(cg, 0); withSearch < noSearch-1e-9 {
+		t.Fatalf("搜平移不该比不搜差：%.4f < %.4f", withSearch, noSearch)
+	}
+	// 尺寸差一倍（缩放）不吃这条判据：不缩放是有意的（T137）。
+	half := whiteCanvas(90, 100)
+	drawDiamond(half, 30, 25, 9)
+	ch, ok := motifAlignCoverage(half)
+	if !ok {
+		t.Fatal("half canvas must have coverage")
+	}
+	if v := cb.overlap(ch, motifAlignShiftCells(0.10)); v >= 0.90 {
+		t.Fatalf("半尺寸的图不该靠这条判据合并（不缩放），got %.3f", v)
 	}
 }
 
@@ -208,32 +231,36 @@ func TestMotifAlignFilterFallsBackWithoutCoverage(t *testing.T) {
 	}
 }
 
-// squashX 把图按水平比例压扁：形状还是那个形状，长宽比变了——旧的逐对判据
-// 用 |Δaspect| ≤ 0.18 硬门槛，压扁 28% 就会被拒；居中重合判据只看重合度。
+// squashX 把图按水平比例压扁：形状还是那个形状，长宽比变了。
 func squashX(src image.Image, factor float64) *image.RGBA {
 	b := src.Bounds()
 	w := int(float64(b.Dx()) * factor)
-	if w < 8 {
-		w = 8
+	if w < 1 {
+		w = 1
 	}
-	dst := image.NewRGBA(image.Rect(0, 0, w, b.Dy()))
+	out := whiteCanvas(w, b.Dy())
 	for y := 0; y < b.Dy(); y++ {
 		for x := 0; x < w; x++ {
-			sx := b.Min.X + int(float64(x)/factor)
-			if sx >= b.Max.X {
-				sx = b.Max.X - 1
+			sx := int(float64(x) / factor)
+			if sx >= b.Dx() {
+				sx = b.Dx() - 1
 			}
-			dst.Set(x, y, src.At(sx, b.Min.Y+y))
+			out.Set(x, y, src.At(b.Min.X+sx, b.Min.Y+y))
 		}
 	}
-	return dst
+	return out
 }
 
-// 桶也走"居中重合"判据：压扁过的同一标记会被逐对相似度漏掉（长宽比门槛），
-// 但重合度达标，所以应当并进同一个桶；结构不同的图仍然分开。
-func TestFindVisualMotifCandidatesAlignedLinksSquashedVariant(t *testing.T) {
+// 桶判据也吃"居中重合"（T130）：同尺寸、位置差几像素的同一枚标记必须并进同
+// 一个桶，结构不同的图和**缩放过**的图不能被并进来（T137：判据不缩放，
+// 跨尺寸交给会话挂靠）。
+func TestFindVisualMotifCandidatesAlignedLinksShiftedDuplicates(t *testing.T) {
 	base := whiteCanvas(70, 96)
 	drawDiamond(base, 35, 30, 18)
+
+	moved := whiteCanvas(70, 96)
+	drawDiamond(moved, 36, 31, 18) // 同一枚，只挪了位置
+
 	squashed := squashX(base, 0.72)
 
 	block := whiteCanvas(70, 96)
@@ -245,32 +272,27 @@ func TestFindVisualMotifCandidatesAlignedLinksSquashedVariant(t *testing.T) {
 
 	samples := []VisualMotifSample{
 		{Key: "a-base", Image: base},
-		{Key: "b-squashed", Image: squashed},
-		{Key: "c-block", Image: block},
+		{Key: "b-moved", Image: moved},
+		{Key: "c-squashed", Image: squashed},
+		{Key: "d-block", Image: block},
 	}
-	// 前提：逐对相似度确实漏掉了压扁版（否则这个测试证明不了桶判据的改动）。
-	legacy := FindVisualMotifCandidates(samples)
-	for _, g := range legacy {
-		if containsKey(g.Members, "a-base") && containsKey(g.Members, "b-squashed") {
-			t.Skip("夹具里的压扁版仍然过逐对判据（阈值可能被调过），本测试不适用")
-		}
-	}
-
 	groups, merges := FindVisualMotifCandidatesAligned(samples, 0.60, 0.10)
 	if merges < 1 {
 		t.Fatalf("居中重合应当并进至少一对，got %d", merges)
 	}
 	joined := false
 	for _, g := range groups {
-		if containsKey(g.Members, "a-base") && containsKey(g.Members, "b-squashed") {
+		if containsKey(g.Members, "a-base") && containsKey(g.Members, "b-moved") {
 			joined = true
 		}
-		if containsKey(g.Members, "c-block") {
-			t.Fatalf("结构不同的图被并进桶: %v", g.Members)
+		for _, bad := range []string{"c-squashed", "d-block"} {
+			if containsKey(g.Members, bad) && containsKey(g.Members, "a-base") {
+				t.Fatalf("%s 不该和基准同桶: %v", bad, g.Members)
+			}
 		}
 	}
 	if !joined {
-		t.Fatalf("压扁版必须与基准同桶，got %v", groups)
+		t.Fatalf("同一枚标记（位置差 1px）必须同桶，got %v", groups)
 	}
 }
 
@@ -313,8 +335,8 @@ func TestMotifAutoIconGroupsIgnoresClass(t *testing.T) {
 	}
 	base := whiteCanvas(70, 96)
 	drawDiamond(base, 35, 30, 18)
-	near := whiteCanvas(72, 98)
-	drawDiamond(near, 36, 30, 19) // 同一枚，略大一点
+	near := whiteCanvas(70, 96)
+	drawDiamond(near, 36, 31, 18) // 同一枚，只挪了位置（不缩放）
 
 	rBase := &Runner{cfg: r.cfg}
 	cb, okB := motifAlignCoverage(base)
@@ -326,27 +348,20 @@ func TestMotifAutoIconGroupsIgnoresClass(t *testing.T) {
 	if v := cb.overlap(cn, shift); v < 0.75 {
 		t.Fatalf("夹具不合适：略大那枚对基准只有 %.3f（应 ≥0.75）", v)
 	}
-	// 找一个"压扁到 0.60–0.75 之间"的版本：这类图正好是用户口径里"仍要送
-	// 会话核验"的那一批，自动归组不能把它们吞掉。具体压多少交给度量自己决定，
-	// 免得夹具和阈值脱钩。
-	var far image.Image
-	farScore, farFactor := 0.0, 0.0
-	for _, f := range []float64{0.62, 0.58, 0.54, 0.50, 0.46, 0.42, 0.38} {
-		cand := squashX(base, f)
-		cov, ok := motifAlignCoverage(cand)
-		if !ok {
-			continue
-		}
-		v := cb.overlap(cov, shift)
-		if v >= 0.60 && v < 0.75 {
-			far, farScore, farFactor = cand, v, f
-			break
+	// 结构完全不同的小图标：重合度远低于门槛，必须留在池子里交会话。
+	far := whiteCanvas(70, 96)
+	for y := 24; y < 70; y++ {
+		for x := 24; x < 46; x++ {
+			far.Set(x, y, color.RGBA{A: 255})
 		}
 	}
-	if far == nil {
-		t.Skip("没有找到落在 0.60–0.75 区间的压扁版本（夹具不适用）")
+	cf, ok := motifAlignCoverage(far)
+	if !ok {
+		t.Fatal("夹具必须是小图标")
 	}
-	t.Logf("中间档夹具：压扁系数 %.2f、重合度 %.3f（应留在池子里交会话）", farFactor, farScore)
+	if v := cb.overlap(cf, shift); v >= 0.60 {
+		t.Fatalf("夹具不合适：不同结构的图标对基准有 %.3f（应 <0.60）", v)
+	}
 
 	a := mk("a.jpg", base, ClassVector)
 	b := mk("b.jpg", near, ClassVector)

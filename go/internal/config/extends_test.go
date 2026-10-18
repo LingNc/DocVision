@@ -573,7 +573,7 @@ models:
 	ref.Latex.DedupeAlignGrid = DefaultAlignGridSpec
 	ref.Latex.DedupeAlignTypical = 0.95
 	ref.Latex.DedupeAttachMin = 0.60
-	ref.Latex.DedupeIconMaxArea = 20000
+	ref.Latex.DedupeIconMaxArea = 200000
 	ref.Latex.DedupeBucketMax = 400
 	if err := validateThinkingTypes(ref); err != nil {
 		t.Fatal(err)

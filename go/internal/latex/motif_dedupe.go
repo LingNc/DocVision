@@ -122,6 +122,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	// 一个连通片切两半（该书 90 张同标记进了桶、另外 10 张落进"未分配"），
 	// 桶与闸门因此长期是两套结论。大插图/无前景的图拿不到覆盖率，仍只走逐对
 	// 相似度，避免稀疏图形互相"有点像"造成误并。
+	applyMotifMetricConfig(r)
 	alignShiftPct := r.cfg.Latex.DedupeAlignShift
 	if alignShiftPct <= 0 {
 		alignShiftPct = motifAlignDefaultShift

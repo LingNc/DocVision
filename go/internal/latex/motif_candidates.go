@@ -28,9 +28,6 @@ const (
 	motifMaxWidth  = 70
 	motifMaxHeight = 70
 	motifGrid      = 20
-	// motifAlignBucketMax 是"桶也用居中重合判据"时允许参与两两比较的小图标
-	// 数量上限；超过它退回逐对相似度（见 findAlignedMotifPairs）。
-	motifAlignBucketMax = 400
 )
 
 // FindVisualMotifCandidates returns exact-content groups and conservative
@@ -608,6 +605,11 @@ func findAlignedMotifPairs(valid []VisualMotifSample, alignMin float64, shiftCel
 		}
 		for j := i + 1; j < len(valid); j++ {
 			if !ok[j] {
+				continue
+			}
+			// 只有"小图标"走这条判据（T130）：内容框超过上限的图是插图，
+			// 两个长得像的插图直接合并没人看过，风险不对等。
+			if covs[i].area > motifAlignIconMaxArea || covs[j].area > motifAlignIconMaxArea {
 				continue
 			}
 			if absFloat(covs[i].inkFrac-covs[j].inkFrac) > 0.12 {
