@@ -7489,6 +7489,15 @@
     if (hasCollapseMemory(key)) return !isCollapsed(key);
     return !!holdsCurrent;
   }
+  function chapterNodeKey(scope, nodeId) {
+    return "chapter:" + scope + "/" + nodeId;
+  }
+  function chapterWantOpen(scope, nodeId, holdsCurrent) {
+    const key = chapterNodeKey(scope, nodeId);
+    const mem = state.collapsed[key];
+    if (mem !== void 0) return !mem;
+    return !!holdsCurrent;
+  }
   function isOverflowOpen(key) {
     return state.overflow[key] === true;
   }
@@ -8962,42 +8971,70 @@
       };
     }
   });
-  const _hoisted_1$h = ["open"];
+  const _hoisted_1$h = ["aria-expanded"];
   const _hoisted_2$g = ["data-id", "title", "onClick"];
-  const _hoisted_3$d = {
-    key: 0,
-    class: "chapter-state"
-  };
+  const _hoisted_3$d = ["aria-expanded", "aria-label", "title", "onClick"];
   const _hoisted_4$b = {
     key: 1,
+    class: "chapter-toggle-spacer",
+    "aria-hidden": "true"
+  };
+  const _hoisted_5$b = {
+    key: 2,
+    class: "chapter-state"
+  };
+  const _hoisted_6$9 = {
+    key: 3,
     class: "chapter-usage"
   };
-  const _hoisted_5$b = { class: "chapter-node-body" };
-  const _hoisted_6$9 = ["data-id", "title", "onClick"];
   const _hoisted_7$8 = {
+    key: 0,
+    class: "chapter-node-body"
+  };
+  const _hoisted_8$5 = ["data-id", "title", "onClick"];
+  const _hoisted_9$5 = {
     key: 0,
     class: "chapter-state"
   };
-  const _hoisted_8$5 = {
+  const _hoisted_10$4 = {
     key: 1,
     class: "chapter-usage"
   };
-  const _hoisted_9$5 = ["onClick"];
+  const _hoisted_11$4 = ["onClick"];
   const _sfc_main$l = /* @__PURE__ */ defineComponent({
     ...{ name: "ChapterSessionTree" },
     __name: "ChapterSessionTree",
     props: {
       nodes: {},
-      depth: {}
+      depth: {},
+      scope: {}
     },
     emits: ["select", "info"],
     setup(__props, { emit: __emit }) {
+      const props = __props;
       const emit2 = __emit;
       const currentId = computed(() => state.current && state.current.id);
       function nodeContainsCurrent(node) {
         var _a, _b;
         if (((_a = node.convert) == null ? void 0 : _a.id) === currentId.value || ((_b = node.checker) == null ? void 0 : _b.id) === currentId.value) return true;
         return node.children.some(nodeContainsCurrent);
+      }
+      function nodeKey(node) {
+        return chapterNodeKey(props.scope, node.id);
+      }
+      function isOpen(node) {
+        return chapterWantOpen(props.scope, node.id, nodeContainsCurrent(node));
+      }
+      function hasBody(node) {
+        return !!node.checker || node.children.length > 0;
+      }
+      function toggle(node, ev) {
+        ev.stopPropagation();
+        setCollapsed(nodeKey(node), isOpen(node));
+      }
+      function selectNode(node) {
+        const s = primary(node);
+        if (s) emit2("select", s);
       }
       function activityText(session) {
         const labels = {
@@ -9014,38 +9051,54 @@
       function primary(node) {
         return node.convert || node.checker;
       }
+      function nodeTitle(node) {
+        const s = primary(node);
+        return s && sessionTitleOf(s) || node.id;
+      }
       return (_ctx, _cache) => {
         const _component_ChapterSessionTree = resolveComponent("ChapterSessionTree", true);
         return openBlock(), createElementBlock("div", {
           class: "chapter-tree",
-          style: normalizeStyle({ "--chapter-depth": __props.depth || 0 })
+          style: normalizeStyle({ "--chapter-depth": __props.depth || 0 }),
+          role: "tree"
         }, [
           (openBlock(true), createElementBlock(Fragment, null, renderList(__props.nodes, (node) => {
             var _a;
-            return openBlock(), createElementBlock("details", {
+            return openBlock(), createElementBlock("div", {
               key: node.id,
-              class: "chapter-node",
-              open: nodeContainsCurrent(node)
+              class: normalizeClass(["chapter-node", { open: isOpen(node) }]),
+              role: "treeitem",
+              "aria-expanded": isOpen(node)
             }, [
-              createBaseVNode("summary", {
-                class: "chapter-node-head session-row",
+              createBaseVNode("div", {
+                class: normalizeClass(["chapter-node-head session-row", { active: !!primary(node) && primary(node).id === currentId.value }]),
                 "data-id": (_a = primary(node)) == null ? void 0 : _a.id,
                 title: primary(node) ? unref(sessionTip)(primary(node)) : node.id,
-                onClick: ($event) => primary(node) && emit2("select", primary(node))
+                onClick: ($event) => selectNode(node)
               }, [
-                _cache[2] || (_cache[2] = createBaseVNode("span", {
-                  class: "chapter-caret",
-                  "aria-hidden": "true"
-                }, null, -1)),
+                hasBody(node) ? (openBlock(), createElementBlock("button", {
+                  key: 0,
+                  class: "chapter-toggle",
+                  type: "button",
+                  "aria-expanded": isOpen(node),
+                  "aria-label": (isOpen(node) ? "收起 " : "展开 ") + nodeTitle(node) + " 的子会话",
+                  title: isOpen(node) ? "收起子会话" : "展开子会话",
+                  onClick: ($event) => toggle(node, $event)
+                }, [..._cache[2] || (_cache[2] = [
+                  createBaseVNode("span", {
+                    class: "caret",
+                    "aria-hidden": "true"
+                  }, null, -1)
+                ])], 8, _hoisted_3$d)) : (openBlock(), createElementBlock("span", _hoisted_4$b)),
                 createVNode(_sfc_main$m, {
                   class: "chapter-name row-title",
                   tag: "span",
-                  text: unref(sessionTitleOf)(primary(node)) || node.id
+                  text: nodeTitle(node)
                 }, null, 8, ["text"]),
-                activityText(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_3$d, toDisplayString(activityText(primary(node))), 1)) : createCommentVNode("", true),
-                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_4$b, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
-              ], 8, _hoisted_2$g),
-              createBaseVNode("div", _hoisted_5$b, [
+                activityText(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_5$b, toDisplayString(activityText(primary(node))), 1)) : createCommentVNode("", true),
+                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_6$9, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
+              ], 10, _hoisted_2$g),
+              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_7$8, [
                 node.checker ? (openBlock(), createElementBlock("div", {
                   key: 0,
                   class: normalizeClass(["chapter-checker", { active: currentId.value === node.checker.id, live: node.checker.live }])
@@ -9064,25 +9117,26 @@
                       tag: "span",
                       text: unref(sessionTitleOf)(node.checker)
                     }, null, 8, ["text"]),
-                    activityText(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_7$8, toDisplayString(activityText(node.checker)), 1)) : createCommentVNode("", true),
-                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_8$5, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
-                  ], 8, _hoisted_6$9),
+                    activityText(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_9$5, toDisplayString(activityText(node.checker)), 1)) : createCommentVNode("", true),
+                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$4, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
+                  ], 8, _hoisted_8$5),
                   createBaseVNode("button", {
                     class: "chapter-info",
                     type: "button",
                     title: "打开核对会话详情",
                     onClick: ($event) => emit2("info", node.checker)
-                  }, "ⓘ", 8, _hoisted_9$5)
+                  }, "ⓘ", 8, _hoisted_11$4)
                 ], 2)) : createCommentVNode("", true),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
                   key: 1,
                   nodes: node.children,
                   depth: (__props.depth || 0) + 1,
+                  scope: __props.scope,
                   onSelect: _cache[0] || (_cache[0] = ($event) => emit2("select", $event)),
                   onInfo: _cache[1] || (_cache[1] = ($event) => emit2("info", $event))
-                }, null, 8, ["nodes", "depth"])) : createCommentVNode("", true)
-              ])
-            ], 8, _hoisted_1$h);
+                }, null, 8, ["nodes", "depth", "scope"])) : createCommentVNode("", true)
+              ])) : createCommentVNode("", true)
+            ], 10, _hoisted_1$h);
           }), 128))
         ], 4);
       };
@@ -9095,7 +9149,7 @@
     }
     return target;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-4fe81f88"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-60a15a70"]]);
   const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"
@@ -9629,7 +9683,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-410ffba2><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-410ffba2><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-410ffba2></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-410ffba2><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-410ffba2></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-410ffba2></path></svg></span>', 1)),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-575cffa8><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-575cffa8><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-575cffa8></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-575cffa8><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-575cffa8></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-575cffa8></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9802,9 +9856,10 @@
                           sv.chapterRoots.length ? (openBlock(), createBlock(ChapterSessionTree, {
                             key: 0,
                             nodes: sv.chapterRoots,
+                            scope: g.name + "/" + sv.stage,
                             onSelect: onRowClick,
                             onInfo: onInfoClick
-                          }, null, 8, ["nodes"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_64, [
+                          }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_64, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9867,9 +9922,10 @@
                           sv.chapterRoots.length ? (openBlock(), createBlock(ChapterSessionTree, {
                             key: 0,
                             nodes: sv.chapterRoots,
+                            scope: g.name + "/" + sv.stage,
                             onSelect: onRowClick,
                             onInfo: onInfoClick
-                          }, null, 8, ["nodes"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_75, [
+                          }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_75, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9953,7 +10009,7 @@
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-410ffba2"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-575cffa8"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

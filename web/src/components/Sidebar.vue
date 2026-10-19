@@ -543,6 +543,7 @@ function onMoreClick(okey: string) {
                 <ChapterSessionTree
                   v-if="sv.chapterRoots.length"
                   :nodes="sv.chapterRoots"
+                  :scope="g.name + '/' + sv.stage"
                   @select="onRowClick" @info="onInfoClick"
                 />
                 <template v-else-if="blockView">
@@ -590,6 +591,7 @@ function onMoreClick(okey: string) {
                 <ChapterSessionTree
                   v-if="sv.chapterRoots.length"
                   :nodes="sv.chapterRoots"
+                  :scope="g.name + '/' + sv.stage"
                   @select="onRowClick" @info="onInfoClick"
                 />
                 <div v-else-if="blockView" class="session-blocks">

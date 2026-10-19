@@ -25,6 +25,8 @@
 
 - **两份配置模板同步、`install_timeout` 笔误修正（T160）**：`docvision init` 内嵌的 `default.yaml` 与仓库根 `config.example.yaml` 长期各自演化（示例里有 `extends` 命名基座的演示、注释是中文讲解，模板还停在逐个角色写死 `model:` 的老写法，另有 `max_fix_rounds`/`raster_dpi`/`sessions.*.max_tokens`/`preview.img2text`/`mermaid.fix_attempts`/`session_errors` 等值漂移，`tools.python.install_timeout` 是 30000 秒）。现在两份模板逐字节相同，`sessions.dedupe.max_tokens` 与 `img2text.max_tokens` 统一为 65536，`install_timeout` 按开发者的值保留 30000（文档默认值仍写代码默认 300 并注明模板示例）；新增 `TestConfigTemplatesInSync`（单边修改即失败）与 `TestBuiltinTemplateLoads`（内嵌模板能加载、版本号与代码一致、示例基座链可解析）；`docs/config.md` 补注各处"模板示例值"。
 
+- **会话预览的递归章节树：展开状态按节点独立记忆，展开与选中各一次点击（T161）**：树节点原来用 `<details :open="节点是否装着当前会话">`，`:open` 是响应式 binding——每次重渲染（含每秒轮询、选中任何会话）都会把"不含当前会话"的节点重新关上，于是刚拉开的树自己收回去、点别处更是全收；`<summary>` 的点击还同时触发"选中会话"和"展开"，命中区只有 12px 三角。现在展开状态是**每节点自己的记忆**（键 `chapter:<项目>/<阶段>/<节点ID>`，存 `state.collapsed` 并落盘），左侧独立的展开按钮（整行高 26px 命中区）只切展开、行本身点一下只选中，两件事各一次点击；手动拉开的分支一直开着，没碰过的分支只在装着当前会话时自动露出。新增 `web/tests/chapter-tree.spec.ts`。
+
 ## [v1.5.0-beta.9] - 2026-10-18
 
 ### Added

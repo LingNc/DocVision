@@ -730,6 +730,36 @@ export function groupWantOpen(key: string, holdsCurrent: boolean): boolean {
   return !!holdsCurrent
 }
 
+/* ---------- P34 递归章节树的展开记忆 ---------- */
+
+/*
+ * 章节节点在折叠记忆里的键。带 scope（项目 + 阶段）是必须的：不同书、甚至
+ * 同一本书的不同阶段里都可能有同名节点（chapter_001），不带 scope 会互相
+ * 串状态——在 A 书里拉开一章，B 书里同名那章跟着开。
+ */
+export function chapterNodeKey(scope: string, nodeId: string): string {
+  return 'chapter:' + scope + '/' + nodeId
+}
+
+/*
+ * 一个章节节点要不要展开：记忆优先，没记忆时只展开"装着当前会话"的那一支。
+ *
+ * 这条规则和侧栏三层分组共用一套语义（groupWantOpen）：用户手动拉开的节点
+ * 一直开着，与看哪个会话无关；从没碰过的节点随选中会话自动露出。关键是**它
+ * 只读自己的键**——选择会话、展开别的节点都不会把这一支关上（旧实现把
+ * `:open` 绑成"是否含当前会话"，每次重渲染都会强制把其它节点关上）。
+ */
+export function chapterWantOpen(scope: string, nodeId: string, holdsCurrent: boolean): boolean {
+  const key = chapterNodeKey(scope, nodeId)
+  /* 这里刻意用**属性读**而不是 hasCollapseMemory：state.collapsed 是 Vue 的
+     reactive 代理，hasOwnProperty 不走 get 陷阱、建不起响应式依赖——照它写会
+     出现"点了展开按钮、记忆写进去了，但视图不重绘"（要等别的 reactive 变化才
+     显示）。读一次 state.collapsed[key] 就把这个键登记成依赖，写入即触发重绘。 */
+  const mem = state.collapsed[key]
+  if (mem !== undefined) return !mem
+  return !!holdsCurrent
+}
+
 export function isOverflowOpen(key: string): boolean {
   return state.overflow[key] === true
 }
