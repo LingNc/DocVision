@@ -1893,3 +1893,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **改**：① `sandboxArgs` 加 `--unshare-pid`（配已有的 `--proc /proc`，新命名空间里的 `/proc` 只列自己这棵树）；② 按用户要求把 `[mem]` 采样行（含基线与结束）全部降到 `Trace`——普通模式终端不再刷 `[mem]`，只保留一行 `[book] 内存/被杀现场日志: <路径>`（低内存告警仍是 `WARNING`），`work/mem.log` 不受日志等级影响；③ `docs/sessions.md` 沙箱一节写明「文件+网络+进程三个面都要隔离」与这起事故。
 - **验证**：`TestSandboxArgsUnsharePID`（参数必须有 `--unshare-pid` 且紧跟 `--proc /proc`）、`TestSandboxCannotSignalHostProcess`（**在本机真起 bwrap**：`ps -eo pid=` 的输出里没有宿主测试进程的 PID，`kill -9 <宿主 PID>` 返回非 0，宿主进程存活）、`TestMemWatchQuietAtInfoLevel`（info 日志里不得出现 `[mem]`，而 `mem.log` 仍有基线与结束行）；既有沙箱集成测试（只读挂载/可写工作区/符号链接/Python 环境/持久 `/tmp`）全绿，全量 `go test ./internal/...` 绿。
 - **教训**：沙箱隔离要按「文件 / 网络 / 进程」三个面逐项确认，只验证"宿主路径看不见"是不够的；另外「进程被杀但没有任何错误行」除了 OOM，还要怀疑**同用户的其他进程**——包括模型自己的工具调用。
+
+## v1.5+（第四十六批，P52：只记录一个未来方向，无代码改动）
+
+- 用户提出（原话）：「未来可能会删掉章节划分这一步骤，直接传入整个，由下层觉得太长了拆分更自然且短文件节约」——明确说**只做记录、不实施**。
+- 记在 `docs/plan.md` 的 **P52**（`[ ][ ]`，未实现）：取消独立 `chapters` 阶段，把整本书直接交给转换层，转换会话在"一次干不完"时自己调 `request_chapter_split` 就地细分（P34 的递归链路已经具备），父节点整合并过 checker。条目里写清了预期收益（少一次全书会话、拆分点由读内容的那层决定、产物更短更省）与必须先想清楚的点（并发从哪来、失败重试粒度、预览页章节 ID 从"划分产物"变成"递归路径"、`chapters/` 与 `progress.json` 的阶段语义、`chapter_granularity` 下沉成"自拆建议粒度"）。
+- 同批次还回答了两个只问不改的问题（结论记在这里，避免下次重复调研）：① 「卡编译」不是资源竞争——`--debug` 日志显示那条转换会话先 `ps | grep '[d]ocvision latex'` 找"另一个进程"，`kill -STOP` 冻住宿主后**它自己的工具回执也卡住了**（30s 超时），它把宿主误当成抢资源的进程再 `kill -9`；② 递归子章节的收集链是完整的：子节点各自 convert + **StrictChecker**（必须明确 pass）、转换报告落 `_subdivision/child_NN/node/reports/conversion.md` 并写进 `children-manifest.md`，父节点整合后自己再过一次整章 checker，任一子节点失败则父节点"禁止提交"并把失败原因往上传；**唯一的弱环节**是"文字意见"不跨层——子 checker 的 issues 只在子节点内迭代 ≤3 轮，过不了就整支失败，"通过"是硬约束而"意见"不汇总给父节点，且整合提示只硬性要求读子 `.tex`/`parts`，报告是"可读"不是"必读"。
