@@ -200,3 +200,34 @@ func TestBudgetWarningForThinkingModel(t *testing.T) {
 		t.Error("warning was not recorded, repeats would flood the log")
 	}
 }
+
+// ReplayWeight 是"续跑被 OOM 杀掉"的现场尺子（T162）：续跑会同时恢复十几条
+// 会话，每条都把转录里的图片重新读成 data URL，审计时必须能说出这条会话要
+// 多少 MiB。两种 image_url 存储形态（map[string]string / map[string]interface{}）
+// 都要算到，纯文字消息不能算。
+func TestReplayWeightCountsImageBytes(t *testing.T) {
+	big := strings.Repeat("A", 1000)
+	msgs := []ChatMessage{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: []map[string]interface{}{
+			{"type": "text", "text": "look"},
+			{"type": "image_url", "image_url": map[string]string{"url": big}},
+		}},
+		{Role: "tool", Content: "plain result"},
+		{Role: "user", Content: []map[string]interface{}{
+			{"type": "image_url", "image_url": map[string]interface{}{"url": strings.Repeat("B", 500)}},
+			{"type": "image_url", "image_url": map[string]interface{}{"url": "data:image/png;base64,AAAA"}},
+		}},
+		{Role: "assistant", Content: "done"},
+	}
+	images, bytes := ReplayWeight(msgs)
+	if images != 3 {
+		t.Fatalf("images = %d, want 3", images)
+	}
+	if want := int64(1000 + 500 + len("data:image/png;base64,AAAA")); bytes != want {
+		t.Fatalf("bytes = %d, want %d", bytes, want)
+	}
+	if images, bytes := ReplayWeight(nil); images != 0 || bytes != 0 {
+		t.Fatalf("empty history = %d/%d", images, bytes)
+	}
+}

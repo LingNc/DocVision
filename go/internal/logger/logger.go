@@ -41,6 +41,9 @@ type Logger struct {
 	// 重定向里每次变化只整行追加一次（否则日志里全是裸转义序列）。
 	tty   bool
 	level int // LevelInfo / LevelDebug / LevelTrace
+	// logPath 是主日志文件的路径（启动提示要告诉用户"日志写在哪"——
+	// 事故现场里最常见的一句追问就是"log 在哪")。
+	logPath string
 }
 
 // NewLogger creates a Logger.
@@ -54,7 +57,7 @@ func NewLogger(logPath, errLogPath string, threadIDWidth int) (*Logger, error) {
 	if threadIDWidth <= 0 {
 		threadIDWidth = 2
 	}
-	l := &Logger{threadIDWidth: threadIDWidth, tty: stdoutIsTerminal()}
+	l := &Logger{threadIDWidth: threadIDWidth, tty: stdoutIsTerminal(), logPath: logPath}
 
 	if logPath != "" {
 		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -169,6 +172,14 @@ func (l *Logger) LogWarning(tid int, args ...interface{}) {
 }
 
 // Close releases the underlying log files. Safe to call multiple times.
+// Path returns the main log file path ("" when logging only to the console).
+func (l *Logger) Path() string {
+	if l == nil {
+		return ""
+	}
+	return l.logPath
+}
+
 func (l *Logger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

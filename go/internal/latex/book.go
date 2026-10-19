@@ -169,11 +169,6 @@ var classNameRe = regexp.MustCompile(`\\ProvidesClass\{([^}]*)\}`)
 //  5. assemble  : main.tex + full-book compile (+ fix session) + standalone.tex
 func (r *Runner) RunBook(opts BookOptions) error {
 	cfg := r.cfg
-	// 内存自证（T158）：SIGKILL 捕获不到，所以把基线与每 60s 的
-	// RSS/可用内存采样写进日志——下一次「已杀死」才有据可查。
-	if stop := r.startMemWatch(time.Minute); stop != nil {
-		defer stop()
-	}
 	// 项目根只在这里决定一次：<paths.latex_project>/<项目名>/（项目名
 	// 默认取本书主题名，可用 --project 覆盖），或者——当输出根本身已是
 	// 一个工程（旧版单项目布局）且未指定 --project——继续沿用输出根。
@@ -197,6 +192,16 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		}
 	}
 	writeFontsReadme(r.cfg.Paths.Fonts)
+	// 内存自证（T158/T162）：SIGKILL 捕获不到，所以把基线与采样写进日志，
+	// 并**同时追加到项目内**的 work/mem.log——终端被刷掉或进程被杀，那
+	// 个文件还在，事后直接看最后几行就知道是不是内存被吃光。前 3 分钟
+	// 每 10s 一次（续跑要同时恢复十几条会话、每条都把转录里的图片读成
+	// data URL，这是内存尖峰），之后每 60s 一次。
+	memLogPath := filepath.Join(proj, "work", "mem.log")
+	if stop := r.startMemWatch(10*time.Second, memLogPath); stop != nil {
+		defer stop()
+	}
+	r.log.LogInfo(0, "[mem] 采样写入:", memLogPath)
 	progPath := filepath.Join(proj, "progress.json")
 	prog := bookProgress{}
 	if data, err := os.ReadFile(progPath); err == nil {

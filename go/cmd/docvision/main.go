@@ -548,11 +548,15 @@ func requestedLogLevel(cmd *cobra.Command, cfg *config.Config) int {
 func applyLogLevel(cmd *cobra.Command, cfg *config.Config, log *logger.Logger) {
 	level := requestedLogLevel(cmd, cfg)
 	log.SetLevel(level)
+	where := ""
+	if path := log.Path(); path != "" {
+		where = "：" + path
+	}
 	switch level {
 	case logger.LevelTrace:
-		fmt.Println("调试模式(TRACE)：请求参数/提示词/流式分片/响应统计完整写入日志文件")
+		fmt.Println("调试模式(TRACE)：请求参数/提示词/流式分片/响应统计完整写入日志文件" + where)
 	case logger.LevelDebug:
-		fmt.Println("调试模式：请求参数/提示词/响应统计写入日志文件")
+		fmt.Println("调试模式：请求参数/提示词/响应统计写入日志文件" + where)
 	}
 }
 

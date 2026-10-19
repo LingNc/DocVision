@@ -1224,6 +1224,46 @@ func hasImage(m ChatMessage) bool {
 	return false
 }
 
+// ReplayWeight summarizes how heavy a replayed history is in memory: how many
+// images it carries and how many bytes their data URLs occupy. Resuming a book
+// restores a dozen transcripts at once, each re-reading its images from media/
+// as base64 data URLs — that is the memory spike behind "已杀死" (SIGKILL) on
+// startup (T162), so the resume log names the cost per session instead of
+// leaving it invisible.
+//
+// Base64 is ~4/3 of the file size; the byte count here is the data-URL length,
+// which is exactly what the process holds.
+func ReplayWeight(msgs []ChatMessage) (images int, bytes int64) {
+	for _, m := range msgs {
+		parts, ok := m.Content.([]map[string]interface{})
+		if !ok {
+			continue
+		}
+		for _, part := range parts {
+			if !isImagePart(part) {
+				continue
+			}
+			images++
+			bytes += int64(imagePartURLLen(part))
+		}
+	}
+	return images, bytes
+}
+
+// imagePartURLLen returns the length of an image part's URL string whether it
+// was stored as map[string]string or map[string]interface{}.
+func imagePartURLLen(part map[string]interface{}) int {
+	switch v := part["image_url"].(type) {
+	case map[string]string:
+		return len(v["url"])
+	case map[string]interface{}:
+		if s, ok := v["url"].(string); ok {
+			return len(s)
+		}
+	}
+	return 0
+}
+
 // maybeCompact triggers AI-driven compaction when the conversation
 // approaches the configured context window. The system prompt is kept;
 // the rest of the transcript is replaced by one summary message.

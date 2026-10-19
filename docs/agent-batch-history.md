@@ -1861,3 +1861,22 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **改**：① 展开状态改成每节点自己的记忆，键 `chapter:<项目>/<阶段>/<节点ID>`（不带 scope 会让不同书/不同阶段的同名 `chapter_001` 串状态），存 `state.collapsed` 并落盘 localStorage；② `<details>` 换受控 `<div class="chapter-node" :class="{open}">` + `v-if` 子树，行点一下只选中、左侧独立按钮点一下只切展开（`@click.stop`），两件事各一次点击就到；③ 展开按钮扩成整行高 26px 的命中区（原 12px 三角），带 hover 与 focus-visible；④ 既无子节点也无 checker 的节点不显示按钮（占位保持缩进对齐）；⑤ checker 行补 26px 左内边距与按钮同一列；⑥ `Sidebar` 两处调用传 `:scope="项目名/阶段"`。新增纯函数 `chapterNodeKey`/`chapterWantOpen`（`web/src/legacy/sidebar.ts`）。
 - **踩到的坑**：`state.collapsed` 是 Vue 的 reactive 代理，`hasOwnProperty` 不走 get 陷阱、**建不起响应式依赖**。第一版照 `groupWantOpen` 的 `hasCollapseMemory` 实现，探针里表现为"点展开按钮 → 记忆确实写进 localStorage，但 `open` 类与子树不出现"，要等 `state.current` 之类别的 reactive 变化才显形。改成读一次 `state.collapsed[key]`（不存在的键也会被 track）后立即正常。
 - **验证**：`web/tests/chapter-tree.spec.ts` 六条（键带 scope、默认只展开装着当前会话的一支、手动展开一直开着、手动收起优先于自动露出、切一个不影响兄弟、落盘键带 `dsh.sessionview.` 前缀）。另起临时无头 chromium 探针（`web/tmp_tree_harness`，验证完即删、不入库）在真实 DOM 上点了一遍，全部符合预期：点按钮只展开不选中、点行只选中不改展开、两个节点互不影响、切到别的节点会话后前一个仍开着、子节点按钮只切自己、清空记忆后装着当前会话的分支自动露出、模拟轮询重渲染不收回、按钮命中区 26×29px、无子节点的节点没有按钮。`npm test` 135 passed、`npm run build` 后 `go build` + `go test ./internal/...` 全绿。
+
+## v1.5+（第四十四批，T162：进程被「已杀死」时的现场取证）
+
+- **背景**：用户报「这次启动 30s 左右就被杀死了，这是为啥？/tmp 不够用了吗？……我也没办法检测？能否开启一个 debug 模式记录到 log 文件……怎么监控一下？」——终端只有一句「已杀死」，没有任何错误行。
+- **现场取证**（只读检查，未改用户机器上的任何文件）：
+  - 机器 15.5GiB 内存、**swap 已用 11GiB**（长期压力），`MemAvailable` 6.3GiB；
+  - `/tmp` 是 **tmpfs 7.8GiB，已用 3.9GiB**——tmpfs 就是内存，其中 **3.4GiB 是我自己跑测试留下的 `GOCACHE=/tmp/dsh-gocache`**。这是我这边的问题，已立刻删除（顺带清掉 `/tmp/go-build*` 残留），可用内存 6.3→6.6GiB、swap 11→8.6GiB，并改用 `/var/tmp/dsh-gocache`；
+  - 运行日志显示这是一次**续跑**：26 章、`latex.concurrency: 5`，一启动就「恢复中断的会话」二十来条（最长 146 条历史消息）——每条恢复都要把转录里的图片重新读成 data URL，这是启动阶段的内存尖峰；
+  - 日志里只有一行 `[mem] 基线`（T158 的内存自证），之后再无采样：采样行走 `Trace` 级（info 下不显示）且只进终端日志，进程一被 SIGKILL 就什么都不剩。
+  - 结论：不是 `/tmp`「不够用」（7.4GiB 空闲），而是**内存**——15.5GiB 里可用只剩 6GiB 左右、swap 已经在撑着，再叠加 5 路续跑会话同时回放带图历史，被内核 OOM killer 挑中。`已杀死` 是 shell 对 SIGKILL 的汉化，SIGKILL 无法被程序捕获，所以问题不是「没处理信号」而是「没留下证据」。
+- **改**：
+  1. 内存采样**同时追加到项目内的 `<proj>/work/mem.log`**（时间戳 + `[mem]` 行）。终端被刷掉、窗口关掉、进程被杀，这个文件都还在；
+  2. 采样节奏：**前 3 分钟每 10s**（「已杀死」大多发生在起步阶段）、之后每 60s，收尾再一行；
+  3. 采样内容补 `VmHWM`（内核记录的峰值，采样间隙也不漏）与 swap 总量/用量；swap 已用 >60% 且 >1GiB 时告警"实际余量比这个数字更小"；
+  4. 恢复会话的日志行带**该历史回放的图片张数与字节数**（新增 `session.ReplayWeight`，`map[string]string` 与 `map[string]interface{}` 两种 `image_url` 形态都算），单条 ≥32MiB 额外告警——直接指认哪条会话吃内存；
+  5. `--debug`/`--trace` 启动提示写明日志文件路径（新增 `logger.Path()`）；`docs/sessions.md` 新增「内存日志」一节。
+- **落在哪**：`go/internal/latex/memwatch.go`（采样/落盘/swap 判据）、`book.go`（采样移到项目目录确定之后，传 `work/mem.log`）、`go/internal/session/session.go`（`ReplayWeight`）、`go/internal/latex/resume.go`（恢复行带图片负载）、`go/internal/logger/logger.go`（`Path()`）、`cmd/docvision/main.go`（调试提示带路径）。
+- **验证**：`TestStartMemWatchLogsBaselineAndStop` 扩展为同时校验 `mem.log` 落地；新增 `TestMemSnapshotParsesSwapAndPeak`、`TestReplayWeightCountsImageBytes`；`go build ./...` + 全量 `go test ./internal/...` 绿。
+- **给用户的操作建议**（回复里也写了）：`latex.concurrency` 从 5 调到 2–3；跑之前看 `free -h` 的 `可用`，别在 `swap 已用` 很高时开跑；跑起来后 `tail -f <proj>/work/mem.log` 就能看到实时内存曲线。

@@ -3,6 +3,7 @@ package latex
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,8 @@ func TestStartMemWatchLogsBaselineAndStop(t *testing.T) {
 	defer log.Close()
 	log.SetQuiet(true)
 	r := &Runner{log: log}
-	stop := r.startMemWatch(20 * time.Millisecond)
+	memLogPath := filepath.Join(t.TempDir(), "mem.log")
+	stop := r.startMemWatch(20*time.Millisecond, memLogPath)
 	if stop == nil {
 		t.Fatal("startMemWatch must return a stop function")
 	}
@@ -86,4 +88,62 @@ func TestStartMemWatchLogsBaselineAndStop(t *testing.T) {
 	if !strings.Contains(string(data), "结束") {
 		t.Errorf("log must carry the final memory line:\n%s", data)
 	}
+	// T162：采样必须同时落到项目内的 mem.log（终端刷掉/进程被杀后唯一证据）。
+	memData, err := os.ReadFile(memLogPath)
+	if err != nil {
+		t.Fatalf("read mem.log: %v", err)
+	}
+	if !strings.Contains(string(memData), "基线") || !strings.Contains(string(memData), "结束") {
+		t.Errorf("mem.log must carry baseline and final lines:\n%s", memData)
+	}
+	if !strings.Contains(string(memData), "[mem]") {
+		t.Errorf("mem.log lines must be tagged [mem]:\n%s", memData)
+	}
+}
+
+// TestMemSnapshotParsesSwapAndPeak pins the extra fields the OOM forensics
+// relies on: swap usage (the machine may already be paging) and VmHWM (the
+// kernel's peak, which a sampling gap cannot miss).
+func TestMemSnapshotParsesSwapAndPeak(t *testing.T) {
+	meminfo := "MemTotal:       16316364 kB\nMemAvailable:   6291456 kB\n" +
+		"SwapTotal:      28311552 kB\nSwapFree:        4194304 kB\n"
+	total, avail := 0, 0
+	for _, line := range strings.Split(meminfo, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "MemTotal:":
+			total = atoiK(t, fields[1])
+		case "MemAvailable:":
+			avail = atoiK(t, fields[1])
+		}
+	}
+	if total == 0 || avail == 0 {
+		t.Fatalf("fixture parse failed: %d/%d", total, avail)
+	}
+	swapTotal, swapFree := parseSwap(strings.NewReader(meminfo))
+	if swapTotal != 28311552 || swapFree != 4194304 {
+		t.Fatalf("parseSwap = %d/%d", swapTotal, swapFree)
+	}
+	if used, pressured := swapPressure(memSnapshot{SwapTotalKiB: swapTotal, SwapFreeKiB: swapFree}); !pressured || used != 28311552-4194304 {
+		t.Fatalf("swapPressure = %d/%v, want ~24GiB/pressured", used, pressured)
+	}
+	if _, pressured := swapPressure(memSnapshot{SwapTotalKiB: 28311552, SwapFreeKiB: 28311552 - 512*1024}); pressured {
+		t.Fatal("half a GiB of swap in use is not pressure")
+	}
+	status := "Name:\tdocvision\nVmPeak:\t 2000000 kB\nVmHWM:\t 1700000 kB\nVmRSS:\t 1234567 kB\n"
+	if got := parsePeakRSS(strings.NewReader(status)); got != 1700000 {
+		t.Fatalf("parsePeakRSS = %d", got)
+	}
+}
+
+func atoiK(t *testing.T, s string) int {
+	t.Helper()
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }
