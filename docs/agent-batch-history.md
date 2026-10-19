@@ -1832,3 +1832,17 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
   测试：`TestParseMemInfo`、`TestParseRSS`、`TestMemLevel`（阈值边界含 0/unknown）、`TestStartMemWatchLogsBaselineAndStop`（基线与结束两行都真的落盘、`stop()` 不阻塞）。
 - **文档同步**：`docs/issue.md` T156–T158；CHANGELOG `[Unreleased]`（T157/T158 Added、T156 Fixed）；`docs/config.md`、`docs/sessions.md` 去掉"后两条线路只走非流式"的旧表述；`go/internal/config/config.go` 的 `API` 字段注释与两份配置模板注释同步；`AGENTS.md` 现状要点更新沙箱口径与内存自证。
 - **校验**：`gofmt` 只碰本批文件；`go test ./internal/... -count=1` 全绿（latex 32.1s / session 6.1s / sessionview 17.7s / img2text 12.2s 等，exit 0）。
+
+## v1.5+（第四十一批，T159：续跑回放清洗与输出预算兜底）
+
+- **背景**：用户准备续跑整本书，先问"这些会话是不是要删掉尾巴才能继续"。逐转录核查 187 份，10 份以失败结局，归成三类：**欠费**（`SESSION_INSUFFICIENT_BALANCE`，按设计 fail-closed，充值后续跑即可）；**400 循环**（两例，`invalid_request_error / upstream_request_rejected`，不可重试）；**空回复**（两例，连续两轮 `finish=length`、`completion_tokens` 打满、content 为空 → `empty final answer`）。
+- **400 循环的根因**：模型流式输出的工具参数被截断，转录里存下的是不闭合的 JSON（`{"path": "chapter_01.md"` 少右括号）。第一次请求合法（历史里还没有这条坏消息），**第二次请求**把这条 assistant 消息连同坏参数原样回放，网关校验工具调用失败 → 400，会话从此每次续跑都在第一个请求上失败。这不是"要不要删会话"的问题，而是回放没做合法性检查。
+- **空回复的根因**：`max_tokens` 是**思考 + 正文**的总预算。开着思考的模型配 8192 时，思考把 8192 全吃掉、正文一个字都不吐；原来的空回复自救只是原样再问一次 `Continue.`，预算没变 → 又是一轮 8192 全空 → 判失败。用户直觉（"配置太小、该调大"）是对的；代码侧要做的只是别让同一个预算再撞一次，并把根因说清楚。
+- **改（`internal/session`）**：
+  - `replay_sanitize.go`：`sanitizeReplayMessages` 在 `LoadTranscriptStats` 返回前跑一次——坏 JSON 参数按 `{}` 重放并把对应 tool 回执改写成"参数不是合法 JSON，已按空参数重放，请重新调用"；正文为空且无工具调用的 assistant 消息丢弃；其余消息逐条不变。**只改内存历史，磁盘转录一字不动**（事故现场要留原样）。
+  - `session.go`：`finish=length` 且正文为空时，重试预算翻倍（`budgetCeiling` 按"窗口 − 当前上下文 − 2% 余量"夹住），并打 `LogWarning` 说明"是预算被思考吃光、该调大会话的 `max_tokens`"。
+  - `budget_warn.go`：会话创建时若模型 `thinking.type` 为 enabled/adaptive 且 `max_tokens < 16384`，按「模型 + 预算」去重告警一次，提示调到 32768 以上（几十个章节会话不会刷屏）。
+- **测试**：`TestSanitizeReplayFixesMalformedToolArguments`、`TestSanitizeReplayDropsEmptyAssistantMessages`、`TestSanitizeReplayKeepsCleanHistory`、`TestBudgetCeilingIsWindowAware`、`TestNudgeBoostsBudgetAfterLengthTruncation`（断言第二次请求的 `max_tokens` 大于被截断那次）、`TestBudgetWarningForThinkingModel`（含去重守卫）。
+- **现场核对**：用只读加载跑过那四份卡住的转录，修复后 `badArgs=0`、`emptyAssistants=0`——续跑第一个请求即合法，**不需要删改任何会话历史**。
+- **文档同步**：`docs/issue.md` T159；CHANGELOG `[Unreleased]` Fixed；`docs/config.md`（`max_tokens` 是总预算、思考模型建议 ≥32768）、`docs/sessions.md`（回放清洗与截断兜底）；`AGENTS.md` 现状要点补两句。
+- **校验**：`go build ./...`、`go vet ./internal/session`、`gofmt` 干净；`go test ./internal/session ./internal/latex -count=1` 全绿（6.1s / 45.0s）。

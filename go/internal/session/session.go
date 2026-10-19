@@ -281,6 +281,7 @@ func NewSession(
 		s.messages = append(s.messages, ChatMessage{Role: "system", Content: system})
 	}
 	s.user = affinityUser(label, tid)
+	warnBudgetOnce(log, tid, modelCfg.Model, modelCfg, tuning.MaxTokens)
 	return s
 }
 
@@ -788,6 +789,24 @@ func (s *Session) run(opts RunOptions) (string, error) {
 			})
 			req2 := *req
 			req2.Messages = s.messages
+			// T159：上一次回复被 max_tokens 截断（finish=length）且正文为空，
+			// 说明整个输出预算都被思考吃掉了——同样的预算再问一次只会再撞
+			// 一次上限（现场连续两次 8192/8192 全空 → "empty final answer"）。
+			// 窗口有余量就把重试预算放大一倍。
+			// 现场不是"答案写到一半被截断"，而是**思考把预算吃光、正文一个字
+			// 都没吐**：checker 配 8192 时连续两轮 8192/8192 全空，会话判
+			// "empty final answer" 直接失败。配置偏小是根因，代码这边只做
+			// 兜底（翻倍、受窗口约束），并把"该调哪个键"写进告警。
+			if resp.FinishReason == "length" {
+				if boosted := s.budgetCeiling(req2.MaxTokens * 2); boosted > req2.MaxTokens {
+					if s.logger != nil {
+						s.logger.LogWarning(s.tid, fmt.Sprintf(
+							"[session:%s] 回复被 max_tokens 截断且无正文（预算是 %d，思考可能把它全吃了）；本次重试提到 %d。长期请调大该会话的 max_tokens",
+							s.label, req2.MaxTokens, boosted))
+					}
+					req2.MaxTokens = boosted
+				}
+			}
 			// Keep the tool definitions (the provider builds its prompt
 			// prefix from tools + messages, so dropping them would throw
 			// away the whole prefix cache); tool_choice=none is enough to
@@ -968,6 +987,32 @@ func (s *Session) outputBudget() int {
 			s.tuning.MaxTokens, out, s.tuning.ContextLimit, s.CurrentTokens())
 	}
 	return out
+}
+
+// budgetCeiling clamps a desired output budget to what the model window can
+// still hold. Used when a reply was truncated by max_tokens and the retry
+// needs more room than the configured budget (T159). Returns want unchanged
+// when no window is configured; returns <= current when there is no room.
+func (s *Session) budgetCeiling(want int) int {
+	if want <= 0 {
+		return 0
+	}
+	limit := s.tuning.ContextLimit
+	if limit <= 0 {
+		return want
+	}
+	margin := limit / 50
+	if margin < 1024 {
+		margin = 1024
+	}
+	room := limit - s.CurrentTokens() - margin
+	if room <= 0 {
+		return 0
+	}
+	if want > room {
+		return room
+	}
+	return want
 }
 
 // sessionOutputBudget is the pure rule behind outputBudget: leave the

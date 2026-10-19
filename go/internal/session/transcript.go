@@ -644,6 +644,11 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 			}
 		}
 	}
+	// T159：回放清洗——模型流式输出的工具参数被截断（JSON 不闭合）时，
+	// 原样回放会让网关拒收整个请求（400 upstream_request_rejected），会话
+	// 从此再也起不来；finish=length 的真空白回复同样无信息量。两者都在
+	// 这里修成 wire 合法（磁盘转录保持原样，事故现场不丢）。
+	fixed, _, _ = sanitizeReplayMessages(fixed)
 	return fixed, stats, nil
 }
 
