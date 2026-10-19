@@ -29,6 +29,8 @@
 
 - **进程被「已杀死」时有了可回看的现场：内存采样落项目文件、恢复会话带图片负载、debug 提示日志路径（T162）**：内存自证原来只写终端日志且采样行在 `Trace` 级，进程被 SIGKILL 后什么也留不下。现在每次 `latex` 运行把 `[mem]` 采样**同时追加到项目内的 `<proj>/work/mem.log`**（不受日志等级影响），**前 3 分钟每 10 秒**采样（续跑同时恢复十几条会话、每条都把转录里的图片读成 data URL，是启动阶段的内存尖峰）、之后每 60 秒；采样内容补上 `VmHWM` 峰值与 swap 用量，swap 已用 >60% 且 >1GiB 时明确提醒"实际余量比这个数字更小"。恢复会话的日志行现在带**这条历史回放的图片张数与字节数**（`session.ReplayWeight`），单条 ≥32MiB 额外告警，能直接指认哪条会话吃内存；`--debug`/`--trace` 启动提示写明日志文件路径。`docs/sessions.md` 新增「内存日志」一节（判据、`MemFree` 不可用、`/tmp` 是 tmpfs=吃内存）。
 
+- **会话沙箱补上 PID 命名空间：模型再也不能 `kill` 掉宿主进程（T163）**：bwrap 沙箱原来只隔离文件（挂载表）与网络（`--unshare-net`），**与宿主共享 PID 命名空间**——实测一条章节转换会话在沙箱里 `ps` 看到宿主 DocVision 的 PID，先 `kill -STOP` 把整本书冻住一分多钟、再 `kill -9` 把进程打死，终端只留下「已杀死」，日志里没有任何错误行、内存也完全正常（这不是 OOM）。现在加 `--unshare-pid`（配 `--proc /proc`）：会话里的 `ps` 只看到自己这棵树，`kill` 对宿主进程无效。新增 `TestSandboxArgsUnsharePID`、`TestSandboxCannotSignalHostProcess`（真起沙箱验证看得见但杀不动）。另按用户要求把 `[mem]` 采样行全部降到 `Trace`——普通模式终端只留一行 `[book] 内存/被杀现场日志: <路径>`，低内存告警仍是 `WARNING`，`mem.log` 不受日志等级影响，`TestMemWatchQuietAtInfoLevel` 钉住这条。
+
 ## [v1.5.0-beta.9] - 2026-10-18
 
 ### Added

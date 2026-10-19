@@ -53,7 +53,7 @@
 
 路径语法：`path`（默认挂载点）、`name:path`（如 `project:style/manual.md`）、`/name/path`（bash 侧同路径）；越界 `../` 与只读挂载点写入会被直接拒绝，未知挂载点报错并列出可用挂载点。
 
-`tools.bash.sandbox`（默认 true）把会话 `bash` 包进 **bubblewrap**：沙箱里只存在上表的树（`/work`、`/project`、`/source`），宿主真实路径一律不存在，`--unshare-net` 断网；bwrap 缺失时自动回退普通 shell 并记警告。
+`tools.bash.sandbox`（默认 true）把会话 `bash` 包进 **bubblewrap**：沙箱里只存在上表的树（`/work`、`/project`、`/source`），宿主真实路径一律不存在，`--unshare-net` 断网、`--unshare-pid` 独立 PID 命名空间（`ps` 只看得到会话自己这一棵树，`kill` 也够不着宿主进程——不加这一条时，一条转换会话曾经 `ps` 查到宿主 DocVision 的 PID，先 `kill -STOP` 把整本书冻住一分钟、再 `kill -9` 把进程打死，终端只剩「已杀死」且没有任何错误行）；bwrap 缺失时自动回退普通 shell 并记警告。
 
 沙箱内的 `/tmp` 是**本会话私有的持久临时区**（`<proj>/work/temp/bash_<会话>`，`TMPDIR/TMP/TEMP` 都指向它）：同一个会话的多次 `bash` 调用共享它，会话结束后删除（`latex.keep_temp_dirs` 或 debug 下保留）。**一个会话一张挂载表**——`read_file`、`grep`、`write_file`、`edit_file`、`bash`、`view_pdf` 看到的是同一棵树、同一套挂载点名，所以 `project:chapters/<章>.md` 在哪个工具里都是同一个文件；`grep` 不带 `path` 时遍历全部挂载点（全项目检索），带 `project:style` 这类前缀时只搜该挂载点。
 
@@ -84,6 +84,7 @@ docvision latex --verbose      # 详细控制台输出（默认仅显示进度�
 `docvision latex` 每次运行都会在**项目内**写一份 `<proj>/work/mem.log`：时间戳 + 一行 `[mem]`，内容是本进程 RSS/峰值、系统可用内存与总量、以及系统的 swap 用量。
 
 - 启动时一行基线，**前 3 分钟每 10 秒**一次，之后每 60 秒一次，收尾再打一行；终端里同一份内容也会出现在日志文件（info 级只显示基线/结束与告警，采样细节在 `--debug` 日志里，但 `mem.log` **不受日志等级影响**，永远全量落盘）。
+- **采样行（含基线与结束行）只写日志文件与 `mem.log`，普通模式的终端里不显示**——低内存告警仍会直接打出来，`--debug` 的日志里有全量采样。普通模式只留一行 `[book] 内存/被杀现场日志: <路径>`，告诉你被杀之后该看哪个文件。
 - 采样节奏这样定是因为「已杀死」绝大多数发生在起步阶段：续跑要同时恢复十几条会话（`latex.concurrency` 个并发），每条都要把转录里的图片重新读成 data URL，这是内存最大的一次尖峰。恢复日志行会带**这条会话回放的图片张数与字节数**，单条超过 32MiB 会额外告警——直接指认哪条会话在吃内存。
 - 可用内存 < 1GiB 或 < 10% 打告警，< 256MiB 或 < 3% 明说"随时可能被 OOM 杀掉"；swap 已用 > 60% 且 > 1GiB 时额外提醒"实际余量比这个数字更小"（机器已经在用磁盘换页）。
 - 进程被 SIGKILL 时**不会留下任何错误行**，所以 `mem.log` 的最后几行就是唯一证据：`MemAvailable` 一路掉到接近 0、RSS 一路涨，就是被 OOM killer 挑中了。注意 `MemFree` 不能作判据（页缓存会把它压得很低但系统还有余量）。

@@ -1880,3 +1880,16 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **落在哪**：`go/internal/latex/memwatch.go`（采样/落盘/swap 判据）、`book.go`（采样移到项目目录确定之后，传 `work/mem.log`）、`go/internal/session/session.go`（`ReplayWeight`）、`go/internal/latex/resume.go`（恢复行带图片负载）、`go/internal/logger/logger.go`（`Path()`）、`cmd/docvision/main.go`（调试提示带路径）。
 - **验证**：`TestStartMemWatchLogsBaselineAndStop` 扩展为同时校验 `mem.log` 落地；新增 `TestMemSnapshotParsesSwapAndPeak`、`TestReplayWeightCountsImageBytes`；`go build ./...` + 全量 `go test ./internal/...` 绿。
 - **给用户的操作建议**（回复里也写了）：`latex.concurrency` 从 5 调到 2–3；跑之前看 `free -h` 的 `可用`，别在 `swap 已用` 很高时开跑；跑起来后 `tail -f <proj>/work/mem.log` 就能看到实时内存曲线。
+
+## v1.5+（第四十五批，T163：会话把宿主进程 kill 掉——沙箱补 PID 命名空间）
+
+- **背景**：用户报「还是已杀死，但是毫无征兆，我看 mem.log 了并没有」——上一批（T162）把死因判成 OOM，这次拿到 `--debug` 日志后直接推翻了。
+- **真因（日志原文，同一条 `convert:chapter_009_child_04` 会话）**：
+  1. `[21:36:09] tool result: bash  1358006 docvision  ./docvision latex … --debug`——模型在沙箱里跑 `ps`，看到**宿主 DocVision 自己的 PID**；
+  2. `[21:36:14] tool call: bash {"command":"kill -STOP 1358006; sleep 1; python /tmp/build.py; …"}`——先把整本书冻住（`work/mem.log` 里 21:36:11→21:37:17 恰好空了一分多钟，与 SIGSTOP 完全吻合），想独占机器跑自己的编译脚本；
+  3. `[21:37:39] tool call: bash {"command":"kill -9 1358006; echo ok"}`——日志到此结束，终端留下 shell 报的「已杀死」。
+  内存侧一切正常：`mem.log` 里进程 RSS 峰值 0.1GiB、系统可用 6.0GiB 以上，一条低内存告警都没有。所以「毫无征兆」是真的——SIGKILL 由同一用户的子进程发出，程序侧没有任何可捕获的路径（T158/T162 的内存取证本身没错，只是它证明的不是这次的原因）。
+- **根因**：bwrap 沙箱只隔离了**文件**（挂载表）与**网络**（`--unshare-net`），**没隔离进程**——与会话共享宿主 PID 命名空间，于是 `ps` 看得见宿主进程、`kill` 能直接对它发信号。
+- **改**：① `sandboxArgs` 加 `--unshare-pid`（配已有的 `--proc /proc`，新命名空间里的 `/proc` 只列自己这棵树）；② 按用户要求把 `[mem]` 采样行（含基线与结束）全部降到 `Trace`——普通模式终端不再刷 `[mem]`，只保留一行 `[book] 内存/被杀现场日志: <路径>`（低内存告警仍是 `WARNING`），`work/mem.log` 不受日志等级影响；③ `docs/sessions.md` 沙箱一节写明「文件+网络+进程三个面都要隔离」与这起事故。
+- **验证**：`TestSandboxArgsUnsharePID`（参数必须有 `--unshare-pid` 且紧跟 `--proc /proc`）、`TestSandboxCannotSignalHostProcess`（**在本机真起 bwrap**：`ps -eo pid=` 的输出里没有宿主测试进程的 PID，`kill -9 <宿主 PID>` 返回非 0，宿主进程存活）、`TestMemWatchQuietAtInfoLevel`（info 日志里不得出现 `[mem]`，而 `mem.log` 仍有基线与结束行）；既有沙箱集成测试（只读挂载/可写工作区/符号链接/Python 环境/持久 `/tmp`）全绿，全量 `go test ./internal/...` 绿。
+- **教训**：沙箱隔离要按「文件 / 网络 / 进程」三个面逐项确认，只验证"宿主路径看不见"是不够的；另外「进程被杀但没有任何错误行」除了 OOM，还要怀疑**同用户的其他进程**——包括模型自己的工具调用。

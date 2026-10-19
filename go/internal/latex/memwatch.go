@@ -212,7 +212,9 @@ func (r *Runner) startMemWatch(interval time.Duration, memLogPath string) func()
 		peakRSS = base.PeakRSSKiB
 	}
 	line := memLine(base, peakRSS, minAvail, "基线")
-	r.log.LogInfo(0, line)
+	// 采样行只写日志文件与 mem.log：普通模式的终端里不再出现 [mem] 噪音
+	// （用户要求）。真正需要人看见的只有下面的低内存告警。
+	r.log.Trace(0, line)
 	appendMem(line)
 	if level := memLevel(base); level == "low" || level == "critical" {
 		r.warnMemory(level, base)
@@ -272,7 +274,7 @@ func (r *Runner) startMemWatch(interval time.Duration, memLogPath string) func()
 			minAvail = final.AvailKiB
 		}
 		out := memLine(final, peakRSS, minAvail, "结束")
-		r.log.LogInfo(0, out)
+		r.log.Trace(0, out)
 		appendMem(out)
 	}
 }

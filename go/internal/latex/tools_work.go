@@ -781,7 +781,14 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 			}
 		}
 	}
-	args := []string{"--die-with-parent", "--unshare-net", "--dev", "/dev", "--proc", "/proc"}
+	// --unshare-pid（T163）：会话 bash 原来共享宿主 PID 命名空间——`ps` 能
+	// 看到 docvision 自己（也就看到了它真实的 PID），`kill` 能直接对它下手。
+	// 实测一条转换会话先 `kill -STOP <pid>` 把整本书的运行冻住一分钟，再
+	// `kill -9 <pid>` 把宿主进程打死，终端只留下「已杀死」、任何错误行和
+	// 内存告警都没有（死因根本不在这层代码里）。新建 PID 命名空间后，会话
+	// 里的 ps 只看到自己这一棵树，kill 也只在本命名空间内生效，宿主进程
+	// 对它是不可见、不可信号的。
+	args := []string{"--die-with-parent", "--unshare-net", "--unshare-pid", "--dev", "/dev", "--proc", "/proc"}
 	if tmp == "/tmp" {
 		args = append(args, "--tmpfs", "/tmp")
 	} else {

@@ -201,7 +201,9 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	if stop := r.startMemWatch(10*time.Second, memLogPath); stop != nil {
 		defer stop()
 	}
-	r.log.LogInfo(0, "[mem] 采样写入:", memLogPath)
+	// 只留这一行普通模式提示：被杀之后要看的文件到底在哪。采样行本身在
+	// 普通模式不显示（debug 日志与 mem.log 里全量都有）。
+	r.log.LogInfo(0, "[book] 内存/被杀现场日志:", memLogPath)
 	progPath := filepath.Join(proj, "progress.json")
 	prog := bookProgress{}
 	if data, err := os.ReadFile(progPath); err == nil {

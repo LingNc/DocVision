@@ -1,9 +1,11 @@
 package latex
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -226,5 +228,61 @@ func TestProjectViewIsNarrow(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(view, hidden)); err == nil {
 			t.Errorf("view must NOT expose %s", hidden)
 		}
+	}
+}
+
+// TestSandboxArgsUnsharePID pins the containment fix for the self-kill
+// (T163): a chapter-conversion session ran `ps` inside its sandbox, saw the
+// host docvision process, `kill -STOP`ped it for a minute and then
+// `kill -9`ed it — the whole book died as "已杀死" with no error line and no
+// memory warning. The sandbox must therefore run in its own PID namespace.
+func TestSandboxArgsUnsharePID(t *testing.T) {
+	work := t.TempDir()
+	tool := &WorkBashTool{Root: work, Mounts: []Mount{{Name: "work", Dir: work, Writable: true}}}
+	args := strings.Join(tool.sandboxArgs("true", false), " ")
+	if !strings.Contains(args, "--unshare-pid") {
+		t.Fatalf("session bash must run in its own PID namespace:\n%s", args)
+	}
+	// --proc /proc must stay right after it: the fresh mount reflects the new
+	// namespace, so `ps` shows only the session's own processes.
+	if !strings.Contains(args, "--proc /proc") {
+		t.Fatalf("a private /proc is required with --unshare-pid:\n%s", args)
+	}
+}
+
+// TestSandboxCannotSignalHostProcess is the behavioural half: from inside
+// the sandbox the host test process is neither listed nor signallable.
+func TestSandboxCannotSignalHostProcess(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed")
+	}
+	work := t.TempDir()
+	log, err := logger.NewLogger("", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	log.SetQuiet(true)
+	tool := &WorkBashTool{
+		Root:    work,
+		Mounts:  []Mount{{Name: "work", Dir: work, Writable: true}},
+		Sandbox: true, Log: log,
+	}
+	hostPID := os.Getpid()
+	payload := fmt.Sprintf(`{"command":"ps -eo pid= | head -8; echo '=== kill'; kill -9 %d 2>&1; echo rc=$?"}`, hostPID)
+	res, err := tool.Execute(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(res.Text, "\n") {
+		if strings.TrimSpace(line) == strconv.Itoa(hostPID) {
+			t.Fatalf("the host process must be invisible inside the sandbox (pid %d listed):\n%s", hostPID, res.Text)
+		}
+	}
+	if !strings.Contains(res.Text, "rc=1") && !strings.Contains(res.Text, "rc=2") {
+		t.Errorf("kill of a host pid must fail inside the sandbox:\n%s", res.Text)
+	}
+	if _, err := os.Stat(work); err != nil {
+		t.Fatalf("the host process must survive the attempt: %v", err)
 	}
 }

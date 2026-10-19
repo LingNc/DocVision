@@ -70,6 +70,9 @@ func TestStartMemWatchLogsBaselineAndStop(t *testing.T) {
 	}
 	defer log.Close()
 	log.SetQuiet(true)
+	// 采样行是 Trace 级（普通模式终端与 info 日志里都不出现），所以这里显式
+	// 打开 trace 来验证"全量采样确实落在 debug 日志里"。
+	log.SetLevel(logger.LevelTrace)
 	r := &Runner{log: log}
 	memLogPath := filepath.Join(t.TempDir(), "mem.log")
 	stop := r.startMemWatch(20*time.Millisecond, memLogPath)
@@ -146,4 +149,40 @@ func atoiK(t *testing.T, s string) int {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// TestMemWatchQuietAtInfoLevel pins the user's requirement (T162 追加)：普通
+// 模式（info）下 [mem] 采样行既不上控制台、也不进 info 日志，但 mem.log 里
+// 必须仍然全量——被杀之后唯一的证据不能跟着日志等级一起消失。
+func TestMemWatchQuietAtInfoLevel(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "memwatch-info.log")
+	log, err := logger.NewLogger(logPath, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	log.SetQuiet(true)
+	log.SetLevel(logger.LevelInfo)
+	r := &Runner{log: log}
+	memLogPath := filepath.Join(t.TempDir(), "mem.log")
+	stop := r.startMemWatch(20*time.Millisecond, memLogPath)
+	if stop == nil {
+		t.Fatal("startMemWatch must return a stop function")
+	}
+	time.Sleep(60 * time.Millisecond)
+	stop()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if strings.Contains(string(data), "[mem]") {
+		t.Errorf("info log must not carry [mem] sampling lines:\n%s", data)
+	}
+	memData, err := os.ReadFile(memLogPath)
+	if err != nil {
+		t.Fatalf("read mem.log: %v", err)
+	}
+	if !strings.Contains(string(memData), "基线") || !strings.Contains(string(memData), "结束") {
+		t.Errorf("mem.log must stay complete regardless of the log level:\n%s", memData)
+	}
 }
