@@ -1931,3 +1931,15 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
   5. 因此新增"提交产物自包含"校验：`\input`/`\include`/`\includegraphics`/`\subfile` 指向 `_subdivision/…`、`node/result/…`、`/temp/…` 的一律在 submit 打回，并说明"把内容整合进 `<章>/` 再交"。嵌套父章节从此不会把断链产物交进书里。
 - **实现位置**：`go/internal/latex/chapterissues.go`（新：条目/合并/渲染/报告解析）、`tools_convert.go`（submit 合并 + 自包含校验 + report schema）、`book.go`（继承收集、children-summary 文案、整合指令、工具接线）、`prompts/templates/latex_convert.system.md`（issue 数组、resolved、自包含一句话）、`docs/latex.md`、`docs/issue.md` T166、`CHANGELOG.md`。
 - **验证**：`TestMergeChapterIssuesInheritsAndResolves`、`TestReportTextListAcceptsBothShapes`、`TestIssueStoreRoundTrip`、`TestUnportableIncludes`；`go test ./internal/latex` 与全量 `go test ./internal/...` 绿。
+
+## v1.5+（第四十七批补二，T167：清到"章节划分之后、章节转换之前"的清理脚本）
+
+- **需求**：用户要一个和 `clean_project.sh` 同款（带备份、带计划预览）的脚本，"帮我删一下章节转换后面的"，自己稍后运行。第一稿把"章节转换的成果"当成了要保留的东西（默认只清风格修复/汇编/终审），用户跑完立刻纠正：**"我说的要删除章节转换这一章的内容，我等下重新跑来着"**——重跑要从逐章转换开始，所以转换成品、每章报告、逐章与 checker 转录、章节临时工作区都必须一起删。
+- **为什么不能只删目录**：`RunBook` 的阶段跳过看 `progress.json`（`style`/`images`/`chapters`/`convert`/`assemble`）。保留转换成品时，即使把 `convert` 标记归空，逐章也会命中"`work/chapters/<章>.tex` 已存在 → 跳过"，实际重跑的只是风格修复；而只删成品不改标记，`convert="done"` 会把整段连同风格反馈回路一起跳过。两件事必须一起做。
+- **实现**（`clean_convert.sh`）：
+  1. **默认删** `work/chapters/`、`work/reports/`、`work/temp/`（含递归子树、`.gate`、issues store）、`work/sessions/{convert_*,checker_*}.jsonl`，以及转换之后的 `build/`、`out/`、同级 `<项目名>.pdf`、`work/style_fix|stylefix_assess|stylefix_integrate|final_review|views|media|pdfview`、`work/sessions/{book_fix,final_review,style_fix_*}.jsonl`；
+  2. `progress.json` 的 `convert`/`assemble` 归空（`style`/`images`/`chapters` 保持），重跑从逐章转换开始、每章重新开会话；
+  3. **保留**划分与样式前置成果：`chapters/*.md`、`work/sessions/chapters.jsonl`、`style/`、`work/style/`、`work/style_session.jsonl`、`source/`（分类结果、images 软链、dedupe 结论）、`doc_index/`；
+  4. `--keep-convert` 提供反口径（保留转换成果、从风格修复重跑），此时把 `work/chapters` 里指向 `_subdivision/…` 的断链点名（T166 修掉的那类，旧二进制产物，汇编会失败）。
+- **交互**：与旧脚本一致——默认 `cp -a` 整目录备份到同级 `<项目名>_记录_<时间戳>/`、先打印计划、`-y` 确认、`-n` 只预览、`--no-backup` 跳过备份、检测到 `docvision latex` 正在运行就拒绝（`-f` 强来）。
+- **验证**：`bash -n` 通过；真实项目上 `-n` 确认清单（转换成品、12 条转换转录、4 条 checker 转录、`work/temp` 全在删除列表；`chapters/*.md`、样式包、`source/` 在保留列表）；临时假项目上跑真实删除，核对删/留清单与 `progress.json` 归空结果；`docs/latex.md` 的"清理与重跑（辅助脚本）"登记 `clean_project.sh` 与 `clean_convert.sh`。

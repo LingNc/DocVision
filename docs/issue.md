@@ -982,3 +982,12 @@ user 轮
   3. 文案上明确**不要求修复**：`children-summary.md` 与整合指令都写"不要求你修复；能顺手修的修，修了写 `resolved`，没修的原样向上（机制保证）"。
   4. 顺带修掉"父节点编译不了"的一条真实根因（用户第 2 问）：嵌套父章节把 `\input{_subdivision/child_01/node/result/…}` 交进了书里，这些路径只在它自己的临时工作区存在，晋级/汇编后全是断链——上一层的模型只能 `find` 临时目录、手工补路径，最后**放弃编译直接提交**。现在 `submit` 检查提交产物是否自包含：`\input`/`\include`/`\includegraphics` 指向 `_subdivision/…`、`node/result/…`、`/temp/…` 的一律打回并说明"把内容整合进 `<章>/` 再交"。
   验证：`TestMergeChapterIssuesInheritsAndResolves`（继承 2 条 + 新 1 条、重复句去重、resolved 划掉、ID/来源保持）、`TestReportTextListAcceptsBothShapes`、`TestIssueStoreRoundTrip`（含空清单写成 `[]`）、`TestUnportableIncludes`（正常 `children/`、`figures/` 不报，`_subdivision/…` 精确指出文件与坏路径）；`go test ./internal/latex` 与全量 `go test ./internal/...` 绿。
+
+[X][ ] T167. 用户要一个"清到章节转换之前"的清理脚本（"帮我删一下章节转换后面的吧，写为一个 clean 的脚本我等下运行下功能和之前那个 clean 类似也备份一下"）；第一稿默认保留了转换成果，用户随即纠正："我说的要删除章节转换这一章的内容，我等下重新跑来着"——即重跑要从逐章转换开始，转换产物必须一起删。
+  现状：`clean_project.sh` 只能清到"只剩分类结果"，章节转换及其之后没有对应口径；而且只删目录不够——阶段跳过看 `progress.json`，`convert`/`assemble` 标着 done 会被直接跳过。
+  改：新增 `clean_convert.sh`，与旧脚本同一套交互（默认整目录备份到同级 `<项目名>_记录_<时间戳>/`、默认先打印计划、`-y` 确认、`-n` 预览、检测到 `docvision latex` 正在运行就拒绝、`-f` 强来）：
+  1. **默认删掉章节转换及其之后的一切**——`work/chapters/`、`work/reports/`、`work/temp/`（含递归子树、`.gate`、issues store）、`work/sessions/{convert_*,checker_*}.jsonl`、`build/`、`out/`、交付副本 `<项目名>.pdf`、`work/style_fix|stylefix_assess|stylefix_integrate|final_review|views|media|pdfview`、`work/sessions/{book_fix,final_review,style_fix_*}.jsonl`；
+  2. `progress.json` 的 `convert`、`assemble` 归空（`style`/`images`/`chapters` 保持 done）——重跑时这三段跳过，从逐章转换开始，每章重新开会话；
+  3. 保留划分与样式前置成果：`chapters/*.md`、`work/sessions/chapters.jsonl`、`style/`、`work/style/`、`work/style_session.jsonl`、`source/`、`doc_index/`；
+  4. `--keep-convert` 是反口径（保留转换成果、从风格修复重跑），此时把 `work/chapters` 里指向 `_subdivision/…` 的断链点名（旧二进制产物，汇编会失败，见 T166）。
+  验证：`bash -n` 通过；真实项目上 `-n` 确认清单（转换成品、转录、`work/temp` 全在删除列表，`chapters/*.md` 与样式包在保留列表）；临时假项目上跑真实删除，核对删/留清单与 `progress.json` 归空结果；`docs/latex.md` 的"清理与重跑（辅助脚本）"登记两个脚本。

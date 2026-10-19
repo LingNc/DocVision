@@ -120,6 +120,13 @@ docvision verify --project 概率论-2026         # 多项目时指定核对哪�
 
 需要本地 LaTeX 工具链：TeX 发行版（xelatex）+ poppler-utils（pdftoppm）。全书多文件构建优先用 `latexmk`（缺失时退回两遍编译）；矢量图转 SVG 按 `dvisvgm → pdftocairo → mutool → inkscape` 依次尝试，任一可用即可；会话 bash 沙箱用 bubblewrap（缺失时自动回退普通 shell 并记警告）。`docvision init` 会自动检查 xelatex / pdftoppm / mmdc 并给出安装提示。
 
+## 清理与重跑（辅助脚本）
+
+仓库根目录有两个 bash 脚本，都默认**先整目录备份**（`cp -a` 到同级的 `<项目名>_记录_<时间戳>/`）、默认先打印计划、要 `-y` 确认（`-n` 只预览）；检测到 `docvision latex` 正在运行会拒绝执行（`-f` 强来）：
+
+- `clean_project.sh <项目目录>` —— 清回**只剩分类结果**（连样式包）：删 dedupe/process 的字段与下游产物、`build/`、`chapters/`、`out/`、`source/figures|tikz`、`source/dedupe`、`source/sessions`，保留 `source/progress_items` 的 classify 结果（逐图请求，删了要整本重烧）。`--with-style` 连样式包一起清，`--keep-sessions` 保留 `source/sessions`。
+- `clean_convert.sh <项目目录>` —— 清回**章节划分刚做完、还没逐章转换**：删 `work/chapters/`（转换成品）、`work/reports/`（每章报告）、`work/temp/`（章节工作区、递归子树、`.gate`、issues store）、`work/sessions/{convert_*,checker_*}.jsonl`，以及转换之后的一切——`build/`、`out/`、交付副本 `<项目名>.pdf`、`work/style_fix|stylefix_assess|stylefix_integrate|final_review|views|media|pdfview`、`work/sessions/{book_fix,final_review,style_fix_*}.jsonl`；把 `progress.json` 的 `convert`/`assemble` 归空（`style`/`images`/`chapters` 保持 done），所以重跑时分类/样式/划分全部跳过、**直接从逐章转换开始**（每章重新开会话，旧转录也清掉，不会拿"已有产物，跳过"糊过去）。保留 `chapters/*.md`、`work/sessions/chapters.jsonl`、`style/`、`work/style/`、`work/style_session.jsonl`、`source/`（含分类结果与 dedupe 结论）、`doc_index/`。`--keep-convert` 是反口径：保留转换成果（含转录与 `work/temp/`），只清它之后的阶段，重跑从风格修复大循环接上；此时脚本会点出 `work/chapters` 里指向 `_subdivision/…` 的断链（旧二进制产物，汇编会失败）。
+
 ## 风格分析的数据来源（档位1）
 
 样式分析 AI 直接查看 **MinerU 保留的原始扫描页面**（`mineru_output/<主题>_part*/*_origin.pdf` 以软链形式暴露为只读 `source` 挂载点下的 `work/pdfview/<part>.pdf`，模型看不到整个 `mineru_output` 树；用 `list_source_pages` 取页索引与章节起点、`view_pdf {path:"source:<file>.pdf", page:N}` 按需 pdftoppm 渲染整页 PNG），支持按页浏览、按百分比裁剪、放大查看细节——这才是真实排版（标题格式、页眉页脚、字号行距）。原始 PDF 缺失时退化为仅用提取图片 + 解析 md 分析，并输出日志提示。
