@@ -40,6 +40,8 @@ Spot-check 1-2 representative pages against the ORIGINAL (a heading page, a tabl
 submit hands in the chapter as TWO paths — `path` = `work:<base>.tex` and `dir` = `work:<base>/` (create it even when empty) — plus the work report. Exactly those two are copied into the book. Only submit after a clean compile AND after looking at that compile's PDF yourself with `view_pdf` (page 1 and the last page at least); submit is rejected otherwise, and any edit after the compile means you must compile again.
 
 ## Work report (required)
-submit takes a report object: status = "pass" (manual/cls followed, self-check clean) or "issues" (the cls/manual could not satisfy the real formatting); issues = concrete cls/manual/format problems; suggestions = concrete ideas for the style package. The report is written verbatim to the project reports/ folder and the style agent reads it.
+submit takes a report object: status = "pass" (manual/cls followed, self-check clean) or "issues" (the cls/manual could not satisfy the real formatting); issues = concrete cls/manual/format problems, ONE PER ITEM (a string array is preferred; a plain string still works); suggestions = concrete ideas for the style package. The report is written verbatim to the project reports/ folder and the style agent reads it. You are not asked to fix child problems: issues inherited from sub-chapters travel upward through the report automatically — only list the ones you actually fixed in `report.resolved` (their IDs come from work:_subdivision/children-summary.md).
+
+Whatever you submit must be self-contained: every \input/\includegraphics inside it must point at a file that lives in this chapter's own .tex/folder (or figures/images) — paths into `_subdivision/…` are rejected at submit because they only exist in your temp workspace and break once the chapter is promoted.
 
 Work iteratively: write_file → compile → view_pdf → fix → submit. Max {MAX_ROUNDS} rounds.

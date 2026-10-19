@@ -966,10 +966,19 @@ user 轮
   - 根章节的 checker 转录里**只有 read_file/grep、没有一次 submit**——8 轮、25 次工具调用、38 分钟，然后被旧兜底"没结论也算过"放行。
   - 一条递归子会话连续拿到 `Read-only file system`（那批时间戳早于 T156 的挂载修复），随后开始 `ps`/`kill`、并把同一个文件反复重写、反复提交——同一会话被 checker 打回 3 轮后仍在原上下文里打转（旧代码对递归节点是"打回 3 轮就整支失败"，对顶层才换会话）。
   - 子章节 report 明确写过"enumerate/proof 结构对不上、没能干净编译"之类的话，但父会话的整合指令只要求读子 `.tex`/`parts`，**报告不在必读清单里**，于是同一个毛病跟着父章节一起提交。
-  改：① 重试预算 `checkerAttemptBudget(base, depth) = max(3, base-depth)`，`base` 取 `latex.checker_rounds`（未写 6）；`checker_rounds - 最大层数(3) < 3` 时启动打 `WARNING`；② **顶层与递归节点同一策略**：同一会话被 checker 打回 `rounds` 轮仍不过 → 作废产物、**换全新会话**重来，每次尝试一条独立转录（`convert_<章>.try2.jsonl`…），次数用尽判失败（不再"记一笔就放过"）；③ checker 两次都拿不到结论**不再降级为通过**（只把厂商/网络错误原样上报，避免用坏模型去触发重转换）；④ 新增 `_subdivision/children-summary.md`：把每个子章节 report 原文汇总并统计"自报 issues"的数量，整合指令改成**必读**，并明确"修不了的写进你自己的 report（可引用子章节的问题、也可追加新发现）"；⑤ 提交门禁（T165）；⑥ 预览页：`chapterAttempt` 字段 + `chapterAttemptChain()`，同一章的各次尝试聚成一条链，中栏出现「历史 N」页签、侧栏行带「第 N 次」chip。
+  改：① 重试预算 `checkerAttemptBudget(base, depth) = max(3, base-depth)`，`base` 取 `latex.checker_rounds`（未写 6）；`checker_rounds - 最大层数(3) < 3` 时启动打 `WARNING`；② **顶层与递归节点同一策略**：同一会话被 checker 打回 `rounds` 轮仍不过 → 作废产物、**换全新会话**重来，每次尝试一条独立转录（`convert_<章>.try2.jsonl`…），次数用尽判失败（不再"记一笔就放过"）；③ checker 两次都拿不到结论**不再降级为通过**（只把厂商/网络错误原样上报，避免用坏模型去触发重转换）；④ 新增 `_subdivision/children-summary.md`：把每个子章节 report 原文汇总并统计"自报 issues"的数量，整合指令改成**必读**（"修不了就原样向上"由 T166 的机制保证）；⑤ 提交门禁（T165）；⑥ 预览页：`chapterAttempt` 字段 + `chapterAttemptChain()`，同一章的各次尝试聚成一条链，中栏出现「历史 N」页签、侧栏行带「第 N 次」chip。
   验证：`TestCheckerAttemptBudget`（6/5/4/3 与下限、自定义基数）、`TestCheckerBudgetWarning`、`TestAttemptTranscriptPath`、`TestChapterIdentityAttemptSuffix`（重试转录仍归属同一章节、子节点同理）、`TestCheckerWithoutVerdictFailsAfterTwoAttempts`、`TestCheckerRecoversAfterDegenerateResponse`、`TestCheckerDegenerateInBothAttemptsFails`、web `chapterAttemptChain`/`chainMemberTag` 三例；全量 `go test ./internal/...` + `npm test` 绿。
 
 [X][ ] T165. 「很多连编译都没编译连看都没看」——把"编译成功 + 亲眼看产物"做成提交硬门禁。
   事实：`submit` 当时只校验「两个路径存在、没有 `\documentclass`、带 report」，编译与看图全凭模型自觉；上面那本书里 4 章 0 次编译、3 章编译了 0 次 `view_pdf`，错误 `.tex` 一路进到书里，到 assemble/终审才炸。
   改：新增 `chapterGate`（`.gate/compile.json` + `.gate/view.json`，写在会话工作区的 `.gate/`，不进提交产物）：`compile` 成功时记下「主 `.tex` + parts 目录的内容摘要 + 产物 sha256 + 页数」，`view_pdf` 渲染到该产物时记下页码；`submit` 要求**摘要与当前文件一致**（编译后又改过文件就作废，必须重编）、产物仍存在且指纹一致、且至少看过 `min(2, 总页数)` 页。拒绝文案直接告诉模型下一步做什么（去 compile / 去 view_pdf / 改了文件要重编）。
   验证：`TestChapterGateRequiresCompileAndView`（未编译拒绝 → 只编译未看拒绝 → 编译+看图通过 → 编译后改 parts 再次拒绝）；`convert` 提示词同步一句"编译后必须自己 view_pdf 看第 1 页与最后一页"。
+
+[X][ ] T166. 用户要求把"问题"做成真正的跨层合并机制（原话要点）：不要求父章节修复子报告（大概率是样式问题）；父章节可以看看、修掉一部分；**剩下的必须原样继续向上交**；担心"一个章节有多个 issue 挤在一个 submit 里"、也担心父会话没余力看，所以合并要由程序做，而不是靠父会话抄一遍。
+  原路径（改动前）：问题只存在于 `submit` 的 `report.issues`（一个字符串），每章落一份 `work/reports/<章>.md`，风格修复大循环只读这些 md。也就是说：子章节的问题**没有任何机制**能到父章节——父会话得自己读很多份 report、再自己抄进自己的 report，任何一步漏了，问题就在层级之间蒸发；多个问题也只能挤在一段话里，无法逐条追踪。
+  改：
+  1. 新增**问题条目**（`ChapterIssue`：ID/来源/深度/正文/状态）与每节点的 store `<work>/.issues/issues.json`；`submit` 的 `report.issues` 同时接受**字符串数组**（推荐，一条一个条目）与旧的一段字符串，新增 `report.resolved`（继承条目的 ID 列表）。
+  2. **合并由代码做**：子节点提交写出自己的 store；`convertChapterChildren` 收齐子节点的**未解决**条目写进父节点的 `_subdivision/issues-inherited.json`；父节点 `submit` 时 = 继承（未解决）+ 自己新报的，再去掉 `resolved` 里明确修掉的，写回自己的 store，并把**未解决清单原样追加**到它的报告 md（"未解决的问题（机制合并，共 N 条…）"）。顶层报告因此带整棵子树的未解问题；风格修复大循环读到的就是全集，不需要读 N 份子报告。
+  3. 文案上明确**不要求修复**：`children-summary.md` 与整合指令都写"不要求你修复；能顺手修的修，修了写 `resolved`，没修的原样向上（机制保证）"。
+  4. 顺带修掉"父节点编译不了"的一条真实根因（用户第 2 问）：嵌套父章节把 `\input{_subdivision/child_01/node/result/…}` 交进了书里，这些路径只在它自己的临时工作区存在，晋级/汇编后全是断链——上一层的模型只能 `find` 临时目录、手工补路径，最后**放弃编译直接提交**。现在 `submit` 检查提交产物是否自包含：`\input`/`\include`/`\includegraphics` 指向 `_subdivision/…`、`node/result/…`、`/temp/…` 的一律打回并说明"把内容整合进 `<章>/` 再交"。
+  验证：`TestMergeChapterIssuesInheritsAndResolves`（继承 2 条 + 新 1 条、重复句去重、resolved 划掉、ID/来源保持）、`TestReportTextListAcceptsBothShapes`、`TestIssueStoreRoundTrip`（含空清单写成 `[]`）、`TestUnportableIncludes`（正常 `children/`、`figures/` 不报，`_subdivision/…` 精确指出文件与坏路径）；`go test ./internal/latex` 与全量 `go test ./internal/...` 绿。

@@ -1918,3 +1918,16 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **实现位置**：`go/internal/latex/chaptergate.go`（新）、`book.go`（预算/重试/孩子汇总/门禁接线）、`checker.go`（无结论判失败、致命错误分类）、`runner.go`（`isSessionFatalError`、`submitGate` + 测试旁路 `noChapterGate`）、`tools_convert.go`/`tools_work.go`（compile/view_pdf 打点）、`internal/config`（`latex.checker_rounds` + 两份模板 + `docs/config.md`）、`internal/sessionview`（`chapterAttempt`）、`web/src/legacy/sidebar.ts` + `HistoryPanel.vue` + `Sidebar.vue`、`prompts/templates/latex_convert.system.md`（一句"编译后必须自己看第 1 页与最后一页"、"先读 children-summary"）。
 - **验证**：新增 Go 用例 `TestCheckerAttemptBudget`、`TestCheckerBudgetWarning`、`TestAttemptTranscriptPath`、`TestChapterGateRequiresCompileAndView`、`TestChapterIdentityAttemptSuffix`、`TestCheckerWithoutVerdictFailsAfterTwoAttempts`、`TestCheckerRecoversAfterDegenerateResponse`、`TestCheckerDegenerateInBothAttemptsFails`；web 新增 `chapter attempt chain` 三例（聚链/单次不出链/标签）。全量 `go test ./internal/...` 与 `npm test` 绿，dist 重建后 `go build ./...` 通过。
 - **给用户的重跑口径**：这一批之前的运行产物作废没问题——门禁会让"没编译/没看过"的章节在 submit 处被挡回，重跑即可；旧项目里已有的 `.gate/` 为空会被要求重新 compile + view_pdf。
+
+## v1.5+（第四十七批补一，T166：问题跨层合并 + 提交产物自包含）
+
+- **背景**：用户接着第四十七批提了两点：① 不要求父章节修复子章节的报告（"大概率是样式的问题"），但**原始问题必须原样继续向上交**；担心"一个章节有多个 issue 挤在一个 submit 里"，也担心父会话"要弄得东西不少、不一定有余力看"，所以合并要由**程序**做；② 追问"父会话为什么看都不看就交了"——之前没有这个现象，怀疑是加了子会话之后才有的，想弄清根因。
+- **问题路径（改动前）**：只有 `submit` 的 `report.issues`（一个自由文本），每章落 `work/reports/<章>.md`，风格修复大循环读这些 md。子章节的问题**没有任何机制**能到父章节：需要父会话逐份读报告、再自己抄进自己的报告，任何一步漏掉就丢；多条问题也只能挤成一段话，无法逐条追踪或标记"已修"。
+- **改**：
+  1. `ChapterIssue`（ID/来源/深度/正文/状态）+ 每节点 store `<work>/.issues/issues.json`；`submit` 的 `report.issues` 收**字符串数组**（推荐）或旧字符串，新增 `report.resolved`（继承条目 ID）。
+  2. 合并全在代码里：子节点写 store → `convertChapterChildren` 收齐子节点**未解决**条目写 `_subdivision/issues-inherited.json` → 父节点 submit 时"继承（未解决）+ 自己新报 − resolved"，写回 store 并把未解决清单原样追加到报告 md。顶层报告 = 整棵子树的未解问题全集，风格修复读一份就够。
+  3. `children-summary.md` 与整合指令明确**不要求修复**：能顺手修的写 `resolved`，没修的原样向上。
+  4. **第 2 问的根因（取证）**：5 个已进入整合阶段的顶层节点里——005 编译 4 次、**全程 0 次 view_pdf** 就提交；007 看过第 1 页与最后一页，但之后又改了 4 轮、编译 4 次、提交 3 次，**那次查看与最终产物已经不是同一份**；008 在整合阶段发现子产物里的 `\input{_subdivision/…}` 在父工作区解析不了，花了整轮 `find` 临时目录、手工 `mkdir`+复制，最后 **0 次编译、0 次查看**，直接以 `report.status=issues` 提交。004/006 当时还停在 `waiting_children`/续跑状态，不算"不看不交"的证据。也就是说：不是模型"不想看"，而是(a) 没有任何机制要求它编译+看，(b) 整合的入口——子产物——本身带着只在临时工作区成立的路径，父节点连编译都编不起来。
+  5. 因此新增"提交产物自包含"校验：`\input`/`\include`/`\includegraphics`/`\subfile` 指向 `_subdivision/…`、`node/result/…`、`/temp/…` 的一律在 submit 打回，并说明"把内容整合进 `<章>/` 再交"。嵌套父章节从此不会把断链产物交进书里。
+- **实现位置**：`go/internal/latex/chapterissues.go`（新：条目/合并/渲染/报告解析）、`tools_convert.go`（submit 合并 + 自包含校验 + report schema）、`book.go`（继承收集、children-summary 文案、整合指令、工具接线）、`prompts/templates/latex_convert.system.md`（issue 数组、resolved、自包含一句话）、`docs/latex.md`、`docs/issue.md` T166、`CHANGELOG.md`。
+- **验证**：`TestMergeChapterIssuesInheritsAndResolves`、`TestReportTextListAcceptsBothShapes`、`TestIssueStoreRoundTrip`、`TestUnportableIncludes`；`go test ./internal/latex` 与全量 `go test ./internal/...` 绿。

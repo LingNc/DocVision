@@ -985,6 +985,7 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var failures []string
+	var inherited []ChapterIssue
 	for i, child := range children {
 		id := fmt.Sprintf("child_%02d", i+1)
 		chapter := child
@@ -1039,12 +1040,26 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 					return
 				}
 			}
+			// 问题继承（T166）：把子节点 store 里**未解决**的条目收上来，
+			// 由父节点提交时合并进它自己的 store。父会话不需要读这些也能
+			// 保证它们继续向上（见 chapterissues.go）。
+			childIssues := openIssues(readIssueStore(filepath.Join(nodeRoot, "work", ".issues", "issues.json")))
+			mu.Lock()
+			inherited = append(inherited, childIssues...)
+			mu.Unlock()
 		}()
 	}
 	wg.Wait()
 	if len(failures) > 0 {
 		sort.Strings(failures)
 		return fmt.Errorf("子章节转换或 checker 失败；父章节禁止提交: %s", strings.Join(failures, "; "))
+	}
+	// 父节点的继承清单：去重后落盘，整合会话与 submit 都从这里取。
+	if err := writeIssueStore(filepath.Join(parentWork, "_subdivision", "issues-inherited.json"), openIssues(inherited)); err != nil {
+		return fmt.Errorf("写入子章节问题继承清单失败: %w", err)
+	}
+	if n := len(openIssues(inherited)); n > 0 {
+		r.log.LogInfo(tid, "[convert]", parentBase, "继承", strconv.Itoa(n), "条子章节未解决问题（未修的会原样向上）")
 	}
 	return nil
 }
@@ -1077,8 +1092,11 @@ func writeChildrenSummary(work, base string, children []ChapterSubdivision) erro
 	var b strings.Builder
 	b.WriteString("# 子章节汇报汇总（整合前必读）\n\n")
 	b.WriteString("下面是每个子章节转换会话在 submit 时交的 `report` 原文。它说的是\"这一章向原书还原时哪里没做到 / 哪里绕过了手册\"，" +
-		"**checker 只看结构与文本一致性，不会替你判断这些**。整合时请逐条读：能在这里修掉的（缺内容、错结构、丢了公式）就修；" +
-		"属于类文件/手册限制的，写进你自己的 submit report（可以原样引用并补充你发现的**新问题**），不必修改子产物。\n\n")
+		"**checker 只看结构与文本一致性，不会替你判断这些**。\n\n" +
+		"**不要求你修复这些问题**——多数是样式/类文件层面的，后面有专门的风格修复大循环统一处理。" +
+		"你要做的是：能顺手修的就修（修了在 submit 的 `report.resolved` 里写上它的 ID）；" +
+		"没修的**保持原样**，提交时合并机制会自动把它们带进你的报告继续向上传递，你不需要抄一遍。" +
+		"你自己发现的**新问题**写进 `report.issues`（推荐字符串数组，一个问题一条），它们会和继承条目一起往上走。\n\n")
 	problems := 0
 	for i, child := range children {
 		id := fmt.Sprintf("child_%02d", i+1)
@@ -1100,11 +1118,19 @@ func writeChildrenSummary(work, base string, children []ChapterSubdivision) erro
 	}
 	b.WriteString("## 你要做的\n\n")
 	b.WriteString("1. 读完上面每一段与每个子 `.tex`/`parts/`，按原书顺序整合成父章节；\n")
-	b.WriteString("2. 能修的修（缺段、错层级、丢公式、编号错位都算）；\n")
-	b.WriteString("3. 修不了的写进你自己的 submit `report.issues`——**可以引用子章节的问题，也可以追加你新发现的**；\n")
+	b.WriteString("2. 顺手能修的修（缺段、错层级、丢公式、编号错位都算），修掉的把 ID 写进 `report.resolved`；\n")
+	b.WriteString("3. 修不了的不必勉强：不写 resolved，合并机制会把它原样带上；你自己的新问题写进 `report.issues`；\n")
 	b.WriteString("4. 改完必须重新 compile，并用 view_pdf 看过编译出的 PDF（至少第 1 页与最后一页），否则 submit 会被拒绝。\n")
 	if problems > 0 {
 		fmt.Fprintf(&b, "\n⚠ 有 %d 个子章节自己报了 `结论: issues`——它们的问题很可能还在父章节里，别当成已经解决。\n", problems)
+	}
+	// 机制合并的清单：这些条目会在你 submit 时自动进入报告（不需要你抄）。
+	if inherited := openIssues(readIssueStore(filepath.Join(work, "_subdivision", "issues-inherited.json"))); len(inherited) > 0 {
+		fmt.Fprintf(&b, "\n## 已继承的问题（%d 条，机制合并）\n\n", len(inherited))
+		b.WriteString("这些是子章节提交时记录的问题，**没修就会原样向上**。修掉了哪条，把它的 ID 填进 `report.resolved`。\n\n")
+		for _, it := range inherited {
+			fmt.Fprintf(&b, "- `%s`（来源 %s）：%s\n", it.ID, it.Source, strings.ReplaceAll(it.Text, "\n", " "))
+		}
 	}
 	summaryPath := filepath.Join(work, "_subdivision", "children-summary.md")
 	return os.WriteFile(summaryPath, []byte(b.String()), 0o644)
@@ -1278,10 +1304,13 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	goal := NewGoalTool(filepath.Join(work, "plan.md"))
 	gate := r.submitGate(work, base)
 	submit := &SubmitChapterTool{
-		WorkRoot:   work,
-		SubmitRoot: node.SubmitRoot,
-		Base:       base,
-		ReportPath: node.ReportPath,
+		WorkRoot:      work,
+		SubmitRoot:    node.SubmitRoot,
+		Base:          base,
+		ReportPath:    node.ReportPath,
+		Depth:         node.Depth,
+		IssuesPath:    filepath.Join(work, ".issues", "issues.json"),
+		InheritedPath: filepath.Join(work, "_subdivision", "issues-inherited.json"),
 		Gate: func() string {
 			if msg := goalGate(goal); msg != "" {
 				return msg
@@ -1409,10 +1438,11 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		if err := writeChapterChildrenManifest(work, base, splitTool.Children); err != nil {
 			return err
 		}
-		integrationText := "All child chapters have passed their individual checkers. FIRST read work:_subdivision/children-summary.md — it contains each child's own report (what it could not restore, what it worked around). " +
-			"Then read work:_subdivision/children-manifest.md and every listed child .tex/parts file. Fix in the integration whatever those reports call out and you can actually fix. " +
+		integrationText := "All child chapters have passed their individual checkers. FIRST read work:_subdivision/children-summary.md — it contains each child's own report (what it could not restore, what it worked around) and the list of issues already inherited for you. " +
+			"You are NOT required to fix those issues (most are class/manual level and are handled later by the style-fix pass); fix the ones you can while integrating, put their IDs in report.resolved, and leave the rest untouched — the merge mechanism carries them into your own report automatically. " +
+			"Then read work:_subdivision/children-manifest.md and every listed child .tex/parts file. " +
 			"Integrate them in source order into work:" + base + ".tex and work:" + base + "/, preserving all content and references. " +
-			"Then compile the parent wrapper, LOOK at the resulting PDF with view_pdf (page 1 and the last page at least), and submit the parent paths with a report that carries remaining problems — you may quote the children's issues and must add any new ones you found. " +
+			"Then compile the parent wrapper, LOOK at the resulting PDF with view_pdf (page 1 and the last page at least), and submit the parent paths. Put any NEW problems you found into report.issues (as a list); unresolved inherited ones go up by themselves. " +
 			"Do not submit child files as independent book chapters."
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		release := r.acquireChapterSlot()
