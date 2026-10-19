@@ -48,7 +48,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `tools.python.pip_index_url` | 宿主侧自动安装用的 PyPI 镜像（如 `https://pypi.tuna.tsinghua.edu.cn/simple`）；留空 = 用宿主 `pip.conf` | 空 |
 | `tools.python.packages` | 启动前确保可导入的模块（缺则宿主侧安装；`PIL`→`Pillow`、`fitz`→`PyMuPDF` 等自动换算成 PyPI 包名） | 空 |
 | `tools.python.auto_install` | 会话 bash 报 `ModuleNotFoundError` 时由宿主侧自动 `pip install` 并提示重试 | true |
-| `tools.python.install_timeout` | 单次 `pip install` 超时（秒） | 300 |
+| `tools.python.install_timeout` | 单次 `pip install` 超时（秒）（随附模板示例写 30000，即 8 小时 20 分——只在装大包/慢镜像时才需要；默认 300 秒） | 300 |
 
 ## 配置项参考（含默认值）
 

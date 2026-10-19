@@ -23,7 +23,7 @@
 
 - **P34 递归章节会话可追踪与核对续跑**：会话预览按章节父子关系显示转换树与配对 checker，并标出并发排队/等待子章节状态；checker 使用完整章节 ID 稳定命名。余额/API 错误不再伪装成内容问题重试，更新 checker 模型后可从原转录上下文续跑。
 
-- **两份配置模板同步、`install_timeout` 笔误修正（T160）**：`docvision init` 内嵌的 `default.yaml` 与仓库根 `config.example.yaml` 长期各自演化（示例里有 `extends` 命名基座的演示、注释是中文讲解，模板还停在逐个角色写死 `model:` 的老写法，另有 `max_fix_rounds`/`raster_dpi`/`sessions.*.max_tokens`/`preview.img2text`/`mermaid.fix_attempts`/`session_errors` 等值漂移，`tools.python.install_timeout` 甚至写成 30000 秒）。现在两份模板逐字节相同，`sessions.dedupe.max_tokens` 与 `img2text.max_tokens` 统一为 65536，`install_timeout` 回到 300；新增 `TestConfigTemplatesInSync`（单边修改即失败）与 `TestBuiltinTemplateLoads`（内嵌模板能加载、版本号与代码一致、示例基座链可解析）；`docs/config.md` 补注各处"模板示例值"。
+- **两份配置模板同步、`install_timeout` 笔误修正（T160）**：`docvision init` 内嵌的 `default.yaml` 与仓库根 `config.example.yaml` 长期各自演化（示例里有 `extends` 命名基座的演示、注释是中文讲解，模板还停在逐个角色写死 `model:` 的老写法，另有 `max_fix_rounds`/`raster_dpi`/`sessions.*.max_tokens`/`preview.img2text`/`mermaid.fix_attempts`/`session_errors` 等值漂移，`tools.python.install_timeout` 是 30000 秒）。现在两份模板逐字节相同，`sessions.dedupe.max_tokens` 与 `img2text.max_tokens` 统一为 65536，`install_timeout` 按开发者的值保留 30000（文档默认值仍写代码默认 300 并注明模板示例）；新增 `TestConfigTemplatesInSync`（单边修改即失败）与 `TestBuiltinTemplateLoads`（内嵌模板能加载、版本号与代码一致、示例基座链可解析）；`docs/config.md` 补注各处"模板示例值"。
 
 ## [v1.5.0-beta.9] - 2026-10-18
 
