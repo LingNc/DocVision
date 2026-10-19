@@ -130,7 +130,12 @@ export interface Session {
   imageCaption?: string
   page?: number
   imageOrder?: number
-  /** 章节族会话（转换/核对/样式修复）文件名里的章号（convert_chapter_003 → 3）。 */
+  /** Recursive conversion identity shared by one conversion and its checker. */
+  chapterId?: string
+  chapterParent?: string
+  chapterRole?: 'convert' | 'checker' | string
+  chapterDepth?: number
+  chapterActivity?: string
   chapterOrder?: number
   /** 方块视图的完成信号（T22）：done=交过 / error=干过活没交 / ''=还没开工；运行中由 live 表达。 */
   endState?: 'done' | 'error' | ''

@@ -274,6 +274,62 @@ func TestCheckerStrictModeFailsClosedWithoutConclusion(t *testing.T) {
 	}
 }
 
+func TestCheckerStrictModeStopsOnInsufficientBalance(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	var calls atomic.Int32
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		io.WriteString(w, `{"error":{"message":"余额不足或无可用资源包","code":1113}}`)
+	})
+	ok, errText := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0,
+		filepath.Join(proj, "nested", "sessions", "checker.jsonl"), filepath.Join(proj, "nested", "checker-view"), true)
+	if ok || !strings.Contains(errText, "SESSION_INSUFFICIENT_BALANCE") {
+		t.Fatalf("expected fail-closed balance error, got ok=%v err=%q", ok, errText)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("checker requests = %d, want one request before resume with a new model", calls.Load())
+	}
+}
+
+func TestCheckerResumeUsesUpdatedModelAndTranscript(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	var firstCalls atomic.Int32
+	first, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		if firstCalls.Add(1) == 1 {
+			jsonReply(w, "unfinished checker note")
+			return
+		}
+		w.WriteHeader(http.StatusPaymentRequired)
+		io.WriteString(w, `{"error":{"message":"余额不足或无可用资源包","code":1113}}`)
+	})
+	transcript := filepath.Join(proj, "nested", "sessions", "checker_chapter_02.jsonl")
+	view := filepath.Join(proj, "nested", "checker-view")
+	if ok, _ := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0, transcript, view, true); ok {
+		t.Fatal("checker without a verdict unexpectedly passed")
+	}
+
+	var calls atomic.Int32
+	secondServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, _ := io.ReadAll(req.Body)
+		if !strings.Contains(string(body), "unfinished checker note") {
+			t.Errorf("resumed request omitted prior transcript context: %s", body)
+		}
+		calls.Add(1)
+		jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
+	}))
+	defer secondServer.Close()
+	off := false
+	first.cfg.Latex.CheckerModel = "updated"
+	first.cfg.Models["updated"] = config.ModelConfig{BaseURL: secondServer.URL, APIKey: "k", Model: "updated-model", Stream: &off}
+	first.clients = map[string]*session.Client{}
+	first.models = map[string]config.ModelConfig{}
+	ok, errText := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0, transcript, view, true)
+	if !ok || errText != "" || calls.Load() != 1 {
+		t.Fatalf("updated checker resume failed: ok=%v err=%q calls=%d", ok, errText, calls.Load())
+	}
+}
+
 func TestCheckerDegradesOnlyAfterTwoAttempts(t *testing.T) {
 	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
 	var calls atomic.Int32

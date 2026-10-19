@@ -997,7 +997,7 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 			childNode := chapterNodeConfig{
 				Base: childBase, Depth: parent.Depth + 1, InputMount: "input", InputRef: "chapter.md",
 				NodeRoot:       nodeRoot,
-				TranscriptPath: filepath.Join(nodeRoot, "sessions", "convert.jsonl"),
+				TranscriptPath: filepath.Join(nodeRoot, "sessions", "convert_"+childBase+".jsonl"),
 				SubmitRoot:     childOut,
 				ReportPath:     filepath.Join(nodeRoot, "reports", "conversion.md"),
 				StrictChecker:  true,
@@ -1334,7 +1334,11 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			return fmt.Errorf("父章节整合会话失败: %w", runErr)
 		}
 	}
-	if !r.remindSubmit(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted }) {
+	if splitTool.Requested {
+		if !submit.Submitted {
+			return fmt.Errorf("细分父章节整合会话未提交")
+		}
+	} else if !r.remindSubmit(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted }) {
 		// 必须显式提交（用户口径）：提前收尾漏了 submit 就提醒续跑（最多两次），
 		// 仍不提交判失败——不再静默采纳"编译通过但没提交"的产物
 		// （chapter_003 事故：模型漏调 submit，章节被悄悄收下，界面看不出）。
@@ -1353,7 +1357,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	checkerTranscript := ""
 	checkerView := ""
 	if node.Depth > 0 || promoteSubmitRoot != "" {
-		checkerTranscript = filepath.Join(node.NodeRoot, "sessions", "checker.jsonl")
+		checkerTranscript = filepath.Join(node.NodeRoot, "sessions", "checker_"+base+".jsonl")
 		checkerView = filepath.Join(node.NodeRoot, "checker-view")
 	}
 	partsPath := filepath.Join(node.SubmitRoot, base)

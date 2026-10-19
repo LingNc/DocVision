@@ -389,9 +389,13 @@ type SessionInfo struct {
 	// picked for this session's short image name (8, escalated to 12 on
 	// collision). Zero = default 8. Server-side only.
 	ImgShortKeep int `json:"-"`
-	// ChapterOrder is the chapter number carried by the transcript file name
-	// ("convert_chapter_003.jsonl" → 3), the block-view badge for chapter
-	// sessions the way ImageOrder numbers per-image ones.
+	// Chapter identity links each conversion to its own checker and nested children.
+	ChapterID       string `json:"chapterId,omitempty"`
+	ChapterParent   string `json:"chapterParent,omitempty"`
+	ChapterRole     string `json:"chapterRole,omitempty"`
+	ChapterDepth    int    `json:"chapterDepth,omitempty"`
+	ChapterActivity string `json:"chapterActivity,omitempty"`
+	// ChapterOrder is the chapter number carried by a transcript identity.
 	ChapterOrder int `json:"chapterOrder,omitempty"`
 	// Stage / StageTitle group sessions by pipeline stage inside a project
 	// ("vector", "convert", "checker", …) — the sidebar's second level.
@@ -603,7 +607,57 @@ func (l Line) MarshalJSON() ([]byte, error) {
 //	<proj>/source/sessions/vector_<书名>__<sha>__<图>.jsonl -> vector:<图>
 //
 // Anything else keeps its base name so an unknown file stays identifiable.
+type chapterIdentityInfo struct {
+	ID, Parent, Role string
+	Depth            int
+}
+
+var chapterRootID = regexp.MustCompile(`^chapter[_-]?\d+`)
+var chapterChildSuffix = regexp.MustCompile(`^(.*)_child_(\d+)$`)
+
+func chapterIdentity(rel string) chapterIdentityInfo {
+	base := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+	role, id := "", ""
+	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}} {
+		if strings.HasPrefix(base, prefix.name) {
+			role, id = prefix.role, strings.TrimPrefix(base, prefix.name)
+			break
+		}
+	}
+	if base == "convert" || base == "checker" {
+		role = base
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		for i, part := range parts {
+			if strings.HasPrefix(part, "conv_") && len(part) > len("conv_") {
+				id = strings.TrimPrefix(part, "conv_")
+				for j := i + 1; j+1 < len(parts); j++ {
+					if parts[j] == "_subdivision" && strings.HasPrefix(parts[j+1], "child_") {
+						child := strings.TrimPrefix(parts[j+1], "child_")
+						if _, err := strconv.Atoi(child); err == nil {
+							id += "_child_" + child
+							j++
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+	if role == "" || id == "" || !chapterRootID.MatchString(id) {
+		return chapterIdentityInfo{}
+	}
+	parent := ""
+	if m := chapterChildSuffix.FindStringSubmatch(id); m != nil {
+		parent = m[1]
+	}
+	return chapterIdentityInfo{ID: id, Parent: parent, Role: role, Depth: strings.Count(id, "_child_")}
+}
+
+// LabelFor infers the pipeline stage tag from a transcript path.
 func LabelFor(rel string) string {
+	if chapter := chapterIdentity(rel); chapter.ID != "" {
+		return chapter.Role + ":" + chapter.ID
+	}
 	base := transcriptStem(rel)
 	switch base {
 	case "":
@@ -856,7 +910,8 @@ type transcriptStat struct {
 	Meta     *MetaInfo
 	// RunEndError 是最近一条 t=meta kind=run_end 的错误文本（会话层 T94
 	// 起每次 Run 结束都落结局）——空 = 正常收尾或旧转录没有结局行。
-	RunEndError string
+	RunEndError     string
+	ChapterActivity string
 	// Prices 是转录里 t=meta kind=price 冻的费率（model → 费率，同模型
 	// 后写胜）——费用按冻的价算，不依赖跑报表时的配置（T101 第二版）。
 	Prices map[string]config.PriceConfig
@@ -992,26 +1047,43 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		rel = filepath.ToSlash(rel)
 		stat := stats[i]
 		grp := s.projectGroupFor(root, rel)
+		chapter := chapterIdentity(rel)
+		live := liveNow(stat, c.mt, now)
+		endState := liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow)
+		switch stat.ChapterActivity {
+		case "queued", "waiting_children", "checking_result":
+			live, endState = false, ""
+		}
 		out = append(out, SessionInfo{
-			ID:            rel,
-			Label:         LabelFor(rel),
-			Title:         TitleFor(rel),
-			Name:          c.name,
-			Path:          c.full,
-			Project:       grp.Name,
-			ProjectLegacy: grp.Legacy,
-			Messages:      stat.Messages,
-			Meta:          stat.Meta,
-			Stats:         stat.Usage,
-			Estimate:      estimateInfoFor(stat),
-			Bytes:         c.size,
-			ModTime:       c.mt,
-			SHA:           stat.SHA,
-			Live:          liveNow(stat, c.mt, now),
-			EndState:      liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow),
-			RunEndError:   stat.RunEndError,
-			Prices:        stat.Prices,
-			ChapterOrder:  chapterOrderOf(c.name),
+			ID: rel,
+			Label: func() string {
+				if chapter.ID != "" {
+					return chapter.Role + ":" + chapter.ID
+				}
+				return LabelFor(rel)
+			}(),
+			Title:           TitleFor(rel),
+			Name:            c.name,
+			Path:            c.full,
+			Project:         grp.Name,
+			ProjectLegacy:   grp.Legacy,
+			Messages:        stat.Messages,
+			Meta:            stat.Meta,
+			Stats:           stat.Usage,
+			Estimate:        estimateInfoFor(stat),
+			Bytes:           c.size,
+			ModTime:         c.mt,
+			SHA:             stat.SHA,
+			Live:            live,
+			EndState:        endState,
+			RunEndError:     stat.RunEndError,
+			ChapterActivity: stat.ChapterActivity,
+			Prices:          stat.Prices,
+			ChapterID:       chapter.ID,
+			ChapterParent:   chapter.Parent,
+			ChapterRole:     chapter.Role,
+			ChapterDepth:    chapter.Depth,
+			ChapterOrder:    chapterOrderOf(strings.Split(chapter.ID, "_child_")[0]),
 		})
 	}
 
@@ -1175,6 +1247,14 @@ func readStat(p string) (transcriptStat, error) {
 							stat.RunEndError = rec.Error
 						} else if rec.OK != nil && *rec.OK {
 							stat.RunEndError = ""
+						}
+					}
+					if strings.Contains(trimmed, `"kind":"chapter_activity"`) {
+						var rec struct {
+							State string `json:"state"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil {
+							stat.ChapterActivity = rec.State
 						}
 					}
 				case "usage":

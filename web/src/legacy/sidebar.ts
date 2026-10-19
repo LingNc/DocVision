@@ -274,11 +274,12 @@ export interface StageAggregate {
 export function stageChapterAggregate(stage: string, items: any[], filtered: boolean): StageAggregate | null {
   if (stage !== 'convert' && stage !== 'checker') return null
   if (filtered) return null
-  const total = (items || []).length
+  const chapterItems = (items || []).filter((s) => !s?.chapterRole || s.chapterRole === 'convert')
+  const total = chapterItems.length
   if (!total) return null
-  const live = items.filter((s) => s && s.live)
-  const done = items.filter((s) => s && s.endState === 'done').length
-  const errs = items.filter((s) => s && !s.live && s.endState === 'error')
+  const live = chapterItems.filter((s) => s && s.live)
+  const done = chapterItems.filter((s) => s && s.endState === 'done').length
+  const errs = chapterItems.filter((s) => s && !s.live && s.endState === 'error')
   const rows = live.length ? live : errs
   const bits = [total + ' 章', '完成 ' + done]
   if (live.length) bits.push('运行 ' + live.length)
@@ -399,6 +400,42 @@ export function imageTipText(s: any): string {
 }
 
 /* ---------- 分组构建（旧页 buildGroups 同名同序） ---------- */
+
+export interface ChapterTreeNode {
+  id: string
+  convert: any | null
+  checker: any | null
+  children: ChapterTreeNode[]
+}
+
+export function buildChapterTree(items: any[]): ChapterTreeNode[] {
+  const byId: Record<string, ChapterTreeNode> = {}
+  const parents: Record<string, string> = {}
+  ;(items || []).forEach((session) => {
+    if (!session?.chapterId) return
+    const id = String(session.chapterId)
+    const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] })
+    parents[id] = String(session.chapterParent || '')
+    if (session.chapterRole === 'checker') node.checker = session
+    else if (session.chapterRole === 'convert') node.convert = session
+  })
+  const roots: ChapterTreeNode[] = []
+  Object.keys(byId).forEach((id) => {
+    const parent = parents[id] && byId[parents[id]]
+    if (parent) parent.children.push(byId[id])
+    else roots.push(byId[id])
+  })
+  const ordinal = (id: string): number => {
+    const m = /_child_(\d+)$/.exec(id)
+    return m ? Number(m[1]) : 0
+  }
+  const sort = (nodes: ChapterTreeNode[]) => {
+    nodes.sort((a, b) => ordinal(a.id) - ordinal(b.id) || a.id.localeCompare(b.id))
+    nodes.forEach((node) => sort(node.children))
+  }
+  sort(roots)
+  return roots
+}
 
 export interface StageGroup { stage: string; title: string; items: any[]; live: number }
 export interface ProjectGroup {

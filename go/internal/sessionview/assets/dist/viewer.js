@@ -2623,6 +2623,9 @@
     injectHook("ec", hook, target);
   }
   const COMPONENTS = "components";
+  function resolveComponent(name, maybeSelfReference) {
+    return resolveAsset(COMPONENTS, name, true, maybeSelfReference) || name;
+  }
   const NULL_DYNAMIC_COMPONENT = /* @__PURE__ */ Symbol.for("v-ndc");
   function resolveDynamicComponent(component) {
     if (isString(component)) {
@@ -7146,11 +7149,12 @@
   function stageChapterAggregate(stage, items, filtered) {
     if (stage !== "convert" && stage !== "checker") return null;
     if (filtered) return null;
-    const total = (items || []).length;
+    const chapterItems = (items || []).filter((s) => !(s == null ? void 0 : s.chapterRole) || s.chapterRole === "convert");
+    const total = chapterItems.length;
     if (!total) return null;
-    const live = items.filter((s) => s && s.live);
-    const done = items.filter((s) => s && s.endState === "done").length;
-    const errs = items.filter((s) => s && !s.live && s.endState === "error");
+    const live = chapterItems.filter((s) => s && s.live);
+    const done = chapterItems.filter((s) => s && s.endState === "done").length;
+    const errs = chapterItems.filter((s) => s && !s.live && s.endState === "error");
     const rows = live.length ? live : errs;
     const bits = [total + " 章", "完成 " + done];
     if (live.length) bits.push("运行 " + live.length);
@@ -7251,6 +7255,34 @@
     if (s.imageOrder) bits.push("书内第 " + s.imageOrder + " 张");
     if (s.imageType) bits.push(s.imageType);
     return bits.join("\n");
+  }
+  function buildChapterTree(items) {
+    const byId = {};
+    const parents = {};
+    (items || []).forEach((session) => {
+      if (!(session == null ? void 0 : session.chapterId)) return;
+      const id = String(session.chapterId);
+      const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] });
+      parents[id] = String(session.chapterParent || "");
+      if (session.chapterRole === "checker") node.checker = session;
+      else if (session.chapterRole === "convert") node.convert = session;
+    });
+    const roots = [];
+    Object.keys(byId).forEach((id) => {
+      const parent = parents[id] && byId[parents[id]];
+      if (parent) parent.children.push(byId[id]);
+      else roots.push(byId[id]);
+    });
+    const ordinal = (id) => {
+      const m = /_child_(\d+)$/.exec(id);
+      return m ? Number(m[1]) : 0;
+    };
+    const sort = (nodes) => {
+      nodes.sort((a, b) => ordinal(a.id) - ordinal(b.id) || a.id.localeCompare(b.id));
+      nodes.forEach((node) => sort(node.children));
+    };
+    sort(roots);
+    return roots;
   }
   function sessionBoard(s) {
     return s && s.board === "img2text" ? "img2text" : "latex";
@@ -8905,7 +8937,7 @@
       mdInline(parent, part, 0);
     });
   }
-  const _sfc_main$l = /* @__PURE__ */ defineComponent({
+  const _sfc_main$m = /* @__PURE__ */ defineComponent({
     __name: "InlineMD",
     props: {
       tag: {},
@@ -8930,6 +8962,140 @@
       };
     }
   });
+  const _hoisted_1$h = ["open"];
+  const _hoisted_2$g = ["data-id", "title", "onClick"];
+  const _hoisted_3$d = {
+    key: 0,
+    class: "chapter-state"
+  };
+  const _hoisted_4$b = {
+    key: 1,
+    class: "chapter-usage"
+  };
+  const _hoisted_5$b = { class: "chapter-node-body" };
+  const _hoisted_6$9 = ["data-id", "title", "onClick"];
+  const _hoisted_7$8 = {
+    key: 0,
+    class: "chapter-state"
+  };
+  const _hoisted_8$5 = {
+    key: 1,
+    class: "chapter-usage"
+  };
+  const _hoisted_9$5 = ["onClick"];
+  const _sfc_main$l = /* @__PURE__ */ defineComponent({
+    ...{ name: "ChapterSessionTree" },
+    __name: "ChapterSessionTree",
+    props: {
+      nodes: {},
+      depth: {}
+    },
+    emits: ["select", "info"],
+    setup(__props, { emit: __emit }) {
+      const emit2 = __emit;
+      const currentId = computed(() => state.current && state.current.id);
+      function nodeContainsCurrent(node) {
+        var _a, _b;
+        if (((_a = node.convert) == null ? void 0 : _a.id) === currentId.value || ((_b = node.checker) == null ? void 0 : _b.id) === currentId.value) return true;
+        return node.children.some(nodeContainsCurrent);
+      }
+      function activityText(session) {
+        const labels = {
+          queued: "等待并发槽",
+          running: "运行中",
+          waiting_children: "等待子会话",
+          checking_result: "核对完成待处理",
+          pass: "已通过",
+          issues: "发现问题",
+          error: "会话错误"
+        };
+        return labels[session == null ? void 0 : session.chapterActivity] || ((session == null ? void 0 : session.live) ? "运行中" : "");
+      }
+      function primary(node) {
+        return node.convert || node.checker;
+      }
+      return (_ctx, _cache) => {
+        const _component_ChapterSessionTree = resolveComponent("ChapterSessionTree", true);
+        return openBlock(), createElementBlock("div", {
+          class: "chapter-tree",
+          style: normalizeStyle({ "--chapter-depth": __props.depth || 0 })
+        }, [
+          (openBlock(true), createElementBlock(Fragment, null, renderList(__props.nodes, (node) => {
+            var _a;
+            return openBlock(), createElementBlock("details", {
+              key: node.id,
+              class: "chapter-node",
+              open: nodeContainsCurrent(node)
+            }, [
+              createBaseVNode("summary", {
+                class: "chapter-node-head session-row",
+                "data-id": (_a = primary(node)) == null ? void 0 : _a.id,
+                title: primary(node) ? unref(sessionTip)(primary(node)) : node.id,
+                onClick: ($event) => primary(node) && emit2("select", primary(node))
+              }, [
+                _cache[2] || (_cache[2] = createBaseVNode("span", {
+                  class: "chapter-caret",
+                  "aria-hidden": "true"
+                }, null, -1)),
+                createVNode(_sfc_main$m, {
+                  class: "chapter-name row-title",
+                  tag: "span",
+                  text: unref(sessionTitleOf)(primary(node)) || node.id
+                }, null, 8, ["text"]),
+                activityText(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_3$d, toDisplayString(activityText(primary(node))), 1)) : createCommentVNode("", true),
+                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_4$b, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
+              ], 8, _hoisted_2$g),
+              createBaseVNode("div", _hoisted_5$b, [
+                node.checker ? (openBlock(), createElementBlock("div", {
+                  key: 0,
+                  class: normalizeClass(["chapter-checker", { active: currentId.value === node.checker.id, live: node.checker.live }])
+                }, [
+                  createBaseVNode("button", {
+                    class: "checker-main session-row",
+                    type: "button",
+                    role: "treeitem",
+                    "data-id": node.checker.id,
+                    title: unref(sessionTip)(node.checker),
+                    onClick: ($event) => emit2("select", node.checker)
+                  }, [
+                    _cache[3] || (_cache[3] = createBaseVNode("span", { class: "checker-marker" }, "核对", -1)),
+                    createVNode(_sfc_main$m, {
+                      class: "checker-name row-title",
+                      tag: "span",
+                      text: unref(sessionTitleOf)(node.checker)
+                    }, null, 8, ["text"]),
+                    activityText(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_7$8, toDisplayString(activityText(node.checker)), 1)) : createCommentVNode("", true),
+                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_8$5, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
+                  ], 8, _hoisted_6$9),
+                  createBaseVNode("button", {
+                    class: "chapter-info",
+                    type: "button",
+                    title: "打开核对会话详情",
+                    onClick: ($event) => emit2("info", node.checker)
+                  }, "ⓘ", 8, _hoisted_9$5)
+                ], 2)) : createCommentVNode("", true),
+                node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
+                  key: 1,
+                  nodes: node.children,
+                  depth: (__props.depth || 0) + 1,
+                  onSelect: _cache[0] || (_cache[0] = ($event) => emit2("select", $event)),
+                  onInfo: _cache[1] || (_cache[1] = ($event) => emit2("info", $event))
+                }, null, 8, ["nodes", "depth"])) : createCommentVNode("", true)
+              ])
+            ], 8, _hoisted_1$h);
+          }), 128))
+        ], 4);
+      };
+    }
+  });
+  const _export_sfc = (sfc, props) => {
+    const target = sfc.__vccOpts || sfc;
+    for (const [key, val] of props) {
+      target[key] = val;
+    }
+    return target;
+  };
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-4fe81f88"]]);
   const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"
@@ -9056,11 +9222,11 @@
   };
   const _hoisted_63 = ["href"];
   const _hoisted_64 = {
-    key: 0,
+    key: 1,
     class: "session-blocks"
   };
   const _hoisted_65 = ["data-id", "title", "onClick"];
-  const _hoisted_66 = { key: 1 };
+  const _hoisted_66 = { key: 2 };
   const _hoisted_67 = ["data-id", "title", "onClick"];
   const _hoisted_68 = { class: "row-slot" };
   const _hoisted_69 = {
@@ -9073,7 +9239,7 @@
   const _hoisted_73 = ["onClick"];
   const _hoisted_74 = ["onClick"];
   const _hoisted_75 = {
-    key: 0,
+    key: 1,
     class: "session-blocks"
   };
   const _hoisted_76 = ["data-id", "title", "onClick"];
@@ -9170,6 +9336,8 @@
               return y.mtime > x.mtime ? 1 : -1;
             });
             const agg = stageChapterAggregate(stg, items, !!state.filter);
+            const chapterItems = items.filter((s) => !!s.chapterId);
+            const chapterRoots = stg === "convert" && items.length > 0 && chapterItems.length === items.length ? buildChapterTree(items) : [];
             const okey = groupKey("overflow", g.name + "/" + stg);
             const shown0 = items;
             const needOverflow = shown0.length > OVERFLOW_LIMIT;
@@ -9190,7 +9358,8 @@
               shown,
               hiddenCount: shown0.length - shown.length,
               agg,
-              noBy
+              noBy,
+              chapterRoots
             };
           });
           let chains = null;
@@ -9460,7 +9629,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-b72c25b8><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-b72c25b8><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b72c25b8></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-b72c25b8><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-b72c25b8></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b72c25b8></path></svg></span>', 1)),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-410ffba2><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-410ffba2><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-410ffba2></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-410ffba2><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-410ffba2></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-410ffba2></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9503,7 +9672,7 @@
                                   class: normalizeClass(["dot", { live: c.live > 0 }])
                                 }, null, 2)
                               ]),
-                              createVNode(_sfc_main$l, {
+                              createVNode(_sfc_main$m, {
                                 tag: "span",
                                 class: "row-title",
                                 text: unref(sessionTitleOf)(c.main)
@@ -9541,7 +9710,7 @@
                                       class: normalizeClass(["dot", { live: s.live }])
                                     }, null, 2)
                                   ]),
-                                  createVNode(_sfc_main$l, {
+                                  createVNode(_sfc_main$m, {
                                     tag: "span",
                                     class: "row-title",
                                     text: unref(sessionTitleOf)(s)
@@ -9578,7 +9747,7 @@
                                 class: normalizeClass(["dot", { live: s.live }])
                               }, null, 2)
                             ]),
-                            createVNode(_sfc_main$l, {
+                            createVNode(_sfc_main$m, {
                               tag: "span",
                               class: "row-title",
                               text: unref(sessionTitleOf)(s)
@@ -9630,7 +9799,12 @@
                               }, "复查", 8, _hoisted_63)
                             ])) : createCommentVNode("", true)
                           ]),
-                          blockView.value ? (openBlock(), createElementBlock("div", _hoisted_64, [
+                          sv.chapterRoots.length ? (openBlock(), createBlock(ChapterSessionTree, {
+                            key: 0,
+                            nodes: sv.chapterRoots,
+                            onSelect: onRowClick,
+                            onInfo: onInfoClick
+                          }, null, 8, ["nodes"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_64, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9658,7 +9832,7 @@
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
                                 ]),
-                                createVNode(_sfc_main$l, {
+                                createVNode(_sfc_main$m, {
                                   tag: "span",
                                   class: "row-title",
                                   text: unref(sessionTitleOf)(s)
@@ -9690,7 +9864,12 @@
                         ], 8, _hoisted_57)), [
                           [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
                         ]) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
-                          blockView.value ? (openBlock(), createElementBlock("div", _hoisted_75, [
+                          sv.chapterRoots.length ? (openBlock(), createBlock(ChapterSessionTree, {
+                            key: 0,
+                            nodes: sv.chapterRoots,
+                            onSelect: onRowClick,
+                            onInfo: onInfoClick
+                          }, null, 8, ["nodes"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_75, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9702,7 +9881,7 @@
                                 onClick: ($event) => onRowClick(s)
                               }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_76);
                             }), 128))
-                          ])) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                          ])) : (openBlock(), createElementBlock(Fragment, { key: 2 }, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9718,7 +9897,7 @@
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
                                 ]),
-                                createVNode(_sfc_main$l, {
+                                createVNode(_sfc_main$m, {
                                   tag: "span",
                                   class: "row-title",
                                   text: unref(sessionTitleOf)(s)
@@ -9774,14 +9953,7 @@
       };
     }
   });
-  const _export_sfc = (sfc, props) => {
-    const target = sfc.__vccOpts || sfc;
-    for (const [key, val] of props) {
-      target[key] = val;
-    }
-    return target;
-  };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-b72c25b8"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-410ffba2"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
@@ -12094,7 +12266,7 @@
                       class: normalizeClass(row.mono ? "mono" : void 0),
                       title: row.title || void 0
                     }, [
-                      row.md ? (openBlock(), createBlock(_sfc_main$l, {
+                      row.md ? (openBlock(), createBlock(_sfc_main$m, {
                         key: 0,
                         text: row.md,
                         tag: "span",
@@ -12285,7 +12457,7 @@
                 onClick: ($event) => onRowClick(s)
               }, [
                 createBaseVNode("span", _hoisted_5$1, toDisplayString(unref(img2textMemberTag)(s.id)), 1),
-                createVNode(_sfc_main$l, {
+                createVNode(_sfc_main$m, {
                   tag: "span",
                   class: "history-title",
                   text: unref(sessionTitleOf)(s)
@@ -12671,7 +12843,7 @@
                         onClick: _cache[3] || (_cache[3] = ($event) => unref(revealProject)(curProject.value))
                       }, toDisplayString(curProject.value), 1),
                       _cache[17] || (_cache[17] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
-                      createVNode(_sfc_main$l, {
+                      createVNode(_sfc_main$m, {
                         text: sessionTitle.value,
                         tag: "span",
                         class: "crumb crumb-current",

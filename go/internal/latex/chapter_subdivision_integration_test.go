@@ -70,6 +70,7 @@ func TestRecursiveChapterConversionChecksChildrenBeforePromotion(t *testing.T) {
 
 	var requests atomic.Int32
 	var formalWasPremature atomic.Bool
+	var splitReminderSeen atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -85,6 +86,9 @@ func TestRecursiveChapterConversionChecksChildrenBeforePromotion(t *testing.T) {
 		for _, message := range apiReq.Messages {
 			if message.Role == "user" {
 				lastUser = message.Content
+				if strings.Contains(message.Content, "You have NOT submitted yet") || strings.Contains(message.Content, "You have NOT called submit yet") {
+					splitReminderSeen.Store(true)
+				}
 			}
 		}
 		toolset := map[string]bool{}
@@ -159,15 +163,18 @@ func TestRecursiveChapterConversionChecksChildrenBeforePromotion(t *testing.T) {
 	nodeRoot := filepath.Join(proj, "work", "temp", "conv_chapter_01")
 	for _, path := range []string{
 		filepath.Join(proj, "work", "sessions", "convert_chapter_01.jsonl"),
-		filepath.Join(nodeRoot, "sessions", "checker.jsonl"),
+		filepath.Join(nodeRoot, "sessions", "checker_chapter_01.jsonl"),
 		filepath.Join(workDir, "reports", "chapter_01.md"),
 		filepath.Join(nodeRoot, "work", "_subdivision", "children-manifest.md"),
-		filepath.Join(nodeRoot, "work", "_subdivision", "child_01", "node", "sessions", "convert.jsonl"),
-		filepath.Join(nodeRoot, "work", "_subdivision", "child_01", "node", "sessions", "checker.jsonl"),
+		filepath.Join(nodeRoot, "work", "_subdivision", "child_01", "node", "sessions", "convert_chapter_01_child_01.jsonl"),
+		filepath.Join(nodeRoot, "work", "_subdivision", "child_01", "node", "sessions", "checker_chapter_01_child_01.jsonl"),
 	} {
 		if !fileExists(path) {
 			t.Errorf("recursive record missing: %s", path)
 		}
+	}
+	if splitReminderSeen.Load() {
+		t.Fatal("valid split request triggered generic submit reminder")
 	}
 	if requests.Load() < 5 {
 		t.Fatalf("API requests = %d, expected parent, children, and checkers", requests.Load())

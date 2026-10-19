@@ -9,16 +9,17 @@ import { computed, ref, watchEffect } from 'vue'
 import { state, openDetails, fmtSize, storeGet, storeSet, setBoard } from '../state'
 import {
   bookDominantState, bookTip, booksHeadText,
-  buildGroups, buildImg2TextChains, filterByBoard, groupKey, groupWantOpen,
+  buildGroups, buildImg2TextChains, buildChapterTree, filterByBoard, groupKey, groupWantOpen,
   imageChipText, imageTipText, img2textMemberTag,
   styleFixPhaseKey, stylefixCompare,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
   stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens, stageChapterAggregate, stylePilotOrder,
-  type SessionChain, type StageStatus, type StageAggregate,
+  type SessionChain, type StageStatus, type StageAggregate, type ChapterTreeNode,
 } from '../legacy/sidebar'
 import { selectSession, refreshIndex } from '../data'
 import InlineMD from './InlineMD.vue'
+import ChapterSessionTree from './ChapterSessionTree.vue'
 import type { Img2TextBook } from '../legacy/types'
 
 const OVERFLOW_LIMIT = 8
@@ -101,6 +102,7 @@ interface StageView {
   hiddenCount: number
   /* T63：convert/checker 聚合（null = 不聚合原样显示）。 */
   agg: StageAggregate | null
+  chapterRoots: ChapterTreeNode[]
 }
 interface GroupView {
   name: string; prefix: string; title: string; legacy: boolean
@@ -153,6 +155,9 @@ const groups = computed<GroupView[]>(() => {
       // 老规矩：行全列、超 8 条给「更多会话」；agg 只留阶段头汇总文案
       // （"8 章 · 完成 8"），方块视图本来就是为多会话扫视设计的。
       const agg = stageChapterAggregate(stg, items, !!state.filter)
+      const chapterItems = items.filter((s: any) => !!s.chapterId)
+      const chapterRoots = stg === 'convert' && items.length > 0 && chapterItems.length === items.length
+        ? buildChapterTree(items) : []
       const okey = groupKey('overflow', g.name + '/' + stg)
       const shown0 = items
       const needOverflow = shown0.length > OVERFLOW_LIMIT
@@ -167,7 +172,7 @@ const groups = computed<GroupView[]>(() => {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
         overflowKey: okey, needOverflow, shown, hiddenCount: shown0.length - shown.length,
-        agg, noBy,
+        agg, noBy, chapterRoots,
       }
     })
     let chains: SessionChain[] | null = null
@@ -535,7 +540,12 @@ function onMoreClick(okey: string) {
                     >复查</a>
                   </span>
                 </summary>
-                <template v-if="blockView">
+                <ChapterSessionTree
+                  v-if="sv.chapterRoots.length"
+                  :nodes="sv.chapterRoots"
+                  @select="onRowClick" @info="onInfoClick"
+                />
+                <template v-else-if="blockView">
                 <div class="session-blocks">
                   <button
                     v-for="s in sv.items"
@@ -577,7 +587,12 @@ function onMoreClick(okey: string) {
                 </div>
               </details>
               <template v-else>
-                <div v-if="blockView" class="session-blocks">
+                <ChapterSessionTree
+                  v-if="sv.chapterRoots.length"
+                  :nodes="sv.chapterRoots"
+                  @select="onRowClick" @info="onInfoClick"
+                />
+                <div v-else-if="blockView" class="session-blocks">
                   <button
                     v-for="s in sv.items"
                     :key="s.id"

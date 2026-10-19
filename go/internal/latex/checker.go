@@ -81,6 +81,15 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 			renderPrompt(prompts.Must(prompts.CheckerSystem), tuning, r.outputLang()),
 			tools, r.log, tid, "checker:"+base)
 		var tr *session.TranscriptWriter
+		var resumedMsgs []session.ChatMessage
+		var resumeSkip bool
+		if msgs, stats, err := session.LoadTranscriptStats(trPath); err == nil && len(msgs) > 0 {
+			sess.SetMessages(msgs)
+			sess.SeedCounters(stats.Rounds, stats.Tools)
+			resumedMsgs = msgs
+			resumeLog(r.log, tid, "checker", base, msgs, stats)
+			resumeSkip = replaySubmit(r.log, tid, "checker:"+base, submit, stats)
+		}
 		if w, err := session.NewTranscript(trPath); err == nil {
 			tr = w
 			sess.SetTranscript(w)
@@ -89,28 +98,34 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		// 而且 checker 是并发跑的，必须有自己的行而不是挤在转换行里。
 		chkHook, chkClose := r.livePhaseRow("checker:"+base, "checker:"+base)
 		sess.SetProgressHook(chkHook)
-		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
-		release := r.acquireChapterSlot()
-		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
-		_, runErr := sess.Run(session.RunOptions{UserText: userText})
-		release()
+		var runErr error
+		if !resumeSkip {
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
+			release := r.acquireChapterSlot()
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+			_, runErr = sess.Run(session.RunOptions{UserText: resumeUserText(resumedMsgs, userText)})
+			release()
+		}
 		chkClose()
+		if runErr == nil {
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
+		}
 		if runErr == nil && !submit.Submitted {
 			// 与 tikz 会话同款：模型漏了 submit 就提醒一次。
 			r.log.LogWarning(tid, "[checker]", base, "会话结束但未提交结论，发送提交提醒")
-			release = r.acquireChapterSlot()
+			release := r.acquireChapterSlot()
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 			_, runErr = sess.Run(session.RunOptions{
 				UserText: "You have NOT called submit yet. Re-read the chapter files if needed, then call submit with your verdict.",
 			})
 			release()
 		}
-		if tr != nil {
-			// 本轮写完即关；重试轮在同一转录上重新打开续写
-			// （append-only，meta 按哈希去重），一章的核对历史保持在一个文件里。
-			tr.Close()
-			tr = nil
-		}
 		if runErr != nil {
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
+			if tr != nil {
+				tr.Close()
+				tr = nil
+			}
 			r.log.LogWarning(tid, "[checker]", base, "会话错误:", runErr)
 			if strict && isSessionAPIError(runErr.Error()) {
 				if tr != nil {
@@ -124,9 +139,18 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		}
 		if !submit.Submitted {
 			r.log.LogWarning(tid, "[checker]", base, "提醒后仍未提交结论")
+			if tr != nil {
+				tr.Close()
+				tr = nil
+			}
 			continue
 		}
 		if submit.Status == "issues" {
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "issues"})
+			if tr != nil {
+				tr.Close()
+				tr = nil
+			}
 			issues := strings.TrimSpace(submit.Issues)
 			if issues == "" {
 				issues = "the checker reported problems but gave no description"
@@ -136,7 +160,16 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		}
 		if submit.Status != "pass" {
 			r.log.LogWarning(tid, "[checker]", base, "提交了未知结论状态:", submit.Status)
+			if tr != nil {
+				tr.Close()
+				tr = nil
+			}
 			continue
+		}
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "pass"})
+		if tr != nil {
+			tr.Close()
+			tr = nil
 		}
 		r.keepCheckerTranscript(trPath, strict)
 		return true, ""

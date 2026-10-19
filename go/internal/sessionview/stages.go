@@ -234,6 +234,9 @@ func (s *scanner) enrichSessions(root string, sessions []SessionInfo) {
 	}
 	for i := range sessions {
 		stage := StageOf(sessions[i])
+		if sessions[i].ChapterID != "" {
+			stage = "convert"
+		}
 		sessions[i].Stage = stage
 		sessions[i].StageTitle = StageTitle(stage)
 		dir := projectDirFor(sessions[i].ID)
