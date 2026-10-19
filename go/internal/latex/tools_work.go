@@ -794,6 +794,7 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 		}
 	}
 	work := ""
+	boundTarget := map[string]bool{}
 	for _, m := range t.Mounts {
 		if m.Dir == "" {
 			continue
@@ -819,10 +820,38 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 				break
 			}
 		}
-		if linked {
-			// A VIEW directory (symlinks to files and/or directories:
-			// the original-PDF view, the project view): bind every target
-			// individually, never following links outside the mounts.
+		if m.Writable {
+			// A writable workspace is bound writable AS A WHOLE, links
+			// included. Branching on "contains a symlink" here used to turn
+			// the session's own workspace into a read-only per-entry view:
+			// convert workspaces link images/ and figures/ to the project's
+			// read-only asset trees (linkAbs), so every .tex, manual and
+			// parts/ file also got --ro-bind and in-sandbox editors (bash,
+			// python) failed with "Read-only file system" while write_file
+			// (no sandbox) still worked. Bind each link target read-only at
+			// its real absolute path instead, so the links resolve inside
+			// the sandbox and the target trees stay read-only.
+			args = append(args, "--dir", dst, "--bind", mountDir, dst)
+			for _, e := range entries {
+				if e.Type()&os.ModeSymlink == 0 {
+					continue
+				}
+				src := filepath.Join(mountDir, e.Name())
+				target, lerr := filepath.EvalSymlinks(src)
+				if lerr != nil || target == mountDir || boundTarget[target] {
+					continue
+				}
+				if _, serr := os.Stat(target); serr != nil {
+					continue
+				}
+				boundTarget[target] = true
+				args = append(args, "--ro-bind", target, target)
+			}
+		} else if linked {
+			// A read-only VIEW directory (symlinks to files and/or
+			// directories: the original-PDF view, the project view): bind
+			// every target individually, never following links outside the
+			// mounts.
 			args = append(args, "--dir", dst)
 			for _, e := range entries {
 				src := filepath.Join(mountDir, e.Name())
@@ -834,8 +863,6 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 				}
 				args = append(args, "--ro-bind", src, filepath.Join(dst, e.Name()))
 			}
-		} else if m.Writable {
-			args = append(args, "--dir", dst, "--bind", mountDir, dst)
 		} else {
 			args = append(args, "--dir", dst, "--ro-bind", mountDir, dst)
 		}

@@ -98,6 +98,91 @@ func TestBashSandboxIsolates(t *testing.T) {
 	_ = config.Config{}
 }
 
+// TestSandboxWritableWorkspaceWithLinks pins the fix for the read-only
+// workspace trap: a convert workspace links images/ and figures/ to the
+// project's read-only asset trees, and the sandbox used to take that as a
+// "view directory" and bind EVERY entry read-only — so in-sandbox editors
+// (bash, python) could not touch the session's own .tex files and failed
+// with "Read-only file system" while write_file (no sandbox) worked.
+func TestSandboxWritableWorkspaceWithLinks(t *testing.T) {
+	work := t.TempDir()
+	assets := t.TempDir()
+	if err := os.WriteFile(filepath.Join(assets, "pic.jpg"), []byte("img"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(assets, filepath.Join(work, "images")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "chapter_01.tex"), []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &WorkBashTool{Root: work, Mounts: []Mount{{Name: "work", Dir: work, Writable: true}}}
+	args := strings.Join(tool.sandboxArgs("ls", false), " ")
+	if !strings.Contains(args, "--bind "+work+" /work") {
+		t.Fatalf("a writable workspace must stay a writable bind:\n%s", args)
+	}
+	if strings.Contains(args, "--ro-bind "+filepath.Join(work, "chapter_01.tex")) {
+		t.Fatalf("the session's own files must not be bound read-only:\n%s", args)
+	}
+	// The link target is bound read-only at its real path so the link
+	// resolves inside the sandbox.
+	if !strings.Contains(args, "--ro-bind "+assets+" "+assets) {
+		t.Fatalf("the symlink target must be bound read-only:\n%s", args)
+	}
+}
+
+// TestBashSandboxEditsOwnWorkspaceWithLinks is the behavioural half of the
+// same contract: a real sandboxed command must be able to overwrite an
+// existing workspace file and read through the images/ link.
+func TestBashSandboxEditsOwnWorkspaceWithLinks(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed")
+	}
+	work := t.TempDir()
+	assets := t.TempDir()
+	if err := os.WriteFile(filepath.Join(assets, "pic.jpg"), []byte("pixels"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(assets, filepath.Join(work, "images")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "chapter_01.tex"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log, err := logger.NewLogger("", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	log.SetQuiet(true)
+	tool := &WorkBashTool{
+		Root:    work,
+		Mounts:  []Mount{{Name: "work", Dir: work, Writable: true}},
+		Sandbox: true, Log: log,
+	}
+	res, err := tool.Execute(`{"command":"printf new > chapter_01.tex && cat images/pic.jpg && echo && echo done"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Text, "Read-only") || strings.Contains(res.Text, "只读") {
+		t.Fatalf("workspace write was rejected by the sandbox:\n%s", res.Text)
+	}
+	if !strings.Contains(res.Text, "pixels") || !strings.Contains(res.Text, "done") {
+		t.Fatalf("command did not complete:\n%s", res.Text)
+	}
+	if b, _ := os.ReadFile(filepath.Join(work, "chapter_01.tex")); string(b) != "new" {
+		t.Fatalf("workspace file not updated, got %q", b)
+	}
+	// The link target must stay read-only.
+	res, err = tool.Execute(`{"command":"echo x > images/pic.jpg 2>&1 | head -1"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "Read-only") && !strings.Contains(res.Text, "只读") {
+		t.Fatalf("the asset tree must stay read-only:\n%s", res.Text)
+	}
+}
+
 // TestProjectViewIsNarrow pins the project-view contract: a session's
 // "project" mount contains ONLY source/style/chapters — never the
 // internal bookkeeping (work/sessions transcripts, doc_index, pages

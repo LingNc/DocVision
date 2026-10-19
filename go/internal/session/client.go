@@ -26,11 +26,11 @@ import (
 // completions endpoint. It is stateless and safe to share across
 // goroutines; retry/backoff lives in CallWithRetry.
 type Client struct {
-	http        *http.Client // non-streaming: connect + read total timeout
-	streamHTTP  *http.Client // streaming: no total timeout, idle watchdog instead
-	baseURL     string
-	apiKey      string
-	model       string
+	http       *http.Client // non-streaming: connect + read total timeout
+	streamHTTP *http.Client // streaming: no total timeout, idle watchdog instead
+	baseURL    string
+	apiKey     string
+	model      string
 	// price 是该条目当时配置的费率：会话开始时冻进转录（t=meta
 	// kind=price），费用统计按转录里冻的价算、不依赖跑报表时的
 	// 配置（用户会多次改配置，T101 第二版）。
@@ -100,7 +100,7 @@ func NewClient(cfg config.ModelConfig) *Client {
 		streamHTTP:      &http.Client{Transport: tr},
 		baseURL:         strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:          cfg.APIKey,
-		price: cfg.Price,
+		price:           cfg.Price,
 		model:           cfg.Model,
 		api:             strings.ToLower(strings.TrimSpace(cfg.API)),
 		requestBody:     cfg.RequestBody,
@@ -317,20 +317,45 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 	}
 
 	// P4：OpenAI Responses API 适配（/v1/responses，gpt-5/o 系新协议）。
-	// 同样只走非流式；store:false + 全量 input 回传（无状态回放）。
+	// store:false + 全量 input 回传（无状态回放）。流式与 anthropic 不同：
+	// 它按 response.* 事件增量推进，最终仍以 response.completed 收账。
 	if c.api == "responses" {
-		payload.Stream = false
 		raw, err := c.buildResponsesBody(&payload)
 		if err != nil {
 			return nil, err
 		}
 		c.logCacheProbe(&payload, raw)
+		fallback := func(cause error) (*ChatResponse, error) {
+			c.logf("  [stream] responses 流式请求失败，改用非流式重试一次:", truncate(cause.Error(), 200))
+			payload.Stream = false
+			raw2, berr := c.buildResponsesBody(&payload)
+			if berr != nil {
+				return nil, cause
+			}
+			resp2, err2 := c.postResponses(raw2, false)
+			if err2 != nil {
+				return nil, cause
+			}
+			return c.decodeResponses(resp2, false, time.Now(), nil)
+		}
 		start := time.Now()
-		resp, err := c.postResponses(raw)
+		resp, err := c.postResponses(raw, payload.Stream)
 		if err != nil {
+			if payload.Stream && shouldFallbackToNonStream(err) {
+				return fallback(err)
+			}
 			return nil, err
 		}
-		return c.decodeResponsesResponse(resp, start)
+		if payload.Stream && resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			httpErr := fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			if shouldFallbackToNonStream(httpErr) {
+				return fallback(httpErr)
+			}
+			return nil, httpErr
+		}
+		return c.decodeResponses(resp, payload.Stream, start, req.StreamHook)
 	}
 
 	raw, err := c.buildBody(&payload)

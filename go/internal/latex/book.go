@@ -169,6 +169,11 @@ var classNameRe = regexp.MustCompile(`\\ProvidesClass\{([^}]*)\}`)
 //  5. assemble  : main.tex + full-book compile (+ fix session) + standalone.tex
 func (r *Runner) RunBook(opts BookOptions) error {
 	cfg := r.cfg
+	// 内存自证（T158）：SIGKILL 捕获不到，所以把基线与每 60s 的
+	// RSS/可用内存采样写进日志——下一次「已杀死」才有据可查。
+	if stop := r.startMemWatch(time.Minute); stop != nil {
+		defer stop()
+	}
 	// 项目根只在这里决定一次：<paths.latex_project>/<项目名>/（项目名
 	// 默认取本书主题名，可用 --project 覆盖），或者——当输出根本身已是
 	// 一个工程（旧版单项目布局）且未指定 --project——继续沿用输出根。

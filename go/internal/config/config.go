@@ -58,8 +58,9 @@ type ModelConfig struct {
 	// (default, /chat/completions), "anthropic" (/v1/messages — the
 	// Anthropic Messages API, Claude and the many Anthropic-compatible
 	// gateways) or "responses" (/v1/responses — the OpenAI Responses
-	// API, gpt-5/o-series and compatible gateways). Anthropic/Responses
-	// entries are answered non-streaming for now.
+	// API, gpt-5/o-series and compatible gateways). "openai" and
+	// "responses" honour models.*.stream (SSE, progressive snapshots);
+	// "anthropic" is answered non-streaming for now.
 	API string `yaml:"api"`
 	// Price is this entry's billing rate. All-zero = unknown, and every
 	// cost report then says "未配置价格" instead of inventing ¥0. A model entry

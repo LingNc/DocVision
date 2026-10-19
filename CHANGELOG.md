@@ -7,7 +7,15 @@
 
 ### Added
 
+- **`api: responses` 支持流式输出（T157）**：Responses API 线路以前强制 `stream:false`，一次整段 JSON 应答，长思考/长输出期间终端没有任何进展。现在按 `models.*.stream` 带 `stream:true`，用 `response.output_text.delta` / `response.reasoning_summary_text.delta` 增量推进实时快照与首字延迟，最终仍以 `response.completed` 里的完整 response 对象收账（与非流式共用同一个解码器，转录内容不随传输方式变化）；`response.failed` 直接透出厂商原因；网关忽略 `stream:true` 返回整段 JSON 时自动兜底解析，不支持 SSE 的网关回退一次非流式。同时修正截断判据认 `incomplete_details.reason`（`length` 触发空响应自救）。`api: anthropic` 仍只走非流式。
+
+- **运行期内存自证（T158）**：SIGKILL 无法捕获，档位1 跑一半被系统杀掉时日志里什么都不留。`latex` 现在启动即打一行 `[mem]` 基线（本进程 RSS + 系统可用/总量），运行期每 60s 采样并记录 RSS 峰值与可用内存最低值，可用内存低于 1GiB 或 10% 告警、低于 256MiB 或 3% 提示随时可能被 OOM 杀掉并建议调低 `latex.concurrency`。
+
 - **章节转换支持递归细分（P34）**：转换会话可通过结构化工具申请按行段完整分区，最多三层；子章节完整转换会话并行运行且必须由 checker 明确判为 pass，父级按序整合后先在隔离目录核验，通过才晋级到正式章节结果。递归节点共享并发上限，并保留各层工作区、转录、报告与细分计划；失败或无结论会阻止父级晋级。
+
+### Fixed
+
+- **bash 沙箱不再把会话自己的工作区变成只读（T156）**：逐章转换工作区的顶层有 `images`/`figures` 两枚指向项目资源树的软链，沙箱据此把整个 `work:` 挂载按条目 `--ro-bind`，于是 bash 里用 python/脚本改 `.tex`、`parts/` 全部 `Read-only file system`（`write_file` 不经沙箱所以显得只有 bash 坏了）。现在可写挂载无条件整棵 `--bind`，再对软链目标补一条只读绑定——自己的文件可写、资源树仍只读、链接照旧能解析。
 
 ### Changed
 
