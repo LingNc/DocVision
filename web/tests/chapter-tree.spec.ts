@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
+import { chapterAttemptChain, chapterAttemptTag, chainMemberTag } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 
 beforeEach(() => {
@@ -59,5 +60,42 @@ describe('章节节点展开记忆', () => {
     } finally {
       g.window = savedWindow
     }
+  })
+})
+
+// T165：章节转换被 checker 打回后换全新会话重来，几次尝试要能串成一条链
+// （中栏「历史 N」页签），并按尝试序号标注「第 N 次」。第一次尝试不带标签。
+describe('chapter attempt chain', () => {
+  const mk = (id: string, attempt: number, mtime: string, chapterId = 'chapter_042') => ({
+    id,
+    project: 'book',
+    chapterId,
+    chapterRole: 'convert',
+    chapterAttempt: attempt,
+    mtime,
+  })
+
+  it('把同一章的各次尝试聚成一条链（新 → 旧）', () => {
+    const sessions = [
+      mk('a/convert_chapter_042.jsonl', 1, '2026-10-19T10:00:00Z'),
+      mk('a/convert_chapter_042.try2.jsonl', 2, '2026-10-19T12:00:00Z'),
+      mk('a/convert_chapter_008.jsonl', 1, '2026-10-19T11:00:00Z', 'chapter_008'),
+    ]
+    const chain = chapterAttemptChain(sessions, 'a/convert_chapter_042.try2.jsonl')
+    expect(chain).not.toBeNull()
+    expect(chain!.length).toBe(2)
+    expect(chain![0].chapterAttempt).toBe(2)
+  })
+
+  it('只尝试过一次 / 非章节会话不出链', () => {
+    const sessions = [mk('a/convert_chapter_042.jsonl', 1, '2026-10-19T10:00:00Z')]
+    expect(chapterAttemptChain(sessions, 'a/convert_chapter_042.jsonl')).toBeNull()
+    expect(chapterAttemptChain([{ id: 'x/style_session.jsonl', project: 'book' }], 'x/style_session.jsonl')).toBeNull()
+  })
+
+  it('标签：第一次为空，之后是第 N 次', () => {
+    expect(chapterAttemptTag({ chapterAttempt: 1 })).toBe('')
+    expect(chapterAttemptTag({ chapterAttempt: 3 })).toBe('第 3 次')
+    expect(chainMemberTag(mk('a/convert_chapter_042.try2.jsonl', 2, '2026-10-19T12:00:00Z'))).toBe('第 2 次')
   })
 })

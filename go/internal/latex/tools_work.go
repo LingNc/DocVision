@@ -1003,8 +1003,11 @@ type ViewPDFTool struct {
 	// SoftMax 0 = no budget.
 	SoftMax   int
 	WarnRatio float64
-	views     map[string]int  // "file#page" -> render count
-	warned    map[string]bool // already reminded about this page
+	// Gate, when set, records "this page of the compiled PDF was really
+	// looked at" so the chapter submit gate can require it (T165).
+	Gate   *chapterGate
+	views  map[string]int  // "file#page" -> render count
+	warned map[string]bool // already reminded about this page
 }
 
 // vfs returns the tool's namespace (Mounts wins over Root).
@@ -1150,6 +1153,9 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 				sizeNote += fmt.Sprintf(", this crop %.1fmm x %.1fmm", wMM*fw, hMM*fh)
 			}
 		}
+	}
+	if t.Gate != nil {
+		t.Gate.markViewed(full, page)
 	}
 	return session.ToolResult{
 		Text: fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx%s)%s attached.", rel, page, left, top, right, bottom, zoom, sizeNote, note) +

@@ -159,6 +159,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `paths.fonts` | AI 字体目录：缺字体时按样式会话报告的清单手动放入，编译环境注入 `TEXINPUTS`/`OSFONTDIR`（无下载工具） | ./fonts |
 | `img2text.model` | 基础流程模型（models: 注册表代号，默认 text） | text |
 | `latex.checker_model` | 每章核对模型（独立小模型）。核对本身是一个极简会话：只读两个文件（章节 md + 提交的 .tex）与一个文件夹（分片），工具只有 read_file/grep/submit，默认 50 轮；调优里未配置的字段继承 convert（轮数除外） | "checker" |
+| `latex.checker_rounds` | 一章**最多尝试几次**：checker 连续打回同一个转换会话若干轮仍不过，就作废产物、换一个全新会话重来；第 N 层递归（细分）每次 -1，**下限 3**，顶层默认 6。顶层次数与最大递归层数（3）不匹配（`checker_rounds - 3 < 3`）时启动告警——深层只会吃到下限 | 6 |
 | `latex.remove_watermark` | 水印处理：true 时样式/转换/核对 AI 会检测并排除水印 | false |
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |
 | `paths.done_dir` | 分割完成后源文件被归档到的目录；空字符串或与 `input_dir` 相同会报错 | `<input_dir>/done` |

@@ -153,11 +153,14 @@ func TestCheckerSessionFeedsBackRealProblems(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name: "no verdict means pass",
+			// T165：没 submit 就是没结论，不再兜底当通过（旧行为让一个
+			// 从未提交结论的 checker 把章节放进了书）。
+			name: "no verdict is not a pass",
 			reply: func(w http.ResponseWriter, round int32) {
 				jsonReply(w, "looks fine to me")
 			},
-			wantOK: true,
+			wantOK:     false,
+			wantIssues: "未能提交结论",
 		},
 		{
 			name: "issues without text still blocks",
@@ -209,8 +212,9 @@ func TestCheckerReadOnlyMountRejectsWrite(t *testing.T) {
 	}
 }
 
-// T46：checker 必须以一个结论收尾，不能"出错就结束"——
-// 会话错误/漏 submit 时先提醒、再重开一轮全新会话，两轮都失败才降级通过。
+// T165：checker 必须以一个结论收尾。会话空响应/漏 submit 时会先在内部
+// 重开一轮核对（同一章节、新会话），两轮都没有结论就**判不通过**——旧
+// 行为在这里降级成"通过"，让一个从未提交结论的 checker 把章节放进了书。
 
 // degenerateJSON 返回 finish=length、0 completion token 的空响应
 // （厂商网关在高压下的真实退化行为）。
@@ -219,25 +223,39 @@ func degenerateJSON(w http.ResponseWriter) {
 	io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"length"}],"usage":{"prompt_tokens":100,"completion_tokens":0,"total_tokens":100}}`)
 }
 
-func TestCheckerRetriesAfterSessionFailure(t *testing.T) {
+// 首轮退化、随后正常提交：内部重开一次就应当拿到结论并通过。
+func TestCheckerRecoversAfterDegenerateResponse(t *testing.T) {
 	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
 	var calls atomic.Int32
 	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
-		n := calls.Add(1)
-		if n <= 2 {
-			// 第 1 轮尝试：退化空响应（含重发 1 次 + nudge 共 2 次请求）。
+		if calls.Add(1) == 1 {
 			degenerateJSON(w)
 			return
 		}
-		// 第 2 轮尝试（重开）：正常提交 pass。
-		jsonToolReply(w, "submit", `{"status":"pass","report":"ok"}`)
+		jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
 	})
 	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0)
 	if !ok {
-		t.Fatalf("want pass after retry, got issues: %q", issues)
+		t.Fatalf("want pass after one degenerate response, got issues: %q", issues)
 	}
-	if calls.Load() < 3 {
-		t.Fatalf("requests = %d, want >= 3 (degenerate round + retry round)", calls.Load())
+	if calls.Load() < 2 {
+		t.Fatalf("requests = %d, want >= 2 (degenerate + recovery)", calls.Load())
+	}
+}
+
+// 两轮都退化：不通过，且原因是"厂商/网络错误"而不是"章节有问题"——上层
+// 据此不做"换会话重转换"（那只会让同一个坏模型再失败 N 次）。
+func TestCheckerDegenerateInBothAttemptsFails(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		degenerateJSON(w)
+	})
+	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0)
+	if ok {
+		t.Fatal("两轮都没有结论，不能判通过")
+	}
+	if !strings.Contains(issues, "未能提交结论") {
+		t.Fatalf("issues = %q, want 未能提交结论（上层据此换会话重来）", issues)
 	}
 }
 
@@ -330,16 +348,22 @@ func TestCheckerResumeUsesUpdatedModelAndTranscript(t *testing.T) {
 	}
 }
 
-func TestCheckerDegradesOnlyAfterTwoAttempts(t *testing.T) {
+// T165：两次核对都没有结论**不再**降级成通过——实测一条跑完的章节，它的
+// checker 8 轮 25 次工具调用 38 分钟一次 submit 都没发，却被旧兜底判成
+// "核对通过"写进了书。没结论就是没结论，交给上层按重试预算重来。
+func TestCheckerWithoutVerdictFailsAfterTwoAttempts(t *testing.T) {
 	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
 	var calls atomic.Int32
 	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
 		calls.Add(1)
 		degenerateJSON(w)
 	})
-	ok, _ := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0)
-	if !ok {
-		t.Fatal("two failed attempts should still degrade to pass (compile/final review are the hard gates)")
+	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0)
+	if ok {
+		t.Fatal("a checker that never submits a verdict must NOT be treated as a pass")
+	}
+	if !strings.Contains(issues, "未能提交结论") {
+		t.Fatalf("issues = %q, want 未能提交结论", issues)
 	}
 	// 每轮最多 3 次请求（原始 + 重发 + nudge），两轮 = 6。
 	if n := calls.Load(); n > 6 {

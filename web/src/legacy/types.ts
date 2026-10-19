@@ -135,6 +135,10 @@ export interface Session {
   chapterParent?: string
   chapterRole?: 'convert' | 'checker' | string
   chapterDepth?: number
+  /** 1-based attempt counter: a checker failure replaces the session and each
+   *  attempt keeps its own transcript (`<名>.try2.jsonl`), so the preview can
+   *  chain them into a "历史 N" list. */
+  chapterAttempt?: number
   chapterActivity?: string
   chapterOrder?: number
   /** 方块视图的完成信号（T22）：done=交过 / error=干过活没交 / ''=还没开工；运行中由 live 表达。 */

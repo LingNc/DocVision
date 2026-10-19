@@ -507,6 +507,16 @@ export function parseImg2TextId(id: string): Img2TextRef | null {
   return null
 }
 
+/*
+ * 章节转换的「第 N 次尝试」标签（T165）：checker 连续打回同一会话若干轮仍
+ * 不过，代码会作废产物、换一个全新会话重来，每次尝试一条独立转录
+ * （`convert_<章>.try2.jsonl`）。第一次不带标签，之后标「第 N 次」。
+ */
+export function chapterAttemptTag(s: any): string {
+  const n = Number(s && s.chapterAttempt) || 1
+  return n > 1 ? '第 ' + n + ' 次' : ''
+}
+
 /* 历史列表里每条会话的来源小标签：逐图分析 / stage0 / stage1 · 上一次 … */
 export function img2textMemberTag(id: string): string {
   const r = parseImg2TextId(id)
@@ -639,6 +649,10 @@ export function buildGroups(): ProjectGroup[] {
  * sessions 数组扫描，不读全局 state，调用方用 computed 按引用缓存。 */
 export function chainOfSession(sessions: any[], id: string | null | undefined): any[] | null {
   if (!id) return null
+  // 章节转换的尝试链优先：同一章被 checker 打回后换会话重来，几次尝试是
+  // 同一件事的历史版本（键 = 项目 + 角色 + 章节 ID，成员 = 各次尝试）。
+  const attemptChain = chapterAttemptChain(sessions, id)
+  if (attemptChain) return attemptChain
   const self = parseImg2TextId(id)
   if (!self) return null
   // 链是按项目聚的（侧栏 buildGroups 里每组各自 buildImg2TextChains）：
@@ -656,6 +670,38 @@ export function chainOfSession(sessions: any[], id: string | null | undefined): 
   })
   if (members.length < 2) return null
   return sortChainMembers(members)
+}
+
+/*
+ * 章节转换/核对的尝试链：给定会话 id，把它所在「同一角色 + 同一章节 ID」的
+ * 各次尝试聚成一条链（新 → 旧）。只认带 chapterId 的会话；只尝试过一次的
+ * 返回 null（此时不出现「历史」页签）。
+ */
+export function chapterAttemptChain(sessions: any[], id: string | null | undefined): any[] | null {
+  if (!id) return null
+  let self: any = null
+  ;(sessions || []).forEach((s) => {
+    if (s && s.id === id) self = s
+  })
+  if (!self || !self.chapterId) return null
+  const proj = self.project || projectOf(self.id)
+  const members: any[] = []
+  ;(sessions || []).forEach((s) => {
+    if (!s || !s.chapterId) return
+    if (s.chapterId !== self.chapterId) return
+    if ((s.chapterRole || '') !== (self.chapterRole || '')) return
+    if ((s.project || projectOf(s.id)) !== proj) return
+    members.push(s)
+  })
+  if (members.length < 2) return null
+  return sortChainMembers(members)
+}
+
+/* 历史行的小标签：img2text 链路用阶段标签，章节重试用「第 N 次」。 */
+export function chainMemberTag(s: any): string {
+  const a = chapterAttemptTag(s)
+  if (a) return a
+  return img2textMemberTag(s && s.id)
 }
 
 export function findSession(id: string): any {

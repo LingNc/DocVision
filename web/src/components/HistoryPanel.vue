@@ -5,7 +5,7 @@
 // 排序与侧栏链一致（sortChainMembers：新 → 旧）；点行切会话（selectSession）。
 import { computed } from 'vue'
 import { state, relTime } from '../state'
-import { chainOfSession, img2textMemberTag, sessionTitleOf } from '../legacy/sidebar'
+import { chainOfSession, chainMemberTag, sessionTitleOf } from '../legacy/sidebar'
 import { selectSession } from '../data'
 import InlineMD from './InlineMD.vue'
 
@@ -32,9 +32,9 @@ function onRowClick(s: any) {
 
 <template>
   <div id="history" class="history" :class="{ hidden: state.view !== 'history' }">
-    <div v-if="!members" class="history-empty">当前会话不属于任何 img2text 调用链</div>
+    <div v-if="!members" class="history-empty">当前会话不属于任何调用链 / 重试链</div>
     <div v-else class="history-list">
-      <div class="history-head">这张图的全部会话（{{ members.length }}，新 → 旧）</div>
+      <div class="history-head">同一件事的全部会话（{{ members.length }}，新 → 旧）</div>
       <button
         v-for="s in members"
         :key="s.id"
@@ -44,7 +44,7 @@ function onRowClick(s: any) {
         :title="s.id"
         @click="onRowClick(s)"
       >
-        <span class="row-chip chain-tag history-tag">{{ img2textMemberTag(s.id) }}</span>
+        <span class="row-chip chain-tag history-tag">{{ chainMemberTag(s) }}</span>
         <InlineMD tag="span" class="history-title" :text="sessionTitleOf(s)"></InlineMD>
         <span class="history-state" :class="endStateCls(s)">{{ endStateText(s) }}</span>
         <span class="history-time">{{ relTime(s.mtime) }}</span>

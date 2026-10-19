@@ -10,7 +10,7 @@ import { state, openDetails, fmtSize, storeGet, storeSet, setBoard } from '../st
 import {
   bookDominantState, bookTip, booksHeadText,
   buildGroups, buildImg2TextChains, buildChapterTree, filterByBoard, groupKey, groupWantOpen,
-  imageChipText, imageTipText, img2textMemberTag,
+  imageChipText, imageTipText, img2textMemberTag, chapterAttemptTag,
   styleFixPhaseKey, stylefixCompare,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
@@ -577,6 +577,7 @@ function onMoreClick(okey: string) {
                     <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
                     <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                     <span v-if="s.imageName" class="row-chip image-chip" :title="imageTipText(s)">{{ imageChipText(s) }}</span>
+                    <span v-if="s.chapterAttempt > 1" class="row-chip chain-tag" :title="'这一章被 checker 打回后换了一个全新会话重转换：第 ' + s.chapterAttempt + ' 次尝试'">{{ chapterAttemptTag(s) }}</span>
                     <span class="row-time">{{ relTime(s.mtime) }}</span>
                     <span class="row-actions">
                       <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, s)">ⓘ</button>

@@ -114,6 +114,10 @@ latex:
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
   convert_model: "convert"       # 档位1：章节转换 / 构建修复 AI
   checker_model: "checker"       # 每章核对（小文本模型即可）
+  # checker_rounds：一章最多尝试几次（checker 连续打回同一会话若干轮仍
+  # 不过，就换一个全新会话重来）。第 N 层递归每次 -1、下限 3；顶层默认 6。
+  # 顶层次数应 >= 3 + 最大递归层数(3)=6，设小了启动会告警。
+  checker_rounds: 6
   insert_image_description: false # 档位2：raster 保留原图时是否再嵌入一段 AI 解释文本
                                  # （档位1 不受此开关控制：raster 总是带 DESCRIBE 解释块）
   chapter_granularity: "medium"  # 档位1 章节拆分粒度：large=大章整体 / medium=按本书自动给出最合理拆分（默认，不拆太细也不太大块）/ small=按小节拆分

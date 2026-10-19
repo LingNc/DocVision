@@ -1085,3 +1085,26 @@ func TestEndStateTypedDone(t *testing.T) {
 		t.Errorf("tool only = %q, want error", got)
 	}
 }
+
+// TestChapterIdentityAttemptSuffix pins the retry transcript naming: a
+// `<名>.try2` transcript is the SAME chapter (same ID/Role/Parent/Depth) at
+// attempt 2, so the preview can chain the attempts instead of showing it as a
+// separate chapter.
+func TestChapterIdentityAttemptSuffix(t *testing.T) {
+	first := chapterIdentity("proj/work/sessions/convert_chapter_042.jsonl")
+	second := chapterIdentity("proj/work/sessions/convert_chapter_042.try2.jsonl")
+	if first.ID != "chapter_042" || first.Attempt != 1 {
+		t.Fatalf("first attempt = %+v", first)
+	}
+	if second.ID != first.ID || second.Role != first.Role || second.Attempt != 2 {
+		t.Fatalf("retry must keep the chapter identity: %+v", second)
+	}
+	child := chapterIdentity("proj/work/temp/conv_chapter_042/work/_subdivision/child_02/node/sessions/checker.jsonl")
+	if child.ID != "chapter_042_child_02" || child.Depth != 1 {
+		t.Fatalf("child identity = %+v", child)
+	}
+	retryChild := chapterIdentity("proj/work/temp/conv_chapter_042/work/_subdivision/child_02/node/sessions/checker_chapter_042_child_02.try2.jsonl")
+	if retryChild.ID != "chapter_042_child_02" || retryChild.Attempt != 2 {
+		t.Fatalf("child retry identity = %+v", retryChild)
+	}
+}

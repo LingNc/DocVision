@@ -7320,6 +7320,10 @@
     }
     return null;
   }
+  function chapterAttemptTag(s) {
+    const n = Number(s && s.chapterAttempt) || 1;
+    return n > 1 ? "第 " + n + " 次" : "";
+  }
   function img2textMemberTag(id) {
     const r = parseImg2TextId(id);
     if (!r) return "";
@@ -7427,6 +7431,8 @@
   }
   function chainOfSession(sessions, id) {
     if (!id) return null;
+    const attemptChain = chapterAttemptChain(sessions, id);
+    if (attemptChain) return attemptChain;
     const self2 = parseImg2TextId(id);
     if (!self2) return null;
     let proj = "";
@@ -7442,6 +7448,30 @@
     });
     if (members.length < 2) return null;
     return sortChainMembers(members);
+  }
+  function chapterAttemptChain(sessions, id) {
+    if (!id) return null;
+    let self2 = null;
+    (sessions || []).forEach((s) => {
+      if (s && s.id === id) self2 = s;
+    });
+    if (!self2 || !self2.chapterId) return null;
+    const proj = self2.project || projectOf(self2.id);
+    const members = [];
+    (sessions || []).forEach((s) => {
+      if (!s || !s.chapterId) return;
+      if (s.chapterId !== self2.chapterId) return;
+      if ((s.chapterRole || "") !== (self2.chapterRole || "")) return;
+      if ((s.project || projectOf(s.id)) !== proj) return;
+      members.push(s);
+    });
+    if (members.length < 2) return null;
+    return sortChainMembers(members);
+  }
+  function chainMemberTag(s) {
+    const a = chapterAttemptTag(s);
+    if (a) return a;
+    return img2textMemberTag(s && s.id);
   }
   function findSession(id) {
     let found = null;
@@ -9288,37 +9318,38 @@
     class: "row-chip usage-chip"
   };
   const _hoisted_70 = ["title"];
-  const _hoisted_71 = { class: "row-time" };
-  const _hoisted_72 = { class: "row-actions" };
-  const _hoisted_73 = ["onClick"];
+  const _hoisted_71 = ["title"];
+  const _hoisted_72 = { class: "row-time" };
+  const _hoisted_73 = { class: "row-actions" };
   const _hoisted_74 = ["onClick"];
-  const _hoisted_75 = {
+  const _hoisted_75 = ["onClick"];
+  const _hoisted_76 = {
     key: 1,
     class: "session-blocks"
   };
-  const _hoisted_76 = ["data-id", "title", "onClick"];
   const _hoisted_77 = ["data-id", "title", "onClick"];
-  const _hoisted_78 = { class: "row-slot" };
-  const _hoisted_79 = {
+  const _hoisted_78 = ["data-id", "title", "onClick"];
+  const _hoisted_79 = { class: "row-slot" };
+  const _hoisted_80 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_80 = ["title"];
-  const _hoisted_81 = { class: "row-time" };
-  const _hoisted_82 = { class: "row-actions" };
-  const _hoisted_83 = ["onClick"];
+  const _hoisted_81 = ["title"];
+  const _hoisted_82 = { class: "row-time" };
+  const _hoisted_83 = { class: "row-actions" };
   const _hoisted_84 = ["onClick"];
-  const _hoisted_85 = {
+  const _hoisted_85 = ["onClick"];
+  const _hoisted_86 = {
     key: 1,
     class: "empty"
   };
-  const _hoisted_86 = { class: "side-status" };
-  const _hoisted_87 = {
+  const _hoisted_87 = { class: "side-status" };
+  const _hoisted_88 = {
     id: "root-path",
     class: "root-path",
     title: "扫描根目录"
   };
-  const _hoisted_88 = {
+  const _hoisted_89 = {
     id: "side-foot",
     class: "side-foot"
   };
@@ -9683,7 +9714,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-575cffa8><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-575cffa8><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-575cffa8></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-575cffa8><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-575cffa8></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-575cffa8></path></svg></span>', 1)),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-0339db9e><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0339db9e><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0339db9e></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0339db9e><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-0339db9e></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0339db9e></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9898,14 +9929,19 @@
                                   class: "row-chip image-chip",
                                   title: unref(imageTipText)(s)
                                 }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_70)) : createCommentVNode("", true),
-                                createBaseVNode("span", _hoisted_71, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                createBaseVNode("span", _hoisted_72, [
+                                s.chapterAttempt > 1 ? (openBlock(), createElementBlock("span", {
+                                  key: 2,
+                                  class: "row-chip chain-tag",
+                                  title: "这一章被 checker 打回后换了一个全新会话重转换：第 " + s.chapterAttempt + " 次尝试"
+                                }, toDisplayString(unref(chapterAttemptTag)(s)), 9, _hoisted_71)) : createCommentVNode("", true),
+                                createBaseVNode("span", _hoisted_72, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                createBaseVNode("span", _hoisted_73, [
                                   createBaseVNode("button", {
                                     class: "icon-btn",
                                     type: "button",
                                     title: "打开详情面板（元信息 / 指标）",
                                     onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                  }, "ⓘ", 8, _hoisted_73)
+                                  }, "ⓘ", 8, _hoisted_74)
                                 ])
                               ], 10, _hoisted_67);
                             }), 128)),
@@ -9914,7 +9950,7 @@
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_74)) : createCommentVNode("", true)
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_75)) : createCommentVNode("", true)
                           ]))
                         ], 8, _hoisted_57)), [
                           [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
@@ -9925,7 +9961,7 @@
                             scope: g.name + "/" + sv.stage,
                             onSelect: onRowClick,
                             onInfo: onInfoClick
-                          }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_75, [
+                          }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_76, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9935,7 +9971,7 @@
                                 "data-id": s.id,
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
-                              }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_76);
+                              }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_77);
                             }), 128))
                           ])) : (openBlock(), createElementBlock(Fragment, { key: 2 }, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
@@ -9948,7 +9984,7 @@
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
                               }, [
-                                createBaseVNode("span", _hoisted_78, [
+                                createBaseVNode("span", _hoisted_79, [
                                   createBaseVNode("span", {
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
@@ -9958,29 +9994,29 @@
                                   class: "row-title",
                                   text: unref(sessionTitleOf)(s)
                                 }, null, 8, ["text"]),
-                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_79, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_80, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
                                   class: "row-chip image-chip",
                                   title: unref(imageTipText)(s)
-                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_80)) : createCommentVNode("", true),
-                                createBaseVNode("span", _hoisted_81, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                createBaseVNode("span", _hoisted_82, [
+                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_81)) : createCommentVNode("", true),
+                                createBaseVNode("span", _hoisted_82, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                createBaseVNode("span", _hoisted_83, [
                                   createBaseVNode("button", {
                                     class: "icon-btn",
                                     type: "button",
                                     title: "打开详情面板（元信息 / 指标）",
                                     onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                  }, "ⓘ", 8, _hoisted_83)
+                                  }, "ⓘ", 8, _hoisted_84)
                                 ])
-                              ], 10, _hoisted_77);
+                              ], 10, _hoisted_78);
                             }), 128)),
                             sv.needOverflow ? (openBlock(), createElementBlock("button", {
                               key: 0,
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_84)) : createCommentVNode("", true)
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_85)) : createCommentVNode("", true)
                           ], 64))
                         ], 64))
                       ], 64);
@@ -9990,7 +10026,7 @@
                   [vCollapse, { key: "proj:" + g.name, want: g.matched ? true : projWantOpen(g), frozen: g.matched }]
                 ]);
               }), 128)),
-              !shownCount.value ? (openBlock(), createElementBlock("div", _hoisted_85, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true)
+              !shownCount.value ? (openBlock(), createElementBlock("div", _hoisted_86, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true)
             ], 512),
             _cache[11] || (_cache[11] = createBaseVNode("div", {
               class: "list-fade",
@@ -10001,15 +10037,15 @@
             id: "side-totals",
             class: normalizeClass(["side-totals", { hidden: !totalsText.value }])
           }, toDisplayString(totalsText.value), 3),
-          createBaseVNode("div", _hoisted_86, [
-            createBaseVNode("div", _hoisted_87, toDisplayString(unref(state).root || "—"), 1),
-            createBaseVNode("div", _hoisted_88, toDisplayString(footText.value), 1)
+          createBaseVNode("div", _hoisted_87, [
+            createBaseVNode("div", _hoisted_88, toDisplayString(unref(state).root || "—"), 1),
+            createBaseVNode("div", _hoisted_89, toDisplayString(footText.value), 1)
           ])
         ]);
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-575cffa8"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-0339db9e"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
@@ -12502,8 +12538,8 @@
           id: "history",
           class: normalizeClass(["history", { hidden: unref(state).view !== "history" }])
         }, [
-          !members.value ? (openBlock(), createElementBlock("div", _hoisted_1$1, "当前会话不属于任何 img2text 调用链")) : (openBlock(), createElementBlock("div", _hoisted_2$1, [
-            createBaseVNode("div", _hoisted_3$1, "这张图的全部会话（" + toDisplayString(members.value.length) + "，新 → 旧）", 1),
+          !members.value ? (openBlock(), createElementBlock("div", _hoisted_1$1, "当前会话不属于任何调用链 / 重试链")) : (openBlock(), createElementBlock("div", _hoisted_2$1, [
+            createBaseVNode("div", _hoisted_3$1, "同一件事的全部会话（" + toDisplayString(members.value.length) + "，新 → 旧）", 1),
             (openBlock(true), createElementBlock(Fragment, null, renderList(members.value, (s) => {
               return openBlock(), createElementBlock("button", {
                 key: s.id,
@@ -12512,7 +12548,7 @@
                 title: s.id,
                 onClick: ($event) => onRowClick(s)
               }, [
-                createBaseVNode("span", _hoisted_5$1, toDisplayString(unref(img2textMemberTag)(s.id)), 1),
+                createBaseVNode("span", _hoisted_5$1, toDisplayString(unref(chainMemberTag)(s)), 1),
                 createVNode(_sfc_main$m, {
                   tag: "span",
                   class: "history-title",
@@ -12529,7 +12565,7 @@
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-0e17a4e8"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-c7e31d5e"]]);
   const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
   const _hoisted_2 = ["data-dragging"];
   const _hoisted_3 = {

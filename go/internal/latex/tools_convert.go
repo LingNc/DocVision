@@ -52,8 +52,10 @@ type CompileChapterTool struct {
 	Dir         string // the session's writable tree (class + manual + chapter + wrapper)
 	MainFile    string // the session's own chapter fragment, e.g. chapter_003.tex
 	WrapperFile string // what gets compiled, e.g. chapter_003_wrapper.tex ("" = MainFile)
-	Log         *logger.Logger
-	Tid         int
+	// Gate 记录「编译成功」这件事，供 submit 的门禁核对（T165）。
+	Gate *chapterGate
+	Log  *logger.Logger
+	Tid  int
 }
 
 func (t *CompileChapterTool) Name() string { return "compile" }
@@ -124,6 +126,12 @@ func (t *CompileChapterTool) Execute(argsJSON string) (session.ToolResult, error
 	start := time.Now()
 	res := t.Comp.CompileOpts(t.Dir, compileFile, opts)
 	LogCompileResult(t.Log, t.Tid, "chapter", res, time.Since(start))
+	if res.OK && t.Gate != nil {
+		pdfName := strings.TrimSuffix(compileFile, ".tex") + ".pdf"
+		if err := t.Gate.markCompiled(filepath.Join(t.Dir, pdfName)); err != nil {
+			t.Log.LogWarning(t.Tid, "[gate] 记录编译印记失败:", err)
+		}
+	}
 	if res.OK {
 		// 成功只报事实：产物名 + 页数 + 一句"用 view_pdf 看它"（怎么细看是模型自己的事）。
 		detail := ""

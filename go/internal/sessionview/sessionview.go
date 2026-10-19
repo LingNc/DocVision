@@ -395,6 +395,11 @@ type SessionInfo struct {
 	ChapterRole     string `json:"chapterRole,omitempty"`
 	ChapterDepth    int    `json:"chapterDepth,omitempty"`
 	ChapterActivity string `json:"chapterActivity,omitempty"`
+	// ChapterAttempt is the 1-based "how many times this chapter was
+	// converted" counter (a checker failure replaces the session; each
+	// attempt keeps its own transcript `<名>.try2.jsonl`). The preview
+	// groups them into a "历史 N" chain. Zero = 1 (single attempt).
+	ChapterAttempt int `json:"chapterAttempt,omitempty"`
 	// ChapterOrder is the chapter number carried by a transcript identity.
 	ChapterOrder int `json:"chapterOrder,omitempty"`
 	// Stage / StageTitle group sessions by pipeline stage inside a project
@@ -610,13 +615,24 @@ func (l Line) MarshalJSON() ([]byte, error) {
 type chapterIdentityInfo struct {
 	ID, Parent, Role string
 	Depth            int
+	Attempt          int
 }
+
+// chapterAttemptSuffix 匹配重试用转录名：convert_<章>.try2.jsonl。
+var chapterAttemptSuffix = regexp.MustCompile(`^(.*)\.try(\d+)$`)
 
 var chapterRootID = regexp.MustCompile(`^chapter[_-]?\d+`)
 var chapterChildSuffix = regexp.MustCompile(`^(.*)_child_(\d+)$`)
 
 func chapterIdentity(rel string) chapterIdentityInfo {
 	base := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+	attempt := 1
+	if m := chapterAttemptSuffix.FindStringSubmatch(base); m != nil {
+		if n, err := strconv.Atoi(m[2]); err == nil && n > 1 {
+			attempt = n
+			base = m[1]
+		}
+	}
 	role, id := "", ""
 	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}} {
 		if strings.HasPrefix(base, prefix.name) {
@@ -650,7 +666,7 @@ func chapterIdentity(rel string) chapterIdentityInfo {
 	if m := chapterChildSuffix.FindStringSubmatch(id); m != nil {
 		parent = m[1]
 	}
-	return chapterIdentityInfo{ID: id, Parent: parent, Role: role, Depth: strings.Count(id, "_child_")}
+	return chapterIdentityInfo{ID: id, Parent: parent, Role: role, Depth: strings.Count(id, "_child_"), Attempt: attempt}
 }
 
 // LabelFor infers the pipeline stage tag from a transcript path.
@@ -1078,6 +1094,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			EndState:        endState,
 			RunEndError:     stat.RunEndError,
 			ChapterActivity: stat.ChapterActivity,
+			ChapterAttempt:  chapter.Attempt,
 			Prices:          stat.Prices,
 			ChapterID:       chapter.ID,
 			ChapterParent:   chapter.Parent,

@@ -185,13 +185,16 @@ type Runner struct {
 	// writes" out of clientFor). clientFor and modelOf are the only doors.
 	cfgMu sync.Mutex
 
-	wm       *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
-	inline   bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
-	docIndex *DocIndex        // 原始文档只读索引（doc_search/原书页面）
-	docPages *pageIndex       // 与索引对齐的全局页表（水印采样/索引对齐）
-	projDir  string           // 项目根（project 挂载点，只读）
-	pdfView  *pdfView         // 原书 PDF 的最小视图（source 挂载点，只读）
-	projView string           // 项目的最小只读视图（project 挂载点）
+	// noChapterGate 只给测试：跳过"编译成功 + 看过 PDF"的提交门禁（那条
+	// 门禁要真跑 xelatex，单测里既慢又需要 TeX 环境）。生产路径恒为 false。
+	noChapterGate bool
+	wm            *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
+	inline        bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
+	docIndex      *DocIndex        // 原始文档只读索引（doc_search/原书页面）
+	docPages      *pageIndex       // 与索引对齐的全局页表（水印采样/索引对齐）
+	projDir       string           // 项目根（project 挂载点，只读）
+	pdfView       *pdfView         // 原书 PDF 的最小视图（source 挂载点，只读）
+	projView      string           // 项目的最小只读视图（project 挂载点）
 
 	// lastSplitError remembers the latest split validation failure so
 	// the chapter session can be re-prompted with a concrete reason.
@@ -326,6 +329,16 @@ func (r *Runner) sessionBashTemp(proj, name string) (string, func()) {
 }
 
 // keepSessionFile deletes a session transcript unless records are kept.
+// noChapterGate 关掉"提交前必须编译成功并看过 PDF"的门禁。**只给测试用**：
+// 那条门禁要真跑 xelatex，而单元/集成测试用假模型、机器上也不一定有 TeX。
+// 生产路径永远不设置它（见 submitGate）。
+func (r *Runner) submitGate(work, base string) *chapterGate {
+	if r.noChapterGate {
+		return nil
+	}
+	return &chapterGate{WorkRoot: work, Base: base}
+}
+
 func (r *Runner) keepSessionFile(path string) {
 	if r.keepRecords() {
 		r.log.Log(0, "[session] 保留会话记录:", path)
@@ -1078,6 +1091,17 @@ const processAPIErrorAbort = 3
 // session layer (HTTP/接口/额度) rather than from the figure itself. 现场
 // 教训：配置写错 thinking.type 时服务端 400 拒掉每个请求，日志却打的是
 // "[vector] TikZ 未通过"，看起来像提示词或编译器的问题。
+// isSessionFatalError reports errors where retrying or re-opening the session
+// cannot help (out of balance / no usable resource pack): report at once.
+func isSessionFatalError(msg string) bool {
+	for _, mark := range []string{"SESSION_INSUFFICIENT_BALANCE", "余额不足", "无可用资源包"} {
+		if strings.Contains(msg, mark) {
+			return true
+		}
+	}
+	return false
+}
+
 func isSessionAPIError(msg string) bool {
 	for _, mark := range []string{"SESSION_API_ERROR", "SESSION_INSUFFICIENT_BALANCE",
 		"SESSION_TIMEOUT", "SESSION_ERROR", "api error:", "会话错误"} {

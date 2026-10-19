@@ -204,6 +204,11 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// 只留这一行普通模式提示：被杀之后要看的文件到底在哪。采样行本身在
 	// 普通模式不显示（debug 日志与 mem.log 里全量都有）。
 	r.log.LogInfo(0, "[book] 内存/被杀现场日志:", memLogPath)
+	// 重试预算与递归层数的匹配检查（T165）：顶层设得太小时，深层永远只能
+	// 吃下限 3，用户以为调大了却传不下去——起步就说清楚。
+	if warn := checkerBudgetWarning(r.cfg.Latex.CheckerRounds); warn != "" {
+		r.log.LogWarning(0, "[convert]", warn)
+	}
 	progPath := filepath.Join(proj, "progress.json")
 	prog := bookProgress{}
 	if data, err := os.ReadFile(progPath); err == nil {
@@ -1047,12 +1052,62 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 func writeChapterChildrenManifest(work, base string, children []ChapterSubdivision) error {
 	var b strings.Builder
 	b.WriteString("# 已核验子章节\n\n")
+	b.WriteString("每个子章节已经过独立转换 + 独立 checker（明确 pass 才会出现在这里）。\n\n")
 	for i, child := range children {
 		id := fmt.Sprintf("child_%02d", i+1)
 		artifactBase := base + "_" + id
 		fmt.Fprintf(&b, "%d. %s（Markdown 行 %d-%d）\n   - TeX: %s/children/%s.tex\n   - Parts: %s/children/%s/\n   - Conversion report: %s/_subdivision/%s/node/reports/conversion.md\n   - Conversion transcript: %s/_subdivision/%s/node/sessions/convert.jsonl\n   - Checker transcript: %s/_subdivision/%s/node/sessions/checker.jsonl\n", i+1, child.Title, child.StartLine, child.EndLine, base, artifactBase, base, artifactBase, base, id, base, id, base, id)
 	}
-	return os.WriteFile(filepath.Join(work, "_subdivision", "children-manifest.md"), []byte(b.String()), 0o644)
+	if err := os.WriteFile(filepath.Join(work, "_subdivision", "children-manifest.md"), []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+	return writeChildrenSummary(work, base, children)
+}
+
+// writeChildrenSummary 把每个子章节**自己交的汇报**（结论/问题/建议）原样
+// 汇总成一个文件，交给父章节的整合会话（T165）。
+//
+// 为什么要这一步：子章节的 checker 只能判"通过/不通过"，它给不出"这一章
+// 哪里没还原"的细节；细节在子会话 submit 的 report 里（有章节明确写了
+// "enumerate/proof 结构对不上、没能干净编译"）。以前这些报告只是躺在
+// `_subdivision/<child>/node/reports/` 下没人读——父会话的整合指令只点名
+// 读 .tex 与 parts/，于是父章节带着同样的毛病提交，问题一路上浮到最后的
+// 终审才炸。现在汇总成一份必读文件，并在文首与结尾各强调一次。
+func writeChildrenSummary(work, base string, children []ChapterSubdivision) error {
+	var b strings.Builder
+	b.WriteString("# 子章节汇报汇总（整合前必读）\n\n")
+	b.WriteString("下面是每个子章节转换会话在 submit 时交的 `report` 原文。它说的是\"这一章向原书还原时哪里没做到 / 哪里绕过了手册\"，" +
+		"**checker 只看结构与文本一致性，不会替你判断这些**。整合时请逐条读：能在这里修掉的（缺内容、错结构、丢了公式）就修；" +
+		"属于类文件/手册限制的，写进你自己的 submit report（可以原样引用并补充你发现的**新问题**），不必修改子产物。\n\n")
+	problems := 0
+	for i, child := range children {
+		id := fmt.Sprintf("child_%02d", i+1)
+		reportPath := filepath.Join(work, "_subdivision", id, "node", "reports", "conversion.md")
+		raw, err := os.ReadFile(reportPath)
+		fmt.Fprintf(&b, "## %d. %s（行 %d-%d，%s）\n\n", i+1, child.Title, child.StartLine, child.EndLine, id)
+		if err != nil {
+			b.WriteString("_（这个子章节没有留下汇报文件）_\n\n")
+			continue
+		}
+		text := strings.TrimSpace(string(raw))
+		if strings.Contains(text, "结论: issues") || strings.Contains(text, "结论:issues") {
+			problems++
+		}
+		if len(text) > 6000 {
+			text = text[:6000] + "\n…（截断，原文见 " + reportPath + "）"
+		}
+		b.WriteString(text + "\n\n")
+	}
+	b.WriteString("## 你要做的\n\n")
+	b.WriteString("1. 读完上面每一段与每个子 `.tex`/`parts/`，按原书顺序整合成父章节；\n")
+	b.WriteString("2. 能修的修（缺段、错层级、丢公式、编号错位都算）；\n")
+	b.WriteString("3. 修不了的写进你自己的 submit `report.issues`——**可以引用子章节的问题，也可以追加你新发现的**；\n")
+	b.WriteString("4. 改完必须重新 compile，并用 view_pdf 看过编译出的 PDF（至少第 1 页与最后一页），否则 submit 会被拒绝。\n")
+	if problems > 0 {
+		fmt.Fprintf(&b, "\n⚠ 有 %d 个子章节自己报了 `结论: issues`——它们的问题很可能还在父章节里，别当成已经解决。\n", problems)
+	}
+	summaryPath := filepath.Join(work, "_subdivision", "children-summary.md")
+	return os.WriteFile(summaryPath, []byte(b.String()), 0o644)
 }
 
 // writeStyleExtras persists the files a submit_style call shipped
@@ -1148,6 +1203,10 @@ type chapterNodeConfig struct {
 	FinalSubmitRoot string
 	ReportPath      string
 	StrictChecker   bool
+	// Attempt 是这一章的「第几次尝试」（1 起）：checker 连续不通过就换一个
+	// 全新会话重来，每次尝试一条独立转录（convert_<章>.try2.jsonl …），
+	// 预览页据此把几次尝试串成「历史 N」。
+	Attempt int
 }
 
 func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool, node chapterNodeConfig) error {
@@ -1170,6 +1229,10 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if node.FinalSubmitRoot == "" {
 		node.FinalSubmitRoot = node.SubmitRoot
 	}
+	if node.Attempt < 1 {
+		node.Attempt = 1
+	}
+	node.TranscriptPath = attemptTranscriptPath(node.TranscriptPath, node.Attempt)
 	mdData, readErr := os.ReadFile(chapPath)
 	if readErr != nil {
 		return fmt.Errorf("读取章节 Markdown 失败: %w", readErr)
@@ -1202,7 +1265,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	// 回放一段没有文件的历史只会让会话空转，不如重来）。
 	trPath := node.TranscriptPath
 	workRoot := filepath.Join(node.NodeRoot, "work")
-	resuming := fileExists(trPath) && fileExists(workRoot)
+	resuming := node.Attempt == 1 && fileExists(trPath) && fileExists(workRoot)
 	work, cleanWork, err := r.chapterWorkTreeAt(proj, clsName, base, node.NodeRoot, resuming, "")
 	if err != nil {
 		return err
@@ -1213,12 +1276,21 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	}
 
 	goal := NewGoalTool(filepath.Join(work, "plan.md"))
+	gate := r.submitGate(work, base)
 	submit := &SubmitChapterTool{
 		WorkRoot:   work,
 		SubmitRoot: node.SubmitRoot,
 		Base:       base,
 		ReportPath: node.ReportPath,
-		Gate:       func() string { return goalGate(goal) },
+		Gate: func() string {
+			if msg := goalGate(goal); msg != "" {
+				return msg
+			}
+			if gate == nil {
+				return ""
+			}
+			return gate.check()
+		},
 	}
 	// 挂载表：work = 本章临时工作区（唯一可写），project/source = 只读。
 	convertMounts := r.sessionMounts(kindConvert, work)
@@ -1236,8 +1308,8 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		&GrepTool{Mounts: convertMounts},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ViewPDFTool{Mounts: convertMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&CompileChapterTool{Comp: r.comp, Dir: work, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex", Log: r.log, Tid: 1},
+		&ViewPDFTool{Mounts: convertMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio(), Gate: gate},
+		&CompileChapterTool{Comp: r.comp, Dir: work, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex", Gate: gate, Log: r.log, Tid: 1},
 		&WorkBashTool{Mounts: convertMounts, Root: work, TmpDir: bashTmp,
 			MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		goal,
@@ -1337,7 +1409,11 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		if err := writeChapterChildrenManifest(work, base, splitTool.Children); err != nil {
 			return err
 		}
-		integrationText := "All child chapters have passed their individual checkers. Read work:_subdivision/children-manifest.md and every listed child .tex/parts file. Integrate them in source order into work:" + base + ".tex and work:" + base + "/, preserving all content and references. Compile the parent wrapper, verify the complete parent chapter, then submit the parent paths with its report. Do not submit child files as independent book chapters."
+		integrationText := "All child chapters have passed their individual checkers. FIRST read work:_subdivision/children-summary.md — it contains each child's own report (what it could not restore, what it worked around). " +
+			"Then read work:_subdivision/children-manifest.md and every listed child .tex/parts file. Fix in the integration whatever those reports call out and you can actually fix. " +
+			"Integrate them in source order into work:" + base + ".tex and work:" + base + "/, preserving all content and references. " +
+			"Then compile the parent wrapper, LOOK at the resulting PDF with view_pdf (page 1 and the last page at least), and submit the parent paths with a report that carries remaining problems — you may quote the children's issues and must add any new ones you found. " +
+			"Do not submit child files as independent book chapters."
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		release := r.acquireChapterSlot()
 		_, runErr := sess.Run(session.RunOptions{UserText: integrationText})
@@ -1364,20 +1440,25 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	// its parts folder) verifies the chapter against the markdown. Hard
 	// problems are fed straight back to the SAME conversion session (its
 	// context is still live, so it is the cheapest and most accurate
-	// fixer), up to maxCheckerRounds rounds; only then the chapter is
+	// fixer), up to `rounds` (按层递减) rounds; only then the chapter is
 	// discarded and re-converted with a fresh session.
 	checkerTranscript := ""
 	checkerView := ""
 	if node.Depth > 0 || promoteSubmitRoot != "" {
-		checkerTranscript = filepath.Join(node.NodeRoot, "sessions", "checker_"+base+".jsonl")
+		checkerTranscript = attemptTranscriptPath(filepath.Join(node.NodeRoot, "sessions", "checker_"+base+".jsonl"), node.Attempt)
 		checkerView = filepath.Join(node.NodeRoot, "checker-view")
 	}
+	rounds := r.checkerAttempts(node.Depth)
 	partsPath := filepath.Join(node.SubmitRoot, base)
 	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, tid, checkerTranscript, checkerView, node.StrictChecker)
-	if !ok && node.StrictChecker && isSessionAPIError(issues) {
-		return fmt.Errorf("递归章节 checker 会话失败（可更换 checker 模型后续跑）: %s", issues)
+	if !ok && isSessionAPIError(issues) {
+		return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
 	}
-	for round := 0; !ok && round < maxCheckerRounds; round++ {
+	if !ok && node.StrictChecker {
+		// 递归子节点与顶层同策略：先在本会话里打回，再由上面的换会话逻辑兜底。
+		r.log.LogWarning(tid, "[checker]", base, "递归节点首次核对未过:", issues)
+	}
+	for round := 0; !ok && round < rounds; round++ {
 		r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
 		r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
 		msg := "The checker reviewed your submitted chapter and found problems that must be fixed:\n" + issues +
@@ -1390,8 +1471,8 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			break
 		}
 		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, tid, checkerTranscript, checkerView, node.StrictChecker)
-		if !ok && node.StrictChecker && isSessionAPIError(issues) {
-			return fmt.Errorf("递归章节 checker 会话失败（可更换 checker 模型后续跑）: %s", issues)
+		if !ok && isSessionAPIError(issues) {
+			return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
 		}
 	}
 	if ok {
@@ -1404,22 +1485,41 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		}
 	} else {
 		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
-		if node.StrictChecker {
-			return fmt.Errorf("递归章节 checker 未通过，结果未提升: %s", issues)
-		}
-		if !retry {
-			r.log.LogWarning(tid, "[checker]", base, strconv.Itoa(maxCheckerRounds)+" 轮反馈后仍有问题 — 作废产物，改用全新会话重转换")
-			r.phaseNote()("[checker] %s 反馈 %d 轮未过 — 重转换", base, maxCheckerRounds)
+		// 同一个会话被 checker 打回 N 轮还不过，说明它的理解已经跑偏（实测：
+		// 一条子会话在只读报错后把"环境有问题"当成前提，反复重写同一个文件、
+		// 甚至去 kill 别的进程）。这时**换一个全新会话**比继续劝它便宜也可靠，
+		// 与顶层章节同一策略、次数同样按层递减。每次尝试一条独立转录，预览页
+		// 里能看到「第几次尝试」。
+		if node.Attempt < r.checkerAttempts(node.Depth) {
+			r.log.LogWarning(tid, "[checker]", base, "第", strconv.Itoa(node.Attempt), "次尝试反馈",
+				strconv.Itoa(rounds), "轮仍未通过 — 作废产物，换全新会话重转换")
+			r.phaseNote()("[checker] %s 第 %d 次尝试未过 — 换新会话", base, node.Attempt)
 			_ = os.Remove(texPath)
 			_ = os.RemoveAll(filepath.Join(node.SubmitRoot, base))
-			if !node.StrictChecker {
-				r.keepSessionFile(trPath)
-			}
-			return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, true, node)
+			next := node
+			next.Attempt = node.Attempt + 1
+			return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, true, next)
 		}
-		r.log.LogWarning(tid, "[checker]", base, "重转换后仍未过（已记录，供终审处理）:", issues)
+		// 次数用尽：**判失败**，不再"记一笔就放过"（旧行为让一个 checker 从
+		// 未给出结论的章节也进了书）。
+		return fmt.Errorf("%s 共 %d 次尝试仍未通过 checker: %s", base, node.Attempt, issues)
 	}
 	return nil
+}
+
+// attemptTranscriptPath 给「第 N 次尝试」一条独立转录：第一次沿用原名，
+// 之后是 `<名>.try2.jsonl`、`<名>.try3.jsonl`…… 这样几次尝试的完整对话都
+// 留在磁盘上（预览页的「历史 N」就是按这个后缀聚合的），而不是像以前那样
+// 换会话时把上一份转录覆盖掉——被覆盖的那份恰好是"它当时为什么跑偏"的证据。
+func attemptTranscriptPath(path string, attempt int) string {
+	if attempt <= 1 || path == "" {
+		return path
+	}
+	ext := filepath.Ext(path)
+	if ext == "" {
+		return fmt.Sprintf("%s.try%d", path, attempt)
+	}
+	return strings.TrimSuffix(path, ext) + fmt.Sprintf(".try%d", attempt) + ext
 }
 
 // sessionKind names the role of a session: it decides which trees the
@@ -1750,10 +1850,40 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 }
 
 // ------------------------------------------------------------------
-// maxCheckerRounds caps how many times a checker verdict is fed back to
-// the SAME conversion session before the chapter is discarded and
-// re-converted with a fresh session.
-const maxCheckerRounds = 3
+// checkerAttemptBudget 是「第 depth 层」一个节点可以尝试几次：顶层（depth 0）
+// 默认 6，往下每层 -1，但**不低于 3**——浅层内容少、一两次就收敛；深层也不
+// 能低于 3，否则短子章节一次误判就整支失败。基数可由 `latex.checker_rounds`
+// 调整（未写 = 6）。
+func checkerAttemptBudget(base, depth int) int {
+	if base <= 0 {
+		base = defaultCheckerRounds
+	}
+	n := base - depth
+	if n < 3 {
+		n = 3
+	}
+	return n
+}
+
+// defaultCheckerRounds 是顶层节点的默认尝试次数。
+const defaultCheckerRounds = 6
+
+func (r *Runner) checkerAttempts(depth int) int {
+	return checkerAttemptBudget(r.cfg.Latex.CheckerRounds, depth)
+}
+
+// checkerBudgetWarning 在「顶层次数 - 最大层数 < 3」时给出启动告警：顶层的
+// 次数要和递归层数匹配，否则深层永远只吃下限 3，调大顶层等于白调。
+func checkerBudgetWarning(base int) string {
+	if base <= 0 {
+		return ""
+	}
+	if base-maxChapterSplitDepth >= 3 {
+		return ""
+	}
+	return fmt.Sprintf("latex.checker_rounds=%d 与最大递归层数 %d 不匹配（%d-%d=%d < 3）：第 %d 层只能吃到下限 3 次。建议至少设成 %d（= 3 + 最大递归层数）。",
+		base, maxChapterSplitDepth, base, maxChapterSplitDepth, base-maxChapterSplitDepth, maxChapterSplitDepth, 3+maxChapterSplitDepth)
+}
 
 // sliceHas reports whether the slice contains want.
 func sliceHas(s []string, want string) bool {

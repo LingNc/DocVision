@@ -315,6 +315,11 @@ type LatexConfig struct {
 	// small/fast model from the registry). Empty falls back to
 	// convert_model.
 	CheckerModel string `yaml:"checker_model"`
+	// CheckerRounds: 一个章节转换"最多尝试几次"。checker 连续打回同一会话
+	// 若干轮仍不过就换一个全新会话重来，第 depth 层每次递减 1、下限 3；
+	// 顶层默认 6。0/未写 = 6。顶层次数应 >= 3 + 最大递归层数(3)，否则深层
+	// 只能吃到下限，启动时会告警。
+	CheckerRounds int `yaml:"checker_rounds"`
 	// InsertImageDescription: when true, images kept as raster (no
 	// vector structure) embed a readable AI explanation as
 	// "[Image]( content )" instead of the bare image link. The same

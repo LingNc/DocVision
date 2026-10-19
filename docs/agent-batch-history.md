@@ -1899,3 +1899,22 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 用户提出（原话）：「未来可能会删掉章节划分这一步骤，直接传入整个，由下层觉得太长了拆分更自然且短文件节约」——明确说**只做记录、不实施**。
 - 记在 `docs/plan.md` 的 **P52**（`[ ][ ]`，未实现）：取消独立 `chapters` 阶段，把整本书直接交给转换层，转换会话在"一次干不完"时自己调 `request_chapter_split` 就地细分（P34 的递归链路已经具备），父节点整合并过 checker。条目里写清了预期收益（少一次全书会话、拆分点由读内容的那层决定、产物更短更省）与必须先想清楚的点（并发从哪来、失败重试粒度、预览页章节 ID 从"划分产物"变成"递归路径"、`chapters/` 与 `progress.json` 的阶段语义、`chapter_granularity` 下沉成"自拆建议粒度"）。
 - 同批次还回答了两个只问不改的问题（结论记在这里，避免下次重复调研）：① 「卡编译」不是资源竞争——`--debug` 日志显示那条转换会话先 `ps | grep '[d]ocvision latex'` 找"另一个进程"，`kill -STOP` 冻住宿主后**它自己的工具回执也卡住了**（30s 超时），它把宿主误当成抢资源的进程再 `kill -9`；② 递归子章节的收集链是完整的：子节点各自 convert + **StrictChecker**（必须明确 pass）、转换报告落 `_subdivision/child_NN/node/reports/conversion.md` 并写进 `children-manifest.md`，父节点整合后自己再过一次整章 checker，任一子节点失败则父节点"禁止提交"并把失败原因往上传；**唯一的弱环节**是"文字意见"不跨层——子 checker 的 issues 只在子节点内迭代 ≤3 轮，过不了就整支失败，"通过"是硬约束而"意见"不汇总给父节点，且整合提示只硬性要求读子 `.tex`/`parts`，报告是"可读"不是"必读"。
+
+## v1.5+（第四十七批，T164/T165：章节转换的"换会话重试 + 编译看图门禁 + 子意见上浮"）
+
+- **背景**：用户要求彻底修正章节转换的质量（原话要点）：checker 顶层重试到 6 次、每层 -1、下限 3、配错要告警；换会话重试要在预览页能看到「历史 N」，「章节转换与下面的小子章节同一策略」；「很多弄好子任务之后回来之后他们并不会看子会话的那个报告」；「很多连编译都没编译连看都没看」。同意作废当次运行、从头重跑。
+- **现场取证**（一本 12 章、递归到第三层的书，24 条转录，均为中立计数）：
+  1. 8 个已开始的顶层章节：`compile` 次数 1/3/2/1/4/4/10/0——**1 章 0 次编译**；`view_pdf` 次数 1/2/4/0/0/0/3/0——**3 章编译过但没看过**；另有 4 章当时还没开始转换（进程被杀）。
+  2. 根章节的 checker 转录里只有 `read_file`/`grep`、**一次 `submit` 都没有**（8 轮、25 次工具调用、38 分钟）——旧兜底「两次没结论也算通过」把它放进了书。
+  3. 一条递归子会话在拿到 `Read-only file system`（时间戳早于 T156 的挂载修复）之后开始 `ps`/`kill`、反复重写同一个文件、反复提交——同一会话被打回 3 轮后仍在原上下文里打转；旧代码对**递归节点**是"打回 3 轮就整支失败"，只有顶层才换会话。
+  4. 子章节 report 里写过"enumerate/proof 结构对不上、没能干净编译"这类文字意见，但父会话的整合指令只点名读子 `.tex`/`parts`，报告不在必读清单。
+- **改**：
+  1. **重试预算**：`checkerAttemptBudget(base, depth) = max(3, base-depth)`，`base` = `latex.checker_rounds`（未写 = 6，代码默认也是 6，`0` 视同未写）；`checker_rounds - 3 < 3` 时 `RunBook` 起步打一条 `WARNING`，说明"第 3 层只会吃到下限 3、建议至少设 6"。
+  2. **顶层与递归节点同一策略**：同一会话被 checker 打回 `rounds` 轮仍不过 → 作废产物 + **换全新会话**（新转录 `convert_<章>.try2.jsonl`、`try3`…），旧转录保留；次数用尽**判失败**并带最后一次 issues。递归节点不再"一次不过就整支失败"。
+  3. **无结论 ≠ 通过**：`checkChapterAt` 两次都没拿到 `submit` 时返回不通过；厂商/网络错误（含空响应重发后仍空、余额不足）单独标注并**不**触发"换会话重转换"（余额不足一次就停）。
+  4. **子意见上浮**：新增 `_subdivision/children-summary.md`（每个子章节 report 原文 + "自报 issues" 计数 + 整合者必读清单），整合指令改为"先读这份汇总，能修的修，修不了的写进你自己的 report（可引用、可追加）"；`children-manifest.md` 保留路径清单。
+  5. **提交门禁**（T165）：`.gate/compile.json` 记「主 `.tex` + parts 内容摘要 + 产物 sha256 + 页数」，`.gate/view.json` 记看过的页；`submit` 要求摘要与当前文件一致（改过就得重编）、产物指纹一致、至少看过 `min(2, 总页数)` 页，拒绝文案直接指向下一步动作。
+  6. **预览页**：会话索引多一个 `chapterAttempt`（`<名>.tryN` 后缀归一，章节 ID/role/父节点/深度都不变），前端 `chapterAttemptChain()` 把同一章各次尝试聚成链——中栏出现「历史 N」页签（与 img2text 调用链同款，`chainMemberTag()` 优先给「第 N 次」），侧栏行带「第 N 次」chip。
+- **实现位置**：`go/internal/latex/chaptergate.go`（新）、`book.go`（预算/重试/孩子汇总/门禁接线）、`checker.go`（无结论判失败、致命错误分类）、`runner.go`（`isSessionFatalError`、`submitGate` + 测试旁路 `noChapterGate`）、`tools_convert.go`/`tools_work.go`（compile/view_pdf 打点）、`internal/config`（`latex.checker_rounds` + 两份模板 + `docs/config.md`）、`internal/sessionview`（`chapterAttempt`）、`web/src/legacy/sidebar.ts` + `HistoryPanel.vue` + `Sidebar.vue`、`prompts/templates/latex_convert.system.md`（一句"编译后必须自己看第 1 页与最后一页"、"先读 children-summary"）。
+- **验证**：新增 Go 用例 `TestCheckerAttemptBudget`、`TestCheckerBudgetWarning`、`TestAttemptTranscriptPath`、`TestChapterGateRequiresCompileAndView`、`TestChapterIdentityAttemptSuffix`、`TestCheckerWithoutVerdictFailsAfterTwoAttempts`、`TestCheckerRecoversAfterDegenerateResponse`、`TestCheckerDegenerateInBothAttemptsFails`；web 新增 `chapter attempt chain` 三例（聚链/单次不出链/标签）。全量 `go test ./internal/...` 与 `npm test` 绿，dist 重建后 `go build ./...` 通过。
+- **给用户的重跑口径**：这一批之前的运行产物作废没问题——门禁会让"没编译/没看过"的章节在 submit 处被挡回，重跑即可；旧项目里已有的 `.gate/` 为空会被要求重新 compile + view_pdf。

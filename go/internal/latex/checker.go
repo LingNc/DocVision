@@ -64,6 +64,7 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 	// 本轮仍拿不到结论（会话错误 / 提醒后仍未提交）再重开一轮全新会话。
 	// 两轮都失败才按既有降级语义视为通过（compile 与终审仍是硬关卡）。
 	const checkerAttempts = 2
+	apiFailure := ""
 	for attempt := 1; attempt <= checkerAttempts; attempt++ {
 		if attempt > 1 {
 			r.log.LogWarning(tid, "[checker]", base, "第 1 次核对未拿到结论，重开核对会话（第 2/2 次）")
@@ -127,13 +128,21 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 				tr = nil
 			}
 			r.log.LogWarning(tid, "[checker]", base, "会话错误:", runErr)
-			if strict && isSessionAPIError(runErr.Error()) {
+			// 厂商/网络错误（含空响应重发后仍空）不是章节本身的问题：本轮
+			// 记下来、重开一次核对会话；两次都这样就把这个原因上报，**不要**
+			// 拿它去触发"换会话重转换"——那只会让同一个坏模型再失败 N 次。
+			if isSessionFatalError(runErr.Error()) {
+				// 余额不足/无可用资源包：换会话、重开都只会得到同一个错误，
+				// 立刻上报（用户换模型后续跑）。
 				if tr != nil {
 					tr.Close()
 					tr = nil
 				}
 				r.keepCheckerTranscript(trPath, strict)
 				return false, "checker API failure: " + runErr.Error()
+			}
+			if isSessionAPIError(runErr.Error()) {
+				apiFailure = runErr.Error()
 			}
 			continue
 		}
@@ -176,10 +185,13 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 	}
 	r.log.LogWarning(tid, "[checker]", base, checkerAttempts, "次核对均未拿到结论")
 	r.keepCheckerTranscript(trPath, strict)
-	if strict {
-		return false, "checker 多次未能提交结论"
+	if apiFailure != "" {
+		return false, "checker API failure: " + apiFailure
 	}
-	return true, ""
+	// 旧行为在这里对非 strict 节点**直接判通过**——实测代价极大：一条跑完的
+	// 章节它的 checker 从头到尾没提交过结论（8 轮、25 次工具调用、38 分钟），
+	// 却因为这条兜底被当成"核对通过"写进了书。没结论就是没结论。
+	return false, "checker 多次未能提交结论（会话未调用 submit）"
 }
 
 func (r *Runner) keepCheckerTranscript(path string, strict bool) {

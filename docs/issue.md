@@ -959,3 +959,17 @@ user 轮
   根因：bwrap 沙箱只做了 `--unshare-net`（网络）与挂载表（文件），**没做 `--unshare-pid`**——会话与宿主共享 PID 命名空间，于是 `ps` 看得见宿主进程、`kill` 也能直接对它发信号。文件与网络被隔离了，进程信号没有。
   改：① 沙箱加 `--unshare-pid`（配合已有的 `--proc /proc`，会话里的 `ps` 只看到自己那棵树，`kill` 越过命名空间无效）；② 顺手按用户要求把 `[mem]` 采样行全部降到 `Trace`（普通模式终端只留一行 `[book] 内存/被杀现场日志: <路径>`，低内存告警仍然是 `WARNING` 会打出来）；③ `docs/sessions.md` 的沙箱一节写明 PID 命名空间隔离与这起事故。
   验证：新增 `TestSandboxArgsUnsharePID`（参数必须含 `--unshare-pid` + `--proc /proc`）与 `TestSandboxCannotSignalHostProcess`（真起一个 bwrap 沙箱：`ps` 里不出现宿主测试进程的 PID、`kill -9 <宿主 PID>` 返回非 0、宿主进程存活）；新增 `TestMemWatchQuietAtInfoLevel`（info 日志里不得出现 `[mem]`，而 `mem.log` 仍必须有基线与结束行）；既有沙箱集成测试（只读挂载/可写工作区/符号链接/Python 环境）全绿，全量 `go test ./internal/...` 绿。
+
+[X][ ] T164. 章节转换的"重试与意见"全链路（用户一次提出的四条，同一批实现）：① checker 打回后换全新会话重来，顶层给 **6 次**、每递归一层 **-1**、**下限 3**，配置项 `latex.checker_rounds` 设得与层数不匹配要告警；② 预览页给重试链加「历史 N」页签（与 img2text 调用链同款），**递归子章节同样遵守**；③ 子章节自己交的 report 必须浮到父节点（父可合并、可追加新问题，自己提交时带上自己的问题）；④ 很多父节点"连编译都没编译、连看都没看"就把产物交了。
+  现场证据（一本 12 章、递归到第三层的书，共 24 条转录）：
+  - 8 个已开始的顶层章节转录里，`compile` 次数分别为 1/3/2/1/4/4/10/0——**1 章一次都没编译**；`view_pdf` 次数 1/2/4/0/0/0/3/0——**3 章编译了却从没看过**；另 4 章连转换会话都还没开始（进程被杀）。
+  - 根章节的 checker 转录里**只有 read_file/grep、没有一次 submit**——8 轮、25 次工具调用、38 分钟，然后被旧兜底"没结论也算过"放行。
+  - 一条递归子会话连续拿到 `Read-only file system`（那批时间戳早于 T156 的挂载修复），随后开始 `ps`/`kill`、并把同一个文件反复重写、反复提交——同一会话被 checker 打回 3 轮后仍在原上下文里打转（旧代码对递归节点是"打回 3 轮就整支失败"，对顶层才换会话）。
+  - 子章节 report 明确写过"enumerate/proof 结构对不上、没能干净编译"之类的话，但父会话的整合指令只要求读子 `.tex`/`parts`，**报告不在必读清单里**，于是同一个毛病跟着父章节一起提交。
+  改：① 重试预算 `checkerAttemptBudget(base, depth) = max(3, base-depth)`，`base` 取 `latex.checker_rounds`（未写 6）；`checker_rounds - 最大层数(3) < 3` 时启动打 `WARNING`；② **顶层与递归节点同一策略**：同一会话被 checker 打回 `rounds` 轮仍不过 → 作废产物、**换全新会话**重来，每次尝试一条独立转录（`convert_<章>.try2.jsonl`…），次数用尽判失败（不再"记一笔就放过"）；③ checker 两次都拿不到结论**不再降级为通过**（只把厂商/网络错误原样上报，避免用坏模型去触发重转换）；④ 新增 `_subdivision/children-summary.md`：把每个子章节 report 原文汇总并统计"自报 issues"的数量，整合指令改成**必读**，并明确"修不了的写进你自己的 report（可引用子章节的问题、也可追加新发现）"；⑤ 提交门禁（T165）；⑥ 预览页：`chapterAttempt` 字段 + `chapterAttemptChain()`，同一章的各次尝试聚成一条链，中栏出现「历史 N」页签、侧栏行带「第 N 次」chip。
+  验证：`TestCheckerAttemptBudget`（6/5/4/3 与下限、自定义基数）、`TestCheckerBudgetWarning`、`TestAttemptTranscriptPath`、`TestChapterIdentityAttemptSuffix`（重试转录仍归属同一章节、子节点同理）、`TestCheckerWithoutVerdictFailsAfterTwoAttempts`、`TestCheckerRecoversAfterDegenerateResponse`、`TestCheckerDegenerateInBothAttemptsFails`、web `chapterAttemptChain`/`chainMemberTag` 三例；全量 `go test ./internal/...` + `npm test` 绿。
+
+[X][ ] T165. 「很多连编译都没编译连看都没看」——把"编译成功 + 亲眼看产物"做成提交硬门禁。
+  事实：`submit` 当时只校验「两个路径存在、没有 `\documentclass`、带 report」，编译与看图全凭模型自觉；上面那本书里 4 章 0 次编译、3 章编译了 0 次 `view_pdf`，错误 `.tex` 一路进到书里，到 assemble/终审才炸。
+  改：新增 `chapterGate`（`.gate/compile.json` + `.gate/view.json`，写在会话工作区的 `.gate/`，不进提交产物）：`compile` 成功时记下「主 `.tex` + parts 目录的内容摘要 + 产物 sha256 + 页数」，`view_pdf` 渲染到该产物时记下页码；`submit` 要求**摘要与当前文件一致**（编译后又改过文件就作废，必须重编）、产物仍存在且指纹一致、且至少看过 `min(2, 总页数)` 页。拒绝文案直接告诉模型下一步做什么（去 compile / 去 view_pdf / 改了文件要重编）。
+  验证：`TestChapterGateRequiresCompileAndView`（未编译拒绝 → 只编译未看拒绝 → 编译+看图通过 → 编译后改 parts 再次拒绝）；`convert` 提示词同步一句"编译后必须自己 view_pdf 看第 1 页与最后一页"。
