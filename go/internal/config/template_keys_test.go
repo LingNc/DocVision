@@ -226,3 +226,64 @@ func TestTemplatesResolveImageEstimatePerRole(t *testing.T) {
 		t.Errorf("chapter 应当完全跟全局: %+v vs %+v", got, cfg.Estimate)
 	}
 }
+
+// TestConfigTemplatesInSync 钉住两份模板的**内容一致**。
+//
+// 背景：这两份文件长期各自演化——`go/internal/config/default.yaml` 是 `docvision
+// init` 内嵌写出的模板，`config.example.yaml` 是仓库根的讲解版。曾经它们的键面
+// 由 TestConfigTemplateKeyParity 守着，但**值、注释、示例条目**全都可以悄悄漂移：
+// 一次真实事故里 default.yaml 落后示例 300 多行（注释语言、gateway-a/b 之类的
+// extends 示例、verify/img2text 块的顺序、raster_dpi 110/220、max_fix_rounds
+// 8/40 等），照 init 跑的用户与照示例跑的用户看到的是两套东西。
+//
+// 现在两份文件保持逐字节相同；任何单边修改都会在这里失败。**如果确实需要让
+// 它们不同**（例如示例要更啰嗦），请把这条测试改成只比较值（键面已有
+// TestConfigTemplateKeyParity），并在 docs/config.md 里注明差异——不要直接删掉
+// 这条测试。
+func TestConfigTemplatesInSync(t *testing.T) {
+	const builtin = "../../../go/internal/config/default.yaml"
+	const example = "../../../config.example.yaml"
+	got, err := os.ReadFile(builtin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(example)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		// 只报第一处差异，避免刷屏。
+		gl := strings.Split(string(got), "\n")
+		wl := strings.Split(string(want), "\n")
+		for i := 0; i < len(gl) && i < len(wl); i++ {
+			if gl[i] != wl[i] {
+				t.Fatalf("两份配置模板在第 %d 行已经不同：\n  default.yaml: %q\n  config.example.yaml: %q\n（同步两份文件，或按本测试的注释说明改成只比值）",
+					i+1, gl[i], wl[i])
+			}
+		}
+		t.Fatalf("两份配置模板行数不同：default.yaml %d 行 / config.example.yaml %d 行", len(gl), len(wl))
+	}
+}
+
+// TestBuiltinTemplateLoads 钉住"`docvision init` 写出来的模板自己能被解析并通过
+// 校验"。键面测试只比对键集合、未知键测试只看拼写；都不能证明 extends 链能解析、
+// 版本号与代码一致、占位值不会在加载期报错。模板是用户第一次运行时的起点，
+// 它自己必须是可加载的——否则用户 init 完立刻被一堆解析错误挡住。
+func TestBuiltinTemplateLoads(t *testing.T) {
+	cfg, err := LoadConfigData([]byte(ConfigTemplate), "default.yaml")
+	if err != nil {
+		t.Fatalf("内嵌模板加载失败：%v", err)
+	}
+	if cfg.ConfigVersion != CurrentConfigVersion {
+		t.Errorf("模板 config_version = %d，代码 CurrentConfigVersion = %d（模板过期）",
+			cfg.ConfigVersion, CurrentConfigVersion)
+	}
+	if cfg.Models["text"].Model == "" {
+		t.Error("模板 models.text.model 为空：init 出来的配置没法用")
+	}
+	// extends 链要真的解析出来（gateway-a / gateway-b / heavy / vision-heavy 这
+	// 几个示例基座是模板的教学核心，链断了上面的加载不会报错但语义全失）。
+	if m, ok := cfg.ResolveModel("vision-heavy"); !ok || m.Model == "" {
+		t.Errorf("模板示例条目 vision-heavy 没有解析出 model（多重基座链断了）：%+v", m)
+	}
+}

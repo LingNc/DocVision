@@ -1846,3 +1846,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **现场核对**：用只读加载跑过那四份卡住的转录，修复后 `badArgs=0`、`emptyAssistants=0`——续跑第一个请求即合法，**不需要删改任何会话历史**。
 - **文档同步**：`docs/issue.md` T159；CHANGELOG `[Unreleased]` Fixed；`docs/config.md`（`max_tokens` 是总预算、思考模型建议 ≥32768）、`docs/sessions.md`（回放清洗与截断兜底）；`AGENTS.md` 现状要点补两句。
 - **校验**：`go build ./...`、`go vet ./internal/session`、`gofmt` 干净；`go test ./internal/session ./internal/latex -count=1` 全绿（6.1s / 45.0s）。
+
+## v1.5+（第四十二批，T160：两份配置模板同步）
+
+- **背景**：用户大改 `config.example.yaml` 后问"软件里面那个 default 跟这个 example 差距有点大，是不是之前一直没更新"。核对结果是**两份模板长期各自演化**：键面一直有 `TestConfigTemplateKeyParity` 守着（键集合必须一致），但值、注释、示例条目全可以漂移——当年实测差异 **339 行**：示例新增了 `gateway-a`/`gateway-b`/`heavy`/`vision-heavy` 等命名基座演示 `extends`（单基座、多重基座、链式），`default.yaml` 还是逐个角色写死 `model:` 的老写法；注释一边英文一边中文教学；`verify`/`img2text` 块顺序不同。值差异 11 处：`max_fix_rounds` 8→40、`raster_dpi` 110→220（docs 早已注明是模板示例值）、`sessions.drawing.max_tokens` 16384→131072、`sessions.style.max_tokens` 32768→131072、`preview.img2text` false→true、`mermaid.fix_attempts` -1→2、`mermaid.session_errors` 3→6（这四处此前未注明）、`models.{chapter,heavy,style}.extends` 目标不同，以及**真笔误 `tools.python.install_timeout: 300 → 30000`**（单位是秒，等于 8 小时 20 分）。
+- **改**：① 两份模板同步为同一内容（用户已把示例整体覆盖到 `default.yaml`），`sessions.dedupe.max_tokens` 与 `img2text.max_tokens` 按用户要求统一为 **65536**；② `install_timeout` 回到 300（与 docs 和代码默认一致）；③ `docs/config.md` 为 `sessions.*.max_tokens`（模板示例 131072 / dedupe 65536 / img2text 65536）、`mermaid.fix_attempts`（示例 2）、`mermaid.session_errors`（示例 6）、`preview.img2text`（示例 true）补上"随附模板示例写…"的注记——此前只有 `raster_dpi`/`max_fix_rounds` 两行注明过。
+- **防复发**：新增 `TestConfigTemplatesInSync`（两份模板逐字节比对，单边修改立刻失败；失败信息里写明"若确需不同，请改成只比值并写进 docs，不要直接删测试"）与 `TestBuiltinTemplateLoads`（**内嵌**的 `ConfigTemplate` 走 `LoadConfigData`：版本号等于 `CurrentConfigVersion`、`models.text.model` 非空、示例条目 `vision-heavy` 的多重基座链能解析出 model）。
+- **校验**：`go build ./...`（模板是 `//go:embed` 的，必须重编）；`go test ./internal/... -count=1` 全绿（config 0.08s / latex 19.0s / session 6.1s / sessionview 18.1s 等）。

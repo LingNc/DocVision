@@ -23,10 +23,10 @@
 | `tools.context.max_calls` | 单图最大上下文扩展请求次数 | 5 |
 | `tools.mermaid.validation` | Mermaid 校验模式（off/auto/strict） | auto |
 | `tools.mermaid.command` | Mermaid CLI 命令 | mmdc |
-| `tools.mermaid.fix_attempts` | Mermaid 就地修复轮数：`-1`（默认/未写）= **首次校验失败直接升级修复会话**；`0` = 无限就地修复（受安全上限保护）；`N>0` = N 轮就地修复后再升级 | -1 |
+| `tools.mermaid.fix_attempts` | Mermaid 就地修复轮数：`-1`（默认/未写）= **首次校验失败直接升级修复会话**；`0` = 无限就地修复（受安全上限保护）；`N>0` = N 轮就地修复后再升级（随附模板示例写 2） | -1 |
 | `tools.mermaid.timeout` | 单次 Mermaid 校验超时（秒） | 30 |
 | `tools.mermaid.session_rounds` | 升级修复会话的提交/检查次数上限（两段合计；≤0 = 关闭升级会话，维持旧的"跳过、下轮重试"） | 32 |
-| `tools.mermaid.session_errors` | 升级会话内编译错误累计上限，满了清上下文切备选模型 | 3 |
+| `tools.mermaid.session_errors` | 升级会话内编译错误累计上限，满了清上下文切备选模型（随附模板示例写 6） | 3 |
 | `tools.mermaid.fallback_model` | 备选兜底模型（`models.<条目名>`；条目不存在或留空 = 原模型清上下文重来） | （空） |
 **升级修复会话（P12）**：默认（T37，`fix_attempts` 未写或 `-1`）**首次校验失败即升级**
 ——不做就地修复轮；显式写 `N>0` 时先在同一对话里追加 N 轮修复消息、用尽后再升级。
@@ -96,7 +96,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
 | `latex.sessions.{drawing,style,chapter,convert,checker,dedupe}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |
 | `latex.sessions.*.context_limit` | 会话上下文窗口（tokens）；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值 | 0（不限制） |
-| `latex.sessions.*.max_tokens` | 会话单次请求最大输出；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值。**这是"思考 + 正文"的总预算**，不是正文长度——开着思考的模型配 8192 会把预算全花在思考上、正文为空（会话因此以空回复失败）；这类模型建议 **≥32768**。被截断且无正文时代码会翻倍重试一次（受窗口约束）并告警 | 16384（style 32768） |
+| `latex.sessions.*.max_tokens` | 会话单次请求最大输出；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值。**这是"思考 + 正文"的总预算**，不是正文长度——开着思考的模型配 8192 会把预算全花在思考上、正文为空（会话因此以空回复失败）；这类模型建议 **≥32768**。被截断且无正文时代码会翻倍重试一次（受窗口约束）并告警（随附模板示例写 drawing/style 131072、dedupe 65536、img2text 65536） | 16384（style 32768） |
 | `latex.sessions.*.keep_images` | 本地历史裁剪策略，不是平台图片上限；上下文裁剪时保留最近多少条带图消息。平台上限请配置 `models.<name>.max_images` | 3 |
 | `latex.sessions.*.temperature` | 该会话采样温度（同 `models.<name>.temperature`，会话配置优先） | 未设置 |
 | `latex.sessions.*.compaction_at` | 触发自动压缩的窗口占用比例（0-1），不写默认 0.85（所有会话一致，不是只继承 drawing） | 0.85 |
@@ -142,7 +142,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |
-| `preview.img2text` | T37：预览侧栏额外显示 **img2text 升级修复会话**（`<finally>/progress_items/mermaid_fix/<书>_<图>/` 的转录），按书分组、组内按图名稳定排序编号（`#N ·`）、走侧栏既有搜索；失败的修复工作区**默认保留**可见。img2text 产物在 latex 扫描根之外，本项是看到它们的唯一开关；P18 起 WebUI 有独立 img2text 板块（板块切换 + 每图进度状态） | false |
+| `preview.img2text` | T37：预览侧栏额外显示 **img2text 升级修复会话**（`<finally>/progress_items/mermaid_fix/<书>_<图>/` 的转录），按书分组、组内按图名稳定排序编号（`#N ·`）、走侧栏既有搜索；失败的修复工作区**默认保留**可见。img2text 产物在 latex 扫描根之外，本项是看到它们的唯一开关；P18 起 WebUI 有独立 img2text 板块（板块切换 + 每图进度状态）（随附模板示例写 true） | false |
 | `preview.img2text_all` | 逐图分析也记录会话转录（`<finally>/progress_items/sessions/<md>/<图>.jsonl`，P18 起在 WebUI img2text 板块展示）；调试完不想堆文件可关。**升级修复会话总是记录、不受此键管** | true |
 | `estimate.method` | **本地估算**的图片计量方法：`pixels`（按尺寸折算）/ `fixed`（每张固定值）/ `none`（本地按 0 计） | "pixels" |
 | `estimate.tokens` | `method: fixed` 时每张的固定值；`method: pixels` 下**取不到尺寸**（未知格式/文件读不到）时也用它 | 1100 |

@@ -154,7 +154,7 @@ latex:
       keep_images: 3             # 本地裁剪时保留最近几张图（负=全部保留）
     dedupe:
       context_limit: 0          # 0=会话不设上限；模型上限写在 models.<name>.context_limit
-      max_tokens: 32768         # 单次请求输出上限；与模型 max_tokens 取较小正值
+      max_tokens: 65536          # 单次请求输出上限；与模型 max_tokens 取较小正值
       max_tool_rounds: 0        # 0=不限制
     style:
       context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
@@ -231,7 +231,7 @@ tools:
     pip_index_url: ""           # 宿主侧自动安装用的 PyPI 镜像（如 https://pypi.tuna.tsinghua.edu.cn/simple）；留空=用宿主 pip 配置
     packages: []                # 启动前确保可导入的模块（如 ["numpy", "PIL"]；缺则宿主侧装；PIL→Pillow、fitz→PyMuPDF 自动换算包名）
     auto_install: true          # 会话 bash 报 ModuleNotFoundError 时由宿主侧自动 pip install 后提示重试
-    install_timeout: 30000        # 单次 pip install 的超时（秒）
+    install_timeout: 300          # 单次 pip install 的超时（秒）
 
 preview:
   enabled: false                 # true = 跑 docvision latex 时自动启动会话预览服务（只读，浏览器里看每个会话实时进度）
