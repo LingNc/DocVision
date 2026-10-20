@@ -1054,3 +1054,12 @@ user 轮
   4. 核对会话的尝试号：T171 起 checker 转录名也带 `.tryN`，与新 convert 尝试一一对应；这次之前写的旧 checker 转录只有 `.jsonl`（没有尝试号），属于历史数据、不做兼容也不改名——它们按"第 1 次"归位，与新尝试之间靠「历史」页签分别查看。
   验证：Go 新增 `TestAttemptNumberForNode`（空目录 / 拆分可恢复时沿用第 1 次 / 无 `run_end` 原位续跑 / 已结束换新号 / 拆分可恢复时即使上次已结束也沿用）；`web/tests/chapter-tree.spec.ts` 新增 5 条"树跟随正在查看的尝试"（父与子同轮、子节点取 ≤pin 的最近一轮、核对会话同轮、pin 超过所有尝试、无 pin 仍取最新）并把标签断言改成 `#N`；`npm test` 148 通过、`go test ./internal/...` 全绿。
   代价与善后：10:56 那次重跑（旧逻辑）已经把 002–006 章的 `work/temp` 整棵清掉，子章节必须重转一次；本次修复后，同一类中断重跑会直接从原尝试继续，不再清子树、不再多出空尝试。
+
+[X][ ] T174. 用户对 T173 的两点纠正（原话）："我们新尝试不是checker跑满才算吗？怎么现在中断就算一个" / "checker满了之后清会话的时候不应该删掉所有逻辑树吧，只是保留和重命名转移？并且不然我们会话中不就看不到了吗？"
+  问题：T173 只做到"拆分计划还在的父节点沿用原尝试"，规则本身仍是"上一次有 `run_end` 就换新号"——所以进程被杀、网络断连、窗口关掉这类中断在重跑时依然会开一条新尝试（用户口径：这不该算一次尝试，新尝试的唯一来源是 checker 连续 `checker_rounds` 轮仍不过、代码主动作废产物换会话）。另一头，换会话时 `chapterWorkTreeAt(resuming=false)` 用 `RemoveAll(nodeRoot)` 把上一轮的工作区连 `_subdivision/`（子章节的成品与转录）一起删了——「历史」里只剩对话，看不到那一轮到底交了什么。
+  改：
+  1. **中断不加号**：`lastAttemptNumber(transcriptBase)` 一律返回磁盘上已有的最大尝试号（没有则 1）；`convertChapterNode` 不再看 `run_end` 决定换号，重跑总是接着最近那条转录继续（回放、续写同一文件）。新号只出现在换会话那一步：`next.AttemptNum = node.AttemptNum + 1` 显式指定。真正的新尝试因此只在"checker 跑满轮次"时产生。
+  2. **作废 ≠ 删光**：换会话前先 `archiveChapterAttempt`，把上一轮的 `work/`（含 `_subdivision/` 子树）、`result/`、`integrated-stage/` 与已提交的 `.tex`/分片整棵**移动**到 `<proj>/work/attempts/<章>/try<N>/`，再清空当前层重新开始；checker 给的问题清单写成同目录的 `checker-issues.md`。留档放在 `work/` 下而不是章节的 `work/temp/conv_<章>/`：后者会在章节收尾时整棵清掉。移动失败只警告，不挡重试。
+  3. **不再整棵 RemoveAll 节点目录**：开新尝试只清这一层的 `work/`、`result/`、`integrated-stage/`、`checker-view/`，**保留 `sessions/`**——递归子章节的转录挂在这棵子树里，删了预览页就看不到整棵子树的历史；留档后的子转录仍按文件名归组，点「历史」里的旧尝试能连它的子章节一起看。
+  验证：新增 `TestLastAttemptNumber`（空目录 / 无 `run_end` / 已收尾仍是同一次 / 磁盘上已有第 2 次就接第 2 次）与 `TestArchiveChapterAttempt`（work、`_subdivision`、result、integrated-stage、问题清单都进留档；旧位置不残留；核对转录留在 `sessions/`）；`go test ./internal/...` 全绿、`npm test` 148 通过。
+  已知代价：留档会把子章节的成品与转录一起搬进 `attempts/`，所以新尝试重转子章节时看不到旧成品（子节点目前还没有"已通过就跳过"的标记）；同一次尝试内重跑已通过的子章节仍会重放对话后再跑一遍 checker。

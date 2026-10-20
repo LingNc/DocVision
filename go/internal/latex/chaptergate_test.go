@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mineru-tools/internal/logger"
 )
 
 // TestAttemptTranscriptPath pins the per-attempt transcript naming: the first
@@ -162,23 +164,19 @@ func TestChapterGateRequiresCompileAndView(t *testing.T) {
 	}
 }
 
-// TestAttemptNumberForNode：T173 —— 已请求细分（子章节结果还在）的父节点重跑时
-// 必须**沿用**已有转录，不能开一条空的新尝试；其余情况仍按"没 run_end 就原位
-// 续跑、有 run_end 就新号"。
-func TestAttemptNumberForNode(t *testing.T) {
+// TestLastAttemptNumber：T174 —— **中断不算新尝试**。磁盘上已有第 1 次
+// （哪怕它已经写了 run_end）就还是 1；只有换会话那一步显式给号才会出现 2。
+func TestLastAttemptNumber(t *testing.T) {
 	dir := t.TempDir()
 	base := filepath.Join(dir, "convert_chapter_009.jsonl")
-	if got := attemptNumberForNode(base, true); got != 1 {
-		t.Fatalf("空目录 splitRestored → %d，want 1", got)
+	if got := lastAttemptNumber(base); got != 1 {
+		t.Fatalf("空目录 → %d，want 1", got)
 	}
 	if err := os.WriteFile(base, []byte(`{"t":"msg","role":"assistant","content":"done"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := attemptNumberForNode(base, true); got != 1 {
-		t.Fatalf("splitRestored 必须沿用第 1 次，got %d", got)
-	}
-	if got := attemptNumberForNode(base, false); got != 1 {
-		t.Fatalf("没有 run_end 时原位续跑，got %d", got)
+	if got := lastAttemptNumber(base); got != 1 {
+		t.Fatalf("没有 run_end 时沿用第 1 次，got %d", got)
 	}
 	f, err := os.OpenFile(base, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -188,10 +186,74 @@ func TestAttemptNumberForNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = f.Close()
-	if got := attemptNumberForNode(base, false); got != 2 {
-		t.Fatalf("已结束且不在等子会话时换新号，got %d", got)
+	if got := lastAttemptNumber(base); got != 1 {
+		t.Fatalf("上一次已收尾也只说明中断过，仍是同一次尝试，got %d", got)
 	}
-	if got := attemptNumberForNode(base, true); got != 1 {
-		t.Fatalf("splitRestored 时即使上一次已结束也沿用，got %d", got)
+	// 换会话那一步写完第 2 次，重跑才接第 2 次
+	if err := os.WriteFile(attemptTranscriptPath(base, 2), []byte(`{"t":"msg","role":"assistant","content":"again"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastAttemptNumber(base); got != 2 {
+		t.Fatalf("应接最近的第 2 次，got %d", got)
+	}
+}
+
+// TestArchiveChapterAttempt：T174 —— 作废一次尝试时把它的工作区、产物挪进
+// `work/attempts/<章>/try<N>/`，而不是删掉；子章节转录必须原地不动（预览页
+// 靠它们显示整棵子树的历史）。
+func TestArchiveChapterAttempt(t *testing.T) {
+	proj := t.TempDir()
+	base := "chapter_009"
+	nodeRoot := filepath.Join(proj, "work", "temp", "conv_"+base)
+	submit := filepath.Join(nodeRoot, "result")
+	write := func(p, txt string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(txt), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(nodeRoot, "work", base+".tex"), "old tex")
+	write(filepath.Join(nodeRoot, "work", "_subdivision", "split.json"), "{}")
+	childTr := filepath.Join(nodeRoot, "work", "_subdivision", "child_01", "node", "sessions", "convert_x_child_01.jsonl")
+	write(childTr, `{"t":"msg"}`+"\n")
+	write(filepath.Join(submit, base+".tex"), "submitted")
+	write(filepath.Join(nodeRoot, "integrated-stage", base+".tex"), "integrated")
+	write(filepath.Join(nodeRoot, "sessions", "checker_"+base+".jsonl"), `{"t":"msg"}`+"\n")
+
+	log, err := logger.NewLogger("", "", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{log: log}
+	node := chapterNodeConfig{Base: base, NodeRoot: nodeRoot, SubmitRoot: submit, AttemptNum: 1}
+	r.archiveChapterAttempt(proj, base, node, filepath.Join(submit, base+".tex"), "missing table")
+
+	dst := filepath.Join(proj, "work", "attempts", base, "try1")
+	for _, rel := range []string{
+		"work/" + base + ".tex",
+		"work/_subdivision/split.json",
+		"result/" + base + ".tex",
+		"integrated-stage/" + base + ".tex",
+		"checker-issues.md",
+	} {
+		if !fileExists(filepath.Join(dst, rel)) {
+			t.Fatalf("留档缺 %s", rel)
+		}
+	}
+	archivedChild := filepath.Join(dst, "work", "_subdivision", "child_01", "node", "sessions", "convert_x_child_01.jsonl")
+	if !fileExists(archivedChild) {
+		t.Fatal("子章节转录应随旧尝试一起留档")
+	}
+	if fileExists(childTr) {
+		t.Fatal("留档是移动不是复制：旧位置不该还留着")
+	}
+	if fileExists(filepath.Join(nodeRoot, "work", base+".tex")) {
+		t.Fatal("旧尝试的主文件应已挪走")
+	}
+	if !fileExists(filepath.Join(nodeRoot, "sessions", "checker_"+base+".jsonl")) {
+		t.Fatal("核对转录不该被留档带走")
 	}
 }

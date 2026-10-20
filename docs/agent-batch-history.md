@@ -2007,3 +2007,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **改**：① 新增 `attemptNumberForNode(transcriptBase, splitRestored)`——拆分状态可恢复的父节点沿用磁盘上最新尝试（同一轮没做完），其余仍"无 run_end 原位续跑 / 有 run_end 新号"；② `buildChapterTree(items, pinAttempt)` + `pickAttempt(cur, next, pin)`：树跟随当前会话的尝试号，≤pin 取最大、都比 pin 新则取最早，convert/checker 同一个 pin；③ `chapterAttemptTag` 改产 `#N`（第 1 次为空）、`chainMemberTag` 对章节统一 `#N`（历史列表），侧栏行与树行不再显示次数。
 - **验证**：`TestAttemptNumberForNode`（5 个分支）；`chapter-tree.spec.ts` 新增 5 条跟随用例并改标签断言；`npm test` 148、`go test ./internal/...` 全绿。
 - **善后**：10:56 那次旧逻辑重跑已把 002–006 章的工作树整棵清掉，子章节必须重转一次；修复后同类中断重跑直接从原尝试继续，不再清子树。
+
+## v1.5+（第四十七批补十，T174：中断不算新尝试，作废尝试留档）
+
+- **真实缺陷（T173 遗留）**：① 尝试号规则仍是"上一次有 `run_end` 就换新号"，而父章节请求拆分那轮就会写 `run_end`（整合是同一会话后来的 `sess.Run`），所以"等子会话时被杀"再重跑仍会开新尝试——用户口径：新尝试只该在 checker 跑满轮次后出现；② 换会话时 `chapterWorkTreeAt(resuming=false)` 直接 `RemoveAll(nodeRoot)`，上一轮的 `work/`（含 `_subdivision/` 子章节成品与转录）、`result/` 全被删掉，「历史」只剩对话，看不到那一轮交了什么。
+- **改**：`lastAttemptNumber()` 一律返回磁盘最大尝试号（重跑接着最近那条继续），新号只在换会话那一步显式 `next.AttemptNum = node.AttemptNum + 1`；换会话前 `archiveChapterAttempt()` 把上一轮整棵移到 `<proj>/work/attempts/<章>/try<N>/`（work/含子树、result、integrated-stage、已提交 .tex 与分片、`checker-issues.md`），移动失败只警告；开新尝试只清当前层 `work`/`result`/`integrated-stage`/`checker-view`，保留 `sessions/`。
+- **验证**：`TestLastAttemptNumber` 4 个分支、`TestArchiveChapterAttempt`（留档到位、旧位置不残留、子转录随子树留档、核对转录留在 sessions）；`go test ./internal/...` 全绿、`npm test` 148。
+- **已知代价**：留档把子章节成品一并搬走，新尝试重转子章节时没有"已通过就跳过"的标记；同一次尝试内重跑已通过的子章节仍会重放对话 + 再跑 checker。

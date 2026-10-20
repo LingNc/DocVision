@@ -1281,7 +1281,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		node.StrictChecker = true
 	}
 	if node.AttemptNum < 1 {
-		node.AttemptNum = attemptNumberForNode(transcriptBase, splitTool.Restored)
+		node.AttemptNum = lastAttemptNumber(transcriptBase)
 	}
 	node.TranscriptPath = attemptTranscriptPath(transcriptBase, node.AttemptNum)
 	texPath := filepath.Join(node.SubmitRoot, base+".tex")
@@ -1304,7 +1304,16 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	trPath := node.TranscriptPath
 	workRoot := filepath.Join(node.NodeRoot, "work")
 	resuming := node.Attempt == 1 && fileExists(trPath) && fileExists(workRoot)
-	work, cleanWork, err := r.chapterWorkTreeAt(proj, clsName, base, node.NodeRoot, resuming, "")
+	if !resuming {
+		// T174：开新尝试只清这一层的工作区，**不动 `sessions/`**——递归子章节
+		// 的转录挂在这棵子树里，删了预览页就看不到它们的历史。上一轮的东西
+		// 由换会话那一步先挪进 `work/attempts/`，这里删的是已经挪空的位置。
+		_ = os.RemoveAll(workRoot)
+		_ = os.RemoveAll(filepath.Join(node.NodeRoot, "result"))
+		_ = os.RemoveAll(filepath.Join(node.NodeRoot, "integrated-stage"))
+		_ = os.RemoveAll(filepath.Join(node.NodeRoot, "checker-view"))
+	}
+	work, cleanWork, err := r.chapterWorkTreeAt(proj, clsName, base, node.NodeRoot, true, "")
 	if err != nil {
 		return err
 	}
@@ -1576,11 +1585,17 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			r.log.LogWarning(tid, "[checker]", base, "第", strconv.Itoa(node.Attempt), "次尝试反馈",
 				strconv.Itoa(rounds), "轮仍未通过 — 作废产物，换全新会话重转换")
 			r.phaseNote()("[checker] %s 第 %d 次尝试未过 — 换新会话", base, node.Attempt)
+			// T174：作废产物 ≠ 删光证据。上一轮交的 .tex/分片、工作区、编译
+			// 产物先整棵挪进 `work/attempts/<章>/try<N>/`，再开新会话——否则
+			// 「历史」里只剩对话，看不到那一轮到底交了什么东西。
+			r.archiveChapterAttempt(proj, base, node, texPath, issues)
 			_ = os.Remove(texPath)
 			_ = os.RemoveAll(filepath.Join(node.SubmitRoot, base))
 			next := node
 			next.Attempt = node.Attempt + 1
-			next.AttemptNum = 0 // 由磁盘重算：刚才这次已经落盘，会拿到新号
+			// 新号在这里显式给：只有"checker 跑满轮次仍不过"才是新尝试，
+			// 进程被杀/断连的重跑一律沿用磁盘上最近的那一次。
+			next.AttemptNum = node.AttemptNum + 1
 			next.TranscriptPath = transcriptBase
 			return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, true, next)
 		}
@@ -1605,22 +1620,72 @@ func attemptTranscriptPath(path string, attempt int) string {
 }
 
 // attemptNumberOnDisk 查这一章在磁盘上已有的最大尝试号，并告诉最后一次是否
-// 已经正常收尾（转录里有 run_end）。0 表示还没有任何尝试。
-// attemptNumberForNode 决定这一次往哪条转录里写（T171/T173）：
-//   - 已经请求细分、子章节结果还在的父节点属于**同一轮工作没做完**（被中断在
-//     "等子会话"）：沿用磁盘上最新一次，把整合与核对接着写进原转录——否则每重跑
-//     一次就多一条空尝试，预览页看起来像"每次都被重试、还停在等子会话"。
-//   - 最后一次转录没有 run_end（被中断）：原位续跑，接着那段对话。
-//   - 否则：换新号，绝不把两段对话追加进同一个文件。
-func attemptNumberForNode(transcriptBase string, splitRestored bool) int {
-	existing, ended := attemptNumberOnDisk(transcriptBase)
-	if existing < 1 {
-		return 1
+// 已经正常收尾（转录里有 run_end）。0 表示还没有任何尝试。收尾与否只用于诊断
+// 与测试：重跑一律沿用最大号（T174），新号只由换会话那一步显式分配。
+// lastAttemptNumber 决定这一次往哪条转录里写：**中断不算新尝试**。
+//
+// 用户口径（T174）：只有 checker 连续打回 `latex.checker_rounds` 轮仍不过、
+// 代码主动作废产物换全新会话时，才分配新号（那一步显式写 `next.AttemptNum`）。
+// 进程被杀、网络断连、窗口关掉之后重跑，都是"同一轮没做完"，接着磁盘上最近
+// 那条转录继续——否则每按一次 Ctrl-C 就多出一条空尝试，历史里全是"第 2 次"
+// "第 3 次"，而真正干活的第 1 次永远停在半路。
+func lastAttemptNumber(transcriptBase string) int {
+	if n, _ := attemptNumberOnDisk(transcriptBase); n >= 1 {
+		return n
 	}
-	if splitRestored || !ended {
-		return existing
+	return 1
+}
+
+// archiveChapterAttempt 把一次被作废的尝试整棵挪进
+// `<proj>/work/attempts/<章>/try<N>/`（T174）。挪的位置在 `work/` 下而不是
+// 章节的 `work/temp/conv_<章>/` 里：后者会在章节收尾时整棵清掉，留档就白留了。
+// 内容 = 上一轮的工作区（含 `_subdivision/` 子树）、提交的 `.tex` 与分片、
+// `result/`、`integrated-stage/`，外加 checker 给的问题清单。移动失败只警告，
+// 绝不因为留档失败而挡住重试。
+func (r *Runner) archiveChapterAttempt(proj, base string, node chapterNodeConfig, texPath, issues string) {
+	dst := filepath.Join(proj, "work", "attempts", base, fmt.Sprintf("try%d", node.AttemptNum))
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		r.log.LogWarning(0, "[convert]", base, "留档目录创建失败（继续重试）:", err)
+		return
 	}
-	return existing + 1
+	move := func(src, name string) {
+		if src == "" || !fileExists(src) {
+			return
+		}
+		if err := movePath(src, filepath.Join(dst, name)); err != nil {
+			r.log.LogWarning(0, "[convert]", base, "留档失败（继续重试）:", filepath.Base(src), err)
+		}
+	}
+	move(filepath.Join(node.NodeRoot, "work"), "work")
+	move(filepath.Join(node.NodeRoot, "result"), "result")
+	move(filepath.Join(node.NodeRoot, "integrated-stage"), "integrated-stage")
+	move(texPath, base+".tex")
+	move(filepath.Join(node.SubmitRoot, base), base)
+	if issues != "" {
+		_ = os.WriteFile(filepath.Join(dst, "checker-issues.md"), []byte(issues), 0o644)
+	}
+}
+
+// movePath 把 src 整个挪到 dst（同盘 rename；跨盘/失败退回复制后删除）。
+func movePath(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	st, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if st.IsDir() {
+		if err := copyDir(src, dst); err != nil {
+			return err
+		}
+	} else if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	return os.RemoveAll(src)
 }
 
 func attemptNumberOnDisk(path string) (int, bool) {
@@ -1661,7 +1726,7 @@ func attemptNumberOnDisk(path string) (int, bool) {
 }
 
 // transcriptEnded 看转录末尾有没有 run_end（会话层每次 Run 结束都会写）。
-// 没有 = 上次被中断，可以原位续跑；有 = 那次已经结束，重跑要用新的尝试号。
+// 它区分"这一段对话是否已经收尾"，用于诊断；尝试号的分配见 lastAttemptNumber。
 func transcriptEnded(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
