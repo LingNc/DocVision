@@ -208,7 +208,7 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 	cmd.Flags().Int("port", 0, "服务监听端口（默认取配置 preview.port；等价于 --addr <配置的 host>:<端口>）")
 	cmd.Flags().Bool("list", false, "只在终端列出扫到的会话（项目/阶段/消息数/提示词 tokens|字符/用量/成本/大小/修改时间/路径）")
 	cmd.Flags().String("unit", sessionsUnitToken, "提示词列的口径 token|char（默认 token：本地估算、带 ≈；char：精确字符数）")
-	cmd.Flags().Bool("no-retry", false, "关掉页面上的「重试这一章」写入口（默认开：按钮只往 <项目>/work/retry/ 排一个请求文件，不执行任何命令）")
+	cmd.Flags().Bool("no-retry", false, "关掉页面上的手动干预写入口（重试/重新核对/继续跑排队、删除记录；默认开：只往 <项目>/work/retry/ 排请求文件或删转录，不执行任何命令）")
 	cmd.Flags().String("out", "", "静态导出路径（默认 <根目录>/sessions.html）")
 	cmd.Flags().Bool("cost", false, "只打印按阶段的用量与费用报告（token/缓存命中率/价格/平均每次请求），价格来自配置 models.*.price")
 	return cmd

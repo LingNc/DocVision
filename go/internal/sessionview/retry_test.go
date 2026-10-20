@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"mineru-tools/internal/retryq"
 )
@@ -69,6 +70,8 @@ func TestPostRetryRejections(t *testing.T) {
 		{"子章节", `{"project":"书A","chapter":"chapter_003_child_01"}`, http.StatusBadRequest},
 		{"请求体不是 JSON", `not json`, http.StatusBadRequest},
 		{"角色非法", `{"project":"书A","chapter":"chapter_002","role":"style"}`, http.StatusBadRequest},
+		// 继续跑的前提是这一章已经有转录。
+		{"没有转录", `{"project":"书A","chapter":"chapter_002","role":"continue"}`, http.StatusBadRequest},
 		// 重新核对的前提是有已提交产物。
 		{"还没有产物", `{"project":"书A","chapter":"chapter_002","role":"checker"}`, http.StatusBadRequest},
 	}
@@ -128,5 +131,92 @@ func TestPostRetryCheckerRoleWithProduct(t *testing.T) {
 	roles := v.retryRoles([]SessionInfo{{Project: "书A"}})
 	if roles["书A"]["chapter_002"] != "checker" {
 		t.Fatalf("retryRoles = %v", roles)
+	}
+}
+
+// 继续跑：有转录就排进队列，角色透传。
+func TestPostRetryContinueRole(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	if err := os.MkdirAll(filepath.Join(proj, "work", "sessions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "work", "sessions", "convert_chapter_002.try2.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"continue","reason":"我改了点东西"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	pending := retryq.Pending(proj)
+	if len(pending) != 1 || pending[0].Role != "continue" || pending[0].Reason != "我改了点东西" {
+		t.Fatalf("队列 = %+v", pending)
+	}
+}
+
+func postDrop(t *testing.T, v *viewerServer, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/drop", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	v.ServeHTTP(rec, req)
+	return rec
+}
+
+// 删一条"转错的记录"：转录没了，同一次尝试的作废归档也一起删。
+func TestPostDropDeletesTranscriptAndArchive(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	sess := filepath.Join(proj, "work", "sessions")
+	if err := os.MkdirAll(sess, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tr := filepath.Join(sess, "convert_chapter_002.try3.jsonl")
+	if err := os.WriteFile(tr, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(tr, old, old); err != nil {
+		t.Fatal(err)
+	}
+	arch := filepath.Join(proj, "work", "attempts", "chapter_002", "try3")
+	if err := os.MkdirAll(arch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(arch, "chapter_002.tex"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := postDrop(t, v, `{"project":"书A","path":"`+tr+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(tr); !os.IsNotExist(err) {
+		t.Fatalf("转录应已删除: %v", err)
+	}
+	if _, err := os.Stat(arch); !os.IsNotExist(err) {
+		t.Fatalf("作废归档应已删除: %v", err)
+	}
+}
+
+// 还在写的会话不给删（90 秒内有更新），--no-retry 的实例整条入口关掉。
+func TestPostDropRejections(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	sess := filepath.Join(proj, "work", "sessions")
+	if err := os.MkdirAll(sess, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	live := filepath.Join(sess, "convert_chapter_002.jsonl")
+	if err := os.WriteFile(live, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postDrop(t, v, `{"project":"书A","path":"`+live+`"}`); rec.Code != http.StatusConflict {
+		t.Fatalf("正在写的转录应拒绝, status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if rec := postDrop(t, v, `{"project":"书A","path":"/etc/passwd"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("非转录文件应拒绝, status = %d", rec.Code)
+	}
+	if rec := postDrop(t, v, `{"project":"书A","path":"`+filepath.Join(proj, "chapters", "chapter_002.md")+`"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("sessions 之外的文件应拒绝, status = %d", rec.Code)
+	}
+	off, _ := retryTestServer(t, false)
+	if rec := postDrop(t, off, `{"project":"书A","path":"x.jsonl"}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("关掉写入口应 403, status = %d", rec.Code)
 	}
 }

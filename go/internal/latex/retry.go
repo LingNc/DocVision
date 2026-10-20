@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"mineru-tools/internal/retryq"
 )
@@ -324,3 +326,243 @@ func (r *Runner) SetOnlyChapters(bases []string) {
 		}
 	}
 }
+
+// ---------- P2：运行期派发（不等阶段边界、不用重启） ----------
+
+// 章节锁：主流程的并发批与运行期的重试派发共用，同一章永远不会被跑两遍。
+//
+//	holdChapter  阻塞拿锁（主流程的并发批用：轮到这一章就必须等前一轮收尾）
+//	lockChapter  非阻塞（派发端用：忙就**不消费**请求，留在队列里等下一次 tick，
+//	             比"排上了但被丢掉"好）
+func (r *Runner) chapterMutex(base string) *sync.Mutex {
+	r.busyMu.Lock()
+	defer r.busyMu.Unlock()
+	if r.chapterBusy == nil {
+		r.chapterBusy = map[string]*sync.Mutex{}
+	}
+	m, ok := r.chapterBusy[base]
+	if !ok {
+		m = &sync.Mutex{}
+		r.chapterBusy[base] = m
+	}
+	return m
+}
+
+func (r *Runner) holdChapter(base string) func() {
+	m := r.chapterMutex(base)
+	m.Lock()
+	return m.Unlock
+}
+
+func (r *Runner) lockChapter(base string) bool { return r.chapterMutex(base).TryLock() }
+
+func (r *Runner) unlockChapter(base string) { r.chapterMutex(base).Unlock() }
+
+// continueTextOf 取这一章的"继续跑"提示（没有则空）。
+func (r *Runner) continueTextOf(base string) string {
+	if r.continueText == nil {
+		return ""
+	}
+	return r.continueText[base]
+}
+
+// setContinueText 记下"这一章要接着跑"的提示；跑完就清掉，免得下一次普通
+// 运行也被当成手动继续。
+func (r *Runner) setContinueText(base, text string) {
+	if r.continueText == nil {
+		r.continueText = map[string]string{}
+	}
+	if text == "" {
+		delete(r.continueText, base)
+		return
+	}
+	r.continueText[base] = text
+}
+
+// startRetryWatcher 起一条 goroutine，每 2 秒看一遍重试队列（P2）。
+//
+// 之前重试只在转换阶段的两个安全点消费：转换阶段跑完之后再点按钮就没人管了，
+// 得等下一次启动。现在它跑在整个 RunBook 生命周期里——样式、划分、转换、组装
+// 任何阶段都能收，真正进并发槽位（转换/核对各自的池子），同一章忙就留队。
+func (r *Runner) startRetryWatcher(proj string) {
+	if proj == "" || r.retryWatcherStop != nil {
+		return
+	}
+	stop := make(chan struct{})
+	r.retryWatcherStop = stop
+	r.retryWatcherWG.Add(1)
+	go func() {
+		defer r.retryWatcherWG.Done()
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				r.dispatchRetries(proj)
+			}
+		}
+	}()
+}
+
+// stopRetryWatcher 停掉 watcher 并等在跑的重试收尾（会等，别让文件写到一半）。
+func (r *Runner) stopRetryWatcher() {
+	if r.retryWatcherStop == nil {
+		return
+	}
+	close(r.retryWatcherStop)
+	r.retryWatcherStop = nil
+	r.retryWatcherWG.Wait()
+}
+
+// retryPrecondition 说明"现在能不能跑这条请求"。返回非空 = 还不能跑（请求留在
+// 队列里，下一个 tick 再看）。样式未就绪、产物还没有都属于这一类。
+func (r *Runner) retryPrecondition(proj, role, base string) string {
+	if !fileExists(filepath.Join(proj, "chapters", base+".md")) {
+		return "章节 markdown 还不存在"
+	}
+	// 继续跑的对象是已有的那条会话：没有转录就没什么可接着的。
+	if role == "continue" {
+		tr := filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")
+		hasTr := false
+		for n := 1; n <= 99; n++ {
+			if fileExists(attemptTranscriptPath(tr, n)) {
+				hasTr = true
+				break
+			}
+		}
+		if !hasTr {
+			return "这一章还没有转换转录"
+		}
+	}
+	if role == "checker" && !fileExists(filepath.Join(proj, "work", "chapters", base+".tex")) {
+		return "这一章还没有提交产物"
+	}
+	if role == "continue" && !fileExists(filepath.Join(proj, "work", "temp", "conv_"+base, "work")) {
+		return "这一章的工作区已经不在了"
+	}
+	if classNameOfFile(filepath.Join(proj, "style")) == "" {
+		return "样式还没就绪"
+	}
+	return ""
+}
+
+// dispatchRetries 扫一遍队列并派发（主流程与 watcher 共用一次实现）。
+// 返回本次派发的条数。
+func (r *Runner) dispatchRetries(proj string) int {
+	files := retryq.Pending(proj)
+	if len(files) == 0 {
+		return 0
+	}
+	started := 0
+	for _, f := range files {
+		base := strings.TrimSuffix(filepath.Base(f.Chapter), filepath.Ext(f.Chapter))
+		if base == "" || strings.Contains(base, "..") {
+			_ = retryq.Consume(f.Path)
+			continue
+		}
+		role := retryRoleOf(f.Request)
+		if role != "convert" && role != "checker" && role != "continue" {
+			r.log.LogWarning(0, "[retry]", base, "未知的请求角色，忽略:", role)
+			_ = retryq.Consume(f.Path)
+			continue
+		}
+		if !r.lockChapter(base) {
+			continue // 正在跑：留在队列里
+		}
+		if why := r.retryPrecondition(proj, role, base); why != "" {
+			r.unlockChapter(base)
+			// 前置条件没到：留队。只在有进展时才会重复扫到它，日志按章去重。
+			if !r.retryWarnOnce(f.Path, base+" "+why) {
+				r.log.LogInfo(0, "[retry]", base, "请求排队中："+why)
+			}
+			continue
+		}
+		if err := retryq.Consume(f.Path); err != nil {
+			r.unlockChapter(base)
+			r.log.LogWarning(0, "[retry]", base, "标记请求完成失败（下次会再处理一次）:", err)
+			continue
+		}
+		started++
+		req := f.Request
+		r.retryWatcherWG.Add(1)
+		go func(base string, req retryq.Request) {
+			defer r.retryWatcherWG.Done()
+			defer r.unlockChapter(base)
+			r.runRetryTask(proj, base, req)
+		}(base, req)
+	}
+	return started
+}
+
+// retryWarnOnce 让"排队中"这类提示每个请求文件只打一次。
+func (r *Runner) retryWarnOnce(key, msg string) bool {
+	r.busyMu.Lock()
+	defer r.busyMu.Unlock()
+	if r.retryWarned == nil {
+		r.retryWarned = map[string]bool{}
+	}
+	if r.retryWarned[key] {
+		return true
+	}
+	r.retryWarned[key] = true
+	return false
+}
+
+// runRetryTask 执行一条重试请求（已在章节锁里）。
+func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
+	role := retryRoleOf(req)
+	reason := strings.TrimSpace(req.Reason)
+	switch role {
+	case "convert":
+		r.forceChapterRetry(proj, base, reason)
+		if err := r.convertChapterNow(proj, base, ""); err != nil {
+			r.log.LogWarning(0, "[convert]", base, "手动重试失败:", err)
+		}
+	case "checker":
+		r.forceCheckerRetry(proj, base)
+		if _, issues := r.recheckChapter(proj, base, 0); issues != "" {
+			r.log.LogInfo(0, "[checker]", base, "重新核对的结论:", issues)
+		}
+	case "continue":
+		if err := r.continueChapter(proj, base, reason); err != nil {
+			r.log.LogWarning(0, "[convert]", base, "继续跑失败:", err)
+		}
+	}
+}
+
+// convertChapterNow 在运行期把一章转换跑掉（主流程之外的那条路）。
+func (r *Runner) convertChapterNow(proj, base, continueText string) error {
+	clsName := classNameOfFile(filepath.Join(proj, "style"))
+	if clsName == "" {
+		return fmt.Errorf("样式还没就绪（style 阶段未完成）")
+	}
+	chapPath := filepath.Join(proj, "chapters", base+".md")
+	if !fileExists(chapPath) {
+		return fmt.Errorf("章节不存在: %s", base)
+	}
+	if continueText != "" {
+		r.setContinueText(base, continueText)
+		defer r.setContinueText(base, "")
+	}
+	return r.convertOneChapter(proj, clsName, filepath.Join(proj, "style", "manual.md"), chapPath,
+		filepath.Join(proj, "work"), 1, 0, true)
+}
+
+// continueChapter 让这一章**接着上一次尝试干**（P2）：不新建尝试、不归档、
+// 不动已提交的产物，只是把一句"接着干"递进那条会话，让它自己把活收尾。
+//
+// 现场是这样的：会话因为厂商报错/上下文跑偏/被手动改过文件而停住，重启整个
+// 流程要重烧一整本的 token。这里给的是"接着这一条继续"。
+func (r *Runner) continueChapter(proj, base, reason string) error {
+	if reason == "" {
+		reason = "手动继续"
+	}
+	text := "The user asked you to continue this chapter manually: " + reason + "\n\n" + continueChapterPrompt
+	r.log.Log(0, "[convert]", base, "手动继续：接着最近一次尝试跑（不新建尝试）")
+	return r.convertChapterNow(proj, base, text)
+}
+
+// continueChapterPrompt 是"继续跑"递给会话的原话。
+const continueChapterPrompt = "Re-read your workspace as it is NOW (read_file), then finish the job: fix whatever is still wrong, compile until clean, and submit the two paths again. Do not restart from scratch and do not ignore work you already did."

@@ -235,6 +235,20 @@ type Runner struct {
 	retryCheckerAttempt map[string]int
 	// retryNotes 是重试原因（写进新尝试的转录，事后对得上）。
 	retryNotes map[string]string
+	// busyMu/chapterBusy 标记"这一章现在有会话在跑"（P2）：主流程的并发批与
+	// 运行期的重试派发共用它，同一章不会被跑两遍（派发发现忙就把请求留在
+	// 队列里，等下一次 tick）。
+	busyMu      sync.Mutex
+	chapterBusy map[string]*sync.Mutex
+	// continueText 是"继续跑"给会话的那句话（P2）：手动要求这一章接着干，
+	// 不新建尝试、不归档，只是把话递进去。
+	continueText map[string]string
+	// retryWatcher 是运行期消费 work/retry 队列的那条 goroutine（P2）：不等
+	// 阶段边界、也不用重启进程，排上就能进并发队列。
+	retryWatcherStop chan struct{}
+	retryWatcherWG   sync.WaitGroup
+	// retryWarned 让"请求还在排队"的提示每个请求文件只打一次。
+	retryWarned map[string]bool
 }
 
 // phaseNote returns a console printer for phase-level progress notes.

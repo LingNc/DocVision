@@ -212,6 +212,10 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// 只留这一行普通模式提示：被杀之后要看的文件到底在哪。采样行本身在
 	// 普通模式不显示（debug 日志与 mem.log 里全量都有）。
 	r.log.LogInfo(0, "[book] 内存/被杀现场日志:", memLogPath)
+	// P2：运行期就消费重试队列——样式/划分/转换/组装任何阶段都能收，不用等
+	// 阶段边界，也不用重启进程。派发要过章节锁，正在跑的章节不重复跑。
+	r.startRetryWatcher(proj)
+	defer r.stopRetryWatcher()
 	// 并发账目（T179）：三个池子的大小与模型级上限一次说清——用户调大
 	// concurrency 之后"为什么没有更快"通常就卡在模型级上限上。
 	r.logConcurrencyPlan()
@@ -924,6 +928,11 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 		go func(i int, chap string, tid int) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
+			// P2：主流程的并发批与运行期派发共用章节锁——排着重试的章节正在
+			// 这里跑时，派发端看到忙就把请求留在队列里，绝不跑两遍。
+			cbase := strings.TrimSuffix(filepath.Base(chap), filepath.Ext(chap))
+			release := r.holdChapter(cbase)
+			defer release()
 			err := r.convertOneChapter(proj, clsName, manualPath, chap, workDir, i, tid, false)
 			progMu.Lock()
 			done++
@@ -1025,6 +1034,8 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 			wg.Add(1)
 			go func(tid int, base string, n int) {
 				defer wg.Done()
+				release := r.holdChapter(base)
+				defer release()
 				r.recheckChapter(proj, base, tid)
 			}(i+1, base, n)
 		}
@@ -1436,7 +1447,9 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	}
 	node.TranscriptPath = attemptTranscriptPath(transcriptBase, node.AttemptNum)
 	texPath := filepath.Join(node.SubmitRoot, base+".tex")
-	if node.Depth == 0 && fileExists(filepath.Join(node.FinalSubmitRoot, base+".tex")) {
+	// P2：retry=true 是"人手动要求的"——产物在也要跑（继续跑尤其如此：它要的
+	// 就是把这条会话推下去）。普通流程仍按产物跳过。
+	if node.Depth == 0 && !retry && fileExists(filepath.Join(node.FinalSubmitRoot, base+".tex")) {
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")
 		// 产物已写出的章节不再需要会话转录。
 		r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
@@ -1588,6 +1601,13 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		// T29：历史以 tool 回执收尾就原样续行（不插内容、不重发任务提示）；
 		// 只有模型自己停了才发一句最小推动。
 		initial = resumeUserText(resumeMsgs, "The session was interrupted earlier. Continue from where you left off: read your last written .tex state (read_file), finish the conversion, compile until clean, then submit.")
+	}
+	// P2 继续跑：人手动把这条会话推下去。上一次即便已 submit（replay 会收账
+	// 并直接结束）也要真的再跑一轮——用户点它就是因为"结果不对、接着改"。
+	if cont := r.continueTextOf(base); cont != "" && node.Depth == 0 {
+		initial = resumeUserText(resumeMsgs, cont)
+		resumeSkip = false
+		_ = sess.AppendTranscriptNote("manual_continue", map[string]any{"attempt": node.AttemptNum})
 	}
 	if !resumeSkip && !splitTool.Requested {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})

@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"mineru-tools/internal/retryq"
 )
@@ -23,6 +25,10 @@ import (
 // 三道校验，任何一道不过都拒绝：① 项目名必须是扫描根下的真实目录（复用
 // resolveUnderRoot，杜绝 `..`）；② 章节名必须长得像 `chapter_002`
 // （`chapter_004_child_01` 也认）；③ 那个章节的 md 必须真的在磁盘上。
+//
+// 请求带角色（P53/P2）：convert = 重转这一章（新尝试）、checker = 只重新核对
+// 已提交产物、continue = 接着这一章最近一次尝试继续跑（不新建尝试）。
+// 运行期的消费者是 latex 里的 watcher，任何阶段都收，忙的章节留队。
 
 var chapterNameRe = regexp.MustCompile(`^chapter_[0-9]+(_child_[0-9]+)*$`)
 
@@ -87,9 +93,17 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 	if role == "" {
 		role = "convert"
 	}
-	if role != "convert" && role != "checker" {
-		http.Error(w, "角色只能是 convert 或 checker", http.StatusBadRequest)
+	if role != "convert" && role != "checker" && role != "continue" {
+		http.Error(w, "角色只能是 convert、checker 或 continue", http.StatusBadRequest)
 		return
+	}
+	// 继续跑的对象是**已有的那条会话**：没有转录就没什么可接着的。
+	if role == "continue" {
+		matches, _ := filepath.Glob(filepath.Join(projDir, "work", "sessions", "convert_"+base+"*.jsonl"))
+		if len(matches) == 0 {
+			http.Error(w, "这一章还没有转换记录，没法接着跑（先跑一次或重试转换）", http.StatusBadRequest)
+			return
+		}
 	}
 	// 重新核对的对象是**已提交的产物**：还没交过就没什么可核的，先重试转换。
 	if role == "checker" && !fileExistsIn(projDir, "work", "chapters", base+".tex") {
@@ -104,9 +118,12 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "写入重试队列失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	note := "已加入重试队列：正在跑的 docvision latex 会在转换阶段处理它；没在跑就留到下次启动"
+	note := "已加入重试队列：正在跑的 docvision latex 会把它排进并发槽位（任何阶段都收）；没在跑就留到下次启动"
 	if role == "checker" {
-		note = "已加入重新核对队列：只重跑核对会话，产物不动；正在跑的 latex 在转换阶段的安全点处理它"
+		note = "已加入重新核对队列：只重跑核对会话，产物不动；正在跑的 latex 会把它排进并发槽位"
+	}
+	if role == "continue" {
+		note = "已加入继续跑队列：接着这一章最近一次尝试干（不新建尝试、不归档），正在跑的 latex 会把它排进并发槽位"
 	}
 	writeJSON(w, map[string]any{
 		"ok": true, "chapter": base, "project": req.Project, "role": role,
@@ -202,4 +219,94 @@ func (v *viewerServer) retryRoles(sessions []SessionInfo) map[string]map[string]
 		return nil
 	}
 	return out
+}
+
+// /api/drop —— 删掉一条"转错的记录"（P2）。
+//
+// 历史里一条作废的尝试会一直挂在「历史 N」里；用户看到某条明显跑歪（模型跑
+// 飞了、上下文坏了）的记录时，希望能直接丢掉它，而不是永远留着。这里只做
+// **转录文件**的删除，且必须满足：
+//
+//	① 项目在扫描根下（复用 projectWorkspace）；
+//	② 文件就在这个项目的 work/sessions/ 里、扩展名 .jsonl（拒绝任何路径穿越）；
+//	③ 它现在**没有被写入**（mtime 超出现在 90 秒且没有 .partial 快照）——
+//	   正在跑的会话删转录会把它自己写坏。
+//
+// 带 .tryN 的转录连它的作废归档（work/attempts/<章>/try<N>/）一起删，因为那
+// 正是"这一轮的错误记录"。
+type dropRequest struct {
+	Project string `json:"project"`
+	Path    string `json:"path"`
+}
+
+var transcriptNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.jsonl$`)
+
+func (v *viewerServer) serveDrop(w http.ResponseWriter, r *http.Request) {
+	if !v.allowRetry {
+		http.Error(w, "写入口已关闭（docvision sessions 用 --no-retry 启动的）", http.StatusForbidden)
+		return
+	}
+	var req dropRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+		http.Error(w, "请求体不是合法 JSON", http.StatusBadRequest)
+		return
+	}
+	projDir, ok := v.projectWorkspace(req.Project)
+	if !ok {
+		http.Error(w, "项目不存在", http.StatusNotFound)
+		return
+	}
+	name := filepath.Base(strings.TrimSpace(req.Path))
+	if !transcriptNameRe.MatchString(name) {
+		http.Error(w, "只能删转录文件（*.jsonl）", http.StatusBadRequest)
+		return
+	}
+	full := filepath.Join(projDir, "work", "sessions", name)
+	st, err := os.Stat(full)
+	if err != nil || !st.Mode().IsRegular() {
+		http.Error(w, "转录不存在: "+name, http.StatusNotFound)
+		return
+	}
+	if time.Since(st.ModTime()) < 90*time.Second || fileExistsIn(projDir, "work", "sessions", name+".partial") {
+		http.Error(w, "这条会话可能还在写（90 秒内有更新），等它停下来再删", http.StatusConflict)
+		return
+	}
+	if err := os.Remove(full); err != nil {
+		http.Error(w, "删除失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// 作废尝试的归档一并清掉：它和这条转录是同一次尝试的两半。
+	removedArchive := ""
+	if base, attempt, ok := attemptFromTranscriptName(name); ok {
+		dir := filepath.Join(projDir, "work", "attempts", base, "try"+strconv.Itoa(attempt))
+		if _, err := os.Stat(dir); err == nil {
+			if err := os.RemoveAll(dir); err == nil {
+				removedArchive = filepath.ToSlash(filepath.Join("work", "attempts", base, "try"+strconv.Itoa(attempt)))
+			}
+		}
+	}
+	writeJSON(w, map[string]any{
+		"ok": true, "deleted": name, "archive": removedArchive,
+		"note": "记录已删除（证据目录 work/attempts 里的同一次尝试也一起删了）",
+	})
+}
+
+// attemptFromTranscriptName 从 convert_chapter_002.try3.jsonl 反推章节与尝试号。
+func attemptFromTranscriptName(name string) (string, int, bool) {
+	stem := strings.TrimSuffix(name, ".jsonl")
+	idx := strings.LastIndex(stem, ".try")
+	if idx < 0 {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(stem[idx+len(".try"):])
+	if err != nil || n < 1 {
+		return "", 0, false
+	}
+	base := stem[:idx]
+	for _, prefix := range []string{"convert_", "checker_"} {
+		if strings.HasPrefix(base, prefix) {
+			return strings.TrimPrefix(base, prefix), n, true
+		}
+	}
+	return "", 0, false
 }

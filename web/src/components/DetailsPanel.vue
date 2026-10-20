@@ -10,7 +10,7 @@ import InlineMD from './InlineMD.vue'
 import MachineText from './MachineText.vue'
 import MdBody from './MdBody.vue'
 import CopyBtn from './CopyBtn.vue'
-import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
+import { chapterPendingRetry, dropSession, refreshIndex, requestChapterRetry } from '../data'
 import ImageStrip from './ImageStrip.vue'
 
 const kvRows = computed(() => sessionKVRows())
@@ -51,6 +51,48 @@ const retryPending = computed(() => {
   return !!t && chapterPendingRetry(t.project, t.chapter, t.role)
 })
 const retryIsChecker = computed(() => !!retryTarget.value && retryTarget.value.role === 'checker')
+/* 继续跑：接着这一章最近一次尝试干（不新建尝试、不归档），用于"会话跑歪了/
+   报错了、我先手动改了点东西，想让它从这儿接着收尾"。 */
+const canContinue = computed(() => !!retryTarget.value && retryTarget.value.role === 'convert')
+const continuePending = computed(() => {
+  const t = retryTarget.value
+  return !!t && chapterPendingRetry(t.project, t.chapter, 'continue')
+})
+/* 删除这条记录：给"转错的那些尝试"一个出口。只在看的是某一条具体的章节会话、
+   且它不正在写入时才给按钮（服务端还会再查一次）。 */
+const canDrop = computed(() => {
+  const s: any = state.current
+  if (!s || state.staticMode || !s.project || !s.path) return false
+  if (!s.chapterId) return false
+  return !s.live
+})
+function doDrop(): void {
+  const s: any = state.current
+  if (!s || !canDrop.value) return
+  if (!window.confirm('删掉这条记录？转录会从「历史」里消失，作废尝试的归档目录也会一起删。')) return
+  state.retryNote = '正在删除 ' + s.name + '…'
+  dropSession(String(s.project), String(s.path))
+    .then((res: any) => {
+      state.retryNote = '已删除 ' + s.name + ((res && res.archive) ? '（含 ' + res.archive + '）' : '')
+    })
+    .catch((err: any) => {
+      state.retryNote = '删除失败：' + ((err && err.message) || err)
+    })
+}
+
+function doContinue(): void {
+  const t = retryTarget.value
+  if (!t) return
+  state.retryNote = '正在提交 ' + t.chapter + ' 的继续跑请求…'
+  requestChapterRetry(t.project, t.chapter, 'continue', '详情栏继续跑')
+    .then((res: any) => {
+      state.retryNote = t.chapter + ' 继续跑请求已排队（' + ((res && res.note) || '等待并发槽位') + '）'
+      return refreshIndex()
+    })
+    .catch((err: any) => {
+      state.retryNote = t.chapter + ' 继续跑请求失败：' + ((err && err.message) || err)
+    })
+}
 const retryButtonText = computed(() => {
   const t = retryTarget.value
   if (!t) return ''
@@ -151,6 +193,21 @@ function closeTrajStep() {
         <button class="retry-btn" type="button" :disabled="retryPending" @click="doRetry">
           {{ retryButtonText }}
         </button>
+        <button
+          v-if="canDrop"
+          class="retry-btn retry-btn-danger"
+          type="button"
+          title="删掉这条转录（作废尝试的 work/attempts 归档一并删除）；正在写入的会话不给删"
+          @click="doDrop"
+        >删除这条记录</button>
+        <button
+          v-if="canContinue"
+          class="retry-btn retry-btn-quiet"
+          type="button"
+          :disabled="continuePending"
+          title="接着这一章最近一次尝试继续跑：不新建尝试、不归档旧产物，把一句「接着干」递进那条会话"
+          @click="doContinue"
+        >{{ continuePending ? '已在继续跑队列' : '继续跑（不新建尝试）' }}</button>
         <div v-if="state.retryNote" class="retry-note">{{ state.retryNote }}</div>
       </section>
 
@@ -413,6 +470,26 @@ function closeTrajStep() {
  font-size: 12.5px; line-height: 20px; color: var(--muted); 
 }
 .retry-hint { color: var(--muted, #6e7781); font-size: 12px; line-height: 18px; margin-bottom: 8px; }
+.retry-btn-danger {
+  margin-top: 6px;
+  background: transparent;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+.retry-btn-danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #ef4444;
+}
+.retry-btn-quiet {
+  margin-top: 6px;
+  background: transparent;
+  color: var(--text-dim, #6b7280);
+  border-color: var(--border, #d4d4d8);
+}
+.retry-btn-quiet:hover:not(:disabled) {
+  color: var(--text, #111827);
+  border-color: var(--text-dim, #6b7280);
+}
 .retry-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border, #d0d7de); border-radius: 6px; background: var(--bg, #fff); cursor: pointer; }
 .retry-btn:hover:not(:disabled) { background: var(--hover, #f3f4f6); }
 .retry-btn:disabled { opacity: .6; cursor: default; }

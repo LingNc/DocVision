@@ -228,3 +228,90 @@ func TestRecheckWithoutProduct(t *testing.T) {
 		t.Fatalf("recheckChapter = (%v, %q)", ok, issues)
 	}
 }
+
+// P2：章节锁——忙的章节不消费请求（留在队列里等下一次 tick），拿锁是非阻塞的，
+// 主流程那边是阻塞拿锁，所以同一章永远不会被跑两遍。
+func TestChapterLockAndBusyDispatch(t *testing.T) {
+	proj := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(proj, "chapters"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "chapters", "chapter_002.md"), []byte("# 章\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := retryq.Queue(proj, retryq.Request{Chapter: "chapter_002", Role: "convert"}); err != nil {
+		t.Fatal(err)
+	}
+	r := testRunner(t, true)
+	release := r.holdChapter("chapter_002")
+	if r.lockChapter("chapter_002") {
+		t.Fatal("已持锁时 TryLock 应失败")
+	}
+	if n := r.dispatchRetries(proj); n != 0 {
+		t.Fatalf("忙的章节不应派发, started = %d", n)
+	}
+	if pending := retryq.Pending(proj); len(pending) != 1 {
+		t.Fatalf("请求应留在队列里, pending = %d", len(pending))
+	}
+	release()
+	if !r.lockChapter("chapter_002") {
+		t.Fatal("释放后应能拿到锁")
+	}
+	r.unlockChapter("chapter_002")
+}
+
+// 前置条件：样式没就绪、没有产物、没有转录分别给出说明（请求留队而不是被吃掉）。
+func TestRetryPrecondition(t *testing.T) {
+	proj := t.TempDir()
+	for _, d := range []string{
+		filepath.Join(proj, "chapters"), filepath.Join(proj, "style"),
+		filepath.Join(proj, "work", "sessions"), filepath.Join(proj, "work", "chapters"),
+		filepath.Join(proj, "work", "temp", "conv_chapter_002", "work"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(proj, "chapters", "chapter_002.md"), []byte("# 章\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := testRunner(t, true)
+	if why := r.retryPrecondition(proj, "convert", "chapter_002"); !strings.Contains(why, "样式") {
+		t.Fatalf("没有 cls 时应说样式未就绪, got %q", why)
+	}
+	// 补一个 cls（内容不重要，只要能被 classNameOfFile 认出来）
+	if err := os.WriteFile(filepath.Join(proj, "style", "book.cls"), []byte("\\ProvidesClass{book}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if why := r.retryPrecondition(proj, "checker", "chapter_002"); !strings.Contains(why, "产物") {
+		t.Fatalf("没有 .tex 时重新核对应说没产物, got %q", why)
+	}
+	if why := r.retryPrecondition(proj, "continue", "chapter_002"); !strings.Contains(why, "转录") {
+		t.Fatalf("没有转录时继续跑应说没记录, got %q", why)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "work", "sessions", "convert_chapter_002.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if why := r.retryPrecondition(proj, "continue", "chapter_002"); why != "" {
+		t.Fatalf("有转录与工作区时应放行, got %q", why)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "work", "chapters", "chapter_002.tex"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if why := r.retryPrecondition(proj, "checker", "chapter_002"); why != "" {
+		t.Fatalf("有产物时重新核对应放行, got %q", why)
+	}
+}
+
+// 继续跑的提示只对下一次转换有效，跑完必须清掉，免得普通运行也当成手动继续。
+func TestContinueTextScoped(t *testing.T) {
+	r := testRunner(t, true)
+	r.setContinueText("chapter_002", "接着干")
+	if got := r.continueTextOf("chapter_002"); got != "接着干" {
+		t.Fatalf("continueTextOf = %q", got)
+	}
+	r.setContinueText("chapter_002", "")
+	if got := r.continueTextOf("chapter_002"); got != "" {
+		t.Fatalf("清空后 = %q", got)
+	}
+}
