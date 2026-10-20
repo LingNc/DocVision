@@ -12044,7 +12044,7 @@
         if (!s || !canCutFrom.value || !row.jump) return;
         const vector = isVectorSession.value;
         const checker = isCheckerSession.value;
-        const ask = vector ? "从第 " + row.jump + " 条记录之后继续？\n\n历史会截到这一条（完整旧转录留档成 .tryN，仍看得到），重新只画这一张；类别与分组不变。画完要看到新图，下游阶段需要重跑。" : checker ? "从第 " + row.jump + " 条记录之后继续核对？\n\n后面的轮次会从这条核对会话的历史里丢掉（源转录仍保留在「历史」里），并开一条新的核对尝试；已提交的产物一个字不动。" : "从第 " + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试；工作区会一起退回这一刻。';
+        const ask = vector ? "从第 " + row.jump + " 条记录之后继续？\n\n历史会截到这一条（完整旧转录留档成 .tryN，仍看得到），重新只画这一张；类别与分组不变。画完要看到新图，下游阶段需要重跑。" : checker ? "从第 " + row.jump + " 条记录之后继续核对？\n\n后面的轮次会从这条核对会话的历史里丢掉（源转录仍保留在「历史」里），并开一条新的核对尝试；已提交的产物一个字不动。" : "从第 " + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试；有工作区快照时会连工作区一起退回这一刻（老会话没有快照则只退对话，工作区里后来的改动会保留）。';
         if (!window.confirm(ask)) return;
         state.retryNote = "正在提交从第 " + row.jump + " 条记录继续的请求…";
         requestChapterRetry(
@@ -12201,7 +12201,7 @@
       };
     }
   });
-  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-91eefa5e"]]);
+  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-d07c4a57"]]);
   function currentEstimate() {
     const id = state.current ? state.current.id : "";
     const list = state.sessions || [];

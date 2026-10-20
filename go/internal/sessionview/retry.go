@@ -172,7 +172,12 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续核对——历史只保留到这一行，开一条新的核对尝试，产物不动、源转录保留", req.From)
 	}
 	if role == "continue" && req.From > 0 {
-		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续——会开一个新尝试，历史只保留到这一行，源转录保留", req.From)
+		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续——会开一个新尝试，历史只保留到这一行，源转录保留；工作区会一起退回那一刻", req.From)
+		// 老版本产生的会话没有工作区快照（P55 之后才有）：退不了就明说，
+		// 别让人以为文件也跟着回去了——这时行为与旧版一致（只退对话）。
+		if !workspaceSnapshotCovers(projDir, base, srcName, req.From) {
+			note += fmt.Sprintf("。⚠ 这条会话第 %d 行之前没有工作区快照（老版本/没有 git），只会回退对话——工作区里后来改动的内容会保留；要连文件一起干净重来请用「重试这一章」", req.From)
+		}
 	} else if role == "continue" {
 		note = "已加入继续跑队列：接着这一章最近一次尝试干（不新建尝试、不归档），正在跑的 latex 会把它排进并发槽位"
 	}
@@ -180,6 +185,41 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "chapter": base, "project": req.Project, "role": role,
 		"queued": filepath.Base(path), "note": note,
 	})
+}
+
+// workspaceSnapshotCovers 判断"第 from 行那一刻"有没有工作区快照（P55）：
+// 读这一章对应尝试的 journal，取 Line ≤ from 的最大值。老会话没有这个文件，
+// 直接 false——页面据此提示"只会回退对话"。
+func workspaceSnapshotCovers(projDir, base, srcName string, from int) bool {
+	if from < 1 {
+		return false
+	}
+	attempt := 1
+	if _, n, ok := attemptFromTranscriptName(srcName); ok && n > 0 {
+		attempt = n
+	}
+	path := filepath.Join(projDir, "work", "rounds", base, fmt.Sprintf("journal-try%d.jsonl", attempt))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	best := 0
+	for _, ln := range strings.Split(string(data), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		var e struct {
+			Line int `json:"line"`
+		}
+		if err := json.Unmarshal([]byte(ln), &e); err != nil {
+			continue
+		}
+		if e.Line >= 1 && e.Line <= from && e.Line > best {
+			best = e.Line
+		}
+	}
+	return best > 0
 }
 
 // fileExistsIn 在项目目录下按段拼路径并确认是普通文件。

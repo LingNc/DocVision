@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -337,5 +338,44 @@ func TestPostRetryCheckerFromRecord(t *testing.T) {
 	if len(pending) != 1 || pending[0].Role != "checker" || pending[0].From != 2 ||
 		pending[0].Request.Path != "checker_chapter_002.try2.jsonl" {
 		t.Fatalf("队列 = %+v", pending)
+	}
+}
+
+// P55 的兼容提示：老版本产生的会话没有工作区快照，排队回执里必须说清"只会
+// 回退对话"，别让人以为文件也跟着回去了；有快照时不带这句。
+func TestPostRetryFromRecordSnapshotNote(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	sess := filepath.Join(proj, "work", "sessions")
+	if err := os.MkdirAll(sess, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "{\"t\":\"msg\"}\n{\"t\":\"msg\"}\n{\"t\":\"msg\"}\n"
+	if err := os.WriteFile(filepath.Join(sess, "convert_chapter_002.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"continue","from":2,"path":"convert_chapter_002.jsonl"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "没有工作区快照") {
+		t.Fatalf("老会话的回执该提示只回退对话: %s", rec.Body.String())
+	}
+	// 补一条覆盖第 2 行的快照 journal → 不再提示。
+	rounds := filepath.Join(proj, "work", "rounds", "chapter_002")
+	if err := os.MkdirAll(rounds, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rounds, "journal-try1.jsonl"), []byte("{\"line\":2,\"sha\":\"abc123\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec = postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"continue","from":2,"path":"convert_chapter_002.jsonl"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "没有工作区快照") {
+		t.Fatalf("有快照时不该提示: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "工作区会一起退回那一刻") {
+		t.Fatalf("回执该说明工作区一起退: %s", rec.Body.String())
 	}
 }

@@ -3,6 +3,7 @@ package latex
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -233,15 +234,32 @@ func (r *Runner) rollbackChapterWork(proj, base, srcName string, line int) (int,
 	if _, n, ok := transcriptAttempt(srcName); ok && n > 0 {
 		attempt = n
 	}
+	// 先只读 journal：老版本产生的会话根本没有这个文件，这时连仓库都不该
+	// 建出来（快照是 P55 之后才有的），直接降级成"只回退对话"。
 	work := filepath.Join(proj, "work", "temp", "conv_"+base, "work")
+	journal := filepath.Join(proj, "work", "rounds", base, fmt.Sprintf("journal-try%d.jsonl", attempt))
+	entries := loadRoundEntries(journal)
+	if len(entries) == 0 {
+		r.log.LogWarning(0, "[snapshot]", base,
+			"这条会话没有工作区快照（老版本 / 宿主没有 git / 递归子章节），只回退对话——工作区保持最后一次的样子")
+		return 0, false
+	}
 	log := r.openRoundLog(proj, base, work, attempt)
 	if log == nil {
 		return 0, false
 	}
+	if len(log.entries) == 0 {
+		log.entries = entries
+		for _, x := range entries {
+			if x.Line > log.last {
+				log.last = x.Line
+			}
+		}
+	}
 	e, ok := log.pickEntry(line)
 	if !ok {
 		r.log.LogWarning(0, "[snapshot]", base,
-			"这条转录在第 "+strconv.Itoa(line)+" 行之前没有工作区快照（老会话？），只回退对话")
+			"这条转录在第 "+strconv.Itoa(line)+" 行之前没有工作区快照，只回退对话——工作区保持最后一次的样子")
 		return 0, false
 	}
 	if _, err := log.git("reset", "--hard", "--quiet", e.SHA); err != nil {

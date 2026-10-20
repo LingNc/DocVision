@@ -119,3 +119,39 @@ func TestTranscriptAttemptParse(t *testing.T) {
 		}
 	}
 }
+
+// 没有快照的老会话（P55 之前产生的）：只退对话，工作区与**已提交的产物**都
+// 不动，也不该为此凭空建一个空仓库。
+func TestApplyWorkspaceCutWithoutSnapshotKeepsProducts(t *testing.T) {
+	proj := t.TempDir()
+	base := "chapter_004"
+	chapters := filepath.Join(proj, "work", "chapters")
+	if err := os.MkdirAll(chapters, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tex := filepath.Join(chapters, base+".tex")
+	if err := os.WriteFile(tex, []byte("%% kept\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	work := filepath.Join(proj, "work", "temp", "conv_"+base, "work")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "scratch.tex"), []byte("later edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := newRoundTestRunner(t)
+	rolled, ok := r.applyWorkspaceCut(proj, base, "convert_"+base+".jsonl", 7)
+	if ok || rolled != 0 {
+		t.Fatalf("没有快照时不该声称回退: %d / %v", rolled, ok)
+	}
+	if _, err := os.Stat(tex); err != nil {
+		t.Fatalf("已提交的产物不该被挪走: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(work, "scratch.tex")); string(got) != "later edit\n" {
+		t.Fatalf("工作区不该被动: %q", string(got))
+	}
+	if _, err := os.Stat(filepath.Join(proj, "work", "rounds", base)); err == nil {
+		t.Fatal("老会话不该被建出一个空快照仓库")
+	}
+}

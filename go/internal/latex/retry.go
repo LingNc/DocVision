@@ -702,21 +702,32 @@ func (r *Runner) continueFromChapter(proj, base, srcName string, from int) error
 	if err != nil {
 		return err
 	}
-	rolled, ok := r.rollbackChapterWork(proj, base, srcName, from)
-	archiveChapterProducts(r, proj, base, srcName)
+	rolled, ok := r.applyWorkspaceCut(proj, base, srcName, from)
 	if r.retryAttempt == nil {
 		r.retryAttempt = map[string]int{}
 	}
 	r.retryAttempt[base] = next
 	r.setContinueFlag(base)
 	defer r.setContinueFlag(base)
-	note := "（源转录保留；不发 user 内容，历史原样续行）"
+	note := "（源转录保留；这条会话没有工作区快照，只回退对话、工作区保持最后一次的样子；不发 user 内容）"
 	if ok {
 		note = fmt.Sprintf("（源转录保留；工作区回退到第 %d 行；不发 user 内容）", rolled)
 	}
 	r.log.Log(0, "[convert]", base, "从第", strconv.Itoa(from), "条记录继续：新尝试写",
 		filepath.Base(dst), note)
 	return r.convertChapterNow(proj, base)
+}
+
+// applyWorkspaceCut 把工作区退到第 from 行那一刻（P55），返回退到的行号与是否
+// 真退了。真退了才挪走已提交的产物——退不了还挪走 `.tex`，就成了"工作区留着
+// 后来的改动、产物却没了"的半新半旧状态，比不回退更让人困惑；退不了时行为与
+// P55 之前完全一致（只退对话、工作区与产物都不动）。
+func (r *Runner) applyWorkspaceCut(proj, base, srcName string, from int) (int, bool) {
+	rolled, ok := r.rollbackChapterWork(proj, base, srcName, from)
+	if ok {
+		archiveChapterProducts(r, proj, base, srcName)
+	}
+	return rolled, ok
 }
 
 // archiveChapterProducts 把这一章已提交的产物与报告挪进 work/attempts/<章>/
