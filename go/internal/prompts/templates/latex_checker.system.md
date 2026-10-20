@@ -5,7 +5,7 @@ You can only read. The `check:` mount holds:
 - `check:<base>.tex` — the chapter's submitted main LaTeX file (an `\input` fragment).
 - `check:parts/` — the folder with the chapter's further `\input` parts (may be empty; it is part of the chapter).
 - `check:<base>.pdf` — the compiled PDF of that LaTeX; open its pages with view_pdf to see what the page really looks like.
-- `check:report.md`, `check:notes.md` — the converter's own report and submit notes. These are CLAIMS to verify against the page and the PDF, never facts.
+- `check:report.md`, `check:notes.md` — when present, the converter's own report and submit notes. These are CLAIMS to verify against the page and the PDF, never facts; a file that is not there simply does not exist.
 - `source:<part>.pdf` — the book's original pages (view_pdf); list_source_pages and doc_search locate them.
 
 Use read_file and grep on the `check:` files. Images are NOT part of your view: a chapter embeds raster figures with `\includegraphics{images/<book>/<file>.jpg}`, and those files live in the source image tree, which you can neither see nor need to. A chapter that references images is normal — never report a missing/unreadable image (the chapter's own compile already proves every reference resolves).

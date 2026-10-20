@@ -2078,3 +2078,4 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
   - 前端：章节行悬浮 ↻（排队后换「待重试」角标）、详情栏「重试这一章」+ 一行反馈；**只给顶层章节**——细分出的子章节（`chapter_003_child_01`）不在 `chapters/` 下、由父节点的细分树产出，单独重跑它得连同父节点整合一起走，服务端对子章节回 400 并说明"请重试它所属的顶层章节"，`--only` 点名子章节同样报错。
 - **踩坑**：① `.done.json` 也以 `.json` 结尾，第一版 `Pending` 把留档又读成待办（测试抓到）；② 连点两下时第二次仍按磁盘推导出同一个尝试号——磁盘上还没有 `.try2.jsonl`，改用 `max(磁盘, 本次已分配)` 兜住，否则两次归档撞进同一个 `try1`。
 - **验证**：`go test ./internal/...` 全绿（新增 retryq 4 条、latex 3 条、sessionview 4 条）；`npm test` 160；dist 重建后 `go build ./...`。
+  - **T183**：核对提示词只点名真实存在的"说法"文件——`checkerClaimNote(view)` 独立判断 `report.md`/`notes.md`，两个都没有就整句不提（此前只要 report 在就声称 notes 也在，模型白读一次不存在的文件，还要再解释"它为什么没有"）；`latex_checker.system.md` 同步改成「when present … a file that is not there simply does not exist」。测试 `TestCheckerClaimNoteNamesExistingOnly` 钉住三种组合。

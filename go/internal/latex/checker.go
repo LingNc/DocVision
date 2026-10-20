@@ -90,9 +90,7 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 	if r.pdfView != nil && r.pdfView.total > 0 {
 		userText += "\n\nThe book's original pages are readable as source:<part>.pdf (view_pdf), and list_source_pages / doc_search locate them. When the markdown is unreadable, or the .tex follows the page rather than the markdown text, judge against the page."
 	}
-	if fileExists(filepath.Join(view, "report.md")) || fileExists(filepath.Join(view, "notes.md")) {
-		userText += "\n\ncheck:report.md (the converter's own report) and check:notes.md (its submit notes) are CLAIMS to verify against the page and this PDF — never facts."
-	}
+	userText += checkerClaimNote(view)
 	if r.cfg.Latex.RemoveWatermark {
 		userText += "\n\nWatermark note: if watermark-like content (institution marks, faint background text) is absent from the .tex, that is CORRECT — watermark removal is enabled. Do not report it as missing content."
 	}
@@ -279,4 +277,21 @@ func ensureCheckerViewAt(dir, base, chapPath, texPath, partsPath string) string 
 		return ""
 	}
 	return dir
+}
+
+// checkerClaimNote 只点名真实存在的"说法"文件（T183）：以前只要 report.md 在就
+// 顺带说 check:notes.md 也在，模型照着去读、白花一次工具调用（读不到还要再想
+// 一遍"这个文件为什么没有"）。
+func checkerClaimNote(view string) string {
+	var claims []string
+	if fileExists(filepath.Join(view, "report.md")) {
+		claims = append(claims, "check:report.md (the converter's own report)")
+	}
+	if fileExists(filepath.Join(view, "notes.md")) {
+		claims = append(claims, "check:notes.md (its submit notes)")
+	}
+	if len(claims) == 0 {
+		return ""
+	}
+	return "\n\n" + strings.Join(claims, " and ") + " — CLAIMS to verify against the page and this PDF, never facts."
 }

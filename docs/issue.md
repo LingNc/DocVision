@@ -1107,3 +1107,7 @@ user 轮
   改：归档时连同 `report.md` 一起挪进 try 目录（`<章>.report.md`），报告与 `.tex`/分片/`work`/`result`/`integrated-stage` 一致地按尝试留档。
   影响面：所有会开新尝试的路径（checker 轮次用尽主动作废、`--only` / 网页重试），旧的 try 目录里从此有 `report.md`，新报告不再覆盖上一份。
   验证：`retry_test.go` 断言 `work/attempts/<章>/try1/<章>.report.md` 存在；`go test ./internal/latex/` 绿。
+[X][ ] T183. 核对会话的首次用户提示词里，只要 `work/views/checker_<章>/report.md` 在，就顺带写「`check:report.md` 和 `check:notes.md` 都是转换会话的说法」——可 `notes.md` 只在转换会话 submit 带了 notes 时才存在。于是核对会话按提示去读一个不存在的文件，白花一次工具调用，然后要么在报告里写"notes 缺失"、要么干脆重新推断。
+  改：`checkerClaimNote(view)` 只点名**真实存在**的那些（`report.md` / `notes.md` 各自独立判断），两个都没有就整句不提；`latex_checker.system.md` 里那行同步改成「when present … a file that is not there simply does not exist」。
+  影响面：所有章节核对会话（含 `--only` 重核与网页「重新核对」）。提示词里仍然保留两个文件名（`MustMention` 不变），只是不再声称它们一定在。
+  验证：新增 `TestCheckerClaimNoteNamesExistingOnly`（都没有 → 空；只有 report → 不提 notes；都在 → 都点名）；`go test ./internal/latex/ ./internal/prompts/` 绿。
