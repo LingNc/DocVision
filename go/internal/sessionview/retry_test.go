@@ -3,6 +3,7 @@ package sessionview
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -285,6 +286,11 @@ func TestPostRetryVectorRole(t *testing.T) {
 	pending := retryq.Pending(proj)
 	if len(pending) != 1 || pending[0].Role != "vector" || pending[0].Chapter != "" {
 		t.Fatalf("队列 = %+v", pending)
+	}
+	// 从某条记录之后继续：行号越界服务端就拒（别排进队列白排）。
+	body3 := `{"project":"书A","role":"vector","from":%d,"path":"vector_book__pic001__label.jsonl"}`
+	if rec := postRetry(t, v, fmt.Sprintf(body3, 99)); rec.Code != http.StatusBadRequest {
+		t.Fatalf("越界应 400, status = %d", rec.Code)
 	}
 	// 没有章节的请求不该挂到章节角标上。
 	if got := v.pendingRetries([]SessionInfo{{Project: "书A"}}); len(got) != 0 {

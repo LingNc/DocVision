@@ -387,19 +387,35 @@ func (v *viewerServer) serveVectorRetry(w http.ResponseWriter, req retryRequest)
 		http.Error(w, "这个项目还没有逐图进度（images 阶段没跑过），没法重画", http.StatusBadRequest)
 		return
 	}
+	// 从某条记录之后继续：先确认行号真的落在这条转录里（worker 还会再查一次）。
+	if req.From > 0 {
+		lines, err := countTranscriptLines(filepath.Join(projDir, "source", "sessions", name))
+		if err != nil {
+			http.Error(w, "读不到这条作图转录: "+name, http.StatusNotFound)
+			return
+		}
+		if req.From > lines {
+			http.Error(w, fmt.Sprintf("第 %d 条记录超出范围（这条转录只有 %d 行）", req.From, lines), http.StatusBadRequest)
+			return
+		}
+	}
 	path, err := retryq.Queue(projDir, retryq.Request{
 		Project: req.Project, Role: "vector",
-		Reason: strings.TrimSpace(req.Reason), Source: "web", Path: name,
+		Reason: strings.TrimSpace(req.Reason), Source: "web", Path: name, From: req.From,
 	})
 	if err != nil {
 		http.Error(w, "写入重试队列失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	note := "已排队重画这张图：会开一条新的作图尝试（旧转录留档成 .tryN），" +
+		"类别与分组不变；画完要看到新图，样式/划分/转换/组装需要重跑"
+	if req.From > 0 {
+		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续——历史截到这一条，完整旧转录留档成 .tryN；"+
+			"类别与分组不变，画完要看到新图，下游阶段需要重跑", req.From)
+	}
 	writeJSON(w, map[string]any{
 		"ok": true, "project": req.Project, "role": "vector", "image": name,
-		"queued": filepath.Base(path),
-		"note": "已排队重画这张图：会开一条新的作图尝试（旧转录留档成 .tryN），" +
-			"类别与分组不变；画完要看到新图，样式/划分/转换/组装需要重跑",
+		"queued": filepath.Base(path), "from": req.From, "note": note,
 	})
 }
 

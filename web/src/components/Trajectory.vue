@@ -71,9 +71,15 @@ function selectRow(row: any) {
 
 /* 「从这一条之后继续」（P2）：把历史截到这条消息，后面的轮次丢掉，开一个新
    尝试接着干。只在看某章的转换会话、且它不正在写入时给这个动作。 */
+// 从某条记录之后继续：章节转换会话，或「矢量图」的作图会话（P53 后续）。
+const isVectorSession = computed(() => {
+  const s: any = state.current
+  return !!s && s.stage === 'vector' && String(s.name || '').indexOf('vector_') === 0
+})
 const canCutFrom = computed(() => {
   const s: any = state.current
   if (!s || state.staticMode || s.live) return false
+  if (isVectorSession.value) return !!s.project
   if (!s.project || !s.chapterId || s.chapterRole !== 'convert') return false
   return String(s.chapterId).indexOf('_child_') < 0
 })
@@ -81,13 +87,19 @@ const canCutFrom = computed(() => {
 function cutFrom(row: any) {
   const s: any = state.current
   if (!s || !canCutFrom.value || !row.jump) return
-  if (!window.confirm('从第 ' + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试。'))
-    return
+  const vector = isVectorSession.value
+  const ask = vector
+    ? '从第 ' + row.jump + ' 条记录之后继续？\n\n历史会截到这一条（完整旧转录留档成 .tryN，仍看得到），重新只画这一张；类别与分组不变。画完要看到新图，下游阶段需要重跑。'
+    : '从第 ' + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试。'
+  if (!window.confirm(ask)) return
   state.retryNote = '正在提交从第 ' + row.jump + ' 条记录继续的请求…'
-  requestChapterRetry(String(s.project), String(s.chapterId), 'continue', '轨迹回滚到 #' + row.jump, {
-    from: Number(row.jump),
-    path: String(s.name || ''),
-  })
+  requestChapterRetry(
+    String(s.project),
+    vector ? '' : String(s.chapterId),
+    vector ? 'vector' : 'continue',
+    '轨迹回滚到 #' + row.jump,
+    { from: Number(row.jump), path: String(s.name || '') },
+  )
     .then((res: any) => {
       state.retryNote = '已排队：从第 ' + row.jump + ' 条记录之后继续（' + ((res && res.note) || '等待并发槽位') + '）'
       return refreshIndex()

@@ -92,6 +92,9 @@ type FigureEnv struct {
 	ViewImageMax  int
 	ViewPDFMax    int
 	ViewWarnRatio float64
+	// ResumeNote 覆盖作图会话续跑时那句默认说明（P53「从某条记录之后继续」：
+	// 历史被截断，得说清后面的轮次不算数）。空 = 用默认那句。
+	ResumeNote string
 	// CheckFigure verifies the submitted render against the original bitmap
 	// (latex.figure_check.enabled). It receives the path of a freshly
 	// rasterised PNG of the submitted figure and returns (ok, problems);
@@ -259,6 +262,9 @@ type Runner struct {
 	// imagesSrcDir 是本次运行 images 阶段扫的原始 md 目录（重画一张图时要
 	// 回到同一份原始 md 重扫，不能用已经被重写过的项目 md）。
 	imagesSrcDir string
+	// vectorResumeNote 覆盖作图会话续跑时那句话（P53：从某条记录之后继续——
+	// 历史被截断，得说明"后面的轮次不算数了"）。只在持 vectorMu 时设置。
+	vectorResumeNote string
 }
 
 // phaseNote returns a console printer for phase-level progress notes.
@@ -1272,7 +1278,8 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	dstPNG := filepath.Join(outDir, "figures", name+".png")
 
 	env := FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown, OutputLang: r.outputLang(),
-		CurrentImgAbs: imgFile, ViewImageMax: r.cfg.ViewImageMax(), ViewPDFMax: r.cfg.ViewPDFMax(), ViewWarnRatio: r.cfg.ViewWarnRatio()}
+		CurrentImgAbs: imgFile, ViewImageMax: r.cfg.ViewImageMax(), ViewPDFMax: r.cfg.ViewPDFMax(), ViewWarnRatio: r.cfg.ViewWarnRatio(),
+		ResumeNote: r.vectorResumeNote}
 	if r.cfg.Latex.FigureCheck.Enabled {
 		// 逐图校验（默认关闭）：原图 ↔ 重画图比对交给视觉模型，不一致的问题
 		// 打回**同一个**作图会话修正，最多 MaxRounds 轮。

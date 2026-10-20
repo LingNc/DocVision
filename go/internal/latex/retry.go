@@ -480,7 +480,7 @@ func (r *Runner) dispatchRetries(proj string) int {
 			go func(req retryq.Request) {
 				defer r.retryWatcherWG.Done()
 				defer r.vectorMu.Unlock()
-				if err := r.redrawVectorImage(proj, req.Path, req.Reason); err != nil {
+				if err := r.redrawVectorImage(proj, req.Path, req.Reason, req.From); err != nil {
 					r.log.LogWarning(0, "[vector]", req.Path, "重画失败:", err)
 				}
 			}(req)
@@ -701,22 +701,30 @@ func (r *Runner) vectorRetryPrecondition(proj, trName string) string {
 // 上一次已经定下来的，重画只该换这张图的画法。
 //
 // 注意下游：作图结果会重新嵌进 md，样式/划分/转换/组装要看新图就得重跑。
-func (r *Runner) redrawVectorImage(proj, trName, reason string) error {
-	key, rec, archived, err := prepareVectorRedraw(proj, trName)
+func (r *Runner) redrawVectorImage(proj, trName, reason string, from int) error {
+	key, rec, archived, err := prepareVectorRedraw(proj, trName, from)
 	if err != nil {
 		return err
 	}
 	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		reason = "手动重画"
+	what := "手动重画"
+	if from > 0 {
+		what = "从第 " + strconv.Itoa(from) + " 条记录继续"
+	}
+	if reason != "" {
+		what += "（" + reason + "）"
 	}
 	archNote := "没有旧转录"
 	if archived != "" {
 		archNote = "旧转录留档为 " + archived
 	}
-	r.log.Log(0, "[vector]", filepath.Base(rec.ImgPath), "手动重画（"+reason+"）："+archNote+
+	r.log.Log(0, "[vector]", filepath.Base(rec.ImgPath), what+"："+archNote+
 		" | 类别/分组不变，只重做这一张")
 
+	if from > 0 {
+		r.vectorResumeNote = fmt.Sprintf("The user rolled this drawing session back to record #%d of %s: everything after that record is GONE from your history, so do not assume anything you did later still applies. Re-read your workspace as it is NOW (read_file figure.tex, view_image the original, look at your last compile), then finish the drawing: fix what is still wrong and call submit with {path: \"figure.tex\"} once the preview faithfully matches the original image.", from, archived)
+		defer func() { r.vectorResumeNote = "" }()
+	}
 	inline := r.inline || looksInlineProject(proj)
 	srcDir := r.imagesSrcDir
 	if srcDir == "" {
@@ -789,7 +797,7 @@ func looksInlineProject(proj string) bool {
 //
 // 返回进度记录的键（`<md>::<图片>`，RunImages 的 Only 用它点名）、记录本身、
 // 留档后的转录名。
-func prepareVectorRedraw(proj, trName string) (string, *imageProgress, string, error) {
+func prepareVectorRedraw(proj, trName string, from int) (string, *imageProgress, string, error) {
 	name := filepath.Base(strings.TrimSpace(trName))
 	if !strings.HasPrefix(name, "vector_") || !strings.HasSuffix(name, ".jsonl") {
 		return "", nil, "", fmt.Errorf("只认 vector_*.jsonl 这条转录: %s", name)
@@ -814,10 +822,72 @@ func prepareVectorRedraw(proj, trName string) (string, *imageProgress, string, e
 	if rec.EquivalentTo != "" && prog[rec.EquivalentTo] != nil {
 		return "", nil, "", fmt.Errorf("这张图是另一张代表图的副本（dedupe 跟随），重画请点代表图那张: %s", rec.EquivalentTo)
 	}
-	archived := archiveVectorAttempt(proj, texBase)
+	// from > 0 = 从某条记录之后继续（不是整张重画）：把前 from 行留下当会话的
+	// 续跑起点，完整的旧转录抄一份 .tryN 留档；from = 0 = 整张重画，旧会话整个
+	// 让开。两条路都清成品，好让这一张重新做。
+	var archived string
+	if from > 0 {
+		var err error
+		archived, err = truncateVectorTranscript(proj, texBase, from)
+		if err != nil {
+			return "", nil, "", err
+		}
+	} else {
+		archived = archiveVectorAttempt(proj, texBase)
+	}
 	rec.Status = "classified"
 	rec.TikzCode, rec.FigPDF, rec.FigPNG, rec.FigSVG = "", "", "", ""
 	rec.Error, rec.SVGFail, rec.Kept, rec.Content = "", false, false, ""
 	saveProgress(progDir, rec)
 	return key, rec, archived, nil
+}
+
+// truncateVectorTranscript 是"从某条记录之后继续"的文件部分（作图会话版）：
+// 把前 from 行留在原地当续跑起点（会话启动时会读它续上），完整的那份抄成
+// vector_<成品名>.try<N>.jsonl 留档——原对话不会因为回滚而消失。
+//
+// 与章节那边的差别：章节把前缀写成**另一条**新尝试的转录，作图会话没有尝试
+// 号那套管道（tikz 只认 vector_<成品名>.jsonl 这一个文件名），所以是"前缀留
+// 原名、全量留档"，但对外语义一样：历史里两份都在、源内容不丢。
+//
+// 同样只回滚**对话**：scratch 工作区还是最后一次的样子（没有按轮次快照文件
+// 树），所以要它"按现在的样子看看还差什么再画"，靠的是续跑时的那句说明。
+func truncateVectorTranscript(proj, texBase string, from int) (string, error) {
+	if from < 1 {
+		return "", fmt.Errorf("截断点必须 ≥ 1（转录里的行号）")
+	}
+	sessDir := filepath.Join(proj, "source", "sessions")
+	name := "vector_" + texBase + ".jsonl"
+	src := filepath.Join(sessDir, name)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", fmt.Errorf("读不到作图转录 %s: %w", name, err)
+	}
+	text := string(data)
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if from > len(lines) {
+		return "", fmt.Errorf("截断点 %d 超出转录长度 %d", from, len(lines))
+	}
+	// 只能切在消息行上：meta/usage 行不进消息流，切在那儿等于没切。
+	var probe struct {
+		T string `json:"t"`
+	}
+	if err := json.Unmarshal([]byte(lines[from-1]), &probe); err != nil || probe.T != "msg" {
+		return "", fmt.Errorf("第 %d 行不是一条消息记录（选了用量/元信息行？）", from)
+	}
+	n := 1
+	for ; n < 999; n++ {
+		if !fileExists(filepath.Join(sessDir, "vector_"+texBase+".try"+strconv.Itoa(n)+".jsonl")) {
+			break
+		}
+	}
+	archived := "vector_" + texBase + ".try" + strconv.Itoa(n) + ".jsonl"
+	if err := os.WriteFile(filepath.Join(sessDir, archived), data, 0o644); err != nil {
+		return "", fmt.Errorf("留档旧转录失败: %w", err)
+	}
+	head := strings.Join(lines[:from], "\n") + "\n"
+	if err := os.WriteFile(src, []byte(head), 0o644); err != nil {
+		return "", fmt.Errorf("写回截断后的转录失败: %w", err)
+	}
+	return archived, nil
 }

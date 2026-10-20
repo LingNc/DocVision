@@ -401,7 +401,7 @@ func TestPrepareVectorRedraw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	key, got, archived, err := prepareVectorRedraw(proj, trName)
+	key, got, archived, err := prepareVectorRedraw(proj, trName, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,11 +441,73 @@ func TestPrepareVectorRedraw(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessDir, ftr), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := prepareVectorRedraw(proj, ftr); err == nil {
+	if _, _, _, err := prepareVectorRedraw(proj, ftr, 0); err == nil {
 		t.Fatal("副本图应拒绝重画")
 	}
 	// 名字不对（不是 vector_*.jsonl）也要拒绝。
-	if _, _, _, err := prepareVectorRedraw(proj, "convert_chapter_002.jsonl"); err == nil {
+	if _, _, _, err := prepareVectorRedraw(proj, "convert_chapter_002.jsonl", 0); err == nil {
 		t.Fatal("非作图转录应拒绝")
+	}
+}
+
+// 矢量图"从某条记录之后继续"：前缀留在原地当续跑起点、完整旧转录留档 .tryN，
+// 第二次再切递增不覆盖；非消息行与越界都拒。
+func TestTruncateVectorTranscript(t *testing.T) {
+	proj := t.TempDir()
+	sessDir := filepath.Join(proj, "source", "sessions")
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	texBase := "book__pic001__fig"
+	tr := filepath.Join(sessDir, "vector_"+texBase+".jsonl")
+	body := strings.Join([]string{
+		`{"t":"meta","kind":"system"}`,
+		`{"t":"msg","role":"user","content":"draw it"}`,
+		`{"t":"msg","role":"assistant","content":"step 1"}`,
+		`{"t":"msg","role":"assistant","content":"step 2 (wrong)"}`,
+		`{"t":"usage","model":"m"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(tr, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	archived, err := truncateVectorTranscript(proj, texBase, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archived != "vector_"+texBase+".try1.jsonl" {
+		t.Fatalf("留档名 = %q", archived)
+	}
+	// 留档是**完整**那份（回滚不会丢对话）。
+	full, err := os.ReadFile(filepath.Join(sessDir, archived))
+	if err != nil || !strings.Contains(string(full), "step 2 (wrong)") {
+		t.Fatalf("留档不完整: %v", err)
+	}
+	// 原地只剩前三行，且以消息行收尾。
+	head, err := os.ReadFile(tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(head), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("前缀行数 = %d（期望 3）", len(lines))
+	}
+	if !strings.Contains(lines[2], "step 1") || strings.Contains(string(head), "wrong") {
+		t.Fatalf("前缀内容不对: %q", string(head))
+	}
+	// 再切一次：号递增，不覆盖 .try1。
+	archived2, err := truncateVectorTranscript(proj, texBase, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archived2 != "vector_"+texBase+".try2.jsonl" {
+		t.Fatalf("第二次留档名 = %q", archived2)
+	}
+	// 越界与非消息行都拒（usage 行不进消息流，切在那儿等于没切）。
+	if _, err := truncateVectorTranscript(proj, texBase, 99); err == nil {
+		t.Fatal("越界应报错")
+	}
+	if _, err := truncateVectorTranscript(proj, texBase, 0); err == nil {
+		t.Fatal("from=0 应报错")
 	}
 }
