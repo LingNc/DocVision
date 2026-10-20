@@ -320,6 +320,12 @@ type LatexConfig struct {
 	// 顶层默认 6。0/未写 = 6。顶层次数应 >= 3 + 最大递归层数(3)，否则深层
 	// 只能吃到下限，启动时会告警。
 	CheckerRounds int `yaml:"checker_rounds"`
+	// MaxChapterLines: 一个转换会话能"好好转完"的章节规模（章节 md 的行数）。
+	// 超过它、又还没拆分过的节点在 submit 会被打回，要求先
+	// request_chapter_split 按语义拆成 2–16 段（子会话各自转换、各自过 checker，
+	// 父会话只整合与核对）；已经递归到最深一层就不再强制（拆不动了）。
+	// 0 = 关闭这条规则；未写该键时默认 DefaultMaxChapterLines。
+	MaxChapterLines int `yaml:"max_chapter_lines"`
 	// InsertImageDescription: when true, images kept as raster (no
 	// vector structure) embed a readable AI explanation as
 	// "[Image]( content )" instead of the bare image link. The same
@@ -780,6 +786,11 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
+// DefaultMaxChapterLines 是一章"一个会话能好好转完"的默认行数上限（T169）。
+// 真实数据里章节 md 从一百多行到两万行不等，几千行的章节一个会话既慢又容易
+// 漏内容——超过这个规模的章节按语义拆开，由子会话并行转换。
+const DefaultMaxChapterLines = 3000
+
 // CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）; 19 (T131)：latex 新增 dedupe_icon_auto（小图标本地自动归组的门槛，未写时 0.75、0 = 关闭，全部交核验会话）; 20 (T138/T135)：latex 新增 dedupe_align_grid（判据网格，整数或 "0.95S"）/ dedupe_align_typical / dedupe_attach_min / dedupe_icon_max_area / dedupe_bucket_max。
 // 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 text。
 const CurrentConfigVersion = 20
@@ -895,6 +906,10 @@ func LoadConfigData(data []byte, path string) (*Config, error) {
 		}
 		if mapNodeValue(latex, "dedupe_bucket_max") == nil {
 			cfg.Latex.DedupeBucketMax = 400
+		}
+		// 0 是有效取值（关闭规则），所以"没写"只能在节点层判定。
+		if mapNodeValue(latex, "max_chapter_lines") == nil {
+			cfg.Latex.MaxChapterLines = DefaultMaxChapterLines
 		}
 	}
 

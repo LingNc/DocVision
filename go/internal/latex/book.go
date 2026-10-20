@@ -1316,6 +1316,11 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			if msg := goalGate(goal); msg != "" {
 				return msg
 			}
+			// 章节太大就先拆（T169）：这条与"看过原书/内容覆盖率"同样属于
+			// 提交前必须满足的条件，而不是建议。
+			if msg := chapterSizeReject(lineCount, r.cfg.Latex.MaxChapterLines, node.Depth, splitTool.Requested); msg != "" {
+				return msg
+			}
 			if gate == nil {
 				return ""
 			}
@@ -1391,6 +1396,11 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		"CHAPTER_FILE": "chapter markdown path: " + node.InputMount + ":" + node.InputRef,
 		"TEX_PATH":     "Write it as work:" + base + ".tex (extra \\input parts go in the folder work:" + base + "/), compile until clean, then submit those TWO paths.",
 	})
+	// 章节规模当面说清（T169）：几千行的章节一个会话既慢又容易漏内容，先按语义
+	// 拆开比事后打回便宜得多。
+	if note := chapterSizeNote(lineCount, r.cfg.Latex.MaxChapterLines, node.Depth); note != "" {
+		initial += "\n\n" + note
+	}
 
 	if r.cfg.Latex.RemoveWatermark {
 		initial += "\n\n" + r.watermarkGuidance("WATERMARK: exclude watermark artifacts from the .tex output (repeated decorative overlay text such as institution marks, faint background strings). Skip such content entirely - do not typeset it.")

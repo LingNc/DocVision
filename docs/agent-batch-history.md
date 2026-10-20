@@ -1959,3 +1959,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
   6. 提示词里"翻原书核对"那句原本是**条件触发**（"whenever something looks doubtful"）：机械包出来的 tex 读起来顺畅，模型不会觉得"有疑问"，于是永远不翻原书，而且没有任何机制核对它翻没翻。改成无条件——每次提交前都要对比本章的几页原书，并点明"整段缺失、表格丢行、插图错序，产物内部看不出来，只有原页能看出来"。
 - **阈值标定**：同一批真实产物上 `chapterCoverage` 量到 0.970/0.989/0.991/0.995；用 python 把同一 PDF 文本砍掉 1/4、1/2 后覆盖率掉到 0.63–0.76 / 0.33–0.59。取 0.85。
 - **验证**：`TestMdPlainTextDropsNonProse`、`TestCoverageOfDetectsMissingContent`、`TestCoverageOfSkipsFormulaOnlyChapters`、`TestNeedSourcePages`、`TestPathWithin`；`TestChapterGateRequiresCompileAndView` 扩成四段式（无编译 → 只看自己 → 只看 1 页原书 → 2 页原书放行）；`go test ./internal/latex` 与全量 `go test ./internal/...` 绿。
+
+## v1.5+（第四十七批补五，T169：章节规模上限与"太大就先拆"）
+
+- **用户观察**："有可能是这个分配的章节实在是太大了，父会话一个会话处理起来会比较耗时。"
+- **量到的规模**：同一批真实项目里，划分阶段给出的 26 个章节 md 从 150 行到 20190 行，总计 133244 行，中位数约 3400 行。也就是说"一章 = 一个会话"这个假设在这类书上根本不成立：读一遍 md、写一遍 tex、编译、看图、核对，几千行的量在一个上下文里做不完，慢与漏都是必然。
+- **旧缺口**：递归拆分机制齐备（2–16 段、覆盖全文、≤3 层、子会话各过 checker、父会话整合），但触发条件是模型自评"太大"——没有数字、没有后果；而且会话连自己这章多少行都不知道。
+- **改**：首条消息追加 "This chapter is N lines of markdown."，超限时附行动建议（拆 2–16 段、每段约 limit/3–limit/2 行）；`submit` 门禁新增规模关：`lines > limit && !splitRequested && depth < 3` → 打回并要求 `request_chapter_split`（已拆分节点正在整合子章节、最深一层拆不动，二者放行）。上限 `latex.max_chapter_lines`（未写 3000，0 关闭），两份模板 + `docs/config.md` + `docs/latex.md` 同步。
+- **验证**：`TestChapterSizeNote`（小章节只报数字 / 超限催拆分并给区间 / 最深一层不催 / 关闭时只报数字）、`TestChapterSizeReject`（未超限 / 超限 / 已拆分 / 到最深 / 关闭五个边界）；`go test ./internal/...` 全绿。

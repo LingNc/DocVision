@@ -1003,3 +1003,12 @@ user 轮
   4. **"处理不了就开子会话"说清楚**：`## Recursive subdivision` 早就有这条（"too large to convert … call `request_chapter_split` instead of submitting"，限三层、子章节各自过 checker、父章节整合后提交），但触发词只提"太大/上下文超限"，内容做不可靠（公式太密、OCR 认不出）与"开到最深还是做不出来"两种情形没写——现在补上，并明确"不许编造内容，把缺什么、为什么缺写进 `report.issues`"。
   另：`submit` 之后把覆盖率写进日志（`内容覆盖率 97.0%（md 正文 → PDF 文本）`），低于 92% 再提醒一次；提示词新增两句（必须对照原书页；不要用脚本把 md 机械包成 tex），整合指令同样要求对照。
   验证：新增 `TestMdPlainTextDropsNonProse`、`TestCoverageOfDetectsMissingContent`（完整 1.0、丢 40% 后跌破阈值并点名缺失段落）、`TestCoverageOfSkipsFormulaOnlyChapters`、`TestNeedSourcePages`、`TestPathWithin`；`TestChapterGateRequiresCompileAndView` 扩成"编译 → 只看自己 → 只看 1 页原书 → 2 页原书才放行"；在真实章节上跑 `chapterCoverage` 与手工测量一致（0.97–0.995）。
+
+[X][ ] T169. 用户观察（原话要点）："有可能是这个分配的章节实在是太大了，父会话一个会话处理起来会比较耗时。"
+  数据：一份真实项目里划分阶段给出的 26 个章节 md 从 150 行到 20190 行不等（总计 13.3 万行，中位数约 3400 行）。几千行的章节丢给一个转换会话，读、写、核对都做不完——不是模型"愿不愿意"的问题，是规模本身超出了单会话的舒适区。
+  旧行为的缺口：递归拆分早就有，但触发条件是模型自评"我觉得太大了"，和"有疑问就翻原书"一样靠不住；而且会话根本不知道自己这一章有多少行（提示词里没有数字），只能凭第一次读文件的感觉猜。
+  改：
+  1. **规模当面告知**：转换会话首条消息追加 "This chapter is N lines of markdown."；超过上限时直接给出行动建议（拆成 2–16 段、每段约 limit/3–limit/2 行），并说明拆完后自己的职责是整合与核对。
+  2. **超限必须先拆（硬规则）**：`submit` 门禁在看过原书/覆盖率之前先查规模——`lines > limit` 且还没拆过（`splitTool.Requested == false`）且还能再拆（`depth < 3`）就打回，告诉它先 `request_chapter_split`。已经拆过的节点（正在整合子章节）与最深一层（拆不动了）放行。
+  3. **可配置**：`latex.max_chapter_lines`（未写 3000，0 = 关闭）。两份模板、`docs/config.md`、`docs/latex.md` 同步。
+  验证：`TestChapterSizeNote` / `TestChapterSizeReject`（规模提示的三种分支、打回的四个边界：未超限/已拆分/到最深/关闭）；`go test ./internal/...` 全绿。

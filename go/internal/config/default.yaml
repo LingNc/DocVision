@@ -118,6 +118,11 @@ latex:
   # 不过，就换一个全新会话重来）。第 N 层递归每次 -1、下限 3；顶层默认 6。
   # 顶层次数应 >= 3 + 最大递归层数(3)=6，设小了启动会告警。
   checker_rounds: 6
+  # max_chapter_lines：一个转换会话"好好转完"的章节规模（章节 md 的行数）。
+  # 超过它、又还没拆分过的章节，submit 会被打回并要求先 request_chapter_split
+  # 按语义拆成 2–16 段（子会话各转各的，父会话只整合与核对）；已经递归到最深
+  # 一层就不再强制。0 = 关闭这条规则。
+  max_chapter_lines: 3000
   insert_image_description: false # 档位2：raster 保留原图时是否再嵌入一段 AI 解释文本
                                  # （档位1 不受此开关控制：raster 总是带 DESCRIBE 解释块）
   chapter_granularity: "medium"  # 档位1 章节拆分粒度：large=大章整体 / medium=按本书自动给出最合理拆分（默认，不拆太细也不太大块）/ small=按小节拆分
