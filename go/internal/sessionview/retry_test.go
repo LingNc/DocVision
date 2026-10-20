@@ -256,3 +256,38 @@ func TestPostRetryFromRecord(t *testing.T) {
 		t.Fatalf("队列 = %+v", pending)
 	}
 }
+
+// 矢量图重画（P53 矢量图侧）：只认 source/sessions 下的 vector_*.jsonl，
+// 排进队列时不带章节（章节角标不该被它污染）。
+func TestPostRetryVectorRole(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	sess := filepath.Join(proj, "source", "sessions")
+	if err := os.MkdirAll(sess, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(proj, "source", "progress_items"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sess, "vector_book__pic001__label.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"project":"书A","role":"vector","path":"`
+	if rec := postRetry(t, v, body+`convert_chapter_002.jsonl"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("非作图转录应 400, status = %d", rec.Code)
+	}
+	if rec := postRetry(t, v, body+`vector_missing.jsonl"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("找不到转录应 404, status = %d", rec.Code)
+	}
+	rec := postRetry(t, v, body+`vector_book__pic001__label.jsonl"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	pending := retryq.Pending(proj)
+	if len(pending) != 1 || pending[0].Role != "vector" || pending[0].Chapter != "" {
+		t.Fatalf("队列 = %+v", pending)
+	}
+	// 没有章节的请求不该挂到章节角标上。
+	if got := v.pendingRetries([]SessionInfo{{Project: "书A"}}); len(got) != 0 {
+		t.Fatalf("章节角标被污染: %+v", got)
+	}
+}

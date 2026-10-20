@@ -40,6 +40,10 @@ type ImagesOptions struct {
 	// Files selects specific markdown files (base names with or
 	// without .md, or paths). Empty = every *.md in SourceDir (batch).
 	Files []string
+	// Only 只重跑点名的图片（`<md名>::<图片引用路径>` 键，P53）：页面上的
+	// 「重画这张图」。done 的条目也会被当成待处理（就是要重画），分类与
+	// dedupe 两个阶段跳过——这张图的类别和分组早就定了，重画不该再动它们。
+	Only []string
 	// Verbose keeps per-image console output. Default (false) shows a
 	// compact img2text-style progress line instead; details always go
 	// to the log file.
@@ -249,6 +253,12 @@ type Runner struct {
 	retryWatcherWG   sync.WaitGroup
 	// retryWarned 让"请求还在排队"的提示每个请求文件只打一次。
 	retryWarned map[string]bool
+	// vectorMu 串行化"逐图重画"与 images 阶段（P53）：两者都写
+	// source/progress_items 与 source/*.md，同时跑会把进度文件写花。
+	vectorMu sync.Mutex
+	// imagesSrcDir 是本次运行 images 阶段扫的原始 md 目录（重画一张图时要
+	// 回到同一份原始 md 重扫，不能用已经被重写过的项目 md）。
+	imagesSrcDir string
 }
 
 // phaseNote returns a console printer for phase-level progress notes.
@@ -430,6 +440,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	// Scan markdown files first: the git-style project name is derived
 	// from them (主题名), and the workspace must be resolved before any
 	// output directory is created.
+	r.imagesSrcDir = srcDir
 	mdFiles, err := filepath.Glob(filepath.Join(srcDir, "*.md"))
 	if err != nil {
 		return err
@@ -518,12 +529,35 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	loadProgress(progDir, prog)
 	r.migrateProgress(prog, progDir, outDir)
 
+	onlySet := map[string]bool{}
+	for _, k := range opts.Only {
+		if k = strings.TrimSpace(k); k != "" {
+			onlySet[k] = true
+		}
+	}
 	pending := make([]*task, 0, len(all))
 	for _, t := range all {
+		if len(onlySet) > 0 {
+			if onlySet[t.key()] {
+				pending = append(pending, t) // 点名重画：done 也要再跑一遍
+				delete(onlySet, t.key())
+			}
+			continue
+		}
 		if p, ok := prog[t.key()]; ok && p.Status == "done" {
 			continue
 		}
 		pending = append(pending, t)
+	}
+	if len(onlySet) > 0 {
+		// 点名的图不在这次扫描里：多半是原始 md 目录不对（项目 md 已经被
+		// 重写成 \input{tikz}，扫不出图片引用了），明确报出来而不是静默跳过。
+		var keys []string
+		for k := range onlySet {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return fmt.Errorf("找不到要重画的图 %s（原始 md 目录: %s）", strings.Join(keys, ", "), srcDir)
 	}
 	if opts.TestMode {
 		pending = sampleTasks(pending, opts.Number, opts.Seed, r.log)
@@ -545,7 +579,10 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	}
 
 	// Phase 1: classification.
-	if opts.Step == "" || opts.Step == "classify" {
+	// 点名重画只跑 process：类别与分组都定了，重跑分类既浪费请求又会把
+	// 这张图归到别的类里去。
+	onlyRun := len(opts.Only) > 0
+	if !onlyRun && (opts.Step == "" || opts.Step == "classify") {
 		// 水印工作记忆：最先检测（全览页 + md 统计），结果贯穿全部会话。
 		if r.cfg.Latex.RemoveWatermark {
 			var samples []watermarkSample
@@ -566,16 +603,23 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	}
 
 	// 档位1：分类完成后、逐图作图前再核对相似图；档位2原有流程不变。
+	// 点名重画跳过 dedupe（分组不动），但要把这张图自己的成品铺进去。
 	if r.inline {
-		r.motifDedupePhase(all, prog, progDir, outDir)
+		if !onlyRun {
+			r.motifDedupePhase(all, prog, progDir, outDir)
+		}
 		applyMotifArtifacts(pending, prog, progDir, outDir)
 	}
 	// Phase 2: per-class processing.
 	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose)
 	if r.inline {
-		applyMotifArtifacts(all, prog, progDir, outDir)
-		r.clearUnresolvedMotifLinks(all, prog, progDir)
-		materializeSharedMotifTeX(all, prog, progDir, outDir)
+		if onlyRun {
+			applyMotifArtifacts(pending, prog, progDir, outDir)
+		} else {
+			applyMotifArtifacts(all, prog, progDir, outDir)
+			r.clearUnresolvedMotifLinks(all, prog, progDir)
+			materializeSharedMotifTeX(all, prog, progDir, outDir)
+		}
 	}
 
 	if !verbose {
@@ -1219,15 +1263,10 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	client := r.clientFor(r.cfg.Latex.DrawingModel)
 	tuning := r.cfg.LatexSession("drawing")
 
-	base := sanitizeName(strings.TrimSuffix(filepath.Base(t.imgPath), filepath.Ext(t.imgPath))) +
-		"__" + sanitizeName(pp.Label)
-	if base == "__" || len(base) < 3 {
-		base = sanitizeName(strings.TrimSuffix(filepath.Base(t.imgPath), filepath.Ext(t.imgPath)))
+	name := vectorTexBase(t.mdName, t.imgPath, pp.Label)
+	if name == "" {
+		name = fmt.Sprintf("fig_%d", time.Now().UnixNano()%100000)
 	}
-	if base == "" {
-		base = fmt.Sprintf("fig_%d", time.Now().UnixNano()%100000)
-	}
-	name := sanitizeName(strings.TrimSuffix(t.mdName, filepath.Ext(t.mdName))) + "__" + base
 	dstTex := filepath.Join(outDir, "tikz", name+".tex")
 	dstPDF := filepath.Join(outDir, "figures", name+".pdf")
 	dstPNG := filepath.Join(outDir, "figures", name+".png")
@@ -1830,4 +1869,19 @@ func resolveImageFile(imagesDir, imgPath, subject string) (string, error) {
 		}
 	}
 	return "", os.ErrNotExist
+}
+
+// vectorTexBase 是"这张图的成品/会话叫什么"的唯一来源（P53 抽出来是为了能
+// 反查：给一条作图转录名，找回它对应哪张图的 progress 记录）。
+// 形如 <md名>__<图片基名>__<类别/图注标签>。
+func vectorTexBase(mdName, imgPath, label string) string {
+	imgBase := sanitizeName(strings.TrimSuffix(filepath.Base(imgPath), filepath.Ext(imgPath)))
+	base := imgBase + "__" + sanitizeName(label)
+	if base == "__" || len(base) < 3 {
+		base = imgBase
+	}
+	if base == "" {
+		return ""
+	}
+	return sanitizeName(strings.TrimSuffix(mdName, filepath.Ext(mdName))) + "__" + base
 }

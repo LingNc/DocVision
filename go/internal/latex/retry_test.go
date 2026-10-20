@@ -373,3 +373,79 @@ func TestTruncateChapterTranscript(t *testing.T) {
 		}
 	}
 }
+
+// 重画一张图（P53 矢量图侧）：旧转录留档成 .tryN、进度记录清成品但保留类别，
+// 类别/分组不动；副本图拒绝（重画要落在代表图上）。
+func TestPrepareVectorRedraw(t *testing.T) {
+	proj := t.TempDir()
+	progDir := filepath.Join(proj, "source", "progress_items")
+	sessDir := filepath.Join(proj, "source", "sessions")
+	if err := os.MkdirAll(progDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := &imageProgress{
+		Key: "m.md::images/b/pic001.jpg", MDName: "m.md", ImgPath: "images/b/pic001.jpg",
+		Class: ClassVector, Status: "done", Label: "系统结构图",
+		TikzCode: "\\draw", FigPDF: "figures/x.pdf", FigPNG: "figures/x.png", FigSVG: "figures/x.svg",
+	}
+	texBase := vectorTexBase(rec.MDName, rec.ImgPath, rec.Label)
+	if texBase == "" || !strings.Contains(texBase, "pic001") {
+		t.Fatalf("成品名 = %q", texBase)
+	}
+	saveProgress(progDir, rec)
+	trName := "vector_" + texBase + ".jsonl"
+	if err := os.WriteFile(filepath.Join(sessDir, trName), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	key, got, archived, err := prepareVectorRedraw(proj, trName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != rec.Key || got == nil {
+		t.Fatalf("key = %q, rec = %v", key, got)
+	}
+	if archived != "vector_"+texBase+".try1.jsonl" {
+		t.Fatalf("留档名 = %q", archived)
+	}
+	if fileExists(filepath.Join(sessDir, trName)) {
+		t.Fatal("旧转录应已改名留档")
+	}
+	if !fileExists(filepath.Join(sessDir, archived)) {
+		t.Fatal("留档转录应存在")
+	}
+	// 成品清空、类别与标签保留（重画不重分类、不改分组）。
+	if got.Status == "done" || got.TikzCode != "" || got.FigPDF != "" || got.FigSVG != "" {
+		t.Fatalf("成品没清干净: %+v", got)
+	}
+	if got.Class != ClassVector || got.Label != "系统结构图" {
+		t.Fatalf("类别/标签被动了: %+v", got)
+	}
+	// 进度落盘了（重新加载还能看到清空后的状态）。
+	reload := map[string]*imageProgress{}
+	loadProgress(progDir, reload)
+	if reload[rec.Key] == nil || reload[rec.Key].Status == "done" {
+		t.Fatalf("进度没落盘: %+v", reload[rec.Key])
+	}
+	// 副本图（dedupe 跟随）不给重画：它复用的是代表图的成品。
+	follower := &imageProgress{
+		Key: "m.md::images/b/pic002.jpg", MDName: "m.md", ImgPath: "images/b/pic002.jpg",
+		Class: ClassVector, Status: "done", Label: "系统结构图",
+		EquivalentTo: rec.Key,
+	}
+	saveProgress(progDir, follower)
+	ftr := "vector_" + vectorTexBase(follower.MDName, follower.ImgPath, follower.Label) + ".jsonl"
+	if err := os.WriteFile(filepath.Join(sessDir, ftr), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := prepareVectorRedraw(proj, ftr); err == nil {
+		t.Fatal("副本图应拒绝重画")
+	}
+	// 名字不对（不是 vector_*.jsonl）也要拒绝。
+	if _, _, _, err := prepareVectorRedraw(proj, "convert_chapter_002.jsonl"); err == nil {
+		t.Fatal("非作图转录应拒绝")
+	}
+}

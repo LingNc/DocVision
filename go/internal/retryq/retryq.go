@@ -50,7 +50,8 @@ func Dir(proj string) string { return filepath.Join(proj, "work", DirName) }
 // Queue 把一条请求写进队列，返回落盘路径。文件名带纳秒时间戳与章节名，
 // 同一个项目里多条请求互不覆盖（O_EXCL，撞了就换名）。
 func Queue(proj string, req Request) (string, error) {
-	if strings.TrimSpace(req.Chapter) == "" {
+	// 章节请求必须点名章节；矢量图重画（role=vector）不带章节，靠 Path 定位。
+	if strings.TrimSpace(req.Chapter) == "" && strings.TrimSpace(req.Path) == "" {
 		return "", fmt.Errorf("重试请求缺少章节名")
 	}
 	dir := Dir(proj)
@@ -69,7 +70,11 @@ func Queue(proj string, req Request) (string, error) {
 	}
 	now := time.Now().UnixNano()
 	for i := 0; i < 8; i++ {
-		name := fmt.Sprintf("req-%d-%s.json", now+int64(i), sanitize(req.Chapter))
+		tag := req.Chapter
+		if strings.TrimSpace(tag) == "" {
+			tag = "vector_" + strings.TrimSuffix(sanitize(req.Path), ".jsonl")
+		}
+		name := fmt.Sprintf("req-%d-%s.json", now+int64(i), sanitize(tag))
 		path := filepath.Join(dir, name)
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err != nil {
@@ -120,7 +125,9 @@ func Pending(proj string) []File {
 		if err := json.Unmarshal(data, &req); err != nil {
 			continue
 		}
-		if strings.TrimSpace(req.Chapter) == "" {
+		// 章节请求要章节名；矢量图重画没有章节，靠 Path 认（两条都不空才算
+		// 结构化不出来的坏文件）。
+		if strings.TrimSpace(req.Chapter) == "" && strings.TrimSpace(req.Path) == "" {
 			continue
 		}
 		out = append(out, File{Path: path, Request: req})

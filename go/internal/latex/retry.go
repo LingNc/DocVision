@@ -457,6 +457,35 @@ func (r *Runner) dispatchRetries(proj string) int {
 	}
 	started := 0
 	for _, f := range files {
+		// 矢量图重画（P53）：请求没有章节，按转录名定位那一条作图会话。
+		if retryRoleOf(f.Request) == "vector" {
+			if !r.vectorMu.TryLock() {
+				continue // 已经有一张在重画：留队等它跑完（进度文件不能并发写）
+			}
+			if why := r.vectorRetryPrecondition(proj, f.Request.Path); why != "" {
+				r.vectorMu.Unlock()
+				if !r.retryWarnOnce(f.Path, f.Request.Path+" "+why) {
+					r.log.LogInfo(0, "[vector]", f.Request.Path, "重画请求排队中："+why)
+				}
+				continue
+			}
+			if err := retryq.Consume(f.Path); err != nil {
+				r.vectorMu.Unlock()
+				r.log.LogWarning(0, "[vector]", f.Request.Path, "标记请求完成失败（下次会再处理一次）:", err)
+				continue
+			}
+			started++
+			req := f.Request
+			r.retryWatcherWG.Add(1)
+			go func(req retryq.Request) {
+				defer r.retryWatcherWG.Done()
+				defer r.vectorMu.Unlock()
+				if err := r.redrawVectorImage(proj, req.Path, req.Reason); err != nil {
+					r.log.LogWarning(0, "[vector]", req.Path, "重画失败:", err)
+				}
+			}(req)
+			continue
+		}
 		base := strings.TrimSuffix(filepath.Base(f.Chapter), filepath.Ext(f.Chapter))
 		if base == "" || strings.Contains(base, "..") {
 			_ = retryq.Consume(f.Path)
@@ -645,4 +674,150 @@ func (r *Runner) truncateChapterTranscript(proj, base, srcName string, from int)
 		return "", 0, fmt.Errorf("写新尝试的转录失败: %w", err)
 	}
 	return dst, next, nil
+}
+
+// vectorRetryPrecondition 判断"重画这张图"现在能不能做（空串 = 可以）。
+func (r *Runner) vectorRetryPrecondition(proj, trName string) string {
+	name := filepath.Base(strings.TrimSpace(trName))
+	if !strings.HasPrefix(name, "vector_") || !strings.HasSuffix(name, ".jsonl") {
+		return "只认 vector_*.jsonl 这条转录"
+	}
+	if !fileExists(filepath.Join(proj, "source", "progress_items")) {
+		return "这个项目还没有逐图进度（images 阶段没跑过）"
+	}
+	// 作图转录在 <proj>/source/sessions/ 里（images 阶段的 outDir），不在 work。
+	if !fileExists(filepath.Join(proj, "source", "sessions", name)) {
+		return "这条作图转录已经不在了"
+	}
+	return ""
+}
+
+// redrawVectorImage 重画一张矢量图（P53 的"矢量图那一侧"）：把这张图的作图
+// 会话作废留档、清掉它的成品与状态，然后只让那一条图重新做一遍。
+//
+// 与章节重试同一个思路——**开新尝试**：旧转录与旧工作区挪进
+// work/attempts/vector_<成品名>/try<N>/，新会话从零开始（图片重画没有"接着
+// 上次画错的那半张继续"的意义）。分类与 dedupe 不动：类别、分组、代表图都是
+// 上一次已经定下来的，重画只该换这张图的画法。
+//
+// 注意下游：作图结果会重新嵌进 md，样式/划分/转换/组装要看新图就得重跑。
+func (r *Runner) redrawVectorImage(proj, trName, reason string) error {
+	key, rec, archived, err := prepareVectorRedraw(proj, trName)
+	if err != nil {
+		return err
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "手动重画"
+	}
+	archNote := "没有旧转录"
+	if archived != "" {
+		archNote = "旧转录留档为 " + archived
+	}
+	r.log.Log(0, "[vector]", filepath.Base(rec.ImgPath), "手动重画（"+reason+"）："+archNote+
+		" | 类别/分组不变，只重做这一张")
+
+	inline := r.inline || looksInlineProject(proj)
+	srcDir := r.imagesSrcDir
+	if srcDir == "" {
+		srcDir = r.cfg.Paths.OutputDir
+	}
+	err = r.RunImages(ImagesOptions{
+		Inline:    inline,
+		SourceDir: srcDir,
+		OutDir:    filepath.Join(proj, "source"),
+		Only:      []string{key},
+	})
+	if err != nil {
+		return err
+	}
+	r.log.Log(0, "[vector]", filepath.Base(rec.ImgPath), "重画完成——下游（样式/划分/转换/组装）需要重跑才能看到新图")
+	return nil
+}
+
+// archiveVectorAttempt 把一张图的旧作图会话改名成 .try<N>.jsonl 留档（与章节
+// 尝试同一个套路：旧的那次仍能在预览页「矢量图」里看到，不是删掉），旧工作区
+// 挪进 work/attempts/vector_<成品名>/try<N>.work/。返回留档后的转录名。
+//
+// 为什么是改名而不是挪走：扫描器把根下**任何** *.jsonl 都当转录，挪进
+// work/attempts 反而会让它变成一条名字古怪的会话；就地加 .tryN 既能留档，
+// 又能让 vectorImageParts 继续把它归到同一张图。
+func archiveVectorAttempt(proj, texBase string) string {
+	sessDir := filepath.Join(proj, "source", "sessions")
+	tr := filepath.Join(sessDir, "vector_"+texBase+".jsonl")
+	work := filepath.Join(sessDir, "vector_"+texBase+".work")
+	if !fileExists(tr) && !fileExists(work) {
+		return ""
+	}
+	n := 1
+	for ; n < 999; n++ {
+		if !fileExists(filepath.Join(sessDir, "vector_"+texBase+".try"+strconv.Itoa(n)+".jsonl")) {
+			break
+		}
+	}
+	dst := filepath.Join(sessDir, "vector_"+texBase+".try"+strconv.Itoa(n)+".jsonl")
+	if fileExists(tr) {
+		if err := os.Rename(tr, dst); err != nil {
+			return ""
+		}
+	}
+	if fileExists(work) {
+		_ = os.Rename(work, filepath.Join(proj, "work", "attempts", "vector_"+texBase,
+			"try"+strconv.Itoa(n)+".work"))
+	}
+	return filepath.Base(dst)
+}
+
+// looksInlineProject 猜一个项目是不是档位1（矢量图内嵌 tikz）。
+// 用于"页面上的重画请求"落到一个不是本次进程跑出来的项目时：读一份项目 md 看
+// 它是不是内嵌 tikz 的形态。
+func looksInlineProject(proj string) bool {
+	mds, _ := filepath.Glob(filepath.Join(proj, "source", "*.md"))
+	for _, md := range mds {
+		data, err := os.ReadFile(md)
+		if err != nil {
+			continue
+		}
+		return strings.Contains(string(data), "\\input{tikz/") || strings.Contains(string(data), "\\input{figures/")
+	}
+	return false
+}
+
+// prepareVectorRedraw 是"重画这张图"的文件部分（可单独测）：按转录名找回那
+// 张图的进度记录、把旧作图会话留档成 .tryN、清掉成品与状态。类别、标签、去重
+// 结论一律保留——重画只换画法，不动分组。
+//
+// 返回进度记录的键（`<md>::<图片>`，RunImages 的 Only 用它点名）、记录本身、
+// 留档后的转录名。
+func prepareVectorRedraw(proj, trName string) (string, *imageProgress, string, error) {
+	name := filepath.Base(strings.TrimSpace(trName))
+	if !strings.HasPrefix(name, "vector_") || !strings.HasSuffix(name, ".jsonl") {
+		return "", nil, "", fmt.Errorf("只认 vector_*.jsonl 这条转录: %s", name)
+	}
+	texBase := strings.TrimSuffix(strings.TrimPrefix(name, "vector_"), ".jsonl")
+	if texBase == "" {
+		return "", nil, "", fmt.Errorf("转录名里没有成品名: %s", name)
+	}
+	progDir := filepath.Join(proj, "source", "progress_items")
+	prog := map[string]*imageProgress{}
+	loadProgress(progDir, prog)
+	key, rec := "", (*imageProgress)(nil)
+	for k, p := range prog {
+		if vectorTexBase(p.MDName, p.ImgPath, p.Label) == texBase {
+			key, rec = k, p
+			break
+		}
+	}
+	if rec == nil {
+		return "", nil, "", fmt.Errorf("找不到这张图对应的进度记录（成品名 %s）", texBase)
+	}
+	if rec.EquivalentTo != "" && prog[rec.EquivalentTo] != nil {
+		return "", nil, "", fmt.Errorf("这张图是另一张代表图的副本（dedupe 跟随），重画请点代表图那张: %s", rec.EquivalentTo)
+	}
+	archived := archiveVectorAttempt(proj, texBase)
+	rec.Status = "classified"
+	rec.TikzCode, rec.FigPDF, rec.FigPNG, rec.FigSVG = "", "", "", ""
+	rec.Error, rec.SVGFail, rec.Kept, rec.Content = "", false, false, ""
+	saveProgress(progDir, rec)
+	return key, rec, archived, nil
 }

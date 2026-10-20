@@ -74,6 +74,12 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请求体不是合法 JSON", http.StatusBadRequest)
 		return
 	}
+	// 矢量图重画（P53）：不带章节，点名一条 vector_*.jsonl 作图转录。
+	role := strings.TrimSpace(req.Role)
+	if role == "vector" {
+		v.serveVectorRetry(w, req)
+		return
+	}
 	base := strings.TrimSuffix(strings.TrimSpace(req.Chapter), ".md")
 	if !chapterNameRe.MatchString(base) {
 		http.Error(w, "章节名不合法（期望 chapter_002 这种）", http.StatusBadRequest)
@@ -94,12 +100,11 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "章节不存在: "+base, http.StatusNotFound)
 		return
 	}
-	role := strings.TrimSpace(req.Role)
 	if role == "" {
 		role = "convert"
 	}
 	if role != "convert" && role != "checker" && role != "continue" {
-		http.Error(w, "角色只能是 convert、checker 或 continue", http.StatusBadRequest)
+		http.Error(w, "角色只能是 convert、checker、continue 或 vector", http.StatusBadRequest)
 		return
 	}
 	// 继续跑的对象是**已有的那条会话**：没有转录就没什么可接着的。
@@ -187,6 +192,9 @@ func (v *viewerServer) pendingRetries(sessions []SessionInfo) map[string][]strin
 			seen := map[string]bool{}
 			var chapters []string
 			for _, f := range files {
+				if f.Chapter == "" { // 矢量图重画没有章节，不挂章节角标
+					continue
+				}
 				if seen[f.Chapter] {
 					continue
 				}
@@ -232,6 +240,9 @@ func (v *viewerServer) retryRoles(sessions []SessionInfo) map[string]map[string]
 		}
 		roles := map[string]string{}
 		for _, f := range files {
+			if f.Chapter == "" { // 矢量图重画：没有章节行可挂
+				continue
+			}
 			role := f.Role
 			if role == "" {
 				role = "convert"
@@ -353,4 +364,47 @@ func countTranscriptLines(path string) (int, error) {
 		return 0, nil
 	}
 	return strings.Count(text, "\n") + 1, nil
+}
+
+// serveVectorRetry 处理"重画这张图"（P53）：只收 source/sessions 下的
+// vector_*.jsonl，排进队列由运行中的 latex 派发。
+func (v *viewerServer) serveVectorRetry(w http.ResponseWriter, req retryRequest) {
+	projDir, ok := v.projectWorkspace(req.Project)
+	if !ok {
+		http.Error(w, "项目不存在", http.StatusNotFound)
+		return
+	}
+	name := filepath.Base(strings.TrimSpace(req.Path))
+	if !strings.HasPrefix(name, "vector_") || !transcriptNameRe.MatchString(name) {
+		http.Error(w, "只能重画某条作图会话（source/sessions/vector_*.jsonl）", http.StatusBadRequest)
+		return
+	}
+	if !fileExistsIn(projDir, "source", "sessions", name) {
+		http.Error(w, "这条作图转录不存在: "+name, http.StatusNotFound)
+		return
+	}
+	if !dirExists(filepath.Join(projDir, "source", "progress_items")) {
+		http.Error(w, "这个项目还没有逐图进度（images 阶段没跑过），没法重画", http.StatusBadRequest)
+		return
+	}
+	path, err := retryq.Queue(projDir, retryq.Request{
+		Project: req.Project, Role: "vector",
+		Reason: strings.TrimSpace(req.Reason), Source: "web", Path: name,
+	})
+	if err != nil {
+		http.Error(w, "写入重试队列失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok": true, "project": req.Project, "role": "vector", "image": name,
+		"queued": filepath.Base(path),
+		"note": "已排队重画这张图：会开一条新的作图尝试（旧转录留档成 .tryN），" +
+			"类别与分组不变；画完要看到新图，样式/划分/转换/组装需要重跑",
+	})
+}
+
+// dirExists 判断一个目录在不在。
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
 }

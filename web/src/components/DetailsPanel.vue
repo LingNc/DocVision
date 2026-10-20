@@ -58,6 +58,30 @@ const continuePending = computed(() => {
   const t = retryTarget.value
   return !!t && chapterPendingRetry(t.project, t.chapter, 'continue')
 })
+/* 重画这张图（P53 矢量图侧）：只在看某条作图会话、且它不正在写入时给。
+   重画只换画法——类别与分组不动；下游阶段要看新图得重跑。 */
+const canRedrawImage = computed(() => {
+  const s: any = state.current
+  if (!s || s.staticMode || s.live) return false
+  if (!s.project || !s.name || s.stage !== 'vector') return false
+  return String(s.name).indexOf('vector_') === 0
+})
+const redrawPending = computed(() => state.retryNote !== '')
+function doRedrawImage(): void {
+  const s: any = state.current
+  if (!s || !canRedrawImage.value) return
+  if (!window.confirm('重画这张图？\n\n会开一条新的作图尝试（旧转录留档成 .tryN、仍在「矢量图」里），类别与分组不变。\n注意：要看到新图，样式/划分/转换/组装需要重跑。')) return
+  state.retryNote = '正在提交重画请求…'
+  requestChapterRetry(String(s.project), '', 'vector', '图不对，重画', { path: String(s.name) })
+    .then((res: any) => {
+      state.retryNote = '已排队重画：' + ((res && res.note) || '等待并发槽位')
+      return refreshIndex()
+    })
+    .catch((err: any) => {
+      state.retryNote = '重画失败：' + ((err && err.message) || err)
+    })
+}
+
 /* 删除这条记录：给"转错的那些尝试"一个出口。只在看的是某一条具体的章节会话、
    且它不正在写入时才给按钮（服务端还会再查一次）。 */
 const canDrop = computed(() => {
@@ -193,6 +217,14 @@ function closeTrajStep() {
         <button class="retry-btn" type="button" :disabled="retryPending" @click="doRetry">
           {{ retryButtonText }}
         </button>
+        <button
+          v-if="canRedrawImage"
+          class="retry-btn"
+          type="button"
+          :disabled="redrawPending"
+          title="只重做这张图：开一条新作图尝试，类别与分组不变；下游阶段要重跑才能看到新图"
+          @click="doRedrawImage"
+        >重画这张图</button>
         <button
           v-if="canDrop"
           class="retry-btn retry-btn-danger"

@@ -312,6 +312,9 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// pages cache and the sessions of the image pass land inside THIS
 	// book's workspace rather than at the output root.
 	err = runPhase("images", func() error {
+		// 与"重画一张图"互斥：两者都写 source/progress_items 与 source/*.md。
+		r.vectorMu.Lock()
+		defer r.vectorMu.Unlock()
 		return r.RunImages(ImagesOptions{
 			TestMode: opts.TestMode, Number: opts.Number, Seed: opts.Seed,
 			SourceDir: opts.SourceDir, Files: opts.Files,
