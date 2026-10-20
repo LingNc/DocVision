@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterAttemptChain, chapterAttemptTag, chainMemberTag, plainTitle } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chainMemberTag, plainTitle } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 
 beforeEach(() => {
@@ -219,5 +219,28 @@ describe('章节标题按纯文本', () => {
     expect(plainTitle({ chapterId: 'chapter_004', chapterRole: 'checker' })).toBe(true)
     expect(plainTitle({ title: '**粗体** 与 $x_1$' })).toBe(false)
     expect(plainTitle(null)).toBe(false)
+  })
+})
+
+// T178：同一个 chapter_activity 在转换会话与核对会话里意思相反，文案不能共用。
+describe('章节状态文案', () => {
+  it('转换跑完是"待核对"，核对跑完才是"待处理"', () => {
+    expect(chapterActivityLabel('checking_result', 'convert')).toBe('转换完成待核对')
+    expect(chapterActivityLabel('checking_result', 'checker')).toBe('核对完成待处理')
+  })
+
+  it('转换又在排队、且这一章已有核对结论 → 等的是重转换的并发槽', () => {
+    expect(chapterActivityLabel('queued', 'convert', true)).toBe('核对完成待并发槽')
+    expect(chapterActivityLabel('queued', 'convert', false)).toBe('等待并发槽')
+    expect(chapterActivityLabel('queued', 'checker', true)).toBe('等待并发槽')
+  })
+
+  it('其余状态照旧，空状态只在 live 时说运行中', () => {
+    expect(chapterActivityLabel('pass')).toBe('已通过')
+    expect(chapterActivityLabel('issues', 'checker')).toBe('发现问题')
+    expect(chapterActivityLabel('waiting_children')).toBe('等待子会话')
+    expect(chapterActivityLabel('interrupted')).toBe('已中断')
+    expect(chapterActivityLabel(undefined, 'convert', false, false)).toBe('')
+    expect(chapterActivityLabel(undefined, 'convert', false, true)).toBe('运行中')
   })
 })

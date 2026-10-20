@@ -1078,3 +1078,8 @@ user 轮
   改：去掉写死的最大宽度，新增 `columnDragMax(viewport, cols, side)`——① 中栏保底 `CENTER_MIN`(640)；② 另一列保留它当前宽度（收起的列不占位）；③ 再按视口 60%（`COLUMN_MAX_RATIO`）封顶；结果不小于该列最小宽度。`computeColumns` 与拖动分隔条共用这一条规则，`toggleDetails` 恢复宽度时也用它。
   效果：1920 屏、详情栏收起时侧栏可到 1152（原来 420）；详情栏 400 时侧栏可到 880；详情栏在侧栏 280 时可到 1000。窄屏仍是原来的范围，中栏不会被压到 640 以下。
   验证：新增 `web/tests/layout.spec.ts`（7 条：60% 封顶、给中栏/另一列让位、窄屏不低于最小、宽值不被截回旧上限、装不下时先压详情栏再放弃）；`npm test` 155 通过、dist 已重建、`go build` + `go test ./internal/...` 全绿。
+
+[X][ ] T178. 用户反馈（附章节树截图）："这个显示的字有问题，应该是处理完成等待核对？因为核对还在等待并发。如果是核对已经完成，要回来的这个在等待并发槽的话才是核对完成等待并发槽吧？"
+  问题：转换会话跑完写的是 `chapter_activity=checking_result`，而界面把这一句统一译成「核对完成待处理」——于是转换行在核对会话还「等待并发槽」时就宣称"核对完成"，把两个阶段说反了。
+  改：新增 `chapterActivityLabel(state, role, prevVerdict, live)` 作为文案唯一来源，按角色分叉——转换会话的 `checking_result` = 「转换完成待核对」；核对会话的 `checking_result` = 「核对完成待处理」；转换会话排到 `queued` 而这一章已有核对结论（上一轮被打回）→ 它等的是**重转换**的并发槽 → 「核对完成待并发槽」；其余状态照旧（`pass`/`issues`/`error`/`waiting_children`/`interrupted`）。章节树两处状态位都改用它。
+  验证：`chapter-tree.spec.ts` 新增 3 条（两种角色的 checking_result、queued 有无核对结论、其余状态与空值）；`npm test` 158 通过、dist 已重建、`go build` + `go test ./internal/...` 全绿。

@@ -559,6 +559,35 @@ export function plainTitle(s: any): boolean {
 }
 
 /*
+ * 章节树里那句状态文案（T178）：同一个 `chapter_activity` 在转换会话与核对
+ * 会话里意思相反，不能共用一张表——
+ *  · 转换会话跑完（checking_result）= 这一轮转换交上去了、正等核对
+ *    → 「转换完成待核对」；
+ *  · 核对会话跑完（checking_result）= 核对会话结束了、正在读它的结论
+ *    → 「核对完成待处理」；
+ *  · 转换会话又排到 queued、而这一章已经有核对结论（上一轮被打回）→ 它等的
+ *    其实是**重转换**的并发槽 → 「核对完成待并发槽」。
+ */
+const CHAPTER_ACTIVITY: Record<string, string> = {
+  running: '运行中', waiting_children: '等待子会话',
+  pass: '已通过', issues: '发现问题', error: '会话错误',
+  // T171：转录里已有 run_end 却停在 running 的尝试被放弃了，不能再显示"运行中"。
+  interrupted: '已中断',
+}
+
+export function chapterActivityLabel(
+  state: string | undefined,
+  role: 'convert' | 'checker' = 'convert',
+  prevVerdict = false,
+  live = false,
+): string {
+  if (!state) return live ? '运行中' : ''
+  if (state === 'queued') return role === 'convert' && prevVerdict ? '核对完成待并发槽' : '等待并发槽'
+  if (state === 'checking_result') return role === 'checker' ? '核对完成待处理' : '转换完成待核对'
+  return CHAPTER_ACTIVITY[state] || (live ? '运行中' : '')
+}
+
+/*
  * 章节会话的尝试号（T165，T173 改标法）：同一章每次重开一条转录
  * （`convert_<章>.try2.jsonl`），条目标 `#N`。用户口径：不要在中栏/侧栏
  * 上写中文「第 N 次」——它在正常浏览时不提供信息，只在「历史」列表里用来

@@ -7354,6 +7354,21 @@
   function plainTitle(s) {
     return !!(s && s.chapterId);
   }
+  const CHAPTER_ACTIVITY = {
+    running: "运行中",
+    waiting_children: "等待子会话",
+    pass: "已通过",
+    issues: "发现问题",
+    error: "会话错误",
+    // T171：转录里已有 run_end 却停在 running 的尝试被放弃了，不能再显示"运行中"。
+    interrupted: "已中断"
+  };
+  function chapterActivityLabel(state2, role = "convert", prevVerdict = false, live = false) {
+    if (!state2) return live ? "运行中" : "";
+    if (state2 === "queued") return role === "convert" && prevVerdict ? "核对完成待并发槽" : "等待并发槽";
+    if (state2 === "checking_result") return role === "checker" ? "核对完成待处理" : "转换完成待核对";
+    return CHAPTER_ACTIVITY[state2] || (live ? "运行中" : "");
+  }
   function img2textMemberTag(id) {
     const r = parseImg2TextId(id);
     if (!r) return "";
@@ -9096,20 +9111,13 @@
         const s = primary(node);
         if (s) emit2("select", s);
       }
-      function activityText(session) {
-        const labels = {
-          queued: "等待并发槽",
-          running: "运行中",
-          waiting_children: "等待子会话",
-          checking_result: "核对完成待处理",
-          pass: "已通过",
-          issues: "发现问题",
-          error: "会话错误",
-          // T171：转录已写 run_end 却停在 running 的尝试被放弃了（换会话重来或中断），
-          // 不能再显示"运行中"，否则同一章会出现两条"运行中"。
-          interrupted: "已中断"
-        };
-        return labels[session == null ? void 0 : session.chapterActivity] || ((session == null ? void 0 : session.live) ? "运行中" : "");
+      function activityText(session, role, node) {
+        const chk = node == null ? void 0 : node.checker;
+        const verdict = !!chk && (chk.chapterActivity === "issues" || chk.chapterActivity === "pass");
+        return chapterActivityLabel(session == null ? void 0 : session.chapterActivity, role, verdict, !!(session == null ? void 0 : session.live));
+      }
+      function nodeActivity(node) {
+        return activityText(primary(node), node.convert ? "convert" : "checker", node);
       }
       function primary(node) {
         return node.convert || node.checker;
@@ -9159,7 +9167,7 @@
                   text: nodeTitle(node),
                   plain: ""
                 }, null, 8, ["text"]),
-                activityText(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_5$b, toDisplayString(activityText(primary(node))), 1)) : createCommentVNode("", true),
+                nodeActivity(node) ? (openBlock(), createElementBlock("span", _hoisted_5$b, toDisplayString(nodeActivity(node)), 1)) : createCommentVNode("", true),
                 unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_6$9, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
               ], 10, _hoisted_2$g),
               hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_7$8, [
@@ -9182,7 +9190,7 @@
                       text: unref(sessionTitleOf)(node.checker),
                       plain: ""
                     }, null, 8, ["text"]),
-                    activityText(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_9$5, toDisplayString(activityText(node.checker)), 1)) : createCommentVNode("", true),
+                    activityText(node.checker, "checker", node) ? (openBlock(), createElementBlock("span", _hoisted_9$5, toDisplayString(activityText(node.checker, "checker", node)), 1)) : createCommentVNode("", true),
                     unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$4, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
                   ], 8, _hoisted_8$5),
                   createBaseVNode("button", {
@@ -9214,7 +9222,7 @@
     }
     return target;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-004d2e46"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-956833c2"]]);
   const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"

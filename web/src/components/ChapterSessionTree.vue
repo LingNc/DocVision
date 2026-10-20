@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { state } from '../state'
-import { chapterNodeKey, chapterWantOpen, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
+import { chapterActivityLabel, chapterNodeKey, chapterWantOpen, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
 import type { ChapterTreeNode } from '../legacy/sidebar'
 
@@ -54,15 +54,18 @@ function selectNode(node: ChapterTreeNode): void {
   if (s) emit('select', s)
 }
 
-function activityText(session: any): string {
-  const labels: Record<string, string> = {
-    queued: '等待并发槽', running: '运行中', waiting_children: '等待子会话',
-    checking_result: '核对完成待处理', pass: '已通过', issues: '发现问题', error: '会话错误',
-    // T171：转录已写 run_end 却停在 running 的尝试被放弃了（换会话重来或中断），
-    // 不能再显示"运行中"，否则同一章会出现两条"运行中"。
-    interrupted: '已中断',
-  }
-  return labels[session?.chapterActivity] || (session?.live ? '运行中' : '')
+/* 同一句状态在两种会话里意思不同（T178），文案的唯一来源是
+ * chapterActivityLabel：转换跑完是「转换完成待核对」，核对跑完才是
+ * 「核对完成待处理」；转换又在排队而这一章已有核对结论时，它等的是重转换
+ * 的并发槽。 */
+function activityText(session: any, role: 'convert' | 'checker', node?: ChapterTreeNode): string {
+  const chk = node?.checker
+  const verdict = !!chk && (chk.chapterActivity === 'issues' || chk.chapterActivity === 'pass')
+  return chapterActivityLabel(session?.chapterActivity, role, verdict, !!session?.live)
+}
+
+function nodeActivity(node: ChapterTreeNode): string {
+  return activityText(primary(node), node.convert ? 'convert' : 'checker', node)
 }
 
 function primary(node: ChapterTreeNode): any {
@@ -105,7 +108,7 @@ function nodeTitle(node: ChapterTreeNode): string {
         ><span class="caret" aria-hidden="true"></span></button>
         <span v-else class="chapter-toggle-spacer" aria-hidden="true"></span>
         <InlineMD class="chapter-name row-title" tag="span" :text="nodeTitle(node)" plain />
-        <span v-if="activityText(primary(node))" class="chapter-state">{{ activityText(primary(node)) }}</span>
+        <span v-if="nodeActivity(node)" class="chapter-state">{{ nodeActivity(node) }}</span>
         <span v-if="usageChipText(primary(node))" class="chapter-usage">{{ usageChipText(primary(node)) }}</span>
       </div>
       <div v-if="hasBody(node) && isOpen(node)" class="chapter-node-body">
@@ -117,7 +120,7 @@ function nodeTitle(node: ChapterTreeNode): string {
           <button class="checker-main session-row" type="button" role="treeitem" :data-id="node.checker.id" :title="sessionTip(node.checker)" @click="emit('select', node.checker)">
             <span class="checker-marker">核对</span>
             <InlineMD class="checker-name row-title" tag="span" :text="sessionTitleOf(node.checker)" plain />
-            <span v-if="activityText(node.checker)" class="chapter-state">{{ activityText(node.checker) }}</span>
+            <span v-if="activityText(node.checker, 'checker', node)" class="chapter-state">{{ activityText(node.checker, 'checker', node) }}</span>
             <span v-if="usageChipText(node.checker)" class="chapter-usage">{{ usageChipText(node.checker) }}</span>
           </button>
           <button class="chapter-info" type="button" title="打开核对会话详情" @click="emit('info', node.checker)">ⓘ</button>

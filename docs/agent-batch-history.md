@@ -2033,3 +2033,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **改**：新增 `columnDragMax(viewport, cols, side)`——中栏保底 640、另一列保留当前宽度、再按视口 60% 封顶，结果不低于该列最小宽度；`computeColumns`、拖动分隔条、`toggleDetails` 恢复宽度共用这一条规则。`SIDEBAR_MAX`/`DETAILS_MAX` 删除。
 - **效果**：1920 屏、详情栏收起时侧栏可到 1152，详情栏 400 时侧栏可到 880，详情栏可到 1000；窄屏仍是原范围。
 - **验证**：新增 `web/tests/layout.spec.ts`（7 条）；`npm test` 155、`go build` + `go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补十四，T178：章节树状态文案按角色分开）
+
+- **真实缺陷**：转换会话跑完写 `chapter_activity=checking_result`，前端统一译成「核对完成待处理」——核对会话还在「等待并发槽」时，转换行就说"核对完成"，两个阶段说反了。
+- **改**：`chapterActivityLabel(state, role, prevVerdict, live)` 作为唯一来源：转换的 `checking_result` = 「转换完成待核对」、核对的 = 「核对完成待处理」、转换在 `queued` 且已有核对结论 = 「核对完成待并发槽」；其余状态不变。
+- **验证**：`chapter-tree.spec.ts` 新增 3 条；`npm test` 158、`go build` + `go test ./internal/...` 全绿。
