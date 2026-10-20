@@ -1,51 +1,51 @@
 
-.chapter-tree[data-v-60a15a70] { border-left: 1px solid var(--line, #c9d1d9); margin-left: 13px; padding-left: 8px;
+.chapter-tree[data-v-3c5ac5f0] { border-left: 1px solid var(--line, #c9d1d9); margin-left: 13px; padding-left: 8px;
 }
-.chapter-node[data-v-60a15a70] { min-width: 0;
+.chapter-node[data-v-3c5ac5f0] { min-width: 0;
 }
-.chapter-node-head[data-v-60a15a70] { display: flex; align-items: center; gap: 4px; min-height: 29px; cursor: pointer; padding: 0 7px 0 0; color: var(--text, #24292f);
+.chapter-node-head[data-v-3c5ac5f0] { display: flex; align-items: center; gap: 4px; min-height: 29px; cursor: pointer; padding: 0 7px 0 0; color: var(--text, #24292f);
 }
 /* 展开按钮：整行高的 26px 命中区（原先只有 12px 的小三角），点它只切展开。 */
-.chapter-toggle[data-v-60a15a70] {
+.chapter-toggle[data-v-3c5ac5f0] {
   flex: 0 0 26px; align-self: stretch; min-height: 26px;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; background: transparent; color: var(--muted, #6e7781);
   padding: 0; border-radius: 5px; cursor: pointer;
 }
-.chapter-toggle[data-v-60a15a70]:hover { background: var(--hover, #f3f4f6); color: var(--text, #24292f);
+.chapter-toggle[data-v-3c5ac5f0]:hover { background: var(--hover, #f3f4f6); color: var(--text, #24292f);
 }
-.chapter-toggle[data-v-60a15a70]:focus-visible { outline: 2px solid var(--accent, #0969da); outline-offset: -1px;
+.chapter-toggle[data-v-3c5ac5f0]:focus-visible { outline: 2px solid var(--accent, #0969da); outline-offset: -1px;
 }
-.chapter-toggle-spacer[data-v-60a15a70] { flex: 0 0 26px;
+.chapter-toggle-spacer[data-v-3c5ac5f0] { flex: 0 0 26px;
 }
-.caret[data-v-60a15a70] {
+.caret[data-v-3c5ac5f0] {
   width: 0; height: 0;
   border-left: 5px solid currentColor;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   transition: transform .15s ease;
 }
-.chapter-node.open > .chapter-node-head .caret[data-v-60a15a70] { transform: rotate(90deg);
+.chapter-node.open > .chapter-node-head .caret[data-v-3c5ac5f0] { transform: rotate(90deg);
 }
-.chapter-name[data-v-60a15a70], .checker-name[data-v-60a15a70] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+.chapter-name[data-v-3c5ac5f0], .checker-name[data-v-3c5ac5f0] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
 }
-.chapter-node-head[data-v-60a15a70]:hover, .chapter-checker[data-v-60a15a70]:hover { background: var(--hover, #f3f4f6);
+.chapter-node-head[data-v-3c5ac5f0]:hover, .chapter-checker[data-v-3c5ac5f0]:hover { background: var(--hover, #f3f4f6);
 }
-.chapter-node-head.active[data-v-60a15a70], .chapter-checker.active[data-v-60a15a70] { background: var(--active, #eaeef2);
+.chapter-node-head.active[data-v-3c5ac5f0], .chapter-checker.active[data-v-3c5ac5f0] { background: var(--active, #eaeef2);
 }
-.chapter-node-body[data-v-60a15a70] { padding-left: 12px;
+.chapter-node-body[data-v-3c5ac5f0] { padding-left: 12px;
 }
-.chapter-checker[data-v-60a15a70] { width: 100%; display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--text, #24292f); padding: 0 7px 0 26px;
+.chapter-checker[data-v-3c5ac5f0] { width: 100%; display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--text, #24292f); padding: 0 7px 0 26px;
 }
-.checker-main[data-v-60a15a70] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer;
+.checker-main[data-v-3c5ac5f0] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer;
 }
-.checker-marker[data-v-60a15a70] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.checker-marker[data-v-3c5ac5f0] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
-.chapter-state[data-v-60a15a70], .chapter-usage[data-v-60a15a70] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.chapter-state[data-v-3c5ac5f0], .chapter-usage[data-v-3c5ac5f0] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
-.chapter-checker.live .chapter-state[data-v-60a15a70] { color: var(--green, #1a7f37);
+.chapter-checker.live .chapter-state[data-v-3c5ac5f0] { color: var(--green, #1a7f37);
 }
-.chapter-info[data-v-60a15a70] { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer;
+.chapter-info[data-v-3c5ac5f0] { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer;
 }
 
 /* ============================ 侧栏 ============================ */

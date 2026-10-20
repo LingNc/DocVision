@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { chapterAttemptChain, chapterAttemptTag, chainMemberTag } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterAttemptChain, chapterAttemptTag, chainMemberTag } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 
 beforeEach(() => {
@@ -97,5 +97,61 @@ describe('chapter attempt chain', () => {
     expect(chapterAttemptTag({ chapterAttempt: 1 })).toBe('')
     expect(chapterAttemptTag({ chapterAttempt: 3 })).toBe('第 3 次')
     expect(chainMemberTag(mk('a/convert_chapter_042.try2.jsonl', 2, '2026-10-19T12:00:00Z'))).toBe('第 2 次')
+  })
+})
+
+// T170：章节树的一行代表"这一章现在的样子"，默认打开**最新一次**尝试。
+// 旧实现靠"遍历时后者覆盖前者"，而会话列表按时间新→旧，结果停在第一次（被
+// 作废的那次）上；这里两个输入顺序都必须选到最新一次。
+describe('章节树默认打开最新一次尝试', () => {
+  const mk = (attempt: number, mtime: string, role = 'convert', chapterId = 'chapter_042') => ({
+    id: `book/work/sessions/${role}_${chapterId}` + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book',
+    chapterId,
+    chapterRole: role,
+    chapterAttempt: attempt,
+    mtime,
+  })
+  const attempts = [
+    mk(1, '2026-10-19T10:00:00Z'),
+    mk(2, '2026-10-19T12:00:00Z'),
+    mk(3, '2026-10-19T14:00:00Z'),
+  ]
+
+  it('列表新→旧（接口给的样子）也选最新一次', () => {
+    const roots = buildChapterTree([...attempts].reverse())
+    expect(roots.length).toBe(1)
+    expect(roots[0].convert!.chapterAttempt).toBe(3)
+  })
+
+  it('列表旧→新也选最新一次（与入参顺序无关）', () => {
+    const roots = buildChapterTree([...attempts])
+    expect(roots[0].convert!.chapterAttempt).toBe(3)
+  })
+
+  it('核对会话同样取最新一次', () => {
+    const roots = buildChapterTree([
+      mk(1, '2026-10-19T10:00:00Z', 'checker'),
+      mk(2, '2026-10-19T11:00:00Z', 'checker'),
+    ])
+    expect(roots[0].checker!.chapterAttempt).toBe(2)
+    expect(roots[0].convert).toBeNull()
+  })
+
+  it('尝试号相同（旧转录没有该字段）时退回修改时间', () => {
+    const a = { ...mk(1, '2026-10-19T10:00:00Z'), chapterAttempt: undefined }
+    const b = { ...mk(1, '2026-10-19T12:00:00Z'), chapterAttempt: undefined }
+    const roots = buildChapterTree([a, b])
+    expect(roots[0].convert!.mtime).toBe('2026-10-19T12:00:00Z')
+  })
+
+  it('子节点仍挂到父节点上，父子各自选自己的最新一次', () => {
+    const parent = mk(2, '2026-10-19T12:00:00Z', 'convert', 'chapter_042')
+    const child = { ...mk(1, '2026-10-19T13:00:00Z', 'convert', 'chapter_042_child_01'), chapterParent: 'chapter_042' }
+    const roots = buildChapterTree([parent, child])
+    expect(roots.length).toBe(1)
+    expect(roots[0].children.length).toBe(1)
+    expect(roots[0].convert!.chapterAttempt).toBe(2)
+    expect(roots[0].children[0].convert!.id).toContain('_child_01')
   })
 })

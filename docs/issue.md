@@ -1012,3 +1012,8 @@ user 轮
   2. **超限必须先拆（硬规则）**：`submit` 门禁在看过原书/覆盖率之前先查规模——`lines > limit` 且还没拆过（`splitTool.Requested == false`）且还能再拆（`depth < 3`）就打回，告诉它先 `request_chapter_split`。已经拆过的节点（正在整合子章节）与最深一层（拆不动了）放行。
   3. **可配置**：`latex.max_chapter_lines`（未写 3000，0 = 关闭）。两份模板、`docs/config.md`、`docs/latex.md` 同步。
   验证：`TestChapterSizeNote` / `TestChapterSizeReject`（规模提示的三种分支、打回的四个边界：未超限/已拆分/到最深/关闭）；`go test ./internal/...` 全绿。
+
+[X][ ] T170. 用户反馈：侧栏里某个章节转换的行点开，如果这一章有多条重试转录（中栏有「历史 N」页签），默认选中的不该是第一次、而应该是最新一次。
+  根因：`buildChapterTree`（web/src/legacy/sidebar.ts）遍历会话列表逐个赋 `node.convert`，**后写的覆盖先写的**；而 Go 侧会话列表按 `ModTime` 新→旧排序（`sessionview.go` 的 sort），于是同一章的多次尝试里最后落进 `node.convert` 的是 **mtime 最早的那次**——正是被 checker 打回、产物作废的第一次。用户在侧栏点这一行，打开的是它，真正的结果藏在「历史 N」页签里，得多点一次。
+  改：`newerAttempt(cur, next)` —— `chapterAttempt` 序号大者胜，序号相同（旧转录无该字段）退回 `mtime`；convert 与 checker 各自取最新一次。章节树行补「第 N 次」chip（`chapterAttemptTag`），点开前就知道这一行代表哪次尝试。更早的尝试照旧在「历史 N」页签里逐个可点（`chapterAttemptChain` 不变，仍 新 → 旧）。
+  验证：`web/tests/chapter-tree.spec.ts` 新增 5 条——接口顺序（新→旧）与反向顺序都选到第 3 次、核对会话同规则、无 `chapterAttempt` 时按时间、子节点仍挂父节点且父子各选各的最新一次；`npm test` 143 通过。

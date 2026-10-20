@@ -408,6 +408,22 @@ export interface ChapterTreeNode {
   children: ChapterTreeNode[]
 }
 
+/*
+ * T170：同一章被 checker 打回后会换全新会话重来（convert_<章>.try2.jsonl…），
+ * 几次尝试是**一件事的历史版本**。章节树一行代表"这一章现在的样子"，所以默认
+ * 打开**最新一次**尝试（序号大者优先，序号相同才比修改时间）——旧实现是遍历
+ * 列表时后者覆盖前者，而列表按时间新→旧，结果反而停在第一次尝试上；用户点开
+ * 这一行看到的是被作废的那一次。更早的尝试仍在「历史 N」页签里逐个可点。
+ */
+function newerAttempt(cur: any, next: any): any {
+  if (!cur) return next
+  if (!next) return cur
+  const a = Number(cur.chapterAttempt) || 1
+  const b = Number(next.chapterAttempt) || 1
+  if (a !== b) return b > a ? next : cur
+  return mtimeMs(next) > mtimeMs(cur) ? next : cur
+}
+
 export function buildChapterTree(items: any[]): ChapterTreeNode[] {
   const byId: Record<string, ChapterTreeNode> = {}
   const parents: Record<string, string> = {}
@@ -416,8 +432,8 @@ export function buildChapterTree(items: any[]): ChapterTreeNode[] {
     const id = String(session.chapterId)
     const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] })
     parents[id] = String(session.chapterParent || '')
-    if (session.chapterRole === 'checker') node.checker = session
-    else if (session.chapterRole === 'convert') node.convert = session
+    if (session.chapterRole === 'checker') node.checker = newerAttempt(node.checker, session)
+    else if (session.chapterRole === 'convert') node.convert = newerAttempt(node.convert, session)
   })
   const roots: ChapterTreeNode[] = []
   Object.keys(byId).forEach((id) => {

@@ -7256,6 +7256,14 @@
     if (s.imageType) bits.push(s.imageType);
     return bits.join("\n");
   }
+  function newerAttempt(cur, next) {
+    if (!cur) return next;
+    if (!next) return cur;
+    const a = Number(cur.chapterAttempt) || 1;
+    const b = Number(next.chapterAttempt) || 1;
+    if (a !== b) return b > a ? next : cur;
+    return mtimeMs(next) > mtimeMs(cur) ? next : cur;
+  }
   function buildChapterTree(items) {
     const byId = {};
     const parents = {};
@@ -7264,8 +7272,8 @@
       const id = String(session.chapterId);
       const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] });
       parents[id] = String(session.chapterParent || "");
-      if (session.chapterRole === "checker") node.checker = session;
-      else if (session.chapterRole === "convert") node.convert = session;
+      if (session.chapterRole === "checker") node.checker = newerAttempt(node.checker, session);
+      else if (session.chapterRole === "convert") node.convert = newerAttempt(node.convert, session);
     });
     const roots = [];
     Object.keys(byId).forEach((id) => {
@@ -9009,28 +9017,29 @@
     class: "chapter-toggle-spacer",
     "aria-hidden": "true"
   };
-  const _hoisted_5$b = {
-    key: 2,
-    class: "chapter-state"
-  };
+  const _hoisted_5$b = ["title"];
   const _hoisted_6$9 = {
     key: 3,
-    class: "chapter-usage"
+    class: "chapter-state"
   };
   const _hoisted_7$8 = {
+    key: 4,
+    class: "chapter-usage"
+  };
+  const _hoisted_8$5 = {
     key: 0,
     class: "chapter-node-body"
   };
-  const _hoisted_8$5 = ["data-id", "title", "onClick"];
-  const _hoisted_9$5 = {
+  const _hoisted_9$5 = ["data-id", "title", "onClick"];
+  const _hoisted_10$4 = {
     key: 0,
     class: "chapter-state"
   };
-  const _hoisted_10$4 = {
+  const _hoisted_11$4 = {
     key: 1,
     class: "chapter-usage"
   };
-  const _hoisted_11$4 = ["onClick"];
+  const _hoisted_12$4 = ["onClick"];
   const _sfc_main$l = /* @__PURE__ */ defineComponent({
     ...{ name: "ChapterSessionTree" },
     __name: "ChapterSessionTree",
@@ -9125,10 +9134,15 @@
                   tag: "span",
                   text: nodeTitle(node)
                 }, null, 8, ["text"]),
-                activityText(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_5$b, toDisplayString(activityText(primary(node))), 1)) : createCommentVNode("", true),
-                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_6$9, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
+                primary(node) && primary(node).chapterAttempt > 1 ? (openBlock(), createElementBlock("span", {
+                  key: 2,
+                  class: "row-chip chain-tag",
+                  title: "这一章被 checker 打回后换过全新会话：这一行打开的是第 " + primary(node).chapterAttempt + " 次尝试（更早的在「历史」页签里）"
+                }, toDisplayString(unref(chapterAttemptTag)(primary(node))), 9, _hoisted_5$b)) : createCommentVNode("", true),
+                activityText(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_6$9, toDisplayString(activityText(primary(node))), 1)) : createCommentVNode("", true),
+                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_7$8, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
               ], 10, _hoisted_2$g),
-              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_7$8, [
+              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_8$5, [
                 node.checker ? (openBlock(), createElementBlock("div", {
                   key: 0,
                   class: normalizeClass(["chapter-checker", { active: currentId.value === node.checker.id, live: node.checker.live }])
@@ -9147,15 +9161,15 @@
                       tag: "span",
                       text: unref(sessionTitleOf)(node.checker)
                     }, null, 8, ["text"]),
-                    activityText(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_9$5, toDisplayString(activityText(node.checker)), 1)) : createCommentVNode("", true),
-                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$4, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
-                  ], 8, _hoisted_8$5),
+                    activityText(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$4, toDisplayString(activityText(node.checker)), 1)) : createCommentVNode("", true),
+                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_11$4, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
+                  ], 8, _hoisted_9$5),
                   createBaseVNode("button", {
                     class: "chapter-info",
                     type: "button",
                     title: "打开核对会话详情",
                     onClick: ($event) => emit2("info", node.checker)
-                  }, "ⓘ", 8, _hoisted_11$4)
+                  }, "ⓘ", 8, _hoisted_12$4)
                 ], 2)) : createCommentVNode("", true),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
                   key: 1,
@@ -9179,7 +9193,7 @@
     }
     return target;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-60a15a70"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-3c5ac5f0"]]);
   const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"

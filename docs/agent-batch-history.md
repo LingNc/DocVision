@@ -1967,3 +1967,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **旧缺口**：递归拆分机制齐备（2–16 段、覆盖全文、≤3 层、子会话各过 checker、父会话整合），但触发条件是模型自评"太大"——没有数字、没有后果；而且会话连自己这章多少行都不知道。
 - **改**：首条消息追加 "This chapter is N lines of markdown."，超限时附行动建议（拆 2–16 段、每段约 limit/3–limit/2 行）；`submit` 门禁新增规模关：`lines > limit && !splitRequested && depth < 3` → 打回并要求 `request_chapter_split`（已拆分节点正在整合子章节、最深一层拆不动，二者放行）。上限 `latex.max_chapter_lines`（未写 3000，0 关闭），两份模板 + `docs/config.md` + `docs/latex.md` 同步。
 - **验证**：`TestChapterSizeNote`（小章节只报数字 / 超限催拆分并给区间 / 最深一层不催 / 关闭时只报数字）、`TestChapterSizeReject`（未超限 / 超限 / 已拆分 / 到最深 / 关闭五个边界）；`go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补六，T170：章节行默认打开最新一次尝试）
+
+- **用户反馈**：侧栏某个章节转换的行点开，这一章有多次重试（中栏出现「历史 N」）时，默认选中的应该是最新一次，而不是第一次。
+- **根因**：`buildChapterTree` 遍历会话列表逐个赋 `node.convert`，后写覆盖先写；Go 侧列表按 `ModTime` 新→旧排序，所以同一章的多条尝试里最后留下的是 **mtime 最早**的那条 = 被 checker 打回、产物作废的第 1 次。点章节行看到的是废产物，真正的结果要进「历史 N」再点一次。
+- **改**：`newerAttempt()` 按 `chapterAttempt` 序号取大（相同才比 mtime），convert / checker 各取最新一次；章节树行加「第 N 次」chip，打开前就知道代表哪次。`chapterAttemptChain()`（历史页签 新 → 旧）不动。
+- **验证**：`web/tests/chapter-tree.spec.ts` +5 条（两种入参顺序都选第 3 次、checker 同规则、缺 `chapterAttempt` 时按时间、子节点仍挂父节点）；`npm test` 143 通过；`npm run build` + `go build` 通过（embed 产物已提交）。
