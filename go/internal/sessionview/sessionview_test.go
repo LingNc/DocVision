@@ -1107,15 +1107,15 @@ func TestChapterIdentityAttemptSuffix(t *testing.T) {
 	if retryChild.ID != "chapter_042_child_02" || retryChild.Attempt != 2 {
 		t.Fatalf("child retry identity = %+v", retryChild)
 	}
-	// T171：旧版本一次运行内连续重试会套成 .try2.try3；剥干净、取最大 N，
-	// 否则预览页会把它当成一个叫 "chapter_042.try2" 的独立章节（两个节点）。
-	nested := chapterIdentity("proj/work/sessions/convert_chapter_042.try2.try3.jsonl")
-	if nested.ID != "chapter_042" || nested.Role != "convert" || nested.Attempt != 3 {
-		t.Fatalf("nested retry must collapse onto the same chapter: %+v", nested)
+	// T171：重试转录名只会有一层 .tryN（磁盘上的旧套娃名已一次性改名），
+	// 第 3 次仍是同一个章节的第 3 次尝试。
+	third := chapterIdentity("proj/work/sessions/convert_chapter_042.try3.jsonl")
+	if third.ID != "chapter_042" || third.Role != "convert" || third.Attempt != 3 {
+		t.Fatalf("third attempt identity = %+v", third)
 	}
-	nestedChild := chapterIdentity("proj/work/sessions/checker_chapter_042_child_02.try2.try3.jsonl")
-	if nestedChild.ID != "chapter_042_child_02" || nestedChild.Parent != "chapter_042" || nestedChild.Attempt != 3 {
-		t.Fatalf("nested child retry = %+v", nestedChild)
+	thirdChild := chapterIdentity("proj/work/sessions/checker_chapter_042_child_02.try3.jsonl")
+	if thirdChild.ID != "chapter_042_child_02" || thirdChild.Parent != "chapter_042" || thirdChild.Attempt != 3 {
+		t.Fatalf("third child attempt = %+v", thirdChild)
 	}
 }
 

@@ -1270,15 +1270,11 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if node.AttemptNum < 1 {
 		// 磁盘上已经试过几次：最后那次被中断（没有 run_end）就原位续跑，否则
 		// 换一个新号——绝不和旧转录共用同一个文件。
-		existingPath, existing, ended := attemptNumberOnDisk(transcriptBase)
+		existing, ended := attemptNumberOnDisk(transcriptBase)
 		if existing >= 1 && !ended {
-			// 原位续跑：用**文件本来的名字**（旧版本可能留下了 .try2.try3 这种
-			// 套娃名），别按号另拼一个出来。
 			node.AttemptNum = existing
-			transcriptBase = existingPath
 		} else {
 			node.AttemptNum = existing + 1
-			transcriptBase = attemptTranscriptPath(transcriptBase, node.AttemptNum)
 		}
 	}
 	node.TranscriptPath = attemptTranscriptPath(transcriptBase, node.AttemptNum)
@@ -1606,13 +1602,13 @@ func attemptTranscriptPath(path string, attempt int) string {
 
 // attemptNumberOnDisk 查这一章在磁盘上已有的最大尝试号，并告诉最后一次是否
 // 已经正常收尾（转录里有 run_end）。0 表示还没有任何尝试。
-func attemptNumberOnDisk(path string) (string, int, bool) {
+func attemptNumberOnDisk(path string) (int, bool) {
 	dir := filepath.Dir(path)
 	ext := filepath.Ext(path)
 	stem := trimAttemptSuffix(strings.TrimSuffix(filepath.Base(path), ext))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return "", 0, false
+		return 0, false
 	}
 	maxNum, maxName := 0, ""
 	for _, e := range entries {
@@ -1624,44 +1620,23 @@ func attemptNumberOnDisk(path string) (string, int, bool) {
 			continue
 		}
 		base := strings.TrimSuffix(name, ext)
-		if base != stem && !strings.HasPrefix(base, stem+".try") {
-			continue
+		var n int
+		switch {
+		case base == stem:
+			n = 1
+		case strings.HasPrefix(base, stem+".try"):
+			if v, err := strconv.Atoi(strings.TrimPrefix(base, stem+".try")); err == nil {
+				n = v
+			}
 		}
-		n := attemptOfName(base, stem)
 		if n > maxNum || (n == maxNum && name > maxName) {
 			maxNum, maxName = n, name
 		}
 	}
 	if maxNum == 0 {
-		return "", 0, false
+		return 0, false
 	}
-	full := filepath.Join(dir, maxName)
-	return full, maxNum, transcriptEnded(full)
-}
-
-// attemptOfName 从转录名里取尝试号：`<stem>` = 1，`<stem>.try3` = 3，
-// 旧版本的 `<stem>.try2.try3` 取最大的一层。
-func attemptOfName(base, stem string) int {
-	num := 1
-	for {
-		i := strings.LastIndex(base, ".try")
-		if i < len(stem) {
-			break
-		}
-		digits := base[i+len(".try"):]
-		if digits == "" {
-			break
-		}
-		n, err := strconv.Atoi(digits)
-		if err != nil {
-			break
-		}
-		if n > num {
-			num = n
-		}
-		base = base[:i]
-	}
-	return num
+	return maxNum, transcriptEnded(filepath.Join(dir, maxName))
 }
 
 // transcriptEnded 看转录末尾有没有 run_end（会话层每次 Run 结束都会写）。
@@ -1688,9 +1663,8 @@ func transcriptEnded(path string) bool {
 	return strings.Contains(string(buf), `"kind":"run_end"`)
 }
 
-// trimAttemptSuffix 去掉名字末尾的 `.tryN`（可能要剥好几层）。T171 之后不会
-// 再产生套娃名，但磁盘上已有的旧转录还得能算对：剥干净才能归到同一章的
-// 第 N 次尝试。
+// trimAttemptSuffix 去掉名字末尾的 `.tryN`（可能要剥好几层）——这是写入方向
+// 的保险：派生新文件名前先剥干净旧后缀，就不会再产出 `.try2.try3` 这种套娃名。
 func trimAttemptSuffix(stem string) string {
 	for {
 		i := strings.LastIndex(stem, ".try")

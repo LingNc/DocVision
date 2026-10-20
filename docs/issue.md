@@ -1027,7 +1027,7 @@ user 轮
   另有第四条，是修的时候顺着查出来的：重跑时 `node.Attempt` 从 1 重新数，与磁盘上已有的 `convert_<章>.try2.jsonl` 撞名，`NewTranscript` 是 append 语义——两段对话会追加进同一条转录。
   改：
   1. `attemptTranscriptPath` 先剥掉已有的 `.tryN` 再套；递归时用**原始** `transcriptBase`（`next.TranscriptPath = transcriptBase`），不再套娃。
-  2. `chapterIdentity` 循环剥尽 `.tryN`、取最大号——磁盘上已有的套娃名也能归回同一章的历史。
-  3. 拆出 `AttemptNum`（写进文件名的跨运行尝试号，0 = 由磁盘推导：最后一次没 `run_end` 就原位续跑、否则新号）与 `Attempt`（本次运行内的预算计数，`checker_rounds` 按它算）。这样重跑既不撞名也不append混排；旧套娃名续跑时用**文件本来的路径**（`attemptNumberOnDisk` 连路径一起返回）。
+  2. **历史数据一次性改名，代码不留兼容**：磁盘上 5 条套娃转录（顶层 1 条 + 递归子章节 4 条，全部是 convert）已改成规范名（`convert_<章>.try2.try3.jsonl` → `convert_<章>.try3.jsonl`），`chapterIdentity` 仍只剥一层 `.tryN`——不为"错误历史"养分支，改完的真实数据直接就是对的。
+  3. 拆出 `AttemptNum`（写进文件名的跨运行尝试号，0 = 由磁盘推导：最后一次没 `run_end` 就原位续跑、否则新号）与 `Attempt`（本次运行内的预算计数，`checker_rounds` 按它算）。这样重跑既不撞名也不 append 混排。
   4. 转换会话跑完写 `chapter_activity=checking_result`，checker 判过写 `pass`、打回写 `issues`、会话失败写 `error`；`sessionview` 另做兜底：活动停在 `running` 但转录里已有 `run_end` → 折成 `interrupted`，侧栏显示「已中断」（同时不算 live）。
-  验证：`TestAttemptTranscriptPath` 补"已带 .try2 再派生 → 只留 .try3"与"旧 `try2.try3` → `try4`"；新增 `TestAttemptNumberOnDisk`（空目录 / 中断续跑取真实路径 / 已结束取新号 / 旧套娃名取最大 / 同前缀的别章文件不串）；`TestChapterIdentityAttemptSuffix` 补旧套娃名与子章节套娃名归组；新增 `TestActivityAfterEnd`、`TestReadStatSawRunEnd`。`go test ./internal/...` 全绿、`npm test` 143 通过。
+  验证：`TestAttemptTranscriptPath` 补"已带 .try2 再派生 → 只留 .try3"（写入方向的保险，任何调用都产不出套娃名）；新增 `TestAttemptNumberOnDisk`（空目录 / 中断续跑 / 已结束取新号 / 第 3 次规范名 / 同前缀的别章文件不串）；`TestChapterIdentityAttemptSuffix` 补第 3 次与子章节第 3 次的归组；新增 `TestActivityAfterEnd`、`TestReadStatSawRunEnd`。`go test ./internal/...` 全绿、`npm test` 143 通过。改名后拿真实项目 `sessions --list` 复核：`convert_chapter_001` 的三条（第 1/2/3 次）标签都是 `转换 · chapter_001`。

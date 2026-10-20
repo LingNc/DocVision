@@ -626,23 +626,12 @@ var chapterChildSuffix = regexp.MustCompile(`^(.*)_child_(\d+)$`)
 
 func chapterIdentity(rel string) chapterIdentityInfo {
 	base := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
-	// T171：`.tryN` 可能不止一层（旧版本一次运行里连续重试会套成
-	// convert_<章>.try2.try3.jsonl）。剥干净、取最大的 N，旧转录才能归到同一
-	// 章的第 N 次尝试，而不是被当成一个叫 "chapter_001.try2" 的独立章节。
 	attempt := 1
-	for {
-		m := chapterAttemptSuffix.FindStringSubmatch(base)
-		if m == nil {
-			break
-		}
-		n, err := strconv.Atoi(m[2])
-		if err != nil || n <= 1 {
-			break
-		}
-		if n > attempt {
+	if m := chapterAttemptSuffix.FindStringSubmatch(base); m != nil {
+		if n, err := strconv.Atoi(m[2]); err == nil && n > 1 {
 			attempt = n
+			base = m[1]
 		}
-		base = m[1]
 	}
 	role, id := "", ""
 	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}} {
