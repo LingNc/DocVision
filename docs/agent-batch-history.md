@@ -2026,3 +2026,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **真实缺陷**：会话名统一走行内 Markdown，而章节会话的标题是流水线标识符 `chapter_004_child_01`——下划线被当成强调标记，渲染成斜体并从文本里消失（截图里显示 `chapter004child01chil…`）。
 - **改**：`InlineMD` 加 `plain`（纯文本插入）；`plainTitle(s)`（有 `chapterId` 即章节会话）用于章节树两处标题、侧栏四处会话行、历史列表与详情栏「会话」行；其它会话仍走 markdown。
 - **验证**：`chapter-tree.spec.ts` 新增 `plainTitle` 用例；`npm test` 148、`go test ./internal/...` 全绿，dist 重建。
+
+## v1.5+（第四十七批补十三，T177：两侧栏的宽度上限按视口算）
+
+- **真实缺陷**：三栏宽度上限是照 DSH 抄来的写死值（侧栏 264–420、详情栏 300–520），大屏上拖到顶就停，详情栏开着时侧栏几乎没有空间。
+- **改**：新增 `columnDragMax(viewport, cols, side)`——中栏保底 640、另一列保留当前宽度、再按视口 60% 封顶，结果不低于该列最小宽度；`computeColumns`、拖动分隔条、`toggleDetails` 恢复宽度共用这一条规则。`SIDEBAR_MAX`/`DETAILS_MAX` 删除。
+- **效果**：1920 屏、详情栏收起时侧栏可到 1152，详情栏 400 时侧栏可到 880，详情栏可到 1000；窄屏仍是原范围。
+- **验证**：新增 `web/tests/layout.spec.ts`（7 条）；`npm test` 155、`go build` + `go test ./internal/...` 全绿。

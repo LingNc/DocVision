@@ -6675,11 +6675,10 @@
   const RAIL_W = 56;
   const SIDEBAR_DEFAULT = 280;
   const SIDEBAR_MIN = 264;
-  const SIDEBAR_MAX = 420;
   const DETAILS_DEFAULT = 400;
   const DETAILS_MIN = 300;
-  const DETAILS_MAX = 520;
   const CENTER_MIN = 640;
+  const COLUMN_MAX_RATIO = 0.6;
   function storeGet(key) {
     try {
       return window.localStorage.getItem(STORE_PREFIX + key);
@@ -6794,9 +6793,15 @@
   function clampWidth(px, min, max) {
     return Math.min(max, Math.max(min, Math.round(px)));
   }
+  function columnDragMax(viewport, cols, side) {
+    const vp = viewport > 0 ? viewport : 1280;
+    const other = side === "sidebar" ? cols.details > 0 ? cols.details : 0 : cols.sidebar > 0 ? cols.sidebar : 0;
+    const floor = side === "sidebar" ? SIDEBAR_MIN : DETAILS_MIN;
+    return Math.max(floor, Math.min(Math.round(vp * COLUMN_MAX_RATIO), vp - CENTER_MIN - other));
+  }
   function computeColumns(viewport, sidebar, details) {
-    const s = sidebar === 0 ? RAIL_W : clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX);
-    const d0 = details === 0 ? 0 : clampWidth(details, DETAILS_MIN, DETAILS_MAX);
+    const s = sidebar === 0 ? RAIL_W : clampWidth(sidebar, SIDEBAR_MIN, columnDragMax(viewport, { sidebar: 0, details: details > 0 ? DETAILS_MIN : 0 }, "sidebar"));
+    const d0 = details === 0 ? 0 : clampWidth(details, DETAILS_MIN, columnDragMax(viewport, { sidebar: s, details: 0 }, "details"));
     if (s + d0 + CENTER_MIN <= viewport) {
       return { sidebar: s, center: viewport - s - d0, details: d0 };
     }
@@ -6837,7 +6842,11 @@
     if (state.details > 0) {
       state.details = 0;
     } else {
-      state.details = clampWidth(state.details || DETAILS_DEFAULT, DETAILS_MIN, DETAILS_MAX);
+      state.details = clampWidth(
+        state.details || DETAILS_DEFAULT,
+        DETAILS_MIN,
+        columnDragMax(layout.viewport, layout.cols, "details")
+      );
       const viewport = layout.viewport;
       const collapsed = sidebarCollapsedNow();
       const pref = collapsed ? 0 : state.sidebar === 0 ? SIDEBAR_DEFAULT : state.sidebar;
@@ -12679,10 +12688,10 @@
         if (!drag.value) return;
         const dx = ev.clientX - dragOrigin;
         if (drag.value.side === "sidebar") {
-          state.sidebar = clampWidth(dragBase + dx, SIDEBAR_MIN, SIDEBAR_MAX);
+          state.sidebar = clampWidth(dragBase + dx, SIDEBAR_MIN, columnDragMax(layout.viewport, layout.cols, "sidebar"));
           if (state.narrow) state.narrowExpanded = true;
         } else {
-          state.details = clampWidth(dragBase - dx, DETAILS_MIN, DETAILS_MAX);
+          state.details = clampWidth(dragBase - dx, DETAILS_MIN, columnDragMax(layout.viewport, layout.cols, "details"));
         }
         applyLayout();
       }
@@ -13171,7 +13180,7 @@
       };
     }
   });
-  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-8be275b1"]]);
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-a0b4e884"]]);
   const app = createApp(App);
   app.config.errorHandler = (err, instance, info) => {
     var _a, _b;

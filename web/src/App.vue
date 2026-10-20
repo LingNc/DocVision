@@ -9,7 +9,6 @@ import {
   applyTheme,
   closeLightbox,
   DETAILS_DEFAULT,
-  DETAILS_MAX,
   DETAILS_MIN,
   fmtSize,
   layout,
@@ -20,8 +19,8 @@ import {
   zoomLightbox,
   persistLayout,
   SIDEBAR_DEFAULT,
-  SIDEBAR_MAX,
   SIDEBAR_MIN,
+  columnDragMax,
   state,
   storedTheme,
   storeSet,
@@ -59,11 +58,12 @@ function onDragStart(ev: PointerEvent, side: 'sidebar' | 'details') {
 function onDragMove(ev: PointerEvent) {
   if (!drag.value) return
   const dx = ev.clientX - dragOrigin
+  // 上限按视口算（T177）：中栏保底 640、另一列保留当前宽度，再按视口 60% 封顶。
   if (drag.value.side === 'sidebar') {
-    state.sidebar = clampWidth(dragBase + dx, SIDEBAR_MIN, SIDEBAR_MAX)
+    state.sidebar = clampWidth(dragBase + dx, SIDEBAR_MIN, columnDragMax(layout.viewport, layout.cols, 'sidebar'))
     if (state.narrow) state.narrowExpanded = true
   } else {
-    state.details = clampWidth(dragBase - dx, DETAILS_MIN, DETAILS_MAX)
+    state.details = clampWidth(dragBase - dx, DETAILS_MIN, columnDragMax(layout.viewport, layout.cols, 'details'))
   }
   applyLayout()
 }

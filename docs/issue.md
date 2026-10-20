@@ -1073,3 +1073,8 @@ user 轮
   原因：会话名统一走行内 Markdown（`InlineMD` → `renderInlineMarkdown`），而章节会话的标题是**流水线标识符**（`chapter_004_child_01`），下划线被当成强调标记，渲染成斜体并从文本里消失；id 本来就长，再少几个下划线就完全读不出来。
   改：`InlineMD` 新增 `plain` 开关（纯文本插入，不走 markdown）；新增 `plainTitle(s)`（有 `chapterId` 即章节会话）——章节树两处标题、侧栏四处会话行、历史列表、详情栏「会话」行都改用它；img2text/样式等会话照旧走行内 markdown。
   验证：`chapter-tree.spec.ts` 新增 `plainTitle` 用例（convert/checker 为 true、普通标题 false、空值 false）；`npm test` 148 通过、dist 已重建、`go build` + `go test ./internal/...` 全绿。
+
+[X][ ] T177. 用户反馈："左右两边列应该可以再多拉开一点，现在好像有固定范围。" 旧值是照 DSH 抄来的硬上限：侧栏 264–420、详情栏 300–520，大屏上拖到 420/520 就到顶，右边那一列开着时几乎没法把侧栏拉宽。
+  改：去掉写死的最大宽度，新增 `columnDragMax(viewport, cols, side)`——① 中栏保底 `CENTER_MIN`(640)；② 另一列保留它当前宽度（收起的列不占位）；③ 再按视口 60%（`COLUMN_MAX_RATIO`）封顶；结果不小于该列最小宽度。`computeColumns` 与拖动分隔条共用这一条规则，`toggleDetails` 恢复宽度时也用它。
+  效果：1920 屏、详情栏收起时侧栏可到 1152（原来 420）；详情栏 400 时侧栏可到 880；详情栏在侧栏 280 时可到 1000。窄屏仍是原来的范围，中栏不会被压到 640 以下。
+  验证：新增 `web/tests/layout.spec.ts`（7 条：60% 封顶、给中栏/另一列让位、窄屏不低于最小、宽值不被截回旧上限、装不下时先压详情栏再放弃）；`npm test` 155 通过、dist 已重建、`go build` + `go test ./internal/...` 全绿。
