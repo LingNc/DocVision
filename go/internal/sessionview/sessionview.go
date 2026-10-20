@@ -626,12 +626,23 @@ var chapterChildSuffix = regexp.MustCompile(`^(.*)_child_(\d+)$`)
 
 func chapterIdentity(rel string) chapterIdentityInfo {
 	base := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+	// T171：`.tryN` 可能不止一层（旧版本一次运行里连续重试会套成
+	// convert_<章>.try2.try3.jsonl）。剥干净、取最大的 N，旧转录才能归到同一
+	// 章的第 N 次尝试，而不是被当成一个叫 "chapter_001.try2" 的独立章节。
 	attempt := 1
-	if m := chapterAttemptSuffix.FindStringSubmatch(base); m != nil {
-		if n, err := strconv.Atoi(m[2]); err == nil && n > 1 {
-			attempt = n
-			base = m[1]
+	for {
+		m := chapterAttemptSuffix.FindStringSubmatch(base)
+		if m == nil {
+			break
 		}
+		n, err := strconv.Atoi(m[2])
+		if err != nil || n <= 1 {
+			break
+		}
+		if n > attempt {
+			attempt = n
+		}
+		base = m[1]
 	}
 	role, id := "", ""
 	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}} {
@@ -926,7 +937,10 @@ type transcriptStat struct {
 	Meta     *MetaInfo
 	// RunEndError 是最近一条 t=meta kind=run_end 的错误文本（会话层 T94
 	// 起每次 Run 结束都落结局）——空 = 正常收尾或旧转录没有结局行。
-	RunEndError     string
+	RunEndError string
+	// SawRunEnd 表示转录里出现过 run_end（不论成败）：用来识别"活动标记停在
+	// running、但这次尝试其实已经结束"的陈旧状态（T171）。
+	SawRunEnd       bool
 	ChapterActivity string
 	// Prices 是转录里 t=meta kind=price 冻的费率（model → 费率，同模型
 	// 后写胜）——费用按冻的价算，不依赖跑报表时的配置（T101 第二版）。
@@ -1066,8 +1080,9 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		chapter := chapterIdentity(rel)
 		live := liveNow(stat, c.mt, now)
 		endState := liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow)
-		switch stat.ChapterActivity {
-		case "queued", "waiting_children", "checking_result":
+		activity := activityAfterEnd(stat.ChapterActivity, stat.SawRunEnd)
+		switch activity {
+		case "queued", "waiting_children", "checking_result", "interrupted":
 			live, endState = false, ""
 		}
 		out = append(out, SessionInfo{
@@ -1093,7 +1108,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			Live:            live,
 			EndState:        endState,
 			RunEndError:     stat.RunEndError,
-			ChapterActivity: stat.ChapterActivity,
+			ChapterActivity: activity,
 			ChapterAttempt:  chapter.Attempt,
 			Prices:          stat.Prices,
 			ChapterID:       chapter.ID,
@@ -1155,6 +1170,18 @@ func liveEndState(state string, live bool) string {
 }
 
 // endStateOf folds the receipt signals into the block-view completion state.
+// activityAfterEnd 修掉陈旧的活动标记：转录里已经写了 run_end（这次 Run 结束
+// 了）却还停在 "running" 的，说明这次尝试被放弃——checker 打回后换了一个全新
+// 会话，或者进程被中断。旧行为照抄这个标记，侧栏会同时显示两条"运行中"（一条
+// 是已经作废的第 2 次，一条是真正在跑的第 3 次），看不出谁是真的。这里把它折成
+// "interrupted"，界面显示"已中断"。
+func activityAfterEnd(activity string, sawRunEnd bool) string {
+	if activity == "running" && sawRunEnd {
+		return "interrupted"
+	}
+	return activity
+}
+
 func endStateOf(stat transcriptStat) string {
 	switch {
 	case stat.SawSubmit || stat.SawTyped:
@@ -1260,6 +1287,7 @@ func readStat(p string) (transcriptStat, error) {
 							OK    *bool  `json:"ok"`
 							Error string `json:"error"`
 						}
+						stat.SawRunEnd = true
 						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.OK != nil && !*rec.OK {
 							stat.RunEndError = rec.Error
 						} else if rec.OK != nil && *rec.OK {

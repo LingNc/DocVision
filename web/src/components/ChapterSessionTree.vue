@@ -58,6 +58,9 @@ function activityText(session: any): string {
   const labels: Record<string, string> = {
     queued: '等待并发槽', running: '运行中', waiting_children: '等待子会话',
     checking_result: '核对完成待处理', pass: '已通过', issues: '发现问题', error: '会话错误',
+    // T171：转录已写 run_end 却停在 running 的尝试被放弃了（换会话重来或中断），
+    // 不能再显示"运行中"，否则同一章会出现两条"运行中"。
+    interrupted: '已中断',
   }
   return labels[session?.chapterActivity] || (session?.live ? '运行中' : '')
 }

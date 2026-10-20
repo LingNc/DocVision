@@ -1229,10 +1229,14 @@ type chapterNodeConfig struct {
 	FinalSubmitRoot string
 	ReportPath      string
 	StrictChecker   bool
-	// Attempt 是这一章的「第几次尝试」（1 起）：checker 连续不通过就换一个
-	// 全新会话重来，每次尝试一条独立转录（convert_<章>.try2.jsonl …），
-	// 预览页据此把几次尝试串成「历史 N」。
+	// Attempt 是**本次运行**内的「第几次尝试」（1 起）：checker 连续不通过就换
+	// 一个全新会话重来，预算按它算（checker_rounds，按层递减）。
 	Attempt int
+	// AttemptNum 是写进转录文件名的尝试号（1 起），跨运行单调递增：0 = 由磁盘
+	// 上已有的转录推导。两者分开是因为"这次运行还有几次机会"与"这一章历史上
+	// 第几次尝试"不是一回事——以前只有一个号，重跑时会拿已经用过的
+	// convert_<章>.try2.jsonl 继续追加，两段对话混进同一条转录（T171）。
+	AttemptNum int
 }
 
 func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool, node chapterNodeConfig) error {
@@ -1258,7 +1262,26 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if node.Attempt < 1 {
 		node.Attempt = 1
 	}
-	node.TranscriptPath = attemptTranscriptPath(node.TranscriptPath, node.Attempt)
+	// T171：每次尝试都从**原始**转录名派生。重试是递归调用同一个函数，而
+	// `next := node` 会带上已经被改写的 TranscriptPath——过去就是拿它再套一层
+	// 后缀，跑出 convert_<章>.try2.try3.jsonl 这种套娃名，预览页把同一次尝试
+	// 拆成两个节点（一个 chapter_001 一个 chapter_001.try2）。
+	transcriptBase := node.TranscriptPath
+	if node.AttemptNum < 1 {
+		// 磁盘上已经试过几次：最后那次被中断（没有 run_end）就原位续跑，否则
+		// 换一个新号——绝不和旧转录共用同一个文件。
+		existingPath, existing, ended := attemptNumberOnDisk(transcriptBase)
+		if existing >= 1 && !ended {
+			// 原位续跑：用**文件本来的名字**（旧版本可能留下了 .try2.try3 这种
+			// 套娃名），别按号另拼一个出来。
+			node.AttemptNum = existing
+			transcriptBase = existingPath
+		} else {
+			node.AttemptNum = existing + 1
+			transcriptBase = attemptTranscriptPath(transcriptBase, node.AttemptNum)
+		}
+	}
+	node.TranscriptPath = attemptTranscriptPath(transcriptBase, node.AttemptNum)
 	mdData, readErr := os.ReadFile(chapPath)
 	if readErr != nil {
 		return fmt.Errorf("读取章节 Markdown 失败: %w", readErr)
@@ -1418,8 +1441,10 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		_, runErr := sess.Run(session.RunOptions{UserText: initial})
 		release()
 		if runErr != nil {
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
 			return fmt.Errorf("会话失败: %w", runErr)
 		}
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
 	}
 	if splitTool.Requested && submit.Submitted && !splitTool.Restored {
 		_ = os.Remove(texPath)
@@ -1462,8 +1487,10 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		_, runErr := sess.Run(session.RunOptions{UserText: integrationText})
 		release()
 		if runErr != nil {
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
 			return fmt.Errorf("父章节整合会话失败: %w", runErr)
 		}
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
 	}
 	if splitTool.Requested {
 		if !submit.Submitted {
@@ -1498,7 +1525,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	checkerTranscript := ""
 	checkerView := ""
 	if node.Depth > 0 || promoteSubmitRoot != "" {
-		checkerTranscript = attemptTranscriptPath(filepath.Join(node.NodeRoot, "sessions", "checker_"+base+".jsonl"), node.Attempt)
+		checkerTranscript = attemptTranscriptPath(filepath.Join(node.NodeRoot, "sessions", "checker_"+base+".jsonl"), node.AttemptNum)
 		checkerView = filepath.Join(node.NodeRoot, "checker-view")
 	}
 	rounds := r.checkerAttempts(node.Depth)
@@ -1529,6 +1556,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		}
 	}
 	if ok {
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "pass"})
 		r.log.Log(tid, "[checker]", base, "通过")
 		_ = os.Remove(texPath + ".checker")
 		if promoteSubmitRoot != "" {
@@ -1537,6 +1565,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			}
 		}
 	} else {
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "issues"})
 		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
 		// 同一个会话被 checker 打回 N 轮还不过，说明它的理解已经跑偏（实测：
 		// 一条子会话在只读报错后把"环境有问题"当成前提，反复重写同一个文件、
@@ -1551,6 +1580,8 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			_ = os.RemoveAll(filepath.Join(node.SubmitRoot, base))
 			next := node
 			next.Attempt = node.Attempt + 1
+			next.AttemptNum = 0 // 由磁盘重算：刚才这次已经落盘，会拿到新号
+			next.TranscriptPath = transcriptBase
 			return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, true, next)
 		}
 		// 次数用尽：**判失败**，不再"记一笔就放过"（旧行为让一个 checker 从
@@ -1569,10 +1600,119 @@ func attemptTranscriptPath(path string, attempt int) string {
 		return path
 	}
 	ext := filepath.Ext(path)
-	if ext == "" {
-		return fmt.Sprintf("%s.try%d", path, attempt)
+	stem := trimAttemptSuffix(strings.TrimSuffix(path, ext))
+	return fmt.Sprintf("%s.try%d%s", stem, attempt, ext)
+}
+
+// attemptNumberOnDisk 查这一章在磁盘上已有的最大尝试号，并告诉最后一次是否
+// 已经正常收尾（转录里有 run_end）。0 表示还没有任何尝试。
+func attemptNumberOnDisk(path string) (string, int, bool) {
+	dir := filepath.Dir(path)
+	ext := filepath.Ext(path)
+	stem := trimAttemptSuffix(strings.TrimSuffix(filepath.Base(path), ext))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", 0, false
 	}
-	return strings.TrimSuffix(path, ext) + fmt.Sprintf(".try%d", attempt) + ext
+	maxNum, maxName := 0, ""
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ext) {
+			continue
+		}
+		base := strings.TrimSuffix(name, ext)
+		if base != stem && !strings.HasPrefix(base, stem+".try") {
+			continue
+		}
+		n := attemptOfName(base, stem)
+		if n > maxNum || (n == maxNum && name > maxName) {
+			maxNum, maxName = n, name
+		}
+	}
+	if maxNum == 0 {
+		return "", 0, false
+	}
+	full := filepath.Join(dir, maxName)
+	return full, maxNum, transcriptEnded(full)
+}
+
+// attemptOfName 从转录名里取尝试号：`<stem>` = 1，`<stem>.try3` = 3，
+// 旧版本的 `<stem>.try2.try3` 取最大的一层。
+func attemptOfName(base, stem string) int {
+	num := 1
+	for {
+		i := strings.LastIndex(base, ".try")
+		if i < len(stem) {
+			break
+		}
+		digits := base[i+len(".try"):]
+		if digits == "" {
+			break
+		}
+		n, err := strconv.Atoi(digits)
+		if err != nil {
+			break
+		}
+		if n > num {
+			num = n
+		}
+		base = base[:i]
+	}
+	return num
+}
+
+// transcriptEnded 看转录末尾有没有 run_end（会话层每次 Run 结束都会写）。
+// 没有 = 上次被中断，可以原位续跑；有 = 那次已经结束，重跑要用新的尝试号。
+func transcriptEnded(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	const tail = 64 << 10
+	st, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	off := st.Size() - tail
+	if off < 0 {
+		off = 0
+	}
+	buf := make([]byte, st.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err.Error() != "EOF" {
+		return false
+	}
+	return strings.Contains(string(buf), `"kind":"run_end"`)
+}
+
+// trimAttemptSuffix 去掉名字末尾的 `.tryN`（可能要剥好几层）。T171 之后不会
+// 再产生套娃名，但磁盘上已有的旧转录还得能算对：剥干净才能归到同一章的
+// 第 N 次尝试。
+func trimAttemptSuffix(stem string) string {
+	for {
+		i := strings.LastIndex(stem, ".try")
+		if i < 0 || i == 0 {
+			return stem
+		}
+		digits := stem[i+len(".try"):]
+		if digits == "" {
+			return stem
+		}
+		ok := true
+		for _, r := range digits {
+			if r < '0' || r > '9' {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			return stem
+		}
+		stem = stem[:i]
+	}
 }
 
 // sessionKind names the role of a session: it decides which trees the

@@ -9083,7 +9083,10 @@
           checking_result: "核对完成待处理",
           pass: "已通过",
           issues: "发现问题",
-          error: "会话错误"
+          error: "会话错误",
+          // T171：转录已写 run_end 却停在 running 的尝试被放弃了（换会话重来或中断），
+          // 不能再显示"运行中"，否则同一章会出现两条"运行中"。
+          interrupted: "已中断"
         };
         return labels[session == null ? void 0 : session.chapterActivity] || ((session == null ? void 0 : session.live) ? "运行中" : "");
       }
@@ -9193,7 +9196,7 @@
     }
     return target;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-3c5ac5f0"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-ce56fabe"]]);
   const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"

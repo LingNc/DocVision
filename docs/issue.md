@@ -1017,3 +1017,17 @@ user 轮
   根因：`buildChapterTree`（web/src/legacy/sidebar.ts）遍历会话列表逐个赋 `node.convert`，**后写的覆盖先写的**；而 Go 侧会话列表按 `ModTime` 新→旧排序（`sessionview.go` 的 sort），于是同一章的多次尝试里最后落进 `node.convert` 的是 **mtime 最早的那次**——正是被 checker 打回、产物作废的第一次。用户在侧栏点这一行，打开的是它，真正的结果藏在「历史 N」页签里，得多点一次。
   改：`newerAttempt(cur, next)` —— `chapterAttempt` 序号大者胜，序号相同（旧转录无该字段）退回 `mtime`；convert 与 checker 各自取最新一次。章节树行补「第 N 次」chip（`chapterAttemptTag`），点开前就知道这一行代表哪次尝试。更早的尝试照旧在「历史 N」页签里逐个可点（`chapterAttemptChain` 不变，仍 新 → 旧）。
   验证：`web/tests/chapter-tree.spec.ts` 新增 5 条——接口顺序（新→旧）与反向顺序都选到第 3 次、核对会话同规则、无 `chapterAttempt` 时按时间、子节点仍挂父节点且父子各选各的最新一次；`npm test` 143 通过。
+
+[X][ ] T171. 用户反馈（原话要点）："这个 try2 和 try3 怎么感觉有点混乱……try2 后面又跟了个 try3，并且应该现在在历史中显示的外边了。是不是程序处理的时候有问题？"
+  现象（真实运行中截的侧栏）：同一章出现两行——`chapter_001 第 2 次`（3.52M / 31k，标"运行中"）与 `chapter_001.tr… 第 3 次`（1.00M / 13k，标"运行中"），都像是当前正在跑的那一次。
+  三条独立缺陷：
+  1. **转录名套娃**：重试是递归调用 `convertChapterNode`，`next := node` 复制的是**已经改写过** `TranscriptPath` 的结构体，于是第 3 次尝试对 `convert_<章>.try2.jsonl` 再套一层后缀，磁盘上真的出现了 `convert_chapter_001.try2.try3.jsonl`。
+  2. **套娃名被当成另一章**：`chapterIdentity` 只剥一层 `.tryN`，`convert_x.try2.try3` 解析成"章节 ID = x.try2、第 3 次"，于是侧栏多出一个 `chapter_001.try2` 节点（T170 的"取最新一次"只在同一章 ID 内生效，救不了它）。
+  3. **陈旧的活动标记**：会话结束后没有任何终态 note，最后一次写下的仍是 `running`；被放弃的第 2 次转录（有 `run_end`、mtime 早）于是永远显示"运行中"，与真正在跑的第三次并排。
+  另有第四条，是修的时候顺着查出来的：重跑时 `node.Attempt` 从 1 重新数，与磁盘上已有的 `convert_<章>.try2.jsonl` 撞名，`NewTranscript` 是 append 语义——两段对话会追加进同一条转录。
+  改：
+  1. `attemptTranscriptPath` 先剥掉已有的 `.tryN` 再套；递归时用**原始** `transcriptBase`（`next.TranscriptPath = transcriptBase`），不再套娃。
+  2. `chapterIdentity` 循环剥尽 `.tryN`、取最大号——磁盘上已有的套娃名也能归回同一章的历史。
+  3. 拆出 `AttemptNum`（写进文件名的跨运行尝试号，0 = 由磁盘推导：最后一次没 `run_end` 就原位续跑、否则新号）与 `Attempt`（本次运行内的预算计数，`checker_rounds` 按它算）。这样重跑既不撞名也不append混排；旧套娃名续跑时用**文件本来的路径**（`attemptNumberOnDisk` 连路径一起返回）。
+  4. 转换会话跑完写 `chapter_activity=checking_result`，checker 判过写 `pass`、打回写 `issues`、会话失败写 `error`；`sessionview` 另做兜底：活动停在 `running` 但转录里已有 `run_end` → 折成 `interrupted`，侧栏显示「已中断」（同时不算 live）。
+  验证：`TestAttemptTranscriptPath` 补"已带 .try2 再派生 → 只留 .try3"与"旧 `try2.try3` → `try4`"；新增 `TestAttemptNumberOnDisk`（空目录 / 中断续跑取真实路径 / 已结束取新号 / 旧套娃名取最大 / 同前缀的别章文件不串）；`TestChapterIdentityAttemptSuffix` 补旧套娃名与子章节套娃名归组；新增 `TestActivityAfterEnd`、`TestReadStatSawRunEnd`。`go test ./internal/...` 全绿、`npm test` 143 通过。

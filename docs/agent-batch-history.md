@@ -1974,3 +1974,15 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **根因**：`buildChapterTree` 遍历会话列表逐个赋 `node.convert`，后写覆盖先写；Go 侧列表按 `ModTime` 新→旧排序，所以同一章的多条尝试里最后留下的是 **mtime 最早**的那条 = 被 checker 打回、产物作废的第 1 次。点章节行看到的是废产物，真正的结果要进「历史 N」再点一次。
 - **改**：`newerAttempt()` 按 `chapterAttempt` 序号取大（相同才比 mtime），convert / checker 各取最新一次；章节树行加「第 N 次」chip，打开前就知道代表哪次。`chapterAttemptChain()`（历史页签 新 → 旧）不动。
 - **验证**：`web/tests/chapter-tree.spec.ts` +5 条（两种入参顺序都选第 3 次、checker 同规则、缺 `chapterAttempt` 时按时间、子节点仍挂父节点）；`npm test` 143 通过；`npm run build` + `go build` 通过（embed 产物已提交）。
+
+## v1.5+（第四十七批补七，T171：重试转录套娃 / 裂成两行 / 陈旧「运行中」）
+
+- **用户反馈**（真实运行中的侧栏截图）：「这个 try2 和 try3 怎么感觉有点混乱……try2 后面又跟了个 try3，并且应该现在在历史中显示的外边了。」截图里同一章两行：`chapter_001 第 2 次`（3.52M / 31k，"运行中"）与 `chapter_001.tr… 第 3 次`（1.00M / 13k，"运行中"）。
+- **直接证据**：项目 `work/sessions/` 里真的存在 `convert_chapter_001.try2.try3.jsonl`。
+- **根因一（套娃命名）**：重试是递归调用 `convertChapterNode`，`next := node` 复制的是**已改写过 TranscriptPath** 的结构体；进入下一层又调 `attemptTranscriptPath`，对 `…try2.jsonl` 再套一层 → `…try2.try3.jsonl`。T165 引入"每次尝试一条独立转录"时，只验证了"第 2 次"这一层。
+- **根因二（裂成两行）**：`chapterIdentity` 的 `^(.*)\.try(\d+)$` 只剥一层，`convert_x.try2.try3` 解析成 ID `x.try2`、第 3 次；于是它不再是 `x` 的尝试，而是侧栏里的另一个章节节点。T170 的"同一章内取最新一次"救不了跨 ID 的情况。
+- **根因三（假运行中）**：转换会话只在开跑时写 `chapter_activity=queued/running`，结束后不写终态；第 2 次转录里有 `run_end`、mtime 已是几十分钟前，活动标记却还停在 `running`，侧栏照抄这个标记 → 与真正在跑的第三次并排"运行中"。
+- **根因四（修的时候顺着查出来的）**：重跑时 `node.Attempt` 从 1 重新数，与磁盘上已有的 `convert_<章>.try2.jsonl` 撞名；`NewTranscript` 是 `O_APPEND`——两段对话会被追加进同一条转录。
+- **改**：① `attemptTranscriptPath` 先剥尽已有 `.tryN` 再套，递归时用原始 `transcriptBase`；② `chapterIdentity` 循环剥尽、取最大号（旧套娃名回归同一章）；③ 拆成两个号——`AttemptNum` 写进文件名、跨运行单调递增（`attemptNumberOnDisk`：最后一次没有 `run_end` 就原位续跑并用**文件本来的路径**，否则新开一号），`Attempt` 只管本次运行的 `checker_rounds` 预算；④ 会话结束写 `checking_result`，checker 写 `pass`/`issues`，失败写 `error`，`sessionview` 兜底把"有 `run_end` 却停在 `running`"折成 `interrupted`（侧栏「已中断」、不算 live）。web 侧补 `interrupted: '已中断'` 文案，dist 重建。
+- **验证**：`TestAttemptTranscriptPath` 补两条（已带 `.try2` 再派生 → `.try3`；旧 `try2.try3` → `try4`）；`TestAttemptNumberOnDisk`（空目录 / 中断续跑取真实路径 / 已结束取新号 / 旧套娃取最大 / 别章同前缀不串）；`TestChapterIdentityAttemptSuffix` 补旧套娃与子章节套娃；`TestActivityAfterEnd`、`TestReadStatSawRunEnd`；`go test ./internal/...` 全绿、`npm test` 143 通过、`npm run build` + `go build` 通过。
+- **现场**：本批结束时用户那本在跑的书已按授权停掉（旧二进制会继续产出套娃名），待重建二进制后重跑；已被中断的那次尝试会原位续跑，已结束的旧尝试保留原名并在「历史 N」里显示。

@@ -1107,4 +1107,51 @@ func TestChapterIdentityAttemptSuffix(t *testing.T) {
 	if retryChild.ID != "chapter_042_child_02" || retryChild.Attempt != 2 {
 		t.Fatalf("child retry identity = %+v", retryChild)
 	}
+	// T171：旧版本一次运行内连续重试会套成 .try2.try3；剥干净、取最大 N，
+	// 否则预览页会把它当成一个叫 "chapter_042.try2" 的独立章节（两个节点）。
+	nested := chapterIdentity("proj/work/sessions/convert_chapter_042.try2.try3.jsonl")
+	if nested.ID != "chapter_042" || nested.Role != "convert" || nested.Attempt != 3 {
+		t.Fatalf("nested retry must collapse onto the same chapter: %+v", nested)
+	}
+	nestedChild := chapterIdentity("proj/work/sessions/checker_chapter_042_child_02.try2.try3.jsonl")
+	if nestedChild.ID != "chapter_042_child_02" || nestedChild.Parent != "chapter_042" || nestedChild.Attempt != 3 {
+		t.Fatalf("nested child retry = %+v", nestedChild)
+	}
+}
+
+// T171：活动标记停在 running、但转录已经写了 run_end 的，是"这次尝试被放弃"
+// （checker 打回换会话 / 被中断），不能再算运行中。
+func TestActivityAfterEnd(t *testing.T) {
+	if got := activityAfterEnd("running", true); got != "interrupted" {
+		t.Fatalf("stale running = %q, want interrupted", got)
+	}
+	if got := activityAfterEnd("running", false); got != "running" {
+		t.Fatalf("live running must stay running, got %q", got)
+	}
+	if got := activityAfterEnd("waiting_children", true); got != "waiting_children" {
+		t.Fatalf("other states untouched, got %q", got)
+	}
+	if got := activityAfterEnd("", true); got != "" {
+		t.Fatalf("no activity stays empty, got %q", got)
+	}
+}
+
+// readStat 要能告诉调用方"这次 Run 已经结束"——成功收尾时 RunEndError 是空的，
+// 光看它分不出"没结束"和"正常结束"。
+func TestReadStatSawRunEnd(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	os.WriteFile(p, []byte(`{"t":"meta","kind":"chapter_activity","state":"running"}
+{"t":"meta","kind":"run_end","ok":true}
+`), 0o644)
+	st, err := readStat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.SawRunEnd || st.RunEndError != "" {
+		t.Fatalf("run_end not recorded: %+v", st)
+	}
+	if st.ChapterActivity != "running" {
+		t.Fatalf("activity = %q", st.ChapterActivity)
+	}
 }

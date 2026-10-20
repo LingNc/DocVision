@@ -22,6 +22,62 @@ func TestAttemptTranscriptPath(t *testing.T) {
 	if got, want := attemptTranscriptPath("/p/x/checker_chapter_042.jsonl", 3), "/p/x/checker_chapter_042.try3.jsonl"; got != want {
 		t.Errorf("attempt 3 = %q, want %q", got, want)
 	}
+	// T171：拿已经带 .try2 的名字再派生一次，不能套成 .try2.try3（一次运行里
+	// 连续重试就是这个路径，曾经在磁盘上留下 convert_<章>.try2.try3.jsonl）。
+	if got, want := attemptTranscriptPath("/p/s/convert_chapter_042.try2.jsonl", 3), "/p/s/convert_chapter_042.try3.jsonl"; got != want {
+		t.Errorf("nested attempt = %q, want %q", got, want)
+	}
+	if got, want := attemptTranscriptPath("/p/s/convert_chapter_042.try2.try3.jsonl", 4), "/p/s/convert_chapter_042.try4.jsonl"; got != want {
+		t.Errorf("legacy nested attempt = %q, want %q", got, want)
+	}
+	if got, want := attemptTranscriptPath("/p/s/convert_chapter_042", 2), "/p/s/convert_chapter_042.try2"; got != want {
+		t.Errorf("no extension = %q, want %q", got, want)
+	}
+}
+
+// TestAttemptNumberOnDisk pins the cross-run attempt numbering: a transcript
+// that ended (run_end) gets a NEW attempt number on rerun, while an interrupted
+// one is resumed in place — otherwise two runs append into the same file.
+func TestAttemptNumberOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "convert_chapter_007.jsonl")
+
+	path, num, ended := attemptNumberOnDisk(base)
+	if num != 0 || ended || path != "" {
+		t.Fatalf("empty dir = %q %d %v", path, num, ended)
+	}
+
+	// 第 1 次结束（有 run_end）、第 2 次被中断（没有）→ 续跑第 2 次。
+	os.WriteFile(filepath.Join(dir, "convert_chapter_007.jsonl"),
+		[]byte(`{"t":"meta","kind":"run_end","ok":true}`+"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "convert_chapter_007.try2.jsonl"),
+		[]byte(`{"t":"msg","role":"assistant"}`+"\n"), 0o644)
+	path, num, ended = attemptNumberOnDisk(base)
+	if num != 2 || ended || path != filepath.Join(dir, "convert_chapter_007.try2.jsonl") {
+		t.Fatalf("interrupted = %q %d %v", path, num, ended)
+	}
+
+	// 第 2 次也结束 → 下一次是 3，且不能和旧文件同名。
+	os.WriteFile(filepath.Join(dir, "convert_chapter_007.try2.jsonl"),
+		[]byte(`{"t":"meta","kind":"run_end"}`+"\n"), 0o644)
+	path, num, ended = attemptNumberOnDisk(base)
+	if num != 2 || !ended || path != filepath.Join(dir, "convert_chapter_007.try2.jsonl") {
+		t.Fatalf("ended = %q %d %v", path, num, ended)
+	}
+
+	// 旧版本的套娃名也算数，取最大号并指向真实文件。
+	os.WriteFile(filepath.Join(dir, "convert_chapter_007.try2.try3.jsonl"),
+		[]byte(`{"t":"msg","role":"assistant"}`+"\n"), 0o644)
+	path, num, ended = attemptNumberOnDisk(base)
+	if num != 3 || ended || path != filepath.Join(dir, "convert_chapter_007.try2.try3.jsonl") {
+		t.Fatalf("legacy nested = %q %d %v", path, num, ended)
+	}
+
+	// 别的章的文件不能算进来。
+	os.WriteFile(filepath.Join(dir, "convert_chapter_0071.jsonl"), []byte("{}"), 0o644)
+	if _, num, _ := attemptNumberOnDisk(base); num != 3 {
+		t.Fatalf("sibling chapter leaked: %d", num)
+	}
 }
 
 // TestCheckerAttemptBudget pins "top-level 6, one less per level, never below
