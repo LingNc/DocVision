@@ -1986,3 +1986,15 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **改**：① `attemptTranscriptPath` 先剥尽已有 `.tryN` 再套，递归时用原始 `transcriptBase`；② **历史数据一次性改名**：项目内 5 条套娃转录（顶层 1 条 + 递归子章节 4 条，全部是 convert）改成规范名，`chapterIdentity` 保持只剥一层 `.tryN`，不留兼容分支——用户口径："不用给我们历史错误的做兼容，你将我们的历史修改为正确的就行"；③ 拆成两个号——`AttemptNum` 写进文件名、跨运行单调递增（`attemptNumberOnDisk`：最后一次没有 `run_end` 就原位续跑并用**文件本来的路径**，否则新开一号），`Attempt` 只管本次运行的 `checker_rounds` 预算；④ 会话结束写 `checking_result`，checker 写 `pass`/`issues`，失败写 `error`，`sessionview` 兜底把"有 `run_end` 却停在 `running`"折成 `interrupted`（侧栏「已中断」、不算 live）。web 侧补 `interrupted: '已中断'` 文案，dist 重建。
 - **验证**：`TestAttemptTranscriptPath` 补两条（已带 `.try2` 再派生 → `.try3`；旧 `try2.try3` → `try4`）；`TestAttemptNumberOnDisk`（空目录 / 中断续跑取真实路径 / 已结束取新号 / 旧套娃取最大 / 别章同前缀不串）；`TestChapterIdentityAttemptSuffix` 补旧套娃与子章节套娃；`TestActivityAfterEnd`、`TestReadStatSawRunEnd`；`go test ./internal/...` 全绿、`npm test` 143 通过、`npm run build` + `go build` 通过。
 - **现场**：本批结束时用户那本在跑的书已按授权停掉（旧二进制会继续产出套娃名），待重建二进制后重跑；已被中断的那次尝试会原位续跑，已结束的旧尝试保留原名并在「历史 N」里显示。
+
+## v1.5+（第四十七批补八，T172：checker 看得到产物与原书页，转换会话的说法可随提交交给它）
+
+- **用户反馈**（原话要点）：「checker 的时候有时候会反馈不存在的问题，由于这个 checker 无法看到原文章之类的，会错误的认为一些内容。这边是否应该给 checker 提供查看的工具？还有就是是否应该提供转换章节的 submit 一些能够给 checker 提供信息的工具？因为有的问题是不存在的。」
+- **根因**：P28 定的"极简只读会话"（只有 md、tex、parts 三个文本 + `read_file`/`grep`/`submit`）在有产物与原书页可比的时候才安全。实际数据里 md 是 OCR 文本（断字、重排、重复页眉），公式/表格在原页上是图形，插图与表格在排版里是浮动体——这些差异 checker 一律读成"缺失/错位"，转换会话被逼着改坏正确内容，或白耗几轮直至 `checker_rounds` 用尽、整章作废重转。
+- **改**（两侧一起做，缺一边都不成立）：
+  1. **checker 的可见面**：`ensureCheckerView` 铺好的视图之外，`checkChapterAt` 再把本章编译出的 `<章>.pdf` 软链进去（`check:<章>.pdf`），并把 `r.pdfView` 的 `source:` 原书 part 挂进 `view_pdf` 的挂载表；工具加 `ViewPDFTool` 与 `sourcePageTools()`（`list_source_pages`/`doc_search`）。`read_file`/`grep` 仍只吃 `check:`，不让它去翻二进制 PDF 上下文。
+  2. **submit 的信息**：新增 `checkHints{PDF, Report, Notes}`，由 `convertChapterNode` 从 `gate.compiledPDF()`、`node.ReportPath`、`submit.Notes` 组出来，挂成 `check:<章>.pdf` / `check:report.md` / `check:notes.md`（notes 直接写盘）。提示词与首条消息都点明：这些是**说法**，要用产物页与原书页核实。
+  3. **提示词重写**（`latex_checker.system.md`）：可见清单改成真实清单；新增"每条问题必须指明位置（md 段落或原书页 ↔ .tex 何处），指不出位置的不算问题"、"不许报"清单（OCR 噪声、只在原页上的公式/表格/插图、浮动体位置、措辞换行、style 意见）、"重复上一轮的问题前先回原页复核，自己看错了就撤回"。注册表 `MustMention` 加 `view_pdf`。
+  4. **打回文案**（`book.go` 反馈轮）：补一段"指出的点不是真问题就别改坏正确内容——把证据（文件与行号或原书页码）写进 submit.notes 再交，会带着产物与原书页再核一遍"。
+- **验证**：新增 `TestCheckerSeesProductAndHints`（视图里有 `<章>.pdf`/`report.md`/`notes.md`、notes 内容落盘、首条消息与工具表出现 `check:<章>.pdf`、`report.md`、`notes.md`、`view_pdf`）；`checkChapterAt` 的 5 个测试调用点补 `checkHints{}`；`go test ./internal/...` 全绿。
+- **未做的（有意）**：没有让 checker 直接看 raster 原图（`view_image`）——插图重画是否像由 `latex.figure_check` 负责，checker 只需要判断题、表、公式、段落有没有丢；也没有把 submit 的 report 当"免检通行证"，否则转换会话可以靠自述绕开核对。

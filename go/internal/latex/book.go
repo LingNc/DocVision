@@ -1526,7 +1526,16 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	}
 	rounds := r.checkerAttempts(node.Depth)
 	partsPath := filepath.Join(node.SubmitRoot, base)
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, tid, checkerTranscript, checkerView, node.StrictChecker)
+	hints := func() checkHints {
+		h := checkHints{Report: node.ReportPath, Notes: submit.Notes}
+		if gate != nil { // 门禁关掉时没有编译记录，就没有产物页可给
+			if pdf, _, ok := gate.compiledPDF(); ok {
+				h.PDF = pdf
+			}
+		}
+		return h
+	}
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker)
 	if !ok && isSessionAPIError(issues) {
 		return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
 	}
@@ -1538,7 +1547,9 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
 		r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
 		msg := "The checker reviewed your submitted chapter and found problems that must be fixed:\n" + issues +
-			"\n\nFix it in your workspace (edit_file/write_file), compile until clean, then submit the two paths again."
+			"\n\nFix them in your workspace (edit_file/write_file), compile until clean, then submit the two paths again." +
+			"\n\nAn item is not automatically true: the checker reads the markdown, your compiled PDF and the original pages. " +
+			"If the marked spot is NOT a real problem (the markdown is OCR noise, the formula/table/figure comes from the original page and your .tex reproduces it), do not damage correct content to satisfy it — put the evidence (file and line, or the source page number) in submit.notes and submit again; it will be re-checked against the page."
 		release := r.acquireChapterSlot()
 		_, runErr := sess.Run(session.RunOptions{UserText: msg})
 		release()
@@ -1546,7 +1557,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			r.log.LogWarning(tid, "[checker]", base, "反馈轮失败:", runErr)
 			break
 		}
-		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, tid, checkerTranscript, checkerView, node.StrictChecker)
+		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker)
 		if !ok && isSessionAPIError(issues) {
 			return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
 		}

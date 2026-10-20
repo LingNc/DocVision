@@ -264,7 +264,7 @@ func TestCheckerStrictModeAcceptsExplicitPass(t *testing.T) {
 	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
 		jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
 	})
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0,
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0,
 		filepath.Join(proj, "nested", "sessions", "checker.jsonl"), filepath.Join(proj, "nested", "checker-view"), true)
 	if !ok || issues != "" {
 		t.Fatalf("explicit pass rejected: ok=%v issues=%q", ok, issues)
@@ -280,7 +280,7 @@ func TestCheckerStrictModeFailsClosedWithoutConclusion(t *testing.T) {
 	})
 	transcript := filepath.Join(proj, "nested", "sessions", "checker.jsonl")
 	view := filepath.Join(proj, "nested", "checker-view")
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0, transcript, view, true)
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true)
 	if ok || issues == "" {
 		t.Fatalf("strict checker accepted missing verdict: ok=%v issues=%q", ok, issues)
 	}
@@ -300,7 +300,7 @@ func TestCheckerStrictModeStopsOnInsufficientBalance(t *testing.T) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		io.WriteString(w, `{"error":{"message":"余额不足或无可用资源包","code":1113}}`)
 	})
-	ok, errText := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0,
+	ok, errText := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0,
 		filepath.Join(proj, "nested", "sessions", "checker.jsonl"), filepath.Join(proj, "nested", "checker-view"), true)
 	if ok || !strings.Contains(errText, "SESSION_INSUFFICIENT_BALANCE") {
 		t.Fatalf("expected fail-closed balance error, got ok=%v err=%q", ok, errText)
@@ -323,7 +323,7 @@ func TestCheckerResumeUsesUpdatedModelAndTranscript(t *testing.T) {
 	})
 	transcript := filepath.Join(proj, "nested", "sessions", "checker_chapter_02.jsonl")
 	view := filepath.Join(proj, "nested", "checker-view")
-	if ok, _ := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0, transcript, view, true); ok {
+	if ok, _ := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true); ok {
 		t.Fatal("checker without a verdict unexpectedly passed")
 	}
 
@@ -342,7 +342,7 @@ func TestCheckerResumeUsesUpdatedModelAndTranscript(t *testing.T) {
 	first.cfg.Models["updated"] = config.ModelConfig{BaseURL: secondServer.URL, APIKey: "k", Model: "updated-model", Stream: &off}
 	first.clients = map[string]*session.Client{}
 	first.models = map[string]config.ModelConfig{}
-	ok, errText := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, 0, transcript, view, true)
+	ok, errText := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true)
 	if !ok || errText != "" || calls.Load() != 1 {
 		t.Fatalf("updated checker resume failed: ok=%v err=%q calls=%d", ok, errText, calls.Load())
 	}
@@ -371,5 +371,55 @@ func TestCheckerWithoutVerdictFailsAfterTwoAttempts(t *testing.T) {
 	}
 	if n := calls.Load(); n < 4 {
 		t.Fatalf("requests = %d, want >= 4 (two full attempts)", n)
+	}
+}
+
+// TestCheckerSeesProductAndHints：T172 —— checker 以前只拿到 md 与 tex 两个文本，
+// 看不见产物、也看不见原书页，只能把"md 这样写、tex 那样写"的差异当成问题猜。
+// 现在只读视图里还挂着本次编译产物（<base>.pdf）与转换会话的 report / notes
+// （后者是"说法"，要它自己核实），并给它 view_pdf 与原文检索工具。
+func TestCheckerSeesProductAndHints(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	pdf := filepath.Join(proj, "work", "temp", "conv_"+base, base+".pdf")
+	if err := os.MkdirAll(filepath.Dir(pdf), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pdf, []byte("%PDF-1.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := filepath.Join(proj, "work", "reports", base+".md")
+	if err := os.MkdirAll(filepath.Dir(report), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(report, []byte("# 报告\n覆盖率 0.93\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view := filepath.Join(proj, "nested", "checker-view")
+
+	var firstBody string
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		body, _ := io.ReadAll(req.Body)
+		if firstBody == "" {
+			firstBody = string(body)
+		}
+		jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
+	})
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath,
+		checkHints{PDF: pdf, Report: report, Notes: "表 3.1 在原页 p12/p13 分两页，已按页排"}, 0, "", view, true)
+	if !ok {
+		t.Fatalf("explicit pass rejected: %q", issues)
+	}
+	for _, name := range []string{base + ".pdf", "report.md", "notes.md"} {
+		if !fileExists(filepath.Join(view, name)) {
+			t.Errorf("checker 只读视图缺 %s", name)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(view, "notes.md")); err != nil || !strings.Contains(string(b), "p12") {
+		t.Errorf("notes.md 内容没写进去: %q %v", string(b), err)
+	}
+	for _, want := range []string{"check:" + base + ".pdf", "report.md", "notes.md", `"name":"view_pdf"`} {
+		if !strings.Contains(firstBody, want) {
+			t.Errorf("首条消息 / 工具表里没有 %q", want)
+		}
 	}
 }

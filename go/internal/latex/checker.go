@@ -20,10 +20,20 @@ import (
 // SAME conversion session. Ordinary chapters retain the historical transport
 // fallback; recursive nodes use strict mode and fail closed on missing verdicts.
 func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, tid int) (bool, string) {
-	return r.checkChapterAt(proj, base, chapPath, texPath, partsPath, tid, "", "", false)
+	return r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, tid, "", "", false)
 }
 
-func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string, tid int, transcriptPath, viewPath string, strict bool) (bool, string) {
+// checkHints 是转换会话留给 checker 的线索：本次编译产物、它自己的工作汇报与
+// submit.notes（T172）。它们都只是**说法**——checker 必须自己对着原书页或产物
+// 页核实；给它们的目的是让"看起来不对但其实正确"的差异（md 是 OCR 文本、公式
+// 与表格来自原页、插图排成浮动体）不必被误报成缺失。
+type checkHints struct {
+	PDF    string // 编译出的章节 PDF（挂成 check:<base>.pdf）
+	Report string // 转换会话的 report（挂成 check:report.md）
+	Notes  string // submit.notes（写成 check:notes.md）
+}
+
+func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string, hints checkHints, tid int, transcriptPath, viewPath string, strict bool) (bool, string) {
 	view := viewPath
 	if view == "" {
 		view = ensureCheckerView(proj, base, chapPath, texPath, partsPath)
@@ -37,6 +47,22 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		}
 		return true, ""
 	}
+	// T172：把产物与转换会话自己的说法挂进只读视图。旧行为 checker 只拿到 md 与
+	// tex 两个文本，看不见产物、也看不见原书页——凡是"md 这样写、tex 那样写"的
+	// 差异都只能猜，于是把 OCR 噪声、原页公式、排成浮动体的表格报成缺失，转换
+	// 会话被逼着改坏本来正确的内容。
+	if hints.PDF != "" && fileExists(hints.PDF) {
+		if err := linkAbs(hints.PDF, filepath.Join(view, base+".pdf")); err != nil {
+			_ = copyFile(hints.PDF, filepath.Join(view, base+".pdf"))
+		}
+	}
+	if hints.Report != "" && fileExists(hints.Report) {
+		_ = linkAbs(hints.Report, filepath.Join(view, "report.md"))
+	}
+	if notes := strings.TrimSpace(hints.Notes); notes != "" {
+		_ = os.WriteFile(filepath.Join(view, "notes.md"), []byte(notes+"\n"), 0o644)
+	}
+
 	checkerName := r.cfg.Latex.CheckerModel
 	if checkerName == "" {
 		checkerName = r.cfg.Latex.ConvertModel
@@ -45,7 +71,10 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 	modelCfg := r.modelOf(checkerName)
 	tuning := r.cfg.LatexSession("checker")
 
-	mounts := []Mount{{Name: "check", Dir: view}}
+	checkMounts := []Mount{{Name: "check", Dir: view}}
+	// view_pdf 还要能打开原书 part（source:）与刚才挂进来的产物页。
+	viewMounts := append([]Mount{}, checkMounts...)
+	viewMounts = append(viewMounts, r.pdfView.Mounts()...)
 	trPath := transcriptPath
 	if trPath == "" {
 		trPath = filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
@@ -55,6 +84,15 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		"CHAPTER_TEX": "check:" + base + ".tex",
 		"PARTS_DIR":   "check:parts/",
 	})
+	if fileExists(filepath.Join(view, base+".pdf")) {
+		userText += "\n\nThe compiled PDF of this LaTeX is check:" + base + ".pdf — open its pages with view_pdf to see what the page actually looks like (floats, table splits, figure placement)."
+	}
+	if r.pdfView != nil && r.pdfView.total > 0 {
+		userText += "\n\nThe book's original pages are readable as source:<part>.pdf (view_pdf), and list_source_pages / doc_search locate them. When the markdown is unreadable, or the .tex follows the page rather than the markdown text, judge against the page."
+	}
+	if fileExists(filepath.Join(view, "report.md")) || fileExists(filepath.Join(view, "notes.md")) {
+		userText += "\n\ncheck:report.md (the converter's own report) and check:notes.md (its submit notes) are CLAIMS to verify against the page and this PDF — never facts."
+	}
 	if r.cfg.Latex.RemoveWatermark {
 		userText += "\n\nWatermark note: if watermark-like content (institution marks, faint background text) is absent from the .tex, that is CORRECT — watermark removal is enabled. Do not report it as missing content."
 	}
@@ -74,10 +112,12 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 			RequireReport: true, // 结论就用这个交（不落盘：写不写 .checker 由 runner 决定）
 		}
 		tools := []session.Tool{
-			&ReadFileTool{Mounts: mounts},
-			&GrepTool{Mounts: mounts},
+			&ReadFileTool{Mounts: checkMounts},
+			&GrepTool{Mounts: checkMounts},
+			&ViewPDFTool{Mounts: viewMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 			submit,
 		}
+		tools = append(tools, r.sourcePageTools()...)
 		sess := session.NewSession(client, modelCfg, tuning,
 			renderPrompt(prompts.Must(prompts.CheckerSystem), tuning, r.outputLang()),
 			tools, r.log, tid, "checker:"+base)

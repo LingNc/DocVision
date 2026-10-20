@@ -63,7 +63,10 @@ func newLatexCmd() *cobra.Command {
            分片文件夹），代码把它们拷进 work/chapters；别人的成品只能经只读通道
            project:converted/、project:reports/ 参考；工具
            compile/view_pdf/view_image/doc_search；每章产物交 checker 会话核对
-           （只读两个文件 + 一个文件夹，read_file/grep/submit，默认 50 轮），
+           （只读视图 = 章节 md / 提交的 .tex / 分片 / 本章编译产物 PDF /
+           原书 source: part PDF / 转换会话的 report 与 notes；工具
+           read_file/grep/view_pdf/list_source_pages/doc_search/submit，默认 50 轮；
+           每条问题必须指明位置，看不见的差异不报），
            硬性问题回同一会话最多 3 轮；普通章节仍按既有策略重转换
             章节过大或难以可靠处理时可结构化申请细分（最多 3 层），子章节并行转换并必须明确通过 checker；
             父级按序整合后暂存核对，通过才晋级；全树共享 latex.concurrency 并发槽，排队/等待子章节状态可在会话预览查看；

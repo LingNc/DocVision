@@ -7,6 +7,8 @@
 
 ### Added
 
+- **checker 能看编译产物与原书页，转换会话的说法可随提交交给它（T172）**：核对会话原来只拿到章节 md 与提交的 `.tex` 两个文本，看不见产物、也看不见原书页，于是把 OCR 噪声、只在原页上的公式/表格/插图、排成浮动体的内容报成"缺失"——转换会话要么改坏本来正确的内容，要么白耗几轮反馈直至整章作废重转。现在只读视图追加**本章编译出的 `<章>.pdf`**（`view_pdf` 翻页）与**原书 `source:` part PDF**，工具加 `view_pdf` 与原文检索 `list_source_pages`/`doc_search`；转换会话 `submit` 的 `report` 与 `notes` 挂成 `check:report.md` / `check:notes.md` 一并可见，但**明确是"说法"**——提示词要求对照原书页与产物页核实，不能当事实。同时把判据收紧成"可核实才报"：每条问题必须指明位置（md 段落或原书页 ↔ `.tex` 何处），指不出位置的不算问题；列出不许报的正常差异；重复上一轮的问题前先回原页复核、看错了就撤回。打回文案也提示转换会话：若指出的点并非真问题，别为迎合而改坏正确内容，把证据写进 `submit.notes` 再交。`latex.checker_model` 因此需要支持看图（默认继承 convert）。
+
 - **`api: responses` 支持流式输出（T157）**：Responses API 线路以前强制 `stream:false`，一次整段 JSON 应答，长思考/长输出期间终端没有任何进展。现在按 `models.*.stream` 带 `stream:true`，用 `response.output_text.delta` / `response.reasoning_summary_text.delta` 增量推进实时快照与首字延迟，最终仍以 `response.completed` 里的完整 response 对象收账（与非流式共用同一个解码器，转录内容不随传输方式变化）；`response.failed` 直接透出厂商原因；网关忽略 `stream:true` 返回整段 JSON 时自动兜底解析，不支持 SSE 的网关回退一次非流式。同时修正截断判据认 `incomplete_details.reason`（`length` 触发空响应自救）。`api: anthropic` 仍只走非流式。
 
 - **运行期内存自证（T158）**：SIGKILL 无法捕获，档位1 跑一半被系统杀掉时日志里什么都不留。`latex` 现在启动即打一行 `[mem]` 基线（本进程 RSS + 系统可用/总量），运行期每 60s 采样并记录 RSS 峰值与可用内存最低值，可用内存低于 1GiB 或 10% 告警、低于 256MiB 或 3% 提示随时可能被 OOM 杀掉并建议调低 `latex.concurrency`。

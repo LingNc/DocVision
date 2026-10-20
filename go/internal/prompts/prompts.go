@@ -214,7 +214,7 @@ var registry = []Template{
 	{
 		Name: CheckerSystem, File: "latex_checker.system.md",
 		Vars:        []string{"MAX_ROUNDS"},
-		MustMention: []string{"grep", "read_file", "submit"},
+		MustMention: []string{"grep", "read_file", "submit", "view_pdf"},
 	},
 	{
 		Name: CheckerUser, File: "latex_checker.user.md",

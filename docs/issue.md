@@ -1031,3 +1031,12 @@ user 轮
   3. 拆出 `AttemptNum`（写进文件名的跨运行尝试号，0 = 由磁盘推导：最后一次没 `run_end` 就原位续跑、否则新号）与 `Attempt`（本次运行内的预算计数，`checker_rounds` 按它算）。这样重跑既不撞名也不 append 混排。
   4. 转换会话跑完写 `chapter_activity=checking_result`，checker 判过写 `pass`、打回写 `issues`、会话失败写 `error`；`sessionview` 另做兜底：活动停在 `running` 但转录里已有 `run_end` → 折成 `interrupted`，侧栏显示「已中断」（同时不算 live）。
   验证：`TestAttemptTranscriptPath` 补"已带 .try2 再派生 → 只留 .try3"（写入方向的保险，任何调用都产不出套娃名）；新增 `TestAttemptNumberOnDisk`（空目录 / 中断续跑 / 已结束取新号 / 第 3 次规范名 / 同前缀的别章文件不串）；`TestChapterIdentityAttemptSuffix` 补第 3 次与子章节第 3 次的归组；新增 `TestActivityAfterEnd`、`TestReadStatSawRunEnd`。`go test ./internal/...` 全绿、`npm test` 143 通过。改名后拿真实项目 `sessions --list` 复核：`convert_chapter_001` 的三条（第 1/2/3 次）标签都是 `转换 · chapter_001`。
+
+[X][ ] T172. 用户反馈（原话要点）："checker 的时候有时候会反馈不存在的问题，由于这个 checker 无法看到原文章之类的，会错误的认为一些内容。这边是否应该给 checker 提供查看的工具？还有就是是否应该提供转换章节的 submit 一些能够给 checker 提供信息的工具？因为有的问题是不存在的。"
+  根因：checker 的只读视图只有**两个文本**（章节 md、提交的 .tex）与一个 `parts/` 文件夹，工具只有 `read_file`/`grep`/`submit`（P28 定的"极简只读会话"）。它看不见编译产物，也看不见原书页，因此凡是"md 这么写、tex 那么写"的差异只能猜：md 是 OCR 文本（断字、重排、重复页眉）、公式与表格在原页上是图形（md 里只剩噪声）、插图与表格在排版里是浮动体——这些正常差异全被当成"缺失/错位"报回去；转换会话为了让 checker 满意只能去改本来正确的内容，或者白跑几轮反馈，攒够 `checker_rounds` 后整章被作废重转。
+  改（两侧同时）：
+  1. **checker 能看产物与原书**：只读视图追加本章编译产物 `check:<章>.pdf`（`view_pdf` 翻页）、原书 `source:<part>.pdf`，工具加 `view_pdf` 与原文检索 `list_source_pages`/`doc_search`（后两者本就有 `sourcePageTools` 构造器，直接复用）。
+  2. **submit 的信息给 checker 看**：转换会话的 `report`（工作汇报，含 `coverage_note`）与 `notes`（submit 的交接说明）挂成 `check:report.md` / `check:notes.md`。**都标成"说法"**——提示词明确要求用原书页与产物页核实，不能当事实采信；提交门禁不变。
+  3. **提示词收紧成"可核实才报"**：每条问题必须指明位置（md 段落或原书页 ↔ .tex 何处），指不出位置的不算问题；列清"不许报"的正常差异（OCR 噪声、只在原页上的公式/表格/插图、浮动体位置、措辞换行）；重复上一轮的问题前先回原页复核，自己看错了就撤回。
+  4. **打回文案给转换会话一条退路**：如果指出的点其实不是问题（md 是 OCR 噪声、内容在原文页上且 .tex 已经复现），不要为了迎合而改坏正确内容——把证据（文件与行号，或原书页码）写进 `submit.notes` 再交，checker 会带着产物与原书页再核一遍。
+  验证：新增 `TestCheckerSeesProductAndHints`（视图里出现 `<章>.pdf`/`report.md`/`notes.md`，`notes.md` 内容落盘，首条消息与工具表里出现 `check:<章>.pdf`、`report.md`、`notes.md` 与 `view_pdf`）；提示词注册表 `MustMention` 加 `view_pdf`；`go test ./internal/...` 全绿。
