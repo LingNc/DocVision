@@ -327,7 +327,7 @@ func (r *Runner) SetOnlyChapters(bases []string) {
 	}
 }
 
-// ---------- P2：运行期派发（不等阶段边界、不用重启） ----------
+// ---------- P53 阶段二：运行期派发（不等阶段边界、不用重启） ----------
 
 // 章节锁：主流程的并发批与运行期的重试派发共用，同一章永远不会被跑两遍。
 //
@@ -358,28 +358,33 @@ func (r *Runner) lockChapter(base string) bool { return r.chapterMutex(base).Try
 
 func (r *Runner) unlockChapter(base string) { r.chapterMutex(base).Unlock() }
 
-// continueTextOf 取这一章的"继续跑"提示（没有则空）。
-func (r *Runner) continueTextOf(base string) string {
-	if r.continueText == nil {
-		return ""
+// takeContinueFlag 取出并清掉"这一章是人手动推下去的"标记。
+//
+// 刻意只传一个 bool、不带任何文字：手动继续与中断续跑走同一条规矩
+// （2026-09-29 定的）——**有历史就原样续行，不插 user 内容**。这个标记的
+// 唯一作用是让那条会话真的再跑一轮（否则"上次已 submit"会被 replay 收账、
+// 直接结束，点一下等于没点）。
+func (r *Runner) takeContinueFlag(base string) bool {
+	if r.continueFlag == nil {
+		return false
 	}
-	return r.continueText[base]
+	if !r.continueFlag[base] {
+		return false
+	}
+	delete(r.continueFlag, base)
+	return true
 }
 
-// setContinueText 记下"这一章要接着跑"的提示；跑完就清掉，免得下一次普通
-// 运行也被当成手动继续。
-func (r *Runner) setContinueText(base, text string) {
-	if r.continueText == nil {
-		r.continueText = map[string]string{}
+// setContinueFlag 记下"这一章要接着跑"；跑完就清掉，免得下一次普通运行也被
+// 当成手动继续。
+func (r *Runner) setContinueFlag(base string) {
+	if r.continueFlag == nil {
+		r.continueFlag = map[string]bool{}
 	}
-	if text == "" {
-		delete(r.continueText, base)
-		return
-	}
-	r.continueText[base] = text
+	r.continueFlag[base] = true
 }
 
-// startRetryWatcher 起一条 goroutine，每 2 秒看一遍重试队列（P2）。
+// startRetryWatcher 起一条 goroutine，每 2 秒看一遍重试队列（P53 阶段二）。
 //
 // 之前重试只在转换阶段的两个安全点消费：转换阶段跑完之后再点按钮就没人管了，
 // 得等下一次启动。现在它跑在整个 RunBook 生命周期里——样式、划分、转换、组装
@@ -546,7 +551,7 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 	switch role {
 	case "convert":
 		r.forceChapterRetry(proj, base, reason)
-		if err := r.convertChapterNow(proj, base, ""); err != nil {
+		if err := r.convertChapterNow(proj, base); err != nil {
 			r.log.LogWarning(0, "[convert]", base, "手动重试失败:", err)
 		}
 	case "checker":
@@ -568,7 +573,7 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 }
 
 // convertChapterNow 在运行期把一章转换跑掉（主流程之外的那条路）。
-func (r *Runner) convertChapterNow(proj, base, continueText string) error {
+func (r *Runner) convertChapterNow(proj, base string) error {
 	clsName := classNameOfFile(filepath.Join(proj, "style"))
 	if clsName == "" {
 		return fmt.Errorf("样式还没就绪（style 阶段未完成）")
@@ -577,32 +582,30 @@ func (r *Runner) convertChapterNow(proj, base, continueText string) error {
 	if !fileExists(chapPath) {
 		return fmt.Errorf("章节不存在: %s", base)
 	}
-	if continueText != "" {
-		r.setContinueText(base, continueText)
-		defer r.setContinueText(base, "")
-	}
 	return r.convertOneChapter(proj, clsName, filepath.Join(proj, "style", "manual.md"), chapPath,
 		filepath.Join(proj, "work"), 1, 0, true)
 }
 
-// continueChapter 让这一章**接着上一次尝试干**（P2）：不新建尝试、不归档、
-// 不动已提交的产物，只是把一句"接着干"递进那条会话，让它自己把活收尾。
+// continueChapter 让这一章**接着上一次尝试干**（P53 阶段二）：不新建尝试、不
+// 归档、不动已提交的产物，只是让那条会话再跑一轮、自己把活收尾。
 //
 // 现场是这样的：会话因为厂商报错/上下文跑偏/被手动改过文件而停住，重启整个
 // 流程要重烧一整本的 token。这里给的是"接着这一条继续"。
+//
+// **不发任何 user 内容**：历史原样续行（与中断续跑同一条规矩），模型接着它
+// 最后那句往下说。真跑完没 submit 时，T94 的"没提交"提醒会补一条——那才是
+// 唯一真会插进去的 user 消息。
 func (r *Runner) continueChapter(proj, base, reason string) error {
 	if reason == "" {
 		reason = "手动继续"
 	}
-	text := "The user asked you to continue this chapter manually: " + reason + "\n\n" + continueChapterPrompt
-	r.log.Log(0, "[convert]", base, "手动继续：接着最近一次尝试跑（不新建尝试）")
-	return r.convertChapterNow(proj, base, text)
+	r.log.Log(0, "[convert]", base, "手动继续：接着最近一次尝试跑（不新建尝试、不插消息）")
+	r.setContinueFlag(base)
+	defer r.setContinueFlag(base)
+	return r.convertChapterNow(proj, base)
 }
 
-// continueChapterPrompt 是"继续跑"递给会话的原话。
-const continueChapterPrompt = "Re-read your workspace as it is NOW (read_file), then finish the job: fix whatever is still wrong, compile until clean, and submit the two paths again. Do not restart from scratch and do not ignore work you already did."
-
-// continueFromChapter 从转录的第 from 条记录之后继续（P2 的"从某个错误的地方
+// continueFromChapter 从转录的第 from 条记录之后继续（P53 阶段二 的"从某个错误的地方
 // 开始"）：把前 from 行抄成**一条新尝试**，后面的轮次丢掉，然后让它接着干。
 //
 // 源转录一个字不动——原记录还在「历史」里，看得见、也删得掉。这样"回滚到某一
@@ -620,14 +623,11 @@ func (r *Runner) continueFromChapter(proj, base, srcName string, from int) error
 		r.retryAttempt = map[string]int{}
 	}
 	r.retryAttempt[base] = next
-	text := fmt.Sprintf("The user rolled this chapter back to record #%d of %s and asked you to continue from there. "+
-		"Everything after that record is GONE from your history — do not assume work you may have done later still applies: "+
-		"%s", from, filepath.Base(dst), continueChapterPrompt)
-	r.setContinueText(base, text)
-	defer r.setContinueText(base, "")
+	r.setContinueFlag(base)
+	defer r.setContinueFlag(base)
 	r.log.Log(0, "[convert]", base, "从第", strconv.Itoa(from), "条记录继续：新尝试写",
-		filepath.Base(dst), "（源转录保留）")
-	return r.convertChapterNow(proj, base, "") // continueText 已经塞好
+		filepath.Base(dst), "（源转录保留；不发 user 内容，历史原样续行）")
+	return r.convertChapterNow(proj, base)
 }
 
 // truncateChapterTranscript 是 continueFromChapter 的纯文件部分：把前 from 行
@@ -721,10 +721,6 @@ func (r *Runner) redrawVectorImage(proj, trName, reason string, from int) error 
 	r.log.Log(0, "[vector]", filepath.Base(rec.ImgPath), what+"："+archNote+
 		" | 类别/分组不变，只重做这一张")
 
-	if from > 0 {
-		r.vectorResumeNote = fmt.Sprintf("The user rolled this drawing session back to record #%d of %s: everything after that record is GONE from your history, so do not assume anything you did later still applies. Re-read your workspace as it is NOW (read_file figure.tex, view_image the original, look at your last compile), then finish the drawing: fix what is still wrong and call submit with {path: \"figure.tex\"} once the preview faithfully matches the original image.", from, archived)
-		defer func() { r.vectorResumeNote = "" }()
-	}
 	inline := r.inline || looksInlineProject(proj)
 	srcDir := r.imagesSrcDir
 	if srcDir == "" {

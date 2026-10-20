@@ -27,7 +27,7 @@ import (
 // resolveUnderRoot，杜绝 `..`）；② 章节名必须长得像 `chapter_002`
 // （`chapter_004_child_01` 也认）；③ 那个章节的 md 必须真的在磁盘上。
 //
-// 请求带角色（P53/P2）：convert = 重转这一章（新尝试）、checker = 只重新核对
+// 请求带角色（P53 阶段二）：convert = 重转这一章（新尝试）、checker = 只重新核对
 // 已提交产物、continue = 接着这一章最近一次尝试继续跑（不新建尝试）。
 // 运行期的消费者是 latex 里的 watcher，任何阶段都收，忙的章节留队。
 
@@ -38,7 +38,7 @@ type retryRequest struct {
 	Chapter string `json:"chapter"`
 	Reason  string `json:"reason"`
 	Role    string `json:"role"`
-	// From/Path 是"从第几条记录之后继续"（P2）：From 是转录行号（1 起、含该行），
+	// From/Path 是"从第几条记录之后继续"（P53 阶段二）：From 是转录行号（1 起、含该行），
 	// Path 是源转录文件名（本项目 work/sessions/ 下的 *.jsonl）。0 = 从末尾继续。
 	From int    `json:"from,omitempty"`
 	Path string `json:"path,omitempty"`
@@ -263,7 +263,7 @@ func (v *viewerServer) retryRoles(sessions []SessionInfo) map[string]map[string]
 	return out
 }
 
-// /api/drop —— 删掉一条"转错的记录"（P2）。
+// /api/drop —— 删掉一条"转错的记录"（P53 阶段二）。
 //
 // 历史里一条作废的尝试会一直挂在「历史 N」里；用户看到某条明显跑歪（模型跑
 // 飞了、上下文坏了）的记录时，希望能直接丢掉它，而不是永远留着。这里只做

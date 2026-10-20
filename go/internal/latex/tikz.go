@@ -125,13 +125,7 @@ func RunTikZSession(
 			state.submitted = true
 			resumeSkip = true
 		} else {
-			note := "The session was interrupted earlier. Continue from where you left off: check your last compile result, fix figure.tex if needed, and call submit once the preview faithfully matches the original image."
-			// 手动"从某条记录之后继续"时换成那句说明（历史被截断，别再假设
-			// 后面那些轮次干过的事还算数）。
-			if env.ResumeNote != "" {
-				note = env.ResumeNote
-			}
-			initial = resumeUserText(msgs, note)
+			initial = resumeUserText(msgs, "The session was interrupted earlier. Continue from where you left off: check your last compile result, fix figure.tex if needed, and call submit once the preview faithfully matches the original image.")
 		}
 	} else if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)

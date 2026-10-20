@@ -229,7 +229,7 @@ func TestRecheckWithoutProduct(t *testing.T) {
 	}
 }
 
-// P2：章节锁——忙的章节不消费请求（留在队列里等下一次 tick），拿锁是非阻塞的，
+// P53 阶段二：章节锁——忙的章节不消费请求（留在队列里等下一次 tick），拿锁是非阻塞的，
 // 主流程那边是阻塞拿锁，所以同一章永远不会被跑两遍。
 func TestChapterLockAndBusyDispatch(t *testing.T) {
 	proj := t.TempDir()
@@ -306,17 +306,16 @@ func TestRetryPrecondition(t *testing.T) {
 // 继续跑的提示只对下一次转换有效，跑完必须清掉，免得普通运行也当成手动继续。
 func TestContinueTextScoped(t *testing.T) {
 	r := testRunner(t, true)
-	r.setContinueText("chapter_002", "接着干")
-	if got := r.continueTextOf("chapter_002"); got != "接着干" {
-		t.Fatalf("continueTextOf = %q", got)
+	r.setContinueFlag("chapter_002")
+	if !r.takeContinueFlag("chapter_002") {
+		t.Fatal("手动继续的标记应被取到")
 	}
-	r.setContinueText("chapter_002", "")
-	if got := r.continueTextOf("chapter_002"); got != "" {
-		t.Fatalf("清空后 = %q", got)
+	if r.takeContinueFlag("chapter_002") {
+		t.Fatal("标记取了就应清掉")
 	}
 }
 
-// 从某条记录之后继续（P2）：前 from 行抄成新尝试，后面的轮次丢掉，源转录不动。
+// 从某条记录之后继续（P53 阶段二）：前 from 行抄成新尝试，后面的轮次丢掉，源转录不动。
 func TestTruncateChapterTranscript(t *testing.T) {
 	proj := t.TempDir()
 	dir := filepath.Join(proj, "work", "sessions")

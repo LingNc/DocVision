@@ -92,9 +92,6 @@ type FigureEnv struct {
 	ViewImageMax  int
 	ViewPDFMax    int
 	ViewWarnRatio float64
-	// ResumeNote 覆盖作图会话续跑时那句默认说明（P53「从某条记录之后继续」：
-	// 历史被截断，得说清后面的轮次不算数）。空 = 用默认那句。
-	ResumeNote string
 	// CheckFigure verifies the submitted render against the original bitmap
 	// (latex.figure_check.enabled). It receives the path of a freshly
 	// rasterised PNG of the submitted figure and returns (ok, problems);
@@ -242,15 +239,15 @@ type Runner struct {
 	retryCheckerAttempt map[string]int
 	// retryNotes 是重试原因（写进新尝试的转录，事后对得上）。
 	retryNotes map[string]string
-	// busyMu/chapterBusy 标记"这一章现在有会话在跑"（P2）：主流程的并发批与
+	// busyMu/chapterBusy 标记"这一章现在有会话在跑"（P53 阶段二）：主流程的并发批与
 	// 运行期的重试派发共用它，同一章不会被跑两遍（派发发现忙就把请求留在
 	// 队列里，等下一次 tick）。
 	busyMu      sync.Mutex
 	chapterBusy map[string]*sync.Mutex
-	// continueText 是"继续跑"给会话的那句话（P2）：手动要求这一章接着干，
-	// 不新建尝试、不归档，只是把话递进去。
-	continueText map[string]string
-	// retryWatcher 是运行期消费 work/retry 队列的那条 goroutine（P2）：不等
+	// continueFlag 标记"这一章是人手动推下去的"（P53 阶段二）：不插任何内容，
+	// 只保证那条会话真的再跑一轮（否则上次已 submit 时会被 replay 收账跳过）。
+	continueFlag map[string]bool
+	// retryWatcher 是运行期消费 work/retry 队列的那条 goroutine（P53 阶段二）：不等
 	// 阶段边界、也不用重启进程，排上就能进并发队列。
 	retryWatcherStop chan struct{}
 	retryWatcherWG   sync.WaitGroup
@@ -262,9 +259,6 @@ type Runner struct {
 	// imagesSrcDir 是本次运行 images 阶段扫的原始 md 目录（重画一张图时要
 	// 回到同一份原始 md 重扫，不能用已经被重写过的项目 md）。
 	imagesSrcDir string
-	// vectorResumeNote 覆盖作图会话续跑时那句话（P53：从某条记录之后继续——
-	// 历史被截断，得说明"后面的轮次不算数了"）。只在持 vectorMu 时设置。
-	vectorResumeNote string
 }
 
 // phaseNote returns a console printer for phase-level progress notes.
@@ -1278,8 +1272,7 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	dstPNG := filepath.Join(outDir, "figures", name+".png")
 
 	env := FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown, OutputLang: r.outputLang(),
-		CurrentImgAbs: imgFile, ViewImageMax: r.cfg.ViewImageMax(), ViewPDFMax: r.cfg.ViewPDFMax(), ViewWarnRatio: r.cfg.ViewWarnRatio(),
-		ResumeNote: r.vectorResumeNote}
+		CurrentImgAbs: imgFile, ViewImageMax: r.cfg.ViewImageMax(), ViewPDFMax: r.cfg.ViewPDFMax(), ViewWarnRatio: r.cfg.ViewWarnRatio()}
 	if r.cfg.Latex.FigureCheck.Enabled {
 		// 逐图校验（默认关闭）：原图 ↔ 重画图比对交给视觉模型，不一致的问题
 		// 打回**同一个**作图会话修正，最多 MaxRounds 轮。
