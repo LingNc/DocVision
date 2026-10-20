@@ -204,6 +204,9 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// 只留这一行普通模式提示：被杀之后要看的文件到底在哪。采样行本身在
 	// 普通模式不显示（debug 日志与 mem.log 里全量都有）。
 	r.log.LogInfo(0, "[book] 内存/被杀现场日志:", memLogPath)
+	// 并发账目（T179）：三个池子的大小与模型级上限一次说清——用户调大
+	// concurrency 之后"为什么没有更快"通常就卡在模型级上限上。
+	r.logConcurrencyPlan()
 	// 重试预算与递归层数的匹配检查（T165）：顶层设得太小时，深层永远只能
 	// 吃下限 3，用户以为调大了却传不下去——起步就说清楚。
 	if warn := checkerBudgetWarning(r.cfg.Latex.CheckerRounds); warn != "" {
@@ -952,14 +955,74 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 	return r.styleFeedbackLoop(proj, fbRound)
 }
 
-func (r *Runner) acquireChapterSlot() func() {
-	r.chapterSlotsOnce.Do(func() {
-		limit := r.cfg.Latex.Concurrency
-		if limit < 1 {
-			limit = 3
+/*
+ * logConcurrencyPlan 打印并发账目并在"池子之和超过模型上限"时告警（T179）：
+ * 转换与核对各自排队的阶段不同，但落到同一个模型上时挤压的是同一个额度。
+ */
+func (r *Runner) logConcurrencyPlan() {
+	l := r.cfg.Latex
+	convert, checker, other := l.ConvertWorkers(), l.CheckerWorkers(), l.OtherWorkers()
+	line := "转换 " + strconv.Itoa(convert) + " / 核对 " + strconv.Itoa(checker) + "（独立槽位）/ 其它阶段 " + strconv.Itoa(other)
+	caps := r.cfg.ModelConcurrencyLimits()
+	if len(caps) == 0 {
+		r.log.LogInfo(0, "[book] 并发:", line, "；模型级不限（models.<名>.max_concurrency 未设置）")
+		return
+	}
+	names := make([]string, 0, len(caps))
+	for name := range caps {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, name+" 上限 "+strconv.Itoa(caps[name]))
+	}
+	r.log.LogInfo(0, "[book] 并发:", line, "；模型级:", strings.Join(parts, " / "))
+
+	// 想同时用同一个模型的会话数：转换池 + 核对池（两者是这本流程里唯一会
+	// 几十个并行的阶段）。
+	checkerName := l.CheckerModel
+	if checkerName == "" {
+		checkerName = l.ConvertModel
+	}
+	demand := map[string]int{}
+	if mc, ok := r.cfg.ResolveModel(l.ConvertModel); ok && mc.Model != "" {
+		demand[mc.Model] += convert
+	}
+	if mc, ok := r.cfg.ResolveModel(checkerName); ok && mc.Model != "" {
+		demand[mc.Model] += checker
+	}
+	for _, name := range names {
+		if want := demand[name]; want > caps[name] {
+			r.log.LogWarning(0, "[book] 并发:模型", name, "上限", strconv.Itoa(caps[name]),
+				"，但转换 "+strconv.Itoa(convert)+" + 核对 "+strconv.Itoa(checker)+" 都在用它——实际最多",
+				strconv.Itoa(caps[name]), "个在跑，其余排队等模型槽位；要更快得先调高该模型的 max_concurrency")
 		}
-		r.chapterSlots = make(chan struct{}, limit)
-	})
+	}
+}
+
+/*
+ * 阶段槽位（T179）：转换与核对各一个池子，各自的上限来自
+ * latex.convert_concurrency / checker_concurrency（没写沿用 concurrency）。
+ * 两者独立计数，所以"转换 3 + 核对 3"可以同时在途 6 个会话；要限制真正打到
+ * 同一个模型上的请求数，用 models.<名>.max_concurrency（会话层还有一个按模型
+ * 名的闸门，见 session.SetModelConcurrency）。
+ */
+func (r *Runner) acquireConvertSlot() func() {
+	r.convertSlotsOnce.Do(func() { r.convertSlots = make(chan struct{}, r.cfg.Latex.ConvertWorkers()) })
+	r.convertSlots <- struct{}{}
+	return func() { <-r.convertSlots }
+}
+
+func (r *Runner) acquireCheckerSlot() func() {
+	r.checkerSlotsOnce.Do(func() { r.checkerSlots = make(chan struct{}, r.cfg.Latex.CheckerWorkers()) })
+	r.checkerSlots <- struct{}{}
+	return func() { <-r.checkerSlots }
+}
+
+// acquireChapterSlot 是其余阶段的通用池子（样式修复、提交提醒等）。
+func (r *Runner) acquireChapterSlot() func() {
+	r.chapterSlotsOnce.Do(func() { r.chapterSlots = make(chan struct{}, r.cfg.Latex.OtherWorkers()) })
 	r.chapterSlots <- struct{}{}
 	return func() { <-r.chapterSlots }
 }
@@ -977,11 +1040,7 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 	if err := os.MkdirAll(parentParts, 0o755); err != nil {
 		return err
 	}
-	limit := r.cfg.Latex.Concurrency
-	if limit < 1 {
-		limit = 3
-	}
-	sem := make(chan struct{}, limit)
+	sem := make(chan struct{}, r.cfg.Latex.ConvertWorkers())
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var failures []string
@@ -1434,7 +1493,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	}
 	if !resumeSkip && !splitTool.Requested {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
-		release := r.acquireChapterSlot()
+		release := r.acquireConvertSlot()
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		_, runErr := sess.Run(session.RunOptions{UserText: initial})
 		release()
@@ -1481,7 +1540,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			"Put any NEW problems you found into report.issues (as a list); unresolved inherited ones go up by themselves. " +
 			"Do not submit child files as independent book chapters."
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
-		release := r.acquireChapterSlot()
+		release := r.acquireConvertSlot()
 		_, runErr := sess.Run(session.RunOptions{UserText: integrationText})
 		release()
 		if runErr != nil {
@@ -1552,7 +1611,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			"\n\nFix them in your workspace (edit_file/write_file), compile until clean, then submit the two paths again." +
 			"\n\nAn item is not automatically true: the checker reads the markdown, your compiled PDF and the original pages. " +
 			"If the marked spot is NOT a real problem (the markdown is OCR noise, the formula/table/figure comes from the original page and your .tex reproduces it), do not damage correct content to satisfy it — put the evidence (file and line, or the source page number) in submit.notes and submit again; it will be re-checked against the page."
-		release := r.acquireChapterSlot()
+		release := r.acquireConvertSlot()
 		_, runErr := sess.Run(session.RunOptions{UserText: msg})
 		release()
 		if runErr != nil {

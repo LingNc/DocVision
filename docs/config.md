@@ -93,6 +93,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.context_limit` | 模型/平台上下文窗口（tokens）；0=模型侧不设本地上限。会话实际值与 `latex.sessions.<session>.context_limit` 取较小的正值 | 0（不限制） |
 | `models.<条目>.max_tokens` | 模型/平台单次请求最大输出；0=模型侧不设上限。会话实际值与 `latex.sessions.<session>.max_tokens` 取较小的正值 | 0（不限制） |
 | `models.<条目>.max_images` | 模型/平台单次请求允许携带的图片数；0=不限制。超过时会话在请求前把最旧图片替换成可重新查看的文字提示 | 0（不限制） |
+| `models.<条目>.max_concurrency` | 该模型**同时在途的会话数**上限（T179）；0=不限制。键是**实际下发的模型名**：转换、核对、样式修复即便配成不同条目，只要最终落到同一个模型上就共用这一个额度（同模型的多条目取最小值）。阶段并发决定开几个 worker，这一项决定几个 worker 能同时跟同一个模型说话——想限制真正打到厂商那边的请求数就配它，而不是把两个阶段的上限相加 | 0（不限制） |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
 | `latex.sessions.{drawing,style,chapter,convert,checker,dedupe}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |
 | `latex.sessions.*.context_limit` | 会话上下文窗口（tokens）；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值 | 0（不限制） |
@@ -100,7 +101,9 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.sessions.*.keep_images` | 本地历史裁剪策略，不是平台图片上限；上下文裁剪时保留最近多少条带图消息。平台上限请配置 `models.<name>.max_images` | 3 |
 | `latex.sessions.*.temperature` | 该会话采样温度（同 `models.<name>.temperature`，会话配置优先） | 未设置 |
 | `latex.sessions.*.compaction_at` | 触发自动压缩的窗口占用比例（0-1），不写默认 0.85（所有会话一致，不是只继承 drawing） | 0.85 |
-| `latex.concurrency` | 档位1/档位2 的会话级并发（classify / 档位2 process / 档位1 逐章 convert / style-fix 共用；style、chapters、assemble、终审是单会话） | 3 |
+| `latex.concurrency` | 档位1/档位2 的通用会话级并发（classify / 档位2 process / style-fix / 提交提醒等共用；style、chapters、assemble、终审是单会话）。也是下面两项的默认值 | 3 |
+| `latex.convert_concurrency` | 章节转换会话的并发上限（T179）；0=沿用 `latex.concurrency`。与核对自己一个槽位池，**不放在一起算**：转换在写 `.tex`、核对在读 PDF/原书页，混在一个池里会让核对排在一个慢转换后面 | 0（=concurrency） |
+| `latex.checker_concurrency` | 章节核对会话的并发上限（T179）；0=沿用 `latex.concurrency`。核对会话比转换轻、读的是已有 PDF，通常可以开得比转换多；两个池子加起来超过某个模型的 `max_concurrency` 时，多出来的会话排队等模型槽位（启动日志会点名） | 0（=concurrency） |
 | `latex.insert_image_description` | 档位2 专用：raster 保留原图时是否嵌入 AI 解释文本（`[Image]( … )`）；档位1 不受它控制（总是生成解释块） | false |
 | `latex.style_fix.max_rounds` | 风格修复大循环上限（任何章节汇报样式问题即进入 整合→风格修复→影响评估→分块修复 循环；负数=关闭） | 3 |
 | `latex.style_fix.integrate_model` | 问题整合会话（stylefix-integrate）单独用的模型（T65）；空 = 沿用 style 模型 | `integrate` |

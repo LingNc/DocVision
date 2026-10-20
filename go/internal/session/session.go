@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"mineru-tools/internal/config"
@@ -434,6 +435,13 @@ func (s *Session) appendToolImage(v visionTurn) {
 // (t=meta kind=run_end): 会话为什么停——正常收尾、终态提交、还是 API 错误——
 // 从此写在转录里（用户实测：终审中途停了但转录没有任何报错原因）。
 func (s *Session) Run(opts RunOptions) (out string, err error) {
+	// 模型级并发闸门（T179）：同一厂商模型同时在途的会话不超过
+	// models.<名>.max_concurrency（没写就不限）。阶段并发决定"开几个 worker"，
+	// 这里决定"几个能同时跟同一个模型说话"——转换与核对配成两个池子之后，只有
+	// 这一层能真正把同一个模型上的请求数压回厂商限额。
+	if release := acquireModelSlot(s.modelCfg.Model); release != nil {
+		defer release()
+	}
 	s.noteFrozenPrice()
 	defer func() {
 		if s.transcript == nil {
@@ -1566,4 +1574,62 @@ func truncateForLog(s string, n int) string {
 		return s
 	}
 	return s[:n] + fmt.Sprintf("...(truncated, %d bytes total)", len(s))
+}
+
+/* ---------- 模型级并发闸门（T179） ---------- */
+
+var (
+	modelSlotMu    sync.Mutex
+	modelSlotLimit = map[string]int{}
+	modelSlots     = map[string]chan struct{}{}
+)
+
+/*
+ * SetModelConcurrency 安装「按厂商模型名」的在途会话上限（0 或缺失 = 不限）。
+ * 由进程启动时按配置调一次；传空 map 表示全部放开。同名模型只有一个池子，
+ * 所以转换 / 核对 / 样式修复这些不同阶段只要落到同一个模型上，就共用这个数。
+ */
+func SetModelConcurrency(limits map[string]int) {
+	modelSlotMu.Lock()
+	defer modelSlotMu.Unlock()
+	next := make(map[string]int, len(limits))
+	for name, n := range limits {
+		if name != "" && n > 0 {
+			next[name] = n
+		}
+	}
+	modelSlotLimit = next
+	modelSlots = map[string]chan struct{}{}
+}
+
+// acquireModelSlot 取一个该模型的会话槽位；返回 nil 表示这个模型不限。
+func acquireModelSlot(model string) func() {
+	if model == "" {
+		return nil
+	}
+	modelSlotMu.Lock()
+	limit, ok := modelSlotLimit[model]
+	if !ok {
+		modelSlotMu.Unlock()
+		return nil
+	}
+	ch, ok := modelSlots[model]
+	if !ok {
+		ch = make(chan struct{}, limit)
+		modelSlots[model] = ch
+	}
+	modelSlotMu.Unlock()
+	ch <- struct{}{}
+	return func() { <-ch }
+}
+
+// ModelConcurrencyLimits 返回当前安装的上限（报表/日志用）。
+func ModelConcurrencyLimits() map[string]int {
+	modelSlotMu.Lock()
+	defer modelSlotMu.Unlock()
+	out := make(map[string]int, len(modelSlotLimit))
+	for k, v := range modelSlotLimit {
+		out[k] = v
+	}
+	return out
 }

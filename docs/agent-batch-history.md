@@ -2039,3 +2039,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **真实缺陷**：转换会话跑完写 `chapter_activity=checking_result`，前端统一译成「核对完成待处理」——核对会话还在「等待并发槽」时，转换行就说"核对完成"，两个阶段说反了。
 - **改**：`chapterActivityLabel(state, role, prevVerdict, live)` 作为唯一来源：转换的 `checking_result` = 「转换完成待核对」、核对的 = 「核对完成待处理」、转换在 `queued` 且已有核对结论 = 「核对完成待并发槽」；其余状态不变。
 - **验证**：`chapter-tree.spec.ts` 新增 3 条；`npm test` 158、`go build` + `go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补十五，T179：转换与核对并发独立 + 模型级封顶）
+
+- **用户口径**："核对和转换的并发是独立的，不能放一起算"；"同一个模型的话并发上限和会话的并发相结合"。
+- **真实缺陷**：`latex.concurrency` 一个池子被转换、整合、checker 反馈轮、提交提醒共用，核对会话排在慢转换后面白等；没有任何地方按厂商模型限流，两个池子调大后打到同一模型上的请求数无从约束。
+- **改**：① `Runner` 拆 `convertSlots`/`checkerSlots`/`chapterSlots`，上限分别来自 `latex.convert_concurrency`/`checker_concurrency`（0 回退 `concurrency`），`LatexConfig.ConvertWorkers/CheckerWorkers/OtherWorkers` 是唯一解析点；子节点本地 sem 改用转换槽位数。② `models.<名>.max_concurrency` + 会话层 `SetModelConcurrency`：`Run` 一开始取该模型槽位，键是实际下发模型名，`Config.ModelConcurrencyLimits()` 用 `ResolveModel` 归并同名条目并取最小值。③ `RunBook` 启动打并发账目，池子之和超过模型上限时告警。
+- **验证**：`TestStageWorkers`、`TestModelConcurrencyLimits`、`TestModelSlotLimitsPerModel`（峰值正好等于上限，两模型互不影响，曾因两模型共用同一个 live 计数导致误报 3 > 1，改为按模型分别计数）、`TestModelSlotUnset`；`go build` + `go test ./internal/...` 全绿。

@@ -206,8 +206,15 @@ type Runner struct {
 	python     *PythonEnv
 	pythonOnce sync.Once
 
-	// chapterSlots bounds simultaneously active conversion/checker sessions
-	// across the entire recursive tree, not once per parent node.
+	// 阶段槽位（T179）：转换与核对各有自己的池子，跨整棵递归树共享（不是每个
+	// 父节点一份）。核对会话读 PDF/原书页、转换会话写 .tex，混在一个池里会让
+	// 核对排在一个慢转换后面——用户口径是"两个阶段的并发独立，不能放一起算"。
+	convertSlotsOnce sync.Once
+	convertSlots     chan struct{}
+	checkerSlotsOnce sync.Once
+	checkerSlots     chan struct{}
+	// chapterSlots 是其余阶段（样式修复 / 整合以外的零散会话 / 提交提醒）共用的
+	// 通用池子，仍然是 latex.concurrency。
 	chapterSlotsOnce sync.Once
 	chapterSlots     chan struct{}
 

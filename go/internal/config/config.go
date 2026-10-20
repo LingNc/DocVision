@@ -119,6 +119,14 @@ type ModelConfig struct {
 	// MaxImages is the provider/model maximum number of image parts accepted in
 	// one request. Zero means unlimited; it is not inherited from models.text.
 	MaxImages int `yaml:"max_images"`
+	// MaxConcurrency caps how many sessions that resolve to this entry's wire
+	// model may be in flight at once (0 = unlimited, the default). Stage
+	// concurrency (latex.convert_concurrency / checker_concurrency) decides how
+	// many workers exist; this decides how many of them may talk to the same
+	// model simultaneously. Different stages that end up on the same wire model
+	// share the cap — that is exactly what a provider's per-model rate limit
+	// meters, and it is why convert+checker are not added up by hand any more.
+	MaxConcurrency int `yaml:"max_concurrency"`
 	// ImageTokens overrides the top-level estimate: block for THIS model only
 	// (same keys: method/tokens/px_per_token/min_tokens/max_tokens). Unset keys
 	// inherit the estimate block, and anything unset there uses the code
@@ -368,8 +376,16 @@ type LatexConfig struct {
 	RemoveWatermark bool `yaml:"remove_watermark"`
 	// Concurrency for per-image and per-chapter workers. Default 3
 	// (sessions are long-lived and much heavier than plain img2text calls).
-	Concurrency int                `yaml:"concurrency"`
-	Compile     LatexCompileConfig `yaml:"compile"`
+	Concurrency int `yaml:"concurrency"`
+	// ConvertConcurrency / CheckerConcurrency（T179）：章节转换会话与章节核对
+	// 会话**各自**的并发上限。两者是独立的槽位池——核对会话在读 PDF/原书页，
+	// 转换会话在写 .tex，混在一个池里会让一堆核对排在一个慢转换后面。0 表示
+	// 沿用 concurrency（老配置不用改），所以「转换 3 + 核对 3」可以同时在途 6 个
+	// 会话；真要限制总请求数用 models.<名>.max_concurrency（按厂商模型名封顶，
+	// 两个阶段共用一个模型时才是真正该一起算的那个数）。
+	ConvertConcurrency int                `yaml:"convert_concurrency"`
+	CheckerConcurrency int                `yaml:"checker_concurrency"`
+	Compile            LatexCompileConfig `yaml:"compile"`
 	// FigureCheck re-verifies every redrawn figure against the original
 	// bitmap with a vision model before it is accepted. Default OFF: it
 	// costs one extra vision call per figure and most books do not need
@@ -407,6 +423,51 @@ type LatexConfig struct {
 		// chapter before assembly. Defaults to the convert tuning.
 		Checker SessionTuning `yaml:"checker"`
 	} `yaml:"sessions"`
+}
+
+/*
+ * ConvertWorkers / CheckerWorkers / OtherWorkers 解析各阶段的并发槽位数（T179）：
+ * 转换与核对各有自己的池子（`convert_concurrency` / `checker_concurrency`），
+ * 没写（0）就沿用 `concurrency`，`concurrency` 也没写时按运行期的老默认 3。
+ */
+func (l LatexConfig) ConvertWorkers() int { return stageWorkers(l.ConvertConcurrency, l.Concurrency) }
+func (l LatexConfig) CheckerWorkers() int { return stageWorkers(l.CheckerConcurrency, l.Concurrency) }
+func (l LatexConfig) OtherWorkers() int   { return stageWorkers(0, l.Concurrency) }
+
+func stageWorkers(v, fallback int) int {
+	if v > 0 {
+		return v
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 3
+}
+
+/*
+ * ModelConcurrencyLimits 汇总「按厂商模型名」的在途会话上限（T179）：
+ * 只收写了 `models.<名>.max_concurrency > 0` 的条目，键是**实际下发的模型名**
+ * （`model:`），所以转换、核对、样式修复即便配成不同条目，只要最终落到同一个
+ * 模型上就共用一个上限——这才是厂商那边真正限的东西。一个模型被多个条目声明
+ * 时取最小值（谁更保守听谁的）。
+ */
+func (c *Config) ModelConcurrencyLimits() map[string]int {
+	out := map[string]int{}
+	if c == nil {
+		return out
+	}
+	for name := range c.Models {
+		// 用 ResolveModel 取条目：`model:` 常常是继承 models.text 的，直接看
+		// 条目自己的 Model 字段会漏掉"写了上限但没写模型名"的条目。
+		mc, ok := c.ResolveModel(name)
+		if !ok || mc.MaxConcurrency <= 0 || mc.Model == "" {
+			continue
+		}
+		if prev, seen := out[mc.Model]; !seen || mc.MaxConcurrency < prev {
+			out[mc.Model] = mc.MaxConcurrency
+		}
+	}
+	return out
 }
 
 // Img2TextConfig holds pipeline-specific overrides for the basic

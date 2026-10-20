@@ -134,7 +134,9 @@ latex:
     stylefix_block_model: "stylefix-block"    # 分块修复会话独立模型（T70；默认沿用 convert）
     bookfix_model: "bookfix"                  # 构建修复会话（book_fix）独立模型（T70；默认沿用 convert）
     final_review_model: "final-review"        # 终审会话独立模型（T70；默认沿用 convert）
-  concurrency: 3                 # 会话级并发（classify / 逐章 convert / style-fix 共用）
+  concurrency: 3                 # 会话级并发（classify / 样式修复 / 提交提醒等共用）
+  convert_concurrency: 0         # 章节转换会话并发（T179）；0=沿用 concurrency。与核对是各自独立的槽位池，不放在一起算
+  checker_concurrency: 0         # 章节核对会话并发（T179）；0=沿用 concurrency。核对在读 PDF/原书页、转换在写 .tex，分开排队
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留
   style_pilot: true # 样式试点（T97 重量档）：选材拼样例 → 试转核对 → 修订定稿 cls，然后才划分章节；样式问题在进入全书转换前暴露
@@ -321,6 +323,7 @@ models:
     model: "Qwen/Qwen3.6-27B"
     context_limit: 0             # 模型上下文上限；0=不限制
     max_images: 0                 # 单次请求图片上限；0=不限制
+    max_concurrency: 0            # 该模型同时在途的会话数上限（T179）；0=不限制。转换/核对/修复落到同一个模型时共用这一个额度
     max_tokens: 0                 # 模型单次输出上限；0=不限制，与会话配置取较小值
     price:                       # 计费单价（元/百万 tokens）
       input: 0                   # 未命中前缀缓存的输入单价

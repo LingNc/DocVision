@@ -69,7 +69,7 @@ func newLatexCmd() *cobra.Command {
            每条问题必须指明位置，看不见的差异不报），
            硬性问题回同一会话最多 3 轮；普通章节仍按既有策略重转换
             章节过大或难以可靠处理时可结构化申请细分（最多 3 层），子章节并行转换并必须明确通过 checker；
-            父级按序整合后暂存核对，通过才晋级；全树共享 latex.concurrency 并发槽，排队/等待子章节状态可在会话预览查看；
+            父级按序整合后暂存核对，通过才晋级；转换与核对各自独立计数（latex.convert_concurrency / checker_concurrency，未写沿用 latex.concurrency），同一模型的在途会话数由 models.<名>.max_concurrency 封顶，排队/等待子章节状态可在会话预览查看；
             更新 checker 模型后重新运行可续核未完成节点，详见 docs/latex.md
   feedback 多数章节报 cls/手册问题时打回原样式会话；样式包更新后只对
            「报问题」或「新 cls 下编译不过」的章节并发跑样式修复子会话（不重转换）

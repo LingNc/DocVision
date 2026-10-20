@@ -136,6 +136,7 @@ func loadConfigWithFlag(cmd *cobra.Command) (*config.Config, error) {
 		return nil, err
 	}
 	applyEstimateConfig(cfg)
+	applyConcurrencyConfig(cfg)
 	return cfg, nil
 }
 
@@ -169,6 +170,17 @@ func applyEstimateConfig(cfg *config.Config) {
 			session.SetModelEstimate(wire, est)
 		}
 	}
+}
+
+/*
+ * applyConcurrencyConfig 把 models.<名>.max_concurrency（T179）装进会话层：
+ * 同一厂商模型同时在途的会话数不超过该上限（0/未写 = 不限）。
+ * 阶段并发（latex.convert_concurrency / checker_concurrency）决定开几个 worker，
+ * 这一层决定几个 worker 能同时跟同一个模型说话——两个阶段配成同一个模型时，
+ * 真正需要一起算的是这个数，而不是把两个池子加起来。
+ */
+func applyConcurrencyConfig(cfg *config.Config) {
+	session.SetModelConcurrency(cfg.ModelConcurrencyLimits())
 }
 
 func newWorkflowCmd() *cobra.Command {

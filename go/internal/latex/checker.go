@@ -142,7 +142,7 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		var runErr error
 		if !resumeSkip {
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
-			release := r.acquireChapterSlot()
+			release := r.acquireCheckerSlot()
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 			_, runErr = sess.Run(session.RunOptions{UserText: resumeUserText(resumedMsgs, userText)})
 			release()
@@ -154,7 +154,7 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		if runErr == nil && !submit.Submitted {
 			// 与 tikz 会话同款：模型漏了 submit 就提醒一次。
 			r.log.LogWarning(tid, "[checker]", base, "会话结束但未提交结论，发送提交提醒")
-			release := r.acquireChapterSlot()
+			release := r.acquireCheckerSlot()
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 			_, runErr = sess.Run(session.RunOptions{
 				UserText: "You have NOT called submit yet. Re-read the chapter files if needed, then call submit with your verdict.",
