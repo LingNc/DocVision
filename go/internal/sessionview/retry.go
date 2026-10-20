@@ -87,6 +87,15 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 	if role == "" {
 		role = "convert"
 	}
+	if role != "convert" && role != "checker" {
+		http.Error(w, "角色只能是 convert 或 checker", http.StatusBadRequest)
+		return
+	}
+	// 重新核对的对象是**已提交的产物**：还没交过就没什么可核的，先重试转换。
+	if role == "checker" && !fileExistsIn(projDir, "work", "chapters", base+".tex") {
+		http.Error(w, "这一章还没有提交产物，无法重新核对（先重试转换）", http.StatusBadRequest)
+		return
+	}
 	path, err := retryq.Queue(projDir, retryq.Request{
 		Project: req.Project, Chapter: base, Role: role,
 		Reason: strings.TrimSpace(req.Reason), Source: "web",
@@ -95,11 +104,20 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "写入重试队列失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	note := "已加入重试队列：正在跑的 docvision latex 会在转换阶段处理它；没在跑就留到下次启动"
+	if role == "checker" {
+		note = "已加入重新核对队列：只重跑核对会话，产物不动；正在跑的 latex 在转换阶段的安全点处理它"
+	}
 	writeJSON(w, map[string]any{
-		"ok": true, "chapter": base, "project": req.Project,
-		"queued": filepath.Base(path),
-		"note":   "已加入重试队列：正在跑的 docvision latex 会在转换阶段处理它；没在跑就留到下次启动",
+		"ok": true, "chapter": base, "project": req.Project, "role": role,
+		"queued": filepath.Base(path), "note": note,
 	})
+}
+
+// fileExistsIn 在项目目录下按段拼路径并确认是普通文件。
+func fileExistsIn(root string, parts ...string) bool {
+	st, err := os.Stat(filepath.Join(append([]string{root}, parts...)...))
+	return err == nil && st.Mode().IsRegular()
 }
 
 // pendingRetries 是每个项目当前排队的重试点（页面据此给章节行挂「待重试」）。
@@ -117,7 +135,16 @@ func (v *viewerServer) pendingRetries(sessions []SessionInfo) map[string][]strin
 		if !ok {
 			continue
 		}
-		if chapters := retryq.Chapters(dir); len(chapters) > 0 {
+		if files := retryq.Pending(dir); len(files) > 0 {
+			seen := map[string]bool{}
+			var chapters []string
+			for _, f := range files {
+				if seen[f.Chapter] {
+					continue
+				}
+				seen[f.Chapter] = true
+				chapters = append(chapters, f.Chapter)
+			}
 			sort.Strings(chapters)
 			out[s.Project] = chapters
 		} else {
@@ -126,6 +153,48 @@ func (v *viewerServer) pendingRetries(sessions []SessionInfo) map[string][]strin
 	}
 	for k, v := range out {
 		if len(v) == 0 {
+			delete(out, k)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// retryRoles 是"每个项目里每一章排的是哪个角色的重试"（P53）：章节行有两个
+// 角色（转换 / 核对），「待重试」必须挂在对应的那一行，而不是两行都挂。
+func (v *viewerServer) retryRoles(sessions []SessionInfo) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, s := range sessions {
+		if s.Board != "" || s.Project == "" {
+			continue
+		}
+		if _, done := out[s.Project]; done {
+			continue
+		}
+		dir, ok := v.projectWorkspace(s.Project)
+		if !ok {
+			continue
+		}
+		files := retryq.Pending(dir)
+		if len(files) == 0 {
+			out[s.Project] = nil
+			continue
+		}
+		roles := map[string]string{}
+		for _, f := range files {
+			role := f.Role
+			if role == "" {
+				role = "convert"
+			}
+			// 同一章两种角色都排着时保留最后一条（消费者两条都会跑）。
+			roles[f.Chapter] = role
+		}
+		out[s.Project] = roles
+	}
+	for k, m := range out {
+		if len(m) == 0 {
 			delete(out, k)
 		}
 	}

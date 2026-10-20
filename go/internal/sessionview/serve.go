@@ -367,6 +367,9 @@ type indexResponse struct {
 	// Retries 是每个项目当前排队的重试点（P53）：章节行据此显示「待重试」，
 	// 处理掉之后自动消失。
 	Retries map[string][]string `json:"retries,omitempty"`
+	// RetryRoles 给每个排队的章节标角色（convert/checker）：章节行有两行，
+	// 「待重试」挂在对应那一行（P53）。
+	RetryRoles map[string]map[string]string `json:"retryRoles,omitempty"`
 }
 
 func (v *viewerServer) serveIndex(w http.ResponseWriter) {
@@ -384,6 +387,7 @@ func (v *viewerServer) serveIndex(w http.ResponseWriter) {
 		Sessions:      sessions,
 		DedupeReviews: v.dedupeReviewProjects(sessions),
 		Retries:       v.pendingRetries(sessions),
+		RetryRoles:    v.retryRoles(sessions),
 	})
 }
 

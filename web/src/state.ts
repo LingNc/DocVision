@@ -111,6 +111,9 @@ export const state = reactive({
   // P53：每个项目当前排队的重试章节（/api/index 的 retries），章节行据此显示
   // 「待重试」。不参与列表签名：它变化只影响一个角标，不该重建侧栏。
   retries: {} as Record<string, string[]>,
+  // P53：排队的章节各自是哪个角色（convert / checker）——章节行有两行，
+  // 「待重试」要挂在对应那一行。
+  retryRoles: {} as Record<string, Record<string, string>>,
   // P53：最近一次「重试」请求的反馈（成功/失败一行字），显示在按钮旁边。
   retryNote: '',
   current: null as Session | null,

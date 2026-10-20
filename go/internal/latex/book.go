@@ -1008,11 +1008,34 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		}
 	}
 	r.log.Log(0, label, "全部", strconv.Itoa(len(targets)), "章转换完成")
-	if retryOnly {
+	// P53 的 checker 角色：只重新核对已提交的产物，不动 .tex。放在转换重试之后
+	// 统一处理——同一章既重转又重核时，先重转再核新产物才有意义。
+	rechecked := 0
+	for pass := 0; pass < 2; pass++ {
+		bases := r.prepareCheckerRetries(proj)
+		if len(bases) == 0 {
+			break
+		}
+		rechecked += len(bases)
+		r.log.Log(0, label, "重新核对:", strings.Join(bases, ", "))
+		var wg sync.WaitGroup
+		for i, base := range bases {
+			r.forceCheckerRetry(proj, base)
+			n := r.retryCheckerAttempt[base]
+			wg.Add(1)
+			go func(tid int, base string, n int) {
+				defer wg.Done()
+				r.recheckChapter(proj, base, tid)
+			}(i+1, base, n)
+		}
+		wg.Wait()
+	}
+	if retryOnly || rechecked > 0 {
 		// 手动重试只补那几章：样式反馈回路会拿全书的报告去改 cls、再分块重转
 		// 整本书——那是"整书重跑"该做的决定，不能由一次单章重试顺手触发。
 		r.log.Log(0, label, "手动重试不回灌样式反馈（整书重跑时它才会介入）")
-		r.log.Log(0, label, "这一轮只重转了", strconv.Itoa(len(targets)), "章；要更新整书 PDF 请再跑一次 --step assemble")
+		r.log.Log(0, label, "这一轮重转", strconv.Itoa(len(targets)), "章、重新核对", strconv.Itoa(rechecked),
+			"章；要更新整书 PDF 请再跑一次 --step assemble")
 		return nil
 	}
 	// 样式反馈回路：多数章节汇报 cls/手册问题 → 打回原样式会话修正

@@ -2072,6 +2072,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
   - `book.go`：重试/`--only` 只做转换这一层——**不进样式反馈回路**（那会拿全书报告改 cls 再分块重转整本书），也不自动 assemble，日志提示再跑 `--step assemble`；`convertPhase` 的并发循环抽成 `convertChapterBatch`（重试补轮要复用同一套并发槽/进度行/失败汇总），阶段头按 `--only`/队列选目标，批次之间最多再补两轮；`runPhase` 对 convert 加 `forceConvert`；`convertOneChapter` 采用 Runner 分配的新尝试号；新尝试转录写一条 `t=meta kind=manual_retry`。
   - `archiveChapterAttempt` 顺手把旧 `report.md` 也挪进 try 目录——新尝试写同一路径，不挪就是被悄悄覆盖。
   - 服务端：`POST /api/retry`（校验项目在扫描根下、章节名 `^chapter_\d+(_child_\d+)*$`、`chapters/<章>.md` 真存在），`/api/index` 增 `retries`；`sessions --no-retry` 关掉写入口。
+  - **核对角色（用户追加要求"这个 checker 会话也可以对他重试吧？不只是转换会话"）**：队列请求带 `role`（convert/checker），消费者按角色分流；checker 走 `forceCheckerRetry` + `recheckChapter`——产物一个字不动，只把旧结论挪成 `<章>.tex.checker.try<N>`、换全新核对会话写 `checker_<章>.try<N+1>.jsonl`（只读视图也按尝试号分开，编译产物从 `work/temp/conv_<章>/work/.gate/compile.json` 找回来挂进去，上次的 `notes.md` 继续用），结论照既有语义落盘（通过删 `.checker`、有问题写进去），API 失败不改结论；没有已提交产物的章节服务端直接 400。`/api/index` 增 `retryRoles`，「待重试」挂到对应那一行。
   - 前端：章节行悬浮 ↻（排队后换「待重试」角标）、详情栏「重试这一章」+ 一行反馈；**只给顶层章节**——细分出的子章节（`chapter_003_child_01`）不在 `chapters/` 下、由父节点的细分树产出，单独重跑它得连同父节点整合一起走，服务端对子章节回 400 并说明"请重试它所属的顶层章节"，`--only` 点名子章节同样报错。
 - **踩坑**：① `.done.json` 也以 `.json` 结尾，第一版 `Pending` 把留档又读成待办（测试抓到）；② 连点两下时第二次仍按磁盘推导出同一个尝试号——磁盘上还没有 `.try2.jsonl`，改用 `max(磁盘, 本次已分配)` 兜住，否则两次归档撞进同一个 `try1`。
 - **验证**：`go test ./internal/...` 全绿（新增 retryq 4 条、latex 3 条、sessionview 4 条）；`npm test` 160；dist 重建后 `go build ./...`。

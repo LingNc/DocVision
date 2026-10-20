@@ -91,6 +91,7 @@ docvision latex --level 1 书.pdf               # 档位1 全书转换
 docvision latex --level 2 --test --number 5    # 抽样测试
 docvision latex --level 1 --step style 书.md   # 仅某个阶段
 docvision latex --only chapter_002             # 单章重跑（开新尝试，旧尝试留档；自动只跑 convert）
+#   重新核对没有命令行等价物：它的对象是已提交产物，在预览页对应核对行上点 ↻
 #   --step 取值：档位1 images|style|chapters|convert|assemble；档位2 classify|process
 docvision latex --source-dir 其它md目录 书.md  # 覆盖输入 markdown 目录（paths.output_dir）
 docvision latex --all                          # 日志分析汇总全部历史
@@ -135,6 +136,11 @@ docvision latex --only chapter_004_child_01 --project 概率论-2026
 - 旧的尝试整棵挪进 `<项目>/work/attempts/<章>/try<N>/`（含已提交的 `.tex`、分片、`work/`、`result/`、`integrated-stage/`、旧 `report.md`，问题清单写 `checker-issues.md`），**不删**；
 - 新会话写 `convert_<章>.try<N+1>.jsonl`，转录里记一条 `t=meta kind=manual_retry`（原因 + 尝试号），预览页的「历史 N」里两条都在、能来回切；
 - 提交过的 `<章>.tex` 会被移走，否则转换阶段会按「已有产物，跳过」直接略过这一章。
+
+重试有两种，页面上分别挂在两行上：
+
+- **转换重试**（转换行 ↻ / 详情栏「重试这一章」，命令行 `--only`）：重转这一章，开一个新尝试；
+- **重新核对**（核对行 ↻ / 详情栏「重新核对这一章」）：**产物一个字不动**，只换核对会话与只读视图重新核对一遍已提交的 `.tex` 与编译产物——旧结论挪成 `<章>.tex.checker.try<N>`，新会话写 `checker_<章>.try<N+1>.jsonl`。它只给结论，**不会**自动打回转换会话；核出问题就再重试转换那一章。没有已提交产物的章节不给这个按钮（先重试转换）。
 
 粒度是**顶层章节**：细分出来的子章节（`chapter_003_child_01`）不单独重试——它由父章节的细分树产出，重跑它得连同父节点的整合一起走，直接重试父章节即可（`--only` 点名子章节会明确报错）。
 

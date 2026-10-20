@@ -3,6 +3,7 @@ package latex
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mineru-tools/internal/retryq"
@@ -142,5 +143,88 @@ func TestSelectOnlyChapters(t *testing.T) {
 	}
 	if got := selectOnlyChapters(chapters, map[string]bool{"chapter_999": true}); len(got) != 0 {
 		t.Fatalf("名单不匹配应当返回空, got %v", got)
+	}
+}
+
+// checker 角色：只换核对尝试号，产物一个字不动；旧结论留档 .checker.try<N>。
+func TestForceCheckerRetryKeepsProduct(t *testing.T) {
+	proj := t.TempDir()
+	base := "chapter_005"
+	for _, d := range []string{
+		filepath.Join(proj, "work", "sessions"),
+		filepath.Join(proj, "work", "chapters"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	texPath := filepath.Join(proj, "work", "chapters", base+".tex")
+	for _, p := range []string{
+		texPath,
+		filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl"),
+	} {
+		if err := os.WriteFile(p, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(texPath+".checker", []byte("第 3 页缺一段\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := testRunner(t, true)
+	if n := r.forceCheckerRetry(proj, base); n != 2 {
+		t.Fatalf("核对尝试号 = %d, want 2", n)
+	}
+	// 产物不能被动：重跑的是"再看一遍"，不是"重做一遍"。
+	if _, err := os.Stat(texPath); err != nil {
+		t.Fatalf("重新核对不该动产物: %v", err)
+	}
+	// 旧结论留档，否则新会话覆盖 `.checker` 就没了。
+	data, err := os.ReadFile(texPath + ".checker.try1")
+	if err != nil || string(data) != "第 3 页缺一段\n" {
+		t.Fatalf("旧结论留档 = %q (%v)", string(data), err)
+	}
+	// 连点两下：第二次继续往上，不撞回 try2。
+	if n := r.forceCheckerRetry(proj, base); n != 3 {
+		t.Fatalf("第二次核对尝试号 = %d, want 3", n)
+	}
+}
+
+// 队列按角色分流：转换请求不会被"重新核对"那一轮吃掉，反之亦然。
+func TestRetryQueueSplitsByRole(t *testing.T) {
+	proj := t.TempDir()
+	for _, d := range []string{filepath.Join(proj, "work", "sessions"), filepath.Join(proj, "work", "chapters"), filepath.Join(proj, "chapters")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(proj, "chapters", "chapter_001.md"), []byte("# 章\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := retryq.Queue(proj, retryq.Request{Chapter: "chapter_001", Role: "convert"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := retryq.Queue(proj, retryq.Request{Chapter: "chapter_002", Role: "checker"}); err != nil {
+		t.Fatal(err)
+	}
+	r := testRunner(t, true)
+	// checker 轮：只有 checker 请求被拿走；chapter_002 没产物 → 忽略但已消费。
+	if got := r.prepareCheckerRetries(proj); len(got) != 0 {
+		t.Fatalf("没产物的重新核对应被忽略, got %v", got)
+	}
+	if got := r.prepareRetries(proj); len(got) != 1 || got[0] != "chapter_001" {
+		t.Fatalf("convert 轮 = %v, want [chapter_001]", got)
+	}
+	if r.hasPendingRetry(proj) {
+		t.Fatal("两条请求都应已消费")
+	}
+}
+
+// 没有产物时重新核对直接说清楚，而不是空跑一个会话。
+func TestRecheckWithoutProduct(t *testing.T) {
+	proj := t.TempDir()
+	r := testRunner(t, true)
+	ok, issues := r.recheckChapter(proj, "chapter_009", 1)
+	if ok || !strings.Contains(issues, "还没有提交产物") {
+		t.Fatalf("recheckChapter = (%v, %q)", ok, issues)
 	}
 }

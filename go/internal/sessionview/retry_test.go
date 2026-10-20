@@ -68,6 +68,9 @@ func TestPostRetryRejections(t *testing.T) {
 		// 子章节由父章节的细分树产出，不在 chapters/ 下：拒绝并说明方向。
 		{"子章节", `{"project":"书A","chapter":"chapter_003_child_01"}`, http.StatusBadRequest},
 		{"请求体不是 JSON", `not json`, http.StatusBadRequest},
+		{"角色非法", `{"project":"书A","chapter":"chapter_002","role":"style"}`, http.StatusBadRequest},
+		// 重新核对的前提是有已提交产物。
+		{"还没有产物", `{"project":"书A","chapter":"chapter_002","role":"checker"}`, http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		if got := postRetry(t, v, tc.body).Code; got != tc.want {
@@ -102,5 +105,28 @@ func TestPendingRetriesForIndex(t *testing.T) {
 	// img2text 板块的会话（Board 非空）不参与。
 	if got := v.pendingRetries([]SessionInfo{{Project: "书A", Board: "img2text"}}); len(got) != 0 {
 		t.Fatalf("img2text 不该出现在 retries: %v", got)
+	}
+}
+
+// 角色透传：checker 请求在队列里是 checker，"重新核对"那一轮才认它。
+func TestPostRetryCheckerRoleWithProduct(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	if err := os.MkdirAll(filepath.Join(proj, "work", "chapters"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "work", "chapters", "chapter_002.tex"), []byte("\\chapter{x}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"checker","reason":"核对看错了"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	pending := retryq.Pending(proj)
+	if len(pending) != 1 || pending[0].Role != "checker" {
+		t.Fatalf("队列 = %+v", pending)
+	}
+	roles := v.retryRoles([]SessionInfo{{Project: "书A"}})
+	if roles["书A"]["chapter_002"] != "checker" {
+		t.Fatalf("retryRoles = %v", roles)
 	}
 }

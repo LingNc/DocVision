@@ -267,4 +267,17 @@ describe('重试队列的状态', () => {
     applyIndex({ sessions: [] })
     expect(chapterPendingRetry('书A', 'chapter_002')).toBe(false)
   })
+
+  // 章节行有两个角色：排的是哪种重试，「待重试」就挂哪一行。
+  it('按角色区分', () => {
+    applyIndex({ sessions: [], retries: { 书A: ['chapter_002'] }, retryRoles: { 书A: { chapter_002: 'checker' } } })
+    expect(chapterPendingRetry('书A', 'chapter_002')).toBe(true)
+    expect(chapterPendingRetry('书A', 'chapter_002', 'checker')).toBe(true)
+    expect(chapterPendingRetry('书A', 'chapter_002', 'convert')).toBe(false)
+
+    applyIndex({ sessions: [], retries: { 书A: ['chapter_002'] } })
+    // 没给角色时按 convert 算（后端的默认值）。
+    expect(chapterPendingRetry('书A', 'chapter_002', 'convert')).toBe(true)
+    expect(chapterPendingRetry('书A', 'chapter_002', 'checker')).toBe(false)
+  })
 })

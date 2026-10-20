@@ -230,6 +230,9 @@ type Runner struct {
 	// 重试队列在批次开始前填好，convertOneChapter 读它决定转录文件名。
 	// 只在批次之间写、批次内部只读，所以不需要锁。
 	retryAttempt map[string]int
+	// retryCheckerAttempt 记录"这一章这一次要写第几号核对尝试"（P53）：重新核对
+	// 不动产物，只换核对转录。写读时机同 retryAttempt。
+	retryCheckerAttempt map[string]int
 	// retryNotes 是重试原因（写进新尝试的转录，事后对得上）。
 	retryNotes map[string]string
 }

@@ -39,25 +39,37 @@ function onMetaToggle(ev: Event) {
  * 一回事，这里不提供。 */
 const retryTarget = computed(() => {
   const s: any = state.current
-  if (!s || !s.chapterId || s.chapterRole !== 'convert' || !s.project) return null
-  return { project: String(s.project), chapter: String(s.chapterId) }
+  const role = s && s.chapterRole
+  if (!s || !s.chapterId || !s.project) return null
+  if (role !== 'convert' && role !== 'checker') return null
+  // 子章节由父章节的细分树产出，不单独重跑（重试父章节）。
+  if (String(s.chapterId).indexOf('_child_') >= 0) return null
+  return { project: String(s.project), chapter: String(s.chapterId), role: String(role) }
 })
 const retryPending = computed(() => {
   const t = retryTarget.value
-  return !!t && chapterPendingRetry(t.project, t.chapter)
+  return !!t && chapterPendingRetry(t.project, t.chapter, t.role)
+})
+const retryIsChecker = computed(() => !!retryTarget.value && retryTarget.value.role === 'checker')
+const retryButtonText = computed(() => {
+  const t = retryTarget.value
+  if (!t) return ''
+  if (retryPending.value) return t.role === 'checker' ? '已在重新核对队列' : '已在重试队列'
+  return t.role === 'checker' ? '重新核对这一章' : '重试这一章'
 })
 
 function doRetry(): void {
   const t = retryTarget.value
   if (!t) return
-  state.retryNote = '正在提交 ' + t.chapter + ' 的重试请求…'
-  requestChapterRetry(t.project, t.chapter, '详情栏重试')
+  const what = t.role === 'checker' ? '重新核对' : '重试'
+  state.retryNote = '正在提交 ' + t.chapter + ' 的' + what + '请求…'
+  requestChapterRetry(t.project, t.chapter, t.role, '详情栏' + what)
     .then((res: any) => {
-      state.retryNote = t.chapter + ' 已加入重试队列（' + ((res && res.note) || '等待转换阶段处理') + '）'
+      state.retryNote = t.chapter + ' ' + what + '请求已排队（' + ((res && res.note) || '等待转换阶段处理') + '）'
       return refreshIndex()
     })
     .catch((err: any) => {
-      state.retryNote = t.chapter + ' 重试请求失败：' + ((err && err.message) || err)
+      state.retryNote = t.chapter + ' ' + what + '请求失败：' + ((err && err.message) || err)
     })
 }
 
@@ -125,13 +137,19 @@ function closeTrajStep() {
       </section>
 
       <section v-if="retryTarget && !state.staticMode" class="detail-block">
-        <h3 class="detail-block-title">手动重试</h3>
+        <h3 class="detail-block-title">{{ retryIsChecker ? '重新核对' : '手动重试' }}</h3>
         <div class="retry-hint">
-          重跑这一章会开一个<b>新尝试</b>：旧的整棵留档在工作区的 work/attempts/，预览页「历史」里两条都在。
+          <template v-if="retryIsChecker">
+            只重跑<b>核对会话</b>，产物一个字不动：用全新上下文再核对一遍已提交的 .tex 与编译产物，
+            旧结论留档在 .checker.try&lt;N&gt;，旧转录留在「历史」里。
+          </template>
+          <template v-else>
+            重跑这一章会开一个<b>新尝试</b>：旧的整棵留档在工作区的 work/attempts/，预览页「历史」里两条都在。
+          </template>
           请求只写进项目的 work/retry/ 队列——正在跑的 latex 会在转换阶段的安全点处理，没在跑就留到下次启动。
         </div>
         <button class="retry-btn" type="button" :disabled="retryPending" @click="doRetry">
-          {{ retryPending ? '已在重试队列' : '重试这一章' }}
+          {{ retryButtonText }}
         </button>
         <div v-if="state.retryNote" class="retry-note">{{ state.retryNote }}</div>
       </section>

@@ -85,23 +85,25 @@ function canRetryNode(node: ChapterTreeNode): boolean {
   return !!nodeProject(node) && !state.staticMode && node.id.indexOf('_child_') < 0
 }
 
-function nodePendingRetry(node: ChapterTreeNode): boolean {
+function nodePendingRetry(node: ChapterTreeNode, role = 'convert'): boolean {
   const project = nodeProject(node)
-  return !!project && chapterPendingRetry(project, node.id)
+  return !!project && chapterPendingRetry(project, node.id, role)
 }
 
-function retryNode(node: ChapterTreeNode, ev: MouseEvent): void {
+/* role: convert = 重转这一章（开新尝试），checker = 只重新核对已提交的产物。 */
+function retryNode(node: ChapterTreeNode, role: string, ev: MouseEvent): void {
   ev.stopPropagation()
   const project = nodeProject(node)
   if (!project) return
-  state.retryNote = '正在提交 ' + node.id + ' 的重试请求…'
-  requestChapterRetry(project, node.id, '侧栏重试')
+  const what = role === 'checker' ? '重新核对' : '重试'
+  state.retryNote = '正在提交 ' + node.id + ' 的' + what + '请求…'
+  requestChapterRetry(project, node.id, role, '侧栏' + what)
     .then((res: any) => {
-      state.retryNote = node.id + ' 已加入重试队列（' + ((res && res.note) || '等待转换阶段处理') + '）'
+      state.retryNote = node.id + ' ' + what + '请求已排队（' + ((res && res.note) || '等待转换阶段处理') + '）'
       return refreshIndex()
     })
     .catch((err: any) => {
-      state.retryNote = node.id + ' 重试请求失败：' + ((err && err.message) || err)
+      state.retryNote = node.id + ' ' + what + '请求失败：' + ((err && err.message) || err)
     })
 }
 
@@ -160,7 +162,7 @@ function nodeTitle(node: ChapterTreeNode): string {
           class="chapter-retry icon-btn"
           type="button"
           :title="'重试这一章 ' + node.id + '：开一个新尝试，旧的留档在工作区 work/attempts/'"
-          @click="retryNode(node, $event)"
+          @click="retryNode(node, 'convert', $event)"
         >↻</button>
       </div>
       <div v-if="hasBody(node) && isOpen(node)" class="chapter-node-body">
@@ -174,6 +176,14 @@ function nodeTitle(node: ChapterTreeNode): string {
             <InlineMD class="checker-name row-title" tag="span" :text="sessionTitleOf(node.checker)" plain />
             <span v-if="activityText(node.checker, 'checker', node)" class="chapter-state" :class="stateTone(activityText(node.checker, 'checker', node))">{{ activityText(node.checker, 'checker', node) }}</span>
             <span v-if="usageChipText(node.checker)" class="chapter-usage">{{ usageChipText(node.checker) }}</span>
+            <span v-if="nodePendingRetry(node, 'checker')" class="chapter-retry-pending" title="已在重新核对队列里：转换阶段的下一个安全点会重跑核对会话（产物不动）">待重试</span>
+            <button
+              v-else-if="canRetryNode(node)"
+              class="chapter-retry icon-btn"
+              type="button"
+              :title="'重新核对这一章 ' + node.id + '：只重跑核对会话、产物不动，旧的核对转录留在历史里'"
+              @click="retryNode(node, 'checker', $event)"
+            >↻</button>
           </button>
           <button class="chapter-info" type="button" title="打开核对会话详情" @click="emit('info', node.checker)">ⓘ</button>
         </div>
