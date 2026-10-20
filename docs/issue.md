@@ -1092,3 +1092,8 @@ user 轮
   3. 启动打一行并发账目（转换 N / 核对 M（独立槽位）/ 其它 K + 模型级上限），当"转换 N + 核对 M > 该模型上限"时告警并说明"实际最多 L 个在跑，其余排队等模型槽位，要更快先调高 max_concurrency"。
   配置面：`latex.convert_concurrency`、`latex.checker_concurrency`、`models.<名>.max_concurrency` 三键（现有块加键，不 bump `config_version`），两份模板 + `docs/config.md` + `docs/latex.md` + `latex --help` 同步。
   验证：新增 `TestStageWorkers`（0 回退/concurrency/独立取值/全空按 3）、`TestModelConcurrencyLimits`（按 wire 模型名归并、同模型取最小、空模型名与 0 跳过）、`session` 的 `TestModelSlotLimitsPerModel`（wire-a 上限 2、wire-b 上限 1，两个池子互不影响、峰值正好打到上限）与 `TestModelSlotUnset`；`go build` + `go test ./internal/...` 全绿。
+
+[X][ ] T180. 用户反馈："html 上章节转换运行中的时候，为什么运行中三个字不是绿色的，只有核对那边的运行中是绿色的？"
+  问题：`.chapter-checker.live .chapter-state` 只给核对行染了绿，转换行（`.chapter-node-head`）从来没有 live 类也没有对应规则，跑着的时候那句「运行中」还是灰色。
+  改：状态文案按内容染色——`stateTone(label)` 只在 label 恰好是「运行中」时给 `.run` 类，两行共用（不是按 `live` 判断：排队等并发槽的会话也是 live，那不该是绿的）。
+  验证：`npm test` 158 通过、dist 已重建。

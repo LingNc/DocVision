@@ -2046,3 +2046,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **真实缺陷**：`latex.concurrency` 一个池子被转换、整合、checker 反馈轮、提交提醒共用，核对会话排在慢转换后面白等；没有任何地方按厂商模型限流，两个池子调大后打到同一模型上的请求数无从约束。
 - **改**：① `Runner` 拆 `convertSlots`/`checkerSlots`/`chapterSlots`，上限分别来自 `latex.convert_concurrency`/`checker_concurrency`（0 回退 `concurrency`），`LatexConfig.ConvertWorkers/CheckerWorkers/OtherWorkers` 是唯一解析点；子节点本地 sem 改用转换槽位数。② `models.<名>.max_concurrency` + 会话层 `SetModelConcurrency`：`Run` 一开始取该模型槽位，键是实际下发模型名，`Config.ModelConcurrencyLimits()` 用 `ResolveModel` 归并同名条目并取最小值。③ `RunBook` 启动打并发账目，池子之和超过模型上限时告警。
 - **验证**：`TestStageWorkers`、`TestModelConcurrencyLimits`、`TestModelSlotLimitsPerModel`（峰值正好等于上限，两模型互不影响，曾因两模型共用同一个 live 计数导致误报 3 > 1，改为按模型分别计数）、`TestModelSlotUnset`；`go build` + `go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补十六，T180：转换行的「运行中」染绿）
+
+- **用户反馈**："为什么运行中这三个字不是绿色的，只有核对那边的是绿色的？"
+- **根因**：Checkers 行的绿来自 `.chapter-checker.live .chapter-state`；转换行是 `.chapter-node-head`，既没有 `live` 类也没有规则，所以状态一直是 muted 灰。
+- **改**：`stateTone(label)` 按文案给 `.run` 类（只有「运行中」染绿，排队等槽的 live 会话不染），两行共用；删掉只服务核对行的 `.chapter-checker.live` 规则。
+- **验证**：`npm test` 158、dist 重建。

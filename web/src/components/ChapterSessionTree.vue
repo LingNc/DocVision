@@ -68,6 +68,13 @@ function nodeActivity(node: ChapterTreeNode): string {
   return activityText(primary(node), node.convert ? 'convert' : 'checker', node)
 }
 
+/* 只有"运行中"染色（T180）：原来只有核对行有 .live 规则，转换行跑着时那句
+ * 「运行中」是灰的，看着像没在跑。按文案判而不是按 live 判——排队等槽的
+ * 会话也是 live，它不该是绿的。 */
+function stateTone(label: string): string {
+  return label === '运行中' ? 'run' : ''
+}
+
 function primary(node: ChapterTreeNode): any {
   return node.convert || node.checker
 }
@@ -108,7 +115,7 @@ function nodeTitle(node: ChapterTreeNode): string {
         ><span class="caret" aria-hidden="true"></span></button>
         <span v-else class="chapter-toggle-spacer" aria-hidden="true"></span>
         <InlineMD class="chapter-name row-title" tag="span" :text="nodeTitle(node)" plain />
-        <span v-if="nodeActivity(node)" class="chapter-state">{{ nodeActivity(node) }}</span>
+        <span v-if="nodeActivity(node)" class="chapter-state" :class="stateTone(nodeActivity(node))">{{ nodeActivity(node) }}</span>
         <span v-if="usageChipText(primary(node))" class="chapter-usage">{{ usageChipText(primary(node)) }}</span>
       </div>
       <div v-if="hasBody(node) && isOpen(node)" class="chapter-node-body">
@@ -120,7 +127,7 @@ function nodeTitle(node: ChapterTreeNode): string {
           <button class="checker-main session-row" type="button" role="treeitem" :data-id="node.checker.id" :title="sessionTip(node.checker)" @click="emit('select', node.checker)">
             <span class="checker-marker">核对</span>
             <InlineMD class="checker-name row-title" tag="span" :text="sessionTitleOf(node.checker)" plain />
-            <span v-if="activityText(node.checker, 'checker', node)" class="chapter-state">{{ activityText(node.checker, 'checker', node) }}</span>
+            <span v-if="activityText(node.checker, 'checker', node)" class="chapter-state" :class="stateTone(activityText(node.checker, 'checker', node))">{{ activityText(node.checker, 'checker', node) }}</span>
             <span v-if="usageChipText(node.checker)" class="chapter-usage">{{ usageChipText(node.checker) }}</span>
           </button>
           <button class="chapter-info" type="button" title="打开核对会话详情" @click="emit('info', node.checker)">ⓘ</button>
@@ -165,6 +172,6 @@ function nodeTitle(node: ChapterTreeNode): string {
 .checker-main { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; }
 .checker-marker { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px; }
 .chapter-state, .chapter-usage { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px; }
-.chapter-checker.live .chapter-state { color: var(--green, #1a7f37); }
+.chapter-state.run { color: var(--green, #1a7f37); }
 .chapter-info { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer; }
 </style>

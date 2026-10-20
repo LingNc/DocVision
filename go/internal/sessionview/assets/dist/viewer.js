@@ -9055,27 +9055,19 @@
     "aria-hidden": "true"
   };
   const _hoisted_5$b = {
-    key: 2,
-    class: "chapter-state"
-  };
-  const _hoisted_6$9 = {
     key: 3,
     class: "chapter-usage"
   };
-  const _hoisted_7$8 = {
+  const _hoisted_6$9 = {
     key: 0,
     class: "chapter-node-body"
   };
-  const _hoisted_8$5 = ["data-id", "title", "onClick"];
-  const _hoisted_9$5 = {
-    key: 0,
-    class: "chapter-state"
-  };
-  const _hoisted_10$4 = {
+  const _hoisted_7$8 = ["data-id", "title", "onClick"];
+  const _hoisted_8$5 = {
     key: 1,
     class: "chapter-usage"
   };
-  const _hoisted_11$4 = ["onClick"];
+  const _hoisted_9$5 = ["onClick"];
   const _sfc_main$l = /* @__PURE__ */ defineComponent({
     ...{ name: "ChapterSessionTree" },
     __name: "ChapterSessionTree",
@@ -9118,6 +9110,9 @@
       }
       function nodeActivity(node) {
         return activityText(primary(node), node.convert ? "convert" : "checker", node);
+      }
+      function stateTone(label) {
+        return label === "运行中" ? "run" : "";
       }
       function primary(node) {
         return node.convert || node.checker;
@@ -9167,10 +9162,13 @@
                   text: nodeTitle(node),
                   plain: ""
                 }, null, 8, ["text"]),
-                nodeActivity(node) ? (openBlock(), createElementBlock("span", _hoisted_5$b, toDisplayString(nodeActivity(node)), 1)) : createCommentVNode("", true),
-                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_6$9, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
+                nodeActivity(node) ? (openBlock(), createElementBlock("span", {
+                  key: 2,
+                  class: normalizeClass(["chapter-state", stateTone(nodeActivity(node))])
+                }, toDisplayString(nodeActivity(node)), 3)) : createCommentVNode("", true),
+                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_5$b, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
               ], 10, _hoisted_2$g),
-              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_7$8, [
+              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_6$9, [
                 node.checker ? (openBlock(), createElementBlock("div", {
                   key: 0,
                   class: normalizeClass(["chapter-checker", { active: currentId.value === node.checker.id, live: node.checker.live }])
@@ -9190,15 +9188,18 @@
                       text: unref(sessionTitleOf)(node.checker),
                       plain: ""
                     }, null, 8, ["text"]),
-                    activityText(node.checker, "checker", node) ? (openBlock(), createElementBlock("span", _hoisted_9$5, toDisplayString(activityText(node.checker, "checker", node)), 1)) : createCommentVNode("", true),
-                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$4, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
-                  ], 8, _hoisted_8$5),
+                    activityText(node.checker, "checker", node) ? (openBlock(), createElementBlock("span", {
+                      key: 0,
+                      class: normalizeClass(["chapter-state", stateTone(activityText(node.checker, "checker", node))])
+                    }, toDisplayString(activityText(node.checker, "checker", node)), 3)) : createCommentVNode("", true),
+                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_8$5, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
+                  ], 8, _hoisted_7$8),
                   createBaseVNode("button", {
                     class: "chapter-info",
                     type: "button",
                     title: "打开核对会话详情",
                     onClick: ($event) => emit2("info", node.checker)
-                  }, "ⓘ", 8, _hoisted_11$4)
+                  }, "ⓘ", 8, _hoisted_9$5)
                 ], 2)) : createCommentVNode("", true),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
                   key: 1,
@@ -9222,7 +9223,7 @@
     }
     return target;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-956833c2"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-7995f1d2"]]);
   const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"
