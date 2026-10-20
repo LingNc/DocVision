@@ -3,6 +3,7 @@ package latex
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -84,8 +85,21 @@ func TestChapterGateRequiresCompileAndView(t *testing.T) {
 		t.Fatal("a compile without looking at the PDF must not pass")
 	}
 	g.markViewed(pdf, 1)
+	// T168：看过自己的产物还不够，还必须和原书对过（至少 2 页）。
+	if msg := g.check(); msg == "" || !strings.Contains(msg, "原书") {
+		t.Fatalf("compile + own view without comparing the original must be rejected, got: %q", msg)
+	}
+	src := filepath.Join(t.TempDir(), "book_part1.pdf")
+	if err := os.WriteFile(src, []byte("%PDF-1.4 src"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g.markSourceViewed(src, 12)
+	if msg := g.check(); msg == "" || !strings.Contains(msg, "原书") {
+		t.Fatalf("one original page is not enough (need 2), got: %q", msg)
+	}
+	g.markSourceViewed(src, 13)
 	if msg := g.check(); msg != "" {
-		t.Fatalf("compile + one page viewed must pass, got: %s", msg)
+		t.Fatalf("compile + own view + two original pages must pass, got: %s", msg)
 	}
 	// 编译之后又改了 parts/：旧印记作废，必须重编。
 	if err := os.WriteFile(filepath.Join(work, base, "part1.tex"), []byte("p1 changed"), 0o644); err != nil {

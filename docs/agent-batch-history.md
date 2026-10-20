@@ -1943,3 +1943,19 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
   4. `--keep-convert` 提供反口径（保留转换成果、从风格修复重跑），此时把 `work/chapters` 里指向 `_subdivision/…` 的断链点名（T166 修掉的那类，旧二进制产物，汇编会失败）。
 - **交互**：与旧脚本一致——默认 `cp -a` 整目录备份到同级 `<项目名>_记录_<时间戳>/`、先打印计划、`-y` 确认、`-n` 只预览、`--no-backup` 跳过备份、检测到 `docvision latex` 正在运行就拒绝（`-f` 强来）。
 - **验证**：`bash -n` 通过；真实项目上 `-n` 确认清单（转换成品、12 条转换转录、4 条 checker 转录、`work/temp` 全在删除列表；`chapters/*.md`、样式包、`source/` 在保留列表）；临时假项目上跑真实删除，核对删/留清单与 `progress.json` 归空结果；`docs/latex.md` 的"清理与重跑（辅助脚本）"登记 `clean_project.sh` 与 `clean_convert.sh`。
+
+## v1.5+（第四十七批补三，T168：必须对照原书 + 内容覆盖率门禁）
+
+- **用户反馈**："有的章节转换会用一个 py 的转换器，然后他也不管最后出来的内容和原来的是否一致。就是没有在他们这一章节逐个 pdf 和原来的核对，他自己的和原来的包括里面的内容。"
+- **根因**：T165 的提交门禁只覆盖"编译过 + 看过自己的 PDF"。两者都满足时，一份拿脚本机械包出来的 tex 依然可能漏段、丢表、把公式降级成纯文本——产物内部完全自洽，checker 只对着 md 与 tex 看结构，也发现不了"内容少了"；没有任何环节拿**原书**去比。
+- **为什么不做"检测脚本"**：沙箱里 bash/python 是干正事的工具（批量替换、查错、抽样核对都合法），按工具名判定既误伤又容易绕。改成判定**结果**：内容对不对得上、有没有和原书对过，这两件事可机械验证。
+- **实现**：
+  1. `ViewPDFTool` 记录原书页：工作区之外的 PDF（`source:<原书 part>.pdf`）走 `gate.markSourceViewed` → `.gate/source.json`（文件+页去重）；工作区内的仍按产物哈希记 `view.json`。
+  2. `chapterGate.check()` 第二道：至少 `needSourcePages(产物页数)` = min(4, max(2, 页数/3)) 页不同的原书页，否则打回并提示 `list_source_pages`/`doc_search` 定位。
+  3. 第三道 `checkCoverage()`：`pdftotext -layout` 抽产物文本，`mdPlainText` 把章节 md 洗成纯正文（去 ``` 代码块、`$$…$$`/`$…$`/`\[…\]`、HTML 注释、图片，保留链接文字与表格文字），两边只保留汉字做三字组交集，覆盖率 < 0.85 **第一次打回**并列出缺得最多的 5 段；**同一章再交仍不达标就放行**（用户口径："第一次打回第二次给通过"——OCR 差异大的书可能永远到不了阈值，硬卡会把整本书卡死），放行时把覆盖率、缺失段与 `report.coverage_note` 写成一条未解问题进本报告，靠 T166 的合并机制向上带；CJK 三字组 < 200（纯公式章节）不判定；`pdftotext` 缺失时跳过（不因环境缺件卡死整本书）。
+  4. 提交后把覆盖率写进日志，< 92% 追加一条"建议再对照原文检查漏段"。
+  5. 提示词：`latex_convert.system.md` 的 Before submitting 段落补两句（必须对照原书页；不要用脚本机械包 tex）；`book.go` 的整合指令同样要求对照原书。
+  6a. 顺带把"自己处理不了怎么办"补完整：`## Recursive subdivision` 原本只写"太大 / 上下文超限就 `request_chapter_split`"，现在把"内容做不可靠（公式太密、OCR 认不出）"也算进触发条件（子会话是独立会话、可以看自己那一份的原书页），并补一句"开到最深仍做不出来时，把缺什么、为什么缺写进 report.issues，不许编造"。
+  6. 提示词里"翻原书核对"那句原本是**条件触发**（"whenever something looks doubtful"）：机械包出来的 tex 读起来顺畅，模型不会觉得"有疑问"，于是永远不翻原书，而且没有任何机制核对它翻没翻。改成无条件——每次提交前都要对比本章的几页原书，并点明"整段缺失、表格丢行、插图错序，产物内部看不出来，只有原页能看出来"。
+- **阈值标定**：同一批真实产物上 `chapterCoverage` 量到 0.970/0.989/0.991/0.995；用 python 把同一 PDF 文本砍掉 1/4、1/2 后覆盖率掉到 0.63–0.76 / 0.33–0.59。取 0.85。
+- **验证**：`TestMdPlainTextDropsNonProse`、`TestCoverageOfDetectsMissingContent`、`TestCoverageOfSkipsFormulaOnlyChapters`、`TestNeedSourcePages`、`TestPathWithin`；`TestChapterGateRequiresCompileAndView` 扩成四段式（无编译 → 只看自己 → 只看 1 页原书 → 2 页原书放行）；`go test ./internal/latex` 与全量 `go test ./internal/...` 绿。

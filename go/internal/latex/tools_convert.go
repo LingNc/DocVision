@@ -328,6 +328,9 @@ type SubmitChapterTool struct {
 	ReportOptional bool
 	// Gate 是可选提交门（P27：goal 计划清空才放行）；返回打回文案即拒绝。
 	Gate func() string
+	// GateRef 是同一个门禁的引用（T168）：「覆盖率不达标但第二次放行」的缺口
+	// 要写进这一章的报告，得从门禁的印记里读。
+	GateRef *chapterGate
 	// Depth 是这一章在递归树里的深度（顶层 0），写进 issue 条目。
 	Depth int
 	// IssuesPath 是本节点的 issue store（<work>/.issues/issues.json）：继承来的
@@ -378,6 +381,12 @@ func (t *SubmitChapterTool) Definition() map[string]any {
 					"suggestions": map[string]any{"type": "string", "description": "Concrete suggestions for the cls/manual (empty for pass)."},
 					// resolved：父章节整合时修掉了哪几条**继承来的**问题，用它们的
 					// ID；机制会据此把条目划掉，没写的原样向上。
+					// coverage_note：内容覆盖率不达标又被放行时的一句解释，
+					// 会连同覆盖率数字一起进报告的未解问题、向上合并。
+					"coverage_note": map[string]any{
+						"type":        "string",
+						"description": "If submit warned that too little of the chapter markdown shows up in your PDF (OCR/duplicate headers can make that unavoidable), explain here why the missing text is expected. It is carried upward with the coverage number.",
+					},
 					"resolved": map[string]any{
 						"type":        "array",
 						"items":       map[string]any{"type": "string"},
@@ -474,12 +483,21 @@ func (t *SubmitChapterTool) Execute(argsJSON string) (session.ToolResult, error)
 	t.Submitted = true
 	t.Notes = notes
 	t.Status, _ = report["status"].(string)
-	t.Issues = strings.Join(reportTextList(report["issues"]), "\n")
+	ownIssues := reportTextList(report["issues"])
+	// 覆盖率不达标但已放行（第二次）的缺口：不是"通过就没事"，而是变成一条
+	// 未解问题进报告——父章节与顶层报告都能看到这一章实际缺了多少。
+	if t.GateRef != nil {
+		if gap, ok := t.GateRef.coverageGap(); ok {
+			note, _ := report["coverage_note"].(string)
+			ownIssues = append(ownIssues, coverageGapIssue(gap.Coverage, gap.Missing, note))
+		}
+	}
+	t.Issues = strings.Join(ownIssues, "\n")
 	t.Suggestions, _ = report["suggestions"].(string)
 	// 问题合并（T166）：继承子章节未解决的条目 + 自己新报的，再去掉明确修掉的。
 	// 这一节由代码写进报告，父会话不必"记得"把子章节的问题抄一遍。
 	if t.IssuesPath != "" {
-		merged := mergeChapterIssues(t.Base, t.Depth, reportTextList(report["issues"]),
+		merged := mergeChapterIssues(t.Base, t.Depth, ownIssues,
 			readIssueStore(t.InheritedPath), reportTextList(report["resolved"]))
 		if err := writeIssueStore(t.IssuesPath, merged); err != nil {
 			return session.ToolResult{}, fmt.Errorf("write chapter issues: %w", err)

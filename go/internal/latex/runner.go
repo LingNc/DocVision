@@ -332,11 +332,11 @@ func (r *Runner) sessionBashTemp(proj, name string) (string, func()) {
 // noChapterGate 关掉"提交前必须编译成功并看过 PDF"的门禁。**只给测试用**：
 // 那条门禁要真跑 xelatex，而单元/集成测试用假模型、机器上也不一定有 TeX。
 // 生产路径永远不设置它（见 submitGate）。
-func (r *Runner) submitGate(work, base string) *chapterGate {
+func (r *Runner) submitGate(work, base, chapterMD string) *chapterGate {
 	if r.noChapterGate {
 		return nil
 	}
-	return &chapterGate{WorkRoot: work, Base: base}
+	return &chapterGate{WorkRoot: work, Base: base, ChapterMD: chapterMD}
 }
 
 func (r *Runner) keepSessionFile(path string) {

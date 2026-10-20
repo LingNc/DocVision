@@ -1302,8 +1302,9 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	}
 
 	goal := NewGoalTool(filepath.Join(work, "plan.md"))
-	gate := r.submitGate(work, base)
+	gate := r.submitGate(work, base, chapPath)
 	submit := &SubmitChapterTool{
+		GateRef:       gate,
 		WorkRoot:      work,
 		SubmitRoot:    node.SubmitRoot,
 		Base:          base,
@@ -1442,7 +1443,9 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			"You are NOT required to fix those issues (most are class/manual level and are handled later by the style-fix pass); fix the ones you can while integrating, put their IDs in report.resolved, and leave the rest untouched — the merge mechanism carries them into your own report automatically. " +
 			"Then read work:_subdivision/children-manifest.md and every listed child .tex/parts file. " +
 			"Integrate them in source order into work:" + base + ".tex and work:" + base + "/, preserving all content and references. " +
-			"Then compile the parent wrapper, LOOK at the resulting PDF with view_pdf (page 1 and the last page at least), and submit the parent paths. Put any NEW problems you found into report.issues (as a list); unresolved inherited ones go up by themselves. " +
+			"Then compile the parent wrapper, LOOK at the resulting PDF with view_pdf (page 1 and the last page at least), AND compare it with the original book pages (view_pdf source:<part>.pdf): submit requires you to have looked at a few original pages. " +
+			"submit also compares your PDF text with the chapter markdown and rejects when too much content is missing, so do not wrap the markdown into LaTeX with a script. " +
+			"Put any NEW problems you found into report.issues (as a list); unresolved inherited ones go up by themselves. " +
 			"Do not submit child files as independent book chapters."
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		release := r.acquireChapterSlot()
@@ -1464,6 +1467,16 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	}
 	if !fileExists(texPath) {
 		return fmt.Errorf("会话已提交但没有写出 .tex")
+	}
+	// 内容覆盖率（T168）：submit 已经用它挡过一道（低于阈值直接打回），这里把
+	// 数字留在日志里——"这一章到底和原稿对不对得上"是可以事后查的。
+	if gate != nil {
+		if cov, ok := gate.lastCoverage(); ok {
+			r.log.LogInfo(tid, "[convert]", base, fmt.Sprintf("内容覆盖率 %.1f%%（md 正文 → PDF 文本）", cov*100))
+			if cov < 0.92 {
+				r.log.LogWarning(tid, "[convert]", base, "内容覆盖率偏低，建议再与原文对照检查是否漏段")
+			}
+		}
 	}
 	// Checker pass: a small dedicated session (read_file/grep/submit only,
 	// read-only view holding the chapter markdown + the submitted .tex +

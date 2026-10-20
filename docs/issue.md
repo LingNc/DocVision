@@ -991,3 +991,15 @@ user 轮
   3. 保留划分与样式前置成果：`chapters/*.md`、`work/sessions/chapters.jsonl`、`style/`、`work/style/`、`work/style_session.jsonl`、`source/`、`doc_index/`；
   4. `--keep-convert` 是反口径（保留转换成果、从风格修复重跑），此时把 `work/chapters` 里指向 `_subdivision/…` 的断链点名（旧二进制产物，汇编会失败，见 T166）。
   验证：`bash -n` 通过；真实项目上 `-n` 确认清单（转换成品、转录、`work/temp` 全在删除列表，`chapters/*.md` 与样式包在保留列表）；临时假项目上跑真实删除，核对删/留清单与 `progress.json` 归空结果；`docs/latex.md` 的"清理与重跑（辅助脚本）"登记两个脚本。
+
+[X][ ] T168. 用户实地发现问题（原话要点）："有的章节转换会用一个 py 的转换器，然后他也不管最后出来的内容和原来的是否一致。就是没有在他们这一章节逐个 pdf 和原来的核对，他自己的和原来的包括里面的内容。"
+  原因：旧 `submit` 只要求"编译过 + 看过自己那份 PDF"，既不要求与**原书页**对照，也没有任何机制检查"md 里的内容是不是真的进了 PDF"。于是拿 python/sed 把 md 机械包成 tex 也能过关：漏段、丢表、公式降级成文本，产物内部自洽，checker 只看 md/tex 结构也发现不了，整章内容缺失却一路进书。
+  改（两道新硬门禁，都写在 `.gate/` 里）：
+  1. **必须和原书对照**：`view_pdf` 在工作区之外的 PDF（`source:<原书 part>.pdf`）上调用会被记成"看过原书页"（`source.json`，按 文件+页 去重）；`submit` 要求至少 `needSourcePages(产物页数)` = 2–4 页不同的原书页（产物 12 页 → 4 页），否则打回并提示用 `list_source_pages`/`doc_search` 定位本章原书页。
+  2. **内容覆盖率**：`submit` 时用 `pdftotext` 抽出编译产物的文本，与章节 md 的正文（去掉代码块、`$$`/`$…$`/`\[…\]` 公式、HTML 注释、图片、表格竖线，保留链接文字）做 **CJK 三字组** 比对；低于 `minChapterCoverage = 0.85` **第一次打回**并列出缺得最多的 5 段原文（计数落 `coverage.json` 的 `checks`），提示"别用脚本机械转换"。
+  3. **不达标不硬卡（用户口径）**："第一次打回第二次给通过"——同一章再次提交时仍不达标就**放行**，但放行不是忽略：把覆盖率、缺失段落与模型的解释（`report.coverage_note`，可空）写成一条未解问题写进本报告，经 T166 的跨层合并一路带到父章节与顶层。理由：OCR 差异大的书（整段换行、重复页眉、公式被排成图）确实可能永远到不了阈值，硬卡会把整本书卡死。CJK 三字组少于 200（纯公式/纯图章节）时不判定，避免误杀。
+  阈值标定（同一批真实产物上量的）：正常完成的章节 0.97–0.995；把 PDF 文本砍掉 1/4 掉到 0.63–0.76、砍一半掉到 0.33–0.59，所以 0.85 既抓得住"少转十分之一以上"，也不会被 OCR 噪声与重复页眉误伤；只比 CJK 是因为公式抽成文本不可靠，公式正确性交给编译、checker 与看图。
+  提示词原本就写了"OCR 可能不准、有疑问就翻原书核对"，但那是**条件触发**（"whenever something looks doubtful"）——机械包出来的 tex 读起来很顺，模型根本不会觉得"有疑问"，于是永远不翻原书；而且没有任何东西核对"到底翻没翻"。所以这次除了加硬门禁，也把那句改成**无条件、每次提交前都要对比几页原书**，并点明"文本比对看不出公式被降级、表格丢行、插图错序"这一类只有原页才能发现的问题。
+  4. **"处理不了就开子会话"说清楚**：`## Recursive subdivision` 早就有这条（"too large to convert … call `request_chapter_split` instead of submitting"，限三层、子章节各自过 checker、父章节整合后提交），但触发词只提"太大/上下文超限"，内容做不可靠（公式太密、OCR 认不出）与"开到最深还是做不出来"两种情形没写——现在补上，并明确"不许编造内容，把缺什么、为什么缺写进 `report.issues`"。
+  另：`submit` 之后把覆盖率写进日志（`内容覆盖率 97.0%（md 正文 → PDF 文本）`），低于 92% 再提醒一次；提示词新增两句（必须对照原书页；不要用脚本把 md 机械包成 tex），整合指令同样要求对照。
+  验证：新增 `TestMdPlainTextDropsNonProse`、`TestCoverageOfDetectsMissingContent`（完整 1.0、丢 40% 后跌破阈值并点名缺失段落）、`TestCoverageOfSkipsFormulaOnlyChapters`、`TestNeedSourcePages`、`TestPathWithin`；`TestChapterGateRequiresCompileAndView` 扩成"编译 → 只看自己 → 只看 1 页原书 → 2 页原书才放行"；在真实章节上跑 `chapterCoverage` 与手工测量一致（0.97–0.995）。

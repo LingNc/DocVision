@@ -1155,7 +1155,14 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 		}
 	}
 	if t.Gate != nil {
-		t.Gate.markViewed(full, page)
+		// 工作区里的 PDF 是"自己的产物"（按哈希认那一轮编译），工作区之外的
+		// 是原书 part——两件事分开记：前者证明"我看了自己编的东西"，后者证明
+		// "我和原书对过"（T168）。
+		if pathWithin(t.Gate.WorkRoot, full) {
+			t.Gate.markViewed(full, page)
+		} else {
+			t.Gate.markSourceViewed(full, page)
+		}
 	}
 	return session.ToolResult{
 		Text: fmt.Sprintf("PDF page %s p%d (crop %.0f%%,%.0f%%-%.0f%%,%.0f%%, width %dpx%s)%s attached.", rel, page, left, top, right, bottom, zoom, sizeNote, note) +
