@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterAttemptChain, chapterAttemptTag, chainMemberTag } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterAttemptChain, chapterAttemptTag, chainMemberTag, pickAttempt } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 
 beforeEach(() => {
@@ -64,7 +64,7 @@ describe('章节节点展开记忆', () => {
 })
 
 // T165：章节转换被 checker 打回后换全新会话重来，几次尝试要能串成一条链
-// （中栏「历史 N」页签），并按尝试序号标注「第 N 次」。第一次尝试不带标签。
+// （中栏「历史 N」页签），并用紧凑的 `#N` 标注尝试号（T173：不再写中文「第 N 次」）。
 describe('chapter attempt chain', () => {
   const mk = (id: string, attempt: number, mtime: string, chapterId = 'chapter_042') => ({
     id,
@@ -93,10 +93,12 @@ describe('chapter attempt chain', () => {
     expect(chapterAttemptChain([{ id: 'x/style_session.jsonl', project: 'book' }], 'x/style_session.jsonl')).toBeNull()
   })
 
-  it('标签：第一次为空，之后是第 N 次', () => {
+  it('标签：只用紧凑的 #N（第 1 次也为空/不出中文）', () => {
     expect(chapterAttemptTag({ chapterAttempt: 1 })).toBe('')
-    expect(chapterAttemptTag({ chapterAttempt: 3 })).toBe('第 3 次')
-    expect(chainMemberTag(mk('a/convert_chapter_042.try2.jsonl', 2, '2026-10-19T12:00:00Z'))).toBe('第 2 次')
+    expect(chapterAttemptTag({ chapterAttempt: 3 })).toBe('#3')
+    expect(chainMemberTag(mk('a/convert_chapter_042.try2.jsonl', 2, '2026-10-19T12:00:00Z'))).toBe('#2')
+    // 历史列表里第 1 次也要有标记，否则同一章几条历史行看起来一样
+    expect(chainMemberTag(mk('a/convert_chapter_042.jsonl', 1, '2026-10-19T10:00:00Z'))).toBe('#1')
   })
 })
 
@@ -153,5 +155,60 @@ describe('章节树默认打开最新一次尝试', () => {
     expect(roots[0].children.length).toBe(1)
     expect(roots[0].convert!.chapterAttempt).toBe(2)
     expect(roots[0].children[0].convert!.id).toContain('_child_01')
+  })
+})
+
+// T173：点开「历史」里的某一次，章节树要显示**那一轮当时的样子**（含子会话），
+// 而不是永远把最新一次摊在眼前。
+describe('章节树跟随正在查看的尝试', () => {
+  const conv = (attempt: number, chapterId = 'chapter_042', parent?: string) => ({
+    id: `book/work/sessions/convert_${chapterId}` + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId, chapterParent: parent || '', chapterRole: 'convert',
+    chapterAttempt: attempt, mtime: `2026-10-19T1${attempt}:00:00Z`,
+  })
+  const chk = (attempt: number, chapterId = 'chapter_042') => ({
+    id: `book/work/sessions/checker_${chapterId}` + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId, chapterRole: 'checker',
+    chapterAttempt: attempt, mtime: `2026-10-19T1${attempt}:30:00Z`,
+  })
+
+  it('pin=2 时父与子都取第 2 次（不管第 3 次更新）', () => {
+    const sessions = [
+      conv(1), conv(2), conv(3),
+      conv(1, 'chapter_042_child_01', 'chapter_042'),
+      conv(2, 'chapter_042_child_01', 'chapter_042'),
+    ]
+    const roots = buildChapterTree(sessions, 2)
+    expect(roots[0].convert!.chapterAttempt).toBe(2)
+    expect(roots[0].children[0].convert!.chapterAttempt).toBe(2)
+  })
+
+  it('子节点没有那一轮时取最近的一轮（≤pin 里最大的）', () => {
+    const sessions = [
+      conv(3),
+      conv(2, 'chapter_042_child_01', 'chapter_042'),
+      conv(3, 'chapter_042_child_02', 'chapter_042'),
+    ]
+    const roots = buildChapterTree(sessions, 3)
+    expect(roots[0].children.find((c) => c.id.endsWith('child_01'))!.convert!.chapterAttempt).toBe(2)
+    expect(roots[0].children.find((c) => c.id.endsWith('child_02'))!.convert!.chapterAttempt).toBe(3)
+  })
+
+  it('核对会话跟着同一次尝试走（不再各自取最新）', () => {
+    const sessions = [conv(1), conv(2), chk(1), chk(2)]
+    expect(buildChapterTree(sessions, 1)[0].checker!.chapterAttempt).toBe(1)
+    expect(buildChapterTree(sessions, 2)[0].checker!.chapterAttempt).toBe(2)
+  })
+
+  it('pin 大于所有尝试时取最大的（看第 3 次就把第 3 次给全树）', () => {
+    const sessions = [conv(1), conv(2)]
+    expect(buildChapterTree(sessions, 9)[0].convert!.chapterAttempt).toBe(2)
+  })
+
+  it('pickAttempt：没有 pin 时仍是"最新一次"', () => {
+    const a = { chapterAttempt: 1, mtime: '2026-10-19T10:00:00Z' }
+    const b = { chapterAttempt: 2, mtime: '2026-10-19T11:00:00Z' }
+    expect(pickAttempt(a, b)).toBe(b)
+    expect(pickAttempt(b, a)).toBe(b)
   })
 })

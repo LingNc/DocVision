@@ -1998,3 +1998,12 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
   4. **打回文案**（`book.go` 反馈轮）：补一段"指出的点不是真问题就别改坏正确内容——把证据（文件与行号或原书页码）写进 submit.notes 再交，会带着产物与原书页再核一遍"。
 - **验证**：新增 `TestCheckerSeesProductAndHints`（视图里有 `<章>.pdf`/`report.md`/`notes.md`、notes 内容落盘、首条消息与工具表出现 `check:<章>.pdf`、`report.md`、`notes.md`、`view_pdf`）；`checkChapterAt` 的 5 个测试调用点补 `checkHints{}`；`go test ./internal/...` 全绿。
 - **未做的（有意）**：没有让 checker 直接看 raster 原图（`view_image`）——插图重画是否像由 `latex.figure_check` 负责，checker 只需要判断题、表、公式、段落有没有丢；也没有把 submit 的 report 当"免检通行证"，否则转换会话可以靠自述绕开核对。
+
+## v1.5+（第四十七批补九，T173：重跑不再凭空多一条空尝试，章节树跟随正在看的尝试）
+
+- **用户反馈**（原话要点）：「我的这些会话怎么都从第二次开始了？是不是错乱了？我看这些第一次都是在等在子会话的返回呢？怎么进入检查阶段了？还有就是整体替换的时候选择某个历史的时候？而且上面存在问题了切换的时候下面的子会话怎么没有跟这边变化，变化那个子会话的历史？……还有对应的核对会话的历史查看，都不太和这次次数相匹配？并且这个次数就不要显示在web上显示中文 第几次了有点碍事。」
+- **真实数据**（一个五章进入细分的工作区）：每章除真正干活的第 1 次转录外，多出 `convert_<章>.try2/.try3.jsonl`，内容只有两行（system + `waiting_children`）；第 1 次停在 `run_end ok` + `waiting_children`；`work/temp/conv_<章>/` 下所有文件的 mtime 同一秒，`_subdivision/split.json` 消失、子章节旧转录也全部消失。
+- **根因链**：① 父会话在请求拆分那轮就 `run_end`（整合是同一会话后来的 `sess.Run`），所以"上一次有 run_end"并不等于"这一轮结束"；旧规则据此开新尝试；② 新尝试 `resuming=false` → `chapterWorkTreeAt` 直接 `RemoveAll(nodeRoot)`，把 `_subdivision/`（子章节 workspace、`split.json`、子转录）一起删掉 → 子章节从头再转、还留下一条两行空转录；③ 树永远取最新一次（T170），看旧尝试时子会话不动，convert 与 checker 还各取各的；④ 中文「第 N 次」chip 是噪音。
+- **改**：① 新增 `attemptNumberForNode(transcriptBase, splitRestored)`——拆分状态可恢复的父节点沿用磁盘上最新尝试（同一轮没做完），其余仍"无 run_end 原位续跑 / 有 run_end 新号"；② `buildChapterTree(items, pinAttempt)` + `pickAttempt(cur, next, pin)`：树跟随当前会话的尝试号，≤pin 取最大、都比 pin 新则取最早，convert/checker 同一个 pin；③ `chapterAttemptTag` 改产 `#N`（第 1 次为空）、`chainMemberTag` 对章节统一 `#N`（历史列表），侧栏行与树行不再显示次数。
+- **验证**：`TestAttemptNumberForNode`（5 个分支）；`chapter-tree.spec.ts` 新增 5 条跟随用例并改标签断言；`npm test` 148、`go test ./internal/...` 全绿。
+- **善后**：10:56 那次旧逻辑重跑已把 002–006 章的工作树整棵清掉，子章节必须重转一次；修复后同类中断重跑直接从原尝试继续，不再清子树。

@@ -424,7 +424,29 @@ function newerAttempt(cur: any, next: any): any {
   return mtimeMs(next) > mtimeMs(cur) ? next : cur
 }
 
-export function buildChapterTree(items: any[]): ChapterTreeNode[] {
+/*
+ * 按"正在看的那一轮"挑会话（T173）。pinAttempt = 你当前打开的会话的尝试号：
+ * 树应该显示**那一轮当时的样子**，而不是永远把最新一次摊在眼前——否则点开
+ * 「历史」里的第 1 次，下面的子会话还在显示第 3 次的东西，两个层级对不上。
+ *
+ * 排序偏好：尝试号 ≤ pin 里取最大（这一轮及之前的产物）；一个都没有（节点
+ * 是后来才出现的）就取最小的、也就是它最早的那次。pin 为 0 时退回"最新一次"。
+ */
+export function pickAttempt(cur: any, next: any, pinAttempt = 0): any {
+  if (!cur) return next
+  if (!next) return cur
+  if (!pinAttempt) return newerAttempt(cur, next)
+  const a = Number(cur.chapterAttempt) || 1
+  const b = Number(next.chapterAttempt) || 1
+  const rank = (n: number): [number, number] => (n <= pinAttempt ? [1, n] : [0, -n])
+  const [ka, ao] = rank(a)
+  const [kb, bo] = rank(b)
+  if (ka !== kb) return ka > kb ? cur : next
+  if (ao !== bo) return ao > bo ? cur : next
+  return mtimeMs(next) > mtimeMs(cur) ? next : cur
+}
+
+export function buildChapterTree(items: any[], pinAttempt = 0): ChapterTreeNode[] {
   const byId: Record<string, ChapterTreeNode> = {}
   const parents: Record<string, string> = {}
   ;(items || []).forEach((session) => {
@@ -432,8 +454,8 @@ export function buildChapterTree(items: any[]): ChapterTreeNode[] {
     const id = String(session.chapterId)
     const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] })
     parents[id] = String(session.chapterParent || '')
-    if (session.chapterRole === 'checker') node.checker = newerAttempt(node.checker, session)
-    else if (session.chapterRole === 'convert') node.convert = newerAttempt(node.convert, session)
+    if (session.chapterRole === 'checker') node.checker = pickAttempt(node.checker, session, pinAttempt)
+    else if (session.chapterRole === 'convert') node.convert = pickAttempt(node.convert, session, pinAttempt)
   })
   const roots: ChapterTreeNode[] = []
   Object.keys(byId).forEach((id) => {
@@ -524,13 +546,14 @@ export function parseImg2TextId(id: string): Img2TextRef | null {
 }
 
 /*
- * 章节转换的「第 N 次尝试」标签（T165）：checker 连续打回同一会话若干轮仍
- * 不过，代码会作废产物、换一个全新会话重来，每次尝试一条独立转录
- * （`convert_<章>.try2.jsonl`）。第一次不带标签，之后标「第 N 次」。
+ * 章节会话的尝试号（T165，T173 改标法）：同一章每次重开一条转录
+ * （`convert_<章>.try2.jsonl`），条目标 `#N`。用户口径：不要在中栏/侧栏
+ * 上写中文「第 N 次」——它在正常浏览时不提供信息，只在「历史」列表里用来
+ * 区分同一件事的几次尝试，所以只保留紧凑的 `#N`，且只在历史列表里出现。
  */
 export function chapterAttemptTag(s: any): string {
   const n = Number(s && s.chapterAttempt) || 1
-  return n > 1 ? '第 ' + n + ' 次' : ''
+  return n > 1 ? '#' + n : ''
 }
 
 /* 历史列表里每条会话的来源小标签：逐图分析 / stage0 / stage1 · 上一次 … */
@@ -713,10 +736,10 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
   return sortChainMembers(members)
 }
 
-/* 历史行的小标签：img2text 链路用阶段标签，章节重试用「第 N 次」。 */
+/* 历史行的小标签：img2text 链路用阶段标签，章节会话统一给 `#N`（含第 1 次，
+ * 否则同章的几条历史行看起来一模一样）。 */
 export function chainMemberTag(s: any): string {
-  const a = chapterAttemptTag(s)
-  if (a) return a
+  if (s && s.chapterId) return '#' + (Number(s.chapterAttempt) || 1)
   return img2textMemberTag(s && s.id)
 }
 

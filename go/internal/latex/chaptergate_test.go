@@ -161,3 +161,37 @@ func TestChapterGateRequiresCompileAndView(t *testing.T) {
 		t.Fatal("editing the chapter after a compile must invalidate the stamp")
 	}
 }
+
+// TestAttemptNumberForNode：T173 —— 已请求细分（子章节结果还在）的父节点重跑时
+// 必须**沿用**已有转录，不能开一条空的新尝试；其余情况仍按"没 run_end 就原位
+// 续跑、有 run_end 就新号"。
+func TestAttemptNumberForNode(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "convert_chapter_009.jsonl")
+	if got := attemptNumberForNode(base, true); got != 1 {
+		t.Fatalf("空目录 splitRestored → %d，want 1", got)
+	}
+	if err := os.WriteFile(base, []byte(`{"t":"msg","role":"assistant","content":"done"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := attemptNumberForNode(base, true); got != 1 {
+		t.Fatalf("splitRestored 必须沿用第 1 次，got %d", got)
+	}
+	if got := attemptNumberForNode(base, false); got != 1 {
+		t.Fatalf("没有 run_end 时原位续跑，got %d", got)
+	}
+	f, err := os.OpenFile(base, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"t":"meta","kind":"run_end","ok":true}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	if got := attemptNumberForNode(base, false); got != 2 {
+		t.Fatalf("已结束且不在等子会话时换新号，got %d", got)
+	}
+	if got := attemptNumberForNode(base, true); got != 1 {
+		t.Fatalf("splitRestored 时即使上一次已结束也沿用，got %d", got)
+	}
+}

@@ -7264,7 +7264,20 @@
     if (a !== b) return b > a ? next : cur;
     return mtimeMs(next) > mtimeMs(cur) ? next : cur;
   }
-  function buildChapterTree(items) {
+  function pickAttempt(cur, next, pinAttempt = 0) {
+    if (!cur) return next;
+    if (!next) return cur;
+    if (!pinAttempt) return newerAttempt(cur, next);
+    const a = Number(cur.chapterAttempt) || 1;
+    const b = Number(next.chapterAttempt) || 1;
+    const rank = (n) => n <= pinAttempt ? [1, n] : [0, -n];
+    const [ka, ao] = rank(a);
+    const [kb, bo] = rank(b);
+    if (ka !== kb) return ka > kb ? cur : next;
+    if (ao !== bo) return ao > bo ? cur : next;
+    return mtimeMs(next) > mtimeMs(cur) ? next : cur;
+  }
+  function buildChapterTree(items, pinAttempt = 0) {
     const byId = {};
     const parents = {};
     (items || []).forEach((session) => {
@@ -7272,8 +7285,8 @@
       const id = String(session.chapterId);
       const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] });
       parents[id] = String(session.chapterParent || "");
-      if (session.chapterRole === "checker") node.checker = newerAttempt(node.checker, session);
-      else if (session.chapterRole === "convert") node.convert = newerAttempt(node.convert, session);
+      if (session.chapterRole === "checker") node.checker = pickAttempt(node.checker, session, pinAttempt);
+      else if (session.chapterRole === "convert") node.convert = pickAttempt(node.convert, session, pinAttempt);
     });
     const roots = [];
     Object.keys(byId).forEach((id) => {
@@ -7327,10 +7340,6 @@
       return { kind: "analyze", img, stage: -1, prev };
     }
     return null;
-  }
-  function chapterAttemptTag(s) {
-    const n = Number(s && s.chapterAttempt) || 1;
-    return n > 1 ? "第 " + n + " 次" : "";
   }
   function img2textMemberTag(id) {
     const r = parseImg2TextId(id);
@@ -7477,8 +7486,7 @@
     return sortChainMembers(members);
   }
   function chainMemberTag(s) {
-    const a = chapterAttemptTag(s);
-    if (a) return a;
+    if (s && s.chapterId) return "#" + (Number(s.chapterAttempt) || 1);
     return img2textMemberTag(s && s.id);
   }
   function findSession(id) {
@@ -9017,29 +9025,28 @@
     class: "chapter-toggle-spacer",
     "aria-hidden": "true"
   };
-  const _hoisted_5$b = ["title"];
-  const _hoisted_6$9 = {
-    key: 3,
+  const _hoisted_5$b = {
+    key: 2,
     class: "chapter-state"
   };
-  const _hoisted_7$8 = {
-    key: 4,
+  const _hoisted_6$9 = {
+    key: 3,
     class: "chapter-usage"
   };
-  const _hoisted_8$5 = {
+  const _hoisted_7$8 = {
     key: 0,
     class: "chapter-node-body"
   };
-  const _hoisted_9$5 = ["data-id", "title", "onClick"];
-  const _hoisted_10$4 = {
+  const _hoisted_8$5 = ["data-id", "title", "onClick"];
+  const _hoisted_9$5 = {
     key: 0,
     class: "chapter-state"
   };
-  const _hoisted_11$4 = {
+  const _hoisted_10$4 = {
     key: 1,
     class: "chapter-usage"
   };
-  const _hoisted_12$4 = ["onClick"];
+  const _hoisted_11$4 = ["onClick"];
   const _sfc_main$l = /* @__PURE__ */ defineComponent({
     ...{ name: "ChapterSessionTree" },
     __name: "ChapterSessionTree",
@@ -9137,15 +9144,10 @@
                   tag: "span",
                   text: nodeTitle(node)
                 }, null, 8, ["text"]),
-                primary(node) && primary(node).chapterAttempt > 1 ? (openBlock(), createElementBlock("span", {
-                  key: 2,
-                  class: "row-chip chain-tag",
-                  title: "这一章被 checker 打回后换过全新会话：这一行打开的是第 " + primary(node).chapterAttempt + " 次尝试（更早的在「历史」页签里）"
-                }, toDisplayString(unref(chapterAttemptTag)(primary(node))), 9, _hoisted_5$b)) : createCommentVNode("", true),
-                activityText(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_6$9, toDisplayString(activityText(primary(node))), 1)) : createCommentVNode("", true),
-                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_7$8, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
+                activityText(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_5$b, toDisplayString(activityText(primary(node))), 1)) : createCommentVNode("", true),
+                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_6$9, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
               ], 10, _hoisted_2$g),
-              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_8$5, [
+              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_7$8, [
                 node.checker ? (openBlock(), createElementBlock("div", {
                   key: 0,
                   class: normalizeClass(["chapter-checker", { active: currentId.value === node.checker.id, live: node.checker.live }])
@@ -9164,15 +9166,15 @@
                       tag: "span",
                       text: unref(sessionTitleOf)(node.checker)
                     }, null, 8, ["text"]),
-                    activityText(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$4, toDisplayString(activityText(node.checker)), 1)) : createCommentVNode("", true),
-                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_11$4, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
-                  ], 8, _hoisted_9$5),
+                    activityText(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_9$5, toDisplayString(activityText(node.checker)), 1)) : createCommentVNode("", true),
+                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$4, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
+                  ], 8, _hoisted_8$5),
                   createBaseVNode("button", {
                     class: "chapter-info",
                     type: "button",
                     title: "打开核对会话详情",
                     onClick: ($event) => emit2("info", node.checker)
-                  }, "ⓘ", 8, _hoisted_12$4)
+                  }, "ⓘ", 8, _hoisted_11$4)
                 ], 2)) : createCommentVNode("", true),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
                   key: 1,
@@ -9196,7 +9198,7 @@
     }
     return target;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-ce56fabe"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-2089a407"]]);
   const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"
@@ -9335,38 +9337,37 @@
     class: "row-chip usage-chip"
   };
   const _hoisted_70 = ["title"];
-  const _hoisted_71 = ["title"];
-  const _hoisted_72 = { class: "row-time" };
-  const _hoisted_73 = { class: "row-actions" };
+  const _hoisted_71 = { class: "row-time" };
+  const _hoisted_72 = { class: "row-actions" };
+  const _hoisted_73 = ["onClick"];
   const _hoisted_74 = ["onClick"];
-  const _hoisted_75 = ["onClick"];
-  const _hoisted_76 = {
+  const _hoisted_75 = {
     key: 1,
     class: "session-blocks"
   };
+  const _hoisted_76 = ["data-id", "title", "onClick"];
   const _hoisted_77 = ["data-id", "title", "onClick"];
-  const _hoisted_78 = ["data-id", "title", "onClick"];
-  const _hoisted_79 = { class: "row-slot" };
-  const _hoisted_80 = {
+  const _hoisted_78 = { class: "row-slot" };
+  const _hoisted_79 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_81 = ["title"];
-  const _hoisted_82 = { class: "row-time" };
-  const _hoisted_83 = { class: "row-actions" };
+  const _hoisted_80 = ["title"];
+  const _hoisted_81 = { class: "row-time" };
+  const _hoisted_82 = { class: "row-actions" };
+  const _hoisted_83 = ["onClick"];
   const _hoisted_84 = ["onClick"];
-  const _hoisted_85 = ["onClick"];
-  const _hoisted_86 = {
+  const _hoisted_85 = {
     key: 1,
     class: "empty"
   };
-  const _hoisted_87 = { class: "side-status" };
-  const _hoisted_88 = {
+  const _hoisted_86 = { class: "side-status" };
+  const _hoisted_87 = {
     id: "root-path",
     class: "root-path",
     title: "扫描根目录"
   };
-  const _hoisted_89 = {
+  const _hoisted_88 = {
     id: "side-foot",
     class: "side-foot"
   };
@@ -9439,7 +9440,10 @@
             });
             const agg = stageChapterAggregate(stg, items, !!state.filter);
             const chapterItems = items.filter((s) => !!s.chapterId);
-            const chapterRoots = stg === "convert" && items.length > 0 && chapterItems.length === items.length ? buildChapterTree(items) : [];
+            const cur = state.current;
+            const pinAll = Number(cur && cur.chapterAttempt) || 0;
+            const pinAttempt = cur && (cur.project || "") === g.name ? pinAll : 0;
+            const chapterRoots = stg === "convert" && items.length > 0 && chapterItems.length === items.length ? buildChapterTree(items, pinAttempt) : [];
             const okey = groupKey("overflow", g.name + "/" + stg);
             const shown0 = items;
             const needOverflow = shown0.length > OVERFLOW_LIMIT;
@@ -9731,7 +9735,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-0339db9e><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0339db9e><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0339db9e></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-0339db9e><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-0339db9e></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-0339db9e></path></svg></span>', 1)),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-d1c328a7><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-d1c328a7><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-d1c328a7></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-d1c328a7><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-d1c328a7></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-d1c328a7></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9946,19 +9950,14 @@
                                   class: "row-chip image-chip",
                                   title: unref(imageTipText)(s)
                                 }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_70)) : createCommentVNode("", true),
-                                s.chapterAttempt > 1 ? (openBlock(), createElementBlock("span", {
-                                  key: 2,
-                                  class: "row-chip chain-tag",
-                                  title: "这一章被 checker 打回后换了一个全新会话重转换：第 " + s.chapterAttempt + " 次尝试"
-                                }, toDisplayString(unref(chapterAttemptTag)(s)), 9, _hoisted_71)) : createCommentVNode("", true),
-                                createBaseVNode("span", _hoisted_72, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                createBaseVNode("span", _hoisted_73, [
+                                createBaseVNode("span", _hoisted_71, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                createBaseVNode("span", _hoisted_72, [
                                   createBaseVNode("button", {
                                     class: "icon-btn",
                                     type: "button",
                                     title: "打开详情面板（元信息 / 指标）",
                                     onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                  }, "ⓘ", 8, _hoisted_74)
+                                  }, "ⓘ", 8, _hoisted_73)
                                 ])
                               ], 10, _hoisted_67);
                             }), 128)),
@@ -9967,7 +9966,7 @@
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_75)) : createCommentVNode("", true)
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_74)) : createCommentVNode("", true)
                           ]))
                         ], 8, _hoisted_57)), [
                           [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
@@ -9978,7 +9977,7 @@
                             scope: g.name + "/" + sv.stage,
                             onSelect: onRowClick,
                             onInfo: onInfoClick
-                          }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_76, [
+                          }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_75, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9988,7 +9987,7 @@
                                 "data-id": s.id,
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
-                              }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_77);
+                              }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_76);
                             }), 128))
                           ])) : (openBlock(), createElementBlock(Fragment, { key: 2 }, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
@@ -10001,7 +10000,7 @@
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
                               }, [
-                                createBaseVNode("span", _hoisted_79, [
+                                createBaseVNode("span", _hoisted_78, [
                                   createBaseVNode("span", {
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
@@ -10011,29 +10010,29 @@
                                   class: "row-title",
                                   text: unref(sessionTitleOf)(s)
                                 }, null, 8, ["text"]),
-                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_80, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_79, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
                                   class: "row-chip image-chip",
                                   title: unref(imageTipText)(s)
-                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_81)) : createCommentVNode("", true),
-                                createBaseVNode("span", _hoisted_82, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                createBaseVNode("span", _hoisted_83, [
+                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_80)) : createCommentVNode("", true),
+                                createBaseVNode("span", _hoisted_81, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                createBaseVNode("span", _hoisted_82, [
                                   createBaseVNode("button", {
                                     class: "icon-btn",
                                     type: "button",
                                     title: "打开详情面板（元信息 / 指标）",
                                     onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                  }, "ⓘ", 8, _hoisted_84)
+                                  }, "ⓘ", 8, _hoisted_83)
                                 ])
-                              ], 10, _hoisted_78);
+                              ], 10, _hoisted_77);
                             }), 128)),
                             sv.needOverflow ? (openBlock(), createElementBlock("button", {
                               key: 0,
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_85)) : createCommentVNode("", true)
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_84)) : createCommentVNode("", true)
                           ], 64))
                         ], 64))
                       ], 64);
@@ -10043,7 +10042,7 @@
                   [vCollapse, { key: "proj:" + g.name, want: g.matched ? true : projWantOpen(g), frozen: g.matched }]
                 ]);
               }), 128)),
-              !shownCount.value ? (openBlock(), createElementBlock("div", _hoisted_86, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true)
+              !shownCount.value ? (openBlock(), createElementBlock("div", _hoisted_85, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true)
             ], 512),
             _cache[11] || (_cache[11] = createBaseVNode("div", {
               class: "list-fade",
@@ -10054,15 +10053,15 @@
             id: "side-totals",
             class: normalizeClass(["side-totals", { hidden: !totalsText.value }])
           }, toDisplayString(totalsText.value), 3),
-          createBaseVNode("div", _hoisted_87, [
-            createBaseVNode("div", _hoisted_88, toDisplayString(unref(state).root || "—"), 1),
-            createBaseVNode("div", _hoisted_89, toDisplayString(footText.value), 1)
+          createBaseVNode("div", _hoisted_86, [
+            createBaseVNode("div", _hoisted_87, toDisplayString(unref(state).root || "—"), 1),
+            createBaseVNode("div", _hoisted_88, toDisplayString(footText.value), 1)
           ])
         ]);
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-0339db9e"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-d1c328a7"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

@@ -10,7 +10,7 @@ import { state, openDetails, fmtSize, storeGet, storeSet, setBoard } from '../st
 import {
   bookDominantState, bookTip, booksHeadText,
   buildGroups, buildImg2TextChains, buildChapterTree, filterByBoard, groupKey, groupWantOpen,
-  imageChipText, imageTipText, img2textMemberTag, chapterAttemptTag,
+  imageChipText, imageTipText, img2textMemberTag,
   styleFixPhaseKey, stylefixCompare,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
@@ -156,8 +156,14 @@ const groups = computed<GroupView[]>(() => {
       // （"8 章 · 完成 8"），方块视图本来就是为多会话扫视设计的。
       const agg = stageChapterAggregate(stg, items, !!state.filter)
       const chapterItems = items.filter((s: any) => !!s.chapterId)
+      // T173：树跟随"正在看的那一轮尝试"——点开历史里的某一次，下面的子会话
+      // 也切成那一轮的版本，而不是永远显示最新一次。只在同一本书里生效：别的
+      // 项目组没有"这一轮"的概念，仍按最新一次显示。
+      const cur: any = state.current as any
+      const pinAll = Number(cur && cur.chapterAttempt) || 0
+      const pinAttempt = cur && (cur.project || '') === g.name ? pinAll : 0
       const chapterRoots = stg === 'convert' && items.length > 0 && chapterItems.length === items.length
-        ? buildChapterTree(items) : []
+        ? buildChapterTree(items, pinAttempt) : []
       const okey = groupKey('overflow', g.name + '/' + stg)
       const shown0 = items
       const needOverflow = shown0.length > OVERFLOW_LIMIT
@@ -577,7 +583,6 @@ function onMoreClick(okey: string) {
                     <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
                     <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                     <span v-if="s.imageName" class="row-chip image-chip" :title="imageTipText(s)">{{ imageChipText(s) }}</span>
-                    <span v-if="s.chapterAttempt > 1" class="row-chip chain-tag" :title="'这一章被 checker 打回后换了一个全新会话重转换：第 ' + s.chapterAttempt + ' 次尝试'">{{ chapterAttemptTag(s) }}</span>
                     <span class="row-time">{{ relTime(s.mtime) }}</span>
                     <span class="row-actions">
                       <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, s)">ⓘ</button>

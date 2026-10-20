@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { state } from '../state'
-import { chapterAttemptTag, chapterNodeKey, chapterWantOpen, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
+import { chapterNodeKey, chapterWantOpen, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
 import type { ChapterTreeNode } from '../legacy/sidebar'
 
@@ -105,7 +105,6 @@ function nodeTitle(node: ChapterTreeNode): string {
         ><span class="caret" aria-hidden="true"></span></button>
         <span v-else class="chapter-toggle-spacer" aria-hidden="true"></span>
         <InlineMD class="chapter-name row-title" tag="span" :text="nodeTitle(node)" />
-        <span v-if="primary(node) && primary(node).chapterAttempt > 1" class="row-chip chain-tag" :title="'这一章被 checker 打回后换过全新会话：这一行打开的是第 ' + primary(node).chapterAttempt + ' 次尝试（更早的在「历史」页签里）'">{{ chapterAttemptTag(primary(node)) }}</span>
         <span v-if="activityText(primary(node))" class="chapter-state">{{ activityText(primary(node)) }}</span>
         <span v-if="usageChipText(primary(node))" class="chapter-usage">{{ usageChipText(primary(node)) }}</span>
       </div>

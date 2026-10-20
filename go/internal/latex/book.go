@@ -1267,17 +1267,6 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	// 后缀，跑出 convert_<章>.try2.try3.jsonl 这种套娃名，预览页把同一次尝试
 	// 拆成两个节点（一个 chapter_001 一个 chapter_001.try2）。
 	transcriptBase := node.TranscriptPath
-	if node.AttemptNum < 1 {
-		// 磁盘上已经试过几次：最后那次被中断（没有 run_end）就原位续跑，否则
-		// 换一个新号——绝不和旧转录共用同一个文件。
-		existing, ended := attemptNumberOnDisk(transcriptBase)
-		if existing >= 1 && !ended {
-			node.AttemptNum = existing
-		} else {
-			node.AttemptNum = existing + 1
-		}
-	}
-	node.TranscriptPath = attemptTranscriptPath(transcriptBase, node.AttemptNum)
 	mdData, readErr := os.ReadFile(chapPath)
 	if readErr != nil {
 		return fmt.Errorf("读取章节 Markdown 失败: %w", readErr)
@@ -1291,6 +1280,10 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		node.SubmitRoot = filepath.Join(node.NodeRoot, "integrated-stage")
 		node.StrictChecker = true
 	}
+	if node.AttemptNum < 1 {
+		node.AttemptNum = attemptNumberForNode(transcriptBase, splitTool.Restored)
+	}
+	node.TranscriptPath = attemptTranscriptPath(transcriptBase, node.AttemptNum)
 	texPath := filepath.Join(node.SubmitRoot, base+".tex")
 	if node.Depth == 0 && fileExists(filepath.Join(node.FinalSubmitRoot, base+".tex")) {
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")
@@ -1613,6 +1606,23 @@ func attemptTranscriptPath(path string, attempt int) string {
 
 // attemptNumberOnDisk 查这一章在磁盘上已有的最大尝试号，并告诉最后一次是否
 // 已经正常收尾（转录里有 run_end）。0 表示还没有任何尝试。
+// attemptNumberForNode 决定这一次往哪条转录里写（T171/T173）：
+//   - 已经请求细分、子章节结果还在的父节点属于**同一轮工作没做完**（被中断在
+//     "等子会话"）：沿用磁盘上最新一次，把整合与核对接着写进原转录——否则每重跑
+//     一次就多一条空尝试，预览页看起来像"每次都被重试、还停在等子会话"。
+//   - 最后一次转录没有 run_end（被中断）：原位续跑，接着那段对话。
+//   - 否则：换新号，绝不把两段对话追加进同一个文件。
+func attemptNumberForNode(transcriptBase string, splitRestored bool) int {
+	existing, ended := attemptNumberOnDisk(transcriptBase)
+	if existing < 1 {
+		return 1
+	}
+	if splitRestored || !ended {
+		return existing
+	}
+	return existing + 1
+}
+
 func attemptNumberOnDisk(path string) (int, bool) {
 	dir := filepath.Dir(path)
 	ext := filepath.Ext(path)
