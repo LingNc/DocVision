@@ -2020,3 +2020,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **真实缺陷（T173 遗留）**：`pickAttempt` 让整棵树都按"尝试号 ≤ pin 取最大"重选，点开某章 convert 的 `#2` 时，同书其它章节（重试次数各不相同）也被拉到第 2 次或它们最早的版本。用户口径：每个节点只该显示自己最新的一次，切换历史只影响"我正在看的那一条（和它同一行的角色）"。
 - **改**：`buildChapterTree(items, pinId)` 恢复 `newerAttempt` 的"各节点取最新"，只把 `pinId` 那条会话钉进它所在的节点/角色；同一节点的另一角色（convert ↔ checker）优先同一轮、没有同轮则最新；子会话与其它章节不跟着切。删除 `pickAttempt`；`Sidebar.vue` 传当前会话 id（不再按项目名算尝试号）。
 - **验证**：`chapter-tree.spec.ts` 跟随用例改写为 4 条（只看那条变、同轮核对、看核对时同行转换切到被核对的那一轮、无 pin 全取最新）；`npm test` 147、`go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补十二，T176：章节标题按纯文本，不吃下划线）
+
+- **真实缺陷**：会话名统一走行内 Markdown，而章节会话的标题是流水线标识符 `chapter_004_child_01`——下划线被当成强调标记，渲染成斜体并从文本里消失（截图里显示 `chapter004child01chil…`）。
+- **改**：`InlineMD` 加 `plain`（纯文本插入）；`plainTitle(s)`（有 `chapterId` 即章节会话）用于章节树两处标题、侧栏四处会话行、历史列表与详情栏「会话」行；其它会话仍走 markdown。
+- **验证**：`chapter-tree.spec.ts` 新增 `plainTitle` 用例；`npm test` 148、`go test ./internal/...` 全绿，dist 重建。

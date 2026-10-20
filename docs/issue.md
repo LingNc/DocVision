@@ -1068,3 +1068,8 @@ user 轮
   问题：T173 的 `pickAttempt(cur, next, pin)` 把**整棵树**都按"尝试号 ≤ pin 取最大"重选，于是点开某章 convert 的 `#2`，同书其它章节（各自重试次数完全不同）也被拉到第 2 次或它们最早的版本——用户要的是"只有我正在看的那一条跟着切"。
   改：`buildChapterTree(items, pinId)` 回到"每个节点各取最新一次"（`newerAttempt`），**只钉住 `pinId` 这一条会话**：它所在节点的这个角色直接用它；同一节点的另一种角色（convert ↔ checker）优先取**同一轮**，那一轮不存在才保持最新；**子会话与其它章节一概不跟着切**（用户口径：子会话默认自己最新的一次）。`pickAttempt` 删除，`Sidebar.vue` 传当前会话的 id（不再按项目名算 pin 号）。
   验证：`web/tests/chapter-tree.spec.ts` 的跟随用例改为 4 条——只有被查看那一行换成 #2（子会话与别的章节仍最新）、同节点核对只跟同一轮/没有同轮就最新、看核对 #1 时同行转换切到它核对的那一轮、无 pin 时全树取最新；`npm test` 147 通过、`go test ./internal/...` 全绿。
+
+[X][ ] T176. 用户反馈（附侧栏截图）："章节标题……会话转换的时候就不需要渲染markdown了吧，这个渲染为斜体了。" 截图里 `chapter_004_child_01` 被行内 markdown 吃掉下划线，显示成 `chapter004child01chil…`。
+  原因：会话名统一走行内 Markdown（`InlineMD` → `renderInlineMarkdown`），而章节会话的标题是**流水线标识符**（`chapter_004_child_01`），下划线被当成强调标记，渲染成斜体并从文本里消失；id 本来就长，再少几个下划线就完全读不出来。
+  改：`InlineMD` 新增 `plain` 开关（纯文本插入，不走 markdown）；新增 `plainTitle(s)`（有 `chapterId` 即章节会话）——章节树两处标题、侧栏四处会话行、历史列表、详情栏「会话」行都改用它；img2text/样式等会话照旧走行内 markdown。
+  验证：`chapter-tree.spec.ts` 新增 `plainTitle` 用例（convert/checker 为 true、普通标题 false、空值 false）；`npm test` 148 通过、dist 已重建、`go build` + `go test ./internal/...` 全绿。

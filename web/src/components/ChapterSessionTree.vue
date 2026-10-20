@@ -104,7 +104,7 @@ function nodeTitle(node: ChapterTreeNode): string {
           @click="toggle(node, $event)"
         ><span class="caret" aria-hidden="true"></span></button>
         <span v-else class="chapter-toggle-spacer" aria-hidden="true"></span>
-        <InlineMD class="chapter-name row-title" tag="span" :text="nodeTitle(node)" />
+        <InlineMD class="chapter-name row-title" tag="span" :text="nodeTitle(node)" plain />
         <span v-if="activityText(primary(node))" class="chapter-state">{{ activityText(primary(node)) }}</span>
         <span v-if="usageChipText(primary(node))" class="chapter-usage">{{ usageChipText(primary(node)) }}</span>
       </div>
@@ -116,7 +116,7 @@ function nodeTitle(node: ChapterTreeNode): string {
         >
           <button class="checker-main session-row" type="button" role="treeitem" :data-id="node.checker.id" :title="sessionTip(node.checker)" @click="emit('select', node.checker)">
             <span class="checker-marker">核对</span>
-            <InlineMD class="checker-name row-title" tag="span" :text="sessionTitleOf(node.checker)" />
+            <InlineMD class="checker-name row-title" tag="span" :text="sessionTitleOf(node.checker)" plain />
             <span v-if="activityText(node.checker)" class="chapter-state">{{ activityText(node.checker) }}</span>
             <span v-if="usageChipText(node.checker)" class="chapter-usage">{{ usageChipText(node.checker) }}</span>
           </button>

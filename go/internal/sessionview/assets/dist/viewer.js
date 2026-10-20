@@ -7342,6 +7342,9 @@
     }
     return null;
   }
+  function plainTitle(s) {
+    return !!(s && s.chapterId);
+  }
   function img2textMemberTag(id) {
     const r = parseImg2TextId(id);
     if (!r) return "";
@@ -8997,7 +9000,8 @@
     __name: "InlineMD",
     props: {
       tag: {},
-      text: {}
+      text: {},
+      plain: { type: Boolean }
     },
     setup(__props) {
       const props = __props;
@@ -9006,10 +9010,10 @@
         const el2 = host.value;
         if (!el2) return;
         el2.textContent = "";
-        el2.appendChild(renderInlineMarkdown(props.text));
+        el2.appendChild(props.plain ? document.createTextNode(props.text) : renderInlineMarkdown(props.text));
       }
       onMounted(render);
-      watch(() => props.text, render);
+      watch(() => [props.text, props.plain], render);
       return (_ctx, _cache) => {
         return openBlock(), createBlock(resolveDynamicComponent(props.tag || "span"), {
           ref_key: "host",
@@ -9143,7 +9147,8 @@
                 createVNode(_sfc_main$m, {
                   class: "chapter-name row-title",
                   tag: "span",
-                  text: nodeTitle(node)
+                  text: nodeTitle(node),
+                  plain: ""
                 }, null, 8, ["text"]),
                 activityText(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_5$b, toDisplayString(activityText(primary(node))), 1)) : createCommentVNode("", true),
                 unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_6$9, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true)
@@ -9165,7 +9170,8 @@
                     createVNode(_sfc_main$m, {
                       class: "checker-name row-title",
                       tag: "span",
-                      text: unref(sessionTitleOf)(node.checker)
+                      text: unref(sessionTitleOf)(node.checker),
+                      plain: ""
                     }, null, 8, ["text"]),
                     activityText(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_9$5, toDisplayString(activityText(node.checker)), 1)) : createCommentVNode("", true),
                     unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$4, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true)
@@ -9199,7 +9205,7 @@
     }
     return target;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-2089a407"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-004d2e46"]]);
   const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"
@@ -9735,7 +9741,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-cbebc143><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-cbebc143><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-cbebc143></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-cbebc143><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-cbebc143></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-cbebc143></path></svg></span>', 1)),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-1962332f><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-1962332f><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-1962332f></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-1962332f><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-1962332f></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-1962332f></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -9781,8 +9787,9 @@
                               createVNode(_sfc_main$m, {
                                 tag: "span",
                                 class: "row-title",
-                                text: unref(sessionTitleOf)(c.main)
-                              }, null, 8, ["text"]),
+                                text: unref(sessionTitleOf)(c.main),
+                                plain: unref(plainTitle)(c.main)
+                              }, null, 8, ["text", "plain"]),
                               unref(usageChipText)(c.main) ? (openBlock(), createElementBlock("span", _hoisted_38$1, toDisplayString(unref(usageChipText)(c.main)), 1)) : createCommentVNode("", true),
                               createBaseVNode("span", _hoisted_39$1, toDisplayString(unref(relTime)(c.main.mtime)), 1),
                               createBaseVNode("span", _hoisted_40$1, [
@@ -9819,8 +9826,9 @@
                                   createVNode(_sfc_main$m, {
                                     tag: "span",
                                     class: "row-title",
-                                    text: unref(sessionTitleOf)(s)
-                                  }, null, 8, ["text"]),
+                                    text: unref(sessionTitleOf)(s),
+                                    plain: unref(plainTitle)(s)
+                                  }, null, 8, ["text", "plain"]),
                                   createBaseVNode("span", _hoisted_47$1, toDisplayString(unref(img2textMemberTag)(s.id)), 1),
                                   createBaseVNode("span", _hoisted_48$1, toDisplayString(unref(relTime)(s.mtime)), 1),
                                   createBaseVNode("span", _hoisted_49, [
@@ -9856,8 +9864,9 @@
                             createVNode(_sfc_main$m, {
                               tag: "span",
                               class: "row-title",
-                              text: unref(sessionTitleOf)(s)
-                            }, null, 8, ["text"]),
+                              text: unref(sessionTitleOf)(s),
+                              plain: unref(plainTitle)(s)
+                            }, null, 8, ["text", "plain"]),
                             unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_53, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                             createBaseVNode("span", _hoisted_54, toDisplayString(unref(relTime)(s.mtime)), 1),
                             createBaseVNode("span", _hoisted_55, [
@@ -9942,8 +9951,9 @@
                                 createVNode(_sfc_main$m, {
                                   tag: "span",
                                   class: "row-title",
-                                  text: unref(sessionTitleOf)(s)
-                                }, null, 8, ["text"]),
+                                  text: unref(sessionTitleOf)(s),
+                                  plain: unref(plainTitle)(s)
+                                }, null, 8, ["text", "plain"]),
                                 unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_69, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
@@ -10008,8 +10018,9 @@
                                 createVNode(_sfc_main$m, {
                                   tag: "span",
                                   class: "row-title",
-                                  text: unref(sessionTitleOf)(s)
-                                }, null, 8, ["text"]),
+                                  text: unref(sessionTitleOf)(s),
+                                  plain: unref(plainTitle)(s)
+                                }, null, 8, ["text", "plain"]),
                                 unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_79, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
@@ -10061,7 +10072,7 @@
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-cbebc143"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-1962332f"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
@@ -12047,7 +12058,7 @@
     const rows = [
       { k: "项目", v: cur.project || projectOf(cur.id), title: cur.id },
       { k: "阶段", v: cur.stageTitle || cur.stage || "—" },
-      { k: "会话", md: sessionTitleOf(cur), title: cur.id, mono: true },
+      plainTitle(cur) ? { k: "会话", v: sessionTitleOf(cur), title: cur.id, mono: true } : { k: "会话", md: sessionTitleOf(cur), title: cur.id, mono: true },
       { k: "文件", v: cur.name || "—", title: cur.path, mono: true },
       { k: "消息", v: cur.messages + " 条 · " + state.lines.length + " 行" },
       { k: "大小", v: fmtSize(cur.size) },
@@ -12568,8 +12579,9 @@
                 createVNode(_sfc_main$m, {
                   tag: "span",
                   class: "history-title",
-                  text: unref(sessionTitleOf)(s)
-                }, null, 8, ["text"]),
+                  text: unref(sessionTitleOf)(s),
+                  plain: unref(plainTitle)(s)
+                }, null, 8, ["text", "plain"]),
                 createBaseVNode("span", {
                   class: normalizeClass(["history-state", endStateCls(s)])
                 }, toDisplayString(endStateText(s)), 3),
@@ -12581,7 +12593,7 @@
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-c7e31d5e"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-f2cd4046"]]);
   const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
   const _hoisted_2 = ["data-dragging"];
   const _hoisted_3 = {

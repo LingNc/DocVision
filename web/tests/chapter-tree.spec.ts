@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterAttemptChain, chapterAttemptTag, chainMemberTag, pickAttempt } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterAttemptChain, chapterAttemptTag, chainMemberTag, plainTitle } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 
 beforeEach(() => {
@@ -208,5 +208,16 @@ describe('章节树只钉住正在查看的那一条', () => {
     const roots = buildChapterTree(sessions, '')
     expect(roots[0].convert!.chapterAttempt).toBe(2)
     expect(roots[0].children[0].convert!.chapterAttempt).toBe(3)
+  })
+})
+
+// T176：章节会话的标题是流水线标识符（chapter_004_child_01），按纯文本显示，
+// 否则行内 markdown 会把下划线当强调吃掉（chapter004child01）。
+describe('章节标题按纯文本', () => {
+  it('convert / checker 会话走纯文本，其它会话仍可走 markdown', () => {
+    expect(plainTitle({ chapterId: 'chapter_004_child_01', chapterRole: 'convert' })).toBe(true)
+    expect(plainTitle({ chapterId: 'chapter_004', chapterRole: 'checker' })).toBe(true)
+    expect(plainTitle({ title: '**粗体** 与 $x_1$' })).toBe(false)
+    expect(plainTitle(null)).toBe(false)
   })
 })

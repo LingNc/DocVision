@@ -10,7 +10,7 @@ import { state, openDetails, fmtSize, storeGet, storeSet, setBoard } from '../st
 import {
   bookDominantState, bookTip, booksHeadText,
   buildGroups, buildImg2TextChains, buildChapterTree, filterByBoard, groupKey, groupWantOpen,
-  imageChipText, imageTipText, img2textMemberTag,
+  imageChipText, imageTipText, img2textMemberTag, plainTitle,
   styleFixPhaseKey, stylefixCompare,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
@@ -461,7 +461,7 @@ function onMoreClick(okey: string) {
                     @click="onRowClick(c.main)"
                   >
                     <span class="row-slot"><span class="dot" :class="{ live: c.live > 0 }"></span></span>
-                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(c.main)"></InlineMD>
+                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(c.main)" :plain="plainTitle(c.main)"></InlineMD>
                     <span v-if="usageChipText(c.main)" class="row-chip usage-chip">{{ usageChipText(c.main) }}</span>
                     <span class="row-time">{{ relTime(c.main.mtime) }}</span>
                     <span class="row-actions">
@@ -489,7 +489,7 @@ function onMoreClick(okey: string) {
                       @click="onRowClick(s)"
                     >
                       <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                      <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                      <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
                       <span class="row-chip chain-tag">{{ img2textMemberTag(s.id) }}</span>
                       <span class="row-time">{{ relTime(s.mtime) }}</span>
                       <span class="row-actions">
@@ -510,7 +510,7 @@ function onMoreClick(okey: string) {
                   @click="onRowClick(s)"
                 >
                   <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                  <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                  <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
                   <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                   <span class="row-time">{{ relTime(s.mtime) }}</span>
                   <span class="row-actions">
@@ -578,7 +578,7 @@ function onMoreClick(okey: string) {
                     @click="onRowClick(s)"
                   >
                     <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
                     <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                     <span v-if="s.imageName" class="row-chip image-chip" :title="imageTipText(s)">{{ imageChipText(s) }}</span>
                     <span class="row-time">{{ relTime(s.mtime) }}</span>
@@ -624,7 +624,7 @@ function onMoreClick(okey: string) {
                     @click="onRowClick(s)"
                   >
                     <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
                     <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                     <span v-if="s.imageName" class="row-chip image-chip" :title="imageTipText(s)">{{ imageChipText(s) }}</span>
                     <span class="row-time">{{ relTime(s.mtime) }}</span>

@@ -5,7 +5,7 @@
 // 排序与侧栏链一致（sortChainMembers：新 → 旧）；点行切会话（selectSession）。
 import { computed } from 'vue'
 import { state, relTime } from '../state'
-import { chainOfSession, chainMemberTag, sessionTitleOf } from '../legacy/sidebar'
+import { chainOfSession, chainMemberTag, plainTitle, sessionTitleOf } from '../legacy/sidebar'
 import { selectSession } from '../data'
 import InlineMD from './InlineMD.vue'
 
@@ -45,7 +45,7 @@ function onRowClick(s: any) {
         @click="onRowClick(s)"
       >
         <span class="row-chip chain-tag history-tag">{{ chainMemberTag(s) }}</span>
-        <InlineMD tag="span" class="history-title" :text="sessionTitleOf(s)"></InlineMD>
+        <InlineMD tag="span" class="history-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
         <span class="history-state" :class="endStateCls(s)">{{ endStateText(s) }}</span>
         <span class="history-time">{{ relTime(s.mtime) }}</span>
       </button>

@@ -549,6 +549,16 @@ export function parseImg2TextId(id: string): Img2TextRef | null {
 }
 
 /*
+ * 章节会话（convert / checker）的标题是**流水线里的标识符**（`chapter_004_child_01`），
+ * 不是作者写的文案：走行内 markdown 会把下划线当成强调吃掉
+ * （`chapter_004_child_01` → `chapter004child01`，树里还缩成 `chapter004child01chil…`），
+ * 所以这一类标题一律纯文本显示（T176）；img2text/样式等会话照旧走 markdown。
+ */
+export function plainTitle(s: any): boolean {
+  return !!(s && s.chapterId)
+}
+
+/*
  * 章节会话的尝试号（T165，T173 改标法）：同一章每次重开一条转录
  * （`convert_<章>.try2.jsonl`），条目标 `#N`。用户口径：不要在中栏/侧栏
  * 上写中文「第 N 次」——它在正常浏览时不提供信息，只在「历史」列表里用来
