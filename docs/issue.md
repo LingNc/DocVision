@@ -1097,3 +1097,8 @@ user 轮
   问题：`.chapter-checker.live .chapter-state` 只给核对行染了绿，转换行（`.chapter-node-head`）从来没有 live 类也没有对应规则，跑着的时候那句「运行中」还是灰色。
   改：状态文案按内容染色——`stateTone(label)` 只在 label 恰好是「运行中」时给 `.run` 类，两行共用（不是按 `live` 判断：排队等并发槽的会话也是 live，那不该是绿的）。
   验证：`npm test` 158 通过、dist 已重建。
+
+[X][ ] T181. 用户反馈（章节树截图：转换行写"转换完成待核对"、它下面的核对行写"发现问题"）："转换完成之后等待核对，核对完成之后上面是不是该改状态了？如果是发现问题的话，上面不应该显示这个待核对吧？"
+  问题：① 转换会话的最后一次活动一直停在 `checking_result`，而反馈轮（checker 打回后同一会话重转换）**不写任何状态**，所以整段重转换期间那一行都显示"转换完成待核对"；② 即使核对已经给出结论，转换行也不看它——两行各说各的。
+  改：① 反馈轮补 `queued` → 取槽 → `running` → 跑完再写 `checking_result`（与首次转换一致，UI 因此能看到"等待重转换槽/运行中"）；② `chapterActivityLabel(state, role, peerVerdict, live)` 增加同一行另一角色的结论：转换行在 `checking_result` 且核对为 `issues` → 「核对发现问题」、核对为 `pass` → 「已通过」、核对还在排队/运行（没有结论）→ 仍「转换完成待核对」；`queued` + 有结论 → 「核对完成待并发槽」（T178 规则保留）。
+  验证：`chapter-tree.spec.ts` 的文案用例改为新签名并补 3 条（issues/pass/在跑三种 peer 状态）；`npm test` 159 通过、dist 已重建、`go build` + `go test ./internal/latex/` 绿。

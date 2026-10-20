@@ -59,9 +59,11 @@ function selectNode(node: ChapterTreeNode): void {
  * 「核对完成待处理」；转换又在排队而这一章已有核对结论时，它等的是重转换
  * 的并发槽。 */
 function activityText(session: any, role: 'convert' | 'checker', node?: ChapterTreeNode): string {
+  // 转换行要参考同一行核对的结论（T181）：核对已经"发现问题"时，转换行不能再
+  // 挂着"待核对"。
   const chk = node?.checker
-  const verdict = !!chk && (chk.chapterActivity === 'issues' || chk.chapterActivity === 'pass')
-  return chapterActivityLabel(session?.chapterActivity, role, verdict, !!session?.live)
+  const peer = role === 'convert' && chk ? String(chk.chapterActivity || '') : ''
+  return chapterActivityLabel(session?.chapterActivity, role, peer, !!session?.live)
 }
 
 function nodeActivity(node: ChapterTreeNode): string {

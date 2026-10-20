@@ -567,6 +567,10 @@ export function plainTitle(s: any): boolean {
  *    → 「核对完成待处理」；
  *  · 转换会话又排到 queued、而这一章已经有核对结论（上一轮被打回）→ 它等的
  *    其实是**重转换**的并发槽 → 「核对完成待并发槽」。
+ *
+ * T181：核对结论一出来，转换行就不能再挂着「待核对」——它自己在等自己的核对，
+ * 而核对已经说话了。所以转换行的 checking_result 要看同一行核对的结论：发现问题
+ * →「核对发现问题」（马上要被重新喂回去改），已通过 →「已通过」。
  */
 const CHAPTER_ACTIVITY: Record<string, string> = {
   running: '运行中', waiting_children: '等待子会话',
@@ -578,12 +582,21 @@ const CHAPTER_ACTIVITY: Record<string, string> = {
 export function chapterActivityLabel(
   state: string | undefined,
   role: 'convert' | 'checker' = 'convert',
-  prevVerdict = false,
+  peerVerdict = '',
   live = false,
 ): string {
   if (!state) return live ? '运行中' : ''
-  if (state === 'queued') return role === 'convert' && prevVerdict ? '核对完成待并发槽' : '等待并发槽'
-  if (state === 'checking_result') return role === 'checker' ? '核对完成待处理' : '转换完成待核对'
+  // peerVerdict 是同一行**另一个角色**的最新结论（转换行看核对的结论）。
+  const judged = peerVerdict === 'issues' || peerVerdict === 'pass'
+  if (state === 'queued') {
+    return role === 'convert' && judged ? '核对完成待并发槽' : '等待并发槽'
+  }
+  if (state === 'checking_result') {
+    if (role === 'checker') return '核对完成待处理'
+    if (peerVerdict === 'issues') return '核对发现问题'
+    if (peerVerdict === 'pass') return '已通过'
+    return '转换完成待核对'
+  }
   return CHAPTER_ACTIVITY[state] || (live ? '运行中' : '')
 }
 

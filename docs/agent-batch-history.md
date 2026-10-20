@@ -2053,3 +2053,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **根因**：Checkers 行的绿来自 `.chapter-checker.live .chapter-state`；转换行是 `.chapter-node-head`，既没有 `live` 类也没有规则，所以状态一直是 muted 灰。
 - **改**：`stateTone(label)` 按文案给 `.run` 类（只有「运行中」染绿，排队等槽的 live 会话不染），两行共用；删掉只服务核对行的 `.chapter-checker.live` 规则。
 - **验证**：`npm test` 158、dist 重建。
+
+## v1.5+（第四十七批补十七，T181：核对有结论后转换行改口 + 反馈轮补状态）
+
+- **用户反馈**："转换完成之后等待核对，核对完成之后上面是不是该改状态了？如果是发现问题的话，上面不应该显示这个待核对吧？"
+- **两个真因**：① `checker` 打回后的反馈轮只调 `sess.Run`，不写 `chapter_activity`，转换行停在上一轮的 `checking_result`；② 前端两行各读各的状态，转换行从不看核对的结论。
+- **改**：反馈轮补 `queued`→`running`→`checking_result`；`chapterActivityLabel` 增 `peerVerdict`，转换行按同一行核对的最新状态说话（issues→「核对发现问题」、pass→「已通过」、核对接在跑→「转换完成待核对」）。
+- **踩坑**：改函数注释时把块注释的 `*/` 一起吃掉，整段导出被注释掉，vitest 报 `chapterActivityLabel is not a function`（4 条红）；补回结束符即绿。
+- **验证**：`npm test` 159、dist 重建、`go test ./internal/latex/` 绿。

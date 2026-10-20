@@ -7363,10 +7363,18 @@
     // T171：转录里已有 run_end 却停在 running 的尝试被放弃了，不能再显示"运行中"。
     interrupted: "已中断"
   };
-  function chapterActivityLabel(state2, role = "convert", prevVerdict = false, live = false) {
+  function chapterActivityLabel(state2, role = "convert", peerVerdict = "", live = false) {
     if (!state2) return live ? "运行中" : "";
-    if (state2 === "queued") return role === "convert" && prevVerdict ? "核对完成待并发槽" : "等待并发槽";
-    if (state2 === "checking_result") return role === "checker" ? "核对完成待处理" : "转换完成待核对";
+    const judged = peerVerdict === "issues" || peerVerdict === "pass";
+    if (state2 === "queued") {
+      return role === "convert" && judged ? "核对完成待并发槽" : "等待并发槽";
+    }
+    if (state2 === "checking_result") {
+      if (role === "checker") return "核对完成待处理";
+      if (peerVerdict === "issues") return "核对发现问题";
+      if (peerVerdict === "pass") return "已通过";
+      return "转换完成待核对";
+    }
     return CHAPTER_ACTIVITY[state2] || (live ? "运行中" : "");
   }
   function img2textMemberTag(id) {
@@ -9105,8 +9113,8 @@
       }
       function activityText(session, role, node) {
         const chk = node == null ? void 0 : node.checker;
-        const verdict = !!chk && (chk.chapterActivity === "issues" || chk.chapterActivity === "pass");
-        return chapterActivityLabel(session == null ? void 0 : session.chapterActivity, role, verdict, !!(session == null ? void 0 : session.live));
+        const peer = role === "convert" && chk ? String(chk.chapterActivity || "") : "";
+        return chapterActivityLabel(session == null ? void 0 : session.chapterActivity, role, peer, !!(session == null ? void 0 : session.live));
       }
       function nodeActivity(node) {
         return activityText(primary(node), node.convert ? "convert" : "checker", node);
@@ -9223,7 +9231,7 @@
     }
     return target;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-7995f1d2"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-bb74f8e4"]]);
   const _hoisted_1$g = {
     id: "sidebar-col",
     class: "sidebar-col"

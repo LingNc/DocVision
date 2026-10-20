@@ -1611,13 +1611,19 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			"\n\nFix them in your workspace (edit_file/write_file), compile until clean, then submit the two paths again." +
 			"\n\nAn item is not automatically true: the checker reads the markdown, your compiled PDF and the original pages. " +
 			"If the marked spot is NOT a real problem (the markdown is OCR noise, the formula/table/figure comes from the original page and your .tex reproduces it), do not damage correct content to satisfy it — put the evidence (file and line, or the source page number) in submit.notes and submit again; it will be re-checked against the page."
+		// T181：反馈轮也要写状态。以前这里什么都不写，转换行的最后一次活动
+		// 还停在上一次的「转换完成待核对」——核对明明已经说了"发现问题"，上面
+		// 那行却在等核对，看着像卡住了。
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
 		release := r.acquireConvertSlot()
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		_, runErr := sess.Run(session.RunOptions{UserText: msg})
 		release()
 		if runErr != nil {
 			r.log.LogWarning(tid, "[checker]", base, "反馈轮失败:", runErr)
 			break
 		}
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
 		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker)
 		if !ok && isSessionAPIError(issues) {
 			return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
