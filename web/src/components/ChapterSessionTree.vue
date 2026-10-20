@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { state } from '../state'
 import { chapterActivityLabel, chapterNodeKey, chapterWantOpen, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
+import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
 import type { ChapterTreeNode } from '../legacy/sidebar'
 
 /*
@@ -70,6 +71,40 @@ function nodeActivity(node: ChapterTreeNode): string {
   return activityText(primary(node), node.convert ? 'convert' : 'checker', node)
 }
 
+/* P53：手动重试。页面只往项目的 work/retry/ 排一个请求文件，正在跑的
+ * docvision latex 在转换阶段的安全点消费它；没在跑就留到下次启动。
+ * 章节已经在队列里时按钮收起、换成「待重试」角标。 */
+function nodeProject(node: ChapterTreeNode): string {
+  const s = primary(node) || node.convert || node.checker
+  return (s && s.project) || ''
+}
+
+/* 只有顶层章节能单独重试：子章节由父章节的细分树产出，重跑它得连同父节点
+ * 的整合一起走（那是"重试父章节"），所以按钮不给子章节。 */
+function canRetryNode(node: ChapterTreeNode): boolean {
+  return !!nodeProject(node) && !state.staticMode && node.id.indexOf('_child_') < 0
+}
+
+function nodePendingRetry(node: ChapterTreeNode): boolean {
+  const project = nodeProject(node)
+  return !!project && chapterPendingRetry(project, node.id)
+}
+
+function retryNode(node: ChapterTreeNode, ev: MouseEvent): void {
+  ev.stopPropagation()
+  const project = nodeProject(node)
+  if (!project) return
+  state.retryNote = '正在提交 ' + node.id + ' 的重试请求…'
+  requestChapterRetry(project, node.id, '侧栏重试')
+    .then((res: any) => {
+      state.retryNote = node.id + ' 已加入重试队列（' + ((res && res.note) || '等待转换阶段处理') + '）'
+      return refreshIndex()
+    })
+    .catch((err: any) => {
+      state.retryNote = node.id + ' 重试请求失败：' + ((err && err.message) || err)
+    })
+}
+
 /* 只有"运行中"染色（T180）：原来只有核对行有 .live 规则，转换行跑着时那句
  * 「运行中」是灰的，看着像没在跑。按文案判而不是按 live 判——排队等槽的
  * 会话也是 live，它不该是绿的。 */
@@ -119,6 +154,14 @@ function nodeTitle(node: ChapterTreeNode): string {
         <InlineMD class="chapter-name row-title" tag="span" :text="nodeTitle(node)" plain />
         <span v-if="nodeActivity(node)" class="chapter-state" :class="stateTone(nodeActivity(node))">{{ nodeActivity(node) }}</span>
         <span v-if="usageChipText(primary(node))" class="chapter-usage">{{ usageChipText(primary(node)) }}</span>
+        <span v-if="nodePendingRetry(node)" class="chapter-retry-pending" title="已在重试队列里：转换阶段的下一个安全点会重跑这一章">待重试</span>
+        <button
+          v-else-if="canRetryNode(node)"
+          class="chapter-retry icon-btn"
+          type="button"
+          :title="'重试这一章 ' + node.id + '：开一个新尝试，旧的留档在工作区 work/attempts/'"
+          @click="retryNode(node, $event)"
+        >↻</button>
       </div>
       <div v-if="hasBody(node) && isOpen(node)" class="chapter-node-body">
         <div
@@ -174,6 +217,12 @@ function nodeTitle(node: ChapterTreeNode): string {
 .checker-main { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; }
 .checker-marker { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px; }
 .chapter-state, .chapter-usage { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px; }
+/* P53：重试按钮与「待重试」角标。按钮平时半透明，行悬浮/选中时才明显——
+ * 章节行本身就是"点一下选中"，按钮不能抢走整行的点击。 */
+.chapter-retry { flex: 0 0 auto; opacity: 0; transition: opacity .12s; font-size: 12px; padding: 0 4px; }
+.chapter-node-head:hover .chapter-retry, .chapter-node-head.active .chapter-retry { opacity: .75; }
+.chapter-retry:hover { opacity: 1; }
+.chapter-retry-pending { flex: 0 0 auto; font-size: 11px; color: var(--amber, #9a6700); }
 .chapter-state.run { color: var(--green, #1a7f37); }
 .chapter-info { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer; }
 </style>

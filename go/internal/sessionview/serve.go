@@ -1,12 +1,12 @@
 package sessionview
 
 import (
-	"io"
-	"encoding/hex"
-	"crypto/sha256"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -46,6 +46,10 @@ type ServeOptions struct {
 	Extras []ScanExtra
 	// Render configures the /api/mermaid preview endpoint (T56).
 	Render RenderConfig
+	// NoRetry 关掉页面上的「重试这一章」写入口（P53）：预览页因此完全回到
+	// "只读观察者"。默认开着——它只往项目的 work/retry/ 写一个请求文件，
+	// 不执行任何命令。
+	NoRetry bool
 }
 
 // Bound is where the viewer actually listens, as net.Listen reported it — not
@@ -69,7 +73,7 @@ type Bound struct {
 //
 // It prints the banner once the listener is actually up.
 func Serve(opt ServeOptions) error {
-	bound, stop, err := StartWithRender(opt.Root, opt.Addr, opt.Extras, opt.Render)
+	bound, stop, err := startViewer(opt.Root, opt.Addr, opt.Extras, opt.Render, !opt.NoRetry)
 	if err != nil {
 		return err
 	}
@@ -155,6 +159,12 @@ type RenderConfig struct {
 
 // StartWithRender is StartWith plus the mermaid render configuration.
 func StartWithRender(root, addr string, extras []ScanExtra, rc RenderConfig) (bound Bound, stopped <-chan struct{}, err error) {
+	return startViewer(root, addr, extras, rc, true)
+}
+
+// startViewer is the single implementation behind every start helper:
+// allowRetry gates the one write endpoint the page has (P53).
+func startViewer(root, addr string, extras []ScanExtra, rc RenderConfig, allowRetry bool) (bound Bound, stopped <-chan struct{}, err error) {
 	if addr == "" {
 		addr = DefaultAddr
 	}
@@ -173,8 +183,10 @@ func StartWithRender(root, addr string, extras []ScanExtra, rc RenderConfig) (bo
 	if err != nil {
 		return Bound{}, nil, fmt.Errorf("会话预览: 监听 %s 失败（端口可能已被占用，请换一个端口）: %w", addr, err)
 	}
+	handler := newViewerServer(rootAbs, extras, rc)
+	handler.allowRetry = allowRetry
 	srv := &http.Server{
-		Handler:           newViewerServer(rootAbs, extras, rc),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	done := make(chan struct{})
@@ -246,9 +258,12 @@ type viewerServer struct {
 	// img2textRoot is the progress_items directory behind the img2text
 	// extra root ("" when preview.img2text is off); /api/img2text-progress
 	// scans it for the P18 progress board.
-	img2textRoot  string
-	mermaidCmd    string
+	img2textRoot   string
+	mermaidCmd     string
 	mermaidTimeout time.Duration
+	// allowRetry 是 /api/retry 的总开关（P53）：默认开，`sessions --no-retry`
+	// 关掉后预览页重新变成一个纯粹的只读观察者。
+	allowRetry bool
 }
 
 // newViewerServer builds the read-only viewer. extras are the absolute
@@ -292,9 +307,9 @@ func newViewerServer(root string, extras []ScanExtra, rc ...RenderConfig) *viewe
 // this local tool wants.
 func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead &&
-		!(r.Method == http.MethodPost && r.URL.Path == "/api/mermaid") {
+		!(r.Method == http.MethodPost && (r.URL.Path == "/api/mermaid" || r.URL.Path == "/api/retry")) {
 		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "只读服务：仅支持 GET/HEAD（/api/mermaid 接受 POST）", http.StatusMethodNotAllowed)
+		http.Error(w, "只读服务：仅支持 GET/HEAD（/api/mermaid、/api/retry 接受 POST）", http.StatusMethodNotAllowed)
 		return
 	}
 	p := r.URL.Path
@@ -317,6 +332,9 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		v.serveImg2TextProgress(w)
 	case p == "/api/mermaid":
 		v.serveMermaid(w, r)
+	case p == "/api/retry":
+		// P53：页面上的「重试这一章」只往 work/retry/ 排队，不执行命令。
+		v.serveRetry(w, r)
 	case strings.HasPrefix(p, "/media/"), strings.HasPrefix(p, "/file/"):
 		v.serveFile(w, r)
 	default:
@@ -346,6 +364,9 @@ type indexResponse struct {
 	// DedupeReviews 是"有复查页可看"的项目名（T154）：侧栏据此在整组核验
 	// 阶段行上决定要不要挂按钮，不猜文件在不在。
 	DedupeReviews []string `json:"dedupeReviews,omitempty"`
+	// Retries 是每个项目当前排队的重试点（P53）：章节行据此显示「待重试」，
+	// 处理掉之后自动消失。
+	Retries map[string][]string `json:"retries,omitempty"`
 }
 
 func (v *viewerServer) serveIndex(w http.ResponseWriter) {
@@ -362,6 +383,7 @@ func (v *viewerServer) serveIndex(w http.ResponseWriter) {
 		Generated:     time.Now().Format(time.RFC3339),
 		Sessions:      sessions,
 		DedupeReviews: v.dedupeReviewProjects(sessions),
+		Retries:       v.pendingRetries(sessions),
 	})
 }
 

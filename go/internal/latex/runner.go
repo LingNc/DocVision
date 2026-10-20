@@ -222,6 +222,16 @@ type Runner struct {
 	// (compact mode) the convert phase shows a single [convert k/N]
 	// progress line instead of streaming every session event.
 	consoleVerbose bool
+
+	// onlyChapters 是 `--only` 指定的章节（P53）：只跑这些章，并且每一章都
+	// 强制重转（归档旧尝试、分配新尝试号）。
+	onlyChapters map[string]bool
+	// retryAttempt 记录"这一章这一次要写第几号尝试"（P53）：由 --only 或网页
+	// 重试队列在批次开始前填好，convertOneChapter 读它决定转录文件名。
+	// 只在批次之间写、批次内部只读，所以不需要锁。
+	retryAttempt map[string]int
+	// retryNotes 是重试原因（写进新尝试的转录，事后对得上）。
+	retryNotes map[string]string
 }
 
 // phaseNote returns a console printer for phase-level progress notes.

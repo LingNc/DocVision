@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
 import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chainMemberTag, plainTitle } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
+import { applyIndex, chapterPendingRetry } from '../src/data'
 
 beforeEach(() => {
   state.collapsed = {}
@@ -252,5 +253,18 @@ describe('章节状态文案', () => {
     expect(chapterActivityLabel('interrupted')).toBe('已中断')
     expect(chapterActivityLabel(undefined, 'convert', '', false)).toBe('')
     expect(chapterActivityLabel(undefined, 'convert', '', true)).toBe('运行中')
+  })
+})
+
+// P53：/api/index 的 retries → state.retries，章节行据此显示「待重试」。
+describe('重试队列的状态', () => {
+  it('按项目区分，消费掉就消失', () => {
+    applyIndex({ sessions: [], retries: { 书A: ['chapter_002'] } })
+    expect(chapterPendingRetry('书A', 'chapter_002')).toBe(true)
+    expect(chapterPendingRetry('书A', 'chapter_003')).toBe(false)
+    expect(chapterPendingRetry('书B', 'chapter_002')).toBe(false)
+
+    applyIndex({ sessions: [] })
+    expect(chapterPendingRetry('书A', 'chapter_002')).toBe(false)
   })
 })

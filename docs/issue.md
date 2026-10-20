@@ -1102,3 +1102,8 @@ user 轮
   问题：① 转换会话的最后一次活动一直停在 `checking_result`，而反馈轮（checker 打回后同一会话重转换）**不写任何状态**，所以整段重转换期间那一行都显示"转换完成待核对"；② 即使核对已经给出结论，转换行也不看它——两行各说各的。
   改：① 反馈轮补 `queued` → 取槽 → `running` → 跑完再写 `checking_result`（与首次转换一致，UI 因此能看到"等待重转换槽/运行中"）；② `chapterActivityLabel(state, role, peerVerdict, live)` 增加同一行另一角色的结论：转换行在 `checking_result` 且核对为 `issues` → 「核对发现问题」、核对为 `pass` → 「已通过」、核对还在排队/运行（没有结论）→ 仍「转换完成待核对」；`queued` + 有结论 → 「核对完成待并发槽」（T178 规则保留）。
   验证：`chapter-tree.spec.ts` 的文案用例改为新签名并补 3 条（issues/pass/在跑三种 peer 状态）；`npm test` 159 通过、dist 已重建、`go build` + `go test ./internal/latex/` 绿。
+
+[X][ ] T182. 实现 P53（手动重试）时发现：`archiveChapterAttempt` 把失败的尝试挪进 `work/attempts/<章>/try<N>/` 时**没有挪 `report.md`**——旧尝试在 `work/reports/<章>.md` 的报告就留在原地，新尝试下一次写同一路径时把它静默覆盖，"留档"实际上只留了产物、没留当时的说法。
+  改：归档时连同 `report.md` 一起挪进 try 目录（`<章>.report.md`），报告与 `.tex`/分片/`work`/`result`/`integrated-stage` 一致地按尝试留档。
+  影响面：所有会开新尝试的路径（checker 轮次用尽主动作废、`--only` / 网页重试），旧的 try 目录里从此有 `report.md`，新报告不再覆盖上一份。
+  验证：`retry_test.go` 断言 `work/attempts/<章>/try1/<章>.report.md` 存在；`go test ./internal/latex/` 绿。

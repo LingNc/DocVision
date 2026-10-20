@@ -10,6 +10,7 @@ import InlineMD from './InlineMD.vue'
 import MachineText from './MachineText.vue'
 import MdBody from './MdBody.vue'
 import CopyBtn from './CopyBtn.vue'
+import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
 import ImageStrip from './ImageStrip.vue'
 
 const kvRows = computed(() => sessionKVRows())
@@ -32,6 +33,36 @@ function onMetaToggle(ev: Event) {
   metaOpen.value = open
   storeSet(m.key, open ? '1' : '0')
 }
+
+/* P53：手动重试入口。只在"章节转换会话"上给按钮——重跑一章是干净的
+ * （每章自己的转录与产物），而样式/汇编/整组核验是屏障阶段，重跑它们不是
+ * 一回事，这里不提供。 */
+const retryTarget = computed(() => {
+  const s: any = state.current
+  if (!s || !s.chapterId || s.chapterRole !== 'convert' || !s.project) return null
+  return { project: String(s.project), chapter: String(s.chapterId) }
+})
+const retryPending = computed(() => {
+  const t = retryTarget.value
+  return !!t && chapterPendingRetry(t.project, t.chapter)
+})
+
+function doRetry(): void {
+  const t = retryTarget.value
+  if (!t) return
+  state.retryNote = '正在提交 ' + t.chapter + ' 的重试请求…'
+  requestChapterRetry(t.project, t.chapter, '详情栏重试')
+    .then((res: any) => {
+      state.retryNote = t.chapter + ' 已加入重试队列（' + ((res && res.note) || '等待转换阶段处理') + '）'
+      return refreshIndex()
+    })
+    .catch((err: any) => {
+      state.retryNote = t.chapter + ' 重试请求失败：' + ((err && err.message) || err)
+    })
+}
+
+/* 切会话时清掉上一章的反馈，免得看着像这一章的。 */
+watch(() => state.current && state.current.id, () => { state.retryNote = '' })
 
 const countTip = computed(() =>
   meta.value?.countNote ? META_COUNT_TIP.replace('{n}', meta.value.countNote.replace(/^共 (\d+) 条.*$/, '$1')) : '',
@@ -91,6 +122,18 @@ function closeTrajStep() {
           </template>
         </dl>
         <div v-if="subPath" class="stats-sub">目录：{{ subPath }}</div>
+      </section>
+
+      <section v-if="retryTarget && !state.staticMode" class="detail-block">
+        <h3 class="detail-block-title">手动重试</h3>
+        <div class="retry-hint">
+          重跑这一章会开一个<b>新尝试</b>：旧的整棵留档在工作区的 work/attempts/，预览页「历史」里两条都在。
+          请求只写进项目的 work/retry/ 队列——正在跑的 latex 会在转换阶段的安全点处理，没在跑就留到下次启动。
+        </div>
+        <button class="retry-btn" type="button" :disabled="retryPending" @click="doRetry">
+          {{ retryPending ? '已在重试队列' : '重试这一章' }}
+        </button>
+        <div v-if="state.retryNote" class="retry-note">{{ state.retryNote }}</div>
       </section>
 
       <section v-if="stats" class="detail-block">
@@ -351,4 +394,9 @@ function closeTrajStep() {
 .prompt-md {
  font-size: 12.5px; line-height: 20px; color: var(--muted); 
 }
+.retry-hint { color: var(--muted, #6e7781); font-size: 12px; line-height: 18px; margin-bottom: 8px; }
+.retry-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border, #d0d7de); border-radius: 6px; background: var(--bg, #fff); cursor: pointer; }
+.retry-btn:hover:not(:disabled) { background: var(--hover, #f3f4f6); }
+.retry-btn:disabled { opacity: .6; cursor: default; }
+.retry-note { margin-top: 6px; font-size: 12px; color: var(--muted, #6e7781); }
 </style>

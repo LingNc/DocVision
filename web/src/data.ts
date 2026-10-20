@@ -34,6 +34,7 @@ export function revealProject(project: string): void {
 export function applyIndex(payload: any): void {
   state.sessions = payload.sessions || []
   state.dedupeReviews = payload.dedupeReviews || []
+  state.retries = payload.retries || {}
   state.root = payload.root || state.root
   state.generated = payload.generated || state.generated
   // Vue 的响应式列表会做 keyed 更新：签名没变时算出的 groups 不变，DOM 不动；
@@ -222,4 +223,26 @@ export function bootData(): void {
       selectSession((live || state.sessions[0]).id)
     }
   })
+}
+
+// requestChapterRetry 是页面上「重试这一章」的落点（P53）：只往项目的
+// work/retry/ 排一个请求文件，不执行任何命令。正在跑的 docvision latex 会在
+// 转换阶段的安全点消费它；没在跑就留到下次启动。
+export function requestChapterRetry(project: string, chapter: string, reason = ''): Promise<any> {
+  return fetch('/api/retry', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project, chapter, reason }),
+  }).then(async (res) => {
+    const text = await res.text()
+    if (!res.ok) throw new Error(text.trim() || 'HTTP ' + res.status)
+    return text ? JSON.parse(text) : {}
+  })
+}
+
+// chapterPendingRetry 报告某项目的某章是否已经在重试队列里（侧栏/详情栏据此
+// 改文案，避免用户连点）。
+export function chapterPendingRetry(project: string, chapter: string): boolean {
+  const list = (state.retries || {})[project] || []
+  return list.indexOf(chapter) >= 0
 }

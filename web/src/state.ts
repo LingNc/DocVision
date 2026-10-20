@@ -108,6 +108,11 @@ export const state = reactive({
   // T154：有 dedupe 复查页的项目名（/dedupe?project=… 可打开），侧栏整组核验
   // 阶段行的「复查」按钮据此显隐；不参与列表签名，按钮出现不影响侧栏重建。
   dedupeReviews: [] as string[],
+  // P53：每个项目当前排队的重试章节（/api/index 的 retries），章节行据此显示
+  // 「待重试」。不参与列表签名：它变化只影响一个角标，不该重建侧栏。
+  retries: {} as Record<string, string[]>,
+  // P53：最近一次「重试」请求的反馈（成功/失败一行字），显示在按钮旁边。
+  retryNote: '',
   current: null as Session | null,
   lines: [] as Line[],
   nextFrom: 0,

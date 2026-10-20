@@ -77,6 +77,15 @@ func newLatexCmd() *cobra.Command {
            成功后进入终审会话逐页核对成品 PDF 并整理，最后写 standalone.tex；
            交付把整棵 build 树复制到 out/（book.pdf = main.pdf 别名）
 
+单章重跑（P53）——某一章看着不对，不用重跑整本书：
+  docvision latex --only chapter_002        只重跑这一章，并开一个新的尝试号
+  docvision latex --only chapter_002,chapter_005
+  旧的尝试整棵留档在工作区的 work/attempts/<章>/try<N>/，新尝试写
+  convert_<章>.try<N+1>.jsonl，预览页的「历史」里两条都在。
+  同样的重试也可以从预览页点出来（章节行 / 详情栏的「重试这一章」）：
+  页面只往 <项目>/work/retry/ 写一个请求文件，正在跑的 latex 在转换阶段的
+  安全点处理它；没在跑就留到下次启动——按下那一下不会白点。
+
 矢量图重画完成后可以再做一次**逐图校验**（latex.figure_check.enabled，默认关闭）：
 用一个能看图的模型把"重画图 ↔ 原图"比一遍，不一致就把问题打回**同一个**作图
 会话继续修（最多 latex.figure_check.max_rounds 轮），仍不合格则记警告照常交付。
@@ -115,6 +124,18 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 			seed, _ := cmd.Flags().GetString("seed")
 			sourceDir, _ := cmd.Flags().GetString("source-dir")
 			project, _ := cmd.Flags().GetString("project")
+			onlyRaw, _ := cmd.Flags().GetString("only")
+			var only []string
+			for _, part := range strings.Split(onlyRaw, ",") {
+				if part = strings.TrimSpace(part); part != "" {
+					only = append(only, part)
+				}
+			}
+			if len(only) > 0 && step == "" {
+				// 重试一章只可能在转换阶段发生：不给 --step 就默认只跑 convert，
+				// 免得用户为了让 --only 生效还要多写一个参数。
+				step = "convert"
+			}
 
 			// 输入约定：与 workflow 相同——源头是 paths.input_dir（files/）。
 			// - 无参数：像 workflow 一样跑前置（split→mineru→organize，
@@ -145,6 +166,7 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 					Step: step, SourceDir: sourceDir, Restart: false,
 					TestMode: testMode, Number: number, Seed: seed,
 					Files: selected, Verbose: verbose, Project: project,
+					Only: only,
 				}); err != nil {
 					return err
 				}
@@ -189,6 +211,7 @@ project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools
 	}
 	cmd.Flags().Int("level", 0, "覆盖配置的档位（1=全书 LaTeX，2=图片矢量化）")
 	cmd.Flags().String("step", "", "仅运行指定阶段（档位2: classify|process；档位1: images|style|chapters|convert|assemble）")
+	cmd.Flags().String("only", "", "只重跑这些章节（逗号分隔的章节名，如 chapter_002,chapter_005）：每章开一个新的尝试号，旧尝试留档进 work/attempts/；不给 --step 时自动只跑 convert")
 	cmd.Flags().Bool("test", false, "测试模式（随机抽样图片）")
 	cmd.Flags().Int("number", 10, "测试图片数量")
 	cmd.Flags().String("seed", "", "随机种子")

@@ -90,6 +90,7 @@ docvision latex
 docvision latex --level 1 书.pdf               # 档位1 全书转换
 docvision latex --level 2 --test --number 5    # 抽样测试
 docvision latex --level 1 --step style 书.md   # 仅某个阶段
+docvision latex --only chapter_002             # 单章重跑（开新尝试，旧尝试留档；自动只跑 convert）
 #   --step 取值：档位1 images|style|chapters|convert|assemble；档位2 classify|process
 docvision latex --source-dir 其它md目录 书.md  # 覆盖输入 markdown 目录（paths.output_dir）
 docvision latex --all                          # 日志分析汇总全部历史
@@ -117,6 +118,34 @@ docvision verify --project 概率论-2026         # 多项目时指定核对哪�
 > ```
 
 `docvision verify` 也按项目工作区定位：`--project <名字>` 显式指定；不指定时，输出根本身是旧版单项目工程就用它，否则用其中**唯一**的子项目（有多个会报错并列出名字，避免核对错书）。默认读写的 `progress_items/` 与 `verify_report.md` 都在该项目工作区内。
+
+### 单章重试（手动重跑）
+
+某一章转得不对（缺内容、公式错、图丢了），不必重跑整本书：
+
+```bash
+docvision latex --only chapter_002                      # 只重跑这一章
+docvision latex --only chapter_002,chapter_005           # 一次重跑几章
+docvision latex --only chapter_004_child_01 --project 概率论-2026
+```
+
+`--only` 不指定 `--step` 时自动只跑 `convert`（重试一章只可能发生在转换阶段）。
+语义只有一条：**重试 = 这一章开一个新尝试**。
+
+- 旧的尝试整棵挪进 `<项目>/work/attempts/<章>/try<N>/`（含已提交的 `.tex`、分片、`work/`、`result/`、`integrated-stage/`、旧 `report.md`，问题清单写 `checker-issues.md`），**不删**；
+- 新会话写 `convert_<章>.try<N+1>.jsonl`，转录里记一条 `t=meta kind=manual_retry`（原因 + 尝试号），预览页的「历史 N」里两条都在、能来回切；
+- 提交过的 `<章>.tex` 会被移走，否则转换阶段会按「已有产物，跳过」直接略过这一章。
+
+粒度是**顶层章节**：细分出来的子章节（`chapter_003_child_01`）不单独重试——它由父章节的细分树产出，重跑它得连同父节点的整合一起走，直接重试父章节即可（`--only` 点名子章节会明确报错）。
+
+单章重试**只做转换这一层**：不进样式反馈回路（那会拿全书报告改 cls、再分块重转整本书，是"整书重跑"该做的决定），也不会自动重跑 `assemble`——想在整书 PDF 里看新章，再跑一次 `docvision latex --step assemble`。
+
+同样的重试也可以从预览页点出来（章节行悬浮出的 ↻、右侧详情栏的「重试这一章」）。预览页是**只读观察者**，所以按钮不执行命令，只往 `<项目>/work/retry/` 写一个请求文件：
+
+- 正在跑的 `docvision latex` 在转换阶段的安全点消费它（每批章节跑完再补最多两轮），排上之后章节行显示「待重试」；
+- 进程没在跑时请求留在磁盘上，下次启动先处理——按下那一下不会白点；
+- 处理完请求文件改名成 `.done.json` 留档；同一章排队多条也只重跑一次；
+- 想完全关掉这个写入口，用 `docvision sessions --no-retry`。
 
 需要本地 LaTeX 工具链：TeX 发行版（xelatex）+ poppler-utils（pdftoppm）。全书多文件构建优先用 `latexmk`（缺失时退回两遍编译）；矢量图转 SVG 按 `dvisvgm → pdftocairo → mutool → inkscape` 依次尝试，任一可用即可；会话 bash 沙箱用 bubblewrap（缺失时自动回退普通 shell 并记警告）。`docvision init` 会自动检查 xelatex / pdftoppm / mmdc 并给出安装提示。
 

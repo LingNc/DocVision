@@ -35,6 +35,11 @@ type BookOptions struct {
 	Seed     string
 	// Files selects specific markdown files (empty = all).
 	Files []string
+	// Only limits the convert phase to these chapters (base names, without
+	// ".md") and FORCES each of them to be re-converted as a new attempt
+	// (P53: the old attempt is archived under work/attempts/, the new one
+	// gets the next attempt number, so the preview page's history shows both).
+	Only []string
 	// Verbose keeps per-phase detail output on the console (session
 	// rounds, tool calls, compile results). Default (false) shows one
 	// compact progress line per phase — like the level-2 process line —
@@ -169,6 +174,9 @@ var classNameRe = regexp.MustCompile(`\\ProvidesClass\{([^}]*)\}`)
 //  5. assemble  : main.tex + full-book compile (+ fix session) + standalone.tex
 func (r *Runner) RunBook(opts BookOptions) error {
 	cfg := r.cfg
+	if len(opts.Only) > 0 {
+		r.SetOnlyChapters(opts.Only)
+	}
 	// 项目根只在这里决定一次：<paths.latex_project>/<项目名>/（项目名
 	// 默认取本书主题名，可用 --project 覆盖），或者——当输出根本身已是
 	// 一个工程（旧版单项目布局）且未指定 --project——继续沿用输出根。
@@ -263,7 +271,10 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		// images 阶段不做 phase 级跳过：RunImages 自身就是增量的
 		// （done 跳过、fallback 重试），phase 级 done 标记会让上次
 		// 失败（fallback）的图片永远得不到重试。
-		if name != "images" && prog2Field(prog, name) == "done" && !opts.Restart && opts.Step == "" {
+		// P53：--only 或者队列里还有重试请求时，convert 阶段即使标了 done 也
+		// 必须再跑一遍——否则用户点的"重试"要等到下次全书重跑才生效。
+		forceConvert := name == "convert" && (len(opts.Only) > 0 || r.hasPendingRetry(proj))
+		if name != "images" && !forceConvert && prog2Field(prog, name) == "done" && !opts.Restart && opts.Step == "" {
 			// T85：assemble 标 done 但上次终审其实**中断**（失败也照常交付
 			// 的语义会写下 done）——中断态仍与当前工作区一致时不能跳过，
 			// 要重跑 assemble 把终审续上。
@@ -856,21 +867,11 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 // phase: convert (concurrent per-chapter sessions)
 // ------------------------------------------------------------------
 
-func (r *Runner) convertPhase(proj string, fbRound int) error {
-	clsName := classNameOfFile(filepath.Join(proj, "style"))
-	if clsName == "" {
-		return fmt.Errorf("未找到样式 cls（style 阶段未完成？）")
-	}
-	manualPath := filepath.Join(proj, "style", "manual.md")
-	chapDir := filepath.Join(proj, "chapters")
-	workDir := filepath.Join(proj, "work")
-
-	chapters, err := filepath.Glob(filepath.Join(chapDir, "chapter_*.md"))
-	if err != nil || len(chapters) == 0 {
-		return fmt.Errorf("没有章节文件可转换")
-	}
-	sort.Strings(chapters)
-
+// convertChapterBatch 并发转换一批章节，返回失败摘要。
+//
+// 抽成方法是为了 P53 的"补轮"：一轮跑完之后可能又有新的重试请求进来，要用
+// 同一套并发槽位、进度行与失败汇总再跑一批——复制第二份循环迟早会走岔。
+func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) []string {
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
 		conc = 3
@@ -886,10 +887,6 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 	// Compact console progress, mirroring the level-2 [process k/N] line.
 	// Details stay in the log file; the console only shows the counter.
 	verbose := r.consoleVerbose
-	label := "[convert]"
-	if fbRound > 0 {
-		label = fmt.Sprintf("[convert#%d]", fbRound+1)
-	}
 	r.phaseNote()("%s %d 章，并发 %d", label, len(chapters), conc)
 	// 并发数同时进日志文件：控制台进度行不进日志，事后看日志无法判断
 	// 当时跑了几个会话（所有阶段共用 latex.concurrency）。
@@ -946,10 +943,78 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 	}
 	wg.Wait()
 	progLive.Close()
-	if len(failures) > 0 {
-		return fmt.Errorf("%d 个章节转换失败: %s", len(failures), strings.Join(failures, "; "))
+
+	return failures
+}
+
+func (r *Runner) convertPhase(proj string, fbRound int) error {
+	clsName := classNameOfFile(filepath.Join(proj, "style"))
+	if clsName == "" {
+		return fmt.Errorf("未找到样式 cls（style 阶段未完成？）")
 	}
-	r.log.Log(0, label, "全部", strconv.Itoa(len(chapters)), "章转换完成")
+	manualPath := filepath.Join(proj, "style", "manual.md")
+	chapDir := filepath.Join(proj, "chapters")
+	workDir := filepath.Join(proj, "work")
+
+	chapters, err := filepath.Glob(filepath.Join(chapDir, "chapter_*.md"))
+	if err != nil || len(chapters) == 0 {
+		return fmt.Errorf("没有章节文件可转换")
+	}
+	sort.Strings(chapters)
+
+	label := "[convert]"
+	if fbRound > 0 {
+		label = fmt.Sprintf("[convert#%d]", fbRound+1)
+	}
+	// P53：--only（命令行）与网页的重试队列都先走这一步——归档旧尝试、
+	// 分配新尝试号、把提交过的 .tex 挪走，之后它才会被真正重转。
+	targets := chapters
+	retryOnly := false
+	if len(r.onlyChapters) > 0 {
+		targets = selectOnlyChapters(chapters, r.onlyChapters)
+		if len(targets) == 0 {
+			return fmt.Errorf("--only 指定的章节一个都不存在: %s（子章节不单独重跑，请点它所属的顶层章节）", strings.Join(r.onlyChapterList(), ", "))
+		}
+		retryOnly = true
+		for _, p := range targets {
+			base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+			r.forceChapterRetry(proj, base, "命令行 --only")
+		}
+	} else if bases := r.prepareRetries(proj); len(bases) > 0 {
+		targets = selectOnlyChapters(chapters, basesToSet(bases))
+		retryOnly = true
+	}
+	if len(targets) == 0 {
+		r.log.Log(0, "[convert]", "没有要转换的章节（--only / 重试队列为空）")
+		return nil
+	}
+	if fails := r.convertChapterBatch(proj, clsName, manualPath, workDir, targets, label); len(fails) > 0 {
+		return fmt.Errorf("%d 个章节转换失败: %s", len(fails), strings.Join(fails, "; "))
+	}
+	// 转换阶段跑着的时候用户可能又点了重试：这一批跑完再补最多两轮，
+	// 不用等到下次启动。
+	for pass := 0; pass < 2; pass++ {
+		bases := r.prepareRetries(proj)
+		if len(bases) == 0 {
+			break
+		}
+		more := selectOnlyChapters(chapters, basesToSet(bases))
+		if len(more) == 0 {
+			break
+		}
+		r.log.Log(0, label, "补一轮手动重试:", strings.Join(bases, ", "))
+		if fails := r.convertChapterBatch(proj, clsName, manualPath, workDir, more, label); len(fails) > 0 {
+			return fmt.Errorf("%d 个章节转换失败: %s", len(fails), strings.Join(fails, "; "))
+		}
+	}
+	r.log.Log(0, label, "全部", strconv.Itoa(len(targets)), "章转换完成")
+	if retryOnly {
+		// 手动重试只补那几章：样式反馈回路会拿全书的报告去改 cls、再分块重转
+		// 整本书——那是"整书重跑"该做的决定，不能由一次单章重试顺手触发。
+		r.log.Log(0, label, "手动重试不回灌样式反馈（整书重跑时它才会介入）")
+		r.log.Log(0, label, "这一轮只重转了", strconv.Itoa(len(targets)), "章；要更新整书 PDF 请再跑一次 --step assemble")
+		return nil
+	}
 	// 样式反馈回路：多数章节汇报 cls/手册问题 → 打回原样式会话修正
 	// 后，用全新上下文重新并发转换。
 	return r.styleFeedbackLoop(proj, fbRound)
@@ -1274,6 +1339,10 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		SubmitRoot:     filepath.Join(workDir, "chapters"),
 		ReportPath:     filepath.Join(workDir, "reports", base+".md"),
 	}
+	// P53：--only / 网页重试队列给这一章分配了新尝试号，覆盖"按磁盘推导"。
+	if n := r.retryAttemptOf(base); n > 0 {
+		node.AttemptNum = n
+	}
 	return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, retry, node)
 }
 
@@ -1468,6 +1537,12 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
+	}
+	// P53：这一条尝试是人手动要求重跑的——记下原因，事后在转录/轨迹里能对上。
+	if reason, ok := r.retryNotes[base]; ok && node.Depth == 0 {
+		_ = sess.AppendTranscriptNote("manual_retry", map[string]any{
+			"reason": reason, "attempt": node.AttemptNum,
+		})
 	}
 
 	// T93：首条消息不再内联章节前 2000 字符——该 md 本就是会话第一步
@@ -1726,6 +1801,8 @@ func (r *Runner) archiveChapterAttempt(proj, base string, node chapterNodeConfig
 	move(filepath.Join(node.NodeRoot, "integrated-stage"), "integrated-stage")
 	move(texPath, base+".tex")
 	move(filepath.Join(node.SubmitRoot, base), base)
+	// 旧报告也一起留档：新尝试会写同一路径，不挪走就等于被悄悄覆盖。
+	move(node.ReportPath, base+".report.md")
 	if issues != "" {
 		_ = os.WriteFile(filepath.Join(dst, "checker-issues.md"), []byte(issues), 0o644)
 	}
