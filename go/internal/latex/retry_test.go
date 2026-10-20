@@ -315,3 +315,61 @@ func TestContinueTextScoped(t *testing.T) {
 		t.Fatalf("清空后 = %q", got)
 	}
 }
+
+// 从某条记录之后继续（P2）：前 from 行抄成新尝试，后面的轮次丢掉，源转录不动。
+func TestTruncateChapterTranscript(t *testing.T) {
+	proj := t.TempDir()
+	dir := filepath.Join(proj, "work", "sessions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "convert_chapter_002.jsonl")
+	body := `{"ts":"1","t":"meta","kind":"system"}
+{"ts":"2","t":"msg","role":"user","content":"先做这件事"}
+{"ts":"3","t":"msg","role":"assistant","content":"好"}
+{"ts":"4","t":"usage","kind":"request"}
+{"ts":"5","t":"msg","role":"user","content":"从这里开始跑飞了"}
+{"ts":"6","t":"msg","role":"assistant","content":"乱改一通"}
+`
+	if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := testRunner(t, true)
+	dst, next, err := r.truncateChapterTranscript(proj, "chapter_002", "convert_chapter_002.jsonl", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != 2 || filepath.Base(dst) != "convert_chapter_002.try2.jsonl" {
+		t.Fatalf("新尝试 = %s (号 %d)", filepath.Base(dst), next)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("新转录应只留 3 行, got %d: %q", len(lines), string(data))
+	}
+	// 源转录一个字不动（原记录还留在「历史」里）。
+	keep, _ := os.ReadFile(src)
+	if string(keep) != body {
+		t.Fatal("源转录被改动了")
+	}
+	// 再切一次：继续往上递增，不覆盖上一次。
+	if _, next2, err := r.truncateChapterTranscript(proj, "chapter_002", "convert_chapter_002.jsonl", 2); err != nil || next2 != 3 {
+		t.Fatalf("第二次截断 = %d (%v), want 3", next2, err)
+	}
+	// 切在用量行 / 超出范围 / 非法文件名都要拒绝。
+	if _, _, err := r.truncateChapterTranscript(proj, "chapter_002", "convert_chapter_002.jsonl", 4); err == nil {
+		t.Fatal("切在用量行应拒绝")
+	}
+	if _, _, err := r.truncateChapterTranscript(proj, "chapter_002", "convert_chapter_002.jsonl", 99); err == nil {
+		t.Fatal("超出范围应拒绝")
+	}
+	if _, _, err := r.truncateChapterTranscript(proj, "chapter_002", "../x.jsonl", 1); err != nil {
+		// "../x.jsonl" 会被 Base 成 x.jsonl，读不到 → 报错，这是期望行为
+		if !strings.Contains(err.Error(), "读不到") {
+			t.Fatalf("应报读不到, got %v", err)
+		}
+	}
+}

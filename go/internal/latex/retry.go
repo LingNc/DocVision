@@ -526,6 +526,12 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 			r.log.LogInfo(0, "[checker]", base, "重新核对的结论:", issues)
 		}
 	case "continue":
+		if req.From > 0 {
+			if err := r.continueFromChapter(proj, base, req.Path, req.From); err != nil {
+				r.log.LogWarning(0, "[convert]", base, "从记录继续失败:", err)
+			}
+			return
+		}
 		if err := r.continueChapter(proj, base, reason); err != nil {
 			r.log.LogWarning(0, "[convert]", base, "继续跑失败:", err)
 		}
@@ -566,3 +572,77 @@ func (r *Runner) continueChapter(proj, base, reason string) error {
 
 // continueChapterPrompt 是"继续跑"递给会话的原话。
 const continueChapterPrompt = "Re-read your workspace as it is NOW (read_file), then finish the job: fix whatever is still wrong, compile until clean, and submit the two paths again. Do not restart from scratch and do not ignore work you already did."
+
+// continueFromChapter 从转录的第 from 条记录之后继续（P2 的"从某个错误的地方
+// 开始"）：把前 from 行抄成**一条新尝试**，后面的轮次丢掉，然后让它接着干。
+//
+// 源转录一个字不动——原记录还在「历史」里，看得见、也删得掉。这样"回滚到某一
+// 步"不会毁掉现场，只是多出一条从那儿分叉出去的尝试。
+//
+// 一个诚实的限制：只回滚**对话**，工作区还是最后一次的样子（没有按轮次快照
+// 文件树）。所以它适合"模型从那一步开始跑飞、后面几轮全在乱改"的情形；若
+// 要连文件一起回滚，那是另一次重转（重试）该做的事。
+func (r *Runner) continueFromChapter(proj, base, srcName string, from int) error {
+	dst, next, err := r.truncateChapterTranscript(proj, base, srcName, from)
+	if err != nil {
+		return err
+	}
+	if r.retryAttempt == nil {
+		r.retryAttempt = map[string]int{}
+	}
+	r.retryAttempt[base] = next
+	text := fmt.Sprintf("The user rolled this chapter back to record #%d of %s and asked you to continue from there. "+
+		"Everything after that record is GONE from your history — do not assume work you may have done later still applies: "+
+		"%s", from, filepath.Base(dst), continueChapterPrompt)
+	r.setContinueText(base, text)
+	defer r.setContinueText(base, "")
+	r.log.Log(0, "[convert]", base, "从第", strconv.Itoa(from), "条记录继续：新尝试写",
+		filepath.Base(dst), "（源转录保留）")
+	return r.convertChapterNow(proj, base, "") // continueText 已经塞好
+}
+
+// truncateChapterTranscript 是 continueFromChapter 的纯文件部分：把前 from 行
+// 抄成一条新尝试的转录，返回新文件与它的尝试号。源转录一个字不动。
+func (r *Runner) truncateChapterTranscript(proj, base, srcName string, from int) (string, int, error) {
+	if from < 1 {
+		return "", 0, fmt.Errorf("截断点必须 ≥ 1（转录里的行号）")
+	}
+	name := filepath.Base(strings.TrimSpace(srcName))
+	if name == "" || !strings.HasSuffix(name, ".jsonl") {
+		return "", 0, fmt.Errorf("源转录不合法: %q", srcName)
+	}
+	dir := filepath.Join(proj, "work", "sessions")
+	src := filepath.Join(dir, name)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", 0, fmt.Errorf("读不到源转录 %s: %w", name, err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if from > len(lines) {
+		return "", 0, fmt.Errorf("截断点 %d 超出转录长度 %d", from, len(lines))
+	}
+	// 只能切在消息行上：meta/usage 行不进消息流，切在那儿等于没切。
+	var probe struct {
+		T string `json:"t"`
+	}
+	if err := json.Unmarshal([]byte(lines[from-1]), &probe); err != nil || probe.T != "msg" {
+		return "", 0, fmt.Errorf("第 %d 行不是一条消息记录（选了用量/元信息行？）", from)
+	}
+	baseTr := filepath.Join(dir, "convert_"+base+".jsonl")
+	next := 1
+	for n := 1; n <= 999; n++ {
+		if !fileExists(attemptTranscriptPath(baseTr, n)) {
+			next = n
+			break
+		}
+	}
+	if prev := r.retryAttemptOf(base); prev >= next {
+		next = prev + 1
+	}
+	dst := attemptTranscriptPath(baseTr, next)
+	head := strings.Join(lines[:from], "\n") + "\n"
+	if err := os.WriteFile(dst, []byte(head), 0o644); err != nil {
+		return "", 0, fmt.Errorf("写新尝试的转录失败: %w", err)
+	}
+	return dst, next, nil
+}

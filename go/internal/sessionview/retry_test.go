@@ -220,3 +220,39 @@ func TestPostDropRejections(t *testing.T) {
 		t.Fatalf("关掉写入口应 403, status = %d", rec.Code)
 	}
 }
+
+// 「从第几条记录之后继续」：范围与角色都要校验，合法时把 from/path 带进队列。
+func TestPostRetryFromRecord(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	sess := filepath.Join(proj, "work", "sessions")
+	if err := os.MkdirAll(sess, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "{\"t\":\"msg\"}\n{\"t\":\"msg\"}\n{\"t\":\"msg\"}\n"
+	if err := os.WriteFile(filepath.Join(sess, "convert_chapter_002.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 只有「继续跑」能带 from。
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"convert","from":2,"path":"convert_chapter_002.jsonl"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("convert 带 from 应 400, status = %d", rec.Code)
+	}
+	// 超出范围 / 不是转录 / 源文件不存在。
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"continue","from":9,"path":"convert_chapter_002.jsonl"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("超出范围应 400, status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"continue","from":2,"path":"chapter_002.md"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("非转录应 400, status = %d", rec.Code)
+	}
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"continue","from":2,"path":"convert_chapter_009.jsonl"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("源不存在应 404, status = %d", rec.Code)
+	}
+	rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"continue","from":2,"path":"convert_chapter_002.jsonl"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	pending := retryq.Pending(proj)
+	// File.Path 是队列文件自己的路径，请求里的 Path 在 Request 上（名字撞了）。
+	if len(pending) != 1 || pending[0].From != 2 || pending[0].Request.Path != "convert_chapter_002.jsonl" {
+		t.Fatalf("队列 = %+v", pending)
+	}
+}

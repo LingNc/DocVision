@@ -1061,10 +1061,10 @@ to { transform: rotate(360deg);
 }
 
 /* ============================ 轨迹（DSH Trajectory 的表） ============================ */
-.trajectory[data-v-54a24f80] {
+.trajectory[data-v-1400a4e6] {
  flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
 }
-.traj-toolbar[data-v-54a24f80] {
+.traj-toolbar[data-v-1400a4e6] {
   flex: none;
   position: sticky;
   top: 0;
@@ -1073,13 +1073,25 @@ to { transform: rotate(360deg);
   border-bottom: .5px solid var(--border);
   background: var(--bg);
 }
-.traj-toolbar-inner[data-v-54a24f80] {
+.traj-toolbar-inner[data-v-1400a4e6] {
  display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 12px;
 }
-.traj-filters[data-v-54a24f80] {
+.traj-filters[data-v-1400a4e6] {
  display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: hidden;
 }
-.traj-chip[data-v-54a24f80] {
+.traj-cut[data-v-1400a4e6] {
+  border: 0; background: transparent; color: var(--dim); cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 0 2px; opacity: 0;
+}
+.traj-row:hover .traj-cut[data-v-1400a4e6] { opacity: 1;
+}
+.traj-cut[data-v-1400a4e6]:hover { color: var(--accent, #2563eb);
+}
+.traj-note[data-v-1400a4e6] {
+  flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--dim); font-size: 12px;
+}
+.traj-chip[data-v-1400a4e6] {
   flex: none;
   height: 20px;
   padding: 0 7px;
@@ -1095,22 +1107,22 @@ to { transform: rotate(360deg);
   align-items: center;
   gap: 4px;
 }
-.traj-chip[data-v-54a24f80]:hover {
+.traj-chip[data-v-1400a4e6]:hover {
  color: var(--text); background: var(--hover);
 }
-.traj-chip[aria-pressed="true"][data-v-54a24f80] {
+.traj-chip[aria-pressed="true"][data-v-1400a4e6] {
  color: var(--accent); background: var(--accent-soft);
 }
-.traj-count[data-v-54a24f80] {
+.traj-count[data-v-1400a4e6] {
  flex: none; margin-left: auto; color: var(--caption); font-size: 12px; font-variant-numeric: tabular-nums;
 }
-.traj-scroll[data-v-54a24f80] {
+.traj-scroll[data-v-1400a4e6] {
  flex: 1; min-height: 0; overflow: auto;
 }
-.traj-table[data-v-54a24f80] {
+.traj-table[data-v-1400a4e6] {
  table-layout: fixed; width: 100%; border-spacing: 0; font-size: 12px; color: var(--text);
 }
-.traj-table th[data-v-54a24f80] {
+.traj-table th[data-v-1400a4e6] {
   position: sticky;
   top: 0;
   z-index: 3;
@@ -1127,7 +1139,7 @@ to { transform: rotate(360deg);
   text-overflow: ellipsis;
   user-select: none;
 }
-.traj-table td[data-v-54a24f80] {
+.traj-table td[data-v-1400a4e6] {
   height: 30px;
   padding: 0 8px;
   border-bottom: .5px solid var(--hairline);
@@ -1135,76 +1147,76 @@ to { transform: rotate(360deg);
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.traj-table tbody tr.traj-row[data-v-54a24f80] {
+.traj-table tbody tr.traj-row[data-v-1400a4e6] {
  cursor: pointer; position: relative;
 }
-.traj-table tbody tr.traj-row[data-v-54a24f80]:hover {
+.traj-table tbody tr.traj-row[data-v-1400a4e6]:hover {
  background: var(--hover);
 }
-.traj-table tbody tr.traj-row.selected[data-v-54a24f80] {
+.traj-table tbody tr.traj-row.selected[data-v-1400a4e6] {
  background: var(--active);
 }
-.traj-table tbody tr.traj-row[data-error="true"] td[data-v-54a24f80]:first-child {
+.traj-table tbody tr.traj-row[data-error="true"] td[data-v-1400a4e6]:first-child {
  box-shadow: inset 3px 0 0 var(--err);
 }
-.traj-table tbody tr.traj-row.selected td[data-v-54a24f80]:first-child {
+.traj-table tbody tr.traj-row.selected td[data-v-1400a4e6]:first-child {
  box-shadow: inset 3px 0 0 var(--accent);
 }
-.col-n[data-v-54a24f80] {
+.col-n[data-v-1400a4e6] {
  width: 46px;
 }
-.col-kind[data-v-54a24f80] {
+.col-kind[data-v-1400a4e6] {
  width: 78px;
 }
-.col-name[data-v-54a24f80] {
+.col-name[data-v-1400a4e6] {
  width: 150px;
 }
-.col-status[data-v-54a24f80] {
+.col-status[data-v-1400a4e6] {
  width: 66px;
 }
-.col-size[data-v-54a24f80] {
+.col-size[data-v-1400a4e6] {
  width: 72px;
 }
-.col-time[data-v-54a24f80] {
+.col-time[data-v-1400a4e6] {
  width: 72px;
 }
 
 /* 数字列的表头与数值一起右对齐（#、字符、耗时） */
-.traj-table th.num-head[data-v-54a24f80] {
+.traj-table th.num-head[data-v-1400a4e6] {
  text-align: right;
 }
-.traj-num[data-v-54a24f80] {
+.traj-num[data-v-1400a4e6] {
  color: var(--caption); font-family: var(--mono); font-size: 11px; text-align: right;
 }
-.traj-name[data-v-54a24f80] {
+.traj-name[data-v-1400a4e6] {
  font-family: var(--mono); font-size: 12px; color: var(--muted);
 }
-.traj-summary[data-v-54a24f80] {
+.traj-summary[data-v-1400a4e6] {
  color: var(--muted);
 }
-.traj-table tbody tr[data-kind="tool"] .traj-summary[data-v-54a24f80],
-.traj-table tbody tr[data-kind="result"] .traj-summary[data-v-54a24f80] {
+.traj-table tbody tr[data-kind="tool"] .traj-summary[data-v-1400a4e6],
+.traj-table tbody tr[data-kind="result"] .traj-summary[data-v-1400a4e6] {
  font-family: var(--mono); font-size: 11.5px;
 }
-.traj-table tbody tr[data-kind="think"] .traj-summary[data-v-54a24f80] {
+.traj-table tbody tr[data-kind="think"] .traj-summary[data-v-1400a4e6] {
  color: var(--dim); font-style: normal;
 }
-.traj-num-cell[data-v-54a24f80] {
+.traj-num-cell[data-v-1400a4e6] {
  text-align: right; color: var(--caption); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 11px;
 }
-.traj-status[data-v-54a24f80] {
+.traj-status[data-v-1400a4e6] {
  font-size: 11.5px;
 }
-.traj-status.ok[data-v-54a24f80] {
+.traj-status.ok[data-v-1400a4e6] {
  color: var(--ok);
 }
-.traj-status.error[data-v-54a24f80] {
+.traj-status.error[data-v-1400a4e6] {
  color: var(--err);
 }
-.traj-status.plain[data-v-54a24f80] {
+.traj-status.plain[data-v-1400a4e6] {
  color: var(--caption);
 }
-.traj-disclose[data-v-54a24f80] {
+.traj-disclose[data-v-1400a4e6] {
   width: 18px;
   height: 18px;
   margin-right: 4px;
@@ -1218,20 +1230,20 @@ to { transform: rotate(360deg);
   cursor: pointer;
   padding: 0;
 }
-.traj-disclose[data-v-54a24f80]:hover {
+.traj-disclose[data-v-1400a4e6]:hover {
  background: var(--hover); color: var(--text);
 }
 
 /* P9：选中行（右侧详情栏正在显示这一步）*/
-.traj-row.selected[data-v-54a24f80] {
+.traj-row.selected[data-v-1400a4e6] {
  background: var(--active);
 }
-.traj-row.selected td[data-v-54a24f80] {
+.traj-row.selected td[data-v-1400a4e6] {
  background: var(--active);
 }
 
 /* 行内的「跳到对话」小按钮（默认很安静，悬浮显形）*/
-.traj-gochat[data-v-54a24f80] {
+.traj-gochat[data-v-1400a4e6] {
   width: 16px;
   height: 18px;
   margin-left: 4px;
@@ -1245,13 +1257,13 @@ to { transform: rotate(360deg);
   cursor: pointer;
   padding: 0;
 }
-.traj-row:hover .traj-gochat[data-v-54a24f80], .traj-gochat[data-v-54a24f80]:hover {
+.traj-row:hover .traj-gochat[data-v-1400a4e6], .traj-gochat[data-v-1400a4e6]:hover {
  color: var(--accent);
 }
-.traj-gochat[data-v-54a24f80]:hover {
+.traj-gochat[data-v-1400a4e6]:hover {
  background: var(--hover);
 }
-.traj-jump[data-v-54a24f80] {
+.traj-jump[data-v-1400a4e6] {
   border: 0;
   background: transparent;
   color: var(--accent);
@@ -1261,12 +1273,12 @@ to { transform: rotate(360deg);
   padding: 0;
   opacity: 0;
 }
-.traj-table tbody tr.traj-row:hover .traj-jump[data-v-54a24f80] {
+.traj-table tbody tr.traj-row:hover .traj-jump[data-v-1400a4e6] {
  opacity: 1;
 }
 
 /* 种类标签（照 DSH 的 kindTag：10px / 650 字重 / 4px 圆角 / 19px 高） */
-.kind-tag[data-v-54a24f80] {
+.kind-tag[data-v-1400a4e6] {
   display: inline-flex;
   align-items: center;
   height: 19px;
@@ -1279,50 +1291,50 @@ to { transform: rotate(360deg);
   user-select: none;
   white-space: nowrap;
 }
-.kind-user[data-v-54a24f80] {
+.kind-user[data-v-1400a4e6] {
  color: var(--kind-user-fg); background: var(--kind-user-bg);
 }
-.kind-msg[data-v-54a24f80] {
+.kind-msg[data-v-1400a4e6] {
  color: var(--kind-msg-fg); background: var(--kind-msg-bg);
 }
-.kind-think[data-v-54a24f80] {
+.kind-think[data-v-1400a4e6] {
  color: var(--kind-think-fg); background: var(--kind-think-bg);
 }
-.kind-tool[data-v-54a24f80] {
+.kind-tool[data-v-1400a4e6] {
  color: var(--kind-tool-fg); background: var(--kind-tool-bg);
 }
-.kind-error[data-v-54a24f80] {
+.kind-error[data-v-1400a4e6] {
  color: var(--kind-err-fg); background: var(--kind-err-bg);
 }
-.kind-meta[data-v-54a24f80] {
+.kind-meta[data-v-1400a4e6] {
  color: var(--kind-meta-fg); background: var(--kind-meta-bg);
 }
-.kind-result[data-v-54a24f80] {
+.kind-result[data-v-1400a4e6] {
  color: var(--kind-tool-fg); background: var(--kind-tool-bg);
 }
-.kind-usage[data-v-54a24f80] {
+.kind-usage[data-v-1400a4e6] {
  color: var(--kind-usage-fg); background: var(--kind-usage-bg);
 }
-.traj-detail > td[data-v-54a24f80] {
+.traj-detail > td[data-v-1400a4e6] {
  height: auto; padding: 0; white-space: normal; overflow: visible; background: var(--surface-2);
 }
-.traj-detail-inner[data-v-54a24f80] {
+.traj-detail-inner[data-v-1400a4e6] {
  padding: 8px 8px 12px 54px; display: flex; flex-direction: column; gap: 8px;
 }
-.traj-detail-title[data-v-54a24f80] {
+.traj-detail-title[data-v-1400a4e6] {
  color: var(--caption); font-size: 11px;
 }
-.traj-empty[data-v-54a24f80] {
+.traj-empty[data-v-1400a4e6] {
  padding: 40px 24px; color: var(--dim); text-align: center;
 }
 @media (max-width: 1023px) {
-.col-name[data-v-54a24f80] { width: 110px;
+.col-name[data-v-1400a4e6] { width: 110px;
 }
-.col-status[data-v-54a24f80] { width: 56px;
+.col-status[data-v-1400a4e6] { width: 56px;
 }
-.col-size[data-v-54a24f80] { width: 58px;
+.col-size[data-v-1400a4e6] { width: 58px;
 }
-.col-time[data-v-54a24f80] { width: 58px;
+.col-time[data-v-1400a4e6] { width: 58px;
 }
 }
 

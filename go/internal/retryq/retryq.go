@@ -23,9 +23,9 @@ import (
 // DirName 是队列目录名（相对项目根）：<proj>/work/retry/。
 const DirName = "retry"
 
-// Request 是一次重试请求。Chapter 是章节基名（`chapter_002`，与转录文件名
-// 里的那段一致）；Role 目前只有 convert（P1 范围），留字段是为了以后能重跑
-// 单条核对会话。
+// Request 是一次手动干预请求。Chapter 是章节基名（`chapter_002`，与转录文件
+// 名里的那段一致）；Role 是 convert（重转，开新尝试）/ checker（只重新核对、
+// 产物不动）/ continue（接着最近一次尝试干，不建新尝试，除非给了 From）。
 type Request struct {
 	TS      string `json:"ts"`
 	Project string `json:"project,omitempty"`
@@ -34,8 +34,14 @@ type Request struct {
 	Reason  string `json:"reason,omitempty"`
 	// Source 记录是谁提的（页面/命令行），排障时对得上。
 	Source string `json:"source,omitempty"`
-	// From 是"从哪一轮之前重试"的截断点（P2 预留，P1 不用）。
-	From string `json:"from,omitempty"`
+	// From 是"从第几条记录之后继续"的截断点：转录里的行号（1 起、含该行）。
+	// 0 = 从末尾继续（不截断）。给了它就开**一个新尝试**，历史只保留到这一行，
+	// 后面的轮次丢掉——源转录一字不动（原记录仍在「历史」里）。
+	From int `json:"from,omitempty"`
+	// Path 是截断的源转录文件名（From > 0 时必填）：本项目 work/sessions/ 下的
+	// *.jsonl。显式指定而不是"取最新那条"，因为用户可能正在看第 2 次尝试、
+	// 想把这次尝试的某一步回滚出来。
+	Path string `json:"path,omitempty"`
 }
 
 // Dir 返回项目的队列目录。

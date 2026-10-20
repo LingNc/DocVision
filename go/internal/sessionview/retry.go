@@ -2,6 +2,7 @@ package sessionview
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -37,6 +38,10 @@ type retryRequest struct {
 	Chapter string `json:"chapter"`
 	Reason  string `json:"reason"`
 	Role    string `json:"role"`
+	// From/Path 是"从第几条记录之后继续"（P2）：From 是转录行号（1 起、含该行），
+	// Path 是源转录文件名（本项目 work/sessions/ 下的 *.jsonl）。0 = 从末尾继续。
+	From int    `json:"from,omitempty"`
+	Path string `json:"path,omitempty"`
 }
 
 // projectWorkspace 把页面上的项目名换成磁盘目录：RootProject（旧版单项目
@@ -110,9 +115,33 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "这一章还没有提交产物，无法重新核对（先重试转换）", http.StatusBadRequest)
 		return
 	}
+	// 从某条记录之后继续：必须先确认源转录在这个项目里、行号落在范围里，
+	// 否则排进队列也是白排（worker 那边还会再查一次）。
+	srcName := ""
+	if req.From > 0 {
+		if role != "continue" {
+			http.Error(w, "只有「继续跑」可以指定从第几条记录开始", http.StatusBadRequest)
+			return
+		}
+		srcName = filepath.Base(strings.TrimSpace(req.Path))
+		if !transcriptNameRe.MatchString(srcName) {
+			http.Error(w, "源转录不合法（要 work/sessions/ 下的 *.jsonl）", http.StatusBadRequest)
+			return
+		}
+		lines, err := countTranscriptLines(filepath.Join(projDir, "work", "sessions", srcName))
+		if err != nil {
+			http.Error(w, "源转录不存在: "+srcName, http.StatusNotFound)
+			return
+		}
+		if req.From > lines {
+			http.Error(w, fmt.Sprintf("第 %d 条记录超出范围（这条转录只有 %d 行）", req.From, lines), http.StatusBadRequest)
+			return
+		}
+	}
 	path, err := retryq.Queue(projDir, retryq.Request{
 		Project: req.Project, Chapter: base, Role: role,
 		Reason: strings.TrimSpace(req.Reason), Source: "web",
+		From: req.From, Path: srcName,
 	})
 	if err != nil {
 		http.Error(w, "写入重试队列失败: "+err.Error(), http.StatusInternalServerError)
@@ -122,7 +151,9 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 	if role == "checker" {
 		note = "已加入重新核对队列：只重跑核对会话，产物不动；正在跑的 latex 会把它排进并发槽位"
 	}
-	if role == "continue" {
+	if role == "continue" && req.From > 0 {
+		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续——会开一个新尝试，历史只保留到这一行，源转录保留", req.From)
+	} else if role == "continue" {
 		note = "已加入继续跑队列：接着这一章最近一次尝试干（不新建尝试、不归档），正在跑的 latex 会把它排进并发槽位"
 	}
 	writeJSON(w, map[string]any{
@@ -309,4 +340,17 @@ func attemptFromTranscriptName(name string) (string, int, bool) {
 		}
 	}
 	return "", 0, false
+}
+
+// countTranscriptLines 数一条转录有多少行（只用来校验"从第几条继续"的范围）。
+func countTranscriptLines(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	text := strings.TrimRight(string(data), "\n")
+	if text == "" {
+		return 0, nil
+	}
+	return strings.Count(text, "\n") + 1, nil
 }

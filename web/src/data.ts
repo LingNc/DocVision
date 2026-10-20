@@ -229,11 +229,19 @@ export function bootData(): void {
 // requestChapterRetry 是页面上「重试这一章」的落点（P53）：只往项目的
 // work/retry/ 排一个请求文件，不执行任何命令。正在跑的 docvision latex 会在
 // 转换阶段的安全点消费它；没在跑就留到下次启动。
-export function requestChapterRetry(project: string, chapter: string, role = 'convert', reason = ''): Promise<any> {
+/* role：convert（重转，开新尝试）/ checker（只重新核对）/ continue（接着干）。
+   from > 0 = 从这条记录之后继续：历史截到这一行，后面丢掉，开一个新尝试。 */
+export function requestChapterRetry(
+  project: string,
+  chapter: string,
+  role = 'convert',
+  reason = '',
+  extra: { from?: number; path?: string } = {},
+): Promise<any> {
   return fetch('/api/retry', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project, chapter, role, reason }),
+    body: JSON.stringify({ project, chapter, role, reason, ...extra }),
   }).then(async (res) => {
     const text = await res.text()
     if (!res.ok) throw new Error(text.trim() || 'HTTP ' + res.status)

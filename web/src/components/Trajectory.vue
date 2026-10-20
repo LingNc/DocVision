@@ -7,6 +7,7 @@ import { computed } from 'vue'
 import { state } from '../state'
 import { countValue, fmtDur, unitLabel } from '../legacy/sidebar'
 import { jumpToLine, TRAJ_KINDS, trajectoryRows } from '../legacy/trajectory'
+import { refreshIndex, requestChapterRetry } from '../data'
 import MachineText from './MachineText.vue'
 import CopyBtn from './CopyBtn.vue'
 import ImageStrip from './ImageStrip.vue'
@@ -68,6 +69,34 @@ function selectRow(row: any) {
   state.trajSelected = state.trajSelected === row.rid ? null : row.rid
 }
 
+/* 「从这一条之后继续」（P2）：把历史截到这条消息，后面的轮次丢掉，开一个新
+   尝试接着干。只在看某章的转换会话、且它不正在写入时给这个动作。 */
+const canCutFrom = computed(() => {
+  const s: any = state.current
+  if (!s || state.staticMode || s.live) return false
+  if (!s.project || !s.chapterId || s.chapterRole !== 'convert') return false
+  return String(s.chapterId).indexOf('_child_') < 0
+})
+
+function cutFrom(row: any) {
+  const s: any = state.current
+  if (!s || !canCutFrom.value || !row.jump) return
+  if (!window.confirm('从第 ' + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试。'))
+    return
+  state.retryNote = '正在提交从第 ' + row.jump + ' 条记录继续的请求…'
+  requestChapterRetry(String(s.project), String(s.chapterId), 'continue', '轨迹回滚到 #' + row.jump, {
+    from: Number(row.jump),
+    path: String(s.name || ''),
+  })
+    .then((res: any) => {
+      state.retryNote = '已排队：从第 ' + row.jump + ' 条记录之后继续（' + ((res && res.note) || '等待并发槽位') + '）'
+      return refreshIndex()
+    })
+    .catch((err: any) => {
+      state.retryNote = '从记录继续失败：' + ((err && err.message) || err)
+    })
+}
+
 function goChat(row: any) {
   if (!row.jump) return
   state.trajSelected = row.rid
@@ -87,6 +116,7 @@ function goChat(row: any) {
             :aria-pressed="state.trajKinds[k.id] ? 'true' : 'false'"
             @click="pick(k.id)">{{ k.label }} {{ k.count }}</button>
         </div>
+        <span v-if="state.retryNote" class="traj-note">{{ state.retryNote }}</span>
         <span class="traj-count">{{ visible.length }} / {{ rows.length }} 步</span>
       </div>
     </div>
@@ -116,6 +146,9 @@ function goChat(row: any) {
                   @click.stop="state.trajOpen[row.rid] = !state.trajOpen[row.rid]">{{ state.trajOpen[row.rid] ? '▾' : '▸' }}</button>{{ row.jump ? String(row.jump) : '—' }}
                 <button v-if="row.jump" type="button" class="traj-gochat" title="跳到对话里对应的那条消息"
                   @click.stop="goChat(row)">↳</button>
+                <button v-if="row.jump && canCutFrom" type="button" class="traj-cut"
+                  title="从这一条之后继续：历史截到这条消息，后面的轮次丢掉，开一个新尝试接着干"
+                  @click.stop="cutFrom(row)">⤓</button>
               </td>
               <td><span class="kind-tag" :class="row.status === 'error' ? 'kind-error' : 'kind-' + row.kind">{{ row.tag }}</span></td>
               <td class="traj-name">{{ row.name }}</td>
@@ -169,6 +202,16 @@ function goChat(row: any) {
  display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: hidden; 
 }
 
+.traj-cut {
+  border: 0; background: transparent; color: var(--dim); cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 0 2px; opacity: 0;
+}
+.traj-row:hover .traj-cut { opacity: 1; }
+.traj-cut:hover { color: var(--accent, #2563eb); }
+.traj-note {
+  flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--dim); font-size: 12px;
+}
 .traj-chip {
   flex: none;
   height: 20px;

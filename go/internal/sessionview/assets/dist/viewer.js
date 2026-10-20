@@ -7787,11 +7787,11 @@
       }
     });
   }
-  function requestChapterRetry(project, chapter, role = "convert", reason = "") {
+  function requestChapterRetry(project, chapter, role = "convert", reason = "", extra = {}) {
     return fetch("/api/retry", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, chapter, role, reason })
+      body: JSON.stringify({ project, chapter, role, reason, ...extra })
     }).then(async (res) => {
       const text = await res.text();
       if (!res.ok) throw new Error(text.trim() || "HTTP " + res.status);
@@ -9377,8 +9377,8 @@
     key: 3,
     class: "i2t-meta-pend"
   };
-  const _hoisted_25$2 = ["data-project"];
-  const _hoisted_26$2 = ["title"];
+  const _hoisted_25$3 = ["data-project"];
+  const _hoisted_26$3 = ["title"];
   const _hoisted_27$2 = { class: "row-body" };
   const _hoisted_28$2 = {
     key: 0,
@@ -9866,7 +9866,7 @@
                     createBaseVNode("span", _hoisted_30$2, toDisplayString(g.items.length) + " 个会话", 1),
                     g.legacy ? (openBlock(), createElementBlock("span", _hoisted_31$2, "旧版单项目")) : createCommentVNode("", true),
                     g.live ? (openBlock(), createElementBlock("span", _hoisted_32$1)) : createCommentVNode("", true)
-                  ], 8, _hoisted_26$2),
+                  ], 8, _hoisted_26$3),
                   createBaseVNode("div", null, [
                     g.progress ? (openBlock(), createElementBlock("div", _hoisted_33$1, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
                     g.chains ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
@@ -10166,7 +10166,7 @@
                       ], 64);
                     }), 128)) : createCommentVNode("", true)
                   ])
-                ], 8, _hoisted_25$2)), [
+                ], 8, _hoisted_25$3)), [
                   [vCollapse, { key: "proj:" + g.name, want: g.matched ? true : projWantOpen(g), frozen: g.matched }]
                 ]);
               }), 128)),
@@ -11942,37 +11942,42 @@
   const _hoisted_3$3 = { class: "traj-filters" };
   const _hoisted_4$3 = ["aria-pressed"];
   const _hoisted_5$3 = ["title", "aria-pressed", "onClick"];
-  const _hoisted_6$3 = { class: "traj-count" };
-  const _hoisted_7$2 = { class: "traj-scroll" };
-  const _hoisted_8$2 = {
+  const _hoisted_6$3 = {
+    key: 0,
+    class: "traj-note"
+  };
+  const _hoisted_7$2 = { class: "traj-count" };
+  const _hoisted_8$2 = { class: "traj-scroll" };
+  const _hoisted_9$2 = {
     key: 0,
     class: "traj-empty"
   };
-  const _hoisted_9$2 = {
+  const _hoisted_10$2 = {
     key: 1,
     class: "traj-table"
   };
-  const _hoisted_10$2 = { class: "num-head" };
-  const _hoisted_11$2 = ["data-kind", "data-error", "title", "onClick"];
-  const _hoisted_12$2 = { class: "traj-num" };
-  const _hoisted_13$2 = ["onClick"];
+  const _hoisted_11$2 = { class: "num-head" };
+  const _hoisted_12$2 = ["data-kind", "data-error", "title", "onClick"];
+  const _hoisted_13$2 = { class: "traj-num" };
   const _hoisted_14$2 = ["onClick"];
-  const _hoisted_15$2 = { class: "traj-name" };
-  const _hoisted_16$2 = ["title"];
-  const _hoisted_17$2 = { class: "traj-num-cell" };
-  const _hoisted_18$2 = { class: "traj-num-cell" };
-  const _hoisted_19$2 = {
+  const _hoisted_15$2 = ["onClick"];
+  const _hoisted_16$2 = ["onClick"];
+  const _hoisted_17$2 = { class: "traj-name" };
+  const _hoisted_18$2 = ["title"];
+  const _hoisted_19$2 = { class: "traj-num-cell" };
+  const _hoisted_20$2 = { class: "traj-num-cell" };
+  const _hoisted_21$2 = {
     key: 0,
     class: "traj-detail"
   };
-  const _hoisted_20$2 = { colspan: 7 };
-  const _hoisted_21$2 = { class: "traj-detail-inner" };
-  const _hoisted_22$2 = { class: "traj-detail-title" };
-  const _hoisted_23$2 = {
+  const _hoisted_22$2 = { colspan: 7 };
+  const _hoisted_23$2 = { class: "traj-detail-inner" };
+  const _hoisted_24$2 = { class: "traj-detail-title" };
+  const _hoisted_25$2 = {
     key: 1,
     class: "code"
   };
-  const _hoisted_24$2 = { class: "row-actions" };
+  const _hoisted_26$2 = { class: "row-actions" };
   const _sfc_main$3 = /* @__PURE__ */ defineComponent({
     __name: "Trajectory",
     setup(__props) {
@@ -12018,6 +12023,28 @@
         if (!row.jump) return;
         state.trajSelected = state.trajSelected === row.rid ? null : row.rid;
       }
+      const canCutFrom = computed(() => {
+        const s = state.current;
+        if (!s || state.staticMode || s.live) return false;
+        if (!s.project || !s.chapterId || s.chapterRole !== "convert") return false;
+        return String(s.chapterId).indexOf("_child_") < 0;
+      });
+      function cutFrom(row) {
+        const s = state.current;
+        if (!s || !canCutFrom.value || !row.jump) return;
+        if (!window.confirm("从第 " + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试。'))
+          return;
+        state.retryNote = "正在提交从第 " + row.jump + " 条记录继续的请求…";
+        requestChapterRetry(String(s.project), String(s.chapterId), "continue", "轨迹回滚到 #" + row.jump, {
+          from: Number(row.jump),
+          path: String(s.name || "")
+        }).then((res) => {
+          state.retryNote = "已排队：从第 " + row.jump + " 条记录之后继续（" + (res && res.note || "等待并发槽位") + "）";
+          return refreshIndex();
+        }).catch((err) => {
+          state.retryNote = "从记录继续失败：" + (err && err.message || err);
+        });
+      }
       function goChat(row) {
         if (!row.jump) return;
         state.trajSelected = row.rid;
@@ -12048,11 +12075,12 @@
                   }, toDisplayString(k.label) + " " + toDisplayString(k.count), 9, _hoisted_5$3);
                 }), 128))
               ]),
-              createBaseVNode("span", _hoisted_6$3, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
+              unref(state).retryNote ? (openBlock(), createElementBlock("span", _hoisted_6$3, toDisplayString(unref(state).retryNote), 1)) : createCommentVNode("", true),
+              createBaseVNode("span", _hoisted_7$2, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
             ])
           ]),
-          createBaseVNode("div", _hoisted_7$2, [
-            !visible.value.length ? (openBlock(), createElementBlock("div", _hoisted_8$2, toDisplayString(rows.value.length ? "当前筛选没有匹配的步骤" : unref(state).current ? "这个会话还没有步骤" : "左侧选择一个会话后，这里列出它的全部步骤。"), 1)) : (openBlock(), createElementBlock("table", _hoisted_9$2, [
+          createBaseVNode("div", _hoisted_8$2, [
+            !visible.value.length ? (openBlock(), createElementBlock("div", _hoisted_9$2, toDisplayString(rows.value.length ? "当前筛选没有匹配的步骤" : unref(state).current ? "这个会话还没有步骤" : "左侧选择一个会话后，这里列出它的全部步骤。"), 1)) : (openBlock(), createElementBlock("table", _hoisted_10$2, [
               _cache[7] || (_cache[7] = createBaseVNode("colgroup", null, [
                 createBaseVNode("col", { class: "col-n" }),
                 createBaseVNode("col", { class: "col-kind" }),
@@ -12069,7 +12097,7 @@
                   _cache[3] || (_cache[3] = createBaseVNode("th", null, "名称", -1)),
                   _cache[4] || (_cache[4] = createBaseVNode("th", null, "摘要", -1)),
                   _cache[5] || (_cache[5] = createBaseVNode("th", null, "状态", -1)),
-                  createBaseVNode("th", _hoisted_10$2, toDisplayString(unref(unitLabel)()), 1),
+                  createBaseVNode("th", _hoisted_11$2, toDisplayString(unref(unitLabel)()), 1),
                   _cache[6] || (_cache[6] = createBaseVNode("th", { class: "num-head" }, "耗时", -1))
                 ])
               ]),
@@ -12085,13 +12113,13 @@
                       title: row.title || "点击在右侧详情栏看这一步",
                       onClick: ($event) => row.jump ? selectRow(row) : unref(state).trajOpen[row.rid] = !unref(state).trajOpen[row.rid]
                     }, [
-                      createBaseVNode("td", _hoisted_12$2, [
+                      createBaseVNode("td", _hoisted_13$2, [
                         createBaseVNode("button", {
                           type: "button",
                           class: "traj-disclose",
                           title: "展开完整输入输出",
                           onClick: withModifiers(($event) => unref(state).trajOpen[row.rid] = !unref(state).trajOpen[row.rid], ["stop"])
-                        }, toDisplayString(unref(state).trajOpen[row.rid] ? "▾" : "▸"), 9, _hoisted_13$2),
+                        }, toDisplayString(unref(state).trajOpen[row.rid] ? "▾" : "▸"), 9, _hoisted_14$2),
                         createTextVNode(toDisplayString(row.jump ? String(row.jump) : "—") + " ", 1),
                         row.jump ? (openBlock(), createElementBlock("button", {
                           key: 0,
@@ -12099,36 +12127,43 @@
                           class: "traj-gochat",
                           title: "跳到对话里对应的那条消息",
                           onClick: withModifiers(($event) => goChat(row), ["stop"])
-                        }, "↳", 8, _hoisted_14$2)) : createCommentVNode("", true)
+                        }, "↳", 8, _hoisted_15$2)) : createCommentVNode("", true),
+                        row.jump && canCutFrom.value ? (openBlock(), createElementBlock("button", {
+                          key: 1,
+                          type: "button",
+                          class: "traj-cut",
+                          title: "从这一条之后继续：历史截到这条消息，后面的轮次丢掉，开一个新尝试接着干",
+                          onClick: withModifiers(($event) => cutFrom(row), ["stop"])
+                        }, "⤓", 8, _hoisted_16$2)) : createCommentVNode("", true)
                       ]),
                       createBaseVNode("td", null, [
                         createBaseVNode("span", {
                           class: normalizeClass(["kind-tag", row.status === "error" ? "kind-error" : "kind-" + row.kind])
                         }, toDisplayString(row.tag), 3)
                       ]),
-                      createBaseVNode("td", _hoisted_15$2, toDisplayString(row.name), 1),
+                      createBaseVNode("td", _hoisted_17$2, toDisplayString(row.name), 1),
                       createBaseVNode("td", {
                         class: "traj-summary",
                         title: row.summary || ""
-                      }, toDisplayString(row.summary || "—"), 9, _hoisted_16$2),
+                      }, toDisplayString(row.summary || "—"), 9, _hoisted_18$2),
                       createBaseVNode("td", {
                         class: normalizeClass("traj-status " + statusCell(row).cls)
                       }, toDisplayString(statusCell(row).text), 3),
-                      createBaseVNode("td", _hoisted_17$2, toDisplayString(sizeCell(row)), 1),
-                      createBaseVNode("td", _hoisted_18$2, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
-                    ], 10, _hoisted_11$2),
-                    unref(state).trajOpen[row.rid] ? (openBlock(), createElementBlock("tr", _hoisted_19$2, [
-                      createBaseVNode("td", _hoisted_20$2, [
-                        createBaseVNode("div", _hoisted_21$2, [
+                      createBaseVNode("td", _hoisted_19$2, toDisplayString(sizeCell(row)), 1),
+                      createBaseVNode("td", _hoisted_20$2, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
+                    ], 10, _hoisted_12$2),
+                    unref(state).trajOpen[row.rid] ? (openBlock(), createElementBlock("tr", _hoisted_21$2, [
+                      createBaseVNode("td", _hoisted_22$2, [
+                        createBaseVNode("div", _hoisted_23$2, [
                           (openBlock(true), createElementBlock(Fragment, null, renderList(row.detail || {}, (text, key) => {
                             return openBlock(), createElementBlock("div", { key }, [
-                              createBaseVNode("div", _hoisted_22$2, toDisplayString(DETAIL_LABELS[key] || key), 1),
+                              createBaseVNode("div", _hoisted_24$2, toDisplayString(DETAIL_LABELS[key] || key), 1),
                               detailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$4, {
                                 key: 0,
                                 text: String(text || ""),
                                 cls: "code"
-                              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_23$2, toDisplayString(String(text || "")), 1)),
-                              createBaseVNode("div", _hoisted_24$2, [
+                              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_25$2, toDisplayString(String(text || "")), 1)),
+                              createBaseVNode("div", _hoisted_26$2, [
                                 createVNode(_sfc_main$b, {
                                   text: String(text || "")
                                 }, null, 8, ["text"])
@@ -12151,7 +12186,7 @@
       };
     }
   });
-  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-54a24f80"]]);
+  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-1400a4e6"]]);
   function currentEstimate() {
     const id = state.current ? state.current.id : "";
     const list = state.sessions || [];
