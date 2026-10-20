@@ -2014,3 +2014,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **改**：`lastAttemptNumber()` 一律返回磁盘最大尝试号（重跑接着最近那条继续），新号只在换会话那一步显式 `next.AttemptNum = node.AttemptNum + 1`；换会话前 `archiveChapterAttempt()` 把上一轮整棵移到 `<proj>/work/attempts/<章>/try<N>/`（work/含子树、result、integrated-stage、已提交 .tex 与分片、`checker-issues.md`），移动失败只警告；开新尝试只清当前层 `work`/`result`/`integrated-stage`/`checker-view`，保留 `sessions/`。
 - **验证**：`TestLastAttemptNumber` 4 个分支、`TestArchiveChapterAttempt`（留档到位、旧位置不残留、子转录随子树留档、核对转录留在 sessions）；`go test ./internal/...` 全绿、`npm test` 148。
 - **已知代价**：留档把子章节成品一并搬走，新尝试重转子章节时没有"已通过就跳过"的标记；同一次尝试内重跑已通过的子章节仍会重放对话 + 再跑 checker。
+
+## v1.5+（第四十七批补十一，T175：历史切换只钉住正在看的那一条）
+
+- **真实缺陷（T173 遗留）**：`pickAttempt` 让整棵树都按"尝试号 ≤ pin 取最大"重选，点开某章 convert 的 `#2` 时，同书其它章节（重试次数各不相同）也被拉到第 2 次或它们最早的版本。用户口径：每个节点只该显示自己最新的一次，切换历史只影响"我正在看的那一条（和它同一行的角色）"。
+- **改**：`buildChapterTree(items, pinId)` 恢复 `newerAttempt` 的"各节点取最新"，只把 `pinId` 那条会话钉进它所在的节点/角色；同一节点的另一角色（convert ↔ checker）优先同一轮、没有同轮则最新；子会话与其它章节不跟着切。删除 `pickAttempt`；`Sidebar.vue` 传当前会话 id（不再按项目名算尝试号）。
+- **验证**：`chapter-tree.spec.ts` 跟随用例改写为 4 条（只看那条变、同轮核对、看核对时同行转换切到被核对的那一轮、无 pin 全取最新）；`npm test` 147、`go test ./internal/...` 全绿。

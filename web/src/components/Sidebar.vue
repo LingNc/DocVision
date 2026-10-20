@@ -156,14 +156,12 @@ const groups = computed<GroupView[]>(() => {
       // （"8 章 · 完成 8"），方块视图本来就是为多会话扫视设计的。
       const agg = stageChapterAggregate(stg, items, !!state.filter)
       const chapterItems = items.filter((s: any) => !!s.chapterId)
-      // T173：树跟随"正在看的那一轮尝试"——点开历史里的某一次，下面的子会话
-      // 也切成那一轮的版本，而不是永远显示最新一次。只在同一本书里生效：别的
-      // 项目组没有"这一轮"的概念，仍按最新一次显示。
+      // T175：只钉住"正在看的那一条"——每个节点的重试次数是独立的，不能拿
+      // 一个章节的 #2 去套全树；子会话与其它章节都按各自最新一次显示。
       const cur: any = state.current as any
-      const pinAll = Number(cur && cur.chapterAttempt) || 0
-      const pinAttempt = cur && (cur.project || '') === g.name ? pinAll : 0
+      const pinId = cur && cur.chapterId ? String(cur.id) : ''
       const chapterRoots = stg === 'convert' && items.length > 0 && chapterItems.length === items.length
-        ? buildChapterTree(items, pinAttempt) : []
+        ? buildChapterTree(items, pinId) : []
       const okey = groupKey('overflow', g.name + '/' + stg)
       const shown0 = items
       const needOverflow = shown0.length > OVERFLOW_LIMIT

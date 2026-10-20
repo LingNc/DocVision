@@ -7264,30 +7264,31 @@
     if (a !== b) return b > a ? next : cur;
     return mtimeMs(next) > mtimeMs(cur) ? next : cur;
   }
-  function pickAttempt(cur, next, pinAttempt = 0) {
-    if (!cur) return next;
-    if (!next) return cur;
-    if (!pinAttempt) return newerAttempt(cur, next);
-    const a = Number(cur.chapterAttempt) || 1;
-    const b = Number(next.chapterAttempt) || 1;
-    const rank = (n) => n <= pinAttempt ? [1, n] : [0, -n];
-    const [ka, ao] = rank(a);
-    const [kb, bo] = rank(b);
-    if (ka !== kb) return ka > kb ? cur : next;
-    if (ao !== bo) return ao > bo ? cur : next;
-    return mtimeMs(next) > mtimeMs(cur) ? next : cur;
-  }
-  function buildChapterTree(items, pinAttempt = 0) {
+  function buildChapterTree(items, pinId = "") {
     const byId = {};
     const parents = {};
+    const byRole = {};
+    let pinned = null;
     (items || []).forEach((session) => {
       if (!(session == null ? void 0 : session.chapterId)) return;
       const id = String(session.chapterId);
       const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] });
       parents[id] = String(session.chapterParent || "");
-      if (session.chapterRole === "checker") node.checker = pickAttempt(node.checker, session, pinAttempt);
-      else if (session.chapterRole === "convert") node.convert = pickAttempt(node.convert, session, pinAttempt);
+      if (session.chapterRole !== "checker" && session.chapterRole !== "convert") return;
+      const role = session.chapterRole === "checker" ? "checker" : "convert";
+      node[role] = newerAttempt(node[role], session);
+      const key = id + "|" + role;
+      (byRole[key] || (byRole[key] = [])).push(session);
+      if (pinId && session.id === pinId) pinned = { node, role, session };
     });
+    if (pinned) {
+      const pin = pinned;
+      pin.node[pin.role] = pin.session;
+      const other = pin.role === "convert" ? "checker" : "convert";
+      const want = Number(pin.session.chapterAttempt) || 1;
+      const peers = (byRole[pin.node.id + "|" + other] || []).filter((x) => (Number(x.chapterAttempt) || 1) === want);
+      if (peers.length) pin.node[other] = peers.reduce((a, b) => newerAttempt(a, b));
+    }
     const roots = [];
     Object.keys(byId).forEach((id) => {
       const parent = parents[id] && byId[parents[id]];
@@ -9441,9 +9442,8 @@
             const agg = stageChapterAggregate(stg, items, !!state.filter);
             const chapterItems = items.filter((s) => !!s.chapterId);
             const cur = state.current;
-            const pinAll = Number(cur && cur.chapterAttempt) || 0;
-            const pinAttempt = cur && (cur.project || "") === g.name ? pinAll : 0;
-            const chapterRoots = stg === "convert" && items.length > 0 && chapterItems.length === items.length ? buildChapterTree(items, pinAttempt) : [];
+            const pinId = cur && cur.chapterId ? String(cur.id) : "";
+            const chapterRoots = stg === "convert" && items.length > 0 && chapterItems.length === items.length ? buildChapterTree(items, pinId) : [];
             const okey = groupKey("overflow", g.name + "/" + stg);
             const shown0 = items;
             const needOverflow = shown0.length > OVERFLOW_LIMIT;
@@ -9735,7 +9735,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-d1c328a7><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-d1c328a7><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-d1c328a7></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-d1c328a7><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-d1c328a7></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-d1c328a7></path></svg></span>', 1)),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-cbebc143><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-cbebc143><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-cbebc143></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-cbebc143><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-cbebc143></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-cbebc143></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$2, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -10061,7 +10061,7 @@
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-d1c328a7"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-cbebc143"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

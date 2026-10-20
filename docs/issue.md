@@ -1063,3 +1063,8 @@ user 轮
   3. **不再整棵 RemoveAll 节点目录**：开新尝试只清这一层的 `work/`、`result/`、`integrated-stage/`、`checker-view/`，**保留 `sessions/`**——递归子章节的转录挂在这棵子树里，删了预览页就看不到整棵子树的历史；留档后的子转录仍按文件名归组，点「历史」里的旧尝试能连它的子章节一起看。
   验证：新增 `TestLastAttemptNumber`（空目录 / 无 `run_end` / 已收尾仍是同一次 / 磁盘上已有第 2 次就接第 2 次）与 `TestArchiveChapterAttempt`（work、`_subdivision`、result、integrated-stage、问题清单都进留档；旧位置不残留；核对转录留在 `sessions/`）；`go test ./internal/...` 全绿、`npm test` 148 通过。
   已知代价：留档会把子章节的成品与转录一起搬进 `attempts/`，所以新尝试重转子章节时看不到旧成品（子节点目前还没有"已通过就跳过"的标记）；同一次尝试内重跑已通过的子章节仍会重放对话后再跑一遍 checker。
+
+[X][ ] T175. 用户对 T173 pin 口径的纠正（原话）："在web页面选择历史的时候，因为每个转换的重试次数之类的是随机的，不能说我看某一个转换的历史的 #2的时候其他的全都切换到#2吧，只是针对我查看的这个和他对应的子会话……感觉你这个页面选择上有问题。"
+  问题：T173 的 `pickAttempt(cur, next, pin)` 把**整棵树**都按"尝试号 ≤ pin 取最大"重选，于是点开某章 convert 的 `#2`，同书其它章节（各自重试次数完全不同）也被拉到第 2 次或它们最早的版本——用户要的是"只有我正在看的那一条跟着切"。
+  改：`buildChapterTree(items, pinId)` 回到"每个节点各取最新一次"（`newerAttempt`），**只钉住 `pinId` 这一条会话**：它所在节点的这个角色直接用它；同一节点的另一种角色（convert ↔ checker）优先取**同一轮**，那一轮不存在才保持最新；**子会话与其它章节一概不跟着切**（用户口径：子会话默认自己最新的一次）。`pickAttempt` 删除，`Sidebar.vue` 传当前会话的 id（不再按项目名算 pin 号）。
+  验证：`web/tests/chapter-tree.spec.ts` 的跟随用例改为 4 条——只有被查看那一行换成 #2（子会话与别的章节仍最新）、同节点核对只跟同一轮/没有同轮就最新、看核对 #1 时同行转换切到它核对的那一轮、无 pin 时全树取最新；`npm test` 147 通过、`go test ./internal/...` 全绿。

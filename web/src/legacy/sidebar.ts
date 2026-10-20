@@ -425,38 +425,41 @@ function newerAttempt(cur: any, next: any): any {
 }
 
 /*
- * 按"正在看的那一轮"挑会话（T173）。pinAttempt = 你当前打开的会话的尝试号：
- * 树应该显示**那一轮当时的样子**，而不是永远把最新一次摊在眼前——否则点开
- * 「历史」里的第 1 次，下面的子会话还在显示第 3 次的东西，两个层级对不上。
+ * 章节树里"这一行显示哪一次尝试"（T173，T175 收窄）。
  *
- * 排序偏好：尝试号 ≤ pin 里取最大（这一轮及之前的产物）；一个都没有（节点
- * 是后来才出现的）就取最小的、也就是它最早的那次。pin 为 0 时退回"最新一次"。
+ * 默认每个节点各取自己最新的一次：同一章下各节点的重试次数是**互相独立**
+ * 的（有的只转过一次、有的被打回五次），拿一个章节的 #2 去套全树，别的章节
+ * 就会显示一个不相干的旧版本。
+ *
+ * 唯一的例外是**你正在看的那一条**（`pinId`）：它所在的行必须显示它，否则
+ * 点开历史里的 #2、树里还是 #3。同一节点的另一种角色（convert ↔ checker）
+ * 也只跟"同一轮"，那一轮不存在才保持最新。子会话与其它章节一概不跟着切。
  */
-export function pickAttempt(cur: any, next: any, pinAttempt = 0): any {
-  if (!cur) return next
-  if (!next) return cur
-  if (!pinAttempt) return newerAttempt(cur, next)
-  const a = Number(cur.chapterAttempt) || 1
-  const b = Number(next.chapterAttempt) || 1
-  const rank = (n: number): [number, number] => (n <= pinAttempt ? [1, n] : [0, -n])
-  const [ka, ao] = rank(a)
-  const [kb, bo] = rank(b)
-  if (ka !== kb) return ka > kb ? cur : next
-  if (ao !== bo) return ao > bo ? cur : next
-  return mtimeMs(next) > mtimeMs(cur) ? next : cur
-}
-
-export function buildChapterTree(items: any[], pinAttempt = 0): ChapterTreeNode[] {
+export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
   const byId: Record<string, ChapterTreeNode> = {}
   const parents: Record<string, string> = {}
+  const byRole: Record<string, any[]> = {}
+  let pinned: { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null = null
   ;(items || []).forEach((session) => {
     if (!session?.chapterId) return
     const id = String(session.chapterId)
     const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] })
     parents[id] = String(session.chapterParent || '')
-    if (session.chapterRole === 'checker') node.checker = pickAttempt(node.checker, session, pinAttempt)
-    else if (session.chapterRole === 'convert') node.convert = pickAttempt(node.convert, session, pinAttempt)
+    if (session.chapterRole !== 'checker' && session.chapterRole !== 'convert') return
+    const role: 'convert' | 'checker' = session.chapterRole === 'checker' ? 'checker' : 'convert'
+    node[role] = newerAttempt(node[role], session)
+    const key = id + '|' + role
+    ;(byRole[key] || (byRole[key] = [])).push(session)
+    if (pinId && session.id === pinId) pinned = { node, role, session }
   })
+  if (pinned) {
+    const pin = pinned as { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any }
+    pin.node[pin.role] = pin.session
+    const other: 'convert' | 'checker' = pin.role === 'convert' ? 'checker' : 'convert'
+    const want = Number(pin.session.chapterAttempt) || 1
+    const peers = (byRole[pin.node.id + '|' + other] || []).filter((x: any) => (Number(x.chapterAttempt) || 1) === want)
+    if (peers.length) pin.node[other] = peers.reduce((a: any, b: any) => newerAttempt(a, b))
+  }
   const roots: ChapterTreeNode[] = []
   Object.keys(byId).forEach((id) => {
     const parent = parents[id] && byId[parents[id]]

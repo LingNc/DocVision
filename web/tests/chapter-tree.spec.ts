@@ -158,12 +158,13 @@ describe('章节树默认打开最新一次尝试', () => {
   })
 })
 
-// T173：点开「历史」里的某一次，章节树要显示**那一轮当时的样子**（含子会话），
-// 而不是永远把最新一次摊在眼前。
-describe('章节树跟随正在查看的尝试', () => {
-  const conv = (attempt: number, chapterId = 'chapter_042', parent?: string) => ({
+// T175：只钉住"正在看的那一条"——各节点的重试次数互相独立，不能拿一个章节的
+// #2 去套全树；点开历史里的 #1，树里只把那一行换成 #1，子会话与其它章节仍按
+// 各自最新一次显示。
+describe('章节树只钉住正在查看的那一条', () => {
+  const conv = (attempt: number, chapterId = 'chapter_042', parent = '') => ({
     id: `book/work/sessions/convert_${chapterId}` + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
-    project: 'book', chapterId, chapterParent: parent || '', chapterRole: 'convert',
+    project: 'book', chapterId, chapterParent: parent, chapterRole: 'convert',
     chapterAttempt: attempt, mtime: `2026-10-19T1${attempt}:00:00Z`,
   })
   const chk = (attempt: number, chapterId = 'chapter_042') => ({
@@ -171,44 +172,41 @@ describe('章节树跟随正在查看的尝试', () => {
     project: 'book', chapterId, chapterRole: 'checker',
     chapterAttempt: attempt, mtime: `2026-10-19T1${attempt}:30:00Z`,
   })
+  const child = (attempt: number) => conv(attempt, 'chapter_042_child_01', 'chapter_042')
 
-  it('pin=2 时父与子都取第 2 次（不管第 3 次更新）', () => {
+  it('看 convert #2：只有这一行换成 #2，子会话与别的章节仍是最新', () => {
     const sessions = [
       conv(1), conv(2), conv(3),
-      conv(1, 'chapter_042_child_01', 'chapter_042'),
-      conv(2, 'chapter_042_child_01', 'chapter_042'),
+      child(1), child(2), child(3),
+      conv(1, 'chapter_043'), conv(2, 'chapter_043'),
     ]
-    const roots = buildChapterTree(sessions, 2)
+    const roots = buildChapterTree(sessions, conv(2).id)
+    const a = roots.find((n) => n.id === 'chapter_042')!
+    expect(a.convert!.chapterAttempt).toBe(2)
+    // 子会话不跟着切（用户口径：子会话默认自己最新的一次）
+    expect(a.children[0].convert!.chapterAttempt).toBe(3)
+    // 别的章节完全不受影响
+    expect(roots.find((n) => n.id === 'chapter_043')!.convert!.chapterAttempt).toBe(2)
+  })
+
+  it('同一节点的核对会话只跟同一轮，那一轮没有就保持最新', () => {
+    const withSame = [conv(1), conv(2), conv(3), chk(1), chk(2), chk(3)]
+    expect(buildChapterTree(withSame, conv(2).id)[0].checker!.chapterAttempt).toBe(2)
+    const noSame = [conv(1), conv(2), conv(3), chk(1), chk(3)]
+    expect(buildChapterTree(noSame, conv(2).id)[0].checker!.chapterAttempt).toBe(3)
+  })
+
+  it('看核对会话 #1：核对钉住 #1，同一行的转换切到它核对的那一轮 #1', () => {
+    const sessions = [conv(1), conv(2), conv(3), chk(1), chk(2), chk(3)]
+    const roots = buildChapterTree(sessions, chk(1).id)
+    expect(roots[0].checker!.chapterAttempt).toBe(1)
+    expect(roots[0].convert!.chapterAttempt).toBe(1)
+  })
+
+  it('没有 pin 时每个节点都取最新', () => {
+    const sessions = [conv(1), conv(2), child(1), child(2), child(3)]
+    const roots = buildChapterTree(sessions, '')
     expect(roots[0].convert!.chapterAttempt).toBe(2)
-    expect(roots[0].children[0].convert!.chapterAttempt).toBe(2)
-  })
-
-  it('子节点没有那一轮时取最近的一轮（≤pin 里最大的）', () => {
-    const sessions = [
-      conv(3),
-      conv(2, 'chapter_042_child_01', 'chapter_042'),
-      conv(3, 'chapter_042_child_02', 'chapter_042'),
-    ]
-    const roots = buildChapterTree(sessions, 3)
-    expect(roots[0].children.find((c) => c.id.endsWith('child_01'))!.convert!.chapterAttempt).toBe(2)
-    expect(roots[0].children.find((c) => c.id.endsWith('child_02'))!.convert!.chapterAttempt).toBe(3)
-  })
-
-  it('核对会话跟着同一次尝试走（不再各自取最新）', () => {
-    const sessions = [conv(1), conv(2), chk(1), chk(2)]
-    expect(buildChapterTree(sessions, 1)[0].checker!.chapterAttempt).toBe(1)
-    expect(buildChapterTree(sessions, 2)[0].checker!.chapterAttempt).toBe(2)
-  })
-
-  it('pin 大于所有尝试时取最大的（看第 3 次就把第 3 次给全树）', () => {
-    const sessions = [conv(1), conv(2)]
-    expect(buildChapterTree(sessions, 9)[0].convert!.chapterAttempt).toBe(2)
-  })
-
-  it('pickAttempt：没有 pin 时仍是"最新一次"', () => {
-    const a = { chapterAttempt: 1, mtime: '2026-10-19T10:00:00Z' }
-    const b = { chapterAttempt: 2, mtime: '2026-10-19T11:00:00Z' }
-    expect(pickAttempt(a, b)).toBe(b)
-    expect(pickAttempt(b, a)).toBe(b)
+    expect(roots[0].children[0].convert!.chapterAttempt).toBe(3)
   })
 })
