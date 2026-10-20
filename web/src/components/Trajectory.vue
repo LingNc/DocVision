@@ -69,18 +69,23 @@ function selectRow(row: any) {
   state.trajSelected = state.trajSelected === row.rid ? null : row.rid
 }
 
-/* 「从这一条之后继续」（P2）：把历史截到这条消息，后面的轮次丢掉，开一个新
-   尝试接着干。只在看某章的转换会话、且它不正在写入时给这个动作。 */
-// 从某条记录之后继续：章节转换会话，或「矢量图」的作图会话（P53 后续）。
+/* 「从这一条之后继续」（P53 阶段二）：把历史截到这条消息，后面的轮次丢掉，开
+   一个新尝试接着干。转换会话、核对会话与「矢量图」的作图会话都给这个动作。 */
 const isVectorSession = computed(() => {
   const s: any = state.current
   return !!s && s.stage === 'vector' && String(s.name || '').indexOf('vector_') === 0
+})
+// 核对会话（T184）：产物只读，从记录继续只是换一段历史重新判断。
+const isCheckerSession = computed(() => {
+  const s: any = state.current
+  return !!s && s.chapterRole === 'checker' && String(s.name || '').indexOf('checker_') === 0
 })
 const canCutFrom = computed(() => {
   const s: any = state.current
   if (!s || state.staticMode || s.live) return false
   if (isVectorSession.value) return !!s.project
-  if (!s.project || !s.chapterId || s.chapterRole !== 'convert') return false
+  if (!s.project || !s.chapterId) return false
+  if (s.chapterRole !== 'convert' && s.chapterRole !== 'checker') return false
   return String(s.chapterId).indexOf('_child_') < 0
 })
 
@@ -88,15 +93,18 @@ function cutFrom(row: any) {
   const s: any = state.current
   if (!s || !canCutFrom.value || !row.jump) return
   const vector = isVectorSession.value
+  const checker = isCheckerSession.value
   const ask = vector
     ? '从第 ' + row.jump + ' 条记录之后继续？\n\n历史会截到这一条（完整旧转录留档成 .tryN，仍看得到），重新只画这一张；类别与分组不变。画完要看到新图，下游阶段需要重跑。'
-    : '从第 ' + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试。'
+    : checker
+      ? '从第 ' + row.jump + ' 条记录之后继续核对？\n\n后面的轮次会从这条核对会话的历史里丢掉（源转录仍保留在「历史」里），并开一条新的核对尝试；已提交的产物一个字不动。'
+      : '从第 ' + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试；工作区会一起退回这一刻。'
   if (!window.confirm(ask)) return
   state.retryNote = '正在提交从第 ' + row.jump + ' 条记录继续的请求…'
   requestChapterRetry(
     String(s.project),
     vector ? '' : String(s.chapterId),
-    vector ? 'vector' : 'continue',
+    vector ? 'vector' : checker ? 'checker' : 'continue',
     '轨迹回滚到 #' + row.jump,
     { from: Number(row.jump), path: String(s.name || '') },
   )

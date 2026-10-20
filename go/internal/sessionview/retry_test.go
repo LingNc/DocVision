@@ -297,3 +297,45 @@ func TestPostRetryVectorRole(t *testing.T) {
 		t.Fatalf("章节角标被污染: %+v", got)
 	}
 }
+
+// T184：核对的转录也能"从第几条记录之后继续"——队列里角色仍是 checker（产物
+// 不动、只换核对会话），源转录必须是这一章的**核对**转录，别的角色/章节不给。
+func TestPostRetryCheckerFromRecord(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	sess := filepath.Join(proj, "work", "sessions")
+	if err := os.MkdirAll(sess, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "{\"t\":\"msg\"}\n{\"t\":\"msg\"}\n{\"t\":\"msg\"}\n"
+	if err := os.WriteFile(filepath.Join(sess, "checker_chapter_002.try2.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 核对要有已提交产物（这是既有前置条件，和 from 无关）。
+	if err := os.MkdirAll(filepath.Join(proj, "work", "chapters"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "work", "chapters", "chapter_002.tex"), []byte("%% x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 拿转换的转录来切核对 → 400（角色错位）。
+	if err := os.WriteFile(filepath.Join(sess, "convert_chapter_002.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"checker","from":2,"path":"convert_chapter_002.jsonl"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("核对拿转换转录应 400, status = %d", rec.Code)
+	}
+	// 超出范围 → 400。
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"checker","from":9,"path":"checker_chapter_002.try2.jsonl"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("超出范围应 400, status = %d", rec.Code)
+	}
+	rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"checker","from":2,"path":"checker_chapter_002.try2.jsonl"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	pending := retryq.Pending(proj)
+	if len(pending) != 1 || pending[0].Role != "checker" || pending[0].From != 2 ||
+		pending[0].Request.Path != "checker_chapter_002.try2.jsonl" {
+		t.Fatalf("队列 = %+v", pending)
+	}
+}

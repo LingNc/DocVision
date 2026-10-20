@@ -510,3 +510,69 @@ func TestTruncateVectorTranscript(t *testing.T) {
 		t.Fatal("from=0 应报错")
 	}
 }
+
+// T184：核对转录也能从某条记录之后继续——前 from 行抄成一条**新的核对尝试**
+// （checker_<章>.try<N+1>.jsonl），源转录一个字不动，产物更不动。
+func TestTruncateCheckerTranscript(t *testing.T) {
+	proj := t.TempDir()
+	base := "chapter_002"
+	sessDir := filepath.Join(proj, "work", "sessions")
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Join([]string{
+		`{"t":"meta","kind":"system"}`,
+		`{"t":"msg","role":"user","content":"review it"}`,
+		`{"t":"msg","role":"assistant","content":"step 1"}`,
+		`{"t":"usage","model":"m"}`,
+		`{"t":"msg","role":"assistant","content":"step 2 (wrong)"}`,
+	}, "\n") + "\n"
+	src := filepath.Join(sessDir, "checker_"+base+".try2.jsonl")
+	if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{}
+
+	dst, n, err := r.truncateCheckerTranscript(proj, base, "checker_"+base+".try2.jsonl", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// try1 是转换阶段自带的那次核对；try2 已存在，所以新号从 3 起。
+	if n != 3 || filepath.Base(dst) != "checker_"+base+".try3.jsonl" {
+		t.Fatalf("新尝试 = %d / %q", n, filepath.Base(dst))
+	}
+	head, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(head), "\n"); got != 3 {
+		t.Fatalf("前缀行数 = %d（期望 3）", got)
+	}
+	if strings.Contains(string(head), "wrong") {
+		t.Fatalf("前缀里不该有被切掉的内容: %q", string(head))
+	}
+	// 源转录不动。
+	orig, err := os.ReadFile(src)
+	if err != nil || !strings.Contains(string(orig), "wrong") {
+		t.Fatalf("源转录被改了: %v", err)
+	}
+	// 再切一次：号继续递增（内存里记的号也要算进去，连点两下不撞车）。
+	r.retryCheckerAttempt = map[string]int{base: 3}
+	dst2, n2, err := r.truncateCheckerTranscript(proj, base, "checker_"+base+".try2.jsonl", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n2 != 4 || filepath.Base(dst2) != "checker_"+base+".try4.jsonl" {
+		t.Fatalf("第二次新尝试 = %d / %q", n2, filepath.Base(dst2))
+	}
+	// 越界、from=0、切在用量行上都拒。
+	if _, _, err := r.truncateCheckerTranscript(proj, base, "checker_"+base+".try2.jsonl", 99); err == nil {
+		t.Fatal("越界应报错")
+	}
+	if _, _, err := r.truncateCheckerTranscript(proj, base, "checker_"+base+".try2.jsonl", 0); err == nil {
+		t.Fatal("from=0 应报错")
+	}
+	if _, _, err := r.truncateCheckerTranscript(proj, base, "checker_"+base+".try2.jsonl", 4); err == nil {
+		t.Fatal("切在用量行应报错")
+	}
+}

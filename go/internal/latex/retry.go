@@ -279,6 +279,79 @@ func chapterCompiledPDF(proj, base string) string {
 // 与转换重试的区别：这里不碰 `.tex`、分片与工作区，只换核对会话与只读视图。
 // 结论照既有语义落盘：通过就删 `<章>.tex.checker`，有问题就写进去（旧结论已在
 // forceCheckerRetry 里留档）。API 失败不改结论——那是环境问题，不是"这一章错"。
+// continueCheckerFrom 从核对转录的第 from 条记录之后继续（T184）：前缀抄成
+// 一条**新的核对尝试**（checker_<章>.try<N>.jsonl），后面的轮次丢掉，然后把
+// 这条会话推下去。产物一个字不动——核对本来就是只读判断，回滚对话只是让它
+// 别带着"后面那些已经被推翻的结论"继续想。
+func (r *Runner) continueCheckerFrom(proj, base, srcName string, from int) error {
+	dst, next, err := r.truncateCheckerTranscript(proj, base, srcName, from)
+	if err != nil {
+		return err
+	}
+	if r.retryCheckerAttempt == nil {
+		r.retryCheckerAttempt = map[string]int{}
+	}
+	r.retryCheckerAttempt[base] = next
+	// 旧结论留一份档（与 forceCheckerRetry 同款）：新的那条核对会重写
+	// <章>.tex.checker，旧的留着还能对照。
+	r.setRetryNote(base, "网页重试请求（从记录继续核对）")
+	texPath := filepath.Join(proj, "work", "chapters", base+".tex")
+	if fileExists(texPath + ".checker") {
+		_ = copyFile(texPath+".checker", fmt.Sprintf("%s.checker.try%d", texPath, next-1))
+	}
+	r.log.Log(0, "[checker]", base, "从第", strconv.Itoa(from), "条记录继续核对：新尝试写",
+		filepath.Base(dst), "（源转录保留；产物不动，历史原样续行）")
+	if _, issues := r.recheckChapter(proj, base, 0); issues != "" {
+		r.log.LogInfo(0, "[checker]", base, "从记录继续后的结论:", issues)
+	}
+	return nil
+}
+
+// truncateCheckerTranscript 把核对转录的前 from 行抄成一条新的核对尝试。
+// 源转录一个字不动（与章节转换那边同一套语义）。
+func (r *Runner) truncateCheckerTranscript(proj, base, srcName string, from int) (string, int, error) {
+	if from < 1 {
+		return "", 0, fmt.Errorf("截断点必须 ≥ 1（转录里的行号）")
+	}
+	name := filepath.Base(strings.TrimSpace(srcName))
+	if name == "" || !strings.HasSuffix(name, ".jsonl") {
+		return "", 0, fmt.Errorf("源转录不合法: %q", srcName)
+	}
+	dir := filepath.Join(proj, "work", "sessions")
+	src := filepath.Join(dir, name)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", 0, fmt.Errorf("读不到源转录 %s: %w", name, err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if from > len(lines) {
+		return "", 0, fmt.Errorf("截断点 %d 超出转录长度 %d", from, len(lines))
+	}
+	var probe struct {
+		T string `json:"t"`
+	}
+	if err := json.Unmarshal([]byte(lines[from-1]), &probe); err != nil || probe.T != "msg" {
+		return "", 0, fmt.Errorf("第 %d 行不是一条消息记录（选了用量/元信息行？）", from)
+	}
+	baseTr := filepath.Join(dir, "checker_"+base+".jsonl")
+	next := 2 // 核对尝试从 try2 起（try1 是转换阶段自带的那次核对）
+	for n := 2; n <= 999; n++ {
+		if !fileExists(attemptTranscriptPath(baseTr, n)) {
+			next = n
+			break
+		}
+	}
+	if prev := r.retryCheckerAttempt[base]; prev >= next {
+		next = prev + 1
+	}
+	dst := attemptTranscriptPath(baseTr, next)
+	head := strings.Join(lines[:from], "\n") + "\n"
+	if err := os.WriteFile(dst, []byte(head), 0o644); err != nil {
+		return "", 0, fmt.Errorf("写新尝试的转录失败: %w", err)
+	}
+	return dst, next, nil
+}
+
 func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	chapPath := filepath.Join(proj, "chapters", base+".md")
 	texPath := filepath.Join(proj, "work", "chapters", base+".tex")
@@ -555,9 +628,17 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 			r.log.LogWarning(0, "[convert]", base, "手动重试失败:", err)
 		}
 	case "checker":
-		r.forceCheckerRetry(proj, base)
-		if _, issues := r.recheckChapter(proj, base, 0); issues != "" {
-			r.log.LogInfo(0, "[checker]", base, "重新核对的结论:", issues)
+		if req.From > 0 {
+			// T184：核对的"从某条记录之后继续"——只换核对会话，产物一个字不动。
+			// 不走 forceCheckerRetry：它自己会分配下一个尝试号，和截断这条撞车。
+			if err := r.continueCheckerFrom(proj, base, req.Path, req.From); err != nil {
+				r.log.LogWarning(0, "[checker]", base, "从记录继续核对失败:", err)
+			}
+		} else {
+			r.forceCheckerRetry(proj, base)
+			if _, issues := r.recheckChapter(proj, base, 0); issues != "" {
+				r.log.LogInfo(0, "[checker]", base, "重新核对的结论:", issues)
+			}
 		}
 	case "continue":
 		if req.From > 0 {
@@ -611,23 +692,66 @@ func (r *Runner) continueChapter(proj, base, reason string) error {
 // 源转录一个字不动——原记录还在「历史」里，看得见、也删得掉。这样"回滚到某一
 // 步"不会毁掉现场，只是多出一条从那儿分叉出去的尝试。
 //
-// 一个诚实的限制：只回滚**对话**，工作区还是最后一次的样子（没有按轮次快照
-// 文件树）。所以它适合"模型从那一步开始跑飞、后面几轮全在乱改"的情形；若
-// 要连文件一起回滚，那是另一次重转（重试）该做的事。
+// P55：**连工作区一起退**。每落一条消息都拍过快照（见 rounds.go），这里把
+// 本章工作树 reset 到那一行对应的 commit——只退对话会让模型困惑：它记得的是
+// 那一刻的文件，一 read_file 却发现后面乱改的还在。快照缺失（老会话/git 不
+// 可用）时降级成只退对话，并在日志里说清。提交过的产物一并留档挪走：那一刻
+// 未必已经提交，"未来"交出来的 .tex 留在原地只会把模型带偏。
 func (r *Runner) continueFromChapter(proj, base, srcName string, from int) error {
 	dst, next, err := r.truncateChapterTranscript(proj, base, srcName, from)
 	if err != nil {
 		return err
 	}
+	rolled, ok := r.rollbackChapterWork(proj, base, srcName, from)
+	archiveChapterProducts(r, proj, base, srcName)
 	if r.retryAttempt == nil {
 		r.retryAttempt = map[string]int{}
 	}
 	r.retryAttempt[base] = next
 	r.setContinueFlag(base)
 	defer r.setContinueFlag(base)
+	note := "（源转录保留；不发 user 内容，历史原样续行）"
+	if ok {
+		note = fmt.Sprintf("（源转录保留；工作区回退到第 %d 行；不发 user 内容）", rolled)
+	}
 	r.log.Log(0, "[convert]", base, "从第", strconv.Itoa(from), "条记录继续：新尝试写",
-		filepath.Base(dst), "（源转录保留；不发 user 内容，历史原样续行）")
+		filepath.Base(dst), note)
 	return r.convertChapterNow(proj, base)
+}
+
+// archiveChapterProducts 把这一章已提交的产物与报告挪进 work/attempts/<章>/
+// try<源尝试>/，不动工作树——工作树要留着给 P55 回退。
+func archiveChapterProducts(r *Runner, proj, base, srcName string) {
+	attempt := 1
+	if _, n, ok := transcriptAttempt(srcName); ok && n > 0 {
+		attempt = n
+	}
+	dst := filepath.Join(proj, "work", "attempts", base, fmt.Sprintf("try%d", attempt))
+	submitRoot := filepath.Join(proj, "work", "chapters")
+	targets := []struct{ src, name string }{
+		{filepath.Join(submitRoot, base+".tex"), base + ".tex"},
+		{filepath.Join(submitRoot, base), base},
+		{filepath.Join(proj, "work", "reports", base+".md"), base + ".report.md"},
+	}
+	moved := 0
+	for _, t := range targets {
+		if !fileExists(t.src) {
+			continue
+		}
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			r.log.LogWarning(0, "[convert]", base, "产物留档目录创建失败:", err)
+			return
+		}
+		if err := movePath(t.src, filepath.Join(dst, t.name)); err != nil {
+			r.log.LogWarning(0, "[convert]", base, "产物留档失败:", filepath.Base(t.src), err)
+			continue
+		}
+		moved++
+	}
+	_ = os.Remove(filepath.Join(submitRoot, base+".tex.checker"))
+	if moved > 0 {
+		r.log.Log(0, "[convert]", base, "已提交的产物挪进 work/attempts/"+base+"/try"+strconv.Itoa(attempt)+"/")
+	}
 }
 
 // truncateChapterTranscript 是 continueFromChapter 的纯文件部分：把前 from 行

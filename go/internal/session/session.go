@@ -100,7 +100,12 @@ type Session struct {
 	// every tool execution with (completed rounds, executed tool
 	// calls) — used by compact console modes to show a live line.
 	progressHook func(rounds, tools int)
-	rounds       int
+	// msgHook（P55），when set, is called right after a message lands in the
+	// transcript with the transcript's current line count — the caller turns
+	// that into a workspace snapshot so "从第 N 条记录继续" can roll the
+	// work tree back to the state the model saw at that point.
+	msgHook func(lines int)
+	rounds  int
 	// user is the stable per-conversation identifier sent as the OpenAI
 	// `user` field. Gateways such as new-api can pin routing on it so one
 	// conversation always reaches the same upstream channel; vendor prefix
@@ -118,6 +123,12 @@ type Session struct {
 // calls). Only one hook is supported; pass nil to clear.
 func (s *Session) SetProgressHook(fn func(rounds, tools int)) {
 	s.progressHook = fn
+}
+
+// SetMessageHook registers a callback invoked after every transcript append
+// with the transcript's current line count (P55). One hook at a time.
+func (s *Session) SetMessageHook(fn func(lines int)) {
+	s.msgHook = fn
 }
 
 // notifyProgress reports the current counters to the hook (no-op
@@ -200,8 +211,12 @@ func (s *Session) appendTranscript(msg ChatMessage) {
 	if s.transcript == nil {
 		return
 	}
-	if err := s.transcript.Append(msg); err != nil && s.logger != nil {
-		s.logger.Debug(s.tid, "[session:"+s.label+"] transcript 写入失败:", err)
+	if err := s.transcript.Append(msg); err != nil {
+		if s.logger != nil {
+			s.logger.Debug(s.tid, "[session:"+s.label+"] transcript 写入失败:", err)
+		}
+	} else if s.msgHook != nil {
+		s.msgHook(s.transcript.Lines())
 	}
 	// P7: the full message is on disk now — the streaming snapshot is stale.
 	s.transcript.ClearPartial()

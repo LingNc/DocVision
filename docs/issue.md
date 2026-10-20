@@ -1111,3 +1111,7 @@ user 轮
   改：`checkerClaimNote(view)` 只点名**真实存在**的那些（`report.md` / `notes.md` 各自独立判断），两个都没有就整句不提；`latex_checker.system.md` 里那行同步改成「when present … a file that is not there simply does not exist」。
   影响面：所有章节核对会话（含 `--only` 重核与网页「重新核对」）。提示词里仍然保留两个文件名（`MustMention` 不变），只是不再声称它们一定在。
   验证：新增 `TestCheckerClaimNoteNamesExistingOnly`（都没有 → 空；只有 report → 不提 notes；都在 → 都点名）；`go test ./internal/latex/ ./internal/prompts/` 绿。
+
+[X][ ] T184. 用户问："核对那边为什么没有加这个从某个记录的地方开始？不行吗？"——转换会话的轨迹表每行都有 ⤓（`retryq.Request.From/Path`），核对会话没有；这是 P53 阶段二之一时刻意的取舍（核对是只读判断，重开一条与"从中间接着判断"信息上等价，且核对尝试号由 `checker_rounds` 记账，人工插一脚会和它打架），不是做不到。
+  改：核对会话也支持从某条记录之后继续——新增 `truncateCheckerTranscript` 把 `checker_<章>[.tryN].jsonl` 的前 `from` 行抄成**一条新的核对尝试**（号从 try2 起、取磁盘上第一个空号，内存里已分配的号也算进去，连点两下不撞车；切在 `t=usage`/`meta` 行或越界都拒），`continueCheckerFrom` 设 `retryCheckerAttempt` 后照旧走 `recheckChapter`：产物与只读视图一个字不动、旧结论留一份 `.tex.checker.try<N-1>`、提示词与工具不变；派发端**不走** `forceCheckerRetry`（它自己会分配下一个号，与截断撞车）。服务端 `role=checker` 允许带 `from`，但源转录必须正好是这一章的**核对**转录（`checker_<章>` 加可选 `.tryN`），拿转换转录/别的章节/越界一律拒。页面 `canCutFrom` 放开核对会话，`cutFrom` 按会话类型选角色（vector / checker / continue），确认文案说明"只换核对会话、产物不动"。
+  验证：新增 `TestTruncateCheckerTranscript`（前缀正确、源不动、号递增、越界/0/用量行都拒）与 `TestPostRetryCheckerFromRecord`（角色错位 400、越界 400、成功入队且 `Role=checker`/`From`/`Path` 都在）；`go test ./...` 绿、`npm test` 161 通过、dist 已重建、`go build` 绿。

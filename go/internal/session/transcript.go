@@ -105,6 +105,9 @@ type TranscriptWriter struct {
 	// lastMetaHash guards against duplicate meta lines when a resumed
 	// session re-attaches to the same transcript file.
 	lastMetaHash string
+	// lines 是这份转录当前的物理行数（续跑时从磁盘现有行数起算）。P55：
+	// 工作区快照按"第几行"索引，预览页的 ⤓ 给的是同一个行号。
+	lines int
 }
 
 // NewTranscript opens (creating if needed) the JSONL transcript at path.
@@ -130,7 +133,34 @@ func NewTranscript(path string) (*TranscriptWriter, error) {
 		file:     f,
 	}
 	w.lastMetaHash = w.readLastMetaHash()
+	if data, err := os.ReadFile(abs); err == nil {
+		w.lines = bytes.Count(data, []byte("\n"))
+	}
 	return w, nil
+}
+
+// Lines 是这份转录当前的物理行数（每写一行加一）。P55 用它把工作区快照
+// 钉在"第几行之前的状态"上：⤓ 给的行号与它同一套编号。
+func (w *TranscriptWriter) Lines() int {
+	if w == nil {
+		return 0
+	}
+	return w.lines
+}
+
+// writeLine 是所有写入的唯一出口：写盘、按需 sync、并且**只在这里**给
+// 行数计数——快照一旦按行号索引，少算一行就会回退到错的那一轮。
+func (w *TranscriptWriter) writeLine(data []byte, sync bool) error {
+	buf := append(data, '\n')
+	n, err := w.file.Write(buf)
+	w.lines += bytes.Count(buf[:n], []byte("\n"))
+	if err != nil {
+		return err
+	}
+	if sync {
+		return w.file.Sync()
+	}
+	return nil
 }
 
 // Close releases the underlying file. A leftover partial snapshot would
@@ -223,7 +253,7 @@ func (w *TranscriptWriter) AppendMeta(kind, label, model, system string, tools [
 	if err != nil {
 		return err
 	}
-	if _, err := w.file.Write(append(data, '\n')); err != nil {
+	if err := w.writeLine(data, false); err != nil {
 		return err
 	}
 	w.lastMetaHash = kind + ":" + hash
@@ -244,8 +274,7 @@ func (w *TranscriptWriter) AppendNote(kind string, fields map[string]any) error 
 	if err != nil {
 		return err
 	}
-	_, err = w.file.Write(append(data, '\n'))
-	return err
+	return w.writeLine(data, false)
 }
 
 // lastMetaHash remembers the (kind, system hash) of the meta line written by
@@ -326,8 +355,7 @@ func (w *TranscriptWriter) AppendUsage(u UsageRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = w.file.Write(append(data, '\n'))
-	return err
+	return w.writeLine(data, false)
 }
 
 // nowStamp is the timestamp format every transcript line carries.
@@ -377,10 +405,7 @@ func (w *TranscriptWriter) Append(msg ChatMessage) error {
 	if err != nil {
 		return err
 	}
-	if _, err := w.file.Write(append(data, '\n')); err != nil {
-		return err
-	}
-	return w.file.Sync()
+	return w.writeLine(data, true)
 }
 
 // roundHash derives the stable per-round identity (P10): SHA-256 over the

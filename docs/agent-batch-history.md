@@ -2097,3 +2097,16 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **编号（用户第二问）**：P53 条目内部的 `P1/P2/P3` 分步改称 **「阶段一/阶段二/阶段三」**，并在条目开头写明"这里的「阶段」只是本条目内部的分步，不占 plan 的 P 编号"——plan 里 `P3` 是另一条老计划（把核心工具独立成组件库），内部分步借 P 号会撞车。同批把 `docs/agent-batch-history.md` 的 `P2 之二/之三/之四` 改称 `阶段二之一/之二/之三`、`CHANGELOG` 的 `P53-P2` 改称 `P53 阶段二`、Go 注释里的 `（P2）` 一并改掉（`P27` 是另一条，不动）。
 - **P54 补记**：手动插入用户消息要**真发出去**，必须绕过 `resumeUserText`（`sess.Run(RunOptions{UserText: 用户的话})`），且只在这条手动路径上这么做——中断续跑仍保持"不发"。
 - **验证**：`go build ./...` 通过；`go test ./internal/latex/ ./internal/sessionview/ ./internal/retryq/` 全绿（`retry_test.go` 的 map 断言换成 flag 语义）；无 web 改动，dist 未动。
+
+## v1.5+（第四十七批补二十，P55 + T184：从某条记录继续，工作区也跟着退、核对也能切）
+
+- **用户两问**：① "核对那边为什么没有加这个从某个记录的地方开始？不行吗？如果是正常的转换会话的话我想他从某次工具调用或者操作之后，后面乱码了我想重新这里跑的话，也是不行的吗？感觉这边你实现的不知道怎么弄得？"② "不是只回滚会话回滚会话的话可能会对模型造成困惑，这边也无需记录就是按照历史模型操作过的过程倒退着返回回去不可以吗？还是说需要额外增加实现部分？"——随后选定：**每轮 git 快照**（工作区外仓库、回退到那一刻），并**同意核对也加**。
+- **第一问的答案（先查清再动手）**：转换会话的 ⤓ 每条记录都有（用户/助手/思考/工具回执都是 `t=msg`，工具**调用**行与它所在的 assistant 消息共用行号——从调用行切是"截到那条 assistant 消息之后、回执作废"，从回执行切才是"这次操作跑完之后"）；核对没有是**当时的取舍**（只读判断、重开一条等价，且核对尝试号由 `checker_rounds` 记账），不是做不到。真正的病根是第二问：**工作区没退**，模型一 `read_file` 就发现记忆与文件对不上。
+- **第二问的答案（为什么"倒着撤销"不够）**：转录里只有 `write_file` 的**新**内容（覆盖前原文不在任何地方）、`edit_file` 只能反替换一部分、`bash` 完全不可逆（`mv`/`rm`/重定向/跑脚本），半途失败还会把树留在"既不是第 N 条也不是最后"的状态。要真回退只能有**那一轮的树状态**。
+- **P55 实现**：
+  - `internal/session`：`TranscriptWriter.lines` 计数（打开时按现有文件行数起算、所有写入统一走 `writeLine`——少算一行就会退到错的那一轮）+ `Lines()`；`Session.SetMessageHook(func(lines int))` 在**每条消息成功落盘后**回调（`appendTranscript` 里唯一的 choke point）。
+  - `internal/latex/rounds.go`（新文件）：`roundLog` 给一章建一个**工作区之外**的裸仓库 `<proj>/work/rounds/<章>/repo.git`（每次命令显式 `--git-dir`/`--work-tree`，隔离宿主 `~/.gitconfig`、固定提交身份），每落一条消息 `git add -A && commit --allow-empty` 并把 `{line, sha}` 追加进 `journal-try<N>.jsonl`；编译产物（`*.pdf`/`*.aux`/`*.log`/`*.synctex.gz`…）写在仓库的 `info/exclude`（**不进模型工作区**，免得模型去改），不进快照但 `clean -fdx` 会删。
+  - `continueFromChapter`：截断之后 `rollbackChapterWork`（按行号取**最近一张 ≤ N 的快照** `reset --hard` + `clean -fdx`）+ `archiveChapterProducts`（把已提交的 `.tex`/分片/`report.md` 挪进 `work/attempts/<章>/try<源尝试>/`——那一刻未必已提交，"未来"的产物留在原地只会把模型带偏）。降级：没有快照（老会话 / 宿主没 `git` / 递归子章节）→ 只回退对话并在日志里说清；单次失败只告警一次。
+- **T184 实现**：`truncateCheckerTranscript`（前缀抄成 `checker_<章>.try<N>.jsonl`，号从 try2 起取第一个空号、内存里已分配的号也算进去，切在 usage/meta 行或越界都拒）+ `continueCheckerFrom`（设 `retryCheckerAttempt` → `recheckChapter`，产物与只读视图一字不动，旧结论 `copyFile` 成 `.tex.checker.try<N-1>`）；派发端 checker 带 `from` **不走** `forceCheckerRetry`（它会自己分配下一个号，与截断撞车）；服务端 `role=checker` 允许 `from`，源转录必须正好是这一章的**核对**转录（`transcriptBaseStem` 比对，校验顺序改成"形状 → 存在(404) → 归属(400)"以保住既有语义）；前端 `canCutFrom` 放开 `chapterRole==='checker'`，`cutFrom` 按类型选角色、confirm 文案分叉。
+- **踩坑**：① `git init` 不接受 `--work-tree`（`fatal: 不允许 … 而没有指定 --git-dir` 的兄弟错误），裸仓库初始化必须单独一条命令；② 测试里想用 `ensureLogger` 这个不存在的方法——照 `memwatch_test.go` 用真 `logger.NewLogger` + `SetQuiet`；③ 服务端原有的 `convert_chapter_009` 用例期望 404，新加的"源转录必须属于本章"检查若排在存在性之前会变 400，所以顺序调成先查存在。
+- **验证**：`GOCACHE=/var/tmp/dsh-gocache go test ./... -count=1` 全绿（新增 `TestRoundLogRollback`/`TestRoundLogMissingJournalDegrades`/`TestTranscriptAttemptParse`/`TestTruncateCheckerTranscript`/`TestPostRetryCheckerFromRecord`）；`npm test` 161 通过；web dist 已重建、`go build ./...` 绿。

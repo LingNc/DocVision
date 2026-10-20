@@ -124,8 +124,9 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 	// 否则排进队列也是白排（worker 那边还会再查一次）。
 	srcName := ""
 	if req.From > 0 {
-		if role != "continue" {
-			http.Error(w, "只有「继续跑」可以指定从第几条记录开始", http.StatusBadRequest)
+		// T184：核对的转录也能从某条记录继续（只换核对会话、产物不动）。
+		if role != "continue" && role != "checker" {
+			http.Error(w, "只有「继续跑」与「重新核对」可以指定从第几条记录开始", http.StatusBadRequest)
 			return
 		}
 		srcName = filepath.Base(strings.TrimSpace(req.Path))
@@ -136,6 +137,17 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		lines, err := countTranscriptLines(filepath.Join(projDir, "work", "sessions", srcName))
 		if err != nil {
 			http.Error(w, "源转录不存在: "+srcName, http.StatusNotFound)
+			return
+		}
+		// 源转录必须正好是这一章对应角色的那一条（convert_<章>[.tryN].jsonl /
+		// checker_<章>[.tryN].jsonl）——别让切点落在别的章节或别的角色上。
+		stem := transcriptBaseStem(srcName)
+		want, kind := "convert_"+base, "转换"
+		if role == "checker" {
+			want, kind = "checker_"+base, "核对"
+		}
+		if stem != want {
+			http.Error(w, "源转录不是这一章的"+kind+"会话: "+srcName, http.StatusBadRequest)
 			return
 		}
 		if req.From > lines {
@@ -155,6 +167,9 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 	note := "已加入重试队列：正在跑的 docvision latex 会把它排进并发槽位（任何阶段都收）；没在跑就留到下次启动"
 	if role == "checker" {
 		note = "已加入重新核对队列：只重跑核对会话，产物不动；正在跑的 latex 会把它排进并发槽位"
+	}
+	if role == "checker" && req.From > 0 {
+		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续核对——历史只保留到这一行，开一条新的核对尝试，产物不动、源转录保留", req.From)
 	}
 	if role == "continue" && req.From > 0 {
 		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续——会开一个新尝试，历史只保留到这一行，源转录保留", req.From)
@@ -334,6 +349,17 @@ func (v *viewerServer) serveDrop(w http.ResponseWriter, r *http.Request) {
 }
 
 // attemptFromTranscriptName 从 convert_chapter_002.try3.jsonl 反推章节与尝试号。
+// transcriptBaseStem 去掉 .jsonl 与 .tryN 后缀（convert_<章>.try2 → convert_<章>）。
+func transcriptBaseStem(name string) string {
+	stem := strings.TrimSuffix(filepath.Base(strings.TrimSpace(name)), ".jsonl")
+	if idx := strings.LastIndex(stem, ".try"); idx > 0 {
+		if n, err := strconv.Atoi(stem[idx+len(".try"):]); err == nil && n > 0 {
+			stem = stem[:idx]
+		}
+	}
+	return stem
+}
+
 func attemptFromTranscriptName(name string) (string, int, bool) {
 	stem := strings.TrimSuffix(name, ".jsonl")
 	idx := strings.LastIndex(stem, ".try")

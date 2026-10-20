@@ -12027,24 +12027,30 @@
         const s = state.current;
         return !!s && s.stage === "vector" && String(s.name || "").indexOf("vector_") === 0;
       });
+      const isCheckerSession = computed(() => {
+        const s = state.current;
+        return !!s && s.chapterRole === "checker" && String(s.name || "").indexOf("checker_") === 0;
+      });
       const canCutFrom = computed(() => {
         const s = state.current;
         if (!s || state.staticMode || s.live) return false;
         if (isVectorSession.value) return !!s.project;
-        if (!s.project || !s.chapterId || s.chapterRole !== "convert") return false;
+        if (!s.project || !s.chapterId) return false;
+        if (s.chapterRole !== "convert" && s.chapterRole !== "checker") return false;
         return String(s.chapterId).indexOf("_child_") < 0;
       });
       function cutFrom(row) {
         const s = state.current;
         if (!s || !canCutFrom.value || !row.jump) return;
         const vector = isVectorSession.value;
-        const ask = vector ? "从第 " + row.jump + " 条记录之后继续？\n\n历史会截到这一条（完整旧转录留档成 .tryN，仍看得到），重新只画这一张；类别与分组不变。画完要看到新图，下游阶段需要重跑。" : "从第 " + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试。';
+        const checker = isCheckerSession.value;
+        const ask = vector ? "从第 " + row.jump + " 条记录之后继续？\n\n历史会截到这一条（完整旧转录留档成 .tryN，仍看得到），重新只画这一张；类别与分组不变。画完要看到新图，下游阶段需要重跑。" : checker ? "从第 " + row.jump + " 条记录之后继续核对？\n\n后面的轮次会从这条核对会话的历史里丢掉（源转录仍保留在「历史」里），并开一条新的核对尝试；已提交的产物一个字不动。" : "从第 " + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试；工作区会一起退回这一刻。';
         if (!window.confirm(ask)) return;
         state.retryNote = "正在提交从第 " + row.jump + " 条记录继续的请求…";
         requestChapterRetry(
           String(s.project),
           vector ? "" : String(s.chapterId),
-          vector ? "vector" : "continue",
+          vector ? "vector" : checker ? "checker" : "continue",
           "轨迹回滚到 #" + row.jump,
           { from: Number(row.jump), path: String(s.name || "") }
         ).then((res) => {
@@ -12195,7 +12201,7 @@
       };
     }
   });
-  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-b10ef80a"]]);
+  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-91eefa5e"]]);
   function currentEstimate() {
     const id = state.current ? state.current.id : "";
     const list = state.sessions || [];

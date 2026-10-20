@@ -1576,6 +1576,14 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
+		// P55：每落一条消息就给本章工作树拍一张快照（仓库在模型的可写挂载
+		// 之外），这样「从第 N 条记录继续」能连工作区一起退回那一刻。只给
+		// 顶层章节做——轨迹的 ⤓ 也只对顶层章节开放。
+		if node.Depth == 0 {
+			if rl := r.openRoundLog(proj, base, work, node.AttemptNum); rl != nil {
+				sess.SetMessageHook(rl.commitLine)
+			}
+		}
 	}
 	// P53：这一条尝试是人手动要求重跑的——记下原因，事后在转录/轨迹里能对上。
 	if reason, ok := r.retryNotes[base]; ok && node.Depth == 0 {
