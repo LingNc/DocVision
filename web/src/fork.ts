@@ -1,18 +1,35 @@
 // fork 的提交入口（P57）：对话页与轨迹页共用一处，避免两套确认文案与请求体。
 // 排队成功之后登记"等新尝试出现就切过去"，然后刷新一次索引。
-import { refreshIndex, requestChapterRetry, watchFork } from './data'
+import { refreshIndex, requestChapterRetry, truncateSession, watchFork } from './data'
 import { canForkFrom, forkPrompt, forkRequestOf } from './legacy/fork'
 import { state } from './state'
 
 /* dropBefore：从这一条**之前** fork——等价于把这条及其之后的（错误）消息删掉，让
  * 它从干净的上下文继续（用户口径："删除某些错误消息让他继续"）。第 1 条之前没有
  * 可截断的点，直接拒绝而不是悄悄退化成重跑整章。 */
-export function forkBeforeLine(line: number, source: string): boolean {
+export function dropFromLine(line: number, source: string): boolean {
   if (!(line > 1)) {
     state.retryNote = '这一条之前没有可截断的记录（要从头重来请用「重试这一章」）'
     return false
   }
-  return forkFromLine(line - 1, source)
+  const s: any = state.current
+  if (!s || !s.chapterId) return false
+  const keep = line - 1
+  const ask = '删掉第 ' + line + ' 条及之后（共 ' + keep + ' 条保留）并继续这条会话？\n\n'
+    + '就地截断当前转录，不新开尝试、不复制会话；原文会先备份到 work/sessions/.trash/。'
+    + '想保留一份对照，请先点 ⤓ 显式 fork 一条同样的会话再在这里操作。'
+  if (!window.confirm(ask)) return false
+  state.retryNote = '正在就地截断到第 ' + keep + ' 条…'
+  truncateSession(String(s.project), String(s.path), keep)
+    .then((res: any) => {
+      state.retryNote = '已截断：保留 ' + ((res && res.kept) || keep) + ' 条、丢掉 ' + ((res && res.dropped) || 0)
+        + ' 条（备份 ' + ((res && res.backup) || '.trash/') + '）；运行中的 latex 会从这条会话接着跑'
+      return refreshIndex()
+    })
+    .catch((err: any) => {
+      state.retryNote = '截断失败：' + ((err && err.message) || err)
+    })
+  return true
 }
 
 export function forkFromLine(line: number, source: string): boolean {

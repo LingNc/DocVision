@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest'
 import { canForkFrom, forkPrompt, forkRequestOf } from '../src/legacy/fork'
 import { state } from '../src/state'
-import { forkBeforeLine } from '../src/fork'
+import { dropFromLine } from '../src/fork'
 
 const conv = (over: Record<string, unknown> = {}) => ({
   id: 'book/work/sessions/convert_chapter_002.jsonl',
@@ -57,7 +57,7 @@ describe('确认文案', () => {
 describe('从这条之前（等于删掉这条及之后）', () => {
   it('第 1 条之前没有可截断的点，拒绝且不静默降级成整章重跑', () => {
     state.retryNote = ''
-    expect(forkBeforeLine(1, '对话')).toBe(false)
+    expect(dropFromLine(1, '对话')).toBe(false)
     expect(state.retryNote).toContain('没有可截断的记录')
   })
 

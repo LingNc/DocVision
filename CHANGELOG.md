@@ -70,6 +70,7 @@
 - **bash 沙箱不再把会话自己的工作区变成只读（T156）**：逐章转换工作区的顶层有 `images`/`figures` 两枚指向项目资源树的软链，沙箱据此把整个 `work:` 挂载按条目 `--ro-bind`，于是 bash 里用 python/脚本改 `.tex`、`parts/` 全部 `Read-only file system`（`write_file` 不经沙箱所以显得只有 bash 坏了）。现在可写挂载无条件整棵 `--bind`，再对软链目标补一条只读绑定——自己的文件可写、资源树仍只读、链接照旧能解析。
 
 ### Changed
+- **改历史默认就地截断，fork 改成显式动作**：对话页的 `⤫` 过去是"从这条之前 fork"，每删一次就多一条尝试，历史越用越乱。现在 `⤫` = **就地截断**（`POST /api/truncate`：把这条转录保留到前一条、其后全丢，不新开尝试、不复制转录，原文先备份到 `work/sessions/.trash/`，90 秒内还在写就拒），`⤓` 才是 fork（开新尝试、源记录保留）——想留对照就先手动 fork 一份再改它。
 
 - **手动继续/从记录继续：把"发什么"与文档对齐——什么都不发（P53）**：用户问"从中间消息继续不需要发送任何内容吧？直接发过去模型就接着回复"，查下来发现**确实什么都没发**，但代码与文档一直在说另一套：`resumeUserText()`（`internal/latex/resume.go`）在"有历史"时**一律返回空串**（2026-09-29 用户定的"续跑不插 user 内容"），所以章节「继续跑」那句 `continueChapterPrompt`、"rolled this chapter back to record #N" 那句、作图「从某条记录之后继续」想塞的"历史已回滚"那句，**从头到尾都没被发出去过**——它们都走了 `resumeUserText`，在恢复会话里必然被丢掉。现在把这些死代码清掉（`continueText map[string]string` → 只留一个 `continueFlag` 标记、删掉 `continueChapterPrompt`、删掉 `FigureEnv.ResumeNote` 与作图的 `vectorResumeNote`），行为不变但语义诚实：**手动继续 = 解除"上次已 submit 就收账即结束"，然后历史原样续行**；真跑完没提交由 T94 的提醒补一条（那才是唯一会插进去的 user 消息）。plan 里 P53 的条目内部分步同时从 `P1/P2/P3` 改称「阶段一/二/三」——plan 里 P3 是另一条老计划（独立组件库），内部分步借用 P 号会撞车。P54（手动插入用户消息）的设计要求同步写明：要真发出去必须**绕过** `resumeUserText`，直接 `sess.Run(UserText: 用户的话)`，且只在这条手动路径上这么做。
 

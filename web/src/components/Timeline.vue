@@ -13,7 +13,7 @@ import SystemMsg from './SystemMsg.vue'
 import ImageTurn from './ImageTurn.vue'
 import ResultMsg from './ResultMsg.vue'
 import FoldText from './FoldText.vue'
-import { forkBeforeLine, forkFromLine } from '../fork'
+import { dropFromLine, forkFromLine } from '../fork'
 import { canForkFrom } from '../legacy/fork'
 
 const model = computed(() => streamModel())
@@ -71,14 +71,14 @@ watch(
             <button
               class="fork-btn"
               type="button"
-              :title="'从这里 fork：历史截到第 ' + item.line.n + ' 条，后面丢掉，开一个新尝试接着干（源记录保留）'"
+              :title="'复制一份并从这里开始（fork）：开一个新尝试接着干，源记录保留在「历史」里。想就地改就先在目标会话上操作，不必 fork。'"
               @click.stop="forkFromLine(item.line.n, '对话')"
             >⤓</button>
             <button
               class="fork-btn fork-drop"
               type="button"
-              :title="'从这条之前 fork：等于删掉这条及其之后的记录再继续（源转录仍保留在「历史」里）'"
-              @click.stop="forkBeforeLine(item.line.n, '对话')"
+              :title="'删掉这条及之后的记录并继续（就地截断这条会话，不新开尝试；原文先备份到 work/sessions/.trash/）'"
+              @click.stop="dropFromLine(item.line.n, '对话')"
             >⤫</button>
           </span>
         </div>

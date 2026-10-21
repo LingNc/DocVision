@@ -1,9 +1,8 @@
 package sessionview
 
 import (
-	"time"
-	"context"
 	"bytes"
+	"context"
 	"image"
 	"image/png"
 	"math"
@@ -14,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // chromiumPath returns the browser used by the end-to-end viewer tests, or ""

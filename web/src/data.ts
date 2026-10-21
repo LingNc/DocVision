@@ -277,6 +277,20 @@ export function requestChapterRetry(
 // chapterPendingRetry 报告某项目的某章是否已经在重试队列里（侧栏/详情栏据此
 // 改文案，避免用户连点）。
 /* 删掉一条"转错的记录"（P2）：只删转录，作废尝试的证据目录由服务端一起清。 */
+// truncateSession 就地截断一条转录到第 line 行（含），返回 null 表示成功；
+// 服务端会先把整份原文件备份到 work/sessions/.trash/ 下。
+export function truncateSession(project: string, path: string, line: number): Promise<any> {
+  return fetch('/api/truncate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project, path, line }),
+  }).then(async (res) => {
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status)
+    return data
+  })
+}
+
 export function dropSession(project: string, path: string): Promise<any> {
   return fetch('/api/drop', {
     method: 'POST',

@@ -472,3 +472,58 @@ func retryqPending(t *testing.T, dir string) []string {
 	}
 	return out
 }
+
+// TestPostTruncateInPlace：默认操作是**就地截断**（不新开尝试、不复制转录），
+// 而且原文必须先备份、隔夜不动的旧转录才敢改。
+func TestPostTruncateInPlace(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	sessions := filepath.Join(proj, "work", "sessions")
+	if err := os.MkdirAll(sessions, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "convert_chapter_002.jsonl"
+	body := "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n"
+	full := filepath.Join(sessions, name)
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(full, old, old); err != nil {
+		t.Fatal(err)
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/truncate", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		v.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := post(`{"project":"书A","path":"` + name + `","line":2}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	got, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "{\"n\":1}\n{\"n\":2}\n" {
+		t.Fatalf("就地截断结果不对: %q", string(got))
+	}
+	// 备份必须存在且是完整原文。
+	trash, err := filepath.Glob(filepath.Join(sessions, ".trash", name+".*.jsonl"))
+	if err != nil || len(trash) != 1 {
+		t.Fatalf("备份文件缺失: %v %v", trash, err)
+	}
+	if data, _ := os.ReadFile(trash[0]); string(data) != body {
+		t.Fatalf("备份内容不对: %q", string(data))
+	}
+	// 还在写就拒（90 秒内更新）。
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := post(`{"project":"书A","path":"` + name + `","line":1}`).Code; got != http.StatusConflict {
+		t.Fatalf("活跃会话 status = %d, want 409", got)
+	}
+	if got := post(`{"project":"书A","path":"` + name + `","line":0}`).Code; got != http.StatusBadRequest {
+		t.Fatalf("line=0 status = %d, want 400", got)
+	}
+}

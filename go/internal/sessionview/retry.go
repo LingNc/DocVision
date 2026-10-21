@@ -583,3 +583,92 @@ func dirExists(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.IsDir()
 }
+
+type truncateRequest struct {
+	Project string `json:"project"`
+	Path    string `json:"path"`
+	// Line 是**保留**到第几行（1 起，含这一行）；它之后的全部丢掉。
+	Line int `json:"line"`
+}
+
+// serveTruncate 把一条转录**就地**截断到第 Line 行——这是"删掉这条及之后的
+// 错误消息再继续"，默认操作，不新开尝试、不复制转录（历史上每点一次就多一条
+// 尝试会把人淹掉；要保留一份对照请显式用 fork）。
+//
+// 安全三条：① 可能还在写就拒（90 秒内有更新或有 .partial）；② 动手前把整份
+// 原始转录复制到 work/sessions/.trash/ 下，随时能捞回来；③ 只认 transcripts
+// 目录里的 *.jsonl，落盘用临时文件 + rename，中途失败不会留下半份转录。
+func (v *viewerServer) serveTruncate(w http.ResponseWriter, r *http.Request) {
+	if !v.allowRetry {
+		http.Error(w, "写入口已关闭（docvision sessions 用 --no-retry 启动的）", http.StatusForbidden)
+		return
+	}
+	var req truncateRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+		http.Error(w, "请求体不是合法 JSON", http.StatusBadRequest)
+		return
+	}
+	projDir, ok := v.projectWorkspace(req.Project)
+	if !ok {
+		http.Error(w, "项目不存在", http.StatusNotFound)
+		return
+	}
+	name := filepath.Base(strings.TrimSpace(req.Path))
+	if !transcriptNameRe.MatchString(name) {
+		http.Error(w, "只能截断转录文件（*.jsonl）", http.StatusBadRequest)
+		return
+	}
+	full := filepath.Join(projDir, "work", "sessions", name)
+	st, err := os.Stat(full)
+	if err != nil || !st.Mode().IsRegular() {
+		http.Error(w, "转录不存在: "+name, http.StatusNotFound)
+		return
+	}
+	if req.Line < 1 {
+		http.Error(w, "line 必须 ≥ 1（要整条清空请删记录）", http.StatusBadRequest)
+		return
+	}
+	if time.Since(st.ModTime()) < 90*time.Second || fileExistsIn(projDir, "work", "sessions", name+".partial") {
+		http.Error(w, "这条会话可能还在写（90 秒内有更新），等它停下来再改", http.StatusConflict)
+		return
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		http.Error(w, "读取失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if req.Line >= len(lines) {
+		writeJSON(w, map[string]any{"ok": true, "kept": len(lines), "dropped": 0, "backup": ""})
+		return
+	}
+	kept := append([]string(nil), lines[:req.Line]...)
+	keptBody := strings.Join(kept, "\n") + "\n"
+
+	trash := filepath.Join(projDir, "work", "sessions", ".trash")
+	if err := os.MkdirAll(trash, 0o755); err != nil {
+		http.Error(w, "建备份目录失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	backup := filepath.Join(trash, fmt.Sprintf("%s.%s.jsonl", name, time.Now().Format("20060102-150405")))
+	if err := os.WriteFile(backup, data, 0o644); err != nil {
+		http.Error(w, "备份失败，未改动: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tmp := full + ".tmp"
+	if err := os.WriteFile(tmp, []byte(keptBody), 0o644); err != nil {
+		http.Error(w, "写入失败，未改动: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.Rename(tmp, full); err != nil {
+		_ = os.Remove(tmp)
+		http.Error(w, "替换失败，未改动: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok":      true,
+		"kept":    len(kept),
+		"dropped": len(lines) - len(kept),
+		"backup":  filepath.ToSlash(filepath.Join("work", "sessions", ".trash", filepath.Base(backup))),
+	})
+}

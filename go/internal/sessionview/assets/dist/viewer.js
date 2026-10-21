@@ -7844,6 +7844,17 @@
       return text ? JSON.parse(text) : {};
     });
   }
+  function truncateSession(project, path, line) {
+    return fetch("/api/truncate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project, path, line })
+    }).then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+      return data;
+    });
+  }
   function dropSession(project, path) {
     return fetch("/api/drop", {
       method: "POST",
@@ -11706,12 +11717,24 @@
       extra: { from: Number(line), path: String(s.name || "") }
     };
   }
-  function forkBeforeLine(line, source) {
+  function dropFromLine(line, source) {
     if (!(line > 1)) {
       state.retryNote = "这一条之前没有可截断的记录（要从头重来请用「重试这一章」）";
       return false;
     }
-    return forkFromLine(line - 1, source);
+    const s = state.current;
+    if (!s || !s.chapterId) return false;
+    const keep = line - 1;
+    const ask = "删掉第 " + line + " 条及之后（共 " + keep + " 条保留）并继续这条会话？\n\n就地截断当前转录，不新开尝试、不复制会话；原文会先备份到 work/sessions/.trash/。想保留一份对照，请先点 ⤓ 显式 fork 一条同样的会话再在这里操作。";
+    if (!window.confirm(ask)) return false;
+    state.retryNote = "正在就地截断到第 " + keep + " 条…";
+    truncateSession(String(s.project), String(s.path), keep).then((res) => {
+      state.retryNote = "已截断：保留 " + (res && res.kept || keep) + " 条、丢掉 " + (res && res.dropped || 0) + " 条（备份 " + (res && res.backup || ".trash/") + "）；运行中的 latex 会从这条会话接着跑";
+      return refreshIndex();
+    }).catch((err) => {
+      state.retryNote = "截断失败：" + (err && err.message || err);
+    });
+    return true;
   }
   function forkFromLine(line, source) {
     const s = state.current;
@@ -11738,7 +11761,7 @@
     key: 5,
     class: "fork-acts"
   };
-  const _hoisted_4$5 = ["title", "onClick"];
+  const _hoisted_4$5 = ["onClick"];
   const _hoisted_5$5 = ["onClick"];
   const _hoisted_6$5 = {
     key: 1,
@@ -11815,14 +11838,14 @@
                   createBaseVNode("button", {
                     class: "fork-btn",
                     type: "button",
-                    title: "从这里 fork：历史截到第 " + item.line.n + " 条，后面丢掉，开一个新尝试接着干（源记录保留）",
+                    title: "复制一份并从这里开始（fork）：开一个新尝试接着干，源记录保留在「历史」里。想就地改就先在目标会话上操作，不必 fork。",
                     onClick: withModifiers(($event) => unref(forkFromLine)(item.line.n, "对话"), ["stop"])
                   }, "⤓", 8, _hoisted_4$5),
                   createBaseVNode("button", {
                     class: "fork-btn fork-drop",
                     type: "button",
-                    title: "从这条之前 fork：等于删掉这条及其之后的记录再继续（源转录仍保留在「历史」里）",
-                    onClick: withModifiers(($event) => unref(forkBeforeLine)(item.line.n, "对话"), ["stop"])
+                    title: "删掉这条及之后的记录并继续（就地截断这条会话，不新开尝试；原文先备份到 work/sessions/.trash/）",
+                    onClick: withModifiers(($event) => unref(dropFromLine)(item.line.n, "对话"), ["stop"])
                   }, "⤫", 8, _hoisted_5$5)
                 ])) : createCommentVNode("", true)
               ]);
@@ -11841,7 +11864,7 @@
       };
     }
   });
-  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-8ac8c660"]]);
+  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-cab0a847"]]);
   const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
   function nextMsgLine(lines, idx) {
     for (let i = idx + 1; i < lines.length; i++) {
