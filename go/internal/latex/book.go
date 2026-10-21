@@ -878,11 +878,24 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 //
 // 抽成方法是为了 P53 的"补轮"：一轮跑完之后可能又有新的重试请求进来，要用
 // 同一套并发槽位、进度行与失败汇总再跑一批——复制第二份循环迟早会走岔。
-func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) []string {
-	conc := r.cfg.Latex.Concurrency
-	if conc <= 0 {
-		conc = 3
+// convertBatchWidth 是转换批次宽度的唯一来源：latex.convert_concurrency，没写
+// 沿用 latex.concurrency，两者都没写按老默认 3（与启动账目里的"转换 N"一致）。
+func (r *Runner) convertBatchWidth() int {
+	if w := r.cfg.Latex.ConvertWorkers(); w > 0 {
+		return w
 	}
+	return 3
+}
+
+func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) []string {
+	// T198：批次宽度 = 转换阶段的 worker 数，也就是 latex.convert_concurrency
+	// （没写沿用 latex.concurrency）。
+	//
+	// 这里以前写死 latex.concurrency——于是用户把 convert_concurrency 调到 15，
+	// 启动账目与进度行都说"并发 15"，实际却只有 5 个章节在跑（会话槽位池是 15，
+	// 但同一时刻只开了 5 个 worker，池子根本到不了上限）。实测峰值：转换 6 个
+	// 会话在跑、核对 4 个。
+	conc := r.convertBatchWidth()
 	tidPool := make(chan int, conc)
 	for i := 1; i <= conc; i++ {
 		tidPool <- i
@@ -897,7 +910,7 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 	r.phaseNote()("%s %d 章，并发 %d", label, len(chapters), conc)
 	// 并发数同时进日志文件：控制台进度行不进日志，事后看日志无法判断
 	// 当时跑了几个会话（所有阶段共用 latex.concurrency）。
-	r.log.Log(0, fmt.Sprintf("%s 并发 %d（latex.concurrency），共 %d 章", label, conc, len(chapters)))
+	r.log.Log(0, fmt.Sprintf("%s 并发 %d（latex.convert_concurrency），共 %d 章", label, conc, len(chapters)))
 	var done, failed, running int
 	var progMu sync.Mutex
 	total := len(chapters)

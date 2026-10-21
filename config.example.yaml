@@ -135,7 +135,7 @@ latex:
     bookfix_model: "bookfix"                  # 构建修复会话（book_fix）独立模型（T70；默认沿用 convert）
     final_review_model: "final-review"        # 终审会话独立模型（T70；默认沿用 convert）
   concurrency: 3                 # 会话级并发（classify / 样式修复 / 提交提醒等共用）
-  convert_concurrency: 0         # 章节转换会话并发（T179）；0=沿用 concurrency。与核对是各自独立的槽位池，不放在一起算
+  convert_concurrency: 0         # 章节转换的并发 worker 数（T179/T198）：同时开这么多章转，也是转换会话的槽位上限；0=沿用 concurrency。与核对各自独立，不放在一起算
   checker_concurrency: 0         # 章节核对会话并发（T179）；0=沿用 concurrency。核对在读 PDF/原书页、转换在写 .tex，分开排队
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留

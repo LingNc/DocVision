@@ -1171,6 +1171,12 @@ user 轮
   1. `confirmTextOf('retry', s)` 先判 `_child_` 再看角色，于是核对会话拿到了讲"重跑会破坏已定稿的东西、父章节一整合完就被拒"的**转换**文案——而重核一个字节的产物都不动（T192 已经把这条判据限定在会改产物的动作上）。现在**先分角色再看层级**：核对会话说"产物一个字不动、旧结论留档 `.checker.try<N>`"，子章节再补一句"重核不改产物、父章节整合完同样可以"；只有子章节的**转换**会话才说"只在父节点等子会话时有效"。
   2. 顺着这条查出真正会让按钮失效的断点：`/api/retry`、`retryPrecondition`、`recheckChapter` 都用 `work/chapters/<章>.tex` 判断"有没有已提交产物"，而递归子章节的产物在它上面某一层的 `work/chapters/<父>/children/<子>.tex`（层数不定，且暂存目录 `children.tmp` 里有同名半成品）——所以子章节的「重新核对」一律 400"这一章还没有提交产物"，或排队后永远等前置条件。现在统一按文件名在 `work/chapters` 下解析（跳过 `children.tmp`，`chapterProductsFor()` / `chapterTexIn()`），`recheckChapter` 与前置条件都用它；子章节的编译产物 PDF 也从细分树的节点工作区（`<节点>/work/.gate/compile.json`）取，核对视图照样带上产物页。
   验证：`npm test` 198 绿（新增"子章节的核对会话说的是重新核对、不是重试这个子章节"，同时钉住子章节转换会话仍走旧说法）；`go test ./...` 全绿（新增 `TestChapterProductsFor`：顶层/两层/三层路径与 `children.tmp` 排除；`TestPostRetryCheckerChildProduct`：有细分树产物时子章节重核 200、只有 `children.tmp` 半成品时拒绝）。
+- T198（用户反馈，2026-10-21）：**`latex.convert_concurrency: 15` 调了没用**。用户原话：*"你看一下我的工作区我把并发调到15了，我不确定的这个实际并发跑到15了没有"*，日志里启动账目说"转换 15 / 核对 15（独立槽位）/ 其它阶段 5"，紧接着转换阶段自己打的是"**26 章，并发 5**"。
+  1. `convertChapterBatch()` 的批次宽度写死 `latex.concurrency`（5），而 T179 加的 `convert_concurrency` 只用在会话槽位池上——同一时刻只开 5 个 worker，池子 15 永远到不了上限。启动账目与进度行都说 15，实际是 5，正是"调了配置没反应"。
+  2. 实测（本次运行 21:50 起，按转录里的 `chapter_activity` 区间做重叠统计）：转换峰值 **6** 个会话、核对峰值 **4** 个（各一次，合计 10），确实没到 15。
+  改：批次宽度改为 `ConvertWorkers()`（`convertBatchWidth()` 是唯一来源，启动账目里的"转换 N"与它同源），日志行改成"（latex.convert_concurrency）"；子节点并发本来就按 `ConvertWorkers()` 取信号量，未变。核对侧不用改：核对会话是逐章内联跑的，批次宽度上去了，`checker_concurrency` 才真能生效。
+  两种配置的分工（回答用户"到底哪个数管什么"）：`latex.concurrency` = 其它阶段（classify/process/style-fix/assemble）的 worker；`latex.convert_concurrency` = 同时转换的章节数与转换会话槽位；`latex.checker_concurrency` = 核对会话槽位；真正同时打到同一个模型的请求数由 `models.<名>.max_concurrency` 封顶（未写 = 不限）。
+  验证：新增 `TestConvertBatchWidth`（只写 convert_concurrency / 只写 concurrency / 两者都写 / 都不写四种，且与 `ConvertWorkers()` 一致）；`go test ./...` 全绿；重建后 `go build ./...` 通过。
 - T195（用户反馈，2026-10-21）：**转换章节行上别再放「重试这一章」的悬浮 ↻**。用户原话：*"在转换章节上的重试这一章就不要放这里了"*（截图里鼠标停在转换行上，行尾浮出 ↻ 与 ⓘ）。
   1. T193 已经把转换/核对/作图三种动作集中到中栏顶栏右侧的动作条，章节行上再挂一个同样的 ↻ 是同一个动作的第二个入口，位置又在"看起来像状态徽标"的行尾，容易误点（重试会开新尝试、旧产物归档）。
   2. 只撤**转换行首**的那个 ↻；核对子行的 ↻ 是另一种动作（重新核对：产物一字不动、只换核对会话），保留。行上的「待重试」徽标不受影响——它只是状态提示，不可点。

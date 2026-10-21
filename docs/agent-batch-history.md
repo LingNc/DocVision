@@ -2217,3 +2217,12 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 根因是判断顺序：`confirmTextOf('retry', s)` 先看 `s.chapterId` 里有没有 `_child_`，命中了就返回转换那套说法，`chapterRole === 'checker'` 那一支根本轮不上。改成**先分角色、再看层级**；核对会话对子章节补一句"重核不改产物、父章节整合完同样可以"。
 - 顺着这条又挖出一个真断点：三处"有没有已提交产物"的判据都写死 `work/chapters/<章>.tex`，而递归子章节的产物在它上面某一层的 `work/chapters/<父>/children/<子>.tex`（层数不定，且暂存目录 `children.tmp` 里有同名半成品）。于是子章节的「重新核对」要么 400"这一章还没有提交产物"，要么排队后永远等不到前置条件——按钮看着有、点了不行。现在 `chapterProductsFor()`（latex）与 `chapterTexIn()`（预览服务）按文件名在 `work/chapters` 下解析、跳过 `children.tmp`，`recheckChapter` 与 `/api/retry` 前置条件都用它；子章节的编译产物 PDF 也从细分树的节点工作区（`work/temp/conv_<顶层>/work/_subdivision/**/node/work/.gate/compile.json`）取，核对视图仍带产物页。
 - 验证：`npm test` 198 绿；`go test ./...` 全绿（`TestChapterProductsFor` 钉顶层/两层/三层路径与暂存目录排除，`TestPostRetryCheckerChildProduct` 钉"有细分树产物 200、只有 children.tmp 半成品拒绝"）。
+
+### T198 · `convert_concurrency` 调了没用：批次宽度还是 `concurrency`（2026-10-21）
+
+- 用户把 `latex.convert_concurrency` 调到 15，看日志发现启动账目写"转换 15 / 核对 15（独立槽位）/ 其它阶段 5"，但转换阶段自己打"[convert] 26 章，并发 5"，问"实际并发跑到 15 了没有"。
+- 根因：`convertChapterBatch()` 的批次宽度写死 `r.cfg.Latex.Concurrency`；T179 加的 `convert_concurrency` 只喂给了会话槽位池（`acquireConvertSlot`）。同一时刻只有 5 个 worker 在跑，池子 15 永远到不了上限——两处数字不一致，用户看到的"调了没反应"就是这个。
+- 实测（本次运行 21:50 起，从各转录的 `chapter_activity` running→结论 区间做重叠统计）：转换峰值 6 个会话（21:55:24）、核对峰值 4 个（21:51:31），合计 10，确实没到 15。
+- 改：批次宽度改取 `ConvertWorkers()`，并收成 `convertBatchWidth()` 一处（启动账目里的"转换 N"用的是同一个 `ConvertWorkers()`，不会再走岔）；日志行前缀改成"（latex.convert_concurrency）"。子节点信号量本来就是 `ConvertWorkers()`，未动；核对会话是逐章内联跑的，批次宽度上去之后 `checker_concurrency` 才真能到 15。
+- 顺带把口径写清（用户问"哪个数管什么"）：`latex.concurrency` = 其它阶段的 worker；`latex.convert_concurrency` = 同时转换的章节数与转换会话槽位；`latex.checker_concurrency` = 核对会话槽位；`models.<名>.max_concurrency` = 真正同时打到同一个模型（wire 名）的请求数，未写 = 不限。
+- 验证：新增 `TestConvertBatchWidth`（四种写法都要与 `ConvertWorkers()` 一致）；`go test ./...` 全绿、`go build ./...` 绿。

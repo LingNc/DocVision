@@ -102,7 +102,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.sessions.*.temperature` | 该会话采样温度（同 `models.<name>.temperature`，会话配置优先） | 未设置 |
 | `latex.sessions.*.compaction_at` | 触发自动压缩的窗口占用比例（0-1），不写默认 0.85（所有会话一致，不是只继承 drawing） | 0.85 |
 | `latex.concurrency` | 档位1/档位2 的通用会话级并发（classify / 档位2 process / style-fix / 提交提醒等共用；style、chapters、assemble、终审是单会话）。也是下面两项的默认值 | 3 |
-| `latex.convert_concurrency` | 章节转换会话的并发上限（T179）；0=沿用 `latex.concurrency`。与核对自己一个槽位池，**不放在一起算**：转换在写 `.tex`、核对在读 PDF/原书页，混在一个池里会让核对排在一个慢转换后面 | 0（=concurrency） |
+| `latex.convert_concurrency` | 章节转换的并发 worker 数（T179/T198）：**批次宽度**（同时开这么多章转换）与转换会话的槽位上限是同一个数；0=沿用 `latex.concurrency`。与核对自己一个槽位池，**不放在一起算**：转换在写 `.tex`、核对在读 PDF/原书页，混在一个池里会让核对排在一个慢转换后面 | 0（=concurrency） |
 | `latex.checker_concurrency` | 章节核对会话的并发上限（T179）；0=沿用 `latex.concurrency`。核对会话比转换轻、读的是已有 PDF，通常可以开得比转换多；两个池子加起来超过某个模型的 `max_concurrency` 时，多出来的会话排队等模型槽位（启动日志会点名） | 0（=concurrency） |
 | `latex.insert_image_description` | 档位2 专用：raster 保留原图时是否嵌入 AI 解释文本（`[Image]( … )`）；档位1 不受它控制（总是生成解释块） | false |
 | `latex.style_fix.max_rounds` | 风格修复大循环上限（任何章节汇报样式问题即进入 整合→风格修复→影响评估→分块修复 循环；负数=关闭） | 3 |
