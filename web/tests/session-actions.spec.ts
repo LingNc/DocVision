@@ -20,10 +20,11 @@ describe('重试目标', () => {
     expect(retryTargetOf(checker())).toEqual({ project: 'book', chapter: 'chapter_002', role: 'checker' })
   })
 
-  // 子章节由父章节的细分树产出：单独重跑它会让父节点的整合/晋级状态对不上。
-  // 不给按钮，而不是点了才报错。
-  it('递归子章节不给按钮', () => {
-    expect(retryTargetOf(conv({ chapterId: 'chapter_004_child_01' }))).toBe(null)
+  // P56⑤：子章节给按钮，但只在"父节点还在等子会话"时服务端才接受；整合完就拒。
+  it('递归子章节给按钮，边界交给服务端与确认文案', () => {
+    const t = retryTargetOf(conv({ chapterId: 'chapter_004_child_01' }))
+    expect(t).toEqual({ project: 'book', chapter: 'chapter_004_child_01', role: 'convert' })
+    expect(confirmTextOf('retry', conv({ chapterId: 'chapter_004_child_01' }))).toContain('父节点还在等子会话')
   })
 
   it('样式/汇编/整组核验这些屏障阶段没有章节 ID，也就没有按钮', () => {

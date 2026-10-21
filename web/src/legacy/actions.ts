@@ -20,7 +20,9 @@ export function retryTargetOf(s: any): SessionActionTarget | null {
   if (!s || s.staticMode) return null
   if (!s.chapterId || !s.project) return null
   if (s.chapterRole !== 'convert' && s.chapterRole !== 'checker') return null
-  if (String(s.chapterId).indexOf('_child_') >= 0) return null
+  // P56⑤：子章节也能重试，但只该在"父节点还在等子会话"时用——那时重跑这一支
+  // 不会破坏已定稿的整合；父节点整合完（提交产物已在）服务端会拒，提示去重跑父章节。
+  // 所以按钮照给，确认文案负责说清这条边界（见 confirmTextOf）。
   return { project: String(s.project), chapter: String(s.chapterId), role: s.chapterRole }
 }
 
@@ -49,6 +51,9 @@ export function canDropOf(s: any): boolean {
 export function confirmTextOf(kind: 'retry' | 'continue' | 'redraw' | 'drop' | 'cancel', s: any): string {
   switch (kind) {
     case 'retry':
+      if (s && String(s.chapterId || '').indexOf('_child_') >= 0) {
+        return '重试这个子章节？只在父节点还在等子会话时有效（那时它还没整合，重跑不会破坏已定稿的东西，父节点会拿新结果重新整合）；父章节一整合完，服务端就会拒并提示去重跑父章节。'
+      }
       return s && s.chapterRole === 'checker'
         ? '重新核对这一章？产物一个字不动，只换核对会话；旧结论留档成 .checker.try<N>，旧转录仍在「历史」里。'
         : '重试这一章？会开一个新尝试：旧的整棵（产物 / 分片 / 报告）留档到 work/attempts/，「历史」里两条都在。'

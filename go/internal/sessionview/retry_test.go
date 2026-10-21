@@ -58,7 +58,7 @@ func TestPostRetryQueuesRequest(t *testing.T) {
 }
 
 func TestPostRetryRejections(t *testing.T) {
-	v, _ := retryTestServer(t, true)
+	v, proj := retryTestServer(t, true)
 	cases := []struct {
 		name string
 		body string
@@ -68,14 +68,20 @@ func TestPostRetryRejections(t *testing.T) {
 		{"项目不存在", `{"project":"书B","chapter":"chapter_002"}`, http.StatusNotFound},
 		{"章节名非法", `{"project":"书A","chapter":"../../x"}`, http.StatusBadRequest},
 		{"章节不存在", `{"project":"书A","chapter":"chapter_099"}`, http.StatusNotFound},
-		// 子章节由父章节的细分树产出，不在 chapters/ 下：拒绝并说明方向。
-		{"子章节", `{"project":"书A","chapter":"chapter_003_child_01"}`, http.StatusBadRequest},
+		// P56⑤：子章节给按钮，但父章节整合完（提交产物已在）就必须改跑父章节。
+		{"子章节父已整合", `{"project":"书A","chapter":"chapter_003_child_01"}`, http.StatusBadRequest},
+		// 父节点既没整合、也没有正在跑它的临时树：多半是名字打错了。
+		{"子章节找不到输入", `{"project":"书A","chapter":"chapter_009_child_01"}`, http.StatusNotFound},
 		{"请求体不是 JSON", `not json`, http.StatusBadRequest},
 		{"角色非法", `{"project":"书A","chapter":"chapter_002","role":"style"}`, http.StatusBadRequest},
 		// 继续跑的前提是这一章已经有转录。
 		{"没有转录", `{"project":"书A","chapter":"chapter_002","role":"continue"}`, http.StatusBadRequest},
 		// 重新核对的前提是有已提交产物。
 		{"还没有产物", `{"project":"书A","chapter":"chapter_002","role":"checker"}`, http.StatusBadRequest},
+	}
+	// "父章节已整合"这条要成立：父章节的提交产物必须在。
+	if err := os.MkdirAll(filepath.Join(proj, "work", "chapters"), 0o755); err == nil {
+		_ = os.WriteFile(filepath.Join(proj, "work", "chapters", "chapter_003.tex"), []byte("% x\n"), 0o644)
 	}
 	for _, tc := range cases {
 		if got := postRetry(t, v, tc.body).Code; got != tc.want {

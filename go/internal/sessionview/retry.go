@@ -169,9 +169,26 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 	if st, err := os.Stat(filepath.Join(projDir, "chapters", base+".md")); err != nil || !st.Mode().IsRegular() {
 		// 子章节由父章节的细分树产出（不在 chapters/ 下），单独重跑它得连同父
 		// 节点的整合一起走——那不是"重试这一章"，明说而不是含糊地报不存在。
-		if strings.Contains(base, "_child_") {
-			http.Error(w, "子章节不能单独重试，请重试它所属的顶层章节: "+base, http.StatusBadRequest)
-			return
+		// P56⑤：子章节只在"父节点还没整合完"时能单独重跑——那时重新跑这一支
+		// 不会破坏任何已定稿的东西，父节点等齐子会话后会拿新结果重新整合。
+		// 父章节的提交产物已经在了就说明整合完成（通过或已晋级），这时改子章节
+		// 等于让父报告里的旧结论与产物脱节，必须重跑父章节而不是这一支。
+		if i := strings.Index(base, "_child_"); i > 0 {
+			parent := base[:i]
+			if fileExistsIn(projDir, "work", "chapters", parent+".tex") {
+				http.Error(w, "父章节 "+parent+" 已经整合完成，子章节不能单独重跑；要改这一支请重跑父章节 "+parent, http.StatusBadRequest)
+				return
+			}
+			if _, err := os.Stat(filepath.Join(projDir, "work", "chapters", base+".tex")); err != nil {
+				// 子章节的 md/.tex 在父节点的细分树里，不铺在 chapters/ 下；
+				// 这里只要求"父节点确实在等它"，否则就是打错名字了。
+				if matches, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "conv_"+parent+"*", "work", "_subdivision", "**", base+".md")); len(matches) == 0 {
+					if !fileExistsIn(projDir, "work", "chapters", base+".md") {
+						http.Error(w, "找不到子章节 "+base+" 的输入（父节点 "+parent+" 既没有整合，也没有正在跑它的临时树），先在父章节里重跑这一支", http.StatusNotFound)
+						return
+					}
+				}
+			}
 		}
 		http.Error(w, "章节不存在: "+base, http.StatusNotFound)
 		return
