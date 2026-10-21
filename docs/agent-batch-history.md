@@ -2135,3 +2135,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### 续：P57 ② 的落地方式（"删除某些错误消息让他继续"）
 
 不引入"就地改写转录"的新能力——那要动 append-only 的源文件、还要给每一行重新编号。**等价动作 = 从这条之前 fork**：历史截断点落在前一行，这条及其之后的记录都在新尝试里不存在，源转录一字不动留在「历史」里。所以对话页每条消息多了第二个悬浮按钮 `⤫`（与 `⤓` 同一套判据、同一个排队入口，只是 `from = n-1`），第 1 条之前直接拒绝并说明"要从头重来请用「重试这一章」"。逐条**编辑**某条历史消息（改内容而不是丢弃）仍未做——那需要"改写一条 msg 行 + 保住后面的轮次"，与 fork 的语义不是一回事。
+
+### T189：那张"总是 fallback"的图的真根因（空路径 + 续跑重放）
+
+- **现象**：`status=fallback` 的进度条目里，除了余额不足那批，还有 5 条错误文本是 `open : no such file or directory`——**没有** `会话错误:` 前缀，说明不是会话/接口错误，而是 `RunTikZSession` 自己的 `error` 返回值；而且这 5 条是**同一个 key**（当前项目 + 4 次归档运行），即同一张图反复失败。
+- **根因**：交付前 `copyFile(state.lastPDF, dstPDF)`。`state.lastPDF` 只在 compile 工具**本进程**编译成功时赋值；而续跑时 `resumeSubmit` 直接收账（`state.submitted = true`、`resumeSkip = true`），**一次编译都没发生**，`lastPDF` 是空串 → `os.Open("")` → `open : no such file or directory`。这条错误被 `pp.Error = err.Error()` 记进进度、状态写 `fallback`；下次运行 `pending` 又把它排进去（`status != "done"`），重放 → 再次空路径 → 再次 fallback，形成闭环。所以"重画这张图"也没用：重画同样从重放开始。
+- **修法**：① 交付前判定 `state.lastPDF` 为空或文件不在，就按 `state.finalCode` 用**同一套** `buildStandalone` + `Compiler.Compile` 补编译一次，成功则用新产物；`finalCode` 也为空才报"没有可交付的图形代码"；② 补编译失败时报"交付前重新编译失败（<fig>）：<最后编译错误>"，不再泄漏系统错误；③ `copyFile` 对空源路径直接报"源路径为空，无法写出 <目标>"（`TestCopyFileRejectsEmptySource` 钉住）。
+- **教训**：把"本进程内的临时状态"（`lastPDF`）当成"磁盘上的事实"用，就会在**重放路径**上踩空——重放只恢复逻辑状态（已提交），不恢复过程状态（产物路径）。凡是"交付/收尾"步骤依赖过程状态，都要能从磁盘事实重建。
