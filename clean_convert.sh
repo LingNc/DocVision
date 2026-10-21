@@ -30,8 +30,11 @@
 #   递归子树、.gate、issues store）、work/sessions/convert_*|checker_*（逐章与
 #   checker 转录）、build/、out/、<项目名>.pdf（汇编交付副本）、
 #   work/style_fix/、work/stylefix_assess/、work/stylefix_integrate/、work/final_review/、
-#   work/views/、work/media/、work/pdfview/、work/sessions/book_fix.jsonl、
+#   work/views/、work/pdfview/、work/sessions/book_fix.jsonl、
 #   work/sessions/final_review.jsonl、work/sessions/style_fix_*.jsonl
+# 不删 work/media/：那是**保留下来的** work/style_session.jsonl 的图片附件目录（会话
+#   把图片写在"转录同级目录的 media/"下），删了样式会话的历史就只剩断图（T199）。
+#   同理 work/sessions/media/ 也不能删——被保留的 chapters.jsonl 用它。
 # 默认清理（阶段标记）：progress.json 的 convert、assemble 归空（style/images/chapters
 #   保持 done）——重跑时这三段跳过，直接从逐章转换开始。
 #
@@ -119,7 +122,6 @@ to_delete_after=(
   "work/stylefix_integrate"
   "work/final_review"
   "work/views"
-  "work/media"
   "work/pdfview"
 )
 to_delete_after_files=(

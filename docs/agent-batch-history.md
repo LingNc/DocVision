@@ -2226,3 +2226,12 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 改：批次宽度改取 `ConvertWorkers()`，并收成 `convertBatchWidth()` 一处（启动账目里的"转换 N"用的是同一个 `ConvertWorkers()`，不会再走岔）；日志行前缀改成"（latex.convert_concurrency）"。子节点信号量本来就是 `ConvertWorkers()`，未动；核对会话是逐章内联跑的，批次宽度上去之后 `checker_concurrency` 才真能到 15。
 - 顺带把口径写清（用户问"哪个数管什么"）：`latex.concurrency` = 其它阶段的 worker；`latex.convert_concurrency` = 同时转换的章节数与转换会话槽位；`latex.checker_concurrency` = 核对会话槽位；`models.<名>.max_concurrency` = 真正同时打到同一个模型（wire 名）的请求数，未写 = 不限。
 - 验证：新增 `TestConvertBatchWidth`（四种写法都要与 `ConvertWorkers()` 一致）；`go test ./...` 全绿、`go build ./...` 绿。
+
+### T199 · 样式会话的图片为什么又没了：清理脚本删了它的附件目录（2026-10-21）
+
+- 用户发来样式会话的截图，`view_pdf` 缩略图全是断图，问"media 里的图片怎么又没有了？被谁删了？我今天就执行过一次删除了一个核对会话"。
+- 先自证清白：`/api/drop`（删一条记录）只删那一条转录 + `work/attempts/<章>/try<N>/`，`/api/truncate` 只截断文件，Go 代码里没有任何一处 `RemoveAll`/`Remove` 落在 `media` 上。再按项目里所有转录的 `file://media/<hash>` 引用逐条核对：5493 张附件里只有 `work/style_session.jsonl` 的 31 张缺失、`work/media/` 整个目录不在——只影响样式会话，与"删了一个核对会话"无关。
+- 真凶：会话写图片的目标是**转录同级目录的 `media/`**（`session.NewTranscript` 里 `mediaDir: filepath.Join(filepath.Dir(abs), "media")`），所以 `work/media/` 归属 `work/style_session.jsonl`。而 `clean_convert.sh`（T167）的删除清单里有 `work/media`、保留清单里却有 `work/style_session.jsonl`——脚本把留下来给用户看的会话的附件删了。旁证：项目同级留有 `*_记录_20261020_0737/`（脚本先整目录备份再删），那 31 张正好都在它的 `work/media/` 里，时间戳与删除时间一致。
+- 改：`clean_convert.sh` 不删 `work/media`；`clean_project.sh` 只在 `--with-style`（连样式会话一起删）时才删 `work/media`；两处都写清了"media 是转录同级附件目录"的理由；`work/sessions/media` 也不能整体删——被保留的 `chapters.jsonl` 用它。`docs/latex.md` 的脚本章节同步。
+- 数据恢复：从 `*_记录_20261020_0737/work/media/` 把缺的 31 张补回项目 `work/media/`（只补缺、不覆盖），复核后附件缺失数归零（存在 5544 / 缺失 0）。
+- 验证：`bash -n` 两个脚本；在临时假项目上 `-n` 跑一遍，删除清单不再包含 `work/media`（`work/views`/`work/pdfview` 仍删，那是每次运行重建的）。

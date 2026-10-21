@@ -1177,6 +1177,12 @@ user 轮
   改：批次宽度改为 `ConvertWorkers()`（`convertBatchWidth()` 是唯一来源，启动账目里的"转换 N"与它同源），日志行改成"（latex.convert_concurrency）"；子节点并发本来就按 `ConvertWorkers()` 取信号量，未变。核对侧不用改：核对会话是逐章内联跑的，批次宽度上去了，`checker_concurrency` 才真能生效。
   两种配置的分工（回答用户"到底哪个数管什么"）：`latex.concurrency` = 其它阶段（classify/process/style-fix/assemble）的 worker；`latex.convert_concurrency` = 同时转换的章节数与转换会话槽位；`latex.checker_concurrency` = 核对会话槽位；真正同时打到同一个模型的请求数由 `models.<名>.max_concurrency` 封顶（未写 = 不限）。
   验证：新增 `TestConvertBatchWidth`（只写 convert_concurrency / 只写 concurrency / 两者都写 / 都不写四种，且与 `ConvertWorkers()` 一致）；`go test ./...` 全绿；重建后 `go build ./...` 通过。
+- T199（用户反馈，2026-10-21）：**样式会话里的图片又没了，问"被谁删了"**。用户原话：*"我第一个样式里面的这个会话的media中的图片怎么又没有了？被谁删了？我今天就执行过一次删除了一个核对会话？"*（截图：样式会话里 `view_pdf` 缩略图全是断图）。
+  1. 先排除"今天删的那个核对会话"：`/api/drop` 只删那一条转录和 `work/attempts/<章>/try<N>/`，`/api/truncate` 只截断文件，Go 侧没有任何一处删 `media`。按项目全部转录里的 `file://media/<hash>` 逐条核对：5493 张附件只有 `work/style_session.jsonl` 的 31 张缺失，且 `work/media/` 整个目录不在——只有样式会话受影响，与"删了别的会话"不符。
+  2. 真凶是清理脚本：会话把图片写在**转录同级目录的 `media/`** 下（`session.NewTranscript` 的 `mediaDir`），所以 `work/media/` 是 `work/style_session.jsonl` 的附件目录；而 `clean_convert.sh`（T167）的**删除**清单里有 `work/media`、**保留**清单里有 `work/style_session.jsonl`——保留下来的会话被删掉了图片。旁证：项目同级还留着 `*_记录_20261020_0737/`（脚本"整目录备份"口径），那 31 张正好都在它的 `work/media/` 里。
+  改：`clean_convert.sh` 不再删 `work/media`（样式会话保留，附件就得留）；`clean_project.sh` 只在 `--with-style`（连样式会话一起删）时才删 `work/media`。两个脚本都补了注释说明"`media` 是转录同级的附件目录"；`work/sessions/media` 同理不能整体删——被保留的 `chapters.jsonl` 用它。
+  恢复：从 `*_记录_20261020_0737/work/media/` 把缺的 31 张补回项目的 `work/media/`（只补缺、不覆盖已有文件），复核后附件缺失数归零。
+  验证：`bash -n clean_convert.sh clean_project.sh` 通过；假项目上 `-n` 确认删除清单里不再出现 `work/media`（`work/views`、`work/pdfview` 仍删——那是每次运行重建的）；真实项目按转录引用逐条复核：存在 5544 / 缺失 0。
 - T195（用户反馈，2026-10-21）：**转换章节行上别再放「重试这一章」的悬浮 ↻**。用户原话：*"在转换章节上的重试这一章就不要放这里了"*（截图里鼠标停在转换行上，行尾浮出 ↻ 与 ⓘ）。
   1. T193 已经把转换/核对/作图三种动作集中到中栏顶栏右侧的动作条，章节行上再挂一个同样的 ↻ 是同一个动作的第二个入口，位置又在"看起来像状态徽标"的行尾，容易误点（重试会开新尝试、旧产物归档）。
   2. 只撤**转换行首**的那个 ↻；核对子行的 ↻ 是另一种动作（重新核对：产物一字不动、只换核对会话），保留。行上的「待重试」徽标不受影响——它只是状态提示，不可点。
