@@ -2210,3 +2210,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 修法：判据拆成 `canCutFrom()`（就地截断，允许子章节）与 `canForkFrom()`（fork 仍只给顶层）；服务端 `transcriptUnderWork()` 按绝对路径解析并限定 `<项目>/work/` 之下的 `.jsonl`（裸文件名仍走 `work/sessions/`），路径不合法 400、不存在 404；子章节会话的「继续跑」换成它的顶层父章节（`continueTargetOf()`，文案「继续跑父章节」）——父章节接着跑不新建尝试、不归档，重新驱动子树时每一支按自己磁盘上那条转录续跑，于是"截断 + 继续跑父章节"= 从截断处接着跑；派发端收到子章节的 `convert`/`continue` 直接消费并写清怎么做，不再无声滞留。
 - 两条现场的归因：转换那条的 400 是网关侧返回的（同一会话此前请求都正常，前缀没变，属于换一次路由再试）；核对那条是模型连着多轮没调 `submit`、被"没提交"提醒追着走，截到第一次提醒之前再继续能让它带着干净上下文重判。
 - 验证：`npm test` 197 绿（新增两组单测：子章节可截、继续跑换父章节）；`go test ./...` 全绿（新增 `TestPostTruncateDeepTranscript`：细分树里的转录能就地截断、备份仍落 `work/sessions/.trash/`、工作区外 400、`../` 穿越拒绝）。
+
+### T197 · 核对会话的确认文案与子章节的产物路径（2026-10-21）
+
+- 用户的反馈很短：截图里站在 `核对 · chapter_014_child_04` 上，确认条写着"重试这个子章节？只在父节点还在等子会话时有效……父章节一整合完，服务端就会拒"，他问"核对会话不应该提示这个吧"。确实不对：重核一个字节的产物都不动（T192 已把"父节点是否已整合"这条判据限定在会改产物的动作上），文案却把转换口径套在了核对会话上。
+- 根因是判断顺序：`confirmTextOf('retry', s)` 先看 `s.chapterId` 里有没有 `_child_`，命中了就返回转换那套说法，`chapterRole === 'checker'` 那一支根本轮不上。改成**先分角色、再看层级**；核对会话对子章节补一句"重核不改产物、父章节整合完同样可以"。
+- 顺着这条又挖出一个真断点：三处"有没有已提交产物"的判据都写死 `work/chapters/<章>.tex`，而递归子章节的产物在它上面某一层的 `work/chapters/<父>/children/<子>.tex`（层数不定，且暂存目录 `children.tmp` 里有同名半成品）。于是子章节的「重新核对」要么 400"这一章还没有提交产物"，要么排队后永远等不到前置条件——按钮看着有、点了不行。现在 `chapterProductsFor()`（latex）与 `chapterTexIn()`（预览服务）按文件名在 `work/chapters` 下解析、跳过 `children.tmp`，`recheckChapter` 与 `/api/retry` 前置条件都用它；子章节的编译产物 PDF 也从细分树的节点工作区（`work/temp/conv_<顶层>/work/_subdivision/**/node/work/.gate/compile.json`）取，核对视图仍带产物页。
+- 验证：`npm test` 198 绿；`go test ./...` 全绿（`TestChapterProductsFor` 钉顶层/两层/三层路径与暂存目录排除，`TestPostRetryCheckerChildProduct` 钉"有细分树产物 200、只有 children.tmp 半成品拒绝"）。

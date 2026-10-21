@@ -258,6 +258,13 @@ func selectOnlyChapters(chapters []string, only map[string]bool) []string {
 // 记的那个）：重新核对时把它挂进只读视图，核对才有"产物页"可看。
 func chapterCompiledPDF(proj, base string) string {
 	work := filepath.Join(proj, "work", "temp", "conv_"+base, "work")
+	if !dirExists(work) {
+		// 递归子章节没有自己的 temp 工作区，它在父节点的细分树里干活：那个节点的
+		// 转录目录是 <节点>/sessions/，工作区就是同级的 <节点>/work。
+		if nodeWork := childNodeWork(proj, base); nodeWork != "" {
+			work = nodeWork
+		}
+	}
 	data, err := os.ReadFile(filepath.Join(work, ".gate", "compile.json"))
 	if err != nil {
 		return ""
@@ -394,10 +401,78 @@ func findChildMarkdown(proj, parent, base string) string {
 	return ""
 }
 
+// chapterProductsFor 找一章**已提交产物**的两个路径：主 .tex 与分片目录。
+//
+// 顶层就在 work/chapters/<章>.tex；递归子章节的产物在它上面某一层的
+// work/chapters/<父>/children/<子>.tex（层数不定），所以按文件名在 work/chapters
+// 下找一遍——暂存目录 children.tmp 里也有同名副本，必须跳过，否则会拿半成品去
+// 核对。（以前这里写死 work/chapters/<章>.tex，子章节的「重新核对」一律报
+// "这一章还没有提交产物"，按钮看起来就是坏的。）
+func chapterProductsFor(proj, base string) (string, string) {
+	root := filepath.Join(proj, "work", "chapters")
+	top := filepath.Join(root, base+".tex")
+	if fileExists(top) {
+		return top, strings.TrimSuffix(top, ".tex")
+	}
+	found := ""
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || found != "" {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == "children.tmp" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == base+".tex" {
+			found = p
+		}
+		return nil
+	})
+	if found == "" {
+		return top, filepath.Join(root, base)
+	}
+	return found, strings.TrimSuffix(found, ".tex")
+}
+
+// childNodeWork 找递归子章节所在节点的工作区（<节点>/work）。节点的转录目录是
+// 同级的 sessions/，文件名带完整章节 ID，所以按转录名定位节点最稳。
+func childNodeWork(proj, base string) string {
+	i := strings.Index(base, "_child_")
+	if i <= 0 {
+		return ""
+	}
+	root := base[:i]
+	roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+root+"*", "work", "_subdivision"))
+	for _, r := range roots {
+		hit := ""
+		_ = filepath.WalkDir(r, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || hit != "" {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+				return nil
+			}
+			if !strings.HasPrefix(d.Name(), "convert_"+base) && !strings.HasPrefix(d.Name(), "checker_"+base) {
+				return nil
+			}
+			if filepath.Base(filepath.Dir(p)) != "sessions" {
+				return nil
+			}
+			hit = filepath.Join(filepath.Dir(filepath.Dir(p)), "work")
+			return nil
+		})
+		if hit != "" && dirExists(hit) {
+			return hit
+		}
+	}
+	return ""
+}
+
 func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	chapPath := chapterMarkdownFor(proj, base)
-	texPath := filepath.Join(proj, "work", "chapters", base+".tex")
-	partsPath := filepath.Join(proj, "work", "chapters", base)
+	texPath, partsPath := chapterProductsFor(proj, base)
 	if !fileExists(texPath) {
 		return false, "这一章还没有提交产物，无法重新核对（先重试转换）"
 	}
@@ -556,8 +631,10 @@ func (r *Runner) retryPrecondition(proj, role, base string) string {
 			return "这一章还没有转换转录"
 		}
 	}
-	if role == "checker" && !fileExists(filepath.Join(proj, "work", "chapters", base+".tex")) {
-		return "这一章还没有提交产物"
+	if role == "checker" {
+		if tex, _ := chapterProductsFor(proj, base); !fileExists(tex) {
+			return "这一章还没有提交产物"
+		}
 	}
 	if role == "continue" && !fileExists(filepath.Join(proj, "work", "temp", "conv_"+base, "work")) {
 		return "这一章的工作区已经不在了"

@@ -473,6 +473,53 @@ func retryqPending(t *testing.T, dir string) []string {
 	return out
 }
 
+// TestPostRetryCheckerChildProduct（T197）：递归子章节的产物不在
+// work/chapters/<章>.tex，而在 <父>/children/<子>.tex。以前"有没有提交产物"只查
+// 顶层路径，于是子章节的「重新核对」一律 400"还没有提交产物"——按钮看着有、
+// 点了就报错（同一批里页面的二次确认文案还把转换口径套在核对会话上）。
+func TestPostRetryCheckerChildProduct(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	base := "chapter_014_child_04"
+	children := filepath.Join(proj, "work", "chapters", "chapter_014", "children")
+	if err := os.MkdirAll(filepath.Join(children, base), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(children, base+".tex"), []byte("\\chapter{x}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 父节点还在等子会话（临时细分树里有它的 md），转换口径的闸门不挡它。
+	sub := filepath.Join(proj, "work", "temp", "conv_chapter_014", "work", "_subdivision", "child_04", "node")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, base+".md"), []byte("# 子章\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := postRetry(t, v, `{"project":"书A","chapter":"`+base+`","role":"checker"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("子章节有产物时应能重新核对，status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	// 暂存目录 children.tmp 里的半成品不算"已提交"。
+	v2, proj2 := retryTestServer(t, true)
+	tmpDir := filepath.Join(proj2, "work", "chapters", "chapter_014", "children", "children.tmp")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, base+".tex"), []byte("\\chapter{x}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub2 := filepath.Join(proj2, "work", "temp", "conv_chapter_014", "work", "_subdivision", "child_04", "node")
+	if err := os.MkdirAll(sub2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub2, base+".md"), []byte("# 子章\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postRetry(t, v2, `{"project":"书A","chapter":"`+base+`","role":"checker"}`); rec.Code == http.StatusOK {
+		t.Fatal("children.tmp 里的暂存产物不该被当成已提交")
+	}
+}
+
 // TestPostTruncateDeepTranscript（T196）：递归子章节的转录不在 work/sessions/ 下，
 // 而在父工作区的细分树里（work/temp/conv_<父>/work/_subdivision/**/node/sessions/）。
 // 页面发的是 SessionInfo.Path（绝对路径），截断必须按"落在 <项目>/work/ 之下"解析

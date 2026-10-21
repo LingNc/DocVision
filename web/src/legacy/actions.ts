@@ -66,13 +66,22 @@ export function canDropOf(s: any): boolean {
 /* 二次确认的文案：把"会发生什么"写清楚，避免点下去才发现。 */
 export function confirmTextOf(kind: 'retry' | 'continue' | 'redraw' | 'drop' | 'cancel', s: any): string {
   switch (kind) {
-    case 'retry':
+    case 'retry': {
+      // T197：**先分角色，再看层级**。核对会话的按钮是「重新核对这一章」，它一个
+      // 字节的产物都不动，所以不受"父节点还在等子会话"那条约束（T192）。以前把
+      // `_child_` 判断写在最前面，站到子章节的核对会话上会弹出一段讲"重跑会破坏
+      // 已定稿的东西、父章节一整合完就被拒"的转换口径文案——纯属张冠李戴，还把
+      // 人劝退。
+      if (s && s.chapterRole === 'checker') {
+        const child = String(s.chapterId || '').indexOf('_child_') >= 0
+        return '重新核对这一章？产物一个字不动，只换核对会话；旧结论留档成 .checker.try<N>，旧转录仍在「历史」里。'
+          + (child ? '（递归子章节也能重核：它不改产物，父章节整合完同样可以。）' : '')
+      }
       if (s && String(s.chapterId || '').indexOf('_child_') >= 0) {
         return '重试这个子章节？只在父节点还在等子会话时有效（那时它还没整合，重跑不会破坏已定稿的东西，父节点会拿新结果重新整合）；父章节一整合完，服务端就会拒并提示去重跑父章节。'
       }
-      return s && s.chapterRole === 'checker'
-        ? '重新核对这一章？产物一个字不动，只换核对会话；旧结论留档成 .checker.try<N>，旧转录仍在「历史」里。'
-        : '重试这一章？会开一个新尝试：旧的整棵（产物 / 分片 / 报告）留档到 work/attempts/，「历史」里两条都在。'
+      return '重试这一章？会开一个新尝试：旧的整棵（产物 / 分片 / 报告）留档到 work/attempts/，「历史」里两条都在。'
+    }
     case 'continue':
       return '继续跑？接着这一章最近一次尝试接着干：不新建尝试、不归档、不动已提交产物。'
     case 'redraw':

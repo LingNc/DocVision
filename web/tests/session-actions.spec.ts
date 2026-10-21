@@ -85,6 +85,17 @@ describe('二次确认的文案', () => {
     expect(confirmTextOf('retry', checker())).toContain('.checker.try')
   })
 
+  /* T197：子章节的核对会话曾经弹的是转换口径的文案（"重跑会破坏已定稿的东西、
+   * 父章节一整合完就被拒"），把"重核不改产物"这条铁律说反了。角色要先于层级。 */
+  it('子章节的核对会话说的是"重新核对"，不是"重试这个子章节"', () => {
+    const child = checker({ chapterId: 'chapter_014_child_04' })
+    expect(confirmTextOf('retry', child)).toContain('产物一个字不动')
+    expect(confirmTextOf('retry', child)).not.toContain('父节点还在等子会话')
+    expect(confirmTextOf('retry', child)).not.toContain('重试这个子章节')
+    // 转换子章节仍然走"只在父节点等子会话时有效"那套说法。
+    expect(confirmTextOf('retry', conv({ chapterId: 'chapter_014_child_04' }))).toContain('父节点还在等子会话')
+  })
+
   it('继续跑说清"不新建尝试"', () => {
     expect(confirmTextOf('continue', conv())).toContain('不新建尝试')
   })

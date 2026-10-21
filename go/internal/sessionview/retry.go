@@ -219,7 +219,7 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// 重新核对的对象是**已提交的产物**：还没交过就没什么可核的，先重试转换。
-	if role == "checker" && !fileExistsIn(projDir, "work", "chapters", base+".tex") {
+	if role == "checker" && chapterTexIn(projDir, base) == "" {
 		http.Error(w, "这一章还没有提交产物，无法重新核对（先重试转换）", http.StatusBadRequest)
 		return
 	}
@@ -457,6 +457,34 @@ var transcriptNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.jsonl$`)
 //	  会话里曾经一律 404）。
 //
 // 两种写法都必须落在 <proj>/work/ 之下、扩展名 .jsonl、且真的是普通文件。
+// chapterTexIn 找一章已提交的 .tex：顶层就在 work/chapters/<章>.tex；递归子章节
+// 的产物在它上面某一层的 work/chapters/<父>/children/<子>.tex（层数不定）。暂存
+// 目录 children.tmp 里有同名半成品，跳过。返回空串 = 还没有提交产物。
+func chapterTexIn(projDir, base string) string {
+	top := filepath.Join(projDir, "work", "chapters", base+".tex")
+	if pathExists(top) {
+		return top
+	}
+	root := filepath.Join(projDir, "work", "chapters")
+	found := ""
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || found != "" {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == "children.tmp" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == base+".tex" {
+			found = p
+		}
+		return nil
+	})
+	return found
+}
+
 var errTranscriptMissing = errors.New("转录不存在")
 
 func transcriptUnderWork(projDir, raw string) (string, error) {
