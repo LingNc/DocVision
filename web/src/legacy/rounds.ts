@@ -53,3 +53,40 @@ export function checkerRounds(lines: any[]): CheckerRound[] {
   flush()
   return out
 }
+
+export interface UserRound {
+  /** 1 起。 */
+  round: number
+  /** 这一轮第一条消息的行号（user 行；没有 user 行时是第一行）。 */
+  from: number
+  /** 这一轮最后一条消息的行号。 */
+  to: number
+  lines: number
+  /** 这一轮的 user 正文摘要（认轮用）。 */
+  summary: string
+  /** 这一轮里出现过 submit 工具调用吗（删它要注意磁盘产物还在）。 */
+  submitted: boolean
+}
+
+/** userRounds：按 user 消息切轮。服务端的 /api/prune 用同一判据，序号必须对得上。 */
+export function userRounds(lines: any[]): UserRound[] {
+  const out: UserRound[] = []
+  const push = (from: number, to: number, summary: string, submitted: boolean) => {
+    out.push({ round: out.length + 1, from, to, lines: to - from + 1, summary, submitted })
+  }
+  let cur: { from: number; to: number; summary: string; submitted: boolean } | null = null
+  for (const l of lines || []) {
+    const n = Number(l && l.n) || 0
+    if (l && l.role === 'user') {
+      if (cur) push(cur.from, cur.to, cur.summary, cur.submitted)
+      cur = { from: n, to: n, summary: String(l.text || '').trim().slice(0, 80), submitted: false }
+      continue
+    }
+    if (!cur) cur = { from: n, to: n, summary: '', submitted: false }
+    cur.to = n
+    const name = String((l && l.name) || '')
+    if (name === 'submit') cur.submitted = true
+  }
+  if (cur) push(cur.from, cur.to, cur.summary, cur.submitted)
+  return out
+}

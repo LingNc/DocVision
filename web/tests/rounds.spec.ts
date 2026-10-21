@@ -29,3 +29,25 @@ describe('核对转录按轮切分（T188）', () => {
     expect(checkerRounds(null as any)).toEqual([])
   })
 })
+
+describe('按 user 轮切分（T191，与 /api/prune 同判据）', () => {
+  it('user 行开一轮，行号与 submit 标记对得上', async () => {
+    const { userRounds } = await import('../src/legacy/rounds')
+    const rs = userRounds([
+      { n: 1, role: 'user', text: '开始转换' },
+      { n: 2, role: 'assistant', text: '好的' },
+      { n: 3, role: 'tool', name: 'submit' },
+      { n: 4, role: 'user', text: '继续' },
+      { n: 5, role: 'assistant', text: 'done' },
+    ])
+    expect(rs.map((r) => [r.round, r.from, r.to])).toEqual([[1, 1, 3], [2, 4, 5]])
+    expect(rs[0].submitted).toBe(true)
+    expect(rs[1].submitted).toBe(false)
+    expect(rs[1].summary).toBe('继续')
+  })
+
+  it('没有 user 行时整条算一轮', async () => {
+    const { userRounds } = await import('../src/legacy/rounds')
+    expect(userRounds([{ n: 1, role: 'assistant', text: 'x' }])).toHaveLength(1)
+  })
+})

@@ -291,6 +291,20 @@ export function truncateSession(project: string, path: string, line: number): Pr
   })
 }
 
+// pruneRounds 按**轮号**删掉一条转录里的若干整轮（T191）：服务端自己再切一遍轮，
+// 序号对不上就整批拒；动手前整份原文备份到 work/sessions/.trash/。
+export function pruneRounds(project: string, path: string, drop: number[]): Promise<any> {
+  return fetch('/api/prune', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project, path, drop }),
+  }).then(async (res) => {
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status)
+    return data
+  })
+}
+
 export function dropSession(project: string, path: string): Promise<any> {
   return fetch('/api/drop', {
     method: 'POST',

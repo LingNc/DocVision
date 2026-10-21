@@ -13,7 +13,8 @@
 // ③ 已经开跑、撤销不到的时候，给「删除这条记录」这条出口（服务端 /api/drop）。
 import { computed, ref, watch } from 'vue'
 import { state } from '../state'
-import { cancelChapterRetry, chapterPendingRetry, dropSession, refreshIndex, requestChapterRetry, selectSession } from '../data'
+import { cancelChapterRetry, chapterPendingRetry, dropSession, pruneRounds, refreshIndex, requestChapterRetry, selectSession } from '../data'
+import { userRounds } from '../legacy/rounds'
 import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, retryTargetOf } from '../legacy/actions'
 
 type Pending =
@@ -25,6 +26,11 @@ const pending = ref<Pending | null>(null)
 const queued = ref<{ project: string; chapter: string; role: string; path: string; prevId: string } | null>(null)
 const prevId = ref('')
 const busy = ref(false)
+/* T191：按轮删除。默认操作就地改，不动 fork；只按**轮边界**删，保证 wire 合法。 */
+const roundsOpen = ref(false)
+const dropRounds = ref<number[]>([])
+const rounds = computed(() => userRounds((state.lines || []) as any[]))
+const canPrune = computed(() => !!canDropOf(state.current) && rounds.value.length > 1)
 
 const target = computed(() => retryTargetOf(state.current))
 const canContinue = computed(() => canContinueOf(state.current))
@@ -57,6 +63,45 @@ watch(
     state.retryNote = ''
   },
 )
+
+function openPrune() {
+  if (busy.value) return
+  dropRounds.value = []
+  roundsOpen.value = !roundsOpen.value
+  pending.value = null
+}
+
+function toggleRound(n: number) {
+  const i = dropRounds.value.indexOf(n)
+  if (i >= 0) dropRounds.value.splice(i, 1)
+  else dropRounds.value.push(n)
+}
+
+function doPrune() {
+  const s: any = state.current
+  const drop = dropRounds.value.slice().sort((a, b) => a - b)
+  if (!s || !drop.length || busy.value) return
+  // 删到含 submit 的轮要额外提醒：磁盘上的产物与归档不会跟着消失。
+  const warn = rounds.value.filter((r) => drop.indexOf(r.round) >= 0 && r.submitted)
+  const ask2 = '删掉 ' + drop.length + ' 轮（第 ' + drop.join('、') + ' 轮）？\n\n'
+    + '就地重写这条转录，不新开尝试、不复制会话；原文先备份到 work/sessions/.trash/。'
+    + (warn.length ? '\n\n注意：第 ' + warn.map((r) => r.round).join('、') + ' 轮里有 submit 记录——磁盘上的产物与 work/attempts 归档不会跟着消失，续跑时"已有产物"的判断看的是磁盘。' : '')
+  if (!window.confirm(ask2)) return
+  roundsOpen.value = false
+  busy.value = true
+  state.retryNote = '正在删掉 ' + drop.length + ' 轮…'
+  pruneRounds(String(s.project), String(s.path), drop)
+    .then((res: any) => {
+      state.retryNote = '已删掉 ' + ((res && res.dropped) || 0) + ' 条记录、保留 ' + ((res && res.kept) || 0)
+        + ' 条（' + ((res && res.rounds) || rounds.value.length) + ' 轮 → 剩 ' + (((res && res.rounds) || 0) - drop.length) + ' 轮；备份 ' + ((res && res.backup) || '.trash/') + '）'
+      busy.value = false
+      return refreshIndex().catch(() => undefined)
+    })
+    .catch((err: any) => {
+      state.retryNote = '按轮删除失败：' + ((err && err.message) || err)
+      busy.value = false
+    })
+}
 
 function ask(kind: 'retry' | 'continue' | 'redraw' | 'drop') {
   if (busy.value) return
@@ -180,6 +225,14 @@ function doCancel() {
         @click="ask('drop')"
       >删除这条记录</button>
       <button
+        v-if="canPrune"
+        class="act-btn"
+        type="button"
+        :disabled="busy"
+        title="按「轮」（一条 user 消息及其后的调用/回执）勾选删除，就地重写这条转录；原文先备份"
+        @click="openPrune"
+      >按轮删除{{ dropRounds.length ? '（' + dropRounds.length + '）' : '' }}</button>
+      <button
         v-if="queued"
         class="act-btn act-undo"
         type="button"
@@ -202,9 +255,53 @@ function doCancel() {
     </template>
     <span v-if="state.retryNote" class="act-note">{{ state.retryNote }}</span>
   </div>
+  <!-- T191：按轮删除的勾选面板。只列轮，不列单条消息——删整轮才保证
+       "调用 ↔ 回执"不被打断，续跑时 wire 仍然合法。 -->
+  <div v-if="roundsOpen" class="act-prune">
+    <div class="act-prune-head">
+      勾选要删掉的轮（这条会话共 {{ rounds.length }} 轮）；不选就取消。
+      <span v-if="!dropRounds.length" class="act-prune-hint">目前没有勾选</span>
+    </div>
+    <label v-for="r in rounds" :key="'pr' + r.round" class="act-prune-row">
+      <input type="checkbox" :checked="dropRounds.indexOf(r.round) >= 0" @change="toggleRound(r.round)" />
+      <span class="act-prune-tag">轮 {{ r.round }}</span>
+      <span class="act-prune-sum">{{ r.summary || '（空）' }}</span>
+      <span class="act-prune-meta">第 {{ r.from }}–{{ r.to }} 行 · {{ r.lines }} 条<span v-if="r.submitted"> · 含 submit</span></span>
+    </label>
+    <div class="act-prune-foot">
+      <button class="act-btn act-danger" type="button" :disabled="busy || !dropRounds.length" @click="doPrune">删掉勾选的轮</button>
+      <button class="act-btn act-quiet" type="button" :disabled="busy" @click="roundsOpen = false">取消</button>
+    </div>
+  </div>
 </template>
 
 <style scoped>
+.act-prune {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 16px 0 20px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.act-prune-head { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--caption); }
+
+.act-prune-hint { color: var(--caption); }
+
+.act-prune-row { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 1px 0; cursor: pointer; }
+
+.act-prune-tag { color: var(--caption); }
+
+.act-prune-sum { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.act-prune-meta { color: var(--caption); white-space: nowrap; }
+
+.act-prune-foot { display: flex; gap: 6px; padding-top: 4px; }
+
 .session-actions {
   display: flex;
   flex-wrap: wrap;
