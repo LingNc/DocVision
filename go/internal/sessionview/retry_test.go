@@ -527,3 +527,43 @@ func TestPostTruncateInPlace(t *testing.T) {
 		t.Fatalf("line=0 status = %d, want 400", got)
 	}
 }
+
+// TestPostRetryChildCheckerIgnoresParent：**重新核对**不动产物，所以不受"父章节
+// 已整合"那条限制（P56⑤ 只管 convert/continue）；同一章用 convert 才被拦。
+func TestPostRetryChildCheckerIgnoresParent(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	chapters := filepath.Join(proj, "work", "chapters")
+	if err := os.MkdirAll(chapters, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 父章节整合完（父 .tex 在）+ 子章节产物也在。
+	for _, n := range []string{"chapter_003.tex", "chapter_003_child_01.tex"} {
+		if err := os.WriteFile(filepath.Join(chapters, n), []byte("% x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := `{"project":"书A","chapter":"chapter_003_child_01","role":"checker"}`
+	if rec := postRetry(t, v, body); rec.Code != http.StatusOK {
+		t.Fatalf("子章节重新核对 status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_003_child_01","role":"convert"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("子章节重转 status = %d, want 400（父已整合）", rec.Code)
+	}
+}
+
+// TestPostRetryChildUsesTempTree：父节点正在跑这一支时，子章节的 md 在节点的临时
+// 细分树深处（父节点还没整合，`work/chapters/<父>.tex` 不在）。这一条曾因为
+// `filepath.Glob` 的 `**` 只匹配一层而被误判成"找不到输入"。
+func TestPostRetryChildUsesTempTree(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	md := filepath.Join(proj, "work", "temp", "conv_chapter_004", "work", "_subdivision", "chapter_004_child_02", "source", "chapter_004_child_02.md")
+	if err := os.MkdirAll(filepath.Dir(md), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(md, []byte("# 子章\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_004_child_02"}`); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+}

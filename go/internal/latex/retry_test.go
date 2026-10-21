@@ -576,3 +576,29 @@ func TestTruncateCheckerTranscript(t *testing.T) {
 		t.Fatal("切在用量行应报错")
 	}
 }
+
+// TestChapterMarkdownForChild：递归子章节的 md 在父节点的细分树里，重新核对
+// 找不到它就会拿一个空视图去核（P56⑤ 放开子章节重核之后必须能定位到）。
+func TestChapterMarkdownForChild(t *testing.T) {
+	proj := t.TempDir()
+	top := filepath.Join(proj, "chapters", "chapter_002.md")
+	if err := os.MkdirAll(filepath.Dir(top), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(top, []byte("# 章\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := chapterMarkdownFor(proj, "chapter_002"); got != top {
+		t.Fatalf("顶层章节 md = %q, want %q", got, top)
+	}
+	child := filepath.Join(proj, "work", "temp", "conv_chapter_003", "work", "_subdivision", "chapter_003_child_01", "source", "chapter_003_child_01.md")
+	if err := os.MkdirAll(filepath.Dir(child), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(child, []byte("# 子章\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := chapterMarkdownFor(proj, "chapter_003_child_01"); got != child {
+		t.Fatalf("子章节 md = %q, want %q", got, child)
+	}
+}

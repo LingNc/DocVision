@@ -3,6 +3,7 @@ package latex
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -352,8 +353,49 @@ func (r *Runner) truncateCheckerTranscript(proj, base, srcName string, from int)
 	return dst, next, nil
 }
 
+// chapterMarkdownFor 找出这一章的源 md。顶层章节在 `chapters/<章>.md`；递归子章节
+// 的 md 在父节点的细分树里（`work/temp/conv_<父>*/work/_subdivision/**/<章>.md`），
+// 核对视图要用它，所以不能写死顶层路径。
+func chapterMarkdownFor(proj, base string) string {
+	if p := filepath.Join(proj, "chapters", base+".md"); fileExists(p) {
+		return p
+	}
+	if i := strings.Index(base, "_child_"); i > 0 {
+		if p := findChildMarkdown(proj, base[:i], base); p != "" {
+			return p
+		}
+	}
+	return filepath.Join(proj, "chapters", base+".md")
+}
+
+// findChildMarkdown 在父节点的临时细分树里递归找子章节的 md。用 WalkDir 而不是
+// Glob：`**` 在 filepath.Glob 里只匹配一个路径段，深层文件根本查不到（曾因此把
+// "父节点正在跑这一支"误判成"找不到输入"）。
+func findChildMarkdown(proj, parent, base string) string {
+	roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+parent+"*", "work", "_subdivision"))
+	if len(roots) == 0 {
+		roots, _ = filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+parent, "work", "_subdivision"))
+	}
+	for _, root := range roots {
+		hit := ""
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || hit != "" {
+				return nil
+			}
+			if !d.IsDir() && d.Name() == base+".md" {
+				hit = p
+			}
+			return nil
+		})
+		if hit != "" {
+			return hit
+		}
+	}
+	return ""
+}
+
 func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
-	chapPath := filepath.Join(proj, "chapters", base+".md")
+	chapPath := chapterMarkdownFor(proj, base)
 	texPath := filepath.Join(proj, "work", "chapters", base+".tex")
 	partsPath := filepath.Join(proj, "work", "chapters", base)
 	if !fileExists(texPath) {

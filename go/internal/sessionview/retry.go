@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -173,25 +174,33 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		// 不会破坏任何已定稿的东西，父节点等齐子会话后会拿新结果重新整合。
 		// 父章节的提交产物已经在了就说明整合完成（通过或已晋级），这时改子章节
 		// 等于让父报告里的旧结论与产物脱节，必须重跑父章节而不是这一支。
+		childOK := false
 		if i := strings.Index(base, "_child_"); i > 0 {
 			parent := base[:i]
-			if fileExistsIn(projDir, "work", "chapters", parent+".tex") {
+			switch {
+			case role == "checker":
+				// 重新核对**不动产物**（只换核对会话、旧结论留档），所以跟"父节点
+				// 整合到哪一步"没有关系——父章节已整合也照样能重核这一支。缺产物
+				// 那句话交给后面的角色前置检查说，这里不掺和。
+				childOK = true
+			case fileExistsIn(projDir, "work", "chapters", parent+".tex"):
+				// 父章节已整合（已提交/已晋级）：改这一支会让父报告里的旧结论与
+				// 产物脱节，必须重跑父章节。
 				http.Error(w, "父章节 "+parent+" 已经整合完成，子章节不能单独重跑；要改这一支请重跑父章节 "+parent, http.StatusBadRequest)
 				return
-			}
-			if _, err := os.Stat(filepath.Join(projDir, "work", "chapters", base+".tex")); err != nil {
-				// 子章节的 md/.tex 在父节点的细分树里，不铺在 chapters/ 下；
-				// 这里只要求"父节点确实在等它"，否则就是打错名字了。
-				if matches, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "conv_"+parent+"*", "work", "_subdivision", "**", base+".md")); len(matches) == 0 {
-					if !fileExistsIn(projDir, "work", "chapters", base+".md") {
-						http.Error(w, "找不到子章节 "+base+" 的输入（父节点 "+parent+" 既没有整合，也没有正在跑它的临时树），先在父章节里重跑这一支", http.StatusNotFound)
-						return
-					}
-				}
+			case childMarkdownInTempTree(projDir, parent, base) || fileExistsIn(projDir, "work", "chapters", base+".md"):
+				// 父节点还在等这一支（临时细分树里有它的 md）：重跑不会破坏已定稿
+				// 的东西，父节点等齐后拿新结果重新整合。
+				childOK = true
+			default:
+				http.Error(w, "找不到子章节 "+base+" 的输入（父节点 "+parent+" 既没有整合，也没有正在跑它的临时树），先在父章节里重跑这一支", http.StatusNotFound)
+				return
 			}
 		}
-		http.Error(w, "章节不存在: "+base, http.StatusNotFound)
-		return
+		if !childOK {
+			http.Error(w, "章节不存在: "+base, http.StatusNotFound)
+			return
+		}
 	}
 	if role == "" {
 		role = "convert"
@@ -671,4 +680,27 @@ func (v *viewerServer) serveTruncate(w http.ResponseWriter, r *http.Request) {
 		"dropped": len(lines) - len(kept),
 		"backup":  filepath.ToSlash(filepath.Join("work", "sessions", ".trash", filepath.Base(backup))),
 	})
+}
+
+// childMarkdownInTempTree 在父节点的临时细分树里递归找子章节的 md。`filepath.Glob`
+// 的 `**` 只匹配一个路径段，深层文件查不到——那样会把"父节点正在跑这一支"误判成
+// "找不到输入"直接 404，所以这里用 WalkDir。
+func childMarkdownInTempTree(projDir, parent, base string) bool {
+	roots, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "conv_"+parent+"*", "work", "_subdivision"))
+	for _, root := range roots {
+		found := false
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || found {
+				return nil
+			}
+			if !d.IsDir() && d.Name() == base+".md" {
+				found = true
+			}
+			return nil
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }
