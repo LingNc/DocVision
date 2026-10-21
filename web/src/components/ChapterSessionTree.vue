@@ -161,13 +161,6 @@ function nodeTitle(node: ChapterTreeNode): string {
         <span v-if="usageChipText(primary(node))" class="chapter-usage">{{ usageChipText(primary(node)) }}</span>
         <span v-if="primary(node)?.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
         <span v-if="nodePendingRetry(node)" class="chapter-retry-pending" title="已在重试队列里：转换阶段的下一个安全点会重跑这一章">待重试</span>
-        <button
-          v-else-if="canRetryNode(node)"
-          class="chapter-retry icon-btn"
-          type="button"
-          :title="'重试这一章 ' + node.id + '：开一个新尝试，旧的留档在工作区 work/attempts/'"
-          @click="retryNode(node, 'convert', $event)"
-        >↻</button>
       </div>
       <div v-if="hasBody(node) && isOpen(node)" class="chapter-node-body">
         <div

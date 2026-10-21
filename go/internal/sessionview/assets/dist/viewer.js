@@ -9220,28 +9220,27 @@
     class: "chapter-retry-pending",
     title: "已在重试队列里：转换阶段的下一个安全点会重跑这一章"
   };
-  const _hoisted_8$7 = ["title", "onClick"];
-  const _hoisted_9$6 = {
+  const _hoisted_8$7 = {
     key: 0,
     class: "chapter-node-body"
   };
-  const _hoisted_10$5 = ["data-id", "title", "onClick"];
-  const _hoisted_11$5 = {
+  const _hoisted_9$6 = ["data-id", "title", "onClick"];
+  const _hoisted_10$5 = {
     key: 1,
     class: "chapter-usage"
   };
-  const _hoisted_12$5 = {
+  const _hoisted_11$5 = {
     key: 2,
     class: "chapter-arch",
     title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
   };
-  const _hoisted_13$5 = {
+  const _hoisted_12$5 = {
     key: 3,
     class: "chapter-retry-pending",
     title: "已在重新核对队列里：转换阶段的下一个安全点会重跑核对会话（产物不动）"
   };
-  const _hoisted_14$5 = ["title", "onClick"];
-  const _hoisted_15$5 = ["onClick"];
+  const _hoisted_13$5 = ["title", "onClick"];
+  const _hoisted_14$5 = ["onClick"];
   const _sfc_main$n = /* @__PURE__ */ defineComponent({
     ...{ name: "ChapterSessionTree" },
     __name: "ChapterSessionTree",
@@ -9300,7 +9299,7 @@
         ev.stopPropagation();
         const project = nodeProject(node);
         if (!project) return;
-        const what = role === "checker" ? "重新核对" : "重试";
+        const what = "重新核对";
         state.retryNote = "正在提交 " + node.id + " 的" + what + "请求…";
         requestChapterRetry(project, node.id, role, "侧栏" + what).then((res) => {
           state.retryNote = node.id + " " + what + "请求已排队（" + (res && res.note || "等待转换阶段处理") + "）";
@@ -9366,15 +9365,9 @@
                 }, toDisplayString(nodeActivity(node)), 3)) : createCommentVNode("", true),
                 unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_5$d, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true),
                 ((_b = primary(node)) == null ? void 0 : _b.archived) ? (openBlock(), createElementBlock("span", _hoisted_6$b, "归档")) : createCommentVNode("", true),
-                nodePendingRetry(node) ? (openBlock(), createElementBlock("span", _hoisted_7$a, "待重试")) : canRetryNode(node) ? (openBlock(), createElementBlock("button", {
-                  key: 6,
-                  class: "chapter-retry icon-btn",
-                  type: "button",
-                  title: "重试这一章 " + node.id + "：开一个新尝试，旧的留档在工作区 work/attempts/",
-                  onClick: ($event) => retryNode(node, "convert", $event)
-                }, "↻", 8, _hoisted_8$7)) : createCommentVNode("", true)
+                nodePendingRetry(node) ? (openBlock(), createElementBlock("span", _hoisted_7$a, "待重试")) : createCommentVNode("", true)
               ], 10, _hoisted_2$i),
-              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_9$6, [
+              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_8$7, [
                 node.checker ? (openBlock(), createElementBlock("div", {
                   key: 0,
                   class: normalizeClass(["chapter-checker", { active: currentId.value === node.checker.id, live: node.checker.live }])
@@ -9398,22 +9391,22 @@
                       key: 0,
                       class: normalizeClass(["chapter-state", stateTone(activityText(node.checker, "checker", node))])
                     }, toDisplayString(activityText(node.checker, "checker", node)), 3)) : createCommentVNode("", true),
-                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_11$5, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true),
-                    node.checker.archived ? (openBlock(), createElementBlock("span", _hoisted_12$5, "归档")) : createCommentVNode("", true),
-                    nodePendingRetry(node, "checker") ? (openBlock(), createElementBlock("span", _hoisted_13$5, "待重试")) : canRetryNode(node) ? (openBlock(), createElementBlock("button", {
+                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$5, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true),
+                    node.checker.archived ? (openBlock(), createElementBlock("span", _hoisted_11$5, "归档")) : createCommentVNode("", true),
+                    nodePendingRetry(node, "checker") ? (openBlock(), createElementBlock("span", _hoisted_12$5, "待重试")) : canRetryNode(node) ? (openBlock(), createElementBlock("button", {
                       key: 4,
                       class: "chapter-retry icon-btn",
                       type: "button",
                       title: "重新核对这一章 " + node.id + "：只重跑核对会话、产物不动，旧的核对转录留在历史里",
                       onClick: ($event) => retryNode(node, "checker", $event)
-                    }, "↻", 8, _hoisted_14$5)) : createCommentVNode("", true)
-                  ], 8, _hoisted_10$5),
+                    }, "↻", 8, _hoisted_13$5)) : createCommentVNode("", true)
+                  ], 8, _hoisted_9$6),
                   createBaseVNode("button", {
                     class: "chapter-info",
                     type: "button",
                     title: "打开核对会话详情",
                     onClick: ($event) => emit2("info", node.checker)
-                  }, "ⓘ", 8, _hoisted_15$5)
+                  }, "ⓘ", 8, _hoisted_14$5)
                 ], 2)) : createCommentVNode("", true),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
                   key: 1,
@@ -9437,7 +9430,7 @@
     }
     return target2;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-633f698b"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-7ecd4785"]]);
   const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"
