@@ -14,15 +14,26 @@ export interface ForkRequest {
   extra: { from: number; path: string }
 }
 
-/* 能不能从这一条 fork：不能在写入的会话上做（那一行可能还在追加），静态导出
- * 没有服务端，子章节与屏障阶段没有可重跑的对象。 */
-export function canForkFrom(s: any): boolean {
+/* 能不能就地截断这一条（⤫）：不能在写入的会话上做（那一行可能还在追加），
+ * 静态导出没有服务端。
+ *
+ * T196：**递归子章节也能截**。它们的转录在父工作区的细分树里
+ * （`work/temp/conv_<父>/work/_subdivision` 下的 `node/sessions/`），页面按
+ * `SessionInfo.Path` 发绝对路径，服务端按 `<项目>/work/` 之下来解析。 */
+export function canCutFrom(s: any): boolean {
   if (!s || s.staticMode || s.live) return false
   if (!s.project) return false
   if (s.stage === 'vector') return String(s.name || '').indexOf('vector_') === 0
   if (!s.chapterId) return false
-  if (s.chapterRole !== 'convert' && s.chapterRole !== 'checker') return false
-  return String(s.chapterId).indexOf('_child_') < 0
+  return s.chapterRole === 'convert' || s.chapterRole === 'checker'
+}
+
+/* 能不能从这一条 fork（⤓ = 截断 + 开一条新尝试接着跑）：比截断窄一档——递归
+ * 子章节的"接着跑"要父节点的整合上下文，单给子章节排 continue/checker 到不了
+ * 前置条件，所以子章节只给就地截断，跑起来走「继续跑父章节」（T196）。 */
+export function canForkFrom(s: any): boolean {
+  if (!canCutFrom(s)) return false
+  return String(s.chapterId || '').indexOf('_child_') < 0
 }
 
 /* 二次确认文案：写清"后面会丢、原记录保留、工作区怎么处理"。 */

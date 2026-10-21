@@ -617,6 +617,18 @@ func (r *Runner) dispatchRetries(proj string) int {
 			_ = retryq.Consume(f.Path)
 			continue
 		}
+		// T196：递归子章节的重转 / 接着跑需要父节点的整合上下文（章节 md、工作区、
+		// 产物都在父节点的细分树里），单纯按章节名排一条请求到不了任何前置条件——
+		// 以前它就那样躺在队列里，页面上看是"点了没反应"。这里直接消费掉并说清
+		// 该怎么修，别让它无声停留。
+		if strings.Contains(base, "_child_") && (role == "convert" || role == "continue") {
+			parent := base[:strings.Index(base, "_child_")]
+			_ = retryq.Consume(f.Path)
+			r.log.LogWarning(0, "[retry]", base,
+				"子章节不能单独重转/接着跑（转录与产物都在父节点的细分树里）；请就地截断它的转录后再「继续跑父章节」", parent,
+				"，或对整个父章节重试")
+			continue
+		}
 		if !r.lockChapter(base) {
 			continue // 正在跑：留在队列里
 		}

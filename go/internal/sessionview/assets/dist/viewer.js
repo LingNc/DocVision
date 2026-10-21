@@ -9487,7 +9487,7 @@
   };
   const _hoisted_25$3 = ["data-project"];
   const _hoisted_26$3 = ["title"];
-  const _hoisted_27$2 = { class: "row-body" };
+  const _hoisted_27$3 = { class: "row-body" };
   const _hoisted_28$2 = {
     key: 0,
     class: "proj-prefix"
@@ -9967,7 +9967,7 @@
                     title: g.name
                   }, [
                     _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-1962332f><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-1962332f><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-1962332f></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-1962332f><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-1962332f></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-1962332f></path></svg></span>', 1)),
-                    createBaseVNode("span", _hoisted_27$2, [
+                    createBaseVNode("span", _hoisted_27$3, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
                     ]),
@@ -11727,13 +11727,16 @@
       };
     }
   });
-  function canForkFrom$1(s) {
+  function canCutFrom(s) {
     if (!s || s.staticMode || s.live) return false;
     if (!s.project) return false;
     if (s.stage === "vector") return String(s.name || "").indexOf("vector_") === 0;
     if (!s.chapterId) return false;
-    if (s.chapterRole !== "convert" && s.chapterRole !== "checker") return false;
-    return String(s.chapterId).indexOf("_child_") < 0;
+    return s.chapterRole === "convert" || s.chapterRole === "checker";
+  }
+  function canForkFrom(s) {
+    if (!canCutFrom(s)) return false;
+    return String(s.chapterId || "").indexOf("_child_") < 0;
   }
   function forkPrompt(line, s) {
     if (s && s.stage === "vector") {
@@ -11745,7 +11748,7 @@
     return "从第 " + line + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试；有工作区快照时会连工作区一起退回这一刻（老会话没有快照则只退对话）。';
   }
   function forkRequestOf(s, line, source) {
-    if (!s || !canForkFrom$1(s) || !(line > 0)) return null;
+    if (!s || !canForkFrom(s) || !(line > 0)) return null;
     const vector = s.stage === "vector";
     return {
       project: String(s.project),
@@ -11763,11 +11766,14 @@
     const s = state.current;
     if (!s || !s.chapterId) return false;
     const keep = line - 1;
+    const child = String(s.chapterId || "").indexOf("_child_") >= 0;
+    const parent = child ? String(s.chapterId).slice(0, String(s.chapterId).indexOf("_child_")) : "";
+    const then = child ? "接着点顶栏的「继续跑父章节」（" + parent + "）让它跑起来：子章节不会单独重跑，父节点重新驱动这一支时会从这条截断后的转录续跑" : "运行中的 latex 会从这条会话接着跑（也可以点「继续跑」排一次）";
     const ask2 = "删掉第 " + line + " 条及之后（共 " + keep + " 条保留）并继续这条会话？\n\n就地截断当前转录，不新开尝试、不复制会话；原文会先备份到 work/sessions/.trash/。想保留一份对照，请先点 ⤓ 显式 fork 一条同样的会话再在这里操作。";
     if (!window.confirm(ask2)) return false;
     state.retryNote = "正在就地截断到第 " + keep + " 条…";
     truncateSession(String(s.project), String(s.path), keep).then((res) => {
-      state.retryNote = "已截断：保留 " + (res && res.kept || keep) + " 条、丢掉 " + (res && res.dropped || 0) + " 条（备份 " + (res && res.backup || ".trash/") + "）；运行中的 latex 会从这条会话接着跑";
+      state.retryNote = "已截断：保留 " + (res && res.kept || keep) + " 条、丢掉 " + (res && res.dropped || 0) + " 条（备份 " + (res && res.backup || ".trash/") + "）；" + then;
       return refreshIndex();
     }).catch((err) => {
       state.retryNote = "截断失败：" + (err && err.message || err);
@@ -11814,7 +11820,8 @@
     __name: "Timeline",
     setup(__props) {
       const model = computed(() => streamModel());
-      const canFork = computed(() => canForkFrom$1(state.current));
+      const canFork = computed(() => canForkFrom(state.current));
+      const canCut = computed(() => canCutFrom(state.current));
       const emptyText = computed(() => {
         if (state.onlyTools) return "这个会话没有工具调用记录";
         if (!state.current) return "左侧选择一个会话开始浏览。";
@@ -11872,19 +11879,21 @@
                     tokens: unref(estOf)(item.line).text
                   }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])
                 ])),
-                canFork.value ? (openBlock(), createElementBlock("span", _hoisted_3$6, [
-                  createBaseVNode("button", {
+                canFork.value || canCut.value ? (openBlock(), createElementBlock("span", _hoisted_3$6, [
+                  canFork.value ? (openBlock(), createElementBlock("button", {
+                    key: 0,
                     class: "fork-btn",
                     type: "button",
                     title: "复制一份并从这里开始（fork）：开一个新尝试接着干，源记录保留在「历史」里。想就地改就先在目标会话上操作，不必 fork。",
                     onClick: withModifiers(($event) => unref(forkFromLine)(item.line.n, "对话"), ["stop"])
-                  }, "⤓", 8, _hoisted_4$6),
-                  createBaseVNode("button", {
+                  }, "⤓", 8, _hoisted_4$6)) : createCommentVNode("", true),
+                  canCut.value ? (openBlock(), createElementBlock("button", {
+                    key: 1,
                     class: "fork-btn fork-drop",
                     type: "button",
                     title: "删掉这条及之后的记录并继续（就地截断这条会话，不新开尝试；原文先备份到 work/sessions/.trash/）",
                     onClick: withModifiers(($event) => unref(dropFromLine)(item.line.n, "对话"), ["stop"])
-                  }, "⤫", 8, _hoisted_5$6)
+                  }, "⤫", 8, _hoisted_5$6)) : createCommentVNode("", true)
                 ])) : createCommentVNode("", true)
               ]);
             }), 128)),
@@ -11902,7 +11911,7 @@
       };
     }
   });
-  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-b5985e02"]]);
+  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-8e9b08f8"]]);
   const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
   function nextMsgLine(lines, idx) {
     for (let i = idx + 1; i < lines.length; i++) {
@@ -12155,22 +12164,23 @@
   const _hoisted_14$3 = ["onClick"];
   const _hoisted_15$3 = ["onClick"];
   const _hoisted_16$3 = ["onClick"];
-  const _hoisted_17$3 = { class: "traj-name" };
-  const _hoisted_18$3 = ["title"];
-  const _hoisted_19$3 = { class: "traj-num-cell" };
+  const _hoisted_17$3 = ["onClick"];
+  const _hoisted_18$3 = { class: "traj-name" };
+  const _hoisted_19$3 = ["title"];
   const _hoisted_20$3 = { class: "traj-num-cell" };
-  const _hoisted_21$3 = {
+  const _hoisted_21$3 = { class: "traj-num-cell" };
+  const _hoisted_22$3 = {
     key: 0,
     class: "traj-detail"
   };
-  const _hoisted_22$3 = { colspan: 7 };
-  const _hoisted_23$2 = { class: "traj-detail-inner" };
-  const _hoisted_24$2 = { class: "traj-detail-title" };
-  const _hoisted_25$2 = {
+  const _hoisted_23$2 = { colspan: 7 };
+  const _hoisted_24$2 = { class: "traj-detail-inner" };
+  const _hoisted_25$2 = { class: "traj-detail-title" };
+  const _hoisted_26$2 = {
     key: 1,
     class: "code"
   };
-  const _hoisted_26$2 = { class: "row-actions" };
+  const _hoisted_27$2 = { class: "row-actions" };
   const _sfc_main$5 = /* @__PURE__ */ defineComponent({
     __name: "Trajectory",
     setup(__props) {
@@ -12216,7 +12226,8 @@
         if (!row.jump) return;
         state.trajSelected = state.trajSelected === row.rid ? null : row.rid;
       }
-      const canCutFrom = computed(() => canForkFrom(state.current));
+      const canFork = computed(() => canForkFrom(state.current));
+      const canCut = computed(() => canCutFrom(state.current));
       function goChat(row) {
         if (!row.jump) return;
         state.trajSelected = row.rid;
@@ -12300,42 +12311,49 @@
                           title: "跳到对话里对应的那条消息",
                           onClick: withModifiers(($event) => goChat(row), ["stop"])
                         }, "↳", 8, _hoisted_15$3)) : createCommentVNode("", true),
-                        row.jump && canCutFrom.value ? (openBlock(), createElementBlock("button", {
+                        row.jump && canFork.value ? (openBlock(), createElementBlock("button", {
                           key: 1,
                           type: "button",
                           class: "traj-cut",
                           title: "从这一条之后继续：历史截到这条消息，后面的轮次丢掉，开一个新尝试接着干",
-                          onClick: withModifiers(($event) => _ctx.forkFromLine(row.jump, "轨迹"), ["stop"])
-                        }, "⤓", 8, _hoisted_16$3)) : createCommentVNode("", true)
+                          onClick: withModifiers(($event) => unref(forkFromLine)(row.jump, "轨迹"), ["stop"])
+                        }, "⤓", 8, _hoisted_16$3)) : createCommentVNode("", true),
+                        row.jump && canCut.value ? (openBlock(), createElementBlock("button", {
+                          key: 2,
+                          type: "button",
+                          class: "traj-cut",
+                          title: "删掉这条及之后的记录并继续（就地截断这条转录，不新开尝试；原文先备份到 work/sessions/.trash/）",
+                          onClick: withModifiers(($event) => unref(dropFromLine)(row.jump, "轨迹"), ["stop"])
+                        }, "⤫", 8, _hoisted_17$3)) : createCommentVNode("", true)
                       ]),
                       createBaseVNode("td", null, [
                         createBaseVNode("span", {
                           class: normalizeClass(["kind-tag", row.status === "error" ? "kind-error" : "kind-" + row.kind])
                         }, toDisplayString(row.tag), 3)
                       ]),
-                      createBaseVNode("td", _hoisted_17$3, toDisplayString(row.name), 1),
+                      createBaseVNode("td", _hoisted_18$3, toDisplayString(row.name), 1),
                       createBaseVNode("td", {
                         class: "traj-summary",
                         title: row.summary || ""
-                      }, toDisplayString(row.summary || "—"), 9, _hoisted_18$3),
+                      }, toDisplayString(row.summary || "—"), 9, _hoisted_19$3),
                       createBaseVNode("td", {
                         class: normalizeClass("traj-status " + statusCell(row).cls)
                       }, toDisplayString(statusCell(row).text), 3),
-                      createBaseVNode("td", _hoisted_19$3, toDisplayString(sizeCell(row)), 1),
-                      createBaseVNode("td", _hoisted_20$3, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
+                      createBaseVNode("td", _hoisted_20$3, toDisplayString(sizeCell(row)), 1),
+                      createBaseVNode("td", _hoisted_21$3, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
                     ], 10, _hoisted_12$3),
-                    unref(state).trajOpen[row.rid] ? (openBlock(), createElementBlock("tr", _hoisted_21$3, [
-                      createBaseVNode("td", _hoisted_22$3, [
-                        createBaseVNode("div", _hoisted_23$2, [
+                    unref(state).trajOpen[row.rid] ? (openBlock(), createElementBlock("tr", _hoisted_22$3, [
+                      createBaseVNode("td", _hoisted_23$2, [
+                        createBaseVNode("div", _hoisted_24$2, [
                           (openBlock(true), createElementBlock(Fragment, null, renderList(row.detail || {}, (text, key) => {
                             return openBlock(), createElementBlock("div", { key }, [
-                              createBaseVNode("div", _hoisted_24$2, toDisplayString(DETAIL_LABELS[key] || key), 1),
+                              createBaseVNode("div", _hoisted_25$2, toDisplayString(DETAIL_LABELS[key] || key), 1),
                               detailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$6, {
                                 key: 0,
                                 text: String(text || ""),
                                 cls: "code"
-                              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_25$2, toDisplayString(String(text || "")), 1)),
-                              createBaseVNode("div", _hoisted_26$2, [
+                              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_26$2, toDisplayString(String(text || "")), 1)),
+                              createBaseVNode("div", _hoisted_27$2, [
                                 createVNode(_sfc_main$d, {
                                   text: String(text || "")
                                 }, null, 8, ["text"])
@@ -12358,7 +12376,7 @@
       };
     }
   });
-  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-27850978"]]);
+  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-488defb4"]]);
   function currentEstimate() {
     const id = state.current ? state.current.id : "";
     const list = state.sessions || [];
@@ -12859,9 +12877,15 @@
     if (s.chapterRole !== "convert" && s.chapterRole !== "checker") return null;
     return { project: String(s.project), chapter: String(s.chapterId), role: s.chapterRole };
   }
-  function canContinueOf(s) {
+  function continueTargetOf(s) {
     const t = retryTargetOf(s);
-    return !!t && t.role === "convert";
+    if (!t || t.role !== "convert") return null;
+    const i = t.chapter.indexOf("_child_");
+    if (i <= 0) return t;
+    return { project: t.project, chapter: t.chapter.slice(0, i), role: "convert" };
+  }
+  function canContinueOf(s) {
+    return !!continueTargetOf(s);
   }
   function canRedrawOf(s) {
     if (!s || s.staticMode || s.live) return false;
@@ -13162,9 +13186,16 @@
     const t = target.value;
     return !!t && chapterPendingRetry(t.project, t.chapter, t.role);
   });
+  const continueTarget = computed(() => continueTargetOf(state.current));
   const continuePending = computed(() => {
-    const t = target.value;
+    const t = continueTarget.value;
     return !!t && chapterPendingRetry(t.project, t.chapter, "continue");
+  });
+  const continueLabel = computed(() => {
+    const t = continueTarget.value;
+    const child = !!(t && state.current && String(state.current.chapterId || "").indexOf("_child_") >= 0);
+    if (continuePending.value) return child ? "父章节已在继续跑队列" : "已在继续跑队列";
+    return child ? "继续跑父章节" : "继续跑";
   });
   const retryLabel = computed(() => {
     const t = target.value;
@@ -13233,13 +13264,14 @@
       }).catch(fail);
       return;
     }
-    const t = target.value;
+    const t = p2.kind === "continue" ? continueTarget.value : target.value;
     if (!t) {
       busy.value = false;
       return;
     }
     const role = p2.kind === "continue" ? "continue" : t.role;
-    const what = p2.kind === "continue" ? "继续跑" : t.role === "checker" ? "重新核对" : "重试";
+    const child = String(s && s.chapterId || "").indexOf("_child_") >= 0;
+    const what = p2.kind === "continue" ? child ? "继续跑父章节" : "继续跑" : t.role === "checker" ? "重新核对" : "重试";
     state.retryNote = "正在提交 " + t.chapter + " 的" + what + "请求…";
     requestChapterRetry(t.project, t.chapter, role, "中栏" + what).then((res) => {
       queued.value = { project: t.project, chapter: t.chapter, role, path: "", prevId: prevId.value };
@@ -13290,6 +13322,7 @@
     hasAny,
     retryPending,
     continuePending,
+    continueLabel,
     retryLabel,
     confirmBody,
     ask,
@@ -13314,7 +13347,7 @@
   const _sfc_main$2 = /* @__PURE__ */ defineComponent({
     __name: "SessionActions",
     setup(__props) {
-      const { target: target2, canContinue: canContinue2, canRedraw: canRedraw2, canDrop: canDrop2, hasAny: hasAny2, retryPending: retryPending2, continuePending: continuePending2, retryLabel: retryLabel2, queued: queued2, busy: busy2, ask: ask2, undoAsk: undoAsk2, backToPrev: backToPrev2 } = actions;
+      const { target: target2, canContinue: canContinue2, canRedraw: canRedraw2, canDrop: canDrop2, hasAny: hasAny2, retryPending: retryPending2, continuePending: continuePending2, continueLabel: continueLabel2, retryLabel: retryLabel2, queued: queued2, busy: busy2, ask: ask2, undoAsk: undoAsk2, backToPrev: backToPrev2 } = actions;
       return (_ctx, _cache) => {
         return unref(hasAny2) ? (openBlock(), createElementBlock("div", _hoisted_1$2, [
           !unref(actions).pending.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
@@ -13331,9 +13364,9 @@
               class: "act-btn",
               type: "button",
               disabled: unref(continuePending2) || unref(busy2),
-              title: "接着这一章最近一次尝试继续跑：不新建尝试、不归档、不动产物",
+              title: "接着这一章最近一次尝试继续跑：不新建尝试、不归档、不动产物（站在递归子章节会话上时，跑的是它所在的父章节）",
               onClick: _cache[1] || (_cache[1] = ($event) => unref(ask2)("continue"))
-            }, toDisplayString(unref(continuePending2) ? "已在继续跑队列" : "继续跑"), 9, _hoisted_3$2)) : createCommentVNode("", true),
+            }, toDisplayString(unref(continueLabel2)), 9, _hoisted_3$2)) : createCommentVNode("", true),
             unref(canRedraw2) ? (openBlock(), createElementBlock("button", {
               key: 2,
               class: "act-btn",
@@ -13371,7 +13404,7 @@
       };
     }
   });
-  const SessionActions = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-de9123bb"]]);
+  const SessionActions = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-b10bdaea"]]);
   const _hoisted_1$1 = {
     key: 0,
     class: "session-action-panel"

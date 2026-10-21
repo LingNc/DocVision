@@ -1,7 +1,7 @@
 /* P57：从某条消息 fork 的判定与请求体。对话页与轨迹页共用这一处，
  * 规则不对就会在写入中的会话上截断，或者把子章节当成可重跑的对象。 */
 import { describe, it, expect } from 'vitest'
-import { canForkFrom, forkPrompt, forkRequestOf } from '../src/legacy/fork'
+import { canCutFrom, canForkFrom, forkPrompt, forkRequestOf } from '../src/legacy/fork'
 import { state } from '../src/state'
 import { dropFromLine } from '../src/fork'
 
@@ -35,6 +35,19 @@ describe('能不能 fork', () => {
     expect(canForkFrom(conv({ chapterId: 'chapter_004_child_01' }))).toBe(false)
     expect(canForkFrom({ project: 'book', stage: 'assemble' })).toBe(false)
     expect(canForkFrom(conv({ staticMode: true }))).toBe(false)
+  })
+
+  /* T196：递归子章节的转录在父工作区的细分树里。以前页面上的"删掉这条及之后"
+   * 在子章节会话里连按钮都不出现，用户就找不到那个功能。就地截断对子章节是
+   * 可以的（转录文件就在那儿、按绝对路径解析），只是跑起来要「继续跑父章节」。 */
+  it('就地截断：子章节也给（转录在细分树里，按绝对路径改）', () => {
+    expect(canCutFrom(conv({ chapterId: 'chapter_004_child_01' }))).toBe(true)
+    expect(canCutFrom(conv({ chapterId: 'chapter_004_child_01_child_02', chapterRole: 'checker' }))).toBe(true)
+    expect(canCutFrom(conv())).toBe(true)
+    expect(canCutFrom(conv({ live: true }))).toBe(false)
+    expect(canCutFrom({ project: 'book', stage: 'assemble' })).toBe(false)
+    // fork 仍不给子章节：单独给子章节排 continue/checker 到不了前置条件。
+    expect(canForkFrom(conv({ chapterId: 'chapter_004_child_01_child_02', chapterRole: 'checker' }))).toBe(false)
   })
 
   it('行号必须是正数（没有可截断的点就不发请求）', () => {

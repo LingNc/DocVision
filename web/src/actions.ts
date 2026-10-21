@@ -19,7 +19,7 @@
 import { computed, ref, watch } from 'vue'
 import { state } from './state'
 import { cancelChapterRetry, chapterPendingRetry, dropSession, refreshIndex, requestChapterRetry, selectSession, watchFork } from './data'
-import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, retryTargetOf } from './legacy/actions'
+import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, continueTargetOf, retryTargetOf } from './legacy/actions'
 
 type Pending =
   | { kind: 'retry' | 'continue' | 'redraw' | 'drop' }
@@ -41,9 +41,18 @@ const retryPending = computed(() => {
   const t = target.value
   return !!t && chapterPendingRetry(t.project, t.chapter, t.role)
 })
+// T196：「继续跑」的对象可能是父章节（站在递归子章节会话上时），所以这条
+// pending 判定不能复用 target。
+const continueTarget = computed(() => continueTargetOf(state.current))
 const continuePending = computed(() => {
-  const t = target.value
+  const t = continueTarget.value
   return !!t && chapterPendingRetry(t.project, t.chapter, 'continue')
+})
+const continueLabel = computed(() => {
+  const t = continueTarget.value
+  const child = !!(t && state.current && String((state.current as any).chapterId || '').indexOf('_child_') >= 0)
+  if (continuePending.value) return child ? '父章节已在继续跑队列' : '已在继续跑队列'
+  return child ? '继续跑父章节' : '继续跑'
 })
 const retryLabel = computed(() => {
   const t = target.value
@@ -110,10 +119,14 @@ function run() {
       .catch(fail)
     return
   }
-  const t = target.value
+  // 继续跑的目标可能与 target（重试目标）不同：站着递归子章节时是它的父章节。
+  const t = p.kind === 'continue' ? continueTarget.value : target.value
   if (!t) { busy.value = false; return }
   const role = p.kind === 'continue' ? 'continue' : t.role
-  const what = p.kind === 'continue' ? '继续跑' : (t.role === 'checker' ? '重新核对' : '重试')
+  const child = String((s && s.chapterId) || '').indexOf('_child_') >= 0
+  const what = p.kind === 'continue'
+    ? (child ? '继续跑父章节' : '继续跑')
+    : (t.role === 'checker' ? '重新核对' : '重试')
   state.retryNote = '正在提交 ' + t.chapter + ' 的' + what + '请求…'
   requestChapterRetry(t.project, t.chapter, role, '中栏' + what)
     .then((res: any) => {
@@ -164,6 +177,6 @@ function doCancel() {
 export const actions = {
   pending, queued, prevId, busy,
   target, canContinue, canRedraw, canDrop, hasAny,
-  retryPending, continuePending, retryLabel, confirmBody,
+  retryPending, continuePending, continueLabel, retryLabel, confirmBody,
   ask, cancelAsk, run, undoAsk, backToPrev, doCancel,
 }

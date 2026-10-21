@@ -1023,9 +1023,9 @@ to { transform: rotate(360deg);
 /* fork 按钮：悬浮在这一条消息右上角，平时不抢戏（与轨迹页的 ⤓ 同一个动作）。 */
 /* 每条消息右边留一条 54px 的窄栏放这两个按钮（T193）：之前它们绝对定位压在行尾
  * 的 token 计数上，即使给了透明度也看不清，用户直接找不到入口。 */
-.fork-wrap[data-v-b5985e02] { position: relative; padding-right: 54px;
+.fork-wrap[data-v-8e9b08f8] { position: relative; padding-right: 54px;
 }
-.fork-btn[data-v-b5985e02] {
+.fork-btn[data-v-8e9b08f8] {
   border: 1px solid var(--line, #d0d7de);
   background: var(--bg, #fff);
   color: var(--caption);
@@ -1040,7 +1040,7 @@ to { transform: rotate(360deg);
 
 /* 平时就半可见（T193）：原来是 hover 才出现，用户根本找不到入口——"对某条消息
  * 之后删除"没有"模式"可进，它就是每条消息右上角这两个按钮。悬浮/聚焦再提亮。 */
-.fork-acts[data-v-b5985e02] {
+.fork-acts[data-v-8e9b08f8] {
   position: absolute;
   top: 2px;
   right: 4px;
@@ -1049,64 +1049,64 @@ to { transform: rotate(360deg);
   opacity: .45;
   transition: opacity .12s;
 }
-.fork-wrap:hover .fork-acts[data-v-b5985e02],
-.fork-acts[data-v-b5985e02]:focus-within {
+.fork-wrap:hover .fork-acts[data-v-8e9b08f8],
+.fork-acts[data-v-8e9b08f8]:focus-within {
   opacity: 1;
 }
-.fork-drop[data-v-b5985e02] {
+.fork-drop[data-v-8e9b08f8] {
   color: #b45309;
   border-color: color-mix(in srgb, #d97706 50%, var(--line, #d0d7de));
 }
 
 /* ============================ 对话（DSH 的消息形态） ============================ */
-.timeline[data-v-b5985e02] {
+.timeline[data-v-8e9b08f8] {
  flex: 1; overflow-y: auto; padding: 16px 24px 80px;
 }
-.stream[data-v-b5985e02] {
+.stream[data-v-8e9b08f8] {
  max-width: var(--content-w); margin: 0 auto; display: flex; flex-direction: column;
 }
 
 /* 回合边界**只有一种画法**：8px + 0.5px 虚线 + 8px（--divider-gap）。虚线只出现在
    section 之间（也就是回合之间），同一条消息里的工具行之间永远只是 --row-gap。 */
-.stream > .msg + .msg[data-v-b5985e02],
+.stream > .msg + .msg[data-v-8e9b08f8],
 
-.stream > .fork-wrap + .fork-wrap > .msg[data-v-b5985e02] {
+.stream > .fork-wrap + .fork-wrap > .msg[data-v-8e9b08f8] {
   margin-top: var(--divider-gap);
   padding-top: var(--divider-gap);
   border-top: .5px dashed var(--border);
 }
-.empty[data-v-b5985e02] {
+.empty[data-v-8e9b08f8] {
  padding: 56px 24px; color: var(--dim); text-align: center;
 }
 
 /* 原 160 号规则里的 msg-other 半边（msg-system 半边在 SystemMsg.vue） */
-.msg-other .body-text[data-v-b5985e02] { color: var(--muted); font-size: 13px;
+.msg-other .body-text[data-v-8e9b08f8] { color: var(--muted); font-size: 13px;
 }
 
 /* 会话结局（run_end ok=false）：一句原因，红边框 + 安静底色，不抢正文。 */
-.msg-end[data-v-b5985e02] {
+.msg-end[data-v-8e9b08f8] {
   border-left: 3px solid var(--err);
   background: color-mix(in srgb, var(--err) 8%, transparent);
   border-radius: 6px;
   padding: 10px 12px;
 }
-.msg-end .end-title[data-v-b5985e02] { font-size: 12px; color: var(--err); font-weight: 600;
+.msg-end .end-title[data-v-8e9b08f8] { font-size: 12px; color: var(--err); font-weight: 600;
 }
-.msg-end .end-detail[data-v-b5985e02] {
+.msg-end .end-detail[data-v-8e9b08f8] {
   margin-top: 4px; font-family: var(--mono);
   font-size: var(--code-font); line-height: var(--code-line);
   word-break: break-word; white-space: pre-wrap; color: var(--text);
 }
 @media (max-width: 1023px) {
-.timeline[data-v-b5985e02] { padding: 12px 12px 60px;
+.timeline[data-v-8e9b08f8] { padding: 12px 12px 60px;
 }
 }
 
 /* ============================ 轨迹（DSH Trajectory 的表） ============================ */
-.trajectory[data-v-27850978] {
+.trajectory[data-v-488defb4] {
  flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
 }
-.traj-toolbar[data-v-27850978] {
+.traj-toolbar[data-v-488defb4] {
   flex: none;
   position: sticky;
   top: 0;
@@ -1115,25 +1115,25 @@ to { transform: rotate(360deg);
   border-bottom: .5px solid var(--border);
   background: var(--bg);
 }
-.traj-toolbar-inner[data-v-27850978] {
+.traj-toolbar-inner[data-v-488defb4] {
  display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 12px;
 }
-.traj-filters[data-v-27850978] {
+.traj-filters[data-v-488defb4] {
  display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: hidden;
 }
-.traj-cut[data-v-27850978] {
+.traj-cut[data-v-488defb4] {
   border: 0; background: transparent; color: var(--dim); cursor: pointer;
   font-size: 12px; line-height: 1; padding: 0 2px; opacity: 0;
 }
-.traj-row:hover .traj-cut[data-v-27850978] { opacity: 1;
+.traj-row:hover .traj-cut[data-v-488defb4] { opacity: 1;
 }
-.traj-cut[data-v-27850978]:hover { color: var(--accent, #2563eb);
+.traj-cut[data-v-488defb4]:hover { color: var(--accent, #2563eb);
 }
-.traj-note[data-v-27850978] {
+.traj-note[data-v-488defb4] {
   flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--dim); font-size: 12px;
 }
-.traj-chip[data-v-27850978] {
+.traj-chip[data-v-488defb4] {
   flex: none;
   height: 20px;
   padding: 0 7px;
@@ -1149,22 +1149,22 @@ to { transform: rotate(360deg);
   align-items: center;
   gap: 4px;
 }
-.traj-chip[data-v-27850978]:hover {
+.traj-chip[data-v-488defb4]:hover {
  color: var(--text); background: var(--hover);
 }
-.traj-chip[aria-pressed="true"][data-v-27850978] {
+.traj-chip[aria-pressed="true"][data-v-488defb4] {
  color: var(--accent); background: var(--accent-soft);
 }
-.traj-count[data-v-27850978] {
+.traj-count[data-v-488defb4] {
  flex: none; margin-left: auto; color: var(--caption); font-size: 12px; font-variant-numeric: tabular-nums;
 }
-.traj-scroll[data-v-27850978] {
+.traj-scroll[data-v-488defb4] {
  flex: 1; min-height: 0; overflow: auto;
 }
-.traj-table[data-v-27850978] {
+.traj-table[data-v-488defb4] {
  table-layout: fixed; width: 100%; border-spacing: 0; font-size: 12px; color: var(--text);
 }
-.traj-table th[data-v-27850978] {
+.traj-table th[data-v-488defb4] {
   position: sticky;
   top: 0;
   z-index: 3;
@@ -1181,7 +1181,7 @@ to { transform: rotate(360deg);
   text-overflow: ellipsis;
   user-select: none;
 }
-.traj-table td[data-v-27850978] {
+.traj-table td[data-v-488defb4] {
   height: 30px;
   padding: 0 8px;
   border-bottom: .5px solid var(--hairline);
@@ -1189,76 +1189,76 @@ to { transform: rotate(360deg);
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.traj-table tbody tr.traj-row[data-v-27850978] {
+.traj-table tbody tr.traj-row[data-v-488defb4] {
  cursor: pointer; position: relative;
 }
-.traj-table tbody tr.traj-row[data-v-27850978]:hover {
+.traj-table tbody tr.traj-row[data-v-488defb4]:hover {
  background: var(--hover);
 }
-.traj-table tbody tr.traj-row.selected[data-v-27850978] {
+.traj-table tbody tr.traj-row.selected[data-v-488defb4] {
  background: var(--active);
 }
-.traj-table tbody tr.traj-row[data-error="true"] td[data-v-27850978]:first-child {
+.traj-table tbody tr.traj-row[data-error="true"] td[data-v-488defb4]:first-child {
  box-shadow: inset 3px 0 0 var(--err);
 }
-.traj-table tbody tr.traj-row.selected td[data-v-27850978]:first-child {
+.traj-table tbody tr.traj-row.selected td[data-v-488defb4]:first-child {
  box-shadow: inset 3px 0 0 var(--accent);
 }
-.col-n[data-v-27850978] {
+.col-n[data-v-488defb4] {
  width: 46px;
 }
-.col-kind[data-v-27850978] {
+.col-kind[data-v-488defb4] {
  width: 78px;
 }
-.col-name[data-v-27850978] {
+.col-name[data-v-488defb4] {
  width: 150px;
 }
-.col-status[data-v-27850978] {
+.col-status[data-v-488defb4] {
  width: 66px;
 }
-.col-size[data-v-27850978] {
+.col-size[data-v-488defb4] {
  width: 72px;
 }
-.col-time[data-v-27850978] {
+.col-time[data-v-488defb4] {
  width: 72px;
 }
 
 /* 数字列的表头与数值一起右对齐（#、字符、耗时） */
-.traj-table th.num-head[data-v-27850978] {
+.traj-table th.num-head[data-v-488defb4] {
  text-align: right;
 }
-.traj-num[data-v-27850978] {
+.traj-num[data-v-488defb4] {
  color: var(--caption); font-family: var(--mono); font-size: 11px; text-align: right;
 }
-.traj-name[data-v-27850978] {
+.traj-name[data-v-488defb4] {
  font-family: var(--mono); font-size: 12px; color: var(--muted);
 }
-.traj-summary[data-v-27850978] {
+.traj-summary[data-v-488defb4] {
  color: var(--muted);
 }
-.traj-table tbody tr[data-kind="tool"] .traj-summary[data-v-27850978],
-.traj-table tbody tr[data-kind="result"] .traj-summary[data-v-27850978] {
+.traj-table tbody tr[data-kind="tool"] .traj-summary[data-v-488defb4],
+.traj-table tbody tr[data-kind="result"] .traj-summary[data-v-488defb4] {
  font-family: var(--mono); font-size: 11.5px;
 }
-.traj-table tbody tr[data-kind="think"] .traj-summary[data-v-27850978] {
+.traj-table tbody tr[data-kind="think"] .traj-summary[data-v-488defb4] {
  color: var(--dim); font-style: normal;
 }
-.traj-num-cell[data-v-27850978] {
+.traj-num-cell[data-v-488defb4] {
  text-align: right; color: var(--caption); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 11px;
 }
-.traj-status[data-v-27850978] {
+.traj-status[data-v-488defb4] {
  font-size: 11.5px;
 }
-.traj-status.ok[data-v-27850978] {
+.traj-status.ok[data-v-488defb4] {
  color: var(--ok);
 }
-.traj-status.error[data-v-27850978] {
+.traj-status.error[data-v-488defb4] {
  color: var(--err);
 }
-.traj-status.plain[data-v-27850978] {
+.traj-status.plain[data-v-488defb4] {
  color: var(--caption);
 }
-.traj-disclose[data-v-27850978] {
+.traj-disclose[data-v-488defb4] {
   width: 18px;
   height: 18px;
   margin-right: 4px;
@@ -1272,20 +1272,20 @@ to { transform: rotate(360deg);
   cursor: pointer;
   padding: 0;
 }
-.traj-disclose[data-v-27850978]:hover {
+.traj-disclose[data-v-488defb4]:hover {
  background: var(--hover); color: var(--text);
 }
 
 /* P9：选中行（右侧详情栏正在显示这一步）*/
-.traj-row.selected[data-v-27850978] {
+.traj-row.selected[data-v-488defb4] {
  background: var(--active);
 }
-.traj-row.selected td[data-v-27850978] {
+.traj-row.selected td[data-v-488defb4] {
  background: var(--active);
 }
 
 /* 行内的「跳到对话」小按钮（默认很安静，悬浮显形）*/
-.traj-gochat[data-v-27850978] {
+.traj-gochat[data-v-488defb4] {
   width: 16px;
   height: 18px;
   margin-left: 4px;
@@ -1299,13 +1299,13 @@ to { transform: rotate(360deg);
   cursor: pointer;
   padding: 0;
 }
-.traj-row:hover .traj-gochat[data-v-27850978], .traj-gochat[data-v-27850978]:hover {
+.traj-row:hover .traj-gochat[data-v-488defb4], .traj-gochat[data-v-488defb4]:hover {
  color: var(--accent);
 }
-.traj-gochat[data-v-27850978]:hover {
+.traj-gochat[data-v-488defb4]:hover {
  background: var(--hover);
 }
-.traj-jump[data-v-27850978] {
+.traj-jump[data-v-488defb4] {
   border: 0;
   background: transparent;
   color: var(--accent);
@@ -1315,12 +1315,12 @@ to { transform: rotate(360deg);
   padding: 0;
   opacity: 0;
 }
-.traj-table tbody tr.traj-row:hover .traj-jump[data-v-27850978] {
+.traj-table tbody tr.traj-row:hover .traj-jump[data-v-488defb4] {
  opacity: 1;
 }
 
 /* 种类标签（照 DSH 的 kindTag：10px / 650 字重 / 4px 圆角 / 19px 高） */
-.kind-tag[data-v-27850978] {
+.kind-tag[data-v-488defb4] {
   display: inline-flex;
   align-items: center;
   height: 19px;
@@ -1333,50 +1333,50 @@ to { transform: rotate(360deg);
   user-select: none;
   white-space: nowrap;
 }
-.kind-user[data-v-27850978] {
+.kind-user[data-v-488defb4] {
  color: var(--kind-user-fg); background: var(--kind-user-bg);
 }
-.kind-msg[data-v-27850978] {
+.kind-msg[data-v-488defb4] {
  color: var(--kind-msg-fg); background: var(--kind-msg-bg);
 }
-.kind-think[data-v-27850978] {
+.kind-think[data-v-488defb4] {
  color: var(--kind-think-fg); background: var(--kind-think-bg);
 }
-.kind-tool[data-v-27850978] {
+.kind-tool[data-v-488defb4] {
  color: var(--kind-tool-fg); background: var(--kind-tool-bg);
 }
-.kind-error[data-v-27850978] {
+.kind-error[data-v-488defb4] {
  color: var(--kind-err-fg); background: var(--kind-err-bg);
 }
-.kind-meta[data-v-27850978] {
+.kind-meta[data-v-488defb4] {
  color: var(--kind-meta-fg); background: var(--kind-meta-bg);
 }
-.kind-result[data-v-27850978] {
+.kind-result[data-v-488defb4] {
  color: var(--kind-tool-fg); background: var(--kind-tool-bg);
 }
-.kind-usage[data-v-27850978] {
+.kind-usage[data-v-488defb4] {
  color: var(--kind-usage-fg); background: var(--kind-usage-bg);
 }
-.traj-detail > td[data-v-27850978] {
+.traj-detail > td[data-v-488defb4] {
  height: auto; padding: 0; white-space: normal; overflow: visible; background: var(--surface-2);
 }
-.traj-detail-inner[data-v-27850978] {
+.traj-detail-inner[data-v-488defb4] {
  padding: 8px 8px 12px 54px; display: flex; flex-direction: column; gap: 8px;
 }
-.traj-detail-title[data-v-27850978] {
+.traj-detail-title[data-v-488defb4] {
  color: var(--caption); font-size: 11px;
 }
-.traj-empty[data-v-27850978] {
+.traj-empty[data-v-488defb4] {
  padding: 40px 24px; color: var(--dim); text-align: center;
 }
 @media (max-width: 1023px) {
-.col-name[data-v-27850978] { width: 110px;
+.col-name[data-v-488defb4] { width: 110px;
 }
-.col-status[data-v-27850978] { width: 56px;
+.col-status[data-v-488defb4] { width: 56px;
 }
-.col-size[data-v-27850978] { width: 58px;
+.col-size[data-v-488defb4] { width: 58px;
 }
-.col-time[data-v-27850978] { width: 58px;
+.col-time[data-v-488defb4] { width: 58px;
 }
 }
 
@@ -1710,14 +1710,14 @@ to { transform: rotate(360deg);
 }
 }
 
-.session-actions[data-v-de9123bb] {
+.session-actions[data-v-b10bdaea] {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
-.act-btn[data-v-de9123bb] {
+.act-btn[data-v-b10bdaea] {
   flex: 0 0 auto;
   white-space: nowrap;
   border: 1px solid var(--line);
@@ -1729,15 +1729,15 @@ to { transform: rotate(360deg);
   line-height: 20px;
   cursor: pointer;
 }
-.act-btn[data-v-de9123bb]:disabled { opacity: 0.55; cursor: default;
+.act-btn[data-v-b10bdaea]:disabled { opacity: 0.55; cursor: default;
 }
-.act-primary[data-v-de9123bb] { border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--line)); color: var(--accent, #3b82f6);
+.act-primary[data-v-b10bdaea] { border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--line)); color: var(--accent, #3b82f6);
 }
-.act-danger[data-v-de9123bb] { border-color: color-mix(in srgb, #dc2626 50%, var(--line)); color: #dc2626;
+.act-danger[data-v-b10bdaea] { border-color: color-mix(in srgb, #dc2626 50%, var(--line)); color: #dc2626;
 }
-.act-undo[data-v-de9123bb] { border-color: color-mix(in srgb, #d97706 55%, var(--line)); color: #b45309;
+.act-undo[data-v-b10bdaea] { border-color: color-mix(in srgb, #d97706 55%, var(--line)); color: #b45309;
 }
-.act-quiet[data-v-de9123bb] { opacity: 0.85;
+.act-quiet[data-v-b10bdaea] { opacity: 0.85;
 }
 
 .session-action-panel[data-v-fca248ed] {

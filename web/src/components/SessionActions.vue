@@ -7,7 +7,7 @@
 // 输入…」那段指标，不单独占一行。
 import { actions } from '../actions'
 
-const { target, canContinue, canRedraw, canDrop, hasAny, retryPending, continuePending, retryLabel, queued, busy, ask, undoAsk, backToPrev } = actions
+const { target, canContinue, canRedraw, canDrop, hasAny, retryPending, continuePending, continueLabel, retryLabel, queued, busy, ask, undoAsk, backToPrev } = actions
 </script>
 
 <template>
@@ -26,9 +26,9 @@ const { target, canContinue, canRedraw, canDrop, hasAny, retryPending, continueP
         class="act-btn"
         type="button"
         :disabled="continuePending || busy"
-        title="接着这一章最近一次尝试继续跑：不新建尝试、不归档、不动产物"
+        title="接着这一章最近一次尝试继续跑：不新建尝试、不归档、不动产物（站在递归子章节会话上时，跑的是它所在的父章节）"
         @click="ask('continue')"
-      >{{ continuePending ? '已在继续跑队列' : '继续跑' }}</button>
+      >{{ continueLabel }}</button>
       <button
         v-if="canRedraw"
         class="act-btn"

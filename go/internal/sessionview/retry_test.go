@@ -473,6 +473,59 @@ func retryqPending(t *testing.T, dir string) []string {
 	return out
 }
 
+// TestPostTruncateDeepTranscript（T196）：递归子章节的转录不在 work/sessions/ 下，
+// 而在父工作区的细分树里（work/temp/conv_<父>/work/_subdivision/**/node/sessions/）。
+// 页面发的是 SessionInfo.Path（绝对路径），截断必须按"落在 <项目>/work/ 之下"解析
+// ——以前按 filepath.Base 去 work/sessions/ 找，子章节一律 404，用户就"找不到那个
+// 删掉这条再继续的功能"。同时钉住越界与穿越都被拒。
+func TestPostTruncateDeepTranscript(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	deep := filepath.Join(proj, "work", "temp", "conv_chapter_007", "work", "_subdivision",
+		"child_01", "node", "work", "_subdivision", "child_02", "node", "sessions")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "checker_chapter_007_child_01_child_02.jsonl"
+	body := "{\"t\":\"msg\"}\n{\"t\":\"msg\"}\n{\"t\":\"msg\"}\n"
+	full := filepath.Join(deep, name)
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(full, old, old); err != nil {
+		t.Fatal(err)
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/truncate", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		v.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := post(`{"project":"书A","path":"` + filepath.ToSlash(full) + `","line":2}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("子章节转录应能就地截断，status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := os.ReadFile(full); string(got) != "{\"t\":\"msg\"}\n{\"t\":\"msg\"}\n" {
+		t.Fatalf("截断结果不对: %q", string(got))
+	}
+	// 备份仍然落在 work/sessions/.trash/ 下（与顶层同一处，便于捞回）。
+	trash, _ := filepath.Glob(filepath.Join(proj, "work", "sessions", ".trash", name+".*.jsonl"))
+	if len(trash) != 1 {
+		t.Fatalf("备份缺失: %v", trash)
+	}
+	// 落在工作区之外、或不在 work/ 之下的绝对路径一律拒。
+	outside := filepath.Join(proj, "chapters", "x.jsonl")
+	if err := os.WriteFile(outside, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := post(`{"project":"书A","path":"` + filepath.ToSlash(outside) + `","line":2}`); rec.Code == http.StatusOK {
+		t.Fatal("工作区之外的路径不该被接受")
+	}
+	if rec := post(`{"project":"书A","path":"../../etc/passwd","line":2}`); rec.Code == http.StatusOK {
+		t.Fatal("路径穿越不该被接受")
+	}
+}
+
 // TestPostTruncateInPlace：默认操作是**就地截断**（不新开尝试、不复制转录），
 // 而且原文必须先备份、隔夜不动的旧转录才敢改。
 func TestPostTruncateInPlace(t *testing.T) {

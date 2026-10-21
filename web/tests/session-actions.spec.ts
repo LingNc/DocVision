@@ -4,7 +4,7 @@
  * 这里把规则钉死：谁有按钮、谁没有、确认文案说的是不是那件事。
  */
 import { describe, it, expect } from 'vitest'
-import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, retryTargetOf } from '../src/legacy/actions'
+import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, continueTargetOf, retryTargetOf } from '../src/legacy/actions'
 
 const conv = (over: Record<string, unknown> = {}) => ({
   id: 'book/work/sessions/convert_chapter_002.jsonl',
@@ -41,6 +41,19 @@ describe('继续跑与重画', () => {
   it('只有转换会话能继续跑', () => {
     expect(canContinueOf(conv())).toBe(true)
     expect(canContinueOf(checker())).toBe(false)
+  })
+
+  /* T196：站在递归子章节的转换会话上点「继续跑」，跑的是它所在的顶层父章节。
+   * 子节点的转录与产物都在父工作区的细分树里，单给子章节排一条 continue 到不了
+   * 任何前置条件（会一直躺在 work/retry/ 里），按钮看起来毫无反应。 */
+  it('继续跑：子章节换成它的父章节，顶层就是自己', () => {
+    expect(continueTargetOf({ project: 'book', chapterId: 'chapter_007', chapterRole: 'convert' }))
+      .toEqual({ project: 'book', chapter: 'chapter_007', role: 'convert' })
+    expect(continueTargetOf({ project: 'book', chapterId: 'chapter_007_child_01_child_01', chapterRole: 'convert' }))
+      .toEqual({ project: 'book', chapter: 'chapter_007', role: 'convert' })
+    // 核对会话没有"继续产出"这回事。
+    expect(continueTargetOf({ project: 'book', chapterId: 'chapter_007_child_02_child_02', chapterRole: 'checker' })).toBe(null)
+    expect(canContinueOf({ project: 'book', chapterId: 'chapter_007_child_01_child_01', chapterRole: 'convert' })).toBe(true)
   })
 
   it('重画只给作图会话，且它不能在写入', () => {

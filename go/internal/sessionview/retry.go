@@ -2,6 +2,7 @@ package sessionview
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -325,6 +326,13 @@ func workspaceSnapshotCovers(projDir, base, srcName string, from int) bool {
 }
 
 // fileExistsIn 在项目目录下按段拼路径并确认是普通文件。
+// pathExists 判断一个具体路径在不在（与 fileExistsIn 的区别：这里已经拼好整条
+// 路径，不再按目录分段；递归子章节的转录路径就是这么来的，T196）。
+func pathExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
+}
+
 func fileExistsIn(root string, parts ...string) bool {
 	st, err := os.Stat(filepath.Join(append([]string{root}, parts...)...))
 	return err == nil && st.Mode().IsRegular()
@@ -440,6 +448,49 @@ type dropRequest struct {
 
 var transcriptNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.jsonl$`)
 
+// transcriptUnderWork 解析请求里的转录路径。两种写法：
+//
+//	· 裸文件名 —— 老调用，只在 <proj>/work/sessions/ 里找；
+//	· 绝对路径 —— 页面把 SessionInfo.Path 直接发过来。递归子章节的转录在
+//	  <proj>/work/temp/conv_<父>/work/_subdivision/**/node/sessions/ 里，
+//	  按名字在 work/sessions/ 下根本找不到（页面上那些"截断/删除"在子章节
+//	  会话里曾经一律 404）。
+//
+// 两种写法都必须落在 <proj>/work/ 之下、扩展名 .jsonl、且真的是普通文件。
+var errTranscriptMissing = errors.New("转录不存在")
+
+func transcriptUnderWork(projDir, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("没有给转录路径")
+	}
+	work := filepath.Join(projDir, "work")
+	if filepath.IsAbs(raw) {
+		full := filepath.Clean(raw)
+		rel, err := filepath.Rel(work, full)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("转录不在这个项目的工作区里")
+		}
+		if !transcriptNameRe.MatchString(filepath.Base(full)) {
+			return "", fmt.Errorf("只能改转录文件（*.jsonl）")
+		}
+		st, err := os.Stat(full)
+		if err != nil || !st.Mode().IsRegular() {
+			return "", fmt.Errorf("%w: %s", errTranscriptMissing, filepath.Base(full))
+		}
+		return full, nil
+	}
+	name := filepath.Base(raw)
+	if name != raw || !transcriptNameRe.MatchString(name) {
+		return "", fmt.Errorf("只能改转录文件（*.jsonl）")
+	}
+	full := filepath.Join(work, "sessions", name)
+	if st, err := os.Stat(full); err != nil || !st.Mode().IsRegular() {
+		return "", fmt.Errorf("%w: %s", errTranscriptMissing, name)
+	}
+	return full, nil
+}
+
 func (v *viewerServer) serveDrop(w http.ResponseWriter, r *http.Request) {
 	if !v.allowRetry {
 		http.Error(w, "写入口已关闭（docvision sessions 用 --no-retry 启动的）", http.StatusForbidden)
@@ -455,18 +506,19 @@ func (v *viewerServer) serveDrop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "项目不存在", http.StatusNotFound)
 		return
 	}
-	name := filepath.Base(strings.TrimSpace(req.Path))
-	if !transcriptNameRe.MatchString(name) {
-		http.Error(w, "只能删转录文件（*.jsonl）", http.StatusBadRequest)
+	// T196：与 /api/truncate 同一套解析——递归子章节的转录按绝对路径给。
+	full, err := transcriptUnderWork(projDir, req.Path)
+	if err != nil {
+		code := http.StatusBadRequest
+		if errors.Is(err, errTranscriptMissing) {
+			code = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), code)
 		return
 	}
-	full := filepath.Join(projDir, "work", "sessions", name)
-	st, err := os.Stat(full)
-	if err != nil || !st.Mode().IsRegular() {
-		http.Error(w, "转录不存在: "+name, http.StatusNotFound)
-		return
-	}
-	if time.Since(st.ModTime()) < 90*time.Second || fileExistsIn(projDir, "work", "sessions", name+".partial") {
+	name := filepath.Base(full)
+	st, _ := os.Stat(full)
+	if st != nil && (time.Since(st.ModTime()) < 90*time.Second || pathExists(full+".partial")) {
 		http.Error(w, "这条会话可能还在写（90 秒内有更新），等它停下来再删", http.StatusConflict)
 		return
 	}
@@ -622,22 +674,24 @@ func (v *viewerServer) serveTruncate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "项目不存在", http.StatusNotFound)
 		return
 	}
-	name := filepath.Base(strings.TrimSpace(req.Path))
-	if !transcriptNameRe.MatchString(name) {
-		http.Error(w, "只能截断转录文件（*.jsonl）", http.StatusBadRequest)
+	// T196：递归子章节的转录不在 work/sessions/ 下，按绝对路径解析（页面发的
+	// 是 SessionInfo.Path）；裸文件名（老调用）仍走 work/sessions/。
+	full, err := transcriptUnderWork(projDir, req.Path)
+	if err != nil {
+		code := http.StatusBadRequest
+		if errors.Is(err, errTranscriptMissing) {
+			code = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), code)
 		return
 	}
-	full := filepath.Join(projDir, "work", "sessions", name)
-	st, err := os.Stat(full)
-	if err != nil || !st.Mode().IsRegular() {
-		http.Error(w, "转录不存在: "+name, http.StatusNotFound)
-		return
-	}
+	name := filepath.Base(full)
+	st, _ := os.Stat(full)
 	if req.Line < 1 {
 		http.Error(w, "line 必须 ≥ 1（要整条清空请删记录）", http.StatusBadRequest)
 		return
 	}
-	if time.Since(st.ModTime()) < 90*time.Second || fileExistsIn(projDir, "work", "sessions", name+".partial") {
+	if st != nil && (time.Since(st.ModTime()) < 90*time.Second || pathExists(full+".partial")) {
 		http.Error(w, "这条会话可能还在写（90 秒内有更新），等它停下来再改", http.StatusConflict)
 		return
 	}
@@ -674,11 +728,15 @@ func (v *viewerServer) serveTruncate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "替换失败，未改动: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	relBackup, relErr := filepath.Rel(projDir, backup)
+	if relErr != nil {
+		relBackup = filepath.Base(backup)
+	}
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"kept":    len(kept),
 		"dropped": len(lines) - len(kept),
-		"backup":  filepath.ToSlash(filepath.Join("work", "sessions", ".trash", filepath.Base(backup))),
+		"backup":  filepath.ToSlash(relBackup),
 	})
 }
 

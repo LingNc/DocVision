@@ -26,11 +26,27 @@ export function retryTargetOf(s: any): SessionActionTarget | null {
   return { project: String(s.project), chapter: String(s.chapterId), role: s.chapterRole }
 }
 
-/* 继续跑：接着这一章最近一次尝试干（不新建尝试、不归档、不动产物）。只给
- * 转换会话——核对会话没有"继续产出"这回事。 */
-export function canContinueOf(s: any): boolean {
+/* 「继续跑」的目标（T196）：顶层转换会话 = 它自己；递归子章节 = 它所在的顶层
+ * 父章节。
+ *
+ * 为什么子章节要换成父章节：子节点的转录与产物都在父工作区的细分树里
+ * （`work/temp/conv_<父>/work/_subdivision/**`），单独给子章节排一条 continue
+ * 到不了任何前置条件——队列里会一直躺着、按钮看起来毫无反应（这一批之前就是
+ * 这样）。父章节的"接着跑"会重新驱动整棵子树，而子树里每一支都按自己磁盘上
+ * 那条转录续跑（T174），所以"先就地截断子会话、再继续跑父章节"= 从截断处接着
+ * 跑，且不新建尝试、不归档任何东西。 */
+export function continueTargetOf(s: any): SessionActionTarget | null {
   const t = retryTargetOf(s)
-  return !!t && t.role === 'convert'
+  if (!t || t.role !== 'convert') return null
+  const i = t.chapter.indexOf('_child_')
+  if (i <= 0) return t
+  return { project: t.project, chapter: t.chapter.slice(0, i), role: 'convert' }
+}
+
+/* 继续跑：接着这一章最近一次尝试干（不新建尝试、不归档、不动产物）。转换会话
+ * 才有（核对会话没有"继续产出"这回事），子章节按父章节算（见上）。 */
+export function canContinueOf(s: any): boolean {
+  return !!continueTargetOf(s)
 }
 
 /* 重画这张图：只在看某条作图会话、且它不正在写入时给。 */

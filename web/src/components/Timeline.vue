@@ -14,13 +14,14 @@ import ImageTurn from './ImageTurn.vue'
 import ResultMsg from './ResultMsg.vue'
 import FoldText from './FoldText.vue'
 import { dropFromLine, forkFromLine } from '../fork'
-import { canForkFrom } from '../legacy/fork'
+import { canCutFrom, canForkFrom } from '../legacy/fork'
 
 const model = computed(() => streamModel())
 
 /* P57：对话页每一条消息也能 fork（以前只有「轨迹」页每行有 ⤓，用户在对话页
  * 找不到入口）。判据与轨迹页同一处（legacy/fork.ts）。 */
 const canFork = computed(() => canForkFrom(state.current))
+const canCut = computed(() => canCutFrom(state.current))
 
 const emptyText = computed(() => {
   if (state.onlyTools) return '这个会话没有工具调用记录'
@@ -67,14 +68,16 @@ watch(
             <FoldText :text="String(item.line.text || '(无正文)')" :mem-key="'other.' + item.line.n"
               :preview-lines="LONG_TEXT_LINES" :tokens="estOf(item.line).text" />
           </section>
-          <span v-if="canFork" class="fork-acts">
+          <span v-if="canFork || canCut" class="fork-acts">
             <button
+              v-if="canFork"
               class="fork-btn"
               type="button"
               :title="'复制一份并从这里开始（fork）：开一个新尝试接着干，源记录保留在「历史」里。想就地改就先在目标会话上操作，不必 fork。'"
               @click.stop="forkFromLine(item.line.n, '对话')"
             >⤓</button>
             <button
+              v-if="canCut"
               class="fork-btn fork-drop"
               type="button"
               :title="'删掉这条及之后的记录并继续（就地截断这条会话，不新开尝试；原文先备份到 work/sessions/.trash/）'"
