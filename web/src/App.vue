@@ -38,6 +38,7 @@ import InlineMD from './components/InlineMD.vue'
 import Trajectory from './components/Trajectory.vue'
 import DetailsPanel from './components/DetailsPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
+import SessionActions from './components/SessionActions.vue'
 
 const frame = ref<HTMLElement | null>(null)
 
@@ -402,6 +403,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </header>
+      <SessionActions />
       <div id="banner" class="banner" :class="{ hidden: !bannerText }">{{ bannerText }}</div>
       <div class="view-area">
         <Timeline></Timeline>

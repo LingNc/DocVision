@@ -2124,3 +2124,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **立项**：P56（中栏重试总入口 + 页面内二次确认 + 撤销请求/删除这次重试/历史行内"设为当前"、删除；子章节重试要连带父节点重新整合）与 P57（对话页每行 fork、fork 后自动切到新会话、删除到某条再继续、与 P54 的"插一句 user 消息"合流）。
 
 - **③ 的精确答案（T189）**：全部项目 `progress_items` 里 `status=fallback` 共 41 条、**class 全是 vector**；36 条是 `[SESSION_INSUFFICIENT_BALANCE]`（额度耗尽、一次就停），5 条是 `open : no such file or directory`（**路径空串**）——而这 5 条**是同一张图**（同一个 `key`），横跨当前项目与最近几次留档运行，正是用户说的"总是 fallback"的那一张。`fallback` 是终态、重跑又被 `open ""` 打回，所以永远停着。待修项见 T189。
+
+## v1.5+（第四十七批补二十二，P56/P57：中栏动作条、撤销、历史行内动作、对话页 fork）
+
+- **用户的四个诉求**：重试总按钮不要放侧栏、要放中栏、要二次确认、误触要能恢复（回到之前那条、删掉重试出来的会话、历史里选一条当当前）；对话页找不到"从某条消息重试"的入口、fork 完要自动切过去。
+- **P56（已实现 ①–④）**：新增中栏 `SessionActions`（挂在 `#center-header` 下方），按钮集合按当前会话从 `legacy/actions.ts` 的纯函数算——`retryTargetOf`（convert/checker、非 `_child_`）、`canContinueOf`、`canRedrawOf`、`canDropOf`；**页面内确认条**取代 `window.confirm`（文案由 `confirmTextOf` 单一来源给出）；排上队之后出现「撤销这个请求」与「回到之前那条」，撤销走新的 `POST /api/retry/cancel`（只删还没被消费的 `work/retry/*.json`，`.done.json` 留档不动，幂等，`--no-retry` 时拒绝）；撤不回来（已被消费）就提示去「历史」删那条新会话。详情栏原来的整块按钮与样式删除（避免两处入口打架）。「历史」页每行加「设为当前」「删除」行内动作 + 「当前」标；删除用行内确认条。
+- **P57（已实现 ①③）**：fork 的判定与请求体抽到 `legacy/fork.ts`（`canForkFrom`/`forkPrompt`/`forkRequestOf`），提交入口 `web/src/fork.ts` 由轨迹页与**对话页**共用；对话页每条消息右上角悬浮 ⤓。fork 排队成功后 `watchFork()` 记下守望条件，下一次 `/api/index` 里出现同项目同章节同角色的更晚转录就自动 `selectSession`——用户口径"自动切换这个为主会话"。②（删除/编辑历史消息再继续）仍未做。
+- **踩到的坑（真缺陷，已修）**：给每条消息外套一层 `.fork-wrap` 后，时间线的回合分隔线规则 `.stream > .msg + .msg` 失效——虚线整片消失。浏览器几何测试（`TestToolRowGeometryComesFromOneTokenSetInChromium`）当场抓住（8px + dashed + 8px 那一条不成立），补了跨 wrapper 的 `.stream > .fork-wrap + .fork-wrap > .msg` 同一条画法。

@@ -7,7 +7,6 @@ import { computed } from 'vue'
 import { state } from '../state'
 import { countValue, fmtDur, unitLabel } from '../legacy/sidebar'
 import { jumpToLine, TRAJ_KINDS, trajectoryRows } from '../legacy/trajectory'
-import { refreshIndex, requestChapterRetry } from '../data'
 import MachineText from './MachineText.vue'
 import CopyBtn from './CopyBtn.vue'
 import ImageStrip from './ImageStrip.vue'
@@ -69,53 +68,8 @@ function selectRow(row: any) {
   state.trajSelected = state.trajSelected === row.rid ? null : row.rid
 }
 
-/* 「从这一条之后继续」（P53 阶段二）：把历史截到这条消息，后面的轮次丢掉，开
-   一个新尝试接着干。转换会话、核对会话与「矢量图」的作图会话都给这个动作。 */
-const isVectorSession = computed(() => {
-  const s: any = state.current
-  return !!s && s.stage === 'vector' && String(s.name || '').indexOf('vector_') === 0
-})
-// 核对会话（T184）：产物只读，从记录继续只是换一段历史重新判断。
-const isCheckerSession = computed(() => {
-  const s: any = state.current
-  return !!s && s.chapterRole === 'checker' && String(s.name || '').indexOf('checker_') === 0
-})
-const canCutFrom = computed(() => {
-  const s: any = state.current
-  if (!s || state.staticMode || s.live) return false
-  if (isVectorSession.value) return !!s.project
-  if (!s.project || !s.chapterId) return false
-  if (s.chapterRole !== 'convert' && s.chapterRole !== 'checker') return false
-  return String(s.chapterId).indexOf('_child_') < 0
-})
-
-function cutFrom(row: any) {
-  const s: any = state.current
-  if (!s || !canCutFrom.value || !row.jump) return
-  const vector = isVectorSession.value
-  const checker = isCheckerSession.value
-  const ask = vector
-    ? '从第 ' + row.jump + ' 条记录之后继续？\n\n历史会截到这一条（完整旧转录留档成 .tryN，仍看得到），重新只画这一张；类别与分组不变。画完要看到新图，下游阶段需要重跑。'
-    : checker
-      ? '从第 ' + row.jump + ' 条记录之后继续核对？\n\n后面的轮次会从这条核对会话的历史里丢掉（源转录仍保留在「历史」里），并开一条新的核对尝试；已提交的产物一个字不动。'
-      : '从第 ' + row.jump + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试；有工作区快照时会连工作区一起退回这一刻（老会话没有快照则只退对话，工作区里后来的改动会保留）。'
-  if (!window.confirm(ask)) return
-  state.retryNote = '正在提交从第 ' + row.jump + ' 条记录继续的请求…'
-  requestChapterRetry(
-    String(s.project),
-    vector ? '' : String(s.chapterId),
-    vector ? 'vector' : checker ? 'checker' : 'continue',
-    '轨迹回滚到 #' + row.jump,
-    { from: Number(row.jump), path: String(s.name || '') },
-  )
-    .then((res: any) => {
-      state.retryNote = '已排队：从第 ' + row.jump + ' 条记录之后继续（' + ((res && res.note) || '等待并发槽位') + '）'
-      return refreshIndex()
-    })
-    .catch((err: any) => {
-      state.retryNote = '从记录继续失败：' + ((err && err.message) || err)
-    })
-}
+/* P57：fork 的判定与提交都走共享入口（legacy/fork.ts + fork.ts），对话页也用同一套。 */
+const canCutFrom = computed(() => canForkFrom(state.current))
 
 function goChat(row: any) {
   if (!row.jump) return
@@ -168,7 +122,7 @@ function goChat(row: any) {
                   @click.stop="goChat(row)">↳</button>
                 <button v-if="row.jump && canCutFrom" type="button" class="traj-cut"
                   title="从这一条之后继续：历史截到这条消息，后面的轮次丢掉，开一个新尝试接着干"
-                  @click.stop="cutFrom(row)">⤓</button>
+                  @click.stop="forkFromLine(row.jump, '轨迹')">⤓</button>
               </td>
               <td><span class="kind-tag" :class="row.status === 'error' ? 'kind-error' : 'kind-' + row.kind">{{ row.tag }}</span></td>
               <td class="traj-name">{{ row.name }}</td>

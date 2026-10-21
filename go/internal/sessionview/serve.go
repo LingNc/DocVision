@@ -307,9 +307,9 @@ func newViewerServer(root string, extras []ScanExtra, rc ...RenderConfig) *viewe
 // this local tool wants.
 func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead &&
-		!(r.Method == http.MethodPost && (r.URL.Path == "/api/mermaid" || r.URL.Path == "/api/retry" || r.URL.Path == "/api/drop")) {
+		!(r.Method == http.MethodPost && (r.URL.Path == "/api/mermaid" || r.URL.Path == "/api/retry" || r.URL.Path == "/api/retry/cancel" || r.URL.Path == "/api/drop")) {
 		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "只读服务：仅支持 GET/HEAD（/api/mermaid、/api/retry、/api/drop 接受 POST）", http.StatusMethodNotAllowed)
+		http.Error(w, "只读服务：仅支持 GET/HEAD（/api/mermaid、/api/retry、/api/retry/cancel、/api/drop 接受 POST）", http.StatusMethodNotAllowed)
 		return
 	}
 	p := r.URL.Path
@@ -334,6 +334,9 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		v.serveMermaid(w, r)
 	case p == "/api/drop":
 		v.serveDrop(w, r)
+	case p == "/api/retry/cancel":
+		// P56：撤销还没被消费的排队请求（误触的出口）。
+		v.serveRetryCancel(w, r)
 	case p == "/api/retry":
 		// P53：页面上的「重试这一章」只往 work/retry/ 排队，不执行命令。
 		v.serveRetry(w, r)

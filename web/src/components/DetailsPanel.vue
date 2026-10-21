@@ -10,7 +10,6 @@ import InlineMD from './InlineMD.vue'
 import MachineText from './MachineText.vue'
 import MdBody from './MdBody.vue'
 import CopyBtn from './CopyBtn.vue'
-import { chapterPendingRetry, dropSession, refreshIndex, requestChapterRetry } from '../data'
 import ImageStrip from './ImageStrip.vue'
 
 const kvRows = computed(() => sessionKVRows())
@@ -34,113 +33,9 @@ function onMetaToggle(ev: Event) {
   storeSet(m.key, open ? '1' : '0')
 }
 
-/* P53：手动重试入口。只在"章节转换会话"上给按钮——重跑一章是干净的
- * （每章自己的转录与产物），而样式/汇编/整组核验是屏障阶段，重跑它们不是
- * 一回事，这里不提供。 */
-const retryTarget = computed(() => {
-  const s: any = state.current
-  const role = s && s.chapterRole
-  if (!s || !s.chapterId || !s.project) return null
-  if (role !== 'convert' && role !== 'checker') return null
-  // 子章节由父章节的细分树产出，不单独重跑（重试父章节）。
-  if (String(s.chapterId).indexOf('_child_') >= 0) return null
-  return { project: String(s.project), chapter: String(s.chapterId), role: String(role) }
-})
-const retryPending = computed(() => {
-  const t = retryTarget.value
-  return !!t && chapterPendingRetry(t.project, t.chapter, t.role)
-})
-const retryIsChecker = computed(() => !!retryTarget.value && retryTarget.value.role === 'checker')
-/* 继续跑：接着这一章最近一次尝试干（不新建尝试、不归档），用于"会话跑歪了/
-   报错了、我先手动改了点东西，想让它从这儿接着收尾"。 */
-const canContinue = computed(() => !!retryTarget.value && retryTarget.value.role === 'convert')
-const continuePending = computed(() => {
-  const t = retryTarget.value
-  return !!t && chapterPendingRetry(t.project, t.chapter, 'continue')
-})
-/* 重画这张图（P53 矢量图侧）：只在看某条作图会话、且它不正在写入时给。
-   重画只换画法——类别与分组不动；下游阶段要看新图得重跑。 */
-const canRedrawImage = computed(() => {
-  const s: any = state.current
-  if (!s || s.staticMode || s.live) return false
-  if (!s.project || !s.name || s.stage !== 'vector') return false
-  return String(s.name).indexOf('vector_') === 0
-})
-const redrawPending = computed(() => state.retryNote !== '')
-function doRedrawImage(): void {
-  const s: any = state.current
-  if (!s || !canRedrawImage.value) return
-  if (!window.confirm('重画这张图？\n\n会开一条新的作图尝试（旧转录留档成 .tryN、仍在「矢量图」里），类别与分组不变。\n注意：要看到新图，样式/划分/转换/组装需要重跑。')) return
-  state.retryNote = '正在提交重画请求…'
-  requestChapterRetry(String(s.project), '', 'vector', '图不对，重画', { path: String(s.name) })
-    .then((res: any) => {
-      state.retryNote = '已排队重画：' + ((res && res.note) || '等待并发槽位')
-      return refreshIndex()
-    })
-    .catch((err: any) => {
-      state.retryNote = '重画失败：' + ((err && err.message) || err)
-    })
-}
-
-/* 删除这条记录：给"转错的那些尝试"一个出口。只在看的是某一条具体的章节会话、
-   且它不正在写入时才给按钮（服务端还会再查一次）。 */
-const canDrop = computed(() => {
-  const s: any = state.current
-  if (!s || state.staticMode || !s.project || !s.path) return false
-  if (!s.chapterId) return false
-  return !s.live
-})
-function doDrop(): void {
-  const s: any = state.current
-  if (!s || !canDrop.value) return
-  if (!window.confirm('删掉这条记录？转录会从「历史」里消失，作废尝试的归档目录也会一起删。')) return
-  state.retryNote = '正在删除 ' + s.name + '…'
-  dropSession(String(s.project), String(s.path))
-    .then((res: any) => {
-      state.retryNote = '已删除 ' + s.name + ((res && res.archive) ? '（含 ' + res.archive + '）' : '')
-    })
-    .catch((err: any) => {
-      state.retryNote = '删除失败：' + ((err && err.message) || err)
-    })
-}
-
-function doContinue(): void {
-  const t = retryTarget.value
-  if (!t) return
-  state.retryNote = '正在提交 ' + t.chapter + ' 的继续跑请求…'
-  requestChapterRetry(t.project, t.chapter, 'continue', '详情栏继续跑')
-    .then((res: any) => {
-      state.retryNote = t.chapter + ' 继续跑请求已排队（' + ((res && res.note) || '等待并发槽位') + '）'
-      return refreshIndex()
-    })
-    .catch((err: any) => {
-      state.retryNote = t.chapter + ' 继续跑请求失败：' + ((err && err.message) || err)
-    })
-}
-const retryButtonText = computed(() => {
-  const t = retryTarget.value
-  if (!t) return ''
-  if (retryPending.value) return t.role === 'checker' ? '已在重新核对队列' : '已在重试队列'
-  return t.role === 'checker' ? '重新核对这一章' : '重试这一章'
-})
-
-function doRetry(): void {
-  const t = retryTarget.value
-  if (!t) return
-  const what = t.role === 'checker' ? '重新核对' : '重试'
-  state.retryNote = '正在提交 ' + t.chapter + ' 的' + what + '请求…'
-  requestChapterRetry(t.project, t.chapter, t.role, '详情栏' + what)
-    .then((res: any) => {
-      state.retryNote = t.chapter + ' ' + what + '请求已排队（' + ((res && res.note) || '等待转换阶段处理') + '）'
-      return refreshIndex()
-    })
-    .catch((err: any) => {
-      state.retryNote = t.chapter + ' ' + what + '请求失败：' + ((err && err.message) || err)
-    })
-}
-
-/* 切会话时清掉上一章的反馈，免得看着像这一章的。 */
-watch(() => state.current && state.current.id, () => { state.retryNote = '' })
+/* P56：重试 / 重新核对 / 继续跑 / 重画 / 删除这条记录 的按钮搬到了中栏
+ * 的 SessionActions（用户口径：不要放在侧边栏里，要放在中间的界面中）。本面板
+ * 只留指标与元信息。 */
 
 const countTip = computed(() =>
   meta.value?.countNote ? META_COUNT_TIP.replace('{n}', meta.value.countNote.replace(/^共 (\d+) 条.*$/, '$1')) : '',
@@ -200,47 +95,6 @@ function closeTrajStep() {
           </template>
         </dl>
         <div v-if="subPath" class="stats-sub">目录：{{ subPath }}</div>
-      </section>
-
-      <section v-if="retryTarget && !state.staticMode" class="detail-block">
-        <h3 class="detail-block-title">{{ retryIsChecker ? '重新核对' : '手动重试' }}</h3>
-        <div class="retry-hint">
-          <template v-if="retryIsChecker">
-            只重跑<b>核对会话</b>，产物一个字不动：用全新上下文再核对一遍已提交的 .tex 与编译产物，
-            旧结论留档在 .checker.try&lt;N&gt;，旧转录留在「历史」里。
-          </template>
-          <template v-else>
-            重跑这一章会开一个<b>新尝试</b>：旧的整棵留档在工作区的 work/attempts/，预览页「历史」里两条都在。
-          </template>
-          请求只写进项目的 work/retry/ 队列——正在跑的 latex 会在转换阶段的安全点处理，没在跑就留到下次启动。
-        </div>
-        <button class="retry-btn" type="button" :disabled="retryPending" @click="doRetry">
-          {{ retryButtonText }}
-        </button>
-        <button
-          v-if="canRedrawImage"
-          class="retry-btn"
-          type="button"
-          :disabled="redrawPending"
-          title="只重做这张图：开一条新作图尝试，类别与分组不变；下游阶段要重跑才能看到新图"
-          @click="doRedrawImage"
-        >重画这张图</button>
-        <button
-          v-if="canDrop"
-          class="retry-btn retry-btn-danger"
-          type="button"
-          title="删掉这条转录（作废尝试的 work/attempts 归档一并删除）；正在写入的会话不给删"
-          @click="doDrop"
-        >删除这条记录</button>
-        <button
-          v-if="canContinue"
-          class="retry-btn retry-btn-quiet"
-          type="button"
-          :disabled="continuePending"
-          title="接着这一章最近一次尝试继续跑：不新建尝试、不归档旧产物，把一句「接着干」递进那条会话"
-          @click="doContinue"
-        >{{ continuePending ? '已在继续跑队列' : '继续跑（不新建尝试）' }}</button>
-        <div v-if="state.retryNote" class="retry-note">{{ state.retryNote }}</div>
       </section>
 
       <section v-if="stats" class="detail-block">
@@ -501,29 +355,4 @@ function closeTrajStep() {
 .prompt-md {
  font-size: 12.5px; line-height: 20px; color: var(--muted); 
 }
-.retry-hint { color: var(--muted, #6e7781); font-size: 12px; line-height: 18px; margin-bottom: 8px; }
-.retry-btn-danger {
-  margin-top: 6px;
-  background: transparent;
-  color: #b91c1c;
-  border-color: #fca5a5;
-}
-.retry-btn-danger:hover:not(:disabled) {
-  background: #fef2f2;
-  border-color: #ef4444;
-}
-.retry-btn-quiet {
-  margin-top: 6px;
-  background: transparent;
-  color: var(--text-dim, #6b7280);
-  border-color: var(--border, #d4d4d8);
-}
-.retry-btn-quiet:hover:not(:disabled) {
-  color: var(--text, #111827);
-  border-color: var(--text-dim, #6b7280);
-}
-.retry-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border, #d0d7de); border-radius: 6px; background: var(--bg, #fff); cursor: pointer; }
-.retry-btn:hover:not(:disabled) { background: var(--hover, #f3f4f6); }
-.retry-btn:disabled { opacity: .6; cursor: default; }
-.retry-note { margin-top: 6px; font-size: 12px; color: var(--muted, #6e7781); }
 </style>

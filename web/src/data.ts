@@ -31,6 +31,30 @@ export function revealProject(project: string): void {
   target.scrollIntoView({ block: 'nearest' })
 }
 
+/* P57：fork 之后自动切到新会话。排队只是写一个文件，新尝试是 latex 那边建的，
+ * 所以这里记一个"等它出现"的守望条件：下一轮 /api/index 里出现更晚的、同项目
+ * 同章节同角色的一条转录，就把它设为当前（用户口径："自动切换这个为主会话"）。 */
+let forkWatch: { project: string; chapter: string; role: string; prevId: string; since: number } | null = null
+
+export function watchFork(project: string, chapter: string, role: string, prevId: string): void {
+  forkWatch = { project, chapter, role, prevId, since: Date.now() - 60_000 }
+}
+
+function settleForkWatch(): void {
+  const w = forkWatch
+  if (!w) return
+  const want = (s: any) =>
+    s && s.project === w.project &&
+    (w.chapter ? s.chapterId === w.chapter : s.stage === 'vector') &&
+    (w.chapter ? s.chapterRole === w.role : true) &&
+    s.id !== w.prevId
+  const hit = (state.sessions || []).filter(want).sort((a: any, b: any) => String(b.mtime).localeCompare(String(a.mtime)))[0]
+  if (!hit) return
+  if (Date.parse(hit.mtime) < w.since && hit.id === w.prevId) return
+  forkWatch = null
+  selectSession(hit.id)
+}
+
 export function applyIndex(payload: any): void {
   state.sessions = payload.sessions || []
   state.dedupeReviews = payload.dedupeReviews || []
@@ -41,6 +65,7 @@ export function applyIndex(payload: any): void {
   // Vue 的响应式列表会做 keyed 更新：签名没变时算出的 groups 不变，DOM 不动；
   // 这里仍保留签名（旧页字段），给需要显式判重的调用方用。
   state.listSig = listSigOf()
+  settleForkWatch()
 }
 
 function listSigOf(): string {
@@ -260,6 +285,22 @@ export function dropSession(project: string, path: string): Promise<any> {
   }).then(async (res) => {
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error((data && data.error) || 'HTTP ' + res.status)
+    void refreshIndex()
+    return data
+  })
+}
+
+/* cancelChapterRetry 撤销一条还没被消费的排队请求（P56）：误触的出口。返回
+   撤掉了几条——0 表示 latex 已经把它消费了，这时只能去「历史」里删那条新会话。 */
+export function cancelChapterRetry(project: string, chapter: string, role = 'convert', path = ''): Promise<any> {
+  return fetch('/api/retry/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project, chapter, role, path }),
+  }).then(async (res) => {
+    const text = await res.text()
+    if (!res.ok) throw new Error(text.trim() || 'HTTP ' + res.status)
+    const data = text ? JSON.parse(text) : {}
     void refreshIndex()
     return data
   })

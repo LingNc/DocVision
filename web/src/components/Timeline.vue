@@ -13,8 +13,14 @@ import SystemMsg from './SystemMsg.vue'
 import ImageTurn from './ImageTurn.vue'
 import ResultMsg from './ResultMsg.vue'
 import FoldText from './FoldText.vue'
+import { forkFromLine } from '../fork'
+import { canForkFrom } from '../legacy/fork'
 
 const model = computed(() => streamModel())
+
+/* P57：对话页每一条消息也能 fork（以前只有「轨迹」页每行有 ⤓，用户在对话页
+ * 找不到入口）。判据与轨迹页同一处（legacy/fork.ts）。 */
+const canFork = computed(() => canForkFrom(state.current))
 
 const emptyText = computed(() => {
   if (state.onlyTools) return '这个会话没有工具调用记录'
@@ -52,14 +58,23 @@ watch(
     <div class="stream">
       <StreamSummary v-if="state.current" />
       <template v-for="item in model.items" :key="item.key">
-        <AssistantMsg v-if="item.type === 'assistant'" :item="item" />
-        <SystemMsg v-else-if="item.type === 'system'" :item="item" />
-        <ImageTurn v-else-if="item.type === 'imageTurn'" :item="item" />
-        <ResultMsg v-else-if="item.type === 'result'" :item="item" />
-        <section v-else class="msg msg-other">
-          <FoldText :text="String(item.line.text || '(无正文)')" :mem-key="'other.' + item.line.n"
-            :preview-lines="LONG_TEXT_LINES" :tokens="estOf(item.line).text" />
-        </section>
+        <div class="fork-wrap">
+          <AssistantMsg v-if="item.type === 'assistant'" :item="item" />
+          <SystemMsg v-else-if="item.type === 'system'" :item="item" />
+          <ImageTurn v-else-if="item.type === 'imageTurn'" :item="item" />
+          <ResultMsg v-else-if="item.type === 'result'" :item="item" />
+          <section v-else class="msg msg-other">
+            <FoldText :text="String(item.line.text || '(无正文)')" :mem-key="'other.' + item.line.n"
+              :preview-lines="LONG_TEXT_LINES" :tokens="estOf(item.line).text" />
+          </section>
+          <button
+            v-if="canFork"
+            class="fork-btn"
+            type="button"
+            :title="'从这里 fork：历史截到第 ' + item.line.n + ' 条，后面丢掉，开一个新尝试接着干（源记录保留）'"
+            @click.stop="forkFromLine(item.line.n, '对话')"
+          >⤓</button>
+        </div>
       </template>
       <div v-if="!model.items.length && !state.partial" class="empty">{{ emptyText }}</div>
       <!-- P7：流式尾——当前会话正在生成的那条消息的实时快照 -->
@@ -79,6 +94,30 @@ watch(
 </template>
 
 <style scoped>
+/* fork 按钮：悬浮在这一条消息右上角，平时不抢戏（与轨迹页的 ⤓ 同一个动作）。 */
+.fork-wrap { position: relative; }
+
+.fork-btn {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  border: 1px solid var(--line, #d0d7de);
+  background: var(--bg, #fff);
+  color: var(--caption);
+  border-radius: 5px;
+  padding: 0 5px;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s;
+}
+
+.fork-wrap:hover .fork-btn,
+.fork-btn:focus {
+  opacity: 1;
+}
+
 /* ============================ 对话（DSH 的消息形态） ============================ */
 
 .timeline {
@@ -91,7 +130,10 @@ watch(
 
 /* 回合边界**只有一种画法**：8px + 0.5px 虚线 + 8px（--divider-gap）。虚线只出现在
    section 之间（也就是回合之间），同一条消息里的工具行之间永远只是 --row-gap。 */
-.stream > .msg + .msg {
+.stream > .msg + .msg,
+/* P57：每条消息外面多了一层 .fork-wrap（装 ⤓ 按钮），分隔线规则要跨过它——
+   否则相邻两条消息不再是兄弟，回合之间那条虚线就整片消失。 */
+.stream > .fork-wrap + .fork-wrap > .msg {
   margin-top: var(--divider-gap);
   padding-top: var(--divider-gap);
   border-top: .5px dashed var(--border);

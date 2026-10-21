@@ -44,6 +44,82 @@ type retryRequest struct {
 	Path string `json:"path,omitempty"`
 }
 
+// /api/retry/cancel —— 撤销一条**还没被消费**的排队请求（P56）。
+//
+// 误触是排队模型自带的代价：按钮点下去只写一个文件，真正干活的 latex 可能几十秒
+// 后才走到它。这段时间里用户应该能把请求撤回来，而不是眼睁睁看它开一个新尝试。
+// 只删队列里的待办文件（`*.done.json` 是已消费的留档，不动），找不到就当已消费，
+// 让页面提示"这次重试可能已经开始了，去历史里删那条会话"。
+type retryCancelRequest struct {
+	Project string `json:"project"`
+	Chapter string `json:"chapter"`
+	Role    string `json:"role"`
+	// Path 是矢量图重画（role=vector）的作图转录名：这种请求不带章节。
+	Path string `json:"path"`
+}
+
+func (v *viewerServer) serveRetryCancel(w http.ResponseWriter, r *http.Request) {
+	if !v.allowRetry {
+		http.Error(w, "重试入口已关闭（docvision sessions 用 --no-retry 启动的）", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "只接受 POST", http.StatusMethodNotAllowed)
+		return
+	}
+	var req retryCancelRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+		http.Error(w, "请求体不是合法 JSON", http.StatusBadRequest)
+		return
+	}
+	projDir, ok := v.projectWorkspace(req.Project)
+	if !ok {
+		http.Error(w, "项目不存在", http.StatusNotFound)
+		return
+	}
+	chapter := strings.TrimSuffix(strings.TrimSpace(req.Chapter), ".md")
+	role := strings.TrimSpace(req.Role)
+	if role == "" {
+		role = "convert"
+	}
+	if chapter == "" && role != "vector" {
+		http.Error(w, "缺少章节名（矢量图重画要用 role=vector + path）", http.StatusBadRequest)
+		return
+	}
+	// Path（矢量图重画）按转录名匹配，章节请求按章节名 + 角色匹配：同一条请求
+	// 可能排了"重试"又排了"继续跑"，只撤用户刚点的那一种。
+	path := filepath.Base(strings.TrimSpace(req.Path))
+	var removed []string
+	for _, f := range retryq.Pending(projDir) {
+		gotRole := f.Role
+		if gotRole == "" {
+			gotRole = "convert"
+		}
+		if gotRole != role {
+			continue
+		}
+		if role == "vector" {
+			if path == "" || filepath.Base(f.Path) != path {
+				continue
+			}
+		} else if strings.TrimSuffix(f.Chapter, ".md") != chapter {
+			continue
+		}
+		if err := os.Remove(f.Path); err != nil {
+			continue
+		}
+		removed = append(removed, filepath.Base(f.Path))
+	}
+	// 队列里的判定与页面上的「待重试」同源（retryq.Pending 读的是同样的文件），
+	// 删完立刻重算一次，回执里带上"还剩几条"，页面据此同步状态。
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"removed": len(removed),
+		"files":   removed,
+	})
+}
+
 // projectWorkspace 把页面上的项目名换成磁盘目录：RootProject（旧版单项目
 // 布局）就是扫描根本身，其它名字必须在根下且是目录。
 func (v *viewerServer) projectWorkspace(project string) (string, bool) {

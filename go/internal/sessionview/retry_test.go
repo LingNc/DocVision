@@ -379,3 +379,90 @@ func TestPostRetryFromRecordSnapshotNote(t *testing.T) {
 		t.Fatalf("回执该说明工作区一起退: %s", rec.Body.String())
 	}
 }
+
+// P56：误触的出口——排队请求还没被 latex 消费时，页面必须能撤回来（否则只能
+// 眼睁睁看它开一个新尝试）。撤只认还没消费的待办；同章另一种角色、已消费的
+// `.done.json` 都不许动。
+func TestPostRetryCancel(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	// 继续跑要求这一章已经有转录，先放一条。
+	if err := os.MkdirAll(filepath.Join(proj, "work", "sessions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "work", "sessions", "convert_chapter_002.jsonl"), []byte("{\"t\":\"msg\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"convert"}`); rec.Code != 200 {
+		t.Fatalf("排队失败: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_002","role":"continue"}`); rec.Code != 200 {
+		t.Fatalf("排队继续跑失败: %d %s", rec.Code, rec.Body.String())
+	}
+	dir := filepath.Join(proj, "work", "retry")
+	if n := len(retryqPending(t, dir)); n != 2 {
+		t.Fatalf("应有 2 条待办，实际 %d", n)
+	}
+	cancel := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/retry/cancel", bytes.NewBufferString(body))
+		rec := httptest.NewRecorder()
+		v.ServeHTTP(rec, req)
+		return rec
+	}
+	// 只撤 convert，continue 那条留着。
+	rec := cancel(`{"project":"书A","chapter":"chapter_002","role":"convert"}`)
+	if rec.Code != 200 {
+		t.Fatalf("撤销失败: %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Removed int      `json:"removed"`
+		Files   []string `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("回执不是 JSON: %v（%s）", err, rec.Body.String())
+	}
+	if out.Removed != 1 || len(out.Files) != 1 {
+		t.Fatalf("应只撤 1 条，回执 %+v", out)
+	}
+	left := retryqPending(t, dir)
+	if len(left) != 1 || left[0] != "continue" {
+		t.Fatalf("剩下的应该是 continue 那条，实际 %v", left)
+	}
+
+	// 已消费的（改了名）不算待办，撤销不能把它删掉。
+	done := filepath.Join(dir, "req-1-chapter_002.done.json")
+	if err := os.WriteFile(done, []byte(`{"chapter":"chapter_002","role":"continue"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := cancel(`{"project":"书A","chapter":"chapter_002","role":"continue"}`); rec.Code != 200 {
+		t.Fatalf("撤销失败: %d", rec.Code)
+	}
+	if _, err := os.Stat(done); err != nil {
+		t.Fatalf("已消费的留档不该被删: %v", err)
+	}
+	if rec := cancel(`{"project":"书A","chapter":"chapter_002","role":"continue"}`); rec.Code != 200 {
+		t.Fatalf("重复撤销应成功（幂等）: %d", rec.Code)
+	}
+
+	// 关掉写入口时同样不许撤（与 /api/retry 一致）。
+	off, _ := retryTestServer(t, false)
+	req := httptest.NewRequest(http.MethodPost, "/api/retry/cancel", bytes.NewBufferString(`{"project":"书A","chapter":"chapter_002"}`))
+	rec = httptest.NewRecorder()
+	off.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("--no-retry 时应拒绝撤销，实际 %d", rec.Code)
+	}
+}
+
+// retryqPending 读队列里还没消费的请求，返回它们的角色（convert 缺省补上）。
+func retryqPending(t *testing.T, dir string) []string {
+	t.Helper()
+	var out []string
+	for _, f := range retryq.Pending(filepath.Dir(filepath.Dir(dir))) {
+		role := f.Role
+		if role == "" {
+			role = "convert"
+		}
+		out = append(out, role)
+	}
+	return out
+}
