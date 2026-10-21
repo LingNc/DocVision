@@ -77,27 +77,17 @@ func checkerFixture(t *testing.T) (proj, base, chapPath, texPath, partsPath stri
 	return
 }
 
-// TestCheckerViewHoldsTwoFilesOneFolder: the checker session gets a
-// read-only view with EXACTLY the two files it compares and the folder
-// with the chapter's \input parts — nothing else, and no way to write.
+// TestCheckerViewHoldsTwoFilesOneFolder: 核对会话拿到的只读视图里必须有它要对照
+// 的两个文件（md / tex）与分片目录。**其余条目按章节真实布局铺开**（P55 之后再
+// 补：`<章>/` 别名、`figures/`、`images/`）——旧断言要求"正好三项"，正是那条
+// 过窄的视图让 tex 里的 `\input{parts/…}` 在视图里指向不存在的位置。
 func TestCheckerViewHoldsTwoFilesOneFolder(t *testing.T) {
 	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
 	view := ensureCheckerView(proj, base, chapPath, texPath, partsPath)
 	if view == "" {
 		t.Fatal("no view")
 	}
-	entries, err := os.ReadDir(view)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	want := []string{base + ".md", base + ".tex", "parts"}
-	if strings.Join(names, ",") != strings.Join(want, ",") {
-		t.Fatalf("视图内容 = %v, want %v", names, want)
-	}
+	want := []string{base + ".md", base + ".tex", "parts", base, "t1.tex"}
 	for _, n := range want {
 		if _, err := os.Stat(filepath.Join(view, n)); err != nil {
 			t.Errorf("视图应有 %s: %v", n, err)
@@ -443,5 +433,77 @@ func TestCheckerClaimNoteNamesExistingOnly(t *testing.T) {
 	both := checkerClaimNote(view)
 	if !strings.Contains(both, "report.md") || !strings.Contains(both, "notes.md") {
 		t.Fatalf("两个都在时都要点名: %q", both)
+	}
+}
+
+// 核对视图必须按章节**自己的布局**铺开（两种提交约定并存）：否则一个完全正确
+// 的 `\input{parts/children/x.tex}` / `\input{figures/motif_x.tex}` 在视图里都指向
+// 不存在的位置，核对只能报"路径写错了""插图被漏掉了"——实测 49 条留档打回理由
+// 里 18 条路径、10 条插图。
+func TestCheckerViewMirrorsChapterLayout(t *testing.T) {
+	proj := t.TempDir()
+	base := "chapter_009_child_03"
+	chapDir := filepath.Join(proj, "chapters")
+	submitDir := filepath.Join(proj, "work", "chapters", base)
+	for _, d := range []string{chapDir, filepath.Join(submitDir, "parts", "children"), filepath.Join(submitDir, "figures"), filepath.Join(proj, "source", "figures")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tex := filepath.Join(proj, "work", "chapters", base+".tex")
+	if err := os.WriteFile(tex, []byte("\\input{parts/children/c1.tex}\n\\input{figures/motif_aa.tex}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md := filepath.Join(chapDir, base+".md")
+	if err := os.WriteFile(md, []byte("# m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(submitDir, "parts", "children", "c1.tex"), []byte("child\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(submitDir, "figures", "motif_aa.tex"), []byte("fig\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 项目级兜底：tex 引用项目 figures 里的图（非递归章节的常态）。
+	if err := os.WriteFile(filepath.Join(proj, "source", "figures", "motif_bb.tex"), []byte("fig2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view := ensureCheckerView(proj, base, md, tex, submitDir)
+	if view == "" {
+		t.Fatal("视图没建出来")
+	}
+	for _, rel := range []string{
+		base + ".tex", base + ".md",
+		"parts/children/c1.tex",         // 递归节点的真实布局
+		"figures/motif_aa.tex",          // 章节目录里的插图
+		"figures/motif_bb.tex",          // 项目级插图兜底
+		base + "/parts/children/c1.tex", // 提交布局里的 `\input{<章>/…}`
+	} {
+		if _, err := os.Stat(filepath.Join(view, rel)); err != nil {
+			t.Fatalf("视图里缺 %s: %v", rel, err)
+		}
+	}
+
+	// 扁平约定：分片直接交在章节目录下，`parts/x.tex` 与 `<章>/x.tex` 都要能读。
+	flat := filepath.Join(proj, "work", "chapters", "chapter_011")
+	if err := os.MkdirAll(flat, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(flat, "table1.tex"), []byte("t\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tex2 := filepath.Join(proj, "work", "chapters", "chapter_011.tex")
+	if err := os.WriteFile(tex2, []byte("\\input{parts/table1.tex}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md2 := filepath.Join(chapDir, "chapter_011.md")
+	if err := os.WriteFile(md2, []byte("# m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	view2 := ensureCheckerView(proj, "chapter_011", md2, tex2, flat)
+	for _, rel := range []string{"parts/table1.tex", "chapter_011/table1.tex", "table1.tex"} {
+		if _, err := os.Stat(filepath.Join(view2, rel)); err != nil {
+			t.Fatalf("扁平约定视图里缺 %s: %v", rel, err)
+		}
 	}
 }

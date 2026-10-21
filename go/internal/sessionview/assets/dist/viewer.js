@@ -7304,8 +7304,15 @@
       const other = pin.role === "convert" ? "checker" : "convert";
       const want = Number(pin.session.chapterAttempt) || 1;
       const peers = (byRole[pin.node.id + "|" + other] || []).filter((x) => (Number(x.chapterAttempt) || 1) === want);
-      if (peers.length) pin.node[other] = peers.reduce((a, b) => newerAttempt(a, b));
+      pin.node[other] = peers.length ? peers.reduce((a, b) => newerAttempt(a, b)) : null;
     }
+    Object.keys(byId).forEach((id) => {
+      const node = byId[id];
+      if (!node.convert || !node.checker) return;
+      const c = Number(node.convert.chapterAttempt) || 1;
+      const k = Number(node.checker.chapterAttempt) || 1;
+      if (k < c) node.checker = null;
+    });
     const roots = [];
     Object.keys(byId).forEach((id) => {
       const parent = parents[id] && byId[parents[id]];

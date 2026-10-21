@@ -458,8 +458,19 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     const other: 'convert' | 'checker' = pin.role === 'convert' ? 'checker' : 'convert'
     const want = Number(pin.session.chapterAttempt) || 1
     const peers = (byRole[pin.node.id + '|' + other] || []).filter((x: any) => (Number(x.chapterAttempt) || 1) === want)
-    if (peers.length) pin.node[other] = peers.reduce((a: any, b: any) => newerAttempt(a, b))
+    // 同一轮没有另一种角色的转录时**留空**，不要退回最新的那条：那条属于另一次
+    // 尝试，摆在一起会让人以为"这次已经核对过了"（T186）。
+    pin.node[other] = peers.length ? peers.reduce((a: any, b: any) => newerAttempt(a, b)) : null
   }
+  // 核对结论只对**它核对过的那次提交**有效：核对的尝试号比转换的小，说明那是
+  // 上一次尝试的结论，这一次还没核对——不显示（切到历史里那一次才看得到）。
+  Object.keys(byId).forEach((id) => {
+    const node = byId[id]
+    if (!node.convert || !node.checker) return
+    const c = Number(node.convert.chapterAttempt) || 1
+    const k = Number(node.checker.chapterAttempt) || 1
+    if (k < c) node.checker = null
+  })
   const roots: ChapterTreeNode[] = []
   Object.keys(byId).forEach((id) => {
     const parent = parents[id] && byId[parents[id]]

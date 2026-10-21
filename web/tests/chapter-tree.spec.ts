@@ -190,11 +190,24 @@ describe('章节树只钉住正在查看的那一条', () => {
     expect(roots.find((n) => n.id === 'chapter_043')!.convert!.chapterAttempt).toBe(2)
   })
 
-  it('同一节点的核对会话只跟同一轮，那一轮没有就保持最新', () => {
+  it('同一节点的核对会话只跟同一轮', () => {
     const withSame = [conv(1), conv(2), conv(3), chk(1), chk(2), chk(3)]
     expect(buildChapterTree(withSame, conv(2).id)[0].checker!.chapterAttempt).toBe(2)
+  })
+
+  // T186：那一轮还没核对就**不留别的轮次**——旧行为退回最新的 #3，摆在一起会
+  // 让人以为"这次已经核对过了"（真实打回理由也就跟着错位）。
+  it('那一轮没有核对结论就不显示核对会话', () => {
     const noSame = [conv(1), conv(2), conv(3), chk(1), chk(3)]
-    expect(buildChapterTree(noSame, conv(2).id)[0].checker!.chapterAttempt).toBe(3)
+    expect(buildChapterTree(noSame, conv(2).id)[0].checker).toBe(null)
+  })
+
+  it('默认视图里过期的核对结论也不挂在新的转换旁边', () => {
+    const stale = [conv(1), conv(2), conv(3), chk(1), chk(2)]
+    expect(buildChapterTree(stale, '')[0].checker).toBe(null)
+    // 手工重新核对（核对号更大）仍然显示
+    const rechecked = [conv(1), conv(2), chk(1), chk(3)]
+    expect(buildChapterTree(rechecked, '')[0].checker!.chapterAttempt).toBe(3)
   })
 
   it('看核对会话 #1：核对钉住 #1，同一行的转换切到它核对的那一轮 #1', () => {

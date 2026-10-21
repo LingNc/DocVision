@@ -269,14 +269,91 @@ func ensureCheckerViewAt(dir, base, chapPath, texPath, partsPath string) string 
 	}
 	link(chapPath, base+".md")
 	link(texPath, base+".tex")
+	// 章节目录要按**它自己的布局**出现，而不是被改名成 parts/。
+	//
+	// 两种提交约定并存：普通章节把分片直接交在 `<章>/` 下（tex 写
+	// `\input{<章>/x.tex}` 或 `\input{parts/x.tex}`），递归/整合过的节点交的是
+	// `<章>/parts/…` 与 `<章>/figures/…`（tex 写 `\input{parts/children/x.tex}`
+	// 与 `\input{figures/motif_x.tex}`）。旧视图一律把章节目录挂成 `parts/`，
+	// 于是后一种约定下 tex 里每一个路径在视图里都指向不存在的位置，核对会话
+	// 只能报"`\input` 路径写错了""插图被漏掉了"——真的 `.tex` 却是对的。实测
+	// 一个项目留档的 49 条打回理由里，18 条是路径、10 条是插图。
 	if st, err := os.Stat(partsPath); err == nil && st.IsDir() {
-		if err := linkAbs(partsPath, filepath.Join(dir, "parts")); err != nil {
-			_ = copyDir(partsPath, filepath.Join(dir, "parts"))
+		// 目录内容铺到视图根：`parts/…`、`figures/…` 与 tex 同级解析。
+		if entries, err := os.ReadDir(partsPath); err == nil {
+			for _, e := range entries {
+				name := e.Name()
+				dst := filepath.Join(dir, name)
+				if fileExists(dst) {
+					continue
+				}
+				src := filepath.Join(partsPath, name)
+				if err := linkAbs(src, dst); err != nil {
+					if e.IsDir() {
+						_ = copyDir(src, dst)
+					} else {
+						_ = copyFile(src, dst)
+					}
+				}
+			}
+		}
+		// 整目录再挂两份：`<章>/`（提交布局里的 `\input{<章>/…}`）与
+		// `parts/`（旧的扁平约定与提示词里的 PARTS_DIR）。铺出来的同名条目优先，
+		// 这里只补缺。
+		for _, alias := range []string{base, "parts"} {
+			dst := filepath.Join(dir, alias)
+			if fileExists(dst) {
+				continue
+			}
+			if err := linkAbs(partsPath, dst); err != nil {
+				_ = copyDir(partsPath, dst)
+			}
 		}
 	} else if err := os.MkdirAll(filepath.Join(dir, "parts"), 0o755); err != nil {
 		return ""
 	}
+	// `<proj>/chapters/<章>.md` → `<proj>`
+	linkCheckerAssets(dir, filepath.Dir(filepath.Dir(chapPath)))
 	return dir
+}
+
+// linkCheckerAssets 把项目级的 figures/ images/ 也挂进核对视图：章节 .tex 里
+// `\input{figures/motif_*.tex}`、`\includegraphics{images/…}` 在转换工作区与
+// 成书树里都能解析（`chapterWorkTreeAt` 就挂了这两枚软链），核对视图若没有，
+// 模型会报告"插图被漏掉了"——同样是视图造成的假问题，代价是一次重转。
+func linkCheckerAssets(dir, proj string) {
+	for _, asset := range []string{"figures", "images"} {
+		src := filepath.Join(proj, "source", asset)
+		if !fileExists(src) {
+			continue
+		}
+		dst := filepath.Join(dir, asset)
+		if !fileExists(dst) {
+			if err := linkAbs(src, dst); err != nil {
+				_ = copyDir(src, dst)
+			}
+			continue
+		}
+		// 章节自带的 figures/ 已经在视图里了：**逐条并进去**（章节插图与项目
+		// 级插图都要能读到，整个跳过会让项目级那批 `\input{figures/…}` 落空）。
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			dstEntry := filepath.Join(dst, e.Name())
+			if fileExists(dstEntry) {
+				continue
+			}
+			if err := linkAbs(filepath.Join(src, e.Name()), dstEntry); err != nil {
+				if e.IsDir() {
+					_ = copyDir(filepath.Join(src, e.Name()), dstEntry)
+				} else {
+					_ = copyFile(filepath.Join(src, e.Name()), dstEntry)
+				}
+			}
+		}
+	}
 }
 
 // checkerClaimNote 只点名真实存在的"说法"文件（T183）：以前只要 report.md 在就
