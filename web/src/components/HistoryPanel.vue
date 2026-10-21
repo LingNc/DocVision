@@ -8,6 +8,8 @@ import { state, relTime } from '../state'
 import { chainOfSession, chainMemberTag, plainTitle, sessionTitleOf } from '../legacy/sidebar'
 import { dropSession, refreshIndex, selectSession } from '../data'
 import { canDropOf } from '../legacy/actions'
+import { checkerRounds } from '../legacy/rounds'
+import { jumpToLine } from '../legacy/trajectory'
 import InlineMD from './InlineMD.vue'
 
 const members = computed(() => chainOfSession(state.sessions, state.current ? (state.current as any).id : null))
@@ -33,6 +35,16 @@ function onRowClick(s: any) {
 /* P56：历史里每一行给两个行内动作——「设为当前」（下次继续跑就接着它）与
  * 「删除这一条」（转错的尝试有出口，整条从历史里消失、归档目录一起删）。
  * 删除要二次确认：这里用行内确认条，不用 window.confirm。 */
+/* T188：核对会话一次尝试里被打回几轮，全挤在同一条转录里（磁盘格式不动）。
+ * 历史里按 user 轮拆成子条目，点一轮就跳到那一轮的起始行——"第 1 轮为什么被
+ * 拒"不用再翻整条转录。 */
+const rounds = computed(() => {
+  const s: any = state.current
+  if (!s || s.chapterRole !== 'checker' || !Array.isArray(state.lines)) return []
+  const r = checkerRounds(state.lines as any[])
+  return r.length > 1 ? r : []
+})
+
 const dropAsk = ref<any>(null)
 const dropNote = ref('')
 
@@ -70,6 +82,23 @@ function doDrop() {
         <button class="history-act" type="button" @click="dropAsk = null">取消</button>
       </div>
       <div v-if="dropNote" class="history-note">{{ dropNote }}</div>
+      <div v-if="rounds.length" class="history-rounds">
+        <div class="history-rounds-head">这条核对转录里的 {{ rounds.length }} 轮（新 → 旧同序，点一轮跳到那一轮的起点）</div>
+        <button
+          v-for="r in rounds"
+          :key="'r' + r.round"
+          class="history-round"
+          type="button"
+          :title="r.summary || '跳到第 ' + r.round + ' 轮'"
+          @click="jumpToLine(r.from)"
+        >
+          <span class="row-chip chain-tag history-tag">轮 {{ r.round }}</span>
+          <span class="history-round-state" :class="r.verdict === 'pass' ? 'ok' : r.verdict === 'issues' ? 'bad' : ''">
+            {{ r.verdict === 'pass' ? '通过' : r.verdict === 'issues' ? '拒绝 ' + r.issues + ' 条' : '无结论' }}
+          </span>
+          <span class="history-round-from">第 {{ r.from }} 行 · {{ r.lines }} 行</span>
+        </button>
+      </div>
       <div
         v-for="s in members"
         :key="s.id"
@@ -96,6 +125,35 @@ function doDrop() {
 </template>
 
 <style scoped>
+.history-rounds { margin: 0 4px 10px; }
+
+.history-rounds-head { font-size: 11px; color: var(--caption); margin-bottom: 4px; }
+
+.history-round {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-round:hover { background: var(--hover, #f3f4f6); }
+
+.history-round-state { font-size: 11px; }
+
+.history-round-state.ok { color: #15803d; }
+
+.history-round-state.bad { color: #b45309; }
+
+.history-round-from { margin-left: auto; font-size: 11px; color: var(--caption); }
+
 .history-confirm {
   display: flex;
   flex-wrap: wrap;

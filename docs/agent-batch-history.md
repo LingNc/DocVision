@@ -2142,3 +2142,9 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **根因**：交付前 `copyFile(state.lastPDF, dstPDF)`。`state.lastPDF` 只在 compile 工具**本进程**编译成功时赋值；而续跑时 `resumeSubmit` 直接收账（`state.submitted = true`、`resumeSkip = true`），**一次编译都没发生**，`lastPDF` 是空串 → `os.Open("")` → `open : no such file or directory`。这条错误被 `pp.Error = err.Error()` 记进进度、状态写 `fallback`；下次运行 `pending` 又把它排进去（`status != "done"`），重放 → 再次空路径 → 再次 fallback，形成闭环。所以"重画这张图"也没用：重画同样从重放开始。
 - **修法**：① 交付前判定 `state.lastPDF` 为空或文件不在，就按 `state.finalCode` 用**同一套** `buildStandalone` + `Compiler.Compile` 补编译一次，成功则用新产物；`finalCode` 也为空才报"没有可交付的图形代码"；② 补编译失败时报"交付前重新编译失败（<fig>）：<最后编译错误>"，不再泄漏系统错误；③ `copyFile` 对空源路径直接报"源路径为空，无法写出 <目标>"（`TestCopyFileRejectsEmptySource` 钉住）。
 - **教训**：把"本进程内的临时状态"（`lastPDF`）当成"磁盘上的事实"用，就会在**重放路径**上踩空——重放只恢复逻辑状态（已提交），不恢复过程状态（产物路径）。凡是"交付/收尾"步骤依赖过程状态，都要能从磁盘事实重建。
+
+### T188（B 方案）：核对转录按轮拆成历史子条目
+
+- **为什么不切文件**：`checker_<章>.try<N>.jsonl` 这个名字是"一次尝试"的身份，被 `lastAttemptNumber`、历史聚合（`chapterAttemptChain`）、`/api/drop`（按 `.tryN` 连 work/attempts 一起删）、checker 重放（`replaySubmit`）四处依赖。按轮改名会把这四条同时改动，而用户要的只是"能看第 1 轮的详细拒绝理由"。
+- **做法**：纯前端视图层切分。`checkerRounds(lines)` 扫一遍转录：user 行开新轮；submit 回执带 pass → 通过，带 issues/reject/problem → 拒绝并数编号行（`- ` / `1.`）；每轮记起始行号与行数，另存最后一条助手正文的前 120 字作摘要。历史面板只在该会话是 checker 且轮数 > 1 时渲染子列表，点击 `jumpToLine(from)`。
+- **边界**：没有 user 行的旧转录整条当一轮（不显示子列表）；行号口径与 `/api/session` 的 `n` 一致，跳转不会串。

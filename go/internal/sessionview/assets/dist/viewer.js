@@ -9187,7 +9187,7 @@
     title: "已在重新核对队列里：转换阶段的下一个安全点会重跑核对会话（产物不动）"
   };
   const _hoisted_12$5 = ["title", "onClick"];
-  const _hoisted_13$4 = ["onClick"];
+  const _hoisted_13$5 = ["onClick"];
   const _sfc_main$m = /* @__PURE__ */ defineComponent({
     ...{ name: "ChapterSessionTree" },
     __name: "ChapterSessionTree",
@@ -9357,7 +9357,7 @@
                     type: "button",
                     title: "打开核对会话详情",
                     onClick: ($event) => emit2("info", node.checker)
-                  }, "ⓘ", 8, _hoisted_13$4)
+                  }, "ⓘ", 8, _hoisted_13$5)
                 ], 2)) : createCommentVNode("", true),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
                   key: 1,
@@ -9409,14 +9409,14 @@
   };
   const _hoisted_11$4 = { class: "i2t-ov-agg" };
   const _hoisted_12$4 = ["title"];
-  const _hoisted_13$3 = {
+  const _hoisted_13$4 = {
     key: 0,
     class: "i2t-blocks"
   };
-  const _hoisted_14$3 = ["title", "aria-label", "onClick"];
-  const _hoisted_15$3 = { class: "i2t-book-head" };
-  const _hoisted_16$3 = ["title"];
-  const _hoisted_17$3 = { class: "i2t-book-count" };
+  const _hoisted_14$4 = ["title", "aria-label", "onClick"];
+  const _hoisted_15$4 = { class: "i2t-book-head" };
+  const _hoisted_16$4 = ["title"];
+  const _hoisted_17$4 = { class: "i2t-book-count" };
   const _hoisted_18$3 = ["aria-label"];
   const _hoisted_19$3 = { class: "i2t-book-meta" };
   const _hoisted_20$3 = { class: "i2t-meta-done" };
@@ -9846,7 +9846,7 @@
                     onClick: withModifiers(toggleOverviewBlocks, ["stop"])
                   }, toDisplayString(overviewBlocks.value ? "☰" : "▦"), 11, _hoisted_12$4)
                 ]),
-                overviewBlocks.value ? (openBlock(), createElementBlock("div", _hoisted_13$3, [
+                overviewBlocks.value ? (openBlock(), createElementBlock("div", _hoisted_13$4, [
                   (openBlock(true), createElementBlock(Fragment, null, renderList(progressBooks.value, (b) => {
                     return openBlock(), createElementBlock("button", {
                       key: b.book,
@@ -9855,19 +9855,19 @@
                       title: unref(bookTip)(b),
                       "aria-label": b.book + "：完成 " + b.done + " · 修复 " + b.fixed + " · 升级 " + b.escalated + " · 进行中 " + b.running + " · 待处理 " + b.pending,
                       onClick: ($event) => onOverviewBookClick(b)
-                    }, null, 10, _hoisted_14$3);
+                    }, null, 10, _hoisted_14$4);
                   }), 128))
                 ])) : (openBlock(true), createElementBlock(Fragment, { key: 1 }, renderList(progressBooks.value, (b) => {
                   return openBlock(), createElementBlock("div", {
                     key: b.book,
                     class: "i2t-book"
                   }, [
-                    createBaseVNode("div", _hoisted_15$3, [
+                    createBaseVNode("div", _hoisted_15$4, [
                       createBaseVNode("span", {
                         class: "i2t-book-name",
                         title: b.book
-                      }, toDisplayString(b.book), 9, _hoisted_16$3),
-                      createBaseVNode("span", _hoisted_17$3, toDisplayString(b.done) + "/" + toDisplayString(b.total), 1)
+                      }, toDisplayString(b.book), 9, _hoisted_16$4),
+                      createBaseVNode("span", _hoisted_17$4, toDisplayString(b.done) + "/" + toDisplayString(b.total), 1)
                     ]),
                     createBaseVNode("div", {
                       class: "i2t-bar",
@@ -12090,11 +12090,11 @@
   };
   const _hoisted_11$3 = { class: "num-head" };
   const _hoisted_12$3 = ["data-kind", "data-error", "title", "onClick"];
-  const _hoisted_13$2 = { class: "traj-num" };
-  const _hoisted_14$2 = ["onClick"];
-  const _hoisted_15$2 = ["onClick"];
-  const _hoisted_16$2 = ["onClick"];
-  const _hoisted_17$2 = { class: "traj-name" };
+  const _hoisted_13$3 = { class: "traj-num" };
+  const _hoisted_14$3 = ["onClick"];
+  const _hoisted_15$3 = ["onClick"];
+  const _hoisted_16$3 = ["onClick"];
+  const _hoisted_17$3 = { class: "traj-name" };
   const _hoisted_18$2 = ["title"];
   const _hoisted_19$2 = { class: "traj-num-cell" };
   const _hoisted_20$2 = { class: "traj-num-cell" };
@@ -12224,13 +12224,13 @@
                       title: row.title || "点击在右侧详情栏看这一步",
                       onClick: ($event) => row.jump ? selectRow(row) : unref(state).trajOpen[row.rid] = !unref(state).trajOpen[row.rid]
                     }, [
-                      createBaseVNode("td", _hoisted_13$2, [
+                      createBaseVNode("td", _hoisted_13$3, [
                         createBaseVNode("button", {
                           type: "button",
                           class: "traj-disclose",
                           title: "展开完整输入输出",
                           onClick: withModifiers(($event) => unref(state).trajOpen[row.rid] = !unref(state).trajOpen[row.rid], ["stop"])
-                        }, toDisplayString(unref(state).trajOpen[row.rid] ? "▾" : "▸"), 9, _hoisted_14$2),
+                        }, toDisplayString(unref(state).trajOpen[row.rid] ? "▾" : "▸"), 9, _hoisted_14$3),
                         createTextVNode(toDisplayString(row.jump ? String(row.jump) : "—") + " ", 1),
                         row.jump ? (openBlock(), createElementBlock("button", {
                           key: 0,
@@ -12238,21 +12238,21 @@
                           class: "traj-gochat",
                           title: "跳到对话里对应的那条消息",
                           onClick: withModifiers(($event) => goChat(row), ["stop"])
-                        }, "↳", 8, _hoisted_15$2)) : createCommentVNode("", true),
+                        }, "↳", 8, _hoisted_15$3)) : createCommentVNode("", true),
                         row.jump && canCutFrom.value ? (openBlock(), createElementBlock("button", {
                           key: 1,
                           type: "button",
                           class: "traj-cut",
                           title: "从这一条之后继续：历史截到这条消息，后面的轮次丢掉，开一个新尝试接着干",
                           onClick: withModifiers(($event) => _ctx.forkFromLine(row.jump, "轨迹"), ["stop"])
-                        }, "⤓", 8, _hoisted_16$2)) : createCommentVNode("", true)
+                        }, "⤓", 8, _hoisted_16$3)) : createCommentVNode("", true)
                       ]),
                       createBaseVNode("td", null, [
                         createBaseVNode("span", {
                           class: normalizeClass(["kind-tag", row.status === "error" ? "kind-error" : "kind-" + row.kind])
                         }, toDisplayString(row.tag), 3)
                       ]),
-                      createBaseVNode("td", _hoisted_17$2, toDisplayString(row.name), 1),
+                      createBaseVNode("td", _hoisted_17$3, toDisplayString(row.name), 1),
                       createBaseVNode("td", {
                         class: "traj-summary",
                         title: row.summary || ""
@@ -12475,17 +12475,17 @@
   const _hoisted_10$3 = { class: "row-actions" };
   const _hoisted_11$2 = { class: "detail-block" };
   const _hoisted_12$2 = { class: "detail-kv" };
-  const _hoisted_13$1 = ["title"];
-  const _hoisted_14$1 = {
+  const _hoisted_13$2 = ["title"];
+  const _hoisted_14$2 = {
     key: 0,
     class: "stats-sub"
   };
-  const _hoisted_15$1 = {
+  const _hoisted_15$2 = {
     key: 1,
     class: "detail-block"
   };
-  const _hoisted_16$1 = { class: "stats-sub" };
-  const _hoisted_17$1 = { class: "tiles" };
+  const _hoisted_16$2 = { class: "stats-sub" };
+  const _hoisted_17$2 = { class: "tiles" };
   const _hoisted_18$1 = ["title"];
   const _hoisted_19$1 = { class: "tile-value" };
   const _hoisted_20$1 = { class: "tile-label" };
@@ -12656,16 +12656,16 @@
                       }, null, 8, ["text"])) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                         createTextVNode(toDisplayString(row.v), 1)
                       ], 64))
-                    ], 10, _hoisted_13$1)
+                    ], 10, _hoisted_13$2)
                   ], 64);
                 }), 128))
               ]),
-              subPath.value ? (openBlock(), createElementBlock("div", _hoisted_14$1, "目录：" + toDisplayString(subPath.value), 1)) : createCommentVNode("", true)
+              subPath.value ? (openBlock(), createElementBlock("div", _hoisted_14$2, "目录：" + toDisplayString(subPath.value), 1)) : createCommentVNode("", true)
             ]),
-            stats.value ? (openBlock(), createElementBlock("section", _hoisted_15$1, [
+            stats.value ? (openBlock(), createElementBlock("section", _hoisted_15$2, [
               _cache[2] || (_cache[2] = createBaseVNode("h3", { class: "detail-block-title" }, "指标", -1)),
-              createBaseVNode("div", _hoisted_16$1, toDisplayString(stats.value.sub), 1),
-              createBaseVNode("div", _hoisted_17$1, [
+              createBaseVNode("div", _hoisted_16$2, toDisplayString(stats.value.sub), 1),
+              createBaseVNode("div", _hoisted_17$2, [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(stats.value.tiles, (t) => {
                   return openBlock(), createElementBlock("div", {
                     key: t.label,
@@ -12828,6 +12828,38 @@
     }
     return "";
   }
+  const ISSUE_LINE = /^\s*(?:[-*]\s+|\d+[.)]\s+)/;
+  function checkerRounds(lines) {
+    const out = [];
+    let cur = null;
+    const flush = () => {
+      if (!cur) return;
+      out.push({ round: out.length + 1, from: cur.from, lines: cur.count, verdict: cur.verdict, issues: cur.issues, summary: cur.summary });
+    };
+    for (const l of lines || []) {
+      const n = Number(l && l.n) || 0;
+      const role = l && l.role;
+      if (role === "user") {
+        flush();
+        cur = { from: n, count: 0, verdict: "unknown", issues: 0, summary: "" };
+      }
+      if (!cur) cur = { from: n, count: 0, verdict: "unknown", issues: 0, summary: "" };
+      cur.count++;
+      const text = String(l && (l.text || l.reasoning) || "");
+      if (!text) continue;
+      const low = text.toLowerCase();
+      if (/(^|\n)\s*pass\b/.test(low) || low.indexOf("verdict: pass") >= 0 || low.includes('"verdict":"pass"')) {
+        cur.verdict = "pass";
+        cur.issues = 0;
+      } else if (low.indexOf("issues") >= 0 || low.indexOf("reject") >= 0 || low.indexOf("problem") >= 0) {
+        if (cur.verdict !== "pass") cur.verdict = "issues";
+        cur.issues += text.split("\n").filter((x) => ISSUE_LINE.test(x)).length;
+      }
+      if (role === "assistant" && text.trim()) cur.summary = text.trim().slice(0, 120);
+    }
+    flush();
+    return out;
+  }
   const _hoisted_1$2 = {
     key: 0,
     class: "history-empty"
@@ -12846,16 +12878,24 @@
     key: 1,
     class: "history-note"
   };
-  const _hoisted_6$2 = ["title", "onClick", "onKeydown"];
-  const _hoisted_7$2 = { class: "row-chip chain-tag history-tag" };
-  const _hoisted_8$2 = {
+  const _hoisted_6$2 = {
+    key: 2,
+    class: "history-rounds"
+  };
+  const _hoisted_7$2 = { class: "history-rounds-head" };
+  const _hoisted_8$2 = ["title", "onClick"];
+  const _hoisted_9$2 = { class: "row-chip chain-tag history-tag" };
+  const _hoisted_10$2 = { class: "history-round-from" };
+  const _hoisted_11$1 = ["title", "onClick", "onKeydown"];
+  const _hoisted_12$1 = { class: "row-chip chain-tag history-tag" };
+  const _hoisted_13$1 = {
     key: 0,
     class: "history-cur"
   };
-  const _hoisted_9$2 = { class: "history-time" };
-  const _hoisted_10$2 = { class: "history-actions" };
-  const _hoisted_11$1 = ["onClick"];
-  const _hoisted_12$1 = ["onClick"];
+  const _hoisted_14$1 = { class: "history-time" };
+  const _hoisted_15$1 = { class: "history-actions" };
+  const _hoisted_16$1 = ["onClick"];
+  const _hoisted_17$1 = ["onClick"];
   const _sfc_main$2 = /* @__PURE__ */ defineComponent({
     __name: "HistoryPanel",
     setup(__props) {
@@ -12875,6 +12915,12 @@
       function onRowClick(s) {
         selectSession(s.id);
       }
+      const rounds = computed(() => {
+        const s = state.current;
+        if (!s || s.chapterRole !== "checker" || !Array.isArray(state.lines)) return [];
+        const r = checkerRounds(state.lines);
+        return r.length > 1 ? r : [];
+      });
       const dropAsk = /* @__PURE__ */ ref(null);
       const dropNote = /* @__PURE__ */ ref("");
       function isCurrent(s) {
@@ -12917,6 +12963,24 @@
               }, "取消")
             ])) : createCommentVNode("", true),
             dropNote.value ? (openBlock(), createElementBlock("div", _hoisted_5$2, toDisplayString(dropNote.value), 1)) : createCommentVNode("", true),
+            rounds.value.length ? (openBlock(), createElementBlock("div", _hoisted_6$2, [
+              createBaseVNode("div", _hoisted_7$2, "这条核对转录里的 " + toDisplayString(rounds.value.length) + " 轮（新 → 旧同序，点一轮跳到那一轮的起点）", 1),
+              (openBlock(true), createElementBlock(Fragment, null, renderList(rounds.value, (r) => {
+                return openBlock(), createElementBlock("button", {
+                  key: "r" + r.round,
+                  class: "history-round",
+                  type: "button",
+                  title: r.summary || "跳到第 " + r.round + " 轮",
+                  onClick: ($event) => unref(jumpToLine)(r.from)
+                }, [
+                  createBaseVNode("span", _hoisted_9$2, "轮 " + toDisplayString(r.round), 1),
+                  createBaseVNode("span", {
+                    class: normalizeClass(["history-round-state", r.verdict === "pass" ? "ok" : r.verdict === "issues" ? "bad" : ""])
+                  }, toDisplayString(r.verdict === "pass" ? "通过" : r.verdict === "issues" ? "拒绝 " + r.issues + " 条" : "无结论"), 3),
+                  createBaseVNode("span", _hoisted_10$2, "第 " + toDisplayString(r.from) + " 行 · " + toDisplayString(r.lines) + " 行", 1)
+                ], 8, _hoisted_8$2);
+              }), 128))
+            ])) : createCommentVNode("", true),
             (openBlock(true), createElementBlock(Fragment, null, renderList(members.value, (s) => {
               return openBlock(), createElementBlock("div", {
                 key: s.id,
@@ -12927,42 +12991,42 @@
                 onClick: ($event) => onRowClick(s),
                 onKeydown: withKeys(($event) => onRowClick(s), ["enter"])
               }, [
-                createBaseVNode("span", _hoisted_7$2, toDisplayString(unref(chainMemberTag)(s)), 1),
+                createBaseVNode("span", _hoisted_12$1, toDisplayString(unref(chainMemberTag)(s)), 1),
                 createVNode(_sfc_main$n, {
                   tag: "span",
                   class: "history-title",
                   text: unref(sessionTitleOf)(s),
                   plain: unref(plainTitle)(s)
                 }, null, 8, ["text", "plain"]),
-                isCurrent(s) ? (openBlock(), createElementBlock("span", _hoisted_8$2, "当前")) : createCommentVNode("", true),
+                isCurrent(s) ? (openBlock(), createElementBlock("span", _hoisted_13$1, "当前")) : createCommentVNode("", true),
                 createBaseVNode("span", {
                   class: normalizeClass(["history-state", endStateCls(s)])
                 }, toDisplayString(endStateText(s)), 3),
-                createBaseVNode("span", _hoisted_9$2, toDisplayString(unref(relTime)(s.mtime)), 1),
-                createBaseVNode("span", _hoisted_10$2, [
+                createBaseVNode("span", _hoisted_14$1, toDisplayString(unref(relTime)(s.mtime)), 1),
+                createBaseVNode("span", _hoisted_15$1, [
                   !isCurrent(s) ? (openBlock(), createElementBlock("button", {
                     key: 0,
                     class: "history-act",
                     type: "button",
                     title: "把这条设为当前会话（继续跑/重试都以它为准）",
                     onClick: withModifiers(($event) => onRowClick(s), ["stop"])
-                  }, "设为当前", 8, _hoisted_11$1)) : createCommentVNode("", true),
+                  }, "设为当前", 8, _hoisted_16$1)) : createCommentVNode("", true),
                   unref(canDropOf)(s) ? (openBlock(), createElementBlock("button", {
                     key: 1,
                     class: "history-act act-danger",
                     type: "button",
                     title: "删掉这条转录（作废尝试的归档一并删除）",
                     onClick: withModifiers(($event) => askDrop(s), ["stop"])
-                  }, "删除", 8, _hoisted_12$1)) : createCommentVNode("", true)
+                  }, "删除", 8, _hoisted_17$1)) : createCommentVNode("", true)
                 ])
-              ], 42, _hoisted_6$2);
+              ], 42, _hoisted_11$1);
             }), 128))
           ]))
         ], 2);
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-17805dad"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-4a7baf9f"]]);
   const _hoisted_1$1 = {
     key: 0,
     id: "session-actions",
