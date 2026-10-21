@@ -13,7 +13,7 @@ import SystemMsg from './SystemMsg.vue'
 import ImageTurn from './ImageTurn.vue'
 import ResultMsg from './ResultMsg.vue'
 import FoldText from './FoldText.vue'
-import { forkFromLine } from '../fork'
+import { forkBeforeLine, forkFromLine } from '../fork'
 import { canForkFrom } from '../legacy/fork'
 
 const model = computed(() => streamModel())
@@ -67,13 +67,20 @@ watch(
             <FoldText :text="String(item.line.text || '(无正文)')" :mem-key="'other.' + item.line.n"
               :preview-lines="LONG_TEXT_LINES" :tokens="estOf(item.line).text" />
           </section>
-          <button
-            v-if="canFork"
-            class="fork-btn"
-            type="button"
-            :title="'从这里 fork：历史截到第 ' + item.line.n + ' 条，后面丢掉，开一个新尝试接着干（源记录保留）'"
-            @click.stop="forkFromLine(item.line.n, '对话')"
-          >⤓</button>
+          <span v-if="canFork" class="fork-acts">
+            <button
+              class="fork-btn"
+              type="button"
+              :title="'从这里 fork：历史截到第 ' + item.line.n + ' 条，后面丢掉，开一个新尝试接着干（源记录保留）'"
+              @click.stop="forkFromLine(item.line.n, '对话')"
+            >⤓</button>
+            <button
+              class="fork-btn fork-drop"
+              type="button"
+              :title="'从这条之前 fork：等于删掉这条及其之后的记录再继续（源转录仍保留在「历史」里）'"
+              @click.stop="forkBeforeLine(item.line.n, '对话')"
+            >⤫</button>
+          </span>
         </div>
       </template>
       <div v-if="!model.items.length && !state.partial" class="empty">{{ emptyText }}</div>
@@ -98,9 +105,6 @@ watch(
 .fork-wrap { position: relative; }
 
 .fork-btn {
-  position: absolute;
-  top: 2px;
-  right: 0;
   border: 1px solid var(--line, #d0d7de);
   background: var(--bg, #fff);
   color: var(--caption);
@@ -113,9 +117,24 @@ watch(
   transition: opacity .12s;
 }
 
-.fork-wrap:hover .fork-btn,
-.fork-btn:focus {
+.fork-acts {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity .12s;
+}
+
+.fork-wrap:hover .fork-acts,
+.fork-acts:focus-within {
   opacity: 1;
+}
+
+.fork-drop {
+  color: #b45309;
+  border-color: color-mix(in srgb, #d97706 50%, var(--line, #d0d7de));
 }
 
 /* ============================ 对话（DSH 的消息形态） ============================ */

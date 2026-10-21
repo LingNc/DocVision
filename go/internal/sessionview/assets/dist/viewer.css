@@ -1019,12 +1019,9 @@ to { transform: rotate(360deg);
 }
 
 /* fork 按钮：悬浮在这一条消息右上角，平时不抢戏（与轨迹页的 ⤓ 同一个动作）。 */
-.fork-wrap[data-v-798b839a] { position: relative;
+.fork-wrap[data-v-8ac8c660] { position: relative;
 }
-.fork-btn[data-v-798b839a] {
-  position: absolute;
-  top: 2px;
-  right: 0;
+.fork-btn[data-v-8ac8c660] {
   border: 1px solid var(--line, #d0d7de);
   background: var(--bg, #fff);
   color: var(--caption);
@@ -1036,52 +1033,65 @@ to { transform: rotate(360deg);
   opacity: 0;
   transition: opacity .12s;
 }
-.fork-wrap:hover .fork-btn[data-v-798b839a],
-.fork-btn[data-v-798b839a]:focus {
+.fork-acts[data-v-8ac8c660] {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity .12s;
+}
+.fork-wrap:hover .fork-acts[data-v-8ac8c660],
+.fork-acts[data-v-8ac8c660]:focus-within {
   opacity: 1;
+}
+.fork-drop[data-v-8ac8c660] {
+  color: #b45309;
+  border-color: color-mix(in srgb, #d97706 50%, var(--line, #d0d7de));
 }
 
 /* ============================ 对话（DSH 的消息形态） ============================ */
-.timeline[data-v-798b839a] {
+.timeline[data-v-8ac8c660] {
  flex: 1; overflow-y: auto; padding: 16px 24px 80px;
 }
-.stream[data-v-798b839a] {
+.stream[data-v-8ac8c660] {
  max-width: var(--content-w); margin: 0 auto; display: flex; flex-direction: column;
 }
 
 /* 回合边界**只有一种画法**：8px + 0.5px 虚线 + 8px（--divider-gap）。虚线只出现在
    section 之间（也就是回合之间），同一条消息里的工具行之间永远只是 --row-gap。 */
-.stream > .msg + .msg[data-v-798b839a],
+.stream > .msg + .msg[data-v-8ac8c660],
 
-.stream > .fork-wrap + .fork-wrap > .msg[data-v-798b839a] {
+.stream > .fork-wrap + .fork-wrap > .msg[data-v-8ac8c660] {
   margin-top: var(--divider-gap);
   padding-top: var(--divider-gap);
   border-top: .5px dashed var(--border);
 }
-.empty[data-v-798b839a] {
+.empty[data-v-8ac8c660] {
  padding: 56px 24px; color: var(--dim); text-align: center;
 }
 
 /* 原 160 号规则里的 msg-other 半边（msg-system 半边在 SystemMsg.vue） */
-.msg-other .body-text[data-v-798b839a] { color: var(--muted); font-size: 13px;
+.msg-other .body-text[data-v-8ac8c660] { color: var(--muted); font-size: 13px;
 }
 
 /* 会话结局（run_end ok=false）：一句原因，红边框 + 安静底色，不抢正文。 */
-.msg-end[data-v-798b839a] {
+.msg-end[data-v-8ac8c660] {
   border-left: 3px solid var(--err);
   background: color-mix(in srgb, var(--err) 8%, transparent);
   border-radius: 6px;
   padding: 10px 12px;
 }
-.msg-end .end-title[data-v-798b839a] { font-size: 12px; color: var(--err); font-weight: 600;
+.msg-end .end-title[data-v-8ac8c660] { font-size: 12px; color: var(--err); font-weight: 600;
 }
-.msg-end .end-detail[data-v-798b839a] {
+.msg-end .end-detail[data-v-8ac8c660] {
   margin-top: 4px; font-family: var(--mono);
   font-size: var(--code-font); line-height: var(--code-line);
   word-break: break-word; white-space: pre-wrap; color: var(--text);
 }
 @media (max-width: 1023px) {
-.timeline[data-v-798b839a] { padding: 12px 12px 60px;
+.timeline[data-v-8ac8c660] { padding: 12px 12px 60px;
 }
 }
 

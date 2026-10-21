@@ -4,6 +4,17 @@ import { refreshIndex, requestChapterRetry, watchFork } from './data'
 import { canForkFrom, forkPrompt, forkRequestOf } from './legacy/fork'
 import { state } from './state'
 
+/* dropBefore：从这一条**之前** fork——等价于把这条及其之后的（错误）消息删掉，让
+ * 它从干净的上下文继续（用户口径："删除某些错误消息让他继续"）。第 1 条之前没有
+ * 可截断的点，直接拒绝而不是悄悄退化成重跑整章。 */
+export function forkBeforeLine(line: number, source: string): boolean {
+  if (!(line > 1)) {
+    state.retryNote = '这一条之前没有可截断的记录（要从头重来请用「重试这一章」）'
+    return false
+  }
+  return forkFromLine(line - 1, source)
+}
+
 export function forkFromLine(line: number, source: string): boolean {
   const s: any = state.current
   const req = forkRequestOf(s, line, source)

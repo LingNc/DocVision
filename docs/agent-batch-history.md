@@ -2131,3 +2131,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **P56（已实现 ①–④）**：新增中栏 `SessionActions`（挂在 `#center-header` 下方），按钮集合按当前会话从 `legacy/actions.ts` 的纯函数算——`retryTargetOf`（convert/checker、非 `_child_`）、`canContinueOf`、`canRedrawOf`、`canDropOf`；**页面内确认条**取代 `window.confirm`（文案由 `confirmTextOf` 单一来源给出）；排上队之后出现「撤销这个请求」与「回到之前那条」，撤销走新的 `POST /api/retry/cancel`（只删还没被消费的 `work/retry/*.json`，`.done.json` 留档不动，幂等，`--no-retry` 时拒绝）；撤不回来（已被消费）就提示去「历史」删那条新会话。详情栏原来的整块按钮与样式删除（避免两处入口打架）。「历史」页每行加「设为当前」「删除」行内动作 + 「当前」标；删除用行内确认条。
 - **P57（已实现 ①③）**：fork 的判定与请求体抽到 `legacy/fork.ts`（`canForkFrom`/`forkPrompt`/`forkRequestOf`），提交入口 `web/src/fork.ts` 由轨迹页与**对话页**共用；对话页每条消息右上角悬浮 ⤓。fork 排队成功后 `watchFork()` 记下守望条件，下一次 `/api/index` 里出现同项目同章节同角色的更晚转录就自动 `selectSession`——用户口径"自动切换这个为主会话"。②（删除/编辑历史消息再继续）仍未做。
 - **踩到的坑（真缺陷，已修）**：给每条消息外套一层 `.fork-wrap` 后，时间线的回合分隔线规则 `.stream > .msg + .msg` 失效——虚线整片消失。浏览器几何测试（`TestToolRowGeometryComesFromOneTokenSetInChromium`）当场抓住（8px + dashed + 8px 那一条不成立），补了跨 wrapper 的 `.stream > .fork-wrap + .fork-wrap > .msg` 同一条画法。
+
+### 续：P57 ② 的落地方式（"删除某些错误消息让他继续"）
+
+不引入"就地改写转录"的新能力——那要动 append-only 的源文件、还要给每一行重新编号。**等价动作 = 从这条之前 fork**：历史截断点落在前一行，这条及其之后的记录都在新尝试里不存在，源转录一字不动留在「历史」里。所以对话页每条消息多了第二个悬浮按钮 `⤫`（与 `⤓` 同一套判据、同一个排队入口，只是 `from = n-1`），第 1 条之前直接拒绝并说明"要从头重来请用「重试这一章」"。逐条**编辑**某条历史消息（改内容而不是丢弃）仍未做——那需要"改写一条 msg 行 + 保住后面的轮次"，与 fork 的语义不是一回事。

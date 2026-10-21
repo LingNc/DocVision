@@ -2,6 +2,8 @@
  * 规则不对就会在写入中的会话上截断，或者把子章节当成可重跑的对象。 */
 import { describe, it, expect } from 'vitest'
 import { canForkFrom, forkPrompt, forkRequestOf } from '../src/legacy/fork'
+import { state } from '../src/state'
+import { forkBeforeLine } from '../src/fork'
 
 const conv = (over: Record<string, unknown> = {}) => ({
   id: 'book/work/sessions/convert_chapter_002.jsonl',
@@ -49,5 +51,19 @@ describe('确认文案', () => {
 
   it('核对说清"产物不动"', () => {
     expect(forkPrompt(9, conv({ chapterRole: 'checker' }))).toContain('产物一个字不动')
+  })
+})
+
+describe('从这条之前（等于删掉这条及之后）', () => {
+  it('第 1 条之前没有可截断的点，拒绝且不静默降级成整章重跑', () => {
+    state.retryNote = ''
+    expect(forkBeforeLine(1, '对话')).toBe(false)
+    expect(state.retryNote).toContain('没有可截断的记录')
+  })
+
+  it('第 N 条之前 = 从第 N-1 条之后继续', () => {
+    const s: any = { id: 'a/convert_chapter_002.jsonl', project: 'book', chapterId: 'chapter_002', chapterRole: 'convert', name: 'convert_chapter_002.jsonl' }
+    const req = forkRequestOf(s, 4, '对话')!
+    expect(req.extra.from).toBe(4) // 按钮传的是 n，函数内部减一；这里钉的是 forkRequestOf 的原样语义
   })
 })

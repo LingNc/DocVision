@@ -9171,8 +9171,8 @@
     class: "chapter-retry-pending",
     title: "已在重试队列里：转换阶段的下一个安全点会重跑这一章"
   };
-  const _hoisted_7$a = ["title", "onClick"];
-  const _hoisted_8$7 = {
+  const _hoisted_7$b = ["title", "onClick"];
+  const _hoisted_8$8 = {
     key: 0,
     class: "chapter-node-body"
   };
@@ -9317,9 +9317,9 @@
                   type: "button",
                   title: "重试这一章 " + node.id + "：开一个新尝试，旧的留档在工作区 work/attempts/",
                   onClick: ($event) => retryNode(node, "convert", $event)
-                }, "↻", 8, _hoisted_7$a)) : createCommentVNode("", true)
+                }, "↻", 8, _hoisted_7$b)) : createCommentVNode("", true)
               ], 10, _hoisted_2$h),
-              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_8$7, [
+              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_8$8, [
                 node.checker ? (openBlock(), createElementBlock("div", {
                   key: 0,
                   class: normalizeClass(["chapter-checker", { active: currentId.value === node.checker.id, live: node.checker.live }])
@@ -9396,8 +9396,8 @@
   };
   const _hoisted_5$b = ["aria-pressed"];
   const _hoisted_6$a = ["aria-pressed"];
-  const _hoisted_7$9 = { class: "side-search" };
-  const _hoisted_8$6 = { class: "side-list-wrap" };
+  const _hoisted_7$a = { class: "side-search" };
+  const _hoisted_8$7 = { class: "side-list-wrap" };
   const _hoisted_9$6 = {
     key: 0,
     class: "i2t-overview",
@@ -9812,7 +9812,7 @@
               onClick: _cache[2] || (_cache[2] = ($event) => unref(setBoard)("img2text"))
             }, "img2text", 8, _hoisted_6$a)
           ])) : createCommentVNode("", true),
-          createBaseVNode("div", _hoisted_7$9, [
+          createBaseVNode("div", _hoisted_7$a, [
             withDirectives(createBaseVNode("input", {
               id: "search",
               "onUpdate:modelValue": _cache[3] || (_cache[3] = ($event) => unref(state).filter = $event),
@@ -9823,7 +9823,7 @@
               [vModelText, unref(state).filter]
             ])
           ]),
-          createBaseVNode("div", _hoisted_8$6, [
+          createBaseVNode("div", _hoisted_8$7, [
             createBaseVNode("div", {
               id: "session-list",
               ref_key: "listEl",
@@ -10914,7 +10914,7 @@
     class: "line-running",
     title: "这个调用还没有收到回执，正在执行"
   };
-  const _hoisted_7$8 = {
+  const _hoisted_7$9 = {
     key: 4,
     class: "line-tail"
   };
@@ -10954,7 +10954,7 @@
               createBaseVNode("span", { class: "running-dot" }, null, -1),
               createTextVNode("运行中 ", -1)
             ])])) : createCommentVNode("", true),
-            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_7$8, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
+            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_7$9, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
           ]),
           renderSlot(_ctx.$slots, "default", {}, void 0, true)
         ], 10, _hoisted_1$e);
@@ -11172,8 +11172,8 @@
   const _hoisted_4$8 = { class: "io-actions" };
   const _hoisted_5$8 = { class: "attach-note" };
   const _hoisted_6$8 = { class: "io-actions" };
-  const _hoisted_7$7 = { class: "io-section attach-section" };
-  const _hoisted_8$5 = { class: "attach-body" };
+  const _hoisted_7$8 = { class: "io-section attach-section" };
+  const _hoisted_8$6 = { class: "attach-body" };
   const _hoisted_9$5 = { class: "attach-note" };
   const _sfc_main$b = /* @__PURE__ */ defineComponent({
     __name: "ToolCard",
@@ -11293,9 +11293,9 @@
                   key: a.line.n
                 }, [
                   _cache[3] || (_cache[3] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
-                  createBaseVNode("div", _hoisted_7$7, [
+                  createBaseVNode("div", _hoisted_7$8, [
                     _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
-                    createBaseVNode("div", _hoisted_8$5, [
+                    createBaseVNode("div", _hoisted_8$6, [
                       a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$g, {
                         key: 0,
                         text: String(a.line.text || ""),
@@ -11327,7 +11327,7 @@
     class: "preview-strip"
   };
   const _hoisted_6$7 = ["src", "alt", "title", "onClick"];
-  const _hoisted_7$6 = {
+  const _hoisted_7$7 = {
     key: 2,
     class: "note"
   };
@@ -11463,7 +11463,7 @@
               ])) : createCommentVNode("", true)
             ], 64);
           }), 128)),
-          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_7$6, "（空消息）")) : createCommentVNode("", true)
+          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_7$7, "（空消息）")) : createCommentVNode("", true)
         ], 512);
       };
     }
@@ -11481,7 +11481,7 @@
   };
   const _hoisted_5$6 = { class: "io-section attach-section" };
   const _hoisted_6$6 = { class: "attach-body" };
-  const _hoisted_7$5 = { class: "attach-note" };
+  const _hoisted_7$6 = { class: "attach-note" };
   const _sfc_main$9 = /* @__PURE__ */ defineComponent({
     __name: "SystemMsg",
     props: {
@@ -11554,7 +11554,7 @@
                     images: a.line.images
                   }, null, 8, ["images"])
                 ]),
-                createBaseVNode("div", _hoisted_7$5, toDisplayString(unref(attachNote)(a)), 1)
+                createBaseVNode("div", _hoisted_7$6, toDisplayString(unref(attachNote)(a)), 1)
               ])
             ], 64);
           }), 128))
@@ -11706,6 +11706,13 @@
       extra: { from: Number(line), path: String(s.name || "") }
     };
   }
+  function forkBeforeLine(line, source) {
+    if (!(line > 1)) {
+      state.retryNote = "这一条之前没有可截断的记录（要从头重来请用「重试这一章」）";
+      return false;
+    }
+    return forkFromLine(line - 1, source);
+  }
   function forkFromLine(line, source) {
     const s = state.current;
     const req = forkRequestOf(s, line, source);
@@ -11727,16 +11734,21 @@
     key: 4,
     class: "msg msg-other"
   };
-  const _hoisted_3$5 = ["title", "onClick"];
-  const _hoisted_4$5 = {
+  const _hoisted_3$5 = {
+    key: 5,
+    class: "fork-acts"
+  };
+  const _hoisted_4$5 = ["title", "onClick"];
+  const _hoisted_5$5 = ["onClick"];
+  const _hoisted_6$5 = {
     key: 1,
     class: "empty"
   };
-  const _hoisted_5$5 = {
+  const _hoisted_7$5 = {
     key: 3,
     class: "msg msg-end"
   };
-  const _hoisted_6$5 = { class: "end-detail" };
+  const _hoisted_8$5 = { class: "end-detail" };
   const _sfc_main$6 = /* @__PURE__ */ defineComponent({
     __name: "Timeline",
     setup(__props) {
@@ -11799,30 +11811,37 @@
                     tokens: unref(estOf)(item.line).text
                   }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])
                 ])),
-                canFork.value ? (openBlock(), createElementBlock("button", {
-                  key: 5,
-                  class: "fork-btn",
-                  type: "button",
-                  title: "从这里 fork：历史截到第 " + item.line.n + " 条，后面丢掉，开一个新尝试接着干（源记录保留）",
-                  onClick: withModifiers(($event) => unref(forkFromLine)(item.line.n, "对话"), ["stop"])
-                }, "⤓", 8, _hoisted_3$5)) : createCommentVNode("", true)
+                canFork.value ? (openBlock(), createElementBlock("span", _hoisted_3$5, [
+                  createBaseVNode("button", {
+                    class: "fork-btn",
+                    type: "button",
+                    title: "从这里 fork：历史截到第 " + item.line.n + " 条，后面丢掉，开一个新尝试接着干（源记录保留）",
+                    onClick: withModifiers(($event) => unref(forkFromLine)(item.line.n, "对话"), ["stop"])
+                  }, "⤓", 8, _hoisted_4$5),
+                  createBaseVNode("button", {
+                    class: "fork-btn fork-drop",
+                    type: "button",
+                    title: "从这条之前 fork：等于删掉这条及其之后的记录再继续（源转录仍保留在「历史」里）",
+                    onClick: withModifiers(($event) => unref(forkBeforeLine)(item.line.n, "对话"), ["stop"])
+                  }, "⤫", 8, _hoisted_5$5)
+                ])) : createCommentVNode("", true)
               ]);
             }), 128)),
-            !model.value.items.length && !unref(state).partial ? (openBlock(), createElementBlock("div", _hoisted_4$5, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true),
+            !model.value.items.length && !unref(state).partial ? (openBlock(), createElementBlock("div", _hoisted_6$5, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true),
             unref(state).current && unref(state).current.live && unref(state).partial ? (openBlock(), createBlock(PartialTail, {
               key: 2,
               partial: unref(state).partial
             }, null, 8, ["partial"])) : createCommentVNode("", true),
-            unref(state).current && !unref(state).current.live && unref(state).current.runEndError ? (openBlock(), createElementBlock("section", _hoisted_5$5, [
+            unref(state).current && !unref(state).current.live && unref(state).current.runEndError ? (openBlock(), createElementBlock("section", _hoisted_7$5, [
               _cache[0] || (_cache[0] = createBaseVNode("div", { class: "end-title" }, "会话结局 · 错误终止", -1)),
-              createBaseVNode("div", _hoisted_6$5, toDisplayString(unref(state).current.runEndError), 1)
+              createBaseVNode("div", _hoisted_8$5, toDisplayString(unref(state).current.runEndError), 1)
             ])) : createCommentVNode("", true)
           ])
         ], 2);
       };
     }
   });
-  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-798b839a"]]);
+  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$6, [["__scopeId", "data-v-8ac8c660"]]);
   const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
   function nextMsgLine(lines, idx) {
     for (let i = idx + 1; i < lines.length; i++) {
