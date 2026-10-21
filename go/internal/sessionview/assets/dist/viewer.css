@@ -1683,39 +1683,14 @@ to { transform: rotate(360deg);
 }
 }
 
-.act-prune[data-v-48cc354b] {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 6px 16px 0 20px;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  max-height: 260px;
-  overflow: auto;
-}
-.act-prune-head[data-v-48cc354b] { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--caption);
-}
-.act-prune-hint[data-v-48cc354b] { color: var(--caption);
-}
-.act-prune-row[data-v-48cc354b] { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 1px 0; cursor: pointer;
-}
-.act-prune-tag[data-v-48cc354b] { color: var(--caption);
-}
-.act-prune-sum[data-v-48cc354b] { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.act-prune-meta[data-v-48cc354b] { color: var(--caption); white-space: nowrap;
-}
-.act-prune-foot[data-v-48cc354b] { display: flex; gap: 6px; padding-top: 4px;
-}
-.session-actions[data-v-48cc354b] {
+.session-actions[data-v-bdcc0e10] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 8px 16px 0 20px;
 }
-.act-btn[data-v-48cc354b] {
+.act-btn[data-v-bdcc0e10] {
   border: 1px solid var(--line);
   background: var(--btn-bg, transparent);
   color: var(--fg);
@@ -1725,31 +1700,31 @@ to { transform: rotate(360deg);
   line-height: 20px;
   cursor: pointer;
 }
-.act-btn[data-v-48cc354b]:disabled {
+.act-btn[data-v-bdcc0e10]:disabled {
   opacity: 0.55;
   cursor: default;
 }
-.act-primary[data-v-48cc354b] {
+.act-primary[data-v-bdcc0e10] {
   border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--line));
   color: var(--accent, #3b82f6);
 }
-.act-danger[data-v-48cc354b] {
+.act-danger[data-v-bdcc0e10] {
   border-color: color-mix(in srgb, #dc2626 50%, var(--line));
   color: #dc2626;
 }
-.act-undo[data-v-48cc354b] {
+.act-undo[data-v-bdcc0e10] {
   border-color: color-mix(in srgb, #d97706 55%, var(--line));
   color: #b45309;
 }
-.act-quiet[data-v-48cc354b] {
+.act-quiet[data-v-bdcc0e10] {
   opacity: 0.85;
 }
-.act-confirm-text[data-v-48cc354b] {
+.act-confirm-text[data-v-bdcc0e10] {
   font-size: 12px;
   color: var(--caption);
   line-height: 18px;
 }
-.act-note[data-v-48cc354b] {
+.act-note[data-v-bdcc0e10] {
   font-size: 12px;
   color: var(--caption);
 }
