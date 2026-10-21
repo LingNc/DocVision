@@ -1092,6 +1092,11 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			case ClassVector:
 				if compErr != nil {
 					r.log.LogWarning(tid, "[vector] 工具链不可用，保留原图（下次运行重试）:", tt.imgPath)
+					// 状态是 fallback，进度行的 fallback 计数就必须跟着加——否则
+					// 收尾那行会出现 done:0/errors:0/fallback:0 全零而图其实被跳过。
+					mu.Lock()
+					warned++
+					mu.Unlock()
 					pp.Kept = true
 					pp.Status = "fallback"
 					sessType = "vector-fallback"

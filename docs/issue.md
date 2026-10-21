@@ -1131,3 +1131,5 @@ user 轮
   验证：新增 `TestApplyWorkspaceCutWithoutSnapshotKeepsProducts`（退不了时产物在、工作区不动、不建仓库）与 `TestPostRetryFromRecordSnapshotNote`（没 journal 的回执带 ⚠、补上覆盖这一行的 journal 后不带且改成"工作区会一起退回那一刻"）；`go test ./...` 全绿。
 
 - T189 根因（2026-10-21 补记）：`status=fallback` 里那 5 条 `open : no such file or directory` **不是图的问题**，是**续跑重放**的产物。`RunTikZSession` 交付前要 `copyFile(state.lastPDF, dstPDF)`，而 `state.lastPDF` 只在**本进程编译成功**时才赋值；续跑时 `resumeSubmit` 直接收账（`state.submitted=true`），一次编译都没发生过，于是拿着**空路径**去 `os.Open`，Go 报 `open : no such file or directory`。这条错误被写进 progress 的 `error`、状态记 `fallback`，下次运行照样重放、照样失败——同一个 key 因此跨 5 次运行重复出现，看起来像"这张图总是画不出来"。修法：交付前若没有可用产物就先按 `state.finalCode` 补一次编译（编排与 session 里 compile 工具同一套 `buildStandalone` + `Compiler.Compile`），补不出来就报"交付前重新编译失败（<fig>）：<最后错误>"；`copyFile` 对空源路径直接报"源路径为空，无法写出 <目标>"，不再把系统错误当业务原因。回归测试 `TestCopyFileRejectsEmptySource`。
+
+- 追加（2026-10-21，进度行计数）：`[process 0/1] 0.00% (done: 0, errors: 0, fallback: 0, raster: 0, running: 0)` 这条全零的收尾行是计数漏了——`[vector] 工具链不可用，保留原图` 那条分支把状态写成 `fallback` 却没加 `warned`（进度行的 fallback 列就是它），于是"图被跳过"在收尾行里完全看不见。已在该分支补计数；`done/errors/fallback` 三者之和应当等于已处理数，这条不变式是排查时要先对上的账。
