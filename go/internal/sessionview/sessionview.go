@@ -400,6 +400,14 @@ type SessionInfo struct {
 	// attempt keeps its own transcript `<名>.try2.jsonl`). The preview
 	// groups them into a "历史 N" chain. Zero = 1 (single attempt).
 	ChapterAttempt int `json:"chapterAttempt,omitempty"`
+	// Archived marks a transcript living under `work/attempts/<章>/tryN/`.
+	// That directory is the archive of an invalidated attempt (the whole
+	// subtree is moved there), so it holds copies of the sessions that are
+	// still in the working tree — the same chapter+attempt shows up twice
+	// and the history list rendered two `#1` rows (T194). The viewer keeps
+	// such sessions (an archived-only attempt is the only evidence left)
+	// but prefers the working-tree copy when both exist.
+	Archived bool `json:"archived,omitempty"`
 	// ChapterOrder is the chapter number carried by a transcript identity.
 	ChapterOrder int `json:"chapterOrder,omitempty"`
 	// Stage / StageTitle group sessions by pipeline stage inside a project
@@ -1099,6 +1107,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			RunEndError:     stat.RunEndError,
 			ChapterActivity: activity,
 			ChapterAttempt:  chapter.Attempt,
+			Archived:        strings.HasPrefix(rel, "work/attempts/"),
 			Prices:          stat.Prices,
 			ChapterID:       chapter.ID,
 			ChapterParent:   chapter.Parent,

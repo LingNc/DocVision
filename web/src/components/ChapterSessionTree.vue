@@ -40,8 +40,11 @@ function isOpen(node: ChapterTreeNode): boolean {
   return chapterWantOpen(props.scope, node.id, nodeContainsCurrent(node))
 }
 
+/* 核对会话作为**子行**出现，前提是行头已经是转换会话；没有转换会话的节点
+ * （只做过重新核对）行头本身就是那条核对会话，再在下面重复一遍就成了
+ * 「核对 核对 · chapter_002」两行同一个会话。 */
 function hasBody(node: ChapterTreeNode): boolean {
-  return !!node.checker || node.children.length > 0
+  return (!!node.convert && !!node.checker) || node.children.length > 0
 }
 
 /* 展开/收起只切自己这一棵，不选中、不影响任何其它节点。 */
@@ -156,6 +159,7 @@ function nodeTitle(node: ChapterTreeNode): string {
         <InlineMD class="chapter-name row-title" tag="span" :text="nodeTitle(node)" plain />
         <span v-if="nodeActivity(node)" class="chapter-state" :class="stateTone(nodeActivity(node))">{{ nodeActivity(node) }}</span>
         <span v-if="usageChipText(primary(node))" class="chapter-usage">{{ usageChipText(primary(node)) }}</span>
+        <span v-if="primary(node)?.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
         <span v-if="nodePendingRetry(node)" class="chapter-retry-pending" title="已在重试队列里：转换阶段的下一个安全点会重跑这一章">待重试</span>
         <button
           v-else-if="canRetryNode(node)"
@@ -176,6 +180,7 @@ function nodeTitle(node: ChapterTreeNode): string {
             <InlineMD class="checker-name row-title" tag="span" :text="sessionTitleOf(node.checker)" plain />
             <span v-if="activityText(node.checker, 'checker', node)" class="chapter-state" :class="stateTone(activityText(node.checker, 'checker', node))">{{ activityText(node.checker, 'checker', node) }}</span>
             <span v-if="usageChipText(node.checker)" class="chapter-usage">{{ usageChipText(node.checker) }}</span>
+            <span v-if="node.checker.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
             <span v-if="nodePendingRetry(node, 'checker')" class="chapter-retry-pending" title="已在重新核对队列里：转换阶段的下一个安全点会重跑核对会话（产物不动）">待重试</span>
             <button
               v-else-if="canRetryNode(node)"
@@ -234,5 +239,6 @@ function nodeTitle(node: ChapterTreeNode): string {
 .chapter-retry:hover { opacity: 1; }
 .chapter-retry-pending { flex: 0 0 auto; font-size: 11px; color: var(--amber, #9a6700); }
 .chapter-state.run { color: var(--green, #1a7f37); }
+.chapter-arch { flex: 0 0 auto; font-size: 11px; color: var(--muted, #6e7781); border: 1px dashed var(--line, #c9d1d9); border-radius: 4px; padding: 0 3px; line-height: 15px; }
 .chapter-info { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer; }
 </style>

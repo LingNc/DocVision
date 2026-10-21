@@ -102,28 +102,32 @@ watch(
 
 <style scoped>
 /* fork 按钮：悬浮在这一条消息右上角，平时不抢戏（与轨迹页的 ⤓ 同一个动作）。 */
-.fork-wrap { position: relative; }
+/* 每条消息右边留一条 54px 的窄栏放这两个按钮（T193）：之前它们绝对定位压在行尾
+ * 的 token 计数上，即使给了透明度也看不清，用户直接找不到入口。 */
+.fork-wrap { position: relative; padding-right: 54px; }
 
 .fork-btn {
   border: 1px solid var(--line, #d0d7de);
   background: var(--bg, #fff);
   color: var(--caption);
   border-radius: 5px;
-  padding: 0 5px;
+  padding: 0 6px;
   font-size: 12px;
   line-height: 18px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity .12s;
+  /* 显隐由父级 .fork-acts 控制。这里曾经也写着 opacity: 0——两层都藏，于是
+   * **连悬浮都显示不出来**，用户自然找不到"从这里 fork / 删到这条为止"。 */
 }
 
+/* 平时就半可见（T193）：原来是 hover 才出现，用户根本找不到入口——"对某条消息
+ * 之后删除"没有"模式"可进，它就是每条消息右上角这两个按钮。悬浮/聚焦再提亮。 */
 .fork-acts {
   position: absolute;
   top: 2px;
-  right: 0;
+  right: 4px;
   display: flex;
   gap: 4px;
-  opacity: 0;
+  opacity: .45;
   transition: opacity .12s;
 }
 

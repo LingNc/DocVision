@@ -14,6 +14,12 @@ import InlineMD from './InlineMD.vue'
 
 const members = computed(() => chainOfSession(state.sessions, state.current ? (state.current as any).id : null))
 
+/* 同一章的角色混在一条链里，行首给角色，编号才不会被误读成"同一件事的第几次"。 */
+const ROLE_LABEL: Record<string, string> = { convert: '转换', checker: '核对', continue: '继续', vector: '作图' }
+function roleLabel(s: any): string {
+  return ROLE_LABEL[s && s.chapterRole] || ''
+}
+
 function endStateText(s: any): string {
   if (s.live) return '运行中'
   if (s.endState === 'done') return '已完成'
@@ -52,6 +58,48 @@ function isCurrent(s: any): boolean {
   return !!state.current && state.current.id === s.id
 }
 
+/* T194：把"正在看"和"最新一次尝试"分开标——用户原来的困惑是那个「当前」小标签
+ * 到底是"页面正在显示"还是"流水线现在用的这一版"。现在：
+ *   正在看 = 这一行就是中栏正在显示的会话（点行切换）；
+ *   最新   = 这条链里尝试号最大的那一次（真正的最新产物）。
+ * 「设为当前」按钮去掉：点行本身就是切换，按钮名字反而让人以为会改流水线状态。 */
+function maxAttempt(members: any[]): number {
+  let n = 0
+  ;(members || []).forEach((s) => { const a = Number(s.chapterAttempt) || 1; if (a > n) n = a })
+  return n
+}
+
+/* 「最新」只看**还在工作区里的**那几条：归档里的同号转录来自更早一次父尝试，
+ * 它的号可能反而更大（父尝试作废后子章节又从 #1 重来），不能拿它当"最新"。 */
+const newest = computed(() => {
+  const live = (members.value || []).filter((s: any) => !s.archived)
+  return maxAttempt(live.length ? live : (members.value || []))
+})
+
+/* 链里混着归档转录时给一句解释，否则「旧#1 / 归档」两枚标还是有人会当成重复行。 */
+const hasArchived = computed(() => (members.value || []).some((s: any) => !!s.archived))
+
+/* T194：转换与同一轮的核对是**一件事的两个角色**（用户口径："这俩是一体的吧，
+ * 如果切换回去就都切换过去"）。历史列表按角色分链，所以从这里给一条直达对方
+ * 那一轮的入口——不必去树里找那个子行。 */
+function pairOf(s: any): any {
+  if (!s || !s.chapterId) return null
+  const attempt = Number(s.chapterAttempt) || 1
+  const same = (o: any) =>
+    o && o.chapterId === s.chapterId &&
+    (o.project || '') === (s.project || '') &&
+    (Number(o.chapterAttempt) || 1) === attempt &&
+    (o.chapterRole || '') !== (s.chapterRole || '')
+  const all = (state.sessions || []).filter(same)
+  // 同号转录可能不止一份（一次来自归档、一次来自工作区）：先找"同源"的那条，
+  // 别把这次的转换配到旧父尝试的核对上。
+  return all.find((o: any) => !!o.archived === !!s.archived) || all[0] || null
+}
+
+function pairLabel(s: any): string {
+  return (s && s.chapterRole === 'checker') ? '同轮转换' : '同轮核对'
+}
+
 function askDrop(s: any) {
   if (!canDropOf(s)) return
   dropAsk.value = s
@@ -75,7 +123,10 @@ function doDrop() {
   <div id="history" class="history" :class="{ hidden: state.view !== 'history' }">
     <div v-if="!members" class="history-empty">当前会话不属于任何调用链 / 重试链</div>
     <div v-else class="history-list">
-      <div class="history-head">同一件事的全部会话（{{ members.length }}，新 → 旧）</div>
+      <div class="history-head">
+          这一章的全部会话（{{ members.length }}，转换与核对都在这里，新 → 旧）
+          <span v-if="hasArchived" class="history-old-note" title="带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话">· 带「旧」的是更早一次父尝试（已作废）留下的</span>
+        </div>
       <div v-if="dropAsk" class="history-confirm" role="alert">
         <span>删掉「{{ dropAsk.name }}」这条记录？转录会从历史里消失，作废尝试的归档目录也会一起删。</span>
         <button class="history-act act-danger" type="button" @click="doDrop">确认删除</button>
@@ -110,13 +161,23 @@ function doDrop() {
         @click="onRowClick(s)"
         @keydown.enter="onRowClick(s)"
       >
+        <span v-if="roleLabel(s)" class="history-role">{{ roleLabel(s) }}</span>
         <span class="row-chip chain-tag history-tag">{{ chainMemberTag(s) }}</span>
         <InlineMD tag="span" class="history-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
-        <span v-if="isCurrent(s)" class="history-cur">当前</span>
+        <span v-if="isCurrent(s)" class="history-cur">正在看</span>
+        <span v-if="(Number(s.chapterAttempt) || 1) === newest" class="history-latest">最新</span>
+        <span v-if="s.archived" class="history-arch" title="这份转录在 work/attempts 归档目录里（工作树那份已被搬走），不是当前工作区">归档</span>
         <span class="history-state" :class="endStateCls(s)">{{ endStateText(s) }}</span>
         <span class="history-time">{{ relTime(s.mtime) }}</span>
         <span class="history-actions">
-          <button v-if="!isCurrent(s)" class="history-act" type="button" title="把这条设为当前会话（继续跑/重试都以它为准）" @click.stop="onRowClick(s)">设为当前</button>
+          <button v-if="!isCurrent(s)" class="history-act" type="button" title="在中栏显示这条会话（只是切视图，不改流水线状态）" @click.stop="onRowClick(s)">查看</button>
+          <button
+            v-if="pairOf(s) && state.current.id !== pairOf(s).id"
+            class="history-act"
+            type="button"
+            :title="'切到同一轮（' + chainMemberTag(s) + '）的' + (s.chapterRole === 'checker' ? '转换' : '核对') + '会话：' + pairOf(s).id"
+            @click.stop="onRowClick(pairOf(s))"
+          >{{ pairLabel(s) }}</button>
           <button v-if="canDropOf(s)" class="history-act act-danger" type="button" title="删掉这条转录（作废尝试的归档一并删除）" @click.stop="askDrop(s)">删除</button>
         </span>
       </div>
@@ -125,6 +186,10 @@ function doDrop() {
 </template>
 
 <style scoped>
+.history-old-note { color: var(--caption); font-weight: 400; }
+
+.history-role { flex: none; font-size: 11px; color: var(--caption); min-width: 22px; }
+
 .history-rounds { margin: 0 4px 10px; }
 
 .history-rounds-head { font-size: 11px; color: var(--caption); margin-bottom: 4px; }
@@ -177,6 +242,24 @@ function doDrop() {
   font-size: 11px;
   color: var(--accent, #3b82f6);
   border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 45%, var(--line, #d0d7de));
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 16px;
+}
+
+.history-latest {
+  font-size: 11px;
+  color: var(--ok, #15803d);
+  border: 1px solid color-mix(in srgb, var(--ok, #15803d) 40%, var(--line, #d0d7de));
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 16px;
+}
+
+.history-arch {
+  font-size: 11px;
+  color: var(--caption);
+  border: 1px dashed var(--line, #d0d7de);
   border-radius: 4px;
   padding: 0 4px;
   line-height: 16px;

@@ -1155,3 +1155,34 @@ func TestReadStatSawRunEnd(t *testing.T) {
 		t.Fatalf("activity = %q", st.ChapterActivity)
 	}
 }
+
+// T194：作废尝试的归档目录（work/attempts/<章>/tryN/）里是同一批会话的副本；
+// 扫描照收但打 archived，页面据此去重（曾经同一章同一尝试在历史里出现两次）。
+func TestScanMarksArchivedCopies(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, jsonl(root, "work", "sessions", "convert_chapter_002.jsonl"),
+		transcript(`{"t":"msg","role":"user","text":"hi"}`))
+	writeFile(t, jsonl(root, "work", "attempts", "chapter_002", "try1", "work", "sessions",
+		"convert_chapter_002.jsonl"), transcript(`{"t":"msg","role":"user","text":"old"}`))
+
+	list, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("want 2 sessions, got %d", len(list))
+	}
+	archived := 0
+	for _, s := range list {
+		wantArchived := strings.HasPrefix(s.ID, "work/attempts/")
+		if s.Archived != wantArchived {
+			t.Fatalf("%s: archived=%v, want %v", s.ID, s.Archived, wantArchived)
+		}
+		if wantArchived {
+			archived++
+		}
+	}
+	if archived != 1 {
+		t.Fatalf("want exactly 1 archived row, got %d", archived)
+	}
+}

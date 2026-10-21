@@ -458,15 +458,23 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     const other: 'convert' | 'checker' = pin.role === 'convert' ? 'checker' : 'convert'
     const want = Number(pin.session.chapterAttempt) || 1
     const peers = (byRole[pin.node.id + '|' + other] || []).filter((x: any) => (Number(x.chapterAttempt) || 1) === want)
-    // 同一轮没有另一种角色的转录时**留空**，不要退回最新的那条：那条属于另一次
-    // 尝试，摆在一起会让人以为"这次已经核对过了"（T186）。
-    pin.node[other] = peers.length ? peers.reduce((a: any, b: any) => newerAttempt(a, b)) : null
+    if (peers.length) {
+      pin.node[other] = peers.reduce((a: any, b: any) => newerAttempt(a, b))
+    } else if (other === 'checker') {
+      // 同一轮没有核对转录时**留空**，不要退回最新的那条：那条属于另一次尝试，
+      // 摆在一起会让人以为"这次已经核对过了"（T186）。
+      pin.node[other] = null
+    }
+    // 反过来（other === 'convert'）**不置空**：转换会话回答的是"这一章是谁转的"，
+    // 一次手工重新核对不该让它从树上消失（曾经重核之后整行只剩「核对」、转换会话
+    // 只能去历史里翻）。核对号更大本来也就合法（T187 只挡核对号更小的旧结论）。
   }
   // 核对结论只对**它核对过的那次提交**有效：核对的尝试号比转换的小，说明那是
   // 上一次尝试的结论，这一次还没核对——不显示（切到历史里那一次才看得到）。
   Object.keys(byId).forEach((id) => {
     const node = byId[id]
     if (!node.convert || !node.checker) return
+    if (pinId && node.checker.id === pinId) return // 你正在看的那条核对会话不能被藏起来
     const c = Number(node.convert.chapterAttempt) || 1
     const k = Number(node.checker.chapterAttempt) || 1
     if (k < c) node.checker = null
@@ -791,10 +799,12 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
   if (!self || !self.chapterId) return null
   const proj = self.project || projectOf(self.id)
   const members: any[] = []
-  ;(sessions || []).forEach((s) => {
+  ;(dedupeChapterAttempts(sessions || [])).forEach((s) => {
     if (!s || !s.chapterId) return
     if (s.chapterId !== self.chapterId) return
-    if ((s.chapterRole || '') !== (self.chapterRole || '')) return
+    // T194：**不再按角色分链**——转换与同一轮的核对是同一件事的两个角色（用户口径
+    // "这俩是一体的"）。原来按角色过滤时，点一条核对会话会让整个列表从「#2 #1」
+    // 变成「#1」（核对只有一次尝试），看起来像"点一下 #2 就变成了 #1"。
     if ((s.project || projectOf(s.id)) !== proj) return
     members.push(s)
   })
@@ -802,10 +812,41 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
   return sortChainMembers(members)
 }
 
+/* T194：同一章同一角色可能扫到**两份同号转录**——工作树里这次尝试的，加上
+ * `work/attempts/<章>/tryN/` 里更早一次父尝试留下的。两种情形要分开处理：
+ *  · 内容完全相同（同一个转录被扫了两遍）→ 只留一份，工作树那份优先；
+ *  · 内容不同（同一个子章节在两次父尝试里各转过一次，文件名里的尝试号都从 1
+ *    重新数）→ **两条都要留**，否则历史会把一次真实发生过的对话藏掉。上层用
+ *    `chainMemberTag` 把归档那份标成 `旧#N`，行上另有「归档」徽标。
+ * 所以这里的判据是「同一键 + 同一内容指纹」才去重，键相同而内容不同不算重复。
+ * 非章节会话原样返回。 */
+export function dedupeChapterAttempts(items: any[]): any[] {
+  const out: any[] = []
+  const byKey: Record<string, any[]> = {}
+  ;(items || []).forEach((s) => {
+    if (!s || !s.chapterId) { out.push(s); return }
+    const key = [s.project || projectOf(s.id), s.chapterId, s.chapterRole || '', Number(s.chapterAttempt) || 1].join('|')
+    const sha = String(s.sha || '')
+    const peers = byKey[key] || (byKey[key] = [])
+    // 没有内容指纹（旧索引 / 静态快照）时不动手：宁可多一行，也不要藏掉一次对话。
+    const twin = sha ? peers.find((o) => String(o.sha || '') === sha) : null
+    if (!twin) { peers.push(s); out.push(s); return }
+    // 同一份内容被扫了两遍：工作树那份胜出；两份都在归档里就留较新的。
+    if (!!twin.archived && !s.archived) {
+      const i = out.indexOf(twin)
+      if (i >= 0) out[i] = s
+      peers[peers.indexOf(twin)] = s
+    }
+  })
+  return out
+}
+
 /* 历史行的小标签：img2text 链路用阶段标签，章节会话统一给 `#N`（含第 1 次，
  * 否则同章的几条历史行看起来一模一样）。 */
 export function chainMemberTag(s: any): string {
-  if (s && s.chapterId) return '#' + (Number(s.chapterAttempt) || 1)
+  // 归档里的同号尝试来自更早一次父尝试（内容不同），标「旧」才不会和这一次的
+  // 同号行混成"重复行"。
+  if (s && s.chapterId) return (s.archived ? '旧' : '') + '#' + (Number(s.chapterAttempt) || 1)
   return img2textMemberTag(s && s.id)
 }
 

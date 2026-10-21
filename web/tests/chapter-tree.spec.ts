@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chainMemberTag, plainTitle } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chainMemberTag, dedupeChapterAttempts, plainTitle } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 import { applyIndex, chapterPendingRetry } from '../src/data'
 
@@ -86,6 +86,18 @@ describe('chapter attempt chain', () => {
     expect(chain).not.toBeNull()
     expect(chain!.length).toBe(2)
     expect(chain![0].chapterAttempt).toBe(2)
+  })
+
+  it('转换与核对混在一条链里（T194：点核对会话不会让列表只剩 #1）', () => {
+    const conv1 = mk('a/convert_chapter_042.jsonl', 1, '2026-10-19T10:00:00Z')
+    const conv2 = mk('a/convert_chapter_042.try2.jsonl', 2, '2026-10-19T12:00:00Z')
+    const chk1 = { ...mk('a/checker_chapter_042.jsonl', 1, '2026-10-19T10:30:00Z'), chapterRole: 'checker' }
+    const sessions = [conv1, conv2, chk1]
+    // 从任一条进去看到的是同一份列表：两个角色都在，列表不随当前会话的角色变。
+    expect(chapterAttemptChain(sessions, conv2.id)!.length).toBe(3)
+    const fromChecker = chapterAttemptChain(sessions, chk1.id)!
+    expect(fromChecker.map((x: any) => x.id).sort()).toEqual([conv1.id, conv2.id, chk1.id].sort())
+    expect(fromChecker.map((x: any) => x.chapterRole).sort()).toEqual(['checker', 'convert', 'convert'])
   })
 
   it('只尝试过一次 / 非章节会话不出链', () => {
@@ -217,6 +229,18 @@ describe('章节树只钉住正在查看的那一条', () => {
     expect(roots[0].convert!.chapterAttempt).toBe(1)
   })
 
+  // T193：手工重新核对的尝试号比转换大，章节行**仍然是转换会话**——一次重核
+  // 不该让"这一章是谁转的"从树上消失（曾经整行变成「核对 · chapter_002」，
+  // 转换会话只能去历史里翻）。
+  it('重核（核对号更大）不把转换会话顶掉', () => {
+    const rechecked = [conv(1), chk(1), chk(2)]
+    for (const pin of ['', chk(2).id]) {
+      const node = buildChapterTree(rechecked, pin)[0]
+      expect(node.convert!.chapterAttempt).toBe(1)
+      expect(node.checker!.chapterAttempt).toBe(2)
+    }
+  })
+
   it('没有 pin 时每个节点都取最新', () => {
     const sessions = [conv(1), conv(2), child(1), child(2), child(3)]
     const roots = buildChapterTree(sessions, '')
@@ -296,5 +320,46 @@ describe('重试队列的状态', () => {
     applyIndex({ sessions: [], retries: { 书A: ['chapter_002'] }, retryRoles: { 书A: { chapter_002: 'continue' } } })
     expect(chapterPendingRetry('书A', 'chapter_002', 'continue')).toBe(true)
     expect(chapterPendingRetry('书A', 'chapter_002', 'convert')).toBe(false)
+  })
+})
+
+// T194：工作树与 work/attempts 里都会有「同一章 + 同一角色 + 同号」的转录，
+// 但两种情形要分开：内容指纹相同（同一份转录被扫了两遍）只留一份；内容不同
+// （同一个子章节在两次父尝试里各转过一次，尝试号都从 1 重新数）两条都留，
+// 归档那份标「旧#N」——不能让历史把一次真实发生过的对话藏掉。
+describe('同号转录：真副本去重，不同对话都留着', () => {
+  const conv = (attempt: number, archived = false, sha = 'aaa', mt = '2026-10-19T11:00:00Z') => ({
+    id: (archived ? 'book/work/attempts/chapter_007/try1/work/sessions/' : 'book/work/sessions/') +
+      `convert_chapter_007` + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: 'chapter_007', chapterRole: 'convert',
+    chapterAttempt: attempt, archived, sha, mtime: mt,
+  })
+
+  it('内容相同的归档副本被工作树那份顶掉', () => {
+    const live = conv(1, false, 'same')
+    const arch = conv(1, true, 'same', '2026-10-19T12:00:00Z')
+    const out = dedupeChapterAttempts([arch, live])
+    expect(out.length).toBe(1)
+    expect(out[0].id).toBe(live.id)
+    expect(dedupeChapterAttempts([live, arch])[0].id).toBe(live.id)
+  })
+
+  it('内容不同的同号转录两条都留（一次真实对话不能被藏掉）', () => {
+    const live = conv(1, false, 'new-conv')
+    const arch = conv(1, true, 'old-conv')
+    const out = dedupeChapterAttempts([live, arch])
+    expect(out.length).toBe(2)
+    expect(out[1].archived).toBe(true)
+    // 标签要分得开：这一次是 #1，早先那次是 旧#1。
+    expect(chainMemberTag(out[0])).toBe('#1')
+    expect(chainMemberTag(out[1])).toBe('旧#1')
+  })
+
+  it('不同尝试号 / 不同角色 / 非章节会话都不受影响', () => {
+    const a = conv(1)
+    const b = conv(2, true)
+    const chk = { ...conv(1), id: 'book/work/sessions/checker_chapter_007.jsonl', chapterRole: 'checker' }
+    const other = { id: 'book/work/sessions/style_pilot_trial.jsonl', project: 'book' }
+    expect(dedupeChapterAttempts([a, b, chk, other]).length).toBe(4)
   })
 })

@@ -4,7 +4,7 @@
  * Timeline.vue / DetailsPanel.vue 的 computed 响应式接管，这里只管数据流。
  */
 import { state, setBannerText } from './state'
-import { findSession, normalizeLines, indexCallEstimates, groupKey, setCollapsed } from './legacy/sidebar'
+import { findSession, normalizeLines, indexCallEstimates, groupKey, setCollapsed, dedupeChapterAttempts } from './legacy/sidebar'
 import type { PartialInfo } from './legacy/types'
 
 let pullSeq = 0
@@ -43,6 +43,9 @@ export function watchFork(project: string, chapter: string, role: string, prevId
 function settleForkWatch(): void {
   const w = forkWatch
   if (!w) return
+  // 排队后 latex 一直没消费（前置条件没到 / 已经关掉）：别在二十分钟后突然把
+  // 视图抢走。
+  if (Date.now() - w.since > 20 * 60_000) { forkWatch = null; return }
   const want = (s: any) =>
     s && s.project === w.project &&
     (w.chapter ? s.chapterId === w.chapter : s.stage === 'vector') &&
@@ -50,13 +53,16 @@ function settleForkWatch(): void {
     s.id !== w.prevId
   const hit = (state.sessions || []).filter(want).sort((a: any, b: any) => String(b.mtime).localeCompare(String(a.mtime)))[0]
   if (!hit) return
-  if (Date.parse(hit.mtime) < w.since && hit.id === w.prevId) return
+  // 只认排队之后才出现/更新的那条（老转录的 mtime 早于排队时间，不能算"新尝试"）。
+  if (Date.parse(hit.mtime) < w.since) return
   forkWatch = null
   selectSession(hit.id)
 }
 
 export function applyIndex(payload: any): void {
-  state.sessions = payload.sessions || []
+  // T194：归档目录里的副本与工作树里那份是同一个章节尝试，统一在这里去掉，
+  // 侧栏 / 章节树 / 历史列表拿到的就是一条。
+  state.sessions = dedupeChapterAttempts(payload.sessions || [])
   state.dedupeReviews = payload.dedupeReviews || []
   state.retries = payload.retries || {}
   state.retryRoles = payload.retryRoles || {}
