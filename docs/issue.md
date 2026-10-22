@@ -1235,3 +1235,8 @@ user 轮
   2. 根因：一条转录里可以跑好几轮 Run（转换→核对打回→重转、手工继续、中断续跑），**上一轮**的 `run_end` 留在文件下面，与这一轮的活动标记无法区分新旧。另外上一轮的错误结局（`RunEndError`）也会被算到正在跑的这一轮头上。
   改：`transcriptStat` 记下 `chapter_activity` 与 `run_end` 的**行号**，`run_end` 排在活动标记之后才算"这次尝试被放弃"；`run_end` 之后又出现消息说明新一轮已开始，那条结局（含错误文本）不再计入。
   验证：`TestActivityInterruptedOnlyWhenRunEndIsNewer`（run_end 在前 → 仍是 running；在后 → interrupted）、`TestRunEndErrorClearedByLaterMessages`、`TestScanLiveWhenRunningActivityIsNewest`（Scan 层 live + activity 都对）；真实数据复扫 live 从 1 条恢复到 11 条（10 转换 + 1 核对），与磁盘上的活动一致；`go test ./...` 全绿。
+- T208（用户反馈，2026-10-22）：**「重试这一章」点了没有用**。用户原话：*"还有一个17章节我点那个重试该章节也没有用来着，因为它乱码了我想让他重新跑一下"*。
+  查证：服务端没有问题——用同样的请求（同项目、`chapter_017`、`role=convert`）直接 `POST /api/retry` 返回 200，队列文件 5 秒内被运行中的 latex 消费、旧尝试归档进 `work/attempts/chapter_017/try1/`、新转录 `convert_chapter_017.try2.jsonl` 当场开始写（`t=meta kind=manual_retry` 在位）。而用户点的那一次，队列目录里既没有待办也没有 `.done` 留档，`work/attempts/chapter_017` 也不存在——说明 POST 根本没发出去。
+  根因在页面：动作条上的按钮只是**打开确认条**（真正的请求在「确认」那一下发出），而 `actions.ts` 里那个 `watch(state.current.id)` 会在**任何**会话切换时清空 `pending`。重试一排队，视图就自动切到这次开出来的新尝试（T194 的行为），或者实时跟随切到别的会话——确认条被静默收走，用户看到的就是"点了没反应"。
+  改：确认条记住这次针对谁（`legacy/actions.ts` 新增纯函数 `sameActionTarget`：同项目 + 同章节 + 同角色 = 同一件事，同一章的另一条尝试也算），会话切换时只有目标真的变了才收走；「重画 / 删除」针对当前这条会话本身，照旧一切换就收。
+  验证：`web/tests/session-actions.spec.ts` 新增 3 条（同一章另一条尝试保留、换章/换角色/换项目收走、任一侧无目标不留），`npm test` 202 条全绿；`npm run build` 重新产出 `dist`。

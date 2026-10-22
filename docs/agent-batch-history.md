@@ -2289,3 +2289,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **页面问题（实测定位）**：真实输出根 1044 条会话只有 1 条 live，而同一时刻 10 条转换 + 1 条核对在写（4 个 `.partial`、23 条转录 3 分钟内有写入）。根因是 `activityAfterEnd` 只看"出现过 run_end"，而一条转录里会跑好几轮 Run，上一轮的结局把这一轮的活动标记折成「已中断」，scan 又对 `interrupted` 强制 `live=false`。
 - 改：`Active` = 各用量行 `duration_ms` 之和；`fmtDuration` 超 1 小时按 `h`；实时行加状态词（排队/运行/等子会话 N/待核对，只有运行让计时器走，切换时结账累计）；续跑行首标「续跑」并用转录里的轮次/工具数/累计时间初始化；转换与核对接上状态切换（含提交提醒轮、父节点等子会话再整合）。页面侧按**行号**比较 `chapter_activity` 与 `run_end`，run_end 之后又出现消息时那条结局不再计入。
 - 验证：9 个新测试（`TestFmtDurationHours`、`TestLiveRowTextStates`、`TestResumeActiveSumsRequestDurations`、`TestResumeActiveWithoutUsageIsZero`、`TestActivityInterruptedOnlyWhenRunEndIsNewer`、`TestRunEndErrorClearedByLaterMessages`、`TestScanLiveWhenRunningActivityIsNewest` + 两个既有测试改口径）；真实数据复扫 live 1 → 11；`go test ./...` 全绿。
+
+### T208 · 「重试这一章」点了没有反应（2026-10-22）
+
+- 用户反馈：*"还有一个17章节我点那个重试该章节也没有用来着，因为它乱码了我想让他重新跑一下"*。
+- 查证：服务端正常——同样的 `POST /api/retry`（`chapter_017`、`role=convert`）返回 200，队列文件 5 秒被消费、旧尝试归档 `work/attempts/chapter_017/try1/`、新转录 `convert_chapter_017.try2.jsonl` 带 `manual_retry` 当场开写；而用户点的那次队列里既无待办也无 `.done`，归档目录也不存在 → POST 没发出去。
+- 根因：动作条按钮只打开**确认条**，请求在「确认」才发；`actions.ts` 的 `watch(state.current.id)` 在任何会话切换时清空 `pending`——重试排队后视图自动跳到新尝试（T194 的行为）或实时跟随切走，确认条被静默收走。
+- 改：`legacy/actions.ts` 新增纯函数 `sameActionTarget`（同项目+同章节+同角色 = 同一件事），确认条只在目标变化时收走；重画/删除仍一切换即收。
+- 验证：`session-actions.spec.ts` +3 条，`npm test` 202 绿；`npm run build` 重出 dist。

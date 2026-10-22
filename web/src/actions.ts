@@ -19,10 +19,13 @@
 import { computed, ref, watch } from 'vue'
 import { state } from './state'
 import { cancelChapterRetry, chapterPendingRetry, dropSession, refreshIndex, requestChapterRetry, selectSession, watchFork } from './data'
-import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, continueTargetOf, retryTargetOf } from './legacy/actions'
+import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, continueTargetOf, retryTargetOf, sameActionTarget } from './legacy/actions'
+import type { SessionActionTarget } from './legacy/actions'
+
+type Target = SessionActionTarget
 
 type Pending =
-  | { kind: 'retry' | 'continue' | 'redraw' | 'drop' }
+  | { kind: 'retry' | 'continue' | 'redraw' | 'drop'; target?: Target }
   | { kind: 'cancel'; project: string; chapter: string; role: string; path: string; prevId: string }
 
 const pending = ref<Pending | null>(null)
@@ -68,7 +71,16 @@ const confirmBody = computed(() => (pending.value ? confirmTextOf(pending.value.
 watch(
   () => state.current && (state.current as any).id,
   () => {
-    pending.value = null
+    // T208：确认条只在这个目标没变时留着（同项目同章节同角色，含同一章的
+    // 另一条尝试）——重试刚排队、视图自动跳到新尝试的那一跳，不该把用户刚
+    // 点开的确认条收走，否则看起来就是"点了没有用"。
+    const p = pending.value
+    const nowTarget = (() => {
+      if (!p || p.kind === 'cancel') return null
+      return p.kind === 'continue' ? continueTargetOf(state.current) : retryTargetOf(state.current)
+    })()
+    const keep = !!p && p.kind !== 'cancel' && sameActionTarget(p.target, nowTarget)
+    if (!keep) pending.value = null
     const cur: any = state.current
     const q = queued.value
     const same = !!q && !!cur &&
@@ -85,7 +97,13 @@ watch(
 function ask(kind: 'retry' | 'continue' | 'redraw' | 'drop') {
   if (busy.value) return
   prevId.value = (state.current && (state.current as any).id) || ''
-  pending.value = { kind }
+  // 记下这次确认条针对谁（T208）：轮询把视图切到别的会话时，只有目标没变才
+  // 留着这条确认条。"重画 / 删除"针对当前这条会话本身，切走就该收。
+  const t = kind === 'retry'
+    ? retryTargetOf(state.current)
+    : kind === 'continue' ? continueTargetOf(state.current) : null
+  const target: Target | undefined = t ? { project: t.project, chapter: t.chapter, role: t.role } : undefined
+  pending.value = { kind, target }
 }
 
 function cancelAsk() {

@@ -4,7 +4,7 @@
  * 这里把规则钉死：谁有按钮、谁没有、确认文案说的是不是那件事。
  */
 import { describe, it, expect } from 'vitest'
-import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, continueTargetOf, retryTargetOf } from '../src/legacy/actions'
+import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, continueTargetOf, retryTargetOf, sameActionTarget } from '../src/legacy/actions'
 
 const conv = (over: Record<string, unknown> = {}) => ({
   id: 'book/work/sessions/convert_chapter_002.jsonl',
@@ -102,5 +102,30 @@ describe('二次确认的文案', () => {
 
   it('撤销说清"只删队列文件"', () => {
     expect(confirmTextOf('cancel', conv())).toContain('work/retry/')
+  })
+})
+
+/*
+ * T208：确认条在轮询自动切换会话时要不要收走。
+ * 用户报"点那个重试该章节也没有用"——点了「重试这一章」、确认条出现，紧接着
+ * 视图被轮询切到本章新开的那条尝试，条子被静默收掉，看起来什么都没发生。
+ * 判据：同项目 + 同章节 + 同角色算同一件事（同一章的另一条尝试也算）。
+ */
+describe('确认条的归属（T208）', () => {
+  const target = (over: Record<string, unknown> = {}) => ({ project: 'book', chapter: 'chapter_017', role: 'convert', ...over })
+
+  it('同一章的另一条尝试算同一件事，确认条留着', () => {
+    expect(sameActionTarget(target(), target())).toBe(true)
+  })
+
+  it('换了章节 / 换了角色 / 换了项目就收走', () => {
+    expect(sameActionTarget(target(), target({ chapter: 'chapter_018' }))).toBe(false)
+    expect(sameActionTarget(target(), target({ role: 'checker' }))).toBe(false)
+    expect(sameActionTarget(target(), target({ project: 'other' }))).toBe(false)
+  })
+
+  it('任一侧没有目标（样式/汇编/静态导出）就不留', () => {
+    expect(sameActionTarget(null, target())).toBe(false)
+    expect(sameActionTarget(target(), null)).toBe(false)
   })
 })

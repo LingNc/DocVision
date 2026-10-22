@@ -26,6 +26,19 @@ export function retryTargetOf(s: any): SessionActionTarget | null {
   return { project: String(s.project), chapter: String(s.chapterId), role: s.chapterRole }
 }
 
+/* 两个动作对象是不是同一件事（T208）：确认条在轮询自动切换会话时收不收走，
+ * 只看这一条。同项目 + 同章节 + 同角色就算同一件事——同一章的另一条尝试
+ * （重试刚开出来的新转录）也算，用户点开的确认条不该被那一跳静默收掉。
+ * 用户报的原话是"点那个重试该章节也没有用"：点了「重试这一章」、确认条出现，
+ * 紧接着轮询把视图切走，条子消失，看起来就是什么都没发生。 */
+export function sameActionTarget(
+  a: SessionActionTarget | null | undefined,
+  b: SessionActionTarget | null | undefined,
+): boolean {
+  if (!a || !b) return false
+  return a.project === b.project && a.chapter === b.chapter && a.role === b.role
+}
+
 /* 「继续跑」的目标（T196）：顶层转换会话 = 它自己；递归子章节 = 它所在的顶层
  * 父章节。
  *

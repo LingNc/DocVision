@@ -12880,6 +12880,10 @@
     if (s.chapterRole !== "convert" && s.chapterRole !== "checker") return null;
     return { project: String(s.project), chapter: String(s.chapterId), role: s.chapterRole };
   }
+  function sameActionTarget(a, b) {
+    if (!a || !b) return false;
+    return a.project === b.project && a.chapter === b.chapter && a.role === b.role;
+  }
   function continueTargetOf(s) {
     const t = retryTargetOf(s);
     if (!t || t.role !== "convert") return null;
@@ -13215,7 +13219,13 @@
   watch(
     () => state.current && state.current.id,
     () => {
-      pending.value = null;
+      const p2 = pending.value;
+      const nowTarget = (() => {
+        if (!p2 || p2.kind === "cancel") return null;
+        return p2.kind === "continue" ? continueTargetOf(state.current) : retryTargetOf(state.current);
+      })();
+      const keep = !!p2 && p2.kind !== "cancel" && sameActionTarget(p2.target, nowTarget);
+      if (!keep) pending.value = null;
       const cur = state.current;
       const q = queued.value;
       const same = !!q && !!cur && String(cur.project || "") === q.project && String(cur.chapterId || "") === q.chapter && (q.role === "vector" || String(cur.chapterRole || "") === q.role);
@@ -13228,7 +13238,9 @@
   function ask(kind) {
     if (busy.value) return;
     prevId.value = state.current && state.current.id || "";
-    pending.value = { kind };
+    const t = kind === "retry" ? retryTargetOf(state.current) : kind === "continue" ? continueTargetOf(state.current) : null;
+    const target2 = t ? { project: t.project, chapter: t.chapter, role: t.role } : void 0;
+    pending.value = { kind, target: target2 };
   }
   function cancelAsk() {
     pending.value = null;
