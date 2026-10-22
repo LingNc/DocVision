@@ -2235,3 +2235,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 改：`clean_convert.sh` 不删 `work/media`；`clean_project.sh` 只在 `--with-style`（连样式会话一起删）时才删 `work/media`；两处都写清了"media 是转录同级附件目录"的理由；`work/sessions/media` 也不能整体删——被保留的 `chapters.jsonl` 用它。`docs/latex.md` 的脚本章节同步。
 - 数据恢复：从 `*_记录_20261020_0737/work/media/` 把缺的 31 张补回项目 `work/media/`（只补缺、不覆盖），复核后附件缺失数归零（存在 5544 / 缺失 0）。
 - 验证：`bash -n` 两个脚本；在临时假项目上 `-n` 跑一遍，删除清单不再包含 `work/media`（`work/views`/`work/pdfview` 仍删，那是每次运行重建的）。
+
+### T200 · 侧栏里的"空会话"与"备份项目"：快照日志被当成转录（2026-10-21）
+
+- 用户发两张截图问"有一堆这些会话是什么？"：转换阶段下并列 14 个方块、点开标题是 `journal-try1`、轨迹页空白；侧栏还多出一个挂着 76 个会话的组。
+- 查盘：那 14 条是 `work/rounds/<章>/journal-try1.jsonl`——P55 工作区快照的"转录行号 → commit"日志（内容只有 `{"line":N,"commit":"…"}`），项目里正好 14 章有快照，与方块数一致；它跟会话毫无关系，只是扩展名也是 `.jsonl`。76 会话那个组是清理脚本的整目录备份 `<项目名>_记录_20261020_0737/`（先备份再删的产物），整份工程副本被当作独立项目扫了进来。
+- 改：`sessionview` 新增 `skipScanDir(p, name)`（主扫描与附加根扫描共用的唯一判据）——`media`、`.git`、`*.git`（`work/rounds/<章>/repo.git` 是裸仓库）、`work/rounds`（限定父目录是 `work`，免得误吞名叫 rounds 的书）、`cleanBackupRe`（`_记录_<8位日期>_<4位时刻>` 结尾）整棵跳过。
+- 验证：`TestScanSkipsRoundsJournalsAndCleanBackups`（真转录留、快照日志/裸仓库/备份副本都不出现）、`TestSkipScanDir`（规则边界）；`go test ./...` 全绿；真实输出根 `sessions --list` 1005 条、`journal-try` 命中 0、无 `_记录_` 组。

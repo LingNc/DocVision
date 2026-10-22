@@ -58,7 +58,7 @@ func (s *scanner) scanExtras(out []SessionInfo, now time.Time) []SessionInfo {
 				return nil
 			}
 			if d.IsDir() {
-				if p != base && (d.Name() == "media" || d.Name() == ".git") {
+				if p != base && skipScanDir(p, d.Name()) {
 					return fs.SkipDir
 				}
 				return nil

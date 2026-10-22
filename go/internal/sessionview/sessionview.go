@@ -988,6 +988,34 @@ func (stat transcriptStat) modelID() string {
 	return stat.model
 }
 
+// cleanBackupName 是清理脚本（clean_project.sh / clean_convert.sh）"整目录备份"
+// 的目录名口径：`<项目名>_记录_<日期>_<时刻>`。它们是项目的**副本**，不是另一个
+// 项目——扫进来会凭空多出一个挂着几十条会话的组，还会把整棵副本读一遍（T200）。
+var cleanBackupRe = regexp.MustCompile(`_记录_[0-9]{8}_[0-9]{4}$`)
+
+// skipScanDir 决定 walk 要不要整棵跳过这个目录（p 是目录的完整路径）。
+//
+//	media / .git      — 图片附件与版本库，不是转录（历史遗留的跳过项）。
+//	*.git             — P55 的工作区快照是**裸仓库**（work/rounds/<章>/repo.git），
+//	                    里面没有转录，进去只会白扫。
+//	work/rounds       — P55 的"转录行号 → commit"日志（journal-try<N>.jsonl）住在
+//	                    这里，文件名也以 .jsonl 结尾，但它不是会话：扫进来会在侧栏
+//	                    多出十几条"没对话、没轨迹"的空会话（T200）。
+//	*_记录_<日期>      — 清理脚本的整目录备份，见 cleanBackupRe。
+func skipScanDir(p, name string) bool {
+	switch {
+	case name == "media" || name == ".git":
+		return true
+	case strings.HasSuffix(name, ".git"):
+		return true
+	case name == "rounds" && filepath.Base(filepath.Dir(p)) == "work":
+		return true
+	case cleanBackupRe.MatchString(name):
+		return true
+	}
+	return false
+}
+
 func (s *scanner) scan() ([]SessionInfo, error) {
 	root, err := filepath.Abs(s.root)
 	if err != nil {
@@ -1025,7 +1053,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if p != root && (d.Name() == "media" || d.Name() == ".git") {
+			if p != root && skipScanDir(p, d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
