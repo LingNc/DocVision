@@ -490,7 +490,21 @@ function newerAttempt(cur: any, next: any): any {
 }
 
 /*
- * 章节树里"这一行显示哪一次尝试"（T173，T175 收窄）。
+ * T214：子行的**世代**跟着父行走。父行的转换是工作树里的（正在跑的这一代），
+ * 子行就只在工作树里挑；父行是归档里的（你在历史里切到了上一代），子行也回到
+ * 归档——同一章的两个世代各有一套子章节，混着取就会"父行是旧的那一代、子行是
+ * 新的那一代"。父行连转换都没有（只有核对）时不设限，退回各取最新；那一代里
+ * 没有这个子章节的转换（这一代根本没转过它）时也不留空行，退回该节点最新一次。
+ */
+function convertInGeneration(candidates: any[], archived: boolean | null): any | null {
+  if (!candidates || !candidates.length) return null
+  if (archived === null) return newestOf(candidates)
+  const sameGen = candidates.filter((c) => !!c.archived === archived)
+  return newestOf(sameGen.length ? sameGen : candidates)
+}
+
+/*
+ * 章节树里"这一行显示哪一次尝试"（T173，T175 收窄，T214 补子行世代）。
  *
  * 默认每个节点各取自己最新的一次：同一章下各节点的重试次数是**互相独立**
  * 的（有的只转过一次、有的被打回五次），拿一个章节的 #2 去套全树，别的章节
@@ -500,7 +514,7 @@ function newerAttempt(cur: any, next: any): any {
  * 点开历史里的 #2、树里还是 #3。同一节点的另一种角色（convert ↔ checker）
  * 按**核对会话的锚点**配（P59，见 checkerForConvert）：钉住核对时转换由锚点
  * 决定，钉住转换时核对挂在它锚定的那次转换下面；旧转录没有锚点才退回"同一轮"。
- * 子会话与其它章节一概不跟着切。
+ * 子会话跟着父行的那一代走（T214，见 convertInGeneration），别的章节不受影响。
  */
 export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
   const byId: Record<string, ChapterTreeNode> = {}
@@ -514,42 +528,11 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     parents[id] = String(session.chapterParent || '')
     if (session.chapterRole !== 'checker' && session.chapterRole !== 'convert') return
     const role: 'convert' | 'checker' = session.chapterRole === 'checker' ? 'checker' : 'convert'
-    node[role] = newerAttempt(node[role], session)
     const key = id + '|' + role
     ;(byRole[key] || (byRole[key] = [])).push(session)
     if (pinId && session.id === pinId) pinned = { node, role, session }
   })
-  // P59：先定每一行的转换，再由**锚点**选核对。钉住核对会话时，转换由它的
-  // 锚点决定（不是按尝试号，也不是"最新那条"）；钉住转换时，转换仍取那一条，
-  // 核对照锚点选。子会话与其它章节不受影响（T175）。
-  Object.keys(byId).forEach((id) => {
-    const node = byId[id]
-    const pin = pinned as { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null
-    if (pin && pin.node === node && pin.role === 'checker') {
-      node.checker = pin.session
-      const anchor = String(pin.session.chapterAnchor || '')
-      const converts = byRole[id + '|convert'] || []
-      if (anchor) {
-        const sameGen = converts.filter((c: any) => !!c.archived === !!pin.session.archived)
-        const hit = (sameGen.length ? sameGen : converts).filter((c: any) => convertBasename(c) === anchor)
-        // 锚点对应的转换不存在（例如只剩归档的核对）时留空：不拿别的尝试凑。
-        node.convert = hit.length ? newestOf(hit) : null
-        return
-      }
-      // 旧转录没有锚点：按老规则把转换切到"同一轮"；那一轮不在就保持最新。
-      const want = Number(pin.session.chapterAttempt) || 1
-      const peers = converts.filter((c: any) =>
-        (Number(c.chapterAttempt) || 1) === want && !!c.archived === !!pin.session.archived)
-      if (peers.length) node.convert = newestOf(peers)
-      return
-    }
-    if (pin && pin.node === node && pin.role === 'convert') node.convert = pin.session
-    node.checker = checkerForConvert(
-      byRole[id + '|checker'] || [],
-      node.convert,
-      !!pin && pin.node === node && pin.role === 'convert',
-    )
-  })
+  // 先搭出父子关系（T214 要按"父行定了哪一代"给子行选行，得从根往下走）。
   const roots: ChapterTreeNode[] = []
   Object.keys(byId).forEach((id) => {
     const parent = parents[id] && byId[parents[id]]
@@ -565,6 +548,38 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     nodes.forEach((node) => sort(node.children))
   }
   sort(roots)
+  // P59：先定每一行的转换，再由**锚点**选核对。钉住核对会话时，转换由它的
+  // 锚点决定（不是按尝试号，也不是"最新那条"）；钉住转换时，转换仍取那一条，
+  // 核对照锚点选。定完把这一行的世代交给子行（T214）。
+  const pin = pinned as { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null
+  const resolve = (node: ChapterTreeNode, parentArchived: boolean | null): void => {
+    const here = pin && pin.node === node ? pin : null
+    if (here && here.role === 'checker') {
+      node.checker = here.session
+      const anchor = String(here.session.chapterAnchor || '')
+      const converts = byRole[node.id + '|convert'] || []
+      if (anchor) {
+        const sameGen = converts.filter((c: any) => !!c.archived === !!here.session.archived)
+        const hit = (sameGen.length ? sameGen : converts).filter((c: any) => convertBasename(c) === anchor)
+        // 锚点对应的转换不存在（例如只剩归档的核对）时留空：不拿别的尝试凑。
+        node.convert = hit.length ? newestOf(hit) : null
+      } else {
+        // 旧转录没有锚点：按老规则把转换切到"同一轮"；那一轮不在就保持最新。
+        const want = Number(here.session.chapterAttempt) || 1
+        const peers = converts.filter((c: any) =>
+          (Number(c.chapterAttempt) || 1) === want && !!c.archived === !!here.session.archived)
+        node.convert = peers.length ? newestOf(peers) : newestOf(converts)
+      }
+    } else {
+      node.convert = here
+        ? here.session
+        : convertInGeneration(byRole[node.id + '|convert'] || [], parentArchived)
+      node.checker = checkerForConvert(byRole[node.id + '|checker'] || [], node.convert, !!here)
+    }
+    const archived = node.convert ? !!node.convert.archived : parentArchived
+    node.children.forEach((child) => resolve(child, archived))
+  }
+  roots.forEach((root) => resolve(root, null))
   return roots
 }
 

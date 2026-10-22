@@ -466,3 +466,54 @@ describe('P59 核对按锚点挂在转换下面', () => {
     expect(chapterAttemptChain([c, legacy, legacy2], legacy.id)!.map((s: any) => s.id)).toEqual([legacy2.id, legacy.id])
   })
 })
+
+/* T214：切到某一次转换时，下面子章节的行也要回到**那一代**。根章重来过一次之
+ * 后，工作树与 work/attempts/<根章>/tryN 里各有一套子章节转录；子行只按"各自
+ * 最新一次"取，钉住上一代的父行时下面挂的仍是这一代的子行（上一代的子行号更大，
+ * 纯按号取甚至会反过来）。世代只说工作树 / 归档，与尝试号无关。
+ */
+describe('T214 子行跟着父行的世代', () => {
+  const conv = (chapterId: string, archived: boolean, attempt = 1, parent = '') => ({
+    id: (archived ? 'book/work/attempts/chapter_042/try1/work/sessions/' : 'book/work/sessions/') +
+      'convert_' + chapterId + (attempt > 1 ? '.try' + attempt : '') + '.jsonl',
+    project: 'book', chapterId, chapterParent: parent, chapterRole: 'convert',
+    chapterAttempt: attempt, archived, mtime: '2026-10-23T10:00:00Z',
+  })
+  const liveParent = conv('chapter_042', false)
+  const oldParent = conv('chapter_042', true)
+  const liveChild = conv('chapter_042_child_01', false, 1, 'chapter_042')
+  // 上一代这一支转过两次，号比工作树里的 #1 还大。
+  const oldChild = conv('chapter_042_child_01', true, 2, 'chapter_042')
+  const sessions = [liveParent, oldParent, liveChild, oldChild]
+
+  it('不钉任何行：父行取工作树，子行也取工作树里的那一条', () => {
+    const root = buildChapterTree(sessions)[0]
+    expect(root.convert!.id).toBe(liveParent.id)
+    expect(root.children[0].convert!.id).toBe(liveChild.id)
+  })
+
+  it('钉住工作树里的转换：子行留在工作树', () => {
+    const root = buildChapterTree(sessions, liveParent.id)[0]
+    expect(root.convert!.id).toBe(liveParent.id)
+    expect(root.children[0].convert!.id).toBe(liveChild.id)
+  })
+
+  it('钉住归档里的转换：子行回到归档那一代', () => {
+    const root = buildChapterTree(sessions, oldParent.id)[0]
+    expect(root.convert!.id).toBe(oldParent.id)
+    expect(root.children[0].convert!.id).toBe(oldChild.id)
+  })
+
+  it('归档那一代的核对挂在归档的子行下，切回工作树就不显示', () => {
+    const oldChk = {
+      ...oldChild,
+      id: oldChild.id.replace('/convert_', '/checker_').replace('.try2.jsonl', '.jsonl'),
+      chapterRole: 'checker',
+      chapterAnchor: 'convert_chapter_042_child_01.try2',
+      mtime: '2026-10-23T10:30:00Z',
+    }
+    const withCheck = [...sessions, oldChk]
+    expect(buildChapterTree(withCheck, oldParent.id)[0].children[0].checker!.id).toBe(oldChk.id)
+    expect(buildChapterTree(withCheck, liveParent.id)[0].children[0].checker).toBeNull()
+  })
+})

@@ -6,7 +6,7 @@
  * 点击才写回）；选中高亮与行内文案走响应式，轮询不重建 DOM。
  */
 import { computed, ref, watchEffect } from 'vue'
-import { state, openDetails, fmtSize, storeGet, storeSet, setBoard } from '../state'
+import { state, openDetails, fmtSize, storeGet, storeSet, setBoard, resetViewState } from '../state'
 import {
   bookDominantState, bookTip, booksHeadText,
   buildGroups, buildImg2TextChains, buildChapterTree, filterByBoard, groupKey, groupWantOpen,
@@ -326,6 +326,14 @@ function onInfoClick(ev: MouseEvent, s: any) {
 function onMoreClick(okey: string) {
   setOverflowOpen(okey, true)
 }
+
+/* T215：重置视图——清掉手动选中（pin）、展开/收起记忆与过滤，回到当前正在跑的
+ * 顶层会话。只清界面记忆：不发写请求、不删数据，主题/显示单位/Markdown 照旧。 */
+function onResetView() {
+  const id = resetViewState()
+  selectSession(id)
+  void refreshIndex()
+}
 </script>
 
 <template>
@@ -338,6 +346,11 @@ function onMoreClick(okey: string) {
         @click="toggleBlockView"
       >{{ blockView ? '☰' : '▦' }}</button>
       <button id="refresh" class="icon-btn" type="button" title="重新扫描会话" @click="refreshIndex">⟳</button>
+      <button
+        id="reset-view" class="tab-toggle side-reset" type="button"
+        title="重置视图：清掉手动选中（pin）、侧栏展开/收起记忆与搜索过滤，回到当前正在跑的顶层会话（没有在跑的就回列表最上面一条）；不动任何数据，也不改主题/显示单位/Markdown 这些显示偏好"
+        @click="onResetView"
+      >重置视图</button>
     </div>
     <div v-if="showBoardSwitch" class="board-tabs" role="group" aria-label="板块">
       <button
@@ -685,6 +698,11 @@ function onMoreClick(okey: string) {
 
 .frame[data-sidebar-collapsed] .side-head {
  padding: 0; justify-content: center; 
+}
+
+/* T215：「重置视图」是文字按钮，收成 56px 轨道后放不下，跟搜索框/状态行一样隐藏。 */
+.frame[data-sidebar-collapsed] .side-reset {
+ display: none; 
 }
 
 .side-search {

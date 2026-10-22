@@ -6726,6 +6726,12 @@
       return fallback;
     }
   }
+  function storeRemove(key) {
+    try {
+      window.localStorage.removeItem(STORE_PREFIX + key);
+    } catch {
+    }
+  }
   function fmtSize(bytes) {
     if (!bytes && bytes !== 0) return "—";
     if (bytes < 1024) return bytes + " B";
@@ -6939,6 +6945,37 @@
   }
   function switchView(view) {
     state.view = view === "trajectory" || view === "history" ? view : "chat";
+  }
+  function resetViewState() {
+    state.current = null;
+    state.lines = [];
+    state.nextFrom = 0;
+    state.curSize = -1;
+    state.curMtime = 0;
+    state.meta = null;
+    state.partial = null;
+    state.callEst = {};
+    state.trajSelected = null;
+    state.trajOpen = {};
+    state.trajKinds = {};
+    state.view = "chat";
+    state.filter = "";
+    state.collapsed = {};
+    state.overflow = {};
+    state.narrowExpanded = true;
+    storeRemove("collapsed");
+    storeRemove("overflow");
+    persistLayout();
+    applyLayout();
+    return firstRunningSession();
+  }
+  function firstRunningSession() {
+    const want = state.board === "img2text" ? "img2text" : "latex";
+    const list = (state.sessions || []).filter((s) => (s.board === "img2text" ? "img2text" : "latex") === want);
+    const live = list.filter((s) => s.live);
+    const top = live.filter((s) => !s.chapterParent);
+    const hit = top[0] || live[0] || list[0];
+    return hit ? String(hit.id) : "";
   }
   const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "", scale: 1, tx: 0, ty: 0 });
   function openLightbox(url, ref2) {
@@ -7350,6 +7387,12 @@
     if (a !== b) return b > a ? next : cur;
     return mtimeMs(next) > mtimeMs(cur) ? next : cur;
   }
+  function convertInGeneration(candidates, archived) {
+    if (!candidates || !candidates.length) return null;
+    if (archived === null) return newestOf(candidates);
+    const sameGen = candidates.filter((c) => !!c.archived === archived);
+    return newestOf(sameGen.length ? sameGen : candidates);
+  }
   function buildChapterTree(items, pinId = "") {
     const byId = {};
     const parents = {};
@@ -7362,35 +7405,9 @@
       parents[id] = String(session.chapterParent || "");
       if (session.chapterRole !== "checker" && session.chapterRole !== "convert") return;
       const role = session.chapterRole === "checker" ? "checker" : "convert";
-      node[role] = newerAttempt(node[role], session);
       const key = id + "|" + role;
       (byRole[key] || (byRole[key] = [])).push(session);
       if (pinId && session.id === pinId) pinned = { node, role, session };
-    });
-    Object.keys(byId).forEach((id) => {
-      const node = byId[id];
-      const pin = pinned;
-      if (pin && pin.node === node && pin.role === "checker") {
-        node.checker = pin.session;
-        const anchor = String(pin.session.chapterAnchor || "");
-        const converts = byRole[id + "|convert"] || [];
-        if (anchor) {
-          const sameGen = converts.filter((c) => !!c.archived === !!pin.session.archived);
-          const hit = (sameGen.length ? sameGen : converts).filter((c) => convertBasename(c) === anchor);
-          node.convert = hit.length ? newestOf(hit) : null;
-          return;
-        }
-        const want = Number(pin.session.chapterAttempt) || 1;
-        const peers = converts.filter((c) => (Number(c.chapterAttempt) || 1) === want && !!c.archived === !!pin.session.archived);
-        if (peers.length) node.convert = newestOf(peers);
-        return;
-      }
-      if (pin && pin.node === node && pin.role === "convert") node.convert = pin.session;
-      node.checker = checkerForConvert(
-        byRole[id + "|checker"] || [],
-        node.convert,
-        !!pin && pin.node === node && pin.role === "convert"
-      );
     });
     const roots = [];
     Object.keys(byId).forEach((id) => {
@@ -7407,6 +7424,30 @@
       nodes.forEach((node) => sort(node.children));
     };
     sort(roots);
+    const pin = pinned;
+    const resolve2 = (node, parentArchived) => {
+      const here = pin && pin.node === node ? pin : null;
+      if (here && here.role === "checker") {
+        node.checker = here.session;
+        const anchor = String(here.session.chapterAnchor || "");
+        const converts = byRole[node.id + "|convert"] || [];
+        if (anchor) {
+          const sameGen = converts.filter((c) => !!c.archived === !!here.session.archived);
+          const hit = (sameGen.length ? sameGen : converts).filter((c) => convertBasename(c) === anchor);
+          node.convert = hit.length ? newestOf(hit) : null;
+        } else {
+          const want = Number(here.session.chapterAttempt) || 1;
+          const peers = converts.filter((c) => (Number(c.chapterAttempt) || 1) === want && !!c.archived === !!here.session.archived);
+          node.convert = peers.length ? newestOf(peers) : newestOf(converts);
+        }
+      } else {
+        node.convert = here ? here.session : convertInGeneration(byRole[node.id + "|convert"] || [], parentArchived);
+        node.checker = checkerForConvert(byRole[node.id + "|checker"] || [], node.convert, !!here);
+      }
+      const archived = node.convert ? !!node.convert.archived : parentArchived;
+      node.children.forEach((child) => resolve2(child, archived));
+    };
+    roots.forEach((root) => resolve2(root, null));
     return roots;
   }
   function sessionBoard(s) {
@@ -9873,6 +9914,11 @@
       function onMoreClick(okey) {
         setOverflowOpen(okey);
       }
+      function onResetView() {
+        const id = resetViewState();
+        selectSession(id);
+        void refreshIndex();
+      }
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("aside", _hoisted_1$i, [
           createBaseVNode("div", _hoisted_2$h, [
@@ -9891,7 +9937,14 @@
               title: "重新扫描会话",
               onClick: _cache[0] || (_cache[0] = //@ts-ignore
               (...args) => unref(refreshIndex) && unref(refreshIndex)(...args))
-            }, "⟳")
+            }, "⟳"),
+            createBaseVNode("button", {
+              id: "reset-view",
+              class: "tab-toggle side-reset",
+              type: "button",
+              title: "重置视图：清掉手动选中（pin）、侧栏展开/收起记忆与搜索过滤，回到当前正在跑的顶层会话（没有在跑的就回列表最上面一条）；不动任何数据，也不改主题/显示单位/Markdown 这些显示偏好",
+              onClick: onResetView
+            }, "重置视图")
           ]),
           showBoardSwitch.value ? (openBlock(), createElementBlock("div", _hoisted_4$c, [
             createBaseVNode("button", {
@@ -10016,7 +10069,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-1962332f><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-1962332f><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-1962332f></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-1962332f><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-1962332f></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-1962332f></path></svg></span>', 1)),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-c5050c48><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-c5050c48><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-c5050c48></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-c5050c48><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-c5050c48></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-c5050c48></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$3, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -10347,7 +10400,7 @@
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-1962332f"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-c5050c48"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

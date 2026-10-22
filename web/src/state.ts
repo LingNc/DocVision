@@ -52,6 +52,14 @@ export function storeJSON(key: string, fallback: Record<string, unknown>): Recor
   }
 }
 
+export function storeRemove(key: string): void {
+  try {
+    window.localStorage.removeItem(STORE_PREFIX + key)
+  } catch {
+    /* 同上：静默跳过 */
+  }
+}
+
 /* ---------- 文案短写（旧页同名函数） ---------- */
 
 export function fmtSize(bytes: number | null | undefined): string {
@@ -318,6 +326,55 @@ export function toggleTheme(): void {
 
 export function switchView(view: string): void {
   state.view = view === 'trajectory' || view === 'history' ? view : 'chat'
+}
+
+/* ---------- T215：重置视图 ----------
+
+ * 只清**跟"我在看哪里"有关**的那层记忆，回到"当前正在跑"的顶层状态：
+ *  · 手动选中/pin（state.current）与它带来的行缓冲、轨迹页选中/展开/类型筛选；
+ *  · 搜索过滤词；
+ *  · 侧栏的展开/收起记忆（state.collapsed 里项目/阶段/链/章节节点，加上
+ *    「更多会话」的 state.overflow）与窄屏下侧栏的展开开关——两处记忆也一并从
+ *    localStorage 删掉，否则下一次刷新又回来了。
+ * 不碰任何数据（不发请求、不删文件），也不动主题 / 显示单位 / Markdown /
+ * 缩略图 / 自动跟随 / 板块 / 方块视图这些与"看哪一条"无关的显示偏好。
+ * 返回应该重新选中的会话 ID（重新选中与拉行由调用方走唯一的 selectSession
+ * 入口，这里不碰网络）：本板块里正在跑的**顶层**会话优先（没有父章节的那条，
+ * 子章节的世代跟着父章节走，选中它等于钉住一行），没有活跃会话就退回列表第一条
+ * （与首次打开页面同一个口径），一个都没有时是空串（选中保持清空）。
+ */
+export function resetViewState(): string {
+  state.current = null
+  state.lines = []
+  state.nextFrom = 0
+  state.curSize = -1
+  state.curMtime = 0
+  state.meta = null
+  state.partial = null
+  state.callEst = {}
+  state.trajSelected = null
+  state.trajOpen = {}
+  state.trajKinds = {}
+  state.view = 'chat'
+  state.filter = ''
+  state.collapsed = {}
+  state.overflow = {}
+  state.narrowExpanded = true
+  storeRemove('collapsed')
+  storeRemove('overflow')
+  persistLayout()
+  applyLayout()
+  return firstRunningSession()
+}
+
+/* 重置后回到哪一条：当前板块里正在跑的顶层会话 → 正在跑的子章节 → 列表第一条。 */
+function firstRunningSession(): string {
+  const want = state.board === 'img2text' ? 'img2text' : 'latex'
+  const list = (state.sessions || []).filter((s) => (s.board === 'img2text' ? 'img2text' : 'latex') === want)
+  const live = list.filter((s) => s.live)
+  const top = live.filter((s) => !s.chapterParent)
+  const hit = top[0] || live[0] || list[0]
+  return hit ? String(hit.id) : ''
 }
 
 /* ---------- 灯箱（旧页 openLightbox/closeLightbox 同名；点击接线在缩略图块） ----------
