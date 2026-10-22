@@ -2637,7 +2637,8 @@ func (r *Runner) remindOrRescue(sess *session.Session, tid int, tag, label, subm
 	hint := ""
 	for remind := 0; remind < 2 && !submitted(); remind++ {
 		if target.Base != "" && r.cfg.Latex.RescueEnabled() {
-			if r.rescueBudget(target.Base + "/" + target.Role) {
+			// 预算按"本次尝试的转录"计数：新尝试 = 新转录 = 预算重置。
+			if r.rescueBudget(target.Base + "/" + target.Role + "/" + filepath.Base(target.TrPath)) {
 				if v, ok := r.rescueReview(target, tid); ok {
 					switch v.Verdict {
 					case "fail":

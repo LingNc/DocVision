@@ -529,7 +529,11 @@ func (r *Runner) rescueReview(t rescueTarget, tid int) (rescueVerdict, bool) {
 	}
 	userText := fmt.Sprintf("The %s session for chapter %s ended its turn without calling submit. Its transcript has %d physical lines (%d message lines). Review it and submit one verdict.",
 		t.Role, t.Base, len(lines), countKind(lines, "msg"))
+	// 复盘也是一次模型调用，占一个章节槽位（与提醒轮同一条规矩），免得在
+	// 并发已满时凭空多开一条会话。
+	release := r.acquireChapterSlot()
 	_, runErr := sess.Run(session.RunOptions{UserText: userText})
+	release()
 	if runErr != nil {
 		r.log.LogWarning(tid, "[rescue]", t.Base, "复盘会话失败:", runErr)
 	}

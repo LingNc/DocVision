@@ -182,7 +182,7 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 			hint := ""
 			if r.cfg.Latex.RescueEnabled() {
 				target := rescueTarget{ProjDir: proj, Base: base, Role: "checker", TrPath: trPath}
-				if r.rescueBudget(base + "/checker") {
+				if r.rescueBudget(base + "/checker/" + filepath.Base(trPath)) {
 					if v, ok := r.rescueReview(target, tid); ok {
 						switch v.Verdict {
 						case "fail":
