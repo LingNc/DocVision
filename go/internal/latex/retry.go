@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -327,6 +328,21 @@ func (r *Runner) truncateCheckerTranscript(proj, base, srcName string, from int)
 	}
 	dir := filepath.Join(proj, "work", "sessions")
 	src := filepath.Join(dir, name)
+	// T201：递归子章节的核对转录在父工作区的细分树里，不在 work/sessions/ 下。
+	// 请求带的是项目内相对路径（`work/temp/conv_<父>/work/_subdivision/…`）或绝对
+	// 路径；新尝试仍然写在 work/sessions/ 下（那里不会随父节点临时树被清掉，
+	// recheckChapter 也按同一位置找转录）。
+	if strings.ContainsAny(strings.TrimSpace(srcName), "/\\") {
+		p := strings.TrimSpace(srcName)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(proj, filepath.FromSlash(p))
+		}
+		if rel, rerr := filepath.Rel(filepath.Join(proj, "work"), p); rerr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			if fileExists(p) {
+				src = p
+			}
+		}
+	}
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return "", 0, fmt.Errorf("读不到源转录 %s: %w", name, err)
@@ -378,18 +394,65 @@ func chapterMarkdownFor(proj, base string) string {
 // findChildMarkdown 在父节点的临时细分树里递归找子章节的 md。用 WalkDir 而不是
 // Glob：`**` 在 filepath.Glob 里只匹配一个路径段，深层文件根本查不到（曾因此把
 // "父节点正在跑这一支"误判成"找不到输入"）。
-func findChildMarkdown(proj, parent, base string) string {
-	roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+parent+"*", "work", "_subdivision"))
-	if len(roots) == 0 {
-		roots, _ = filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+parent, "work", "_subdivision"))
+// childIDRe 认章节 id 里的层级编号（child_04、child_02…）。
+var childIDRe = regexp.MustCompile(`child_\d+`)
+
+// childInputRel 是子章节输入 md 相对**根章节**细分树根的路径（T201）：
+// 顶层子章节是 `child_04/input/chapter.md`，嵌套时中间要经过父节点自己的
+// `node/work/_subdivision`。用它做整段比较而不是"文件名匹配"——同一棵细分树里
+// 不同层级都可能出现 `child_04`，只比名字会把 child_01 底下的 child_04 认成
+// 顶层的 child_04（真数据里就这样认错过）。
+func childInputRel(base string) string {
+	i := strings.Index(base, "_child_")
+	if i < 0 {
+		return ""
 	}
+	ids := childIDRe.FindAllString(base[i+1:], -1)
+	if len(ids) == 0 {
+		return ""
+	}
+	parts := []string{}
+	for k, id := range ids {
+		if k > 0 {
+			parts = append(parts, "node", "work", "_subdivision")
+		}
+		parts = append(parts, id)
+	}
+	parts = append(parts, "input", "chapter.md")
+	return strings.Join(parts, "/")
+}
+func findChildMarkdown(proj, parent, base string) string {
+	// 走**根章节**的细分树：嵌套子章节的输入在父节点自己的
+	// `node/work/_subdivision` 底下，只按 parent 拼路径找不到。
+	rootChapter := parent
+	if i := strings.Index(base, "_child_"); i > 0 {
+		rootChapter = base[:i]
+	}
+	roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+rootChapter+"*", "work", "_subdivision"))
+	if len(roots) == 0 {
+		roots, _ = filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+rootChapter, "work", "_subdivision"))
+	}
+	want := childInputRel(base)
 	for _, root := range roots {
 		hit := ""
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil || hit != "" {
 				return nil
 			}
-			if !d.IsDir() && d.Name() == base+".md" {
+			if d.IsDir() {
+				return nil
+			}
+			// ① 真身：父节点细分这一支时写的输入 `…/<id>/input/chapter.md`（T201：
+			//    以前只认 `<章>.md`，靠核对视图里那份同名副本碰巧命中，视图一清就
+			//    "找不到章节 markdown"）。按整段相对路径比，避免认错层级。
+			if want != "" {
+				if rel, rerr := filepath.Rel(root, p); rerr == nil && filepath.ToSlash(rel) == want {
+					hit = p
+					return nil
+				}
+			}
+			// ② 兼容：核对视图/报告里留下的 `<章>.md` 副本。
+			if d.Name() == base+".md" {
 				hit = p
 			}
 			return nil
@@ -431,9 +494,59 @@ func chapterProductsFor(proj, base string) (string, string) {
 		return nil
 	})
 	if found == "" {
-		return top, filepath.Join(root, base)
+		if found = tempProductFor(proj, base); found == "" {
+			return top, filepath.Join(root, base)
+		}
 	}
 	return found, strings.TrimSuffix(found, ".tex")
+}
+
+// tempProductFor 在父节点的临时细分树里找子章节**已提交**的产物（T201）。
+//
+// 子章节核对通过、父节点还没整合时，产物不在 work/chapters 下，而在父工作区里：
+//
+//	· 父节点收集孩子产物的暂存池：<父工作区>/<父章>/children/<子>.tex
+//	· 自己那一支的节点产物：<节点>/result/<子>.tex、<节点>/integrated-stage/<子>.tex
+//	  （后者是"这一支还要继续细分"时的落点）
+//
+// 以前只认 work/chapters，于是"子章节转换完、核对也跑完了，点重新核对却说还没有
+// 提交产物"——产品明明在临时树里等着父节点整合。
+func tempProductFor(proj, base string) string {
+	if i := strings.Index(base, "_child_"); i > 0 {
+		roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+base[:i]+"*", "work"))
+		for _, root := range roots {
+			if p := filepath.Join(root, base[:i], "children", base+".tex"); fileExists(p) {
+				return p
+			}
+		}
+	}
+	roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_*", "work", "_subdivision"))
+	for _, root := range roots {
+		found := ""
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || found != "" {
+				return nil
+			}
+			if d.IsDir() {
+				if d.Name() == "children.tmp" {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if d.Name() != base+".tex" {
+				return nil
+			}
+			switch filepath.Base(filepath.Dir(p)) {
+			case "result", "integrated-stage":
+				found = p
+			}
+			return nil
+		})
+		if found != "" {
+			return found
+		}
+	}
+	return ""
 }
 
 // childNodeWork 找递归子章节所在节点的工作区（<节点>/work）。节点的转录目录是
@@ -614,7 +727,9 @@ func (r *Runner) stopRetryWatcher() {
 // retryPrecondition 说明"现在能不能跑这条请求"。返回非空 = 还不能跑（请求留在
 // 队列里，下一个 tick 再看）。样式未就绪、产物还没有都属于这一类。
 func (r *Runner) retryPrecondition(proj, role, base string) string {
-	if !fileExists(filepath.Join(proj, "chapters", base+".md")) {
+	// T201：递归子章节没有 chapters/<章>.md（它的输入在父节点的细分树里），
+	// 这里必须走同一个章节 md 解析入口，否则子章节的请求永远停在"markdown 还不存在"。
+	if !fileExists(chapterMarkdownFor(proj, base)) {
 		return "章节 markdown 还不存在"
 	}
 	// 继续跑的对象是已有的那条会话：没有转录就没什么可接着的。
@@ -636,7 +751,7 @@ func (r *Runner) retryPrecondition(proj, role, base string) string {
 			return "这一章还没有提交产物"
 		}
 	}
-	if role == "continue" && !fileExists(filepath.Join(proj, "work", "temp", "conv_"+base, "work")) {
+	if role == "continue" && !fileExists(filepath.Join(proj, "work", "temp", "conv_"+base, "work")) && childNodeWork(proj, base) == "" {
 		return "这一章的工作区已经不在了"
 	}
 	if classNameOfFile(filepath.Join(proj, "style")) == "" {

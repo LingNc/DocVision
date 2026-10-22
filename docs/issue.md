@@ -1193,4 +1193,15 @@ user 轮
   2. 只撤**转换行首**的那个 ↻；核对子行的 ↻ 是另一种动作（重新核对：产物一字不动、只换核对会话），保留。行上的「待重试」徽标不受影响——它只是状态提示，不可点。
   3. 要重试某一章：点它的转换会话（或从动作条）→ 顶栏动作条的「重试这一章」。
   验证：`npm test` 195 绿；重建 dist 后 `grep` 产物里只剩核对那一个 `chapter-retry icon-btn`；`go build ./...` 通过。
-
+- T201（用户反馈，2026-10-22）：**"输出乱码"的会话要重跑，重跑报错；有的会话能截断、有的不行（比如核对会话）**。用户原话：*"还有就是，有的转换会话我看输出乱码了，我想让他重跑一下。但是会报错。有的会话截断消息可以，但是有的会话不行。比如核对会话"*；随后又发来一条核对会话的截图：*"就是这个核对会话没办法重新转换"*，报错 *"失败：这一章还没有提交产物，无法重新核对（先重试转换）"*。
+  1. **乱码的真身**：转储项目里所有转录（不碰 `.trash`），10 条会话里有同一种形态的 assistant 消息——正文开头是 `{"paths":["skills://","skills://plugins"]}` 加一段伪 `bash -lc …`，接着"I can convert …, but the chapter workspace tools are not available in this session"。这些消息**没有 `tool_calls`**（工具一次都没执行），随后两轮"必须 submit"提醒收到的又是个逐字不同的同类垃圾，最后 `run_end ok=true`——章节没有产物，用户看到的就是"输出乱码，也不报错"。同一批用量行显示厂商只报了 2472/2530 prompt tokens，而本地估算 8031/8056（约三分之一），说明请求在网关那一侧被改小了：模型拿不到完整的系统提示与工具表，于是自说自话。
+  2. **核对会话为什么不能重跑**：`chapterProductsFor`（Go 侧）与 `chapterTexIn`（预览服务一侧）只认 `work/chapters/` 下的产物。子章节在父节点整合之前，产物在**父工作区的临时树**里（`work/temp/conv_<根章>/work/<父章>/children/<子>.tex`，或自己那一支的 `node/result|integrated-stage/<子>.tex`），于是一个转换完、核对也跑完了的子章节，点「重新核对」只会得到"这一章还没有提交产物"。派发端 `retryPrecondition` 还有两处只认顶层：`chapters/<章>.md`（子章节没有这个文件）与 `work/temp/conv_<章>/work`（子章节的工作区在细分树里）——就算队列收了也会一直停在"章节 markdown 还不存在"。
+  3. **"从某条记录之后继续核对"只认 `work/sessions/`**：`/api/retry` 的 `from` 分支拿 `filepath.Base(req.Path)` 去 `work/sessions/` 找源转录，子章节的核对转录在 `node/sessions/` 里，必然 404"源转录不存在"；`truncateCheckerTranscript` 同样写死目录。页面上子章节的核对会话还只给 ⤫、不给 ⤓（`canForkFrom` 一刀切挡掉所有子章节）。
+  4. **子章节重跑没有输入时是一条 404 死路**：输入（`_subdivision/<id>/input/chapter.md`）已经不在、父节点又没整合，"重试这一章"只回一条"先在父章节里重跑这一支"。
+  改：
+  - `internal/session`：新增 `LooksLikeToolProseLeak`——给过工具却没有 `tool_calls`、正文里出现这种伪调用签名时，**直接判这次 Run 失败**并写清"厂商报 prompt N / 本地估算 M"，不再把同一条垃圾重收两遍后"正常结束"；`observePromptSize` 在厂商报的 prompt 小于本地估算 60% 时**每个会话告警一次**（以前 ratio 被夹到 ≥1，这种异常完全静默）。
+  - 产物与 md 解析补齐递归口径：`chapterProductsFor`/`chapterTexIn` 追加临时树（暂存池 `children/`、节点 `result|integrated-stage/`，跳过 `children.tmp`）；`findChildMarkdown`/`childMarkdownInTempTree` 认真正的输入 `…/<id>/input/chapter.md`（以前靠核对视图里那份同名副本碰巧命中），并**按层级链整段比对**（同一棵细分树里不同层级都有 `child_04`，只比目录名会串到 child_01 底下那一支）。
+  - `retryPrecondition` 用同一个章节 md 解析入口、工作区判据也认细分树里的节点，子章节的请求不会再卡在"markdown/工作区还不存在"。
+  - 「从某条记录之后继续」接受**项目内相对路径/绝对路径**的源转录（`transcriptUnderWork` 解析），队列里记相对路径；`truncateCheckerTranscript` 同口径解析源（仍写在 `work/sessions/checker_<章>.try<N>.jsonl`，`recheckChapter` 按同一位置读）。页面上子章节的**核对会话也给 ⤓**（重新核对不动产物，源转录也能在细分树里解析），转换会话维持只给 ⤫；fork 请求改发会话完整路径（以前只发文件名）。
+  - 子章节要重跑但输入已不在、父章节还有转录时，**改为排队父章节的「继续跑」**并在回执里说明（父节点重新驱动时会重新细分、重建这一支的输入）；父章节连转录都没有才 404。
+  验证：`TestLooksLikeToolProseLeak`、`TestTruncateCheckerTranscriptFromSubtree`（相对/绝对路径都行、`work/` 之外拒）、`TestChapterProductsForChildInTempTree`（暂存池、`integrated-stage`、`children.tmp` 不算）、`TestRetryPreconditionChildInTempTree`、`TestFindChildMarkdownDepthExact`、`TestChildMarkdownInTempTreeDepthExact`、`TestPostRetryCheckerChildFromSubtreeTranscript`、`TestPostRetryChildConvertWithoutInputQueuesParent`、`TestPostRetryChildConvertWithoutParentTranscript`；`go test ./...` 全绿，`npm test` 199 绿，重建 dist；真实项目上只读复核 `chapter_014_child_04`/`chapter_014_child_06`/`chapter_007_child_02` 三支：产物与 md 都指向各自那一支、`retryPrecondition` 放行；临时副本上用 HTTP 复核两条路径（子章节有临时树产物 → 200 排队重新核对；子章节输入不在、父有转录 → 200 改排父章节 continue）。

@@ -11736,6 +11736,7 @@
   }
   function canForkFrom(s) {
     if (!canCutFrom(s)) return false;
+    if (s.chapterRole === "checker") return true;
     return String(s.chapterId || "").indexOf("_child_") < 0;
   }
   function forkPrompt(line, s) {
@@ -11755,7 +11756,9 @@
       chapter: vector ? "" : String(s.chapterId),
       role: vector ? "vector" : s.chapterRole === "checker" ? "checker" : "continue",
       reason: source + "回滚到 #" + line,
-      extra: { from: Number(line), path: String(s.name || "") }
+      // T201：发**完整路径**（会话的 Path 是绝对路径）。子章节的转录在父工作区的
+      // 细分树里，只发文件名服务端只能去 work/sessions/ 找，必然报"源转录不存在"。
+      extra: { from: Number(line), path: String(s.path || s.name || "") }
     };
   }
   function dropFromLine(line, source) {

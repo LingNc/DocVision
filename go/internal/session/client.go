@@ -822,6 +822,40 @@ var (
 	leakedToolXMLTagLine = regexp.MustCompile(`^\s*</?(?:tool_call|function|parameter)(?:[=\s][^>\n]*)?>?\s*$`)
 )
 
+// leakedToolProseMarkers 是"模型把工具调用写成了正文、并声称工作区能力不可用"
+// 这一种退化回复的特征词。
+//
+// 真实案例（多个章节的转换会话，同一形态反复出现）：assistant 的 content 开头
+// 是 `{"paths":["skills://","skills://plugins"]}`，后面跟着 `bash -lc ls -la …`
+// 这样的伪调用，再跟一段"I can convert …, but the chapter workspace tools are
+// not available in this session"。这些消息**没有** tool_calls，所以工具一次都
+// 没执行，模型只是在自我复述另一个工具体系的格式；随后的两轮"必须 submit"提醒
+// 收到的是逐字相同的垃圾文本，会话最后"正常结束"、章节却没有产物——用户看到
+// 的就是"输出乱码了，但也不报错"。
+//
+// 同时这类回复的厂商 prompt_tokens 只有本地估算的三分之一左右，说明请求在网关
+// 那一侧被换掉了（模型没拿到我们的系统提示与工具表）。所以这里不重试同一条请求
+// （重试只会再写一份同样的垃圾、白烧钱），直接判这次 Run 失败，让人看见并重跑。
+var leakedToolProseMarkers = []string{
+	"skills://",
+	"tools are not available in this session",
+	"workspace tools are not available",
+}
+
+// LooksLikeToolProseLeak 判断一条**没有 tool_calls** 的正文是不是这种退化回复。
+// 只在确实给过工具（useTools && len(tools) > 0）时才有意义，调用方负责这个前提。
+func LooksLikeToolProseLeak(text string) bool {
+	low := strings.ToLower(text)
+	for _, m := range leakedToolProseMarkers {
+		if strings.Contains(low, strings.ToLower(m)) {
+			return true
+		}
+	}
+	// `{"paths":[...]}` 开头的伪调用（模型自己的另一种工具体系）：只有同时提到
+	// skills:// 才算，避免把真的在讨论 JSON 的正文误判——上面已经覆盖。
+	return false
+}
+
 // StripLeakedToolXML 清掉模型随 tool_calls 一起写进 content 的原始
 // XML 协议残片（T32）。真实调用已走 tool_calls 通道正常执行，正文里
 // 重复的残片只会污染回放历史与转录 UI，实测形态：

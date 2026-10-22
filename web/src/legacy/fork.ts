@@ -30,9 +30,14 @@ export function canCutFrom(s: any): boolean {
 
 /* 能不能从这一条 fork（⤓ = 截断 + 开一条新尝试接着跑）：比截断窄一档——递归
  * 子章节的"接着跑"要父节点的整合上下文，单给子章节排 continue/checker 到不了
- * 前置条件，所以子章节只给就地截断，跑起来走「继续跑父章节」（T196）。 */
+ * 前置条件，所以子章节只给就地截断，跑起来走「继续跑父章节」（T196）。
+ *
+ * T201：**核对会话例外**——重新核对一个字节的产物都不动，产物在不在细分树里都
+ * 找得到（`chapterProductsFor`），源转录也可以在细分树里（服务端按路径解析），
+ * 所以子章节的核对会话照样能「从某条记录之后继续核对」。 */
 export function canForkFrom(s: any): boolean {
   if (!canCutFrom(s)) return false
+  if (s.chapterRole === 'checker') return true
   return String(s.chapterId || '').indexOf('_child_') < 0
 }
 
@@ -55,6 +60,8 @@ export function forkRequestOf(s: any, line: number, source: string): ForkRequest
     chapter: vector ? '' : String(s.chapterId),
     role: vector ? 'vector' : s.chapterRole === 'checker' ? 'checker' : 'continue',
     reason: source + '回滚到 #' + line,
-    extra: { from: Number(line), path: String(s.name || '') },
+    // T201：发**完整路径**（会话的 Path 是绝对路径）。子章节的转录在父工作区的
+    // 细分树里，只发文件名服务端只能去 work/sessions/ 找，必然报"源转录不存在"。
+    extra: { from: Number(line), path: String(s.path || s.name || '') },
   }
 }

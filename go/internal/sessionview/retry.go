@@ -142,6 +142,40 @@ func (v *viewerServer) projectWorkspace(project string) (string, bool) {
 	return abs, true
 }
 
+// hasChapterTranscript 判断这一章有没有转换记录（顶层在 work/sessions/，递归子章节在
+// 父工作区的细分树里）。
+func hasChapterTranscript(projDir, base string) bool {
+	if m, _ := filepath.Glob(filepath.Join(projDir, "work", "sessions", "convert_"+base+"*.jsonl")); len(m) > 0 {
+		return true
+	}
+	m, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "*", "work", "_subdivision", "*", "node", "sessions", "convert_"+base+"*.jsonl"))
+	return len(m) > 0
+}
+
+// queueParentContinue 把"子章节要重跑但没有输入"翻译成父章节的一次「继续跑」：
+// 父节点重新驱动时会重新细分、重建这一支的输入，之后这一支才有东西可跑。
+func (v *viewerServer) queueParentContinue(w http.ResponseWriter, project, parent, child string) {
+	projDir, ok := v.projectWorkspace(project)
+	if !ok {
+		http.Error(w, "项目不存在", http.StatusNotFound)
+		return
+	}
+	path, err := retryq.Queue(projDir, retryq.Request{
+		Project: project, Chapter: parent, Role: "continue",
+		Reason: "子章节 " + child + " 的输入已不存在（网页重试）", Source: "web",
+	})
+	if err != nil {
+		http.Error(w, "写入重试队列失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok": true, "chapter": parent, "project": project, "role": "continue",
+		"queued": filepath.Base(path), "parent": true,
+		"note": "子章节 " + child + " 的输入已经不在了（父节点既没整合、也没有临时树），单独重跑这一支没有输入可用；" +
+			"已改为排队父章节 " + parent + " 的「继续跑」——父节点重新驱动时会重新细分并重建这一支，跑起来后这一支按磁盘上的转录续跑",
+	})
+}
+
 func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 	if !v.allowRetry {
 		http.Error(w, "重试入口已关闭（docvision sessions 用 --no-retry 启动的）", http.StatusForbidden)
@@ -194,7 +228,18 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 				// 的东西，父节点等齐后拿新结果重新整合。
 				childOK = true
 			default:
-				http.Error(w, "找不到子章节 "+base+" 的输入（父节点 "+parent+" 既没有整合，也没有正在跑它的临时树），先在父章节里重跑这一支", http.StatusNotFound)
+				// T201：子章节的输入（父节点细分树里的 chapter.md）已经不存在，
+				// 而父章节又还没整合——单独重跑这一支没有输入可用。以前这里是一
+				// 条 404 死路（用户点「重试这一章」只拿到错误），现在改成**排队父
+				// 章节的「继续跑」**：父节点重新驱动时会重新细分并重建这一支的输入。
+				// 父章节连转录都没有时才真的没救，那就照实说。
+				if role == "convert" || role == "" {
+					if hasChapterTranscript(projDir, parent) {
+						v.queueParentContinue(w, req.Project, parent, base)
+						return
+					}
+				}
+				http.Error(w, "找不到子章节 "+base+" 的输入（父节点 "+parent+" 既没有整合、也没有临时树，而且父章节还没有转换记录），先在父章节里跑一次转换", http.StatusNotFound)
 				return
 			}
 		}
@@ -232,19 +277,31 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "只有「继续跑」与「重新核对」可以指定从第几条记录开始", http.StatusBadRequest)
 			return
 		}
-		srcName = filepath.Base(strings.TrimSpace(req.Path))
-		if !transcriptNameRe.MatchString(srcName) {
-			http.Error(w, "源转录不合法（要 work/sessions/ 下的 *.jsonl）", http.StatusBadRequest)
+		// T201：源转录不一定在 work/sessions/ 下——递归子章节的转换/核对转录在
+		// 父工作区的细分树里（`work/temp/conv_<父>/work/_subdivision/…/node/sessions/`）。
+		// 页面发的是会话的完整路径，这里按 `<项目>/work/` 之下来解析；老调用发裸
+		// 文件名时仍走 work/sessions/。
+		full, terr := transcriptUnderWork(projDir, req.Path)
+		if terr != nil {
+			code := http.StatusBadRequest
+			if errors.Is(terr, errTranscriptMissing) {
+				code = http.StatusNotFound
+			}
+			http.Error(w, "源转录不可用: "+terr.Error(), code)
 			return
 		}
-		lines, err := countTranscriptLines(filepath.Join(projDir, "work", "sessions", srcName))
+		srcName = filepath.Base(full)
+		if rel, rerr := filepath.Rel(projDir, full); rerr == nil {
+			srcName = filepath.ToSlash(rel)
+		}
+		lines, err := countTranscriptLines(full)
 		if err != nil {
 			http.Error(w, "源转录不存在: "+srcName, http.StatusNotFound)
 			return
 		}
 		// 源转录必须正好是这一章对应角色的那一条（convert_<章>[.tryN].jsonl /
 		// checker_<章>[.tryN].jsonl）——别让切点落在别的章节或别的角色上。
-		stem := transcriptBaseStem(srcName)
+		stem := transcriptBaseStem(filepath.Base(srcName))
 		want, kind := "convert_"+base, "转换"
 		if role == "checker" {
 			want, kind = "checker_"+base, "核对"
@@ -482,7 +539,54 @@ func chapterTexIn(projDir, base string) string {
 		}
 		return nil
 	})
+	if found == "" {
+		return tempProductFor(projDir, base)
+	}
 	return found
+}
+
+// tempProductFor 在父节点的临时细分树里找子章节**已提交**的产物（T201）。
+//
+// 子章节转换完、父节点还没整合时，产物不在 work/chapters 下，而在父工作区里：
+// 父节点收集孩子产物的暂存池 <父工作区>/<父章>/children/<子>.tex，或自己那一支
+// 节点的 <节点>/result（或 integrated-stage）/<子>.tex。以前只认 work/chapters，
+// 于是页面上点「重新核对」只会看到"这一章还没有提交产物"，而产物就在临时树里。
+func tempProductFor(projDir, base string) string {
+	if i := strings.Index(base, "_child_"); i > 0 {
+		roots, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "conv_"+base[:i]+"*", "work"))
+		for _, root := range roots {
+			if p := filepath.Join(root, base[:i], "children", base+".tex"); pathExists(p) {
+				return p
+			}
+		}
+	}
+	roots, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "conv_*", "work", "_subdivision"))
+	for _, root := range roots {
+		found := ""
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || found != "" {
+				return nil
+			}
+			if d.IsDir() {
+				if d.Name() == "children.tmp" {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if d.Name() != base+".tex" {
+				return nil
+			}
+			switch filepath.Base(filepath.Dir(p)) {
+			case "result", "integrated-stage":
+				found = p
+			}
+			return nil
+		})
+		if found != "" {
+			return found
+		}
+	}
+	return ""
 }
 
 var errTranscriptMissing = errors.New("转录不存在")
@@ -771,15 +875,62 @@ func (v *viewerServer) serveTruncate(w http.ResponseWriter, r *http.Request) {
 // childMarkdownInTempTree 在父节点的临时细分树里递归找子章节的 md。`filepath.Glob`
 // 的 `**` 只匹配一个路径段，深层文件查不到——那样会把"父节点正在跑这一支"误判成
 // "找不到输入"直接 404，所以这里用 WalkDir。
+// childIDRe 认章节 id 里的层级编号（child_04、child_02…）。
+var childIDRe = regexp.MustCompile(`child_\d+`)
+
+// childInputRel 是子章节输入 md 相对**根章节**细分树根的路径（T201）：
+// 顶层子章节是 `child_04/input/chapter.md`，嵌套时中间要经过父节点自己的
+// `node/work/_subdivision`。用它做整段比较而不是"文件名匹配"——同一棵细分树里
+// 不同层级都可能出现 `child_04`，只比名字会把 child_01 底下的 child_04 认成
+// 顶层的 child_04（真数据里就这样认错过）。
+func childInputRel(base string) string {
+	i := strings.Index(base, "_child_")
+	if i < 0 {
+		return ""
+	}
+	ids := childIDRe.FindAllString(base[i+1:], -1)
+	if len(ids) == 0 {
+		return ""
+	}
+	parts := []string{}
+	for k, id := range ids {
+		if k > 0 {
+			parts = append(parts, "node", "work", "_subdivision")
+		}
+		parts = append(parts, id)
+	}
+	parts = append(parts, "input", "chapter.md")
+	return strings.Join(parts, "/")
+}
+
 func childMarkdownInTempTree(projDir, parent, base string) bool {
-	roots, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "conv_"+parent+"*", "work", "_subdivision"))
+	// 走**根章节**的细分树：嵌套子章节的输入在父节点自己的
+	// `node/work/_subdivision` 底下，只按 parent 拼路径找不到（T201）。
+	rootChapter := parent
+	if i := strings.Index(base, "_child_"); i > 0 {
+		rootChapter = base[:i]
+	}
+	roots, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "conv_"+rootChapter+"*", "work", "_subdivision"))
+	want := childInputRel(base)
 	for _, root := range roots {
 		found := false
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil || found {
 				return nil
 			}
-			if !d.IsDir() && d.Name() == base+".md" {
+			if d.IsDir() {
+				return nil
+			}
+			// ① 父节点细分这一支时写的输入 `…/<id>/input/chapter.md`（按整段相对
+			//    路径比，避免把更深层的同名 child_04 认成这一支）；
+			// ② 兼容核对视图里留下的 `<章>.md` 副本。
+			if want != "" {
+				if rel, rerr := filepath.Rel(root, p); rerr == nil && filepath.ToSlash(rel) == want {
+					found = true
+					return nil
+				}
+			}
+			if d.Name() == base+".md" {
 				found = true
 			}
 			return nil

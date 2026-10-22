@@ -46,8 +46,10 @@ describe('能不能 fork', () => {
     expect(canCutFrom(conv())).toBe(true)
     expect(canCutFrom(conv({ live: true }))).toBe(false)
     expect(canCutFrom({ project: 'book', stage: 'assemble' })).toBe(false)
-    // fork 仍不给子章节：单独给子章节排 continue/checker 到不了前置条件。
-    expect(canForkFrom(conv({ chapterId: 'chapter_004_child_01_child_02', chapterRole: 'checker' }))).toBe(false)
+    // 转换的 fork 仍不给子章节：单独给子章节排 continue 到不了前置条件。
+    expect(canForkFrom(conv({ chapterId: 'chapter_004_child_01' }))).toBe(false)
+    // T201：核对的 fork 给子章节——重新核对不动产物，源转录也能在细分树里解析。
+    expect(canForkFrom(conv({ chapterId: 'chapter_004_child_01_child_02', chapterRole: 'checker' }))).toBe(true)
   })
 
   it('行号必须是正数（没有可截断的点就不发请求）', () => {
@@ -57,6 +59,17 @@ describe('能不能 fork', () => {
 })
 
 describe('确认文案', () => {
+  it('T201：fork 请求带完整路径（子章节的转录在细分树里，只发文件名找不到）', () => {
+    const child = conv({
+      chapterId: 'chapter_004_child_01', chapterRole: 'checker',
+      path: '/root/book/work/temp/conv_chapter_004/work/_subdivision/child_01/node/sessions/checker_chapter_004_child_01.jsonl',
+      name: 'checker_chapter_004_child_01.jsonl',
+    })
+    expect(forkRequestOf(child, 40, '轨迹')!.extra.path).toContain('/node/sessions/checker_')
+    // 老调用（没有 path）仍退回文件名，服务端按 work/sessions/ 解析。
+    expect(forkRequestOf(conv(), 12, '对话')!.extra.path).toBe('convert_chapter_002.jsonl')
+  })
+
   it('转换说清"后面会丢、原记录保留"', () => {
     expect(forkPrompt(9, conv())).toContain('丢掉')
     expect(forkPrompt(9, conv())).toContain('保留')

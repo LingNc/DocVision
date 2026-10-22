@@ -260,7 +260,9 @@ func TestPostRetryFromRecord(t *testing.T) {
 	}
 	pending := retryq.Pending(proj)
 	// File.Path 是队列文件自己的路径，请求里的 Path 在 Request 上（名字撞了）。
-	if len(pending) != 1 || pending[0].From != 2 || pending[0].Request.Path != "convert_chapter_002.jsonl" {
+	// T201：队列里记项目内相对路径（子章节的转录在细分树里，裸文件名找不到）；
+	// latex 侧按 <项目>/work/ 之下解析，两种写法都认。
+	if len(pending) != 1 || pending[0].Request.From != 2 || pending[0].Request.Path != "work/sessions/convert_chapter_002.jsonl" {
 		t.Fatalf("队列 = %+v", pending)
 	}
 }
@@ -341,8 +343,10 @@ func TestPostRetryCheckerFromRecord(t *testing.T) {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	pending := retryq.Pending(proj)
-	if len(pending) != 1 || pending[0].Role != "checker" || pending[0].From != 2 ||
-		pending[0].Request.Path != "checker_chapter_002.try2.jsonl" {
+	// T201：队列里记**项目内相对路径**（以前只有裸文件名，子章节在细分树里的
+	// 转录因此找不到）；latex 侧两种写法都认。
+	if len(pending) != 1 || pending[0].Request.Role != "checker" || pending[0].Request.From != 2 ||
+		pending[0].Request.Path != "work/sessions/checker_chapter_002.try2.jsonl" {
 		t.Fatalf("队列 = %+v", pending)
 	}
 }

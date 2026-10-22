@@ -2242,3 +2242,14 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 查盘：那 14 条是 `work/rounds/<章>/journal-try1.jsonl`——P55 工作区快照的"转录行号 → commit"日志（内容只有 `{"line":N,"commit":"…"}`），项目里正好 14 章有快照，与方块数一致；它跟会话毫无关系，只是扩展名也是 `.jsonl`。76 会话那个组是清理脚本的整目录备份 `<项目名>_记录_20261020_0737/`（先备份再删的产物），整份工程副本被当作独立项目扫了进来。
 - 改：`sessionview` 新增 `skipScanDir(p, name)`（主扫描与附加根扫描共用的唯一判据）——`media`、`.git`、`*.git`（`work/rounds/<章>/repo.git` 是裸仓库）、`work/rounds`（限定父目录是 `work`，免得误吞名叫 rounds 的书）、`cleanBackupRe`（`_记录_<8位日期>_<4位时刻>` 结尾）整棵跳过。
 - 验证：`TestScanSkipsRoundsJournalsAndCleanBackups`（真转录留、快照日志/裸仓库/备份副本都不出现）、`TestSkipScanDir`（规则边界）；`go test ./...` 全绿；真实输出根 `sessions --list` 1005 条、`journal-try` 命中 0、无 `_记录_` 组。
+
+### T201 · 乱码会话、子章节的产物/输入/转录解析、核对会话的"从记录继续"（2026-10-22）
+
+- 用户三连问：*"有的转换会话我看输出乱码了，我想让他重跑一下。但是会报错。有的会话截断消息可以，但是有的会话不行。比如核对会话"*，紧接着是核对会话的截图 *"就是这个核对会话没办法重新转换"* + *"失败：这一章还没有提交产物，无法重新核对（先重试转换）"*。
+- **乱码是"模型把工具调用写成正文"**：转储项目里全部转录（跳过 `.trash`）后发现 10 条会话有同一种形态——assistant 的正文以 `{"paths":["skills://","skills://plugins"]}` 开头，跟着伪 `bash -lc …`，再声明"the chapter workspace tools are not available in this session"。这些消息**没有 `tool_calls`**（工具一次都没执行），后面两轮"必须 submit"提醒收到的是逐字不同的同类垃圾，最后 `run_end ok=true`、章节没有产物。同批用量行：厂商只报 2472/2530 prompt tokens，本地估算 8031/8056（约三分之一）——请求在网关那侧被改小了，模型拿不到完整系统提示与工具表。以前 `observePromptSize` 把 ratio 夹到 ≥1，这种异常完全静默；`remindSubmit` 只会再问两遍。
+- **子章节产物在临时树里**：`chapterProductsFor`（Go）与 `chapterTexIn`（预览服务）只认 `work/chapters/`。父节点整合前，子章节产物在 `work/temp/conv_<根章>/work/<父章>/children/<子>.tex` 或自己那一支的 `node/result|integrated-stage/<子>.tex`。真数据里 `chapter_014_child_04` 转换完、核对也跑完了（135 条消息），点「重新核对」只得到"这一章还没有提交产物"。
+- **子章节输入的真身是 `input/chapter.md`**：`findChildMarkdown`/`childMarkdownInTempTree` 只找 `<章>.md`，真数据里能命中纯属侥幸——细分树里只有核对视图那份同名副本，视图一清就"找不到章节 markdown"。而且只比文件名会串层级：`chapter_014_child_04` 被认成 child_01 底下那一支的 child_04（真数据里就这样认错过，md 指到了 put 错的输入）。
+- **"从记录继续"写死 `work/sessions/`**：`/api/retry` 的 `from` 分支拿 `filepath.Base(req.Path)` 去 `work/sessions/` 找；`truncateCheckerTranscript` 同样。子章节的核对转录在 `node/sessions/`，于是截断（就地改，`/api/truncate` 走的是 `transcriptUnderWork`）能成、⤓ 从记录继续一律 404。页面上 `canForkFrom` 又对所有 `_child_` 一刀切，子章节的核对会话连 ⤓ 都不出现。fork 请求只发文件名，也是同一个坑。
+- **子章节重跑没有输入是死路**：输入不在、父节点没整合 → 404"先在父章节里重跑这一支"，用户点"重试"什么也不会发生。
+- 改：`session.LooksLikeToolProseLeak` + Run 里直接判失败（写清厂商 prompt 与本地估算）+ `observePromptSize` 每会话一次告警；产物/md 解析补齐临时树并按层级链整段比对；`retryPrecondition` 走同一 md 解析、工作区判据认细分树节点；`from` 分支用 `transcriptUnderWork` 解析并按相对路径入队、`truncateCheckerTranscript` 同口径；`canForkFrom` 对核对放开子章节、fork 请求发完整路径；子章节输入不在时改为排队父章节 continue。
+- 验证：新增 9 个 Go 测试（检测、临时树产物、前置条件、层级精确、子章节核对 from、子章节 continue 回退、父无转录仍 404）+ 2 个 web 断言（子章节核对可 fork、fork 带完整路径）；`go test ./...` 全绿、`npm test` 199 绿、重建 dist；真实项目只读复核三支子章节的产物/md/前置条件；临时副本上用 HTTP 复核"有临时树产物 → 200 排队重新核对"与"输入不在、父有转录 → 200 改排父 continue"。
