@@ -4,6 +4,9 @@
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
 ## [Unreleased]
+### Fixed
+- **`--debug` 下看不到复盘会话（P58 实测）**：日志级别是 `Info=0 / Debug=1 / Trace=2`，判定"是否落盘复盘转录"时写成了 `>= 4`，等于**永不落盘**——用户在 `--debug` 下跑，`work/rescue/log.jsonl` 有审计记录、网页「错误处理」里却一条会话都没有。改为 `>= logger.LevelDebug`，并加测试钉住（Debug 落盘 / Info 不落盘 / `latex.rescue.keep_records: true` 落盘）。**要重编译重启才生效**：此前产生的复盘只留在审计日志里，没有对话可看。
+
 ### Added
 
 - **未提交收尾的复盘会话（P58）**：会话"跑完但没 submit"时不再直接在同一会话里喊"你还没提交"——先起一条**只读的复盘会话**（新阶段「错误处理」，排在侧栏最后）看那条会话自己的转录，用代码算好的事实（轮次、`finish_reason`、正文把工具调用写成正文的行号、最长重复块）+ 按行号翻窗的工具判断，得出三种结论之一：`retry`（会话还健康，照常提醒，可带一句 hint）、`truncate`（已退化，从最后一个干净轮次截断继续，走与页面 ⤓ 同一条重试队列通路）、`fail`（救不回来，按失败收尾）。复盘会话没有任何可写挂载、只能给结论，最坏后果是一次截断（源转录与归档尝试都留着）；同一次尝试最多复盘 `latex.rescue.max_per_attempt`（默认 2）次。配置分两处：`latex.rescue.*`（开关 `enabled`、`max_per_attempt`、`keep_records`、模型指针 `model`）与 `latex.sessions.rescue`（会话调优：`context_limit` 默认 128K、`max_tool_rounds` 默认 12、其余继承 `sessions.checker`，输出预算与 checker 同配置）；模型条目 `models.rescue` 写在 `models.checker` 下面、`extends: checker`（限制不写在模型条目上），配置版本 20→22。工具：`read_session`（按物理行号取窗口，默认末尾 12 条、单条 2000 字符，`max_chars: 0` 看全文，`from` 往前翻）、`session_stats`（代码算好的事实，不做判断）、`submit`（verdict/from/reason/hint）。默认只写一行审计记录 `work/rescue/log.jsonl`，`--debug` 或 `latex.rescue.keep_records: true` 才把复盘转录落盘。

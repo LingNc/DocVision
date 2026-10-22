@@ -2337,3 +2337,5 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 **测试**：`p58_rescue_test.go`（尾窗/`from`/全文、超长截断提示、`session_stats` 点名正文工具调用与 `finish_reason`、`submit` 校验与终态、排队请求的 `role=continue`/`From`/`Path`、预算默认 2 次、模型回退链）、`p58_rescue_stage_test.go`（预览阶段归组与排序）。`go test ./internal/...` 全绿。
 
 **已知边界**：递归子章节的**转换**会话被判 `truncate` 时，`role=continue` 会被 T211 的分流折成"继续跑父章节"（`From` 丢弃）——子章节退化目前靠父章节续跑兜底，没有按行号精确截断；子章节的**核对**会话不受影响（`role=checker` 的 `From` 一路可用）。`--debug` 强制落盘复盘转录（`rescueKeepRecords` 读 logger level ≥ 4）。
+
+**上线后第一轮观察（同日 17:17 重启后）**：`work/rescue/log.jsonl` 四条——17:19 `chapter_023_child_02_child_02` 判 `retry`（理由：转换与目标检查都已完成、只差 submit，属"正常提示"那一路，随后确实发了那条提醒）、17:31 两个 `child_04` 子章节判 `fail`（模型两次自述"workspace tools 不可用"；其转录显示 15:01 第一次响应就是 `finish=stop`、正文与工具调用皆空，属厂商空响应后的退化，T205 的"只告警不判死"正是这条链的源头）、17:32 `child_04_child_03` 判 `truncate`（from=44）。**暴露两个问题**：① `--debug` 下复盘转录没有落盘（判定写成 `level >= 4`，而 Debug=1）→ 网页「错误处理」看不到会话，只有审计日志；已修并加测试；② 子章节判 `truncate` 时排出的 `role=continue` 被 T211 分流折成"父章节继续跑"（`req-…-chapter_023.json` 在队列里等章节锁），`From` 丢掉——子章节的精确截断仍缺，见 plan P58 的"已知边界"。

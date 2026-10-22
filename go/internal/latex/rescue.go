@@ -542,12 +542,15 @@ func (r *Runner) rescueReview(t rescueTarget, tid int) (rescueVerdict, bool) {
 	return v, true
 }
 
-// rescueKeepRecords：默认不存复盘转录，--debug / keep_session_records 才存。
+// rescueKeepRecords：默认不存复盘转录，--debug（logger 的 debug 级别）或
+// latex.rescue.keep_records: true 才存。日志级别是 Info=0 / Debug=1 / Trace=2，
+// 所以判定用 logger.LevelDebug —— 早先写成"≥4"等于永不落盘，用户在 --debug 下
+// 也看不到复盘会话（P58 实测踩到，已修）。
 func (r *Runner) rescueKeepRecords(tid int) bool {
 	if r.cfg.Latex.RescueKeepRecords() {
 		return true
 	}
-	return r.log != nil && r.log.Level() >= 4
+	return r.log != nil && r.log.Level() >= logger.LevelDebug
 }
 
 // rescueTranscriptPath 是复盘会话的转录落点（同一个项目里按章节+时间区分）。

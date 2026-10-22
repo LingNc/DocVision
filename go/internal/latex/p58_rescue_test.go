@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/logger"
 )
 
 // 造一条最小转录：两条正常消息，一条"把 submit 写成正文"的助手消息，末尾用量行。
@@ -228,4 +229,33 @@ func TestRescueSessionTuningInheritsChecker(t *testing.T) {
 	if got.ContextLimit != 262144 || got.MaxToolRounds != 20 || got.MaxTokens != 512 {
 		t.Fatalf("latex.sessions.rescue 的显式值应生效：%+v", got)
 	}
+}
+
+// P58：--debug（logger Debug 级别）必须让复盘转录落盘，否则网页里看不到
+// 「错误处理」下的复盘会话（早先按 level>=4 判，debug=1 永远不落盘）。
+func TestRescueKeepRecordsOnDebug(t *testing.T) {
+	cfg := &config.Config{}
+	r := &Runner{cfg: cfg, log: mustTestLogger(t, logger.LevelDebug)}
+	if !r.rescueKeepRecords(0) {
+		t.Fatal("--debug 下应落盘复盘转录")
+	}
+	r.log = mustTestLogger(t, logger.LevelInfo)
+	if r.rescueKeepRecords(0) {
+		t.Fatal("info 级别默认不落盘")
+	}
+	on := true
+	cfg.Latex.Rescue.KeepRecords = &on
+	if !r.rescueKeepRecords(0) {
+		t.Fatal("latex.rescue.keep_records=true 时应落盘")
+	}
+}
+
+func mustTestLogger(t *testing.T, level int) *logger.Logger {
+	t.Helper()
+	l, err := logger.NewLogger("", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.SetLevel(level)
+	return l
 }
