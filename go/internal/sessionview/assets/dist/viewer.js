@@ -7866,49 +7866,41 @@
       }
     });
   }
-  function requestChapterRetry(project, chapter, role = "convert", reason = "", extra = {}) {
-    return fetch("/api/retry", {
+  async function postJSON(url, body) {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, chapter, role, reason, ...extra })
-    }).then(async (res) => {
-      const text = await res.text();
-      if (!res.ok) throw new Error(text.trim() || "HTTP " + res.status);
-      return text ? JSON.parse(text) : {};
+      body: JSON.stringify(body)
     });
+    const text = (await res.text()).trim();
+    let data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
+    }
+    if (!res.ok) {
+      const reason = data && (data.error || data.message) || text || "HTTP " + res.status;
+      throw new Error(String(reason));
+    }
+    return data === null ? {} : data;
+  }
+  function requestChapterRetry(project, chapter, role = "convert", reason = "", extra = {}) {
+    return postJSON("/api/retry", { project, chapter, role, reason, ...extra });
   }
   function truncateSession(project, path, line) {
-    return fetch("/api/truncate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, path, line })
-    }).then(async (res) => {
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
-      return data;
-    });
+    return postJSON("/api/truncate", { project, path, line });
   }
   function dropSession(project, path) {
-    return fetch("/api/drop", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, path })
-    }).then(async (res) => {
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data && data.error || "HTTP " + res.status);
+    return postJSON("/api/drop", { project, path }).then((data) => {
       void refreshIndex();
       return data;
     });
   }
   function cancelChapterRetry(project, chapter, role = "convert", path = "") {
-    return fetch("/api/retry/cancel", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, chapter, role, path })
-    }).then(async (res) => {
-      const text = await res.text();
-      if (!res.ok) throw new Error(text.trim() || "HTTP " + res.status);
-      const data = text ? JSON.parse(text) : {};
+    return postJSON("/api/retry/cancel", { project, chapter, role, path }).then((data) => {
       void refreshIndex();
       return data;
     });

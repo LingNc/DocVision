@@ -9,6 +9,19 @@ import (
 	"mineru-tools/internal/session"
 )
 
+// checkerNoVerdict 报告这次核对失败的原因是"核对会话自己没给出结论"——模型把
+// submit 写成了正文（实测：`\submit{ "report": … }` 一整段行文本，finish=stop、
+// tool_calls 为空），或者连续 API 错误——而不是"章节有问题"。
+//
+// 为什么要单独认出来（T209）：这种失败被拿去喂反馈轮时，转换会话收到的
+// 是"checker 发现了问题：<其实是核对失败的原因>"，它能做的只有把同样的产物
+// 再交一遍，然后撞同一堵墙。实测一条核对连续 6 轮、每轮 2 次会话、每轮约 30 秒
+// 全部落在这个循环里，钱花了、结论一个字都没有。判定依据是**没有 submit 回执**
+// 这个事实，不是正文长什么样。
+func checkerNoVerdict(issues string) bool {
+	return strings.HasPrefix(issues, "checker 多次未能提交结论") || strings.HasPrefix(issues, "checker API failure")
+}
+
 // checkChapter reviews ONE converted chapter with its own minimal,
 // read-only session: the small text model gets exactly two files (the
 // chapter markdown and the submitted .tex) and one folder (that
@@ -169,7 +182,8 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 			chkState(rowStateRunning)
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 			_, runErr = sess.Run(session.RunOptions{
-				UserText: "You have NOT called submit yet. Re-read the chapter files if needed, then call submit with your verdict.",
+				// T209：同上——写成正文不算，必须真的发一次 submit 工具调用。
+				UserText: "You have NOT called submit yet. Use the `submit` TOOL (a real tool call with its JSON arguments — writing `submit` or `\\submit{...}` inside your reply text does nothing): re-read the chapter files if needed, then call submit with your verdict.",
 			})
 			release()
 		}

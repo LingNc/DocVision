@@ -1824,7 +1824,11 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		// 递归子节点与顶层同策略：先在本会话里打回，再由上面的换会话逻辑兜底。
 		r.log.LogWarning(tid, "[checker]", base, "递归节点首次核对未过:", issues)
 	}
-	for round := 0; !ok && round < rounds; round++ {
+	if !ok && checkerNoVerdict(issues) {
+		// T209：核对会话没给结论，不是章节的问题——喂反馈轮只会换来一次"再交一遍"。
+		r.log.LogWarning(tid, "[checker]", base, "核对会话没有给出结论，跳过反馈轮:", issues)
+	}
+	for round := 0; !ok && !checkerNoVerdict(issues) && round < rounds; round++ {
 		r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
 		r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
 		msg := "The checker reviewed your submitted chapter and found problems that must be fixed:\n" + issues +
@@ -2620,7 +2624,11 @@ func (r *Runner) remindSubmit(sess *session.Session, tid int, tag, label, submit
 	for remind := 0; remind < 2 && !submitted(); remind++ {
 		r.log.LogWarning(tid, tag, label, "会话结束但未提交，发送提交提醒")
 		release := r.acquireChapterSlot()
-		_, runErr := sess.Run(session.RunOptions{UserText: "You have NOT submitted yet — the result only counts after an explicit " + submitTool + " call. Call " + submitTool + " now (fix and compile first if something is still broken)."})
+		// T209：提醒里点名"要真的发一次工具调用"。实测模型会把这个动作**写成
+		// 正文**（`\submit{…}` / 裸 JSON 字符串，finish=stop、tool_calls 为空），
+		// 于是提醒发两遍、钱花了、会话还是没有提交——只重复"你还没提交"没有用，
+		// 得说清"写在正文里不算"。
+		_, runErr := sess.Run(session.RunOptions{UserText: "You have NOT submitted yet — nothing counts until you make a real `" + submitTool + "` TOOL CALL with its JSON arguments. Writing the call, its JSON, or `\\submit{...}` inside your reply text does nothing; use the tool itself. Call " + submitTool + " now (fix and compile first if something is still broken)."})
 		release()
 		if runErr != nil {
 			r.log.LogWarning(tid, tag, label, "提交提醒轮失败:", runErr)

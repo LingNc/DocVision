@@ -1240,3 +1240,11 @@ user 轮
   根因在页面：动作条上的按钮只是**打开确认条**（真正的请求在「确认」那一下发出），而 `actions.ts` 里那个 `watch(state.current.id)` 会在**任何**会话切换时清空 `pending`。重试一排队，视图就自动切到这次开出来的新尝试（T194 的行为），或者实时跟随切到别的会话——确认条被静默收走，用户看到的就是"点了没反应"。
   改：确认条记住这次针对谁（`legacy/actions.ts` 新增纯函数 `sameActionTarget`：同项目 + 同章节 + 同角色 = 同一件事，同一章的另一条尝试也算），会话切换时只有目标真的变了才收走；「重画 / 删除」针对当前这条会话本身，照旧一切换就收。
   验证：`web/tests/session-actions.spec.ts` 新增 3 条（同一章另一条尝试保留、换章/换角色/换项目收走、任一侧无目标不留），`npm test` 202 条全绿；`npm run build` 重新产出 `dist`。
+- T209（用户反馈，2026-10-22）：**核对会话卡在"写 submit 正文"的环路里，而且页面只显示「失败：HTTP 409」**。用户原话：*"并且我无法重试或者删除这个checker_4的这个核对会话，因为这个核对会话有问题"*（截图：`核对 · chapter_004`，顶部回执「失败：HTTP 409」）。
+  1. **删除被拒 409**：该核对转录正被写入（实测 mtime 距现在 13 秒，`.partial` 也在），服务端的保护是对的——但页面把 `http.Error` 写的**纯文本**原因丢了：`dropSession`/`truncateSession` 一律 `res.json()` 解析，纯文本解析失败就退回 `'HTTP 409'`，用户既看不到原因也不知道要等。
+  2. **重试被拒 400**：父节点的产物要先过核对才从暂存区晋级（`placeChapterFiles`），核对没过时 `work/chapters/<章>.tex` 根本不存在，而「重新核对」要求"已提交产物"——鸡生蛋死锁：核对越给不出结论，越没有可重核的对象。
+  3. **环路根因**：核对会话的回复是**把 submit 写成了正文**（转录里实测 `\submit{ "report": { "status": "issues", … } }` 一整段，`finish_reason=stop`、`tool_calls` 为空）。`checkChapterAt` 两次拿不到结论后返回失败文本，`convertChapterNode` 把它当"核对发现了问题"喂回转换会话；转换会话能做的只有把同样的产物再交一遍，于是撞同一堵墙——实测 13:31→13:48 每 30–100 秒一轮，6 轮 × 2 次会话全落在这个模式上，结论一个字都没有。
+  改：① `web/src/data.ts` 统一 `postJSON` 写入口：先按文本读，能解析就解析，失败时优先用服务端那句话（"这条会话可能还在写（90 秒内有更新），等它停下来再删"）；
+  ② 提交提醒点名"要真的发一次工具调用"——`remindSubmit` 与 checker 的提醒都写明"把调用/JSON 写进正文不算（`\submit{...}` 也一样），要用工具本身"；
+  ③ `checkerNoVerdict()`：核对失败若是"会话自己没给结论"（无 submit 回执 / API 错误），**跳过反馈轮**——那串文本不是章节问题，喂回去只会换来一次同样产物的再提交。判定依据是"没有 submit 回执"这个事实，不是正文长什么样（与 T205 的口径一致）。
+  验证：`TestCheckerNoVerdict`（3 种"没结论"文本识别、3 种真结论不误判）、`npm test` 202 绿、`dist` 重出；`go test ./internal/latex ./internal/session ./internal/sessionview ./internal/config` 全绿。

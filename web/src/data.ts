@@ -262,6 +262,29 @@ export function bootData(): void {
 // 转换阶段的安全点消费它；没在跑就留到下次启动。
 /* role：convert（重转，开新尝试）/ checker（只重新核对）/ continue（接着干）。
    from > 0 = 从这条记录之后继续：历史截到这一行，后面丢掉，开一个新尝试。 */
+/* postJSON 是写入口的统一调用（T209）：服务端用 http.Error 写的失败原因是
+ * **纯文本**（"这条会话可能还在写（90 秒内有更新），等它停下来再删"），而调用方
+ * 一律按 JSON 解析——解析失败就退回 `HTTP 409`，等于把唯一有用的那句话丢掉，
+ * 用户只看到"失败：HTTP 409"，既不知道原因也不知道怎么办。这里先按文本读，
+ * 能解析成 JSON 就用 JSON，失败时优先用服务端那句话。 */
+async function postJSON(url: string, body: unknown): Promise<any> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const text = (await res.text()).trim()
+  let data: any = {}
+  if (text) {
+    try { data = JSON.parse(text) } catch { data = null }
+  }
+  if (!res.ok) {
+    const reason = (data && (data.error || data.message)) || text || 'HTTP ' + res.status
+    throw new Error(String(reason))
+  }
+  return data === null ? {} : data
+}
+
 export function requestChapterRetry(
   project: string,
   chapter: string,
@@ -269,15 +292,7 @@ export function requestChapterRetry(
   reason = '',
   extra: { from?: number; path?: string } = {},
 ): Promise<any> {
-  return fetch('/api/retry', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project, chapter, role, reason, ...extra }),
-  }).then(async (res) => {
-    const text = await res.text()
-    if (!res.ok) throw new Error(text.trim() || 'HTTP ' + res.status)
-    return text ? JSON.parse(text) : {}
-  })
+  return postJSON('/api/retry', { project, chapter, role, reason, ...extra })
 }
 
 // chapterPendingRetry 报告某项目的某章是否已经在重试队列里（侧栏/详情栏据此
@@ -286,25 +301,11 @@ export function requestChapterRetry(
 // truncateSession 就地截断一条转录到第 line 行（含），返回 null 表示成功；
 // 服务端会先把整份原文件备份到 work/sessions/.trash/ 下。
 export function truncateSession(project: string, path: string, line: number): Promise<any> {
-  return fetch('/api/truncate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project, path, line }),
-  }).then(async (res) => {
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status)
-    return data
-  })
+  return postJSON('/api/truncate', { project, path, line })
 }
 
 export function dropSession(project: string, path: string): Promise<any> {
-  return fetch('/api/drop', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project, path }),
-  }).then(async (res) => {
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error((data && data.error) || 'HTTP ' + res.status)
+  return postJSON('/api/drop', { project, path }).then((data) => {
     void refreshIndex()
     return data
   })
@@ -313,14 +314,7 @@ export function dropSession(project: string, path: string): Promise<any> {
 /* cancelChapterRetry 撤销一条还没被消费的排队请求（P56）：误触的出口。返回
    撤掉了几条——0 表示 latex 已经把它消费了，这时只能去「历史」里删那条新会话。 */
 export function cancelChapterRetry(project: string, chapter: string, role = 'convert', path = ''): Promise<any> {
-  return fetch('/api/retry/cancel', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project, chapter, role, path }),
-  }).then(async (res) => {
-    const text = await res.text()
-    if (!res.ok) throw new Error(text.trim() || 'HTTP ' + res.status)
-    const data = text ? JSON.parse(text) : {}
+  return postJSON('/api/retry/cancel', { project, chapter, role, path }).then((data) => {
     void refreshIndex()
     return data
   })
