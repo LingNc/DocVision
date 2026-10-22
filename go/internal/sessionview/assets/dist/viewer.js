@@ -7300,6 +7300,7 @@
   function newerAttempt(cur, next) {
     if (!cur) return next;
     if (!next) return cur;
+    if (!!cur.archived !== !!next.archived) return cur.archived ? next : cur;
     const a = Number(cur.chapterAttempt) || 1;
     const b = Number(next.chapterAttempt) || 1;
     if (a !== b) return b > a ? next : cur;
@@ -7327,7 +7328,7 @@
       pin.node[pin.role] = pin.session;
       const other = pin.role === "convert" ? "checker" : "convert";
       const want = Number(pin.session.chapterAttempt) || 1;
-      const peers = (byRole[pin.node.id + "|" + other] || []).filter((x) => (Number(x.chapterAttempt) || 1) === want);
+      const peers = (byRole[pin.node.id + "|" + other] || []).filter((x) => (Number(x.chapterAttempt) || 1) === want && !!x.archived === !!pin.session.archived);
       if (peers.length) {
         pin.node[other] = peers.reduce((a, b) => newerAttempt(a, b));
       } else if (other === "checker") {
@@ -7338,6 +7339,10 @@
       const node = byId[id];
       if (!node.convert || !node.checker) return;
       if (pinId && node.checker.id === pinId) return;
+      if (!!node.checker.archived !== !!node.convert.archived) {
+        node.checker = null;
+        return;
+      }
       const c = Number(node.convert.chapterAttempt) || 1;
       const k = Number(node.checker.chapterAttempt) || 1;
       if (k < c) node.checker = null;
@@ -7590,7 +7595,10 @@
     return out;
   }
   function chainMemberTag(s) {
-    if (s && s.chapterId) return (s.archived ? "旧" : "") + "#" + (Number(s.chapterAttempt) || 1);
+    if (s && s.chapterId) {
+      const tag = (s.chapterRole === "checker" ? "核对" : "") + "#" + (Number(s.chapterAttempt) || 1);
+      return (s.archived ? "旧" : "") + tag;
+    }
     return img2textMemberTag(s && s.id);
   }
   function findSession(id) {

@@ -418,6 +418,12 @@ export interface ChapterTreeNode {
 function newerAttempt(cur: any, next: any): any {
   if (!cur) return next
   if (!next) return cur
+  // 归档里的转录来自**更早一次根尝试**（`work/attempts/<根章>/tryN/`）。根章重来
+  // 一次时它的子章节尝试号又从 1 数起，所以归档里的 `convert_<子章>.try2` 尝试号
+  // 比工作树里这一次的 `convert_<子章>`（#1）还大——只比号会把"上一代的通过结果"
+  // 当成这一章的现状显示（用户看到"下面都通过了、却还有一个在排队"）。先比是不是
+  // 归档，工作树那条永远优先；两边同为归档/同时活体时才比尝试号。
+  if (!!cur.archived !== !!next.archived) return cur.archived ? next : cur
   const a = Number(cur.chapterAttempt) || 1
   const b = Number(next.chapterAttempt) || 1
   if (a !== b) return b > a ? next : cur
@@ -457,7 +463,8 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     pin.node[pin.role] = pin.session
     const other: 'convert' | 'checker' = pin.role === 'convert' ? 'checker' : 'convert'
     const want = Number(pin.session.chapterAttempt) || 1
-    const peers = (byRole[pin.node.id + '|' + other] || []).filter((x: any) => (Number(x.chapterAttempt) || 1) === want)
+    const peers = (byRole[pin.node.id + '|' + other] || []).filter((x: any) =>
+      (Number(x.chapterAttempt) || 1) === want && !!x.archived === !!pin.session.archived)
     if (peers.length) {
       pin.node[other] = peers.reduce((a: any, b: any) => newerAttempt(a, b))
     } else if (other === 'checker') {
@@ -475,6 +482,9 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     const node = byId[id]
     if (!node.convert || !node.checker) return
     if (pinId && node.checker.id === pinId) return // 你正在看的那条核对会话不能被藏起来
+    // 世代也不同时（一边在归档、一边在工作树）结论同样不成立：那是上一次根尝试
+    // 的核对，挂在这一次的转换上会让人以为"这次已经核对通过了"。
+    if (!!node.checker.archived !== !!node.convert.archived) { node.checker = null; return }
     const c = Number(node.convert.chapterAttempt) || 1
     const k = Number(node.checker.chapterAttempt) || 1
     if (k < c) node.checker = null
@@ -846,7 +856,13 @@ export function dedupeChapterAttempts(items: any[]): any[] {
 export function chainMemberTag(s: any): string {
   // 归档里的同号尝试来自更早一次父尝试（内容不同），标「旧」才不会和这一次的
   // 同号行混成"重复行"。
-  if (s && s.chapterId) return (s.archived ? '旧' : '') + '#' + (Number(s.chapterAttempt) || 1)
+  // P58 观察：只给 `#N` 时，同一条链里会出现两个 `#1`（转换 #1 + 核对 #1），
+  // 加了"重新核对"以后又出现 `#1/#2` 对不上号——用户看不出哪一行是核对。
+  // 核对行标「核对#N」，转换行仍是 `#N`；归档前缀照旧。
+  if (s && s.chapterId) {
+    const tag = (s.chapterRole === 'checker' ? '核对' : '') + '#' + (Number(s.chapterAttempt) || 1)
+    return (s.archived ? '旧' : '') + tag
+  }
   return img2textMemberTag(s && s.id)
 }
 

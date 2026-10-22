@@ -363,3 +363,37 @@ describe('同号转录：真副本去重，不同对话都留着', () => {
     expect(dedupeChapterAttempts([a, b, chk, other]).length).toBe(4)
   })
 })
+
+/* P58 观察（2026-10-22）：根章重来一次后，它的子章节尝试号又从 1 数起，
+ * 归档里上一代的 `convert_<子章>.try2` 号比工作树里这一次的 #1 还大。
+ * 只比号会把上一代的「已通过」当成这一章的现状：树上显示通过、实际还在排队。
+ */
+describe('归档世代不抢工作树的行（P58）', () => {
+  const mkA = (id: string, att: number, archived: boolean, role = 'convert') => ({
+    id, chapterId: 'chapter_004_child_03', chapterRole: role, chapterAttempt: att,
+    archived, mtime: '2026-10-22T11:53:00Z', chapterActivity: '', live: false,
+  })
+
+  it('工作树里的 #1 优先于归档里的 #2', () => {
+    const live = mkA('a/work/temp/conv_chapter_004/work/_subdivision/child_03/node/sessions/convert_chapter_004_child_03.jsonl', 1, false)
+    const old = mkA('a/work/attempts/chapter_004/try1/work/_subdivision/child_03/node/sessions/convert_chapter_004_child_03.try2.jsonl', 2, true)
+    const nodes = buildChapterTree([live, old])
+    const node = nodes.find((n: any) => n.id === 'chapter_004_child_03')!
+    expect(node.convert!.id).toBe(live.id)
+  })
+
+  it('上一代的核对结论不会挂到这一代的转换上', () => {
+    const live = mkA('a/live/convert_chapter_004_child_03.jsonl', 1, false)
+    const oldConv = mkA('a/work/attempts/chapter_004/try1/convert_chapter_004_child_03.try2.jsonl', 2, true)
+    const oldChk = mkA('a/work/attempts/chapter_004/try1/checker_chapter_004_child_03.try2.jsonl', 2, true, 'checker')
+    const node = buildChapterTree([live, oldConv, oldChk]).find((n: any) => n.id === 'chapter_004_child_03')!
+    expect(node.convert!.id).toBe(live.id)
+    expect(node.checker).toBeNull()
+  })
+
+  it('历史标签：核对行带「核对」前缀，归档仍是「旧」', () => {
+    expect(chainMemberTag(mkA('a/checker_chapter_004_child_03.jsonl', 2, false, 'checker'))).toBe('核对#2')
+    expect(chainMemberTag(mkA('a/checker_chapter_004_child_03.jsonl', 1, true, 'checker'))).toBe('旧核对#1')
+    expect(chainMemberTag(mkA('a/convert_chapter_004_child_03.jsonl', 1, false))).toBe('#1')
+  })
+})
