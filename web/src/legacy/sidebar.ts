@@ -879,8 +879,20 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
     if ((s.project || projectOf(s.id)) !== proj) return
     members.push(s)
   })
-  if (members.length < 2) return null
-  return orderChapterChain(members)
+  // P59：链只列**当前这条会话所在角色**的历史——
+  //  · 转换会话下面 = 这一章的各次转换（不看核对）；
+  //  · 核对会话下面 = **挂在同一个转换名下**的各次核对（不看转换）。
+  // 锚点就是转换转录名（`chapterAnchor`）；没有锚点的老转录退回"同章同类"。
+  const wantRole = self.chapterRole === 'checker' ? 'checker' : 'convert'
+  let rows = members.filter((m: any) => (m.chapterRole === 'checker' ? 'checker' : 'convert') === wantRole)
+  if (wantRole === 'checker' && self.chapterAnchor) {
+    rows = rows.filter((m: any) => m.chapterAnchor === self.chapterAnchor)
+  }
+  if (rows.length < 2) return null
+  // 转换：各次尝试（新 → 旧）；核对：同一转换名下的各次核对（新 → 旧）。
+  return wantRole === 'checker'
+    ? rows.slice().sort((a: any, b: any) => mtimeMs(b) - mtimeMs(a))
+    : sortChainMembers(rows)
 }
 
 /* P59：历史列表以转换会话为行首锚点——每个转换尝试一行，紧跟它**锚定的**核对

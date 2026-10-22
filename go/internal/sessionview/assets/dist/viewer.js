@@ -7611,53 +7611,13 @@
       if ((s.project || projectOf(s.id)) !== proj) return;
       members.push(s);
     });
-    if (members.length < 2) return null;
-    return orderChapterChain(members);
-  }
-  function orderChapterChain(members) {
-    const converts = (members || []).filter((s) => s && s.chapterRole !== "checker").sort(convertChainOrder);
-    const checkers = (members || []).filter((s) => s && s.chapterRole === "checker");
-    const owned = {};
-    const leftover = [];
-    converts.forEach((c) => {
-      owned[String(c.id)] = [];
-    });
-    checkers.forEach((k) => {
-      const anchor = String(k && k.chapterAnchor || "");
-      if (anchor) {
-        const hit = converts.find((c) => convertBasename(c) === anchor && !!c.archived === !!k.archived);
-        if (hit) {
-          owned[String(hit.id)].push(k);
-          return;
-        }
-        leftover.push(k);
-        return;
-      }
-      const sameGen = converts.filter((c) => !!c.archived === !!k.archived);
-      const older = sameGen.filter((c) => (Number(c.chapterAttempt) || 1) <= (Number(k.chapterAttempt) || 1));
-      const owner = (older.length ? older : sameGen).slice().sort(convertChainOrder)[0];
-      if (owner) owned[String(owner.id)].push(k);
-      else leftover.push(k);
-    });
-    const byThen = (a, b) => mtimeMs(b) - mtimeMs(a);
-    const out = [];
-    converts.forEach((c) => {
-      out.push(c);
-      owned[String(c.id)].sort(byThen).forEach((k) => out.push(k));
-    });
-    leftover.sort(byThen).forEach((k) => out.push(k));
-    return out;
-  }
-  function convertChainOrder(a, b) {
-    if (!!a.archived !== !!b.archived) return a.archived ? 1 : -1;
-    const aa = Number(a.chapterAttempt) || 1;
-    const ab = Number(b.chapterAttempt) || 1;
-    if (aa !== ab) return ab - aa;
-    const d = mtimeMs(b) - mtimeMs(a);
-    if (d) return d;
-    const ia = String(a && a.id || "");
-    const ib = String(b && b.id || "");
-    return ia < ib ? -1 : ia > ib ? 1 : 0;
+    const wantRole = self2.chapterRole === "checker" ? "checker" : "convert";
+    let rows = members.filter((m) => (m.chapterRole === "checker" ? "checker" : "convert") === wantRole);
+    if (wantRole === "checker" && self2.chapterAnchor) {
+      rows = rows.filter((m) => m.chapterAnchor === self2.chapterAnchor);
+    }
+    if (rows.length < 2) return null;
+    return wantRole === "checker" ? rows.slice().sort((a, b) => mtimeMs(b) - mtimeMs(a)) : sortChainMembers(rows);
   }
   function dedupeChapterAttempts(items) {
     const out = [];

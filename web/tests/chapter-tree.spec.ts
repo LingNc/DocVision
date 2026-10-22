@@ -88,16 +88,16 @@ describe('chapter attempt chain', () => {
     expect(chain![0].chapterAttempt).toBe(2)
   })
 
-  it('转换与核对混在一条链里（T194：点核对会话不会让列表只剩 #1）', () => {
+  it('历史按角色分开：转换会话下面只有转换，核对会话下面只有它核对的那次转换的核对', () => {
     const conv1 = mk('a/convert_chapter_042.jsonl', 1, '2026-10-19T10:00:00Z')
     const conv2 = mk('a/convert_chapter_042.try2.jsonl', 2, '2026-10-19T12:00:00Z')
-    const chk1 = { ...mk('a/checker_chapter_042.jsonl', 1, '2026-10-19T10:30:00Z'), chapterRole: 'checker' }
-    const sessions = [conv1, conv2, chk1]
-    // 从任一条进去看到的是同一份列表：两个角色都在，列表不随当前会话的角色变。
-    expect(chapterAttemptChain(sessions, conv2.id)!.length).toBe(3)
-    const fromChecker = chapterAttemptChain(sessions, chk1.id)!
-    expect(fromChecker.map((x: any) => x.id).sort()).toEqual([conv1.id, conv2.id, chk1.id].sort())
-    expect(fromChecker.map((x: any) => x.chapterRole).sort()).toEqual(['checker', 'convert', 'convert'])
+    const chk1 = { ...mk('a/checker_chapter_042.jsonl', 1, '2026-10-19T10:30:00Z'), chapterRole: 'checker', chapterAnchor: 'convert_chapter_042' }
+    const chk2 = { ...mk('a/checker_chapter_042.try2.jsonl', 2, '2026-10-19T11:30:00Z'), chapterRole: 'checker', chapterAnchor: 'convert_chapter_042' }
+    const sessions = [conv1, conv2, chk1, chk2]
+    // 转换会话的历史 = 各次转换（新 → 旧），核对不混进来。
+    expect(chapterAttemptChain(sessions, conv2.id)!.map((x: any) => x.id)).toEqual([conv2.id, conv1.id])
+    // 核对会话的历史 = 挂在同一个转换名下的各次核对（新 → 旧），转换不混进来。
+    expect(chapterAttemptChain(sessions, chk1.id)!.map((x: any) => x.id)).toEqual([chk2.id, chk1.id])
   })
 
   it('只尝试过一次 / 非章节会话不出链', () => {
@@ -447,20 +447,22 @@ describe('P59 核对按锚点挂在转换下面', () => {
     expect(buildChapterTree([c, other])[0].checker).toBeNull()
   })
 
-  it('历史：每个转换下面跟着它锚定的核对（新 → 旧）', () => {
-    const c1 = conv(1)
+  it('历史：转换会话只列转换，核对只列同一锚点下的核对', () => {
+    const c1 = { ...conv(1), mtime: '2026-10-22T09:00:00Z' }
     const c2 = conv(2)
     const k1 = chk(1, 'convert_chapter_042', '2026-10-22T10:10:00Z')
     const k2 = chk(2, 'convert_chapter_042.try2', '2026-10-22T12:10:00Z')
-    const chain = chapterAttemptChain([c1, c2, k1, k2], k2.id)!
-    expect(chain.map((s: any) => s.id)).toEqual([c2.id, k2.id, c1.id, k1.id])
+    expect(chapterAttemptChain([c1, c2, k1, k2], c2.id)!.map((s: any) => s.id)).toEqual([c2.id, c1.id])
+    // k2 只核对过 c2，所以它的历史里不该出现 k1（k1 核对的另一次转换）。
+    expect(chapterAttemptChain([c1, c2, k1, k2], k2.id)).toBeNull()
   })
 
-  it('旧转录没有锚点：仍按尝试号归组', () => {
+  it('旧转录没有锚点：树上退回按号配对，历史里只列同类', () => {
     const c = conv()
     const legacy = chk(1, '', '2026-10-22T10:30:00Z')
+    const legacy2 = chk(2, '', '2026-10-22T11:30:00Z')
     const node = buildChapterTree([c, legacy])[0]
     expect(node.checker!.id).toBe(legacy.id)
-    expect(chapterAttemptChain([c, legacy], legacy.id)!.map((s: any) => s.id)).toEqual([c.id, legacy.id])
+    expect(chapterAttemptChain([c, legacy, legacy2], legacy.id)!.map((s: any) => s.id)).toEqual([legacy2.id, legacy.id])
   })
 })
