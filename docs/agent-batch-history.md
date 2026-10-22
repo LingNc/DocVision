@@ -2267,3 +2267,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 现象与根因：核对提示词虽已写了"md 是 OCR 来的、看着奇怪去看原页"，但判据仍是"md 有、`.tex` 没有 = 缺内容"，开场又把 md 称作 "the source it was converted from"——于是核对会话拿 md 的差异当事实，报出原书根本没缺的东西，转换会话被逼着改坏正确内容。
 - 改（只两处措辞、不新增段落，净增约 30 词）：① md 那一条改成"a reference, not the truth. … where the page and the markdown disagree, the page wins and the .tex may follow it"；② "缺内容"那一类补 "confirmed on the original page, since a markdown-only gap proves nothing"。
 - 验证：`go test ./internal/prompts/` 绿；模板仍 27 行。
+
+### T204 · 核对会话的工具轮次随层级加宽（2026-10-22）
+
+- 用户截图 `ROUND BUDGET: 35 of 50 tool rounds used, 15 left`，要求：*"随着层级越高每层增加20轮吧，线性方法增加或者倍数增加，并且在配置文件中可以修改，这边默认是50"*。
+- 现状：所有层级的核对会话都是固定 50 轮。但父节点的核对要通读整棵子树（每个孩子都要过一遍），最里层只管自己那一片——父章节核对到 35/50 就被迫收尾，子树里几段内容根本没翻到。
+- 改：`sessions.checker.max_tool_rounds` 改指**最里层**的预算；往上每层 +`max_tool_rounds_per_level`（默认 20）；要倍数增长配 `max_tool_rounds_factor`（默认 1=纯线性，2=每层翻倍；per_level 写负数 = 只翻倍不另加）。公式 `rounds = base × factor^levels + per_level × levels`，levels = `maxChapterSplitDepth - depth`，上限 1000 轮。层级从章节 ID 数出来，不动调用链。
+- 验证：config 侧 `TestToolRoundsAtLevels` / `TestCheckerSessionDefaultsPerLevel`，latex 侧 `TestChapterDepthOf` / `TestCheckerRoundsScaleWithDepth` / `TestCheckerRoundsDoubling`；模板键面 parity 测试绿；`go test ./...` 全绿。

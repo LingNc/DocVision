@@ -1214,3 +1214,8 @@ user 轮
   1. 核对提示词原本已有一句"md 是 OCR 来的，看着奇怪就去看原页、不要报"，但整篇的判据仍是"md 有、`.tex` 没有 = 缺内容"，加上开场把 md 称作 "the source it was converted from"——核对会话于是拿 md 的差异当事实，报出原书根本没有的缺失。
   2. 按"少即是多"只在两处改措辞（各一句、不新增段落）：① md 那一条改成"a reference, not the truth … 原页与 md 不一致时以原页为准、`.tex` 可以跟着原页走"；② "缺内容"那一类补上"在原书页上确认过——只有 md 上的差异证明不了什么"。
   验证：`go test ./internal/prompts/` 绿（注册表 `MustMention`/`RetiredNames` 与模板守护测试不受影响）；模板 27 行、净增约 30 词。
+- T204（用户反馈，2026-10-22）：**核对会话的轮次应该随层级加宽**。用户原话：*"感觉需要随着层级越高每层增加20轮吧，线性方法增加或者倍数增加。并且在配置文件中可以修改。这边默认是50。最里面的向上一层增加 20 再一层增加 20或者 x2(50+20x2) 再一层也是+2 或者 x2(50+20x2x2)。"*（截图：`ROUND BUDGET: 35 of 50 tool rounds used, 15 left`）。
+  1. 现状所有层级的核对会话都是固定 50 轮，但父节点的核对要通读整棵子树（每个孩子的内容都要过一遍），最里层只管自己那一片——父章节核对到"35/50"就被迫收尾，子树里几段内容根本没翻到。
+  2. 设计：`sessions.checker.max_tool_rounds`（默认 50）**改指最里层**，往上每层加 `max_tool_rounds_per_level`（默认 20）——四层默认 110/90/70/50；想要倍数增长就配 `max_tool_rounds_factor`（1=纯线性，2=每层翻倍 50→100→200→400；`max_tool_rounds_per_level` 写负数 = 只翻倍不另加），公式 `rounds = max_tool_rounds × factor^层数 + per_level × 层数`，层数 = 最深一层（`maxChapterSplitDepth` = 3）− 本层，上限 1000 轮兜底。层级直接从章节 ID 数（`chapter_014_child_03_child_02` = 第 2 层），不需要新的调用链参数。
+  改：`SessionTuning` 增两个键 + `ToolRoundsAtLevels()`（[config.go](go/internal/config/config.go)）；`checkChapterAt` 建会话前按章节 ID 的层级调它（[checker.go](go/internal/latex/checker.go)），`chapterDepthOf` 放在 `chapter_subdivision.go`；两个配置模板与 `docs/config.md` 同步（没有新配置块，不动 config_version）。
+  验证：`TestToolRoundsAtLevels`（线性 50/70/90/110、翻倍 100/200/400、per_level 负数、base 0/负数保持、倍数上限兜底）、`TestCheckerSessionDefaultsPerLevel`（未配置时 checker 拿到 50+20/线性 110，convert 不受影响）、`TestChapterDepthOf`、`TestCheckerRoundsScaleWithDepth`（四层 110/90/70/50）、`TestCheckerRoundsDoubling`；`go test ./...` 全绿。

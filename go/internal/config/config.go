@@ -183,6 +183,14 @@ type SessionTuning struct {
 	// through a local prune; older ones become a text placeholder.
 	// 0 = default 3, negative = keep every image.
 	KeepImages int `yaml:"keep_images"`
+	// MaxToolRoundsPerLevel widens the tool-round budget by this much for every
+	// level ABOVE the deepest one (T204): the parent of a subdivided chapter
+	// has to integrate all its children, the deepest child only its own slice.
+	// 0 = default 20 (checker only), negative = no per-level widening.
+	MaxToolRoundsPerLevel int `yaml:"max_tool_rounds_per_level"`
+	// MaxToolRoundsFactor multiplies the budget per level instead of adding
+	// (T204). 0 or 1 = pure linear growth; 2 doubles it per level.
+	MaxToolRoundsFactor float64 `yaml:"max_tool_rounds_factor"`
 }
 
 // LatexCompileConfig controls the LaTeX toolchain used to compile and
@@ -1655,6 +1663,46 @@ func (c *Config) ResolveImageEstimate(name string) EstimateConfig {
 // config does not say otherwise (it does NOT inherit convert's rounds).
 const checkerDefaultToolRounds = 50
 
+// checkerDefaultRoundsPerLevel is how much the checker's tool-round budget
+// widens per recursion level above the deepest one (T204).
+const checkerDefaultRoundsPerLevel = 20
+
+// checkerToolRoundsCeil caps the widened budget so a stray factor cannot turn
+// one review session into a day of tool calls.
+const checkerToolRoundsCeil = 1000
+
+// ToolRoundsAtLevels widens this session's tool-round budget by "how many
+// levels above the deepest one" this node sits (T204): a chapter that had to be
+// subdivided into children must integrate and cross-check all of them, while the
+// deepest child only covers its own slice — so the parent gets more rounds:
+//
+//	rounds = max_tool_rounds * factor^levels + max_tool_rounds_per_level * levels
+//
+// levels <= 0 (the deepest node) returns the base value unchanged, and a
+// non-positive base (0 = unlimited, negative = no cap) is never rewritten.
+func (s SessionTuning) ToolRoundsAtLevels(levels int) int {
+	base := s.MaxToolRounds
+	if base <= 0 || levels <= 0 {
+		return base
+	}
+	perLevel := s.MaxToolRoundsPerLevel
+	factor := s.MaxToolRoundsFactor
+	if factor < 1 {
+		factor = 1
+	}
+	out := float64(base)
+	for i := 0; i < levels; i++ {
+		out *= factor
+	}
+	if perLevel > 0 {
+		out += float64(perLevel * levels)
+	}
+	if out > checkerToolRoundsCeil {
+		return checkerToolRoundsCeil
+	}
+	return int(out)
+}
+
 // LatexSession returns the tuning block for a named latex session
 // (drawing / style / chapter / convert / checker / dedupe), applying the shared
 // defaults. The checker block is the exception: any field it leaves at
@@ -1682,6 +1730,14 @@ func (c *Config) LatexSession(name string) SessionTuning {
 		// = 真正不限制，照旧生效。
 		if explicitRounds == 0 {
 			s.MaxToolRounds = checkerDefaultToolRounds
+		}
+		// T204：按层加宽（父节点要整合整棵子树，最里层只管自己那一片）。
+		// 显式负数 = 不加宽；factor 未写 = 1（纯线性）。
+		if s.MaxToolRoundsPerLevel == 0 {
+			s.MaxToolRoundsPerLevel = checkerDefaultRoundsPerLevel
+		}
+		if s.MaxToolRoundsFactor == 0 {
+			s.MaxToolRoundsFactor = 1
 		}
 	default:
 		s = SessionTuning{}

@@ -178,7 +178,9 @@ latex:
       context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
     checker:                     # 每章核对会话（只读两个文件 + 一个文件夹；工具只有 read_file/grep/submit）
-      max_tool_rounds: 50       # 默认 50 轮（不继承 convert 的 128；其余字段仍继承 convert）
+      max_tool_rounds: 50       # 最里层的轮次（不继承 convert 的 128；其余字段仍继承 convert）
+      max_tool_rounds_per_level: 20  # T204：每往上一层加 20 轮（父节点要通读整棵子树；负 = 只翻倍不加）
+      max_tool_rounds_factor: 1      # T204：按层翻倍的倍数（1=纯线性；2=每层翻倍，50→100→200→400）
 
 # img2text 基础图片转文本流程的独立配置（模型用 models: 注册表代号）
 img2text:

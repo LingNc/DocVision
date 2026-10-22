@@ -70,6 +70,14 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 	client := r.clientFor(checkerName)
 	modelCfg := r.modelOf(checkerName)
 	tuning := r.cfg.LatexSession("checker")
+	// T204：轮次预算随层级加宽——这一章要是被细分过，父节点的核对要通读整棵
+	// 子树（每个孩子的内容都要过一遍），最里层只管自己那一片。层级从章节 ID 数
+	// 出来（`chapter_014_child_03_child_02` = 第 2 层），离最深一层还有几层就加
+	// 几档；配置见 `sessions.checker.max_tool_rounds_per_level` /
+	// `max_tool_rounds_factor`（默认 50 + 20×层数）。
+	if levels := maxChapterSplitDepth - chapterDepthOf(base); levels > 0 {
+		tuning.MaxToolRounds = tuning.ToolRoundsAtLevels(levels)
+	}
 
 	checkMounts := []Mount{{Name: "check", Dir: view}}
 	// view_pdf 还要能打开原书 part（source:）与刚才挂进来的产物页。

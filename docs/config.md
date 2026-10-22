@@ -95,7 +95,9 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.max_images` | 模型/平台单次请求允许携带的图片数；0=不限制。超过时会话在请求前把最旧图片替换成可重新查看的文字提示 | 0（不限制） |
 | `models.<条目>.max_concurrency` | 该模型**同时在途的会话数**上限（T179）；0=不限制。键是**实际下发的模型名**：转换、核对、样式修复即便配成不同条目，只要最终落到同一个模型上就共用这一个额度（同模型的多条目取最小值）。阶段并发决定开几个 worker，这一项决定几个 worker 能同时跟同一个模型说话——想限制真正打到厂商那边的请求数就配它，而不是把两个阶段的上限相加 | 0（不限制） |
 | `latex.level` | LaTeX 档位（2=图片矢量化，1=全书转换） | 2 |
-| `latex.sessions.{drawing,style,chapter,convert,checker,dedupe}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数），显式写 -1 才是无限 | 0（不限制；checker 50） |
+| `latex.sessions.{drawing,style,chapter,convert,checker,dedupe}.*.max_tool_rounds` | 会话工具轮数上限；**代码无内置默认，省略即 0 = 不限制**（随附模板示例写 128）。checker 是唯一例外：不写就是 **50**（不继承 convert 的轮数，它是**最里层**的基数，往上每层按 `max_tool_rounds_per_level` 加宽，T204），显式写 -1 才是无限 | 0（不限制；checker 50） |
+| `latex.sessions.checker.max_tool_rounds_per_level` | **核对会话按层加宽轮次（T204）**：每往上一层（离最深一层更远）加这么多轮——父节点的核对要通读整棵子树，最里层只管自己那一片。负数=不加宽（只想按倍数走时用它） | 20 |
+| `latex.sessions.checker.max_tool_rounds_factor` | **核对会话按层翻倍（T204）**：轮次 = `max_tool_rounds × factor^层数 + per_level × 层数`（层数 = 最深一层 − 本层）。1=纯线性；2=每层翻倍（50→100→200→400）。上限 1000 轮兜底 | 1 |
 | `latex.sessions.*.context_limit` | 会话上下文窗口（tokens）；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值 | 0（不限制） |
 | `latex.sessions.*.max_tokens` | 会话单次请求最大输出；0=会话侧不设上限；如果模型也配置正值，实际使用两者中较小值。**这是"思考 + 正文"的总预算**，不是正文长度——开着思考的模型配 8192 会把预算全花在思考上、正文为空（会话因此以空回复失败）；这类模型建议 **≥32768**。被截断且无正文时代码会翻倍重试一次（受窗口约束）并告警（随附模板示例写 drawing/style 131072、dedupe 65536、img2text 65536） | 16384（style 32768） |
 | `latex.sessions.*.keep_images` | 本地历史裁剪策略，不是平台图片上限；上下文裁剪时保留最近多少条带图消息。平台上限请配置 `models.<name>.max_images` | 3 |

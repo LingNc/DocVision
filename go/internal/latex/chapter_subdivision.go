@@ -137,3 +137,9 @@ func validateChapterSubdivisions(children []ChapterSubdivision, totalLines int) 
 func chapterSubrange(lines []string, r ChapterSubdivision) string {
 	return strings.Join(lines[r.StartLine-1:r.EndLine], "\n")
 }
+
+// chapterDepthOf 数一个章节 ID 的递归层数：`chapter_014` = 0，
+// `chapter_014_child_04` = 1，`chapter_014_child_03_child_02` = 2（T204）。
+func chapterDepthOf(base string) int {
+	return strings.Count(base, "_child_")
+}
