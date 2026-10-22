@@ -1199,7 +1199,7 @@ user 轮
   3. **"从某条记录之后继续核对"只认 `work/sessions/`**：`/api/retry` 的 `from` 分支拿 `filepath.Base(req.Path)` 去 `work/sessions/` 找源转录，子章节的核对转录在 `node/sessions/` 里，必然 404"源转录不存在"；`truncateCheckerTranscript` 同样写死目录。页面上子章节的核对会话还只给 ⤫、不给 ⤓（`canForkFrom` 一刀切挡掉所有子章节）。
   4. **子章节重跑没有输入时是一条 404 死路**：输入（`_subdivision/<id>/input/chapter.md`）已经不在、父节点又没整合，"重试这一章"只回一条"先在父章节里重跑这一支"。
   改：
-  - `internal/session`：新增 `LooksLikeToolProseLeak`——给过工具却没有 `tool_calls`、正文里出现这种伪调用签名时，**直接判这次 Run 失败**并写清"厂商报 prompt N / 本地估算 M"，不再把同一条垃圾重收两遍后"正常结束"；`observePromptSize` 在厂商报的 prompt 小于本地估算 60% 时**每个会话告警一次**（以前 ratio 被夹到 ≥1，这种异常完全静默）。
+  - `internal/session`：新增 `LooksLikeToolProseLeak`——给过工具却没有 `tool_calls`、正文里出现这种伪调用签名时给一条 warning（带"厂商报 prompt N / 本地估算 M"）。**T205 复盘时撤掉了"直接判 Run 失败"与"prompt < 本地估算 60% 单独告警"两处**：前者是按正文特征替用户决定会话失败，后者在计数口径不同的厂商上会误报。
   - 产物与 md 解析补齐递归口径：`chapterProductsFor`/`chapterTexIn` 追加临时树（暂存池 `children/`、节点 `result|integrated-stage/`，跳过 `children.tmp`）；`findChildMarkdown`/`childMarkdownInTempTree` 认真正的输入 `…/<id>/input/chapter.md`（以前靠核对视图里那份同名副本碰巧命中），并**按层级链整段比对**（同一棵细分树里不同层级都有 `child_04`，只比目录名会串到 child_01 底下那一支）。
   - `retryPrecondition` 用同一个章节 md 解析入口、工作区判据也认细分树里的节点，子章节的请求不会再卡在"markdown/工作区还不存在"。
   - 「从某条记录之后继续」接受**项目内相对路径/绝对路径**的源转录（`transcriptUnderWork` 解析），队列里记相对路径；`truncateCheckerTranscript` 同口径解析源（仍写在 `work/sessions/checker_<章>.try<N>.jsonl`，`recheckChapter` 按同一位置读）。页面上子章节的**核对会话也给 ⤓**（重新核对不动产物，源转录也能在细分树里解析），转换会话维持只给 ⤫；fork 请求改发会话完整路径（以前只发文件名）。
@@ -1219,3 +1219,8 @@ user 轮
   2. 设计：`sessions.checker.max_tool_rounds`（默认 50）**改指最里层**，往上每层加 `max_tool_rounds_per_level`（默认 20）——四层默认 110/90/70/50；想要倍数增长就配 `max_tool_rounds_factor`（1=纯线性，2=每层翻倍 50→100→200→400；`max_tool_rounds_per_level` 写负数 = 只翻倍不另加），公式 `rounds = max_tool_rounds × factor^层数 + per_level × 层数`，层数 = 最深一层（`maxChapterSplitDepth` = 3）− 本层，上限 1000 轮兜底。层级直接从章节 ID 数（`chapter_014_child_03_child_02` = 第 2 层），不需要新的调用链参数。
   改：`SessionTuning` 增两个键 + `ToolRoundsAtLevels()`（[config.go](go/internal/config/config.go)）；`checkChapterAt` 建会话前按章节 ID 的层级调它（[checker.go](go/internal/latex/checker.go)），`chapterDepthOf` 放在 `chapter_subdivision.go`；两个配置模板与 `docs/config.md` 同步（没有新配置块，不动 config_version）。
   验证：`TestToolRoundsAtLevels`（线性 50/70/90/110、翻倍 100/200/400、per_level 负数、base 0/负数保持、倍数上限兜底）、`TestCheckerSessionDefaultsPerLevel`（未配置时 checker 拿到 50+20/线性 110，convert 不受影响）、`TestChapterDepthOf`、`TestCheckerRoundsScaleWithDepth`（四层 110/90/70/50）、`TestCheckerRoundsDoubling`；`go test ./...` 全绿。
+- T205（用户反馈，2026-10-22）：**"这种按正文判失败的检查是必须要加的吗？确定不会误判吗？"**。用户原话：*"这个这边是怎么处理的？确定不会误判吗？是必须要加的吗？我感觉可以人工手动这边重试就行，因为有各种各样的错误。每个厂家都不一样。"*
+  1. T201 里我自己加了一条"命中退化形态就 return error"的判据（`useTools && 有工具 && 无 tool_calls && LooksLikeToolProseLeak(正文)`）——`skills://`、`tools are not available in this session` 这类字符串本身就是**软判据**：模型正常解释"这个会话里没有某个工具"、或引用别处的 URI 都会被一起打死；而异常形态不止这一种，"每个厂家都不一样"，用字符串替用户决定会话失败不成立。
+  2. 这条检查也**不是必须的**：真正要看的是"这一轮有没有产出"，用户看页面就知道，重试一次就好（T201 之前那次回执里的静默失败，价值在于**让人看见**，不在于替人判失败）。
+  改：撤掉判失败，改为**只记一条警告**（每会话一次，写出厂商报的 prompt tokens 与本地估算，便于判断是不是网关把请求改小了）；同时撤掉 T201 另加的"厂商 prompt < 本地估算 60% 就告警"——各家计数口径不同（有的不含工具定义），单看比例容易误报，这两个数字现在并到同一条警告里。运行行为回到 T201 之前：正文照常返回、"必须 submit"提醒照常走。
+  验证：`TestToolProseLeakWarnsButDoesNotFailRun`（退化回复 → Run 正常返回正文、不重发、只置位一次警告标记）、`TestToolProseLeakWarnsOnce`（普通正文不命中、退化形态命中）；`go test ./...` 全绿。

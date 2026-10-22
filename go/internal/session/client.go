@@ -844,6 +844,10 @@ var leakedToolProseMarkers = []string{
 
 // LooksLikeToolProseLeak 判断一条**没有 tool_calls** 的正文是不是这种退化回复。
 // 只在确实给过工具（useTools && len(tools) > 0）时才有意义，调用方负责这个前提。
+//
+// 它只是**诊断信号**（T205）：Run 命中时记一条带厂商 prompt 与本地估算的警告，
+// 不改运行行为。各家网关的异常形态千奇百怪，按正文特征判失败等于替用户做决定，
+// 而这些会话人工重试一次就好——"有没有产出"用户一眼就能看出来。
 func LooksLikeToolProseLeak(text string) bool {
 	low := strings.ToLower(text)
 	for _, m := range leakedToolProseMarkers {

@@ -2251,7 +2251,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **子章节输入的真身是 `input/chapter.md`**：`findChildMarkdown`/`childMarkdownInTempTree` 只找 `<章>.md`，真数据里能命中纯属侥幸——细分树里只有核对视图那份同名副本，视图一清就"找不到章节 markdown"。而且只比文件名会串层级：`chapter_014_child_04` 被认成 child_01 底下那一支的 child_04（真数据里就这样认错过，md 指到了 put 错的输入）。
 - **"从记录继续"写死 `work/sessions/`**：`/api/retry` 的 `from` 分支拿 `filepath.Base(req.Path)` 去 `work/sessions/` 找；`truncateCheckerTranscript` 同样。子章节的核对转录在 `node/sessions/`，于是截断（就地改，`/api/truncate` 走的是 `transcriptUnderWork`）能成、⤓ 从记录继续一律 404。页面上 `canForkFrom` 又对所有 `_child_` 一刀切，子章节的核对会话连 ⤓ 都不出现。fork 请求只发文件名，也是同一个坑。
 - **子章节重跑没有输入是死路**：输入不在、父节点没整合 → 404"先在父章节里重跑这一支"，用户点"重试"什么也不会发生。
-- 改：`session.LooksLikeToolProseLeak` + Run 里直接判失败（写清厂商 prompt 与本地估算）+ `observePromptSize` 每会话一次告警；产物/md 解析补齐临时树并按层级链整段比对；`retryPrecondition` 走同一 md 解析、工作区判据认细分树节点；`from` 分支用 `transcriptUnderWork` 解析并按相对路径入队、`truncateCheckerTranscript` 同口径；`canForkFrom` 对核对放开子章节、fork 请求发完整路径；子章节输入不在时改为排队父章节 continue。
+- 改：`session.LooksLikeToolProseLeak`（当时判失败、**T205 已撤成只告警**）；产物/md 解析补齐临时树并按层级链整段比对；`retryPrecondition` 走同一 md 解析、工作区判据认细分树节点；`from` 分支用 `transcriptUnderWork` 解析并按相对路径入队、`truncateCheckerTranscript` 同口径；`canForkFrom` 对核对放开子章节、fork 请求发完整路径；子章节输入不在时改为排队父章节 continue。
 - 验证：新增 9 个 Go 测试（检测、临时树产物、前置条件、层级精确、子章节核对 from、子章节 continue 回退、父无转录仍 404）+ 2 个 web 断言（子章节核对可 fork、fork 带完整路径）；`go test ./...` 全绿、`npm test` 199 绿、重建 dist；真实项目只读复核三支子章节的产物/md/前置条件；临时副本上用 HTTP 复核"有临时树产物 → 200 排队重新核对"与"输入不在、父有转录 → 200 改排父 continue"。
 
 ### T202 · 截断备份（`.trash`）不再被扫成会话（2026-10-22）
@@ -2274,3 +2274,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 现状：所有层级的核对会话都是固定 50 轮。但父节点的核对要通读整棵子树（每个孩子都要过一遍），最里层只管自己那一片——父章节核对到 35/50 就被迫收尾，子树里几段内容根本没翻到。
 - 改：`sessions.checker.max_tool_rounds` 改指**最里层**的预算；往上每层 +`max_tool_rounds_per_level`（默认 20）；要倍数增长配 `max_tool_rounds_factor`（默认 1=纯线性，2=每层翻倍；per_level 写负数 = 只翻倍不另加）。公式 `rounds = base × factor^levels + per_level × levels`，levels = `maxChapterSplitDepth - depth`，上限 1000 轮。层级从章节 ID 数出来，不动调用链。
 - 验证：config 侧 `TestToolRoundsAtLevels` / `TestCheckerSessionDefaultsPerLevel`，latex 侧 `TestChapterDepthOf` / `TestCheckerRoundsScaleWithDepth` / `TestCheckerRoundsDoubling`；模板键面 parity 测试绿；`go test ./...` 全绿。
+
+### T205 · 撤掉"按正文特征判失败"，改回只告警（2026-10-22）
+
+- 用户追问 T201 那条检测：*"确定不会误判吗？是必须要加的吗？我感觉可以人工手动这边重试就行，因为有各种各样的错误。每个厂家都不一样。"*
+- 复盘：那条判据是**软判据**——`skills://`、`tools are not available in this session` 只是字符串，模型正常解释"这个会话里没有某个工具"就会被打死，异常形态也不止这一种；而且判失败本来就不是必要的，"这一轮有没有产出"用户看页面就知道。T201 真正有价值的部分是**让人看见**，不是替人判失败。
+- 改：判失败撤掉，改成每会话一条警告（含厂商报的 prompt tokens 与本地估算）；T201 另加的"厂商 prompt < 本地估算 60% 告警"也撤掉（各家计数口径不同，单看比例会误报），两个数字并进同一条警告。行为回到 T201 之前。
+- 验证：`TestToolProseLeakWarnsButDoesNotFailRun`（退化回复正常返回、不重发、只置位一次）、`TestToolProseLeakWarnsOnce`；`go test ./...` 全绿。

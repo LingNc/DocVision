@@ -85,9 +85,9 @@ type Session struct {
 	lastPromptTokens int     // 最近一次厂商实测的 prompt_tokens
 	calibNum         float64 // 标定分子（实测）
 	calibDen         float64 // 标定分母（当时估算）
-	// smallPromptWarned 只让"厂商报的 prompt 远小于本地估算"告警一次（T201）：
-	// 每个会话都刷一遍会把终端淹掉，但完全不提又会让"模型说工具不可用"无从查起。
-	smallPromptWarned bool
+	// toolProseWarned 只让"工具调用被写成正文"的警告每个会话出现一次（T205）：
+	// 这种回复会连着来，刷屏没有意义；它只是诊断线索，不影响会话怎么跑。
+	toolProseWarned bool
 	// estBeforeRequest 是最近一次请求发出**之前**的本地估算，用它当
 	// 标定分母（响应回来后才知道厂商实测值）。
 	estBeforeRequest int
@@ -686,19 +686,24 @@ func (s *Session) run(opts RunOptions) (string, error) {
 
 		s.recordUsage(resp, toolRounds+1, "")
 
-		// T201：模型把工具调用写成了正文（content 形如 {"paths":["skills://",…]}
+		// T205：模型把工具调用写成了正文（content 形如 {"paths":["skills://",…]}
 		// 加伪 bash 调用），并声称"工作区工具在这个会话里不可用"。这种回复没有
-		// tool_calls，工具一次都不会执行；继续走"必须 submit"提醒只会把同一条
-		// 垃圾再收两遍（实测逐字相同），会话最后"正常结束"而章节没有产物——用户
-		// 看到的就是"输出乱码，也不报错"。直接判失败，让它可见、可重跑。
-		if useTools && len(s.tools) > 0 && len(choice.Message.ToolCalls) == 0 {
+		// tool_calls，工具一次都不会执行。这里**只记一条警告、不改行为**：各家
+		// 网关的异常形态千奇百怪，按正文特征判失败（T201 曾这么做）会把"模型正
+		// 好在说明什么"的正常回复也一起打死，而这类会话人工重试一次就好。警告里
+		// 带上厂商报的 prompt 与本地估算，一眼能看出请求是不是被网关改小了。
+		if useTools && len(s.tools) > 0 && len(choice.Message.ToolCalls) == 0 && !s.toolProseWarned {
 			if text := ContentString(choice.Message); LooksLikeToolProseLeak(text) {
+				s.toolProseWarned = true
 				reported := 0
 				if resp.Usage != nil {
 					reported = resp.Usage.PromptTokens
 				}
-				return "", fmt.Errorf("模型返回了「工具调用样式」的正文而不是工具调用（多半是网关把请求改小了：本次厂商报 prompt %d tokens，本地估算 %d）：%s",
-					reported, s.EstimatedTokens(), truncateForLog(strings.TrimSpace(text), 300))
+				if s.logger != nil {
+					s.logger.LogWarning(s.tid, fmt.Sprintf(
+						"[session:%s] 这条回复像「工具调用被写成了正文」（没有 tool_calls、工具一次都没执行；厂商报 prompt %d tokens，本地估算 %d）。若这一轮没有产出，直接重试这一章即可：%s",
+						s.label, reported, s.EstimatedTokens(), truncateForLog(strings.TrimSpace(text), 200)))
+				}
 			}
 		}
 
@@ -996,16 +1001,6 @@ func (s *Session) observePromptSize(estBefore, actual int) {
 	s.lastPromptTokens = actual
 	if estBefore <= 0 {
 		return
-	}
-	// T201：厂商报的 prompt 明显**小于**本地估算（实测只有三分之一）说明请求在
-	// 网关那一侧被改小/替换了——模型拿不到系统提示与工具表，会开始自说自话
-	// （"工具不可用"、伪调用）。以前这里把 ratio 夹到 ≥1，这种异常被静默吞掉；
-	// 现在每个会话告警一次，现场能直接看到。
-	if estBefore >= 2000 && actual < estBefore*3/5 && !s.smallPromptWarned {
-		s.smallPromptWarned = true
-		s.logger.LogWarning(s.tid, fmt.Sprintf(
-			"[session:%s] 厂商只报了 %d prompt tokens，本地估算 %d（%.0f%%）——请求可能被网关改小/截断，模型看不到完整的系统提示与工具说明",
-			s.label, actual, estBefore, 100*float64(actual)/float64(estBefore)))
 	}
 	ratio := float64(actual) / float64(estBefore)
 	if ratio < 1 {
