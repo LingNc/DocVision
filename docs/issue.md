@@ -1210,3 +1210,7 @@ user 轮
   2. T200 的 `skipScanDir` 当时只加了 `media`/`.git`/`work/rounds`/`<名>_记录_…`，漏了 `.trash`。
   改：`skipScanDir` 增加 `name == ".trash"` 整棵跳过（主扫描与附加根扫描共用同一判据，细分树里的 `.trash` 同样跳过）。要看截断前的原文仍可 `docvision sessions --dir <项目>/work/sessions/.trash` 单独开。
   验证：`TestScanSkipsRoundsJournalsAndCleanBackups` 增加两处 `.trash` 备份（`work/sessions/.trash/` 与细分树里的 `…/work/.trash/`），`TestSkipScanDir` 增加两条规则边界；`go test ./...` 全绿；真实输出根上 `sessions --list` 共 1029 条、`grep` 命中 `.trash|jsonl.2026|journal-try` 为 0。
+- T203（用户反馈，2026-10-22）：**核对会话太依赖 markdown**。用户原话：*"我发现有的这个核对会话好像会太过于依赖markdown的转换内容。不过因为有的时候不符合得参考原始的pdf，而非将markdown认为是绝对正确的来源。他只是ocr的一个转换参考。"*，并明确要求：*"关于核对的提示词少即是多。不要增加太大量篇幅。"*
+  1. 核对提示词原本已有一句"md 是 OCR 来的，看着奇怪就去看原页、不要报"，但整篇的判据仍是"md 有、`.tex` 没有 = 缺内容"，加上开场把 md 称作 "the source it was converted from"——核对会话于是拿 md 的差异当事实，报出原书根本没有的缺失。
+  2. 按"少即是多"只在两处改措辞（各一句、不新增段落）：① md 那一条改成"a reference, not the truth … 原页与 md 不一致时以原页为准、`.tex` 可以跟着原页走"；② "缺内容"那一类补上"在原书页上确认过——只有 md 上的差异证明不了什么"。
+  验证：`go test ./internal/prompts/` 绿（注册表 `MustMention`/`RetiredNames` 与模板守护测试不受影响）；模板 27 行、净增约 30 词。

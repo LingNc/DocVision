@@ -2260,3 +2260,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 原因：就地截断（⤫）把原文整份备份到 `work/sessions/.trash/<转录>.<时刻>.jsonl`，扩展名还是 `.jsonl`，扫描按扩展名认会话，于是这条备份被列成一个新会话（标题就是那串后缀，点开是截断前的旧对话）。T200 的 `skipScanDir` 补了 `media`/`.git`/`work/rounds`/`<名>_记录_…`，漏了 `.trash`。
 - 改：`skipScanDir` 增加 `.trash` 整棵跳过（主扫描与附加根扫描共用）；要看截断前的原文，用 `docvision sessions --dir <项目>/work/sessions/.trash`。
 - 验证：扫描测试补两处 `.trash`（`work/sessions/.trash/` 与细分树 `…/work/.trash/`）、规则测试补两条边界；`go test ./...` 全绿；真实输出根 `sessions --list` 1029 条、`grep` 命中 `.trash|jsonl.2026|journal-try` 为 0（截断备份实际只有 1 份，正是截图那条）。
+
+### T203 · 核对会话别把 markdown 当权威（2026-10-22）
+
+- 用户反馈：*"有的这个核对会话好像会太过于依赖markdown的转换内容……他只是ocr的一个转换参考"*，并要求"核对的提示词少即是多，不要增加太大量篇幅"。
+- 现象与根因：核对提示词虽已写了"md 是 OCR 来的、看着奇怪去看原页"，但判据仍是"md 有、`.tex` 没有 = 缺内容"，开场又把 md 称作 "the source it was converted from"——于是核对会话拿 md 的差异当事实，报出原书根本没缺的东西，转换会话被逼着改坏正确内容。
+- 改（只两处措辞、不新增段落，净增约 30 词）：① md 那一条改成"a reference, not the truth. … where the page and the markdown disagree, the page wins and the .tex may follow it"；② "缺内容"那一类补 "confirmed on the original page, since a markdown-only gap proves nothing"。
+- 验证：`go test ./internal/prompts/` 绿；模板仍 27 行。
