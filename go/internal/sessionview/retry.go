@@ -148,12 +148,20 @@ func hasChapterTranscript(projDir, base string) bool {
 	if m, _ := filepath.Glob(filepath.Join(projDir, "work", "sessions", "convert_"+base+"*.jsonl")); len(m) > 0 {
 		return true
 	}
+	// 顶层父章节在跑时转录在 work/sessions/；也有落在自己临时工作区里的老布局。
+	if m, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "conv_"+base+"*", "sessions", "convert_"+base+"*.jsonl")); len(m) > 0 {
+		return true
+	}
 	m, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "*", "work", "_subdivision", "*", "node", "sessions", "convert_"+base+"*.jsonl"))
 	return len(m) > 0
 }
 
-// queueParentContinue 把"子章节要重跑但没有输入"翻译成父章节的一次「继续跑」：
+// queueParentContinue 把"这一支单独重跑"改成排队父章节的「继续跑」（T196/T201）：
 // 父节点重新驱动时会重新细分、重建这一支的输入，之后这一支才有东西可跑。
+//
+// 为什么子章节不能单独重转（T211 补）：子章节的产物与整合都归父节点——把它单独
+// 重跑一遍，父节点不会再去整合，新结果进不了书；而父节点的 children-summary、
+// 问题继承清单也会与产物脱节。所以浏览器侧不再假装排了一条子章节的转换请求。
 func (v *viewerServer) queueParentContinue(w http.ResponseWriter, project, parent, child string) {
 	projDir, ok := v.projectWorkspace(project)
 	if !ok {
@@ -162,7 +170,7 @@ func (v *viewerServer) queueParentContinue(w http.ResponseWriter, project, paren
 	}
 	path, err := retryq.Queue(projDir, retryq.Request{
 		Project: project, Chapter: parent, Role: "continue",
-		Reason: "子章节 " + child + " 的输入已不存在（网页重试）", Source: "web",
+		Reason: "子章节 " + child + " 重试，改为继续跑父章节（网页重试）", Source: "web",
 	})
 	if err != nil {
 		http.Error(w, "写入重试队列失败: "+err.Error(), http.StatusInternalServerError)
@@ -171,8 +179,8 @@ func (v *viewerServer) queueParentContinue(w http.ResponseWriter, project, paren
 	writeJSON(w, map[string]any{
 		"ok": true, "chapter": parent, "project": project, "role": "continue",
 		"queued": filepath.Base(path), "parent": true,
-		"note": "子章节 " + child + " 的输入已经不在了（父节点既没整合、也没有临时树），单独重跑这一支没有输入可用；" +
-			"已改为排队父章节 " + parent + " 的「继续跑」——父节点重新驱动时会重新细分并重建这一支，跑起来后这一支按磁盘上的转录续跑",
+		"note": "子章节的产物与整合都归父节点：" + child + " 单独重跑完也没有人去整合它；" +
+			"已改为排队父章节 " + parent + " 的「继续跑」——父节点会重新驱动整棵子树（这一支按磁盘上的转录续跑，不会从零重来），改完再重新整合",
 	})
 }
 
@@ -203,12 +211,11 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st, err := os.Stat(filepath.Join(projDir, "chapters", base+".md")); err != nil || !st.Mode().IsRegular() {
-		// 子章节由父章节的细分树产出（不在 chapters/ 下），单独重跑它得连同父
-		// 节点的整合一起走——那不是"重试这一章"，明说而不是含糊地报不存在。
-		// P56⑤：子章节只在"父节点还没整合完"时能单独重跑——那时重新跑这一支
-		// 不会破坏任何已定稿的东西，父节点等齐子会话后会拿新结果重新整合。
-		// 父章节的提交产物已经在了就说明整合完成（通过或已晋级），这时改子章节
-		// 等于让父报告里的旧结论与产物脱节，必须重跑父章节而不是这一支。
+		// 子章节由父章节的细分树产出（不在 chapters/ 下）。
+		// T196/T211：它的「重转 / 继续跑」一律改成父章节的「继续跑」——子章节的
+		// 产物与整合都归父节点，单独重跑这一支没有谁去整合它的新产物（父报告的
+		// 旧结论也会与产物脱节）。以前这里排一条子章节请求：回执说"已排队"，派发
+		// 端把它消费掉只写一行日志，页面上就是"点了没反应、刷新还是原样"。
 		childOK := false
 		if i := strings.Index(base, "_child_"); i > 0 {
 			parent := base[:i]
@@ -218,28 +225,13 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 				// 整合到哪一步"没有关系——父章节已整合也照样能重核这一支。缺产物
 				// 那句话交给后面的角色前置检查说，这里不掺和。
 				childOK = true
-			case fileExistsIn(projDir, "work", "chapters", parent+".tex"):
-				// 父章节已整合（已提交/已晋级）：改这一支会让父报告里的旧结论与
-				// 产物脱节，必须重跑父章节。
-				http.Error(w, "父章节 "+parent+" 已经整合完成，子章节不能单独重跑；要改这一支请重跑父章节 "+parent, http.StatusBadRequest)
-				return
-			case childMarkdownInTempTree(projDir, parent, base) || fileExistsIn(projDir, "work", "chapters", base+".md"):
-				// 父节点还在等这一支（临时细分树里有它的 md）：重跑不会破坏已定稿
-				// 的东西，父节点等齐后拿新结果重新整合。
-				childOK = true
-			default:
-				// T201：子章节的输入（父节点细分树里的 chapter.md）已经不存在，
-				// 而父章节又还没整合——单独重跑这一支没有输入可用。以前这里是一
-				// 条 404 死路（用户点「重试这一章」只拿到错误），现在改成**排队父
-				// 章节的「继续跑」**：父节点重新驱动时会重新细分并重建这一支的输入。
-				// 父章节连转录都没有时才真的没救，那就照实说。
-				if role == "convert" || role == "" {
-					if hasChapterTranscript(projDir, parent) {
-						v.queueParentContinue(w, req.Project, parent, base)
-						return
-					}
+			case role == "convert" || role == "continue" || role == "":
+				if hasChapterTranscript(projDir, parent) {
+					v.queueParentContinue(w, req.Project, parent, base)
+					return
 				}
-				http.Error(w, "找不到子章节 "+base+" 的输入（父节点 "+parent+" 既没有整合、也没有临时树，而且父章节还没有转换记录），先在父章节里跑一次转换", http.StatusNotFound)
+				// 父章节连转换记录都没有：排一条「继续跑」也没人接着跑，照实说。
+				http.Error(w, "找不到子章节 "+base+" 可续跑的父章节（"+parent+" 还没有转换记录），先在父章节里跑一次转换", http.StatusNotFound)
 				return
 			}
 		}
@@ -248,6 +240,7 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
 	if role == "" {
 		role = "convert"
 	}
@@ -558,6 +551,16 @@ func tempProductFor(projDir, base string) string {
 			if p := filepath.Join(root, base[:i], "children", base+".tex"); pathExists(p) {
 				return p
 			}
+		}
+	}
+	// 顶层拆分父节点的暂存区（T210）：细分父节点提交进
+	// `work/temp/conv_<章>/integrated-stage/`，等核对通过才晋级到 work/chapters。
+	// 以前只认 work/chapters 与**子树**里的 result/integrated-stage，于是活的
+	// 核对会话正在看那份产物、页面上点「重新核对」却说"还没有提交产物"——同一份
+	// 文件，两个判据。
+	for _, stage := range []string{"integrated-stage", "result"} {
+		if p := filepath.Join(projDir, "work", "temp", "conv_"+base, stage, base+".tex"); pathExists(p) {
+			return p
 		}
 	}
 	roots, _ := filepath.Glob(filepath.Join(projDir, "work", "temp", "conv_*", "work", "_subdivision"))

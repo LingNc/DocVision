@@ -68,10 +68,6 @@ func TestPostRetryRejections(t *testing.T) {
 		{"项目不存在", `{"project":"书B","chapter":"chapter_002"}`, http.StatusNotFound},
 		{"章节名非法", `{"project":"书A","chapter":"../../x"}`, http.StatusBadRequest},
 		{"章节不存在", `{"project":"书A","chapter":"chapter_099"}`, http.StatusNotFound},
-		// P56⑤：子章节给按钮，但父章节整合完（提交产物已在）就必须改跑父章节。
-		{"子章节父已整合", `{"project":"书A","chapter":"chapter_003_child_01"}`, http.StatusBadRequest},
-		// 父节点既没整合、也没有正在跑它的临时树：多半是名字打错了。
-		{"子章节找不到输入", `{"project":"书A","chapter":"chapter_009_child_01"}`, http.StatusNotFound},
 		{"请求体不是 JSON", `not json`, http.StatusBadRequest},
 		{"角色非法", `{"project":"书A","chapter":"chapter_002","role":"style"}`, http.StatusBadRequest},
 		// 继续跑的前提是这一章已经有转录。
@@ -87,6 +83,40 @@ func TestPostRetryRejections(t *testing.T) {
 		if got := postRetry(t, v, tc.body).Code; got != tc.want {
 			t.Errorf("%s: status = %d, want %d", tc.name, got, tc.want)
 		}
+	}
+}
+
+// TestPostRetryChildBecomesParentContinue（T211）：子章节的重转 / 继续跑一律换成
+// 父章节的「继续跑」——子章节的产物与整合都归父节点，单独重跑这一支没有谁去整合
+// 它的新产物。以前这里排一条子章节请求：回执说"已排队"，派发端却把它消费掉、只
+// 写一行日志，页面上就是"点了没反应、刷新还是原样"。
+func TestPostRetryChildBecomesParentContinue(t *testing.T) {
+	v, proj := retryTestServer(t, true)
+	// 父章节有转换记录（可以继续跑），子章节的输入/临时树都不在。
+	parentTr := filepath.Join(proj, "work", "sessions", "convert_chapter_009.jsonl")
+	if err := os.MkdirAll(filepath.Dir(parentTr), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(parentTr, []byte(`{"t":"msg","role":"user","text":"转换"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_009_child_01","role":"convert"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("响应 = %s (%v)", rec.Body.String(), err)
+	}
+	if resp["chapter"] != "chapter_009" || resp["role"] != "continue" {
+		t.Fatalf("响应 = %s，应改为父章节 continue", rec.Body.String())
+	}
+	if note, _ := resp["note"].(string); !strings.Contains(note, "继续跑") {
+		t.Fatalf("回执没说清改跑了父章节: %s", note)
+	}
+	pending := retryq.Pending(proj)
+	if len(pending) != 1 || pending[0].Chapter != "chapter_009" || pending[0].Role != "continue" {
+		t.Fatalf("队列 = %+v", pending)
 	}
 }
 
@@ -650,8 +680,27 @@ func TestPostRetryChildCheckerIgnoresParent(t *testing.T) {
 	if rec := postRetry(t, v, body); rec.Code != http.StatusOK {
 		t.Fatalf("子章节重新核对 status = %d: %s", rec.Code, rec.Body.String())
 	}
-	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_003_child_01","role":"convert"}`); rec.Code != http.StatusBadRequest {
-		t.Fatalf("子章节重转 status = %d, want 400（父已整合）", rec.Code)
+	// 父章节已整合：子章节不能单独重跑（父报告里的旧结论会与产物脱节）。
+	// T211：改成**排队父章节的「继续跑」**——以前是 400 让用户自己去点父章节。
+	parentTr := filepath.Join(proj, "work", "sessions", "convert_chapter_003.jsonl")
+	if err := os.MkdirAll(filepath.Dir(parentTr), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(parentTr, []byte(`{"t":"msg","role":"user","text":"转换"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_003_child_01","role":"convert"}`); rec.Code != http.StatusOK {
+		t.Fatalf("子章节重转应改成父章节继续跑，status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var cont *retryq.Request
+	for _, f := range retryq.Pending(proj) {
+		if f.Chapter == "chapter_003" && f.Role == "continue" {
+			req := f.Request
+			cont = &req
+		}
+	}
+	if cont == nil {
+		t.Fatalf("队列里应有父章节的继续跑：%+v", retryq.Pending(proj))
 	}
 }
 
@@ -667,7 +716,20 @@ func TestPostRetryChildUsesTempTree(t *testing.T) {
 	if err := os.WriteFile(md, []byte("# 子章\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_004_child_02"}`); rec.Code != http.StatusOK {
+	// 父节点正在跑这一支：它有转换记录，所以子章节的请求会转成父章节的「继续跑」。
+	parentTr := filepath.Join(proj, "work", "sessions", "convert_chapter_004.jsonl")
+	if err := os.MkdirAll(filepath.Dir(parentTr), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(parentTr, []byte(`{"t":"msg","role":"user","text":"转换"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := postRetry(t, v, `{"project":"书A","chapter":"chapter_004_child_02"}`)
+	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	pending := retryq.Pending(proj)
+	if len(pending) != 1 || pending[0].Chapter != "chapter_004" || pending[0].Role != "continue" {
+		t.Fatalf("应把请求转成父章节的继续跑，队列 = %+v", pending)
 	}
 }

@@ -520,6 +520,16 @@ func tempProductFor(proj, base string) string {
 			}
 		}
 	}
+	// 顶层拆分父节点的暂存区（T210）：细分父节点提交进
+	// `work/temp/conv_<章>/integrated-stage/`，等核对通过才晋级到 work/chapters。
+	// 以前只认 work/chapters 与**子树**里的 result/integrated-stage，于是活的
+	// 核对会话正在看那份产物、页面上点「重新核对」却说"还没有提交产物"——同一份
+	// 文件，两个判据。
+	for _, stage := range []string{"integrated-stage", "result"} {
+		if p := filepath.Join(proj, "work", "temp", "conv_"+base, stage, base+".tex"); fileExists(p) {
+			return p
+		}
+	}
 	roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_*", "work", "_subdivision"))
 	for _, root := range roots {
 		found := ""
@@ -809,16 +819,14 @@ func (r *Runner) dispatchRetries(proj string) int {
 			_ = retryq.Consume(f.Path)
 			continue
 		}
-		// T196：递归子章节的重转 / 接着跑需要父节点的整合上下文（章节 md、工作区、
-		// 产物都在父节点的细分树里），单纯按章节名排一条请求到不了任何前置条件——
-		// 以前它就那样躺在队列里，页面上看是"点了没反应"。这里直接消费掉并说清
-		// 该怎么修，别让它无声停留。
-		if strings.Contains(base, "_child_") && (role == "convert" || role == "continue") {
-			parent := base[:strings.Index(base, "_child_")]
+		// T196/T211：递归子章节的重转 / 接着跑需要父节点的整合上下文（章节 md、
+		// 工作区、产物都在父节点的细分树里）。以前这里**只消费、只写日志**，页面
+		// 上是"点了没反应"：回执说已排队，磁盘上请求被丢掉，会话一个字节没变。
+		// 现在改成真的推进——把它换成父章节的「继续跑」，父节点重新驱动整棵子树
+		// （这一支按磁盘上的转录续跑），改完再重新整合。
+		if parent, isChild := childChapterParent(base); isChild && (role == "convert" || role == "continue") {
 			_ = retryq.Consume(f.Path)
-			r.log.LogWarning(0, "[retry]", base,
-				"子章节不能单独重转/接着跑（转录与产物都在父节点的细分树里）；请就地截断它的转录后再「继续跑父章节」", parent,
-				"，或对整个父章节重试")
+			r.queueParentContinueFor(proj, f.Request.Project, parent, base)
 			continue
 		}
 		if !r.lockChapter(base) {
@@ -861,6 +869,38 @@ func (r *Runner) retryWarnOnce(key, msg string) bool {
 	}
 	r.retryWarned[key] = true
 	return false
+}
+
+// childChapterParent 拆出递归子章节所属的顶层父章节
+// （chapter_004_child_02 → chapter_004；嵌套子章节取到最外层）。
+func childChapterParent(base string) (string, bool) {
+	i := strings.Index(base, "_child_")
+	if i <= 0 {
+		return "", false
+	}
+	return base[:i], true
+}
+
+// queueParentContinueFor 把"子章节单独重转"改成排队父章节的「继续跑」（T211）。
+//
+// 为什么不能单独重跑：子章节的产物与整合都归父节点——重跑完这一支没有谁去整合
+// 它，父节点的 children-summary 与问题继承清单也会与产物脱节。父章节已经排着
+// 一条「继续跑」时不重复排。
+func (r *Runner) queueParentContinueFor(proj, project, parent, child string) {
+	for _, f := range retryq.Pending(proj) {
+		if f.Chapter == parent && retryRoleOf(f.Request) == "continue" {
+			r.log.LogInfo(0, "[retry]", child, "父章节 "+parent+" 已有「继续跑」在排队，不重复排")
+			return
+		}
+	}
+	if _, err := retryq.Queue(proj, retryq.Request{
+		Project: project, Chapter: parent, Role: "continue",
+		Reason: "子章节 " + child + " 的重试（改为继续跑父章节）", Source: "latex",
+	}); err != nil {
+		r.log.LogWarning(0, "[retry]", child, "改为继续跑父章节失败:", err)
+		return
+	}
+	r.log.LogInfo(0, "[retry]", child, "子章节不能单独重跑，已排队父章节 "+parent+" 的「继续跑」")
 }
 
 // runRetryTask 执行一条重试请求（已在章节锁里）。

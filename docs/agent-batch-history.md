@@ -2304,3 +2304,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 三条链一起查：① 删除 409 是因为会话正在写（实测 mtime 距现在 13 秒）——保护正确，但页面把 `http.Error` 的**纯文本**原因丢了（`res.json()` 失败就退回 `HTTP 409`）；② 重试 400 是因为父节点产物要过核对才从暂存区晋级，核对没过时 `work/chapters/<章>.tex` 不存在（鸡生蛋）；③ 环路根因是核对会话把 submit 写成正文（`\submit{ "report": … }`，`finish_reason=stop`、`tool_calls` 空），那段"没结论"的失败文本被当成"核对发现问题"喂回转换会话，转换只能再交一遍同样的产物。实测 13:31→13:48 每 30–100 秒一轮。
 - 改：`postJSON` 统一写入口并优先显示服务端说明；提交提醒写明"写进正文不算，要发真的工具调用"；`checkerNoVerdict()` 把"会话自己没给结论"与"章节真有问题"分开，前者跳过反馈轮（判据是 submit 回执这个事实，不是正文形态，与 T205 同口径）。
 - 验证：`TestCheckerNoVerdict` + 既有测试，`go test` 四个包全绿、`npm test` 202 绿、`dist` 重出。
+
+### T210/T211 · 拆分父节点的暂存产物、子章节重试的去向（2026-10-22）
+
+- 两条用户反馈连着查：① 拆分父节点的「重新核对」报"还没有提交产物"，而活的核对会话正在读同一份 `.tex`；② 子章节的重试回执说"已排队"，刷新后会话原样不动。
+- ① 的产品在 `work/temp/<章>/integrated-stage/` 等核对通过才晋级，判据（`chapterProductsFor`、`chapterTexIn` → `tempProductFor`）只认 `work/chapters/**` 与子树里的 `result|integrated-stage`，不认节点自己这一层——同一份文件两套结论。两处都补上，晋级后仍优先用 `work/chapters/`。
+- ② 队列里两条子章节请求被消费成 `.done`，那一支的转录与 `work/attempts/` 一个字节没变：接口侧（T201）放行并排队，派发端（T196）消费掉只写日志，回执与事实相反。改成接口与派发端统一：子章节的重转/继续跑翻译成父章节的「继续跑」，回执点名父章节；父章节无转录时 404。
+- 验证：`TestChapterProductsFindsStagedParentProduct`/`TestChapterProductsPrefersPromotedProduct`/`TestChapterTexInFindsStagedParentProduct`/`TestChapterTexInIgnoresEmptyStagingDir`、`TestChildChapterParent`/`TestQueueParentContinueFor`、`TestPostRetryChildBecomesParentContinue`；旧断言跟着新语义改（父已整合/临时树两条由 400/单独排队改为父章节继续跑）。`go test ./internal/...` 全绿。
