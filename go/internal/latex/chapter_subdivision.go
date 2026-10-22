@@ -25,10 +25,16 @@ type ChapterSubdivision struct {
 type RequestChapterSplitTool struct {
 	Root      string
 	TotalLine int
-	Depth     int
-	Children  []ChapterSubdivision
-	Requested bool
-	Restored  bool
+	// LastContent 是**最后一条非空行**的行号（1 起）。ReadFile 把文件内容按
+	// "\n" 切会给末尾换行多切出一个空元素：条目 1671 行的章节数出来是 1672，
+	// 模型按自己看到的正文切到 1671 就被判"没盖到 1672"打回——实测 173 次调用
+	// 里有 21 次第一次就是这样撞回来的。判据按 LastContent 收口，末尾的空行
+	// 算在最后一段里、不算漏。
+	LastContent int
+	Depth       int
+	Children    []ChapterSubdivision
+	Requested   bool
+	Restored    bool
 }
 
 func (t *RequestChapterSplitTool) Name() string { return "request_chapter_split" }
@@ -66,7 +72,7 @@ func (t *RequestChapterSplitTool) Restore() error {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		return fmt.Errorf("读取已保存的细分计划失败: %w", err)
 	}
-	if err := validateChapterSubdivisions(saved.Children, t.TotalLine); err != nil {
+	if err := validateChapterSubdivisions(saved.Children, t.LastContent, t.TotalLine); err != nil {
 		return fmt.Errorf("已保存的细分计划无效: %w", err)
 	}
 	if saved.Depth != t.Depth+1 {
@@ -86,7 +92,7 @@ func (t *RequestChapterSplitTool) Execute(argsJSON string) (session.ToolResult, 
 	if err := json.Unmarshal([]byte(argsJSON), &req); err != nil {
 		return session.ToolResult{}, err
 	}
-	if err := validateChapterSubdivisions(req.Children, t.TotalLine); err != nil {
+	if err := validateChapterSubdivisions(req.Children, t.LastContent, t.TotalLine); err != nil {
 		return session.ToolResult{Text: "REJECTED: " + err.Error()}, nil
 	}
 	if t.Root == "" {
@@ -111,8 +117,23 @@ func (t *RequestChapterSplitTool) Execute(argsJSON string) (session.ToolResult, 
 	return session.ToolResult{Text: fmt.Sprintf("SUBDIVISION REQUESTED: %d child ranges persisted. The runner will convert and check each child before returning their artifacts for parent integration.", len(req.Children)), Terminal: true}, nil
 }
 
-func validateChapterSubdivisions(children []ChapterSubdivision, totalLines int) error {
-	if totalLines < 2 {
+// lastContentLine 返回最后一条非空行的行号（1 起）；整篇都是空白时返回 1。
+func lastContentLine(lines []string) int {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return i + 1
+		}
+	}
+	return 1
+}
+
+// validateChapterSubdivisions 校验"完整、连续、覆盖全文"的分段。
+//
+// lastContent 是最后一条非空行，totalLines 是文件按 "\n" 切出来的行数（末尾
+// 换行会多出一个空元素）。收口按 lastContent：正文盖满即可，末尾那几行空白
+// 算进最后一段，不因为它没被显式点到就打回——这是实测最常见的第一次失败。
+func validateChapterSubdivisions(children []ChapterSubdivision, lastContent, totalLines int) error {
+	if totalLines < 2 || lastContent < 1 {
 		return fmt.Errorf("chapter has fewer than two lines")
 	}
 	if len(children) < 2 || len(children) > maxChapterChildren {
@@ -128,8 +149,8 @@ func validateChapterSubdivisions(children []ChapterSubdivision, totalLines int) 
 		}
 		next = child.EndLine + 1
 	}
-	if next != totalLines+1 {
-		return fmt.Errorf("ranges stop at line %d; expected full coverage through line %d", next-1, totalLines)
+	if next != lastContent+1 && next != totalLines+1 {
+		return fmt.Errorf("ranges stop at line %d; the chapter's text ends at line %d (the file has %d lines, the rest blank) — extend the last child to line %d", next-1, lastContent, totalLines, lastContent)
 	}
 	return nil
 }

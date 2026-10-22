@@ -1254,3 +1254,7 @@ user 轮
   证据：队列里两条 `chapter_024_child_06` 的 convert 请求分别在 16:11、16:19 被消费成 `.done`，而那一支的转录最后一次变化停在 15:04、`work/attempts/` 里没有任何新尝试——请求被消费、任务没跑。
   根因是两批判据打架：T201 让**接口**接受子章节的转换重试并排进队列（输入在细分树里就放行），而 T196 让**派发端**把子章节的 convert/continue 请求"消费掉 + 写一行日志"（理由是子章节的产物与整合都归父节点）。于是回执说"已排队"，磁盘上请求被扔掉，页面上什么都没有发生。
   改：把"子章节不能单独重跑"这条**贯彻到底**——接口层把子章节的重转/继续跑直接翻译成父章节的「继续跑」，回执点名改跑的是哪个父章节；派发端留同样的兜底（同名父章节已有「继续跑」在排队就不重复排）。父章节连转换记录都没有时照实 404，不排一条没人能接着跑的请求。
+- T212（用户反馈，2026-10-22）：**`request_chapter_split` 常常要调两次，第一次必报错**。用户原话：*"我发现很多会话都会请求两次 request_chapter_split 这个第一次总是报错咋回事？"*
+  转录统计：1137 条会话里 173 次调用，其中 **21 次第一次被拒**，且全是同一种——`REJECTED: ranges stop at line 1671; expected full coverage through line 1672`。根因是行数口径差一：`len(strings.Split(md, "\n"))` 会把文件末尾的换行多切出一个空元素（1671 行的章节数出 1672 行），而模型按自己看到的正文（`wc -l`/`grep -n` 也是 1671）切到 1671 就被判"没盖满"打回，白花一轮请求。
+  改：新增 `lastContentLine()`（最后一条非空行的行号），`validateChapterSubdivisions` 的收口改成"正文盖满即可"——`next == lastContent+1` 与 `next == totalLines+1`（把末尾空行并入最后一段）都接受；真漏一行正文仍然拒。错误文案也写清正文止于哪一行。`RequestChapterSplitTool` 增 `LastContent`（构造点与 `Restore` 都填）；`read_file` 整文件回执加行数 `[path, N bytes, M lines]`，M 是正文最后一行行号，模型不必再自己数、也不会数成差一。
+  验证：把真实章节那次被拒的原始参数重放（`total=1672 lastContent=1671`）→ `SUBDIVISION REQUESTED: 7 child ranges persisted`；`TestValidateChapterSubdivisionsAllowsTrailingBlankLine`（正文盖满接受 / 末尾空行并入接受 / 真漏正文仍拒）、`TestLastContentLine`。

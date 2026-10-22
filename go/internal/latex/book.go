@@ -1514,8 +1514,12 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if readErr != nil {
 		return fmt.Errorf("读取章节 Markdown 失败: %w", readErr)
 	}
-	lineCount := len(strings.Split(string(mdData), "\n"))
-	splitTool := &RequestChapterSplitTool{Root: filepath.Join(node.NodeRoot, "work", "_subdivision"), TotalLine: lineCount, Depth: node.Depth}
+	mdLines := strings.Split(string(mdData), "\n")
+	lineCount := len(mdLines)
+	splitTool := &RequestChapterSplitTool{
+		Root: filepath.Join(node.NodeRoot, "work", "_subdivision"), TotalLine: lineCount,
+		LastContent: lastContentLine(mdLines), Depth: node.Depth,
+	}
 	if err := splitTool.Restore(); err != nil {
 		return err
 	}

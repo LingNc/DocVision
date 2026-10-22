@@ -2311,3 +2311,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - ① 的产品在 `work/temp/<章>/integrated-stage/` 等核对通过才晋级，判据（`chapterProductsFor`、`chapterTexIn` → `tempProductFor`）只认 `work/chapters/**` 与子树里的 `result|integrated-stage`，不认节点自己这一层——同一份文件两套结论。两处都补上，晋级后仍优先用 `work/chapters/`。
 - ② 队列里两条子章节请求被消费成 `.done`，那一支的转录与 `work/attempts/` 一个字节没变：接口侧（T201）放行并排队，派发端（T196）消费掉只写日志，回执与事实相反。改成接口与派发端统一：子章节的重转/继续跑翻译成父章节的「继续跑」，回执点名父章节；父章节无转录时 404。
 - 验证：`TestChapterProductsFindsStagedParentProduct`/`TestChapterProductsPrefersPromotedProduct`/`TestChapterTexInFindsStagedParentProduct`/`TestChapterTexInIgnoresEmptyStagingDir`、`TestChildChapterParent`/`TestQueueParentContinueFor`、`TestPostRetryChildBecomesParentContinue`；旧断言跟着新语义改（父已整合/临时树两条由 400/单独排队改为父章节继续跑）。`go test ./internal/...` 全绿。
+
+### T212 · `request_chapter_split` 第一次总被打回（2026-10-22）
+
+- 用户反馈：*"很多会话都会请求两次 request_chapter_split，这个第一次总是报错"*。
+- 转录统计（1137 条会话、173 次调用）：21 次第一次被拒，全是 `ranges stop at line N; expected full coverage through line N+1`。根因是行数口径：`len(strings.Split(md, "\n"))` 把末尾换行多算一行，模型按 `wc -l`/`grep -n` 看到的正文行数切分，就差那一行。
+- 改：`lastContentLine()` 取最后一条非空行，校验按它收口（`next == lastContent+1` 与 `next == totalLines+1` 都接受）；`read_file` 整文件回执加 `M lines`。真机重放：被拒的那次原始参数（`total=1672 lastContent=1671`）现在直接 `SUBDIVISION REQUESTED: 7 child ranges persisted`。
+- 验证：`TestValidateChapterSubdivisionsAllowsTrailingBlankLine` / `TestLastContentLine` + 既有分段测试；`go test ./internal/latex ./internal/session` 绿。

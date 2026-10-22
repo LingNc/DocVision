@@ -209,7 +209,11 @@ func (t *ReadFileTool) Execute(argsJSON string) (session.ToolResult, error) {
 		text = text[:max]
 		note = "\n...[truncated; use start_line/end_line for later parts]..."
 	}
-	return session.ToolResult{Text: fmt.Sprintf("[%s, %d bytes]\n%s%s", shown, len(data), text, note)}, nil
+	// T212：顺手给出行数。模型要按行号切分（request_chapter_split），以前只能自己
+	// 数，`wc -l` 数出来的是正文行数，而判据那边的行数把末尾换行多算一行——两边
+	// 差一行就成了"第一次提交总被打回"。这里报的是**正文最后一行**行号。
+	lines := lastContentLine(strings.Split(text, "\n"))
+	return session.ToolResult{Text: fmt.Sprintf("[%s, %d bytes, %d lines]\n%s%s", shown, len(data), lines, text, note)}, nil
 }
 
 // CompileTexTool is the general LaTeX build tool for a workspace: it
