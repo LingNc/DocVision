@@ -67,6 +67,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.dedupe_bucket_max` | 参与重合度归并的小图标最大张数，超过就退回逐对相似度并警告 | 400（键缺席时） |
 | `latex.dedupe_model` | 档位1 classify 后整组相似图工具核验会话的模型注册表键；留空回退 `text`，须支持看图和工具调用；随附模板为 `dedupe`，继承 `text` | 空（回退 text） |
 | `models.dedupe` | 随附模板的独立去重模型条目，可用 extends 指向 text 或自行指定视觉模型 | 未设置（模板继承 text） |
+| `models.rescue` | 复盘会话（未提交收尾的复盘，P58）的模型条目；模板预置、默认与 checker 同底座（`extends: text`），想用更便宜的模型复盘就改这一条，或把 `latex.rescue.model` 指到别的条目 | 模板预置（`extends: text`，`context_limit: 131072`） |
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking），原样合并到请求体顶层 | 见示例 |
 | `models.text.api` | 线路协议：`openai`（默认，OpenAI 兼容 `/chat/completions`）、`anthropic`（Anthropic Messages API，`base_url` 指到 `/v1`，自动带 `x-api-key`/`anthropic-version` 头）或 `responses`（OpenAI Responses API，`/v1/responses`，gpt-5/o 系；固定 `store:false` 全量回传，加密思考链请求 `reasoning.encrypted_content` 回放——**加密思考约半小时级有效期**，长间隔续跑可能失效）。`anthropic` **只走非流式**，`responses` 与非流式同款解码但支持 SSE（`response.output_text.delta` 推进实时快照、`response.completed` 收账，网关忽略 `stream:true` 时自动兜底解析整段 JSON）；三者都把应答的缓存读计入命中率、stop_reason 翻译为 finish_reason | `openai` |
 | `options.log_level` | 日志等级：info / debug / trace（debug 记请求响应摘要与最终内容，trace 再加流式分片） | info |
@@ -117,6 +118,13 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.chapter_granularity` | 档位1 章节拆分粒度：large=大章整体 / medium=按本书自动给出最合理拆分（不拆太细也不太大块）/ small=按小节拆分 | medium |
 | `latex.keep_temp_dirs` | 保留 `<项目>/work/temp/` 下的临时工作目录（拆章沙箱、逐章转换/修复工作区 `conv_<章>`、矢量图工作区） | false |
 | `latex.keep_session_records` | 保留成功会话的 JSONL 转录（与上一项独立）；debug 日志下两项都必定保留 | true（旧版默认 false） |
+| `latex.rescue.enabled` | 会话"跑完但没 submit"时先起一条只读的**复盘会话**看它的转录，得出 `retry`（还健康，照常提醒）/ `truncate`（已退化，截断到最后一个干净轮次继续）/ `fail`（救不回来）三种结论之一；false 退回"只发提醒"的老路径 | true |
+| `latex.rescue.max_per_attempt` | 同一次尝试最多复盘几次（防"复盘 → 又没交 → 再复盘"） | 2 |
+| `latex.rescue.max_rounds` | 复盘会话自己的轮次上限 | 12 |
+| `latex.rescue.context_limit` | 复盘会话的上下文窗口（0 = 沿用模型自己的限制） | 131072 |
+| `latex.rescue.max_tokens` | 复盘会话的输出预算；0 = 与 checker 会话同配置 | 0 |
+| `latex.rescue.keep_records` | 复盘会话的转录是否落盘到 `work/sessions/rescue_*.jsonl`（默认只写一行审计记录 `work/rescue/log.jsonl`）；`--debug` 强制落盘 | false |
+| `latex.rescue.model` | 复盘会话用的模型条目；空 = 跟随 `latex.checker_model`（模板预置了 `models.rescue` 条目，默认与 checker 同底座） | `"rescue"` |
 | `latex.style_pilot` | 样式试点（T97 重量档）：样式阶段后，选材会话拼一份代表全书特色内容的最小样例（md 行段 + 原书页），试转会话用样式包转换并对照原书核对，修订会话（新上下文）据此定稿 cls，然后才划分章节 | true |
 | `latex.pilot_select_model` / `pilot_trial_model` / `pilot_revise_model` | 样式试点三个子会话的独立模型键（T108；`models:` 需注册对应条目，模板默认 `pilot-select` extends chapter、`pilot-trial` extends convert、`pilot-revise` extends style） | 空 = 回退 chapter / convert / style |
 | `latex.compile.engine` | 编译引擎（pdflatex / xelatex / lualatex） | xelatex |

@@ -12,7 +12,7 @@
 #   3. 未知键不生效：拼错一个键名不会有任何报错，启动时只会给一行"未知配置键"
 #      告警（`docvision setup` 保存时会把它拦下来）。
 
-config_version: 20
+config_version: 21
 
 # MinerU API Configuration
 mineru:
@@ -139,6 +139,18 @@ latex:
   checker_concurrency: 0         # 章节核对会话并发（T179）；0=沿用 concurrency。核对在读 PDF/原书页、转换在写 .tex，分开排队
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留
+  # P58：会话"跑完但没 submit"时的**复盘**。默认开：先起一条只读的复盘会话
+  # 看那条会话自己的转录，给出 retry（会话还健康，再提醒一次）/ truncate（已退化，
+  # 截断到最后一个干净轮次继续）/ fail（救不回来）三种结论之一，再由代码执行。
+  # 复盘会话没有任何可写挂载，最坏后果是一次截断（源转录与归档尝试都留着）。
+  rescue:
+    enabled: true                # 默认开；false = 退回"只发提醒"的老路径
+    max_per_attempt: 2           # 同一次尝试最多复盘几次（防复盘循环）
+    max_rounds: 12               # 复盘会话自己的轮次上限
+    context_limit: 131072        # 复盘会话上下文（128K；0 = 沿用模型自己的限制）
+    max_tokens: 0                # 输出预算；0 = 与 checker 会话同配置
+    keep_records: false          # 复盘会话的转录是否落盘（--debug 下强制落盘）
+    model: "rescue"              # 复盘会话的模型条目；空 = 跟随 checker_model
   style_pilot: true # 样式试点（T97 重量档）：选材拼样例 → 试转核对 → 修订定稿 cls，然后才划分章节；样式问题在进入全书转换前暴露
   pilot_select_model: "pilot-select" # 试点选材会话独立模型（T108；models.pilot-select 默认 extends chapter = 沿用章节划分模型）
   pilot_trial_model: "pilot-trial"   # 试点试转会话独立模型（T108；models.pilot-trial 默认 extends convert）
@@ -349,6 +361,12 @@ models:
       px_per_token: 750
       min_tokens: 85
       max_tokens: 4096
+
+  # P58：未提交收尾的复盘会话默认用这个条目（默认与 checker 同底座 = text）。
+  # 想用更便宜的模型复盘，就改这一条（或把 latex.rescue.model 指到别的条目）。
+  rescue:
+    extends: text
+    context_limit: 131072        # 复盘会话默认 128K 上下文
 
   # ---- 命名基座 1：跨模型共享 endpoint / key / 请求控制 ----
   # 基座不是"特殊条目"：它自己也可以被 latex.drawing_model 这类角色直接引用。

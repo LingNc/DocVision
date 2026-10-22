@@ -420,6 +420,8 @@ type LatexConfig struct {
 	// BashMaxOutput is the deprecated location of tools.bash.max_output
 	// (resolved by Config.BashMaxOutput).
 	BashMaxOutput int `yaml:"bash_max_output"`
+	// Rescue（P58）：「会话没提交就结束」时的复盘。默认开；深度可配。
+	Rescue RescueConfig `yaml:"rescue"`
 	// Sessions tunes each specialised AI session independently.
 	Sessions struct {
 		Drawing SessionTuning `yaml:"drawing"`
@@ -431,6 +433,67 @@ type LatexConfig struct {
 		// chapter before assembly. Defaults to the convert tuning.
 		Checker SessionTuning `yaml:"checker"`
 	} `yaml:"sessions"`
+}
+
+// RescueConfig 是「未提交收尾的复盘会话」的配置（P58）。
+//
+// 会话正常结束但没有调 submit 时，先起一条**只读**的复盘会话看它的转录，得出
+// retry / truncate / fail 三种结论之一，再由代码执行：发提醒、截断到最后一个
+// 干净轮次继续、或按失败收尾。复盘会话只读、只能给结论，最坏后果是一次截断
+// （源转录与归档尝试都留着）。
+type RescueConfig struct {
+	// Enabled 默认开；显式 false 退回"只发提醒"的老路径。
+	Enabled *bool `yaml:"enabled"`
+	// MaxPerAttempt 同一次尝试最多复盘几次（默认 2），防"复盘 → 又没交 →
+	// 再复盘"的循环。
+	MaxPerAttempt int `yaml:"max_per_attempt"`
+	// MaxRounds 复盘会话自己的轮次上限（默认 12）。
+	MaxRounds int `yaml:"max_rounds"`
+	// KeepRecords 是否把复盘会话的转录落盘（默认 false，只写一
+	// 行审计记录到 work/rescue/log.jsonl）。--debug 时强制落盘。
+	KeepRecords *bool `yaml:"keep_records"`
+	// Model 复盘会话用的模型条目；空 = 跟随 checker_model，再空 = 文本模型。
+	Model string `yaml:"model"`
+	// ContextLimit 复盘会话的上下文窗口（默认 131072 = 128K；0 表示沿用
+	// checker/模型自己的限制）。
+	ContextLimit int `yaml:"context_limit"`
+	// MaxTokens 复盘会话的输出预算；0 = 与 checker 会话同配置。
+	MaxTokens int `yaml:"max_tokens"`
+}
+
+// RescueEnabled reports whether the rescue review runs (default ON).
+func (c LatexConfig) RescueEnabled() bool { return c.Rescue.Enabled == nil || *c.Rescue.Enabled }
+
+// RescueMaxPerAttempt 是同一次尝试里最多复盘几次（默认 2）。
+func (c LatexConfig) RescueMaxPerAttempt() int {
+	if c.Rescue.MaxPerAttempt <= 0 {
+		return 2
+	}
+	return c.Rescue.MaxPerAttempt
+}
+
+// RescueMaxRounds 是复盘会话的轮次上限（默认 12）。
+func (c LatexConfig) RescueMaxRounds() int {
+	if c.Rescue.MaxRounds <= 0 {
+		return 12
+	}
+	return c.Rescue.MaxRounds
+}
+
+// RescueContextLimit 是复盘会话的上下文窗口（默认 131072 = 128K）。
+func (c LatexConfig) RescueContextLimit() int {
+	if c.Rescue.ContextLimit <= 0 {
+		return 131072
+	}
+	return c.Rescue.ContextLimit
+}
+
+// RescueMaxTokens 是复盘会话的输出预算；0 = 沿用 checker 会话的配置。
+func (c LatexConfig) RescueMaxTokens() int { return c.Rescue.MaxTokens }
+
+// RescueKeepRecords 决定复盘会话的转录是否落盘（默认 false）。
+func (c LatexConfig) RescueKeepRecords() bool {
+	return c.Rescue.KeepRecords != nil && *c.Rescue.KeepRecords
 }
 
 /*
@@ -860,9 +923,9 @@ type PathsConfig struct {
 // 漏内容——超过这个规模的章节按语义拆开，由子会话并行转换。
 const DefaultMaxChapterLines = 3000
 
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）; 19 (T131)：latex 新增 dedupe_icon_auto（小图标本地自动归组的门槛，未写时 0.75、0 = 关闭，全部交核验会话）; 20 (T138/T135)：latex 新增 dedupe_align_grid（判据网格，整数或 "0.95S"）/ dedupe_align_typical / dedupe_attach_min / dedupe_icon_max_area / dedupe_bucket_max。
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）; 19 (T131)：latex 新增 dedupe_icon_auto（小图标本地自动归组的门槛，未写时 0.75、0 = 关闭，全部交核验会话）; 20 (T138/T135)：latex 新增 dedupe_align_grid（判据网格，整数或 "0.95S"）/ dedupe_align_typical / dedupe_attach_min / dedupe_icon_max_area / dedupe_bucket_max; 21 (P58)：latex 新增 rescue 块（enabled / max_per_attempt / max_rounds / keep_records / model）以及 models.rescue 这个可选条目（未配则跟随 checker 模型）。
 // 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 text。
-const CurrentConfigVersion = 20
+const CurrentConfigVersion = 21
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.

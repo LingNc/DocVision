@@ -714,6 +714,8 @@ func LabelFor(rel string) string {
 		{"stylefix-", "style-fix"},
 		{"vector_", "vector"},
 		{"figure_check_", "figure-check"},
+		// P58：复盘会话（rescue_<章>[.tryN].jsonl）落到「错误处理」阶段。
+		{"rescue_", "rescue"},
 	} {
 		if strings.HasPrefix(base, p.prefix) && len(base) > len(p.prefix) {
 			return p.label + ":" + stageSubject(p.label, strings.TrimPrefix(base, p.prefix))

@@ -1,6 +1,7 @@
 package latex
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,15 +176,52 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
 		}
 		if runErr == nil && !submit.Submitted {
+			// P58：先让复盘会话看一眼——还健康就照常提醒；已经退化成正文工具调用/
+			// 重复内容时，截断到最后一个干净轮次再核对（排进重试队列，与页面
+			// 的 ⤓ 同一条通路）；救不回来就直接上报，不再拿同一个坏会话烧两轮。
+			hint := ""
+			if r.cfg.Latex.RescueEnabled() {
+				target := rescueTarget{ProjDir: proj, Base: base, Role: "checker", TrPath: trPath}
+				if r.rescueBudget(base + "/checker") {
+					if v, ok := r.rescueReview(target, tid); ok {
+						switch v.Verdict {
+						case "fail":
+							r.log.LogWarning(tid, "[checker]", base, "复盘判定核对会话无法挽救："+v.Reason)
+							if tr != nil {
+								tr.Close()
+								tr = nil
+							}
+							r.keepCheckerTranscript(trPath, strict)
+							return false, "checker 复盘判定会话无法挽救：" + v.Reason
+						case "truncate":
+							if err := r.rescueQueueTruncate(target, v.From); err == nil {
+								r.log.LogWarning(tid, "[checker]", base, fmt.Sprintf("复盘判定核对会话已退化，已排队从第 %d 条记录继续核对：%s", v.From, v.Reason))
+								if tr != nil {
+									tr.Close()
+									tr = nil
+								}
+								r.keepCheckerTranscript(trPath, strict)
+								return false, "checker 会话已退化，已排队从干净轮次继续核对"
+							}
+						case "retry":
+							hint = v.Hint
+						}
+					}
+				}
+			}
 			// 与 tikz 会话同款：模型漏了 submit 就提醒一次。
 			r.log.LogWarning(tid, "[checker]", base, "会话结束但未提交结论，发送提交提醒")
 			chkState(rowStateQueued)
 			release := r.acquireCheckerSlot()
 			chkState(rowStateRunning)
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+			remindText := "You have NOT called submit yet. Use the `submit` TOOL (a real tool call with its JSON arguments — writing `submit` or `\\submit{...}` inside your reply text does nothing): re-read the chapter files if needed, then call submit with your verdict."
+			if hint != "" {
+				remindText += " Reviewer note: " + hint
+			}
 			_, runErr = sess.Run(session.RunOptions{
 				// T209：同上——写成正文不算，必须真的发一次 submit 工具调用。
-				UserText: "You have NOT called submit yet. Use the `submit` TOOL (a real tool call with its JSON arguments — writing `submit` or `\\submit{...}` inside your reply text does nothing): re-read the chapter files if needed, then call submit with your verdict.",
+				UserText: remindText,
 			})
 			release()
 		}

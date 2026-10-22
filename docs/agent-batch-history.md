@@ -2318,3 +2318,21 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 转录统计（1137 条会话、173 次调用）：21 次第一次被拒，全是 `ranges stop at line N; expected full coverage through line N+1`。根因是行数口径：`len(strings.Split(md, "\n"))` 把末尾换行多算一行，模型按 `wc -l`/`grep -n` 看到的正文行数切分，就差那一行。
 - 改：`lastContentLine()` 取最后一条非空行，校验按它收口（`next == lastContent+1` 与 `next == totalLines+1` 都接受）；`read_file` 整文件回执加 `M lines`。真机重放：被拒的那次原始参数（`total=1672 lastContent=1671`）现在直接 `SUBDIVISION REQUESTED: 7 child ranges persisted`。
 - 验证：`TestValidateChapterSubdivisionsAllowsTrailingBlankLine` / `TestLastContentLine` + 既有分段测试；`go test ./internal/latex ./internal/session` 绿。
+
+## 第五十八批：未提交收尾的复盘会话（P58，2026-10-22）
+
+用户口径：「我们的模型有时候会在没有反馈的时候就是意外的中间终止就是没有最终 submit……只是发送 not submit 并不能让模型正确的继续，因为很多时候都是模型已经开始输出错误的乱码，或者 json，或者 xml 的工具等等」——所以要一个**只读的复盘会话**来看那条会话的历史，判断"还能救（发提醒）"还是"已退化（从最后一个干净轮次截断）"，它自己的会话存到单独的「错误处理」分类里、默认只在 debug 下存 jsonl。
+
+**设计定稿（用户确认的三点）**：① 模型条目不跟随 checker，而是**单独新建 `models.rescue` 条目**（模板里 `extends: text`，默认与 checker 同底座，方便单独调）；② 记录默认**只写一行审计日志**，`--debug` 才落 jsonl；③ 三步一次做完（retry / truncate / fail 全上，convert 与 checker 都接）。
+
+**做了什么**：
+- `internal/latex/rescue.go`：`ReadSessionTool`（按物理行号取窗口：默认末尾 12 条消息、单条截 2000 字符、`from` 往前翻、`count` 到 40、`max_chars: 0` 看全文并回执"要读全文就再给 `max_chars=0`"）、`SessionStatsTool`（轮次数、每轮 `finish_reason`、正文"像工具调用"的行号（`<tool_call`/`<parameter`/`"function":`/`\submit{`/整段裸 JSON）、最长重复 120 字符块、每轮起点行号——**事实**，不下结论）、`RescueSubmitTool`（`verdict`/`from`/`reason`/`hint`，`truncate` 必须给 `from`、`reason` 必填、终态回执）。`rescueReview` 起会话（上下文 `latex.rescue.context_limit` 默认 131072、输出预算与 checker 同配置、轮次 `max_rounds` 默认 12），`rescueBudget` 按「章节/角色」计数（默认 2 次），`rescueAudit` 追加 `work/rescue/log.jsonl`，`rescueQueueTruncate` 排 `role=continue`（checker → `role=checker`）的重试请求（`From`/`Path`/`Source: rescue`）。
+- `remindOrRescue`（`book.go`）：`remindSubmit` 变薄壳；convert 调用点带 `rescueTarget{Proj, Base, Role: "convert", TrPath: trPath}`。每次提醒前先复盘：`fail` → 直接失败；`truncate` → 排队并失败收尾（不再在同一坏会话里烧第二轮）；`retry` → 照常提醒，`hint` 拼在提醒末尾。
+- checker（`checker.go`）：未提交结论时同样先复盘，`role=checker`，`truncate` 排队后返回「已排队从干净轮次继续核对」。
+- 预览（`sessionview`）：「错误处理」阶段（`StageTitles`/`StageOrder` 排最后/`LabelFor` 认 `rescue_` 前缀），复盘转录 `work/sessions/rescue_<章>_<时间>.jsonl` 单独成组。
+- 提示词 `latex_rescue.system.md`（三类结论的判据、`truncate` 取**最早**干净点、不得编造行号、必须 `submit`）+ 注册表（`MustMention: read_session/session_stats/submit`）。
+- 配置 `latex.rescue.*`（enabled/max_per_attempt/max_rounds/context_limit/max_tokens/keep_records/model）+ 模板 `models.rescue`，配置版本 20→21，两份模板同步、`temp/config_new.yaml` 固件同步。
+
+**测试**：`p58_rescue_test.go`（尾窗/`from`/全文、超长截断提示、`session_stats` 点名正文工具调用与 `finish_reason`、`submit` 校验与终态、排队请求的 `role=continue`/`From`/`Path`、预算默认 2 次、模型回退链）、`p58_rescue_stage_test.go`（预览阶段归组与排序）。`go test ./internal/...` 全绿。
+
+**已知边界**：递归子章节的**转换**会话被判 `truncate` 时，`role=continue` 会被 T211 的分流折成"继续跑父章节"（`From` 丢弃）——子章节退化目前靠父章节续跑兜底，没有按行号精确截断；子章节的**核对**会话不受影响（`role=checker` 的 `From` 一路可用）。`--debug` 强制落盘复盘转录（`rescueKeepRecords` 读 logger level ≥ 4）。

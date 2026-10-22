@@ -51,6 +51,7 @@ const (
 	VerifySystem      = "latex_verify.system"
 	WatermarkSystem   = "latex_watermark.system"
 	CheckerSystem     = "latex_checker.system"
+	RescueSystem      = "latex_rescue.system"
 	FigureCheckSystem = "latex_figurecheck.system"
 
 	// T43 风格修复大循环的三个会话。
@@ -154,6 +155,11 @@ var registry = []Template{
 	{
 		Name: FixSystem, File: "latex_fix.system.md",
 		MustMention: []string{"bash", "compile", "edit_file", "grep", "list_fonts", "read_file", "submit", "view_image", "view_pdf", "write_file"},
+	},
+	{
+		Name: RescueSystem, File: "latex_rescue.system.md",
+		Vars:        []string{"OUTPUT_LANGUAGE"},
+		MustMention: []string{"read_session", "session_stats", "submit"},
 	},
 	{
 		Name: VerifySystem, File: "latex_verify.system.md",

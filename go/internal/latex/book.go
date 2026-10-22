@@ -1776,7 +1776,8 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	} else if !func() bool {
 		convState(rowStateCheck)
 		defer convState(rowStateRunning)
-		return r.remindSubmit(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted })
+		return r.remindOrRescue(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted },
+			rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath})
 	}() {
 		// 必须显式提交（用户口径）：提前收尾漏了 submit 就提醒续跑（最多两次），
 		// 仍不提交判失败——不再静默采纳"编译通过但没提交"的产物
@@ -2625,14 +2626,51 @@ func writeFontsReadme(fontsDir string) {
 // 会话提前收尾没提交 → 提醒续跑最多两次 → 仍未提交返回 false（调用方判失败）。
 // 提醒轮在同一会话里续跑——前面写好的文件都还在，补上 submit 即可。
 func (r *Runner) remindSubmit(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool) bool {
+	return r.remindOrRescue(sess, tid, tag, label, submitTool, submitted, rescueTarget{})
+}
+
+// remindOrRescue 是 remindSubmit 的超集：给了 rescueTarget 时，每次提醒之前
+// 先让复盘会话（P58）看一遍这条会话的转录——还健康就照常提醒，已经退化就
+// 截断到最后一个干净轮次继续（排进重试队列，与页面的 ⤓ 同一条通路），救不回
+// 来就按失败收尾。没有 target（样式/划分/装配等阶段）时行为与老路径一致。
+func (r *Runner) remindOrRescue(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool, target rescueTarget) bool {
+	hint := ""
 	for remind := 0; remind < 2 && !submitted(); remind++ {
+		if target.Base != "" && r.cfg.Latex.RescueEnabled() {
+			if r.rescueBudget(target.Base + "/" + target.Role) {
+				if v, ok := r.rescueReview(target, tid); ok {
+					switch v.Verdict {
+					case "fail":
+						r.log.LogWarning(tid, tag, label, "复盘判定这条会话无法挽救，不再提醒："+v.Reason)
+						return false
+					case "truncate":
+						if err := r.rescueQueueTruncate(target, v.From); err != nil {
+							r.log.LogWarning(tid, tag, label, "复盘要求截断，但排队失败："+err.Error())
+						} else {
+							r.log.LogWarning(tid, tag, label, fmt.Sprintf("复盘判定会话已退化，已排队从第 %d 条记录继续：%s", v.From, v.Reason))
+							return false
+						}
+					case "retry":
+						if v.Hint != "" {
+							hint = v.Hint
+						}
+					}
+				}
+			} else {
+				r.log.LogWarning(tid, tag, label, "复盘次数已用完，退回普通提醒")
+			}
+		}
 		r.log.LogWarning(tid, tag, label, "会话结束但未提交，发送提交提醒")
 		release := r.acquireChapterSlot()
 		// T209：提醒里点名"要真的发一次工具调用"。实测模型会把这个动作**写成
 		// 正文**（`\submit{…}` / 裸 JSON 字符串，finish=stop、tool_calls 为空），
 		// 于是提醒发两遍、钱花了、会话还是没有提交——只重复"你还没提交"没有用，
 		// 得说清"写在正文里不算"。
-		_, runErr := sess.Run(session.RunOptions{UserText: "You have NOT submitted yet — nothing counts until you make a real `" + submitTool + "` TOOL CALL with its JSON arguments. Writing the call, its JSON, or `\\submit{...}` inside your reply text does nothing; use the tool itself. Call " + submitTool + " now (fix and compile first if something is still broken)."})
+		remindText := "You have NOT submitted yet — nothing counts until you make a real `" + submitTool + "` TOOL CALL with its JSON arguments. Writing the call, its JSON, or `\\submit{...}` inside your reply text does nothing; use the tool itself. Call " + submitTool + " now (fix and compile first if something is still broken)."
+		if hint != "" {
+			remindText += " Reviewer note: " + hint
+		}
+		_, runErr := sess.Run(session.RunOptions{UserText: remindText})
 		release()
 		if runErr != nil {
 			r.log.LogWarning(tid, tag, label, "提交提醒轮失败:", runErr)
