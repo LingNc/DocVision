@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 ### Fixed
+- **"工作区没有工具"是幻觉，不是结论（P58 观察）**：会话被厂商空回复打断后，恢复时模型只回一句 "the chapter workspace tools are not available in this session" 就收尾，整章被记成失败——工具其实一直在请求里。现在分两层修：① **会话层纠正一次**——回复声称工具/工作区不可用、而这一轮没有 tool_calls 时，把真实工具清单写进一条 user 消息并要求"现在就调"，然后重发（每会话一次；仍然拒绝就照常收尾，交给提醒/复盘链路，不在这一层判死，T205 的规矩不变）；② **空回复判据放宽**——正文、思考、工具调用三者全空时原样重发一次，不再要求 completion tokens == 0（真实案例 finish=stop、completion 1819 tokens，思考被网关吞掉，会话就此静默停住）；`finish=length` 的空回复仍由 T159 的预算翻倍路径处理，两条不抢。③ 复盘提示词加一条：**拒绝不算答案**，只说"工具不可用/我读不了文件"的会话判 `truncate`（从第一条 worker 消息重新开始），不判 `fail`。
+
+
+### Fixed
 - **`--debug` 下看不到复盘会话（P58 实测）**：日志级别是 `Info=0 / Debug=1 / Trace=2`，判定"是否落盘复盘转录"时写成了 `>= 4`，等于**永不落盘**——用户在 `--debug` 下跑，`work/rescue/log.jsonl` 有审计记录、网页「错误处理」里却一条会话都没有。改为 `>= logger.LevelDebug`，并加测试钉住（Debug 落盘 / Info 不落盘 / `latex.rescue.keep_records: true` 落盘）。**要重编译重启才生效**：此前产生的复盘只留在审计日志里，没有对话可看。
 
 ### Added

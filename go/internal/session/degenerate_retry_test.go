@@ -59,7 +59,9 @@ func TestDegenerateEmptyResponseGivesUpAfterOneRetry(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		sse(w, "", "length", 0)
+		// finish=stop 才是"退化空回复"（finish=length 由 T159 的预算翻倍路径
+		// 接管，见 TestNudgeBoostsBudgetAfterLengthTruncation）。
+		sse(w, "", "stop", 0)
 	}))
 	defer srv.Close()
 
@@ -89,10 +91,12 @@ func TestDegenerateEmptyResponseHelper(t *testing.T) {
 	if !degenerateEmptyResponse(deg, msg("")) {
 		t.Error("empty content + 0 completion should be degenerate")
 	}
-	// 有真实输出 token 的空内容（finish=stop）不是退化响应，走 nudge。
+	// 有真实输出 token 的空内容（finish=stop、思考被网关吞掉）同样是退化
+	// 响应：真实案例 completion 1819 tokens、正文/思考/工具调用全空，会话
+	// 静默停住。原样重发一次比走 nudge 更对。
 	ok := &ChatResponse{Usage: &Usage{CompletionTokens: 12}}
-	if degenerateEmptyResponse(ok, msg("")) {
-		t.Error("empty content with real completion tokens must stay on the nudge path")
+	if !degenerateEmptyResponse(ok, msg("")) {
+		t.Error("empty content with real completion tokens is still degenerate")
 	}
 	// 有内容不是退化响应。
 	if degenerateEmptyResponse(deg, msg("text")) {

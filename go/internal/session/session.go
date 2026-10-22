@@ -88,6 +88,8 @@ type Session struct {
 	// toolProseWarned 只让"工具调用被写成正文"的警告每个会话出现一次（T205）：
 	// 这种回复会连着来，刷屏没有意义；它只是诊断线索，不影响会话怎么跑。
 	toolProseWarned bool
+	// toolAccessNudged 只让"声称工具不可用"的纠正每会话出现一次。
+	toolAccessNudged bool
 	// estBeforeRequest 是最近一次请求发出**之前**的本地估算，用它当
 	// 标定分母（响应回来后才知道厂商实测值）。
 	estBeforeRequest int
@@ -707,6 +709,31 @@ func (s *Session) run(opts RunOptions) (string, error) {
 			}
 		}
 
+		// 用户口径（2026-10-22）：模型说"工作区没有工具 / 我访问不了文件"是
+		// **幻觉**——工具一直在请求里（tool_choice=auto）。以前只记告警（T205），
+		// 结果这种会话静默结束、整章被记成失败。这里纠正一次：把真实工具清单
+		// 直接告诉它，并要求它现在就调；仍然拒绝就交给提醒/复盘链路（不在这一
+		// 层判死，T205 的规矩不变）。
+		if useTools && len(s.tools) > 0 && len(choice.Message.ToolCalls) == 0 && !s.toolAccessNudged {
+			if text := ContentString(choice.Message); claimsNoToolAccess(text) {
+				s.toolAccessNudged = true
+				s.messages = append(s.messages, choice.Message)
+				s.appendTranscript(choice.Message)
+				names := s.toolNameList(12)
+				if s.logger != nil {
+					s.logger.LogWarning(s.tid, fmt.Sprintf(
+						"[session:%s] 模型声称「工具不可用」，但工具一直在（%s）；已纠正一次并要求现在就调用：%s",
+						s.label, names, truncateForLog(strings.TrimSpace(text), 160)))
+				}
+				nudge := "Your tools ARE available in this session: " + names + ". " +
+					"The previous reply claimed they were not — that is incorrect; nothing ran because you did not call them. " +
+					"Call the tools now (for a conversion session start with read_file on work:manual.md, then read the chapter markdown)."
+				s.messages = append(s.messages, ChatMessage{Role: "user", Content: nudge})
+				s.appendTranscript(ChatMessage{Role: "user", Content: nudge})
+				continue
+			}
+		}
+
 		if len(choice.Message.ToolCalls) > 0 && useTools {
 			NormalizeToolCallTypes(&choice.Message)
 			StripLeakedToolXML(&choice.Message)
@@ -904,7 +931,15 @@ func degenerateEmptyResponse(resp *ChatResponse, choice *ChatResponseChoice) boo
 	if strings.TrimSpace(choice.Message.ReasoningContent) != "" {
 		return false
 	}
-	return resp.Usage != nil && resp.Usage.CompletionTokens == 0
+	// 截断（finish=length）由 T159 的"预算翻倍重试"处理，这里不抢它。
+	if resp.FinishReason == "length" {
+		return false
+	}
+	// 不再要求 completion tokens == 0：真实案例是 finish=stop、completion
+	// 1819 tokens，正文/思考/工具调用三者全空——思考被网关吞掉，会话就此
+	// 静默停住（恢复后模型再冒出一个"我没有工具"的幻觉）。这种响应对会话
+	// 没有任何推进，原样重发比走 nudge 更对。
+	return resp.Usage != nil
 }
 
 // executeTool dispatches one tool call, logging and error-wrapping.
@@ -1671,4 +1706,46 @@ func ModelConcurrencyLimits() map[string]int {
 		out[k] = v
 	}
 	return out
+}
+
+// claimsNoToolAccess 判断这条正文是不是在声称"工具/工作区不可用"。
+// 真实案例（P58 上线后）：子章节会话被厂商空回复打断，恢复后只回一句
+// "the chapter workspace tools are not available in this session" 就收尾，
+// 而工具一直在请求里。这是幻觉，要纠正，不是"会话做不到"。
+func claimsNoToolAccess(text string) bool {
+	t := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	if t == "" {
+		return false
+	}
+	toolish := strings.Contains(t, "tool") || strings.Contains(t, "workspace") ||
+		strings.Contains(t, "file system") || strings.Contains(t, "filesystem") ||
+		strings.Contains(t, "工具") || strings.Contains(t, "工作区")
+	if !toolish {
+		return false
+	}
+	for _, pat := range []string{
+		"not available", "unavailable", "not accessible", "cannot access", "can't access",
+		"don't have access", "do not have access", "no access", "not enabled",
+		"没有可用的工具", "工具不可用", "无法访问工具", "无法访问工作区", "没有工具",
+	} {
+		if strings.Contains(t, pat) {
+			return true
+		}
+	}
+	return false
+}
+
+// toolNameList 给纠正文案用的工具名清单（最多 n 个）。
+func (s *Session) toolNameList(n int) string {
+	names := make([]string, 0, len(s.tools))
+	for _, t := range s.tools {
+		names = append(names, t.Name())
+		if n > 0 && len(names) >= n {
+			break
+		}
+	}
+	if len(names) == 0 {
+		return "（无）"
+	}
+	return strings.Join(names, ", ")
 }

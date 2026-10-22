@@ -14,6 +14,9 @@ A session ended its turn **without calling `submit`**. Your job is to look at th
   - Prefer cutting **before** the first message that shows the degeneration; keep the messages where the work was actually progressing.
 - `fail` — nothing is salvageable in this conversation (it never got started, or every round is degenerate). The runner stops here; say why in `reason`.
 
+## A refusal is not an answer
+If the only reply is a refusal — "the workspace tools are not available", "I cannot read the files", "nothing I can do" — that is a **hallucination**: the tools are always sent with the request and the runner has already told the model so. Do **not** call it `fail` (that silently marks a whole chapter as impossible). It is `truncate`: cut back to the first worker message (or the earliest line before the refusal) so the work starts over with a clean context. Only use `fail` when the session did work and then degenerated beyond repair, or the transcript itself is unreadable.
+
 ## Rules
 - Judge by the transcript, not by hope: if the last rounds are prose tool calls or repetitions, it is `truncate`, not `retry`.
 - Never invent line numbers; only use numbers that `read_session` or `session_stats` showed you.
