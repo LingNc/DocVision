@@ -1258,3 +1258,7 @@ user 轮
   转录统计：1137 条会话里 173 次调用，其中 **21 次第一次被拒**，且全是同一种——`REJECTED: ranges stop at line 1671; expected full coverage through line 1672`。根因是行数口径差一：`len(strings.Split(md, "\n"))` 会把文件末尾的换行多切出一个空元素（1671 行的章节数出 1672 行），而模型按自己看到的正文（`wc -l`/`grep -n` 也是 1671）切到 1671 就被判"没盖满"打回，白花一轮请求。
   改：新增 `lastContentLine()`（最后一条非空行的行号），`validateChapterSubdivisions` 的收口改成"正文盖满即可"——`next == lastContent+1` 与 `next == totalLines+1`（把末尾空行并入最后一段）都接受；真漏一行正文仍然拒。错误文案也写清正文止于哪一行。`RequestChapterSplitTool` 增 `LastContent`（构造点与 `Restore` 都填）；`read_file` 整文件回执加行数 `[path, N bytes, M lines]`，M 是正文最后一行行号，模型不必再自己数、也不会数成差一。
   验证：把真实章节那次被拒的原始参数重放（`total=1672 lastContent=1671`）→ `SUBDIVISION REQUESTED: 7 child ranges persisted`；`TestValidateChapterSubdivisionsAllowsTrailingBlankLine`（正文盖满接受 / 末尾空行并入接受 / 真漏正文仍拒）、`TestLastContentLine`。
+
+- T214 章节树：切换转换会话时，下面子章节行没有跟着切到那次转换对应的子会话（仍在显示最新一次），需要按"选中转换的世代"取子行（P59 的锚点/世代规则同样适用于子行）。
+- T215 预览：刷新按钮旁加「重置视图」——清掉 pin/选中/展开记忆，回到当前正在跑的顶层状态（不清任何数据）。
+- T216 修复会话（P60）：在已划分的子章节与工作区上按修复任务重新下派新会话，减少父章节整章重开的代价；核对由父会话定向下发规则并沿用同一锚点。
