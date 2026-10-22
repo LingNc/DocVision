@@ -110,3 +110,20 @@
 **实现结果（2026-10-22）**：三步一次做完。`internal/latex/rescue.go`（三个工具 + 复盘会话 + 审计日志 + 预算 + 模型解析）、`remindOrRescue`（convert 与 checker 两处都接上，样式/划分/装配等阶段不受影响）、`rescueQueueTruncate`（排 `role=continue` 的请求，复用页面 ⤓ 那条通路；checker 排 `role=checker` 走 `continueCheckerFrom`）、预览侧 `rescue` 阶段（`StageTitles` = 错误处理、`StageOrder` 里排最后、`LabelFor` 认 `rescue_` 前缀）、提示词 `latex_rescue.system.md`、配置块 `latex.rescue.*`（开关/预算/记录/模型指针）+ `latex.sessions.rescue`（上下文 128K、轮次 12、其余继承 checker）+ 模型条目 `models.rescue`（写在 `models.checker` 下面、`extends: checker`），配置 v22、`docs/config.md`/`docs/sessions.md`/CHANGELOG 同步。测试钉住：`read_session` 的尾窗/`from`/`max_chars=0`、`session_stats` 点名正文工具调用、`submit` 校验、排队请求的角色与 `From`/`Path`、预算默认 2 次、模型回退链、预览阶段归组。**判定口径（2026-10-22 用户调整）**：`truncate` 是默认——会话本身有问题（坏的一轮、工具用错、拒绝、重复/乱码、上下文被错误前提污染、已经做错的工作）就截断，retry 只会把错误留在上下文里；`retry` 只留给**聊天记录干净、纯外部瞬时故障**（断网、API 错误、`finish=length` 截断、进程中断），拿不准一律 `truncate`。提示词里写死这条优先级。
 
 **已知边界**：递归子章节的转换会话如果被判 `truncate`，`role=continue` 会被 T211 的分流折成"继续跑父章节"（`From` 丢弃，等于从会话末尾续跑）——子章节的退化目前靠父章节续跑兜底，没有按行号精确截断；子章节的**核对**会话不受影响（`role=checker` 的 `From` 一路可用）。
+
+### P59 预览：以「转换会话」为唯一锚点组织核对与子会话（设计，待实现）
+
+**用户口径（2026-10-22）**："每个会话的历史和对应的转换、核对的关系很难说清楚，特别是核对的多次轮次——应该以转换会话为唯一的锚点：转换会话决定看到哪一个核对，同一个转换会话下可以有历史的不同核对会话；同理子会话也是。不能因为切换核对会话而改变转换会话或造成状态混乱；这样重试核对也不影响，因为都按最新的来。不要打补丁。"
+
+**问题（实测 `chapter_004`）**：转换与核对各自按**文件名里的尝试号**编号（`convert_<章>.tryN` / `checker_<章>.tryN`），两个号没有关系——
+- 手动重新核对只让核对的号加一（`checker_<章>.try2` 核对的仍是 `convert_<章>` 第 1 次），于是「同号=同一轮」的配对规则当场失效；
+- 根章重来一次后子章节的尝试号又从 1 数起，归档里上一代的 `convert_<子章>.try2` 号比工作树里这一次的 `#1` 还大，树与历史把两代混在一起（"下面都通过了、还有一个在排队"）。
+
+**模型**：唯一锚点是**转换会话**。
+- `anchor(会话)`：核对会话记录它核对的转换转录（新增 `t=meta kind=checker_target {"convert": "convert_<章>[.tryN]", "convert_attempt": N, "convert_sha": "…"}`，第一次核对与重新核对都写）；转换会话的锚点就是它自己。
+- 树上每个节点：`convert` = 这一次该章/该子章的转换（工作树优先、归档只作历史）；`checker` = **锚点等于该 convert 的所有核心里最新的那一条**。切换/重核核对只影响 `checker`，永远不改变 `convert`；`pin` 一条核对时，`convert` 由它的锚点决定（不是由号决定）。
+- 历史页：以 convert 为行首锚点分组——每个转换尝试一行，它下面的核对（含多次重核）按时间排；同一条链里不再出现"两个 `#1` 分不清"（核对行标 `核对#N`，且 `#N` 只是该角色自己的历史序号，不参与配对）。
+- 子会话：锚点规则同样成立——子章节行的父节点由子章节**转换**所属的根尝试决定（世代），与它被核对过几次无关。
+- 旧转录（没有 `checker_target`）回退：`checker.chapterAttempt == convert.chapterAttempt` 且归档世代相同，否则把核对接给它所在世代里最后一次转换（只在读索引时推断，不改磁盘）。
+
+**实现落点**：① `internal/latex/checker.go` 建会话后写 `checker_target`（`recheckChapter`/递归子节点同一入口）；② `internal/sessionview/sessionview.go` 读出 `ChapterAnchor` 字段进索引；③ `web/src/legacy/sidebar.ts` 的 `buildChapterTree`/`chapterAttemptChain` 改为按锚点选行与分组，`pin` 不再按号推断；④ 单测钉住：重核后 `convert` 不变、旧世代核对不上树、同锚多核对只显示最新；⑤ 归档世代参与链的身份键（`项目|章节|世代|锚点`）。
