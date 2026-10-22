@@ -2331,7 +2331,8 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - checker（`checker.go`）：未提交结论时同样先复盘，`role=checker`，`truncate` 排队后返回「已排队从干净轮次继续核对」。
 - 预览（`sessionview`）：「错误处理」阶段（`StageTitles`/`StageOrder` 排最后/`LabelFor` 认 `rescue_` 前缀），复盘转录 `work/sessions/rescue_<章>_<时间>.jsonl` 单独成组。
 - 提示词 `latex_rescue.system.md`（三类结论的判据、`truncate` 取**最早**干净点、不得编造行号、必须 `submit`）+ 注册表（`MustMention: read_session/session_stats/submit`）。
-- 配置 `latex.rescue.*`（enabled/max_per_attempt/max_rounds/context_limit/max_tokens/keep_records/model）+ 模板 `models.rescue`，配置版本 20→21，两份模板同步、`temp/config_new.yaml` 固件同步。
+- 配置分两处（用户当天调整）：`latex.rescue.*` 只留功能级——`enabled` / `max_per_attempt` / `keep_records` / 模型指针 `model`；**会话参数进 `latex.sessions.rescue`**（`context_limit` 默认 131072、`max_tool_rounds` 默认 12、`max_tokens` 0 = 继承 checker 的预算；没写的字段继承 `sessions.checker`，`LatexSession("rescue")` 里实现）。模型条目 `models.rescue` 写在 **`models.checker` 下面**、`extends: "checker"`（限制不写在模型条目上）。配置版本 20→22，两份模板同步、`temp/config_new.yaml` 固件同步、README/docs/config.md 同步。
+  期间一次操作失误：把模板 cp 到了仓库外（`/home/lingnc/workspace/Test/config.example.yaml`），已确认内容与模板一致后删除，并写到正确的 `MinerU_Tools/config.example.yaml`。
 
 **测试**：`p58_rescue_test.go`（尾窗/`from`/全文、超长截断提示、`session_stats` 点名正文工具调用与 `finish_reason`、`submit` 校验与终态、排队请求的 `role=continue`/`From`/`Path`、预算默认 2 次、模型回退链）、`p58_rescue_stage_test.go`（预览阶段归组与排序）。`go test ./internal/...` 全绿。
 

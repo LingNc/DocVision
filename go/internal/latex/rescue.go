@@ -504,15 +504,10 @@ func (r *Runner) rescueReview(t rescueTarget, tid int) (rescueVerdict, bool) {
 	name := r.rescueModelName()
 	client := r.clientFor(name)
 	modelCfg := r.modelOf(name)
-	// 上下文：默认 128K（配置可覆盖）；会话与模型两侧取 min，所以两边都设。
-	limit := r.cfg.Latex.RescueContextLimit()
-	modelCfg.ContextLimit = limit
-	tuning := r.cfg.LatexSession("checker") // 输出预算与 checker 同配置
-	if v := r.cfg.Latex.RescueMaxTokens(); v > 0 {
-		tuning.MaxTokens = v
-	}
-	tuning.ContextLimit = limit
-	tuning.MaxToolRounds = r.cfg.Latex.RescueMaxRounds()
+	// 会话参数全部来自 latex.sessions.rescue（没写的字段继承 sessions.checker：
+	// 输出预算与 checker 同配置；上下文默认 128K、轮次默认 12 由
+	// config.LatexSession("rescue") 给）。模型那边一并不动——限制设在这里。
+	tuning := r.cfg.LatexSession("rescue")
 
 	readTool := &ReadSessionTool{Path: t.TrPath, Lines: lines, Total: len(lines)}
 	statsTool := &SessionStatsTool{Lines: lines, Total: len(lines)}

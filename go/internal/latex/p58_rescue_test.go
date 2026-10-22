@@ -199,3 +199,33 @@ func TestRescueModelFallsBackToChecker(t *testing.T) {
 		t.Fatalf("显式配置优先，got %q", got)
 	}
 }
+
+// P58：复盘会话的会话参数在 latex.sessions.rescue 里；没写的字段继承 checker
+// （输出预算同配置），上下文默认 128K、轮次默认 12。
+func TestRescueSessionTuningInheritsChecker(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Latex.Sessions.Checker.MaxTokens = 4321
+	got := cfg.LatexSession("rescue")
+	if got.MaxTokens != 4321 {
+		t.Fatalf("max_tokens 应继承 checker（4321），got %d", got.MaxTokens)
+	}
+	if got.ContextLimit != 131072 {
+		t.Fatalf("context_limit 默认应是 128K，got %d", got.ContextLimit)
+	}
+	// checker 自己配了上下文时随它（"继承 checker，默认 128K"）。
+	cfg2 := &config.Config{}
+	cfg2.Latex.Sessions.Checker.ContextLimit = 65536
+	if got := cfg2.LatexSession("rescue"); got.ContextLimit != 65536 {
+		t.Fatalf("应继承 checker 的上下文（65536），got %d", got.ContextLimit)
+	}
+	if got.MaxToolRounds != 12 {
+		t.Fatalf("max_tool_rounds 默认应是 12，got %d", got.MaxToolRounds)
+	}
+	cfg.Latex.Sessions.Rescue.ContextLimit = 262144
+	cfg.Latex.Sessions.Rescue.MaxToolRounds = 20
+	cfg.Latex.Sessions.Rescue.MaxTokens = 512
+	got = cfg.LatexSession("rescue")
+	if got.ContextLimit != 262144 || got.MaxToolRounds != 20 || got.MaxTokens != 512 {
+		t.Fatalf("latex.sessions.rescue 的显式值应生效：%+v", got)
+	}
+}
