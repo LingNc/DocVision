@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// T200：预览页把两类"不是会话"的 jsonl 也当成会话列出来——P55 的工作区快照
+// T200/T202：预览页把不是会话的 jsonl 也当成会话列出来——P55 的工作区快照
 // 日志（`work/rounds/<章>/journal-try<N>.jsonl`，侧栏因此多出十几条没有对话、
 // 没有轨迹的空会话）与清理脚本的整目录备份（`<项目名>_记录_<日期>_<时刻>/`，
 // 整个副本被读成一个挂着几十条会话的项目组）。两者都必须在扫描时整棵跳过。
@@ -26,6 +26,14 @@ func TestScanSkipsRoundsJournalsAndCleanBackups(t *testing.T) {
 	// 清理脚本的整目录备份：跳过（哪怕是完整的工程副本）。
 	writeFile(t, jsonl(root, "latex_project", "书_记录_20261021_2308", "work", "sessions", "convert_chapter_001.jsonl"),
 		transcript(`{"t":"msg","role":"user","text":"备份里的旧会话"}`))
+	// 就地截断的原文备份（T202）：`work/sessions/.trash/<转录>.<时刻>.jsonl`
+	// 也是 .jsonl，侧栏曾因此冒出"转换 · <章>.jsonl.20261022-122539"。
+	writeFile(t, jsonl(root, "latex_project", "书", "work", "sessions", ".trash",
+		"convert_chapter_022_child_08.jsonl.20261022-122539.jsonl"),
+		transcript(`{"t":"msg","role":"user","text":"截断前的原文"}`))
+	writeFile(t, jsonl(root, "latex_project", "书", "work", "temp", "conv_chapter_001", "work", ".trash",
+		"convert_chapter_001.jsonl.20261022-130000.jsonl"),
+		transcript(`{"t":"msg","role":"user","text":"细分树里的截断备份"}`))
 
 	sessions, err := Scan(root)
 	if err != nil {
@@ -57,6 +65,8 @@ func TestSkipScanDir(t *testing.T) {
 		{"/r/p/书_记录_20261021_2308", "书_记录_20261021_2308", true},
 		{"/r/p/书_记录_2026", "书_记录_2026", false},
 		{"/r/p/work/sessions", "sessions", false},
+		{"/r/p/work/sessions/.trash", ".trash", true},
+		{"/r/p/work/temp/conv_chapter_001/work/.trash", ".trash", true},
 	}
 	for _, c := range cases {
 		if got := skipScanDir(c.path, c.name); got != c.want {

@@ -2253,3 +2253,10 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - **子章节重跑没有输入是死路**：输入不在、父节点没整合 → 404"先在父章节里重跑这一支"，用户点"重试"什么也不会发生。
 - 改：`session.LooksLikeToolProseLeak` + Run 里直接判失败（写清厂商 prompt 与本地估算）+ `observePromptSize` 每会话一次告警；产物/md 解析补齐临时树并按层级链整段比对；`retryPrecondition` 走同一 md 解析、工作区判据认细分树节点；`from` 分支用 `transcriptUnderWork` 解析并按相对路径入队、`truncateCheckerTranscript` 同口径；`canForkFrom` 对核对放开子章节、fork 请求发完整路径；子章节输入不在时改为排队父章节 continue。
 - 验证：新增 9 个 Go 测试（检测、临时树产物、前置条件、层级精确、子章节核对 from、子章节 continue 回退、父无转录仍 404）+ 2 个 web 断言（子章节核对可 fork、fork 带完整路径）；`go test ./...` 全绿、`npm test` 199 绿、重建 dist；真实项目只读复核三支子章节的产物/md/前置条件；临时副本上用 HTTP 复核"有临时树产物 → 200 排队重新核对"与"输入不在、父有转录 → 200 改排父 continue"。
+
+### T202 · 截断备份（`.trash`）不再被扫成会话（2026-10-22）
+
+- 用户截图问：*"还有就是截断之后的会话怎么还会在这里显示？在 .trash中的"*——侧栏转换阶段下多出一条 `chapter_022_child_08.jsonl.20261022-122539`。
+- 原因：就地截断（⤫）把原文整份备份到 `work/sessions/.trash/<转录>.<时刻>.jsonl`，扩展名还是 `.jsonl`，扫描按扩展名认会话，于是这条备份被列成一个新会话（标题就是那串后缀，点开是截断前的旧对话）。T200 的 `skipScanDir` 补了 `media`/`.git`/`work/rounds`/`<名>_记录_…`，漏了 `.trash`。
+- 改：`skipScanDir` 增加 `.trash` 整棵跳过（主扫描与附加根扫描共用）；要看截断前的原文，用 `docvision sessions --dir <项目>/work/sessions/.trash`。
+- 验证：扫描测试补两处 `.trash`（`work/sessions/.trash/` 与细分树 `…/work/.trash/`）、规则测试补两条边界；`go test ./...` 全绿；真实输出根 `sessions --list` 1029 条、`grep` 命中 `.trash|jsonl.2026|journal-try` 为 0（截断备份实际只有 1 份，正是截图那条）。

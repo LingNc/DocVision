@@ -1002,6 +1002,10 @@ var cleanBackupRe = regexp.MustCompile(`_记录_[0-9]{8}_[0-9]{4}$`)
 //	                    这里，文件名也以 .jsonl 结尾，但它不是会话：扫进来会在侧栏
 //	                    多出十几条"没对话、没轨迹"的空会话（T200）。
 //	*_记录_<日期>      — 清理脚本的整目录备份，见 cleanBackupRe。
+//	.trash            — 就地截断（⤫ / 「删掉这条及之后」）的**原文备份**目录
+//	                    `work/sessions/.trash/<转录>.<时刻>.jsonl`。备份文件仍以
+//	                    .jsonl 结尾，扫进来会在侧栏冒出"转换 · <章>.jsonl.20261022-122539"
+//	                    这种条目——它不是任何一次运行产生的会话（T202）。
 func skipScanDir(p, name string) bool {
 	switch {
 	case name == "media" || name == ".git":
@@ -1009,6 +1013,8 @@ func skipScanDir(p, name string) bool {
 	case strings.HasSuffix(name, ".git"):
 		return true
 	case name == "rounds" && filepath.Base(filepath.Dir(p)) == "work":
+		return true
+	case name == ".trash":
 		return true
 	case cleanBackupRe.MatchString(name):
 		return true
