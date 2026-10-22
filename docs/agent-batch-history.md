@@ -2281,3 +2281,11 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 复盘：那条判据是**软判据**——`skills://`、`tools are not available in this session` 只是字符串，模型正常解释"这个会话里没有某个工具"就会被打死，异常形态也不止这一种；而且判失败本来就不是必要的，"这一轮有没有产出"用户看页面就知道。T201 真正有价值的部分是**让人看见**，不是替人判失败。
 - 改：判失败撤掉，改成每会话一条警告（含厂商报的 prompt tokens 与本地估算）；T201 另加的"厂商 prompt < 本地估算 60% 告警"也撤掉（各家计数口径不同，单看比例会误报），两个数字并进同一条警告。行为回到 T201 之前。
 - 验证：`TestToolProseLeakWarnsButDoesNotFailRun`（退化回复正常返回、不重发、只置位一次）、`TestToolProseLeakWarnsOnce`；`go test ./...` 全绿。
+
+### T206/T207 · 控制台实时行的时序、以及页面「是否在跑」的判据（2026-10-22）
+
+- 用户反馈两件事：*"这个cli界面很多显示的不全面或者有点乱。正在运行的和排队的，还有之前开子会话又回来续上的"* + 一屏实时行；*"web界面对于是否正在运行的显示感觉也有很多问题"*。
+- **CLI 三个问题**：① `ResumeStats.Active` 是"首行→末行"的墙上跨度，隔几天续跑的会话（实际只跑四十来分钟）写成 `2628m56s`；② 实时行在拿到并发槽之前就建好，排队 / 父节点等子会话（十几二十分钟）/ 真正在跑都长成 `轮次 0 · 工具调用 0 · 已用 25m46s`；③ 续跑的行从 `0` 开始爬，要等第一次进度回调才跳到真实数字。
+- **页面问题（实测定位）**：真实输出根 1044 条会话只有 1 条 live，而同一时刻 10 条转换 + 1 条核对在写（4 个 `.partial`、23 条转录 3 分钟内有写入）。根因是 `activityAfterEnd` 只看"出现过 run_end"，而一条转录里会跑好几轮 Run，上一轮的结局把这一轮的活动标记折成「已中断」，scan 又对 `interrupted` 强制 `live=false`。
+- 改：`Active` = 各用量行 `duration_ms` 之和；`fmtDuration` 超 1 小时按 `h`；实时行加状态词（排队/运行/等子会话 N/待核对，只有运行让计时器走，切换时结账累计）；续跑行首标「续跑」并用转录里的轮次/工具数/累计时间初始化；转换与核对接上状态切换（含提交提醒轮、父节点等子会话再整合）。页面侧按**行号**比较 `chapter_activity` 与 `run_end`，run_end 之后又出现消息时那条结局不再计入。
+- 验证：9 个新测试（`TestFmtDurationHours`、`TestLiveRowTextStates`、`TestResumeActiveSumsRequestDurations`、`TestResumeActiveWithoutUsageIsZero`、`TestActivityInterruptedOnlyWhenRunEndIsNewer`、`TestRunEndErrorClearedByLaterMessages`、`TestScanLiveWhenRunningActivityIsNewest` + 两个既有测试改口径）；真实数据复扫 live 1 → 11；`go test ./...` 全绿。

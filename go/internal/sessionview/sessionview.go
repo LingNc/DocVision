@@ -939,6 +939,13 @@ type transcriptStat struct {
 	// running、但这次尝试其实已经结束"的陈旧状态（T171）。
 	SawRunEnd       bool
 	ChapterActivity string
+	// ActivityIdx / RunEndIdx 是这两种 meta 行在转录里的行号（T207）：一次
+	// 会话可以在同一条转录里跑好几轮 Run，"活动标记停在 running" 与 "run_end
+	// 已经写过" 谁新谁旧只能按先后判断——旧实现只看 SawRunEnd，于是**正在跑**
+	// 的会话（上一轮 Run 的 run_end 还在下面）被判成"已中断"，侧栏那一片绿点
+	// 全灭、树里显示等待/中断。
+	ActivityIdx int
+	RunEndIdx   int
 	// Prices 是转录里 t=meta kind=price 冻的费率（model → 费率，同模型
 	// 后写胜）——费用按冻的价算，不依赖跑报表时的配置（T101 第二版）。
 	Prices map[string]config.PriceConfig
@@ -1111,7 +1118,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		chapter := chapterIdentity(rel)
 		live := liveNow(stat, c.mt, now)
 		endState := liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow)
-		activity := activityAfterEnd(stat.ChapterActivity, stat.SawRunEnd)
+		activity := activityAfterEnd(stat, stat.ChapterActivity)
 		switch activity {
 		case "queued", "waiting_children", "checking_result", "interrupted":
 			live, endState = false, ""
@@ -1207,8 +1214,8 @@ func liveEndState(state string, live bool) string {
 // 会话，或者进程被中断。旧行为照抄这个标记，侧栏会同时显示两条"运行中"（一条
 // 是已经作废的第 2 次，一条是真正在跑的第 3 次），看不出谁是真的。这里把它折成
 // "interrupted"，界面显示"已中断"。
-func activityAfterEnd(activity string, sawRunEnd bool) string {
-	if activity == "running" && sawRunEnd {
+func activityAfterEnd(stat transcriptStat, activity string) string {
+	if activity == "running" && stat.SawRunEnd && stat.RunEndIdx > stat.ActivityIdx {
 		return "interrupted"
 	}
 	return activity
@@ -1259,11 +1266,13 @@ func readStat(p string) (transcriptStat, error) {
 	br := bufio.NewReaderSize(f, 64*1024)
 	h := sha256.New()
 	var stat transcriptStat
+	idx := 0
 	for {
 		text, rerr := br.ReadString('\n')
 		h.Write([]byte(text))
 		trimmed := strings.TrimSpace(text)
 		if trimmed != "" {
+			idx++
 			// Only the type is decoded for every line: messages are the vast
 			// majority and must stay cheap to skip.
 			var head struct {
@@ -1273,6 +1282,11 @@ func readStat(p string) (transcriptStat, error) {
 				switch head.T {
 				case "msg":
 					stat.Messages++
+					// 这一行落在 run_end 之后 = 新的 Run 已经在跑（T207）：那条
+					// 结局是上一轮的，别再拿它当"这次会话的错误收尾"。
+					if stat.RunEndIdx > 0 {
+						stat.RunEndError = ""
+					}
 					// T22：原始行子串检查（零额外解码）——tool 回执行必含
 					// `"role":"tool"`（写入方是紧凑 JSON），submit 回执以
 					// SUBMITTED 开头；assistant 的正常文本只会写 "Submitted"。
@@ -1320,6 +1334,7 @@ func readStat(p string) (transcriptStat, error) {
 							Error string `json:"error"`
 						}
 						stat.SawRunEnd = true
+						stat.RunEndIdx = idx
 						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.OK != nil && !*rec.OK {
 							stat.RunEndError = rec.Error
 						} else if rec.OK != nil && *rec.OK {
@@ -1332,6 +1347,7 @@ func readStat(p string) (transcriptStat, error) {
 						}
 						if json.Unmarshal([]byte(trimmed), &rec) == nil {
 							stat.ChapterActivity = rec.State
+							stat.ActivityIdx = idx
 						}
 					}
 				case "usage":

@@ -130,10 +130,12 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		var tr *session.TranscriptWriter
 		var resumedMsgs []session.ChatMessage
 		var resumeSkip bool
+		var ckSeed liveSeed
 		if msgs, stats, err := session.LoadTranscriptStats(trPath); err == nil && len(msgs) > 0 {
 			sess.SetMessages(msgs)
 			sess.SeedCounters(stats.Rounds, stats.Tools)
 			resumedMsgs = msgs
+			ckSeed = liveSeed{rounds: stats.Rounds, tools: stats.Tools, active: stats.Active, resumed: true}
 			resumeLog(r.log, tid, "checker", base, msgs, stats)
 			resumeSkip = replaySubmit(r.log, tid, "checker:"+base, submit, stats)
 		}
@@ -143,12 +145,14 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		}
 		// checker 会话也进实时块：用户要看得到"谁进了 checker、跑到哪了"，
 		// 而且 checker 是并发跑的，必须有自己的行而不是挤在转换行里。
-		chkHook, chkClose := r.livePhaseRow("checker:"+base, "checker:"+base)
+		chkHook, chkState, chkClose := r.livePhaseRowState("checker:"+base, "checker:"+base, ckSeed)
 		sess.SetProgressHook(chkHook)
 		var runErr error
 		if !resumeSkip {
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
+			chkState(rowStateQueued)
 			release := r.acquireCheckerSlot()
+			chkState(rowStateRunning)
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 			_, runErr = sess.Run(session.RunOptions{UserText: resumeUserText(resumedMsgs, userText)})
 			release()
@@ -160,7 +164,9 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		if runErr == nil && !submit.Submitted {
 			// 与 tikz 会话同款：模型漏了 submit 就提醒一次。
 			r.log.LogWarning(tid, "[checker]", base, "会话结束但未提交结论，发送提交提醒")
+			chkState(rowStateQueued)
 			release := r.acquireCheckerSlot()
+			chkState(rowStateRunning)
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 			_, runErr = sess.Run(session.RunOptions{
 				UserText: "You have NOT called submit yet. Re-read the chapter files if needed, then call submit with your verdict.",

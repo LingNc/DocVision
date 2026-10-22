@@ -1224,3 +1224,14 @@ user 轮
   2. 这条检查也**不是必须的**：真正要看的是"这一轮有没有产出"，用户看页面就知道，重试一次就好（T201 之前那次回执里的静默失败，价值在于**让人看见**，不在于替人判失败）。
   改：撤掉判失败，改为**只记一条警告**（每会话一次，写出厂商报的 prompt tokens 与本地估算，便于判断是不是网关把请求改小了）；同时撤掉 T201 另加的"厂商 prompt < 本地估算 60% 就告警"——各家计数口径不同（有的不含工具定义），单看比例容易误报，这两个数字现在并到同一条警告里。运行行为回到 T201 之前：正文照常返回、"必须 submit"提醒照常走。
   验证：`TestToolProseLeakWarnsButDoesNotFailRun`（退化回复 → Run 正常返回正文、不重发、只置位一次警告标记）、`TestToolProseLeakWarnsOnce`（普通正文不命中、退化形态命中）；`go test ./...` 全绿。
+- T206（用户反馈，2026-10-22）：**控制台实时行"乱且不全"**。用户原话：*"感觉这个cli界面很多显示的不全面或者有点乱。正在运行的和排队的，还有之前开子会话又回来续上的"*，并贴了一屏 `[convert:chapter_xxx] 轮次 N · 工具调用 M · 已用 X`。
+  1. **"已用"会膨胀成几十小时**：`session.ResumeStats.Active` 取的是转录"首行 → 末行"的墙上跨度，隔几天再续跑的会话（本来只跑了四十来分钟）在行上写着 `2628m56s`；`fmtDuration` 又只会折成分钟。
+  2. **排队与运行长得一模一样**：转换/核对的实时行在**拿到并发槽之前**就建好了，排队、等子会话（父节点等整棵子树，动辄二十分钟）与真正在跑的行都长成 `轮次 0 · 工具调用 0 · 已用 25m46s`——用户看到的是"跑了半天一轮都没走"。
+  3. **续跑从 0 开始爬**：行一创建就是 `轮次 0`，要等会话第一次进度回调才跳到真实数字。
+  改：`Active` = 转录里各用量行 `duration_ms` 之和（真实工作时间，进程空档天然不计）；`fmtDuration` 超过 1 小时按 `h` 显示；实时行加**状态词**（`排队` / `运行` / `等子会话 N` / `待核对`，只有"运行"让计时器走，切换时把已跑时间结账进累计值，所以"已用"永远是真实工作时间）；续跑的行首标「续跑」并直接用转录里的轮次/工具数/累计时间初始化；转换与核对（含提交提醒那一轮、父节点等子会话再整合）都接上状态切换。
+  验证：`TestFmtDurationHours`（`2628m56s → 43h48m`）、`TestLiveRowTextStates`（排队/续跑运行/等子会话三种文案）、`TestResumeActiveSumsRequestDurations`（两条用量行 60s+30s → `1m30s`，中间隔两天不算）、`TestResumeActiveWithoutUsageIsZero`（老转录没有用量行 → 0，不退回墙上跨度）；`go test ./...` 全绿。
+- T207（用户反馈，2026-10-22）：**页面"是否正在运行"不可信**。用户原话：*"并且web界面对于是否正在运行的显示感觉也有很多问题"*。
+  1. 实测：扫描真实输出根（1044 条会话）时只有 **1 条 live**，而同一时刻磁盘上有 10 条转换 + 1 条核对在写（4 个 `.partial`、23 条转录 3 分钟内有写入）。查下去：`activityAfterEnd` 只要"转录里出现过 run_end"就把停在 `running` 的活动标记折成「已中断」，而扫描又对 `interrupted` 强制 `live=false`。
+  2. 根因：一条转录里可以跑好几轮 Run（转换→核对打回→重转、手工继续、中断续跑），**上一轮**的 `run_end` 留在文件下面，与这一轮的活动标记无法区分新旧。另外上一轮的错误结局（`RunEndError`）也会被算到正在跑的这一轮头上。
+  改：`transcriptStat` 记下 `chapter_activity` 与 `run_end` 的**行号**，`run_end` 排在活动标记之后才算"这次尝试被放弃"；`run_end` 之后又出现消息说明新一轮已开始，那条结局（含错误文本）不再计入。
+  验证：`TestActivityInterruptedOnlyWhenRunEndIsNewer`（run_end 在前 → 仍是 running；在后 → interrupted）、`TestRunEndErrorClearedByLaterMessages`、`TestScanLiveWhenRunningActivityIsNewest`（Scan 层 live + activity 都对）；真实数据复扫 live 从 1 条恢复到 11 条（10 转换 + 1 核对），与磁盘上的活动一致；`go test ./...` 全绿。

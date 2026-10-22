@@ -1119,19 +1119,26 @@ func TestChapterIdentityAttemptSuffix(t *testing.T) {
 	}
 }
 
-// T171：活动标记停在 running、但转录已经写了 run_end 的，是"这次尝试被放弃"
-// （checker 打回换会话 / 被中断），不能再算运行中。
+// T171/T207：活动标记停在 running、且 run_end 出现在它**之后**的，是"这次
+// 尝试被放弃"（checker 打回换会话 / 被中断），不能再算运行中；反过来 run_end
+// 是上一轮 Run 留下的（同一条转录里又开了新的一轮），照旧算运行中。
 func TestActivityAfterEnd(t *testing.T) {
-	if got := activityAfterEnd("running", true); got != "interrupted" {
+	staleRunning := transcriptStat{ChapterActivity: "running", SawRunEnd: true, ActivityIdx: 3, RunEndIdx: 9}
+	if got := activityAfterEnd(staleRunning, staleRunning.ChapterActivity); got != "interrupted" {
 		t.Fatalf("stale running = %q, want interrupted", got)
 	}
-	if got := activityAfterEnd("running", false); got != "running" {
+	liveRunning := transcriptStat{ChapterActivity: "running", SawRunEnd: true, ActivityIdx: 9, RunEndIdx: 3}
+	if got := activityAfterEnd(liveRunning, liveRunning.ChapterActivity); got != "running" {
 		t.Fatalf("live running must stay running, got %q", got)
 	}
-	if got := activityAfterEnd("waiting_children", true); got != "waiting_children" {
+	if got := activityAfterEnd(transcriptStat{ChapterActivity: "running"}, "running"); got != "running" {
+		t.Fatalf("no run_end must stay running, got %q", got)
+	}
+	waiting := transcriptStat{ChapterActivity: "waiting_children", SawRunEnd: true, ActivityIdx: 1, RunEndIdx: 2}
+	if got := activityAfterEnd(waiting, waiting.ChapterActivity); got != "waiting_children" {
 		t.Fatalf("other states untouched, got %q", got)
 	}
-	if got := activityAfterEnd("", true); got != "" {
+	if got := activityAfterEnd(transcriptStat{SawRunEnd: true, RunEndIdx: 2}, ""); got != "" {
 		t.Fatalf("no activity stays empty, got %q", got)
 	}
 }

@@ -517,10 +517,12 @@ type ResumeStats struct {
 	// Tools is the number of executed tool calls (role=tool receipts;
 	// continues Session.ToolInvoked).
 	Tools int
-	// Active is the span first-write → last-write of the transcript: the
-	// best available approximation of the session's accumulated working
-	// time (dead-process gaps are excluded by anchoring at the resume
-	// moment, not wall-clock since the first line).
+	// Active is the session's accumulated REAL working time: the sum of the
+	// per-request durations recorded on the transcript's usage lines (model
+	// time + tool time actually spent). It used to be "span first-write →
+	// last-write", which exploded on sessions resumed days later: the console
+	// row then read 已用 2628m56s for forty minutes of work (T206). Idle gaps
+	// between runs are now excluded by construction.
 	Active time.Duration
 	// SubmitName / SubmitArgs describe the LAST submit* call that actually
 	// produced a tool receipt; empty when the transcript holds none.
@@ -542,7 +544,7 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 	}
 	baseDir := filepath.Dir(path)
 	var msgs []ChatMessage
-	var firstTS, lastTS time.Time
+	var worked time.Duration
 	submitCalls := map[string]string{} // call id → name (submit*)
 	receipts := map[string]bool{}
 	for _, ln := range strings.Split(string(data), "\n") {
@@ -554,14 +556,16 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 		if err := json.Unmarshal([]byte(ln), &line); err != nil {
 			return nil, ResumeStats{}, fmt.Errorf("transcript %s: %w", path, err)
 		}
-		if line.T != "msg" {
+		if line.T == "usage" {
+			// 真实工作时间 = 每次请求耗时的累加（T206）：续跑时用它当"已用"，
+			// 而不是"首行到末行"的墙上跨度——后者会把中间几天的空档也算进去。
+			if line.DurationMS > 0 {
+				worked += time.Duration(line.DurationMS) * time.Millisecond
+			}
 			continue
 		}
-		if ts, perr := parseStamp(line.TS); perr == nil {
-			if firstTS.IsZero() {
-				firstTS = ts
-			}
-			lastTS = ts
+		if line.T != "msg" {
+			continue
 		}
 		msg := ChatMessage{Role: line.Role, ToolCallID: line.CallID, ToolCalls: line.Calls, ReasoningContent: line.Reasoning}
 		switch {
@@ -644,9 +648,7 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 			break
 		}
 	}
-	if !firstTS.IsZero() && !lastTS.IsZero() && lastTS.After(firstTS) {
-		stats.Active = lastTS.Sub(firstTS)
-	}
+	stats.Active = worked
 	// Dangling assistant tool_calls（进程死在回执落盘前）合成一条占位
 	// 回执：否则重放的历史在 wire 上非法（tool_calls 后面必须跟 tool），
 	// 续跑第一次请求就会 400。

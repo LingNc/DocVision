@@ -53,7 +53,12 @@ func fmtDuration(d time.Duration) string {
 	if d < time.Minute {
 		return strconv.FormatFloat(d.Seconds(), 'f', 1, 64) + "s"
 	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	// 长任务（一次转换常常几十分钟到几小时）用"h"读起来才不别扭，
+	// 以前一律折成分钟，续跑过的会话会写成 2628m56s（T206）。
+	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // livePhaseRow manages the compact console status line of a
@@ -71,25 +76,69 @@ func fmtDuration(d time.Duration) string {
 // alternating with both timers running, because the single live slot held
 // whichever owner had drawn last).
 func (r *Runner) livePhaseRow(id, label string) (hook func(rounds, tools int), fin func()) {
-	return r.livePhaseRowAt(id, label, time.Now())
+	h, _, f := r.livePhaseRowState(id, label, liveSeed{})
+	return h, f
+}
+
+// 实时行左侧的状态词（T206）：只有「运行」这一种让计时器走。排队、等子会话、
+// 待核对都用冻结的累计时间——否则父节点等二十分钟子会话时，那一行看起来像
+// "已经跑了 25 分钟却一轮都没走"，和真正在跑的行混在一起分不清。
+const (
+	rowStateQueued  = "排队"
+	rowStateRunning = "运行"
+	rowStateWaiting = "等子会话"
+	rowStateCheck   = "待核对"
+)
+
+// liveSeed 是实时行的起始状态：续跑时把转录里的轮次/工具数/真实工作时间
+// 带进来，行一出现就是真实进度，不再从 0 开始爬。
+type liveSeed struct {
+	rounds, tools int
+	active        time.Duration
+	resumed       bool
+}
+
+// liveRowText 是实时行的唯一文案来源（测试直接钉它）。
+func liveRowText(label, state string, seed liveSeed, rounds, tools int, active time.Duration) string {
+	prefix := ""
+	if seed.resumed {
+		prefix = "续跑 · "
+	}
+	return fmt.Sprintf("[%s] %s%s · 轮次 %d · 工具调用 %d · 已用 %s",
+		label, prefix, state, rounds, tools, fmtDuration(active))
 }
 
 // livePhaseRowAt 是 livePhaseRow 的续跑形态（T28）：start 可以前移到
 // 「现在 − 转录历史活跃跨度」，让"已用"从上次中断处继续累计，而不是
 // 每次续跑都从十几秒看起来像重新开了一场。
 func (r *Runner) livePhaseRowAt(id, label string, start time.Time) (hook func(rounds, tools int), fin func()) {
+	h, _, f := r.livePhaseRowState(id, label, liveSeed{active: time.Since(start)})
+	return h, f
+}
+
+// livePhaseRowState 是实时行的通用形态：除了进度回调，还给一个 setState
+// 用来在「排队 / 运行 / 等子会话 / 待核对」之间切换（T206）——只有运行态
+// 让计时器走，切换时把已经跑过的真实时间结账进 active，所以"已用"永远是
+// 这段时间真正花掉的工作时间，不含排队与等待。
+func (r *Runner) livePhaseRowState(id, label string, seed liveSeed) (hook func(rounds, tools int), setState func(string), fin func()) {
 	if r.consoleVerbose {
-		return func(int, int) {}, func() {}
+		return func(int, int) {}, func(string) {}, func() {}
 	}
 	var mu sync.Mutex
-	var rounds, tools int
+	rounds, tools := seed.rounds, seed.tools
+	state := rowStateRunning
+	active := seed.active
+	runStart := time.Now()
 	row := r.log.LiveRow(id)
 	render := func() {
 		mu.Lock()
-		rounds, tools := rounds, tools
+		cur := active
+		if state == rowStateRunning && !runStart.IsZero() {
+			cur += time.Since(runStart)
+		}
+		text := liveRowText(label, state, seed, rounds, tools, cur)
 		mu.Unlock()
-		row.Update("[%s] 轮次 %d · 工具调用 %d · 已用 %s",
-			label, rounds, tools, fmtDuration(time.Since(start)))
+		row.Set(text)
 	}
 	render() // 立即出现起始行，会话一开始就有进度
 	stop := make(chan struct{})
@@ -119,6 +168,18 @@ func (r *Runner) livePhaseRowAt(id, label string, start time.Time) (hook func(ro
 			rounds, tools = rr, tt
 			mu.Unlock()
 			render()
+		}, func(next string) {
+			mu.Lock()
+			if state == rowStateRunning && !runStart.IsZero() {
+				active += time.Since(runStart)
+				runStart = time.Time{}
+			}
+			state = next
+			if next == rowStateRunning {
+				runStart = time.Now()
+			}
+			mu.Unlock()
+			render()
 		}, func() {
 			once.Do(func() {
 				close(stop)
@@ -130,8 +191,12 @@ func (r *Runner) livePhaseRowAt(id, label string, start time.Time) (hook func(ro
 				// 行实时刷，不会被顶掉。
 				row.Remove()
 				mu.Lock()
+				cur := active
+				if state == rowStateRunning && !runStart.IsZero() {
+					cur += time.Since(runStart)
+				}
 				finalText := fmt.Sprintf("[%s] 轮次 %d · 工具调用 %d · 已用 %s",
-					label, rounds, tools, fmtDuration(time.Since(start)))
+					label, rounds, tools, fmtDuration(cur))
 				mu.Unlock()
 				r.log.PrintConsole(finalText)
 			})
@@ -1567,23 +1632,26 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	// 中断续跑时才回放转录（resuming 已确认工作树也在）。
 	resumed := false
 	resumeSkip := false
-	convertStart := time.Now()
 	var resumeMsgs []session.ChatMessage
+	var convStats session.ResumeStats
 	if resuming {
 		if msgs, st, err := session.LoadTranscriptStats(trPath); err != nil {
 			r.log.LogWarning(tid, "[convert] 转录读取失败（忽略，按全新会话继续）:", err)
 		} else if len(msgs) > 0 {
 			sess.SetMessages(msgs)
 			sess.SeedCounters(st.Rounds, st.Tools)
-			resumed, resumeMsgs = true, msgs
+			resumed, resumeMsgs, convStats = true, msgs, st
 			resumeLog(r.log, tid, "convert", base, msgs, st)
 			if replaySubmit(r.log, tid, "convert:"+base, submit, st) {
 				resumeSkip = true
 			}
-			convertStart = time.Now().Add(-st.Active)
 		}
 	}
-	convHook, convClose := r.livePhaseRowAt("convert:"+base, "convert:"+base, convertStart)
+	seed := liveSeed{}
+	if resumed {
+		seed = liveSeed{rounds: convStats.Rounds, tools: convStats.Tools, active: convStats.Active, resumed: true}
+	}
+	convHook, convState, convClose := r.livePhaseRowState("convert:"+base, "convert:"+base, seed)
 	sess.SetProgressHook(convHook)
 	defer convClose()
 	if tr, err := session.NewTranscript(trPath); err == nil {
@@ -1636,7 +1704,9 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	}
 	if !resumeSkip && !splitTool.Requested {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
+		convState(rowStateQueued)
 		release := r.acquireConvertSlot()
+		convState(rowStateRunning)
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		_, runErr := sess.Run(session.RunOptions{UserText: initial})
 		release()
@@ -1659,6 +1729,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		cleanWork = func() {}
 		promoteSubmitRoot = node.FinalSubmitRoot
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "waiting_children", "children": len(splitTool.Children)})
+		convState(fmt.Sprintf("%s %d", rowStateWaiting, len(splitTool.Children)))
 		stageRoot := filepath.Join(node.NodeRoot, "integrated-stage")
 		_ = os.RemoveAll(stageRoot)
 		if err := os.MkdirAll(stageRoot, 0o755); err != nil {
@@ -1683,7 +1754,9 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			"Put any NEW problems you found into report.issues (as a list); unresolved inherited ones go up by themselves. " +
 			"Do not submit child files as independent book chapters."
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+		convState(rowStateQueued)
 		release := r.acquireConvertSlot()
+		convState(rowStateRunning)
 		_, runErr := sess.Run(session.RunOptions{UserText: integrationText})
 		release()
 		if runErr != nil {
@@ -1696,7 +1769,11 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		if !submit.Submitted {
 			return fmt.Errorf("细分父章节整合会话未提交")
 		}
-	} else if !r.remindSubmit(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted }) {
+	} else if !func() bool {
+		convState(rowStateCheck)
+		defer convState(rowStateRunning)
+		return r.remindSubmit(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted })
+	}() {
 		// 必须显式提交（用户口径）：提前收尾漏了 submit 就提醒续跑（最多两次），
 		// 仍不提交判失败——不再静默采纳"编译通过但没提交"的产物
 		// （chapter_003 事故：模型漏调 submit，章节被悄悄收下，界面看不出）。

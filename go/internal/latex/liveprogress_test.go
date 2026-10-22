@@ -124,8 +124,9 @@ func TestConvertProgressTextNoStrayBracket(t *testing.T) {
 	if got != want {
 		t.Errorf("起始行 = %q, want %q", got, want)
 	}
+	// T206：超过一小时按 h 显示（2628m56s → 43h48m 那种读法）。
 	got = convertProgressText("[convert#2]", 3, 2, 0, 3, 200*time.Minute+54*time.Second)
-	want = "[convert#2] 3/3 100.00% (done: 1, errors: 2, running: 0, 200m54s)"
+	want = "[convert#2] 3/3 100.00% (done: 1, errors: 2, running: 0, 3h20m)"
 	if got != want {
 		t.Errorf("结束行 = %q, want %q", got, want)
 	}
