@@ -7297,6 +7297,50 @@
     if (s.imageType) bits.push(s.imageType);
     return bits.join("\n");
   }
+  function convertBasename(s) {
+    const id = String(s && s.id || "");
+    const seg = id.slice(id.lastIndexOf("/") + 1);
+    return seg.replace(/\.jsonl$/, "");
+  }
+  function newestOf(items) {
+    let best = null;
+    (items || []).forEach((s) => {
+      best = newerAttempt(best, s);
+    });
+    return best;
+  }
+  function newestByMtime(items) {
+    let best = null;
+    (items || []).forEach((s) => {
+      if (!best) {
+        best = s;
+        return;
+      }
+      const d = mtimeMs(s) - mtimeMs(best);
+      if (d > 0) best = s;
+      else if (d === 0) best = newerAttempt(best, s);
+    });
+    return best;
+  }
+  function checkerForConvert(checkers, convert, pinnedConvert) {
+    if (!convert) return newestOf(checkers);
+    const anchored = (checkers || []).filter((c) => String(c.chapterAnchor || "") !== "");
+    if (anchored.length) {
+      const key = convertBasename(convert);
+      const hit = anchored.filter((c) => String(c.chapterAnchor) === key && !!c.archived === !!convert.archived);
+      return newestByMtime(hit);
+    }
+    const attempt = Number(convert.chapterAttempt) || 1;
+    if (pinnedConvert) {
+      const peers = (checkers || []).filter((k) => (Number(k.chapterAttempt) || 1) === attempt && !!k.archived === !!convert.archived);
+      return newestOf(peers);
+    }
+    const best = newestOf(checkers);
+    if (!best) return null;
+    if (!!best.archived !== !!convert.archived) return null;
+    if ((Number(best.chapterAttempt) || 1) < attempt) return null;
+    return best;
+  }
   function newerAttempt(cur, next) {
     if (!cur) return next;
     if (!next) return cur;
@@ -7323,29 +7367,30 @@
       (byRole[key] || (byRole[key] = [])).push(session);
       if (pinId && session.id === pinId) pinned = { node, role, session };
     });
-    if (pinned) {
-      const pin = pinned;
-      pin.node[pin.role] = pin.session;
-      const other = pin.role === "convert" ? "checker" : "convert";
-      const want = Number(pin.session.chapterAttempt) || 1;
-      const peers = (byRole[pin.node.id + "|" + other] || []).filter((x) => (Number(x.chapterAttempt) || 1) === want && !!x.archived === !!pin.session.archived);
-      if (peers.length) {
-        pin.node[other] = peers.reduce((a, b) => newerAttempt(a, b));
-      } else if (other === "checker") {
-        pin.node[other] = null;
-      }
-    }
     Object.keys(byId).forEach((id) => {
       const node = byId[id];
-      if (!node.convert || !node.checker) return;
-      if (pinId && node.checker.id === pinId) return;
-      if (!!node.checker.archived !== !!node.convert.archived) {
-        node.checker = null;
+      const pin = pinned;
+      if (pin && pin.node === node && pin.role === "checker") {
+        node.checker = pin.session;
+        const anchor = String(pin.session.chapterAnchor || "");
+        const converts = byRole[id + "|convert"] || [];
+        if (anchor) {
+          const sameGen = converts.filter((c) => !!c.archived === !!pin.session.archived);
+          const hit = (sameGen.length ? sameGen : converts).filter((c) => convertBasename(c) === anchor);
+          node.convert = hit.length ? newestOf(hit) : null;
+          return;
+        }
+        const want = Number(pin.session.chapterAttempt) || 1;
+        const peers = converts.filter((c) => (Number(c.chapterAttempt) || 1) === want && !!c.archived === !!pin.session.archived);
+        if (peers.length) node.convert = newestOf(peers);
         return;
       }
-      const c = Number(node.convert.chapterAttempt) || 1;
-      const k = Number(node.checker.chapterAttempt) || 1;
-      if (k < c) node.checker = null;
+      if (pin && pin.node === node && pin.role === "convert") node.convert = pin.session;
+      node.checker = checkerForConvert(
+        byRole[id + "|checker"] || [],
+        node.convert,
+        !!pin && pin.node === node && pin.role === "convert"
+      );
     });
     const roots = [];
     Object.keys(byId).forEach((id) => {
@@ -7567,7 +7612,52 @@
       members.push(s);
     });
     if (members.length < 2) return null;
-    return sortChainMembers(members);
+    return orderChapterChain(members);
+  }
+  function orderChapterChain(members) {
+    const converts = (members || []).filter((s) => s && s.chapterRole !== "checker").sort(convertChainOrder);
+    const checkers = (members || []).filter((s) => s && s.chapterRole === "checker");
+    const owned = {};
+    const leftover = [];
+    converts.forEach((c) => {
+      owned[String(c.id)] = [];
+    });
+    checkers.forEach((k) => {
+      const anchor = String(k && k.chapterAnchor || "");
+      if (anchor) {
+        const hit = converts.find((c) => convertBasename(c) === anchor && !!c.archived === !!k.archived);
+        if (hit) {
+          owned[String(hit.id)].push(k);
+          return;
+        }
+        leftover.push(k);
+        return;
+      }
+      const sameGen = converts.filter((c) => !!c.archived === !!k.archived);
+      const older = sameGen.filter((c) => (Number(c.chapterAttempt) || 1) <= (Number(k.chapterAttempt) || 1));
+      const owner = (older.length ? older : sameGen).slice().sort(convertChainOrder)[0];
+      if (owner) owned[String(owner.id)].push(k);
+      else leftover.push(k);
+    });
+    const byThen = (a, b) => mtimeMs(b) - mtimeMs(a);
+    const out = [];
+    converts.forEach((c) => {
+      out.push(c);
+      owned[String(c.id)].sort(byThen).forEach((k) => out.push(k));
+    });
+    leftover.sort(byThen).forEach((k) => out.push(k));
+    return out;
+  }
+  function convertChainOrder(a, b) {
+    if (!!a.archived !== !!b.archived) return a.archived ? 1 : -1;
+    const aa = Number(a.chapterAttempt) || 1;
+    const ab = Number(b.chapterAttempt) || 1;
+    if (aa !== ab) return ab - aa;
+    const d = mtimeMs(b) - mtimeMs(a);
+    if (d) return d;
+    const ia = String(a && a.id || "");
+    const ib = String(b && b.id || "");
+    return ia < ib ? -1 : ia > ib ? 1 : 0;
   }
   function dedupeChapterAttempts(items) {
     const out = [];
@@ -12969,7 +13059,7 @@
   };
   const _hoisted_3$3 = { class: "history-head" };
   const _hoisted_4$3 = {
-    key: 0,
+    key: 2,
     class: "history-old-note",
     title: "带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话"
   };
@@ -13037,7 +13127,9 @@
       function onRowClick(s) {
         selectSession(s.id);
       }
+      const chapterChain = computed(() => (members.value || []).some((s) => !!s.chapterId));
       const rounds = computed(() => {
+        if (chapterChain.value) return [];
         const s = state.current;
         if (!s || s.chapterRole !== "checker" || !Array.isArray(state.lines)) return [];
         const r = checkerRounds(state.lines);
@@ -13094,7 +13186,11 @@
         }, [
           !members.value ? (openBlock(), createElementBlock("div", _hoisted_1$3, "当前会话不属于任何调用链 / 重试链")) : (openBlock(), createElementBlock("div", _hoisted_2$3, [
             createBaseVNode("div", _hoisted_3$3, [
-              createTextVNode(" 这一章的全部会话（" + toDisplayString(members.value.length) + "，转换与核对都在这里，新 → 旧） ", 1),
+              chapterChain.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+                createTextVNode("这一章的全部会话（" + toDisplayString(members.value.length) + "，每个转换后面跟着它名下的核对，新 → 旧）", 1)
+              ], 64)) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                createTextVNode("这一章的全部会话（" + toDisplayString(members.value.length) + "，转换与核对都在这里，新 → 旧）", 1)
+              ], 64)),
               hasArchived.value ? (openBlock(), createElementBlock("span", _hoisted_4$3, "· 带「旧」的是更早一次父尝试（已作废）留下的")) : createCommentVNode("", true)
             ]),
             dropAsk.value ? (openBlock(), createElementBlock("div", _hoisted_5$3, [
@@ -13184,7 +13280,7 @@
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-f9690ea3"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-e7b8c016"]]);
   const pending = /* @__PURE__ */ ref(null);
   const queued = /* @__PURE__ */ ref(null);
   const prevId = /* @__PURE__ */ ref("");

@@ -33,8 +33,8 @@ func checkerNoVerdict(issues string) bool {
 // Hard problems are returned to the caller, which feeds them back to the
 // SAME conversion session. Ordinary chapters retain the historical transport
 // fallback; recursive nodes use strict mode and fail closed on missing verdicts.
-func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, tid int) (bool, string) {
-	return r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, tid, "", "", false)
+func (r *Runner) checkChapter(proj, base, chapPath, texPath, partsPath string, tid int, convertAttempt int) (bool, string) {
+	return r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, tid, "", "", false, convertAttempt)
 }
 
 // checkHints 是转换会话留给 checker 的线索：本次编译产物、它自己的工作汇报与
@@ -47,7 +47,7 @@ type checkHints struct {
 	Notes  string // submit.notes（写成 check:notes.md）
 }
 
-func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string, hints checkHints, tid int, transcriptPath, viewPath string, strict bool) (bool, string) {
+func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string, hints checkHints, tid int, transcriptPath, viewPath string, strict bool, convertAttempt int) (bool, string) {
 	view := viewPath
 	if view == "" {
 		view = ensureCheckerView(proj, base, chapPath, texPath, partsPath)
@@ -156,6 +156,18 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		if w, err := session.NewTranscript(trPath); err == nil {
 			tr = w
 			sess.SetTranscript(w)
+		}
+		// P59：核对会话记录它核对的**转换转录**（文件名里的尝试号与核对自己的
+		// 号没有关系：手动重新核对只让核对的号加一，核对的还是同一份产物）。
+		// 预览页的树与历史都按这个锚点配对；每次重核（含重开一轮）都写一条，
+		// 指回同一份转换。拿不到转换尝试号（0）时宁可不写，也不编一个。
+		if convertAttempt < 1 {
+			r.log.LogWarning(tid, "[checker]", base, "不知道这次的转换尝试号，核对锚点未记录")
+		} else {
+			_ = sess.AppendTranscriptNote("checker_target", map[string]any{
+				"convert":         checkerAnchorName(base, convertAttempt),
+				"convert_attempt": convertAttempt,
+			})
 		}
 		// checker 会话也进实时块：用户要看得到"谁进了 checker、跑到哪了"，
 		// 而且 checker 是并发跑的，必须有自己的行而不是挤在转换行里。
@@ -304,6 +316,16 @@ func (r *Runner) keepCheckerTranscript(path string, strict bool) {
 		return
 	}
 	r.keepSessionFile(path)
+}
+
+// checkerAnchorName 是核对会话的锚点（P59）：产出这份产物的转换转录的**文件名**
+// （`convert_<章>` / `convert_<章>.tryN`，不含扩展名）。
+//
+// 为什么用文件名而不是路径：预览页的章节树按「项目 + 章节 ID」聚合，同一章的
+// 顶层转录在 `work/sessions/`、递归子章节的转录在 `<节点>/sessions/`，路径不同
+// 但文件名口径一致；锚点只回答"哪一次转换"，位置由扫描目录决定。
+func checkerAnchorName(base string, convertAttempt int) string {
+	return strings.TrimSuffix(filepath.Base(attemptTranscriptPath("convert_"+base+".jsonl", convertAttempt)), ".jsonl")
 }
 
 // ensureCheckerView materialises the checker's read-only view: exactly

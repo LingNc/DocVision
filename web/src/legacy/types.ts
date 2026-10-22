@@ -139,6 +139,13 @@ export interface Session {
    *  attempt keeps its own transcript (`<名>.try2.jsonl`), so the preview can
    *  chain them into a "历史 N" list. */
   chapterAttempt?: number
+  /** P59：这条核对会话核对的**转换转录**（文件名去扩展名，`convert_<章>` /
+   * `convert_<章>.tryN`），来自转录里的 `t=meta kind=checker_target`。核对自己的
+   * `.tryN` 号与转换的号没有对应关系（手动重核只让核对号加一），树与历史按这个
+   * 锚点配对；空 = 旧转录，退回按尝试号配对。 */
+  chapterAnchor?: string
+  /** 那个锚点的转换尝试号（1 起；0 = 没有锚点）。 */
+  chapterAnchorAttempt?: number
   chapterActivity?: string
   chapterOrder?: number
   /** 方块视图的完成信号（T22）：done=交过 / error=干过活没交 / ''=还没开工；运行中由 live 表达。 */

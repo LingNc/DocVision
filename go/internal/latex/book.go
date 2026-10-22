@@ -1821,7 +1821,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		}
 		return h
 	}
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker)
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker, node.AttemptNum)
 	if !ok && isSessionAPIError(issues) {
 		return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
 	}
@@ -1853,7 +1853,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			break
 		}
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
-		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker)
+		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker, node.AttemptNum)
 		if !ok && isSessionAPIError(issues) {
 			return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
 		}

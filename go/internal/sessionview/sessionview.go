@@ -400,6 +400,18 @@ type SessionInfo struct {
 	// attempt keeps its own transcript `<名>.try2.jsonl`). The preview
 	// groups them into a "历史 N" chain. Zero = 1 (single attempt).
 	ChapterAttempt int `json:"chapterAttempt,omitempty"`
+	// ChapterAnchor (P59) is the CONVERT transcript this checker session
+	// reviewed, as a basename without extension (`convert_<章>` or
+	// `convert_<章>.tryN`), read from the `t=meta kind=checker_target` note
+	// the runner writes when the checker session starts. The two attempt
+	// counters (convert vs checker) are independent — a manual re-check only
+	// bumps the checker number and still reviews the same product — so the
+	// viewer pairs a checker with a convert by THIS anchor, never by number.
+	ChapterAnchor string `json:"chapterAnchor,omitempty"`
+	// ChapterAnchorAttempt is that convert transcript's 1-based attempt
+	// number (the `convert_attempt` field of the same note). Zero = no
+	// anchor (transcripts written before P59).
+	ChapterAnchorAttempt int `json:"chapterAnchorAttempt,omitempty"`
 	// Archived marks a transcript living under `work/attempts/<章>/tryN/`.
 	// That directory is the archive of an invalidated attempt (the whole
 	// subtree is moved there), so it holds copies of the sessions that are
@@ -948,6 +960,10 @@ type transcriptStat struct {
 	// 全灭、树里显示等待/中断。
 	ActivityIdx int
 	RunEndIdx   int
+	// ChapterAnchor / ChapterAnchorAttempt 是最近一条 t=meta kind=checker_target
+	// （P59）：这条核对会话核对的转换转录与它的尝试号。空 = 旧转录，没有锚点。
+	ChapterAnchor        string
+	ChapterAnchorAttempt int
 	// Prices 是转录里 t=meta kind=price 冻的费率（model → 费率，同模型
 	// 后写胜）——费用按冻的价算，不依赖跑报表时的配置（T101 第二版）。
 	Prices map[string]config.PriceConfig
@@ -1133,30 +1149,32 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 				}
 				return LabelFor(rel)
 			}(),
-			Title:           TitleFor(rel),
-			Name:            c.name,
-			Path:            c.full,
-			Project:         grp.Name,
-			ProjectLegacy:   grp.Legacy,
-			Messages:        stat.Messages,
-			Meta:            stat.Meta,
-			Stats:           stat.Usage,
-			Estimate:        estimateInfoFor(stat),
-			Bytes:           c.size,
-			ModTime:         c.mt,
-			SHA:             stat.SHA,
-			Live:            live,
-			EndState:        endState,
-			RunEndError:     stat.RunEndError,
-			ChapterActivity: activity,
-			ChapterAttempt:  chapter.Attempt,
-			Archived:        strings.HasPrefix(rel, "work/attempts/"),
-			Prices:          stat.Prices,
-			ChapterID:       chapter.ID,
-			ChapterParent:   chapter.Parent,
-			ChapterRole:     chapter.Role,
-			ChapterDepth:    chapter.Depth,
-			ChapterOrder:    chapterOrderOf(strings.Split(chapter.ID, "_child_")[0]),
+			Title:                TitleFor(rel),
+			Name:                 c.name,
+			Path:                 c.full,
+			Project:              grp.Name,
+			ProjectLegacy:        grp.Legacy,
+			Messages:             stat.Messages,
+			Meta:                 stat.Meta,
+			Stats:                stat.Usage,
+			Estimate:             estimateInfoFor(stat),
+			Bytes:                c.size,
+			ModTime:              c.mt,
+			SHA:                  stat.SHA,
+			Live:                 live,
+			EndState:             endState,
+			RunEndError:          stat.RunEndError,
+			ChapterActivity:      activity,
+			ChapterAttempt:       chapter.Attempt,
+			ChapterAnchor:        stat.ChapterAnchor,
+			ChapterAnchorAttempt: stat.ChapterAnchorAttempt,
+			Archived:             strings.HasPrefix(rel, "work/attempts/"),
+			Prices:               stat.Prices,
+			ChapterID:            chapter.ID,
+			ChapterParent:        chapter.Parent,
+			ChapterRole:          chapter.Role,
+			ChapterDepth:         chapter.Depth,
+			ChapterOrder:         chapterOrderOf(strings.Split(chapter.ID, "_child_")[0]),
 		})
 	}
 
@@ -1350,6 +1368,17 @@ func readStat(p string) (transcriptStat, error) {
 						if json.Unmarshal([]byte(trimmed), &rec) == nil {
 							stat.ChapterActivity = rec.State
 							stat.ActivityIdx = idx
+						}
+					}
+					// P59：核对会话的锚点——它核对的是哪一条转换转录。
+					if strings.Contains(trimmed, `"kind":"checker_target"`) {
+						var rec struct {
+							Convert        string `json:"convert"`
+							ConvertAttempt int    `json:"convert_attempt"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.Convert != "" {
+							stat.ChapterAnchor = rec.Convert
+							stat.ChapterAnchorAttempt = rec.ConvertAttempt
 						}
 					}
 				case "usage":

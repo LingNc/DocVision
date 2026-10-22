@@ -173,7 +173,7 @@ func TestCheckerSessionFeedsBackRealProblems(t *testing.T) {
 				n := atomic.AddInt32(&round, 1)
 				c.reply(w, n)
 			})
-			ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 1)
+			ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 1, 1)
 			if ok != c.wantOK {
 				t.Fatalf("ok = %v, want %v (issues=%q)", ok, c.wantOK, issues)
 			}
@@ -224,7 +224,7 @@ func TestCheckerRecoversAfterDegenerateResponse(t *testing.T) {
 		}
 		jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
 	})
-	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0)
+	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0, 1)
 	if !ok {
 		t.Fatalf("want pass after one degenerate response, got issues: %q", issues)
 	}
@@ -240,7 +240,7 @@ func TestCheckerDegenerateInBothAttemptsFails(t *testing.T) {
 	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
 		degenerateJSON(w)
 	})
-	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0)
+	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0, 1)
 	if ok {
 		t.Fatal("两轮都没有结论，不能判通过")
 	}
@@ -255,9 +255,38 @@ func TestCheckerStrictModeAcceptsExplicitPass(t *testing.T) {
 		jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
 	})
 	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0,
-		filepath.Join(proj, "nested", "sessions", "checker.jsonl"), filepath.Join(proj, "nested", "checker-view"), true)
+		filepath.Join(proj, "nested", "sessions", "checker.jsonl"), filepath.Join(proj, "nested", "checker-view"), true, 1)
 	if !ok || issues != "" {
 		t.Fatalf("explicit pass rejected: ok=%v issues=%q", ok, issues)
+	}
+}
+
+// P59：核对会话在转录里写锚点——它核对的是**哪一条转换转录**。手动重新核对
+// 只让核对的号加一，核对的仍是同一份产物，所以锚点必须指回做出这份产物的那次
+// 转换（尝试号也是它的，不是核对自己的）。
+func TestCheckerWritesConvertAnchor(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
+	})
+	transcript := filepath.Join(proj, "work", "sessions", "checker_"+base+".try3.jsonl")
+	view := filepath.Join(proj, "work", "views", "checker_"+base+"_try3")
+	if ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true, 2); !ok {
+		t.Fatalf("explicit pass rejected: %q", issues)
+	}
+	data, err := os.ReadFile(transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		`"kind":"checker_target"`,
+		`"convert":"convert_` + base + `.try2"`,
+		`"convert_attempt":2`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("核对转录缺锚点 %s: %s", want, body)
+		}
 	}
 }
 
@@ -270,7 +299,7 @@ func TestCheckerStrictModeFailsClosedWithoutConclusion(t *testing.T) {
 	})
 	transcript := filepath.Join(proj, "nested", "sessions", "checker.jsonl")
 	view := filepath.Join(proj, "nested", "checker-view")
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true)
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true, 1)
 	if ok || issues == "" {
 		t.Fatalf("strict checker accepted missing verdict: ok=%v issues=%q", ok, issues)
 	}
@@ -291,7 +320,7 @@ func TestCheckerStrictModeStopsOnInsufficientBalance(t *testing.T) {
 		io.WriteString(w, `{"error":{"message":"余额不足或无可用资源包","code":1113}}`)
 	})
 	ok, errText := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0,
-		filepath.Join(proj, "nested", "sessions", "checker.jsonl"), filepath.Join(proj, "nested", "checker-view"), true)
+		filepath.Join(proj, "nested", "sessions", "checker.jsonl"), filepath.Join(proj, "nested", "checker-view"), true, 1)
 	if ok || !strings.Contains(errText, "SESSION_INSUFFICIENT_BALANCE") {
 		t.Fatalf("expected fail-closed balance error, got ok=%v err=%q", ok, errText)
 	}
@@ -313,7 +342,7 @@ func TestCheckerResumeUsesUpdatedModelAndTranscript(t *testing.T) {
 	})
 	transcript := filepath.Join(proj, "nested", "sessions", "checker_chapter_02.jsonl")
 	view := filepath.Join(proj, "nested", "checker-view")
-	if ok, _ := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true); ok {
+	if ok, _ := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true, 1); ok {
 		t.Fatal("checker without a verdict unexpectedly passed")
 	}
 
@@ -332,7 +361,7 @@ func TestCheckerResumeUsesUpdatedModelAndTranscript(t *testing.T) {
 	first.cfg.Models["updated"] = config.ModelConfig{BaseURL: secondServer.URL, APIKey: "k", Model: "updated-model", Stream: &off}
 	first.clients = map[string]*session.Client{}
 	first.models = map[string]config.ModelConfig{}
-	ok, errText := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true)
+	ok, errText := first.checkChapterAt(proj, base, chapPath, texPath, partsPath, checkHints{}, 0, transcript, view, true, 1)
 	if !ok || errText != "" || calls.Load() != 1 {
 		t.Fatalf("updated checker resume failed: ok=%v err=%q calls=%d", ok, errText, calls.Load())
 	}
@@ -348,7 +377,7 @@ func TestCheckerWithoutVerdictFailsAfterTwoAttempts(t *testing.T) {
 		calls.Add(1)
 		degenerateJSON(w)
 	})
-	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0)
+	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0, 1)
 	if ok {
 		t.Fatal("a checker that never submits a verdict must NOT be treated as a pass")
 	}
@@ -395,7 +424,7 @@ func TestCheckerSeesProductAndHints(t *testing.T) {
 		jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
 	})
 	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath,
-		checkHints{PDF: pdf, Report: report, Notes: "表 3.1 在原页 p12/p13 分两页，已按页排"}, 0, "", view, true)
+		checkHints{PDF: pdf, Report: report, Notes: "表 3.1 在原页 p12/p13 分两页，已按页排"}, 0, "", view, true, 1)
 	if !ok {
 		t.Fatalf("explicit pass rejected: %q", issues)
 	}

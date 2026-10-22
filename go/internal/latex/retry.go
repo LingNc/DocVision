@@ -593,6 +593,21 @@ func childNodeWork(proj, base string) string {
 	return ""
 }
 
+// latestConvertAttempt 找这一章最近一次转换尝试的号（P59）：重新核对产出的
+// 锚点必须指向**做出这份产物的那次转换**。顶层章节的转换转录在
+// `<proj>/work/sessions/`；递归子章节的转录跟着自己的节点走
+// （`<节点>/sessions/`），节点工作区由 childNodeWork 反推，再取同级 sessions。
+// 找不到任何转录时按第 1 次算——与 lastAttemptNumber 的既有口径一致。
+func latestConvertAttempt(proj, base string) int {
+	dir := filepath.Join(proj, "work", "sessions")
+	if !fileExists(filepath.Join(dir, "convert_"+base+".jsonl")) {
+		if nodeWork := childNodeWork(proj, base); nodeWork != "" {
+			dir = filepath.Join(filepath.Dir(nodeWork), "sessions")
+		}
+	}
+	return lastAttemptNumber(filepath.Join(dir, "convert_"+base+".jsonl"))
+}
+
 func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	chapPath := chapterMarkdownFor(proj, base)
 	texPath, partsPath := chapterProductsFor(proj, base)
@@ -614,7 +629,7 @@ func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	}
 	trPath := attemptTranscriptPath(filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl"), n)
 	view := filepath.Join(proj, "work", "views", fmt.Sprintf("checker_%s_try%d", base, n))
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid, trPath, view, false)
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid, trPath, view, false, latestConvertAttempt(proj, base))
 	if isSessionAPIError(issues) {
 		return false, issues
 	}

@@ -408,6 +408,65 @@ export interface ChapterTreeNode {
   children: ChapterTreeNode[]
 }
 
+/* P59：核对会话的锚点是它核对的那份**转换转录的文件名**（`convert_<章>` /
+ * `convert_<章>.tryN`），不含扩展名。转换与核对自己的 `.tryN` 号互相独立——
+ * 手动重新核对只让核对的号加一、核对的还是同一份产物——所以树与历史只按这个
+ * 口径配对，不再拿两套号互相猜。 */
+export function convertBasename(s: any): string {
+  const id = String((s && s.id) || '')
+  const seg = id.slice(id.lastIndexOf('/') + 1)
+  return seg.replace(/\.jsonl$/, '')
+}
+
+function newestOf(items: any[]): any | null {
+  let best: any = null
+  ;(items || []).forEach((s) => { best = newerAttempt(best, s) })
+  return best
+}
+
+/* 同一个锚点下的多次核对：用户口径是"按 mtime 取最新"（重核号只是它自己的
+ * 历史序号），mtime 并列才退回 newerAttempt 的确定性比较。 */
+function newestByMtime(items: any[]): any | null {
+  let best: any = null
+  ;(items || []).forEach((s) => {
+    if (!best) { best = s; return }
+    const d = mtimeMs(s) - mtimeMs(best)
+    if (d > 0) best = s
+    else if (d === 0) best = newerAttempt(best, s)
+  })
+  return best
+}
+
+/*
+ * P59：给一个节点选核对会话——**核对挂在它锚定的转换下面**。
+ *  · 有锚点的节点（新转录）只认锚点：锚点对不上就不显示，绝不退回"最近那条
+ *    核对"，否则另一次尝试的结论会摆到这一行旁边；
+ *  · 全都还是没有锚点的旧转录时才走老规则；
+ *  · 归档世代参与配对：上一代的核对不能挂到这一代的转换上（P58）。
+ */
+function checkerForConvert(checkers: any[], convert: any, pinnedConvert: boolean): any | null {
+  if (!convert) return newestOf(checkers)
+  const anchored = (checkers || []).filter((c) => String(c.chapterAnchor || '') !== '')
+  if (anchored.length) {
+    const key = convertBasename(convert)
+    const hit = anchored.filter((c) => String(c.chapterAnchor) === key && !!c.archived === !!convert.archived)
+    return newestByMtime(hit)
+  }
+  // 旧规则：钉住转换时只跟同一轮（同尝试号 + 同世代）；默认取最新一条，归档
+  // 世代不同、或核对号小于转换号（上一次尝试的结论）都不算这一次的（T187）。
+  const attempt = Number(convert.chapterAttempt) || 1
+  if (pinnedConvert) {
+    const peers = (checkers || []).filter((k: any) =>
+      (Number(k.chapterAttempt) || 1) === attempt && !!k.archived === !!convert.archived)
+    return newestOf(peers)
+  }
+  const best = newestOf(checkers)
+  if (!best) return null
+  if (!!best.archived !== !!convert.archived) return null
+  if ((Number(best.chapterAttempt) || 1) < attempt) return null
+  return best
+}
+
 /*
  * T170：同一章被 checker 打回后会换全新会话重来（convert_<章>.try2.jsonl…），
  * 几次尝试是**一件事的历史版本**。章节树一行代表"这一章现在的样子"，所以默认
@@ -439,7 +498,9 @@ function newerAttempt(cur: any, next: any): any {
  *
  * 唯一的例外是**你正在看的那一条**（`pinId`）：它所在的行必须显示它，否则
  * 点开历史里的 #2、树里还是 #3。同一节点的另一种角色（convert ↔ checker）
- * 也只跟"同一轮"，那一轮不存在才保持最新。子会话与其它章节一概不跟着切。
+ * 按**核对会话的锚点**配（P59，见 checkerForConvert）：钉住核对时转换由锚点
+ * 决定，钉住转换时核对挂在它锚定的那次转换下面；旧转录没有锚点才退回"同一轮"。
+ * 子会话与其它章节一概不跟着切。
  */
 export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
   const byId: Record<string, ChapterTreeNode> = {}
@@ -458,36 +519,36 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     ;(byRole[key] || (byRole[key] = [])).push(session)
     if (pinId && session.id === pinId) pinned = { node, role, session }
   })
-  if (pinned) {
-    const pin = pinned as { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any }
-    pin.node[pin.role] = pin.session
-    const other: 'convert' | 'checker' = pin.role === 'convert' ? 'checker' : 'convert'
-    const want = Number(pin.session.chapterAttempt) || 1
-    const peers = (byRole[pin.node.id + '|' + other] || []).filter((x: any) =>
-      (Number(x.chapterAttempt) || 1) === want && !!x.archived === !!pin.session.archived)
-    if (peers.length) {
-      pin.node[other] = peers.reduce((a: any, b: any) => newerAttempt(a, b))
-    } else if (other === 'checker') {
-      // 同一轮没有核对转录时**留空**，不要退回最新的那条：那条属于另一次尝试，
-      // 摆在一起会让人以为"这次已经核对过了"（T186）。
-      pin.node[other] = null
-    }
-    // 反过来（other === 'convert'）**不置空**：转换会话回答的是"这一章是谁转的"，
-    // 一次手工重新核对不该让它从树上消失（曾经重核之后整行只剩「核对」、转换会话
-    // 只能去历史里翻）。核对号更大本来也就合法（T187 只挡核对号更小的旧结论）。
-  }
-  // 核对结论只对**它核对过的那次提交**有效：核对的尝试号比转换的小，说明那是
-  // 上一次尝试的结论，这一次还没核对——不显示（切到历史里那一次才看得到）。
+  // P59：先定每一行的转换，再由**锚点**选核对。钉住核对会话时，转换由它的
+  // 锚点决定（不是按尝试号，也不是"最新那条"）；钉住转换时，转换仍取那一条，
+  // 核对照锚点选。子会话与其它章节不受影响（T175）。
   Object.keys(byId).forEach((id) => {
     const node = byId[id]
-    if (!node.convert || !node.checker) return
-    if (pinId && node.checker.id === pinId) return // 你正在看的那条核对会话不能被藏起来
-    // 世代也不同时（一边在归档、一边在工作树）结论同样不成立：那是上一次根尝试
-    // 的核对，挂在这一次的转换上会让人以为"这次已经核对通过了"。
-    if (!!node.checker.archived !== !!node.convert.archived) { node.checker = null; return }
-    const c = Number(node.convert.chapterAttempt) || 1
-    const k = Number(node.checker.chapterAttempt) || 1
-    if (k < c) node.checker = null
+    const pin = pinned as { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null
+    if (pin && pin.node === node && pin.role === 'checker') {
+      node.checker = pin.session
+      const anchor = String(pin.session.chapterAnchor || '')
+      const converts = byRole[id + '|convert'] || []
+      if (anchor) {
+        const sameGen = converts.filter((c: any) => !!c.archived === !!pin.session.archived)
+        const hit = (sameGen.length ? sameGen : converts).filter((c: any) => convertBasename(c) === anchor)
+        // 锚点对应的转换不存在（例如只剩归档的核对）时留空：不拿别的尝试凑。
+        node.convert = hit.length ? newestOf(hit) : null
+        return
+      }
+      // 旧转录没有锚点：按老规则把转换切到"同一轮"；那一轮不在就保持最新。
+      const want = Number(pin.session.chapterAttempt) || 1
+      const peers = converts.filter((c: any) =>
+        (Number(c.chapterAttempt) || 1) === want && !!c.archived === !!pin.session.archived)
+      if (peers.length) node.convert = newestOf(peers)
+      return
+    }
+    if (pin && pin.node === node && pin.role === 'convert') node.convert = pin.session
+    node.checker = checkerForConvert(
+      byRole[id + '|checker'] || [],
+      node.convert,
+      !!pin && pin.node === node && pin.role === 'convert',
+    )
   })
   const roots: ChapterTreeNode[] = []
   Object.keys(byId).forEach((id) => {
@@ -796,9 +857,9 @@ export function chainOfSession(sessions: any[], id: string | null | undefined): 
 }
 
 /*
- * 章节转换/核对的尝试链：给定会话 id，把它所在「同一角色 + 同一章节 ID」的
- * 各次尝试聚成一条链（新 → 旧）。只认带 chapterId 的会话；只尝试过一次的
- * 返回 null（此时不出现「历史」页签）。
+ * 章节转换/核对的尝试链：给定会话 id，把它所在「同一章节 ID」的各次尝试聚成
+ * 一条链。只认带 chapterId 的会话；只尝试过一次的返回 null（此时不出现
+ * 「历史」页签）。
  */
 export function chapterAttemptChain(sessions: any[], id: string | null | undefined): any[] | null {
   if (!id) return null
@@ -819,7 +880,53 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
     members.push(s)
   })
   if (members.length < 2) return null
-  return sortChainMembers(members)
+  return orderChapterChain(members)
+}
+
+/* P59：历史列表以转换会话为行首锚点——每个转换尝试一行，紧跟它**锚定的**核对
+ * （新 → 旧），然后是上一个更老的转换。旧转录没有锚点时才按"同世代里尝试号
+ * 不大于自己的最近那次转换"归位；归不进去的排在最后，不藏掉任何一条。 */
+export function orderChapterChain(members: any[]): any[] {
+  const converts = (members || []).filter((s) => s && s.chapterRole !== 'checker').sort(convertChainOrder)
+  const checkers = (members || []).filter((s) => s && s.chapterRole === 'checker')
+  const owned: Record<string, any[]> = {}
+  const leftover: any[] = []
+  converts.forEach((c) => { owned[String(c.id)] = [] })
+  checkers.forEach((k) => {
+    const anchor = String((k && k.chapterAnchor) || '')
+    if (anchor) {
+      const hit = converts.find((c) => convertBasename(c) === anchor && !!c.archived === !!k.archived)
+      if (hit) { owned[String(hit.id)].push(k); return }
+      leftover.push(k)
+      return
+    }
+    const sameGen = converts.filter((c) => !!c.archived === !!k.archived)
+    const older = sameGen.filter((c) => (Number(c.chapterAttempt) || 1) <= (Number(k.chapterAttempt) || 1))
+    const owner = (older.length ? older : sameGen).slice().sort(convertChainOrder)[0]
+    if (owner) owned[String(owner.id)].push(k)
+    else leftover.push(k)
+  })
+  const byThen = (a: any, b: any) => mtimeMs(b) - mtimeMs(a)
+  const out: any[] = []
+  converts.forEach((c) => {
+    out.push(c)
+    owned[String(c.id)].sort(byThen).forEach((k) => out.push(k))
+  })
+  leftover.sort(byThen).forEach((k) => out.push(k))
+  return out
+}
+
+/* 转换自己的先后：工作树优先于归档（P58：归档是上一代），再比尝试号、mtime。 */
+function convertChainOrder(a: any, b: any): number {
+  if (!!a.archived !== !!b.archived) return a.archived ? 1 : -1
+  const aa = Number(a.chapterAttempt) || 1
+  const ab = Number(b.chapterAttempt) || 1
+  if (aa !== ab) return ab - aa
+  const d = mtimeMs(b) - mtimeMs(a)
+  if (d) return d
+  const ia = String((a && a.id) || '')
+  const ib = String((b && b.id) || '')
+  return ia < ib ? -1 : ia > ib ? 1 : 0
 }
 
 /* T194：同一章同一角色可能扫到**两份同号转录**——工作树里这次尝试的，加上

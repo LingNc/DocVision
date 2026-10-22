@@ -397,3 +397,70 @@ describe('归档世代不抢工作树的行（P58）', () => {
     expect(chainMemberTag(mkA('a/convert_chapter_004_child_03.jsonl', 1, false))).toBe('#1')
   })
 })
+
+/* P59：转换是唯一锚点。核对会话在转录里记它核对的那份转换（chapterAnchor），
+ * 树与历史都按这个锚点配对，不再拿两套各自编号的 .tryN 互相猜——手动重新核对
+ * 只让核对号加一，核对的仍是同一份产物。 */
+describe('P59 核对按锚点挂在转换下面', () => {
+  const conv = (attempt = 1) => ({
+    id: 'book/work/sessions/convert_chapter_042' + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: 'chapter_042', chapterRole: 'convert',
+    chapterAttempt: attempt, mtime: '2026-10-22T10:00:00Z',
+  })
+  const chk = (attempt: number, anchor: string, mt: string) => ({
+    id: 'book/work/sessions/checker_chapter_042' + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: 'chapter_042', chapterRole: 'checker',
+    chapterAttempt: attempt, chapterAnchor: anchor, chapterAnchorAttempt: 1, mtime: mt,
+  })
+
+  it('同一个转换的两次核对：显示锚定它的最新那条', () => {
+    const c = conv()
+    const older = chk(1, 'convert_chapter_042', '2026-10-22T10:30:00Z')
+    const newer = chk(2, 'convert_chapter_042', '2026-10-22T12:00:00Z')
+    const node = buildChapterTree([c, older, newer])[0]
+    expect(node.convert!.id).toBe(c.id)
+    expect(node.checker!.id).toBe(newer.id)
+  })
+
+  it('钉住较老的核对（同锚点）时转换不变', () => {
+    const c = conv()
+    const older = chk(1, 'convert_chapter_042', '2026-10-22T10:30:00Z')
+    const newer = chk(2, 'convert_chapter_042', '2026-10-22T12:00:00Z')
+    const node = buildChapterTree([c, older, newer], older.id)[0]
+    expect(node.checker!.id).toBe(older.id)
+    // 转换由锚点决定，不是"最新那条"也不是按号。
+    expect(node.convert!.id).toBe(c.id)
+  })
+
+  it('钉住锚定旧转换的核对时，转换跟着锚点切过去', () => {
+    const c1 = conv(1)
+    const c2 = conv(2)
+    const k1 = chk(1, 'convert_chapter_042', '2026-10-22T10:10:00Z')
+    const k2 = chk(2, 'convert_chapter_042.try2', '2026-10-22T12:10:00Z')
+    expect(buildChapterTree([c1, c2, k1, k2], k1.id)[0].convert!.id).toBe(c1.id)
+    expect(buildChapterTree([c1, c2, k1, k2], k2.id)[0].convert!.id).toBe(c2.id)
+  })
+
+  it('核对锚定的是另一次转换 → 不挂上来', () => {
+    const c = conv()
+    const other = chk(1, 'convert_chapter_042.try2', '2026-10-22T11:00:00Z')
+    expect(buildChapterTree([c, other])[0].checker).toBeNull()
+  })
+
+  it('历史：每个转换下面跟着它锚定的核对（新 → 旧）', () => {
+    const c1 = conv(1)
+    const c2 = conv(2)
+    const k1 = chk(1, 'convert_chapter_042', '2026-10-22T10:10:00Z')
+    const k2 = chk(2, 'convert_chapter_042.try2', '2026-10-22T12:10:00Z')
+    const chain = chapterAttemptChain([c1, c2, k1, k2], k2.id)!
+    expect(chain.map((s: any) => s.id)).toEqual([c2.id, k2.id, c1.id, k1.id])
+  })
+
+  it('旧转录没有锚点：仍按尝试号归组', () => {
+    const c = conv()
+    const legacy = chk(1, '', '2026-10-22T10:30:00Z')
+    const node = buildChapterTree([c, legacy])[0]
+    expect(node.checker!.id).toBe(legacy.id)
+    expect(chapterAttemptChain([c, legacy], legacy.id)!.map((s: any) => s.id)).toEqual([c.id, legacy.id])
+  })
+})

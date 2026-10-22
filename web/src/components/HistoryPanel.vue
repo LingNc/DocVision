@@ -44,7 +44,13 @@ function onRowClick(s: any) {
 /* T188：核对会话一次尝试里被打回几轮，全挤在同一条转录里（磁盘格式不动）。
  * 历史里按 user 轮拆成子条目，点一轮就跳到那一轮的起始行——"第 1 轮为什么被
  * 拒"不用再翻整条转录。 */
+/* P59：章节链只列**会话级**条目——用户口径：把一条核对转录按 user 轮拆成
+ * 「轮 N / 拒绝 N 条 / 第 N 行 · M 行」没有用，一进去就应该看到这一章有哪几次
+ * 转换、每次转换下面核对了哪几次。逐图（img2text）链保持原样。 */
+const chapterChain = computed(() => (members.value || []).some((s: any) => !!s.chapterId))
+
 const rounds = computed(() => {
+  if (chapterChain.value) return []
   const s: any = state.current
   if (!s || s.chapterRole !== 'checker' || !Array.isArray(state.lines)) return []
   const r = checkerRounds(state.lines as any[])
@@ -124,9 +130,10 @@ function doDrop() {
     <div v-if="!members" class="history-empty">当前会话不属于任何调用链 / 重试链</div>
     <div v-else class="history-list">
       <div class="history-head">
-          这一章的全部会话（{{ members.length }}，转换与核对都在这里，新 → 旧）
-          <span v-if="hasArchived" class="history-old-note" title="带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话">· 带「旧」的是更早一次父尝试（已作废）留下的</span>
-        </div>
+        <template v-if="chapterChain">这一章的全部会话（{{ members.length }}，每个转换后面跟着它名下的核对，新 → 旧）</template>
+        <template v-else>这一章的全部会话（{{ members.length }}，转换与核对都在这里，新 → 旧）</template>
+        <span v-if="hasArchived" class="history-old-note" title="带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话">· 带「旧」的是更早一次父尝试（已作废）留下的</span>
+      </div>
       <div v-if="dropAsk" class="history-confirm" role="alert">
         <span>删掉「{{ dropAsk.name }}」这条记录？转录会从历史里消失，作废尝试的归档目录也会一起删。</span>
         <button class="history-act act-danger" type="button" @click="doDrop">确认删除</button>
