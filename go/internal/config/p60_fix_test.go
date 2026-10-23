@@ -4,15 +4,15 @@ import (
 	"testing"
 )
 
-// P60：修复会话的开关默认关闭、轮数默认 2、模型默认为空（= 继承 convert）。
-// 这一步只落骨架：默认配置下本批代码不产生任何运行期行为。
+// P60：修复会话**默认开启**、轮数默认 5、模型默认为空（= 继承 convert）；
+// 显式 enabled: false 才退回“整章重转”的老行为（用户口径 2026-10-22）。
 func TestFixConfigDefaultsAndAccessors(t *testing.T) {
 	var l LatexConfig
-	if l.FixEnabled() {
-		t.Error("latex.fix.enabled 默认必须是关闭的（P60 第一步）")
+	if !l.FixEnabled() {
+		t.Error("latex.fix.enabled 默认应当开启（P60）")
 	}
-	if got := l.FixMaxRounds(); got != 2 {
-		t.Errorf("latex.fix.max_rounds 默认 = %d, want 2", got)
+	if got := l.FixMaxRounds(); got != 5 {
+		t.Errorf("latex.fix.max_rounds 默认 = %d, want 5", got)
 	}
 	if l.Fix.Model != "" {
 		t.Errorf("latex.fix.model 默认应当为空（继承 convert）: %q", l.Fix.Model)
@@ -32,12 +32,12 @@ func TestFixConfigDefaultsAndAccessors(t *testing.T) {
 	if l.FixEnabled() {
 		t.Error("显式 enabled: false 应当关闭")
 	}
-	if got := l.FixMaxRounds(); got != 2 {
-		t.Errorf("max_rounds=0 应当按默认 2: %d", got)
+	if got := l.FixMaxRounds(); got != 5 {
+		t.Errorf("max_rounds=0 应当按默认 5: %d", got)
 	}
 	l.Fix.MaxRounds = -3
-	if got := l.FixMaxRounds(); got != 2 {
-		t.Errorf("负数 max_rounds 应当按默认 2: %d", got)
+	if got := l.FixMaxRounds(); got != 5 {
+		t.Errorf("负数 max_rounds 应当按默认 5: %d", got)
 	}
 }
 

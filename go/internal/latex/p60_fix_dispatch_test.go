@@ -281,10 +281,8 @@ func p60RunWith(t *testing.T, opts p60Options) (*p60Stats, string, string) {
 	if opts.checkerRounds > 0 {
 		cfg.Latex.CheckerRounds = opts.checkerRounds
 	}
-	if opts.enabled {
-		on := true
-		cfg.Latex.Fix = config.FixConfig{Enabled: &on, MaxRounds: opts.maxRounds}
-	}
+	on := opts.enabled
+	cfg.Latex.Fix = config.FixConfig{Enabled: &on, MaxRounds: opts.maxRounds}
 	off := false
 	cfg.Models = map[string]config.ModelConfig{"fake": {BaseURL: server.URL, APIKey: "test", Model: "fake", Stream: &off}}
 	r := &Runner{cfg: cfg, log: log, noChapterGate: true, projDir: proj,
@@ -418,6 +416,8 @@ func TestFixDispatchFailureFallsBackToIntegration(t *testing.T) {
 // （这正是"默认跑法不变"最容易被破坏的地方）。
 func TestConvertSystemPromptDispatchOnlyWhenEnabled(t *testing.T) {
 	r := keepTestRunner(t)
+	off := false
+	r.cfg.Latex.Fix = config.FixConfig{Enabled: &off}
 	tuning := config.SessionTuning{MaxToolRounds: 30}
 	today := renderPrompt(prompts.Must(prompts.ConvertSystem), tuning, r.outputLang())
 	if got := r.convertSystemPrompt(tuning); got != today {

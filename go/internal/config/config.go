@@ -500,15 +500,16 @@ type FixConfig struct {
 	Model string `yaml:"model"`
 }
 
-// FixEnabled reports whether the fix sessions run (default OFF：P60 的调度也
-// 只在这个开关打开时才存在——关闭时转换会话的工具面、提示词与请求数都不变).
-func (c LatexConfig) FixEnabled() bool { return c.Fix.Enabled != nil && *c.Fix.Enabled }
+// FixEnabled reports whether the fix sessions run. **默认开**（用户口径
+// 2026-10-22）：子章节有问题就在原地修，不再为一个小问题整章归档重转；
+// 显式 enabled: false 才关闭，那时候工具面、提示词与请求数都与旧版完全一致.
+func (c LatexConfig) FixEnabled() bool { return c.Fix.Enabled == nil || *c.Fix.Enabled }
 
-// FixMaxRounds 是一个子章节最多能拿到几轮修复（默认 2；<=0 也按 2 算——写 0
+// FixMaxRounds 是一个子章节最多能拿到几轮修复（默认 5；<=0 也按 5 算——写 0
 // 不会变成"无限轮"）。
 func (c LatexConfig) FixMaxRounds() int {
 	if c.Fix.MaxRounds <= 0 {
-		return 2
+		return 5
 	}
 	return c.Fix.MaxRounds
 }

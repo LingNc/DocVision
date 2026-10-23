@@ -241,17 +241,19 @@ func TestDispatchFixWritesPlan(t *testing.T) {
 	}
 }
 
-// P60：默认关闭——修复会话的第一道守卫就是开关，没开就一个字都不动。
+// P60：显式 enabled: false ——修复会话的第一道守卫就是开关，没开就一个字都不动。
 func TestRunChildFixDisabledByDefault(t *testing.T) {
 	r := keepTestRunner(t)
+	off := false
+	r.cfg.Latex.Fix = config.FixConfig{Enabled: &off}
 	if r.cfg.Latex.FixEnabled() {
-		t.Fatal("latex.fix.enabled 默认必须是关闭的")
+		t.Fatal("latex.fix.enabled 显式关闭后不该生效")
 	}
 	err := r.runChildFix("/nonexistent", "cls", fixTarget{
 		Child: "child_02", Base: "chapter_014_child_02", NodeRoot: "/nonexistent/node", Depth: 1,
 	}, []fixPlanIssue{{ID: "a", What: "w", Rule: "r", Where: "x:1"}}, 0)
 	if err == nil || !strings.Contains(err.Error(), "latex.fix.enabled") {
-		t.Fatalf("默认关闭时应当直接返回未启用错误: %v", err)
+		t.Fatalf("关闭时应当直接返回未启用错误: %v", err)
 	}
 }
 

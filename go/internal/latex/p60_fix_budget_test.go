@@ -56,10 +56,8 @@ func TestFixBudgetExhaustedHelper(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := keepTestRunner(t)
-			if tc.enabled {
-				flag := true
-				r.cfg.Latex.Fix = config.FixConfig{Enabled: &flag, MaxRounds: tc.max}
-			}
+			flag := tc.enabled
+			r.cfg.Latex.Fix = config.FixConfig{Enabled: &flag, MaxRounds: tc.max}
 			work := t.TempDir()
 			if tc.child != "" {
 				p60WriteFixTranscript(t, work, "chapter_01", tc.child, tc.rounds)
