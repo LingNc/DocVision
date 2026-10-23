@@ -999,6 +999,10 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 	for idx, chapPath := range chapters {
 		wg.Add(1)
 		tid := <-tidPool
+		// 创建戳在这里取（派发循环里、goroutine 之前）：章节按 sort 后的顺序
+		// 创建，号的大小就是创建早晚。放进 goroutine 里取就等于按调度顺序排，
+		// 那正是要修掉的东西（P60 收尾）。
+		seq := r.nextConvertSeq()
 		if verbose {
 			r.log.Log(0, label, "start", filepath.Base(chapPath),
 				fmt.Sprintf("(%d/%d)", idx+1, total))
@@ -1006,7 +1010,7 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 		progMu.Lock()
 		running++
 		progMu.Unlock()
-		go func(i int, chap string, tid int) {
+		go func(i int, chap string, tid int, seq int64) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
 			// P53 阶段二：主流程的并发批与运行期派发共用章节锁——排着重试的章节正在
@@ -1014,7 +1018,7 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 			cbase := strings.TrimSuffix(filepath.Base(chap), filepath.Ext(chap))
 			release := r.holdChapter(cbase)
 			defer release()
-			err := r.convertOneChapter(proj, clsName, manualPath, chap, workDir, i, tid, false)
+			err := r.convertOneChapterSeq(proj, clsName, manualPath, chap, workDir, i, tid, false, seq)
 			progMu.Lock()
 			done++
 			running--
@@ -1029,7 +1033,7 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 				failures = append(failures, filepath.Base(chap)+": "+err.Error())
 				failsMu.Unlock()
 			}
-		}(idx, chapPath, tid)
+		}(idx, chapPath, tid, seq)
 	}
 	wg.Wait()
 	progLive.Close()
@@ -1187,12 +1191,29 @@ func (r *Runner) logConcurrencyPlan() {
  * 两者独立计数，所以"转换 3 + 核对 3"可以同时在途 6 个会话；要限制真正打到
  * 同一个模型上的请求数，用 models.<名>.max_concurrency（会话层还有一个按模型
  * 名的闸门，见 session.SetModelConcurrency）。
+ *
+ * 转换池按**任务创建顺序**派发（P60 收尾，见 slots.go 与 nextConvertSeq）：
+ * 同一时刻只有 N 个转换会话在跑，"哪个就绪的会话先拿空出来的槽位"由任务创建
+ * 的早晚决定，而不是谁先排队。旧实现是 buffered channel，先到先得——晚创建的
+ * 顶层章节会一路插在早创建的那一支前面（真实一次运行：一棵子树的 15 个孙节点
+ * 排了约 25 分钟，期间后来创建的会话轮番拿走全部 10 个槽位）。核对池与其余
+ * 阶段的池子仍是先到先得，本批不动。
  */
-func (r *Runner) acquireConvertSlot() func() {
-	r.convertSlotsOnce.Do(func() { r.convertSlots = make(chan struct{}, r.cfg.Latex.ConvertWorkers()) })
-	r.convertSlots <- struct{}{}
-	return func() { <-r.convertSlots }
+func (r *Runner) acquireConvertSlot(seq int64) func() {
+	r.convertSlotsOnce.Do(func() { r.convertSlots = newSlotSem(r.cfg.Latex.ConvertWorkers()) })
+	if seq <= 0 {
+		// 没带创建戳（新入口 / 测试）：当场发一个号，于是它排在所有已创建的任务
+		// 之后——宁可保守地排后面，也不让它凭空抢队头。
+		seq = r.nextConvertSeq()
+	}
+	return r.convertSlots.acquire(seq)
 }
+
+// nextConvertSeq 发一个「任务创建顺序」号（1 起，单调递增）。
+//
+// 必须在**任务被创建**的那一行取号（派发循环里、子章节 goroutine 启动之前），
+// 不能在 goroutine 里取——那样号的大小就成了调度顺序，等于换了个方式先到先得。
+func (r *Runner) nextConvertSeq() int64 { return r.convertSeq.Add(1) }
 
 func (r *Runner) acquireCheckerSlot() func() {
 	r.checkerSlotsOnce.Do(func() { r.checkerSlots = make(chan struct{}, r.cfg.Latex.CheckerWorkers()) })
@@ -1228,6 +1249,10 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 	for i, child := range children {
 		id := fmt.Sprintf("child_%02d", i+1)
 		chapter := child
+		// 子章节的创建戳在**启动 goroutine 之前**取，按 children 的顺序单调递增：
+		// 早创建的那一支（含它的子树）永远排在晚创建的那一支前面，与谁先被调度
+		// 无关。它也自然大于父节点的号（父节点更早创建）。
+		childSeq := r.nextConvertSeq()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -1258,6 +1283,7 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 				SubmitRoot:     childOut,
 				ReportPath:     filepath.Join(nodeRoot, "reports", "conversion.md"),
 				StrictChecker:  true,
+				Seq:            childSeq,
 			}
 			if err := r.convertChapterNode(proj, clsName, manualPath, childMD, workDir, idx, tid, false, childNode); err != nil {
 				mu.Lock()
@@ -1446,6 +1472,15 @@ func classNameOfFile(styleDir string) string {
 // <proj>/work/chapters. Probe files, test PDFs and other scratch can
 // therefore never leak into the book.
 func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool) error {
+	// 这一章在此刻被创建（运行期重试 / 测试入口），创建戳当场取：它排在所有
+	// 已经创建的任务之后——保守但正确，不凭空抢队头。
+	return r.convertOneChapterSeq(proj, clsName, manualPath, chapPath, workDir, idx, tid, retry, r.nextConvertSeq())
+}
+
+// convertOneChapterSeq 与 convertOneChapter 相同，但创建戳由调用方给。
+// 批量派发必须走这一条：号在**派发循环里**取（章节顺序 = 创建顺序），不能等
+// goroutine 跑起来才取（那就成了按调度顺序，P60 收尾要修掉的就是这个）。
+func (r *Runner) convertOneChapterSeq(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool, seq int64) error {
 	base := strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
 	node := chapterNodeConfig{
 		InputMount: "project", InputRef: "chapters/" + base + ".md",
@@ -1453,6 +1488,7 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		TranscriptPath: filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"),
 		SubmitRoot:     filepath.Join(workDir, "chapters"),
 		ReportPath:     filepath.Join(workDir, "reports", base+".md"),
+		Seq:            seq,
 	}
 	// P53：--only / 网页重试队列给这一章分配了新尝试号，覆盖"按磁盘推导"。
 	if n := r.retryAttemptOf(base); n > 0 {
@@ -1472,6 +1508,11 @@ type chapterNodeConfig struct {
 	FinalSubmitRoot string
 	ReportPath      string
 	StrictChecker   bool
+	// Seq 是这一章的**任务创建顺序戳**（1 起，越小创建越早）：转换槽位池按它
+	// 派发，见 slots.go。子章节由 convertChapterChildren 在启动 goroutine 之前
+	// 发号，所以一个早创建的子树的每个节点都保持自己的早期号；重试沿用父节点
+	// 的号（同一件任务，不因为重来一次就变"新任务"）。
+	Seq int64
 	// Attempt 是**本次运行**内的「第几次尝试」（1 起）：checker 连续不通过就换
 	// 一个全新会话重来，预算按它算（checker_rounds，按层递减）。
 	Attempt int
@@ -1718,7 +1759,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if !resumeSkip && !splitTool.Requested {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
 		convState(rowStateQueued)
-		release := r.acquireConvertSlot()
+		release := r.acquireConvertSlot(node.Seq)
 		convState(rowStateRunning)
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		_, runErr := sess.Run(session.RunOptions{UserText: initial})
@@ -1763,8 +1804,8 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		// dispatchFix 为 nil（latex.fix.enabled 关闭）时这两步根本不存在——默认
 		// 跑法与引入 P60 之前一字不差。
 		if dispatchFix != nil {
-			if planPath := r.reviewChildrenBeforeIntegration(sess, base, dispatchFix, convState, tid); planPath != "" {
-				r.applyChildFixPlan(proj, clsName, base, work, node.Depth+1, splitTool.Children, planPath, tid)
+			if planPath := r.reviewChildrenBeforeIntegration(sess, base, dispatchFix, convState, node.Seq, tid); planPath != "" {
+				r.applyChildFixPlan(proj, clsName, base, work, node.Depth+1, splitTool.Children, planPath, node.Seq, tid)
 			}
 		}
 		integrationText := "All child chapters have passed their individual checkers. FIRST read work:_subdivision/children-summary.md — it contains each child's own report (what it could not restore, what it worked around) and the list of issues already inherited for you. " +
@@ -1777,7 +1818,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			"Do not submit child files as independent book chapters."
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		convState(rowStateQueued)
-		release := r.acquireConvertSlot()
+		release := r.acquireConvertSlot(node.Seq)
 		convState(rowStateRunning)
 		_, runErr := sess.Run(session.RunOptions{UserText: integrationText})
 		release()
@@ -1862,7 +1903,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		// 还停在上一次的「转换完成待核对」——核对明明已经说了"发现问题"，上面
 		// 那行却在等核对，看着像卡住了。
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
-		release := r.acquireConvertSlot()
+		release := r.acquireConvertSlot(node.Seq)
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		_, runErr := sess.Run(session.RunOptions{UserText: msg})
 		release()

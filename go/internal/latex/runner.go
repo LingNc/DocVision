@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mineru-tools/internal/config"
@@ -214,7 +215,10 @@ type Runner struct {
 	// 父节点一份）。核对会话读 PDF/原书页、转换会话写 .tex，混在一个池里会让
 	// 核对排在一个慢转换后面——用户口径是"两个阶段的并发独立，不能放一起算"。
 	convertSlotsOnce sync.Once
-	convertSlots     chan struct{}
+	// convertSlots 按**任务创建顺序**派发（见 slots.go）：只用 channel 的 FIFO
+	// 会让晚创建的顶层会话一直插队，早期子树的孙节点饿在队尾（P60 收尾）。
+	convertSlots     *slotSem
+	convertSeq       atomic.Int64 // 章节任务的创建顺序戳（越小创建越早）
 	checkerSlotsOnce sync.Once
 	checkerSlots     chan struct{}
 	// chapterSlots 是其余阶段（样式修复 / 整合以外的零散会话 / 提交提醒）共用的

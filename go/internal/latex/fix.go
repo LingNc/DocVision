@@ -400,6 +400,10 @@ type fixTarget struct {
 	NodeRoot string // <parentWork>/_subdivision/child_02/node
 	InputMD  string // <parentWork>/_subdivision/child_02/input/chapter.md
 	Depth    int    // 递归深度（子章节恒 >= 1）
+	// Seq 是**它所属那棵子树**的创建顺序戳（P60 收尾）：修复会话干的是同一棵
+	// 早期子树里的事，它拿的是父节点的号而不是现在新发的号——否则一个早创建、
+	// 正在等孩子的子树，它的修复会话会被排到所有后来创建的会话后面。
+	Seq int64
 }
 
 // fixRoundsUsed 数这个子章节已经用掉几轮修复：转录里每条 `fix_target` 锚点
@@ -602,8 +606,9 @@ func (r *Runner) runChildFix(proj, clsName string, t fixTarget, issues []fixPlan
 
 	_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
 	// 修复会话干的是"改 .tex / 编译"这一类活，和转换会话抢同一批并发槽位：
-	// 父章节等其他顶层章节在转换时，这里不能再凭空多开一路请求。
-	release := r.acquireConvertSlot()
+	// 父章节等其他顶层章节在转换时，这里不能再凭空多开一路请求。派发顺序按
+	// 它所属子树的创建戳（t.Seq），见 slots.go。
+	release := r.acquireConvertSlot(t.Seq)
 	fixState(rowStateRunning)
 	_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 	_, runErr := sess.Run(session.RunOptions{UserText: initial})
@@ -684,10 +689,10 @@ func (r *Runner) convertSystemPrompt(tuning config.SessionTuning) string {
 // 对话，返回它写下的计划文件路径（空 = 没有下派任何东西）。
 //
 // 这一段只是改善手段：对话本身失败不是致命错，按今天的行为直接整合。
-func (r *Runner) reviewChildrenBeforeIntegration(sess *session.Session, base string, dispatch *DispatchFixTool, setState func(string), tid int) string {
+func (r *Runner) reviewChildrenBeforeIntegration(sess *session.Session, base string, dispatch *DispatchFixTool, setState func(string), seq int64, tid int) string {
 	_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
 	setState(rowStateQueued)
-	release := r.acquireConvertSlot()
+	release := r.acquireConvertSlot(seq)
 	setState(rowStateRunning)
 	_, err := sess.Run(session.RunOptions{UserText: childReviewText})
 	release()
@@ -709,7 +714,7 @@ func (r *Runner) reviewChildrenBeforeIntegration(sess *session.Session, base str
 //
 // 任何一步失败都只警告、不中止：今天的行为（父会话照旧整合并提交）必须还是
 // 兜底——一整本书不能因为一轮修复失败而失败。
-func (r *Runner) applyChildFixPlan(proj, clsName, base, work string, childDepth int, children []ChapterSubdivision, planPath string, tid int) {
+func (r *Runner) applyChildFixPlan(proj, clsName, base, work string, childDepth int, children []ChapterSubdivision, planPath string, seq int64, tid int) {
 	plan, err := ReadFixPlan(proj, base)
 	if err != nil {
 		r.log.LogWarning(tid, "[fix]", base, "修复计划读取失败（按原行为整合）:", err)
@@ -724,6 +729,7 @@ func (r *Runner) applyChildFixPlan(proj, clsName, base, work string, childDepth 
 			NodeRoot: filepath.Join(work, "_subdivision", pc.Child, "node"),
 			InputMD:  filepath.Join(work, "_subdivision", pc.Child, "input", "chapter.md"),
 			Depth:    childDepth,
+			Seq:      seq,
 		}
 		// 顺序跑：计划通常只有一两个子章节，父会话只等这一小段；每一轮都会
 		// 拿转换槽位，所以不会额外放大并发。
