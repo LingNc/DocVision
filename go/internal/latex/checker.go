@@ -19,8 +19,13 @@ import (
 // 再交一遍，然后撞同一堵墙。实测一条核对连续 6 轮、每轮 2 次会话、每轮约 30 秒
 // 全部落在这个循环里，钱花了、结论一个字都没有。判定依据是**没有 submit 回执**
 // 这个事实，不是正文长什么样。
+//
+// T217：一次结论都没拿到的路径单独有了一句更明确的文案（"核对始终没有给出结论
+// （不是内容问题，共尝试 N 次）…"），它同样是"没结论"、同样必须跳过反馈轮。
 func checkerNoVerdict(issues string) bool {
-	return strings.HasPrefix(issues, "checker 多次未能提交结论") || strings.HasPrefix(issues, "checker API failure")
+	return strings.HasPrefix(issues, "核对始终没有给出结论") ||
+		strings.HasPrefix(issues, "checker 多次未能提交结论") ||
+		strings.HasPrefix(issues, "checker API failure")
 }
 
 // checkChapter reviews ONE converted chapter with its own minimal,
@@ -117,15 +122,33 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		userText += "\n\nWatermark note: if watermark-like content (institution marks, faint background text) is absent from the .tex, that is CORRECT — watermark removal is enabled. Do not report it as missing content."
 	}
 
-	// T46：核对必须以一个结论收尾，不能"出错就结束"。两轮尝试：
-	// 每轮先正常跑；模型漏了 submit 就按 tikz/mermaid-fix 同款提醒一次；
-	// 本轮仍拿不到结论（会话错误 / 提醒后仍未提交）再重开一轮全新会话。
-	// 两轮都失败才按既有降级语义视为通过（compile 与终审仍是硬关卡）。
+	// T46：核对必须以一个结论收尾，不能"出错就结束"。每轮先正常跑；模型漏了
+	// submit 就按 tikz/mermaid-fix 同款提醒一次；本轮仍拿不到结论（会话错误 /
+	// 提醒后仍未提交）再重开一轮全新会话。
+	//
+	// T217：**一次结论都没拿到**时把预算放宽到 checkerNoVerdictAttempts 次。这种
+	// 失败不是内容问题（会话跑挂、或模型始终不调 submit），旧实现 2 次就上报，
+	// 调用方把它当成"核对不过"而作废整章、从头重转——实测一整章就因为核对始终
+	// 没提交被白白重跑一遍。重开一次核对会话比整章重来便宜得多，所以这里多重试
+	// 几次（每次都是全新会话、同一转录路径、同一只读视图）。
+	// 反过来，**只要有任何一次拿到过结论**，预算就回到 checkerAttempts（2）：
+	// 那时要处理的是内容，交给调用方按 checker_rounds 把问题喂回转换会话。
 	const checkerAttempts = 2
+	const checkerNoVerdictAttempts = 4
 	apiFailure := ""
-	for attempt := 1; attempt <= checkerAttempts; attempt++ {
+	sawVerdict := false
+	attemptsMade := 0
+	for attempt := 1; ; attempt++ {
+		limit := checkerAttempts
+		if !sawVerdict {
+			limit = checkerNoVerdictAttempts
+		}
+		if attempt > limit {
+			break
+		}
+		attemptsMade = attempt
 		if attempt > 1 {
-			r.log.LogWarning(tid, "[checker]", base, "第 1 次核对未拿到结论，重开核对会话（第 2/2 次）")
+			r.log.LogWarning(tid, "[checker]", base, fmt.Sprintf("第 %d 次核对未拿到结论，重开核对会话（第 %d/%d 次）", attempt-1, attempt, limit))
 		}
 		submit := &SubmitDoneTool{
 			Label:         "the review of chapter " + base,
@@ -270,6 +293,9 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 			}
 			continue
 		}
+		// T217：拿到过结论了（issues 或无法识别的状态都算）——轮次预算就此回到
+		// checkerAttempts，不再为"没结论"多开会话。
+		sawVerdict = true
 		if submit.Status == "issues" {
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "issues"})
 			if tr != nil {
@@ -299,10 +325,16 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 		r.keepCheckerTranscript(trPath, strict)
 		return true, ""
 	}
-	r.log.LogWarning(tid, "[checker]", base, checkerAttempts, "次核对均未拿到结论")
+	r.log.LogWarning(tid, "[checker]", base, attemptsMade, "次核对均未拿到结论")
 	r.keepCheckerTranscript(trPath, strict)
 	if apiFailure != "" {
 		return false, "checker API failure: " + apiFailure
+	}
+	// T217：一次结论都没有，与"核对说了这一章有问题"是两回事。旧文案只说
+	// "未能提交结论"，调用方与用户都容易读成"内容没通过"；这里点明原因、次数，
+	// 让上层（checkerNoVerdict）与人都看得出该做的是重开核对，而不是重转整章。
+	if !sawVerdict {
+		return false, fmt.Sprintf("核对始终没有给出结论（不是内容问题，共尝试 %d 次）：会话一次都没有调用 submit，可能把结论写成了正文或直接结束", attemptsMade)
 	}
 	// 旧行为在这里对非 strict 节点**直接判通过**——实测代价极大：一条跑完的
 	// 章节它的 checker 从头到尾没提交过结论（8 轮、25 次工具调用、38 分钟），

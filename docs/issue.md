@@ -1267,3 +1267,9 @@ user 轮
   改：`web/src/state.ts` 新增 `resetViewState()`（纯状态、不碰 DOM、不发请求）：清掉手动选中/pin 与它的行缓冲/轨迹页选中/展开/类型筛选、搜索过滤词，清空 `state.collapsed`/`state.overflow` 并把这两个记忆键从 localStorage 删掉，窄屏侧栏回到展开；**主题 / 显示单位 / Markdown / 缩略图 / 自动跟随 / 板块 / 方块视图一律不动**。返回"该重新选中哪一条"（本板块里正在跑的**顶层**会话优先，其次正在跑的子章节，再退回列表第一条，一条都没有时空串），选中与拉行由调用方走唯一的 `selectSession` 入口——所以它不发写请求、不删任何数据。侧栏头部刷新键 `⟳` 右边新增文字按钮「重置视图」，悬浮说明写清"清什么、不碰什么"；56px 轨道态放不下，跟搜索框/状态行一样隐藏。
   验证：`web/tests/reset-view.spec.ts` 4 条（清导航键、主题/单位/Markdown/缩略图原样留着、回到正在跑的顶层会话而不是子章节、板块之间不串），`npm test` 219 条全绿；`npx tsc --noEmit` 只剩 data.ts / legacy/trajectory.ts 的既有报错。
 - T216 修复会话（P60）：在已划分的子章节与工作区上按修复任务重新下派新会话，减少父章节整章重开的代价；核对由父会话定向下发规则并沿用同一锚点。
+- T217 核对拿不到结论时先重开核对，不要直接升级为整章重来。
+  现象：`checkChapterAt` 只跑 `checkerAttempts = 2` 次核对会话；两次都没有 `submit`（会话跑挂、或模型把结论写成正文/直接结束，提醒也不管用）时返回失败文本，调用方把它当"核对不过"处理——旧尝试整棵归档、这一章从头上重转。实测有一章内容本身没问题，只因为核对始终没提交就被整章重跑了一遍，代价与误判都是白花。
+  改：① 循环里记 `sawVerdict`（任一次 `submit.Submitted`）。**一次结论都没拿到**时预算放宽到 `checkerNoVerdictAttempts = 4` 次——每次都是全新会话、同一转录路径、同一只读视图；**只要拿到过结论**，预算立刻回到 `checkerAttempts = 2`，`issues` 那一路照旧立刻返回、由调用方按 `checker_rounds` 把问题喂回转换会话（升级链一行没动）。② 文案分开：一次结论都没有时返回 `核对始终没有给出结论（不是内容问题，共尝试 N 次）：会话一次都没有调用 submit…`（N 为实际尝试次数），旧文案 `checker 多次未能提交结论（会话未调用 submit）` 留给"给过结论但没有可用结论"那一路；`checkerNoVerdict()` 同步认得新前缀——否则 T209 会失效，这串文本又会被当成"章节有问题"喂回转换会话。每次额外轮次打一条 warning（`第 N 次核对未拿到结论，重开核对会话（第 N/4 次）`）。
+  改（未做，刻意留下）：`book.go` / `retry.go` 的升级链**不动**——4 次都拿不到结论时整章仍然作废重来，这一批只降低"没结论就被判整章重来"的概率，不重设计升级路径。
+  验证：`TestCheckerNoVerdictRetriesFourAttempts`（只回正文 → 恰好 4 次会话：8 条请求 = 每轮首请求 + 提交提醒、4 条 `checker_target` 锚点，返回新文案前缀）、`TestCheckerNoVerdictExtraAttemptCanPass`（前两次只回正文、第 3 次提交 `pass` → 通过，3 条锚点）、`TestCheckerWithoutVerdictFailsAfterFourAttempts`（退化响应连跑 4 轮、请求数 8–12）、`TestCheckerNoVerdict` 补新文案一条；`go test ./internal/latex/`、`go test ./internal/...` 全绿。
+  已知边界：P58 复盘会话判 `fail`/`truncate` 时会直接返回（`checker 复盘判定会话无法挽救…` / 已排队续跑），走不到第 4 次；且这两句不在 `checkerNoVerdict()` 的识别范围里。本轮不动它（动它就等于改升级链，见上），观察后再定。

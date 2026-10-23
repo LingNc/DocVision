@@ -38,6 +38,13 @@ func jsonReply(w http.ResponseWriter, content string) {
 	io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":`+strconvQuote(content)+`}}]}`)
 }
 
+// noRescue 关掉 P58 的复盘会话。本组测试要数"核对会话自己"的次数，而复盘会话
+// 会拿同一台假服务器再打一次模型（预算还是跨测试共享的全局计数），次数会飘。
+func noRescue(r *Runner) {
+	off := false
+	r.cfg.Latex.Rescue.Enabled = &off
+}
+
 func strconvQuote(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s) + `"`
 }
@@ -143,14 +150,15 @@ func TestCheckerSessionFeedsBackRealProblems(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			// T165：没 submit 就是没结论，不再兜底当通过（旧行为让一个
-			// 从未提交结论的 checker 把章节放进了书）。
+			// T165/T217：没 submit 就是没结论，不再兜底当通过（旧行为让一个
+			// 从未提交结论的 checker 把章节放进了书）。这种失败与"章节有问题"
+			// 分开：文案点明"不是内容问题"，轮次预算也放到 4 次。
 			name: "no verdict is not a pass",
 			reply: func(w http.ResponseWriter, round int32) {
 				jsonReply(w, "looks fine to me")
 			},
 			wantOK:     false,
-			wantIssues: "未能提交结论",
+			wantIssues: "核对始终没有给出结论（不是内容问题，共尝试 4 次）",
 		},
 		{
 			name: "issues without text still blocks",
@@ -233,19 +241,20 @@ func TestCheckerRecoversAfterDegenerateResponse(t *testing.T) {
 	}
 }
 
-// 两轮都退化：不通过，且原因是"厂商/网络错误"而不是"章节有问题"——上层
-// 据此不做"换会话重转换"（那只会让同一个坏模型再失败 N 次）。
+// 每一轮都退化（T217 起是 4 轮）：不通过，且原因是"厂商/网络错误"而不是
+// "章节有问题"——上层据此不做"换会话重转换"（那只会让同一个坏模型再失败 N 次）。
 func TestCheckerDegenerateInBothAttemptsFails(t *testing.T) {
 	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
 	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
 		degenerateJSON(w)
 	})
+	noRescue(r)
 	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0, 1)
 	if ok {
-		t.Fatal("两轮都没有结论，不能判通过")
+		t.Fatal("几轮都没有结论，不能判通过")
 	}
-	if !strings.Contains(issues, "未能提交结论") {
-		t.Fatalf("issues = %q, want 未能提交结论（上层据此换会话重来）", issues)
+	if !strings.Contains(issues, "核对始终没有给出结论") {
+		t.Fatalf("issues = %q, want 核对始终没有给出结论（上层据此不把整章作废重来）", issues)
 	}
 }
 
@@ -367,29 +376,95 @@ func TestCheckerResumeUsesUpdatedModelAndTranscript(t *testing.T) {
 	}
 }
 
-// T165：两次核对都没有结论**不再**降级成通过——实测一条跑完的章节，它的
-// checker 8 轮 25 次工具调用 38 分钟一次 submit 都没发，却被旧兜底判成
-// "核对通过"写进了书。没结论就是没结论，交给上层按重试预算重来。
-func TestCheckerWithoutVerdictFailsAfterTwoAttempts(t *testing.T) {
+// T165/T217：核对一次结论都没拿到**不再**降级成通过——实测一条跑完的章节，它的
+// checker 8 轮 25 次工具调用 38 分钟一次 submit 都没发，却被旧兜底判成"核对通过"
+// 写进了书。没结论就是没结论；这种失败也不是内容问题，先把 4 次预算用满再上报。
+func TestCheckerWithoutVerdictFailsAfterFourAttempts(t *testing.T) {
 	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
 	var calls atomic.Int32
 	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
 		calls.Add(1)
 		degenerateJSON(w)
 	})
+	noRescue(r)
 	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0, 1)
 	if ok {
 		t.Fatal("a checker that never submits a verdict must NOT be treated as a pass")
 	}
-	if !strings.Contains(issues, "未能提交结论") {
-		t.Fatalf("issues = %q, want 未能提交结论", issues)
+	if !strings.Contains(issues, "核对始终没有给出结论（不是内容问题，共尝试 4 次）") {
+		t.Fatalf("issues = %q, want 核对始终没有给出结论（共尝试 4 次）", issues)
 	}
-	// 每轮最多 3 次请求（原始 + 重发 + nudge），两轮 = 6。
-	if n := calls.Load(); n > 6 {
-		t.Fatalf("requests = %d, want <= 6", n)
+	// 每轮最多 3 次请求（原始 + 重发 + nudge），4 轮 = 12。
+	if n := calls.Load(); n > 12 {
+		t.Fatalf("requests = %d, want <= 12", n)
 	}
-	if n := calls.Load(); n < 4 {
-		t.Fatalf("requests = %d, want >= 4 (two full attempts)", n)
+	if n := calls.Load(); n < 8 {
+		t.Fatalf("requests = %d, want >= 8 (four full attempts)", n)
+	}
+}
+
+// T217（a）：核对会话一次 submit 都没发（只回正文）时，旧实现 2 次就上报，调用方
+// 把它当成"核对不过"作废整章从头重转。现在这种"没结论"的失败放宽到 4 次**全新
+// 会话**（同一转录路径、同一只读视图）；4 次都没有结论才上报，并在文案里点明
+// "不是内容问题、共尝试几次"。
+func TestCheckerNoVerdictRetriesFourAttempts(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	var calls atomic.Int32
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		calls.Add(1)
+		jsonReply(w, "looks fine to me")
+	})
+	noRescue(r)
+	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0, 1)
+	if ok {
+		t.Fatal("没给结论不能判通过")
+	}
+	if want := "核对始终没有给出结论（不是内容问题，共尝试 4 次）"; !strings.HasPrefix(issues, want) {
+		t.Fatalf("issues = %q, want 前缀 %q", issues, want)
+	}
+	// 每次重开核对会话都在同一份转录里写一条锚点：4 条 = 4 次会话。
+	transcript := filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
+	data, err := os.ReadFile(transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), `"kind":"checker_target"`); n != 4 {
+		t.Fatalf("核对会话 = %d 次, want 4（转录 %s）", n, transcript)
+	}
+	// 每次会话两条请求：首请求 + 提交提醒（复盘已关，所以只有这两条）。
+	if n := calls.Load(); n != 8 {
+		t.Fatalf("requests = %d, want 8（4 次会话 × 首请求 + 提醒）", n)
+	}
+}
+
+// T217（b）：多出来的那些轮次是**可用**的——前两次只回正文，第 3 次会话提交 pass
+// 就按通过收账，不能因为前两次没结论把一章本来正确的产物作废。
+func TestCheckerNoVerdictExtraAttemptCanPass(t *testing.T) {
+	proj, base, chapPath, texPath, partsPath := checkerFixture(t)
+	var calls atomic.Int32
+	r, _ := checkerRunner(t, func(w http.ResponseWriter, req *http.Request) {
+		// 每次会话 = 首请求 + 提交提醒（复盘已关）：第 5 条请求就是第 3 次会话。
+		if calls.Add(1) == 5 {
+			jsonToolReply(w, "submit", `{"report":{"status":"pass"}}`)
+			return
+		}
+		jsonReply(w, "looks fine to me")
+	})
+	noRescue(r)
+	ok, issues := r.checkChapter(proj, base, chapPath, texPath, partsPath, 0, 1)
+	if !ok || issues != "" {
+		t.Fatalf("第 3 次会话的 pass 没被采纳: ok=%v issues=%q", ok, issues)
+	}
+	if n := calls.Load(); n != 5 {
+		t.Fatalf("requests = %d, want 5（前两次各 2 条 + 第 3 次首请求）", n)
+	}
+	transcript := filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
+	data, err := os.ReadFile(transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), `"kind":"checker_target"`); n != 3 {
+		t.Fatalf("核对会话 = %d 次, want 3", n)
 	}
 }
 
