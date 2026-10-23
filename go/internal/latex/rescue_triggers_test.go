@@ -53,12 +53,17 @@ type rescueChapterOptions struct {
 	// keepRescueRecords 打开 latex.rescue.keep_records，让复盘转录真的落盘
 	// （要断言"丢弃/挪进 .trash"的用例必须开）。
 	keepRescueRecords bool
+	// preseedNoVerdict 预铺一份"产物在、但上次核对没给结论"的现场（T222）：
+	// `work/chapters/<章>.tex` 与带退化文案的 `.checker` 都已存在，用来钉住
+	// 「已有产物，跳过」不会静默采纳一份没被判定过的产物。
+	preseedNoVerdict bool
 }
 
 type rescueChapterStats struct {
 	mu         sync.Mutex
 	requests   int
 	convert    int
+	checker    int
 	rescue     int
 	rescueText []string // 每次复盘请求里的第一段 user 文本
 	userTexts  []string // 所有请求里的最后一条 user 文本
@@ -113,6 +118,22 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 	}
 
 	stats := &rescueChapterStats{}
+	if opts.preseedNoVerdict {
+		// T222 现场：上一轮交了产物、核对没给结论就收尾了。重跑时"已有产物，
+		// 跳过"不能把这份没被判定过的东西直接采纳。
+		submitted := filepath.Join(workDir, "chapters")
+		if err := os.MkdirAll(submitted, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		texPath := filepath.Join(submitted, "chapter_01.tex")
+		if err := os.WriteFile(texPath, []byte("\\section{First}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(texPath+".checker",
+			[]byte("checker 会话已退化，已排队从干净轮次继续核对"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var convertRounds int
 	verdictAt := func(n int) (string, int, string) {
 		if len(opts.verdicts) == 0 {
@@ -182,6 +203,7 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 
 		// 核对会话：只读（有 read_file / grep、没有 write_file）。
 		case toolset["read_file"] && toolset["grep"] && !toolset["write_file"]:
+			stats.add(func() { stats.checker++ })
 			if opts.checkerNoSubmit {
 				// 退化：跑完就给一段正文，从不调 submit。
 				p60Text(w, "I could not finish the review.")

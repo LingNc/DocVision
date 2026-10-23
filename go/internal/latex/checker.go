@@ -39,6 +39,28 @@ func checkerNoVerdict(issues string) bool {
 		strings.HasPrefix(issues, "checker 只读视图无法准备")
 }
 
+// checkerNoVerdictRetryCycles 是"核对没给结论"之后**只重开核对会话**的次数。
+//
+// T222：这类收尾以前会走进"作废产物、换全新会话整章重转"那条路（最多 6 次），
+// 而界面上那句话写的是「已排队从干净轮次继续核对」——两件事对不上，而且重转
+// 出来的是同一份东西：产物根本还没被判定过，重做一遍既不会更有结论，也没理由
+// 假设新的转换会话能救回一个坏掉的核对模型。所以这里只再开一次核对会话（同一份
+// 产物、同一条只读视图），仍没有结论就以"checker 不可用"收尾并保留产物。
+const checkerNoVerdictRetryCycles = 1
+
+// chapterRecheckPending 报告这一章的产物在、但上一次核对**没有下过判定**
+// （`<章>.tex.checker` 里是 checkerNoVerdict 认得的那类文案）。
+//
+// T222：这种产物不能被"已有产物，跳过"静默采纳——跳过意味着整章连核对都不跑，
+// 一份从没被判定过的东西就这样进了书。带这个标记的章节重跑时先重核这一份。
+func chapterRecheckPending(texPath string) bool {
+	data, err := os.ReadFile(texPath + ".checker")
+	if err != nil {
+		return false
+	}
+	return checkerNoVerdict(string(data))
+}
+
 // checkChapter reviews ONE converted chapter with its own minimal,
 // read-only session: the small text model gets exactly two files (the
 // chapter markdown and the submitted .tex) and one folder (that

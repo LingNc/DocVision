@@ -1576,6 +1576,21 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	// P53 阶段二：retry=true 是"人手动要求的"——产物在也要跑（继续跑尤其如此：它要的
 	// 就是把这条会话推下去）。普通流程仍按产物跳过。
 	if node.Depth == 0 && !retry && fileExists(filepath.Join(node.FinalSubmitRoot, base+".tex")) {
+		if chapterRecheckPending(filepath.Join(node.FinalSubmitRoot, base+".tex")) {
+			// T222：产物在，但上一次核对**没有下过判定**（`.checker` 里是"没结论"那类
+			// 文案）。跳过就意味着整章连核对都不跑，一份从没被判定过的东西直接进书，
+			// 所以这里先重核这一份：通过就按"已有产物"继续，没过就把结论留在
+			// `.checker` 里如实报错，绝不当场采纳。
+			r.log.LogWarning(tid, "[checker]", base, "已有产物，但上一次核对没有给出结论——重新核对这一份，不跳过")
+			ok, issues := r.recheckChapter(proj, base, tid)
+			if ok {
+				// 与下面"已有产物"那条路同一口径：这一章算完了，转换转录照旧
+				// 按 latex.keep_session_records 处置（核对转录不受影响）。
+				r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
+				return nil
+			}
+			return fmt.Errorf("%s 重新核对未通过（这份产物未被采纳）: %s", base, issues)
+		}
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")
 		// 产物已写出的章节不再需要会话转录。
 		r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
@@ -1964,6 +1979,39 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		if !ok && isSessionAPIError(issues) {
 			return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
 		}
+	}
+	// T222：核对**没给结论**（会话退化 / 复盘判定无法挽救 / 只读视图没准备好）时
+	// **保留这一版产物、只重开核对会话**，不再作废产物整章重转。
+	//
+	// 旧行为是跳过反馈轮之后直接落到"作废产物、换全新会话重转换"（最多 6 次尝试），
+	// 可上一句写给用户的却是"已排队从干净轮次继续核对"——承诺的是重核，做的是重转。
+	// 产物根本没被判定过，重转出来的是同一份东西：重做一遍不会更有结论，也没理由
+	// 假设新的转换会话能救回一个坏掉的核对模型，唯一确定被消耗掉的是时间和额度
+	// （核对模型持续退化时，这一章会被作废重转最多 6 次、每次再开若干核对会话）。
+	// 真正给出内容结论的失败不受影响，照旧走下面的反馈/重转链路。
+	if !ok && checkerNoVerdict(issues) {
+		for cycle := 0; cycle < checkerNoVerdictRetryCycles; cycle++ {
+			r.log.LogWarning(tid, "[checker]", base,
+				"核对没有给出结论——保留产物，重开核对会话再核（第 "+strconv.Itoa(cycle+1)+"/"+
+					strconv.Itoa(checkerNoVerdictRetryCycles)+" 次）:", issues)
+			r.phaseNote()("[checker] %s 重开核对会话", base)
+			ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker, node.AttemptNum)
+			if !ok && isSessionAPIError(issues) {
+				return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
+			}
+			if ok || !checkerNoVerdict(issues) {
+				break // 这一次真给了结论：通过，或者落到下面的内容处理
+			}
+		}
+	}
+	if !ok && checkerNoVerdict(issues) {
+		// 仍然没有判定：以"checker 不可用"收尾，产物留在原处不归档（`.checker` 里
+		// 留这条文案，重跑时 chapterRecheckPending 会让它先重核而不是"已有产物，跳过"）。
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
+		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
+		return fmt.Errorf("%s 的核对始终没有给出结论（不是内容问题，%d 个核对会话都没下判定），"+
+			"已保留这一版产物未作废——重跑或「重新核对」会接着核这一份: %s",
+			base, 1+checkerNoVerdictRetryCycles, issues)
 	}
 	if ok {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "pass"})
