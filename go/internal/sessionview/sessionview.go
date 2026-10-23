@@ -1140,6 +1140,20 @@ func skipScanDir(p, name string) bool {
 	return false
 }
 
+// skipScanFile 决定 walk 要不要跳过这**一个文件**（p 是文件的完整路径）。
+//
+//	work/rescue/log.jsonl — P58 复盘的审计日志（每次复盘一行 JSON：章节、角色、
+//	                        结论、提示词），同样是 .jsonl 结尾，但它不是会话：没有
+//	                        对话、没有轨迹，扫进来会在侧栏最底下多出一个只有一行
+//	                        「log」的分组，看着像一条不知从哪来的会话（T223）。
+func skipScanFile(p, name string) bool {
+	if name != "log.jsonl" {
+		return false
+	}
+	return filepath.Base(filepath.Dir(p)) == "rescue" &&
+		filepath.Base(filepath.Dir(filepath.Dir(p))) == "work"
+}
+
 func (s *scanner) scan() ([]SessionInfo, error) {
 	root, err := filepath.Abs(s.root)
 	if err != nil {
@@ -1183,6 +1197,9 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".jsonl") {
+			return nil
+		}
+		if skipScanFile(p, d.Name()) {
 			return nil
 		}
 		info, ierr := d.Info()

@@ -34,6 +34,10 @@ func TestScanSkipsRoundsJournalsAndCleanBackups(t *testing.T) {
 	writeFile(t, jsonl(root, "latex_project", "书", "work", "temp", "conv_chapter_001", "work", ".trash",
 		"convert_chapter_001.jsonl.20261022-130000.jsonl"),
 		transcript(`{"t":"msg","role":"user","text":"细分树里的截断备份"}`))
+	// T223：复盘的审计日志（`work/rescue/log.jsonl`，每行一次复盘结论）也是
+	// .jsonl，侧栏曾因此多出一个叫「log」的分组、看着像一条来历不明的会话。
+	writeFile(t, jsonl(root, "latex_project", "书", "work", "rescue", "log.jsonl"),
+		`{"chapter":"chapter_001","role":"convert","verdict":"retry"}`+"\n")
 
 	sessions, err := Scan(root)
 	if err != nil {
@@ -71,6 +75,26 @@ func TestSkipScanDir(t *testing.T) {
 	for _, c := range cases {
 		if got := skipScanDir(c.path, c.name); got != c.want {
 			t.Errorf("skipScanDir(%q, %q) = %v, want %v", c.path, c.name, got, c.want)
+		}
+	}
+}
+
+// T223：只认 `<项目>/work/rescue/log.jsonl` 这一个文件——别的 log.jsonl
+// （会话目录里的、项目名恰叫 rescue 的）照旧当会话。
+func TestSkipScanFile(t *testing.T) {
+	cases := []struct {
+		path, name string
+		want       bool
+	}{
+		{"/r/p/work/rescue/log.jsonl", "log.jsonl", true},
+		{"/r/p/work/sessions/log.jsonl", "log.jsonl", false},
+		{"/r/p/rescue/log.jsonl", "log.jsonl", false},
+		{"/r/p/work/rescue/rescue_chapter_001.jsonl", "rescue_chapter_001.jsonl", false},
+		{"/r/p/work/rescue/log.jsonl.bak", "log.jsonl.bak", false},
+	}
+	for _, c := range cases {
+		if got := skipScanFile(c.path, c.name); got != c.want {
+			t.Errorf("skipScanFile(%q, %q) = %v, want %v", c.path, c.name, got, c.want)
 		}
 	}
 }

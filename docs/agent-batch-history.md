@@ -2518,3 +2518,13 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **测试（`internal/latex/checker_degrade_test.go`）**：`TestCheckerDegradeDoesNotFeedConvertSession` 的旧断言 `stats.convert >= 2` 反过来成了 `== 1`（那正是要命的旧行为），并加断言：核对会话 ≥ 2（初核 + 重核）、`work/chapters/<章>.tex` 仍在、`work/attempts/` 空、失败文案含「没有给出结论」、`.checker` 里是"没结论"那类文案。新增 `TestPendingNoVerdictProductIsRecheckedNotSkipped`：夹具加 `preseedNoVerdict` 开关预铺"产物在 + `.checker` 是退化文案"，断言重跑**不跳过**——`stats.convert == 0`、核对跑 1 次、通过后 `.checker` 被收掉。夹具顺手加了 `stats.checker` 计数（原来只数 convert/rescue）。
 - **验证**：`go build ./...`、`go vet ./internal/...` 干净、`gofmt` 只报既有的 `stylefix.go`；`go test ./internal/... -count=1` 14 个包全绿。
 - **没覆盖到的**：这件事的触发条件是"核对模型持续退化"，而真跑起来第一次重核成功与否取决于模型当时的状态——测试里钉的是**路径**（不重转、保留产物、跳过前先重核），不是"重核一定成功"。真机上仍可能连续两个核对会话都没结论，那时这一章会停在"checker 不可用"+保留产物，重跑或点 ↻ 接着核，这条要看用户现场是否还会撞上。
+
+## v1.5+（T223：复盘的审计日志不再被当成会话，2026-10-23）
+
+用户贴出侧栏截图：章节组下面还有一个阶段名就叫「会话」的分组，里面一条会话标题 `log`、状态「未开始」，问「还有一个 log 会话不知道是什么」。查现场索引（`/api/index`，2600 条会话）只有一条 `stage == "会话"`，它的路径是 `<项目>/work/rescue/log.jsonl`——P58 复盘的审计日志，每行一条复盘结论（章节 / 角色 / `verdict` / 提示词 / 转录行数），592 行、258 KB。它不是任何一次会话，只是文件名以 `.jsonl` 结尾。
+
+- **根因（`internal/sessionview/sessionview.go`）**：`scanner.scan()` 的 walk 只按后缀收候选、只对**目录**有 `skipScanDir`，所以这个文件被当转录读进来；`LabelFor` 的对不上任何已知前缀，退回 `会话:<stem>`，标题 `log`、阶段 `会话`（`stageTitleOf` 拿不到映射就原样返回阶段名）。没有 `msg` 行 → 消息数 0 → 状态「未开始」；复盘每写一行就更新 mtime，看着还像 live。T200（`work/rounds` 快照日志）与 T202（`.trash` 截断备份）是同一类问题的前两次，前两次都是"目录不是会话"，这次是"单个文件不是会话"。
+- **改**：新增 `skipScanFile(p, name)`，只跳 `<项目>/work/rescue/log.jsonl`（父目录 `rescue` 且祖父目录 `work` 同时成立才跳），在 walk 里紧跟"是不是 `.jsonl`"之后调用。**没有动侧栏分组逻辑**——分组没错，错的是把一个非会话文件扫了进来。审计日志的写入（`rescue.go` 的 `work/rescue/log.jsonl`、`keep_records`/`--debug` 语义）一字未动；复盘转录 `rescue_<章>[.tryN].jsonl` 住在 `work/sessions/`、名字也不同，不受影响。
+- **测试（`internal/sessionview/scan_dirs_test.go`）**：`TestScanSkipsRoundsJournalsAndCleanBackups` 加一条 `work/rescue/log.jsonl`（仍只留真正那条转录，扫描到 1 条）；新增 `TestSkipScanFile` 钉住边界——`work/rescue/log.jsonl` 跳，`work/sessions/log.jsonl`、`rescue/log.jsonl`（项目名恰叫 rescue）、`work/rescue/rescue_chapter_001.jsonl`、`log.jsonl.bak` 都不跳。
+- **验证**：`go build ./...`、`gofmt -l`（改动文件无输出）、`go test ./internal/sessionview/ -count=1` 全绿（17.0s）。对真实数据做只读复扫（临时程序调 `sessionview.Scan("…/latex_project")`、跑完即删）：2604 条会话、落「会话」组 **0** 条；修前那个索引里正好是 1 条。
+- **没覆盖到的**：① 侧栏那枚方块里的 `1` 是分组的行数徽标，不是会话名——修完这组直接不存在，没有为它单独做什么；② 只用只读复扫验证了索引层，页面渲染没重跑（dist 没改、不需要重建 web）；③ 现场跑的是旧二进制，要重新构建才会看到这一组消失。
