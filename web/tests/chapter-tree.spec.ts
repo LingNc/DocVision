@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chapterIdSuffix, chapterNodeHasRows, chainMemberTag, dedupeChapterAttempts, fixOutcomeLabel, fixRoundAt, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, plainTitle, rescueAttemptOf, rescueRowLabel, rescueRowTitle, sessionTip } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chapterIdSuffix, chapterNodeHasRows, chainMemberTag, dedupeChapterAttempts, fixOutcomeLabel, fixRoundAt, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, plainTitle, rescueOrdinal, rescueRowLabel, rescueRowTitle, reviewedTargetLabel, sessionTip } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 import { applyIndex, chapterPendingRetry } from '../src/data'
 
@@ -847,9 +847,13 @@ describe('P60 修复行独立于核对行', () => {
 })
 
 
-/* P61：复盘会话（`rescue_<章>[.tryN].jsonl`）带章节身份后落进章节树，与核对行
- * **同层**、像修复行那样是一条独立子行。它绝不能变成某一章的 convert/checker；
- * 它也不进「历史」尝试链（那是"这一章转过几次"，复盘是附注）。
+/* P61 + P58 补：复盘会话（`rescue_<章>[.tryN].jsonl`）带章节身份后落进章节树，
+ * 与核对行**同层**、像修复行那样是一条独立子行。它绝不能变成某一章的
+ * convert/checker，也不进**转换/核对**的尝试链。
+ *
+ * C：它自己有一条链——同一章、**同一目标**（meta 里的 `reviewed_transcript`）的
+ * 复盘，新 → 旧；不同目标是两件事，行与号都分开。行号是"这条目标被复盘的第几次"，
+ * 由界面按 mtime 读时推断（D：老转录不改名、不重写）。
  */
 describe('P61 复盘行挂在章节下面', () => {
   const conv3 = (id: string, attempt = 1, mt = '2026-10-23T10:00:00Z', over: Record<string, unknown> = {}) => ({
@@ -867,8 +871,11 @@ describe('P61 复盘行挂在章节下面', () => {
     project: 'book', chapterId: id, chapterRole: 'rescue',
     chapterAttempt: attempt, mtime: mt, ...over,
   })
+  // 复盘了同章的一次转换；`reviewed` 是被复盘的转录名（不含扩展名）。
+  const rescueOf = (chapter: string, n: number, reviewed: string, mt: string, role = 'convert') =>
+    rescue3(chapter, n, mt, { reviewedRole: role, reviewedTranscript: reviewed })
 
-  it('复原话挂到它复盘的那一章下面，旧 → 新，且不参选 convert/checker', () => {
+  it('复盘会话挂到它复盘的那一章下面，旧 → 新，且不参选 convert/checker', () => {
     const c = conv3('chapter_042', 2, '2026-10-23T12:00:00Z')
     const k = checker3('chapter_042', 2, '2026-10-23T12:30:00Z')
     const r1 = rescue3('chapter_042', 1, '2026-10-23T11:00:00Z')
@@ -880,13 +887,45 @@ describe('P61 复盘行挂在章节下面', () => {
     expect(node.rescues.map((r: any) => r.id)).toEqual([r1.id, r2.id])
   })
 
-  it('复盘行标签写「复盘 #N」，N 是它复盘的那次转换的尝试号，归档带「旧」', () => {
-    expect(rescueAttemptOf(rescue3('chapter_042', 3, 'x'))).toBe(3)
-    expect(rescueRowLabel(rescue3('chapter_042', 2, 'x'))).toBe('复盘 #2')
-    expect(rescueRowLabel(rescue3('chapter_042', 1, 'x', { archived: true }))).toBe('旧复盘 #1')
-    // title = 原有 tip + 复盘对象（转录名去掉 rescue_ 前缀）。
-    const r = rescue3('chapter_042', 2, 'x')
-    expect(rescueRowTitle(r)).toBe(sessionTip(r) + '\n复盘对象：chapter_042.try2')
+  it('复盘行标签写「复盘 #N」，N 由目标 + mtime 读时推断，归档带「旧」', () => {
+    const sessions = [
+      rescueOf('chapter_042', 1, 'convert_chapter_042', '2026-10-23T11:00:00Z'),
+      rescueOf('chapter_042', 2, 'convert_chapter_042', '2026-10-23T13:00:00Z'),
+    ]
+    // 名字里就算写着 .try2，界面按目标重新数：第一次是 #1，第二次是 #2。
+    expect(rescueRowLabel(sessions[0], rescueOrdinal(sessions, sessions[0]))).toBe('复盘 #1')
+    expect(rescueRowLabel(sessions[1], rescueOrdinal(sessions, sessions[1]))).toBe('复盘 #2')
+    expect(rescueRowLabel(sessions[1], 2)).toBe('复盘 #2')
+    expect(rescueRowLabel({ ...sessions[1], archived: true }, 1)).toBe('旧复盘 #1')
+  })
+
+  it('「复盘了 …」写清被复盘的会话与角色：转换#1 / 转换#2 / 核对#1', () => {
+    expect(reviewedTargetLabel(rescueOf('chapter_042', 1, 'convert_chapter_042', 'x'))).toBe('转换#1')
+    expect(reviewedTargetLabel(rescueOf('chapter_042', 2, 'convert_chapter_042.try2', 'x'))).toBe('转换#2')
+    expect(reviewedTargetLabel(rescueOf('chapter_042', 1, 'checker_chapter_042', 'x', 'checker'))).toBe('核对#1')
+    // 老转录没有目标备注：不编角色/轮次。
+    expect(reviewedTargetLabel(rescue3('chapter_042', 1, 'x'))).toBe('')
+    // title = 原有 tip + 复盘对象（新转录带上被复盘的转录名）。
+    const r = rescueOf('chapter_042', 1, 'convert_chapter_042.try2', 'x')
+    expect(rescueRowTitle(r)).toBe(sessionTip(r) + '\n复盘对象：转换#2（convert_chapter_042.try2）')
+    // 没有备注的老转录：原样给转录名去掉 rescue_ 前缀，与之前一致。
+    const old = rescue3('chapter_042', 2, 'x')
+    expect(rescueRowTitle(old)).toBe(sessionTip(old) + '\n复盘对象：chapter_042.try2')
+  })
+
+  it('同一章两个目标的复盘是两行、各算各的号', () => {
+    const c = conv3('chapter_042', 1, '2026-10-23T10:00:00Z')
+    const k = checker3('chapter_042', 1, '2026-10-23T10:30:00Z')
+    const rc = rescueOf('chapter_042', 1, 'convert_chapter_042', '2026-10-23T11:00:00Z')
+    const rk = rescueOf('chapter_042', 2, 'checker_chapter_042', '2026-10-23T12:00:00Z', 'checker')
+    const list = [c, k, rc, rk]
+    const node = buildChapterTree(list)[0]
+    // 两行都在、按 mtime 旧 → 新；号各从 1 数（名字里的 .try2 不参与）。
+    expect(node.rescues.map((r: any) => r.id)).toEqual([rc.id, rk.id])
+    expect(rescueOrdinal(list, rc)).toBe(1)
+    expect(rescueOrdinal(list, rk)).toBe(1)
+    expect(rescueRowLabel(rc, rescueOrdinal(list, rc))).toBe('复盘 #1')
+    expect(rescueRowLabel(rk, rescueOrdinal(list, rk))).toBe('复盘 #1')
   })
 
   it('只有复盘的节点也算有子行（展开箭头与在引入复盘之前一致）', () => {
@@ -900,27 +939,47 @@ describe('P61 复盘行挂在章节下面', () => {
     expect(chapterNodeHasRows({ convert: {}, checker: null, rescues: [{ id: 'r' }], children: [] })).toBe(true)
   })
 
-  it('复盘会话不进「历史」尝试链，点它没有历史页签', () => {
+  it('复盘会话不进转换/核对的历史链（只复盘过一次时它自己也没有页签）', () => {
     const c = conv3('chapter_042', 1, '2026-10-23T12:00:00Z')
     const k = checker3('chapter_042', 1, '2026-10-23T12:30:00Z')
-    const r = rescue3('chapter_042', 1, '2026-10-23T13:00:00Z')
+    const r = rescueOf('chapter_042', 1, 'convert_chapter_042', '2026-10-23T13:00:00Z')
     const chain = chapterAttemptChain([c, k, r])
     const ids = (chain || []).map((m: any) => m.id)
     expect(ids).not.toContain(r.id)
     expect(chapterAttemptChain([c, k, r], r.id)).toBeNull()
   })
 
-  it('钉住一条复盘会话时，那一行显示到它复盘的那次转换（不拿别的尝试凑）', () => {
+  it('C：复盘自己的历史只列同一章 + 同一目标的复盘（新 → 旧）', () => {
+    const c1 = conv3('chapter_042', 1, '2026-10-23T10:00:00Z')
+    const c2 = conv3('chapter_042', 2, '2026-10-23T10:30:00Z')
+    const k = checker3('chapter_042', 1, '2026-10-23T10:40:00Z')
+    const a1 = rescueOf('chapter_042', 1, 'convert_chapter_042', '2026-10-23T11:00:00Z')
+    const a2 = rescueOf('chapter_042', 2, 'convert_chapter_042', '2026-10-23T13:00:00Z')
+    const b1 = rescueOf('chapter_042', 3, 'checker_chapter_042', '2026-10-23T12:00:00Z', 'checker')
+    const list = [c1, c2, k, a1, a2, b1]
+    // 转换 #1 的两条复盘成一条链，新 → 旧。
+    expect((chapterAttemptChain(list, a2.id) || []).map((m: any) => m.id)).toEqual([a2.id, a1.id])
+    expect((chapterAttemptChain(list, a1.id) || []).map((m: any) => m.id)).toEqual([a2.id, a1.id])
+    // 核对那一条目标只有一次复盘：没有页签；另一条目标的复盘绝不混进来。
+    expect(chapterAttemptChain(list, b1.id)).toBeNull()
+  })
+
+  it('钉住一条复盘会话时，按它 meta 里的目标转录钉住那一次转换', () => {
     const c1 = conv3('chapter_042', 1, '2026-10-23T10:00:00Z')
     const c2 = conv3('chapter_042', 2, '2026-10-23T12:00:00Z')
-    const r = rescue3('chapter_042', 1, '2026-10-23T13:00:00Z')
+    const r = rescueOf('chapter_042', 2, 'convert_chapter_042', '2026-10-23T13:00:00Z')
     const node = buildChapterTree([c1, c2, r], r.id)[0]
     expect(node.convert!.id).toBe(c1.id)
     expect(node.rescues.map((x: any) => x.id)).toEqual([r.id])
     // 复盘的那次转换已经不在了：仍然挂在这一行下面，只是不钉（默认最新）。
-    const node2 = buildChapterTree([c2, rescue3('chapter_042', 9, 'x')], rescue3('chapter_042', 9, 'x').id)[0]
+    const orphan = rescueOf('chapter_042', 1, 'convert_chapter_042.try9', '2026-10-23T13:00:00Z')
+    const node2 = buildChapterTree([c2, orphan], orphan.id)[0]
     expect(node2.convert!.id).toBe(c2.id)
-    expect(node2.rescues.map((x: any) => x.id)).toEqual([rescue3('chapter_042', 9, 'x').id])
+    expect(node2.rescues.map((x: any) => x.id)).toEqual([orphan.id])
+    // 老转录没有目标备注：不按号猜，默认仍显示最新一次。
+    const legacy = rescue3('chapter_042', 9, 'x')
+    const node3 = buildChapterTree([c2, legacy], legacy.id)[0]
+    expect(node3.convert!.id).toBe(c2.id)
   })
 })
 

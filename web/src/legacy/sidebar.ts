@@ -469,23 +469,77 @@ export function fixRowLabel(fix: any, nodeId: string, round: number): string {
   return ((fix && fix.archived) ? '旧' : '') + '修复' + name + ' #' + (Number(round) || 1)
 }
 
-/* P61：复盘行的标签 = 「复盘」+ 它复盘的那一次转换的尝试号。名字里的 `.tryN`
- * （`rescue_<章>.try2.jsonl`）就是目标转录的尝试号，所以这个数字不是行序号，
- * 而是"复盘的是哪一份产物"——与修复行同理，不另编一个号。 */
-export function rescueAttemptOf(rescue: any): number {
-  return Number(rescue && rescue.chapterAttempt) || 1
+/* 章节会话角色的中文名：历史行小标签与复盘行的「复盘了 转换#1」共用一份。 */
+export const CHAPTER_ROLE_LABELS: Record<string, string> = {
+  convert: '转换', checker: '核对', fix: '修复', rescue: '复盘', continue: '继续', vector: '作图',
 }
 
-/* 复盘行的一句话标签：`复盘 #2`（归档前缀「旧」与转换/核对/修复行同一套）。 */
-export function rescueRowLabel(rescue: any): string {
-  return ((rescue && rescue.archived) ? '旧' : '') + '复盘 #' + rescueAttemptOf(rescue)
+/* 角色键 → 中文名（未知角色给空串，不编名字）。 */
+export function chapterRoleLabel(role: string): string {
+  return CHAPTER_ROLE_LABELS[String(role || '')] || ''
 }
 
-/* 复盘行的悬浮说明：会话原本的 tip + 一句"复盘的是哪一条目标转录"（转录名去掉
- * 角色前缀，`rescue_chapter_004.try2` → `chapter_004.try2`）。 */
+/* C：复盘的目标身份 = 同一章 + **它复盘的那一条转录**。
+ * 复盘转录自己的 meta 里写着 `reviewed_transcript`（转录名不含扩展名，已含被复盘
+ * 那一次的 `.tryN`），所以同一章里对转换与对核对的复盘天然是两件事；老转录没有
+ * 这条备注，只能按"这一章"归到一个桶里（D 的读时推断，不改磁盘）。 */
+export function rescueTargetKey(rescue: any): string {
+  if (!rescue) return ''
+  const tr = String(rescue.reviewedTranscript || '')
+  if (!tr) return ''
+  return String(rescue.reviewedRole || '') + '|' + tr
+}
+
+/* 复盘行/历史行的一句话标签：`复盘 #2`（归档前缀「旧」与转换/核对/修复行同一套）。
+ * N 是"这一条目标被复盘的第几次"，由 rescueOrdinal 按 mtime 读时算出来（旧 → 新从
+ * 1 数）；没有会话池的孤立调用退回转录名里的号。 */
+export function rescueRowLabel(rescue: any, ordinal?: number): string {
+  const n = Number(ordinal) || Number(rescue && rescue.chapterAttempt) || 1
+  return ((rescue && rescue.archived) ? '旧' : '') + '复盘 #' + n
+}
+
+/* 同一章 + 同一目标（+ 同一归档世代）下这是第几次复盘，1 起、按 mtime 旧 → 新。
+ * 这是 D 的**读时推断**：老命名的复盘转录名里没有号，界面靠 mtime 排出来，
+ * 磁盘上的文件名一个字节都不改。 */
+export function rescueOrdinal(sessions: any[], rescue: any): number {
+  if (!rescue) return 1
+  const chapter = String(rescue.chapterId || '')
+  const key = rescueTargetKey(rescue)
+  const proj = rescue.project || projectOf(rescue.id)
+  const peers = (sessions || []).filter((s: any) => !!s && s.chapterRole === 'rescue' &&
+    String(s.chapterId || '') === chapter && rescueTargetKey(s) === key &&
+    !!s.archived === !!rescue.archived && (s.project || projectOf(s.id)) === proj)
+  peers.sort((a: any, b: any) => {
+    const d = mtimeMs(a) - mtimeMs(b)
+    if (d) return d
+    const ia = String((a && a.id) || '')
+    const ib = String((b && b.id) || '')
+    return ia < ib ? -1 : ia > ib ? 1 : 0
+  })
+  const i = peers.findIndex((s: any) => String(s && s.id) === String(rescue.id))
+  return i >= 0 ? i + 1 : 1
+}
+
+/* 复盘行的"复盘了 …"小标签：`转换#1`——角色来自转录的 meta（`reviewed_role`），
+ * 尝试号从被复盘转录名里的 `.tryN` 取（没有后缀 = #1）。老转录没有这条备注时给
+ * 空串：不猜一个可能是错的角色/轮次。 */
+export function reviewedTargetLabel(rescue: any): string {
+  const role = chapterRoleLabel(String((rescue && rescue.reviewedRole) || ''))
+  if (!role) return ''
+  const tr = String((rescue && rescue.reviewedTranscript) || '')
+  const m = /\.try(\d+)$/.exec(tr)
+  return role + '#' + (m ? Number(m[1]) : 1)
+}
+
+/* 复盘行的悬浮说明：会话原本的 tip + 一句"复盘的是哪一条目标转录"。新转录用
+ * meta 里的被复盘角色/转录名（`复盘对象：转换#1（convert_<章>.try2）`），老转录
+ * 退回转录名去掉 `rescue_` 前缀（`chapter_004.try2`），一字不多编。 */
 export function rescueRowTitle(rescue: any): string {
   const tip = sessionTip(rescue)
-  const target = convertBasename(rescue).replace(/^rescue_/, '')
+  const reviewed = reviewedTargetLabel(rescue)
+  const name = String((rescue && rescue.reviewedTranscript) || '') ||
+    convertBasename(rescue).replace(/^rescue_/, '')
+  const target = reviewed && name ? reviewed + '（' + name + '）' : reviewed || name
   const line = '复盘对象：' + (target || '—')
   return tip ? tip + '\n' + line : line
 }
@@ -754,16 +808,20 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     const node = hit ? nodeOfSession[String(hit.id)] : null
     if (node) pinned = { node, role: 'convert', session: hit }
   }
-  // P61：钉住一条复盘会话时，让它所在的那一行显示到它——复盘写着它复盘的是哪一次
-  // 转换（名字里的 `.tryN`），就钉那一代、那一个尝试号的转换；找不到就不钉，
-  // 绝不拿别的尝试凑（这一行默认显示最新一次，复盘行仍挂在这一行下面可见）。
+  // P61：钉住一条复盘会话时，让它所在的那一行能显示到它复盘的那一次转换。
+  // C 起不再靠"目标尝试号"猜：复盘自己的转录在 meta 里写着被复盘的转录名
+  // （`reviewed_transcript` = `convert_<章>[.tryN]`），按名字精确钉；老转录没有
+  // 这条备注就不钉（这一行默认显示最新一次，复盘行仍挂在这一行下面可见），
+  // 绝不拿别的尝试凑。
   if (!pinned && pinnedRescue) {
     const node = byId[String(pinnedRescue.chapterId || '')]
-    if (node) {
-      const want = rescueAttemptOf(pinnedRescue)
+    const want = String(pinnedRescue.reviewedTranscript || '')
+    if (node && want) {
       const gen = !!pinnedRescue.archived
-      const hit = (byRole[node.id + '|convert'] || []).filter((c: any) =>
-        (Number(c.chapterAttempt) || 1) === want && !!c.archived === gen)
+      const converts = byRole[node.id + '|convert'] || []
+      const sameGen = converts.filter((c: any) => !!c.archived === gen)
+      const pool = sameGen.length ? sameGen : converts
+      const hit = pool.filter((c: any) => convertBasename(c) === want)
       if (hit.length) pinned = { node, role: 'convert', session: newestOf(hit) }
     }
   }
@@ -1114,9 +1172,18 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
   const proj = self.project || projectOf(self.id)
   // P60：修复会话没有章节身份（文件名是 `fix_<章>`），它自己的历史 = **同一锚点**
   // 下的其他修复轮次（新 → 旧）；锚点不同就是修的另一份产物，不能混进来。
-  // P61：复盘会话不进「历史」尝试链——它是某一章的附注，不是那一章的一次尝试
-  // （点了它也只会看到一串不相干的转换）。它自己也就没有历史页签。
-  if (self.chapterRole === 'rescue') return null
+  // P61：复盘会话不进**转换/核对**的尝试链——它是某一章的附注，不是那一章的一次
+  // 尝试。C：但它自己有一条链——同一章、**同一目标**的复盘（新 → 旧），目标不同
+  // 就是复盘的另一件事，绝不混排；只有一次复盘时没有历史页签。
+  if (self.chapterRole === 'rescue') {
+    if (!self.chapterId) return null
+    const target = rescueTargetKey(self)
+    const rows = (sessions || []).filter((s: any) => !!s && s.chapterRole === 'rescue' &&
+      String(s.chapterId || '') === String(self.chapterId) &&
+      rescueTargetKey(s) === target && (s.project || projectOf(s.id)) === proj)
+    if (rows.length < 2) return null
+    return rows.slice().sort((a: any, b: any) => mtimeMs(b) - mtimeMs(a))
+  }
   if (self.chapterRole === 'fix') {
     const anchor = String(self.chapterAnchor || '')
     if (!anchor) return null
@@ -1235,8 +1302,10 @@ export function dedupeChapterAttempts(items: any[]): any[] {
 }
 
 /* 历史行的小标签：img2text 链路用阶段标签，章节会话统一给 `#N`（含第 1 次，
- * 否则同章的几条历史行看起来一模一样）。 */
-export function chainMemberTag(s: any): string {
+ * 否则同章的几条历史行看起来一模一样）。
+ * C：复盘行另给「复盘#N」——N 是这条目标被复盘的第几次，由调用方按目标算出
+ * （rescueOrdinal）；不传时退回转录名里的号，不编。 */
+export function chainMemberTag(s: any, rescueNo?: number): string {
   // P60：修复转录没有章节尝试号（文件名是 `fix_<章>`，不是 convert_/checker_
   // 前缀），按角色标「修复」+ 名字里的 `.tryN`（若有）；不编一个可能是错的 `#N`。
   if (s && s.chapterRole === 'fix') {
@@ -1247,6 +1316,10 @@ export function chainMemberTag(s: any): string {
   // P58 观察：只给 `#N` 时，同一条链里会出现两个 `#1`（转换 #1 + 核对 #1），
   // 加了"重新核对"以后又出现 `#1/#2` 对不上号——用户看不出哪一行是核对。
   // 核对行标「核对#N」，转换行仍是 `#N`；归档前缀照旧。
+  if (s && s.chapterRole === 'rescue') {
+    const n = Number(rescueNo) > 0 ? Number(rescueNo) : (Number(s.chapterAttempt) || 1)
+    return (s.archived ? '旧' : '') + '复盘#' + n
+  }
   if (s && s.chapterId) {
     const tag = (s.chapterRole === 'checker' ? '核对' : '') + '#' + (Number(s.chapterAttempt) || 1)
     return (s.archived ? '旧' : '') + tag

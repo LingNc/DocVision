@@ -5,7 +5,7 @@
 // 排序与侧栏链一致（sortChainMembers：新 → 旧）；点行切会话（selectSession）。
 import { computed, ref } from 'vue'
 import { state, relTime } from '../state'
-import { chainOfSession, chainMemberTag, chapterIdSuffix, fixRoundAt, fixRowLabel, fixTargetId, plainTitle, sessionTitleOf } from '../legacy/sidebar'
+import { chainMemberTag, chapterIdSuffix, chapterRoleLabel, chainOfSession, fixRoundAt, fixRowLabel, fixTargetId, plainTitle, rescueOrdinal, reviewedTargetLabel, sessionTitleOf } from '../legacy/sidebar'
 import { dropSession, refreshIndex, selectSession } from '../data'
 import { canDropOf } from '../legacy/actions'
 import { checkerRounds } from '../legacy/rounds'
@@ -14,10 +14,10 @@ import InlineMD from './InlineMD.vue'
 
 const members = computed(() => chainOfSession(state.sessions, state.current ? (state.current as any).id : null))
 
-/* 同一章的角色混在一条链里，行首给角色，编号才不会被误读成"同一件事的第几次"。 */
-const ROLE_LABEL: Record<string, string> = { convert: '转换', checker: '核对', continue: '继续', vector: '作图', fix: '修复' }
+/* 同一章的角色混在一条链里，行首给角色，编号才不会被误读成"同一件事的第几次"。
+ * 文案表收在 legacy/sidebar.ts（复盘行的「复盘了 转换#1」用同一份）。 */
 function roleLabel(s: any): string {
-  return ROLE_LABEL[s && s.chapterRole] || ''
+  return chapterRoleLabel(s && s.chapterRole)
 }
 
 function endStateText(s: any): string {
@@ -50,18 +50,34 @@ function fixRoundOf(index: number): number {
   return fixRoundAt(index, (members.value || []).length)
 }
 
-/* 行首小标签：修复链换成「章节后缀 #轮次」（归档前缀照旧），其余链不变。 */
+/* 行首小标签：修复链换成「章节后缀 #轮次」（归档前缀照旧），其余链不变。
+ * C：复盘链的号是"这条目标被复盘的第几次"，由 rescueOrdinal 按目标读时算出来
+ * （链里新 → 旧，号与树行同一个来源）；非复盘链不看这个参数。 */
 function chainTag(s: any, index: number): string {
-  if (!fixChain.value) return chainMemberTag(s)
+  if (!fixChain.value) return chainMemberTag(s, rescueNo(s))
   const round = fixRoundOf(index)
   const id = fixTargetId(s, fixTarget.value)
   return ((s && s.archived) ? '旧' : '') + (id ? chapterIdSuffix(id) : '修复') + ' #' + round
 }
 
 function chainTagTip(s: any, index: number): string {
-  if (!fixChain.value) return chainMemberTag(s)
+  if (rescueChain.value) {
+    return '这是同一处目标的第 ' + rescueNo(s) + ' 次复盘：' + reviewedLine(s) + '（新 → 旧）'
+  }
+  if (!fixChain.value) return chainMemberTag(s, rescueNo(s))
   const id = fixTargetId(s, fixTarget.value)
   return '这是 ' + (id || '这一章') + ' 的第 ' + fixRoundOf(index) + ' 轮修复（同一处、新 → 旧）'
+}
+
+/* 复盘链里这一行的号：同一章 + 同一目标按 mtime 从 1 数（读时推断，磁盘不改）。 */
+function rescueNo(s: any): number {
+  return rescueOrdinal(state.sessions, s)
+}
+
+/* 复盘行的「复盘了 …」：`转换#1`。老转录没有 meta 时为空，不编。 */
+function reviewedLine(s: any): string {
+  const t = reviewedTargetLabel(s)
+  return t ? '复盘了 ' + t : '复盘了（目标未记录）'
 }
 
 /* 悬停说明里点明归属：修复行与它上面那几行转换/核对不是同一件事的第几次，
@@ -91,6 +107,16 @@ const fixChain = computed(() => {
   const list = members.value || []
   return list.length > 0 && list.every((s: any) => s && s.chapterRole === 'fix')
 })
+
+/* C：复盘链只列同一章 + **同一目标**的复盘（成员全是复盘会话），新 → 旧。 */
+const rescueChain = computed(() => {
+  const list = members.value || []
+  return list.length > 0 && list.every((s: any) => s && s.chapterRole === 'rescue')
+})
+
+/* 复盘链表头要点名被复盘的那一条会话与它的角色（`复盘了 转换#1`）；链里任一成员
+ * 的 meta 都写着同一个目标，老转录没有就只能说"目标未记录"。 */
+const reviewedHead = computed(() => reviewedLine((members.value || [])[0] || null))
 
 const rounds = computed(() => {
   if (chapterChain.value) return []
@@ -127,7 +153,7 @@ const newest = computed(() => {
 
 /* P60：修复转录没有尝试号（文件名是 `fix_<章>`，`chapterAttempt` 取不到值），
  * 按号比较会让每一行都顶着「最新」——修复链改按链序（已按 mtime 新 → 旧排好）
- * 标第一行。 */
+ * 标第一行。C：复盘链同理（转录名里的号是防覆盖用的，不是"这一章的第几次"）。 */
 const newestFixId = computed(() => {
   const live = (members.value || []).filter((s: any) => !s.archived)
   const pool = live.length ? live : (members.value || [])
@@ -135,7 +161,9 @@ const newestFixId = computed(() => {
 })
 
 function isNewestRow(s: any): boolean {
-  if (fixChain.value) return !!s && String(s.id) === newestFixId.value
+  // 修复链与复盘链都没有可比的"章节尝试号"（修复按轮次、复盘按目标次数），
+  // 「最新」= 链里排在最前的那一条（链已按新 → 旧排好）。
+  if (fixChain.value || rescueChain.value) return !!s && String(s.id) === newestFixId.value
   return (Number(s && s.chapterAttempt) || 1) === newest.value
 }
 
@@ -151,6 +179,9 @@ function pairOf(s: any): any {
   // 规则），但它**不是**这一章的转换/核对——配对服务的是"转换 ↔ 同轮核对"这两个
   // 角色，修复的历史里多一个「同轮核对」按钮只会跳去不相干的一条。
   if (s.chapterRole === 'fix') return null
+  // C：复盘会话的号是"这条目标被复盘的第几次"，与转换/核对的尝试号不是一回事，
+  // 拿它去配"同轮核对"只会跳去不相干的一条。
+  if (s.chapterRole === 'rescue') return null
   const attempt = Number(s.chapterAttempt) || 1
   const same = (o: any) =>
     o && o.chapterId === s.chapterId &&
@@ -191,7 +222,8 @@ function doDrop() {
     <div v-if="!members" class="history-empty">当前会话不属于任何调用链 / 重试链</div>
     <div v-else class="history-list">
       <div class="history-head">
-        <template v-if="fixChain">同一处的修复轮次（<span class="history-fix-target" title="这条修复链修的是哪一章">{{ fixTarget || '章节未知' }}</span>，{{ members.length }} 轮，新 → 旧）</template>
+        <template v-if="rescueChain">同一处目标的复盘（<span class="history-fix-target" title="这条复盘链复盘的是哪一条会话">{{ reviewedHead }}</span>，{{ members.length }} 次，新 → 旧）</template>
+        <template v-else-if="fixChain">同一处的修复轮次（<span class="history-fix-target" title="这条修复链修的是哪一章">{{ fixTarget || '章节未知' }}</span>，{{ members.length }} 轮，新 → 旧）</template>
         <template v-else-if="chapterChain">这一章的全部会话（{{ members.length }}，每个转换后面跟着它名下的核对，新 → 旧）</template>
         <template v-else>这一章的全部会话（{{ members.length }}，转换与核对都在这里，新 → 旧）</template>
         <span v-if="hasArchived" class="history-old-note" title="带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话">· 带「旧」的是更早一次父尝试（已作废）留下的</span>
@@ -230,8 +262,9 @@ function doDrop() {
         @click="onRowClick(s)"
         @keydown.enter="onRowClick(s)"
       >
-        <span v-if="roleLabel(s)" class="history-role">{{ roleLabel(s) }}</span>
+        <span v-if="roleLabel(s) && !rescueChain" class="history-role">{{ roleLabel(s) }}</span>
         <span class="row-chip chain-tag history-tag" :title="chainTagTip(s, i)">{{ chainTag(s, i) }}</span>
+        <span v-if="rescueChain" class="history-reviewed" :title="reviewedLine(s)">{{ reviewedLine(s) }}</span>
         <InlineMD tag="span" class="history-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
         <span v-if="isCurrent(s)" class="history-cur">正在看</span>
         <span v-if="isNewestRow(s)" class="history-latest">最新</span>
@@ -261,6 +294,10 @@ function doDrop() {
 .history-fix-target { color: var(--text); font-weight: 500; }
 
 .history-role { flex: none; font-size: 11px; color: var(--caption); min-width: 22px; }
+
+/* C：复盘行点名"复盘了哪一条会话、什么角色"（`复盘了 转换#1`），与行标签
+ * 「复盘#N」一起读就是「复盘#2 · 复盘了 转换#1」。 */
+.history-reviewed { flex: none; font-size: 11px; color: var(--caption); }
 
 .history-rounds { margin: 0 4px 10px; }
 

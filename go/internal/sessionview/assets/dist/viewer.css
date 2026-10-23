@@ -1,63 +1,63 @@
 
-.chapter-tree[data-v-a87b69c2] { border-left: 1px solid var(--line, #c9d1d9); margin-left: 13px; padding-left: 8px;
+.chapter-tree[data-v-59e54b21] { border-left: 1px solid var(--line, #c9d1d9); margin-left: 13px; padding-left: 8px;
 }
-.chapter-node[data-v-a87b69c2] { min-width: 0;
+.chapter-node[data-v-59e54b21] { min-width: 0;
 }
-.chapter-node-head[data-v-a87b69c2] { display: flex; align-items: center; gap: 4px; min-height: 29px; cursor: pointer; padding: 0 7px 0 0; color: var(--text, #24292f);
+.chapter-node-head[data-v-59e54b21] { display: flex; align-items: center; gap: 4px; min-height: 29px; cursor: pointer; padding: 0 7px 0 0; color: var(--text, #24292f);
 }
 /* 展开按钮：整行高的 26px 命中区（原先只有 12px 的小三角），点它只切展开。 */
-.chapter-toggle[data-v-a87b69c2] {
+.chapter-toggle[data-v-59e54b21] {
   flex: 0 0 26px; align-self: stretch; min-height: 26px;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; background: transparent; color: var(--muted, #6e7781);
   padding: 0; border-radius: 5px; cursor: pointer;
 }
-.chapter-toggle[data-v-a87b69c2]:hover { background: var(--hover, #f3f4f6); color: var(--text, #24292f);
+.chapter-toggle[data-v-59e54b21]:hover { background: var(--hover, #f3f4f6); color: var(--text, #24292f);
 }
-.chapter-toggle[data-v-a87b69c2]:focus-visible { outline: 2px solid var(--accent, #0969da); outline-offset: -1px;
+.chapter-toggle[data-v-59e54b21]:focus-visible { outline: 2px solid var(--accent, #0969da); outline-offset: -1px;
 }
-.chapter-toggle-spacer[data-v-a87b69c2] { flex: 0 0 26px;
+.chapter-toggle-spacer[data-v-59e54b21] { flex: 0 0 26px;
 }
-.caret[data-v-a87b69c2] {
+.caret[data-v-59e54b21] {
   width: 0; height: 0;
   border-left: 5px solid currentColor;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   transition: transform .15s ease;
 }
-.chapter-node.open > .chapter-node-head .caret[data-v-a87b69c2] { transform: rotate(90deg);
+.chapter-node.open > .chapter-node-head .caret[data-v-59e54b21] { transform: rotate(90deg);
 }
-.chapter-name[data-v-a87b69c2], .checker-name[data-v-a87b69c2] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+.chapter-name[data-v-59e54b21], .checker-name[data-v-59e54b21] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
 }
-.chapter-node-head[data-v-a87b69c2]:hover, .chapter-checker[data-v-a87b69c2]:hover { background: var(--hover, #f3f4f6);
+.chapter-node-head[data-v-59e54b21]:hover, .chapter-checker[data-v-59e54b21]:hover { background: var(--hover, #f3f4f6);
 }
-.chapter-node-head.active[data-v-a87b69c2], .chapter-checker.active[data-v-a87b69c2] { background: var(--active, #eaeef2);
+.chapter-node-head.active[data-v-59e54b21], .chapter-checker.active[data-v-59e54b21] { background: var(--active, #eaeef2);
 }
-.chapter-node-body[data-v-a87b69c2] { padding-left: 12px;
+.chapter-node-body[data-v-59e54b21] { padding-left: 12px;
 }
-.chapter-checker[data-v-a87b69c2] { width: 100%; display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--text, #24292f); padding: 0 7px 0 26px;
+.chapter-checker[data-v-59e54b21] { width: 100%; display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--text, #24292f); padding: 0 7px 0 26px;
 }
-.checker-main[data-v-a87b69c2] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer;
+.checker-main[data-v-59e54b21] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer;
 }
-.checker-marker[data-v-a87b69c2] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.checker-marker[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
-.chapter-state[data-v-a87b69c2], .chapter-usage[data-v-a87b69c2] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.chapter-state[data-v-59e54b21], .chapter-usage[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
 /* P53：重试按钮与「待重试」角标。按钮平时半透明，行悬浮/选中时才明显——
  * 章节行本身就是"点一下选中"，按钮不能抢走整行的点击。 */
-.chapter-retry[data-v-a87b69c2] { flex: 0 0 auto; opacity: 0; transition: opacity .12s; font-size: 12px; padding: 0 4px;
+.chapter-retry[data-v-59e54b21] { flex: 0 0 auto; opacity: 0; transition: opacity .12s; font-size: 12px; padding: 0 4px;
 }
-.chapter-node-head:hover .chapter-retry[data-v-a87b69c2], .chapter-node-head.active .chapter-retry[data-v-a87b69c2] { opacity: .75;
+.chapter-node-head:hover .chapter-retry[data-v-59e54b21], .chapter-node-head.active .chapter-retry[data-v-59e54b21] { opacity: .75;
 }
-.chapter-retry[data-v-a87b69c2]:hover { opacity: 1;
+.chapter-retry[data-v-59e54b21]:hover { opacity: 1;
 }
-.chapter-retry-pending[data-v-a87b69c2] { flex: 0 0 auto; font-size: 11px; color: var(--amber, #9a6700);
+.chapter-retry-pending[data-v-59e54b21] { flex: 0 0 auto; font-size: 11px; color: var(--amber, #9a6700);
 }
-.chapter-state.run[data-v-a87b69c2] { color: var(--green, #1a7f37);
+.chapter-state.run[data-v-59e54b21] { color: var(--green, #1a7f37);
 }
-.chapter-arch[data-v-a87b69c2] { flex: 0 0 auto; font-size: 11px; color: var(--muted, #6e7781); border: 1px dashed var(--line, #c9d1d9); border-radius: 4px; padding: 0 3px; line-height: 15px;
+.chapter-arch[data-v-59e54b21] { flex: 0 0 auto; font-size: 11px; color: var(--muted, #6e7781); border: 1px dashed var(--line, #c9d1d9); border-radius: 4px; padding: 0 3px; line-height: 15px;
 }
-.chapter-info[data-v-a87b69c2] { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer;
+.chapter-info[data-v-59e54b21] { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer;
 }
 /* P60 第六步：修复行与核对行**同层**，不再缩进一级。
  * 一次修复会话的复核结果写的是 `checker_<child>.tryN.jsonl`、并被并进本节点
@@ -67,29 +67,29 @@
  * 旧→新跟在后面（排序在 sidebar.ts 的 fixesForNode）。
  * 只动横向留白，行高仍是 `var(--row-h)`：没有修复的节点一条也不渲染，布局
  * 与加这条规则之前逐字节相同。 */
-.chapter-fix[data-v-a87b69c2] { display: flex; align-items: center; padding: 0 7px 0 26px;
+.chapter-fix[data-v-59e54b21] { display: flex; align-items: center; padding: 0 7px 0 26px;
 }
-.fix-main[data-v-a87b69c2] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
+.fix-main[data-v-59e54b21] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
 }
-.chapter-fix[data-v-a87b69c2]:hover { background: var(--hover, #f3f4f6);
+.chapter-fix[data-v-59e54b21]:hover { background: var(--hover, #f3f4f6);
 }
-.chapter-fix.active[data-v-a87b69c2] { background: var(--active, #eaeef2);
+.chapter-fix.active[data-v-59e54b21] { background: var(--active, #eaeef2);
 }
-.fix-marker[data-v-a87b69c2] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.fix-marker[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
-.fix-try[data-v-a87b69c2] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.fix-try[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
 /* P61：复盘行与核对/修复行**同层同高**（同一处 26px 左边距、同一个 --row-h），
  * 只把标记文案染成弱色，与"这只是一条附注"的语义一致。 */
-.chapter-rescue[data-v-a87b69c2] { display: flex; align-items: center; padding: 0 7px 0 26px;
+.chapter-rescue[data-v-59e54b21] { display: flex; align-items: center; padding: 0 7px 0 26px;
 }
-.rescue-main[data-v-a87b69c2] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
+.rescue-main[data-v-59e54b21] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
 }
-.chapter-rescue[data-v-a87b69c2]:hover { background: var(--hover, #f3f4f6);
+.chapter-rescue[data-v-59e54b21]:hover { background: var(--hover, #f3f4f6);
 }
-.chapter-rescue.active[data-v-a87b69c2] { background: var(--active, #eaeef2);
+.chapter-rescue.active[data-v-59e54b21] { background: var(--active, #eaeef2);
 }
-.rescue-marker[data-v-a87b69c2] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.rescue-marker[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
 
 /* ============================ 侧栏 ============================ */
@@ -1559,19 +1559,24 @@ to { transform: rotate(360deg);
  font-size: 12.5px; line-height: 20px; color: var(--muted);
 }
 
-.history-old-note[data-v-f21ee8fb] { color: var(--caption); font-weight: 400;
+.history-old-note[data-v-c75e6ae7] { color: var(--caption); font-weight: 400;
 }
 
 /* P60 补充：修复链表头点名目标章节——行里的「修复 child_02 #1」与树上同一口径。 */
-.history-fix-target[data-v-f21ee8fb] { color: var(--text); font-weight: 500;
+.history-fix-target[data-v-c75e6ae7] { color: var(--text); font-weight: 500;
 }
-.history-role[data-v-f21ee8fb] { flex: none; font-size: 11px; color: var(--caption); min-width: 22px;
+.history-role[data-v-c75e6ae7] { flex: none; font-size: 11px; color: var(--caption); min-width: 22px;
 }
-.history-rounds[data-v-f21ee8fb] { margin: 0 4px 10px;
+
+/* C：复盘行点名"复盘了哪一条会话、什么角色"（`复盘了 转换#1`），与行标签
+ * 「复盘#N」一起读就是「复盘#2 · 复盘了 转换#1」。 */
+.history-reviewed[data-v-c75e6ae7] { flex: none; font-size: 11px; color: var(--caption);
 }
-.history-rounds-head[data-v-f21ee8fb] { font-size: 11px; color: var(--caption); margin-bottom: 4px;
+.history-rounds[data-v-c75e6ae7] { margin: 0 4px 10px;
 }
-.history-round[data-v-f21ee8fb] {
+.history-rounds-head[data-v-c75e6ae7] { font-size: 11px; color: var(--caption); margin-bottom: 4px;
+}
+.history-round[data-v-c75e6ae7] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1585,17 +1590,17 @@ to { transform: rotate(360deg);
   text-align: left;
   cursor: pointer;
 }
-.history-round[data-v-f21ee8fb]:hover { background: var(--hover, #f3f4f6);
+.history-round[data-v-c75e6ae7]:hover { background: var(--hover, #f3f4f6);
 }
-.history-round-state[data-v-f21ee8fb] { font-size: 11px;
+.history-round-state[data-v-c75e6ae7] { font-size: 11px;
 }
-.history-round-state.ok[data-v-f21ee8fb] { color: #15803d;
+.history-round-state.ok[data-v-c75e6ae7] { color: #15803d;
 }
-.history-round-state.bad[data-v-f21ee8fb] { color: #b45309;
+.history-round-state.bad[data-v-c75e6ae7] { color: #b45309;
 }
-.history-round-from[data-v-f21ee8fb] { margin-left: auto; font-size: 11px; color: var(--caption);
+.history-round-from[data-v-c75e6ae7] { margin-left: auto; font-size: 11px; color: var(--caption);
 }
-.history-confirm[data-v-f21ee8fb] {
+.history-confirm[data-v-c75e6ae7] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1607,12 +1612,12 @@ to { transform: rotate(360deg);
   font-size: 12px;
   color: var(--caption);
 }
-.history-note[data-v-f21ee8fb] {
+.history-note[data-v-c75e6ae7] {
   margin: 0 4px 8px;
   font-size: 12px;
   color: var(--caption);
 }
-.history-cur[data-v-f21ee8fb] {
+.history-cur[data-v-c75e6ae7] {
   font-size: 11px;
   color: var(--accent, #3b82f6);
   border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 45%, var(--line, #d0d7de));
@@ -1620,7 +1625,7 @@ to { transform: rotate(360deg);
   padding: 0 4px;
   line-height: 16px;
 }
-.history-latest[data-v-f21ee8fb] {
+.history-latest[data-v-c75e6ae7] {
   font-size: 11px;
   color: var(--ok, #15803d);
   border: 1px solid color-mix(in srgb, var(--ok, #15803d) 40%, var(--line, #d0d7de));
@@ -1628,7 +1633,7 @@ to { transform: rotate(360deg);
   padding: 0 4px;
   line-height: 16px;
 }
-.history-arch[data-v-f21ee8fb] {
+.history-arch[data-v-c75e6ae7] {
   font-size: 11px;
   color: var(--caption);
   border: 1px dashed var(--line, #d0d7de);
@@ -1636,18 +1641,18 @@ to { transform: rotate(360deg);
   padding: 0 4px;
   line-height: 16px;
 }
-.history-actions[data-v-f21ee8fb] {
+.history-actions[data-v-c75e6ae7] {
   display: flex;
   gap: 6px;
   margin-left: auto;
   opacity: 0;
   transition: opacity .12s;
 }
-.history-row:hover .history-actions[data-v-f21ee8fb],
-.history-row:focus-within .history-actions[data-v-f21ee8fb] {
+.history-row:hover .history-actions[data-v-c75e6ae7],
+.history-row:focus-within .history-actions[data-v-c75e6ae7] {
   opacity: 1;
 }
-.history-act[data-v-f21ee8fb] {
+.history-act[data-v-c75e6ae7] {
   border: 1px solid var(--line, #d0d7de);
   background: transparent;
   color: var(--text);
@@ -1657,30 +1662,30 @@ to { transform: rotate(360deg);
   line-height: 18px;
   cursor: pointer;
 }
-.history-act.act-danger[data-v-f21ee8fb] {
+.history-act.act-danger[data-v-c75e6ae7] {
   border-color: color-mix(in srgb, #dc2626 50%, var(--line, #d0d7de));
   color: #dc2626;
 }
-.history[data-v-f21ee8fb] {
+.history[data-v-c75e6ae7] {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 12px 28px 20px 20px;
 }
-.history.hidden[data-v-f21ee8fb] {
+.history.hidden[data-v-c75e6ae7] {
   display: none;
 }
-.history-empty[data-v-f21ee8fb] {
+.history-empty[data-v-c75e6ae7] {
   padding: 16px 4px;
   color: var(--caption);
   font-size: 13px;
 }
-.history-head[data-v-f21ee8fb] {
+.history-head[data-v-c75e6ae7] {
   padding: 0 4px 8px;
   color: var(--caption);
   font-size: 12px;
 }
-.history-row[data-v-f21ee8fb] {
+.history-row[data-v-c75e6ae7] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1696,13 +1701,13 @@ to { transform: rotate(360deg);
   cursor: pointer;
   transition: background .12s;
 }
-.history-row[data-v-f21ee8fb]:hover {
+.history-row[data-v-c75e6ae7]:hover {
   background: var(--hover);
 }
-.history-row.active[data-v-f21ee8fb] {
+.history-row.active[data-v-c75e6ae7] {
   background: var(--active);
 }
-.history-tag[data-v-f21ee8fb] {
+.history-tag[data-v-c75e6ae7] {
   flex: none;
   color: var(--caption);
   font-size: 11px;
@@ -1712,7 +1717,7 @@ to { transform: rotate(360deg);
   padding: 0 6px;
   line-height: 16px;
 }
-.history-title[data-v-f21ee8fb] {
+.history-title[data-v-c75e6ae7] {
   flex: 1;
   min-width: 0;
   font-size: 14px;
@@ -1721,25 +1726,25 @@ to { transform: rotate(360deg);
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.history-row.active .history-title[data-v-f21ee8fb] {
+.history-row.active .history-title[data-v-c75e6ae7] {
   font-weight: 500;
 }
-.history-state[data-v-f21ee8fb] {
+.history-state[data-v-c75e6ae7] {
   flex: none;
   font-size: 12px;
   line-height: 20px;
   color: var(--caption);
 }
-.history-state.live[data-v-f21ee8fb] {
+.history-state.live[data-v-c75e6ae7] {
   color: var(--ok);
 }
-.history-state.done[data-v-f21ee8fb] {
+.history-state.done[data-v-c75e6ae7] {
   color: var(--ok);
 }
-.history-state.error[data-v-f21ee8fb] {
+.history-state.error[data-v-c75e6ae7] {
   color: var(--err);
 }
-.history-time[data-v-f21ee8fb] {
+.history-time[data-v-c75e6ae7] {
   flex: none;
   color: var(--caption);
   font-size: 12px;
@@ -1747,7 +1752,7 @@ to { transform: rotate(360deg);
   font-variant-numeric: tabular-nums;
 }
 @media (max-width: 1023px) {
-.history[data-v-f21ee8fb] { padding: 10px 16px 16px 12px;
+.history[data-v-c75e6ae7] { padding: 10px 16px 16px 12px;
 }
 }
 

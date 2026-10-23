@@ -484,9 +484,12 @@ func (t *RescueSubmitTool) Execute(argsJSON string) (session.ToolResult, error) 
 }
 
 // rescueMu 保护 rescueSeen（同一章同一次尝试最多复盘 max_per_attempt 次）。
+// rescuePathMu 保护"定转录名 + 建文件"这一段：同一个章节的转换与核对可能在各自
+// 的槽位里同时复盘，两边都只看磁盘上已有的最大号就会拿到同一个名字。
 var (
-	rescueMu   sync.Mutex
-	rescueSeen = map[string]int{}
+	rescueMu     sync.Mutex
+	rescueSeen   = map[string]int{}
+	rescuePathMu sync.Mutex
 )
 
 // rescueBudget 记一次复盘并判断是否还在预算内。
@@ -533,11 +536,13 @@ func (r *Runner) rescueReview(t rescueTarget, tid int) (rescueVerdict, bool) {
 		return rescueVerdict{}, false
 	}
 	for attempt := 1; attempt <= rescueMaxReviewAttempts; attempt++ {
-		v, ok := r.rescueReviewOnce(t, lines, tid)
+		// 转录名在**开跑之前**定下来：每一条复盘都用自己的一号（见
+		// rescueTranscriptPath），拿不到结论时退掉的必须正是这一次那份。
+		trPath := r.allocateRescueTranscript(t, tid)
+		v, ok := r.rescueReviewOnce(t, lines, tid, trPath)
 		if ok {
 			return v, true
 		}
-		trPath := r.rescueTranscriptPath(t)
 		if attempt >= rescueMaxReviewAttempts {
 			r.log.LogWarning(tid, "[rescue]", t.Base, fmt.Sprintf(
 				"复盘会话连续 %d 次没有给出结论，放弃复盘：目标按引入复盘之前的行为收尾（照常提醒/判失败）", attempt))
@@ -553,7 +558,8 @@ func (r *Runner) rescueReview(t rescueTarget, tid int) (rescueVerdict, bool) {
 }
 
 // rescueReviewOnce 起一条复盘会话并等它的结论（不做重来，见 rescueReview）。
-func (r *Runner) rescueReviewOnce(t rescueTarget, lines []transcriptLine, tid int) (rescueVerdict, bool) {
+// trPath 是这一次的复盘转录落点（已完成编号，见 rescueTranscriptPath）。
+func (r *Runner) rescueReviewOnce(t rescueTarget, lines []transcriptLine, tid int, trPath string) (rescueVerdict, bool) {
 	name := r.rescueModelName()
 	client := r.clientFor(name)
 	modelCfg := r.modelOf(name)
@@ -570,12 +576,20 @@ func (r *Runner) rescueReviewOnce(t rescueTarget, lines []transcriptLine, tid in
 		renderPrompt(prompts.Must(prompts.RescueSystem), tuning, r.outputLang()),
 		tools, r.log, tid, "rescue:"+t.Base)
 	if r.rescueKeepRecords(tid) {
-		// 同名文件可能是上一轮复盘留下的（按章节+尝试号命名，见
-		// rescueTranscriptPath）：先退掉，两段对话绝不串进同一条转录。
-		r.retireRescueTranscript(tid, t, r.rescueTranscriptPath(t), "上一轮同名复盘")
-		if tr, terr := session.NewTranscript(r.rescueTranscriptPath(t)); terr == nil {
+		if tr, terr := session.NewTranscript(trPath); terr == nil {
 			sess.SetTranscript(tr)
 			defer tr.Close()
+			// 复盘**自己**的转录先写下"它复盘的是哪一条会话"（在会话开跑之前）：
+			// ① 预览页靠它把老命名（`rescue_<章>_<时间戳>.jsonl`）的复盘补出章节
+			// 身份（`rescue_<章>` 的形状能解析，剩下部分不是章节 ID 也没关系）；
+			// ② 历史页签靠它说清「复盘了 转换#1」，同一章不同目标的复盘才能各成
+			// 一条链。字段口径与 `checker_target` 的锚点一致：转录名不含扩展名。
+			_ = sess.AppendTranscriptNote("rescue_target", map[string]any{
+				"chapter":             t.Base,
+				"reviewed_role":       t.Role,
+				"reviewed_transcript": transcriptStemName(t.TrPath),
+				"reviewed_attempt":    transcriptAttemptOf(t.TrPath),
+			})
 		}
 	}
 	// P58 扩展：三种触发（没提交 / 报错终止 / 纠正过"工具不可用"）共用同一条
@@ -648,10 +662,10 @@ func isRescueTranscript(path string) bool {
 	return strings.HasPrefix(filepath.Base(path), "rescue_")
 }
 
-// retireRescueTranscript 退掉一份复盘转录（P61/B、E）：挪进
-// `work/sessions/.trash/`，挪不动就直接删。复盘转录是一次性的——要么这次没拿到
-// 结论（留着只会让预览页多一条谁也看不懂的会话行），要么同名文件是上一轮复盘
-// 留下的（新的一条必须写进自己的文件，两段对话不能串进同一条转录）。
+// retireRescueTranscript 退掉一份**没拿到结论**的复盘转录（P61/B）：挪进
+// `work/sessions/.trash/`，挪不动就直接删。只有"这一次没有结论"会走这里——
+// 有结论的复盘（哪怕后来又被复盘一次）是真实发生过的记录，一条都不删，
+// 因为它已经写在自己的 `.tryN` 名字上（见 rescueTranscriptPath）。
 func (r *Runner) retireRescueTranscript(tid int, t rescueTarget, trPath, why string) {
 	if trPath == "" || !fileExists(trPath) {
 		return // latex.rescue.keep_records 关闭时根本没有落盘
@@ -661,8 +675,7 @@ func (r *Runner) retireRescueTranscript(tid int, t rescueTarget, trPath, why str
 		stem := strings.TrimSuffix(filepath.Base(trPath), ".jsonl")
 		stamp := time.Now().Format("20060102-150405")
 		dst := filepath.Join(trash, fmt.Sprintf("%s.%s.jsonl", stem, stamp))
-		// 同一条目标的复盘重来会复用同一个文件名（每次先丢弃再重开），一秒内
-		// 丢两次就会撞名——撞名时加序号，别把上一份覆盖掉。
+		// 一秒内丢两次会撞名（重试循环很快）；撞名时加序号，别把上一份覆盖掉。
 		for n := 2; fileExists(dst); n++ {
 			dst = filepath.Join(trash, fmt.Sprintf("%s.%s-%d.jsonl", stem, stamp, n))
 		}
@@ -729,23 +742,61 @@ func (r *Runner) rescueKeepRecords(tid int) bool {
 	return r.log != nil && r.log.Level() >= logger.LevelDebug
 }
 
-// rescueTranscriptPath 是复盘会话的转录落点（P61/E）：
+// rescueTranscriptPath 是复盘会话的转录落点（P61/E，P58 补改编号）：
 //
-//	work/sessions/rescue_<章>[.try<目标尝试号>].jsonl
+//	work/sessions/rescue_<章>[.tryN].jsonl
 //
 // 名字与转换/核对同一种口径（`<角色>_<章>[.tryN]`），所以预览页用同一套规则就能
 // 推出章节身份（`chapterRole: "rescue"`，章节 ID/父章/深度与 `checker_` 完全相同），
-// 复盘会话于是能挂在它复盘的章节下面显示。`.tryN` 是**目标转录的尝试号**——这条
-// 复盘说的是那一份产物；同一个目标尝试的复盘重来（P61/B）会先把没结论的旧转录
-// 丢进 `work/sessions/.trash/`，因此这个名字可以直接复用，不会把两次对话串进
-// 同一个文件。
+// 复盘会话于是能挂在它复盘的章节下面显示。
+//
+// `.tryN` 是**这条目标被复盘的第几次**（与 convert 的尝试号同一个推导方式：磁盘上
+// 已有的最大号 + 1，见 nextAttemptNumber）。它以前是"目标转录的尝试号"，于是同一
+// 目标第二次复盘会复用同一个文件名、把上一份（已经收尾的）转录退掉——那是一段
+// 真实发生过的复盘记录，不该被后来的那次覆盖。现在每次复盘都拿自己的一号，
+// 已完成的转录一条都不删；只有**没拿到结论**的那一次才会被退进
+// `work/sessions/.trash/`（见 rescueReview）。
 func (r *Runner) rescueTranscriptPath(t rescueTarget) string {
-	name := fmt.Sprintf("rescue_%s%s.jsonl", t.Base, attemptSuffixOf(transcriptAttemptOf(t.TrPath)))
-	return filepath.Join(t.ProjDir, "work", "sessions", name)
+	base := filepath.Join(t.ProjDir, "work", "sessions", "rescue_"+t.Base+".jsonl")
+	return attemptTranscriptPath(base, nextAttemptNumber(base))
+}
+
+// allocateRescueTranscript 定下这一次的落点，并在**同一把锁**里把文件占出来：
+// 只算名字不建文件的话，同一章的转换与核对同时复盘会拿到同一个名字，两段对话
+// 追加进同一条转录（NewTranscript 是 O_APPEND）。落不落盘由 latex.rescue.keep_records
+// 决定——不落盘时没有文件可占，也就不需要锁（没有任何写入）。
+func (r *Runner) allocateRescueTranscript(t rescueTarget, tid int) string {
+	if !r.rescueKeepRecords(tid) {
+		return r.rescueTranscriptPath(t)
+	}
+	rescuePathMu.Lock()
+	defer rescuePathMu.Unlock()
+	path := r.rescueTranscriptPath(t)
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644); err == nil {
+		_ = f.Close()
+	}
+	return path
+}
+
+// nextAttemptNumber 是"这一处下一次该用的号"——与 convert 的 lastAttemptNumber
+// 同一口径（磁盘上已有的最大号 + 1），只是它给的是**新**号而不是要续写的那一个。
+// 一个都没有时是 1（第一次沿用不带后缀的原名）。attemptNumberOnDisk 的第二个
+// 返回值是"最后一份是否已收尾"，与新号无关，这里不看它。
+func nextAttemptNumber(transcriptBase string) int {
+	if n, _ := attemptNumberOnDisk(transcriptBase); n >= 1 {
+		return n + 1
+	}
+	return 1
+}
+
+// transcriptStemName 是转录名去掉目录与扩展名（`convert_<章>.try2`）——写进
+// 锚点/复盘目标备注时的口径，与核对会话的 `checker_target.convert` 一致。
+func transcriptStemName(path string) string {
+	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 }
 
 // transcriptAttemptOf 从转录名里取尝试号（`convert_<章>.try2.jsonl` → 2；
-// 没有后缀 → 1）。文件名是唯一来源：复盘要写的尝试号就是目标那一份转录的。
+// 没有后缀 → 1）。文件名是唯一来源。
 func transcriptAttemptOf(path string) int {
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	if i := strings.LastIndex(stem, ".try"); i > 0 {
@@ -754,14 +805,6 @@ func transcriptAttemptOf(path string) int {
 		}
 	}
 	return 1
-}
-
-// attemptSuffixOf 给出 `.tryN` 后缀（第 1 次尝试没有后缀，与转换/核对一致）。
-func attemptSuffixOf(n int) string {
-	if n <= 1 {
-		return ""
-	}
-	return fmt.Sprintf(".try%d", n)
 }
 
 // rescueAudit 追一行审计记录（默认不存对话，也要能看到"哪一章被判过什么"）。

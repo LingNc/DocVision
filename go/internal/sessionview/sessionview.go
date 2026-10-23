@@ -417,6 +417,16 @@ type SessionInfo struct {
 	// transcripts carry them. P60 第一步只把它读出来给将来的界面用：
 	// 章节树/历史/分组的行为一行都没改（见 Scan 里的角色赋值）。
 	FixIssueIDs []string `json:"fixIssueIds,omitempty"`
+	// ReviewedRole / ReviewedTranscript (P58 补) are what a RESCUE session
+	// reviewed, read from `t=meta kind=rescue_target` that the rescue writes
+	// into its own transcript before the review starts: the role
+	// (convert/checker) and the reviewed transcript's base name without the
+	// extension (`convert_<章>.try2`), same shape as the checker anchor.
+	// The history tab uses them to say "复盘了 转换#1" and to keep the rescues
+	// of DIFFERENT targets in separate chains; transcripts written before the
+	// note existed carry empty strings.
+	ReviewedRole       string `json:"reviewedRole,omitempty"`
+	ReviewedTranscript string `json:"reviewedTranscript,omitempty"`
 	// Archived marks a transcript living under `work/attempts/<章>/tryN/`.
 	// That directory is the archive of an invalidated attempt (the whole
 	// subtree is moved there), so it holds copies of the sessions that are
@@ -651,9 +661,35 @@ var chapterChildSuffix = regexp.MustCompile(`^(.*)_child_(\d+)$`)
 
 // chapterRescueID 是复盘转录名里允许出现的章节 ID 形状（P61/E）：`rescue_` 后面
 // 必须**整段**就是一个章节 ID（`chapter_004` / `chapter_004_child_02`）。P58 的
-// 老命名（`rescue_<章>_<时间戳>`）整段不匹配 → 拿不到章节身份，仍按「错误处理」
-// 阶段落组（P58 的用例钉住）。
+// 老命名（`rescue_<章>_<时间戳>`）整段不匹配 → 文件名给不出章节身份，改由
+// rescueLegacyChapter 从转录自己的备注里补（补不到才留在「错误处理」）。
 var chapterRescueID = regexp.MustCompile(`^chapter[_-]?\d+(?:_child_\d+)*$`)
+
+// rescueLegacyChapter 给**老命名**的复盘转录补章节身份（P58 补）。文件名不可用
+// 时按转录自己的 meta 推断，来源按优先级：
+//
+//  1. `t=meta kind=rescue_target` 的 `chapter`（复盘开始时写的目标章节）；
+//  2. 系统快照里的 `session_label`（`rescue:<章>`）——P58/P61 那批没有目标备注，
+//     但会话层建转录时就写了标签。
+//
+// 两条都没有/形状不对 → 零值：这条转录仍按 P58 落在「错误处理」组（不丢）。
+// 编号（`#1..#N`）不在这里定：老名字没有号，界面按 mtime 读时推断（D）。
+func rescueLegacyChapter(stat transcriptStat) chapterIdentityInfo {
+	id := strings.TrimSpace(stat.RescueChapter)
+	if id == "" {
+		if label := strings.TrimSpace(stat.SessionLabel); strings.HasPrefix(label, "rescue:") {
+			id = strings.TrimPrefix(label, "rescue:")
+		}
+	}
+	if !chapterRescueID.MatchString(id) {
+		return chapterIdentityInfo{}
+	}
+	parent := ""
+	if m := chapterChildSuffix.FindStringSubmatch(id); m != nil {
+		parent = m[1]
+	}
+	return chapterIdentityInfo{ID: id, Parent: parent, Role: "rescue", Depth: strings.Count(id, "_child_"), Attempt: 1}
+}
 
 func chapterIdentity(rel string) chapterIdentityInfo {
 	base := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
@@ -670,10 +706,11 @@ func chapterIdentity(rel string) chapterIdentityInfo {
 	// 文件名自带的。角色仍记成 "fix"（谁干的活），阶段归组由 enrichSessions 按
 	// "有章节身份即章节阶段"归到 convert 组，与转换/核对同组。
 	//
-	// P61：复盘转录同样自带章节（`rescue_<章>[.try<目标尝试号>].jsonl`）。章节 ID、
-	// 父章、深度与 `checker_` 完全同一套推导；`.tryN` 是**它复盘的那一条转录的**
-	// 尝试号。角色是 "rescue"——它永远只是章节下面的一行，绝不能变成某一章的
-	// convert 或 checker（挑选在 web 侧，见 sidebar.ts 的 buildChapterTree）。
+	// P61：复盘转录同样自带章节（`rescue_<章>[.tryN].jsonl`）。章节 ID、父章、
+	// 深度与 `checker_` 完全同一套推导；`.tryN` 是这条目标被复盘的第几次
+	// （P58 补起，见 internal/latex/rescue.go 的 rescueTranscriptPath）。角色是
+	// "rescue"——它永远只是章节下面的一行，绝不能变成某一章的 convert 或
+	// checker（挑选在 web 侧，见 sidebar.ts 的 buildChapterTree）。
 	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}, {"fix_", "fix"}, {"rescue_", "rescue"}} {
 		if strings.HasPrefix(base, prefix.name) {
 			role, id = prefix.role, strings.TrimPrefix(base, prefix.name)
@@ -702,8 +739,9 @@ func chapterIdentity(rel string) chapterIdentityInfo {
 	if role == "" || id == "" || !chapterRootID.MatchString(id) {
 		return chapterIdentityInfo{}
 	}
-	// P61：复盘转录的剩余部分必须整段是一个章节 ID，否则宁可没有章节身份
-	// （老命名 `rescue_<章>_<时间戳>` 就落在这里，继续归「错误处理」阶段）。
+	// P61：复盘转录的剩余部分必须整段是一个章节 ID，否则文件名给不出章节身份
+	// （老命名 `rescue_<章>_<时间戳>` 就落在这里）。P58 补起这种转录改由 Scan
+	// 调 rescueLegacyChapter 从它自己的 meta 里补；补不到才归「错误处理」阶段。
 	if role == "rescue" && !chapterRescueID.MatchString(id) {
 		return chapterIdentityInfo{}
 	}
@@ -1006,6 +1044,19 @@ type transcriptStat struct {
 	FixAnchorAttempt int
 	FixIssueIDs      []string
 	SawFixTarget     bool
+	// RescueChapter / RescueReviewedRole / RescueReviewedTranscript 来自复盘
+	// 会话自己转录里的 `t=meta kind=rescue_target`（P58 补）：它复盘的是哪一章、
+	// 哪条角色的哪一条转录（转录名不含扩展名，与 checker_target 的锚点同口径）。
+	// 预览页靠它①给老命名（`rescue_<章>_<时间戳>.jsonl`）补出章节身份，
+	// ②在历史页签里说清「复盘了 转换#1」并按目标分链。
+	RescueChapter            string
+	RescueReviewedRole       string
+	RescueReviewedTranscript string
+	// SessionLabel 是最近一条系统快照里的 `session_label`（`rescue:<章>` /
+	// `convert:…`）。复盘转录的老命名只有这一条能说明它属于哪一章：会话层在
+	// SetTranscript 时就把它写进 kind=system 那行，比 rescue_target 更早的
+	// 落盘也有。
+	SessionLabel string
 	// Prices 是转录里 t=meta kind=price 冻的费率（model → 费率，同模型
 	// 后写胜）——费用按冻的价算，不依赖跑报表时的配置（T101 第二版）。
 	Prices map[string]config.PriceConfig
@@ -1176,6 +1227,19 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		stat := stats[i]
 		grp := s.projectGroupFor(root, rel)
 		chapter := chapterIdentity(rel)
+		// P58 补：老命名的复盘转录（`rescue_<章>_<时间戳>.jsonl`）文件名整段不是
+		// 章节 ID，按它自己转录里的目标备注/会话标签补一个——补到了就和
+		// `rescue_<章>.jsonl` 完全一样（挂进章节树当复盘行、阶段归章节转换组），
+		// 补不到才留在「错误处理」（见 rescueLegacyChapter）。
+		// labelRel 只用于标签/标题：把老名字当成规范名 `rescue_<章>.jsonl` 算，
+		// 于是「复盘 · <章>」与带编号的转录是同一个来源（LabelFor/TitleFor）。
+		labelRel := rel
+		if chapter.ID == "" && strings.HasPrefix(transcriptStem(rel), "rescue_") {
+			if legacy := rescueLegacyChapter(stat); legacy.ID != "" {
+				chapter = legacy
+				labelRel = path.Join(path.Dir(rel), "rescue_"+legacy.ID+".jsonl")
+			}
+		}
 		live := liveNow(stat, c.mt, now)
 		endState := liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow)
 		activity := activityAfterEnd(stat, stat.ChapterActivity)
@@ -1204,9 +1268,9 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 				if chapter.ID != "" {
 					return chapter.Role + ":" + chapter.ID
 				}
-				return LabelFor(rel)
+				return LabelFor(labelRel)
 			}(),
-			Title:                TitleFor(rel),
+			Title:                TitleFor(labelRel),
 			Name:                 c.name,
 			Path:                 c.full,
 			Project:              grp.Name,
@@ -1226,6 +1290,8 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			ChapterAnchor:        anchor,
 			ChapterAnchorAttempt: anchorAttempt,
 			FixIssueIDs:          stat.FixIssueIDs,
+			ReviewedRole:         stat.RescueReviewedRole,
+			ReviewedTranscript:   stat.RescueReviewedTranscript,
 			Archived:             strings.HasPrefix(rel, "work/attempts/"),
 			Prices:               stat.Prices,
 			ChapterID:            chapter.ID,
@@ -1455,6 +1521,23 @@ func readStat(p string) (transcriptStat, error) {
 							stat.FixIssueIDs = rec.IssueIDs
 						}
 					}
+					// P58 补：复盘会话自己的目标备注——它复盘的是哪一章、哪个
+					// 角色的哪一条转录。老命名（`rescue_<章>_<时间戳>.jsonl`）
+					// 的章节身份只能靠它补（见 rescueLegacyChapter）。
+					if strings.Contains(trimmed, `"kind":"rescue_target"`) {
+						var rec struct {
+							Chapter            string `json:"chapter"`
+							ReviewedRole       string `json:"reviewed_role"`
+							ReviewedTranscript string `json:"reviewed_transcript"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil {
+							if rec.Chapter != "" {
+								stat.RescueChapter = rec.Chapter
+							}
+							stat.RescueReviewedRole = rec.ReviewedRole
+							stat.RescueReviewedTranscript = rec.ReviewedTranscript
+						}
+					}
 				case "usage":
 					stat.addUsage(trimmed)
 				}
@@ -1591,6 +1674,11 @@ func (stat *transcriptStat) addMeta(line string) {
 		stat.Meta = &MetaInfo{}
 	}
 	stat.Meta.Count++
+	// P58 补：会话标签（`rescue:<章>` / `convert:<章>`）在系统快照里，是复盘转录
+	// 老命名能拿到的唯一章节线索，单独留一份，别被提示词快照的更新规则挡住。
+	if rec.SessionLabel != "" {
+		stat.SessionLabel = rec.SessionLabel
+	}
 	// 只有 kind=system（或无 kind 的旧行）才更新提示词快照——price/run_end
 	// 也是 t=meta，没有 text/tools，若照样覆盖会把详情栏的提示词快照
 	// 抹成"没有正文 / 工具定义 0 个"（T99/T101 引入的真实回归）。

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { state } from '../state'
-import { chapterActivityLabel, chapterNodeHasRows, chapterNodeKey, chapterWantOpen, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, rescueRowLabel, rescueRowTitle, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
+import { chapterActivityLabel, chapterNodeHasRows, chapterNodeKey, chapterWantOpen, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, rescueOrdinal, rescueRowLabel, rescueRowTitle, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
 import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
 import type { ChapterTreeNode } from '../legacy/sidebar'
@@ -68,6 +68,14 @@ function fixStateText(session: any): string {
  * 复盘处理中 / 会话错误），在这里再抄一遍只会把两件事搅在一起。 */
 function rescueStateText(session: any): string {
   return session && session.live ? '运行中' : ''
+}
+
+/* C：行标签里的号是"这条目标被复盘的第几次"（同一章 + 同一目标按 mtime 旧 → 新
+ * 从 1 数），不是转录名里的序号——名字里的 `.tryN` 是防覆盖用的（同一章的不同
+ * 目标会共用一段号段），界面按目标重新数。老命名的复盘转录没有序号，也是靠这里
+ * 读时推断出 `#1..#N`（D，磁盘不改）。 */
+function rescueLabel(session: any): string {
+  return rescueRowLabel(session, rescueOrdinal(state.sessions, session))
 }
 
 /* 转录名里的 `.tryN` 只有当它**不是**这一轮时才有信息量：轮次已经写在
@@ -245,10 +253,11 @@ function nodeTitle(node: ChapterTreeNode): string {
           </button>
         </div>
         <!-- P61：复盘会话**与核对行同层**（和修复行一样是这一行的直接子行，
-             左边距取同一个 26px）。标签是「复盘 #N」——N 是它复盘的那一条转换
-             的尝试号（转录名里的 `.tryN`），不是行序号；结局与"复盘的是哪一条
-             产物"在行 title 里。没有复盘的节点一条也不渲染，布局与加这条规则
-             之前逐字节相同。 -->
+             左边距取同一个 26px）。标签是「复盘 #N」——N 是这条目标被复盘的
+             第几次（同一章 + 同一目标按 mtime 读时推断，C/D）；"复盘的是哪一条
+             会话"（`复盘了 转换#1`）与归档状态在行 title 里。同一章的不同目标各有
+             自己的行与号，互不遮挡。没有复盘的节点一条也不渲染，布局与加这条
+             规则之前逐字节相同。 -->
         <div
           v-if="(node.rescues || []).length"
           v-for="(rs, i) in node.rescues"
@@ -264,7 +273,7 @@ function nodeTitle(node: ChapterTreeNode): string {
             :title="rescueRowTitle(rs)"
             @click="emit('select', rs)"
           >
-            <span class="rescue-marker">{{ rescueRowLabel(rs) }}</span>
+            <span class="rescue-marker">{{ rescueLabel(rs) }}</span>
             <span v-if="rescueStateText(rs)" class="chapter-state" :class="stateTone(rescueStateText(rs))">{{ rescueStateText(rs) }}</span>
             <span v-if="rs.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
           </button>
