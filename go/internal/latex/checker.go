@@ -57,7 +57,7 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 	if view == "" {
 		view = ensureCheckerView(proj, base, chapPath, texPath, partsPath)
 	} else {
-		view = ensureCheckerViewAt(viewPath, base, chapPath, texPath, partsPath)
+		view = ensureCheckerViewAt(proj, viewPath, base, chapPath, texPath, partsPath)
 	}
 	if view == "" {
 		r.log.LogWarning(tid, "[checker]", base, "无法准备只读视图，跳过核对")
@@ -355,10 +355,14 @@ func ensureCheckerView(proj, base, chapPath, texPath, partsPath string) string {
 	if proj == "" || base == "" {
 		return ""
 	}
-	return ensureCheckerViewAt(filepath.Join(proj, "work", "views", "checker_"+base), base, chapPath, texPath, partsPath)
+	return ensureCheckerViewAt(proj, filepath.Join(proj, "work", "views", "checker_"+base), base, chapPath, texPath, partsPath)
 }
 
-func ensureCheckerViewAt(dir, base, chapPath, texPath, partsPath string) string {
+// ensureCheckerViewAt 铺开一份只读视图。`proj` 必须显式传进来：递归子章节的 md
+// 不在 `<proj>/chapters/` 下，而在 `<节点>/../input/chapter.md`，按 chapPath 往上
+// 两级猜项目根会把子章节猜成 `_subdivision/child_02`，于是项目级 `figures|images`
+// 一个都挂不上（T186 的"插图被漏掉"就这样在子章节一侧继续发生）。
+func ensureCheckerViewAt(proj, dir, base, chapPath, texPath, partsPath string) string {
 	if dir == "" || base == "" {
 		return ""
 	}
@@ -419,8 +423,9 @@ func ensureCheckerViewAt(dir, base, chapPath, texPath, partsPath string) string 
 	} else if err := os.MkdirAll(filepath.Join(dir, "parts"), 0o755); err != nil {
 		return ""
 	}
-	// `<proj>/chapters/<章>.md` → `<proj>`
-	linkCheckerAssets(dir, filepath.Dir(filepath.Dir(chapPath)))
+	// `<proj>/source/figures|images` 一并挂上（章节 .tex 里 `\input{figures/…}`、
+	// `\includegraphics{images/…}` 在转换工作区与成书树里都能解析）。
+	linkCheckerAssets(dir, proj)
 	return dir
 }
 

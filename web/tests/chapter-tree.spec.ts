@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chainMemberTag, dedupeChapterAttempts, fixTranscriptTag, plainTitle } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chapterIdSuffix, chainMemberTag, dedupeChapterAttempts, fixRoundAt, fixRowLabel, fixTargetId, fixTranscriptTag, plainTitle } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 import { applyIndex, chapterPendingRetry } from '../src/data'
 
@@ -674,5 +674,113 @@ describe('P60 修复会话带上章节身份后仍只看锚点', () => {
     // 修复自己的历史仍是同一锚点的轮次。
     const f2 = fix('fix_chapter_042_child_01.try2.jsonl', 'chapter_042_child_01', 'convert_chapter_042_child_01.try2', '2026-10-23T13:30:00Z')
     expect(chapterAttemptChain([c1, c2, f, f2], f2.id)!.map((s: any) => s.id)).toEqual([f2.id, f.id])
+  })
+})
+
+/* P59 补充：老核对转录（P58 之前落盘的）**没有锚点**。只按锚点全等过滤时，
+ * 只要当前这条写下了锚点，那些老核对就一条都匹配不上——历史里看起来像"最新的
+ * 一次核对把旧的盖掉了"。没有锚点的成员没得比，一律留在链里；锚在别处的核对
+ * 仍然要排除。 */
+describe('P59 老核对转录不被历史丢掉', () => {
+  const conv = (attempt = 1, mt = '2026-10-22T09:00:00Z') => ({
+    id: 'book/work/sessions/convert_chapter_042' + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: 'chapter_042', chapterRole: 'convert', chapterAttempt: attempt, mtime: mt,
+  })
+  const chk = (name: string, attempt: number, anchor: string, mt: string) => ({
+    id: 'book/work/sessions/' + name,
+    project: 'book', chapterId: 'chapter_042', chapterRole: 'checker', chapterAttempt: attempt,
+    chapterAnchor: anchor, mtime: mt,
+  })
+
+  it('两次有锚点的核对 + 一条没有锚点的老核对：三条都在（新 → 旧）', () => {
+    const c = conv()
+    const first = chk('checker_chapter_042.jsonl', 1, 'convert_chapter_042', '2026-10-22T10:10:00Z')
+    // 老转录：扫描不出锚点（chapterAnchor 为空）。
+    const legacy = chk('checker_chapter_042.try2.jsonl', 2, '', '2026-10-22T10:40:00Z')
+    const newest = chk('checker_chapter_042.try3.jsonl', 3, 'convert_chapter_042', '2026-10-22T12:10:00Z')
+    const sessions = [c, first, legacy, newest]
+    const chain = chapterAttemptChain(sessions, newest.id)
+    expect(chain).not.toBeNull()
+    expect(chain!.map((s: any) => s.id)).toEqual([newest.id, legacy.id, first.id])
+    // 从老转录那边点开历史，同样三条都在（不是反向把有锚点的过滤掉）。
+    expect(chapterAttemptChain(sessions, legacy.id)!.map((s: any) => s.id)).toEqual([newest.id, legacy.id, first.id])
+  })
+
+  it('锚在另一次转换上的核对仍然排除（别处的结论不混进来）', () => {
+    const c1 = conv(1, '2026-10-22T09:00:00Z')
+    const c2 = conv(2, '2026-10-22T11:00:00Z')
+    const onFirst = chk('checker_chapter_042.jsonl', 1, 'convert_chapter_042', '2026-10-22T10:00:00Z')
+    const legacy = chk('checker_chapter_042.try2.jsonl', 2, '', '2026-10-22T10:30:00Z')
+    const onSecond = chk('checker_chapter_042.try3.jsonl', 3, 'convert_chapter_042.try2', '2026-10-22T11:30:00Z')
+    const sessions = [c1, c2, onFirst, legacy, onSecond]
+    expect(chapterAttemptChain(sessions, onSecond.id)!.map((s: any) => s.id)).toEqual([onSecond.id, legacy.id])
+    expect(chapterAttemptChain(sessions, onFirst.id)!.map((s: any) => s.id)).toEqual([legacy.id, onFirst.id])
+  })
+})
+
+/* P60 补充：修复行要说清"这是哪一章的第几轮"——只写「修复 N」时，同一行下面
+ * 可能挂着不同子章节的修复，看不出归属。树上写 `修复 child_02 #1`（与核对行
+ * 用章节身份的层级口径一致），历史里每行同样带章节后缀与轮次、表头给完整章节 ID。 */
+describe('P60 修复行标明章节与轮次', () => {
+  const parentOf = (id: string) => (/_child_\d+$/.test(id) ? id.replace(/_child_\d+$/, '') : '')
+  const conv = (id: string, attempt = 1, mt = '2026-10-23T10:00:00Z') => ({
+    id: 'book/work/sessions/convert_' + id + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: id, chapterParent: parentOf(id), chapterRole: 'convert',
+    chapterAttempt: attempt, mtime: mt,
+  })
+  const fix = (name: string, childId: string, anchor: string, mt: string, over: Record<string, unknown> = {}) => ({
+    id: 'book/work/temp/conv_chapter_042/work/_subdivision/child_02/node/sessions/' + name,
+    project: 'book', chapterRole: 'fix',
+    chapterId: childId, chapterParent: parentOf(childId), chapterDepth: 1,
+    chapterAttempt: 1, chapterAnchor: anchor, mtime: mt, ...over,
+  })
+
+  it('章节 ID 在本层只留后缀；顶层照写自己的 ID', () => {
+    expect(chapterIdSuffix('chapter_042_child_02')).toBe('child_02')
+    // 嵌套子章节保留整段后缀，层级不会被抹成同一个名字。
+    expect(chapterIdSuffix('chapter_042_child_01_child_02')).toBe('child_01_child_02')
+    expect(chapterIdSuffix('chapter_042')).toBe('chapter_042')
+    expect(chapterIdSuffix('')).toBe('')
+  })
+
+  it('标签 = 修复 <章节后缀> #<轮次>，归档前缀照旧', () => {
+    const f = fix('fix_chapter_042_child_02.jsonl', 'chapter_042_child_02', 'convert_chapter_042_child_02', '2026-10-23T11:00:00Z')
+    expect(fixRowLabel(f, 'chapter_042', 1)).toBe('修复 child_02 #1')
+    // 老转录没有章节身份：退回它挂靠的那一行（节点）的章节 ID。
+    const legacy = { ...f, chapterId: '' }
+    expect(fixTargetId(legacy, 'chapter_042_child_02')).toBe('chapter_042_child_02')
+    expect(fixRowLabel(legacy, 'chapter_042_child_02', 2)).toBe('修复 child_02 #2')
+    expect(fixRowLabel({ ...f, archived: true }, 'chapter_042', 3)).toBe('旧修复 child_02 #3')
+  })
+
+  it('修复链的轮次：新 → 旧，队尾是最早一轮', () => {
+    expect(fixRoundAt(0, 3)).toBe(3)
+    expect(fixRoundAt(1, 3)).toBe(2)
+    expect(fixRoundAt(2, 3)).toBe(1)
+    expect(fixRoundAt(0, 1)).toBe(1)
+  })
+
+  it('子章节那一行下挂两轮修复：标签分别是 #1 / #2，且都点名子章节', () => {
+    const parent = conv('chapter_042')
+    const child = conv('chapter_042_child_02', 1, '2026-10-23T10:05:00Z')
+    const first = fix('fix_chapter_042_child_02.jsonl', 'chapter_042_child_02', 'convert_chapter_042_child_02', '2026-10-23T11:00:00Z')
+    const second = fix('fix_chapter_042_child_02.try2.jsonl', 'chapter_042_child_02', 'convert_chapter_042_child_02', '2026-10-23T11:30:00Z', { chapterAttempt: 2 })
+    const node = buildChapterTree([parent, child, first, second])[0].children[0]
+    expect(node.fixes.map((f: any) => f.id)).toEqual([first.id, second.id])
+    // 与 ChapterSessionTree 的渲染同一口径：树上旧 → 新，轮次从 1 数。
+    expect(node.fixes.map((f: any, i: number) => fixRowLabel(f, node.id, i + 1)))
+      .toEqual(['修复 child_02 #1', '修复 child_02 #2'])
+  })
+
+  it('修复历史表头能拿到目标章节，行按新 → 旧标 #N', () => {
+    const first = fix('fix_chapter_042_child_02.jsonl', 'chapter_042_child_02', 'convert_chapter_042_child_02', '2026-10-23T11:00:00Z')
+    const second = fix('fix_chapter_042_child_02.try2.jsonl', 'chapter_042_child_02', 'convert_chapter_042_child_02', '2026-10-23T11:30:00Z')
+    const chain = chapterAttemptChain([conv('chapter_042_child_02'), first, second], second.id)!
+    expect(chain.map((s: any) => s.id)).toEqual([second.id, first.id])
+    // 表头取同链里第一份能读到的章节身份（老转录没有 chapterId 时靠它兜底）。
+    const target = chain.map((s: any) => fixTargetId(s)).find((id: string) => !!id)
+    expect(target).toBe('chapter_042_child_02')
+    // 历史是新 → 旧：最新一轮在最上面，轮次从队尾数起。
+    expect(chain.map((s: any, i: number) => fixRoundAt(i, chain.length))).toEqual([2, 1])
   })
 })

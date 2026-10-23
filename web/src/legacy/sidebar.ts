@@ -438,6 +438,42 @@ export function fixTranscriptTag(s: any): string {
   return m ? '.try' + m[1] : ''
 }
 
+/*
+ * P60 补充：修复行光写「修复 N」看不出**修的是哪一章**的——同一行下面可能挂着
+ * 不同子章节的修复（父章节的转换名是同一处锚点），而树本身是分层的，行里只留
+ * 章节 ID 在本层的后缀就够了（`chapter_042_child_02` → `child_02`，与核对行
+ * 用章节身份标身份是同一个层级口径）。顶层章节没有可省的层，就照写自己的 ID
+ * （`chapter_042`）。嵌套子章节保留整段后缀（`child_01_child_02`），层级不会
+ * 被抹成同一个名字。
+ */
+export function chapterIdSuffix(id: string): string {
+  const s = String(id || '')
+  const m = /^chapter[_-]?\d+_(.+)$/.exec(s)
+  return m && m[1] ? m[1] : s
+}
+
+/* 这条修复挂在哪一章上：P60 第四步起修复转录名自带章节身份（`fix_<章>`），
+ * 老转录没有 `chapterId`，退回它挂靠的那一行的章节 ID。 */
+export function fixTargetId(fix: any, nodeId = ''): string {
+  return String((fix && fix.chapterId) || nodeId || '')
+}
+
+/* 修复行的一句话标签：`修复 child_02 #1`（归档前缀「旧」与转换/核对行同一套）。
+ * round 是这一处修复的轮次，按渲染顺序从 1 起（树上旧 → 新，历史里新 → 旧）。 */
+export function fixRowLabel(fix: any, nodeId: string, round: number): string {
+  const id = fixTargetId(fix, nodeId)
+  const name = id ? ' ' + chapterIdSuffix(id) : ''
+  return ((fix && fix.archived) ? '旧' : '') + '修复' + name + ' #' + (Number(round) || 1)
+}
+
+/* 修复链（`chapterAttemptChain` 里已按新 → 旧排好）的第 index 条是第几轮：
+ * 队尾是最早一轮，从 1 数。树上是旧 → 新，所以直接用 i + 1。 */
+export function fixRoundAt(index: number, total: number): number {
+  const n = Math.max(1, Math.floor(Number(total) || 0))
+  const i = Math.max(0, Math.floor(Number(index) || 0))
+  return Math.max(1, n - i)
+}
+
 /* 修复轮次按**时间**排出先后（同一处修多轮，旧 → 新）；并列时按 id 保底确定性。 */
 function sortFixesOldestFirst(items: any[]): any[] {
   return (items || []).slice().sort((a, b) => {
@@ -994,8 +1030,12 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
   // 锚点就是转换转录名（`chapterAnchor`）；没有锚点的老转录退回"同章同类"。
   const wantRole = self.chapterRole === 'checker' ? 'checker' : 'convert'
   let rows = members.filter((m: any) => (m.chapterRole === 'checker' ? 'checker' : 'convert') === wantRole)
+  // P59 补充：老核对转录**没有锚点**（P58 之前落盘的），它们同样是"这一章真的
+  // 核过"的记录。只按锚点全等过滤时，只要当前这条写下了锚点，那些老核对就一条
+  // 也匹配不上——看起来像"新的一次核对把旧的盖掉了"。所以没有锚点的成员一律保留
+  // （它们没得比），有锚点的仍必须与自己的锚点一致，锚在别处的核对不混进来。
   if (wantRole === 'checker' && self.chapterAnchor) {
-    rows = rows.filter((m: any) => m.chapterAnchor === self.chapterAnchor)
+    rows = rows.filter((m: any) => !m.chapterAnchor || m.chapterAnchor === self.chapterAnchor)
   }
   if (rows.length < 2) return null
   // 转换：各次尝试（新 → 旧）；核对：同一转换名下的各次核对（新 → 旧）。

@@ -611,3 +611,117 @@ func TestCheckerViewMirrorsChapterLayout(t *testing.T) {
 		}
 	}
 }
+
+// P59/P60 后续：递归子章节的核对只读视图。用户看到的现象是"子章节的核对读不到
+// parts/"。这里按**真实目录**铺一遍：子章节自己的临时工作区（
+// `work/temp/conv_<根>/work/_subdivision/<child>/node/work`，里面有它编译时读的
+// `parts/`）、提交契约要求的分片文件夹（`work:<子章>/`），再走一遍真正的提交
+// （placeChapterFiles）与真视图构建（节点内的 `checker-view`），逐条断言两种
+// 提交约定下 `parts/` 都能解析。
+func TestCheckerViewRecursiveChildHasPartsAliases(t *testing.T) {
+	proj := t.TempDir()
+	root, child := "chapter_03", "chapter_03_child_02"
+	node := filepath.Join(proj, "work", "temp", "conv_"+root, "work", "_subdivision", "child_02", "node")
+	work := filepath.Join(node, "work")
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(work, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 转换会话的工作区：它编译时 cwd = work，所以 `\input{parts/…}` 读的是
+	// 工作区根下的 parts/。
+	write(filepath.Join("parts", "x.tex"), "part x\n")
+	write(filepath.Join("parts", "sub", "y.tex"), "part y\n")
+	// 整合过的主 .tex：递归/整合节点交出来的布局就是 `\input{parts/…}`。
+	write(child+".tex", "\\section{Child}\n\\input{parts/x.tex}\n\\input{parts/sub/y.tex}\n")
+	// 提交契约要的分片文件夹是 `work:<子章>/`——模型把它要交的分片放这里。
+	write(filepath.Join(child, "parts", "x.tex"), "part x\n")
+	write(filepath.Join(child, "parts", "sub", "y.tex"), "part y\n")
+
+	result := filepath.Join(node, "result")
+	if _, err := placeChapterFiles(work, result, child); err != nil {
+		t.Fatalf("提交两路径失败: %v", err)
+	}
+	// 子章节的 md 在 `_subdivision/<child>/input/chapter.md`（不在
+	// `<proj>/chapters/`）——这正是"按 chapPath 往上两级猜项目根"会猜错的地方。
+	inputDir := filepath.Join(node, "..", "input")
+	if err := os.MkdirAll(inputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	md := filepath.Join(inputDir, "chapter.md")
+	if err := os.WriteFile(md, []byte("# child\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 项目级插图：子章节的 .tex 会 `\input{figures/motif_…}`（工作区与成书树都
+	// 能解析），核对视图同样要挂上，否则又被报成"插图被漏掉"。
+	if err := os.MkdirAll(filepath.Join(proj, "source", "figures"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "source", "figures", "motif_bb.tex"), []byte("fig\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	view := ensureCheckerViewAt(proj, filepath.Join(node, "checker-view"), child, md,
+		filepath.Join(result, child+".tex"), filepath.Join(result, child))
+	if view == "" {
+		t.Fatal("视图没建出来")
+	}
+	for _, rel := range []string{
+		child + ".md", child + ".tex",
+		"parts/x.tex", "parts/sub/y.tex", // `\input{parts/…}`（T186 的 PARTS_DIR）
+		child + "/parts/x.tex", // 提交布局里的 `\input{<章>/…}`
+		"figures/motif_bb.tex", // 项目级插图（以前子章节挂不上）
+	} {
+		if _, err := os.Stat(filepath.Join(view, rel)); err != nil {
+			t.Errorf("子章节核对视图里缺 %s: %v", rel, err)
+		}
+	}
+}
+
+// 反面对照（这条也是"核对读不到 parts/"的真实来源之一）：分片只留在**工作区**
+// 根下的 `parts/`、没有进提交的分片文件夹时，只读视图照实映出提交内容——`parts/`
+// 在、但里面是空的。核对判的是提交产物，工作区里的 `parts/` 不会被偷渡进视图
+// （模型本地编译能过，是因为编译的 cwd 就是工作区根）。这才是需要修转换侧的地方，
+// 不是视图把文件藏起来了。
+func TestCheckerViewDoesNotLeakWorkTreeParts(t *testing.T) {
+	proj := t.TempDir()
+	root, child := "chapter_03", "chapter_03_child_03"
+	node := filepath.Join(proj, "work", "temp", "conv_"+root, "work", "_subdivision", "child_03", "node")
+	work := filepath.Join(node, "work")
+	if err := os.MkdirAll(filepath.Join(work, "parts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "parts", "z.tex"), []byte("z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, child+".tex"), []byte("\\input{parts/z.tex}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 提交的分片文件夹存在但是空的（"create it even when empty"）。
+	if err := os.MkdirAll(filepath.Join(work, child), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result := filepath.Join(node, "result")
+	if _, err := placeChapterFiles(work, result, child); err != nil {
+		t.Fatalf("提交两路径失败: %v", err)
+	}
+	view := ensureCheckerViewAt(proj, filepath.Join(node, "checker-view"), child, "",
+		filepath.Join(result, child+".tex"), filepath.Join(result, child))
+	if view == "" {
+		t.Fatal("视图没建出来")
+	}
+	if _, err := os.Stat(filepath.Join(view, "parts")); err != nil {
+		t.Fatalf("视图必须保留 parts/ 别名（即使提交的是空文件夹）: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(view, "parts", "z.tex")); err == nil {
+		t.Fatal("工作区里的 parts/ 不该被偷渡进只读视图：核对只能看到提交产物")
+	}
+	if _, err := os.Stat(filepath.Join(work, "parts", "z.tex")); err != nil {
+		t.Fatalf("工作区文件不该被动过: %v", err)
+	}
+}

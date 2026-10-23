@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { state } from '../state'
-import { chapterActivityLabel, chapterNodeKey, chapterWantOpen, fixTranscriptTag, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
+import { chapterActivityLabel, chapterNodeKey, chapterWantOpen, fixRowLabel, fixTargetId, fixTranscriptTag, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
 import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
 import type { ChapterTreeNode } from '../legacy/sidebar'
@@ -57,6 +57,15 @@ function hasBody(node: ChapterTreeNode): boolean {
  */
 function fixStateText(session: any): string {
   return session && session.live ? '运行中' : ''
+}
+
+/* 转录名里的 `.tryN` 只有当它**不是**这一轮时才有信息量：轮次已经写在
+ * 「修复 child_02 #1」里了，再挂一个 `.try1` 只是把同一个数字写两遍。 */
+function fixTryTag(session: any, round: number): string {
+  const tag = fixTranscriptTag(session)
+  const m = /^\.try(\d+)$/.exec(tag)
+  if (m && Number(m[1]) === (Number(round) || 1)) return ''
+  return tag
 }
 
 /* 展开/收起只切自己这一棵，不选中、不影响任何其它节点。 */
@@ -198,6 +207,8 @@ function nodeTitle(node: ChapterTreeNode): string {
           <button class="chapter-info" type="button" title="打开核对会话详情" @click="emit('info', node.checker)">ⓘ</button>
         </div>
         <!-- P60：修复会话子行，紧挨着核对行（它修的就是这一行选中的那份转换产物）。
+             标签写清**修的是哪一章的第几轮**（`修复 child_02 #1`）——同一行下面
+             可能挂着不同子章节的修复，只写「修复 N」看不出归属。
              没有修复的节点这里一条也不渲染——不留占位、不撑高度。 -->
         <div
           v-for="(fx, i) in node.fixes"
@@ -213,8 +224,8 @@ function nodeTitle(node: ChapterTreeNode): string {
             :title="sessionTip(fx)"
             @click="emit('select', fx)"
           >
-            <span class="fix-marker">修复 {{ i + 1 }}</span>
-            <span v-if="fixTranscriptTag(fx)" class="fix-try">{{ fixTranscriptTag(fx) }}</span>
+            <span class="fix-marker" :title="'修复会话针对的章节：' + (fixTargetId(fx, node.id) || '—')">{{ fixRowLabel(fx, node.id, i + 1) }}</span>
+            <span v-if="fixTryTag(fx, i + 1)" class="fix-try">{{ fixTryTag(fx, i + 1) }}</span>
             <span v-if="fixStateText(fx)" class="chapter-state" :class="stateTone(fixStateText(fx))">{{ fixStateText(fx) }}</span>
             <span v-if="fx.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
           </button>

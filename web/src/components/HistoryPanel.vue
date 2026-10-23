@@ -5,7 +5,7 @@
 // 排序与侧栏链一致（sortChainMembers：新 → 旧）；点行切会话（selectSession）。
 import { computed, ref } from 'vue'
 import { state, relTime } from '../state'
-import { chainOfSession, chainMemberTag, plainTitle, sessionTitleOf } from '../legacy/sidebar'
+import { chainOfSession, chainMemberTag, chapterIdSuffix, fixRoundAt, fixRowLabel, fixTargetId, plainTitle, sessionTitleOf } from '../legacy/sidebar'
 import { dropSession, refreshIndex, selectSession } from '../data'
 import { canDropOf } from '../legacy/actions'
 import { checkerRounds } from '../legacy/rounds'
@@ -32,6 +32,43 @@ function endStateCls(s: any): string {
   if (s.endState === 'done') return 'done'
   if (s.endState === 'error') return 'error'
   return 'pend'
+}
+
+/* P60 补充：修复链里每一行都要能对上"这是哪一章的第几轮"——只在标题里写章节名
+ * 会被省略号截掉，而且同一处修复的几轮标题一模一样。链是同一锚点下的修复（新 →
+ * 旧），队尾是最早一轮；目标章节能从任一成员的章节身份取到（老转录没有，就用
+ * 同链里别人那份），行标签按 `修复 child_02 #1` 的同一口径生成。 */
+const fixTarget = computed(() => {
+  for (const s of (members.value || [])) {
+    const id = fixTargetId(s)
+    if (id) return id
+  }
+  return ''
+})
+
+function fixRoundOf(index: number): number {
+  return fixRoundAt(index, (members.value || []).length)
+}
+
+/* 行首小标签：修复链换成「章节后缀 #轮次」（归档前缀照旧），其余链不变。 */
+function chainTag(s: any, index: number): string {
+  if (!fixChain.value) return chainMemberTag(s)
+  const round = fixRoundOf(index)
+  const id = fixTargetId(s, fixTarget.value)
+  return ((s && s.archived) ? '旧' : '') + (id ? chapterIdSuffix(id) : '修复') + ' #' + round
+}
+
+function chainTagTip(s: any, index: number): string {
+  if (!fixChain.value) return chainMemberTag(s)
+  const id = fixTargetId(s, fixTarget.value)
+  return '这是 ' + (id || '这一章') + ' 的第 ' + fixRoundOf(index) + ' 轮修复（同一处、新 → 旧）'
+}
+
+/* 悬停说明里点明归属：修复行与它上面那几行转换/核对不是同一件事的第几次，
+ * 而是"另一处/另一轮修复"。 */
+function rowTitle(s: any, index: number): string {
+  if (!fixChain.value) return s.id
+  return fixRowLabel(s, fixTarget.value, fixRoundOf(index)) + '\n' + s.id
 }
 
 function onRowClick(s: any) {
@@ -154,7 +191,7 @@ function doDrop() {
     <div v-if="!members" class="history-empty">当前会话不属于任何调用链 / 重试链</div>
     <div v-else class="history-list">
       <div class="history-head">
-        <template v-if="fixChain">同一处的修复轮次（{{ members.length }}，新 → 旧）</template>
+        <template v-if="fixChain">同一处的修复轮次（<span class="history-fix-target" title="这条修复链修的是哪一章">{{ fixTarget || '章节未知' }}</span>，{{ members.length }} 轮，新 → 旧）</template>
         <template v-else-if="chapterChain">这一章的全部会话（{{ members.length }}，每个转换后面跟着它名下的核对，新 → 旧）</template>
         <template v-else>这一章的全部会话（{{ members.length }}，转换与核对都在这里，新 → 旧）</template>
         <span v-if="hasArchived" class="history-old-note" title="带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话">· 带「旧」的是更早一次父尝试（已作废）留下的</span>
@@ -183,18 +220,18 @@ function doDrop() {
         </button>
       </div>
       <div
-        v-for="s in members"
+        v-for="(s, i) in members"
         :key="s.id"
         class="history-row"
         :class="{ active: isCurrent(s) }"
         role="button"
         tabindex="0"
-        :title="s.id"
+        :title="rowTitle(s, i)"
         @click="onRowClick(s)"
         @keydown.enter="onRowClick(s)"
       >
         <span v-if="roleLabel(s)" class="history-role">{{ roleLabel(s) }}</span>
-        <span class="row-chip chain-tag history-tag">{{ chainMemberTag(s) }}</span>
+        <span class="row-chip chain-tag history-tag" :title="chainTagTip(s, i)">{{ chainTag(s, i) }}</span>
         <InlineMD tag="span" class="history-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
         <span v-if="isCurrent(s)" class="history-cur">正在看</span>
         <span v-if="isNewestRow(s)" class="history-latest">最新</span>
@@ -219,6 +256,9 @@ function doDrop() {
 
 <style scoped>
 .history-old-note { color: var(--caption); font-weight: 400; }
+
+/* P60 补充：修复链表头点名目标章节——行里的「修复 child_02 #1」与树上同一口径。 */
+.history-fix-target { color: var(--text); font-weight: 500; }
 
 .history-role { flex: none; font-size: 11px; color: var(--caption); min-width: 22px; }
 

@@ -1273,3 +1273,18 @@ user 轮
   改（未做，刻意留下）：`book.go` / `retry.go` 的升级链**不动**——4 次都拿不到结论时整章仍然作废重来，这一批只降低"没结论就被判整章重来"的概率，不重设计升级路径。
   验证：`TestCheckerNoVerdictRetriesFourAttempts`（只回正文 → 恰好 4 次会话：8 条请求 = 每轮首请求 + 提交提醒、4 条 `checker_target` 锚点，返回新文案前缀）、`TestCheckerNoVerdictExtraAttemptCanPass`（前两次只回正文、第 3 次提交 `pass` → 通过，3 条锚点）、`TestCheckerWithoutVerdictFailsAfterFourAttempts`（退化响应连跑 4 轮、请求数 8–12）、`TestCheckerNoVerdict` 补新文案一条；`go test ./internal/latex/`、`go test ./internal/...` 全绿。
   已知边界：P58 复盘会话判 `fail`/`truncate` 时会直接返回（`checker 复盘判定会话无法挽救…` / 已排队续跑），走不到第 4 次；且这两句不在 `checkerNoVerdict()` 的识别范围里。本轮不动它（动它就等于改升级链，见上），观察后再定。
+- T218 核对历史里老转录被新的一次"盖掉"（P59 遗留）。
+  现象：同一章核过三次，点最新那条核对进「历史」只看到两条甚至一条；老的那几次核对明明还在磁盘上，看起来像被最新一次覆盖了。
+  根因：`chapterAttemptChain` 的核对分支只保留 `m.chapterAnchor === self.chapterAnchor` 的成员。锚点是 P58 起才写进转录的，更早落盘的老核对转录 `chapterAnchor` 为空，一次都匹配不上——于是"当前这条有锚点、老转录没有"时老转录全部消失。
+  改：成员侧放宽成 `!m.chapterAnchor || m.chapterAnchor === self.chapterAnchor`（没有锚点就没得比，一律保留；有锚点的仍必须与自己的锚点一致）。`self.chapterAnchor` 为空时仍不做过滤，老会话的行为一字不差；排序仍是新 → 旧、最少两条才出「历史」页签的规矩不变。锚在另一次转换上的核对照旧排除（结论不能被配到别的产物上）。
+  验证：`web/tests/chapter-tree.spec.ts` 新增两条——两次有锚点 + 一条没有锚点的老校对时三条都在（从最新那条与从老那条点开结果相同，新 → 旧），锚在 `convert_chapter_042.try2` 的核对在钉住 `convert_chapter_042` 那条时仍被排除；`npx vitest run` 全绿。
+- T219 修复子行只写「修复 N」，看不出修的是哪一章、第几轮（P60 遗留）。
+  现象：父章节那一行下面可能挂着不同子章节的修复（同一处锚点），行上只有「修复 1」「修复 2」，要挨个点开才知道各自修的是谁；历史页的修复链条目同样只有轮数、没有章节，和上面转换/核对行对不上。
+  改：新增三个纯函数（`chapterIdSuffix` / `fixTargetId` / `fixRowLabel`）作为标签的唯一来源——章节 ID 只取本层后缀（`chapter_042_child_02` → `child_02`，嵌套保留 `child_01_child_02`，顶层照写自己的 ID），修复归属优先取转录自带的 `chapterId`（P60 第四步），老转录退回它挂靠那一行的章节；轮次按渲染顺序从 1 数（树上旧 → 新用 `i + 1`，历史新 → 旧用 `fixRoundAt(index, total)`），归档前缀「旧」照旧。章节树行变成 `修复 child_02 #1`（行高仍走 `var(--row-h)`，不写死像素），`.tryN` 只在它不等于轮次时才另挂一枚；历史页表头写出目标章节 ID，每行小标签换成「章节后缀 #轮次」、悬浮说明点名章节与轮次。
+  验证：`web/tests/chapter-tree.spec.ts` 新增 5 条（后缀三种形态、标签三种形态含归档与老转录兜底、轮次换算、子章节行两轮修复分别 `#1`/`#2` 且都点名 `child_02`、修复链表头取到目标章节且行按新 → 旧标 `#2`/`#1`）；`npx vitest run` 全绿，`vite build` 重建 dist。
+- T220 递归子章节的核对只读视图缺项目级插图（T186 遗留）。
+  现象：用了 `\input{figures/…}` / `\includegraphics{images/…}` 的子章节，转换工作区里编译正常、成书树里也能解析，核对却把这些插图报成缺失，逼着转换会话改坏本来正确的内容。
+  根因：`ensureCheckerViewAt` 用 `filepath.Dir(filepath.Dir(chapPath))` 猜项目根——顶层章节的 md 在 `<proj>/chapters/` 下正好猜对，递归子章节的 md 在 `<节点>/../input/chapter.md`，猜出来的是 `_subdivision/child_NN`，那里没有 `source/figures|images`，于是项目级资源一个都挂不上。
+  改：项目根由调用方显式传入（`ensureCheckerView` 与 `checkChapterAt` 本来就有它），`linkCheckerAssets(dir, proj)` 对子章节与顶层用同一个来源。**`parts/` 别名本身没有丢**，这一批把它的正确性也钉住了：子章节提交进 `work:<子章>/` 的分片，在视图里以 `parts/…` 与 `<子章>/…` 两种写法都能解析；`parts/` 仍是 `PARTS_DIR`。
+  未改（刻意）：分片只留在**工作区根** `parts/`、没有提交进 `work:<子章>/` 时，视图里的 `parts/` 为空——视图照实映出提交内容，工作区里的文件不会被偷渡进只读视图（核对判的是提交产物）。这类"本地能编译、提交里没有"的布局属于转换侧，需从提示词/提交契约那条线处理，不在视图里补。
+  验证：`internal/latex/checker_test.go` 新增两条——`TestCheckerViewRecursiveChildHasPartsAliases` 按真实目录铺出子章节的临时工作区（`work/temp/conv_<根>/work/_subdivision/<child>/node/work`，含 `parts/`）、提交契约的分片文件夹与整合后的 `.tex`，走真实 `placeChapterFiles` + `ensureCheckerViewAt`，逐条断言 `parts/x.tex`、`parts/sub/y.tex`、`<子章>/parts/x.tex`、`figures/motif_bb.tex`（项目级）都解析得到；`TestCheckerViewDoesNotLeakWorkTreeParts` 钉住反面对照（`parts/` 别名在、工作区里的分片不在，且工作区文件没被动过）。`go test ./internal/... -count=1` 全绿。

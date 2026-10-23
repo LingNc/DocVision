@@ -7350,6 +7350,24 @@
     const m = /\.try(\d+)$/.exec(convertBasename(s));
     return m ? ".try" + m[1] : "";
   }
+  function chapterIdSuffix(id) {
+    const s = String(id || "");
+    const m = /^chapter[_-]?\d+_(.+)$/.exec(s);
+    return m && m[1] ? m[1] : s;
+  }
+  function fixTargetId(fix, nodeId = "") {
+    return String(fix && fix.chapterId || nodeId || "");
+  }
+  function fixRowLabel(fix, nodeId, round) {
+    const id = fixTargetId(fix, nodeId);
+    const name = id ? " " + chapterIdSuffix(id) : "";
+    return (fix && fix.archived ? "旧" : "") + "修复" + name + " #" + (Number(round) || 1);
+  }
+  function fixRoundAt(index, total) {
+    const n = Math.max(1, Math.floor(Number(total) || 0));
+    const i = Math.max(0, Math.floor(Number(index) || 0));
+    return Math.max(1, n - i);
+  }
   function sortFixesOldestFirst(items) {
     return (items || []).slice().sort((a, b) => {
       const d = mtimeMs(a) - mtimeMs(b);
@@ -7712,7 +7730,7 @@
     const wantRole = self2.chapterRole === "checker" ? "checker" : "convert";
     let rows = members.filter((m) => (m.chapterRole === "checker" ? "checker" : "convert") === wantRole);
     if (wantRole === "checker" && self2.chapterAnchor) {
-      rows = rows.filter((m) => m.chapterAnchor === self2.chapterAnchor);
+      rows = rows.filter((m) => !m.chapterAnchor || m.chapterAnchor === self2.chapterAnchor);
     }
     if (rows.length < 2) return null;
     return wantRole === "checker" ? rows.slice().sort((a, b) => mtimeMs(b) - mtimeMs(a)) : sortChainMembers(rows);
@@ -9393,7 +9411,7 @@
   const _hoisted_13$5 = ["title", "onClick"];
   const _hoisted_14$5 = ["onClick"];
   const _hoisted_15$5 = ["data-id", "title", "onClick"];
-  const _hoisted_16$5 = { class: "fix-marker" };
+  const _hoisted_16$5 = ["title"];
   const _hoisted_17$5 = {
     key: 0,
     class: "fix-try"
@@ -9433,6 +9451,12 @@
       }
       function fixStateText(session) {
         return session && session.live ? "运行中" : "";
+      }
+      function fixTryTag(session, round) {
+        const tag = fixTranscriptTag(session);
+        const m = /^\.try(\d+)$/.exec(tag);
+        if (m && Number(m[1]) === (Number(round) || 1)) return "";
+        return tag;
       }
       function toggle(node, ev) {
         ev.stopPropagation();
@@ -9587,8 +9611,11 @@
                       title: unref(sessionTip)(fx),
                       onClick: ($event) => emit2("select", fx)
                     }, [
-                      createBaseVNode("span", _hoisted_16$5, "修复 " + toDisplayString(i + 1), 1),
-                      unref(fixTranscriptTag)(fx) ? (openBlock(), createElementBlock("span", _hoisted_17$5, toDisplayString(unref(fixTranscriptTag)(fx)), 1)) : createCommentVNode("", true),
+                      createBaseVNode("span", {
+                        class: "fix-marker",
+                        title: "修复会话针对的章节：" + (unref(fixTargetId)(fx, node.id) || "—")
+                      }, toDisplayString(unref(fixRowLabel)(fx, node.id, i + 1)), 9, _hoisted_16$5),
+                      fixTryTag(fx, i + 1) ? (openBlock(), createElementBlock("span", _hoisted_17$5, toDisplayString(fixTryTag(fx, i + 1)), 1)) : createCommentVNode("", true),
                       fixStateText(fx) ? (openBlock(), createElementBlock("span", {
                         key: 1,
                         class: normalizeClass(["chapter-state", stateTone(fixStateText(fx))])
@@ -9619,7 +9646,7 @@
     }
     return target2;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-b01c8e57"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-d9fec8f3"]]);
   const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"
@@ -9666,7 +9693,7 @@
     key: 1,
     class: "i2t-meta-esc"
   };
-  const _hoisted_23$3 = {
+  const _hoisted_23$4 = {
     key: 2,
     class: "i2t-meta-run"
   };
@@ -10149,7 +10176,7 @@
                       createBaseVNode("span", _hoisted_20$4, "完成 " + toDisplayString(b.done), 1),
                       b.fixed ? (openBlock(), createElementBlock("span", _hoisted_21$4, "修复 " + toDisplayString(b.fixed), 1)) : createCommentVNode("", true),
                       b.escalated ? (openBlock(), createElementBlock("span", _hoisted_22$4, "升级 " + toDisplayString(b.escalated), 1)) : createCommentVNode("", true),
-                      b.running ? (openBlock(), createElementBlock("span", _hoisted_23$3, "进行中 " + toDisplayString(b.running), 1)) : createCommentVNode("", true),
+                      b.running ? (openBlock(), createElementBlock("span", _hoisted_23$4, "进行中 " + toDisplayString(b.running), 1)) : createCommentVNode("", true),
                       b.pending ? (openBlock(), createElementBlock("span", _hoisted_24$3, "待处理 " + toDisplayString(b.pending), 1)) : createCommentVNode("", true)
                     ])
                   ]);
@@ -12377,7 +12404,7 @@
     key: 0,
     class: "traj-detail"
   };
-  const _hoisted_23$2 = { colspan: 7 };
+  const _hoisted_23$3 = { colspan: 7 };
   const _hoisted_24$2 = { class: "traj-detail-inner" };
   const _hoisted_25$2 = { class: "traj-detail-title" };
   const _hoisted_26$2 = {
@@ -12547,7 +12574,7 @@
                       createBaseVNode("td", _hoisted_21$3, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
                     ], 10, _hoisted_12$3),
                     unref(state).trajOpen[row.rid] ? (openBlock(), createElementBlock("tr", _hoisted_22$3, [
-                      createBaseVNode("td", _hoisted_23$2, [
+                      createBaseVNode("td", _hoisted_23$3, [
                         createBaseVNode("div", _hoisted_24$2, [
                           (openBlock(true), createElementBlock(Fragment, null, renderList(row.detail || {}, (text, key) => {
                             return openBlock(), createElementBlock("div", { key }, [
@@ -12777,7 +12804,7 @@
     open: ""
   };
   const _hoisted_22$2 = { class: "schema-head" };
-  const _hoisted_23$1 = { class: "schema-meta" };
+  const _hoisted_23$2 = { class: "schema-meta" };
   const _hoisted_24$1 = { class: "stats-scroll" };
   const _hoisted_25$1 = { class: "stats-table" };
   const _hoisted_26$1 = ["title"];
@@ -12963,7 +12990,7 @@
               createBaseVNode("details", _hoisted_21$2, [
                 createBaseVNode("summary", _hoisted_22$2, [
                   _cache[1] || (_cache[1] = createBaseVNode("span", { class: "schema-name" }, "每次请求明细", -1)),
-                  createBaseVNode("span", _hoisted_23$1, toDisplayString(stats.value.rowCount) + " 行", 1)
+                  createBaseVNode("span", _hoisted_23$2, toDisplayString(stats.value.rowCount) + " 行", 1)
                 ]),
                 createBaseVNode("div", _hoisted_24$1, [
                   createBaseVNode("table", _hoisted_25$1, [
@@ -13170,51 +13197,55 @@
   };
   const _hoisted_3$3 = { class: "history-head" };
   const _hoisted_4$3 = {
+    class: "history-fix-target",
+    title: "这条修复链修的是哪一章"
+  };
+  const _hoisted_5$3 = {
     key: 3,
     class: "history-old-note",
     title: "带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话"
   };
-  const _hoisted_5$3 = {
+  const _hoisted_6$2 = {
     key: 0,
     class: "history-confirm",
     role: "alert"
   };
-  const _hoisted_6$2 = {
+  const _hoisted_7$1 = {
     key: 1,
     class: "history-note"
   };
-  const _hoisted_7$1 = {
+  const _hoisted_8$1 = {
     key: 2,
     class: "history-rounds"
   };
-  const _hoisted_8$1 = { class: "history-rounds-head" };
-  const _hoisted_9$1 = ["title", "onClick"];
-  const _hoisted_10$1 = { class: "row-chip chain-tag history-tag" };
-  const _hoisted_11$1 = { class: "history-round-from" };
-  const _hoisted_12$1 = ["title", "onClick", "onKeydown"];
-  const _hoisted_13$1 = {
+  const _hoisted_9$1 = { class: "history-rounds-head" };
+  const _hoisted_10$1 = ["title", "onClick"];
+  const _hoisted_11$1 = { class: "row-chip chain-tag history-tag" };
+  const _hoisted_12$1 = { class: "history-round-from" };
+  const _hoisted_13$1 = ["title", "onClick", "onKeydown"];
+  const _hoisted_14$1 = {
     key: 0,
     class: "history-role"
   };
-  const _hoisted_14$1 = { class: "row-chip chain-tag history-tag" };
-  const _hoisted_15$1 = {
+  const _hoisted_15$1 = ["title"];
+  const _hoisted_16$1 = {
     key: 1,
     class: "history-cur"
   };
-  const _hoisted_16$1 = {
+  const _hoisted_17$1 = {
     key: 2,
     class: "history-latest"
   };
-  const _hoisted_17$1 = {
+  const _hoisted_18$1 = {
     key: 3,
     class: "history-arch",
     title: "这份转录在 work/attempts 归档目录里（工作树那份已被搬走），不是当前工作区"
   };
-  const _hoisted_18$1 = { class: "history-time" };
-  const _hoisted_19$1 = { class: "history-actions" };
-  const _hoisted_20$1 = ["onClick"];
-  const _hoisted_21$1 = ["title", "onClick"];
-  const _hoisted_22$1 = ["onClick"];
+  const _hoisted_19$1 = { class: "history-time" };
+  const _hoisted_20$1 = { class: "history-actions" };
+  const _hoisted_21$1 = ["onClick"];
+  const _hoisted_22$1 = ["title", "onClick"];
+  const _hoisted_23$1 = ["onClick"];
   const _sfc_main$3 = /* @__PURE__ */ defineComponent({
     __name: "HistoryPanel",
     setup(__props) {
@@ -13234,6 +13265,31 @@
         if (s.endState === "done") return "done";
         if (s.endState === "error") return "error";
         return "pend";
+      }
+      const fixTarget = computed(() => {
+        for (const s of members.value || []) {
+          const id = fixTargetId(s);
+          if (id) return id;
+        }
+        return "";
+      });
+      function fixRoundOf(index) {
+        return fixRoundAt(index, (members.value || []).length);
+      }
+      function chainTag(s, index) {
+        if (!fixChain.value) return chainMemberTag(s);
+        const round = fixRoundOf(index);
+        const id = fixTargetId(s, fixTarget.value);
+        return (s && s.archived ? "旧" : "") + (id ? chapterIdSuffix(id) : "修复") + " #" + round;
+      }
+      function chainTagTip(s, index) {
+        if (!fixChain.value) return chainMemberTag(s);
+        const id = fixTargetId(s, fixTarget.value);
+        return "这是 " + (id || "这一章") + " 的第 " + fixRoundOf(index) + " 轮修复（同一处、新 → 旧）";
+      }
+      function rowTitle(s, index) {
+        if (!fixChain.value) return s.id;
+        return fixRowLabel(s, fixTarget.value, fixRoundOf(index)) + "\n" + s.id;
       }
       function onRowClick(s) {
         selectSession(s.id);
@@ -13312,15 +13368,17 @@
           !members.value ? (openBlock(), createElementBlock("div", _hoisted_1$3, "当前会话不属于任何调用链 / 重试链")) : (openBlock(), createElementBlock("div", _hoisted_2$3, [
             createBaseVNode("div", _hoisted_3$3, [
               fixChain.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
-                createTextVNode("同一处的修复轮次（" + toDisplayString(members.value.length) + "，新 → 旧）", 1)
+                _cache[1] || (_cache[1] = createTextVNode("同一处的修复轮次（", -1)),
+                createBaseVNode("span", _hoisted_4$3, toDisplayString(fixTarget.value || "章节未知"), 1),
+                createTextVNode("，" + toDisplayString(members.value.length) + " 轮，新 → 旧）", 1)
               ], 64)) : chapterChain.value ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                 createTextVNode("这一章的全部会话（" + toDisplayString(members.value.length) + "，每个转换后面跟着它名下的核对，新 → 旧）", 1)
               ], 64)) : (openBlock(), createElementBlock(Fragment, { key: 2 }, [
                 createTextVNode("这一章的全部会话（" + toDisplayString(members.value.length) + "，转换与核对都在这里，新 → 旧）", 1)
               ], 64)),
-              hasArchived.value ? (openBlock(), createElementBlock("span", _hoisted_4$3, "· 带「旧」的是更早一次父尝试（已作废）留下的")) : createCommentVNode("", true)
+              hasArchived.value ? (openBlock(), createElementBlock("span", _hoisted_5$3, "· 带「旧」的是更早一次父尝试（已作废）留下的")) : createCommentVNode("", true)
             ]),
-            dropAsk.value ? (openBlock(), createElementBlock("div", _hoisted_5$3, [
+            dropAsk.value ? (openBlock(), createElementBlock("div", _hoisted_6$2, [
               createBaseVNode("span", null, "删掉「" + toDisplayString(dropAsk.value.name) + "」这条记录？转录会从历史里消失，作废尝试的归档目录也会一起删。", 1),
               createBaseVNode("button", {
                 class: "history-act act-danger",
@@ -13333,9 +13391,9 @@
                 onClick: _cache[0] || (_cache[0] = ($event) => dropAsk.value = null)
               }, "取消")
             ])) : createCommentVNode("", true),
-            dropNote.value ? (openBlock(), createElementBlock("div", _hoisted_6$2, toDisplayString(dropNote.value), 1)) : createCommentVNode("", true),
-            rounds.value.length ? (openBlock(), createElementBlock("div", _hoisted_7$1, [
-              createBaseVNode("div", _hoisted_8$1, "这条核对转录里的 " + toDisplayString(rounds.value.length) + " 轮（新 → 旧同序，点一轮跳到那一轮的起点）", 1),
+            dropNote.value ? (openBlock(), createElementBlock("div", _hoisted_7$1, toDisplayString(dropNote.value), 1)) : createCommentVNode("", true),
+            rounds.value.length ? (openBlock(), createElementBlock("div", _hoisted_8$1, [
+              createBaseVNode("div", _hoisted_9$1, "这条核对转录里的 " + toDisplayString(rounds.value.length) + " 轮（新 → 旧同序，点一轮跳到那一轮的起点）", 1),
               (openBlock(true), createElementBlock(Fragment, null, renderList(rounds.value, (r) => {
                 return openBlock(), createElementBlock("button", {
                   key: "r" + r.round,
@@ -13344,70 +13402,73 @@
                   title: r.summary || "跳到第 " + r.round + " 轮",
                   onClick: ($event) => unref(jumpToLine)(r.from)
                 }, [
-                  createBaseVNode("span", _hoisted_10$1, "轮 " + toDisplayString(r.round), 1),
+                  createBaseVNode("span", _hoisted_11$1, "轮 " + toDisplayString(r.round), 1),
                   createBaseVNode("span", {
                     class: normalizeClass(["history-round-state", r.verdict === "pass" ? "ok" : r.verdict === "issues" ? "bad" : ""])
                   }, toDisplayString(r.verdict === "pass" ? "通过" : r.verdict === "issues" ? "拒绝 " + r.issues + " 条" : "无结论"), 3),
-                  createBaseVNode("span", _hoisted_11$1, "第 " + toDisplayString(r.from) + " 行 · " + toDisplayString(r.lines) + " 行", 1)
-                ], 8, _hoisted_9$1);
+                  createBaseVNode("span", _hoisted_12$1, "第 " + toDisplayString(r.from) + " 行 · " + toDisplayString(r.lines) + " 行", 1)
+                ], 8, _hoisted_10$1);
               }), 128))
             ])) : createCommentVNode("", true),
-            (openBlock(true), createElementBlock(Fragment, null, renderList(members.value, (s) => {
+            (openBlock(true), createElementBlock(Fragment, null, renderList(members.value, (s, i) => {
               return openBlock(), createElementBlock("div", {
                 key: s.id,
                 class: normalizeClass(["history-row", { active: isCurrent(s) }]),
                 role: "button",
                 tabindex: "0",
-                title: s.id,
+                title: rowTitle(s, i),
                 onClick: ($event) => onRowClick(s),
                 onKeydown: withKeys(($event) => onRowClick(s), ["enter"])
               }, [
-                roleLabel(s) ? (openBlock(), createElementBlock("span", _hoisted_13$1, toDisplayString(roleLabel(s)), 1)) : createCommentVNode("", true),
-                createBaseVNode("span", _hoisted_14$1, toDisplayString(unref(chainMemberTag)(s)), 1),
+                roleLabel(s) ? (openBlock(), createElementBlock("span", _hoisted_14$1, toDisplayString(roleLabel(s)), 1)) : createCommentVNode("", true),
+                createBaseVNode("span", {
+                  class: "row-chip chain-tag history-tag",
+                  title: chainTagTip(s, i)
+                }, toDisplayString(chainTag(s, i)), 9, _hoisted_15$1),
                 createVNode(_sfc_main$o, {
                   tag: "span",
                   class: "history-title",
                   text: unref(sessionTitleOf)(s),
                   plain: unref(plainTitle)(s)
                 }, null, 8, ["text", "plain"]),
-                isCurrent(s) ? (openBlock(), createElementBlock("span", _hoisted_15$1, "正在看")) : createCommentVNode("", true),
-                isNewestRow(s) ? (openBlock(), createElementBlock("span", _hoisted_16$1, "最新")) : createCommentVNode("", true),
-                s.archived ? (openBlock(), createElementBlock("span", _hoisted_17$1, "归档")) : createCommentVNode("", true),
+                isCurrent(s) ? (openBlock(), createElementBlock("span", _hoisted_16$1, "正在看")) : createCommentVNode("", true),
+                isNewestRow(s) ? (openBlock(), createElementBlock("span", _hoisted_17$1, "最新")) : createCommentVNode("", true),
+                s.archived ? (openBlock(), createElementBlock("span", _hoisted_18$1, "归档")) : createCommentVNode("", true),
                 createBaseVNode("span", {
                   class: normalizeClass(["history-state", endStateCls(s)])
                 }, toDisplayString(endStateText(s)), 3),
-                createBaseVNode("span", _hoisted_18$1, toDisplayString(unref(relTime)(s.mtime)), 1),
-                createBaseVNode("span", _hoisted_19$1, [
+                createBaseVNode("span", _hoisted_19$1, toDisplayString(unref(relTime)(s.mtime)), 1),
+                createBaseVNode("span", _hoisted_20$1, [
                   !isCurrent(s) ? (openBlock(), createElementBlock("button", {
                     key: 0,
                     class: "history-act",
                     type: "button",
                     title: "在中栏显示这条会话（只是切视图，不改流水线状态）",
                     onClick: withModifiers(($event) => onRowClick(s), ["stop"])
-                  }, "查看", 8, _hoisted_20$1)) : createCommentVNode("", true),
+                  }, "查看", 8, _hoisted_21$1)) : createCommentVNode("", true),
                   pairOf(s) && unref(state).current.id !== pairOf(s).id ? (openBlock(), createElementBlock("button", {
                     key: 1,
                     class: "history-act",
                     type: "button",
                     title: "切到同一轮（" + unref(chainMemberTag)(s) + "）的" + (s.chapterRole === "checker" ? "转换" : "核对") + "会话：" + pairOf(s).id,
                     onClick: withModifiers(($event) => onRowClick(pairOf(s)), ["stop"])
-                  }, toDisplayString(pairLabel(s)), 9, _hoisted_21$1)) : createCommentVNode("", true),
+                  }, toDisplayString(pairLabel(s)), 9, _hoisted_22$1)) : createCommentVNode("", true),
                   unref(canDropOf)(s) ? (openBlock(), createElementBlock("button", {
                     key: 2,
                     class: "history-act act-danger",
                     type: "button",
                     title: "删掉这条转录（作废尝试的归档一并删除）",
                     onClick: withModifiers(($event) => askDrop(s), ["stop"])
-                  }, "删除", 8, _hoisted_22$1)) : createCommentVNode("", true)
+                  }, "删除", 8, _hoisted_23$1)) : createCommentVNode("", true)
                 ])
-              ], 42, _hoisted_12$1);
+              ], 42, _hoisted_13$1);
             }), 128))
           ]))
         ], 2);
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-22dcdbe9"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-f21ee8fb"]]);
   const pending = /* @__PURE__ */ ref(null);
   const queued = /* @__PURE__ */ ref(null);
   const prevId = /* @__PURE__ */ ref("");
