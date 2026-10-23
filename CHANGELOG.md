@@ -188,6 +188,11 @@
 
 - **会话沙箱补上 PID 命名空间：模型再也不能 `kill` 掉宿主进程（T163）**：bwrap 沙箱原来只隔离文件（挂载表）与网络（`--unshare-net`），**与宿主共享 PID 命名空间**——实测一条章节转换会话在沙箱里 `ps` 看到宿主 DocVision 的 PID，先 `kill -STOP` 把整本书冻住一分多钟、再 `kill -9` 把进程打死，终端只留下「已杀死」，日志里没有任何错误行、内存也完全正常（这不是 OOM）。现在加 `--unshare-pid`（配 `--proc /proc`）：会话里的 `ps` 只看到自己这棵树，`kill` 对宿主进程无效。新增 `TestSandboxArgsUnsharePID`、`TestSandboxCannotSignalHostProcess`（真起沙箱验证看得见但杀不动）。另按用户要求把 `[mem]` 采样行全部降到 `Trace`——普通模式终端只留一行 `[book] 内存/被杀现场日志: <路径>`，低内存告警仍是 `WARNING`，`mem.log` 不受日志等级影响，`TestMemWatchQuietAtInfoLevel` 钉住这条。
 
+### Changed
+- **测试文件按主题分组重命名（P62 第二轮，行为不变）**：`internal/latex` 的 87 个测试文件里 26 个按主题加了前缀——`chapter_*`（章节流水线：划分、核对、重试、并发槽、覆盖率、问题库、规模）、`rescue_*`（复盘与修复线）、`tools_*`（工具、虚拟工作区、沙箱）、`style_*`（样式会话与样式试点）、`env_*`（文档索引、Python 环境）；`motif_*` 12 个本来就带前缀，另有 42 个与这六组无关（书级装配/编译/成本/提示词/进度等）一个都没动。`internal/sessionview` 的 8 条扫描器用例改成 `scan_*`。文件名不再带 `pNN`/`tNNN` 号（号留在文件正文注释里），文档与注释里的 29 处旧路径（文档 26 + 注释 3）同步改；包名、测试名、断言零改动。
+- **配置改写稿夹具入库（P62 第二轮）**：`internal/config/runconfig_rewrite_test.go` 一直读仓库外的 `temp/` 两份配置，别人的检出里没有就自动跳过——等于没人验。现在两份夹具随仓库放在 `internal/config/testdata/`（同名），测试读它们、三处"缺文件就跳过"删掉，于是这条承诺**总是**被验证。夹具里的本地网关地址换成 `api.example.com`、来源注明样例项目 `example_book`；`.gitignore` 的 `test*/` 曾把这个目录一起忽略，补了一行放行。
+- **章节树用例拆成三份（P62 第二轮）**：`web/tests/chapter-tree.spec.ts`（1002 行、79 条）按主题拆成 `chapter-tree.spec.ts`（树本身的规则：展开记忆、默认取最新一代、只钉住当前行、标题与状态文案、世代与归档）、`chapter-chain.spec.ts`（尝试链、角色分离、同号去重、老转录兜底）、`chapter-fix-rescue.spec.ts`（修复行、复盘行、标签与结局），转录 id 与会话夹具的构造器抽到 `web/tests/helpers/chapter.ts`。断言与用例标题逐行一致，`npx vitest run` 仍是 253 条全过。
+
 ## [v1.5.0-beta.9] - 2026-10-18
 
 ### Added
