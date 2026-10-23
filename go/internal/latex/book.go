@@ -1770,10 +1770,16 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		if runErr != nil {
 			runErr = r.rescueAfterError(sess, tid, "[convert]", base, "submit",
 				func() bool { return submit.Submitted },
-				rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath}, runErr)
+				rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath, Sess: sess}, runErr)
 		}
 		if runErr != nil {
-			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
+			// P61/C：复盘判 truncate 时状态已经写成 queued，队列马上接手重跑这
+			// 一章——失败终态不能把它盖回"会话错误"。
+			state := "error"
+			if r.rescueQueuedFor(trPath) {
+				state = "queued"
+			}
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
 			return fmt.Errorf("会话失败: %w", runErr)
 		}
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
@@ -1845,23 +1851,40 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		if runErr != nil {
 			runErr = r.rescueAfterError(sess, tid, "[convert]", base, "submit",
 				func() bool { return submit.Submitted },
-				rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath}, runErr)
+				rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath, Sess: sess}, runErr)
 		}
 		if runErr != nil {
-			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
+			// P61/C：同上面那条路径——复盘判 truncate 时状态已写成 queued，
+			// 不要用失败终态盖掉"等待并发槽"。
+			state := "error"
+			if r.rescueQueuedFor(trPath) {
+				state = "queued"
+			}
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
 			return fmt.Errorf("父章节整合会话失败: %w", runErr)
 		}
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
 	}
 	if splitTool.Requested {
 		if !submit.Submitted {
-			return fmt.Errorf("细分父章节整合会话未提交")
+			// P61/D：细分节点的**整合轮**没提交时也走同一条提醒/复盘链路。
+			// 以前这里直接判失败——嵌套子章节（它自己也细分过）于是既没有提醒
+			// 也没有复盘：外层只看到"子章节转换或 checker 失败"，那条转录里则
+			// 停在一句"整合完请 submit"上，谁也没再去推它。
+			if !func() bool {
+				convState(rowStateCheck)
+				defer convState(rowStateRunning)
+				return r.remindOrRescue(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted },
+					rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath, Sess: sess})
+			}() {
+				return fmt.Errorf("细分父章节整合会话未提交（已提醒两次）")
+			}
 		}
 	} else if !func() bool {
 		convState(rowStateCheck)
 		defer convState(rowStateRunning)
 		return r.remindOrRescue(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted },
-			rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath})
+			rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath, Sess: sess})
 	}() {
 		// 必须显式提交（用户口径）：提前收尾漏了 submit 就提醒续跑（最多两次），
 		// 仍不提交判失败——不再静默采纳"编译通过但没提交"的产物
@@ -2740,13 +2763,21 @@ func (r *Runner) remindOrRescue(sess *session.Session, tid int, tag, label, subm
 	}
 	hint := ""
 	for remind := 0; remind < 2 && !submitted(); remind++ {
-		if dec := r.maybeRescue(tid, tag, label, target); dec.Stop {
+		dec := r.maybeRescue(tid, tag, label, target)
+		if dec.Stop {
 			return false
-		} else if dec.Hint != "" {
+		}
+		if dec.Hint != "" {
 			hint = dec.Hint
 		}
 		r.log.LogWarning(tid, tag, label, "会话结束但未提交，发送提交提醒")
 		release := r.acquireChapterSlot()
+		// P61/C：复盘说了 retry 时目标状态已经先写成 queued（在排队之前），这里
+		// 拿到槽位再写成 running——与其它阶段的 queued → running 同一套规矩，
+		// 界面上不会出现"排着队"其实已经在跑的错位。
+		if dec.Verdict != "" {
+			r.markTargetActivity(tid, tag, label, target, "running", "提醒轮拿到并发槽")
+		}
 		_, runErr := sess.Run(session.RunOptions{UserText: submitReminderText(submitTool, hint)})
 		release()
 		if runErr != nil {
@@ -2775,33 +2806,75 @@ type rescueDecision struct {
 //
 // 关闭 `latex.rescue.enabled` 时它在第一行就返回空结论：不起会话、不写转录、
 // 不改任何后续动作。
+//
+// P61：复盘一开始就把目标转录的状态写成 `rescuing`（预览页显示「复盘处理中」）；
+// 结论是 retry/truncate 时，**先**把目标状态写成 `queued`、**再**让调用方排队
+// （C），界面上看到的是"等待并发槽"而不是刚才的报错。复盘自己拿不到结论时不复盘
+// 自己，也不再复盘这一条（B）——退回引入复盘之前的路径。
 func (r *Runner) maybeRescue(tid int, tag, label string, target rescueTarget) rescueDecision {
 	if target.Base == "" || !r.cfg.Latex.RescueEnabled() {
 		return rescueDecision{}
 	}
+	// B：复盘会话**自己**永远不进复盘。给它也挂一条复盘就是 rescue-of-rescue，
+	// 只会无限套娃（正常路径根本走不到这里）。
+	if isRescueTranscript(target.TrPath) {
+		r.log.LogWarning(tid, tag, label, "这条转录是复盘会话自己，不再复盘（禁止 rescue-of-rescue）")
+		return rescueDecision{}
+	}
 	// 预算按"本次尝试的转录"计数：新尝试 = 新转录 = 预算重置。
-	if !r.rescueBudget(target.Base + "/" + target.Role + "/" + filepath.Base(target.TrPath)) {
+	key := target.Base + "/" + target.Role + "/" + filepath.Base(target.TrPath)
+	if !r.rescueBudget(key) {
 		r.log.LogWarning(tid, tag, label, "复盘次数已用完，退回普通提醒")
 		return rescueDecision{}
 	}
+	// 上一轮的"已排队"标记不带进这一轮（P61/C）。
+	r.clearRescueQueued(target.TrPath)
+	// C(i)：先让界面看到"这条会话正在被复盘"，而不是一直挂着上一次的 error。
+	r.markTargetActivity(tid, tag, label, target, rescueActivityState, "复盘会话已启动")
 	v, ok := r.rescueReview(target, tid)
 	if !ok {
+		// B：复盘自己没拿到结论（报错/不提交，重来 2 次仍如此）——**这条目标
+		// 不再进复盘**，状态写回 error，行为退回引入复盘之前：照常提醒，仍不
+		// 提交就按失败收尾（caller 判）。
+		r.exhaustRescueBudget(key)
+		r.markTargetActivity(tid, tag, label, target, "error", "复盘没有给出结论，退回普通提醒")
 		return rescueDecision{}
 	}
 	dec := rescueDecision{Verdict: v.Verdict, From: v.From, Reason: v.Reason, Hint: v.Hint}
 	switch v.Verdict {
 	case "fail":
+		r.markTargetActivity(tid, tag, label, target, "error", "复盘判定这条会话无法挽救")
 		r.log.LogWarning(tid, tag, label, "复盘判定这条会话无法挽救，不再提醒："+v.Reason)
 		dec.Stop = true
 	case "truncate":
+		// C(ii)：状态先写成 queued（排队之前），再排进重试队列——顺序在日志里
+		// 能看到：先"目标会话状态 → queued"，再"已排队从第 N 条记录继续"。
+		r.markTargetActivity(tid, tag, label, target, "queued", "复盘判为截断：先写状态，再排队")
 		if err := r.rescueQueueTruncate(target, v.From); err != nil {
+			r.markTargetActivity(tid, tag, label, target, "error", "复盘要求截断但排队失败")
 			r.log.LogWarning(tid, tag, label, "复盘要求截断，但排队失败："+err.Error())
 			break
 		}
+		// 记一笔"已排队"：调用方的失败终态要写成 queued（见 Runner.rescueQueued）。
+		r.markRescueQueued(target.TrPath)
 		r.log.LogWarning(tid, tag, label, fmt.Sprintf("复盘判定会话已退化，已排队从第 %d 条记录继续：%s", v.From, v.Reason))
 		dec.Stop = true
+	case "retry":
+		// C(ii)：提醒轮马上要在同一个会话里重新排队，状态先写成 queued。
+		r.markTargetActivity(tid, tag, label, target, "queued", "复盘判为可重试：先写状态，交给提醒轮排队")
 	}
 	return dec
+}
+
+// exhaustRescueBudget 把这一条目标的复盘预算一次用光（P61/B）：复盘自己连续
+// 拿不到结论之后，同一条目标不再尝试复盘——否则两次提醒各起一轮（最多 3 次
+// 会话）就会变成 6 次模型调用白烧。
+func (r *Runner) exhaustRescueBudget(key string) {
+	rescueMu.Lock()
+	defer rescueMu.Unlock()
+	if r.cfg.Latex.RescueMaxPerAttempt() > rescueSeen[key] {
+		rescueSeen[key] = r.cfg.Latex.RescueMaxPerAttempt()
+	}
 }
 
 // rescueAfterError 是 P58 扩展的**报错终止**触发点：Run 返回了非致命错误时，

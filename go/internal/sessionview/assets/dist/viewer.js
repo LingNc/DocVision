@@ -7363,6 +7363,18 @@
     const name = id ? " " + chapterIdSuffix(id) : "";
     return (fix && fix.archived ? "旧" : "") + "修复" + name + " #" + (Number(round) || 1);
   }
+  function rescueAttemptOf(rescue) {
+    return Number(rescue && rescue.chapterAttempt) || 1;
+  }
+  function rescueRowLabel(rescue) {
+    return (rescue && rescue.archived ? "旧" : "") + "复盘 #" + rescueAttemptOf(rescue);
+  }
+  function rescueRowTitle(rescue) {
+    const tip = sessionTip(rescue);
+    const target2 = convertBasename(rescue).replace(/^rescue_/, "");
+    const line = "复盘对象：" + (target2 || "—");
+    return tip ? tip + "\n" + line : line;
+  }
   function fixRoundAt(index, total) {
     const n = Math.max(1, Math.floor(Number(total) || 0));
     const i = Math.max(0, Math.floor(Number(index) || 0));
@@ -7388,7 +7400,7 @@
     return outcome ? tip + "\n修复结果：" + outcome : tip;
   }
   function chapterNodeHasRows(node) {
-    return !!node.convert && !!node.checker || (node.children || []).length > 0 || (node.fixes || []).length > 0;
+    return !!node.convert && !!node.checker || (node.children || []).length > 0 || (node.fixes || []).length > 0 || (node.rescues || []).length > 0;
   }
   function sortFixesOldestFirst(items) {
     return (items || []).slice().sort((a, b) => {
@@ -7409,6 +7421,16 @@
       const anchor = String(f.chapterAnchor || "");
       if (anchor) return !!want && anchor === want;
       return String(f.chapterId || "") === node.id;
+    });
+    return sortFixesOldestFirst(hits);
+  }
+  function rescuesForNode(node, convert, parentArchived, pool) {
+    if (!pool || !pool.length) return [];
+    const gen = convert ? !!convert.archived : parentArchived;
+    const hits = pool.filter((r) => {
+      if (!r) return false;
+      if (gen !== null && !!r.archived !== gen) return false;
+      return String(r.chapterId || "") === node.id;
     });
     return sortFixesOldestFirst(hits);
   }
@@ -7470,8 +7492,10 @@
     const parents = {};
     const byRole = {};
     const fixPool = [];
+    const rescuePool = [];
     const nodeOfSession = {};
     let pinnedFix = null;
+    let pinnedRescue = null;
     let pinned = null;
     (items || []).forEach((session) => {
       if (!session) return;
@@ -7480,9 +7504,14 @@
         if (pinId && session.id === pinId) pinnedFix = session;
         return;
       }
+      if (session.chapterRole === "rescue") {
+        rescuePool.push(session);
+        if (pinId && session.id === pinId) pinnedRescue = session;
+        return;
+      }
       if (!session.chapterId) return;
       const id = String(session.chapterId);
-      const node = byId[id] || (byId[id] = { id, convert: null, checker: null, fixes: [], children: [] });
+      const node = byId[id] || (byId[id] = { id, convert: null, checker: null, fixes: [], rescues: [], children: [] });
       parents[id] = String(session.chapterParent || "");
       if (session.chapterRole !== "checker" && session.chapterRole !== "convert") return;
       const role = session.chapterRole === "checker" ? "checker" : "convert";
@@ -7511,6 +7540,15 @@
       const node = hit ? nodeOfSession[String(hit.id)] : null;
       if (node) pinned = { node, role: "convert", session: hit };
     }
+    if (!pinned && pinnedRescue) {
+      const node = byId[String(pinnedRescue.chapterId || "")];
+      if (node) {
+        const want = rescueAttemptOf(pinnedRescue);
+        const gen = !!pinnedRescue.archived;
+        const hit = (byRole[node.id + "|convert"] || []).filter((c) => (Number(c.chapterAttempt) || 1) === want && !!c.archived === gen);
+        if (hit.length) pinned = { node, role: "convert", session: newestOf(hit) };
+      }
+    }
     const pin = pinned;
     const resolve2 = (node, parentArchived) => {
       const here = pin && pin.node === node ? pin : null;
@@ -7533,6 +7571,7 @@
       }
       const archived = node.convert ? !!node.convert.archived : parentArchived;
       node.fixes = fixesForNode(node, node.convert, archived, fixPool);
+      node.rescues = rescuesForNode(node, node.convert, archived, rescuePool);
       node.children.forEach((child) => resolve2(child, archived));
     };
     roots.forEach((root) => resolve2(root, null));
@@ -7584,7 +7623,11 @@
     issues: "发现问题",
     error: "会话错误",
     // T171：转录里已有 run_end 却停在 running 的尝试被放弃了，不能再显示"运行中"。
-    interrupted: "已中断"
+    interrupted: "已中断",
+    // P61：复盘正在看这条转录（状态写在**目标**转录里，复盘一开始就写、结论出来
+    // 再改成 queued/error）。目标会话此刻并没有在跑，但要让人一眼看出"这条报错
+    // 的会话正在被复盘"，而不是以为它就这么定局了。
+    rescuing: "复盘处理中"
   };
   function chapterActivityLabel(state2, role = "convert", peerVerdict = "", live = false) {
     if (!state2) return live ? "运行中" : "";
@@ -7733,6 +7776,7 @@
     });
     if (!self2) return null;
     const proj = self2.project || projectOf(self2.id);
+    if (self2.chapterRole === "rescue") return null;
     if (self2.chapterRole === "fix") {
       const anchor = String(self2.chapterAnchor || "");
       if (!anchor) return null;
@@ -7744,7 +7788,7 @@
     const members = [];
     dedupeChapterAttempts(sessions || []).forEach((s) => {
       if (!s || !s.chapterId) return;
-      if (s.chapterRole === "fix") return;
+      if (s.chapterRole === "fix" || s.chapterRole === "rescue") return;
       if (s.chapterId !== self2.chapterId) return;
       if ((s.project || projectOf(s.id)) !== proj) return;
       members.push(s);
@@ -9443,6 +9487,13 @@
     class: "chapter-arch",
     title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
   };
+  const _hoisted_19$5 = ["data-id", "title", "onClick"];
+  const _hoisted_20$5 = { class: "rescue-marker" };
+  const _hoisted_21$5 = {
+    key: 1,
+    class: "chapter-arch",
+    title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
+  };
   const _sfc_main$n = /* @__PURE__ */ defineComponent({
     ...{ name: "ChapterSessionTree" },
     __name: "ChapterSessionTree",
@@ -9460,6 +9511,7 @@
         var _a, _b;
         if (((_a = node.convert) == null ? void 0 : _a.id) === currentId.value || ((_b = node.checker) == null ? void 0 : _b.id) === currentId.value) return true;
         if ((node.fixes || []).some((f) => f && f.id === currentId.value)) return true;
+        if ((node.rescues || []).some((r) => r && r.id === currentId.value)) return true;
         return node.children.some(nodeContainsCurrent);
       }
       function nodeKey(node) {
@@ -9472,6 +9524,9 @@
         return chapterNodeHasRows(node);
       }
       function fixStateText(session) {
+        return session && session.live ? "运行中" : "";
+      }
+      function rescueStateText(session) {
         return session && session.live ? "运行中" : "";
       }
       function fixTryTag(session, round) {
@@ -9646,8 +9701,30 @@
                     ], 8, _hoisted_15$5)
                   ], 2);
                 }), 128)) : createCommentVNode("", true),
+                (node.rescues || []).length ? (openBlock(true), createElementBlock(Fragment, { key: 2 }, renderList(node.rescues, (rs, i) => {
+                  return openBlock(), createElementBlock("div", {
+                    key: "rescue:" + rs.id + ":" + i,
+                    class: normalizeClass(["chapter-rescue", { active: currentId.value === rs.id }])
+                  }, [
+                    createBaseVNode("button", {
+                      class: "rescue-main session-row",
+                      type: "button",
+                      role: "treeitem",
+                      "data-id": rs.id,
+                      title: unref(rescueRowTitle)(rs),
+                      onClick: ($event) => emit2("select", rs)
+                    }, [
+                      createBaseVNode("span", _hoisted_20$5, toDisplayString(unref(rescueRowLabel)(rs)), 1),
+                      rescueStateText(rs) ? (openBlock(), createElementBlock("span", {
+                        key: 0,
+                        class: normalizeClass(["chapter-state", stateTone(rescueStateText(rs))])
+                      }, toDisplayString(rescueStateText(rs)), 3)) : createCommentVNode("", true),
+                      rs.archived ? (openBlock(), createElementBlock("span", _hoisted_21$5, "归档")) : createCommentVNode("", true)
+                    ], 8, _hoisted_19$5)
+                  ], 2);
+                }), 128)) : createCommentVNode("", true),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
-                  key: 2,
+                  key: 3,
                   nodes: node.children,
                   depth: (__props.depth || 0) + 1,
                   scope: __props.scope,
@@ -9668,7 +9745,7 @@
     }
     return target2;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-f7d7d990"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-a87b69c2"]]);
   const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"

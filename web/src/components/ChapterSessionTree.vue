@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { state } from '../state'
-import { chapterActivityLabel, chapterNodeHasRows, chapterNodeKey, chapterWantOpen, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
+import { chapterActivityLabel, chapterNodeHasRows, chapterNodeKey, chapterWantOpen, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, rescueRowLabel, rescueRowTitle, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
 import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
 import type { ChapterTreeNode } from '../legacy/sidebar'
@@ -30,6 +30,8 @@ function nodeContainsCurrent(node: ChapterTreeNode): boolean {
   if (node.convert?.id === currentId.value || node.checker?.id === currentId.value) return true
   // P60：看的是修复会话时，它所在的那一支也要自动露出（修复行是子行）。
   if ((node.fixes || []).some((f: any) => f && f.id === currentId.value)) return true
+  // P61：复盘行同理——点开一条复盘会话，它挂在的那一章要自己展开。
+  if ((node.rescues || []).some((r: any) => r && r.id === currentId.value)) return true
   return node.children.some(nodeContainsCurrent)
 }
 
@@ -58,6 +60,13 @@ function hasBody(node: ChapterTreeNode): boolean {
  * 也不在等核对，硬套会给出不相干的话。
  */
 function fixStateText(session: any): string {
+  return session && session.live ? '运行中' : ''
+}
+
+/* P61：复盘行只说"这条复盘会话还在写吗"。结论（retry/truncate/fail）不是会话
+ * 状态而是**目标**会话的状态（已经由目标行的 chapter_activity 显示成 queued /
+ * 复盘处理中 / 会话错误），在这里再抄一遍只会把两件事搅在一起。 */
+function rescueStateText(session: any): string {
   return session && session.live ? '运行中' : ''
 }
 
@@ -235,6 +244,31 @@ function nodeTitle(node: ChapterTreeNode): string {
             <span v-if="fx.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
           </button>
         </div>
+        <!-- P61：复盘会话**与核对行同层**（和修复行一样是这一行的直接子行，
+             左边距取同一个 26px）。标签是「复盘 #N」——N 是它复盘的那一条转换
+             的尝试号（转录名里的 `.tryN`），不是行序号；结局与"复盘的是哪一条
+             产物"在行 title 里。没有复盘的节点一条也不渲染，布局与加这条规则
+             之前逐字节相同。 -->
+        <div
+          v-if="(node.rescues || []).length"
+          v-for="(rs, i) in node.rescues"
+          :key="'rescue:' + rs.id + ':' + i"
+          class="chapter-rescue"
+          :class="{ active: currentId === rs.id }"
+        >
+          <button
+            class="rescue-main session-row"
+            type="button"
+            role="treeitem"
+            :data-id="rs.id"
+            :title="rescueRowTitle(rs)"
+            @click="emit('select', rs)"
+          >
+            <span class="rescue-marker">{{ rescueRowLabel(rs) }}</span>
+            <span v-if="rescueStateText(rs)" class="chapter-state" :class="stateTone(rescueStateText(rs))">{{ rescueStateText(rs) }}</span>
+            <span v-if="rs.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
+          </button>
+        </div>
         <ChapterSessionTree
           v-if="node.children.length"
           :nodes="node.children" :depth="(depth || 0) + 1" :scope="scope"
@@ -298,4 +332,11 @@ function nodeTitle(node: ChapterTreeNode): string {
 .chapter-fix.active { background: var(--active, #eaeef2); }
 .fix-marker { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px; }
 .fix-try { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px; }
+/* P61：复盘行与核对/修复行**同层同高**（同一处 26px 左边距、同一个 --row-h），
+ * 只把标记文案染成弱色，与"这只是一条附注"的语义一致。 */
+.chapter-rescue { display: flex; align-items: center; padding: 0 7px 0 26px; }
+.rescue-main { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px; }
+.chapter-rescue:hover { background: var(--hover, #f3f4f6); }
+.chapter-rescue.active { background: var(--active, #eaeef2); }
+.rescue-marker { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px; }
 </style>

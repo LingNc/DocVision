@@ -216,6 +216,11 @@ func TestDispatchFixWritesPlan(t *testing.T) {
 	if !strings.HasPrefix(res.Text, "FIX PLAN RECORDED") {
 		t.Fatalf("回执 = %q", res.Text)
 	}
+	// P61/A：只记计划的回执**不是**终态——这一轮还没接上 Runner，父会话可能还要
+	// 接着说；终态只给"同步跑完修复"的那条 FIX RESULT。
+	if res.Terminal {
+		t.Error("只记计划的回执不该标成 Terminal（会白掐掉一轮）")
+	}
 	path := fixPlanPath(proj, "chapter_014")
 	for _, want := range []string{path, "3 issue(s)", "2 child chapter(s)", "child_01 (2)", "child_03 (1)", "note 环境"} {
 		if !strings.Contains(res.Text, want) {

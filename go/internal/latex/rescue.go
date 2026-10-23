@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,17 @@ type rescueVerdict struct {
 	Hint    string `json:"hint"`
 }
 
+// rescueMaxReviewAttempts 是一次复盘最多起几条复盘会话（P61/B）：1 次正常 +
+// 2 次重来。复盘会话**自身**失败（报错终止或跑完也没有 submit）不算"这条目标
+// 没救了"——它只是一次没拿到结论的模型调用，换一条新会话再来即可；旧转录丢进
+// `work/sessions/.trash/`（复盘会话是可丢弃的）。
+const rescueMaxReviewAttempts = 3
+
+// rescueActivityState 是"复盘正在处理这条目标会话"的活动标记（P61/C）。
+// 它写进**目标**转录（不是复盘自己的），预览页据此把那条已经报错/没提交的
+// 会话显示成「复盘处理中」，而不是一直挂着上一次的状态。
+const rescueActivityState = "rescuing"
+
 // rescueTarget 说明"复盘哪条会话"。
 type rescueTarget struct {
 	ProjDir string // 项目根目录
@@ -43,6 +55,10 @@ type rescueTarget struct {
 	Role    string // convert | checker
 	TrPath  string // 目标会话的转录（绝对路径）
 	Label   string // 日志标签
+	// Sess 是目标会话本体（可空）。复盘要把「复盘处理中」「等待并发槽」这类
+	// 状态写回目标转录；有会话时走它自己的 transcript writer——那条 writer 记着
+	// 转录行数（P55 的工作区快照按行号索引），另开一个句柄追加一行会让行号错位。
+	Sess *session.Session
 	// Cause 非空表示这条会话是**报错终止**的（Run 返回了错误），调用方已经
 	// 排除致命错误（余额不足/无可用资源包）。它不影响会话、工具与结论处理，
 	// 只让复盘者的第一句话看到"停下来的原因是报错"而不是"模型自己收尾了"——
@@ -503,13 +519,41 @@ func (r *Runner) rescueModelName() string {
 	return name
 }
 
-// rescueReview 起一条只读复盘会话，返回它的结论。ok=false 表示没能拿到结论。
+// rescueReview 起只读复盘会话，返回它的结论。ok=false 表示没能拿到结论。
+//
+// P61/B：复盘会话自己也是会话——它可能报错终止，也可能跑完不调 submit（没有
+// 结论）。那种情况下**不复盘它自己**（rescue-of-rescue 一律禁止），而是把这条
+// 没结论的转录丢掉、重开一条新会话，最多 `rescueMaxReviewAttempts` 次：每次
+// 记一行警告，全都没结论时再记一行"放弃"。放弃不是"目标会话没救"——调用方
+// 退回引入复盘之前的路径（照常提醒，仍不提交就判失败）。
 func (r *Runner) rescueReview(t rescueTarget, tid int) (rescueVerdict, bool) {
 	lines, err := loadTranscriptLines(t.TrPath)
 	if err != nil || len(lines) == 0 {
 		r.log.LogWarning(tid, "[rescue]", t.Base, "读不到转录，跳过复盘:", err)
 		return rescueVerdict{}, false
 	}
+	for attempt := 1; attempt <= rescueMaxReviewAttempts; attempt++ {
+		v, ok := r.rescueReviewOnce(t, lines, tid)
+		if ok {
+			return v, true
+		}
+		trPath := r.rescueTranscriptPath(t)
+		if attempt >= rescueMaxReviewAttempts {
+			r.log.LogWarning(tid, "[rescue]", t.Base, fmt.Sprintf(
+				"复盘会话连续 %d 次没有给出结论，放弃复盘：目标按引入复盘之前的行为收尾（照常提醒/判失败）", attempt))
+			r.retireRescueTranscript(tid, t, trPath, "连续三次没有结论")
+			return rescueVerdict{}, false
+		}
+		r.log.LogWarning(tid, "[rescue]", t.Base, fmt.Sprintf(
+			"复盘会话第 %d 次没有给出结论：丢弃这条复盘转录，重开一条（第 %d/%d 次）",
+			attempt, attempt+1, rescueMaxReviewAttempts))
+		r.retireRescueTranscript(tid, t, trPath, "这一次没有结论")
+	}
+	return rescueVerdict{}, false
+}
+
+// rescueReviewOnce 起一条复盘会话并等它的结论（不做重来，见 rescueReview）。
+func (r *Runner) rescueReviewOnce(t rescueTarget, lines []transcriptLine, tid int) (rescueVerdict, bool) {
 	name := r.rescueModelName()
 	client := r.clientFor(name)
 	modelCfg := r.modelOf(name)
@@ -526,6 +570,9 @@ func (r *Runner) rescueReview(t rescueTarget, tid int) (rescueVerdict, bool) {
 		renderPrompt(prompts.Must(prompts.RescueSystem), tuning, r.outputLang()),
 		tools, r.log, tid, "rescue:"+t.Base)
 	if r.rescueKeepRecords(tid) {
+		// 同名文件可能是上一轮复盘留下的（按章节+尝试号命名，见
+		// rescueTranscriptPath）：先退掉，两段对话绝不串进同一条转录。
+		r.retireRescueTranscript(tid, t, r.rescueTranscriptPath(t), "上一轮同名复盘")
 		if tr, terr := session.NewTranscript(r.rescueTranscriptPath(t)); terr == nil {
 			sess.SetTranscript(tr)
 			defer tr.Close()
@@ -561,6 +608,116 @@ func (r *Runner) rescueReview(t rescueTarget, tid int) (rescueVerdict, bool) {
 	return v, true
 }
 
+// markRescueQueued 记下"这条转录已被复盘排进重试队列"（P61/C）。
+func (r *Runner) markRescueQueued(trPath string) {
+	if trPath == "" {
+		return
+	}
+	r.rescueQueuedMu.Lock()
+	defer r.rescueQueuedMu.Unlock()
+	if r.rescueQueued == nil {
+		r.rescueQueued = map[string]bool{}
+	}
+	r.rescueQueued[trPath] = true
+}
+
+// clearRescueQueued 丢掉这条转录的"已排队"标记（下次复盘开始前清一次，
+// 上一轮的标记不会漏到这一轮）。
+func (r *Runner) clearRescueQueued(trPath string) {
+	if trPath == "" {
+		return
+	}
+	r.rescueQueuedMu.Lock()
+	defer r.rescueQueuedMu.Unlock()
+	delete(r.rescueQueued, trPath)
+}
+
+// rescueQueuedFor 问"这条转录是不是刚被复盘排进队列了"（P61/C）：是的话调用方
+// 的失败终态要写成 queued 而不是 error——它马上会被重跑，界面不该停在"会话错误"。
+func (r *Runner) rescueQueuedFor(trPath string) bool {
+	if trPath == "" {
+		return false
+	}
+	r.rescueQueuedMu.Lock()
+	defer r.rescueQueuedMu.Unlock()
+	return r.rescueQueued[trPath]
+}
+
+// isRescueTranscript 判断一条转录是不是复盘会话自己的（P61/B）：`rescue_` 前缀。
+func isRescueTranscript(path string) bool {
+	return strings.HasPrefix(filepath.Base(path), "rescue_")
+}
+
+// retireRescueTranscript 退掉一份复盘转录（P61/B、E）：挪进
+// `work/sessions/.trash/`，挪不动就直接删。复盘转录是一次性的——要么这次没拿到
+// 结论（留着只会让预览页多一条谁也看不懂的会话行），要么同名文件是上一轮复盘
+// 留下的（新的一条必须写进自己的文件，两段对话不能串进同一条转录）。
+func (r *Runner) retireRescueTranscript(tid int, t rescueTarget, trPath, why string) {
+	if trPath == "" || !fileExists(trPath) {
+		return // latex.rescue.keep_records 关闭时根本没有落盘
+	}
+	trash := filepath.Join(t.ProjDir, "work", "sessions", ".trash")
+	if err := os.MkdirAll(trash, 0o755); err == nil {
+		stem := strings.TrimSuffix(filepath.Base(trPath), ".jsonl")
+		stamp := time.Now().Format("20060102-150405")
+		dst := filepath.Join(trash, fmt.Sprintf("%s.%s.jsonl", stem, stamp))
+		// 同一条目标的复盘重来会复用同一个文件名（每次先丢弃再重开），一秒内
+		// 丢两次就会撞名——撞名时加序号，别把上一份覆盖掉。
+		for n := 2; fileExists(dst); n++ {
+			dst = filepath.Join(trash, fmt.Sprintf("%s.%s-%d.jsonl", stem, stamp, n))
+		}
+		if movePath(trPath, dst) == nil {
+			r.log.LogInfo(tid, "[rescue]", t.Base, "复盘转录（"+why+"）已挪进 work/sessions/.trash/:", filepath.Base(dst))
+			return
+		}
+	}
+	if err := os.Remove(trPath); err != nil {
+		r.log.LogWarning(tid, "[rescue]", t.Base, "复盘转录（"+why+"）删除失败:", err)
+	}
+}
+
+// appendTranscriptActivity 往任意转录末尾追加一条 chapter_activity 标记（P61/C）。
+// 只有在拿不到目标会话本体（rescueTarget.Sess == nil）时才走这里：没有 writer
+// 可以借用，只能自己开一个追加句柄。文件不存在时什么都不做——不凭空造一条转录。
+func appendTranscriptActivity(trPath, state string) error {
+	if trPath == "" {
+		return nil
+	}
+	if !fileExists(trPath) {
+		return nil
+	}
+	f, err := os.OpenFile(trPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	data, err := json.Marshal(map[string]any{
+		"t": "meta", "kind": "chapter_activity", "state": state,
+		"ts": time.Now().Format(time.RFC3339),
+	})
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(data, '\n'))
+	return err
+}
+
+// markTargetActivity 把**目标**会话的活动状态写成 state，并把这一步记进日志
+// （P61/C：状态的写入时机与"什么时候排队/提醒"的先后要能在日志里对上）。
+func (r *Runner) markTargetActivity(tid int, tag, label string, t rescueTarget, state, why string) {
+	var err error
+	if t.Sess != nil {
+		err = t.Sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
+	} else {
+		err = appendTranscriptActivity(t.TrPath, state)
+	}
+	if err != nil {
+		r.log.LogWarning(tid, tag, label, "写目标会话状态 "+state+" 失败（界面会停在旧状态）:", err)
+		return
+	}
+	r.log.LogInfo(tid, tag, label, "目标会话状态 → "+state+"（"+why+"）")
+}
+
 // rescueKeepRecords：默认不存复盘转录，--debug（logger 的 debug 级别）或
 // latex.rescue.keep_records: true 才存。日志级别是 Info=0 / Debug=1 / Trace=2，
 // 所以判定用 logger.LevelDebug —— 早先写成"≥4"等于永不落盘，用户在 --debug 下
@@ -572,10 +729,39 @@ func (r *Runner) rescueKeepRecords(tid int) bool {
 	return r.log != nil && r.log.Level() >= logger.LevelDebug
 }
 
-// rescueTranscriptPath 是复盘会话的转录落点（同一个项目里按章节+时间区分）。
+// rescueTranscriptPath 是复盘会话的转录落点（P61/E）：
+//
+//	work/sessions/rescue_<章>[.try<目标尝试号>].jsonl
+//
+// 名字与转换/核对同一种口径（`<角色>_<章>[.tryN]`），所以预览页用同一套规则就能
+// 推出章节身份（`chapterRole: "rescue"`，章节 ID/父章/深度与 `checker_` 完全相同），
+// 复盘会话于是能挂在它复盘的章节下面显示。`.tryN` 是**目标转录的尝试号**——这条
+// 复盘说的是那一份产物；同一个目标尝试的复盘重来（P61/B）会先把没结论的旧转录
+// 丢进 `work/sessions/.trash/`，因此这个名字可以直接复用，不会把两次对话串进
+// 同一个文件。
 func (r *Runner) rescueTranscriptPath(t rescueTarget) string {
-	name := fmt.Sprintf("rescue_%s_%s.jsonl", t.Base, time.Now().Format("20060102-150405"))
+	name := fmt.Sprintf("rescue_%s%s.jsonl", t.Base, attemptSuffixOf(transcriptAttemptOf(t.TrPath)))
 	return filepath.Join(t.ProjDir, "work", "sessions", name)
+}
+
+// transcriptAttemptOf 从转录名里取尝试号（`convert_<章>.try2.jsonl` → 2；
+// 没有后缀 → 1）。文件名是唯一来源：复盘要写的尝试号就是目标那一份转录的。
+func transcriptAttemptOf(path string) int {
+	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if i := strings.LastIndex(stem, ".try"); i > 0 {
+		if n, err := strconv.Atoi(stem[i+len(".try"):]); err == nil && n > 1 {
+			return n
+		}
+	}
+	return 1
+}
+
+// attemptSuffixOf 给出 `.tryN` 后缀（第 1 次尝试没有后缀，与转换/核对一致）。
+func attemptSuffixOf(n int) string {
+	if n <= 1 {
+		return ""
+	}
+	return fmt.Sprintf(".try%d", n)
 }
 
 // rescueAudit 追一行审计记录（默认不存对话，也要能看到"哪一章被判过什么"）。

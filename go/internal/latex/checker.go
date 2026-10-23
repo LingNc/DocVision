@@ -217,7 +217,7 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 			// 与 convert 走同一个入口（maybeRescue），结论处理不再有第二份。
 			dec := r.maybeRescue(tid, "[checker]", base, rescueTarget{
 				ProjDir: proj, Base: base, Role: "checker", TrPath: trPath,
-				NoToolNudge: sess.ToolAccessNudged(),
+				NoToolNudge: sess.ToolAccessNudged(), Sess: sess,
 			})
 			if dec.Stop {
 				if tr != nil {

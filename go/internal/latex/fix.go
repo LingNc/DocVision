@@ -399,11 +399,18 @@ func (t *DispatchFixTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if t.Runner == nil || strings.TrimSpace(t.Work) == "" {
 		// 没有 Runner（单测/老调用方）：计划留在盘上，由 runner 侧
 		// applyChildFixPlan 执行——回执与引入 P60 第五步之前一致。
+		// P61/A：**这条路不标终态**。它出现在"还没有子章节/还没接上 Runner 的
+		// 那一轮"，父会话通常还想接着说（真正跑修复的是后面的复查轮）；在这里
+		// 掐掉一轮会把它没说完的判断丢掉。同步跑完修复的 FIX RESULT 才是终态。
 		return session.ToolResult{Text: recordOnlyFixReceipt(path, plan, args.Note)}, nil
 	}
 	results := t.applyPlan(plan)
 	t.noteResult(path, results)
-	return session.ToolResult{Text: syncFixReceipt(path, plan, results, args.Note)}, nil
+	// P61/A：修复已经**同步跑完**，回执里每个子章节的结局都写清了。到此这一轮
+	// 没有任何还需要模型判断的东西——标成终态，Run 在回执落盘后直接返回，父
+	// 会话不会为了"回应这条回执"再空烧一次请求。会话本身照常可继续用：整合轮
+	// 是下一次 Run（父会话在整合时用的是 refreshed 的产物，不需要回执后的寒暄）。
+	return session.ToolResult{Text: syncFixReceipt(path, plan, results, args.Note), Terminal: true}, nil
 }
 
 // applyPlan 同步执行一份计划并把它标成已消费（P60 第五步）。
@@ -927,6 +934,10 @@ func (r *Runner) reviewChildrenBeforeIntegration(sess *session.Session, base str
 	path := dispatch.PlannedPath()
 	if path == "" {
 		r.log.Log(tid, "[fix]", base, "没有子章节需要下派修复，直接整合")
+	} else {
+		// P61/A：dispatch_fix 的回执是终态，Run 在它落盘后就返回了——这一轮
+		// 没有"回应回执"的额外请求。日志里把这件事说明白，事后看请求数能对上。
+		r.log.Log(tid, "[fix]", base, "dispatch_fix 已同步执行修复并回执结局，本轮就此结束（不再发模型请求），按计划走整合")
 	}
 	return path
 }

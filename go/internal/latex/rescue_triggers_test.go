@@ -43,6 +43,13 @@ type rescueChapterOptions struct {
 	verdicts []string
 	from     int
 	hint     string
+	// rescueFailures 是前几次复盘会话"不给结论"的方式（1 起，第 n 项对应第 n
+	// 次复盘）：1 = 报错终止，2 = 跑完不调 submit。用完之后的复盘照常按
+	// verdicts 给结论（P61/B 的丢弃重来）。
+	rescueFailures []int
+	// keepRescueRecords 打开 latex.rescue.keep_records，让复盘转录真的落盘
+	// （要断言"丢弃/挪进 .trash"的用例必须开）。
+	keepRescueRecords bool
 }
 
 type rescueChapterStats struct {
@@ -150,10 +157,25 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 				n = stats.rescue
 				stats.rescueText = append(stats.rescueText, lastUser)
 			})
-			verdict, from, hint := verdictAt(n)
-			subdivisionReply(w, subdivisionCall("rescue-submit", "submit", map[string]any{
-				"verdict": verdict, "from": from, "reason": "用例给的结论", "hint": hint,
-			}))
+			// P61/B：前几次复盘可以"不给结论"（报错 / 不提交），用来钉住丢弃
+			// 重来与放弃后的退回行为。
+			failure := 0
+			if n <= len(opts.rescueFailures) {
+				failure = opts.rescueFailures[n-1]
+			}
+			switch failure {
+			case 1:
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"error":{"message":"review model rejected the request"}}`)
+			case 2:
+				p60Text(w, "I could not review it.")
+			default:
+				verdict, from, hint := verdictAt(n)
+				subdivisionReply(w, subdivisionCall("rescue-submit", "submit", map[string]any{
+					"verdict": verdict, "from": from, "reason": "用例给的结论", "hint": hint,
+				}))
+			}
 
 		// 核对会话：只读（有 read_file / grep、没有 write_file）。
 		case toolset["read_file"] && toolset["grep"] && !toolset["write_file"]:
@@ -199,6 +221,10 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 	r.cfg.Latex.ConvertModel = "fake"
 	r.cfg.Latex.CheckerModel = "fake"
 	r.cfg.Latex.Rescue.Enabled = opts.enabled
+	if opts.keepRescueRecords {
+		on := true
+		r.cfg.Latex.Rescue.KeepRecords = &on
+	}
 	off := false
 	r.cfg.Models = map[string]config.ModelConfig{"fake": {BaseURL: server.URL, APIKey: "test", Model: "fake", Stream: &off}}
 	r.clients = map[string]*session.Client{}

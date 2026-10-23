@@ -263,6 +263,12 @@ type Runner struct {
 	// imagesSrcDir 是本次运行 images 阶段扫的原始 md 目录（重画一张图时要
 	// 回到同一份原始 md 重扫，不能用已经被重写过的项目 md）。
 	imagesSrcDir string
+	// rescueQueued 记录"这条转录已经被复盘排进重试队列"（P61/C）。判 truncate
+	// 之后那一章仍按失败收尾，但界面要显示的是"等待并发槽"（队列马上会重跑
+	// 它），所以调用方写失败终态前先看这个标记、把 error 换成 queued。
+	// 键 = 转录绝对路径；每次进复盘前清掉，上一轮的标记不会漏过来。
+	rescueQueuedMu sync.Mutex
+	rescueQueued   map[string]bool
 }
 
 // phaseNote returns a console printer for phase-level progress notes.

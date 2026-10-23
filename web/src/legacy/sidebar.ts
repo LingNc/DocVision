@@ -409,6 +409,9 @@ export interface ChapterTreeNode {
    * 修复**不进** convert/checker 的挑选——它永远只能是子行，不能变成这一行的
    * 转换或核对。 */
   fixes: any[]
+  /* P61：复盘会话（`rescue_<章>[.tryN]`）与修复同层：按章节 ID + 世代挂在这一行
+   * 下面，旧 → 新；没有复盘就是空数组。同样**绝不**参与 convert/checker 的挑选。 */
+  rescues: any[]
   children: ChapterTreeNode[]
 }
 
@@ -466,6 +469,27 @@ export function fixRowLabel(fix: any, nodeId: string, round: number): string {
   return ((fix && fix.archived) ? '旧' : '') + '修复' + name + ' #' + (Number(round) || 1)
 }
 
+/* P61：复盘行的标签 = 「复盘」+ 它复盘的那一次转换的尝试号。名字里的 `.tryN`
+ * （`rescue_<章>.try2.jsonl`）就是目标转录的尝试号，所以这个数字不是行序号，
+ * 而是"复盘的是哪一份产物"——与修复行同理，不另编一个号。 */
+export function rescueAttemptOf(rescue: any): number {
+  return Number(rescue && rescue.chapterAttempt) || 1
+}
+
+/* 复盘行的一句话标签：`复盘 #2`（归档前缀「旧」与转换/核对/修复行同一套）。 */
+export function rescueRowLabel(rescue: any): string {
+  return ((rescue && rescue.archived) ? '旧' : '') + '复盘 #' + rescueAttemptOf(rescue)
+}
+
+/* 复盘行的悬浮说明：会话原本的 tip + 一句"复盘的是哪一条目标转录"（转录名去掉
+ * 角色前缀，`rescue_chapter_004.try2` → `chapter_004.try2`）。 */
+export function rescueRowTitle(rescue: any): string {
+  const tip = sessionTip(rescue)
+  const target = convertBasename(rescue).replace(/^rescue_/, '')
+  const line = '复盘对象：' + (target || '—')
+  return tip ? tip + '\n' + line : line
+}
+
 /* 修复链（`chapterAttemptChain` 里已按新 → 旧排好）的第 index 条是第几轮：
  * 队尾是最早一轮，从 1 数。树上是旧 → 新，所以直接用 i + 1。 */
 export function fixRoundAt(index: number, total: number): number {
@@ -510,8 +534,9 @@ export function fixRowTitle(s: any): string {
  * （P60 第五步：真实跑批的 fix_*.jsonl 就是这么在界面上看不见的）。
  * 判据保持与引入修复行之前一致：没有这三种子行的节点不多出展开箭头。
  */
-export function chapterNodeHasRows(node: { convert?: any; checker?: any; fixes?: any[]; children?: any[] }): boolean {
-  return (!!node.convert && !!node.checker) || (node.children || []).length > 0 || (node.fixes || []).length > 0
+export function chapterNodeHasRows(node: { convert?: any; checker?: any; fixes?: any[]; rescues?: any[]; children?: any[] }): boolean {
+  return (!!node.convert && !!node.checker) || (node.children || []).length > 0 ||
+    (node.fixes || []).length > 0 || (node.rescues || []).length > 0
 }
 
 /* 修复轮次按**时间**排出先后（同一处修多轮，旧 → 新）；并列时按 id 保底确定性。 */
@@ -541,6 +566,24 @@ function fixesForNode(node: ChapterTreeNode, convert: any, parentArchived: boole
     const anchor = String(f.chapterAnchor || '')
     if (anchor) return !!want && anchor === want
     return String(f.chapterId || '') === node.id
+  })
+  return sortFixesOldestFirst(hits)
+}
+
+/*
+ * P61：一个节点显示哪几条复盘会话——按**章节 ID + 世代**（与修复同一套口径）。
+ * 复盘转录自己带章节身份（`rescue_<章>[.tryN]`），所以不需要锚点；而 `.tryN`
+ * 是它复盘的那一条**转换**的尝试号（不是行序号），所以这里不按尝试号过滤：
+ * 尝试 2 的复议会一直在树里，哪怕这一行此刻显示的是尝试 3——挪走它就等于把那
+ * 次复盘藏掉，而它正是"这条会话被救过/没救回来"的唯一记录。尝试号写在行标签上。
+ */
+function rescuesForNode(node: ChapterTreeNode, convert: any, parentArchived: boolean | null, pool: any[]): any[] {
+  if (!pool || !pool.length) return []
+  const gen = convert ? !!convert.archived : parentArchived
+  const hits = pool.filter((r) => {
+    if (!r) return false
+    if (gen !== null && !!r.archived !== gen) return false
+    return String(r.chapterId || '') === node.id
   })
   return sortFixesOldestFirst(hits)
 }
@@ -655,8 +698,12 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
   // P60：修复会话单独收集（锚点是唯一的挂靠依据），并记下每个转换/核对会话属于
   // 哪个节点——钉住一条修复会话时要靠它找回那一行。
   const fixPool: any[] = []
+  // P61：复盘会话同理单独收集（章节 ID 是挂靠依据）；它**永远**不参选
+  // convert/checker——这里是它进不了那两条挑选的唯一一道闸。
+  const rescuePool: any[] = []
   const nodeOfSession: Record<string, ChapterTreeNode> = {}
   let pinnedFix: any = null
+  let pinnedRescue: any = null
   let pinned: { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null = null
   ;(items || []).forEach((session) => {
     if (!session) return
@@ -667,9 +714,15 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
       if (pinId && session.id === pinId) pinnedFix = session
       return
     }
+    // P61：复盘会话与修复行同层——它只挂到自己的章节下面，不建节点、不参选。
+    if (session.chapterRole === 'rescue') {
+      rescuePool.push(session)
+      if (pinId && session.id === pinId) pinnedRescue = session
+      return
+    }
     if (!session.chapterId) return
     const id = String(session.chapterId)
-    const node = byId[id] || (byId[id] = { id, convert: null, checker: null, fixes: [], children: [] })
+    const node = byId[id] || (byId[id] = { id, convert: null, checker: null, fixes: [], rescues: [], children: [] })
     parents[id] = String(session.chapterParent || '')
     if (session.chapterRole !== 'checker' && session.chapterRole !== 'convert') return
     const role: 'convert' | 'checker' = session.chapterRole === 'checker' ? 'checker' : 'convert'
@@ -700,6 +753,19 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     const hit = anchoredConvert(items, pinnedFix)
     const node = hit ? nodeOfSession[String(hit.id)] : null
     if (node) pinned = { node, role: 'convert', session: hit }
+  }
+  // P61：钉住一条复盘会话时，让它所在的那一行显示到它——复盘写着它复盘的是哪一次
+  // 转换（名字里的 `.tryN`），就钉那一代、那一个尝试号的转换；找不到就不钉，
+  // 绝不拿别的尝试凑（这一行默认显示最新一次，复盘行仍挂在这一行下面可见）。
+  if (!pinned && pinnedRescue) {
+    const node = byId[String(pinnedRescue.chapterId || '')]
+    if (node) {
+      const want = rescueAttemptOf(pinnedRescue)
+      const gen = !!pinnedRescue.archived
+      const hit = (byRole[node.id + '|convert'] || []).filter((c: any) =>
+        (Number(c.chapterAttempt) || 1) === want && !!c.archived === gen)
+      if (hit.length) pinned = { node, role: 'convert', session: newestOf(hit) }
+    }
   }
   // P59：先定每一行的转换，再由**锚点**选核对。钉住核对会话时，转换由它的
   // 锚点决定（不是按尝试号，也不是"最新那条"）；钉住转换时，转换仍取那一条，
@@ -733,6 +799,8 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     // P60：修复子行挂在这一行选中的转换下面（同锚点 + 同世代）；没有修复就是
     // 空数组——调用方不用判空，也不会多出占位行。
     node.fixes = fixesForNode(node, node.convert, archived, fixPool)
+    // P61：复盘行也是这一层的子行（与修复行同层），绝不参与上面的挑选。
+    node.rescues = rescuesForNode(node, node.convert, archived, rescuePool)
     node.children.forEach((child) => resolve(child, archived))
   }
   roots.forEach((root) => resolve(root, null))
@@ -838,6 +906,10 @@ const CHAPTER_ACTIVITY: Record<string, string> = {
   pass: '已通过', issues: '发现问题', error: '会话错误',
   // T171：转录里已有 run_end 却停在 running 的尝试被放弃了，不能再显示"运行中"。
   interrupted: '已中断',
+  // P61：复盘正在看这条转录（状态写在**目标**转录里，复盘一开始就写、结论出来
+  // 再改成 queued/error）。目标会话此刻并没有在跑，但要让人一眼看出"这条报错
+  // 的会话正在被复盘"，而不是以为它就这么定局了。
+  rescuing: '复盘处理中',
 }
 
 export function chapterActivityLabel(
@@ -1042,6 +1114,9 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
   const proj = self.project || projectOf(self.id)
   // P60：修复会话没有章节身份（文件名是 `fix_<章>`），它自己的历史 = **同一锚点**
   // 下的其他修复轮次（新 → 旧）；锚点不同就是修的另一份产物，不能混进来。
+  // P61：复盘会话不进「历史」尝试链——它是某一章的附注，不是那一章的一次尝试
+  // （点了它也只会看到一串不相干的转换）。它自己也就没有历史页签。
+  if (self.chapterRole === 'rescue') return null
   if (self.chapterRole === 'fix') {
     const anchor = String(self.chapterAnchor || '')
     if (!anchor) return null
@@ -1055,8 +1130,8 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
   ;(dedupeChapterAttempts(sessions || [])).forEach((s) => {
     if (!s || !s.chapterId) return
     // 修复已经作为章节树的子行显示，**不进**转换/核对的尝试链——它们挂在同一次
-    // 转换上，混进来会把"这一章转过几次"搅乱（P60）。
-    if (s.chapterRole === 'fix') return
+    // 转换上，混进来会把"这一章转过几次"搅乱（P60）。P61 的复盘行同理。
+    if (s.chapterRole === 'fix' || s.chapterRole === 'rescue') return
     if (s.chapterId !== self.chapterId) return
     // T194：**不再按角色分链**——转换与同一轮的核对是同一件事的两个角色（用户口径
     // "这俩是一体的"）。原来按角色过滤时，点一条核对会话会让整个列表从「#2 #1」

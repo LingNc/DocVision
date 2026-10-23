@@ -165,13 +165,20 @@ func newFixSyncHarness(t *testing.T, maxRounds int) *fixSyncHarness {
 // dispatch 调一次 dispatch_fix（一条 child_01 的 issue），返回回执文本。
 func (h *fixSyncHarness) dispatch(t *testing.T, issueID string) string {
 	t.Helper()
+	return h.dispatchResult(t, issueID).Text
+}
+
+// dispatchResult 同上，但连 ToolResult 一起给——P61/A 要钉住回执是**终态**
+// （Terminal），这一轮不再为它发一次模型请求。
+func (h *fixSyncHarness) dispatchResult(t *testing.T, issueID string) session.ToolResult {
+	t.Helper()
 	args := `{"issues":[{"id":"` + issueID + `","child":"child_01","where":"chapter_01_child_01.tex:3",` +
 		`"what":"缺一段正文","rule":"与原书该页一致"}]}`
 	res, err := h.tool.Execute(args)
 	if err != nil {
 		t.Fatalf("dispatch_fix: %v", err)
 	}
-	return res.Text
+	return res
 }
 
 func (h *fixSyncHarness) fixTranscript(t *testing.T) string {
@@ -183,7 +190,12 @@ func (h *fixSyncHarness) fixTranscript(t *testing.T) string {
 // 跑过，计划标成 applied，父会话转录里有一行 fix_result。
 func TestDispatchFixReportsOutcomeSynchronously(t *testing.T) {
 	h := newFixSyncHarness(t, 2)
-	receipt := h.dispatch(t, "ISSUE-1")
+	res := h.dispatchResult(t, "ISSUE-1")
+	receipt := res.Text
+	// P61/A：回执是终态——修复已经同步跑完，这一轮不该再为它发一次模型请求。
+	if !res.Terminal {
+		t.Error("dispatch_fix 的同步回执必须标成 Terminal（Run 就地结束，不再发请求）")
+	}
 	for _, want := range []string{
 		"FIX RESULT", "1 fixed, 0 still failing",
 		"child_01: FIXED", "checker: pass", "rounds 1/2, 1 left",

@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chapterIdSuffix, chapterNodeHasRows, chainMemberTag, dedupeChapterAttempts, fixOutcomeLabel, fixRoundAt, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, plainTitle, sessionTip } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chapterIdSuffix, chapterNodeHasRows, chainMemberTag, dedupeChapterAttempts, fixOutcomeLabel, fixRoundAt, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, plainTitle, rescueAttemptOf, rescueRowLabel, rescueRowTitle, sessionTip } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 import { applyIndex, chapterPendingRetry } from '../src/data'
 
@@ -843,5 +843,101 @@ describe('P60 修复行独立于核对行', () => {
     // title = 原有 tip + 结局；没有结局时与之前一字不差。
     expect(fixRowTitle({ ...base })).toBe(sessionTip({ ...base }))
     expect(fixRowTitle({ ...base, chapterActivity: 'issues' })).toBe(sessionTip({ ...base }) + '\n修复结果：未通过')
+  })
+})
+
+
+/* P61：复盘会话（`rescue_<章>[.tryN].jsonl`）带章节身份后落进章节树，与核对行
+ * **同层**、像修复行那样是一条独立子行。它绝不能变成某一章的 convert/checker；
+ * 它也不进「历史」尝试链（那是"这一章转过几次"，复盘是附注）。
+ */
+describe('P61 复盘行挂在章节下面', () => {
+  const conv3 = (id: string, attempt = 1, mt = '2026-10-23T10:00:00Z', over: Record<string, unknown> = {}) => ({
+    id: 'book/work/sessions/convert_' + id + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: id, chapterRole: 'convert',
+    chapterAttempt: attempt, mtime: mt, ...over,
+  })
+  const checker3 = (id: string, attempt: number, mt: string) => ({
+    id: 'book/work/sessions/checker_' + id + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: id, chapterRole: 'checker',
+    chapterAttempt: attempt, mtime: mt,
+  })
+  const rescue3 = (id: string, attempt: number, mt: string, over: Record<string, unknown> = {}) => ({
+    id: 'book/work/sessions/rescue_' + id + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: id, chapterRole: 'rescue',
+    chapterAttempt: attempt, mtime: mt, ...over,
+  })
+
+  it('复原话挂到它复盘的那一章下面，旧 → 新，且不参选 convert/checker', () => {
+    const c = conv3('chapter_042', 2, '2026-10-23T12:00:00Z')
+    const k = checker3('chapter_042', 2, '2026-10-23T12:30:00Z')
+    const r1 = rescue3('chapter_042', 1, '2026-10-23T11:00:00Z')
+    const r2 = rescue3('chapter_042', 2, '2026-10-23T13:00:00Z')
+    const node = buildChapterTree([c, k, r1, r2])[0]
+    // 只建了一棵节点：复盘会话没有把自己变成节点，也没有抢走 convert/checker。
+    expect(node.convert!.id).toBe(c.id)
+    expect(node.checker!.id).toBe(k.id)
+    expect(node.rescues.map((r: any) => r.id)).toEqual([r1.id, r2.id])
+  })
+
+  it('复盘行标签写「复盘 #N」，N 是它复盘的那次转换的尝试号，归档带「旧」', () => {
+    expect(rescueAttemptOf(rescue3('chapter_042', 3, 'x'))).toBe(3)
+    expect(rescueRowLabel(rescue3('chapter_042', 2, 'x'))).toBe('复盘 #2')
+    expect(rescueRowLabel(rescue3('chapter_042', 1, 'x', { archived: true }))).toBe('旧复盘 #1')
+    // title = 原有 tip + 复盘对象（转录名去掉 rescue_ 前缀）。
+    const r = rescue3('chapter_042', 2, 'x')
+    expect(rescueRowTitle(r)).toBe(sessionTip(r) + '\n复盘对象：chapter_042.try2')
+  })
+
+  it('只有复盘的节点也算有子行（展开箭头与在引入复盘之前一致）', () => {
+    const c = conv3('chapter_042', 1, '2026-10-23T12:00:00Z')
+    const node = buildChapterTree([c, rescue3('chapter_042', 1, '2026-10-23T13:00:00Z')])[0]
+    expect(node.checker).toBeNull()
+    expect(chapterNodeHasRows(node)).toBe(true)
+    // 没有复盘的节点不多出展开箭头。
+    expect(chapterNodeHasRows({ convert: {}, checker: null, fixes: [], rescues: [], children: [] })).toBe(false)
+    // 只有复盘没别的：也要能展开。
+    expect(chapterNodeHasRows({ convert: {}, checker: null, rescues: [{ id: 'r' }], children: [] })).toBe(true)
+  })
+
+  it('复盘会话不进「历史」尝试链，点它没有历史页签', () => {
+    const c = conv3('chapter_042', 1, '2026-10-23T12:00:00Z')
+    const k = checker3('chapter_042', 1, '2026-10-23T12:30:00Z')
+    const r = rescue3('chapter_042', 1, '2026-10-23T13:00:00Z')
+    const chain = chapterAttemptChain([c, k, r])
+    const ids = (chain || []).map((m: any) => m.id)
+    expect(ids).not.toContain(r.id)
+    expect(chapterAttemptChain([c, k, r], r.id)).toBeNull()
+  })
+
+  it('钉住一条复盘会话时，那一行显示到它复盘的那次转换（不拿别的尝试凑）', () => {
+    const c1 = conv3('chapter_042', 1, '2026-10-23T10:00:00Z')
+    const c2 = conv3('chapter_042', 2, '2026-10-23T12:00:00Z')
+    const r = rescue3('chapter_042', 1, '2026-10-23T13:00:00Z')
+    const node = buildChapterTree([c1, c2, r], r.id)[0]
+    expect(node.convert!.id).toBe(c1.id)
+    expect(node.rescues.map((x: any) => x.id)).toEqual([r.id])
+    // 复盘的那次转换已经不在了：仍然挂在这一行下面，只是不钉（默认最新）。
+    const node2 = buildChapterTree([c2, rescue3('chapter_042', 9, 'x')], rescue3('chapter_042', 9, 'x').id)[0]
+    expect(node2.convert!.id).toBe(c2.id)
+    expect(node2.rescues.map((x: any) => x.id)).toEqual([rescue3('chapter_042', 9, 'x').id])
+  })
+})
+
+/* P61：`rescuing` 是复盘在目标转录里写的中间状态——文案「复盘处理中」，
+ * 既有状态一个都不能变。
+ */
+describe('P61 复盘处理中的文案', () => {
+  it('rescuing → 复盘处理中', () => {
+    expect(chapterActivityLabel('rescuing', 'convert')).toBe('复盘处理中')
+    expect(chapterActivityLabel('rescuing', 'checker')).toBe('复盘处理中')
+  })
+
+  it('既有状态文案不变', () => {
+    expect(chapterActivityLabel('queued', 'convert')).toBe('等待并发槽')
+    expect(chapterActivityLabel('running', 'convert')).toBe('运行中')
+    expect(chapterActivityLabel('error', 'convert')).toBe('会话错误')
+    expect(chapterActivityLabel('interrupted', 'convert')).toBe('已中断')
+    expect(chapterActivityLabel('pass', 'checker')).toBe('已通过')
   })
 })

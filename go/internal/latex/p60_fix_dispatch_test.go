@@ -364,8 +364,10 @@ func TestFixDispatchRunsPlannedChildOnly(t *testing.T) {
 		!strings.Contains(stats.convertSystem, "dispatch_fix") {
 		t.Error("打开时转换系统提示词应当带上下派说明")
 	}
-	if stats.reviews == 0 {
-		t.Error("打开时整合前应当有一次复查子章节的对话")
+	if stats.reviews != 1 {
+		// P61/A：同步回执是终态——复查轮在 FIX RESULT 落盘后立刻结束，不为了
+		// "回应这条回执"再发一次请求（以前这里会是 2 次）。
+		t.Errorf("复查对话应当只有 1 次请求（回执即终态），实际 %d 次", stats.reviews)
 	}
 	if got := stats.fixes["chapter_01_child_01"]; got != 1 {
 		t.Errorf("child_01 的修复会话请求数 = %d，期望 1（P60 第五步：dispatch_fix 同步跑一次，runner 不再重复执行同一份计划）: %v", got, stats.fixes)

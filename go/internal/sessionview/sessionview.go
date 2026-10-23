@@ -649,6 +649,12 @@ var chapterAttemptSuffix = regexp.MustCompile(`^(.*)\.try(\d+)$`)
 var chapterRootID = regexp.MustCompile(`^chapter[_-]?\d+`)
 var chapterChildSuffix = regexp.MustCompile(`^(.*)_child_(\d+)$`)
 
+// chapterRescueID 是复盘转录名里允许出现的章节 ID 形状（P61/E）：`rescue_` 后面
+// 必须**整段**就是一个章节 ID（`chapter_004` / `chapter_004_child_02`）。P58 的
+// 老命名（`rescue_<章>_<时间戳>`）整段不匹配 → 拿不到章节身份，仍按「错误处理」
+// 阶段落组（P58 的用例钉住）。
+var chapterRescueID = regexp.MustCompile(`^chapter[_-]?\d+(?:_child_\d+)*$`)
+
 func chapterIdentity(rel string) chapterIdentityInfo {
 	base := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
 	attempt := 1
@@ -663,7 +669,12 @@ func chapterIdentity(rel string) chapterIdentityInfo {
 	// 身份照同一套规则推断——`chapter_004_child_02` 的父章、深度、尝试号都是
 	// 文件名自带的。角色仍记成 "fix"（谁干的活），阶段归组由 enrichSessions 按
 	// "有章节身份即章节阶段"归到 convert 组，与转换/核对同组。
-	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}, {"fix_", "fix"}} {
+	//
+	// P61：复盘转录同样自带章节（`rescue_<章>[.try<目标尝试号>].jsonl`）。章节 ID、
+	// 父章、深度与 `checker_` 完全同一套推导；`.tryN` 是**它复盘的那一条转录的**
+	// 尝试号。角色是 "rescue"——它永远只是章节下面的一行，绝不能变成某一章的
+	// convert 或 checker（挑选在 web 侧，见 sidebar.ts 的 buildChapterTree）。
+	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}, {"fix_", "fix"}, {"rescue_", "rescue"}} {
 		if strings.HasPrefix(base, prefix.name) {
 			role, id = prefix.role, strings.TrimPrefix(base, prefix.name)
 			break
@@ -689,6 +700,11 @@ func chapterIdentity(rel string) chapterIdentityInfo {
 		}
 	}
 	if role == "" || id == "" || !chapterRootID.MatchString(id) {
+		return chapterIdentityInfo{}
+	}
+	// P61：复盘转录的剩余部分必须整段是一个章节 ID，否则宁可没有章节身份
+	// （老命名 `rescue_<章>_<时间戳>` 就落在这里，继续归「错误处理」阶段）。
+	if role == "rescue" && !chapterRescueID.MatchString(id) {
 		return chapterIdentityInfo{}
 	}
 	parent := ""
@@ -797,6 +813,10 @@ func TitleFor(rel string) string {
 			return "修复 · " + subject
 		}
 		return "全书修复"
+	case "rescue":
+		// P61：复盘会话带章节身份后与转换同组（这样它能在章节树里当子行显示），
+		// 标题仍点名"复盘"，不跟着叫「转换 · <章>」。
+		return "复盘 · " + subject
 	case "final-review":
 		return "终审" // T62：终审会话（final_review）
 	case "会话":
@@ -1160,7 +1180,9 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		endState := liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow)
 		activity := activityAfterEnd(stat, stat.ChapterActivity)
 		switch activity {
-		case "queued", "waiting_children", "checking_result", "interrupted":
+		case "queued", "waiting_children", "checking_result", "interrupted", "rescuing":
+			// P61：`rescuing` 是"复盘正在看这条转录"——目标会话自己并没有在跑，
+			// 不能因为刚被追加了一行状态就显示成活跃（绿点/运行中）。
 			live, endState = false, ""
 		}
 		// P60：修复转录（`fix_<子章>.jsonl` 这类，只在子章节自己的 sessions/
