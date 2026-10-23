@@ -2541,3 +2541,12 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **测试（`web/tests/chapter-fix-rescue.spec.ts`）**：改掉三条与新口径冲突的用例——「同一章两个目标各占一行、各算各的号」→「号按全章连着数、树上仍只占一行」；「复盘链只列同一章 + 同一目标」→「列这一章的全部复盘，只有一次时没有页签，别的章不混进来」；「复盘了不同目标各占一行」→「树上只有一行，两次都在它的历史里（并断言行上的 `复盘了 核对#1/转换#1`）」。新增「T224：老复盘转录没有目标备注，也不再一章叠成好几行」——三份无 meta 的老转录 → `treeRescueRows(node).length === 1`、链里三份（新 → 旧）、`rescueOrdinal` = 1/2/3、`reviewedTargetLabel` 给空串。
 - **验证**：`cd web && npx vitest run` 22 个文件 257 条全绿；`npm run build` 通过，dist 已重出（`viewer.js` 544.73 kB / `viewer.css` 87.45 kB）。真实数据只读验算：临时写一条一次性 vitest 用例拉 `/api/index` 跑完删掉——目标章 13 份复盘 → `treeRescueRows` 1 行、`chapterAttemptChain` 13 条、序号 1..13 无重复；全库 130 个曾经超过一行的章节节点，改造后每个最多一行。
 - **没覆盖到的**：① 老转录的「复盘对象」只能显示它的转录名（`rescue_<章>_<时间戳>` 之类），真正的"复盘的是转换第几次"永远补不出来——这是磁盘上没有的事实，不再尝试猜；② 页面渲染只靠单测 + dist 构建验证，没有在浏览器里重跑截图（dist 已重出，但要重新构建 `docvision` 才会看到）；③ 用户现场跑的是这批提交之前的二进制。
+
+## v1.5+（T226：实时进度块按屏幕高度截断、只重画变化的行，2026-10-23）
+- **问题（用户报）**：几十条会话一起跑时控制台"一直在刷新和频闪"，那片进度区比屏幕还高，"滚动到上面就看不到了"，想要"驻留固定屏幕的会话"。
+- **根因**：① 块高 = 行数、没有上限；终端覆写靠 `\x1b[<n-1>A` 上移 + 逐行清空，`n` 超过屏幕高度时上移被终端夹在顶部，接着打印的换行只能靠向下滚动腾地方——"擦除"实际是把 scrollback 里的历史推出屏幕。② `refreshLiveLocked()` 先擦后**全量**重画，1 秒一跳的计时器让整块每秒重绘一次；收尾又是 `Remove()` 重画 + `PrintConsole()` 擦/画各一次。
+- **改（`go/internal/logger`）**：新增 `termsize_unix.go`（`TIOCGWINSZ`）/`termsize_windows.go`（返回 0）与测试钩子 `TermRowsForTest`；`liveCap() = 终端行数 − 6`（下限 3，查不到按 24 行）；`liveBlockTextsLocked()` 超限只画前 `cap-1` 行 + 末行折叠提示；`liveRowEntry.prio` + `LiveRow.SetWithPriority()` + `liveOrderLocked()`（`sort.SliceStable`，同优先级保持创建顺序）；`paintLiveLocked()` 改增量——逐行与 `painted` 比对只重写变了的行，行数变化才整块重来；`eraseLiveLocked()` 清 `painted`；`LiveRowTexts()` 按显示顺序但列全部行。`Finalize` 保持原语义（摘行 + 定格行 + 重画一次）。
+- **改（`go/internal/latex/book.go`）**：新增 `rowStatePriority()`（运行 0 / 等子会话 1 / 待核对 2 / 排队 3），render 走 `SetWithPriority`；阶段收尾从 `row.Remove()` + `PrintConsole(final)` 改成 `row.Finalize(final)`，一次收尾不再两遍整块重画。
+- **测试（`internal/logger/livepanel_screen_test.go`，沿用 ANSI 回放屏幕模型）**：`TestLiveBlockBoundedByTerminalHeight`（12 行终端 + 22 条会话：屏上 ≤ 6 行、末行「另有 17 个会话」、两条运行中都在、排队第 20 个不上屏、字节流最大光标上移 ≤ 5）、`TestLiveBlockHiddenRowStillFinalizes`、`TestLiveBlockRepaintsOnlyChangedLines`（a/c 各只写 1 次）、`TestLiveBlockPipeKeepsAllRows`（管道不截断、无折叠提示）。
+- **验证**：`go build ./...`、`go test ./internal/logger/ -count=1`、`go test ./internal/latex/ -count=1`（32.5s）全绿；另用一次性可视化用例（30 行终端 + 36 条会话）目检屏幕：运行中/等子会话在前、排队在后、末尾一行折叠提示，跑完删除该用例。
+- **口径**：截断只发生在屏幕上——日志文件、`--console-verbose` 与管道输出仍每个会话每一行；被折起来的会话收尾时定格行照样落进滚动区，账不省。

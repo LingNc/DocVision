@@ -90,6 +90,22 @@ const (
 	rowStateCheck   = "待核对"
 )
 
+// rowStatePriority 决定实时行在"一屏放不下"时的先后（T226）：只有运行中
+// 的会话每秒都在推进，最该常驻；等子会话/待核对次之；排队的最先折进
+// 「还有 N 个会话」那一行。同一个状态内部保持创建顺序，行不会互相换位。
+func rowStatePriority(state string) int {
+	switch state {
+	case rowStateRunning:
+		return 0
+	case rowStateWaiting:
+		return 1
+	case rowStateCheck:
+		return 2
+	default: // rowStateQueued
+		return 3
+	}
+}
+
 // liveSeed 是实时行的起始状态：续跑时把转录里的轮次/工具数/真实工作时间
 // 带进来，行一出现就是真实进度，不再从 0 开始爬。
 type liveSeed struct {
@@ -138,7 +154,7 @@ func (r *Runner) livePhaseRowState(id, label string, seed liveSeed) (hook func(r
 		}
 		text := liveRowText(label, state, seed, rounds, tools, cur)
 		mu.Unlock()
-		row.Set(text)
+		row.SetWithPriority(text, rowStatePriority(state))
 	}
 	render() // 立即出现起始行，会话一开始就有进度
 	stop := make(chan struct{})
@@ -189,7 +205,6 @@ func (r *Runner) livePhaseRowState(id, label string, seed liveSeed) (hook func(r
 				// 把定格行（轮次/工具调用/已用）作为普通行留在滚动区——
 				// 每个跑过的流程在终端上都留着最终状态，下一个流程开新
 				// 行实时刷，不会被顶掉。
-				row.Remove()
 				mu.Lock()
 				cur := active
 				if state == rowStateRunning && !runStart.IsZero() {
@@ -198,7 +213,9 @@ func (r *Runner) livePhaseRowState(id, label string, seed liveSeed) (hook func(r
 				finalText := fmt.Sprintf("[%s] 轮次 %d · 工具调用 %d · 已用 %s",
 					label, rounds, tools, fmtDuration(cur))
 				mu.Unlock()
-				r.log.PrintConsole(finalText)
+				// 摘行 + 定格行 + 重画一次搞定（T226：Remove 再 PrintConsole
+				// 会让整块白白重画两遍，会话多的屏上看得见闪）。
+				row.Finalize(finalText)
 			})
 		}
 }
