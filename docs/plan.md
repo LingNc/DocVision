@@ -205,3 +205,29 @@
 **第六步（2026-10-23）已完成**：两处收口——① 章节树里的修复行与核对行**同层**：一次修复的复核写的是 `checker_<child>.tryN.jsonl` 并被并进本节点自己那条核对行（同一个锚点），没有"修复的核对行"这一层，所以修复行是转换行的直接子行、左边距与核对行同值（行高仍 `var(--row-h)`，行序核对在前、修复按旧 → 新，没有修复时布局逐字节不变）；② `latex.fix.enabled` 打开时追加的下派说明多一句「回执已逐个子章节给出结局，回复里不要复述或改写它，直接接着整合」，关闭时提示词仍逐字节不变（`TestConvertSystemPromptDispatchOnlyWhenEnabled` 钉住这句只在打开时出现、且落实在同一行）。
 **P60 默认值（用户口径 2026-10-22 晚）**：`latex.fix.enabled` 默认 **true**、`max_rounds` 默认 **5**（写 0/负数也按 5，不是无限轮）。显式 `false` 才退回“整章重转”的老路径，那时工具面、提示词与请求数与引入 P60 之前逐字节一致（有对照测试）。
 **补记（2026-10-23）**：① **`dispatch_fix` 的回执即终态**——同步跑完修复的 `FIX RESULT` 回执标 `ToolResult.Terminal`，复查轮在回执落盘后就结束，父会话不再为"回应回执"多发一次模型请求（整章流程的复查请求数 2 → 1）；"只记计划"那条回执**不**标终态（它出现在还没接上 Runner 的一轮，父会话可能还要接着说）。② **复盘行与核对行同层**——`rescue_` 转录按文件名拿到章节身份（`chapterRole: "rescue"`，ID/父章/深度与 `checker_` 同源，`.tryN` 是它复盘的那次转换的尝试号），章节树里是**直接子行**（同一处 26px 左边距、同一 `var(--row-h)`），标签「复盘 #N」+ 归档前缀「旧」，点行切会话、钉住时那一行切到它复盘的那次转换；它永不参选 convert/checker、也不进「历史」尝试链；没有复盘时布局逐字节不变。
+
+### P62 仓库整理（审计与计划）
+
+**编号说明**：用户口述的批次号是 P61，但 P61 已被复盘会话占用（`internal/latex/p61_*_test.go`、`internal/sessionview/p61_rescue_identity_test.go` 与 `book.go` 里的 `P61/A–D` 注释），按编号递增规则顺延为 P62。
+
+**口径**：只整理、不改行为——功能代码、提示词、配置默认值、测试期望一律不动。已跟踪文件的删除可由 `git log` 回滚，所以只删「零引用 + 从未被删过 + 有替代物」的；未跟踪文件的删除不可回滚，所以只删**可再生的构建产物**与**一次性脚本**，样本数据副本一律留在原地（只列清单）。
+
+**本批已做**
+
+- `web/src/legacy/dom.ts` —— 旧页命令式 DOM 小助手（`el()`/`clear()`）。P11/P5-R2 全组件化之后 `web/src` 的 import 图里没有任何边指向它（44 个模块、41 条被引用，另两个是入口 `main.ts` 与类型声明 `env.d.ts`）。删前删后各跑一次 `npm run build`，内嵌产物 `assets/dist/viewer.{js,css}` **逐字节相同**（同样 88 个模块）——"行为不变"的凭据是哈希没动，不是"看了一遍"。
+- `powershell/organize_files.ps1` —— 被 `legacy/python/python/organize_files.py`（README 与 `docs/dev.md` 指向的归档实现）同一套三步流程取代的早期版本，且内含一处本地绝对路径（本仓库不允许）。该目录随之变空而消失；`RULE.md` 推送清理示例里那句 `rm -rf … powershell` 现在走它自己的"文件夹不存在，跳过"分支。
+- 上面两个路径的证据相同：`git log --diff-filter=D -- <路径>` 为空（从未被删过），`git grep` 按 basename 与全路径两种写法都是零命中。
+- 未跟踪的一次性脚本与临时态（都在 `temp/`）：11 个按 P 号命名的源码改写/探针脚本（`p30.py`～`p138.py`）、一个内联正则探针（`recheck.mjs`）、一份文件名里带本地样本名的重置脚本、一份已被 `build.sh` 取代的部署脚本（`deploy.py`）、一份 9.8 MB 的单条转录拷贝（`session.jsonl`）、两份一次性配置（`models_only.yaml`/`t37cfg.yaml`），以及七个探针/评审残留目录（浏览器探针截图、两张对照图、一个一次性 Go 探针、一个旧二进制副本、一组 e2e 配置与日志、一组 133 MB 的图形对比指标、一个空目录）。
+- 可再生的构建产物：`go/` 下的 Go 构建缓存（1.7 GB，`.gitignore` 已列）、`make build`/`make release` 的输出目录（156 MB；CI 用 `make release` 现场生成，见 `.github/workflows/release.yml`）、`go/temp` 的 e2e 临时目录、两个平台二进制（`go build ./...` 即回）。连同上面的脚本合计约 **2.1 GB**。
+- 空目录 `release/`（从未被任何脚本写入；发布产物在 `go/release/`）。
+
+**留待后续（本批只看不动）**
+
+- **样本数据副本约 8.3 GB**（MinerU 解析结果、切分后的 PDF、历年输出与对照数据，全在 `.gitignore` 里）：逐图模型请求换来的，删了不可再生，所以只列清单——删除还是迁出仓库目录由人工定。
+- 两个**有文档引用**的探针目录按"被 tracked 文本引用就保留"的规矩留着：浏览器两页对照探针（3.9 GB，`AGENTS.md` 的验收口径写到了它）、重合度实验（5.9 MB，`docs/issue.md` 引）。
+- **测试文件重排**：202 个 `_test.go`（1.27 MB，16 个包）+ 20 个 spec（连 `setup.ts` 21 个文件、133 KB）本批**只出表、不搬文件**。可归的三类：① 以 `tNNN_`/`pNN_` 开头、绑定单个 issue 的 30 个（`latex/` 17、`sessionview/` 8、`session/` 3、`config/` 2），其中复盘与修复两条线占 14 个（`p58_*`/`p59_*`/`p60_*`/`p61_*`/`rescue_triggers`）；② `latex/motif_*` 12 个（dedupe 一整套，约占该包测试体积的三成）；③ 两个只有辅助函数、没有任何 `Test` 的文件（`latex/pngtest_helper_test.go`、`split/helpers_test.go`）——Go 的约定本来就该这么放，不算问题。同包内辅助函数重名 0 处（真重名编译就过不去），测试名撞 `RetiredNames` 那 11 个退役名也是 0 处。
+- **仓库外夹具**：`internal/config/runconfig_rewrite_test.go` 读 `temp/` 下两份配置改写稿，检出里缺文件时自动 `t.Skipf`。本批按"被引用就保留"留着那两份；后续应把夹具收进 `testdata/`，并顺手换掉同文件注释里的本地绝对路径。
+- `DocVision.code-workspace`（43 B，单文件夹 `.`）零引用、从未删过，属于"删了也不影响任何东西"的候选，本批不动。
+- 文档体积（本批不重写）：最大三节是 `docs/config.md` 的「配置项参考」（144 行）、`docs/commands.md` 的「会话预览」（84 行）、本文件 P60 一节（64 行）。10 份 `docs/*.md` 全部可达——`README.md` 直连 8 份，`dedupe.md` 由 `dedupe-algorithm.md` 连，`agent-batch-history.md`/`issue.md`/`plan.md` 由 `AGENTS.md` 与 `README.md` 连。
+
+**验证**：`GOCACHE=/var/tmp/dsh-gocache go test ./internal/... -count=1` 全绿（14 个包 ok，`splitlog` 无测试文件）、`go build ./...` 通过、`npx vitest run` 20 个文件 250 条全过、`npm run build` 后 dist 零差异。
