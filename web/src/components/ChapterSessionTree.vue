@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { state } from '../state'
-import { chapterActivityLabel, chapterNodeKey, chapterWantOpen, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
+import { chapterActivityLabel, chapterNodeKey, chapterWantOpen, fixTranscriptTag, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
 import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
 import type { ChapterTreeNode } from '../legacy/sidebar'
@@ -28,6 +28,8 @@ const currentId = computed(() => state.current && state.current.id)
 
 function nodeContainsCurrent(node: ChapterTreeNode): boolean {
   if (node.convert?.id === currentId.value || node.checker?.id === currentId.value) return true
+  // P60：看的是修复会话时，它所在的那一支也要自动露出（修复行是子行）。
+  if ((node.fixes || []).some((f: any) => f && f.id === currentId.value)) return true
   return node.children.some(nodeContainsCurrent)
 }
 
@@ -42,9 +44,19 @@ function isOpen(node: ChapterTreeNode): boolean {
 
 /* 核对会话作为**子行**出现，前提是行头已经是转换会话；没有转换会话的节点
  * （只做过重新核对）行头本身就是那条核对会话，再在下面重复一遍就成了
- * 「核对 核对 · chapter_002」两行同一个会话。 */
+ * 「核对 核对 · chapter_002」两行同一个会话。
+ * P60：修复子行同理——没有修复的节点不能因为这条判据多出一个展开箭头。 */
 function hasBody(node: ChapterTreeNode): boolean {
-  return (!!node.convert && !!node.checker) || node.children.length > 0
+  return (!!node.convert && !!node.checker) || node.children.length > 0 || (node.fixes || []).length > 0
+}
+
+/*
+ * P60：修复行的状态只说两件事——活着 / 归档。不套 chapterActivityLabel：那是
+ * 转换与核对共用的文案表（"转换完成待核对"/"核对完成待处理"），修复既不是转换
+ * 也不在等核对，硬套会给出不相干的话。
+ */
+function fixStateText(session: any): string {
+  return session && session.live ? '运行中' : ''
 }
 
 /* 展开/收起只切自己这一棵，不选中、不影响任何其它节点。 */
@@ -185,6 +197,28 @@ function nodeTitle(node: ChapterTreeNode): string {
           </button>
           <button class="chapter-info" type="button" title="打开核对会话详情" @click="emit('info', node.checker)">ⓘ</button>
         </div>
+        <!-- P60：修复会话子行，紧挨着核对行（它修的就是这一行选中的那份转换产物）。
+             没有修复的节点这里一条也不渲染——不留占位、不撑高度。 -->
+        <div
+          v-for="(fx, i) in node.fixes"
+          :key="'fix:' + fx.id + ':' + i"
+          class="chapter-fix"
+          :class="{ active: currentId === fx.id }"
+        >
+          <button
+            class="fix-main session-row"
+            type="button"
+            role="treeitem"
+            :data-id="fx.id"
+            :title="sessionTip(fx)"
+            @click="emit('select', fx)"
+          >
+            <span class="fix-marker">修复 {{ i + 1 }}</span>
+            <span v-if="fixTranscriptTag(fx)" class="fix-try">{{ fixTranscriptTag(fx) }}</span>
+            <span v-if="fixStateText(fx)" class="chapter-state" :class="stateTone(fixStateText(fx))">{{ fixStateText(fx) }}</span>
+            <span v-if="fx.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
+          </button>
+        </div>
         <ChapterSessionTree
           v-if="node.children.length"
           :nodes="node.children" :depth="(depth || 0) + 1" :scope="scope"
@@ -234,4 +268,11 @@ function nodeTitle(node: ChapterTreeNode): string {
 .chapter-state.run { color: var(--green, #1a7f37); }
 .chapter-arch { flex: 0 0 auto; font-size: 11px; color: var(--muted, #6e7781); border: 1px dashed var(--line, #c9d1d9); border-radius: 4px; padding: 0 3px; line-height: 15px; }
 .chapter-info { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer; }
+/* P60：修复子行比核对行更紧凑（24px）、再缩进一级——它是核对行下面的第三层。 */
+.chapter-fix { display: flex; align-items: center; padding: 0 7px 0 40px; }
+.fix-main { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px; }
+.chapter-fix:hover { background: var(--hover, #f3f4f6); }
+.chapter-fix.active { background: var(--active, #eaeef2); }
+.fix-marker { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px; }
+.fix-try { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px; }
 </style>

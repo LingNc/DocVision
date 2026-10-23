@@ -405,6 +405,10 @@ export interface ChapterTreeNode {
   id: string
   convert: any | null
   checker: any | null
+  /* P60：挂在这一行（同一次转换）下面的修复会话，旧 → 新；没有修复就是空数组。
+   * 修复**不进** convert/checker 的挑选——它永远只能是子行，不能变成这一行的
+   * 转换或核对。 */
+  fixes: any[]
   children: ChapterTreeNode[]
 }
 
@@ -422,6 +426,58 @@ function newestOf(items: any[]): any | null {
   let best: any = null
   ;(items || []).forEach((s) => { best = newerAttempt(best, s) })
   return best
+}
+
+/*
+ * P60：修复会话的转录名可能带尝试号（`fix_<章>.try2.jsonl` = 同一处修了几轮时
+ * 留档的那一份）。章节尝试号对它取不到值（文件名不是 convert_/checker_ 前缀），
+ * 所以行上把名字里的 `.tryN` 原样标出来，不另编一个号。
+ */
+export function fixTranscriptTag(s: any): string {
+  const m = /\.try(\d+)$/.exec(convertBasename(s))
+  return m ? '.try' + m[1] : ''
+}
+
+/* 修复轮次按**时间**排出先后（同一处修多轮，旧 → 新）；并列时按 id 保底确定性。 */
+function sortFixesOldestFirst(items: any[]): any[] {
+  return (items || []).slice().sort((a, b) => {
+    const d = mtimeMs(a) - mtimeMs(b)
+    if (d) return d
+    const ia = String((a && a.id) || '')
+    const ib = String((b && b.id) || '')
+    return ia < ib ? -1 : ia > ib ? 1 : 0
+  })
+}
+
+/*
+ * P60：一个节点显示哪几条修复会话——**锚点等于这一行选中的转换名**（与核对同
+ * 一个口径，P59）：锚点对不上就别挂（另一次转换的修复不能摆到这一行旁边），
+ * 归档世代也要一致。修复转录本身没有章节身份（文件名是 `fix_<章>`），所以锚点
+ * 才是唯一可靠的挂靠依据；没有锚点的老转录退回按章节 ID 相等。
+ */
+function fixesForNode(node: ChapterTreeNode, convert: any, parentArchived: boolean | null, pool: any[]): any[] {
+  if (!pool || !pool.length) return []
+  const gen = convert ? !!convert.archived : parentArchived
+  const want = convert ? convertBasename(convert) : ''
+  const hits = pool.filter((f) => {
+    if (!f) return false
+    if (gen !== null && !!f.archived !== gen) return false
+    const anchor = String(f.chapterAnchor || '')
+    if (anchor) return !!want && anchor === want
+    return String(f.chapterId || '') === node.id
+  })
+  return sortFixesOldestFirst(hits)
+}
+
+/* 钉住一条修复会话时，它所在的行要能显示到它：转换由它的锚点决定（与钉住核对
+ * 同一条规则）。找不到锚点对应的转换就不钉，绝不拿别的尝试凑。 */
+function anchoredConvert(items: any[], fix: any): any | null {
+  const anchor = String((fix && fix.chapterAnchor) || '')
+  if (!anchor) return null
+  const hits = (items || []).filter((s: any) => s && s.chapterId &&
+    s.chapterRole !== 'checker' && s.chapterRole !== 'fix' &&
+    convertBasename(s) === anchor && !!s.archived === !!(fix && fix.archived))
+  return newestOf(hits)
 }
 
 /* 同一个锚点下的多次核对：用户口径是"按 mtime 取最新"（重核号只是它自己的
@@ -520,16 +576,30 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
   const byId: Record<string, ChapterTreeNode> = {}
   const parents: Record<string, string> = {}
   const byRole: Record<string, any[]> = {}
+  // P60：修复会话单独收集（锚点是唯一的挂靠依据），并记下每个转换/核对会话属于
+  // 哪个节点——钉住一条修复会话时要靠它找回那一行。
+  const fixPool: any[] = []
+  const nodeOfSession: Record<string, ChapterTreeNode> = {}
+  let pinnedFix: any = null
   let pinned: { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null = null
   ;(items || []).forEach((session) => {
-    if (!session?.chapterId) return
+    if (!session) return
+    // 修复转录没有章节身份（文件名是 `fix_<章>`、不是 convert_/checker_ 前缀）：
+    // 它不能建节点，只能挂到别人身上，所以连 pinned 都要留到节点建好之后再定。
+    if (session.chapterRole === 'fix') {
+      fixPool.push(session)
+      if (pinId && session.id === pinId) pinnedFix = session
+      return
+    }
+    if (!session.chapterId) return
     const id = String(session.chapterId)
-    const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] })
+    const node = byId[id] || (byId[id] = { id, convert: null, checker: null, fixes: [], children: [] })
     parents[id] = String(session.chapterParent || '')
     if (session.chapterRole !== 'checker' && session.chapterRole !== 'convert') return
     const role: 'convert' | 'checker' = session.chapterRole === 'checker' ? 'checker' : 'convert'
     const key = id + '|' + role
     ;(byRole[key] || (byRole[key] = [])).push(session)
+    nodeOfSession[String(session.id)] = node
     if (pinId && session.id === pinId) pinned = { node, role, session }
   })
   // 先搭出父子关系（T214 要按"父行定了哪一代"给子行选行，得从根往下走）。
@@ -548,6 +618,13 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     nodes.forEach((node) => sort(node.children))
   }
   sort(roots)
+  // P60：钉住一条修复会话时，让它所在的行显示到它——转换由它的锚点决定（与钉住
+  // 核对同一条规则）；不然点开修复后这一行会切回"最新一次转换"，修复子行跟着消失。
+  if (!pinned && pinnedFix) {
+    const hit = anchoredConvert(items, pinnedFix)
+    const node = hit ? nodeOfSession[String(hit.id)] : null
+    if (node) pinned = { node, role: 'convert', session: hit }
+  }
   // P59：先定每一行的转换，再由**锚点**选核对。钉住核对会话时，转换由它的
   // 锚点决定（不是按尝试号，也不是"最新那条"）；钉住转换时，转换仍取那一条，
   // 核对照锚点选。定完把这一行的世代交给子行（T214）。
@@ -577,6 +654,9 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
       node.checker = checkerForConvert(byRole[node.id + '|checker'] || [], node.convert, !!here)
     }
     const archived = node.convert ? !!node.convert.archived : parentArchived
+    // P60：修复子行挂在这一行选中的转换下面（同锚点 + 同世代）；没有修复就是
+    // 空数组——调用方不用判空，也不会多出占位行。
+    node.fixes = fixesForNode(node, node.convert, archived, fixPool)
     node.children.forEach((child) => resolve(child, archived))
   }
   roots.forEach((root) => resolve(root, null))
@@ -882,11 +962,25 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
   ;(sessions || []).forEach((s) => {
     if (s && s.id === id) self = s
   })
-  if (!self || !self.chapterId) return null
+  if (!self) return null
   const proj = self.project || projectOf(self.id)
+  // P60：修复会话没有章节身份（文件名是 `fix_<章>`），它自己的历史 = **同一锚点**
+  // 下的其他修复轮次（新 → 旧）；锚点不同就是修的另一份产物，不能混进来。
+  if (self.chapterRole === 'fix') {
+    const anchor = String(self.chapterAnchor || '')
+    if (!anchor) return null
+    const rounds = (sessions || []).filter((s: any) => s && s.chapterRole === 'fix' &&
+      String(s.chapterAnchor || '') === anchor && (s.project || projectOf(s.id)) === proj)
+    if (rounds.length < 2) return null
+    return rounds.slice().sort((a: any, b: any) => mtimeMs(b) - mtimeMs(a))
+  }
+  if (!self.chapterId) return null
   const members: any[] = []
   ;(dedupeChapterAttempts(sessions || [])).forEach((s) => {
     if (!s || !s.chapterId) return
+    // 修复已经作为章节树的子行显示，**不进**转换/核对的尝试链——它们挂在同一次
+    // 转换上，混进来会把"这一章转过几次"搅乱（P60）。
+    if (s.chapterRole === 'fix') return
     if (s.chapterId !== self.chapterId) return
     // T194：**不再按角色分链**——转换与同一轮的核对是同一件事的两个角色（用户口径
     // "这俩是一体的"）。原来按角色过滤时，点一条核对会话会让整个列表从「#2 #1」
@@ -988,6 +1082,11 @@ export function dedupeChapterAttempts(items: any[]): any[] {
 /* 历史行的小标签：img2text 链路用阶段标签，章节会话统一给 `#N`（含第 1 次，
  * 否则同章的几条历史行看起来一模一样）。 */
 export function chainMemberTag(s: any): string {
+  // P60：修复转录没有章节尝试号（文件名是 `fix_<章>`，不是 convert_/checker_
+  // 前缀），按角色标「修复」+ 名字里的 `.tryN`（若有）；不编一个可能是错的 `#N`。
+  if (s && s.chapterRole === 'fix') {
+    return (s.archived ? '旧' : '') + '修复' + fixTranscriptTag(s)
+  }
   // 归档里的同号尝试来自更早一次父尝试（内容不同），标「旧」才不会和这一次的
   // 同号行混成"重复行"。
   // P58 观察：只给 `#N` 时，同一条链里会出现两个 `#1`（转换 #1 + 核对 #1），

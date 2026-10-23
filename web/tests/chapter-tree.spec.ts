@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chainMemberTag, dedupeChapterAttempts, plainTitle } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chainMemberTag, dedupeChapterAttempts, fixTranscriptTag, plainTitle } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 import { applyIndex, chapterPendingRetry } from '../src/data'
 
@@ -515,5 +515,103 @@ describe('T214 子行跟着父行的世代', () => {
     const withCheck = [...sessions, oldChk]
     expect(buildChapterTree(withCheck, oldParent.id)[0].children[0].checker!.id).toBe(oldChk.id)
     expect(buildChapterTree(withCheck, liveParent.id)[0].children[0].checker).toBeNull()
+  })
+})
+
+/* P60：修复会话（`fix_<章>.jsonl`）没有章节身份——文件名不是 convert_/checker_
+ * 前缀，扫描器给出的 `chapterId`/`chapterAttempt` 都是空的，唯一能挂靠的是
+ * `chapterAnchor`（它修的那次转换，与核对同一个口径，P59）。树上它们只是核对行
+ * 下面的子行：**绝不参与这一行的转换/核对挑选**。
+ */
+describe('P60 修复会话作为子行', () => {
+  const conv = (attempt = 1, mt = '2026-10-23T10:00:00Z', archived = false) => ({
+    id: (archived ? 'book/work/attempts/chapter_042/try1/work/sessions/' : 'book/work/sessions/') +
+      'convert_chapter_042' + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: 'chapter_042', chapterRole: 'convert',
+    chapterAttempt: attempt, archived, mtime: mt,
+  })
+  const fix = (name: string, anchor: string, mt: string, over: Record<string, unknown> = {}) => ({
+    id: 'book/work/temp/conv_chapter_042/work/_subdivision/child_01/node/sessions/' + name,
+    project: 'book', chapterRole: 'fix', chapterAnchor: anchor, mtime: mt, ...over,
+  })
+
+  it('锚点相同的两轮修复都列在行下（旧 → 新），行头仍是转换会话', () => {
+    const c = conv()
+    const first = fix('fix_chapter_042.jsonl', 'convert_chapter_042', '2026-10-23T11:00:00Z')
+    const second = fix('fix_chapter_042.try2.jsonl', 'convert_chapter_042', '2026-10-23T11:30:00Z')
+    // 入参顺序反着给，输出仍按时间旧 → 新。
+    const node = buildChapterTree([second, c, first])[0]
+    expect(node.convert!.id).toBe(c.id)
+    expect(node.checker).toBeNull()
+    expect(node.fixes.map((f: any) => f.id)).toEqual([first.id, second.id])
+    // 修复绝不变成这一行的转换（它就是子行）。
+    expect(node.convert!.chapterRole).toBe('convert')
+  })
+
+  it('锚定另一次转换的修复不挂上来', () => {
+    const c1 = conv(1)
+    const c2 = conv(2, '2026-10-23T12:00:00Z')
+    const other = fix('fix_chapter_042.jsonl', 'convert_chapter_042', '2026-10-23T11:00:00Z')
+    const node = buildChapterTree([c1, c2, other])[0]
+    expect(node.convert!.id).toBe(c2.id)
+    expect(node.fixes).toEqual([])
+  })
+
+  it('钉住一条修复会话时，那一行就显示它锚定的那次转换', () => {
+    const c1 = conv(1)
+    const c2 = conv(2, '2026-10-23T12:00:00Z')
+    const onOld = fix('fix_chapter_042.jsonl', 'convert_chapter_042', '2026-10-23T11:00:00Z')
+    const defaultRow = buildChapterTree([c1, c2, onOld])[0]
+    expect(defaultRow.convert!.id).toBe(c2.id)
+    expect(defaultRow.fixes).toEqual([])
+    const pinnedRow = buildChapterTree([c1, c2, onOld], onOld.id)[0]
+    expect(pinnedRow.convert!.id).toBe(c1.id)
+    expect(pinnedRow.fixes.map((f: any) => f.id)).toEqual([onOld.id])
+  })
+
+  it('归档那一代的修复不挂到工作树这一行上', () => {
+    const live = conv(1, '2026-10-23T10:00:00Z')
+    const archived = conv(1, '2026-10-22T10:00:00Z', true)
+    const oldFix = fix('fix_chapter_042.jsonl', 'convert_chapter_042', '2026-10-22T11:00:00Z', { archived: true })
+    expect(buildChapterTree([live, archived, oldFix])[0].fixes).toEqual([])
+    expect(buildChapterTree([live, archived, oldFix], archived.id)[0].fixes.map((f: any) => f.id)).toEqual([oldFix.id])
+  })
+
+  it('没有修复时 fixes 是空数组（树上不多出任何行）', () => {
+    expect(buildChapterTree([conv()])[0].fixes).toEqual([])
+    expect(buildChapterTree([])).toEqual([])
+  })
+
+  it('只有修复会话时不凭空造出一个节点', () => {
+    const lone = fix('fix_chapter_042.jsonl', 'convert_chapter_042', '2026-10-23T11:00:00Z')
+    expect(buildChapterTree([lone])).toEqual([])
+  })
+
+  it('修复会话自己的历史 = 同一锚点的其他修复轮次（新 → 旧）', () => {
+    const c1 = conv(1)
+    const c2 = conv(2, '2026-10-23T12:00:00Z')
+    const first = fix('fix_chapter_042.jsonl', 'convert_chapter_042.try2', '2026-10-23T13:00:00Z')
+    const second = fix('fix_chapter_042.try2.jsonl', 'convert_chapter_042.try2', '2026-10-23T13:30:00Z')
+    // 另一处（另一次的产物）的修复不能混进这条链。
+    const elsewhere = fix('fix_chapter_042.jsonl', 'convert_chapter_042', '2026-10-23T13:10:00Z')
+    const sessions = [c1, c2, first, second, elsewhere]
+    expect(chapterAttemptChain(sessions, second.id)!.map((s: any) => s.id)).toEqual([second.id, first.id])
+    // 只修过一次就不出「历史」页签。
+    expect(chapterAttemptChain([c1, first], first.id)).toBeNull()
+  })
+
+  it('转换会话的历史仍只有转换（修复只在树上显示）', () => {
+    const c1 = conv(1, '2026-10-23T09:00:00Z')
+    const c2 = conv(2, '2026-10-23T12:00:00Z')
+    const f = fix('fix_chapter_042.jsonl', 'convert_chapter_042.try2', '2026-10-23T13:00:00Z')
+    expect(chapterAttemptChain([c1, c2, f], c2.id)!.map((s: any) => s.id)).toEqual([c2.id, c1.id])
+  })
+
+  it('文件名里的 .tryN 原样标出，标签不编尝试号', () => {
+    expect(fixTranscriptTag(fix('fix_chapter_042.try2.jsonl', 'x', '2026-10-23T11:00:00Z'))).toBe('.try2')
+    expect(fixTranscriptTag(fix('fix_chapter_042.jsonl', 'x', '2026-10-23T11:00:00Z'))).toBe('')
+    // 修复转录没有 chapterAttempt，标签不能退回一个假的 #1。
+    expect(chainMemberTag(fix('fix_chapter_042.try2.jsonl', 'x', '2026-10-23T11:00:00Z'))).toBe('修复.try2')
+    expect(chainMemberTag(fix('fix_chapter_042.jsonl', 'x', '2026-10-23T11:00:00Z', { archived: true }))).toBe('旧修复')
   })
 })

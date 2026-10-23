@@ -15,7 +15,7 @@ import InlineMD from './InlineMD.vue'
 const members = computed(() => chainOfSession(state.sessions, state.current ? (state.current as any).id : null))
 
 /* 同一章的角色混在一条链里，行首给角色，编号才不会被误读成"同一件事的第几次"。 */
-const ROLE_LABEL: Record<string, string> = { convert: '转换', checker: '核对', continue: '继续', vector: '作图' }
+const ROLE_LABEL: Record<string, string> = { convert: '转换', checker: '核对', continue: '继续', vector: '作图', fix: '修复' }
 function roleLabel(s: any): string {
   return ROLE_LABEL[s && s.chapterRole] || ''
 }
@@ -47,7 +47,13 @@ function onRowClick(s: any) {
 /* P59：章节链只列**会话级**条目——用户口径：把一条核对转录按 user 轮拆成
  * 「轮 N / 拒绝 N 条 / 第 N 行 · M 行」没有用，一进去就应该看到这一章有哪几次
  * 转换、每次转换下面核对了哪几次。逐图（img2text）链保持原样。 */
-const chapterChain = computed(() => (members.value || []).some((s: any) => !!s.chapterId))
+const chapterChain = computed(() => (members.value || []).some((s: any) => !!s.chapterId || (s && s.chapterRole === 'fix')))
+
+/* P60：修复链只列同一处（同一锚点）的修复轮次，成员全是修复会话。 */
+const fixChain = computed(() => {
+  const list = members.value || []
+  return list.length > 0 && list.every((s: any) => s && s.chapterRole === 'fix')
+})
 
 const rounds = computed(() => {
   if (chapterChain.value) return []
@@ -81,6 +87,20 @@ const newest = computed(() => {
   const live = (members.value || []).filter((s: any) => !s.archived)
   return maxAttempt(live.length ? live : (members.value || []))
 })
+
+/* P60：修复转录没有尝试号（文件名是 `fix_<章>`，`chapterAttempt` 取不到值），
+ * 按号比较会让每一行都顶着「最新」——修复链改按链序（已按 mtime 新 → 旧排好）
+ * 标第一行。 */
+const newestFixId = computed(() => {
+  const live = (members.value || []).filter((s: any) => !s.archived)
+  const pool = live.length ? live : (members.value || [])
+  return pool.length ? String(pool[0].id) : ''
+})
+
+function isNewestRow(s: any): boolean {
+  if (fixChain.value) return !!s && String(s.id) === newestFixId.value
+  return (Number(s && s.chapterAttempt) || 1) === newest.value
+}
 
 /* 链里混着归档转录时给一句解释，否则「旧#1 / 归档」两枚标还是有人会当成重复行。 */
 const hasArchived = computed(() => (members.value || []).some((s: any) => !!s.archived))
@@ -130,7 +150,8 @@ function doDrop() {
     <div v-if="!members" class="history-empty">当前会话不属于任何调用链 / 重试链</div>
     <div v-else class="history-list">
       <div class="history-head">
-        <template v-if="chapterChain">这一章的全部会话（{{ members.length }}，每个转换后面跟着它名下的核对，新 → 旧）</template>
+        <template v-if="fixChain">同一处的修复轮次（{{ members.length }}，新 → 旧）</template>
+        <template v-else-if="chapterChain">这一章的全部会话（{{ members.length }}，每个转换后面跟着它名下的核对，新 → 旧）</template>
         <template v-else>这一章的全部会话（{{ members.length }}，转换与核对都在这里，新 → 旧）</template>
         <span v-if="hasArchived" class="history-old-note" title="带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话">· 带「旧」的是更早一次父尝试（已作废）留下的</span>
       </div>
@@ -172,7 +193,7 @@ function doDrop() {
         <span class="row-chip chain-tag history-tag">{{ chainMemberTag(s) }}</span>
         <InlineMD tag="span" class="history-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
         <span v-if="isCurrent(s)" class="history-cur">正在看</span>
-        <span v-if="(Number(s.chapterAttempt) || 1) === newest" class="history-latest">最新</span>
+        <span v-if="isNewestRow(s)" class="history-latest">最新</span>
         <span v-if="s.archived" class="history-arch" title="这份转录在 work/attempts 归档目录里（工作树那份已被搬走），不是当前工作区">归档</span>
         <span class="history-state" :class="endStateCls(s)">{{ endStateText(s) }}</span>
         <span class="history-time">{{ relTime(s.mtime) }}</span>

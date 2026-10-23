@@ -158,8 +158,10 @@ const groups = computed<GroupView[]>(() => {
       const chapterItems = items.filter((s: any) => !!s.chapterId)
       // T175：只钉住"正在看的那一条"——每个节点的重试次数是独立的，不能拿
       // 一个章节的 #2 去套全树；子会话与其它章节都按各自最新一次显示。
+      // P60：修复会话没有章节身份（文件名是 `fix_<章>`），但它也是树里的一行，
+      // 点开它时同样要钉住那一行（显示哪一次转换由它的锚点决定）。
       const cur: any = state.current as any
-      const pinId = cur && cur.chapterId ? String(cur.id) : ''
+      const pinId = cur && (cur.chapterId || cur.chapterRole === 'fix') ? String(cur.id) : ''
       const chapterRoots = stg === 'convert' && items.length > 0 && chapterItems.length === items.length
         ? buildChapterTree(items, pinId) : []
       const okey = groupKey('overflow', g.name + '/' + stg)

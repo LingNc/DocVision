@@ -7346,6 +7346,38 @@
     });
     return best;
   }
+  function fixTranscriptTag(s) {
+    const m = /\.try(\d+)$/.exec(convertBasename(s));
+    return m ? ".try" + m[1] : "";
+  }
+  function sortFixesOldestFirst(items) {
+    return (items || []).slice().sort((a, b) => {
+      const d = mtimeMs(a) - mtimeMs(b);
+      if (d) return d;
+      const ia = String(a && a.id || "");
+      const ib = String(b && b.id || "");
+      return ia < ib ? -1 : ia > ib ? 1 : 0;
+    });
+  }
+  function fixesForNode(node, convert, parentArchived, pool) {
+    if (!pool || !pool.length) return [];
+    const gen = convert ? !!convert.archived : parentArchived;
+    const want = convert ? convertBasename(convert) : "";
+    const hits = pool.filter((f) => {
+      if (!f) return false;
+      if (gen !== null && !!f.archived !== gen) return false;
+      const anchor = String(f.chapterAnchor || "");
+      if (anchor) return !!want && anchor === want;
+      return String(f.chapterId || "") === node.id;
+    });
+    return sortFixesOldestFirst(hits);
+  }
+  function anchoredConvert(items, fix) {
+    const anchor = String(fix && fix.chapterAnchor || "");
+    if (!anchor) return null;
+    const hits = (items || []).filter((s) => s && s.chapterId && s.chapterRole !== "checker" && s.chapterRole !== "fix" && convertBasename(s) === anchor && !!s.archived === !!(fix && fix.archived));
+    return newestOf(hits);
+  }
   function newestByMtime(items) {
     let best = null;
     (items || []).forEach((s) => {
@@ -7397,16 +7429,26 @@
     const byId = {};
     const parents = {};
     const byRole = {};
+    const fixPool = [];
+    const nodeOfSession = {};
+    let pinnedFix = null;
     let pinned = null;
     (items || []).forEach((session) => {
-      if (!(session == null ? void 0 : session.chapterId)) return;
+      if (!session) return;
+      if (session.chapterRole === "fix") {
+        fixPool.push(session);
+        if (pinId && session.id === pinId) pinnedFix = session;
+        return;
+      }
+      if (!session.chapterId) return;
       const id = String(session.chapterId);
-      const node = byId[id] || (byId[id] = { id, convert: null, checker: null, children: [] });
+      const node = byId[id] || (byId[id] = { id, convert: null, checker: null, fixes: [], children: [] });
       parents[id] = String(session.chapterParent || "");
       if (session.chapterRole !== "checker" && session.chapterRole !== "convert") return;
       const role = session.chapterRole === "checker" ? "checker" : "convert";
       const key = id + "|" + role;
       (byRole[key] || (byRole[key] = [])).push(session);
+      nodeOfSession[String(session.id)] = node;
       if (pinId && session.id === pinId) pinned = { node, role, session };
     });
     const roots = [];
@@ -7424,6 +7466,11 @@
       nodes.forEach((node) => sort(node.children));
     };
     sort(roots);
+    if (!pinned && pinnedFix) {
+      const hit = anchoredConvert(items, pinnedFix);
+      const node = hit ? nodeOfSession[String(hit.id)] : null;
+      if (node) pinned = { node, role: "convert", session: hit };
+    }
     const pin = pinned;
     const resolve2 = (node, parentArchived) => {
       const here = pin && pin.node === node ? pin : null;
@@ -7445,6 +7492,7 @@
         node.checker = checkerForConvert(byRole[node.id + "|checker"] || [], node.convert, !!here);
       }
       const archived = node.convert ? !!node.convert.archived : parentArchived;
+      node.fixes = fixesForNode(node, node.convert, archived, fixPool);
       node.children.forEach((child) => resolve2(child, archived));
     };
     roots.forEach((root) => resolve2(root, null));
@@ -7643,11 +7691,20 @@
     (sessions || []).forEach((s) => {
       if (s && s.id === id) self2 = s;
     });
-    if (!self2 || !self2.chapterId) return null;
+    if (!self2) return null;
     const proj = self2.project || projectOf(self2.id);
+    if (self2.chapterRole === "fix") {
+      const anchor = String(self2.chapterAnchor || "");
+      if (!anchor) return null;
+      const rounds = (sessions || []).filter((s) => s && s.chapterRole === "fix" && String(s.chapterAnchor || "") === anchor && (s.project || projectOf(s.id)) === proj);
+      if (rounds.length < 2) return null;
+      return rounds.slice().sort((a, b) => mtimeMs(b) - mtimeMs(a));
+    }
+    if (!self2.chapterId) return null;
     const members = [];
     dedupeChapterAttempts(sessions || []).forEach((s) => {
       if (!s || !s.chapterId) return;
+      if (s.chapterRole === "fix") return;
       if (s.chapterId !== self2.chapterId) return;
       if ((s.project || projectOf(s.id)) !== proj) return;
       members.push(s);
@@ -7686,6 +7743,9 @@
     return out;
   }
   function chainMemberTag(s) {
+    if (s && s.chapterRole === "fix") {
+      return (s.archived ? "旧" : "") + "修复" + fixTranscriptTag(s);
+    }
     if (s && s.chapterId) {
       const tag = (s.chapterRole === "checker" ? "核对" : "") + "#" + (Number(s.chapterAttempt) || 1);
       return (s.archived ? "旧" : "") + tag;
@@ -9332,6 +9392,17 @@
   };
   const _hoisted_13$5 = ["title", "onClick"];
   const _hoisted_14$5 = ["onClick"];
+  const _hoisted_15$5 = ["data-id", "title", "onClick"];
+  const _hoisted_16$5 = { class: "fix-marker" };
+  const _hoisted_17$5 = {
+    key: 0,
+    class: "fix-try"
+  };
+  const _hoisted_18$5 = {
+    key: 2,
+    class: "chapter-arch",
+    title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
+  };
   const _sfc_main$n = /* @__PURE__ */ defineComponent({
     ...{ name: "ChapterSessionTree" },
     __name: "ChapterSessionTree",
@@ -9348,6 +9419,7 @@
       function nodeContainsCurrent(node) {
         var _a, _b;
         if (((_a = node.convert) == null ? void 0 : _a.id) === currentId.value || ((_b = node.checker) == null ? void 0 : _b.id) === currentId.value) return true;
+        if ((node.fixes || []).some((f) => f && f.id === currentId.value)) return true;
         return node.children.some(nodeContainsCurrent);
       }
       function nodeKey(node) {
@@ -9357,7 +9429,10 @@
         return chapterWantOpen(props.scope, node.id, nodeContainsCurrent(node));
       }
       function hasBody(node) {
-        return !!node.convert && !!node.checker || node.children.length > 0;
+        return !!node.convert && !!node.checker || node.children.length > 0 || (node.fixes || []).length > 0;
+      }
+      function fixStateText(session) {
+        return session && session.live ? "运行中" : "";
       }
       function toggle(node, ev) {
         ev.stopPropagation();
@@ -9499,6 +9574,29 @@
                     onClick: ($event) => emit2("info", node.checker)
                   }, "ⓘ", 8, _hoisted_14$5)
                 ], 2)) : createCommentVNode("", true),
+                (openBlock(true), createElementBlock(Fragment, null, renderList(node.fixes, (fx, i) => {
+                  return openBlock(), createElementBlock("div", {
+                    key: "fix:" + fx.id + ":" + i,
+                    class: normalizeClass(["chapter-fix", { active: currentId.value === fx.id }])
+                  }, [
+                    createBaseVNode("button", {
+                      class: "fix-main session-row",
+                      type: "button",
+                      role: "treeitem",
+                      "data-id": fx.id,
+                      title: unref(sessionTip)(fx),
+                      onClick: ($event) => emit2("select", fx)
+                    }, [
+                      createBaseVNode("span", _hoisted_16$5, "修复 " + toDisplayString(i + 1), 1),
+                      unref(fixTranscriptTag)(fx) ? (openBlock(), createElementBlock("span", _hoisted_17$5, toDisplayString(unref(fixTranscriptTag)(fx)), 1)) : createCommentVNode("", true),
+                      fixStateText(fx) ? (openBlock(), createElementBlock("span", {
+                        key: 1,
+                        class: normalizeClass(["chapter-state", stateTone(fixStateText(fx))])
+                      }, toDisplayString(fixStateText(fx)), 3)) : createCommentVNode("", true),
+                      fx.archived ? (openBlock(), createElementBlock("span", _hoisted_18$5, "归档")) : createCommentVNode("", true)
+                    ], 8, _hoisted_15$5)
+                  ], 2);
+                }), 128)),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
                   key: 1,
                   nodes: node.children,
@@ -9521,7 +9619,7 @@
     }
     return target2;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-7ecd4785"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-b01c8e57"]]);
   const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"
@@ -9764,7 +9862,7 @@
             const agg = stageChapterAggregate(stg, items, !!state.filter);
             const chapterItems = items.filter((s) => !!s.chapterId);
             const cur = state.current;
-            const pinId = cur && cur.chapterId ? String(cur.id) : "";
+            const pinId = cur && (cur.chapterId || cur.chapterRole === "fix") ? String(cur.id) : "";
             const chapterRoots = stg === "convert" && items.length > 0 && chapterItems.length === items.length ? buildChapterTree(items, pinId) : [];
             const okey = groupKey("overflow", g.name + "/" + stg);
             const shown0 = items;
@@ -10069,7 +10167,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-c5050c48><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-c5050c48><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-c5050c48></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-c5050c48><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-c5050c48></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-c5050c48></path></svg></span>', 1)),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-5f65ee61><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5f65ee61><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5f65ee61></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5f65ee61><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-5f65ee61></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5f65ee61></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$3, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -10400,7 +10498,7 @@
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-c5050c48"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-5f65ee61"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
@@ -13072,7 +13170,7 @@
   };
   const _hoisted_3$3 = { class: "history-head" };
   const _hoisted_4$3 = {
-    key: 2,
+    key: 3,
     class: "history-old-note",
     title: "带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话"
   };
@@ -13121,7 +13219,7 @@
     __name: "HistoryPanel",
     setup(__props) {
       const members = computed(() => chainOfSession(state.sessions, state.current ? state.current.id : null));
-      const ROLE_LABEL = { convert: "转换", checker: "核对", continue: "继续", vector: "作图" };
+      const ROLE_LABEL = { convert: "转换", checker: "核对", continue: "继续", vector: "作图", fix: "修复" };
       function roleLabel(s) {
         return ROLE_LABEL[s && s.chapterRole] || "";
       }
@@ -13140,7 +13238,11 @@
       function onRowClick(s) {
         selectSession(s.id);
       }
-      const chapterChain = computed(() => (members.value || []).some((s) => !!s.chapterId));
+      const chapterChain = computed(() => (members.value || []).some((s) => !!s.chapterId || s && s.chapterRole === "fix"));
+      const fixChain = computed(() => {
+        const list = members.value || [];
+        return list.length > 0 && list.every((s) => s && s.chapterRole === "fix");
+      });
       const rounds = computed(() => {
         if (chapterChain.value) return [];
         const s = state.current;
@@ -13165,6 +13267,15 @@
         const live = (members.value || []).filter((s) => !s.archived);
         return maxAttempt(live.length ? live : members.value || []);
       });
+      const newestFixId = computed(() => {
+        const live = (members.value || []).filter((s) => !s.archived);
+        const pool = live.length ? live : members.value || [];
+        return pool.length ? String(pool[0].id) : "";
+      });
+      function isNewestRow(s) {
+        if (fixChain.value) return !!s && String(s.id) === newestFixId.value;
+        return (Number(s && s.chapterAttempt) || 1) === newest.value;
+      }
       const hasArchived = computed(() => (members.value || []).some((s) => !!s.archived));
       function pairOf(s) {
         if (!s || !s.chapterId) return null;
@@ -13199,9 +13310,11 @@
         }, [
           !members.value ? (openBlock(), createElementBlock("div", _hoisted_1$3, "当前会话不属于任何调用链 / 重试链")) : (openBlock(), createElementBlock("div", _hoisted_2$3, [
             createBaseVNode("div", _hoisted_3$3, [
-              chapterChain.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+              fixChain.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+                createTextVNode("同一处的修复轮次（" + toDisplayString(members.value.length) + "，新 → 旧）", 1)
+              ], 64)) : chapterChain.value ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                 createTextVNode("这一章的全部会话（" + toDisplayString(members.value.length) + "，每个转换后面跟着它名下的核对，新 → 旧）", 1)
-              ], 64)) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+              ], 64)) : (openBlock(), createElementBlock(Fragment, { key: 2 }, [
                 createTextVNode("这一章的全部会话（" + toDisplayString(members.value.length) + "，转换与核对都在这里，新 → 旧）", 1)
               ], 64)),
               hasArchived.value ? (openBlock(), createElementBlock("span", _hoisted_4$3, "· 带「旧」的是更早一次父尝试（已作废）留下的")) : createCommentVNode("", true)
@@ -13257,7 +13370,7 @@
                   plain: unref(plainTitle)(s)
                 }, null, 8, ["text", "plain"]),
                 isCurrent(s) ? (openBlock(), createElementBlock("span", _hoisted_15$1, "正在看")) : createCommentVNode("", true),
-                (Number(s.chapterAttempt) || 1) === newest.value ? (openBlock(), createElementBlock("span", _hoisted_16$1, "最新")) : createCommentVNode("", true),
+                isNewestRow(s) ? (openBlock(), createElementBlock("span", _hoisted_16$1, "最新")) : createCommentVNode("", true),
                 s.archived ? (openBlock(), createElementBlock("span", _hoisted_17$1, "归档")) : createCommentVNode("", true),
                 createBaseVNode("span", {
                   class: normalizeClass(["history-state", endStateCls(s)])
@@ -13293,7 +13406,7 @@
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-e7b8c016"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-cc37ac40"]]);
   const pending = /* @__PURE__ */ ref(null);
   const queued = /* @__PURE__ */ ref(null);
   const prevId = /* @__PURE__ */ ref("");
