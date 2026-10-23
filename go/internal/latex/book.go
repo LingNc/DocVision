@@ -1764,6 +1764,14 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		_, runErr := sess.Run(session.RunOptions{UserText: initial})
 		release()
+		// P58 扩展：**报错终止**也走复盘链路（与"没提交"同一条；非致命错误
+		// 才复盘，余额不足/无资源包由 rescueAfterError 自己挡掉）。开关关着或
+		// 复盘没救回来时 runErr 原样返回，行为与引入本功能之前一致。
+		if runErr != nil {
+			runErr = r.rescueAfterError(sess, tid, "[convert]", base, "submit",
+				func() bool { return submit.Submitted },
+				rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath}, runErr)
+		}
 		if runErr != nil {
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
 			return fmt.Errorf("会话失败: %w", runErr)
@@ -1822,6 +1830,12 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		convState(rowStateRunning)
 		_, runErr := sess.Run(session.RunOptions{UserText: integrationText})
 		release()
+		// P58 扩展：整合轮报错终止同样走复盘链路（同一会话、同一套结论处理）。
+		if runErr != nil {
+			runErr = r.rescueAfterError(sess, tid, "[convert]", base, "submit",
+				func() bool { return submit.Submitted },
+				rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath}, runErr)
+		}
 		if runErr != nil {
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
 			return fmt.Errorf("父章节整合会话失败: %w", runErr)
@@ -2708,44 +2722,21 @@ func (r *Runner) remindSubmit(sess *session.Session, tid int, tag, label, submit
 // 截断到最后一个干净轮次继续（排进重试队列，与页面的 ⤓ 同一条通路），救不回
 // 来就按失败收尾。没有 target（样式/划分/装配等阶段）时行为与老路径一致。
 func (r *Runner) remindOrRescue(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool, target rescueTarget) bool {
+	if sess != nil {
+		// P58 扩展②：会话里已经纠正过"你的工具确实可用"，它仍然收尾——把这件事
+		// 告诉复盘者（退化的强信号），结论处理与审计记录一字不变。
+		target.NoToolNudge = sess.ToolAccessNudged()
+	}
 	hint := ""
 	for remind := 0; remind < 2 && !submitted(); remind++ {
-		if target.Base != "" && r.cfg.Latex.RescueEnabled() {
-			// 预算按"本次尝试的转录"计数：新尝试 = 新转录 = 预算重置。
-			if r.rescueBudget(target.Base + "/" + target.Role + "/" + filepath.Base(target.TrPath)) {
-				if v, ok := r.rescueReview(target, tid); ok {
-					switch v.Verdict {
-					case "fail":
-						r.log.LogWarning(tid, tag, label, "复盘判定这条会话无法挽救，不再提醒："+v.Reason)
-						return false
-					case "truncate":
-						if err := r.rescueQueueTruncate(target, v.From); err != nil {
-							r.log.LogWarning(tid, tag, label, "复盘要求截断，但排队失败："+err.Error())
-						} else {
-							r.log.LogWarning(tid, tag, label, fmt.Sprintf("复盘判定会话已退化，已排队从第 %d 条记录继续：%s", v.From, v.Reason))
-							return false
-						}
-					case "retry":
-						if v.Hint != "" {
-							hint = v.Hint
-						}
-					}
-				}
-			} else {
-				r.log.LogWarning(tid, tag, label, "复盘次数已用完，退回普通提醒")
-			}
+		if dec := r.maybeRescue(tid, tag, label, target); dec.Stop {
+			return false
+		} else if dec.Hint != "" {
+			hint = dec.Hint
 		}
 		r.log.LogWarning(tid, tag, label, "会话结束但未提交，发送提交提醒")
 		release := r.acquireChapterSlot()
-		// T209：提醒里点名"要真的发一次工具调用"。实测模型会把这个动作**写成
-		// 正文**（`\submit{…}` / 裸 JSON 字符串，finish=stop、tool_calls 为空），
-		// 于是提醒发两遍、钱花了、会话还是没有提交——只重复"你还没提交"没有用，
-		// 得说清"写在正文里不算"。
-		remindText := "You have NOT submitted yet — nothing counts until you make a real `" + submitTool + "` TOOL CALL with its JSON arguments. Writing the call, its JSON, or `\\submit{...}` inside your reply text does nothing; use the tool itself. Call " + submitTool + " now (fix and compile first if something is still broken)."
-		if hint != "" {
-			remindText += " Reviewer note: " + hint
-		}
-		_, runErr := sess.Run(session.RunOptions{UserText: remindText})
+		_, runErr := sess.Run(session.RunOptions{UserText: submitReminderText(submitTool, hint)})
 		release()
 		if runErr != nil {
 			r.log.LogWarning(tid, tag, label, "提交提醒轮失败:", runErr)
@@ -2753,4 +2744,87 @@ func (r *Runner) remindOrRescue(sess *session.Session, tid int, tag, label, subm
 		}
 	}
 	return submitted()
+}
+
+// rescueDecision 是复盘结论在调用方看来意味着什么。
+type rescueDecision struct {
+	Verdict string // retry | truncate | fail（空 = 没复盘 / 没拿到结论）
+	From    int    // truncate：最后一条好记录的行号
+	Reason  string
+	Hint    string // retry：拼进提醒的一句
+	Stop    bool   // fail，或 truncate 已排进重试队列 → 调用方必须停下
+}
+
+// maybeRescue 是 P58 复盘的**唯一入口**：开关、预算、结论处理都只在这里，
+// 三种触发共用它——
+//
+//	① Run 正常结束但没提交（target.Cause == ""）；
+//	② Run 报错终止、且不是致命错误（target.Cause != ""，由 rescueAfterError 填）；
+//	③ 会话层纠正过"工具不可用"之后仍然没提交（target.NoToolNudge）。
+//
+// 关闭 `latex.rescue.enabled` 时它在第一行就返回空结论：不起会话、不写转录、
+// 不改任何后续动作。
+func (r *Runner) maybeRescue(tid int, tag, label string, target rescueTarget) rescueDecision {
+	if target.Base == "" || !r.cfg.Latex.RescueEnabled() {
+		return rescueDecision{}
+	}
+	// 预算按"本次尝试的转录"计数：新尝试 = 新转录 = 预算重置。
+	if !r.rescueBudget(target.Base + "/" + target.Role + "/" + filepath.Base(target.TrPath)) {
+		r.log.LogWarning(tid, tag, label, "复盘次数已用完，退回普通提醒")
+		return rescueDecision{}
+	}
+	v, ok := r.rescueReview(target, tid)
+	if !ok {
+		return rescueDecision{}
+	}
+	dec := rescueDecision{Verdict: v.Verdict, From: v.From, Reason: v.Reason, Hint: v.Hint}
+	switch v.Verdict {
+	case "fail":
+		r.log.LogWarning(tid, tag, label, "复盘判定这条会话无法挽救，不再提醒："+v.Reason)
+		dec.Stop = true
+	case "truncate":
+		if err := r.rescueQueueTruncate(target, v.From); err != nil {
+			r.log.LogWarning(tid, tag, label, "复盘要求截断，但排队失败："+err.Error())
+			break
+		}
+		r.log.LogWarning(tid, tag, label, fmt.Sprintf("复盘判定会话已退化，已排队从第 %d 条记录继续：%s", v.From, v.Reason))
+		dec.Stop = true
+	}
+	return dec
+}
+
+// rescueAfterError 是 P58 扩展的**报错终止**触发点：Run 返回了非致命错误时，
+// 先走与"没提交"完全相同的那条链路（同一个复盘会话、同一套结论处理、同一行
+// 审计记录），只是把"为什么停下"写进 target.Cause 让复盘者看见。
+//
+// 返回 nil = 复盘 + 提醒之后会话又活过来了（调用方继续按正常流程收尾）；
+// 否则**原样返回 cause**，调用方照旧把这一章记成失败。
+//
+// 以下情况一律原样返回、一个字节都不多写（`latex.rescue.enabled: false` 的
+// 回落就是这样成立的）：开关关着、没有转录可复盘、错误是致命错误（余额不足/
+// 无可用资源包——换会话也救不回来，复盘只会白烧一次模型调用）。
+func (r *Runner) rescueAfterError(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool, target rescueTarget, cause error) error {
+	if cause == nil || target.Base == "" || target.TrPath == "" ||
+		!r.cfg.Latex.RescueEnabled() || isSessionFatalError(cause.Error()) {
+		return cause
+	}
+	target.Cause = cause.Error()
+	r.log.LogWarning(tid, tag, label, "会话报错终止（非致命），交给复盘链路："+cause.Error())
+	if r.remindOrRescue(sess, tid, tag, label, submitTool, submitted, target) {
+		return nil
+	}
+	return cause
+}
+
+// submitReminderText 是"必须真的发一次 submit 工具调用"的那句话（T209/P58）：
+// 提醒轮与报错续跑共用同一份文案，免得两处措辞分叉。
+func submitReminderText(submitTool, hint string) string {
+	// 实测模型会把这个动作**写成正文**（`\submit{…}` / 裸 JSON 字符串，
+	// finish=stop、tool_calls 为空），于是提醒发两遍、钱花了、会话还是没有
+	// 提交——只重复"你还没提交"没有用，得说清"写在正文里不算"。
+	remindText := "You have NOT submitted yet — nothing counts until you make a real `" + submitTool + "` TOOL CALL with its JSON arguments. Writing the call, its JSON, or `\\submit{...}` inside your reply text does nothing; use the tool itself. Call " + submitTool + " now (fix and compile first if something is still broken)."
+	if hint != "" {
+		remindText += " Reviewer note: " + hint
+	}
+	return remindText
 }

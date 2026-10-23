@@ -12,7 +12,7 @@
 #   3. 未知键不生效：拼错一个键名不会有任何报错，启动时只会给一行"未知配置键"
 #      告警（`docvision setup` 保存时会把它拦下来）。
 
-config_version: 23
+config_version: 24
 
 # MinerU API Configuration
 mineru:
@@ -139,12 +139,15 @@ latex:
   checker_concurrency: 0         # 章节核对会话并发（T179）；0=沿用 concurrency。核对在读 PDF/原书页、转换在写 .tex，分开排队
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留
-  # P58：会话"跑完但没 submit"时的**复盘**。默认开：先起一条只读的复盘会话
-  # 看那条会话自己的转录，给出 retry（会话还健康，再提醒一次）/ truncate（已退化，
-  # 截断到最后一个干净轮次继续）/ fail（救不回来）三种结论之一，再由代码执行。
-  # 复盘会话没有任何可写挂载，最坏后果是一次截断（源转录与归档尝试都留着）。
+  # P58：会话**非正常收尾**时的复盘。覆盖三种触发，结论处理完全同一条：
+  # ① 跑完但没 submit；② 报错终止（非致命——余额不足/无资源包不算）；
+  # ③ 声称"工具不可用"、纠正过一次后仍然没 submit。默认开：先起一条只读的
+  # 复盘会话看那条会话自己的转录，给出 retry（会话还健康，再提醒一次）/
+  # truncate（已退化，截断到最后一个干净轮次继续）/ fail（救不回来）三种结论
+  # 之一，再由代码执行。复盘会话没有任何可写挂载，最坏后果是一次截断（源转录
+  # 与归档尝试都留着）。
   rescue:
-    enabled: true                # 默认开；false = 退回"只发提醒"的老路径
+    enabled: true                # 默认开；false = 三种触发全部退回"只发提醒"的老路径
     max_per_attempt: 2           # 同一次尝试最多复盘几次（防复盘循环）
     keep_records: false          # 复盘会话的转录是否落盘（--debug 下强制落盘）
     model: "rescue"              # 复盘会话的模型条目；空 = 跟随 checker_model

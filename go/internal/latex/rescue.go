@@ -43,6 +43,15 @@ type rescueTarget struct {
 	Role    string // convert | checker
 	TrPath  string // 目标会话的转录（绝对路径）
 	Label   string // 日志标签
+	// Cause 非空表示这条会话是**报错终止**的（Run 返回了错误），调用方已经
+	// 排除致命错误（余额不足/无可用资源包）。它不影响会话、工具与结论处理，
+	// 只让复盘者的第一句话看到"停下来的原因是报错"而不是"模型自己收尾了"——
+	// 这正是 `retry` 那一档（外部瞬时故障）该被认出来的场合。
+	Cause string
+	// NoToolNudge 为真表示会话里已经用过一次「你的工具确实可用」的纠正，之后
+	// 仍然没有提交——"工具不可用"是幻觉，这是退化的强信号。同样只进复盘者的
+	// 第一段话，结论处理一字不变。
+	NoToolNudge bool
 }
 
 // transcriptLine 是复盘工具看到的一行（物理行号，1 起）。
@@ -522,8 +531,18 @@ func (r *Runner) rescueReview(t rescueTarget, tid int) (rescueVerdict, bool) {
 			defer tr.Close()
 		}
 	}
+	// P58 扩展：三种触发（没提交 / 报错终止 / 纠正过"工具不可用"）共用同一条
+	// 复盘会话、同一套工具与同一套结论处理；差别只在第一段话把"为什么停下"说准，
+	// 否则复盘者会把外部瞬时故障当成模型自己收尾（反之亦然）。
 	userText := fmt.Sprintf("The %s session for chapter %s ended its turn without calling submit. Its transcript has %d physical lines (%d message lines). Review it and submit one verdict.",
 		t.Role, t.Base, len(lines), countKind(lines, "msg"))
+	if t.Cause != "" {
+		userText = fmt.Sprintf("The %s session for chapter %s ended with an error (%s) instead of a submit call. Its transcript has %d physical lines (%d message lines). Review it and submit one verdict.",
+			t.Role, t.Base, clipOneLine(t.Cause, 400), len(lines), countKind(lines, "msg"))
+	}
+	if t.NoToolNudge {
+		userText += " Note: this session claimed that its tools were not available; the runner already corrected that once (the tools are always sent with every request) and it still ended without submit."
+	}
 	// 复盘也是一次模型调用，占一个章节槽位（与提醒轮同一条规矩），免得在
 	// 并发已满时凭空多开一条会话。
 	release := r.acquireChapterSlot()

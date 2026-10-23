@@ -334,6 +334,12 @@ func (s *Session) Label() string { return s.label }
 // SetLabel updates the session label.
 func (s *Session) SetLabel(l string) { s.label = l }
 
+// ToolAccessNudged reports whether this session already received the
+// "your tools ARE available" correction (the model claimed it had no tools
+// although they are always sent). P58 扩展：这种收尾是退化的强信号，runner
+// 用它决定复盘时要告诉复盘者"纠正已经用过了、它仍然没提交"。
+func (s *Session) ToolAccessNudged() bool { return s.toolAccessNudged }
+
 // Messages returns a copy of the conversation so callers can persist
 // or inspect it.
 func (s *Session) Messages() []ChatMessage {

@@ -109,6 +109,8 @@
 
 **实现结果（2026-10-22）**：三步一次做完。`internal/latex/rescue.go`（三个工具 + 复盘会话 + 审计日志 + 预算 + 模型解析）、`remindOrRescue`（convert 与 checker 两处都接上，样式/划分/装配等阶段不受影响）、`rescueQueueTruncate`（排 `role=continue` 的请求，复用页面 ⤓ 那条通路；checker 排 `role=checker` 走 `continueCheckerFrom`）、预览侧 `rescue` 阶段（`StageTitles` = 错误处理、`StageOrder` 里排最后、`LabelFor` 认 `rescue_` 前缀）、提示词 `latex_rescue.system.md`、配置块 `latex.rescue.*`（开关/预算/记录/模型指针）+ `latex.sessions.rescue`（上下文 128K、轮次 12、其余继承 checker）+ 模型条目 `models.rescue`（写在 `models.checker` 下面、`extends: checker`），配置 v22、`docs/config.md`/`docs/sessions.md`/CHANGELOG 同步。测试钉住：`read_session` 的尾窗/`from`/`max_chars=0`、`session_stats` 点名正文工具调用、`submit` 校验、排队请求的角色与 `From`/`Path`、预算默认 2 次、模型回退链、预览阶段归组。**判定口径（2026-10-22 用户调整）**：`truncate` 是默认——会话本身有问题（坏的一轮、工具用错、拒绝、重复/乱码、上下文被错误前提污染、已经做错的工作）就截断，retry 只会把错误留在上下文里；`retry` 只留给**聊天记录干净、纯外部瞬时故障**（断网、API 错误、`finish=length` 截断、进程中断），拿不准一律 `truncate`。提示词里写死这条优先级。
 
+**触发点扩展（2026-10-22 第二轮，用户口径）**：上面"只在 Run 正常结束但没提交"那一条作废——**报错终止（非致命）**与**"声称没有工具"纠正过一次后仍未提交**也进同一条复盘链路（`rescueAfterError` / `maybeRescue`，同一会话、同一套结论处理、同一行审计记录；致命错误余额不足/无资源包不复盘），`latex.rescue.enabled: false` 时三种触发全部退回引入复盘之前的行为（请求数/文件逐字节不变），配置版本 23 → 24（键面未变，只是开关覆盖面扩大）。
+
 **已知边界**：递归子章节的转换会话如果被判 `truncate`，`role=continue` 会被 T211 的分流折成"继续跑父章节"（`From` 丢弃，等于从会话末尾续跑）——子章节的退化目前靠父章节续跑兜底，没有按行号精确截断；子章节的**核对**会话不受影响（`role=checker` 的 `From` 一路可用）。
 
 ### P59 预览：以「转换会话」为唯一锚点组织核对与子会话（已实现）

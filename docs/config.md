@@ -118,7 +118,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.chapter_granularity` | 档位1 章节拆分粒度：large=大章整体 / medium=按本书自动给出最合理拆分（不拆太细也不太大块）/ small=按小节拆分 | medium |
 | `latex.keep_temp_dirs` | 保留 `<项目>/work/temp/` 下的临时工作目录（拆章沙箱、逐章转换/修复工作区 `conv_<章>`、矢量图工作区） | false |
 | `latex.keep_session_records` | 保留成功会话的 JSONL 转录（与上一项独立）；debug 日志下两项都必定保留 | true（旧版默认 false） |
-| `latex.rescue.enabled` | 会话"跑完但没 submit"时先起一条只读的**复盘会话**看它的转录，得出 `retry`（还健康，照常提醒）/ `truncate`（已退化，截断到最后一个干净轮次继续）/ `fail`（救不回来）三种结论之一；false 退回"只发提醒"的老路径 | true |
+| `latex.rescue.enabled` | 会话**非正常收尾**时先起一条只读的**复盘会话**看它的转录，得出 `retry`（还健康，照常提醒）/ `truncate`（已退化，截断到最后一个干净轮次继续）/ `fail`（救不回来）三种结论之一。三种触发共用这一条链路：① 跑完但没 submit；② **报错终止**（非致命错误——余额不足/无可用资源包这类致命错误不复盘，直接上报）；③ **声称"工具/工作区不可用"**、会话层纠正过一次之后仍然没 submit。false 时三种触发全部退回"只发提醒"的老路径（请求数与文件与引入开关之前逐字节相同） | true |
 | `latex.rescue.max_per_attempt` | 同一次尝试最多复盘几次（防"复盘 → 又没交 → 再复盘"） | 2 |
 | `latex.rescue.keep_records` | 复盘会话的转录是否落盘到 `work/sessions/rescue_*.jsonl`（默认只写一行审计记录 `work/rescue/log.jsonl`）；`--debug` 强制落盘 | false |
 | `latex.rescue.model` | 复盘会话用的模型条目；空 = 跟随 `latex.checker_model`（模板预置了 `models.rescue`，`extends: checker`） | `"rescue"` |
@@ -155,7 +155,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **23**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 23 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **24**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 24 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |

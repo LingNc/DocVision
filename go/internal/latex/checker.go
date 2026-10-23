@@ -214,36 +214,23 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 			// P58：先让复盘会话看一眼——还健康就照常提醒；已经退化成正文工具调用/
 			// 重复内容时，截断到最后一个干净轮次再核对（排进重试队列，与页面
 			// 的 ⤓ 同一条通路）；救不回来就直接上报，不再拿同一个坏会话烧两轮。
-			hint := ""
-			if r.cfg.Latex.RescueEnabled() {
-				target := rescueTarget{ProjDir: proj, Base: base, Role: "checker", TrPath: trPath}
-				if r.rescueBudget(base + "/checker/" + filepath.Base(trPath)) {
-					if v, ok := r.rescueReview(target, tid); ok {
-						switch v.Verdict {
-						case "fail":
-							r.log.LogWarning(tid, "[checker]", base, "复盘判定核对会话无法挽救："+v.Reason)
-							if tr != nil {
-								tr.Close()
-								tr = nil
-							}
-							r.keepCheckerTranscript(trPath, strict)
-							return false, "checker 复盘判定会话无法挽救：" + v.Reason
-						case "truncate":
-							if err := r.rescueQueueTruncate(target, v.From); err == nil {
-								r.log.LogWarning(tid, "[checker]", base, fmt.Sprintf("复盘判定核对会话已退化，已排队从第 %d 条记录继续核对：%s", v.From, v.Reason))
-								if tr != nil {
-									tr.Close()
-									tr = nil
-								}
-								r.keepCheckerTranscript(trPath, strict)
-								return false, "checker 会话已退化，已排队从干净轮次继续核对"
-							}
-						case "retry":
-							hint = v.Hint
-						}
-					}
+			// 与 convert 走同一个入口（maybeRescue），结论处理不再有第二份。
+			dec := r.maybeRescue(tid, "[checker]", base, rescueTarget{
+				ProjDir: proj, Base: base, Role: "checker", TrPath: trPath,
+				NoToolNudge: sess.ToolAccessNudged(),
+			})
+			if dec.Stop {
+				if tr != nil {
+					tr.Close()
+					tr = nil
 				}
+				r.keepCheckerTranscript(trPath, strict)
+				if dec.Verdict == "fail" {
+					return false, "checker 复盘判定会话无法挽救：" + dec.Reason
+				}
+				return false, "checker 会话已退化，已排队从干净轮次继续核对"
 			}
+			hint := dec.Hint
 			// 与 tikz 会话同款：模型漏了 submit 就提醒一次。
 			r.log.LogWarning(tid, "[checker]", base, "会话结束但未提交结论，发送提交提醒")
 			chkState(rowStateQueued)

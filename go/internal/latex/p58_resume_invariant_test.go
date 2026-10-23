@@ -7,8 +7,8 @@ import (
 )
 
 // 用户口径（2026-10-22）：中断后回来重跑是**原样续行、不插任何内容**，
-// 也不该被 P58 的复盘/重试链路改变。复盘只在"这一轮跑完但没 submit"之后
-// 才触发（remindOrRescue），续跑的起点永远是空 UserText。
+// 也不该被 P58 的复盘/重试链路改变。复盘只在"这一轮非正常收尾"之后才触发
+// （remindOrRescue / rescueAfterError），续跑的起点永远是空 UserText。
 func TestResumeInsertsNoContent(t *testing.T) {
 	history := []session.ChatMessage{{Role: "user", Content: "task"}, {Role: "tool", Content: "ok"}}
 	if got := resumeUserText(history, "The session was interrupted earlier. Continue."); got != "" {
