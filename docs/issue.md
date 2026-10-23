@@ -1106,7 +1106,7 @@ user 轮
 [X][ ] T182. 实现 P53（手动重试）时发现：`archiveChapterAttempt` 把失败的尝试挪进 `work/attempts/<章>/try<N>/` 时**没有挪 `report.md`**——旧尝试在 `work/reports/<章>.md` 的报告就留在原地，新尝试下一次写同一路径时把它静默覆盖，"留档"实际上只留了产物、没留当时的说法。
   改：归档时连同 `report.md` 一起挪进 try 目录（`<章>.report.md`），报告与 `.tex`/分片/`work`/`result`/`integrated-stage` 一致地按尝试留档。
   影响面：所有会开新尝试的路径（checker 轮次用尽主动作废、`--only` / 网页重试），旧的 try 目录里从此有 `report.md`，新报告不再覆盖上一份。
-  验证：`retry_test.go` 断言 `work/attempts/<章>/try1/<章>.report.md` 存在；`go test ./internal/latex/` 绿。
+  验证：`chapter_retry_test.go` 断言 `work/attempts/<章>/try1/<章>.report.md` 存在；`go test ./internal/latex/` 绿。
 [X][ ] T183. 核对会话的首次用户提示词里，只要 `work/views/checker_<章>/report.md` 在，就顺带写「`check:report.md` 和 `check:notes.md` 都是转换会话的说法」——可 `notes.md` 只在转换会话 submit 带了 notes 时才存在。于是核对会话按提示去读一个不存在的文件，白花一次工具调用，然后要么在报告里写"notes 缺失"、要么干脆重新推断。
   改：`checkerClaimNote(view)` 只点名**真实存在**的那些（`report.md` / `notes.md` 各自独立判断），两个都没有就整句不提；`latex_checker.system.md` 里那行同步改成「when present … a file that is not there simply does not exist」。
   影响面：所有章节核对会话（含 `--only` 重核与网页「重新核对」）。提示词里仍然保留两个文件名（`MustMention` 不变），只是不再声称它们一定在。
@@ -1287,4 +1287,4 @@ user 轮
   根因：`ensureCheckerViewAt` 用 `filepath.Dir(filepath.Dir(chapPath))` 猜项目根——顶层章节的 md 在 `<proj>/chapters/` 下正好猜对，递归子章节的 md 在 `<节点>/../input/chapter.md`，猜出来的是 `_subdivision/child_NN`，那里没有 `source/figures|images`，于是项目级资源一个都挂不上。
   改：项目根由调用方显式传入（`ensureCheckerView` 与 `checkChapterAt` 本来就有它），`linkCheckerAssets(dir, proj)` 对子章节与顶层用同一个来源。**`parts/` 别名本身没有丢**，这一批把它的正确性也钉住了：子章节提交进 `work:<子章>/` 的分片，在视图里以 `parts/…` 与 `<子章>/…` 两种写法都能解析；`parts/` 仍是 `PARTS_DIR`。
   未改（刻意）：分片只留在**工作区根** `parts/`、没有提交进 `work:<子章>/` 时，视图里的 `parts/` 为空——视图照实映出提交内容，工作区里的文件不会被偷渡进只读视图（核对判的是提交产物）。这类"本地能编译、提交里没有"的布局属于转换侧，需从提示词/提交契约那条线处理，不在视图里补。
-  验证：`internal/latex/checker_test.go` 新增两条——`TestCheckerViewRecursiveChildHasPartsAliases` 按真实目录铺出子章节的临时工作区（`work/temp/conv_<根>/work/_subdivision/<child>/node/work`，含 `parts/`）、提交契约的分片文件夹与整合后的 `.tex`，走真实 `placeChapterFiles` + `ensureCheckerViewAt`，逐条断言 `parts/x.tex`、`parts/sub/y.tex`、`<子章>/parts/x.tex`、`figures/motif_bb.tex`（项目级）都解析得到；`TestCheckerViewDoesNotLeakWorkTreeParts` 钉住反面对照（`parts/` 别名在、工作区里的分片不在，且工作区文件没被动过）。`go test ./internal/... -count=1` 全绿。
+  验证：`internal/latex/chapter_checker_test.go` 新增两条——`TestCheckerViewRecursiveChildHasPartsAliases` 按真实目录铺出子章节的临时工作区（`work/temp/conv_<根>/work/_subdivision/<child>/node/work`，含 `parts/`）、提交契约的分片文件夹与整合后的 `.tex`，走真实 `placeChapterFiles` + `ensureCheckerViewAt`，逐条断言 `parts/x.tex`、`parts/sub/y.tex`、`<子章>/parts/x.tex`、`figures/motif_bb.tex`（项目级）都解析得到；`TestCheckerViewDoesNotLeakWorkTreeParts` 钉住反面对照（`parts/` 别名在、工作区里的分片不在，且工作区文件没被动过）。`go test ./internal/... -count=1` 全绿。

@@ -7,7 +7,7 @@ package sessionview
  * `.tryN` 是这条目标被复盘的第几次，P58 补起），于是它能拿到章节 ID/父章/深度，
  * 挂进章节树当子行。老命名（`rescue_<章>_<时间戳>`）在**文件名**层面整段不是
  * 章节 ID——`chapterIdentity` 只认名字，所以这里仍然为空；补身份的读时推断在
- * Scan 里（见 p58_rescue_legacy_meta_test.go）。
+ * Scan 里（见 scan_rescue_legacy_meta_test.go）。
  *
  * `rescuing` 是复盘的中间状态：写在**目标**转录里，说明"这条会话正在被复盘"。
  * 它必须被认成活动状态，而且不能把目标会话算成 live（复盘在跑，目标没跑）。
@@ -32,7 +32,7 @@ func TestRescueTranscriptChapterIdentity(t *testing.T) {
 		t.Fatalf("子章节复盘身份 = %+v", child)
 	}
 	// P58 的老命名整段不是章节 ID：chapterIdentity 只认文件名，所以这里没有身份
-	// （Scan 会按转录自己的 meta 补，见 p58_rescue_legacy_meta_test.go）。
+	// （Scan 会按转录自己的 meta 补，见 scan_rescue_legacy_meta_test.go）。
 	old := chapterIdentity("work/sessions/rescue_chapter_004_20261022-101010.jsonl")
 	if old.ID != "" || old.Role != "" {
 		t.Fatalf("老命名的复盘转录不该拿到章节身份: %+v", old)

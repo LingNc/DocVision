@@ -200,17 +200,17 @@
 
 ② **整章重开的预算收口（此前一直留着的那条）**：新助手 `fixBudgetExhausted`——修复打开、且某个子章节的修复转录里已经攒满 `latex.fix.max_rounds` 条 `fix_target` 时为真。命中时父章节核对再不过也**不再**归档这一版、换全新会话把整章连同所有子章节从头重跑（同一段很贵的对话只会被重放一遍），而是保留这一版整合产物继续往上走——未解决的问题本来就走 issues 库与报告向上传递，一个都不会丢——并记一行「修复轮数已用完，不再整章重开」的警告。开关关着、或没有任何子章节进过修复路径时判据为空，作废 + 重开与之前一字不差。`docs/config.md` 的 `latex.fix.max_rounds` 一行按新口径改写。
 
-测试：`internal/sessionview` 两条（`fix_chapter_004_child_02` 的 ID/父章/角色/尝试号、阶段落在 `convert` 组、标题与书级 `book_fix` 不混）+ 既有 `fix_target` 用例改成新口径；`internal/latex/p60_fix_budget_test.go` 四条（判据本体表驱动、预算用光不重开且警告与产物都在、预算还在照旧重开并归档、开关关着照旧重开且没有任何修复日志），后三条用真实 `convertOneChapter` 递归路径 + 假客户端跑。**还留着**：手动把 `latex.fix.enabled` 打开跑一本真书的观察（工具面与提示词追加在真实数据上够不够用）。
+测试：`internal/sessionview` 两条（`fix_chapter_004_child_02` 的 ID/父章/角色/尝试号、阶段落在 `convert` 组、标题与书级 `book_fix` 不混）+ 既有 `fix_target` 用例改成新口径；`internal/latex/rescue_fix_budget_test.go` 四条（判据本体表驱动、预算用光不重开且警告与产物都在、预算还在照旧重开并归档、开关关着照旧重开且没有任何修复日志），后三条用真实 `convertOneChapter` 递归路径 + 假客户端跑。**还留着**：手动把 `latex.fix.enabled` 打开跑一本真书的观察（工具面与提示词追加在真实数据上够不够用）。
 
 **收尾（2026-10-23）已完成**：P59 第二条口径（「并发优先级 = 创建顺序」）真正落到转换槽位池上——`latex.convert_concurrency` 的槽位不再是 channel 先到先得，而是按任务**创建时**发的号排队、释放时把槽位直接交给队里创建最早的那个（同号按到达顺序），创建戳在章节/子章节被创建的那一行取、重试沿用原号；父节点等自己的子树时已经还掉槽位，所以被阻塞的节点不在队列里、不占队头。核对池与其它阶段的池子不动。
-**第五步（2026-10-23）已完成**：`dispatch_fix` 从"只记录计划"改成**同步执行并回执结局**——按计划逐个子章节走与 runner 相同的一条路径（`runChildFixAt`，与 `runChildFix` 同一份校验/预算/工具集/挂载/重核），回执按子章节给 fixed / 核对结论第一行（截断 160 字符）/ 已用与剩余轮数，并在父会话转录追加一行 `t=meta kind=fix_result`；计划执行后标 `applied`，`applyChildFixPlan` 读到已消费的计划就空转，未消费时仍按原路径兜底且执行后同样标记（同一份计划不会执行两次）。同步执行的前提是并发放手：转换槽由调用方让给这一轮修复（`holdSlot`），模型并发槽由新增的 `Session.PauseModelSlot()` 临时让出、执行完取回。同一批还收紧了两处误判——下派提示词写明 `figures/`、`images/` 是项目级资源、只有 `_subdivision/…` 与 `node/result/…` 算断链（关闭开关时提示词仍逐字节不变）；章节树的修复行只认 `node.fixes`（判据收进 `chapterNodeHasRows`，与核对行、子章节互不依赖），行 title 写出修复结局。测试：`p60_fix_sync_test.go` 三条 + `TestPauseModelSlotFreesNestedSession` + `TestConvertFixDispatchScopesSelfContainedness`，预览页三条纯函数用例。
+**第五步（2026-10-23）已完成**：`dispatch_fix` 从"只记录计划"改成**同步执行并回执结局**——按计划逐个子章节走与 runner 相同的一条路径（`runChildFixAt`，与 `runChildFix` 同一份校验/预算/工具集/挂载/重核），回执按子章节给 fixed / 核对结论第一行（截断 160 字符）/ 已用与剩余轮数，并在父会话转录追加一行 `t=meta kind=fix_result`；计划执行后标 `applied`，`applyChildFixPlan` 读到已消费的计划就空转，未消费时仍按原路径兜底且执行后同样标记（同一份计划不会执行两次）。同步执行的前提是并发放手：转换槽由调用方让给这一轮修复（`holdSlot`），模型并发槽由新增的 `Session.PauseModelSlot()` 临时让出、执行完取回。同一批还收紧了两处误判——下派提示词写明 `figures/`、`images/` 是项目级资源、只有 `_subdivision/…` 与 `node/result/…` 算断链（关闭开关时提示词仍逐字节不变）；章节树的修复行只认 `node.fixes`（判据收进 `chapterNodeHasRows`，与核对行、子章节互不依赖），行 title 写出修复结局。测试：`rescue_fix_sync_test.go` 三条 + `TestPauseModelSlotFreesNestedSession` + `TestConvertFixDispatchScopesSelfContainedness`，预览页三条纯函数用例。
 **第六步（2026-10-23）已完成**：两处收口——① 章节树里的修复行与核对行**同层**：一次修复的复核写的是 `checker_<child>.tryN.jsonl` 并被并进本节点自己那条核对行（同一个锚点），没有"修复的核对行"这一层，所以修复行是转换行的直接子行、左边距与核对行同值（行高仍 `var(--row-h)`，行序核对在前、修复按旧 → 新，没有修复时布局逐字节不变）；② `latex.fix.enabled` 打开时追加的下派说明多一句「回执已逐个子章节给出结局，回复里不要复述或改写它，直接接着整合」，关闭时提示词仍逐字节不变（`TestConvertSystemPromptDispatchOnlyWhenEnabled` 钉住这句只在打开时出现、且落实在同一行）。
 **P60 默认值（用户口径 2026-10-22 晚）**：`latex.fix.enabled` 默认 **true**、`max_rounds` 默认 **5**（写 0/负数也按 5，不是无限轮）。显式 `false` 才退回“整章重转”的老路径，那时工具面、提示词与请求数与引入 P60 之前逐字节一致（有对照测试）。
 **补记（2026-10-23）**：① **`dispatch_fix` 的回执即终态**——同步跑完修复的 `FIX RESULT` 回执标 `ToolResult.Terminal`，复查轮在回执落盘后就结束，父会话不再为"回应回执"多发一次模型请求（整章流程的复查请求数 2 → 1）；"只记计划"那条回执**不**标终态（它出现在还没接上 Runner 的一轮，父会话可能还要接着说）。② **复盘行与核对行同层**——`rescue_` 转录按文件名拿到章节身份（`chapterRole: "rescue"`，ID/父章/深度与 `checker_` 同源，`.tryN` 是它复盘的那次转换的尝试号），章节树里是**直接子行**（同一处 26px 左边距、同一 `var(--row-h)`），标签「复盘 #N」+ 归档前缀「旧」，点行切会话、钉住时那一行切到它复盘的那次转换；它永不参选 convert/checker、也不进「历史」尝试链；没有复盘时布局逐字节不变。
 
 ### P62 仓库整理（审计与计划）
 
-**编号说明**：用户口述的批次号是 P61，但 P61 已被复盘会话占用（`internal/latex/p61_*_test.go`、`internal/sessionview/p61_rescue_identity_test.go` 与 `book.go` 里的 `P61/A–D` 注释），按编号递增规则顺延为 P62。
+**编号说明**：用户口述的批次号是 P61，但 P61 已被复盘会话占用（`internal/latex/rescue_*_test.go`、`internal/sessionview/scan_rescue_identity_test.go` 与 `book.go` 里的 `P61/A–D` 注释），按编号递增规则顺延为 P62。
 
 **口径**：只整理、不改行为——功能代码、提示词、配置默认值、测试期望一律不动。已跟踪文件的删除可由 `git log` 回滚，所以只删「零引用 + 从未被删过 + 有替代物」的；未跟踪文件的删除不可回滚，所以只删**可再生的构建产物**与**一次性脚本**，样本数据副本一律留在原地（只列清单）。
 
