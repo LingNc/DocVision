@@ -412,6 +412,11 @@ type SessionInfo struct {
 	// number (the `convert_attempt` field of the same note). Zero = no
 	// anchor (transcripts written before P59).
 	ChapterAnchorAttempt int `json:"chapterAnchorAttempt,omitempty"`
+	// FixIssueIDs (P60) lists the issue ids the latest fix round of this
+	// session was given, read from `t=meta kind=fix_target`. Only fix
+	// transcripts carry them. P60 第一步只把它读出来给将来的界面用：
+	// 章节树/历史/分组的行为一行都没改（见 Scan 里的角色赋值）。
+	FixIssueIDs []string `json:"fixIssueIds,omitempty"`
 	// Archived marks a transcript living under `work/attempts/<章>/tryN/`.
 	// That directory is the archive of an invalidated attempt (the whole
 	// subtree is moved there), so it holds copies of the sessions that are
@@ -964,6 +969,14 @@ type transcriptStat struct {
 	// （P59）：这条核对会话核对的转换转录与它的尝试号。空 = 旧转录，没有锚点。
 	ChapterAnchor        string
 	ChapterAnchorAttempt int
+	// FixAnchor / FixAnchorAttempt / FixIssueIDs（P60）来自最近一条
+	// t=meta kind=fix_target：修复会话修的是哪一次转换（与核对同一种锚点口径）、
+	// 这一轮改了哪几条 issue。SawFixTarget 标记转录里有没有这种锚点——有它就是
+	// 一条修复会话（角色 fix）。P60 第一步只把这些事实读出来，分组与树一行不动。
+	FixAnchor        string
+	FixAnchorAttempt int
+	FixIssueIDs      []string
+	SawFixTarget     bool
 	// Prices 是转录里 t=meta kind=price 冻的费率（model → 费率，同模型
 	// 后写胜）——费用按冻的价算，不依赖跑报表时的配置（T101 第二版）。
 	Prices map[string]config.PriceConfig
@@ -1141,6 +1154,18 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		case "queued", "waiting_children", "checking_result", "interrupted":
 			live, endState = false, ""
 		}
+		// P60：修复转录（`fix_<子章>.jsonl` 这类，只在子章节自己的 sessions/
+		// 下）靠 `t=meta kind=fix_target` 认出来。角色固定为 "fix"，锚点沿用
+		// 核对的同一套口径（它修的是哪一次转换产物）。**只改字段、不改分组**：
+		// 阶段归组仍由 LabelFor 决定，章节树/历史的挑选规则这一步不动。
+		role := chapter.Role
+		anchor, anchorAttempt := stat.ChapterAnchor, stat.ChapterAnchorAttempt
+		if stat.SawFixTarget {
+			role = "fix"
+			if stat.FixAnchor != "" {
+				anchor, anchorAttempt = stat.FixAnchor, stat.FixAnchorAttempt
+			}
+		}
 		out = append(out, SessionInfo{
 			ID: rel,
 			Label: func() string {
@@ -1166,13 +1191,14 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			RunEndError:          stat.RunEndError,
 			ChapterActivity:      activity,
 			ChapterAttempt:       chapter.Attempt,
-			ChapterAnchor:        stat.ChapterAnchor,
-			ChapterAnchorAttempt: stat.ChapterAnchorAttempt,
+			ChapterAnchor:        anchor,
+			ChapterAnchorAttempt: anchorAttempt,
+			FixIssueIDs:          stat.FixIssueIDs,
 			Archived:             strings.HasPrefix(rel, "work/attempts/"),
 			Prices:               stat.Prices,
 			ChapterID:            chapter.ID,
 			ChapterParent:        chapter.Parent,
-			ChapterRole:          chapter.Role,
+			ChapterRole:          role,
 			ChapterDepth:         chapter.Depth,
 			ChapterOrder:         chapterOrderOf(strings.Split(chapter.ID, "_child_")[0]),
 		})
@@ -1379,6 +1405,22 @@ func readStat(p string) (transcriptStat, error) {
 						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.Convert != "" {
 							stat.ChapterAnchor = rec.Convert
 							stat.ChapterAnchorAttempt = rec.ConvertAttempt
+						}
+					}
+					// P60：修复会话的锚点——它修的是哪一条转换产物、这一轮
+					// 改了哪几条 issue。字段与 checker_target 同一种口径
+					// （`convert` 是转录名、`convert_attempt` 是转换的尝试号）。
+					if strings.Contains(trimmed, `"kind":"fix_target"`) {
+						var rec struct {
+							Convert        string   `json:"convert"`
+							ConvertAttempt int      `json:"convert_attempt"`
+							IssueIDs       []string `json:"issue_ids"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.Convert != "" {
+							stat.SawFixTarget = true
+							stat.FixAnchor = rec.Convert
+							stat.FixAnchorAttempt = rec.ConvertAttempt
+							stat.FixIssueIDs = rec.IssueIDs
 						}
 					}
 				case "usage":

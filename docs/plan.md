@@ -148,3 +148,33 @@
 **前端**：不做新的顶层页签。中子栏「历史」保持按角色分开（P59）；章节树里在子章节的核对行下面多一层「修复」子行（同锚点、带轮次），点它进入修复会话；核对仍归该转换，历史里按"谁的核对"分组（锚点相同即同组）。另外加一个**重置视图**按钮（在刷新旁）：清掉 pin/选中/展开记忆，回到"当前正在跑"的顶层状态。
 
 **实现落点（待做）**：`internal/latex/`（fix 角色 + 计划文件 + 复用子章节工作区 + 预算）、`sessionview`（`fix_target` 解析、树里的修复子行）、`web`（子行渲染 + 重置按钮）。先在 issue 里拆条（T214 子会话切换 bug / T215 重置按钮 / T216 修复会话），再逐条落地。
+
+#### P60 接口设计（已定）
+
+第一步（2026-10-23）只把接口定死并落地一个**默认关闭**的骨架，不接进现有跑法；下面这份契约是实现依据，后续步骤按它接线。
+
+**工具（暴露给父会话 = 章节转换会话）**：`dispatch_fix`
+
+```json
+{"issues":[{"id":"<issue id or slug>","child":"child_02","where":"...","what":"...","rule":"..."}],"note":"..."}
+```
+
+语义：**只记录计划**，不同步执行任何东西（父会话还在跑，同步下派会把它的上下文与并发槽一起占住）。回执写明写好的计划文件路径、一共几条 issue、将要下派几个子章节（按子章节分组：`child_01 (2), child_03 (1)`）。校验：`child` 必须是这次细分树里**真实存在**的目录名（`_subdivision/child_NN`）；`id`/`where`/`what`/`rule` 全部不得为空；`id` 不得重复；没细分过的章节直接拒。任何一条不合格都当场 `REJECTED` 并指出是第几条、哪个字段，**不写盘**（半对的计划会让下派凭空少掉任务）。
+
+**计划文件** `work/fix/<rootChapter>/plan.json`（schema 固定为 v1；同目录临时文件 + `rename` 原子写）：
+
+```json
+{"version":1,"created":"<RFC3339>","root":"<根章>","children":[{"child":"child_02","issues":[{"id":"...","what":"...","rule":"...","where":"..."}]}]}
+```
+
+`children` 按子章节名排序、组内 issue 保持父会话给出的顺序；读回时不认识的 `version` 直接报错（宁可停下，也不按猜测执行一份外来的计划）。
+
+**修复会话（角色 `fix`）**：每个**有 issue 的子章节一条**，跑在该子章节**自己的节点工作区**（`node/work`；转换时建好，递归节点收尾不删），不重建工作区、不重新划分。工具集 = **转换会话的工具集减去 `request_chapter_split`**，**加上 `submit`**（`goal`/`compile`/`bash`/`view_pdf`/`view_image`/`doc_search`/`list_source_pages` 都在；章节规模那条提交门禁对它不适用——这一段本来就是父章节拆下来的，它也不能再拆）。转录写该子章节的 `node/sessions/fix_<childChapter>.jsonl`，第二轮起接在同一条转录上继续。它 submit 后跑的仍是**该子章节原本的核对**（同一只读视图、同一转换锚点，P59）——不是新开一条核对链。
+
+**预算**：`latex.fix.max_rounds`（int，默认 2）= 一个子章节能拿到的修复轮数；转录里每条 `fix_target` 锚点算一轮。用完就**退回老行为**——父章节按原来的重试路径重来，不再无限下派。
+
+**锚点**：每条修复转录带 `t=meta kind=fix_target {"convert":"convert_<子章>[.tryN]","convert_attempt":N,"issue_ids":[...]}`。`convert` 与该子章节核对里 `checker_target.convert` 是同一个名字，`convert_attempt` 与 P59 同口径（预览页据此把修复会话、以及它之后那次核对都挂到同一次转换下面）。
+
+**配置**：`latex.fix.enabled`（本步默认 **false**）、`latex.fix.max_rounds`（默认 2；0/负数也按 2，不是"无限轮"）、`latex.fix.model`（空 = 继承 convert；会话调优沿用 `latex.sessions.convert`，不新开块）。配置版本 22 → 23。
+
+**第一步的边界**：已落地 `internal/latex/fix.go`（计划类型与读写、`DispatchFixTool`、`runChildFix`）、提示词 `latex_childfix.system.md`（**与装配阶段的 `latex_fix.system.md` 不是一回事**，后者是书级编译修复 `book_fix`）、`sessionview` 把 `fix_target` 读成 `chapterRole:"fix"` + `chapterAnchor`/`chapterAnchorAttempt` + `fixIssueIds`（分组一行不动）、配置项与模板、两份配置模板同步。`dispatch_fix` **只在 `latex.fix.enabled` 打开时注册**给转换会话；`runChildFix` 目前**只有测试会调用**——所以默认配置下本批代码零运行期行为。**还没做**：调度（父会话何时下派、修完怎么整合、失败怎么退回）、章节树里的「修复」子行与历史分组、配置开关的打开验证。这几项留给 P60 的下一步。

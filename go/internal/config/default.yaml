@@ -12,7 +12,7 @@
 #   3. 未知键不生效：拼错一个键名不会有任何报错，启动时只会给一行"未知配置键"
 #      告警（`docvision setup` 保存时会把它拦下来）。
 
-config_version: 22
+config_version: 23
 
 # MinerU API Configuration
 mineru:
@@ -148,6 +148,16 @@ latex:
     max_per_attempt: 2           # 同一次尝试最多复盘几次（防复盘循环）
     keep_records: false          # 复盘会话的转录是否落盘（--debug 下强制落盘）
     model: "rescue"              # 复盘会话的模型条目；空 = 跟随 checker_model
+  # P60：子章节修复会话（默认关闭）。父章节把「哪个子章节、按哪条规则改」
+  # 写成 work/fix/<根章>/plan.json（dispatch_fix 工具只记录计划、不同步执行），
+  # 再由 runner 为每个有问题的子章节起一条修复会话——复用该子章节已经划好的
+  # 工作区，改完提交后跑它原本的核对（同一转换锚点）；修不动就退回老行为（父
+  # 章节重试）。第一步只落骨架：打开也只是多一个「记录计划」的工具，没有调度
+  # 消费它，产物一个字节都不变。
+  fix:
+    enabled: false               # 默认关；true 才给转换会话注册 dispatch_fix 并下派修复
+    max_rounds: 2                # 一个子章节最多几轮修复；用完退回老行为（父会话重试）
+    model: ""                    # 修复会话的模型条目；空 = 继承 convert 模型
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）

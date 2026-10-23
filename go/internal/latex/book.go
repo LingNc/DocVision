@@ -1621,6 +1621,12 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		submit,
 	}
 	tools = append(tools, splitTool)
+	// P60：子章节修复的下派入口。**默认关闭**（latex.fix.enabled=false 时这里
+	// 根本不注册），所以现有跑法的工具面一字不变；打开后父会话才看得到
+	// dispatch_fix——它只记录计划，真正下派的调度是 P60 的下一步。
+	if r.cfg.Latex.FixEnabled() {
+		tools = append(tools, &DispatchFixTool{Proj: proj, Root: base, Work: work})
+	}
 	// 原始文档只读工具：片段→原 PDF 页定位（doc_search）+ 原书页面索引/
 	// 逐页内容（list_source_pages）；原书 PDF 通过 view_pdf 的 source
 	// 挂载查看。

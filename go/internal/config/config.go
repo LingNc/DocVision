@@ -422,6 +422,10 @@ type LatexConfig struct {
 	BashMaxOutput int `yaml:"bash_max_output"`
 	// Rescue（P58）：「会话没提交就结束」时的复盘。默认开；深度可配。
 	Rescue RescueConfig `yaml:"rescue"`
+	// Fix（P60）：「修复会话」——父章节把修复任务按 issue 下派给已经划好的
+	// 子章节（复用它的工作区与转录树），不再整章重转。默认关：第一步只落
+	// 骨架（计划文件 + dispatch_fix 工具 + 修复会话本体），不接进运行路径。
+	Fix FixConfig `yaml:"fix"`
 	// Sessions tunes each specialised AI session independently.
 	Sessions struct {
 		Drawing SessionTuning `yaml:"drawing"`
@@ -473,6 +477,38 @@ func (c LatexConfig) RescueMaxPerAttempt() int {
 // RescueKeepRecords 决定复盘会话的转录是否落盘（默认 false）。
 func (c LatexConfig) RescueKeepRecords() bool {
 	return c.Rescue.KeepRecords != nil && *c.Rescue.KeepRecords
+}
+
+// FixConfig 是「子章节修复会话」的配置（P60）。
+//
+// 模型：父章节在整理阶段把「哪个子章节、按哪条规则改」写成
+// `work/fix/<根章>/plan.json`（`dispatch_fix` 工具只记录计划、不同步执行），
+// 然后由 runner 为每个有问题的子章节起一条修复会话——它复用该子章节**已经
+// 划好的工作区**（`_subdivision/child_NN/node/work`），只改有问题的部分，提交
+// 后跑该子章节原本的核对（同一转换锚点，P59）。修不动时退回老行为：整章由
+// 父章节重试。
+type FixConfig struct {
+	// Enabled 默认关（P60 第一步只落骨架，不产生任何运行期行为）。
+	Enabled *bool `yaml:"enabled"`
+	// MaxRounds 一个子章节最多几轮修复（默认 2）。用完就退回老行为——父
+	// 会话按原来的重试路径处理，不再无限下派。
+	MaxRounds int `yaml:"max_rounds"`
+	// Model 修复会话用的模型条目；空 = 继承 convert 模型。会话调优不在模型
+	// 条目上，目前沿用 `latex.sessions.convert`。
+	Model string `yaml:"model"`
+}
+
+// FixEnabled reports whether the fix sessions run (default OFF：P60 第一步只落
+// 骨架，配置默认就是关闭的).
+func (c LatexConfig) FixEnabled() bool { return c.Fix.Enabled != nil && *c.Fix.Enabled }
+
+// FixMaxRounds 是一个子章节最多能拿到几轮修复（默认 2；<=0 也按 2 算——写 0
+// 不会变成"无限轮"）。
+func (c LatexConfig) FixMaxRounds() int {
+	if c.Fix.MaxRounds <= 0 {
+		return 2
+	}
+	return c.Fix.MaxRounds
 }
 
 /*
@@ -902,7 +938,7 @@ type PathsConfig struct {
 // 漏内容——超过这个规模的章节按语义拆开，由子会话并行转换。
 const DefaultMaxChapterLines = 3000
 
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）; 19 (T131)：latex 新增 dedupe_icon_auto（小图标本地自动归组的门槛，未写时 0.75、0 = 关闭，全部交核验会话）; 20 (T138/T135)：latex 新增 dedupe_align_grid（判据网格，整数或 "0.95S"）/ dedupe_align_typical / dedupe_attach_min / dedupe_icon_max_area / dedupe_bucket_max; 21 (P58)：latex 新增 rescue 块（enabled / max_per_attempt / max_rounds / keep_records / model）以及 models.rescue 这个可选条目（未配则跟随 checker 模型）; 22 (P58 调整)：rescue 的会话调优挪进 latex.sessions.rescue（context_limit 默认 131072、max_tool_rounds 默认 12、其余继承 sessions.checker），latex.rescue 只留 enabled / max_per_attempt / keep_records / model；model 条目改成 extends: checker。
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）; 19 (T131)：latex 新增 dedupe_icon_auto（小图标本地自动归组的门槛，未写时 0.75、0 = 关闭，全部交核验会话）; 20 (T138/T135)：latex 新增 dedupe_align_grid（判据网格，整数或 "0.95S"）/ dedupe_align_typical / dedupe_attach_min / dedupe_icon_max_area / dedupe_bucket_max; 21 (P58)：latex 新增 rescue 块（enabled / max_per_attempt / max_rounds / keep_records / model）以及 models.rescue 这个可选条目（未配则跟随 checker 模型）; 22 (P58 调整)：rescue 的会话调优挪进 latex.sessions.rescue（context_limit 默认 131072、max_tool_rounds 默认 12、其余继承 sessions.checker），latex.rescue 只留 enabled / max_per_attempt / keep_records / model；model 条目改成 extends: checker; 23 (P60)：latex 新增 fix 块（enabled 默认 false / max_rounds 默认 2 / model 空 = 继承 convert）——修复会话骨架，默认关闭、无运行期行为。
 // 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 text。
 // P58：复盘会话的默认会话参数（写在 latex.sessions.rescue 里可覆盖）。
 const (
@@ -910,7 +946,7 @@ const (
 	rescueDefaultContextLimit = 131072
 )
 
-const CurrentConfigVersion = 22
+const CurrentConfigVersion = 23
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.

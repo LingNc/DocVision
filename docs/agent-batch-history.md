@@ -2371,3 +2371,16 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 验证：`TestCheckerNoVerdictRetriesFourAttempts`（只回正文 → 恰好 4 次会话：8 条请求 = 每轮首请求 + 提交提醒、转录里 4 条 `checker_target` 锚点，返回新文案前缀）、`TestCheckerNoVerdictExtraAttemptCanPass`（前两次只回正文、第 3 次提交 `pass` → 通过，3 条锚点，多出来的轮次确实可用）、`TestCheckerWithoutVerdictFailsAfterFourAttempts`（退化响应连跑 4 轮、请求数 8–12，原先是"两轮 / ≤6"）、`TestCheckerNoVerdict` 补新文案一条；`go test ./internal/latex/` 与 `go test ./internal/...` 全绿。
 - 已知边界：P58 的复盘会话判 `fail`/`truncate` 时会**提前返回**（"复盘判定会话无法挽救" / 已排队从干净轮次继续），走不到第 4 次；这两句也不在 `checkerNoVerdict()` 的识别范围里。本轮不动它——动它等于改升级链。另：核对转录是同一条（同一次尝试内四次会话共用一个路径），所以"试了几次"只能从锚点/警告行看出来，页面仍显示一条核对会话。
 
+
+## v1.5+（P60 第一步：修复会话骨架与 `dispatch_fix` 工具，默认关闭，2026-10-23）
+
+设计口径（见 `docs/plan.md` P60）：父章节重试代价太大，应当按修复任务把工作重新下派给**已经划好的**子章节与工作区，父会话只做整合。这一步只落接口与骨架，**不接进运行路径**。
+
+- `internal/config`：新增 `latex.fix` 块——`enabled`（`*bool`，默认 false）、`max_rounds`（默认 2；0/负数也按 2，不是无限轮）、`model`（空 = 继承 convert），外加 `LatexConfig.FixEnabled()` / `FixMaxRounds()`。两份配置模板逐字节同步（`fix` 块写在 `latex.rescue` 后面）、`config_version` 22 → 23，README 的示例行与 `docs/config.md` 的版本行/新增三行同步。
+- `internal/latex/fix.go`：`fixPlan` / `fixPlanChild` / `fixPlanIssue` 与 `WriteFixPlan` / `ReadFixPlan`（同目录临时文件 + rename 原子写；版本、根章名、`child_NN` 形状、字段非空、issue id 不重复都在写与读的同一套校验里）；`DispatchFixTool`（`dispatch_fix`）只**记录计划**并回执计划路径 + issue 数 + 将要下派的子章节数，校验失败当场 `REJECTED` 且不写盘；子章节名对着 `_subdivision/` 下的真实目录核对（优先用调用方给的父工作区，否则按 `work/temp/conv_<根章>*` 找最近的一棵）。`runChildFix` 按最终形态写好：复用子章节自己的 `node/work`、工具集 = 转换会话减去 `request_chapter_split` 再加 `submit`、转录 `node/sessions/fix_<子章>.jsonl`、每轮写一条 `t=meta kind=fix_target`（锚点与核对同口径）、提交后跑该子章节原本的核对（同一只读视图、同一锚点，P59）。守卫顺序：未启用 → 顶层节点 → 无任务 → 工作区/输入不在 → 轮数预算用完，都不凭空重建。
+- `internal/prompts`：新增 `latex_childfix.system.md` + 注册表条目（`Vars: MAX_ROUNDS`，`MustMention` 含 `submit` 与转换那套工具）。**名字不能叫 `latex_fix.system.md`**——那个文件名已经是装配阶段的书级编译修复会话（`FixSystem` / `book_fix`），两个用途不能共用一个模板。
+- `internal/latex/book.go`：唯一一处运行期接线——`latex.fix.enabled` 为真时给转换会话注册 `dispatch_fix`；默认关闭时工具面一字不变。
+- `internal/sessionview`：解析 `t=meta kind=fix_target` 得到 `fixAnchor`/`fixAnchorAttempt`/`fixIssueIDs`，`SessionInfo` 上给出 `chapterRole:"fix"` + `chapterAnchor`/`chapterAnchorAttempt` + `fixIssueIds`（新字段）。**分组、章节树、历史一行没改**（章节身份仍为空、阶段仍落通用「会话」），留给后续的树/历史条目。
+- 守护测试的一处调整：`TestLiveLatexToolsAreMentionedSomewhere` 要求"每个工具名都在某个模板里被提到"，而 `dispatch_fix` 是**条件注册**的（只在开关打开时存在）——把它登记进 `conditionalTools` 并注明理由，避免提示词为一个默认不存在的工具留下说明（模型照着提示词调用不存在的工具是历史事故）。
+- 测试：`internal/latex/p60_fix_test.go`（计划往返与落盘形状、非法 child 名、未知版本、字段缺失/重复 id、`dispatch_fix` 的校验矩阵与"校验失败不写盘"、正常下派的分组与回执、默认关闭守卫、轮数预算、顶层拒绝、模型继承）、`internal/config/p60_fix_test.go`（默认值与访问器、两份模板读出来的值、版本号已 bump）、`internal/sessionview/p60_fix_target_test.go`（`fix_target` 解析、角色/锚点/issue 清单、普通转录不受影响）。`go test ./internal/...` 全绿；`go vet ./internal/...`、`gofmt` 干净。
+- 本地一份 **gitignored** 的配置改写固件（`temp/config_new.yaml`）随之把 `config_version` 从 22 提到 23，否则它自己的严格校验测试会因版本不匹配而失败；该文件不入库。

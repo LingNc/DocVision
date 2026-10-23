@@ -48,6 +48,10 @@ const (
 	StyleFixSystem    = "latex_stylefix.system"
 	FinalReviewSystem = "latex_finalreview.system"
 	FixSystem         = "latex_fix.system"
+	// ChildFixSystem（P60）是**子章节修复会话**的提示词。与 FixSystem（装配
+	// 阶段的书级编译修复，`book_fix`）不是一回事，所以另起一个文件名——同一个
+	// 名字不能同时是"修整本书的编译"和"按 issue 修一个子章节"。
+	ChildFixSystem    = "latex_childfix.system"
 	VerifySystem      = "latex_verify.system"
 	WatermarkSystem   = "latex_watermark.system"
 	CheckerSystem     = "latex_checker.system"
@@ -155,6 +159,14 @@ var registry = []Template{
 	{
 		Name: FixSystem, File: "latex_fix.system.md",
 		MustMention: []string{"bash", "compile", "edit_file", "grep", "list_fonts", "read_file", "submit", "view_image", "view_pdf", "write_file"},
+	},
+	{
+		// P60：子章节修复会话——工具集 = 转换会话减去 request_chapter_split
+		// （已经划好的工作区不再重新划分），加上 submit。
+		Name: ChildFixSystem, File: "latex_childfix.system.md",
+		Vars: []string{"MAX_ROUNDS"},
+		MustMention: []string{"bash", "compile", "doc_search", "edit_file", "grep", "list_source_pages",
+			"read_file", "submit", "view_image", "view_pdf", "write_file"},
 	},
 	{
 		Name: RescueSystem, File: "latex_rescue.system.md",

@@ -122,6 +122,9 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.rescue.max_per_attempt` | 同一次尝试最多复盘几次（防"复盘 → 又没交 → 再复盘"） | 2 |
 | `latex.rescue.keep_records` | 复盘会话的转录是否落盘到 `work/sessions/rescue_*.jsonl`（默认只写一行审计记录 `work/rescue/log.jsonl`）；`--debug` 强制落盘 | false |
 | `latex.rescue.model` | 复盘会话用的模型条目；空 = 跟随 `latex.checker_model`（模板预置了 `models.rescue`，`extends: checker`） | `"rescue"` |
+| `latex.fix.enabled` | 子章节**修复会话**（P60）的总开关：打开后转换会话才有 `dispatch_fix` 工具，父会话才能把"哪个子章节、按哪条规则改"写成 `work/fix/<根章>/plan.json` 交给子章节去修（修复会话复用该子章节已划好的工作区，提交后跑它原本的核对）。**本步默认关闭**：骨架已落地，但调度还没接进运行路径，打开也不会改变现有跑法的产物 | false |
+| `latex.fix.max_rounds` | 一个子章节最多能拿几轮修复（P60）：转录里每条 `fix_target` 锚点算一轮；用完就退回老行为——由父章节按原来的重试路径重来。0/负数也按 2 算，不是"无限轮" | 2 |
+| `latex.fix.model` | 修复会话用的模型条目（P60）；空 = 继承 `latex.convert_model`。会话调优没有单独的块，沿用 `latex.sessions.convert` | `""` |
 | `latex.sessions.rescue` | 复盘会话自己的会话调优；没写的字段继承 `sessions.checker`（输出预算与它同配置） | — |
 | `latex.sessions.rescue.context_limit` | 复盘会话的上下文窗口（会话与模型两侧取较小值） | 131072 |
 | `latex.sessions.rescue.max_tool_rounds` | 复盘会话自己的轮次上限（看几窗转录就该给结论） | 12 |
@@ -152,7 +155,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **19**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 15 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **23**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 23 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |
