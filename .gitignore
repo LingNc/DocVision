@@ -17,6 +17,7 @@ mineru_output/
 temp/
 test*/
 !web/tests/
+!go/internal/config/testdata/
 
 config.yaml
 

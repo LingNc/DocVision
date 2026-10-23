@@ -11,15 +11,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// 运行目录 `/home/share/samba-share/PDF2MD/config.yaml` 的改写稿校验。
+// 一份真实运行配置的改写稿校验（样例 project：example_book，凭据与网关地址已换成占位符）。
 //
-// temp/ 已被 .gitignore，所以这两份文件在别人的检出里不存在（测试自动跳过）；
-// 留成测试是为了让"其余内容逐字保留、只有下面这几处不同"这条承诺**可复核**，
-// 而不是靠人眼看 diff。源文件里的密钥在 temp/config_src_redacted.yaml 里已被
-// 占位符替换（本文件、测试输出都不含任何真实密钥）。
+// 两份夹具随仓库放在 testdata/ 下（原来读仓库外的 temp/，检出里缺文件时自动跳过——
+// 那样这条承诺等于没人验），所以现在**总是**跑。留成测试是为了让"其余内容逐字保留、
+// 只有下面这几处不同"这条承诺**可复核**，而不是靠人眼看 diff。源文件的密钥在
+// testdata/config_src_redacted.yaml 里已被占位符替换（本文件、测试输出都不含任何真实密钥）。
 const (
-	rewriteSrc = "../../../temp/config_src_redacted.yaml"
-	rewriteNew = "../../../temp/config_new.yaml"
+	rewriteSrc = "testdata/config_src_redacted.yaml"
+	rewriteNew = "testdata/config_new.yaml"
 )
 
 // flatten 把一份配置拍成 `路径 → 标量值` 的表，`路径 → 键存在` 靠键集合单独判定。
@@ -27,7 +27,7 @@ func flatten(t *testing.T, path string) map[string]string {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Skipf("没有 %s（temp/ 已 gitignore）: %v", path, err)
+		t.Fatalf("读不到夹具 %s（testdata/ 随仓库提交）: %v", path, err)
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
@@ -111,9 +111,6 @@ func TestRunConfigRewriteKeepsEverythingElse(t *testing.T) {
 // TestRunConfigRewriteResolvesIdentically 钉住"估算数字不变、角色行为不变"：两份
 // 配置里的每个角色解析出的有效模型与图片计量规则完全一致。
 func TestRunConfigRewriteResolvesIdentically(t *testing.T) {
-	if _, err := os.Stat(rewriteSrc); err != nil {
-		t.Skipf("没有 %s: %v", rewriteSrc, err)
-	}
 	src, err := LoadConfig(rewriteSrc)
 	if err != nil {
 		t.Fatalf("源配置加载失败: %v", err)
@@ -164,9 +161,6 @@ func TestRunConfigRewriteResolvesIdentically(t *testing.T) {
 // 占位符"（红线：报告与测试都不含密钥），不该有任何问题——没有未知键、没有
 // 语法错误、没有 extends 报错。
 func TestRunConfigRewriteStrictValidation(t *testing.T) {
-	if _, err := os.Stat(rewriteNew); err != nil {
-		t.Skipf("没有 %s: %v", rewriteNew, err)
-	}
 	problems := ValidateFile(rewriteNew)
 	var left []string
 	for _, p := range problems {
@@ -188,9 +182,6 @@ func TestRunConfigRewriteStrictValidation(t *testing.T) {
 // TestRunConfigRewriteKeepsFourRolesToOneEntry 钉住"那四块并成一条命名条目"：
 // 改写稿里恰好一条 heavy，四个角色各一行 extends 指向它。
 func TestRunConfigRewriteKeepsFourRolesToOneEntry(t *testing.T) {
-	if _, err := os.Stat(rewriteNew); err != nil {
-		t.Skipf("没有 %s: %v", rewriteNew, err)
-	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(mustRead(t, rewriteNew), &doc); err != nil {
 		t.Fatal(err)
