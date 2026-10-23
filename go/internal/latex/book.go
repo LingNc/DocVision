@@ -294,6 +294,15 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// 只留这一行普通模式提示：被杀之后要看的文件到底在哪。采样行本身在
 	// 普通模式不显示（debug 日志与 mem.log 里全量都有）。
 	r.log.LogInfo(0, "[book] 内存/被杀现场日志:", memLogPath)
+	// 原书 PDF 视图与原始文档索引必须在**启动重试监视器之前**建好。监视器
+	// 一接手请求就开转换会话，而会话的 `source` 挂载点和 list_source_pages /
+	// doc_search 全都来自这两个对象——过去它们排在 images 阶段之后，续跑时
+	// "手动继续 / 子章节重试"在那之前就开跑：会话里既没有 source 挂载点，
+	// 提交门禁又照旧要求"至少对照 2–4 页原书"，那条要求永远满足不了，会话
+	// 只能反复"复盘 → 截断 → 还是过不去"。
+	r.buildPDFViewQuiet(opts.SourceDir, opts.Files)
+	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
+	r.checkPageAlignment()
 	// P53 阶段二：运行期就消费重试队列——样式/划分/转换/组装任何阶段都能收，不用等
 	// 阶段边界，也不用重启进程。派发要过章节锁，正在跑的章节不重复跑。
 	r.startRetryWatcher(proj)
@@ -412,7 +421,10 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// layout/origin.pdf）加工为只读检索索引。样式会话最先用到它
 	// （doc_search 定位文本页、list_source_pages 列章节起点与逐页图片），
 	// 所以放在 style 之前构建。
-	r.buildPDFViewQuiet(opts.SourceDir, opts.Files)
+	//
+	// images 刚把 md 加工完（DOCVISION 注释落在 <proj>/source），索引以那份
+	// 为准：内容变了就在这里重建一次，没变则这一步什么都不做（见
+	// buildDocIndexQuiet 的指纹判据）。原书 PDF 视图前面已经建好，这里不重复。
 	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
 	r.checkPageAlignment()
 	// T109：无图片的书老版本不会把 md 落进 source/，且 images 已标 done
@@ -935,6 +947,13 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	if st, serr := os.Stat(markerDir); serr != nil || !st.IsDir() {
 		markerDir = sourceDir
 	}
+	// 幂等：索引以 md 的内容为准，源没变就不重建。这条判据让"images 之前先
+	// 建一次（重试监视器可能马上就开转换会话）、images 之后按加工过的 md 再
+	// 核一次"这个顺序只多花一次文件 stat，而不是每次都重扫一遍中间产物。
+	stamp := docIndexStampOf(mds, markerDir)
+	if stamp == r.docIndexStamp && r.docIndex != nil {
+		return
+	}
 	outPath := filepath.Join(proj, "doc_index", "doc_index.json")
 	idx, pageIdx, err := buildDocIndex(r.cfg.Paths.MineruOutput, mds, markerDir, outPath)
 	if err != nil {
@@ -943,6 +962,7 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	}
 	r.docIndex = idx
 	r.docPages = pageIdx
+	r.docIndexStamp = stamp
 	withNotes := 0
 	for _, e := range idx.Entries {
 		if e.Marker != "" {
@@ -951,6 +971,27 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	}
 	r.log.Log(0, "[docindex] 原始文档索引就绪:", strconv.Itoa(len(idx.Entries)), "个块 /", strconv.Itoa(len(idx.Parts)),
 		"个 part（带 DOCVISION 注释:", strconv.Itoa(withNotes), "）->", outPath)
+}
+
+// docIndexStampOf 给"这次要索引哪几份 md、它们是什么样"取一个指纹：目录 +
+// 每份的大小与修改时间。images 阶段把 md 加工（打 DOCVISION 注释）落进
+// <proj>/source 之后指纹会变，索引据此重建一次；没变就一个字节都不动。
+func docIndexStampOf(mds []string, markerDir string) string {
+	var b strings.Builder
+	b.WriteString(markerDir)
+	sorted := append([]string(nil), mds...)
+	sort.Strings(sorted)
+	for _, p := range sorted {
+		b.WriteString("\x00")
+		b.WriteString(p)
+		if st, err := os.Stat(p); err == nil {
+			b.WriteString("\x00")
+			b.WriteString(strconv.FormatInt(st.Size(), 10))
+			b.WriteString(":")
+			b.WriteString(strconv.FormatInt(st.ModTime().UnixNano(), 10))
+		}
+	}
+	return b.String()
 }
 
 // phase: convert (concurrent per-chapter sessions)
@@ -1625,6 +1666,18 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	// 回放一段没有文件的历史只会让会话空转，不如重来）。
 	trPath := node.TranscriptPath
 	workRoot := filepath.Join(node.NodeRoot, "work")
+	// T227：续跑之前先给转录做一次体检。已经坏在磁盘上的会话不会自己好——它回放
+	// 的还是那段"看不见原书 / 我做不到"的历史，截掉之后再接着跑（工作树不动）。
+	if node.Attempt == 1 && fileExists(workRoot) {
+		if dst, num, why, ok := repairDerailedTranscript(trPath, workRoot); ok {
+			r.log.LogWarning(tid, "[convert]", base, "会话转录已被带偏（"+why+"），另开第",
+				strconv.Itoa(num), "次尝试继续跑")
+			r.phaseNote()("[convert] %s 转录已被带偏（%s），已截断另开第 %d 次尝试继续跑", base, why, num)
+			trPath, node.TranscriptPath, node.AttemptNum = dst, dst, num
+		} else if why != "" {
+			r.log.LogWarning(tid, "[convert]", base, "转录体检失败（按原样续跑）:", why)
+		}
+	}
 	resuming := node.Attempt == 1 && fileExists(trPath) && fileExists(workRoot)
 	if !resuming {
 		// T174：开新尝试只清这一层的工作区，**不动 `sessions/`**——递归子章节
@@ -2835,6 +2888,16 @@ func (r *Runner) remindOrRescue(sess *session.Session, tid int, tag, label, subm
 		if dec.Hint != "" {
 			hint = dec.Hint
 		}
+		// 提示轮只说话、不说话就收：上一次提醒如果只换来一模一样的答复，模型
+		// 就是在复读，同一句提醒再发一遍只会多堆一条同样的记录（历史里那串
+		// 一模一样的 "You have NOT submitted yet" 加重复总结就是这么来的）。
+		// 只砍"复读"这一种：实测第二次提醒后答复变了的会话绝大多数最终真提交，
+		// 提醒本身有效，不能因为怕污染就一律不发。
+		reminder := submitReminderText(submitTool, hint)
+		if reminderInCircles(sess, reminder) {
+			r.log.LogWarning(tid, tag, label, "上一次提交提醒只换来一模一样的答复，不再重复发送")
+			break
+		}
 		r.log.LogWarning(tid, tag, label, "会话结束但未提交，发送提交提醒")
 		release := r.acquireChapterSlot()
 		// P61/C：复盘说了 retry 时目标状态已经先写成 queued（在排队之前），这里
@@ -2843,7 +2906,7 @@ func (r *Runner) remindOrRescue(sess *session.Session, tid int, tag, label, subm
 		if dec.Verdict != "" {
 			r.markTargetActivity(tid, tag, label, target, "running", "提醒轮拿到并发槽")
 		}
-		_, runErr := sess.Run(session.RunOptions{UserText: submitReminderText(submitTool, hint)})
+		_, runErr := sess.Run(session.RunOptions{UserText: reminder})
 		release()
 		if runErr != nil {
 			r.log.LogWarning(tid, tag, label, "提交提醒轮失败:", runErr)
@@ -2851,6 +2914,52 @@ func (r *Runner) remindOrRescue(sess *session.Session, tid int, tag, label, subm
 		}
 	}
 	return submitted()
+}
+
+// reminderInCircles 判断上一次提交提醒是否只换来一模一样的答复：取最后一条
+// user 消息（必须就是这句提醒）前后的两条助手正文，一字不差就是模型在复读。
+// 没有提醒、提醒后没有正文、或前后两条不同，都返回 false（照常提醒）。
+func reminderInCircles(sess *session.Session, reminder string) bool {
+	if sess == nil || reminder == "" {
+		return false
+	}
+	msgs := sess.Messages()
+	last := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "user" {
+			continue
+		}
+		if s, ok := msgs[i].Content.(string); ok && s == reminder {
+			last = i
+		}
+		break
+	}
+	if last < 0 {
+		return false
+	}
+	after := ""
+	for i := last + 1; i < len(msgs); i++ {
+		if t := assistantSaid(msgs[i]); t != "" {
+			after = t
+		}
+	}
+	before := ""
+	for i := last - 1; i >= 0; i-- {
+		if t := assistantSaid(msgs[i]); t != "" {
+			before = t
+			break
+		}
+	}
+	return after != "" && after == before
+}
+
+// assistantSaid 取一条助手消息的正文（带工具调用的轮次正文为空，跳过）。
+func assistantSaid(m session.ChatMessage) string {
+	if m.Role != "assistant" {
+		return ""
+	}
+	s, _ := m.Content.(string)
+	return strings.TrimSpace(s)
 }
 
 // rescueDecision 是复盘结论在调用方看来意味着什么。

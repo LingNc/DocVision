@@ -841,6 +841,16 @@ func (r *Runner) dispatchRetries(proj string) int {
 		// （这一支按磁盘上的转录续跑），改完再重新整合。
 		if parent, isChild := childChapterParent(base); isChild && (role == "convert" || role == "continue") {
 			_ = retryq.Consume(f.Path)
+			// 子章节不能单独重跑（没有谁去整合它），但**"从某条记录之后继续"
+			// 这个切点必须在这里先落地**：过去这一支直接换成父章节的「继续跑」，
+			// 请求里的 From/Path 一个字没用上；而且真要截的那条转录在子节点自己
+			// 的 `sessions/` 下（不在 `<proj>/work/sessions/`），按顶层目录拼
+			// 路径根本读不到它，失败还只写一行 warning。结果就是页面回执"已截断"、
+			// 磁盘上一行没少，父章节重新驱动时子会话照旧从那段坏尾巴接着跑——
+			// 截断等于没发生，一轮又一轮地耗 token。
+			if role == "continue" && f.Request.From > 0 && strings.TrimSpace(f.Request.Path) != "" {
+				r.cutChapterTranscriptForRetry(proj, base, f.Request.Path, f.Request.From)
+			}
 			r.queueParentContinueFor(proj, f.Request.Project, parent, base)
 			continue
 		}
@@ -944,12 +954,13 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 	case "continue":
 		if req.From > 0 {
 			if err := r.continueFromChapter(proj, base, req.Path, req.From); err != nil {
-				r.log.LogWarning(0, "[convert]", base, "从记录继续失败:", err)
+				r.log.LogError(0, "[convert]", base, "从记录继续失败:", err)
+				r.phaseNote()("[convert] %s 从记录继续失败：%v", base, err)
 			}
 			return
 		}
 		if err := r.continueChapter(proj, base, reason); err != nil {
-			r.log.LogWarning(0, "[convert]", base, "继续跑失败:", err)
+			r.log.LogError(0, "[convert]", base, "继续跑失败:", err)
 		}
 	}
 }
@@ -1076,11 +1087,52 @@ func (r *Runner) truncateChapterTranscript(proj, base, srcName string, from int)
 	if name == "" || !strings.HasSuffix(name, ".jsonl") {
 		return "", 0, fmt.Errorf("源转录不合法: %q", srcName)
 	}
-	dir := filepath.Join(proj, "work", "sessions")
-	src := filepath.Join(dir, name)
+	// 转录不一定在顶层 `work/sessions/`：递归子章节的转录跟着自己的节点走
+	// （`<节点>/sessions/`），拿顶层目录硬拼一条路径出来只会"读不到源转录"。
+	src := findChapterTranscript(proj, base, name)
+	if src == "" {
+		return "", 0, fmt.Errorf("读不到源转录 %s: 顶层 work/sessions/ 与细分节点里都没有这个文件", name)
+	}
+	floor := 2
+	if prev := r.retryAttemptOf(base); prev >= floor {
+		floor = prev + 1
+	}
+	return cutTranscriptAt(src, from, floor)
+}
+
+// cutChapterTranscriptForRetry 是重试队列用的"先截断、再排队"这一步：请求里
+// 的 Path 是转录文件名，From 是 1 基行号。切成功返回新转录名，失败返回空串
+// 并**大声**记一条错误（旧代码在这里只写一行 warning，页面上却已经回执"已
+// 截断"，于是"截断"看起来发生了、实际一行没少，子会话一轮又一轮重放坏尾巴）。
+func (r *Runner) cutChapterTranscriptForRetry(proj, base, srcName string, from int) string {
+	dst, next, err := r.truncateChapterTranscript(proj, base, srcName, from)
+	if err != nil {
+		r.log.LogError(0, "[retry]", base, "按请求截断转录失败（继续排父章节，但这一支没被截）:", err)
+		r.phaseNote()("[retry] %s 截断失败：%v", base, err)
+		return ""
+	}
+	r.log.LogInfo(0, "[retry]", base, "已按请求截断到第", strconv.Itoa(from), "行，新尝试写",
+		filepath.Base(dst), "（第", strconv.Itoa(next), "次尝试）")
+	return filepath.Base(dst)
+}
+
+// transcriptStem 把 `convert_<章>[.tryN].jsonl` 还原成"第 1 次尝试"的名字：
+// 新的尝试号一律从它派生，避免切一条 `.try3` 却写出 `.try3.try2.jsonl`。
+func transcriptStem(path string) string {
+	ext := filepath.Ext(path)
+	return trimAttemptSuffix(strings.TrimSuffix(path, ext)) + ext
+}
+
+// cutTranscriptAt 把 src 的前 from 行抄成**同目录**下的下一条尝试，返回新文件
+// 与它的尝试号（floor 是允许的最小号）。源转录一个字不动——保留现场，回滚只
+// 是多出一条从那儿分叉的尝试。
+func cutTranscriptAt(src string, from, floor int) (string, int, error) {
+	if from < 1 {
+		return "", 0, fmt.Errorf("截断点必须 ≥ 1（转录里的行号）")
+	}
 	data, err := os.ReadFile(src)
 	if err != nil {
-		return "", 0, fmt.Errorf("读不到源转录 %s: %w", name, err)
+		return "", 0, fmt.Errorf("读不到源转录 %s: %w", filepath.Base(src), err)
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	if from > len(lines) {
@@ -1093,16 +1145,16 @@ func (r *Runner) truncateChapterTranscript(proj, base, srcName string, from int)
 	if err := json.Unmarshal([]byte(lines[from-1]), &probe); err != nil || probe.T != "msg" {
 		return "", 0, fmt.Errorf("第 %d 行不是一条消息记录（选了用量/元信息行？）", from)
 	}
-	baseTr := filepath.Join(dir, "convert_"+base+".jsonl")
-	next := 1
-	for n := 1; n <= 999; n++ {
+	baseTr := transcriptStem(src)
+	if floor < 2 {
+		floor = 2
+	}
+	next := floor
+	for n := floor; n <= floor+999; n++ {
 		if !fileExists(attemptTranscriptPath(baseTr, n)) {
 			next = n
 			break
 		}
-	}
-	if prev := r.retryAttemptOf(base); prev >= next {
-		next = prev + 1
 	}
 	dst := attemptTranscriptPath(baseTr, next)
 	head := strings.Join(lines[:from], "\n") + "\n"
@@ -1110,6 +1162,38 @@ func (r *Runner) truncateChapterTranscript(proj, base, srcName string, from int)
 		return "", 0, fmt.Errorf("写新尝试的转录失败: %w", err)
 	}
 	return dst, next, nil
+}
+
+// findChapterTranscript 在磁盘上找这一章的一条转录（只按文件名找）：先看顶层
+// `work/sessions/`，再顺着这本书的细分树找 `<节点>/sessions/`。
+func findChapterTranscript(proj, base, name string) string {
+	if p := filepath.Join(proj, "work", "sessions", name); fileExists(p) {
+		return p
+	}
+	top := base
+	if i := strings.Index(top, "_child_"); i > 0 {
+		top = top[:i]
+	}
+	if top == "" {
+		return ""
+	}
+	roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+top+"*", "work", "_subdivision"))
+	for _, root := range roots {
+		hit := ""
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || hit != "" || d.IsDir() {
+				return nil
+			}
+			if d.Name() == name && filepath.Base(filepath.Dir(p)) == "sessions" {
+				hit = p
+			}
+			return nil
+		})
+		if hit != "" {
+			return hit
+		}
+	}
+	return ""
 }
 
 // vectorRetryPrecondition 判断"重画这张图"现在能不能做（空串 = 可以）。

@@ -36,6 +36,17 @@ type chapterGate struct {
 	// 覆盖率**核对（T168）：脚本机械转换漏掉整段/整张表时，md 的正文三字组
 	// 在 PDF 文本里就凑不齐，当场打回并列出缺得最多的几段。
 	ChapterMD string
+	// NoSourceMount 表示这条会话**没有** source 挂载点（原书 PDF 视图没就绪，
+	// 见 Runner.submitGate）。门禁照旧要求"编译成功 + 亲眼看产物"，但不再要求
+	// "对照原书页"：那个要求在没有 source 挂载点的会话里永远满足不了（会话只
+	// 会拿到 `未知挂载点 "source"`），硬留着只会把会话逼进"复盘 → 截断 → 还是
+	// 过不去"的死循环。
+	NoSourceMount bool
+	// Warn 收一句告警（可选）。NoSourceMount 生效时用它把"这次不要求对照原书"
+	// 说清楚，只提醒一次——静默放宽等于把一个顺序/配置问题藏起来。
+	Warn func(string)
+	// noSourceNoted 是 Warn 的"只说一次"标记（check 会被反复调用）。
+	noSourceNoted bool
 }
 
 type gateCompileStamp struct {
@@ -352,7 +363,19 @@ func (g *chapterGate) check() string {
 	}
 	// 第二道（T168）：和**原书**对一遍。只看自己的产物等于自说自话——脚本
 	// 机械转换漏掉整段内容时，产物内部毫无矛盾，只有和原书比才看得出来。
+	// 例外：这次会话根本没有 source 挂载点（NoSourceMount）。那时它不是"偷懒
+	// 不看原书"，而是**看不了**——要求它满足一个物理上做不到的条件，只会让
+	// 会话在"提醒 / 复盘 / 截断"里空转。
 	need := needSourcePages(cs.Pages)
+	if g.NoSourceMount {
+		if !g.noSourceNoted {
+			g.noSourceNoted = true
+			if g.Warn != nil {
+				g.Warn(fmt.Sprintf("本次会话没有 source 挂载点（原书 PDF 视图没就绪），不要求对照原书（这一章 %d 页，原本要 %d 页原书页）", cs.Pages, need))
+			}
+		}
+		return g.checkCoverage()
+	}
 	if have := len(g.sourceViews()); have < need {
 		return fmt.Sprintf("REJECTED: 还没有和原书对照过。这一章的 PDF 有 %d 页，至少用 view_pdf 打开原书对应页 %d 页"+
 			"（source:<原书 part>.pdf, page: N），逐段核对文字、公式、表格与插图顺序——你已经看了 %d 页。"+

@@ -197,6 +197,7 @@ type Runner struct {
 	inline        bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
 	docIndex      *DocIndex        // 原始文档只读索引（doc_search/原书页面）
 	docPages      *pageIndex       // 与索引对齐的全局页表（水印采样/索引对齐）
+	docIndexStamp string           // 上次建索引时的 md 指纹（幂等重建用）
 	projDir       string           // 项目根（project 挂载点，只读）
 	pdfView       *pdfView         // 原书 PDF 的最小视图（source 挂载点，只读）
 	projView      string           // 项目的最小只读视图（project 挂载点）
@@ -390,7 +391,27 @@ func (r *Runner) submitGate(work, base, chapterMD string) *chapterGate {
 	if r.noChapterGate {
 		return nil
 	}
-	return &chapterGate{WorkRoot: work, Base: base, ChapterMD: chapterMD}
+	g := &chapterGate{WorkRoot: work, Base: base, ChapterMD: chapterMD}
+	// 没有 source 挂载点（原书 PDF 视图还没就绪 / 这本书没有 MinerU 中间产物）
+	// 时，"至少对照 2–4 页原书"这一条永远不可能满足：会话拿到的是
+	// `未知挂载点 "source"`，看不了原书，门禁却一直拿它拒。真实现场里就是
+	// 这样把会话逼进"复盘 → 截断 → 还是过不去"的死循环的。放宽这一条，
+	// 但留一行告警——放宽不等于装作没发生。
+	g.NoSourceMount = len(r.sourceMounts()) == 0
+	if g.NoSourceMount {
+		g.Warn = func(msg string) { r.log.LogWarning(0, "[gate]", base, msg) }
+	}
+	return g
+}
+
+// sourceMounts 返回原书 PDF 视图能给会话的几个挂载点（视图没就绪时是空的）。
+// 会话的 source 挂载点与 list_source_pages/doc_search 都来自同一个 pdfView，
+// 所以它是"这次会话能不能对照原书"的唯一判据。
+func (r *Runner) sourceMounts() []Mount {
+	if r.pdfView == nil {
+		return nil
+	}
+	return r.pdfView.Mounts()
 }
 
 func (r *Runner) keepSessionFile(path string) {

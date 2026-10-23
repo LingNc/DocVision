@@ -2550,3 +2550,18 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **测试（`internal/logger/livepanel_screen_test.go`，沿用 ANSI 回放屏幕模型）**：`TestLiveBlockBoundedByTerminalHeight`（12 行终端 + 22 条会话：屏上 ≤ 6 行、末行「另有 17 个会话」、两条运行中都在、排队第 20 个不上屏、字节流最大光标上移 ≤ 5）、`TestLiveBlockHiddenRowStillFinalizes`、`TestLiveBlockRepaintsOnlyChangedLines`（a/c 各只写 1 次）、`TestLiveBlockPipeKeepsAllRows`（管道不截断、无折叠提示）。
 - **验证**：`go build ./...`、`go test ./internal/logger/ -count=1`、`go test ./internal/latex/ -count=1`（32.5s）全绿；另用一次性可视化用例（30 行终端 + 36 条会话）目检屏幕：运行中/等子会话在前、排队在后、末尾一行折叠提示，跑完删除该用例。
 - **口径**：截断只发生在屏幕上——日志文件、`--console-verbose` 与管道输出仍每个会话每一行；被折起来的会话收尾时定格行照样落进滚动区，账不省。
+
+## v1.5+（T227：原书视图就绪顺序、截断真的会生效、转录体检与复读提醒，2026-10-23）
+- **问题（用户报）**：转换会话大面积陷在同一个死循环里——`submit` 回「还没有和原书对照过…你已经看了 0 页」、`view_pdf` 回「未知挂载点 "source"」，复盘判截断却从不生效，转录里重复提醒与重复总结越堆越多（「这么多的污染内容，而不是从一个最干净的地方截断？…你检查一下？」→「主要是感觉现在好多会话都陷入到了这个情况，导致几乎都没办法继续推进下去了」→「这些有非常多这种错误的会话，怎么处理一下。对这些转换会话处理一下再继续跑？」）。
+- **根因①（顺序）**：`RunBook` 一开始就 `startRetryWatcher`，运行期任何时刻都能派发重试/继续；而 `buildPDFViewQuiet` / `buildDocIndexQuiet` / `checkPageAlignment` 排在**图片阶段之后**。中间被派发的转换会话建出来时 `r.pdfView` 还是 nil → `sessionMounts` 没有 `source` 挂载点 → 门禁仍要求"看过 2–4 页不同的原书页"（`needSourcePages()`）→ 一个不可能满足的条件 → 必然走完"看不了 → 打回 → 复盘 → 判截断 → 再拉起"。日志里**没有任何 `[pdfview]` 行**，说明不是配置或构建问题，是顺序。页计数没被截断清掉：`.gate/source.json` 只在 `node.Depth == 0` 重置运行（P55）时才被清，所以同一句「已经看了 0 页」会被反复撞到。
+- **根因②（截断读错目录）**：`truncateChapterTranscript` 把目录写死成 `<项目>/work/sessions`；子章节转录实际在递归节点里（`work/temp/conv_<章>/work/_subdivision/<子章>/node/sessions/`），`os.ReadFile` 直接失败。
+- **根因③（请求被改写）**：`dispatchRetries` 把命中子章节的 `convert`/`continue` 请求一律改写成"继续跑父章节 `From=0`"，请求里带的 `From`/`Path` 被丢掉；②③ 的失败只落 `LogWarning`（仅文件），界面照旧显示"已截断继续"。
+- **根因④（逐字重复的提醒）**：`remindOrRescue` 两轮提醒在没拿到复盘 `hint` 时是同一句话，模型收到同一句话就照抄上一轮答复 → 同一句 `You have NOT submitted yet…` 与同一段总结在转录里越堆越多。
+- **改（`go/internal/latex/book.go`）**：① 视图/索引/页对齐三步挪到 `startRetryWatcher` 之前（注释写明顺序理由）；图片阶段之后只保留"产物出来再补一次"。`buildDocIndexQuiet` 加指纹守卫（`docIndexStampOf` + `docIndexStamp` 字段）。② `convertChapterNode` 在 `node.Attempt == 1` 且工作区存在时先做转录体检，命中就换新的尝试转录接着跑。③ `remindOrRescue` 先算 `reminder`，`reminderInCircles(sess, reminder)` 为真（上一次提醒前后的两条助手正文一字不差）就不发第二次；新增 `assistantSaid`。
+- **改（`go/internal/latex/retry.go`）**：`truncateChapterTranscript` 走新增的 `findChapterTranscript`（顶层 `work/sessions/` + `work/temp/conv_*` 下 `_subdivision` 递归找）；新增 `cutChapterTranscriptForRetry` 照请求的 `Path`/`From` 截；`dispatchRetries` 子章节分支先消费请求、再排父章节继续跑；截断/继续失败改 `LogError` + `phaseNote`。
+- **改（`go/internal/latex/chaptergate.go` + `runner.go`）**：`chapterGate` 加 `NoSourceMount`（+ `Warn` 回调、只提示一次的 `noSourceNoted`）；`submitGate` 用 `len(r.sourceMounts()) == 0` 判定，会话确实没有 `source` 挂载点时就记一行警告、只要求覆盖检查。
+- **新增（`go/internal/latex/repair.go`）**：`repairDerailedTranscript(trPath, workRoot) (path, attempt, why, ok)`。两条硬证据——工具回执里 `未知挂载点 "source"`、同一 N 的「还没有和原书对照过…你已经看了 N 页」拒绝重复 ≥2 次；**只在回放窗口内**（`replayStart` 找最后一条 `=== COMPRESSED SESSION CONTEXT`）、**只在最后一次成功看过原书页之后**（`lastSourceViewIndex`，回执形如 `PDF page source:`）评估，取最早那条证据；有收账的 `SUBMITTED` 一律不动；切点落在窗口起点之前就跳过。截断复用 `cutTranscriptAt`（源转录一字不动、新尝试写在旁边）。
+- **测试**：`repair_test.go` 15 条（截断点、收账放过、单次拒绝放过、同 N 才认、不同 N 不认、压缩检查点之前跳过、尾巴只有元信息时到上一段找、之后看过原书页的不动、其它挂载点错误不认、干净未完成的不动、新尝试编号、无工作区跳过）；`rescue_triggers_test.go` 加 `repeatAnswer` 开关与两条口径用例（复读只提醒一次 / 答复每轮都变照发两次）。
+- **离线体检（真实工作区，只读 + 一次性写盘后逐条核对）**：625 条最新尝试 → 58 条需截断、567 条干净；58 条逐个核对"行数与源文件前缀逐字节一致"全对，源文件均未被改动；与复盘审计里同一批判 `truncate` 的 195 条交集 **57/58**（切点：AI 偏早 25、偏晚 32、相同 0）。临时驱动用例用完即删，不入库。
+- **验证**：`go test ./internal/latex/ -count=1` 全绿、`go build ./...`、`go vet` 干净。
+- **口径**：提醒不能一刀切取消——实测 65 条发过第二次提醒的转录里 56 条答复变了、48 条最终真提交；只砍"复读"这一种。截断只退对话：不写 `.gate`、不动工作区与已提交产物。

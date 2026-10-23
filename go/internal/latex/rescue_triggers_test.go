@@ -14,6 +14,7 @@ package latex
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,7 +39,11 @@ type rescueChapterOptions struct {
 	// 那一轮正常收尾、不提交。
 	claimNoTools bool
 	// noSubmit 为真时会话每轮都正常收尾、从不调 submit（老的"没提交"触发）。
+	// 每轮正文带轮次号，模拟"还在推进但就是不提交"。
 	noSubmit bool
+	// repeatAnswer 让 noSubmit 的会话每轮返回**一字不差**的正文：模型在复读，
+	// 第二次提醒只换来同一段话（钉住"不再重复追提醒"）。
+	repeatAnswer bool
 	// checkerNoSubmit 为真时**核对会话**每轮都正常收尾、从不调 submit：现场那句
 	// "checker 会话已退化，已排队从干净轮次继续核对"就是这么来的。
 	checkerNoSubmit bool
@@ -229,8 +234,12 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 			case opts.claimNoTools && round == 1:
 				// 声称"工具不可用"：会话层会插一条纠正消息再重发一轮。
 				p60Text(w, "The chapter workspace tools are not available in this session, so I cannot convert it.")
-			case opts.claimNoTools || opts.noSubmit:
+			case opts.repeatAnswer:
+				// 复读：每一轮的正文一字不差。
 				p60Text(w, "I cannot make progress.")
+			case opts.claimNoTools || opts.noSubmit:
+				// 还在推进（正文带轮次号）但就是不提交：提醒仍然值钱。
+				p60Text(w, fmt.Sprintf("I cannot make progress (round %d).", round))
 			default:
 				// 正常收尾：写产物 + 真调 submit（"一章本来就没问题"的对照用例）。
 				subdivisionReply(w,
@@ -505,6 +514,49 @@ func TestRescueDisabledKeepsPreChangeBehaviour(t *testing.T) {
 			t.Errorf("关闭时不该创建 work/rescue/（stat err = %v）", err)
 		}
 	})
+}
+
+// 模型复读时不再重复追提醒：上一次提醒只换来一模一样的答复，第二次提醒
+// 就不发了（历史里那串同样的提醒 + 同样的总结就是它堆出来的）。
+// 注意口径：只在"答复一字不差"时停，答复变了的会话提醒照发（实测值钱）。
+func TestReminderStopsWhenModelRepeatsItself(t *testing.T) {
+	off := false
+	run := runRescueChapter(t, rescueChapterOptions{
+		enabled:      &off,
+		noSubmit:     true,
+		repeatAnswer: true,
+	})
+	if run.err == nil {
+		t.Fatal("复读且未提交，这一章应当失败")
+	}
+	if run.stats.convert != 2 {
+		t.Errorf("请求数 = %d（转换请求），期望 2（首次 + 一次提醒）", run.stats.convert)
+	}
+	reminders := 0
+	for _, text := range run.stats.userTexts {
+		if strings.Contains(text, "You have NOT submitted yet") {
+			reminders++
+		}
+	}
+	if reminders != 1 {
+		t.Errorf("提交提醒 = %d 次，期望 1（第二次会因为复读而跳过）", reminders)
+	}
+}
+
+// 对照：答复每轮都变（还在推进、就是不提交）时，两次提醒照发——不能因为
+// 怕污染就一律只提醒一次。
+func TestReminderKeepsGoingWhenAnswerChanges(t *testing.T) {
+	off := false
+	run := runRescueChapter(t, rescueChapterOptions{
+		enabled:  &off,
+		noSubmit: true,
+	})
+	if run.err == nil {
+		t.Fatal("提醒两次后仍未提交，这一章应当失败")
+	}
+	if run.stats.convert != 3 {
+		t.Errorf("转换请求 = %d，期望 3（首次 + 两次提醒）", run.stats.convert)
+	}
 }
 
 // (e) 不写 latex.rescue.enabled（默认开）时复盘照跑：结论 retry 会把复盘者给的
