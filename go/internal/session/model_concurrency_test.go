@@ -5,6 +5,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"mineru-tools/internal/config"
 )
 
 // T179：同一模型的在途会话数不超过 max_concurrency；不同模型互不影响；
@@ -61,4 +63,45 @@ func TestModelSlotUnlimitedWhenUnset(t *testing.T) {
 		t.Errorf("limits=%v want m:2", got)
 	}
 	SetModelConcurrency(nil)
+}
+
+// P60 第五步：同步嵌套会话（dispatch_fix 在工具调用里跑子会话）之前，父会话
+// 把本轮占着的模型名额临时让出来——不让的话 max_concurrency=1 时父会话握着
+// 名额、子会话排队等它，两个会话互等成死锁。取回后名额要真的回到父会话。
+func TestPauseModelSlotFreesNestedSession(t *testing.T) {
+	SetModelConcurrency(map[string]int{"nested": 1})
+	defer SetModelConcurrency(nil)
+
+	s := &Session{modelCfg: config.ModelConfig{Model: "nested"}}
+	s.holdModelSlot(acquireModelSlot("nested"))
+	defer s.releaseModelSlot()
+
+	resume := s.PauseModelSlot()
+	// 让出之后，另一个会话（子修复会话）立刻能拿到名额。
+	got := make(chan func(), 1)
+	go func() { got <- acquireModelSlot("nested") }()
+	select {
+	case release := <-got:
+		release()
+	case <-time.After(2 * time.Second):
+		t.Fatal("让出模型名额后子会话仍拿不到（同步嵌套会死锁）")
+	}
+
+	resume()
+	// 取回后名额属于父会话，第二个会话不能同时拿到（上限 1）。
+	blocked := make(chan func(), 1)
+	go func() { blocked <- acquireModelSlot("nested") }()
+	select {
+	case release := <-blocked:
+		release()
+		t.Fatal("取回后名额不该再被第二个会话同时拿到（上限 1）")
+	case <-time.After(50 * time.Millisecond):
+	}
+	s.releaseModelSlot()
+	select {
+	case release := <-blocked:
+		release()
+	case <-time.After(2 * time.Second):
+		t.Fatal("父会话释放后另一个会话应当拿到名额")
+	}
 }

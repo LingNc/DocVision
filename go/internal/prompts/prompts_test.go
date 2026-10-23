@@ -102,6 +102,21 @@ func TestTemplatesForbidMention(t *testing.T) {
 	}
 }
 
+// P60 第五步：下派说明必须写明"自包含"的边界，否则父会话会把引用
+// `figures/`/`images/`（装配时才供上的项目级资源）的子章节当成断链再派一遍，
+// 白白多跑一轮修复。只有 `_subdivision/…` 与 `node/result/…` 才是断链。
+func TestConvertFixDispatchScopesSelfContainedness(t *testing.T) {
+	text := Must(ConvertFixDispatch)
+	for _, want := range []string{
+		"`figures/`", "`images/`", "project-level resources", "NOT non-self-contained",
+		"_subdivision/", "node/result/",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("下派说明缺少 %q（自包含边界说不清时父会话会误判并重复下派）:\n%s", want, text)
+		}
+	}
+}
+
 // 守卫④：退役名字表本身要覆盖历史事故清单（防止顺手删条目）。
 func TestRetiredNamesCoverHistory(t *testing.T) {
 	want := []string{"read_md", "view_page", "list_images", "install_font", "compile_preview", "preview.png"}

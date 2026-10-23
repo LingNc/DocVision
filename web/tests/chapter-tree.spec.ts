@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chapterIdSuffix, chainMemberTag, dedupeChapterAttempts, fixRoundAt, fixRowLabel, fixTargetId, fixTranscriptTag, plainTitle } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterAttemptTag, chapterIdSuffix, chapterNodeHasRows, chainMemberTag, dedupeChapterAttempts, fixOutcomeLabel, fixRoundAt, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, plainTitle, sessionTip } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 import { applyIndex, chapterPendingRetry } from '../src/data'
 
@@ -782,5 +782,66 @@ describe('P60 修复行标明章节与轮次', () => {
     expect(target).toBe('chapter_042_child_02')
     // 历史是新 → 旧：最新一轮在最上面，轮次从队尾数起。
     expect(chain.map((s: any, i: number) => fixRoundAt(i, chain.length))).toEqual([2, 1])
+  })
+})
+
+/* P60 第五步：修复行独立于核对行。
+ *
+ * 真实跑批里出现过「修复转录明明在磁盘上、章节树里却一条修复行都看不见」：
+ * 渲染逻辑把修复行当成核对块的附属物，这一行没有核对（还没核对，或核对是上
+ * 一次尝试、按 T187 不显示）时它跟着一起没。现在渲染条件只认 `node.fixes`
+ * 自己，`chapterNodeHasRows` 也把「核对 / 修复 / 子章节」当三种互不依赖的来源。
+ */
+describe('P60 修复行独立于核对行', () => {
+  const conv2 = (id: string, attempt = 1, mt = '2026-10-23T10:00:00Z', over: Record<string, unknown> = {}) => ({
+    id: 'book/work/sessions/convert_' + id + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: id, chapterRole: 'convert',
+    chapterAttempt: attempt, mtime: mt, ...over,
+  })
+  const checker2 = (id: string, attempt: number, mt: string, over: Record<string, unknown> = {}) => ({
+    id: 'book/work/sessions/checker_' + id + (attempt > 1 ? `.try${attempt}` : '') + '.jsonl',
+    project: 'book', chapterId: id, chapterRole: 'checker',
+    chapterAttempt: attempt, mtime: mt, ...over,
+  })
+  const fix2 = (id: string, anchor: string, mt: string, over: Record<string, unknown> = {}) => ({
+    id: 'book/work/temp/conv_' + id + '/work/_subdivision/child_01/node/sessions/fix_' + id + '.jsonl',
+    project: 'book', chapterRole: 'fix', chapterAnchor: anchor, mtime: mt, ...over,
+  })
+
+  it('核对因尝试号不显示时，修复行仍然挂在这一行上', () => {
+    // 转换是第 2 次（旧结论作废重来），核对还是第 1 次且没有锚点 → 按 T187
+    // 不显示；修复锚定的是第 2 次转换，必须照旧显示。
+    const c = conv2('chapter_042', 2, '2026-10-23T12:00:00Z')
+    const oldCheck = checker2('chapter_042', 1, '2026-10-23T10:30:00Z')
+    const fx = fix2('chapter_042', 'convert_chapter_042.try2', '2026-10-23T13:00:00Z')
+    const node = buildChapterTree([c, oldCheck, fx])[0]
+    expect(node.convert!.id).toBe(c.id)
+    expect(node.checker).toBeNull()
+    expect(node.fixes.map((f: any) => f.id)).toEqual([fx.id])
+    // 渲染判据：有修复行 → 有子行可展开，与核对在不在无关。
+    expect(chapterNodeHasRows(node)).toBe(true)
+  })
+
+  it('chapterNodeHasRows：三种子行来源互不依赖，都没有时不撑高一行', () => {
+    expect(chapterNodeHasRows({ convert: {}, checker: {}, fixes: [], children: [] })).toBe(true)
+    expect(chapterNodeHasRows({ convert: {}, checker: null, fixes: [{ id: 'f' }], children: [] })).toBe(true)
+    expect(chapterNodeHasRows({ convert: {}, checker: null, fixes: [], children: [{ id: 'c' }] })).toBe(true)
+    // 没有修复的节点与引入修复行之前完全一致：不多出展开箭头。
+    expect(chapterNodeHasRows({ convert: {}, checker: null, fixes: [], children: [] })).toBe(false)
+    expect(chapterNodeHasRows({ convert: null, checker: null, fixes: [], children: [] })).toBe(false)
+  })
+
+  it('修复行的结局写进 title：通过 / 未通过 / 失败 / 运行中', () => {
+    const base = { id: 'f', label: '修复 · chapter_042', status: 'done' }
+    expect(fixOutcomeLabel({ ...base, chapterActivity: 'pass' })).toBe('通过')
+    expect(fixOutcomeLabel({ ...base, chapterActivity: 'issues' })).toBe('未通过')
+    expect(fixOutcomeLabel({ ...base, chapterActivity: 'error' })).toBe('失败')
+    // 还活着就只说"运行中"：上一次的结论不能冒充这一次。
+    expect(fixOutcomeLabel({ ...base, chapterActivity: 'pass', live: true })).toBe('运行中')
+    expect(fixOutcomeLabel({ ...base })).toBe('')
+    expect(fixOutcomeLabel(null)).toBe('')
+    // title = 原有 tip + 结局；没有结局时与之前一字不差。
+    expect(fixRowTitle({ ...base })).toBe(sessionTip({ ...base }))
+    expect(fixRowTitle({ ...base, chapterActivity: 'issues' })).toBe(sessionTip({ ...base }) + '\n修复结果：未通过')
   })
 })

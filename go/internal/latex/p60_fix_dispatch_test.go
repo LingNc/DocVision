@@ -33,6 +33,7 @@ type p60Stats struct {
 	runErr          string         // convertOneChapter 的错误（空 = 这一章收下了）
 	dispatchOffered bool           // 有没有任何请求把 dispatch_fix 放进工具表
 	convertSystem   string         // 转换会话的系统提示词（第一份）
+	receipts        []string       // 模型看到的 dispatch_fix 回执（P60 第五步同步执行）
 }
 
 // p60Options 是 p60RunWith 的场景旋钮（p60Run 的三个变体只是它们的简写）。
@@ -110,12 +111,19 @@ func p60RunWith(t *testing.T, opts p60Options) (*p60Stats, string, string) {
 			return
 		}
 		lastUser, system := "", ""
+		var receipts []string
 		for _, m := range apiReq.Messages {
 			switch m.Role {
 			case "user":
 				lastUser = m.Content
 			case "system":
 				system = m.Content
+			case "tool":
+				// P60 第五步：dispatch_fix 的回执是同步执行的唯一"结果面"，
+				// 它随 tool 消息回到模型——这里留一份给断言用。
+				if strings.HasPrefix(m.Content, "FIX RESULT") {
+					receipts = append(receipts, m.Content)
+				}
 			}
 		}
 		toolset := map[string]bool{}
@@ -135,6 +143,7 @@ func p60RunWith(t *testing.T, opts p60Options) (*p60Stats, string, string) {
 		if stats.convertSystem == "" && toolset["request_chapter_split"] {
 			stats.convertSystem = system
 		}
+		stats.receipts = append(stats.receipts, receipts...)
 		stats.mu.Unlock()
 
 		switch {
@@ -358,8 +367,8 @@ func TestFixDispatchRunsPlannedChildOnly(t *testing.T) {
 	if stats.reviews == 0 {
 		t.Error("打开时整合前应当有一次复查子章节的对话")
 	}
-	if got := stats.fixes["chapter_01_child_01"]; got == 0 {
-		t.Errorf("计划点名的 child_01 应当跑修复会话: %v", stats.fixes)
+	if got := stats.fixes["chapter_01_child_01"]; got != 1 {
+		t.Errorf("child_01 的修复会话请求数 = %d，期望 1（P60 第五步：dispatch_fix 同步跑一次，runner 不再重复执行同一份计划）: %v", got, stats.fixes)
 	}
 	if got := stats.fixes["chapter_01_child_02"]; got != 0 {
 		t.Errorf("计划没点名的 child_02 不该跑修复会话: %v", stats.fixes)
@@ -372,6 +381,22 @@ func TestFixDispatchRunsPlannedChildOnly(t *testing.T) {
 	}
 	if stats.integrations != 1 {
 		t.Errorf("父章节整合会话 = %d，期望 1", stats.integrations)
+	}
+	// 回执里必须有结局（P60 第五步）：模型在整合前就知道 child_01 修好了、
+	// 核对结论与还剩几轮。
+	receipts := strings.Join(stats.receipts, "\n")
+	for _, want := range []string{"FIX RESULT", "child_01: FIXED", "checker: pass", "rounds 1/5, 4 left"} {
+		if !strings.Contains(receipts, want) {
+			t.Errorf("dispatch_fix 的回执缺 %q:\n%s", want, receipts)
+		}
+	}
+	// 同步执行过的计划已标成 applied：runner 侧看到它就该空转。
+	plan, err := ReadFixPlan(proj, "chapter_01")
+	if err != nil {
+		t.Fatalf("读不回修复计划: %v", err)
+	}
+	if plan.Applied == "" {
+		t.Error("同步执行的计划应当带 applied 时间戳")
 	}
 
 	// 修复会话写下的产物要真的刷新进父章节的 children/ 副本，否则整合读到的
@@ -412,8 +437,8 @@ func TestFixDispatchFailureFallsBackToIntegration(t *testing.T) {
 	}
 }
 
-// P60 第二步：下派说明只按开关追加。关闭时的提示词必须与引入它之前逐字节相同
-// （这正是"默认跑法不变"最容易被破坏的地方）。
+// P60 第二步/第五步：下派说明只按开关追加。关闭时的提示词必须与引入它之前逐字节
+// 相同（这正是"默认跑法不变"最容易被破坏的地方）。
 func TestConvertSystemPromptDispatchOnlyWhenEnabled(t *testing.T) {
 	r := keepTestRunner(t)
 	off := false
@@ -426,13 +451,27 @@ func TestConvertSystemPromptDispatchOnlyWhenEnabled(t *testing.T) {
 	if strings.Contains(today, "dispatch_fix") {
 		t.Fatal("常驻的转换模板不该提到 dispatch_fix（它只在开关打开时注册）")
 	}
+	// P60 第五步（A）：自包含边界的说明也只跟着开关走——关闭时一个字都不能有。
+	// （`_subdivision/` 本身在常驻提示词里就有，所以只钉新增的判据句。）
+	for _, want := range []string{"project-level resources", "NOT non-self-contained", "node/result/"} {
+		if strings.Contains(today, want) {
+			t.Errorf("关闭时不该出现自包含边界说明 %q", want)
+		}
+	}
 	on := true
 	r.cfg.Latex.Fix = config.FixConfig{Enabled: &on}
 	got := r.convertSystemPrompt(tuning)
 	if !strings.HasPrefix(got, today+"\n\n") {
 		t.Fatal("打开时应当只是在今天的提示词后面追加一段")
 	}
-	if !strings.Contains(got, "dispatch_fix") || !strings.Contains(got, "only records a plan") {
+	if !strings.Contains(got, "dispatch_fix") || !strings.Contains(got, "records the plan") {
 		t.Errorf("追加的说明缺少关键语义:\n%s", got)
+	}
+	// 打开时：`figures/`/`images/` 不是断链、只有 `_subdivision/…` 与
+	// `node/result/…` 才是——父会话不能把引用项目级资源的子章节退回来重修。
+	for _, want := range []string{"`figures/`", "`images/`", "project-level resources", "NOT non-self-contained", "_subdivision/", "node/result/"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("打开时应当带自包含边界说明 %q:\n%s", want, got)
+		}
 	}
 }

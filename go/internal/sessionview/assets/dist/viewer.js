@@ -7368,6 +7368,28 @@
     const i = Math.max(0, Math.floor(Number(index) || 0));
     return Math.max(1, n - i);
   }
+  function fixOutcomeLabel(s) {
+    if (!s) return "";
+    if (s.live) return "运行中";
+    switch (String(s.chapterActivity || "")) {
+      case "pass":
+        return "通过";
+      case "issues":
+        return "未通过";
+      case "error":
+        return "失败";
+      default:
+        return "";
+    }
+  }
+  function fixRowTitle(s) {
+    const tip = sessionTip(s);
+    const outcome = fixOutcomeLabel(s);
+    return outcome ? tip + "\n修复结果：" + outcome : tip;
+  }
+  function chapterNodeHasRows(node) {
+    return !!node.convert && !!node.checker || (node.children || []).length > 0 || (node.fixes || []).length > 0;
+  }
   function sortFixesOldestFirst(items) {
     return (items || []).slice().sort((a, b) => {
       const d = mtimeMs(a) - mtimeMs(b);
@@ -9447,7 +9469,7 @@
         return chapterWantOpen(props.scope, node.id, nodeContainsCurrent(node));
       }
       function hasBody(node) {
-        return !!node.convert && !!node.checker || node.children.length > 0 || (node.fixes || []).length > 0;
+        return chapterNodeHasRows(node);
       }
       function fixStateText(session) {
         return session && session.live ? "运行中" : "";
@@ -9598,7 +9620,7 @@
                     onClick: ($event) => emit2("info", node.checker)
                   }, "ⓘ", 8, _hoisted_14$5)
                 ], 2)) : createCommentVNode("", true),
-                (openBlock(true), createElementBlock(Fragment, null, renderList(node.fixes, (fx, i) => {
+                (node.fixes || []).length ? (openBlock(true), createElementBlock(Fragment, { key: 1 }, renderList(node.fixes, (fx, i) => {
                   return openBlock(), createElementBlock("div", {
                     key: "fix:" + fx.id + ":" + i,
                     class: normalizeClass(["chapter-fix", { active: currentId.value === fx.id }])
@@ -9608,7 +9630,7 @@
                       type: "button",
                       role: "treeitem",
                       "data-id": fx.id,
-                      title: unref(sessionTip)(fx),
+                      title: unref(fixRowTitle)(fx),
                       onClick: ($event) => emit2("select", fx)
                     }, [
                       createBaseVNode("span", {
@@ -9623,9 +9645,9 @@
                       fx.archived ? (openBlock(), createElementBlock("span", _hoisted_18$5, "归档")) : createCommentVNode("", true)
                     ], 8, _hoisted_15$5)
                   ], 2);
-                }), 128)),
+                }), 128)) : createCommentVNode("", true),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
-                  key: 1,
+                  key: 2,
                   nodes: node.children,
                   depth: (__props.depth || 0) + 1,
                   scope: __props.scope,
@@ -9646,7 +9668,7 @@
     }
     return target2;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-d9fec8f3"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-58f35b3d"]]);
   const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"

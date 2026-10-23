@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { state } from '../state'
-import { chapterActivityLabel, chapterNodeKey, chapterWantOpen, fixRowLabel, fixTargetId, fixTranscriptTag, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
+import { chapterActivityLabel, chapterNodeHasRows, chapterNodeKey, chapterWantOpen, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
 import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
 import type { ChapterTreeNode } from '../legacy/sidebar'
@@ -45,9 +45,11 @@ function isOpen(node: ChapterTreeNode): boolean {
 /* 核对会话作为**子行**出现，前提是行头已经是转换会话；没有转换会话的节点
  * （只做过重新核对）行头本身就是那条核对会话，再在下面重复一遍就成了
  * 「核对 核对 · chapter_002」两行同一个会话。
- * P60：修复子行同理——没有修复的节点不能因为这条判据多出一个展开箭头。 */
+ * P60 第五步：修复子行同理——没有修复的节点不能因为这条判据多出一个展开箭头；
+ * 反过来，修复行也不能因为这一行没有核对（或核对不显示）就跟着消失，所以
+ * 「有没有子行」的三种来源互不依赖（判据收在 sidebar.ts 的 chapterNodeHasRows）。 */
 function hasBody(node: ChapterTreeNode): boolean {
-  return (!!node.convert && !!node.checker) || node.children.length > 0 || (node.fixes || []).length > 0
+  return chapterNodeHasRows(node)
 }
 
 /*
@@ -206,11 +208,14 @@ function nodeTitle(node: ChapterTreeNode): string {
           </button>
           <button class="chapter-info" type="button" title="打开核对会话详情" @click="emit('info', node.checker)">ⓘ</button>
         </div>
-        <!-- P60：修复会话子行，紧挨着核对行（它修的就是这一行选中的那份转换产物）。
+        <!-- P60 第五步：修复会话子行是这一行选中那次转换下面的**独立子行**，
+             不在核对块里——核对行在不在（还没核对、或核对尝试号比转换小而不
+             显示）都不影响它。没有修复的节点一条也不渲染：不留占位、不撑高度。
              标签写清**修的是哪一章的第几轮**（`修复 child_02 #1`）——同一行下面
-             可能挂着不同子章节的修复，只写「修复 N」看不出归属。
-             没有修复的节点这里一条也不渲染——不留占位、不撑高度。 -->
+             可能挂着不同子章节的修复，只写「修复 N」看不出归属；结局（通过 /
+             未通过 / 运行中）在行 title 里（fixRowTitle）。 -->
         <div
+          v-if="(node.fixes || []).length"
           v-for="(fx, i) in node.fixes"
           :key="'fix:' + fx.id + ':' + i"
           class="chapter-fix"
@@ -221,7 +226,7 @@ function nodeTitle(node: ChapterTreeNode): string {
             type="button"
             role="treeitem"
             :data-id="fx.id"
-            :title="sessionTip(fx)"
+            :title="fixRowTitle(fx)"
             @click="emit('select', fx)"
           >
             <span class="fix-marker" :title="'修复会话针对的章节：' + (fixTargetId(fx, node.id) || '—')">{{ fixRowLabel(fx, node.id, i + 1) }}</span>

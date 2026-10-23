@@ -474,6 +474,46 @@ export function fixRoundAt(index: number, total: number): number {
   return Math.max(1, n - i)
 }
 
+/*
+ * P60 第五步：修复行的结局（通过 / 未通过 / 失败 / 运行中）。
+ *
+ * 修复会话自己往转录里写 `chapter_activity`（pass / issues / error），扫描端
+ * 把它放进行上的 `chapterActivity`；还在写入的会话一律算"运行中"（还没结论，
+ * 不能拿上一次的状态冒充这一次）。这一行写进行 title——鼠标停一下就知道那
+ * 一轮修没修过，不必点进去读转录。
+ */
+export function fixOutcomeLabel(s: any): string {
+  if (!s) return ''
+  if (s.live) return '运行中'
+  switch (String(s.chapterActivity || '')) {
+    case 'pass':
+      return '通过'
+    case 'issues':
+      return '未通过'
+    case 'error':
+      return '失败'
+    default:
+      return ''
+  }
+}
+
+/* 修复行的悬浮说明 = 会话原本的 tip + 结局；没有结局时与之前一字不差。 */
+export function fixRowTitle(s: any): string {
+  const tip = sessionTip(s)
+  const outcome = fixOutcomeLabel(s)
+  return outcome ? tip + '\n修复结果：' + outcome : tip
+}
+
+/*
+ * 一个节点有没有子行可展开：核对行 / 修复行 / 子章节。三者互不依赖——
+ * 修复行不能因为这一行没有核对（或核对因尝试号不显示）就一起消失
+ * （P60 第五步：真实跑批的 fix_*.jsonl 就是这么在界面上看不见的）。
+ * 判据保持与引入修复行之前一致：没有这三种子行的节点不多出展开箭头。
+ */
+export function chapterNodeHasRows(node: { convert?: any; checker?: any; fixes?: any[]; children?: any[] }): boolean {
+  return (!!node.convert && !!node.checker) || (node.children || []).length > 0 || (node.fixes || []).length > 0
+}
+
 /* 修复轮次按**时间**排出先后（同一处修多轮，旧 → 新）；并列时按 id 保底确定性。 */
 function sortFixesOldestFirst(items: any[]): any[] {
   return (items || []).slice().sort((a, b) => {

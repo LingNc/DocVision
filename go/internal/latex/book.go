@@ -1812,7 +1812,18 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		// dispatchFix 为 nil（latex.fix.enabled 关闭）时这两步根本不存在——默认
 		// 跑法与引入 P60 之前一字不差。
 		if dispatchFix != nil {
+			// P60 第五步：dispatch_fix 在工具调用里同步跑修复并回执结局，需要
+			// Runner、父会话本体（临时让出模型并发槽、写 fix_result 转录）与
+			// 这次细分出来的子章节清单（刷新父章节副本用）。
+			dispatchFix.Runner = r
+			dispatchFix.Parent = sess
+			dispatchFix.Children = splitTool.Children
+			dispatchFix.ChildDepth = node.Depth + 1
+			dispatchFix.Seq = node.Seq
+			dispatchFix.Tid = tid
 			if planPath := r.reviewChildrenBeforeIntegration(sess, base, dispatchFix, convState, node.Seq, tid); planPath != "" {
+				// 计划已被同步消费时它什么都不做（P60 第五步）；没消费（老流程
+				// / 标记失败）时按老行为执行，整本书不会因此失败。
 				r.applyChildFixPlan(proj, clsName, base, work, node.Depth+1, splitTool.Children, planPath, node.Seq, tid)
 			}
 		}

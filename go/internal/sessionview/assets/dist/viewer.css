@@ -1,76 +1,76 @@
 
-.chapter-tree[data-v-d9fec8f3] { border-left: 1px solid var(--line, #c9d1d9); margin-left: 13px; padding-left: 8px;
+.chapter-tree[data-v-58f35b3d] { border-left: 1px solid var(--line, #c9d1d9); margin-left: 13px; padding-left: 8px;
 }
-.chapter-node[data-v-d9fec8f3] { min-width: 0;
+.chapter-node[data-v-58f35b3d] { min-width: 0;
 }
-.chapter-node-head[data-v-d9fec8f3] { display: flex; align-items: center; gap: 4px; min-height: 29px; cursor: pointer; padding: 0 7px 0 0; color: var(--text, #24292f);
+.chapter-node-head[data-v-58f35b3d] { display: flex; align-items: center; gap: 4px; min-height: 29px; cursor: pointer; padding: 0 7px 0 0; color: var(--text, #24292f);
 }
 /* 展开按钮：整行高的 26px 命中区（原先只有 12px 的小三角），点它只切展开。 */
-.chapter-toggle[data-v-d9fec8f3] {
+.chapter-toggle[data-v-58f35b3d] {
   flex: 0 0 26px; align-self: stretch; min-height: 26px;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; background: transparent; color: var(--muted, #6e7781);
   padding: 0; border-radius: 5px; cursor: pointer;
 }
-.chapter-toggle[data-v-d9fec8f3]:hover { background: var(--hover, #f3f4f6); color: var(--text, #24292f);
+.chapter-toggle[data-v-58f35b3d]:hover { background: var(--hover, #f3f4f6); color: var(--text, #24292f);
 }
-.chapter-toggle[data-v-d9fec8f3]:focus-visible { outline: 2px solid var(--accent, #0969da); outline-offset: -1px;
+.chapter-toggle[data-v-58f35b3d]:focus-visible { outline: 2px solid var(--accent, #0969da); outline-offset: -1px;
 }
-.chapter-toggle-spacer[data-v-d9fec8f3] { flex: 0 0 26px;
+.chapter-toggle-spacer[data-v-58f35b3d] { flex: 0 0 26px;
 }
-.caret[data-v-d9fec8f3] {
+.caret[data-v-58f35b3d] {
   width: 0; height: 0;
   border-left: 5px solid currentColor;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   transition: transform .15s ease;
 }
-.chapter-node.open > .chapter-node-head .caret[data-v-d9fec8f3] { transform: rotate(90deg);
+.chapter-node.open > .chapter-node-head .caret[data-v-58f35b3d] { transform: rotate(90deg);
 }
-.chapter-name[data-v-d9fec8f3], .checker-name[data-v-d9fec8f3] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+.chapter-name[data-v-58f35b3d], .checker-name[data-v-58f35b3d] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
 }
-.chapter-node-head[data-v-d9fec8f3]:hover, .chapter-checker[data-v-d9fec8f3]:hover { background: var(--hover, #f3f4f6);
+.chapter-node-head[data-v-58f35b3d]:hover, .chapter-checker[data-v-58f35b3d]:hover { background: var(--hover, #f3f4f6);
 }
-.chapter-node-head.active[data-v-d9fec8f3], .chapter-checker.active[data-v-d9fec8f3] { background: var(--active, #eaeef2);
+.chapter-node-head.active[data-v-58f35b3d], .chapter-checker.active[data-v-58f35b3d] { background: var(--active, #eaeef2);
 }
-.chapter-node-body[data-v-d9fec8f3] { padding-left: 12px;
+.chapter-node-body[data-v-58f35b3d] { padding-left: 12px;
 }
-.chapter-checker[data-v-d9fec8f3] { width: 100%; display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--text, #24292f); padding: 0 7px 0 26px;
+.chapter-checker[data-v-58f35b3d] { width: 100%; display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--text, #24292f); padding: 0 7px 0 26px;
 }
-.checker-main[data-v-d9fec8f3] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer;
+.checker-main[data-v-58f35b3d] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer;
 }
-.checker-marker[data-v-d9fec8f3] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.checker-marker[data-v-58f35b3d] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
-.chapter-state[data-v-d9fec8f3], .chapter-usage[data-v-d9fec8f3] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.chapter-state[data-v-58f35b3d], .chapter-usage[data-v-58f35b3d] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
 /* P53：重试按钮与「待重试」角标。按钮平时半透明，行悬浮/选中时才明显——
  * 章节行本身就是"点一下选中"，按钮不能抢走整行的点击。 */
-.chapter-retry[data-v-d9fec8f3] { flex: 0 0 auto; opacity: 0; transition: opacity .12s; font-size: 12px; padding: 0 4px;
+.chapter-retry[data-v-58f35b3d] { flex: 0 0 auto; opacity: 0; transition: opacity .12s; font-size: 12px; padding: 0 4px;
 }
-.chapter-node-head:hover .chapter-retry[data-v-d9fec8f3], .chapter-node-head.active .chapter-retry[data-v-d9fec8f3] { opacity: .75;
+.chapter-node-head:hover .chapter-retry[data-v-58f35b3d], .chapter-node-head.active .chapter-retry[data-v-58f35b3d] { opacity: .75;
 }
-.chapter-retry[data-v-d9fec8f3]:hover { opacity: 1;
+.chapter-retry[data-v-58f35b3d]:hover { opacity: 1;
 }
-.chapter-retry-pending[data-v-d9fec8f3] { flex: 0 0 auto; font-size: 11px; color: var(--amber, #9a6700);
+.chapter-retry-pending[data-v-58f35b3d] { flex: 0 0 auto; font-size: 11px; color: var(--amber, #9a6700);
 }
-.chapter-state.run[data-v-d9fec8f3] { color: var(--green, #1a7f37);
+.chapter-state.run[data-v-58f35b3d] { color: var(--green, #1a7f37);
 }
-.chapter-arch[data-v-d9fec8f3] { flex: 0 0 auto; font-size: 11px; color: var(--muted, #6e7781); border: 1px dashed var(--line, #c9d1d9); border-radius: 4px; padding: 0 3px; line-height: 15px;
+.chapter-arch[data-v-58f35b3d] { flex: 0 0 auto; font-size: 11px; color: var(--muted, #6e7781); border: 1px dashed var(--line, #c9d1d9); border-radius: 4px; padding: 0 3px; line-height: 15px;
 }
-.chapter-info[data-v-d9fec8f3] { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer;
+.chapter-info[data-v-58f35b3d] { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer;
 }
 /* P60：修复子行比核对行更紧凑（24px）、再缩进一级——它是核对行下面的第三层。 */
-.chapter-fix[data-v-d9fec8f3] { display: flex; align-items: center; padding: 0 7px 0 40px;
+.chapter-fix[data-v-58f35b3d] { display: flex; align-items: center; padding: 0 7px 0 40px;
 }
-.fix-main[data-v-d9fec8f3] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
+.fix-main[data-v-58f35b3d] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
 }
-.chapter-fix[data-v-d9fec8f3]:hover { background: var(--hover, #f3f4f6);
+.chapter-fix[data-v-58f35b3d]:hover { background: var(--hover, #f3f4f6);
 }
-.chapter-fix.active[data-v-d9fec8f3] { background: var(--active, #eaeef2);
+.chapter-fix.active[data-v-58f35b3d] { background: var(--active, #eaeef2);
 }
-.fix-marker[data-v-d9fec8f3] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.fix-marker[data-v-58f35b3d] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
-.fix-try[data-v-d9fec8f3] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.fix-try[data-v-58f35b3d] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
 
 /* ============================ 侧栏 ============================ */

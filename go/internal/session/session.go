@@ -121,6 +121,13 @@ type Session struct {
 	// transcript, when set, receives every appended conversation
 	// message as a JSONL line (images as file:// refs) for resume.
 	transcript *TranscriptWriter
+
+	// 模型并发槽（T179）由 Run 在整轮里持有。同步嵌套会话（P60 第五步：
+	// dispatch_fix 在工具调用里跑子会话，父会话此刻并不发请求）需要把它临时
+	// 让出来，否则 models.<名>.max_concurrency 配得小时父会话与子会话互等。
+	// 语义见 PauseModelSlot。
+	slotMu      sync.Mutex
+	slotRelease func()
 }
 
 // SetProgressHook registers a callback notified after every API round
@@ -466,7 +473,8 @@ func (s *Session) Run(opts RunOptions) (out string, err error) {
 	// 这里决定"几个能同时跟同一个模型说话"——转换与核对配成两个池子之后，只有
 	// 这一层能真正把同一个模型上的请求数压回厂商限额。
 	if release := acquireModelSlot(s.modelCfg.Model); release != nil {
-		defer release()
+		s.holdModelSlot(release)
+		defer s.releaseModelSlot()
 	}
 	s.noteFrozenPrice()
 	defer func() {
@@ -480,6 +488,53 @@ func (s *Session) Run(opts RunOptions) (out string, err error) {
 		_ = s.transcript.AppendNote("run_end", fields)
 	}()
 	return s.run(opts)
+}
+
+// holdModelSlot 记下本轮持有的模型并发槽释放函数。
+func (s *Session) holdModelSlot(release func()) {
+	s.slotMu.Lock()
+	s.slotRelease = release
+	s.slotMu.Unlock()
+}
+
+// releaseModelSlot 释放本轮持有的模型并发槽（没持有则什么也不做）。
+func (s *Session) releaseModelSlot() {
+	s.slotMu.Lock()
+	release := s.slotRelease
+	s.slotRelease = nil
+	s.slotMu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+/*
+ * PauseModelSlot 在工具执行期间临时让出本会话的模型并发槽，返回"取回"函数。
+ *
+ * 为什么需要：Run 在整轮里的开头取槽、结束时才释放，而 dispatch_fix 是在
+ * 工具调用里**同步**跑子修复会话的。父会话这一刻并不发请求、却还占着名额；
+ * 子会话与父会话落到同一个模型上时，`models.<名>.max_concurrency` 配成 1
+ * （或名额被几个同样停在工具里的父会话占满）就会互等成死锁。让出之后名额按
+ * 真实在途请求计数，取回时再排队（父会话之后自己还要说话）。
+ *
+ * 没有持槽（模型没配上限）或本轮已让出时是空操作。调用方必须在同一条路径上
+ * 调用返回的函数——不让出就取回会让名额泄漏。
+ */
+func (s *Session) PauseModelSlot() func() {
+	s.slotMu.Lock()
+	release := s.slotRelease
+	s.slotRelease = nil
+	model := s.modelCfg.Model
+	s.slotMu.Unlock()
+	if release == nil {
+		return func() {}
+	}
+	release()
+	return func() {
+		if again := acquireModelSlot(model); again != nil {
+			s.holdModelSlot(again)
+		}
+	}
 }
 
 // noteFrozenPrice 把"这个会话用什么模型、当时的费率"冻进转录
