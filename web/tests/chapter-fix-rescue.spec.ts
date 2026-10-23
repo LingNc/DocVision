@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state } from '../src/state'
 import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterIdSuffix, chapterNodeHasRows, chainMemberTag, fixOutcomeLabel, fixRoundAt, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, rescueOrdinal, rescueRowLabel, rescueRowTitle, reviewedTargetLabel, sessionTip, treeFixRows, treeRescueRows } from '../src/legacy/sidebar'
-import { archivedId, fixId, liveId, parentOf, session } from './helpers/chapter'
+import { SESSIONS_DIR, archivedId, fixId, liveId, parentOf, session } from './helpers/chapter'
 
 beforeEach(() => {
   state.collapsed = {}
@@ -299,9 +299,9 @@ describe('P60 修复行独立于核对行', () => {
  * 与核对行**同层**、像修复行那样是一条独立子行。它绝不能变成某一章的
  * convert/checker，也不进**转换/核对**的尝试链。
  *
- * C：它自己有一条链——同一章、**同一目标**（meta 里的 `reviewed_transcript`）的
- * 复盘，新 → 旧；不同目标是两件事，行与号都分开。行号是"这条目标被复盘的第几次"，
- * 由界面按 mtime 读时推断（D：老转录不改名、不重写）。
+ * C：它自己有一条链——**这一章的全部复盘**（T224：不再按"复盘了哪一条转录"分桶），
+ * 新 → 旧。行号是"这一章的第几次复盘"，由界面按 mtime 读时推断（D：老转录不改名、
+ * 不重写）；树上这一章只有一行「复盘」，全部次数都在它的「历史」里。
  */
 describe('P61 复盘行挂在章节下面', () => {
   const conv3 = (id: string, attempt = 1, mt = '2026-10-23T10:00:00Z', over: Record<string, unknown> = {}) => ({
@@ -335,12 +335,12 @@ describe('P61 复盘行挂在章节下面', () => {
     expect(node.rescues.map((r: any) => r.id)).toEqual([r1.id, r2.id])
   })
 
-  it('复盘行标签写「复盘 #N」，N 由目标 + mtime 读时推断，归档带「旧」', () => {
+  it('复盘行标签写「复盘 #N」，N 按这一章 + mtime 读时推断，归档带「旧」', () => {
     const sessions = [
       rescueOf('chapter_042', 1, 'convert_chapter_042', '2026-10-23T11:00:00Z'),
       rescueOf('chapter_042', 2, 'convert_chapter_042', '2026-10-23T13:00:00Z'),
     ]
-    // 名字里就算写着 .try2，界面按目标重新数：第一次是 #1，第二次是 #2。
+    // 名字里就算写着 .try2，界面按这一章重新数：第一次是 #1，第二次是 #2。
     expect(rescueRowLabel(sessions[0], rescueOrdinal(sessions, sessions[0]))).toBe('复盘 #1')
     expect(rescueRowLabel(sessions[1], rescueOrdinal(sessions, sessions[1]))).toBe('复盘 #2')
     expect(rescueRowLabel(sessions[1], 2)).toBe('复盘 #2')
@@ -361,19 +361,22 @@ describe('P61 复盘行挂在章节下面', () => {
     expect(rescueRowTitle(old)).toBe(sessionTip(old) + '\n复盘对象：chapter_042.try2')
   })
 
-  it('同一章两个目标的复盘是两行、各算各的号', () => {
+  it('同一章复盘了不同目标：号按全章连着数，树上仍只占一行', () => {
     const c = conv3('chapter_042', 1, '2026-10-23T10:00:00Z')
     const k = checker3('chapter_042', 1, '2026-10-23T10:30:00Z')
     const rc = rescueOf('chapter_042', 1, 'convert_chapter_042', '2026-10-23T11:00:00Z')
     const rk = rescueOf('chapter_042', 2, 'checker_chapter_042', '2026-10-23T12:00:00Z', 'checker')
     const list = [c, k, rc, rk]
     const node = buildChapterTree(list)[0]
-    // 两行都在、按 mtime 旧 → 新；号各从 1 数（名字里的 .try2 不参与）。
+    // 池子（历史页签要用）里两次都在，按 mtime 旧 → 新。
     expect(node.rescues.map((r: any) => r.id)).toEqual([rc.id, rk.id])
+    // T224：树上只留最新一次——复盘对象不同不是另一条行的理由。
+    expect(treeRescueRows(node).map((r: any) => r.id)).toEqual([rk.id])
+    // 号是"这一章的第几次复盘"，与目标无关。
     expect(rescueOrdinal(list, rc)).toBe(1)
-    expect(rescueOrdinal(list, rk)).toBe(1)
+    expect(rescueOrdinal(list, rk)).toBe(2)
     expect(rescueRowLabel(rc, rescueOrdinal(list, rc))).toBe('复盘 #1')
-    expect(rescueRowLabel(rk, rescueOrdinal(list, rk))).toBe('复盘 #1')
+    expect(rescueRowLabel(rk, rescueOrdinal(list, rk))).toBe('复盘 #2')
   })
 
   it('只有复盘的节点也算有子行（展开箭头与在引入复盘之前一致）', () => {
@@ -397,7 +400,7 @@ describe('P61 复盘行挂在章节下面', () => {
     expect(chapterAttemptChain([c, k, r], r.id)).toBeNull()
   })
 
-  it('C：复盘自己的历史只列同一章 + 同一目标的复盘（新 → 旧）', () => {
+  it('T224：复盘自己的历史列出这一章的全部复盘（新 → 旧），只有一次时没有页签', () => {
     const c1 = conv3('chapter_042', 1, '2026-10-23T10:00:00Z')
     const c2 = conv3('chapter_042', 2, '2026-10-23T10:30:00Z')
     const k = checker3('chapter_042', 1, '2026-10-23T10:40:00Z')
@@ -405,11 +408,17 @@ describe('P61 复盘行挂在章节下面', () => {
     const a2 = rescueOf('chapter_042', 2, 'convert_chapter_042', '2026-10-23T13:00:00Z')
     const b1 = rescueOf('chapter_042', 3, 'checker_chapter_042', '2026-10-23T12:00:00Z', 'checker')
     const list = [c1, c2, k, a1, a2, b1]
-    // 转换 #1 的两条复盘成一条链，新 → 旧。
-    expect((chapterAttemptChain(list, a2.id) || []).map((m: any) => m.id)).toEqual([a2.id, a1.id])
-    expect((chapterAttemptChain(list, a1.id) || []).map((m: any) => m.id)).toEqual([a2.id, a1.id])
-    // 核对那一条目标只有一次复盘：没有页签；另一条目标的复盘绝不混进来。
-    expect(chapterAttemptChain(list, b1.id)).toBeNull()
+    // 同目标的两条照旧成链；不同目标的那条也在同一条链里（树上只有一行）。
+    expect((chapterAttemptChain(list, a2.id) || []).map((m: any) => m.id)).toEqual([a2.id, b1.id, a1.id])
+    expect((chapterAttemptChain(list, a1.id) || []).map((m: any) => m.id)).toEqual([a2.id, b1.id, a1.id])
+    expect((chapterAttemptChain(list, b1.id) || []).map((m: any) => m.id)).toEqual([a2.id, b1.id, a1.id])
+    // 只有一次复盘：没有历史页签（不造假行）。
+    const single = [c1, a1]
+    expect(chapterAttemptChain(single, a1.id)).toBeNull()
+    // 别的章的复盘绝不混进来。
+    const other = rescueOf('chapter_043', 1, 'convert_chapter_042', '2026-10-23T12:30:00Z')
+    expect((chapterAttemptChain([...list, other], a2.id) || []).map((m: any) => m.id))
+      .toEqual([a2.id, b1.id, a1.id])
   })
 
   it('钉住一条复盘会话时，按它 meta 里的目标转录钉住那一次转换', () => {
@@ -450,7 +459,8 @@ describe('P61 复盘处理中的文案', () => {
 })
 
 /* 用户口径（本批）：树上每种只留一行，号只在「历史」里。修复按子章节取最新一轮、
- * 复盘按目标取最新一次；chapterAttemptChain 仍给全部轮次（新 → 旧）。
+ * 复盘按**这一章**取最新一次（T224：老转录没有目标备注时也不再各占一行）；
+ * chapterAttemptChain 仍给全部轮次（新 → 旧）。
  */
 describe('树上每种只留一行（编号只进历史）', () => {
   it('三轮修复在树上只剩最新一轮，历史里三轮都在（新 → 旧）', () => {
@@ -472,7 +482,7 @@ describe('树上每种只留一行（编号只进历史）', () => {
     expect(chain!.map((x: any) => x.id)).toEqual([rounds[2].id, rounds[1].id, rounds[0].id])
   })
 
-  it('同一目标复盘两次：树上只一行「复盘」，历史里两次都在', () => {
+  it('同一章复盘两次：树上只一行「复盘」，历史里两次都在', () => {
     const c = session({
       id: liveId('convert', 'chapter_042', 1), chapterId: 'chapter_042', chapterRole: 'convert',
       chapterAttempt: 1, mtime: '2026-10-23T10:00:00Z',
@@ -493,7 +503,7 @@ describe('树上每种只留一行（编号只进历史）', () => {
     expect(chain!.map((x: any) => x.id)).toEqual([r2.id, r1.id])
   })
 
-  it('复盘了不同目标：树上各占一行，各算各的历史', () => {
+  it('复盘了不同目标：树上只有一行，两次都在它的历史里', () => {
     const c = session({
       id: liveId('convert', 'chapter_042', 1), chapterId: 'chapter_042', chapterRole: 'convert',
       chapterAttempt: 1, mtime: '2026-10-23T10:00:00Z',
@@ -511,9 +521,37 @@ describe('树上每种只留一行（编号只进历史）', () => {
       reviewedRole: 'checker', reviewedTranscript: 'checker_chapter_042', mtime: '2026-10-23T11:10:00Z',
     })
     const node = buildChapterTree([c, k, rc, rk])[0]
-    const rows = treeRescueRows(node)
-    expect(rows.map((x: any) => x.id).sort()).toEqual([rc.id, rk.id].sort())
-    // 每个目标各有各的历史：只有一次复盘的目标没有可列的旧记录（null，不造假行）。
-    expect(chapterAttemptChain([c, k, rc, rk], rc.id)).toBeNull()
+    // T224：目标不同不再各占一行——树上就是这一章的那一行「复盘」（最新一次）。
+    expect(treeRescueRows(node).map((x: any) => x.id)).toEqual([rk.id])
+    // 历史里两次都在（新 → 旧），复盘对象逐行写在行上。
+    const chain = chapterAttemptChain([c, k, rc, rk], rc.id)
+    expect((chain || []).map((x: any) => x.id)).toEqual([rk.id, rc.id])
+    expect(reviewedTargetLabel(chain![0])).toBe('核对#1')
+    expect(reviewedTargetLabel(chain![1])).toBe('转换#1')
+  })
+
+  it('T224：老复盘转录没有目标备注，也不再一章叠成好几行', () => {
+    const c = session({
+      id: liveId('convert', 'chapter_042', 1), chapterId: 'chapter_042', chapterRole: 'convert',
+      chapterAttempt: 1, mtime: '2026-10-23T10:00:00Z',
+    })
+    // 老命名：`rescue_<章>_<时间戳>.jsonl`，转录里只有系统提示词与 run_end，既没有
+    // `reviewed_role` 也没有 `reviewed_transcript`（实测磁盘就是这样）。
+    const legacy = [1, 2, 3].map((n) => session({
+      id: `${SESSIONS_DIR}rescue_chapter_042_2026102${n}-100000.jsonl`,
+      chapterId: 'chapter_042', chapterRole: 'rescue',
+      chapterAttempt: 1, mtime: `2026-10-23T1${n}:00:00Z`,
+    }))
+    const list = [c, ...legacy]
+    const node = buildChapterTree(list)[0]
+    // 池子里三份都在（历史页签要用），树上只留最新那一行。
+    expect(node.rescues.length).toBe(3)
+    expect(treeRescueRows(node).map((x: any) => x.id)).toEqual([legacy[2].id])
+    // 历史把三份都列出来，号按这一章连着数（旧 → 新 1..3）。
+    const chain = chapterAttemptChain(list, legacy[2].id)
+    expect((chain || []).map((x: any) => x.id)).toEqual([legacy[2].id, legacy[1].id, legacy[0].id])
+    expect(legacy.map((s) => rescueOrdinal(list, s))).toEqual([1, 2, 3])
+    // 目标没记录就写「目标未记录」，不按号猜一个角色/轮次。
+    expect(reviewedTargetLabel(legacy[2])).toBe('')
   })
 })

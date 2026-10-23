@@ -479,43 +479,35 @@ export function chapterRoleLabel(role: string): string {
   return CHAPTER_ROLE_LABELS[String(role || '')] || ''
 }
 
-/* C：复盘的目标身份 = 同一章 + **它复盘的那一条转录**。
- * 复盘转录自己的 meta 里写着 `reviewed_transcript`（转录名不含扩展名，已含被复盘
- * 那一次的 `.tryN`），所以同一章里对转换与对核对的复盘天然是两件事；老转录没有
- * 这条备注，只能按"这一章"归到一个桶里（D 的读时推断，不改磁盘）。 */
-export function rescueTargetKey(rescue: any): string {
-  if (!rescue) return ''
-  const tr = String(rescue.reviewedTranscript || '')
-  if (!tr) return ''
-  return String(rescue.reviewedRole || '') + '|' + tr
+/* 这一章的**全部**复盘（同一项目，归档世代也算——父尝试作废后那些老记录不能
+ * 因此找不到），按 mtime 旧 → 新。
+ *
+ * T224：`#N` 与「历史」都只按**这一章**数，不再按"复盘了哪一条转录"分桶。
+ * 用户口径：树上这里只能有一行复盘；复盘过的对象写在行 title/历史行里，不是
+ * 另一条行的理由。老命名的复盘转录里既没有号、也没有"复盘了哪一条"的备注，
+ * 界面只能按 mtime 排号（读时推断，磁盘上的文件名一个字节都不改）。 */
+export function chapterRescueRows(sessions: any[], rescue: any): any[] {
+  if (!rescue || rescue.chapterRole !== 'rescue') return []
+  const chapter = String(rescue.chapterId || '')
+  if (!chapter) return []
+  const proj = rescue.project || projectOf(rescue.id)
+  return sortFixesOldestFirst((sessions || []).filter((s: any) => !!s && s.chapterRole === 'rescue' &&
+    String(s.chapterId || '') === chapter && (s.project || projectOf(s.id)) === proj))
 }
 
 /* 复盘行/历史行的一句话标签：`复盘 #2`（归档前缀「旧」与转换/核对/修复行同一套）。
- * N 是"这一条目标被复盘的第几次"，由 rescueOrdinal 按 mtime 读时算出来（旧 → 新从
- * 1 数）；没有会话池的孤立调用退回转录名里的号。 */
+ * N 是"这一章的第几次复盘"，由 rescueOrdinal 按 mtime 读时算出来（旧 → 新从 1
+ * 数）；没有会话池的孤立调用退回转录名里的号。 */
 export function rescueRowLabel(rescue: any, ordinal?: number): string {
   const n = Number(ordinal) || Number(rescue && rescue.chapterAttempt) || 1
   return ((rescue && rescue.archived) ? '旧' : '') + '复盘 #' + n
 }
 
-/* 同一章 + 同一目标（+ 同一归档世代）下这是第几次复盘，1 起、按 mtime 旧 → 新。
- * 这是 D 的**读时推断**：老命名的复盘转录名里没有号，界面靠 mtime 排出来，
- * 磁盘上的文件名一个字节都不改。 */
+/* 这是这一章的第几次复盘（1 起，按 mtime 旧 → 新）。与 chapterRescueRows 同一
+ * 份集合，所以树行、历史行、历史链的号一定对得上。 */
 export function rescueOrdinal(sessions: any[], rescue: any): number {
   if (!rescue) return 1
-  const chapter = String(rescue.chapterId || '')
-  const key = rescueTargetKey(rescue)
-  const proj = rescue.project || projectOf(rescue.id)
-  const peers = (sessions || []).filter((s: any) => !!s && s.chapterRole === 'rescue' &&
-    String(s.chapterId || '') === chapter && rescueTargetKey(s) === key &&
-    !!s.archived === !!rescue.archived && (s.project || projectOf(s.id)) === proj)
-  peers.sort((a: any, b: any) => {
-    const d = mtimeMs(a) - mtimeMs(b)
-    if (d) return d
-    const ia = String((a && a.id) || '')
-    const ib = String((b && b.id) || '')
-    return ia < ib ? -1 : ia > ib ? 1 : 0
-  })
+  const peers = chapterRescueRows(sessions, rescue)
   const i = peers.findIndex((s: any) => String(s && s.id) === String(rescue.id))
   return i >= 0 ? i + 1 : 1
 }
@@ -642,11 +634,10 @@ function rescuesForNode(node: ChapterTreeNode, convert: any, parentArchived: boo
   return sortFixesOldestFirst(hits)
 }
 
-/* 用户口径（本批）：**树上每种只留一行**。修复按子章节取最新一轮、复盘按目标
- * （同一章 + 它复盘的那条转录）取最新一次——否则同一处修三轮、复盘两次，节点下
- * 就叠出一串 `#1 #2 #3`，树被撑成流水账。号与全部轮次只在「历史」页签里出现
- * （chapterAttemptChain 仍然给出完整列表，新 → 旧）；行 title 里带轮数与最新一轮
- * 的结局，点这一行进去就能看到全部。 */
+/* 用户口径（本批）：**树上每种只留一行**。修复按子章节取最新一轮、复盘按**这一章**
+ * 取最新一次——否则同一处修三轮、复盘两次，节点下就叠出一串 `#1 #2 #3`，树被撑成
+ * 流水账。号与全部轮次只在「历史」页签里出现（chapterAttemptChain 仍然给出完整
+ * 列表，新 → 旧）；行 title 里带复盘对象，点这一行进去就能看到全部。 */
 function newestByKey(list: any[] | undefined, keyOf: (x: any) => string): any[] {
   const items = list || []
   const best = new Map<string, any>()
@@ -668,8 +659,17 @@ export function treeFixRows(node: { id?: string; fixes?: any[] }): any[] {
   return newestByKey(node && node.fixes, (fx) => fixTargetId(fx, id))
 }
 
+/* T224：树上一个节点**只留一行复盘**——取这一章最新的一次（mtime，并列时后面那条
+ * 赢，与 newestByKey 同一口径）。老命名的复盘转录没有目标备注，原来按 id 兜底成
+ * 每份一个 key，于是同一章复盘过几次就叠出几行「复盘」；现在是"这一章复盘过"这
+ * 一件事只有一行，全部次数在「历史」里（chapterAttemptChain → chapterRescueRows）。 */
 export function treeRescueRows(node: { rescues?: any[] }): any[] {
-  return newestByKey(node && node.rescues, (rs) => rescueTargetKey(rs) || String((rs && rs.id) || ''))
+  let best: any = null
+  ;((node && node.rescues) || []).forEach((rs) => {
+    if (!rs) return
+    if (!best || mtimeMs(rs) >= mtimeMs(best)) best = rs
+  })
+  return best ? [best] : []
 }
 /* 钉住一条修复会话时，它所在的行要能显示到它：转换由它的锚点决定（与钉住核对
  * 同一条规则）。找不到锚点对应的转换就不钉，绝不拿别的尝试凑。 */
@@ -1202,14 +1202,12 @@ export function chapterAttemptChain(sessions: any[], id: string | null | undefin
   // P60：修复会话没有章节身份（文件名是 `fix_<章>`），它自己的历史 = **同一锚点**
   // 下的其他修复轮次（新 → 旧）；锚点不同就是修的另一份产物，不能混进来。
   // P61：复盘会话不进**转换/核对**的尝试链——它是某一章的附注，不是那一章的一次
-  // 尝试。C：但它自己有一条链——同一章、**同一目标**的复盘（新 → 旧），目标不同
-  // 就是复盘的另一件事，绝不混排；只有一次复盘时没有历史页签。
+  // 尝试。C：但它自己有一条链。T224：这条链 = **这一章的全部复盘**（新 → 旧），
+  // 不再按"复盘了哪一条转录"分桶——树上这里只有一行，用户口径是"以前的复盘都在
+  // 这个会话的历史里"，谁复盘谁写在行里，不影响归位；老命名的复盘转录本来也没有
+  // 目标备注，分桶只会让它们互相看不见。只有一次复盘时没有历史页签。
   if (self.chapterRole === 'rescue') {
-    if (!self.chapterId) return null
-    const target = rescueTargetKey(self)
-    const rows = (sessions || []).filter((s: any) => !!s && s.chapterRole === 'rescue' &&
-      String(s.chapterId || '') === String(self.chapterId) &&
-      rescueTargetKey(s) === target && (s.project || projectOf(s.id)) === proj)
+    const rows = chapterRescueRows(sessions, self)
     if (rows.length < 2) return null
     return rows.slice().sort((a: any, b: any) => mtimeMs(b) - mtimeMs(a))
   }

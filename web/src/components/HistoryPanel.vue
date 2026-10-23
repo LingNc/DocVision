@@ -51,8 +51,8 @@ function fixRoundOf(index: number): number {
 }
 
 /* 行首小标签：修复链换成「章节后缀 #轮次」（归档前缀照旧），其余链不变。
- * C：复盘链的号是"这条目标被复盘的第几次"，由 rescueOrdinal 按目标读时算出来
- * （链里新 → 旧，号与树行同一个来源）；非复盘链不看这个参数。 */
+ * C：复盘链的号是"这一章的第几次复盘"，由 rescueOrdinal 按全章读时算出来
+ * （链里新 → 旧，号与树行、树上「历史 N」同一个来源）；非复盘链不看这个参数。 */
 function chainTag(s: any, index: number): string {
   if (!fixChain.value) return chainMemberTag(s, rescueNo(s))
   const round = fixRoundOf(index)
@@ -62,14 +62,14 @@ function chainTag(s: any, index: number): string {
 
 function chainTagTip(s: any, index: number): string {
   if (rescueChain.value) {
-    return '这是同一处目标的第 ' + rescueNo(s) + ' 次复盘：' + reviewedLine(s) + '（新 → 旧）'
+    return '这是这一章的第 ' + rescueNo(s) + ' 次复盘：' + reviewedLine(s) + '（新 → 旧）'
   }
   if (!fixChain.value) return chainMemberTag(s, rescueNo(s))
   const id = fixTargetId(s, fixTarget.value)
   return '这是 ' + (id || '这一章') + ' 的第 ' + fixRoundOf(index) + ' 轮修复（同一处、新 → 旧）'
 }
 
-/* 复盘链里这一行的号：同一章 + 同一目标按 mtime 从 1 数（读时推断，磁盘不改）。 */
+/* 复盘链里这一行的号：这一章的全部复盘按 mtime 从 1 数（读时推断，磁盘不改）。 */
 function rescueNo(s: any): number {
   return rescueOrdinal(state.sessions, s)
 }
@@ -108,15 +108,20 @@ const fixChain = computed(() => {
   return list.length > 0 && list.every((s: any) => s && s.chapterRole === 'fix')
 })
 
-/* C：复盘链只列同一章 + **同一目标**的复盘（成员全是复盘会话），新 → 旧。 */
+/* C：复盘链只列**这一章的全部复盘**（成员全是复盘会话），新 → 旧。
+ * T224：不再按"复盘了哪一条转录"分桶——树上这里只有一行复盘，以前的每一次复盘
+ * 都要能在它的「历史」里找到；老命名的转录本来也没有目标备注，分桶等于互相藏。 */
 const rescueChain = computed(() => {
   const list = members.value || []
   return list.length > 0 && list.every((s: any) => s && s.chapterRole === 'rescue')
 })
 
-/* 复盘链表头要点名被复盘的那一条会话与它的角色（`复盘了 转换#1`）；链里任一成员
- * 的 meta 都写着同一个目标，老转录没有就只能说"目标未记录"。 */
-const reviewedHead = computed(() => reviewedLine((members.value || [])[0] || null))
+/* 复盘链表头点名这一章（行里的「复盘#N · 复盘了 …」逐行写清复盘对象）。 */
+const rescueChapter = computed(() => {
+  const s: any = (members.value || [])[0] || null
+  const id = String((s && s.chapterId) || '')
+  return id ? chapterIdSuffix(id) : '章节未知'
+})
 
 const rounds = computed(() => {
   if (chapterChain.value) return []
@@ -161,7 +166,7 @@ const newestFixId = computed(() => {
 })
 
 function isNewestRow(s: any): boolean {
-  // 修复链与复盘链都没有可比的"章节尝试号"（修复按轮次、复盘按目标次数），
+  // 修复链与复盘链都没有可比的"章节尝试号"（修复按轮次、复盘按这一章的第几次），
   // 「最新」= 链里排在最前的那一条（链已按新 → 旧排好）。
   if (fixChain.value || rescueChain.value) return !!s && String(s.id) === newestFixId.value
   return (Number(s && s.chapterAttempt) || 1) === newest.value
@@ -179,7 +184,7 @@ function pairOf(s: any): any {
   // 规则），但它**不是**这一章的转换/核对——配对服务的是"转换 ↔ 同轮核对"这两个
   // 角色，修复的历史里多一个「同轮核对」按钮只会跳去不相干的一条。
   if (s.chapterRole === 'fix') return null
-  // C：复盘会话的号是"这条目标被复盘的第几次"，与转换/核对的尝试号不是一回事，
+  // C：复盘会话的号是"这一章的第几次复盘"，与转换/核对的尝试号不是一回事，
   // 拿它去配"同轮核对"只会跳去不相干的一条。
   if (s.chapterRole === 'rescue') return null
   const attempt = Number(s.chapterAttempt) || 1
@@ -222,7 +227,7 @@ function doDrop() {
     <div v-if="!members" class="history-empty">当前会话不属于任何调用链 / 重试链</div>
     <div v-else class="history-list">
       <div class="history-head">
-        <template v-if="rescueChain">同一处目标的复盘（<span class="history-fix-target" title="这条复盘链复盘的是哪一条会话">{{ reviewedHead }}</span>，{{ members.length }} 次，新 → 旧）</template>
+        <template v-if="rescueChain">这一章的全部复盘（<span class="history-fix-target" title="这一章一共复盘过几次（含更早父尝试留下的归档转录）">{{ rescueChapter }}</span>，{{ members.length }} 次，新 → 旧）</template>
         <template v-else-if="fixChain">同一处的修复轮次（<span class="history-fix-target" title="这条修复链修的是哪一章">{{ fixTarget || '章节未知' }}</span>，{{ members.length }} 轮，新 → 旧）</template>
         <template v-else-if="chapterChain">这一章的全部会话（{{ members.length }}，每个转换后面跟着它名下的核对，新 → 旧）</template>
         <template v-else>这一章的全部会话（{{ members.length }}，转换与核对都在这里，新 → 旧）</template>

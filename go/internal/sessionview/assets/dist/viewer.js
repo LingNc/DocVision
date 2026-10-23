@@ -7374,25 +7374,16 @@
   function chapterRoleLabel(role) {
     return CHAPTER_ROLE_LABELS[String(role || "")] || "";
   }
-  function rescueTargetKey(rescue) {
-    if (!rescue) return "";
-    const tr = String(rescue.reviewedTranscript || "");
-    if (!tr) return "";
-    return String(rescue.reviewedRole || "") + "|" + tr;
+  function chapterRescueRows(sessions, rescue) {
+    if (!rescue || rescue.chapterRole !== "rescue") return [];
+    const chapter = String(rescue.chapterId || "");
+    if (!chapter) return [];
+    const proj = rescue.project || projectOf(rescue.id);
+    return sortFixesOldestFirst((sessions || []).filter((s) => !!s && s.chapterRole === "rescue" && String(s.chapterId || "") === chapter && (s.project || projectOf(s.id)) === proj));
   }
   function rescueOrdinal(sessions, rescue) {
     if (!rescue) return 1;
-    const chapter = String(rescue.chapterId || "");
-    const key = rescueTargetKey(rescue);
-    const proj = rescue.project || projectOf(rescue.id);
-    const peers = (sessions || []).filter((s) => !!s && s.chapterRole === "rescue" && String(s.chapterId || "") === chapter && rescueTargetKey(s) === key && !!s.archived === !!rescue.archived && (s.project || projectOf(s.id)) === proj);
-    peers.sort((a, b) => {
-      const d = mtimeMs(a) - mtimeMs(b);
-      if (d) return d;
-      const ia = String(a && a.id || "");
-      const ib = String(b && b.id || "");
-      return ia < ib ? -1 : ia > ib ? 1 : 0;
-    });
+    const peers = chapterRescueRows(sessions, rescue);
     const i = peers.findIndex((s) => String(s && s.id) === String(rescue.id));
     return i >= 0 ? i + 1 : 1;
   }
@@ -7490,7 +7481,12 @@
     return newestByKey(node && node.fixes, (fx) => fixTargetId(fx, id));
   }
   function treeRescueRows(node) {
-    return newestByKey(node && node.rescues, (rs) => rescueTargetKey(rs) || String(rs && rs.id || ""));
+    let best = null;
+    (node && node.rescues || []).forEach((rs) => {
+      if (!rs) return;
+      if (!best || mtimeMs(rs) >= mtimeMs(best)) best = rs;
+    });
+    return best ? [best] : [];
   }
   function anchoredConvert(items, fix) {
     const anchor = String(fix && fix.chapterAnchor || "");
@@ -7838,9 +7834,7 @@
     if (!self2) return null;
     const proj = self2.project || projectOf(self2.id);
     if (self2.chapterRole === "rescue") {
-      if (!self2.chapterId) return null;
-      const target2 = rescueTargetKey(self2);
-      const rows2 = (sessions || []).filter((s) => !!s && s.chapterRole === "rescue" && String(s.chapterId || "") === String(self2.chapterId) && rescueTargetKey(s) === target2 && (s.project || projectOf(s.id)) === proj);
+      const rows2 = chapterRescueRows(sessions, self2);
       if (rows2.length < 2) return null;
       return rows2.slice().sort((a, b) => mtimeMs(b) - mtimeMs(a));
     }
@@ -9808,7 +9802,7 @@
     }
     return target2;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-12990cdf"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-6ec23ae5"]]);
   const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"
@@ -13360,7 +13354,7 @@
   const _hoisted_3$3 = { class: "history-head" };
   const _hoisted_4$3 = {
     class: "history-fix-target",
-    title: "这条复盘链复盘的是哪一条会话"
+    title: "这一章一共复盘过几次（含更早父尝试留下的归档转录）"
   };
   const _hoisted_5$3 = {
     class: "history-fix-target",
@@ -13450,7 +13444,7 @@
       }
       function chainTagTip(s, index) {
         if (rescueChain.value) {
-          return "这是同一处目标的第 " + rescueNo(s) + " 次复盘：" + reviewedLine(s) + "（新 → 旧）";
+          return "这是这一章的第 " + rescueNo(s) + " 次复盘：" + reviewedLine(s) + "（新 → 旧）";
         }
         if (!fixChain.value) return chainMemberTag(s, rescueNo(s));
         const id = fixTargetId(s, fixTarget.value);
@@ -13479,7 +13473,11 @@
         const list = members.value || [];
         return list.length > 0 && list.every((s) => s && s.chapterRole === "rescue");
       });
-      const reviewedHead = computed(() => reviewedLine((members.value || [])[0] || null));
+      const rescueChapter = computed(() => {
+        const s = (members.value || [])[0] || null;
+        const id = String(s && s.chapterId || "");
+        return id ? chapterIdSuffix(id) : "章节未知";
+      });
       const rounds = computed(() => {
         if (chapterChain.value) return [];
         const s = state.current;
@@ -13550,8 +13548,8 @@
           !members.value ? (openBlock(), createElementBlock("div", _hoisted_1$3, "当前会话不属于任何调用链 / 重试链")) : (openBlock(), createElementBlock("div", _hoisted_2$3, [
             createBaseVNode("div", _hoisted_3$3, [
               rescueChain.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
-                _cache[1] || (_cache[1] = createTextVNode("同一处目标的复盘（", -1)),
-                createBaseVNode("span", _hoisted_4$3, toDisplayString(reviewedHead.value), 1),
+                _cache[1] || (_cache[1] = createTextVNode("这一章的全部复盘（", -1)),
+                createBaseVNode("span", _hoisted_4$3, toDisplayString(rescueChapter.value), 1),
                 createTextVNode("，" + toDisplayString(members.value.length) + " 次，新 → 旧）", 1)
               ], 64)) : fixChain.value ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                 _cache[2] || (_cache[2] = createTextVNode("同一处的修复轮次（", -1)),
@@ -13659,7 +13657,7 @@
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-c75e6ae7"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-e7befb11"]]);
   const pending = /* @__PURE__ */ ref(null);
   const queued = /* @__PURE__ */ ref(null);
   const prevId = /* @__PURE__ */ ref("");
