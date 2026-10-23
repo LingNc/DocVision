@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { state } from '../state'
-import { chapterActivityLabel, chapterNodeHasRows, chapterNodeKey, chapterWantOpen, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, rescueOrdinal, rescueRowLabel, rescueRowTitle, sessionTip, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
+import { chapterActivityLabel, chapterNodeHasRows, chapterNodeKey, chapterWantOpen, fixRowTitle, fixTargetId, rescueRowTitle, sessionTip, treeFixRows, treeRescueRows, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
 import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
 import type { ChapterTreeNode } from '../legacy/sidebar'
@@ -70,21 +70,16 @@ function rescueStateText(session: any): string {
   return session && session.live ? '运行中' : ''
 }
 
-/* C：行标签里的号是"这条目标被复盘的第几次"（同一章 + 同一目标按 mtime 旧 → 新
- * 从 1 数），不是转录名里的序号——名字里的 `.tryN` 是防覆盖用的（同一章的不同
- * 目标会共用一段号段），界面按目标重新数。老命名的复盘转录没有序号，也是靠这里
- * 读时推断出 `#1..#N`（D，磁盘不改）。 */
-function rescueLabel(session: any): string {
-  return rescueRowLabel(session, rescueOrdinal(state.sessions, session))
-}
+/* 树上每种只留一行（用户定的口径）：修复按子章节取**最新一轮**、复盘按目标取
+ * **最新一次**，编号（`修复#3` / `复盘#2`）只在「历史」页签里出现——否则同一处
+ * 被修三轮、复盘两次，节点下面就叠出一串 `#1 #2 #3`，把树撑成流水账。
+ * 判据在 sidebar.ts 的 treeFixRows / treeRescueRows（可单测）；历史页签仍由
+ * chapterAttemptChain 给出全部轮次（新 → 旧），行 title 里带轮数与最新一轮的
+ * 结局，所以这一行点进去就能看到全部。 */
 
-/* 转录名里的 `.tryN` 只有当它**不是**这一轮时才有信息量：轮次已经写在
- * 「修复 child_02 #1」里了，再挂一个 `.try1` 只是把同一个数字写两遍。 */
-function fixTryTag(session: any, round: number): string {
-  const tag = fixTranscriptTag(session)
-  const m = /^\.try(\d+)$/.exec(tag)
-  if (m && Number(m[1]) === (Number(round) || 1)) return ''
-  return tag
+/* 行标签不带号：归档的仍标「旧」。 */
+function kindLabel(session: any, kind: string): string {
+  return (session && session.archived ? '旧' : '') + kind
 }
 
 /* 展开/收起只切自己这一棵，不选中、不影响任何其它节点。 */
@@ -228,13 +223,12 @@ function nodeTitle(node: ChapterTreeNode): string {
         <!-- P60 第五步：修复会话子行是这一行选中那次转换下面的**独立子行**，
              不在核对块里——核对行在不在（还没核对、或核对尝试号比转换小而不
              显示）都不影响它。没有修复的节点一条也不渲染：不留占位、不撑高度。
-             标签写清**修的是哪一章的第几轮**（`修复 child_02 #1`）——同一行下面
-             可能挂着不同子章节的修复，只写「修复 N」看不出归属；结局（通过 /
-             未通过 / 运行中）在行 title 里（fixRowTitle）。 -->
+             用户口径（本批）：**树上只留一行「修复」**（按子章节取最新一轮），
+             轮次与结局都在行 title 里（fixRowTitle），全部轮次进「历史」页签
+             （`修复#N` 标签只在那里出现）——否则修三轮就在节点下叠三行 #1 #2 #3。 -->
         <div
-          v-if="(node.fixes || []).length"
-          v-for="(fx, i) in node.fixes"
-          :key="'fix:' + fx.id + ':' + i"
+          v-for="fx in treeFixRows(node)"
+          :key="'fix:' + fx.id"
           class="chapter-fix"
           :class="{ active: currentId === fx.id }"
         >
@@ -246,22 +240,20 @@ function nodeTitle(node: ChapterTreeNode): string {
             :title="fixRowTitle(fx)"
             @click="emit('select', fx)"
           >
-            <span class="fix-marker" :title="'修复会话针对的章节：' + (fixTargetId(fx, node.id) || '—')">{{ fixRowLabel(fx, node.id, i + 1) }}</span>
-            <span v-if="fixTryTag(fx, i + 1)" class="fix-try">{{ fixTryTag(fx, i + 1) }}</span>
+            <span class="fix-marker" :title="'修复会话针对的章节：' + (fixTargetId(fx, node.id) || '—')">{{ kindLabel(fx, '修复') }}</span>
             <span v-if="fixStateText(fx)" class="chapter-state" :class="stateTone(fixStateText(fx))">{{ fixStateText(fx) }}</span>
             <span v-if="fx.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
           </button>
         </div>
         <!-- P61：复盘会话**与核对行同层**（和修复行一样是这一行的直接子行，
-             左边距取同一个 26px）。标签是「复盘 #N」——N 是这条目标被复盘的
-             第几次（同一章 + 同一目标按 mtime 读时推断，C/D）；"复盘的是哪一条
-             会话"（`复盘了 转换#1`）与归档状态在行 title 里。同一章的不同目标各有
-             自己的行与号，互不遮挡。没有复盘的节点一条也不渲染，布局与加这条
-             规则之前逐字节相同。 -->
+             左边距取同一个 26px）。现在树上每章只留一行「复盘」：同一目标的多
+             次复盘取最新一次，不同目标（转换/核对/修复）各占一行——行 title 写
+             明复盘的是哪一条会话（`复盘了 转换#1`）、这一目标共复盘过几次。
+             `复盘 #N` 的号只在「历史」页签里出现（C/D）。没有复盘的节点一条也
+             不渲染，布局与加这条规则之前逐字节相同。 -->
         <div
-          v-if="(node.rescues || []).length"
-          v-for="(rs, i) in node.rescues"
-          :key="'rescue:' + rs.id + ':' + i"
+          v-for="rs in treeRescueRows(node)"
+          :key="'rescue:' + rs.id"
           class="chapter-rescue"
           :class="{ active: currentId === rs.id }"
         >
@@ -273,7 +265,7 @@ function nodeTitle(node: ChapterTreeNode): string {
             :title="rescueRowTitle(rs)"
             @click="emit('select', rs)"
           >
-            <span class="rescue-marker">{{ rescueLabel(rs) }}</span>
+            <span class="rescue-marker">{{ kindLabel(rs, '复盘') }}</span>
             <span v-if="rescueStateText(rs)" class="chapter-state" :class="stateTone(rescueStateText(rs))">{{ rescueStateText(rs) }}</span>
             <span v-if="rs.archived" class="chapter-arch" title="这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区">归档</span>
           </button>

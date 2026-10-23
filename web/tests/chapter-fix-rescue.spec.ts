@@ -8,8 +8,8 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state } from '../src/state'
-import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterIdSuffix, chapterNodeHasRows, chainMemberTag, fixOutcomeLabel, fixRoundAt, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, rescueOrdinal, rescueRowLabel, rescueRowTitle, reviewedTargetLabel, sessionTip } from '../src/legacy/sidebar'
-import { archivedId, fixId, liveId, parentOf } from './helpers/chapter'
+import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chapterIdSuffix, chapterNodeHasRows, chainMemberTag, fixOutcomeLabel, fixRoundAt, fixRowLabel, fixRowTitle, fixTargetId, fixTranscriptTag, rescueOrdinal, rescueRowLabel, rescueRowTitle, reviewedTargetLabel, sessionTip, treeFixRows, treeRescueRows } from '../src/legacy/sidebar'
+import { archivedId, fixId, liveId, parentOf, session } from './helpers/chapter'
 
 beforeEach(() => {
   state.collapsed = {}
@@ -446,5 +446,74 @@ describe('P61 复盘处理中的文案', () => {
     expect(chapterActivityLabel('error', 'convert')).toBe('会话错误')
     expect(chapterActivityLabel('interrupted', 'convert')).toBe('已中断')
     expect(chapterActivityLabel('pass', 'checker')).toBe('已通过')
+  })
+})
+
+/* 用户口径（本批）：树上每种只留一行，号只在「历史」里。修复按子章节取最新一轮、
+ * 复盘按目标取最新一次；chapterAttemptChain 仍给全部轮次（新 → 旧）。
+ */
+describe('树上每种只留一行（编号只进历史）', () => {
+  it('三轮修复在树上只剩最新一轮，历史里三轮都在（新 → 旧）', () => {
+    const c = session({
+      id: liveId('convert', 'chapter_042', 1), chapterId: 'chapter_042', chapterRole: 'convert',
+      chapterAttempt: 1, mtime: '2026-10-23T10:00:00Z',
+    })
+    const rounds = [1, 2, 3].map((n) => session({
+      id: fixId(n > 1 ? `fix_chapter_042.try${n}.jsonl` : 'fix_chapter_042.jsonl'),
+      chapterRole: 'fix', chapterAnchor: 'convert_chapter_042',
+      mtime: `2026-10-23T1${n}:00:00Z`,
+    }))
+    const node = buildChapterTree([c, ...rounds])[0]
+    expect(node.fixes!.length).toBe(3) // 池子仍是全部轮次（历史页签要用）
+    const rows = treeFixRows(node)
+    expect(rows.length).toBe(1)
+    expect(rows[0].id).toBe(rounds[2].id) // 最新一轮
+    const chain = chapterAttemptChain([c, ...rounds], rounds[2].id)
+    expect(chain!.map((x: any) => x.id)).toEqual([rounds[2].id, rounds[1].id, rounds[0].id])
+  })
+
+  it('同一目标复盘两次：树上只一行「复盘」，历史里两次都在', () => {
+    const c = session({
+      id: liveId('convert', 'chapter_042', 1), chapterId: 'chapter_042', chapterRole: 'convert',
+      chapterAttempt: 1, mtime: '2026-10-23T10:00:00Z',
+    })
+    const r1 = session({
+      id: liveId('rescue', 'chapter_042', 1), chapterId: 'chapter_042', chapterRole: 'rescue',
+      reviewedRole: 'convert', reviewedTranscript: 'convert_chapter_042', mtime: '2026-10-23T11:00:00Z',
+    })
+    const r2 = session({
+      id: liveId('rescue', 'chapter_042', 2), chapterId: 'chapter_042', chapterRole: 'rescue',
+      reviewedRole: 'convert', reviewedTranscript: 'convert_chapter_042', mtime: '2026-10-23T11:30:00Z',
+    })
+    const node = buildChapterTree([c, r1, r2])[0]
+    const rows = treeRescueRows(node)
+    expect(rows.length).toBe(1)
+    expect(rows[0].id).toBe(r2.id)
+    const chain = chapterAttemptChain([c, r1, r2], r2.id)
+    expect(chain!.map((x: any) => x.id)).toEqual([r2.id, r1.id])
+  })
+
+  it('复盘了不同目标：树上各占一行，各算各的历史', () => {
+    const c = session({
+      id: liveId('convert', 'chapter_042', 1), chapterId: 'chapter_042', chapterRole: 'convert',
+      chapterAttempt: 1, mtime: '2026-10-23T10:00:00Z',
+    })
+    const k = session({
+      id: liveId('checker', 'chapter_042', 1), chapterId: 'chapter_042', chapterRole: 'checker',
+      chapterAttempt: 1, chapterAnchor: 'convert_chapter_042', mtime: '2026-10-23T10:30:00Z',
+    })
+    const rc = session({
+      id: liveId('rescue', 'chapter_042', 1), chapterId: 'chapter_042', chapterRole: 'rescue',
+      reviewedRole: 'convert', reviewedTranscript: 'convert_chapter_042', mtime: '2026-10-23T11:00:00Z',
+    })
+    const rk = session({
+      id: liveId('rescue', 'chapter_042', 2), chapterId: 'chapter_042', chapterRole: 'rescue',
+      reviewedRole: 'checker', reviewedTranscript: 'checker_chapter_042', mtime: '2026-10-23T11:10:00Z',
+    })
+    const node = buildChapterTree([c, k, rc, rk])[0]
+    const rows = treeRescueRows(node)
+    expect(rows.map((x: any) => x.id).sort()).toEqual([rc.id, rk.id].sort())
+    // 每个目标各有各的历史：只有一次复盘的目标没有可列的旧记录（null，不造假行）。
+    expect(chapterAttemptChain([c, k, rc, rk], rc.id)).toBeNull()
   })
 })

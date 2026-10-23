@@ -1,63 +1,63 @@
 
-.chapter-tree[data-v-59e54b21] { border-left: 1px solid var(--line, #c9d1d9); margin-left: 13px; padding-left: 8px;
+.chapter-tree[data-v-12990cdf] { border-left: 1px solid var(--line, #c9d1d9); margin-left: 13px; padding-left: 8px;
 }
-.chapter-node[data-v-59e54b21] { min-width: 0;
+.chapter-node[data-v-12990cdf] { min-width: 0;
 }
-.chapter-node-head[data-v-59e54b21] { display: flex; align-items: center; gap: 4px; min-height: 29px; cursor: pointer; padding: 0 7px 0 0; color: var(--text, #24292f);
+.chapter-node-head[data-v-12990cdf] { display: flex; align-items: center; gap: 4px; min-height: 29px; cursor: pointer; padding: 0 7px 0 0; color: var(--text, #24292f);
 }
 /* 展开按钮：整行高的 26px 命中区（原先只有 12px 的小三角），点它只切展开。 */
-.chapter-toggle[data-v-59e54b21] {
+.chapter-toggle[data-v-12990cdf] {
   flex: 0 0 26px; align-self: stretch; min-height: 26px;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; background: transparent; color: var(--muted, #6e7781);
   padding: 0; border-radius: 5px; cursor: pointer;
 }
-.chapter-toggle[data-v-59e54b21]:hover { background: var(--hover, #f3f4f6); color: var(--text, #24292f);
+.chapter-toggle[data-v-12990cdf]:hover { background: var(--hover, #f3f4f6); color: var(--text, #24292f);
 }
-.chapter-toggle[data-v-59e54b21]:focus-visible { outline: 2px solid var(--accent, #0969da); outline-offset: -1px;
+.chapter-toggle[data-v-12990cdf]:focus-visible { outline: 2px solid var(--accent, #0969da); outline-offset: -1px;
 }
-.chapter-toggle-spacer[data-v-59e54b21] { flex: 0 0 26px;
+.chapter-toggle-spacer[data-v-12990cdf] { flex: 0 0 26px;
 }
-.caret[data-v-59e54b21] {
+.caret[data-v-12990cdf] {
   width: 0; height: 0;
   border-left: 5px solid currentColor;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
   transition: transform .15s ease;
 }
-.chapter-node.open > .chapter-node-head .caret[data-v-59e54b21] { transform: rotate(90deg);
+.chapter-node.open > .chapter-node-head .caret[data-v-12990cdf] { transform: rotate(90deg);
 }
-.chapter-name[data-v-59e54b21], .checker-name[data-v-59e54b21] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+.chapter-name[data-v-12990cdf], .checker-name[data-v-12990cdf] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
 }
-.chapter-node-head[data-v-59e54b21]:hover, .chapter-checker[data-v-59e54b21]:hover { background: var(--hover, #f3f4f6);
+.chapter-node-head[data-v-12990cdf]:hover, .chapter-checker[data-v-12990cdf]:hover { background: var(--hover, #f3f4f6);
 }
-.chapter-node-head.active[data-v-59e54b21], .chapter-checker.active[data-v-59e54b21] { background: var(--active, #eaeef2);
+.chapter-node-head.active[data-v-12990cdf], .chapter-checker.active[data-v-12990cdf] { background: var(--active, #eaeef2);
 }
-.chapter-node-body[data-v-59e54b21] { padding-left: 12px;
+.chapter-node-body[data-v-12990cdf] { padding-left: 12px;
 }
-.chapter-checker[data-v-59e54b21] { width: 100%; display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--text, #24292f); padding: 0 7px 0 26px;
+.chapter-checker[data-v-12990cdf] { width: 100%; display: flex; align-items: center; gap: 6px; min-height: 28px; color: var(--text, #24292f); padding: 0 7px 0 26px;
 }
-.checker-main[data-v-59e54b21] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer;
+.checker-main[data-v-12990cdf] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: 28px; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer;
 }
-.checker-marker[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.checker-marker[data-v-12990cdf] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
-.chapter-state[data-v-59e54b21], .chapter-usage[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.chapter-state[data-v-12990cdf], .chapter-usage[data-v-12990cdf] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
 /* P53：重试按钮与「待重试」角标。按钮平时半透明，行悬浮/选中时才明显——
  * 章节行本身就是"点一下选中"，按钮不能抢走整行的点击。 */
-.chapter-retry[data-v-59e54b21] { flex: 0 0 auto; opacity: 0; transition: opacity .12s; font-size: 12px; padding: 0 4px;
+.chapter-retry[data-v-12990cdf] { flex: 0 0 auto; opacity: 0; transition: opacity .12s; font-size: 12px; padding: 0 4px;
 }
-.chapter-node-head:hover .chapter-retry[data-v-59e54b21], .chapter-node-head.active .chapter-retry[data-v-59e54b21] { opacity: .75;
+.chapter-node-head:hover .chapter-retry[data-v-12990cdf], .chapter-node-head.active .chapter-retry[data-v-12990cdf] { opacity: .75;
 }
-.chapter-retry[data-v-59e54b21]:hover { opacity: 1;
+.chapter-retry[data-v-12990cdf]:hover { opacity: 1;
 }
-.chapter-retry-pending[data-v-59e54b21] { flex: 0 0 auto; font-size: 11px; color: var(--amber, #9a6700);
+.chapter-retry-pending[data-v-12990cdf] { flex: 0 0 auto; font-size: 11px; color: var(--amber, #9a6700);
 }
-.chapter-state.run[data-v-59e54b21] { color: var(--green, #1a7f37);
+.chapter-state.run[data-v-12990cdf] { color: var(--green, #1a7f37);
 }
-.chapter-arch[data-v-59e54b21] { flex: 0 0 auto; font-size: 11px; color: var(--muted, #6e7781); border: 1px dashed var(--line, #c9d1d9); border-radius: 4px; padding: 0 3px; line-height: 15px;
+.chapter-arch[data-v-12990cdf] { flex: 0 0 auto; font-size: 11px; color: var(--muted, #6e7781); border: 1px dashed var(--line, #c9d1d9); border-radius: 4px; padding: 0 3px; line-height: 15px;
 }
-.chapter-info[data-v-59e54b21] { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer;
+.chapter-info[data-v-12990cdf] { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer;
 }
 /* P60 第六步：修复行与核对行**同层**，不再缩进一级。
  * 一次修复会话的复核结果写的是 `checker_<child>.tryN.jsonl`、并被并进本节点
@@ -67,29 +67,29 @@
  * 旧→新跟在后面（排序在 sidebar.ts 的 fixesForNode）。
  * 只动横向留白，行高仍是 `var(--row-h)`：没有修复的节点一条也不渲染，布局
  * 与加这条规则之前逐字节相同。 */
-.chapter-fix[data-v-59e54b21] { display: flex; align-items: center; padding: 0 7px 0 26px;
+.chapter-fix[data-v-12990cdf] { display: flex; align-items: center; padding: 0 7px 0 26px;
 }
-.fix-main[data-v-59e54b21] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
+.fix-main[data-v-12990cdf] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
 }
-.chapter-fix[data-v-59e54b21]:hover { background: var(--hover, #f3f4f6);
+.chapter-fix[data-v-12990cdf]:hover { background: var(--hover, #f3f4f6);
 }
-.chapter-fix.active[data-v-59e54b21] { background: var(--active, #eaeef2);
+.chapter-fix.active[data-v-12990cdf] { background: var(--active, #eaeef2);
 }
-.fix-marker[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.fix-marker[data-v-12990cdf] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
-.fix-try[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.fix-try[data-v-12990cdf] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
 /* P61：复盘行与核对/修复行**同层同高**（同一处 26px 左边距、同一个 --row-h），
  * 只把标记文案染成弱色，与"这只是一条附注"的语义一致。 */
-.chapter-rescue[data-v-59e54b21] { display: flex; align-items: center; padding: 0 7px 0 26px;
+.chapter-rescue[data-v-12990cdf] { display: flex; align-items: center; padding: 0 7px 0 26px;
 }
-.rescue-main[data-v-59e54b21] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
+.rescue-main[data-v-12990cdf] { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px;
 }
-.chapter-rescue[data-v-59e54b21]:hover { background: var(--hover, #f3f4f6);
+.chapter-rescue[data-v-12990cdf]:hover { background: var(--hover, #f3f4f6);
 }
-.chapter-rescue.active[data-v-59e54b21] { background: var(--active, #eaeef2);
+.chapter-rescue.active[data-v-12990cdf] { background: var(--active, #eaeef2);
 }
-.rescue-marker[data-v-59e54b21] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
+.rescue-marker[data-v-12990cdf] { flex: 0 0 auto; color: var(--muted, #6e7781); font-size: 11px;
 }
 
 /* ============================ 侧栏 ============================ */

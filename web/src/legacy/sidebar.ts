@@ -642,6 +642,35 @@ function rescuesForNode(node: ChapterTreeNode, convert: any, parentArchived: boo
   return sortFixesOldestFirst(hits)
 }
 
+/* 用户口径（本批）：**树上每种只留一行**。修复按子章节取最新一轮、复盘按目标
+ * （同一章 + 它复盘的那条转录）取最新一次——否则同一处修三轮、复盘两次，节点下
+ * 就叠出一串 `#1 #2 #3`，树被撑成流水账。号与全部轮次只在「历史」页签里出现
+ * （chapterAttemptChain 仍然给出完整列表，新 → 旧）；行 title 里带轮数与最新一轮
+ * 的结局，点这一行进去就能看到全部。 */
+function newestByKey(list: any[] | undefined, keyOf: (x: any) => string): any[] {
+  const items = list || []
+  const best = new Map<string, any>()
+  for (const x of items) {
+    if (!x) continue
+    const k = keyOf(x)
+    const cur = best.get(k)
+    if (!cur || mtimeMs(x) >= mtimeMs(cur)) best.set(k, x)
+  }
+  const out: any[] = []
+  for (const x of items) {
+    if (x && best.get(keyOf(x)) === x) out.push(x)
+  }
+  return out
+}
+
+export function treeFixRows(node: { id?: string; fixes?: any[] }): any[] {
+  const id = String((node && node.id) || '')
+  return newestByKey(node && node.fixes, (fx) => fixTargetId(fx, id))
+}
+
+export function treeRescueRows(node: { rescues?: any[] }): any[] {
+  return newestByKey(node && node.rescues, (rs) => rescueTargetKey(rs) || String((rs && rs.id) || ''))
+}
 /* 钉住一条修复会话时，它所在的行要能显示到它：转换由它的锚点决定（与钉住核对
  * 同一条规则）。找不到锚点对应的转换就不钉，绝不拿别的尝试凑。 */
 function anchoredConvert(items: any[], fix: any): any | null {

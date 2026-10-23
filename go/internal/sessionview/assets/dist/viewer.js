@@ -7380,10 +7380,6 @@
     if (!tr) return "";
     return String(rescue.reviewedRole || "") + "|" + tr;
   }
-  function rescueRowLabel(rescue, ordinal) {
-    const n = Number(ordinal) || Number(rescue && rescue.chapterAttempt) || 1;
-    return (rescue && rescue.archived ? "旧" : "") + "复盘 #" + n;
-  }
   function rescueOrdinal(sessions, rescue) {
     if (!rescue) return 1;
     const chapter = String(rescue.chapterId || "");
@@ -7473,6 +7469,28 @@
       return String(r.chapterId || "") === node.id;
     });
     return sortFixesOldestFirst(hits);
+  }
+  function newestByKey(list, keyOf) {
+    const items = list || [];
+    const best = /* @__PURE__ */ new Map();
+    for (const x of items) {
+      if (!x) continue;
+      const k = keyOf(x);
+      const cur = best.get(k);
+      if (!cur || mtimeMs(x) >= mtimeMs(cur)) best.set(k, x);
+    }
+    const out = [];
+    for (const x of items) {
+      if (x && best.get(keyOf(x)) === x) out.push(x);
+    }
+    return out;
+  }
+  function treeFixRows(node) {
+    const id = String(node && node.id || "");
+    return newestByKey(node && node.fixes, (fx) => fixTargetId(fx, id));
+  }
+  function treeRescueRows(node) {
+    return newestByKey(node && node.rescues, (rs) => rescueTargetKey(rs) || String(rs && rs.id || ""));
   }
   function anchoredConvert(items, fix) {
     const anchor = String(fix && fix.chapterAnchor || "");
@@ -9532,17 +9550,13 @@
   const _hoisted_15$5 = ["data-id", "title", "onClick"];
   const _hoisted_16$5 = ["title"];
   const _hoisted_17$5 = {
-    key: 0,
-    class: "fix-try"
-  };
-  const _hoisted_18$5 = {
-    key: 2,
+    key: 1,
     class: "chapter-arch",
     title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
   };
-  const _hoisted_19$5 = ["data-id", "title", "onClick"];
-  const _hoisted_20$5 = { class: "rescue-marker" };
-  const _hoisted_21$5 = {
+  const _hoisted_18$5 = ["data-id", "title", "onClick"];
+  const _hoisted_19$5 = { class: "rescue-marker" };
+  const _hoisted_20$5 = {
     key: 1,
     class: "chapter-arch",
     title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
@@ -9582,14 +9596,8 @@
       function rescueStateText(session) {
         return session && session.live ? "运行中" : "";
       }
-      function rescueLabel(session) {
-        return rescueRowLabel(session, rescueOrdinal(state.sessions, session));
-      }
-      function fixTryTag(session, round) {
-        const tag = fixTranscriptTag(session);
-        const m = /^\.try(\d+)$/.exec(tag);
-        if (m && Number(m[1]) === (Number(round) || 1)) return "";
-        return tag;
+      function kindLabel(session, kind) {
+        return (session && session.archived ? "旧" : "") + kind;
       }
       function toggle(node, ev) {
         ev.stopPropagation();
@@ -9731,9 +9739,9 @@
                     onClick: ($event) => emit2("info", node.checker)
                   }, "ⓘ", 8, _hoisted_14$5)
                 ], 2)) : createCommentVNode("", true),
-                (node.fixes || []).length ? (openBlock(true), createElementBlock(Fragment, { key: 1 }, renderList(node.fixes, (fx, i) => {
+                (openBlock(true), createElementBlock(Fragment, null, renderList(unref(treeFixRows)(node), (fx) => {
                   return openBlock(), createElementBlock("div", {
-                    key: "fix:" + fx.id + ":" + i,
+                    key: "fix:" + fx.id,
                     class: normalizeClass(["chapter-fix", { active: currentId.value === fx.id }])
                   }, [
                     createBaseVNode("button", {
@@ -9747,19 +9755,18 @@
                       createBaseVNode("span", {
                         class: "fix-marker",
                         title: "修复会话针对的章节：" + (unref(fixTargetId)(fx, node.id) || "—")
-                      }, toDisplayString(unref(fixRowLabel)(fx, node.id, i + 1)), 9, _hoisted_16$5),
-                      fixTryTag(fx, i + 1) ? (openBlock(), createElementBlock("span", _hoisted_17$5, toDisplayString(fixTryTag(fx, i + 1)), 1)) : createCommentVNode("", true),
+                      }, toDisplayString(kindLabel(fx, "修复")), 9, _hoisted_16$5),
                       fixStateText(fx) ? (openBlock(), createElementBlock("span", {
-                        key: 1,
+                        key: 0,
                         class: normalizeClass(["chapter-state", stateTone(fixStateText(fx))])
                       }, toDisplayString(fixStateText(fx)), 3)) : createCommentVNode("", true),
-                      fx.archived ? (openBlock(), createElementBlock("span", _hoisted_18$5, "归档")) : createCommentVNode("", true)
+                      fx.archived ? (openBlock(), createElementBlock("span", _hoisted_17$5, "归档")) : createCommentVNode("", true)
                     ], 8, _hoisted_15$5)
                   ], 2);
-                }), 128)) : createCommentVNode("", true),
-                (node.rescues || []).length ? (openBlock(true), createElementBlock(Fragment, { key: 2 }, renderList(node.rescues, (rs, i) => {
+                }), 128)),
+                (openBlock(true), createElementBlock(Fragment, null, renderList(unref(treeRescueRows)(node), (rs) => {
                   return openBlock(), createElementBlock("div", {
-                    key: "rescue:" + rs.id + ":" + i,
+                    key: "rescue:" + rs.id,
                     class: normalizeClass(["chapter-rescue", { active: currentId.value === rs.id }])
                   }, [
                     createBaseVNode("button", {
@@ -9770,17 +9777,17 @@
                       title: unref(rescueRowTitle)(rs),
                       onClick: ($event) => emit2("select", rs)
                     }, [
-                      createBaseVNode("span", _hoisted_20$5, toDisplayString(rescueLabel(rs)), 1),
+                      createBaseVNode("span", _hoisted_19$5, toDisplayString(kindLabel(rs, "复盘")), 1),
                       rescueStateText(rs) ? (openBlock(), createElementBlock("span", {
                         key: 0,
                         class: normalizeClass(["chapter-state", stateTone(rescueStateText(rs))])
                       }, toDisplayString(rescueStateText(rs)), 3)) : createCommentVNode("", true),
-                      rs.archived ? (openBlock(), createElementBlock("span", _hoisted_21$5, "归档")) : createCommentVNode("", true)
-                    ], 8, _hoisted_19$5)
+                      rs.archived ? (openBlock(), createElementBlock("span", _hoisted_20$5, "归档")) : createCommentVNode("", true)
+                    ], 8, _hoisted_18$5)
                   ], 2);
-                }), 128)) : createCommentVNode("", true),
+                }), 128)),
                 node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
-                  key: 3,
+                  key: 1,
                   nodes: node.children,
                   depth: (__props.depth || 0) + 1,
                   scope: __props.scope,
@@ -9801,7 +9808,7 @@
     }
     return target2;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-59e54b21"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-12990cdf"]]);
   const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"
