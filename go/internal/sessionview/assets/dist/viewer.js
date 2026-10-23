@@ -13279,6 +13279,7 @@
       const hasArchived = computed(() => (members.value || []).some((s) => !!s.archived));
       function pairOf(s) {
         if (!s || !s.chapterId) return null;
+        if (s.chapterRole === "fix") return null;
         const attempt = Number(s.chapterAttempt) || 1;
         const same = (o) => o && o.chapterId === s.chapterId && (o.project || "") === (s.project || "") && (Number(o.chapterAttempt) || 1) === attempt && (o.chapterRole || "") !== (s.chapterRole || "");
         const all = (state.sessions || []).filter(same);
@@ -13406,7 +13407,7 @@
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-cc37ac40"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-22dcdbe9"]]);
   const pending = /* @__PURE__ */ ref(null);
   const queued = /* @__PURE__ */ ref(null);
   const prevId = /* @__PURE__ */ ref("");

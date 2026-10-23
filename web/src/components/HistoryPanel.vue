@@ -110,6 +110,10 @@ const hasArchived = computed(() => (members.value || []).some((s: any) => !!s.ar
  * 那一轮的入口——不必去树里找那个子行。 */
 function pairOf(s: any): any {
   if (!s || !s.chapterId) return null
+  // P60 第四步：修复转录现在也有章节身份（fix_ 前缀与 convert_/checker_ 同一套
+  // 规则），但它**不是**这一章的转换/核对——配对服务的是"转换 ↔ 同轮核对"这两个
+  // 角色，修复的历史里多一个「同轮核对」按钮只会跳去不相干的一条。
+  if (s.chapterRole === 'fix') return null
   const attempt = Number(s.chapterAttempt) || 1
   const same = (o: any) =>
     o && o.chapterId === s.chapterId &&

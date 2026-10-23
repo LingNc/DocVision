@@ -28,8 +28,27 @@ type p60Stats struct {
 	integrations    int            // 父章节整合对话轮次
 	fixes           map[string]int // 子章节修复会话的请求数（按子章节名）
 	checkers        map[string]int // 核对会话请求数（按章节 ID）
+	parentSessions  int            // 父章节**转换会话**的轮数（请求拆分的那条）：≈ 整章尝试次数
+	parentCheckers  int            // 父章节核对会话的次数
+	runErr          string         // convertOneChapter 的错误（空 = 这一章收下了）
 	dispatchOffered bool           // 有没有任何请求把 dispatch_fix 放进工具表
 	convertSystem   string         // 转换会话的系统提示词（第一份）
+}
+
+// p60Options 是 p60RunWith 的场景旋钮（p60Run 的三个变体只是它们的简写）。
+type p60Options struct {
+	enabled bool // latex.fix.enabled
+	failFix bool // 修复会话怎么提醒都不提交
+	// maxRounds 是 latex.fix.max_rounds（0 = 配置默认 2）。
+	maxRounds int
+	// parentIssues 让**父章节核对**每次都报 issues（"整合不顺"）——整章重开
+	// 与修复预算收口这两条判据都只在它成立时才有区别。
+	parentIssues bool
+	// checkerRounds 是 latex.checker_rounds（0 = 默认 6）。测试把它压到 1，
+	// 反馈轮与尝试次数的下限（3）就够验证判据，不必跑满六轮。
+	checkerRounds int
+	// expectError 表示这次转换**本来就该失败**（例如整章重开到次数上限）。
+	expectError bool
 }
 
 func (s *p60Stats) bump(m *map[string]int, key string) {
@@ -44,6 +63,13 @@ func (s *p60Stats) bump(m *map[string]int, key string) {
 // p60Run 跑一次最小的两子章节递归转换。enabled 打开 latex.fix.enabled；
 // failFix 让修复会话"怎么提醒都不提交"（模拟一轮修复失败）。返回统计与日志。
 func p60Run(t *testing.T, enabled, failFix bool) (*p60Stats, string, string) {
+	t.Helper()
+	return p60RunWith(t, p60Options{enabled: enabled, failFix: failFix})
+}
+
+// p60RunWith 与 p60Run 同一条路径，只是把场景旋钮摊开（P60 第四步的预算收口
+// 要能同时拨动"父章节核对不过"与"修复轮数上限"）。
+func p60RunWith(t *testing.T, opts p60Options) (*p60Stats, string, string) {
 	t.Helper()
 	proj := t.TempDir()
 	workDir := filepath.Join(proj, "work")
@@ -121,7 +147,7 @@ func p60Run(t *testing.T, enabled, failFix bool) (*p60Stats, string, string) {
 				base = "chapter_01_child_02"
 			}
 			stats.bump(&stats.fixes, base)
-			if failFix {
+			if opts.failFix {
 				// 不调 submit：runner 会提醒两次，仍然不提交——一轮修复失败。
 				p60Text(w, "I could not fix this.")
 				return
@@ -147,6 +173,19 @@ func p60Run(t *testing.T, enabled, failFix bool) (*p60Stats, string, string) {
 				return
 			}
 			stats.bump(&stats.checkers, base)
+			if base == "chapter_01" {
+				stats.mu.Lock()
+				stats.parentCheckers++
+				stats.mu.Unlock()
+				if opts.parentIssues {
+					// 父章节核对报问题 = "整合不顺"：今天会作废这一版、整章重开；
+					// P60 第四步要看修复预算用光时收不收得住。
+					subdivisionReply(w, subdivisionCall("check-"+base, "submit", map[string]any{
+						"report": map[string]any{"status": "issues", "issues": "第 3 页有一段没还原"},
+					}))
+					return
+				}
+			}
 			subdivisionReply(w, subdivisionCall("check-"+base, "submit", map[string]any{
 				"report": map[string]any{"status": "pass"},
 			}))
@@ -198,8 +237,23 @@ func p60Run(t *testing.T, enabled, failFix bool) (*p60Stats, string, string) {
 				}),
 			)
 
+		// 父章节的反馈轮（核对打了 issues 之后回到同一个转换会话）：重交同一份
+		// 整合产物。内容不变，所以要看的只是"有没有再问一次核对"。
+		case strings.Contains(lastUser, "The checker reviewed your submitted chapter"):
+			subdivisionReply(w,
+				subdivisionWrite("work:chapter_01.tex", "\\section{Integrated}\n"),
+				subdivisionWrite("work:chapter_01/part.tex", "integrated part\n"),
+				subdivisionCall("parent-feedback-submit", "submit", map[string]any{
+					"path": "work:chapter_01.tex", "dir": "work:chapter_01/",
+					"report": map[string]any{"status": "pass"},
+				}),
+			)
+
 		// 父章节第一次会话：请求拆分。
 		default:
+			stats.mu.Lock()
+			stats.parentSessions++
+			stats.mu.Unlock()
 			subdivisionReply(w,
 				subdivisionWrite("work:chapter_01.tex", "\\section{Parent draft}\n"),
 				subdivisionWrite("work:chapter_01/part.tex", "draft part\n"),
@@ -224,18 +278,27 @@ func p60Run(t *testing.T, enabled, failFix bool) (*p60Stats, string, string) {
 	cfg.Latex.Concurrency = 2
 	cfg.Latex.ConvertModel = "fake"
 	cfg.Latex.CheckerModel = "fake"
-	if enabled {
+	if opts.checkerRounds > 0 {
+		cfg.Latex.CheckerRounds = opts.checkerRounds
+	}
+	if opts.enabled {
 		on := true
-		cfg.Latex.Fix = config.FixConfig{Enabled: &on, MaxRounds: 2}
+		cfg.Latex.Fix = config.FixConfig{Enabled: &on, MaxRounds: opts.maxRounds}
 	}
 	off := false
 	cfg.Models = map[string]config.ModelConfig{"fake": {BaseURL: server.URL, APIKey: "test", Model: "fake", Stream: &off}}
 	r := &Runner{cfg: cfg, log: log, noChapterGate: true, projDir: proj,
 		clients: map[string]*session.Client{}, models: map[string]config.ModelConfig{}}
-	if err := r.convertOneChapter(proj, "book", filepath.Join(style, "manual.md"), chapterPath, workDir, 1, 1, false); err != nil {
-		t.Fatalf("convertOneChapter: %v", err)
+	runErr := r.convertOneChapter(proj, "book", filepath.Join(style, "manual.md"), chapterPath, workDir, 1, 1, false)
+	stats.mu.Lock()
+	if runErr != nil {
+		stats.runErr = runErr.Error()
 	}
-	if !fileExists(filepath.Join(workDir, "chapters", "chapter_01.tex")) {
+	stats.mu.Unlock()
+	if runErr != nil && !opts.expectError {
+		t.Fatalf("convertOneChapter: %v", runErr)
+	}
+	if runErr == nil && !fileExists(filepath.Join(workDir, "chapters", "chapter_01.tex")) {
 		t.Fatal("父章节没有交出产物")
 	}
 	raw, _ := os.ReadFile(logPath)

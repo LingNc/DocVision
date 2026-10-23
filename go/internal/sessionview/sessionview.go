@@ -659,7 +659,11 @@ func chapterIdentity(rel string) chapterIdentityInfo {
 		}
 	}
 	role, id := "", ""
-	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}} {
+	// P60：修复转录与转换/核对同一种命名（`fix_<章>[.tryN].jsonl`），所以章节
+	// 身份照同一套规则推断——`chapter_004_child_02` 的父章、深度、尝试号都是
+	// 文件名自带的。角色仍记成 "fix"（谁干的活），阶段归组由 enrichSessions 按
+	// "有章节身份即章节阶段"归到 convert 组，与转换/核对同组。
+	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}, {"fix_", "fix"}} {
 		if strings.HasPrefix(base, prefix.name) {
 			role, id = prefix.role, strings.TrimPrefix(base, prefix.name)
 			break
@@ -787,7 +791,12 @@ func TitleFor(rel string) string {
 	case "figure-check":
 		return "逐图校验 · " + subject
 	case "fix":
-		return "全书修复" // T62：装配失败修复会话（book_fix）
+		// T62：装配失败修复会话（book_fix）是书级的，没有章节身份；P60 的修复
+		// 转录带章节 ID（fix_<章>.jsonl），点名到章，不再笼统叫「全书修复」。
+		if chapterRootID.MatchString(subject) {
+			return "修复 · " + subject
+		}
+		return "全书修复"
 	case "final-review":
 		return "终审" // T62：终审会话（final_review）
 	case "会话":
@@ -1156,8 +1165,9 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		}
 		// P60：修复转录（`fix_<子章>.jsonl` 这类，只在子章节自己的 sessions/
 		// 下）靠 `t=meta kind=fix_target` 认出来。角色固定为 "fix"，锚点沿用
-		// 核对的同一套口径（它修的是哪一次转换产物）。**只改字段、不改分组**：
-		// 阶段归组仍由 LabelFor 决定，章节树/历史的挑选规则这一步不动。
+		// 核对的同一套口径（它修的是哪一次转换产物）。章节身份由文件名推断
+		// （见 chapterIdentity），所以它和转换/核对一样落进章节阶段组；锚点
+		// 仍是它挂在树上哪一行的唯一依据（P60 第三步）。
 		role := chapter.Role
 		anchor, anchorAttempt := stat.ChapterAnchor, stat.ChapterAnchorAttempt
 		if stat.SawFixTarget {

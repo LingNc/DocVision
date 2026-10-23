@@ -412,6 +412,36 @@ func fixRoundsUsed(transcriptPath string) int {
 	return strings.Count(string(data), `"kind":"fix_target"`)
 }
 
+/*
+ * 第四步：整章重开的预算收口（P60）。
+ *
+ * 老行为：整合完的父章节被核对打回，就归档这一次尝试、换全新会话把整章（连同
+ * 它下面所有子章节）从头再跑一遍。这在一个子章节已经把 `latex.fix.max_rounds`
+ * 轮修复都用光之后是纯浪费——修复都到上限了，再整章重来一遍还是同样的子章节
+ * 内容、同样的预算，只是把一轮很贵的对话重放一次。
+ *
+ * 所以：修复打开、且某个子章节的修复转录里已经攒满轮数时，父章节不再整章重开，
+ * 保留这一版整合产物继续往上走（未解决的问题本来就走 issues 库与报告向上传递，
+ * 不靠重开一次来"记住"），只记一行警告。开关关着、或没有任何子章节进过修复
+ * 路径时返回空，行为与引入本步之前一字不差。
+ *
+ * 返回用光子章节的目录名（`child_02`，空 = 没有用光）与它用掉的轮数。
+ */
+func (r *Runner) fixBudgetExhausted(work, parentBase string, children []ChapterSubdivision) (string, int) {
+	if !r.cfg.Latex.FixEnabled() || len(children) == 0 {
+		return "", 0
+	}
+	budget := r.cfg.Latex.FixMaxRounds()
+	for i := range children {
+		id := fmt.Sprintf("child_%02d", i+1)
+		tr := filepath.Join(work, "_subdivision", id, "node", "sessions", "fix_"+parentBase+"_"+id+".jsonl")
+		if used := fixRoundsUsed(tr); used >= budget {
+			return id, used
+		}
+	}
+	return "", 0
+}
+
 // fixSessionModel 是修复会话用的模型条目：`latex.fix.model` 为空时继承
 // convert（用户口径：默认不额外配模型）。
 func (r *Runner) fixSessionModel() string {

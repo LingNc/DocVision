@@ -1888,6 +1888,21 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	} else {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "issues"})
 		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
+		// P60 第四步：子章节的修复轮数已经用光时**不整章重开**——保留这一版
+		// 整合产物，未解决的问题照旧沿 issues 库/报告向上走（见
+		// fixBudgetExhausted 的说明）。只有修复打开、且确有子章节用过修复路径
+		// 才可能命中；其它情况一律落到今天的行为。
+		if child, used := r.fixBudgetExhausted(work, base, splitTool.Children); child != "" {
+			r.log.LogWarning(tid, "[fix]", base,
+				"子章节 "+child+" 的修复轮数已用完（"+strconv.Itoa(used)+"/"+
+					strconv.Itoa(r.cfg.Latex.FixMaxRounds())+"）——不再整章重开：保留这一版整合产物，未解决的问题照原路向上传递")
+			if promoteSubmitRoot != "" {
+				if _, err := placeChapterFiles(node.SubmitRoot, promoteSubmitRoot, base); err != nil {
+					return fmt.Errorf("父章节沿用整合产物失败: %w", err)
+				}
+			}
+			return nil
+		}
 		// 同一个会话被 checker 打回 N 轮还不过，说明它的理解已经跑偏（实测：
 		// 一条子会话在只读报错后把"环境有问题"当成前提，反复重写同一个文件、
 		// 甚至去 kill 别的进程）。这时**换一个全新会话**比继续劝它便宜也可靠，
