@@ -284,8 +284,15 @@ function nodeTitle(node: ChapterTreeNode): string {
 .chapter-state.run { color: var(--green, #1a7f37); }
 .chapter-arch { flex: 0 0 auto; font-size: 11px; color: var(--muted, #6e7781); border: 1px dashed var(--line, #c9d1d9); border-radius: 4px; padding: 0 3px; line-height: 15px; }
 .chapter-info { flex: 0 0 22px; border: 0; background: transparent; color: var(--muted, #6e7781); cursor: pointer; }
-/* P60：修复子行比核对行更紧凑（24px）、再缩进一级——它是核对行下面的第三层。 */
-.chapter-fix { display: flex; align-items: center; padding: 0 7px 0 40px; }
+/* P60 第六步：修复行与核对行**同层**，不再缩进一级。
+ * 一次修复会话的复核结果写的是 `checker_<child>.tryN.jsonl`、并被并进本节点
+ * 自己那条核对行（同一个锚点），所以并没有"修复的核对行"这一层；修复行与核对
+ * 行都是转换行的直接子行，左边距取同一个值（26px，含 12px 的
+ * `.chapter-node-body` 内边距在里面）。行序也是这一层：核对行在前，修复行按
+ * 旧→新跟在后面（排序在 sidebar.ts 的 fixesForNode）。
+ * 只动横向留白，行高仍是 `var(--row-h)`：没有修复的节点一条也不渲染，布局
+ * 与加这条规则之前逐字节相同。 */
+.chapter-fix { display: flex; align-items: center; padding: 0 7px 0 26px; }
 .fix-main { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; min-height: var(--row-h); border: 0; background: transparent; color: inherit; text-align: left; padding: 0; cursor: pointer; border-radius: 4px; }
 .chapter-fix:hover { background: var(--hover, #f3f4f6); }
 .chapter-fix.active { background: var(--active, #eaeef2); }

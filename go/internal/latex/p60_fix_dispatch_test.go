@@ -439,6 +439,10 @@ func TestFixDispatchFailureFallsBackToIntegration(t *testing.T) {
 
 // P60 第二步/第五步：下派说明只按开关追加。关闭时的提示词必须与引入它之前逐字节
 // 相同（这正是"默认跑法不变"最容易被破坏的地方）。
+//
+// P60 第六步：下派回执已经逐个子章节写清了结局，父会话不该在回复里再复述一遍。
+// 那句话同样只跟着开关走——关着时一个字都没有，开着时只出现一次（写成一整句，
+// 不折行：分成两行容易读成两条无关的要求）。
 func TestConvertSystemPromptDispatchOnlyWhenEnabled(t *testing.T) {
 	r := keepTestRunner(t)
 	off := false
@@ -458,6 +462,11 @@ func TestConvertSystemPromptDispatchOnlyWhenEnabled(t *testing.T) {
 			t.Errorf("关闭时不该出现自包含边界说明 %q", want)
 		}
 	}
+	// P60 第六步：不复述回执的说明也只在开关打开时出现。
+	const noReceiptEcho = "do not repeat or paraphrase"
+	if strings.Contains(today, noReceiptEcho) {
+		t.Errorf("关闭时不该出现「不复述回执」的说明 %q", noReceiptEcho)
+	}
 	on := true
 	r.cfg.Latex.Fix = config.FixConfig{Enabled: &on}
 	got := r.convertSystemPrompt(tuning)
@@ -473,5 +482,18 @@ func TestConvertSystemPromptDispatchOnlyWhenEnabled(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("打开时应当带自包含边界说明 %q:\n%s", want, got)
 		}
+	}
+	// P60 第六步：回执由工具自己给出逐子章节结局，父会话只接着整合、不复述。
+	if !strings.Contains(got, noReceiptEcho) || !strings.Contains(got, "continue with integration") {
+		t.Errorf("打开时应当说明「不要复述派发回执」:\n%s", got)
+	}
+	echoLines := 0
+	for _, ln := range strings.Split(got, "\n") {
+		if strings.Contains(ln, noReceiptEcho) {
+			echoLines++
+		}
+	}
+	if echoLines != 1 {
+		t.Errorf("「不复述回执」必须放在同一行（实际跨 %d 行）:\n%s", echoLines, got)
 	}
 }

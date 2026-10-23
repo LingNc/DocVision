@@ -9668,7 +9668,7 @@
     }
     return target2;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-58f35b3d"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-f7d7d990"]]);
   const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"
