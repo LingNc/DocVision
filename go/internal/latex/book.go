@@ -1623,16 +1623,19 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	tools = append(tools, splitTool)
 	// P60：子章节修复的下派入口。**默认关闭**（latex.fix.enabled=false 时这里
 	// 根本不注册），所以现有跑法的工具面一字不变；打开后父会话才看得到
-	// dispatch_fix——它只记录计划，真正下派的调度是 P60 的下一步。
+	// dispatch_fix——它只记录计划，逐个子章节的修复由细分父节点分支里的
+	// reviewChildrenBeforeIntegration / applyChildFixPlan 调度。
+	var dispatchFix *DispatchFixTool
 	if r.cfg.Latex.FixEnabled() {
-		tools = append(tools, &DispatchFixTool{Proj: proj, Root: base, Work: work})
+		dispatchFix = &DispatchFixTool{Proj: proj, Root: base, Work: work}
+		tools = append(tools, dispatchFix)
 	}
 	// 原始文档只读工具：片段→原 PDF 页定位（doc_search）+ 原书页面索引/
 	// 逐页内容（list_source_pages）；原书 PDF 通过 view_pdf 的 source
 	// 挂载查看。
 	tools = append(tools, r.sourcePageTools()...)
 	sess := session.NewSession(client, modelCfg, tuning,
-		renderPrompt(prompts.Must(prompts.ConvertSystem), tuning, r.outputLang()),
+		r.convertSystemPrompt(tuning),
 		tools, r.log, tid, "convert:"+base)
 	// 每章一行实时行：并发的 4 章并排显示各自的轮次/工具数/已用时间，
 	// 谁跑完谁那行消失（用户要的"箭头指过去看每个子会话状态"）。聚合进度
@@ -1754,6 +1757,15 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		}
 		if err := writeChapterChildrenManifest(work, base, splitTool.Children); err != nil {
 			return err
+		}
+		// P60 第二步：子章节都转换+核对完了、父会话整合之前，先给它一次「把还
+		// 不对的孩子还回去」的机会；它写下计划后按计划跑修复会话并重核该子章节。
+		// dispatchFix 为 nil（latex.fix.enabled 关闭）时这两步根本不存在——默认
+		// 跑法与引入 P60 之前一字不差。
+		if dispatchFix != nil {
+			if planPath := r.reviewChildrenBeforeIntegration(sess, base, dispatchFix, convState, tid); planPath != "" {
+				r.applyChildFixPlan(proj, clsName, base, work, node.Depth+1, splitTool.Children, planPath, tid)
+			}
 		}
 		integrationText := "All child chapters have passed their individual checkers. FIRST read work:_subdivision/children-summary.md — it contains each child's own report (what it could not restore, what it worked around) and the list of issues already inherited for you. " +
 			"You are NOT required to fix those issues (most are class/manual level and are handled later by the style-fix pass); fix the ones you can while integrating, put their IDs in report.resolved, and leave the rest untouched — the merge mechanism carries them into your own report automatically. " +

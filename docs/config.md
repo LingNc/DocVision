@@ -122,7 +122,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.rescue.max_per_attempt` | 同一次尝试最多复盘几次（防"复盘 → 又没交 → 再复盘"） | 2 |
 | `latex.rescue.keep_records` | 复盘会话的转录是否落盘到 `work/sessions/rescue_*.jsonl`（默认只写一行审计记录 `work/rescue/log.jsonl`）；`--debug` 强制落盘 | false |
 | `latex.rescue.model` | 复盘会话用的模型条目；空 = 跟随 `latex.checker_model`（模板预置了 `models.rescue`，`extends: checker`） | `"rescue"` |
-| `latex.fix.enabled` | 子章节**修复会话**（P60）的总开关：打开后转换会话才有 `dispatch_fix` 工具，父会话才能把"哪个子章节、按哪条规则改"写成 `work/fix/<根章>/plan.json` 交给子章节去修（修复会话复用该子章节已划好的工作区，提交后跑它原本的核对）。**本步默认关闭**：骨架已落地，但调度还没接进运行路径，打开也不会改变现有跑法的产物 | false |
+| `latex.fix.enabled` | 子章节**修复会话**（P60）的总开关：打开后在细分父章节的转换会话里注册 `dispatch_fix`，并在提示词末尾追加"把问题子章节还回去"那一段；子章节转换+核对完、父会话整合之前，runner 先给它一次复查对话，按它写下的 `work/fix/<根章>/plan.json` 逐个子章节跑修复会话（复用该子章节已划好的工作区）并重核，然后把修过的产物刷新回父章节再整合。修复失败只警告、退回原来的整合流程。**默认关闭**：关着时工具面、提示词与请求数都与引入 P60 之前一致 | false |
 | `latex.fix.max_rounds` | 一个子章节最多能拿几轮修复（P60）：转录里每条 `fix_target` 锚点算一轮；用完就退回老行为——由父章节按原来的重试路径重来。0/负数也按 2 算，不是"无限轮" | 2 |
 | `latex.fix.model` | 修复会话用的模型条目（P60）；空 = 继承 `latex.convert_model`。会话调优没有单独的块，沿用 `latex.sessions.convert` | `""` |
 | `latex.sessions.rescue` | 复盘会话自己的会话调优；没写的字段继承 `sessions.checker`（输出预算与它同配置） | — |

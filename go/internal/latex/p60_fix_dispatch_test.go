@@ -1,0 +1,375 @@
+package latex
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+
+	"mineru-tools/internal/config"
+	"mineru-tools/internal/logger"
+	"mineru-tools/internal/prompts"
+	"mineru-tools/internal/session"
+)
+
+// p60Stats 统计一次递归转换里真正发生的会话/请求：P60 第二步的验收全看这些
+// 数字——关着开关时它们必须与今天一模一样，打开并且有计划时才多出"复查→修复
+// →重核"这三样东西。
+type p60Stats struct {
+	mu              sync.Mutex
+	requests        int            // 一共多少个 HTTP 请求（≈ 一次会话轮次）
+	reviews         int            // 整合前的"复查子章节"对话轮次
+	integrations    int            // 父章节整合对话轮次
+	fixes           map[string]int // 子章节修复会话的请求数（按子章节名）
+	checkers        map[string]int // 核对会话请求数（按章节 ID）
+	dispatchOffered bool           // 有没有任何请求把 dispatch_fix 放进工具表
+	convertSystem   string         // 转换会话的系统提示词（第一份）
+}
+
+func (s *p60Stats) bump(m *map[string]int, key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if *m == nil {
+		*m = map[string]int{}
+	}
+	(*m)[key]++
+}
+
+// p60Run 跑一次最小的两子章节递归转换。enabled 打开 latex.fix.enabled；
+// failFix 让修复会话"怎么提醒都不提交"（模拟一轮修复失败）。返回统计与日志。
+func p60Run(t *testing.T, enabled, failFix bool) (*p60Stats, string, string) {
+	t.Helper()
+	proj := t.TempDir()
+	workDir := filepath.Join(proj, "work")
+	chapters := filepath.Join(proj, "chapters")
+	style := filepath.Join(proj, "style")
+	for _, dir := range []string{workDir, chapters, style} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chapterPath := filepath.Join(chapters, "chapter_01.md")
+	if err := os.WriteFile(chapterPath, []byte("# First\nFirst text\n# Second\nSecond text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"book.cls":    "\\ProvidesClass{book}\n",
+		"manual.md":   "# Manual\n",
+		"example.tex": "\\section{Example}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(style, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stats := &p60Stats{}
+	checkerBase := regexp.MustCompile(`check:(chapter_[0-9a-z_]+)\.md`)
+	dispatchOnce := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		var apiReq subdivisionAPIRequest
+		if err := json.Unmarshal(body, &apiReq); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		lastUser, system := "", ""
+		for _, m := range apiReq.Messages {
+			switch m.Role {
+			case "user":
+				lastUser = m.Content
+			case "system":
+				system = m.Content
+			}
+		}
+		toolset := map[string]bool{}
+		submitDescription := ""
+		for _, tool := range apiReq.Tools {
+			toolset[tool.Function.Name] = true
+			if tool.Function.Name == "submit" {
+				submitDescription = tool.Function.Description
+			}
+		}
+
+		stats.mu.Lock()
+		stats.requests++
+		if toolset["dispatch_fix"] {
+			stats.dispatchOffered = true
+		}
+		if stats.convertSystem == "" && toolset["request_chapter_split"] {
+			stats.convertSystem = system
+		}
+		stats.mu.Unlock()
+
+		switch {
+		// 修复会话（P60 第二步）：可写、但没有 request_chapter_split（那是转换
+		// 会话独有的）；它后面还有"提醒提交"的轮次，所以按工具表 + submit 的
+		// 描述认，而不是只看首句。
+		case toolset["write_file"] && !toolset["request_chapter_split"] && toolset["submit"]:
+			base := "chapter_01_child_01"
+			if strings.Contains(submitDescription, "chapter_01_child_02.tex") {
+				base = "chapter_01_child_02"
+			}
+			stats.bump(&stats.fixes, base)
+			if failFix {
+				// 不调 submit：runner 会提醒两次，仍然不提交——一轮修复失败。
+				p60Text(w, "I could not fix this.")
+				return
+			}
+			subdivisionReply(w,
+				subdivisionWrite("work:"+base+".tex", "\\section{Fixed "+base+"}\n"),
+				subdivisionWrite("work:"+base+"/part.tex", "fixed part\n"),
+				subdivisionCall("fix-submit-"+base, "submit", map[string]any{
+					"path": "work:" + base + ".tex", "dir": "work:" + base + "/",
+					"report": map[string]any{"status": "pass"},
+				}),
+			)
+
+		// 核对会话：read_file + grep，没有写权限。
+		case toolset["read_file"] && toolset["grep"] && !toolset["write_file"]:
+			base := ""
+			if m := checkerBase.FindStringSubmatch(lastUser); len(m) == 2 {
+				base = m[1]
+			}
+			if base == "" {
+				t.Errorf("认不出核对会话的章节名: %q", lastUser)
+				p60Text(w, "no verdict")
+				return
+			}
+			stats.bump(&stats.checkers, base)
+			subdivisionReply(w, subdivisionCall("check-"+base, "submit", map[string]any{
+				"report": map[string]any{"status": "pass"},
+			}))
+
+		// 整合前的复查对话（P60 第二步）：第一次调用 dispatch_fix，第二次收尾。
+		case strings.Contains(lastUser, "only hands work down"):
+			stats.mu.Lock()
+			stats.reviews++
+			seen := dispatchOnce
+			dispatchOnce = true
+			stats.mu.Unlock()
+			if seen {
+				p60Text(w, "nothing else to hand down")
+				return
+			}
+			subdivisionReply(w, subdivisionCall("dispatch-fix", "dispatch_fix", map[string]any{
+				"issues": []any{map[string]any{
+					"id": "ISSUE-1", "child": "child_01", "where": "chapter_01_child_01.tex:3",
+					"what": "缺一段正文", "rule": "与原书该页一致",
+				}},
+			}))
+
+		// 父章节整合会话（今天的行为）。
+		case strings.Contains(lastUser, "All child chapters have passed"):
+			stats.mu.Lock()
+			stats.integrations++
+			stats.mu.Unlock()
+			subdivisionReply(w,
+				subdivisionWrite("work:chapter_01.tex", "\\section{Integrated}\n"),
+				subdivisionWrite("work:chapter_01/part.tex", "integrated part\n"),
+				subdivisionCall("parent-submit", "submit", map[string]any{
+					"path": "work:chapter_01.tex", "dir": "work:chapter_01/",
+					"report": map[string]any{"status": "pass"},
+				}),
+			)
+
+		// 子章节转换会话。
+		case strings.Contains(lastUser, "input:chapter.md"):
+			base := "chapter_01_child_01"
+			if strings.Contains(submitDescription, "chapter_01_child_02.tex") {
+				base = "chapter_01_child_02"
+			}
+			subdivisionReply(w,
+				subdivisionWrite("work:"+base+".tex", "\\section{"+base+"}\n"),
+				subdivisionWrite("work:"+base+"/part.tex", "child part\n"),
+				subdivisionCall("child-submit-"+base, "submit", map[string]any{
+					"path": "work:" + base + ".tex", "dir": "work:" + base + "/",
+					"report": map[string]any{"status": "pass"},
+				}),
+			)
+
+		// 父章节第一次会话：请求拆分。
+		default:
+			subdivisionReply(w,
+				subdivisionWrite("work:chapter_01.tex", "\\section{Parent draft}\n"),
+				subdivisionWrite("work:chapter_01/part.tex", "draft part\n"),
+				subdivisionCall("split", "request_chapter_split", map[string]any{"children": []any{
+					map[string]any{"title": "First", "start_line": 1, "end_line": 2},
+					map[string]any{"title": "Second", "start_line": 3, "end_line": 4},
+				}}),
+			)
+		}
+	}))
+	defer server.Close()
+
+	logPath := filepath.Join(t.TempDir(), "run.log")
+	log, err := logger.NewLogger(logPath, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	log.SetQuiet(true)
+
+	cfg := &config.Config{}
+	cfg.Latex.Concurrency = 2
+	cfg.Latex.ConvertModel = "fake"
+	cfg.Latex.CheckerModel = "fake"
+	if enabled {
+		on := true
+		cfg.Latex.Fix = config.FixConfig{Enabled: &on, MaxRounds: 2}
+	}
+	off := false
+	cfg.Models = map[string]config.ModelConfig{"fake": {BaseURL: server.URL, APIKey: "test", Model: "fake", Stream: &off}}
+	r := &Runner{cfg: cfg, log: log, noChapterGate: true, projDir: proj,
+		clients: map[string]*session.Client{}, models: map[string]config.ModelConfig{}}
+	if err := r.convertOneChapter(proj, "book", filepath.Join(style, "manual.md"), chapterPath, workDir, 1, 1, false); err != nil {
+		t.Fatalf("convertOneChapter: %v", err)
+	}
+	if !fileExists(filepath.Join(workDir, "chapters", "chapter_01.tex")) {
+		t.Fatal("父章节没有交出产物")
+	}
+	raw, _ := os.ReadFile(logPath)
+	_ = log.Close()
+	return stats, string(raw), proj
+}
+
+// p60Text 是"模型这一轮没有工具调用、正常收尾"的回复。
+func p60Text(w http.ResponseWriter, text string) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{
+		"role": "assistant", "content": text,
+	}}}})
+}
+
+// P60 第二步（a）：默认关闭时，父章节这条路径上一条多余会话都不许有——
+// 不多一次复查对话、不多一次修复、不多一次核对，工具表里也没有 dispatch_fix。
+func TestFixDispatchDisabledKeepsTodayPath(t *testing.T) {
+	stats, _, _ := p60Run(t, false, false)
+	if stats.dispatchOffered {
+		t.Error("关闭时不该把 dispatch_fix 注册给任何会话")
+	}
+	if strings.Contains(stats.convertSystem, "dispatch_fix") {
+		t.Error("关闭时转换系统提示词不该出现 dispatch_fix")
+	}
+	if stats.reviews != 0 || len(stats.fixes) != 0 {
+		t.Errorf("关闭时不该有复查/修复会话: reviews=%d fixes=%v", stats.reviews, stats.fixes)
+	}
+	if stats.integrations != 1 {
+		t.Errorf("父章节整合会话 = %d，期望 1", stats.integrations)
+	}
+	// 今天这条路径一共 7 个请求：父会话拆分、两个子会话、两个子核对、
+	// 父整合、父核对。任何"默认也会多跑一条会话"的回归都会把这个数字顶上去。
+	if stats.requests != 7 {
+		t.Errorf("请求数 = %d，期望 7（与引入 P60 之前一致）", stats.requests)
+	}
+	if got := stats.checkers["chapter_01_child_01"]; got != 1 {
+		t.Errorf("child_01 核对次数 = %d，期望 1", got)
+	}
+	if got := stats.checkers["chapter_01_child_02"]; got != 1 {
+		t.Errorf("child_02 核对次数 = %d，期望 1", got)
+	}
+	if got := stats.checkers["chapter_01"]; got != 1 {
+		t.Errorf("父章节核对次数 = %d，期望 1", got)
+	}
+}
+
+// P60 第二步（b）：打开开关、计划点名一个子章节时，只有它多一条修复会话与
+// 一次重核；另一个子章节一动不动，父章节的整合会话照常跑。
+func TestFixDispatchRunsPlannedChildOnly(t *testing.T) {
+	stats, _, proj := p60Run(t, true, false)
+	if !stats.dispatchOffered {
+		t.Fatal("打开时 dispatch_fix 应当出现在转换会话的工具表里")
+	}
+	if !strings.Contains(stats.convertSystem, "## Handing a problem child back") ||
+		!strings.Contains(stats.convertSystem, "dispatch_fix") {
+		t.Error("打开时转换系统提示词应当带上下派说明")
+	}
+	if stats.reviews == 0 {
+		t.Error("打开时整合前应当有一次复查子章节的对话")
+	}
+	if got := stats.fixes["chapter_01_child_01"]; got == 0 {
+		t.Errorf("计划点名的 child_01 应当跑修复会话: %v", stats.fixes)
+	}
+	if got := stats.fixes["chapter_01_child_02"]; got != 0 {
+		t.Errorf("计划没点名的 child_02 不该跑修复会话: %v", stats.fixes)
+	}
+	if got := stats.checkers["chapter_01_child_01"]; got != 2 {
+		t.Errorf("child_01 核对次数 = %d，期望 2（原核对 + 修复后重核）", got)
+	}
+	if got := stats.checkers["chapter_01_child_02"]; got != 1 {
+		t.Errorf("child_02 核对次数 = %d，期望 1（不动它）", got)
+	}
+	if stats.integrations != 1 {
+		t.Errorf("父章节整合会话 = %d，期望 1", stats.integrations)
+	}
+
+	// 修复会话写下的产物要真的刷新进父章节的 children/ 副本，否则整合读到的
+	// 还是修复前的旧文件。
+	fixed := filepath.Join(proj, "work", "temp", "conv_chapter_01", "work",
+		"chapter_01", "children", "chapter_01_child_01.tex")
+	raw, err := os.ReadFile(fixed)
+	if err != nil {
+		t.Fatalf("父章节的 child_01 副本不存在: %v", err)
+	}
+	if !strings.Contains(string(raw), "Fixed chapter_01_child_01") {
+		t.Errorf("父章节的 child_01 副本没有刷新成修复后的产物:\n%s", raw)
+	}
+	// 修复转录里要有一条 fix_target 锚点（P59/P60：挂回同一次转换）。
+	tr := filepath.Join(proj, "work", "temp", "conv_chapter_01", "work", "_subdivision",
+		"child_01", "node", "sessions", "fix_chapter_01_child_01.jsonl")
+	trRaw, err := os.ReadFile(tr)
+	if err != nil {
+		t.Fatalf("修复转录不存在: %v", err)
+	}
+	if !strings.Contains(string(trRaw), "fix_target") {
+		t.Error("修复转录缺少 fix_target 锚点")
+	}
+}
+
+// P60 第二步（c）：一轮修复失败只留一行警告，整本书照旧整合、照旧提交——
+// 落回今天的行为，不因为修复失败而失败。
+func TestFixDispatchFailureFallsBackToIntegration(t *testing.T) {
+	stats, logText, _ := p60Run(t, true, true)
+	if got := stats.fixes["chapter_01_child_01"]; got == 0 {
+		t.Fatalf("计划点名的 child_01 应当尝试过修复: %v", stats.fixes)
+	}
+	if stats.integrations != 1 {
+		t.Errorf("修复失败后父章节整合会话 = %d，期望 1", stats.integrations)
+	}
+	if !strings.Contains(logText, "修复失败") {
+		t.Errorf("修复失败应当记一行警告，日志里没有：\n%s", logText)
+	}
+}
+
+// P60 第二步：下派说明只按开关追加。关闭时的提示词必须与引入它之前逐字节相同
+// （这正是"默认跑法不变"最容易被破坏的地方）。
+func TestConvertSystemPromptDispatchOnlyWhenEnabled(t *testing.T) {
+	r := keepTestRunner(t)
+	tuning := config.SessionTuning{MaxToolRounds: 30}
+	today := renderPrompt(prompts.Must(prompts.ConvertSystem), tuning, r.outputLang())
+	if got := r.convertSystemPrompt(tuning); got != today {
+		t.Fatal("latex.fix.enabled 关闭时转换系统提示词必须与今天逐字节相同")
+	}
+	if strings.Contains(today, "dispatch_fix") {
+		t.Fatal("常驻的转换模板不该提到 dispatch_fix（它只在开关打开时注册）")
+	}
+	on := true
+	r.cfg.Latex.Fix = config.FixConfig{Enabled: &on}
+	got := r.convertSystemPrompt(tuning)
+	if !strings.HasPrefix(got, today+"\n\n") {
+		t.Fatal("打开时应当只是在今天的提示词后面追加一段")
+	}
+	if !strings.Contains(got, "dispatch_fix") || !strings.Contains(got, "only records a plan") {
+		t.Errorf("追加的说明缺少关键语义:\n%s", got)
+	}
+}

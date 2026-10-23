@@ -423,8 +423,9 @@ type LatexConfig struct {
 	// Rescue（P58）：「会话没提交就结束」时的复盘。默认开；深度可配。
 	Rescue RescueConfig `yaml:"rescue"`
 	// Fix（P60）：「修复会话」——父章节把修复任务按 issue 下派给已经划好的
-	// 子章节（复用它的工作区与转录树），不再整章重转。默认关：第一步只落
-	// 骨架（计划文件 + dispatch_fix 工具 + 修复会话本体），不接进运行路径。
+	// 子章节（复用它的工作区与转录树），不再整章重转。默认关：关着时不注册
+	// dispatch_fix、不追加那段提示词、不跑任何修复会话——跑法与引入 P60 之前
+	// 逐字节相同。
 	Fix FixConfig `yaml:"fix"`
 	// Sessions tunes each specialised AI session independently.
 	Sessions struct {
@@ -488,7 +489,8 @@ func (c LatexConfig) RescueKeepRecords() bool {
 // 后跑该子章节原本的核对（同一转换锚点，P59）。修不动时退回老行为：整章由
 // 父章节重试。
 type FixConfig struct {
-	// Enabled 默认关（P60 第一步只落骨架，不产生任何运行期行为）。
+	// Enabled 默认关：关着时不注册 dispatch_fix、不追加提示词、不跑修复
+	// 会话，跑法与引入 P60 之前一致。
 	Enabled *bool `yaml:"enabled"`
 	// MaxRounds 一个子章节最多几轮修复（默认 2）。用完就退回老行为——父
 	// 会话按原来的重试路径处理，不再无限下派。
@@ -498,8 +500,8 @@ type FixConfig struct {
 	Model string `yaml:"model"`
 }
 
-// FixEnabled reports whether the fix sessions run (default OFF：P60 第一步只落
-// 骨架，配置默认就是关闭的).
+// FixEnabled reports whether the fix sessions run (default OFF：P60 的调度也
+// 只在这个开关打开时才存在——关闭时转换会话的工具面、提示词与请求数都不变).
 func (c LatexConfig) FixEnabled() bool { return c.Fix.Enabled != nil && *c.Fix.Enabled }
 
 // FixMaxRounds 是一个子章节最多能拿到几轮修复（默认 2；<=0 也按 2 算——写 0

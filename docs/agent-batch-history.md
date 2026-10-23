@@ -2384,3 +2384,16 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 守护测试的一处调整：`TestLiveLatexToolsAreMentionedSomewhere` 要求"每个工具名都在某个模板里被提到"，而 `dispatch_fix` 是**条件注册**的（只在开关打开时存在）——把它登记进 `conditionalTools` 并注明理由，避免提示词为一个默认不存在的工具留下说明（模型照着提示词调用不存在的工具是历史事故）。
 - 测试：`internal/latex/p60_fix_test.go`（计划往返与落盘形状、非法 child 名、未知版本、字段缺失/重复 id、`dispatch_fix` 的校验矩阵与"校验失败不写盘"、正常下派的分组与回执、默认关闭守卫、轮数预算、顶层拒绝、模型继承）、`internal/config/p60_fix_test.go`（默认值与访问器、两份模板读出来的值、版本号已 bump）、`internal/sessionview/p60_fix_target_test.go`（`fix_target` 解析、角色/锚点/issue 清单、普通转录不受影响）。`go test ./internal/...` 全绿；`go vet ./internal/...`、`gofmt` 干净。
 - 本地一份 **gitignored** 的配置改写固件（`temp/config_new.yaml`）随之把 `config_version` 从 22 提到 23，否则它自己的严格校验测试会因版本不匹配而失败；该文件不入库。
+
+
+## v1.5+（P60 第二步：把 `dispatch_fix` 接进章节转换流程，默认仍然关闭，2026-10-23）
+
+第一步只落骨架、不接运行路径；这一步把调度接上去，开关 `latex.fix.enabled` 依旧默认关闭——关着时转换会话的工具面、系统提示词与请求数都与引入 P60 之前逐字节一致（有测试按请求数钉住）。
+
+- **提示词只按开关追加**：新增模板 `latex_convert_fixdispatch.system`（"把问题子章节还回去"两行：只记录计划、runner 会跑该子章节的修复会话并重核、没列出的子章节不动），由 `Runner.convertSystemPrompt` 在开关打开时接在 `latex_convert.system` 后面；常驻的转换模板一个字没动。因此关着开关的跑法不可能看到一个不存在的工具（历史事故：`view_page`）。
+- **为什么需要一次额外对话**：子章节只要有一个没通过自己的核对，`convertChapterChildren` 直接报错、整章不会整合——也就是说走到"子章节转换+核对完"这一步时，**所有子章节都过了核对**，没有任何现成信号告诉父会话哪个孩子还有问题。所以细分父节点分支在整合对话之前先给父会话一次**复查对话**（`reviewChildrenBeforeIntegration`，同样取转换槽位）：读 `children-summary.md` 与有疑问的子章节产物，有问题就调 `dispatch_fix`，没事就停手；这段对话本身失败也只警告，照旧整合。
+- **按计划执行**：`applyChildFixPlan` 读 `work/fix/<根章>/plan.json`，按子章节顺序跑 `runChildFix`（各自的工作区、`latex.fix.max_rounds` 轮数预算、修复会话现在也从 `latex.convert_concurrency` 的槽位池取一个）。修完把该子章节的 `.tex` 与分片**重拷**回父章节的 `children/`，重写 `children-manifest.md`/`children-summary.md`，并按子章节的 issue store 重算 `issues-inherited.json`——整合会话读的就是这三样，不刷新等于没修。计划之外、不在计划里的子章节一律不碰。
+- **重核用的是"新的一次核对"**：沿用原来那条核对转录会被"转录里已 submit 就重放收账"直接判成上一轮的结论（模型根本不会再核一遍，实测就是秒过）。改成与手动重核同一个口径——写 `checker_<子章>.try<N>.jsonl`，锚点仍指同一次转换（P59），产物与只读视图不变。
+- **失败一律降级**：修复会话失败/未提交/修复后重核不过，都只记一行 warning，父会话照旧整合并提交（今天的行为）；这份失败不会让整本书跑挂。修复后核对没过的子章节，父章节整合时看到的是它在磁盘上的最新产物（注释里写明了这一点）。
+- 守护测试调回普通规则：`dispatch_fix` 现在真的出现在一个模板里，`conditionalTools` 豁免删除；"关闭时提示词逐字节不变"改由 `TestConvertSystemPromptDispatchOnlyWhenEnabled` 与几个假客户端集成用例钉住。
+- 测试（`internal/latex/p60_fix_dispatch_test.go`，沿用既有 httptest 假客户端风格）：关闭时 7 个请求（父拆分 / 两子转换 / 两子核对 / 父整合 / 父核对）、工具表里没有 `dispatch_fix`、提示词里没有它；打开且计划点名 `child_01` 时只有它多一条修复会话与一次重核（核对次数 1→2），`child_02` 不变，父整合照常，且父章节 `children/` 副本确实换成了修复后的内容、修复转录里有 `fix_target`；修复会话怎么提醒都不提交时整本书仍然整合提交，日志里有那条 warning。

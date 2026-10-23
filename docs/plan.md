@@ -147,7 +147,7 @@
 
 **前端**：不做新的顶层页签。中子栏「历史」保持按角色分开（P59）；章节树里在子章节的核对行下面多一层「修复」子行（同锚点、带轮次），点它进入修复会话；核对仍归该转换，历史里按"谁的核对"分组（锚点相同即同组）。另外加一个**重置视图**按钮（在刷新旁）：清掉 pin/选中/展开记忆，回到"当前正在跑"的顶层状态。
 
-**实现落点（待做）**：`internal/latex/`（fix 角色 + 计划文件 + 复用子章节工作区 + 预算）、`sessionview`（`fix_target` 解析、树里的修复子行）、`web`（子行渲染 + 重置按钮）。先在 issue 里拆条（T214 子会话切换 bug / T215 重置按钮 / T216 修复会话），再逐条落地。
+**实现落点（后端已落地，前端待做）**：`internal/latex/`（fix 角色 + 计划文件 + 复用子章节工作区 + 预算，两步都已接进运行路径）、`sessionview`（`fix_target` 解析已落地、树里的修复子行待做）、`web`（子行渲染待做 + 重置按钮已落地）。先在 issue 里拆条（T214 子会话切换 bug / T215 重置按钮 / T216 修复会话），再逐条落地。
 
 #### P60 接口设计（已定）
 
@@ -178,3 +178,5 @@
 **配置**：`latex.fix.enabled`（本步默认 **false**）、`latex.fix.max_rounds`（默认 2；0/负数也按 2，不是"无限轮"）、`latex.fix.model`（空 = 继承 convert；会话调优沿用 `latex.sessions.convert`，不新开块）。配置版本 22 → 23。
 
 **第一步的边界**：已落地 `internal/latex/fix.go`（计划类型与读写、`DispatchFixTool`、`runChildFix`）、提示词 `latex_childfix.system.md`（**与装配阶段的 `latex_fix.system.md` 不是一回事**，后者是书级编译修复 `book_fix`）、`sessionview` 把 `fix_target` 读成 `chapterRole:"fix"` + `chapterAnchor`/`chapterAnchorAttempt` + `fixIssueIds`（分组一行不动）、配置项与模板、两份配置模板同步。`dispatch_fix` **只在 `latex.fix.enabled` 打开时注册**给转换会话；`runChildFix` 目前**只有测试会调用**——所以默认配置下本批代码零运行期行为。**还没做**：调度（父会话何时下派、修完怎么整合、失败怎么退回）、章节树里的「修复」子行与历史分组、配置开关的打开验证。这几项留给 P60 的下一步。
+
+**第二步（2026-10-23）已完成**：调度接进 `convertChapterNode` 的细分父节点分支——子章节转换+核对完、父会话整合之前，先给它一次**复查对话**（这一步必须存在：子章节只要有一个没过自己的核对，整章根本不会走到整合，所以"哪个孩子还有问题"只能由父会话读过报告与产物之后回答）。`dispatch_fix` 只在 `latex.fix.enabled` 打开时注册，系统提示词那一段（`latex_convert_fixdispatch.system`）也只在那时追加，关着时提示词与请求数逐字节不变。父会话写下计划后，runner 按计划逐个子章节跑 `runChildFix`（各自的 `_subdivision/<child>/node` 工作区、`latex.fix.max_rounds` 轮数预算、转换槽位池），修完用**新的一次核对转录**（`checker_<子章>.try<N>.jsonl`，锚点仍指同一次转换，P59）重判，再把 `.tex`/分片、`children-manifest.md`/`children-summary.md` 与 `issues-inherited.json` 刷新回父章节，最后照今天的流程整合。计划之外的子章节不碰；任何一步失败只记 warning 并退回原来的整合流程。**还没做**：预览页章节树里的「修复」子行与历史分组（`fix_target` 已被读成角色/锚点，树与历史一行未动）；"父章节整体失败次数到与转换重试同一上限才整章重开"这条预算也还没落地（现在仍是整合不顺就按原路径整章重试）。

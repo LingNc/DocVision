@@ -7,32 +7,33 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"mineru-tools/internal/config"
 	"mineru-tools/internal/prompts"
 	"mineru-tools/internal/session"
 )
 
 /*
- * P60：子章节「修复会话」的骨架。
+ * P60：子章节「修复会话」。
  *
  * 背景（用户口径）：父章节重试代价太大。子会话都已跑过之后，应当能**按修复
  * 任务重新下派**到已经划好的章节与工作区上，用新会话继续改，父会话只做整合；
  * 父章节反复失败到与转换重试同一上限时才整章重开。
  *
- * 这一步（P60 第一步）只落**接口**，不接进运行路径：
+ * 形态：
  *
  *   - 契约：父会话在整理阶段用 `dispatch_fix` 工具把「哪个子章节、按哪条规则
  *     改」写成 `work/fix/<根章>/plan.json`；工具**只记录计划**、不同步执行。
- *   - 执行：`runChildFix` 已按最终形态写好（复用子章节自己的工作区、工具集 =
- *     转换会话减去 request_chapter_split、提交后跑该子章节原本的核对、锚点
- *     不变），但只有测试会调用它——第一道守卫就是 `latex.fix.enabled`，默认关闭。
+ *   - 调度（第二步）：`convertChapterNode` 在子章节转换+核对完、父会话整合之前，
+ *     给它一次「看子章节结果、把还不对的还回去」的对话；它写下计划后，runner
+ *     按计划逐个子章节跑 `runChildFix`（各自的工作区、各自的轮数、各自的
+ *     核对），然后把产物刷新回父章节的 children/，再做今天的整合。
  *   - 预算：`latex.fix.max_rounds`（默认 2）；用完就退回老行为（父会话重试）。
- *
- * 为什么不在这批里接进 book.go：接进去就改变了现有跑法的结果，而这一步要的
- * 是"接口先定死、骨架先编译通过、默认零行为"。真正的调度（父会话何时下派、
- * 修完后父会话怎么整合）是 P60 的下一步。
+ *   - 总开关：`latex.fix.enabled`，默认关闭——关着的时候既不注册工具、也不
+ *     追加提示词、也不多跑任何一条会话，跑法与引入 P60 之前逐字节相同。
  */
 
 const (
@@ -237,9 +238,17 @@ type DispatchFixTool struct {
 	// Work 是父会话自己的工作区；它的 `_subdivision/` 是子章节名的唯一真源。
 	// 为空时按 <proj>/work/temp/conv_<Root>* 去找（见 findSubdivisionDir）。
 	Work string
+
+	// plannedPath 是本次会话写下计划后得到的路径（空 = 还没下派）。调度只认
+	// 它：磁盘上可能还躺着上一次运行留下的 plan.json，那不是"这次刚下派的"，
+	// 不能拿来执行（同一份计划被重复执行会把已经修过的子章节再修一遍）。
+	plannedPath string
 }
 
 func (t *DispatchFixTool) Name() string { return "dispatch_fix" }
+
+// PlannedPath 返回本次会话刚写下的计划文件路径（空 = 没有下派任何东西）。
+func (t *DispatchFixTool) PlannedPath() string { return t.plannedPath }
 
 func (t *DispatchFixTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
@@ -340,6 +349,7 @@ func (t *DispatchFixTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if err != nil {
 		return session.ToolResult{}, err
 	}
+	t.plannedPath = path
 
 	parts := make([]string, 0, len(plan.Children))
 	total := 0
@@ -413,7 +423,7 @@ func (r *Runner) fixSessionModel() string {
 
 // runChildFix 跑一个子章节的修复会话。
 //
-// 形态（P60 第一步已定，调度留给下一步）：
+// 形态（P60 第一步已定，第二步接进调度）：
 //   - 工作区：子章节**自己**那棵树（`<node>/work`，转换时建好、递归节点收尾
 //     不删），不重建、不重新划分；
 //   - 工具集：转换会话减去 `request_chapter_split`（已经划好的不再划），加上
@@ -561,9 +571,13 @@ func (r *Runner) runChildFix(proj, clsName string, t fixTarget, issues []fixPlan
 	initial := resumeUserText(resumeMsgs, b.String())
 
 	_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
+	// 修复会话干的是"改 .tex / 编译"这一类活，和转换会话抢同一批并发槽位：
+	// 父章节等其他顶层章节在转换时，这里不能再凭空多开一路请求。
+	release := r.acquireConvertSlot()
 	fixState(rowStateRunning)
 	_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 	_, runErr := sess.Run(session.RunOptions{UserText: initial})
+	release()
 	if runErr != nil {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
 		return fmt.Errorf("修复会话失败: %w", runErr)
@@ -582,13 +596,19 @@ func (r *Runner) runChildFix(proj, clsName string, t fixTarget, issues []fixPlan
 
 	// 交回该子章节原本的核对：同一只读视图、同一转换锚点（P59），等价于
 	// "这一支再核一遍"，而不是新开一条核对链。
+	//
+	// 但**不能沿用原来那条核对转录**：那一轮的 submit 已经收账，续跑逻辑会
+	// 直接重放旧结论、模型根本不会再核一遍（实测就是这么"秒过"的）。所以
+	// 与手动重核同一个口径：新的一次核对写 `checker_<章>.tryN.jsonl`，锚点
+	// 仍然指同一个转换尝试——预览页据此把它挂在同一次转换下面。
 	hints := checkHints{Report: reportPath, Notes: submit.Notes}
 	if gate != nil {
 		if pdf, _, ok := gate.compiledPDF(); ok {
 			hints.PDF = pdf
 		}
 	}
-	checkerTr := attemptTranscriptPath(filepath.Join(t.NodeRoot, "sessions", "checker_"+base+".jsonl"), convertAttempt)
+	checkerBase := filepath.Join(t.NodeRoot, "sessions", "checker_"+base+".jsonl")
+	checkerTr := attemptTranscriptPath(checkerBase, lastAttemptNumber(checkerBase)+1)
 	ok, detail := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid,
 		checkerTr, filepath.Join(t.NodeRoot, "checker-view"), true, convertAttempt)
 	if !ok {
@@ -599,4 +619,129 @@ func (r *Runner) runChildFix(proj, clsName string, t fixTarget, issues []fixPlan
 	_ = os.Remove(texPath + ".checker")
 	r.log.Log(tid, "[fix]", base, "修复完成并通过核对")
 	return nil
+}
+
+/*
+ * 第二步：把 dispatch_fix 接进章节转换流程（P60）。
+ *
+ * 时间点在 convertChapterNode 的细分父节点分支里：子章节全部转换+核对完、
+ * 父会话的整合对话之前。为什么必须在这里给父会话一次**额外的对话**：子章节
+ * 只要有一个没通过自己的核对，convertChapterChildren 就直接报错、整章不会
+ * 整合；所以走到这一步时"所有子章节都过了核对"，没有任何现成信号告诉父会话
+ * 哪个孩子还有问题——只能它自己读过报告与产物之后才知道。
+ */
+
+// childReviewText 是整合前那次「复查子章节、把还不对的还回去」的用户提示。
+// 它是一次性的运行指令（与整合指令同一类），不是常驻提示词。
+const childReviewText = "The child chapters are converted and their checkers have run. Before integrating, look at them: read work:_subdivision/children-summary.md, then the report and the .tex/parts of any child that still looks wrong. " +
+	"If a child's artifact really still has a problem (missing content, wrong structure, a figure/table that does not match the original page), call dispatch_fix ONCE with every such issue (id, child, where, what, rule) — it only records the plan; the runner runs that child's fix session and re-checks it, then you integrate. " +
+	"If nothing needs handing back, do nothing. Do NOT integrate and do NOT submit in this turn: this turn only hands work down."
+
+// convertSystemPrompt 是章节转换会话的系统提示词。
+//
+// P60 第二步的「把问题子章节还回去」那一段只在 latex.fix.enabled 打开时追加：
+// dispatch_fix 也只有那时才注册给会话。关着开关的跑法拿到的提示词必须与引入
+// 这段之前逐字节相同（有测试钉住）——否则"默认零行为"就不成立了。
+func (r *Runner) convertSystemPrompt(tuning config.SessionTuning) string {
+	prompt := renderPrompt(prompts.Must(prompts.ConvertSystem), tuning, r.outputLang())
+	if !r.cfg.Latex.FixEnabled() {
+		return prompt
+	}
+	return prompt + "\n\n" + prompts.Must(prompts.ConvertFixDispatch)
+}
+
+// reviewChildrenBeforeIntegration 给父会话一次「看子章节结果、按 issue 下派」的
+// 对话，返回它写下的计划文件路径（空 = 没有下派任何东西）。
+//
+// 这一段只是改善手段：对话本身失败不是致命错，按今天的行为直接整合。
+func (r *Runner) reviewChildrenBeforeIntegration(sess *session.Session, base string, dispatch *DispatchFixTool, setState func(string), tid int) string {
+	_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
+	setState(rowStateQueued)
+	release := r.acquireConvertSlot()
+	setState(rowStateRunning)
+	_, err := sess.Run(session.RunOptions{UserText: childReviewText})
+	release()
+	if err != nil {
+		setState(rowStateRunning)
+		r.log.LogWarning(tid, "[fix]", base, "复查子章节的对话失败（跳过修复，按原行为整合）:", err)
+		return ""
+	}
+	_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+	setState(rowStateRunning)
+	path := dispatch.PlannedPath()
+	if path == "" {
+		r.log.Log(tid, "[fix]", base, "没有子章节需要下派修复，直接整合")
+	}
+	return path
+}
+
+// applyChildFixPlan 按计划逐个子章节跑修复会话，然后把修过的产物刷新回父章节。
+//
+// 任何一步失败都只警告、不中止：今天的行为（父会话照旧整合并提交）必须还是
+// 兜底——一整本书不能因为一轮修复失败而失败。
+func (r *Runner) applyChildFixPlan(proj, clsName, base, work string, childDepth int, children []ChapterSubdivision, planPath string, tid int) {
+	plan, err := ReadFixPlan(proj, base)
+	if err != nil {
+		r.log.LogWarning(tid, "[fix]", base, "修复计划读取失败（按原行为整合）:", err)
+		return
+	}
+	r.log.Log(tid, "[fix]", base, "按 "+planPath+" 下派 "+strconv.Itoa(len(plan.Children))+" 个子章节的修复")
+	var fixed []string
+	for _, pc := range plan.Children {
+		target := fixTarget{
+			Child:    pc.Child,
+			Base:     base + "_" + pc.Child,
+			NodeRoot: filepath.Join(work, "_subdivision", pc.Child, "node"),
+			InputMD:  filepath.Join(work, "_subdivision", pc.Child, "input", "chapter.md"),
+			Depth:    childDepth,
+		}
+		// 顺序跑：计划通常只有一两个子章节，父会话只等这一小段；每一轮都会
+		// 拿转换槽位，所以不会额外放大并发。
+		if err := r.runChildFix(proj, clsName, target, pc.Issues, tid); err != nil {
+			r.log.LogWarning(tid, "[fix]", base, "子章节 "+pc.Child+" 修复失败（按原行为继续整合）:", err)
+		}
+		// 失败也刷新：修复会话可能已经交了一份（只是核对没过），整合应该看到
+		// 子章节在磁盘上的最新状态，而不是更旧的副本。
+		fixed = append(fixed, pc.Child)
+	}
+	if err := refreshFixedChildren(work, base, fixed, children); err != nil {
+		r.log.LogWarning(tid, "[fix]", base, "刷新子章节产物失败（整合会读到修复前的副本）:", err)
+	}
+}
+
+// refreshFixedChildren 把修过的子章节重新收进父章节：`children/` 副本、
+// 子章节汇报汇总与继承清单。整合对话读的就是这三样。
+func refreshFixedChildren(work, parentBase string, fixed []string, children []ChapterSubdivision) error {
+	parts := filepath.Join(work, parentBase, "children")
+	for _, child := range fixed {
+		childBase := parentBase + "_" + child
+		src := filepath.Join(work, "_subdivision", child, "node", "result")
+		if err := copyFile(filepath.Join(src, childBase+".tex"), filepath.Join(parts, childBase+".tex")); err != nil {
+			return fmt.Errorf("复制 %s.tex 失败: %w", childBase, err)
+		}
+		// 分片整棵替换：修复删掉的文件不能留在旧副本里。
+		if srcParts := filepath.Join(src, childBase); fileExists(srcParts) {
+			dst := filepath.Join(parts, childBase)
+			_ = os.RemoveAll(dst)
+			if err := copyDir(srcParts, dst); err != nil {
+				return fmt.Errorf("复制 %s/ 失败: %w", childBase, err)
+			}
+		}
+	}
+	if children == nil {
+		return nil
+	}
+	// 继承清单重算：修复会话的 submit 可能已经把某条问题标成 resolved，不重算
+	// 就会把它当成"还没解决"继续往上带。
+	var inherited []ChapterIssue
+	for i := range children {
+		id := fmt.Sprintf("child_%02d", i+1)
+		store := filepath.Join(work, "_subdivision", id, "node", "work", ".issues", "issues.json")
+		inherited = append(inherited, openIssues(readIssueStore(store))...)
+	}
+	if err := writeIssueStore(filepath.Join(work, "_subdivision", "issues-inherited.json"), openIssues(inherited)); err != nil {
+		return fmt.Errorf("重写继承问题清单失败: %w", err)
+	}
+	// manifest + summary 由报告原文重建：修过的子章节交的是新报告。
+	return writeChapterChildrenManifest(work, parentBase, children)
 }

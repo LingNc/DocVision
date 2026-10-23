@@ -24,19 +24,15 @@ func TestPromptToolNamesExistInCode(t *testing.T) {
 	}
 }
 
-// conditionalTools 是**只在某个配置开关打开时才注册**的工具：它们不能出现在
-// 提示词里，否则关着开关的跑法会让模型看到一个不存在的工具（模型照着提示词
-// 调用、拿到 "unknown tool"——历史上 `view_page` 就这么浪费过整条会话）。
-//
-//   - dispatch_fix（P60）：只有 latex.fix.enabled=true 才注册给转换会话；提示词
-//     里对它的说明等"真正接进调度"那一步再补（那一步会一并决定父会话怎么用、
-//     怎么整合）。在此之前它靠 Definition() 的 description 自解释。
-var conditionalTools = map[string]string{
-	"dispatch_fix": "latex.fix.enabled",
-}
-
 // 反向检查：代码里的每个工具名都必须在**某个**模板里出现过，否则说明
 // 新工具加进来了却没有告诉模型怎么用（只在本包范围内核对 latex 工具）。
+//
+// dispatch_fix（P60）是这里唯一"按配置注册"的工具：它只在 latex.fix.enabled
+// 打开时才进工具表，所以它的说明不在常驻的 latex_convert.system 里，而在
+// latex_convert_fixdispatch.system —— 那段文字由 runner 只在开关打开时接到
+// 转换系统提示词后面（`Runner.convertSystemPrompt`，有测试钉住关着时逐字节
+// 不变）。这里按普通工具核对：既然它真的登记在一个模板里，就不再需要
+// "条件工具"的豁免了。
 func TestLiveLatexToolsAreMentionedSomewhere(t *testing.T) {
 	all := map[string]bool{}
 	for _, tpl := range prompts.Templates() {
@@ -46,13 +42,6 @@ func TestLiveLatexToolsAreMentionedSomewhere(t *testing.T) {
 	}
 	for name, where := range liveToolNames(t) {
 		if filepath.Dir(where) != "." { // 只核对本包（internal/latex）的工具
-			continue
-		}
-		if flag, conditional := conditionalTools[name]; conditional {
-			// 条件工具只要求"确实有开关在把它挡在外面"，不要求提示词提到。
-			if flag == "" {
-				t.Errorf("工具 %q（%s）登记成条件工具却没写开关名", name, where)
-			}
 			continue
 		}
 		if !all[name] {

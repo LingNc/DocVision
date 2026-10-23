@@ -58,6 +58,12 @@ const (
 	RescueSystem      = "latex_rescue.system"
 	FigureCheckSystem = "latex_figurecheck.system"
 
+	// ConvertFixDispatch（P60）是章节转换系统提示词里的一段**附加**文字：只有
+	// `latex.fix.enabled` 打开（也就是 dispatch_fix 真的注册给会话）时，runner
+	// 才把它接到 ConvertSystem 后面。单列一个模板而不是写进 latex_convert.system，
+	// 是为了让"关着开关的跑法"拿到的提示词与引入它之前逐字节相同。
+	ConvertFixDispatch = "latex_convert_fixdispatch.system"
+
 	// T43 风格修复大循环的三个会话。
 	StyleFixIntegrateSystem = "latex_stylefix_integrate.system"
 	StyleFixAssessSystem    = "latex_stylefix_assess.system"
@@ -135,6 +141,14 @@ var registry = []Template{
 		Name: ConvertSystem, File: "latex_convert.system.md",
 		Vars:        []string{"MAX_ROUNDS"},
 		MustMention: []string{"compile", "doc_search", "edit_file", "grep", "list_source_pages", "read_file", "request_chapter_split", "submit", "view_image", "view_pdf", "write_file"},
+	},
+	{
+		// P60：下派修复（dispatch_fix）的说明。它**不**在主转换模板里，因为
+		// dispatch_fix 只在 latex.fix.enabled 打开时才注册；runner 按开关决定
+		// 要不要把这段接到转换系统提示词后面。
+		Name:        ConvertFixDispatch,
+		File:        "latex_convert_fixdispatch.system.md",
+		MustMention: []string{"dispatch_fix"},
 	},
 	{
 		Name: StyleFixIntegrateSystem, File: "latex_stylefix_integrate.system.md",
