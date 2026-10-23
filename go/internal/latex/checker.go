@@ -22,10 +22,21 @@ import (
 //
 // T217：一次结论都没拿到的路径单独有了一句更明确的文案（"核对始终没有给出结论
 // （不是内容问题，共尝试 N 次）…"），它同样是"没结论"、同样必须跳过反馈轮。
+//
+// 现场补（用户报的截图）：核对会话退化、已经被排进队列"从干净轮次继续核对"时，
+// 返回的是"checker 会话已退化，已排队从干净轮次继续核对"——这不是章节的问题，
+// 而且那一章的核对已经重新排队了；可它不在上面三条前缀里，于是照样被当成
+// "checker 发现了问题"喂回转换会话，转换只能把同一份产物再交一遍，而界面上一
+// 边写着"已排队继续核对"、一边又要求转换会话修内容，两件事自相矛盾。同一类的
+// 还有"复盘判定会话无法挽救"（放弃这次核对）与"只读视图无法准备"（基础设施
+// 失败）——三种都**没有对章节下过任何结论**。
 func checkerNoVerdict(issues string) bool {
 	return strings.HasPrefix(issues, "核对始终没有给出结论") ||
 		strings.HasPrefix(issues, "checker 多次未能提交结论") ||
-		strings.HasPrefix(issues, "checker API failure")
+		strings.HasPrefix(issues, "checker API failure") ||
+		strings.HasPrefix(issues, "checker 会话已退化") ||
+		strings.HasPrefix(issues, "checker 复盘判定会话无法挽救") ||
+		strings.HasPrefix(issues, "checker 只读视图无法准备")
 }
 
 // checkChapter reviews ONE converted chapter with its own minimal,

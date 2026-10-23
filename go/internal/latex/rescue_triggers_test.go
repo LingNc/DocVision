@@ -39,6 +39,9 @@ type rescueChapterOptions struct {
 	claimNoTools bool
 	// noSubmit 为真时会话每轮都正常收尾、从不调 submit（老的"没提交"触发）。
 	noSubmit bool
+	// checkerNoSubmit 为真时**核对会话**每轮都正常收尾、从不调 submit：现场那句
+	// "checker 会话已退化，已排队从干净轮次继续核对"就是这么来的。
+	checkerNoSubmit bool
 	// verdicts 是复盘结论序列（第 n 次复盘取第 n 个，超出取最后一个）。
 	verdicts []string
 	from     int
@@ -179,6 +182,11 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 
 		// 核对会话：只读（有 read_file / grep、没有 write_file）。
 		case toolset["read_file"] && toolset["grep"] && !toolset["write_file"]:
+			if opts.checkerNoSubmit {
+				// 退化：跑完就给一段正文，从不调 submit。
+				p60Text(w, "I could not finish the review.")
+				return
+			}
 			subdivisionReply(w, subdivisionCall("check-submit", "submit", map[string]any{
 				"report": map[string]any{"status": "pass"},
 			}))

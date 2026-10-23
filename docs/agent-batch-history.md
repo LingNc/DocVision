@@ -2497,3 +2497,13 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **组件（`ChapterSessionTree.vue`）**：修复行 `v-for="fx in treeFixRows(node)"`、复盘行 `v-for="rs in treeRescueRows(node)"`，标签固定「修复」/「复盘」（归档前缀「旧」由 `kindLabel` 给），去掉了行内的 `#N` 与 `.tryN` 角标；轮数、最新一轮结局、被复盘的会话仍在行 `title`（`fixRowTitle`/`rescueRowTitle`）。不同目标（转换/核对/修复）的复盘仍各占一行，互不遮挡。
 - **测试**：`web/tests/chapter-fix-rescue.spec.ts` 新增 describe「树上每种只留一行（编号只进历史）」三条——三轮修复树上只剩最新一轮且历史里三轮都在（新 → 旧）、同一目标两次复盘树上只一行且链里两次都在、复盘了转换与核对两个目标时树上两行且各自历史独立（单条目标返回 `null`）。`npx vitest run` 22 文件 **256 条**全绿，`vite build` 重建 dist 并提交。
 - **没覆盖到的**：树行仍然没有组件级渲染测试（落位由 `treeFixRows`/`treeRescueRows` 的数据层断言保证）；「最新一轮」按 mtime 判定，mtime 相同的极端情况下取池子里靠后的那条（`>=` 覆盖）。
+
+## v1.5+（T221：核对退化/放弃/视图失败不再喂反馈轮，2026-10-23）
+
+用户贴出截图：同一条转换会话里，「checker 会话已退化，已排队从干净轮次继续核对」下面紧跟着「The checker reviewed your submitted chapter and found problems that must be fixed」+「Fix them in your workspace … then submit the two paths again」。核对在那一刻**没判定过章节**，第二句让去改内容纯属自相矛盾。先确认这是真缺陷（不是用户跑旧版造成的错觉）：`checkerNoVerdict()` 的识别表漏了退化路径的文案，反馈轮照旧发了出去。
+
+- **识别表（`internal/latex/checker.go`）**：`checkerNoVerdict()` 从三个前缀扩到六个，补上核对"没判定就返回"的三条路——`checker 会话已退化，已排队从干净轮次继续核对`（复盘判 `truncate`）、`checker 复盘判定会话无法挽救：…`（判 `fail`）、`checker 只读视图无法准备`（视图没铺起来，strict 模式判失败）。`convertChapterNode` 的反馈轮守卫本来就是 `!checkerNoVerdict(issues)`，一行调用侧代码没改；命中时多打一行「核对会话没有给出结论，跳过反馈轮」。
+- **刻意不动的部分（升级链）**：跳过反馈轮之后仍走 T217 那条路——按 `checker_rounds` 归档这一版、换全新会话重转换，次数用尽判失败。没有改成"留产物 + 强制重核"，因为顶层重跑遇到已有 `<章>.tex` 会走 `book.go` 的「已有产物，跳过」并直接 return（连核对都不跑），留产物等于让下一次运行静默采纳一份没核对过的东西。那条要动得先改重跑跳过的语义，单独定。
+- **测试**：`t209_checker_noverdict_test.go` 的识别表补三条字符串（`real` 一侧不动，继续保证内容问题不被误判成"没结论"）；新增 `checker_degrade_test.go`，在 `rescue_triggers_test.go` 的夹具上加了 `checkerNoSubmit` 开关（核对会话跑完只回一段正文、从不调 `submit`），跑真实 `convertOneChapter`：断言转换会话一条反馈消息都没收到、复盘确实跑过、`truncate` 排出的队列请求是 `role=checker`、这一章仍按失败收尾、`stats.convert >= 2`（换会话重转换没被跳过）。把三个前缀临时删掉重跑，用例红在"却收到了第 4 条反馈消息"并打印出用户截图里那一段原文，恢复即绿——这条用例确实复现了现场。
+- **验证**：`go build ./...`、`go vet ./internal/...` 干净；`go test ./internal/... -count=1` 14 个包全绿（`internal/latex` 21.5s）；`gofmt -l` 对改动文件无输出（`internal/latex/stylefix.go` 的未格式化是既有状态）。
+- **没覆盖到的**：① 这三类"没结论"最后仍会把这一版产物作废，与「已排队从干净轮次继续核对」的措辞并不完全一致——那句话说的是"排队重核"，实际发生了什么见上（保产物会导致下一次运行静默跳过核对，这条取舍要用户定）；② 只在小模型假客户端下验证，没有在真实厂商的空回复/超时上复跑；③ 用户现场跑的是这批提交之前的二进制，旧行为会一直存在到重新构建。

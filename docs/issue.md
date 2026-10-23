@@ -1272,7 +1272,7 @@ user 轮
   改：① 循环里记 `sawVerdict`（任一次 `submit.Submitted`）。**一次结论都没拿到**时预算放宽到 `checkerNoVerdictAttempts = 4` 次——每次都是全新会话、同一转录路径、同一只读视图；**只要拿到过结论**，预算立刻回到 `checkerAttempts = 2`，`issues` 那一路照旧立刻返回、由调用方按 `checker_rounds` 把问题喂回转换会话（升级链一行没动）。② 文案分开：一次结论都没有时返回 `核对始终没有给出结论（不是内容问题，共尝试 N 次）：会话一次都没有调用 submit…`（N 为实际尝试次数），旧文案 `checker 多次未能提交结论（会话未调用 submit）` 留给"给过结论但没有可用结论"那一路；`checkerNoVerdict()` 同步认得新前缀——否则 T209 会失效，这串文本又会被当成"章节有问题"喂回转换会话。每次额外轮次打一条 warning（`第 N 次核对未拿到结论，重开核对会话（第 N/4 次）`）。
   改（未做，刻意留下）：`book.go` / `retry.go` 的升级链**不动**——4 次都拿不到结论时整章仍然作废重来，这一批只降低"没结论就被判整章重来"的概率，不重设计升级路径。
   验证：`TestCheckerNoVerdictRetriesFourAttempts`（只回正文 → 恰好 4 次会话：8 条请求 = 每轮首请求 + 提交提醒、4 条 `checker_target` 锚点，返回新文案前缀）、`TestCheckerNoVerdictExtraAttemptCanPass`（前两次只回正文、第 3 次提交 `pass` → 通过，3 条锚点）、`TestCheckerWithoutVerdictFailsAfterFourAttempts`（退化响应连跑 4 轮、请求数 8–12）、`TestCheckerNoVerdict` 补新文案一条；`go test ./internal/latex/`、`go test ./internal/...` 全绿。
-  已知边界：P58 复盘会话判 `fail`/`truncate` 时会直接返回（`checker 复盘判定会话无法挽救…` / 已排队续跑），走不到第 4 次；且这两句不在 `checkerNoVerdict()` 的识别范围里。本轮不动它（动它就等于改升级链，见上），观察后再定。
+  已知边界：P58 复盘会话判 `fail`/`truncate` 时会直接返回（`checker 复盘判定会话无法挽救…` / 已排队续跑），走不到第 4 次；且这两句不在 `checkerNoVerdict()` 的识别范围里。本轮不动它（动它就等于改升级链，见上），观察后再定。→ **T221 已补**：这三类（再加 `checker 只读视图无法准备`）都进了 `checkerNoVerdict()`，反馈轮不再被喂；升级链（作废产物、换会话重转）仍未动。
 - T218 核对历史里老转录被新的一次"盖掉"（P59 遗留）。
   现象：同一章核过三次，点最新那条核对进「历史」只看到两条甚至一条；老的那几次核对明明还在磁盘上，看起来像被最新一次覆盖了。
   根因：`chapterAttemptChain` 的核对分支只保留 `m.chapterAnchor === self.chapterAnchor` 的成员。锚点是 P58 起才写进转录的，更早落盘的老核对转录 `chapterAnchor` 为空，一次都匹配不上——于是"当前这条有锚点、老转录没有"时老转录全部消失。
@@ -1288,3 +1288,10 @@ user 轮
   改：项目根由调用方显式传入（`ensureCheckerView` 与 `checkChapterAt` 本来就有它），`linkCheckerAssets(dir, proj)` 对子章节与顶层用同一个来源。**`parts/` 别名本身没有丢**，这一批把它的正确性也钉住了：子章节提交进 `work:<子章>/` 的分片，在视图里以 `parts/…` 与 `<子章>/…` 两种写法都能解析；`parts/` 仍是 `PARTS_DIR`。
   未改（刻意）：分片只留在**工作区根** `parts/`、没有提交进 `work:<子章>/` 时，视图里的 `parts/` 为空——视图照实映出提交内容，工作区里的文件不会被偷渡进只读视图（核对判的是提交产物）。这类"本地能编译、提交里没有"的布局属于转换侧，需从提示词/提交契约那条线处理，不在视图里补。
   验证：`internal/latex/chapter_checker_test.go` 新增两条——`TestCheckerViewRecursiveChildHasPartsAliases` 按真实目录铺出子章节的临时工作区（`work/temp/conv_<根>/work/_subdivision/<child>/node/work`，含 `parts/`）、提交契约的分片文件夹与整合后的 `.tex`，走真实 `placeChapterFiles` + `ensureCheckerViewAt`，逐条断言 `parts/x.tex`、`parts/sub/y.tex`、`<子章>/parts/x.tex`、`figures/motif_bb.tex`（项目级）都解析得到；`TestCheckerViewDoesNotLeakWorkTreeParts` 钉住反面对照（`parts/` 别名在、工作区里的分片不在，且工作区文件没被动过）。`go test ./internal/... -count=1` 全绿。
+- T221 核对没给结论时仍把「发现问题」喂回转换会话（T209/T217 遗留，用户看截图报的）。
+  现象：同一条转换会话里既有「checker 会话已退化，已排队从干净轮次继续核对」，又紧跟一条「The checker reviewed your submitted chapter and found problems that must be fixed:」+「改完再交那两个路径」。那一刻核对**一个内容问题都没指出来**——界面上一句说"已经排队重核"，下一句让去改内容，两句话互相矛盾；用户的第一反应就是"这不对"。
+  根因：`checkerNoVerdict()` 只认 `核对始终没有给出结论` / `checker 多次未能提交结论` / `checker API failure` 三个前缀。核对还有三条"没判定就返回"的路不在里面——`checker 会话已退化，已排队从干净轮次继续核对`（复盘判 `truncate`）、`checker 复盘判定会话无法挽救：…`（判 `fail`）、`checker 只读视图无法准备`（视图都没铺起来）。这三句落到 `convertChapterNode` 就被当成普通 issues，走进反馈轮。T217 的"已知边界"点过这件事，当时刻意留着。
+  改：三个前缀补进 `checkerNoVerdict()`，T209 的"跳过反馈轮"自然覆盖这三类（只多打一行 `核对会话没有给出结论，跳过反馈轮`）。
+  未改（刻意）：跳过反馈轮之后仍是 T217 那条路——按 `checker_rounds` 归档这一版、换全新会话重转换，次数用尽判失败。理由：顶层重跑遇到已有 `<章>.tex` 会走 `已有产物，跳过` 直接 return，**连核对都不跑**；把产物留下来"等重核"等于让下一次运行静默采纳一份没被核对过的东西，与"绝不静默采纳未提交/未核对产物"冲突。要改成"留产物 + 强制重核"，得先改重跑跳过的语义，单独定。
+  验证：`internal/latex/t209_checker_noverdict_test.go` 的识别表补三条（退化/放弃/视图失败），`real` 一侧不变；新增 `internal/latex/checker_degrade_test.go` 跑真实 `convertOneChapter`（假客户端、`rescue_triggers_test.go` 的夹具加一个 `checkerNoSubmit` 开关让核对每轮跑完不提交）：断言转换会话**一条** "The checker reviewed your submitted chapter" 都没收到、复盘确实跑过、`truncate` 排出的请求是 `role=checker`、这一章仍按失败收尾且 `stats.convert >= 2`（T217 的换会话重转换没被跳过）。把三个前缀临时拿掉跑同一条用例会红在"却收到了第 4 条反馈消息"，恢复即绿。`go test ./internal/... -count=1` 14 个包全绿、`go build ./...`、`go vet ./internal/...` 干净。
+  注：用户现场跑的是这批提交之前的二进制（旧行为照旧），需重新构建才生效。
