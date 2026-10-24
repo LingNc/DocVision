@@ -1,0 +1,7 @@
+*.jsonl
+*.log
+*.aux
+*.log
+*.out
+*.pdf
+work/

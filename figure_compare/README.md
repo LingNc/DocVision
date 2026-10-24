@@ -6,6 +6,7 @@
 
 - `algorithms/`：legacy 比较器、新版视觉证据评估器、容错指标、校准工具、judge 合约及会话停止策略。
 - `tests/`：合成图像和结构化判定测试，作为源码纳入 Git。
+- `runner/`：Go 单会话 harness，输出 JSONL 转录和比较证据。
 - `viewer/`：单文件 HTML JSONL 会话浏览器模板。
 - `docs/`：设计边界与使用说明。
 
@@ -25,6 +26,17 @@ python3 algorithms/compare_vnext.py evaluate --help
 ```
 
 使用 viewer：浏览器打开 `viewer/viewer.html`，通过“选择目录”选取会话 JSONL。比较图像需要同目录提供标准比较产物；没有图像证据时 viewer 仍展示会话时间线。
+
+运行会话级 Go harness（需在仓库模块上下文中构建，参数详见 `runner/main.go`）：
+
+```bash
+cd figure_compare/runner
+go run . -config ../../path/to/config.yaml -original ../../path/to/reference.png \\
+  -compare-script ../algorithms/compare.py -out ../../path/to/run \\
+  -transcript ../../path/to/run/session.jsonl
+```
+
+程序会在指定输出目录产生 `session.jsonl`、运行日志和工作产物；用 `viewer/viewer.html` 选择 JSONL，再选择对应的 `compare/latest` 或 `compare/round_NN` 目录查看图像证据。配置、原图、输出路径均由命令行传入，不在源码中写死。
 
 ## 隐私与数据边界
 
