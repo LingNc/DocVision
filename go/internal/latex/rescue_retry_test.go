@@ -100,39 +100,46 @@ func TestRescueDiscardsNoVerdictReviewAndRetries(t *testing.T) {
 	}
 }
 
-// (B-2) 三次都没结论：放弃复盘，目标退回引入复盘之前的行为——照常提醒两次、
-// 仍不提交判失败；复盘只起 3 条（不会因为两次提醒又各起 3 条）。
-func TestRescueGivesUpAfterThreeNoVerdictReviews(t *testing.T) {
+// (B-2, T233) 复盘会话自己没给结论**不算**这条目标的复盘次数：头三次复盘都
+// 不给结论之后，代码把占用的那一次退回去、只记一笔"复盘自己失败"，下一次提醒
+// 照旧换一条新复盘会话——所以第 4 条复盘拿到了结论，目标按正常路径收尾。
+//
+// 以前这里是把目标的复盘预算一次用光，"复盘自己坏掉"直接变成"这条目标再也别
+// 复盘"，等于把复盘的问题算到目标头上；用户要求的正是这两件事分开计。
+func TestRescueOwnFailuresDoNotExhaustTargetBudget(t *testing.T) {
 	run := runRescueChapter(t, rescueChapterOptions{
 		noSubmit:          true,
 		rescueFailures:    []int{1, 2, 1},
 		keepRescueRecords: true,
 	})
 	if run.err == nil || !strings.Contains(run.err.Error(), "未提交") {
-		t.Fatalf("复盘放弃之后应当按老路径判失败（未提交），实际 %v", run.err)
+		t.Fatalf("这一章最终仍应按老路径判失败（未提交），实际 %v", run.err)
 	}
-	if run.stats.rescue != 3 {
-		t.Fatalf("复盘最多起 3 条会话（1+2 次重来），实际 %d 条（请求 %d）",
+	// 复盘自己失败的次数不进目标的预算：第 4 条复盘照常起得来并给出结论。
+	if run.stats.rescue != 4 {
+		t.Fatalf("复盘自身失败应退回预算、再换一条复盘会话（共 4 条），实际 %d 条（请求 %d）",
 			run.stats.rescue, run.stats.requests)
 	}
-	if run.stats.convert != 3 {
-		t.Errorf("放弃复盘后应当照常提醒两次（转换请求 = 1+2 = 3），实际 %d", run.stats.convert)
+	if max := rescueMaxOwnFailures * rescueMaxReviewAttempts; run.stats.rescue > max {
+		t.Errorf("复盘自身失败的自我重试也要有上限（<= %d），实际 %d", max, run.stats.rescue)
 	}
-	if got := len(rescueQueuedRequests(t, run.proj)); got != 0 {
-		t.Errorf("复盘放弃不该排任何重试请求，实际 %d 条", got)
+	// 第 4 条给了 retry：只够再发一次提醒，不会把转换会话反复重开。
+	if run.stats.convert < 2 || run.stats.convert > 3 {
+		t.Errorf("拿到 retry 后应当只多发一次提醒（转换请求 2–3），实际 %d", run.stats.convert)
 	}
-	if got := len(rescueTranscripts(t, run.proj)); got != 0 {
-		t.Errorf("没结论的复盘转录应当全部丢弃，工作区还剩 %d 条", got)
-	}
+	// 拿不到结论的那几条复盘转录照旧丢弃，留下有结论的那一条。
 	trash, _ := filepath.Glob(filepath.Join(run.proj, "work", "sessions", ".trash", "rescue_*.jsonl"))
 	if len(trash) != 3 {
 		t.Errorf("3 条没结论的复盘转录都应当进 .trash，实际 %d", len(trash))
 	}
-	// 目标转录的终态是 error（退回老路径后的"没提交判失败"），不残留 rescuing。
+	if got := len(rescueTranscripts(t, run.proj)); got != 1 {
+		t.Errorf("应当只留有结论的那条复盘转录，实际 %d 条", got)
+	}
+	// 目标转录的终态是 error（没提交判失败），不残留 rescuing。
 	target := filepath.Join(run.proj, "work", "sessions", "convert_chapter_01.jsonl")
 	states := targetActivityStates(t, target)
 	if last := states[len(states)-1]; last == rescueActivityState {
-		t.Errorf("放弃复盘后目标状态不该停在 rescuing：%v", states)
+		t.Errorf("复盘收尾后目标状态不该停在 rescuing：%v", states)
 	}
 }
 

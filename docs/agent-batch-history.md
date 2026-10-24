@@ -2620,3 +2620,16 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **测试**：新增 `t232_guards_test.go` 三条——打满的转录换到下一条（try1→try2）、三条都打满时保持原号交回守卫、同一切口只拦第二次（换切口/换转录放行）。`rescue_retry_test.go` 与 `rescue_triggers_test.go` 里原来依赖"每次都能切"的四条用例在新守卫下先红后绿：守卫的 key 从章节名改成目标转录路径（跨用例/跨项目不再互相污染）。
 - **验证**：`go test ./internal/latex/ -count=1` 全绿、`go build ./...`、`gofmt` 对新改文件干净（`stylefix.go` 是历史遗留，不动）。
 - **未改（刻意）**：① 已落盘转录一字不动（用户数据），新记法只对之后的写入生效；② 槽位总数与派发顺序不动（"转换池 10 格被大章节占满"是并发成本，不是本次要改的口径，本次只让等待可见、让退化会话自愈）；③ 正在跑的进程仍用旧二进制，要看到这些行为得换新二进制重跑。
+
+## v1.5+（T233：核对没结论默认换 6 条新会话、复盘自身失败不占目标预算，2026-10-25）
+
+- **触发**：用户三句话——「核对一直没有反馈的时候不是应该重新核对吗？就是这边复盘超过10次都这样吧（默认给6次）」「复盘会话自己出问题不计算在次数自我重试」「重新核对能跑就行最后肯定可以给出核对结论吧，如果重转就造成浪费了。因为这次不是转换会话的问题」。
+- **现场**：一章的核对到了 `try8`，同一支的复盘转录到了 `try12`；一条核对会话 `run_end` 只有 107 秒，第一轮 97 个字符的答复是把 `submit {` 写进正文，被提醒后仍然不调用工具——这类收尾以前一次调用内部就够 4 条会话、随后自动重核只给 2 次（`checkerNoVerdictSelfHeal=2`），用尽就交回入口守卫，页面上一直是「核对无结论」，只能人再点「重新核对」。
+- **缺陷 A（重核次数写死且太短）**：`checkerNoVerdictRetryCycles`（旧 1）与 `checkerNoVerdictSelfHeal`（旧 2）都是常量，`book.go` 的自愈循环把"再开一次就收手"当成默认；用户现场需要的量级是 6 甚至更多。
+- **改 A**：`config.go` 新增 `LatexConfig.CheckerNoVerdictRetryCount`（`checker_no_verdict_retries`）与 `CheckerNoVerdictRetries()`（0/未写 = 6）；`book.go` 的自愈循环改用 `r.cfg.Latex.CheckerNoVerdictRetries()`，每轮抬 `checkAttempt`（至少 2）并把 `checkerTranscript` 换成 `attemptTranscriptPath(nodeTr, checkAttempt)`，日志写明第几次、产物不动。用尽后保留产物、如实报没结论，并 `retryq.Queue` 一条 `role=checker`、`Source=no_verdict` 的重核请求（不重转）。T222 那段"同一条死转录再开一次"的第二循环整段删掉。旧常量留下 `checkerNoVerdictSelfHeal = 6` 只作测试与兜底。
+- **缺陷 B（复盘自身失败吃掉目标预算）**：`maybeRescue` 在复盘没有给出结论时直接 `exhaustRescueBudget(key)`，等于"一次失败的复盘 = 这条目标永远别复盘"，下次提醒退回普通路径。
+- **改 B**：`rescue.go` 新增 `rescueOwnBad` 计数、`refundRescueBudget(key)`（把 `rescueSeen[key]` 退一格）与 `rescueOwnFailure(key)`；`book.go` 的 `!ok` 分支改成先退款、再记自身失败，累计到 `rescueMaxOwnFailures = 6` 才 `exhaustRescueBudget` 收手，日志分两句写清楚"第几次、不占这条目标的次数"。
+- **测试**：新增 `t233_budget_test.go`（`CheckerNoVerdictRetries` 默认 6 / 负数取 6 / 显式覆盖；复盘退款后还能再复盘、自身失败累计到上限）；改 `checker_degrade_test.go` 的「打满提醒不再回放」用例——断言换成"不再原地续跑但会自动换新尝试、次数有上限"；`rescue_retry_test.go` 的「三次没结论就放弃复盘」改成 `TestRescueOwnFailuresDoNotExhaustTargetBudget`（复盘自身失败不吃目标预算，第 4 条复盘照常起得来并给出结论）。
+- **配置与文档**：`config.go` + `internal/config/default.yaml` + `config.example.yaml`（两份模板逐字节一致，`cmp` 核过）+ `docs/config.md` 新行；`config_version` 不变（标量键，无新块）。
+- **验证**：`go build ./...`、`go vet ./internal/latex/ ./internal/config/`、`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿；`gofmt -l` 对新改文件干净（`stylefix.go` 是既有）。
+- **未改（刻意）**：① 已经落盘的转录一字不动（用户数据），新行为只对之后的写入生效；② 正在跑的进程用的是旧二进制，要看到这些行为得换新二进制重跑；③ 槽位总数没动（重核走核对池，`checker_concurrency` 20 已够）。

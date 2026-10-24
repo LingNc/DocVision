@@ -132,22 +132,21 @@ func TestPendingNoVerdictProductIsRecheckedNotSkipped(t *testing.T) {
 // 里已经重复到"提醒了还是不提交"之后，旧代码仍然把**同一份历史**回放给下一次
 // 核对，于是同一段坏尾巴被一轮又一轮地追加：现场那条转录 319 行里有 34 次
 // run_end、74 条章节活动、18 条核对锚点，全是"把 submit 写进正文 → 被提醒 →
-// 再写一遍"。这里钉住新的收口：到线就不再回放、也不再往上写，如实报"没结论"，
-// 由上游按 T222 保留产物。
+// 再写一遍"。T233 起收口分两步：这条打满提醒的转录**不再回放**（也不再往上
+// 写），但整章不因此失败——自动换的下一条全新尝试照常再核（默认 6 条），产物
+// 一直留着；用户要的正是"没反馈就重新核对，而不是原地卡死"。
 func TestCheckerTranscriptWithRepeatedRemindersIsNotResumed(t *testing.T) {
 	run := runRescueChapter(t, rescueChapterOptions{
 		checkerNoSubmit:      true,
 		seedCheckerReminders: checkerNoVerdictAttempts,
 	})
 
-	// 一次核对请求都不该发：这条历史里已经攒满了一整轮的"提醒了还没提交"，
-	// 再回放也只是让同一段坏尾巴继续长长。
-	if run.stats.checker != 0 {
-		t.Fatalf("已经反复没提交的核对转录不该再续跑，实际发了 %d 次核对请求", run.stats.checker)
+	// 那条已到线的转录不再被回放：换的是新的尝试文件，不是同一条历史。
+	if run.stats.checker < 1 {
+		t.Fatalf("打满提醒之后应当换一条全新核对尝试再核，实际核对请求 %d 次", run.stats.checker)
 	}
-	// 也不该再去问复盘：它救的是"这一轮跑歪了"，不是"这条会话已经证明跑不动了"。
-	if run.stats.rescue != 0 {
-		t.Fatalf("不该为一条已到线的转录开复盘，实际 %d 次", run.stats.rescue)
+	if run.stats.checker > 1+checkerNoVerdictSelfHeal {
+		t.Errorf("自动重核次数应当有上限（<= %d），实际 %d", 1+checkerNoVerdictSelfHeal, run.stats.checker)
 	}
 	// 转录没被追加：没有新的提醒、没有新的章节活动。
 	trPath := filepath.Join(run.proj, "work", "sessions", "checker_chapter_01.jsonl")

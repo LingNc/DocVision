@@ -336,6 +336,11 @@ type LatexConfig struct {
 	// 顶层默认 6。0/未写 = 6。顶层次数应 >= 3 + 最大递归层数(3)，否则深层
 	// 只能吃到下限，启动时会告警。
 	CheckerRounds int `yaml:"checker_rounds"`
+	// CheckerNoVerdictRetries: 核对**没给结论**时自动换新核对会话再来的次数
+	// （T233）。这一路**只重核、不重转**：产物一个字不动，换掉的只是那条已经
+	// 退化的核对会话——重做一遍转换出来的是同一份东西，没有理由假设新的转换
+	// 会话能救回一个坏掉的核对模型。0/未写 = 6。
+	CheckerNoVerdictRetryCount int `yaml:"checker_no_verdict_retries"`
 	// MaxChapterLines: 一个转换会话能"好好转完"的章节规模（章节 md 的行数）。
 	// 超过它、又还没拆分过的节点在 submit 会被打回，要求先
 	// request_chapter_split 按语义拆成 2–16 段（子会话各自转换、各自过 checker，
@@ -466,6 +471,18 @@ type RescueConfig struct {
 
 // RescueEnabled reports whether the rescue review runs (default ON).
 func (c LatexConfig) RescueEnabled() bool { return c.Rescue.Enabled == nil || *c.Rescue.Enabled }
+
+// CheckerNoVerdictRetries 是核对没给结论时最多换几条全新核对会话（默认 6，T233）。
+//
+// 只重核、不重转：产物留着，换的是退化掉的那条核对会话。给得比较宽是有原因
+// 的——核对会话的退化大多是模型这一轮"不会调工具/没给结论"，换一条干净上下文
+// 往往就能给出结论；而重转一次要重跑整个章节的转换，代价高得多。
+func (c LatexConfig) CheckerNoVerdictRetries() int {
+	if c.CheckerNoVerdictRetryCount <= 0 {
+		return 6
+	}
+	return c.CheckerNoVerdictRetryCount
+}
 
 // RescueMaxPerAttempt 是同一次尝试里最多复盘几次（默认 2）。
 func (c LatexConfig) RescueMaxPerAttempt() int {

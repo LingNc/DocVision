@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mineru-tools/internal/prompts"
+	"mineru-tools/internal/retryq"
 	"mineru-tools/internal/session"
 )
 
@@ -2123,13 +2124,15 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	}
 	var ok bool
 	var issues string
-	// T232：核对没给结论时**自动**换一条全新的核对尝试再来一次（最多
-	// checkerNoVerdictSelfHeal 次）——产物一个字不动，换掉的只是那条已经退化的
-	// 核对会话。以前这一步只能靠人点「重新核对」或父章节「继续跑」，自动这一路
-	// 把"没结论"当成了章节判决，父章节跟着失败，页面就挂在那里等人工。
+	// T232/T233：核对没给结论时**自动**换一条全新的核对尝试再来（次数 =
+	// latex.checker_no_verdict_retries，默认 6）——产物一个字不动，换掉的只是那条
+	// 已经退化的核对会话，转换会话不重跑（用户：这不是转换会话的问题，重转就是
+	// 白烧一遍时间和额度，而重转出来的还是同一份东西）。每一次都抬到新的尝试号：
+	// 回放同一条打满提醒的死转录只会被入口守卫当场拒跑，等于白等。
+	autoHeals := r.cfg.Latex.CheckerNoVerdictRetries()
 	for heal := 0; ; heal++ {
 		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker, node.AttemptNum)
-		if ok || !checkerNoVerdict(issues) || heal >= checkerNoVerdictSelfHeal || node.Depth == 0 && promoteSubmitRoot == "" {
+		if ok || !checkerNoVerdict(issues) || heal >= autoHeals {
 			break
 		}
 		checkAttempt++
@@ -2138,7 +2141,9 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		}
 		r.bumpCheckerAttemptNo(base, checkAttempt)
 		checkerTranscript = attemptTranscriptPath(nodeTr, checkAttempt)
-		r.log.LogWarning(tid, "[checker]", base, "核对没有给出结论，换一条全新的核对尝试 try"+strconv.Itoa(checkAttempt)+" 再来一次（产物不动）")
+		r.log.LogWarning(tid, "[checker]", base, "核对没有给出结论，换一条全新的核对尝试 try"+
+			strconv.Itoa(checkAttempt)+" 再来一次（第 "+strconv.Itoa(heal+1)+"/"+strconv.Itoa(autoHeals)+
+			" 次，产物不动）")
 	}
 	if !ok && isSessionAPIError(issues) {
 		return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
@@ -2186,21 +2191,6 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	// （核对模型持续退化时，这一章会被作废重转最多 6 次、每次再开若干核对会话）。
 	// 真正给出内容结论的失败不受影响，照旧走下面的反馈/重转链路。
 	if !ok && checkerNoVerdict(issues) {
-		for cycle := 0; cycle < checkerNoVerdictRetryCycles; cycle++ {
-			r.log.LogWarning(tid, "[checker]", base,
-				"核对没有给出结论——保留产物，重开核对会话再核（第 "+strconv.Itoa(cycle+1)+"/"+
-					strconv.Itoa(checkerNoVerdictRetryCycles)+" 次）:", issues)
-			r.phaseNote()("[checker] %s 重开核对会话", base)
-			ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker, node.AttemptNum)
-			if !ok && isSessionAPIError(issues) {
-				return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
-			}
-			if ok || !checkerNoVerdict(issues) {
-				break // 这一次真给了结论：通过，或者落到下面的内容处理
-			}
-		}
-	}
-	if !ok && checkerNoVerdict(issues) {
 		// 仍然没有判定：以"checker 不可用"收尾，产物留在原处不归档（`.checker` 里
 		// 留这条文案，重跑时 chapterRecheckPending 会让它先重核而不是"已有产物，跳过"）。
 		//
@@ -2212,9 +2202,20 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		// 作"会话错误"。
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "no_verdict"})
 		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
-		return fmt.Errorf("%s 的核对始终没有给出结论（不是内容问题，%d 个核对会话都没下判定），"+
-			"已保留这一版产物未作废——重跑或「重新核对」会接着核这一份: %s",
-			base, 1+checkerNoVerdictRetryCycles, issues)
+		// T233：把重核排进重试队列，别再等人工点。产物不动、转换不重跑，队列里的
+		// 那条请求只负责"过一会儿再换一条全新核对会话看一遍"（截图里那种"跑了十
+		// 几次还在原地"的局面，从这里起由队列自己接下去）。
+		if _, qerr := retryq.Queue(proj, retryq.Request{
+			Project: filepath.Base(proj), Chapter: base, Role: "checker",
+			Source: "no_verdict", Reason: "核对连续没给结论，排队换新核对会话接着核（产物不动）",
+		}); qerr != nil {
+			r.log.LogWarning(tid, "[checker]", base, "排队重核失败:", qerr)
+		} else {
+			r.log.LogWarning(tid, "[checker]", base, "已排队接着重核（产物不动，转换不重跑）")
+		}
+		return fmt.Errorf("%s 的核对始终没有给出结论（不是内容问题，%d 条核对会话都没下判定），"+
+			"已保留这一版产物未作废、并排了一条重核请求——重跑或「重新核对」会接着核这一份: %s",
+			base, 1+autoHeals, issues)
 	}
 	if ok {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "pass"})
@@ -3140,10 +3141,21 @@ func (r *Runner) maybeRescue(tid int, tag, label string, target rescueTarget) re
 	r.markTargetActivity(tid, tag, label, target, rescueActivityState, "复盘会话已启动")
 	v, ok := r.rescueReview(target, tid)
 	if !ok {
-		// B：复盘自己没拿到结论（报错/不提交，重来 2 次仍如此）——**这条目标
-		// 不再进复盘**，状态写回 error，行为退回引入复盘之前：照常提醒，仍不
-		// 提交就按失败收尾（caller 判）。
-		r.exhaustRescueBudget(key)
+		// T233：复盘会话自己没给出结论（报错/跑完不 submit）是**复盘**的问题，
+		// 不从这条目标的复盘次数里扣——把刚才占用的那一次退回去，只记一笔
+		// "复盘自己失败"，下一次触发照旧换一条新复盘会话再看。只有这条目标连续
+		// rescueMaxOwnFailures 次都碰上坏掉的复盘会话，才认它不值得再复盘。
+		r.refundRescueBudget(key)
+		n := r.rescueOwnFailure(key)
+		if n >= rescueMaxOwnFailures {
+			r.exhaustRescueBudget(key)
+			r.log.LogWarning(tid, tag, label, "复盘会话连续 "+strconv.Itoa(n)+" 次自己没给结论，这条目标不再复盘")
+		} else {
+			r.log.LogWarning(tid, tag, label, "复盘会话自己没给结论（第 "+strconv.Itoa(n)+"/"+
+				strconv.Itoa(rescueMaxOwnFailures)+" 次，不占这条目标的复盘次数），下次触发再换一条复盘会话")
+		}
+		// B：状态写回 error，行为退回引入复盘之前的路径：照常提醒，仍不提交就
+		// 按失败收尾（caller 判）；换一条新复盘的机会留在下一次触发。
 		r.markTargetActivity(tid, tag, label, target, "error", "复盘没有给出结论，退回普通提醒")
 		return rescueDecision{}
 	}

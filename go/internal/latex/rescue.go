@@ -490,8 +490,34 @@ var (
 	rescueMu     sync.Mutex
 	rescueSeen   = map[string]int{}
 	rescueCutAt  = map[string]int{}
+	rescueOwnBad = map[string]int{}
 	rescuePathMu sync.Mutex
 )
+
+// rescueMaxOwnFailures 是"复盘会话自己没给出结论"最多算几次（T233）。
+//
+// 复盘出错是**复盘**的事，不该从目标的复盘次数里扣（用户：复盘自己出问题不算
+// 在次数里，应该自己重试）。这类失败只记在这里，并把刚才占用的那一次退回去；
+// 攒到上限才认这条目标不值得再起复盘会话，那时才照旧把预算用光，避免无休止地
+// 起会话白烧模型调用。
+const rescueMaxOwnFailures = 6
+
+// refundRescueBudget 退回一次被占用的复盘次数（复盘自己没给结论时用）。
+func (r *Runner) refundRescueBudget(key string) {
+	rescueMu.Lock()
+	defer rescueMu.Unlock()
+	if rescueSeen[key] > 0 {
+		rescueSeen[key]--
+	}
+}
+
+// rescueOwnFailure 记一次"复盘会话自己没给出结论"，返回累计次数。
+func (r *Runner) rescueOwnFailure(key string) int {
+	rescueMu.Lock()
+	defer rescueMu.Unlock()
+	rescueOwnBad[key]++
+	return rescueOwnBad[key]
+}
 
 // rescueCutRepeated 记下这条转录这次的切口，并回答"与上一次是不是同一个"（T232）。
 //

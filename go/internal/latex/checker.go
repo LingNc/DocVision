@@ -40,14 +40,13 @@ func checkerNoVerdict(issues string) bool {
 		strings.HasPrefix(issues, "checker 只读视图无法准备")
 }
 
-// checkerNoVerdictRetryCycles 是"核对没给结论"之后**只重开核对会话**的次数。
+// T222：核对"没给结论"的收尾以前会走进"作废产物、换全新会话整章重转"那条路
+// （最多 6 次），而界面上那句话写的是「已排队从干净轮次继续核对」——两件事对不
+// 上，而且重转出来的是同一份东西：产物根本还没被判定过，重做一遍既不会更有结论，
+// 也没理由假设新的转换会话能救回一个坏掉的核对模型。
 //
-// T222：这类收尾以前会走进"作废产物、换全新会话整章重转"那条路（最多 6 次），
-// 而界面上那句话写的是「已排队从干净轮次继续核对」——两件事对不上，而且重转
-// 出来的是同一份东西：产物根本还没被判定过，重做一遍既不会更有结论，也没理由
-// 假设新的转换会话能救回一个坏掉的核对模型。所以这里只再开一次核对会话（同一份
-// 产物、同一条只读视图），仍没有结论就以"checker 不可用"收尾并保留产物。
-const checkerNoVerdictRetryCycles = 1
+// T233：这条重核的次数由 `latex.checker_no_verdict_retries` 决定（默认 6，每次
+// 换一条全新的核对尝试、转换会话不重跑），见 LatexConfig.CheckerNoVerdictRetries。
 
 // chapterRecheckPending 报告这一章的产物在、但上一次核对**没有下过判定**
 // （`<章>.tex.checker` 里是 checkerNoVerdict 认得的那类文案）。
@@ -172,7 +171,7 @@ func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string
 			strconv.Itoa(n), "次「没提交」的提醒，不再原地续跑:", filepath.Base(trPath))
 		return false, fmt.Sprintf("checker 多次未能提交结论：这条核对转录里已经攒了 %d 次提交提醒"+
 			"（会话反复把结论写进正文，没有真的调用 submit），不再原地续跑它——"+
-			"产物保留，要换干净的核对会话用页面上的 ⤓ 截断或「重新核对」", n)
+			"产物保留，runner 会自动换一条全新的核对尝试接着核（T233；也可以手动「重新核对」）", n)
 	}
 	userText := prompts.Render(prompts.CheckerUser, map[string]string{
 		"CHAPTER_MD":  "check:" + base + ".md",
@@ -458,9 +457,11 @@ const (
 	checkerNoVerdictAttempts = 4
 
 	// checkerNoVerdictSelfHeal：节点核对"没结论"之后自动换**全新**尝试再来的
-	// 次数（T232）。产物保留、换掉的只是那条已经退化的核对会话；以前这一步只能
-	// 靠人点「重新核对」，自动这一路把"没结论"直接当判决，父章节跟着失败。
-	checkerNoVerdictSelfHeal = 2
+	// 次数上限（T232/T233）。产物保留、换掉的只是那条已经退化的核对会话；以前
+	// 这一步只能靠人点「重新核对」，自动这一路把"没结论"直接当判决，父章节跟着
+	// 失败。实际次数取 `latex.checker_no_verdict_retries`（默认与这个上限相同），
+	// 这里只给测试与"配置没写"的场合一个可读的常量。
+	checkerNoVerdictSelfHeal = 6
 )
 
 // checkerSubmitReminderMark 是"这条会话没有交结论"的提醒开头（T230）。转录里
