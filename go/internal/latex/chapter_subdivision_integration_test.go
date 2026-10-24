@@ -71,6 +71,11 @@ func TestRecursiveChapterConversionChecksChildrenBeforePromotion(t *testing.T) {
 	var requests atomic.Int32
 	var formalWasPremature atomic.Bool
 	var splitReminderSeen atomic.Bool
+	// T230：递归子节点干活时必须占住**它自己那个章节名**的锁。这里在它的转换
+	// 请求正飞着的时候试抢同一把锁——抢到了就说明没人占，页面上同一章的
+	// 「重新核对」也会同样抢到，于是两条核对并行跑。
+	var childLockMissing atomic.Bool
+	var r *Runner
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -117,6 +122,10 @@ func TestRecursiveChapterConversionChecksChildrenBeforePromotion(t *testing.T) {
 			if strings.Contains(submitDescription, "chapter_01_child_02.tex") {
 				base = "chapter_01_child_02"
 			}
+			if r != nil && r.lockChapter(base) {
+				r.unlockChapter(base)
+				childLockMissing.Store(true)
+			}
 			subdivisionReply(w,
 				subdivisionWrite("work:"+base+".tex", "\\section{Child}\n"),
 				subdivisionWrite("work:"+base+"/part.tex", "child part\n"),
@@ -135,7 +144,7 @@ func TestRecursiveChapterConversionChecksChildrenBeforePromotion(t *testing.T) {
 	}))
 	defer server.Close()
 
-	r := keepTestRunner(t)
+	r = keepTestRunner(t)
 	r.cfg.Latex.Concurrency = 2
 	r.cfg.Latex.ConvertModel = "fake"
 	r.cfg.Latex.CheckerModel = "fake"
@@ -175,6 +184,9 @@ func TestRecursiveChapterConversionChecksChildrenBeforePromotion(t *testing.T) {
 	}
 	if splitReminderSeen.Load() {
 		t.Fatal("valid split request triggered generic submit reminder")
+	}
+	if childLockMissing.Load() {
+		t.Fatal("子节点转换时没有占住自己的章节锁：页面上的「重新核对」能立刻并排再跑一条核对")
 	}
 	if requests.Load() < 5 {
 		t.Fatalf("API requests = %d, expected parent, children, and checkers", requests.Load())

@@ -62,6 +62,10 @@ type rescueChapterOptions struct {
 	// `work/chapters/<章>.tex` 与带退化文案的 `.checker` 都已存在，用来钉住
 	// 「已有产物，跳过」不会静默采纳一份没被判定过的产物。
 	preseedNoVerdict bool
+	// seedCheckerReminders > 0 时预铺一份"已经退回 n 次都没提交"的核对转录
+	// （T230）：`work/sessions/checker_chapter_01.jsonl` 里已经有 n 条提交提醒，
+	// 用来钉住「这种转录不再回放、也不再往上追加」。
+	seedCheckerReminders int
 }
 
 type rescueChapterStats struct {
@@ -118,6 +122,33 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 		"example.tex": "\\section{Example}\n",
 	} {
 		if err := os.WriteFile(filepath.Join(style, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if n := opts.seedCheckerReminders; n > 0 {
+		var lines []map[string]any
+		lines = append(lines, map[string]any{"t": "msg", "role": "system", "text": "You are a checker."})
+		for i := 0; i < n; i++ {
+			lines = append(lines,
+				map[string]any{"t": "msg", "role": "assistant", "text": `{"submit": {"report": {"status": "pass"}}}`},
+				map[string]any{"t": "msg", "role": "user", "text": checkerSubmitReminderMark + " Use the `submit` TOOL."},
+			)
+		}
+		var b strings.Builder
+		for _, l := range lines {
+			data, err := json.Marshal(l)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.Write(data)
+			b.WriteByte('\n')
+		}
+		trPath := filepath.Join(workDir, "sessions", "checker_chapter_01.jsonl")
+		if err := os.MkdirAll(filepath.Dir(trPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(trPath, []byte(b.String()), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

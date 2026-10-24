@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"mineru-tools/internal/prompts"
@@ -139,6 +140,23 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 	if trPath == "" {
 		trPath = filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
 	}
+	// T230：**这条转录已经被一整轮的"没提交"预算打满过**，就别再拿它开新会话了。
+	// 旧行为是只要文件还在就回放，于是父节点的再驱动、页面上的重新核对都在同一条
+	// 文件后面继续追加：现场一条核对转录 319 行、几十万字节，34 次 run_end、74 条
+	// 章节活动，全是"把 submit 写进正文 → 被提醒 → 再写一遍"，钱花了、结论一个字
+	// 没有。到线就如实报"没结论"（上游按 T222 保留产物），要换干净会话走 ⤓ 截断
+	// 或「重新核对」——那两条会另开一次尝试，提醒数从零算起。
+	//
+	// 判据用"这条转录里真实留下的提醒条数"，而不是"开了几次会话"：一次调用内部
+	// 重开 4 个会话（T217）是设计好的预算，跨调用的重复才是退化。
+	if n := countCheckerSubmitReminders(loadTranscriptMessages(trPath)); n >= checkerNoVerdictAttempts {
+		r.keepCheckerTranscript(trPath, strict)
+		r.log.LogWarning(tid, "[checker]", base, "这条核对转录里已有",
+			strconv.Itoa(n), "次「没提交」的提醒，不再原地续跑:", filepath.Base(trPath))
+		return false, fmt.Sprintf("checker 多次未能提交结论：这条核对转录里已经攒了 %d 次提交提醒"+
+			"（会话反复把结论写进正文，没有真的调用 submit），不再原地续跑它——"+
+			"产物保留，要换干净的核对会话用页面上的 ⤓ 截断或「重新核对」", n)
+	}
 	userText := prompts.Render(prompts.CheckerUser, map[string]string{
 		"CHAPTER_MD":  "check:" + base + ".md",
 		"CHAPTER_TEX": "check:" + base + ".tex",
@@ -166,8 +184,6 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 	// 几次（每次都是全新会话、同一转录路径、同一只读视图）。
 	// 反过来，**只要有任何一次拿到过结论**，预算就回到 checkerAttempts（2）：
 	// 那时要处理的是内容，交给调用方按 checker_rounds 把问题喂回转换会话。
-	const checkerAttempts = 2
-	const checkerNoVerdictAttempts = 4
 	apiFailure := ""
 	sawVerdict := false
 	attemptsMade := 0
@@ -270,7 +286,7 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 			release := r.acquireCheckerSlot()
 			chkState(rowStateRunning)
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
-			remindText := "You have NOT called submit yet. Use the `submit` TOOL (a real tool call with its JSON arguments — writing `submit` or `\\submit{...}` inside your reply text does nothing): re-read the chapter files if needed, then call submit with your verdict."
+			remindText := checkerSubmitReminderMark + " Use the `submit` TOOL (a real tool call with its JSON arguments — writing `submit` or `\\submit{...}` inside your reply text does nothing): re-read the chapter files if needed, then call submit with your verdict."
 			if hint != "" {
 				remindText += " Reviewer note: " + hint
 			}
@@ -360,6 +376,58 @@ func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string,
 	// 章节它的 checker 从头到尾没提交过结论（8 轮、25 次工具调用、38 分钟），
 	// 却因为这条兜底被当成"核对通过"写进了书。没结论就是没结论。
 	return false, "checker 多次未能提交结论（会话未调用 submit）"
+}
+
+// checkerAttempts 是一次核对里"已经拿到过结论"时的会话预算；
+// checkerNoVerdictAttempts 是**一次结论都没拿到**时的预算（T217：重开一个核对
+// 会话比整章重转便宜得多）。后者同时是"同一条转录还能不能被再次回放"的线——
+// 攒满这一整轮还没结论，说明这条历史本身已经跑不动了（见 checkChapterAt 入口）。
+//
+// T230：这条线以前只管**一次调用内部**重开几次。转录文件是跨调用共享的，于是
+// 父节点的再驱动、页面上的重新核对把同一条历史反复回放，坏尾巴越滚越长：实测
+// 一条递归节点的核对转录 319 行、几十万字节，34 次 run_end、74 条章节活动、18 条
+// 核对锚点，全是"把 submit 写进正文 → 被提醒 → 再写一遍"的死循环，钱花了、结论
+// 一个字没有。现在同一个数字也当"这条转录还能不能再次回放"的线：攒够一整轮还
+// 没结论就不再回放它（如实报"没结论"，上游按 T222 保留产物）。要换干净会话，
+// 走 ⤓ 截断或页面「重新核对」——那两条会另开一次尝试，提醒数从零算起。
+const (
+	checkerAttempts          = 2
+	checkerNoVerdictAttempts = 4
+)
+
+// checkerSubmitReminderMark 是"这条会话没有交结论"的提醒开头（T230）。转录里
+// 出现一次这样的 user 消息，就等于那一次续跑没能拿到结论——判断一条核对转录
+// 是否已经退化到不该再回放，只看这个计数，不看正文写了什么。
+const checkerSubmitReminderMark = "You have NOT called submit yet."
+
+// loadTranscriptMessages 读一条转录的历史消息（读不到就当空：新会话）。
+func loadTranscriptMessages(path string) []session.ChatMessage {
+	if path == "" {
+		return nil
+	}
+	msgs, _, err := session.LoadTranscriptStats(path)
+	if err != nil {
+		return nil
+	}
+	return msgs
+}
+
+// countCheckerSubmitReminders 数一条（将要回放的）会话历史里有几次提交提醒。
+func countCheckerSubmitReminders(msgs []session.ChatMessage) int {
+	n := 0
+	for _, m := range msgs {
+		if m.Role != "user" {
+			continue
+		}
+		s, ok := m.Content.(string)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(s), checkerSubmitReminderMark) {
+			n++
+		}
+	}
+	return n
 }
 
 func (r *Runner) keepCheckerTranscript(path string, strict bool) {

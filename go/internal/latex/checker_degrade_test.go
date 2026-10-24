@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mineru-tools/internal/session"
 )
 
 func TestCheckerDegradeDoesNotFeedConvertSession(t *testing.T) {
@@ -99,5 +101,69 @@ func TestPendingNoVerdictProductIsRecheckedNotSkipped(t *testing.T) {
 	texPath := filepath.Join(run.proj, "work", "chapters", "chapter_01.tex")
 	if _, err := os.Stat(texPath + ".checker"); !os.IsNotExist(err) {
 		t.Errorf("重核通过后应收掉 .checker，实际 stat err = %v", err)
+	}
+}
+
+// T230（用户报的「核对#9 那条会话为什么一直不重试、复盘也不触发」）：核对转录
+// 里已经重复到"提醒了还是不提交"之后，旧代码仍然把**同一份历史**回放给下一次
+// 核对，于是同一段坏尾巴被一轮又一轮地追加：现场那条转录 319 行里有 34 次
+// run_end、74 条章节活动、18 条核对锚点，全是"把 submit 写进正文 → 被提醒 →
+// 再写一遍"。这里钉住新的收口：到线就不再回放、也不再往上写，如实报"没结论"，
+// 由上游按 T222 保留产物。
+func TestCheckerTranscriptWithRepeatedRemindersIsNotResumed(t *testing.T) {
+	run := runRescueChapter(t, rescueChapterOptions{
+		checkerNoSubmit:      true,
+		seedCheckerReminders: checkerNoVerdictAttempts,
+	})
+
+	// 一次核对请求都不该发：这条历史里已经攒满了一整轮的"提醒了还没提交"，
+	// 再回放也只是让同一段坏尾巴继续长长。
+	if run.stats.checker != 0 {
+		t.Fatalf("已经反复没提交的核对转录不该再续跑，实际发了 %d 次核对请求", run.stats.checker)
+	}
+	// 也不该再去问复盘：它救的是"这一轮跑歪了"，不是"这条会话已经证明跑不动了"。
+	if run.stats.rescue != 0 {
+		t.Fatalf("不该为一条已到线的转录开复盘，实际 %d 次", run.stats.rescue)
+	}
+	// 转录没被追加：没有新的提醒、没有新的章节活动。
+	trPath := filepath.Join(run.proj, "work", "sessions", "checker_chapter_01.jsonl")
+	data, err := os.ReadFile(trPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), checkerSubmitReminderMark); n != checkerNoVerdictAttempts {
+		t.Fatalf("转录里提交提醒应为 %d 条（没有被追加），实际 %d 条", checkerNoVerdictAttempts, n)
+	}
+	// 产物保留、`.checker` 里写的是"没结论"那类文案：重跑或页面「重新核对」
+	// 会接着核这一份，而不是被当成已通过。
+	if !fileExists(filepath.Join(run.proj, "work", "chapters", "chapter_01.tex")) {
+		t.Fatal("核对没给结论不该作废产物")
+	}
+	marker, err := os.ReadFile(filepath.Join(run.proj, "work", "chapters", "chapter_01.tex.checker"))
+	if err != nil {
+		t.Fatal("应留下 .checker 标记，重跑时先重核这一份:", err)
+	}
+	if !checkerNoVerdict(string(marker)) {
+		t.Fatalf(".checker 里的文案应属于「没结论」那一类，实际: %s", marker)
+	}
+	if run.err == nil {
+		t.Fatal("核对始终没有结论应如实上报失败")
+	}
+}
+
+// 判据只看"真实的提醒消息"，不看正文：把 submit 写进正文的那些轮次本来就不该
+// 被数成提醒，也别把别的会话的提醒（"You have NOT submitted yet."）算进来。
+func TestCountCheckerSubmitReminders(t *testing.T) {
+	msgs := []session.ChatMessage{
+		{Role: "system", Content: "You are a checker."},
+		{Role: "assistant", Content: `{"submit": {"report": {"status": "pass"}}}`},
+		{Role: "user", Content: `"submit": {"report": {"status": "pass"}}`},
+		{Role: "user", Content: "  " + checkerSubmitReminderMark + " Use the `submit` TOOL."},
+		{Role: "assistant", Content: "ok"},
+		{Role: "user", Content: []map[string]any{{"type": "text", "text": "not a string body"}}},
+		{Role: "user", Content: "You have NOT submitted yet."},
+	}
+	if got := countCheckerSubmitReminders(msgs); got != 1 {
+		t.Fatalf("提交提醒应数到 1 条，实际 %d", got)
 	}
 }

@@ -1311,11 +1311,20 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 		// 早创建的那一支（含它的子树）永远排在晚创建的那一支前面，与谁先被调度
 		// 无关。它也自然大于父节点的号（父节点更早创建）。
 		childSeq := r.nextConvertSeq()
+		childBase := parentBase + "_" + id
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			// T230：递归子章节的转换/核对也要占住**它自己那个章节名**的互斥锁。
+			// 这把锁以前只有顶层章节占（convertChapterBatch），于是这一支在
+			// 干活时，页面上"重新核对这一章"的请求能立刻 lockChapter 成功、
+			// 另开一条核对会话——用户看到同一章同时跑着两条核对（旧的没停、
+			// 新的又起）。锁在这里，派发端那一步 TryLock 就会失败、请求留在
+			// 队列里等它收尾，而不是并排再跑一遍。
+			release := r.holdChapter(childBase)
+			defer release()
 			childRoot := filepath.Join(parentWork, "_subdivision", id)
 			nodeRoot := filepath.Join(childRoot, "node")
 			inputDir := filepath.Join(childRoot, "input")
@@ -1332,7 +1341,6 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 				mu.Unlock()
 				return
 			}
-			childBase := parentBase + "_" + id
 			childOut := filepath.Join(nodeRoot, "result")
 			childNode := chapterNodeConfig{
 				Base: childBase, Depth: parent.Depth + 1, InputMount: "input", InputRef: "chapter.md",
