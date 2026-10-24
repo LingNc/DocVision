@@ -25,7 +25,7 @@ PYTHONPATH=algorithms python3 -m unittest discover -s tests -v
 python3 algorithms/compare_vnext.py evaluate --help
 ```
 
-使用 viewer：浏览器打开 `viewer/viewer.html`，通过“选择目录”选取会话 JSONL。比较图像需要同目录提供标准比较产物；没有图像证据时 viewer 仍展示会话时间线。
+使用 viewer：浏览器打开 `viewer/viewer.html`，先选择某次运行的 `session.jsonl`，再选择同一次运行的**运行目录**（目录内应包含 `media/` 与 `compare/round_*`）。viewer 会把 `file://media/...` 和比较图映射为所选目录中的本地文件对象；不要只选择 `compare/` 子目录。
 
 运行会话级 Go harness（需在仓库模块上下文中构建，参数详见 `runner/main.go`）：
 
