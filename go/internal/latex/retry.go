@@ -297,6 +297,17 @@ func (r *Runner) continueCheckerFrom(proj, base, srcName string, from int) error
 	if err != nil {
 		return err
 	}
+	r.log.Log(0, "[checker]", base, "从第", strconv.Itoa(from), "条记录继续核对：新尝试写",
+		filepath.Base(dst), "（源转录保留；产物不动，历史原样续行）")
+	return r.continueCheckerAfterCut(proj, base, next)
+}
+
+// continueCheckerAfterCut 是"前缀已经切好"之后的那一半（T228）：切口可能是提交
+// 方（复盘会话）**当场**做完的，派发端就不该再切一次，只把这条核对会话推下去。
+func (r *Runner) continueCheckerAfterCut(proj, base string, next int) error {
+	if next < 2 {
+		return fmt.Errorf("核对新尝试号不合法: %d", next)
+	}
 	if r.retryCheckerAttempt == nil {
 		r.retryCheckerAttempt = map[string]int{}
 	}
@@ -308,8 +319,6 @@ func (r *Runner) continueCheckerFrom(proj, base, srcName string, from int) error
 	if fileExists(texPath + ".checker") {
 		_ = copyFile(texPath+".checker", fmt.Sprintf("%s.checker.try%d", texPath, next-1))
 	}
-	r.log.Log(0, "[checker]", base, "从第", strconv.Itoa(from), "条记录继续核对：新尝试写",
-		filepath.Base(dst), "（源转录保留；产物不动，历史原样续行）")
 	if _, issues := r.recheckChapter(proj, base, 0); issues != "" {
 		r.log.LogInfo(0, "[checker]", base, "从记录继续后的结论:", issues)
 	}
@@ -848,7 +857,11 @@ func (r *Runner) dispatchRetries(proj string) int {
 			// 路径根本读不到它，失败还只写一行 warning。结果就是页面回执"已截断"、
 			// 磁盘上一行没少，父章节重新驱动时子会话照旧从那段坏尾巴接着跑——
 			// 截断等于没发生，一轮又一轮地耗 token。
-			if role == "continue" && f.Request.From > 0 && strings.TrimSpace(f.Request.Path) != "" {
+			// T228：CutAttempt > 0 表示切口已经由提交方（复盘会话）当场做完，
+			// 这里不再切第二刀——再切一次会多出一条同前缀的尝试，页面上看着像
+			// "截了两回"，续跑也会选到重复的那一类文件。
+			if role == "continue" && f.Request.From > 0 && f.Request.CutAttempt == 0 &&
+				strings.TrimSpace(f.Request.Path) != "" {
 				r.cutChapterTranscriptForRetry(proj, base, f.Request.Path, f.Request.From)
 			}
 			r.queueParentContinueFor(proj, f.Request.Project, parent, base)
@@ -939,7 +952,14 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 			r.log.LogWarning(0, "[convert]", base, "手动重试失败:", err)
 		}
 	case "checker":
-		if req.From > 0 {
+		if req.From > 0 && req.CutAttempt > 0 {
+			// T228：切口已由提交方当场做完，只把这条核对会话推下去。
+			r.log.LogInfo(0, "[checker]", base, "截断已在提交时当场落到磁盘（第",
+				strconv.Itoa(req.CutAttempt), "次尝试），直接继续核对")
+			if err := r.continueCheckerAfterCut(proj, base, req.CutAttempt); err != nil {
+				r.log.LogWarning(0, "[checker]", base, "从记录继续核对失败:", err)
+			}
+		} else if req.From > 0 {
 			// T184：核对的"从某条记录之后继续"——只换核对会话，产物一个字不动。
 			// 不走 forceCheckerRetry：它自己会分配下一个尝试号，和截断这条撞车。
 			if err := r.continueCheckerFrom(proj, base, req.Path, req.From); err != nil {
@@ -952,12 +972,17 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 			}
 		}
 	case "continue":
-		if req.From > 0 {
+		if req.From > 0 && req.CutAttempt == 0 {
 			if err := r.continueFromChapter(proj, base, req.Path, req.From); err != nil {
 				r.log.LogError(0, "[convert]", base, "从记录继续失败:", err)
 				r.phaseNote()("[convert] %s 从记录继续失败：%v", base, err)
 			}
 			return
+		}
+		if req.From > 0 {
+			// T228：切口在提交时就已经落在磁盘上了，这里只负责接着那条新尝试跑。
+			r.log.LogInfo(0, "[convert]", base, "截断已在提交时当场落到磁盘（第",
+				strconv.Itoa(req.CutAttempt), "次尝试），直接继续")
 		}
 		if err := r.continueChapter(proj, base, reason); err != nil {
 			r.log.LogError(0, "[convert]", base, "继续跑失败:", err)
@@ -1098,6 +1123,43 @@ func (r *Runner) truncateChapterTranscript(proj, base, srcName string, from int)
 		floor = prev + 1
 	}
 	return cutTranscriptAt(src, from, floor)
+}
+
+// cutTranscriptNow 在**作出截断结论的这一刻**把前缀切成一条新尝试并落盘（T228）。
+//
+// 与 truncateChapterTranscript 的区别：源转录是已知的那一条——复盘目标带着完整
+// 路径（递归子章节的转录在父工作区的细分树里），不用再按章节名去猜；尝试号是
+// "这条转录的号 + 1"，新尝试就排在它后面，续跑时按磁盘推导会自动选中它
+// （convertOneChapterSeq：retryAttemptOf 优先，其次是 lastAttemptNumber）。
+//
+// 这里只做纯文件操作：源转录一字不动、页面的「历史」立刻多一条。调用方负责把
+// 工作区一起退回那一刻（applyWorkspaceCut）与排进重试队列。
+func (r *Runner) cutTranscriptNow(proj, base, role, trPath string, from int) (string, int, error) {
+	trPath = strings.TrimSpace(trPath)
+	if trPath == "" || !fileExists(trPath) {
+		return "", 0, fmt.Errorf("源转录不存在: %s", trPath)
+	}
+	if role == "checker" {
+		// 核对转录：新尝试照旧写在 work/sessions/ 下（recheckChapter 按那儿找）。
+		rel, err := filepath.Rel(proj, trPath)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", 0, fmt.Errorf("核对转录不在本项目之下: %s", trPath)
+		}
+		return r.truncateCheckerTranscript(proj, base, filepath.ToSlash(rel), from)
+	}
+	floor := transcriptAttemptOf(trPath) + 1
+	if prev := r.retryAttemptOf(base); prev >= floor {
+		floor = prev + 1
+	}
+	dst, next, err := cutTranscriptAt(transcriptStem(trPath), from, floor)
+	if err != nil {
+		return "", 0, err
+	}
+	if r.retryAttempt == nil {
+		r.retryAttempt = map[string]int{}
+	}
+	r.retryAttempt[base] = next
+	return dst, next, nil
 }
 
 // cutChapterTranscriptForRetry 是重试队列用的"先截断、再排队"这一步：请求里

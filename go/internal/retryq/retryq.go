@@ -42,6 +42,11 @@ type Request struct {
 	// *.jsonl。显式指定而不是"取最新那条"，因为用户可能正在看第 2 次尝试、
 	// 想把这次尝试的某一步回滚出来。
 	Path string `json:"path,omitempty"`
+	// CutAttempt 是"切断已经由提交方做过"的记号（T228）：复盘会话给出截断结论
+	// 时，前缀**当场**就写成了第 CutAttempt 次尝试（不等派发、不等并发槽）。
+	// 派发端看到它就直接接着那条尝试跑，不再重复截断。0 = 还没切（页面 ⤓ 那条路
+	// 只能把请求排进队列，真正的文件操作留给运行中的进程）。
+	CutAttempt int `json:"cut_attempt,omitempty"`
 }
 
 // Dir 返回项目的队列目录。

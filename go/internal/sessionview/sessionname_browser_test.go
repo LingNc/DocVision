@@ -18,12 +18,17 @@ import (
 const tick = "`"
 
 // 标记会话：`**粗体**`、`_斜体_`、反引号 code 三样都在**文件名**里。
+//
+// T228：单下划线只在词边界上才算强调（CommonMark 的 intraword 规则）——
+// `这是_斜体_与` 这种两侧都贴着字的写法现在**按字面**显示（`chapter_012_child_02`
+// 这类名字就是被当成斜体吃掉的），所以夹具用 `-` 划出边界，保住"下划线斜体
+// 仍会渲染"这条对照。
 var (
-	markedStem  = "convert_这是_斜体_与**粗体**与" + tick + "code" + tick + "的会话"
+	markedStem  = "convert_这是-_斜体_-与**粗体**与" + tick + "code" + tick + "的会话"
 	markedFile  = markedStem + ".jsonl"
-	markedTitle = "转换 · 这是_斜体_与**粗体**与" + tick + "code" + tick + "的会话"
+	markedTitle = "转换 · 这是-_斜体_-与**粗体**与" + tick + "code" + tick + "的会话"
 	// 渲染后的可见文本：标记符号本身一个都不剩。
-	markedText = "转换 · 这是斜体与粗体与code的会话"
+	markedText = "转换 · 这是-斜体-与粗体与code的会话"
 )
 
 // 危险字符会话：`<` / `>` / `&` / 落单的 `*` 与反引号——都不是标记，必须是文本。

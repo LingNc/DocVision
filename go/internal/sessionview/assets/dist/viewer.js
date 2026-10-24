@@ -9412,18 +9412,34 @@
     if (text !== void 0 && text !== null) node.textContent = text;
     return node;
   }
+  const WORD_CHAR = /[\p{L}\p{N}_]/u;
+  function intrawordUnderscore(m, before, after) {
+    if (m[6] === void 0 && m[9] === void 0) return false;
+    return before !== "" && WORD_CHAR.test(before) || after !== "" && WORD_CHAR.test(after);
+  }
   function mdInline(parent, text, depth = 0) {
     if (depth > 6) {
       parent.appendChild(document.createTextNode(String(text || "")));
       return;
     }
     let rest = String(text === void 0 || text === null ? "" : text);
+    let before = "";
     let guard = 0;
     while (rest && guard++ < 800) {
       const m = MD_INLINE.exec(rest);
       if (!m) break;
-      if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
-      rest = rest.slice(m.index + m[0].length);
+      if (m.index > 0) {
+        parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
+        before = rest.slice(m.index - 1, m.index);
+      }
+      const matched = m[0];
+      rest = rest.slice(m.index + matched.length);
+      if (intrawordUnderscore(m, before, rest.slice(0, 1))) {
+        parent.appendChild(document.createTextNode(matched));
+        before = matched.slice(-1);
+        continue;
+      }
+      before = matched.slice(-1);
       let node;
       if (m[1] !== void 0) {
         node = el("code", "md-inline-code", m[2]);

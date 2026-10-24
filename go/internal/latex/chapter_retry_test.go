@@ -602,3 +602,92 @@ func TestChapterMarkdownForChild(t *testing.T) {
 		t.Fatalf("子章节 md = %q, want %q", got, child)
 	}
 }
+
+// T228：复盘判的截断在提交那一刻就落盘，排队请求只是"接着那条新尝试跑"。
+// 派发端见到 CutAttempt > 0 必须**不再切第二刀**——再切一次会多出一条同前缀的
+// 尝试，页面上看着像截了两回，续跑也会选到重复的那一类文件。
+func TestDispatchDoesNotCutTwice(t *testing.T) {
+	setup := func(t *testing.T) (proj, child, sessDir string) {
+		t.Helper()
+		proj = t.TempDir()
+		child = "chapter_001_child_02"
+		sessDir = filepath.Join(proj, "work", "temp", "conv_chapter_001", "work",
+			"_subdivision", "child_02", "node", "sessions")
+		if err := os.MkdirAll(sessDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		lines := make([]string, 0, 8)
+		for i := 0; i < 8; i++ {
+			lines = append(lines, `{"t":"msg","role":"user","text":"row"}`)
+		}
+		tr := filepath.Join(sessDir, "convert_"+child+".jsonl")
+		if err := os.WriteFile(tr, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return proj, child, sessDir
+	}
+	countSessions := func(t *testing.T, dir string) int {
+		t.Helper()
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(entries)
+	}
+
+	// ① 老请求（CutAttempt == 0，没有提交方先切）：派发时照旧切一刀。
+	t.Run("未切过的请求由派发端切", func(t *testing.T) {
+		proj, child, sessDir := setup(t)
+		if _, err := retryq.Queue(proj, retryq.Request{
+			Project: "p", Chapter: child, Role: "continue", From: 6,
+			Path: "temp/conv_chapter_001/work/_subdivision/child_02/node/sessions/convert_" + child + ".jsonl",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		r := testRunner(t, true)
+		if n := r.dispatchRetries(proj); n != 0 {
+			t.Fatalf("子章节的继续跑改成排父章节，started 应为 0, got %d", n)
+		}
+		if got := countSessions(t, sessDir); got != 2 {
+			t.Fatalf("应切出第 2 次尝试（2 个文件）, got %d", got)
+		}
+	})
+
+	// ② T228：提交方已经当场切好（CutAttempt > 0），派发端只排父章节。
+	t.Run("已当场切好的请求不再切第二刀", func(t *testing.T) {
+		proj, child, sessDir := setup(t)
+		// 提交方当场切出来的新尝试就在这儿。
+		cut := filepath.Join(sessDir, "convert_"+child+".try2.jsonl")
+		if err := os.WriteFile(cut, []byte(`{"t":"msg"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := retryq.Queue(proj, retryq.Request{
+			Project: "p", Chapter: child, Role: "continue", From: 6, CutAttempt: 2,
+			Path:   "temp/conv_chapter_001/work/_subdivision/child_02/node/sessions/convert_" + child + ".jsonl",
+			Source: "rescue",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		r := testRunner(t, true)
+		if n := r.dispatchRetries(proj); n != 0 {
+			t.Fatalf("started 应为 0（改成排父章节）, got %d", n)
+		}
+		if got := countSessions(t, sessDir); got != 2 {
+			t.Fatalf("不该再切一刀（仍是 2 个文件）, got %d", got)
+		}
+		if _, err := os.Stat(cut); err != nil {
+			t.Fatalf("当场切好的那次尝试应原样保留：%v", err)
+		}
+		// 父章节必须排上「继续跑」，否则这一支没人驱动。
+		pending := retryq.Pending(proj)
+		found := ""
+		for _, f := range pending {
+			if f.Chapter == "chapter_001" && retryRoleOf(f.Request) == "continue" {
+				found = f.Chapter
+			}
+		}
+		if found == "" {
+			t.Fatalf("应排队父章节的「继续跑」, pending = %+v", pending)
+		}
+	})
+}

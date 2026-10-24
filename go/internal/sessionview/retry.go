@@ -322,10 +322,10 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		note = "已加入重新核对队列：只重跑核对会话，产物不动；正在跑的 latex 会把它排进并发槽位"
 	}
 	if role == "checker" && req.From > 0 {
-		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续核对——历史只保留到这一行，开一条新的核对尝试，产物不动、源转录保留", req.From)
+		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续核对——历史只保留到这一行，开一条新的核对尝试，产物不动、源转录保留（切口要等它排进槽位时才写盘：页面只读，不提前改你的转录）", req.From)
 	}
 	if role == "continue" && req.From > 0 {
-		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续——会开一个新尝试，历史只保留到这一行，源转录保留；工作区会一起退回那一刻", req.From)
+		note = fmt.Sprintf("已排队：从第 %d 条记录之后继续——会开一个新尝试，历史只保留到这一行，源转录保留；工作区会一起退回那一刻（切口要等它排进槽位时才写盘：页面只读，不提前改你的转录）", req.From)
 		// 老版本产生的会话没有工作区快照（P55 之后才有）：退不了就明说，
 		// 别让人以为文件也跟着回去了——这时行为与旧版一致（只退对话）。
 		if !workspaceSnapshotCovers(projDir, base, srcName, req.From) {

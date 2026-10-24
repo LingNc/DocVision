@@ -3023,15 +3023,29 @@ func (r *Runner) maybeRescue(tid int, tag, label string, target rescueTarget) re
 	case "truncate":
 		// C(ii)：状态先写成 queued（排队之前），再排进重试队列——顺序在日志里
 		// 能看到：先"目标会话状态 → queued"，再"已排队从第 N 条记录继续"。
-		r.markTargetActivity(tid, tag, label, target, "queued", "复盘判为截断：先写状态，再排队")
-		if err := r.rescueQueueTruncate(target, v.From); err != nil {
+		//
+		// T228：截断本身在 rescueQueueTruncate 里**当场**落盘（新尝试立刻出现在
+		// 页面「历史」里），排队只是"接着那条新尝试继续跑"，所以这里的进度行
+		// 说的是"已截断"而不是"已排队、等会儿再截"。
+		r.markTargetActivity(tid, tag, label, target, "queued", "复盘判为截断：先写状态，再截断并排队")
+		attempt, err := r.rescueQueueTruncate(target, v.From)
+		if err != nil {
 			r.markTargetActivity(tid, tag, label, target, "error", "复盘要求截断但排队失败")
 			r.log.LogWarning(tid, tag, label, "复盘要求截断，但排队失败："+err.Error())
 			break
 		}
 		// 记一笔"已排队"：调用方的失败终态要写成 queued（见 Runner.rescueQueued）。
 		r.markRescueQueued(target.TrPath)
-		r.log.LogWarning(tid, tag, label, fmt.Sprintf("复盘判定会话已退化，已排队从第 %d 条记录继续：%s", v.From, v.Reason))
+		if attempt > 0 {
+			r.log.LogWarning(tid, tag, label, fmt.Sprintf(
+				"复盘判定会话已退化，已当场截断到第 %d 条记录（第 %d 次尝试，源转录保留）并排队继续：%s",
+				v.From, attempt, v.Reason))
+			r.phaseNote()("[rescue] %s 已截断到第 %d 条记录（第 %d 次尝试），排队继续",
+				target.Base, v.From, attempt)
+		} else {
+			r.log.LogWarning(tid, tag, label, fmt.Sprintf("复盘判定会话已退化，已排队从第 %d 条记录继续：%s", v.From, v.Reason))
+			r.phaseNote()("[rescue] %s 已排队从第 %d 条记录继续（截断在派发时执行）", target.Base, v.From)
+		}
 		dec.Stop = true
 	case "retry":
 		// C(ii)：提醒轮马上要在同一个会话里重新排队，状态先写成 queued。

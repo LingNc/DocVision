@@ -830,12 +830,20 @@ func (r *Runner) rescueAudit(t rescueTarget, v rescueVerdict, lines int) {
 	_, _ = f.Write(append(data, '\n'))
 }
 
-// rescueQueueTruncate 把"截断到 from 再继续"排进重试队列（与页面的 ⤓ 同一条
-// 通路：源转录保留、新尝试写 .tryN+1、有工作区快照就一起回退）。
-func (r *Runner) rescueQueueTruncate(t rescueTarget, from int) error {
+// rescueQueueTruncate 把"截断到 from 再继续"**当场**落到磁盘，然后排进重试队列。
+//
+// T228：截断是纯文件操作（前缀抄成下一条尝试、源转录一字不动），没有理由等到
+// 派发、等到有并发槽才做。旧行为是"结论收下、只写一条排队请求"，真正的切口
+// 要等 dispatchRetries——中间那段时间页面上什么都没变、转录一行没少，用户会
+// 以为"这个截断没生效"。现在切口在提交那一刻就落盘（多出一条新尝试，页面的
+// 「历史」立刻能看到），排队请求只负责"接着这条新尝试继续跑"。
+//
+// 切不动（源转录读不到、切点不是消息行）时不装作切了：CutAttempt 留 0，由派发
+// 端再切一次，并把失败写进日志与进度行。
+func (r *Runner) rescueQueueTruncate(t rescueTarget, from int) (int, error) {
 	rel, err := filepath.Rel(filepath.Join(t.ProjDir, "work"), t.TrPath)
 	if err != nil || strings.HasPrefix(rel, "..") {
-		return fmt.Errorf("转录不在本项目 work/ 之下: %s", t.TrPath)
+		return 0, fmt.Errorf("转录不在本项目 work/ 之下: %s", t.TrPath)
 	}
 	role := t.Role
 	if role == "" {
@@ -844,12 +852,24 @@ func (r *Runner) rescueQueueTruncate(t rescueTarget, from int) error {
 	if role == "convert" {
 		role = "continue" // 转换会话：从这条记录继续
 	}
+	_, attempt, cutErr := r.cutTranscriptNow(t.ProjDir, t.Base, t.Role, t.TrPath, from)
+	reason := fmt.Sprintf("复盘判为退化，从第 %d 条记录继续", from)
+	if cutErr != nil {
+		r.log.LogWarning(0, "[rescue]", t.Base, "当场截断失败，退回派发时再切:", cutErr)
+		r.phaseNote()("[rescue] %s 当场截断失败，退回派发时再切：%v", t.Base, cutErr)
+	} else {
+		// 工作区跟着对话一起退回那一刻（P55）：只切对话会让模型记得的文件还在。
+		if rolled, ok := r.applyWorkspaceCut(t.ProjDir, t.Base, filepath.Base(t.TrPath), from); ok {
+			r.log.LogInfo(0, "[rescue]", t.Base, "工作区已回退到第", strconv.Itoa(rolled), "行")
+		}
+		reason = fmt.Sprintf("复盘判为退化，已当场截断到第 %d 条记录（第 %d 次尝试），接着跑", from, attempt)
+	}
 	_, err = retryq.Queue(t.ProjDir, retryq.Request{
 		Project: filepath.Base(t.ProjDir), Chapter: t.Base, Role: role,
 		From: from, Path: filepath.ToSlash(rel), Source: "rescue",
-		Reason: fmt.Sprintf("复盘判为退化，从第 %d 条记录继续", from),
+		CutAttempt: attempt, Reason: reason,
 	})
-	return err
+	return attempt, err
 }
 
 var _ = logger.LevelInfo

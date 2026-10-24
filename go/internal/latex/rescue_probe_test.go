@@ -2,6 +2,7 @@ package latex
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,7 +139,81 @@ func TestRescueSubmitToolValidation(t *testing.T) {
 	}
 }
 
-func TestRescueQueueTruncateQueuesContinue(t *testing.T) {
+// T228：复盘一提交截断结论，切口就**当场**落在磁盘上——不等到派发、不等并发
+// 槽。页面「历史」立刻多出一条尝试，用户不会以为"这个截断没生效"。
+func TestRescueTruncateCutsOnTheSpot(t *testing.T) {
+	proj := t.TempDir()
+	trPath := filepath.Join(proj, "work", "sessions", "convert_chapter_001.jsonl")
+	if err := os.MkdirAll(filepath.Dir(trPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := make([]string, 0, 10)
+	for i := 0; i < 10; i++ {
+		lines = append(lines, fmt.Sprintf(`{"t":"msg","role":"user","text":"row %d"}`, i+1))
+	}
+	if err := os.WriteFile(trPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log, err := logger.NewLogger("", "", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{cfg: &config.Config{}, log: log}
+	attempt, err := r.rescueQueueTruncate(
+		rescueTarget{ProjDir: proj, Base: "chapter_001", Role: "convert", TrPath: trPath}, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt != 2 {
+		t.Fatalf("应切出第 2 次尝试，got %d", attempt)
+	}
+	// 切口已经在磁盘上：新尝试 6 行、源转录一字未动。
+	cut := filepath.Join(proj, "work", "sessions", "convert_chapter_001.try2.jsonl")
+	data, err := os.ReadFile(cut)
+	if err != nil {
+		t.Fatalf("截断应立刻落盘（%s）：%v", cut, err)
+	}
+	if got := len(strings.Split(strings.TrimRight(string(data), "\n"), "\n")); got != 6 {
+		t.Fatalf("新尝试应有 6 行，got %d", got)
+	}
+	src, err := os.ReadFile(trPath)
+	if err != nil || len(strings.Split(strings.TrimRight(string(src), "\n"), "\n")) != 10 {
+		t.Fatalf("源转录不该被动：%v %d", err, len(src))
+	}
+	// 排队请求带上 CutAttempt，派发端据此不再切第二刀。
+	dir := filepath.Join(proj, "work", "retry")
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("应排一条请求：%v %v", entries, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req struct {
+		Role       string `json:"role"`
+		Chapter    string `json:"chapter"`
+		Path       string `json:"path"`
+		Source     string `json:"source"`
+		From       int    `json:"from"`
+		CutAttempt int    `json:"cut_attempt"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Role != "continue" || req.From != 6 || req.Chapter != "chapter_001" || req.Path == "" {
+		t.Fatalf("请求内容不对：%+v", req)
+	}
+	if req.CutAttempt != 2 {
+		t.Fatalf("请求应记下已切好的尝试号（派发端不再切）：%+v", req)
+	}
+	if req.Path != "sessions/convert_chapter_001.jsonl" {
+		t.Fatalf("Path 应是 work/ 下的相对路径：%q", req.Path)
+	}
+}
+
+// 切不动时不装作切了：CutAttempt 留 0，派发端还会再切一次。
+func TestRescueQueueTruncateFallsBackWhenCutFails(t *testing.T) {
 	proj := t.TempDir()
 	trPath := filepath.Join(proj, "work", "sessions", "convert_chapter_001.jsonl")
 	if err := os.MkdirAll(filepath.Dir(trPath), 0o755); err != nil {
@@ -147,9 +222,18 @@ func TestRescueQueueTruncateQueuesContinue(t *testing.T) {
 	if err := os.WriteFile(trPath, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r := &Runner{cfg: &config.Config{}}
-	if err := r.rescueQueueTruncate(rescueTarget{ProjDir: proj, Base: "chapter_001", Role: "convert", TrPath: trPath}, 7); err != nil {
+	log, err := logger.NewLogger("", "", 4)
+	if err != nil {
 		t.Fatal(err)
+	}
+	r := &Runner{cfg: &config.Config{}, log: log}
+	attempt, err := r.rescueQueueTruncate(
+		rescueTarget{ProjDir: proj, Base: "chapter_001", Role: "convert", TrPath: trPath}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt != 0 {
+		t.Fatalf("切点越界时不应报成已切：%d", attempt)
 	}
 	dir := filepath.Join(proj, "work", "retry")
 	entries, err := os.ReadDir(dir)
@@ -161,17 +245,18 @@ func TestRescueQueueTruncateQueuesContinue(t *testing.T) {
 		t.Fatal(err)
 	}
 	var req struct {
-		Role, Chapter, Path, Source string
-		From                        int
+		Role       string `json:"role"`
+		Chapter    string `json:"chapter"`
+		Path       string `json:"path"`
+		Source     string `json:"source"`
+		From       int    `json:"from"`
+		CutAttempt int    `json:"cut_attempt"`
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
 		t.Fatal(err)
 	}
-	if req.Role != "continue" || req.From != 7 || req.Chapter != "chapter_001" || req.Path == "" {
+	if req.Role != "continue" || req.From != 7 || req.CutAttempt != 0 {
 		t.Fatalf("请求内容不对：%+v", req)
-	}
-	if req.Path != "sessions/convert_chapter_001.jsonl" {
-		t.Fatalf("Path 应是 work/ 下的相对路径：%q", req.Path)
 	}
 }
 
