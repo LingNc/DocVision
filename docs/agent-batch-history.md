@@ -2606,3 +2606,17 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **测试**：`chapter_verdict_test.go`（新增：结论只写回自己的转换转录、同名子章节的转录不被误改、顶层章节的结论留在顶层）；`checker_degrade_test.go` 改成钉"退化后转换与核对两边都留 `no_verdict`，没有任何一条留 `error`"（这条一开始红——退化的收尾在 `dec.Stop` 那支提前返回，入口包装才收到它，所以标记必须放在入口）；`chapter_subdivision_integration_test.go` 新增 `TestChildConvertFailureRecordsStateOnItsOwnNode`（子节点转换必失败：父节点与失败子节点的收尾状态都不能是 `waiting_children`）；`t211_child_retry_test.go` 新增 `TestChildCheckerPassRequeuesParentContinue`（顶层不排、子章节排到 `chapter_024`、重复调用只排一次）。
 - **验证**：`go test ./internal/... -count=1` 14 个包全绿、`go build ./...`、`go vet ./internal/...` 干净；`cd web && npx vitest run` 262 条全绿，`npm run build` 重出 `viewer.js`（545.58 kB）后再 `go build` 通过。
 - **未改（刻意）**：① 已经落盘的转录一字不动（用户数据），新记法只对之后的写入生效；② 用户机器上正在跑的进程用的是 T230/T231 之前的二进制，状态不会自己变回来，那些行重新核对一次即可；③ 多层父节点的重排仍排最上面那一层（与 T211 口径一致），不改成逐层叫醒。
+
+## v1.5+（T232：排队不再沉默、核对没结论自动换新会话、复盘不再重复同一切口，2026-10-24）
+
+- **触发**：用户先报「我对好多核对会话重新核对，都没有反应，不会新建一个新的也不会排队，就是没有反应，除非我截断的话倒是可以正确继续运行」，再追问「我们的复盘会话不是用来裁剪的吗处理一些遇到的会话问题，没有正确提交的让他们提交，或者遇到的错误的结束的、裁剪并继续运行的吗？这个好像也没办法正确工作了吗？」，最后把要求说定：「正常来说应该不需要手动操作，这边也有对应的复盘机制可以让会话变好和变干净，但是不会出现卡死的情况」。
+- **现场（预览页 `/api/index` 只读快照，3932 条转录、generated 20:17:53）**：live 17 条 = 转换 9 + 修复 1（共用转换池 10 格，正好占满）+ 核对 6（池 20 格）+ 复盘 1，排队 175 条。四五个父章节（013/014/022/024/004）都是 `waiting_children`；chapter_013 那棵树里只剩 `chapter_013_child_02`（19:39:10）与 `chapter_013_child_03_child_03`（19:38:48）两条 `queued`，一直没拿到转换槽位。人工「继续跑」被章节锁当"忙"挡回队列，所以「点了没反应」；截断立刻生效是因为它走核对池。核对一侧：`chapter_004_child_01_child_03` 已跑到 try8，另一支复盘转录到 try12。
+- **缺陷 A（等待沉默）**：取转换槽位的路径只在拿到槽位前写一次 `queued`；等 40 分钟期间零输出，日志里连"被挡回"都不一定有（旧二进制的 busy 分支是静默 `continue`），外面无法区分排队与卡死。
+- **改 A**：`book.go` 新增 `holdConvertSlot`／`holdSlot`／`slotHeartbeatEvery`（5 分钟）。取槽位期间的心跳把「转换槽位已等 N」写进转录 `chapter_activity`（页面行时间戳随之更新）并打一行 info；三处转换 `acquireConvertSlot`（首轮、整合轮、反馈轮）全部改走它。`retry.go` 的 busy 分支改成 `logBusySkip`（同一请求 5 分钟最多一行，带已等时长与该章最后一次输出的年龄）。
+- **缺陷 B（核对没结论只能靠人）**：节点驱动算核对转录时只认 `node.AttemptNum`；一条转录的「没提交」提醒攒满 4 条后 `checkChapterAt` 入口守卫当场拒跑，同一份文件永远回放，父章节每次「继续跑」原地失败。抬尝试号的只有人工「重新核对」与复盘截断两条路，自动这一路把"没结论"当成了章节判决。
+- **改 B**：新增 `nextCheckerAttempt(nodeTr, start, maxBumps)`：从当前尝试起找第一条提醒没打满的转录，找到就换新尝试（新文件、无历史可回放、产物不动）。节点核对外面包一层自愈循环 `checkerNoVerdictSelfHeal = 2`：`checkerNoVerdict` 收尾时抬号重试，仍不行才如实报没结论。另补一条同会话提醒：`submit` 交了不可用的 `status` 时先在同会话追加 `checkerStatusReminder`（并计入提醒数），不再直接关会话白烧一次预算。
+- **缺陷 C（复盘重复同一切口）**：`maybeRescue` 的 `truncate` 分支每次都从判定给的 `From` 切，没有记忆；同一章因此一轮轮从同一个位置重开（现场 try8／try12）。
+- **改 C**：`rescue.go` 新增 `rescueCutAt`（key 是目标转录路径）与 `rescueCutRepeated`；`book.go` 的 `truncate` 分支先问一句，重复同一切口就写「复盘这次仍要截到第 N 条记录，与上次同一个切口：不再重复截断」、判 `fail` 收尾。
+- **测试**：新增 `t232_guards_test.go` 三条——打满的转录换到下一条（try1→try2）、三条都打满时保持原号交回守卫、同一切口只拦第二次（换切口/换转录放行）。`rescue_retry_test.go` 与 `rescue_triggers_test.go` 里原来依赖"每次都能切"的四条用例在新守卫下先红后绿：守卫的 key 从章节名改成目标转录路径（跨用例/跨项目不再互相污染）。
+- **验证**：`go test ./internal/latex/ -count=1` 全绿、`go build ./...`、`gofmt` 对新改文件干净（`stylefix.go` 是历史遗留，不动）。
+- **未改（刻意）**：① 已落盘转录一字不动（用户数据），新记法只对之后的写入生效；② 槽位总数与派发顺序不动（"转换池 10 格被大章节占满"是并发成本，不是本次要改的口径，本次只让等待可见、让退化会话自愈）；③ 正在跑的进程仍用旧二进制，要看到这些行为得换新二进制重跑。

@@ -258,6 +258,11 @@ type Runner struct {
 	retryWatcherWG   sync.WaitGroup
 	// retryWarned 让"请求还在排队"的提示每个请求文件只打一次。
 	retryWarned map[string]bool
+	// retryBusySince/retryBusyLogged 支撑"这一章还有会话在跑"那条日志（T232）：每个
+	// 请求文件记下第一次被跳过与上次打日志的时间，好说清"等了多久"，又不至于
+	// 每 2 秒刷一行。
+	retryBusySince  map[string]time.Time
+	retryBusyLogged map[string]time.Time
 	// vectorMu 串行化"逐图重画"与 images 阶段（P53）：两者都写
 	// source/progress_items 与 source/*.md，同时跑会把进度文件写花。
 	vectorMu sync.Mutex

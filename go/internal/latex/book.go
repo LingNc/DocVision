@@ -1173,7 +1173,7 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		var wg sync.WaitGroup
 		for i, base := range bases {
 			r.forceCheckerRetry(proj, base)
-			n := r.retryCheckerAttempt[base]
+			n := r.checkerAttemptNo(base)
 			wg.Add(1)
 			go func(tid int, base string, n int) {
 				defer wg.Done()
@@ -1273,10 +1273,74 @@ func (r *Runner) acquireConvertSlot(seq int64) func() {
 // 不能在 goroutine 里取——那样号的大小就成了调度顺序，等于换了个方式先到先得。
 func (r *Runner) nextConvertSeq() int64 { return r.convertSeq.Add(1) }
 
+// slotHeartbeatEvery 是"还在等并发槽"提示的重复间隔（T232）。
+//
+// 排队几十分钟、页面上只有一句「等待并发槽」的章节，看不出它是在排队还是已经
+// 卡死——转换池 10 格全被大章节占着时，这种等待是常态。取槽位期间定期把"还在
+// 等、等了多久"写进转录状态（页面那一行的时间戳跟着动）与日志，等待就不再是
+// 沉默的。
+const slotHeartbeatEvery = 5 * time.Minute
+
+// holdConvertSlot 取转换槽位，等的时候每 slotHeartbeatEvery 报一次平安。
+func (r *Runner) holdConvertSlot(sess *session.Session, tid int, base string, seq int64) func() {
+	return r.holdSlot(sess, tid, base, "转换", func() func() { return r.acquireConvertSlot(seq) })
+}
+
+// holdSlot 是 hold*Slot 的公共实现：先起心跳，再去排队。
+func (r *Runner) holdSlot(sess *session.Session, tid int, base, what string, acquire func() func()) func() {
+	start := time.Now()
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tk := time.NewTicker(slotHeartbeatEvery)
+		defer tk.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tk.C:
+				waited := waitText(time.Since(start))
+				if sess != nil {
+					_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{
+						"state": "queued",
+						"note":  what + "槽位已等 " + waited,
+					})
+				}
+				r.log.LogInfo(tid, "["+what+"]", base, what+"槽位已等"+waited+"，还没轮到它")
+			}
+		}
+	}()
+	release := acquire()
+	close(stop)
+	<-done
+	return release
+}
+
 func (r *Runner) acquireCheckerSlot() func() {
 	r.checkerSlotsOnce.Do(func() { r.checkerSlots = make(chan struct{}, r.cfg.Latex.CheckerWorkers()) })
 	r.checkerSlots <- struct{}{}
 	return func() { <-r.checkerSlots }
+}
+
+// nextCheckerAttempt 从 start 起找第一条「没提交提醒还没打满」的核对尝试号
+// （T232）：当前这条已经打满时，与其把同一条死转录再推一遍，不如换下一条全新
+// 的——新文件没有历史可回放，模型拿到干净上下文和完整轮次，而产物不动。
+//
+// maxBumps 是上限：三条都打满就交给入口守卫如实报"没结论"，不要在磁盘上刷出
+// 一串空尝试。
+func nextCheckerAttempt(nodeTr string, start, maxBumps int) int {
+	attempt := start
+	for bumps := 0; bumps < maxBumps; bumps++ {
+		if countCheckerSubmitReminders(loadTranscriptMessages(attemptTranscriptPath(nodeTr, attempt))) < checkerNoVerdictAttempts {
+			return attempt
+		}
+		attempt++
+		if attempt < 2 {
+			attempt = 2
+		}
+	}
+	return start
 }
 
 // acquireChapterSlot 是其余阶段的通用池子（样式修复、提交提醒等）。
@@ -1860,7 +1924,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if !resumeSkip && !splitTool.Requested {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
 		convState(rowStateQueued)
-		release := r.acquireConvertSlot(node.Seq)
+		release := r.holdConvertSlot(sess, tid, base, node.Seq)
 		convState(rowStateRunning)
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		_, runErr := sess.Run(session.RunOptions{UserText: initial})
@@ -1952,7 +2016,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			"Do not submit child files as independent book chapters."
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		convState(rowStateQueued)
-		release := r.acquireConvertSlot(node.Seq)
+		release := r.holdConvertSlot(sess, tid, base, node.Seq)
 		convState(rowStateRunning)
 		_, runErr := sess.Run(session.RunOptions{UserText: integrationText})
 		release()
@@ -2022,8 +2086,28 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	// discarded and re-converted with a fresh session.
 	checkerTranscript := ""
 	checkerView := ""
+	// nodeTr 与 checkAttempt 提到这里：核对"没结论"时要就地换一条全新尝试再试
+	// （T232），那一步在 if 之后也要用。
+	nodeTr := filepath.Join(node.NodeRoot, "sessions", "checker_"+base+".jsonl")
+	checkAttempt := node.AttemptNum
 	if node.Depth > 0 || promoteSubmitRoot != "" {
-		checkerTranscript = attemptTranscriptPath(filepath.Join(node.NodeRoot, "sessions", "checker_"+base+".jsonl"), node.AttemptNum)
+		// T232：手动的「重新核对」把新尝试号记在 retryCheckerAttempt 里；递归
+		// 节点的核对转录以前只认转换尝试号，于是那些"提醒已经打满"的子章节
+		// 永远回放同一条文件、父节点每次「继续跑」都在原地失败。两个号取大的。
+		if n := r.checkerAttemptNo(base); n > checkAttempt {
+			checkAttempt = n
+		}
+		// T232：这条转录的"没提交"提醒已经打满（checker 的入口守卫会当场拒跑），
+		// 就别再把同一条死转录推下去了——换下一条全新的：新文件没有历史可回放，
+		// 模型拿到的是干净上下文和完整轮次，而产物一个字不动。以前这里只有人工
+		// 「重新核对」与复盘截断会抬尝试号，自动这一路永远停在同一条文件上，父
+		// 章节于是每次「继续跑」都原地失败、页面挂「核对无结论」。
+		if next := nextCheckerAttempt(nodeTr, checkAttempt, 3); next != checkAttempt {
+			checkAttempt = next
+			r.log.LogInfo(tid, "[checker]", base, "这条核对转录的提醒已经打满，换新尝试 try"+strconv.Itoa(checkAttempt))
+		}
+		r.bumpCheckerAttemptNo(base, checkAttempt)
+		checkerTranscript = attemptTranscriptPath(nodeTr, checkAttempt)
 		checkerView = filepath.Join(node.NodeRoot, "checker-view")
 	}
 	rounds := r.checkerAttempts(node.Depth)
@@ -2037,7 +2121,25 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		}
 		return h
 	}
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker, node.AttemptNum)
+	var ok bool
+	var issues string
+	// T232：核对没给结论时**自动**换一条全新的核对尝试再来一次（最多
+	// checkerNoVerdictSelfHeal 次）——产物一个字不动，换掉的只是那条已经退化的
+	// 核对会话。以前这一步只能靠人点「重新核对」或父章节「继续跑」，自动这一路
+	// 把"没结论"当成了章节判决，父章节跟着失败，页面就挂在那里等人工。
+	for heal := 0; ; heal++ {
+		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker, node.AttemptNum)
+		if ok || !checkerNoVerdict(issues) || heal >= checkerNoVerdictSelfHeal || node.Depth == 0 && promoteSubmitRoot == "" {
+			break
+		}
+		checkAttempt++
+		if checkAttempt < 2 {
+			checkAttempt = 2
+		}
+		r.bumpCheckerAttemptNo(base, checkAttempt)
+		checkerTranscript = attemptTranscriptPath(nodeTr, checkAttempt)
+		r.log.LogWarning(tid, "[checker]", base, "核对没有给出结论，换一条全新的核对尝试 try"+strconv.Itoa(checkAttempt)+" 再来一次（产物不动）")
+	}
 	if !ok && isSessionAPIError(issues) {
 		return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
 	}
@@ -2060,7 +2162,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		// 还停在上一次的「转换完成待核对」——核对明明已经说了"发现问题"，上面
 		// 那行却在等核对，看着像卡住了。
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
-		release := r.acquireConvertSlot(node.Seq)
+		release := r.holdConvertSlot(sess, tid, base, node.Seq)
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
 		_, runErr := sess.Run(session.RunOptions{UserText: msg})
 		release()
@@ -3052,6 +3154,20 @@ func (r *Runner) maybeRescue(tid int, tag, label string, target rescueTarget) re
 		r.log.LogWarning(tid, tag, label, "复盘判定这条会话无法挽救，不再提醒："+v.Reason)
 		dec.Stop = true
 	case "truncate":
+		// T232：同一个切口连着判两次就不要再切了。复盘会话看的是"这一条转录"
+		// 里的退化，它给的切口因此常常与上一次一字不差；照切一遍只会得到同一
+		// 条前缀、同一个死法，把这一章反复推进新尝试（实测有章切到第 7 条尝试
+		// 仍在原地），而页面只看到"核对无结论"。同一切口第二次出现就按"救不回
+		// 来"收尾，让调用方如实停下，把决定权交回给人。
+		if r.rescueCutRepeated(target.TrPath, v.From) {
+			r.markTargetActivity(tid, tag, label, target, "error", "复盘判定的切口与上次相同")
+			r.log.LogWarning(tid, tag, label, fmt.Sprintf(
+				"复盘这次仍要截到第 %d 条记录，与上次同一个切口：不再重复截断（换了切口才有可能好转）", v.From))
+			dec.Stop = true
+			dec.Verdict = "fail"
+			dec.Reason = "同一个退化切口已经截过一次，再切一次还是同一个死法"
+			break
+		}
 		// C(ii)：状态先写成 queued（排队之前），再排进重试队列——顺序在日志里
 		// 能看到：先"目标会话状态 → queued"，再"已排队从第 N 条记录继续"。
 		//

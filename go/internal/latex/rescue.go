@@ -489,8 +489,25 @@ func (t *RescueSubmitTool) Execute(argsJSON string) (session.ToolResult, error) 
 var (
 	rescueMu     sync.Mutex
 	rescueSeen   = map[string]int{}
+	rescueCutAt  = map[string]int{}
 	rescuePathMu sync.Mutex
 )
+
+// rescueCutRepeated 记下这条转录这次的切口，并回答"与上一次是不是同一个"（T232）。
+//
+// 复盘看的是"这条转录哪里开始退化"，同一条转录连着两次给出的切口往往一字不差；
+// 照着同一条前缀再切一遍，模型还是那个模型、材料还是那些材料，只会把这一章
+// 一次次推进新尝试（实测有章到第 7 条尝试仍在原地）。同一切口第二次出现就按
+// 救不回来处理，让调用方停下、把决定权交回给人。
+func (r *Runner) rescueCutRepeated(trPath string, from int) bool {
+	rescueMu.Lock()
+	defer rescueMu.Unlock()
+	if prev, ok := rescueCutAt[trPath]; ok && prev == from {
+		return true
+	}
+	rescueCutAt[trPath] = from
+	return false
+}
 
 // rescueBudget 记一次复盘并判断是否还在预算内。
 func (r *Runner) rescueBudget(key string) bool {

@@ -106,17 +106,7 @@ func (r *Runner) forceChapterRetry(proj, base, reason string) int {
 func (r *Runner) forceCheckerRetry(proj, base string) int {
 	baseTranscript := filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
 	cur, _ := attemptNumberOnDisk(baseTranscript)
-	if prev := r.retryCheckerAttempt[base]; prev > cur {
-		cur = prev
-	}
-	next := cur + 1
-	if next < 2 {
-		next = 2
-	}
-	if r.retryCheckerAttempt == nil {
-		r.retryCheckerAttempt = map[string]int{}
-	}
-	r.retryCheckerAttempt[base] = next
+	next := r.raiseCheckerAttemptNo(base, cur)
 	verdict := filepath.Join(proj, "work", "chapters", base+".tex") + ".checker"
 	if fileExists(verdict) {
 		keep := cur
@@ -129,6 +119,126 @@ func (r *Runner) forceCheckerRetry(proj, base string) int {
 	r.log.Log(0, "[checker]", base, "手动重新核对：产物不动，新尝试写 checker_"+base+".try"+
 		strconv.Itoa(next)+".jsonl（旧结论留档 .checker.try"+strconv.Itoa(cur)+"）")
 	return next
+}
+
+// checkerAttemptNo 读"这一章这次要写第几号核对转录"（T232）。
+//
+// retryCheckerAttempt 会被派发端（写）与递归节点的转换 goroutine（读）同时碰到，
+// 所以读写都走这两个小函数。以前直接读写这个 map，靠的是"只在批次之间写"，递归
+// 节点让这个前提不再成立。
+func (r *Runner) checkerAttemptNo(base string) int {
+	r.busyMu.Lock()
+	defer r.busyMu.Unlock()
+	return r.retryCheckerAttempt[base]
+}
+
+// raiseCheckerAttemptNo 把这一章的核对尝试号抬到 cur+1（不小于 2），返回新号。
+func (r *Runner) raiseCheckerAttemptNo(base string, cur int) int {
+	r.busyMu.Lock()
+	defer r.busyMu.Unlock()
+	if r.retryCheckerAttempt == nil {
+		r.retryCheckerAttempt = map[string]int{}
+	}
+	if prev := r.retryCheckerAttempt[base]; prev > cur {
+		cur = prev
+	}
+	next := cur + 1
+	if next < 2 {
+		next = 2
+	}
+	r.retryCheckerAttempt[base] = next
+	return next
+}
+
+// bumpCheckerAttemptNo 把这一章的核对尝试号抬到 n（只增不减），返回是否真的变了。
+func (r *Runner) bumpCheckerAttemptNo(base string, n int) bool {
+	r.busyMu.Lock()
+	defer r.busyMu.Unlock()
+	if r.retryCheckerAttempt == nil {
+		r.retryCheckerAttempt = map[string]int{}
+	}
+	if n <= r.retryCheckerAttempt[base] {
+		return false
+	}
+	r.retryCheckerAttempt[base] = n
+	return true
+}
+
+// rotateSpentChildCheckers 在手动重跑一个父章节之前，把这一支里"提醒已经打满"
+// 的子章节核对转录换成下一个尝试号（T232）。
+//
+// 为什么必须在重跑之前换：递归节点的核对转录按转换尝试号命名，一条转录攒满
+// 「没提交」的提醒之后，节点这条路就进不去它了（checker 的入口守卫），于是父章节
+// 每次「继续跑」都当场撞在"子章节转换或 checker 失败；父章节禁止提交"上——请求
+// 被消费掉、页面上什么都没变，看起来就是点了没反应。手动重跑本来就想让这一支
+// 再试一次，所以先给那些打满的转录换新号：产物一个字不动，与页面上的「重新核对」
+// 同一条通路。
+func (r *Runner) rotateSpentChildCheckers(proj, base string) {
+	for _, tr := range r.childCheckerTranscripts(proj, base) {
+		n := countCheckerSubmitReminders(loadTranscriptMessages(tr))
+		if n < checkerNoVerdictAttempts {
+			continue
+		}
+		child, cur := childBaseOfCheckerTranscript(filepath.Base(tr))
+		if child == "" || child == base {
+			continue
+		}
+		next := cur + 1
+		if next < 2 {
+			next = 2
+		}
+		if r.bumpCheckerAttemptNo(child, next) {
+			r.log.LogInfo(0, "[checker]", child, "这条核对转录已有", strconv.Itoa(n),
+				"次没提交的提醒，手动重跑换新尝试 try"+strconv.Itoa(next))
+		}
+	}
+}
+
+// childCheckerTranscripts 列出这一支下面所有子章节的核对转录：顶层的（重新核对
+// 写的那些）与细分树里每个节点的（递归节点写的那些）。
+func (r *Runner) childCheckerTranscripts(proj, base string) []string {
+	var out []string
+	sessions := filepath.Join(proj, "work", "sessions")
+	if ents, err := os.ReadDir(sessions); err == nil {
+		for _, e := range ents {
+			n := e.Name()
+			if e.IsDir() || !strings.HasSuffix(n, ".jsonl") {
+				continue
+			}
+			if !strings.HasPrefix(n, "checker_"+base+"_child_") {
+				continue
+			}
+			out = append(out, filepath.Join(sessions, n))
+		}
+	}
+	roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+base+"*", "work", "_subdivision"))
+	for _, root := range roots {
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d == nil || d.IsDir() {
+				return nil
+			}
+			n := d.Name()
+			if strings.HasPrefix(n, "checker_") && strings.HasSuffix(n, ".jsonl") {
+				out = append(out, p)
+			}
+			return nil
+		})
+	}
+	return out
+}
+
+// childBaseOfCheckerTranscript 从核对转录文件名反推章节名与尝试号。
+func childBaseOfCheckerTranscript(name string) (string, int) {
+	s := strings.TrimSuffix(strings.TrimPrefix(name, "checker_"), ".jsonl")
+	s = strings.TrimSuffix(s, ".partial")
+	attempt := 0
+	if i := strings.Index(s, ".try"); i > 0 {
+		if n, err := strconv.Atoi(s[i+4:]); err == nil {
+			attempt = n
+		}
+		s = s[:i]
+	}
+	return s, attempt
 }
 
 // consumeRetryRequests 取走队列里指定角色的待办请求，返回去重后的章节基名。
@@ -308,10 +418,7 @@ func (r *Runner) continueCheckerAfterCut(proj, base string, next int) error {
 	if next < 2 {
 		return fmt.Errorf("核对新尝试号不合法: %d", next)
 	}
-	if r.retryCheckerAttempt == nil {
-		r.retryCheckerAttempt = map[string]int{}
-	}
-	r.retryCheckerAttempt[base] = next
+	r.bumpCheckerAttemptNo(base, next)
 	// 旧结论留一份档（与 forceCheckerRetry 同款）：新的那条核对会重写
 	// <章>.tex.checker，旧的留着还能对照。
 	r.setRetryNote(base, "网页重试请求（从记录继续核对）")
@@ -374,7 +481,7 @@ func (r *Runner) truncateCheckerTranscript(proj, base, srcName string, from int)
 			break
 		}
 	}
-	if prev := r.retryCheckerAttempt[base]; prev >= next {
+	if prev := r.checkerAttemptNo(base); prev >= next {
 		next = prev + 1
 	}
 	dst := attemptTranscriptPath(baseTr, next)
@@ -714,7 +821,7 @@ func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	if rp := filepath.Join(proj, "work", "reports", base+".md"); fileExists(rp) {
 		hints.Report = rp
 	}
-	n := r.retryCheckerAttempt[base]
+	n := r.checkerAttemptNo(base)
 	if n < 2 {
 		n = 2
 	}
@@ -954,7 +1061,12 @@ func (r *Runner) dispatchRetries(proj string) int {
 			continue
 		}
 		if !r.lockChapter(base) {
-			continue // 正在跑：留在队列里
+			// 忙：留队、不消费。以前这里连一行日志都不打——页面上点「重新核对」
+			// 就像什么都没发生（既不新建尝试、也不显示在排队），用户只能靠截断
+			// 绕过。现在第一次跳过就记一行，之后每隔几分钟再说一次，带"等了多久"
+			// 与"这一章最后一次输出在多久之前"，卡住的章节能从日志里直接看出来。
+			r.logBusySkip(proj, base, role, f.Path)
+			continue
 		}
 		if why := r.retryPrecondition(proj, role, base); why != "" {
 			r.unlockChapter(base)
@@ -979,6 +1091,96 @@ func (r *Runner) dispatchRetries(proj string) int {
 		}(base, req)
 	}
 	return started
+}
+
+// retryBusyLogEvery 是"这一章忙、请求留队"这类提示的重复间隔：第一次立刻打，
+// 之后每隔这么久再说一次。太密会把日志刷爆（tick 是 2 秒一次），太稀又看不出
+// 到底卡了多久。
+const retryBusyLogEvery = 5 * time.Minute
+
+// logBusySkip 报告"请求排上了，但这一章还有会话在跑"（T232）。
+//
+// 派发端只 TryLock：拿不到就留队等下一 tick。以前这条分支一声不响，页面上点
+// 「重新核对」/「继续跑」既不新建尝试、也不显示在排队——用户看到的就是"点了没
+// 反应"，只有截断（换一条干净的尝试）能绕过去。这里把同样的信息写进日志：等了
+// 多久、这一章最后一次输出在多久之前；两个数字一起看就知道是"真在跑、等着就行"
+// 还是"这一章已经没有输出了、会话卡住了"。
+func (r *Runner) logBusySkip(proj, base, role, reqPath string) {
+	now := time.Now()
+	r.busyMu.Lock()
+	if r.retryBusySince == nil {
+		r.retryBusySince = map[string]time.Time{}
+	}
+	if r.retryBusyLogged == nil {
+		r.retryBusyLogged = map[string]time.Time{}
+	}
+	since, ok := r.retryBusySince[reqPath]
+	if !ok {
+		since = now
+		r.retryBusySince[reqPath] = since
+	}
+	last := r.retryBusyLogged[reqPath]
+	if !last.IsZero() && now.Sub(last) < retryBusyLogEvery {
+		r.busyMu.Unlock()
+		return
+	}
+	r.retryBusyLogged[reqPath] = now
+	r.busyMu.Unlock()
+
+	what := "还有会话在跑"
+	switch role {
+	case "checker":
+		what = "还有核对在跑"
+	case "continue", "convert":
+		what = "还有转换在跑"
+	}
+	msg := "请求排队中：" + what + "（已等 " + waitText(now.Sub(since)) + "）"
+	switch age := r.chapterLastOutputAge(proj, base); {
+	case age < 0:
+		msg += "；还没看到这一章的任何输出"
+	case age > retryBusyLogEvery:
+		msg += "；这一章最后一次输出在 " + waitText(age) + "前——它可能卡住了，等不下去时只能重启进程（队列里的请求不会丢）"
+	default:
+		msg += "；这一章最后一次输出在 " + waitText(age) + "前，它还在动"
+	}
+	r.log.LogInfo(0, "[retry]", base, msg)
+}
+
+// waitText 把时长写成"19 分钟"这种一眼能读的形式。
+func waitText(d time.Duration) string {
+	if d < time.Minute {
+		return strconv.Itoa(int(d.Seconds())) + " 秒"
+	}
+	if d < time.Hour {
+		return strconv.Itoa(int(d.Minutes())) + " 分钟"
+	}
+	return strconv.Itoa(int(d.Hours())) + " 小时"
+}
+
+// chapterLastOutputAge 是一章最近一次写盘的"年岁"：转录、产物、报告都算。
+// 找不到任何文件时返回 -1（这一章还没开始过）。
+func (r *Runner) chapterLastOutputAge(proj, base string) time.Duration {
+	newest := time.Time{}
+	consider := func(p string) {
+		if st, err := os.Stat(p); err == nil && st.ModTime().After(newest) {
+			newest = st.ModTime()
+		}
+	}
+	if ents, err := os.ReadDir(filepath.Join(proj, "work", "sessions")); err == nil {
+		for _, e := range ents {
+			if e.IsDir() || !strings.Contains(e.Name(), base) {
+				continue
+			}
+			if p := filepath.Join(proj, "work", "sessions", e.Name()); strings.HasSuffix(e.Name(), ".jsonl") {
+				consider(p)
+			}
+		}
+	}
+	consider(filepath.Join(proj, "work", "chapters", base+".tex"))
+	if newest.IsZero() {
+		return -1
+	}
+	return time.Since(newest)
 }
 
 // retryWarnOnce 让"排队中"这类提示每个请求文件只打一次。
@@ -1042,6 +1244,12 @@ func (r *Runner) queueParentContinueFor(proj, project, parent, child string) {
 func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 	role := retryRoleOf(req)
 	reason := strings.TrimSpace(req.Reason)
+	// T232：重跑之前先把这一支里"提醒已经打满"的子章节核对转录换新尝试。不换
+	// 的话父章节的「继续跑」会在子章节的核对入口守卫上当场失败，请求被消费、
+	// 页面什么都没变——用户看到的就是"点了没反应"。
+	if role != "checker" {
+		r.rotateSpentChildCheckers(proj, base)
+	}
 	switch role {
 	case "convert":
 		r.forceChapterRetry(proj, base, reason)

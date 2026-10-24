@@ -204,7 +204,11 @@ func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string
 	apiFailure := ""
 	sawVerdict := false
 	attemptsMade := 0
+	// statusAsked 标记"这一次尝试已经为不可用的结论状态提醒过一轮"（T232）：
+	// 每条会话只问一次，问过仍给不出状态就照原来的路走（换会话/收尾）。
+	statusAsked := false
 	for attempt := 1; ; attempt++ {
+		statusAsked = false
 		limit := checkerAttempts
 		if !sawVerdict {
 			limit = checkerNoVerdictAttempts
@@ -346,6 +350,48 @@ func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string
 			}
 			continue
 		}
+		// T232：会话真的调了 submit，但 status 不是 pass / issues（实测最常见
+		// 的是一个空状态）。旧行为是关掉这条会话、按"没拿到结论"再开下一次，
+		// 两次之后就成了「核对无结论」：话说了没人听，产物留着，父节点那一支
+		// 永远收不了尾。这里先在同一条会话里要一次可用的状态——工具是可用的，
+		// 只是参数没给对，一句话就能救回来。
+		if submit.Submitted && submit.Status != "pass" && submit.Status != "issues" && !statusAsked {
+			statusAsked = true
+			r.log.LogWarning(tid, "[checker]", base, "提交了未知结论状态:", strconv.Quote(submit.Status))
+			chkState(rowStateQueued)
+			release := r.acquireCheckerSlot()
+			chkState(rowStateRunning)
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+			_, runErr = sess.Run(session.RunOptions{UserText: checkerStatusReminder})
+			release()
+			if runErr != nil {
+				_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
+				if tr != nil {
+					tr.Close()
+					tr = nil
+				}
+				r.log.LogWarning(tid, "[checker]", base, "结论状态提醒轮失败:", runErr)
+				if isSessionFatalError(runErr.Error()) {
+					r.keepCheckerTranscript(trPath, strict)
+					return false, "checker API failure: " + runErr.Error()
+				}
+				if isSessionAPIError(runErr.Error()) {
+					apiFailure = runErr.Error()
+				}
+				continue
+			}
+			if !submit.Submitted {
+				r.log.LogWarning(tid, "[checker]", base, "提醒后仍未提交结论")
+				if tr != nil {
+					tr.Close()
+					tr = nil
+				}
+				continue
+			}
+			if submit.Status != "pass" && submit.Status != "issues" {
+				r.log.LogWarning(tid, "[checker]", base, "提醒后结论状态仍不可用:", strconv.Quote(submit.Status))
+			}
+		}
 		// T217：拿到过结论了（issues 或无法识别的状态都算）——轮次预算就此回到
 		// checkerAttempts，不再为"没结论"多开会话。
 		sawVerdict = true
@@ -410,12 +456,29 @@ func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string
 const (
 	checkerAttempts          = 2
 	checkerNoVerdictAttempts = 4
+
+	// checkerNoVerdictSelfHeal：节点核对"没结论"之后自动换**全新**尝试再来的
+	// 次数（T232）。产物保留、换掉的只是那条已经退化的核对会话；以前这一步只能
+	// 靠人点「重新核对」，自动这一路把"没结论"直接当判决，父章节跟着失败。
+	checkerNoVerdictSelfHeal = 2
 )
 
 // checkerSubmitReminderMark 是"这条会话没有交结论"的提醒开头（T230）。转录里
 // 出现一次这样的 user 消息，就等于那一次续跑没能拿到结论——判断一条核对转录
 // 是否已经退化到不该再回放，只看这个计数，不看正文写了什么。
 const checkerSubmitReminderMark = "You have NOT called submit yet."
+
+// checkerStatusReminderMark 是"调了 submit 但状态不可用"的提醒开头（T232）。
+// 与"根本没调 submit"分开数，但两者都算一次没拿到结论——同一条转录里反复出现
+// 这两种提醒，就是它已经不该再原地续跑了。
+const checkerStatusReminderMark = "You did NOT give a usable submit status."
+
+// checkerStatusReminder 是那句话本身。结论状态只有 pass / issues 两个合法值，
+// 说清楚就行，不解释工具怎么用（工具是可用的，只是参数没给对）。
+const checkerStatusReminder = checkerStatusReminderMark +
+	" Call the `submit` TOOL again with `status` set to exactly `pass` (the chapter is correct) or `issues`" +
+	" (something must be fixed), and put the problem list in `issues` when it is `issues`." +
+	" A verdict written in your reply text is not a verdict."
 
 // loadTranscriptMessages 读一条转录的历史消息（读不到就当空：新会话）。
 func loadTranscriptMessages(path string) []session.ChatMessage {
@@ -440,7 +503,8 @@ func countCheckerSubmitReminders(msgs []session.ChatMessage) int {
 		if !ok {
 			continue
 		}
-		if strings.HasPrefix(strings.TrimSpace(s), checkerSubmitReminderMark) {
+		if strings.HasPrefix(strings.TrimSpace(s), checkerSubmitReminderMark) ||
+			strings.HasPrefix(strings.TrimSpace(s), checkerStatusReminderMark) {
 			n++
 		}
 	}
