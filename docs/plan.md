@@ -220,6 +220,7 @@
 - `powershell/organize_files.ps1` —— 被 `legacy/python/python/organize_files.py`（README 与 `docs/dev.md` 指向的归档实现）同一套三步流程取代的早期版本，且内含一处本地绝对路径（本仓库不允许）。该目录随之变空而消失；`RULE.md` 推送清理示例里那句 `rm -rf … powershell` 现在走它自己的"文件夹不存在，跳过"分支。
 - 上面两个路径的证据相同：`git log --diff-filter=D -- <路径>` 为空（从未被删过），`git grep` 按 basename 与全路径两种写法都是零命中。
 - 未跟踪的一次性脚本与临时态（都在 `temp/`）：11 个按 P 号命名的源码改写/探针脚本（`p30.py`～`p138.py`）、一个内联正则探针（`recheck.mjs`）、一份文件名里带本地样本名的重置脚本、一份已被 `build.sh` 取代的部署脚本（`deploy.py`）、一份 9.8 MB 的单条转录拷贝（`session.jsonl`）、两份一次性配置（`models_only.yaml`/`t37cfg.yaml`），以及七个探针/评审残留目录（浏览器探针截图、两张对照图、一个一次性 Go 探针、一个旧二进制副本、一组 e2e 配置与日志、一组 133 MB 的图形对比指标、一个空目录）。
+  - **更正（2026-10-24）**：上面那组「133 MB 的图形对比指标」属于误删——它不是再生得了的探针残留，而是用户自己的一次**图像对比实验**：3914 个文件、约 133 MB，顶层有对比脚本（`compare.py`/`compare_vnext.py`/`calibrate_metrics.py`）、指标汇总 CSV 与折线图，另有若干按次分目录的会话转录（`.jsonl`）。当时的判据是"tracked 文本零引用 = 残留"，但 `temp/` 整体在 `.gitignore` 里，删掉**不可恢复**（无 git 历史、回收站为空、`/home` 是 ext4 无快照）。教训写成硬规矩置于 `AGENTS.md` 的「未跟踪数据不许按"零引用"删」：含 `.jsonl`／`.csv`／结果图／实验脚本的未跟踪目录一律当数据，只删可再生的构建产物，真要清先逐项列清单确认。
 - 可再生的构建产物：`go/` 下的 Go 构建缓存（1.7 GB，`.gitignore` 已列）、`make build`/`make release` 的输出目录（156 MB；CI 用 `make release` 现场生成，见 `.github/workflows/release.yml`）、`go/temp` 的 e2e 临时目录、两个平台二进制（`go build ./...` 即回）。连同上面的脚本合计约 **2.1 GB**。
 - 空目录 `release/`（从未被任何脚本写入；发布产物在 `go/release/`）。
 
