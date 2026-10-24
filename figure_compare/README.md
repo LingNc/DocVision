@@ -25,7 +25,7 @@ PYTHONPATH=algorithms python3 -m unittest discover -s tests -v
 python3 algorithms/compare_vnext.py evaluate --help
 ```
 
-使用 viewer：浏览器打开 `viewer/viewer.html`，先选择某次运行的 `session.jsonl`，再选择同一次运行的**运行目录**（目录内应包含 `media/` 与 `compare/round_*`）。viewer 会把 `file://media/...` 和比较图映射为所选目录中的本地文件对象；不要只选择 `compare/` 子目录。
+使用 viewer：浏览器打开 `viewer/viewer.html`，点击“选择工作目录”选择包含多个运行子目录的根目录（例如 figure_compare_runs）。viewer 会在浏览器中递归读取并列出所有 `session.jsonl`，选择某个会话后加载其对应的 `media/` 与 `compare/round_*` 缩略图；点击“刷新”可重新读取新增或更新的会话。不会上传整个目录。
 
 运行会话级 Go harness（需在仓库模块上下文中构建，参数详见 `runner/main.go`）：
 
@@ -36,7 +36,7 @@ go run . -config ../../path/to/config.yaml -original ../../path/to/reference.png
   -transcript ../../path/to/run/session.jsonl
 ```
 
-程序会在指定输出目录产生 `session.jsonl`、运行日志和工作产物；用 `viewer/viewer.html` 选择 JSONL，再选择对应的 `compare/latest` 或 `compare/round_NN` 目录查看图像证据。配置、原图、输出路径均由命令行传入，不在源码中写死。
+程序会在指定输出目录产生 `session.jsonl`、运行日志和工作产物；打开 `viewer/viewer.html` 后选择包含多个运行子目录的根工作目录，再从会话列表中选择目标会话查看。配置、原图、输出路径均由命令行传入，不在源码中写死。
 
 ## 隐私与数据边界
 
