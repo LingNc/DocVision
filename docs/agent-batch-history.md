@@ -2633,3 +2633,13 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **配置与文档**：`config.go` + `internal/config/default.yaml` + `config.example.yaml`（两份模板逐字节一致，`cmp` 核过）+ `docs/config.md` 新行；`config_version` 不变（标量键，无新块）。
 - **验证**：`go build ./...`、`go vet ./internal/latex/ ./internal/config/`、`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿；`gofmt -l` 对新改文件干净（`stylefix.go` 是既有）。
 - **未改（刻意）**：① 已经落盘的转录一字不动（用户数据），新行为只对之后的写入生效；② 正在跑的进程用的是旧二进制，要看到这些行为得换新二进制重跑；③ 槽位总数没动（重核走核对池，`checker_concurrency` 20 已够）。
+
+## v1.5+（T234：打回后的重核真的重新问一遍核对模型，2026-10-25）
+
+- **触发**：用户报「我发现有一个会话 明明在第一次已经处理完了并且通过了。为什么现在又被重跑了一次？：「work:chapter_024_child_01_child_04.tex 」」。
+- **现场**：这一支的子章节在 18:20:17 与 18:27:47 各核对通过一次（两次都落 `run_end`，第二次在 `checker_…child_04.try2.jsonl`），21:35 父节点的工作区被重置，22:00 它被从头转换，随后重新拆出四条子章节（22:00–23:50）。往上追一层：父节点的核对转录 112 条消息、只有 18:51:21 一次 `submit`、之后一次 `run_end`，却在 18:51:22、18:56:34、19:02:42、19:10:39、19:18:24、19:25:23 记了六次「发现问题」，六次的问题原文逐字相同（同一条脚注缺正文）。
+- **缺陷**：`book.go` 的反馈轮把同一个 `checkerTranscript` 再交给 `checkChapterAt`；`runChapterCheck` 从这条转录回放历史，末尾那次 `submit` 被 `replaySubmit` 原样重放、`resumeSkip` 置真，`sess.Run` 整段跳过——模型一次都没被再问，返回的还是上一轮的结论。于是「重核」= 复读：每一轮的修复会话都真的把被点名的行补上（分片 16192→16301→16304→16432→16293→16314 字节，脚注在第 121 行，报告写「Open issues carried upward: 0」），核对一次都没看过它。6 轮耗尽 ⇒ `archiveChapterAttempt` 作废整次尝试 ⇒ 重转该节点与全部子孙，把早已通过的子章节一起扔掉。缺陷在 `Depth 0` 的普通章节同样成立（顶层第一轮的核对转录在 `work/sessions/`，节点推导出来的路径在 `work/temp/conv_<章>/sessions/`，两条路都走同一个 `replaySubmit`）。
+- **改**：反馈轮新增局部闭包 `nextCheckerTranscript()`——基准取第一条真在用的核对转录（递归节点是节点目录那条，顶层是 `work/sessions/checker_<章>.jsonl`），号取 `lastAttemptNumber` + 1 且必须大于当前号、至少 2，写回 `checkerAttemptNo` 并用 `attemptTranscriptPath` 开新文件；`checkChapterAt` 的入参换成它。首次核对与 T233 的自动重核路径一字未动。
+- **测试**：新增 `t234_recheck_test.go`（`checkerStatuses: {"issues","pass"}`）：这一章必须收下、核对请求 2 次、转换请求 2 次、`work/chapters/chapter_01.tex.checker` 不存在、`work/sessions/checker_chapter_01.try2.jsonl` 存在。把 `checkChapterAt` 的入参改回旧路径，这条 0.96 秒就红，报的正是「共 6 次尝试仍未通过 checker: the marked formula is missing from the submitted chapter」——与现场同一句话。`rescue_triggers_test.go` 的假服务器为此加了按请求取 `status` 的能力。P60 的 `TestFixBudgetExhaustedSkipsChapterReattempt` 原先期望「父章节核对 1 次」，那是重放假象；现在按「首次 + 反馈轮」算（`checker_rounds: 1` 被下限抬到 3，故 4 次），整章不重开的三条断言不变。
+- **验证**：`go build ./...`、`go vet ./internal/latex/ ./internal/config/`、`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿；`gofmt -l` 对新改文件干净（`stylefix.go` 是既有）。
+- **未改（刻意）**：① 已作废的尝试照旧留在 `work/attempts/` 下不删；② 被重转那一支已经烧掉的转换不回来；③ 落盘转录一字不动（用户数据），新行为只对之后的写入生效；④ 整章重开仍会重转子树（"已通过的子章节跨尝试复用"是另一个题目，不在本次范围）。

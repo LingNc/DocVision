@@ -93,9 +93,11 @@ func TestFixBudgetExhaustedSkipsChapterReattempt(t *testing.T) {
 	if stats.integrations != 1 {
 		t.Errorf("父章节整合会话 = %d，期望 1", stats.integrations)
 	}
-	// 父章节核对只跑第一轮；重开一次会再来一次（外加反馈轮）。
-	if stats.parentCheckers != 1 {
-		t.Errorf("父章节核对次数 = %d，期望 1（没有第二次尝试）", stats.parentCheckers)
+	// 父章节核对 = 首次 1 次 + 反馈轮 3 次（`checker_rounds: 1` 会被下限抬到 3）。
+	// 重点是"没有第二次尝试"：整章重开会再来一整套，这里只多出反馈轮。以前这条
+	// 写的是 1——那时反馈轮都在重放上一轮的结论、一次都没真问过模型（T234）。
+	if want := 1 + checkerAttemptBudget(1, 0); stats.parentCheckers != want {
+		t.Errorf("父章节核对次数 = %d，期望 %d（首次 + 反馈轮，且没有第二次尝试）", stats.parentCheckers, want)
 	}
 	if dir := filepath.Join(proj, "work", "attempts", "chapter_01"); pathExists(dir) {
 		t.Errorf("不该归档这一版尝试（说明整章重开了）: %s", dir)

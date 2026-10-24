@@ -2156,6 +2156,29 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		// T209：核对会话没给结论，不是章节的问题——喂反馈轮只会换来一次"再交一遍"。
 		r.log.LogWarning(tid, "[checker]", base, "核对会话没有给出结论，跳过反馈轮:", issues)
 	}
+	// T234：打回一轮之后的重核必须**另开一条核对转录**。沿用上一条会命中
+	// replaySubmit——它把转录里已经记下的那次 submit 原样重放一遍，模型根本不会
+	// 被再问一次，回来的还是上一轮的 issues 原文。实测一条整合节点连续 6 轮收到
+	// 同一条「脚注 41 缺正文」：每一轮修复会话都真的把那一行补上、编译通过、提交
+	// 成功，核对却一次都没有再看它；6 轮耗尽后整次尝试作废，连已经核对通过的子
+	// 章节一起重转（用户看到的就是"明明通过了，又被重跑一次"）。
+	nextCheckerTranscript := func() string {
+		trBase := checkerTranscript
+		if trBase == "" {
+			trBase = filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
+		}
+		next := lastAttemptNumber(trBase) + 1
+		if next <= checkAttempt {
+			next = checkAttempt + 1
+		}
+		if next < 2 {
+			next = 2
+		}
+		checkAttempt = next
+		r.bumpCheckerAttemptNo(base, checkAttempt)
+		checkerTranscript = attemptTranscriptPath(trBase, checkAttempt)
+		return checkerTranscript
+	}
 	for round := 0; !ok && !checkerNoVerdict(issues) && round < rounds; round++ {
 		r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
 		r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
@@ -2176,7 +2199,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			break
 		}
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
-		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker, node.AttemptNum)
+		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, nextCheckerTranscript(), checkerView, node.StrictChecker, node.AttemptNum)
 		if !ok && isSessionAPIError(issues) {
 			return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
 		}

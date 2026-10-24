@@ -66,6 +66,10 @@ type rescueChapterOptions struct {
 	// （T230）：`work/sessions/checker_chapter_01.jsonl` 里已经有 n 条提交提醒，
 	// 用来钉住「这种转录不再回放、也不再往上追加」。
 	seedCheckerReminders int
+	// checkerStatuses 是逐次核对会话给出的结论（第 n 次取第 n 项，超出取最后
+	// 一项）；空 = 每次都 pass。给多项时用来钉住"打回一轮之后必须重新真的核一
+	// 遍"（T234）：第二项是 pass 就说明修复后的那一版确实被重新看过了。
+	checkerStatuses []string
 }
 
 type rescueChapterStats struct {
@@ -239,15 +243,29 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 
 		// 核对会话：只读（有 read_file / grep、没有 write_file）。
 		case toolset["read_file"] && toolset["grep"] && !toolset["write_file"]:
-			stats.add(func() { stats.checker++ })
+			var n int
+			stats.add(func() {
+				stats.checker++
+				n = stats.checker
+			})
 			if opts.checkerNoSubmit {
 				// 退化：跑完就给一段正文，从不调 submit。
 				p60Text(w, "I could not finish the review.")
 				return
 			}
-			subdivisionReply(w, subdivisionCall("check-submit", "submit", map[string]any{
-				"report": map[string]any{"status": "pass"},
-			}))
+			status := "pass"
+			if len(opts.checkerStatuses) > 0 {
+				i := n - 1
+				if i >= len(opts.checkerStatuses) || i < 0 {
+					i = len(opts.checkerStatuses) - 1
+				}
+				status = opts.checkerStatuses[i]
+			}
+			report := map[string]any{"status": status}
+			if status != "pass" {
+				report["issues"] = "the marked formula is missing from the submitted chapter"
+			}
+			subdivisionReply(w, subdivisionCall("check-submit", "submit", map[string]any{"report": report}))
 
 		// 转换会话：可写 + request_chapter_split。
 		default:
