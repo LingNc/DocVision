@@ -602,18 +602,100 @@ func childNodeWork(proj, base string) string {
 	return ""
 }
 
-// latestConvertAttempt 找这一章最近一次转换尝试的号（P59）：重新核对产出的
-// 锚点必须指向**做出这份产物的那次转换**。顶层章节的转换转录在
-// `<proj>/work/sessions/`；递归子章节的转录跟着自己的节点走
-// （`<节点>/sessions/`），节点工作区由 childNodeWork 反推，再取同级 sessions。
-// 找不到任何转录时按第 1 次算——与 lastAttemptNumber 的既有口径一致。
-func latestConvertAttempt(proj, base string) int {
-	dir := filepath.Join(proj, "work", "sessions")
-	if !fileExists(filepath.Join(dir, "convert_"+base+".jsonl")) {
-		if nodeWork := childNodeWork(proj, base); nodeWork != "" {
-			dir = filepath.Join(filepath.Dir(nodeWork), "sessions")
+// chapterSessionsDir 找这一章转录所在的目录：顶层章节在 `<proj>/work/sessions/`，
+// 递归子章节在它自己节点的 `sessions/` 下（T231）。
+//
+// 为什么按**文件名精确匹配**走：`childNodeWork` 用的是前缀匹配，
+// `chapter_024_child_09` 会先撞上 `convert_chapter_024_child_09_child_01.jsonl`
+// （遍历到 child_01 目录就命中并返回），于是"这一章的转录"被解到了孙节点上。
+// 转录名带完整章节 ID，精确匹配（`convert_<章>.jsonl` / `convert_<章>.try<N>.jsonl`）
+// 才是唯一的。
+func chapterSessionsDir(proj, base string) string {
+	top := filepath.Join(proj, "work", "sessions")
+	if isChapterTranscriptDir(top, base) {
+		return top
+	}
+	if i := strings.Index(base, "_child_"); i > 0 {
+		roots, _ := filepath.Glob(filepath.Join(proj, "work", "temp", "conv_"+base[:i]+"*", "work", "_subdivision"))
+		for _, root := range roots {
+			hit := ""
+			_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+				if err != nil || hit != "" {
+					return nil
+				}
+				if d.IsDir() || filepath.Base(filepath.Dir(p)) != "sessions" {
+					return nil
+				}
+				if !isChapterTranscriptName(d.Name(), base) {
+					return nil
+				}
+				hit = filepath.Dir(p)
+				return nil
+			})
+			if hit != "" {
+				return hit
+			}
 		}
 	}
+	return top
+}
+
+// isChapterTranscriptName 判断转录名是不是**这一章**的（不含孙节点的转录）。
+func isChapterTranscriptName(name, base string) bool {
+	name = strings.ToLower(name)
+	for _, role := range []string{"convert_", "checker_"} {
+		stem := role + strings.ToLower(base)
+		if name == stem+".jsonl" || strings.HasPrefix(name, stem+".try") {
+			return true
+		}
+	}
+	return false
+}
+
+func isChapterTranscriptDir(dir, base string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && isChapterTranscriptName(e.Name(), base) {
+			return true
+		}
+	}
+	return false
+}
+
+// chapterConvertTranscript 这一章第 attempt 次转换的转录路径（T231）。
+func chapterConvertTranscript(proj, base string, attempt int) string {
+	return attemptTranscriptPath(filepath.Join(chapterSessionsDir(proj, base), "convert_"+base+".jsonl"), attempt)
+}
+
+// markChapterVerdict 把核对的结论写到**产出这份产物的那次转换转录**上（T231）。
+//
+// 页面上转换行看的是它自己那条转录的最后一条 chapter_activity。以前"重新核对"
+// 只在核对转录里写结论，转换转录还挂着之前那句 error，于是核对已经通过、界面
+// 上仍是"转换 · 会话错误"，看着像这一章永远过不去。
+func markChapterVerdict(proj, base string, attempt int, ok bool, issues string) {
+	state := "issues"
+	switch {
+	case ok:
+		state = "pass"
+	case checkerNoVerdict(issues):
+		state = "no_verdict"
+	}
+	tr := chapterConvertTranscript(proj, base, attempt)
+	if tr == "" || !fileExists(tr) {
+		return
+	}
+	_ = appendTranscriptActivity(tr, state)
+}
+
+// latestConvertAttempt 找这一章最近一次转换尝试的号（P59）：重新核对产出的
+// 锚点必须指向**做出这份产物的那次转换**。顶层章节的转换转录在
+// `<proj>/work/sessions/`；递归子章节的转录跟着自己的节点走（`<节点>/sessions/`）。
+// 找不到任何转录时按第 1 次算——与 lastAttemptNumber 的既有口径一致。
+func latestConvertAttempt(proj, base string) int {
+	dir := chapterSessionsDir(proj, base)
 	return lastAttemptNumber(filepath.Join(dir, "convert_"+base+".jsonl"))
 }
 
@@ -636,12 +718,16 @@ func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	if n < 2 {
 		n = 2
 	}
-	trPath := attemptTranscriptPath(filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl"), n)
+	trPath := attemptTranscriptPath(filepath.Join(chapterSessionsDir(proj, base), "checker_"+base+".jsonl"), n)
 	view := filepath.Join(proj, "work", "views", fmt.Sprintf("checker_%s_try%d", base, n))
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid, trPath, view, false, latestConvertAttempt(proj, base))
+	attempt := latestConvertAttempt(proj, base)
+	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid, trPath, view, false, attempt)
 	if isSessionAPIError(issues) {
 		return false, issues
 	}
+	// T231：结论写回转换转录（页面上那一行的状态就是它）。核对那一边的
+	// no_verdict 由 checkChapterAt 自己写在核对转录上，这里不再重复。
+	markChapterVerdict(proj, base, attempt, ok, issues)
 	if ok {
 		_ = os.Remove(texPath + ".checker")
 		r.log.Log(tid, "[checker]", base, "重新核对通过")
@@ -919,6 +1005,17 @@ func childChapterParent(base string) (string, bool) {
 	return base[:i], true
 }
 
+// requeueParentAfterChildPass：子章节的核对这一轮**通过了**，父节点却还停在
+// 「等待子会话」——它只能靠人点一下「继续跑」才醒。这里替人点这一下（T231）。
+// 顶层章节没有父节点，什么也不做。
+func (r *Runner) requeueParentAfterChildPass(proj, project, base string) {
+	parent, isChild := childChapterParent(base)
+	if !isChild {
+		return
+	}
+	r.queueParentContinueFor(proj, project, parent, base)
+}
+
 // queueParentContinueFor 把"子章节单独重转"改成排队父章节的「继续跑」（T211）。
 //
 // 为什么不能单独重跑：子章节的产物与整合都归父节点——重跑完这一支没有谁去整合
@@ -967,8 +1064,15 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 			}
 		} else {
 			r.forceCheckerRetry(proj, base)
-			if _, issues := r.recheckChapter(proj, base, 0); issues != "" {
+			ok, issues := r.recheckChapter(proj, base, 0)
+			if issues != "" {
 				r.log.LogInfo(0, "[checker]", base, "重新核对的结论:", issues)
+			}
+			// T231：子章节这一支由父节点负责整合，它的核对后来通过了，父节点
+			// 不会自己醒过来——于是"子会话全部已通过、父会话一直等待子会话"。
+			// 这里替父节点排一条「继续跑」，让它重新收尾。
+			if ok {
+				r.requeueParentAfterChildPass(proj, req.Project, base)
 			}
 		}
 	case "continue":

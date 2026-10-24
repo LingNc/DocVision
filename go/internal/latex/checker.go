@@ -86,7 +86,24 @@ type checkHints struct {
 	Notes  string // submit.notes（写成 check:notes.md）
 }
 
+// checkChapterAt 是核对入口。它把这一轮的结果落到**核对转录**上（T231）：没给结论
+// 的几种收尾（退化、复盘判定无法挽救、只读视图没准备好、始终不 submit）统一写
+// no_verdict；会话真报错（API/余额）照旧留 error——那是真的出错，不能一起糊成
+// "没结论"。写在入口而不是每个 return 上，是因为返回点有六处，漏一处就会重新
+// 出现"页面上说会话错误、实际只是核对没交结论"。
 func (r *Runner) checkChapterAt(proj, base, chapPath, texPath, partsPath string, hints checkHints, tid int, transcriptPath, viewPath string, strict bool, convertAttempt int) (bool, string) {
+	ok, issues := r.runChapterCheck(proj, base, chapPath, texPath, partsPath, hints, tid, transcriptPath, viewPath, strict, convertAttempt)
+	if !ok && checkerNoVerdict(issues) && !strings.HasPrefix(issues, "checker API failure") {
+		trPath := transcriptPath
+		if trPath == "" {
+			trPath = filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
+		}
+		markCheckerNoVerdict(trPath)
+	}
+	return ok, issues
+}
+
+func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string, hints checkHints, tid int, transcriptPath, viewPath string, strict bool, convertAttempt int) (bool, string) {
 	view := viewPath
 	if view == "" {
 		view = ensureCheckerView(proj, base, chapPath, texPath, partsPath)
@@ -436,6 +453,14 @@ func (r *Runner) keepCheckerTranscript(path string, strict bool) {
 		return
 	}
 	r.keepSessionFile(path)
+}
+
+// markCheckerNoVerdict 把"这一轮核对没给结论"写在这条核对转录自己身上（T231）。
+//
+// 这里不写 error：核对会话确实跑完了，只是没交结论，页面上原来那条"会话错误"
+// 既冤枉了转换、也说不清到底发生了什么。
+func markCheckerNoVerdict(trPath string) {
+	_ = appendTranscriptActivity(trPath, "no_verdict")
 }
 
 // checkerAnchorName 是核对会话的锚点（P59）：产出这份产物的转换转录的**文件名**

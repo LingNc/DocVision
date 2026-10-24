@@ -2590,3 +2590,19 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **测试**：`checker_degrade_test.go` 新增 `TestCountCheckerSubmitReminders`（正文写 `submit`／非字符串消息／别的提醒文案都不算）与 `TestCheckerTranscriptWithRepeatedRemindersIsNotResumed`（预铺 4 条提醒：一次核对请求都不发、`stats.checker == 0`、产物在、`.checker` 是"没结论"那类文案；把守卫摘掉这条会红，已复验）；`rescue_triggers_test.go` 夹具加 `seedCheckerReminders`；`chapter_subdivision_integration_test.go` 在子节点转换的那一刻探 `r.lockChapter(childBase)`，探到"没被占住"就断言失败（摘掉 A 的锁这条会红，已复验）。
 - **验证**：`go test ./internal/... -count=1` 14 个包全绿（latex 29.1s）、`go build ./...`、`go vet ./internal/...` 干净。
 - **未改（刻意）**：① 正在跑的那条无法从页面叫停（预览服务只读，也没有"停止会话"通道）——保证的是"不会再有第二条并排跑起来"；② 已经落盘的坏转录一字不动（用户数据）；③ 节点驱动的续跑路径与切割副本落点都不动（见缺陷 C）。
+
+## v1.5+（T231：核对结论写回它自己的转换转录；父节点不再停在「等待子会话」，2026-10-24）
+
+- **触发**：用户贴了四行章节树：「转换 · chapter_022_child_12 会话错误 1.98M / 9.2k」「转换 · chapter_023_child_04 会话错误 2.95M / 12k 就卡在这一个会话上了」「转换 · chapter_024_child_05_child_05 会话错误 761k / 5.5k」「转换 · chapter_024_child_09 等待子会话 295k / 3.8k」，并说「很多父会话都卡在同一个问题上，有一个子会话核对通过会话提交，但是显示会话错误导致父会话一直没办法合并」「子会话全部显示已经通过，但是我看这个会话里面并没有子会话完成的消息」。
+- **现场（只读 `/api/index` 与转录尾部）**：`chapter_022_child_12` 转换 a1 是 `error`，核对 a2/a3 在 16:42/16:46 通过、`checker_target` 记的转换尝试号对得上 a1；`chapter_024_child_05_child_05` 转换 a4 是 `error`（`.try4`），核对 a2/a3 在 16:37/16:41 通过、锚点也对得上。这两处是标签缺陷，产物是过的。`chapter_023_child_04` 转换 a3 `error`，核对 a3 从 16:23 起停在 `checking_result`、没有结论——不是显示错。`chapter_024_child_09` 转换 a3 `waiting_children`（children:3，16:20:42）：child_01 17:26 `issues` → 17:53 重转通过并核对通过，child_03 17:15 通过，child_02 转换 17:04 `checking_result`、核对 17:41 `error`——那三行里没有 child_02 的失败，父节点一直在等它。
+- **缺陷 A（结论落错转录）**：`recheckChapter` 按章节名前缀找核对转录，先命中 `work/sessions/` 下的顶层文件，也会误命中同前缀的子章节文件（`chapter_024_child_05_child_05` 与 `…_child_05`）；拿到结论后只 `appendTranscriptActivity(trPath, …)`，改的是核对转录，转换转录最后一条活动仍是 `error`。
+- **改 A**：`retry.go` 新增 `chapterSessionsDir`／`isChapterTranscriptName`（精确匹配 `convert_<章>[.tryN]`、`checker_<章>[.tryN]`，小写比较）／`isChapterTranscriptDir`／`chapterConvertTranscript`／`latestConvertAttempt`；`recheckChapter` 用会话目录定位转录，尝试号取该目录下最大的一版，结论走 `markChapterVerdict(proj, base, attempt, ok, issues)`——按 `checker_target` 的锚点写回对应的转换转录（`pass`／`issues`／`no_verdict`）。
+- **缺陷 B（没结论被记成会话错误）**：核对的几种收尾（入口守卫、会话退化、复盘判救不回、始终不 submit、只读视图没准备好）返回的都是"没给结论"，但转录上写 `error`，转换行于是显示「会话错误」。
+- **改 B**：`checkChapterAt` 拆成入口包装 + `runChapterCheck`（原函数体）；包装里 `!ok && checkerNoVerdict(issues) && !strings.HasPrefix(issues, "checker API failure")` 时写 `markCheckerNoVerdict(trPath)`（`chapter_activity: no_verdict`）。写在入口而不是六处返回点，漏一处就会复现。接口失败／余额不足仍写 `error`。`book.go` 里 no-verdict 结算那支把转换侧的 `error` 也换成 `no_verdict`（T222 的"保留产物、只重开核对"口径不变）；页面 `CHAPTER_ACTIVITY` 新增 `no_verdict: '核对无结论'`。
+- **缺陷 C（失败状态没人写）**：子节点转换失败只进了 `convertChapterChildren` 的返回值；父转录最后一条活动还是之前的 `waiting_children`，失败的子节点自己也不写状态。
+- **改 C**：父节点转换失败时写 `error`（已排队重试则写 `queued`），子节点失败时同样往自己转录写一条终态。
+- **缺陷 D（子章节核对通过后没人叫醒父节点）**：父节点的整合只在它自己那一轮驱动里发生；子章节的重试把核对跑过了，父节点不知道，于是一直「等待子会话」。
+- **改 D**：`runRetryTask` 的核对分支通过后调 `requeueParentAfterChildPass(proj, req.Project, base)`，内部 `childChapterParent` 取到负责整合的那一段（多层的取最上面一层），排一条父章节的「继续跑」；父章节已有「继续跑」排队时不重复排。
+- **测试**：`chapter_verdict_test.go`（新增：结论只写回自己的转换转录、同名子章节的转录不被误改、顶层章节的结论留在顶层）；`checker_degrade_test.go` 改成钉"退化后转换与核对两边都留 `no_verdict`，没有任何一条留 `error`"（这条一开始红——退化的收尾在 `dec.Stop` 那支提前返回，入口包装才收到它，所以标记必须放在入口）；`chapter_subdivision_integration_test.go` 新增 `TestChildConvertFailureRecordsStateOnItsOwnNode`（子节点转换必失败：父节点与失败子节点的收尾状态都不能是 `waiting_children`）；`t211_child_retry_test.go` 新增 `TestChildCheckerPassRequeuesParentContinue`（顶层不排、子章节排到 `chapter_024`、重复调用只排一次）。
+- **验证**：`go test ./internal/... -count=1` 14 个包全绿、`go build ./...`、`go vet ./internal/...` 干净；`cd web && npx vitest run` 262 条全绿，`npm run build` 重出 `viewer.js`（545.58 kB）后再 `go build` 通过。
+- **未改（刻意）**：① 已经落盘的转录一字不动（用户数据），新记法只对之后的写入生效；② 用户机器上正在跑的进程用的是 T230/T231 之前的二进制，状态不会自己变回来，那些行重新核对一次即可；③ 多层父节点的重排仍排最上面那一层（与 T211 口径一致），不改成逐层叫醒。

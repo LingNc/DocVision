@@ -82,6 +82,30 @@ func TestCheckerDegradeDoesNotFeedConvertSession(t *testing.T) {
 	if !checkerNoVerdict(string(note)) {
 		t.Errorf(".checker 里应是「没结论」那类文案，实际：%q", string(note))
 	}
+
+	// T231：这一章是**核对**没给结论，不是转换出错。以前失败只记在转换转录里、
+	// 状态还是 error，页面上就是"转换 · 会话错误"——转换明明 submit 成功、run_end
+	// 为 ok。现在两份转录各写 no_verdict，任何一条都不再读作会话错误。
+	convertTr := filepath.Join(run.proj, "work", "sessions", "convert_chapter_01.jsonl")
+	if got := lastChapterActivity(t, convertTr); got != "no_verdict" {
+		t.Errorf("转换转录最后一条状态 = %q，期望 no_verdict（页面上这一行不该显示会话错误）", got)
+	}
+	checkers, _ := filepath.Glob(filepath.Join(run.proj, "work", "sessions", "checker_chapter_01*.jsonl"))
+	if len(checkers) == 0 {
+		t.Fatal("没有核对转录")
+	}
+	sawNoVerdict := false
+	for _, path := range checkers {
+		switch got := lastChapterActivity(t, path); got {
+		case "no_verdict":
+			sawNoVerdict = true
+		case "error":
+			t.Errorf("%s 最后一条状态仍是 error：没给结论不是会话错误", filepath.Base(path))
+		}
+	}
+	if !sawNoVerdict {
+		t.Errorf("核对那一边也该留下 no_verdict，实际转录 %v", checkers)
+	}
 }
 
 // TestPendingNoVerdictProductIsRecheckedNotSkipped 钉住另一半：产物在、但上次核对

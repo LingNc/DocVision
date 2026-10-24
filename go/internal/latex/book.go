@@ -1352,6 +1352,14 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 				Seq:            childSeq,
 			}
 			if err := r.convertChapterNode(proj, clsName, manualPath, childMD, workDir, idx, tid, false, childNode); err != nil {
+				// T231：这一支失败必须写在**它自己**的转录上。以前只有父节点的
+				// 失败清单里有一句，页面这一行还停在最后一条成功状态上（"等待
+				// 子会话"/"转换完成待核对"），一看像是还在跑。
+				state := "error"
+				if r.rescueQueuedFor(childNode.TranscriptPath) {
+					state = "queued"
+				}
+				_ = appendTranscriptActivity(childNode.TranscriptPath, state)
 				mu.Lock()
 				failures = append(failures, id+": "+err.Error())
 				mu.Unlock()
@@ -1901,6 +1909,14 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		submit.SubmitRoot = stageRoot
 		texPath = filepath.Join(stageRoot, base+".tex")
 		if err := r.convertChapterChildren(proj, clsName, manualPath, chapPath, base, work, workDir, idx, tid, node, splitTool.Children); err != nil {
+			// T231：子树上任何一支失败，这一层也必须留下结论。以前这里直接
+			// return，转录的最后一条还是上面那句"等待子会话"——子树早就跑完了，
+			// 页面上却几小时都显示在等，看着像卡住，实际是失败没有落盘。
+			state := "error"
+			if r.rescueQueuedFor(trPath) {
+				state = "queued"
+			}
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
 			return err
 		}
 		if err := writeChapterChildrenManifest(work, base, splitTool.Children); err != nil {
@@ -2085,7 +2101,14 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if !ok && checkerNoVerdict(issues) {
 		// 仍然没有判定：以"checker 不可用"收尾，产物留在原处不归档（`.checker` 里
 		// 留这条文案，重跑时 chapterRecheckPending 会让它先重核而不是"已有产物，跳过"）。
-		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
+		//
+		// T231：这条失败属于**核对**，不属于转换——转换会话这一轮已经交了两个
+		// 路径。以前只往转换转录里写 `error`，页面上就成了"转换 · 会话错误"：一条
+		// 明明 submit 成功、run_end 为 ok 的记录被判了死，用户只能猜是显示错了还是
+		// 真出错。现在各写各的：核对转录由 checkChapterAt 写 `no_verdict`（它没给
+		// 结论），转换转录也写 `no_verdict`（这一版产物保留、等重核），没有一行读
+		// 作"会话错误"。
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "no_verdict"})
 		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
 		return fmt.Errorf("%s 的核对始终没有给出结论（不是内容问题，%d 个核对会话都没下判定），"+
 			"已保留这一版产物未作废——重跑或「重新核对」会接着核这一份: %s",

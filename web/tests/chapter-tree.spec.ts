@@ -242,6 +242,10 @@ describe('章节状态文案', () => {
     expect(chapterActivityLabel('issues', 'checker')).toBe('发现问题')
     expect(chapterActivityLabel('waiting_children')).toBe('等待子会话')
     expect(chapterActivityLabel('interrupted')).toBe('已中断')
+    // T231：核对没给结论时写 no_verdict，两个角色都读作"核对无结论"——
+    // 转换会话其实交付成功，不能再显示"会话错误"。
+    expect(chapterActivityLabel('no_verdict', 'convert')).toBe('核对无结论')
+    expect(chapterActivityLabel('no_verdict', 'checker')).toBe('核对无结论')
     expect(chapterActivityLabel(undefined, 'convert', '', false)).toBe('')
     expect(chapterActivityLabel(undefined, 'convert', '', true)).toBe('运行中')
   })
