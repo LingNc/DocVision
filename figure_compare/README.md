@@ -6,7 +6,7 @@
 
 - `algorithms/`：legacy 比较器、新版视觉证据评估器、容错指标、校准工具、judge 合约及会话停止策略。
 - `tests/`：合成图像和结构化判定测试，作为源码纳入 Git。
-- `runner/`：Go 单会话 harness，输出 JSONL 转录和比较证据。
+- `runner/`：Go 单会话 harness，提供 `view_pdf` 候选预览与 `compare_figure` 比较；比较回执含最差区域坐标，可按区域放大复查。
 - `viewer/`：单文件 HTML JSONL 会话浏览器模板。
 - `docs/`：设计边界与使用说明。
 

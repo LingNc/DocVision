@@ -9,6 +9,8 @@ go run . -config <config.yaml> -original <reference-image> \
   -compare-script ../algorithms/compare.py -out <run-directory>
 ```
 
-The default transcript is `<run-directory>/session.jsonl`. Override with `-transcript`. Use `-model` to select a configured alias; otherwise `latex.drawing_model` is used. `-context` optionally supplies surrounding document context for the figure session and is also returned by `image_context`; keep real document text outside the repository. `-python` selects the interpreter for the comparator. The supplied config must define the model and session settings; the runtime must also provide XeLaTeX and pdfinfo.
+The runner exposes `view_pdf` before `compare_figure`: the model can inspect the actual compiled PDF, then receive similarity, channel evidence, and a `worst_region` percentage box. It can call `compare_figure` again with that box and a larger `zoom` to focus on the weakest area before submitting.
+
+The default transcript is `<run-directory>/session.jsonl`. Override with `-transcript`. Use `-model` to select a configured alias; otherwise `latex.drawing_model` is used. `-context` optionally supplies surrounding document context for the figure session and is also returned by `image_context`; keep real document text outside the repository. `-python` selects the interpreter for the comparator. The supplied config must define the model and session settings; the runtime must also provide XeLaTeX, pdfinfo, and pdftocairo.
 
 Open `../viewer/viewer.html`, click “选择工作目录”, and choose the parent directory containing the run subdirectories. The viewer recursively lists `session.jsonl` files; select one session to inspect its transcript, `media/` thumbnails, and `compare/round_*` evidence. Do not commit actual config, image, JSONL, or run outputs.
