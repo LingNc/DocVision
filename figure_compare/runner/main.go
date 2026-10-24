@@ -21,6 +21,7 @@ import (
 
 type harness struct {
 	root, original, script, python string
+	contextText                    string
 	compileOK                      bool
 	lastPDF                        string
 	hasComparison                  bool
@@ -190,6 +191,9 @@ func (t *tool) Execute(raw string) (session.ToolResult, error) {
 		}
 		return session.ToolResult{Text: "Image attached: " + name, ImageBase64: base64.StdEncoding.EncodeToString(b), ImageMIME: mime}, nil
 	case "image_context":
+		if t.h.contextText != "" {
+			return session.ToolResult{Text: t.h.contextText}, nil
+		}
 		return session.ToolResult{Text: "No neighboring image references; this is a standalone figure."}, nil
 	case "submit":
 		if !t.h.compileOK {
@@ -314,6 +318,7 @@ func main() {
 	out := flag.String("out", "work/figure-compare-run", "run output directory")
 	transcriptPath := flag.String("transcript", "", "JSONL transcript path; defaults to <out>/session.jsonl")
 	modelName := flag.String("model", "", "model alias or model id; defaults to latex.drawing_model")
+	contextText := flag.String("context", "", "surrounding document context for this figure session")
 	compareScript := flag.String("compare-script", "algorithms/compare.py", "path to compare.py")
 	python := flag.String("python", "python3", "Python executable used by compare.py")
 	flag.Parse()
@@ -342,7 +347,7 @@ func main() {
 	if *transcriptPath == "" {
 		*transcriptPath = filepath.Join(root, "session.jsonl")
 	}
-	h := &harness{root: root, original: *original, script: *compareScript, python: *python}
+	h := &harness{root: root, original: *original, script: *compareScript, python: *python, contextText: *contextText}
 	names := []string{"write_file", "edit_file", "read_file", "grep", "compile", "compare_figure", "view_image", "image_context", "submit"}
 	tools := make([]session.Tool, 0, len(names))
 	for _, n := range names {
@@ -354,7 +359,10 @@ func main() {
 	system = strings.ReplaceAll(system, "Compare what you see in view_pdf with the ORIGINAL image (view_image). Fix structure, geometry, label positions and proportions; compile again.", "Inspect the compare_figure overlays and the ORIGINAL image (view_image). Fix structure, geometry, label positions and proportions; compile and compare again. The experimental acceptance gate is similarity >= 50%; submit is rejected below that score.")
 	system = strings.ReplaceAll(system, "and view_pdf report the actual numbers in mm, the same unit as the original's measured size", "and compare_figure reports raster dimensions")
 	system += "\n\nFor this isolated experiment, use compare_figure after every successful compile. Its similarity is foreground-stroke intersection-over-union after translation search; do not treat it as semantic correctness. Pass only at >=50%, and inspect each channel before submit."
-	ctx := "Standalone reference figure. Preserve the visible structure, geometry, labels, colors, and aspect ratio of the supplied reference image."
+	ctx := *contextText
+	if strings.TrimSpace(ctx) == "" {
+		ctx = "Standalone reference figure. Preserve the visible structure, geometry, labels, colors, and aspect ratio of the supplied reference image."
+	}
 	user := prompts.Render(prompts.FigureUser, map[string]string{"CONTEXT": ctx, "ORIGINAL_SIZE": "Match the supplied reference image aspect ratio and do not enlarge it to page size.", "VIEW_BUDGET": "View budget: 24 looks at the original image; use compare_figure for registered channel comparison."})
 	transcript, err := session.NewTranscript(*transcriptPath)
 	fatal(err)
