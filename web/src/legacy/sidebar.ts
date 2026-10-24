@@ -704,10 +704,13 @@ function newestByMtime(items: any[]): any | null {
  */
 function checkerForConvert(checkers: any[], convert: any, pinnedConvert: boolean): any | null {
   if (!convert) return newestOf(checkers)
+  const generation = sessionGeneration(convert)
   const anchored = (checkers || []).filter((c) => String(c.chapterAnchor || '') !== '')
   if (anchored.length) {
     const key = convertBasename(convert)
-    const hit = anchored.filter((c) => String(c.chapterAnchor) === key && !!c.archived === !!convert.archived)
+    // T235：世代要比到"哪一次尝试的归档"，不能只比工作树/归档——同一章作废重开
+    // 过几次就有几棵归档树，各树里的同名核对不能互相挂。
+    const hit = anchored.filter((c) => String(c.chapterAnchor) === key && sessionGeneration(c) === generation)
     return newestByMtime(hit)
   }
   // 旧规则：钉住转换时只跟同一轮（同尝试号 + 同世代）；默认取最新一条，归档
@@ -715,12 +718,12 @@ function checkerForConvert(checkers: any[], convert: any, pinnedConvert: boolean
   const attempt = Number(convert.chapterAttempt) || 1
   if (pinnedConvert) {
     const peers = (checkers || []).filter((k: any) =>
-      (Number(k.chapterAttempt) || 1) === attempt && !!k.archived === !!convert.archived)
+      (Number(k.chapterAttempt) || 1) === attempt && sessionGeneration(k) === generation)
     return newestOf(peers)
   }
   const best = newestOf(checkers)
   if (!best) return null
-  if (!!best.archived !== !!convert.archived) return null
+  if (sessionGeneration(best) !== generation) return null
   if ((Number(best.chapterAttempt) || 1) < attempt) return null
   return best
 }
@@ -747,18 +750,84 @@ function newerAttempt(cur: any, next: any): any {
   return mtimeMs(next) > mtimeMs(cur) ? next : cur
 }
 
+const ARCHIVE_MARK = '/work/attempts/'
+
+/* 会话的转录路径：接口给 `path`（绝对），老转录只有 `id`（相对工程根）——两者
+ * 都带着 `work/attempts/<章>/tryN` 这一段，世代就从这一段读。 */
+function sessionPath(s: any): string {
+  return String((s && (s.path || s.id)) || '')
+}
+
+/*
+ * T235：会话所在的**世代**。工作树里的返回空串；`work/attempts/<章>/tryN/` 里的
+ * 返回「<项目根>|<章>|tryN」。路径里就写着它属于谁的哪一次尝试，比 archived 这个
+ * 布尔更细——同一章可以被作废重开好几次，每次的归档各是一代，只看布尔会把所有的
+ * 归档当成同一代。
+ */
+export function sessionGeneration(s: any): string {
+  const p = sessionPath(s)
+  const i = p.indexOf(ARCHIVE_MARK)
+  if (i < 0) return ''
+  const segs = p.slice(i + ARCHIVE_MARK.length).split('/')
+  if (segs.length < 2 || !/^try\d+$/.test(segs[1])) return ''
+  return p.slice(0, i) + '|' + segs[0] + '|' + segs[1]
+}
+
+/* 世代键的项目根：工作树与归档树都取 `/work/` 之前那一段，两边的写法才对得上。 */
+function genRoot(s: any): string {
+  const p = sessionPath(s)
+  const i = p.indexOf('/work/')
+  return i < 0 ? 'project:' + String((s && s.project) || '') : p.slice(0, i)
+}
+
+/*
+ * T235：子行的世代。`key` 是 `work/attempts/<章>/tryN` 的路径键（工作树为 ''，
+ * 查不到路径时为 ''），`archived` 是工作树/归档那一层——两者都是路径拿不到时的
+ * 退路，路径在就以 key 为准，比得出"这是哪一次尝试的归档"。
+ */
+interface ChapterGen { key: string; archived: boolean }
+
+/*
+ * T235：这一行的转换定下来之后，**子行该去哪一代里找**。
+ *  · 归档里的转换：子行就在同一棵归档树里，世代键直接取它的路径；
+ *  · 工作树里的转换：默认还是工作树；但这一次尝试**已经被作废**（尝试号小于这一
+ *    章最新的工作树尝试、且 `work/attempts/<章>/tryN` 确实存在）时，它那一代的子
+ *    行已经被搬进归档，就按那个归档世代取——在历史里切到那一次，下面挂的必须
+ *    是它自己那一代的子会话；
+ *  · 这一行连转换都没有：沿用父行给的世代（T214 老规矩）。
+ */
+function childGeneration(convert: any, converts: any[], parentGen: ChapterGen | null, archiveGens: Set<string>): ChapterGen | null {
+  if (!convert) return parentGen
+  if (convert.archived) return { key: sessionGeneration(convert), archived: true }
+  const n = Number(convert.chapterAttempt) || 1
+  let maxLive = 0
+  ;(converts || []).forEach((c) => {
+    if (c && !c.archived) maxLive = Math.max(maxLive, Number(c.chapterAttempt) || 1)
+  })
+  if (n < maxLive) {
+    const want = genRoot(convert) + '|' + String(convert.chapterId || '') + '|try' + n
+    if (archiveGens.has(want)) return { key: want, archived: true }
+  }
+  return { key: sessionGeneration(convert), archived: false }
+}
+
 /*
  * T214：子行的**世代**跟着父行走。父行的转换是工作树里的（正在跑的这一代），
  * 子行就只在工作树里挑；父行是归档里的（你在历史里切到了上一代），子行也回到
  * 归档——同一章的两个世代各有一套子章节，混着取就会"父行是旧的那一代、子行是
  * 新的那一代"。父行连转换都没有（只有核对）时不设限，退回各取最新；那一代里
  * 没有这个子章节的转换（这一代根本没转过它）时也不留空行，退回该节点最新一次。
+ * T235：世代不再只是"工作树/归档"两态，而是具体到哪一次尝试的归档。
  */
-function convertInGeneration(candidates: any[], archived: boolean | null): any | null {
+function convertInGeneration(candidates: any[], gen: ChapterGen | null): any | null {
   if (!candidates || !candidates.length) return null
-  if (archived === null) return newestOf(candidates)
-  const sameGen = candidates.filter((c) => !!c.archived === archived)
-  return newestOf(sameGen.length ? sameGen : candidates)
+  if (!gen) return newestOf(candidates)
+  // 先按工作树/归档这一层筛（没有 path 的旧转录只能筛到这一层），路径在时再细到
+  // "哪一次尝试的归档"；这一代里没有这个子章节就退回该节点最新一次，不留空行。
+  const sameArchived = candidates.filter((c) => !!c.archived === gen.archived)
+  const pool = sameArchived.length ? sameArchived : candidates
+  const exact = pool.filter((c) => sessionGeneration(c) === gen.key)
+  return newestOf(exact.length ? exact : pool)
 }
 
 /*
@@ -778,6 +847,9 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
   const byId: Record<string, ChapterTreeNode> = {}
   const parents: Record<string, string> = {}
   const byRole: Record<string, any[]> = {}
+  // T235：现存的所有归档世代（`work/attempts/<章>/tryN`）。工作树里一次被作废的
+  // 尝试该把哪一代归档子行带出来，就靠这张表判断"那一代的归档到底在不在"。
+  const archiveGens = new Set<string>()
   // P60：修复会话单独收集（锚点是唯一的挂靠依据），并记下每个转换/核对会话属于
   // 哪个节点——钉住一条修复会话时要靠它找回那一行。
   const fixPool: any[] = []
@@ -790,6 +862,8 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
   let pinned: { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null = null
   ;(items || []).forEach((session) => {
     if (!session) return
+    const archivedGen = sessionGeneration(session)
+    if (archivedGen) archiveGens.add(archivedGen)
     // 修复转录没有章节身份（文件名是 `fix_<章>`、不是 convert_/checker_ 前缀）：
     // 它不能建节点，只能挂到别人身上，所以连 pinned 都要留到节点建好之后再定。
     if (session.chapterRole === 'fix') {
@@ -858,7 +932,7 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
   // 锚点决定（不是按尝试号，也不是"最新那条"）；钉住转换时，转换仍取那一条，
   // 核对照锚点选。定完把这一行的世代交给子行（T214）。
   const pin = pinned as { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null
-  const resolve = (node: ChapterTreeNode, parentArchived: boolean | null): void => {
+  const resolve = (node: ChapterTreeNode, parentGen: ChapterGen | null): void => {
     const here = pin && pin.node === node ? pin : null
     if (here && here.role === 'checker') {
       node.checker = here.session
@@ -879,16 +953,19 @@ export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
     } else {
       node.convert = here
         ? here.session
-        : convertInGeneration(byRole[node.id + '|convert'] || [], parentArchived)
+        : convertInGeneration(byRole[node.id + '|convert'] || [], parentGen)
       node.checker = checkerForConvert(byRole[node.id + '|checker'] || [], node.convert, !!here)
     }
-    const archived = node.convert ? !!node.convert.archived : parentArchived
     // P60：修复子行挂在这一行选中的转换下面（同锚点 + 同世代）；没有修复就是
     // 空数组——调用方不用判空，也不会多出占位行。
+    // T235：子行的世代按父行**选中的那一次尝试**定，不只是工作树/归档两态；
+    // 修复/复盘行仍按"这一次转换自己在工作树还是归档里"筛。
+    const gen = childGeneration(node.convert, byRole[node.id + '|convert'] || [], parentGen, archiveGens)
+    const archived = gen ? gen.archived : null
     node.fixes = fixesForNode(node, node.convert, archived, fixPool)
     // P61：复盘行也是这一层的子行（与修复行同层），绝不参与上面的挑选。
     node.rescues = rescuesForNode(node, node.convert, archived, rescuePool)
-    node.children.forEach((child) => resolve(child, archived))
+    node.children.forEach((child) => resolve(child, gen))
   }
   roots.forEach((root) => resolve(root, null))
   return roots

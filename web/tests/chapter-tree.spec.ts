@@ -433,3 +433,66 @@ describe('T214 子行跟着父行的世代', () => {
     expect(buildChapterTree(withCheck, liveParent.id)[0].children[0].checker).toBeNull()
   })
 })
+
+/* T235：父行在同一条**工作树**转录上有两次尝试（第 1 次被作废、第 2 次又从头来）
+ * 时，下面的子行也得跟着"你看的那一次"走：作废那一次的子会话已经被搬进
+ * `work/attempts/<根章>/try1/`，切到它就不能还挂着现在这一代的子行。
+ *
+ * 父行两次都是活体转录（作废只搬工作树、转录留在原处），所以光看工作树/归档的
+ * 布尔分不开——世代要读到"哪一次尝试的归档"。
+ */
+describe('T235 子行跟着父行选中的那次尝试', () => {
+  const root = 'chapter_050'
+  const mk = (role: string, chapterId: string, attempt: number, archived: boolean, over: Record<string, unknown> = {}) => {
+    const id = archived ? archivedId(role, chapterId, attempt, root) : liveId(role, chapterId, attempt)
+    return {
+      id, path: '/srv/proj/' + id, project: 'book',
+      chapterId, chapterRole: role, chapterAttempt: attempt, archived,
+      chapterParent: chapterId === root ? '' : root,
+      chapterActivity: 'issues', mtime: '2026-10-25T14:20:00Z', live: !archived,
+      ...over,
+    }
+  }
+  // 父章：第 1 次被作废（转录仍在工作树），第 2 次正在等子会话。
+  const att1 = mk('convert', root, 1, false, { chapterActivity: 'issues' })
+  const att2 = mk('convert', root, 2, false, { chapterActivity: 'waiting_children', mtime: '2026-10-25T21:36:00Z' })
+  // 子章：作废那一次的子会话在 try1 归档里；现在这一代在工作树里。
+  const oldChild = mk('convert', root + '_child_01', 1, true, { mtime: '2026-10-25T14:19:00Z' })
+  const liveChild = mk('convert', root + '_child_01', 1, false, { mtime: '2026-10-25T21:35:00Z' })
+  // 同一份锚点、两个世代各一条核对（转录名一样，只有路径里的世代不同）。
+  const oldChk = mk('checker', root + '_child_01', 1, true, {
+    chapterAnchor: 'convert_' + root + '_child_01', chapterActivity: 'issues', mtime: '2026-10-25T14:19:30Z',
+  })
+  const liveChk = mk('checker', root + '_child_01', 1, false, {
+    chapterAnchor: 'convert_' + root + '_child_01', chapterActivity: 'pass', mtime: '2026-10-25T21:35:30Z',
+  })
+  // 另一个子章只在作废那一代里转过：现在这一代没有它，退回最新一次（T214 老规矩）。
+  const onlyOld = mk('convert', root + '_child_02', 1, true)
+  const all = [att1, att2, oldChild, liveChild, oldChk, liveChk, onlyOld]
+
+  it('不钉任何行：父行取最新一次，子行也是工作树这一代', () => {
+    const node = buildChapterTree(all)[0]
+    expect(node.convert!.id).toBe(att2.id)
+    expect(node.children[0].convert!.id).toBe(liveChild.id)
+    expect(node.children[0].checker!.id).toBe(liveChk.id)
+  })
+
+  it('钉住作废的第 1 次：子行回到 work/attempts/<根章>/try1', () => {
+    const node = buildChapterTree(all, att1.id)[0]
+    expect(node.convert!.id).toBe(att1.id)
+    expect(node.children[0].convert!.id).toBe(oldChild.id)
+    expect(node.children[0].checker!.id).toBe(oldChk.id)
+  })
+
+  it('钉住正在跑的第 2 次：子行回到工作树', () => {
+    const node = buildChapterTree(all, att2.id)[0]
+    expect(node.convert!.id).toBe(att2.id)
+    expect(node.children[0].convert!.id).toBe(liveChild.id)
+    expect(node.children[0].checker!.id).toBe(liveChk.id)
+  })
+
+  it('这一代没转过的子章不留空行，退回最新一次', () => {
+    const node = buildChapterTree(all, att2.id)[0]
+    expect(node.children[1].convert!.id).toBe(onlyOld.id)
+  })
+})

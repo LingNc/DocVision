@@ -7509,20 +7509,21 @@
   }
   function checkerForConvert(checkers, convert, pinnedConvert) {
     if (!convert) return newestOf(checkers);
+    const generation = sessionGeneration(convert);
     const anchored = (checkers || []).filter((c) => String(c.chapterAnchor || "") !== "");
     if (anchored.length) {
       const key = convertBasename(convert);
-      const hit = anchored.filter((c) => String(c.chapterAnchor) === key && !!c.archived === !!convert.archived);
+      const hit = anchored.filter((c) => String(c.chapterAnchor) === key && sessionGeneration(c) === generation);
       return newestByMtime(hit);
     }
     const attempt = Number(convert.chapterAttempt) || 1;
     if (pinnedConvert) {
-      const peers = (checkers || []).filter((k) => (Number(k.chapterAttempt) || 1) === attempt && !!k.archived === !!convert.archived);
+      const peers = (checkers || []).filter((k) => (Number(k.chapterAttempt) || 1) === attempt && sessionGeneration(k) === generation);
       return newestOf(peers);
     }
     const best = newestOf(checkers);
     if (!best) return null;
-    if (!!best.archived !== !!convert.archived) return null;
+    if (sessionGeneration(best) !== generation) return null;
     if ((Number(best.chapterAttempt) || 1) < attempt) return null;
     return best;
   }
@@ -7535,16 +7536,50 @@
     if (a !== b) return b > a ? next : cur;
     return mtimeMs(next) > mtimeMs(cur) ? next : cur;
   }
-  function convertInGeneration(candidates, archived) {
+  const ARCHIVE_MARK = "/work/attempts/";
+  function sessionPath(s) {
+    return String(s && (s.path || s.id) || "");
+  }
+  function sessionGeneration(s) {
+    const p2 = sessionPath(s);
+    const i = p2.indexOf(ARCHIVE_MARK);
+    if (i < 0) return "";
+    const segs = p2.slice(i + ARCHIVE_MARK.length).split("/");
+    if (segs.length < 2 || !/^try\d+$/.test(segs[1])) return "";
+    return p2.slice(0, i) + "|" + segs[0] + "|" + segs[1];
+  }
+  function genRoot(s) {
+    const p2 = sessionPath(s);
+    const i = p2.indexOf("/work/");
+    return i < 0 ? "project:" + String(s && s.project || "") : p2.slice(0, i);
+  }
+  function childGeneration(convert, converts, parentGen, archiveGens) {
+    if (!convert) return parentGen;
+    if (convert.archived) return { key: sessionGeneration(convert), archived: true };
+    const n = Number(convert.chapterAttempt) || 1;
+    let maxLive = 0;
+    (converts || []).forEach((c) => {
+      if (c && !c.archived) maxLive = Math.max(maxLive, Number(c.chapterAttempt) || 1);
+    });
+    if (n < maxLive) {
+      const want = genRoot(convert) + "|" + String(convert.chapterId || "") + "|try" + n;
+      if (archiveGens.has(want)) return { key: want, archived: true };
+    }
+    return { key: sessionGeneration(convert), archived: false };
+  }
+  function convertInGeneration(candidates, gen) {
     if (!candidates || !candidates.length) return null;
-    if (archived === null) return newestOf(candidates);
-    const sameGen = candidates.filter((c) => !!c.archived === archived);
-    return newestOf(sameGen.length ? sameGen : candidates);
+    if (!gen) return newestOf(candidates);
+    const sameArchived = candidates.filter((c) => !!c.archived === gen.archived);
+    const pool = sameArchived.length ? sameArchived : candidates;
+    const exact = pool.filter((c) => sessionGeneration(c) === gen.key);
+    return newestOf(exact.length ? exact : pool);
   }
   function buildChapterTree(items, pinId = "") {
     const byId = {};
     const parents = {};
     const byRole = {};
+    const archiveGens = /* @__PURE__ */ new Set();
     const fixPool = [];
     const rescuePool = [];
     const nodeOfSession = {};
@@ -7553,6 +7588,8 @@
     let pinned = null;
     (items || []).forEach((session) => {
       if (!session) return;
+      const archivedGen = sessionGeneration(session);
+      if (archivedGen) archiveGens.add(archivedGen);
       if (session.chapterRole === "fix") {
         fixPool.push(session);
         if (pinId && session.id === pinId) pinnedFix = session;
@@ -7607,7 +7644,7 @@
       }
     }
     const pin = pinned;
-    const resolve2 = (node, parentArchived) => {
+    const resolve2 = (node, parentGen) => {
       const here = pin && pin.node === node ? pin : null;
       if (here && here.role === "checker") {
         node.checker = here.session;
@@ -7623,13 +7660,14 @@
           node.convert = peers.length ? newestOf(peers) : newestOf(converts);
         }
       } else {
-        node.convert = here ? here.session : convertInGeneration(byRole[node.id + "|convert"] || [], parentArchived);
+        node.convert = here ? here.session : convertInGeneration(byRole[node.id + "|convert"] || [], parentGen);
         node.checker = checkerForConvert(byRole[node.id + "|checker"] || [], node.convert, !!here);
       }
-      const archived = node.convert ? !!node.convert.archived : parentArchived;
+      const gen = childGeneration(node.convert, byRole[node.id + "|convert"] || [], parentGen, archiveGens);
+      const archived = gen ? gen.archived : null;
       node.fixes = fixesForNode(node, node.convert, archived, fixPool);
       node.rescues = rescuesForNode(node, node.convert, archived, rescuePool);
-      node.children.forEach((child) => resolve2(child, archived));
+      node.children.forEach((child) => resolve2(child, gen));
     };
     roots.forEach((root) => resolve2(root, null));
     return roots;

@@ -966,6 +966,17 @@ func isHashSegment(s string) bool {
 // hold the image payloads referenced by the transcripts, never transcripts
 // themselves) and .git (never a session store). A single unreadable
 // subdirectory does not abort the scan.
+// archivedRel 判断一条转录是否在「作废尝试」的归档目录里。
+//
+// T235：多项目布局下 Scan 的根是 `latex_project/`，rel 长成
+// `<项目名>/work/attempts/<章>/try<N>/...`；以前只判 `work/attempts/` 前缀，于是
+// 多项目布局里 archived 恒为 false——页面上归档标记、活体优先、修复/复盘按世代
+// 挂靠全都失效（接口里连这个字段都不出现）。前缀与路径中段两种位置都认。
+func archivedRel(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	return strings.HasPrefix(rel, "work/attempts/") || strings.Contains(rel, "/work/attempts/")
+}
+
 func Scan(root string) ([]SessionInfo, error) {
 	return (&scanner{root: root}).scan()
 }
@@ -1309,7 +1320,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			FixIssueIDs:          stat.FixIssueIDs,
 			ReviewedRole:         stat.RescueReviewedRole,
 			ReviewedTranscript:   stat.RescueReviewedTranscript,
-			Archived:             strings.HasPrefix(rel, "work/attempts/"),
+			Archived:             archivedRel(rel),
 			Prices:               stat.Prices,
 			ChapterID:            chapter.ID,
 			ChapterParent:        chapter.Parent,

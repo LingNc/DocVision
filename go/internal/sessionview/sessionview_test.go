@@ -1193,3 +1193,40 @@ func TestScanMarksArchivedCopies(t *testing.T) {
 		t.Fatalf("want exactly 1 archived row, got %d", archived)
 	}
 }
+
+// T235：多项目布局（根是 latex_project/，每个项目一个子目录）下，归档判据以前
+// 只认 `work/attempts/` 前缀，而 rel 实际是 `<项目>/work/attempts/...`，于是
+// archived 恒为 false：页面没有归档标记、活体优先失效，历史面板也分不出世代。
+func TestScanMarksArchivedCopiesInMultiProjectLayout(t *testing.T) {
+	root := t.TempDir()
+	proj := filepath.Join(root, "book_a")
+	live := filepath.Join(proj, "work", "sessions", "convert_chapter_002.jsonl")
+	writeFile(t, live, transcript(`{"t":"msg","role":"user","text":"hi"}`))
+	writeFile(t, filepath.Join(proj, "work", "attempts", "chapter_002", "try1", "work", "sessions",
+		"convert_chapter_002.jsonl"), transcript(`{"t":"msg","role":"user","text":"old"}`))
+
+	list, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("want 2 sessions, got %d", len(list))
+	}
+	archived, liveRows := 0, 0
+	for _, s := range list {
+		if s.Archived {
+			archived++
+			if !strings.Contains(s.ID, "/work/attempts/") {
+				t.Fatalf("%s: 归档标记打在了非归档路径上", s.ID)
+			}
+			continue
+		}
+		liveRows++
+		if strings.Contains(s.ID, "/work/attempts/") {
+			t.Fatalf("%s: 归档副本没有被标记", s.ID)
+		}
+	}
+	if archived != 1 || liveRows != 1 {
+		t.Fatalf("archived=%d live=%d, want 1/1", archived, liveRows)
+	}
+}

@@ -1416,10 +1416,14 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 				StrictChecker:  true,
 				Seq:            childSeq,
 			}
-			if err := r.convertChapterNode(proj, clsName, manualPath, childMD, workDir, idx, tid, false, childNode); err != nil {
+			if err := r.convertChapterNode(proj, clsName, manualPath, childMD, workDir, idx, tid, false, &childNode); err != nil {
 				// T231：这一支失败必须写在**它自己**的转录上。以前只有父节点的
 				// 失败清单里有一句，页面这一行还停在最后一条成功状态上（"等待
 				// 子会话"/"转换完成待核对"），一看像是还在跑。
+				// T235：`childNode` 是按指针传进去的，这里读到的已经是这一次实际用的
+				// 那条转录（`convert_<章>.tryN.jsonl`）。以前按值传，拿到的是第 1 次
+				// 尝试的旧路径——失败终态写到一条早已结束的历史转录上（而且它比在跑
+				// 的那条新，页面就挑它显示「会话错误」，实际上那一代早就通过了）。
 				state := "error"
 				if r.rescueQueuedFor(childNode.TranscriptPath) {
 					state = "queued"
@@ -1633,7 +1637,7 @@ func (r *Runner) convertOneChapterSeq(proj, clsName, manualPath, chapPath, workD
 	if n := r.retryAttemptOf(base); n > 0 {
 		node.AttemptNum = n
 	}
-	return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, retry, node)
+	return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, retry, &node)
 }
 
 type chapterNodeConfig struct {
@@ -1662,7 +1666,11 @@ type chapterNodeConfig struct {
 	AttemptNum int
 }
 
-func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool, node chapterNodeConfig) error {
+// T235：node 传指针——调用方（递归子章节）拿到返回值之后才知道这一次**实际**用的是
+// 哪条转录（`node.TranscriptPath` 会在里面按磁盘上的尝试号被改写）。以前按值传，
+// 调用方手里还是第 1 次尝试的旧路径，失败终态就写到了那条早就结束的转录上（页面
+// 显示「会话错误」的其实是上一轮的历史行）。
+func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool, node *chapterNodeConfig) error {
 	base := node.Base
 	if base == "" {
 		base = strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
@@ -1686,7 +1694,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		node.Attempt = 1
 	}
 	// T171：每次尝试都从**原始**转录名派生。重试是递归调用同一个函数，而
-	// `next := node` 会带上已经被改写的 TranscriptPath——过去就是拿它再套一层
+	// `next := *node` 会带上已经被改写的 TranscriptPath——过去就是拿它再套一层
 	// 后缀，跑出 convert_<章>.try2.try3.jsonl 这种套娃名，预览页把同一次尝试
 	// 拆成两个节点（一个 chapter_001 一个 chapter_001.try2）。
 	transcriptBase := node.TranscriptPath
@@ -1973,7 +1981,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		node.StrictChecker = true
 		submit.SubmitRoot = stageRoot
 		texPath = filepath.Join(stageRoot, base+".tex")
-		if err := r.convertChapterChildren(proj, clsName, manualPath, chapPath, base, work, workDir, idx, tid, node, splitTool.Children); err != nil {
+		if err := r.convertChapterChildren(proj, clsName, manualPath, chapPath, base, work, workDir, idx, tid, *node, splitTool.Children); err != nil {
 			// T231：子树上任何一支失败，这一层也必须留下结论。以前这里直接
 			// return，转录的最后一条还是上面那句"等待子会话"——子树早就跑完了，
 			// 页面上却几小时都显示在等，看着像卡住，实际是失败没有落盘。
@@ -2279,16 +2287,16 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			// T174：作废产物 ≠ 删光证据。上一轮交的 .tex/分片、工作区、编译
 			// 产物先整棵挪进 `work/attempts/<章>/try<N>/`，再开新会话——否则
 			// 「历史」里只剩对话，看不到那一轮到底交了什么东西。
-			r.archiveChapterAttempt(proj, base, node, texPath, issues)
+			r.archiveChapterAttempt(proj, base, *node, texPath, issues)
 			_ = os.Remove(texPath)
 			_ = os.RemoveAll(filepath.Join(node.SubmitRoot, base))
-			next := node
+			next := *node
 			next.Attempt = node.Attempt + 1
 			// 新号在这里显式给：只有"checker 跑满轮次仍不过"才是新尝试，
 			// 进程被杀/断连的重跑一律沿用磁盘上最近的那一次。
 			next.AttemptNum = node.AttemptNum + 1
 			next.TranscriptPath = transcriptBase
-			return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, true, next)
+			return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, true, &next)
 		}
 		// 次数用尽：**判失败**，不再"记一笔就放过"（旧行为让一个 checker 从
 		// 未给出结论的章节也进了书）。
