@@ -262,7 +262,14 @@ func (r *Runner) rollbackChapterWork(proj, base, srcName string, line int) (int,
 			"这条转录在第 "+strconv.Itoa(line)+" 行之前没有工作区快照，只回退对话——工作区保持最后一次的样子")
 		return 0, false
 	}
+	// T236：细分父节点的回退不能连子章节一起退。`_subdivision/` 挂在**父节点**的
+	// 工作树里（子节点自己的转录、产物、checker 通过的记录全在里头），
+	// reset --hard + clean -fdx 会连着把它们退回那一刻；随后父会话照常重新派发
+	// 子章节，等于把已经做完的子节点从头再跑一遍。这里先把 `_subdivision` 挪出
+	// 工作树，回退完再放回：父会话自己的文件仍是那一刻的样子，子章节保持最新。
+	subKeep := stashSubdivision(work)
 	if _, err := log.git("reset", "--hard", "--quiet", e.SHA); err != nil {
+		restoreSubdivision(work, subKeep)
 		r.log.LogWarning(0, "[snapshot]", base, "工作区回退失败（只回退对话）:", err)
 		return 0, false
 	}
@@ -271,9 +278,39 @@ func (r *Runner) rollbackChapterWork(proj, base, srcName string, line int) (int,
 	if _, err := log.git("clean", "-fdx", "--quiet"); err != nil {
 		r.log.LogWarning(0, "[snapshot]", base, "回退后清理失败（可能有残留文件）:", err)
 	}
+	if !restoreSubdivision(work, subKeep) {
+		r.log.LogWarning(0, "[snapshot]", base,
+			"子章节目录没能放回工作树（暂存在 "+subKeep+"），它们会被重新派发")
+	}
 	r.log.Log(0, "[snapshot]", base, "工作区回退到转录第", strconv.Itoa(e.Line), "行",
 		"（快照", e.SHA[:min(12, len(e.SHA))], "）")
 	return e.Line, true
+}
+
+// stashSubdivision 把工作树里的 `_subdivision` 暂时挪到工作树之外，返回暂存
+// 路径（没这个目录、或挪不动时返回空串）。暂存位置是 `conv_<章>/` 里——
+// 工作树的上一级，git 看不见它，也不会被 clean 清掉。
+func stashSubdivision(work string) string {
+	src := filepath.Join(work, "_subdivision")
+	if st, err := os.Stat(src); err != nil || !st.IsDir() {
+		return ""
+	}
+	keep := filepath.Join(filepath.Dir(work), ".subdivision-keep")
+	_ = os.RemoveAll(keep)
+	if err := os.Rename(src, keep); err != nil {
+		return ""
+	}
+	return keep
+}
+
+// restoreSubdivision 把暂存的 `_subdivision` 放回工作树（回退以后工作树里那份
+// 已是旧样子，先清掉再放）。keep 为空时什么都不做、也算成功。
+func restoreSubdivision(work, keep string) bool {
+	if keep == "" {
+		return true
+	}
+	_ = os.RemoveAll(filepath.Join(work, "_subdivision"))
+	return os.Rename(keep, filepath.Join(work, "_subdivision")) == nil
 }
 
 // transcriptAttempt 从转录名反推尝试号：convert_x.jsonl → 1，

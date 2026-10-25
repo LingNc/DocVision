@@ -100,6 +100,54 @@ func TestRoundLogMissingJournalDegrades(t *testing.T) {
 	}
 }
 
+// T236：回退工作区不能连 `_subdivision`（子章节自己的转录与产物）一起退回那一刻。
+// 父会话续跑之后会照常重新派发子章节，把它们退掉就等于把已经做完的子节点从头
+// 再跑一遍——第四章实测就是这么重烧了四个子章节。
+func TestRoundLogRollbackKeepsSubdivision(t *testing.T) {
+	proj := t.TempDir()
+	base := "chapter_002"
+	work := filepath.Join(proj, "work", "temp", "conv_"+base, "work")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := newRoundTestRunner(t)
+	write(filepath.Join(work, base+".tex"), "%% v1\n")
+	l := r.openRoundLog(proj, base, work, 1)
+	if l == nil {
+		t.Skip("宿主没有 git")
+	}
+	l.commitLine(2)
+	childTex := filepath.Join(work, "_subdivision", "child_01", "node", "result", base+"_child_01.tex")
+	write(childTex, "%% 子章节产物\n")
+	write(filepath.Join(work, "junk.tex"), "scratch\n")
+	l.commitLine(4)
+
+	if _, ok := r.rollbackChapterWork(proj, base, "convert_"+base+".jsonl", 2); !ok {
+		t.Fatal("第 2 行应能回退")
+	}
+	if got, _ := os.ReadFile(filepath.Join(work, base+".tex")); string(got) != "%% v1\n" {
+		t.Fatalf("父章节该退回第 2 行，得到 %q", string(got))
+	}
+	if _, err := os.Stat(filepath.Join(work, "junk.tex")); err == nil {
+		t.Fatal("后来新建的临时文件应被清掉")
+	}
+	if _, err := os.Stat(childTex); err != nil {
+		t.Fatalf("子章节产物应保留: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(work), ".subdivision-keep")); err == nil {
+		t.Fatal("暂存目录应已放回、不留残渣")
+	}
+}
+
 func TestTranscriptAttemptParse(t *testing.T) {
 	cases := []struct {
 		name     string

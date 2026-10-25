@@ -1400,13 +1400,35 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 				return
 			}
 			childMD := filepath.Join(inputDir, "chapter.md")
-			if err := os.WriteFile(childMD, []byte(chapterSubrange(lines, chapter)), 0o644); err != nil {
+			wanted := chapterSubrange(lines, chapter)
+			// T236：父节点每一次续跑/续跑式重试都会把整棵子树重新派发一遍。子章节
+			// 上次已经转换**并通过核对**、而这次重算出来的 input 一个字没变时，直接
+			// 复用它的产物——重新跑一遍只是把同样的活再烧一遍 token（第四章实测：
+			// 四个子节点在父会话续跑后全部从头再转一次，各自又要多轮核对）。
+			prev, _ := os.ReadFile(childMD)
+			reusable := string(prev) == wanted && childPassedEarlier(nodeRoot, childBase)
+			if err := os.WriteFile(childMD, []byte(wanted), 0o644); err != nil {
 				mu.Lock()
 				failures = append(failures, id+": "+err.Error())
 				mu.Unlock()
 				return
 			}
 			childOut := filepath.Join(nodeRoot, "result")
+			if reusable {
+				if err := copyChildArtifacts(parentParts, childOut, childBase); err != nil {
+					mu.Lock()
+					failures = append(failures, id+": "+err.Error())
+					mu.Unlock()
+					return
+				}
+				childIssues := inheritChildIssues(nodeRoot)
+				mu.Lock()
+				inherited = append(inherited, childIssues...)
+				mu.Unlock()
+				r.log.LogInfo(tid, "[convert]", parentBase, "子章节", id,
+					"上次已转换并通过核对、输入未变——直接复用产物，不再重跑")
+				return
+			}
 			childNode := chapterNodeConfig{
 				Base: childBase, Depth: parent.Depth + 1, InputMount: "input", InputRef: "chapter.md",
 				NodeRoot:       nodeRoot,
@@ -1434,24 +1456,16 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 				mu.Unlock()
 				return
 			}
-			if err := copyFile(filepath.Join(childOut, childBase+".tex"), filepath.Join(parentParts, childBase+".tex")); err != nil {
+			if err := copyChildArtifacts(parentParts, childOut, childBase); err != nil {
 				mu.Lock()
 				failures = append(failures, id+": "+err.Error())
 				mu.Unlock()
 				return
 			}
-			if fileExists(filepath.Join(childOut, childBase)) {
-				if err := copyDir(filepath.Join(childOut, childBase), filepath.Join(parentParts, childBase)); err != nil {
-					mu.Lock()
-					failures = append(failures, id+": "+err.Error())
-					mu.Unlock()
-					return
-				}
-			}
 			// 问题继承（T166）：把子节点 store 里**未解决**的条目收上来，
 			// 由父节点提交时合并进它自己的 store。父会话不需要读这些也能
 			// 保证它们继续向上（见 chapterissues.go）。
-			childIssues := openIssues(readIssueStore(filepath.Join(nodeRoot, "work", ".issues", "issues.json")))
+			childIssues := inheritChildIssues(nodeRoot)
 			mu.Lock()
 			inherited = append(inherited, childIssues...)
 			mu.Unlock()
@@ -1470,6 +1484,25 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 		r.log.LogInfo(tid, "[convert]", parentBase, "继承", strconv.Itoa(n), "条子章节未解决问题（未修的会原样向上）")
 	}
 	return nil
+}
+
+// copyChildArtifacts 把一支子章节的产物铺进父节点的 `children/`（提交时按
+// 两个路径交上去的就是这里）：章节 `.tex` 与它的分片文件夹。
+func copyChildArtifacts(parentParts, childOut, childBase string) error {
+	if err := copyFile(filepath.Join(childOut, childBase+".tex"), filepath.Join(parentParts, childBase+".tex")); err != nil {
+		return err
+	}
+	if fileExists(filepath.Join(childOut, childBase)) {
+		if err := copyDir(filepath.Join(childOut, childBase), filepath.Join(parentParts, childBase)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// inheritChildIssues 收一支子节点 store 里**未解决**的条目（T166）。
+func inheritChildIssues(nodeRoot string) []ChapterIssue {
+	return openIssues(readIssueStore(filepath.Join(nodeRoot, "work", ".issues", "issues.json")))
 }
 
 func writeChapterChildrenManifest(work, base string, children []ChapterSubdivision) error {
