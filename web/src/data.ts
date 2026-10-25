@@ -3,7 +3,7 @@
  * 旧页 refreshIndex/applyIndex/selectSession/pullSession 的移植；渲染由
  * Timeline.vue / DetailsPanel.vue 的 computed 响应式接管，这里只管数据流。
  */
-import { state, setBannerText } from './state'
+import { state, setBannerText, clearRetryNote } from './state'
 import { findSession, normalizeLines, indexCallEstimates, groupKey, setCollapsed, dedupeChapterAttempts } from './legacy/sidebar'
 import type { PartialInfo } from './legacy/types'
 
@@ -164,6 +164,8 @@ export function pullSession(reset: boolean): Promise<void> {
 
 export function selectSession(id: string): void {
   const s = findSession(id)
+  // T239：上一章那条「已加入…队列」的回执说的不是眼前这一条，切走就清掉。
+  clearRetryNote()
   state.current = s
   if (staticSessions && staticSessions[id]) {
     // 静态快照：行已在手，不走 /api。

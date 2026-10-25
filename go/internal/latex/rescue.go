@@ -489,7 +489,7 @@ func (t *RescueSubmitTool) Execute(argsJSON string) (session.ToolResult, error) 
 var (
 	rescueMu     sync.Mutex
 	rescueSeen   = map[string]int{}
-	rescueCutAt  = map[string]int{}
+	rescueCutAt  = map[string][]int{}
 	rescueOwnBad = map[string]int{}
 	rescuePathMu sync.Mutex
 )
@@ -519,20 +519,56 @@ func (r *Runner) rescueOwnFailure(key string) int {
 	return rescueOwnBad[key]
 }
 
-// rescueCutRepeated 记下这条转录这次的切口，并回答"与上一次是不是同一个"（T232）。
+// T238：复盘判"截断"时的两道闸。复盘看的是"这条转录哪里开始退化"，但它对
+// **每一条新尝试**都会给出一个同样靠前的切口：照切一遍，模型还是那个模型、
+// 材料还是那些材料，只会把这一章一次次推进新尝试（实测同一章到了第 10 条
+// 尝试、每一轮都是"切到前几行再跑"，页面上只看到"核对无结论"）。
 //
-// 复盘看的是"这条转录哪里开始退化"，同一条转录连着两次给出的切口往往一字不差；
-// 照着同一条前缀再切一遍，模型还是那个模型、材料还是那些材料，只会把这一章
-// 一次次推进新尝试（实测有章到第 7 条尝试仍在原地）。同一切口第二次出现就按
-// 救不回来处理，让调用方停下、把决定权交回给人。
-func (r *Runner) rescueCutRepeated(trPath string, from int) bool {
+//	rescueCutKeepLines  保住的正文少于这么多行 ≈ 从头再跑一遍
+//	rescueCutKeepRatio  转录够长时，保住的前缀不足 1/5 同样算从头再跑
+//	rescueCutSameWindow 同一章同一角色切过的位置，前后这么多行内算同一个切口
+const (
+	rescueCutKeepLines  = 12
+	rescueCutKeepRatio  = 5
+	rescueCutSameWindow = 8
+)
+
+// rescueCutRefusal 回答"这个截断该不该真的做"：返回非空 = 不做，理由是给人看的。
+//
+// 两道闸（T238）：①保住的东西少到等于重跑——那不是"接着跑"，而重跑正是用户
+// 最不想要的；②这一章这个角色已经切过附近的位置——同一个死法不会因为多一条
+// 尝试就变好。任一成立就按"救不回来"收尾，把决定权交回给人，绝不再自动换尝试。
+func (r *Runner) rescueCutRefusal(t rescueTarget, from int) string {
+	total := countTranscriptLines(t.TrPath)
+	if total > rescueCutKeepLines && from < rescueCutKeepLines {
+		return fmt.Sprintf("切口只留下前 %d/%d 条记录，等于从头再跑一遍", from, total)
+	}
+	if from*rescueCutKeepRatio < total && total >= rescueCutKeepLines*rescueCutKeepRatio {
+		return fmt.Sprintf("切口只留下前 %d/%d 条记录（不到 1/%d），等于从头再跑一遍",
+			from, total, rescueCutKeepRatio)
+	}
+	// 键带上项目根目录：同一本书里的一章才是"同一条会话"，不同项目的
+	// chapter_001 互不相干（测试与多项目布局里这很常见）。
+	key := t.ProjDir + "/" + t.Base + "/" + t.Role
 	rescueMu.Lock()
 	defer rescueMu.Unlock()
-	if prev, ok := rescueCutAt[trPath]; ok && prev == from {
-		return true
+	for _, prev := range rescueCutAt[key] {
+		if prev >= from-rescueCutSameWindow && prev <= from+rescueCutSameWindow {
+			return fmt.Sprintf("这一章这个角色已经切过第 %d 条附近，再切一次还是同一个位置", prev)
+		}
 	}
-	rescueCutAt[trPath] = from
-	return false
+	rescueCutAt[key] = append(rescueCutAt[key], from)
+	return ""
+}
+
+// countTranscriptLines 数一条转录有多少行（读不到就当 0：闸门随之放行，让
+// 真正的读写错误在截断那一步照旧报出来）。
+func countTranscriptLines(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return strings.Count(strings.TrimRight(string(data), "\n"), "\n") + 1
 }
 
 // rescueBudget 记一次复盘并判断是否还在预算内。

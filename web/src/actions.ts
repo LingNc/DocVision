@@ -17,7 +17,7 @@
 //    /api/retry/cancel）；同时给「回到刚才那条会话」，把选中项切回去；
 // ③ 已经开跑、撤销不到的时候，给「删除这条记录」这条出口（服务端 /api/drop）。
 import { computed, ref, watch } from 'vue'
-import { state } from './state'
+import { state, setRetryNote, clearRetryNote } from './state'
 import { cancelChapterRetry, chapterPendingRetry, dropSession, refreshIndex, requestChapterRetry, selectSession, watchFork } from './data'
 import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, continueTargetOf, retryTargetOf, sameActionTarget } from './legacy/actions'
 import type { SessionActionTarget } from './legacy/actions'
@@ -89,7 +89,7 @@ watch(
       (q.role === 'vector' || String(cur.chapterRole || '') === q.role)
     if (!same) {
       queued.value = null
-      state.retryNote = ''
+      clearRetryNote()
     }
   },
 )
@@ -116,19 +116,19 @@ function run() {
   if (!p || busy.value) return
   pending.value = null
   busy.value = true
-  const done = (msg: string) => { state.retryNote = msg; busy.value = false; return refreshIndex().catch(() => undefined) }
-  const fail = (err: any) => { state.retryNote = '失败：' + ((err && err.message) || err); busy.value = false }
+  const done = (msg: string) => { setRetryNote(msg); busy.value = false; return refreshIndex().catch(() => undefined) }
+  const fail = (err: any) => { setRetryNote('失败：' + ((err && err.message) || err)); busy.value = false }
   if (p.kind === 'drop') {
     if (!s) { busy.value = false; return }
-    state.retryNote = '正在删除 ' + s.name + '…'
+    setRetryNote('正在删除 ' + s.name + '…')
     dropSession(String(s.project), String(s.path))
-      .then((res: any) => { state.retryNote = '已删除 ' + s.name + ((res && res.archive) ? '（含 ' + res.archive + '）' : ''); busy.value = false })
+      .then((res: any) => { setRetryNote('已删除 ' + s.name + ((res && res.archive) ? '（含 ' + res.archive + '）' : '')); busy.value = false })
       .catch(fail)
     return
   }
   if (p.kind === 'redraw') {
     if (!s) { busy.value = false; return }
-    state.retryNote = '正在提交重画请求…'
+    setRetryNote('正在提交重画请求…')
     requestChapterRetry(String(s.project), '', 'vector', '图不对，重画', { path: String(s.name) })
       .then((res: any) => {
         queued.value = { project: String(s.project), chapter: '', role: 'vector', path: String(s.name), prevId: prevId.value }
@@ -145,7 +145,7 @@ function run() {
   const what = p.kind === 'continue'
     ? (child ? '继续跑父章节' : '继续跑')
     : (t.role === 'checker' ? '重新核对' : '重试')
-  state.retryNote = '正在提交 ' + t.chapter + ' 的' + what + '请求…'
+  setRetryNote('正在提交 ' + t.chapter + ' 的' + what + '请求…')
   requestChapterRetry(t.project, t.chapter, role, '中栏' + what)
     .then((res: any) => {
       queued.value = { project: t.project, chapter: t.chapter, role, path: '', prevId: prevId.value }
@@ -178,18 +178,18 @@ function doCancel() {
     .then((res: any) => {
       const n = Number((res && res.removed) || 0)
       if (n > 0) {
-        state.retryNote = '已撤销排队请求（' + n + ' 条）'
+        setRetryNote('已撤销排队请求（' + n + ' 条）')
         queued.value = null
         backToPrev(p.prevId)
       } else {
         // 队列里已经没有了：latex 消费掉了，这一次重试已经（或正在）开跑。
-        state.retryNote = '这个请求已经被 latex 消费，撤不回来了——它开出的那条新会话可以在「历史」里删掉。'
+        setRetryNote('这个请求已经被 latex 消费，撤不回来了——它开出的那条新会话可以在「历史」里删掉。')
         queued.value = null
         return refreshIndex().catch(() => undefined)
       }
       busy.value = false
     })
-    .catch((err: any) => { state.retryNote = '撤销失败：' + ((err && err.message) || err); busy.value = false })
+    .catch((err: any) => { setRetryNote('撤销失败：' + ((err && err.message) || err)); busy.value = false })
 }
 
 export const actions = {

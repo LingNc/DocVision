@@ -2,14 +2,14 @@
 // 排队成功之后登记"等新尝试出现就切过去"，然后刷新一次索引。
 import { refreshIndex, requestChapterRetry, truncateSession, watchFork } from './data'
 import { canForkFrom, forkPrompt, forkRequestOf } from './legacy/fork'
-import { state } from './state'
+import { state, setRetryNote } from './state'
 
 /* dropBefore：从这一条**之前** fork——等价于把这条及其之后的（错误）消息删掉，让
  * 它从干净的上下文继续（用户口径："删除某些错误消息让他继续"）。第 1 条之前没有
  * 可截断的点，直接拒绝而不是悄悄退化成重跑整章。 */
 export function dropFromLine(line: number, source: string): boolean {
   if (!(line > 1)) {
-    state.retryNote = '这一条之前没有可截断的记录（要从头重来请用「重试这一章」）'
+    setRetryNote('这一条之前没有可截断的记录（要从头重来请用「重试这一章」）')
     return false
   }
   const s: any = state.current
@@ -27,15 +27,15 @@ export function dropFromLine(line: number, source: string): boolean {
     + '就地截断当前转录，不新开尝试、不复制会话；原文会先备份到 work/sessions/.trash/。'
     + '想保留一份对照，请先点 ⤓ 显式 fork 一条同样的会话再在这里操作。'
   if (!window.confirm(ask)) return false
-  state.retryNote = '正在就地截断到第 ' + keep + ' 条…'
+  setRetryNote('正在就地截断到第 ' + keep + ' 条…')
   truncateSession(String(s.project), String(s.path), keep)
     .then((res: any) => {
-      state.retryNote = '已截断：保留 ' + ((res && res.kept) || keep) + ' 条、丢掉 ' + ((res && res.dropped) || 0)
-        + ' 条（备份 ' + ((res && res.backup) || '.trash/') + '）；' + then
+      setRetryNote('已截断：保留 ' + ((res && res.kept) || keep) + ' 条、丢掉 ' + ((res && res.dropped) || 0)
+        + ' 条（备份 ' + ((res && res.backup) || '.trash/') + '）；' + then)
       return refreshIndex()
     })
     .catch((err: any) => {
-      state.retryNote = '截断失败：' + ((err && err.message) || err)
+      setRetryNote('截断失败：' + ((err && err.message) || err))
     })
   return true
 }
@@ -46,15 +46,15 @@ export function forkFromLine(line: number, source: string): boolean {
   if (!s || !req) return false
   if (!window.confirm(forkPrompt(line, s))) return false
   const prevId = String(s.id || '')
-  state.retryNote = '正在提交从第 ' + line + ' 条记录继续的请求…'
+  setRetryNote('正在提交从第 ' + line + ' 条记录继续的请求…')
   requestChapterRetry(req.project, req.chapter, req.role, req.reason, req.extra)
     .then((res: any) => {
-      state.retryNote = '已排队：从第 ' + line + ' 条记录之后继续（' + ((res && res.note) || '等待并发槽位') + '）；新会话出现后自动切过去'
+      setRetryNote('已排队：从第 ' + line + ' 条记录之后继续（' + ((res && res.note) || '等待并发槽位') + '）；新会话出现后自动切过去')
       watchFork(req.project, req.chapter, req.role, prevId)
       return refreshIndex()
     })
     .catch((err: any) => {
-      state.retryNote = '从记录继续失败：' + ((err && err.message) || err)
+      setRetryNote('从记录继续失败：' + ((err && err.message) || err))
     })
   return true
 }

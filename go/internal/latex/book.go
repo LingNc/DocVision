@@ -3230,18 +3230,17 @@ func (r *Runner) maybeRescue(tid int, tag, label string, target rescueTarget) re
 		r.log.LogWarning(tid, tag, label, "复盘判定这条会话无法挽救，不再提醒："+v.Reason)
 		dec.Stop = true
 	case "truncate":
-		// T232：同一个切口连着判两次就不要再切了。复盘会话看的是"这一条转录"
-		// 里的退化，它给的切口因此常常与上一次一字不差；照切一遍只会得到同一
-		// 条前缀、同一个死法，把这一章反复推进新尝试（实测有章切到第 7 条尝试
-		// 仍在原地），而页面只看到"核对无结论"。同一切口第二次出现就按"救不回
-		// 来"收尾，让调用方如实停下，把决定权交回给人。
-		if r.rescueCutRepeated(target.TrPath, v.From) {
-			r.markTargetActivity(tid, tag, label, target, "error", "复盘判定的切口与上次相同")
+		// T238：截断只在"确实能接着跑"时做。复盘对每一条新尝试都会给出同样靠
+		// 前的切口，照着切就把这一章反复推进新尝试（实测同一章到了第 10 条仍在
+		// 原地），而页面只看到"核对无结论"。切口太小或与这一章切过的位置重合，
+		// 就按"救不回来"收尾，让调用方如实停下，把决定权交回给人。
+		if why := r.rescueCutRefusal(target, v.From); why != "" {
+			r.markTargetActivity(tid, tag, label, target, "error", "复盘要求的截断不该做："+why)
 			r.log.LogWarning(tid, tag, label, fmt.Sprintf(
-				"复盘这次仍要截到第 %d 条记录，与上次同一个切口：不再重复截断（换了切口才有可能好转）", v.From))
+				"复盘要求截到第 %d 条记录，但不做——%s。不再自动换尝试，这一章交给人工处理", v.From, why))
 			dec.Stop = true
 			dec.Verdict = "fail"
-			dec.Reason = "同一个退化切口已经截过一次，再切一次还是同一个死法"
+			dec.Reason = why
 			break
 		}
 		// C(ii)：状态先写成 queued（排队之前），再排进重试队列——顺序在日志里
@@ -3298,9 +3297,21 @@ func (r *Runner) exhaustRescueBudget(key string) {
 // 以下情况一律原样返回、一个字节都不多写（`latex.rescue.enabled: false` 的
 // 回落就是这样成立的）：开关关着、没有转录可复盘、错误是致命错误（余额不足/
 // 无可用资源包——换会话也救不回来，复盘只会白烧一次模型调用）。
+//
+// T237：**上游接口错误**（连接超时/网关 5xx/限流）在这里被单独拦下——它不是
+// 会话退化，交给复盘只会被判成"截断"（换新尝试、整章重转），一次上游抖动就被
+// 放大成一整章的转换重跑。改成同一会话按退避时间原地续跑，不截断、不换尝试、
+// 不动产物（见 queueUpstreamRetry）。
 func (r *Runner) rescueAfterError(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool, target rescueTarget, cause error) error {
-	if cause == nil || target.Base == "" || target.TrPath == "" ||
-		!r.cfg.Latex.RescueEnabled() || isSessionFatalError(cause.Error()) {
+	if cause == nil || target.Base == "" || target.TrPath == "" || isSessionFatalError(cause.Error()) {
+		return cause
+	}
+	if isSessionUpstreamError(cause.Error()) {
+		target.Cause = cause.Error()
+		r.queueUpstreamRetry(tid, tag, label, target, cause.Error())
+		return cause
+	}
+	if !r.cfg.Latex.RescueEnabled() {
 		return cause
 	}
 	target.Cause = cause.Error()

@@ -165,6 +165,34 @@ export const state = reactive({
   img2textProgress: [] as Img2TextBook[],
 })
 
+/* ---------- T239：操作回执只在"它说的那件事"上活一小会儿 ----------
+
+ * state.retryNote 是**全页共用**的一行字，挂在每个会话的操作面板旁边。它原来
+ * 一旦写下就再也不清：在 chapter_013 点过「切回」之后，那行「已加入切回队列」
+ * 会一直贴在**每一个**会话下面（用户看到的就是"转换 · chapter_024_child_01
+ * 也已经加入切回队列了？我根本没点它"），于是以为全书都不能操作了。
+ *
+ * 现在统一从 setRetryNote 写：终态回执（已…/失败…）20 秒后自己消失，正在提
+ * 交中的那些 60 秒兜底；切会话（selectSession）与「重置视图」立刻清掉——那行
+ * 字说的已经不是眼前这一条了。
+ */
+let retryNoteTimer: ReturnType<typeof setTimeout> | 0 = 0
+const RETRY_NOTE_DONE_MS = 20000
+const RETRY_NOTE_BUSY_MS = 60000
+
+export function setRetryNote(text: string): void {
+  state.retryNote = text
+  if (retryNoteTimer) { clearTimeout(retryNoteTimer); retryNoteTimer = 0 }
+  if (!text) return
+  const ttl = /^(已|失败|撤销|这个请求)/.test(text) ? RETRY_NOTE_DONE_MS : RETRY_NOTE_BUSY_MS
+  retryNoteTimer = setTimeout(() => { retryNoteTimer = 0; state.retryNote = '' }, ttl)
+}
+
+export function clearRetryNote(): void {
+  if (retryNoteTimer) { clearTimeout(retryNoteTimer); retryNoteTimer = 0 }
+  if (state.retryNote) state.retryNote = ''
+}
+
 /* ---------- 布局求解（computeColumns 逐行照旧页：纯函数、无迟滞） ---------- */
 
 export function clampWidth(px: number, min: number, max: number): number {
@@ -357,6 +385,7 @@ export function resetViewState(): string {
   state.trajKinds = {}
   state.view = 'chat'
   state.filter = ''
+  clearRetryNote()
   state.collapsed = {}
   state.overflow = {}
   state.narrowExpanded = true

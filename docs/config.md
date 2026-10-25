@@ -178,6 +178,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.checker_model` | 每章核对模型（独立小模型，须支持看图）。核对会话的只读视图是：章节 md、提交的 .tex、分片文件夹、本章编译产物 `<章>.pdf`、转换会话的 report/notes（当"说法"核实）、原书 `source:` part PDF；工具 read_file/grep/view_pdf/list_source_pages/doc_search/submit，默认 50 轮；调优里未配置的字段继承 convert（轮数除外） | "checker" |
 | `latex.checker_rounds` | 一章**最多尝试几次**：checker 连续打回同一个转换会话若干轮仍不过，就作废产物、换一个全新会话重来；第 N 层递归（细分）每次 -1，**下限 3**，顶层默认 6。顶层次数与最大递归层数（3）不匹配（`checker_rounds - 3 < 3`）时启动告警——深层只会吃到下限 | 6 |
 | `latex.checker_no_verdict_retries` | 核对**没给结论**时自动换新的核对会话再来几次（T233）。只重核、不重转：这一版产物留着、转换会话不重跑，换掉的只是那条已退化的核对会话。用完仍没结论就如实记「核对无结论」并排一条重核请求（产物不动）。**0/未写 = 6** | 6 |
+| `latex.api_error_retries` | 会话报的是**上游接口问题**（连接超时、5xx、限流）时，原地重试同一条会话几次（T237）。这类错误与模型退化无关，换新尝试只是把已经做完的转换再跑一遍；间隔 30s 起、每步翻倍、最多 10 分钟（6 次约 25 分钟），次数用完才如实记失败，不触发复盘、不截断、不占尝试预算。余额不足/资源包不可用这类致命错误不走这条路（照旧立刻失败）。**0/未写 = 6**；计数在内存里，重启进程后重新计数 | 6 |
 | `latex.max_chapter_lines` | 一个转换会话"好好转完"的章节规模（章节 md 的行数）。超过它、又还没拆分过的节点，`submit` 会被打回并要求先 `request_chapter_split` 按语义拆成 2–16 段（子会话各转各的、各自过 checker，父会话只整合与核对）；已经递归到最深一层不再强制。首条消息会直接把本章行数告诉会话。**0 = 关闭这条规则** | 3000 |
 | `latex.remove_watermark` | 水印处理：true 时样式/转换/核对 AI 会检测并排除水印 | false |
 | `paths.logs_dir` | img2text 处理日志目录（`img2text_*.log` + `img2text_error_*.log`） | `./logs` |

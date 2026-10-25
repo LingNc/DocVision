@@ -3,7 +3,7 @@
 // 数据来自纯函数 chainOfSession（legacy/sidebar.ts），computed 按
 // state.sessions / state.current 引用缓存，轮询换新数组时才重扫一遍。
 // 排序与侧栏链一致（sortChainMembers：新 → 旧）；点行切会话（selectSession）。
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { state, relTime } from '../state'
 import { chainMemberTag, chapterIdSuffix, chapterRoleLabel, chainOfSession, fixRoundAt, fixRowLabel, fixTargetId, plainTitle, rescueOrdinal, reviewedTargetLabel, sessionTitleOf } from '../legacy/sidebar'
 import { dropSession, refreshIndex, requestChapterRetry, selectSession } from '../data'
@@ -235,6 +235,16 @@ function askRestore(s: any) {
   restoreAsk.value = t
   restoreNote.value = ''
 }
+
+/* T239：这一页的确认条与回执只说"我正在看的这条链"。原来它们谁也不清，点过
+ * chapter_013 的「切回」之后，每一章的历史页都挂着"已排队：切回第 1 次尝试…"，
+ * 用户以为别的章也被切回了。切走就清掉。 */
+watch(() => (state.current ? (state.current as any).id : ''), () => {
+  dropAsk.value = null
+  dropNote.value = ''
+  restoreAsk.value = null
+  restoreNote.value = ''
+})
 
 function doRestore() {
   const t = restoreAsk.value

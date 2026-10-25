@@ -62,22 +62,55 @@ func TestNextCheckerAttemptStopsAtBumpLimit(t *testing.T) {
 	}
 }
 
-// TestRescueCutRepeatedOnlyTwice：同一个切口只允许截一次，重复判定要被拦住
-// （T232）；换一个切口或换一条转录都算新情况。
-func TestRescueCutRepeatedOnlyTwice(t *testing.T) {
-	r := &Runner{}
-	tr := filepath.Join(t.TempDir(), "checker_chapter_006.try4.jsonl")
+// writeLongTranscript 写一条 n 行的消息转录（每一行都是一条消息，切点校验要求）。
+func writeLongTranscript(t *testing.T, path string, n int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		data, err := json.Marshal(map[string]any{"t": "msg", "role": "assistant", "text": "step"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(data)
+		b.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
-	if r.rescueCutRepeated(tr, 69) {
-		t.Fatal("第一次截断不该被拦")
+// TestRescueCutRefusal：截断只在"确实能接着跑"时做（T238）。留下来的前缀太少
+// 等于重跑，同一个位置再切一次还是同一个死法——两种都该被拦住，让这一章如实
+// 停下而不是继续换尝试。
+func TestRescueCutRefusal(t *testing.T) {
+	r := &Runner{}
+	dir := t.TempDir()
+	tr := filepath.Join(dir, "convert_chapter_006.jsonl")
+	writeLongTranscript(t, tr, 100)
+	target := func(trPath, role string) rescueTarget {
+		return rescueTarget{Base: "chapter_006", Role: role, TrPath: trPath}
 	}
-	if !r.rescueCutRepeated(tr, 69) {
-		t.Fatal("同一个切口第二次应当被拦")
+
+	if why := r.rescueCutRefusal(target(tr, "convert"), 8); why == "" {
+		t.Fatal("只留下前 8/100 行等于重跑，应当拦住")
 	}
-	if r.rescueCutRepeated(tr, 40) {
-		t.Fatal("换了切口应当放行")
+	if why := r.rescueCutRefusal(target(tr, "convert"), 30); why != "" {
+		t.Fatalf("留下 30/100 行应当放行，却被拦住：%s", why)
 	}
-	if r.rescueCutRepeated(tr+"x", 40) {
-		t.Fatal("换一条转录应当放行")
+	// 换一条尝试（新转录）但同一章同一角色、切口就在上次附近：还是同一个位置。
+	next := filepath.Join(dir, "convert_chapter_006.try2.jsonl")
+	writeLongTranscript(t, next, 100)
+	if why := r.rescueCutRefusal(target(next, "convert"), 33); why == "" {
+		t.Fatal("同一章同一角色切过的位置附近，应当拦住")
+	}
+	if why := r.rescueCutRefusal(target(next, "convert"), 70); why != "" {
+		t.Fatalf("换了位置的切口应当放行，却被拦住：%s", why)
+	}
+	// 别的角色是另一条会话，不该被这一章的转换切口挡住。
+	if why := r.rescueCutRefusal(target(next, "checker"), 33); why != "" {
+		t.Fatalf("另一个角色应当放行，却被拦住：%s", why)
 	}
 }

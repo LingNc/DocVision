@@ -50,6 +50,11 @@ type Request struct {
 	// Attempt 是「切回第 N 次尝试」（role=restore，P63）要切回的那个号：
 	// 留档目录 `work/attempts/<章>/try<N>/` 里的 N。别的角色不用它。
 	Attempt int `json:"attempt,omitempty"`
+	// NotBefore 是"最早什么时候可以动手"（RFC3339，空 = 随时）。上游接口报错
+	// （T237）时**不换尝试、不截断**，只把同一章的「继续跑」按退避时间放回队伍：
+	// 派发端看到还没到点就安静跳过（不写日志、不占任何预算），到点才真的续跑
+	// 那条会话。一次上游抖动因此只多等几分钟，不会把整章重转一遍。
+	NotBefore string `json:"not_before,omitempty"`
 }
 
 // Dir 返回项目的队列目录。

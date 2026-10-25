@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { state } from '../state'
+import { state, setRetryNote } from '../state'
 import { chapterActivityLabel, chapterNodeHasRows, chapterNodeKey, chapterWantOpen, fixRowTitle, fixTargetId, rescueRowTitle, sessionTip, treeFixRows, treeRescueRows, sessionTitleOf, setCollapsed, usageChipText } from '../legacy/sidebar'
 import InlineMD from './InlineMD.vue'
 import { chapterPendingRetry, refreshIndex, requestChapterRetry } from '../data'
@@ -137,14 +137,14 @@ function retryNode(node: ChapterTreeNode, role: string, ev: MouseEvent): void {
   const project = nodeProject(node)
   if (!project) return
   const what = role === 'checker' ? '重新核对' : '重试'
-  state.retryNote = '正在提交 ' + node.id + ' 的' + what + '请求…'
+  setRetryNote('正在提交 ' + node.id + ' 的' + what + '请求…')
   requestChapterRetry(project, node.id, role, '侧栏' + what)
     .then((res: any) => {
-      state.retryNote = node.id + ' ' + what + '请求已排队（' + ((res && res.note) || '等待转换阶段处理') + '）'
+      setRetryNote(node.id + ' ' + what + '请求已排队（' + ((res && res.note) || '等待转换阶段处理') + '）')
       return refreshIndex()
     })
     .catch((err: any) => {
-      state.retryNote = node.id + ' ' + what + '请求失败：' + ((err && err.message) || err)
+      setRetryNote(node.id + ' ' + what + '请求失败：' + ((err && err.message) || err))
     })
 }
 

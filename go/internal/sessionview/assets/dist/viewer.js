@@ -6828,6 +6828,29 @@
     // P18：/api/img2text-progress 的按书进度（独立 ~5s 轮询；preview.img2text 未开时为空）。
     img2textProgress: []
   });
+  let retryNoteTimer = 0;
+  const RETRY_NOTE_DONE_MS = 2e4;
+  const RETRY_NOTE_BUSY_MS = 6e4;
+  function setRetryNote(text) {
+    state.retryNote = text;
+    if (retryNoteTimer) {
+      clearTimeout(retryNoteTimer);
+      retryNoteTimer = 0;
+    }
+    if (!text) return;
+    const ttl = /^(已|失败|撤销|这个请求)/.test(text) ? RETRY_NOTE_DONE_MS : RETRY_NOTE_BUSY_MS;
+    retryNoteTimer = setTimeout(() => {
+      retryNoteTimer = 0;
+      state.retryNote = "";
+    }, ttl);
+  }
+  function clearRetryNote() {
+    if (retryNoteTimer) {
+      clearTimeout(retryNoteTimer);
+      retryNoteTimer = 0;
+    }
+    if (state.retryNote) state.retryNote = "";
+  }
   function clampWidth(px, min, max) {
     return Math.min(max, Math.max(min, Math.round(px)));
   }
@@ -6960,6 +6983,7 @@
     state.trajKinds = {};
     state.view = "chat";
     state.filter = "";
+    clearRetryNote();
     state.collapsed = {};
     state.overflow = {};
     state.narrowExpanded = true;
@@ -8146,6 +8170,7 @@
   }
   function selectSession(id) {
     const s = findSession(id);
+    clearRetryNote();
     state.current = s;
     if (staticSessions && staticSessions[id]) {
       const fresh = normalizeLines(staticSessions[id].lines);
@@ -9682,12 +9707,12 @@
         const project = nodeProject(node);
         if (!project) return;
         const what = "重新核对";
-        state.retryNote = "正在提交 " + node.id + " 的" + what + "请求…";
+        setRetryNote("正在提交 " + node.id + " 的" + what + "请求…");
         requestChapterRetry(project, node.id, role, "侧栏" + what).then((res) => {
-          state.retryNote = node.id + " " + what + "请求已排队（" + (res && res.note || "等待转换阶段处理") + "）";
+          setRetryNote(node.id + " " + what + "请求已排队（" + (res && res.note || "等待转换阶段处理") + "）");
           return refreshIndex();
         }).catch((err) => {
-          state.retryNote = node.id + " " + what + "请求失败：" + (err && err.message || err);
+          setRetryNote(node.id + " " + what + "请求失败：" + (err && err.message || err));
         });
       }
       function stateTone(label) {
@@ -9859,7 +9884,7 @@
     }
     return target2;
   };
-  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-6ec23ae5"]]);
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-68c7c629"]]);
   const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"
@@ -12204,7 +12229,7 @@
   }
   function dropFromLine(line, source) {
     if (!(line > 1)) {
-      state.retryNote = "这一条之前没有可截断的记录（要从头重来请用「重试这一章」）";
+      setRetryNote("这一条之前没有可截断的记录（要从头重来请用「重试这一章」）");
       return false;
     }
     const s = state.current;
@@ -12215,12 +12240,12 @@
     const then = child ? "接着点顶栏的「继续跑父章节」（" + parent + "）让它跑起来：子章节不会单独重跑，父节点重新驱动这一支时会从这条截断后的转录续跑" : "运行中的 latex 会从这条会话接着跑（也可以点「继续跑」排一次）";
     const ask2 = "删掉第 " + line + " 条及之后（共 " + keep + " 条保留）并继续这条会话？\n\n就地截断当前转录，不新开尝试、不复制会话；原文会先备份到 work/sessions/.trash/。想保留一份对照，请先点 ⤓ 显式 fork 一条同样的会话再在这里操作。";
     if (!window.confirm(ask2)) return false;
-    state.retryNote = "正在就地截断到第 " + keep + " 条…";
+    setRetryNote("正在就地截断到第 " + keep + " 条…");
     truncateSession(String(s.project), String(s.path), keep).then((res) => {
-      state.retryNote = "已截断：保留 " + (res && res.kept || keep) + " 条、丢掉 " + (res && res.dropped || 0) + " 条（备份 " + (res && res.backup || ".trash/") + "）；" + then;
+      setRetryNote("已截断：保留 " + (res && res.kept || keep) + " 条、丢掉 " + (res && res.dropped || 0) + " 条（备份 " + (res && res.backup || ".trash/") + "）；" + then);
       return refreshIndex();
     }).catch((err) => {
-      state.retryNote = "截断失败：" + (err && err.message || err);
+      setRetryNote("截断失败：" + (err && err.message || err));
     });
     return true;
   }
@@ -12230,13 +12255,13 @@
     if (!s || !req) return false;
     if (!window.confirm(forkPrompt(line, s))) return false;
     const prevId2 = String(s.id || "");
-    state.retryNote = "正在提交从第 " + line + " 条记录继续的请求…";
+    setRetryNote("正在提交从第 " + line + " 条记录继续的请求…");
     requestChapterRetry(req.project, req.chapter, req.role, req.reason, req.extra).then((res) => {
-      state.retryNote = "已排队：从第 " + line + " 条记录之后继续（" + (res && res.note || "等待并发槽位") + "）；新会话出现后自动切过去";
+      setRetryNote("已排队：从第 " + line + " 条记录之后继续（" + (res && res.note || "等待并发槽位") + "）；新会话出现后自动切过去");
       watchFork(req.project, req.chapter, req.role, prevId2);
       return refreshIndex();
     }).catch((err) => {
-      state.retryNote = "从记录继续失败：" + (err && err.message || err);
+      setRetryNote("从记录继续失败：" + (err && err.message || err));
     });
     return true;
   }
@@ -13628,6 +13653,12 @@
         restoreAsk.value = t;
         restoreNote.value = "";
       }
+      watch(() => state.current ? state.current.id : "", () => {
+        dropAsk.value = null;
+        dropNote.value = "";
+        restoreAsk.value = null;
+        restoreNote.value = "";
+      });
       function doRestore() {
         const t = restoreAsk.value;
         if (!t) return;
@@ -13778,7 +13809,7 @@
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-6f7095f9"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-fcc68c40"]]);
   const pending = /* @__PURE__ */ ref(null);
   const queued = /* @__PURE__ */ ref(null);
   const prevId = /* @__PURE__ */ ref("");
@@ -13825,7 +13856,7 @@
       const same = !!q && !!cur && String(cur.project || "") === q.project && String(cur.chapterId || "") === q.chapter && (q.role === "vector" || String(cur.chapterRole || "") === q.role);
       if (!same) {
         queued.value = null;
-        state.retryNote = "";
+        clearRetryNote();
       }
     }
   );
@@ -13846,12 +13877,12 @@
     pending.value = null;
     busy.value = true;
     const done = (msg) => {
-      state.retryNote = msg;
+      setRetryNote(msg);
       busy.value = false;
       return refreshIndex().catch(() => void 0);
     };
     const fail = (err) => {
-      state.retryNote = "失败：" + (err && err.message || err);
+      setRetryNote("失败：" + (err && err.message || err));
       busy.value = false;
     };
     if (p2.kind === "drop") {
@@ -13859,9 +13890,9 @@
         busy.value = false;
         return;
       }
-      state.retryNote = "正在删除 " + s.name + "…";
+      setRetryNote("正在删除 " + s.name + "…");
       dropSession(String(s.project), String(s.path)).then((res) => {
-        state.retryNote = "已删除 " + s.name + (res && res.archive ? "（含 " + res.archive + "）" : "");
+        setRetryNote("已删除 " + s.name + (res && res.archive ? "（含 " + res.archive + "）" : ""));
         busy.value = false;
       }).catch(fail);
       return;
@@ -13871,7 +13902,7 @@
         busy.value = false;
         return;
       }
-      state.retryNote = "正在提交重画请求…";
+      setRetryNote("正在提交重画请求…");
       requestChapterRetry(String(s.project), "", "vector", "图不对，重画", { path: String(s.name) }).then((res) => {
         queued.value = { project: String(s.project), chapter: "", role: "vector", path: String(s.name), prevId: prevId.value };
         done("已排队重画：" + (res && res.note || "等待并发槽位") + "（可以撤销）");
@@ -13886,7 +13917,7 @@
     const role = p2.kind === "continue" ? "continue" : t.role;
     const child = String(s && s.chapterId || "").indexOf("_child_") >= 0;
     const what = p2.kind === "continue" ? child ? "继续跑父章节" : "继续跑" : t.role === "checker" ? "重新核对" : "重试";
-    state.retryNote = "正在提交 " + t.chapter + " 的" + what + "请求…";
+    setRetryNote("正在提交 " + t.chapter + " 的" + what + "请求…");
     requestChapterRetry(t.project, t.chapter, role, "中栏" + what).then((res) => {
       queued.value = { project: t.project, chapter: t.chapter, role, path: "", prevId: prevId.value };
       if (role !== "continue") watchFork(t.project, t.chapter, role, prevId.value);
@@ -13910,17 +13941,17 @@
     cancelChapterRetry(p2.project, p2.chapter, p2.role, p2.path).then((res) => {
       const n = Number(res && res.removed || 0);
       if (n > 0) {
-        state.retryNote = "已撤销排队请求（" + n + " 条）";
+        setRetryNote("已撤销排队请求（" + n + " 条）");
         queued.value = null;
         backToPrev(p2.prevId);
       } else {
-        state.retryNote = "这个请求已经被 latex 消费，撤不回来了——它开出的那条新会话可以在「历史」里删掉。";
+        setRetryNote("这个请求已经被 latex 消费，撤不回来了——它开出的那条新会话可以在「历史」里删掉。");
         queued.value = null;
         return refreshIndex().catch(() => void 0);
       }
       busy.value = false;
     }).catch((err) => {
-      state.retryNote = "撤销失败：" + (err && err.message || err);
+      setRetryNote("撤销失败：" + (err && err.message || err));
       busy.value = false;
     });
   }

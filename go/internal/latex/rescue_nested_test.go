@@ -121,8 +121,10 @@ func TestNestedChildIntegrationNoSubmitIsRescued(t *testing.T) {
 		// 复盘会话：只读转录 + 交结论。
 		case toolset["read_session"]:
 			stats.add(func() { stats.rescues++ })
+			// 切口落在"整合轮那句用户提示"上：保住子章节自己那几轮转换，只丢掉
+			// 没提交的整合轮。切到第 1 条会等于整章从头再跑，T238 会拒绝。
 			subdivisionReply(w, subdivisionCall("rescue-submit", "submit", map[string]any{
-				"verdict": "truncate", "from": 1, "reason": "整合轮退化", "hint": "",
+				"verdict": "truncate", "from": 13, "reason": "整合轮退化", "hint": "",
 			}))
 		// 核对会话：只读（read_file/grep，没有 write_file）。
 		case toolset["read_file"] && toolset["grep"] && !toolset["write_file"]:

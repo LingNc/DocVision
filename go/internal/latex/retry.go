@@ -1048,6 +1048,14 @@ func (r *Runner) dispatchRetries(proj string) int {
 			_ = retryq.Consume(f.Path)
 			continue
 		}
+		// T237：上游接口错误的重试请求带"最早动手时间"——还没到点就安静跳过，
+		// 不写日志、不占章节锁、不消耗任何预算（watcher 两秒一 tick，真正动手
+		// 只发生在退避时间到了之后）。
+		if nb := strings.TrimSpace(f.Request.NotBefore); nb != "" {
+			if at, err := time.Parse(time.RFC3339, nb); err == nil && time.Now().Before(at) {
+				continue
+			}
+		}
 		// 切回第 N 次尝试（P63）：子章节的尝试号是**父尝试之内**的号，单独把一支
 		// 搬回去会把两代子树拼在一起（产物、报告、整合阶段的版本全对不上）。排成
 		// "父章节切回"听起来更周到，但父章节那份留档里没有"子章节这一支的第 N 次"
@@ -1831,4 +1839,98 @@ func truncateVectorTranscript(proj, texBase string, from int) (string, error) {
 		return "", fmt.Errorf("写回截断后的转录失败: %w", err)
 	}
 	return archived, nil
+}
+
+// ---- 上游接口错误的原地重试（T237） ----
+
+// apiRetryMu 保护 apiRetrySeen。
+var (
+	apiRetryMu   sync.Mutex
+	apiRetrySeen = map[string]int{}
+)
+
+// isSessionUpstreamError 判断一条失败是不是"上游接口不通"（T237）。
+//
+// 为什么单独分一类：连接超时、网关 5xx、限流是**上游**的事，与这条会话做过
+// 什么无关——换一条尝试、整章重转，照样在同一个请求上撞同一堵墙，代价却是一
+// 整章的转换重跑。这类错误只该在同一条会话上退避重试，不该进复盘、不该截断、
+// 更不该开新尝试。
+//
+// 明确标了"不可重试"的 4xx（配置/模型名写错）不算：重试多少次还是那个错。
+func isSessionUpstreamError(msg string) bool {
+	if strings.Contains(msg, "不可重试") {
+		return false
+	}
+	for _, mark := range []string{
+		"SESSION_CONNECTION_TIMEOUT", "SESSION_API_ERROR",
+		"SESSION_RATE_LIMIT_EXCEEDED", "SESSION_TIMEOUT", "connection reset",
+	} {
+		if strings.Contains(msg, mark) {
+			return true
+		}
+	}
+	return false
+}
+
+// apiRetryDelay 是第 n 次原地重试前等多久：30 秒起翻倍，封顶 10 分钟。
+//
+// 上限 10 分钟不是怕等，而是怕页面上一条会话几小时都停在"排队"——用满默认的
+// 6 次大约 25 分钟，足够熬过常见的上游抖动；真断这么久，人该被告知。
+func apiRetryDelay(n int) time.Duration {
+	if n < 1 {
+		n = 1
+	}
+	d := 30 * time.Second
+	for i := 1; i < n; i++ {
+		d *= 2
+		if d >= 10*time.Minute {
+			return 10 * time.Minute
+		}
+	}
+	return d
+}
+
+// queueUpstreamRetry 把"这一章过一会儿再续跑同一条会话"排进队列，返回是否排上。
+//
+// 排的是 role=continue（同一转录、同一工作区、不建新尝试），带 NotBefore 退避
+// 时间；派发端到点才动手。计数按目标（章/角色/转录）算，用满就返回 false，让
+// 调用方如实收尾——那时已经能确定不是抖一下，而是上游真的不通。
+func (r *Runner) queueUpstreamRetry(tid int, tag, label string, target rescueTarget, cause string) bool {
+	if target.ProjDir == "" || target.Base == "" || target.TrPath == "" {
+		return false
+	}
+	limit := r.cfg.Latex.APIErrorRetryLimit()
+	key := target.Base + "/" + target.Role + "/" + filepath.Base(target.TrPath)
+	apiRetryMu.Lock()
+	apiRetrySeen[key]++
+	n := apiRetrySeen[key]
+	if n > limit {
+		delete(apiRetrySeen, key)
+	}
+	apiRetryMu.Unlock()
+	if n > limit {
+		r.log.LogWarning(tid, tag, label, "上游接口错误已重试 "+strconv.Itoa(limit)+" 次仍不通，不再等："+cause)
+		return false
+	}
+	wait := apiRetryDelay(n)
+	at := time.Now().Add(wait)
+	_, err := retryq.Queue(target.ProjDir, retryq.Request{
+		Project: filepath.Base(target.ProjDir), Chapter: target.Base, Role: "continue",
+		Source: "upstream", NotBefore: at.Format(time.RFC3339),
+		Reason: fmt.Sprintf("上游接口错误，第 %d/%d 次原地重试：%s", n, limit, cause),
+	})
+	if err != nil {
+		r.log.LogWarning(tid, tag, label, "上游接口错误，但排队重试失败:", err)
+		return false
+	}
+	why := fmt.Sprintf("上游接口错误（第 %d/%d 次重试，%s 后续跑同一条会话，不重转）",
+		n, limit, wait)
+	// 用复盘那条"已排队"标记：调用方的失败终态要写 queued 而不是 error——它
+	// 几分钟后就会被这条请求续上，界面不该停在「会话错误」。
+	r.markRescueQueued(target.TrPath)
+	r.markTargetActivity(tid, tag, label, target, "queued", why)
+	r.log.LogWarning(tid, tag, label, fmt.Sprintf(
+		"%s：%s 后再续跑这条会话（第 %d/%d 次，不截断、不换尝试）", why, wait, n, limit))
+	r.phaseNote()("[retry] %s 上游接口错误，%s 后原地重试（第 %d/%d 次）", target.Base, wait, n, limit)
+	return true
 }
