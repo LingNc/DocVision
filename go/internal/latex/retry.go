@@ -1471,9 +1471,22 @@ func (r *Runner) continueFromChapter(proj, base, srcName string, from int) error
 // 后来的改动、产物却没了"的半新半旧状态，比不回退更让人困惑；退不了时行为与
 // P55 之前完全一致（只退对话、工作区与产物都不动）。
 func (r *Runner) applyWorkspaceCut(proj, base, srcName string, from int) (int, bool) {
+	return r.applyWorkspaceCutTo(proj, base, srcName, from, "")
+}
+
+// applyWorkspaceCutTo 与 applyWorkspaceCut 相同，只是把"已提交的产物"挪到
+// archiveDir（空 = work/attempts/<章>/try<源尝试>/）。T241：复盘原地截断时尝试号
+// 不变，产物不能挪进 attempts——那会把"作废留档"和"现役这一次"搅成同一个
+// 目录，切回第 N 次尝试时搬回来的会是它自己刚作废的产物。改挪进
+// work/rescue/cuts/<章>/，只作证据。
+func (r *Runner) applyWorkspaceCutTo(proj, base, srcName string, from int, archiveDir string) (int, bool) {
 	rolled, ok := r.rollbackChapterWork(proj, base, srcName, from)
 	if ok {
-		archiveChapterProducts(r, proj, base, srcName)
+		if archiveDir != "" {
+			archiveChapterProductsTo(r, proj, base, archiveDir)
+		} else {
+			archiveChapterProducts(r, proj, base, srcName)
+		}
 	}
 	return rolled, ok
 }
@@ -1485,7 +1498,11 @@ func archiveChapterProducts(r *Runner, proj, base, srcName string) {
 	if _, n, ok := transcriptAttempt(srcName); ok && n > 0 {
 		attempt = n
 	}
-	dst := filepath.Join(proj, "work", "attempts", base, fmt.Sprintf("try%d", attempt))
+	archiveChapterProductsTo(r, proj, base, filepath.Join(proj, "work", "attempts", base, fmt.Sprintf("try%d", attempt)))
+}
+
+// archiveChapterProductsTo 是 archiveChapterProducts 的目的地显式版。
+func archiveChapterProductsTo(r *Runner, proj, base, dst string) {
 	submitRoot := filepath.Join(proj, "work", "chapters")
 	targets := []struct{ src, name string }{
 		{filepath.Join(submitRoot, base+".tex"), base + ".tex"},
@@ -1509,7 +1526,11 @@ func archiveChapterProducts(r *Runner, proj, base, srcName string) {
 	}
 	_ = os.Remove(filepath.Join(submitRoot, base+".tex.checker"))
 	if moved > 0 {
-		r.log.Log(0, "[convert]", base, "已提交的产物挪进 work/attempts/"+base+"/try"+strconv.Itoa(attempt)+"/")
+		shown := dst
+		if rel, err := filepath.Rel(proj, dst); err == nil && !strings.HasPrefix(rel, "..") {
+			shown = filepath.ToSlash(rel)
+		}
+		r.log.Log(0, "[convert]", base, "已提交的产物挪进 "+shown+"/")
 	}
 }
 
@@ -1635,6 +1656,139 @@ func cutTranscriptAt(src string, from, floor int) (string, int, error) {
 		return "", 0, fmt.Errorf("写新尝试的转录失败: %w", err)
 	}
 	return dst, next, nil
+}
+
+// balancedCutFrom 把切口往前挪到"所有工具调用都已经拿到回执"的那一条记录上。
+//
+// 为什么必须挪：截在一条还在等回执的 assistant 消息后面，续跑时那些调用只能
+// 补占位回执（"这个调用没有回执，已跳过"）。模型看到自己上一轮"调了四个工具、
+// 一个结果都没有"，下一句就是"这个会话里工作区/编译/提交工具都不可用"——实测
+// 一族章节连切十次全栽在这句话上，每切一次就多一条同样退化、同样只活几轮的
+// 尝试。切口挪回真正平衡的那一条，回放的上下文里工具全部是有结果的。
+//
+// 返回保留的前缀行数（1 基，等于"保留到第几条记录"）；0 = 整段前缀都不平衡。
+// 老转录没有 tool_call_id 时按先后顺序一对一对销（tool 行的 role 是 tool）。
+func balancedCutFrom(lines []string, from int) int {
+	type probe struct {
+		T     string `json:"t"`
+		Role  string `json:"role"`
+		Calls []struct {
+			ID string `json:"id"`
+		} `json:"tool_calls"`
+		CallID string `json:"tool_call_id"`
+	}
+	var pending []string
+	last := 0
+	for i := 0; i < from && i < len(lines); i++ {
+		var p probe
+		if err := json.Unmarshal([]byte(lines[i]), &p); err != nil || p.T != "msg" {
+			continue
+		}
+		for _, c := range p.Calls {
+			pending = append(pending, c.ID)
+		}
+		if p.Role == "tool" {
+			switch {
+			case p.CallID != "":
+				for j, id := range pending {
+					if id == p.CallID {
+						pending = append(pending[:j], pending[j+1:]...)
+						break
+					}
+				}
+			case len(pending) > 0:
+				pending = pending[1:]
+			}
+		}
+		if len(pending) == 0 {
+			last = i + 1
+		}
+	}
+	return last
+}
+
+// trimTranscriptInPlace 把一条转录**原地**截到第 from 条记录之前（T241）：同一条
+// 文件、同一个尝试号，页面的「历史」不多出一条。
+//
+// 复盘截断以前是"抄前 N 行成下一条尝试"（cutTranscriptNow），于是一次真实会话
+// 被复盘十次就在历史里变成十条：每条都是同一个退化现场的前缀，谁也看不出它们
+// 本来是同一件事，还跟"核对多次打回"、"手动重试"、"子会话切换"这些**真**换尝试
+// 的操作混在一起。复盘是"这条会话跑歪了、退回去重说"，它不该占一次尝试。
+//
+// 丢掉的那一段不销毁：抄进 `<proj>/work/rescue/cuts/<章>/`（只给查证据用，不进
+// 历史、不可切回）。切口上补一条 `t=meta kind=cut` 记录，历史和转录里都能看出
+// "这里被复盘截过、截到第几条"。
+func (r *Runner) trimTranscriptInPlace(proj, base, trPath string, from int, reason string) (int, int, error) {
+	trPath = strings.TrimSpace(trPath)
+	if trPath == "" || !fileExists(trPath) {
+		return 0, 0, fmt.Errorf("源转录不存在: %s", trPath)
+	}
+	if from < 1 {
+		return 0, 0, fmt.Errorf("截断点必须 ≥ 1（转录里的行号）")
+	}
+	data, err := os.ReadFile(trPath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("读不到源转录 %s: %w", filepath.Base(trPath), err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if from > len(lines) {
+		return 0, 0, fmt.Errorf("截断点 %d 超出转录长度 %d", from, len(lines))
+	}
+	var probe struct {
+		T string `json:"t"`
+	}
+	if err := json.Unmarshal([]byte(lines[from-1]), &probe); err != nil || probe.T != "msg" {
+		return 0, 0, fmt.Errorf("第 %d 行不是一条消息记录（选了用量/元信息行？）", from)
+	}
+	keep := balancedCutFrom(lines, from)
+	if keep < 1 {
+		return 0, 0, fmt.Errorf("前 %d 行里没有一步是工具调用都已回执的，截了也接不下去", from)
+	}
+	if keep < from {
+		r.log.LogWarning(0, "[rescue]", base, "切口从第", strconv.Itoa(from), "条前移到第",
+			strconv.Itoa(keep), "条：后面那条还在等工具回执，截在那儿续跑只会读到占位回执")
+	}
+	tail := lines[keep:]
+	if len(tail) > 0 {
+		if p, err := saveCutEvidence(proj, base, trPath, tail); err != nil {
+			r.log.LogWarning(0, "[rescue]", base, "丢掉的那一段没能留档:", err)
+		} else {
+			r.log.LogInfo(0, "[rescue]", base, "丢掉的那一段留档:", p)
+		}
+	}
+	meta, err := json.Marshal(map[string]any{
+		"t": "meta", "kind": "cut", "ts": time.Now().Format(time.RFC3339),
+		"from": keep, "dropped": len(tail), "reason": reason,
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	head := strings.Join(lines[:keep], "\n") + "\n" + string(meta) + "\n"
+	// 先写临时文件再 rename：转录随时可能被预览页/复盘读到，读到一个半截文件
+	// 比什么都没做更糟。
+	tmp := trPath + ".cut-tmp"
+	if err := os.WriteFile(tmp, []byte(head), 0o644); err != nil {
+		return 0, 0, fmt.Errorf("写截断后的转录失败: %w", err)
+	}
+	if err := os.Rename(tmp, trPath); err != nil {
+		_ = os.Remove(tmp)
+		return 0, 0, fmt.Errorf("截断后的转录就位失败: %w", err)
+	}
+	return keep, len(tail), nil
+}
+
+// saveCutEvidence 把复盘截断丢掉的那一段抄进 work/rescue/cuts/<章>/。
+func saveCutEvidence(proj, base, trPath string, tail []string) (string, error) {
+	dir := filepath.Join(proj, "work", "rescue", "cuts", base)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	name := time.Now().Format("20060102-150405") + "-" + filepath.Base(trPath)
+	if !strings.HasSuffix(name, ".jsonl") {
+		name += ".jsonl"
+	}
+	dst := filepath.Join(dir, name)
+	return dst, os.WriteFile(dst, []byte(strings.Join(tail, "\n")+"\n"), 0o644)
 }
 
 // findChapterTranscript 在磁盘上找这一章的一条转录（只按文件名找）：先看顶层

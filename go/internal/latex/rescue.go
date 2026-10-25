@@ -909,46 +909,88 @@ func (r *Runner) rescueAudit(t rescueTarget, v rescueVerdict, lines int) {
 	_, _ = f.Write(append(data, '\n'))
 }
 
+// rescueCutResult 是一刀复盘截断的结果：保留到第几条记录、丢掉多少条、还算
+// 第几次尝试。Attempt 0 = 这一刀没做成（源转录读不到/切点不合法），派发端会
+// 照老路再切一次。
+type rescueCutResult struct {
+	Kept    int
+	Dropped int
+	Attempt int
+}
+
 // rescueQueueTruncate 把"截断到 from 再继续"**当场**落到磁盘，然后排进重试队列。
 //
-// T228：截断是纯文件操作（前缀抄成下一条尝试、源转录一字不动），没有理由等到
-// 派发、等到有并发槽才做。旧行为是"结论收下、只写一条排队请求"，真正的切口
-// 要等 dispatchRetries——中间那段时间页面上什么都没变、转录一行没少，用户会
-// 以为"这个截断没生效"。现在切口在提交那一刻就落盘（多出一条新尝试，页面的
-// 「历史」立刻能看到），排队请求只负责"接着这条新尝试继续跑"。
+// T228：截断是纯文件操作，没有理由等到派发、等到有并发槽才做。旧行为是"结论
+// 收下、只写一条排队请求"，真正的切口要等 dispatchRetries——中间那段时间页面
+// 上什么都没变、转录一行没少，用户会以为"这个截断没生效"。
 //
-// 切不动（源转录读不到、切点不是消息行）时不装作切了：CutAttempt 留 0，由派发
-// 端再切一次，并把失败写进日志与进度行。
-func (r *Runner) rescueQueueTruncate(t rescueTarget, from int) (int, error) {
+// T241：转换/修复会话的复盘截断**原地**做（同一条转录、同一个尝试号）。以前是
+// "前缀抄成下一条尝试"，于是同一条真实会话被复盘三次就在「历史」里长成三条，
+// 每条都是同一个退化现场的前缀——用户看到的"这一章怎么重复了这么多次历史"
+// 就是这么来的，而且它和"核对多次打回"、"手动重试"、"子会话切换"这些**真**换
+// 尝试的操作混在一起。复盘是"退回去重说"，不该占一次尝试；复盘次数不受限。
+//
+// 核对会话仍然是换尝试（核对一句一尝试、结论按尝试号回写，语义不同）。
+func (r *Runner) rescueQueueTruncate(t rescueTarget, from int) (rescueCutResult, error) {
 	rel, err := filepath.Rel(filepath.Join(t.ProjDir, "work"), t.TrPath)
 	if err != nil || strings.HasPrefix(rel, "..") {
-		return 0, fmt.Errorf("转录不在本项目 work/ 之下: %s", t.TrPath)
+		return rescueCutResult{}, fmt.Errorf("转录不在本项目 work/ 之下: %s", t.TrPath)
 	}
 	role := t.Role
 	if role == "" {
 		role = "convert"
 	}
-	if role == "convert" {
-		role = "continue" // 转换会话：从这条记录继续
+	queueRole := role
+	if queueRole == "convert" {
+		queueRole = "continue" // 转换会话：从这条记录继续
 	}
-	_, attempt, cutErr := r.cutTranscriptNow(t.ProjDir, t.Base, t.Role, t.TrPath, from)
+	if role == "checker" {
+		_, attempt, cutErr := r.cutTranscriptNow(t.ProjDir, t.Base, t.Role, t.TrPath, from)
+		reason := fmt.Sprintf("复盘判为退化，从第 %d 条记录继续", from)
+		res := rescueCutResult{Kept: from, Attempt: attempt}
+		if cutErr != nil {
+			r.log.LogWarning(0, "[rescue]", t.Base, "当场截断失败，退回派发时再切:", cutErr)
+			r.phaseNote()("[rescue] %s 当场截断失败，退回派发时再切：%v", t.Base, cutErr)
+		} else {
+			if rolled, ok := r.applyWorkspaceCut(t.ProjDir, t.Base, filepath.Base(t.TrPath), from); ok {
+				r.log.LogInfo(0, "[rescue]", t.Base, "工作区已回退到第", strconv.Itoa(rolled), "行")
+			}
+			reason = fmt.Sprintf("复盘判为退化，已当场截断到第 %d 条记录（第 %d 次尝试），接着跑", from, attempt)
+		}
+		_, err = retryq.Queue(t.ProjDir, retryq.Request{
+			Project: filepath.Base(t.ProjDir), Chapter: t.Base, Role: queueRole,
+			From: from, Path: filepath.ToSlash(rel), Source: "rescue",
+			CutAttempt: attempt, Reason: reason,
+		})
+		return res, err
+	}
+
+	kept, dropped, cutErr := r.trimTranscriptInPlace(t.ProjDir, t.Base, t.TrPath, from, "复盘判为退化")
+	res := rescueCutResult{Kept: from}
 	reason := fmt.Sprintf("复盘判为退化，从第 %d 条记录继续", from)
 	if cutErr != nil {
-		r.log.LogWarning(0, "[rescue]", t.Base, "当场截断失败，退回派发时再切:", cutErr)
-		r.phaseNote()("[rescue] %s 当场截断失败，退回派发时再切：%v", t.Base, cutErr)
+		r.log.LogWarning(0, "[rescue]", t.Base, "当场原地截断失败，退回派发时再切:", cutErr)
+		r.phaseNote()("[rescue] %s 当场原地截断失败，退回派发时再切：%v", t.Base, cutErr)
 	} else {
+		res.Kept, res.Dropped = kept, dropped
+		// 尝试号取自转录名，原地截断不改它。
+		res.Attempt = transcriptAttemptOf(t.TrPath)
 		// 工作区跟着对话一起退回那一刻（P55）：只切对话会让模型记得的文件还在。
-		if rolled, ok := r.applyWorkspaceCut(t.ProjDir, t.Base, filepath.Base(t.TrPath), from); ok {
+		// 产物不能挪进 work/attempts（尝试号没变，那是"作废留档"的位置），
+		// 挪进复盘自己的证据目录。
+		archive := filepath.Join(t.ProjDir, "work", "rescue", "cuts", t.Base)
+		if rolled, ok := r.applyWorkspaceCutTo(t.ProjDir, t.Base, filepath.Base(t.TrPath), kept, archive); ok {
 			r.log.LogInfo(0, "[rescue]", t.Base, "工作区已回退到第", strconv.Itoa(rolled), "行")
 		}
-		reason = fmt.Sprintf("复盘判为退化，已当场截断到第 %d 条记录（第 %d 次尝试），接着跑", from, attempt)
+		reason = fmt.Sprintf("复盘判为退化，已原地截断到第 %d 条记录（仍是第 %d 次尝试，丢掉后面 %d 条），接着跑",
+			kept, res.Attempt, dropped)
 	}
 	_, err = retryq.Queue(t.ProjDir, retryq.Request{
-		Project: filepath.Base(t.ProjDir), Chapter: t.Base, Role: role,
-		From: from, Path: filepath.ToSlash(rel), Source: "rescue",
-		CutAttempt: attempt, Reason: reason,
+		Project: filepath.Base(t.ProjDir), Chapter: t.Base, Role: queueRole,
+		From: res.Kept, Path: filepath.ToSlash(rel), Source: "rescue",
+		CutAttempt: res.Attempt, Reason: reason,
 	})
-	return attempt, err
+	return res, err
 }
 
 var _ = logger.LevelInfo

@@ -139,9 +139,10 @@ func TestRescueSubmitToolValidation(t *testing.T) {
 	}
 }
 
-// T228：复盘一提交截断结论，切口就**当场**落在磁盘上——不等到派发、不等并发
-// 槽。页面「历史」立刻多出一条尝试，用户不会以为"这个截断没生效"。
-func TestRescueTruncateCutsOnTheSpot(t *testing.T) {
+// T228/T241：复盘一提交截断结论，切口就**当场**落在磁盘上——不等到派发、不等
+// 并发槽。T241 起这一刀是**原地**的：同一条转录、同一个尝试号，页面「历史」不会
+// 多出一条；丢掉的那一段另存进 work/rescue/cuts/ 作证据。
+func TestRescueTruncateTrimsInPlace(t *testing.T) {
 	proj := t.TempDir()
 	trPath := filepath.Join(proj, "work", "sessions", "convert_chapter_001.jsonl")
 	if err := os.MkdirAll(filepath.Dir(trPath), 0o755); err != nil {
@@ -159,28 +160,43 @@ func TestRescueTruncateCutsOnTheSpot(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &Runner{cfg: &config.Config{}, log: log}
-	attempt, err := r.rescueQueueTruncate(
+	res, err := r.rescueQueueTruncate(
 		rescueTarget{ProjDir: proj, Base: "chapter_001", Role: "convert", TrPath: trPath}, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attempt != 2 {
-		t.Fatalf("应切出第 2 次尝试，got %d", attempt)
+	if res.Attempt != 1 || res.Kept != 6 || res.Dropped != 4 {
+		t.Fatalf("应原地截到第 6 条（仍是第 1 次尝试），got %+v", res)
 	}
-	// 切口已经在磁盘上：新尝试 6 行、源转录一字未动。
-	cut := filepath.Join(proj, "work", "sessions", "convert_chapter_001.try2.jsonl")
-	data, err := os.ReadFile(cut)
+	// 截断已经落在磁盘上：6 条记录 + 一条"这里被复盘切过"的 meta 行。
+	data, err := os.ReadFile(trPath)
 	if err != nil {
-		t.Fatalf("截断应立刻落盘（%s）：%v", cut, err)
+		t.Fatal(err)
 	}
-	if got := len(strings.Split(strings.TrimRight(string(data), "\n"), "\n")); got != 6 {
-		t.Fatalf("新尝试应有 6 行，got %d", got)
+	kept := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(kept) != 7 {
+		t.Fatalf("原地截断后应是 6 条记录 + 1 条 cut 记录，got %d 行", len(kept))
 	}
-	src, err := os.ReadFile(trPath)
-	if err != nil || len(strings.Split(strings.TrimRight(string(src), "\n"), "\n")) != 10 {
-		t.Fatalf("源转录不该被动：%v %d", err, len(src))
+	if !strings.Contains(kept[6], `"kind":"cut"`) || !strings.Contains(kept[6], `"from":6`) {
+		t.Fatalf("切口上应留一条 cut 记录：%s", kept[6])
 	}
-	// 排队请求带上 CutAttempt，派发端据此不再切第二刀。
+	// 不该再长出下一条尝试：复盘不占尝试号。
+	if fileExists(filepath.Join(proj, "work", "sessions", "convert_chapter_001.try2.jsonl")) {
+		t.Fatalf("复盘截断不该另开一条尝试")
+	}
+	// 丢掉的那一段留档。
+	cuts, err := os.ReadDir(filepath.Join(proj, "work", "rescue", "cuts", "chapter_001"))
+	if err != nil || len(cuts) != 1 {
+		t.Fatalf("丢掉的那一段应留档：%v %v", cuts, err)
+	}
+	tail, err := os.ReadFile(filepath.Join(proj, "work", "rescue", "cuts", "chapter_001", cuts[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(strings.Split(strings.TrimRight(string(tail), "\n"), "\n")); got != 4 {
+		t.Fatalf("留档应是被丢掉的 4 条，got %d", got)
+	}
+	// 排队请求带上 CutAttempt（还是这一次尝试），派发端据此不再切第二刀。
 	dir := filepath.Join(proj, "work", "retry")
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 {
@@ -204,15 +220,15 @@ func TestRescueTruncateCutsOnTheSpot(t *testing.T) {
 	if req.Role != "continue" || req.From != 6 || req.Chapter != "chapter_001" || req.Path == "" {
 		t.Fatalf("请求内容不对：%+v", req)
 	}
-	if req.CutAttempt != 2 {
-		t.Fatalf("请求应记下已切好的尝试号（派发端不再切）：%+v", req)
+	if req.CutAttempt != 1 {
+		t.Fatalf("请求应记下切口所在的尝试号（派发端不再切）：%+v", req)
 	}
 	if req.Path != "sessions/convert_chapter_001.jsonl" {
 		t.Fatalf("Path 应是 work/ 下的相对路径：%q", req.Path)
 	}
 }
 
-// 切不动时不装作切了：CutAttempt 留 0，派发端还会再切一次。
+// 切不动时不装作切了：Attempt 留 0，派发端还会再切一次。
 func TestRescueQueueTruncateFallsBackWhenCutFails(t *testing.T) {
 	proj := t.TempDir()
 	trPath := filepath.Join(proj, "work", "sessions", "convert_chapter_001.jsonl")
@@ -227,13 +243,13 @@ func TestRescueQueueTruncateFallsBackWhenCutFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &Runner{cfg: &config.Config{}, log: log}
-	attempt, err := r.rescueQueueTruncate(
+	res, err := r.rescueQueueTruncate(
 		rescueTarget{ProjDir: proj, Base: "chapter_001", Role: "convert", TrPath: trPath}, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attempt != 0 {
-		t.Fatalf("切点越界时不应报成已切：%d", attempt)
+	if res.Attempt != 0 {
+		t.Fatalf("切点越界时不应报成已切：%+v", res)
 	}
 	dir := filepath.Join(proj, "work", "retry")
 	entries, err := os.ReadDir(dir)
