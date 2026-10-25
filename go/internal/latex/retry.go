@@ -1205,8 +1205,15 @@ func waitText(d time.Duration) string {
 	return strconv.Itoa(int(d.Hours())) + " 小时"
 }
 
-// chapterLastOutputAge 是一章最近一次写盘的"年岁"：转录、产物、报告都算。
-// 找不到任何文件时返回 -1（这一章还没开始过）。
+// chapterLastOutputAge 是一章（含它的递归子章节）最近一次写盘的"年岁"：转录与
+// 产物都算。找不到任何文件时返回 -1（这一章还没开始过）。
+//
+// T240：子章节的转录不在 `<proj>/work/sessions/` 里，而在父章节的临时工作区
+// `<proj>/work/temp/conv_<父章>/work/_subdivision/…/node/sessions/` 下（P34）。
+// 只看顶层目录时，父节点停在「等待子会话」的那几个小时里它自己一行都不写，而
+// 子树其实在猛跑——排队提示据此说出"这一章最后一次输出在 1 小时前——它可能卡住
+// 了、等不下去只能重启"，把"还在动"误报成"卡住"，用户就去重启一个干得好好的
+// 进程。所以这里把子树里属于这一章的转录也算进来。
 func (r *Runner) chapterLastOutputAge(proj, base string) time.Duration {
 	newest := time.Time{}
 	consider := func(p string) {
@@ -1214,21 +1221,54 @@ func (r *Runner) chapterLastOutputAge(proj, base string) time.Duration {
 			newest = st.ModTime()
 		}
 	}
-	if ents, err := os.ReadDir(filepath.Join(proj, "work", "sessions")); err == nil {
+	sessDir := filepath.Join(proj, "work", "sessions")
+	if ents, err := os.ReadDir(sessDir); err == nil {
 		for _, e := range ents {
-			if e.IsDir() || !strings.Contains(e.Name(), base) {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") || !strings.Contains(e.Name(), base) {
 				continue
 			}
-			if p := filepath.Join(proj, "work", "sessions", e.Name()); strings.HasSuffix(e.Name(), ".jsonl") {
-				consider(p)
-			}
+			consider(filepath.Join(sessDir, e.Name()))
 		}
 	}
+	// ② 递归子章节的转录：父章节临时工作区里的 node/sessions/ 与 .partial。
+	// 走这棵树时按名字过滤（子节点名一定以父章节名开头），只看 .jsonl 与
+	// .partial；条目数设上限，几千个文件的父章不至于把 tick 拖住。
+	walkRoot := filepath.Join(proj, "work", "temp", "conv_"+topChapterOf(base), "work")
+	seen := 0
+	_ = filepath.WalkDir(walkRoot, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		seen++
+		if seen > 20000 {
+			return fs.SkipAll
+		}
+		name := d.Name()
+		if !strings.Contains(name, base) {
+			return nil
+		}
+		if strings.HasSuffix(name, ".jsonl") || strings.HasSuffix(name, ".partial") {
+			consider(p)
+		}
+		return nil
+	})
 	consider(filepath.Join(proj, "work", "chapters", base+".tex"))
 	if newest.IsZero() {
 		return -1
 	}
 	return time.Since(newest)
+}
+
+// topChapterOf 把递归子章节名收敛到最外层的顶层章节（chapter_004_child_02_child_02
+// → chapter_004）；顶层章节原样返回。子节点的转录都挂在顶层章节的临时工作区下。
+func topChapterOf(base string) string {
+	if i := strings.Index(base, "_child_"); i > 0 {
+		return base[:i]
+	}
+	return base
 }
 
 // retryWarnOnce 让"排队中"这类提示每个请求文件只打一次。
