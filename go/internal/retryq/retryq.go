@@ -47,6 +47,9 @@ type Request struct {
 	// 派发端看到它就直接接着那条尝试跑，不再重复截断。0 = 还没切（页面 ⤓ 那条路
 	// 只能把请求排进队列，真正的文件操作留给运行中的进程）。
 	CutAttempt int `json:"cut_attempt,omitempty"`
+	// Attempt 是「切回第 N 次尝试」（role=restore，P63）要切回的那个号：
+	// 留档目录 `work/attempts/<章>/try<N>/` 里的 N。别的角色不用它。
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // Dir 返回项目的队列目录。

@@ -30,8 +30,10 @@ import (
 // （`chapter_004_child_01` 也认）；③ 那个章节的 md 必须真的在磁盘上。
 //
 // 请求带角色（P53 阶段二）：convert = 重转这一章（新尝试）、checker = 只重新核对
-// 已提交产物、continue = 接着这一章最近一次尝试继续跑（不新建尝试）。
-// 运行期的消费者是 latex 里的 watcher，任何阶段都收，忙的章节留队。
+// 已提交产物、continue = 接着这一章最近一次尝试继续跑（不新建尝试）、restore =
+// 切回第 N 次尝试（把 `work/attempts/<章>/try<N>/` 搬回工作区、把现役这一次整棵
+// 留档，P63，请求里 `attempt` 指明是第几次）。运行期的消费者是 latex 里的
+// watcher，任何阶段都收，忙的章节留队。
 
 var chapterNameRe = regexp.MustCompile(`^chapter_[0-9]+(_child_[0-9]+)*$`)
 
@@ -44,6 +46,9 @@ type retryRequest struct {
 	// Path 是源转录文件名（本项目 work/sessions/ 下的 *.jsonl）。0 = 从末尾继续。
 	From int    `json:"from,omitempty"`
 	Path string `json:"path,omitempty"`
+	// Attempt 是「切回第 N 次尝试」（role=restore，P63）要切回的那个号：留档
+	// 目录 `work/attempts/<章>/try<N>/` 里的 N。别的角色不用它。
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // /api/retry/cancel —— 撤销一条**还没被消费**的排队请求（P56）。
@@ -210,7 +215,25 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "项目不存在", http.StatusNotFound)
 		return
 	}
-	if st, err := os.Stat(filepath.Join(projDir, "chapters", base+".md")); err != nil || !st.Mode().IsRegular() {
+	// 切回第 N 次尝试（P63）：只认顶层章节——子章节的尝试号是**父尝试之内**的号，
+	// 单独把一支搬回去会把两代子树拼在一起。它也不需要 `chapters/<章>.md` 在
+	// （搬回来的就是产物本身，md 不在也该能切），所以这两条在下面那套检查之前。
+	if role == "restore" {
+		if i := strings.Index(base, "_child_"); i > 0 {
+			http.Error(w, "子章节的尝试归它所在的父章节（"+base[:i]+"），请对父章节切回", http.StatusBadRequest)
+			return
+		}
+		if req.Attempt <= 0 {
+			http.Error(w, "切回要指明第几次尝试（attempt 从 1 开始）", http.StatusBadRequest)
+			return
+		}
+		arch := filepath.Join(projDir, "work", "attempts", base, fmt.Sprintf("try%d", req.Attempt))
+		if st, err := os.Stat(arch); err != nil || !st.IsDir() {
+			http.Error(w, fmt.Sprintf("没有第 %d 次尝试的留档，无法切回", req.Attempt), http.StatusNotFound)
+			return
+		}
+	}
+	if st, err := os.Stat(filepath.Join(projDir, "chapters", base+".md")); role != "restore" && (err != nil || !st.Mode().IsRegular()) {
 		// 子章节由父章节的细分树产出（不在 chapters/ 下）。
 		// T196/T211：它的「重转 / 继续跑」一律改成父章节的「继续跑」——子章节的
 		// 产物与整合都归父节点，单独重跑这一支没有谁去整合它的新产物（父报告的
@@ -244,8 +267,8 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 	if role == "" {
 		role = "convert"
 	}
-	if role != "convert" && role != "checker" && role != "continue" {
-		http.Error(w, "角色只能是 convert、checker、continue 或 vector", http.StatusBadRequest)
+	if role != "convert" && role != "checker" && role != "continue" && role != "restore" {
+		http.Error(w, "角色只能是 convert、checker、continue、restore 或 vector", http.StatusBadRequest)
 		return
 	}
 	// 继续跑的对象是**已有的那条会话**：没有转录就没什么可接着的。
@@ -311,7 +334,7 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 	path, err := retryq.Queue(projDir, retryq.Request{
 		Project: req.Project, Chapter: base, Role: role,
 		Reason: strings.TrimSpace(req.Reason), Source: "web",
-		From: req.From, Path: srcName,
+		From: req.From, Path: srcName, Attempt: req.Attempt,
 	})
 	if err != nil {
 		http.Error(w, "写入重试队列失败: "+err.Error(), http.StatusInternalServerError)
@@ -337,6 +360,14 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if role == "continue" {
 		note = "已加入继续跑队列：接着这一章最近一次尝试干（不新建尝试、不归档），正在跑的 latex 会把它排进并发槽位"
+	}
+	if role == "restore" {
+		// 切回（P63）是文件搬运，不是"再跑一条会话"：把话说清楚——正在跑的那条
+		// 不会被打断（打断不了，也没有必要），切回等它把手上这一轮走完再搬；那一次
+		// 整棵留档，之后还能切回来接着跑。
+		note = fmt.Sprintf("已加入切回队列：把第 %d 次尝试的留档搬回工作区，现在这一次整棵留档"+
+			"（之后还能切回来接着跑）。正在跑的这一章不会被打断——切回会等它跑完手上这一轮再搬；"+
+			"没在跑就等下次启动", req.Attempt)
 	}
 	writeJSON(w, map[string]any{
 		"ok": true, "chapter": base, "project": req.Project, "role": role,

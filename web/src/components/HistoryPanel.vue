@@ -6,8 +6,8 @@
 import { computed, ref } from 'vue'
 import { state, relTime } from '../state'
 import { chainMemberTag, chapterIdSuffix, chapterRoleLabel, chainOfSession, fixRoundAt, fixRowLabel, fixTargetId, plainTitle, rescueOrdinal, reviewedTargetLabel, sessionTitleOf } from '../legacy/sidebar'
-import { dropSession, refreshIndex, selectSession } from '../data'
-import { canDropOf } from '../legacy/actions'
+import { dropSession, refreshIndex, requestChapterRetry, selectSession } from '../data'
+import { canDropOf, canRestoreOf, restoreTargetOf } from '../legacy/actions'
 import { checkerRounds } from '../legacy/rounds'
 import { jumpToLine } from '../legacy/trajectory'
 import InlineMD from './InlineMD.vue'
@@ -220,6 +220,34 @@ function doDrop() {
     })
     .catch((err: any) => { dropNote.value = '删除失败：' + ((err && err.message) || err) })
 }
+
+/* 切回第 N 次尝试（P63）：历史里每一条转换会话就是"那一次的工作区"。
+ *
+ * 为什么按钮放在历史行上：用户要复刻的念头总是"那一次明明全过了，回到那一次"，
+ * 而他看到的正是这一列行。判定收在 legacy/actions.ts 的 restoreTargetOf（纯函数、
+ * 有单测），这里只负责确认条与发请求。 */
+const restoreAsk = ref<{ project: string; chapter: string; attempt: number } | null>(null)
+const restoreNote = ref('')
+
+function askRestore(s: any) {
+  const t = restoreTargetOf(s, newest.value)
+  if (!t) return
+  restoreAsk.value = t
+  restoreNote.value = ''
+}
+
+function doRestore() {
+  const t = restoreAsk.value
+  if (!t) return
+  restoreAsk.value = null
+  restoreNote.value = '已排队：切回第 ' + t.attempt + ' 次尝试…'
+  requestChapterRetry(t.project, t.chapter, 'restore', '', { attempt: t.attempt })
+    .then((res: any) => {
+      restoreNote.value = (res && res.note) || ('已排队：切回第 ' + t.attempt + ' 次尝试')
+      return refreshIndex()
+    })
+    .catch((err: any) => { restoreNote.value = '切回失败：' + ((err && err.message) || err) })
+}
 </script>
 
 <template>
@@ -238,7 +266,16 @@ function doDrop() {
         <button class="history-act act-danger" type="button" @click="doDrop">确认删除</button>
         <button class="history-act" type="button" @click="dropAsk = null">取消</button>
       </div>
+      <div v-if="restoreAsk" class="history-confirm" role="alert">
+        <span>
+          切回第 {{ restoreAsk.attempt }} 次尝试？那一份的工作区与产物会搬回原处，现在这一次（第
+          {{ newest }} 次）整棵留档——之后还能在历史里再切回来。正在跑的会话不会被打断，会等它跑完手上这一轮再搬。
+        </span>
+        <button class="history-act" type="button" @click="doRestore">确认切回</button>
+        <button class="history-act" type="button" @click="restoreAsk = null">取消</button>
+      </div>
       <div v-if="dropNote" class="history-note">{{ dropNote }}</div>
+      <div v-if="restoreNote" class="history-note">{{ restoreNote }}</div>
       <div v-if="rounds.length" class="history-rounds">
         <div class="history-rounds-head">这条核对转录里的 {{ rounds.length }} 轮（新 → 旧同序，点一轮跳到那一轮的起点）</div>
         <button
@@ -285,6 +322,7 @@ function doDrop() {
             :title="'切到同一轮（' + chainMemberTag(s) + '）的' + (s.chapterRole === 'checker' ? '转换' : '核对') + '会话：' + pairOf(s).id"
             @click.stop="onRowClick(pairOf(s))"
           >{{ pairLabel(s) }}</button>
+          <button v-if="canRestoreOf(s, newest)" class="history-act" type="button" title="把这一份的工作区与产物搬回原处（现在这一次整棵留档，之后还能切回来）" @click.stop="askRestore(s)">切回这次</button>
           <button v-if="canDropOf(s)" class="history-act act-danger" type="button" title="删掉这条转录（作废尝试的归档一并删除）" @click.stop="askDrop(s)">删除</button>
         </span>
       </div>

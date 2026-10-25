@@ -237,3 +237,19 @@
 **验证**：`GOCACHE=/var/tmp/dsh-gocache go test ./internal/... -count=1` 全绿（14 个包 ok，`splitlog` 无测试文件）、`go build ./...` 通过、`npx vitest run` 20 个文件 250 条全过、`npm run build` 后 dist 零差异。
 
 **第二轮验证（2026-10-23）**：`go test ./internal/... -count=1` 14 个包全绿（`internal/latex`、`internal/sessionview`、`internal/config` 都含改名后的文件）、`go vet ./internal/latex/ ./internal/sessionview/` 干净、`npx vitest run` **22 个文件 253 条**全过（拆出两份新 spec，原文件 79 → 38 条）、`npx tsc --noEmit` 仍只有 `data.ts`/`legacy/trajectory.ts` 两条既有报错；生产代码与 `dist` 未动（除夹具路径常量）。
+
+### P63 切回第 N 次尝试（已实现）
+
+**用户口径（2026-10-25）**："做一下切回"，并在中途追加一条："还有注意切换的时候暂停当前会话"。
+
+**问题**：换尝试一直是单向的。作废的那一次整棵被搬进 `work/attempts/<章>/try<N>/`，新尝试从空工作区重开，旧的只能翻不能回去。页面上一排「第 1/2/3 次」点了只是切视图，流水线用的还是最新那一次——用户遇到的正是最典型的后悔：一次新尝试跑到一半发现"上一版其实是对的"，或者核对会话自己跑坏了、想退回它还没插手那一刻接着干。
+
+**改法**：把它做成一次对称的搬运，`go/internal/latex/restore.go`。现役这一次（第 L 次）整棵搬进 `work/attempts/<章>/tryL/`，`work/attempts/<章>/tryN/` 整棵搬回工作区；搬的清单与 `archiveChapterAttempt` 同一张（节点工作区的三份 + 提交产物 + 分片目录 + 报告），所以"切回再切回来"是幂等的，不会长出第二套布局。转录也跟着搬：`lastAttemptNumber` 是按 `work/sessions` 里最大的 `.tryN` 号认"现在这一次"的，只搬文件树不搬转录，切回来以后各条路径会继续往那个更大的号上写，页面上的「最新」也对不上。
+
+**不做的事**：不重跑任何会话（切回只是把文件摆回原处，要不要接着干由用户按「继续跑 / 重新核对」决定，自动开一条核对会立刻烧掉一轮 token，而用户常常只是想先看一眼那一版）；不动核对转录（结论记在它自己那条转录的 meta 里，那是历史事实）；不覆盖任何东西（目标已占就拒，冲突的那一份加 `parked-` 前缀，同名转录不搬、原地留着）。
+
+**"暂停"是怎么落地的**：这套流水线里没有可叫停的入口——`lockChapter` 只是内存里的章节锁，没有取消通道，也没有 PID 文件。所以切回不打断任何会话：请求照常排队，等这一章的会话把手上这一轮走完、松开章节锁，整棵现役尝试才被搬走；那一次是完整留档的，之后在历史里还能切回来接着跑。守卫是"最近 2 分钟内还有没有写入"（这一章与它整棵细分树里的转换/核对转录、以及节点工作区里除 `media/views/pdfview/build` 之外的条目），有写入就不搬——半个工作区被搬走时子会话还在里面写，是这个功能唯一能把数据搞坏的方式。日志与页面文案都照实说这一点，不假装"已经停下了"。
+
+**接口**：`/api/retry` 增加角色 `restore` 与字段 `attempt`。子章节一律拒（它的尝试号是父尝试之内的号，单独搬一支会把两代子树拼在一起），要切就切父章节。前端入口在「历史」页签的每一行上：「切回这次」，只给顶层章节的转换会话、且尝试号不等于当前这一次（切回去之后，被搬走的那一次号比"现在"大，所以同样有这个按钮，能切回来）。判定收在 `web/src/legacy/actions.ts` 的 `restoreTargetOf` 里，页面只负责确认条与发请求。
+
+**验证**：`go/internal/latex/restore_test.go` 覆盖双向对调、往返幂等、写入中拒切、四类非法目标，`go/internal/sessionview/restore_retry_test.go` 钉住接口的四个拒绝分支与回执文案；`web/tests/session-actions.spec.ts` 钉住按钮给谁不给谁。全量 `go test ./internal/...`、`npx vitest run`、`go vet`、`npm run build` 全绿。

@@ -4,7 +4,7 @@
  * 这里把规则钉死：谁有按钮、谁没有、确认文案说的是不是那件事。
  */
 import { describe, it, expect } from 'vitest'
-import { canContinueOf, canDropOf, canRedrawOf, confirmTextOf, continueTargetOf, retryTargetOf, sameActionTarget } from '../src/legacy/actions'
+import { canContinueOf, canDropOf, canRedrawOf, canRestoreOf, confirmTextOf, continueTargetOf, restoreTargetOf, retryTargetOf, sameActionTarget } from '../src/legacy/actions'
 
 const conv = (over: Record<string, unknown> = {}) => ({
   id: 'book/work/sessions/convert_chapter_002.jsonl',
@@ -127,5 +127,43 @@ describe('确认条的归属（T208）', () => {
   it('任一侧没有目标（样式/汇编/静态导出）就不留', () => {
     expect(sameActionTarget(null, target())).toBe(false)
     expect(sameActionTarget(target(), null)).toBe(false)
+  })
+})
+
+/*
+ * P63：「切回第 N 次尝试」只长在**顶层章节的转换会话**上，且号不是当前这一次。
+ * 这些边界都不是审美问题——子章节的号是父尝试之内的号，拿它去拼 try<N> 会把
+ * 两代子树拼在一起；修复/复盘链的号根本不是"这一章的第几次"。
+ */
+describe('切回第 N 次尝试的按钮（P63）', () => {
+  const convAt = (attempt: number, over: Record<string, unknown> = {}) =>
+    conv({ chapterAttempt: attempt, name: `convert_chapter_002.try${attempt}.jsonl`, ...over })
+
+  it('旧尝试给按钮，目标带项目/章节/号', () => {
+    expect(restoreTargetOf(convAt(1), 3)).toEqual({ project: 'book', chapter: 'chapter_002', attempt: 1 })
+    expect(restoreTargetOf(convAt(2), 3)).toEqual({ project: 'book', chapter: 'chapter_002', attempt: 2 })
+    expect(canRestoreOf(convAt(1), 3)).toBe(true)
+  })
+
+  it('号就是当前这一次时没有可切回的旧版', () => {
+    expect(restoreTargetOf(convAt(3), 3)).toBeNull()
+    expect(canRestoreOf(convAt(3), 3)).toBe(false)
+  })
+
+  // 切过去还能切回来：切回第 1 次之后，第 3 次就在留档里，号比"现在"大。
+  it('切回来也认：号不等于当前这一次就行', () => {
+    expect(restoreTargetOf(convAt(3), 1)).toEqual({ project: 'book', chapter: 'chapter_002', attempt: 3 })
+  })
+
+  it('子章节 / 核对 / 归档 / 静态导出都不给', () => {
+    expect(restoreTargetOf(convAt(1, { chapterId: 'chapter_004_child_01' }), 3)).toBeNull()
+    expect(restoreTargetOf(checker({ chapterAttempt: 1 }), 3)).toBeNull()
+    expect(restoreTargetOf(convAt(1, { archived: true }), 3)).toBeNull()
+    expect(restoreTargetOf(convAt(1, { staticMode: true }), 3)).toBeNull()
+    expect(restoreTargetOf(null, 3)).toBeNull()
+  })
+
+  it('没有尝试号的老转录按第 1 次算', () => {
+    expect(restoreTargetOf(conv(), 2)).toEqual({ project: 'book', chapter: 'chapter_002', attempt: 1 })
   })
 })

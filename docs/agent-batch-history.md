@@ -2670,3 +2670,17 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **测试**：新增 `childreuse_test.go` 两条——（产物 + 最后一次 pass 才算复用；最后一次是 `issues` 不算；之后又 pass 才算；更新的 `.try2` 以 `error` 收尾则不算；用量行、消息行、`run_end` 不影响结论）。新增 `rounds_test.go` 的 `TestRoundLogRollbackKeepsSubdivision`——回退后父章节 `.tex` 回到存档点那一版、后来产生的 `junk.tex` 被清掉、`_subdivision/child_01/node/result/<子章>.tex` 仍在、暂存目录已消失；把 `stashSubdivision`/`restoreSubdivision` 摘掉这条立刻红。
 - **验证**：`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿（latex 38.5s）、`go vet ./...`、`go build ./...` 干净、`gofmt -l` 对新改文件干净（7 个既有文件不动）。
 - **未改（刻意）**：① 已作废的尝试照旧留在 `work/attempts/` 下不删，人工"回到第 N 次尝试"（把归档搬回工作树）本次没做，眼下要回退只能等这一轮停下后手工搬；② 已经白跑掉的那些子章节不回来；③ 落盘转录一字不动（用户数据）；④ 017 那种 `SESSION_CONNECTION_TIMEOUT` 是接口侧失败，不在本次范围。
+
+## v1.5+（P63：切回第 N 次尝试，2026-10-25）
+
+- **触发**：用户先问"之前子会话都通过了，我想切换回去"—，随后一句口径："做一下切回"，中途追加"还有注意切换的时候暂停当前会话"。T236 那一批的"未改（刻意）"里写的正是"人工回到第 N 次尝试本次没做，要回退只能手工搬"，这一批就是它。
+- **口径**：切回 = 把 `work/attempts/<章>/try<N>/` 整棵搬回工作区、把现役这一次整棵留档，两个方向对称；搬的清单与 `archiveChapterAttempt` 同一张（节点工作区的 `work`/`result`/`integrated-stage`、提交的 `.tex`、分片目录、报告）。转录也要跟着搬，否则 `lastAttemptNumber` 仍按 `work/sessions` 里最大的 `.tryN` 认"现在这一次"，切回来以后各条路径继续往那个更大的号上写。
+- **"暂停"的真实落地方式**：走查了三条可能的叫停入口——`internal/latex/runner.go` 的 `aborted` 只是接口错误的重试计数，`internal/session/session.go` 的 `interrupted` 是"从磁盘续跑"的标志，`continueFlag`/`setContinueFlag` 只是手动继续的消息标记；没有取消通道、没有项目级锁、没有 PID 文件，`lockChapter` 也只是内存里那一格。硬做一次真正的中途取消要动会话循环与工具执行，代价和风险都远大于收益。于是"暂停"= 请求排队 + 只在拿到章节锁（`TryLock`）时才动手：正在跑的会话把手上这一轮走完 → 松锁 → 整棵现役尝试被搬进留档（完整、可续）→ 再切回来 + 「继续跑」就能接着干。日志 `[restore] … 等它跑完这一轮`（同一章 5 分钟内只留一行）与页面回执都照实这么写，不假装已经停下。
+- **写保护（唯一能把数据搞坏的路）**：`restoreBusyReason` 看两处——`work/sessions` 下这一章（含 `_child_*`）的转换转录与 `.partial`、以及节点工作区里除 `media/views/pdfview/build/out/images/children.tmp` 之外的条目，最近 2 分钟（`restoreLiveGrace`）有 mtime 就拒。013 这种父章节停在 `waiting_children`、孩子在 `_subdivision/` 里写的现场，如果没有这道守卫，半个工作区会被搬走。
+- **不覆盖**：目标已占就拒（`movePath` 报「目标已存在，不搬」），冲突的那一份加 `parked-` 前缀，同名转录不搬、原地留着；`try<attempt>` 目录只在搬空后删。
+- **接口**：`retryq.Request` 新增 `Attempt`，`/api/retry` 接受 `role=restore` + `attempt`；四个拒绝分支各有一句话——没写第几次（400）、号不大于 0（400）、留档不存在（404）、子章节（400，并指出该对哪个父章节切）。`role=restore` 不要求章节的 `.md` 还在（它搬的是留档，不是重跑），也不会自动开核对会话。
+- **前端**：「历史」页签每一行多一个「切回这次」，判定在 `web/src/legacy/actions.ts` 的 `restoreTargetOf`（顶层章节的转换会话、未归档、尝试号 ≠ 当前这一次——切回去之后被搬走那一次的号比"现在"大，所以同样有这个按钮，能切回来）；确认条写明"现在这一次整棵留档、之后还能切回来""正在跑的会话不会被打断，会等它跑完手上这一轮"。
+- **缺陷（自己踩的，留在档案里）**：第一版把 `transcriptAttempt` 的返回值当成了不带前缀的章节名，而它返回的 stem **含** `convert_` 前缀——于是"搬转录"和"写入中守卫"两条路径都在拿 `chapter_004` 比 `convert_chapter_004`，一个转录都没搬、守卫也永远返回空；四条 Go 用例里三条当场红（"转录应该在 …/try3/…"、"应允许切回第 3 次，却被拒"）。改成与 `"convert_"+base` 比较后全绿。
+- **测试**：`go/internal/latex/restore_test.go` 四条（双向对调、往返幂等、写入中拒切、四类非法目标）；`go/internal/sessionview/restore_retry_test.go` 两条（排队成功且回执带 `attempt`、"不会被打断"、队列里那一项角色正确；四类拒绝且队列保持空）。`web/tests/session-actions.spec.ts` 新增五条钉住按钮给谁不给谁。
+- **验证**：`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿、`go vet ./...`、`go build ./...` 干净；`npx vitest run` 22 个文件 271 条全绿；`npm run build` 后 `go build` 再通过（dist 已重建并提交）。
+- **未改（刻意）**：① 落盘的转录与产物一个字节都不改写，切回只做搬运；② 核对转录不搬（结论记在它自己那条转录的 meta 里，那是历史事实）；③ 真正的中途取消没做，卡死的会话今天仍然只能等它自己收尾——这是能力边界，不是遗漏。

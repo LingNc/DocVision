@@ -290,7 +290,7 @@ export function requestChapterRetry(
   chapter: string,
   role = 'convert',
   reason = '',
-  extra: { from?: number; path?: string } = {},
+  extra: { from?: number; path?: string; attempt?: number } = {},
 ): Promise<any> {
   return postJSON('/api/retry', { project, chapter, role, reason, ...extra })
 }

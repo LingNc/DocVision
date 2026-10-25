@@ -951,6 +951,18 @@ func (r *Runner) stopRetryWatcher() {
 	r.retryWatcherWG.Wait()
 }
 
+// retryBlockReason 是派发端统一的"现在还不能跑"判断。
+//
+// 切回第 N 次尝试（P63）走另一套判据：它不是"跑一条会话"，而是把两个留档目录
+// 里的文件互换；"章节 markdown 存在""样式就绪"这些跟它无关，倒是"这一章还在
+// 不在写"必须查——所以两套各归各的，别混在一个函数里越堆越长。
+func (r *Runner) retryBlockReason(proj, role, base string, req retryq.Request) string {
+	if role == "restore" {
+		return RestorePrecondition(proj, base, req.Attempt)
+	}
+	return r.retryPrecondition(proj, role, base)
+}
+
 // retryPrecondition 说明"现在能不能跑这条请求"。返回非空 = 还不能跑（请求留在
 // 队列里，下一个 tick 再看）。样式未就绪、产物还没有都属于这一类。
 func (r *Runner) retryPrecondition(proj, role, base string) string {
@@ -1031,9 +1043,18 @@ func (r *Runner) dispatchRetries(proj string) int {
 			continue
 		}
 		role := retryRoleOf(f.Request)
-		if role != "convert" && role != "checker" && role != "continue" {
+		if role != "convert" && role != "checker" && role != "continue" && role != "restore" {
 			r.log.LogWarning(0, "[retry]", base, "未知的请求角色，忽略:", role)
 			_ = retryq.Consume(f.Path)
+			continue
+		}
+		// 切回第 N 次尝试（P63）：子章节的尝试号是**父尝试之内**的号，单独把一支
+		// 搬回去会把两代子树拼在一起（产物、报告、整合阶段的版本全对不上）。排成
+		// "父章节切回"听起来更周到，但父章节那份留档里没有"子章节这一支的第 N 次"
+		// 这个粒度——照实说，让它去父章节上点。
+		if parent, isChild := childChapterParent(base); isChild && role == "restore" {
+			_ = retryq.Consume(f.Path)
+			r.log.LogWarning(0, "[restore]", base, "子章节的尝试归它所在的父章节，请对", parent, "切回")
 			continue
 		}
 		// T196/T211：递归子章节的重转 / 接着跑需要父节点的整合上下文（章节 md、
@@ -1065,10 +1086,17 @@ func (r *Runner) dispatchRetries(proj string) int {
 			// 就像什么都没发生（既不新建尝试、也不显示在排队），用户只能靠截断
 			// 绕过。现在第一次跳过就记一行，之后每隔几分钟再说一次，带"等了多久"
 			// 与"这一章最后一次输出在多久之前"，卡住的章节能从日志里直接看出来。
+			if role == "restore" {
+				// 切回要搬的就是工作区本身，绝不能和正在写它的会话并行（P63）：
+				// 拿不到锁就等这一章收尾的那一刻再切，句子也换成"在等它停下来"，
+				// 免得被当成在排槽位。
+				r.logRestoreWait(base, f.Path)
+				continue
+			}
 			r.logBusySkip(proj, base, role, f.Path)
 			continue
 		}
-		if why := r.retryPrecondition(proj, role, base); why != "" {
+		if why := r.retryBlockReason(proj, role, base, f.Request); why != "" {
 			r.unlockChapter(base)
 			// 前置条件没到：留队。只在有进展时才会重复扫到它，日志按章去重。
 			if !r.retryWarnOnce(f.Path, base+" "+why) {
@@ -1091,6 +1119,18 @@ func (r *Runner) dispatchRetries(proj string) int {
 		}(base, req)
 	}
 	return started
+}
+
+// logRestoreWait 报告"切回请求在等这一章的会话收尾"（P63）。
+//
+// 用户点「切回第 N 次尝试」时，工作区里可能正有一个会话在写。切回要搬的就是这棵
+// 树，所以它和其它请求一样只 TryLock：拿不到就留队，**不打断正在跑的那条**，等
+// 这一章收尾的那一刻立刻切。这条日志就是"它在等，不是没反应"。
+func (r *Runner) logRestoreWait(base, reqPath string) {
+	if !r.retryWarnOnce(reqPath, base+" 切回请求在等这一章的会话收尾") {
+		r.log.LogInfo(0, "[restore]", base,
+			"切回请求排队中：先等这一章的会话跑完手上这一轮再搬（不打断它，那一次会整棵留档，之后能切回来接着跑）")
+	}
 }
 
 // retryBusyLogEvery 是"这一章忙、请求留队"这类提示的重复间隔：第一次立刻打，
@@ -1283,6 +1323,17 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 				r.requeueParentAfterChildPass(proj, req.Project, base)
 			}
 		}
+	case "restore":
+		// 切回第 N 次尝试（P63）：纯文件搬运，不跑任何会话。跑完了提示一句
+		// "要不要接着核对"——自动开一条核对会立刻烧掉一轮 token，而用户往往
+		// 只是想先看一眼那一版的产物。
+		msg, err := RestoreChapterAttempt(proj, base, req.Attempt)
+		if err != nil {
+			r.log.LogWarning(0, "[restore]", base, "切回失败:", err)
+			break
+		}
+		r.log.Log(0, "[restore]", base, msg)
+		r.log.LogInfo(0, "[restore]", base, "产物已就位；要更新核对结论请点「重新核对这一章」")
 	case "continue":
 		if req.From > 0 && req.CutAttempt == 0 {
 			if err := r.continueFromChapter(proj, base, req.Path, req.From); err != nil {

@@ -76,6 +76,37 @@ export function canDropOf(s: any): boolean {
   return !s.live
 }
 
+export interface RestoreTarget {
+  project: string
+  chapter: string
+  attempt: number
+}
+
+/* 「切回第 N 次尝试」的目标（P63）：把 work/attempts/<章>/try<N>/ 整棵搬回工作区、
+ * 把现在这一次整棵留档。判定收在这里，页面只读结论。
+ *
+ * 为什么只给顶层章节的转换会话：
+ *   · 子章节的尝试号是**父尝试之内**的号，单独搬一支会把两代子树拼在一起——它
+ *     归父章节（服务端也这么拒）；
+ *   · 修复 / 复盘链的号不是"这一章的第几次"（修复按轮次、复盘按这一章的第几次），
+ *     拿它去拼 try<N> 会指到不相干的目录；
+ *   · 号等于当前这一次时没有旧版可切（那本来就是工作区里这一份）。
+ * newestAttempt 是历史链里**还在工作区**的最大尝试号（HistoryPanel 的 newest）。 */
+export function restoreTargetOf(s: any, newestAttempt: number): RestoreTarget | null {
+  if (!s || s.staticMode || !s.project || !s.chapterId) return null
+  if (s.chapterRole !== 'convert') return null
+  if (s.archived) return null
+  const chapter = String(s.chapterId)
+  if (chapter.indexOf('_child_') >= 0) return null
+  const attempt = Number(s.chapterAttempt) || 1
+  if (attempt === (Number(newestAttempt) || 1)) return null
+  return { project: String(s.project), chapter, attempt }
+}
+
+export function canRestoreOf(s: any, newestAttempt: number): boolean {
+  return !!restoreTargetOf(s, newestAttempt)
+}
+
 /* 二次确认的文案：把"会发生什么"写清楚，避免点下去才发现。 */
 export function confirmTextOf(kind: 'retry' | 'continue' | 'redraw' | 'drop' | 'cancel', s: any): string {
   switch (kind) {
