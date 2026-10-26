@@ -70,6 +70,10 @@ type rescueChapterOptions struct {
 	// 一项）；空 = 每次都 pass。给多项时用来钉住"打回一轮之后必须重新真的核一
 	// 遍"（T234）：第二项是 pass 就说明修复后的那一版确实被重新看过了。
 	checkerStatuses []string
+	// checkerEmptyIssues 是前几次**核对请求**给出"issues 但问题清单为空"的次数
+	// （T242）：现场实测整章核对跑完、issues 是空串，旧行为据此作废整章重转。
+	// 之后的请求照 checkerStatuses 回答。
+	checkerEmptyIssues int
 }
 
 type rescueChapterStats struct {
@@ -251,6 +255,13 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 			if opts.checkerNoSubmit {
 				// 退化：跑完就给一段正文，从不调 submit。
 				p60Text(w, "I could not finish the review.")
+				return
+			}
+			// T242：交了 issues 却一条问题都没写——现场原样（report 里没有 issues）。
+			if opts.checkerEmptyIssues > 0 && n <= opts.checkerEmptyIssues {
+				subdivisionReply(w, subdivisionCall("check-submit", "submit", map[string]any{
+					"report": map[string]any{"status": "issues"},
+				}))
 				return
 			}
 			status := "pass"

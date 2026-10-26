@@ -205,9 +205,14 @@ func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string
 	attemptsMade := 0
 	// statusAsked 标记"这一次尝试已经为不可用的结论状态提醒过一轮"（T232）：
 	// 每条会话只问一次，问过仍给不出状态就照原来的路走（换会话/收尾）。
+	// issuesAsked 同理，管的是"交了 issues 但一条问题都没写"（T242）。
+	// emptyIssues 数这种情况一共出现几次，用于最后那句如实的收尾文案。
 	statusAsked := false
+	issuesAsked := false
+	emptyIssues := 0
 	for attempt := 1; ; attempt++ {
 		statusAsked = false
+		issuesAsked = false
 		limit := checkerAttempts
 		if !sawVerdict {
 			limit = checkerNoVerdictAttempts
@@ -391,6 +396,59 @@ func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string
 				r.log.LogWarning(tid, "[checker]", base, "提醒后结论状态仍不可用:", strconv.Quote(submit.Status))
 			}
 		}
+		// T242：交了 issues 却**一条问题都没写**。现场实测：整章核对跑完，
+		// submit 的 issues 是空串，代码把一句占位文案写进留档，随后按"打回"
+		// 作废整章、从头重转——等于一句话都没说就把一整棵跑好的产物扔了，而
+		// 拿回来的只有"the checker reported problems but gave no description"。
+		// 零信息的结论不能当判决用。与 T232 问状态同一手法：先在同一条会话里
+		// 要一份清单（工具没坏，只是参数空着），要不到就按"这次没结论"换一条
+		// 核对会话重核，产物与转换会话都不动。
+		if submit.Status == "issues" && strings.TrimSpace(submit.Issues) == "" && !issuesAsked {
+			issuesAsked = true
+			r.log.LogWarning(tid, "[checker]", base, "结论是 issues 却没有任何问题描述，先在同一条会话里要清单")
+			chkState(rowStateQueued)
+			release := r.acquireCheckerSlot()
+			chkState(rowStateRunning)
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+			_, runErr = sess.Run(session.RunOptions{UserText: checkerIssuesReminder})
+			release()
+			if runErr != nil {
+				_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "error"})
+				if tr != nil {
+					tr.Close()
+					tr = nil
+				}
+				r.log.LogWarning(tid, "[checker]", base, "问题清单提醒轮失败:", runErr)
+				if isSessionFatalError(runErr.Error()) {
+					r.keepCheckerTranscript(trPath, strict)
+					return false, "checker API failure: " + runErr.Error()
+				}
+				if isSessionAPIError(runErr.Error()) {
+					apiFailure = runErr.Error()
+				}
+				continue
+			}
+			if !submit.Submitted {
+				r.log.LogWarning(tid, "[checker]", base, "提醒后仍未提交结论")
+				if tr != nil {
+					tr.Close()
+					tr = nil
+				}
+				continue
+			}
+		}
+		// T242：要过清单还是空的——这一轮不算"拿到结论"（sawVerdict 不动，
+		// 预算仍是 checkerNoVerdictAttempts），关掉这条会话换一条核对重核。
+		if submit.Status == "issues" && strings.TrimSpace(submit.Issues) == "" {
+			r.log.LogWarning(tid, "[checker]", base, "提醒后 issues 仍为空，按没结论重开核对会话")
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "no_verdict"})
+			if tr != nil {
+				tr.Close()
+				tr = nil
+			}
+			emptyIssues++
+			continue
+		}
 		// T217：拿到过结论了（issues 或无法识别的状态都算）——轮次预算就此回到
 		// checkerAttempts，不再为"没结论"多开会话。
 		sawVerdict = true
@@ -400,12 +458,8 @@ func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string
 				tr.Close()
 				tr = nil
 			}
-			issues := strings.TrimSpace(submit.Issues)
-			if issues == "" {
-				issues = "the checker reported problems but gave no description"
-			}
 			r.keepCheckerTranscript(trPath, strict)
-			return false, issues
+			return false, strings.TrimSpace(submit.Issues)
 		}
 		if submit.Status != "pass" {
 			r.log.LogWarning(tid, "[checker]", base, "提交了未知结论状态:", submit.Status)
@@ -432,6 +486,9 @@ func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string
 	// "未能提交结论"，调用方与用户都容易读成"内容没通过"；这里点明原因、次数，
 	// 让上层（checkerNoVerdict）与人都看得出该做的是重开核对，而不是重转整章。
 	if !sawVerdict {
+		if emptyIssues > 0 {
+			return false, fmt.Sprintf("核对始终没有给出结论（不是内容问题，共尝试 %d 次）：每次都交了 issues 却一条问题都没有写出来，没有清单就没法据此改内容", attemptsMade)
+		}
 		return false, fmt.Sprintf("核对始终没有给出结论（不是内容问题，共尝试 %d 次）：会话一次都没有调用 submit，可能把结论写成了正文或直接结束", attemptsMade)
 	}
 	// 旧行为在这里对非 strict 节点**直接判通过**——实测代价极大：一条跑完的
@@ -481,6 +538,17 @@ const checkerStatusReminder = checkerStatusReminderMark +
 	" (something must be fixed), and put the problem list in `issues` when it is `issues`." +
 	" A verdict written in your reply text is not a verdict."
 
+// checkerIssuesReminderMark 是"交了 issues 但一条问题都没写"的提醒开头（T242）。
+// 与上面两条同样计入"这条转录还能不能原地续跑"的那条线。
+const checkerIssuesReminderMark = "You submitted issues but wrote no problem list."
+
+// checkerIssuesReminder 是那句话本身。issues 为空的结论既不能用来改内容，
+// 也不该拿它作废整章——要么给出可指位置的问题，要么交 pass。
+const checkerIssuesReminder = checkerIssuesReminderMark +
+	" Call the `submit` TOOL again: if something really must be fixed, put it in `issues` as concrete, locatable problems" +
+	" (file + what is wrong there); if nothing is wrong, submit `status: pass`." +
+	" A problem list written in your reply text, or `issues: \"\"`, is not usable."
+
 // loadTranscriptMessages 读一条转录的历史消息（读不到就当空：新会话）。
 func loadTranscriptMessages(path string) []session.ChatMessage {
 	if path == "" {
@@ -505,7 +573,8 @@ func countCheckerSubmitReminders(msgs []session.ChatMessage) int {
 			continue
 		}
 		if strings.HasPrefix(strings.TrimSpace(s), checkerSubmitReminderMark) ||
-			strings.HasPrefix(strings.TrimSpace(s), checkerStatusReminderMark) {
+			strings.HasPrefix(strings.TrimSpace(s), checkerStatusReminderMark) ||
+			strings.HasPrefix(strings.TrimSpace(s), checkerIssuesReminderMark) {
 			n++
 		}
 	}

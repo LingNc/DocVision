@@ -161,7 +161,26 @@ func TestCheckerSessionFeedsBackRealProblems(t *testing.T) {
 			wantIssues: "核对始终没有给出结论（不是内容问题，共尝试 4 次）",
 		},
 		{
-			name: "issues without text still blocks",
+			// T242：交了 issues 却一条问题都没写，先在同一条会话里要一次清单
+			// ——模型补上了就照常按清单打回。
+			name: "issues without text asks for the list",
+			reply: func(w http.ResponseWriter, round int32) {
+				switch round {
+				case 1:
+					jsonToolReply(w, "submit", `{"report":{"status":"issues"}}`)
+				case 2:
+					jsonToolReply(w, "submit", `{"report":{"status":"issues","issues":"表 3-2 少了三行"}}`)
+				default:
+					jsonReply(w, "reported")
+				}
+			},
+			wantOK:     false,
+			wantIssues: "表 3-2 少了三行",
+		},
+		{
+			// T242：要过还是空的就按"这次没结论"收尾——一句空清单不能作废
+			// 整章重转（旧行为正是如此）。
+			name: "issues without text is not a verdict",
 			reply: func(w http.ResponseWriter, round int32) {
 				if round == 1 {
 					jsonToolReply(w, "submit", `{"report":{"status":"issues"}}`)
@@ -170,7 +189,7 @@ func TestCheckerSessionFeedsBackRealProblems(t *testing.T) {
 				jsonReply(w, "reported")
 			},
 			wantOK:     false,
-			wantIssues: "no description",
+			wantIssues: "核对始终没有给出结论（不是内容问题",
 		},
 	}
 	for _, c := range cases {
