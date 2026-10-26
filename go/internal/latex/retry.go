@@ -2,6 +2,7 @@ package latex
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -990,9 +991,10 @@ func (r *Runner) retryPrecondition(proj, role, base string) string {
 			return "这一章还没有提交产物"
 		}
 	}
-	if role == "continue" && !fileExists(filepath.Join(proj, "work", "temp", "conv_"+base, "work")) && childNodeWork(proj, base) == "" {
-		return "这一章的工作区已经不在了"
-	}
+	// 这里**不再要求工作区还在**（T243）：章节工作树是临时树，一次转换收尾就
+	// 删掉了（`keep_temp_dirs` 默认关），而「接着跑」本来就以 resume=true 重建
+	// 它。以前这条判据会把整条接口错误重试链挡死——排下的续跑请求每次扫到都被
+	// 判成"工作区已经不在了"，这一章永远停在 queued，重启也不会自己动。
 	if classNameOfFile(filepath.Join(proj, "style")) == "" {
 		return "样式还没就绪"
 	}
@@ -1385,6 +1387,12 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 	case "continue":
 		if req.From > 0 && req.CutAttempt == 0 {
 			if err := r.continueFromChapter(proj, base, req.Path, req.From); err != nil {
+				if isPaused(err) {
+					// T243：接口重试用满 = 暂停，不改口叫"失败"。
+					r.log.LogWarning(0, "[convert]", base, "上游接口仍不通，这一章保持暂停（重启或点「继续跑」再试）：", err)
+					r.phaseNote()("[convert] %s 因上游接口错误暂停", base)
+					return
+				}
 				r.log.LogError(0, "[convert]", base, "从记录继续失败:", err)
 				r.phaseNote()("[convert] %s 从记录继续失败：%v", base, err)
 			}
@@ -1396,7 +1404,12 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 				strconv.Itoa(req.CutAttempt), "次尝试），直接继续")
 		}
 		if err := r.continueChapter(proj, base, reason); err != nil {
-			r.log.LogError(0, "[convert]", base, "继续跑失败:", err)
+			if isPaused(err) {
+				// T243：接口重试用满 = 暂停，不是"继续跑失败"。
+				r.log.LogWarning(0, "[convert]", base, "上游接口仍不通，这一章保持暂停（重启或点「继续跑」再试）：", err)
+			} else {
+				r.log.LogError(0, "[convert]", base, "继续跑失败:", err)
+			}
 		}
 	}
 }
@@ -2069,7 +2082,7 @@ func isSessionUpstreamError(msg string) bool {
 // apiRetryDelay 是第 n 次原地重试前等多久：30 秒起翻倍，封顶 10 分钟。
 //
 // 上限 10 分钟不是怕等，而是怕页面上一条会话几小时都停在"排队"——用满默认的
-// 6 次大约 25 分钟，足够熬过常见的上游抖动；真断这么久，人该被告知。
+// 30 次大约 4.5 小时，足够熬过常见的上游抖动；真断这么久，这一章就暂停（T243）。
 func apiRetryDelay(n int) time.Duration {
 	if n < 1 {
 		n = 1
@@ -2084,11 +2097,60 @@ func apiRetryDelay(n int) time.Duration {
 	return d
 }
 
+// pausedMarker 让"暂停"的两种承载（单章、整轮收尾）都能被 isPaused 认出来。
+type pausedMarker interface{ pausedMarker() }
+
+// pausedError 是"这一章暂停"（T243）：上游接口错误连 api_error_retries 次原地
+// 重试仍不通，这一章不再往下跑，它也**不是失败**——不换尝试、不归档产物、转录
+// 里不写 error（页面写「已暂停」）。重试更多次没有意义（还是同一个接口错误），
+// 正确的下一步是人来定：重启程序会接着这条会话跑，网页上也能点「继续跑」。
+type pausedError struct {
+	Base    string
+	Retries int
+	Cause   string
+}
+
+func (e *pausedError) pausedMarker() {}
+
+func (e *pausedError) Error() string {
+	return fmt.Sprintf("%s 因上游接口错误暂停（连 %d 次原地重试仍不通，不是这一章的失败：不换尝试、不归档产物）："+
+		"重启程序会接着这条会话跑，也可以在网页点「继续跑」。最后一条错误：%s",
+		e.Base, e.Retries, e.Cause)
+}
+
+// pausedChaptersError 是一轮转换的收尾错误：这一批里有章节因上游接口错误暂停
+// 了（T243）。措辞刻意不叫"转换失败"——失败会让人以为这一章废了、要重转；暂停
+// 只是停在原地等人接着推。
+type pausedChaptersError struct{ Chapters []string }
+
+func (e *pausedChaptersError) pausedMarker() {}
+
+func (e *pausedChaptersError) Error() string {
+	return fmt.Sprintf("%s 因上游接口错误暂停（原地重试次数已用满；不是失败：尝试、产物与核对预算都没动）："+
+		"重启程序会接着跑，也可以在网页点「继续跑」", strings.Join(e.Chapters, "; "))
+}
+
+// pauseError 把这一批里暂停的章节包成整轮收尾的错误（T243）。
+func pauseError(pauses []string) error {
+	if len(pauses) == 0 {
+		return nil
+	}
+	sorted := append([]string(nil), pauses...)
+	sort.Strings(sorted)
+	return &pausedChaptersError{Chapters: sorted}
+}
+
+// isPaused 判断错误是不是"暂停"（T243）。
+func isPaused(err error) bool {
+	var m pausedMarker
+	return errors.As(err, &m)
+}
+
 // queueUpstreamRetry 把"这一章过一会儿再续跑同一条会话"排进队列，返回是否排上。
 //
 // 排的是 role=continue（同一转录、同一工作区、不建新尝试），带 NotBefore 退避
 // 时间；派发端到点才动手。计数按目标（章/角色/转录）算，用满就返回 false，让
-// 调用方如实收尾——那时已经能确定不是抖一下，而是上游真的不通。
+// 调用方按"暂停"收尾（T243：不重试、不记失败、不换尝试）。
 func (r *Runner) queueUpstreamRetry(tid int, tag, label string, target rescueTarget, cause string) bool {
 	if target.ProjDir == "" || target.Base == "" || target.TrPath == "" {
 		return false
@@ -2103,7 +2165,10 @@ func (r *Runner) queueUpstreamRetry(tid int, tag, label string, target rescueTar
 	}
 	apiRetryMu.Unlock()
 	if n > limit {
-		r.log.LogWarning(tid, tag, label, "上游接口错误已重试 "+strconv.Itoa(limit)+" 次仍不通，不再等："+cause)
+		// T243：次数用完 = 暂停，不是失败。不再排队（再排一次还是同一个接口错误），
+		// 也不写「会话错误」；重启进程或网页「继续跑」会接着这条会话干。
+		r.log.LogWarning(tid, tag, label, "上游接口错误已重试 "+strconv.Itoa(limit)+
+			" 次仍不通，这一章暂停（重启程序或网页「继续跑」接着跑，不重转）："+cause)
 		return false
 	}
 	wait := apiRetryDelay(n)

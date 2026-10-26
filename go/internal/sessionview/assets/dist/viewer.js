@@ -7749,7 +7749,10 @@
     // P61：复盘正在看这条转录（状态写在**目标**转录里，复盘一开始就写、结论出来
     // 再改成 queued/error）。目标会话此刻并没有在跑，但要让人一眼看出"这条报错
     // 的会话正在被复盘"，而不是以为它就这么定局了。
-    rescuing: "复盘处理中"
+    rescuing: "复盘处理中",
+    // T243：上游接口错误的原地重试用满了——这一章**暂停**，不是失败：重启程序
+    // 或在网页点「继续跑」就接着这条会话干。页面文案刻意不写「失败」。
+    paused: "已暂停"
   };
   function chapterActivityLabel(state2, role = "convert", peerVerdict = "", live = false) {
     if (!state2) return live ? "运行中" : "";

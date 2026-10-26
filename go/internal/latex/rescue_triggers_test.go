@@ -74,6 +74,9 @@ type rescueChapterOptions struct {
 	// （T242）：现场实测整章核对跑完、issues 是空串，旧行为据此作废整章重转。
 	// 之后的请求照 checkerStatuses 回答。
 	checkerEmptyIssues int
+	// apiErrorRetries 是 latex.api_error_retries（T243）：上游接口错误的原地
+	// 重试上限，0 = 不写（走默认 30）。配合 chapterError 用。
+	apiErrorRetries int
 }
 
 type rescueChapterStats struct {
@@ -93,9 +96,10 @@ func (s *rescueChapterStats) add(fn func()) {
 }
 
 type rescueChapterRun struct {
-	stats *rescueChapterStats
-	proj  string
-	err   error
+	stats  *rescueChapterStats
+	proj   string
+	err    error
+	runner *Runner
 }
 
 // resetRescueBudget 清掉包级的复盘预算表：它按"章节/角色/转录文件名"计数，
@@ -326,12 +330,15 @@ func runRescueChapter(t *testing.T, opts rescueChapterOptions) *rescueChapterRun
 	}
 	off := false
 	r.cfg.Models = map[string]config.ModelConfig{"fake": {BaseURL: server.URL, APIKey: "test", Model: "fake", Stream: &off}}
+	if opts.apiErrorRetries > 0 {
+		r.cfg.Latex.APIErrorRetries = opts.apiErrorRetries
+	}
 	r.clients = map[string]*session.Client{}
 	r.models = map[string]config.ModelConfig{}
 	r.projDir = proj
 
 	err := r.convertOneChapter(proj, "book", filepath.Join(style, "manual.md"), chapterPath, workDir, 1, 1, false)
-	return &rescueChapterRun{stats: stats, proj: proj, err: err}
+	return &rescueChapterRun{stats: stats, proj: proj, err: err, runner: r}
 }
 
 // rescueQueuedRequests 读 <proj>/work/retry/ 里排下的请求（按文件名排序）。

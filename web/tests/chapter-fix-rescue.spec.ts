@@ -456,6 +456,11 @@ describe('P61 复盘处理中的文案', () => {
     expect(chapterActivityLabel('interrupted', 'convert')).toBe('已中断')
     expect(chapterActivityLabel('pass', 'checker')).toBe('已通过')
   })
+
+  it('T243：接口重试用满的 paused → 已暂停（不写成失败）', () => {
+    expect(chapterActivityLabel('paused', 'convert')).toBe('已暂停')
+    expect(chapterActivityLabel('paused', 'checker')).toBe('已暂停')
+  })
 })
 
 /* 用户口径（本批）：树上每种只留一行，号只在「历史」里。修复按子章节取最新一轮、

@@ -428,9 +428,10 @@ type LatexConfig struct {
 	// Rescue（P58）：「会话没提交就结束」时的复盘。默认开；深度可配。
 	Rescue RescueConfig `yaml:"rescue"`
 	// APIErrorRetries（T237）是上游接口错误（连接超时/网关 4xx5xx/限流）时的
-	// 原地重试次数（默认 6）。这类错误跟会话质量无关，换尝试、重转一遍只会把
-	// 一次上游抖动放大成"整章重跑"，所以这里只把同一条会话按退避时间放回队伍
-	// 续跑；用满仍不通才按失败收尾并交给复盘判。0 用默认值。
+	// 原地重试次数（默认 30，T243）。这类错误跟会话质量无关，换尝试、重转一遍
+	// 只会把一次上游抖动放大成"整章重跑"，所以这里只把同一条会话按退避时间放
+	// 回队伍续跑；用满仍不通就**暂停**这一章（不算失败、不换尝试、不归档产
+	// 物），重启程序或网页「继续跑」会接着同一条会话干。0 用默认值。
 	APIErrorRetries int `yaml:"api_error_retries"`
 	// Fix（P60）：「修复会话」——父章节把修复任务按 issue 下派给已经划好的
 	// 子章节（复用它的工作区与转录树），不再整章重转。默认关：关着时不注册
@@ -497,16 +498,20 @@ func (c LatexConfig) RescueMaxPerAttempt() int {
 	return c.Rescue.MaxPerAttempt
 }
 
-// APIErrorRetryLimit 是上游接口错误最多原地重试几次（默认 6，T237）。
+// APIErrorRetryLimit 是上游接口错误最多原地重试几次（默认 30，T237/T243）。
 //
 // 不设 0 关闭：这类错误重试就是正确做法，关掉只会把"上游抖一下"变成"整章
-// 失败、等人工重跑"。真要少等，把它设成 1–2 就行。
+// 失败、等人工重跑"。真要少等，把它设成 1–2 就行。用满仍不通时这一章会
+// **暂停**（不是失败）：重启程序或网页「继续跑」接着干，不重转。
 func (c LatexConfig) APIErrorRetryLimit() int {
 	if c.APIErrorRetries <= 0 {
-		return 6
+		return DefaultAPIErrorRetries
 	}
 	return c.APIErrorRetries
 }
+
+// DefaultAPIErrorRetries 是 latex.api_error_retries 的代码默认值（T243：30 次）。
+const DefaultAPIErrorRetries = 30
 
 // RescueKeepRecords 决定复盘会话的转录是否落盘（默认 false）。
 func (c LatexConfig) RescueKeepRecords() bool {

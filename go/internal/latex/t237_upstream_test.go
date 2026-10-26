@@ -56,7 +56,7 @@ func TestAPIRetryDelayBacksOff(t *testing.T) {
 
 // TestQueueUpstreamRetryQueuesContinue：上游接口错误只排一条"过一会儿续跑同一条
 // 会话"的请求（role=continue、带 NotBefore），不截断、不开新尝试；次数用满后
-// 返回 false 交给调用方如实收尾（T237）。
+// 返回 false，调用方按"暂停"收尾（T237/T243）。
 func TestQueueUpstreamRetryQueuesContinue(t *testing.T) {
 	dir := t.TempDir()
 	log, err := logger.NewLogger(filepath.Join(dir, "run.log"), filepath.Join(dir, "error.log"), 2)
@@ -100,7 +100,7 @@ func TestQueueUpstreamRetryQueuesContinue(t *testing.T) {
 		t.Fatal("第二次上游错误应当排上重试（上限 2）")
 	}
 	if r.queueUpstreamRetry(0, "[convert]", "chapter_777", target, "api error: [SESSION_CONNECTION_TIMEOUT]") {
-		t.Fatal("上限用满后不该再排，应当交回调用方如实收尾")
+		t.Fatal("上限用满后不该再排——再排一次还是同一个接口错误，应当暂停（T243）")
 	}
 }
 

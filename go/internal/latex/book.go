@@ -1011,7 +1011,10 @@ func (r *Runner) convertBatchWidth() int {
 	return 3
 }
 
-func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) []string {
+// convertChapterBatch 跑一批章节，返回（真失败, 暂停）。T243：因上游接口错误
+// 重试用满而**暂停**的章节不算失败——不换尝试、不归档产物、页面写「已暂停」，
+// 而且它不该混进"转换失败"的措辞里让用户以为这一章废了。
+func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) (failures, pauses []string) {
 	// T198：批次宽度 = 转换阶段的 worker 数，也就是 latex.convert_concurrency
 	// （没写沿用 latex.concurrency）。
 	//
@@ -1026,7 +1029,6 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 	}
 	var wg sync.WaitGroup
 	var failsMu sync.Mutex
-	var failures []string
 
 	// Compact console progress, mirroring the level-2 [process k/N] line.
 	// Details stay in the log file; the console only shows the counter.
@@ -1087,9 +1089,18 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 			progMu.Unlock()
 			progress()
 			if err != nil {
-				r.log.LogError(tid, label, "章节失败:", filepath.Base(chap), err)
+				if isPaused(err) {
+					// T243：暂停不是失败——单独的计账，措辞也不一样。
+					r.log.LogWarning(tid, label, "章节暂停:", filepath.Base(chap), err)
+				} else {
+					r.log.LogError(tid, label, "章节失败:", filepath.Base(chap), err)
+				}
 				failsMu.Lock()
-				failures = append(failures, filepath.Base(chap)+": "+err.Error())
+				if isPaused(err) {
+					pauses = append(pauses, filepath.Base(chap)+": "+err.Error())
+				} else {
+					failures = append(failures, filepath.Base(chap)+": "+err.Error())
+				}
 				failsMu.Unlock()
 			}
 		}(idx, chapPath, tid, seq)
@@ -1097,7 +1108,7 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 	wg.Wait()
 	progLive.Close()
 
-	return failures
+	return failures, pauses
 }
 
 func (r *Runner) convertPhase(proj string, fbRound int) error {
@@ -1141,7 +1152,14 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		r.log.Log(0, "[convert]", "没有要转换的章节（--only / 重试队列为空）")
 		return nil
 	}
-	if fails := r.convertChapterBatch(proj, clsName, manualPath, workDir, targets, label); len(fails) > 0 {
+	fails, pauses := r.convertChapterBatch(proj, clsName, manualPath, workDir, targets, label)
+	if len(pauses) > 0 {
+		// T243：上游接口重试用满 → 这一章暂停，整轮到此为止（不重试、不记失败、
+		// 不换尝试、产物与尝试预算都没动）。重启程序会接着这条会话跑，网页上
+		// 也能点「继续跑」。
+		return pauseError(pauses)
+	}
+	if len(fails) > 0 {
 		return fmt.Errorf("%d 个章节转换失败: %s", len(fails), strings.Join(fails, "; "))
 	}
 	// 转换阶段跑着的时候用户可能又点了重试：这一批跑完再补最多两轮，
@@ -1156,7 +1174,11 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 			break
 		}
 		r.log.Log(0, label, "补一轮手动重试:", strings.Join(bases, ", "))
-		if fails := r.convertChapterBatch(proj, clsName, manualPath, workDir, more, label); len(fails) > 0 {
+		fails, pauses := r.convertChapterBatch(proj, clsName, manualPath, workDir, more, label)
+		if len(pauses) > 0 {
+			return pauseError(pauses)
+		}
+		if len(fails) > 0 {
 			return fmt.Errorf("%d 个章节转换失败: %s", len(fails), strings.Join(fails, "; "))
 		}
 	}
@@ -1368,6 +1390,7 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var failures []string
+	pausedN := 0
 	var inherited []ChapterIssue
 	for i, child := range children {
 		id := fmt.Sprintf("child_%02d", i+1)
@@ -1447,12 +1470,20 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 				// 尝试的旧路径——失败终态写到一条早已结束的历史转录上（而且它比在跑
 				// 的那条新，页面就挑它显示「会话错误」，实际上那一代早就通过了）。
 				state := "error"
-				if r.rescueQueuedFor(childNode.TranscriptPath) {
+				if isPaused(err) {
+					// T243：接口重试用满 = 暂停，不是会话错误。放在最前面判：
+					// rescueQueuedFor 是**上一次**排重试时留下的标记，接口错误
+					// 用满的那一次并没有排任何东西，让旧标记赢会一直显示排队中。
+					state = "paused"
+				} else if r.rescueQueuedFor(childNode.TranscriptPath) {
 					state = "queued"
 				}
 				_ = appendTranscriptActivity(childNode.TranscriptPath, state)
 				mu.Lock()
 				failures = append(failures, id+": "+err.Error())
+				if isPaused(err) {
+					pausedN++
+				}
 				mu.Unlock()
 				return
 			}
@@ -1474,6 +1505,12 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 	wg.Wait()
 	if len(failures) > 0 {
 		sort.Strings(failures)
+		if pausedN == len(failures) {
+			// T243：这一支全是"接口重试用满而暂停"——父章节跟着暂停，不记成
+			// 会话错误（失败清单里的每一句都已经写明是暂停）。
+			return &pausedError{Base: parentBase, Retries: r.cfg.Latex.APIErrorRetryLimit(),
+				Cause: strings.Join(failures, "; ")}
+		}
 		return fmt.Errorf("子章节转换或 checker 失败；父章节禁止提交: %s", strings.Join(failures, "; "))
 	}
 	// 父节点的继承清单：去重后落盘，整合会话与 submit 都从这里取。
@@ -1982,11 +2019,20 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		if runErr != nil {
 			// P61/C：复盘判 truncate 时状态已经写成 queued，队列马上接手重跑这
 			// 一章——失败终态不能把它盖回"会话错误"。
+			//
+			// T243：上游接口错误把原地重试次数用满时这一章**暂停**（isPaused）：
+			// 状态写 paused，错误原样往上带（不再是"会话失败"），不换尝试、不归档
+			// 产物，重启程序或网页「继续跑」接着这条会话干。
 			state := "error"
-			if r.rescueQueuedFor(trPath) {
+			if isPaused(runErr) {
+				state = "paused"
+			} else if r.rescueQueuedFor(trPath) {
 				state = "queued"
 			}
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
+			if isPaused(runErr) {
+				return runErr
+			}
 			return fmt.Errorf("会话失败: %w", runErr)
 		}
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
@@ -2019,7 +2065,9 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			// return，转录的最后一条还是上面那句"等待子会话"——子树早就跑完了，
 			// 页面上却几小时都显示在等，看着像卡住，实际是失败没有落盘。
 			state := "error"
-			if r.rescueQueuedFor(trPath) {
+			if isPaused(err) {
+				state = "paused"
+			} else if r.rescueQueuedFor(trPath) {
 				state = "queued"
 			}
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
@@ -2070,12 +2118,17 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		}
 		if runErr != nil {
 			// P61/C：同上面那条路径——复盘判 truncate 时状态已写成 queued，
-			// 不要用失败终态盖掉"等待并发槽"。
+			// 不要用失败终态盖掉"等待并发槽"。T243：接口重试用满则写 paused。
 			state := "error"
-			if r.rescueQueuedFor(trPath) {
+			if isPaused(runErr) {
+				state = "paused"
+			} else if r.rescueQueuedFor(trPath) {
 				state = "queued"
 			}
 			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
+			if isPaused(runErr) {
+				return runErr
+			}
 			return fmt.Errorf("父章节整合会话失败: %w", runErr)
 		}
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
@@ -3303,13 +3356,19 @@ func (r *Runner) exhaustRescueBudget(key string) {
 // 会话退化，交给复盘只会被判成"截断"（换新尝试、整章重转），一次上游抖动就被
 // 放大成一整章的转换重跑。改成同一会话按退避时间原地续跑，不截断、不换尝试、
 // 不动产物（见 queueUpstreamRetry）。
+//
+// T243：原地重试的次数也用完时返回 *pausedError——这一章**暂停**，不是失败：
+// 重试更多次还是同一个接口错误，正确的下一步是人来定（重启程序接着跑，或网页
+// 点「继续跑」）。调用方靠 isPaused 认出它，写「已暂停」而不是「会话错误」。
 func (r *Runner) rescueAfterError(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool, target rescueTarget, cause error) error {
 	if cause == nil || target.Base == "" || target.TrPath == "" || isSessionFatalError(cause.Error()) {
 		return cause
 	}
 	if isSessionUpstreamError(cause.Error()) {
 		target.Cause = cause.Error()
-		r.queueUpstreamRetry(tid, tag, label, target, cause.Error())
+		if !r.queueUpstreamRetry(tid, tag, label, target, cause.Error()) {
+			return &pausedError{Base: target.Base, Retries: r.cfg.Latex.APIErrorRetryLimit(), Cause: cause.Error()}
+		}
 		return cause
 	}
 	if !r.cfg.Latex.RescueEnabled() {
