@@ -2746,3 +2746,14 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **为什么只收口一处**：其余入口（转换、核对、复盘）自己会写终态，多写只会造成两条状态打架；而"跳过"这一支恰好是唯一一处"确定不会再有人写"的地方。
 - **测试**：新增 `t246_activity_settle_test.go` 四条——`queued` 且 `.checker` 在 → `issues`、收口后再调不再刷 note；`pass` 之后一个字段都不改；没有产物时什么都不写（`queued` 原样留着）；产物在但 `.checker` 已删、状态停在 `running` → `checking_result`（不凭空造 `pass`）。`go test ./internal/...` 只有那条与本批无关的环境用例失败（`TestPythonEnvVenvRunsInsideRealSandbox`：本机 python3 已升 3.14 而 `libpython3.14.so` 缺失，回退改动同样失败）。
 - **未改（另开一条）**：细分父章节把"仍在重试中的子节点"记成失败、以及同一章后来通过后阶段汇总里那条旧失败不消失。这两条要动的是细分驱动的判定与失败清单的生命周期，放在同一个提交里风险太大。取证已经做完：父章节在某次继续跑时把两支还在整合/提醒中的子节点判成失败并写进 `failures`（`book.go` 汇聚处），子节点随后各自通过（核对转录 `pass`），父节点后来重新整合也通过，但阶段汇总里那条失败一直留到运行结束。
+
+## 批次 T247：父章节不再把「还在重试的子节点」判成失败
+
+- **现象**：一份运行日志的结尾是「3 个章节转换失败」，点名的三章里有两章的核对在同一分钟或更早已经是 `pass`；另一份日志里父章节在 18:02 报「子章节转换或 checker 失败；父章节禁止提交: child_03: 细分父章节整合会话未提交（已提醒两次）」，而这两支子节点当时刚被复盘原地截断、已经排进重试队列（转录状态写成 `queued`），几分钟后各自跑通、父章节随后重新整合也通过。用户看到的是「父会话通过了子会话还在运行」。
+- **根因一**：子节点这一轮没交上来时，代码先按 `rescueQueuedFor` 判断"它已经排进重试"，把转录状态写成 `queued`，然后**照样**把它塞进 `failures`——状态说"待会儿接着跑"，记账说"它失败"。父章节当场被锁死，而那一支并没有死。
+- **根因二**：失败清单是按"哪一章的 goroutine 返回了什么"追加的切片，没有生命周期。重试队列在批次外面把同一章推通了，旧条目仍然留着，阶段汇总于是一边打印"通过"一边报它失败。
+- **改法一**：新增 `go/internal/latex/retryingchildren.go` 的 `retryingChildrenError` + `isRetryingChildren`；细分驱动的子节点错误分支里，`state == "queued"` 的记进 `retrying`（不再进 `failures`）。`wg.Wait()` 之后如果只有这类子节点，父章节返回 `retryingChildrenError`——不提交、不写失败。批次派发（`convertChapterBatch`）与 retry 派发（`dispatchRetries` 的 continue 分支）两处都认这个类型，只记一行"子章节还在重试，这次不提交（不记失败）"，并把它并入"这次没跑完、不计失败"的清单（与 T244 的切回同一口径，日志分开写，不混成"有切回请求在等"）。真正跑到死的子节点（提醒用满、复盘没救回来、没排任何重试）照旧记失败。
+- **改法二**：`activity.go` 新增 `latestConvertTranscript`（`convert_<章>.jsonl` 与 `.tryN.jsonl` 取 mtime 最新）、`chapterPassedOnDisk`（产物在 + 没有 `.tex.checker` + 最新一条转换转录最后状态是 `pass`，三条同时成立）、`dropHealedFailures`，以及 `Runner.chapterFailure`——阶段汇总前先摘掉"后来已经通过"的章节并记一行日志；两个报错口（首批与补跑批次）都改走它。
+- **判据取舍**：只看"产物在"不够（失败前可能留着上一版产物），只看"状态是 pass"也不够（那可能属于另一次尝试），所以三条同时要求；`pass` 时 `.checker` 会被删掉这一既有事实正好当第三条。
+- **测试**：新增 `t247_retrying_children_test.go` 三条——`retryingChildrenError` 只被自己认出来（普通失败与 nil 都不算）、章名排序稳定；`dropHealedFailures` 三条样本里只摘掉"后来通过"的那一条，仍有 `.checker` 的与没有产物的照旧算失败；`chapterPassedOnDisk` 三条判据逐个反证（缺产物、留 `.checker`、状态不是 `pass` 都不算）。`go test ./internal/...` 只有那条与本批无关的环境用例失败（`TestPythonEnvVenvRunsInsideRealSandbox`：本机 python3 已升 3.14 而 `libpython3.14.so` 缺失）。
+- **未改**：`retrying` 的父章节这一刻不写自己转录的状态（它没开会话），页面靠子节点的 `queued` 与随后 T231 排的那条「继续跑」体现进度；子节点通过后替父章节排「继续跑」的链路本来就有，没有动。

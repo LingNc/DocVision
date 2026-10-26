@@ -1043,6 +1043,8 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 	var progMu sync.Mutex
 	// T244：这些章节因为「切回第 N 次尝试」在等而先停（不是失败）。
 	var skippedRestore []string
+	// T247：子节点还在重试、这一章这次不提交的那几章（同样不算失败）。
+	var skippedRetry []string
 	total := len(chapters)
 	start := time.Now()
 	// 进度行统一走 liveProgress：终端里原地覆写、管道里按节拍整行输出。
@@ -1117,6 +1119,16 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 					failsMu.Unlock()
 					return
 				}
+				if kids, retryingKids := isRetryingChildren(err); retryingKids {
+					// T247：子节点还在重试队列里，父章节这次没提交——这不是失败。
+					// 那几支跑通后会照 T231 替父章节排一条「继续跑」，届时再整合。
+					r.log.LogWarning(tid, label, "子章节还在重试，这一章这次不提交（不记失败）:",
+						filepath.Base(chap), strings.Join(kids, ", "))
+					failsMu.Lock()
+					skippedRetry = append(skippedRetry, strings.TrimSuffix(filepath.Base(chap), filepath.Ext(chap)))
+					failsMu.Unlock()
+					return
+				}
 				if isPaused(err) {
 					// T243：暂停不是失败——单独的计账，措辞也不一样。
 					r.log.LogWarning(tid, label, "章节暂停:", filepath.Base(chap), err)
@@ -1141,6 +1153,13 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 		r.log.LogWarning(0, label, "先停", strconv.Itoa(len(skippedRestore)),
 			"章（有切回请求在等，不是失败）:", strings.Join(skippedRestore, ", "),
 			"—切回在这一章停止写盘后自动落地，之后重跑这一章即可")
+	}
+	if len(skippedRetry) > 0 {
+		sort.Strings(skippedRetry)
+		r.log.LogWarning(0, label, "子章节还在重试，这", strconv.Itoa(len(skippedRetry)),
+			"章这次不提交（不是失败，子节点通过后自动接手）:", strings.Join(skippedRetry, ", "))
+		// 与"等切回"合流：调用方只需要知道这几章这次没跑完、不计失败。
+		skippedRestore = append(skippedRestore, skippedRetry...)
 	}
 	return failures, pauses, skippedRestore
 }
@@ -1193,8 +1212,8 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		// 也能点「继续跑」。
 		return pauseError(pauses)
 	}
-	if len(fails) > 0 {
-		return fmt.Errorf("%d 个章节转换失败: %s", len(fails), strings.Join(fails, "; "))
+	if err := r.chapterFailure(proj, fails); err != nil {
+		return err
 	}
 	// 转换阶段跑着的时候用户可能又点了重试：这一批跑完再补最多两轮，
 	// 不用等到下次启动。
@@ -1213,8 +1232,8 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		if len(pauses) > 0 {
 			return pauseError(pauses)
 		}
-		if len(fails) > 0 {
-			return fmt.Errorf("%d 个章节转换失败: %s", len(fails), strings.Join(fails, "; "))
+		if err := r.chapterFailure(proj, fails); err != nil {
+			return err
 		}
 	}
 	if len(skipped) == 0 {
@@ -1433,6 +1452,9 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var failures []string
+	// T247：这一轮没交上来、但已经被复盘排进重试队列的子节点。它们不是失败，
+	// 父章节这次不提交也不记失败，等它们跑通后自动接手。
+	var retrying []string
 	pausedN := 0
 	// T244：有几支子章节因为「切回第 N 次尝试」在等而先停（不记失败）。
 	restoreN, restoreAttempt := 0, 0
@@ -1544,7 +1566,14 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 				}
 				_ = appendTranscriptActivity(childNode.TranscriptPath, state)
 				mu.Lock()
-				failures = append(failures, id+": "+err.Error())
+				if state == "queued" {
+					// T247：这一支已经被复盘排进重试队列，几分钟后会接着跑，跑通了
+					// 还会替父章节排「继续跑」。它不是失败——锁死父章节只会让页面
+					// 后来同时出现"父已通过"和几小时前那句失败。
+					retrying = append(retrying, id)
+				} else {
+					failures = append(failures, id+": "+err.Error())
+				}
 				if isPaused(err) {
 					pausedN++
 				}
@@ -1570,6 +1599,15 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 	if restoreN > 0 && len(failures) == 0 {
 		// T244：整棵子树都让开了，父章节照样"先停"，不提交、不记失败。
 		return &restoreWaitingError{Base: parentBase, Attempt: restoreAttempt}
+	}
+	// T247：还有子节点在重试队列里——这次不提交，但也不记失败。它们跑通之后
+	// 会照 T231 替父章节排一条「继续跑」，那时再整合。
+	if len(failures) == 0 && len(retrying) > 0 {
+		sort.Strings(retrying)
+		r.log.LogWarning(tid, "[convert]", parentBase,
+			"有", strconv.Itoa(len(retrying)), "支子章节还在重试（已排进队列），父章节这次不提交、不记失败:",
+			strings.Join(retrying, ", "))
+		return &retryingChildrenError{Base: parentBase, Children: retrying}
 	}
 	if len(failures) > 0 {
 		sort.Strings(failures)

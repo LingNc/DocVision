@@ -1459,7 +1459,11 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 				strconv.Itoa(req.CutAttempt), "次尝试），直接继续")
 		}
 		if err := r.continueChapter(proj, base, reason); err != nil {
-			if isPaused(err) {
+			if kids, retryingKids := isRetryingChildren(err); retryingKids {
+				// T247：子节点还在重试队列里，父章节这次没提交——不是失败。
+				r.log.LogWarning(0, "[convert]", base, "子章节还在重试，这次先不整合（不记失败）:",
+					strings.Join(kids, ", "))
+			} else if isPaused(err) {
 				// T243：接口重试用满 = 暂停，不是"继续跑失败"。
 				r.log.LogWarning(0, "[convert]", base, "上游接口仍不通，这一章保持暂停（重启或点「继续跑」再试）：", err)
 			} else {

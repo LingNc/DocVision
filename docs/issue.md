@@ -1446,3 +1446,9 @@ user 轮
   改法：新增 settleStaleActivity（activity.go）——只对 queued/running/rescuing 这三种"只有活着的会话才成立"的状态动手，新状态照磁盘事实写：有 .tex.checker 就是 issues（有产物但核对没过），只剩产物就是 checking_result；没有产物就什么都不写。调用点只放一处：「已有产物，跳过」那一支，settle 完再按 latex.keep_session_records 处置转录。
   验证：新增 t246_activity_settle_test.go 四条（queued 且 .checker 在 → issues、第二次调用不再刷note；pass 之后一个字段都不改；没有产物时什么都不写；产物在但 .checker 已删、状态停在 running → checking_result，不凭空造 pass）；go test ./internal/... 除与本批无关的 TestPythonEnvVenvRunsInsideRealSandbox（本机 libpython3.14 缺失）外全绿。
   未改：父章节把"仍在重试中的子节点"记成失败、以及同一章后来通过后阶段汇总里那条旧失败不消失，这两条本次没动（要改的是细分驱动的判定与失败清单的生命周期），另开一条继续。
+- T247 一封运行到最后的失败汇总，把"后来已经通过"的章节也算进去，还带着一句几小时前就对不上的失败（用户问「chapter_12 感觉很奇怪啊，父会话通过了子会话还在运行」）。
+  现象：某章顶层转换与核对在 19:56 写成 pass，同一秒的阶段汇总仍然打印「3 个章节转换失败」并点名这一章；子节点的转录在此期间陆续写成 pass，父章节后来重新整合也 pass。另一份日志里同一现象：父章节在 18:02 报「子章节转换或 checker 失败；父章节禁止提交: child_03: 细分父章节整合会话未提交（已提醒两次）」，而那两支子节点当时刚被复盘原地截断、已排进重试队列（转录状态 queued），几分钟后各自跑通。
+  根因两条。① 子节点这一轮没交上来时，代码先按 rescueQueuedFor 把它的转录状态写成 queued（意思是"已经排进重试、待会儿接着跑"），却照样把它塞进 failures——父章节当场被锁死成失败，而那一支并没有死。② 失败清单是按"哪一章的 goroutine 返回了什么"追加的，没有生命周期：重试队列在批次外面把同一章推通了，旧条目仍然留着，阶段汇总就一边打印"通过"一边报它失败。
+  改法：① 新增 retryingChildrenError（retryingchildren.go）：子节点状态是 queued 时记进 retrying 而不是 failures；这一轮只有这类子节点时，父章节返回 retryingChildrenError——不提交、不写失败；批次派发与 retry 派发两处都认这个类型，只记一行"子章节还在重试，这次不提交（不记失败）"，并把它并入"这次没跑完、不计失败"的清单（与 T244 的切回同一口径）。真正跑到死的子节点（提醒用满、复盘没救回来、没排任何重试）照旧记失败。② 新增 chapterPassedOnDisk（activity.go）：产物在 + 没有 .tex.checker + 最新一条转换转录的最后状态是 pass，三条同时成立才算"后来通过"；新增 Runner.chapterFailure，阶段汇总前先把这类章节从失败清单里摘掉并记一行"这些章后来已经通过，不再计入失败"，两个报错口（首批与补跑批次）都改走它。
+  验证：新增 t247_retrying_children_test.go 三条（retryingChildrenError 只被自己认出来、章名排序、普通错误与 nil 不算；dropHealedFailures 三条样本里只摘掉"后来通过"的那一条、仍有 .checker 的与没有产物的照旧算失败；chapterPassedOnDisk 的三条判据逐个反证）；go test ./internal/... 只有那条与本批无关的环境用例失败。
+  未改：retrying 的父章节这一刻不写自己转录的状态（它没开会话），页面靠子节点的 queued 与随后 T231 排的那条「继续跑」体现进度；与本次无关的另一条——子节点通过后替父章节排「继续跑」的链路本来就有，没有改动。
