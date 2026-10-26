@@ -1886,6 +1886,12 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			return fmt.Errorf("%s 重新核对未通过（这份产物未被采纳）: %s", base, issues)
 		}
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")
+		// T246：上一轮可能把状态停在 queued/running 就被杀掉了。这条路径持有
+		// 章节锁、这一章本轮也不会再被驱动，正好按磁盘事实把那一行收口——
+		// 否则页面上会永远挂着一句「等待并发槽」。
+		if settled := settleStaleActivity(node.TranscriptPath, filepath.Join(node.FinalSubmitRoot, base+".tex")); settled != "" {
+			r.log.LogInfo(tid, "[convert]", base, "上一轮停在排队/运行态，状态已按产物收口:", settled)
+		}
 		// 产物已写出的章节不再需要会话转录。
 		r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
 		return nil

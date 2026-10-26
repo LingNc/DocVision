@@ -1440,3 +1440,9 @@ user 轮
   改法：新增 snapCutLine，把切口挪到最近的一条消息行上（先往前找，前面没有消息才往后找到第一条）。原地截断与核对路径挪过之后打一行警告说明「切口从第 N 条挪到第 M 条：那一行是用量/元信息行，不进消息流」；派发端（cutChapterTranscriptForRetry）先落位再用，日志写的是真正切到的行号；复盘会话的 submit 也拿同一份转录落位，回执里写明「line 238 is a usage/meta line, the cut lands on the last message line」，队列里带的就是能用的数。整条转录一条消息行都没有时照旧如实报错。
   验证：新增 t245_cut_snap_test.go 四条（落位表：往前挪/前面没有往后挪/越界与 0 仍拒/整条没有消息行仍拒；事故原形的原地截断成功切在第 6 条且证据留档、切口留 kind=cut；submit 自己落位且回执说明原因、没有转录时一个数都不改；派发端落位后新转录 3 行、坏尾巴不跟过来）；chapter_retry_test.go 两条旧断言按新语义改写（切在用量行现在挪到消息行照切，不再期待报错）；rescue_retry_test.go / rescue_triggers_test.go 里依赖 from=1 硬拒的三处断言改成落位后的行号（顺带发现原地截断会把尾巴里的 rescuing 标记一起切走，用例改成要求切口有 kind=cut、终态是 queued 或 running）；go test ./internal/... 除一条与本批无关的环境用例外全绿。
   未改：切口挪动只做"最近的一条消息行"，不做语义判断（哪一轮该留下仍由复盘会话决定）；已经因为坏行号被丢掉的那几条排队请求不会自动重放。
+- T246 页面上有一章永远挂着「等待并发槽」，而进程早就没了：那一行状态停在 queued 就再没动过（用户问「章节2 一直没等到并发槽…其他都终止了也没等到他」）。
+  现象：这一章的转录最后两条是「继续跑」与 chapter_activity=queued（同一次点击、同一秒），此后两天没有任何新状态；章节的 .tex 和 .tex.checker 都在，重跑时走的是「已有产物，跳过」，于是那句 queued 一直留在页面上。同时段还有一章停在 running、一章停在 rescuing，都是上一轮进程在"写进行中、还没写终态"之间消失留下的。
+  根因：chapter_activity 是页面那一行状态的唯一来源，而收口只发生在会话跑完的路径上。进程被杀、阶段收尾、请求刚被队列消费就退出，这三种收尾都不经过那里，进行中状态于是永久留存；「已有产物，跳过」这条路明明持有章节锁、这一章本轮也不会再被驱动，却从不回头看那一行。
+  改法：新增 settleStaleActivity（activity.go）——只对 queued/running/rescuing 这三种"只有活着的会话才成立"的状态动手，新状态照磁盘事实写：有 .tex.checker 就是 issues（有产物但核对没过），只剩产物就是 checking_result；没有产物就什么都不写。调用点只放一处：「已有产物，跳过」那一支，settle 完再按 latex.keep_session_records 处置转录。
+  验证：新增 t246_activity_settle_test.go 四条（queued 且 .checker 在 → issues、第二次调用不再刷note；pass 之后一个字段都不改；没有产物时什么都不写；产物在但 .checker 已删、状态停在 running → checking_result，不凭空造 pass）；go test ./internal/... 除与本批无关的 TestPythonEnvVenvRunsInsideRealSandbox（本机 libpython3.14 缺失）外全绿。
+  未改：父章节把"仍在重试中的子节点"记成失败、以及同一章后来通过后阶段汇总里那条旧失败不消失，这两条本次没动（要改的是细分驱动的判定与失败清单的生命周期），另开一条继续。
