@@ -1452,3 +1452,9 @@ user 轮
   改法：① 新增 retryingChildrenError（retryingchildren.go）：子节点状态是 queued 时记进 retrying 而不是 failures；这一轮只有这类子节点时，父章节返回 retryingChildrenError——不提交、不写失败；批次派发与 retry 派发两处都认这个类型，只记一行"子章节还在重试，这次不提交（不记失败）"，并把它并入"这次没跑完、不计失败"的清单（与 T244 的切回同一口径）。真正跑到死的子节点（提醒用满、复盘没救回来、没排任何重试）照旧记失败。② 新增 chapterPassedOnDisk（activity.go）：产物在 + 没有 .tex.checker + 最新一条转换转录的最后状态是 pass，三条同时成立才算"后来通过"；新增 Runner.chapterFailure，阶段汇总前先把这类章节从失败清单里摘掉并记一行"这些章后来已经通过，不再计入失败"，两个报错口（首批与补跑批次）都改走它。
   验证：新增 t247_retrying_children_test.go 三条（retryingChildrenError 只被自己认出来、章名排序、普通错误与 nil 不算；dropHealedFailures 三条样本里只摘掉"后来通过"的那一条、仍有 .checker 的与没有产物的照旧算失败；chapterPassedOnDisk 的三条判据逐个反证）；go test ./internal/... 只有那条与本批无关的环境用例失败。
   未改：retrying 的父章节这一刻不写自己转录的状态（它没开会话），页面靠子节点的 queued 与随后 T231 排的那条「继续跑」体现进度；与本次无关的另一条——子节点通过后替父章节排「继续跑」的链路本来就有，没有改动。
+- T248 页面上章节那一行常常停在**早就作废的那一次尝试**上：产物明明由 try1 交出、并且当天就通过了，行上却显示十天前的 try10「等待并发槽」；另一章停在上一代的 try13，还有一章 try3 已通过、行上却是 try4「运行中」。
+  现象：三章各显示一种旧状态（等待并发槽／运行中／发现问题的旧结论），用户据此以为工作区坏了。
+  根因：章节树选"这一章现在的样子"用的是 newerAttempt——先比 archived，再比尝试号，号大者优先，号相同才比 mtime。可子章节的尝试号会随根章重来**重新从 1 数起**，归档里或上一代工作树里留下的废尝试号往往比现在这次更大，于是"号大但十天没动"的废尝试压过真正交出产物、当天通过的那一次。P60 当年加这条本是为了让默认打开"最新一次"，判断依据选错了维度。
+  改法：newerAttempt 改成 mtime 优先、尝试号退为并列时的确定性比较（archived 优先级不变：工作树那条永远优先于归档）。只动 web/src/legacy/sidebar.ts 一处，接口与数据都不变。
+  验证：新增 chapter-tree 用例「尝试号更大但更旧（上一代的废尝试）不压过现在这次」；npm test 23 个文件 277 条全绿；vite build 重出 viewer.js；go build 通过。
+  未改：树里"历史 N"页签仍按尝试号列出全部轮次（那里本来就该按号排）；接口侧的 chapterAttempt 字段含义没动。

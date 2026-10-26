@@ -2757,3 +2757,11 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **判据取舍**：只看"产物在"不够（失败前可能留着上一版产物），只看"状态是 pass"也不够（那可能属于另一次尝试），所以三条同时要求；`pass` 时 `.checker` 会被删掉这一既有事实正好当第三条。
 - **测试**：新增 `t247_retrying_children_test.go` 三条——`retryingChildrenError` 只被自己认出来（普通失败与 nil 都不算）、章名排序稳定；`dropHealedFailures` 三条样本里只摘掉"后来通过"的那一条，仍有 `.checker` 的与没有产物的照旧算失败；`chapterPassedOnDisk` 三条判据逐个反证（缺产物、留 `.checker`、状态不是 `pass` 都不算）。`go test ./internal/...` 只有那条与本批无关的环境用例失败（`TestPythonEnvVenvRunsInsideRealSandbox`：本机 python3 已升 3.14 而 `libpython3.14.so` 缺失）。
 - **未改**：`retrying` 的父章节这一刻不写自己转录的状态（它没开会话），页面靠子节点的 `queued` 与随后 T231 排的那条「继续跑」体现进度；子节点通过后替父章节排「继续跑」的链路本来就有，没有动。
+
+## 批次 T248：章节行选对"现在这一次"尝试
+
+- **现象**：三章的页面行各显示一种旧状态——一章产物由 try1 交出、当天通过，行上却是十天前的 try10「等待并发槽」；一章停在上一代的 try13；一章 try3 已通过，行上却是 try4「运行中」。用户据此以为工作区坏了。
+- **根因**：`newerAttempt` 的比较顺序是 archived → 尝试号 → mtime，号大者优先。子章节的尝试号随根章重来**重新从 1 数起**，上一代留下的废尝试号往往比现在这次更大，于是"号大但十天没动"的废尝试压过真正交出产物、当天通过的那一次。P60 加这条本是为了"默认打开最新一次"，但判据选错了维度。
+- **改法**：`web/src/legacy/sidebar.ts` 的 `newerAttempt` 改成 mtime 优先、尝试号退为并列时的确定性比较；archived 优先级不变（工作树那条永远优先于归档）。接口字段与数据一个都没动。
+- **测试**：`tests/chapter-tree.spec.ts` 新增「尝试号更大但更旧（上一代的废尝试）不压过现在这次」；`npm test` 23 个文件 277 条全绿；`vite build` 重出 `go/internal/sessionview/assets/dist/viewer.js`（产物照规矩提交）；`go build` 通过。
+- **未改**：「历史 N」页签仍按尝试号列出全部轮次（那里本来就该按号排）；接口侧 `chapterAttempt` 的含义没动。

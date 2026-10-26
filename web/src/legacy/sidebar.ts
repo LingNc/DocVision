@@ -744,10 +744,16 @@ function newerAttempt(cur: any, next: any): any {
   // 当成这一章的现状显示（用户看到"下面都通过了、却还有一个在排队"）。先比是不是
   // 归档，工作树那条永远优先；两边同为归档/同时活体时才比尝试号。
   if (!!cur.archived !== !!next.archived) return cur.archived ? next : cur
+  // T248：先比"谁更晚还在动"（mtime），再比尝试号。子章节的尝试号会随根章重来
+  // 重新从 1 数起，只比号会把上一代里编号更大的废尝试当成这一章的现状——实测
+  // 一章的产物由 try1 交出、页面上却停在十天前的 try10「等待并发槽」，另一章停
+  // 在上一代的 try13，还有一章明明 try3 已通过却显示 try4「运行中」。
+  const d = mtimeMs(next) - mtimeMs(cur)
+  if (d !== 0) return d > 0 ? next : cur
   const a = Number(cur.chapterAttempt) || 1
   const b = Number(next.chapterAttempt) || 1
   if (a !== b) return b > a ? next : cur
-  return mtimeMs(next) > mtimeMs(cur) ? next : cur
+  return cur
 }
 
 const ARCHIVE_MARK = '/work/attempts/'

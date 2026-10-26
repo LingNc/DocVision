@@ -114,6 +114,16 @@ describe('章节树默认打开最新一次尝试', () => {
     expect(roots[0].convert!.mtime).toBe('2026-10-19T12:00:00Z')
   })
 
+  // T248：子章节尝试号随根章重来重新数起，上一代留下的"号更大、但十天没动"的
+  // 废尝试不能压过真正交出产物、刚通过的那一次。
+  it('尝试号更大但更旧（上一代的废尝试）不压过现在这次', () => {
+    const roots = buildChapterTree([
+      mk(10, '2026-10-15T12:00:00Z'),
+      mk(1, '2026-10-26T15:08:00Z'),
+    ])
+    expect(roots[0].convert!.chapterAttempt).toBe(1)
+  })
+
   it('子节点仍挂到父节点上，父子各自选自己的最新一次', () => {
     const parent = mk(2, '2026-10-19T12:00:00Z', 'convert', 'chapter_042')
     const child = { ...mk(1, '2026-10-19T13:00:00Z', 'convert', 'chapter_042_child_01'), chapterParent: 'chapter_042' }

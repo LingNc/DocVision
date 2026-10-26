@@ -7555,10 +7555,12 @@
     if (!cur) return next;
     if (!next) return cur;
     if (!!cur.archived !== !!next.archived) return cur.archived ? next : cur;
+    const d = mtimeMs(next) - mtimeMs(cur);
+    if (d !== 0) return d > 0 ? next : cur;
     const a = Number(cur.chapterAttempt) || 1;
     const b = Number(next.chapterAttempt) || 1;
     if (a !== b) return b > a ? next : cur;
-    return mtimeMs(next) > mtimeMs(cur) ? next : cur;
+    return cur;
   }
   const ARCHIVE_MARK = "/work/attempts/";
   function sessionPath(s) {
