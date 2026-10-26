@@ -465,14 +465,14 @@ func (r *Runner) truncateCheckerTranscript(proj, base, srcName string, from int)
 		return "", 0, fmt.Errorf("读不到源转录 %s: %w", name, err)
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if from > len(lines) {
-		return "", 0, fmt.Errorf("截断点 %d 超出转录长度 %d", from, len(lines))
+	asked := from
+	from, snapped, err := snapCutLine(lines, from)
+	if err != nil {
+		return "", 0, err
 	}
-	var probe struct {
-		T string `json:"t"`
-	}
-	if err := json.Unmarshal([]byte(lines[from-1]), &probe); err != nil || probe.T != "msg" {
-		return "", 0, fmt.Errorf("第 %d 行不是一条消息记录（选了用量/元信息行？）", from)
+	if snapped && r.log != nil {
+		r.log.LogWarning(0, "[checker]", base, "切口从第", strconv.Itoa(asked), "条挪到第",
+			strconv.Itoa(from), "条：那一行是用量/元信息行，不进消息流")
 	}
 	baseTr := filepath.Join(dir, "checker_"+base+".jsonl")
 	next := 2 // 核对尝试从 try2 起（try1 是转换阶段自带的那次核对）
@@ -1667,6 +1667,15 @@ func (r *Runner) cutTranscriptNow(proj, base, role, trPath string, from int) (st
 // 并**大声**记一条错误（旧代码在这里只写一行 warning，页面上却已经回执"已
 // 截断"，于是"截断"看起来发生了、实际一行没少，子会话一轮又一轮重放坏尾巴）。
 func (r *Runner) cutChapterTranscriptForRetry(proj, base, srcName string, from int) string {
+	// 请求里带的行号可能落在用量/元信息行上（复盘会话常把"最后一条好消息的下
+	// 一行"当切口）：先落位，日志与调用都用真正切到的位置（T245）。
+	if src := findChapterTranscript(proj, base, srcName); src != "" {
+		if fixed, moved := snapTranscriptFile(src, from); moved {
+			r.log.LogWarning(0, "[retry]", base, "请求的切口在第", strconv.Itoa(from),
+				"行（用量/元信息行），挪到第", strconv.Itoa(fixed), "行")
+			from = fixed
+		}
+	}
 	dst, next, err := r.truncateChapterTranscript(proj, base, srcName, from)
 	if err != nil {
 		r.log.LogError(0, "[retry]", base, "按请求截断转录失败（继续排父章节，但这一支没被截）:", err)
@@ -1697,15 +1706,11 @@ func cutTranscriptAt(src string, from, floor int) (string, int, error) {
 		return "", 0, fmt.Errorf("读不到源转录 %s: %w", filepath.Base(src), err)
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if from > len(lines) {
-		return "", 0, fmt.Errorf("截断点 %d 超出转录长度 %d", from, len(lines))
-	}
-	// 只能切在消息行上：meta/usage 行不进消息流，切在那儿等于没切。
-	var probe struct {
-		T string `json:"t"`
-	}
-	if err := json.Unmarshal([]byte(lines[from-1]), &probe); err != nil || probe.T != "msg" {
-		return "", 0, fmt.Errorf("第 %d 行不是一条消息记录（选了用量/元信息行？）", from)
+	// 只能切在消息行上：meta/usage 行不进消息流，切在那儿等于没切。挪不过去
+	// （整条转录没有消息行）才算错。
+	from, _, err = snapCutLine(lines, from)
+	if err != nil {
+		return "", 0, err
 	}
 	baseTr := transcriptStem(src)
 	if floor < 2 {
@@ -1724,6 +1729,59 @@ func cutTranscriptAt(src string, from, floor int) (string, int, error) {
 		return "", 0, fmt.Errorf("写新尝试的转录失败: %w", err)
 	}
 	return dst, next, nil
+}
+
+// snapCutLine 把切口挪到最近的一条消息行上（先往前找，前面没有才往后找）。
+//
+// 为什么不再直接拒绝：`from` 是"保留到第几条记录"的物理行号，可转录里夹着
+// t=meta / t=usage 行（只记录、不回放）。复盘会话读到"最后一条是第 237 行"，
+// 很自然就填 238 —— 那正好是紧跟其后的用量行；于是每一次截断都被判"不是一条
+// 消息记录"，请求原样再派一次、还是同一个数，这一章就再也续不上（实测两章连
+// 撞两次，一次在原地、一次在派发端，每次都要重跑一整轮父节点）。往前挪到最近
+// 的消息行，会话读到的内容一条不少，切口也仍然落在消息流上。
+//
+// 返回挪后的行号与是否挪过；整条转录里一条消息行都没有才算错。
+func snapCutLine(lines []string, from int) (int, bool, error) {
+	if from < 1 {
+		return 0, false, fmt.Errorf("截断点必须 ≥ 1（转录里的行号）")
+	}
+	if from > len(lines) {
+		return 0, false, fmt.Errorf("截断点 %d 超出转录长度 %d", from, len(lines))
+	}
+	isMsg := func(i int) bool {
+		var probe struct {
+			T string `json:"t"`
+		}
+		if err := json.Unmarshal([]byte(lines[i]), &probe); err != nil {
+			return false
+		}
+		return probe.T == "msg"
+	}
+	for i := from - 1; i >= 0; i-- {
+		if isMsg(i) {
+			return i + 1, i+1 != from, nil
+		}
+	}
+	for i := from; i < len(lines); i++ {
+		if isMsg(i) {
+			return i + 1, true, nil
+		}
+	}
+	return 0, false, fmt.Errorf("第 %d 行前后都没有一条消息记录（整条转录只有用量/元信息行？）", from)
+}
+
+// snapTranscriptFile 读转录文件、把切口挪到消息行上；读不到就原样返回。
+func snapTranscriptFile(path string, from int) (int, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return from, false
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	fixed, moved, err := snapCutLine(lines, from)
+	if err != nil {
+		return from, false
+	}
+	return fixed, moved
 }
 
 // balancedCutFrom 把切口往前挪到"所有工具调用都已经拿到回执"的那一条记录上。
@@ -1799,14 +1857,14 @@ func (r *Runner) trimTranscriptInPlace(proj, base, trPath string, from int, reas
 		return 0, 0, fmt.Errorf("读不到源转录 %s: %w", filepath.Base(trPath), err)
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if from > len(lines) {
-		return 0, 0, fmt.Errorf("截断点 %d 超出转录长度 %d", from, len(lines))
+	asked := from
+	from, snapped, err := snapCutLine(lines, from)
+	if err != nil {
+		return 0, 0, err
 	}
-	var probe struct {
-		T string `json:"t"`
-	}
-	if err := json.Unmarshal([]byte(lines[from-1]), &probe); err != nil || probe.T != "msg" {
-		return 0, 0, fmt.Errorf("第 %d 行不是一条消息记录（选了用量/元信息行？）", from)
+	if snapped && r.log != nil {
+		r.log.LogWarning(0, "[rescue]", base, "切口从第", strconv.Itoa(asked), "条挪到第",
+			strconv.Itoa(from), "条：那一行是用量/元信息行，不进消息流")
 	}
 	keep := balancedCutFrom(lines, from)
 	if keep < 1 {
@@ -2076,16 +2134,12 @@ func truncateVectorTranscript(proj, texBase string, from int) (string, error) {
 	}
 	text := string(data)
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	if from > len(lines) {
-		return "", fmt.Errorf("截断点 %d 超出转录长度 %d", from, len(lines))
-	}
 	// 只能切在消息行上：meta/usage 行不进消息流，切在那儿等于没切。
-	var probe struct {
-		T string `json:"t"`
+	snappedFrom, _, err := snapCutLine(lines, from)
+	if err != nil {
+		return "", err
 	}
-	if err := json.Unmarshal([]byte(lines[from-1]), &probe); err != nil || probe.T != "msg" {
-		return "", fmt.Errorf("第 %d 行不是一条消息记录（选了用量/元信息行？）", from)
-	}
+	from = snappedFrom
 	n := 1
 	for ; n < 999; n++ {
 		if !fileExists(filepath.Join(sessDir, "vector_"+texBase+".try"+strconv.Itoa(n)+".jsonl")) {

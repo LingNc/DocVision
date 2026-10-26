@@ -439,6 +439,11 @@ type RescueSubmitTool struct {
 	From      int
 	Reason    string
 	Hint      string
+	// Lines 是复盘会话正在看的那条转录（read_session 的同一份）。给截断点做
+	// 落位用：模型偶尔会把切口落在紧跟最后一条好消息的用量/元信息行上（T245）。
+	Lines []transcriptLine
+	// RawFrom 是模型原样填的那个行号，只在挪过之后用于日志。
+	RawFrom int
 }
 
 func (t *RescueSubmitTool) Name() string { return "submit" }
@@ -478,9 +483,38 @@ func (t *RescueSubmitTool) Execute(argsJSON string) (session.ToolResult, error) 
 	if strings.TrimSpace(args.Reason) == "" {
 		return session.ToolResult{Text: "REJECTED: reason is required"}, nil
 	}
-	t.Submitted, t.Verdict, t.From, t.Reason, t.Hint = true, v, args.From, strings.TrimSpace(args.Reason), strings.TrimSpace(args.Hint)
+	t.Submitted, t.Verdict, t.RawFrom, t.From, t.Reason, t.Hint = true, v, args.From, args.From, strings.TrimSpace(args.Reason), strings.TrimSpace(args.Hint)
 	label := map[string]string{"retry": "REMINDER WILL BE SENT", "truncate": fmt.Sprintf("WILL TRUNCATE AT LINE %d AND CONTINUE", t.From), "fail": "THE RUNNER WILL STOP"}[v]
-	return session.ToolResult{Text: "VERDICT ACCEPTED: " + label + ". Reason: " + t.Reason, Terminal: true}, nil
+	note := ""
+	if v == "truncate" {
+		if fixed := t.snapFrom(args.From); fixed != args.From {
+			t.From = fixed
+			label = fmt.Sprintf("WILL TRUNCATE AT LINE %d AND CONTINUE", fixed)
+			note = fmt.Sprintf(" NOTE: line %d is a usage/meta line, it is never replayed — the cut lands on the last message line %d.", args.From, fixed)
+		}
+	}
+	return session.ToolResult{Text: "VERDICT ACCEPTED: " + label + "." + note + " Reason: " + t.Reason, Terminal: true}, nil
+}
+
+// snapFrom 把模型给的行号挪到最近一条消息行上（往前找；前面没有就原样返回）。
+//
+// 复盘会话读的是"第 237 行是最后一条好消息"，落笔却常常填 238 —— 那是紧跟其后
+// 的用量行。以前这种切口一律被判"不是一条消息记录"，请求带着同一个数再派一遍，
+// 这一章就再也续不上（T245）。切在用量行上确实等于没切，但意图是清楚的：往前
+// 挪一条就是它想说的那一条。
+func (t *RescueSubmitTool) snapFrom(from int) int {
+	if from < 1 || from > len(t.Lines) {
+		return from
+	}
+	if t.Lines[from-1].Kind == "msg" {
+		return from
+	}
+	for i := from - 2; i >= 0; i-- {
+		if t.Lines[i].Kind == "msg" {
+			return t.Lines[i].Line
+		}
+	}
+	return from
 }
 
 // rescueMu 保护 rescueSeen（同一章同一次尝试最多复盘 max_per_attempt 次）。
@@ -649,7 +683,7 @@ func (r *Runner) rescueReviewOnce(t rescueTarget, lines []transcriptLine, tid in
 
 	readTool := &ReadSessionTool{Path: t.TrPath, Lines: lines, Total: len(lines)}
 	statsTool := &SessionStatsTool{Lines: lines, Total: len(lines)}
-	submit := &RescueSubmitTool{}
+	submit := &RescueSubmitTool{Lines: lines}
 	tools := []session.Tool{readTool, statsTool, submit}
 	sess := session.NewSession(client, modelCfg, tuning,
 		renderPrompt(prompts.Must(prompts.RescueSystem), tuning, r.outputLang()),

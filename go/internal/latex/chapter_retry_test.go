@@ -358,9 +358,21 @@ func TestTruncateChapterTranscript(t *testing.T) {
 	if _, next2, err := r.truncateChapterTranscript(proj, "chapter_002", "convert_chapter_002.jsonl", 2); err != nil || next2 != 3 {
 		t.Fatalf("第二次截断 = %d (%v), want 3", next2, err)
 	}
-	// 切在用量行 / 超出范围 / 非法文件名都要拒绝。
-	if _, _, err := r.truncateChapterTranscript(proj, "chapter_002", "convert_chapter_002.jsonl", 4); err == nil {
-		t.Fatal("切在用量行应拒绝")
+	// 切在用量行：往上挪到最近的消息行（第 3 行）照切不误。复盘会话常把"最后
+	// 一条好消息的下一行"当切口，而那一行正是用量行（T245）。
+	dst3, next3, err := r.truncateChapterTranscript(proj, "chapter_002", "convert_chapter_002.jsonl", 4)
+	if err != nil {
+		t.Fatalf("切在用量行应挪到消息行而不是拒绝: %v", err)
+	}
+	head3, err := os.ReadFile(dst3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(strings.Split(strings.TrimRight(string(head3), "\n"), "\n")); got != 3 {
+		t.Fatalf("挪到第 3 行后前缀应是 3 行, got %d（第 %d 号尝试）", got, next3)
+	}
+	if next3 != 4 {
+		t.Fatalf("第三次截断 = %d, want 4", next3)
 	}
 	if _, _, err := r.truncateChapterTranscript(proj, "chapter_002", "convert_chapter_002.jsonl", 99); err == nil {
 		t.Fatal("超出范围应拒绝")
@@ -572,8 +584,17 @@ func TestTruncateCheckerTranscript(t *testing.T) {
 	if _, _, err := r.truncateCheckerTranscript(proj, base, "checker_"+base+".try2.jsonl", 0); err == nil {
 		t.Fatal("from=0 应报错")
 	}
-	if _, _, err := r.truncateCheckerTranscript(proj, base, "checker_"+base+".try2.jsonl", 4); err == nil {
-		t.Fatal("切在用量行应报错")
+	// 切在用量行：挪到最近的消息行（第 3 行）照切不误（T245）。
+	dst5, n5, err := r.truncateCheckerTranscript(proj, base, "checker_"+base+".try2.jsonl", 4)
+	if err != nil {
+		t.Fatalf("切在用量行应挪到消息行: %v", err)
+	}
+	if n5 != 5 || filepath.Base(dst5) != "checker_"+base+".try5.jsonl" {
+		t.Fatalf("挪位后的新尝试 = %d / %q", n5, filepath.Base(dst5))
+	}
+	head5, err := os.ReadFile(dst5)
+	if err != nil || strings.Count(string(head5), "\n") != 3 {
+		t.Fatalf("挪到第 3 行后前缀应是 3 行: %q %v", string(head5), err)
 	}
 }
 

@@ -438,13 +438,14 @@ func TestRescueOnErrorEndedConvertQueuesTruncate(t *testing.T) {
 	if len(run.stats.rescueText) != 1 || !strings.Contains(run.stats.rescueText[0], "ended with an error") {
 		t.Errorf("复盘请求应说明这次是报错终止：%v", run.stats.rescueText)
 	}
-	// truncate 结论 → 与页面 ⤓ 同一条队列通路：role=continue、From 保留。
+	// truncate 结论 → 与页面 ⤓ 同一条队列通路：role=continue、From 是落位后的
+	// 行号（用例给的 1 落在元信息行上，往前没有消息就往后挪到第一条消息）。
 	reqs := rescueQueuedRequests(t, run.proj)
 	if len(reqs) != 1 {
 		t.Fatalf("应排一条 continue 请求，实际 %d 条", len(reqs))
 	}
 	req := reqs[0]
-	if req["role"] != "continue" || req["chapter"] != "chapter_01" || req["from"] != float64(1) {
+	if req["role"] != "continue" || req["chapter"] != "chapter_01" || req["from"] != float64(4) {
 		t.Errorf("排队请求不对：%+v", req)
 	}
 	if req["source"] != "rescue" {

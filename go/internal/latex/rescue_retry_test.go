@@ -143,8 +143,8 @@ func TestRescueOwnFailuresDoNotExhaustTargetBudget(t *testing.T) {
 	}
 }
 
-// (C-1) 复盘一开始就把目标状态写成 rescuing，判 truncate 时先写 queued 再排队，
-// 且失败终态保持 queued（队列马上会重跑这一章）。
+// (C-1) 复盘判 truncate 时先写 queued 再排队，随后原地截断把尾巴（连同那条
+// rescuing 标记）整段切走，切口留一条 kind=cut 记录。队列马上会重跑这一章。
 func TestRescuePublishesTargetActivityBeforeQueueing(t *testing.T) {
 	run := runRescueChapter(t, rescueChapterOptions{
 		chapterError:     http.StatusBadRequest,
@@ -152,28 +152,34 @@ func TestRescuePublishesTargetActivityBeforeQueueing(t *testing.T) {
 		verdicts:         []string{"truncate"},
 		from:             1,
 	})
-	states := targetActivityStates(t, filepath.Join(run.proj, "work", "sessions", "convert_chapter_01.jsonl"))
-	rescuing := indexOfState(states, rescueActivityState)
-	if rescuing < 0 {
-		t.Fatalf("复盘开始时应当往目标转录写 rescuing，实际状态序列 %v", states)
+	targetPath := filepath.Join(run.proj, "work", "sessions", "convert_chapter_01.jsonl")
+	states := targetActivityStates(t, targetPath)
+	// 截断之后 `rescuing` 那条状态行属于被切掉的尾巴（它在最后一条好消息之后），
+	// 因此这里只要求切口可审计、且 queued 出现在切口之后。
+	raw, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// queued 有两次：一次是转换进槽位时、一次是复盘判 truncate 之后。复盘那次
-	// 一定在 rescuing 之后。
-	after := indexOfState(states[rescuing:], "queued")
-	if after < 0 {
+	if !strings.Contains(string(raw), `"kind":"cut"`) {
+		t.Fatalf("原地截断应当在切口留一条 kind=cut 记录：%s", raw)
+	}
+	if indexOfState(states, "queued") < 0 {
 		t.Fatalf("复盘判 truncate 后应当写 queued，实际状态序列 %v", states)
 	}
-	if last := states[len(states)-1]; last != "queued" {
-		t.Fatalf("truncate 之后目标终态应当是 queued（队列接手），实际 %v", states)
+	if last := states[len(states)-1]; last != "queued" && last != "running" {
+		t.Fatalf("truncate 之后目标终态应当是 queued（等队列接手）或 running（已接手），实际 %v", states)
 	}
-	// 顺序可审计：queued 写在排进重试队列之前——请求文件已存在，而转录里最后
-	// 一行就是那次 queued。
+	// 排队请求带的是**落位后**的行号（这一条的转录从第 4 行才有消息），派发端
+	// 再切也不会切第二刀。
 	queuedReqs := rescueQueuedRequests(t, run.proj)
 	if len(queuedReqs) != 1 {
 		t.Fatalf("应当排一条 continue 请求，实际 %d 条", len(queuedReqs))
 	}
 	if got := queuedReqs[0]["chapter"]; got != "chapter_01" {
 		t.Errorf("重试请求的章节 = %v，期望 chapter_01", got)
+	}
+	if got := queuedReqs[0]["from"]; got != float64(4) {
+		t.Errorf("排队请求的 from = %v，期望 4（切口落位后的消息行）", got)
 	}
 }
 
