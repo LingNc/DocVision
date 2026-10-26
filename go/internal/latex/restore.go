@@ -1,6 +1,7 @@
 package latex
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mineru-tools/internal/retryq"
 )
 
 // 切回第 N 次尝试（P63）。
@@ -68,6 +71,81 @@ func restoreLivePaths(proj, base string) []attemptPath {
 // chapterAttemptArchive 是第 N 次尝试的留档目录。
 func chapterAttemptArchive(proj, base string, attempt int) string {
 	return filepath.Join(proj, "work", "attempts", base, "try"+strconv.Itoa(attempt))
+}
+
+// rootChapterOf 把子章节名折回它所属的顶层章节名：`chapter_009_child_03_child_01`
+// → `chapter_009`。没有 `_child_` 的原样返回。
+func rootChapterOf(base string) string {
+	base = strings.TrimSuffix(strings.TrimSpace(base), ".md")
+	if i := strings.Index(base, "_child_"); i > 0 {
+		return base[:i]
+	}
+	return base
+}
+
+// restoreWaitingError 表示"这一章先停一下：已经有人排了切回第 N 次尝试的请求，
+// 而且条件够、随时能落地"。它既不是失败，也不是 T243 那种接口错误的暂停——
+// 不换尝试、不动产物、不记失败、不留新请求，只是把位置（章节锁与工作区）让出来
+// 给切回（T244）。
+type restoreWaitingError struct {
+	Base    string
+	Attempt int
+}
+
+func (e *restoreWaitingError) Error() string {
+	return fmt.Sprintf("有切回第 %d 次尝试的请求在等：这一章先停在这里（不记失败、不换尝试、产物不动），切回随后生效，之后重跑这一章",
+		e.Attempt)
+}
+
+func isRestoreWaiting(err error) (int, bool) {
+	var e *restoreWaitingError
+	if errors.As(err, &e) {
+		return e.Attempt, true
+	}
+	return 0, false
+}
+
+// pendingRestore 报告这一章（含它的递归子树）有没有**已经排上、而且现在就能切**
+// 的「切回第 N 次尝试」请求，返回 N。
+//
+// 为什么转换侧要知道它：切回要搬的就是工作区这棵树，所以派发端只 TryLock 这一章、
+// 绝不打断正在跑的会话（P63）。可"正在跑"对细分父章节来说是**整棵子树**——父节点
+// 的细分驱动从转换开始就占着父章节的锁，一直等到最后一个孙子收尾（实测几小时）。
+// 于是切回请求在队列里躺着，日志只有打开时的那一行，用户以为按钮坏了、重启也没用
+// （重启后这一章又从第 N+1 次被重新派发，锁又被占住）。
+//
+// 这里把"有切回在等"变成转换侧的一个停止条件：这一章不再进批次、不再往下派发新的
+// 子分支与新回合，正在跑的那几条跑完手上这一轮就收——锁很快松开，切回在一两分钟内
+// 落地。它只是"不再开新活"，不会中断任何会话，也不会挪动正在写的文件。
+//
+// 只用**便宜**的那几条条件（留档在、这代不是它）。不带 restoreLiveGrace 的写入检查：
+// 那要遍历整棵子树，每个节点都做一次太贵；而且写入检查恰好会让"正在跑"的那几秒
+// 里判成不能切，与这里的目的相反。
+func (r *Runner) pendingRestore(proj, base string) (int, bool) {
+	root := rootChapterOf(base)
+	if root == "" {
+		return 0, false
+	}
+	for _, f := range retryq.Pending(proj) {
+		if retryRoleOf(f.Request) != "restore" || f.Request.Attempt <= 0 {
+			continue
+		}
+		if rootChapterOf(f.Chapter) != root {
+			continue
+		}
+		attempt := f.Request.Attempt
+		if !dirExists(chapterAttemptArchive(proj, root, attempt)) {
+			continue
+		}
+		live := lastAttemptNumber(filepath.Join(proj, "work", "sessions", "convert_"+root+".jsonl"))
+		if live == attempt {
+			// 请求指的是"现在这一次"：它永远切不成（前置条件会拒），不能拿它拦着
+			// 转换——否则这一章不动、请求也走不掉，两边互相等死。
+			continue
+		}
+		return attempt, true
+	}
+	return 0, false
 }
 
 // RestorePrecondition 说明"现在能不能切回第 attempt 次尝试"，返回非空 = 不能

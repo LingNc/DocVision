@@ -1014,7 +1014,9 @@ func (r *Runner) convertBatchWidth() int {
 // convertChapterBatch 跑一批章节，返回（真失败, 暂停）。T243：因上游接口错误
 // 重试用满而**暂停**的章节不算失败——不换尝试、不归档产物、页面写「已暂停」，
 // 而且它不该混进"转换失败"的措辞里让用户以为这一章废了。
-func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) (failures, pauses []string) {
+// 返回值第三项是"因为切回请求在等而**没跑**"的章节（T244）：既不是失败也不是
+// 暂停，调用方据此知道这一批少跑了几章。
+func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) (failures, pauses, skipped []string) {
 	// T198：批次宽度 = 转换阶段的 worker 数，也就是 latex.convert_concurrency
 	// （没写沿用 latex.concurrency）。
 	//
@@ -1039,6 +1041,8 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 	r.log.Log(0, fmt.Sprintf("%s 并发 %d（latex.convert_concurrency），共 %d 章", label, conc, len(chapters)))
 	var done, failed, running int
 	var progMu sync.Mutex
+	// T244：这些章节因为「切回第 N 次尝试」在等而先停（不是失败）。
+	var skippedRestore []string
 	total := len(chapters)
 	start := time.Now()
 	// 进度行统一走 liveProgress：终端里原地覆写、管道里按节拍整行输出。
@@ -1058,6 +1062,20 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 	progress := func() { progLive.render() }
 
 	for idx, chapPath := range chapters {
+		// T244：这一章有「切回第 N 次尝试」在等，而且随时能切——这次先不跑它。
+		// 切回要搬的就是工作区这棵树，转换一开跑就占住章节锁（细分父章节是整棵
+		// 子树），切回只能干等；反过来先让出来，切回在一两分钟内落地，之后重跑
+		// 这一章才是从第 N 次接着干。这里只跳过，不记失败、不换尝试。
+		cbase := strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
+		if n, ok := r.pendingRestore(proj, cbase); ok {
+			r.log.Log(0, label, "这一章有切回第", strconv.Itoa(n), "次尝试的请求在等，这次先不跑:", cbase)
+			skippedRestore = append(skippedRestore, cbase)
+			progMu.Lock()
+			done++
+			progMu.Unlock()
+			progress()
+			continue
+		}
 		wg.Add(1)
 		tid := <-tidPool
 		// 创建戳在这里取（派发循环里、goroutine 之前）：章节按 sort 后的顺序
@@ -1089,6 +1107,16 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 			progMu.Unlock()
 			progress()
 			if err != nil {
+				if n, waiting := isRestoreWaiting(err); waiting {
+					// T244：切回请求到了（这一章可能已经跑到半路）。既不记失败也
+					// 不暂停：让出锁、让切回搬完，之后重跑这一章就是从第 N 次接着干。
+					r.log.Log(0, label, "有切回第", strconv.Itoa(n), "次尝试的请求在等，这一章先停在这里:",
+						filepath.Base(chap))
+					failsMu.Lock()
+					skippedRestore = append(skippedRestore, strings.TrimSuffix(filepath.Base(chap), filepath.Ext(chap)))
+					failsMu.Unlock()
+					return
+				}
 				if isPaused(err) {
 					// T243：暂停不是失败——单独的计账，措辞也不一样。
 					r.log.LogWarning(tid, label, "章节暂停:", filepath.Base(chap), err)
@@ -1108,7 +1136,13 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 	wg.Wait()
 	progLive.Close()
 
-	return failures, pauses
+	if len(skippedRestore) > 0 {
+		sort.Strings(skippedRestore)
+		r.log.LogWarning(0, label, "先停", strconv.Itoa(len(skippedRestore)),
+			"章（有切回请求在等，不是失败）:", strings.Join(skippedRestore, ", "),
+			"—切回在这一章停止写盘后自动落地，之后重跑这一章即可")
+	}
+	return failures, pauses, skippedRestore
 }
 
 func (r *Runner) convertPhase(proj string, fbRound int) error {
@@ -1152,7 +1186,7 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		r.log.Log(0, "[convert]", "没有要转换的章节（--only / 重试队列为空）")
 		return nil
 	}
-	fails, pauses := r.convertChapterBatch(proj, clsName, manualPath, workDir, targets, label)
+	fails, pauses, skipped := r.convertChapterBatch(proj, clsName, manualPath, workDir, targets, label)
 	if len(pauses) > 0 {
 		// T243：上游接口重试用满 → 这一章暂停，整轮到此为止（不重试、不记失败、
 		// 不换尝试、产物与尝试预算都没动）。重启程序会接着这条会话跑，网页上
@@ -1174,7 +1208,8 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 			break
 		}
 		r.log.Log(0, label, "补一轮手动重试:", strings.Join(bases, ", "))
-		fails, pauses := r.convertChapterBatch(proj, clsName, manualPath, workDir, more, label)
+		fails, pauses, skippedMore := r.convertChapterBatch(proj, clsName, manualPath, workDir, more, label)
+		skipped = append(skipped, skippedMore...)
 		if len(pauses) > 0 {
 			return pauseError(pauses)
 		}
@@ -1182,7 +1217,15 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 			return fmt.Errorf("%d 个章节转换失败: %s", len(fails), strings.Join(fails, "; "))
 		}
 	}
-	r.log.Log(0, label, "全部", strconv.Itoa(len(targets)), "章转换完成")
+	if len(skipped) == 0 {
+		r.log.Log(0, label, "全部", strconv.Itoa(len(targets)), "章转换完成")
+	} else {
+		// T244：有章节因为切回请求在等而没跑。别报"全部完成"——那会让人以为这一章
+		// 已经转好（它连产物都还没有），下一页就应该去点「继续跑」。
+		r.log.Log(0, label, "这一批", strconv.Itoa(len(targets)), "章：完成",
+			strconv.Itoa(len(targets)-len(skipped)), "章，等切回",
+			strconv.Itoa(len(skipped)), "章（", strings.Join(skipped, ", "), "）")
+	}
 	// P53 的 checker 角色：只重新核对已提交的产物，不动 .tex。放在转换重试之后
 	// 统一处理——同一章既重转又重核时，先重转再核新产物才有意义。
 	rechecked := 0
@@ -1391,8 +1434,21 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 	var mu sync.Mutex
 	var failures []string
 	pausedN := 0
+	// T244：有几支子章节因为「切回第 N 次尝试」在等而先停（不记失败）。
+	restoreN, restoreAttempt := 0, 0
 	var inherited []ChapterIssue
 	for i, child := range children {
+		// T244：这一章有切回在等、而且随时能切——剩下的子分支这次不派发。正在跑
+		// 的那几支会跑完手上这一轮（不打断它们），然后父节点收尾、锁松开，切回
+		// 就能搬。以前细分父章节的锁从转换开始一直占到最后一支收尾（实测几小时），
+		// 切回只能干等，重启还会被重新抢走。
+		if n, ok := r.pendingRestore(proj, parentBase); ok {
+			r.log.Log(0, "[convert]", parentBase, "有切回第", strconv.Itoa(n),
+				"次尝试的请求在等，剩下", strconv.Itoa(len(children)-i), "支子章节这次不派发")
+			restoreN++
+			restoreAttempt = n
+			break
+		}
 		id := fmt.Sprintf("child_%02d", i+1)
 		chapter := child
 		// 子章节的创建戳在**启动 goroutine 之前**取，按 children 的顺序单调递增：
@@ -1469,6 +1525,14 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 				// 那条转录（`convert_<章>.tryN.jsonl`）。以前按值传，拿到的是第 1 次
 				// 尝试的旧路径——失败终态写到一条早已结束的历史转录上（而且它比在跑
 				// 的那条新，页面就挑它显示「会话错误」，实际上那一代早就通过了）。
+				if n, waiting := isRestoreWaiting(err); waiting {
+					// T244：这一支让开了（切回在等）。不写终态、不算失败。
+					mu.Lock()
+					restoreN++
+					restoreAttempt = n
+					mu.Unlock()
+					return
+				}
 				state := "error"
 				if isPaused(err) {
 					// T243：接口重试用满 = 暂停，不是会话错误。放在最前面判：
@@ -1503,6 +1567,10 @@ func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, par
 		}()
 	}
 	wg.Wait()
+	if restoreN > 0 && len(failures) == 0 {
+		// T244：整棵子树都让开了，父章节照样"先停"，不提交、不记失败。
+		return &restoreWaitingError{Base: parentBase, Attempt: restoreAttempt}
+	}
 	if len(failures) > 0 {
 		sort.Strings(failures)
 		if pausedN == len(failures) {
@@ -1762,6 +1830,15 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	}
 	if node.Attempt < 1 {
 		node.Attempt = 1
+	}
+	// T244：这一章（含它的父章）有「切回第 N 次尝试」在等，而且随时能切——这次
+	// 一个字节都不碰就退出去。放在最前面：细分驱动在派发前已经拦了一道，这里
+	// 是第二道——已经进了槽位池、或者转换跑到半路又来了一条切回请求时，这一支
+	// 在节点入口就安静让开，锁随即松开。不记失败、不换尝试、不写终态：切回是
+	// 文件搬运，它才是这一章的下一步。
+	if n, ok := r.pendingRestore(proj, base); ok {
+		r.log.Log(0, "[convert]", base, "有切回第", strconv.Itoa(n), "次尝试的请求在等，这一支先不跑")
+		return &restoreWaitingError{Base: base, Attempt: n}
 	}
 	// T171：每次尝试都从**原始**转录名派生。重试是递归调用同一个函数，而
 	// `next := *node` 会带上已经被改写的 TranscriptPath——过去就是拿它再套一层

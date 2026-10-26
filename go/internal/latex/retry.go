@@ -1072,6 +1072,29 @@ func (r *Runner) dispatchRetries(proj string) int {
 		// 上是"点了没反应"：回执说已排队，磁盘上请求被丢掉，会话一个字节没变。
 		// 现在改成真的推进——把它换成父章节的「继续跑」，父节点重新驱动整棵子树
 		// （这一支按磁盘上的转录续跑），改完再重新整合。
+		// T244：这一章排着「切回第 N 次尝试」时，别的角色先别动手——它们一开跑就
+		// 占住这一章的锁（细分父章节是整棵子树），切回又得从头等。请求留队，等切回
+		// 搬完再轮到它们。切回自己不受这条限制。
+		if role != "restore" {
+			if n, ok := r.pendingRestore(proj, base); ok {
+				if !r.retryWarnOnce(f.Path+"|waitrestore", base+" 等切回") {
+					r.log.LogInfo(0, "[retry]", base, "有切回第", strconv.Itoa(n),
+						"次尝试的请求在等，这条", role, "请求先留着（切回落地后再派发）")
+				}
+				continue
+			}
+		}
+		if role == "restore" && f.Request.Attempt > 0 && rootChapterOf(base) == base {
+			// T244：这条切回请求的目标已经是**现在这一次**了——多半是同一个按钮
+			// 点了两下（第二条在第一轮搬完之后就没有意义）。以前它会永远留在队列
+			// 里：每 5 分钟重排一次、永远排不上、也永远不消失。这里直接收掉。
+			if lastAttemptNumber(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")) == f.Request.Attempt {
+				_ = retryq.Consume(f.Path)
+				r.log.LogInfo(0, "[restore]", base, "切回第", strconv.Itoa(f.Request.Attempt),
+					"次尝试的请求作废：它已经是现在这一次（可能点了两次）")
+				continue
+			}
+		}
 		if parent, isChild := childChapterParent(base); isChild && (role == "convert" || role == "continue") {
 			_ = retryq.Consume(f.Path)
 			// 子章节不能单独重跑（没有谁去整合它），但**"从某条记录之后继续"
@@ -1100,7 +1123,7 @@ func (r *Runner) dispatchRetries(proj string) int {
 				// 切回要搬的就是工作区本身，绝不能和正在写它的会话并行（P63）：
 				// 拿不到锁就等这一章收尾的那一刻再切，句子也换成"在等它停下来"，
 				// 免得被当成在排槽位。
-				r.logRestoreWait(base, f.Path)
+				r.logRestoreWait(proj, base, f.Path, f.Request.Attempt)
 				continue
 			}
 			r.logBusySkip(proj, base, role, f.Path)
@@ -1136,11 +1159,43 @@ func (r *Runner) dispatchRetries(proj string) int {
 // 用户点「切回第 N 次尝试」时，工作区里可能正有一个会话在写。切回要搬的就是这棵
 // 树，所以它和其它请求一样只 TryLock：拿不到就留队，**不打断正在跑的那条**，等
 // 这一章收尾的那一刻立刻切。这条日志就是"它在等，不是没反应"。
-func (r *Runner) logRestoreWait(base, reqPath string) {
-	if !r.retryWarnOnce(reqPath, base+" 切回请求在等这一章的会话收尾") {
-		r.log.LogInfo(0, "[restore]", base,
-			"切回请求排队中：先等这一章的会话跑完手上这一轮再搬（不打断它，那一次会整棵留档，之后能切回来接着跑）")
+// T244：这条以前一辈子只打一行（按请求去重）。细分父章节的锁可能被整棵子树占着
+// 几十分钟到几小时，用户看到的就是"点了切回、日志里只有一句、然后什么都没有"，
+// 于是以为按钮没用、去重启进程。现在按 retryBusyLogEvery 重复，并带上第几次、
+// 等了多久，卡没卡一眼能看出来。
+func (r *Runner) logRestoreWait(proj, base, reqPath string, attempt int) {
+	now := time.Now()
+	r.busyMu.Lock()
+	if r.retryBusySince == nil {
+		r.retryBusySince = map[string]time.Time{}
 	}
+	if r.retryBusyLogged == nil {
+		r.retryBusyLogged = map[string]time.Time{}
+	}
+	since, ok := r.retryBusySince[reqPath]
+	if !ok {
+		since = now
+		r.retryBusySince[reqPath] = since
+	}
+	last := r.retryBusyLogged[reqPath]
+	if !last.IsZero() && now.Sub(last) < retryBusyLogEvery {
+		r.busyMu.Unlock()
+		return
+	}
+	r.retryBusyLogged[reqPath] = now
+	r.busyMu.Unlock()
+
+	msg := "切回第 " + strconv.Itoa(attempt) + " 次尝试的请求排队中（已等 " + waitText(now.Sub(since)) +
+		"）：先等这一章的会话跑完手上这一轮再搬（不打断它，那一次会整棵留档，之后能切回来接着跑）"
+	switch age := r.chapterLastOutputAge(proj, base); {
+	case age < 0:
+		msg += "；这一章还没有任何输出"
+	case age > retryBusyLogEvery:
+		msg += "；这一章最后一次输出在 " + waitText(age) + "前——它可能卡住了（实在等不下去就重启程序，队列里的请求不会丢）"
+	default:
+		msg += "；这一章最后一次输出在 " + waitText(age) + "前，它还在动"
+	}
+	r.log.LogInfo(0, "[restore]", base, msg)
 }
 
 // retryBusyLogEvery 是"这一章忙、请求留队"这类提示的重复间隔：第一次立刻打，
