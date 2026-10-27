@@ -47,7 +47,7 @@ func newLatexCmd() *cobra.Command {
   text   -> 只提取图中可见文本（公式→LaTeX、表格→Markdown；无文字则保留原图），
             纯文本嵌入正文（无 [AI]/[IMG_TYPE] 标记）。
   vector -> 专用作图 AI 会话 write_file 写代码 -> compile 编译（只回日志/产物名/页数）
-            -> view_pdf 看自己编译出的 PDF 视觉核对 -> submit；
+            -> view_pdf 看自己编译出的 PDF 视觉核对；可选 compare_figure 返回 overlay 与对齐证据供模型参考 -> submit；
             产物转 SVG 后以 ![label](figures/*.svg) 嵌入（SVG 不可用退 PNG/PDF 链接）。
   raster -> 保留原图链接（insert_image_description 开启时才嵌入可读解释文本）。
   档位2 输出**不含任何 <!-- DOCVISION-* --> 注释**，失败只记日志与 progress.json。

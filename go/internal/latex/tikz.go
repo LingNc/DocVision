@@ -60,6 +60,7 @@ func RunTikZSession(
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
 	submitFig := &SubmitFigureTool{State: state}
+	compareFig := &compareFigureTool{State: state, Comp: comp, OriginalPath: env.CurrentImgAbs}
 	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.FigureSystem), tuning, env.OutputLang), []session.Tool{
 		&WriteWorkFileTool{Root: scratch},
 		&EditWorkFileTool{Root: scratch},
@@ -68,6 +69,7 @@ func RunTikZSession(
 		&CompileFigureTool{Comp: comp, State: state, EngineIsXe: engineIsXe, Log: log, Tid: tid},
 		// 看图预算（软，提醒不拦截）：tools.view.pdf_max / warn_ratio。
 		&ViewPDFTool{Root: scratch, Comp: comp, SoftMax: cfgPdfMax, WarnRatio: cfgWarnRatio},
+		compareFig,
 		submitFig,
 		&ImageContextTool{Content: env.MDContent, CurrentImg: env.CurrentImg, MaxUp: env.MaxUp, MaxDown: env.MaxDown},
 		// 原图:每次看图都附带"印刷尺寸/像素/有效 dpi"测量 + 软预算提醒。

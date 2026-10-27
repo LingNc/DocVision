@@ -20,7 +20,7 @@ PDF 文件 -> 分割 -> MinerU API 解析 -> 整理文件 -> AI 图片转文本 
 
 另有两条**独立运行**的命令，不属于 workflow 步骤（`workflow --step` 不接受这两个名字）：
 
-- **latex** - LaTeX 输出（图片矢量化 / 全书转换，见 [LaTeX 输出](docs/latex.md)；自带前置流程与日志分析）
+- **latex** - LaTeX 输出（图片矢量化 / 全书转换，矢量图会话可选调用 `compare_figure` 获取图像 overlay 与对齐证据；不改变提交流程，见 [LaTeX 输出](docs/latex.md)；自带前置流程与日志分析）
 - **verify** - AI 核对图片与嵌入内容（默认关闭，`verify.enabled`；只能显式运行 `docvision verify`）
 
 ## 环境要求
