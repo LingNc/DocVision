@@ -277,8 +277,12 @@ export function stageChapterAggregate(stage: string, items: any[], filtered: boo
   // T254：只数**有章节身份**的会话。阶段级会话（章节划分、样式派生、作图）
   // 与复盘截断残片没有 chapterId，以前也被算成"一章"，于是阶段头报出 852 章、
   // 错误里混着 vector/style/chapters 这些根本不属于章节转换的条目。
+  // T256：归档里的转录是**上一代**的尝试（它们的 `_subdivision` 早已随章节收尾
+  // 清掉、产物也不在了），不该算作"这一章现在还没完"。以前只要某章只剩归档转录，
+  // 那条 error 就被当成现状挂进阶段头，于是出现"父章节都通过了、数字里还有错误"、
+  // 点进去又找不到对应条目。
   const chapterItems = (items || []).filter((s) =>
-    !!s?.chapterId && (!s.chapterRole || s.chapterRole === 'convert'))
+    !isStageLevelSession(s) && !s?.archived && (!s.chapterRole || s.chapterRole === 'convert'))
   // T251：先按章节收敛——同一章的历史尝试、上一代的归档转录、返工留下的多条都只算
   // 一次，取"这一章现在那一条"（与章节树同一个判据：非归档优先、mtime 新者胜）。
   // 否则阶段头会按转录条数报数（一次运行实测报出 1811 章，而全书只有几十章）。
@@ -299,6 +303,15 @@ export function stageChapterAggregate(stage: string, items: any[], filtered: boo
   if (live.length) bits.push('运行 ' + live.length)
   if (errs.length) bits.push('错误 ' + errs.length)
   return { total, done, live: live.length, err: errs.length, rows, head: bits.join(' · ') }
+}
+
+/* T254：阶段级会话（章节划分、样式派生、作图、整本书修复/终审）不是"某一章"，
+ * 阶段头的「N 章」不能把它们算进去。没有章节身份的会话按文件名认这几类。 */
+const STAGE_LEVEL_SESSION = /(^|\/)(chapters|style_session|style_pilot_trial|book_fix|final_review)\.jsonl$|\/vector_/
+
+function isStageLevelSession(s: any): boolean {
+  if (s && s.chapterId) return false
+  return STAGE_LEVEL_SESSION.test(String((s && (s.id || s.path)) || ''))
 }
 
 /* 书级进展：progress.json 原样列出各阶段状态（档位1/2 的键略有不同）。 */

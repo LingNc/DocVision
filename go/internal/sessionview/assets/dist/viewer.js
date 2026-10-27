@@ -7251,7 +7251,7 @@
   function stageChapterAggregate(stage, items, filtered) {
     if (stage !== "convert" && stage !== "checker") return null;
     if (filtered) return null;
-    const chapterItems = (items || []).filter((s) => !!(s == null ? void 0 : s.chapterId) && (!s.chapterRole || s.chapterRole === "convert"));
+    const chapterItems = (items || []).filter((s) => !isStageLevelSession(s) && !(s == null ? void 0 : s.archived) && (!s.chapterRole || s.chapterRole === "convert"));
     const byChapter = /* @__PURE__ */ new Map();
     chapterItems.forEach((s) => {
       const id = String(s && (s.chapterId || s.id) || "");
@@ -7269,6 +7269,11 @@
     if (live.length) bits.push("运行 " + live.length);
     if (errs.length) bits.push("错误 " + errs.length);
     return { total, done, live: live.length, err: errs.length, rows, head: bits.join(" · ") };
+  }
+  const STAGE_LEVEL_SESSION = /(^|\/)(chapters|style_session|style_pilot_trial|book_fix|final_review)\.jsonl$|\/vector_/;
+  function isStageLevelSession(s) {
+    if (s && s.chapterId) return false;
+    return STAGE_LEVEL_SESSION.test(String(s && (s.id || s.path) || ""));
   }
   function projectProgressLine(stages) {
     if (!stages) return null;

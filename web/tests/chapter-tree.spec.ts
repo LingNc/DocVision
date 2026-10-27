@@ -555,3 +555,20 @@ describe('阶段头只数章节会话', () => {
     expect(agg.err).toBe(0)
   })
 })
+
+// T256：只剩归档转录的章节（上一代的尝试、产物早没了）不算"还在跑"。
+describe('归档章节不进阶段统计', () => {
+  const mk = (id: string, extra: any = {}) => ({
+    id, chapterId: 'chapter_042', chapterRole: 'convert',
+    mtime: '2026-10-26T10:00:00Z', endState: 'done', ...extra,
+  })
+
+  it('只有归档转录的章不计入总数与错误数', () => {
+    const agg = stageChapterAggregate('convert', [
+      mk('work/attempts/chapter_042/try3/sessions/convert_x.jsonl', { archived: true, endState: 'error' }),
+      mk('sessions/convert_chapter_043.jsonl', { chapterId: 'chapter_043', endState: 'done' }),
+    ], false)!
+    expect(agg.total).toBe(1)
+    expect(agg.err).toBe(0)
+  })
+})
