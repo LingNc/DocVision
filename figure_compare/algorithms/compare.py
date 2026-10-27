@@ -314,7 +314,18 @@ def worst_region(src, dst, cells=16):
     }
 
 
-def save_comparisons(original_path: Path, candidate_path: Path, out_dir: Path, detail="all", grid_spec="0.95S", shift_pct=0.10, crop=(0, 0, 100, 100), width=0):
+def threshold_for(difficulty=0.5, confidence=0.5, base=50.0, minimum=40.0, maximum=75.0):
+    difficulty = min(1.0, max(0.0, float(difficulty)))
+    confidence = min(1.0, max(0.0, float(confidence)))
+    minimum, maximum = float(minimum), float(maximum)
+    if minimum > maximum:
+        raise ValueError("minimum threshold must not exceed maximum threshold")
+    base = min(maximum, max(minimum, float(base)))
+    value = base + 10.0 * (0.5 - confidence) - 12.0 * (difficulty - 0.5)
+    return round(min(maximum, max(minimum, value)), 2)
+
+
+def save_comparisons(original_path: Path, candidate_path: Path, out_dir: Path, detail="all", grid_spec="0.95S", shift_pct=0.10, crop=(0, 0, 100, 100), width=0, threshold=50.0, threshold_policy=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     src_img = Image.open(original_path).convert("RGB")
     cand_img = Image.open(candidate_path).convert("RGB")
@@ -379,8 +390,9 @@ def save_comparisons(original_path: Path, candidate_path: Path, out_dir: Path, d
             "similarity_percent": round(result["score"] * 100, 2),
             "channel_similarity_percent": {k: round(v * 100, 2) for k, v in channel_scores.items()},
             "score_method": "墨迹重叠率（soft-ink Jaccard）, 3-channel mean; grayscale is reported separately",
-            "threshold_percent": 50,
-            "pass": result["score"] >= 0.50,
+            "threshold_percent": threshold,
+            "threshold_policy": threshold_policy,
+            "pass": result["score"] >= threshold / 100.0,
             "translation_px": {"x": dx, "y": dy},
             "translation_percent": {"x": round(dx * 100 / iw, 3), "y": round(dy * 100 / ih, 3)},
             "canvas": result["canvas"],
@@ -423,8 +435,9 @@ def save_comparisons(original_path: Path, candidate_path: Path, out_dir: Path, d
         "similarity_percent": round(result["score"] * 100, 2),
         "channel_similarity_percent": {k: round(v * 100, 2) for k, v in channel_scores.items()},
         "score_method": "墨迹重叠率（soft-ink Jaccard）, 3-channel mean; grayscale is reported separately",
-        "threshold_percent": 50,
-        "pass": result["score"] >= 0.50,
+        "threshold_percent": threshold,
+        "threshold_policy": threshold_policy,
+        "pass": result["score"] >= threshold / 100.0,
         "translation_px": {"x": dx, "y": dy},
         "translation_percent": {"x": round(dx * 100 / iw, 3), "y": round(dy * 100 / ih, 3)},
         "canvas": result["canvas"],
@@ -460,12 +473,24 @@ def main():
     ap.add_argument("--width", type=int, default=0)
     ap.add_argument("--grid", default="0.95S")
     ap.add_argument("--shift", type=float, default=0.10)
+    ap.add_argument("--pass-threshold", type=float, default=50.0, help="pass threshold in percent for the submit gate")
+    ap.add_argument("--threshold-policy", default="fixed", choices=["fixed", "adaptive-v1"], help="fixed threshold or explicit adaptive threshold policy")
+    ap.add_argument("--difficulty", type=float, default=0.5, help="normalized case difficulty for adaptive-v1 (0 easy, 1 difficult)")
+    ap.add_argument("--confidence", type=float, default=0.5, help="model confidence for adaptive-v1 (0 low, 1 high)")
+    ap.add_argument("--threshold-min", type=float, default=40.0, help="adaptive-v1 lower bound in percent")
+    ap.add_argument("--threshold-max", type=float, default=75.0, help="adaptive-v1 upper bound in percent")
     args = ap.parse_args()
+    threshold_policy = None
+    if args.threshold_policy == "adaptive-v1":
+        difficulty = min(1.0, max(0.0, args.difficulty))
+        confidence = min(1.0, max(0.0, args.confidence))
+        args.pass_threshold = threshold_for(difficulty, confidence, args.pass_threshold, args.threshold_min, args.threshold_max)
+        threshold_policy = {"name": "adaptive-v1", "difficulty": difficulty, "confidence": confidence, "minimum": args.threshold_min, "maximum": args.threshold_max}
     original = Image.open(args.original).convert("RGB")
     args.out.mkdir(parents=True, exist_ok=True)
     rendered = args.out / "candidate.png"
     size_info = render_cached(args.pdf, rendered, original.size)
-    metrics, selected = save_comparisons(args.original, rendered, args.out, args.detail, args.grid, args.shift, (args.left, args.top, args.right, args.bottom), args.width)
+    metrics, selected = save_comparisons(args.original, rendered, args.out, args.detail, args.grid, args.shift, (args.left, args.top, args.right, args.bottom), args.width, threshold=args.pass_threshold, threshold_policy=threshold_policy)
     metrics.update(size_info)
     print(json.dumps({"metrics": metrics, "selected_image": selected}, ensure_ascii=False))
 

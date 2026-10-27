@@ -7,7 +7,8 @@
 - `algorithms/`：legacy 比较器、新版视觉证据评估器、容错指标、校准工具、judge 合约及会话停止策略。
 - `tests/`：合成图像和结构化判定测试，作为源码纳入 Git。
 - `runner/`：Go 单会话 harness，提供 `view_pdf` 候选预览与 `compare_figure` 比较；比较回执含最差区域坐标，可按区域放大复查。
-- `viewer/`：单文件 HTML JSONL 会话浏览器模板。
+- `compare_figure_skill/`：可独立复制/导出的 compare_figure Skill，包含完整算法、动态阈值和离线 viewer。
+- `viewer/`：会话 JSONL 浏览器，可按工具调用回退转录并在确认后备份原文件。
 - `docs/`：设计边界与使用说明。
 
 ## 快速使用
@@ -36,7 +37,24 @@ go run . -config ../../path/to/config.yaml -original ../../path/to/reference.png
   -transcript ../../path/to/run/session.jsonl
 ```
 
-程序会在指定输出目录产生 `session.jsonl`、运行日志和工作产物；打开 `viewer/viewer.html` 后选择包含多个运行子目录的根工作目录，再从会话列表中选择目标会话查看。配置、原图、输出路径均由命令行传入，不在源码中写死。
+调用本地比较 Skill：
+
+```bash
+cd figure_compare/compare_figure_skill
+python3 compare.py --original <reference.png> --pdf <candidate.pdf> --out <result-dir> \\
+  --threshold-policy adaptive-v1 --difficulty 0.65 --confidence 0.8
+```
+
+默认不启用动态阈值，仍使用 50% 固定门槛。Skill 的独立使用、依赖和输出契约见 [Skill 说明](compare_figure_skill/SKILL.md)。可只打包该目录供其他 Agent 使用：
+
+```bash
+cd figure_compare/compare_figure_skill
+tar -czf /tmp/compare_figure_skill.tar.gz compare.py SKILL.md viewer.html
+```
+
+在浏览器打开 `compare_figure_skill/viewer.html`，手动选择 `metrics.json` 与同一输出目录中的 PNG 文件，即可离线查看。
+
+程序会在指定输出目录产生 `session.jsonl`、运行日志和工作产物；打开 `viewer/viewer.html` 后选择包含多个运行子目录的根工作目录，再从会话列表中选择目标会话查看。配置、原图、输出路径均由命令行传入，不在源码中写死。若在 viewer 中从某次工具调用处截断会话，先停止原 runner，再使用相同的 `-out` 与 `-transcript` 参数追加 `-resume`；续跑进程会恢复保留的 JSONL 历史，让模型从截断点直接继续（不发送新的用户消息），但需要重新编译并比较后才能提交。
 
 ## 隐私与数据边界
 
