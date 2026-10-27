@@ -2398,6 +2398,15 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		checkerTranscript = attemptTranscriptPath(trBase, checkAttempt)
 		return checkerTranscript
 	}
+	// T260：这一版产物**已经通过过**、而手上这串 issues 来自一条更早的核对会话
+	// ——那就不是在打回转换，是在把上一轮的旧账再算一次。实测代价：刚通过的章节
+	// 被重做一小时，重做完再开核对还撞上游 400，整章判失败。
+	if !ok && !checkerNoVerdict(issues) && staleCheckerFeedback(texPath, partsPath, checkerTranscript) {
+		r.log.LogWarning(tid, "[checker]", base,
+			"这一版产物已经有通过结论，忽略更早那条核对会话的反馈（不重做）")
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "pass"})
+		ok = true
+	}
 	for round := 0; !ok && !checkerNoVerdict(issues) && round < rounds; round++ {
 		r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
 		r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
@@ -2463,6 +2472,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "pass"})
 		r.log.Log(tid, "[checker]", base, "通过")
 		_ = os.Remove(texPath + ".checker")
+		writePassMarker(texPath, productFingerprint(texPath, partsPath))
 		if promoteSubmitRoot != "" {
 			if _, err := placeChapterFiles(node.SubmitRoot, promoteSubmitRoot, base); err != nil {
 				return fmt.Errorf("父章节 checker 通过但提升产物失败: %w", err)
@@ -2470,6 +2480,7 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 		}
 	} else {
 		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "issues"})
+		dropPassMarker(texPath)
 		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
 		// P60 第四步：子章节的修复轮数已经用光时**不整章重开**——保留这一版
 		// 整合产物，未解决的问题照旧沿 issues 库/报告向上走（见

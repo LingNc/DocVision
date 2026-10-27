@@ -2817,3 +2817,10 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **根因**：两条都来自 T253 的索引缓存。① walk 回调直接往 scanner 字段 map 写；② 预览页**复用同一个 scanner** 做轮询，两个请求的扫描撞在一起就是两个 goroutine 同时写同一个 map。
 - **改法**：walk 期间写本地 map，走完持锁交给字段；给 scanner 加 `scanMu`，同一实例上的 `scan` 串行（扫描 0.6 秒级、轮询 2 秒一次，排队无感）。
 - **测试**：新增 `t255_concurrent_scan_test.go`——同一个 scanner 8 个 goroutine 并发 scan，`go test -race` 由失败转通过；`go test ./internal/sessionview/ -race` 全绿。
+
+## 批次 T260：通过过的产物不再被旧核对反馈打回
+
+- **现象**：某章的核对已经交了 pass，紧接着日志出现「checker 第 1 轮反馈」，转换会话被喂回上一轮的问题重做 1 小时；重做完再开核对，请求被上游 `HTTP 400 invalid_request_error / upstream_request_rejected` 拒掉，整章记「checker 会话失败」。
+- **根因**：同一章会同时留着多条核对转录（不同尝试、不同代）。驱动只看"手上这条会话的结论"，不看这一版产物**已经通过过**，于是旧会话的 issues 又生效。
+- **改法**：`internal/latex/checker_pass_marker.go`——通过时写 `<章>.tex.passed`（产物指纹 = 主 .tex + parts 全部文件按路径排序后哈希）；拿回 issues 时比对：指纹一致且记号比那条核对转录更新，就判为旧反馈，不写 `.checker`、不打回，直接按通过收尾；产物变了或记号更旧照旧打回；判 issues 时清记号。
+- **测试**：`checker_pass_marker_test.go` 四条（无记号、旧反馈、产物变化、清记号）。
