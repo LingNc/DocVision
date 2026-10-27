@@ -1488,3 +1488,9 @@ user 轮
   改法：加磁盘索引缓存 `.sessionview-cache.json`（放在扫描根下，带版本号），键是转录路径、值是 (size, mtime, 统计)；命中就不开文件。转录是 append-only，size 与 mtime 任一变化即失效重算。落盘时按本轮扫到的文件剪掉已删除条目，避免缓存无限膨胀。写失败只当没写，下次重算。
   验证：新增用例把文件换成同样长度、同样 mtime 的垃圾内容——没缓存会重读、消息数归零，命中缓存则沿用上次结果（实测会失败一次：countEntry 字段当时未导出，整个条目被序列化成 `{}`，已改导出字段）。真实数据实测：冷启 3 分 08 秒 → 热启 0.64 秒（5365 条）。
   未改：SHA 仍在这一遍里算（缓存命中后就不再重算）；冷启那一次依旧要把全部转录读一遍。
+- T254 阶段头「852 章 · 完成 824 · 运行 1 · 错误 12」里混进了根本不属于章节转换的条目。
+  现象：错误数看着比实际多；点开看是 `work/sessions/chapters.jsonl`（章节划分）、`style_pilot_trial.jsonl`/`style_session.jsonl`（样式）、`source/sessions/vector_*.jsonl`（作图）这类阶段级会话。
+  根因：T251 只按 chapterId 收敛，没有章节身份的会话各自算一章——它们本来就不该进这个计数。
+  改法：stageChapterAggregate 只统计 chapterId 非空的会话（角色仍限 convert）。
+  验证：新增用例（阶段会话即便 error 也不进计数）；npm test 全绿；vite build 重出 viewer.js。
+  未改：真正的章节会话里仍有历史遗留的 error（旧二进制写下的终态），T250 只保证以后不再写错。

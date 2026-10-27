@@ -538,3 +538,20 @@ describe('阶段头按章节收敛', () => {
     expect(agg.err).toBe(0)
   })
 })
+
+// T254：阶段头只数有章节身份的会话——阶段级会话（划分/样式/作图）不算"一章"。
+describe('阶段头只数章节会话', () => {
+  const mk = (id: string, extra: any = {}) => ({
+    id, chapterId: '', chapterRole: '', mtime: '2026-10-26T10:00:00Z', endState: 'done', ...extra,
+  })
+
+  it('没有 chapterId 的阶段会话不进计数', () => {
+    const agg = stageChapterAggregate('convert', [
+      mk('proj/work/sessions/chapters.jsonl', { endState: 'error' }),
+      mk('proj/source/sessions/vector_x.jsonl', { endState: 'error' }),
+      mk('proj/work/sessions/convert_chapter_042.jsonl', { chapterId: 'chapter_042', chapterRole: 'convert' }),
+    ], false)!
+    expect(agg.total).toBe(1)
+    expect(agg.err).toBe(0)
+  })
+})

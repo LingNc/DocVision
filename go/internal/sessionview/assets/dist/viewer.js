@@ -7251,7 +7251,7 @@
   function stageChapterAggregate(stage, items, filtered) {
     if (stage !== "convert" && stage !== "checker") return null;
     if (filtered) return null;
-    const chapterItems = (items || []).filter((s) => !(s == null ? void 0 : s.chapterRole) || s.chapterRole === "convert");
+    const chapterItems = (items || []).filter((s) => !!(s == null ? void 0 : s.chapterId) && (!s.chapterRole || s.chapterRole === "convert"));
     const byChapter = /* @__PURE__ */ new Map();
     chapterItems.forEach((s) => {
       const id = String(s && (s.chapterId || s.id) || "");

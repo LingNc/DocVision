@@ -274,7 +274,11 @@ export interface StageAggregate {
 export function stageChapterAggregate(stage: string, items: any[], filtered: boolean): StageAggregate | null {
   if (stage !== 'convert' && stage !== 'checker') return null
   if (filtered) return null
-  const chapterItems = (items || []).filter((s) => !s?.chapterRole || s.chapterRole === 'convert')
+  // T254：只数**有章节身份**的会话。阶段级会话（章节划分、样式派生、作图）
+  // 与复盘截断残片没有 chapterId，以前也被算成"一章"，于是阶段头报出 852 章、
+  // 错误里混着 vector/style/chapters 这些根本不属于章节转换的条目。
+  const chapterItems = (items || []).filter((s) =>
+    !!s?.chapterId && (!s.chapterRole || s.chapterRole === 'convert'))
   // T251：先按章节收敛——同一章的历史尝试、上一代的归档转录、返工留下的多条都只算
   // 一次，取"这一章现在那一条"（与章节树同一个判据：非归档优先、mtime 新者胜）。
   // 否则阶段头会按转录条数报数（一次运行实测报出 1811 章，而全书只有几十章）。

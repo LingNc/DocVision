@@ -2802,3 +2802,11 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **测试**：`t253_cache_test.go`——把文件换成同样长度、同样 mtime 的垃圾内容，命中缓存则消息数沿用上次值（未命中会归零）；用例同时断言缓存文件确实写出。
 - **实测**：同一棵真实目录，冷启 **3 分 08 秒**（5365 条）→ 热启 **0.64 秒**。
 - **未改**：冷启那一次仍要全量读；SHA 仍在这一次里算（之后不再重算）。
+
+## 批次 T254：阶段头只数章节会话
+
+- **现象**：阶段头「852 章 · 完成 824 · 运行 1 · 错误 12」里，点开错误条目能看到 `work/sessions/chapters.jsonl`、`style_pilot_trial.jsonl`、`style_session.jsonl`、`source/sessions/vector_*.jsonl`——这些是阶段级会话，不是章节。
+- **根因**：T251 只按 `chapterId` 收敛，没有章节身份的会话各自算一章。
+- **改法**：`stageChapterAggregate` 只统计 `chapterId` 非空的会话（角色仍限 convert）。
+- **测试**：`tests/chapter-tree.spec.ts` 新增用例（阶段会话即便 `endState=error` 也不进计数）；`npm test` 全绿；`vite build` 重出 `viewer.js`。
+- **未改**：真正的章节会话里仍有旧二进制写下的历史 `error` 终态，T250 只保证以后不再写错。
