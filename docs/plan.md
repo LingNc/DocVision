@@ -279,3 +279,5 @@
 **做法（草案）**：数据侧已有 `progress_items` 与 dedupe 结果，新增只读接口 `/api/images`（分组 + 逐图字段）与 `/api/image/<id>`（单图详情 + 会话定位）；前端在图片阶段下加一个「核对」页签，复用现有缩略图与大图组件；分组与逐图的判定字段全部直出磁盘事实，不重新推理。进度行改成两层计数，fallback 列表来自同一次判定的记录。
 
 **未定**：单图核对页是否要允许"就地改判"（把这张图从"转文本"改成"重画"并只重跑这一张）——这属于能改数据的操作，需要单独确认；本计划先只做只读核对。
+
+**进展（P64 第一刀，已完成）**：完成口径先收成一处——`go/internal/latex/image_status.go` 的 `imageStatusSettled`/`imageStatusQuality`，判定**只看 `progress_items` 的 `status`**（用户口径：raster 那类没真正处理也算完成）。词表：`classified` 未完事、`done` 真做完、`fallback` 退回原图但也算收尾、其余（`error`/空）未完事；另给界面一档 `quality`（ok/degraded/pending），让"退回原图"能和"真画出来"分开显示。用例 `image_status_test.go` 钉住六种输入。后续进度行、分组视图、单图页一律调这两个函数，不再各自判断。
