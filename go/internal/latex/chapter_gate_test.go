@@ -234,7 +234,6 @@ func TestArchiveChapterAttempt(t *testing.T) {
 	dst := filepath.Join(proj, "work", "attempts", base, "try1")
 	for _, rel := range []string{
 		"work/" + base + ".tex",
-		"work/_subdivision/split.json",
 		"result/" + base + ".tex",
 		"integrated-stage/" + base + ".tex",
 		"checker-issues.md",
@@ -243,12 +242,13 @@ func TestArchiveChapterAttempt(t *testing.T) {
 			t.Fatalf("留档缺 %s", rel)
 		}
 	}
-	archivedChild := filepath.Join(dst, "work", "_subdivision", "child_01", "node", "sessions", "convert_x_child_01.jsonl")
-	if !fileExists(archivedChild) {
-		t.Fatal("子章节转录应随旧尝试一起留档")
+	// T249：`_subdivision/` 原地不动——子节点的产物与结论留在那里，新尝试的复用
+	// 判据才找得到东西（整棵搬走会让每个子章节从零重转）。
+	if fileExists(filepath.Join(dst, "work", "_subdivision")) {
+		t.Fatal("_subdivision 不该被搬进留档：它要留在原地供新尝试复用")
 	}
-	if fileExists(childTr) {
-		t.Fatal("留档是移动不是复制：旧位置不该还留着")
+	if !fileExists(childTr) {
+		t.Fatal("子章节转录应留在原地（复用判据要读它）")
 	}
 	if fileExists(filepath.Join(nodeRoot, "work", base+".tex")) {
 		t.Fatal("旧尝试的主文件应已挪走")

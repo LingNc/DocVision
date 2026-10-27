@@ -2188,6 +2188,10 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 			state := "error"
 			if isPaused(err) {
 				state = "paused"
+			} else if _, retryingKids := isRetryingChildren(err); retryingKids {
+				// T250：子节点排队里等着重试，父节点是在等它们，不是失败——写成
+				// error 会让页面显示「会话错误」，而它明明只是等子会话。
+				state = "waiting_children"
 			} else if r.rescueQueuedFor(trPath) {
 				state = "queued"
 			}
@@ -2562,7 +2566,10 @@ func (r *Runner) archiveChapterAttempt(proj, base string, node chapterNodeConfig
 			r.log.LogWarning(0, "[convert]", base, "留档失败（继续重试）:", filepath.Base(src), err)
 		}
 	}
-	move(filepath.Join(node.NodeRoot, "work"), "work")
+	// T249：`_subdivision/` 原地不动。子节点的产物、转录和"上次已通过"的结论都在
+	// 那棵树里——整棵搬走之后，新尝试复用判据找不到任何东西，只能 16 支全部重转
+	// （实测一章因此从零重烧一遍）。其余工作文件照旧留档。
+	moveKeepingSubdivision(filepath.Join(node.NodeRoot, "work"), filepath.Join(dst, "work"), r, base)
 	move(filepath.Join(node.NodeRoot, "result"), "result")
 	move(filepath.Join(node.NodeRoot, "integrated-stage"), "integrated-stage")
 	move(texPath, base+".tex")
@@ -2571,6 +2578,27 @@ func (r *Runner) archiveChapterAttempt(proj, base string, node chapterNodeConfig
 	move(node.ReportPath, base+".report.md")
 	if issues != "" {
 		_ = os.WriteFile(filepath.Join(dst, "checker-issues.md"), []byte(issues), 0o644)
+	}
+}
+
+// moveKeepingSubdivision 把 dir 下的内容挪到 dst，但跳过 `_subdivision/`（T249）。
+// 失败只警告：留档不是重试的前置条件。
+func moveKeepingSubdivision(dir, dst string, r *Runner, base string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		r.log.LogWarning(0, "[convert]", base, "留档目录创建失败（继续重试）:", err)
+		return
+	}
+	for _, e := range entries {
+		if e.Name() == "_subdivision" {
+			continue
+		}
+		if err := movePath(filepath.Join(dir, e.Name()), filepath.Join(dst, e.Name())); err != nil {
+			r.log.LogWarning(0, "[convert]", base, "留档失败（继续重试）:", e.Name(), err)
+		}
 	}
 }
 

@@ -2773,3 +2773,14 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **改法**：`web/src/legacy/sidebar.ts` 先按 `chapterId` 收敛，取「这一章现在那一条」（判据与章节树一致：非归档优先、mtime 新者胜），再据此算完成／运行／错误。
 - **测试**：`tests/chapter-tree.spec.ts` 加两条（同一章多条历史只算一次且状态取最新；归档不压过现役）；`npm test` 279 条全绿；`vite build` 重出 `viewer.js`；`go build` 通过。
 - **未改**：子章节各算一章（它们本来就是独立章节），总数仍会大于顶层章数。
+
+## 批次 T249 / T250：换尝试不搬子树、等子会话不算错误
+
+- **T249 现象**：一章在换新尝试后被"继续跑"恢复成一条「1 条历史消息 · 轮次 0」的空转录，第 1 轮就重新 `request_chapter_split`、重发全部 16 支子章节；当天日志里这一章"复用产物"命中 **0** 次（同书其它章共 13 次）。查树：现役 `work/temp/conv_<章>/work/_subdivision/child_01/node/result/` 是空的，留档 `work/attempts/<章>/try3/work/_subdivision/child_01/node/result/` 里有产物。
+- **T249 根因**：`archiveChapterAttempt` 把 `node.NodeRoot/work` 整棵挪走；子节点的产物、转录、已通过结论都在这棵树里。判据写着"换尝试不删 `_subdivision/`"，实现却整棵搬。
+- **T249 改法**：新增 `moveKeepingSubdivision`——留档 work 下文件时跳过 `_subdivision/`，其余照旧；子节点产物与转录原地不动，新尝试按 T236 逐支复用。
+- **T250 现象**：页面上一批父节点显示「会话错误」，实际在等子节点（107 条转换转录里 9 条最后状态 `error`，其中数个同时是 `waiting_children`）。
+- **T250 根因**：细分父章节在子树上出错时一律写终态 `error`（T231 为了不再停在"等待子会话"）；T247 之后"子节点还在重试"不算失败，却仍走写 `error` 的分支。
+- **T250 改法**：该处按错误类型分流——`isRetryingChildren` → `waiting_children`，`isPaused` → `paused`，复盘排了队 → `queued`，其余 `error`。
+- **测试**：`chapter_gate_test.go` 的留档用例改为新口径（不再要求留档里有 `_subdivision`，改为断言它留在原地、子转录仍在）；`go test ./internal/...` 只有那条与本批无关的环境用例失败。
+- **未改**：留档里因此不再有 `_subdivision` 快照；真正跑到死的子节点仍记 `error`。
