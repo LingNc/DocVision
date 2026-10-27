@@ -59,16 +59,6 @@ def render_cached(pdf: Path, out: Path, target_size):
     return info
 
 
-    # Match motifCanonFromImage: three soft-ink channels, no binarization;
-    # the content box is the bbox where any channel has ink > 0.2.
-    ink = 1.0 - np.asarray(rgb, dtype=np.float32) / 255.0
-    mask = np.max(ink, axis=2) > 0.2
-    ys, xs = np.where(mask)
-    if not len(xs):
-        return np.zeros((1, 1, 3), dtype=np.float32)
-    return ink[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
-
-
 def parse_finest(spec, canvas):
     value = str(spec).strip().lower()
     if value.endswith("s"):
@@ -138,60 +128,91 @@ def overlap_scores(a, b, dy, dx):
             for c in range(a.shape[2])]
 
 
-def progressive_overlap(src_ink, dst_ink, grid_spec="0.95S", shift_pct=0.10):
+def ink_centroid(ink):
+    """Return (y, x) centroid of ink mass in a cropped frame."""
+    mass = ink.max(axis=2)
+    total = float(mass.sum())
+    if total <= 0:
+        return 0.0, 0.0
+    ys, xs = np.nonzero(mass)
+    return float((ys * mass[ys, xs]).sum() / total), float((xs * mass[ys, xs]).sum() / total)
+
+
+def progressive_overlap(src_ink, dst_ink, grid_spec="0.95S", shift_pct=0.10, starts=None):
+    """Coarse-to-fine soft-ink alignment with multiple starting anchors."""
     canvas = max(src_ink.shape[0], src_ink.shape[1], dst_ink.shape[0], dst_ink.shape[1])
     canvas = max(24, min(512, canvas))
     finest = parse_finest(grid_spec, canvas)
     levels = levels_for(canvas, finest)
     shift_cells = min(16, max(0, math.floor(shift_pct * 32 + 0.5)))
     shift_pct = shift_cells / 32.0
-    shift_y = shift_x = 0
-    best_scores = [0.0, 0.0, 0.0]
-    tested = 0
-    coarse_window = 0
-    for level_index, grid in enumerate(levels):
-        a = to_grid(src_ink, canvas, grid)
-        b = to_grid(dst_ink, canvas, grid)
-        if level_index == 0:
-            win = max(1, round(shift_pct * grid))
-            coarse_window = win
-            cx = cy = 0
-        else:
-            win = min(2, grid)
-            previous = levels[level_index - 1]
-            cx = go_round(shift_x * grid / previous)
-            cy = go_round(shift_y * grid / previous)
-        best = -1.0
-        best_y, best_x = cy, cx
-        for dy in range(cy - win, cy + win + 1):
-            for dx in range(cx - win, cx + win + 1):
-                scores = overlap_scores(a, b, dy, dx)
-                score = sum(scores) / len(scores)
-                tested += 1
-                if score > best:
-                    best, best_y, best_x, best_scores = score, dy, dx, scores
-        shift_y, shift_x = best_y, best_x
+    coarse_window = max(1, round(shift_pct * levels[0]))
+    grids = [(g, to_grid(src_ink, canvas, g), to_grid(dst_ink, canvas, g)) for g in levels]
+
+    def run_pyramid(start_y, start_x):
+        shift_y, shift_x = start_y, start_x
+        best_scores = [0.0, 0.0, 0.0]
+        tested = 0
+        for level_index, (grid, a, b) in enumerate(grids):
+            if level_index == 0:
+                win = coarse_window
+                cx, cy = start_x, start_y
+            else:
+                win = min(2, grid)
+                previous = levels[level_index - 1]
+                cx = go_round(shift_x * grid / previous)
+                cy = go_round(shift_y * grid / previous)
+            best = -1.0
+            best_y, best_x = cy, cx
+            for dy in range(cy - win, cy + win + 1):
+                for dx in range(cx - win, cx + win + 1):
+                    scores = overlap_scores(a, b, dy, dx)
+                    score = sum(scores) / len(scores)
+                    tested += 1
+                    if score > best:
+                        best, best_y, best_x, best_scores = score, dy, dx, scores
+            shift_y, shift_x = best_y, best_x
+        return {"score": max(0.0, best), "channel_scores": best_scores,
+                "shift_y": shift_y, "shift_x": shift_x, "tested": tested}
+
+    candidates = [(0, 0)]
+    for start in starts or []:
+        if len(start) == 2:
+            candidates.append((int(start[0]), int(start[1])))
+    seen = set()
+    candidates = [c for c in candidates if not (c in seen or seen.add(c))]
+    runs = [run_pyramid(y, x) for y, x in candidates]
+    # Prefer the smallest displacement only for exact score ties.
+    best_run = max(runs, key=lambda run: (run["score"], -(abs(run["shift_y"]) + abs(run["shift_x"]))))
+    shift_y, shift_x = best_run["shift_y"], best_run["shift_x"]
     return {
-        "score": max(0.0, best),
-        "channel_scores": dict(zip(("r", "g", "b"), best_scores)),
+        "score": best_run["score"],
+        "channel_scores": dict(zip(("r", "g", "b"), best_run["channel_scores"])),
         "canvas": canvas,
         "grid": levels[-1],
         "levels": levels,
         "shift_cells": {"x": shift_x, "y": shift_y},
         "shift_px": {"x": go_round(shift_x * canvas / levels[-1]), "y": go_round(shift_y * canvas / levels[-1])},
-        "tested_offsets": tested,
+        "tested_offsets": sum(run["tested"] for run in runs),
         "coarse_shift_cells": coarse_window,
         "shift_budget_percent": round(shift_pct * 100, 3),
+        "alignment_starts": [{"y": y, "x": x} for y, x in candidates],
+        "alignment_runs": [
+            {"start": {"y": y, "x": x}, "score": round(run["score"], 6),
+             "shift_cells": {"x": run["shift_x"], "y": run["shift_y"]}}
+            for (y, x), run in zip(candidates, runs)
+        ],
     }
 
 
 def content_ink(rgb):
+    """Return cropped soft ink and its exact origin in the full canvas."""
     ink = 1.0 - np.asarray(rgb, dtype=np.float32) / 255.0
     mask = np.max(ink, axis=2) > 0.2
     ys, xs = np.where(mask)
     if not len(xs):
-        return np.zeros((1, 1, 3), dtype=np.float32)
-    return ink[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+        return np.zeros((1, 1, 3), dtype=np.float32), (0, 0)
+    return ink[ys.min():ys.max() + 1, xs.min():xs.max() + 1], (int(xs.min()), int(ys.min()))
 
 
 def select_channel(rgb, channel):
@@ -239,10 +260,6 @@ def raw_overlay(src, dst, channel="all"):
     out[src_only & ~dst_only, 2] = 255
     out[dst_only & ~src_only, 1] = 255
     return Image.fromarray(out)
-
-
-    lum = np.asarray(Image.fromarray(rgb).convert("L"), dtype=np.float32) / 255.0
-    return (1.0 - lum)[:, :, None]
 
 
 def translated(rgb, dx, dy):
@@ -343,13 +360,25 @@ def save_comparisons(original_path: Path, candidate_path: Path, out_dir: Path, d
     cand_canvas.paste(cand_img, (0, (canvas_h - candidate_h) // 2))
     src_img, cand_img = src_canvas, cand_canvas
     src, cand = np.asarray(src_img), np.asarray(cand_img)
-    result = progressive_overlap(content_ink(src), content_ink(cand), grid_spec, shift_pct)
-    dx, dy = result["shift_px"]["x"], result["shift_px"]["y"]
+    src_ink, src_origin = content_ink(src)
+    cand_ink, cand_origin = content_ink(cand)
+    prior_canvas = max(src_ink.shape[0], src_ink.shape[1], cand_ink.shape[0], cand_ink.shape[1])
+    prior_canvas = max(24, min(512, prior_canvas))
+    prior_grid = min(parse_finest(grid_spec, prior_canvas), prior_canvas)
+    csy, csx = ink_centroid(src_ink)
+    cdy, cdx = ink_centroid(cand_ink)
+    centroid_start = (
+        go_round((csy - cdy) * prior_grid / prior_canvas),
+        go_round((csx - cdx) * prior_grid / prior_canvas),
+    )
+    result = progressive_overlap(src_ink, cand_ink, grid_spec, shift_pct, starts=[centroid_start])
+    dx = result["shift_px"]["x"] + (src_origin[0] - cand_origin[0])
+    dy = result["shift_px"]["y"] + (src_origin[1] - cand_origin[1])
     aligned = translated(cand, dx, dy)
 
     # Compare luminance on the same canonical grid with the same final offset.
-    gray_src = content_ink(np.repeat(np.asarray(Image.fromarray(src).convert("L"))[:, :, None], 3, axis=2))
-    gray_cand = content_ink(np.repeat(np.asarray(Image.fromarray(cand).convert("L"))[:, :, None], 3, axis=2))
+    gray_src, _ = content_ink(np.repeat(np.asarray(Image.fromarray(src).convert("L"))[:, :, None], 3, axis=2))
+    gray_cand, _ = content_ink(np.repeat(np.asarray(Image.fromarray(cand).convert("L"))[:, :, None], 3, axis=2))
     canvas = result["canvas"]
     grid = result["grid"]
     gs, gc = to_grid(gray_src, canvas, grid), to_grid(gray_cand, canvas, grid)
@@ -400,6 +429,7 @@ def save_comparisons(original_path: Path, candidate_path: Path, out_dir: Path, d
             "grid_levels": result["levels"],
             "tested_offsets": result["tested_offsets"],
             "shift_cells": result["shift_cells"],
+            "alignment_runs": result.get("alignment_runs"),
             "source_size": [source_w, source_h],
             "render_size": [candidate_w, candidate_h],
             "comparison_canvas": [iw, canvas_h],
@@ -445,6 +475,7 @@ def save_comparisons(original_path: Path, candidate_path: Path, out_dir: Path, d
         "grid_levels": result["levels"],
         "tested_offsets": result["tested_offsets"],
         "shift_cells": result["shift_cells"],
+        "alignment_runs": result.get("alignment_runs"),
         "source_size": [source_w, source_h],
         "render_size": [candidate_w, candidate_h],
         "comparison_canvas": [iw, canvas_h],
@@ -492,6 +523,7 @@ def main():
     size_info = render_cached(args.pdf, rendered, original.size)
     metrics, selected = save_comparisons(args.original, rendered, args.out, args.detail, args.grid, args.shift, (args.left, args.top, args.right, args.bottom), args.width, threshold=args.pass_threshold, threshold_policy=threshold_policy)
     metrics.update(size_info)
+    (args.out / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"metrics": metrics, "selected_image": selected}, ensure_ascii=False))
 
 

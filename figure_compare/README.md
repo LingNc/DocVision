@@ -45,7 +45,7 @@ python3 compare.py --original <reference.png> --pdf <candidate.pdf> --out <resul
   --threshold-policy adaptive-v1 --difficulty 0.65 --confidence 0.8
 ```
 
-默认不启用动态阈值，仍使用 50% 固定门槛。Skill 的独立使用、依赖和输出契约见 [Skill 说明](compare_figure_skill/SKILL.md)。可只打包该目录供其他 Agent 使用：
+默认不启用动态阈值，仍使用 50% 固定门槛；当前版本还修复了稀疏线稿粗网格锁错和非对称白边的平移坐标问题，旧分数定义保持不变。Skill 的独立使用、依赖和输出契约见 [Skill 说明](compare_figure_skill/SKILL.md)。可只打包该目录供其他 Agent 使用：
 
 ```bash
 cd figure_compare/compare_figure_skill
