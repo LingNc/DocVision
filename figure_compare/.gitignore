@@ -1,0 +1,20 @@
+# Local experiment outputs and private inputs
+__pycache__/
+*.py[cod]
+*.jsonl
+*.jsonl.*
+*.csv
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.svg
+*.zip
+*.part
+.pair-cache/
+cache/
+output/
+results/
+runs/

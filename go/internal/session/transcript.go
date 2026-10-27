@@ -105,6 +105,9 @@ type TranscriptWriter struct {
 	// lastMetaHash guards against duplicate meta lines when a resumed
 	// session re-attaches to the same transcript file.
 	lastMetaHash string
+	// lines 是这份转录当前的物理行数（续跑时从磁盘现有行数起算）。P55：
+	// 工作区快照按"第几行"索引，预览页的 ⤓ 给的是同一个行号。
+	lines int
 }
 
 // NewTranscript opens (creating if needed) the JSONL transcript at path.
@@ -130,7 +133,34 @@ func NewTranscript(path string) (*TranscriptWriter, error) {
 		file:     f,
 	}
 	w.lastMetaHash = w.readLastMetaHash()
+	if data, err := os.ReadFile(abs); err == nil {
+		w.lines = bytes.Count(data, []byte("\n"))
+	}
 	return w, nil
+}
+
+// Lines 是这份转录当前的物理行数（每写一行加一）。P55 用它把工作区快照
+// 钉在"第几行之前的状态"上：⤓ 给的行号与它同一套编号。
+func (w *TranscriptWriter) Lines() int {
+	if w == nil {
+		return 0
+	}
+	return w.lines
+}
+
+// writeLine 是所有写入的唯一出口：写盘、按需 sync、并且**只在这里**给
+// 行数计数——快照一旦按行号索引，少算一行就会回退到错的那一轮。
+func (w *TranscriptWriter) writeLine(data []byte, sync bool) error {
+	buf := append(data, '\n')
+	n, err := w.file.Write(buf)
+	w.lines += bytes.Count(buf[:n], []byte("\n"))
+	if err != nil {
+		return err
+	}
+	if sync {
+		return w.file.Sync()
+	}
+	return nil
 }
 
 // Close releases the underlying file. A leftover partial snapshot would
@@ -223,7 +253,7 @@ func (w *TranscriptWriter) AppendMeta(kind, label, model, system string, tools [
 	if err != nil {
 		return err
 	}
-	if _, err := w.file.Write(append(data, '\n')); err != nil {
+	if err := w.writeLine(data, false); err != nil {
 		return err
 	}
 	w.lastMetaHash = kind + ":" + hash
@@ -244,8 +274,7 @@ func (w *TranscriptWriter) AppendNote(kind string, fields map[string]any) error 
 	if err != nil {
 		return err
 	}
-	_, err = w.file.Write(append(data, '\n'))
-	return err
+	return w.writeLine(data, false)
 }
 
 // lastMetaHash remembers the (kind, system hash) of the meta line written by
@@ -326,8 +355,7 @@ func (w *TranscriptWriter) AppendUsage(u UsageRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = w.file.Write(append(data, '\n'))
-	return err
+	return w.writeLine(data, false)
 }
 
 // nowStamp is the timestamp format every transcript line carries.
@@ -377,10 +405,7 @@ func (w *TranscriptWriter) Append(msg ChatMessage) error {
 	if err != nil {
 		return err
 	}
-	if _, err := w.file.Write(append(data, '\n')); err != nil {
-		return err
-	}
-	return w.file.Sync()
+	return w.writeLine(data, true)
 }
 
 // roundHash derives the stable per-round identity (P10): SHA-256 over the
@@ -492,10 +517,12 @@ type ResumeStats struct {
 	// Tools is the number of executed tool calls (role=tool receipts;
 	// continues Session.ToolInvoked).
 	Tools int
-	// Active is the span first-write → last-write of the transcript: the
-	// best available approximation of the session's accumulated working
-	// time (dead-process gaps are excluded by anchoring at the resume
-	// moment, not wall-clock since the first line).
+	// Active is the session's accumulated REAL working time: the sum of the
+	// per-request durations recorded on the transcript's usage lines (model
+	// time + tool time actually spent). It used to be "span first-write →
+	// last-write", which exploded on sessions resumed days later: the console
+	// row then read 已用 2628m56s for forty minutes of work (T206). Idle gaps
+	// between runs are now excluded by construction.
 	Active time.Duration
 	// SubmitName / SubmitArgs describe the LAST submit* call that actually
 	// produced a tool receipt; empty when the transcript holds none.
@@ -517,7 +544,7 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 	}
 	baseDir := filepath.Dir(path)
 	var msgs []ChatMessage
-	var firstTS, lastTS time.Time
+	var worked time.Duration
 	submitCalls := map[string]string{} // call id → name (submit*)
 	receipts := map[string]bool{}
 	for _, ln := range strings.Split(string(data), "\n") {
@@ -529,14 +556,16 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 		if err := json.Unmarshal([]byte(ln), &line); err != nil {
 			return nil, ResumeStats{}, fmt.Errorf("transcript %s: %w", path, err)
 		}
-		if line.T != "msg" {
+		if line.T == "usage" {
+			// 真实工作时间 = 每次请求耗时的累加（T206）：续跑时用它当"已用"，
+			// 而不是"首行到末行"的墙上跨度——后者会把中间几天的空档也算进去。
+			if line.DurationMS > 0 {
+				worked += time.Duration(line.DurationMS) * time.Millisecond
+			}
 			continue
 		}
-		if ts, perr := parseStamp(line.TS); perr == nil {
-			if firstTS.IsZero() {
-				firstTS = ts
-			}
-			lastTS = ts
+		if line.T != "msg" {
+			continue
 		}
 		msg := ChatMessage{Role: line.Role, ToolCallID: line.CallID, ToolCalls: line.Calls, ReasoningContent: line.Reasoning}
 		switch {
@@ -619,9 +648,7 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 			break
 		}
 	}
-	if !firstTS.IsZero() && !lastTS.IsZero() && lastTS.After(firstTS) {
-		stats.Active = lastTS.Sub(firstTS)
-	}
+	stats.Active = worked
 	// Dangling assistant tool_calls（进程死在回执落盘前）合成一条占位
 	// 回执：否则重放的历史在 wire 上非法（tool_calls 后面必须跟 tool），
 	// 续跑第一次请求就会 400。
@@ -644,6 +671,11 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 			}
 		}
 	}
+	// T159：回放清洗——模型流式输出的工具参数被截断（JSON 不闭合）时，
+	// 原样回放会让网关拒收整个请求（400 upstream_request_rejected），会话
+	// 从此再也起不来；finish=length 的真空白回复同样无信息量。两者都在
+	// 这里修成 wire 合法（磁盘转录保持原样，事故现场不丢）。
+	fixed, _, _ = sanitizeReplayMessages(fixed)
 	return fixed, stats, nil
 }
 

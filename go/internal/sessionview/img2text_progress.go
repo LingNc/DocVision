@@ -2,9 +2,9 @@
 //
 // Data sources under <finally>/progress_items/ (no logs involved):
 //   - <md>.md/original.md     book markdown copy (dir keeps the .md suffix)
-//                             → total image refs (order = book order)
+//     → total image refs (order = book order)
 //   - <md>/images_<img>.json  per-image result (older runs: images_<md>_<img>;
-//                             result contains [IMG_TYPE:) → done
+//     result contains [IMG_TYPE:) → done
 //   - mermaid_fix/<md>_<img>/ upgrade-fix workspace exists → escalated
 //
 // An image with neither a result nor a fix workspace is "pending" (never
@@ -13,12 +13,12 @@
 package sessionview
 
 import (
-	"time"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Img2TextItem is one image of one book on the progress board.

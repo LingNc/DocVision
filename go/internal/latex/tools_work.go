@@ -209,7 +209,11 @@ func (t *ReadFileTool) Execute(argsJSON string) (session.ToolResult, error) {
 		text = text[:max]
 		note = "\n...[truncated; use start_line/end_line for later parts]..."
 	}
-	return session.ToolResult{Text: fmt.Sprintf("[%s, %d bytes]\n%s%s", shown, len(data), text, note)}, nil
+	// T212：顺手给出行数。模型要按行号切分（request_chapter_split），以前只能自己
+	// 数，`wc -l` 数出来的是正文行数，而判据那边的行数把末尾换行多算一行——两边
+	// 差一行就成了"第一次提交总被打回"。这里报的是**正文最后一行**行号。
+	lines := lastContentLine(strings.Split(text, "\n"))
+	return session.ToolResult{Text: fmt.Sprintf("[%s, %d bytes, %d lines]\n%s%s", shown, len(data), lines, text, note)}, nil
 }
 
 // CompileTexTool is the general LaTeX build tool for a workspace: it
@@ -781,7 +785,14 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 			}
 		}
 	}
-	args := []string{"--die-with-parent", "--unshare-net", "--dev", "/dev", "--proc", "/proc"}
+	// --unshare-pid（T163）：会话 bash 原来共享宿主 PID 命名空间——`ps` 能
+	// 看到 docvision 自己（也就看到了它真实的 PID），`kill` 能直接对它下手。
+	// 实测一条转换会话先 `kill -STOP <pid>` 把整本书的运行冻住一分钟，再
+	// `kill -9 <pid>` 把宿主进程打死，终端只留下「已杀死」、任何错误行和
+	// 内存告警都没有（死因根本不在这层代码里）。新建 PID 命名空间后，会话
+	// 里的 ps 只看到自己这一棵树，kill 也只在本命名空间内生效，宿主进程
+	// 对它是不可见、不可信号的。
+	args := []string{"--die-with-parent", "--unshare-net", "--unshare-pid", "--dev", "/dev", "--proc", "/proc"}
 	if tmp == "/tmp" {
 		args = append(args, "--tmpfs", "/tmp")
 	} else {
@@ -794,6 +805,7 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 		}
 	}
 	work := ""
+	boundTarget := map[string]bool{}
 	for _, m := range t.Mounts {
 		if m.Dir == "" {
 			continue
@@ -819,10 +831,38 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 				break
 			}
 		}
-		if linked {
-			// A VIEW directory (symlinks to files and/or directories:
-			// the original-PDF view, the project view): bind every target
-			// individually, never following links outside the mounts.
+		if m.Writable {
+			// A writable workspace is bound writable AS A WHOLE, links
+			// included. Branching on "contains a symlink" here used to turn
+			// the session's own workspace into a read-only per-entry view:
+			// convert workspaces link images/ and figures/ to the project's
+			// read-only asset trees (linkAbs), so every .tex, manual and
+			// parts/ file also got --ro-bind and in-sandbox editors (bash,
+			// python) failed with "Read-only file system" while write_file
+			// (no sandbox) still worked. Bind each link target read-only at
+			// its real absolute path instead, so the links resolve inside
+			// the sandbox and the target trees stay read-only.
+			args = append(args, "--dir", dst, "--bind", mountDir, dst)
+			for _, e := range entries {
+				if e.Type()&os.ModeSymlink == 0 {
+					continue
+				}
+				src := filepath.Join(mountDir, e.Name())
+				target, lerr := filepath.EvalSymlinks(src)
+				if lerr != nil || target == mountDir || boundTarget[target] {
+					continue
+				}
+				if _, serr := os.Stat(target); serr != nil {
+					continue
+				}
+				boundTarget[target] = true
+				args = append(args, "--ro-bind", target, target)
+			}
+		} else if linked {
+			// A read-only VIEW directory (symlinks to files and/or
+			// directories: the original-PDF view, the project view): bind
+			// every target individually, never following links outside the
+			// mounts.
 			args = append(args, "--dir", dst)
 			for _, e := range entries {
 				src := filepath.Join(mountDir, e.Name())
@@ -834,8 +874,6 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 				}
 				args = append(args, "--ro-bind", src, filepath.Join(dst, e.Name()))
 			}
-		} else if m.Writable {
-			args = append(args, "--dir", dst, "--bind", mountDir, dst)
 		} else {
 			args = append(args, "--dir", dst, "--ro-bind", mountDir, dst)
 		}
@@ -969,8 +1007,11 @@ type ViewPDFTool struct {
 	// SoftMax 0 = no budget.
 	SoftMax   int
 	WarnRatio float64
-	views     map[string]int  // "file#page" -> render count
-	warned    map[string]bool // already reminded about this page
+	// Gate, when set, records "this page of the compiled PDF was really
+	// looked at" so the chapter submit gate can require it (T165).
+	Gate   *chapterGate
+	views  map[string]int  // "file#page" -> render count
+	warned map[string]bool // already reminded about this page
 }
 
 // vfs returns the tool's namespace (Mounts wins over Root).
@@ -1115,6 +1156,16 @@ func (t *ViewPDFTool) Execute(argsJSON string) (session.ToolResult, error) {
 			if fw > 0 && fh > 0 {
 				sizeNote += fmt.Sprintf(", this crop %.1fmm x %.1fmm", wMM*fw, hMM*fh)
 			}
+		}
+	}
+	if t.Gate != nil {
+		// 工作区里的 PDF 是"自己的产物"（按哈希认那一轮编译），工作区之外的
+		// 是原书 part——两件事分开记：前者证明"我看了自己编的东西"，后者证明
+		// "我和原书对过"（T168）。
+		if pathWithin(t.Gate.WorkRoot, full) {
+			t.Gate.markViewed(full, page)
+		} else {
+			t.Gate.markSourceViewed(full, page)
 		}
 	}
 	return session.ToolResult{

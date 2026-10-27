@@ -1,12 +1,12 @@
 package sessionview
 
 import (
-	"io"
-	"encoding/hex"
-	"crypto/sha256"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -46,6 +46,10 @@ type ServeOptions struct {
 	Extras []ScanExtra
 	// Render configures the /api/mermaid preview endpoint (T56).
 	Render RenderConfig
+	// NoRetry 关掉页面上的「重试这一章」写入口（P53）：预览页因此完全回到
+	// "只读观察者"。默认开着——它只往项目的 work/retry/ 写一个请求文件，
+	// 不执行任何命令。
+	NoRetry bool
 }
 
 // Bound is where the viewer actually listens, as net.Listen reported it — not
@@ -69,7 +73,7 @@ type Bound struct {
 //
 // It prints the banner once the listener is actually up.
 func Serve(opt ServeOptions) error {
-	bound, stop, err := StartWithRender(opt.Root, opt.Addr, opt.Extras, opt.Render)
+	bound, stop, err := startViewer(opt.Root, opt.Addr, opt.Extras, opt.Render, !opt.NoRetry)
 	if err != nil {
 		return err
 	}
@@ -155,6 +159,12 @@ type RenderConfig struct {
 
 // StartWithRender is StartWith plus the mermaid render configuration.
 func StartWithRender(root, addr string, extras []ScanExtra, rc RenderConfig) (bound Bound, stopped <-chan struct{}, err error) {
+	return startViewer(root, addr, extras, rc, true)
+}
+
+// startViewer is the single implementation behind every start helper:
+// allowRetry gates the one write endpoint the page has (P53).
+func startViewer(root, addr string, extras []ScanExtra, rc RenderConfig, allowRetry bool) (bound Bound, stopped <-chan struct{}, err error) {
 	if addr == "" {
 		addr = DefaultAddr
 	}
@@ -173,8 +183,10 @@ func StartWithRender(root, addr string, extras []ScanExtra, rc RenderConfig) (bo
 	if err != nil {
 		return Bound{}, nil, fmt.Errorf("会话预览: 监听 %s 失败（端口可能已被占用，请换一个端口）: %w", addr, err)
 	}
+	handler := newViewerServer(rootAbs, extras, rc)
+	handler.allowRetry = allowRetry
 	srv := &http.Server{
-		Handler:           newViewerServer(rootAbs, extras, rc),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	done := make(chan struct{})
@@ -246,9 +258,12 @@ type viewerServer struct {
 	// img2textRoot is the progress_items directory behind the img2text
 	// extra root ("" when preview.img2text is off); /api/img2text-progress
 	// scans it for the P18 progress board.
-	img2textRoot  string
-	mermaidCmd    string
+	img2textRoot   string
+	mermaidCmd     string
 	mermaidTimeout time.Duration
+	// allowRetry 是 /api/retry 的总开关（P53）：默认开，`sessions --no-retry`
+	// 关掉后预览页重新变成一个纯粹的只读观察者。
+	allowRetry bool
 }
 
 // newViewerServer builds the read-only viewer. extras are the absolute
@@ -292,9 +307,9 @@ func newViewerServer(root string, extras []ScanExtra, rc ...RenderConfig) *viewe
 // this local tool wants.
 func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead &&
-		!(r.Method == http.MethodPost && r.URL.Path == "/api/mermaid") {
+		!(r.Method == http.MethodPost && (r.URL.Path == "/api/mermaid" || r.URL.Path == "/api/retry" || r.URL.Path == "/api/retry/cancel" || r.URL.Path == "/api/truncate" || r.URL.Path == "/api/drop")) {
 		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "只读服务：仅支持 GET/HEAD（/api/mermaid 接受 POST）", http.StatusMethodNotAllowed)
+		http.Error(w, "只读服务：仅支持 GET/HEAD（/api/mermaid、/api/retry、/api/retry/cancel、/api/truncate、/api/drop 接受 POST）", http.StatusMethodNotAllowed)
 		return
 	}
 	p := r.URL.Path
@@ -317,6 +332,16 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		v.serveImg2TextProgress(w)
 	case p == "/api/mermaid":
 		v.serveMermaid(w, r)
+	case p == "/api/truncate":
+		v.serveTruncate(w, r)
+	case p == "/api/drop":
+		v.serveDrop(w, r)
+	case p == "/api/retry/cancel":
+		// P56：撤销还没被消费的排队请求（误触的出口）。
+		v.serveRetryCancel(w, r)
+	case p == "/api/retry":
+		// P53：页面上的「重试这一章」只往 work/retry/ 排队，不执行命令。
+		v.serveRetry(w, r)
 	case strings.HasPrefix(p, "/media/"), strings.HasPrefix(p, "/file/"):
 		v.serveFile(w, r)
 	default:
@@ -346,6 +371,12 @@ type indexResponse struct {
 	// DedupeReviews 是"有复查页可看"的项目名（T154）：侧栏据此在整组核验
 	// 阶段行上决定要不要挂按钮，不猜文件在不在。
 	DedupeReviews []string `json:"dedupeReviews,omitempty"`
+	// Retries 是每个项目当前排队的重试点（P53）：章节行据此显示「待重试」，
+	// 处理掉之后自动消失。
+	Retries map[string][]string `json:"retries,omitempty"`
+	// RetryRoles 给每个排队的章节标角色（convert/checker）：章节行有两行，
+	// 「待重试」挂在对应那一行（P53）。
+	RetryRoles map[string]map[string]string `json:"retryRoles,omitempty"`
 }
 
 func (v *viewerServer) serveIndex(w http.ResponseWriter) {
@@ -362,6 +393,8 @@ func (v *viewerServer) serveIndex(w http.ResponseWriter) {
 		Generated:     time.Now().Format(time.RFC3339),
 		Sessions:      sessions,
 		DedupeReviews: v.dedupeReviewProjects(sessions),
+		Retries:       v.pendingRetries(sessions),
+		RetryRoles:    v.retryRoles(sessions),
 	})
 }
 
@@ -471,6 +504,19 @@ func (v *viewerServer) serveFile(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "拒绝越界路径", http.StatusBadRequest)
 			return
 		}
+		// T258：图片附件有时不在"转录所在目录/media"下。真机一例：转录在
+		// `work/sessions/`，而那张图落在 `work/temp/conv_<章>/sessions/media/`
+		// （子章节会话的附件目录），按相对路径取就是 404，页面上是一张裂图。
+		// 这里按文件名在项目里几个固定的 media 位置兜一下，命中就发。
+		if alt, ok := v.findSiblingMedia(rel); ok {
+			if hf, herr := os.Open(alt); herr == nil {
+				defer hf.Close()
+				if st, serr := hf.Stat(); serr == nil && !st.IsDir() {
+					http.ServeContent(w, r, st.Name(), st.ModTime(), hf)
+					return
+				}
+			}
+		}
 		http.NotFound(w, r)
 		return
 	}
@@ -482,6 +528,37 @@ func (v *viewerServer) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeContent(w, r, st.Name(), st.ModTime(), f)
+}
+
+// findSiblingMedia 在项目里几个固定的 media 位置按文件名兜底（T258）。它只在
+// 正常解析失败时调用，所以这些 Stat/Glob 都落在缺文件的冷路径上。
+func (v *viewerServer) findSiblingMedia(rel string) (string, bool) {
+	base := path.Base(path.Clean(rel))
+	if base == "" || base == "." || base == "/" {
+		return "", false
+	}
+	parts := strings.Split(path.Clean(rel), "/")
+	if len(parts) < 2 {
+		return "", false
+	}
+	proj := filepath.Join(v.root, filepath.FromSlash(parts[0]))
+	patterns := []string{
+		filepath.Join(proj, "work", "media", base),
+		filepath.Join(proj, "work", "sessions", "media", base),
+		filepath.Join(proj, "work", "temp", "conv_*", "sessions", "media", base),
+	}
+	for _, pat := range patterns {
+		hits, err := filepath.Glob(pat)
+		if err != nil {
+			continue
+		}
+		for _, h := range hits {
+			if st, serr := os.Stat(h); serr == nil && !st.IsDir() {
+				return h, true
+			}
+		}
+	}
+	return "", false
 }
 
 // resolveUnderRoot maps a slash path from the viewer onto the filesystem and

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mineru-tools/internal/config"
 	"mineru-tools/internal/logger"
@@ -199,6 +200,28 @@ func RunTikZSession(
 		}
 	}
 
+	// T189：续跑重放（resumeSubmit 收账）时本进程一次也没编译过，state 里没有
+	// 产物路径。旧代码直接拿空路径去 copy，报出 `open : no such file or directory`
+	// ——这条错误与图本身无关，却被记成 fallback，下次运行照样重放、照样失败，
+	// 于是同一张图永远画不出来（实测同一 key 跨 5 次运行重复出现）。这里先补一次
+	// 编译把 PDF 补出来；真补不出来就报清楚原因，而不是让一个空路径去撞系统错误。
+	if state.lastPDF == "" || !fileExists(state.lastPDF) {
+		if strings.TrimSpace(state.finalCode) == "" {
+			return TikZResult{}, fmt.Errorf("作图会话没有可交付的图形代码（提交记录为空），无法交付 %s", filepath.Base(dstTex))
+		}
+		texFile := filepath.Join(state.workDir, "standalone.tex")
+		if err := os.WriteFile(texFile, []byte(buildStandalone(state.finalCode, engineIsXe)), 0o644); err != nil {
+			return TikZResult{}, err
+		}
+		start := time.Now()
+		res := comp.Compile(state.workDir, "standalone.tex")
+		LogCompileResult(log, tid, "preview", res, time.Since(start))
+		if !res.OK {
+			return TikZResult{}, fmt.Errorf("交付前重新编译失败（%s）：%s", filepath.Base(dstTex), truncateStr(res.Err, 300))
+		}
+		state.lastPDF = res.PDF
+	}
+
 	// Persist the confirmed artifacts.
 	if err := os.MkdirAll(filepath.Dir(dstTex), 0o755); err != nil {
 		return TikZResult{}, err
@@ -233,6 +256,11 @@ func RunTikZSession(
 }
 
 func copyFile(src, dst string) error {
+	if strings.TrimSpace(src) == "" {
+		// 空路径去 os.Open 只会得到 `open : no such file or directory`，
+		// 看不出是哪一步、也看不出目标是谁（T189 的现场就是这个形状）。
+		return fmt.Errorf("copyFile: 源路径为空，无法写出 %s", filepath.Base(dst))
+	}
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return err

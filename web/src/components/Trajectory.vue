@@ -7,6 +7,8 @@ import { computed } from 'vue'
 import { state } from '../state'
 import { countValue, fmtDur, unitLabel } from '../legacy/sidebar'
 import { jumpToLine, TRAJ_KINDS, trajectoryRows } from '../legacy/trajectory'
+import { canCutFrom, canForkFrom } from '../legacy/fork'
+import { dropFromLine, forkFromLine } from '../fork'
 import MachineText from './MachineText.vue'
 import CopyBtn from './CopyBtn.vue'
 import ImageStrip from './ImageStrip.vue'
@@ -68,6 +70,12 @@ function selectRow(row: any) {
   state.trajSelected = state.trajSelected === row.rid ? null : row.rid
 }
 
+/* P57：fork 的判定与提交都走共享入口（legacy/fork.ts + fork.ts），对话页也用同一套。
+ * T196：⤓（fork）与 ⤫（就地截断）分开判——递归子章节只给 ⤫，接着跑走
+ * 「继续跑父章节」。（这两个名字以前漏了 import，轨迹页整个 ⤓ 列其实渲染即报错。） */
+const canFork = computed(() => canForkFrom(state.current))
+const canCut = computed(() => canCutFrom(state.current))
+
 function goChat(row: any) {
   if (!row.jump) return
   state.trajSelected = row.rid
@@ -87,6 +95,7 @@ function goChat(row: any) {
             :aria-pressed="state.trajKinds[k.id] ? 'true' : 'false'"
             @click="pick(k.id)">{{ k.label }} {{ k.count }}</button>
         </div>
+        <span v-if="state.retryNote" class="traj-note">{{ state.retryNote }}</span>
         <span class="traj-count">{{ visible.length }} / {{ rows.length }} 步</span>
       </div>
     </div>
@@ -116,6 +125,12 @@ function goChat(row: any) {
                   @click.stop="state.trajOpen[row.rid] = !state.trajOpen[row.rid]">{{ state.trajOpen[row.rid] ? '▾' : '▸' }}</button>{{ row.jump ? String(row.jump) : '—' }}
                 <button v-if="row.jump" type="button" class="traj-gochat" title="跳到对话里对应的那条消息"
                   @click.stop="goChat(row)">↳</button>
+                <button v-if="row.jump && canFork" type="button" class="traj-cut"
+                  title="从这一条之后继续：历史截到这条消息，后面的轮次丢掉，开一个新尝试接着干"
+                  @click.stop="forkFromLine(row.jump, '轨迹')">⤓</button>
+                <button v-if="row.jump && canCut" type="button" class="traj-cut"
+                  title="删掉这条及之后的记录并继续（就地截断这条转录，不新开尝试；原文先备份到 work/sessions/.trash/）"
+                  @click.stop="dropFromLine(row.jump, '轨迹')">⤫</button>
               </td>
               <td><span class="kind-tag" :class="row.status === 'error' ? 'kind-error' : 'kind-' + row.kind">{{ row.tag }}</span></td>
               <td class="traj-name">{{ row.name }}</td>
@@ -169,6 +184,16 @@ function goChat(row: any) {
  display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: hidden; 
 }
 
+.traj-cut {
+  border: 0; background: transparent; color: var(--dim); cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 0 2px; opacity: 0;
+}
+.traj-row:hover .traj-cut { opacity: 1; }
+.traj-cut:hover { color: var(--accent, #2563eb); }
+.traj-note {
+  flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--dim); font-size: 12px;
+}
 .traj-chip {
   flex: none;
   height: 20px;

@@ -3,13 +3,22 @@
 // 数据来自纯函数 chainOfSession（legacy/sidebar.ts），computed 按
 // state.sessions / state.current 引用缓存，轮询换新数组时才重扫一遍。
 // 排序与侧栏链一致（sortChainMembers：新 → 旧）；点行切会话（selectSession）。
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { state, relTime } from '../state'
-import { chainOfSession, img2textMemberTag, sessionTitleOf } from '../legacy/sidebar'
-import { selectSession } from '../data'
+import { chainMemberTag, chapterIdSuffix, chapterRoleLabel, chainOfSession, fixRoundAt, fixRowLabel, fixTargetId, plainTitle, rescueOrdinal, reviewedTargetLabel, sessionTitleOf } from '../legacy/sidebar'
+import { dropSession, refreshIndex, requestChapterRetry, selectSession } from '../data'
+import { canDropOf, canRestoreOf, restoreTargetOf } from '../legacy/actions'
+import { checkerRounds } from '../legacy/rounds'
+import { jumpToLine } from '../legacy/trajectory'
 import InlineMD from './InlineMD.vue'
 
 const members = computed(() => chainOfSession(state.sessions, state.current ? (state.current as any).id : null))
+
+/* 同一章的角色混在一条链里，行首给角色，编号才不会被误读成"同一件事的第几次"。
+ * 文案表收在 legacy/sidebar.ts（复盘行的「复盘了 转换#1」用同一份）。 */
+function roleLabel(s: any): string {
+  return chapterRoleLabel(s && s.chapterRole)
+}
 
 function endStateText(s: any): string {
   if (s.live) return '运行中'
@@ -25,35 +34,428 @@ function endStateCls(s: any): string {
   return 'pend'
 }
 
+/* P60 补充：修复链里每一行都要能对上"这是哪一章的第几轮"——只在标题里写章节名
+ * 会被省略号截掉，而且同一处修复的几轮标题一模一样。链是同一锚点下的修复（新 →
+ * 旧），队尾是最早一轮；目标章节能从任一成员的章节身份取到（老转录没有，就用
+ * 同链里别人那份），行标签按 `修复 child_02 #1` 的同一口径生成。 */
+const fixTarget = computed(() => {
+  for (const s of (members.value || [])) {
+    const id = fixTargetId(s)
+    if (id) return id
+  }
+  return ''
+})
+
+function fixRoundOf(index: number): number {
+  return fixRoundAt(index, (members.value || []).length)
+}
+
+/* 行首小标签：修复链换成「章节后缀 #轮次」（归档前缀照旧），其余链不变。
+ * C：复盘链的号是"这一章的第几次复盘"，由 rescueOrdinal 按全章读时算出来
+ * （链里新 → 旧，号与树行、树上「历史 N」同一个来源）；非复盘链不看这个参数。 */
+function chainTag(s: any, index: number): string {
+  if (!fixChain.value) return chainMemberTag(s, rescueNo(s))
+  const round = fixRoundOf(index)
+  const id = fixTargetId(s, fixTarget.value)
+  return ((s && s.archived) ? '旧' : '') + (id ? chapterIdSuffix(id) : '修复') + ' #' + round
+}
+
+function chainTagTip(s: any, index: number): string {
+  if (rescueChain.value) {
+    return '这是这一章的第 ' + rescueNo(s) + ' 次复盘：' + reviewedLine(s) + '（新 → 旧）'
+  }
+  if (!fixChain.value) return chainMemberTag(s, rescueNo(s))
+  const id = fixTargetId(s, fixTarget.value)
+  return '这是 ' + (id || '这一章') + ' 的第 ' + fixRoundOf(index) + ' 轮修复（同一处、新 → 旧）'
+}
+
+/* 复盘链里这一行的号：这一章的全部复盘按 mtime 从 1 数（读时推断，磁盘不改）。 */
+function rescueNo(s: any): number {
+  return rescueOrdinal(state.sessions, s)
+}
+
+/* 复盘行的「复盘了 …」：`转换#1`。老转录没有 meta 时为空，不编。 */
+function reviewedLine(s: any): string {
+  const t = reviewedTargetLabel(s)
+  return t ? '复盘了 ' + t : '复盘了（目标未记录）'
+}
+
+/* 悬停说明里点明归属：修复行与它上面那几行转换/核对不是同一件事的第几次，
+ * 而是"另一处/另一轮修复"。 */
+function rowTitle(s: any, index: number): string {
+  if (!fixChain.value) return s.id
+  return fixRowLabel(s, fixTarget.value, fixRoundOf(index)) + '\n' + s.id
+}
+
 function onRowClick(s: any) {
   selectSession(s.id)
+}
+
+/* P56：历史里每一行给两个行内动作——「设为当前」（下次继续跑就接着它）与
+ * 「删除这一条」（转错的尝试有出口，整条从历史里消失、归档目录一起删）。
+ * 删除要二次确认：这里用行内确认条，不用 window.confirm。 */
+/* T188：核对会话一次尝试里被打回几轮，全挤在同一条转录里（磁盘格式不动）。
+ * 历史里按 user 轮拆成子条目，点一轮就跳到那一轮的起始行——"第 1 轮为什么被
+ * 拒"不用再翻整条转录。 */
+/* P59：章节链只列**会话级**条目——用户口径：把一条核对转录按 user 轮拆成
+ * 「轮 N / 拒绝 N 条 / 第 N 行 · M 行」没有用，一进去就应该看到这一章有哪几次
+ * 转换、每次转换下面核对了哪几次。逐图（img2text）链保持原样。 */
+const chapterChain = computed(() => (members.value || []).some((s: any) => !!s.chapterId || (s && s.chapterRole === 'fix')))
+
+/* P60：修复链只列同一处（同一锚点）的修复轮次，成员全是修复会话。 */
+const fixChain = computed(() => {
+  const list = members.value || []
+  return list.length > 0 && list.every((s: any) => s && s.chapterRole === 'fix')
+})
+
+/* C：复盘链只列**这一章的全部复盘**（成员全是复盘会话），新 → 旧。
+ * T224：不再按"复盘了哪一条转录"分桶——树上这里只有一行复盘，以前的每一次复盘
+ * 都要能在它的「历史」里找到；老命名的转录本来也没有目标备注，分桶等于互相藏。 */
+const rescueChain = computed(() => {
+  const list = members.value || []
+  return list.length > 0 && list.every((s: any) => s && s.chapterRole === 'rescue')
+})
+
+/* 复盘链表头点名这一章（行里的「复盘#N · 复盘了 …」逐行写清复盘对象）。 */
+const rescueChapter = computed(() => {
+  const s: any = (members.value || [])[0] || null
+  const id = String((s && s.chapterId) || '')
+  return id ? chapterIdSuffix(id) : '章节未知'
+})
+
+const rounds = computed(() => {
+  if (chapterChain.value) return []
+  const s: any = state.current
+  if (!s || s.chapterRole !== 'checker' || !Array.isArray(state.lines)) return []
+  const r = checkerRounds(state.lines as any[])
+  return r.length > 1 ? r : []
+})
+
+const dropAsk = ref<any>(null)
+const dropNote = ref('')
+
+function isCurrent(s: any): boolean {
+  return !!state.current && state.current.id === s.id
+}
+
+/* T194：把"正在看"和"最新一次尝试"分开标——用户原来的困惑是那个「当前」小标签
+ * 到底是"页面正在显示"还是"流水线现在用的这一版"。现在：
+ *   正在看 = 这一行就是中栏正在显示的会话（点行切换）；
+ *   最新   = 这条链里尝试号最大的那一次（真正的最新产物）。
+ * 「设为当前」按钮去掉：点行本身就是切换，按钮名字反而让人以为会改流水线状态。 */
+function maxAttempt(members: any[]): number {
+  let n = 0
+  ;(members || []).forEach((s) => { const a = Number(s.chapterAttempt) || 1; if (a > n) n = a })
+  return n
+}
+
+/* 「最新」只看**还在工作区里的**那几条：归档里的同号转录来自更早一次父尝试，
+ * 它的号可能反而更大（父尝试作废后子章节又从 #1 重来），不能拿它当"最新"。 */
+const newest = computed(() => {
+  const live = (members.value || []).filter((s: any) => !s.archived)
+  return maxAttempt(live.length ? live : (members.value || []))
+})
+
+/* P60：修复转录没有尝试号（文件名是 `fix_<章>`，`chapterAttempt` 取不到值），
+ * 按号比较会让每一行都顶着「最新」——修复链改按链序（已按 mtime 新 → 旧排好）
+ * 标第一行。C：复盘链同理（转录名里的号是防覆盖用的，不是"这一章的第几次"）。 */
+const newestFixId = computed(() => {
+  const live = (members.value || []).filter((s: any) => !s.archived)
+  const pool = live.length ? live : (members.value || [])
+  return pool.length ? String(pool[0].id) : ''
+})
+
+function isNewestRow(s: any): boolean {
+  // 修复链与复盘链都没有可比的"章节尝试号"（修复按轮次、复盘按这一章的第几次），
+  // 「最新」= 链里排在最前的那一条（链已按新 → 旧排好）。
+  if (fixChain.value || rescueChain.value) return !!s && String(s.id) === newestFixId.value
+  return (Number(s && s.chapterAttempt) || 1) === newest.value
+}
+
+/* 链里混着归档转录时给一句解释，否则「旧#1 / 归档」两枚标还是有人会当成重复行。 */
+const hasArchived = computed(() => (members.value || []).some((s: any) => !!s.archived))
+
+/* T194：转换与同一轮的核对是**一件事的两个角色**（用户口径："这俩是一体的吧，
+ * 如果切换回去就都切换过去"）。历史列表按角色分链，所以从这里给一条直达对方
+ * 那一轮的入口——不必去树里找那个子行。 */
+function pairOf(s: any): any {
+  if (!s || !s.chapterId) return null
+  // P60 第四步：修复转录现在也有章节身份（fix_ 前缀与 convert_/checker_ 同一套
+  // 规则），但它**不是**这一章的转换/核对——配对服务的是"转换 ↔ 同轮核对"这两个
+  // 角色，修复的历史里多一个「同轮核对」按钮只会跳去不相干的一条。
+  if (s.chapterRole === 'fix') return null
+  // C：复盘会话的号是"这一章的第几次复盘"，与转换/核对的尝试号不是一回事，
+  // 拿它去配"同轮核对"只会跳去不相干的一条。
+  if (s.chapterRole === 'rescue') return null
+  const attempt = Number(s.chapterAttempt) || 1
+  const same = (o: any) =>
+    o && o.chapterId === s.chapterId &&
+    (o.project || '') === (s.project || '') &&
+    (Number(o.chapterAttempt) || 1) === attempt &&
+    (o.chapterRole || '') !== (s.chapterRole || '')
+  const all = (state.sessions || []).filter(same)
+  // 同号转录可能不止一份（一次来自归档、一次来自工作区）：先找"同源"的那条，
+  // 别把这次的转换配到旧父尝试的核对上。
+  return all.find((o: any) => !!o.archived === !!s.archived) || all[0] || null
+}
+
+function pairLabel(s: any): string {
+  return (s && s.chapterRole === 'checker') ? '同轮转换' : '同轮核对'
+}
+
+function askDrop(s: any) {
+  if (!canDropOf(s)) return
+  dropAsk.value = s
+}
+
+function doDrop() {
+  const s = dropAsk.value
+  if (!s) return
+  dropAsk.value = null
+  dropNote.value = '正在删除 ' + s.name + '…'
+  dropSession(String(s.project), String(s.path))
+    .then((res: any) => {
+      dropNote.value = '已删除 ' + s.name + ((res && res.archive) ? '（含 ' + res.archive + '）' : '')
+      return refreshIndex()
+    })
+    .catch((err: any) => { dropNote.value = '删除失败：' + ((err && err.message) || err) })
+}
+
+/* 切回第 N 次尝试（P63）：历史里每一条转换会话就是"那一次的工作区"。
+ *
+ * 为什么按钮放在历史行上：用户要复刻的念头总是"那一次明明全过了，回到那一次"，
+ * 而他看到的正是这一列行。判定收在 legacy/actions.ts 的 restoreTargetOf（纯函数、
+ * 有单测），这里只负责确认条与发请求。 */
+const restoreAsk = ref<{ project: string; chapter: string; attempt: number } | null>(null)
+const restoreNote = ref('')
+
+function askRestore(s: any) {
+  const t = restoreTargetOf(s, newest.value)
+  if (!t) return
+  restoreAsk.value = t
+  restoreNote.value = ''
+}
+
+/* T239：这一页的确认条与回执只说"我正在看的这条链"。原来它们谁也不清，点过
+ * chapter_013 的「切回」之后，每一章的历史页都挂着"已排队：切回第 1 次尝试…"，
+ * 用户以为别的章也被切回了。切走就清掉。 */
+watch(() => (state.current ? (state.current as any).id : ''), () => {
+  dropAsk.value = null
+  dropNote.value = ''
+  restoreAsk.value = null
+  restoreNote.value = ''
+})
+
+function doRestore() {
+  const t = restoreAsk.value
+  if (!t) return
+  restoreAsk.value = null
+  restoreNote.value = '已排队：切回第 ' + t.attempt + ' 次尝试…'
+  requestChapterRetry(t.project, t.chapter, 'restore', '', { attempt: t.attempt })
+    .then((res: any) => {
+      restoreNote.value = (res && res.note) || ('已排队：切回第 ' + t.attempt + ' 次尝试')
+      return refreshIndex()
+    })
+    .catch((err: any) => { restoreNote.value = '切回失败：' + ((err && err.message) || err) })
 }
 </script>
 
 <template>
   <div id="history" class="history" :class="{ hidden: state.view !== 'history' }">
-    <div v-if="!members" class="history-empty">当前会话不属于任何 img2text 调用链</div>
+    <div v-if="!members" class="history-empty">当前会话不属于任何调用链 / 重试链</div>
     <div v-else class="history-list">
-      <div class="history-head">这张图的全部会话（{{ members.length }}，新 → 旧）</div>
-      <button
-        v-for="s in members"
+      <div class="history-head">
+        <template v-if="rescueChain">这一章的全部复盘（<span class="history-fix-target" title="这一章一共复盘过几次（含更早父尝试留下的归档转录）">{{ rescueChapter }}</span>，{{ members.length }} 次，新 → 旧）</template>
+        <template v-else-if="fixChain">同一处的修复轮次（<span class="history-fix-target" title="这条修复链修的是哪一章">{{ fixTarget || '章节未知' }}</span>，{{ members.length }} 轮，新 → 旧）</template>
+        <template v-else-if="chapterChain">这一章的全部会话（{{ members.length }}，每个转换后面跟着它名下的核对，新 → 旧）</template>
+        <template v-else>这一章的全部会话（{{ members.length }}，转换与核对都在这里，新 → 旧）</template>
+        <span v-if="hasArchived" class="history-old-note" title="带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话">· 带「旧」的是更早一次父尝试（已作废）留下的</span>
+      </div>
+      <div v-if="dropAsk" class="history-confirm" role="alert">
+        <span>删掉「{{ dropAsk.name }}」这条记录？转录会从历史里消失，作废尝试的归档目录也会一起删。</span>
+        <button class="history-act act-danger" type="button" @click="doDrop">确认删除</button>
+        <button class="history-act" type="button" @click="dropAsk = null">取消</button>
+      </div>
+      <div v-if="restoreAsk" class="history-confirm" role="alert">
+        <span>
+          切回第 {{ restoreAsk.attempt }} 次尝试？那一份的工作区与产物会搬回原处，现在这一次（第
+          {{ newest }} 次）整棵留档——之后还能在历史里再切回来。正在跑的会话不会被打断，会等它跑完手上这一轮再搬。
+        </span>
+        <button class="history-act" type="button" @click="doRestore">确认切回</button>
+        <button class="history-act" type="button" @click="restoreAsk = null">取消</button>
+      </div>
+      <div v-if="dropNote" class="history-note">{{ dropNote }}</div>
+      <div v-if="restoreNote" class="history-note">{{ restoreNote }}</div>
+      <div v-if="rounds.length" class="history-rounds">
+        <div class="history-rounds-head">这条核对转录里的 {{ rounds.length }} 轮（新 → 旧同序，点一轮跳到那一轮的起点）</div>
+        <button
+          v-for="r in rounds"
+          :key="'r' + r.round"
+          class="history-round"
+          type="button"
+          :title="r.summary || '跳到第 ' + r.round + ' 轮'"
+          @click="jumpToLine(r.from)"
+        >
+          <span class="row-chip chain-tag history-tag">轮 {{ r.round }}</span>
+          <span class="history-round-state" :class="r.verdict === 'pass' ? 'ok' : r.verdict === 'issues' ? 'bad' : ''">
+            {{ r.verdict === 'pass' ? '通过' : r.verdict === 'issues' ? '拒绝 ' + r.issues + ' 条' : '无结论' }}
+          </span>
+          <span class="history-round-from">第 {{ r.from }} 行 · {{ r.lines }} 行</span>
+        </button>
+      </div>
+      <div
+        v-for="(s, i) in members"
         :key="s.id"
         class="history-row"
-        :class="{ active: state.current && state.current.id === s.id }"
-        type="button"
-        :title="s.id"
+        :class="{ active: isCurrent(s) }"
+        role="button"
+        tabindex="0"
+        :title="rowTitle(s, i)"
         @click="onRowClick(s)"
+        @keydown.enter="onRowClick(s)"
       >
-        <span class="row-chip chain-tag history-tag">{{ img2textMemberTag(s.id) }}</span>
-        <InlineMD tag="span" class="history-title" :text="sessionTitleOf(s)"></InlineMD>
+        <span v-if="roleLabel(s) && !rescueChain" class="history-role">{{ roleLabel(s) }}</span>
+        <span class="row-chip chain-tag history-tag" :title="chainTagTip(s, i)">{{ chainTag(s, i) }}</span>
+        <span v-if="rescueChain" class="history-reviewed" :title="reviewedLine(s)">{{ reviewedLine(s) }}</span>
+        <InlineMD tag="span" class="history-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
+        <span v-if="isCurrent(s)" class="history-cur">正在看</span>
+        <span v-if="isNewestRow(s)" class="history-latest">最新</span>
+        <span v-if="s.archived" class="history-arch" title="这份转录在 work/attempts 归档目录里（工作树那份已被搬走），不是当前工作区">归档</span>
         <span class="history-state" :class="endStateCls(s)">{{ endStateText(s) }}</span>
         <span class="history-time">{{ relTime(s.mtime) }}</span>
-      </button>
+        <span class="history-actions">
+          <button v-if="!isCurrent(s)" class="history-act" type="button" title="在中栏显示这条会话（只是切视图，不改流水线状态）" @click.stop="onRowClick(s)">查看</button>
+          <button
+            v-if="pairOf(s) && state.current.id !== pairOf(s).id"
+            class="history-act"
+            type="button"
+            :title="'切到同一轮（' + chainMemberTag(s) + '）的' + (s.chapterRole === 'checker' ? '转换' : '核对') + '会话：' + pairOf(s).id"
+            @click.stop="onRowClick(pairOf(s))"
+          >{{ pairLabel(s) }}</button>
+          <button v-if="canRestoreOf(s, newest)" class="history-act" type="button" title="把这一份的工作区与产物搬回原处（现在这一次整棵留档，之后还能切回来）" @click.stop="askRestore(s)">切回这次</button>
+          <button v-if="canDropOf(s)" class="history-act act-danger" type="button" title="删掉这条转录（作废尝试的归档一并删除）" @click.stop="askDrop(s)">删除</button>
+        </span>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.history-old-note { color: var(--caption); font-weight: 400; }
+
+/* P60 补充：修复链表头点名目标章节——行里的「修复 child_02 #1」与树上同一口径。 */
+.history-fix-target { color: var(--text); font-weight: 500; }
+
+.history-role { flex: none; font-size: 11px; color: var(--caption); min-width: 22px; }
+
+/* C：复盘行点名"复盘了哪一条会话、什么角色"（`复盘了 转换#1`），与行标签
+ * 「复盘#N」一起读就是「复盘#2 · 复盘了 转换#1」。 */
+.history-reviewed { flex: none; font-size: 11px; color: var(--caption); }
+
+.history-rounds { margin: 0 4px 10px; }
+
+.history-rounds-head { font-size: 11px; color: var(--caption); margin-bottom: 4px; }
+
+.history-round {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-round:hover { background: var(--hover, #f3f4f6); }
+
+.history-round-state { font-size: 11px; }
+
+.history-round-state.ok { color: #15803d; }
+
+.history-round-state.bad { color: #b45309; }
+
+.history-round-from { margin-left: auto; font-size: 11px; color: var(--caption); }
+
+.history-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 4px 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #dc2626 40%, var(--line, #d0d7de));
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--caption);
+}
+
+.history-note {
+  margin: 0 4px 8px;
+  font-size: 12px;
+  color: var(--caption);
+}
+
+.history-cur {
+  font-size: 11px;
+  color: var(--accent, #3b82f6);
+  border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 45%, var(--line, #d0d7de));
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 16px;
+}
+
+.history-latest {
+  font-size: 11px;
+  color: var(--ok, #15803d);
+  border: 1px solid color-mix(in srgb, var(--ok, #15803d) 40%, var(--line, #d0d7de));
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 16px;
+}
+
+.history-arch {
+  font-size: 11px;
+  color: var(--caption);
+  border: 1px dashed var(--line, #d0d7de);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 16px;
+}
+
+.history-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity .12s;
+}
+
+.history-row:hover .history-actions,
+.history-row:focus-within .history-actions {
+  opacity: 1;
+}
+
+.history-act {
+  border: 1px solid var(--line, #d0d7de);
+  background: transparent;
+  color: var(--text);
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.history-act.act-danger {
+  border-color: color-mix(in srgb, #dc2626 50%, var(--line, #d0d7de));
+  color: #dc2626;
+}
+
 .history {
   flex: 1;
   min-height: 0;

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"mineru-tools/internal/config"
@@ -84,6 +85,11 @@ type Session struct {
 	lastPromptTokens int     // 最近一次厂商实测的 prompt_tokens
 	calibNum         float64 // 标定分子（实测）
 	calibDen         float64 // 标定分母（当时估算）
+	// toolProseWarned 只让"工具调用被写成正文"的警告每个会话出现一次（T205）：
+	// 这种回复会连着来，刷屏没有意义；它只是诊断线索，不影响会话怎么跑。
+	toolProseWarned bool
+	// toolAccessNudged 只让"声称工具不可用"的纠正每会话出现一次。
+	toolAccessNudged bool
 	// estBeforeRequest 是最近一次请求发出**之前**的本地估算，用它当
 	// 标定分母（响应回来后才知道厂商实测值）。
 	estBeforeRequest int
@@ -99,7 +105,12 @@ type Session struct {
 	// every tool execution with (completed rounds, executed tool
 	// calls) — used by compact console modes to show a live line.
 	progressHook func(rounds, tools int)
-	rounds       int
+	// msgHook（P55），when set, is called right after a message lands in the
+	// transcript with the transcript's current line count — the caller turns
+	// that into a workspace snapshot so "从第 N 条记录继续" can roll the
+	// work tree back to the state the model saw at that point.
+	msgHook func(lines int)
+	rounds  int
 	// user is the stable per-conversation identifier sent as the OpenAI
 	// `user` field. Gateways such as new-api can pin routing on it so one
 	// conversation always reaches the same upstream channel; vendor prefix
@@ -110,6 +121,13 @@ type Session struct {
 	// transcript, when set, receives every appended conversation
 	// message as a JSONL line (images as file:// refs) for resume.
 	transcript *TranscriptWriter
+
+	// 模型并发槽（T179）由 Run 在整轮里持有。同步嵌套会话（P60 第五步：
+	// dispatch_fix 在工具调用里跑子会话，父会话此刻并不发请求）需要把它临时
+	// 让出来，否则 models.<名>.max_concurrency 配得小时父会话与子会话互等。
+	// 语义见 PauseModelSlot。
+	slotMu      sync.Mutex
+	slotRelease func()
 }
 
 // SetProgressHook registers a callback notified after every API round
@@ -117,6 +135,12 @@ type Session struct {
 // calls). Only one hook is supported; pass nil to clear.
 func (s *Session) SetProgressHook(fn func(rounds, tools int)) {
 	s.progressHook = fn
+}
+
+// SetMessageHook registers a callback invoked after every transcript append
+// with the transcript's current line count (P55). One hook at a time.
+func (s *Session) SetMessageHook(fn func(lines int)) {
+	s.msgHook = fn
 }
 
 // notifyProgress reports the current counters to the hook (no-op
@@ -144,6 +168,14 @@ func (s *Session) HasTranscript() bool {
 func (s *Session) SetTranscript(w *TranscriptWriter) {
 	s.transcript = w
 	s.recordPromptMeta()
+}
+
+// AppendTranscriptNote records runner-owned lifecycle state without replaying it.
+func (s *Session) AppendTranscriptNote(kind string, fields map[string]any) error {
+	if s == nil || s.transcript == nil {
+		return nil
+	}
+	return s.transcript.AppendNote(kind, fields)
 }
 
 // recordPromptMeta writes the "what was the model told" meta line: the
@@ -191,8 +223,12 @@ func (s *Session) appendTranscript(msg ChatMessage) {
 	if s.transcript == nil {
 		return
 	}
-	if err := s.transcript.Append(msg); err != nil && s.logger != nil {
-		s.logger.Debug(s.tid, "[session:"+s.label+"] transcript 写入失败:", err)
+	if err := s.transcript.Append(msg); err != nil {
+		if s.logger != nil {
+			s.logger.Debug(s.tid, "[session:"+s.label+"] transcript 写入失败:", err)
+		}
+	} else if s.msgHook != nil {
+		s.msgHook(s.transcript.Lines())
 	}
 	// P7: the full message is on disk now — the streaming snapshot is stale.
 	s.transcript.ClearPartial()
@@ -273,6 +309,7 @@ func NewSession(
 		s.messages = append(s.messages, ChatMessage{Role: "system", Content: system})
 	}
 	s.user = affinityUser(label, tid)
+	warnBudgetOnce(log, tid, modelCfg.Model, modelCfg, tuning.MaxTokens)
 	return s
 }
 
@@ -303,6 +340,12 @@ func (s *Session) Label() string { return s.label }
 
 // SetLabel updates the session label.
 func (s *Session) SetLabel(l string) { s.label = l }
+
+// ToolAccessNudged reports whether this session already received the
+// "your tools ARE available" correction (the model claimed it had no tools
+// although they are always sent). P58 扩展：这种收尾是退化的强信号，runner
+// 用它决定复盘时要告诉复盘者"纠正已经用过了、它仍然没提交"。
+func (s *Session) ToolAccessNudged() bool { return s.toolAccessNudged }
 
 // Messages returns a copy of the conversation so callers can persist
 // or inspect it.
@@ -425,6 +468,14 @@ func (s *Session) appendToolImage(v visionTurn) {
 // (t=meta kind=run_end): 会话为什么停——正常收尾、终态提交、还是 API 错误——
 // 从此写在转录里（用户实测：终审中途停了但转录没有任何报错原因）。
 func (s *Session) Run(opts RunOptions) (out string, err error) {
+	// 模型级并发闸门（T179）：同一厂商模型同时在途的会话不超过
+	// models.<名>.max_concurrency（没写就不限）。阶段并发决定"开几个 worker"，
+	// 这里决定"几个能同时跟同一个模型说话"——转换与核对配成两个池子之后，只有
+	// 这一层能真正把同一个模型上的请求数压回厂商限额。
+	if release := acquireModelSlot(s.modelCfg.Model); release != nil {
+		s.holdModelSlot(release)
+		defer s.releaseModelSlot()
+	}
 	s.noteFrozenPrice()
 	defer func() {
 		if s.transcript == nil {
@@ -437,6 +488,53 @@ func (s *Session) Run(opts RunOptions) (out string, err error) {
 		_ = s.transcript.AppendNote("run_end", fields)
 	}()
 	return s.run(opts)
+}
+
+// holdModelSlot 记下本轮持有的模型并发槽释放函数。
+func (s *Session) holdModelSlot(release func()) {
+	s.slotMu.Lock()
+	s.slotRelease = release
+	s.slotMu.Unlock()
+}
+
+// releaseModelSlot 释放本轮持有的模型并发槽（没持有则什么也不做）。
+func (s *Session) releaseModelSlot() {
+	s.slotMu.Lock()
+	release := s.slotRelease
+	s.slotRelease = nil
+	s.slotMu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+/*
+ * PauseModelSlot 在工具执行期间临时让出本会话的模型并发槽，返回"取回"函数。
+ *
+ * 为什么需要：Run 在整轮里的开头取槽、结束时才释放，而 dispatch_fix 是在
+ * 工具调用里**同步**跑子修复会话的。父会话这一刻并不发请求、却还占着名额；
+ * 子会话与父会话落到同一个模型上时，`models.<名>.max_concurrency` 配成 1
+ * （或名额被几个同样停在工具里的父会话占满）就会互等成死锁。让出之后名额按
+ * 真实在途请求计数，取回时再排队（父会话之后自己还要说话）。
+ *
+ * 没有持槽（模型没配上限）或本轮已让出时是空操作。调用方必须在同一条路径上
+ * 调用返回的函数——不让出就取回会让名额泄漏。
+ */
+func (s *Session) PauseModelSlot() func() {
+	s.slotMu.Lock()
+	release := s.slotRelease
+	s.slotRelease = nil
+	model := s.modelCfg.Model
+	s.slotMu.Unlock()
+	if release == nil {
+		return func() {}
+	}
+	release()
+	return func() {
+		if again := acquireModelSlot(model); again != nil {
+			s.holdModelSlot(again)
+		}
+	}
 }
 
 // noteFrozenPrice 把"这个会话用什么模型、当时的费率"冻进转录
@@ -651,6 +749,52 @@ func (s *Session) run(opts RunOptions) (string, error) {
 
 		s.recordUsage(resp, toolRounds+1, "")
 
+		// T205：模型把工具调用写成了正文（content 形如 {"paths":["skills://",…]}
+		// 加伪 bash 调用），并声称"工作区工具在这个会话里不可用"。这种回复没有
+		// tool_calls，工具一次都不会执行。这里**只记一条警告、不改行为**：各家
+		// 网关的异常形态千奇百怪，按正文特征判失败（T201 曾这么做）会把"模型正
+		// 好在说明什么"的正常回复也一起打死，而这类会话人工重试一次就好。警告里
+		// 带上厂商报的 prompt 与本地估算，一眼能看出请求是不是被网关改小了。
+		if useTools && len(s.tools) > 0 && len(choice.Message.ToolCalls) == 0 && !s.toolProseWarned {
+			if text := ContentString(choice.Message); LooksLikeToolProseLeak(text) {
+				s.toolProseWarned = true
+				reported := 0
+				if resp.Usage != nil {
+					reported = resp.Usage.PromptTokens
+				}
+				if s.logger != nil {
+					s.logger.LogWarning(s.tid, fmt.Sprintf(
+						"[session:%s] 这条回复像「工具调用被写成了正文」（没有 tool_calls、工具一次都没执行；厂商报 prompt %d tokens，本地估算 %d）。若这一轮没有产出，直接重试这一章即可：%s",
+						s.label, reported, s.EstimatedTokens(), truncateForLog(strings.TrimSpace(text), 200)))
+				}
+			}
+		}
+
+		// 用户口径（2026-10-22）：模型说"工作区没有工具 / 我访问不了文件"是
+		// **幻觉**——工具一直在请求里（tool_choice=auto）。以前只记告警（T205），
+		// 结果这种会话静默结束、整章被记成失败。这里纠正一次：把真实工具清单
+		// 直接告诉它，并要求它现在就调；仍然拒绝就交给提醒/复盘链路（不在这一
+		// 层判死，T205 的规矩不变）。
+		if useTools && len(s.tools) > 0 && len(choice.Message.ToolCalls) == 0 && !s.toolAccessNudged {
+			if text := ContentString(choice.Message); claimsNoToolAccess(text) {
+				s.toolAccessNudged = true
+				s.messages = append(s.messages, choice.Message)
+				s.appendTranscript(choice.Message)
+				names := s.toolNameList(12)
+				if s.logger != nil {
+					s.logger.LogWarning(s.tid, fmt.Sprintf(
+						"[session:%s] 模型声称「工具不可用」，但工具一直在（%s）；已纠正一次并要求现在就调用：%s",
+						s.label, names, truncateForLog(strings.TrimSpace(text), 160)))
+				}
+				nudge := "Your tools ARE available in this session: " + names + ". " +
+					"The previous reply claimed they were not — that is incorrect; nothing ran because you did not call them. " +
+					"Call the tools now (for a conversion session start with read_file on work:manual.md, then read the chapter markdown)."
+				s.messages = append(s.messages, ChatMessage{Role: "user", Content: nudge})
+				s.appendTranscript(ChatMessage{Role: "user", Content: nudge})
+				continue
+			}
+		}
+
 		if len(choice.Message.ToolCalls) > 0 && useTools {
 			NormalizeToolCallTypes(&choice.Message)
 			StripLeakedToolXML(&choice.Message)
@@ -780,6 +924,24 @@ func (s *Session) run(opts RunOptions) (string, error) {
 			})
 			req2 := *req
 			req2.Messages = s.messages
+			// T159：上一次回复被 max_tokens 截断（finish=length）且正文为空，
+			// 说明整个输出预算都被思考吃掉了——同样的预算再问一次只会再撞
+			// 一次上限（现场连续两次 8192/8192 全空 → "empty final answer"）。
+			// 窗口有余量就把重试预算放大一倍。
+			// 现场不是"答案写到一半被截断"，而是**思考把预算吃光、正文一个字
+			// 都没吐**：checker 配 8192 时连续两轮 8192/8192 全空，会话判
+			// "empty final answer" 直接失败。配置偏小是根因，代码这边只做
+			// 兜底（翻倍、受窗口约束），并把"该调哪个键"写进告警。
+			if resp.FinishReason == "length" {
+				if boosted := s.budgetCeiling(req2.MaxTokens * 2); boosted > req2.MaxTokens {
+					if s.logger != nil {
+						s.logger.LogWarning(s.tid, fmt.Sprintf(
+							"[session:%s] 回复被 max_tokens 截断且无正文（预算是 %d，思考可能把它全吃了）；本次重试提到 %d。长期请调大该会话的 max_tokens",
+							s.label, req2.MaxTokens, boosted))
+					}
+					req2.MaxTokens = boosted
+				}
+			}
 			// Keep the tool definitions (the provider builds its prompt
 			// prefix from tools + messages, so dropping them would throw
 			// away the whole prefix cache); tool_choice=none is enough to
@@ -830,7 +992,15 @@ func degenerateEmptyResponse(resp *ChatResponse, choice *ChatResponseChoice) boo
 	if strings.TrimSpace(choice.Message.ReasoningContent) != "" {
 		return false
 	}
-	return resp.Usage != nil && resp.Usage.CompletionTokens == 0
+	// 截断（finish=length）由 T159 的"预算翻倍重试"处理，这里不抢它。
+	if resp.FinishReason == "length" {
+		return false
+	}
+	// 不再要求 completion tokens == 0：真实案例是 finish=stop、completion
+	// 1819 tokens，正文/思考/工具调用三者全空——思考被网关吞掉，会话就此
+	// 静默停住（恢复后模型再冒出一个"我没有工具"的幻觉）。这种响应对会话
+	// 没有任何推进，原样重发比走 nudge 更对。
+	return resp.Usage != nil
 }
 
 // executeTool dispatches one tool call, logging and error-wrapping.
@@ -960,6 +1130,32 @@ func (s *Session) outputBudget() int {
 			s.tuning.MaxTokens, out, s.tuning.ContextLimit, s.CurrentTokens())
 	}
 	return out
+}
+
+// budgetCeiling clamps a desired output budget to what the model window can
+// still hold. Used when a reply was truncated by max_tokens and the retry
+// needs more room than the configured budget (T159). Returns want unchanged
+// when no window is configured; returns <= current when there is no room.
+func (s *Session) budgetCeiling(want int) int {
+	if want <= 0 {
+		return 0
+	}
+	limit := s.tuning.ContextLimit
+	if limit <= 0 {
+		return want
+	}
+	margin := limit / 50
+	if margin < 1024 {
+		margin = 1024
+	}
+	room := limit - s.CurrentTokens() - margin
+	if room <= 0 {
+		return 0
+	}
+	if want > room {
+		return room
+	}
+	return want
 }
 
 // sessionOutputBudget is the pure rule behind outputBudget: leave the
@@ -1169,6 +1365,46 @@ func hasImage(m ChatMessage) bool {
 		}
 	}
 	return false
+}
+
+// ReplayWeight summarizes how heavy a replayed history is in memory: how many
+// images it carries and how many bytes their data URLs occupy. Resuming a book
+// restores a dozen transcripts at once, each re-reading its images from media/
+// as base64 data URLs — that is the memory spike behind "已杀死" (SIGKILL) on
+// startup (T162), so the resume log names the cost per session instead of
+// leaving it invisible.
+//
+// Base64 is ~4/3 of the file size; the byte count here is the data-URL length,
+// which is exactly what the process holds.
+func ReplayWeight(msgs []ChatMessage) (images int, bytes int64) {
+	for _, m := range msgs {
+		parts, ok := m.Content.([]map[string]interface{})
+		if !ok {
+			continue
+		}
+		for _, part := range parts {
+			if !isImagePart(part) {
+				continue
+			}
+			images++
+			bytes += int64(imagePartURLLen(part))
+		}
+	}
+	return images, bytes
+}
+
+// imagePartURLLen returns the length of an image part's URL string whether it
+// was stored as map[string]string or map[string]interface{}.
+func imagePartURLLen(part map[string]interface{}) int {
+	switch v := part["image_url"].(type) {
+	case map[string]string:
+		return len(v["url"])
+	case map[string]interface{}:
+		if s, ok := v["url"].(string); ok {
+			return len(s)
+		}
+	}
+	return 0
 }
 
 // maybeCompact triggers AI-driven compaction when the conversation
@@ -1473,4 +1709,104 @@ func truncateForLog(s string, n int) string {
 		return s
 	}
 	return s[:n] + fmt.Sprintf("...(truncated, %d bytes total)", len(s))
+}
+
+/* ---------- 模型级并发闸门（T179） ---------- */
+
+var (
+	modelSlotMu    sync.Mutex
+	modelSlotLimit = map[string]int{}
+	modelSlots     = map[string]chan struct{}{}
+)
+
+/*
+ * SetModelConcurrency 安装「按厂商模型名」的在途会话上限（0 或缺失 = 不限）。
+ * 由进程启动时按配置调一次；传空 map 表示全部放开。同名模型只有一个池子，
+ * 所以转换 / 核对 / 样式修复这些不同阶段只要落到同一个模型上，就共用这个数。
+ */
+func SetModelConcurrency(limits map[string]int) {
+	modelSlotMu.Lock()
+	defer modelSlotMu.Unlock()
+	next := make(map[string]int, len(limits))
+	for name, n := range limits {
+		if name != "" && n > 0 {
+			next[name] = n
+		}
+	}
+	modelSlotLimit = next
+	modelSlots = map[string]chan struct{}{}
+}
+
+// acquireModelSlot 取一个该模型的会话槽位；返回 nil 表示这个模型不限。
+func acquireModelSlot(model string) func() {
+	if model == "" {
+		return nil
+	}
+	modelSlotMu.Lock()
+	limit, ok := modelSlotLimit[model]
+	if !ok {
+		modelSlotMu.Unlock()
+		return nil
+	}
+	ch, ok := modelSlots[model]
+	if !ok {
+		ch = make(chan struct{}, limit)
+		modelSlots[model] = ch
+	}
+	modelSlotMu.Unlock()
+	ch <- struct{}{}
+	return func() { <-ch }
+}
+
+// ModelConcurrencyLimits 返回当前安装的上限（报表/日志用）。
+func ModelConcurrencyLimits() map[string]int {
+	modelSlotMu.Lock()
+	defer modelSlotMu.Unlock()
+	out := make(map[string]int, len(modelSlotLimit))
+	for k, v := range modelSlotLimit {
+		out[k] = v
+	}
+	return out
+}
+
+// claimsNoToolAccess 判断这条正文是不是在声称"工具/工作区不可用"。
+// 真实案例（P58 上线后）：子章节会话被厂商空回复打断，恢复后只回一句
+// "the chapter workspace tools are not available in this session" 就收尾，
+// 而工具一直在请求里。这是幻觉，要纠正，不是"会话做不到"。
+func claimsNoToolAccess(text string) bool {
+	t := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	if t == "" {
+		return false
+	}
+	toolish := strings.Contains(t, "tool") || strings.Contains(t, "workspace") ||
+		strings.Contains(t, "file system") || strings.Contains(t, "filesystem") ||
+		strings.Contains(t, "工具") || strings.Contains(t, "工作区")
+	if !toolish {
+		return false
+	}
+	for _, pat := range []string{
+		"not available", "unavailable", "not accessible", "cannot access", "can't access",
+		"don't have access", "do not have access", "no access", "not enabled",
+		"没有可用的工具", "工具不可用", "无法访问工具", "无法访问工作区", "没有工具",
+	} {
+		if strings.Contains(t, pat) {
+			return true
+		}
+	}
+	return false
+}
+
+// toolNameList 给纠正文案用的工具名清单（最多 n 个）。
+func (s *Session) toolNameList(n int) string {
+	names := make([]string, 0, len(s.tools))
+	for _, t := range s.tools {
+		names = append(names, t.Name())
+		if n > 0 && len(names) >= n {
+			break
+		}
+	}
+	if len(names) == 0 {
+		return "（无）"
+	}
+	return strings.Join(names, ", ")
 }

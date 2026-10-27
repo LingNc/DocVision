@@ -89,6 +89,8 @@ func TestLoadTranscriptStats(t *testing.T) {
 		}),
 		{"t": "msg", "role": "tool", "tool_call_id": "c1", "text": "OK", "ts": last},
 		{"t": "msg", "role": "tool", "tool_call_id": "c2", "text": "SUBMITTED. figure.tex", "ts": last},
+		// T206：活跃时长 = 各用量行请求耗时之和（不再是首尾时间跨度）。
+		{"t": "usage", "round": 1, "prompt_tokens": 10, "duration_ms": 90000},
 	})
 	msgs, st, err := LoadTranscriptStats(path)
 	if err != nil {
@@ -100,8 +102,8 @@ func TestLoadTranscriptStats(t *testing.T) {
 	if st.SubmitName != "submit" || !strings.Contains(st.SubmitArgs, "figure.tex") {
 		t.Fatalf("提交识别失败: %q %q", st.SubmitName, st.SubmitArgs)
 	}
-	if st.Active < time.Minute {
-		t.Fatalf("Active=%v，期望 ≥1m（首尾时间跨度）", st.Active)
+	if st.Active != 90*time.Second {
+		t.Fatalf("Active=%v，期望 1m30s（用量行耗时之和，T206）", st.Active)
 	}
 	// c3 是悬空调用（没有回执）→ 合成占位回执，历史 wire 合法。
 	found := false

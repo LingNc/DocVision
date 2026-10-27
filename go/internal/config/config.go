@@ -58,8 +58,9 @@ type ModelConfig struct {
 	// (default, /chat/completions), "anthropic" (/v1/messages — the
 	// Anthropic Messages API, Claude and the many Anthropic-compatible
 	// gateways) or "responses" (/v1/responses — the OpenAI Responses
-	// API, gpt-5/o-series and compatible gateways). Anthropic/Responses
-	// entries are answered non-streaming for now.
+	// API, gpt-5/o-series and compatible gateways). "openai" and
+	// "responses" honour models.*.stream (SSE, progressive snapshots);
+	// "anthropic" is answered non-streaming for now.
 	API string `yaml:"api"`
 	// Price is this entry's billing rate. All-zero = unknown, and every
 	// cost report then says "未配置价格" instead of inventing ¥0. A model entry
@@ -118,6 +119,14 @@ type ModelConfig struct {
 	// MaxImages is the provider/model maximum number of image parts accepted in
 	// one request. Zero means unlimited; it is not inherited from models.text.
 	MaxImages int `yaml:"max_images"`
+	// MaxConcurrency caps how many sessions that resolve to this entry's wire
+	// model may be in flight at once (0 = unlimited, the default). Stage
+	// concurrency (latex.convert_concurrency / checker_concurrency) decides how
+	// many workers exist; this decides how many of them may talk to the same
+	// model simultaneously. Different stages that end up on the same wire model
+	// share the cap — that is exactly what a provider's per-model rate limit
+	// meters, and it is why convert+checker are not added up by hand any more.
+	MaxConcurrency int `yaml:"max_concurrency"`
 	// ImageTokens overrides the top-level estimate: block for THIS model only
 	// (same keys: method/tokens/px_per_token/min_tokens/max_tokens). Unset keys
 	// inherit the estimate block, and anything unset there uses the code
@@ -174,6 +183,14 @@ type SessionTuning struct {
 	// through a local prune; older ones become a text placeholder.
 	// 0 = default 3, negative = keep every image.
 	KeepImages int `yaml:"keep_images"`
+	// MaxToolRoundsPerLevel widens the tool-round budget by this much for every
+	// level ABOVE the deepest one (T204): the parent of a subdivided chapter
+	// has to integrate all its children, the deepest child only its own slice.
+	// 0 = default 20 (checker only), negative = no per-level widening.
+	MaxToolRoundsPerLevel int `yaml:"max_tool_rounds_per_level"`
+	// MaxToolRoundsFactor multiplies the budget per level instead of adding
+	// (T204). 0 or 1 = pure linear growth; 2 doubles it per level.
+	MaxToolRoundsFactor float64 `yaml:"max_tool_rounds_factor"`
 }
 
 // LatexCompileConfig controls the LaTeX toolchain used to compile and
@@ -314,6 +331,22 @@ type LatexConfig struct {
 	// small/fast model from the registry). Empty falls back to
 	// convert_model.
 	CheckerModel string `yaml:"checker_model"`
+	// CheckerRounds: 一个章节转换"最多尝试几次"。checker 连续打回同一会话
+	// 若干轮仍不过就换一个全新会话重来，第 depth 层每次递减 1、下限 3；
+	// 顶层默认 6。0/未写 = 6。顶层次数应 >= 3 + 最大递归层数(3)，否则深层
+	// 只能吃到下限，启动时会告警。
+	CheckerRounds int `yaml:"checker_rounds"`
+	// CheckerNoVerdictRetries: 核对**没给结论**时自动换新核对会话再来的次数
+	// （T233）。这一路**只重核、不重转**：产物一个字不动，换掉的只是那条已经
+	// 退化的核对会话——重做一遍转换出来的是同一份东西，没有理由假设新的转换
+	// 会话能救回一个坏掉的核对模型。0/未写 = 6。
+	CheckerNoVerdictRetryCount int `yaml:"checker_no_verdict_retries"`
+	// MaxChapterLines: 一个转换会话能"好好转完"的章节规模（章节 md 的行数）。
+	// 超过它、又还没拆分过的节点在 submit 会被打回，要求先
+	// request_chapter_split 按语义拆成 2–16 段（子会话各自转换、各自过 checker，
+	// 父会话只整合与核对）；已经递归到最深一层就不再强制（拆不动了）。
+	// 0 = 关闭这条规则；未写该键时默认 DefaultMaxChapterLines。
+	MaxChapterLines int `yaml:"max_chapter_lines"`
 	// InsertImageDescription: when true, images kept as raster (no
 	// vector structure) embed a readable AI explanation as
 	// "[Image]( content )" instead of the bare image link. The same
@@ -356,8 +389,16 @@ type LatexConfig struct {
 	RemoveWatermark bool `yaml:"remove_watermark"`
 	// Concurrency for per-image and per-chapter workers. Default 3
 	// (sessions are long-lived and much heavier than plain img2text calls).
-	Concurrency int                `yaml:"concurrency"`
-	Compile     LatexCompileConfig `yaml:"compile"`
+	Concurrency int `yaml:"concurrency"`
+	// ConvertConcurrency / CheckerConcurrency（T179）：章节转换会话与章节核对
+	// 会话**各自**的并发上限。两者是独立的槽位池——核对会话在读 PDF/原书页，
+	// 转换会话在写 .tex，混在一个池里会让一堆核对排在一个慢转换后面。0 表示
+	// 沿用 concurrency（老配置不用改），所以「转换 3 + 核对 3」可以同时在途 6 个
+	// 会话；真要限制总请求数用 models.<名>.max_concurrency（按厂商模型名封顶，
+	// 两个阶段共用一个模型时才是真正该一起算的那个数）。
+	ConvertConcurrency int                `yaml:"convert_concurrency"`
+	CheckerConcurrency int                `yaml:"checker_concurrency"`
+	Compile            LatexCompileConfig `yaml:"compile"`
 	// FigureCheck re-verifies every redrawn figure against the original
 	// bitmap with a vision model before it is accepted. Default OFF: it
 	// costs one extra vision call per figure and most books do not need
@@ -384,6 +425,19 @@ type LatexConfig struct {
 	// BashMaxOutput is the deprecated location of tools.bash.max_output
 	// (resolved by Config.BashMaxOutput).
 	BashMaxOutput int `yaml:"bash_max_output"`
+	// Rescue（P58）：「会话没提交就结束」时的复盘。默认开；深度可配。
+	Rescue RescueConfig `yaml:"rescue"`
+	// APIErrorRetries（T237）是上游接口错误（连接超时/网关 4xx5xx/限流）时的
+	// 原地重试次数（默认 30，T243）。这类错误跟会话质量无关，换尝试、重转一遍
+	// 只会把一次上游抖动放大成"整章重跑"，所以这里只把同一条会话按退避时间放
+	// 回队伍续跑；用满仍不通就**暂停**这一章（不算失败、不换尝试、不归档产
+	// 物），重启程序或网页「继续跑」会接着同一条会话干。0 用默认值。
+	APIErrorRetries int `yaml:"api_error_retries"`
+	// Fix（P60）：「修复会话」——父章节把修复任务按 issue 下派给已经划好的
+	// 子章节（复用它的工作区与转录树），不再整章重转。默认关：关着时不注册
+	// dispatch_fix、不追加那段提示词、不跑任何修复会话——跑法与引入 P60 之前
+	// 逐字节相同。
+	Fix FixConfig `yaml:"fix"`
 	// Sessions tunes each specialised AI session independently.
 	Sessions struct {
 		Drawing SessionTuning `yaml:"drawing"`
@@ -394,7 +448,153 @@ type LatexConfig struct {
 		// Checker is the small text model that reviews each converted
 		// chapter before assembly. Defaults to the convert tuning.
 		Checker SessionTuning `yaml:"checker"`
+		// Rescue（P58）是「会话没提交就结束」时的复盘会话：只读转录、只
+		// 交结论。没写的字段继承 checker（输出预算与它同配置），上下文默认
+		// 128K、轮次默认 12。
+		Rescue SessionTuning `yaml:"rescue"`
 	} `yaml:"sessions"`
+}
+
+// RescueConfig 是「未提交收尾的复盘会话」的配置（P58）。
+//
+// 会话正常结束但没有调 submit 时，先起一条**只读**的复盘会话看它的转录，得出
+// retry / truncate / fail 三种结论之一，再由代码执行：发提醒、截断到最后一个
+// 干净轮次继续、或按失败收尾。复盘会话只读、只能给结论，最坏后果是一次截断
+// （源转录与归档尝试都留着）。
+type RescueConfig struct {
+	// Enabled 默认开；显式 false 退回"只发提醒"的老路径。
+	Enabled *bool `yaml:"enabled"`
+	// MaxPerAttempt 同一次尝试最多复盘几次（默认 2），防"复盘 → 又没交 →
+	// 再复盘"的循环。
+	MaxPerAttempt int `yaml:"max_per_attempt"`
+	// KeepRecords 是否把复盘会话的转录落盘（默认 false，只写一
+	// 行审计记录到 work/rescue/log.jsonl）。--debug 时强制落盘。
+	KeepRecords *bool `yaml:"keep_records"`
+	// Model 复盘会话用的模型条目；空 = 跟随 checker_model，再空 = 文本模型。
+	// 会话参数（上下文/轮次/输出预算）在 latex.sessions.rescue 里，不在模型条目上。
+	Model string `yaml:"model"`
+}
+
+// RescueEnabled reports whether the rescue review runs (default ON).
+func (c LatexConfig) RescueEnabled() bool { return c.Rescue.Enabled == nil || *c.Rescue.Enabled }
+
+// CheckerNoVerdictRetries 是核对没给结论时最多换几条全新核对会话（默认 6，T233）。
+//
+// 只重核、不重转：产物留着，换的是退化掉的那条核对会话。给得比较宽是有原因
+// 的——核对会话的退化大多是模型这一轮"不会调工具/没给结论"，换一条干净上下文
+// 往往就能给出结论；而重转一次要重跑整个章节的转换，代价高得多。
+func (c LatexConfig) CheckerNoVerdictRetries() int {
+	if c.CheckerNoVerdictRetryCount <= 0 {
+		return 6
+	}
+	return c.CheckerNoVerdictRetryCount
+}
+
+// RescueMaxPerAttempt 是同一次尝试里最多复盘几次（默认 2）。
+func (c LatexConfig) RescueMaxPerAttempt() int {
+	if c.Rescue.MaxPerAttempt <= 0 {
+		return 2
+	}
+	return c.Rescue.MaxPerAttempt
+}
+
+// APIErrorRetryLimit 是上游接口错误最多原地重试几次（默认 30，T237/T243）。
+//
+// 不设 0 关闭：这类错误重试就是正确做法，关掉只会把"上游抖一下"变成"整章
+// 失败、等人工重跑"。真要少等，把它设成 1–2 就行。用满仍不通时这一章会
+// **暂停**（不是失败）：重启程序或网页「继续跑」接着干，不重转。
+func (c LatexConfig) APIErrorRetryLimit() int {
+	if c.APIErrorRetries <= 0 {
+		return DefaultAPIErrorRetries
+	}
+	return c.APIErrorRetries
+}
+
+// DefaultAPIErrorRetries 是 latex.api_error_retries 的代码默认值（T243：30 次）。
+const DefaultAPIErrorRetries = 30
+
+// RescueKeepRecords 决定复盘会话的转录是否落盘（默认 false）。
+func (c LatexConfig) RescueKeepRecords() bool {
+	return c.Rescue.KeepRecords != nil && *c.Rescue.KeepRecords
+}
+
+// FixConfig 是「子章节修复会话」的配置（P60）。
+//
+// 模型：父章节在整理阶段把「哪个子章节、按哪条规则改」写成
+// `work/fix/<根章>/plan.json`（`dispatch_fix` 工具只记录计划、不同步执行），
+// 然后由 runner 为每个有问题的子章节起一条修复会话——它复用该子章节**已经
+// 划好的工作区**（`_subdivision/child_NN/node/work`），只改有问题的部分，提交
+// 后跑该子章节原本的核对（同一转换锚点，P59）。修不动时退回老行为：整章由
+// 父章节重试。
+type FixConfig struct {
+	// Enabled 默认关：关着时不注册 dispatch_fix、不追加提示词、不跑修复
+	// 会话，跑法与引入 P60 之前一致。
+	Enabled *bool `yaml:"enabled"`
+	// MaxRounds 一个子章节最多几轮修复（默认 2）。用完就退回老行为——父
+	// 会话按原来的重试路径处理，不再无限下派。
+	MaxRounds int `yaml:"max_rounds"`
+	// Model 修复会话用的模型条目；空 = 继承 convert 模型。会话调优不在模型
+	// 条目上，目前沿用 `latex.sessions.convert`。
+	Model string `yaml:"model"`
+}
+
+// FixEnabled reports whether the fix sessions run. **默认开**（用户口径
+// 2026-10-22）：子章节有问题就在原地修，不再为一个小问题整章归档重转；
+// 显式 enabled: false 才关闭，那时候工具面、提示词与请求数都与旧版完全一致.
+func (c LatexConfig) FixEnabled() bool { return c.Fix.Enabled == nil || *c.Fix.Enabled }
+
+// FixMaxRounds 是一个子章节最多能拿到几轮修复（默认 5；<=0 也按 5 算——写 0
+// 不会变成"无限轮"）。
+func (c LatexConfig) FixMaxRounds() int {
+	if c.Fix.MaxRounds <= 0 {
+		return 5
+	}
+	return c.Fix.MaxRounds
+}
+
+/*
+ * ConvertWorkers / CheckerWorkers / OtherWorkers 解析各阶段的并发槽位数（T179）：
+ * 转换与核对各有自己的池子（`convert_concurrency` / `checker_concurrency`），
+ * 没写（0）就沿用 `concurrency`，`concurrency` 也没写时按运行期的老默认 3。
+ */
+func (l LatexConfig) ConvertWorkers() int { return stageWorkers(l.ConvertConcurrency, l.Concurrency) }
+func (l LatexConfig) CheckerWorkers() int { return stageWorkers(l.CheckerConcurrency, l.Concurrency) }
+func (l LatexConfig) OtherWorkers() int   { return stageWorkers(0, l.Concurrency) }
+
+func stageWorkers(v, fallback int) int {
+	if v > 0 {
+		return v
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 3
+}
+
+/*
+ * ModelConcurrencyLimits 汇总「按厂商模型名」的在途会话上限（T179）：
+ * 只收写了 `models.<名>.max_concurrency > 0` 的条目，键是**实际下发的模型名**
+ * （`model:`），所以转换、核对、样式修复即便配成不同条目，只要最终落到同一个
+ * 模型上就共用一个上限——这才是厂商那边真正限的东西。一个模型被多个条目声明
+ * 时取最小值（谁更保守听谁的）。
+ */
+func (c *Config) ModelConcurrencyLimits() map[string]int {
+	out := map[string]int{}
+	if c == nil {
+		return out
+	}
+	for name := range c.Models {
+		// 用 ResolveModel 取条目：`model:` 常常是继承 models.text 的，直接看
+		// 条目自己的 Model 字段会漏掉"写了上限但没写模型名"的条目。
+		mc, ok := c.ResolveModel(name)
+		if !ok || mc.MaxConcurrency <= 0 || mc.Model == "" {
+			continue
+		}
+		if prev, seen := out[mc.Model]; !seen || mc.MaxConcurrency < prev {
+			out[mc.Model] = mc.MaxConcurrency
+		}
+	}
+	return out
 }
 
 // Img2TextConfig holds pipeline-specific overrides for the basic
@@ -774,9 +974,20 @@ type PathsConfig struct {
 // CurrentConfigVersion is the config schema version this binary expects.
 // Bump it whenever yaml keys change; loaders warn when the file differs.
 // 10: models.<名>.extends + the price/unknown-key rules that came with it.
-// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）; 19 (T131)：latex 新增 dedupe_icon_auto（小图标本地自动归组的门槛，未写时 0.75、0 = 关闭，全部交核验会话）; 20 (T138/T135)：latex 新增 dedupe_align_grid（判据网格，整数或 "0.95S"）/ dedupe_align_typical / dedupe_attach_min / dedupe_icon_max_area / dedupe_bucket_max。
+// DefaultMaxChapterLines 是一章"一个会话能好好转完"的默认行数上限（T169）。
+// 真实数据里章节 md 从一百多行到两万行不等，几千行的章节一个会话既慢又容易
+// 漏内容——超过这个规模的章节按语义拆开，由子会话并行转换。
+const DefaultMaxChapterLines = 3000
+
+// CurrentConfigVersion 11 (T37)：preview 块新增 img2text / img2text_all; 12 (T43)：latex 新增 style_fix 块（max_rounds，默认 3）; 13 (T108)：latex 新增 pilot_select/trial/revise_model 三个键 + models 注册 pilot-select/pilot-trial/pilot-revise 条目; 14 (T111)：latex 新增 dedupe_model + models.dedupe；15：模型级 context_limit/max_images/max_tokens 约束 + 独立 dedupe 会话调优; 16：latex 新增 dedupe_group_session_over / dedupe_batch_images（按相似组分配核验会话）与 groups.json 的 key（每组必须选代表图）; 17 (T127)：latex 新增 dedupe_concurrency（桶核验会话并发数，未写时 2、0 = 串行）; 18 (T129)：latex 新增 dedupe_align_min / dedupe_align_shift（组内合并的居中重合度门槛与平移上限，未写时 0.60 / 0.10）; 19 (T131)：latex 新增 dedupe_icon_auto（小图标本地自动归组的门槛，未写时 0.75、0 = 关闭，全部交核验会话）; 20 (T138/T135)：latex 新增 dedupe_align_grid（判据网格，整数或 "0.95S"）/ dedupe_align_typical / dedupe_attach_min / dedupe_icon_max_area / dedupe_bucket_max; 21 (P58)：latex 新增 rescue 块（enabled / max_per_attempt / max_rounds / keep_records / model）以及 models.rescue 这个可选条目（未配则跟随 checker 模型）; 22 (P58 调整)：rescue 的会话调优挪进 latex.sessions.rescue（context_limit 默认 131072、max_tool_rounds 默认 12、其余继承 sessions.checker），latex.rescue 只留 enabled / max_per_attempt / keep_records / model；model 条目改成 extends: checker; 23 (P60)：latex 新增 fix 块（enabled 默认 false / max_rounds 默认 2 / model 空 = 继承 convert）——修复会话骨架，默认关闭、无运行期行为。 24 (P58 扩展)：latex.rescue 的开关覆盖面扩到**报错终止**与「声称没有工具」两种收尾（键面不变，同一份 `latex.rescue.enabled` 同时管住三种触发）。
 // 配置版本仅用于提示模板升级；旧配置继续加载并为缺失的去重模型回退 text。
-const CurrentConfigVersion = 20
+// P58：复盘会话的默认会话参数（写在 latex.sessions.rescue 里可覆盖）。
+const (
+	rescueDefaultToolRounds   = 12
+	rescueDefaultContextLimit = 131072
+)
+
+const CurrentConfigVersion = 24
 
 // checkConfigVersion warns (non-fatally) when the loaded config was
 // written for a different schema version.
@@ -889,6 +1100,10 @@ func LoadConfigData(data []byte, path string) (*Config, error) {
 		}
 		if mapNodeValue(latex, "dedupe_bucket_max") == nil {
 			cfg.Latex.DedupeBucketMax = 400
+		}
+		// 0 是有效取值（关闭规则），所以"没写"只能在节点层判定。
+		if mapNodeValue(latex, "max_chapter_lines") == nil {
+			cfg.Latex.MaxChapterLines = DefaultMaxChapterLines
 		}
 	}
 
@@ -1573,6 +1788,46 @@ func (c *Config) ResolveImageEstimate(name string) EstimateConfig {
 // config does not say otherwise (it does NOT inherit convert's rounds).
 const checkerDefaultToolRounds = 50
 
+// checkerDefaultRoundsPerLevel is how much the checker's tool-round budget
+// widens per recursion level above the deepest one (T204).
+const checkerDefaultRoundsPerLevel = 20
+
+// checkerToolRoundsCeil caps the widened budget so a stray factor cannot turn
+// one review session into a day of tool calls.
+const checkerToolRoundsCeil = 1000
+
+// ToolRoundsAtLevels widens this session's tool-round budget by "how many
+// levels above the deepest one" this node sits (T204): a chapter that had to be
+// subdivided into children must integrate and cross-check all of them, while the
+// deepest child only covers its own slice — so the parent gets more rounds:
+//
+//	rounds = max_tool_rounds * factor^levels + max_tool_rounds_per_level * levels
+//
+// levels <= 0 (the deepest node) returns the base value unchanged, and a
+// non-positive base (0 = unlimited, negative = no cap) is never rewritten.
+func (s SessionTuning) ToolRoundsAtLevels(levels int) int {
+	base := s.MaxToolRounds
+	if base <= 0 || levels <= 0 {
+		return base
+	}
+	perLevel := s.MaxToolRoundsPerLevel
+	factor := s.MaxToolRoundsFactor
+	if factor < 1 {
+		factor = 1
+	}
+	out := float64(base)
+	for i := 0; i < levels; i++ {
+		out *= factor
+	}
+	if perLevel > 0 {
+		out += float64(perLevel * levels)
+	}
+	if out > checkerToolRoundsCeil {
+		return checkerToolRoundsCeil
+	}
+	return int(out)
+}
+
 // LatexSession returns the tuning block for a named latex session
 // (drawing / style / chapter / convert / checker / dedupe), applying the shared
 // defaults. The checker block is the exception: any field it leaves at
@@ -1591,6 +1846,18 @@ func (c *Config) LatexSession(name string) SessionTuning {
 		s = c.Latex.Sessions.Convert
 	case "dedupe":
 		s = c.Latex.Sessions.Dedupe
+	case "rescue":
+		// P58：复盘会话是"看转录 + 交结论"的短会话——没写的字段继承
+		// checker（包括它的 max_tokens 预算），上下文默认 128K、轮次默认 12。
+		s = c.Latex.Sessions.Rescue
+		explicitRounds := s.MaxToolRounds
+		inheritSessionTuning(&s, c.LatexSession("checker"))
+		if explicitRounds == 0 {
+			s.MaxToolRounds = rescueDefaultToolRounds
+		}
+		if s.ContextLimit == 0 {
+			s.ContextLimit = rescueDefaultContextLimit
+		}
 	case "checker":
 		s = c.Latex.Sessions.Checker
 		explicitRounds := s.MaxToolRounds
@@ -1600,6 +1867,14 @@ func (c *Config) LatexSession(name string) SessionTuning {
 		// = 真正不限制，照旧生效。
 		if explicitRounds == 0 {
 			s.MaxToolRounds = checkerDefaultToolRounds
+		}
+		// T204：按层加宽（父节点要整合整棵子树，最里层只管自己那一片）。
+		// 显式负数 = 不加宽；factor 未写 = 1（纯线性）。
+		if s.MaxToolRoundsPerLevel == 0 {
+			s.MaxToolRoundsPerLevel = checkerDefaultRoundsPerLevel
+		}
+		if s.MaxToolRoundsFactor == 0 {
+			s.MaxToolRoundsFactor = 1
 		}
 	default:
 		s = SessionTuning{}

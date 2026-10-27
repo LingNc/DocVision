@@ -26,7 +26,9 @@
 1. **样式分析 AI**（`models.style`）：拥有独立虚拟工作区（`latex_project/<项目名>/work/style/`），用 `list_source_pages` 取原书页索引（源 PDF / 页范围 / 全局页号 / OCR 推导的章节起点），再用 `view_pdf {path:"source:<file>.pdf", page:N}` **按需渲染** MinerU 保留的原始扫描页（支持裁剪放大）、`view_image` 看提取图、`read_file`/`grep` 读解析文本，分析全书样式后用 `write_file`/`edit_file` 增量起草（`example.tex` 的图**直接用 md 里已有的 LaTeX**：`<!-- DOCVISION-VECTOR -->` 下面那个 ```latex 围栏就是这本书真正的图代码，复制它比重新画一张更省心智、也更贴合实际成品），再 `submit_style` **按工作区路径**提交 `book.cls` + 使用手册 + 案例（`{cls, manual, example, extra[], report}`：`extra` 可带上类需要的任何附属文件——helper `.sty`、TikZ 样式、字体表——会连同示例一起进试编译；`report` 写进 `style/REPORT.md`；示例自动试编译，失败回炉）。`submit_style` **只收工作区路径**，没有内联内容兼容（工具形态不该对模型保留历史包袱，且"路径还是内容"的启发式曾把一行 `## Vector figure style` 误判为文件名）；参数里带换行内容会被拒绝并提示先 `write_file` 再交路径。字体通过 `list_fonts` 查看；缺字体时在提交报告与手册里列出清单，由用户按文件名手动放进 `paths.fonts`（编译环境已注入 `TEXINPUTS`/`OSFONTDIR`，无需装系统字体）
 2. **章节划分 AI**（`models.chapter`）：`grep`/`read_file`/`bash` + `buffer.md` 工作记忆缓冲区（分析结论增量写入、跨轮保留），按行号划分章节（结构化提交，全覆盖校验）
    **逐图校验（`latex.figure_check`，默认关闭）**：打开后每次 `submit` 都再用一个**能看图**的模型把"重画图 ↔ 原图"比一遍（两张图同时进会话，工具只有 `submit`）；不一致就把问题清单打回**同一个作图会话**继续修（上下文还在），最多 `max_rounds` 轮（默认 2），仍不合格记警告照常交付。校验会话转录落在 `work/sessions/figure_check_<图>.jsonl`。
-3. **转换 AI** 并发逐章转 `.tex`：每章在**自己的临时工作区** `work/temp/conv_<章>/work` 里干活——里面已经铺好 cls/`.sty`/手册/`example.tex` 的**副本**（随便改随便试，真样式包不受影响）、插图（`images/`、`figures/`）、该编译的 wrapper 与**待提交的两个路径**（`<章>.tex` + `<章>/`）；探针、实验 `.tex`、PDF 都留在临时工作区里，**只有提交的那两个路径会被拷进 `work/chapters/`**（分片文件夹整棵替换，历史残留与探针不会混进书里）；别人的成品只能经只读通道 `project:converted/`（其他章节已提交的 `.tex`）与 `project:reports/`（其他章节的工作汇报）参考；首条消息给出**工作区地图**（`work:`/`project:`/`source:` 各是什么）与两处权威输入路径——章节文本 `project:chapters/<章>.md`（**从它转换**：它是解析好的纯文本，读起来最省；但它是 OCR 来的、**可能出错**——遇到读不通的字、公式、图表就以**原书为准**，用 `doc_search`/`list_source_pages`/`view_pdf source:` 翻原页核对；版面问题一律以原书为准）与 class 手册 `project:style/manual.md`（不再整段内联）；工具集含 `bash`（沙箱内、与其它工具同一套挂载点）与 `compile`（**编译包了 `\\documentclass` 的 wrapper**；`compile {path:"chapters/<章>/probe.tex"}` 可单独编译工作区里任何一个 `.tex` 做验证，探针文件不得留在产物里；章节 `compile` 也接受 `engine`/`passes`/`args` 现场指定引擎与额外参数，回执只报 `COMPILE OK` + 产物名 + 页数或错误日志）；章节提示词只写"怎么用"与转换规则，工具参数交给工具自己的 schema（system 9.3K→4.9K、首条消息 1.2K→0.17K，模型不用把同一件事读两遍）；矢量图已在 images 阶段以 latex 代码块内嵌进章节 md，转换时按手册的 `## Vector figure style` 二次加工（保留结构、几何与全部标签）；raster 原图走 includegraphics → 每章提交后由 **核对会话**（`models.checker`，小文本模型即可）比对原章 md 与产物：它跑成一个**极简的只读会话**——挂载表里只有两个文件（章节 md + 提交的 `.tex`）与一个文件夹（`parts/` 分片），工具只有 `read_file`/`grep`/`submit`，默认 50 轮，写不了任何东西；**硬性问题回同一个转换会话最多 3 轮**（上下文还在，最省 token），3 轮仍未过才作废该章 `.tex`、资源目录与转录，用全新会话重转换一次
+3. **转换 AI** 并发逐章转 `.tex`：每章在**自己的临时工作区** `work/temp/conv_<章>/work` 里干活——里面已经铺好 cls/`.sty`/手册/`example.tex` 的**副本**（随便改随便试，真样式包不受影响）、插图（`images/`、`figures/`）、该编译的 wrapper 与**待提交的两个路径**（`<章>.tex` + `<章>/`）；探针、实验 `.tex`、PDF 都留在临时工作区里，**只有提交的那两个路径会被拷进 `work/chapters/`**（分片文件夹整棵替换，历史残留与探针不会混进书里）；别人的成品只能经只读通道 `project:converted/`（其他章节已提交的 `.tex`）与 `project:reports/`（其他章节的工作汇报）参考；首条消息给出**工作区地图**（`work:`/`project:`/`source:` 各是什么）与两处权威输入路径——章节文本 `project:chapters/<章>.md`（**从它转换**：它是解析好的纯文本，读起来最省；但它是 OCR 来的、**可能出错**——遇到读不通的字、公式、图表就以**原书为准**，用 `doc_search`/`list_source_pages`/`view_pdf source:` 翻原页核对；版面问题一律以原书为准）与 class 手册 `project:style/manual.md`（不再整段内联）；工具集含 `bash`（沙箱内、与其它工具同一套挂载点）与 `compile`（**编译包了 `\\documentclass` 的 wrapper**；`compile {path:"chapters/<章>/probe.tex"}` 可单独编译工作区里任何一个 `.tex` 做验证，探针文件不得留在产物里；章节 `compile` 也接受 `engine`/`passes`/`args` 现场指定引擎与额外参数，回执只报 `COMPILE OK` + 产物名 + 页数或错误日志）；章节提示词只写"怎么用"与转换规则，工具参数交给工具自己的 schema（system 9.3K→4.9K、首条消息 1.2K→0.17K，模型不用把同一件事读两遍）；矢量图已在 images 阶段以 latex 代码块内嵌进章节 md，转换时按手册的 `## Vector figure style` 二次加工（保留结构、几何与全部标签）；raster 原图走 includegraphics → 每章提交后由 **核对会话**（`latex.checker_model`，须支持看图）比对产物与原书：它跑成一个**只读会话**——视图里有章节 md、提交的 `.tex`、`parts/` 分片、**本章编译出的 `<章>.pdf`**、转换会话的 `report.md` / `notes.md`（当作"说法"核实，不是事实）以及原书 `source:` part PDF；工具 `read_file`/`grep`/`view_pdf`/`list_source_pages`/`doc_search`/`submit`，**轮次随层级加宽**（T204：最里层 `sessions.checker.max_tool_rounds` 默认 50，每往上一层 +`max_tool_rounds_per_level`（默认 20）→ 50/70/90/110；也可以改成按层翻倍 `max_tool_rounds_factor`），写不了任何东西；**每条问题必须指明位置**（md 段落或原书页 ↔ `.tex` 何处），看不见的差异不报——OCR 噪声、只在原页上的公式/表格/插图、浮动体位置都算正常；md 只是**OCR 参考、不是权威**——原页与 md 不一致时以原页为准，`.tex` 跟着原页走（T203）；重复上一轮的问题前要先回原页复核，自己看错了就撤回（T172：旧行为只给 md 与 tex 两个文本，看不到产物与原书页，于是把正常差异报成缺失，转换会话被逼着改坏本来正确的内容）；**硬性问题回同一个转换会话最多 `latex.checker_rounds` 轮**（上下文还在，最省 token），仍不过就**作废产物、换一个全新会话重来**：顶层默认 6 次、每递归一层 -1、**下限 3**（`checker_rounds` 与最大层数不匹配时起步告警），每次尝试一条独立转录（`convert_<章>.try2.jsonl`…）；checker 一次结论都没拿到时先重开核对到 **4 次**（T217：每次都是全新会话、同一转录与只读视图——没结论不是内容问题，不该升级成整章重来），仍没有结论才**判不通过**（不再降级为通过）；拿到过结论（`issues`）则照旧按 `checker_rounds` 喂回转换会话。余额不足这类致命错误一次就停。**提交门禁**：`compile` 成功会在工作区 `.gate/compile.json` 记下「主 `.tex` + `parts/` 内容摘要 + 产物 sha256 + 页数」，`view_pdf` 渲染这份产物时记下页码；`submit` 要求摘要与当前文件一致（编译后又改过就得重编）、产物指纹一致、且至少看过 `min(2, 总页数)` 页——"没编译"或"编译了没看"都会被拒，并告知下一步该做什么；**还要和原书对过**（T168：`view_pdf` 打开 `source:<原书 part>.pdf` 的页记进 `.gate/source.json`，至少 2–4 页不同的原书页，产物越长要求越多——脚本机械转换最容易在"产物看着没问题、和原书一比就露馅"的地方偷懒），**且内容覆盖率达标**（`pdftotext` 抽出产物文本，与章节 md 的正文去代码块/公式/注释/图片后做 CJK 三字组比对，低于 85% **第一次打回**并列出缺得最多的几段原文，同一章再交仍不达标则放行（OCR 差异大的书可能永远到不了阈值；放行时缺口连同 `report.coverage_note` 的说明写进本报告的未解问题、向上合并）；实测正常完成的章节 0.97–0.995，把产物文本砍掉 1/4 会掉到 0.63–0.76；CJK 太少（纯公式）不判定、`pdftotext` 缺失时跳过）。覆盖率同时写进日志（`内容覆盖率 97.0%（md 正文 → PDF 文本）`），低于 92% 再提醒一次；**章节太大先拆**（T169：`latex.max_chapter_lines`，默认 3000 行，0 关闭）——首条消息直接把"这一章 N 行"告诉会话，超过上限又还没拆分过的节点 `submit` 会被打回，要求先 `request_chapter_split` 拆成 2–16 段（子会话各转各的、各自过 checker，父会话只负责整合与核对），已到最深层不再强制
+**P34 递归细分**：转换会话遇到章节过大或无法可靠处理时，可用 `request_chapter_split` 按语义边界申请完整、连续、无重叠的 Markdown 行段（每次 2–16 段，最多三层细分）。子章节会话在对应父工作区的 `_subdivision/` 子树内并行运行，各阶段的**活动 API 会话**并发上限互相独立（T179）：转换会话共用 `latex.convert_concurrency`（未写沿用 `latex.concurrency`；这个数同时是**批次宽度**，即同时开这么多章转换）、核对会话共用 `latex.checker_concurrency`，其它阶段用 `latex.concurrency`；两者不放在一起算，核对不会因为转换排队而等着。要限制真正打到同一个模型上的请求数用 `models.<名>.max_concurrency`（会话层按实际下发的模型名封顶，转换与核对落到同一模型时共用这个额度）。父转换在等待子树期间释放槽位，只有执行转换或 checker 请求时才占槽，避免父节点等待占满并发名额。子节点尚未取得槽时在会话预览显示“等待并发槽”，父节点等子节点时显示“等待子会话”。每个子章节必须通过明确提交 `pass` 的 checker。父会话先读 `_subdivision/children-summary.md`（每个子章节自己报告的问题原文 + "自报 issues" 计数 + 已继承的问题清单，**必读但不要求修复**：能顺手修的写 `report.resolved` 划掉，没修的由机制原样向上——见 `docs/issue.md` T166）、再按源顺序读取 manifest 与子产物，整合后在隔离暂存目录提交核对；**提交产物必须自包含**（`\input`/`\includegraphics` 不许指向 `_subdivision/…` 这类临时路径，`submit` 当场打回）；父级 checker 通过才晋级到上一级章节结果，任一子级失败或缺少 checker 结论都会阻止晋级。细分节点保留输入、按完整章节 ID 命名的转换/checker 转录、工作报告及各层工作区，供失败诊断与续跑。checker transcript 只追加保存；重跑时使用当前 `latex.checker_model` 与模型配置，恢复同一 checker transcript 的历史对话，未完成核对不会误变成 pass。
+
 4. 汇总为多文件 `.tex` 项目 → 编译全书 PDF（失败进入**修复会话**：读文件/改文件/重编译 + 字体工具核对样式）→ 成功后进入**终审会话**逐页核对成品 PDF 并整理（`latex.compile.final_review`，默认开启；转录在 `work/sessions/final_review.jsonl`，WebUI 可见、计成本）→ 生成单文件 `standalone.tex`；编译前幂等注入 hyperref + 逐章 `\pdfbookmark` 保底书签（T49，成品 PDF 有书签/跳转，书签文字与层级取划分 md 首个标题行（# 数=书的真实层级）；main.tex 已带书签时视为终审会话按书结构接管、不再注入基线）并做**资源盘点**（T44：cls/figures/images/章节就位计数 + 逐条核对 \includegraphics 引用，缺失告警不中止）；交付把整棵 build 树复制到 `out/`，`book.pdf` 只是 `main.pdf` 的别名，并另复制到**项目根外侧** `<latex_project>/<项目名>.pdf`（T42）。终审成功后它的树内修改（章节修订 + 新增顶层 .tex + main.tex 钩子）**回写** `work/chapters/` 与 `work/final_review/` 并记内容指纹（`state.sha256`）；续跑时指纹一致（convert 后没动过）直接沿用、**跳过终审会话**，不一致才重审（旧转录归档 `final_review_prev.jsonl`）——build/ 每次重建，不回写的话每次续跑都要把几十轮终审从头再烧。修复会话转录在 `work/sessions/book_fix.jsonl`
 5. **风格修复大循环（T43）**：任何章节的工作汇报报告 cls/手册问题（不再要求多数派）即进入：整合会话把各章汇报整合成**不重复的问题清单**（固定格式 `submit_problems`）→ 风格修复会话（**复用原样式会话上下文**，信息不丢失；缓存失效只是成本）修 cls/手册并编译 example 验证 → 影响评估会话按问题**划分章节块**（在工作区 `work:blocks.json` 里 write/edit 划分、可反复修改后 `submit_blocks` 无参提交，也可内联传参；样式问题常是全局性的，评估会话可 grep 全部章节 .tex 圈定真实影响面；T70 起与整合会话同一套工作区提交通路）→ 每块一个并行**分块修复会话**（临时工作区里对块内章节做定位修改、wrapper 编译验证，逐章汇报是否解决，绝不重做）；仍有问题进入下一轮 style-fN+1，上限 `latex.style_fix.max_rounds`（默认 3，负数=关闭）；块会话失败的章节退回单章增量修复，再失败删产物重转换。各会话可用 `latex.style_fix.*_model` 独立配模型（T70，模板默认 extends 自原角色条目 = 行为不变）。各会话转录：`work/sessions/stylefix_integrate.jsonl` / `stylefix_style_r<N>.jsonl` / `stylefix_assess_r<N>.jsonl` / `stylefix-blk-r<N>-<i>.jsonl`。整合会话有自己的虚拟工作区 `work/stylefix_integrate/`（各章汇报按 `reports/<章>.md` 落盘，配 read/grep/write/edit，T64）。T64 重构起问题清单是一块共享存储 `work/style_fix/problems.json` + `problems` 工具——整合会话独占写权限（逐条 add/update/delete，无打勾），下游会话（样式/评估/分块）只能 list/get/search 与 check；清单不再塞进任何会话的提示词。提交门由代码核对存储：样式修复会话要求全部问题打勾、分块会话要求本块问题打勾，缺一个就 REJECTED（T66 的 `checked_problem_ids` 与 T67 的 `list.md` 随之退役）；每个会话另有 `goal` 工具（`plan.md` 计划清单，增删改勾，压缩后随时找回进度），提交前计划必须清空；分块会话可 `view_pdf` 看编译产物（T68）
 
@@ -44,10 +46,10 @@
 | `chapters/` | 章节划分 AI 产出的 chapter_00N.md |
 | `work/chapters/` | 转换 AI 的正式产物：`chapter_00N.tex` + 每章资源目录 `chapter_00N/` |
 | `work/views/project/` | `project` 挂载点（只读窄视图：source / style / chapters / converted / reports） |
-| `work/views/checker_<章>/` | checker 会话的**只读视图**：`<章>.md`、`<章>.tex`、`parts/`（正好两个文件 + 一个文件夹） |
+| `work/views/checker_<章>/` | checker 会话的**只读视图**：`<章>.md`、`<章>.tex`、`parts/`、编译产物 `<章>.pdf`、转换会话的 `report.md` 与 `notes.md`（后两者存在时才有） |
 | `work/pdfview/` | 原书 PDF 最小视图（`source` 挂载点，`<part>.pdf` 软链到 MinerU 的 `*_origin.pdf`） |
 | `work/reports/` | 每章转换会话的工作汇报 `<章>.md`（转换期间，只读通道 `project:reports/`） |
-| `work/sessions/` | 会话转录（`chapters.jsonl`、`convert_<章>.jsonl`、`checker_<章>.jsonl`、`style_fix_<章>.jsonl`、`figure_check_<图>.jsonl`）；矢量图另有 `sessions/vector_<图>.work` 持久工作区 |
+| `work/sessions/` | 会话转录（`chapters.jsonl`、`convert_<章>.jsonl`、`checker_<章>.jsonl`、`style_fix_<章>.jsonl`、`figure_check_<图>.jsonl`）；重试产生 `<名>.try2.jsonl`/`.try3.jsonl`…，预览页把它们聚成「历史 N」；矢量图另有 `sessions/vector_<图>.work` 持久工作区 |
 | `work/temp/` | 临时工作区（拆章沙箱、样式/反馈 scratch、每章转换工作区 `conv_<章>/work`），默认用完即删 |
 | `build/` | 全书的构建树（每次 clean 重建：cls/手册/案例 + chapters + figures + main.tex），同时是修复会话与终审会话的工作区 |
 | `out/` | 交付产物：整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件），`book.pdf` 是 `main.pdf` 的别名，另有 `standalone.tex` |
@@ -88,6 +90,8 @@ docvision latex
 docvision latex --level 1 书.pdf               # 档位1 全书转换
 docvision latex --level 2 --test --number 5    # 抽样测试
 docvision latex --level 1 --step style 书.md   # 仅某个阶段
+docvision latex --only chapter_002             # 单章重跑（开新尝试，旧尝试留档；自动只跑 convert）
+#   重新核对没有命令行等价物：它的对象是已提交产物，在预览页对应核对行上点 ↻
 #   --step 取值：档位1 images|style|chapters|convert|assemble；档位2 classify|process
 docvision latex --source-dir 其它md目录 书.md  # 覆盖输入 markdown 目录（paths.output_dir）
 docvision latex --all                          # 日志分析汇总全部历史
@@ -116,7 +120,56 @@ docvision verify --project 概率论-2026         # 多项目时指定核对哪�
 
 `docvision verify` 也按项目工作区定位：`--project <名字>` 显式指定；不指定时，输出根本身是旧版单项目工程就用它，否则用其中**唯一**的子项目（有多个会报错并列出名字，避免核对错书）。默认读写的 `progress_items/` 与 `verify_report.md` 都在该项目工作区内。
 
+### 单章重试（手动重跑）
+
+某一章转得不对（缺内容、公式错、图丢了），不必重跑整本书：
+
+```bash
+docvision latex --only chapter_002                      # 只重跑这一章
+docvision latex --only chapter_002,chapter_005           # 一次重跑几章
+docvision latex --only chapter_004_child_01 --project 概率论-2026
+```
+
+`--only` 不指定 `--step` 时自动只跑 `convert`（重试一章只可能发生在转换阶段）。
+语义只有一条：**重试 = 这一章开一个新尝试**。
+
+顺带一个用法：某一章排着切回请求、当前这一轮又收不了尾时，重启程序并用 `--only` 点名**别的**章节，这一章整轮都不会被碰，2 分钟写入静默后队列里的切回自己落地（T244）。
+
+- 旧的尝试整棵挪进 `<项目>/work/attempts/<章>/try<N>/`（含已提交的 `.tex`、分片、`work/`、`result/`、`integrated-stage/`、旧 `report.md`，问题清单写 `checker-issues.md`），**不删**；
+- 新会话写 `convert_<章>.try<N+1>.jsonl`，转录里记一条 `t=meta kind=manual_retry`（原因 + 尝试号），预览页的「历史 N」里两条都在、能来回切；
+- 提交过的 `<章>.tex` 会被移走，否则转换阶段会按「已有产物，跳过」直接略过这一章。
+
+手动干预有五种，页面上按角色给按钮：
+
+- **转换重试**（转换行 ↻ / 详情栏「重试这一章」，命令行 `--only`）：重转这一章，开一个新尝试；
+- **切回第 N 次尝试**（「历史」页签里转换会话那一行的「切回这次」，P63）：把 `work/attempts/<章>/try<N>/` 整棵搬回工作区、把现在这一次整棵留档（含两条转录），来回切是幂等的、始终只有一个工作区；不重跑任何会话，要不要接着干由「继续跑 / 重新核对」决定。它**不打断**正在跑的会话：请求排队，等这一章跑完手上这一轮再搬（最近 2 分钟还有写入一律先不搬）；不过等待期间这一章**不再开新活**——批次派发前跳过、细分驱动不再派发新的子分支、同一章的续跑与核对留在队列里（T244），所以细分过的章节也是一两分钟就能切，不再一等几小时；排队那行日志每 5 分钟重复一次，带第几次尝试与已等多久；子章节对它所在的父章节切；
+- **继续跑**（详情栏「继续跑（不新建尝试）」）：接着这一章**最近一次尝试**干——不新建尝试、不归档、不动已提交的产物，**不发任何 user 内容**（历史原样续行，和中断续跑同一条规矩），只是让那条会话真的再跑一轮——哪怕它上次已 submit，也不会被"收账即结束"跳过。"会话跑歪了/报错了、我先手动改了工作区里的东西，想让它从这儿收尾"用它；
+- **从某条记录之后继续（作图会话）**（「轨迹」表每行的 ⤓，对「矢量图」同样可用）：历史截到这一条、完整旧转录留档成 `.tryN.jsonl`（回滚不丢对话）、成品清掉，然后只重跑这一张——不发任何内容（历史原样续行）；类别与 dedupe 分组不动。注意作图这一侧只回滚**对话**，作图 scratch 工作区还是最后一次的样子（成品按图清，不按轮次快照文件树）；
+- **重画这张图**（「矢量图」的作图会话详情栏）：只重做这一张——旧作图会话留档成 `.tryN.jsonl`（仍在「矢量图」里看得见），清掉这张图的成品重跑一遍；**类别、dedupe 分组与代表图都不动**，重画只换画法。是某张代表图的副本（dedupe 跟随）会被拒绝，让你去点代表图那张。画完下游（样式/划分/转换/组装）需要重跑才看得到新图；
+- **从某条记录之后继续**（轨迹表每行的 ⤓，转换会话与核对会话都行）：把这一章的转录截到这条消息、后面的轮次丢掉，抄成**一条新尝试**接着干；源转录一字不动（原记录仍在「历史」里）。转换会话会**连工作区一起退回那一刻**（P55）：每章的工作区在 `<项目>/work/rounds/<章>/repo.git`（工作区之外的裸仓库，模型看不见）里每落一条消息提交一次，切点按转录行号找回那一张快照，`reset --hard` + `clean -fdx`——改过的文件恢复、后来新建的文件与编译产物清掉，已提交的产物/分片/报告挪进 `work/attempts/<章>/try<源尝试>/`。**兼容老会话**（只有一种模式：能退就退、退不了就只退对话）：P55 之前产生的会话没有快照、宿主没有 `git`、递归子章节不拍快照——这时降级成**只回退对话**，工作区与已提交产物都保持最后一次的样子（与旧版行为一致，也不会为一个老会话建空仓库）；排队后页面的提示会直接写明"⚠ 这条会话没有工作区快照，只会回退对话，工作区里后来改动的内容会保留"，要连文件一起干净重来请用「重试这一章」。核对会话的 ⤓ 只换核对会话：产物与只读视图一个字不动，旧结论留一份 `.tex.checker.try<N>`；
+- **删除这条记录**（详情栏）：删掉 `work/sessions/` 下的那一条转录；带 `.tryN` 的连 `work/attempts/<章>/try<N>/` 一起删。90 秒内有更新或存在 `.partial`（可能还在写）会被拒绝；
+- **重新核对**（核对行 ↻ / 详情栏「重新核对这一章」）：**产物一个字不动**，只换核对会话与只读视图重新核对一遍已提交的 `.tex` 与编译产物——旧结论挪成 `<章>.tex.checker.try<N>`，新会话写 `checker_<章>.try<N+1>.jsonl`。它只给结论，**不会**自动打回转换会话；核出问题就再重试转换那一章。没有已提交产物的章节不给这个按钮（先重试转换）；递归子章节的产物在父节点的临时树里（`work/temp/conv_<根章>/work/<父章>/children/<子>.tex`、或自己那一支的 `node/result|integrated-stage/<子>.tex`），整合前也能重核（T201）。
+
+粒度是**顶层章节**：细分出来的子章节（`chapter_003_child_01`）不单独重试——它由父章节的细分树产出，重跑它得连同父节点的整合一起走，直接重试父章节即可（`--only` 点名子章节会明确报错）。
+
+单章重试**只做转换这一层**：不进样式反馈回路（那会拿全书报告改 cls、再分块重转整本书，是"整书重跑"该做的决定），也不会自动重跑 `assemble`——想在整书 PDF 里看新章，再跑一次 `docvision latex --step assemble`。
+
+这些干预都可以从预览页点出来（章节行悬浮出的 ↻、右侧详情栏的按钮）。预览页是**只读观察者**，所以按钮不执行命令，只往 `<项目>/work/retry/` 写一个请求文件（删除记录走 `/api/drop`，只删转录）：
+
+- 正在跑的 `docvision latex` 里有一条 **watcher** 跑在整个生命周期里（2 秒一跳）：样式/划分/转换/组装**任何阶段**都收，真正排进各自的并发槽位（转换与核对是两套池子）；同一章正在跑就**不消费**、留在队列里等它收尾，排上之后章节行显示「待重试」；
+- 前置条件没到（样式还没就绪、这一章还没有产物/转录）也留队，只在日志里提示一次；
+- 进程没在跑时请求留在磁盘上，下次启动先处理——按下那一下不会白点；
+- 处理完请求文件改名成 `.done.json` 留档；同一章排队多条也只重跑一次；
+- 想完全关掉这些写入口，用 `docvision sessions --no-retry`。
+
 需要本地 LaTeX 工具链：TeX 发行版（xelatex）+ poppler-utils（pdftoppm）。全书多文件构建优先用 `latexmk`（缺失时退回两遍编译）；矢量图转 SVG 按 `dvisvgm → pdftocairo → mutool → inkscape` 依次尝试，任一可用即可；会话 bash 沙箱用 bubblewrap（缺失时自动回退普通 shell 并记警告）。`docvision init` 会自动检查 xelatex / pdftoppm / mmdc 并给出安装提示。
+
+## 清理与重跑（辅助脚本）
+
+仓库根目录有两个 bash 脚本，都默认**先整目录备份**（`cp -a` 到同级的 `<项目名>_记录_<时间戳>/`）、默认先打印计划、要 `-y` 确认（`-n` 只预览）；检测到 `docvision latex` 正在运行会拒绝执行（`-f` 强来）：
+
+- `clean_project.sh <项目目录>` —— 清回**只剩分类结果**（连样式包）：删 dedupe/process 的字段与下游产物、`build/`、`chapters/`、`out/`、`source/figures|tikz`、`source/dedupe`、`source/sessions`，保留 `source/progress_items` 的 classify 结果（逐图请求，删了要整本重烧）。`--with-style` 连样式包一起清，`--keep-sessions` 保留 `source/sessions`。
+- `clean_convert.sh <项目目录>` —— 清回**章节划分刚做完、还没逐章转换**：删 `work/chapters/`（转换成品）、`work/reports/`（每章报告）、`work/temp/`（章节工作区、递归子树、`.gate`、issues store）、`work/sessions/{convert_*,checker_*}.jsonl`，以及转换之后的一切——`build/`、`out/`、交付副本 `<项目名>.pdf`、`work/style_fix|stylefix_assess|stylefix_integrate|final_review|views|pdfview`（**不删 `work/media/`**：那是保留下来的 `work/style_session.jsonl` 的图片附件目录，删了样式会话就只剩断图，T199）、`work/sessions/{book_fix,final_review,style_fix_*}.jsonl`；把 `progress.json` 的 `convert`/`assemble` 归空（`style`/`images`/`chapters` 保持 done），所以重跑时分类/样式/划分全部跳过、**直接从逐章转换开始**（每章重新开会话，旧转录也清掉，不会拿"已有产物，跳过"糊过去）。保留 `chapters/*.md`、`work/sessions/chapters.jsonl`、`style/`、`work/style/`、`work/style_session.jsonl`、`source/`（含分类结果与 dedupe 结论）、`doc_index/`。`--keep-convert` 是反口径：保留转换成果（含转录与 `work/temp/`），只清它之后的阶段，重跑从风格修复大循环接上；此时脚本会点出 `work/chapters` 里指向 `_subdivision/…` 的断链（旧二进制产物，汇编会失败）。
 
 ## 风格分析的数据来源（档位1）
 

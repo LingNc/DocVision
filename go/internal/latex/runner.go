@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mineru-tools/internal/config"
@@ -40,6 +41,10 @@ type ImagesOptions struct {
 	// Files selects specific markdown files (base names with or
 	// without .md, or paths). Empty = every *.md in SourceDir (batch).
 	Files []string
+	// Only 只重跑点名的图片（`<md名>::<图片引用路径>` 键，P53）：页面上的
+	// 「重画这张图」。done 的条目也会被当成待处理（就是要重画），分类与
+	// dedupe 两个阶段跳过——这张图的类别和分组早就定了，重画不该再动它们。
+	Only []string
 	// Verbose keeps per-image console output. Default (false) shows a
 	// compact img2text-style progress line instead; details always go
 	// to the log file.
@@ -185,13 +190,17 @@ type Runner struct {
 	// writes" out of clientFor). clientFor and modelOf are the only doors.
 	cfgMu sync.Mutex
 
-	wm       *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
-	inline   bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
-	docIndex *DocIndex        // 原始文档只读索引（doc_search/原书页面）
-	docPages *pageIndex       // 与索引对齐的全局页表（水印采样/索引对齐）
-	projDir  string           // 项目根（project 挂载点，只读）
-	pdfView  *pdfView         // 原书 PDF 的最小视图（source 挂载点，只读）
-	projView string           // 项目的最小只读视图（project 挂载点）
+	// noChapterGate 只给测试：跳过"编译成功 + 看过 PDF"的提交门禁（那条
+	// 门禁要真跑 xelatex，单测里既慢又需要 TeX 环境）。生产路径恒为 false。
+	noChapterGate bool
+	wm            *WatermarkMemory // 水印工作记忆（流程开始时检测，贯穿所有会话）
+	inline        bool             // 档位1 inline 模式：tikz 代码直接内嵌进 markdown
+	docIndex      *DocIndex        // 原始文档只读索引（doc_search/原书页面）
+	docPages      *pageIndex       // 与索引对齐的全局页表（水印采样/索引对齐）
+	docIndexStamp string           // 上次建索引时的 md 指纹（幂等重建用）
+	projDir       string           // 项目根（project 挂载点，只读）
+	pdfView       *pdfView         // 原书 PDF 的最小视图（source 挂载点，只读）
+	projView      string           // 项目的最小只读视图（project 挂载点）
 
 	// lastSplitError remembers the latest split validation failure so
 	// the chapter session can be re-prompted with a concrete reason.
@@ -203,10 +212,69 @@ type Runner struct {
 	python     *PythonEnv
 	pythonOnce sync.Once
 
+	// 阶段槽位（T179）：转换与核对各有自己的池子，跨整棵递归树共享（不是每个
+	// 父节点一份）。核对会话读 PDF/原书页、转换会话写 .tex，混在一个池里会让
+	// 核对排在一个慢转换后面——用户口径是"两个阶段的并发独立，不能放一起算"。
+	convertSlotsOnce sync.Once
+	// convertSlots 按**任务创建顺序**派发（见 slots.go）：只用 channel 的 FIFO
+	// 会让晚创建的顶层会话一直插队，早期子树的孙节点饿在队尾（P60 收尾）。
+	convertSlots     *slotSem
+	convertSeq       atomic.Int64 // 章节任务的创建顺序戳（越小创建越早）
+	checkerSlotsOnce sync.Once
+	checkerSlots     chan struct{}
+	// chapterSlots 是其余阶段（样式修复 / 整合以外的零散会话 / 提交提醒）共用的
+	// 通用池子，仍然是 latex.concurrency。
+	chapterSlotsOnce sync.Once
+	chapterSlots     chan struct{}
+
 	// consoleVerbose mirrors the book-run --verbose flag: when false
 	// (compact mode) the convert phase shows a single [convert k/N]
 	// progress line instead of streaming every session event.
 	consoleVerbose bool
+
+	// onlyChapters 是 `--only` 指定的章节（P53）：只跑这些章，并且每一章都
+	// 强制重转（归档旧尝试、分配新尝试号）。
+	onlyChapters map[string]bool
+	// retryAttempt 记录"这一章这一次要写第几号尝试"（P53）：由 --only 或网页
+	// 重试队列在批次开始前填好，convertOneChapter 读它决定转录文件名。
+	// 只在批次之间写、批次内部只读，所以不需要锁。
+	retryAttempt map[string]int
+	// retryCheckerAttempt 记录"这一章这一次要写第几号核对尝试"（P53）：重新核对
+	// 不动产物，只换核对转录。写读时机同 retryAttempt。
+	retryCheckerAttempt map[string]int
+	// retryNotes 是重试原因（写进新尝试的转录，事后对得上）。
+	retryNotes map[string]string
+	// busyMu/chapterBusy 标记"这一章现在有会话在跑"（P53 阶段二）：主流程的并发批与
+	// 运行期的重试派发共用它，同一章不会被跑两遍（派发发现忙就把请求留在
+	// 队列里，等下一次 tick）。
+	busyMu      sync.Mutex
+	chapterBusy map[string]*sync.Mutex
+	// continueFlag 标记"这一章是人手动推下去的"（P53 阶段二）：不插任何内容，
+	// 只保证那条会话真的再跑一轮（否则上次已 submit 时会被 replay 收账跳过）。
+	continueFlag map[string]bool
+	// retryWatcher 是运行期消费 work/retry 队列的那条 goroutine（P53 阶段二）：不等
+	// 阶段边界、也不用重启进程，排上就能进并发队列。
+	retryWatcherStop chan struct{}
+	retryWatcherWG   sync.WaitGroup
+	// retryWarned 让"请求还在排队"的提示每个请求文件只打一次。
+	retryWarned map[string]bool
+	// retryBusySince/retryBusyLogged 支撑"这一章还有会话在跑"那条日志（T232）：每个
+	// 请求文件记下第一次被跳过与上次打日志的时间，好说清"等了多久"，又不至于
+	// 每 2 秒刷一行。
+	retryBusySince  map[string]time.Time
+	retryBusyLogged map[string]time.Time
+	// vectorMu 串行化"逐图重画"与 images 阶段（P53）：两者都写
+	// source/progress_items 与 source/*.md，同时跑会把进度文件写花。
+	vectorMu sync.Mutex
+	// imagesSrcDir 是本次运行 images 阶段扫的原始 md 目录（重画一张图时要
+	// 回到同一份原始 md 重扫，不能用已经被重写过的项目 md）。
+	imagesSrcDir string
+	// rescueQueued 记录"这条转录已经被复盘排进重试队列"（P61/C）。判 truncate
+	// 之后那一章仍按失败收尾，但界面要显示的是"等待并发槽"（队列马上会重跑
+	// 它），所以调用方写失败终态前先看这个标记、把 error 换成 queued。
+	// 键 = 转录绝对路径；每次进复盘前清掉，上一轮的标记不会漏过来。
+	rescueQueuedMu sync.Mutex
+	rescueQueued   map[string]bool
 }
 
 // phaseNote returns a console printer for phase-level progress notes.
@@ -321,6 +389,36 @@ func (r *Runner) sessionBashTemp(proj, name string) (string, func()) {
 }
 
 // keepSessionFile deletes a session transcript unless records are kept.
+// noChapterGate 关掉"提交前必须编译成功并看过 PDF"的门禁。**只给测试用**：
+// 那条门禁要真跑 xelatex，而单元/集成测试用假模型、机器上也不一定有 TeX。
+// 生产路径永远不设置它（见 submitGate）。
+func (r *Runner) submitGate(work, base, chapterMD string) *chapterGate {
+	if r.noChapterGate {
+		return nil
+	}
+	g := &chapterGate{WorkRoot: work, Base: base, ChapterMD: chapterMD}
+	// 没有 source 挂载点（原书 PDF 视图还没就绪 / 这本书没有 MinerU 中间产物）
+	// 时，"至少对照 2–4 页原书"这一条永远不可能满足：会话拿到的是
+	// `未知挂载点 "source"`，看不了原书，门禁却一直拿它拒。真实现场里就是
+	// 这样把会话逼进"复盘 → 截断 → 还是过不去"的死循环的。放宽这一条，
+	// 但留一行告警——放宽不等于装作没发生。
+	g.NoSourceMount = len(r.sourceMounts()) == 0
+	if g.NoSourceMount {
+		g.Warn = func(msg string) { r.log.LogWarning(0, "[gate]", base, msg) }
+	}
+	return g
+}
+
+// sourceMounts 返回原书 PDF 视图能给会话的几个挂载点（视图没就绪时是空的）。
+// 会话的 source 挂载点与 list_source_pages/doc_search 都来自同一个 pdfView，
+// 所以它是"这次会话能不能对照原书"的唯一判据。
+func (r *Runner) sourceMounts() []Mount {
+	if r.pdfView == nil {
+		return nil
+	}
+	return r.pdfView.Mounts()
+}
+
 func (r *Runner) keepSessionFile(path string) {
 	if r.keepRecords() {
 		r.log.Log(0, "[session] 保留会话记录:", path)
@@ -378,6 +476,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	// Scan markdown files first: the git-style project name is derived
 	// from them (主题名), and the workspace must be resolved before any
 	// output directory is created.
+	r.imagesSrcDir = srcDir
 	mdFiles, err := filepath.Glob(filepath.Join(srcDir, "*.md"))
 	if err != nil {
 		return err
@@ -466,12 +565,35 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	loadProgress(progDir, prog)
 	r.migrateProgress(prog, progDir, outDir)
 
+	onlySet := map[string]bool{}
+	for _, k := range opts.Only {
+		if k = strings.TrimSpace(k); k != "" {
+			onlySet[k] = true
+		}
+	}
 	pending := make([]*task, 0, len(all))
 	for _, t := range all {
+		if len(onlySet) > 0 {
+			if onlySet[t.key()] {
+				pending = append(pending, t) // 点名重画：done 也要再跑一遍
+				delete(onlySet, t.key())
+			}
+			continue
+		}
 		if p, ok := prog[t.key()]; ok && p.Status == "done" {
 			continue
 		}
 		pending = append(pending, t)
+	}
+	if len(onlySet) > 0 {
+		// 点名的图不在这次扫描里：多半是原始 md 目录不对（项目 md 已经被
+		// 重写成 \input{tikz}，扫不出图片引用了），明确报出来而不是静默跳过。
+		var keys []string
+		for k := range onlySet {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return fmt.Errorf("找不到要重画的图 %s（原始 md 目录: %s）", strings.Join(keys, ", "), srcDir)
 	}
 	if opts.TestMode {
 		pending = sampleTasks(pending, opts.Number, opts.Seed, r.log)
@@ -493,7 +615,10 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	}
 
 	// Phase 1: classification.
-	if opts.Step == "" || opts.Step == "classify" {
+	// 点名重画只跑 process：类别与分组都定了，重跑分类既浪费请求又会把
+	// 这张图归到别的类里去。
+	onlyRun := len(opts.Only) > 0
+	if !onlyRun && (opts.Step == "" || opts.Step == "classify") {
 		// 水印工作记忆：最先检测（全览页 + md 统计），结果贯穿全部会话。
 		if r.cfg.Latex.RemoveWatermark {
 			var samples []watermarkSample
@@ -514,16 +639,23 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	}
 
 	// 档位1：分类完成后、逐图作图前再核对相似图；档位2原有流程不变。
+	// 点名重画跳过 dedupe（分组不动），但要把这张图自己的成品铺进去。
 	if r.inline {
-		r.motifDedupePhase(all, prog, progDir, outDir)
+		if !onlyRun {
+			r.motifDedupePhase(all, prog, progDir, outDir)
+		}
 		applyMotifArtifacts(pending, prog, progDir, outDir)
 	}
 	// Phase 2: per-class processing.
 	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose)
 	if r.inline {
-		applyMotifArtifacts(all, prog, progDir, outDir)
-		r.clearUnresolvedMotifLinks(all, prog, progDir)
-		materializeSharedMotifTeX(all, prog, progDir, outDir)
+		if onlyRun {
+			applyMotifArtifacts(pending, prog, progDir, outDir)
+		} else {
+			applyMotifArtifacts(all, prog, progDir, outDir)
+			r.clearUnresolvedMotifLinks(all, prog, progDir)
+			materializeSharedMotifTeX(all, prog, progDir, outDir)
+		}
 	}
 
 	if !verbose {
@@ -996,6 +1128,11 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			case ClassVector:
 				if compErr != nil {
 					r.log.LogWarning(tid, "[vector] 工具链不可用，保留原图（下次运行重试）:", tt.imgPath)
+					// 状态是 fallback，进度行的 fallback 计数就必须跟着加——否则
+					// 收尾那行会出现 done:0/errors:0/fallback:0 全零而图其实被跳过。
+					mu.Lock()
+					warned++
+					mu.Unlock()
 					pp.Kept = true
 					pp.Status = "fallback"
 					sessType = "vector-fallback"
@@ -1073,6 +1210,17 @@ const processAPIErrorAbort = 3
 // session layer (HTTP/接口/额度) rather than from the figure itself. 现场
 // 教训：配置写错 thinking.type 时服务端 400 拒掉每个请求，日志却打的是
 // "[vector] TikZ 未通过"，看起来像提示词或编译器的问题。
+// isSessionFatalError reports errors where retrying or re-opening the session
+// cannot help (out of balance / no usable resource pack): report at once.
+func isSessionFatalError(msg string) bool {
+	for _, mark := range []string{"SESSION_INSUFFICIENT_BALANCE", "余额不足", "无可用资源包"} {
+		if strings.Contains(msg, mark) {
+			return true
+		}
+	}
+	return false
+}
+
 func isSessionAPIError(msg string) bool {
 	for _, mark := range []string{"SESSION_API_ERROR", "SESSION_INSUFFICIENT_BALANCE",
 		"SESSION_TIMEOUT", "SESSION_ERROR", "api error:", "会话错误"} {
@@ -1156,15 +1304,10 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	client := r.clientFor(r.cfg.Latex.DrawingModel)
 	tuning := r.cfg.LatexSession("drawing")
 
-	base := sanitizeName(strings.TrimSuffix(filepath.Base(t.imgPath), filepath.Ext(t.imgPath))) +
-		"__" + sanitizeName(pp.Label)
-	if base == "__" || len(base) < 3 {
-		base = sanitizeName(strings.TrimSuffix(filepath.Base(t.imgPath), filepath.Ext(t.imgPath)))
+	name := vectorTexBase(t.mdName, t.imgPath, pp.Label)
+	if name == "" {
+		name = fmt.Sprintf("fig_%d", time.Now().UnixNano()%100000)
 	}
-	if base == "" {
-		base = fmt.Sprintf("fig_%d", time.Now().UnixNano()%100000)
-	}
-	name := sanitizeName(strings.TrimSuffix(t.mdName, filepath.Ext(t.mdName))) + "__" + base
 	dstTex := filepath.Join(outDir, "tikz", name+".tex")
 	dstPDF := filepath.Join(outDir, "figures", name+".pdf")
 	dstPNG := filepath.Join(outDir, "figures", name+".png")
@@ -1767,4 +1910,19 @@ func resolveImageFile(imagesDir, imgPath, subject string) (string, error) {
 		}
 	}
 	return "", os.ErrNotExist
+}
+
+// vectorTexBase 是"这张图的成品/会话叫什么"的唯一来源（P53 抽出来是为了能
+// 反查：给一条作图转录名，找回它对应哪张图的 progress 记录）。
+// 形如 <md名>__<图片基名>__<类别/图注标签>。
+func vectorTexBase(mdName, imgPath, label string) string {
+	imgBase := sanitizeName(strings.TrimSuffix(filepath.Base(imgPath), filepath.Ext(imgPath)))
+	base := imgBase + "__" + sanitizeName(label)
+	if base == "__" || len(base) < 3 {
+		base = imgBase
+	}
+	if base == "" {
+		return ""
+	}
+	return sanitizeName(strings.TrimSuffix(mdName, filepath.Ext(mdName))) + "__" + base
 }

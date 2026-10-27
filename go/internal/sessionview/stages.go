@@ -16,7 +16,7 @@ import (
 // StageOrder is the pipeline order used to sort stage groups; a stage that is
 // not listed sorts last (alphabetically), so an unknown session file can never
 // push itself to the top of a book's sidebar.
-var StageOrder = []string{"dedupe", "vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check", "fix", "final-review", "mermaid-fix", "img2text"}
+var StageOrder = []string{"dedupe", "vector", "style", "chapters", "convert", "checker", "style-fix", "figure-check", "fix", "final-review", "mermaid-fix", "img2text", "rescue"}
 
 // StageTitles maps a stage key to its short Chinese display name.
 var StageTitles = map[string]string{
@@ -34,7 +34,9 @@ var StageTitles = map[string]string{
 	// 失败后的虚拟工作区会话；逐图分析 = preview.img2text_all 的 debug 转录。
 	"mermaid-fix": "升级修复",
 	"img2text":    "逐图分析",
-	"session":     "其他会话",
+	// P58：未提交收尾的复盘会话单独成组，排在最后（一般不看，只做记录）。
+	"rescue":  "错误处理",
+	"session": "其他会话",
 }
 
 // StageTitle renders a stage key for the sidebar.
@@ -234,6 +236,9 @@ func (s *scanner) enrichSessions(root string, sessions []SessionInfo) {
 	}
 	for i := range sessions {
 		stage := StageOf(sessions[i])
+		if sessions[i].ChapterID != "" {
+			stage = "convert"
+		}
 		sessions[i].Stage = stage
 		sessions[i].StageTitle = StageTitle(stage)
 		dir := projectDirFor(sessions[i].ID)

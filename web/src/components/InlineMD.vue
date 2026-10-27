@@ -4,18 +4,20 @@
 import { onMounted, ref, watch } from 'vue'
 import { renderInlineMarkdown } from '../legacy/markdown'
 
-const props = defineProps<{ tag?: string; text: string }>()
+// plain：按纯文本插入、不走行内 markdown（章节会话的标题是流水线标识符
+// `chapter_004_child_01`，渲染 markdown 会把下划线当斜体吃掉——T176）。
+const props = defineProps<{ tag?: string; text: string; plain?: boolean }>()
 const host = ref<HTMLElement | null>(null)
 
 function render() {
   const el = host.value
   if (!el) return
   el.textContent = ''
-  el.appendChild(renderInlineMarkdown(props.text))
+  el.appendChild(props.plain ? document.createTextNode(props.text) : renderInlineMarkdown(props.text))
 }
 
 onMounted(render)
-watch(() => props.text, render)
+watch(() => [props.text, props.plain], render)
 </script>
 
 <template>

@@ -16,7 +16,10 @@ split_files/
 mineru_output/
 temp/
 test*/
+!figure_compare/
+!figure_compare/**
 !web/tests/
+!go/internal/config/testdata/
 
 config.yaml
 

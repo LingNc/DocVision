@@ -58,7 +58,7 @@ func (s *scanner) scanExtras(out []SessionInfo, now time.Time) []SessionInfo {
 				return nil
 			}
 			if d.IsDir() {
-				if p != base && (d.Name() == "media" || d.Name() == ".git") {
+				if p != base && skipScanDir(p, d.Name()) {
 					return fs.SkipDir
 				}
 				return nil
@@ -137,25 +137,25 @@ func img2TextSessionInfo(p, rel, name string, info fs.FileInfo, stat transcriptS
 	}
 	return SessionInfo{
 		// Prefix the ID so it can never collide with a main-root rel path.
-		ID:            "img2text:" + rel,
-		Board:         "img2text",
-		Label:         label,
-		Title:         title,
-		Name:          name,
-		Path:          p,
-		Project:       project,
-		Stage:         stage,
-		StageTitle:    stageTitle,
-		Messages:      stat.Messages,
-		Meta:          stat.Meta,
-		Stats:         stat.Usage,
-		Estimate:      estimateInfoFor(stat),
-		Bytes:         info.Size(),
-		ModTime:       info.ModTime(),
-		SHA:           stat.SHA,
-		Live:          liveNow(stat, info.ModTime(), now),
-		EndState:      liveEndState(endStateOf(stat), now.Sub(info.ModTime()) < LiveWindow),
-		ChapterOrder:  -1, // set by the numbering pass below
+		ID:           "img2text:" + rel,
+		Board:        "img2text",
+		Label:        label,
+		Title:        title,
+		Name:         name,
+		Path:         p,
+		Project:      project,
+		Stage:        stage,
+		StageTitle:   stageTitle,
+		Messages:     stat.Messages,
+		Meta:         stat.Meta,
+		Stats:        stat.Usage,
+		Estimate:     estimateInfoFor(stat),
+		Bytes:        info.Size(),
+		ModTime:      info.ModTime(),
+		SHA:          stat.SHA,
+		Live:         liveNow(stat, info.ModTime(), now),
+		EndState:     liveEndState(endStateOf(stat), now.Sub(info.ModTime()) < LiveWindow),
+		ChapterOrder: -1, // set by the numbering pass below
 	}, imgKey, true
 }
 

@@ -389,9 +389,53 @@ type SessionInfo struct {
 	// picked for this session's short image name (8, escalated to 12 on
 	// collision). Zero = default 8. Server-side only.
 	ImgShortKeep int `json:"-"`
-	// ChapterOrder is the chapter number carried by the transcript file name
-	// ("convert_chapter_003.jsonl" → 3), the block-view badge for chapter
-	// sessions the way ImageOrder numbers per-image ones.
+	// Chapter identity links each conversion to its own checker and nested children.
+	ChapterID       string `json:"chapterId,omitempty"`
+	ChapterParent   string `json:"chapterParent,omitempty"`
+	ChapterRole     string `json:"chapterRole,omitempty"`
+	ChapterDepth    int    `json:"chapterDepth,omitempty"`
+	ChapterActivity string `json:"chapterActivity,omitempty"`
+	// ChapterAttempt is the 1-based "how many times this chapter was
+	// converted" counter (a checker failure replaces the session; each
+	// attempt keeps its own transcript `<名>.try2.jsonl`). The preview
+	// groups them into a "历史 N" chain. Zero = 1 (single attempt).
+	ChapterAttempt int `json:"chapterAttempt,omitempty"`
+	// ChapterAnchor (P59) is the CONVERT transcript this checker session
+	// reviewed, as a basename without extension (`convert_<章>` or
+	// `convert_<章>.tryN`), read from the `t=meta kind=checker_target` note
+	// the runner writes when the checker session starts. The two attempt
+	// counters (convert vs checker) are independent — a manual re-check only
+	// bumps the checker number and still reviews the same product — so the
+	// viewer pairs a checker with a convert by THIS anchor, never by number.
+	ChapterAnchor string `json:"chapterAnchor,omitempty"`
+	// ChapterAnchorAttempt is that convert transcript's 1-based attempt
+	// number (the `convert_attempt` field of the same note). Zero = no
+	// anchor (transcripts written before P59).
+	ChapterAnchorAttempt int `json:"chapterAnchorAttempt,omitempty"`
+	// FixIssueIDs (P60) lists the issue ids the latest fix round of this
+	// session was given, read from `t=meta kind=fix_target`. Only fix
+	// transcripts carry them. P60 第一步只把它读出来给将来的界面用：
+	// 章节树/历史/分组的行为一行都没改（见 Scan 里的角色赋值）。
+	FixIssueIDs []string `json:"fixIssueIds,omitempty"`
+	// ReviewedRole / ReviewedTranscript (P58 补) are what a RESCUE session
+	// reviewed, read from `t=meta kind=rescue_target` that the rescue writes
+	// into its own transcript before the review starts: the role
+	// (convert/checker) and the reviewed transcript's base name without the
+	// extension (`convert_<章>.try2`), same shape as the checker anchor.
+	// The history tab uses them to say "复盘了 转换#1" and to keep the rescues
+	// of DIFFERENT targets in separate chains; transcripts written before the
+	// note existed carry empty strings.
+	ReviewedRole       string `json:"reviewedRole,omitempty"`
+	ReviewedTranscript string `json:"reviewedTranscript,omitempty"`
+	// Archived marks a transcript living under `work/attempts/<章>/tryN/`.
+	// That directory is the archive of an invalidated attempt (the whole
+	// subtree is moved there), so it holds copies of the sessions that are
+	// still in the working tree — the same chapter+attempt shows up twice
+	// and the history list rendered two `#1` rows (T194). The viewer keeps
+	// such sessions (an archived-only attempt is the only evidence left)
+	// but prefers the working-tree copy when both exist.
+	Archived bool `json:"archived,omitempty"`
+	// ChapterOrder is the chapter number carried by a transcript identity.
 	ChapterOrder int `json:"chapterOrder,omitempty"`
 	// Stage / StageTitle group sessions by pipeline stage inside a project
 	// ("vector", "convert", "checker", …) — the sidebar's second level.
@@ -603,7 +647,127 @@ func (l Line) MarshalJSON() ([]byte, error) {
 //	<proj>/source/sessions/vector_<书名>__<sha>__<图>.jsonl -> vector:<图>
 //
 // Anything else keeps its base name so an unknown file stays identifiable.
+type chapterIdentityInfo struct {
+	ID, Parent, Role string
+	Depth            int
+	Attempt          int
+}
+
+// chapterAttemptSuffix 匹配重试用转录名：convert_<章>.try2.jsonl。
+var chapterAttemptSuffix = regexp.MustCompile(`^(.*)\.try(\d+)$`)
+
+var chapterRootID = regexp.MustCompile(`^chapter[_-]?\d+`)
+var chapterChildSuffix = regexp.MustCompile(`^(.*)_child_(\d+)$`)
+
+// chapterRescueID 是复盘转录名里允许出现的章节 ID 形状（P61/E）：`rescue_` 后面
+// 必须**整段**就是一个章节 ID（`chapter_004` / `chapter_004_child_02`）。P58 的
+// 老命名（`rescue_<章>_<时间戳>`）整段不匹配 → 文件名给不出章节身份，改由
+// rescueLegacyChapter 从转录自己的备注里补（补不到才留在「错误处理」）。
+var chapterRescueID = regexp.MustCompile(`^chapter[_-]?\d+(?:_child_\d+)*$`)
+
+// rescueLegacyChapter 给**老命名**的复盘转录补章节身份（P58 补）。文件名不可用
+// 时按转录自己的 meta 推断，来源按优先级：
+//
+//  1. `t=meta kind=rescue_target` 的 `chapter`（复盘开始时写的目标章节）；
+//  2. 系统快照里的 `session_label`（`rescue:<章>`）——P58/P61 那批没有目标备注，
+//     但会话层建转录时就写了标签。
+//
+// 两条都没有/形状不对 → 零值：这条转录仍按 P58 落在「错误处理」组（不丢）。
+// 编号（`#1..#N`）不在这里定：老名字没有号，界面按 mtime 读时推断（D）。
+func rescueLegacyChapter(stat transcriptStat) chapterIdentityInfo {
+	id := strings.TrimSpace(stat.RescueChapter)
+	if id == "" {
+		if label := strings.TrimSpace(stat.SessionLabel); strings.HasPrefix(label, "rescue:") {
+			id = strings.TrimPrefix(label, "rescue:")
+		}
+	}
+	if !chapterRescueID.MatchString(id) {
+		return chapterIdentityInfo{}
+	}
+	parent := ""
+	if m := chapterChildSuffix.FindStringSubmatch(id); m != nil {
+		parent = m[1]
+	}
+	return chapterIdentityInfo{ID: id, Parent: parent, Role: "rescue", Depth: strings.Count(id, "_child_"), Attempt: 1}
+}
+
+var timestampPrefixRe = regexp.MustCompile(`^\d{8}-\d{6}-`)
+
+func chapterIdentity(rel string) chapterIdentityInfo {
+	base := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+	// T252：残片/快照副本的名字前面带 `YYYYMMDD-HHMMSS-`，先把这段前缀剥掉，
+	// 否则整段名字对不上任何前缀，会话就没有章节身份、单独排在「会话」阶段。
+	if m := timestampPrefixRe.FindString(base); m != "" {
+		base = strings.TrimPrefix(base, m)
+	}
+	// T257：`parked-<名>` 是切回时"目标已存在、不覆盖"的改名（restoreMoveUnique），
+	// 内容是一条被换下来的旧尝试。剥掉前缀才认得出章节身份，否则它单独排在
+	// 「会话」阶段、按未开始显示。
+	base = strings.TrimPrefix(base, "parked-")
+	attempt := 1
+	if m := chapterAttemptSuffix.FindStringSubmatch(base); m != nil {
+		if n, err := strconv.Atoi(m[2]); err == nil && n > 1 {
+			attempt = n
+			base = m[1]
+		}
+	}
+	role, id := "", ""
+	// P60：修复转录与转换/核对同一种命名（`fix_<章>[.tryN].jsonl`），所以章节
+	// 身份照同一套规则推断——`chapter_004_child_02` 的父章、深度、尝试号都是
+	// 文件名自带的。角色仍记成 "fix"（谁干的活），阶段归组由 enrichSessions 按
+	// "有章节身份即章节阶段"归到 convert 组，与转换/核对同组。
+	//
+	// P61：复盘转录同样自带章节（`rescue_<章>[.tryN].jsonl`）。章节 ID、父章、
+	// 深度与 `checker_` 完全同一套推导；`.tryN` 是这条目标被复盘的第几次
+	// （P58 补起，见 internal/latex/rescue.go 的 rescueTranscriptPath）。角色是
+	// "rescue"——它永远只是章节下面的一行，绝不能变成某一章的 convert 或
+	// checker（挑选在 web 侧，见 sidebar.ts 的 buildChapterTree）。
+	for _, prefix := range []struct{ name, role string }{{"convert_", "convert"}, {"checker_", "checker"}, {"fix_", "fix"}, {"rescue_", "rescue"}} {
+		if strings.HasPrefix(base, prefix.name) {
+			role, id = prefix.role, strings.TrimPrefix(base, prefix.name)
+			break
+		}
+	}
+	if base == "convert" || base == "checker" {
+		role = base
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		for i, part := range parts {
+			if strings.HasPrefix(part, "conv_") && len(part) > len("conv_") {
+				id = strings.TrimPrefix(part, "conv_")
+				for j := i + 1; j+1 < len(parts); j++ {
+					if parts[j] == "_subdivision" && strings.HasPrefix(parts[j+1], "child_") {
+						child := strings.TrimPrefix(parts[j+1], "child_")
+						if _, err := strconv.Atoi(child); err == nil {
+							id += "_child_" + child
+							j++
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+	if role == "" || id == "" || !chapterRootID.MatchString(id) {
+		return chapterIdentityInfo{}
+	}
+	// P61：复盘转录的剩余部分必须整段是一个章节 ID，否则文件名给不出章节身份
+	// （老命名 `rescue_<章>_<时间戳>` 就落在这里）。P58 补起这种转录改由 Scan
+	// 调 rescueLegacyChapter 从它自己的 meta 里补；补不到才归「错误处理」阶段。
+	if role == "rescue" && !chapterRescueID.MatchString(id) {
+		return chapterIdentityInfo{}
+	}
+	parent := ""
+	if m := chapterChildSuffix.FindStringSubmatch(id); m != nil {
+		parent = m[1]
+	}
+	return chapterIdentityInfo{ID: id, Parent: parent, Role: role, Depth: strings.Count(id, "_child_"), Attempt: attempt}
+}
+
+// LabelFor infers the pipeline stage tag from a transcript path.
 func LabelFor(rel string) string {
+	if chapter := chapterIdentity(rel); chapter.ID != "" {
+		return chapter.Role + ":" + chapter.ID
+	}
 	base := transcriptStem(rel)
 	switch base {
 	case "":
@@ -636,6 +800,8 @@ func LabelFor(rel string) string {
 		{"stylefix-", "style-fix"},
 		{"vector_", "vector"},
 		{"figure_check_", "figure-check"},
+		// P58：复盘会话（rescue_<章>[.tryN].jsonl）落到「错误处理」阶段。
+		{"rescue_", "rescue"},
 	} {
 		if strings.HasPrefix(base, p.prefix) && len(base) > len(p.prefix) {
 			return p.label + ":" + stageSubject(p.label, strings.TrimPrefix(base, p.prefix))
@@ -690,7 +856,16 @@ func TitleFor(rel string) string {
 	case "figure-check":
 		return "逐图校验 · " + subject
 	case "fix":
-		return "全书修复" // T62：装配失败修复会话（book_fix）
+		// T62：装配失败修复会话（book_fix）是书级的，没有章节身份；P60 的修复
+		// 转录带章节 ID（fix_<章>.jsonl），点名到章，不再笼统叫「全书修复」。
+		if chapterRootID.MatchString(subject) {
+			return "修复 · " + subject
+		}
+		return "全书修复"
+	case "rescue":
+		// P61：复盘会话带章节身份后与转换同组（这样它能在章节树里当子行显示），
+		// 标题仍点名"复盘"，不跟着叫「转换 · <章>」。
+		return "复盘 · " + subject
 	case "final-review":
 		return "终审" // T62：终审会话（final_review）
 	case "会话":
@@ -802,8 +977,26 @@ func isHashSegment(s string) bool {
 // hold the image payloads referenced by the transcripts, never transcripts
 // themselves) and .git (never a session store). A single unreadable
 // subdirectory does not abort the scan.
+// archivedRel 判断一条转录是否在「作废尝试」的归档目录里。
+//
+// T235：多项目布局下 Scan 的根是 `latex_project/`，rel 长成
+// `<项目名>/work/attempts/<章>/try<N>/...`；以前只判 `work/attempts/` 前缀，于是
+// 多项目布局里 archived 恒为 false——页面上归档标记、活体优先、修复/复盘按世代
+// 挂靠全都失效（接口里连这个字段都不出现）。前缀与路径中段两种位置都认。
+func archivedRel(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	if strings.HasPrefix(path.Base(rel), "parked-") {
+		// T257：切回时被换下来的那条（改名 parked- 保留），是历史不是现役。
+		return true
+	}
+	return strings.HasPrefix(rel, "work/attempts/") || strings.Contains(rel, "/work/attempts/")
+}
+
 func Scan(root string) ([]SessionInfo, error) {
-	return (&scanner{root: root}).scan()
+	sc := &scanner{root: root}
+	sc.loadCountCache(root) // T253：命中缓存的转录不再重读
+	defer sc.saveCountCache(root)
+	return sc.scan()
 }
 
 // ScanWith scans root plus every extra directory (T37 img2text sessions).
@@ -814,13 +1007,19 @@ func ScanWith(root string, extras []ScanExtra) ([]SessionInfo, error) {
 // scanner caches per-file message counts between scans so the live server's
 // 2-second polling does not re-read transcripts that did not change.
 type scanner struct {
+	// keep 记这一轮扫到的文件（T253）：缓存落盘时按它剪掉已删除的条目。
+	keep   map[string]bool
 	root   string
 	extras []ScanExtra
 	// img2Text accumulates the sessions found in img2text extra roots
 	// during one scan, so the numbering pass can index them per group.
 	img2Text []img2TextEntry
 	mu       sync.Mutex
-	counts   map[string]countEntry
+	// scanMu 让同一个 scanner 上的并发扫描排队（T255）：预览页会复用同一个
+	// scanner 做轮询，而 scan 里有多处 per-扫描的可变状态（img2Text、keep…），
+	// 两个请求撞在一起时以前会崩在 concurrent map writes。
+	scanMu sync.Mutex
+	counts map[string]countEntry
 	// ws caches "is this directory a project workspace" between polls.
 	ws map[string]bool
 }
@@ -843,10 +1042,79 @@ func (s *scanner) workspace(dir string) bool {
 	return v
 }
 
+// 字段导出：索引缓存要落盘，encoding/json 只认导出字段（T253 踩过一次：整个
+// entry 序列化成 `{}`——缓存写着成功，其实什么都没记住）。
 type countEntry struct {
-	size    int64
-	modTime time.Time
-	stat    transcriptStat
+	Size    int64          `json:"size"`
+	ModTime time.Time      `json:"mtime"`
+	Stat    transcriptStat `json:"stat"`
+}
+
+// countCacheFile 是 T253 的磁盘索引缓存：路径 → (size, mtime, 统计)。
+// 命中就不重读文件——一次启动要过 5000 多条、7 GB 转录，重算消息数/用量/SHA
+// 全得把每个文件读完，这就是 `sessions --serve` 启动慢的全部原因。
+// 失效判据只有 size 与 mtime：两者都没变就当内容没变（转录是 append-only）。
+type countCacheFile struct {
+	Version int                   `json:"version"`
+	Entries map[string]countEntry `json:"entries"`
+}
+
+const countCacheName = ".sessionview-cache.json"
+const countCacheVersion = 1
+
+// loadCountCache 读上一次的索引缓存；读不到或版本不符就当没有（只是慢一次）。
+func (s *scanner) loadCountCache(root string) {
+	f, err := os.Open(filepath.Join(root, countCacheName))
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	var cf countCacheFile
+	if err := json.NewDecoder(bufio.NewReaderSize(f, 1<<20)).Decode(&cf); err != nil {
+		return
+	}
+	if cf.Version != countCacheVersion || len(cf.Entries) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.counts = cf.Entries
+	s.mu.Unlock()
+}
+
+// saveCountCache 把这一轮的统计落盘。失败只当没写（下次重算一遍，不影响功能）。
+func (s *scanner) saveCountCache(root string) {
+	s.mu.Lock()
+	entries := make(map[string]countEntry, len(s.counts))
+	for k, v := range s.counts {
+		// 只留这一轮真扫到的文件：删掉的转录不该在缓存里越攒越多。
+		if s.keep != nil && !s.keep[k] {
+			continue
+		}
+		entries[k] = v
+	}
+	s.mu.Unlock()
+	if len(entries) == 0 {
+		return
+	}
+	path := filepath.Join(root, countCacheName)
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return
+	}
+	bw := bufio.NewWriterSize(f, 1<<20)
+	err = json.NewEncoder(bw).Encode(countCacheFile{Version: countCacheVersion, Entries: entries})
+	if err == nil {
+		err = bw.Flush()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return
+	}
+	_ = os.Rename(tmp, path)
 }
 
 // transcriptStat is what one streaming pass over a transcript yields: the
@@ -857,6 +1125,42 @@ type transcriptStat struct {
 	// RunEndError 是最近一条 t=meta kind=run_end 的错误文本（会话层 T94
 	// 起每次 Run 结束都落结局）——空 = 正常收尾或旧转录没有结局行。
 	RunEndError string
+	// SawRunEnd 表示转录里出现过 run_end（不论成败）：用来识别"活动标记停在
+	// running、但这次尝试其实已经结束"的陈旧状态（T171）。
+	SawRunEnd       bool
+	ChapterActivity string
+	// ActivityIdx / RunEndIdx 是这两种 meta 行在转录里的行号（T207）：一次
+	// 会话可以在同一条转录里跑好几轮 Run，"活动标记停在 running" 与 "run_end
+	// 已经写过" 谁新谁旧只能按先后判断——旧实现只看 SawRunEnd，于是**正在跑**
+	// 的会话（上一轮 Run 的 run_end 还在下面）被判成"已中断"，侧栏那一片绿点
+	// 全灭、树里显示等待/中断。
+	ActivityIdx int
+	RunEndIdx   int
+	// ChapterAnchor / ChapterAnchorAttempt 是最近一条 t=meta kind=checker_target
+	// （P59）：这条核对会话核对的转换转录与它的尝试号。空 = 旧转录，没有锚点。
+	ChapterAnchor        string
+	ChapterAnchorAttempt int
+	// FixAnchor / FixAnchorAttempt / FixIssueIDs（P60）来自最近一条
+	// t=meta kind=fix_target：修复会话修的是哪一次转换（与核对同一种锚点口径）、
+	// 这一轮改了哪几条 issue。SawFixTarget 标记转录里有没有这种锚点——有它就是
+	// 一条修复会话（角色 fix）。P60 第一步只把这些事实读出来，分组与树一行不动。
+	FixAnchor        string
+	FixAnchorAttempt int
+	FixIssueIDs      []string
+	SawFixTarget     bool
+	// RescueChapter / RescueReviewedRole / RescueReviewedTranscript 来自复盘
+	// 会话自己转录里的 `t=meta kind=rescue_target`（P58 补）：它复盘的是哪一章、
+	// 哪条角色的哪一条转录（转录名不含扩展名，与 checker_target 的锚点同口径）。
+	// 预览页靠它①给老命名（`rescue_<章>_<时间戳>.jsonl`）补出章节身份，
+	// ②在历史页签里说清「复盘了 转换#1」并按目标分链。
+	RescueChapter            string
+	RescueReviewedRole       string
+	RescueReviewedTranscript string
+	// SessionLabel 是最近一条系统快照里的 `session_label`（`rescue:<章>` /
+	// `convert:…`）。复盘转录的老命名只有这一条能说明它属于哪一章：会话层在
+	// SetTranscript 时就把它写进 kind=system 那行，比 rescue_target 更早的
+	// 落盘也有。
+	SessionLabel string
 	// Prices 是转录里 t=meta kind=price 冻的费率（model → 费率，同模型
 	// 后写胜）——费用按冻的价算，不依赖跑报表时的配置（T101 第二版）。
 	Prices map[string]config.PriceConfig
@@ -906,7 +1210,62 @@ func (stat transcriptStat) modelID() string {
 	return stat.model
 }
 
+// cleanBackupName 是清理脚本（clean_project.sh / clean_convert.sh）"整目录备份"
+// 的目录名口径：`<项目名>_记录_<日期>_<时刻>`。它们是项目的**副本**，不是另一个
+// 项目——扫进来会凭空多出一个挂着几十条会话的组，还会把整棵副本读一遍（T200）。
+var cleanBackupRe = regexp.MustCompile(`_记录_[0-9]{8}_[0-9]{4}$`)
+
+// skipScanDir 决定 walk 要不要整棵跳过这个目录（p 是目录的完整路径）。
+//
+//	media / .git      — 图片附件与版本库，不是转录（历史遗留的跳过项）。
+//	*.git             — P55 的工作区快照是**裸仓库**（work/rounds/<章>/repo.git），
+//	                    里面没有转录，进去只会白扫。
+//	work/rounds       — P55 的"转录行号 → commit"日志（journal-try<N>.jsonl）住在
+//	                    这里，文件名也以 .jsonl 结尾，但它不是会话：扫进来会在侧栏
+//	                    多出十几条"没对话、没轨迹"的空会话（T200）。
+//	*_记录_<日期>      — 清理脚本的整目录备份，见 cleanBackupRe。
+//	.trash            — 就地截断（⤫ / 「删掉这条及之后」）的**原文备份**目录
+//	                    `work/sessions/.trash/<转录>.<时刻>.jsonl`。备份文件仍以
+//	                    .jsonl 结尾，扫进来会在侧栏冒出"转换 · <章>.jsonl.20261022-122539"
+//	                    这种条目——它不是任何一次运行产生的会话（T202）。
+func skipScanDir(p, name string) bool {
+	switch {
+	case name == "media" || name == ".git":
+		return true
+	case strings.HasSuffix(name, ".git"):
+		return true
+	case name == "rounds" && filepath.Base(filepath.Dir(p)) == "work":
+		return true
+	case name == ".trash":
+		return true
+	case name == "cuts" && filepath.Base(filepath.Dir(p)) == "rescue":
+		// T252：`work/rescue/cuts/<章>/` 里放的是复盘截断丢掉的那一段转录**残片**
+		// （名字带 `YYYYMMDD-HHMMSS-` 前缀、只有几行），不是会话。以前它们被当成
+		// 会话平铺在「会话」阶段里，每条都显示未开始/会话错误。
+		return true
+	case cleanBackupRe.MatchString(name):
+		return true
+	}
+	return false
+}
+
+// skipScanFile 决定 walk 要不要跳过这**一个文件**（p 是文件的完整路径）。
+//
+//	work/rescue/log.jsonl — P58 复盘的审计日志（每次复盘一行 JSON：章节、角色、
+//	                        结论、提示词），同样是 .jsonl 结尾，但它不是会话：没有
+//	                        对话、没有轨迹，扫进来会在侧栏最底下多出一个只有一行
+//	                        「log」的分组，看着像一条不知从哪来的会话（T223）。
+func skipScanFile(p, name string) bool {
+	if name != "log.jsonl" {
+		return false
+	}
+	return filepath.Base(filepath.Dir(p)) == "rescue" &&
+		filepath.Base(filepath.Dir(filepath.Dir(p))) == "work"
+}
+
 func (s *scanner) scan() ([]SessionInfo, error) {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
 	root, err := filepath.Abs(s.root)
 	if err != nil {
 		return nil, err
@@ -933,6 +1292,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		mt   time.Time
 	}
 	var candidates []candidate
+	keepLocal := map[string]bool{}
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// Skip what we cannot read and keep going: one broken branch of
@@ -943,7 +1303,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if p != root && (d.Name() == "media" || d.Name() == ".git") {
+			if p != root && skipScanDir(p, d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
@@ -951,16 +1311,26 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".jsonl") {
 			return nil
 		}
+		if skipScanFile(p, d.Name()) {
+			return nil
+		}
 		info, ierr := d.Info()
 		if ierr != nil {
 			return nil
 		}
+		// T255：这里必须写**本地** map。`scan` 会被轮询复用同一个 scanner，别处
+		// 的分支还会并发读写 `s.keep`/`s.counts`——直接往字段 map 里写会崩在
+		// `fatal error: concurrent map writes`（真机复现过一次）。
+		keepLocal[p] = true
 		candidates = append(candidates, candidate{full: p, name: d.Name(), size: info.Size(), mt: info.ModTime()})
 		return nil
 	})
 	if walkErr != nil {
 		return nil, walkErr
 	}
+	s.mu.Lock()
+	s.keep = keepLocal
+	s.mu.Unlock()
 
 	stats := make([]transcriptStat, len(candidates))
 	var wg sync.WaitGroup
@@ -992,26 +1362,79 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		rel = filepath.ToSlash(rel)
 		stat := stats[i]
 		grp := s.projectGroupFor(root, rel)
+		chapter := chapterIdentity(rel)
+		// P58 补：老命名的复盘转录（`rescue_<章>_<时间戳>.jsonl`）文件名整段不是
+		// 章节 ID，按它自己转录里的目标备注/会话标签补一个——补到了就和
+		// `rescue_<章>.jsonl` 完全一样（挂进章节树当复盘行、阶段归章节转换组），
+		// 补不到才留在「错误处理」（见 rescueLegacyChapter）。
+		// labelRel 只用于标签/标题：把老名字当成规范名 `rescue_<章>.jsonl` 算，
+		// 于是「复盘 · <章>」与带编号的转录是同一个来源（LabelFor/TitleFor）。
+		labelRel := rel
+		if chapter.ID == "" && strings.HasPrefix(transcriptStem(rel), "rescue_") {
+			if legacy := rescueLegacyChapter(stat); legacy.ID != "" {
+				chapter = legacy
+				labelRel = path.Join(path.Dir(rel), "rescue_"+legacy.ID+".jsonl")
+			}
+		}
+		live := liveNow(stat, c.mt, now)
+		endState := liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow)
+		activity := activityAfterEnd(stat, stat.ChapterActivity)
+		switch activity {
+		case "queued", "waiting_children", "checking_result", "interrupted", "rescuing":
+			// P61：`rescuing` 是"复盘正在看这条转录"——目标会话自己并没有在跑，
+			// 不能因为刚被追加了一行状态就显示成活跃（绿点/运行中）。
+			live, endState = false, ""
+		}
+		// P60：修复转录（`fix_<子章>.jsonl` 这类，只在子章节自己的 sessions/
+		// 下）靠 `t=meta kind=fix_target` 认出来。角色固定为 "fix"，锚点沿用
+		// 核对的同一套口径（它修的是哪一次转换产物）。章节身份由文件名推断
+		// （见 chapterIdentity），所以它和转换/核对一样落进章节阶段组；锚点
+		// 仍是它挂在树上哪一行的唯一依据（P60 第三步）。
+		role := chapter.Role
+		anchor, anchorAttempt := stat.ChapterAnchor, stat.ChapterAnchorAttempt
+		if stat.SawFixTarget {
+			role = "fix"
+			if stat.FixAnchor != "" {
+				anchor, anchorAttempt = stat.FixAnchor, stat.FixAnchorAttempt
+			}
+		}
 		out = append(out, SessionInfo{
-			ID:            rel,
-			Label:         LabelFor(rel),
-			Title:         TitleFor(rel),
-			Name:          c.name,
-			Path:          c.full,
-			Project:       grp.Name,
-			ProjectLegacy: grp.Legacy,
-			Messages:      stat.Messages,
-			Meta:          stat.Meta,
-			Stats:         stat.Usage,
-			Estimate:      estimateInfoFor(stat),
-			Bytes:         c.size,
-			ModTime:       c.mt,
-			SHA:           stat.SHA,
-			Live:          liveNow(stat, c.mt, now),
-			EndState:      liveEndState(endStateOf(stat), now.Sub(c.mt) < LiveWindow),
-			RunEndError:   stat.RunEndError,
-			Prices:        stat.Prices,
-			ChapterOrder:  chapterOrderOf(c.name),
+			ID: rel,
+			Label: func() string {
+				if chapter.ID != "" {
+					return chapter.Role + ":" + chapter.ID
+				}
+				return LabelFor(labelRel)
+			}(),
+			Title:                TitleFor(labelRel),
+			Name:                 c.name,
+			Path:                 c.full,
+			Project:              grp.Name,
+			ProjectLegacy:        grp.Legacy,
+			Messages:             stat.Messages,
+			Meta:                 stat.Meta,
+			Stats:                stat.Usage,
+			Estimate:             estimateInfoFor(stat),
+			Bytes:                c.size,
+			ModTime:              c.mt,
+			SHA:                  stat.SHA,
+			Live:                 live,
+			EndState:             endState,
+			RunEndError:          stat.RunEndError,
+			ChapterActivity:      activity,
+			ChapterAttempt:       chapter.Attempt,
+			ChapterAnchor:        anchor,
+			ChapterAnchorAttempt: anchorAttempt,
+			FixIssueIDs:          stat.FixIssueIDs,
+			ReviewedRole:         stat.RescueReviewedRole,
+			ReviewedTranscript:   stat.RescueReviewedTranscript,
+			Archived:             archivedRel(rel),
+			Prices:               stat.Prices,
+			ChapterID:            chapter.ID,
+			ChapterParent:        chapter.Parent,
+			ChapterRole:          role,
+			ChapterDepth:         chapter.Depth,
+			ChapterOrder:         chapterOrderOf(strings.Split(chapter.ID, "_child_")[0]),
 		})
 	}
 
@@ -1034,9 +1457,9 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 // but never the message count.
 func (s *scanner) fileStat(p string, size int64, modTime time.Time) transcriptStat {
 	s.mu.Lock()
-	if e, ok := s.counts[p]; ok && e.size == size && e.modTime.Equal(modTime) {
+	if e, ok := s.counts[p]; ok && e.Size == size && e.ModTime.Equal(modTime) {
 		s.mu.Unlock()
-		return e.stat
+		return e.Stat
 	}
 	s.mu.Unlock()
 
@@ -1048,7 +1471,7 @@ func (s *scanner) fileStat(p string, size int64, modTime time.Time) transcriptSt
 	if s.counts == nil {
 		s.counts = map[string]countEntry{}
 	}
-	s.counts[p] = countEntry{size: size, modTime: modTime, stat: stat}
+	s.counts[p] = countEntry{Size: size, ModTime: modTime, Stat: stat}
 	s.mu.Unlock()
 	return stat
 }
@@ -1066,6 +1489,18 @@ func liveEndState(state string, live bool) string {
 }
 
 // endStateOf folds the receipt signals into the block-view completion state.
+// activityAfterEnd 修掉陈旧的活动标记：转录里已经写了 run_end（这次 Run 结束
+// 了）却还停在 "running" 的，说明这次尝试被放弃——checker 打回后换了一个全新
+// 会话，或者进程被中断。旧行为照抄这个标记，侧栏会同时显示两条"运行中"（一条
+// 是已经作废的第 2 次，一条是真正在跑的第 3 次），看不出谁是真的。这里把它折成
+// "interrupted"，界面显示"已中断"。
+func activityAfterEnd(stat transcriptStat, activity string) string {
+	if activity == "running" && stat.SawRunEnd && stat.RunEndIdx > stat.ActivityIdx {
+		return "interrupted"
+	}
+	return activity
+}
+
 func endStateOf(stat transcriptStat) string {
 	switch {
 	case stat.SawSubmit || stat.SawTyped:
@@ -1111,11 +1546,13 @@ func readStat(p string) (transcriptStat, error) {
 	br := bufio.NewReaderSize(f, 64*1024)
 	h := sha256.New()
 	var stat transcriptStat
+	idx := 0
 	for {
 		text, rerr := br.ReadString('\n')
 		h.Write([]byte(text))
 		trimmed := strings.TrimSpace(text)
 		if trimmed != "" {
+			idx++
 			// Only the type is decoded for every line: messages are the vast
 			// majority and must stay cheap to skip.
 			var head struct {
@@ -1125,6 +1562,11 @@ func readStat(p string) (transcriptStat, error) {
 				switch head.T {
 				case "msg":
 					stat.Messages++
+					// 这一行落在 run_end 之后 = 新的 Run 已经在跑（T207）：那条
+					// 结局是上一轮的，别再拿它当"这次会话的错误收尾"。
+					if stat.RunEndIdx > 0 {
+						stat.RunEndError = ""
+					}
 					// T22：原始行子串检查（零额外解码）——tool 回执行必含
 					// `"role":"tool"`（写入方是紧凑 JSON），submit 回执以
 					// SUBMITTED 开头；assistant 的正常文本只会写 "Submitted"。
@@ -1171,10 +1613,65 @@ func readStat(p string) (transcriptStat, error) {
 							OK    *bool  `json:"ok"`
 							Error string `json:"error"`
 						}
+						stat.SawRunEnd = true
+						stat.RunEndIdx = idx
 						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.OK != nil && !*rec.OK {
 							stat.RunEndError = rec.Error
 						} else if rec.OK != nil && *rec.OK {
 							stat.RunEndError = ""
+						}
+					}
+					if strings.Contains(trimmed, `"kind":"chapter_activity"`) {
+						var rec struct {
+							State string `json:"state"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil {
+							stat.ChapterActivity = rec.State
+							stat.ActivityIdx = idx
+						}
+					}
+					// P59：核对会话的锚点——它核对的是哪一条转换转录。
+					if strings.Contains(trimmed, `"kind":"checker_target"`) {
+						var rec struct {
+							Convert        string `json:"convert"`
+							ConvertAttempt int    `json:"convert_attempt"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.Convert != "" {
+							stat.ChapterAnchor = rec.Convert
+							stat.ChapterAnchorAttempt = rec.ConvertAttempt
+						}
+					}
+					// P60：修复会话的锚点——它修的是哪一条转换产物、这一轮
+					// 改了哪几条 issue。字段与 checker_target 同一种口径
+					// （`convert` 是转录名、`convert_attempt` 是转换的尝试号）。
+					if strings.Contains(trimmed, `"kind":"fix_target"`) {
+						var rec struct {
+							Convert        string   `json:"convert"`
+							ConvertAttempt int      `json:"convert_attempt"`
+							IssueIDs       []string `json:"issue_ids"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil && rec.Convert != "" {
+							stat.SawFixTarget = true
+							stat.FixAnchor = rec.Convert
+							stat.FixAnchorAttempt = rec.ConvertAttempt
+							stat.FixIssueIDs = rec.IssueIDs
+						}
+					}
+					// P58 补：复盘会话自己的目标备注——它复盘的是哪一章、哪个
+					// 角色的哪一条转录。老命名（`rescue_<章>_<时间戳>.jsonl`）
+					// 的章节身份只能靠它补（见 rescueLegacyChapter）。
+					if strings.Contains(trimmed, `"kind":"rescue_target"`) {
+						var rec struct {
+							Chapter            string `json:"chapter"`
+							ReviewedRole       string `json:"reviewed_role"`
+							ReviewedTranscript string `json:"reviewed_transcript"`
+						}
+						if json.Unmarshal([]byte(trimmed), &rec) == nil {
+							if rec.Chapter != "" {
+								stat.RescueChapter = rec.Chapter
+							}
+							stat.RescueReviewedRole = rec.ReviewedRole
+							stat.RescueReviewedTranscript = rec.ReviewedTranscript
 						}
 					}
 				case "usage":
@@ -1313,6 +1810,11 @@ func (stat *transcriptStat) addMeta(line string) {
 		stat.Meta = &MetaInfo{}
 	}
 	stat.Meta.Count++
+	// P58 补：会话标签（`rescue:<章>` / `convert:<章>`）在系统快照里，是复盘转录
+	// 老命名能拿到的唯一章节线索，单独留一份，别被提示词快照的更新规则挡住。
+	if rec.SessionLabel != "" {
+		stat.SessionLabel = rec.SessionLabel
+	}
 	// 只有 kind=system（或无 kind 的旧行）才更新提示词快照——price/run_end
 	// 也是 t=meta，没有 text/tools，若照样覆盖会把详情栏的提示词快照
 	// 抹成"没有正文 / 工具定义 0 个"（T99/T101 引入的真实回归）。

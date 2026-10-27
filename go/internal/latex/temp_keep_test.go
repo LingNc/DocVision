@@ -26,7 +26,8 @@ func keepTestRunner(t *testing.T, probes ...*bool) *Runner {
 	if len(probes) >= 2 && probes[1] != nil {
 		cfg.Latex.KeepSessionRecords = probes[1]
 	}
-	return &Runner{cfg: cfg, log: log}
+	// 测试里不跑真 TeX：关掉"提交前必须编译 + 看过 PDF"的门禁。
+	return &Runner{cfg: cfg, log: log, noChapterGate: true}
 }
 
 // TestTempDirLivesInProject: temporary workspaces are created INSIDE the

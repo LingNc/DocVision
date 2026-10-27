@@ -1085,3 +1085,148 @@ func TestEndStateTypedDone(t *testing.T) {
 		t.Errorf("tool only = %q, want error", got)
 	}
 }
+
+// TestChapterIdentityAttemptSuffix pins the retry transcript naming: a
+// `<名>.try2` transcript is the SAME chapter (same ID/Role/Parent/Depth) at
+// attempt 2, so the preview can chain the attempts instead of showing it as a
+// separate chapter.
+func TestChapterIdentityAttemptSuffix(t *testing.T) {
+	first := chapterIdentity("proj/work/sessions/convert_chapter_042.jsonl")
+	second := chapterIdentity("proj/work/sessions/convert_chapter_042.try2.jsonl")
+	if first.ID != "chapter_042" || first.Attempt != 1 {
+		t.Fatalf("first attempt = %+v", first)
+	}
+	if second.ID != first.ID || second.Role != first.Role || second.Attempt != 2 {
+		t.Fatalf("retry must keep the chapter identity: %+v", second)
+	}
+	child := chapterIdentity("proj/work/temp/conv_chapter_042/work/_subdivision/child_02/node/sessions/checker.jsonl")
+	if child.ID != "chapter_042_child_02" || child.Depth != 1 {
+		t.Fatalf("child identity = %+v", child)
+	}
+	retryChild := chapterIdentity("proj/work/temp/conv_chapter_042/work/_subdivision/child_02/node/sessions/checker_chapter_042_child_02.try2.jsonl")
+	if retryChild.ID != "chapter_042_child_02" || retryChild.Attempt != 2 {
+		t.Fatalf("child retry identity = %+v", retryChild)
+	}
+	// T171：重试转录名只会有一层 .tryN（磁盘上的旧套娃名已一次性改名），
+	// 第 3 次仍是同一个章节的第 3 次尝试。
+	third := chapterIdentity("proj/work/sessions/convert_chapter_042.try3.jsonl")
+	if third.ID != "chapter_042" || third.Role != "convert" || third.Attempt != 3 {
+		t.Fatalf("third attempt identity = %+v", third)
+	}
+	thirdChild := chapterIdentity("proj/work/sessions/checker_chapter_042_child_02.try3.jsonl")
+	if thirdChild.ID != "chapter_042_child_02" || thirdChild.Parent != "chapter_042" || thirdChild.Attempt != 3 {
+		t.Fatalf("third child attempt = %+v", thirdChild)
+	}
+}
+
+// T171/T207：活动标记停在 running、且 run_end 出现在它**之后**的，是"这次
+// 尝试被放弃"（checker 打回换会话 / 被中断），不能再算运行中；反过来 run_end
+// 是上一轮 Run 留下的（同一条转录里又开了新的一轮），照旧算运行中。
+func TestActivityAfterEnd(t *testing.T) {
+	staleRunning := transcriptStat{ChapterActivity: "running", SawRunEnd: true, ActivityIdx: 3, RunEndIdx: 9}
+	if got := activityAfterEnd(staleRunning, staleRunning.ChapterActivity); got != "interrupted" {
+		t.Fatalf("stale running = %q, want interrupted", got)
+	}
+	liveRunning := transcriptStat{ChapterActivity: "running", SawRunEnd: true, ActivityIdx: 9, RunEndIdx: 3}
+	if got := activityAfterEnd(liveRunning, liveRunning.ChapterActivity); got != "running" {
+		t.Fatalf("live running must stay running, got %q", got)
+	}
+	if got := activityAfterEnd(transcriptStat{ChapterActivity: "running"}, "running"); got != "running" {
+		t.Fatalf("no run_end must stay running, got %q", got)
+	}
+	waiting := transcriptStat{ChapterActivity: "waiting_children", SawRunEnd: true, ActivityIdx: 1, RunEndIdx: 2}
+	if got := activityAfterEnd(waiting, waiting.ChapterActivity); got != "waiting_children" {
+		t.Fatalf("other states untouched, got %q", got)
+	}
+	if got := activityAfterEnd(transcriptStat{SawRunEnd: true, RunEndIdx: 2}, ""); got != "" {
+		t.Fatalf("no activity stays empty, got %q", got)
+	}
+}
+
+// readStat 要能告诉调用方"这次 Run 已经结束"——成功收尾时 RunEndError 是空的，
+// 光看它分不出"没结束"和"正常结束"。
+func TestReadStatSawRunEnd(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	os.WriteFile(p, []byte(`{"t":"meta","kind":"chapter_activity","state":"running"}
+{"t":"meta","kind":"run_end","ok":true}
+`), 0o644)
+	st, err := readStat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.SawRunEnd || st.RunEndError != "" {
+		t.Fatalf("run_end not recorded: %+v", st)
+	}
+	if st.ChapterActivity != "running" {
+		t.Fatalf("activity = %q", st.ChapterActivity)
+	}
+}
+
+// T194：作废尝试的归档目录（work/attempts/<章>/tryN/）里是同一批会话的副本；
+// 扫描照收但打 archived，页面据此去重（曾经同一章同一尝试在历史里出现两次）。
+func TestScanMarksArchivedCopies(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, jsonl(root, "work", "sessions", "convert_chapter_002.jsonl"),
+		transcript(`{"t":"msg","role":"user","text":"hi"}`))
+	writeFile(t, jsonl(root, "work", "attempts", "chapter_002", "try1", "work", "sessions",
+		"convert_chapter_002.jsonl"), transcript(`{"t":"msg","role":"user","text":"old"}`))
+
+	list, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("want 2 sessions, got %d", len(list))
+	}
+	archived := 0
+	for _, s := range list {
+		wantArchived := strings.HasPrefix(s.ID, "work/attempts/")
+		if s.Archived != wantArchived {
+			t.Fatalf("%s: archived=%v, want %v", s.ID, s.Archived, wantArchived)
+		}
+		if wantArchived {
+			archived++
+		}
+	}
+	if archived != 1 {
+		t.Fatalf("want exactly 1 archived row, got %d", archived)
+	}
+}
+
+// T235：多项目布局（根是 latex_project/，每个项目一个子目录）下，归档判据以前
+// 只认 `work/attempts/` 前缀，而 rel 实际是 `<项目>/work/attempts/...`，于是
+// archived 恒为 false：页面没有归档标记、活体优先失效，历史面板也分不出世代。
+func TestScanMarksArchivedCopiesInMultiProjectLayout(t *testing.T) {
+	root := t.TempDir()
+	proj := filepath.Join(root, "book_a")
+	live := filepath.Join(proj, "work", "sessions", "convert_chapter_002.jsonl")
+	writeFile(t, live, transcript(`{"t":"msg","role":"user","text":"hi"}`))
+	writeFile(t, filepath.Join(proj, "work", "attempts", "chapter_002", "try1", "work", "sessions",
+		"convert_chapter_002.jsonl"), transcript(`{"t":"msg","role":"user","text":"old"}`))
+
+	list, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("want 2 sessions, got %d", len(list))
+	}
+	archived, liveRows := 0, 0
+	for _, s := range list {
+		if s.Archived {
+			archived++
+			if !strings.Contains(s.ID, "/work/attempts/") {
+				t.Fatalf("%s: 归档标记打在了非归档路径上", s.ID)
+			}
+			continue
+		}
+		liveRows++
+		if strings.Contains(s.ID, "/work/attempts/") {
+			t.Fatalf("%s: 归档副本没有被标记", s.ID)
+		}
+	}
+	if archived != 1 || liveRows != 1 {
+		t.Fatalf("archived=%d live=%d, want 1/1", archived, liveRows)
+	}
+}

@@ -26,6 +26,13 @@ func TestPromptToolNamesExistInCode(t *testing.T) {
 
 // 反向检查：代码里的每个工具名都必须在**某个**模板里出现过，否则说明
 // 新工具加进来了却没有告诉模型怎么用（只在本包范围内核对 latex 工具）。
+//
+// dispatch_fix（P60）是这里唯一"按配置注册"的工具：它只在 latex.fix.enabled
+// 打开时才进工具表，所以它的说明不在常驻的 latex_convert.system 里，而在
+// latex_convert_fixdispatch.system —— 那段文字由 runner 只在开关打开时接到
+// 转换系统提示词后面（`Runner.convertSystemPrompt`，有测试钉住关着时逐字节
+// 不变）。这里按普通工具核对：既然它真的登记在一个模板里，就不再需要
+// "条件工具"的豁免了。
 func TestLiveLatexToolsAreMentionedSomewhere(t *testing.T) {
 	all := map[string]bool{}
 	for _, tpl := range prompts.Templates() {

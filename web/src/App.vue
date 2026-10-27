@@ -9,7 +9,6 @@ import {
   applyTheme,
   closeLightbox,
   DETAILS_DEFAULT,
-  DETAILS_MAX,
   DETAILS_MIN,
   fmtSize,
   layout,
@@ -20,8 +19,8 @@ import {
   zoomLightbox,
   persistLayout,
   SIDEBAR_DEFAULT,
-  SIDEBAR_MAX,
   SIDEBAR_MIN,
+  columnDragMax,
   state,
   storedTheme,
   storeSet,
@@ -32,13 +31,15 @@ import {
   toggleTheme,
 } from './state'
 import { bootData, refreshIndex, refreshImg2TextProgress, revealProject } from './data'
-import { projectOf, sessionTitleOf, chainOfSession } from './legacy/sidebar'
+import { projectOf, sessionTitleOf, chainOfSession, plainTitle } from './legacy/sidebar'
 import Sidebar from './components/Sidebar.vue'
 import Timeline from './components/Timeline.vue'
 import InlineMD from './components/InlineMD.vue'
 import Trajectory from './components/Trajectory.vue'
 import DetailsPanel from './components/DetailsPanel.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
+import SessionActions from './components/SessionActions.vue'
+import SessionActionPanel from './components/SessionActionPanel.vue'
 
 const frame = ref<HTMLElement | null>(null)
 
@@ -59,11 +60,12 @@ function onDragStart(ev: PointerEvent, side: 'sidebar' | 'details') {
 function onDragMove(ev: PointerEvent) {
   if (!drag.value) return
   const dx = ev.clientX - dragOrigin
+  // 上限按视口算（T177）：中栏保底 640、另一列保留当前宽度，再按视口 60% 封顶。
   if (drag.value.side === 'sidebar') {
-    state.sidebar = clampWidth(dragBase + dx, SIDEBAR_MIN, SIDEBAR_MAX)
+    state.sidebar = clampWidth(dragBase + dx, SIDEBAR_MIN, columnDragMax(layout.viewport, layout.cols, 'sidebar'))
     if (state.narrow) state.narrowExpanded = true
   } else {
-    state.details = clampWidth(dragBase - dx, DETAILS_MIN, DETAILS_MAX)
+    state.details = clampWidth(dragBase - dx, DETAILS_MIN, columnDragMax(layout.viewport, layout.cols, 'details'))
   }
   applyLayout()
 }
@@ -376,10 +378,13 @@ onBeforeUnmount(() => {
               <button class="crumb is-link" type="button" title="在侧栏里定位到这个项目" @click="revealProject(curProject)">{{ curProject }}</button>
               <span class="crumb-sep">›</span>
               <!-- 会话名本身就是行内 Markdown 渲染根（旧页 nameNode('span','crumb crumb-current',…)），不再多包一层 -->
-              <InlineMD :text="sessionTitle" tag="span" class="crumb crumb-current" :title="state.current.id"></InlineMD>
+              <InlineMD :text="sessionTitle" :plain="plainTitle(state.current)" tag="span" class="crumb crumb-current" :title="state.current.id"></InlineMD>
             </template>
           </nav>
+          <!-- T193：动作条（重试 / 继续跑 / 删除…）收进顶栏右侧，紧挨着"N 条消息"那段
+               指标；确认条与回执仍然留在顶栏下面单独一行（`#action-panel`），不挤占这里。 -->
           <div id="header-actions" class="header-actions">
+            <SessionActions />
             <span v-if="!state.current" id="mode-badge" class="badge badge-live">{{ badgeText }}</span>
             <span v-else class="badge">{{ headerSummary }}</span>
           </div>
@@ -402,6 +407,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </header>
+      <SessionActionPanel />
       <div id="banner" class="banner" :class="{ hidden: !bannerText }">{{ bannerText }}</div>
       <div class="view-area">
         <Timeline></Timeline>
@@ -634,8 +640,9 @@ onBeforeUnmount(() => {
 }
 
 .header-actions {
- flex: none; display: flex; align-items: center; gap: 8px; margin-left: 20px; 
+ flex: 0 1 auto; display: flex; align-items: center; gap: 8px; margin-left: 20px; min-width: 0;
 }
+.header-actions .badge { white-space: nowrap; }
 
 .header-actions:empty {
  display: none; 

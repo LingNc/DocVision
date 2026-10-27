@@ -3,9 +3,11 @@ import { type Line, type ImageAttr, type Session, type PartialInfo, type Img2Tex
 
 /*
  * 全局状态：字段名与旧页 viewer.js 的 state 一一对应，后续按块移植的
- * 渲染/交互函数都能按旧页同名引用。布局常量照抄旧页（源自 DSH 的
- * client-ui-layout）：视口 < 1024 侧栏自动折轨道，侧栏 264–420（默认
- * 280，折叠后 56 轨道），详情栏 300–520（默认 400），中栏最小 640。
+ * 渲染/交互函数都能按旧页同名引用。布局常量源自 DSH 的 client-ui-layout：
+ * 视口 < 1024 侧栏自动折轨道；侧栏最小 264（默认 280，折叠后 56 轨道）、
+ * 详情栏最小 300（默认 400）、中栏最小 640。上限不写死（T177）：拖拽时
+ * 一列最多占视口 60%，并且要给中栏留够 CENTER_MIN、给另一列留够它当前
+ * 宽度——大屏可以把两侧拉得很宽，小屏仍旧是原来那个范围。
  */
 export const POLL_MS = 2000
 export const LONG_TEXT_LINES = 20
@@ -15,11 +17,10 @@ export const SIDEBAR_AUTO_COLLAPSE = 1024
 export const RAIL_W = 56
 export const SIDEBAR_DEFAULT = 280
 export const SIDEBAR_MIN = 264
-export const SIDEBAR_MAX = 420
 export const DETAILS_DEFAULT = 400
 export const DETAILS_MIN = 300
-export const DETAILS_MAX = 520
 export const CENTER_MIN = 640
+export const COLUMN_MAX_RATIO = 0.6
 export const OVERFLOW_LIMIT = 8
 
 /* ---------- localStorage 小助手（旧页 storeGet/storeSet/storeJSON 同名） ---------- */
@@ -48,6 +49,14 @@ export function storeJSON(key: string, fallback: Record<string, unknown>): Recor
     return v && typeof v === 'object' ? v : fallback
   } catch {
     return fallback
+  }
+}
+
+export function storeRemove(key: string): void {
+  try {
+    window.localStorage.removeItem(STORE_PREFIX + key)
+  } catch {
+    /* 同上：静默跳过 */
   }
 }
 
@@ -107,6 +116,14 @@ export const state = reactive({
   // T154：有 dedupe 复查页的项目名（/dedupe?project=… 可打开），侧栏整组核验
   // 阶段行的「复查」按钮据此显隐；不参与列表签名，按钮出现不影响侧栏重建。
   dedupeReviews: [] as string[],
+  // P53：每个项目当前排队的重试章节（/api/index 的 retries），章节行据此显示
+  // 「待重试」。不参与列表签名：它变化只影响一个角标，不该重建侧栏。
+  retries: {} as Record<string, string[]>,
+  // P53/P2：排队的章节各自是哪个角色（convert / checker / continue）——章节行有两行，
+  // 「待重试」要挂在对应那一行。
+  retryRoles: {} as Record<string, Record<string, string>>,
+  // P53：最近一次「重试」请求的反馈（成功/失败一行字），显示在按钮旁边。
+  retryNote: '',
   current: null as Session | null,
   lines: [] as Line[],
   nextFrom: 0,
@@ -148,15 +165,65 @@ export const state = reactive({
   img2textProgress: [] as Img2TextBook[],
 })
 
+/* ---------- T239：操作回执只在"它说的那件事"上活一小会儿 ----------
+
+ * state.retryNote 是**全页共用**的一行字，挂在每个会话的操作面板旁边。它原来
+ * 一旦写下就再也不清：在 chapter_013 点过「切回」之后，那行「已加入切回队列」
+ * 会一直贴在**每一个**会话下面（用户看到的就是"转换 · chapter_024_child_01
+ * 也已经加入切回队列了？我根本没点它"），于是以为全书都不能操作了。
+ *
+ * 现在统一从 setRetryNote 写：终态回执（已…/失败…）20 秒后自己消失，正在提
+ * 交中的那些 60 秒兜底；切会话（selectSession）与「重置视图」立刻清掉——那行
+ * 字说的已经不是眼前这一条了。
+ */
+let retryNoteTimer: ReturnType<typeof setTimeout> | 0 = 0
+const RETRY_NOTE_DONE_MS = 20000
+const RETRY_NOTE_BUSY_MS = 60000
+
+export function setRetryNote(text: string): void {
+  state.retryNote = text
+  if (retryNoteTimer) { clearTimeout(retryNoteTimer); retryNoteTimer = 0 }
+  if (!text) return
+  const ttl = /^(已|失败|撤销|这个请求)/.test(text) ? RETRY_NOTE_DONE_MS : RETRY_NOTE_BUSY_MS
+  retryNoteTimer = setTimeout(() => { retryNoteTimer = 0; state.retryNote = '' }, ttl)
+}
+
+export function clearRetryNote(): void {
+  if (retryNoteTimer) { clearTimeout(retryNoteTimer); retryNoteTimer = 0 }
+  if (state.retryNote) state.retryNote = ''
+}
+
 /* ---------- 布局求解（computeColumns 逐行照旧页：纯函数、无迟滞） ---------- */
 
 export function clampWidth(px: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(px)))
 }
 
+/*
+ * 某一列拖拽时能拉到多宽（T177）：不写死像素上限，按视口算——
+ * ① 中栏保底 CENTER_MIN；② 另一列保留它当前宽度（收起的列不占位）；
+ * ③ 再按视口 60% 封顶，免得一列吃掉整屏。结果不小于该列的最小宽度。
+ */
+export function columnDragMax(
+  viewport: number,
+  cols: { sidebar: number; details: number },
+  side: 'sidebar' | 'details',
+): number {
+  const vp = viewport > 0 ? viewport : 1280
+  const other = side === 'sidebar'
+    ? (cols.details > 0 ? cols.details : 0)
+    : (cols.sidebar > 0 ? cols.sidebar : 0)
+  const floor = side === 'sidebar' ? SIDEBAR_MIN : DETAILS_MIN
+  return Math.max(floor, Math.min(Math.round(vp * COLUMN_MAX_RATIO), vp - CENTER_MIN - other))
+}
+
 export function computeColumns(viewport: number, sidebar: number, details: number) {
-  const s = sidebar === 0 ? RAIL_W : clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX)
-  const d0 = details === 0 ? 0 : clampWidth(details, DETAILS_MIN, DETAILS_MAX)
+  const s = sidebar === 0
+    ? RAIL_W
+    : clampWidth(sidebar, SIDEBAR_MIN, columnDragMax(viewport, { sidebar: 0, details: details > 0 ? DETAILS_MIN : 0 }, 'sidebar'))
+  const d0 = details === 0
+    ? 0
+    : clampWidth(details, DETAILS_MIN, columnDragMax(viewport, { sidebar: s, details: 0 }, 'details'))
   if (s + d0 + CENTER_MIN <= viewport) {
     return { sidebar: s, center: viewport - s - d0, details: d0 }
   }
@@ -204,7 +271,8 @@ export function toggleDetails(): void {
   if (state.details > 0) {
     state.details = 0
   } else {
-    state.details = clampWidth(state.details || DETAILS_DEFAULT, DETAILS_MIN, DETAILS_MAX)
+    state.details = clampWidth(state.details || DETAILS_DEFAULT, DETAILS_MIN,
+      columnDragMax(layout.viewport, layout.cols, 'details'))
     // 让步链在中栏 640px 保不住时会直接放弃详情栏。点了没反应比"先把侧栏
     // 折成轨道腾地方"更糟：窄窗口下用户要的就是这块面板，所以放不下时
     // 顺手把侧栏折了，再解一次。
@@ -286,6 +354,56 @@ export function toggleTheme(): void {
 
 export function switchView(view: string): void {
   state.view = view === 'trajectory' || view === 'history' ? view : 'chat'
+}
+
+/* ---------- T215：重置视图 ----------
+
+ * 只清**跟"我在看哪里"有关**的那层记忆，回到"当前正在跑"的顶层状态：
+ *  · 手动选中/pin（state.current）与它带来的行缓冲、轨迹页选中/展开/类型筛选；
+ *  · 搜索过滤词；
+ *  · 侧栏的展开/收起记忆（state.collapsed 里项目/阶段/链/章节节点，加上
+ *    「更多会话」的 state.overflow）与窄屏下侧栏的展开开关——两处记忆也一并从
+ *    localStorage 删掉，否则下一次刷新又回来了。
+ * 不碰任何数据（不发请求、不删文件），也不动主题 / 显示单位 / Markdown /
+ * 缩略图 / 自动跟随 / 板块 / 方块视图这些与"看哪一条"无关的显示偏好。
+ * 返回应该重新选中的会话 ID（重新选中与拉行由调用方走唯一的 selectSession
+ * 入口，这里不碰网络）：本板块里正在跑的**顶层**会话优先（没有父章节的那条，
+ * 子章节的世代跟着父章节走，选中它等于钉住一行），没有活跃会话就退回列表第一条
+ * （与首次打开页面同一个口径），一个都没有时是空串（选中保持清空）。
+ */
+export function resetViewState(): string {
+  state.current = null
+  state.lines = []
+  state.nextFrom = 0
+  state.curSize = -1
+  state.curMtime = 0
+  state.meta = null
+  state.partial = null
+  state.callEst = {}
+  state.trajSelected = null
+  state.trajOpen = {}
+  state.trajKinds = {}
+  state.view = 'chat'
+  state.filter = ''
+  clearRetryNote()
+  state.collapsed = {}
+  state.overflow = {}
+  state.narrowExpanded = true
+  storeRemove('collapsed')
+  storeRemove('overflow')
+  persistLayout()
+  applyLayout()
+  return firstRunningSession()
+}
+
+/* 重置后回到哪一条：当前板块里正在跑的顶层会话 → 正在跑的子章节 → 列表第一条。 */
+function firstRunningSession(): string {
+  const want = state.board === 'img2text' ? 'img2text' : 'latex'
+  const list = (state.sessions || []).filter((s) => (s.board === 'img2text' ? 'img2text' : 'latex') === want)
+  const live = list.filter((s) => s.live)
+  const top = live.filter((s) => !s.chapterParent)
+  const hit = top[0] || live[0] || list[0]
+  return hit ? String(hit.id) : ''
 }
 
 /* ---------- 灯箱（旧页 openLightbox/closeLightbox 同名；点击接线在缩略图块） ----------

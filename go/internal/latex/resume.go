@@ -9,6 +9,7 @@ package latex
 //     才发一句最小推动；原图也不重附（历史里已经有）。
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -52,7 +53,30 @@ func resumeUserText(msgs []session.ChatMessage, nudge string) string {
 // resumeLog summarizes the loaded history the way the console shows it, so
 // an interrupted-then-resumed session reads as one continuous story.
 func resumeLog(log *logger.Logger, tid int, tag, file string, msgs []session.ChatMessage, st session.ResumeStats) {
-	log.Log(tid, "["+tag+"] 恢复中断的会话:", file, "(", strconv.Itoa(len(msgs)), "条历史消息 · 轮次 ",
-		strconv.Itoa(st.Rounds), " · 工具调用 ", strconv.Itoa(st.Tools),
-		" · 已用 ", st.Active.Round(time.Second), ")")
+	// 回放的内存量一并写出来（T162）：续跑会同时恢复十几条会话，每条都把
+	// 转录里的图片重新读成 data URL，这是启动阶段最大的一次内存尖峰。
+	images, bytes := session.ReplayWeight(msgs)
+	line := "[" + tag + "] 恢复中断的会话: " + file + " (" + strconv.Itoa(len(msgs)) + " 条历史消息"
+	if images > 0 {
+		line += " · 图片 " + strconv.Itoa(images) + " 张 " + fmtMiB64(bytes)
+	}
+	line += " · 轮次 " + strconv.Itoa(st.Rounds) + " · 工具调用 " + strconv.Itoa(st.Tools) +
+		" · 已用 " + st.Active.Round(time.Second).String() + ")"
+	log.Log(tid, line)
+	// 单条会话回放就要几十 MiB 时明确提醒：并发恢复几条就足以把可用内存吃掉。
+	if bytes >= 32<<20 {
+		log.LogWarning(tid, "["+tag+"] 这条会话的光图片回放就要 "+fmtMiB64(bytes)+
+			"；同时恢复多条会话时内存会成倍上涨，必要时调低 latex.concurrency")
+	}
+}
+
+// fmtMiB64 renders a byte count as MiB/GiB for the log.
+func fmtMiB64(bytes int64) string {
+	if bytes <= 0 {
+		return "0"
+	}
+	if bytes >= 1<<30 {
+		return fmt.Sprintf("%.1fGiB", float64(bytes)/(1<<30))
+	}
+	return fmt.Sprintf("%.1fMiB", float64(bytes)/(1<<20))
 }

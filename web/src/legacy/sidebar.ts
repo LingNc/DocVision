@@ -274,16 +274,44 @@ export interface StageAggregate {
 export function stageChapterAggregate(stage: string, items: any[], filtered: boolean): StageAggregate | null {
   if (stage !== 'convert' && stage !== 'checker') return null
   if (filtered) return null
-  const total = (items || []).length
+  // T254：只数**有章节身份**的会话。阶段级会话（章节划分、样式派生、作图）
+  // 与复盘截断残片没有 chapterId，以前也被算成"一章"，于是阶段头报出 852 章、
+  // 错误里混着 vector/style/chapters 这些根本不属于章节转换的条目。
+  // T256：归档里的转录是**上一代**的尝试（它们的 `_subdivision` 早已随章节收尾
+  // 清掉、产物也不在了），不该算作"这一章现在还没完"。以前只要某章只剩归档转录，
+  // 那条 error 就被当成现状挂进阶段头，于是出现"父章节都通过了、数字里还有错误"、
+  // 点进去又找不到对应条目。
+  const chapterItems = (items || []).filter((s) =>
+    !isStageLevelSession(s) && !s?.archived && (!s.chapterRole || s.chapterRole === 'convert'))
+  // T251：先按章节收敛——同一章的历史尝试、上一代的归档转录、返工留下的多条都只算
+  // 一次，取"这一章现在那一条"（与章节树同一个判据：非归档优先、mtime 新者胜）。
+  // 否则阶段头会按转录条数报数（一次运行实测报出 1811 章，而全书只有几十章）。
+  const byChapter = new Map<string, any>()
+  chapterItems.forEach((s) => {
+    const id = String((s && (s.chapterId || s.id)) || '')
+    const cur = byChapter.get(id)
+    byChapter.set(id, cur ? newerAttempt(cur, s) : s)
+  })
+  const current = Array.from(byChapter.values())
+  const total = current.length
   if (!total) return null
-  const live = items.filter((s) => s && s.live)
-  const done = items.filter((s) => s && s.endState === 'done').length
-  const errs = items.filter((s) => s && !s.live && s.endState === 'error')
+  const live = current.filter((s) => s && s.live)
+  const done = current.filter((s) => s && s.endState === 'done').length
+  const errs = current.filter((s) => s && !s.live && s.endState === 'error')
   const rows = live.length ? live : errs
   const bits = [total + ' 章', '完成 ' + done]
   if (live.length) bits.push('运行 ' + live.length)
   if (errs.length) bits.push('错误 ' + errs.length)
   return { total, done, live: live.length, err: errs.length, rows, head: bits.join(' · ') }
+}
+
+/* T254：阶段级会话（章节划分、样式派生、作图、整本书修复/终审）不是"某一章"，
+ * 阶段头的「N 章」不能把它们算进去。没有章节身份的会话按文件名认这几类。 */
+const STAGE_LEVEL_SESSION = /(^|\/)(chapters|style_session|style_pilot_trial|book_fix|final_review)\.jsonl$|\/vector_/
+
+function isStageLevelSession(s: any): boolean {
+  if (s && s.chapterId) return false
+  return STAGE_LEVEL_SESSION.test(String((s && (s.id || s.path)) || ''))
 }
 
 /* 书级进展：progress.json 原样列出各阶段状态（档位1/2 的键略有不同）。 */
@@ -400,6 +428,582 @@ export function imageTipText(s: any): string {
 
 /* ---------- 分组构建（旧页 buildGroups 同名同序） ---------- */
 
+export interface ChapterTreeNode {
+  id: string
+  convert: any | null
+  checker: any | null
+  /* P60：挂在这一行（同一次转换）下面的修复会话，旧 → 新；没有修复就是空数组。
+   * 修复**不进** convert/checker 的挑选——它永远只能是子行，不能变成这一行的
+   * 转换或核对。 */
+  fixes: any[]
+  /* P61：复盘会话（`rescue_<章>[.tryN]`）与修复同层：按章节 ID + 世代挂在这一行
+   * 下面，旧 → 新；没有复盘就是空数组。同样**绝不**参与 convert/checker 的挑选。 */
+  rescues: any[]
+  children: ChapterTreeNode[]
+}
+
+/* P59：核对会话的锚点是它核对的那份**转换转录的文件名**（`convert_<章>` /
+ * `convert_<章>.tryN`），不含扩展名。转换与核对自己的 `.tryN` 号互相独立——
+ * 手动重新核对只让核对的号加一、核对的还是同一份产物——所以树与历史只按这个
+ * 口径配对，不再拿两套号互相猜。 */
+export function convertBasename(s: any): string {
+  const id = String((s && s.id) || '')
+  const seg = id.slice(id.lastIndexOf('/') + 1)
+  return seg.replace(/\.jsonl$/, '')
+}
+
+function newestOf(items: any[]): any | null {
+  let best: any = null
+  ;(items || []).forEach((s) => { best = newerAttempt(best, s) })
+  return best
+}
+
+/*
+ * P60：修复会话的转录名可能带尝试号（`fix_<章>.try2.jsonl` = 同一处修了几轮时
+ * 留档的那一份）。章节尝试号对它取不到值（文件名不是 convert_/checker_ 前缀），
+ * 所以行上把名字里的 `.tryN` 原样标出来，不另编一个号。
+ */
+export function fixTranscriptTag(s: any): string {
+  const m = /\.try(\d+)$/.exec(convertBasename(s))
+  return m ? '.try' + m[1] : ''
+}
+
+/*
+ * P60 补充：修复行光写「修复 N」看不出**修的是哪一章**的——同一行下面可能挂着
+ * 不同子章节的修复（父章节的转换名是同一处锚点），而树本身是分层的，行里只留
+ * 章节 ID 在本层的后缀就够了（`chapter_042_child_02` → `child_02`，与核对行
+ * 用章节身份标身份是同一个层级口径）。顶层章节没有可省的层，就照写自己的 ID
+ * （`chapter_042`）。嵌套子章节保留整段后缀（`child_01_child_02`），层级不会
+ * 被抹成同一个名字。
+ */
+export function chapterIdSuffix(id: string): string {
+  const s = String(id || '')
+  const m = /^chapter[_-]?\d+_(.+)$/.exec(s)
+  return m && m[1] ? m[1] : s
+}
+
+/* 这条修复挂在哪一章上：P60 第四步起修复转录名自带章节身份（`fix_<章>`），
+ * 老转录没有 `chapterId`，退回它挂靠的那一行的章节 ID。 */
+export function fixTargetId(fix: any, nodeId = ''): string {
+  return String((fix && fix.chapterId) || nodeId || '')
+}
+
+/* 修复行的一句话标签：`修复 child_02 #1`（归档前缀「旧」与转换/核对行同一套）。
+ * round 是这一处修复的轮次，按渲染顺序从 1 起（树上旧 → 新，历史里新 → 旧）。 */
+export function fixRowLabel(fix: any, nodeId: string, round: number): string {
+  const id = fixTargetId(fix, nodeId)
+  const name = id ? ' ' + chapterIdSuffix(id) : ''
+  return ((fix && fix.archived) ? '旧' : '') + '修复' + name + ' #' + (Number(round) || 1)
+}
+
+/* 章节会话角色的中文名：历史行小标签与复盘行的「复盘了 转换#1」共用一份。 */
+export const CHAPTER_ROLE_LABELS: Record<string, string> = {
+  convert: '转换', checker: '核对', fix: '修复', rescue: '复盘', continue: '继续', vector: '作图',
+}
+
+/* 角色键 → 中文名（未知角色给空串，不编名字）。 */
+export function chapterRoleLabel(role: string): string {
+  return CHAPTER_ROLE_LABELS[String(role || '')] || ''
+}
+
+/* 这一章的**全部**复盘（同一项目，归档世代也算——父尝试作废后那些老记录不能
+ * 因此找不到），按 mtime 旧 → 新。
+ *
+ * T224：`#N` 与「历史」都只按**这一章**数，不再按"复盘了哪一条转录"分桶。
+ * 用户口径：树上这里只能有一行复盘；复盘过的对象写在行 title/历史行里，不是
+ * 另一条行的理由。老命名的复盘转录里既没有号、也没有"复盘了哪一条"的备注，
+ * 界面只能按 mtime 排号（读时推断，磁盘上的文件名一个字节都不改）。 */
+export function chapterRescueRows(sessions: any[], rescue: any): any[] {
+  if (!rescue || rescue.chapterRole !== 'rescue') return []
+  const chapter = String(rescue.chapterId || '')
+  if (!chapter) return []
+  const proj = rescue.project || projectOf(rescue.id)
+  return sortFixesOldestFirst((sessions || []).filter((s: any) => !!s && s.chapterRole === 'rescue' &&
+    String(s.chapterId || '') === chapter && (s.project || projectOf(s.id)) === proj))
+}
+
+/* 复盘行/历史行的一句话标签：`复盘 #2`（归档前缀「旧」与转换/核对/修复行同一套）。
+ * N 是"这一章的第几次复盘"，由 rescueOrdinal 按 mtime 读时算出来（旧 → 新从 1
+ * 数）；没有会话池的孤立调用退回转录名里的号。 */
+export function rescueRowLabel(rescue: any, ordinal?: number): string {
+  const n = Number(ordinal) || Number(rescue && rescue.chapterAttempt) || 1
+  return ((rescue && rescue.archived) ? '旧' : '') + '复盘 #' + n
+}
+
+/* 这是这一章的第几次复盘（1 起，按 mtime 旧 → 新）。与 chapterRescueRows 同一
+ * 份集合，所以树行、历史行、历史链的号一定对得上。 */
+export function rescueOrdinal(sessions: any[], rescue: any): number {
+  if (!rescue) return 1
+  const peers = chapterRescueRows(sessions, rescue)
+  const i = peers.findIndex((s: any) => String(s && s.id) === String(rescue.id))
+  return i >= 0 ? i + 1 : 1
+}
+
+/* 复盘行的"复盘了 …"小标签：`转换#1`——角色来自转录的 meta（`reviewed_role`），
+ * 尝试号从被复盘转录名里的 `.tryN` 取（没有后缀 = #1）。老转录没有这条备注时给
+ * 空串：不猜一个可能是错的角色/轮次。 */
+export function reviewedTargetLabel(rescue: any): string {
+  const role = chapterRoleLabel(String((rescue && rescue.reviewedRole) || ''))
+  if (!role) return ''
+  const tr = String((rescue && rescue.reviewedTranscript) || '')
+  const m = /\.try(\d+)$/.exec(tr)
+  return role + '#' + (m ? Number(m[1]) : 1)
+}
+
+/* 复盘行的悬浮说明：会话原本的 tip + 一句"复盘的是哪一条目标转录"。新转录用
+ * meta 里的被复盘角色/转录名（`复盘对象：转换#1（convert_<章>.try2）`），老转录
+ * 退回转录名去掉 `rescue_` 前缀（`chapter_004.try2`），一字不多编。 */
+export function rescueRowTitle(rescue: any): string {
+  const tip = sessionTip(rescue)
+  const reviewed = reviewedTargetLabel(rescue)
+  const name = String((rescue && rescue.reviewedTranscript) || '') ||
+    convertBasename(rescue).replace(/^rescue_/, '')
+  const target = reviewed && name ? reviewed + '（' + name + '）' : reviewed || name
+  const line = '复盘对象：' + (target || '—')
+  return tip ? tip + '\n' + line : line
+}
+
+/* 修复链（`chapterAttemptChain` 里已按新 → 旧排好）的第 index 条是第几轮：
+ * 队尾是最早一轮，从 1 数。树上是旧 → 新，所以直接用 i + 1。 */
+export function fixRoundAt(index: number, total: number): number {
+  const n = Math.max(1, Math.floor(Number(total) || 0))
+  const i = Math.max(0, Math.floor(Number(index) || 0))
+  return Math.max(1, n - i)
+}
+
+/*
+ * P60 第五步：修复行的结局（通过 / 未通过 / 失败 / 运行中）。
+ *
+ * 修复会话自己往转录里写 `chapter_activity`（pass / issues / error），扫描端
+ * 把它放进行上的 `chapterActivity`；还在写入的会话一律算"运行中"（还没结论，
+ * 不能拿上一次的状态冒充这一次）。这一行写进行 title——鼠标停一下就知道那
+ * 一轮修没修过，不必点进去读转录。
+ */
+export function fixOutcomeLabel(s: any): string {
+  if (!s) return ''
+  if (s.live) return '运行中'
+  switch (String(s.chapterActivity || '')) {
+    case 'pass':
+      return '通过'
+    case 'issues':
+      return '未通过'
+    case 'error':
+      return '失败'
+    default:
+      return ''
+  }
+}
+
+/* 修复行的悬浮说明 = 会话原本的 tip + 结局；没有结局时与之前一字不差。 */
+export function fixRowTitle(s: any): string {
+  const tip = sessionTip(s)
+  const outcome = fixOutcomeLabel(s)
+  return outcome ? tip + '\n修复结果：' + outcome : tip
+}
+
+/*
+ * 一个节点有没有子行可展开：核对行 / 修复行 / 子章节。三者互不依赖——
+ * 修复行不能因为这一行没有核对（或核对因尝试号不显示）就一起消失
+ * （P60 第五步：真实跑批的 fix_*.jsonl 就是这么在界面上看不见的）。
+ * 判据保持与引入修复行之前一致：没有这三种子行的节点不多出展开箭头。
+ */
+export function chapterNodeHasRows(node: { convert?: any; checker?: any; fixes?: any[]; rescues?: any[]; children?: any[] }): boolean {
+  return (!!node.convert && !!node.checker) || (node.children || []).length > 0 ||
+    (node.fixes || []).length > 0 || (node.rescues || []).length > 0
+}
+
+/* 修复轮次按**时间**排出先后（同一处修多轮，旧 → 新）；并列时按 id 保底确定性。 */
+function sortFixesOldestFirst(items: any[]): any[] {
+  return (items || []).slice().sort((a, b) => {
+    const d = mtimeMs(a) - mtimeMs(b)
+    if (d) return d
+    const ia = String((a && a.id) || '')
+    const ib = String((b && b.id) || '')
+    return ia < ib ? -1 : ia > ib ? 1 : 0
+  })
+}
+
+/*
+ * P60：一个节点显示哪几条修复会话——**锚点等于这一行选中的转换名**（与核对同
+ * 一个口径，P59）：锚点对不上就别挂（另一次转换的修复不能摆到这一行旁边），
+ * 归档世代也要一致。修复转录本身没有章节身份（文件名是 `fix_<章>`），所以锚点
+ * 才是唯一可靠的挂靠依据；没有锚点的老转录退回按章节 ID 相等。
+ */
+function fixesForNode(node: ChapterTreeNode, convert: any, parentArchived: boolean | null, pool: any[]): any[] {
+  if (!pool || !pool.length) return []
+  const gen = convert ? !!convert.archived : parentArchived
+  const want = convert ? convertBasename(convert) : ''
+  const hits = pool.filter((f) => {
+    if (!f) return false
+    if (gen !== null && !!f.archived !== gen) return false
+    const anchor = String(f.chapterAnchor || '')
+    if (anchor) return !!want && anchor === want
+    return String(f.chapterId || '') === node.id
+  })
+  return sortFixesOldestFirst(hits)
+}
+
+/*
+ * P61：一个节点显示哪几条复盘会话——按**章节 ID + 世代**（与修复同一套口径）。
+ * 复盘转录自己带章节身份（`rescue_<章>[.tryN]`），所以不需要锚点；而 `.tryN`
+ * 是它复盘的那一条**转换**的尝试号（不是行序号），所以这里不按尝试号过滤：
+ * 尝试 2 的复议会一直在树里，哪怕这一行此刻显示的是尝试 3——挪走它就等于把那
+ * 次复盘藏掉，而它正是"这条会话被救过/没救回来"的唯一记录。尝试号写在行标签上。
+ */
+function rescuesForNode(node: ChapterTreeNode, convert: any, parentArchived: boolean | null, pool: any[]): any[] {
+  if (!pool || !pool.length) return []
+  const gen = convert ? !!convert.archived : parentArchived
+  const hits = pool.filter((r) => {
+    if (!r) return false
+    if (gen !== null && !!r.archived !== gen) return false
+    return String(r.chapterId || '') === node.id
+  })
+  return sortFixesOldestFirst(hits)
+}
+
+/* 用户口径（本批）：**树上每种只留一行**。修复按子章节取最新一轮、复盘按**这一章**
+ * 取最新一次——否则同一处修三轮、复盘两次，节点下就叠出一串 `#1 #2 #3`，树被撑成
+ * 流水账。号与全部轮次只在「历史」页签里出现（chapterAttemptChain 仍然给出完整
+ * 列表，新 → 旧）；行 title 里带复盘对象，点这一行进去就能看到全部。 */
+function newestByKey(list: any[] | undefined, keyOf: (x: any) => string): any[] {
+  const items = list || []
+  const best = new Map<string, any>()
+  for (const x of items) {
+    if (!x) continue
+    const k = keyOf(x)
+    const cur = best.get(k)
+    if (!cur || mtimeMs(x) >= mtimeMs(cur)) best.set(k, x)
+  }
+  const out: any[] = []
+  for (const x of items) {
+    if (x && best.get(keyOf(x)) === x) out.push(x)
+  }
+  return out
+}
+
+export function treeFixRows(node: { id?: string; fixes?: any[] }): any[] {
+  const id = String((node && node.id) || '')
+  return newestByKey(node && node.fixes, (fx) => fixTargetId(fx, id))
+}
+
+/* T224：树上一个节点**只留一行复盘**——取这一章最新的一次（mtime，并列时后面那条
+ * 赢，与 newestByKey 同一口径）。老命名的复盘转录没有目标备注，原来按 id 兜底成
+ * 每份一个 key，于是同一章复盘过几次就叠出几行「复盘」；现在是"这一章复盘过"这
+ * 一件事只有一行，全部次数在「历史」里（chapterAttemptChain → chapterRescueRows）。 */
+export function treeRescueRows(node: { rescues?: any[] }): any[] {
+  let best: any = null
+  ;((node && node.rescues) || []).forEach((rs) => {
+    if (!rs) return
+    if (!best || mtimeMs(rs) >= mtimeMs(best)) best = rs
+  })
+  return best ? [best] : []
+}
+/* 钉住一条修复会话时，它所在的行要能显示到它：转换由它的锚点决定（与钉住核对
+ * 同一条规则）。找不到锚点对应的转换就不钉，绝不拿别的尝试凑。 */
+function anchoredConvert(items: any[], fix: any): any | null {
+  const anchor = String((fix && fix.chapterAnchor) || '')
+  if (!anchor) return null
+  const hits = (items || []).filter((s: any) => s && s.chapterId &&
+    s.chapterRole !== 'checker' && s.chapterRole !== 'fix' &&
+    convertBasename(s) === anchor && !!s.archived === !!(fix && fix.archived))
+  return newestOf(hits)
+}
+
+/* 同一个锚点下的多次核对：用户口径是"按 mtime 取最新"（重核号只是它自己的
+ * 历史序号），mtime 并列才退回 newerAttempt 的确定性比较。 */
+function newestByMtime(items: any[]): any | null {
+  let best: any = null
+  ;(items || []).forEach((s) => {
+    if (!best) { best = s; return }
+    const d = mtimeMs(s) - mtimeMs(best)
+    if (d > 0) best = s
+    else if (d === 0) best = newerAttempt(best, s)
+  })
+  return best
+}
+
+/*
+ * P59：给一个节点选核对会话——**核对挂在它锚定的转换下面**。
+ *  · 有锚点的节点（新转录）只认锚点：锚点对不上就不显示，绝不退回"最近那条
+ *    核对"，否则另一次尝试的结论会摆到这一行旁边；
+ *  · 全都还是没有锚点的旧转录时才走老规则；
+ *  · 归档世代参与配对：上一代的核对不能挂到这一代的转换上（P58）。
+ */
+function checkerForConvert(checkers: any[], convert: any, pinnedConvert: boolean): any | null {
+  if (!convert) return newestOf(checkers)
+  const generation = sessionGeneration(convert)
+  const anchored = (checkers || []).filter((c) => String(c.chapterAnchor || '') !== '')
+  if (anchored.length) {
+    const key = convertBasename(convert)
+    // T235：世代要比到"哪一次尝试的归档"，不能只比工作树/归档——同一章作废重开
+    // 过几次就有几棵归档树，各树里的同名核对不能互相挂。
+    const hit = anchored.filter((c) => String(c.chapterAnchor) === key && sessionGeneration(c) === generation)
+    return newestByMtime(hit)
+  }
+  // 旧规则：钉住转换时只跟同一轮（同尝试号 + 同世代）；默认取最新一条，归档
+  // 世代不同、或核对号小于转换号（上一次尝试的结论）都不算这一次的（T187）。
+  const attempt = Number(convert.chapterAttempt) || 1
+  if (pinnedConvert) {
+    const peers = (checkers || []).filter((k: any) =>
+      (Number(k.chapterAttempt) || 1) === attempt && sessionGeneration(k) === generation)
+    return newestOf(peers)
+  }
+  const best = newestOf(checkers)
+  if (!best) return null
+  if (sessionGeneration(best) !== generation) return null
+  if ((Number(best.chapterAttempt) || 1) < attempt) return null
+  return best
+}
+
+/*
+ * T170：同一章被 checker 打回后会换全新会话重来（convert_<章>.try2.jsonl…），
+ * 几次尝试是**一件事的历史版本**。章节树一行代表"这一章现在的样子"，所以默认
+ * 打开**最新一次**尝试（序号大者优先，序号相同才比修改时间）——旧实现是遍历
+ * 列表时后者覆盖前者，而列表按时间新→旧，结果反而停在第一次尝试上；用户点开
+ * 这一行看到的是被作废的那一次。更早的尝试仍在「历史 N」页签里逐个可点。
+ */
+function newerAttempt(cur: any, next: any): any {
+  if (!cur) return next
+  if (!next) return cur
+  // 归档里的转录来自**更早一次根尝试**（`work/attempts/<根章>/tryN/`）。根章重来
+  // 一次时它的子章节尝试号又从 1 数起，所以归档里的 `convert_<子章>.try2` 尝试号
+  // 比工作树里这一次的 `convert_<子章>`（#1）还大——只比号会把"上一代的通过结果"
+  // 当成这一章的现状显示（用户看到"下面都通过了、却还有一个在排队"）。先比是不是
+  // 归档，工作树那条永远优先；两边同为归档/同时活体时才比尝试号。
+  if (!!cur.archived !== !!next.archived) return cur.archived ? next : cur
+  // T248：先比"谁更晚还在动"（mtime），再比尝试号。子章节的尝试号会随根章重来
+  // 重新从 1 数起，只比号会把上一代里编号更大的废尝试当成这一章的现状——实测
+  // 一章的产物由 try1 交出、页面上却停在十天前的 try10「等待并发槽」，另一章停
+  // 在上一代的 try13，还有一章明明 try3 已通过却显示 try4「运行中」。
+  const d = mtimeMs(next) - mtimeMs(cur)
+  if (d !== 0) return d > 0 ? next : cur
+  const a = Number(cur.chapterAttempt) || 1
+  const b = Number(next.chapterAttempt) || 1
+  if (a !== b) return b > a ? next : cur
+  return cur
+}
+
+const ARCHIVE_MARK = '/work/attempts/'
+
+/* 会话的转录路径：接口给 `path`（绝对），老转录只有 `id`（相对工程根）——两者
+ * 都带着 `work/attempts/<章>/tryN` 这一段，世代就从这一段读。 */
+function sessionPath(s: any): string {
+  return String((s && (s.path || s.id)) || '')
+}
+
+/*
+ * T235：会话所在的**世代**。工作树里的返回空串；`work/attempts/<章>/tryN/` 里的
+ * 返回「<项目根>|<章>|tryN」。路径里就写着它属于谁的哪一次尝试，比 archived 这个
+ * 布尔更细——同一章可以被作废重开好几次，每次的归档各是一代，只看布尔会把所有的
+ * 归档当成同一代。
+ */
+export function sessionGeneration(s: any): string {
+  const p = sessionPath(s)
+  const i = p.indexOf(ARCHIVE_MARK)
+  if (i < 0) return ''
+  const segs = p.slice(i + ARCHIVE_MARK.length).split('/')
+  if (segs.length < 2 || !/^try\d+$/.test(segs[1])) return ''
+  return p.slice(0, i) + '|' + segs[0] + '|' + segs[1]
+}
+
+/* 世代键的项目根：工作树与归档树都取 `/work/` 之前那一段，两边的写法才对得上。 */
+function genRoot(s: any): string {
+  const p = sessionPath(s)
+  const i = p.indexOf('/work/')
+  return i < 0 ? 'project:' + String((s && s.project) || '') : p.slice(0, i)
+}
+
+/*
+ * T235：子行的世代。`key` 是 `work/attempts/<章>/tryN` 的路径键（工作树为 ''，
+ * 查不到路径时为 ''），`archived` 是工作树/归档那一层——两者都是路径拿不到时的
+ * 退路，路径在就以 key 为准，比得出"这是哪一次尝试的归档"。
+ */
+interface ChapterGen { key: string; archived: boolean }
+
+/*
+ * T235：这一行的转换定下来之后，**子行该去哪一代里找**。
+ *  · 归档里的转换：子行就在同一棵归档树里，世代键直接取它的路径；
+ *  · 工作树里的转换：默认还是工作树；但这一次尝试**已经被作废**（尝试号小于这一
+ *    章最新的工作树尝试、且 `work/attempts/<章>/tryN` 确实存在）时，它那一代的子
+ *    行已经被搬进归档，就按那个归档世代取——在历史里切到那一次，下面挂的必须
+ *    是它自己那一代的子会话；
+ *  · 这一行连转换都没有：沿用父行给的世代（T214 老规矩）。
+ */
+function childGeneration(convert: any, converts: any[], parentGen: ChapterGen | null, archiveGens: Set<string>): ChapterGen | null {
+  if (!convert) return parentGen
+  if (convert.archived) return { key: sessionGeneration(convert), archived: true }
+  const n = Number(convert.chapterAttempt) || 1
+  let maxLive = 0
+  ;(converts || []).forEach((c) => {
+    if (c && !c.archived) maxLive = Math.max(maxLive, Number(c.chapterAttempt) || 1)
+  })
+  if (n < maxLive) {
+    const want = genRoot(convert) + '|' + String(convert.chapterId || '') + '|try' + n
+    if (archiveGens.has(want)) return { key: want, archived: true }
+  }
+  return { key: sessionGeneration(convert), archived: false }
+}
+
+/*
+ * T214：子行的**世代**跟着父行走。父行的转换是工作树里的（正在跑的这一代），
+ * 子行就只在工作树里挑；父行是归档里的（你在历史里切到了上一代），子行也回到
+ * 归档——同一章的两个世代各有一套子章节，混着取就会"父行是旧的那一代、子行是
+ * 新的那一代"。父行连转换都没有（只有核对）时不设限，退回各取最新；那一代里
+ * 没有这个子章节的转换（这一代根本没转过它）时也不留空行，退回该节点最新一次。
+ * T235：世代不再只是"工作树/归档"两态，而是具体到哪一次尝试的归档。
+ */
+function convertInGeneration(candidates: any[], gen: ChapterGen | null): any | null {
+  if (!candidates || !candidates.length) return null
+  if (!gen) return newestOf(candidates)
+  // 先按工作树/归档这一层筛（没有 path 的旧转录只能筛到这一层），路径在时再细到
+  // "哪一次尝试的归档"；这一代里没有这个子章节就退回该节点最新一次，不留空行。
+  const sameArchived = candidates.filter((c) => !!c.archived === gen.archived)
+  const pool = sameArchived.length ? sameArchived : candidates
+  const exact = pool.filter((c) => sessionGeneration(c) === gen.key)
+  return newestOf(exact.length ? exact : pool)
+}
+
+/*
+ * 章节树里"这一行显示哪一次尝试"（T173，T175 收窄，T214 补子行世代）。
+ *
+ * 默认每个节点各取自己最新的一次：同一章下各节点的重试次数是**互相独立**
+ * 的（有的只转过一次、有的被打回五次），拿一个章节的 #2 去套全树，别的章节
+ * 就会显示一个不相干的旧版本。
+ *
+ * 唯一的例外是**你正在看的那一条**（`pinId`）：它所在的行必须显示它，否则
+ * 点开历史里的 #2、树里还是 #3。同一节点的另一种角色（convert ↔ checker）
+ * 按**核对会话的锚点**配（P59，见 checkerForConvert）：钉住核对时转换由锚点
+ * 决定，钉住转换时核对挂在它锚定的那次转换下面；旧转录没有锚点才退回"同一轮"。
+ * 子会话跟着父行的那一代走（T214，见 convertInGeneration），别的章节不受影响。
+ */
+export function buildChapterTree(items: any[], pinId = ''): ChapterTreeNode[] {
+  const byId: Record<string, ChapterTreeNode> = {}
+  const parents: Record<string, string> = {}
+  const byRole: Record<string, any[]> = {}
+  // T235：现存的所有归档世代（`work/attempts/<章>/tryN`）。工作树里一次被作废的
+  // 尝试该把哪一代归档子行带出来，就靠这张表判断"那一代的归档到底在不在"。
+  const archiveGens = new Set<string>()
+  // P60：修复会话单独收集（锚点是唯一的挂靠依据），并记下每个转换/核对会话属于
+  // 哪个节点——钉住一条修复会话时要靠它找回那一行。
+  const fixPool: any[] = []
+  // P61：复盘会话同理单独收集（章节 ID 是挂靠依据）；它**永远**不参选
+  // convert/checker——这里是它进不了那两条挑选的唯一一道闸。
+  const rescuePool: any[] = []
+  const nodeOfSession: Record<string, ChapterTreeNode> = {}
+  let pinnedFix: any = null
+  let pinnedRescue: any = null
+  let pinned: { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null = null
+  ;(items || []).forEach((session) => {
+    if (!session) return
+    const archivedGen = sessionGeneration(session)
+    if (archivedGen) archiveGens.add(archivedGen)
+    // 修复转录没有章节身份（文件名是 `fix_<章>`、不是 convert_/checker_ 前缀）：
+    // 它不能建节点，只能挂到别人身上，所以连 pinned 都要留到节点建好之后再定。
+    if (session.chapterRole === 'fix') {
+      fixPool.push(session)
+      if (pinId && session.id === pinId) pinnedFix = session
+      return
+    }
+    // P61：复盘会话与修复行同层——它只挂到自己的章节下面，不建节点、不参选。
+    if (session.chapterRole === 'rescue') {
+      rescuePool.push(session)
+      if (pinId && session.id === pinId) pinnedRescue = session
+      return
+    }
+    if (!session.chapterId) return
+    const id = String(session.chapterId)
+    const node = byId[id] || (byId[id] = { id, convert: null, checker: null, fixes: [], rescues: [], children: [] })
+    parents[id] = String(session.chapterParent || '')
+    if (session.chapterRole !== 'checker' && session.chapterRole !== 'convert') return
+    const role: 'convert' | 'checker' = session.chapterRole === 'checker' ? 'checker' : 'convert'
+    const key = id + '|' + role
+    ;(byRole[key] || (byRole[key] = [])).push(session)
+    nodeOfSession[String(session.id)] = node
+    if (pinId && session.id === pinId) pinned = { node, role, session }
+  })
+  // 先搭出父子关系（T214 要按"父行定了哪一代"给子行选行，得从根往下走）。
+  const roots: ChapterTreeNode[] = []
+  Object.keys(byId).forEach((id) => {
+    const parent = parents[id] && byId[parents[id]]
+    if (parent) parent.children.push(byId[id])
+    else roots.push(byId[id])
+  })
+  const ordinal = (id: string): number => {
+    const m = /_child_(\d+)$/.exec(id)
+    return m ? Number(m[1]) : 0
+  }
+  const sort = (nodes: ChapterTreeNode[]) => {
+    nodes.sort((a, b) => ordinal(a.id) - ordinal(b.id) || a.id.localeCompare(b.id))
+    nodes.forEach((node) => sort(node.children))
+  }
+  sort(roots)
+  // P60：钉住一条修复会话时，让它所在的行显示到它——转换由它的锚点决定（与钉住
+  // 核对同一条规则）；不然点开修复后这一行会切回"最新一次转换"，修复子行跟着消失。
+  if (!pinned && pinnedFix) {
+    const hit = anchoredConvert(items, pinnedFix)
+    const node = hit ? nodeOfSession[String(hit.id)] : null
+    if (node) pinned = { node, role: 'convert', session: hit }
+  }
+  // P61：钉住一条复盘会话时，让它所在的那一行能显示到它复盘的那一次转换。
+  // C 起不再靠"目标尝试号"猜：复盘自己的转录在 meta 里写着被复盘的转录名
+  // （`reviewed_transcript` = `convert_<章>[.tryN]`），按名字精确钉；老转录没有
+  // 这条备注就不钉（这一行默认显示最新一次，复盘行仍挂在这一行下面可见），
+  // 绝不拿别的尝试凑。
+  if (!pinned && pinnedRescue) {
+    const node = byId[String(pinnedRescue.chapterId || '')]
+    const want = String(pinnedRescue.reviewedTranscript || '')
+    if (node && want) {
+      const gen = !!pinnedRescue.archived
+      const converts = byRole[node.id + '|convert'] || []
+      const sameGen = converts.filter((c: any) => !!c.archived === gen)
+      const pool = sameGen.length ? sameGen : converts
+      const hit = pool.filter((c: any) => convertBasename(c) === want)
+      if (hit.length) pinned = { node, role: 'convert', session: newestOf(hit) }
+    }
+  }
+  // P59：先定每一行的转换，再由**锚点**选核对。钉住核对会话时，转换由它的
+  // 锚点决定（不是按尝试号，也不是"最新那条"）；钉住转换时，转换仍取那一条，
+  // 核对照锚点选。定完把这一行的世代交给子行（T214）。
+  const pin = pinned as { node: ChapterTreeNode; role: 'convert' | 'checker'; session: any } | null
+  const resolve = (node: ChapterTreeNode, parentGen: ChapterGen | null): void => {
+    const here = pin && pin.node === node ? pin : null
+    if (here && here.role === 'checker') {
+      node.checker = here.session
+      const anchor = String(here.session.chapterAnchor || '')
+      const converts = byRole[node.id + '|convert'] || []
+      if (anchor) {
+        const sameGen = converts.filter((c: any) => !!c.archived === !!here.session.archived)
+        const hit = (sameGen.length ? sameGen : converts).filter((c: any) => convertBasename(c) === anchor)
+        // 锚点对应的转换不存在（例如只剩归档的核对）时留空：不拿别的尝试凑。
+        node.convert = hit.length ? newestOf(hit) : null
+      } else {
+        // 旧转录没有锚点：按老规则把转换切到"同一轮"；那一轮不在就保持最新。
+        const want = Number(here.session.chapterAttempt) || 1
+        const peers = converts.filter((c: any) =>
+          (Number(c.chapterAttempt) || 1) === want && !!c.archived === !!here.session.archived)
+        node.convert = peers.length ? newestOf(peers) : newestOf(converts)
+      }
+    } else {
+      node.convert = here
+        ? here.session
+        : convertInGeneration(byRole[node.id + '|convert'] || [], parentGen)
+      node.checker = checkerForConvert(byRole[node.id + '|checker'] || [], node.convert, !!here)
+    }
+    // P60：修复子行挂在这一行选中的转换下面（同锚点 + 同世代）；没有修复就是
+    // 空数组——调用方不用判空，也不会多出占位行。
+    // T235：子行的世代按父行**选中的那一次尝试**定，不只是工作树/归档两态；
+    // 修复/复盘行仍按"这一次转换自己在工作树还是归档里"筛。
+    const gen = childGeneration(node.convert, byRole[node.id + '|convert'] || [], parentGen, archiveGens)
+    const archived = gen ? gen.archived : null
+    node.fixes = fixesForNode(node, node.convert, archived, fixPool)
+    // P61：复盘行也是这一层的子行（与修复行同层），绝不参与上面的挑选。
+    node.rescues = rescuesForNode(node, node.convert, archived, rescuePool)
+    node.children.forEach((child) => resolve(child, gen))
+  }
+  roots.forEach((root) => resolve(root, null))
+  return roots
+}
+
 export interface StageGroup { stage: string; title: string; items: any[]; live: number }
 export interface ProjectGroup {
   name: string; prefix: string; title: string; legacy: boolean
@@ -468,6 +1072,79 @@ export function parseImg2TextId(id: string): Img2TextRef | null {
     return { kind: 'analyze', img, stage: -1, prev }
   }
   return null
+}
+
+/*
+ * 章节会话（convert / checker）的标题是**流水线里的标识符**（`chapter_004_child_01`），
+ * 不是作者写的文案：走行内 markdown 会把下划线当成强调吃掉
+ * （`chapter_004_child_01` → `chapter004child01`，树里还缩成 `chapter004child01chil…`），
+ * 所以这一类标题一律纯文本显示（T176）；img2text/样式等会话照旧走 markdown。
+ */
+export function plainTitle(s: any): boolean {
+  return !!(s && s.chapterId)
+}
+
+/*
+ * 章节树里那句状态文案（T178）：同一个 `chapter_activity` 在转换会话与核对
+ * 会话里意思相反，不能共用一张表——
+ *  · 转换会话跑完（checking_result）= 这一轮转换交上去了、正等核对
+ *    → 「转换完成待核对」；
+ *  · 核对会话跑完（checking_result）= 核对会话结束了、正在读它的结论
+ *    → 「核对完成待处理」；
+ *  · 转换会话又排到 queued、而这一章已经有核对结论（上一轮被打回）→ 它等的
+ *    其实是**重转换**的并发槽 → 「核对完成待并发槽」。
+ *
+ * T181：核对结论一出来，转换行就不能再挂着「待核对」——它自己在等自己的核对，
+ * 而核对已经说话了。所以转换行的 checking_result 要看同一行核对的结论：发现问题
+ * →「核对发现问题」（马上要被重新喂回去改），已通过 →「已通过」。
+ */
+const CHAPTER_ACTIVITY: Record<string, string> = {
+  running: '运行中', waiting_children: '等待子会话',
+  pass: '已通过', issues: '发现问题', error: '会话错误',
+  // T171：转录里已有 run_end 却停在 running 的尝试被放弃了，不能再显示"运行中"。
+  interrupted: '已中断',
+  // T231：核对跑完没给结论（会话退化/复盘判无法挽救/只读视图没铺起来）时写的
+  // 状态。以前写的是 error，于是一条 submit 成功的转换会话在页面上成了"会话错误"。
+  no_verdict: '核对无结论',
+  // P61：复盘正在看这条转录（状态写在**目标**转录里，复盘一开始就写、结论出来
+  // 再改成 queued/error）。目标会话此刻并没有在跑，但要让人一眼看出"这条报错
+  // 的会话正在被复盘"，而不是以为它就这么定局了。
+  rescuing: '复盘处理中',
+  // T243：上游接口错误的原地重试用满了——这一章**暂停**，不是失败：重启程序
+  // 或在网页点「继续跑」就接着这条会话干。页面文案刻意不写「失败」。
+  paused: '已暂停',
+}
+
+export function chapterActivityLabel(
+  state: string | undefined,
+  role: 'convert' | 'checker' = 'convert',
+  peerVerdict = '',
+  live = false,
+): string {
+  if (!state) return live ? '运行中' : ''
+  // peerVerdict 是同一行**另一个角色**的最新结论（转换行看核对的结论）。
+  const judged = peerVerdict === 'issues' || peerVerdict === 'pass'
+  if (state === 'queued') {
+    return role === 'convert' && judged ? '核对完成待并发槽' : '等待并发槽'
+  }
+  if (state === 'checking_result') {
+    if (role === 'checker') return '核对完成待处理'
+    if (peerVerdict === 'issues') return '核对发现问题'
+    if (peerVerdict === 'pass') return '已通过'
+    return '转换完成待核对'
+  }
+  return CHAPTER_ACTIVITY[state] || (live ? '运行中' : '')
+}
+
+/*
+ * 章节会话的尝试号（T165，T173 改标法）：同一章每次重开一条转录
+ * （`convert_<章>.try2.jsonl`），条目标 `#N`。用户口径：不要在中栏/侧栏
+ * 上写中文「第 N 次」——它在正常浏览时不提供信息，只在「历史」列表里用来
+ * 区分同一件事的几次尝试，所以只保留紧凑的 `#N`，且只在历史列表里出现。
+ */
+export function chapterAttemptTag(s: any): string {
+  const n = Number(s && s.chapterAttempt) || 1
+  return n > 1 ? '#' + n : ''
 }
 
 /* 历史列表里每条会话的来源小标签：逐图分析 / stage0 / stage1 · 上一次 … */
@@ -602,6 +1279,10 @@ export function buildGroups(): ProjectGroup[] {
  * sessions 数组扫描，不读全局 state，调用方用 computed 按引用缓存。 */
 export function chainOfSession(sessions: any[], id: string | null | undefined): any[] | null {
   if (!id) return null
+  // 章节转换的尝试链优先：同一章被 checker 打回后换会话重来，几次尝试是
+  // 同一件事的历史版本（键 = 项目 + 角色 + 章节 ID，成员 = 各次尝试）。
+  const attemptChain = chapterAttemptChain(sessions, id)
+  if (attemptChain) return attemptChain
   const self = parseImg2TextId(id)
   if (!self) return null
   // 链是按项目聚的（侧栏 buildGroups 里每组各自 buildImg2TextChains）：
@@ -619,6 +1300,174 @@ export function chainOfSession(sessions: any[], id: string | null | undefined): 
   })
   if (members.length < 2) return null
   return sortChainMembers(members)
+}
+
+/*
+ * 章节转换/核对的尝试链：给定会话 id，把它所在「同一章节 ID」的各次尝试聚成
+ * 一条链。只认带 chapterId 的会话；只尝试过一次的返回 null（此时不出现
+ * 「历史」页签）。
+ */
+export function chapterAttemptChain(sessions: any[], id: string | null | undefined): any[] | null {
+  if (!id) return null
+  let self: any = null
+  ;(sessions || []).forEach((s) => {
+    if (s && s.id === id) self = s
+  })
+  if (!self) return null
+  const proj = self.project || projectOf(self.id)
+  // P60：修复会话没有章节身份（文件名是 `fix_<章>`），它自己的历史 = **同一锚点**
+  // 下的其他修复轮次（新 → 旧）；锚点不同就是修的另一份产物，不能混进来。
+  // P61：复盘会话不进**转换/核对**的尝试链——它是某一章的附注，不是那一章的一次
+  // 尝试。C：但它自己有一条链。T224：这条链 = **这一章的全部复盘**（新 → 旧），
+  // 不再按"复盘了哪一条转录"分桶——树上这里只有一行，用户口径是"以前的复盘都在
+  // 这个会话的历史里"，谁复盘谁写在行里，不影响归位；老命名的复盘转录本来也没有
+  // 目标备注，分桶只会让它们互相看不见。只有一次复盘时没有历史页签。
+  if (self.chapterRole === 'rescue') {
+    const rows = chapterRescueRows(sessions, self)
+    if (rows.length < 2) return null
+    return rows.slice().sort((a: any, b: any) => mtimeMs(b) - mtimeMs(a))
+  }
+  if (self.chapterRole === 'fix') {
+    const anchor = String(self.chapterAnchor || '')
+    if (!anchor) return null
+    const rounds = (sessions || []).filter((s: any) => s && s.chapterRole === 'fix' &&
+      String(s.chapterAnchor || '') === anchor && (s.project || projectOf(s.id)) === proj)
+    if (rounds.length < 2) return null
+    return rounds.slice().sort((a: any, b: any) => mtimeMs(b) - mtimeMs(a))
+  }
+  if (!self.chapterId) return null
+  const members: any[] = []
+  ;(dedupeChapterAttempts(sessions || [])).forEach((s) => {
+    if (!s || !s.chapterId) return
+    // 修复已经作为章节树的子行显示，**不进**转换/核对的尝试链——它们挂在同一次
+    // 转换上，混进来会把"这一章转过几次"搅乱（P60）。P61 的复盘行同理。
+    if (s.chapterRole === 'fix' || s.chapterRole === 'rescue') return
+    if (s.chapterId !== self.chapterId) return
+    // T194：**不再按角色分链**——转换与同一轮的核对是同一件事的两个角色（用户口径
+    // "这俩是一体的"）。原来按角色过滤时，点一条核对会话会让整个列表从「#2 #1」
+    // 变成「#1」（核对只有一次尝试），看起来像"点一下 #2 就变成了 #1"。
+    if ((s.project || projectOf(s.id)) !== proj) return
+    members.push(s)
+  })
+  // P59：链只列**当前这条会话所在角色**的历史——
+  //  · 转换会话下面 = 这一章的各次转换（不看核对）；
+  //  · 核对会话下面 = **挂在同一个转换名下**的各次核对（不看转换）。
+  // 锚点就是转换转录名（`chapterAnchor`）；没有锚点的老转录退回"同章同类"。
+  const wantRole = self.chapterRole === 'checker' ? 'checker' : 'convert'
+  let rows = members.filter((m: any) => (m.chapterRole === 'checker' ? 'checker' : 'convert') === wantRole)
+  // P59 补充：老核对转录**没有锚点**（P58 之前落盘的），它们同样是"这一章真的
+  // 核过"的记录。只按锚点全等过滤时，只要当前这条写下了锚点，那些老核对就一条
+  // 也匹配不上——看起来像"新的一次核对把旧的盖掉了"。所以没有锚点的成员一律保留
+  // （它们没得比），有锚点的仍必须与自己的锚点一致，锚在别处的核对不混进来。
+  if (wantRole === 'checker' && self.chapterAnchor) {
+    rows = rows.filter((m: any) => !m.chapterAnchor || m.chapterAnchor === self.chapterAnchor)
+  }
+  if (rows.length < 2) return null
+  // 转换：各次尝试（新 → 旧）；核对：同一转换名下的各次核对（新 → 旧）。
+  return wantRole === 'checker'
+    ? rows.slice().sort((a: any, b: any) => mtimeMs(b) - mtimeMs(a))
+    : sortChainMembers(rows)
+}
+
+/* P59：历史列表以转换会话为行首锚点——每个转换尝试一行，紧跟它**锚定的**核对
+ * （新 → 旧），然后是上一个更老的转换。旧转录没有锚点时才按"同世代里尝试号
+ * 不大于自己的最近那次转换"归位；归不进去的排在最后，不藏掉任何一条。 */
+export function orderChapterChain(members: any[]): any[] {
+  const converts = (members || []).filter((s) => s && s.chapterRole !== 'checker').sort(convertChainOrder)
+  const checkers = (members || []).filter((s) => s && s.chapterRole === 'checker')
+  const owned: Record<string, any[]> = {}
+  const leftover: any[] = []
+  converts.forEach((c) => { owned[String(c.id)] = [] })
+  checkers.forEach((k) => {
+    const anchor = String((k && k.chapterAnchor) || '')
+    if (anchor) {
+      const hit = converts.find((c) => convertBasename(c) === anchor && !!c.archived === !!k.archived)
+      if (hit) { owned[String(hit.id)].push(k); return }
+      leftover.push(k)
+      return
+    }
+    const sameGen = converts.filter((c) => !!c.archived === !!k.archived)
+    const older = sameGen.filter((c) => (Number(c.chapterAttempt) || 1) <= (Number(k.chapterAttempt) || 1))
+    const owner = (older.length ? older : sameGen).slice().sort(convertChainOrder)[0]
+    if (owner) owned[String(owner.id)].push(k)
+    else leftover.push(k)
+  })
+  const byThen = (a: any, b: any) => mtimeMs(b) - mtimeMs(a)
+  const out: any[] = []
+  converts.forEach((c) => {
+    out.push(c)
+    owned[String(c.id)].sort(byThen).forEach((k) => out.push(k))
+  })
+  leftover.sort(byThen).forEach((k) => out.push(k))
+  return out
+}
+
+/* 转换自己的先后：工作树优先于归档（P58：归档是上一代），再比尝试号、mtime。 */
+function convertChainOrder(a: any, b: any): number {
+  if (!!a.archived !== !!b.archived) return a.archived ? 1 : -1
+  const aa = Number(a.chapterAttempt) || 1
+  const ab = Number(b.chapterAttempt) || 1
+  if (aa !== ab) return ab - aa
+  const d = mtimeMs(b) - mtimeMs(a)
+  if (d) return d
+  const ia = String((a && a.id) || '')
+  const ib = String((b && b.id) || '')
+  return ia < ib ? -1 : ia > ib ? 1 : 0
+}
+
+/* T194：同一章同一角色可能扫到**两份同号转录**——工作树里这次尝试的，加上
+ * `work/attempts/<章>/tryN/` 里更早一次父尝试留下的。两种情形要分开处理：
+ *  · 内容完全相同（同一个转录被扫了两遍）→ 只留一份，工作树那份优先；
+ *  · 内容不同（同一个子章节在两次父尝试里各转过一次，文件名里的尝试号都从 1
+ *    重新数）→ **两条都要留**，否则历史会把一次真实发生过的对话藏掉。上层用
+ *    `chainMemberTag` 把归档那份标成 `旧#N`，行上另有「归档」徽标。
+ * 所以这里的判据是「同一键 + 同一内容指纹」才去重，键相同而内容不同不算重复。
+ * 非章节会话原样返回。 */
+export function dedupeChapterAttempts(items: any[]): any[] {
+  const out: any[] = []
+  const byKey: Record<string, any[]> = {}
+  ;(items || []).forEach((s) => {
+    if (!s || !s.chapterId) { out.push(s); return }
+    const key = [s.project || projectOf(s.id), s.chapterId, s.chapterRole || '', Number(s.chapterAttempt) || 1].join('|')
+    const sha = String(s.sha || '')
+    const peers = byKey[key] || (byKey[key] = [])
+    // 没有内容指纹（旧索引 / 静态快照）时不动手：宁可多一行，也不要藏掉一次对话。
+    const twin = sha ? peers.find((o) => String(o.sha || '') === sha) : null
+    if (!twin) { peers.push(s); out.push(s); return }
+    // 同一份内容被扫了两遍：工作树那份胜出；两份都在归档里就留较新的。
+    if (!!twin.archived && !s.archived) {
+      const i = out.indexOf(twin)
+      if (i >= 0) out[i] = s
+      peers[peers.indexOf(twin)] = s
+    }
+  })
+  return out
+}
+
+/* 历史行的小标签：img2text 链路用阶段标签，章节会话统一给 `#N`（含第 1 次，
+ * 否则同章的几条历史行看起来一模一样）。
+ * C：复盘行另给「复盘#N」——N 是这条目标被复盘的第几次，由调用方按目标算出
+ * （rescueOrdinal）；不传时退回转录名里的号，不编。 */
+export function chainMemberTag(s: any, rescueNo?: number): string {
+  // P60：修复转录没有章节尝试号（文件名是 `fix_<章>`，不是 convert_/checker_
+  // 前缀），按角色标「修复」+ 名字里的 `.tryN`（若有）；不编一个可能是错的 `#N`。
+  if (s && s.chapterRole === 'fix') {
+    return (s.archived ? '旧' : '') + '修复' + fixTranscriptTag(s)
+  }
+  // 归档里的同号尝试来自更早一次父尝试（内容不同），标「旧」才不会和这一次的
+  // 同号行混成"重复行"。
+  // P58 观察：只给 `#N` 时，同一条链里会出现两个 `#1`（转换 #1 + 核对 #1），
+  // 加了"重新核对"以后又出现 `#1/#2` 对不上号——用户看不出哪一行是核对。
+  // 核对行标「核对#N」，转换行仍是 `#N`；归档前缀照旧。
+  if (s && s.chapterRole === 'rescue') {
+    const n = Number(rescueNo) > 0 ? Number(rescueNo) : (Number(s.chapterAttempt) || 1)
+    return (s.archived ? '旧' : '') + '复盘#' + n
+  }
+  if (s && s.chapterId) {
+    const tag = (s.chapterRole === 'checker' ? '核对' : '') + '#' + (Number(s.chapterAttempt) || 1)
+    return (s.archived ? '旧' : '') + tag
+  }
+  return img2textMemberTag(s && s.id)
 }
 
 export function findSession(id: string): any {
@@ -690,6 +1539,36 @@ export function setCollapsed(key: string, collapsed: boolean): void {
  */
 export function groupWantOpen(key: string, holdsCurrent: boolean): boolean {
   if (hasCollapseMemory(key)) return !isCollapsed(key)
+  return !!holdsCurrent
+}
+
+/* ---------- P34 递归章节树的展开记忆 ---------- */
+
+/*
+ * 章节节点在折叠记忆里的键。带 scope（项目 + 阶段）是必须的：不同书、甚至
+ * 同一本书的不同阶段里都可能有同名节点（chapter_001），不带 scope 会互相
+ * 串状态——在 A 书里拉开一章，B 书里同名那章跟着开。
+ */
+export function chapterNodeKey(scope: string, nodeId: string): string {
+  return 'chapter:' + scope + '/' + nodeId
+}
+
+/*
+ * 一个章节节点要不要展开：记忆优先，没记忆时只展开"装着当前会话"的那一支。
+ *
+ * 这条规则和侧栏三层分组共用一套语义（groupWantOpen）：用户手动拉开的节点
+ * 一直开着，与看哪个会话无关；从没碰过的节点随选中会话自动露出。关键是**它
+ * 只读自己的键**——选择会话、展开别的节点都不会把这一支关上（旧实现把
+ * `:open` 绑成"是否含当前会话"，每次重渲染都会强制把其它节点关上）。
+ */
+export function chapterWantOpen(scope: string, nodeId: string, holdsCurrent: boolean): boolean {
+  const key = chapterNodeKey(scope, nodeId)
+  /* 这里刻意用**属性读**而不是 hasCollapseMemory：state.collapsed 是 Vue 的
+     reactive 代理，hasOwnProperty 不走 get 陷阱、建不起响应式依赖——照它写会
+     出现"点了展开按钮、记忆写进去了，但视图不重绘"（要等别的 reactive 变化才
+     显示）。读一次 state.collapsed[key] 就把这个键登记成依赖，写入即触发重绘。 */
+  const mem = state.collapsed[key]
+  if (mem !== undefined) return !mem
   return !!holdsCurrent
 }
 

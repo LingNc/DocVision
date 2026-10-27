@@ -6,19 +6,20 @@
  * 点击才写回）；选中高亮与行内文案走响应式，轮询不重建 DOM。
  */
 import { computed, ref, watchEffect } from 'vue'
-import { state, openDetails, fmtSize, storeGet, storeSet, setBoard } from '../state'
+import { state, openDetails, fmtSize, storeGet, storeSet, setBoard, resetViewState } from '../state'
 import {
   bookDominantState, bookTip, booksHeadText,
-  buildGroups, buildImg2TextChains, filterByBoard, groupKey, groupWantOpen,
-  imageChipText, imageTipText, img2textMemberTag,
+  buildGroups, buildImg2TextChains, buildChapterTree, filterByBoard, groupKey, groupWantOpen,
+  imageChipText, imageTipText, img2textMemberTag, plainTitle,
   styleFixPhaseKey, stylefixCompare,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
   stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens, stageChapterAggregate, stylePilotOrder,
-  type SessionChain, type StageStatus, type StageAggregate,
+  type SessionChain, type StageStatus, type StageAggregate, type ChapterTreeNode,
 } from '../legacy/sidebar'
 import { selectSession, refreshIndex } from '../data'
 import InlineMD from './InlineMD.vue'
+import ChapterSessionTree from './ChapterSessionTree.vue'
 import type { Img2TextBook } from '../legacy/types'
 
 const OVERFLOW_LIMIT = 8
@@ -101,6 +102,7 @@ interface StageView {
   hiddenCount: number
   /* T63：convert/checker 聚合（null = 不聚合原样显示）。 */
   agg: StageAggregate | null
+  chapterRoots: ChapterTreeNode[]
 }
 interface GroupView {
   name: string; prefix: string; title: string; legacy: boolean
@@ -153,6 +155,15 @@ const groups = computed<GroupView[]>(() => {
       // 老规矩：行全列、超 8 条给「更多会话」；agg 只留阶段头汇总文案
       // （"8 章 · 完成 8"），方块视图本来就是为多会话扫视设计的。
       const agg = stageChapterAggregate(stg, items, !!state.filter)
+      const chapterItems = items.filter((s: any) => !!s.chapterId)
+      // T175：只钉住"正在看的那一条"——每个节点的重试次数是独立的，不能拿
+      // 一个章节的 #2 去套全树；子会话与其它章节都按各自最新一次显示。
+      // P60：修复会话没有章节身份（文件名是 `fix_<章>`），但它也是树里的一行，
+      // 点开它时同样要钉住那一行（显示哪一次转换由它的锚点决定）。
+      const cur: any = state.current as any
+      const pinId = cur && (cur.chapterId || cur.chapterRole === 'fix') ? String(cur.id) : ''
+      const chapterRoots = stg === 'convert' && items.length > 0 && chapterItems.length === items.length
+        ? buildChapterTree(items, pinId) : []
       const okey = groupKey('overflow', g.name + '/' + stg)
       const shown0 = items
       const needOverflow = shown0.length > OVERFLOW_LIMIT
@@ -167,7 +178,7 @@ const groups = computed<GroupView[]>(() => {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
         overflowKey: okey, needOverflow, shown, hiddenCount: shown0.length - shown.length,
-        agg, noBy,
+        agg, noBy, chapterRoots,
       }
     })
     let chains: SessionChain[] | null = null
@@ -317,6 +328,14 @@ function onInfoClick(ev: MouseEvent, s: any) {
 function onMoreClick(okey: string) {
   setOverflowOpen(okey, true)
 }
+
+/* T215：重置视图——清掉手动选中（pin）、展开/收起记忆与过滤，回到当前正在跑的
+ * 顶层会话。只清界面记忆：不发写请求、不删数据，主题/显示单位/Markdown 照旧。 */
+function onResetView() {
+  const id = resetViewState()
+  selectSession(id)
+  void refreshIndex()
+}
 </script>
 
 <template>
@@ -329,6 +348,11 @@ function onMoreClick(okey: string) {
         @click="toggleBlockView"
       >{{ blockView ? '☰' : '▦' }}</button>
       <button id="refresh" class="icon-btn" type="button" title="重新扫描会话" @click="refreshIndex">⟳</button>
+      <button
+        id="reset-view" class="tab-toggle side-reset" type="button"
+        title="重置视图：清掉手动选中（pin）、侧栏展开/收起记忆与搜索过滤，回到当前正在跑的顶层会话（没有在跑的就回列表最上面一条）；不动任何数据，也不改主题/显示单位/Markdown 这些显示偏好"
+        @click="onResetView"
+      >重置视图</button>
     </div>
     <div v-if="showBoardSwitch" class="board-tabs" role="group" aria-label="板块">
       <button
@@ -452,7 +476,7 @@ function onMoreClick(okey: string) {
                     @click="onRowClick(c.main)"
                   >
                     <span class="row-slot"><span class="dot" :class="{ live: c.live > 0 }"></span></span>
-                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(c.main)"></InlineMD>
+                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(c.main)" :plain="plainTitle(c.main)"></InlineMD>
                     <span v-if="usageChipText(c.main)" class="row-chip usage-chip">{{ usageChipText(c.main) }}</span>
                     <span class="row-time">{{ relTime(c.main.mtime) }}</span>
                     <span class="row-actions">
@@ -480,7 +504,7 @@ function onMoreClick(okey: string) {
                       @click="onRowClick(s)"
                     >
                       <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                      <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                      <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
                       <span class="row-chip chain-tag">{{ img2textMemberTag(s.id) }}</span>
                       <span class="row-time">{{ relTime(s.mtime) }}</span>
                       <span class="row-actions">
@@ -501,7 +525,7 @@ function onMoreClick(okey: string) {
                   @click="onRowClick(s)"
                 >
                   <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                  <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                  <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
                   <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                   <span class="row-time">{{ relTime(s.mtime) }}</span>
                   <span class="row-actions">
@@ -535,7 +559,13 @@ function onMoreClick(okey: string) {
                     >复查</a>
                   </span>
                 </summary>
-                <template v-if="blockView">
+                <ChapterSessionTree
+                  v-if="sv.chapterRoots.length"
+                  :nodes="sv.chapterRoots"
+                  :scope="g.name + '/' + sv.stage"
+                  @select="onRowClick" @info="onInfoClick"
+                />
+                <template v-else-if="blockView">
                 <div class="session-blocks">
                   <button
                     v-for="s in sv.items"
@@ -563,7 +593,7 @@ function onMoreClick(okey: string) {
                     @click="onRowClick(s)"
                   >
                     <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
                     <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                     <span v-if="s.imageName" class="row-chip image-chip" :title="imageTipText(s)">{{ imageChipText(s) }}</span>
                     <span class="row-time">{{ relTime(s.mtime) }}</span>
@@ -577,7 +607,13 @@ function onMoreClick(okey: string) {
                 </div>
               </details>
               <template v-else>
-                <div v-if="blockView" class="session-blocks">
+                <ChapterSessionTree
+                  v-if="sv.chapterRoots.length"
+                  :nodes="sv.chapterRoots"
+                  :scope="g.name + '/' + sv.stage"
+                  @select="onRowClick" @info="onInfoClick"
+                />
+                <div v-else-if="blockView" class="session-blocks">
                   <button
                     v-for="s in sv.items"
                     :key="s.id"
@@ -603,7 +639,7 @@ function onMoreClick(okey: string) {
                     @click="onRowClick(s)"
                   >
                     <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)"></InlineMD>
+                    <InlineMD tag="span" class="row-title" :text="sessionTitleOf(s)" :plain="plainTitle(s)"></InlineMD>
                     <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                     <span v-if="s.imageName" class="row-chip image-chip" :title="imageTipText(s)">{{ imageChipText(s) }}</span>
                     <span class="row-time">{{ relTime(s.mtime) }}</span>
@@ -664,6 +700,11 @@ function onMoreClick(okey: string) {
 
 .frame[data-sidebar-collapsed] .side-head {
  padding: 0; justify-content: center; 
+}
+
+/* T215：「重置视图」是文字按钮，收成 56px 轨道后放不下，跟搜索框/状态行一样隐藏。 */
+.frame[data-sidebar-collapsed] .side-reset {
+ display: none; 
 }
 
 .side-search {

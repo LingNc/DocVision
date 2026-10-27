@@ -6,8 +6,7 @@
 import { state, storeGet, fmtClock, fmtSize } from '../state'
 import {
   aggregate, countText, estOf, fmtCost, fmtDur, fmtTokens, imageDisplayName, imageTipText,
-  projectOf, sessionTitleOf, shortSHA, subPathOf, usageLines,
-} from './sidebar'
+  projectOf, sessionTitleOf, shortSHA, subPathOf, usageLines, plainTitle } from './sidebar'
 import { jsonPretty } from './richtext'
 import { metaState } from './timeline'
 
@@ -40,7 +39,9 @@ export function sessionKVRows(): KVRow[] {
   const rows: KVRow[] = [
     { k: '项目', v: cur.project || projectOf(cur.id), title: cur.id },
     { k: '阶段', v: cur.stageTitle || cur.stage || '—' },
-    { k: '会话', md: sessionTitleOf(cur), title: cur.id, mono: true },
+    plainTitle(cur)
+      ? { k: '会话', v: sessionTitleOf(cur), title: cur.id, mono: true }
+      : { k: '会话', md: sessionTitleOf(cur), title: cur.id, mono: true },
     { k: '文件', v: cur.name || '—', title: cur.path, mono: true },
     { k: '消息', v: cur.messages + ' 条 · ' + state.lines.length + ' 行' },
     { k: '大小', v: fmtSize(cur.size) },

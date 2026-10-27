@@ -33,6 +33,10 @@ function onMetaToggle(ev: Event) {
   storeSet(m.key, open ? '1' : '0')
 }
 
+/* P56：重试 / 重新核对 / 继续跑 / 重画 / 删除这条记录 的按钮搬到了中栏
+ * 的 SessionActions（用户口径：不要放在侧边栏里，要放在中间的界面中）。本面板
+ * 只留指标与元信息。 */
+
 const countTip = computed(() =>
   meta.value?.countNote ? META_COUNT_TIP.replace('{n}', meta.value.countNote.replace(/^共 (\d+) 条.*$/, '$1')) : '',
 )

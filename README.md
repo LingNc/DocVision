@@ -81,9 +81,9 @@ models:
     model: "your-vision-model"
 ```
 
-配置写在 `config_version: 20`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
+配置写在 `config_version: 24`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
 
-档位1图片阶段先分类，再由独立工具会话对**全部图片**做整组核验（逐字节相同的重复图只送一份进会话、其余自动跟随代表图；本地相似度只作参考写入 manifest/advisory JSON，会话可用 `read_file`/`grep`/`bash`+Python/`view_image`（逐张原图，另可 `compare_images` 把 2–4 张并排对比，不作为证据），用 `motif_groups` 增量维护分组并显式 submit；确认后仅全员 vector 的组共享单份 TeX 图元，不同题号保持独立）。模型平台能力写在 `models.<条目>.context_limit`/`max_images`/`max_tokens`，与会话侧配置取较小值。模型选项与续跑细节见 [LaTeX 输出](docs/latex.md) 和 [配置参考](docs/config.md)。
+档位1图片阶段先分类，再由独立工具会话对**全部图片**做整组核验（逐字节相同的重复图只送一份进会话、其余自动跟随代表图；本地相似度只作参考写入 manifest/advisory JSON，会话可用 `read_file`/`grep`/`bash`+Python/`view_image`（逐张原图，另可 `compare_images` 把 2–4 张并排对比，不作为证据），用 `motif_groups` 增量维护分组并显式 submit；确认后仅全员 vector 的组共享单份 TeX 图元，不同题号保持独立）。模型平台能力写在 `models.<条目>.context_limit`/`max_images`/`max_tokens`，与会话侧配置取较小值。档位1 的大型或难以可靠转换章节可递归细分；会话预览按章节显示多级转换树与配对 checker，并标出排队、等待子章节和核验状态，checker 模型调整后可续跑未完成核验。完整流程见 [LaTeX 输出](docs/latex.md)。模型选项与续跑细节见 [配置参考](docs/config.md)。
 
 ### 2. 跑起来
 
@@ -118,7 +118,7 @@ docvision workflow -c my.yaml
 | `docvision mineru` | 调用 MinerU API 解析文件 |
 | `docvision organize` | 整理解析结果 |
 | `docvision img2text` | AI 图片转文本（`--test` 测试模式） |
-| `docvision latex` | LaTeX 输出（可直接传 PDF/DOCX 自动补前置流程，或传 md 名只处理指定文件；跑完打印按阶段 AI 用量与费用，可配 `latex.figure_check` 开逐图校验、`preview.enabled` 边跑边看会话） |
+| `docvision latex` | LaTeX 输出（可直接传 PDF/DOCX 自动补前置流程，或传 md 名只处理指定文件；跑完打印按阶段 AI 用量与费用，可配 `latex.figure_check` 开逐图校验、`preview.enabled` 边跑边看会话；单章重跑用 `--only chapter_002`；预览页上可对某一章手动「重试 / 重新核对 / 继续跑 / 删除记录」、对一张矢量图「重画」，运行中的实例任何阶段都会接） |
 | `docvision verify` | AI 核对输出与原图（默认关闭；只能显式运行，不参与自动流程） |
 | `docvision sessions` | 会话预览：把 AI 会话转录渲染成可浏览页面（静态导出 / 本地实时服务；目录与端口默认取配置，行内计数可切 `token`（本地估算，带 ≈）/`字符`，`--list` 的提示词列同口径（`--unit char` 切字符），详情栏为厂商实测指标；`--cost` 只出费用报告） |
 | `docvision analyze` | 分析日志（`--progress` 仅进度，`--all` 汇总历史，`--logfile` 指定日志） |

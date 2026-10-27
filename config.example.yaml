@@ -12,7 +12,7 @@
 #   3. 未知键不生效：拼错一个键名不会有任何报错，启动时只会给一行"未知配置键"
 #      告警（`docvision setup` 保存时会把它拦下来）。
 
-config_version: 20
+config_version: 24
 
 # MinerU API Configuration
 mineru:
@@ -114,6 +114,27 @@ latex:
   chapter_model: "chapter"       # 档位1：章节划分 AI（grep+最小bash沙箱）
   convert_model: "convert"       # 档位1：章节转换 / 构建修复 AI
   checker_model: "checker"       # 每章核对（小文本模型即可）
+  # checker_rounds：一章最多尝试几次（checker 连续打回同一会话若干轮仍
+  # 不过，就换一个全新会话重来）。第 N 层递归每次 -1、下限 3；顶层默认 6。
+  # 顶层次数应 >= 3 + 最大递归层数(3)=6，设小了启动会告警。
+  checker_rounds: 6
+  # checker_no_verdict_retries：核对**没给结论**时自动换新的核对会话再来几次。
+  # 只重核、不重转（产物不动、转换会话不重跑）；0/未写 = 6。核对模型退化时
+  # 换一条干净上下文的会话通常就能给出结论，重转一次代价高得多。
+  checker_no_verdict_retries: 6
+  # api_error_retries：会话报错是**上游接口问题**（连接超时、5xx、限流）时，
+  # 原地重试同一条会话几次（T237/T243）。这类错误与模型退化无关：换新尝试等于把
+  # 已经做完的转换再跑一遍，纯属白烧。重试间隔 30s 起、每次翻倍、最多 10 分钟
+  # （30 次约 4.5 小时），次数用完不再重试也不再记失败——这一章**暂停**：不换
+  # 尝试、不归档产物，重启程序会接着这条会话跑，也可以在网页点「继续跑」。
+  # 0/未写 = 30。余额不足、资源包不可用这类致命错误不走这条路。计数在内存里，
+  # 重启进程会重新计数。
+  api_error_retries: 30
+  # max_chapter_lines：一个转换会话"好好转完"的章节规模（章节 md 的行数）。
+  # 超过它、又还没拆分过的章节，submit 会被打回并要求先 request_chapter_split
+  # 按语义拆成 2–16 段（子会话各转各的，父会话只整合与核对）；已经递归到最深
+  # 一层就不再强制。0 = 关闭这条规则。
+  max_chapter_lines: 3000
   insert_image_description: false # 档位2：raster 保留原图时是否再嵌入一段 AI 解释文本
                                  # （档位1 不受此开关控制：raster 总是带 DESCRIBE 解释块）
   chapter_granularity: "medium"  # 档位1 章节拆分粒度：large=大章整体 / medium=按本书自动给出最合理拆分（默认，不拆太细也不太大块）/ small=按小节拆分
@@ -125,13 +146,34 @@ latex:
     stylefix_block_model: "stylefix-block"    # 分块修复会话独立模型（T70；默认沿用 convert）
     bookfix_model: "bookfix"                  # 构建修复会话（book_fix）独立模型（T70；默认沿用 convert）
     final_review_model: "final-review"        # 终审会话独立模型（T70；默认沿用 convert）
-  concurrency: 3                 # 会话级并发（classify / 逐章 convert / style-fix 共用）
+  concurrency: 3                 # 会话级并发（classify / 样式修复 / 提交提醒等共用）
+  convert_concurrency: 0         # 章节转换的并发 worker 数（T179/T198）：同时开这么多章转，也是转换会话的槽位上限；0=沿用 concurrency。与核对各自独立，不放在一起算
+  checker_concurrency: 0         # 章节核对会话并发（T179）；0=沿用 concurrency。核对在读 PDF/原书页、转换在写 .tex，分开排队
   keep_temp_dirs: false       # 保留临时工作目录（拆章沙箱/逐章转换工作区/矢量图工作区）；debug 日志下必定保留
   keep_session_records: true # 保留会话转录 JSONL（默认全开）；debug 日志下必定保留
-  style_pilot: true # 样式试点（T97 重量档）：选材拼样例 → 试转核对 → 修订定稿 cls，然后才划分章节；样式问题在进入全书转换前暴露
-  pilot_select_model: "pilot-select" # 试点选材会话独立模型（T108；models.pilot-select 默认 extends chapter = 沿用章节划分模型）
-  pilot_trial_model: "pilot-trial"   # 试点试转会话独立模型（T108；models.pilot-trial 默认 extends convert）
-  pilot_revise_model: "pilot-revise" # 试点样式修订会话独立模型（T108；models.pilot-revise 默认 extends style）
+  # P58：会话**非正常收尾**时的复盘。覆盖三种触发，结论处理完全同一条：
+  # ① 跑完但没 submit；② 报错终止（非致命——余额不足/无资源包不算）；
+  # ③ 声称"工具不可用"、纠正过一次后仍然没 submit。默认开：先起一条只读的
+  # 复盘会话看那条会话自己的转录，给出 retry（会话还健康，再提醒一次）/
+  # truncate（已退化，截断到最后一个干净轮次继续）/ fail（救不回来）三种结论
+  # 之一，再由代码执行。复盘会话没有任何可写挂载，最坏后果是一次截断（源转录
+  # 与归档尝试都留着）。
+  rescue:
+    enabled: true                # 默认开；false = 三种触发全部退回"只发提醒"的老路径
+    max_per_attempt: 2           # 同一次尝试最多复盘几次（防复盘循环）
+    keep_records: false          # 复盘会话的转录是否落盘（--debug 下强制落盘）
+    model: "rescue"              # 复盘会话的模型条目；空 = 跟随 checker_model
+  # P60：子章节修复会话（默认关闭）。父章节把「哪个子章节、按哪条规则改」
+  # 写成 work/fix/<根章>/plan.json（dispatch_fix 工具只记录计划、不同步执行），
+  # 再由 runner 为每个有问题的子章节起一条修复会话——复用该子章节已经划好的
+  # 工作区，改完提交后跑它原本的核对（同一转换锚点）；修不动就退回老行为（父
+  # 章节重试）。打开后细分父章节会在整合前多一次「复查子章节」的对话，再按
+  # 计划逐个子章节跑修复会话并重核；默认关闭，关着时请求数与产物都和引入 P60
+  # 之前一致。
+  fix:
+    enabled: false               # 默认关；true 才给转换会话注册 dispatch_fix 并下派修复
+    max_rounds: 2                # 一个子章节最多几轮修复；用完退回老行为（父会话重试）
+    model: ""                    # 修复会话的模型条目；空 = 继承 convert 模型
   compile:
     engine: "xelatex"            # pdflatex / xelatex / lualatex
     timeout: 120                 # 单次编译超时（秒）
@@ -154,7 +196,7 @@ latex:
       keep_images: 3             # 本地裁剪时保留最近几张图（负=全部保留）
     dedupe:
       context_limit: 0          # 0=会话不设上限；模型上限写在 models.<name>.context_limit
-      max_tokens: 32768         # 单次请求输出上限；与模型 max_tokens 取较小正值
+      max_tokens: 65536          # 单次请求输出上限；与模型 max_tokens 取较小正值
       max_tool_rounds: 0        # 0=不限制
     style:
       context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
@@ -167,7 +209,13 @@ latex:
       context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
     checker:                     # 每章核对会话（只读两个文件 + 一个文件夹；工具只有 read_file/grep/submit）
-      max_tool_rounds: 50       # 默认 50 轮（不继承 convert 的 128；其余字段仍继承 convert）
+      max_tool_rounds: 50       # 最里层的轮次（不继承 convert 的 128；其余字段仍继承 convert）
+      max_tool_rounds_per_level: 20  # T204：每往上一层加 20 轮（父节点要通读整棵子树；负 = 只翻倍不加）
+      max_tool_rounds_factor: 1      # T204：按层翻倍的倍数（1=纯线性；2=每层翻倍，50→100→200→400）
+    rescue:                      # P58 未提交收尾的复盘会话（只读转录 + 交结论）
+      context_limit: 131072      # 复盘会话上下文 128K（0 = 不设上限，模型自己的限制仍然生效）
+      max_tool_rounds: 12        # 复盘是短会话：看几窗转录就该给结论
+      max_tokens: 0              # 0 = 与 checker 会话同配置（沿用它的输出预算）
 
 # img2text 基础图片转文本流程的独立配置（模型用 models: 注册表代号）
 img2text:
@@ -231,7 +279,7 @@ tools:
     pip_index_url: ""           # 宿主侧自动安装用的 PyPI 镜像（如 https://pypi.tuna.tsinghua.edu.cn/simple）；留空=用宿主 pip 配置
     packages: []                # 启动前确保可导入的模块（如 ["numpy", "PIL"]；缺则宿主侧装；PIL→Pillow、fitz→PyMuPDF 自动换算包名）
     auto_install: true          # 会话 bash 报 ModuleNotFoundError 时由宿主侧自动 pip install 后提示重试
-    install_timeout: 30000        # 单次 pip install 的超时（秒）
+    install_timeout: 30000          # 单次 pip install 的超时（秒）
 
 preview:
   enabled: false                 # true = 跑 docvision latex 时自动启动会话预览服务（只读，浏览器里看每个会话实时进度）
@@ -312,6 +360,7 @@ models:
     model: "Qwen/Qwen3.6-27B"
     context_limit: 0             # 模型上下文上限；0=不限制
     max_images: 0                 # 单次请求图片上限；0=不限制
+    max_concurrency: 0            # 该模型同时在途的会话数上限（T179）；0=不限制。转换/核对/修复落到同一个模型时共用这一个额度
     max_tokens: 0                 # 模型单次输出上限；0=不限制，与会话配置取较小值
     price:                       # 计费单价（元/百万 tokens）
       input: 0                   # 未命中前缀缓存的输入单价
@@ -324,7 +373,7 @@ models:
     api_stream_idle_timeout: 0  # 流式：两个数据块之间的最大间隔（秒），0 = 用 api_timeout
     api_max_retries: 3          # 通用 API 错误重试次数（4xx 客户端错误不重试）
     rate_limit_retries: 20      # 429 限流重试上限（退避封顶 60s；余额/配额类错误不走重试）
-    api: openai                 # 线路协议：openai（默认）| anthropic（Claude 及兼容网关）| responses（OpenAI Responses API，gpt-5/o 系）；后两者只走非流式
+    api: openai                 # 线路协议：openai（默认）| anthropic（Claude 及兼容网关）| responses（OpenAI Responses API，gpt-5/o 系）；anthropic 只走非流式，responses 支持流式
     stream: true                # 默认流式（SSE）：长思考/长输出期间持续有进展
     thinking:                   # 思考控制：请求体**顶层**字段，不要写进 request_body.extra_body
       type: disabled            # enabled | disabled | adaptive（写 disable 这类笔误会自动纠正并告警）
@@ -403,6 +452,8 @@ models:
   checker:                       # 每章核对（小文本模型即可）
     extends: "gateway-a"
     stream: true                # 需要回一行 JSON，流式即可（示例：显式覆盖基座的 false）
+  rescue:                        # P58 未提交收尾的复盘会话：默认就用 checker 那条
+    extends: "checker"           # 想用更便宜的模型复盘：改这条或 latex.rescue.model 指到别处
   verifier:                      # AI 校验模型（需视觉能力）
     extends: "gateway-a"
     image_tokens:

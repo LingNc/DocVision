@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"mineru-tools/internal/config"
 )
@@ -88,7 +89,9 @@ func TestResponsesEndToEnd(t *testing.T) {
 	if gotBody["instructions"] != "you verify chapters" {
 		t.Errorf("instructions = %v", gotBody["instructions"])
 	}
-	if gotBody["store"] != false || gotBody["stream"] != false {
+	// stream 跟随 models.*.stream（这里取默认：开）。响应体是整段 JSON，
+	// 正好顺带验证「网关忽略 stream:true」时的兜底解析。
+	if gotBody["store"] != false || gotBody["stream"] != true {
 		t.Errorf("store/stream = %v / %v", gotBody["store"], gotBody["stream"])
 	}
 	if gotBody["max_output_tokens"] != float64(512) {
@@ -245,5 +248,84 @@ func TestResponsesReasoningEffortPassthrough(t *testing.T) {
 	reasoning, _ := gotBody["reasoning"].(map[string]any)
 	if reasoning["effort"] != "low" {
 		t.Errorf("reasoning = %v", gotBody["reasoning"])
+	}
+}
+
+// TestResponsesStreaming pins the SSE path: deltas drive the progressive
+// snapshot and first-token latency, while response.completed supplies the
+// authoritative output — so a streamed reply decodes exactly like a
+// non-streamed one.
+func TestResponsesStreaming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, ev := range []string{
+			`{"type":"response.created","response":{"status":"in_progress"}}`,
+			`{"type":"response.reasoning_summary_text.delta","delta":"想一想"}`,
+			`{"type":"response.output_text.delta","delta":"先说"}`,
+			`{"type":"response.output_text.delta","delta":"一句"}`,
+			`{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_9","name":"submit","arguments":"{\"status\":\"pass\"}"}}`,
+			`{"type":"response.completed","response":{"status":"completed","output":[` +
+				`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"先说一句"}]},` +
+				`{"type":"function_call","call_id":"call_9","name":"submit","arguments":"{\"status\":\"pass\"}"}],` +
+				`"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}`,
+		} {
+			_, _ = io.WriteString(w, "event: x\ndata: "+ev+"\n\n")
+		}
+	}))
+	defer srv.Close()
+	c := NewClient(config.ModelConfig{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", API: "responses", MaxTokens: 64})
+	var phases []string
+	resp, err := c.ChatCompletion(&ChatRequest{
+		Model: "m", Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+		StreamHook: func(phase, text string) { phases = append(phases, phase+":"+text) },
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion: %v", err)
+	}
+	if gotBody["stream"] != true {
+		t.Fatalf("stream = %v, want true", gotBody["stream"])
+	}
+	if !resp.Streamed {
+		t.Error("resp.Streamed must be true for an SSE reply")
+	}
+	if resp.TTFT <= 0 || resp.TTFT > resp.Elapsed+time.Millisecond {
+		t.Errorf("TTFT = %v, elapsed = %v", resp.TTFT, resp.Elapsed)
+	}
+	if resp.Choices[0].Message.Content != "先说一句" {
+		t.Errorf("content = %q", resp.Choices[0].Message.Content)
+	}
+	if len(resp.Choices[0].Message.ToolCalls) != 1 ||
+		resp.Choices[0].Message.ToolCalls[0].Function.Name != "submit" {
+		t.Errorf("tool calls = %+v", resp.Choices[0].Message.ToolCalls)
+	}
+	if resp.FinishReason != "tool_calls" {
+		t.Errorf("finish = %q", resp.FinishReason)
+	}
+	if resp.Usage == nil || resp.Usage.PromptTokens != 10 || resp.Usage.CompletionTokens != 5 {
+		t.Errorf("usage = %+v", resp.Usage)
+	}
+	if resp.ReasoningChars != len("想一想") {
+		t.Errorf("reasoning chars = %d", resp.ReasoningChars)
+	}
+	if len(phases) == 0 {
+		t.Error("StreamHook must see progressive snapshots")
+	}
+}
+
+// TestResponsesStreamFailureSurfacesReason: a response.failed event must
+// abort the stream with the provider's reason, not a generic decode error.
+func TestResponsesStreamFailureSurfacesReason(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"safety block\"}}}\n\n")
+	}))
+	defer srv.Close()
+	c := NewClient(config.ModelConfig{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", API: "responses", MaxTokens: 16})
+	_, err := c.ChatCompletion(&ChatRequest{Model: "m", Messages: []ChatMessage{{Role: "user", Content: "hi"}}})
+	if err == nil || !strings.Contains(err.Error(), "safety block") {
+		t.Errorf("err = %v", err)
 	}
 }

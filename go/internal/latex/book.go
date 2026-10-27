@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mineru-tools/internal/prompts"
+	"mineru-tools/internal/retryq"
 	"mineru-tools/internal/session"
 )
 
@@ -35,6 +36,11 @@ type BookOptions struct {
 	Seed     string
 	// Files selects specific markdown files (empty = all).
 	Files []string
+	// Only limits the convert phase to these chapters (base names, without
+	// ".md") and FORCES each of them to be re-converted as a new attempt
+	// (P53: the old attempt is archived under work/attempts/, the new one
+	// gets the next attempt number, so the preview page's history shows both).
+	Only []string
 	// Verbose keeps per-phase detail output on the console (session
 	// rounds, tool calls, compile results). Default (false) shows one
 	// compact progress line per phase — like the level-2 process line —
@@ -48,7 +54,12 @@ func fmtDuration(d time.Duration) string {
 	if d < time.Minute {
 		return strconv.FormatFloat(d.Seconds(), 'f', 1, 64) + "s"
 	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	// 长任务（一次转换常常几十分钟到几小时）用"h"读起来才不别扭，
+	// 以前一律折成分钟，续跑过的会话会写成 2628m56s（T206）。
+	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // livePhaseRow manages the compact console status line of a
@@ -66,25 +77,85 @@ func fmtDuration(d time.Duration) string {
 // alternating with both timers running, because the single live slot held
 // whichever owner had drawn last).
 func (r *Runner) livePhaseRow(id, label string) (hook func(rounds, tools int), fin func()) {
-	return r.livePhaseRowAt(id, label, time.Now())
+	h, _, f := r.livePhaseRowState(id, label, liveSeed{})
+	return h, f
+}
+
+// 实时行左侧的状态词（T206）：只有「运行」这一种让计时器走。排队、等子会话、
+// 待核对都用冻结的累计时间——否则父节点等二十分钟子会话时，那一行看起来像
+// "已经跑了 25 分钟却一轮都没走"，和真正在跑的行混在一起分不清。
+const (
+	rowStateQueued  = "排队"
+	rowStateRunning = "运行"
+	rowStateWaiting = "等子会话"
+	rowStateCheck   = "待核对"
+)
+
+// rowStatePriority 决定实时行在"一屏放不下"时的先后（T226）：只有运行中
+// 的会话每秒都在推进，最该常驻；等子会话/待核对次之；排队的最先折进
+// 「还有 N 个会话」那一行。同一个状态内部保持创建顺序，行不会互相换位。
+func rowStatePriority(state string) int {
+	switch state {
+	case rowStateRunning:
+		return 0
+	case rowStateWaiting:
+		return 1
+	case rowStateCheck:
+		return 2
+	default: // rowStateQueued
+		return 3
+	}
+}
+
+// liveSeed 是实时行的起始状态：续跑时把转录里的轮次/工具数/真实工作时间
+// 带进来，行一出现就是真实进度，不再从 0 开始爬。
+type liveSeed struct {
+	rounds, tools int
+	active        time.Duration
+	resumed       bool
+}
+
+// liveRowText 是实时行的唯一文案来源（测试直接钉它）。
+func liveRowText(label, state string, seed liveSeed, rounds, tools int, active time.Duration) string {
+	prefix := ""
+	if seed.resumed {
+		prefix = "续跑 · "
+	}
+	return fmt.Sprintf("[%s] %s%s · 轮次 %d · 工具调用 %d · 已用 %s",
+		label, prefix, state, rounds, tools, fmtDuration(active))
 }
 
 // livePhaseRowAt 是 livePhaseRow 的续跑形态（T28）：start 可以前移到
 // 「现在 − 转录历史活跃跨度」，让"已用"从上次中断处继续累计，而不是
 // 每次续跑都从十几秒看起来像重新开了一场。
 func (r *Runner) livePhaseRowAt(id, label string, start time.Time) (hook func(rounds, tools int), fin func()) {
+	h, _, f := r.livePhaseRowState(id, label, liveSeed{active: time.Since(start)})
+	return h, f
+}
+
+// livePhaseRowState 是实时行的通用形态：除了进度回调，还给一个 setState
+// 用来在「排队 / 运行 / 等子会话 / 待核对」之间切换（T206）——只有运行态
+// 让计时器走，切换时把已经跑过的真实时间结账进 active，所以"已用"永远是
+// 这段时间真正花掉的工作时间，不含排队与等待。
+func (r *Runner) livePhaseRowState(id, label string, seed liveSeed) (hook func(rounds, tools int), setState func(string), fin func()) {
 	if r.consoleVerbose {
-		return func(int, int) {}, func() {}
+		return func(int, int) {}, func(string) {}, func() {}
 	}
 	var mu sync.Mutex
-	var rounds, tools int
+	rounds, tools := seed.rounds, seed.tools
+	state := rowStateRunning
+	active := seed.active
+	runStart := time.Now()
 	row := r.log.LiveRow(id)
 	render := func() {
 		mu.Lock()
-		rounds, tools := rounds, tools
+		cur := active
+		if state == rowStateRunning && !runStart.IsZero() {
+			cur += time.Since(runStart)
+		}
+		text := liveRowText(label, state, seed, rounds, tools, cur)
 		mu.Unlock()
-		row.Update("[%s] 轮次 %d · 工具调用 %d · 已用 %s",
-			label, rounds, tools, fmtDuration(time.Since(start)))
+		row.SetWithPriority(text, rowStatePriority(state))
 	}
 	render() // 立即出现起始行，会话一开始就有进度
 	stop := make(chan struct{})
@@ -114,6 +185,18 @@ func (r *Runner) livePhaseRowAt(id, label string, start time.Time) (hook func(ro
 			rounds, tools = rr, tt
 			mu.Unlock()
 			render()
+		}, func(next string) {
+			mu.Lock()
+			if state == rowStateRunning && !runStart.IsZero() {
+				active += time.Since(runStart)
+				runStart = time.Time{}
+			}
+			state = next
+			if next == rowStateRunning {
+				runStart = time.Now()
+			}
+			mu.Unlock()
+			render()
 		}, func() {
 			once.Do(func() {
 				close(stop)
@@ -123,12 +206,17 @@ func (r *Runner) livePhaseRowAt(id, label string, start time.Time) (hook func(ro
 				// 把定格行（轮次/工具调用/已用）作为普通行留在滚动区——
 				// 每个跑过的流程在终端上都留着最终状态，下一个流程开新
 				// 行实时刷，不会被顶掉。
-				row.Remove()
 				mu.Lock()
+				cur := active
+				if state == rowStateRunning && !runStart.IsZero() {
+					cur += time.Since(runStart)
+				}
 				finalText := fmt.Sprintf("[%s] 轮次 %d · 工具调用 %d · 已用 %s",
-					label, rounds, tools, fmtDuration(time.Since(start)))
+					label, rounds, tools, fmtDuration(cur))
 				mu.Unlock()
-				r.log.PrintConsole(finalText)
+				// 摘行 + 定格行 + 重画一次搞定（T226：Remove 再 PrintConsole
+				// 会让整块白白重画两遍，会话多的屏上看得见闪）。
+				row.Finalize(finalText)
 			})
 		}
 }
@@ -169,6 +257,9 @@ var classNameRe = regexp.MustCompile(`\\ProvidesClass\{([^}]*)\}`)
 //  5. assemble  : main.tex + full-book compile (+ fix session) + standalone.tex
 func (r *Runner) RunBook(opts BookOptions) error {
 	cfg := r.cfg
+	if len(opts.Only) > 0 {
+		r.SetOnlyChapters(opts.Only)
+	}
 	// 项目根只在这里决定一次：<paths.latex_project>/<项目名>/（项目名
 	// 默认取本书主题名，可用 --project 覆盖），或者——当输出根本身已是
 	// 一个工程（旧版单项目布局）且未指定 --project——继续沿用输出根。
@@ -192,6 +283,39 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		}
 	}
 	writeFontsReadme(r.cfg.Paths.Fonts)
+	// 内存自证（T158/T162）：SIGKILL 捕获不到，所以把基线与采样写进日志，
+	// 并**同时追加到项目内**的 work/mem.log——终端被刷掉或进程被杀，那
+	// 个文件还在，事后直接看最后几行就知道是不是内存被吃光。前 3 分钟
+	// 每 10s 一次（续跑要同时恢复十几条会话、每条都把转录里的图片读成
+	// data URL，这是内存尖峰），之后每 60s 一次。
+	memLogPath := filepath.Join(proj, "work", "mem.log")
+	if stop := r.startMemWatch(10*time.Second, memLogPath); stop != nil {
+		defer stop()
+	}
+	// 只留这一行普通模式提示：被杀之后要看的文件到底在哪。采样行本身在
+	// 普通模式不显示（debug 日志与 mem.log 里全量都有）。
+	r.log.LogInfo(0, "[book] 内存/被杀现场日志:", memLogPath)
+	// 原书 PDF 视图与原始文档索引必须在**启动重试监视器之前**建好。监视器
+	// 一接手请求就开转换会话，而会话的 `source` 挂载点和 list_source_pages /
+	// doc_search 全都来自这两个对象——过去它们排在 images 阶段之后，续跑时
+	// "手动继续 / 子章节重试"在那之前就开跑：会话里既没有 source 挂载点，
+	// 提交门禁又照旧要求"至少对照 2–4 页原书"，那条要求永远满足不了，会话
+	// 只能反复"复盘 → 截断 → 还是过不去"。
+	r.buildPDFViewQuiet(opts.SourceDir, opts.Files)
+	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
+	r.checkPageAlignment()
+	// P53 阶段二：运行期就消费重试队列——样式/划分/转换/组装任何阶段都能收，不用等
+	// 阶段边界，也不用重启进程。派发要过章节锁，正在跑的章节不重复跑。
+	r.startRetryWatcher(proj)
+	defer r.stopRetryWatcher()
+	// 并发账目（T179）：三个池子的大小与模型级上限一次说清——用户调大
+	// concurrency 之后"为什么没有更快"通常就卡在模型级上限上。
+	r.logConcurrencyPlan()
+	// 重试预算与递归层数的匹配检查（T165）：顶层设得太小时，深层永远只能
+	// 吃下限 3，用户以为调大了却传不下去——起步就说清楚。
+	if warn := checkerBudgetWarning(r.cfg.Latex.CheckerRounds); warn != "" {
+		r.log.LogWarning(0, "[convert]", warn)
+	}
 	progPath := filepath.Join(proj, "progress.json")
 	prog := bookProgress{}
 	if data, err := os.ReadFile(progPath); err == nil {
@@ -243,7 +367,10 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		// images 阶段不做 phase 级跳过：RunImages 自身就是增量的
 		// （done 跳过、fallback 重试），phase 级 done 标记会让上次
 		// 失败（fallback）的图片永远得不到重试。
-		if name != "images" && prog2Field(prog, name) == "done" && !opts.Restart && opts.Step == "" {
+		// P53：--only 或者队列里还有重试请求时，convert 阶段即使标了 done 也
+		// 必须再跑一遍——否则用户点的"重试"要等到下次全书重跑才生效。
+		forceConvert := name == "convert" && (len(opts.Only) > 0 || r.hasPendingRetry(proj))
+		if name != "images" && !forceConvert && prog2Field(prog, name) == "done" && !opts.Restart && opts.Step == "" {
 			// T85：assemble 标 done 但上次终审其实**中断**（失败也照常交付
 			// 的语义会写下 done）——中断态仍与当前工作区一致时不能跳过，
 			// 要重跑 assemble 把终审续上。
@@ -277,6 +404,9 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// pages cache and the sessions of the image pass land inside THIS
 	// book's workspace rather than at the output root.
 	err = runPhase("images", func() error {
+		// 与"重画一张图"互斥：两者都写 source/progress_items 与 source/*.md。
+		r.vectorMu.Lock()
+		defer r.vectorMu.Unlock()
 		return r.RunImages(ImagesOptions{
 			TestMode: opts.TestMode, Number: opts.Number, Seed: opts.Seed,
 			SourceDir: opts.SourceDir, Files: opts.Files,
@@ -292,7 +422,10 @@ func (r *Runner) RunBook(opts BookOptions) error {
 	// layout/origin.pdf）加工为只读检索索引。样式会话最先用到它
 	// （doc_search 定位文本页、list_source_pages 列章节起点与逐页图片），
 	// 所以放在 style 之前构建。
-	r.buildPDFViewQuiet(opts.SourceDir, opts.Files)
+	//
+	// images 刚把 md 加工完（DOCVISION 注释落在 <proj>/source），索引以那份
+	// 为准：内容变了就在这里重建一次，没变则这一步什么都不做（见
+	// buildDocIndexQuiet 的指纹判据）。原书 PDF 视图前面已经建好，这里不重复。
 	r.buildDocIndexQuiet(proj, opts.SourceDir, opts.Files)
 	r.checkPageAlignment()
 	// T109：无图片的书老版本不会把 md 落进 source/，且 images 已标 done
@@ -815,6 +948,13 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	if st, serr := os.Stat(markerDir); serr != nil || !st.IsDir() {
 		markerDir = sourceDir
 	}
+	// 幂等：索引以 md 的内容为准，源没变就不重建。这条判据让"images 之前先
+	// 建一次（重试监视器可能马上就开转换会话）、images 之后按加工过的 md 再
+	// 核一次"这个顺序只多花一次文件 stat，而不是每次都重扫一遍中间产物。
+	stamp := docIndexStampOf(mds, markerDir)
+	if stamp == r.docIndexStamp && r.docIndex != nil {
+		return
+	}
 	outPath := filepath.Join(proj, "doc_index", "doc_index.json")
 	idx, pageIdx, err := buildDocIndex(r.cfg.Paths.MineruOutput, mds, markerDir, outPath)
 	if err != nil {
@@ -823,6 +963,7 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 	}
 	r.docIndex = idx
 	r.docPages = pageIdx
+	r.docIndexStamp = stamp
 	withNotes := 0
 	for _, e := range idx.Entries {
 		if e.Marker != "" {
@@ -833,49 +974,77 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 		"个 part（带 DOCVISION 注释:", strconv.Itoa(withNotes), "）->", outPath)
 }
 
+// docIndexStampOf 给"这次要索引哪几份 md、它们是什么样"取一个指纹：目录 +
+// 每份的大小与修改时间。images 阶段把 md 加工（打 DOCVISION 注释）落进
+// <proj>/source 之后指纹会变，索引据此重建一次；没变就一个字节都不动。
+func docIndexStampOf(mds []string, markerDir string) string {
+	var b strings.Builder
+	b.WriteString(markerDir)
+	sorted := append([]string(nil), mds...)
+	sort.Strings(sorted)
+	for _, p := range sorted {
+		b.WriteString("\x00")
+		b.WriteString(p)
+		if st, err := os.Stat(p); err == nil {
+			b.WriteString("\x00")
+			b.WriteString(strconv.FormatInt(st.Size(), 10))
+			b.WriteString(":")
+			b.WriteString(strconv.FormatInt(st.ModTime().UnixNano(), 10))
+		}
+	}
+	return b.String()
+}
+
 // phase: convert (concurrent per-chapter sessions)
 // ------------------------------------------------------------------
 
-func (r *Runner) convertPhase(proj string, fbRound int) error {
-	clsName := classNameOfFile(filepath.Join(proj, "style"))
-	if clsName == "" {
-		return fmt.Errorf("未找到样式 cls（style 阶段未完成？）")
+// convertChapterBatch 并发转换一批章节，返回失败摘要。
+//
+// 抽成方法是为了 P53 的"补轮"：一轮跑完之后可能又有新的重试请求进来，要用
+// 同一套并发槽位、进度行与失败汇总再跑一批——复制第二份循环迟早会走岔。
+// convertBatchWidth 是转换批次宽度的唯一来源：latex.convert_concurrency，没写
+// 沿用 latex.concurrency，两者都没写按老默认 3（与启动账目里的"转换 N"一致）。
+func (r *Runner) convertBatchWidth() int {
+	if w := r.cfg.Latex.ConvertWorkers(); w > 0 {
+		return w
 	}
-	manualPath := filepath.Join(proj, "style", "manual.md")
-	chapDir := filepath.Join(proj, "chapters")
-	workDir := filepath.Join(proj, "work")
+	return 3
+}
 
-	chapters, err := filepath.Glob(filepath.Join(chapDir, "chapter_*.md"))
-	if err != nil || len(chapters) == 0 {
-		return fmt.Errorf("没有章节文件可转换")
-	}
-	sort.Strings(chapters)
-
-	conc := r.cfg.Latex.Concurrency
-	if conc <= 0 {
-		conc = 3
-	}
+// convertChapterBatch 跑一批章节，返回（真失败, 暂停）。T243：因上游接口错误
+// 重试用满而**暂停**的章节不算失败——不换尝试、不归档产物、页面写「已暂停」，
+// 而且它不该混进"转换失败"的措辞里让用户以为这一章废了。
+// 返回值第三项是"因为切回请求在等而**没跑**"的章节（T244）：既不是失败也不是
+// 暂停，调用方据此知道这一批少跑了几章。
+func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) (failures, pauses, skipped []string) {
+	// T198：批次宽度 = 转换阶段的 worker 数，也就是 latex.convert_concurrency
+	// （没写沿用 latex.concurrency）。
+	//
+	// 这里以前写死 latex.concurrency——于是用户把 convert_concurrency 调到 15，
+	// 启动账目与进度行都说"并发 15"，实际却只有 5 个章节在跑（会话槽位池是 15，
+	// 但同一时刻只开了 5 个 worker，池子根本到不了上限）。实测峰值：转换 6 个
+	// 会话在跑、核对 4 个。
+	conc := r.convertBatchWidth()
 	tidPool := make(chan int, conc)
 	for i := 1; i <= conc; i++ {
 		tidPool <- i
 	}
 	var wg sync.WaitGroup
 	var failsMu sync.Mutex
-	var failures []string
 
 	// Compact console progress, mirroring the level-2 [process k/N] line.
 	// Details stay in the log file; the console only shows the counter.
 	verbose := r.consoleVerbose
-	label := "[convert]"
-	if fbRound > 0 {
-		label = fmt.Sprintf("[convert#%d]", fbRound+1)
-	}
 	r.phaseNote()("%s %d 章，并发 %d", label, len(chapters), conc)
 	// 并发数同时进日志文件：控制台进度行不进日志，事后看日志无法判断
 	// 当时跑了几个会话（所有阶段共用 latex.concurrency）。
-	r.log.Log(0, fmt.Sprintf("%s 并发 %d（latex.concurrency），共 %d 章", label, conc, len(chapters)))
+	r.log.Log(0, fmt.Sprintf("%s 并发 %d（latex.convert_concurrency），共 %d 章", label, conc, len(chapters)))
 	var done, failed, running int
 	var progMu sync.Mutex
+	// T244：这些章节因为「切回第 N 次尝试」在等而先停（不是失败）。
+	var skippedRestore []string
+	// T247：子节点还在重试、这一章这次不提交的那几章（同样不算失败）。
+	var skippedRetry []string
 	total := len(chapters)
 	start := time.Now()
 	// 进度行统一走 liveProgress：终端里原地覆写、管道里按节拍整行输出。
@@ -895,8 +1064,26 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 	progress := func() { progLive.render() }
 
 	for idx, chapPath := range chapters {
+		// T244：这一章有「切回第 N 次尝试」在等，而且随时能切——这次先不跑它。
+		// 切回要搬的就是工作区这棵树，转换一开跑就占住章节锁（细分父章节是整棵
+		// 子树），切回只能干等；反过来先让出来，切回在一两分钟内落地，之后重跑
+		// 这一章才是从第 N 次接着干。这里只跳过，不记失败、不换尝试。
+		cbase := strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
+		if n, ok := r.pendingRestore(proj, cbase); ok {
+			r.log.Log(0, label, "这一章有切回第", strconv.Itoa(n), "次尝试的请求在等，这次先不跑:", cbase)
+			skippedRestore = append(skippedRestore, cbase)
+			progMu.Lock()
+			done++
+			progMu.Unlock()
+			progress()
+			continue
+		}
 		wg.Add(1)
 		tid := <-tidPool
+		// 创建戳在这里取（派发循环里、goroutine 之前）：章节按 sort 后的顺序
+		// 创建，号的大小就是创建早晚。放进 goroutine 里取就等于按调度顺序排，
+		// 那正是要修掉的东西（P60 收尾）。
+		seq := r.nextConvertSeq()
 		if verbose {
 			r.log.Log(0, label, "start", filepath.Base(chapPath),
 				fmt.Sprintf("(%d/%d)", idx+1, total))
@@ -904,10 +1091,15 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		progMu.Lock()
 		running++
 		progMu.Unlock()
-		go func(i int, chap string, tid int) {
+		go func(i int, chap string, tid int, seq int64) {
 			defer wg.Done()
 			defer func() { tidPool <- tid }()
-			err := r.convertOneChapter(proj, clsName, manualPath, chap, workDir, i, tid, false)
+			// P53 阶段二：主流程的并发批与运行期派发共用章节锁——排着重试的章节正在
+			// 这里跑时，派发端看到忙就把请求留在队列里，绝不跑两遍。
+			cbase := strings.TrimSuffix(filepath.Base(chap), filepath.Ext(chap))
+			release := r.holdChapter(cbase)
+			defer release()
+			err := r.convertOneChapterSeq(proj, clsName, manualPath, chap, workDir, i, tid, false, seq)
 			progMu.Lock()
 			done++
 			running--
@@ -917,22 +1109,615 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 			progMu.Unlock()
 			progress()
 			if err != nil {
-				r.log.LogError(tid, label, "章节失败:", filepath.Base(chap), err)
+				if n, waiting := isRestoreWaiting(err); waiting {
+					// T244：切回请求到了（这一章可能已经跑到半路）。既不记失败也
+					// 不暂停：让出锁、让切回搬完，之后重跑这一章就是从第 N 次接着干。
+					r.log.Log(0, label, "有切回第", strconv.Itoa(n), "次尝试的请求在等，这一章先停在这里:",
+						filepath.Base(chap))
+					failsMu.Lock()
+					skippedRestore = append(skippedRestore, strings.TrimSuffix(filepath.Base(chap), filepath.Ext(chap)))
+					failsMu.Unlock()
+					return
+				}
+				if kids, retryingKids := isRetryingChildren(err); retryingKids {
+					// T247：子节点还在重试队列里，父章节这次没提交——这不是失败。
+					// 那几支跑通后会照 T231 替父章节排一条「继续跑」，届时再整合。
+					r.log.LogWarning(tid, label, "子章节还在重试，这一章这次不提交（不记失败）:",
+						filepath.Base(chap), strings.Join(kids, ", "))
+					failsMu.Lock()
+					skippedRetry = append(skippedRetry, strings.TrimSuffix(filepath.Base(chap), filepath.Ext(chap)))
+					failsMu.Unlock()
+					return
+				}
+				if isPaused(err) {
+					// T243：暂停不是失败——单独的计账，措辞也不一样。
+					r.log.LogWarning(tid, label, "章节暂停:", filepath.Base(chap), err)
+				} else {
+					r.log.LogError(tid, label, "章节失败:", filepath.Base(chap), err)
+				}
 				failsMu.Lock()
-				failures = append(failures, filepath.Base(chap)+": "+err.Error())
+				if isPaused(err) {
+					pauses = append(pauses, filepath.Base(chap)+": "+err.Error())
+				} else {
+					failures = append(failures, filepath.Base(chap)+": "+err.Error())
+				}
 				failsMu.Unlock()
 			}
-		}(idx, chapPath, tid)
+		}(idx, chapPath, tid, seq)
 	}
 	wg.Wait()
 	progLive.Close()
-	if len(failures) > 0 {
-		return fmt.Errorf("%d 个章节转换失败: %s", len(failures), strings.Join(failures, "; "))
+
+	if len(skippedRestore) > 0 {
+		sort.Strings(skippedRestore)
+		r.log.LogWarning(0, label, "先停", strconv.Itoa(len(skippedRestore)),
+			"章（有切回请求在等，不是失败）:", strings.Join(skippedRestore, ", "),
+			"—切回在这一章停止写盘后自动落地，之后重跑这一章即可")
 	}
-	r.log.Log(0, label, "全部", strconv.Itoa(len(chapters)), "章转换完成")
+	if len(skippedRetry) > 0 {
+		sort.Strings(skippedRetry)
+		r.log.LogWarning(0, label, "子章节还在重试，这", strconv.Itoa(len(skippedRetry)),
+			"章这次不提交（不是失败，子节点通过后自动接手）:", strings.Join(skippedRetry, ", "))
+		// 与"等切回"合流：调用方只需要知道这几章这次没跑完、不计失败。
+		skippedRestore = append(skippedRestore, skippedRetry...)
+	}
+	return failures, pauses, skippedRestore
+}
+
+func (r *Runner) convertPhase(proj string, fbRound int) error {
+	clsName := classNameOfFile(filepath.Join(proj, "style"))
+	if clsName == "" {
+		return fmt.Errorf("未找到样式 cls（style 阶段未完成？）")
+	}
+	manualPath := filepath.Join(proj, "style", "manual.md")
+	chapDir := filepath.Join(proj, "chapters")
+	workDir := filepath.Join(proj, "work")
+
+	chapters, err := filepath.Glob(filepath.Join(chapDir, "chapter_*.md"))
+	if err != nil || len(chapters) == 0 {
+		return fmt.Errorf("没有章节文件可转换")
+	}
+	sort.Strings(chapters)
+
+	label := "[convert]"
+	if fbRound > 0 {
+		label = fmt.Sprintf("[convert#%d]", fbRound+1)
+	}
+	// P53：--only（命令行）与网页的重试队列都先走这一步——归档旧尝试、
+	// 分配新尝试号、把提交过的 .tex 挪走，之后它才会被真正重转。
+	targets := chapters
+	retryOnly := false
+	if len(r.onlyChapters) > 0 {
+		targets = selectOnlyChapters(chapters, r.onlyChapters)
+		if len(targets) == 0 {
+			return fmt.Errorf("--only 指定的章节一个都不存在: %s（子章节不单独重跑，请点它所属的顶层章节）", strings.Join(r.onlyChapterList(), ", "))
+		}
+		retryOnly = true
+		for _, p := range targets {
+			base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+			r.forceChapterRetry(proj, base, "命令行 --only")
+		}
+	} else if bases := r.prepareRetries(proj); len(bases) > 0 {
+		targets = selectOnlyChapters(chapters, basesToSet(bases))
+		retryOnly = true
+	}
+	if len(targets) == 0 {
+		r.log.Log(0, "[convert]", "没有要转换的章节（--only / 重试队列为空）")
+		return nil
+	}
+	fails, pauses, skipped := r.convertChapterBatch(proj, clsName, manualPath, workDir, targets, label)
+	if len(pauses) > 0 {
+		// T243：上游接口重试用满 → 这一章暂停，整轮到此为止（不重试、不记失败、
+		// 不换尝试、产物与尝试预算都没动）。重启程序会接着这条会话跑，网页上
+		// 也能点「继续跑」。
+		return pauseError(pauses)
+	}
+	if err := r.chapterFailure(proj, fails); err != nil {
+		return err
+	}
+	// 转换阶段跑着的时候用户可能又点了重试：这一批跑完再补最多两轮，
+	// 不用等到下次启动。
+	for pass := 0; pass < 2; pass++ {
+		bases := r.prepareRetries(proj)
+		if len(bases) == 0 {
+			break
+		}
+		more := selectOnlyChapters(chapters, basesToSet(bases))
+		if len(more) == 0 {
+			break
+		}
+		r.log.Log(0, label, "补一轮手动重试:", strings.Join(bases, ", "))
+		fails, pauses, skippedMore := r.convertChapterBatch(proj, clsName, manualPath, workDir, more, label)
+		skipped = append(skipped, skippedMore...)
+		if len(pauses) > 0 {
+			return pauseError(pauses)
+		}
+		if err := r.chapterFailure(proj, fails); err != nil {
+			return err
+		}
+	}
+	if len(skipped) == 0 {
+		r.log.Log(0, label, "全部", strconv.Itoa(len(targets)), "章转换完成")
+	} else {
+		// T244：有章节因为切回请求在等而没跑。别报"全部完成"——那会让人以为这一章
+		// 已经转好（它连产物都还没有），下一页就应该去点「继续跑」。
+		r.log.Log(0, label, "这一批", strconv.Itoa(len(targets)), "章：完成",
+			strconv.Itoa(len(targets)-len(skipped)), "章，等切回",
+			strconv.Itoa(len(skipped)), "章（", strings.Join(skipped, ", "), "）")
+	}
+	// P53 的 checker 角色：只重新核对已提交的产物，不动 .tex。放在转换重试之后
+	// 统一处理——同一章既重转又重核时，先重转再核新产物才有意义。
+	rechecked := 0
+	for pass := 0; pass < 2; pass++ {
+		bases := r.prepareCheckerRetries(proj)
+		if len(bases) == 0 {
+			break
+		}
+		rechecked += len(bases)
+		r.log.Log(0, label, "重新核对:", strings.Join(bases, ", "))
+		var wg sync.WaitGroup
+		for i, base := range bases {
+			r.forceCheckerRetry(proj, base)
+			n := r.checkerAttemptNo(base)
+			wg.Add(1)
+			go func(tid int, base string, n int) {
+				defer wg.Done()
+				release := r.holdChapter(base)
+				defer release()
+				r.recheckChapter(proj, base, tid)
+			}(i+1, base, n)
+		}
+		wg.Wait()
+	}
+	if retryOnly || rechecked > 0 {
+		// 手动重试只补那几章：样式反馈回路会拿全书的报告去改 cls、再分块重转
+		// 整本书——那是"整书重跑"该做的决定，不能由一次单章重试顺手触发。
+		r.log.Log(0, label, "手动重试不回灌样式反馈（整书重跑时它才会介入）")
+		r.log.Log(0, label, "这一轮重转", strconv.Itoa(len(targets)), "章、重新核对", strconv.Itoa(rechecked),
+			"章；要更新整书 PDF 请再跑一次 --step assemble")
+		return nil
+	}
 	// 样式反馈回路：多数章节汇报 cls/手册问题 → 打回原样式会话修正
 	// 后，用全新上下文重新并发转换。
 	return r.styleFeedbackLoop(proj, fbRound)
+}
+
+/*
+ * logConcurrencyPlan 打印并发账目并在"池子之和超过模型上限"时告警（T179）：
+ * 转换与核对各自排队的阶段不同，但落到同一个模型上时挤压的是同一个额度。
+ */
+func (r *Runner) logConcurrencyPlan() {
+	l := r.cfg.Latex
+	convert, checker, other := l.ConvertWorkers(), l.CheckerWorkers(), l.OtherWorkers()
+	line := "转换 " + strconv.Itoa(convert) + " / 核对 " + strconv.Itoa(checker) + "（独立槽位）/ 其它阶段 " + strconv.Itoa(other)
+	caps := r.cfg.ModelConcurrencyLimits()
+	if len(caps) == 0 {
+		r.log.LogInfo(0, "[book] 并发:", line, "；模型级不限（models.<名>.max_concurrency 未设置）")
+		return
+	}
+	names := make([]string, 0, len(caps))
+	for name := range caps {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, name+" 上限 "+strconv.Itoa(caps[name]))
+	}
+	r.log.LogInfo(0, "[book] 并发:", line, "；模型级:", strings.Join(parts, " / "))
+
+	// 想同时用同一个模型的会话数：转换池 + 核对池（两者是这本流程里唯一会
+	// 几十个并行的阶段）。
+	checkerName := l.CheckerModel
+	if checkerName == "" {
+		checkerName = l.ConvertModel
+	}
+	demand := map[string]int{}
+	if mc, ok := r.cfg.ResolveModel(l.ConvertModel); ok && mc.Model != "" {
+		demand[mc.Model] += convert
+	}
+	if mc, ok := r.cfg.ResolveModel(checkerName); ok && mc.Model != "" {
+		demand[mc.Model] += checker
+	}
+	for _, name := range names {
+		if want := demand[name]; want > caps[name] {
+			r.log.LogWarning(0, "[book] 并发:模型", name, "上限", strconv.Itoa(caps[name]),
+				"，但转换 "+strconv.Itoa(convert)+" + 核对 "+strconv.Itoa(checker)+" 都在用它——实际最多",
+				strconv.Itoa(caps[name]), "个在跑，其余排队等模型槽位；要更快得先调高该模型的 max_concurrency")
+		}
+	}
+}
+
+/*
+ * 阶段槽位（T179）：转换与核对各一个池子，各自的上限来自
+ * latex.convert_concurrency / checker_concurrency（没写沿用 concurrency）。
+ * 两者独立计数，所以"转换 3 + 核对 3"可以同时在途 6 个会话；要限制真正打到
+ * 同一个模型上的请求数，用 models.<名>.max_concurrency（会话层还有一个按模型
+ * 名的闸门，见 session.SetModelConcurrency）。
+ *
+ * 转换池按**任务创建顺序**派发（P60 收尾，见 slots.go 与 nextConvertSeq）：
+ * 同一时刻只有 N 个转换会话在跑，"哪个就绪的会话先拿空出来的槽位"由任务创建
+ * 的早晚决定，而不是谁先排队。旧实现是 buffered channel，先到先得——晚创建的
+ * 顶层章节会一路插在早创建的那一支前面（真实一次运行：一棵子树的 15 个孙节点
+ * 排了约 25 分钟，期间后来创建的会话轮番拿走全部 10 个槽位）。核对池与其余
+ * 阶段的池子仍是先到先得，本批不动。
+ */
+func (r *Runner) acquireConvertSlot(seq int64) func() {
+	r.convertSlotsOnce.Do(func() { r.convertSlots = newSlotSem(r.cfg.Latex.ConvertWorkers()) })
+	if seq <= 0 {
+		// 没带创建戳（新入口 / 测试）：当场发一个号，于是它排在所有已创建的任务
+		// 之后——宁可保守地排后面，也不让它凭空抢队头。
+		seq = r.nextConvertSeq()
+	}
+	return r.convertSlots.acquire(seq)
+}
+
+// nextConvertSeq 发一个「任务创建顺序」号（1 起，单调递增）。
+//
+// 必须在**任务被创建**的那一行取号（派发循环里、子章节 goroutine 启动之前），
+// 不能在 goroutine 里取——那样号的大小就成了调度顺序，等于换了个方式先到先得。
+func (r *Runner) nextConvertSeq() int64 { return r.convertSeq.Add(1) }
+
+// slotHeartbeatEvery 是"还在等并发槽"提示的重复间隔（T232）。
+//
+// 排队几十分钟、页面上只有一句「等待并发槽」的章节，看不出它是在排队还是已经
+// 卡死——转换池 10 格全被大章节占着时，这种等待是常态。取槽位期间定期把"还在
+// 等、等了多久"写进转录状态（页面那一行的时间戳跟着动）与日志，等待就不再是
+// 沉默的。
+const slotHeartbeatEvery = 5 * time.Minute
+
+// holdConvertSlot 取转换槽位，等的时候每 slotHeartbeatEvery 报一次平安。
+func (r *Runner) holdConvertSlot(sess *session.Session, tid int, base string, seq int64) func() {
+	return r.holdSlot(sess, tid, base, "转换", func() func() { return r.acquireConvertSlot(seq) })
+}
+
+// holdSlot 是 hold*Slot 的公共实现：先起心跳，再去排队。
+func (r *Runner) holdSlot(sess *session.Session, tid int, base, what string, acquire func() func()) func() {
+	start := time.Now()
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tk := time.NewTicker(slotHeartbeatEvery)
+		defer tk.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tk.C:
+				waited := waitText(time.Since(start))
+				if sess != nil {
+					_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{
+						"state": "queued",
+						"note":  what + "槽位已等 " + waited,
+					})
+				}
+				r.log.LogInfo(tid, "["+what+"]", base, what+"槽位已等"+waited+"，还没轮到它")
+			}
+		}
+	}()
+	release := acquire()
+	close(stop)
+	<-done
+	return release
+}
+
+func (r *Runner) acquireCheckerSlot() func() {
+	r.checkerSlotsOnce.Do(func() { r.checkerSlots = make(chan struct{}, r.cfg.Latex.CheckerWorkers()) })
+	r.checkerSlots <- struct{}{}
+	return func() { <-r.checkerSlots }
+}
+
+// nextCheckerAttempt 从 start 起找第一条「没提交提醒还没打满」的核对尝试号
+// （T232）：当前这条已经打满时，与其把同一条死转录再推一遍，不如换下一条全新
+// 的——新文件没有历史可回放，模型拿到干净上下文和完整轮次，而产物不动。
+//
+// maxBumps 是上限：三条都打满就交给入口守卫如实报"没结论"，不要在磁盘上刷出
+// 一串空尝试。
+func nextCheckerAttempt(nodeTr string, start, maxBumps int) int {
+	attempt := start
+	for bumps := 0; bumps < maxBumps; bumps++ {
+		if countCheckerSubmitReminders(loadTranscriptMessages(attemptTranscriptPath(nodeTr, attempt))) < checkerNoVerdictAttempts {
+			return attempt
+		}
+		attempt++
+		if attempt < 2 {
+			attempt = 2
+		}
+	}
+	return start
+}
+
+// acquireChapterSlot 是其余阶段的通用池子（样式修复、提交提醒等）。
+func (r *Runner) acquireChapterSlot() func() {
+	r.chapterSlotsOnce.Do(func() { r.chapterSlots = make(chan struct{}, r.cfg.Latex.OtherWorkers()) })
+	r.chapterSlots <- struct{}{}
+	return func() { <-r.chapterSlots }
+}
+
+func (r *Runner) convertChapterChildren(proj, clsName, manualPath, chapPath, parentBase, parentWork, workDir string, idx, tid int, parent chapterNodeConfig, children []ChapterSubdivision) error {
+	data, err := os.ReadFile(chapPath)
+	if err != nil {
+		return fmt.Errorf("读取父章节失败: %w", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	parentParts := filepath.Join(parentWork, parentBase, "children")
+	if err := os.RemoveAll(parentParts); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(parentParts, 0o755); err != nil {
+		return err
+	}
+	sem := make(chan struct{}, r.cfg.Latex.ConvertWorkers())
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var failures []string
+	// T247：这一轮没交上来、但已经被复盘排进重试队列的子节点。它们不是失败，
+	// 父章节这次不提交也不记失败，等它们跑通后自动接手。
+	var retrying []string
+	pausedN := 0
+	// T244：有几支子章节因为「切回第 N 次尝试」在等而先停（不记失败）。
+	restoreN, restoreAttempt := 0, 0
+	var inherited []ChapterIssue
+	for i, child := range children {
+		// T244：这一章有切回在等、而且随时能切——剩下的子分支这次不派发。正在跑
+		// 的那几支会跑完手上这一轮（不打断它们），然后父节点收尾、锁松开，切回
+		// 就能搬。以前细分父章节的锁从转换开始一直占到最后一支收尾（实测几小时），
+		// 切回只能干等，重启还会被重新抢走。
+		if n, ok := r.pendingRestore(proj, parentBase); ok {
+			r.log.Log(0, "[convert]", parentBase, "有切回第", strconv.Itoa(n),
+				"次尝试的请求在等，剩下", strconv.Itoa(len(children)-i), "支子章节这次不派发")
+			restoreN++
+			restoreAttempt = n
+			break
+		}
+		id := fmt.Sprintf("child_%02d", i+1)
+		chapter := child
+		// 子章节的创建戳在**启动 goroutine 之前**取，按 children 的顺序单调递增：
+		// 早创建的那一支（含它的子树）永远排在晚创建的那一支前面，与谁先被调度
+		// 无关。它也自然大于父节点的号（父节点更早创建）。
+		childSeq := r.nextConvertSeq()
+		childBase := parentBase + "_" + id
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			// T230：递归子章节的转换/核对也要占住**它自己那个章节名**的互斥锁。
+			// 这把锁以前只有顶层章节占（convertChapterBatch），于是这一支在
+			// 干活时，页面上"重新核对这一章"的请求能立刻 lockChapter 成功、
+			// 另开一条核对会话——用户看到同一章同时跑着两条核对（旧的没停、
+			// 新的又起）。锁在这里，派发端那一步 TryLock 就会失败、请求留在
+			// 队列里等它收尾，而不是并排再跑一遍。
+			release := r.holdChapter(childBase)
+			defer release()
+			childRoot := filepath.Join(parentWork, "_subdivision", id)
+			nodeRoot := filepath.Join(childRoot, "node")
+			inputDir := filepath.Join(childRoot, "input")
+			if err := os.MkdirAll(inputDir, 0o755); err != nil {
+				mu.Lock()
+				failures = append(failures, id+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			childMD := filepath.Join(inputDir, "chapter.md")
+			wanted := chapterSubrange(lines, chapter)
+			// T236：父节点每一次续跑/续跑式重试都会把整棵子树重新派发一遍。子章节
+			// 上次已经转换**并通过核对**、而这次重算出来的 input 一个字没变时，直接
+			// 复用它的产物——重新跑一遍只是把同样的活再烧一遍 token（第四章实测：
+			// 四个子节点在父会话续跑后全部从头再转一次，各自又要多轮核对）。
+			prev, _ := os.ReadFile(childMD)
+			reusable := string(prev) == wanted && childPassedEarlier(nodeRoot, childBase)
+			if err := os.WriteFile(childMD, []byte(wanted), 0o644); err != nil {
+				mu.Lock()
+				failures = append(failures, id+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			childOut := filepath.Join(nodeRoot, "result")
+			if reusable {
+				if err := copyChildArtifacts(parentParts, childOut, childBase); err != nil {
+					mu.Lock()
+					failures = append(failures, id+": "+err.Error())
+					mu.Unlock()
+					return
+				}
+				childIssues := inheritChildIssues(nodeRoot)
+				mu.Lock()
+				inherited = append(inherited, childIssues...)
+				mu.Unlock()
+				r.log.LogInfo(tid, "[convert]", parentBase, "子章节", id,
+					"上次已转换并通过核对、输入未变——直接复用产物，不再重跑")
+				return
+			}
+			childNode := chapterNodeConfig{
+				Base: childBase, Depth: parent.Depth + 1, InputMount: "input", InputRef: "chapter.md",
+				NodeRoot:       nodeRoot,
+				TranscriptPath: filepath.Join(nodeRoot, "sessions", "convert_"+childBase+".jsonl"),
+				SubmitRoot:     childOut,
+				ReportPath:     filepath.Join(nodeRoot, "reports", "conversion.md"),
+				StrictChecker:  true,
+				Seq:            childSeq,
+			}
+			if err := r.convertChapterNode(proj, clsName, manualPath, childMD, workDir, idx, tid, false, &childNode); err != nil {
+				// T231：这一支失败必须写在**它自己**的转录上。以前只有父节点的
+				// 失败清单里有一句，页面这一行还停在最后一条成功状态上（"等待
+				// 子会话"/"转换完成待核对"），一看像是还在跑。
+				// T235：`childNode` 是按指针传进去的，这里读到的已经是这一次实际用的
+				// 那条转录（`convert_<章>.tryN.jsonl`）。以前按值传，拿到的是第 1 次
+				// 尝试的旧路径——失败终态写到一条早已结束的历史转录上（而且它比在跑
+				// 的那条新，页面就挑它显示「会话错误」，实际上那一代早就通过了）。
+				if n, waiting := isRestoreWaiting(err); waiting {
+					// T244：这一支让开了（切回在等）。不写终态、不算失败。
+					mu.Lock()
+					restoreN++
+					restoreAttempt = n
+					mu.Unlock()
+					return
+				}
+				state := "error"
+				if isPaused(err) {
+					// T243：接口重试用满 = 暂停，不是会话错误。放在最前面判：
+					// rescueQueuedFor 是**上一次**排重试时留下的标记，接口错误
+					// 用满的那一次并没有排任何东西，让旧标记赢会一直显示排队中。
+					state = "paused"
+				} else if r.rescueQueuedFor(childNode.TranscriptPath) {
+					state = "queued"
+				}
+				_ = appendTranscriptActivity(childNode.TranscriptPath, state)
+				mu.Lock()
+				if state == "queued" {
+					// T247：这一支已经被复盘排进重试队列，几分钟后会接着跑，跑通了
+					// 还会替父章节排「继续跑」。它不是失败——锁死父章节只会让页面
+					// 后来同时出现"父已通过"和几小时前那句失败。
+					retrying = append(retrying, id)
+				} else {
+					failures = append(failures, id+": "+err.Error())
+				}
+				if isPaused(err) {
+					pausedN++
+				}
+				mu.Unlock()
+				return
+			}
+			if err := copyChildArtifacts(parentParts, childOut, childBase); err != nil {
+				mu.Lock()
+				failures = append(failures, id+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			// 问题继承（T166）：把子节点 store 里**未解决**的条目收上来，
+			// 由父节点提交时合并进它自己的 store。父会话不需要读这些也能
+			// 保证它们继续向上（见 chapterissues.go）。
+			childIssues := inheritChildIssues(nodeRoot)
+			mu.Lock()
+			inherited = append(inherited, childIssues...)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	if restoreN > 0 && len(failures) == 0 {
+		// T244：整棵子树都让开了，父章节照样"先停"，不提交、不记失败。
+		return &restoreWaitingError{Base: parentBase, Attempt: restoreAttempt}
+	}
+	// T247：还有子节点在重试队列里——这次不提交，但也不记失败。它们跑通之后
+	// 会照 T231 替父章节排一条「继续跑」，那时再整合。
+	if len(failures) == 0 && len(retrying) > 0 {
+		sort.Strings(retrying)
+		r.log.LogWarning(tid, "[convert]", parentBase,
+			"有", strconv.Itoa(len(retrying)), "支子章节还在重试（已排进队列），父章节这次不提交、不记失败:",
+			strings.Join(retrying, ", "))
+		return &retryingChildrenError{Base: parentBase, Children: retrying}
+	}
+	if len(failures) > 0 {
+		sort.Strings(failures)
+		if pausedN == len(failures) {
+			// T243：这一支全是"接口重试用满而暂停"——父章节跟着暂停，不记成
+			// 会话错误（失败清单里的每一句都已经写明是暂停）。
+			return &pausedError{Base: parentBase, Retries: r.cfg.Latex.APIErrorRetryLimit(),
+				Cause: strings.Join(failures, "; ")}
+		}
+		return fmt.Errorf("子章节转换或 checker 失败；父章节禁止提交: %s", strings.Join(failures, "; "))
+	}
+	// 父节点的继承清单：去重后落盘，整合会话与 submit 都从这里取。
+	if err := writeIssueStore(filepath.Join(parentWork, "_subdivision", "issues-inherited.json"), openIssues(inherited)); err != nil {
+		return fmt.Errorf("写入子章节问题继承清单失败: %w", err)
+	}
+	if n := len(openIssues(inherited)); n > 0 {
+		r.log.LogInfo(tid, "[convert]", parentBase, "继承", strconv.Itoa(n), "条子章节未解决问题（未修的会原样向上）")
+	}
+	return nil
+}
+
+// copyChildArtifacts 把一支子章节的产物铺进父节点的 `children/`（提交时按
+// 两个路径交上去的就是这里）：章节 `.tex` 与它的分片文件夹。
+func copyChildArtifacts(parentParts, childOut, childBase string) error {
+	if err := copyFile(filepath.Join(childOut, childBase+".tex"), filepath.Join(parentParts, childBase+".tex")); err != nil {
+		return err
+	}
+	if fileExists(filepath.Join(childOut, childBase)) {
+		if err := copyDir(filepath.Join(childOut, childBase), filepath.Join(parentParts, childBase)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// inheritChildIssues 收一支子节点 store 里**未解决**的条目（T166）。
+func inheritChildIssues(nodeRoot string) []ChapterIssue {
+	return openIssues(readIssueStore(filepath.Join(nodeRoot, "work", ".issues", "issues.json")))
+}
+
+func writeChapterChildrenManifest(work, base string, children []ChapterSubdivision) error {
+	var b strings.Builder
+	b.WriteString("# 已核验子章节\n\n")
+	b.WriteString("每个子章节已经过独立转换 + 独立 checker（明确 pass 才会出现在这里）。\n\n")
+	for i, child := range children {
+		id := fmt.Sprintf("child_%02d", i+1)
+		artifactBase := base + "_" + id
+		fmt.Fprintf(&b, "%d. %s（Markdown 行 %d-%d）\n   - TeX: %s/children/%s.tex\n   - Parts: %s/children/%s/\n   - Conversion report: %s/_subdivision/%s/node/reports/conversion.md\n   - Conversion transcript: %s/_subdivision/%s/node/sessions/convert.jsonl\n   - Checker transcript: %s/_subdivision/%s/node/sessions/checker.jsonl\n", i+1, child.Title, child.StartLine, child.EndLine, base, artifactBase, base, artifactBase, base, id, base, id, base, id)
+	}
+	if err := os.WriteFile(filepath.Join(work, "_subdivision", "children-manifest.md"), []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+	return writeChildrenSummary(work, base, children)
+}
+
+// writeChildrenSummary 把每个子章节**自己交的汇报**（结论/问题/建议）原样
+// 汇总成一个文件，交给父章节的整合会话（T165）。
+//
+// 为什么要这一步：子章节的 checker 只能判"通过/不通过"，它给不出"这一章
+// 哪里没还原"的细节；细节在子会话 submit 的 report 里（有章节明确写了
+// "enumerate/proof 结构对不上、没能干净编译"）。以前这些报告只是躺在
+// `_subdivision/<child>/node/reports/` 下没人读——父会话的整合指令只点名
+// 读 .tex 与 parts/，于是父章节带着同样的毛病提交，问题一路上浮到最后的
+// 终审才炸。现在汇总成一份必读文件，并在文首与结尾各强调一次。
+func writeChildrenSummary(work, base string, children []ChapterSubdivision) error {
+	var b strings.Builder
+	b.WriteString("# 子章节汇报汇总（整合前必读）\n\n")
+	b.WriteString("下面是每个子章节转换会话在 submit 时交的 `report` 原文。它说的是\"这一章向原书还原时哪里没做到 / 哪里绕过了手册\"，" +
+		"**checker 只看结构与文本一致性，不会替你判断这些**。\n\n" +
+		"**不要求你修复这些问题**——多数是样式/类文件层面的，后面有专门的风格修复大循环统一处理。" +
+		"你要做的是：能顺手修的就修（修了在 submit 的 `report.resolved` 里写上它的 ID）；" +
+		"没修的**保持原样**，提交时合并机制会自动把它们带进你的报告继续向上传递，你不需要抄一遍。" +
+		"你自己发现的**新问题**写进 `report.issues`（推荐字符串数组，一个问题一条），它们会和继承条目一起往上走。\n\n")
+	problems := 0
+	for i, child := range children {
+		id := fmt.Sprintf("child_%02d", i+1)
+		reportPath := filepath.Join(work, "_subdivision", id, "node", "reports", "conversion.md")
+		raw, err := os.ReadFile(reportPath)
+		fmt.Fprintf(&b, "## %d. %s（行 %d-%d，%s）\n\n", i+1, child.Title, child.StartLine, child.EndLine, id)
+		if err != nil {
+			b.WriteString("_（这个子章节没有留下汇报文件）_\n\n")
+			continue
+		}
+		text := strings.TrimSpace(string(raw))
+		if strings.Contains(text, "结论: issues") || strings.Contains(text, "结论:issues") {
+			problems++
+		}
+		if len(text) > 6000 {
+			text = text[:6000] + "\n…（截断，原文见 " + reportPath + "）"
+		}
+		b.WriteString(text + "\n\n")
+	}
+	b.WriteString("## 你要做的\n\n")
+	b.WriteString("1. 读完上面每一段与每个子 `.tex`/`parts/`，按原书顺序整合成父章节；\n")
+	b.WriteString("2. 顺手能修的修（缺段、错层级、丢公式、编号错位都算），修掉的把 ID 写进 `report.resolved`；\n")
+	b.WriteString("3. 修不了的不必勉强：不写 resolved，合并机制会把它原样带上；你自己的新问题写进 `report.issues`；\n")
+	b.WriteString("4. 改完必须重新 compile，并用 view_pdf 看过编译出的 PDF（至少第 1 页与最后一页），否则 submit 会被拒绝。\n")
+	if problems > 0 {
+		fmt.Fprintf(&b, "\n⚠ 有 %d 个子章节自己报了 `结论: issues`——它们的问题很可能还在父章节里，别当成已经解决。\n", problems)
+	}
+	// 机制合并的清单：这些条目会在你 submit 时自动进入报告（不需要你抄）。
+	if inherited := openIssues(readIssueStore(filepath.Join(work, "_subdivision", "issues-inherited.json"))); len(inherited) > 0 {
+		fmt.Fprintf(&b, "\n## 已继承的问题（%d 条，机制合并）\n\n", len(inherited))
+		b.WriteString("这些是子章节提交时记录的问题，**没修就会原样向上**。修掉了哪条，把它的 ID 填进 `report.resolved`。\n\n")
+		for _, it := range inherited {
+			fmt.Fprintf(&b, "- `%s`（来源 %s）：%s\n", it.ID, it.Source, strings.ReplaceAll(it.Text, "\n", " "))
+		}
+	}
+	summaryPath := filepath.Join(work, "_subdivision", "children-summary.md")
+	return os.WriteFile(summaryPath, []byte(b.String()), 0o644)
 }
 
 // writeStyleExtras persists the files a submit_style call shipped
@@ -1006,10 +1791,145 @@ func classNameOfFile(styleDir string) string {
 // <proj>/work/chapters. Probe files, test PDFs and other scratch can
 // therefore never leak into the book.
 func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool) error {
+	// 这一章在此刻被创建（运行期重试 / 测试入口），创建戳当场取：它排在所有
+	// 已经创建的任务之后——保守但正确，不凭空抢队头。
+	return r.convertOneChapterSeq(proj, clsName, manualPath, chapPath, workDir, idx, tid, retry, r.nextConvertSeq())
+}
+
+// convertOneChapterSeq 与 convertOneChapter 相同，但创建戳由调用方给。
+// 批量派发必须走这一条：号在**派发循环里**取（章节顺序 = 创建顺序），不能等
+// goroutine 跑起来才取（那就成了按调度顺序，P60 收尾要修掉的就是这个）。
+func (r *Runner) convertOneChapterSeq(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool, seq int64) error {
 	base := strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
-	texPath := filepath.Join(workDir, "chapters", base+".tex")
-	if fileExists(texPath) {
+	node := chapterNodeConfig{
+		InputMount: "project", InputRef: "chapters/" + base + ".md",
+		NodeRoot:       filepath.Join(proj, "work", "temp", "conv_"+base),
+		TranscriptPath: filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"),
+		SubmitRoot:     filepath.Join(workDir, "chapters"),
+		ReportPath:     filepath.Join(workDir, "reports", base+".md"),
+		Seq:            seq,
+	}
+	// P53：--only / 网页重试队列给这一章分配了新尝试号，覆盖"按磁盘推导"。
+	if n := r.retryAttemptOf(base); n > 0 {
+		node.AttemptNum = n
+	}
+	return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, retry, &node)
+}
+
+type chapterNodeConfig struct {
+	Base            string
+	Depth           int
+	InputMount      string
+	InputRef        string
+	NodeRoot        string
+	TranscriptPath  string
+	SubmitRoot      string
+	FinalSubmitRoot string
+	ReportPath      string
+	StrictChecker   bool
+	// Seq 是这一章的**任务创建顺序戳**（1 起，越小创建越早）：转换槽位池按它
+	// 派发，见 slots.go。子章节由 convertChapterChildren 在启动 goroutine 之前
+	// 发号，所以一个早创建的子树的每个节点都保持自己的早期号；重试沿用父节点
+	// 的号（同一件任务，不因为重来一次就变"新任务"）。
+	Seq int64
+	// Attempt 是**本次运行**内的「第几次尝试」（1 起）：checker 连续不通过就换
+	// 一个全新会话重来，预算按它算（checker_rounds，按层递减）。
+	Attempt int
+	// AttemptNum 是写进转录文件名的尝试号（1 起），跨运行单调递增：0 = 由磁盘
+	// 上已有的转录推导。两者分开是因为"这次运行还有几次机会"与"这一章历史上
+	// 第几次尝试"不是一回事——以前只有一个号，重跑时会拿已经用过的
+	// convert_<章>.try2.jsonl 继续追加，两段对话混进同一条转录（T171）。
+	AttemptNum int
+}
+
+// T235：node 传指针——调用方（递归子章节）拿到返回值之后才知道这一次**实际**用的是
+// 哪条转录（`node.TranscriptPath` 会在里面按磁盘上的尝试号被改写）。以前按值传，
+// 调用方手里还是第 1 次尝试的旧路径，失败终态就写到了那条早就结束的转录上（页面
+// 显示「会话错误」的其实是上一轮的历史行）。
+func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir string, idx, tid int, retry bool, node *chapterNodeConfig) error {
+	base := node.Base
+	if base == "" {
+		base = strings.TrimSuffix(filepath.Base(chapPath), filepath.Ext(chapPath))
+	}
+	if node.TranscriptPath == "" {
+		node.TranscriptPath = filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")
+	}
+	if node.NodeRoot == "" {
+		node.NodeRoot = filepath.Join(proj, "work", "temp", "conv_"+base)
+	}
+	if node.SubmitRoot == "" {
+		node.SubmitRoot = filepath.Join(workDir, "chapters")
+	}
+	if node.ReportPath == "" {
+		node.ReportPath = filepath.Join(workDir, "reports", base+".md")
+	}
+	if node.FinalSubmitRoot == "" {
+		node.FinalSubmitRoot = node.SubmitRoot
+	}
+	if node.Attempt < 1 {
+		node.Attempt = 1
+	}
+	// T244：这一章（含它的父章）有「切回第 N 次尝试」在等，而且随时能切——这次
+	// 一个字节都不碰就退出去。放在最前面：细分驱动在派发前已经拦了一道，这里
+	// 是第二道——已经进了槽位池、或者转换跑到半路又来了一条切回请求时，这一支
+	// 在节点入口就安静让开，锁随即松开。不记失败、不换尝试、不写终态：切回是
+	// 文件搬运，它才是这一章的下一步。
+	if n, ok := r.pendingRestore(proj, base); ok {
+		r.log.Log(0, "[convert]", base, "有切回第", strconv.Itoa(n), "次尝试的请求在等，这一支先不跑")
+		return &restoreWaitingError{Base: base, Attempt: n}
+	}
+	// T171：每次尝试都从**原始**转录名派生。重试是递归调用同一个函数，而
+	// `next := *node` 会带上已经被改写的 TranscriptPath——过去就是拿它再套一层
+	// 后缀，跑出 convert_<章>.try2.try3.jsonl 这种套娃名，预览页把同一次尝试
+	// 拆成两个节点（一个 chapter_001 一个 chapter_001.try2）。
+	transcriptBase := node.TranscriptPath
+	mdData, readErr := os.ReadFile(chapPath)
+	if readErr != nil {
+		return fmt.Errorf("读取章节 Markdown 失败: %w", readErr)
+	}
+	mdLines := strings.Split(string(mdData), "\n")
+	lineCount := len(mdLines)
+	splitTool := &RequestChapterSplitTool{
+		Root: filepath.Join(node.NodeRoot, "work", "_subdivision"), TotalLine: lineCount,
+		LastContent: lastContentLine(mdLines), Depth: node.Depth,
+	}
+	if err := splitTool.Restore(); err != nil {
+		return err
+	}
+	if splitTool.Restored {
+		node.SubmitRoot = filepath.Join(node.NodeRoot, "integrated-stage")
+		node.StrictChecker = true
+	}
+	if node.AttemptNum < 1 {
+		node.AttemptNum = lastAttemptNumber(transcriptBase)
+	}
+	node.TranscriptPath = attemptTranscriptPath(transcriptBase, node.AttemptNum)
+	texPath := filepath.Join(node.SubmitRoot, base+".tex")
+	// P53 阶段二：retry=true 是"人手动要求的"——产物在也要跑（继续跑尤其如此：它要的
+	// 就是把这条会话推下去）。普通流程仍按产物跳过。
+	if node.Depth == 0 && !retry && fileExists(filepath.Join(node.FinalSubmitRoot, base+".tex")) {
+		if chapterRecheckPending(filepath.Join(node.FinalSubmitRoot, base+".tex")) {
+			// T222：产物在，但上一次核对**没有下过判定**（`.checker` 里是"没结论"那类
+			// 文案）。跳过就意味着整章连核对都不跑，一份从没被判定过的东西直接进书，
+			// 所以这里先重核这一份：通过就按"已有产物"继续，没过就把结论留在
+			// `.checker` 里如实报错，绝不当场采纳。
+			r.log.LogWarning(tid, "[checker]", base, "已有产物，但上一次核对没有给出结论——重新核对这一份，不跳过")
+			ok, issues := r.recheckChapter(proj, base, tid)
+			if ok {
+				// 与下面"已有产物"那条路同一口径：这一章算完了，转换转录照旧
+				// 按 latex.keep_session_records 处置（核对转录不受影响）。
+				r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
+				return nil
+			}
+			return fmt.Errorf("%s 重新核对未通过（这份产物未被采纳）: %s", base, issues)
+		}
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")
+		// T246：上一轮可能把状态停在 queued/running 就被杀掉了。这条路径持有
+		// 章节锁、这一章本轮也不会再被驱动，正好按磁盘事实把那一行收口——
+		// 否则页面上会永远挂着一句「等待并发槽」。
+		if settled := settleStaleActivity(node.TranscriptPath, filepath.Join(node.FinalSubmitRoot, base+".tex")); settled != "" {
+			r.log.LogInfo(tid, "[convert]", base, "上一轮停在排队/运行态，状态已按产物收口:", settled)
+		}
 		// 产物已写出的章节不再需要会话转录。
 		r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
 		return nil
@@ -1024,25 +1944,70 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 
 	// 本章会话的临时工作区；只有"转录与工作树都在"才算中断续跑（否则
 	// 回放一段没有文件的历史只会让会话空转，不如重来）。
-	trPath := filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl")
-	workRoot := filepath.Join(proj, "work", "temp", "conv_"+base, "work")
-	resuming := fileExists(trPath) && fileExists(workRoot)
-	work, cleanWork, err := r.chapterWorkTree(proj, clsName, base, resuming, "")
+	trPath := node.TranscriptPath
+	workRoot := filepath.Join(node.NodeRoot, "work")
+	// T227：续跑之前先给转录做一次体检。已经坏在磁盘上的会话不会自己好——它回放
+	// 的还是那段"看不见原书 / 我做不到"的历史，截掉之后再接着跑（工作树不动）。
+	if node.Attempt == 1 && fileExists(workRoot) {
+		if dst, num, why, ok := repairDerailedTranscript(trPath, workRoot); ok {
+			r.log.LogWarning(tid, "[convert]", base, "会话转录已被带偏（"+why+"），另开第",
+				strconv.Itoa(num), "次尝试继续跑")
+			r.phaseNote()("[convert] %s 转录已被带偏（%s），已截断另开第 %d 次尝试继续跑", base, why, num)
+			trPath, node.TranscriptPath, node.AttemptNum = dst, dst, num
+		} else if why != "" {
+			r.log.LogWarning(tid, "[convert]", base, "转录体检失败（按原样续跑）:", why)
+		}
+	}
+	resuming := node.Attempt == 1 && fileExists(trPath) && fileExists(workRoot)
+	if !resuming {
+		// T174：开新尝试只清这一层的工作区，**不动 `sessions/`**——递归子章节
+		// 的转录挂在这棵子树里，删了预览页就看不到它们的历史。上一轮的东西
+		// 由换会话那一步先挪进 `work/attempts/`，这里删的是已经挪空的位置。
+		_ = os.RemoveAll(workRoot)
+		_ = os.RemoveAll(filepath.Join(node.NodeRoot, "result"))
+		_ = os.RemoveAll(filepath.Join(node.NodeRoot, "integrated-stage"))
+		_ = os.RemoveAll(filepath.Join(node.NodeRoot, "checker-view"))
+	}
+	work, cleanWork, err := r.chapterWorkTreeAt(proj, clsName, base, node.NodeRoot, true, "")
 	if err != nil {
 		return err
 	}
-	defer cleanWork()
+	defer func() { cleanWork() }()
+	if node.Depth > 0 || splitTool.Restored {
+		cleanWork = func() {}
+	}
 
 	goal := NewGoalTool(filepath.Join(work, "plan.md"))
+	gate := r.submitGate(work, base, chapPath)
 	submit := &SubmitChapterTool{
-		WorkRoot:   work,
-		SubmitRoot: filepath.Join(workDir, "chapters"),
-		Base:       base,
-		ReportPath: filepath.Join(workDir, "reports", base+".md"), // 工作汇报（实时落盘）
-		Gate:       func() string { return goalGate(goal) },
+		GateRef:       gate,
+		WorkRoot:      work,
+		SubmitRoot:    node.SubmitRoot,
+		Base:          base,
+		ReportPath:    node.ReportPath,
+		Depth:         node.Depth,
+		IssuesPath:    filepath.Join(work, ".issues", "issues.json"),
+		InheritedPath: filepath.Join(work, "_subdivision", "issues-inherited.json"),
+		Gate: func() string {
+			if msg := goalGate(goal); msg != "" {
+				return msg
+			}
+			// 章节太大就先拆（T169）：这条与"看过原书/内容覆盖率"同样属于
+			// 提交前必须满足的条件，而不是建议。
+			if msg := chapterSizeReject(lineCount, r.cfg.Latex.MaxChapterLines, node.Depth, splitTool.Requested); msg != "" {
+				return msg
+			}
+			if gate == nil {
+				return ""
+			}
+			return gate.check()
+		},
 	}
 	// 挂载表：work = 本章临时工作区（唯一可写），project/source = 只读。
 	convertMounts := r.sessionMounts(kindConvert, work)
+	if node.InputMount == "input" {
+		convertMounts = append(convertMounts, Mount{Name: "input", Dir: filepath.Dir(chapPath)})
+	}
 	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, "bash_"+base)
 	defer cleanBashTmp()
 	tools := []session.Tool{
@@ -1054,19 +2019,29 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		&GrepTool{Mounts: convertMounts},
 		// 看 markdown 里引用的原图（传 markdown 中的引用路径即可）
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&ViewPDFTool{Mounts: convertMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
-		&CompileChapterTool{Comp: r.comp, Dir: work, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex", Log: r.log, Tid: 1},
+		&ViewPDFTool{Mounts: convertMounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio(), Gate: gate},
+		&CompileChapterTool{Comp: r.comp, Dir: work, MainFile: base + ".tex", WrapperFile: base + "_wrapper.tex", Gate: gate, Log: r.log, Tid: 1},
 		&WorkBashTool{Mounts: convertMounts, Root: work, TmpDir: bashTmp,
 			MaxOutput: r.cfg.BashMaxOutput(), Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		goal,
 		submit,
+	}
+	tools = append(tools, splitTool)
+	// P60：子章节修复的下派入口。**默认关闭**（latex.fix.enabled=false 时这里
+	// 根本不注册），所以现有跑法的工具面一字不变；打开后父会话才看得到
+	// dispatch_fix——它只记录计划，逐个子章节的修复由细分父节点分支里的
+	// reviewChildrenBeforeIntegration / applyChildFixPlan 调度。
+	var dispatchFix *DispatchFixTool
+	if r.cfg.Latex.FixEnabled() {
+		dispatchFix = &DispatchFixTool{Proj: proj, Root: base, Work: work}
+		tools = append(tools, dispatchFix)
 	}
 	// 原始文档只读工具：片段→原 PDF 页定位（doc_search）+ 原书页面索引/
 	// 逐页内容（list_source_pages）；原书 PDF 通过 view_pdf 的 source
 	// 挂载查看。
 	tools = append(tools, r.sourcePageTools()...)
 	sess := session.NewSession(client, modelCfg, tuning,
-		renderPrompt(prompts.Must(prompts.ConvertSystem), tuning, r.outputLang()),
+		r.convertSystemPrompt(tuning),
 		tools, r.log, tid, "convert:"+base)
 	// 每章一行实时行：并发的 4 章并排显示各自的轮次/工具数/已用时间，
 	// 谁跑完谁那行消失（用户要的"箭头指过去看每个子会话状态"）。聚合进度
@@ -1076,36 +2051,58 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	// 中断续跑时才回放转录（resuming 已确认工作树也在）。
 	resumed := false
 	resumeSkip := false
-	convertStart := time.Now()
 	var resumeMsgs []session.ChatMessage
+	var convStats session.ResumeStats
 	if resuming {
 		if msgs, st, err := session.LoadTranscriptStats(trPath); err != nil {
 			r.log.LogWarning(tid, "[convert] 转录读取失败（忽略，按全新会话继续）:", err)
 		} else if len(msgs) > 0 {
 			sess.SetMessages(msgs)
 			sess.SeedCounters(st.Rounds, st.Tools)
-			resumed, resumeMsgs = true, msgs
+			resumed, resumeMsgs, convStats = true, msgs, st
 			resumeLog(r.log, tid, "convert", base, msgs, st)
 			if replaySubmit(r.log, tid, "convert:"+base, submit, st) {
 				resumeSkip = true
 			}
-			convertStart = time.Now().Add(-st.Active)
 		}
 	}
-	convHook, convClose := r.livePhaseRowAt("convert:"+base, "convert:"+base, convertStart)
+	seed := liveSeed{}
+	if resumed {
+		seed = liveSeed{rounds: convStats.Rounds, tools: convStats.Tools, active: convStats.Active, resumed: true}
+	}
+	convHook, convState, convClose := r.livePhaseRowState("convert:"+base, "convert:"+base, seed)
 	sess.SetProgressHook(convHook)
 	defer convClose()
 	if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
+		// P55：每落一条消息就给本章工作树拍一张快照（仓库在模型的可写挂载
+		// 之外），这样「从第 N 条记录继续」能连工作区一起退回那一刻。只给
+		// 顶层章节做——轨迹的 ⤓ 也只对顶层章节开放。
+		if node.Depth == 0 {
+			if rl := r.openRoundLog(proj, base, work, node.AttemptNum); rl != nil {
+				sess.SetMessageHook(rl.commitLine)
+			}
+		}
+	}
+	// P53：这一条尝试是人手动要求重跑的——记下原因，事后在转录/轨迹里能对上。
+	if reason, ok := r.retryNotes[base]; ok && node.Depth == 0 {
+		_ = sess.AppendTranscriptNote("manual_retry", map[string]any{
+			"reason": reason, "attempt": node.AttemptNum,
+		})
 	}
 
 	// T93：首条消息不再内联章节前 2000 字符——该 md 本就是会话第一步
 	// 必读的文件，内联只会跟着每轮请求重发。
 	initial := prompts.Render(prompts.ConvertUser, map[string]string{
-		"CHAPTER_FILE": "chapter markdown path: project:chapters/" + base + ".md",
+		"CHAPTER_FILE": "chapter markdown path: " + node.InputMount + ":" + node.InputRef,
 		"TEX_PATH":     "Write it as work:" + base + ".tex (extra \\input parts go in the folder work:" + base + "/), compile until clean, then submit those TWO paths.",
 	})
+	// 章节规模当面说清（T169）：几千行的章节一个会话既慢又容易漏内容，先按语义
+	// 拆开比事后打回便宜得多。
+	if note := chapterSizeNote(lineCount, r.cfg.Latex.MaxChapterLines, node.Depth); note != "" {
+		initial += "\n\n" + note
+	}
 
 	if r.cfg.Latex.RemoveWatermark {
 		initial += "\n\n" + r.watermarkGuidance("WATERMARK: exclude watermark artifacts from the .tex output (repeated decorative overlay text such as institution marks, faint background strings). Skip such content entirely - do not typeset it.")
@@ -1116,12 +2113,172 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 		// 只有模型自己停了才发一句最小推动。
 		initial = resumeUserText(resumeMsgs, "The session was interrupted earlier. Continue from where you left off: read your last written .tex state (read_file), finish the conversion, compile until clean, then submit.")
 	}
-	if !resumeSkip {
-		if _, err := sess.Run(session.RunOptions{UserText: initial}); err != nil {
-			return fmt.Errorf("会话失败: %w", err)
-		}
+	// P53 阶段二「继续跑」：人手动把这条会话推下去。上一次即便已 submit（replay
+	// 会收账并直接结束）也要真的再跑一轮——用户点它就是因为"结果不对、接着改"。
+	// 不插任何内容（历史原样续行，与中断续跑同一条规矩），只解除"收账即结束"。
+	if node.Depth == 0 && r.takeContinueFlag(base) {
+		initial = ""
+		resumeSkip = false
+		_ = sess.AppendTranscriptNote("manual_continue", map[string]any{"attempt": node.AttemptNum})
 	}
-	if !r.remindSubmit(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted }) {
+	if !resumeSkip && !splitTool.Requested {
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
+		convState(rowStateQueued)
+		release := r.holdConvertSlot(sess, tid, base, node.Seq)
+		convState(rowStateRunning)
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+		_, runErr := sess.Run(session.RunOptions{UserText: initial})
+		release()
+		// P58 扩展：**报错终止**也走复盘链路（与"没提交"同一条；非致命错误
+		// 才复盘，余额不足/无资源包由 rescueAfterError 自己挡掉）。开关关着或
+		// 复盘没救回来时 runErr 原样返回，行为与引入本功能之前一致。
+		if runErr != nil {
+			runErr = r.rescueAfterError(sess, tid, "[convert]", base, "submit",
+				func() bool { return submit.Submitted },
+				rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath, Sess: sess}, runErr)
+		}
+		if runErr != nil {
+			// P61/C：复盘判 truncate 时状态已经写成 queued，队列马上接手重跑这
+			// 一章——失败终态不能把它盖回"会话错误"。
+			//
+			// T243：上游接口错误把原地重试次数用满时这一章**暂停**（isPaused）：
+			// 状态写 paused，错误原样往上带（不再是"会话失败"），不换尝试、不归档
+			// 产物，重启程序或网页「继续跑」接着这条会话干。
+			state := "error"
+			if isPaused(runErr) {
+				state = "paused"
+			} else if r.rescueQueuedFor(trPath) {
+				state = "queued"
+			}
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
+			if isPaused(runErr) {
+				return runErr
+			}
+			return fmt.Errorf("会话失败: %w", runErr)
+		}
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
+	}
+	if splitTool.Requested && submit.Submitted && !splitTool.Restored {
+		_ = os.Remove(texPath)
+		_ = os.RemoveAll(filepath.Join(node.SubmitRoot, base))
+		return fmt.Errorf("父章节不能在请求细分的同一轮提交；子章节和 checker 尚未完成")
+	}
+	promoteSubmitRoot := ""
+	if splitTool.Restored {
+		promoteSubmitRoot = node.FinalSubmitRoot
+	}
+	if splitTool.Requested && !submit.Submitted {
+		cleanWork = func() {}
+		promoteSubmitRoot = node.FinalSubmitRoot
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "waiting_children", "children": len(splitTool.Children)})
+		convState(fmt.Sprintf("%s %d", rowStateWaiting, len(splitTool.Children)))
+		stageRoot := filepath.Join(node.NodeRoot, "integrated-stage")
+		_ = os.RemoveAll(stageRoot)
+		if err := os.MkdirAll(stageRoot, 0o755); err != nil {
+			return err
+		}
+		node.SubmitRoot = stageRoot
+		node.StrictChecker = true
+		submit.SubmitRoot = stageRoot
+		texPath = filepath.Join(stageRoot, base+".tex")
+		if err := r.convertChapterChildren(proj, clsName, manualPath, chapPath, base, work, workDir, idx, tid, *node, splitTool.Children); err != nil {
+			// T231：子树上任何一支失败，这一层也必须留下结论。以前这里直接
+			// return，转录的最后一条还是上面那句"等待子会话"——子树早就跑完了，
+			// 页面上却几小时都显示在等，看着像卡住，实际是失败没有落盘。
+			state := "error"
+			if isPaused(err) {
+				state = "paused"
+			} else if _, retryingKids := isRetryingChildren(err); retryingKids {
+				// T250：子节点排队里等着重试，父节点是在等它们，不是失败——写成
+				// error 会让页面显示「会话错误」，而它明明只是等子会话。
+				state = "waiting_children"
+			} else if r.rescueQueuedFor(trPath) {
+				state = "queued"
+			}
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
+			return err
+		}
+		if err := writeChapterChildrenManifest(work, base, splitTool.Children); err != nil {
+			return err
+		}
+		// P60 第二步：子章节都转换+核对完了、父会话整合之前，先给它一次「把还
+		// 不对的孩子还回去」的机会；它写下计划后按计划跑修复会话并重核该子章节。
+		// dispatchFix 为 nil（latex.fix.enabled 关闭）时这两步根本不存在——默认
+		// 跑法与引入 P60 之前一字不差。
+		if dispatchFix != nil {
+			// P60 第五步：dispatch_fix 在工具调用里同步跑修复并回执结局，需要
+			// Runner、父会话本体（临时让出模型并发槽、写 fix_result 转录）与
+			// 这次细分出来的子章节清单（刷新父章节副本用）。
+			dispatchFix.Runner = r
+			dispatchFix.Parent = sess
+			dispatchFix.Children = splitTool.Children
+			dispatchFix.ChildDepth = node.Depth + 1
+			dispatchFix.Seq = node.Seq
+			dispatchFix.Tid = tid
+			if planPath := r.reviewChildrenBeforeIntegration(sess, base, dispatchFix, convState, node.Seq, tid); planPath != "" {
+				// 计划已被同步消费时它什么都不做（P60 第五步）；没消费（老流程
+				// / 标记失败）时按老行为执行，整本书不会因此失败。
+				r.applyChildFixPlan(proj, clsName, base, work, node.Depth+1, splitTool.Children, planPath, node.Seq, tid)
+			}
+		}
+		integrationText := "All child chapters have passed their individual checkers. FIRST read work:_subdivision/children-summary.md — it contains each child's own report (what it could not restore, what it worked around) and the list of issues already inherited for you. " +
+			"You are NOT required to fix those issues (most are class/manual level and are handled later by the style-fix pass); fix the ones you can while integrating, put their IDs in report.resolved, and leave the rest untouched — the merge mechanism carries them into your own report automatically. " +
+			"Then read work:_subdivision/children-manifest.md and every listed child .tex/parts file. " +
+			"Integrate them in source order into work:" + base + ".tex and work:" + base + "/, preserving all content and references. " +
+			"Then compile the parent wrapper, LOOK at the resulting PDF with view_pdf (page 1 and the last page at least), AND compare it with the original book pages (view_pdf source:<part>.pdf): submit requires you to have looked at a few original pages. " +
+			"submit also compares your PDF text with the chapter markdown and rejects when too much content is missing, so do not wrap the markdown into LaTeX with a script. " +
+			"Put any NEW problems you found into report.issues (as a list); unresolved inherited ones go up by themselves. " +
+			"Do not submit child files as independent book chapters."
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+		convState(rowStateQueued)
+		release := r.holdConvertSlot(sess, tid, base, node.Seq)
+		convState(rowStateRunning)
+		_, runErr := sess.Run(session.RunOptions{UserText: integrationText})
+		release()
+		// P58 扩展：整合轮报错终止同样走复盘链路（同一会话、同一套结论处理）。
+		if runErr != nil {
+			runErr = r.rescueAfterError(sess, tid, "[convert]", base, "submit",
+				func() bool { return submit.Submitted },
+				rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath, Sess: sess}, runErr)
+		}
+		if runErr != nil {
+			// P61/C：同上面那条路径——复盘判 truncate 时状态已写成 queued，
+			// 不要用失败终态盖掉"等待并发槽"。T243：接口重试用满则写 paused。
+			state := "error"
+			if isPaused(runErr) {
+				state = "paused"
+			} else if r.rescueQueuedFor(trPath) {
+				state = "queued"
+			}
+			_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": state})
+			if isPaused(runErr) {
+				return runErr
+			}
+			return fmt.Errorf("父章节整合会话失败: %w", runErr)
+		}
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
+	}
+	if splitTool.Requested {
+		if !submit.Submitted {
+			// P61/D：细分节点的**整合轮**没提交时也走同一条提醒/复盘链路。
+			// 以前这里直接判失败——嵌套子章节（它自己也细分过）于是既没有提醒
+			// 也没有复盘：外层只看到"子章节转换或 checker 失败"，那条转录里则
+			// 停在一句"整合完请 submit"上，谁也没再去推它。
+			if !func() bool {
+				convState(rowStateCheck)
+				defer convState(rowStateRunning)
+				return r.remindOrRescue(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted },
+					rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath, Sess: sess})
+			}() {
+				return fmt.Errorf("细分父章节整合会话未提交（已提醒两次）")
+			}
+		}
+	} else if !func() bool {
+		convState(rowStateCheck)
+		defer convState(rowStateRunning)
+		return r.remindOrRescue(sess, tid, "[convert]", base, "submit", func() bool { return submit.Submitted },
+			rescueTarget{ProjDir: proj, Base: base, Role: "convert", TrPath: trPath, Sess: sess})
+	}() {
 		// 必须显式提交（用户口径）：提前收尾漏了 submit 就提醒续跑（最多两次），
 		// 仍不提交判失败——不再静默采纳"编译通过但没提交"的产物
 		// （chapter_003 事故：模型漏调 submit，章节被悄悄收下，界面看不出）。
@@ -1130,41 +2287,439 @@ func (r *Runner) convertOneChapter(proj, clsName, manualPath, chapPath, workDir 
 	if !fileExists(texPath) {
 		return fmt.Errorf("会话已提交但没有写出 .tex")
 	}
+	// 内容覆盖率（T168）：submit 已经用它挡过一道（低于阈值直接打回），这里把
+	// 数字留在日志里——"这一章到底和原稿对不对得上"是可以事后查的。
+	if gate != nil {
+		if cov, ok := gate.lastCoverage(); ok {
+			r.log.LogInfo(tid, "[convert]", base, fmt.Sprintf("内容覆盖率 %.1f%%（md 正文 → PDF 文本）", cov*100))
+			if cov < 0.92 {
+				r.log.LogWarning(tid, "[convert]", base, "内容覆盖率偏低，建议再与原文对照检查是否漏段")
+			}
+		}
+	}
 	// Checker pass: a small dedicated session (read_file/grep/submit only,
 	// read-only view holding the chapter markdown + the submitted .tex +
 	// its parts folder) verifies the chapter against the markdown. Hard
 	// problems are fed straight back to the SAME conversion session (its
 	// context is still live, so it is the cheapest and most accurate
-	// fixer), up to maxCheckerRounds rounds; only then the chapter is
+	// fixer), up to `rounds` (按层递减) rounds; only then the chapter is
 	// discarded and re-converted with a fresh session.
-	ok, issues := r.checkChapter(proj, base, chapPath, texPath, filepath.Join(workDir, "chapters", base), tid)
-	for round := 0; !ok && round < maxCheckerRounds; round++ {
+	checkerTranscript := ""
+	checkerView := ""
+	// nodeTr 与 checkAttempt 提到这里：核对"没结论"时要就地换一条全新尝试再试
+	// （T232），那一步在 if 之后也要用。
+	nodeTr := filepath.Join(node.NodeRoot, "sessions", "checker_"+base+".jsonl")
+	checkAttempt := node.AttemptNum
+	if node.Depth > 0 || promoteSubmitRoot != "" {
+		// T232：手动的「重新核对」把新尝试号记在 retryCheckerAttempt 里；递归
+		// 节点的核对转录以前只认转换尝试号，于是那些"提醒已经打满"的子章节
+		// 永远回放同一条文件、父节点每次「继续跑」都在原地失败。两个号取大的。
+		if n := r.checkerAttemptNo(base); n > checkAttempt {
+			checkAttempt = n
+		}
+		// T232：这条转录的"没提交"提醒已经打满（checker 的入口守卫会当场拒跑），
+		// 就别再把同一条死转录推下去了——换下一条全新的：新文件没有历史可回放，
+		// 模型拿到的是干净上下文和完整轮次，而产物一个字不动。以前这里只有人工
+		// 「重新核对」与复盘截断会抬尝试号，自动这一路永远停在同一条文件上，父
+		// 章节于是每次「继续跑」都原地失败、页面挂「核对无结论」。
+		if next := nextCheckerAttempt(nodeTr, checkAttempt, 3); next != checkAttempt {
+			checkAttempt = next
+			r.log.LogInfo(tid, "[checker]", base, "这条核对转录的提醒已经打满，换新尝试 try"+strconv.Itoa(checkAttempt))
+		}
+		r.bumpCheckerAttemptNo(base, checkAttempt)
+		checkerTranscript = attemptTranscriptPath(nodeTr, checkAttempt)
+		checkerView = filepath.Join(node.NodeRoot, "checker-view")
+	}
+	rounds := r.checkerAttempts(node.Depth)
+	partsPath := filepath.Join(node.SubmitRoot, base)
+	hints := func() checkHints {
+		h := checkHints{Report: node.ReportPath, Notes: submit.Notes}
+		if gate != nil { // 门禁关掉时没有编译记录，就没有产物页可给
+			if pdf, _, ok := gate.compiledPDF(); ok {
+				h.PDF = pdf
+			}
+		}
+		return h
+	}
+	var ok bool
+	var issues string
+	// T232/T233：核对没给结论时**自动**换一条全新的核对尝试再来（次数 =
+	// latex.checker_no_verdict_retries，默认 6）——产物一个字不动，换掉的只是那条
+	// 已经退化的核对会话，转换会话不重跑（用户：这不是转换会话的问题，重转就是
+	// 白烧一遍时间和额度，而重转出来的还是同一份东西）。每一次都抬到新的尝试号：
+	// 回放同一条打满提醒的死转录只会被入口守卫当场拒跑，等于白等。
+	autoHeals := r.cfg.Latex.CheckerNoVerdictRetries()
+	for heal := 0; ; heal++ {
+		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, checkerTranscript, checkerView, node.StrictChecker, node.AttemptNum)
+		if ok || !checkerNoVerdict(issues) || heal >= autoHeals {
+			break
+		}
+		checkAttempt++
+		if checkAttempt < 2 {
+			checkAttempt = 2
+		}
+		r.bumpCheckerAttemptNo(base, checkAttempt)
+		checkerTranscript = attemptTranscriptPath(nodeTr, checkAttempt)
+		r.log.LogWarning(tid, "[checker]", base, "核对没有给出结论，换一条全新的核对尝试 try"+
+			strconv.Itoa(checkAttempt)+" 再来一次（第 "+strconv.Itoa(heal+1)+"/"+strconv.Itoa(autoHeals)+
+			" 次，产物不动）")
+	}
+	if !ok && isSessionAPIError(issues) {
+		return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
+	}
+	if !ok && node.StrictChecker {
+		// 递归子节点与顶层同策略：先在本会话里打回，再由上面的换会话逻辑兜底。
+		r.log.LogWarning(tid, "[checker]", base, "递归节点首次核对未过:", issues)
+	}
+	if !ok && checkerNoVerdict(issues) {
+		// T209：核对会话没给结论，不是章节的问题——喂反馈轮只会换来一次"再交一遍"。
+		r.log.LogWarning(tid, "[checker]", base, "核对会话没有给出结论，跳过反馈轮:", issues)
+	}
+	// T234：打回一轮之后的重核必须**另开一条核对转录**。沿用上一条会命中
+	// replaySubmit——它把转录里已经记下的那次 submit 原样重放一遍，模型根本不会
+	// 被再问一次，回来的还是上一轮的 issues 原文。实测一条整合节点连续 6 轮收到
+	// 同一条「脚注 41 缺正文」：每一轮修复会话都真的把那一行补上、编译通过、提交
+	// 成功，核对却一次都没有再看它；6 轮耗尽后整次尝试作废，连已经核对通过的子
+	// 章节一起重转（用户看到的就是"明明通过了，又被重跑一次"）。
+	nextCheckerTranscript := func() string {
+		trBase := checkerTranscript
+		if trBase == "" {
+			trBase = filepath.Join(proj, "work", "sessions", "checker_"+base+".jsonl")
+		}
+		next := lastAttemptNumber(trBase) + 1
+		if next <= checkAttempt {
+			next = checkAttempt + 1
+		}
+		if next < 2 {
+			next = 2
+		}
+		checkAttempt = next
+		r.bumpCheckerAttemptNo(base, checkAttempt)
+		checkerTranscript = attemptTranscriptPath(trBase, checkAttempt)
+		return checkerTranscript
+	}
+	// T260：这一版产物**已经通过过**、而手上这串 issues 来自一条更早的核对会话
+	// ——那就不是在打回转换，是在把上一轮的旧账再算一次。实测代价：刚通过的章节
+	// 被重做一小时，重做完再开核对还撞上游 400，整章判失败。
+	if !ok && !checkerNoVerdict(issues) && staleCheckerFeedback(texPath, partsPath, checkerTranscript) {
+		r.log.LogWarning(tid, "[checker]", base,
+			"这一版产物已经有通过结论，忽略更早那条核对会话的反馈（不重做）")
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "pass"})
+		ok = true
+	}
+	for round := 0; !ok && !checkerNoVerdict(issues) && round < rounds; round++ {
 		r.log.LogWarning(tid, "[checker]", base, "第"+strconv.Itoa(round+1)+"轮反馈:", issues)
 		r.phaseNote()("[checker] %s 第 %d 轮反馈", base, round+1)
 		msg := "The checker reviewed your submitted chapter and found problems that must be fixed:\n" + issues +
-			"\n\nFix it in your workspace (edit_file/write_file), compile until clean, then submit the two paths again."
-		if _, err := sess.Run(session.RunOptions{UserText: msg}); err != nil {
-			r.log.LogWarning(tid, "[checker]", base, "反馈轮失败:", err)
+			"\n\nFix them in your workspace (edit_file/write_file), compile until clean, then submit the two paths again." +
+			"\n\nAn item is not automatically true: the checker reads the markdown, your compiled PDF and the original pages. " +
+			"If the marked spot is NOT a real problem (the markdown is OCR noise, the formula/table/figure comes from the original page and your .tex reproduces it), do not damage correct content to satisfy it — put the evidence (file and line, or the source page number) in submit.notes and submit again; it will be re-checked against the page."
+		// T181：反馈轮也要写状态。以前这里什么都不写，转换行的最后一次活动
+		// 还停在上一次的「转换完成待核对」——核对明明已经说了"发现问题"，上面
+		// 那行却在等核对，看着像卡住了。
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "queued"})
+		release := r.holdConvertSlot(sess, tid, base, node.Seq)
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "running"})
+		_, runErr := sess.Run(session.RunOptions{UserText: msg})
+		release()
+		if runErr != nil {
+			r.log.LogWarning(tid, "[checker]", base, "反馈轮失败:", runErr)
 			break
 		}
-		ok, issues = r.checkChapter(proj, base, chapPath, texPath, filepath.Join(workDir, "chapters", base), tid)
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "checking_result"})
+		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints(), tid, nextCheckerTranscript(), checkerView, node.StrictChecker, node.AttemptNum)
+		if !ok && isSessionAPIError(issues) {
+			return fmt.Errorf("checker 会话失败（换 checker 模型后可续跑）: %s", issues)
+		}
+	}
+	// T222：核对**没给结论**（会话退化 / 复盘判定无法挽救 / 只读视图没准备好）时
+	// **保留这一版产物、只重开核对会话**，不再作废产物整章重转。
+	//
+	// 旧行为是跳过反馈轮之后直接落到"作废产物、换全新会话重转换"（最多 6 次尝试），
+	// 可上一句写给用户的却是"已排队从干净轮次继续核对"——承诺的是重核，做的是重转。
+	// 产物根本没被判定过，重转出来的是同一份东西：重做一遍不会更有结论，也没理由
+	// 假设新的转换会话能救回一个坏掉的核对模型，唯一确定被消耗掉的是时间和额度
+	// （核对模型持续退化时，这一章会被作废重转最多 6 次、每次再开若干核对会话）。
+	// 真正给出内容结论的失败不受影响，照旧走下面的反馈/重转链路。
+	if !ok && checkerNoVerdict(issues) {
+		// 仍然没有判定：以"checker 不可用"收尾，产物留在原处不归档（`.checker` 里
+		// 留这条文案，重跑时 chapterRecheckPending 会让它先重核而不是"已有产物，跳过"）。
+		//
+		// T231：这条失败属于**核对**，不属于转换——转换会话这一轮已经交了两个
+		// 路径。以前只往转换转录里写 `error`，页面上就成了"转换 · 会话错误"：一条
+		// 明明 submit 成功、run_end 为 ok 的记录被判了死，用户只能猜是显示错了还是
+		// 真出错。现在各写各的：核对转录由 checkChapterAt 写 `no_verdict`（它没给
+		// 结论），转换转录也写 `no_verdict`（这一版产物保留、等重核），没有一行读
+		// 作"会话错误"。
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "no_verdict"})
+		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
+		// T233：把重核排进重试队列，别再等人工点。产物不动、转换不重跑，队列里的
+		// 那条请求只负责"过一会儿再换一条全新核对会话看一遍"（截图里那种"跑了十
+		// 几次还在原地"的局面，从这里起由队列自己接下去）。
+		if _, qerr := retryq.Queue(proj, retryq.Request{
+			Project: filepath.Base(proj), Chapter: base, Role: "checker",
+			Source: "no_verdict", Reason: "核对连续没给结论，排队换新核对会话接着核（产物不动）",
+		}); qerr != nil {
+			r.log.LogWarning(tid, "[checker]", base, "排队重核失败:", qerr)
+		} else {
+			r.log.LogWarning(tid, "[checker]", base, "已排队接着重核（产物不动，转换不重跑）")
+		}
+		return fmt.Errorf("%s 的核对始终没有给出结论（不是内容问题，%d 条核对会话都没下判定），"+
+			"已保留这一版产物未作废、并排了一条重核请求——重跑或「重新核对」会接着核这一份: %s",
+			base, 1+autoHeals, issues)
 	}
 	if ok {
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "pass"})
 		r.log.Log(tid, "[checker]", base, "通过")
 		_ = os.Remove(texPath + ".checker")
-	} else {
-		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
-		if !retry {
-			r.log.LogWarning(tid, "[checker]", base, strconv.Itoa(maxCheckerRounds)+" 轮反馈后仍有问题 — 作废产物，改用全新会话重转换")
-			r.phaseNote()("[checker] %s 反馈 %d 轮未过 — 重转换", base, maxCheckerRounds)
-			_ = os.Remove(texPath)
-			_ = os.RemoveAll(filepath.Join(workDir, "chapters", base))
-			r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
-			return r.convertOneChapter(proj, clsName, manualPath, chapPath, workDir, idx, tid, true)
+		writePassMarker(texPath, productFingerprint(texPath, partsPath))
+		if promoteSubmitRoot != "" {
+			if _, err := placeChapterFiles(node.SubmitRoot, promoteSubmitRoot, base); err != nil {
+				return fmt.Errorf("父章节 checker 通过但提升产物失败: %w", err)
+			}
 		}
-		r.log.LogWarning(tid, "[checker]", base, "重转换后仍未过（已记录，供终审处理）:", issues)
+	} else {
+		_ = sess.AppendTranscriptNote("chapter_activity", map[string]any{"state": "issues"})
+		dropPassMarker(texPath)
+		_ = os.WriteFile(texPath+".checker", []byte(issues), 0o644)
+		// P60 第四步：子章节的修复轮数已经用光时**不整章重开**——保留这一版
+		// 整合产物，未解决的问题照旧沿 issues 库/报告向上走（见
+		// fixBudgetExhausted 的说明）。只有修复打开、且确有子章节用过修复路径
+		// 才可能命中；其它情况一律落到今天的行为。
+		if child, used := r.fixBudgetExhausted(work, base, splitTool.Children); child != "" {
+			r.log.LogWarning(tid, "[fix]", base,
+				"子章节 "+child+" 的修复轮数已用完（"+strconv.Itoa(used)+"/"+
+					strconv.Itoa(r.cfg.Latex.FixMaxRounds())+"）——不再整章重开：保留这一版整合产物，未解决的问题照原路向上传递")
+			if promoteSubmitRoot != "" {
+				if _, err := placeChapterFiles(node.SubmitRoot, promoteSubmitRoot, base); err != nil {
+					return fmt.Errorf("父章节沿用整合产物失败: %w", err)
+				}
+			}
+			return nil
+		}
+		// 同一个会话被 checker 打回 N 轮还不过，说明它的理解已经跑偏（实测：
+		// 一条子会话在只读报错后把"环境有问题"当成前提，反复重写同一个文件、
+		// 甚至去 kill 别的进程）。这时**换一个全新会话**比继续劝它便宜也可靠，
+		// 与顶层章节同一策略、次数同样按层递减。每次尝试一条独立转录，预览页
+		// 里能看到「第几次尝试」。
+		if node.Attempt < r.checkerAttempts(node.Depth) {
+			r.log.LogWarning(tid, "[checker]", base, "第", strconv.Itoa(node.Attempt), "次尝试反馈",
+				strconv.Itoa(rounds), "轮仍未通过 — 作废产物，换全新会话重转换")
+			r.phaseNote()("[checker] %s 第 %d 次尝试未过 — 换新会话", base, node.Attempt)
+			// T174：作废产物 ≠ 删光证据。上一轮交的 .tex/分片、工作区、编译
+			// 产物先整棵挪进 `work/attempts/<章>/try<N>/`，再开新会话——否则
+			// 「历史」里只剩对话，看不到那一轮到底交了什么东西。
+			r.archiveChapterAttempt(proj, base, *node, texPath, issues)
+			_ = os.Remove(texPath)
+			_ = os.RemoveAll(filepath.Join(node.SubmitRoot, base))
+			next := *node
+			next.Attempt = node.Attempt + 1
+			// 新号在这里显式给：只有"checker 跑满轮次仍不过"才是新尝试，
+			// 进程被杀/断连的重跑一律沿用磁盘上最近的那一次。
+			next.AttemptNum = node.AttemptNum + 1
+			next.TranscriptPath = transcriptBase
+			return r.convertChapterNode(proj, clsName, manualPath, chapPath, workDir, idx, tid, true, &next)
+		}
+		// 次数用尽：**判失败**，不再"记一笔就放过"（旧行为让一个 checker 从
+		// 未给出结论的章节也进了书）。
+		return fmt.Errorf("%s 共 %d 次尝试仍未通过 checker: %s", base, node.Attempt, issues)
 	}
 	return nil
+}
+
+// attemptTranscriptPath 给「第 N 次尝试」一条独立转录：第一次沿用原名，
+// 之后是 `<名>.try2.jsonl`、`<名>.try3.jsonl`…… 这样几次尝试的完整对话都
+// 留在磁盘上（预览页的「历史 N」就是按这个后缀聚合的），而不是像以前那样
+// 换会话时把上一份转录覆盖掉——被覆盖的那份恰好是"它当时为什么跑偏"的证据。
+func attemptTranscriptPath(path string, attempt int) string {
+	if attempt <= 1 || path == "" {
+		return path
+	}
+	ext := filepath.Ext(path)
+	stem := trimAttemptSuffix(strings.TrimSuffix(path, ext))
+	return fmt.Sprintf("%s.try%d%s", stem, attempt, ext)
+}
+
+// attemptNumberOnDisk 查这一章在磁盘上已有的最大尝试号，并告诉最后一次是否
+// 已经正常收尾（转录里有 run_end）。0 表示还没有任何尝试。收尾与否只用于诊断
+// 与测试：重跑一律沿用最大号（T174），新号只由换会话那一步显式分配。
+// lastAttemptNumber 决定这一次往哪条转录里写：**中断不算新尝试**。
+//
+// 用户口径（T174）：只有 checker 连续打回 `latex.checker_rounds` 轮仍不过、
+// 代码主动作废产物换全新会话时，才分配新号（那一步显式写 `next.AttemptNum`）。
+// 进程被杀、网络断连、窗口关掉之后重跑，都是"同一轮没做完"，接着磁盘上最近
+// 那条转录继续——否则每按一次 Ctrl-C 就多出一条空尝试，历史里全是"第 2 次"
+// "第 3 次"，而真正干活的第 1 次永远停在半路。
+func lastAttemptNumber(transcriptBase string) int {
+	if n, _ := attemptNumberOnDisk(transcriptBase); n >= 1 {
+		return n
+	}
+	return 1
+}
+
+// archiveChapterAttempt 把一次被作废的尝试整棵挪进
+// `<proj>/work/attempts/<章>/try<N>/`（T174）。挪的位置在 `work/` 下而不是
+// 章节的 `work/temp/conv_<章>/` 里：后者会在章节收尾时整棵清掉，留档就白留了。
+// 内容 = 上一轮的工作区（含 `_subdivision/` 子树）、提交的 `.tex` 与分片、
+// `result/`、`integrated-stage/`，外加 checker 给的问题清单。移动失败只警告，
+// 绝不因为留档失败而挡住重试。
+func (r *Runner) archiveChapterAttempt(proj, base string, node chapterNodeConfig, texPath, issues string) {
+	dst := filepath.Join(proj, "work", "attempts", base, fmt.Sprintf("try%d", node.AttemptNum))
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		r.log.LogWarning(0, "[convert]", base, "留档目录创建失败（继续重试）:", err)
+		return
+	}
+	move := func(src, name string) {
+		if src == "" || !fileExists(src) {
+			return
+		}
+		if err := movePath(src, filepath.Join(dst, name)); err != nil {
+			r.log.LogWarning(0, "[convert]", base, "留档失败（继续重试）:", filepath.Base(src), err)
+		}
+	}
+	// T249：`_subdivision/` 原地不动。子节点的产物、转录和"上次已通过"的结论都在
+	// 那棵树里——整棵搬走之后，新尝试复用判据找不到任何东西，只能 16 支全部重转
+	// （实测一章因此从零重烧一遍）。其余工作文件照旧留档。
+	moveKeepingSubdivision(filepath.Join(node.NodeRoot, "work"), filepath.Join(dst, "work"), r, base)
+	move(filepath.Join(node.NodeRoot, "result"), "result")
+	move(filepath.Join(node.NodeRoot, "integrated-stage"), "integrated-stage")
+	move(texPath, base+".tex")
+	move(filepath.Join(node.SubmitRoot, base), base)
+	// 旧报告也一起留档：新尝试会写同一路径，不挪走就等于被悄悄覆盖。
+	move(node.ReportPath, base+".report.md")
+	if issues != "" {
+		_ = os.WriteFile(filepath.Join(dst, "checker-issues.md"), []byte(issues), 0o644)
+	}
+}
+
+// moveKeepingSubdivision 把 dir 下的内容挪到 dst，但跳过 `_subdivision/`（T249）。
+// 失败只警告：留档不是重试的前置条件。
+func moveKeepingSubdivision(dir, dst string, r *Runner, base string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		r.log.LogWarning(0, "[convert]", base, "留档目录创建失败（继续重试）:", err)
+		return
+	}
+	for _, e := range entries {
+		if e.Name() == "_subdivision" {
+			continue
+		}
+		if err := movePath(filepath.Join(dir, e.Name()), filepath.Join(dst, e.Name())); err != nil {
+			r.log.LogWarning(0, "[convert]", base, "留档失败（继续重试）:", e.Name(), err)
+		}
+	}
+}
+
+// movePath 把 src 整个挪到 dst（同盘 rename；跨盘/失败退回复制后删除）。
+func movePath(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	st, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if st.IsDir() {
+		if err := copyDir(src, dst); err != nil {
+			return err
+		}
+	} else if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	return os.RemoveAll(src)
+}
+
+func attemptNumberOnDisk(path string) (int, bool) {
+	dir := filepath.Dir(path)
+	ext := filepath.Ext(path)
+	stem := trimAttemptSuffix(strings.TrimSuffix(filepath.Base(path), ext))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, false
+	}
+	maxNum, maxName := 0, ""
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ext) {
+			continue
+		}
+		base := strings.TrimSuffix(name, ext)
+		var n int
+		switch {
+		case base == stem:
+			n = 1
+		case strings.HasPrefix(base, stem+".try"):
+			if v, err := strconv.Atoi(strings.TrimPrefix(base, stem+".try")); err == nil {
+				n = v
+			}
+		}
+		if n > maxNum || (n == maxNum && name > maxName) {
+			maxNum, maxName = n, name
+		}
+	}
+	if maxNum == 0 {
+		return 0, false
+	}
+	return maxNum, transcriptEnded(filepath.Join(dir, maxName))
+}
+
+// transcriptEnded 看转录末尾有没有 run_end（会话层每次 Run 结束都会写）。
+// 它区分"这一段对话是否已经收尾"，用于诊断；尝试号的分配见 lastAttemptNumber。
+func transcriptEnded(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	const tail = 64 << 10
+	st, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	off := st.Size() - tail
+	if off < 0 {
+		off = 0
+	}
+	buf := make([]byte, st.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err.Error() != "EOF" {
+		return false
+	}
+	return strings.Contains(string(buf), `"kind":"run_end"`)
+}
+
+// trimAttemptSuffix 去掉名字末尾的 `.tryN`（可能要剥好几层）——这是写入方向
+// 的保险：派生新文件名前先剥干净旧后缀，就不会再产出 `.try2.try3` 这种套娃名。
+func trimAttemptSuffix(stem string) string {
+	for {
+		i := strings.LastIndex(stem, ".try")
+		if i < 0 || i == 0 {
+			return stem
+		}
+		digits := stem[i+len(".try"):]
+		if digits == "" {
+			return stem
+		}
+		ok := true
+		for _, r := range digits {
+			if r < '0' || r > '9' {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			return stem
+		}
+		stem = stem[:i]
+	}
 }
 
 // sessionKind names the role of a session: it decides which trees the
@@ -1197,20 +2752,28 @@ func (r *Runner) sessionMounts(kind sessionKind, workDir string) []Mount {
 	// work/sessions, work/reports, doc_index.json, pages/, build/ and out/
 	// are not part of it.
 	if r.projDir != "" {
-		r.projView = ensureProjectView(r.projDir)
-		if r.projView != "" {
-			mounts = append(mounts, Mount{Name: "project", Dir: r.projView})
+		if view := r.projectView(); view != "" {
+			mounts = append(mounts, Mount{Name: "project", Dir: view})
 		}
 	}
 	mounts = append(mounts, r.pdfView.Mounts()...)
 	return mounts
 }
 
+func (r *Runner) projectView() string {
+	r.cfgMu.Lock()
+	defer r.cfgMu.Unlock()
+	if r.projView == "" && r.projDir != "" {
+		r.projView = ensureProjectView(r.projDir)
+	}
+	return r.projView
+}
+
 // projectRoot is the directory a session reads as "the project": the
 // narrow view when available, otherwise the project root (degraded).
 func (r *Runner) projectRoot() string {
-	if r.projView != "" {
-		return r.projView
+	if view := r.projectView(); view != "" {
+		return view
 	}
 	if r.projDir != "" {
 		if v := ensureProjectView(r.projDir); v != "" {
@@ -1250,7 +2813,10 @@ func (r *Runner) sourcePageTools() []session.Tool {
 // holding an already converted chapter to start from (the style-fix
 // session adapts the existing chapter instead of re-converting).
 func (r *Runner) chapterWorkTree(proj, clsName, base string, resume bool, seed string) (string, func(), error) {
-	root := filepath.Join(proj, "work", "temp", "conv_"+base)
+	return r.chapterWorkTreeAt(proj, clsName, base, filepath.Join(proj, "work", "temp", "conv_"+base), resume, seed)
+}
+
+func (r *Runner) chapterWorkTreeAt(proj, clsName, base, root string, resume bool, seed string) (string, func(), error) {
 	if !resume {
 		_ = os.RemoveAll(root)
 	}
@@ -1422,7 +2988,7 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 	if err != nil {
 		return err
 	}
-	defer cleanWork()
+	defer func() { cleanWork() }()
 	// 手册不内联：它在会话工作区里（work:manual.md）与 project:style/manual.md。
 	_ = manualPath
 
@@ -1484,10 +3050,40 @@ func (r *Runner) fixChapterStyle(proj, clsName, manualPath, chapPath, workRoot, 
 }
 
 // ------------------------------------------------------------------
-// maxCheckerRounds caps how many times a checker verdict is fed back to
-// the SAME conversion session before the chapter is discarded and
-// re-converted with a fresh session.
-const maxCheckerRounds = 3
+// checkerAttemptBudget 是「第 depth 层」一个节点可以尝试几次：顶层（depth 0）
+// 默认 6，往下每层 -1，但**不低于 3**——浅层内容少、一两次就收敛；深层也不
+// 能低于 3，否则短子章节一次误判就整支失败。基数可由 `latex.checker_rounds`
+// 调整（未写 = 6）。
+func checkerAttemptBudget(base, depth int) int {
+	if base <= 0 {
+		base = defaultCheckerRounds
+	}
+	n := base - depth
+	if n < 3 {
+		n = 3
+	}
+	return n
+}
+
+// defaultCheckerRounds 是顶层节点的默认尝试次数。
+const defaultCheckerRounds = 6
+
+func (r *Runner) checkerAttempts(depth int) int {
+	return checkerAttemptBudget(r.cfg.Latex.CheckerRounds, depth)
+}
+
+// checkerBudgetWarning 在「顶层次数 - 最大层数 < 3」时给出启动告警：顶层的
+// 次数要和递归层数匹配，否则深层永远只吃下限 3，调大顶层等于白调。
+func checkerBudgetWarning(base int) string {
+	if base <= 0 {
+		return ""
+	}
+	if base-maxChapterSplitDepth >= 3 {
+		return ""
+	}
+	return fmt.Sprintf("latex.checker_rounds=%d 与最大递归层数 %d 不匹配（%d-%d=%d < 3）：第 %d 层只能吃到下限 3 次。建议至少设成 %d（= 3 + 最大递归层数）。",
+		base, maxChapterSplitDepth, base, maxChapterSplitDepth, base-maxChapterSplitDepth, maxChapterSplitDepth, 3+maxChapterSplitDepth)
+}
 
 // sliceHas reports whether the slice contains want.
 func sliceHas(s []string, want string) bool {
@@ -1681,12 +3277,280 @@ func writeFontsReadme(fontsDir string) {
 // 会话提前收尾没提交 → 提醒续跑最多两次 → 仍未提交返回 false（调用方判失败）。
 // 提醒轮在同一会话里续跑——前面写好的文件都还在，补上 submit 即可。
 func (r *Runner) remindSubmit(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool) bool {
+	return r.remindOrRescue(sess, tid, tag, label, submitTool, submitted, rescueTarget{})
+}
+
+// remindOrRescue 是 remindSubmit 的超集：给了 rescueTarget 时，每次提醒之前
+// 先让复盘会话（P58）看一遍这条会话的转录——还健康就照常提醒，已经退化就
+// 截断到最后一个干净轮次继续（排进重试队列，与页面的 ⤓ 同一条通路），救不回
+// 来就按失败收尾。没有 target（样式/划分/装配等阶段）时行为与老路径一致。
+func (r *Runner) remindOrRescue(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool, target rescueTarget) bool {
+	if sess != nil {
+		// P58 扩展②：会话里已经纠正过"你的工具确实可用"，它仍然收尾——把这件事
+		// 告诉复盘者（退化的强信号），结论处理与审计记录一字不变。
+		target.NoToolNudge = sess.ToolAccessNudged()
+	}
+	hint := ""
 	for remind := 0; remind < 2 && !submitted(); remind++ {
+		dec := r.maybeRescue(tid, tag, label, target)
+		if dec.Stop {
+			return false
+		}
+		if dec.Hint != "" {
+			hint = dec.Hint
+		}
+		// 提示轮只说话、不说话就收：上一次提醒如果只换来一模一样的答复，模型
+		// 就是在复读，同一句提醒再发一遍只会多堆一条同样的记录（历史里那串
+		// 一模一样的 "You have NOT submitted yet" 加重复总结就是这么来的）。
+		// 只砍"复读"这一种：实测第二次提醒后答复变了的会话绝大多数最终真提交，
+		// 提醒本身有效，不能因为怕污染就一律不发。
+		reminder := submitReminderText(submitTool, hint)
+		if reminderInCircles(sess, reminder) {
+			r.log.LogWarning(tid, tag, label, "上一次提交提醒只换来一模一样的答复，不再重复发送")
+			break
+		}
 		r.log.LogWarning(tid, tag, label, "会话结束但未提交，发送提交提醒")
-		if _, err := sess.Run(session.RunOptions{UserText: "You have NOT submitted yet — the result only counts after an explicit " + submitTool + " call. Call " + submitTool + " now (fix and compile first if something is still broken)."}); err != nil {
-			r.log.LogWarning(tid, tag, label, "提交提醒轮失败:", err)
+		release := r.acquireChapterSlot()
+		// P61/C：复盘说了 retry 时目标状态已经先写成 queued（在排队之前），这里
+		// 拿到槽位再写成 running——与其它阶段的 queued → running 同一套规矩，
+		// 界面上不会出现"排着队"其实已经在跑的错位。
+		if dec.Verdict != "" {
+			r.markTargetActivity(tid, tag, label, target, "running", "提醒轮拿到并发槽")
+		}
+		_, runErr := sess.Run(session.RunOptions{UserText: reminder})
+		release()
+		if runErr != nil {
+			r.log.LogWarning(tid, tag, label, "提交提醒轮失败:", runErr)
 			return false
 		}
 	}
 	return submitted()
+}
+
+// reminderInCircles 判断上一次提交提醒是否只换来一模一样的答复：取最后一条
+// user 消息（必须就是这句提醒）前后的两条助手正文，一字不差就是模型在复读。
+// 没有提醒、提醒后没有正文、或前后两条不同，都返回 false（照常提醒）。
+func reminderInCircles(sess *session.Session, reminder string) bool {
+	if sess == nil || reminder == "" {
+		return false
+	}
+	msgs := sess.Messages()
+	last := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "user" {
+			continue
+		}
+		if s, ok := msgs[i].Content.(string); ok && s == reminder {
+			last = i
+		}
+		break
+	}
+	if last < 0 {
+		return false
+	}
+	after := ""
+	for i := last + 1; i < len(msgs); i++ {
+		if t := assistantSaid(msgs[i]); t != "" {
+			after = t
+		}
+	}
+	before := ""
+	for i := last - 1; i >= 0; i-- {
+		if t := assistantSaid(msgs[i]); t != "" {
+			before = t
+			break
+		}
+	}
+	return after != "" && after == before
+}
+
+// assistantSaid 取一条助手消息的正文（带工具调用的轮次正文为空，跳过）。
+func assistantSaid(m session.ChatMessage) string {
+	if m.Role != "assistant" {
+		return ""
+	}
+	s, _ := m.Content.(string)
+	return strings.TrimSpace(s)
+}
+
+// rescueDecision 是复盘结论在调用方看来意味着什么。
+type rescueDecision struct {
+	Verdict string // retry | truncate | fail（空 = 没复盘 / 没拿到结论）
+	From    int    // truncate：最后一条好记录的行号
+	Reason  string
+	Hint    string // retry：拼进提醒的一句
+	Stop    bool   // fail，或 truncate 已排进重试队列 → 调用方必须停下
+}
+
+// maybeRescue 是 P58 复盘的**唯一入口**：开关、预算、结论处理都只在这里，
+// 三种触发共用它——
+//
+//	① Run 正常结束但没提交（target.Cause == ""）；
+//	② Run 报错终止、且不是致命错误（target.Cause != ""，由 rescueAfterError 填）；
+//	③ 会话层纠正过"工具不可用"之后仍然没提交（target.NoToolNudge）。
+//
+// 关闭 `latex.rescue.enabled` 时它在第一行就返回空结论：不起会话、不写转录、
+// 不改任何后续动作。
+//
+// P61：复盘一开始就把目标转录的状态写成 `rescuing`（预览页显示「复盘处理中」）；
+// 结论是 retry/truncate 时，**先**把目标状态写成 `queued`、**再**让调用方排队
+// （C），界面上看到的是"等待并发槽"而不是刚才的报错。复盘自己拿不到结论时不复盘
+// 自己，也不再复盘这一条（B）——退回引入复盘之前的路径。
+func (r *Runner) maybeRescue(tid int, tag, label string, target rescueTarget) rescueDecision {
+	if target.Base == "" || !r.cfg.Latex.RescueEnabled() {
+		return rescueDecision{}
+	}
+	// B：复盘会话**自己**永远不进复盘。给它也挂一条复盘就是 rescue-of-rescue，
+	// 只会无限套娃（正常路径根本走不到这里）。
+	if isRescueTranscript(target.TrPath) {
+		r.log.LogWarning(tid, tag, label, "这条转录是复盘会话自己，不再复盘（禁止 rescue-of-rescue）")
+		return rescueDecision{}
+	}
+	// 预算按"本次尝试的转录"计数：新尝试 = 新转录 = 预算重置。
+	key := target.Base + "/" + target.Role + "/" + filepath.Base(target.TrPath)
+	if !r.rescueBudget(key) {
+		r.log.LogWarning(tid, tag, label, "复盘次数已用完，退回普通提醒")
+		return rescueDecision{}
+	}
+	// 上一轮的"已排队"标记不带进这一轮（P61/C）。
+	r.clearRescueQueued(target.TrPath)
+	// C(i)：先让界面看到"这条会话正在被复盘"，而不是一直挂着上一次的 error。
+	r.markTargetActivity(tid, tag, label, target, rescueActivityState, "复盘会话已启动")
+	v, ok := r.rescueReview(target, tid)
+	if !ok {
+		// T233：复盘会话自己没给出结论（报错/跑完不 submit）是**复盘**的问题，
+		// 不从这条目标的复盘次数里扣——把刚才占用的那一次退回去，只记一笔
+		// "复盘自己失败"，下一次触发照旧换一条新复盘会话再看。只有这条目标连续
+		// rescueMaxOwnFailures 次都碰上坏掉的复盘会话，才认它不值得再复盘。
+		r.refundRescueBudget(key)
+		n := r.rescueOwnFailure(key)
+		if n >= rescueMaxOwnFailures {
+			r.exhaustRescueBudget(key)
+			r.log.LogWarning(tid, tag, label, "复盘会话连续 "+strconv.Itoa(n)+" 次自己没给结论，这条目标不再复盘")
+		} else {
+			r.log.LogWarning(tid, tag, label, "复盘会话自己没给结论（第 "+strconv.Itoa(n)+"/"+
+				strconv.Itoa(rescueMaxOwnFailures)+" 次，不占这条目标的复盘次数），下次触发再换一条复盘会话")
+		}
+		// B：状态写回 error，行为退回引入复盘之前的路径：照常提醒，仍不提交就
+		// 按失败收尾（caller 判）；换一条新复盘的机会留在下一次触发。
+		r.markTargetActivity(tid, tag, label, target, "error", "复盘没有给出结论，退回普通提醒")
+		return rescueDecision{}
+	}
+	dec := rescueDecision{Verdict: v.Verdict, From: v.From, Reason: v.Reason, Hint: v.Hint}
+	switch v.Verdict {
+	case "fail":
+		r.markTargetActivity(tid, tag, label, target, "error", "复盘判定这条会话无法挽救")
+		r.log.LogWarning(tid, tag, label, "复盘判定这条会话无法挽救，不再提醒："+v.Reason)
+		dec.Stop = true
+	case "truncate":
+		// T238：截断只在"确实能接着跑"时做。复盘对每一条新尝试都会给出同样靠
+		// 前的切口，照着切就把这一章反复推进新尝试（实测同一章到了第 10 条仍在
+		// 原地），而页面只看到"核对无结论"。切口太小或与这一章切过的位置重合，
+		// 就按"救不回来"收尾，让调用方如实停下，把决定权交回给人。
+		if why := r.rescueCutRefusal(target, v.From); why != "" {
+			r.markTargetActivity(tid, tag, label, target, "error", "复盘要求的截断不该做："+why)
+			r.log.LogWarning(tid, tag, label, fmt.Sprintf(
+				"复盘要求截到第 %d 条记录，但不做——%s。不再自动换尝试，这一章交给人工处理", v.From, why))
+			dec.Stop = true
+			dec.Verdict = "fail"
+			dec.Reason = why
+			break
+		}
+		// C(ii)：状态先写成 queued（排队之前），再排进重试队列——顺序在日志里
+		// 能看到：先"目标会话状态 → queued"，再"已排队从第 N 条记录继续"。
+		//
+		// T228：截断本身在 rescueQueueTruncate 里**当场**落盘，排队只是"接着
+		// 这一条继续跑"，所以这里的进度行说的是"已截断"而不是"已排队、等会儿
+		// 再截"。T241：转换/修复会话的截断是原地做的——同一条转录、同一个尝试
+		// 号，页面「历史」不会多出一条。
+		r.markTargetActivity(tid, tag, label, target, "queued", "复盘判为截断：先写状态，再截断并排队")
+		res, err := r.rescueQueueTruncate(target, v.From)
+		if err != nil {
+			r.markTargetActivity(tid, tag, label, target, "error", "复盘要求截断但排队失败")
+			r.log.LogWarning(tid, tag, label, "复盘要求截断，但排队失败："+err.Error())
+			break
+		}
+		// 记一笔"已排队"：调用方的失败终态要写成 queued（见 Runner.rescueQueued）。
+		r.markRescueQueued(target.TrPath)
+		if res.Attempt > 0 {
+			r.log.LogWarning(tid, tag, label, fmt.Sprintf(
+				"复盘判定会话已退化，已原地截断到第 %d 条记录（仍是第 %d 次尝试，丢掉后面 %d 条，那一段留档在 work/rescue/cuts/）并排队继续：%s",
+				res.Kept, res.Attempt, res.Dropped, v.Reason))
+			r.phaseNote()("[rescue] %s 已原地截断到第 %d 条记录（第 %d 次尝试），排队继续",
+				target.Base, res.Kept, res.Attempt)
+		} else {
+			r.log.LogWarning(tid, tag, label, fmt.Sprintf("复盘判定会话已退化，已排队从第 %d 条记录继续：%s", res.Kept, v.Reason))
+			r.phaseNote()("[rescue] %s 已排队从第 %d 条记录继续（截断在派发时执行）", target.Base, res.Kept)
+		}
+		dec.Stop = true
+	case "retry":
+		// C(ii)：提醒轮马上要在同一个会话里重新排队，状态先写成 queued。
+		r.markTargetActivity(tid, tag, label, target, "queued", "复盘判为可重试：先写状态，交给提醒轮排队")
+	}
+	return dec
+}
+
+// exhaustRescueBudget 把这一条目标的复盘预算一次用光（P61/B）：复盘自己连续
+// 拿不到结论之后，同一条目标不再尝试复盘——否则两次提醒各起一轮（最多 3 次
+// 会话）就会变成 6 次模型调用白烧。
+func (r *Runner) exhaustRescueBudget(key string) {
+	rescueMu.Lock()
+	defer rescueMu.Unlock()
+	if r.cfg.Latex.RescueMaxPerAttempt() > rescueSeen[key] {
+		rescueSeen[key] = r.cfg.Latex.RescueMaxPerAttempt()
+	}
+}
+
+// rescueAfterError 是 P58 扩展的**报错终止**触发点：Run 返回了非致命错误时，
+// 先走与"没提交"完全相同的那条链路（同一个复盘会话、同一套结论处理、同一行
+// 审计记录），只是把"为什么停下"写进 target.Cause 让复盘者看见。
+//
+// 返回 nil = 复盘 + 提醒之后会话又活过来了（调用方继续按正常流程收尾）；
+// 否则**原样返回 cause**，调用方照旧把这一章记成失败。
+//
+// 以下情况一律原样返回、一个字节都不多写（`latex.rescue.enabled: false` 的
+// 回落就是这样成立的）：开关关着、没有转录可复盘、错误是致命错误（余额不足/
+// 无可用资源包——换会话也救不回来，复盘只会白烧一次模型调用）。
+//
+// T237：**上游接口错误**（连接超时/网关 5xx/限流）在这里被单独拦下——它不是
+// 会话退化，交给复盘只会被判成"截断"（换新尝试、整章重转），一次上游抖动就被
+// 放大成一整章的转换重跑。改成同一会话按退避时间原地续跑，不截断、不换尝试、
+// 不动产物（见 queueUpstreamRetry）。
+//
+// T243：原地重试的次数也用完时返回 *pausedError——这一章**暂停**，不是失败：
+// 重试更多次还是同一个接口错误，正确的下一步是人来定（重启程序接着跑，或网页
+// 点「继续跑」）。调用方靠 isPaused 认出它，写「已暂停」而不是「会话错误」。
+func (r *Runner) rescueAfterError(sess *session.Session, tid int, tag, label, submitTool string, submitted func() bool, target rescueTarget, cause error) error {
+	if cause == nil || target.Base == "" || target.TrPath == "" || isSessionFatalError(cause.Error()) {
+		return cause
+	}
+	if isSessionUpstreamError(cause.Error()) {
+		target.Cause = cause.Error()
+		if !r.queueUpstreamRetry(tid, tag, label, target, cause.Error()) {
+			return &pausedError{Base: target.Base, Retries: r.cfg.Latex.APIErrorRetryLimit(), Cause: cause.Error()}
+		}
+		return cause
+	}
+	if !r.cfg.Latex.RescueEnabled() {
+		return cause
+	}
+	target.Cause = cause.Error()
+	r.log.LogWarning(tid, tag, label, "会话报错终止（非致命），交给复盘链路："+cause.Error())
+	if r.remindOrRescue(sess, tid, tag, label, submitTool, submitted, target) {
+		return nil
+	}
+	return cause
+}
+
+// submitReminderText 是"必须真的发一次 submit 工具调用"的那句话（T209/P58）：
+// 提醒轮与报错续跑共用同一份文案，免得两处措辞分叉。
+func submitReminderText(submitTool, hint string) string {
+	// 实测模型会把这个动作**写成正文**（`\submit{…}` / 裸 JSON 字符串，
+	// finish=stop、tool_calls 为空），于是提醒发两遍、钱花了、会话还是没有
+	// 提交——只重复"你还没提交"没有用，得说清"写在正文里不算"。
+	remindText := "You have NOT submitted yet — nothing counts until you make a real `" + submitTool + "` TOOL CALL with its JSON arguments. Writing the call, its JSON, or `\\submit{...}` inside your reply text does nothing; use the tool itself. Call " + submitTool + " now (fix and compile first if something is still broken)."
+	if hint != "" {
+		remindText += " Reviewer note: " + hint
+	}
+	return remindText
 }

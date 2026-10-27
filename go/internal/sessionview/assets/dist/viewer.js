@@ -786,11 +786,11 @@
   const ARRAY_ITERATE_KEY = /* @__PURE__ */ Symbol(
     ""
   );
-  function track(target, type, key) {
+  function track(target2, type, key) {
     if (shouldTrack && activeSub) {
-      let depsMap = targetMap.get(target);
+      let depsMap = targetMap.get(target2);
       if (!depsMap) {
-        targetMap.set(target, depsMap = /* @__PURE__ */ new Map());
+        targetMap.set(target2, depsMap = /* @__PURE__ */ new Map());
       }
       let dep = depsMap.get(key);
       if (!dep) {
@@ -803,13 +803,13 @@
       }
     }
   }
-  function trigger(target, type, key, newValue, oldValue, oldTarget) {
-    const depsMap = targetMap.get(target);
+  function trigger(target2, type, key, newValue, oldValue, oldTarget) {
+    const depsMap = targetMap.get(target2);
     if (!depsMap) {
       globalVersion++;
       return;
     }
-    const run = (dep) => {
+    const run2 = (dep) => {
       if (dep) {
         {
           dep.trigger();
@@ -818,46 +818,46 @@
     };
     startBatch();
     if (type === "clear") {
-      depsMap.forEach(run);
+      depsMap.forEach(run2);
     } else {
-      const targetIsArray = isArray(target);
+      const targetIsArray = isArray(target2);
       const isArrayIndex = targetIsArray && isIntegerKey(key);
       if (targetIsArray && key === "length") {
         const newLength = Number(newValue);
         depsMap.forEach((dep, key2) => {
           if (key2 === "length" || key2 === ARRAY_ITERATE_KEY || !isSymbol(key2) && key2 >= newLength) {
-            run(dep);
+            run2(dep);
           }
         });
       } else {
         if (key !== void 0 || depsMap.has(void 0)) {
-          run(depsMap.get(key));
+          run2(depsMap.get(key));
         }
         if (isArrayIndex) {
-          run(depsMap.get(ARRAY_ITERATE_KEY));
+          run2(depsMap.get(ARRAY_ITERATE_KEY));
         }
         switch (type) {
           case "add":
             if (!targetIsArray) {
-              run(depsMap.get(ITERATE_KEY));
-              if (isMap(target)) {
-                run(depsMap.get(MAP_KEY_ITERATE_KEY));
+              run2(depsMap.get(ITERATE_KEY));
+              if (isMap(target2)) {
+                run2(depsMap.get(MAP_KEY_ITERATE_KEY));
               }
             } else if (isArrayIndex) {
-              run(depsMap.get("length"));
+              run2(depsMap.get("length"));
             }
             break;
           case "delete":
             if (!targetIsArray) {
-              run(depsMap.get(ITERATE_KEY));
-              if (isMap(target)) {
-                run(depsMap.get(MAP_KEY_ITERATE_KEY));
+              run2(depsMap.get(ITERATE_KEY));
+              if (isMap(target2)) {
+                run2(depsMap.get(MAP_KEY_ITERATE_KEY));
               }
             }
             break;
           case "set":
-            if (isMap(target)) {
-              run(depsMap.get(ITERATE_KEY));
+            if (isMap(target2)) {
+              run2(depsMap.get(ITERATE_KEY));
             }
             break;
         }
@@ -875,9 +875,9 @@
     track(arr = /* @__PURE__ */ toRaw(arr), "iterate", ARRAY_ITERATE_KEY);
     return arr;
   }
-  function toWrapped(target, item) {
-    if (/* @__PURE__ */ isReadonly(target)) {
-      return /* @__PURE__ */ isReactive(target) ? toReadonly(toReactive(item)) : toReadonly(item);
+  function toWrapped(target2, item) {
+    if (/* @__PURE__ */ isReadonly(target2)) {
+      return /* @__PURE__ */ isReactive(target2) ? toReadonly(toReactive(item)) : toReadonly(item);
     }
     return toReactive(item);
   }
@@ -1090,8 +1090,8 @@
       this._isReadonly = _isReadonly;
       this._isShallow = _isShallow;
     }
-    get(target, key, receiver) {
-      if (key === "__v_skip") return target["__v_skip"];
+    get(target2, key, receiver) {
+      if (key === "__v_skip") return target2["__v_skip"];
       const isReadonly2 = this._isReadonly, isShallow2 = this._isShallow;
       if (key === "__v_isReactive") {
         return !isReadonly2;
@@ -1100,14 +1100,14 @@
       } else if (key === "__v_isShallow") {
         return isShallow2;
       } else if (key === "__v_raw") {
-        if (receiver === (isReadonly2 ? isShallow2 ? shallowReadonlyMap : readonlyMap : isShallow2 ? shallowReactiveMap : reactiveMap).get(target) || // receiver is not the reactive proxy, but has the same prototype
+        if (receiver === (isReadonly2 ? isShallow2 ? shallowReadonlyMap : readonlyMap : isShallow2 ? shallowReactiveMap : reactiveMap).get(target2) || // receiver is not the reactive proxy, but has the same prototype
         // this means the receiver is a user proxy of the reactive proxy
-        Object.getPrototypeOf(target) === Object.getPrototypeOf(receiver)) {
-          return target;
+        Object.getPrototypeOf(target2) === Object.getPrototypeOf(receiver)) {
+          return target2;
         }
         return;
       }
-      const targetIsArray = isArray(target);
+      const targetIsArray = isArray(target2);
       if (!isReadonly2) {
         let fn;
         if (targetIsArray && (fn = arrayInstrumentations[key])) {
@@ -1118,18 +1118,18 @@
         }
       }
       const res = Reflect.get(
-        target,
+        target2,
         key,
         // if this is a proxy wrapping a ref, return methods using the raw ref
         // as receiver so that we don't have to call `toRaw` on the ref in all
         // its class methods
-        /* @__PURE__ */ isRef(target) ? target : receiver
+        /* @__PURE__ */ isRef(target2) ? target2 : receiver
       );
       if (isSymbol(key) ? builtInSymbols.has(key) : isNonTrackableKeys(key)) {
         return res;
       }
       if (!isReadonly2) {
-        track(target, "get", key);
+        track(target2, "get", key);
       }
       if (isShallow2) {
         return res;
@@ -1148,9 +1148,9 @@
     constructor(isShallow2 = false) {
       super(false, isShallow2);
     }
-    set(target, key, value, receiver) {
-      let oldValue = target[key];
-      const isArrayWithIntegerKey = isArray(target) && isIntegerKey(key);
+    set(target2, key, value, receiver) {
+      let oldValue = target2[key];
+      const isArrayWithIntegerKey = isArray(target2) && isIntegerKey(key);
       if (!this._isShallow) {
         const isOldValueReadonly = /* @__PURE__ */ isReadonly(oldValue);
         if (!/* @__PURE__ */ isShallow(value) && !/* @__PURE__ */ isReadonly(value)) {
@@ -1166,55 +1166,55 @@
           }
         }
       }
-      const hadKey = isArrayWithIntegerKey ? Number(key) < target.length : hasOwn(target, key);
+      const hadKey = isArrayWithIntegerKey ? Number(key) < target2.length : hasOwn(target2, key);
       const result = Reflect.set(
-        target,
+        target2,
         key,
         value,
-        /* @__PURE__ */ isRef(target) ? target : receiver
+        /* @__PURE__ */ isRef(target2) ? target2 : receiver
       );
-      if (target === /* @__PURE__ */ toRaw(receiver) && result) {
+      if (target2 === /* @__PURE__ */ toRaw(receiver) && result) {
         if (!hadKey) {
-          trigger(target, "add", key, value);
+          trigger(target2, "add", key, value);
         } else if (hasChanged(value, oldValue)) {
-          trigger(target, "set", key, value);
+          trigger(target2, "set", key, value);
         }
       }
       return result;
     }
-    deleteProperty(target, key) {
-      const hadKey = hasOwn(target, key);
-      target[key];
-      const result = Reflect.deleteProperty(target, key);
+    deleteProperty(target2, key) {
+      const hadKey = hasOwn(target2, key);
+      target2[key];
+      const result = Reflect.deleteProperty(target2, key);
       if (result && hadKey) {
-        trigger(target, "delete", key, void 0);
+        trigger(target2, "delete", key, void 0);
       }
       return result;
     }
-    has(target, key) {
-      const result = Reflect.has(target, key);
+    has(target2, key) {
+      const result = Reflect.has(target2, key);
       if (!isSymbol(key) || !builtInSymbols.has(key)) {
-        track(target, "has", key);
+        track(target2, "has", key);
       }
       return result;
     }
-    ownKeys(target) {
+    ownKeys(target2) {
       track(
-        target,
+        target2,
         "iterate",
-        isArray(target) ? "length" : ITERATE_KEY
+        isArray(target2) ? "length" : ITERATE_KEY
       );
-      return Reflect.ownKeys(target);
+      return Reflect.ownKeys(target2);
     }
   }
   class ReadonlyReactiveHandler extends BaseReactiveHandler {
     constructor(isShallow2 = false) {
       super(true, isShallow2);
     }
-    set(target, key) {
+    set(target2, key) {
       return true;
     }
-    deleteProperty(target, key) {
+    deleteProperty(target2, key) {
       return true;
     }
   }
@@ -1226,12 +1226,12 @@
   const getProto = (v) => Reflect.getPrototypeOf(v);
   function createIterableMethod(method, isReadonly2, isShallow2) {
     return function(...args) {
-      const target = this["__v_raw"];
-      const rawTarget = /* @__PURE__ */ toRaw(target);
+      const target2 = this["__v_raw"];
+      const rawTarget = /* @__PURE__ */ toRaw(target2);
       const targetIsMap = isMap(rawTarget);
       const isPair = method === "entries" || method === Symbol.iterator && targetIsMap;
       const isKeyOnly = method === "keys" && targetIsMap;
-      const innerIterator = target[method](...args);
+      const innerIterator = target2[method](...args);
       const wrap = isShallow2 ? toShallow : isReadonly2 ? toReadonly : toReactive;
       !isReadonly2 && track(
         rawTarget,
@@ -1262,8 +1262,8 @@
   function createInstrumentations(readonly2, shallow) {
     const instrumentations = {
       get(key) {
-        const target = this["__v_raw"];
-        const rawTarget = /* @__PURE__ */ toRaw(target);
+        const target2 = this["__v_raw"];
+        const rawTarget = /* @__PURE__ */ toRaw(target2);
         const rawKey = /* @__PURE__ */ toRaw(key);
         if (!readonly2) {
           if (hasChanged(key, rawKey)) {
@@ -1274,21 +1274,21 @@
         const { has } = getProto(rawTarget);
         const wrap = shallow ? toShallow : readonly2 ? toReadonly : toReactive;
         if (has.call(rawTarget, key)) {
-          return wrap(target.get(key));
+          return wrap(target2.get(key));
         } else if (has.call(rawTarget, rawKey)) {
-          return wrap(target.get(rawKey));
-        } else if (target !== rawTarget) {
-          target.get(key);
+          return wrap(target2.get(rawKey));
+        } else if (target2 !== rawTarget) {
+          target2.get(key);
         }
       },
       get size() {
-        const target = this["__v_raw"];
-        !readonly2 && track(/* @__PURE__ */ toRaw(target), "iterate", ITERATE_KEY);
-        return target.size;
+        const target2 = this["__v_raw"];
+        !readonly2 && track(/* @__PURE__ */ toRaw(target2), "iterate", ITERATE_KEY);
+        return target2.size;
       },
       has(key) {
-        const target = this["__v_raw"];
-        const rawTarget = /* @__PURE__ */ toRaw(target);
+        const target2 = this["__v_raw"];
+        const rawTarget = /* @__PURE__ */ toRaw(target2);
         const rawKey = /* @__PURE__ */ toRaw(key);
         if (!readonly2) {
           if (hasChanged(key, rawKey)) {
@@ -1296,15 +1296,15 @@
           }
           track(rawTarget, "has", rawKey);
         }
-        return key === rawKey ? target.has(key) : target.has(key) || target.has(rawKey);
+        return key === rawKey ? target2.has(key) : target2.has(key) || target2.has(rawKey);
       },
       forEach(callback, thisArg) {
         const observed = this;
-        const target = observed["__v_raw"];
-        const rawTarget = /* @__PURE__ */ toRaw(target);
+        const target2 = observed["__v_raw"];
+        const rawTarget = /* @__PURE__ */ toRaw(target2);
         const wrap = shallow ? toShallow : readonly2 ? toReadonly : toReactive;
         !readonly2 && track(rawTarget, "iterate", ITERATE_KEY);
-        return target.forEach((value, key) => {
+        return target2.forEach((value, key) => {
           return callback.call(thisArg, wrap(value), wrap(key), observed);
         });
       }
@@ -1318,14 +1318,14 @@
         clear: createReadonlyMethod("clear")
       } : {
         add(value) {
-          const target = /* @__PURE__ */ toRaw(this);
-          const proto = getProto(target);
+          const target2 = /* @__PURE__ */ toRaw(this);
+          const proto = getProto(target2);
           const rawValue = /* @__PURE__ */ toRaw(value);
           const valueToAdd = !shallow && !/* @__PURE__ */ isShallow(value) && !/* @__PURE__ */ isReadonly(value) ? rawValue : value;
-          const hadKey = proto.has.call(target, valueToAdd) || hasChanged(value, valueToAdd) && proto.has.call(target, value) || hasChanged(rawValue, valueToAdd) && proto.has.call(target, rawValue);
+          const hadKey = proto.has.call(target2, valueToAdd) || hasChanged(value, valueToAdd) && proto.has.call(target2, value) || hasChanged(rawValue, valueToAdd) && proto.has.call(target2, rawValue);
           if (!hadKey) {
-            target.add(valueToAdd);
-            trigger(target, "add", valueToAdd, valueToAdd);
+            target2.add(valueToAdd);
+            trigger(target2, "add", valueToAdd, valueToAdd);
           }
           return this;
         },
@@ -1333,44 +1333,44 @@
           if (!shallow && !/* @__PURE__ */ isShallow(value) && !/* @__PURE__ */ isReadonly(value)) {
             value = /* @__PURE__ */ toRaw(value);
           }
-          const target = /* @__PURE__ */ toRaw(this);
-          const { has, get } = getProto(target);
-          let hadKey = has.call(target, key);
+          const target2 = /* @__PURE__ */ toRaw(this);
+          const { has, get } = getProto(target2);
+          let hadKey = has.call(target2, key);
           if (!hadKey) {
             key = /* @__PURE__ */ toRaw(key);
-            hadKey = has.call(target, key);
+            hadKey = has.call(target2, key);
           }
-          const oldValue = get.call(target, key);
-          target.set(key, value);
+          const oldValue = get.call(target2, key);
+          target2.set(key, value);
           if (!hadKey) {
-            trigger(target, "add", key, value);
+            trigger(target2, "add", key, value);
           } else if (hasChanged(value, oldValue)) {
-            trigger(target, "set", key, value);
+            trigger(target2, "set", key, value);
           }
           return this;
         },
         delete(key) {
-          const target = /* @__PURE__ */ toRaw(this);
-          const { has, get } = getProto(target);
-          let hadKey = has.call(target, key);
+          const target2 = /* @__PURE__ */ toRaw(this);
+          const { has, get } = getProto(target2);
+          let hadKey = has.call(target2, key);
           if (!hadKey) {
             key = /* @__PURE__ */ toRaw(key);
-            hadKey = has.call(target, key);
+            hadKey = has.call(target2, key);
           }
-          get ? get.call(target, key) : void 0;
-          const result = target.delete(key);
+          get ? get.call(target2, key) : void 0;
+          const result = target2.delete(key);
           if (hadKey) {
-            trigger(target, "delete", key, void 0);
+            trigger(target2, "delete", key, void 0);
           }
           return result;
         },
         clear() {
-          const target = /* @__PURE__ */ toRaw(this);
-          const hadItems = target.size !== 0;
-          const result = target.clear();
+          const target2 = /* @__PURE__ */ toRaw(this);
+          const hadItems = target2.size !== 0;
+          const result = target2.clear();
           if (hadItems) {
             trigger(
-              target,
+              target2,
               "clear",
               void 0,
               void 0
@@ -1393,16 +1393,16 @@
   }
   function createInstrumentationGetter(isReadonly2, shallow) {
     const instrumentations = createInstrumentations(isReadonly2, shallow);
-    return (target, key, receiver) => {
+    return (target2, key, receiver) => {
       if (key === "__v_isReactive") {
         return !isReadonly2;
       } else if (key === "__v_isReadonly") {
         return isReadonly2;
       } else if (key === "__v_raw") {
-        return target;
+        return target2;
       }
       return Reflect.get(
-        hasOwn(instrumentations, key) && key in target ? instrumentations : target,
+        hasOwn(instrumentations, key) && key in target2 ? instrumentations : target2,
         key,
         receiver
       );
@@ -1439,12 +1439,12 @@
     }
   }
   // @__NO_SIDE_EFFECTS__
-  function reactive(target) {
-    if (/* @__PURE__ */ isReadonly(target)) {
-      return target;
+  function reactive(target2) {
+    if (/* @__PURE__ */ isReadonly(target2)) {
+      return target2;
     }
     return createReactiveObject(
-      target,
+      target2,
       false,
       mutableHandlers,
       mutableCollectionHandlers,
@@ -1452,9 +1452,9 @@
     );
   }
   // @__NO_SIDE_EFFECTS__
-  function shallowReactive(target) {
+  function shallowReactive(target2) {
     return createReactiveObject(
-      target,
+      target2,
       false,
       shallowReactiveHandlers,
       shallowCollectionHandlers,
@@ -1462,9 +1462,9 @@
     );
   }
   // @__NO_SIDE_EFFECTS__
-  function readonly(target) {
+  function readonly(target2) {
     return createReactiveObject(
-      target,
+      target2,
       true,
       readonlyHandlers,
       readonlyCollectionHandlers,
@@ -1472,38 +1472,38 @@
     );
   }
   // @__NO_SIDE_EFFECTS__
-  function shallowReadonly(target) {
+  function shallowReadonly(target2) {
     return createReactiveObject(
-      target,
+      target2,
       true,
       shallowReadonlyHandlers,
       shallowReadonlyCollectionHandlers,
       shallowReadonlyMap
     );
   }
-  function createReactiveObject(target, isReadonly2, baseHandlers, collectionHandlers, proxyMap) {
-    if (!isObject(target)) {
-      return target;
+  function createReactiveObject(target2, isReadonly2, baseHandlers, collectionHandlers, proxyMap) {
+    if (!isObject(target2)) {
+      return target2;
     }
-    if (target["__v_raw"] && !(isReadonly2 && target["__v_isReactive"])) {
-      return target;
+    if (target2["__v_raw"] && !(isReadonly2 && target2["__v_isReactive"])) {
+      return target2;
     }
-    if (target["__v_skip"] || !Object.isExtensible(target)) {
-      return target;
+    if (target2["__v_skip"] || !Object.isExtensible(target2)) {
+      return target2;
     }
-    const existingProxy = proxyMap.get(target);
+    const existingProxy = proxyMap.get(target2);
     if (existingProxy) {
       return existingProxy;
     }
-    const targetType = targetTypeMap(toRawType(target));
+    const targetType = targetTypeMap(toRawType(target2));
     if (targetType === 0) {
-      return target;
+      return target2;
     }
     const proxy = new Proxy(
-      target,
+      target2,
       targetType === 2 ? collectionHandlers : baseHandlers
     );
-    proxyMap.set(target, proxy);
+    proxyMap.set(target2, proxy);
     return proxy;
   }
   // @__NO_SIDE_EFFECTS__
@@ -1584,14 +1584,14 @@
     return /* @__PURE__ */ isRef(ref2) ? ref2.value : ref2;
   }
   const shallowUnwrapHandlers = {
-    get: (target, key, receiver) => key === "__v_raw" ? target : unref(Reflect.get(target, key, receiver)),
-    set: (target, key, value, receiver) => {
-      const oldValue = target[key];
+    get: (target2, key, receiver) => key === "__v_raw" ? target2 : unref(Reflect.get(target2, key, receiver)),
+    set: (target2, key, value, receiver) => {
+      const oldValue = target2[key];
       if (/* @__PURE__ */ isRef(oldValue) && !/* @__PURE__ */ isRef(value)) {
         oldValue.value = value;
         return true;
       } else {
-        return Reflect.set(target, key, value, receiver);
+        return Reflect.set(target2, key, value, receiver);
       }
     }
   };
@@ -2540,15 +2540,15 @@
   getGlobalThis().cancelIdleCallback || ((id) => clearTimeout(id));
   const isAsyncWrapper = (i) => !!i.type.__asyncLoader;
   const isKeepAlive = (vnode) => vnode.type.__isKeepAlive;
-  function onActivated(hook, target) {
-    registerKeepAliveHook(hook, "a", target);
+  function onActivated(hook, target2) {
+    registerKeepAliveHook(hook, "a", target2);
   }
-  function onDeactivated(hook, target) {
-    registerKeepAliveHook(hook, "da", target);
+  function onDeactivated(hook, target2) {
+    registerKeepAliveHook(hook, "da", target2);
   }
-  function registerKeepAliveHook(hook, type, target = currentInstance) {
+  function registerKeepAliveHook(hook, type, target2 = currentInstance) {
     const wrappedHook = hook.__wdc || (hook.__wdc = () => {
-      let current = target;
+      let current = target2;
       while (current) {
         if (current.isDeactivated) {
           return;
@@ -2557,18 +2557,18 @@
       }
       return hook();
     });
-    injectHook(type, wrappedHook, target);
-    if (target) {
-      let current = target.parent;
+    injectHook(type, wrappedHook, target2);
+    if (target2) {
+      let current = target2.parent;
       while (current && current.parent) {
         if (isKeepAlive(current.parent.vnode)) {
-          injectToKeepAliveRoot(wrappedHook, type, target, current);
+          injectToKeepAliveRoot(wrappedHook, type, target2, current);
         }
         current = current.parent;
       }
     }
   }
-  function injectToKeepAliveRoot(hook, type, target, keepAliveRoot) {
+  function injectToKeepAliveRoot(hook, type, target2, keepAliveRoot) {
     const injected = injectHook(
       type,
       hook,
@@ -2578,15 +2578,15 @@
     );
     onUnmounted(() => {
       remove(keepAliveRoot[type], injected);
-    }, target);
+    }, target2);
   }
-  function injectHook(type, hook, target = currentInstance, prepend = false) {
-    if (target) {
-      const hooks = target[type] || (target[type] = []);
+  function injectHook(type, hook, target2 = currentInstance, prepend = false) {
+    if (target2) {
+      const hooks = target2[type] || (target2[type] = []);
       const wrappedHook = hook.__weh || (hook.__weh = (...args) => {
         pauseTracking();
-        const reset = setCurrentInstance(target);
-        const res = callWithAsyncErrorHandling(hook, target, type, args);
+        const reset = setCurrentInstance(target2);
+        const res = callWithAsyncErrorHandling(hook, target2, type, args);
         reset();
         resetTracking();
         return res;
@@ -2599,9 +2599,9 @@
       return wrappedHook;
     }
   }
-  const createHook = (lifecycle) => (hook, target = currentInstance) => {
+  const createHook = (lifecycle) => (hook, target2 = currentInstance) => {
     if (!isInSSRComponentSetup || lifecycle === "sp") {
-      injectHook(lifecycle, (...args) => hook(...args), target);
+      injectHook(lifecycle, (...args) => hook(...args), target2);
     }
   };
   const onBeforeMount = createHook("bm");
@@ -2619,10 +2619,13 @@
   );
   const onRenderTriggered = createHook("rtg");
   const onRenderTracked = createHook("rtc");
-  function onErrorCaptured(hook, target = currentInstance) {
-    injectHook("ec", hook, target);
+  function onErrorCaptured(hook, target2 = currentInstance) {
+    injectHook("ec", hook, target2);
   }
   const COMPONENTS = "components";
+  function resolveComponent(name, maybeSelfReference) {
+    return resolveAsset(COMPONENTS, name, true, maybeSelfReference) || name;
+  }
   const NULL_DYNAMIC_COMPONENT = /* @__PURE__ */ Symbol.for("v-ndc");
   function resolveDynamicComponent(component) {
     if (isString(component)) {
@@ -2876,13 +2879,13 @@
       let cssModules;
       return !!(accessCache[key] || data !== EMPTY_OBJ && key[0] !== "$" && hasOwn(data, key) || hasSetupBinding(setupState, key) || hasOwn(props, key) || hasOwn(ctx, key) || hasOwn(publicPropertiesMap, key) || hasOwn(appContext.config.globalProperties, key) || (cssModules = type.__cssModules) && cssModules[key]);
     },
-    defineProperty(target, key, descriptor) {
+    defineProperty(target2, key, descriptor) {
       if (descriptor.get != null) {
-        target._.accessCache[key] = 0;
+        target2._.accessCache[key] = 0;
       } else if (hasOwn(descriptor, "value")) {
-        this.set(target, key, descriptor.value, null);
+        this.set(target2, key, descriptor.value, null);
       }
-      return Reflect.defineProperty(target, key, descriptor);
+      return Reflect.defineProperty(target2, key, descriptor);
     }
   };
   function useSlots() {
@@ -3493,13 +3496,13 @@
       if (vnode.shapeFlag & 4) {
         const proxyToUse = withProxy || proxy;
         const thisProxy = false ? new Proxy(proxyToUse, {
-          get(target, key, receiver) {
+          get(target2, key, receiver) {
             warn$1(
               `Property '${String(
                 key
               )}' was accessed via 'this'. Avoid using 'this' in templates.`
             );
-            return Reflect.get(target, key, receiver);
+            return Reflect.get(target2, key, receiver);
           }
         }) : proxyToUse;
         result = normalizeVNode(
@@ -4044,8 +4047,8 @@
     return baseCreateRenderer(options);
   }
   function baseCreateRenderer(options, createHydrationFns) {
-    const target = getGlobalThis();
-    target.__VUE__ = true;
+    const target2 = getGlobalThis();
+    target2.__VUE__ = true;
     const {
       insert: hostInsert,
       remove: hostRemove,
@@ -6009,9 +6012,9 @@
     }
   }
   const attrsProxyHandlers = {
-    get(target, key) {
-      track(target, "get", "");
-      return target[key];
+    get(target2, key) {
+      track(target2, "get", "");
+      return target2[key];
     }
   };
   function createSetupContext(instance) {
@@ -6030,15 +6033,15 @@
   function getComponentPublicInstance(instance) {
     if (instance.exposed) {
       return instance.exposeProxy || (instance.exposeProxy = new Proxy(proxyRefs(markRaw(instance.exposed)), {
-        get(target, key) {
-          if (key in target) {
-            return target[key];
+        get(target2, key) {
+          if (key in target2) {
+            return target2[key];
           } else if (key in publicPropertiesMap) {
             return publicPropertiesMap[key](instance);
           }
         },
-        has(target, key) {
-          return key in target || key in publicPropertiesMap;
+        has(target2, key) {
+          return key in target2 || key in publicPropertiesMap;
         }
       }));
     } else {
@@ -6527,10 +6530,10 @@
     e.target.composing = true;
   }
   function onCompositionEnd(e) {
-    const target = e.target;
-    if (target.composing) {
-      target.composing = false;
-      target.dispatchEvent(new Event("input"));
+    const target2 = e.target;
+    if (target2.composing) {
+      target2.composing = false;
+      target2.dispatchEvent(new Event("input"));
     }
   }
   const assignKey = /* @__PURE__ */ Symbol("_assign");
@@ -6623,6 +6626,30 @@
       return fn(event, ...args);
     }));
   };
+  const keyNames = {
+    esc: "escape",
+    space: " ",
+    up: "arrow-up",
+    left: "arrow-left",
+    right: "arrow-right",
+    down: "arrow-down",
+    delete: "backspace"
+  };
+  const withKeys = (fn, modifiers) => {
+    const cache = fn._withKeys || (fn._withKeys = {});
+    const cacheKey = modifiers.join(".");
+    return cache[cacheKey] || (cache[cacheKey] = ((event) => {
+      if (!("key" in event)) {
+        return;
+      }
+      const eventKey = hyphenate(event.key);
+      if (modifiers.some(
+        (k) => k === eventKey || keyNames[k] === eventKey
+      )) {
+        return fn(event);
+      }
+    }));
+  };
   const rendererOptions = /* @__PURE__ */ extend({ patchProp }, nodeOps);
   let renderer;
   function ensureRenderer() {
@@ -6672,11 +6699,10 @@
   const RAIL_W = 56;
   const SIDEBAR_DEFAULT = 280;
   const SIDEBAR_MIN = 264;
-  const SIDEBAR_MAX = 420;
   const DETAILS_DEFAULT = 400;
   const DETAILS_MIN = 300;
-  const DETAILS_MAX = 520;
   const CENTER_MIN = 640;
+  const COLUMN_MAX_RATIO = 0.6;
   function storeGet(key) {
     try {
       return window.localStorage.getItem(STORE_PREFIX + key);
@@ -6698,6 +6724,12 @@
       return v && typeof v === "object" ? v : fallback;
     } catch {
       return fallback;
+    }
+  }
+  function storeRemove(key) {
+    try {
+      window.localStorage.removeItem(STORE_PREFIX + key);
+    } catch {
     }
   }
   function fmtSize(bytes) {
@@ -6746,6 +6778,14 @@
     // T154：有 dedupe 复查页的项目名（/dedupe?project=… 可打开），侧栏整组核验
     // 阶段行的「复查」按钮据此显隐；不参与列表签名，按钮出现不影响侧栏重建。
     dedupeReviews: [],
+    // P53：每个项目当前排队的重试章节（/api/index 的 retries），章节行据此显示
+    // 「待重试」。不参与列表签名：它变化只影响一个角标，不该重建侧栏。
+    retries: {},
+    // P53/P2：排队的章节各自是哪个角色（convert / checker / continue）——章节行有两行，
+    // 「待重试」要挂在对应那一行。
+    retryRoles: {},
+    // P53：最近一次「重试」请求的反馈（成功/失败一行字），显示在按钮旁边。
+    retryNote: "",
     current: null,
     lines: [],
     nextFrom: 0,
@@ -6788,12 +6828,41 @@
     // P18：/api/img2text-progress 的按书进度（独立 ~5s 轮询；preview.img2text 未开时为空）。
     img2textProgress: []
   });
+  let retryNoteTimer = 0;
+  const RETRY_NOTE_DONE_MS = 2e4;
+  const RETRY_NOTE_BUSY_MS = 6e4;
+  function setRetryNote(text) {
+    state.retryNote = text;
+    if (retryNoteTimer) {
+      clearTimeout(retryNoteTimer);
+      retryNoteTimer = 0;
+    }
+    if (!text) return;
+    const ttl = /^(已|失败|撤销|这个请求)/.test(text) ? RETRY_NOTE_DONE_MS : RETRY_NOTE_BUSY_MS;
+    retryNoteTimer = setTimeout(() => {
+      retryNoteTimer = 0;
+      state.retryNote = "";
+    }, ttl);
+  }
+  function clearRetryNote() {
+    if (retryNoteTimer) {
+      clearTimeout(retryNoteTimer);
+      retryNoteTimer = 0;
+    }
+    if (state.retryNote) state.retryNote = "";
+  }
   function clampWidth(px, min, max) {
     return Math.min(max, Math.max(min, Math.round(px)));
   }
+  function columnDragMax(viewport, cols, side) {
+    const vp = viewport > 0 ? viewport : 1280;
+    const other = side === "sidebar" ? cols.details > 0 ? cols.details : 0 : cols.sidebar > 0 ? cols.sidebar : 0;
+    const floor = side === "sidebar" ? SIDEBAR_MIN : DETAILS_MIN;
+    return Math.max(floor, Math.min(Math.round(vp * COLUMN_MAX_RATIO), vp - CENTER_MIN - other));
+  }
   function computeColumns(viewport, sidebar, details) {
-    const s = sidebar === 0 ? RAIL_W : clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX);
-    const d0 = details === 0 ? 0 : clampWidth(details, DETAILS_MIN, DETAILS_MAX);
+    const s = sidebar === 0 ? RAIL_W : clampWidth(sidebar, SIDEBAR_MIN, columnDragMax(viewport, { sidebar: 0, details: details > 0 ? DETAILS_MIN : 0 }, "sidebar"));
+    const d0 = details === 0 ? 0 : clampWidth(details, DETAILS_MIN, columnDragMax(viewport, { sidebar: s, details: 0 }, "details"));
     if (s + d0 + CENTER_MIN <= viewport) {
       return { sidebar: s, center: viewport - s - d0, details: d0 };
     }
@@ -6834,7 +6903,11 @@
     if (state.details > 0) {
       state.details = 0;
     } else {
-      state.details = clampWidth(state.details || DETAILS_DEFAULT, DETAILS_MIN, DETAILS_MAX);
+      state.details = clampWidth(
+        state.details || DETAILS_DEFAULT,
+        DETAILS_MIN,
+        columnDragMax(layout.viewport, layout.cols, "details")
+      );
       const viewport = layout.viewport;
       const collapsed = sidebarCollapsedNow();
       const pref = collapsed ? 0 : state.sidebar === 0 ? SIDEBAR_DEFAULT : state.sidebar;
@@ -6895,6 +6968,38 @@
   }
   function switchView(view) {
     state.view = view === "trajectory" || view === "history" ? view : "chat";
+  }
+  function resetViewState() {
+    state.current = null;
+    state.lines = [];
+    state.nextFrom = 0;
+    state.curSize = -1;
+    state.curMtime = 0;
+    state.meta = null;
+    state.partial = null;
+    state.callEst = {};
+    state.trajSelected = null;
+    state.trajOpen = {};
+    state.trajKinds = {};
+    state.view = "chat";
+    state.filter = "";
+    clearRetryNote();
+    state.collapsed = {};
+    state.overflow = {};
+    state.narrowExpanded = true;
+    storeRemove("collapsed");
+    storeRemove("overflow");
+    persistLayout();
+    applyLayout();
+    return firstRunningSession();
+  }
+  function firstRunningSession() {
+    const want = state.board === "img2text" ? "img2text" : "latex";
+    const list = (state.sessions || []).filter((s) => (s.board === "img2text" ? "img2text" : "latex") === want);
+    const live = list.filter((s) => s.live);
+    const top = live.filter((s) => !s.chapterParent);
+    const hit = top[0] || live[0] || list[0];
+    return hit ? String(hit.id) : "";
   }
   const lightbox = /* @__PURE__ */ reactive({ open: false, url: "", ref: "", scale: 1, tx: 0, ty: 0 });
   function openLightbox(url, ref2) {
@@ -7146,16 +7251,29 @@
   function stageChapterAggregate(stage, items, filtered) {
     if (stage !== "convert" && stage !== "checker") return null;
     if (filtered) return null;
-    const total = (items || []).length;
+    const chapterItems = (items || []).filter((s) => !isStageLevelSession(s) && !(s == null ? void 0 : s.archived) && (!s.chapterRole || s.chapterRole === "convert"));
+    const byChapter = /* @__PURE__ */ new Map();
+    chapterItems.forEach((s) => {
+      const id = String(s && (s.chapterId || s.id) || "");
+      const cur = byChapter.get(id);
+      byChapter.set(id, cur ? newerAttempt(cur, s) : s);
+    });
+    const current = Array.from(byChapter.values());
+    const total = current.length;
     if (!total) return null;
-    const live = items.filter((s) => s && s.live);
-    const done = items.filter((s) => s && s.endState === "done").length;
-    const errs = items.filter((s) => s && !s.live && s.endState === "error");
+    const live = current.filter((s) => s && s.live);
+    const done = current.filter((s) => s && s.endState === "done").length;
+    const errs = current.filter((s) => s && !s.live && s.endState === "error");
     const rows = live.length ? live : errs;
     const bits = [total + " 章", "完成 " + done];
     if (live.length) bits.push("运行 " + live.length);
     if (errs.length) bits.push("错误 " + errs.length);
     return { total, done, live: live.length, err: errs.length, rows, head: bits.join(" · ") };
+  }
+  const STAGE_LEVEL_SESSION = /(^|\/)(chapters|style_session|style_pilot_trial|book_fix|final_review)\.jsonl$|\/vector_/;
+  function isStageLevelSession(s) {
+    if (s && s.chapterId) return false;
+    return STAGE_LEVEL_SESSION.test(String(s && (s.id || s.path) || ""));
   }
   function projectProgressLine(stages) {
     if (!stages) return null;
@@ -7252,6 +7370,346 @@
     if (s.imageType) bits.push(s.imageType);
     return bits.join("\n");
   }
+  function convertBasename(s) {
+    const id = String(s && s.id || "");
+    const seg = id.slice(id.lastIndexOf("/") + 1);
+    return seg.replace(/\.jsonl$/, "");
+  }
+  function newestOf(items) {
+    let best = null;
+    (items || []).forEach((s) => {
+      best = newerAttempt(best, s);
+    });
+    return best;
+  }
+  function fixTranscriptTag(s) {
+    const m = /\.try(\d+)$/.exec(convertBasename(s));
+    return m ? ".try" + m[1] : "";
+  }
+  function chapterIdSuffix(id) {
+    const s = String(id || "");
+    const m = /^chapter[_-]?\d+_(.+)$/.exec(s);
+    return m && m[1] ? m[1] : s;
+  }
+  function fixTargetId(fix, nodeId = "") {
+    return String(fix && fix.chapterId || nodeId || "");
+  }
+  function fixRowLabel(fix, nodeId, round) {
+    const id = fixTargetId(fix, nodeId);
+    const name = id ? " " + chapterIdSuffix(id) : "";
+    return (fix && fix.archived ? "旧" : "") + "修复" + name + " #" + (Number(round) || 1);
+  }
+  const CHAPTER_ROLE_LABELS = {
+    convert: "转换",
+    checker: "核对",
+    fix: "修复",
+    rescue: "复盘",
+    continue: "继续",
+    vector: "作图"
+  };
+  function chapterRoleLabel(role) {
+    return CHAPTER_ROLE_LABELS[String(role || "")] || "";
+  }
+  function chapterRescueRows(sessions, rescue) {
+    if (!rescue || rescue.chapterRole !== "rescue") return [];
+    const chapter = String(rescue.chapterId || "");
+    if (!chapter) return [];
+    const proj = rescue.project || projectOf(rescue.id);
+    return sortFixesOldestFirst((sessions || []).filter((s) => !!s && s.chapterRole === "rescue" && String(s.chapterId || "") === chapter && (s.project || projectOf(s.id)) === proj));
+  }
+  function rescueOrdinal(sessions, rescue) {
+    if (!rescue) return 1;
+    const peers = chapterRescueRows(sessions, rescue);
+    const i = peers.findIndex((s) => String(s && s.id) === String(rescue.id));
+    return i >= 0 ? i + 1 : 1;
+  }
+  function reviewedTargetLabel(rescue) {
+    const role = chapterRoleLabel(String(rescue && rescue.reviewedRole || ""));
+    if (!role) return "";
+    const tr = String(rescue && rescue.reviewedTranscript || "");
+    const m = /\.try(\d+)$/.exec(tr);
+    return role + "#" + (m ? Number(m[1]) : 1);
+  }
+  function rescueRowTitle(rescue) {
+    const tip = sessionTip(rescue);
+    const reviewed = reviewedTargetLabel(rescue);
+    const name = String(rescue && rescue.reviewedTranscript || "") || convertBasename(rescue).replace(/^rescue_/, "");
+    const target2 = reviewed && name ? reviewed + "（" + name + "）" : reviewed || name;
+    const line = "复盘对象：" + (target2 || "—");
+    return tip ? tip + "\n" + line : line;
+  }
+  function fixRoundAt(index, total) {
+    const n = Math.max(1, Math.floor(Number(total) || 0));
+    const i = Math.max(0, Math.floor(Number(index) || 0));
+    return Math.max(1, n - i);
+  }
+  function fixOutcomeLabel(s) {
+    if (!s) return "";
+    if (s.live) return "运行中";
+    switch (String(s.chapterActivity || "")) {
+      case "pass":
+        return "通过";
+      case "issues":
+        return "未通过";
+      case "error":
+        return "失败";
+      default:
+        return "";
+    }
+  }
+  function fixRowTitle(s) {
+    const tip = sessionTip(s);
+    const outcome = fixOutcomeLabel(s);
+    return outcome ? tip + "\n修复结果：" + outcome : tip;
+  }
+  function chapterNodeHasRows(node) {
+    return !!node.convert && !!node.checker || (node.children || []).length > 0 || (node.fixes || []).length > 0 || (node.rescues || []).length > 0;
+  }
+  function sortFixesOldestFirst(items) {
+    return (items || []).slice().sort((a, b) => {
+      const d = mtimeMs(a) - mtimeMs(b);
+      if (d) return d;
+      const ia = String(a && a.id || "");
+      const ib = String(b && b.id || "");
+      return ia < ib ? -1 : ia > ib ? 1 : 0;
+    });
+  }
+  function fixesForNode(node, convert, parentArchived, pool) {
+    if (!pool || !pool.length) return [];
+    const gen = convert ? !!convert.archived : parentArchived;
+    const want = convert ? convertBasename(convert) : "";
+    const hits = pool.filter((f) => {
+      if (!f) return false;
+      if (gen !== null && !!f.archived !== gen) return false;
+      const anchor = String(f.chapterAnchor || "");
+      if (anchor) return !!want && anchor === want;
+      return String(f.chapterId || "") === node.id;
+    });
+    return sortFixesOldestFirst(hits);
+  }
+  function rescuesForNode(node, convert, parentArchived, pool) {
+    if (!pool || !pool.length) return [];
+    const gen = convert ? !!convert.archived : parentArchived;
+    const hits = pool.filter((r) => {
+      if (!r) return false;
+      if (gen !== null && !!r.archived !== gen) return false;
+      return String(r.chapterId || "") === node.id;
+    });
+    return sortFixesOldestFirst(hits);
+  }
+  function newestByKey(list, keyOf) {
+    const items = list || [];
+    const best = /* @__PURE__ */ new Map();
+    for (const x of items) {
+      if (!x) continue;
+      const k = keyOf(x);
+      const cur = best.get(k);
+      if (!cur || mtimeMs(x) >= mtimeMs(cur)) best.set(k, x);
+    }
+    const out = [];
+    for (const x of items) {
+      if (x && best.get(keyOf(x)) === x) out.push(x);
+    }
+    return out;
+  }
+  function treeFixRows(node) {
+    const id = String(node && node.id || "");
+    return newestByKey(node && node.fixes, (fx) => fixTargetId(fx, id));
+  }
+  function treeRescueRows(node) {
+    let best = null;
+    (node && node.rescues || []).forEach((rs) => {
+      if (!rs) return;
+      if (!best || mtimeMs(rs) >= mtimeMs(best)) best = rs;
+    });
+    return best ? [best] : [];
+  }
+  function anchoredConvert(items, fix) {
+    const anchor = String(fix && fix.chapterAnchor || "");
+    if (!anchor) return null;
+    const hits = (items || []).filter((s) => s && s.chapterId && s.chapterRole !== "checker" && s.chapterRole !== "fix" && convertBasename(s) === anchor && !!s.archived === !!(fix && fix.archived));
+    return newestOf(hits);
+  }
+  function newestByMtime(items) {
+    let best = null;
+    (items || []).forEach((s) => {
+      if (!best) {
+        best = s;
+        return;
+      }
+      const d = mtimeMs(s) - mtimeMs(best);
+      if (d > 0) best = s;
+      else if (d === 0) best = newerAttempt(best, s);
+    });
+    return best;
+  }
+  function checkerForConvert(checkers, convert, pinnedConvert) {
+    if (!convert) return newestOf(checkers);
+    const generation = sessionGeneration(convert);
+    const anchored = (checkers || []).filter((c) => String(c.chapterAnchor || "") !== "");
+    if (anchored.length) {
+      const key = convertBasename(convert);
+      const hit = anchored.filter((c) => String(c.chapterAnchor) === key && sessionGeneration(c) === generation);
+      return newestByMtime(hit);
+    }
+    const attempt = Number(convert.chapterAttempt) || 1;
+    if (pinnedConvert) {
+      const peers = (checkers || []).filter((k) => (Number(k.chapterAttempt) || 1) === attempt && sessionGeneration(k) === generation);
+      return newestOf(peers);
+    }
+    const best = newestOf(checkers);
+    if (!best) return null;
+    if (sessionGeneration(best) !== generation) return null;
+    if ((Number(best.chapterAttempt) || 1) < attempt) return null;
+    return best;
+  }
+  function newerAttempt(cur, next) {
+    if (!cur) return next;
+    if (!next) return cur;
+    if (!!cur.archived !== !!next.archived) return cur.archived ? next : cur;
+    const d = mtimeMs(next) - mtimeMs(cur);
+    if (d !== 0) return d > 0 ? next : cur;
+    const a = Number(cur.chapterAttempt) || 1;
+    const b = Number(next.chapterAttempt) || 1;
+    if (a !== b) return b > a ? next : cur;
+    return cur;
+  }
+  const ARCHIVE_MARK = "/work/attempts/";
+  function sessionPath(s) {
+    return String(s && (s.path || s.id) || "");
+  }
+  function sessionGeneration(s) {
+    const p2 = sessionPath(s);
+    const i = p2.indexOf(ARCHIVE_MARK);
+    if (i < 0) return "";
+    const segs = p2.slice(i + ARCHIVE_MARK.length).split("/");
+    if (segs.length < 2 || !/^try\d+$/.test(segs[1])) return "";
+    return p2.slice(0, i) + "|" + segs[0] + "|" + segs[1];
+  }
+  function genRoot(s) {
+    const p2 = sessionPath(s);
+    const i = p2.indexOf("/work/");
+    return i < 0 ? "project:" + String(s && s.project || "") : p2.slice(0, i);
+  }
+  function childGeneration(convert, converts, parentGen, archiveGens) {
+    if (!convert) return parentGen;
+    if (convert.archived) return { key: sessionGeneration(convert), archived: true };
+    const n = Number(convert.chapterAttempt) || 1;
+    let maxLive = 0;
+    (converts || []).forEach((c) => {
+      if (c && !c.archived) maxLive = Math.max(maxLive, Number(c.chapterAttempt) || 1);
+    });
+    if (n < maxLive) {
+      const want = genRoot(convert) + "|" + String(convert.chapterId || "") + "|try" + n;
+      if (archiveGens.has(want)) return { key: want, archived: true };
+    }
+    return { key: sessionGeneration(convert), archived: false };
+  }
+  function convertInGeneration(candidates, gen) {
+    if (!candidates || !candidates.length) return null;
+    if (!gen) return newestOf(candidates);
+    const sameArchived = candidates.filter((c) => !!c.archived === gen.archived);
+    const pool = sameArchived.length ? sameArchived : candidates;
+    const exact = pool.filter((c) => sessionGeneration(c) === gen.key);
+    return newestOf(exact.length ? exact : pool);
+  }
+  function buildChapterTree(items, pinId = "") {
+    const byId = {};
+    const parents = {};
+    const byRole = {};
+    const archiveGens = /* @__PURE__ */ new Set();
+    const fixPool = [];
+    const rescuePool = [];
+    const nodeOfSession = {};
+    let pinnedFix = null;
+    let pinnedRescue = null;
+    let pinned = null;
+    (items || []).forEach((session) => {
+      if (!session) return;
+      const archivedGen = sessionGeneration(session);
+      if (archivedGen) archiveGens.add(archivedGen);
+      if (session.chapterRole === "fix") {
+        fixPool.push(session);
+        if (pinId && session.id === pinId) pinnedFix = session;
+        return;
+      }
+      if (session.chapterRole === "rescue") {
+        rescuePool.push(session);
+        if (pinId && session.id === pinId) pinnedRescue = session;
+        return;
+      }
+      if (!session.chapterId) return;
+      const id = String(session.chapterId);
+      const node = byId[id] || (byId[id] = { id, convert: null, checker: null, fixes: [], rescues: [], children: [] });
+      parents[id] = String(session.chapterParent || "");
+      if (session.chapterRole !== "checker" && session.chapterRole !== "convert") return;
+      const role = session.chapterRole === "checker" ? "checker" : "convert";
+      const key = id + "|" + role;
+      (byRole[key] || (byRole[key] = [])).push(session);
+      nodeOfSession[String(session.id)] = node;
+      if (pinId && session.id === pinId) pinned = { node, role, session };
+    });
+    const roots = [];
+    Object.keys(byId).forEach((id) => {
+      const parent = parents[id] && byId[parents[id]];
+      if (parent) parent.children.push(byId[id]);
+      else roots.push(byId[id]);
+    });
+    const ordinal = (id) => {
+      const m = /_child_(\d+)$/.exec(id);
+      return m ? Number(m[1]) : 0;
+    };
+    const sort = (nodes) => {
+      nodes.sort((a, b) => ordinal(a.id) - ordinal(b.id) || a.id.localeCompare(b.id));
+      nodes.forEach((node) => sort(node.children));
+    };
+    sort(roots);
+    if (!pinned && pinnedFix) {
+      const hit = anchoredConvert(items, pinnedFix);
+      const node = hit ? nodeOfSession[String(hit.id)] : null;
+      if (node) pinned = { node, role: "convert", session: hit };
+    }
+    if (!pinned && pinnedRescue) {
+      const node = byId[String(pinnedRescue.chapterId || "")];
+      const want = String(pinnedRescue.reviewedTranscript || "");
+      if (node && want) {
+        const gen = !!pinnedRescue.archived;
+        const converts = byRole[node.id + "|convert"] || [];
+        const sameGen = converts.filter((c) => !!c.archived === gen);
+        const pool = sameGen.length ? sameGen : converts;
+        const hit = pool.filter((c) => convertBasename(c) === want);
+        if (hit.length) pinned = { node, role: "convert", session: newestOf(hit) };
+      }
+    }
+    const pin = pinned;
+    const resolve2 = (node, parentGen) => {
+      const here = pin && pin.node === node ? pin : null;
+      if (here && here.role === "checker") {
+        node.checker = here.session;
+        const anchor = String(here.session.chapterAnchor || "");
+        const converts = byRole[node.id + "|convert"] || [];
+        if (anchor) {
+          const sameGen = converts.filter((c) => !!c.archived === !!here.session.archived);
+          const hit = (sameGen.length ? sameGen : converts).filter((c) => convertBasename(c) === anchor);
+          node.convert = hit.length ? newestOf(hit) : null;
+        } else {
+          const want = Number(here.session.chapterAttempt) || 1;
+          const peers = converts.filter((c) => (Number(c.chapterAttempt) || 1) === want && !!c.archived === !!here.session.archived);
+          node.convert = peers.length ? newestOf(peers) : newestOf(converts);
+        }
+      } else {
+        node.convert = here ? here.session : convertInGeneration(byRole[node.id + "|convert"] || [], parentGen);
+        node.checker = checkerForConvert(byRole[node.id + "|checker"] || [], node.convert, !!here);
+      }
+      const gen = childGeneration(node.convert, byRole[node.id + "|convert"] || [], parentGen, archiveGens);
+      const archived = gen ? gen.archived : null;
+      node.fixes = fixesForNode(node, node.convert, archived, fixPool);
+      node.rescues = rescuesForNode(node, node.convert, archived, rescuePool);
+      node.children.forEach((child) => resolve2(child, gen));
+    };
+    roots.forEach((root) => resolve2(root, null));
+    return roots;
+  }
   function sessionBoard(s) {
     return s && s.board === "img2text" ? "img2text" : "latex";
   }
@@ -7287,6 +7745,42 @@
       return { kind: "analyze", img, stage: -1, prev };
     }
     return null;
+  }
+  function plainTitle(s) {
+    return !!(s && s.chapterId);
+  }
+  const CHAPTER_ACTIVITY = {
+    running: "运行中",
+    waiting_children: "等待子会话",
+    pass: "已通过",
+    issues: "发现问题",
+    error: "会话错误",
+    // T171：转录里已有 run_end 却停在 running 的尝试被放弃了，不能再显示"运行中"。
+    interrupted: "已中断",
+    // T231：核对跑完没给结论（会话退化/复盘判无法挽救/只读视图没铺起来）时写的
+    // 状态。以前写的是 error，于是一条 submit 成功的转换会话在页面上成了"会话错误"。
+    no_verdict: "核对无结论",
+    // P61：复盘正在看这条转录（状态写在**目标**转录里，复盘一开始就写、结论出来
+    // 再改成 queued/error）。目标会话此刻并没有在跑，但要让人一眼看出"这条报错
+    // 的会话正在被复盘"，而不是以为它就这么定局了。
+    rescuing: "复盘处理中",
+    // T243：上游接口错误的原地重试用满了——这一章**暂停**，不是失败：重启程序
+    // 或在网页点「继续跑」就接着这条会话干。页面文案刻意不写「失败」。
+    paused: "已暂停"
+  };
+  function chapterActivityLabel(state2, role = "convert", peerVerdict = "", live = false) {
+    if (!state2) return live ? "运行中" : "";
+    const judged = peerVerdict === "issues" || peerVerdict === "pass";
+    if (state2 === "queued") {
+      return role === "convert" && judged ? "核对完成待并发槽" : "等待并发槽";
+    }
+    if (state2 === "checking_result") {
+      if (role === "checker") return "核对完成待处理";
+      if (peerVerdict === "issues") return "核对发现问题";
+      if (peerVerdict === "pass") return "已通过";
+      return "转换完成待核对";
+    }
+    return CHAPTER_ACTIVITY[state2] || (live ? "运行中" : "");
   }
   function img2textMemberTag(id) {
     const r = parseImg2TextId(id);
@@ -7395,6 +7889,8 @@
   }
   function chainOfSession(sessions, id) {
     if (!id) return null;
+    const attemptChain = chapterAttemptChain(sessions, id);
+    if (attemptChain) return attemptChain;
     const self2 = parseImg2TextId(id);
     if (!self2) return null;
     let proj = "";
@@ -7410,6 +7906,82 @@
     });
     if (members.length < 2) return null;
     return sortChainMembers(members);
+  }
+  function chapterAttemptChain(sessions, id) {
+    if (!id) return null;
+    let self2 = null;
+    (sessions || []).forEach((s) => {
+      if (s && s.id === id) self2 = s;
+    });
+    if (!self2) return null;
+    const proj = self2.project || projectOf(self2.id);
+    if (self2.chapterRole === "rescue") {
+      const rows2 = chapterRescueRows(sessions, self2);
+      if (rows2.length < 2) return null;
+      return rows2.slice().sort((a, b) => mtimeMs(b) - mtimeMs(a));
+    }
+    if (self2.chapterRole === "fix") {
+      const anchor = String(self2.chapterAnchor || "");
+      if (!anchor) return null;
+      const rounds = (sessions || []).filter((s) => s && s.chapterRole === "fix" && String(s.chapterAnchor || "") === anchor && (s.project || projectOf(s.id)) === proj);
+      if (rounds.length < 2) return null;
+      return rounds.slice().sort((a, b) => mtimeMs(b) - mtimeMs(a));
+    }
+    if (!self2.chapterId) return null;
+    const members = [];
+    dedupeChapterAttempts(sessions || []).forEach((s) => {
+      if (!s || !s.chapterId) return;
+      if (s.chapterRole === "fix" || s.chapterRole === "rescue") return;
+      if (s.chapterId !== self2.chapterId) return;
+      if ((s.project || projectOf(s.id)) !== proj) return;
+      members.push(s);
+    });
+    const wantRole = self2.chapterRole === "checker" ? "checker" : "convert";
+    let rows = members.filter((m) => (m.chapterRole === "checker" ? "checker" : "convert") === wantRole);
+    if (wantRole === "checker" && self2.chapterAnchor) {
+      rows = rows.filter((m) => !m.chapterAnchor || m.chapterAnchor === self2.chapterAnchor);
+    }
+    if (rows.length < 2) return null;
+    return wantRole === "checker" ? rows.slice().sort((a, b) => mtimeMs(b) - mtimeMs(a)) : sortChainMembers(rows);
+  }
+  function dedupeChapterAttempts(items) {
+    const out = [];
+    const byKey = {};
+    (items || []).forEach((s) => {
+      if (!s || !s.chapterId) {
+        out.push(s);
+        return;
+      }
+      const key = [s.project || projectOf(s.id), s.chapterId, s.chapterRole || "", Number(s.chapterAttempt) || 1].join("|");
+      const sha = String(s.sha || "");
+      const peers = byKey[key] || (byKey[key] = []);
+      const twin = sha ? peers.find((o) => String(o.sha || "") === sha) : null;
+      if (!twin) {
+        peers.push(s);
+        out.push(s);
+        return;
+      }
+      if (!!twin.archived && !s.archived) {
+        const i = out.indexOf(twin);
+        if (i >= 0) out[i] = s;
+        peers[peers.indexOf(twin)] = s;
+      }
+    });
+    return out;
+  }
+  function chainMemberTag(s, rescueNo) {
+    if (s && s.chapterRole === "fix") {
+      return (s.archived ? "旧" : "") + "修复" + fixTranscriptTag(s);
+    }
+    if (s && s.chapterRole === "rescue") {
+      const n = Number(rescueNo) > 0 ? Number(rescueNo) : Number(s.chapterAttempt) || 1;
+      return (s.archived ? "旧" : "") + "复盘#" + n;
+    }
+    if (s && s.chapterId) {
+      const tag = (s.chapterRole === "checker" ? "核对" : "") + "#" + (Number(s.chapterAttempt) || 1);
+      return (s.archived ? "旧" : "") + tag;
+    }
+    return img2textMemberTag(s && s.id);
   }
   function findSession(id) {
     let found = null;
@@ -7457,6 +8029,15 @@
     if (hasCollapseMemory(key)) return !isCollapsed(key);
     return !!holdsCurrent;
   }
+  function chapterNodeKey(scope, nodeId) {
+    return "chapter:" + scope + "/" + nodeId;
+  }
+  function chapterWantOpen(scope, nodeId, holdsCurrent) {
+    const key = chapterNodeKey(scope, nodeId);
+    const mem = state.collapsed[key];
+    if (mem !== void 0) return !mem;
+    return !!holdsCurrent;
+  }
   function isOverflowOpen(key) {
     return state.overflow[key] === true;
   }
@@ -7494,21 +8075,42 @@
       const summary = el2.querySelector(".proj-row");
       if (!hit && summary && summary.title === project) hit = el2;
     });
-    const target = hit;
-    if (!target) return;
-    if (!target.open) {
-      target.open = true;
-      target.dataset.open = "1";
+    const target2 = hit;
+    if (!target2) return;
+    if (!target2.open) {
+      target2.open = true;
+      target2.dataset.open = "1";
       setCollapsed(groupKey("proj", project), false);
     }
-    target.scrollIntoView({ block: "nearest" });
+    target2.scrollIntoView({ block: "nearest" });
+  }
+  let forkWatch = null;
+  function watchFork(project, chapter, role, prevId2) {
+    forkWatch = { project, chapter, role, prevId: prevId2, since: Date.now() - 6e4 };
+  }
+  function settleForkWatch() {
+    const w = forkWatch;
+    if (!w) return;
+    if (Date.now() - w.since > 20 * 6e4) {
+      forkWatch = null;
+      return;
+    }
+    const want = (s) => s && s.project === w.project && (w.chapter ? s.chapterId === w.chapter : s.stage === "vector") && (w.chapter ? s.chapterRole === w.role : true) && s.id !== w.prevId;
+    const hit = (state.sessions || []).filter(want).sort((a, b) => String(b.mtime).localeCompare(String(a.mtime)))[0];
+    if (!hit) return;
+    if (Date.parse(hit.mtime) < w.since) return;
+    forkWatch = null;
+    selectSession(hit.id);
   }
   function applyIndex(payload) {
-    state.sessions = payload.sessions || [];
+    state.sessions = dedupeChapterAttempts(payload.sessions || []);
     state.dedupeReviews = payload.dedupeReviews || [];
+    state.retries = payload.retries || {};
+    state.retryRoles = payload.retryRoles || {};
     state.root = payload.root || state.root;
     state.generated = payload.generated || state.generated;
     state.listSig = listSigOf();
+    settleForkWatch();
   }
   function listSigOf() {
     const parts = [state.filter, state.sessions.length];
@@ -7585,6 +8187,7 @@
   }
   function selectSession(id) {
     const s = findSession(id);
+    clearRetryNote();
     state.current = s;
     if (staticSessions && staticSessions[id]) {
       const fresh = normalizeLines(staticSessions[id].lines);
@@ -7653,6 +8256,53 @@
         selectSession((live || state.sessions[0]).id);
       }
     });
+  }
+  async function postJSON(url, body) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const text = (await res.text()).trim();
+    let data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
+    }
+    if (!res.ok) {
+      const reason = data && (data.error || data.message) || text || "HTTP " + res.status;
+      throw new Error(String(reason));
+    }
+    return data === null ? {} : data;
+  }
+  function requestChapterRetry(project, chapter, role = "convert", reason = "", extra = {}) {
+    return postJSON("/api/retry", { project, chapter, role, reason, ...extra });
+  }
+  function truncateSession(project, path, line) {
+    return postJSON("/api/truncate", { project, path, line });
+  }
+  function dropSession(project, path) {
+    return postJSON("/api/drop", { project, path }).then((data) => {
+      void refreshIndex();
+      return data;
+    });
+  }
+  function cancelChapterRetry(project, chapter, role = "convert", path = "") {
+    return postJSON("/api/retry/cancel", { project, chapter, role, path }).then((data) => {
+      void refreshIndex();
+      return data;
+    });
+  }
+  function chapterPendingRetry(project, chapter, role = "") {
+    const list = (state.retries || {})[project] || [];
+    if (list.indexOf(chapter) < 0) return false;
+    if (!role) return true;
+    const roles = (state.retryRoles || {})[project] || {};
+    const queued2 = roles[chapter] || "convert";
+    return queued2 === role;
   }
   const mermaidCache = /* @__PURE__ */ new Map();
   async function defaultPoster(source) {
@@ -8845,18 +9495,34 @@
     if (text !== void 0 && text !== null) node.textContent = text;
     return node;
   }
+  const WORD_CHAR = /[\p{L}\p{N}_]/u;
+  function intrawordUnderscore(m, before, after) {
+    if (m[6] === void 0 && m[9] === void 0) return false;
+    return before !== "" && WORD_CHAR.test(before) || after !== "" && WORD_CHAR.test(after);
+  }
   function mdInline(parent, text, depth = 0) {
     if (depth > 6) {
       parent.appendChild(document.createTextNode(String(text || "")));
       return;
     }
     let rest = String(text === void 0 || text === null ? "" : text);
+    let before = "";
     let guard = 0;
     while (rest && guard++ < 800) {
       const m = MD_INLINE.exec(rest);
       if (!m) break;
-      if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
-      rest = rest.slice(m.index + m[0].length);
+      if (m.index > 0) {
+        parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
+        before = rest.slice(m.index - 1, m.index);
+      }
+      const matched = m[0];
+      rest = rest.slice(m.index + matched.length);
+      if (intrawordUnderscore(m, before, rest.slice(0, 1))) {
+        parent.appendChild(document.createTextNode(matched));
+        before = matched.slice(-1);
+        continue;
+      }
+      before = matched.slice(-1);
       let node;
       if (m[1] !== void 0) {
         node = el("code", "md-inline-code", m[2]);
@@ -8905,11 +9571,12 @@
       mdInline(parent, part, 0);
     });
   }
-  const _sfc_main$l = /* @__PURE__ */ defineComponent({
+  const _sfc_main$o = /* @__PURE__ */ defineComponent({
     __name: "InlineMD",
     props: {
       tag: {},
-      text: {}
+      text: {},
+      plain: { type: Boolean }
     },
     setup(__props) {
       const props = __props;
@@ -8918,10 +9585,10 @@
         const el2 = host.value;
         if (!el2) return;
         el2.textContent = "";
-        el2.appendChild(renderInlineMarkdown(props.text));
+        el2.appendChild(props.plain ? document.createTextNode(props.text) : renderInlineMarkdown(props.text));
       }
       onMounted(render);
-      watch(() => props.text, render);
+      watch(() => [props.text, props.plain], render);
       return (_ctx, _cache) => {
         return openBlock(), createBlock(resolveDynamicComponent(props.tag || "span"), {
           ref_key: "host",
@@ -8930,64 +9597,369 @@
       };
     }
   });
-  const _hoisted_1$g = {
+  const _hoisted_1$j = ["aria-expanded"];
+  const _hoisted_2$i = ["data-id", "title", "onClick"];
+  const _hoisted_3$f = ["aria-expanded", "aria-label", "title", "onClick"];
+  const _hoisted_4$d = {
+    key: 1,
+    class: "chapter-toggle-spacer",
+    "aria-hidden": "true"
+  };
+  const _hoisted_5$d = {
+    key: 3,
+    class: "chapter-usage"
+  };
+  const _hoisted_6$b = {
+    key: 4,
+    class: "chapter-arch",
+    title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
+  };
+  const _hoisted_7$a = {
+    key: 5,
+    class: "chapter-retry-pending",
+    title: "已在重试队列里：转换阶段的下一个安全点会重跑这一章"
+  };
+  const _hoisted_8$7 = {
+    key: 0,
+    class: "chapter-node-body"
+  };
+  const _hoisted_9$6 = ["data-id", "title", "onClick"];
+  const _hoisted_10$5 = {
+    key: 1,
+    class: "chapter-usage"
+  };
+  const _hoisted_11$5 = {
+    key: 2,
+    class: "chapter-arch",
+    title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
+  };
+  const _hoisted_12$5 = {
+    key: 3,
+    class: "chapter-retry-pending",
+    title: "已在重新核对队列里：转换阶段的下一个安全点会重跑核对会话（产物不动）"
+  };
+  const _hoisted_13$5 = ["title", "onClick"];
+  const _hoisted_14$5 = ["onClick"];
+  const _hoisted_15$5 = ["data-id", "title", "onClick"];
+  const _hoisted_16$5 = ["title"];
+  const _hoisted_17$5 = {
+    key: 1,
+    class: "chapter-arch",
+    title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
+  };
+  const _hoisted_18$5 = ["data-id", "title", "onClick"];
+  const _hoisted_19$5 = { class: "rescue-marker" };
+  const _hoisted_20$5 = {
+    key: 1,
+    class: "chapter-arch",
+    title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
+  };
+  const _sfc_main$n = /* @__PURE__ */ defineComponent({
+    ...{ name: "ChapterSessionTree" },
+    __name: "ChapterSessionTree",
+    props: {
+      nodes: {},
+      depth: {},
+      scope: {}
+    },
+    emits: ["select", "info"],
+    setup(__props, { emit: __emit }) {
+      const props = __props;
+      const emit2 = __emit;
+      const currentId = computed(() => state.current && state.current.id);
+      function nodeContainsCurrent(node) {
+        var _a, _b;
+        if (((_a = node.convert) == null ? void 0 : _a.id) === currentId.value || ((_b = node.checker) == null ? void 0 : _b.id) === currentId.value) return true;
+        if ((node.fixes || []).some((f) => f && f.id === currentId.value)) return true;
+        if ((node.rescues || []).some((r) => r && r.id === currentId.value)) return true;
+        return node.children.some(nodeContainsCurrent);
+      }
+      function nodeKey(node) {
+        return chapterNodeKey(props.scope, node.id);
+      }
+      function isOpen(node) {
+        return chapterWantOpen(props.scope, node.id, nodeContainsCurrent(node));
+      }
+      function hasBody(node) {
+        return chapterNodeHasRows(node);
+      }
+      function fixStateText(session) {
+        return session && session.live ? "运行中" : "";
+      }
+      function rescueStateText(session) {
+        return session && session.live ? "运行中" : "";
+      }
+      function kindLabel(session, kind) {
+        return (session && session.archived ? "旧" : "") + kind;
+      }
+      function toggle(node, ev) {
+        ev.stopPropagation();
+        setCollapsed(nodeKey(node), isOpen(node));
+      }
+      function selectNode(node) {
+        const s = primary(node);
+        if (s) emit2("select", s);
+      }
+      function activityText(session, role, node) {
+        const chk = node == null ? void 0 : node.checker;
+        const peer = role === "convert" && chk ? String(chk.chapterActivity || "") : "";
+        return chapterActivityLabel(session == null ? void 0 : session.chapterActivity, role, peer, !!(session == null ? void 0 : session.live));
+      }
+      function nodeActivity(node) {
+        return activityText(primary(node), node.convert ? "convert" : "checker", node);
+      }
+      function nodeProject(node) {
+        const s = primary(node) || node.convert || node.checker;
+        return s && s.project || "";
+      }
+      function canRetryNode(node) {
+        return !!nodeProject(node) && !state.staticMode && node.id.indexOf("_child_") < 0;
+      }
+      function nodePendingRetry(node, role = "convert") {
+        const project = nodeProject(node);
+        return !!project && chapterPendingRetry(project, node.id, role);
+      }
+      function retryNode(node, role, ev) {
+        ev.stopPropagation();
+        const project = nodeProject(node);
+        if (!project) return;
+        const what = "重新核对";
+        setRetryNote("正在提交 " + node.id + " 的" + what + "请求…");
+        requestChapterRetry(project, node.id, role, "侧栏" + what).then((res) => {
+          setRetryNote(node.id + " " + what + "请求已排队（" + (res && res.note || "等待转换阶段处理") + "）");
+          return refreshIndex();
+        }).catch((err) => {
+          setRetryNote(node.id + " " + what + "请求失败：" + (err && err.message || err));
+        });
+      }
+      function stateTone(label) {
+        return label === "运行中" ? "run" : "";
+      }
+      function primary(node) {
+        return node.convert || node.checker;
+      }
+      function nodeTitle(node) {
+        const s = primary(node);
+        return s && sessionTitleOf(s) || node.id;
+      }
+      return (_ctx, _cache) => {
+        const _component_ChapterSessionTree = resolveComponent("ChapterSessionTree", true);
+        return openBlock(), createElementBlock("div", {
+          class: "chapter-tree",
+          style: normalizeStyle({ "--chapter-depth": __props.depth || 0 }),
+          role: "tree"
+        }, [
+          (openBlock(true), createElementBlock(Fragment, null, renderList(__props.nodes, (node) => {
+            var _a, _b;
+            return openBlock(), createElementBlock("div", {
+              key: node.id,
+              class: normalizeClass(["chapter-node", { open: isOpen(node) }]),
+              role: "treeitem",
+              "aria-expanded": isOpen(node)
+            }, [
+              createBaseVNode("div", {
+                class: normalizeClass(["chapter-node-head session-row", { active: !!primary(node) && primary(node).id === currentId.value }]),
+                "data-id": (_a = primary(node)) == null ? void 0 : _a.id,
+                title: primary(node) ? unref(sessionTip)(primary(node)) : node.id,
+                onClick: ($event) => selectNode(node)
+              }, [
+                hasBody(node) ? (openBlock(), createElementBlock("button", {
+                  key: 0,
+                  class: "chapter-toggle",
+                  type: "button",
+                  "aria-expanded": isOpen(node),
+                  "aria-label": (isOpen(node) ? "收起 " : "展开 ") + nodeTitle(node) + " 的子会话",
+                  title: isOpen(node) ? "收起子会话" : "展开子会话",
+                  onClick: ($event) => toggle(node, $event)
+                }, [..._cache[2] || (_cache[2] = [
+                  createBaseVNode("span", {
+                    class: "caret",
+                    "aria-hidden": "true"
+                  }, null, -1)
+                ])], 8, _hoisted_3$f)) : (openBlock(), createElementBlock("span", _hoisted_4$d)),
+                createVNode(_sfc_main$o, {
+                  class: "chapter-name row-title",
+                  tag: "span",
+                  text: nodeTitle(node),
+                  plain: ""
+                }, null, 8, ["text"]),
+                nodeActivity(node) ? (openBlock(), createElementBlock("span", {
+                  key: 2,
+                  class: normalizeClass(["chapter-state", stateTone(nodeActivity(node))])
+                }, toDisplayString(nodeActivity(node)), 3)) : createCommentVNode("", true),
+                unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_5$d, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true),
+                ((_b = primary(node)) == null ? void 0 : _b.archived) ? (openBlock(), createElementBlock("span", _hoisted_6$b, "归档")) : createCommentVNode("", true),
+                nodePendingRetry(node) ? (openBlock(), createElementBlock("span", _hoisted_7$a, "待重试")) : createCommentVNode("", true)
+              ], 10, _hoisted_2$i),
+              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_8$7, [
+                node.checker ? (openBlock(), createElementBlock("div", {
+                  key: 0,
+                  class: normalizeClass(["chapter-checker", { active: currentId.value === node.checker.id, live: node.checker.live }])
+                }, [
+                  createBaseVNode("button", {
+                    class: "checker-main session-row",
+                    type: "button",
+                    role: "treeitem",
+                    "data-id": node.checker.id,
+                    title: unref(sessionTip)(node.checker),
+                    onClick: ($event) => emit2("select", node.checker)
+                  }, [
+                    _cache[3] || (_cache[3] = createBaseVNode("span", { class: "checker-marker" }, "核对", -1)),
+                    createVNode(_sfc_main$o, {
+                      class: "checker-name row-title",
+                      tag: "span",
+                      text: unref(sessionTitleOf)(node.checker),
+                      plain: ""
+                    }, null, 8, ["text"]),
+                    activityText(node.checker, "checker", node) ? (openBlock(), createElementBlock("span", {
+                      key: 0,
+                      class: normalizeClass(["chapter-state", stateTone(activityText(node.checker, "checker", node))])
+                    }, toDisplayString(activityText(node.checker, "checker", node)), 3)) : createCommentVNode("", true),
+                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$5, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true),
+                    node.checker.archived ? (openBlock(), createElementBlock("span", _hoisted_11$5, "归档")) : createCommentVNode("", true),
+                    nodePendingRetry(node, "checker") ? (openBlock(), createElementBlock("span", _hoisted_12$5, "待重试")) : canRetryNode(node) ? (openBlock(), createElementBlock("button", {
+                      key: 4,
+                      class: "chapter-retry icon-btn",
+                      type: "button",
+                      title: "重新核对这一章 " + node.id + "：只重跑核对会话、产物不动，旧的核对转录留在历史里",
+                      onClick: ($event) => retryNode(node, "checker", $event)
+                    }, "↻", 8, _hoisted_13$5)) : createCommentVNode("", true)
+                  ], 8, _hoisted_9$6),
+                  createBaseVNode("button", {
+                    class: "chapter-info",
+                    type: "button",
+                    title: "打开核对会话详情",
+                    onClick: ($event) => emit2("info", node.checker)
+                  }, "ⓘ", 8, _hoisted_14$5)
+                ], 2)) : createCommentVNode("", true),
+                (openBlock(true), createElementBlock(Fragment, null, renderList(unref(treeFixRows)(node), (fx) => {
+                  return openBlock(), createElementBlock("div", {
+                    key: "fix:" + fx.id,
+                    class: normalizeClass(["chapter-fix", { active: currentId.value === fx.id }])
+                  }, [
+                    createBaseVNode("button", {
+                      class: "fix-main session-row",
+                      type: "button",
+                      role: "treeitem",
+                      "data-id": fx.id,
+                      title: unref(fixRowTitle)(fx),
+                      onClick: ($event) => emit2("select", fx)
+                    }, [
+                      createBaseVNode("span", {
+                        class: "fix-marker",
+                        title: "修复会话针对的章节：" + (unref(fixTargetId)(fx, node.id) || "—")
+                      }, toDisplayString(kindLabel(fx, "修复")), 9, _hoisted_16$5),
+                      fixStateText(fx) ? (openBlock(), createElementBlock("span", {
+                        key: 0,
+                        class: normalizeClass(["chapter-state", stateTone(fixStateText(fx))])
+                      }, toDisplayString(fixStateText(fx)), 3)) : createCommentVNode("", true),
+                      fx.archived ? (openBlock(), createElementBlock("span", _hoisted_17$5, "归档")) : createCommentVNode("", true)
+                    ], 8, _hoisted_15$5)
+                  ], 2);
+                }), 128)),
+                (openBlock(true), createElementBlock(Fragment, null, renderList(unref(treeRescueRows)(node), (rs) => {
+                  return openBlock(), createElementBlock("div", {
+                    key: "rescue:" + rs.id,
+                    class: normalizeClass(["chapter-rescue", { active: currentId.value === rs.id }])
+                  }, [
+                    createBaseVNode("button", {
+                      class: "rescue-main session-row",
+                      type: "button",
+                      role: "treeitem",
+                      "data-id": rs.id,
+                      title: unref(rescueRowTitle)(rs),
+                      onClick: ($event) => emit2("select", rs)
+                    }, [
+                      createBaseVNode("span", _hoisted_19$5, toDisplayString(kindLabel(rs, "复盘")), 1),
+                      rescueStateText(rs) ? (openBlock(), createElementBlock("span", {
+                        key: 0,
+                        class: normalizeClass(["chapter-state", stateTone(rescueStateText(rs))])
+                      }, toDisplayString(rescueStateText(rs)), 3)) : createCommentVNode("", true),
+                      rs.archived ? (openBlock(), createElementBlock("span", _hoisted_20$5, "归档")) : createCommentVNode("", true)
+                    ], 8, _hoisted_18$5)
+                  ], 2);
+                }), 128)),
+                node.children.length ? (openBlock(), createBlock(_component_ChapterSessionTree, {
+                  key: 1,
+                  nodes: node.children,
+                  depth: (__props.depth || 0) + 1,
+                  scope: __props.scope,
+                  onSelect: _cache[0] || (_cache[0] = ($event) => emit2("select", $event)),
+                  onInfo: _cache[1] || (_cache[1] = ($event) => emit2("info", $event))
+                }, null, 8, ["nodes", "depth", "scope"])) : createCommentVNode("", true)
+              ])) : createCommentVNode("", true)
+            ], 10, _hoisted_1$j);
+          }), 128))
+        ], 4);
+      };
+    }
+  });
+  const _export_sfc = (sfc, props) => {
+    const target2 = sfc.__vccOpts || sfc;
+    for (const [key, val] of props) {
+      target2[key] = val;
+    }
+    return target2;
+  };
+  const ChapterSessionTree = /* @__PURE__ */ _export_sfc(_sfc_main$n, [["__scopeId", "data-v-68c7c629"]]);
+  const _hoisted_1$i = {
     id: "sidebar-col",
     class: "sidebar-col"
   };
-  const _hoisted_2$f = { class: "side-head" };
-  const _hoisted_3$c = ["title"];
-  const _hoisted_4$a = {
+  const _hoisted_2$h = { class: "side-head" };
+  const _hoisted_3$e = ["title"];
+  const _hoisted_4$c = {
     key: 0,
     class: "board-tabs",
     role: "group",
     "aria-label": "板块"
   };
-  const _hoisted_5$a = ["aria-pressed"];
-  const _hoisted_6$8 = ["aria-pressed"];
-  const _hoisted_7$7 = { class: "side-search" };
-  const _hoisted_8$4 = { class: "side-list-wrap" };
-  const _hoisted_9$4 = {
+  const _hoisted_5$c = ["aria-pressed"];
+  const _hoisted_6$a = ["aria-pressed"];
+  const _hoisted_7$9 = { class: "side-search" };
+  const _hoisted_8$6 = { class: "side-list-wrap" };
+  const _hoisted_9$5 = {
     key: 0,
     class: "i2t-overview",
     "aria-label": "img2text 进度概览"
   };
-  const _hoisted_10$3 = {
+  const _hoisted_10$4 = {
     class: "i2t-ov-head",
     title: "img2text 逐书进度概览（点击折叠/展开，状态会被记住）"
   };
-  const _hoisted_11$3 = { class: "i2t-ov-agg" };
-  const _hoisted_12$3 = ["title"];
-  const _hoisted_13$3 = {
+  const _hoisted_11$4 = { class: "i2t-ov-agg" };
+  const _hoisted_12$4 = ["title"];
+  const _hoisted_13$4 = {
     key: 0,
     class: "i2t-blocks"
   };
-  const _hoisted_14$3 = ["title", "aria-label", "onClick"];
-  const _hoisted_15$3 = { class: "i2t-book-head" };
-  const _hoisted_16$3 = ["title"];
-  const _hoisted_17$3 = { class: "i2t-book-count" };
-  const _hoisted_18$3 = ["aria-label"];
-  const _hoisted_19$3 = { class: "i2t-book-meta" };
-  const _hoisted_20$3 = { class: "i2t-meta-done" };
-  const _hoisted_21$3 = {
+  const _hoisted_14$4 = ["title", "aria-label", "onClick"];
+  const _hoisted_15$4 = { class: "i2t-book-head" };
+  const _hoisted_16$4 = ["title"];
+  const _hoisted_17$4 = { class: "i2t-book-count" };
+  const _hoisted_18$4 = ["aria-label"];
+  const _hoisted_19$4 = { class: "i2t-book-meta" };
+  const _hoisted_20$4 = { class: "i2t-meta-done" };
+  const _hoisted_21$4 = {
     key: 0,
     class: "i2t-meta-fixed"
   };
-  const _hoisted_22$3 = {
+  const _hoisted_22$4 = {
     key: 1,
     class: "i2t-meta-esc"
   };
-  const _hoisted_23$3 = {
+  const _hoisted_23$4 = {
     key: 2,
     class: "i2t-meta-run"
   };
-  const _hoisted_24$3 = {
+  const _hoisted_24$4 = {
     key: 3,
     class: "i2t-meta-pend"
   };
-  const _hoisted_25$2 = ["data-project"];
-  const _hoisted_26$2 = ["title"];
-  const _hoisted_27$2 = { class: "row-body" };
-  const _hoisted_28$2 = {
+  const _hoisted_25$4 = ["data-project"];
+  const _hoisted_26$4 = ["title"];
+  const _hoisted_27$4 = { class: "row-body" };
+  const _hoisted_28$3 = {
     key: 0,
     class: "proj-prefix"
   };
@@ -9056,11 +10028,11 @@
   };
   const _hoisted_63 = ["href"];
   const _hoisted_64 = {
-    key: 0,
+    key: 1,
     class: "session-blocks"
   };
   const _hoisted_65 = ["data-id", "title", "onClick"];
-  const _hoisted_66 = { key: 1 };
+  const _hoisted_66 = { key: 2 };
   const _hoisted_67 = ["data-id", "title", "onClick"];
   const _hoisted_68 = { class: "row-slot" };
   const _hoisted_69 = {
@@ -9073,7 +10045,7 @@
   const _hoisted_73 = ["onClick"];
   const _hoisted_74 = ["onClick"];
   const _hoisted_75 = {
-    key: 0,
+    key: 1,
     class: "session-blocks"
   };
   const _hoisted_76 = ["data-id", "title", "onClick"];
@@ -9103,7 +10075,7 @@
     class: "side-foot"
   };
   const OVERFLOW_LIMIT = 8;
-  const _sfc_main$k = /* @__PURE__ */ defineComponent({
+  const _sfc_main$m = /* @__PURE__ */ defineComponent({
     __name: "Sidebar",
     setup(__props) {
       const listEl = /* @__PURE__ */ ref(null);
@@ -9170,6 +10142,10 @@
               return y.mtime > x.mtime ? 1 : -1;
             });
             const agg = stageChapterAggregate(stg, items, !!state.filter);
+            const chapterItems = items.filter((s) => !!s.chapterId);
+            const cur = state.current;
+            const pinId = cur && (cur.chapterId || cur.chapterRole === "fix") ? String(cur.id) : "";
+            const chapterRoots = stg === "convert" && items.length > 0 && chapterItems.length === items.length ? buildChapterTree(items, pinId) : [];
             const okey = groupKey("overflow", g.name + "/" + stg);
             const shown0 = items;
             const needOverflow = shown0.length > OVERFLOW_LIMIT;
@@ -9190,7 +10166,8 @@
               shown,
               hiddenCount: shown0.length - shown.length,
               agg,
-              noBy
+              noBy,
+              chapterRoots
             };
           });
           let chains = null;
@@ -9317,9 +10294,14 @@
       function onMoreClick(okey) {
         setOverflowOpen(okey);
       }
+      function onResetView() {
+        const id = resetViewState();
+        selectSession(id);
+        void refreshIndex();
+      }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("aside", _hoisted_1$g, [
-          createBaseVNode("div", _hoisted_2$f, [
+        return openBlock(), createElementBlock("aside", _hoisted_1$i, [
+          createBaseVNode("div", _hoisted_2$h, [
             _cache[5] || (_cache[5] = createBaseVNode("span", { class: "side-title" }, "工作区", -1)),
             createBaseVNode("button", {
               id: "side-view-toggle",
@@ -9327,7 +10309,7 @@
               type: "button",
               title: blockView.value ? "切回列表视图" : "切到方块视图（会话多时好扫；悬浮看说明）",
               onClick: toggleBlockView
-            }, toDisplayString(blockView.value ? "☰" : "▦"), 11, _hoisted_3$c),
+            }, toDisplayString(blockView.value ? "☰" : "▦"), 11, _hoisted_3$e),
             createBaseVNode("button", {
               id: "refresh",
               class: "icon-btn",
@@ -9335,9 +10317,16 @@
               title: "重新扫描会话",
               onClick: _cache[0] || (_cache[0] = //@ts-ignore
               (...args) => unref(refreshIndex) && unref(refreshIndex)(...args))
-            }, "⟳")
+            }, "⟳"),
+            createBaseVNode("button", {
+              id: "reset-view",
+              class: "tab-toggle side-reset",
+              type: "button",
+              title: "重置视图：清掉手动选中（pin）、侧栏展开/收起记忆与搜索过滤，回到当前正在跑的顶层会话（没有在跑的就回列表最上面一条）；不动任何数据，也不改主题/显示单位/Markdown 这些显示偏好",
+              onClick: onResetView
+            }, "重置视图")
           ]),
-          showBoardSwitch.value ? (openBlock(), createElementBlock("div", _hoisted_4$a, [
+          showBoardSwitch.value ? (openBlock(), createElementBlock("div", _hoisted_4$c, [
             createBaseVNode("button", {
               id: "board-latex",
               class: "tab-toggle",
@@ -9345,7 +10334,7 @@
               "aria-pressed": unref(state).board === "latex" ? "true" : "false",
               title: "LaTeX 板块：主根（latex）会话",
               onClick: _cache[1] || (_cache[1] = ($event) => unref(setBoard)("latex"))
-            }, "LaTeX", 8, _hoisted_5$a),
+            }, "LaTeX", 8, _hoisted_5$c),
             createBaseVNode("button", {
               id: "board-img2text",
               class: "tab-toggle",
@@ -9353,9 +10342,9 @@
               "aria-pressed": unref(state).board === "img2text" ? "true" : "false",
               title: "img2text 板块：逐图文字化会话与进度",
               onClick: _cache[2] || (_cache[2] = ($event) => unref(setBoard)("img2text"))
-            }, "img2text", 8, _hoisted_6$8)
+            }, "img2text", 8, _hoisted_6$a)
           ])) : createCommentVNode("", true),
-          createBaseVNode("div", _hoisted_7$7, [
+          createBaseVNode("div", _hoisted_7$9, [
             withDirectives(createBaseVNode("input", {
               id: "search",
               "onUpdate:modelValue": _cache[3] || (_cache[3] = ($event) => unref(state).filter = $event),
@@ -9366,7 +10355,7 @@
               [vModelText, unref(state).filter]
             ])
           ]),
-          createBaseVNode("div", _hoisted_8$4, [
+          createBaseVNode("div", _hoisted_8$6, [
             createBaseVNode("div", {
               id: "session-list",
               ref_key: "listEl",
@@ -9375,21 +10364,21 @@
               role: "tree",
               "aria-label": "会话列表"
             }, [
-              progressBooks.value.length ? withDirectives((openBlock(), createElementBlock("details", _hoisted_9$4, [
-                createBaseVNode("summary", _hoisted_10$3, [
+              progressBooks.value.length ? withDirectives((openBlock(), createElementBlock("details", _hoisted_9$5, [
+                createBaseVNode("summary", _hoisted_10$4, [
                   _cache[6] || (_cache[6] = createBaseVNode("span", { class: "row-slot" }, [
                     createBaseVNode("span", { class: "row-caret" })
                   ], -1)),
                   _cache[7] || (_cache[7] = createBaseVNode("span", { class: "i2t-ov-title" }, "进度概览", -1)),
-                  createBaseVNode("span", _hoisted_11$3, toDisplayString(overviewHeadText.value), 1),
+                  createBaseVNode("span", _hoisted_11$4, toDisplayString(overviewHeadText.value), 1),
                   createBaseVNode("button", {
                     class: normalizeClass(["icon-btn", { on: overviewBlocks.value }]),
                     type: "button",
                     title: overviewBlocks.value ? "概览切回列表视图" : "概览切到方块视图（一书一块，色块按主导状态；点块搜该书的会话）",
                     onClick: withModifiers(toggleOverviewBlocks, ["stop"])
-                  }, toDisplayString(overviewBlocks.value ? "☰" : "▦"), 11, _hoisted_12$3)
+                  }, toDisplayString(overviewBlocks.value ? "☰" : "▦"), 11, _hoisted_12$4)
                 ]),
-                overviewBlocks.value ? (openBlock(), createElementBlock("div", _hoisted_13$3, [
+                overviewBlocks.value ? (openBlock(), createElementBlock("div", _hoisted_13$4, [
                   (openBlock(true), createElementBlock(Fragment, null, renderList(progressBooks.value, (b) => {
                     return openBlock(), createElementBlock("button", {
                       key: b.book,
@@ -9398,19 +10387,19 @@
                       title: unref(bookTip)(b),
                       "aria-label": b.book + "：完成 " + b.done + " · 修复 " + b.fixed + " · 升级 " + b.escalated + " · 进行中 " + b.running + " · 待处理 " + b.pending,
                       onClick: ($event) => onOverviewBookClick(b)
-                    }, null, 10, _hoisted_14$3);
+                    }, null, 10, _hoisted_14$4);
                   }), 128))
                 ])) : (openBlock(true), createElementBlock(Fragment, { key: 1 }, renderList(progressBooks.value, (b) => {
                   return openBlock(), createElementBlock("div", {
                     key: b.book,
                     class: "i2t-book"
                   }, [
-                    createBaseVNode("div", _hoisted_15$3, [
+                    createBaseVNode("div", _hoisted_15$4, [
                       createBaseVNode("span", {
                         class: "i2t-book-name",
                         title: b.book
-                      }, toDisplayString(b.book), 9, _hoisted_16$3),
-                      createBaseVNode("span", _hoisted_17$3, toDisplayString(b.done) + "/" + toDisplayString(b.total), 1)
+                      }, toDisplayString(b.book), 9, _hoisted_16$4),
+                      createBaseVNode("span", _hoisted_17$4, toDisplayString(b.done) + "/" + toDisplayString(b.total), 1)
                     ]),
                     createBaseVNode("div", {
                       class: "i2t-bar",
@@ -9437,13 +10426,13 @@
                         class: "i2t-seg i2t-pend",
                         style: normalizeStyle({ width: barPct(b.pending, b.total) + "%" })
                       }, null, 4)
-                    ], 8, _hoisted_18$3),
-                    createBaseVNode("div", _hoisted_19$3, [
-                      createBaseVNode("span", _hoisted_20$3, "完成 " + toDisplayString(b.done), 1),
-                      b.fixed ? (openBlock(), createElementBlock("span", _hoisted_21$3, "修复 " + toDisplayString(b.fixed), 1)) : createCommentVNode("", true),
-                      b.escalated ? (openBlock(), createElementBlock("span", _hoisted_22$3, "升级 " + toDisplayString(b.escalated), 1)) : createCommentVNode("", true),
-                      b.running ? (openBlock(), createElementBlock("span", _hoisted_23$3, "进行中 " + toDisplayString(b.running), 1)) : createCommentVNode("", true),
-                      b.pending ? (openBlock(), createElementBlock("span", _hoisted_24$3, "待处理 " + toDisplayString(b.pending), 1)) : createCommentVNode("", true)
+                    ], 8, _hoisted_18$4),
+                    createBaseVNode("div", _hoisted_19$4, [
+                      createBaseVNode("span", _hoisted_20$4, "完成 " + toDisplayString(b.done), 1),
+                      b.fixed ? (openBlock(), createElementBlock("span", _hoisted_21$4, "修复 " + toDisplayString(b.fixed), 1)) : createCommentVNode("", true),
+                      b.escalated ? (openBlock(), createElementBlock("span", _hoisted_22$4, "升级 " + toDisplayString(b.escalated), 1)) : createCommentVNode("", true),
+                      b.running ? (openBlock(), createElementBlock("span", _hoisted_23$4, "进行中 " + toDisplayString(b.running), 1)) : createCommentVNode("", true),
+                      b.pending ? (openBlock(), createElementBlock("span", _hoisted_24$4, "待处理 " + toDisplayString(b.pending), 1)) : createCommentVNode("", true)
                     ])
                   ]);
                 }), 128))
@@ -9460,15 +10449,15 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-b72c25b8><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-b72c25b8><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b72c25b8></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-b72c25b8><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-b72c25b8></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-b72c25b8></path></svg></span>', 1)),
-                    createBaseVNode("span", _hoisted_27$2, [
-                      g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$2, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-5f65ee61><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5f65ee61><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5f65ee61></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5f65ee61><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-5f65ee61></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5f65ee61></path></svg></span>', 1)),
+                    createBaseVNode("span", _hoisted_27$4, [
+                      g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$3, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
                     ]),
                     createBaseVNode("span", _hoisted_30$2, toDisplayString(g.items.length) + " 个会话", 1),
                     g.legacy ? (openBlock(), createElementBlock("span", _hoisted_31$2, "旧版单项目")) : createCommentVNode("", true),
                     g.live ? (openBlock(), createElementBlock("span", _hoisted_32$1)) : createCommentVNode("", true)
-                  ], 8, _hoisted_26$2),
+                  ], 8, _hoisted_26$4),
                   createBaseVNode("div", null, [
                     g.progress ? (openBlock(), createElementBlock("div", _hoisted_33$1, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
                     g.chains ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
@@ -9503,11 +10492,12 @@
                                   class: normalizeClass(["dot", { live: c.live > 0 }])
                                 }, null, 2)
                               ]),
-                              createVNode(_sfc_main$l, {
+                              createVNode(_sfc_main$o, {
                                 tag: "span",
                                 class: "row-title",
-                                text: unref(sessionTitleOf)(c.main)
-                              }, null, 8, ["text"]),
+                                text: unref(sessionTitleOf)(c.main),
+                                plain: unref(plainTitle)(c.main)
+                              }, null, 8, ["text", "plain"]),
                               unref(usageChipText)(c.main) ? (openBlock(), createElementBlock("span", _hoisted_38$1, toDisplayString(unref(usageChipText)(c.main)), 1)) : createCommentVNode("", true),
                               createBaseVNode("span", _hoisted_39$1, toDisplayString(unref(relTime)(c.main.mtime)), 1),
                               createBaseVNode("span", _hoisted_40$1, [
@@ -9541,11 +10531,12 @@
                                       class: normalizeClass(["dot", { live: s.live }])
                                     }, null, 2)
                                   ]),
-                                  createVNode(_sfc_main$l, {
+                                  createVNode(_sfc_main$o, {
                                     tag: "span",
                                     class: "row-title",
-                                    text: unref(sessionTitleOf)(s)
-                                  }, null, 8, ["text"]),
+                                    text: unref(sessionTitleOf)(s),
+                                    plain: unref(plainTitle)(s)
+                                  }, null, 8, ["text", "plain"]),
                                   createBaseVNode("span", _hoisted_47$1, toDisplayString(unref(img2textMemberTag)(s.id)), 1),
                                   createBaseVNode("span", _hoisted_48$1, toDisplayString(unref(relTime)(s.mtime)), 1),
                                   createBaseVNode("span", _hoisted_49, [
@@ -9578,11 +10569,12 @@
                                 class: normalizeClass(["dot", { live: s.live }])
                               }, null, 2)
                             ]),
-                            createVNode(_sfc_main$l, {
+                            createVNode(_sfc_main$o, {
                               tag: "span",
                               class: "row-title",
-                              text: unref(sessionTitleOf)(s)
-                            }, null, 8, ["text"]),
+                              text: unref(sessionTitleOf)(s),
+                              plain: unref(plainTitle)(s)
+                            }, null, 8, ["text", "plain"]),
                             unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_53, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                             createBaseVNode("span", _hoisted_54, toDisplayString(unref(relTime)(s.mtime)), 1),
                             createBaseVNode("span", _hoisted_55, [
@@ -9630,7 +10622,13 @@
                               }, "复查", 8, _hoisted_63)
                             ])) : createCommentVNode("", true)
                           ]),
-                          blockView.value ? (openBlock(), createElementBlock("div", _hoisted_64, [
+                          sv.chapterRoots.length ? (openBlock(), createBlock(ChapterSessionTree, {
+                            key: 0,
+                            nodes: sv.chapterRoots,
+                            scope: g.name + "/" + sv.stage,
+                            onSelect: onRowClick,
+                            onInfo: onInfoClick
+                          }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_64, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9658,11 +10656,12 @@
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
                                 ]),
-                                createVNode(_sfc_main$l, {
+                                createVNode(_sfc_main$o, {
                                   tag: "span",
                                   class: "row-title",
-                                  text: unref(sessionTitleOf)(s)
-                                }, null, 8, ["text"]),
+                                  text: unref(sessionTitleOf)(s),
+                                  plain: unref(plainTitle)(s)
+                                }, null, 8, ["text", "plain"]),
                                 unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_69, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
@@ -9690,7 +10689,13 @@
                         ], 8, _hoisted_57)), [
                           [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
                         ]) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
-                          blockView.value ? (openBlock(), createElementBlock("div", _hoisted_75, [
+                          sv.chapterRoots.length ? (openBlock(), createBlock(ChapterSessionTree, {
+                            key: 0,
+                            nodes: sv.chapterRoots,
+                            scope: g.name + "/" + sv.stage,
+                            onSelect: onRowClick,
+                            onInfo: onInfoClick
+                          }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_75, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.items, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9702,7 +10707,7 @@
                                 onClick: ($event) => onRowClick(s)
                               }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_76);
                             }), 128))
-                          ])) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                          ])) : (openBlock(), createElementBlock(Fragment, { key: 2 }, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -9718,11 +10723,12 @@
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
                                 ]),
-                                createVNode(_sfc_main$l, {
+                                createVNode(_sfc_main$o, {
                                   tag: "span",
                                   class: "row-title",
-                                  text: unref(sessionTitleOf)(s)
-                                }, null, 8, ["text"]),
+                                  text: unref(sessionTitleOf)(s),
+                                  plain: unref(plainTitle)(s)
+                                }, null, 8, ["text", "plain"]),
                                 unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_79, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
@@ -9751,7 +10757,7 @@
                       ], 64);
                     }), 128)) : createCommentVNode("", true)
                   ])
-                ], 8, _hoisted_25$2)), [
+                ], 8, _hoisted_25$4)), [
                   [vCollapse, { key: "proj:" + g.name, want: g.matched ? true : projWantOpen(g), frozen: g.matched }]
                 ]);
               }), 128)),
@@ -9774,14 +10780,7 @@
       };
     }
   });
-  const _export_sfc = (sfc, props) => {
-    const target = sfc.__vccOpts || sfc;
-    for (const [key, val] of props) {
-      target[key] = val;
-    }
-    return target;
-  };
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-b72c25b8"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-5f65ee61"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
@@ -10256,8 +11255,8 @@
           const attr = legacyParts ? { kind: "task", how: "task", callId: "", lineN: line.n, taskLineN: line.n } : attrs[line.n] || { kind: "none", how: "", callId: "", taskLineN: 0 };
           if (attr.kind === "call" && callById[attr.callId]) {
             const host = callById[attr.callId];
-            const target = previewTarget(attr, callById) || host;
-            target.previews.push(line);
+            const target2 = previewTarget(attr, callById) || host;
+            target2.previews.push(line);
             if (attr.how === "call-id") {
               host.outImages.push({ line, attr });
             } else {
@@ -10342,12 +11341,12 @@
     });
     return map;
   }
-  const _hoisted_1$f = { class: "stream-summary" };
-  const _hoisted_2$e = {
+  const _hoisted_1$h = { class: "stream-summary" };
+  const _hoisted_2$g = {
     key: 0,
     class: "dot-sep"
   };
-  const _sfc_main$j = /* @__PURE__ */ defineComponent({
+  const _sfc_main$l = /* @__PURE__ */ defineComponent({
     __name: "StreamSummary",
     setup(__props) {
       const bits = computed(() => {
@@ -10367,10 +11366,10 @@
       });
       const detailsBtn = computed(() => layout.cols.details > 0 ? "收起详情" : "详情 ›");
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("div", _hoisted_1$f, [
+        return openBlock(), createElementBlock("div", _hoisted_1$h, [
           (openBlock(true), createElementBlock(Fragment, null, renderList(bits.value, (b, i) => {
             return openBlock(), createElementBlock(Fragment, { key: i }, [
-              i ? (openBlock(), createElementBlock("span", _hoisted_2$e)) : createCommentVNode("", true),
+              i ? (openBlock(), createElementBlock("span", _hoisted_2$g)) : createCommentVNode("", true),
               createBaseVNode("span", null, toDisplayString(b), 1)
             ], 64);
           }), 128)),
@@ -10383,13 +11382,13 @@
       };
     }
   });
-  const StreamSummary = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-a0dfcd77"]]);
-  const _hoisted_1$e = ["data-phase"];
-  const _hoisted_2$d = { class: "pt-head" };
-  const _hoisted_3$b = { class: "pt-label" };
-  const _hoisted_4$9 = { class: "pt-age" };
-  const _hoisted_5$9 = { class: "code pt-text" };
-  const _sfc_main$i = /* @__PURE__ */ defineComponent({
+  const StreamSummary = /* @__PURE__ */ _export_sfc(_sfc_main$l, [["__scopeId", "data-v-a0dfcd77"]]);
+  const _hoisted_1$g = ["data-phase"];
+  const _hoisted_2$f = { class: "pt-head" };
+  const _hoisted_3$d = { class: "pt-label" };
+  const _hoisted_4$b = { class: "pt-age" };
+  const _hoisted_5$b = { class: "code pt-text" };
+  const _sfc_main$k = /* @__PURE__ */ defineComponent({
     __name: "PartialTail",
     props: {
       partial: {}
@@ -10410,48 +11409,48 @@
           class: "msg partial-tail",
           "data-phase": __props.partial.phase
         }, [
-          createBaseVNode("div", _hoisted_2$d, [
+          createBaseVNode("div", _hoisted_2$f, [
             _cache[0] || (_cache[0] = createBaseVNode("span", {
               class: "pt-spinner",
               "aria-hidden": "true"
             }, null, -1)),
-            createBaseVNode("span", _hoisted_3$b, toDisplayString(phaseLabel.value), 1),
-            createBaseVNode("span", _hoisted_4$9, toDisplayString(age.value), 1)
+            createBaseVNode("span", _hoisted_3$d, toDisplayString(phaseLabel.value), 1),
+            createBaseVNode("span", _hoisted_4$b, toDisplayString(age.value), 1)
           ]),
-          createBaseVNode("pre", _hoisted_5$9, [
+          createBaseVNode("pre", _hoisted_5$b, [
             createTextVNode(toDisplayString(text.value), 1),
             _cache[1] || (_cache[1] = createBaseVNode("span", {
               class: "pt-caret",
               "aria-hidden": "true"
             }, "▍", -1))
           ])
-        ], 8, _hoisted_1$e);
+        ], 8, _hoisted_1$g);
       };
     }
   });
-  const PartialTail = /* @__PURE__ */ _export_sfc(_sfc_main$i, [["__scopeId", "data-v-37ec04a0"]]);
-  const _hoisted_1$d = ["open"];
-  const _hoisted_2$c = { class: "line-name" };
-  const _hoisted_3$a = {
+  const PartialTail = /* @__PURE__ */ _export_sfc(_sfc_main$k, [["__scopeId", "data-v-37ec04a0"]]);
+  const _hoisted_1$f = ["open"];
+  const _hoisted_2$e = { class: "line-name" };
+  const _hoisted_3$c = {
     key: 0,
     class: "line-badge"
   };
-  const _hoisted_4$8 = {
+  const _hoisted_4$a = {
     key: 1,
     class: "line-lock",
     title: "厂商加密摘要头（reasoning_content 不是明文思维链）"
   };
-  const _hoisted_5$8 = ["title"];
-  const _hoisted_6$7 = {
+  const _hoisted_5$a = ["title"];
+  const _hoisted_6$9 = {
     key: 3,
     class: "line-running",
     title: "这个调用还没有收到回执，正在执行"
   };
-  const _hoisted_7$6 = {
+  const _hoisted_7$8 = {
     key: 4,
     class: "line-tail"
   };
-  const _sfc_main$h = /* @__PURE__ */ defineComponent({
+  const _sfc_main$j = /* @__PURE__ */ defineComponent({
     __name: "Disclosure",
     props: {
       cls: {},
@@ -10473,29 +11472,29 @@
             _cache[2] || (_cache[2] = createBaseVNode("span", { class: "line-slot" }, [
               createBaseVNode("span", { class: "line-caret" })
             ], -1)),
-            createBaseVNode("span", _hoisted_2$c, toDisplayString(__props.name), 1),
-            __props.badge ? (openBlock(), createElementBlock("span", _hoisted_3$a, toDisplayString(__props.badge), 1)) : createCommentVNode("", true),
-            __props.encrypted ? (openBlock(), createElementBlock("span", _hoisted_4$8, "🔒 加密摘要")) : createCommentVNode("", true),
+            createBaseVNode("span", _hoisted_2$e, toDisplayString(__props.name), 1),
+            __props.badge ? (openBlock(), createElementBlock("span", _hoisted_3$c, toDisplayString(__props.badge), 1)) : createCommentVNode("", true),
+            __props.encrypted ? (openBlock(), createElementBlock("span", _hoisted_4$a, "🔒 加密摘要")) : createCommentVNode("", true),
             __props.summary ? (openBlock(), createElementBlock(Fragment, { key: 2 }, [
               _cache[0] || (_cache[0] = createBaseVNode("span", { class: "line-sep" }, null, -1)),
               createBaseVNode("span", {
                 class: "line-summary",
                 title: __props.summary
-              }, toDisplayString(__props.summary), 9, _hoisted_5$8)
+              }, toDisplayString(__props.summary), 9, _hoisted_5$a)
             ], 64)) : createCommentVNode("", true),
-            __props.running ? (openBlock(), createElementBlock("span", _hoisted_6$7, [..._cache[1] || (_cache[1] = [
+            __props.running ? (openBlock(), createElementBlock("span", _hoisted_6$9, [..._cache[1] || (_cache[1] = [
               createBaseVNode("span", { class: "running-dot" }, null, -1),
               createTextVNode("运行中 ", -1)
             ])])) : createCommentVNode("", true),
-            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_7$6, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
+            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_7$8, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
           ]),
           renderSlot(_ctx.$slots, "default", {}, void 0, true)
-        ], 10, _hoisted_1$d);
+        ], 10, _hoisted_1$f);
       };
     }
   });
-  const Disclosure = /* @__PURE__ */ _export_sfc(_sfc_main$h, [["__scopeId", "data-v-5dfa0673"]]);
-  const _sfc_main$g = /* @__PURE__ */ defineComponent({
+  const Disclosure = /* @__PURE__ */ _export_sfc(_sfc_main$j, [["__scopeId", "data-v-5dfa0673"]]);
+  const _sfc_main$i = /* @__PURE__ */ defineComponent({
     __name: "MdBody",
     props: {
       text: {}
@@ -10519,8 +11518,8 @@
       };
     }
   });
-  const _hoisted_1$c = { class: "text-wrap" };
-  const _sfc_main$f = /* @__PURE__ */ defineComponent({
+  const _hoisted_1$e = { class: "text-wrap" };
+  const _sfc_main$h = /* @__PURE__ */ defineComponent({
     __name: "FoldText",
     props: {
       text: {},
@@ -10542,8 +11541,8 @@
         storeSet("text." + props.memKey, expanded.value ? "1" : "0");
       }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("div", _hoisted_1$c, [
-          unref(state).markdown ? (openBlock(), createBlock(_sfc_main$g, {
+        return openBlock(), createElementBlock("div", _hoisted_1$e, [
+          unref(state).markdown ? (openBlock(), createBlock(_sfc_main$i, {
             key: 0,
             text: raw.value,
             class: normalizeClass(["md-body", __props.extraClass, { clamped: long.value && !expanded.value }]),
@@ -10562,7 +11561,7 @@
       };
     }
   });
-  const _sfc_main$e = /* @__PURE__ */ defineComponent({
+  const _sfc_main$g = /* @__PURE__ */ defineComponent({
     __name: "MachineScrollBox",
     props: {
       text: {},
@@ -10594,16 +11593,16 @@
       };
     }
   });
-  const _hoisted_1$b = { class: "io-label" };
-  const _hoisted_2$b = {
+  const _hoisted_1$d = { class: "io-label" };
+  const _hoisted_2$d = {
     key: 0,
     class: "io-empty"
   };
-  const _hoisted_3$9 = {
+  const _hoisted_3$b = {
     key: 2,
     class: "io-extra"
   };
-  const _sfc_main$d = /* @__PURE__ */ defineComponent({
+  const _sfc_main$f = /* @__PURE__ */ defineComponent({
     __name: "IOSection",
     props: {
       label: {},
@@ -10619,24 +11618,24 @@
         return openBlock(), createElementBlock("div", {
           class: normalizeClass(["io-section", { "out-section": __props.out }])
         }, [
-          createBaseVNode("div", _hoisted_1$b, toDisplayString(__props.label), 1),
-          __props.text === void 0 || __props.text === null || __props.text === "" ? (openBlock(), createElementBlock("div", _hoisted_2$b, "（无内容）")) : (openBlock(), createBlock(_sfc_main$e, {
+          createBaseVNode("div", _hoisted_1$d, toDisplayString(__props.label), 1),
+          __props.text === void 0 || __props.text === null || __props.text === "" ? (openBlock(), createElementBlock("div", _hoisted_2$d, "（无内容）")) : (openBlock(), createBlock(_sfc_main$g, {
             key: 1,
             text: __props.text,
             "mem-key": __props.memKey || "",
             tokens: __props.tokens,
             error: __props.error
           }, null, 8, ["text", "mem-key", "tokens", "error"])),
-          unref(slots).default ? (openBlock(), createElementBlock("div", _hoisted_3$9, [
+          unref(slots).default ? (openBlock(), createElementBlock("div", _hoisted_3$b, [
             renderSlot(_ctx.$slots, "default")
           ])) : createCommentVNode("", true)
         ], 2);
       };
     }
   });
-  const _hoisted_1$a = { class: "images" };
-  const _hoisted_2$a = ["src", "alt", "title", "onClick"];
-  const _sfc_main$c = /* @__PURE__ */ defineComponent({
+  const _hoisted_1$c = { class: "images" };
+  const _hoisted_2$c = ["src", "alt", "title", "onClick"];
+  const _sfc_main$e = /* @__PURE__ */ defineComponent({
     __name: "ImageStrip",
     props: {
       images: {}
@@ -10646,7 +11645,7 @@
         openLightbox(mediaURL(ref2), ref2);
       }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("div", _hoisted_1$a, [
+        return openBlock(), createElementBlock("div", _hoisted_1$c, [
           (openBlock(true), createElementBlock(Fragment, null, renderList(__props.images || [], (img) => {
             return openBlock(), createElementBlock("img", {
               key: img,
@@ -10656,13 +11655,13 @@
               loading: "lazy",
               title: img,
               onClick: ($event) => show(img)
-            }, null, 8, _hoisted_2$a);
+            }, null, 8, _hoisted_2$c);
           }), 128))
         ]);
       };
     }
   });
-  const _sfc_main$b = /* @__PURE__ */ defineComponent({
+  const _sfc_main$d = /* @__PURE__ */ defineComponent({
     __name: "CopyBtn",
     props: {
       text: {}
@@ -10696,19 +11695,19 @@
       };
     }
   });
-  const _hoisted_1$9 = { class: "io-card" };
-  const _hoisted_2$9 = {
+  const _hoisted_1$b = { class: "io-card" };
+  const _hoisted_2$b = {
     key: 0,
     class: "io-cmd"
   };
-  const _hoisted_3$8 = { class: "cmd-line" };
-  const _hoisted_4$7 = { class: "io-actions" };
-  const _hoisted_5$7 = { class: "attach-note" };
-  const _hoisted_6$6 = { class: "io-actions" };
-  const _hoisted_7$5 = { class: "io-section attach-section" };
-  const _hoisted_8$3 = { class: "attach-body" };
-  const _hoisted_9$3 = { class: "attach-note" };
-  const _sfc_main$a = /* @__PURE__ */ defineComponent({
+  const _hoisted_3$a = { class: "cmd-line" };
+  const _hoisted_4$9 = { class: "io-actions" };
+  const _hoisted_5$9 = { class: "attach-note" };
+  const _hoisted_6$8 = { class: "io-actions" };
+  const _hoisted_7$7 = { class: "io-section attach-section" };
+  const _hoisted_8$5 = { class: "attach-body" };
+  const _hoisted_9$4 = { class: "attach-note" };
+  const _sfc_main$c = /* @__PURE__ */ defineComponent({
     __name: "ToolCard",
     props: {
       item: {}
@@ -10771,19 +11770,19 @@
           onToggle
         }, {
           default: withCtx(() => [
-            createBaseVNode("div", _hoisted_1$9, [
-              __props.item.cmdLine ? (openBlock(), createElementBlock("div", _hoisted_2$9, [
+            createBaseVNode("div", _hoisted_1$b, [
+              __props.item.cmdLine ? (openBlock(), createElementBlock("div", _hoisted_2$b, [
                 _cache[0] || (_cache[0] = createBaseVNode("span", { class: "cmd-prompt" }, "$ ", -1)),
-                createBaseVNode("span", _hoisted_3$8, toDisplayString(__props.item.cmdLine), 1)
+                createBaseVNode("span", _hoisted_3$a, toDisplayString(__props.item.cmdLine), 1)
               ])) : createCommentVNode("", true),
-              createVNode(_sfc_main$d, {
+              createVNode(_sfc_main$f, {
                 label: "输入",
                 text: prettyArgs.value,
                 "mem-key": "in." + (__props.item.id || ""),
                 tokens: __props.item.argsTokens
               }, null, 8, ["text", "mem-key", "tokens"]),
-              createBaseVNode("div", _hoisted_4$7, [
-                createVNode(_sfc_main$b, {
+              createBaseVNode("div", _hoisted_4$9, [
+                createVNode(_sfc_main$d, {
                   text: __props.item.argsText
                 }, null, 8, ["text"])
               ]),
@@ -10792,7 +11791,7 @@
                   key: r.line.n
                 }, [
                   _cache[1] || (_cache[1] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
-                  createVNode(_sfc_main$d, {
+                  createVNode(_sfc_main$f, {
                     label: "输出",
                     text: String(r.line.text || ""),
                     error: r.status === "error",
@@ -10805,17 +11804,17 @@
                         return openBlock(), createElementBlock(Fragment, {
                           key: a.line.n
                         }, [
-                          createVNode(_sfc_main$c, {
+                          createVNode(_sfc_main$e, {
                             images: a.line.images
                           }, null, 8, ["images"]),
-                          createBaseVNode("div", _hoisted_5$7, toDisplayString(unref(outImageNote)(a)), 1)
+                          createBaseVNode("div", _hoisted_5$9, toDisplayString(unref(outImageNote)(a)), 1)
                         ], 64);
                       }), 128)) : createCommentVNode("", true)
                     ]),
                     _: 2
                   }, 1032, ["text", "error", "mem-key", "tokens"]),
-                  createBaseVNode("div", _hoisted_6$6, [
-                    createVNode(_sfc_main$b, {
+                  createBaseVNode("div", _hoisted_6$8, [
+                    createVNode(_sfc_main$d, {
                       text: String(r.line.text || "")
                     }, null, 8, ["text"])
                   ])
@@ -10826,21 +11825,21 @@
                   key: a.line.n
                 }, [
                   _cache[3] || (_cache[3] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
-                  createBaseVNode("div", _hoisted_7$5, [
+                  createBaseVNode("div", _hoisted_7$7, [
                     _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
-                    createBaseVNode("div", _hoisted_8$3, [
-                      a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$f, {
+                    createBaseVNode("div", _hoisted_8$5, [
+                      a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$h, {
                         key: 0,
                         text: String(a.line.text || ""),
                         "mem-key": "imgtext." + a.line.n,
                         "preview-lines": _ctx.FOLD_PREVIEW_LINES,
                         tokens: unref(estOf)(a.line).text
                       }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])) : createCommentVNode("", true),
-                      createVNode(_sfc_main$c, {
+                      createVNode(_sfc_main$e, {
                         images: a.line.images
                       }, null, 8, ["images"])
                     ]),
-                    createBaseVNode("div", _hoisted_9$3, toDisplayString(unref(attachNote)(a)), 1)
+                    createBaseVNode("div", _hoisted_9$4, toDisplayString(unref(attachNote)(a)), 1)
                   ])
                 ], 64);
               }), 128))
@@ -10851,20 +11850,20 @@
       };
     }
   });
-  const _hoisted_1$8 = { class: "thinking-body" };
-  const _hoisted_2$8 = { class: "reasoning-scroll reasoning-md" };
-  const _hoisted_3$7 = { class: "leak-body" };
-  const _hoisted_4$6 = { class: "body-text" };
-  const _hoisted_5$6 = {
+  const _hoisted_1$a = { class: "thinking-body" };
+  const _hoisted_2$a = { class: "reasoning-scroll reasoning-md" };
+  const _hoisted_3$9 = { class: "leak-body" };
+  const _hoisted_4$8 = { class: "body-text" };
+  const _hoisted_5$8 = {
     key: 0,
     class: "preview-strip"
   };
-  const _hoisted_6$5 = ["src", "alt", "title", "onClick"];
-  const _hoisted_7$4 = {
+  const _hoisted_6$7 = ["src", "alt", "title", "onClick"];
+  const _hoisted_7$6 = {
     key: 2,
     class: "note"
   };
-  const _sfc_main$9 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$b = /* @__PURE__ */ defineComponent({
     __name: "AssistantMsg",
     props: {
       item: {}
@@ -10945,15 +11944,15 @@
             onToggle: onThinkToggle
           }, {
             default: withCtx(() => [
-              createBaseVNode("div", _hoisted_1$8, [
-                createBaseVNode("div", _hoisted_2$8, [
-                  createVNode(_sfc_main$g, { text: thinkBody.value }, null, 8, ["text"])
+              createBaseVNode("div", _hoisted_1$a, [
+                createBaseVNode("div", _hoisted_2$a, [
+                  createVNode(_sfc_main$i, { text: thinkBody.value }, null, 8, ["text"])
                 ])
               ])
             ]),
             _: 1
           }, 8, ["encrypted", "summary", "tail", "open"])) : createCommentVNode("", true),
-          body.value.main ? (openBlock(), createBlock(_sfc_main$f, {
+          body.value.main ? (openBlock(), createBlock(_sfc_main$h, {
             key: 1,
             text: body.value.main,
             "mem-key": "asst." + line.value.n,
@@ -10969,8 +11968,8 @@
               summary: leakSummary(b)
             }, {
               default: withCtx(() => [
-                createBaseVNode("div", _hoisted_3$7, [
-                  createBaseVNode("pre", _hoisted_4$6, toDisplayString(b.text), 1)
+                createBaseVNode("div", _hoisted_3$9, [
+                  createBaseVNode("pre", _hoisted_4$8, toDisplayString(b.text), 1)
                 ])
               ]),
               _: 2
@@ -10980,8 +11979,8 @@
             return openBlock(), createElementBlock(Fragment, {
               key: c.key
             }, [
-              createVNode(_sfc_main$a, { item: c }, null, 8, ["item"]),
-              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_5$6, [
+              createVNode(_sfc_main$c, { item: c }, null, 8, ["item"]),
+              unref(state).showThumbs && previewThumbs(c).length ? (openBlock(), createElementBlock("div", _hoisted_5$8, [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(previewThumbs(c), (t) => {
                   return openBlock(), createElementBlock("img", {
                     key: t.ref,
@@ -10991,31 +11990,31 @@
                     loading: "lazy",
                     title: t.ref,
                     onClick: ($event) => show(t.ref, t.url)
-                  }, null, 8, _hoisted_6$5);
+                  }, null, 8, _hoisted_6$7);
                 }), 128))
               ])) : createCommentVNode("", true)
             ], 64);
           }), 128)),
-          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_7$4, "（空消息）")) : createCommentVNode("", true)
+          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_7$6, "（空消息）")) : createCommentVNode("", true)
         ], 512);
       };
     }
   });
-  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-a034e634"]]);
-  const _hoisted_1$7 = { class: "sys-line" };
-  const _hoisted_2$7 = { class: "line-summary" };
-  const _hoisted_3$6 = {
+  const AssistantMsg = /* @__PURE__ */ _export_sfc(_sfc_main$b, [["__scopeId", "data-v-a034e634"]]);
+  const _hoisted_1$9 = { class: "sys-line" };
+  const _hoisted_2$9 = { class: "line-summary" };
+  const _hoisted_3$8 = {
     key: 0,
     class: "note"
   };
-  const _hoisted_4$5 = {
+  const _hoisted_4$7 = {
     key: 1,
     class: "body-text sys-text"
   };
-  const _hoisted_5$5 = { class: "io-section attach-section" };
-  const _hoisted_6$4 = { class: "attach-body" };
-  const _hoisted_7$3 = { class: "attach-note" };
-  const _sfc_main$8 = /* @__PURE__ */ defineComponent({
+  const _hoisted_5$7 = { class: "io-section attach-section" };
+  const _hoisted_6$6 = { class: "attach-body" };
+  const _hoisted_7$5 = { class: "attach-note" };
+  const _sfc_main$a = /* @__PURE__ */ defineComponent({
     __name: "SystemMsg",
     props: {
       item: {}
@@ -11046,21 +12045,21 @@
           class: "msg msg-system",
           title: "这一轮是 user 角色发出的任务提示（系统性质，不是人打的字）"
         }, [
-          createBaseVNode("div", _hoisted_1$7, [
+          createBaseVNode("div", _hoisted_1$9, [
             _cache[0] || (_cache[0] = createBaseVNode("span", { class: "sys-badge" }, "系统", -1)),
             _cache[1] || (_cache[1] = createBaseVNode("span", { class: "sys-meta" }, "user 轮", -1)),
-            createBaseVNode("span", _hoisted_2$7, toDisplayString(unref(firstLine)(line.value.text)), 1)
+            createBaseVNode("span", _hoisted_2$9, toDisplayString(unref(firstLine)(line.value.text)), 1)
           ]),
-          !raw.value ? (openBlock(), createElementBlock("div", _hoisted_3$6, "（无正文）")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+          !raw.value ? (openBlock(), createElementBlock("div", _hoisted_3$8, "（无正文）")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
             createBaseVNode("div", {
               class: normalizeClass(["sys-scroll", { folded: long.value && !expanded.value }]),
               style: normalizeStyle({ maxHeight: long.value && !expanded.value ? unref(SYSTEM_PREVIEW_LINES) * 24 + "px" : "var(--code-scroll-h)" })
             }, [
-              unref(state).markdown ? (openBlock(), createBlock(_sfc_main$g, {
+              unref(state).markdown ? (openBlock(), createBlock(_sfc_main$i, {
                 key: 0,
                 text: raw.value,
                 class: "md-body sys-md"
-              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_4$5, toDisplayString(raw.value), 1))
+              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_4$7, toDisplayString(raw.value), 1))
             ], 6),
             long.value ? (openBlock(), createElementBlock("button", {
               key: 0,
@@ -11074,20 +12073,20 @@
               key: a.line.n
             }, [
               _cache[3] || (_cache[3] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
-              createBaseVNode("div", _hoisted_5$5, [
+              createBaseVNode("div", _hoisted_5$7, [
                 _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
-                createBaseVNode("div", _hoisted_6$4, [
-                  a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$f, {
+                createBaseVNode("div", _hoisted_6$6, [
+                  a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$h, {
                     key: 0,
                     text: String(a.line.text || ""),
                     "mem-key": "imgtext." + a.line.n,
                     tokens: unref(estOf)(a.line).text
                   }, null, 8, ["text", "mem-key", "tokens"])) : createCommentVNode("", true),
-                  createVNode(_sfc_main$c, {
+                  createVNode(_sfc_main$e, {
                     images: a.line.images
                   }, null, 8, ["images"])
                 ]),
-                createBaseVNode("div", _hoisted_7$3, toDisplayString(unref(attachNote)(a)), 1)
+                createBaseVNode("div", _hoisted_7$5, toDisplayString(unref(attachNote)(a)), 1)
               ])
             ], 64);
           }), 128))
@@ -11095,11 +12094,11 @@
       };
     }
   });
-  const SystemMsg = /* @__PURE__ */ _export_sfc(_sfc_main$8, [["__scopeId", "data-v-b39af669"]]);
-  const _hoisted_1$6 = { class: "msg msg-image" };
-  const _hoisted_2$6 = { class: "image-body" };
-  const _hoisted_3$5 = { class: "attach-note" };
-  const _sfc_main$7 = /* @__PURE__ */ defineComponent({
+  const SystemMsg = /* @__PURE__ */ _export_sfc(_sfc_main$a, [["__scopeId", "data-v-b39af669"]]);
+  const _hoisted_1$8 = { class: "msg msg-image" };
+  const _hoisted_2$8 = { class: "image-body" };
+  const _hoisted_3$7 = { class: "attach-note" };
+  const _sfc_main$9 = /* @__PURE__ */ defineComponent({
     __name: "ImageTurn",
     props: {
       item: {}
@@ -11126,7 +12125,7 @@
         if (line.value && ((_a = root.value) == null ? void 0 : _a.$el)) unregisterAnchor(line.value.n, root.value.$el);
       });
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("section", _hoisted_1$6, [
+        return openBlock(), createElementBlock("section", _hoisted_1$8, [
           createVNode(Disclosure, {
             ref_key: "root",
             ref: root,
@@ -11139,17 +12138,17 @@
             onToggle
           }, {
             default: withCtx(() => [
-              createBaseVNode("div", _hoisted_2$6, [
-                line.value.text ? (openBlock(), createBlock(_sfc_main$f, {
+              createBaseVNode("div", _hoisted_2$8, [
+                line.value.text ? (openBlock(), createBlock(_sfc_main$h, {
                   key: 0,
                   text: String(line.value.text),
                   "mem-key": "imgtext." + line.value.n,
                   tokens: unref(estOf)(line.value).text
                 }, null, 8, ["text", "mem-key", "tokens"])) : createCommentVNode("", true),
-                createVNode(_sfc_main$c, {
+                createVNode(_sfc_main$e, {
                   images: line.value.images
                 }, null, 8, ["images"]),
-                createBaseVNode("div", _hoisted_3$5, toDisplayString(unref(attributionText)(__props.item.attr)), 1)
+                createBaseVNode("div", _hoisted_3$7, toDisplayString(unref(attributionText)(__props.item.attr)), 1)
               ])
             ]),
             _: 1
@@ -11158,10 +12157,10 @@
       };
     }
   });
-  const ImageTurn = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-1eee90b4"]]);
-  const _hoisted_1$5 = { class: "io-card" };
-  const _hoisted_2$5 = { class: "io-actions" };
-  const _sfc_main$6 = /* @__PURE__ */ defineComponent({
+  const ImageTurn = /* @__PURE__ */ _export_sfc(_sfc_main$9, [["__scopeId", "data-v-1eee90b4"]]);
+  const _hoisted_1$7 = { class: "io-card" };
+  const _hoisted_2$7 = { class: "io-actions" };
+  const _sfc_main$8 = /* @__PURE__ */ defineComponent({
     __name: "ResultMsg",
     props: {
       item: {}
@@ -11192,16 +12191,16 @@
             title: !__props.item.paired ? line.value.tool_call_id ? "未找到配对的工具调用：id " + line.value.tool_call_id : "这条回执行没有 tool_call_id，无法与调用配对" : void 0
           }, {
             default: withCtx(() => [
-              createBaseVNode("div", _hoisted_1$5, [
-                createVNode(_sfc_main$d, {
+              createBaseVNode("div", _hoisted_1$7, [
+                createVNode(_sfc_main$f, {
                   label: "输出",
                   text: text.value,
                   error: status.value === "error",
                   "mem-key": "result." + line.value.n,
                   tokens: unref(estOf)(line.value).text
                 }, null, 8, ["text", "error", "mem-key", "tokens"]),
-                createBaseVNode("div", _hoisted_2$5, [
-                  createVNode(_sfc_main$b, { text: text.value }, null, 8, ["text"])
+                createBaseVNode("div", _hoisted_2$7, [
+                  createVNode(_sfc_main$d, { text: text.value }, null, 8, ["text"])
                 ])
               ])
             ]),
@@ -11211,24 +12210,104 @@
       };
     }
   });
-  const _hoisted_1$4 = { class: "stream" };
-  const _hoisted_2$4 = {
+  function canCutFrom(s) {
+    if (!s || s.staticMode || s.live) return false;
+    if (!s.project) return false;
+    if (s.stage === "vector") return String(s.name || "").indexOf("vector_") === 0;
+    if (!s.chapterId) return false;
+    return s.chapterRole === "convert" || s.chapterRole === "checker";
+  }
+  function canForkFrom(s) {
+    if (!canCutFrom(s)) return false;
+    if (s.chapterRole === "checker") return true;
+    return String(s.chapterId || "").indexOf("_child_") < 0;
+  }
+  function forkPrompt(line, s) {
+    if (s && s.stage === "vector") {
+      return "从第 " + line + " 条记录之后继续？\n\n历史会截到这一条（完整旧转录留档成 .tryN，仍看得到），只重画这一张；类别与分组不变。";
+    }
+    if (s && s.chapterRole === "checker") {
+      return "从第 " + line + " 条记录之后继续核对？\n\n后面的轮次会从这条核对会话的历史里丢掉（源转录仍保留在「历史」里），并开一条新的核对尝试；已提交的产物一个字不动。";
+    }
+    return "从第 " + line + ' 条记录之后继续？\n\n后面的轮次会从"接着干"的历史里丢掉（源转录仍保留在「历史」里），并开一个新尝试；有工作区快照时会连工作区一起退回这一刻（老会话没有快照则只退对话）。';
+  }
+  function forkRequestOf(s, line, source) {
+    if (!s || !canForkFrom(s) || !(line > 0)) return null;
+    const vector = s.stage === "vector";
+    return {
+      project: String(s.project),
+      chapter: vector ? "" : String(s.chapterId),
+      role: vector ? "vector" : s.chapterRole === "checker" ? "checker" : "continue",
+      reason: source + "回滚到 #" + line,
+      // T201：发**完整路径**（会话的 Path 是绝对路径）。子章节的转录在父工作区的
+      // 细分树里，只发文件名服务端只能去 work/sessions/ 找，必然报"源转录不存在"。
+      extra: { from: Number(line), path: String(s.path || s.name || "") }
+    };
+  }
+  function dropFromLine(line, source) {
+    if (!(line > 1)) {
+      setRetryNote("这一条之前没有可截断的记录（要从头重来请用「重试这一章」）");
+      return false;
+    }
+    const s = state.current;
+    if (!s || !s.chapterId) return false;
+    const keep = line - 1;
+    const child = String(s.chapterId || "").indexOf("_child_") >= 0;
+    const parent = child ? String(s.chapterId).slice(0, String(s.chapterId).indexOf("_child_")) : "";
+    const then = child ? "接着点顶栏的「继续跑父章节」（" + parent + "）让它跑起来：子章节不会单独重跑，父节点重新驱动这一支时会从这条截断后的转录续跑" : "运行中的 latex 会从这条会话接着跑（也可以点「继续跑」排一次）";
+    const ask2 = "删掉第 " + line + " 条及之后（共 " + keep + " 条保留）并继续这条会话？\n\n就地截断当前转录，不新开尝试、不复制会话；原文会先备份到 work/sessions/.trash/。想保留一份对照，请先点 ⤓ 显式 fork 一条同样的会话再在这里操作。";
+    if (!window.confirm(ask2)) return false;
+    setRetryNote("正在就地截断到第 " + keep + " 条…");
+    truncateSession(String(s.project), String(s.path), keep).then((res) => {
+      setRetryNote("已截断：保留 " + (res && res.kept || keep) + " 条、丢掉 " + (res && res.dropped || 0) + " 条（备份 " + (res && res.backup || ".trash/") + "）；" + then);
+      return refreshIndex();
+    }).catch((err) => {
+      setRetryNote("截断失败：" + (err && err.message || err));
+    });
+    return true;
+  }
+  function forkFromLine(line, source) {
+    const s = state.current;
+    const req = forkRequestOf(s, line, source);
+    if (!s || !req) return false;
+    if (!window.confirm(forkPrompt(line, s))) return false;
+    const prevId2 = String(s.id || "");
+    setRetryNote("正在提交从第 " + line + " 条记录继续的请求…");
+    requestChapterRetry(req.project, req.chapter, req.role, req.reason, req.extra).then((res) => {
+      setRetryNote("已排队：从第 " + line + " 条记录之后继续（" + (res && res.note || "等待并发槽位") + "）；新会话出现后自动切过去");
+      watchFork(req.project, req.chapter, req.role, prevId2);
+      return refreshIndex();
+    }).catch((err) => {
+      setRetryNote("从记录继续失败：" + (err && err.message || err));
+    });
+    return true;
+  }
+  const _hoisted_1$6 = { class: "stream" };
+  const _hoisted_2$6 = {
     key: 4,
     class: "msg msg-other"
   };
-  const _hoisted_3$4 = {
+  const _hoisted_3$6 = {
+    key: 5,
+    class: "fork-acts"
+  };
+  const _hoisted_4$6 = ["onClick"];
+  const _hoisted_5$6 = ["onClick"];
+  const _hoisted_6$5 = {
     key: 1,
     class: "empty"
   };
-  const _hoisted_4$4 = {
+  const _hoisted_7$4 = {
     key: 3,
     class: "msg msg-end"
   };
-  const _hoisted_5$4 = { class: "end-detail" };
-  const _sfc_main$5 = /* @__PURE__ */ defineComponent({
+  const _hoisted_8$4 = { class: "end-detail" };
+  const _sfc_main$7 = /* @__PURE__ */ defineComponent({
     __name: "Timeline",
     setup(__props) {
       const model = computed(() => streamModel());
+      const canFork = computed(() => canForkFrom(state.current));
+      const canCut = computed(() => canCutFrom(state.current));
       const emptyText = computed(() => {
         if (state.onlyTools) return "这个会话没有工具调用记录";
         if (!state.current) return "左侧选择一个会话开始浏览。";
@@ -11259,11 +12338,12 @@
           id: "timeline",
           class: normalizeClass(["timeline", { hidden: unref(state).view !== "chat" }])
         }, [
-          createBaseVNode("div", _hoisted_1$4, [
+          createBaseVNode("div", _hoisted_1$6, [
             unref(state).current ? (openBlock(), createBlock(StreamSummary, { key: 0 })) : createCommentVNode("", true),
             (openBlock(true), createElementBlock(Fragment, null, renderList(model.value.items, (item) => {
-              return openBlock(), createElementBlock(Fragment, {
-                key: item.key
+              return openBlock(), createElementBlock("div", {
+                key: item.key,
+                class: "fork-wrap"
               }, [
                 item.type === "assistant" ? (openBlock(), createBlock(AssistantMsg, {
                   key: 0,
@@ -11274,34 +12354,50 @@
                 }, null, 8, ["item"])) : item.type === "imageTurn" ? (openBlock(), createBlock(ImageTurn, {
                   key: 2,
                   item
-                }, null, 8, ["item"])) : item.type === "result" ? (openBlock(), createBlock(_sfc_main$6, {
+                }, null, 8, ["item"])) : item.type === "result" ? (openBlock(), createBlock(_sfc_main$8, {
                   key: 3,
                   item
-                }, null, 8, ["item"])) : (openBlock(), createElementBlock("section", _hoisted_2$4, [
-                  createVNode(_sfc_main$f, {
+                }, null, 8, ["item"])) : (openBlock(), createElementBlock("section", _hoisted_2$6, [
+                  createVNode(_sfc_main$h, {
                     text: String(item.line.text || "(无正文)"),
                     "mem-key": "other." + item.line.n,
                     "preview-lines": unref(LONG_TEXT_LINES),
                     tokens: unref(estOf)(item.line).text
                   }, null, 8, ["text", "mem-key", "preview-lines", "tokens"])
-                ]))
-              ], 64);
+                ])),
+                canFork.value || canCut.value ? (openBlock(), createElementBlock("span", _hoisted_3$6, [
+                  canFork.value ? (openBlock(), createElementBlock("button", {
+                    key: 0,
+                    class: "fork-btn",
+                    type: "button",
+                    title: "复制一份并从这里开始（fork）：开一个新尝试接着干，源记录保留在「历史」里。想就地改就先在目标会话上操作，不必 fork。",
+                    onClick: withModifiers(($event) => unref(forkFromLine)(item.line.n, "对话"), ["stop"])
+                  }, "⤓", 8, _hoisted_4$6)) : createCommentVNode("", true),
+                  canCut.value ? (openBlock(), createElementBlock("button", {
+                    key: 1,
+                    class: "fork-btn fork-drop",
+                    type: "button",
+                    title: "删掉这条及之后的记录并继续（就地截断这条会话，不新开尝试；原文先备份到 work/sessions/.trash/）",
+                    onClick: withModifiers(($event) => unref(dropFromLine)(item.line.n, "对话"), ["stop"])
+                  }, "⤫", 8, _hoisted_5$6)) : createCommentVNode("", true)
+                ])) : createCommentVNode("", true)
+              ]);
             }), 128)),
-            !model.value.items.length && !unref(state).partial ? (openBlock(), createElementBlock("div", _hoisted_3$4, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true),
+            !model.value.items.length && !unref(state).partial ? (openBlock(), createElementBlock("div", _hoisted_6$5, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true),
             unref(state).current && unref(state).current.live && unref(state).partial ? (openBlock(), createBlock(PartialTail, {
               key: 2,
               partial: unref(state).partial
             }, null, 8, ["partial"])) : createCommentVNode("", true),
-            unref(state).current && !unref(state).current.live && unref(state).current.runEndError ? (openBlock(), createElementBlock("section", _hoisted_4$4, [
+            unref(state).current && !unref(state).current.live && unref(state).current.runEndError ? (openBlock(), createElementBlock("section", _hoisted_7$4, [
               _cache[0] || (_cache[0] = createBaseVNode("div", { class: "end-title" }, "会话结局 · 错误终止", -1)),
-              createBaseVNode("div", _hoisted_5$4, toDisplayString(unref(state).current.runEndError), 1)
+              createBaseVNode("div", _hoisted_8$4, toDisplayString(unref(state).current.runEndError), 1)
             ])) : createCommentVNode("", true)
           ])
         ], 2);
       };
     }
   });
-  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-e0584d34"]]);
+  const Timeline = /* @__PURE__ */ _export_sfc(_sfc_main$7, [["__scopeId", "data-v-8e9b08f8"]]);
   const IMAGE_PLACEHOLDER = /\[\s*image\b|\[\s*图片|图片见|image omitted/i;
   function nextMsgLine(lines, idx) {
     for (let i = idx + 1; i < lines.length; i++) {
@@ -11503,7 +12599,7 @@
     void node.offsetWidth;
     node.classList.add("flash");
   }
-  const _sfc_main$4 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$6 = /* @__PURE__ */ defineComponent({
     __name: "MachineText",
     props: {
       text: {},
@@ -11529,43 +12625,49 @@
       };
     }
   });
-  const _hoisted_1$3 = { class: "traj-toolbar" };
-  const _hoisted_2$3 = { class: "traj-toolbar-inner" };
-  const _hoisted_3$3 = { class: "traj-filters" };
-  const _hoisted_4$3 = ["aria-pressed"];
-  const _hoisted_5$3 = ["title", "aria-pressed", "onClick"];
-  const _hoisted_6$3 = { class: "traj-count" };
-  const _hoisted_7$2 = { class: "traj-scroll" };
-  const _hoisted_8$2 = {
+  const _hoisted_1$5 = { class: "traj-toolbar" };
+  const _hoisted_2$5 = { class: "traj-toolbar-inner" };
+  const _hoisted_3$5 = { class: "traj-filters" };
+  const _hoisted_4$5 = ["aria-pressed"];
+  const _hoisted_5$5 = ["title", "aria-pressed", "onClick"];
+  const _hoisted_6$4 = {
+    key: 0,
+    class: "traj-note"
+  };
+  const _hoisted_7$3 = { class: "traj-count" };
+  const _hoisted_8$3 = { class: "traj-scroll" };
+  const _hoisted_9$3 = {
     key: 0,
     class: "traj-empty"
   };
-  const _hoisted_9$2 = {
+  const _hoisted_10$3 = {
     key: 1,
     class: "traj-table"
   };
-  const _hoisted_10$2 = { class: "num-head" };
-  const _hoisted_11$2 = ["data-kind", "data-error", "title", "onClick"];
-  const _hoisted_12$2 = { class: "traj-num" };
-  const _hoisted_13$2 = ["onClick"];
-  const _hoisted_14$2 = ["onClick"];
-  const _hoisted_15$2 = { class: "traj-name" };
-  const _hoisted_16$2 = ["title"];
-  const _hoisted_17$2 = { class: "traj-num-cell" };
-  const _hoisted_18$2 = { class: "traj-num-cell" };
-  const _hoisted_19$2 = {
+  const _hoisted_11$3 = { class: "num-head" };
+  const _hoisted_12$3 = ["data-kind", "data-error", "title", "onClick"];
+  const _hoisted_13$3 = { class: "traj-num" };
+  const _hoisted_14$3 = ["onClick"];
+  const _hoisted_15$3 = ["onClick"];
+  const _hoisted_16$3 = ["onClick"];
+  const _hoisted_17$3 = ["onClick"];
+  const _hoisted_18$3 = { class: "traj-name" };
+  const _hoisted_19$3 = ["title"];
+  const _hoisted_20$3 = { class: "traj-num-cell" };
+  const _hoisted_21$3 = { class: "traj-num-cell" };
+  const _hoisted_22$3 = {
     key: 0,
     class: "traj-detail"
   };
-  const _hoisted_20$2 = { colspan: 7 };
-  const _hoisted_21$2 = { class: "traj-detail-inner" };
-  const _hoisted_22$2 = { class: "traj-detail-title" };
-  const _hoisted_23$2 = {
+  const _hoisted_23$3 = { colspan: 7 };
+  const _hoisted_24$3 = { class: "traj-detail-inner" };
+  const _hoisted_25$3 = { class: "traj-detail-title" };
+  const _hoisted_26$3 = {
     key: 1,
     class: "code"
   };
-  const _hoisted_24$2 = { class: "row-actions" };
-  const _sfc_main$3 = /* @__PURE__ */ defineComponent({
+  const _hoisted_27$3 = { class: "row-actions" };
+  const _sfc_main$5 = /* @__PURE__ */ defineComponent({
     __name: "Trajectory",
     setup(__props) {
       const rows = computed(() => state.current ? trajectoryRows() : []);
@@ -11610,6 +12712,8 @@
         if (!row.jump) return;
         state.trajSelected = state.trajSelected === row.rid ? null : row.rid;
       }
+      const canFork = computed(() => canForkFrom(state.current));
+      const canCut = computed(() => canCutFrom(state.current));
       function goChat(row) {
         if (!row.jump) return;
         state.trajSelected = row.rid;
@@ -11620,15 +12724,15 @@
           id: "trajectory",
           class: normalizeClass(["trajectory", { hidden: unref(state).view !== "trajectory" }])
         }, [
-          createBaseVNode("div", _hoisted_1$3, [
-            createBaseVNode("div", _hoisted_2$3, [
-              createBaseVNode("div", _hoisted_3$3, [
+          createBaseVNode("div", _hoisted_1$5, [
+            createBaseVNode("div", _hoisted_2$5, [
+              createBaseVNode("div", _hoisted_3$5, [
                 createBaseVNode("button", {
                   type: "button",
                   class: "traj-chip",
                   "aria-pressed": allPressed.value ? "true" : "false",
                   onClick: _cache[0] || (_cache[0] = ($event) => unref(state).trajKinds = {})
-                }, "全部", 8, _hoisted_4$3),
+                }, "全部", 8, _hoisted_4$5),
                 (openBlock(true), createElementBlock(Fragment, null, renderList(kinds.value, (k) => {
                   return openBlock(), createElementBlock("button", {
                     key: k.id,
@@ -11637,14 +12741,15 @@
                     title: "只看 / 不看「" + k.label + "」",
                     "aria-pressed": unref(state).trajKinds[k.id] ? "true" : "false",
                     onClick: ($event) => pick(k.id)
-                  }, toDisplayString(k.label) + " " + toDisplayString(k.count), 9, _hoisted_5$3);
+                  }, toDisplayString(k.label) + " " + toDisplayString(k.count), 9, _hoisted_5$5);
                 }), 128))
               ]),
-              createBaseVNode("span", _hoisted_6$3, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
+              unref(state).retryNote ? (openBlock(), createElementBlock("span", _hoisted_6$4, toDisplayString(unref(state).retryNote), 1)) : createCommentVNode("", true),
+              createBaseVNode("span", _hoisted_7$3, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
             ])
           ]),
-          createBaseVNode("div", _hoisted_7$2, [
-            !visible.value.length ? (openBlock(), createElementBlock("div", _hoisted_8$2, toDisplayString(rows.value.length ? "当前筛选没有匹配的步骤" : unref(state).current ? "这个会话还没有步骤" : "左侧选择一个会话后，这里列出它的全部步骤。"), 1)) : (openBlock(), createElementBlock("table", _hoisted_9$2, [
+          createBaseVNode("div", _hoisted_8$3, [
+            !visible.value.length ? (openBlock(), createElementBlock("div", _hoisted_9$3, toDisplayString(rows.value.length ? "当前筛选没有匹配的步骤" : unref(state).current ? "这个会话还没有步骤" : "左侧选择一个会话后，这里列出它的全部步骤。"), 1)) : (openBlock(), createElementBlock("table", _hoisted_10$3, [
               _cache[7] || (_cache[7] = createBaseVNode("colgroup", null, [
                 createBaseVNode("col", { class: "col-n" }),
                 createBaseVNode("col", { class: "col-kind" }),
@@ -11661,7 +12766,7 @@
                   _cache[3] || (_cache[3] = createBaseVNode("th", null, "名称", -1)),
                   _cache[4] || (_cache[4] = createBaseVNode("th", null, "摘要", -1)),
                   _cache[5] || (_cache[5] = createBaseVNode("th", null, "状态", -1)),
-                  createBaseVNode("th", _hoisted_10$2, toDisplayString(unref(unitLabel)()), 1),
+                  createBaseVNode("th", _hoisted_11$3, toDisplayString(unref(unitLabel)()), 1),
                   _cache[6] || (_cache[6] = createBaseVNode("th", { class: "num-head" }, "耗时", -1))
                 ])
               ]),
@@ -11677,13 +12782,13 @@
                       title: row.title || "点击在右侧详情栏看这一步",
                       onClick: ($event) => row.jump ? selectRow(row) : unref(state).trajOpen[row.rid] = !unref(state).trajOpen[row.rid]
                     }, [
-                      createBaseVNode("td", _hoisted_12$2, [
+                      createBaseVNode("td", _hoisted_13$3, [
                         createBaseVNode("button", {
                           type: "button",
                           class: "traj-disclose",
                           title: "展开完整输入输出",
                           onClick: withModifiers(($event) => unref(state).trajOpen[row.rid] = !unref(state).trajOpen[row.rid], ["stop"])
-                        }, toDisplayString(unref(state).trajOpen[row.rid] ? "▾" : "▸"), 9, _hoisted_13$2),
+                        }, toDisplayString(unref(state).trajOpen[row.rid] ? "▾" : "▸"), 9, _hoisted_14$3),
                         createTextVNode(toDisplayString(row.jump ? String(row.jump) : "—") + " ", 1),
                         row.jump ? (openBlock(), createElementBlock("button", {
                           key: 0,
@@ -11691,43 +12796,57 @@
                           class: "traj-gochat",
                           title: "跳到对话里对应的那条消息",
                           onClick: withModifiers(($event) => goChat(row), ["stop"])
-                        }, "↳", 8, _hoisted_14$2)) : createCommentVNode("", true)
+                        }, "↳", 8, _hoisted_15$3)) : createCommentVNode("", true),
+                        row.jump && canFork.value ? (openBlock(), createElementBlock("button", {
+                          key: 1,
+                          type: "button",
+                          class: "traj-cut",
+                          title: "从这一条之后继续：历史截到这条消息，后面的轮次丢掉，开一个新尝试接着干",
+                          onClick: withModifiers(($event) => unref(forkFromLine)(row.jump, "轨迹"), ["stop"])
+                        }, "⤓", 8, _hoisted_16$3)) : createCommentVNode("", true),
+                        row.jump && canCut.value ? (openBlock(), createElementBlock("button", {
+                          key: 2,
+                          type: "button",
+                          class: "traj-cut",
+                          title: "删掉这条及之后的记录并继续（就地截断这条转录，不新开尝试；原文先备份到 work/sessions/.trash/）",
+                          onClick: withModifiers(($event) => unref(dropFromLine)(row.jump, "轨迹"), ["stop"])
+                        }, "⤫", 8, _hoisted_17$3)) : createCommentVNode("", true)
                       ]),
                       createBaseVNode("td", null, [
                         createBaseVNode("span", {
                           class: normalizeClass(["kind-tag", row.status === "error" ? "kind-error" : "kind-" + row.kind])
                         }, toDisplayString(row.tag), 3)
                       ]),
-                      createBaseVNode("td", _hoisted_15$2, toDisplayString(row.name), 1),
+                      createBaseVNode("td", _hoisted_18$3, toDisplayString(row.name), 1),
                       createBaseVNode("td", {
                         class: "traj-summary",
                         title: row.summary || ""
-                      }, toDisplayString(row.summary || "—"), 9, _hoisted_16$2),
+                      }, toDisplayString(row.summary || "—"), 9, _hoisted_19$3),
                       createBaseVNode("td", {
                         class: normalizeClass("traj-status " + statusCell(row).cls)
                       }, toDisplayString(statusCell(row).text), 3),
-                      createBaseVNode("td", _hoisted_17$2, toDisplayString(sizeCell(row)), 1),
-                      createBaseVNode("td", _hoisted_18$2, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
-                    ], 10, _hoisted_11$2),
-                    unref(state).trajOpen[row.rid] ? (openBlock(), createElementBlock("tr", _hoisted_19$2, [
-                      createBaseVNode("td", _hoisted_20$2, [
-                        createBaseVNode("div", _hoisted_21$2, [
+                      createBaseVNode("td", _hoisted_20$3, toDisplayString(sizeCell(row)), 1),
+                      createBaseVNode("td", _hoisted_21$3, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
+                    ], 10, _hoisted_12$3),
+                    unref(state).trajOpen[row.rid] ? (openBlock(), createElementBlock("tr", _hoisted_22$3, [
+                      createBaseVNode("td", _hoisted_23$3, [
+                        createBaseVNode("div", _hoisted_24$3, [
                           (openBlock(true), createElementBlock(Fragment, null, renderList(row.detail || {}, (text, key) => {
                             return openBlock(), createElementBlock("div", { key }, [
-                              createBaseVNode("div", _hoisted_22$2, toDisplayString(DETAIL_LABELS[key] || key), 1),
-                              detailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$4, {
+                              createBaseVNode("div", _hoisted_25$3, toDisplayString(DETAIL_LABELS[key] || key), 1),
+                              detailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$6, {
                                 key: 0,
                                 text: String(text || ""),
                                 cls: "code"
-                              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_23$2, toDisplayString(String(text || "")), 1)),
-                              createBaseVNode("div", _hoisted_24$2, [
-                                createVNode(_sfc_main$b, {
+                              }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_26$3, toDisplayString(String(text || "")), 1)),
+                              createBaseVNode("div", _hoisted_27$3, [
+                                createVNode(_sfc_main$d, {
                                   text: String(text || "")
                                 }, null, 8, ["text"])
                               ])
                             ]);
                           }), 128)),
-                          row.images && row.images.length ? (openBlock(), createBlock(_sfc_main$c, {
+                          row.images && row.images.length ? (openBlock(), createBlock(_sfc_main$e, {
                             key: 0,
                             images: row.images
                           }, null, 8, ["images"])) : createCommentVNode("", true)
@@ -11743,7 +12862,7 @@
       };
     }
   });
-  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-54a24f80"]]);
+  const Trajectory = /* @__PURE__ */ _export_sfc(_sfc_main$5, [["__scopeId", "data-v-488defb4"]]);
   function currentEstimate() {
     const id = state.current ? state.current.id : "";
     const list = state.sessions || [];
@@ -11767,7 +12886,7 @@
     const rows = [
       { k: "项目", v: cur.project || projectOf(cur.id), title: cur.id },
       { k: "阶段", v: cur.stageTitle || cur.stage || "—" },
-      { k: "会话", md: sessionTitleOf(cur), title: cur.id, mono: true },
+      plainTitle(cur) ? { k: "会话", v: sessionTitleOf(cur), title: cur.id, mono: true } : { k: "会话", md: sessionTitleOf(cur), title: cur.id, mono: true },
       { k: "文件", v: cur.name || "—", title: cur.path, mono: true },
       { k: "消息", v: cur.messages + " 条 · " + state.lines.length + " 行" },
       { k: "大小", v: fmtSize(cur.size) },
@@ -11897,58 +13016,58 @@
     };
   }
   const META_COUNT_TIP = "同一个转录里有 {n} 条 meta 行（多次运行 / 提示词变化各一条），这里显示最后一条。";
-  const _hoisted_1$2 = {
+  const _hoisted_1$4 = {
     id: "details-body",
     class: "details-body"
   };
-  const _hoisted_2$2 = {
+  const _hoisted_2$4 = {
     key: 0,
     class: "note"
   };
-  const _hoisted_3$2 = {
+  const _hoisted_3$4 = {
     key: 0,
     class: "detail-block traj-step"
   };
-  const _hoisted_4$2 = { class: "detail-block-title" };
-  const _hoisted_5$2 = { class: "traj-step-head" };
-  const _hoisted_6$2 = { class: "kind-tag" };
-  const _hoisted_7$1 = { class: "traj-step-name" };
-  const _hoisted_8$1 = { class: "traj-detail-title" };
-  const _hoisted_9$1 = {
+  const _hoisted_4$4 = { class: "detail-block-title" };
+  const _hoisted_5$4 = { class: "traj-step-head" };
+  const _hoisted_6$3 = { class: "kind-tag" };
+  const _hoisted_7$2 = { class: "traj-step-name" };
+  const _hoisted_8$2 = { class: "traj-detail-title" };
+  const _hoisted_9$2 = {
     key: 1,
     class: "code"
   };
-  const _hoisted_10$1 = { class: "row-actions" };
-  const _hoisted_11$1 = { class: "detail-block" };
-  const _hoisted_12$1 = { class: "detail-kv" };
-  const _hoisted_13$1 = ["title"];
-  const _hoisted_14$1 = {
+  const _hoisted_10$2 = { class: "row-actions" };
+  const _hoisted_11$2 = { class: "detail-block" };
+  const _hoisted_12$2 = { class: "detail-kv" };
+  const _hoisted_13$2 = ["title"];
+  const _hoisted_14$2 = {
     key: 0,
     class: "stats-sub"
   };
-  const _hoisted_15$1 = {
+  const _hoisted_15$2 = {
     key: 1,
     class: "detail-block"
   };
-  const _hoisted_16$1 = { class: "stats-sub" };
-  const _hoisted_17$1 = { class: "tiles" };
-  const _hoisted_18$1 = ["title"];
-  const _hoisted_19$1 = { class: "tile-value" };
-  const _hoisted_20$1 = { class: "tile-label" };
-  const _hoisted_21$1 = {
+  const _hoisted_16$2 = { class: "stats-sub" };
+  const _hoisted_17$2 = { class: "tiles" };
+  const _hoisted_18$2 = ["title"];
+  const _hoisted_19$2 = { class: "tile-value" };
+  const _hoisted_20$2 = { class: "tile-label" };
+  const _hoisted_21$2 = {
     class: "stats-details",
     open: ""
   };
-  const _hoisted_22$1 = { class: "schema-head" };
-  const _hoisted_23$1 = { class: "schema-meta" };
-  const _hoisted_24$1 = { class: "stats-scroll" };
-  const _hoisted_25$1 = { class: "stats-table" };
-  const _hoisted_26$1 = ["title"];
-  const _hoisted_27$1 = {
+  const _hoisted_22$2 = { class: "schema-head" };
+  const _hoisted_23$2 = { class: "schema-meta" };
+  const _hoisted_24$2 = { class: "stats-scroll" };
+  const _hoisted_25$2 = { class: "stats-table" };
+  const _hoisted_26$2 = ["title"];
+  const _hoisted_27$2 = {
     key: 2,
     class: "detail-block"
   };
-  const _hoisted_28$1 = ["open"];
+  const _hoisted_28$2 = ["open"];
   const _hoisted_29$1 = { class: "line-summary" };
   const _hoisted_30$1 = { class: "schema-body" };
   const _hoisted_31$1 = { class: "prompt-scroll" };
@@ -11990,7 +13109,7 @@
     key: 3,
     class: "note"
   };
-  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
+  const _sfc_main$4 = /* @__PURE__ */ defineComponent({
     __name: "DetailsPanel",
     setup(__props) {
       const kvRows = computed(() => sessionKVRows());
@@ -12043,10 +13162,10 @@
         state.trajSelected = null;
       }
       return (_ctx, _cache) => {
-        return openBlock(), createElementBlock("div", _hoisted_1$2, [
-          !unref(state).current ? (openBlock(), createElementBlock("div", _hoisted_2$2, "左侧选择一个会话后，这里显示它的指标与元信息。")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
-            trajStep.value ? (openBlock(), createElementBlock("section", _hoisted_3$2, [
-              createBaseVNode("h3", _hoisted_4$2, [
+        return openBlock(), createElementBlock("div", _hoisted_1$4, [
+          !unref(state).current ? (openBlock(), createElementBlock("div", _hoisted_2$4, "左侧选择一个会话后，这里显示它的指标与元信息。")) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+            trajStep.value ? (openBlock(), createElementBlock("section", _hoisted_3$4, [
+              createBaseVNode("h3", _hoisted_4$4, [
                 createTextVNode(" 步骤 #" + toDisplayString(trajStep.value.n) + " ", 1),
                 createBaseVNode("button", {
                   type: "button",
@@ -12055,36 +13174,36 @@
                   onClick: closeTrajStep
                 }, "×")
               ]),
-              createBaseVNode("div", _hoisted_5$2, [
-                createBaseVNode("span", _hoisted_6$2, toDisplayString(trajStep.value.tag), 1),
-                createBaseVNode("span", _hoisted_7$1, toDisplayString(trajStep.value.name), 1)
+              createBaseVNode("div", _hoisted_5$4, [
+                createBaseVNode("span", _hoisted_6$3, toDisplayString(trajStep.value.tag), 1),
+                createBaseVNode("span", _hoisted_7$2, toDisplayString(trajStep.value.name), 1)
               ]),
               (openBlock(true), createElementBlock(Fragment, null, renderList(trajStep.value.detail, (text, key) => {
                 return openBlock(), createElementBlock("div", {
                   key,
                   class: "traj-step-section"
                 }, [
-                  createBaseVNode("div", _hoisted_8$1, toDisplayString(TRAJ_STEP_LABELS[key] || key), 1),
-                  trajDetailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$4, {
+                  createBaseVNode("div", _hoisted_8$2, toDisplayString(TRAJ_STEP_LABELS[key] || key), 1),
+                  trajDetailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$6, {
                     key: 0,
                     text: String(text || ""),
                     cls: "code"
-                  }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_9$1, toDisplayString(String(text || "")), 1)),
-                  createBaseVNode("div", _hoisted_10$1, [
-                    createVNode(_sfc_main$b, {
+                  }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_9$2, toDisplayString(String(text || "")), 1)),
+                  createBaseVNode("div", _hoisted_10$2, [
+                    createVNode(_sfc_main$d, {
                       text: String(text || "")
                     }, null, 8, ["text"])
                   ])
                 ]);
               }), 128)),
-              trajStep.value.images.length ? (openBlock(), createBlock(_sfc_main$c, {
+              trajStep.value.images.length ? (openBlock(), createBlock(_sfc_main$e, {
                 key: 0,
                 images: trajStep.value.images
               }, null, 8, ["images"])) : createCommentVNode("", true)
             ])) : createCommentVNode("", true),
-            createBaseVNode("section", _hoisted_11$1, [
+            createBaseVNode("section", _hoisted_11$2, [
               _cache[0] || (_cache[0] = createBaseVNode("h3", { class: "detail-block-title" }, "会话", -1)),
-              createBaseVNode("dl", _hoisted_12$1, [
+              createBaseVNode("dl", _hoisted_12$2, [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(kvRows.value, (row) => {
                   return openBlock(), createElementBlock(Fragment, {
                     key: row.k
@@ -12094,7 +13213,7 @@
                       class: normalizeClass(row.mono ? "mono" : void 0),
                       title: row.title || void 0
                     }, [
-                      row.md ? (openBlock(), createBlock(_sfc_main$l, {
+                      row.md ? (openBlock(), createBlock(_sfc_main$o, {
                         key: 0,
                         text: row.md,
                         tag: "span",
@@ -12102,34 +13221,34 @@
                       }, null, 8, ["text"])) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                         createTextVNode(toDisplayString(row.v), 1)
                       ], 64))
-                    ], 10, _hoisted_13$1)
+                    ], 10, _hoisted_13$2)
                   ], 64);
                 }), 128))
               ]),
-              subPath.value ? (openBlock(), createElementBlock("div", _hoisted_14$1, "目录：" + toDisplayString(subPath.value), 1)) : createCommentVNode("", true)
+              subPath.value ? (openBlock(), createElementBlock("div", _hoisted_14$2, "目录：" + toDisplayString(subPath.value), 1)) : createCommentVNode("", true)
             ]),
-            stats.value ? (openBlock(), createElementBlock("section", _hoisted_15$1, [
+            stats.value ? (openBlock(), createElementBlock("section", _hoisted_15$2, [
               _cache[2] || (_cache[2] = createBaseVNode("h3", { class: "detail-block-title" }, "指标", -1)),
-              createBaseVNode("div", _hoisted_16$1, toDisplayString(stats.value.sub), 1),
-              createBaseVNode("div", _hoisted_17$1, [
+              createBaseVNode("div", _hoisted_16$2, toDisplayString(stats.value.sub), 1),
+              createBaseVNode("div", _hoisted_17$2, [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(stats.value.tiles, (t) => {
                   return openBlock(), createElementBlock("div", {
                     key: t.label,
                     class: "tile",
                     title: t.title || void 0
                   }, [
-                    createBaseVNode("div", _hoisted_19$1, toDisplayString(t.value), 1),
-                    createBaseVNode("div", _hoisted_20$1, toDisplayString(t.label), 1)
-                  ], 8, _hoisted_18$1);
+                    createBaseVNode("div", _hoisted_19$2, toDisplayString(t.value), 1),
+                    createBaseVNode("div", _hoisted_20$2, toDisplayString(t.label), 1)
+                  ], 8, _hoisted_18$2);
                 }), 128))
               ]),
-              createBaseVNode("details", _hoisted_21$1, [
-                createBaseVNode("summary", _hoisted_22$1, [
+              createBaseVNode("details", _hoisted_21$2, [
+                createBaseVNode("summary", _hoisted_22$2, [
                   _cache[1] || (_cache[1] = createBaseVNode("span", { class: "schema-name" }, "每次请求明细", -1)),
-                  createBaseVNode("span", _hoisted_23$1, toDisplayString(stats.value.rowCount) + " 行", 1)
+                  createBaseVNode("span", _hoisted_23$2, toDisplayString(stats.value.rowCount) + " 行", 1)
                 ]),
-                createBaseVNode("div", _hoisted_24$1, [
-                  createBaseVNode("table", _hoisted_25$1, [
+                createBaseVNode("div", _hoisted_24$2, [
+                  createBaseVNode("table", _hoisted_25$2, [
                     createBaseVNode("tr", null, [
                       (openBlock(true), createElementBlock(Fragment, null, renderList(stats.value.cols, (h) => {
                         return openBlock(), createElementBlock("th", { key: h }, toDisplayString(h), 1);
@@ -12144,13 +13263,13 @@
                         (openBlock(true), createElementBlock(Fragment, null, renderList(r.cells, (c, j) => {
                           return openBlock(), createElementBlock("td", { key: j }, toDisplayString(c), 1);
                         }), 128))
-                      ], 8, _hoisted_26$1);
+                      ], 8, _hoisted_26$2);
                     }), 128))
                   ])
                 ])
               ])
             ])) : createCommentVNode("", true),
-            meta.value ? (openBlock(), createElementBlock("section", _hoisted_27$1, [
+            meta.value ? (openBlock(), createElementBlock("section", _hoisted_27$2, [
               _cache[7] || (_cache[7] = createBaseVNode("h3", { class: "detail-block-title" }, "元信息", -1)),
               createBaseVNode("details", {
                 class: "disclosure meta-card",
@@ -12167,22 +13286,22 @@
                 ]),
                 createBaseVNode("div", _hoisted_30$1, [
                   createBaseVNode("div", _hoisted_31$1, [
-                    meta.value.mode === "json" ? (openBlock(), createBlock(_sfc_main$4, {
+                    meta.value.mode === "json" ? (openBlock(), createBlock(_sfc_main$6, {
                       key: 0,
                       text: meta.value.promptText,
                       cls: "body-text prompt-text"
-                    }, null, 8, ["text"])) : meta.value.mode === "md" ? (openBlock(), createBlock(_sfc_main$g, {
+                    }, null, 8, ["text"])) : meta.value.mode === "md" ? (openBlock(), createBlock(_sfc_main$i, {
                       key: 1,
                       text: meta.value.promptText,
                       class: "md-body prompt-md"
-                    }, null, 8, ["text"])) : (openBlock(), createBlock(_sfc_main$4, {
+                    }, null, 8, ["text"])) : (openBlock(), createBlock(_sfc_main$6, {
                       key: 2,
                       text: meta.value.promptText,
                       cls: "body-text prompt-text"
                     }, null, 8, ["text"]))
                   ]),
                   createBaseVNode("div", _hoisted_32, [
-                    createVNode(_sfc_main$b, {
+                    createVNode(_sfc_main$d, {
                       text: meta.value.copyText
                     }, null, 8, ["text"])
                   ]),
@@ -12208,12 +13327,12 @@
                               createBaseVNode("span", { class: "schema-meta" }, "JSON · 默认收起")
                             ], -1)),
                             createBaseVNode("div", _hoisted_44, [
-                              createVNode(_sfc_main$4, {
+                              createVNode(_sfc_main$6, {
                                 text: t.params,
                                 cls: "code"
                               }, null, 8, ["text"]),
                               createBaseVNode("div", _hoisted_45, [
-                                createVNode(_sfc_main$b, {
+                                createVNode(_sfc_main$d, {
                                   text: t.params
                                 }, null, 8, ["text"])
                               ])
@@ -12229,7 +13348,7 @@
                     title: countTip.value
                   }, toDisplayString(meta.value.countNote), 9, _hoisted_47)) : createCommentVNode("", true)
                 ])
-              ], 40, _hoisted_28$1)
+              ], 40, _hoisted_28$2)
             ])) : createCommentVNode("", true),
             !kvRows.value.length && !stats.value && !meta.value ? (openBlock(), createElementBlock("div", _hoisted_48, "这个会话没有可显示的详情。")) : createCommentVNode("", true)
           ], 64))
@@ -12237,23 +13356,186 @@
       };
     }
   });
-  const DetailsPanel = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-176fd06c"]]);
-  const _hoisted_1$1 = {
+  const DetailsPanel = /* @__PURE__ */ _export_sfc(_sfc_main$4, [["__scopeId", "data-v-ebd3f21d"]]);
+  function retryTargetOf(s) {
+    if (!s || s.staticMode) return null;
+    if (!s.chapterId || !s.project) return null;
+    if (s.chapterRole !== "convert" && s.chapterRole !== "checker") return null;
+    return { project: String(s.project), chapter: String(s.chapterId), role: s.chapterRole };
+  }
+  function sameActionTarget(a, b) {
+    if (!a || !b) return false;
+    return a.project === b.project && a.chapter === b.chapter && a.role === b.role;
+  }
+  function continueTargetOf(s) {
+    const t = retryTargetOf(s);
+    if (!t || t.role !== "convert") return null;
+    const i = t.chapter.indexOf("_child_");
+    if (i <= 0) return t;
+    return { project: t.project, chapter: t.chapter.slice(0, i), role: "convert" };
+  }
+  function canContinueOf(s) {
+    return !!continueTargetOf(s);
+  }
+  function canRedrawOf(s) {
+    if (!s || s.staticMode || s.live) return false;
+    if (!s.project || !s.name || s.stage !== "vector") return false;
+    return String(s.name).indexOf("vector_") === 0;
+  }
+  function canDropOf(s) {
+    if (!s || s.staticMode || !s.project || !s.path) return false;
+    if (!s.chapterId) return false;
+    return !s.live;
+  }
+  function restoreTargetOf(s, newestAttempt) {
+    if (!s || s.staticMode || !s.project || !s.chapterId) return null;
+    if (s.chapterRole !== "convert") return null;
+    if (s.archived) return null;
+    const chapter = String(s.chapterId);
+    if (chapter.indexOf("_child_") >= 0) return null;
+    const attempt = Number(s.chapterAttempt) || 1;
+    if (attempt === (Number(newestAttempt) || 1)) return null;
+    return { project: String(s.project), chapter, attempt };
+  }
+  function canRestoreOf(s, newestAttempt) {
+    return !!restoreTargetOf(s, newestAttempt);
+  }
+  function confirmTextOf(kind, s) {
+    switch (kind) {
+      case "retry": {
+        if (s && s.chapterRole === "checker") {
+          const child = String(s.chapterId || "").indexOf("_child_") >= 0;
+          return "重新核对这一章？产物一个字不动，只换核对会话；旧结论留档成 .checker.try<N>，旧转录仍在「历史」里。" + (child ? "（递归子章节也能重核：它不改产物，父章节整合完同样可以。）" : "");
+        }
+        if (s && String(s.chapterId || "").indexOf("_child_") >= 0) {
+          return "重试这个子章节？只在父节点还在等子会话时有效（那时它还没整合，重跑不会破坏已定稿的东西，父节点会拿新结果重新整合）；父章节一整合完，服务端就会拒并提示去重跑父章节。";
+        }
+        return "重试这一章？会开一个新尝试：旧的整棵（产物 / 分片 / 报告）留档到 work/attempts/，「历史」里两条都在。";
+      }
+      case "continue":
+        return "继续跑？接着这一章最近一次尝试接着干：不新建尝试、不归档、不动已提交产物。";
+      case "redraw":
+        return "重画这张图？会开一条新的作图尝试（旧转录留档成 .tryN），类别与 dedupe 分组不变；要看新图得重跑下游阶段。";
+      case "drop":
+        return "删掉这条记录？转录会从「历史」里消失，作废尝试的 work/attempts 归档目录也会一起删。";
+      case "cancel":
+        return "撤销这个排队请求？只是把 work/retry/ 里那个文件删掉——真正干活的那一侧还没看到它。";
+    }
+    return "";
+  }
+  const ISSUE_LINE = /^\s*(?:[-*]\s+|\d+[.)]\s+)/;
+  function checkerRounds(lines) {
+    const out = [];
+    let cur = null;
+    const flush = () => {
+      if (!cur) return;
+      out.push({ round: out.length + 1, from: cur.from, lines: cur.count, verdict: cur.verdict, issues: cur.issues, summary: cur.summary });
+    };
+    for (const l of lines || []) {
+      const n = Number(l && l.n) || 0;
+      const role = l && l.role;
+      if (role === "user") {
+        flush();
+        cur = { from: n, count: 0, verdict: "unknown", issues: 0, summary: "" };
+      }
+      if (!cur) cur = { from: n, count: 0, verdict: "unknown", issues: 0, summary: "" };
+      cur.count++;
+      const text = String(l && (l.text || l.reasoning) || "");
+      if (!text) continue;
+      const low = text.toLowerCase();
+      if (/(^|\n)\s*pass\b/.test(low) || low.indexOf("verdict: pass") >= 0 || low.includes('"verdict":"pass"')) {
+        cur.verdict = "pass";
+        cur.issues = 0;
+      } else if (low.indexOf("issues") >= 0 || low.indexOf("reject") >= 0 || low.indexOf("problem") >= 0) {
+        if (cur.verdict !== "pass") cur.verdict = "issues";
+        cur.issues += text.split("\n").filter((x) => ISSUE_LINE.test(x)).length;
+      }
+      if (role === "assistant" && text.trim()) cur.summary = text.trim().slice(0, 120);
+    }
+    flush();
+    return out;
+  }
+  const _hoisted_1$3 = {
     key: 0,
     class: "history-empty"
   };
-  const _hoisted_2$1 = {
+  const _hoisted_2$3 = {
     key: 1,
     class: "history-list"
   };
-  const _hoisted_3$1 = { class: "history-head" };
-  const _hoisted_4$1 = ["title", "onClick"];
-  const _hoisted_5$1 = { class: "row-chip chain-tag history-tag" };
-  const _hoisted_6$1 = { class: "history-time" };
-  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+  const _hoisted_3$3 = { class: "history-head" };
+  const _hoisted_4$3 = {
+    class: "history-fix-target",
+    title: "这一章一共复盘过几次（含更早父尝试留下的归档转录）"
+  };
+  const _hoisted_5$3 = {
+    class: "history-fix-target",
+    title: "这条修复链修的是哪一章"
+  };
+  const _hoisted_6$2 = {
+    key: 4,
+    class: "history-old-note",
+    title: "带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话"
+  };
+  const _hoisted_7$1 = {
+    key: 0,
+    class: "history-confirm",
+    role: "alert"
+  };
+  const _hoisted_8$1 = {
+    key: 1,
+    class: "history-confirm",
+    role: "alert"
+  };
+  const _hoisted_9$1 = {
+    key: 2,
+    class: "history-note"
+  };
+  const _hoisted_10$1 = {
+    key: 3,
+    class: "history-note"
+  };
+  const _hoisted_11$1 = {
+    key: 4,
+    class: "history-rounds"
+  };
+  const _hoisted_12$1 = { class: "history-rounds-head" };
+  const _hoisted_13$1 = ["title", "onClick"];
+  const _hoisted_14$1 = { class: "row-chip chain-tag history-tag" };
+  const _hoisted_15$1 = { class: "history-round-from" };
+  const _hoisted_16$1 = ["title", "onClick", "onKeydown"];
+  const _hoisted_17$1 = {
+    key: 0,
+    class: "history-role"
+  };
+  const _hoisted_18$1 = ["title"];
+  const _hoisted_19$1 = ["title"];
+  const _hoisted_20$1 = {
+    key: 2,
+    class: "history-cur"
+  };
+  const _hoisted_21$1 = {
+    key: 3,
+    class: "history-latest"
+  };
+  const _hoisted_22$1 = {
+    key: 4,
+    class: "history-arch",
+    title: "这份转录在 work/attempts 归档目录里（工作树那份已被搬走），不是当前工作区"
+  };
+  const _hoisted_23$1 = { class: "history-time" };
+  const _hoisted_24$1 = { class: "history-actions" };
+  const _hoisted_25$1 = ["onClick"];
+  const _hoisted_26$1 = ["title", "onClick"];
+  const _hoisted_27$1 = ["onClick"];
+  const _hoisted_28$1 = ["onClick"];
+  const _sfc_main$3 = /* @__PURE__ */ defineComponent({
     __name: "HistoryPanel",
     setup(__props) {
       const members = computed(() => chainOfSession(state.sessions, state.current ? state.current.id : null));
+      function roleLabel(s) {
+        return chapterRoleLabel(s && s.chapterRole);
+      }
       function endStateText(s) {
         if (s.live) return "运行中";
         if (s.endState === "done") return "已完成";
@@ -12266,42 +13548,564 @@
         if (s.endState === "error") return "error";
         return "pend";
       }
+      const fixTarget = computed(() => {
+        for (const s of members.value || []) {
+          const id = fixTargetId(s);
+          if (id) return id;
+        }
+        return "";
+      });
+      function fixRoundOf(index) {
+        return fixRoundAt(index, (members.value || []).length);
+      }
+      function chainTag(s, index) {
+        if (!fixChain.value) return chainMemberTag(s, rescueNo(s));
+        const round = fixRoundOf(index);
+        const id = fixTargetId(s, fixTarget.value);
+        return (s && s.archived ? "旧" : "") + (id ? chapterIdSuffix(id) : "修复") + " #" + round;
+      }
+      function chainTagTip(s, index) {
+        if (rescueChain.value) {
+          return "这是这一章的第 " + rescueNo(s) + " 次复盘：" + reviewedLine(s) + "（新 → 旧）";
+        }
+        if (!fixChain.value) return chainMemberTag(s, rescueNo(s));
+        const id = fixTargetId(s, fixTarget.value);
+        return "这是 " + (id || "这一章") + " 的第 " + fixRoundOf(index) + " 轮修复（同一处、新 → 旧）";
+      }
+      function rescueNo(s) {
+        return rescueOrdinal(state.sessions, s);
+      }
+      function reviewedLine(s) {
+        const t = reviewedTargetLabel(s);
+        return t ? "复盘了 " + t : "复盘了（目标未记录）";
+      }
+      function rowTitle(s, index) {
+        if (!fixChain.value) return s.id;
+        return fixRowLabel(s, fixTarget.value, fixRoundOf(index)) + "\n" + s.id;
+      }
       function onRowClick(s) {
         selectSession(s.id);
+      }
+      const chapterChain = computed(() => (members.value || []).some((s) => !!s.chapterId || s && s.chapterRole === "fix"));
+      const fixChain = computed(() => {
+        const list = members.value || [];
+        return list.length > 0 && list.every((s) => s && s.chapterRole === "fix");
+      });
+      const rescueChain = computed(() => {
+        const list = members.value || [];
+        return list.length > 0 && list.every((s) => s && s.chapterRole === "rescue");
+      });
+      const rescueChapter = computed(() => {
+        const s = (members.value || [])[0] || null;
+        const id = String(s && s.chapterId || "");
+        return id ? chapterIdSuffix(id) : "章节未知";
+      });
+      const rounds = computed(() => {
+        if (chapterChain.value) return [];
+        const s = state.current;
+        if (!s || s.chapterRole !== "checker" || !Array.isArray(state.lines)) return [];
+        const r = checkerRounds(state.lines);
+        return r.length > 1 ? r : [];
+      });
+      const dropAsk = /* @__PURE__ */ ref(null);
+      const dropNote = /* @__PURE__ */ ref("");
+      function isCurrent(s) {
+        return !!state.current && state.current.id === s.id;
+      }
+      function maxAttempt(members2) {
+        let n = 0;
+        (members2 || []).forEach((s) => {
+          const a = Number(s.chapterAttempt) || 1;
+          if (a > n) n = a;
+        });
+        return n;
+      }
+      const newest = computed(() => {
+        const live = (members.value || []).filter((s) => !s.archived);
+        return maxAttempt(live.length ? live : members.value || []);
+      });
+      const newestFixId = computed(() => {
+        const live = (members.value || []).filter((s) => !s.archived);
+        const pool = live.length ? live : members.value || [];
+        return pool.length ? String(pool[0].id) : "";
+      });
+      function isNewestRow(s) {
+        if (fixChain.value || rescueChain.value) return !!s && String(s.id) === newestFixId.value;
+        return (Number(s && s.chapterAttempt) || 1) === newest.value;
+      }
+      const hasArchived = computed(() => (members.value || []).some((s) => !!s.archived));
+      function pairOf(s) {
+        if (!s || !s.chapterId) return null;
+        if (s.chapterRole === "fix") return null;
+        if (s.chapterRole === "rescue") return null;
+        const attempt = Number(s.chapterAttempt) || 1;
+        const same = (o) => o && o.chapterId === s.chapterId && (o.project || "") === (s.project || "") && (Number(o.chapterAttempt) || 1) === attempt && (o.chapterRole || "") !== (s.chapterRole || "");
+        const all = (state.sessions || []).filter(same);
+        return all.find((o) => !!o.archived === !!s.archived) || all[0] || null;
+      }
+      function pairLabel(s) {
+        return s && s.chapterRole === "checker" ? "同轮转换" : "同轮核对";
+      }
+      function askDrop(s) {
+        if (!canDropOf(s)) return;
+        dropAsk.value = s;
+      }
+      function doDrop() {
+        const s = dropAsk.value;
+        if (!s) return;
+        dropAsk.value = null;
+        dropNote.value = "正在删除 " + s.name + "…";
+        dropSession(String(s.project), String(s.path)).then((res) => {
+          dropNote.value = "已删除 " + s.name + (res && res.archive ? "（含 " + res.archive + "）" : "");
+          return refreshIndex();
+        }).catch((err) => {
+          dropNote.value = "删除失败：" + (err && err.message || err);
+        });
+      }
+      const restoreAsk = /* @__PURE__ */ ref(null);
+      const restoreNote = /* @__PURE__ */ ref("");
+      function askRestore(s) {
+        const t = restoreTargetOf(s, newest.value);
+        if (!t) return;
+        restoreAsk.value = t;
+        restoreNote.value = "";
+      }
+      watch(() => state.current ? state.current.id : "", () => {
+        dropAsk.value = null;
+        dropNote.value = "";
+        restoreAsk.value = null;
+        restoreNote.value = "";
+      });
+      function doRestore() {
+        const t = restoreAsk.value;
+        if (!t) return;
+        restoreAsk.value = null;
+        restoreNote.value = "已排队：切回第 " + t.attempt + " 次尝试…";
+        requestChapterRetry(t.project, t.chapter, "restore", "", { attempt: t.attempt }).then((res) => {
+          restoreNote.value = res && res.note || "已排队：切回第 " + t.attempt + " 次尝试";
+          return refreshIndex();
+        }).catch((err) => {
+          restoreNote.value = "切回失败：" + (err && err.message || err);
+        });
       }
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("div", {
           id: "history",
           class: normalizeClass(["history", { hidden: unref(state).view !== "history" }])
         }, [
-          !members.value ? (openBlock(), createElementBlock("div", _hoisted_1$1, "当前会话不属于任何 img2text 调用链")) : (openBlock(), createElementBlock("div", _hoisted_2$1, [
-            createBaseVNode("div", _hoisted_3$1, "这张图的全部会话（" + toDisplayString(members.value.length) + "，新 → 旧）", 1),
-            (openBlock(true), createElementBlock(Fragment, null, renderList(members.value, (s) => {
-              return openBlock(), createElementBlock("button", {
-                key: s.id,
-                class: normalizeClass(["history-row", { active: unref(state).current && unref(state).current.id === s.id }]),
+          !members.value ? (openBlock(), createElementBlock("div", _hoisted_1$3, "当前会话不属于任何调用链 / 重试链")) : (openBlock(), createElementBlock("div", _hoisted_2$3, [
+            createBaseVNode("div", _hoisted_3$3, [
+              rescueChain.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+                _cache[2] || (_cache[2] = createTextVNode("这一章的全部复盘（", -1)),
+                createBaseVNode("span", _hoisted_4$3, toDisplayString(rescueChapter.value), 1),
+                createTextVNode("，" + toDisplayString(members.value.length) + " 次，新 → 旧）", 1)
+              ], 64)) : fixChain.value ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                _cache[3] || (_cache[3] = createTextVNode("同一处的修复轮次（", -1)),
+                createBaseVNode("span", _hoisted_5$3, toDisplayString(fixTarget.value || "章节未知"), 1),
+                createTextVNode("，" + toDisplayString(members.value.length) + " 轮，新 → 旧）", 1)
+              ], 64)) : chapterChain.value ? (openBlock(), createElementBlock(Fragment, { key: 2 }, [
+                createTextVNode("这一章的全部会话（" + toDisplayString(members.value.length) + "，每个转换后面跟着它名下的核对，新 → 旧）", 1)
+              ], 64)) : (openBlock(), createElementBlock(Fragment, { key: 3 }, [
+                createTextVNode("这一章的全部会话（" + toDisplayString(members.value.length) + "，转换与核对都在这里，新 → 旧）", 1)
+              ], 64)),
+              hasArchived.value ? (openBlock(), createElementBlock("span", _hoisted_6$2, "· 带「旧」的是更早一次父尝试（已作废）留下的")) : createCommentVNode("", true)
+            ]),
+            dropAsk.value ? (openBlock(), createElementBlock("div", _hoisted_7$1, [
+              createBaseVNode("span", null, "删掉「" + toDisplayString(dropAsk.value.name) + "」这条记录？转录会从历史里消失，作废尝试的归档目录也会一起删。", 1),
+              createBaseVNode("button", {
+                class: "history-act act-danger",
                 type: "button",
-                title: s.id,
-                onClick: ($event) => onRowClick(s)
+                onClick: doDrop
+              }, "确认删除"),
+              createBaseVNode("button", {
+                class: "history-act",
+                type: "button",
+                onClick: _cache[0] || (_cache[0] = ($event) => dropAsk.value = null)
+              }, "取消")
+            ])) : createCommentVNode("", true),
+            restoreAsk.value ? (openBlock(), createElementBlock("div", _hoisted_8$1, [
+              createBaseVNode("span", null, " 切回第 " + toDisplayString(restoreAsk.value.attempt) + " 次尝试？那一份的工作区与产物会搬回原处，现在这一次（第 " + toDisplayString(newest.value) + " 次）整棵留档——之后还能在历史里再切回来。正在跑的会话不会被打断，会等它跑完手上这一轮再搬。 ", 1),
+              createBaseVNode("button", {
+                class: "history-act",
+                type: "button",
+                onClick: doRestore
+              }, "确认切回"),
+              createBaseVNode("button", {
+                class: "history-act",
+                type: "button",
+                onClick: _cache[1] || (_cache[1] = ($event) => restoreAsk.value = null)
+              }, "取消")
+            ])) : createCommentVNode("", true),
+            dropNote.value ? (openBlock(), createElementBlock("div", _hoisted_9$1, toDisplayString(dropNote.value), 1)) : createCommentVNode("", true),
+            restoreNote.value ? (openBlock(), createElementBlock("div", _hoisted_10$1, toDisplayString(restoreNote.value), 1)) : createCommentVNode("", true),
+            rounds.value.length ? (openBlock(), createElementBlock("div", _hoisted_11$1, [
+              createBaseVNode("div", _hoisted_12$1, "这条核对转录里的 " + toDisplayString(rounds.value.length) + " 轮（新 → 旧同序，点一轮跳到那一轮的起点）", 1),
+              (openBlock(true), createElementBlock(Fragment, null, renderList(rounds.value, (r) => {
+                return openBlock(), createElementBlock("button", {
+                  key: "r" + r.round,
+                  class: "history-round",
+                  type: "button",
+                  title: r.summary || "跳到第 " + r.round + " 轮",
+                  onClick: ($event) => unref(jumpToLine)(r.from)
+                }, [
+                  createBaseVNode("span", _hoisted_14$1, "轮 " + toDisplayString(r.round), 1),
+                  createBaseVNode("span", {
+                    class: normalizeClass(["history-round-state", r.verdict === "pass" ? "ok" : r.verdict === "issues" ? "bad" : ""])
+                  }, toDisplayString(r.verdict === "pass" ? "通过" : r.verdict === "issues" ? "拒绝 " + r.issues + " 条" : "无结论"), 3),
+                  createBaseVNode("span", _hoisted_15$1, "第 " + toDisplayString(r.from) + " 行 · " + toDisplayString(r.lines) + " 行", 1)
+                ], 8, _hoisted_13$1);
+              }), 128))
+            ])) : createCommentVNode("", true),
+            (openBlock(true), createElementBlock(Fragment, null, renderList(members.value, (s, i) => {
+              return openBlock(), createElementBlock("div", {
+                key: s.id,
+                class: normalizeClass(["history-row", { active: isCurrent(s) }]),
+                role: "button",
+                tabindex: "0",
+                title: rowTitle(s, i),
+                onClick: ($event) => onRowClick(s),
+                onKeydown: withKeys(($event) => onRowClick(s), ["enter"])
               }, [
-                createBaseVNode("span", _hoisted_5$1, toDisplayString(unref(img2textMemberTag)(s.id)), 1),
-                createVNode(_sfc_main$l, {
+                roleLabel(s) && !rescueChain.value ? (openBlock(), createElementBlock("span", _hoisted_17$1, toDisplayString(roleLabel(s)), 1)) : createCommentVNode("", true),
+                createBaseVNode("span", {
+                  class: "row-chip chain-tag history-tag",
+                  title: chainTagTip(s, i)
+                }, toDisplayString(chainTag(s, i)), 9, _hoisted_18$1),
+                rescueChain.value ? (openBlock(), createElementBlock("span", {
+                  key: 1,
+                  class: "history-reviewed",
+                  title: reviewedLine(s)
+                }, toDisplayString(reviewedLine(s)), 9, _hoisted_19$1)) : createCommentVNode("", true),
+                createVNode(_sfc_main$o, {
                   tag: "span",
                   class: "history-title",
-                  text: unref(sessionTitleOf)(s)
-                }, null, 8, ["text"]),
+                  text: unref(sessionTitleOf)(s),
+                  plain: unref(plainTitle)(s)
+                }, null, 8, ["text", "plain"]),
+                isCurrent(s) ? (openBlock(), createElementBlock("span", _hoisted_20$1, "正在看")) : createCommentVNode("", true),
+                isNewestRow(s) ? (openBlock(), createElementBlock("span", _hoisted_21$1, "最新")) : createCommentVNode("", true),
+                s.archived ? (openBlock(), createElementBlock("span", _hoisted_22$1, "归档")) : createCommentVNode("", true),
                 createBaseVNode("span", {
                   class: normalizeClass(["history-state", endStateCls(s)])
                 }, toDisplayString(endStateText(s)), 3),
-                createBaseVNode("span", _hoisted_6$1, toDisplayString(unref(relTime)(s.mtime)), 1)
-              ], 10, _hoisted_4$1);
+                createBaseVNode("span", _hoisted_23$1, toDisplayString(unref(relTime)(s.mtime)), 1),
+                createBaseVNode("span", _hoisted_24$1, [
+                  !isCurrent(s) ? (openBlock(), createElementBlock("button", {
+                    key: 0,
+                    class: "history-act",
+                    type: "button",
+                    title: "在中栏显示这条会话（只是切视图，不改流水线状态）",
+                    onClick: withModifiers(($event) => onRowClick(s), ["stop"])
+                  }, "查看", 8, _hoisted_25$1)) : createCommentVNode("", true),
+                  pairOf(s) && unref(state).current.id !== pairOf(s).id ? (openBlock(), createElementBlock("button", {
+                    key: 1,
+                    class: "history-act",
+                    type: "button",
+                    title: "切到同一轮（" + unref(chainMemberTag)(s) + "）的" + (s.chapterRole === "checker" ? "转换" : "核对") + "会话：" + pairOf(s).id,
+                    onClick: withModifiers(($event) => onRowClick(pairOf(s)), ["stop"])
+                  }, toDisplayString(pairLabel(s)), 9, _hoisted_26$1)) : createCommentVNode("", true),
+                  unref(canRestoreOf)(s, newest.value) ? (openBlock(), createElementBlock("button", {
+                    key: 2,
+                    class: "history-act",
+                    type: "button",
+                    title: "把这一份的工作区与产物搬回原处（现在这一次整棵留档，之后还能切回来）",
+                    onClick: withModifiers(($event) => askRestore(s), ["stop"])
+                  }, "切回这次", 8, _hoisted_27$1)) : createCommentVNode("", true),
+                  unref(canDropOf)(s) ? (openBlock(), createElementBlock("button", {
+                    key: 3,
+                    class: "history-act act-danger",
+                    type: "button",
+                    title: "删掉这条转录（作废尝试的归档一并删除）",
+                    onClick: withModifiers(($event) => askDrop(s), ["stop"])
+                  }, "删除", 8, _hoisted_28$1)) : createCommentVNode("", true)
+                ])
+              ], 42, _hoisted_16$1);
             }), 128))
           ]))
         ], 2);
       };
     }
   });
-  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-0e17a4e8"]]);
+  const HistoryPanel = /* @__PURE__ */ _export_sfc(_sfc_main$3, [["__scopeId", "data-v-fcc68c40"]]);
+  const pending = /* @__PURE__ */ ref(null);
+  const queued = /* @__PURE__ */ ref(null);
+  const prevId = /* @__PURE__ */ ref("");
+  const busy = /* @__PURE__ */ ref(false);
+  const target = computed(() => retryTargetOf(state.current));
+  const canContinue = computed(() => canContinueOf(state.current));
+  const canRedraw = computed(() => canRedrawOf(state.current));
+  const canDrop = computed(() => canDropOf(state.current));
+  const hasAny = computed(() => !!target.value || canRedraw.value || canDrop.value || !!queued.value);
+  const retryPending = computed(() => {
+    const t = target.value;
+    return !!t && chapterPendingRetry(t.project, t.chapter, t.role);
+  });
+  const continueTarget = computed(() => continueTargetOf(state.current));
+  const continuePending = computed(() => {
+    const t = continueTarget.value;
+    return !!t && chapterPendingRetry(t.project, t.chapter, "continue");
+  });
+  const continueLabel = computed(() => {
+    const t = continueTarget.value;
+    const child = !!(t && state.current && String(state.current.chapterId || "").indexOf("_child_") >= 0);
+    if (continuePending.value) return child ? "父章节已在继续跑队列" : "已在继续跑队列";
+    return child ? "继续跑父章节" : "继续跑";
+  });
+  const retryLabel = computed(() => {
+    const t = target.value;
+    if (!t) return "";
+    if (retryPending.value) return t.role === "checker" ? "已在核对队列" : "已在重试队列";
+    return t.role === "checker" ? "重新核对这一章" : "重试这一章";
+  });
+  const confirmBody = computed(() => pending.value ? confirmTextOf(pending.value.kind, state.current) : "");
+  watch(
+    () => state.current && state.current.id,
+    () => {
+      const p2 = pending.value;
+      const nowTarget = (() => {
+        if (!p2 || p2.kind === "cancel") return null;
+        return p2.kind === "continue" ? continueTargetOf(state.current) : retryTargetOf(state.current);
+      })();
+      const keep = !!p2 && p2.kind !== "cancel" && sameActionTarget(p2.target, nowTarget);
+      if (!keep) pending.value = null;
+      const cur = state.current;
+      const q = queued.value;
+      const same = !!q && !!cur && String(cur.project || "") === q.project && String(cur.chapterId || "") === q.chapter && (q.role === "vector" || String(cur.chapterRole || "") === q.role);
+      if (!same) {
+        queued.value = null;
+        clearRetryNote();
+      }
+    }
+  );
+  function ask(kind) {
+    if (busy.value) return;
+    prevId.value = state.current && state.current.id || "";
+    const t = kind === "retry" ? retryTargetOf(state.current) : kind === "continue" ? continueTargetOf(state.current) : null;
+    const target2 = t ? { project: t.project, chapter: t.chapter, role: t.role } : void 0;
+    pending.value = { kind, target: target2 };
+  }
+  function cancelAsk() {
+    pending.value = null;
+  }
+  function run() {
+    const p2 = pending.value;
+    const s = state.current;
+    if (!p2 || busy.value) return;
+    pending.value = null;
+    busy.value = true;
+    const done = (msg) => {
+      setRetryNote(msg);
+      busy.value = false;
+      return refreshIndex().catch(() => void 0);
+    };
+    const fail = (err) => {
+      setRetryNote("失败：" + (err && err.message || err));
+      busy.value = false;
+    };
+    if (p2.kind === "drop") {
+      if (!s) {
+        busy.value = false;
+        return;
+      }
+      setRetryNote("正在删除 " + s.name + "…");
+      dropSession(String(s.project), String(s.path)).then((res) => {
+        setRetryNote("已删除 " + s.name + (res && res.archive ? "（含 " + res.archive + "）" : ""));
+        busy.value = false;
+      }).catch(fail);
+      return;
+    }
+    if (p2.kind === "redraw") {
+      if (!s) {
+        busy.value = false;
+        return;
+      }
+      setRetryNote("正在提交重画请求…");
+      requestChapterRetry(String(s.project), "", "vector", "图不对，重画", { path: String(s.name) }).then((res) => {
+        queued.value = { project: String(s.project), chapter: "", role: "vector", path: String(s.name), prevId: prevId.value };
+        done("已排队重画：" + (res && res.note || "等待并发槽位") + "（可以撤销）");
+      }).catch(fail);
+      return;
+    }
+    const t = p2.kind === "continue" ? continueTarget.value : target.value;
+    if (!t) {
+      busy.value = false;
+      return;
+    }
+    const role = p2.kind === "continue" ? "continue" : t.role;
+    const child = String(s && s.chapterId || "").indexOf("_child_") >= 0;
+    const what = p2.kind === "continue" ? child ? "继续跑父章节" : "继续跑" : t.role === "checker" ? "重新核对" : "重试";
+    setRetryNote("正在提交 " + t.chapter + " 的" + what + "请求…");
+    requestChapterRetry(t.project, t.chapter, role, "中栏" + what).then((res) => {
+      queued.value = { project: t.project, chapter: t.chapter, role, path: "", prevId: prevId.value };
+      if (role !== "continue") watchFork(t.project, t.chapter, role, prevId.value);
+      done(t.chapter + " " + what + "请求已排队（" + (res && res.note || "等待处理") + "）（可以撤销）");
+    }).catch(fail);
+  }
+  function undoAsk() {
+    const q = queued.value;
+    if (!q || busy.value) return;
+    pending.value = { kind: "cancel", project: q.project, chapter: q.chapter, role: q.role, path: q.path, prevId: q.prevId };
+  }
+  function backToPrev(id) {
+    if (!id) return;
+    selectSession(id);
+  }
+  function doCancel() {
+    const p2 = pending.value;
+    if (!p2 || p2.kind !== "cancel" || busy.value) return;
+    pending.value = null;
+    busy.value = true;
+    cancelChapterRetry(p2.project, p2.chapter, p2.role, p2.path).then((res) => {
+      const n = Number(res && res.removed || 0);
+      if (n > 0) {
+        setRetryNote("已撤销排队请求（" + n + " 条）");
+        queued.value = null;
+        backToPrev(p2.prevId);
+      } else {
+        setRetryNote("这个请求已经被 latex 消费，撤不回来了——它开出的那条新会话可以在「历史」里删掉。");
+        queued.value = null;
+        return refreshIndex().catch(() => void 0);
+      }
+      busy.value = false;
+    }).catch((err) => {
+      setRetryNote("撤销失败：" + (err && err.message || err));
+      busy.value = false;
+    });
+  }
+  const actions = {
+    pending,
+    queued,
+    prevId,
+    busy,
+    target,
+    canContinue,
+    canRedraw,
+    canDrop,
+    hasAny,
+    retryPending,
+    continuePending,
+    continueLabel,
+    retryLabel,
+    confirmBody,
+    ask,
+    cancelAsk,
+    run,
+    undoAsk,
+    backToPrev,
+    doCancel
+  };
+  const _hoisted_1$2 = {
+    key: 0,
+    id: "session-actions",
+    class: "session-actions",
+    role: "group",
+    "aria-label": "这条会话的动作"
+  };
+  const _hoisted_2$2 = ["disabled", "title"];
+  const _hoisted_3$2 = ["disabled"];
+  const _hoisted_4$2 = ["disabled"];
+  const _hoisted_5$2 = ["disabled"];
+  const _hoisted_6$1 = ["disabled"];
+  const _sfc_main$2 = /* @__PURE__ */ defineComponent({
+    __name: "SessionActions",
+    setup(__props) {
+      const { target: target2, canContinue: canContinue2, canRedraw: canRedraw2, canDrop: canDrop2, hasAny: hasAny2, retryPending: retryPending2, continuePending: continuePending2, continueLabel: continueLabel2, retryLabel: retryLabel2, queued: queued2, busy: busy2, ask: ask2, undoAsk: undoAsk2, backToPrev: backToPrev2 } = actions;
+      return (_ctx, _cache) => {
+        return unref(hasAny2) ? (openBlock(), createElementBlock("div", _hoisted_1$2, [
+          !unref(actions).pending.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+            unref(target2) ? (openBlock(), createElementBlock("button", {
+              key: 0,
+              class: "act-btn act-primary",
+              type: "button",
+              disabled: unref(retryPending2) || unref(busy2),
+              title: unref(target2).role === "checker" ? "只重跑核对会话：产物不动，旧结论留档" : "重跑这一章：开一个新尝试，旧的整棵留档",
+              onClick: _cache[0] || (_cache[0] = ($event) => unref(ask2)("retry"))
+            }, toDisplayString(unref(retryLabel2)), 9, _hoisted_2$2)) : createCommentVNode("", true),
+            unref(canContinue2) ? (openBlock(), createElementBlock("button", {
+              key: 1,
+              class: "act-btn",
+              type: "button",
+              disabled: unref(continuePending2) || unref(busy2),
+              title: "接着这一章最近一次尝试继续跑：不新建尝试、不归档、不动产物（站在递归子章节会话上时，跑的是它所在的父章节）",
+              onClick: _cache[1] || (_cache[1] = ($event) => unref(ask2)("continue"))
+            }, toDisplayString(unref(continueLabel2)), 9, _hoisted_3$2)) : createCommentVNode("", true),
+            unref(canRedraw2) ? (openBlock(), createElementBlock("button", {
+              key: 2,
+              class: "act-btn",
+              type: "button",
+              disabled: unref(busy2),
+              title: "只重做这张图：开一条新作图尝试，类别与分组不变；下游阶段要重跑才能看到新图",
+              onClick: _cache[2] || (_cache[2] = ($event) => unref(ask2)("redraw"))
+            }, "重画这张图", 8, _hoisted_4$2)) : createCommentVNode("", true),
+            unref(canDrop2) ? (openBlock(), createElementBlock("button", {
+              key: 3,
+              class: "act-btn act-danger",
+              type: "button",
+              disabled: unref(busy2),
+              title: "删掉这条转录（作废尝试的 work/attempts 归档一并删除）；正在写入的会话不给删",
+              onClick: _cache[3] || (_cache[3] = ($event) => unref(ask2)("drop"))
+            }, "删除这条记录", 8, _hoisted_5$2)) : createCommentVNode("", true),
+            unref(queued2) ? (openBlock(), createElementBlock("button", {
+              key: 4,
+              class: "act-btn act-undo",
+              type: "button",
+              disabled: unref(busy2),
+              title: "把刚排进 work/retry/ 的请求删掉；已经被 latex 消费时给出替代动作",
+              onClick: _cache[4] || (_cache[4] = //@ts-ignore
+              (...args) => unref(undoAsk2) && unref(undoAsk2)(...args))
+            }, "撤销这个请求", 8, _hoisted_6$1)) : createCommentVNode("", true),
+            unref(queued2) && unref(queued2).prevId ? (openBlock(), createElementBlock("button", {
+              key: 5,
+              class: "act-btn act-quiet",
+              type: "button",
+              title: "回到按下重试之前看的那条会话",
+              onClick: _cache[5] || (_cache[5] = ($event) => unref(backToPrev2)(unref(queued2).prevId))
+            }, "回到之前那条")) : createCommentVNode("", true)
+          ], 64)) : createCommentVNode("", true)
+        ])) : createCommentVNode("", true);
+      };
+    }
+  });
+  const SessionActions = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-b10bdaea"]]);
+  const _hoisted_1$1 = {
+    key: 0,
+    class: "session-action-panel"
+  };
+  const _hoisted_2$1 = { class: "act-confirm-text" };
+  const _hoisted_3$1 = ["disabled"];
+  const _hoisted_4$1 = ["disabled"];
+  const _hoisted_5$1 = {
+    key: 1,
+    class: "act-note"
+  };
+  const _sfc_main$1 = /* @__PURE__ */ defineComponent({
+    __name: "SessionActionPanel",
+    setup(__props) {
+      const { pending: pending2, busy: busy2, confirmBody: confirmBody2, cancelAsk: cancelAsk2, run: run2, doCancel: doCancel2 } = actions;
+      return (_ctx, _cache) => {
+        return unref(pending2) || unref(state).retryNote ? (openBlock(), createElementBlock("div", _hoisted_1$1, [
+          unref(pending2) ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+            createBaseVNode("span", _hoisted_2$1, toDisplayString(unref(confirmBody2)), 1),
+            createBaseVNode("button", {
+              class: "act-btn act-primary",
+              type: "button",
+              disabled: unref(busy2),
+              onClick: _cache[0] || (_cache[0] = ($event) => unref(pending2).kind === "cancel" ? unref(doCancel2)() : unref(run2)())
+            }, "确认执行", 8, _hoisted_3$1),
+            createBaseVNode("button", {
+              class: "act-btn act-quiet",
+              type: "button",
+              disabled: unref(busy2),
+              onClick: _cache[1] || (_cache[1] = //@ts-ignore
+              (...args) => unref(cancelAsk2) && unref(cancelAsk2)(...args))
+            }, "取消", 8, _hoisted_4$1)
+          ], 64)) : createCommentVNode("", true),
+          unref(state).retryNote ? (openBlock(), createElementBlock("span", _hoisted_5$1, toDisplayString(unref(state).retryNote), 1)) : createCommentVNode("", true)
+        ])) : createCommentVNode("", true);
+      };
+    }
+  });
+  const SessionActionPanel = /* @__PURE__ */ _export_sfc(_sfc_main$1, [["__scopeId", "data-v-fca248ed"]]);
   const _hoisted_1 = ["data-sidebar-collapsed", "data-details-collapsed", "data-dragging"];
   const _hoisted_2 = ["data-dragging"];
   const _hoisted_3 = {
@@ -12387,10 +14191,10 @@
         if (!drag.value) return;
         const dx = ev.clientX - dragOrigin;
         if (drag.value.side === "sidebar") {
-          state.sidebar = clampWidth(dragBase + dx, SIDEBAR_MIN, SIDEBAR_MAX);
+          state.sidebar = clampWidth(dragBase + dx, SIDEBAR_MIN, columnDragMax(layout.viewport, layout.cols, "sidebar"));
           if (state.narrow) state.narrowExpanded = true;
         } else {
-          state.details = clampWidth(dragBase - dx, DETAILS_MIN, DETAILS_MAX);
+          state.details = clampWidth(dragBase - dx, DETAILS_MIN, columnDragMax(layout.viewport, layout.cols, "details"));
         }
         applyLayout();
       }
@@ -12671,15 +14475,17 @@
                         onClick: _cache[3] || (_cache[3] = ($event) => unref(revealProject)(curProject.value))
                       }, toDisplayString(curProject.value), 1),
                       _cache[17] || (_cache[17] = createBaseVNode("span", { class: "crumb-sep" }, "›", -1)),
-                      createVNode(_sfc_main$l, {
+                      createVNode(_sfc_main$o, {
                         text: sessionTitle.value,
+                        plain: unref(plainTitle)(unref(state).current),
                         tag: "span",
                         class: "crumb crumb-current",
                         title: unref(state).current.id
-                      }, null, 8, ["text", "title"])
+                      }, null, 8, ["text", "plain", "title"])
                     ], 64))
                   ]),
                   createBaseVNode("div", _hoisted_9, [
+                    createVNode(SessionActions),
                     !unref(state).current ? (openBlock(), createElementBlock("span", _hoisted_10, toDisplayString(badgeText.value), 1)) : (openBlock(), createElementBlock("span", _hoisted_11, toDisplayString(headerSummary.value), 1))
                   ]),
                   createBaseVNode("button", {
@@ -12785,6 +14591,7 @@
                   ])
                 ])
               ]),
+              createVNode(SessionActionPanel),
               createBaseVNode("div", {
                 id: "banner",
                 class: normalizeClass(["banner", { hidden: !bannerText.value }])
@@ -12879,7 +14686,7 @@
       };
     }
   });
-  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-8be275b1"]]);
+  const App = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-04cd03d0"]]);
   const app = createApp(App);
   app.config.errorHandler = (err, instance, info) => {
     var _a, _b;

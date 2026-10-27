@@ -3,6 +3,7 @@ package logger
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -37,10 +38,17 @@ type Logger struct {
 	liveRows []*liveRowEntry
 	// liveDrawn 是**当前已经画在终端上**的行数，重绘/擦除要靠它把光标移回去。
 	liveDrawn int
+	// painted 是块里每一行**当前画在屏幕上**的文本（只有 TTY 模式有意义）。
+	// 重绘按它做差集：没变的行一个字都不重写——整块每秒擦掉重画正是用户
+	// 看到的"频闪"（T226）。
+	painted []string
 	// tty 决定重绘方式：真终端里用 ANSI 光标上移 + 清行原地重绘；管道/
 	// 重定向里每次变化只整行追加一次（否则日志里全是裸转义序列）。
 	tty   bool
 	level int // LevelInfo / LevelDebug / LevelTrace
+	// logPath 是主日志文件的路径（启动提示要告诉用户"日志写在哪"——
+	// 事故现场里最常见的一句追问就是"log 在哪")。
+	logPath string
 }
 
 // NewLogger creates a Logger.
@@ -54,7 +62,7 @@ func NewLogger(logPath, errLogPath string, threadIDWidth int) (*Logger, error) {
 	if threadIDWidth <= 0 {
 		threadIDWidth = 2
 	}
-	l := &Logger{threadIDWidth: threadIDWidth, tty: stdoutIsTerminal()}
+	l := &Logger{threadIDWidth: threadIDWidth, tty: stdoutIsTerminal(), logPath: logPath}
 
 	if logPath != "" {
 		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -169,6 +177,14 @@ func (l *Logger) LogWarning(tid int, args ...interface{}) {
 }
 
 // Close releases the underlying log files. Safe to call multiple times.
+// Path returns the main log file path ("" when logging only to the console).
+func (l *Logger) Path() string {
+	if l == nil {
+		return ""
+	}
+	return l.logPath
+}
+
 func (l *Logger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -225,10 +241,41 @@ func stdoutIsTerminal() bool {
 	return st.Mode()&os.ModeCharDevice != 0
 }
 
+// TermRowsForTest forces the terminal height seen by the live block (nil =
+// query the real terminal). Tests need it because their stdout is a pipe.
+var TermRowsForTest *int
+
+// 块最多占终端的多少行：留出日志行、阶段定格行与 shell 提示符的位置。
+// 块一旦比屏幕高，光标上移会被终端夹在顶部，擦除就变成"把上面的历史
+// 一起滚掉"——用户看到的正是"列表太长，往上滚就没了"（T226）。
+const (
+	defaultTermRows = 24
+	liveCapMargin   = 6
+	liveCapMin      = 3
+)
+
+// liveCap 是实时块最多画几行（含最后那行"还有 N 行"的折叠提示）。
+func (l *Logger) liveCap() int {
+	rows := defaultTermRows
+	if TermRowsForTest != nil {
+		rows = *TermRowsForTest
+	} else if n := terminalRows(); n > 0 {
+		rows = n
+	}
+	capN := rows - liveCapMargin
+	if capN < liveCapMin {
+		capN = liveCapMin
+	}
+	return capN
+}
+
 // liveRowEntry is one owner's line inside the live block.
 type liveRowEntry struct {
 	id   string
 	text string
+	// prio 是显示优先级（小的先画、也最先扛住超高的裁剪）：运行中的会话
+	// 要一直看得见，排队中的可以先折起来（T226）。
+	prio int
 	// printed is the last text flushed as a whole line in non-TTY mode
 	// (one line per change; consecutive identical states stay one line).
 	printed string
@@ -283,8 +330,28 @@ func (r *LiveRow) Set(text string) {
 		return
 	}
 	e.text = text
-	// 必须先擦再画：块画完后光标停在**最后一行**，直接重画会把第 0 行
-	// 盖到最后一行上。
+	// 画完块后光标停在**最后一行**，paint 会先移回块首行再逐行比对重写。
+	l.refreshLiveLocked()
+}
+
+// SetWithPriority replaces the row text and its display priority in one
+// repaint. Lower priority draws first and survives when the block has to be
+// trimmed to the terminal height: 运行中的会话永远排在排队中的前面（T226）。
+func (r *LiveRow) SetWithPriority(text string, prio int) {
+	if r == nil || r.l == nil || r.ent == nil {
+		return
+	}
+	l := r.l
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.findRowLocked(r.ent)
+	if e == nil {
+		return // already removed: late updates must not resurrect a row
+	}
+	if e.text == text && e.prio == prio {
+		return
+	}
+	e.text, e.prio = text, prio
 	l.refreshLiveLocked()
 }
 
@@ -354,13 +421,48 @@ func (l *Logger) TTY() bool {
 	return l.tty
 }
 
+// liveOrderLocked 返回按显示顺序排列的行下标：优先级小的在前（运行中的
+// 会话先画），同优先级按创建顺序——顺序稳定，行不会每秒互相换位（T226）。
+func (l *Logger) liveOrderLocked() []int {
+	order := make([]int, len(l.liveRows))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		return l.liveRows[order[a]].prio < l.liveRows[order[b]].prio
+	})
+	return order
+}
+
+// liveBlockTextsLocked 返回真正要画的那些行：超过终端高度时只画前
+// cap-1 行，最后一行换成「还有 N 个会话」的折叠提示。日志文件里永远有
+// 全量，屏幕上只保留最有用的那一屏。
+func (l *Logger) liveBlockTextsLocked() []string {
+	order := l.liveOrderLocked()
+	capN := l.liveCap()
+	out := make([]string, 0, min(len(order), capN))
+	if len(order) > capN {
+		for _, i := range order[:capN-1] {
+			out = append(out, l.liveRows[i].text)
+		}
+		out = append(out, fmt.Sprintf("…… 另有 %d 个会话（屏幕放不下，明细见日志文件）",
+			len(order)-(capN-1)))
+		return out
+	}
+	for _, i := range order {
+		out = append(out, l.liveRows[i].text)
+	}
+	return out
+}
+
 // LiveRowTexts returns the rows in display order (tests and the panel owner).
+// It lists EVERY row (no height cap): callers inspect state, not the screen.
 func (l *Logger) LiveRowTexts() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := make([]string, 0, len(l.liveRows))
-	for _, e := range l.liveRows {
-		out = append(out, e.text)
+	for _, i := range l.liveOrderLocked() {
+		out = append(out, l.liveRows[i].text)
 	}
 	return out
 }
@@ -396,11 +498,14 @@ func (l *Logger) eraseLiveLocked() {
 		fmt.Fprintf(os.Stdout, "\x1b[%dA", n-1) // back to the first line
 	}
 	l.liveDrawn = 0
+	l.painted = nil
 }
 
-// paintLiveLocked draws the current rows. In a TTY it reuses the space the
-// previous block occupied; for a pipe it appends one line per CHANGE (so a
-// captured log keeps a chronological record without每秒重画).
+// paintLiveLocked draws the current rows. In a TTY it moves the cursor back to
+// the block's first line and rewrites ONLY the lines whose text changed: 每秒
+// 把整块擦掉重画是用户看到的"频闪"来源（T226）。行数变了就整块重来，因为
+// 下面每一行都要挪位。For a pipe it appends one line per CHANGE (so a captured
+// log keeps a chronological record).
 func (l *Logger) paintLiveLocked() {
 	// T11：quiet 不再抑制进度块——RunBook 的紧凑模式靠 LiveRow 显示
 	// classify/convert/style 进度；quiet 只负责压明细日志行。
@@ -415,18 +520,30 @@ func (l *Logger) paintLiveLocked() {
 		}
 		return
 	}
-	for i, e := range l.liveRows {
+	texts := l.liveBlockTextsLocked()
+	if len(texts) != len(l.painted) {
+		l.eraseLiveLocked() // 行数变了：旧块的每一行位置都不再对
+	}
+	if l.liveDrawn > 1 {
+		fmt.Fprintf(os.Stdout, "\x1b[%dA", l.liveDrawn-1) // 回到块首行
+	}
+	for i, t := range texts {
 		if i > 0 {
 			fmt.Fprint(os.Stdout, "\n")
 		}
-		fmt.Fprintf(os.Stdout, "\r\x1b[K%s", e.text)
+		if i < len(l.painted) && l.painted[i] == t {
+			continue // 没变的行不动它：不擦、不重写，屏幕就不会闪
+		}
+		fmt.Fprintf(os.Stdout, "\r\x1b[K%s", t)
 	}
-	l.liveDrawn = len(l.liveRows)
+	l.painted = append(l.painted[:0], texts...)
+	l.liveDrawn = len(texts)
 }
 
 // refreshLiveLocked repaints the block in place (row added/updated/removed).
+// paint 自己会在行数变化时整块重来，所以这里不再先擦一次（那等于每次都
+// 整块重画，正是频闪的另一个来源）。
 func (l *Logger) refreshLiveLocked() {
-	l.eraseLiveLocked()
 	l.paintLiveLocked()
 }
 

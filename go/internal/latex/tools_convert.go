@@ -4,12 +4,54 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"mineru-tools/internal/logger"
 	"mineru-tools/internal/session"
 )
+
+// includeRef 抓取 \input{…} / \include{…} / \includegraphics[opts]{…} / \subfile{…}
+// 的目标路径。只用于"提交产物是否自包含"这一项检查，不解析 TeX。
+var includeRef = regexp.MustCompile(`\\(input|include|includegraphics|subfile|InputIfFileExists)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}`)
+
+// unportableIncludes 找出提交产物里指向**临时树**的包含路径。chapter 提交只把
+// `<base>.tex` 与 `<base>/` 拷进书里，任何 `_subdivision/…`、`node/result/…`
+// 之类的引用在晋级后就断了；汇编/编译要等很久才炸，而模型往往就在这时候
+// 放弃编译直接提交。这里在 submit 当场挡回去。
+func unportableIncludes(workRoot, base string) []string {
+	files := []string{filepath.Join(workRoot, base+".tex")}
+	_ = filepath.Walk(filepath.Join(workRoot, base), func(p string, info os.FileInfo, err error) error {
+		if err == nil && info != nil && !info.IsDir() {
+			files = append(files, p)
+		}
+		return nil
+	})
+	var bad []string
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(workRoot, f)
+		for _, m := range includeRef.FindAllStringSubmatch(string(data), -1) {
+			target := strings.TrimSpace(m[2])
+			if target == "" || strings.ContainsAny(target, "\\#") || strings.Contains(target, "://") {
+				continue
+			}
+			norm := filepath.ToSlash(target)
+			if strings.Contains(norm, "_subdivision/") || strings.HasSuffix(norm, "_subdivision") ||
+				strings.Contains(norm, "node/result/") || strings.HasPrefix(norm, "/temp/") {
+				bad = append(bad, filepath.ToSlash(rel)+": \\"+m[1]+"{"+target+"}")
+			}
+		}
+	}
+	sort.Strings(bad)
+	return bad
+}
 
 // resolveInside maps rel under root, refusing escapes.
 func resolveInside(root, rel string) (string, error) {
@@ -52,8 +94,10 @@ type CompileChapterTool struct {
 	Dir         string // the session's writable tree (class + manual + chapter + wrapper)
 	MainFile    string // the session's own chapter fragment, e.g. chapter_003.tex
 	WrapperFile string // what gets compiled, e.g. chapter_003_wrapper.tex ("" = MainFile)
-	Log         *logger.Logger
-	Tid         int
+	// Gate 记录「编译成功」这件事，供 submit 的门禁核对（T165）。
+	Gate *chapterGate
+	Log  *logger.Logger
+	Tid  int
 }
 
 func (t *CompileChapterTool) Name() string { return "compile" }
@@ -124,6 +168,12 @@ func (t *CompileChapterTool) Execute(argsJSON string) (session.ToolResult, error
 	start := time.Now()
 	res := t.Comp.CompileOpts(t.Dir, compileFile, opts)
 	LogCompileResult(t.Log, t.Tid, "chapter", res, time.Since(start))
+	if res.OK && t.Gate != nil {
+		pdfName := strings.TrimSuffix(compileFile, ".tex") + ".pdf"
+		if err := t.Gate.markCompiled(filepath.Join(t.Dir, pdfName)); err != nil {
+			t.Log.LogWarning(t.Tid, "[gate] 记录编译印记失败:", err)
+		}
+	}
 	if res.OK {
 		// 成功只报事实：产物名 + 页数 + 一句"用 view_pdf 看它"（怎么细看是模型自己的事）。
 		detail := ""
@@ -278,6 +328,19 @@ type SubmitChapterTool struct {
 	ReportOptional bool
 	// Gate 是可选提交门（P27：goal 计划清空才放行）；返回打回文案即拒绝。
 	Gate func() string
+	// GateRef 是同一个门禁的引用（T168）：「覆盖率不达标但第二次放行」的缺口
+	// 要写进这一章的报告，得从门禁的印记里读。
+	GateRef *chapterGate
+	// Depth 是这一章在递归树里的深度（顶层 0），写进 issue 条目。
+	Depth int
+	// IssuesPath 是本节点的 issue store（<work>/.issues/issues.json）：继承来的
+	// 子章节问题 + 自己新报的，都落在这里，父节点直接读文件继承。
+	IssuesPath string
+	// InheritedPath 是父节点写下的"子章节未解决问题"（
+	// <work>/_subdivision/issues-inherited.json）；不存在就是没有。
+	InheritedPath string
+	// OpenIssues / NewIssues 是提交后算出的结果，供调用方记录日志。
+	OpenIssues []ChapterIssue
 }
 
 func (t *SubmitChapterTool) Name() string { return "submit" }
@@ -305,9 +368,30 @@ func (t *SubmitChapterTool) Definition() map[string]any {
 				"type":        "object",
 				"description": "REQUIRED work report (工作汇报) on style/manual conformance. status=pass when your conversion used the manual/cls correctly with no style problems; status=issues when the cls/manual could not express what the book really does.",
 				"properties": map[string]any{
-					"status":      map[string]any{"type": "string", "enum": []string{"pass", "issues"}},
-					"issues":      map[string]any{"type": "string", "description": "Concrete cls/manual/format problems found (empty for pass)."},
+					"status": map[string]any{"type": "string", "enum": []string{"pass", "issues"}},
+					// issues 两种写法都收：字符串（旧）或字符串数组（推荐，一条
+					// 一个条目，便于跨层合并）；子章节的问题会由机制继承进来。
+					"issues": map[string]any{
+						"description": "Concrete cls/manual/format problems you found — one problem per item (a string array is preferred; a plain string still works).",
+						"anyOf": []any{
+							map[string]any{"type": "string"},
+							map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						},
+					},
 					"suggestions": map[string]any{"type": "string", "description": "Concrete suggestions for the cls/manual (empty for pass)."},
+					// resolved：父章节整合时修掉了哪几条**继承来的**问题，用它们的
+					// ID；机制会据此把条目划掉，没写的原样向上。
+					// coverage_note：内容覆盖率不达标又被放行时的一句解释，
+					// 会连同覆盖率数字一起进报告的未解问题、向上合并。
+					"coverage_note": map[string]any{
+						"type":        "string",
+						"description": "If submit warned that too little of the chapter markdown shows up in your PDF (OCR/duplicate headers can make that unavoidable), explain here why the missing text is expected. It is carried upward with the coverage number.",
+					},
+					"resolved": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "IDs of inherited child issues you actually FIXED while integrating (from children-summary.md). Leave a problem out if you did not fix it — it is carried upward automatically.",
+					},
 				},
 				"required": []string{"status"},
 			},
@@ -373,6 +457,23 @@ func (t *SubmitChapterTool) Execute(argsJSON string) (session.ToolResult, error)
 	if strings.Contains(string(data), `\documentclass`) {
 		return session.ToolResult{Text: "REJECTED: " + wantTex + " must be an \\input fragment (no \\documentclass) — the book's wrapper provides the preamble."}, nil
 	}
+	// 提交产物必须**自包含**：`\\input`/`\\includegraphics` 只能指向本目录，
+	// 不能指向 `_subdivision/` 这类临时树。实测代价：一个嵌套父章节把
+	// `\\input{_subdivision/child_01/node/result/...}` 交进了书里，路径只在它自己的
+	// 临时工作区存在，晋级/汇编后全是断链——上一层的模型只好去 `find` 临时
+	// 目录、手工补路径，最后连编译都放弃就提交了（这正是"父节点不编译不看"
+	// 的一条真实来源）。在这里挡回去，让它把内容整合进 <base>/。
+	if bad := unportableIncludes(t.WorkRoot, t.Base); len(bad) > 0 {
+		shown := bad
+		if len(shown) > 6 {
+			shown = shown[:6]
+		}
+		return session.ToolResult{Text: "REJECTED: " + wantTex + " 或 " + wantDir + "/ 里有 " +
+			strconv.Itoa(len(bad)) + " 处包含指向临时目录的路径（提交后必然断链）：\n  " +
+			strings.Join(shown, "\n  ") +
+			"\n只能引用本目录里的文件（\\input{" + wantDir + "/...} 或 figures/images 里的资源）。" +
+			"把这些内容整合进 " + wantDir + "/ 后再提交。"}, nil
+	}
 	// 只把这两个路径拷进书里；文件夹整棵替换，旧内容与历史残留不会留下。
 	placed, perr := placeChapterFiles(t.WorkRoot, t.SubmitRoot, t.Base)
 	if perr != nil {
@@ -382,9 +483,33 @@ func (t *SubmitChapterTool) Execute(argsJSON string) (session.ToolResult, error)
 	t.Submitted = true
 	t.Notes = notes
 	t.Status, _ = report["status"].(string)
-	t.Issues, _ = report["issues"].(string)
+	ownIssues := reportTextList(report["issues"])
+	// 覆盖率不达标但已放行（第二次）的缺口：不是"通过就没事"，而是变成一条
+	// 未解问题进报告——父章节与顶层报告都能看到这一章实际缺了多少。
+	if t.GateRef != nil {
+		if gap, ok := t.GateRef.coverageGap(); ok {
+			note, _ := report["coverage_note"].(string)
+			ownIssues = append(ownIssues, coverageGapIssue(gap.Coverage, gap.Missing, note))
+		}
+	}
+	t.Issues = strings.Join(ownIssues, "\n")
 	t.Suggestions, _ = report["suggestions"].(string)
-	t.Report = renderWorkReport("chapter "+t.Base, notes, report)
+	// 问题合并（T166）：继承子章节未解决的条目 + 自己新报的，再去掉明确修掉的。
+	// 这一节由代码写进报告，父会话不必"记得"把子章节的问题抄一遍。
+	if t.IssuesPath != "" {
+		merged := mergeChapterIssues(t.Base, t.Depth, ownIssues,
+			readIssueStore(t.InheritedPath), reportTextList(report["resolved"]))
+		if err := writeIssueStore(t.IssuesPath, merged); err != nil {
+			return session.ToolResult{}, fmt.Errorf("write chapter issues: %w", err)
+		}
+		t.OpenIssues = openIssues(merged)
+		if extra := renderIssuesSection(t.OpenIssues); extra != "" {
+			t.Report = renderWorkReport("chapter "+t.Base, notes, report) + extra
+		}
+	}
+	if t.Report == "" {
+		t.Report = renderWorkReport("chapter "+t.Base, notes, report)
+	}
 	if t.ReportPath != "" {
 		if err := os.MkdirAll(filepath.Dir(t.ReportPath), 0o755); err == nil {
 			if werr := os.WriteFile(t.ReportPath, []byte(t.Report), 0o644); werr != nil {
@@ -392,8 +517,12 @@ func (t *SubmitChapterTool) Execute(argsJSON string) (session.ToolResult, error)
 			}
 		}
 	}
-	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. chapters/%s and chapters/%s/ (%d files) are in the book.",
-		wantTex, wantDir, t.Placed), Terminal: true}, nil
+	extra := ""
+	if t.IssuesPath != "" {
+		extra = fmt.Sprintf(" Open issues carried upward: %d (fix some? put their IDs in report.resolved and submit again).", len(t.OpenIssues))
+	}
+	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. chapters/%s and chapters/%s/ (%d files) are in the book.%s",
+		wantTex, wantDir, t.Placed, extra), Terminal: true}, nil
 }
 
 // renderWorkReport renders the fixed-format 工作汇报 file. The "结论:"

@@ -575,6 +575,7 @@ models:
 	ref.Latex.DedupeAttachMin = 0.60
 	ref.Latex.DedupeIconMaxArea = 200000
 	ref.Latex.DedupeBucketMax = 400
+	ref.Latex.MaxChapterLines = DefaultMaxChapterLines
 	if err := validateThinkingTypes(ref); err != nil {
 		t.Fatal(err)
 	}

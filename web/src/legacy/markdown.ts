@@ -3,6 +3,9 @@
  * __粗__ / ~~删~~ / *斜* / _斜_ / $…$ 与 $$…$$（数学）。一律 DOM API 落树，
  * 从不拼 HTML；名字里的 `<`、`&` 只是文本。
  *
+ * 下划线的强调只在词边界成立（T228，CommonMark 的 intraword 规则）：
+ * `chapter_012_child_02` 这种名字里的下划线原样保留。
+ *
  * 数学转换器（mdMathML）在对话正文块才移植；这里先按旧页的"转换器抛错就
  * 地退回原始 $…$ 文本"路径走（stub 抛错），块3 接上真转换器后此文件不用改。
  */
@@ -26,6 +29,22 @@ function el(tag: string, cls?: string, text?: string): HTMLElement {
   return node
 }
 
+/*
+ * T228：`_` / `__` 只在**词边界**上才是强调（CommonMark 的 intraword 规则）。
+ * 转录里到处是 `chapter_012_child_02`、`convert_….jsonl` 这类名字，旧正则把
+ * 中间的下划线当成强调标记吃掉了，页面上显示成 `chapter012child_02…`——读起来
+ * 就像记录本身被改坏了。`*` 不受这条限制（`a*b*c` 仍是强调）。
+ *
+ * 不用 lookbehind：老浏览器（Safari < 16.4）会在加载模块时抛 SyntaxError，
+ * 整页白屏；前一个字符由 mdInline 跨片带进来。
+ */
+const WORD_CHAR = /[\p{L}\p{N}_]/u
+
+export function intrawordUnderscore(m: RegExpExecArray, before: string, after: string): boolean {
+  if (m[6] === undefined && m[9] === undefined) return false // 6 = __…__、9 = _…_
+  return (before !== '' && WORD_CHAR.test(before)) || (after !== '' && WORD_CHAR.test(after))
+}
+
 /* 数学：LaTeX → MathML 转换器在 richtext.ts（块3 移植）；转换器抛错就地
  * 退回原始 $…$ 文本——一条坏公式不许打断整页渲染。 */
 import { mdMathML } from './richtext'
@@ -36,12 +55,26 @@ export function mdInline(parent: Node, text: unknown, depth = 0): void {
     return
   }
   let rest = String(text === undefined || text === null ? '' : text)
+  // current[0] 前面那个字符（跨片跟踪）：词内下划线要靠它判断，见
+  // intrawordUnderscore（T228）。
+  let before = ''
   let guard = 0
   while (rest && guard++ < 800) {
     const m = MD_INLINE.exec(rest)
     if (!m) break
-    if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)))
-    rest = rest.slice(m.index + m[0].length)
+    if (m.index > 0) {
+      parent.appendChild(document.createTextNode(rest.slice(0, m.index)))
+      before = rest.slice(m.index - 1, m.index)
+    }
+    const matched = m[0]
+    rest = rest.slice(m.index + matched.length)
+    // T228：词内的 `_`/`__` 不是强调，原样落成文本（见 intrawordUnderscore）。
+    if (intrawordUnderscore(m, before, rest.slice(0, 1))) {
+      parent.appendChild(document.createTextNode(matched))
+      before = matched.slice(-1)
+      continue
+    }
+    before = matched.slice(-1)
     let node: HTMLElement
     if (m[1] !== undefined) {
       // 行内代码：内容原样进文本节点（含 < > & ，不会被当成标签）

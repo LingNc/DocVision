@@ -1236,7 +1236,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 ### T46 checker 必须拿到结论才收尾
 - 旧行为：Run 出错或未提交 → 直接「视为通过」。真实项目审计（见 T41）显示 6/36 章 checker 空转即此路径。
 - 新行为：**两轮尝试**——每轮漏 submit 先按 tikz 同款提醒一次；本轮仍无结论（会话错误/提醒后未提交）重开一轮全新核对会话（同一转录续写，一章一个文件）；两轮都失败才降级通过并打 warning。compile 与终审仍是硬关卡，降级语义不变。
-- 测试：`checker_test.go` 2 例（退化会话→重试轮成功 / 两轮全退化→降级且请求数 ≤6）。
+- 测试：`chapter_checker_test.go` 2 例（退化会话→重试轮成功 / 两轮全退化→降级且请求数 ≤6）。
 
 ### T41 checker 提出问题是否解决的审计结论（不改代码）
 - 李艳芳项目 36 章 checker 转录逐一解析（submit 参数嵌套 `report.status`）：**30 章 pass、0 章 issues、6 章无结论**（008/014/020/024/028/030）——checker 从未提出过问题，故无"未解决的问题"。
@@ -1292,7 +1292,7 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
 - 新配置块 `latex.style_fix.max_rounds` → **配置版本 11→12**（config.go/default.yaml/config.example.yaml/README 示例行/docs/config.md 同步；测试固件 config_version 同步；temp/config_new.yaml 改写固件同步）。
 - 新提示词模板 3 个（integrate/assess/block system），注册表 + MustMention 守护。
 - 删除：旧 styleFeedbackLoop（多数派门 + 内嵌单章修复循环，约 230 行）与 maxStyleFeedbackRounds 常量；maxCheckerRounds 常量保留（原被误删，已恢复）。
-- 测试：stylefix_test.go 4 例（submit_problems/submit_blocks/submit 块结论/collectIssueReports）；全仓 go test 绿。
+- 测试：style_fix_test.go 4 例（submit_problems/submit_blocks/submit 块结论/collectIssueReports）；全仓 go test 绿。
 - 遗留（如实记录）：stylefix 会话无断点续跑重放（中断后整轮重来，成本有界）；整合会话只跑一次、问题清单跨轮复用（修复轮之间问题集假定不变）。
 
 ## 第四十九批（2026-09-17，T52 mermaid 升级会话整修）
@@ -1811,3 +1811,1016 @@ P8 批里把 T12/T13 同步打进了旧页 viewer.js——这是**最后一次**
   - **验收证据**（fixture 页：2 组 + 8 张独立、24 条图片引用 / 22 张不同缩略图）：收起状态 **0** 个图片请求（`[0,24,10]`）、点 `全部展开` 后 **24/24** 全 200（`[2,24,24]`）；灯箱开→`100%`→滚轮 `152%`→点击关闭 true→`Esc` 关闭 true；真实项目页（17 个项目 / 45 个阶段行）只有 **1** 枚「复查」、在「整组核验」行、新标签标题 `dedupe 复查`、注入 `<base>`、无破图、不触发外层折叠。
   - **测试**：`TestWriteMotifReviewLinksSelectedImages` 同步钉住新形态（`../images/…`、`thumbs/<12 hex>.jpg`、`id="lb"`、`data-all="open"`、`<details class="group"`、无 `data:image/jpeg;base64,`、无 `<details class="group" open`、`代表图 ★`、`组内最低分`）；新增 `TestServeDedupeReviewPage`（`dedupeReviews == ["bookA"]`、200 `text/html` + 注入的 `<base>`、缩略图与原图各一条 200、未知项目 404、`../etc` 400）。
 - **测试/校验**：`go build ./...`、`go vet ./...` 干净；`gofmt -l` 只剩既有的两个历史文件；全量 `go test ./internal/... -count=1` 全绿（latex / sessionview / img2text）；`web/npm test` 129 passed；`npm run build` 重建 `go/internal/sessionview/assets/dist`（`viewer.css` 74.53 kB / `viewer.js` 466.71 kB）后 `go build` 再验证；`node --check` 过页面脚本。文档同步：`docs/issue.md` T153/T154、CHANGELOG `[Unreleased]`（T153 Changed、T154 Added、点图打不开 Fixed）、`docs/dedupe-algorithm.md`（产物、流程图、落盘、续跑四层）、`docs/dedupe.md`（`scan.json`、review.html 形态）、`docs/latex.md`（整组核验落盘）、`docs/commands.md`（会话预览「复查」入口与 `/dedupe` 路由）、`AGENTS.md` 现状要点。
+
+## v1.5+（第三十九批，P34 后续）
+
+- 递归章节会话使用完整稳定 ID 命名转换与 checker transcript；预览扫描兼容旧嵌套 generic 文件名，并恢复父 ID、角色和深度。
+- 会话 API 增加章节树字段与 `chapter_activity` 状态。Web 侧把 convert 作为树节点、同 ID checker 放在节点下方，子节点递归；排队、等待子会话、运行、核对和结论状态可见，checker 不重复计入章节聚合。
+- 父节点等待子树时释放全局章节 API 槽位；转换、checker 与提醒请求统一通过共享 `latex.concurrency` 槽。strict checker 遇余额/API 错误立即 fail-closed，保留现场供更换 checker 模型续跑；续跑恢复原 transcript 历史、轮次与工具计数并使用当前模型配置。
+- 回归覆盖章节身份/父子配对、旧路径兼容、等待元数据、全局槽位、split reminder 抑制、欠费不重试、checker 模型切换后的 transcript continuity；Web 测试覆盖递归树排序和 checker 去重计数。
+
+## v1.5+（第四十批，T156–T158：bash 可写工作区 / responses 流式 / 内存自证）
+
+- **T156 bash 沙箱把会话自己的工作区锁成只读**。`WorkBashTool.sandboxArgs` 原先用「这个挂载目录顶层有没有软链」来决定走"视图目录"分支——有软链就按条目逐个 `--ro-bind`。逐章转换工作区的顶层恰好有 `images`/`figures` 两枚软链（`linkAbs` 指向项目只读资源树），于是 `work:`（本应可写）整棵走进只读分支：`chapter_01.tex`、`manual.md`、`parts/` 都被只读绑定，沙箱里新建文件能写、**改已有文件一律 EROFS**。`write_file` 走 VFS 不经沙箱，于是现场看起来像"只有 bash 坏了"，多个会话在 `OSError: [Errno 30] Read-only file system` 面前直接放弃。
+  改法：可写挂载**无条件** `--dir dst --bind mountDir dst`（软链原样保留），再遍历顶层软链，把每个解析目标的**真实绝对路径**补一条 `--ro-bind target target`（去重、跳过 `target == mountDir`、目标不存在就跳过），这样 `images/xxx.jpg` 在沙箱内仍可读、资源树仍不可写；只读视图分支（原书 PDF 视图、项目窄视图）逻辑原样未动。
+  验证：`TestSandboxWritableWorkspaceWithLinks`（参数面：必须是 `--bind`、自己的 `.tex` 不得出现 `--ro-bind`、软链目标按真实路径只读绑定）与 `TestBashSandboxEditsOwnWorkspaceWithLinks`（行为面：真 bwrap 下覆盖已有 `.tex` 成功、`cat images/pic.jpg` 读到内容、往软链目标 `echo x >` 仍报只读）。
+- **T157 `api: responses` 接上 SSE**。原来该分支 `payload.Stream = false` 强制非流式。现在：`buildResponsesBody` 写 `stream: payload.Stream`；`postResponses(raw, stream)` 按模式选 `streamHTTP`（流式不吃整次超时）；新增 `readResponsesStream` 消费 `response.output_text.delta` / `response.reasoning_summary_text.delta` / `response.reasoning_text.delta` 喂 `StreamHook`（150ms 节流、尾 16KB）与 TTFT，用 `response.completed`/`response.incomplete` 里的完整 response 对象经 `decodeResponsesBody` 收账——与非流式**同一个解码器**，所以转录与用量不随传输方式变化；`response.failed`/`error` 先试解嵌在 `response.error.message` 里的原因再退回事件级字段；`ChatCompletion` 里照 openai 分支补了 4xx/连接错误的一次非流式回退。
+  实现细节两个坑：① 行读取 goroutine 在 EOF 后必须用 `msg, open = <-lines` 判关闭——最初写成只判 `err`，channel 关闭后零值空转，`go test` 直接挂死 8 分钟；② 网关忽略 `stream:true` 返回整段 JSON 时不能报「没有 response.completed」，改成把整段 body 攒下来兜底 `decodeResponsesBody`，既有端到端用例因此零改动通过（它们本来就回 JSON）。
+  顺带修 `finish_reason`：截断判据原来只认扁平 `incomplete_reason`，补上 REST 的 `incomplete_details.reason=max_output_tokens` → `length`（`length` 是空响应自救的触发条件，漏了就自救不了）。
+  测试：`TestResponsesStreaming`（`stream:true`、`Streamed`、TTFT 在 (0, elapsed]、内容、工具调用、usage、`ReasoningChars`、hook 收到增量）、`TestResponsesStreamFailureSurfacesReason`；`TestResponsesEndToEnd` 的 `stream` 断言改为 `true` 并注明同时覆盖"整段 JSON 兜底"。
+- **T158 「已杀死」= SIGKILL，改成先留证据**。现场：进程消失、章节转录停在 `waiting_children`、日志无错误行，shell 只打一句「已杀死」（SIGTERM 才是「已终止」）；取证时可用 RAM ~740MB、swap 已用 ~10GB/27GB、`Committed_AS` 超 `CommitLimit`，符合 OOM killer 条件，但 `dmesg`/`journalctl -k` 需要 `adm`，读不到，所以判断只能到"最可能"。SIGKILL 拦不住，于是新增 `internal/latex/memwatch.go`：`RunBook` 一进来就 `startMemWatch(time.Minute)`，立刻打一行 `[mem] 基线`（`VmRSS` + `MemAvailable`/`MemTotal`），此后每 60s 采样并维护 RSS 峰值与可用内存最低值，`defer stop()` 收尾打一行汇总；`memLevel` 三档（`<1GiB 或 <10%` = low，`<256MiB 或 <3%` = critical），low/critical 立即 `LogWarning` 并给"调低 `latex.concurrency`"的可执行建议，critical 明说"随时可能被 SIGKILL、日志不会有错误行"。判据用 `MemAvailable` 而不是 `MemFree`（换出压力下 `MemFree` 仍然好看）。`/proc` 不可读时字段退化为 `?`，绝不因此让流程失败。
+  测试：`TestParseMemInfo`、`TestParseRSS`、`TestMemLevel`（阈值边界含 0/unknown）、`TestStartMemWatchLogsBaselineAndStop`（基线与结束两行都真的落盘、`stop()` 不阻塞）。
+- **文档同步**：`docs/issue.md` T156–T158；CHANGELOG `[Unreleased]`（T157/T158 Added、T156 Fixed）；`docs/config.md`、`docs/sessions.md` 去掉"后两条线路只走非流式"的旧表述；`go/internal/config/config.go` 的 `API` 字段注释与两份配置模板注释同步；`AGENTS.md` 现状要点更新沙箱口径与内存自证。
+- **校验**：`gofmt` 只碰本批文件；`go test ./internal/... -count=1` 全绿（latex 32.1s / session 6.1s / sessionview 17.7s / img2text 12.2s 等，exit 0）。
+
+## v1.5+（第四十一批，T159：续跑回放清洗与输出预算兜底）
+
+- **背景**：用户准备续跑整本书，先问"这些会话是不是要删掉尾巴才能继续"。逐转录核查 187 份，10 份以失败结局，归成三类：**欠费**（`SESSION_INSUFFICIENT_BALANCE`，按设计 fail-closed，充值后续跑即可）；**400 循环**（两例，`invalid_request_error / upstream_request_rejected`，不可重试）；**空回复**（两例，连续两轮 `finish=length`、`completion_tokens` 打满、content 为空 → `empty final answer`）。
+- **400 循环的根因**：模型流式输出的工具参数被截断，转录里存下的是不闭合的 JSON（`{"path": "chapter_01.md"` 少右括号）。第一次请求合法（历史里还没有这条坏消息），**第二次请求**把这条 assistant 消息连同坏参数原样回放，网关校验工具调用失败 → 400，会话从此每次续跑都在第一个请求上失败。这不是"要不要删会话"的问题，而是回放没做合法性检查。
+- **空回复的根因**：`max_tokens` 是**思考 + 正文**的总预算。开着思考的模型配 8192 时，思考把 8192 全吃掉、正文一个字都不吐；原来的空回复自救只是原样再问一次 `Continue.`，预算没变 → 又是一轮 8192 全空 → 判失败。用户直觉（"配置太小、该调大"）是对的；代码侧要做的只是别让同一个预算再撞一次，并把根因说清楚。
+- **改（`internal/session`）**：
+  - `replay_sanitize.go`：`sanitizeReplayMessages` 在 `LoadTranscriptStats` 返回前跑一次——坏 JSON 参数按 `{}` 重放并把对应 tool 回执改写成"参数不是合法 JSON，已按空参数重放，请重新调用"；正文为空且无工具调用的 assistant 消息丢弃；其余消息逐条不变。**只改内存历史，磁盘转录一字不动**（事故现场要留原样）。
+  - `session.go`：`finish=length` 且正文为空时，重试预算翻倍（`budgetCeiling` 按"窗口 − 当前上下文 − 2% 余量"夹住），并打 `LogWarning` 说明"是预算被思考吃光、该调大会话的 `max_tokens`"。
+  - `budget_warn.go`：会话创建时若模型 `thinking.type` 为 enabled/adaptive 且 `max_tokens < 16384`，按「模型 + 预算」去重告警一次，提示调到 32768 以上（几十个章节会话不会刷屏）。
+- **测试**：`TestSanitizeReplayFixesMalformedToolArguments`、`TestSanitizeReplayDropsEmptyAssistantMessages`、`TestSanitizeReplayKeepsCleanHistory`、`TestBudgetCeilingIsWindowAware`、`TestNudgeBoostsBudgetAfterLengthTruncation`（断言第二次请求的 `max_tokens` 大于被截断那次）、`TestBudgetWarningForThinkingModel`（含去重守卫）。
+- **现场核对**：用只读加载跑过那四份卡住的转录，修复后 `badArgs=0`、`emptyAssistants=0`——续跑第一个请求即合法，**不需要删改任何会话历史**。
+- **文档同步**：`docs/issue.md` T159；CHANGELOG `[Unreleased]` Fixed；`docs/config.md`（`max_tokens` 是总预算、思考模型建议 ≥32768）、`docs/sessions.md`（回放清洗与截断兜底）；`AGENTS.md` 现状要点补两句。
+- **校验**：`go build ./...`、`go vet ./internal/session`、`gofmt` 干净；`go test ./internal/session ./internal/latex -count=1` 全绿（6.1s / 45.0s）。
+
+## v1.5+（第四十二批，T160：两份配置模板同步）
+
+- **背景**：用户大改 `config.example.yaml` 后问"软件里面那个 default 跟这个 example 差距有点大，是不是之前一直没更新"。核对结果是**两份模板长期各自演化**：键面一直有 `TestConfigTemplateKeyParity` 守着（键集合必须一致），但值、注释、示例条目全可以漂移——当年实测差异 **339 行**：示例新增了 `gateway-a`/`gateway-b`/`heavy`/`vision-heavy` 等命名基座演示 `extends`（单基座、多重基座、链式），`default.yaml` 还是逐个角色写死 `model:` 的老写法；注释一边英文一边中文教学；`verify`/`img2text` 块顺序不同。值差异 11 处：`max_fix_rounds` 8→40、`raster_dpi` 110→220（docs 早已注明是模板示例值）、`sessions.drawing.max_tokens` 16384→131072、`sessions.style.max_tokens` 32768→131072、`preview.img2text` false→true、`mermaid.fix_attempts` -1→2、`mermaid.session_errors` 3→6（这四处此前未注明）、`models.{chapter,heavy,style}.extends` 目标不同，以及 `tools.python.install_timeout` 的 300/30000 之别（单位是秒；曾按数量级笔误改成 300，开发者随后改回 30000 并保留，文档默认值仍写代码默认 300）。
+- **改**：① 两份模板同步为同一内容（用户已把示例整体覆盖到 `default.yaml`），`sessions.dedupe.max_tokens` 与 `img2text.max_tokens` 按用户要求统一为 **65536**；② `install_timeout` 按开发者的值保留 30000（`docs/config.md` 默认值列写代码默认 300，并注明模板示例 30000）；③ `docs/config.md` 为 `sessions.*.max_tokens`（模板示例 131072 / dedupe 65536 / img2text 65536）、`mermaid.fix_attempts`（示例 2）、`mermaid.session_errors`（示例 6）、`preview.img2text`（示例 true）补上"随附模板示例写…"的注记——此前只有 `raster_dpi`/`max_fix_rounds` 两行注明过。
+- **防复发**：新增 `TestConfigTemplatesInSync`（两份模板逐字节比对，单边修改立刻失败；失败信息里写明"若确需不同，请改成只比值并写进 docs，不要直接删测试"）与 `TestBuiltinTemplateLoads`（**内嵌**的 `ConfigTemplate` 走 `LoadConfigData`：版本号等于 `CurrentConfigVersion`、`models.text.model` 非空、示例条目 `vision-heavy` 的多重基座链能解析出 model）。
+- **校验**：`go build ./...`（模板是 `//go:embed` 的，必须重编）；`go test ./internal/... -count=1` 全绿（config 0.08s / latex 19.0s / session 6.1s / sessionview 18.1s 等）。
+
+## v1.5+（第四十三批，T161：递归章节树的展开交互）
+
+- **背景**：用户要改会话预览侧栏里"多子会话"的展开操作——「不要点一下那个会话查看，然后点一下展开的逻辑有点奇怪…左边那个下拉按钮点击的范围可以大一点，点击可以下拉展开，而不是用两次操作，并且可以维持其他的地方的展开保持不变，而不是点一下其他的之前拉开的都收回去了」。
+- **根因**：`ChapterSessionTree.vue` 用 `<details :open="nodeContainsCurrent(node)">`。`:open` 是响应式 binding，每次重渲染（每秒轮询、选中任何会话、filter 变化都算）都会把「不含当前会话」的节点重新赋成 closed——所以刚拉开的树会自己收回去，点别处更是全收；展开状态完全没有记忆（侧栏三层分组早有 `state.collapsed`，章节树是漏的）；`<summary>` 一次点击同时触发"选中会话"与"展开"两件事；可点区域只有 12px 的小三角。
+- **改**：① 展开状态改成每节点自己的记忆，键 `chapter:<项目>/<阶段>/<节点ID>`（不带 scope 会让不同书/不同阶段的同名 `chapter_001` 串状态），存 `state.collapsed` 并落盘 localStorage；② `<details>` 换受控 `<div class="chapter-node" :class="{open}">` + `v-if` 子树，行点一下只选中、左侧独立按钮点一下只切展开（`@click.stop`），两件事各一次点击就到；③ 展开按钮扩成整行高 26px 的命中区（原 12px 三角），带 hover 与 focus-visible；④ 既无子节点也无 checker 的节点不显示按钮（占位保持缩进对齐）；⑤ checker 行补 26px 左内边距与按钮同一列；⑥ `Sidebar` 两处调用传 `:scope="项目名/阶段"`。新增纯函数 `chapterNodeKey`/`chapterWantOpen`（`web/src/legacy/sidebar.ts`）。
+- **踩到的坑**：`state.collapsed` 是 Vue 的 reactive 代理，`hasOwnProperty` 不走 get 陷阱、**建不起响应式依赖**。第一版照 `groupWantOpen` 的 `hasCollapseMemory` 实现，探针里表现为"点展开按钮 → 记忆确实写进 localStorage，但 `open` 类与子树不出现"，要等 `state.current` 之类别的 reactive 变化才显形。改成读一次 `state.collapsed[key]`（不存在的键也会被 track）后立即正常。
+- **验证**：`web/tests/chapter-tree.spec.ts` 六条（键带 scope、默认只展开装着当前会话的一支、手动展开一直开着、手动收起优先于自动露出、切一个不影响兄弟、落盘键带 `dsh.sessionview.` 前缀）。另起临时无头 chromium 探针（`web/tmp_tree_harness`，验证完即删、不入库）在真实 DOM 上点了一遍，全部符合预期：点按钮只展开不选中、点行只选中不改展开、两个节点互不影响、切到别的节点会话后前一个仍开着、子节点按钮只切自己、清空记忆后装着当前会话的分支自动露出、模拟轮询重渲染不收回、按钮命中区 26×29px、无子节点的节点没有按钮。`npm test` 135 passed、`npm run build` 后 `go build` + `go test ./internal/...` 全绿。
+
+## v1.5+（第四十四批，T162：进程被「已杀死」时的现场取证）
+
+- **背景**：用户报「这次启动 30s 左右就被杀死了，这是为啥？/tmp 不够用了吗？……我也没办法检测？能否开启一个 debug 模式记录到 log 文件……怎么监控一下？」——终端只有一句「已杀死」，没有任何错误行。
+- **现场取证**（只读检查，未改用户机器上的任何文件）：
+  - 机器 15.5GiB 内存、**swap 已用 11GiB**（长期压力），`MemAvailable` 6.3GiB；
+  - `/tmp` 是 **tmpfs 7.8GiB，已用 3.9GiB**——tmpfs 就是内存，其中 **3.4GiB 是我自己跑测试留下的 `GOCACHE=/tmp/dsh-gocache`**。这是我这边的问题，已立刻删除（顺带清掉 `/tmp/go-build*` 残留），可用内存 6.3→6.6GiB、swap 11→8.6GiB，并改用 `/var/tmp/dsh-gocache`；
+  - 运行日志显示这是一次**续跑**：26 章、`latex.concurrency: 5`，一启动就「恢复中断的会话」二十来条（最长 146 条历史消息）——每条恢复都要把转录里的图片重新读成 data URL，这是启动阶段的内存尖峰；
+  - 日志里只有一行 `[mem] 基线`（T158 的内存自证），之后再无采样：采样行走 `Trace` 级（info 下不显示）且只进终端日志，进程一被 SIGKILL 就什么都不剩。
+  - 结论：不是 `/tmp`「不够用」（7.4GiB 空闲），而是**内存**——15.5GiB 里可用只剩 6GiB 左右、swap 已经在撑着，再叠加 5 路续跑会话同时回放带图历史，被内核 OOM killer 挑中。`已杀死` 是 shell 对 SIGKILL 的汉化，SIGKILL 无法被程序捕获，所以问题不是「没处理信号」而是「没留下证据」。
+- **改**：
+  1. 内存采样**同时追加到项目内的 `<proj>/work/mem.log`**（时间戳 + `[mem]` 行）。终端被刷掉、窗口关掉、进程被杀，这个文件都还在；
+  2. 采样节奏：**前 3 分钟每 10s**（「已杀死」大多发生在起步阶段）、之后每 60s，收尾再一行；
+  3. 采样内容补 `VmHWM`（内核记录的峰值，采样间隙也不漏）与 swap 总量/用量；swap 已用 >60% 且 >1GiB 时告警"实际余量比这个数字更小"；
+  4. 恢复会话的日志行带**该历史回放的图片张数与字节数**（新增 `session.ReplayWeight`，`map[string]string` 与 `map[string]interface{}` 两种 `image_url` 形态都算），单条 ≥32MiB 额外告警——直接指认哪条会话吃内存；
+  5. `--debug`/`--trace` 启动提示写明日志文件路径（新增 `logger.Path()`）；`docs/sessions.md` 新增「内存日志」一节。
+- **落在哪**：`go/internal/latex/memwatch.go`（采样/落盘/swap 判据）、`book.go`（采样移到项目目录确定之后，传 `work/mem.log`）、`go/internal/session/session.go`（`ReplayWeight`）、`go/internal/latex/resume.go`（恢复行带图片负载）、`go/internal/logger/logger.go`（`Path()`）、`cmd/docvision/main.go`（调试提示带路径）。
+- **验证**：`TestStartMemWatchLogsBaselineAndStop` 扩展为同时校验 `mem.log` 落地；新增 `TestMemSnapshotParsesSwapAndPeak`、`TestReplayWeightCountsImageBytes`；`go build ./...` + 全量 `go test ./internal/...` 绿。
+- **给用户的操作建议**（回复里也写了）：`latex.concurrency` 从 5 调到 2–3；跑之前看 `free -h` 的 `可用`，别在 `swap 已用` 很高时开跑；跑起来后 `tail -f <proj>/work/mem.log` 就能看到实时内存曲线。
+
+## v1.5+（第四十五批，T163：会话把宿主进程 kill 掉——沙箱补 PID 命名空间）
+
+- **背景**：用户报「还是已杀死，但是毫无征兆，我看 mem.log 了并没有」——上一批（T162）把死因判成 OOM，这次拿到 `--debug` 日志后直接推翻了。
+- **真因（日志原文，同一条 `convert:chapter_009_child_04` 会话）**：
+  1. `[21:36:09] tool result: bash  1358006 docvision  ./docvision latex … --debug`——模型在沙箱里跑 `ps`，看到**宿主 DocVision 自己的 PID**；
+  2. `[21:36:14] tool call: bash {"command":"kill -STOP 1358006; sleep 1; python /tmp/build.py; …"}`——先把整本书冻住（`work/mem.log` 里 21:36:11→21:37:17 恰好空了一分多钟，与 SIGSTOP 完全吻合），想独占机器跑自己的编译脚本；
+  3. `[21:37:39] tool call: bash {"command":"kill -9 1358006; echo ok"}`——日志到此结束，终端留下 shell 报的「已杀死」。
+  内存侧一切正常：`mem.log` 里进程 RSS 峰值 0.1GiB、系统可用 6.0GiB 以上，一条低内存告警都没有。所以「毫无征兆」是真的——SIGKILL 由同一用户的子进程发出，程序侧没有任何可捕获的路径（T158/T162 的内存取证本身没错，只是它证明的不是这次的原因）。
+- **根因**：bwrap 沙箱只隔离了**文件**（挂载表）与**网络**（`--unshare-net`），**没隔离进程**——与会话共享宿主 PID 命名空间，于是 `ps` 看得见宿主进程、`kill` 能直接对它发信号。
+- **改**：① `sandboxArgs` 加 `--unshare-pid`（配已有的 `--proc /proc`，新命名空间里的 `/proc` 只列自己这棵树）；② 按用户要求把 `[mem]` 采样行（含基线与结束）全部降到 `Trace`——普通模式终端不再刷 `[mem]`，只保留一行 `[book] 内存/被杀现场日志: <路径>`（低内存告警仍是 `WARNING`），`work/mem.log` 不受日志等级影响；③ `docs/sessions.md` 沙箱一节写明「文件+网络+进程三个面都要隔离」与这起事故。
+- **验证**：`TestSandboxArgsUnsharePID`（参数必须有 `--unshare-pid` 且紧跟 `--proc /proc`）、`TestSandboxCannotSignalHostProcess`（**在本机真起 bwrap**：`ps -eo pid=` 的输出里没有宿主测试进程的 PID，`kill -9 <宿主 PID>` 返回非 0，宿主进程存活）、`TestMemWatchQuietAtInfoLevel`（info 日志里不得出现 `[mem]`，而 `mem.log` 仍有基线与结束行）；既有沙箱集成测试（只读挂载/可写工作区/符号链接/Python 环境/持久 `/tmp`）全绿，全量 `go test ./internal/...` 绿。
+- **教训**：沙箱隔离要按「文件 / 网络 / 进程」三个面逐项确认，只验证"宿主路径看不见"是不够的；另外「进程被杀但没有任何错误行」除了 OOM，还要怀疑**同用户的其他进程**——包括模型自己的工具调用。
+
+## v1.5+（第四十六批，P52：只记录一个未来方向，无代码改动）
+
+- 用户提出（原话）：「未来可能会删掉章节划分这一步骤，直接传入整个，由下层觉得太长了拆分更自然且短文件节约」——明确说**只做记录、不实施**。
+- 记在 `docs/plan.md` 的 **P52**（`[ ][ ]`，未实现）：取消独立 `chapters` 阶段，把整本书直接交给转换层，转换会话在"一次干不完"时自己调 `request_chapter_split` 就地细分（P34 的递归链路已经具备），父节点整合并过 checker。条目里写清了预期收益（少一次全书会话、拆分点由读内容的那层决定、产物更短更省）与必须先想清楚的点（并发从哪来、失败重试粒度、预览页章节 ID 从"划分产物"变成"递归路径"、`chapters/` 与 `progress.json` 的阶段语义、`chapter_granularity` 下沉成"自拆建议粒度"）。
+- 同批次还回答了两个只问不改的问题（结论记在这里，避免下次重复调研）：① 「卡编译」不是资源竞争——`--debug` 日志显示那条转换会话先 `ps | grep '[d]ocvision latex'` 找"另一个进程"，`kill -STOP` 冻住宿主后**它自己的工具回执也卡住了**（30s 超时），它把宿主误当成抢资源的进程再 `kill -9`；② 递归子章节的收集链是完整的：子节点各自 convert + **StrictChecker**（必须明确 pass）、转换报告落 `_subdivision/child_NN/node/reports/conversion.md` 并写进 `children-manifest.md`，父节点整合后自己再过一次整章 checker，任一子节点失败则父节点"禁止提交"并把失败原因往上传；**唯一的弱环节**是"文字意见"不跨层——子 checker 的 issues 只在子节点内迭代 ≤3 轮，过不了就整支失败，"通过"是硬约束而"意见"不汇总给父节点，且整合提示只硬性要求读子 `.tex`/`parts`，报告是"可读"不是"必读"。
+
+## v1.5+（第四十七批，T164/T165：章节转换的"换会话重试 + 编译看图门禁 + 子意见上浮"）
+
+- **背景**：用户要求彻底修正章节转换的质量（原话要点）：checker 顶层重试到 6 次、每层 -1、下限 3、配错要告警；换会话重试要在预览页能看到「历史 N」，「章节转换与下面的小子章节同一策略」；「很多弄好子任务之后回来之后他们并不会看子会话的那个报告」；「很多连编译都没编译连看都没看」。同意作废当次运行、从头重跑。
+- **现场取证**（一本 12 章、递归到第三层的书，24 条转录，均为中立计数）：
+  1. 8 个已开始的顶层章节：`compile` 次数 1/3/2/1/4/4/10/0——**1 章 0 次编译**；`view_pdf` 次数 1/2/4/0/0/0/3/0——**3 章编译过但没看过**；另有 4 章当时还没开始转换（进程被杀）。
+  2. 根章节的 checker 转录里只有 `read_file`/`grep`、**一次 `submit` 都没有**（8 轮、25 次工具调用、38 分钟）——旧兜底「两次没结论也算通过」把它放进了书。
+  3. 一条递归子会话在拿到 `Read-only file system`（时间戳早于 T156 的挂载修复）之后开始 `ps`/`kill`、反复重写同一个文件、反复提交——同一会话被打回 3 轮后仍在原上下文里打转；旧代码对**递归节点**是"打回 3 轮就整支失败"，只有顶层才换会话。
+  4. 子章节 report 里写过"enumerate/proof 结构对不上、没能干净编译"这类文字意见，但父会话的整合指令只点名读子 `.tex`/`parts`，报告不在必读清单。
+- **改**：
+  1. **重试预算**：`checkerAttemptBudget(base, depth) = max(3, base-depth)`，`base` = `latex.checker_rounds`（未写 = 6，代码默认也是 6，`0` 视同未写）；`checker_rounds - 3 < 3` 时 `RunBook` 起步打一条 `WARNING`，说明"第 3 层只会吃到下限 3、建议至少设 6"。
+  2. **顶层与递归节点同一策略**：同一会话被 checker 打回 `rounds` 轮仍不过 → 作废产物 + **换全新会话**（新转录 `convert_<章>.try2.jsonl`、`try3`…），旧转录保留；次数用尽**判失败**并带最后一次 issues。递归节点不再"一次不过就整支失败"。
+  3. **无结论 ≠ 通过**：`checkChapterAt` 两次都没拿到 `submit` 时返回不通过；厂商/网络错误（含空响应重发后仍空、余额不足）单独标注并**不**触发"换会话重转换"（余额不足一次就停）。
+  4. **子意见上浮**：新增 `_subdivision/children-summary.md`（每个子章节 report 原文 + "自报 issues" 计数 + 整合者必读清单），整合指令改为"先读这份汇总，能修的修，修不了的写进你自己的 report（可引用、可追加）"；`children-manifest.md` 保留路径清单。
+  5. **提交门禁**（T165）：`.gate/compile.json` 记「主 `.tex` + parts 内容摘要 + 产物 sha256 + 页数」，`.gate/view.json` 记看过的页；`submit` 要求摘要与当前文件一致（改过就得重编）、产物指纹一致、至少看过 `min(2, 总页数)` 页，拒绝文案直接指向下一步动作。
+  6. **预览页**：会话索引多一个 `chapterAttempt`（`<名>.tryN` 后缀归一，章节 ID/role/父节点/深度都不变），前端 `chapterAttemptChain()` 把同一章各次尝试聚成链——中栏出现「历史 N」页签（与 img2text 调用链同款，`chainMemberTag()` 优先给「第 N 次」），侧栏行带「第 N 次」chip。
+- **实现位置**：`go/internal/latex/chaptergate.go`（新）、`book.go`（预算/重试/孩子汇总/门禁接线）、`checker.go`（无结论判失败、致命错误分类）、`runner.go`（`isSessionFatalError`、`submitGate` + 测试旁路 `noChapterGate`）、`tools_convert.go`/`tools_work.go`（compile/view_pdf 打点）、`internal/config`（`latex.checker_rounds` + 两份模板 + `docs/config.md`）、`internal/sessionview`（`chapterAttempt`）、`web/src/legacy/sidebar.ts` + `HistoryPanel.vue` + `Sidebar.vue`、`prompts/templates/latex_convert.system.md`（一句"编译后必须自己看第 1 页与最后一页"、"先读 children-summary"）。
+- **验证**：新增 Go 用例 `TestCheckerAttemptBudget`、`TestCheckerBudgetWarning`、`TestAttemptTranscriptPath`、`TestChapterGateRequiresCompileAndView`、`TestChapterIdentityAttemptSuffix`、`TestCheckerWithoutVerdictFailsAfterTwoAttempts`、`TestCheckerRecoversAfterDegenerateResponse`、`TestCheckerDegenerateInBothAttemptsFails`；web 新增 `chapter attempt chain` 三例（聚链/单次不出链/标签）。全量 `go test ./internal/...` 与 `npm test` 绿，dist 重建后 `go build ./...` 通过。
+- **给用户的重跑口径**：这一批之前的运行产物作废没问题——门禁会让"没编译/没看过"的章节在 submit 处被挡回，重跑即可；旧项目里已有的 `.gate/` 为空会被要求重新 compile + view_pdf。
+
+## v1.5+（第四十七批补一，T166：问题跨层合并 + 提交产物自包含）
+
+- **背景**：用户接着第四十七批提了两点：① 不要求父章节修复子章节的报告（"大概率是样式的问题"），但**原始问题必须原样继续向上交**；担心"一个章节有多个 issue 挤在一个 submit 里"，也担心父会话"要弄得东西不少、不一定有余力看"，所以合并要由**程序**做；② 追问"父会话为什么看都不看就交了"——之前没有这个现象，怀疑是加了子会话之后才有的，想弄清根因。
+- **问题路径（改动前）**：只有 `submit` 的 `report.issues`（一个自由文本），每章落 `work/reports/<章>.md`，风格修复大循环读这些 md。子章节的问题**没有任何机制**能到父章节：需要父会话逐份读报告、再自己抄进自己的报告，任何一步漏掉就丢；多条问题也只能挤成一段话，无法逐条追踪或标记"已修"。
+- **改**：
+  1. `ChapterIssue`（ID/来源/深度/正文/状态）+ 每节点 store `<work>/.issues/issues.json`；`submit` 的 `report.issues` 收**字符串数组**（推荐）或旧字符串，新增 `report.resolved`（继承条目 ID）。
+  2. 合并全在代码里：子节点写 store → `convertChapterChildren` 收齐子节点**未解决**条目写 `_subdivision/issues-inherited.json` → 父节点 submit 时"继承（未解决）+ 自己新报 − resolved"，写回 store 并把未解决清单原样追加到报告 md。顶层报告 = 整棵子树的未解问题全集，风格修复读一份就够。
+  3. `children-summary.md` 与整合指令明确**不要求修复**：能顺手修的写 `resolved`，没修的原样向上。
+  4. **第 2 问的根因（取证）**：5 个已进入整合阶段的顶层节点里——005 编译 4 次、**全程 0 次 view_pdf** 就提交；007 看过第 1 页与最后一页，但之后又改了 4 轮、编译 4 次、提交 3 次，**那次查看与最终产物已经不是同一份**；008 在整合阶段发现子产物里的 `\input{_subdivision/…}` 在父工作区解析不了，花了整轮 `find` 临时目录、手工 `mkdir`+复制，最后 **0 次编译、0 次查看**，直接以 `report.status=issues` 提交。004/006 当时还停在 `waiting_children`/续跑状态，不算"不看不交"的证据。也就是说：不是模型"不想看"，而是(a) 没有任何机制要求它编译+看，(b) 整合的入口——子产物——本身带着只在临时工作区成立的路径，父节点连编译都编不起来。
+  5. 因此新增"提交产物自包含"校验：`\input`/`\include`/`\includegraphics`/`\subfile` 指向 `_subdivision/…`、`node/result/…`、`/temp/…` 的一律在 submit 打回，并说明"把内容整合进 `<章>/` 再交"。嵌套父章节从此不会把断链产物交进书里。
+- **实现位置**：`go/internal/latex/chapterissues.go`（新：条目/合并/渲染/报告解析）、`tools_convert.go`（submit 合并 + 自包含校验 + report schema）、`book.go`（继承收集、children-summary 文案、整合指令、工具接线）、`prompts/templates/latex_convert.system.md`（issue 数组、resolved、自包含一句话）、`docs/latex.md`、`docs/issue.md` T166、`CHANGELOG.md`。
+- **验证**：`TestMergeChapterIssuesInheritsAndResolves`、`TestReportTextListAcceptsBothShapes`、`TestIssueStoreRoundTrip`、`TestUnportableIncludes`；`go test ./internal/latex` 与全量 `go test ./internal/...` 绿。
+
+## v1.5+（第四十七批补二，T167：清到"章节划分之后、章节转换之前"的清理脚本）
+
+- **需求**：用户要一个和 `clean_project.sh` 同款（带备份、带计划预览）的脚本，"帮我删一下章节转换后面的"，自己稍后运行。第一稿把"章节转换的成果"当成了要保留的东西（默认只清风格修复/汇编/终审），用户跑完立刻纠正：**"我说的要删除章节转换这一章的内容，我等下重新跑来着"**——重跑要从逐章转换开始，所以转换成品、每章报告、逐章与 checker 转录、章节临时工作区都必须一起删。
+- **为什么不能只删目录**：`RunBook` 的阶段跳过看 `progress.json`（`style`/`images`/`chapters`/`convert`/`assemble`）。保留转换成品时，即使把 `convert` 标记归空，逐章也会命中"`work/chapters/<章>.tex` 已存在 → 跳过"，实际重跑的只是风格修复；而只删成品不改标记，`convert="done"` 会把整段连同风格反馈回路一起跳过。两件事必须一起做。
+- **实现**（`clean_convert.sh`）：
+  1. **默认删** `work/chapters/`、`work/reports/`、`work/temp/`（含递归子树、`.gate`、issues store）、`work/sessions/{convert_*,checker_*}.jsonl`，以及转换之后的 `build/`、`out/`、同级 `<项目名>.pdf`、`work/style_fix|stylefix_assess|stylefix_integrate|final_review|views|media|pdfview`、`work/sessions/{book_fix,final_review,style_fix_*}.jsonl`；
+  2. `progress.json` 的 `convert`/`assemble` 归空（`style`/`images`/`chapters` 保持），重跑从逐章转换开始、每章重新开会话；
+  3. **保留**划分与样式前置成果：`chapters/*.md`、`work/sessions/chapters.jsonl`、`style/`、`work/style/`、`work/style_session.jsonl`、`source/`（分类结果、images 软链、dedupe 结论）、`doc_index/`；
+  4. `--keep-convert` 提供反口径（保留转换成果、从风格修复重跑），此时把 `work/chapters` 里指向 `_subdivision/…` 的断链点名（T166 修掉的那类，旧二进制产物，汇编会失败）。
+- **交互**：与旧脚本一致——默认 `cp -a` 整目录备份到同级 `<项目名>_记录_<时间戳>/`、先打印计划、`-y` 确认、`-n` 只预览、`--no-backup` 跳过备份、检测到 `docvision latex` 正在运行就拒绝（`-f` 强来）。
+- **验证**：`bash -n` 通过；真实项目上 `-n` 确认清单（转换成品、12 条转换转录、4 条 checker 转录、`work/temp` 全在删除列表；`chapters/*.md`、样式包、`source/` 在保留列表）；临时假项目上跑真实删除，核对删/留清单与 `progress.json` 归空结果；`docs/latex.md` 的"清理与重跑（辅助脚本）"登记 `clean_project.sh` 与 `clean_convert.sh`。
+
+## v1.5+（第四十七批补三，T168：必须对照原书 + 内容覆盖率门禁）
+
+- **用户反馈**："有的章节转换会用一个 py 的转换器，然后他也不管最后出来的内容和原来的是否一致。就是没有在他们这一章节逐个 pdf 和原来的核对，他自己的和原来的包括里面的内容。"
+- **根因**：T165 的提交门禁只覆盖"编译过 + 看过自己的 PDF"。两者都满足时，一份拿脚本机械包出来的 tex 依然可能漏段、丢表、把公式降级成纯文本——产物内部完全自洽，checker 只对着 md 与 tex 看结构，也发现不了"内容少了"；没有任何环节拿**原书**去比。
+- **为什么不做"检测脚本"**：沙箱里 bash/python 是干正事的工具（批量替换、查错、抽样核对都合法），按工具名判定既误伤又容易绕。改成判定**结果**：内容对不对得上、有没有和原书对过，这两件事可机械验证。
+- **实现**：
+  1. `ViewPDFTool` 记录原书页：工作区之外的 PDF（`source:<原书 part>.pdf`）走 `gate.markSourceViewed` → `.gate/source.json`（文件+页去重）；工作区内的仍按产物哈希记 `view.json`。
+  2. `chapterGate.check()` 第二道：至少 `needSourcePages(产物页数)` = min(4, max(2, 页数/3)) 页不同的原书页，否则打回并提示 `list_source_pages`/`doc_search` 定位。
+  3. 第三道 `checkCoverage()`：`pdftotext -layout` 抽产物文本，`mdPlainText` 把章节 md 洗成纯正文（去 ``` 代码块、`$$…$$`/`$…$`/`\[…\]`、HTML 注释、图片，保留链接文字与表格文字），两边只保留汉字做三字组交集，覆盖率 < 0.85 **第一次打回**并列出缺得最多的 5 段；**同一章再交仍不达标就放行**（用户口径："第一次打回第二次给通过"——OCR 差异大的书可能永远到不了阈值，硬卡会把整本书卡死），放行时把覆盖率、缺失段与 `report.coverage_note` 写成一条未解问题进本报告，靠 T166 的合并机制向上带；CJK 三字组 < 200（纯公式章节）不判定；`pdftotext` 缺失时跳过（不因环境缺件卡死整本书）。
+  4. 提交后把覆盖率写进日志，< 92% 追加一条"建议再对照原文检查漏段"。
+  5. 提示词：`latex_convert.system.md` 的 Before submitting 段落补两句（必须对照原书页；不要用脚本机械包 tex）；`book.go` 的整合指令同样要求对照原书。
+  6a. 顺带把"自己处理不了怎么办"补完整：`## Recursive subdivision` 原本只写"太大 / 上下文超限就 `request_chapter_split`"，现在把"内容做不可靠（公式太密、OCR 认不出）"也算进触发条件（子会话是独立会话、可以看自己那一份的原书页），并补一句"开到最深仍做不出来时，把缺什么、为什么缺写进 report.issues，不许编造"。
+  6. 提示词里"翻原书核对"那句原本是**条件触发**（"whenever something looks doubtful"）：机械包出来的 tex 读起来顺畅，模型不会觉得"有疑问"，于是永远不翻原书，而且没有任何机制核对它翻没翻。改成无条件——每次提交前都要对比本章的几页原书，并点明"整段缺失、表格丢行、插图错序，产物内部看不出来，只有原页能看出来"。
+- **阈值标定**：同一批真实产物上 `chapterCoverage` 量到 0.970/0.989/0.991/0.995；用 python 把同一 PDF 文本砍掉 1/4、1/2 后覆盖率掉到 0.63–0.76 / 0.33–0.59。取 0.85。
+- **验证**：`TestMdPlainTextDropsNonProse`、`TestCoverageOfDetectsMissingContent`、`TestCoverageOfSkipsFormulaOnlyChapters`、`TestNeedSourcePages`、`TestPathWithin`；`TestChapterGateRequiresCompileAndView` 扩成四段式（无编译 → 只看自己 → 只看 1 页原书 → 2 页原书放行）；`go test ./internal/latex` 与全量 `go test ./internal/...` 绿。
+
+## v1.5+（第四十七批补五，T169：章节规模上限与"太大就先拆"）
+
+- **用户观察**："有可能是这个分配的章节实在是太大了，父会话一个会话处理起来会比较耗时。"
+- **量到的规模**：同一批真实项目里，划分阶段给出的 26 个章节 md 从 150 行到 20190 行，总计 133244 行，中位数约 3400 行。也就是说"一章 = 一个会话"这个假设在这类书上根本不成立：读一遍 md、写一遍 tex、编译、看图、核对，几千行的量在一个上下文里做不完，慢与漏都是必然。
+- **旧缺口**：递归拆分机制齐备（2–16 段、覆盖全文、≤3 层、子会话各过 checker、父会话整合），但触发条件是模型自评"太大"——没有数字、没有后果；而且会话连自己这章多少行都不知道。
+- **改**：首条消息追加 "This chapter is N lines of markdown."，超限时附行动建议（拆 2–16 段、每段约 limit/3–limit/2 行）；`submit` 门禁新增规模关：`lines > limit && !splitRequested && depth < 3` → 打回并要求 `request_chapter_split`（已拆分节点正在整合子章节、最深一层拆不动，二者放行）。上限 `latex.max_chapter_lines`（未写 3000，0 关闭），两份模板 + `docs/config.md` + `docs/latex.md` 同步。
+- **验证**：`TestChapterSizeNote`（小章节只报数字 / 超限催拆分并给区间 / 最深一层不催 / 关闭时只报数字）、`TestChapterSizeReject`（未超限 / 超限 / 已拆分 / 到最深 / 关闭五个边界）；`go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补六，T170：章节行默认打开最新一次尝试）
+
+- **用户反馈**：侧栏某个章节转换的行点开，这一章有多次重试（中栏出现「历史 N」）时，默认选中的应该是最新一次，而不是第一次。
+- **根因**：`buildChapterTree` 遍历会话列表逐个赋 `node.convert`，后写覆盖先写；Go 侧列表按 `ModTime` 新→旧排序，所以同一章的多条尝试里最后留下的是 **mtime 最早**的那条 = 被 checker 打回、产物作废的第 1 次。点章节行看到的是废产物，真正的结果要进「历史 N」再点一次。
+- **改**：`newerAttempt()` 按 `chapterAttempt` 序号取大（相同才比 mtime），convert / checker 各取最新一次；章节树行加「第 N 次」chip，打开前就知道代表哪次。`chapterAttemptChain()`（历史页签 新 → 旧）不动。
+- **验证**：`web/tests/chapter-tree.spec.ts` +5 条（两种入参顺序都选第 3 次、checker 同规则、缺 `chapterAttempt` 时按时间、子节点仍挂父节点）；`npm test` 143 通过；`npm run build` + `go build` 通过（embed 产物已提交）。
+
+## v1.5+（第四十七批补七，T171：重试转录套娃 / 裂成两行 / 陈旧「运行中」）
+
+- **用户反馈**（真实运行中的侧栏截图）：「这个 try2 和 try3 怎么感觉有点混乱……try2 后面又跟了个 try3，并且应该现在在历史中显示的外边了。」截图里同一章两行：`chapter_001 第 2 次`（3.52M / 31k，"运行中"）与 `chapter_001.tr… 第 3 次`（1.00M / 13k，"运行中"）。
+- **直接证据**：项目 `work/sessions/` 里真的存在 `convert_chapter_001.try2.try3.jsonl`。
+- **根因一（套娃命名）**：重试是递归调用 `convertChapterNode`，`next := node` 复制的是**已改写过 TranscriptPath** 的结构体；进入下一层又调 `attemptTranscriptPath`，对 `…try2.jsonl` 再套一层 → `…try2.try3.jsonl`。T165 引入"每次尝试一条独立转录"时，只验证了"第 2 次"这一层。
+- **根因二（裂成两行）**：`chapterIdentity` 的 `^(.*)\.try(\d+)$` 只剥一层，`convert_x.try2.try3` 解析成 ID `x.try2`、第 3 次；于是它不再是 `x` 的尝试，而是侧栏里的另一个章节节点。T170 的"同一章内取最新一次"救不了跨 ID 的情况。
+- **根因三（假运行中）**：转换会话只在开跑时写 `chapter_activity=queued/running`，结束后不写终态；第 2 次转录里有 `run_end`、mtime 已是几十分钟前，活动标记却还停在 `running`，侧栏照抄这个标记 → 与真正在跑的第三次并排"运行中"。
+- **根因四（修的时候顺着查出来的）**：重跑时 `node.Attempt` 从 1 重新数，与磁盘上已有的 `convert_<章>.try2.jsonl` 撞名；`NewTranscript` 是 `O_APPEND`——两段对话会被追加进同一条转录。
+- **改**：① `attemptTranscriptPath` 先剥尽已有 `.tryN` 再套，递归时用原始 `transcriptBase`；② **历史数据一次性改名**：项目内 5 条套娃转录（顶层 1 条 + 递归子章节 4 条，全部是 convert）改成规范名，`chapterIdentity` 保持只剥一层 `.tryN`，不留兼容分支——用户口径："不用给我们历史错误的做兼容，你将我们的历史修改为正确的就行"；③ 拆成两个号——`AttemptNum` 写进文件名、跨运行单调递增（`attemptNumberOnDisk`：最后一次没有 `run_end` 就原位续跑并用**文件本来的路径**，否则新开一号），`Attempt` 只管本次运行的 `checker_rounds` 预算；④ 会话结束写 `checking_result`，checker 写 `pass`/`issues`，失败写 `error`，`sessionview` 兜底把"有 `run_end` 却停在 `running`"折成 `interrupted`（侧栏「已中断」、不算 live）。web 侧补 `interrupted: '已中断'` 文案，dist 重建。
+- **验证**：`TestAttemptTranscriptPath` 补两条（已带 `.try2` 再派生 → `.try3`；旧 `try2.try3` → `try4`）；`TestAttemptNumberOnDisk`（空目录 / 中断续跑取真实路径 / 已结束取新号 / 旧套娃取最大 / 别章同前缀不串）；`TestChapterIdentityAttemptSuffix` 补旧套娃与子章节套娃；`TestActivityAfterEnd`、`TestReadStatSawRunEnd`；`go test ./internal/...` 全绿、`npm test` 143 通过、`npm run build` + `go build` 通过。
+- **现场**：本批结束时用户那本在跑的书已按授权停掉（旧二进制会继续产出套娃名），待重建二进制后重跑；已被中断的那次尝试会原位续跑，已结束的旧尝试保留原名并在「历史 N」里显示。
+
+## v1.5+（第四十七批补八，T172：checker 看得到产物与原书页，转换会话的说法可随提交交给它）
+
+- **用户反馈**（原话要点）：「checker 的时候有时候会反馈不存在的问题，由于这个 checker 无法看到原文章之类的，会错误的认为一些内容。这边是否应该给 checker 提供查看的工具？还有就是是否应该提供转换章节的 submit 一些能够给 checker 提供信息的工具？因为有的问题是不存在的。」
+- **根因**：P28 定的"极简只读会话"（只有 md、tex、parts 三个文本 + `read_file`/`grep`/`submit`）在有产物与原书页可比的时候才安全。实际数据里 md 是 OCR 文本（断字、重排、重复页眉），公式/表格在原页上是图形，插图与表格在排版里是浮动体——这些差异 checker 一律读成"缺失/错位"，转换会话被逼着改坏正确内容，或白耗几轮直至 `checker_rounds` 用尽、整章作废重转。
+- **改**（两侧一起做，缺一边都不成立）：
+  1. **checker 的可见面**：`ensureCheckerView` 铺好的视图之外，`checkChapterAt` 再把本章编译出的 `<章>.pdf` 软链进去（`check:<章>.pdf`），并把 `r.pdfView` 的 `source:` 原书 part 挂进 `view_pdf` 的挂载表；工具加 `ViewPDFTool` 与 `sourcePageTools()`（`list_source_pages`/`doc_search`）。`read_file`/`grep` 仍只吃 `check:`，不让它去翻二进制 PDF 上下文。
+  2. **submit 的信息**：新增 `checkHints{PDF, Report, Notes}`，由 `convertChapterNode` 从 `gate.compiledPDF()`、`node.ReportPath`、`submit.Notes` 组出来，挂成 `check:<章>.pdf` / `check:report.md` / `check:notes.md`（notes 直接写盘）。提示词与首条消息都点明：这些是**说法**，要用产物页与原书页核实。
+  3. **提示词重写**（`latex_checker.system.md`）：可见清单改成真实清单；新增"每条问题必须指明位置（md 段落或原书页 ↔ .tex 何处），指不出位置的不算问题"、"不许报"清单（OCR 噪声、只在原页上的公式/表格/插图、浮动体位置、措辞换行、style 意见）、"重复上一轮的问题前先回原页复核，自己看错了就撤回"。注册表 `MustMention` 加 `view_pdf`。
+  4. **打回文案**（`book.go` 反馈轮）：补一段"指出的点不是真问题就别改坏正确内容——把证据（文件与行号或原书页码）写进 submit.notes 再交，会带着产物与原书页再核一遍"。
+- **验证**：新增 `TestCheckerSeesProductAndHints`（视图里有 `<章>.pdf`/`report.md`/`notes.md`、notes 内容落盘、首条消息与工具表出现 `check:<章>.pdf`、`report.md`、`notes.md`、`view_pdf`）；`checkChapterAt` 的 5 个测试调用点补 `checkHints{}`；`go test ./internal/...` 全绿。
+- **未做的（有意）**：没有让 checker 直接看 raster 原图（`view_image`）——插图重画是否像由 `latex.figure_check` 负责，checker 只需要判断题、表、公式、段落有没有丢；也没有把 submit 的 report 当"免检通行证"，否则转换会话可以靠自述绕开核对。
+
+## v1.5+（第四十七批补九，T173：重跑不再凭空多一条空尝试，章节树跟随正在看的尝试）
+
+- **用户反馈**（原话要点）：「我的这些会话怎么都从第二次开始了？是不是错乱了？我看这些第一次都是在等在子会话的返回呢？怎么进入检查阶段了？还有就是整体替换的时候选择某个历史的时候？而且上面存在问题了切换的时候下面的子会话怎么没有跟这边变化，变化那个子会话的历史？……还有对应的核对会话的历史查看，都不太和这次次数相匹配？并且这个次数就不要显示在web上显示中文 第几次了有点碍事。」
+- **真实数据**（一个五章进入细分的工作区）：每章除真正干活的第 1 次转录外，多出 `convert_<章>.try2/.try3.jsonl`，内容只有两行（system + `waiting_children`）；第 1 次停在 `run_end ok` + `waiting_children`；`work/temp/conv_<章>/` 下所有文件的 mtime 同一秒，`_subdivision/split.json` 消失、子章节旧转录也全部消失。
+- **根因链**：① 父会话在请求拆分那轮就 `run_end`（整合是同一会话后来的 `sess.Run`），所以"上一次有 run_end"并不等于"这一轮结束"；旧规则据此开新尝试；② 新尝试 `resuming=false` → `chapterWorkTreeAt` 直接 `RemoveAll(nodeRoot)`，把 `_subdivision/`（子章节 workspace、`split.json`、子转录）一起删掉 → 子章节从头再转、还留下一条两行空转录；③ 树永远取最新一次（T170），看旧尝试时子会话不动，convert 与 checker 还各取各的；④ 中文「第 N 次」chip 是噪音。
+- **改**：① 新增 `attemptNumberForNode(transcriptBase, splitRestored)`——拆分状态可恢复的父节点沿用磁盘上最新尝试（同一轮没做完），其余仍"无 run_end 原位续跑 / 有 run_end 新号"；② `buildChapterTree(items, pinAttempt)` + `pickAttempt(cur, next, pin)`：树跟随当前会话的尝试号，≤pin 取最大、都比 pin 新则取最早，convert/checker 同一个 pin；③ `chapterAttemptTag` 改产 `#N`（第 1 次为空）、`chainMemberTag` 对章节统一 `#N`（历史列表），侧栏行与树行不再显示次数。
+- **验证**：`TestAttemptNumberForNode`（5 个分支）；`chapter-tree.spec.ts` 新增 5 条跟随用例并改标签断言；`npm test` 148、`go test ./internal/...` 全绿。
+- **善后**：10:56 那次旧逻辑重跑已把 002–006 章的工作树整棵清掉，子章节必须重转一次；修复后同类中断重跑直接从原尝试继续，不再清子树。
+
+## v1.5+（第四十七批补十，T174：中断不算新尝试，作废尝试留档）
+
+- **真实缺陷（T173 遗留）**：① 尝试号规则仍是"上一次有 `run_end` 就换新号"，而父章节请求拆分那轮就会写 `run_end`（整合是同一会话后来的 `sess.Run`），所以"等子会话时被杀"再重跑仍会开新尝试——用户口径：新尝试只该在 checker 跑满轮次后出现；② 换会话时 `chapterWorkTreeAt(resuming=false)` 直接 `RemoveAll(nodeRoot)`，上一轮的 `work/`（含 `_subdivision/` 子章节成品与转录）、`result/` 全被删掉，「历史」只剩对话，看不到那一轮交了什么。
+- **改**：`lastAttemptNumber()` 一律返回磁盘最大尝试号（重跑接着最近那条继续），新号只在换会话那一步显式 `next.AttemptNum = node.AttemptNum + 1`；换会话前 `archiveChapterAttempt()` 把上一轮整棵移到 `<proj>/work/attempts/<章>/try<N>/`（work/含子树、result、integrated-stage、已提交 .tex 与分片、`checker-issues.md`），移动失败只警告；开新尝试只清当前层 `work`/`result`/`integrated-stage`/`checker-view`，保留 `sessions/`。
+- **验证**：`TestLastAttemptNumber` 4 个分支、`TestArchiveChapterAttempt`（留档到位、旧位置不残留、子转录随子树留档、核对转录留在 sessions）；`go test ./internal/...` 全绿、`npm test` 148。
+- **已知代价**：留档把子章节成品一并搬走，新尝试重转子章节时没有"已通过就跳过"的标记；同一次尝试内重跑已通过的子章节仍会重放对话 + 再跑 checker。
+
+## v1.5+（第四十七批补十一，T175：历史切换只钉住正在看的那一条）
+
+- **真实缺陷（T173 遗留）**：`pickAttempt` 让整棵树都按"尝试号 ≤ pin 取最大"重选，点开某章 convert 的 `#2` 时，同书其它章节（重试次数各不相同）也被拉到第 2 次或它们最早的版本。用户口径：每个节点只该显示自己最新的一次，切换历史只影响"我正在看的那一条（和它同一行的角色）"。
+- **改**：`buildChapterTree(items, pinId)` 恢复 `newerAttempt` 的"各节点取最新"，只把 `pinId` 那条会话钉进它所在的节点/角色；同一节点的另一角色（convert ↔ checker）优先同一轮、没有同轮则最新；子会话与其它章节不跟着切。删除 `pickAttempt`；`Sidebar.vue` 传当前会话 id（不再按项目名算尝试号）。
+- **验证**：`chapter-tree.spec.ts` 跟随用例改写为 4 条（只看那条变、同轮核对、看核对时同行转换切到被核对的那一轮、无 pin 全取最新）；`npm test` 147、`go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补十二，T176：章节标题按纯文本，不吃下划线）
+
+- **真实缺陷**：会话名统一走行内 Markdown，而章节会话的标题是流水线标识符 `chapter_004_child_01`——下划线被当成强调标记，渲染成斜体并从文本里消失（截图里显示 `chapter004child01chil…`）。
+- **改**：`InlineMD` 加 `plain`（纯文本插入）；`plainTitle(s)`（有 `chapterId` 即章节会话）用于章节树两处标题、侧栏四处会话行、历史列表与详情栏「会话」行；其它会话仍走 markdown。
+- **验证**：`chapter-tree.spec.ts` 新增 `plainTitle` 用例；`npm test` 148、`go test ./internal/...` 全绿，dist 重建。
+
+## v1.5+（第四十七批补十三，T177：两侧栏的宽度上限按视口算）
+
+- **真实缺陷**：三栏宽度上限是照 DSH 抄来的写死值（侧栏 264–420、详情栏 300–520），大屏上拖到顶就停，详情栏开着时侧栏几乎没有空间。
+- **改**：新增 `columnDragMax(viewport, cols, side)`——中栏保底 640、另一列保留当前宽度、再按视口 60% 封顶，结果不低于该列最小宽度；`computeColumns`、拖动分隔条、`toggleDetails` 恢复宽度共用这一条规则。`SIDEBAR_MAX`/`DETAILS_MAX` 删除。
+- **效果**：1920 屏、详情栏收起时侧栏可到 1152，详情栏 400 时侧栏可到 880，详情栏可到 1000；窄屏仍是原范围。
+- **验证**：新增 `web/tests/layout.spec.ts`（7 条）；`npm test` 155、`go build` + `go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补十四，T178：章节树状态文案按角色分开）
+
+- **真实缺陷**：转换会话跑完写 `chapter_activity=checking_result`，前端统一译成「核对完成待处理」——核对会话还在「等待并发槽」时，转换行就说"核对完成"，两个阶段说反了。
+- **改**：`chapterActivityLabel(state, role, prevVerdict, live)` 作为唯一来源：转换的 `checking_result` = 「转换完成待核对」、核对的 = 「核对完成待处理」、转换在 `queued` 且已有核对结论 = 「核对完成待并发槽」；其余状态不变。
+- **验证**：`chapter-tree.spec.ts` 新增 3 条；`npm test` 158、`go build` + `go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补十五，T179：转换与核对并发独立 + 模型级封顶）
+
+- **用户口径**："核对和转换的并发是独立的，不能放一起算"；"同一个模型的话并发上限和会话的并发相结合"。
+- **真实缺陷**：`latex.concurrency` 一个池子被转换、整合、checker 反馈轮、提交提醒共用，核对会话排在慢转换后面白等；没有任何地方按厂商模型限流，两个池子调大后打到同一模型上的请求数无从约束。
+- **改**：① `Runner` 拆 `convertSlots`/`checkerSlots`/`chapterSlots`，上限分别来自 `latex.convert_concurrency`/`checker_concurrency`（0 回退 `concurrency`），`LatexConfig.ConvertWorkers/CheckerWorkers/OtherWorkers` 是唯一解析点；子节点本地 sem 改用转换槽位数。② `models.<名>.max_concurrency` + 会话层 `SetModelConcurrency`：`Run` 一开始取该模型槽位，键是实际下发模型名，`Config.ModelConcurrencyLimits()` 用 `ResolveModel` 归并同名条目并取最小值。③ `RunBook` 启动打并发账目，池子之和超过模型上限时告警。
+- **验证**：`TestStageWorkers`、`TestModelConcurrencyLimits`、`TestModelSlotLimitsPerModel`（峰值正好等于上限，两模型互不影响，曾因两模型共用同一个 live 计数导致误报 3 > 1，改为按模型分别计数）、`TestModelSlotUnset`；`go build` + `go test ./internal/...` 全绿。
+
+## v1.5+（第四十七批补十六，T180：转换行的「运行中」染绿）
+
+- **用户反馈**："为什么运行中这三个字不是绿色的，只有核对那边的是绿色的？"
+- **根因**：Checkers 行的绿来自 `.chapter-checker.live .chapter-state`；转换行是 `.chapter-node-head`，既没有 `live` 类也没有规则，所以状态一直是 muted 灰。
+- **改**：`stateTone(label)` 按文案给 `.run` 类（只有「运行中」染绿，排队等槽的 live 会话不染），两行共用；删掉只服务核对行的 `.chapter-checker.live` 规则。
+- **验证**：`npm test` 158、dist 重建。
+
+## v1.5+（第四十七批补十七，T181：核对有结论后转换行改口 + 反馈轮补状态）
+
+- **用户反馈**："转换完成之后等待核对，核对完成之后上面是不是该改状态了？如果是发现问题的话，上面不应该显示这个待核对吧？"
+- **两个真因**：① `checker` 打回后的反馈轮只调 `sess.Run`，不写 `chapter_activity`，转换行停在上一轮的 `checking_result`；② 前端两行各读各的状态，转换行从不看核对的结论。
+- **改**：反馈轮补 `queued`→`running`→`checking_result`；`chapterActivityLabel` 增 `peerVerdict`，转换行按同一行核对的最新状态说话（issues→「核对发现问题」、pass→「已通过」、核对接在跑→「转换完成待核对」）。
+- **踩坑**：改函数注释时把块注释的 `*/` 一起吃掉，整段导出被注释掉，vitest 报 `chapterActivityLabel is not a function`（4 条红）；补回结束符即绿。
+- **验证**：`npm test` 159、dist 重建、`go test ./internal/latex/` 绿。
+
+## v1.5+（第四十七批补十八，P53/T182：手动重试——页面上重跑某一章）
+
+- **用户需求**："网页上是否应该增加一个手动重试的功能？……在我自己看的时候如果发现有的会话存在问题，可以选择从某个记录处重试之类的功能？然后这个也算在历史里面。"（用选项问过范围，用户选 P1：章节重试 + 队列 + 页面按钮，只 convert）
+- **约束**：预览页是**另一个进程的只读观察者**（`serve.go` 只放行 GET/HEAD + `/api/mermaid`），不能让它去 fork 一个会话；真正干活的是 `docvision latex`。于是把"重试"拆成两半：页面只**提请求**，运行中的 latex 在安全点**消费请求**。
+- **改**：
+  - 新包 `internal/retryq`：`work/retry/req-<纳秒>-<章>.json` 落盘队列（append-only，消费后改名 `.done.json` 留档）；`Pending` 跳过 `.done.json` 与坏文件，`Chapters` 去重，文件名 sanitize 防章节名被当路径。
+  - `latex.retry.go`：`forceChapterRetry` 归档旧尝试（复用 `archiveChapterAttempt`）+ 清掉提交的 `.tex`/分片 + 分配新尝试号；`prepareRetries` 消费队列并对 md 不在的请求只警告；`hasPendingRetry` 决定 convert 阶段是否强制跑。
+  - `book.go`：重试/`--only` 只做转换这一层——**不进样式反馈回路**（那会拿全书报告改 cls 再分块重转整本书），也不自动 assemble，日志提示再跑 `--step assemble`；`convertPhase` 的并发循环抽成 `convertChapterBatch`（重试补轮要复用同一套并发槽/进度行/失败汇总），阶段头按 `--only`/队列选目标，批次之间最多再补两轮；`runPhase` 对 convert 加 `forceConvert`；`convertOneChapter` 采用 Runner 分配的新尝试号；新尝试转录写一条 `t=meta kind=manual_retry`。
+  - `archiveChapterAttempt` 顺手把旧 `report.md` 也挪进 try 目录——新尝试写同一路径，不挪就是被悄悄覆盖。
+  - 服务端：`POST /api/retry`（校验项目在扫描根下、章节名 `^chapter_\d+(_child_\d+)*$`、`chapters/<章>.md` 真存在），`/api/index` 增 `retries`；`sessions --no-retry` 关掉写入口。
+  - **核对角色（用户追加要求"这个 checker 会话也可以对他重试吧？不只是转换会话"）**：队列请求带 `role`（convert/checker），消费者按角色分流；checker 走 `forceCheckerRetry` + `recheckChapter`——产物一个字不动，只把旧结论挪成 `<章>.tex.checker.try<N>`、换全新核对会话写 `checker_<章>.try<N+1>.jsonl`（只读视图也按尝试号分开，编译产物从 `work/temp/conv_<章>/work/.gate/compile.json` 找回来挂进去，上次的 `notes.md` 继续用），结论照既有语义落盘（通过删 `.checker`、有问题写进去），API 失败不改结论；没有已提交产物的章节服务端直接 400。`/api/index` 增 `retryRoles`，「待重试」挂到对应那一行。
+  - **阶段二（用户："针对某些可能有错误的会话进行手动的继续跑并且删除错误的记录之类的，不用等程序重新启动，可以手动重新加入并发队列。可能有的遇到了错误之类的，需要手动调整会话然后从某处继续"）**：① watcher 跑在整个 `RunBook` 生命周期（2s 一跳），消费不再受"转换阶段安全点"限制；② 章节锁 `holdChapter`（阻塞，主流程）/`lockChapter`（TryLock，派发端：忙就不消费、请求留队）+ `retryPrecondition`（样式/产物/转录没就绪也留队，只提示一次）；③ 第三角色 `continue`：`continueChapter` → `convertChapterNow` → `convertOneChapter(retry=true)`，`retry` 用来绕过"已有产物，跳过"、`continueText` 让会话拿到"接着干"那句开场话并强制真跑一轮（否则 replay 收账会把它吞掉），转录里记 `t=meta kind=manual_continue`；④ `/api/drop` 删转录（路径限定在 `<项目>/work/sessions/`、`.jsonl`、90 秒内更新或有 `.partial` 回 409），带 `.tryN` 的连 `work/attempts/<章>/try<N>/` 一起删；⑤ 页面：详情栏按角色给「重试这一章」/「重新核对这一章」/「继续跑（不新建尝试）」/「删除这条记录」。
+  - **阶段二之一（用户："从某个错误的地方开始就是从这个错误的最后一条或者前几条我可以自己选择"）**：`retryq.Request` 的 `From int`（转录行号，含该行）+ `Path`（源转录文件名，显式指定而不是取最新——用户可能正在看第 2 次尝试）；`truncateChapterTranscript` 是纯文件部分（校验行号范围、只能切在 `t=msg` 行、源文件不动、新尝试号 = 磁盘上最大 + 1），`continueFromChapter` 之后再 `convertChapterNow` 用 `continueText` 把"后面都丢了、别假设之前改的东西还在"递给会话；服务端校验只有 continue 能带 `from`、源文件必须是本项目 `work/sessions/` 下的 `.jsonl`、行号不超范围；前端在轨迹表每行给「⤓」（hover 显现 + `confirm` 说清后果）。
+  - **阶段二之二（用户："可以给矢量图那边加上重跑重试的功能吧……因为修改之后后面都可以变动"；同时定下"整阶段重跑不用做"）**：`ImagesOptions.Only` 让 images 阶段只跑点名的图（done 也算 pending、跳过分类与 dedupe、只跑 process + 重新嵌回 md；点名的键不在扫描范围内直接报错，避免"原始 md 目录不对"被静默吞掉）；`vectorTexBase(mdName, imgPath, label)` 从 `processVectorImage` 里抽出来当唯一命名来源，于是能**反查**：给一条作图转录名找回它的进度记录；`prepareVectorRedraw` = 找回记录 + 拒副本图 + 旧会话改名 `.tryN.jsonl` 留档（就地改名而不是挪进 `work/attempts`——扫描器把根下任何 `*.jsonl` 都当转录，挪走反而变成一条名字古怪的会话）+ 旧工作区挪 `work/attempts/vector_<成品名>/try<N>.work/` + 清成品保类别；`redrawVectorImage` 再 `RunImages(Only:[key])`；`r.vectorMu` 与 images 阶段互斥（都要写 `progress_items` 和 `source/*.md`），派发端 `TryLock` 拿不到就留队；`retryq` 允许"没有章节、只有 Path"的请求（`Pending` 同步放宽，文件名用 `vector_<成品名>` 以便事后辨认），`pendingRetries`/`retryRoles` 跳过空章节条目以免挂到空章节行上。
+  - **阶段二之三（用户："矢量图这边允许一下，从某个消息处重试就是，不是完整重新，和章节那样一样"）**：`truncateVectorTranscript` —— 章节的做法是"前缀另写一条 `.tryN` 新尝试"，作图会话没有尝试号管道（tikz 只认 `vector_<成品名>.jsonl` 这一个名字），所以反过来：**前缀留在原地**当续跑起点、**完整的那份抄成 `.tryN.jsonl`** 留档，语义对外一致（历史里两份都在、回滚不丢对话）；只能在消息行上切（meta/usage 行不进消息流）；`prepareVectorRedraw` 多一个 `from` 参数，`from>0` 走截断、`0` 走整张重画，两条路都清成品；续跑那句默认说明改成 `FigureEnv.ResumeNote`（`Runner.vectorResumeNote` 在持 `vectorMu` 时设置），否则模型会以为后面那些被丢掉的轮次还有效；前端轨迹 ⤓ 从"只给章节 convert 会话"放宽到「矢量图」作图会话，`cutFrom` 按会话类型选角色（`vector` 不带章节 / `continue` 带章节），confirm 文案分叉；服务端 `serveVectorRetry` 校验 `from` 行号范围。
+  - 前端：章节行悬浮 ↻（排队后换「待重试」角标）、详情栏「重试这一章」+ 一行反馈；**只给顶层章节**——细分出的子章节（`chapter_003_child_01`）不在 `chapters/` 下、由父节点的细分树产出，单独重跑它得连同父节点整合一起走，服务端对子章节回 400 并说明"请重试它所属的顶层章节"，`--only` 点名子章节同样报错。
+- **踩坑**：① `.done.json` 也以 `.json` 结尾，第一版 `Pending` 把留档又读成待办（测试抓到）；② 连点两下时第二次仍按磁盘推导出同一个尝试号——磁盘上还没有 `.try2.jsonl`，改用 `max(磁盘, 本次已分配)` 兜住，否则两次归档撞进同一个 `try1`。
+- **验证**：`go test ./internal/...` 全绿（新增 retryq 4 条、latex 3 条、sessionview 4 条）；`npm test` 160；dist 重建后 `go build ./...`。
+  - **T183**：核对提示词只点名真实存在的"说法"文件——`checkerClaimNote(view)` 独立判断 `report.md`/`notes.md`，两个都没有就整句不提（此前只要 report 在就声称 notes 也在，模型白读一次不存在的文件，还要再解释"它为什么没有"）；`latex_checker.system.md` 同步改成「when present … a file that is not there simply does not exist」。测试 `TestCheckerClaimNoteNamesExistingOnly` 钉住三种组合。
+
+## v1.5+（第四十七批补十九，P53：手动继续/从记录继续到底发不发东西）
+
+- **用户需求**："这边从中间消息继续的话不需要发送任何内容吧？直接发送过去就行吧，模型就会接着回复，无需增加什么东西？就是从某个消息开始？还是说增加一个continue？矢量图和会话转换和核对，都检查。告诉我一下"；随后"还有就是这个plan你怎么排到p3了按照我们plan中的编号排吧"。
+- **查下来（三类会话各是什么）**：
+  - **章节转换（继续跑 / 从记录继续）**：新尝试转录 = 前 N 行前缀，恢复时 `resumeMsgs` 非空 → `resumeUserText(msgs, note)` **返回空串**（`internal/latex/resume.go`，2026-09-29 用户定的"续跑不插 user 内容"）→ `sess.Run(RunOptions{UserText: ""})` **原样续行，一个字节都不发**。那句 `continueChapterPrompt` / "rolled this chapter back to record #N" **从来没被发出去过**（死代码）。
+  - **作图会话（从某条记录继续）**：同一条路——这轮刚加的 `FigureEnv.ResumeNote` 也走 `resumeUserText`，有历史时被同样丢掉，**同样是死代码**。所以用户的理解（"直接发过去，模型接着回复"）就是现状。
+  - **核对会话**：**根本没有"从某条记录继续"这个入口**——轨迹 ⤓ 只对 `chapterRole==='convert'` 与 `stage==='vector'` 出现；核对只有「重新核对这一章」= 换一条**全新**核对会话（`checker_<章>.try<N+1>.jsonl`，任务文本是新建会话的首条消息，不是续跑）。
+- **改**：把"假装要发"的死代码清掉，让代码与文档都说实话——
+  - `Runner.continueText map[string]string` + `setContinueText`/`continueTextOf`/`continueChapterPrompt` → 只剩 `continueFlag map[string]bool` + `setContinueFlag`/`takeContinueFlag`；`convertChapterNow(proj, base)` 去掉 `continueText` 参数。
+  - `convertChapterNode` 里继续跑那段改成：`if node.Depth == 0 && r.takeContinueFlag(base) { initial = ""; resumeSkip = false; 记 manual_continue }`——标记的唯一作用是**解除"上次已 submit 就收账即结束"**（否则点一下等于没点），不插内容。
+  - 删掉 `FigureEnv.ResumeNote`、`Runner.vectorResumeNote` 与 `prepareVectorRedraw` 里设置它的分支，`tikz.go` 恢复成原来那句默认续跑说明。
+  - 文档全部改成事实（`docs/plan.md` P53、`AGENTS.md`、`docs/latex.md`、`docs/commands.md`、`CHANGELOG.md`）：继续跑/从记录继续 = **不发任何 user 内容**，历史原样续行；真跑完没 submit 时 T94 的"没提交"提醒才是唯一会插进去的 user 消息。
+- **编号（用户第二问）**：P53 条目内部的 `P1/P2/P3` 分步改称 **「阶段一/阶段二/阶段三」**，并在条目开头写明"这里的「阶段」只是本条目内部的分步，不占 plan 的 P 编号"——plan 里 `P3` 是另一条老计划（把核心工具独立成组件库），内部分步借 P 号会撞车。同批把 `docs/agent-batch-history.md` 的 `P2 之二/之三/之四` 改称 `阶段二之一/之二/之三`、`CHANGELOG` 的 `P53-P2` 改称 `P53 阶段二`、Go 注释里的 `（P2）` 一并改掉（`P27` 是另一条，不动）。
+- **P54 补记**：手动插入用户消息要**真发出去**，必须绕过 `resumeUserText`（`sess.Run(RunOptions{UserText: 用户的话})`），且只在这条手动路径上这么做——中断续跑仍保持"不发"。
+- **验证**：`go build ./...` 通过；`go test ./internal/latex/ ./internal/sessionview/ ./internal/retryq/` 全绿（`chapter_retry_test.go` 的 map 断言换成 flag 语义）；无 web 改动，dist 未动。
+
+## v1.5+（第四十七批补二十，P55 + T184：从某条记录继续，工作区也跟着退、核对也能切）
+
+- **用户两问**：① "核对那边为什么没有加这个从某个记录的地方开始？不行吗？如果是正常的转换会话的话我想他从某次工具调用或者操作之后，后面乱码了我想重新这里跑的话，也是不行的吗？感觉这边你实现的不知道怎么弄得？"② "不是只回滚会话回滚会话的话可能会对模型造成困惑，这边也无需记录就是按照历史模型操作过的过程倒退着返回回去不可以吗？还是说需要额外增加实现部分？"——随后选定：**每轮 git 快照**（工作区外仓库、回退到那一刻），并**同意核对也加**。
+- **第一问的答案（先查清再动手）**：转换会话的 ⤓ 每条记录都有（用户/助手/思考/工具回执都是 `t=msg`，工具**调用**行与它所在的 assistant 消息共用行号——从调用行切是"截到那条 assistant 消息之后、回执作废"，从回执行切才是"这次操作跑完之后"）；核对没有是**当时的取舍**（只读判断、重开一条等价，且核对尝试号由 `checker_rounds` 记账），不是做不到。真正的病根是第二问：**工作区没退**，模型一 `read_file` 就发现记忆与文件对不上。
+- **第二问的答案（为什么"倒着撤销"不够）**：转录里只有 `write_file` 的**新**内容（覆盖前原文不在任何地方）、`edit_file` 只能反替换一部分、`bash` 完全不可逆（`mv`/`rm`/重定向/跑脚本），半途失败还会把树留在"既不是第 N 条也不是最后"的状态。要真回退只能有**那一轮的树状态**。
+- **P55 实现**：
+  - `internal/session`：`TranscriptWriter.lines` 计数（打开时按现有文件行数起算、所有写入统一走 `writeLine`——少算一行就会退到错的那一轮）+ `Lines()`；`Session.SetMessageHook(func(lines int))` 在**每条消息成功落盘后**回调（`appendTranscript` 里唯一的 choke point）。
+  - `internal/latex/rounds.go`（新文件）：`roundLog` 给一章建一个**工作区之外**的裸仓库 `<proj>/work/rounds/<章>/repo.git`（每次命令显式 `--git-dir`/`--work-tree`，隔离宿主 `~/.gitconfig`、固定提交身份），每落一条消息 `git add -A && commit --allow-empty` 并把 `{line, sha}` 追加进 `journal-try<N>.jsonl`；编译产物（`*.pdf`/`*.aux`/`*.log`/`*.synctex.gz`…）写在仓库的 `info/exclude`（**不进模型工作区**，免得模型去改），不进快照但 `clean -fdx` 会删。
+  - `continueFromChapter`：截断之后 `rollbackChapterWork`（按行号取**最近一张 ≤ N 的快照** `reset --hard` + `clean -fdx`）+ `archiveChapterProducts`（把已提交的 `.tex`/分片/`report.md` 挪进 `work/attempts/<章>/try<源尝试>/`——那一刻未必已提交，"未来"的产物留在原地只会把模型带偏）。降级：没有快照（老会话 / 宿主没 `git` / 递归子章节）→ 只回退对话并在日志里说清；单次失败只告警一次。
+- **T184 实现**：`truncateCheckerTranscript`（前缀抄成 `checker_<章>.try<N>.jsonl`，号从 try2 起取第一个空号、内存里已分配的号也算进去，切在 usage/meta 行或越界都拒）+ `continueCheckerFrom`（设 `retryCheckerAttempt` → `recheckChapter`，产物与只读视图一字不动，旧结论 `copyFile` 成 `.tex.checker.try<N-1>`）；派发端 checker 带 `from` **不走** `forceCheckerRetry`（它会自己分配下一个号，与截断撞车）；服务端 `role=checker` 允许 `from`，源转录必须正好是这一章的**核对**转录（`transcriptBaseStem` 比对，校验顺序改成"形状 → 存在(404) → 归属(400)"以保住既有语义）；前端 `canCutFrom` 放开 `chapterRole==='checker'`，`cutFrom` 按类型选角色、confirm 文案分叉。
+- **踩坑**：① `git init` 不接受 `--work-tree`（`fatal: 不允许 … 而没有指定 --git-dir` 的兄弟错误），裸仓库初始化必须单独一条命令；② 测试里想用 `ensureLogger` 这个不存在的方法——照 `memwatch_test.go` 用真 `logger.NewLogger` + `SetQuiet`；③ 服务端原有的 `convert_chapter_009` 用例期望 404，新加的"源转录必须属于本章"检查若排在存在性之前会变 400，所以顺序调成先查存在。
+- **验证**：`GOCACHE=/var/tmp/dsh-gocache go test ./... -count=1` 全绿（新增 `TestRoundLogRollback`/`TestRoundLogMissingJournalDegrades`/`TestTranscriptAttemptParse`/`TestTruncateCheckerTranscript`/`TestPostRetryCheckerFromRecord`）；`npm test` 161 通过；web dist 已重建、`go build ./...` 绿。
+  - **T185（兼容老会话）**：用户追问"如果历史没有那个 git 仓库的话就注意处理一下吧，两种模式？bash 的就没办法了……无法回退的话要增加一段话说明？"——定成**一种模式**（能退就退、退不了就只退对话），不做开关：老会话本来就不知道"工作区里后来的改动"与"那一刻"差多少，给它一个"半退"模式只会更困惑。`bash` 在沙箱里能写的只有工作树与它自己的 `/tmp`（会话私有草稿），工作树在快照里、`/tmp` 本来就不该被"退回"。实现：① 退不了时**连产物都不挪**（此前 `continueFromChapter` 无条件 `archiveChapterProducts`，会把已提交的 `.tex` 挪进 `work/attempts/`，而工作区还留着后来的改动——"工作区是新的、产物没了"的半新半旧状态），抽 `applyWorkspaceCut` 收口"退回 + 按结果决定是否挪产物"；② 老会话连空仓库都不建（先只读 journal，没有任何条目直接降级）；③ 页面提前说清：`POST /api/retry` 的回执新增 `workspaceSnapshotCovers` 判断，没覆盖就点名「⚠ 这条会话第 N 行之前没有工作区快照，只会回退对话——工作区里后来改动的内容会保留；要连文件一起干净重来请用「重试这一章」」，`⤓` 的确认框写同一句。测试 `TestApplyWorkspaceCutWithoutSnapshotKeepsProducts`（产物在、工作区不动、不建仓库）、`TestPostRetryFromRecordSnapshotNote`（有/无 journal 两种回执文案）。
+
+## v1.5+（第四十七批补二十一，T186–T188 + P56/P57 立项：核对视图、核对与转换的配对、"总是 fallback"与打回理由审计）
+
+- **用户这几问**：① 重试总按钮放哪了、为什么不放中栏、子章节为什么不能重试、子章节的核对会话没有重试入口、要二次确认与误触恢复（回到之前的会话、删掉重试的会话、历史里选一条作为当前）；② 从某条消息 fork 怎么操作、找不到入口、能不能编辑/删除历史消息再继续；③ "有一个矢量图总是 fallback"要查是谁；④ 父会话二次重试时子会话与核对会话该不该跟着切；⑤ 核对会话看到 `chapter_010_child_03/children/…` 与 `check:` 视角不一致，"很多 checker 都遇到过"；⑥ 查所有重试过的会话为什么被打回，是否误判；⑦ 核对是不是每次覆盖上一次、历史里看不到每次核对。
+- **数据在哪**：用户更正——运行时目录是 `~/workspace/kaoyan/docvision`（下面有 `latex_project/`、`config.yaml`、二进制），不是文档里那个旧的 `/home/share/samba-share/PDF2MD`。这次审计全部只读。
+- **T186（真缺陷，已修）**：核对视图把整个章节目录挂成 `parts/`，而递归/整合过的章节提交的是 `<章>/parts/children/…` 与 `<章>/figures/…`。留档的 49 条打回理由里 **18 条"`\input` 路径写错"、10 条"插图被漏掉"**，全是视图造成的假问题（例：主 tex 写 `\input{parts/children/x.tex}`、分片里第 15 行就有 `\input{figures/motif_….tex}`，核对却声称"分片里没有"）。修法：目录内容铺到视图根、整目录再挂 `<章>/` 与 `parts/` 两个别名、`<proj>/source/figures|images` **逐条并进去**（章节自带的与项目级的两批都要能读到）。测试 `TestCheckerViewMirrorsChapterLayout` 钉住 6 条路径；`TestCheckerViewHoldsTwoFilesOneFolder` 从"正好三项"改成"该有的必须有"——那条过窄的断言正是这个缺陷的卫兵。
+- **T187（已修）**：章节树里核对与转换各取"自己最新"，同轮匹配不到就退回最新。改成"核对结论只对它核对过的那次提交有效"：同轮没有核对就留空、`checker.attempt < convert.attempt` 一律不显示；手工重新核对（号更大）照常显示。web 测试同步改。
+- **③ 的答案（真数据）**：`source/progress_items` 里 `status=fallback` 的条目分两类——上游 **HTTP 500 `do_request_failed`**（偶发，重跑可能好），以及老版本写出的 **HTTP 400 `unknown variant \`disable\`**（`thinking.type` 笔误；当前代码已把 `disable` 归一成 `disabled` 并在配置加载时纠正/报错，属于历史事故）。**没有"某一张图恒定失败"的机制**：fallback 是"保留原图"的终态、不进重试；要重画用「重画这张图」，要确认身份看进度记录里的 `key`。
+- **⑥ 的答案（真数据）**：那本书留档 49 条打回理由里 28 条属 T186 的假问题（18 路径 + 10 插图），其余是真缺陷（整段解析块缺失、脚注丢失、`♠` 记号丢失、空 `remark` 环境）与"核对多次未提交结论"。所以"很多重试不必要"的判断部分成立——假问题那 28 条本该零成本通过。
+- **⑦ 的事实**：核对转录**按转换尝试**已有独立文件（`checker_<章>.try<N>.jsonl`），但**一次尝试内的多轮核对共用一条转录**（追加），`<章>.tex.checker` 只留最新结论 → 历史里看不到逐轮。登记 T188（排期）：逐轮转录或按轮切子条目 + 每轮结论落盘。
+- **立项**：P56（中栏重试总入口 + 页面内二次确认 + 撤销请求/删除这次重试/历史行内"设为当前"、删除；子章节重试要连带父节点重新整合）与 P57（对话页每行 fork、fork 后自动切到新会话、删除到某条再继续、与 P54 的"插一句 user 消息"合流）。
+
+- **③ 的精确答案（T189）**：全部项目 `progress_items` 里 `status=fallback` 共 41 条、**class 全是 vector**；36 条是 `[SESSION_INSUFFICIENT_BALANCE]`（额度耗尽、一次就停），5 条是 `open : no such file or directory`（**路径空串**）——而这 5 条**是同一张图**（同一个 `key`），横跨当前项目与最近几次留档运行，正是用户说的"总是 fallback"的那一张。`fallback` 是终态、重跑又被 `open ""` 打回，所以永远停着。待修项见 T189。
+
+## v1.5+（第四十七批补二十二，P56/P57：中栏动作条、撤销、历史行内动作、对话页 fork）
+
+- **用户的四个诉求**：重试总按钮不要放侧栏、要放中栏、要二次确认、误触要能恢复（回到之前那条、删掉重试出来的会话、历史里选一条当当前）；对话页找不到"从某条消息重试"的入口、fork 完要自动切过去。
+- **P56（已实现 ①–④）**：新增中栏 `SessionActions`（挂在 `#center-header` 下方），按钮集合按当前会话从 `legacy/actions.ts` 的纯函数算——`retryTargetOf`（convert/checker、非 `_child_`）、`canContinueOf`、`canRedrawOf`、`canDropOf`；**页面内确认条**取代 `window.confirm`（文案由 `confirmTextOf` 单一来源给出）；排上队之后出现「撤销这个请求」与「回到之前那条」，撤销走新的 `POST /api/retry/cancel`（只删还没被消费的 `work/retry/*.json`，`.done.json` 留档不动，幂等，`--no-retry` 时拒绝）；撤不回来（已被消费）就提示去「历史」删那条新会话。详情栏原来的整块按钮与样式删除（避免两处入口打架）。「历史」页每行加「设为当前」「删除」行内动作 + 「当前」标；删除用行内确认条。
+- **P57（已实现 ①③）**：fork 的判定与请求体抽到 `legacy/fork.ts`（`canForkFrom`/`forkPrompt`/`forkRequestOf`），提交入口 `web/src/fork.ts` 由轨迹页与**对话页**共用；对话页每条消息右上角悬浮 ⤓。fork 排队成功后 `watchFork()` 记下守望条件，下一次 `/api/index` 里出现同项目同章节同角色的更晚转录就自动 `selectSession`——用户口径"自动切换这个为主会话"。②（删除/编辑历史消息再继续）仍未做。
+- **踩到的坑（真缺陷，已修）**：给每条消息外套一层 `.fork-wrap` 后，时间线的回合分隔线规则 `.stream > .msg + .msg` 失效——虚线整片消失。浏览器几何测试（`TestToolRowGeometryComesFromOneTokenSetInChromium`）当场抓住（8px + dashed + 8px 那一条不成立），补了跨 wrapper 的 `.stream > .fork-wrap + .fork-wrap > .msg` 同一条画法。
+
+### 续：P57 ② 的落地方式（"删除某些错误消息让他继续"）
+
+不引入"就地改写转录"的新能力——那要动 append-only 的源文件、还要给每一行重新编号。**等价动作 = 从这条之前 fork**：历史截断点落在前一行，这条及其之后的记录都在新尝试里不存在，源转录一字不动留在「历史」里。所以对话页每条消息多了第二个悬浮按钮 `⤫`（与 `⤓` 同一套判据、同一个排队入口，只是 `from = n-1`），第 1 条之前直接拒绝并说明"要从头重来请用「重试这一章」"。逐条**编辑**某条历史消息（改内容而不是丢弃）仍未做——那需要"改写一条 msg 行 + 保住后面的轮次"，与 fork 的语义不是一回事。
+
+### T189：那张"总是 fallback"的图的真根因（空路径 + 续跑重放）
+
+- **现象**：`status=fallback` 的进度条目里，除了余额不足那批，还有 5 条错误文本是 `open : no such file or directory`——**没有** `会话错误:` 前缀，说明不是会话/接口错误，而是 `RunTikZSession` 自己的 `error` 返回值；而且这 5 条是**同一个 key**（当前项目 + 4 次归档运行），即同一张图反复失败。
+- **根因**：交付前 `copyFile(state.lastPDF, dstPDF)`。`state.lastPDF` 只在 compile 工具**本进程**编译成功时赋值；而续跑时 `resumeSubmit` 直接收账（`state.submitted = true`、`resumeSkip = true`），**一次编译都没发生**，`lastPDF` 是空串 → `os.Open("")` → `open : no such file or directory`。这条错误被 `pp.Error = err.Error()` 记进进度、状态写 `fallback`；下次运行 `pending` 又把它排进去（`status != "done"`），重放 → 再次空路径 → 再次 fallback，形成闭环。所以"重画这张图"也没用：重画同样从重放开始。
+- **修法**：① 交付前判定 `state.lastPDF` 为空或文件不在，就按 `state.finalCode` 用**同一套** `buildStandalone` + `Compiler.Compile` 补编译一次，成功则用新产物；`finalCode` 也为空才报"没有可交付的图形代码"；② 补编译失败时报"交付前重新编译失败（<fig>）：<最后编译错误>"，不再泄漏系统错误；③ `copyFile` 对空源路径直接报"源路径为空，无法写出 <目标>"（`TestCopyFileRejectsEmptySource` 钉住）。
+- **教训**：把"本进程内的临时状态"（`lastPDF`）当成"磁盘上的事实"用，就会在**重放路径**上踩空——重放只恢复逻辑状态（已提交），不恢复过程状态（产物路径）。凡是"交付/收尾"步骤依赖过程状态，都要能从磁盘事实重建。
+
+### T188（B 方案）：核对转录按轮拆成历史子条目
+
+- **为什么不切文件**：`checker_<章>.try<N>.jsonl` 这个名字是"一次尝试"的身份，被 `lastAttemptNumber`、历史聚合（`chapterAttemptChain`）、`/api/drop`（按 `.tryN` 连 work/attempts 一起删）、checker 重放（`replaySubmit`）四处依赖。按轮改名会把这四条同时改动，而用户要的只是"能看第 1 轮的详细拒绝理由"。
+- **做法**：纯前端视图层切分。`checkerRounds(lines)` 扫一遍转录：user 行开新轮；submit 回执带 pass → 通过，带 issues/reject/problem → 拒绝并数编号行（`- ` / `1.`）；每轮记起始行号与行数，另存最后一条助手正文的前 120 字作摘要。历史面板只在该会话是 checker 且轮数 > 1 时渲染子列表，点击 `jumpToLine(from)`。
+- **边界**：没有 user 行的旧转录整条当一轮（不显示子列表）；行号口径与 `/api/session` 的 `n` 一致，跳转不会串。
+
+### P56⑤：子章节重试的边界就是"父节点有没有整合"
+
+- **用户给的判据**：① 父节点还在等子会话 → 重跑这一支没有任何问题；② 父节点已经弄完（整合/晋级）→ 不能重跑；③ 已经通过的子章节本来就没人要重跑。真实动机是"会话出错要人工干预"，而那种场景多用 ⤫/继续跑，重试只用于确实要重做这一支。
+- **实现**：服务端判据用磁盘事实而不是运行期状态——`work/chapters/<父章>.tex` 存在即视为父已整合（提交产物是整合的终点），这时 400 并指名"重跑父章节 X"；否则要求能找到子章节的输入（`work/chapters/<子章>.md` 或父节点 `conv_<父>*` 临时树里的 `_subdivision/**/<子章>.md`），找不到 404。这样判断与"预览页此刻显示什么状态"无关，重启后行为一致。
+- **前端**：`retryTargetOf` 不再对 `_child_` 返回 null；确认文案专门说这条边界。测试从"不给按钮"改成"给按钮 + 文案含边界 + 服务端两条拒绝（父已整合 400 / 找不到输入 404）"。
+
+### T190：历史操作的默认语义——就地改，fork 才复制
+
+- **用户的原话**："对历史操作的时候不要默认 fork，默认是在这上面操作的，fork 是个手动操作的过程。防止每操作一次就增加一个，我可以手动先 fork 一个一样的然后再操作。"
+- **为什么原先不对**：`⤫` 复用了"从第 N-1 条之后继续"的排队请求（开新尝试）。语义上它确实等价于"删掉后面再继续"，但**副作用是每次删都产出一条新尝试**，而用户的心智是"我在改这一条会话"。
+- **做法**：新增 `POST /api/truncate`（`serveTruncate`）——就地截断，三条安全线：① 90 秒内有更新或有 `.partial` 就 409（和 `/api/drop` 同一条判据，避免改一条正在写的转录）；② 动手前整份备份到 `work/sessions/.trash/<转录>.<时间>.jsonl`；③ 临时文件 + rename，中途失败不留半份。`⤓` 保持 fork 语义不变。
+- **边界**：只认 `work/sessions/*.jsonl`（`transcriptNameRe`），`line < 1` 400（要清空就删记录），`line >= 总行数` 回 `dropped: 0` 不动文件。
+
+### T191（否决）：按轮删除为什么不该存在
+
+- 实过一版（`POST /api/prune` + 中栏勾选面板），用户当场否掉，代码已 revert。**否决理由记在这里，避免以后又被提一遍**：
+  - 删掉中间某轮时，转录少了那段上下文，而工作区/产物/快照仍是"后面那些轮次叠出来的结果"——两者不再自洽。要修就得连工作区一起回滚到那一轮、再让后面全部重跑，本质上等于重开一条会话，做成"删除按钮"只会让人误判成本。
+  - 只有"截掉尾巴"天然安全：尾巴之后没有东西，所以对话、`work/rounds` 快照（P55）、已提交产物与归档能对齐。`⤫`（就地截断）与 `⤓`（复制成新尝试）都属于这一类。
+- 顺带确认的格式问题：`docs/plan.md` 是扁平的 `[旗标] P<N>.` 列表，**不在列表项之外挂 `###` 小节**——设计结论要折回对应条目正文里。
+
+### T192：重新核对与"父节点等子会话"解耦 + Glob `**` 的坑
+
+- 用户一眼看出 P56⑤ 的判据挂错位置：*"核对会话的重新重试的那个核对？不需要父会话是否等待子会话合并之类的吧，我看你这边弄一起了？"*——对。
+- **语义**：重核不动产物（只换核对会话、旧结论挪 `.checker.tryN`、视图重建），所以"父章节已整合"根本不是它的前置条件；父整合完了照样能重核这一支，结论仍然进 `历史 N`。只有 convert / continue 才要那条父节点判据（它们会改产物与工作区）。
+- **两个真 bug**（写测试时暴露）：
+  1. `filepath.Glob(join(..., "**", base+".md"))` —— `**` 在 Glob 里只是"一个路径段里的任意字符"，不是递归。父节点正在跑这一支时 md 在 `work/temp/conv_<父>/work/_subdivision/<子>/source/<子>.md`，永远匹配不到 → 误判"父节点既没整合也没有正在跑它的临时树"→404。改成 `filepath.WalkDir` 全树找。
+  2. `recheckChapter` 把 md 路径写死成 `chapters/<章>.md`；子章节没这个文件，核对视图就少了 md（拿 tex/parts 去核等于换了判据）。新增 `chapterMarkdownFor()`：顶层直取，子章节在父细分树里找。
+- 判据收敛成一句：**改产物的动作**（重转、继续跑）看父节点整合状态；**只看产物的动作**（重新核对）只看"产物在不在"。
+
+### T193：入口与位置的三处硬伤
+
+- 用户连续三条反馈："我章节会话去哪了"（截图里章节行显示成 `核对 · chapter_002`，下面又有一行 `核对 核对 · chapter_002`）、"上面这个位置不太好"（动作条独占一行）、"正常会话的 fork 按钮在哪里 / 对某条消息后面删除在哪里操作？怎么进入这个模式？"。
+- **① 树行归属**：`buildChapterTree` 里 T186 的"同一轮没有另一种角色就留空"被对称地用在了 `convert` 上。核对号可以比转换号大（手工重核就是），那时 `node.convert` 被置空 → `primary()` 落到核对会话 → 行头变 `核对 ·`，而 `hasBody` 看到 `node.checker` 又把同一个会话渲染成子行。修法：`convert` 方向不置空（它是"这一章是谁转的"），`checker` 方向保留留空（旧结论不摆到新转换旁边）；`hasBody` 要求 `node.convert && node.checker` 才单列核对行。单测覆盖 pin 与不 pin 两种情况。
+- **② 动作条**：拆成 `SessionActions.vue`（顶栏按钮）+ `SessionActionPanel.vue`（确认条 / 回执），共享 `src/actions.ts`。CDP 实测：`#header-actions` 里顺序是「重试这一章 继续跑 删除这条记录 41 条消息 · 62 行 · 66.1 KB」。
+- **③ `⤓` / `⤫`**：真 bug ——`.fork-btn { opacity: 0 }` 与 `.fork-acts { opacity: 0 }` 叠加，**永远不可见**（连 hover 都只是把容器提到 1、按钮自己仍是 0）。改成只由容器控制（0.45 / hover 1），并给 `.fork-wrap` 加 `padding-right: 54px` 留出窄栏——原来绝对定位在 `right: 0` 压在行尾 token 计数上。
+- 验证：`npm test` 187 通过；用仓库内构建的二进制 + 一份 `/tmp` 里的项目副本起只读预览，CDP 读 DOM（`forkOpacity=0.45`、`elementFromPoint` 命中 `fork-btn`）并截图目检。
+
+### T194：「历史」里的当前/最新/归档，以及两个 `#1` 的真凶
+
+- 用户发来「历史 2」的截图：`#2 当前 · 运行中`、`#1 已完成`，同时说"我点那个就是当前、这个当前的标示不对""设为当前的话那个就乱了""我刚刚对我的一个进行操作，就全乱了，显示两个 #1 #1"。
+- **两个 `#1` 不是重复副本，是两段不同的对话共用了一个号**：作废尝试用 `archiveChapterAttempt` 把 `work/`（含 `_subdivision/` 子树）整棵搬进 `work/attempts/<章>/try<N>/`，而扫描只按扩展名收 `.jsonl`，搬家后的转录照样进索引。把真实项目复制一份起服务核对：635 条转录里 **84 条在 `work/attempts/` 下**，按（项目 + 章节 + 角色 + 尝试）分组有 **26 组**与工作树那条同号。**先按"副本"处理，是错的**——逐字节比对（`sha256` + 体积）发现两边完全不同：父尝试作废后这一支重跑，文件名里的尝试号**又从 1 重新数**，所以归档那份是"上一次父尝试里这一章的 #1"、工作树这份是"这一次父尝试里的 #1"。教训：同号 ≠ 同一份，别拿路径规律当内容判据。修法随之改成两层判据：扫描打 `archived`（`SessionInfo.Archived`）；`dedupeChapterAttempts` **只在内容指纹（`sha`）相同时**才去掉同号行（真被扫两遍那种），内容不同则两条都留，归档那条由 `chainMemberTag` 标成 `旧#N`、行上另挂「归档」徽标，历史列表头顶补一句说明。把旧的那条直接藏掉会丢掉一次真实对话与那次作废的证据。
+- **「当前」混了三件事**：中栏正在看的、流水线现在用的、最新一次尝试。现在三枚不同的标：`正在看` / `最新`（只数还在工作区里的，归档那条的号可能反而更大）/ `归档`；「设为当前」改名「查看」（点行本来就是切视图，名字让人以为会改重试目标）。顺带确认：**页面没有"归档"这个操作**——归档只由流水线在"核对判不过、作废这次尝试换新会话"时做，用户界面上根本点不出来，所以"我点了一下就变成归档了"这种自述一律先怀疑时间线。
+- **成对切换**：转换与同一轮核对是同一件事的两个角色，历史每行加「同轮核对 / 同轮转换」直达对方那一轮；`重新核对`/`重试` 排队成功后复用 P57 的守望条件（同项目同章节同角色的新转录、且 mtime 晚于排队时刻，20 分钟作废）自动切过去。**踩到并修掉的副作用**：`actions.ts` 里"换会话就清空 queued"会在自动切过去的那一刻把「撤销这个请求」收走，等于刚排上就撤不回来——改成"切到的正是这次排队的那一章那一角色就保留"。
+- **"点一下 `#2` 就变成 `#1`"的真因是分链**：历史列表原来只列"当前会话那个角色"的尝试——转换有 `#2/#1`，核对只有 `#1`。点一条核对会话，整列换成核对的链，编号全落到 `#1`，看起来就像那条 `#2` 被改名了。用户描述的"对某个 `#2` 点设为当前就变成 `#1`"就是这么来的（CDP 复现：同一次点击前后 `#2 #1 旧#1` → `#1 旧#1`）。修法：`chapterAttemptChain` **不再按角色过滤**，这一章的转换与核对混在一条链里（本来就该如此——"这俩是一体的"），行首标「转换 / 核对」，编号仍取文件名里的尝试号，点任何一行列表都不再变。单测钉住"从任一条进去拿到同一份列表"。
+- 顺带：面包屑把章节 ID 交给行内 Markdown，`chapter_004_child_02_child_01` 渲染成 `chapter004child02child01`（下划线被当强调），补 `:plain="plainTitle(state.current)"`，与侧栏/历史一致。
+- 验证：`go test ./...` 全绿（新增 `TestScanMarksArchivedCopies`）、`npm test` 194 绿（新增 `t194-attempt-switch.spec.ts` 4 条 + 去重 3 条）；真实项目转录副本 + `dvmine8 sessions --serve` + CDP 复核：重复章节不再有「历史」页签、`#2/#1` 各一条且 `正在看`/`最新`/`归档` 正确、点「同轮核对」切到核对会话、排队后新建转录出现即切换且「撤销这个请求」仍在、撤销后 `work/retry/` 清空并跳回原会话。
+
+### T195 · 转换行别再挂「重试这一章」的悬浮 ↻（2026-10-21）
+
+- 用户截图：鼠标停在转换行上，行尾浮出 ↻（重试这一章）与 ⓘ。要求"不要放这里了"。
+- 这是 T193 之后的重复入口：动作条已经在顶栏右侧放同一个「重试这一章」，行尾那个既重复、位置又像状态徽标（一误点就开新尝试、旧产物归档），撤掉。
+- 只撤**转换行首**的 ↻；核对子行的 ↻ 是另一种动作（重新核对：产物一字不动），保留。「待重试」徽标（纯状态、不可点）不受影响。
+- 验证：`npm test` 195 绿；重建 dist 后产物里 `chapter-retry icon-btn` 只剩 1 处（核对那条），`重试这一章` 文案不再出现在章节树里；`go build ./...` 通过。
+
+### T196 · 递归子章节也能"删掉这条及之后、再接着跑"（2026-10-21）
+
+- 用户的现场：一条三级递归子章节的转换会话因网关 `HTTP 400 System messages are not allowed` 终止，一条同级核对会话被"还没提交"提醒追着走、最后 `submit` 自己报错。他要在页面上"删掉这条及之后、再继续跑"，被告知"这是你之前写的功能"——查下去发现**子章节根本用不了**。
+- 三个断点：① `canForkFrom()` 把 `_child_` 一刀切排除，对话页不画 ⤫（可是就地截断只需要转录文件）；② `/api/truncate`、`/api/drop` 只认 `work/sessions/<名字>`，子章节转录在 `work/temp/conv_<父>/work/_subdivision` 下的 `node/sessions/`，请求 404；③ 子章节的 `continue`/`convert` 请求进了 `work/retry/` 就出不来——`retryPrecondition` 找 `chapters/<子>.md` 与 `work/temp/conv_<子>/work` 都找不到，页面只显示"排队中"，看起来像按钮坏了。
+- 修法：判据拆成 `canCutFrom()`（就地截断，允许子章节）与 `canForkFrom()`（fork 仍只给顶层）；服务端 `transcriptUnderWork()` 按绝对路径解析并限定 `<项目>/work/` 之下的 `.jsonl`（裸文件名仍走 `work/sessions/`），路径不合法 400、不存在 404；子章节会话的「继续跑」换成它的顶层父章节（`continueTargetOf()`，文案「继续跑父章节」）——父章节接着跑不新建尝试、不归档，重新驱动子树时每一支按自己磁盘上那条转录续跑，于是"截断 + 继续跑父章节"= 从截断处接着跑；派发端收到子章节的 `convert`/`continue` 直接消费并写清怎么做，不再无声滞留。
+- 两条现场的归因：转换那条的 400 是网关侧返回的（同一会话此前请求都正常，前缀没变，属于换一次路由再试）；核对那条是模型连着多轮没调 `submit`、被"没提交"提醒追着走，截到第一次提醒之前再继续能让它带着干净上下文重判。
+- 验证：`npm test` 197 绿（新增两组单测：子章节可截、继续跑换父章节）；`go test ./...` 全绿（新增 `TestPostTruncateDeepTranscript`：细分树里的转录能就地截断、备份仍落 `work/sessions/.trash/`、工作区外 400、`../` 穿越拒绝）。
+
+### T197 · 核对会话的确认文案与子章节的产物路径（2026-10-21）
+
+- 用户的反馈很短：截图里站在 `核对 · chapter_014_child_04` 上，确认条写着"重试这个子章节？只在父节点还在等子会话时有效……父章节一整合完，服务端就会拒"，他问"核对会话不应该提示这个吧"。确实不对：重核一个字节的产物都不动（T192 已把"父节点是否已整合"这条判据限定在会改产物的动作上），文案却把转换口径套在了核对会话上。
+- 根因是判断顺序：`confirmTextOf('retry', s)` 先看 `s.chapterId` 里有没有 `_child_`，命中了就返回转换那套说法，`chapterRole === 'checker'` 那一支根本轮不上。改成**先分角色、再看层级**；核对会话对子章节补一句"重核不改产物、父章节整合完同样可以"。
+- 顺着这条又挖出一个真断点：三处"有没有已提交产物"的判据都写死 `work/chapters/<章>.tex`，而递归子章节的产物在它上面某一层的 `work/chapters/<父>/children/<子>.tex`（层数不定，且暂存目录 `children.tmp` 里有同名半成品）。于是子章节的「重新核对」要么 400"这一章还没有提交产物"，要么排队后永远等不到前置条件——按钮看着有、点了不行。现在 `chapterProductsFor()`（latex）与 `chapterTexIn()`（预览服务）按文件名在 `work/chapters` 下解析、跳过 `children.tmp`，`recheckChapter` 与 `/api/retry` 前置条件都用它；子章节的编译产物 PDF 也从细分树的节点工作区（`work/temp/conv_<顶层>/work/_subdivision/**/node/work/.gate/compile.json`）取，核对视图仍带产物页。
+- 验证：`npm test` 198 绿；`go test ./...` 全绿（`TestChapterProductsFor` 钉顶层/两层/三层路径与暂存目录排除，`TestPostRetryCheckerChildProduct` 钉"有细分树产物 200、只有 children.tmp 半成品拒绝"）。
+
+### T198 · `convert_concurrency` 调了没用：批次宽度还是 `concurrency`（2026-10-21）
+
+- 用户把 `latex.convert_concurrency` 调到 15，看日志发现启动账目写"转换 15 / 核对 15（独立槽位）/ 其它阶段 5"，但转换阶段自己打"[convert] 26 章，并发 5"，问"实际并发跑到 15 了没有"。
+- 根因：`convertChapterBatch()` 的批次宽度写死 `r.cfg.Latex.Concurrency`；T179 加的 `convert_concurrency` 只喂给了会话槽位池（`acquireConvertSlot`）。同一时刻只有 5 个 worker 在跑，池子 15 永远到不了上限——两处数字不一致，用户看到的"调了没反应"就是这个。
+- 实测（本次运行 21:50 起，从各转录的 `chapter_activity` running→结论 区间做重叠统计）：转换峰值 6 个会话（21:55:24）、核对峰值 4 个（21:51:31），合计 10，确实没到 15。
+- 改：批次宽度改取 `ConvertWorkers()`，并收成 `convertBatchWidth()` 一处（启动账目里的"转换 N"用的是同一个 `ConvertWorkers()`，不会再走岔）；日志行前缀改成"（latex.convert_concurrency）"。子节点信号量本来就是 `ConvertWorkers()`，未动；核对会话是逐章内联跑的，批次宽度上去之后 `checker_concurrency` 才真能到 15。
+- 顺带把口径写清（用户问"哪个数管什么"）：`latex.concurrency` = 其它阶段的 worker；`latex.convert_concurrency` = 同时转换的章节数与转换会话槽位；`latex.checker_concurrency` = 核对会话槽位；`models.<名>.max_concurrency` = 真正同时打到同一个模型（wire 名）的请求数，未写 = 不限。
+- 验证：新增 `TestConvertBatchWidth`（四种写法都要与 `ConvertWorkers()` 一致）；`go test ./...` 全绿、`go build ./...` 绿。
+
+### T199 · 样式会话的图片为什么又没了：清理脚本删了它的附件目录（2026-10-21）
+
+- 用户发来样式会话的截图，`view_pdf` 缩略图全是断图，问"media 里的图片怎么又没有了？被谁删了？我今天就执行过一次删除了一个核对会话"。
+- 先自证清白：`/api/drop`（删一条记录）只删那一条转录 + `work/attempts/<章>/try<N>/`，`/api/truncate` 只截断文件，Go 代码里没有任何一处 `RemoveAll`/`Remove` 落在 `media` 上。再按项目里所有转录的 `file://media/<hash>` 引用逐条核对：5493 张附件里只有 `work/style_session.jsonl` 的 31 张缺失、`work/media/` 整个目录不在——只影响样式会话，与"删了一个核对会话"无关。
+- 真凶：会话写图片的目标是**转录同级目录的 `media/`**（`session.NewTranscript` 里 `mediaDir: filepath.Join(filepath.Dir(abs), "media")`），所以 `work/media/` 归属 `work/style_session.jsonl`。而 `clean_convert.sh`（T167）的删除清单里有 `work/media`、保留清单里却有 `work/style_session.jsonl`——脚本把留下来给用户看的会话的附件删了。旁证：项目同级留有 `*_记录_20261020_0737/`（脚本先整目录备份再删），那 31 张正好都在它的 `work/media/` 里，时间戳与删除时间一致。
+- 改：`clean_convert.sh` 不删 `work/media`；`clean_project.sh` 只在 `--with-style`（连样式会话一起删）时才删 `work/media`；两处都写清了"media 是转录同级附件目录"的理由；`work/sessions/media` 也不能整体删——被保留的 `chapters.jsonl` 用它。`docs/latex.md` 的脚本章节同步。
+- 数据恢复：从 `*_记录_20261020_0737/work/media/` 把缺的 31 张补回项目 `work/media/`（只补缺、不覆盖），复核后附件缺失数归零（存在 5544 / 缺失 0）。
+- 验证：`bash -n` 两个脚本；在临时假项目上 `-n` 跑一遍，删除清单不再包含 `work/media`（`work/views`/`work/pdfview` 仍删，那是每次运行重建的）。
+
+### T200 · 侧栏里的"空会话"与"备份项目"：快照日志被当成转录（2026-10-21）
+
+- 用户发两张截图问"有一堆这些会话是什么？"：转换阶段下并列 14 个方块、点开标题是 `journal-try1`、轨迹页空白；侧栏还多出一个挂着 76 个会话的组。
+- 查盘：那 14 条是 `work/rounds/<章>/journal-try1.jsonl`——P55 工作区快照的"转录行号 → commit"日志（内容只有 `{"line":N,"commit":"…"}`），项目里正好 14 章有快照，与方块数一致；它跟会话毫无关系，只是扩展名也是 `.jsonl`。76 会话那个组是清理脚本的整目录备份 `<项目名>_记录_20261020_0737/`（先备份再删的产物），整份工程副本被当作独立项目扫了进来。
+- 改：`sessionview` 新增 `skipScanDir(p, name)`（主扫描与附加根扫描共用的唯一判据）——`media`、`.git`、`*.git`（`work/rounds/<章>/repo.git` 是裸仓库）、`work/rounds`（限定父目录是 `work`，免得误吞名叫 rounds 的书）、`cleanBackupRe`（`_记录_<8位日期>_<4位时刻>` 结尾）整棵跳过。
+- 验证：`TestScanSkipsRoundsJournalsAndCleanBackups`（真转录留、快照日志/裸仓库/备份副本都不出现）、`TestSkipScanDir`（规则边界）；`go test ./...` 全绿；真实输出根 `sessions --list` 1005 条、`journal-try` 命中 0、无 `_记录_` 组。
+
+### T201 · 乱码会话、子章节的产物/输入/转录解析、核对会话的"从记录继续"（2026-10-22）
+
+- 用户三连问：*"有的转换会话我看输出乱码了，我想让他重跑一下。但是会报错。有的会话截断消息可以，但是有的会话不行。比如核对会话"*，紧接着是核对会话的截图 *"就是这个核对会话没办法重新转换"* + *"失败：这一章还没有提交产物，无法重新核对（先重试转换）"*。
+- **乱码是"模型把工具调用写成正文"**：转储项目里全部转录（跳过 `.trash`）后发现 10 条会话有同一种形态——assistant 的正文以 `{"paths":["skills://","skills://plugins"]}` 开头，跟着伪 `bash -lc …`，再声明"the chapter workspace tools are not available in this session"。这些消息**没有 `tool_calls`**（工具一次都没执行），后面两轮"必须 submit"提醒收到的是逐字不同的同类垃圾，最后 `run_end ok=true`、章节没有产物。同批用量行：厂商只报 2472/2530 prompt tokens，本地估算 8031/8056（约三分之一）——请求在网关那侧被改小了，模型拿不到完整系统提示与工具表。以前 `observePromptSize` 把 ratio 夹到 ≥1，这种异常完全静默；`remindSubmit` 只会再问两遍。
+- **子章节产物在临时树里**：`chapterProductsFor`（Go）与 `chapterTexIn`（预览服务）只认 `work/chapters/`。父节点整合前，子章节产物在 `work/temp/conv_<根章>/work/<父章>/children/<子>.tex` 或自己那一支的 `node/result|integrated-stage/<子>.tex`。真数据里 `chapter_014_child_04` 转换完、核对也跑完了（135 条消息），点「重新核对」只得到"这一章还没有提交产物"。
+- **子章节输入的真身是 `input/chapter.md`**：`findChildMarkdown`/`childMarkdownInTempTree` 只找 `<章>.md`，真数据里能命中纯属侥幸——细分树里只有核对视图那份同名副本，视图一清就"找不到章节 markdown"。而且只比文件名会串层级：`chapter_014_child_04` 被认成 child_01 底下那一支的 child_04（真数据里就这样认错过，md 指到了 put 错的输入）。
+- **"从记录继续"写死 `work/sessions/`**：`/api/retry` 的 `from` 分支拿 `filepath.Base(req.Path)` 去 `work/sessions/` 找；`truncateCheckerTranscript` 同样。子章节的核对转录在 `node/sessions/`，于是截断（就地改，`/api/truncate` 走的是 `transcriptUnderWork`）能成、⤓ 从记录继续一律 404。页面上 `canForkFrom` 又对所有 `_child_` 一刀切，子章节的核对会话连 ⤓ 都不出现。fork 请求只发文件名，也是同一个坑。
+- **子章节重跑没有输入是死路**：输入不在、父节点没整合 → 404"先在父章节里重跑这一支"，用户点"重试"什么也不会发生。
+- 改：`session.LooksLikeToolProseLeak`（当时判失败、**T205 已撤成只告警**）；产物/md 解析补齐临时树并按层级链整段比对；`retryPrecondition` 走同一 md 解析、工作区判据认细分树节点；`from` 分支用 `transcriptUnderWork` 解析并按相对路径入队、`truncateCheckerTranscript` 同口径；`canForkFrom` 对核对放开子章节、fork 请求发完整路径；子章节输入不在时改为排队父章节 continue。
+- 验证：新增 9 个 Go 测试（检测、临时树产物、前置条件、层级精确、子章节核对 from、子章节 continue 回退、父无转录仍 404）+ 2 个 web 断言（子章节核对可 fork、fork 带完整路径）；`go test ./...` 全绿、`npm test` 199 绿、重建 dist；真实项目只读复核三支子章节的产物/md/前置条件；临时副本上用 HTTP 复核"有临时树产物 → 200 排队重新核对"与"输入不在、父有转录 → 200 改排父 continue"。
+
+### T202 · 截断备份（`.trash`）不再被扫成会话（2026-10-22）
+
+- 用户截图问：*"还有就是截断之后的会话怎么还会在这里显示？在 .trash中的"*——侧栏转换阶段下多出一条 `chapter_022_child_08.jsonl.20261022-122539`。
+- 原因：就地截断（⤫）把原文整份备份到 `work/sessions/.trash/<转录>.<时刻>.jsonl`，扩展名还是 `.jsonl`，扫描按扩展名认会话，于是这条备份被列成一个新会话（标题就是那串后缀，点开是截断前的旧对话）。T200 的 `skipScanDir` 补了 `media`/`.git`/`work/rounds`/`<名>_记录_…`，漏了 `.trash`。
+- 改：`skipScanDir` 增加 `.trash` 整棵跳过（主扫描与附加根扫描共用）；要看截断前的原文，用 `docvision sessions --dir <项目>/work/sessions/.trash`。
+- 验证：扫描测试补两处 `.trash`（`work/sessions/.trash/` 与细分树 `…/work/.trash/`）、规则测试补两条边界；`go test ./...` 全绿；真实输出根 `sessions --list` 1029 条、`grep` 命中 `.trash|jsonl.2026|journal-try` 为 0（截断备份实际只有 1 份，正是截图那条）。
+
+### T203 · 核对会话别把 markdown 当权威（2026-10-22）
+
+- 用户反馈：*"有的这个核对会话好像会太过于依赖markdown的转换内容……他只是ocr的一个转换参考"*，并要求"核对的提示词少即是多，不要增加太大量篇幅"。
+- 现象与根因：核对提示词虽已写了"md 是 OCR 来的、看着奇怪去看原页"，但判据仍是"md 有、`.tex` 没有 = 缺内容"，开场又把 md 称作 "the source it was converted from"——于是核对会话拿 md 的差异当事实，报出原书根本没缺的东西，转换会话被逼着改坏正确内容。
+- 改（只两处措辞、不新增段落，净增约 30 词）：① md 那一条改成"a reference, not the truth. … where the page and the markdown disagree, the page wins and the .tex may follow it"；② "缺内容"那一类补 "confirmed on the original page, since a markdown-only gap proves nothing"。
+- 验证：`go test ./internal/prompts/` 绿；模板仍 27 行。
+
+### T204 · 核对会话的工具轮次随层级加宽（2026-10-22）
+
+- 用户截图 `ROUND BUDGET: 35 of 50 tool rounds used, 15 left`，要求：*"随着层级越高每层增加20轮吧，线性方法增加或者倍数增加，并且在配置文件中可以修改，这边默认是50"*。
+- 现状：所有层级的核对会话都是固定 50 轮。但父节点的核对要通读整棵子树（每个孩子都要过一遍），最里层只管自己那一片——父章节核对到 35/50 就被迫收尾，子树里几段内容根本没翻到。
+- 改：`sessions.checker.max_tool_rounds` 改指**最里层**的预算；往上每层 +`max_tool_rounds_per_level`（默认 20）；要倍数增长配 `max_tool_rounds_factor`（默认 1=纯线性，2=每层翻倍；per_level 写负数 = 只翻倍不另加）。公式 `rounds = base × factor^levels + per_level × levels`，levels = `maxChapterSplitDepth - depth`，上限 1000 轮。层级从章节 ID 数出来，不动调用链。
+- 验证：config 侧 `TestToolRoundsAtLevels` / `TestCheckerSessionDefaultsPerLevel`，latex 侧 `TestChapterDepthOf` / `TestCheckerRoundsScaleWithDepth` / `TestCheckerRoundsDoubling`；模板键面 parity 测试绿；`go test ./...` 全绿。
+
+### T205 · 撤掉"按正文特征判失败"，改回只告警（2026-10-22）
+
+- 用户追问 T201 那条检测：*"确定不会误判吗？是必须要加的吗？我感觉可以人工手动这边重试就行，因为有各种各样的错误。每个厂家都不一样。"*
+- 复盘：那条判据是**软判据**——`skills://`、`tools are not available in this session` 只是字符串，模型正常解释"这个会话里没有某个工具"就会被打死，异常形态也不止这一种；而且判失败本来就不是必要的，"这一轮有没有产出"用户看页面就知道。T201 真正有价值的部分是**让人看见**，不是替人判失败。
+- 改：判失败撤掉，改成每会话一条警告（含厂商报的 prompt tokens 与本地估算）；T201 另加的"厂商 prompt < 本地估算 60% 告警"也撤掉（各家计数口径不同，单看比例会误报），两个数字并进同一条警告。行为回到 T201 之前。
+- 验证：`TestToolProseLeakWarnsButDoesNotFailRun`（退化回复正常返回、不重发、只置位一次）、`TestToolProseLeakWarnsOnce`；`go test ./...` 全绿。
+
+### T206/T207 · 控制台实时行的时序、以及页面「是否在跑」的判据（2026-10-22）
+
+- 用户反馈两件事：*"这个cli界面很多显示的不全面或者有点乱。正在运行的和排队的，还有之前开子会话又回来续上的"* + 一屏实时行；*"web界面对于是否正在运行的显示感觉也有很多问题"*。
+- **CLI 三个问题**：① `ResumeStats.Active` 是"首行→末行"的墙上跨度，隔几天续跑的会话（实际只跑四十来分钟）写成 `2628m56s`；② 实时行在拿到并发槽之前就建好，排队 / 父节点等子会话（十几二十分钟）/ 真正在跑都长成 `轮次 0 · 工具调用 0 · 已用 25m46s`；③ 续跑的行从 `0` 开始爬，要等第一次进度回调才跳到真实数字。
+- **页面问题（实测定位）**：真实输出根 1044 条会话只有 1 条 live，而同一时刻 10 条转换 + 1 条核对在写（4 个 `.partial`、23 条转录 3 分钟内有写入）。根因是 `activityAfterEnd` 只看"出现过 run_end"，而一条转录里会跑好几轮 Run，上一轮的结局把这一轮的活动标记折成「已中断」，scan 又对 `interrupted` 强制 `live=false`。
+- 改：`Active` = 各用量行 `duration_ms` 之和；`fmtDuration` 超 1 小时按 `h`；实时行加状态词（排队/运行/等子会话 N/待核对，只有运行让计时器走，切换时结账累计）；续跑行首标「续跑」并用转录里的轮次/工具数/累计时间初始化；转换与核对接上状态切换（含提交提醒轮、父节点等子会话再整合）。页面侧按**行号**比较 `chapter_activity` 与 `run_end`，run_end 之后又出现消息时那条结局不再计入。
+- 验证：9 个新测试（`TestFmtDurationHours`、`TestLiveRowTextStates`、`TestResumeActiveSumsRequestDurations`、`TestResumeActiveWithoutUsageIsZero`、`TestActivityInterruptedOnlyWhenRunEndIsNewer`、`TestRunEndErrorClearedByLaterMessages`、`TestScanLiveWhenRunningActivityIsNewest` + 两个既有测试改口径）；真实数据复扫 live 1 → 11；`go test ./...` 全绿。
+
+### T208 · 「重试这一章」点了没有反应（2026-10-22）
+
+- 用户反馈：*"还有一个17章节我点那个重试该章节也没有用来着，因为它乱码了我想让他重新跑一下"*。
+- 查证：服务端正常——同样的 `POST /api/retry`（`chapter_017`、`role=convert`）返回 200，队列文件 5 秒被消费、旧尝试归档 `work/attempts/chapter_017/try1/`、新转录 `convert_chapter_017.try2.jsonl` 带 `manual_retry` 当场开写；而用户点的那次队列里既无待办也无 `.done`，归档目录也不存在 → POST 没发出去。
+- 根因：动作条按钮只打开**确认条**，请求在「确认」才发；`actions.ts` 的 `watch(state.current.id)` 在任何会话切换时清空 `pending`——重试排队后视图自动跳到新尝试（T194 的行为）或实时跟随切走，确认条被静默收走。
+- 改：`legacy/actions.ts` 新增纯函数 `sameActionTarget`（同项目+同章节+同角色 = 同一件事），确认条只在目标变化时收走；重画/删除仍一切换即收。
+- 验证：`session-actions.spec.ts` +3 条，`npm test` 202 绿；`npm run build` 重出 dist。
+
+### T209 · 核对会话"把 submit 写成正文"的空转环路（2026-10-22）
+
+- 用户反馈：*"并且我无法重试或者删除这个checker_4的这个核对会话，因为这个核对会话有问题"*（截图里回执是「失败：HTTP 409」）。
+- 三条链一起查：① 删除 409 是因为会话正在写（实测 mtime 距现在 13 秒）——保护正确，但页面把 `http.Error` 的**纯文本**原因丢了（`res.json()` 失败就退回 `HTTP 409`）；② 重试 400 是因为父节点产物要过核对才从暂存区晋级，核对没过时 `work/chapters/<章>.tex` 不存在（鸡生蛋）；③ 环路根因是核对会话把 submit 写成正文（`\submit{ "report": … }`，`finish_reason=stop`、`tool_calls` 空），那段"没结论"的失败文本被当成"核对发现问题"喂回转换会话，转换只能再交一遍同样的产物。实测 13:31→13:48 每 30–100 秒一轮。
+- 改：`postJSON` 统一写入口并优先显示服务端说明；提交提醒写明"写进正文不算，要发真的工具调用"；`checkerNoVerdict()` 把"会话自己没给结论"与"章节真有问题"分开，前者跳过反馈轮（判据是 submit 回执这个事实，不是正文形态，与 T205 同口径）。
+- 验证：`TestCheckerNoVerdict` + 既有测试，`go test` 四个包全绿、`npm test` 202 绿、`dist` 重出。
+
+### T210/T211 · 拆分父节点的暂存产物、子章节重试的去向（2026-10-22）
+
+- 两条用户反馈连着查：① 拆分父节点的「重新核对」报"还没有提交产物"，而活的核对会话正在读同一份 `.tex`；② 子章节的重试回执说"已排队"，刷新后会话原样不动。
+- ① 的产品在 `work/temp/<章>/integrated-stage/` 等核对通过才晋级，判据（`chapterProductsFor`、`chapterTexIn` → `tempProductFor`）只认 `work/chapters/**` 与子树里的 `result|integrated-stage`，不认节点自己这一层——同一份文件两套结论。两处都补上，晋级后仍优先用 `work/chapters/`。
+- ② 队列里两条子章节请求被消费成 `.done`，那一支的转录与 `work/attempts/` 一个字节没变：接口侧（T201）放行并排队，派发端（T196）消费掉只写日志，回执与事实相反。改成接口与派发端统一：子章节的重转/继续跑翻译成父章节的「继续跑」，回执点名父章节；父章节无转录时 404。
+- 验证：`TestChapterProductsFindsStagedParentProduct`/`TestChapterProductsPrefersPromotedProduct`/`TestChapterTexInFindsStagedParentProduct`/`TestChapterTexInIgnoresEmptyStagingDir`、`TestChildChapterParent`/`TestQueueParentContinueFor`、`TestPostRetryChildBecomesParentContinue`；旧断言跟着新语义改（父已整合/临时树两条由 400/单独排队改为父章节继续跑）。`go test ./internal/...` 全绿。
+
+### T212 · `request_chapter_split` 第一次总被打回（2026-10-22）
+
+- 用户反馈：*"很多会话都会请求两次 request_chapter_split，这个第一次总是报错"*。
+- 转录统计（1137 条会话、173 次调用）：21 次第一次被拒，全是 `ranges stop at line N; expected full coverage through line N+1`。根因是行数口径：`len(strings.Split(md, "\n"))` 把末尾换行多算一行，模型按 `wc -l`/`grep -n` 看到的正文行数切分，就差那一行。
+- 改：`lastContentLine()` 取最后一条非空行，校验按它收口（`next == lastContent+1` 与 `next == totalLines+1` 都接受）；`read_file` 整文件回执加 `M lines`。真机重放：被拒的那次原始参数（`total=1672 lastContent=1671`）现在直接 `SUBDIVISION REQUESTED: 7 child ranges persisted`。
+- 验证：`TestValidateChapterSubdivisionsAllowsTrailingBlankLine` / `TestLastContentLine` + 既有分段测试；`go test ./internal/latex ./internal/session` 绿。
+
+## 第五十八批：未提交收尾的复盘会话（P58，2026-10-22）
+
+用户口径：「我们的模型有时候会在没有反馈的时候就是意外的中间终止就是没有最终 submit……只是发送 not submit 并不能让模型正确的继续，因为很多时候都是模型已经开始输出错误的乱码，或者 json，或者 xml 的工具等等」——所以要一个**只读的复盘会话**来看那条会话的历史，判断"还能救（发提醒）"还是"已退化（从最后一个干净轮次截断）"，它自己的会话存到单独的「错误处理」分类里、默认只在 debug 下存 jsonl。
+
+**设计定稿（用户确认的三点）**：① 模型条目不跟随 checker，而是**单独新建 `models.rescue` 条目**（模板里 `extends: text`，默认与 checker 同底座，方便单独调）；② 记录默认**只写一行审计日志**，`--debug` 才落 jsonl；③ 三步一次做完（retry / truncate / fail 全上，convert 与 checker 都接）。
+
+**做了什么**：
+- `internal/latex/rescue.go`：`ReadSessionTool`（按物理行号取窗口：默认末尾 12 条消息、单条截 2000 字符、`from` 往前翻、`count` 到 40、`max_chars: 0` 看全文并回执"要读全文就再给 `max_chars=0`"）、`SessionStatsTool`（轮次数、每轮 `finish_reason`、正文"像工具调用"的行号（`<tool_call`/`<parameter`/`"function":`/`\submit{`/整段裸 JSON）、最长重复 120 字符块、每轮起点行号——**事实**，不下结论）、`RescueSubmitTool`（`verdict`/`from`/`reason`/`hint`，`truncate` 必须给 `from`、`reason` 必填、终态回执）。`rescueReview` 起会话（上下文 `latex.rescue.context_limit` 默认 131072、输出预算与 checker 同配置、轮次 `max_rounds` 默认 12），`rescueBudget` 按「章节/角色」计数（默认 2 次），`rescueAudit` 追加 `work/rescue/log.jsonl`，`rescueQueueTruncate` 排 `role=continue`（checker → `role=checker`）的重试请求（`From`/`Path`/`Source: rescue`）。
+- `remindOrRescue`（`book.go`）：`remindSubmit` 变薄壳；convert 调用点带 `rescueTarget{Proj, Base, Role: "convert", TrPath: trPath}`。每次提醒前先复盘：`fail` → 直接失败；`truncate` → 排队并失败收尾（不再在同一坏会话里烧第二轮）；`retry` → 照常提醒，`hint` 拼在提醒末尾。
+- checker（`checker.go`）：未提交结论时同样先复盘，`role=checker`，`truncate` 排队后返回「已排队从干净轮次继续核对」。
+- 预览（`sessionview`）：「错误处理」阶段（`StageTitles`/`StageOrder` 排最后/`LabelFor` 认 `rescue_` 前缀），复盘转录 `work/sessions/rescue_<章>_<时间>.jsonl` 单独成组。
+- 提示词 `latex_rescue.system.md`（三类结论的判据、`truncate` 取**最早**干净点、不得编造行号、必须 `submit`）+ 注册表（`MustMention: read_session/session_stats/submit`）。
+- 配置分两处（用户当天调整）：`latex.rescue.*` 只留功能级——`enabled` / `max_per_attempt` / `keep_records` / 模型指针 `model`；**会话参数进 `latex.sessions.rescue`**（`context_limit` 默认 131072、`max_tool_rounds` 默认 12、`max_tokens` 0 = 继承 checker 的预算；没写的字段继承 `sessions.checker`，`LatexSession("rescue")` 里实现）。模型条目 `models.rescue` 写在 **`models.checker` 下面**、`extends: "checker"`（限制不写在模型条目上）。配置版本 20→22，两份模板同步、`temp/config_new.yaml` 固件同步、README/docs/config.md 同步。
+  期间一次操作失误：把模板 cp 到了仓库外（`/home/lingnc/workspace/Test/config.example.yaml`），已确认内容与模板一致后删除，并写到正确的 `MinerU_Tools/config.example.yaml`。
+
+**测试**：`rescue_probe_test.go`（尾窗/`from`/全文、超长截断提示、`session_stats` 点名正文工具调用与 `finish_reason`、`submit` 校验与终态、排队请求的 `role=continue`/`From`/`Path`、预算默认 2 次、模型回退链）、`scan_rescue_stage_test.go`（预览阶段归组与排序）。`go test ./internal/...` 全绿。
+
+**已知边界**：递归子章节的**转换**会话被判 `truncate` 时，`role=continue` 会被 T211 的分流折成"继续跑父章节"（`From` 丢弃）——子章节退化目前靠父章节续跑兜底，没有按行号精确截断；子章节的**核对**会话不受影响（`role=checker` 的 `From` 一路可用）。`--debug` 强制落盘复盘转录（`rescueKeepRecords` 读 logger level ≥ 4）。
+
+**上线后第一轮观察（同日 17:17 重启后）**：`work/rescue/log.jsonl` 四条——17:19 `chapter_023_child_02_child_02` 判 `retry`（理由：转换与目标检查都已完成、只差 submit，属"正常提示"那一路，随后确实发了那条提醒）、17:31 两个 `child_04` 子章节判 `fail`（模型两次自述"workspace tools 不可用"；其转录显示 15:01 第一次响应就是 `finish=stop`、正文与工具调用皆空，属厂商空响应后的退化，T205 的"只告警不判死"正是这条链的源头）、17:32 `child_04_child_03` 判 `truncate`（from=44）。**暴露两个问题**：① `--debug` 下复盘转录没有落盘（判定写成 `level >= 4`，而 Debug=1）→ 网页「错误处理」看不到会话，只有审计日志；已修并加测试；② 子章节判 `truncate` 时排出的 `role=continue` 被 T211 分流折成"父章节继续跑"（`req-…-chapter_023.json` 在队列里等章节锁），`From` 丢掉——子章节的精确截断仍缺，见 plan P58 的"已知边界"。
+
+**P58 的第二次观察（用户指出）**：`chapter_023_child_04_child_02` 的转录里只有一条 user 任务 + 一条 "the chapter workspace tools are not available in this session" 的拒绝，用户判定"这不对，工作区明明给了工具，这是幻觉"。查下来是两件事叠在一起：① 15:01:26 的第一次响应 `finish=stop`、**completion 1819 tokens 但正文/思考/工具调用全空**（思考被网关吞掉），T50 的退化判据要求 `completion==0`，于是漏网——会话静默停住；② 进程重启恢复后模型冒出"工具不可用"的幻觉并收尾，复盘判了 `fail`（把整章记成不可能）。修法：会话层遇到"声称工具不可用 + 本轮没有 tool_calls"就**纠正一次**（把真实工具名清单写进 user 消息、要求现在就调，每会话一次，仍拒绝则照常收尾交提醒/复盘）；空回复判据放宽到"正文/思考/工具调用三者全空"（不再要求 completion==0），`finish=length` 仍交给 T159 的预算翻倍路径，两条不抢；复盘提示词补「拒绝不算答案」——只拒绝的会话判 `truncate`（从头重开）而不是 `fail`。测试：`TestToolProseLeakNudgesOnceButDoesNotFailRun`（2 次请求 + 纠正消息里点名列工具）、`TestDegenerateEmptyResponseHelper`（completion>0 的空内容也算退化）、`TestClaimsNoToolAccess`/`TestToolNameList`；`TestDegenerateEmptyResponseGivesUpAfterOneRetry` 改用 `finish=stop`（`length` 归预算翻倍路径）。
+
+**判定口径再调整（同日，用户口径）**：`truncate` 应当是常态而不是例外——"retry 会保留错误，工具问题和会话污染；只有网络中断、截断这类小问题 retry 比较好，会话或输出有问题就截断"。于是把 `latex_rescue.system.md` 的判定段落按这条重写：`truncate` 是默认（坏的一轮 / 工具用错 / 拒绝 / 重复乱码 / 上下文被错误前提污染 / 已经做错的工作），`retry` 只留给"聊天记录一路干净、停住的原因是外部瞬时故障"（断网、API 错误、`finish=length` 截断、进程中断），并加一条硬规则：**拿不准选 truncate**；`truncate` 时若任务之后没有干净点，就截到原始任务那一行（同一个任务、干净上下文重开）。代码不动（判据在提示词里），`docs/sessions.md`/plan P58/CHANGELOG 同步。
+
+**章节树把上一代当成现状（用户报告）**：查 `chapter_004` 的数据——工作树里是这一次的 `convert_chapter_004_child_03.jsonl`（#1），归档 `work/attempts/chapter_004/try1/...` 里是上一代的 `convert_chapter_004_child_03.try2.jsonl`（#2）与它的 `checker...try2`。根章重来一次时子章节尝试号又从 1 数起，而 `newerAttempt` 只比号，于是上一代的 #2（已通过）盖住这一次的 #1（还在排队），核对结论也跟着挂上去——用户看到的「下面都通过了、却还有一个没完成」正是这样来的。修法：`newerAttempt` 先比「是否归档」（工作树永远优先），核对只与同一世代配对；`chainMemberTag` 给核对行加 `核对` 前缀（`旧核对#1`），同号 `#1` 不再分不清。web 单测 205 条全绿、dist 已重建。
+
+## v1.5+（第五十九批补一，T214/T215：子行跟着父行换代 + 预览「重置视图」，2026-10-22）
+
+### T214 · 切换转换会话时子章节行跟着换代
+
+- 现象（P59 落地后的遗留）：钉住上一代（归档）的转换时，父行的转换切过去了，下面子章节行仍在工作树里挑——上一代的子行挂到这一次的父行下面。根因是 `buildChapterTree` 每个节点各自 `newerAttempt`（先比归档标记、再比尝试号），从来没有"子行跟着父行走"这一层。
+- 改：先搭父子关系、再从根往下逐层定行。父行先定它显示哪一次转换，子行 `convertInGeneration` 只在**同一代**里挑（父行在工作树 → 只在工作树；父行是归档 → 回到归档），同代里再按原来的 `newerAttempt` 取最新；核对继续走 P59 的锚点规则（锚定同一次转换 + 同世代、mtime 最新）。钉住的那一行照旧不被覆盖（钉住核对时转换由锚点决定）；没有 pin 时与旧行为一致；那一代里没有这个子章节的转录时不留空行、退回该节点最新一次。世代只说工作树 / 归档，与尝试号无关（父子的号本来互不相关，T175 的"子行不按父行号切"仍然成立）。
+- 验证：`web/tests/chapter-tree.spec.ts` 新增 4 条（不钉：父/子都取工作树；钉工作树转换：子行留在工作树；钉归档转换：子行回到归档；归档那一代的核对只挂在归档子行下、切回工作树就不显示）。既有 41 条全绿——尤其 T175 那条"钉 convert #2 时子行仍是自己最新一次"（同属工作树，世代没变）。
+
+### T215 · 预览页「重置视图」
+
+- `web/src/state.ts` 新增 `resetViewState()`：纯状态、不碰 DOM、不发请求。清手动选中/pin 与它的行缓冲、轨迹页选中/展开/类型筛选、搜索过滤词，清空 `state.collapsed`/`state.overflow` 并从 localStorage 删掉这两个记忆键，窄屏侧栏回到展开；**主题 / 显示单位 / Markdown / 缩略图 / 自动跟随 / 板块 / 方块视图一律不动**。返回"该重新选中哪一条"：本板块里正在跑的顶层会话（无 `chapterParent` 那条，子章节的世代跟着父章节走，选中它等于钉住一行）→ 正在跑的子章节 → 列表第一条 → 空串。选中与拉行仍走唯一的 `selectSession` 入口（所以它自己不发写请求、不删数据）；`storeRemove()` 与 `storeGet/storeSet/storeJSON` 同款静默降级。
+- 侧栏头部刷新键 `⟳` 右边加文字按钮「重置视图」（复用 `.tab-toggle` 词汇），悬浮说明写清"清什么、不碰什么"；56px 轨道态放不下，与搜索框/状态行一样隐藏。
+- 验证：`web/tests/reset-view.spec.ts` 4 条（清导航键 + localStorage 两个记忆键、主题/单位/Markdown/缩略图原样留着、回到正在跑的顶层会话而不是子章节、板块之间不串）。
+- 本批合计：`npm test` 219 条全绿（原 211 + 4 + 4）、`npm run build` 重建 dist（`go/internal/sessionview/assets/dist/` 已提交）、仓库内 `go build ./...` 通过；`npx tsc --noEmit` 只剩 `data.ts` 与 `legacy/trajectory.ts` 的既有报错（改动文件零新增）。
+
+## v1.5+（第五十九批补二，T217：核对拿不到结论先重开核对，不升级为整章重来，2026-10-23）
+
+### T217 · 核对的"没结论"不再等于"这一章不过"
+
+- 现象：一次转换已经跑完、产物也在，核对会话两次都没有提交结论（模型把结论写成正文、或直接结束回合，提醒也没用），`checkChapterAt` 就把失败文本交给调用方——调用方按"核对发现了问题"的规矩处理，旧尝试整棵归档、这一章从头重转。实测有一章内容本身没有问题，只因为核对始终没提交，整章重跑了一遍，白花钱也拖时间。
+- 根因：`checkChapterAt` 里写死 `checkerAttempts = 2`，且"没结论"与"结论说有问题"返回的都是同一种"失败"，上层没有可区分的事实。核对的失败类型其实有两种：**会话自己没产出结论**（跑挂 / 漏 submit，重开一次核对就好）与**核对真的判了这一章有问题**（要回到转换会话修内容）。
+- 改：① 循环里记 `sawVerdict`（任一次 `submit.Submitted`）。一次结论都没拿到时预算放宽到 4 次**全新会话**（同一转录路径、同一只读视图，每次重开打一条 warning）；只拿到过一次结论就回到原来的 2 次，`issues` 那一路照旧立刻返回、由调用方按 `checker_rounds` 喂回转换会话。② 文案分开：没结论时是 `核对始终没有给出结论（不是内容问题，共尝试 N 次）…`，旧的 `checker 多次未能提交结论（会话未调用 submit）` 留给"给过结论但没有可用结论"那一路；`checkerNoVerdict()` 同步认得新前缀——不然这串文本又会被当成"章节有问题"送进反馈轮（T209 修掉的就是这个空转）。③ `book.go` / `retry.go` 的升级链**刻意不动**：4 次都拿不到结论时整章仍会作废重来，这一批只把"没结论"这一类失败的概率压下去，不重设计升级路径。
+- 验证：`TestCheckerNoVerdictRetriesFourAttempts`（只回正文 → 恰好 4 次会话：8 条请求 = 每轮首请求 + 提交提醒、转录里 4 条 `checker_target` 锚点，返回新文案前缀）、`TestCheckerNoVerdictExtraAttemptCanPass`（前两次只回正文、第 3 次提交 `pass` → 通过，3 条锚点，多出来的轮次确实可用）、`TestCheckerWithoutVerdictFailsAfterFourAttempts`（退化响应连跑 4 轮、请求数 8–12，原先是"两轮 / ≤6"）、`TestCheckerNoVerdict` 补新文案一条；`go test ./internal/latex/` 与 `go test ./internal/...` 全绿。
+- 已知边界：P58 的复盘会话判 `fail`/`truncate` 时会**提前返回**（"复盘判定会话无法挽救" / 已排队从干净轮次继续），走不到第 4 次；这两句也不在 `checkerNoVerdict()` 的识别范围里。本轮不动它——动它等于改升级链。另：核对转录是同一条（同一次尝试内四次会话共用一个路径），所以"试了几次"只能从锚点/警告行看出来，页面仍显示一条核对会话。
+
+
+## v1.5+（P60 第一步：修复会话骨架与 `dispatch_fix` 工具，默认关闭，2026-10-23）
+
+设计口径（见 `docs/plan.md` P60）：父章节重试代价太大，应当按修复任务把工作重新下派给**已经划好的**子章节与工作区，父会话只做整合。这一步只落接口与骨架，**不接进运行路径**。
+
+- `internal/config`：新增 `latex.fix` 块——`enabled`（`*bool`，默认 false）、`max_rounds`（默认 2；0/负数也按 2，不是无限轮）、`model`（空 = 继承 convert），外加 `LatexConfig.FixEnabled()` / `FixMaxRounds()`。两份配置模板逐字节同步（`fix` 块写在 `latex.rescue` 后面）、`config_version` 22 → 23，README 的示例行与 `docs/config.md` 的版本行/新增三行同步。
+- `internal/latex/fix.go`：`fixPlan` / `fixPlanChild` / `fixPlanIssue` 与 `WriteFixPlan` / `ReadFixPlan`（同目录临时文件 + rename 原子写；版本、根章名、`child_NN` 形状、字段非空、issue id 不重复都在写与读的同一套校验里）；`DispatchFixTool`（`dispatch_fix`）只**记录计划**并回执计划路径 + issue 数 + 将要下派的子章节数，校验失败当场 `REJECTED` 且不写盘；子章节名对着 `_subdivision/` 下的真实目录核对（优先用调用方给的父工作区，否则按 `work/temp/conv_<根章>*` 找最近的一棵）。`runChildFix` 按最终形态写好：复用子章节自己的 `node/work`、工具集 = 转换会话减去 `request_chapter_split` 再加 `submit`、转录 `node/sessions/fix_<子章>.jsonl`、每轮写一条 `t=meta kind=fix_target`（锚点与核对同口径）、提交后跑该子章节原本的核对（同一只读视图、同一锚点，P59）。守卫顺序：未启用 → 顶层节点 → 无任务 → 工作区/输入不在 → 轮数预算用完，都不凭空重建。
+- `internal/prompts`：新增 `latex_childfix.system.md` + 注册表条目（`Vars: MAX_ROUNDS`，`MustMention` 含 `submit` 与转换那套工具）。**名字不能叫 `latex_fix.system.md`**——那个文件名已经是装配阶段的书级编译修复会话（`FixSystem` / `book_fix`），两个用途不能共用一个模板。
+- `internal/latex/book.go`：唯一一处运行期接线——`latex.fix.enabled` 为真时给转换会话注册 `dispatch_fix`；默认关闭时工具面一字不变。
+- `internal/sessionview`：解析 `t=meta kind=fix_target` 得到 `fixAnchor`/`fixAnchorAttempt`/`fixIssueIDs`，`SessionInfo` 上给出 `chapterRole:"fix"` + `chapterAnchor`/`chapterAnchorAttempt` + `fixIssueIds`（新字段）。**分组、章节树、历史一行没改**（章节身份仍为空、阶段仍落通用「会话」），留给后续的树/历史条目。
+- 守护测试的一处调整：`TestLiveLatexToolsAreMentionedSomewhere` 要求"每个工具名都在某个模板里被提到"，而 `dispatch_fix` 是**条件注册**的（只在开关打开时存在）——把它登记进 `conditionalTools` 并注明理由，避免提示词为一个默认不存在的工具留下说明（模型照着提示词调用不存在的工具是历史事故）。
+- 测试：`internal/latex/rescue_fix_plan_test.go`（计划往返与落盘形状、非法 child 名、未知版本、字段缺失/重复 id、`dispatch_fix` 的校验矩阵与"校验失败不写盘"、正常下派的分组与回执、默认关闭守卫、轮数预算、顶层拒绝、模型继承）、`internal/config/p60_fix_test.go`（默认值与访问器、两份模板读出来的值、版本号已 bump）、`internal/sessionview/scan_fix_target_test.go`（`fix_target` 解析、角色/锚点/issue 清单、普通转录不受影响）。`go test ./internal/...` 全绿；`go vet ./internal/...`、`gofmt` 干净。
+- 本地一份 **gitignored** 的配置改写固件（`temp/config_new.yaml`）随之把 `config_version` 从 22 提到 23，否则它自己的严格校验测试会因版本不匹配而失败；该文件不入库。
+
+
+## v1.5+（P60 第二步：把 `dispatch_fix` 接进章节转换流程，默认仍然关闭，2026-10-23）
+
+第一步只落骨架、不接运行路径；这一步把调度接上去，开关 `latex.fix.enabled` 依旧默认关闭——关着时转换会话的工具面、系统提示词与请求数都与引入 P60 之前逐字节一致（有测试按请求数钉住）。
+
+- **提示词只按开关追加**：新增模板 `latex_convert_fixdispatch.system`（"把问题子章节还回去"两行：只记录计划、runner 会跑该子章节的修复会话并重核、没列出的子章节不动），由 `Runner.convertSystemPrompt` 在开关打开时接在 `latex_convert.system` 后面；常驻的转换模板一个字没动。因此关着开关的跑法不可能看到一个不存在的工具（历史事故：`view_page`）。
+- **为什么需要一次额外对话**：子章节只要有一个没通过自己的核对，`convertChapterChildren` 直接报错、整章不会整合——也就是说走到"子章节转换+核对完"这一步时，**所有子章节都过了核对**，没有任何现成信号告诉父会话哪个孩子还有问题。所以细分父节点分支在整合对话之前先给父会话一次**复查对话**（`reviewChildrenBeforeIntegration`，同样取转换槽位）：读 `children-summary.md` 与有疑问的子章节产物，有问题就调 `dispatch_fix`，没事就停手；这段对话本身失败也只警告，照旧整合。
+- **按计划执行**：`applyChildFixPlan` 读 `work/fix/<根章>/plan.json`，按子章节顺序跑 `runChildFix`（各自的工作区、`latex.fix.max_rounds` 轮数预算、修复会话现在也从 `latex.convert_concurrency` 的槽位池取一个）。修完把该子章节的 `.tex` 与分片**重拷**回父章节的 `children/`，重写 `children-manifest.md`/`children-summary.md`，并按子章节的 issue store 重算 `issues-inherited.json`——整合会话读的就是这三样，不刷新等于没修。计划之外、不在计划里的子章节一律不碰。
+- **重核用的是"新的一次核对"**：沿用原来那条核对转录会被"转录里已 submit 就重放收账"直接判成上一轮的结论（模型根本不会再核一遍，实测就是秒过）。改成与手动重核同一个口径——写 `checker_<子章>.try<N>.jsonl`，锚点仍指同一次转换（P59），产物与只读视图不变。
+- **失败一律降级**：修复会话失败/未提交/修复后重核不过，都只记一行 warning，父会话照旧整合并提交（今天的行为）；这份失败不会让整本书跑挂。修复后核对没过的子章节，父章节整合时看到的是它在磁盘上的最新产物（注释里写明了这一点）。
+- 守护测试调回普通规则：`dispatch_fix` 现在真的出现在一个模板里，`conditionalTools` 豁免删除；"关闭时提示词逐字节不变"改由 `TestConvertSystemPromptDispatchOnlyWhenEnabled` 与几个假客户端集成用例钉住。
+- 测试（`internal/latex/rescue_fix_dispatch_test.go`，沿用既有 httptest 假客户端风格）：关闭时 7 个请求（父拆分 / 两子转换 / 两子核对 / 父整合 / 父核对）、工具表里没有 `dispatch_fix`、提示词里没有它；打开且计划点名 `child_01` 时只有它多一条修复会话与一次重核（核对次数 1→2），`child_02` 不变，父整合照常，且父章节 `children/` 副本确实换成了修复后的内容、修复转录里有 `fix_target`；修复会话怎么提醒都不提交时整本书仍然整合提交，日志里有那条 warning。
+
+## v1.5+（P60 第三步：章节树显示修复会话子行，2026-10-23）
+
+前两步把修复会话与调度做完了，但预览页一直看不到它们——`fix_target` 只被读成角色/锚点，树与历史一行未动。这一步补上显示，**没有修复转录时行为与之前一致**（默认配置下 `latex.fix.enabled` 仍是 false，本批零运行期差异）。
+
+- **树数据（`web/src/legacy/sidebar.ts`）**：`ChapterTreeNode` 多一个 `fixes: any[]`（没有修复就是空数组，调用方不用判空）。修复会话按**锚点**挂到节点上——锚点等于这一行**选中的那次转换**的转录名才挂，归档世代也要一致，锚定另一次转换的修复不显示（与 P59 核对同一条规则）；没有锚点的老转录退回按章节 ID 相等。节点内按时间**旧 → 新**排（修复是同一处的连续轮次）。修复会话从头到尾不参与该行 convert/checker 的挑选；钉住一条修复会话时，它所在的行按锚点显示那次转换（否则点开修复后行会切回最新一次、修复子行跟着消失）。
+- **历史（`chapterAttemptChain`）**：修复会话自己的链 = 同一锚点下的其他修复轮次（新 → 旧）；转换会话的链仍是「只有转换」，核对的链仍是「同一转换名下的各次核对」——修复已被排除在成员之外（它们本来就因为文件名不是 `convert_`/`checker_` 前缀而没有章节身份）。
+- **UI（`ChapterSessionTree.vue`）**：核对行下面每条修复一行（24px，走 `--row-h` token；缩进再深一级），标「修复 N」（N = 该节点内的 1-based 顺序）、文件名里的 `.tryN`、运行中/归档状态，点行选会话（与其它行同一个 emit）。状态只说"运行中"——不套 `chapterActivityLabel` 那套转换/核对语义。`hasBody` 把"有修复"也算成可展开，`nodeContainsCurrent` 把修复算进"这一支装着当前会话"，所以从修复会话进来时它自动露出。
+- **历史面板（`HistoryPanel.vue`）**：修复行有「修复」角色标签、头部文案是「同一处的修复轮次」。修复转录取不到尝试号，按号比较会让每一行都顶「最新」——修复链改按链序标第一行；`chainMemberTag` 对修复给「修复」+ 文件名里的 `.tryN`（归档前缀仍是「旧」），不编一个假的 `#1`。
+- **测试**：`web/tests/chapter-tree.spec.ts` 新增 9 条（同锚两轮按旧 → 新列出且行头仍是转换、锚定另一次转换的修复不挂上来、钉住修复时行按锚点切、归档那一代的修复不挂到工作树、没有修复时是空数组、只有修复会话不凭空造节点、修复自己的链只含同锚点且新 → 旧、转换的链仍只有转换、`.tryN` 与标签不编尝试号）。`npm test` 228 条全绿（原 219 + 9）、`npm run build` 重建 dist（已提交）、仓库内 `go build ./...` 与 `go test ./internal/sessionview/...` 通过（后者也钉住"间距尺寸只认 token"，修复行的 24px 因此走 `--row-h`）。
+- **数据形状没对上的一处**：spec 里"锚点为空时退回 `chapterId` 相等"在真实数据上走不到——修复转录文件名是 `fix_<章>`，`chapterIdentity` 只认 `convert_`/`checker_` 前缀，所以扫描给出的 `chapterId`/`chapterParent`/`chapterAttempt` 都是空的（P60 第一步的测试就明确钉着这一点，本步不改后端）。于是树的挂靠主路径只能是锚点，`chapterId` 那条作为旧/外来数据的兜底保留；历史面板里也才有"修复没有尝试号"这一串处理。
+
+## v1.5+（P60 第四步：修复会话纳入章节身份 + 整章重开预算收口，2026-10-23）
+
+第三步的最后一条记录点明了数据形状没对上：修复转录文件名是 `fix_<章>`，而 `chapterIdentity` 只认 `convert_`/`checker_` 前缀，所以扫描出来的 `chapterId`/`chapterParent` 是空的，树的挂靠只能是锚点、历史里还得专门绕开"修复没有尝试号"。这一步把身份补上，并把一直留着的"整章重开预算"落地；`latex.fix.enabled` 仍默认关闭，默认跑法不变。
+
+- **身份（`internal/sessionview`）**：`chapterIdentity` 的前缀表加上 `fix_` —— `chapterId`/`chapterParent`/`chapterDepth` 与 `.tryN` 尝试号自动齐了；`LabelFor` 给出 `fix:<章>`，`enrichSessions` 的既有规则（有章节身份即章节阶段）把它归到 `convert` 组，不再落通用「会话」。`TitleFor` 的 `fix` 分支按 subject 是否像章节 ID 分叉：章节修复是「修复 · <章>」，书级 `book_fix` 仍是「全书修复」（两者原本共用一个阶段名，直接改会把装配阶段那条也一起改掉）。
+- **网页（`web/src/legacy/sidebar.ts` / `HistoryPanel.vue`）**：一行未改挂靠逻辑——`buildChapterTree` 先按角色 `fix` 收进修复池（不建节点），`fixesForNode` 仍以**锚点等于这一行选中的转换**为唯一依据，`chapterId` 只是兜底；`chainMemberTag`、`chapterAttemptChain` 对修复仍走锚点分支。唯一改动是历史面板的 `pairOf`（转换 ↔ 同轮核对的直达入口）对修复返回空：`chapterId` 有了值之后，修复行会被当成"非核对"的一半去和同章的转换配对，多出一个跳错地方的「同轮核对」按钮。
+- **预算（`internal/latex`）**：`fixBudgetExhausted(work, parentBase, children)` —— 修复打开、且某个子章节的修复转录里已有 `>= latex.fix.max_rounds` 条 `fix_target` 时为真（读不到转录算 0）。命中时 `convertChapterNode` 的"核对不过 → 归档 + 换新会话整章重转"改为保留这一版整合产物（细分父节点照 `placeChapterFiles` 晋级到正式章节目录）、记一行「修复轮数已用完，不再整章重开」的 warning 后正常返回；未解决的问题不在这一层处理，它们本来就走 issues 库与报告向上。开关关着、节点没有子章节、或没有子章节进过修复路径时判据为空，代码路径与之前完全一致。
+- 测试：`internal/sessionview/scan_fix_target_test.go` 加两条（`.try2` 文件名推出 ID/父章/深度/尝试号/阶段/标题，扫描行落在 `convert` 阶段组且锚点与角色不受影响），并改掉原先"章节身份必须为空、阶段必须是「会话」"的断言；`internal/latex/rescue_fix_budget_test.go` 四条——判据本体表驱动（关着 / 没进过修复 / 预算还有 / 用光 / 第二个孩子用光），以及用真实 `convertOneChapter` 递归路径 + 假客户端跑的三条端到端：预算用光时不重开（父会话与父核对各一次、无 `work/attempts/` 归档、整合产物仍在、日志有警告）、预算还在时照旧重开（归档出现、多次尝试直到次数用尽）、关着时同样照旧重开且没有任何修复日志。为跑这几条把第二步的假客户端扩成带选项的 `p60RunWith`（父核对可报 issues、可压 `checker_rounds`、可预期失败），并补一条"核对反馈轮重交同一份产物"的回复分支。变异检查：把收口判据短路掉，预算用光那条会退化成"3 次尝试仍未通过 checker"，测试确实红了。
+- 验证：`go test ./internal/... -count=1` 全绿（`internal/latex` 17.5s、`internal/sessionview` 17.5s），`go vet ./internal/...` 干净，`gofmt -l` 对改动文件无输出（`internal/latex/stylefix.go` 是既有的未格式化文件，本轮未触碰）；`web` 侧 `npx vitest run` 233 条全绿（新增 5 条），`vite build` 重建 dist 并提交（`HistoryPanel.vue` 的 scoped hash 因此变化）。
+
+## v1.5+（P60 收尾：转换槽位按任务创建顺序派发，2026-10-23）
+
+P59 定下的第二条口径是「当前没有被阻塞的会话，创建早的优先级高」，那一批只落了锚点归组，槽位派发明写「未另改」。这一批把它补上，改动只落在 `latex.convert_concurrency` 那个转换槽位池里；核对池与其它阶段的通用池仍是先到先得。
+
+- **现象**：一次真实运行里，一棵正在等孩子的子树的 15 个孙节点在队列里排了约 25 分钟，期间后来创建的顶层会话轮番拿走全部 10 个槽位，那一支一步没动。等待本身不是问题，问题是**等待的人里没有按创建早晚排序**。
+- **根因**：转换池是 `make(chan struct{}, N)`，取槽位就是往 channel 里塞、释放就是收——这是纯粹的先到先得。递归细分下来的子章节与晚创建的顶层章节在同一时刻变成"就绪"，谁先排到谁上；一棵早创建但中途在等孩子的子树，等完回来时排在所有后来者后面。
+- **改**：新增 `internal/latex/slots.go`，一个零依赖、只做一件事的优先信号量 `slotSem`：容量 N，`acquire(seq)` 返回释放函数，等待队列按 `(seq, 到达顺序)` 排序，`release` 把槽位**直接交给**队里最小的那个（交棒时 `used` 不变，不给新来者插入的机会）。释放幂等——调用方既有 `defer release()` 也有显式 `release()`，重复释放若照收就会把别人的槽位吞掉。创建戳 `seq` 由 `Runner.nextConvertSeq()` 发（1 起、单调递增，`atomic.Int64`）：顶层章节在**派发循环里、goroutine 启动之前**取（章节顺序 = 创建顺序），子章节在 `convertChapterChildren` 的循环里、启动 goroutine 之前取（顺序按 children，且必然大于父节点的号），重试沿用父节点原来的号（同一件任务，不因为重来一次就变成"新任务"）。修复会话与整合前的那次复查对话用的是**它们所属那棵子树**的号，不是一个此刻新发的号——否则一个早创建、正在等孩子的子树，它的修复会话会被排到所有后来者后面。等自己子树的父节点本来就在等之前把槽位还掉了，所以「被阻塞的会话」根本不在等待队列里，「不占队头」是这么成立的、不需要额外判据。
+- **边界**：`acquireConvertSlot(seq int64)` 的调用方没带创建戳（`seq <= 0`）时当场领一个新号，于是排到所有已创建任务之后——宁可保守排后面，也不让它凭空抢队头。`convertOneChapter` 保持原签名（运行期手动重试/测试入口按"此刻创建"取号），批量派发走 `convertOneChapterSeq` 显式带号。`convertChapterChildren` 里那个局部的 `sem` 没有一起改：它只在同一个父节点的兄弟之间限流，兄弟本就是同一批创建的任务，改它没有收益。
+- **测试**（`internal/latex/chapter_slots_test.go`，7 条）：容量 1 下三个等待者按 3、1、2 到达仍按 1、2、3 被释放；一次释放只叫醒最小的那个（其余仍在排队、`used` 不变）；晚到的小号照样拿到下一个空槽（"被阻塞后刚就绪"）；容量 3 时第 4 个必须排队、放掉一个只叫醒一个；20 个并发取用者、容量 4 时峰值不超容量且事后无泄漏（再整批取满仍成立）；重复释放幂等；book 级的 `TestConvertSlotUsesCreationStamp` 走真实 `Runner.acquireConvertSlot`，晚创建的先排队也抢不过早创建的后到者，`seq<=0` 的调用方排在两者之后。`go test ./internal/... -count=1` 全绿、`go vet ./internal/...` 干净、`gofmt -l` 对改动文件无输出。
+- **没覆盖到的**：没有一条测试在真实递归运行里端到端验证"孙节点按创建顺序上槽位"——那需要可观测的会话启动顺序与可控的槽位争抢，测试里只能用信号量本体 + `Runner` 池的两层直接断言；调度层（派发循环里取号、子章节号大于父节点）靠代码结构与注释约定，不是自动化断言。
+
+## v1.5+（P58 扩展：复盘也覆盖报错终止与"声称没有工具"，且可整段关闭，2026-10-22 第二轮）
+
+P58 第一版的触发点只有一个：`Run` **正常结束**但没 `submit`（`remindOrRescue` 被调用的那一刻）。用户第二轮把口子放宽——**报错终止**的会话（网络/接口瞬时故障、空回复等非致命错误）上下文其实还完整，却被直接记成"这一章失败"，连一次复盘都没有；**"声称工具不可用"**的会话（工具一直在请求里，是幻觉）也只能靠提醒再赌一轮。除此之外，整个功能要能被一个开关整段关掉，关掉时与引入之前逐字节相同。
+
+- **唯一入口**：`maybeRescue(tid, tag, label, target)` 收走开关判断、`latex.rescue.max_per_attempt` 预算、结论处理与全部日志；`remindOrRescue`（convert）与核对会话的提醒路径都调它——核对里原先那份内联的 `fail`/`truncate`/`retry` 分支删掉，两处不再有第二份结论处理（`fail` → `Stop`；`truncate` → 排队 `role=continue` + `Stop`；`retry` → 只把 `hint` 带回去拼进提醒）。
+- **报错终止**：新增 `rescueAfterError(sess, …, cause)`，在 `convertChapterNode` 的**初次转换**与**细分父章节整合**两处 `sess.Run` 之后调用。`cause` 非致命时先把一段事实写进 `rescueTarget.Cause`（复盘会话的第一句话变成"这次是报错终止（原因）"，而不是"模型自己收尾了"——`retry` 那一档本来就只为外部瞬时故障准备），然后复用 `remindOrRescue`：`retry`/无结论 → 照旧发提醒续跑一轮（`retry` 成功提交则这一章接着走核对），否则原样返回 `cause`。**致命错误（余额不足 / 无可用资源包）在函数入口就返回**，一次模型调用都不多花。
+- **"声称没有工具"**：`session.Session` 新增读访问器 `ToolAccessNudged()`（`toolAccessNudged` 原本只在包内可见）。触发点在 `remindOrRescue`：会话层已经纠过一次"你的工具确实可用"而它仍然收尾时，`target.NoToolNudge` 置位，复盘者的第一段话会读到这条事实（"纠正已经用过、它仍然没提交"）。这不改变任何结论处理——它只是把"这是退化的强信号"告诉复盘者，判 `truncate` 还是 `retry` 仍由它按判据决定。
+- **关闭即老行为**：`latex.rescue.enabled: false` 时 `maybeRescue` 第一行返回空结论、`rescueAfterError` 第一行原样返回 `cause`——没有复盘请求、没有复盘转录、没有审计行、不排重试队列；"没提交"仍是两次提醒 + 失败，提醒文案取自新的 `submitReminderText()`（提醒轮与报错续跑共用一个来源，措辞与之前一字不差）。
+- **配置**：键面没变（`latex.rescue.enabled`/`max_per_attempt`/`keep_records`/`model` 都在 P58 第一版里），但开关的覆盖面扩大，版本号 23 → 24；两份模板仍逐字节相同、`docs/config.md`（`config_version` 行 + `latex.rescue.enabled` 行的说明）、`README.md` 的版本行、`docs/sessions.md` 的触发点说明同步。
+- **测试**（`internal/latex/rescue_triggers_test.go`，沿用包内 `httptest` 假客户端 + `subdivideReply` 风格，跑真实 `convertOneChapter`，断言**请求数与磁盘上留下什么**而不是内部函数被调了几次）：① 报错终止 → 恰好一次复盘、请求数 2、`work/retry/` 里一条 `role=continue` + `from` + `source=rescue`、审计行 verdict=truncate、复盘请求文本里带"ended with an error"；② "声称工具不可用" → 转换请求 2 次（幻觉 + 纠正后一轮）、复盘 1 次且文本里带"claimed that its tools were not available"；③ 429 + 余额不足 → 复盘 0 次、请求 1 次、无队列无审计、错误原样上报；④ `enabled: false` 两条：报错终止请求数 1（立刻上报）、没提交请求数 3（转换 + 两次提醒）、两种都没有复盘转录/审计/队列，提醒文案仍是 "You have NOT submitted yet"；⑤ 不写开关（默认开）→ 复盘两次（`retry` 一次把 hint 拼进提醒、再判 `fail` 停手）、审计两行。变异检查：把 `rescueAfterError` 短路成直接返回 → ① 立刻红；把 `NoToolNudge` 写死 false → ② 红。
+- **没覆盖到的**：① 核对会话的**报错终止**仍走它自己的路（`checkChapterAt` 的错误分支本来就会换一条新核对会话重开，与转换的"报错即整章失败"不是一回事；这里只把它的"没提交"分支并入 `maybeRescue`，错误分支一行未改）；② 转换会话的**反馈轮**（核对打回之后那一轮）报错时仍只是 `break` 出来按核对结论处理——它不是"会话收尾"，而是同一章内部的一次重试轮，改它要同时改反馈轮之后的复核时机，本轮不动。
+
+## v1.5+（P59/P60 收尾：核对历史保留老转录、修复行标明章节与轮次、子章节核对视图补项目插图，2026-10-23）
+
+三条互不相干的遗留问题，一批收拾。前两条只动预览页，第三条只动核对视图的项目根来源；默认跑法与 P59/P60 定下的挂靠规则一行未改。
+
+- **老核对转录被历史丢掉（T218）**：`chapterAttemptChain` 的核对分支只保留 `chapterAnchor` 等于自己的成员。锚点是 P58 起才写进转录的，更早落盘的老核对转录没有锚点、一次都匹配不上——用户看到的是"最新一次核对把旧的盖掉了"。成员侧放宽成"没有锚点就保留（没得比）+ 有锚点必须同锚"，`self.chapterAnchor` 为空时仍不过滤（老会话行为一字不差），排序仍是新 → 旧；锚在另一次转换上的核对照旧排除。`web/tests/chapter-tree.spec.ts` 两条：两次有锚点 + 一条老转录时三条都在（从最新那条与从老那条点开结果相同），锚在 `.try2` 的核对在钉住第 1 次转换时仍不出现。
+- **修复行看不出"修的是哪一章的第几轮"（T219）**：树行以前只写「修复 N」，而同一行下面可能挂着不同子章节的修复；历史修复链也只有轮数。新增 `chapterIdSuffix` / `fixTargetId` / `fixRowLabel` 三个纯函数做标签唯一来源：章节 ID 只取本层后缀（`child_02`，嵌套保留整段后缀 `child_01_child_02`，顶层照写自己的 ID），归属优先用转录自带的 `chapterId`、老转录退回挂靠行的章节，轮次按渲染顺序从 1 数（树上旧 → 新、历史新 → 旧用 `fixRoundAt`）。章节树行变成 `修复 child_02 #1`（行高仍走 `var(--row-h)`，`.tryN` 只在它不等于轮次时另挂一枚），历史表头写目标章节 ID、每行标「章节后缀 #轮次」并带悬浮说明。测试加 5 条（后缀三形态、标签含归档与老转录兜底、轮次换算、子章节两轮修复 `#1`/`#2`、历史链取目标章节并按新 → 旧标 `#2`/`#1`）。
+- **递归子章节的核对视图缺项目级插图（T220）**：`ensureCheckerViewAt` 用 `filepath.Dir(filepath.Dir(chapPath))` 猜项目根——顶层章节正好猜对，子章节的 md 在 `_subdivision/<child>/input/` 下，猜出来的是子节点目录，`linkCheckerAssets` 在那里找不到 `source/figures|images`，项目级插图一个都挂不上（子章节的核对于是把本来正确的引用报成缺失）。改成项目根由调用方显式传入（`ensureCheckerView` / `checkChapterAt` 本来就有它），子章节与顶层用同一个来源。
+- **`parts/` 本身没丢，也钉住了**：按用户描述的目录形状铺了一遍（子章节自己的临时工作区 `work/temp/conv_<根>/work/_subdivision/<child>/node/work` 里的 `parts/`、提交契约的 `work:<子章>/`、走真实 `placeChapterFiles` 与节点内的 `checker-view`），`parts/x.tex`、`parts/sub/y.tex`、`<子章>/parts/x.tex` 全部解析得到——视图的 `parts/` 别名（T186 的 `PARTS_DIR`）对递归节点是对的。反面对照也写了：分片只留在**工作区根**、没有进提交的分片文件夹时，视图里 `parts/` 为单位空目录、工作区文件不进视图也不被动过——"本地能编译、提交里没有"属于转换侧布局，不是视图藏文件，这一条刻意不改。
+- **验证**：`go test ./internal/... -count=1` 全绿（新增 `TestCheckerViewRecursiveChildHasPartsAliases` / `TestCheckerViewDoesNotLeakWorkTreeParts`）、`go vet ./internal/...` 干净、`gofmt -l` 对改动文件无输出；`web` 侧 `npx vitest run` 240 条全绿（`chapter-tree.spec.ts` 66 条），`vite build` 重建 dist 并提交，`npx tsc --noEmit` 只剩 `data.ts` / `legacy/trajectory.ts` 的既有报错。
+
+## v1.5+（P60 第五步：`dispatch_fix` 同步执行并回执结局、修复行独立于核对行，2026-10-23）
+
+P60 前四步把修复会话、计划文件、调度与预览页的修复子行都接通了，但父会话手里始终没有**结局**：`dispatch_fix` 只写一份计划就返回，修复要等这次复查对话结束、runner 再执行，父会话整合时并不知道哪一个孩子修好了。这一步把"执行 + 回执"收进工具自己，并顺手收拾了两处误判。
+
+- **同步执行（`internal/latex/fix.go`）**：`DispatchFixTool` 新增 `Runner`/`Parent`/`Children`/`ChildDepth`/`Seq`/`Tid`，`Execute` 写完计划后走 `applyPlan` → 新增的 `(*Runner).applyFixPlan`（把原来 `applyChildFixPlan` 的循环抽成共享实现），每个子章节调 `runChildFixAt`——`runChildFix` 保留为薄包装，因此同步路径与 runner 路径的校验、预算、工具集、挂载、转录、重核完全同源。结局用 `fixChildResult`（Child/Fixed/Checked/Verdict/RoundsUsed/RoundsBudget/RoundsLeft/Err）表达，回执 `FIX RESULT` 按子章节列 `FIXED`/`STILL FAILING`、核对结论第一行（`fixVerdictSummary` 截到 160 字符）、`rounds N/M, K left`，并在父会话转录里追加一行 `t=meta kind=fix_result`（`summary = "N/M 修正通过"`）。计划执行后 `MarkFixPlanApplied` 写 `applied`，`applyChildFixPlan` 读到它直接空转；没有消费的计划（没接 Runner 的老流程）仍按原路径执行，执行完也写 `applied`，所以同一份计划不会被执行两次。
+- **并发放手是这一步的必要条件**：父会话停在工具调用里时仍占着转换槽与模型并发槽，而子修复会话马上要问同一个模型——`max_concurrency=1` 时会当场互等。转换槽按 `holdSlot` 让给这一轮修复（调用方已占着，不再另取），模型槽由新增的 `Session.PauseModelSlot()` 临时让出、`applyPlan` 结束时取回；`Session.Run` 里的取槽改成经 `holdModelSlot`/`releaseModelSlot` 记账，取回后仍由同一个 `defer` 释放。
+- **自包含边界（A）**：`latex_convert_fixdispatch.system.md` 与整合前的复查指令都写明 `figures/`、`images/` 是装配时才供上的项目级资源，引用它们不算断链；只有 `_subdivision/…` 与 `node/result/…` 才是。`prompts_test.go` 钉住模板文本，`rescue_fix_dispatch_test.go` 钉住关闭开关时提示词逐字节不变、打开时这些句子才出现。
+- **修复行独立于核对行（C）**：渲染条件只认 `node.fixes`，"有没有子行"的判据从组件内的 `hasBody` 提成 `chapterNodeHasRows`（核对 / 修复 / 子章节三种来源互不依赖），行 title 由 `fixRowTitle` 给出（`sessionTip` + 结局，结局来自修复会话自己的 `chapter_activity`：pass/issues/error/运行中）。**如实记录**：本仓此前的模板里修复行已经与核对块并列（不在 `v-if="node.checker"` 内），所以这一步的实际改动是显式独立块 + 判据收口 + 结局 title + 回归测试；真实跑批里"看不见修复行"若仍复现，剩余的唯一可解释来源是**锚点规则**（修复锚点不等于该行选中的那次转换时按设计不显示，与核对同一条规则），而不是嵌套。
+- **测试**：新增 5 条 Go 测试——`TestConvertFixDispatchScopesSelfContainedness`（模板守卫）；`internal/latex/rescue_fix_sync_test.go` 三条（回执含每个子章节的结局与剩余轮数且重核真的跑过、第二次下派吃掉下一轮并在预算上停住不再发请求、同步消费过的计划 runner 侧空转 / 未被消费的计划 runner 照旧执行且执行后也只执行一次）；`TestPauseModelSlotFreesNestedSession`（让出后子会话立刻拿到名额、取回后名额不能同时被第二个会话拿到）。既有 `TestFixDispatchRunsPlannedChildOnly` 追加三条断言（修复请求恰好 1 次、回执里 `FIXED`/`checker: pass`/`rounds 1/5, 4 left`、计划已 `applied`）。`go test ./internal/... -count=1` 全绿、`go vet ./internal/...` 干净、`gofmt -l` 对改动文件无输出（`internal/latex/stylefix.go` 的未格式化是既有状态，未动）。`web` 侧 `npx vitest run` 243 条全绿（`chapter-tree.spec.ts` 69 条，新增 3 条：核对因尝试号不显示时修复行仍在、`chapterNodeHasRows` 三来源、结局 title），`vite build` 重建 dist 并提交。
+- **没覆盖到的**：① 没有在真实一本书上把 `models.<名>.max_concurrency` 配成 1 跑一遍端到端死锁场景——现在只有 `session` 层的直接断言，重试/续跑路径下的让出时机靠代码结构约定；② 前端改动只由纯函数测试把守（本仓 `web/tests` 没有组件渲染测试），"修复行在有/无核对时都渲染出来"由 `chapterNodeHasRows` + `node.fixes` 的数据层断言间接保证，没有 DOM 级探针。
+
+## v1.5+（P58/P60 补：复盘会话可丢弃重来并按层级显示、`dispatch_fix` 回执终结本轮，2026-10-23）
+
+用户提了四条互相关联的问题：`dispatch_fix` 回执之后父会话还在空转一轮；复盘会话自己挂了就没人管；复盘开始/结论时界面看不出状态；一条嵌套子章节的转录堆满"还没提交"却从没被复盘过。四项都不改默认开关语义（`latex.rescue.enabled`、`latex.fix.enabled` 的默认值与关闭时的行为一字未动）。
+
+- **A：回执即终态（`internal/latex/fix.go`）**：同步跑完修复的 `FIX RESULT` 回执标 `session.ToolResult.Terminal`（会话层本来就有这个通道，`submit` 用的同一个），`Run` 在回执与工具消息都落盘后直接返回，父会话不再为了"回应这条回执"发一次请求——整章流程里"整合前复查"的请求数从 2 降到 1，`rescue_fix_dispatch_test.go` 用 `reviews == 1` 钉住。"只记计划"那条回执**不**标终态：它出现在还没接上 `Runner` 的一轮（工具从第一次转换轮起就在工具表里），在那儿掐掉一轮会丢掉父会话还没说完的判断。
+- **B：复盘会话可丢弃重来（`internal/latex/rescue.go`）**：`rescueReview` 拆成"重试循环 + `rescueReviewOnce`"，一次复盘最多起 `rescueMaxReviewAttempts = 3` 条会话；没结论（报错终止或跑完不 `submit`）就把这条转录挪进 `work/sessions/.trash/`（撞名加序号）后重开，每次一行警告、三次都没结论再记一行"放弃"；`maybeRescue` 在放弃时把这条目标的复盘预算一次用光并返回空结论——于是行为退回引入复盘之前（照常提醒、仍不提交判失败），不是把整章判死。`isRescueTranscript` 在 `maybeRescue` 的第一道闸上挡住 rescue-of-rescue。转录名从时间戳改成 `rescue_<章>[.try<目标尝试号>].jsonl`（与转换/核对/修复同一口径），同名文件在开新会话前先退掉，所以重来与跨轮次都不会把两段对话串进同一个文件（`NewTranscript` 是 `O_APPEND`，这一点必须显式做）。
+- **C：状态当场可见**：`markTargetActivity` 把状态写进**目标**转录（有会话本体就走它自己的 writer，避免 P55 的工作区快照行号错位；没有才退到 `appendTranscriptActivity`）。复盘开始写 `rescuing`；判 `truncate` 时先写 `queued`、再 `rescueQueueTruncate`，判 `retry` 时先写 `queued`、提醒轮拿到槽位后再写 `running`。`truncate` 之后那一章仍按失败收尾，所以 `Runner` 上留一个"已排队"标记（`rescueQueued` map + 互斥量），两处失败终态看到它就把 `error` 写成 `queued`——否则界面会被最后那条 `error` 拉回「会话错误」，正是用户要求避免的。Go 侧的活动状态折 live 的开关补上 `rescuing`，web 侧 `CHAPTER_ACTIVITY` 补「复盘处理中」。
+- **D：嵌套子章节的复盘**：用户的假设（`convertChapterChildren`/`convertChapterNode` 的嵌套路径没接 `remindOrRescue`）**只对了一半**。普通的嵌套子章节走的仍是同一个 `remindOrRescue`（同一个函数处理所有深度，`splitTool.Requested == false` 那条分支），复盘本来是接上的；真正没有提醒/复盘的只有一条分支——**自己又细分过的节点**，它的整合轮没提交时直接 `return fmt.Errorf("细分父章节整合会话未提交")`，于是外层只看到"子章节转换或 checker 失败"，那条转录停在"整合完请 submit"上。现已并入同一条链路（同样的 `maybeRescue`、同样的 trigger 与结论处理）。另一个叠加因素是 `latex.rescue.keep_records` 默认 `false`：复盘当时可能真的跑过，但转录没落盘，事后只能看见同一会话里的提醒——这也是"从没被复盘过"的观感来源之一。新测试跑真实三层细分树（父 → child_01/child_02 → 孙章节），孙章节正常转换+核对，child_01 的整合轮不提交：恰好一次复盘、`truncate` 之后恰好一条 `role=continue` 的请求指向 `.../_subdivision/child_01/node/sessions/convert_chapter_01_child_01.jsonl`，且这条路径里不再往同一个坏会话发提醒。
+- **E：复盘行的层级（`sessionview` + `web`）**：`chapterIdentity` 认 `rescue_` 前缀，且要求剩余部分**整段**是一个章节 ID（`^chapter[_-]?\d+(?:_child_\d+)*$`）——于是带章节身份的复盘落进章节阶段组（树才画得出），老命名的 `rescue_<章>_<时间戳>` 整段不匹配、仍按 P58 留在「错误处理」组；`TitleFor` 给「复盘 · <章>」。web 侧 `ChapterTreeNode` 加 `rescues`，`buildChapterTree` 单独收集复盘会话（与修复同一个池子的写法），`rescuesForNode` 按章节 ID + 世代挂靠、旧 → 新排序（**不按尝试号过滤**：尝试 2 的复盘不能因为这一行切到尝试 3 就消失，标签里写着 `#N`），钉住复盘时按名字里的 `.tryN` 选那一代那一次转换；`chapterAttemptChain` 对复盘一律返回 `null`，也不让它进成员列表；`ChapterSessionTree.vue` 在修复行之后加一组 `.chapter-rescue` 行（同层 26px 左边距、`.rescue-marker` 文案来自 `rescueRowLabel`、行 title 由 `rescueRowTitle` 给出"复盘对象"），`nodeContainsCurrent` 把复盘算进"装着当前会话的那一支"。
+- **测试**：Go 侧新增 `rescue_retry_test.go`（4 条：两次无结论后第三次拿到结论且 `.trash` 里两份、三次都无结论时放弃并退回提醒且源码里剩 0 条复盘转录、`truncate` 的 `rescuing → queued` 顺序与 `queued` 终态、`retry` 的 `queued → running` 顺序）、`rescue_nested_test.go`（三层细分树的 D 用例）、`internal/sessionview/scan_rescue_identity_test.go`（3 条：章节身份三形态、扫描后的角色/阶段/标题/JSON 字段、`rescuing` 不算 live）；改了两条既有用例（`rescue_fix_sync_test.go` 的回执改看 `ToolResult.Terminal`、`rescue_fix_plan_test.go` 的"只记计划"回执断言不是终态）。web 侧 `web/tests/chapter-tree.spec.ts` 新增 6 条（复盘挂靠与排序、标签/title、`chapterNodeHasRows` 三来源含复盘、不进尝试链、钉住复盘的选行、`rescuing` 文案与既有状态文案不变）。`go test ./internal/... -count=1` 全绿、`go vet ./internal/...` 干净、`gofmt -l` 对改动文件无输出（`internal/latex/stylefix.go` 的未格式化是既有状态，未动）；`npx vitest run` 250 条全绿，`vite build` 重建 dist 并提交。
+- **没覆盖到的**：① 复盘转录的 `.trash` 命名用秒级时间戳 + 撞名序号，跨进程同一秒内多次丢弃只会保留两份（`-2` 之后的会被覆盖），复盘转录本来就是一次性的，没有做更强的保留策略；② 前端没有组件渲染测试，复盘行的落位仍由数据层断言（`node.rescues` + `chapterNodeHasRows`）间接保证；③ "复盘自己连续无结论"只在小模型假客户端下验证，没有在真实厂商的空回复/超时上跑过。
+
+## v1.5+（P58 补：复盘按目标编号成历史、并入章节树并隐藏旧阶段，2026-10-23）
+
+复盘会话此前有两个尾巴：转录名里的 `.tryN` 是"目标转录的尝试号"，于是同一目标第二次复盘会复用文件名、开新会话前先把上一份退掉（等于删掉一段已经写完的复盘记录）；老命名（`rescue_<章>_<时间戳>.jsonl`）拿不到章节身份，只能堆在侧栏最后一组里，既进不了章节树也没有自己的历史。这一批把命名、归属、历史与编号一起收口，预览页的其它行为不动。
+
+- **每次复盘拿自己的一号（`internal/latex/rescue.go`）**：`.tryN` 改成"这条目标被复盘的第几次"，由 `nextAttemptNumber`（`attemptNumberOnDisk` 的最大号 + 1，与转换的 `lastAttemptNumber` 同一口径）在开跑前算出并传进 `rescueReviewOnce`；"上一轮同名先退掉"整段去掉，只有**没拿到结论**的那一次仍退进 `work/sessions/.trash/`。开跑前还往复盘自己的转录写一行 `t=meta kind=rescue_target`（`chapter` / `reviewed_role` / `reviewed_transcript` / `reviewed_attempt`），它是预览页补身份与历史链分目标的唯一依据。
+- **老命名按 meta 读时补身份（`internal/sessionview/sessionview.go`）**：`chapterIdentity` 仍只认文件名；`Scan` 在它给不出 ID 且名字是 `rescue_` 前缀时调 `rescueLegacyChapter`——先看 `rescue_target.chapter`，退一步用系统快照里的 `session_label: rescue:<章>`，形状校验通过就得到与带编号转录完全相同的章节身份（父章/深度/角色），标签与标题按规范名 `rescue_<章>.jsonl` 推导；两条都没有的仍落「错误处理」。`SessionInfo` 新增 `reviewedRole` / `reviewedTranscript`。
+- **历史与树（`web/src/legacy/sidebar.ts` / `HistoryPanel.vue` / `ChapterSessionTree.vue`）**：`chapterAttemptChain` 对复盘会话返回"同一章 + 同一目标"的复盘（新 → 旧，`rescueTargetKey` = `reviewed_role|reviewed_transcript`，老转录归章节内的未知目标桶）；行标「复盘#N」由 `rescueOrdinal` 按 mtime 数出，树行标签「复盘 #N」同一来源，归档带「旧」；钉住一条复盘时按 `reviewed_transcript` 精确配转换（老转录不钉、不猜号）。历史表头写「复盘了 转换#1」（角色取 meta、轮次取被复盘转录名里的 `.tryN`），行里另给一枚「复盘了 …」小标签；`pairOf` 不再给复盘行配"同轮核对"。
+- **验证**：`go test ./internal/... -count=1` 全绿（新增 `rescue_attempts_test.go` 两条：同一目标两次复盘得到 `.jsonl` + `.try2.jsonl` 且两份都留 `run_end` 与目标备注、下一号只看磁盘；`scan_rescue_legacy_meta_test.go` 三条：老命名 + 目标备注补身份、只有会话标签也能补、什么都没有仍留「错误处理」），`go vet ./internal/...` 干净、`gofmt -l` 对改动文件无输出；web 侧 `npx vitest run` 253 条全绿（`chapter-tree.spec.ts` 79 条，含复盘行按目标编号、不同目标各自成行成链、钉住按目标转录），`vite build` 重建 dist 并提交。`npx tsc --noEmit` 只剩 `data.ts` / `legacy/trajectory.ts` 的既有报错。
+- **没覆盖到的**：① 文件名里的号只在**章节**内递增（同一章的不同目标共用一段号段，靠 meta 区分目标），界面显示的号按目标重数——两者不一定相等，这是有意的（防覆盖优先）；② 老转录没有 `reviewed_transcript` 时，"被复盘的会话"与目标分桶都是未知，只能按章节 + mtime 推断；③ 前端没有组件渲染测试，表头/行标仍由数据层断言间接保证。
+
+## v1.5+（P62 第二轮：测试文件分组、夹具入库、章节树用例拆分，2026-10-23）
+
+P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把那张表落地，**行为一字未改**——没有测试逻辑与断言改动，除了夹具路径常量没有生产代码改动。**分组**：`internal/latex` 87 个测试文件里 26 个按六组加前缀——`chapter_` 7（`chaptercoverage`/`chaptergate`/`chapterissues`/`chaptersize`/`checker`/`retry`/`slots`）、`rescue_` 9（`p58_rescue`/`p58_rescue_attempts`/`p58_resume_invariant`/`p60_fix`/`p60_fix_budget`/`p60_fix_dispatch`/`p60_fix_sync`/`p61_nested_rescue`/`p61_rescue_retry`）、`tools_` 2（`vfs`/`sandbox`）、`style_` 4（`stylefix`×3 + `pilot`）、`env_` 4（`docindex`×2 + `pythonenv`×2）；`motif_*` 12、`tools_*` 4、`chapter_subdivision*` 2、`rescue_triggers` 本就在组里，其余 42 个与六组无关（书级装配/编译/成本/交付/提示词/进度/看图/分块/项目/嵌入…）一个都没动；`internal/sessionview` 的 8 条扫描器用例改 `scan_*`（`p58_rescue_stage`/`p58_rescue_legacy_meta`/`p59_checker_anchor`/`p60_fix_target`/`p61_rescue_identity`/`t200_scan`/`t207_activity_order`/`t210_staged_product`），另 19 个非扫描器用例不动（`t201_child_retry` 是重试接口、`label_t62`/`live_t74`/`number_t77` 的号是后缀且与扫描无关、`review_fixes_test.go` 内容属工具与挂载，硬套前缀只会更难认）。文件名不再带 `pNN`/`tNNN`（号留在**文件正文**注释里），文档与注释里 29 处旧路径（文档 26 + 注释 3）同步改（含测试文件之间的一处交叉引用）。**夹具**：两份配置改写稿副本进 `internal/config/testdata/`（`temp/` 原件保留），`runconfig_rewrite_test.go` 改读 `testdata/`、删掉 `flatten` 的 `t.Skipf` 与三处 `os.Stat` 守卫，四条用例现在**总是**跑（原来是"检出里缺文件就跳过"）；`.gitignore` 的 `test*/` 会连 `testdata/` 一起忽略，补了 `!go/internal/config/testdata/`；夹具里的本地网关域名换 `api.example.com`、头部注明样例项目 `example_book`、凭据保持占位符。**拆分**：`web/tests/chapter-tree.spec.ts`（1002 行 / 79 条）拆成 `chapter-tree.spec.ts` 38 条、`chapter-chain.spec.ts` 9 条、`chapter-fix-rescue.spec.ts` 32 条，夹具构造器进 `web/tests/helpers/chapter.ts`（`SESSIONS_DIR`/`archiveDir`/`idWithTry`/`liveId`/`archivedId`/`fixId`/`session`/`parentOf`），各 describe 的本地 helper 保留原签名，只把拼路径那一段换成共享函数（mtime、字段与锚点一字未改）。**验证**：`go test ./internal/... -count=1` 14 个包全绿、`go vet ./internal/latex/ ./internal/sessionview/` 干净；`npx vitest run` **22 个文件 253 条**全过；拆分前后对比 `expect(`/`it(` 行集合，298 行逐条相同。
+
+## v1.5+（P58/P60 补：树上复盘与修复各只留一行，编号只进历史，2026-10-23）
+
+用户看截图指出两件事：树上「复盘 #1 / 复盘 #2」这种号放在外面看不懂，而且修复会话每修一轮就在节点下面多一行「修复 child_02 #1 / #2 / #3」，同一处被修三轮、复盘两次就把树叠成流水账。口径改为**树上每种只留一行，号只在「历史」页签里**。
+
+- **数据层（`web/src/legacy/sidebar.ts`）**：新增 `newestByKey` 与两个可单测的纯函数 `treeFixRows(node)`（按 `fixTargetId` = 子章节/锚点去重，取 mtime 最新一轮）、`treeRescueRows(node)`（按 `rescueTargetKey` = `reviewed_role|reviewed_transcript` 去重，取最新一次）。`node.fixes`/`node.rescues` 池子**不变**——历史页签、钉住选行、`chapterNodeHasRows` 都还要用全部条目；只是树渲染时再过一层。`chapterAttemptChain` 一字未改（仍给全部轮次，新 → 旧，`修复#N`/`复盘#N` 标签只出现在那里）。
+- **组件（`ChapterSessionTree.vue`）**：修复行 `v-for="fx in treeFixRows(node)"`、复盘行 `v-for="rs in treeRescueRows(node)"`，标签固定「修复」/「复盘」（归档前缀「旧」由 `kindLabel` 给），去掉了行内的 `#N` 与 `.tryN` 角标；轮数、最新一轮结局、被复盘的会话仍在行 `title`（`fixRowTitle`/`rescueRowTitle`）。不同目标（转换/核对/修复）的复盘仍各占一行，互不遮挡。
+- **测试**：`web/tests/chapter-fix-rescue.spec.ts` 新增 describe「树上每种只留一行（编号只进历史）」三条——三轮修复树上只剩最新一轮且历史里三轮都在（新 → 旧）、同一目标两次复盘树上只一行且链里两次都在、复盘了转换与核对两个目标时树上两行且各自历史独立（单条目标返回 `null`）。`npx vitest run` 22 文件 **256 条**全绿，`vite build` 重建 dist 并提交。
+- **没覆盖到的**：树行仍然没有组件级渲染测试（落位由 `treeFixRows`/`treeRescueRows` 的数据层断言保证）；「最新一轮」按 mtime 判定，mtime 相同的极端情况下取池子里靠后的那条（`>=` 覆盖）。
+
+## v1.5+（T221：核对退化/放弃/视图失败不再喂反馈轮，2026-10-23）
+
+用户贴出截图：同一条转换会话里，「checker 会话已退化，已排队从干净轮次继续核对」下面紧跟着「The checker reviewed your submitted chapter and found problems that must be fixed」+「Fix them in your workspace … then submit the two paths again」。核对在那一刻**没判定过章节**，第二句让去改内容纯属自相矛盾。先确认这是真缺陷（不是用户跑旧版造成的错觉）：`checkerNoVerdict()` 的识别表漏了退化路径的文案，反馈轮照旧发了出去。
+
+- **识别表（`internal/latex/checker.go`）**：`checkerNoVerdict()` 从三个前缀扩到六个，补上核对"没判定就返回"的三条路——`checker 会话已退化，已排队从干净轮次继续核对`（复盘判 `truncate`）、`checker 复盘判定会话无法挽救：…`（判 `fail`）、`checker 只读视图无法准备`（视图没铺起来，strict 模式判失败）。`convertChapterNode` 的反馈轮守卫本来就是 `!checkerNoVerdict(issues)`，一行调用侧代码没改；命中时多打一行「核对会话没有给出结论，跳过反馈轮」。
+- **刻意不动的部分（升级链）**：跳过反馈轮之后仍走 T217 那条路——按 `checker_rounds` 归档这一版、换全新会话重转换，次数用尽判失败。没有改成"留产物 + 强制重核"，因为顶层重跑遇到已有 `<章>.tex` 会走 `book.go` 的「已有产物，跳过」并直接 return（连核对都不跑），留产物等于让下一次运行静默采纳一份没核对过的东西。那条要动得先改重跑跳过的语义，单独定。
+- **测试**：`t209_checker_noverdict_test.go` 的识别表补三条字符串（`real` 一侧不动，继续保证内容问题不被误判成"没结论"）；新增 `checker_degrade_test.go`，在 `rescue_triggers_test.go` 的夹具上加了 `checkerNoSubmit` 开关（核对会话跑完只回一段正文、从不调 `submit`），跑真实 `convertOneChapter`：断言转换会话一条反馈消息都没收到、复盘确实跑过、`truncate` 排出的队列请求是 `role=checker`、这一章仍按失败收尾、`stats.convert >= 2`（换会话重转换没被跳过）。把三个前缀临时删掉重跑，用例红在"却收到了第 4 条反馈消息"并打印出用户截图里那一段原文，恢复即绿——这条用例确实复现了现场。
+- **验证**：`go build ./...`、`go vet ./internal/...` 干净；`go test ./internal/... -count=1` 14 个包全绿（`internal/latex` 21.5s）；`gofmt -l` 对改动文件无输出（`internal/latex/stylefix.go` 的未格式化是既有状态）。
+- **没覆盖到的**：① 这三类"没结论"最后仍会把这一版产物作废，与「已排队从干净轮次继续核对」的措辞并不完全一致——那句话说的是"排队重核"，实际发生了什么见上（保产物会导致下一次运行静默跳过核对，这条取舍要用户定）；② 只在小模型假客户端下验证，没有在真实厂商的空回复/超时上复跑；③ 用户现场跑的是这批提交之前的二进制，旧行为会一直存在到重新构建。
+
+## v1.5+（T222：核对没给结论时只重核、不作废产物整章重转，2026-10-23）
+
+用户接着追问：「所以这个退化是啥意思？为什么要重转？不是重新核对就可以了吗？我还是没懂」——他的直觉正是代码该做的事。核对退化时界面承诺的是「已排队从干净轮次继续核对」，代码做的却是归档这一版产物、删掉、换全新会话整章重转。产物那一刻根本没被任何核对判定过，重转出来的是同一份东西：重做一遍不会更有结论，也没有理由假设新的转换会话能救回一个坏掉的核对模型；确定被消耗掉的只有时间与额度——核对模型持续退化时，这一章会被作废重转最多 `checkerAttempts(depth)` 次（顶层 6），每次再开若干核对会话、每次再触发一次复盘。`rescueQueueTruncate` 排出的那条 `role=checker` 重核请求随之落空：产物已被删，`recheckChapter` 只会回「这一章还没有提交产物，无法重新核对（先重试转换）」。
+
+- **保留产物、只重开核对会话（`internal/latex/book.go`）**：`convertChapterNode` 的反馈轮之后原本直接落进"核对不过"的同一个分支（写 `.checker` → `archiveChapterAttempt` → 删 `.tex` 与分片 → `convertChapterNode(..., true, next)` 换会话重来）。现在先分出一条：`checkerNoVerdict(issues)` 为真时**不动产物**，只重开核对会话核这一份（`checkerNoVerdictRetryCycles = 1`，同一份只读视图、全新会话）。重核拿到结论就按结论走——通过就在原处收账，真指出内容问题才落到原来那条归档重转链路（内容问题该重转，这一支一格没动）。重核仍没结论就以「checker 不可用」收尾：`<章>.tex` 留在原处不归档不删、`.checker` 留那句话、`chapter_activity` 记 `error`，错误文案写明「不是内容问题，N 个核对会话都没下判定，已保留这一版产物未作废——重跑或「重新核对」会接着核这一份」。
+- **补上"留产物"的前提：跳过不再无条件放行（`internal/latex/checker.go` + `book.go`）**：T221 当初不敢留产物的理由是真的——顶层重跑遇到已有 `<章>.tex` 会走「已有产物，跳过」并直接 `return nil`，连核对都不跑，留产物等于让下一次运行**静默采纳一份没被判定过的东西**。新增 `chapterRecheckPending()`（读 `texPath+".checker"`，内容是 `checkerNoVerdict` 认得的文案即为真）挂在那条跳过分支上：命中就先走 `recheckChapter`（与页面「重新核对」同一条通路、产物一个字节不动），通过才 `keepSessionFile` + 跳过，没过如实报错并说明"这份产物未被采纳"。于是"保留产物"与"绝不静默采纳未核对产物"两条不再打架，T221 留的那个口子消失。
+- **刻意不动**：① 复盘判 `fail`（会话无法挽救）与判 `truncate` 走同一条"重核一次"的路——对产物来说两者处境完全一样（都没被判定过）；② 重核只加一轮，不做无限重试：真坏掉的核对模型再开十次也一样，不如交给人和下一次运行；③ `rescueQueueTruncate` 排的请求保留，现在它核的是留下来的这份产物，跑通一次就把 `.checker` 收掉，下次运行自然"已有产物，跳过"。
+- **测试（`internal/latex/checker_degrade_test.go`）**：`TestCheckerDegradeDoesNotFeedConvertSession` 的旧断言 `stats.convert >= 2` 反过来成了 `== 1`（那正是要命的旧行为），并加断言：核对会话 ≥ 2（初核 + 重核）、`work/chapters/<章>.tex` 仍在、`work/attempts/` 空、失败文案含「没有给出结论」、`.checker` 里是"没结论"那类文案。新增 `TestPendingNoVerdictProductIsRecheckedNotSkipped`：夹具加 `preseedNoVerdict` 开关预铺"产物在 + `.checker` 是退化文案"，断言重跑**不跳过**——`stats.convert == 0`、核对跑 1 次、通过后 `.checker` 被收掉。夹具顺手加了 `stats.checker` 计数（原来只数 convert/rescue）。
+- **验证**：`go build ./...`、`go vet ./internal/...` 干净、`gofmt` 只报既有的 `stylefix.go`；`go test ./internal/... -count=1` 14 个包全绿。
+- **没覆盖到的**：这件事的触发条件是"核对模型持续退化"，而真跑起来第一次重核成功与否取决于模型当时的状态——测试里钉的是**路径**（不重转、保留产物、跳过前先重核），不是"重核一定成功"。真机上仍可能连续两个核对会话都没结论，那时这一章会停在"checker 不可用"+保留产物，重跑或点 ↻ 接着核，这条要看用户现场是否还会撞上。
+
+## v1.5+（T223：复盘的审计日志不再被当成会话，2026-10-23）
+
+用户贴出侧栏截图：章节组下面还有一个阶段名就叫「会话」的分组，里面一条会话标题 `log`、状态「未开始」，问「还有一个 log 会话不知道是什么」。查现场索引（`/api/index`，2600 条会话）只有一条 `stage == "会话"`，它的路径是 `<项目>/work/rescue/log.jsonl`——P58 复盘的审计日志，每行一条复盘结论（章节 / 角色 / `verdict` / 提示词 / 转录行数），592 行、258 KB。它不是任何一次会话，只是文件名以 `.jsonl` 结尾。
+
+- **根因（`internal/sessionview/sessionview.go`）**：`scanner.scan()` 的 walk 只按后缀收候选、只对**目录**有 `skipScanDir`，所以这个文件被当转录读进来；`LabelFor` 的对不上任何已知前缀，退回 `会话:<stem>`，标题 `log`、阶段 `会话`（`stageTitleOf` 拿不到映射就原样返回阶段名）。没有 `msg` 行 → 消息数 0 → 状态「未开始」；复盘每写一行就更新 mtime，看着还像 live。T200（`work/rounds` 快照日志）与 T202（`.trash` 截断备份）是同一类问题的前两次，前两次都是"目录不是会话"，这次是"单个文件不是会话"。
+- **改**：新增 `skipScanFile(p, name)`，只跳 `<项目>/work/rescue/log.jsonl`（父目录 `rescue` 且祖父目录 `work` 同时成立才跳），在 walk 里紧跟"是不是 `.jsonl`"之后调用。**没有动侧栏分组逻辑**——分组没错，错的是把一个非会话文件扫了进来。审计日志的写入（`rescue.go` 的 `work/rescue/log.jsonl`、`keep_records`/`--debug` 语义）一字未动；复盘转录 `rescue_<章>[.tryN].jsonl` 住在 `work/sessions/`、名字也不同，不受影响。
+- **测试（`internal/sessionview/scan_dirs_test.go`）**：`TestScanSkipsRoundsJournalsAndCleanBackups` 加一条 `work/rescue/log.jsonl`（仍只留真正那条转录，扫描到 1 条）；新增 `TestSkipScanFile` 钉住边界——`work/rescue/log.jsonl` 跳，`work/sessions/log.jsonl`、`rescue/log.jsonl`（项目名恰叫 rescue）、`work/rescue/rescue_chapter_001.jsonl`、`log.jsonl.bak` 都不跳。
+- **验证**：`go build ./...`、`gofmt -l`（改动文件无输出）、`go test ./internal/sessionview/ -count=1` 全绿（17.0s）。对真实数据做只读复扫（临时程序调 `sessionview.Scan("…/latex_project")`、跑完即删）：2604 条会话、落「会话」组 **0** 条；修前那个索引里正好是 1 条。
+- **没覆盖到的**：① 侧栏那枚方块里的 `1` 是分组的行数徽标，不是会话名——修完这组直接不存在，没有为它单独做什么；② 只用只读复扫验证了索引层，页面渲染没重跑（dist 没改、不需要重建 web）；③ 现场跑的是旧二进制，要重新构建才会看到这一组消失。
+
+## v1.5+（T224：同一章的复盘在树上只占一行，以前的复盘都进它的历史，2026-10-23）
+
+用户贴出侧栏截图：一个章节节点下面竖着六、七行「复盘」，最后一行标「运行中」、上面几行只有「复盘」两个字；点进任何一行只有它自己那次对话。他的原话是「之前的复盘不要这样显示吧，显示在这个复盘会话里面的历史中，不要这样堆在这里，这里只能有一个复盘。并且之前的记录这边都找不到，我希望你帮我迁移一下之前的复盘记录到正确的位置上」。三件事：树上每章只留一行；以前的复盘进那一行的「历史」；那些记录要**真的归位**，不是把行藏起来。
+
+- **根因（旧口径是"一行一个复盘目标"）**：`sidebar.ts` 的 `rescueTargetKey(s)` 用「这一章 + 它复盘的那条转录」（`reviewedTranscript`，来自转录里的 `t=meta kind=rescue_target`）当树的 key，`newestByKey` 再按 key 取最新。P58 之前（以及复盘队列早期）的转录名是 `rescue_<章>_<时间戳>.jsonl`，翻真转录确认里面只有系统提示词、`price` 与 `run_end`——**没有** `rescue_target` 那一行；index 下发的 `reviewedRole`/`reviewedTranscript`/`chapterAnchor`/`archived` 全空、`chapterAttempt` 兜底成 1，于是 key 退化成空串，`newestByKey` 只能退回按 `rs.id` 兜底 → 一份老转录一个 key，同一章复盘过几次就叠几行。雪上加霜的是每行自己又是"只有一次复盘"的链（链也按目标分桶），所以每行都没有「历史」页签：行数堆着，记录谁也看不见。
+- **只读摸清现场**：`/api/index`（2621 条会话）里 623 份复盘散在 213 章上，130 章超过一次（最多的 13 次）。取其中一章逐份打开看：12 份老命名 + `rescue_<章>.jsonl` + `rescue_<章>.try2.jsonl`，按旧口径就是 14 行；而审计日志 `work/rescue/log.jsonl` 里对应的记录只有 `chapter`/`role`/`verdict`/`reason`/`from`/`hint`/`model`/`transcript_lines`/`ts`，**没有**被复盘转录的文件名或尝试号（有一份 log 的 `ts` 与某条老转录最后一行 meta 的时间戳逐字相同，但这也只能说明"是那一次"，推不出文件名）。
+- **改（`web/src/legacy/sidebar.ts`）**：① 新增 `chapterRescueRows(sessions, rescue)` = 这一章、同项目的**全部**复盘（含更早父尝试留下的归档世代），按 mtime 旧 → 新；② `treeRescueRows(node)` 改成**这一章只留最新一行**（mtime，并列取后面那条，与 `newestByKey` 同口径）；③ `chapterAttemptChain` 的复盘分支不再按目标过滤，直接用 `chapterRescueRows`，新 → 旧；④ `rescueOrdinal` 与 `treeRescueRows` 共用同一份集合，所以树上、历史行、历史链的号一定对得上（`复盘#N` = 这一章的第 N 次，读时推断）；⑤ 删掉 `rescueTargetKey`。
+- **改（界面）**：`ChapterSessionTree.vue` 的 P61 注释改成"每章一行"（渲染分支没动，`v-for` 现在恒为 0 或 1 项）；`HistoryPanel.vue` 的链表头从「同一处目标的复盘（复盘了 转换#1，N 次，新 → 旧）」改成「这一章的全部复盘（<章节后缀>，N 次，新 → 旧）」，删掉不再用的 `reviewedHead`、新增 `rescueChapter`；`chainTagTip` 改口「这是这一章的第 N 次复盘：<复盘了谁>」；行内 `复盘#N` 与「复盘了 …」逐行照旧。
+- **迁移为什么在读取侧做**：要让老记录"进到正确的位置"，可以改名把老转录变成 `rescue_<章>.tryN.jsonl`，也可以改读法让它们自然归位。选后者。老转录**没有记录它复盘的是哪一条转录**，改名只能编一个猜出来的 `.tryN`——这跟"不编造转录没记录过的元数据"直接冲突；而且只改名字、不补 `rescue_target` 行，界面照样读不到目标。读时归位则一份不丢、磁盘一个字节不改、正在写的那条转录也不会被碰到（摸现场时正好有一次复盘在跑）。`rescueRowTitle` 对老转录继续给「复盘对象：<转录名去掉 rescue_ 前缀>」，不猜角色与轮次。
+- **测试（`web/tests/chapter-fix-rescue.spec.ts`）**：改掉三条与新口径冲突的用例——「同一章两个目标各占一行、各算各的号」→「号按全章连着数、树上仍只占一行」；「复盘链只列同一章 + 同一目标」→「列这一章的全部复盘，只有一次时没有页签，别的章不混进来」；「复盘了不同目标各占一行」→「树上只有一行，两次都在它的历史里（并断言行上的 `复盘了 核对#1/转换#1`）」。新增「T224：老复盘转录没有目标备注，也不再一章叠成好几行」——三份无 meta 的老转录 → `treeRescueRows(node).length === 1`、链里三份（新 → 旧）、`rescueOrdinal` = 1/2/3、`reviewedTargetLabel` 给空串。
+- **验证**：`cd web && npx vitest run` 22 个文件 257 条全绿；`npm run build` 通过，dist 已重出（`viewer.js` 544.73 kB / `viewer.css` 87.45 kB）。真实数据只读验算：临时写一条一次性 vitest 用例拉 `/api/index` 跑完删掉——目标章 13 份复盘 → `treeRescueRows` 1 行、`chapterAttemptChain` 13 条、序号 1..13 无重复；全库 130 个曾经超过一行的章节节点，改造后每个最多一行。
+- **没覆盖到的**：① 老转录的「复盘对象」只能显示它的转录名（`rescue_<章>_<时间戳>` 之类），真正的"复盘的是转换第几次"永远补不出来——这是磁盘上没有的事实，不再尝试猜；② 页面渲染只靠单测 + dist 构建验证，没有在浏览器里重跑截图（dist 已重出，但要重新构建 `docvision` 才会看到）；③ 用户现场跑的是这批提交之前的二进制。
+
+## v1.5+（T226：实时进度块按屏幕高度截断、只重画变化的行，2026-10-23）
+- **问题（用户报）**：几十条会话一起跑时控制台"一直在刷新和频闪"，那片进度区比屏幕还高，"滚动到上面就看不到了"，想要"驻留固定屏幕的会话"。
+- **根因**：① 块高 = 行数、没有上限；终端覆写靠 `\x1b[<n-1>A` 上移 + 逐行清空，`n` 超过屏幕高度时上移被终端夹在顶部，接着打印的换行只能靠向下滚动腾地方——"擦除"实际是把 scrollback 里的历史推出屏幕。② `refreshLiveLocked()` 先擦后**全量**重画，1 秒一跳的计时器让整块每秒重绘一次；收尾又是 `Remove()` 重画 + `PrintConsole()` 擦/画各一次。
+- **改（`go/internal/logger`）**：新增 `termsize_unix.go`（`TIOCGWINSZ`）/`termsize_windows.go`（返回 0）与测试钩子 `TermRowsForTest`；`liveCap() = 终端行数 − 6`（下限 3，查不到按 24 行）；`liveBlockTextsLocked()` 超限只画前 `cap-1` 行 + 末行折叠提示；`liveRowEntry.prio` + `LiveRow.SetWithPriority()` + `liveOrderLocked()`（`sort.SliceStable`，同优先级保持创建顺序）；`paintLiveLocked()` 改增量——逐行与 `painted` 比对只重写变了的行，行数变化才整块重来；`eraseLiveLocked()` 清 `painted`；`LiveRowTexts()` 按显示顺序但列全部行。`Finalize` 保持原语义（摘行 + 定格行 + 重画一次）。
+- **改（`go/internal/latex/book.go`）**：新增 `rowStatePriority()`（运行 0 / 等子会话 1 / 待核对 2 / 排队 3），render 走 `SetWithPriority`；阶段收尾从 `row.Remove()` + `PrintConsole(final)` 改成 `row.Finalize(final)`，一次收尾不再两遍整块重画。
+- **测试（`internal/logger/livepanel_screen_test.go`，沿用 ANSI 回放屏幕模型）**：`TestLiveBlockBoundedByTerminalHeight`（12 行终端 + 22 条会话：屏上 ≤ 6 行、末行「另有 17 个会话」、两条运行中都在、排队第 20 个不上屏、字节流最大光标上移 ≤ 5）、`TestLiveBlockHiddenRowStillFinalizes`、`TestLiveBlockRepaintsOnlyChangedLines`（a/c 各只写 1 次）、`TestLiveBlockPipeKeepsAllRows`（管道不截断、无折叠提示）。
+- **验证**：`go build ./...`、`go test ./internal/logger/ -count=1`、`go test ./internal/latex/ -count=1`（32.5s）全绿；另用一次性可视化用例（30 行终端 + 36 条会话）目检屏幕：运行中/等子会话在前、排队在后、末尾一行折叠提示，跑完删除该用例。
+- **口径**：截断只发生在屏幕上——日志文件、`--console-verbose` 与管道输出仍每个会话每一行；被折起来的会话收尾时定格行照样落进滚动区，账不省。
+
+## v1.5+（T227：原书视图就绪顺序、截断真的会生效、转录体检与复读提醒，2026-10-23）
+- **问题（用户报）**：转换会话大面积陷在同一个死循环里——`submit` 回「还没有和原书对照过…你已经看了 0 页」、`view_pdf` 回「未知挂载点 "source"」，复盘判截断却从不生效，转录里重复提醒与重复总结越堆越多（「这么多的污染内容，而不是从一个最干净的地方截断？…你检查一下？」→「主要是感觉现在好多会话都陷入到了这个情况，导致几乎都没办法继续推进下去了」→「这些有非常多这种错误的会话，怎么处理一下。对这些转换会话处理一下再继续跑？」）。
+- **根因①（顺序）**：`RunBook` 一开始就 `startRetryWatcher`，运行期任何时刻都能派发重试/继续；而 `buildPDFViewQuiet` / `buildDocIndexQuiet` / `checkPageAlignment` 排在**图片阶段之后**。中间被派发的转换会话建出来时 `r.pdfView` 还是 nil → `sessionMounts` 没有 `source` 挂载点 → 门禁仍要求"看过 2–4 页不同的原书页"（`needSourcePages()`）→ 一个不可能满足的条件 → 必然走完"看不了 → 打回 → 复盘 → 判截断 → 再拉起"。日志里**没有任何 `[pdfview]` 行**，说明不是配置或构建问题，是顺序。页计数没被截断清掉：`.gate/source.json` 只在 `node.Depth == 0` 重置运行（P55）时才被清，所以同一句「已经看了 0 页」会被反复撞到。
+- **根因②（截断读错目录）**：`truncateChapterTranscript` 把目录写死成 `<项目>/work/sessions`；子章节转录实际在递归节点里（`work/temp/conv_<章>/work/_subdivision/<子章>/node/sessions/`），`os.ReadFile` 直接失败。
+- **根因③（请求被改写）**：`dispatchRetries` 把命中子章节的 `convert`/`continue` 请求一律改写成"继续跑父章节 `From=0`"，请求里带的 `From`/`Path` 被丢掉；②③ 的失败只落 `LogWarning`（仅文件），界面照旧显示"已截断继续"。
+- **根因④（逐字重复的提醒）**：`remindOrRescue` 两轮提醒在没拿到复盘 `hint` 时是同一句话，模型收到同一句话就照抄上一轮答复 → 同一句 `You have NOT submitted yet…` 与同一段总结在转录里越堆越多。
+- **改（`go/internal/latex/book.go`）**：① 视图/索引/页对齐三步挪到 `startRetryWatcher` 之前（注释写明顺序理由）；图片阶段之后只保留"产物出来再补一次"。`buildDocIndexQuiet` 加指纹守卫（`docIndexStampOf` + `docIndexStamp` 字段）。② `convertChapterNode` 在 `node.Attempt == 1` 且工作区存在时先做转录体检，命中就换新的尝试转录接着跑。③ `remindOrRescue` 先算 `reminder`，`reminderInCircles(sess, reminder)` 为真（上一次提醒前后的两条助手正文一字不差）就不发第二次；新增 `assistantSaid`。
+- **改（`go/internal/latex/retry.go`）**：`truncateChapterTranscript` 走新增的 `findChapterTranscript`（顶层 `work/sessions/` + `work/temp/conv_*` 下 `_subdivision` 递归找）；新增 `cutChapterTranscriptForRetry` 照请求的 `Path`/`From` 截；`dispatchRetries` 子章节分支先消费请求、再排父章节继续跑；截断/继续失败改 `LogError` + `phaseNote`。
+- **改（`go/internal/latex/chaptergate.go` + `runner.go`）**：`chapterGate` 加 `NoSourceMount`（+ `Warn` 回调、只提示一次的 `noSourceNoted`）；`submitGate` 用 `len(r.sourceMounts()) == 0` 判定，会话确实没有 `source` 挂载点时就记一行警告、只要求覆盖检查。
+- **新增（`go/internal/latex/repair.go`）**：`repairDerailedTranscript(trPath, workRoot) (path, attempt, why, ok)`。两条硬证据——工具回执里 `未知挂载点 "source"`、同一 N 的「还没有和原书对照过…你已经看了 N 页」拒绝重复 ≥2 次；**只在回放窗口内**（`replayStart` 找最后一条 `=== COMPRESSED SESSION CONTEXT`）、**只在最后一次成功看过原书页之后**（`lastSourceViewIndex`，回执形如 `PDF page source:`）评估，取最早那条证据；有收账的 `SUBMITTED` 一律不动；切点落在窗口起点之前就跳过。截断复用 `cutTranscriptAt`（源转录一字不动、新尝试写在旁边）。
+- **测试**：`repair_test.go` 15 条（截断点、收账放过、单次拒绝放过、同 N 才认、不同 N 不认、压缩检查点之前跳过、尾巴只有元信息时到上一段找、之后看过原书页的不动、其它挂载点错误不认、干净未完成的不动、新尝试编号、无工作区跳过）；`rescue_triggers_test.go` 加 `repeatAnswer` 开关与两条口径用例（复读只提醒一次 / 答复每轮都变照发两次）。
+- **离线体检（真实工作区，只读 + 一次性写盘后逐条核对）**：625 条最新尝试 → 58 条需截断、567 条干净；58 条逐个核对"行数与源文件前缀逐字节一致"全对，源文件均未被改动；与复盘审计里同一批判 `truncate` 的 195 条交集 **57/58**（切点：AI 偏早 25、偏晚 32、相同 0）。临时驱动用例用完即删，不入库。
+- **验证**：`go test ./internal/latex/ -count=1` 全绿、`go build ./...`、`go vet` 干净。
+- **口径**：提醒不能一刀切取消——实测 65 条发过第二次提醒的转录里 56 条答复变了、48 条最终真提交；只砍"复读"这一种。截断只退对话：不写 `.gate`、不动工作区与已提交产物。
+
+## v1.5+（T228：截断当场落盘 + 词内下划线，2026-10-24）
+
+- **触发**：用户贴了一份复盘会话转录，问截断结论提交后有没有**立刻**反映到 jsonl 与网页上（「提交截断之后，有没有在 web 界面显示的时候或者实时的就反应在那个 jsonl 上了，而不是等到并发的时候才去截断它…不然用户可能会错误的认为这个没有修复」）；同一份转录里用户打的章节名显示成没有下划线的样子。
+- **缺陷 A（延迟截断）**：`maybeRescue` 的 `truncate` 分支只调 `rescueQueueTruncate` → 写一份 `work/retry/*.json`（`Role:"continue"`、`From`、`Path`）；真正的切口在 `dispatchRetries` 里（`cutChapterTranscriptForRetry` / `continueFromChapter`），要等并发槽。证据：复盘审计 `2026-10-23T12:52:02+08:00` 已写 `{"chapter":"…","from":6,…,"verdict":"truncate"}`，进度行也写了"会开一个新尝试"，而 `.try2.jsonl` 直到次日 `00:43`（离线体检）才出现——中间网页「历史」里只有原来那一条跑歪的会话。
+- **改 A**：新增 `Runner.cutTranscriptNow(proj, base, role, trPath, from) (dst string, next int, err error)`——纯文件操作 + `retryAttempt` 记账（转换 `cutTranscriptAt`、核对 `truncateCheckerTranscript`）。`rescueQueueTruncate` 改成 `(int, error)`：先切（并 `applyWorkspaceCut` 把工作区也退回那一刻），再排队，请求新增 `retryq.Request.CutAttempt`（`cut_attempt`，omitempty）记住已切好的尝试号。派发端据此分流：`dispatchRetries` 的子章节分支只在 `CutAttempt == 0` 时切；`runRetryTask` 的 `continue` 分支 `From>0 && CutAttempt==0` 才走 `continueFromChapter`（切 + 推进），否则直接 `continueChapter`（续跑最新尝试，`book.go` 的 `retryAttemptOf` 覆盖让同进程内立刻选中新尝试、重启则靠 `lastAttemptNumber`）；`checker` 分支拆出 `continueCheckerAfterCut(proj, base, next)`（`retryCheckerAttempt` + 归档旧 `.checker` + `recheckChapter`），`CutAttempt>0` 时跳过切口。切不动时不装作切了：`CutAttempt` 留 0，退回派发时再切，日志与进度行都写"当场截断失败"。
+- **缺陷 B（渲染吃下划线）**：`web/src/legacy/markdown.ts` 的 `MD_INLINE` 里 `__([^_]+)__` / `_([^_\n]+)_` 没有 CommonMark 的词内下划线规则，`chapter_012_child_02_child_03`、`convert_….jsonl` 的第一对下划线被当成斜体。转录原文一直是正确的，纯渲染问题。
+- **改 B**：`mdInline` 保持 `MD_INLINE` 分组号不变（`__` 第 6 组、`_` 第 9 组），匹配后过滤：跨切片记录"当前切片前一个字符"，新增导出函数 `intrawordUnderscore(m, before, after)`——只有 `m[6]`/`m[9]` 命中、且任一侧紧贴 `[\p{L}\p{N}_]` 时返回 true，该次匹配回退成字面文本。**故意不用后行断言**：Safari <16.4 在解析阶段就 SyntaxError，整页白屏（模块级正则的 `g` 标志陷阱同源）。
+- **测试**：Go 新增 `TestRescueTruncateCutsOnTheSpot`（提交后立刻读到 `.try2.jsonl`、6 行、源转录 10 行未动、请求带 `CutAttempt=2` 与 `work/` 下相对 `Path`）、`TestRescueQueueTruncateFallsBackWhenCutFails`（切点越界 → `attempt==0`、`CutAttempt==0`）；原 `TestRescueQueueTruncateQueuesContinue` 由这两条取代（`rescue_probe_test.go` 的匿名结构补 `json` tag，否则 `cut_attempt` 读不到）。另加 `TestDispatchDoesNotCutTwice`（两条子测试：`CutAttempt=0` 的老请求派发时照切一刀、`CutAttempt=2` 的已切请求不再切第二刀且父章节排上「继续跑」，前一条是后一条的对照——去掉守卫后者会多出 `.try3.jsonl`）；预览页那条"下划线斜体"探针的夹具原本把 `_斜体_` 夹在两个汉字之间（按新规则本该是字面），改用 `-` 划出词边界，保住"下划线斜体仍会渲染"的对照；Web 新增 `web/tests/markdown.spec.ts` 的 `T228 词内下划线不当强调` 5 条（章节名/转录名/`a_b_c` 字面、`_斜体_`/`__加粗__`/`~~删~~`/行内代码照旧、`a*b*c` 星号字面、`**要重跑**` 仍加粗、`intrawordUnderscore` 单元判定），配一个只实现 `createTextNode`/`createElement`/`createDocumentFragment` 的假 DOM（`node.textContent` 对无子节点返回自身 `text`）。
+- **验证**：`go test ./internal/latex/ -count=1` 全绿（30.9s）、`go test ./internal/... -count=1` 全绿、`go build ./...`、`go vet ./internal/latex/ ./internal/retryq/ ./internal/sessionview/` 干净、`gofmt -l` 只剩既有的 `stylefix.go`；`cd web && npx vitest run` 22 个文件 262 条全绿，`npm run build` 重出 `viewer.js`（545.31 kB）后再 `go build` 通过。
+- **口径**：① 网页 ⤓ 不改成当场写盘——`docvision sessions` 是只读观察者，工作区只归 `docvision latex` 动；回执补了"切口要等它排进槽位时才写盘：页面只读，不提前改你的转录"。② 复盘判 `truncate` 后给父章节排的仍是"继续跑 `From=0`"（T227 口径不变），子章节的截断点跟着请求里的 `Path`/`From` 走。③ 截断仍只动"新尝试 + 工作区回退"，不写 `.gate`、不删任何东西。
+
+## v1.5+（T229/T230：临时实验目录的去向取证；同一章不再并排跑两条核对，跑歪的核对转录不再无限续跑，2026-10-24）
+
+- **触发**：用户先问一份图像对比实验的临时目录为何"凭空消失"（是不是被 Agent 删了）；随后贴出核对页面的现场：「核对 `chapter_004_child_01_child_03` 的会话不会重试吗？我看他的复盘会话一直没有触发？并且这里面混杂了太多的这个错误内容」「我手动进行重新核对，我发现我的重新核对和之前的核对同时在跑，太奇怪了。没有停下来之前的」。
+- **T229 取证（不改代码）**：该目录整体在一个未跟踪的 `temp/` 下（`.gitignore` 里、无 git 历史）、回收站为空、`/home` 是 ext4 且无快照，因此**没有任何恢复途径**。对照 P62 的整理记录，结论是它在前一轮"按 tracked 文本零引用判残留"的清理里被当成构建产物删掉——是 Agent 自己的错。教训写成硬规则 `AGENTS.md`「未跟踪数据不许按零引用删」，经过记在 `c140f61`。
+- **T230 缺陷 A（并发）**：`convertChapterChildren` 里子节点在自己的 goroutine 里转换与核对，**一把章节锁都没拿**；`convertChapterBatch` 只对顶章 `holdChapter`。派发端 `dispatchRetries` 用 `lockChapter(base)`（TryLock，忙就留队）判"这一章能不能开跑"，于是同名子章节永远是"空闲"——页面的「重新核对」与父节点对同一支的重驱动并排开了两条核对。磁盘上能看到两处各写一条：节点目录 `…/child_03/node/sessions/checker_<章>.try9.jsonl`（319 行／515 198 字节、34 次 `run_end`、74 条章节活动、19 条提交提醒）与顶层 `work/sessions/checker_<章>.try4/5.jsonl`（51／55 行，都是页面「重新核对」在 18:33 前后开出来的）。
+- **改 A**：`childBase` 提到 `wg.Add(1)` 之前算好；goroutine 里 `release := r.holdChapter(childBase)` + `defer release()`。语义是"子节点转换/核对期间这一章名归它"：派发端 TryLock 失败 → 请求留在队列里等它收尾，既不并排、也不打断。父子锁名不同、`holdChapter` 阻塞而派发端只 TryLock，所以不会互相等死。
+- **T230 缺陷 B（无限续跑）**：`checkChapterAt` 只要转录文件还在就把历史回放给下一个核对会话。一次调用内部"没结论就重开、最多 4 次"（T217）是设计好的预算，但文件跨调用共享：父节点反复重驱动、页面反复点重新核对，都往同一条文件后面追加。T227 的转录体检也救不了这条路——它不是"忘了提醒"，是**提醒了也不提交**（那条 319 行的转录里 19 条提醒，一段结论没交）。
+- **改 B**：`checkChapterAt` 进门先 `countCheckerSubmitReminders(loadTranscriptMessages(trPath))`；`>= checkerNoVerdictAttempts`（4，提为包级常量，与"一次调用内部的 4 次预算"共用同一个数字）就 `keepCheckerTranscript` 后如实返回「checker 多次未能提交结论：这条核对转录里已经攒了 N 次提交提醒…不再原地续跑它」，**不建会话、不回放、不追加**。产物仍按 T222 保留；干净会话走 ⤓ 截断或页面「重新核对」（另开一次尝试，提醒数从零算）。判据只看 `user` 消息是否以那句提醒开头，正文里写的 `submit` 不算。
+- **T230 缺陷 C（判决落错地方，本轮只记录不改）**：复盘判 `truncate` 后 `truncateCheckerTranscript` 把前缀抄成新尝试写在 `work/sessions/`（T201 的决定：那里不随父节点临时树被清、页面「重新核对」也按同一位置找）；节点驱动的核对路径却是 `<节点>/sessions/checker_<章>.try<转换尝试号>.jsonl`。两条通路读的不是同一个文件，所以对"节点自己那条"的救援注定改不动它读的那条。这一章的审计日志有 18 条结论（核对 8、转换 10），两次核对 `truncate` 判在 17:17（74 行 → 68）与 17:24（84 → 69），而那条 try9 在 18:25 还长到 319 行。改通道映射会把两条通路搅在一起，本轮由 B 的入口守卫兜住"不再回放"。
+- **改 C（页面口径）**：`internal/sessionview/retry.go` 的核对回执改成「只重跑核对会话，产物不动；同一章已经有核对在跑时，这一条会等它收尾后再开始——不会并排再跑一条，也不会打断正在跑的那条」。
+- **测试**：`checker_degrade_test.go` 新增 `TestCountCheckerSubmitReminders`（正文写 `submit`／非字符串消息／别的提醒文案都不算）与 `TestCheckerTranscriptWithRepeatedRemindersIsNotResumed`（预铺 4 条提醒：一次核对请求都不发、`stats.checker == 0`、产物在、`.checker` 是"没结论"那类文案；把守卫摘掉这条会红，已复验）；`rescue_triggers_test.go` 夹具加 `seedCheckerReminders`；`chapter_subdivision_integration_test.go` 在子节点转换的那一刻探 `r.lockChapter(childBase)`，探到"没被占住"就断言失败（摘掉 A 的锁这条会红，已复验）。
+- **验证**：`go test ./internal/... -count=1` 14 个包全绿（latex 29.1s）、`go build ./...`、`go vet ./internal/...` 干净。
+- **未改（刻意）**：① 正在跑的那条无法从页面叫停（预览服务只读，也没有"停止会话"通道）——保证的是"不会再有第二条并排跑起来"；② 已经落盘的坏转录一字不动（用户数据）；③ 节点驱动的续跑路径与切割副本落点都不动（见缺陷 C）。
+
+## v1.5+（T231：核对结论写回它自己的转换转录；父节点不再停在「等待子会话」，2026-10-24）
+
+- **触发**：用户贴了四行章节树：「转换 · chapter_022_child_12 会话错误 1.98M / 9.2k」「转换 · chapter_023_child_04 会话错误 2.95M / 12k 就卡在这一个会话上了」「转换 · chapter_024_child_05_child_05 会话错误 761k / 5.5k」「转换 · chapter_024_child_09 等待子会话 295k / 3.8k」，并说「很多父会话都卡在同一个问题上，有一个子会话核对通过会话提交，但是显示会话错误导致父会话一直没办法合并」「子会话全部显示已经通过，但是我看这个会话里面并没有子会话完成的消息」。
+- **现场（只读 `/api/index` 与转录尾部）**：`chapter_022_child_12` 转换 a1 是 `error`，核对 a2/a3 在 16:42/16:46 通过、`checker_target` 记的转换尝试号对得上 a1；`chapter_024_child_05_child_05` 转换 a4 是 `error`（`.try4`），核对 a2/a3 在 16:37/16:41 通过、锚点也对得上。这两处是标签缺陷，产物是过的。`chapter_023_child_04` 转换 a3 `error`，核对 a3 从 16:23 起停在 `checking_result`、没有结论——不是显示错。`chapter_024_child_09` 转换 a3 `waiting_children`（children:3，16:20:42）：child_01 17:26 `issues` → 17:53 重转通过并核对通过，child_03 17:15 通过，child_02 转换 17:04 `checking_result`、核对 17:41 `error`——那三行里没有 child_02 的失败，父节点一直在等它。
+- **缺陷 A（结论落错转录）**：`recheckChapter` 按章节名前缀找核对转录，先命中 `work/sessions/` 下的顶层文件，也会误命中同前缀的子章节文件（`chapter_024_child_05_child_05` 与 `…_child_05`）；拿到结论后只 `appendTranscriptActivity(trPath, …)`，改的是核对转录，转换转录最后一条活动仍是 `error`。
+- **改 A**：`retry.go` 新增 `chapterSessionsDir`／`isChapterTranscriptName`（精确匹配 `convert_<章>[.tryN]`、`checker_<章>[.tryN]`，小写比较）／`isChapterTranscriptDir`／`chapterConvertTranscript`／`latestConvertAttempt`；`recheckChapter` 用会话目录定位转录，尝试号取该目录下最大的一版，结论走 `markChapterVerdict(proj, base, attempt, ok, issues)`——按 `checker_target` 的锚点写回对应的转换转录（`pass`／`issues`／`no_verdict`）。
+- **缺陷 B（没结论被记成会话错误）**：核对的几种收尾（入口守卫、会话退化、复盘判救不回、始终不 submit、只读视图没准备好）返回的都是"没给结论"，但转录上写 `error`，转换行于是显示「会话错误」。
+- **改 B**：`checkChapterAt` 拆成入口包装 + `runChapterCheck`（原函数体）；包装里 `!ok && checkerNoVerdict(issues) && !strings.HasPrefix(issues, "checker API failure")` 时写 `markCheckerNoVerdict(trPath)`（`chapter_activity: no_verdict`）。写在入口而不是六处返回点，漏一处就会复现。接口失败／余额不足仍写 `error`。`book.go` 里 no-verdict 结算那支把转换侧的 `error` 也换成 `no_verdict`（T222 的"保留产物、只重开核对"口径不变）；页面 `CHAPTER_ACTIVITY` 新增 `no_verdict: '核对无结论'`。
+- **缺陷 C（失败状态没人写）**：子节点转换失败只进了 `convertChapterChildren` 的返回值；父转录最后一条活动还是之前的 `waiting_children`，失败的子节点自己也不写状态。
+- **改 C**：父节点转换失败时写 `error`（已排队重试则写 `queued`），子节点失败时同样往自己转录写一条终态。
+- **缺陷 D（子章节核对通过后没人叫醒父节点）**：父节点的整合只在它自己那一轮驱动里发生；子章节的重试把核对跑过了，父节点不知道，于是一直「等待子会话」。
+- **改 D**：`runRetryTask` 的核对分支通过后调 `requeueParentAfterChildPass(proj, req.Project, base)`，内部 `childChapterParent` 取到负责整合的那一段（多层的取最上面一层），排一条父章节的「继续跑」；父章节已有「继续跑」排队时不重复排。
+- **测试**：`chapter_verdict_test.go`（新增：结论只写回自己的转换转录、同名子章节的转录不被误改、顶层章节的结论留在顶层）；`checker_degrade_test.go` 改成钉"退化后转换与核对两边都留 `no_verdict`，没有任何一条留 `error`"（这条一开始红——退化的收尾在 `dec.Stop` 那支提前返回，入口包装才收到它，所以标记必须放在入口）；`chapter_subdivision_integration_test.go` 新增 `TestChildConvertFailureRecordsStateOnItsOwnNode`（子节点转换必失败：父节点与失败子节点的收尾状态都不能是 `waiting_children`）；`t211_child_retry_test.go` 新增 `TestChildCheckerPassRequeuesParentContinue`（顶层不排、子章节排到 `chapter_024`、重复调用只排一次）。
+- **验证**：`go test ./internal/... -count=1` 14 个包全绿、`go build ./...`、`go vet ./internal/...` 干净；`cd web && npx vitest run` 262 条全绿，`npm run build` 重出 `viewer.js`（545.58 kB）后再 `go build` 通过。
+- **未改（刻意）**：① 已经落盘的转录一字不动（用户数据），新记法只对之后的写入生效；② 用户机器上正在跑的进程用的是 T230/T231 之前的二进制，状态不会自己变回来，那些行重新核对一次即可；③ 多层父节点的重排仍排最上面那一层（与 T211 口径一致），不改成逐层叫醒。
+
+## v1.5+（T232：排队不再沉默、核对没结论自动换新会话、复盘不再重复同一切口，2026-10-24）
+
+- **触发**：用户先报「我对好多核对会话重新核对，都没有反应，不会新建一个新的也不会排队，就是没有反应，除非我截断的话倒是可以正确继续运行」，再追问「我们的复盘会话不是用来裁剪的吗处理一些遇到的会话问题，没有正确提交的让他们提交，或者遇到的错误的结束的、裁剪并继续运行的吗？这个好像也没办法正确工作了吗？」，最后把要求说定：「正常来说应该不需要手动操作，这边也有对应的复盘机制可以让会话变好和变干净，但是不会出现卡死的情况」。
+- **现场（预览页 `/api/index` 只读快照，3932 条转录、generated 20:17:53）**：live 17 条 = 转换 9 + 修复 1（共用转换池 10 格，正好占满）+ 核对 6（池 20 格）+ 复盘 1，排队 175 条。四五个父章节（013/014/022/024/004）都是 `waiting_children`；chapter_013 那棵树里只剩 `chapter_013_child_02`（19:39:10）与 `chapter_013_child_03_child_03`（19:38:48）两条 `queued`，一直没拿到转换槽位。人工「继续跑」被章节锁当"忙"挡回队列，所以「点了没反应」；截断立刻生效是因为它走核对池。核对一侧：`chapter_004_child_01_child_03` 已跑到 try8，另一支复盘转录到 try12。
+- **缺陷 A（等待沉默）**：取转换槽位的路径只在拿到槽位前写一次 `queued`；等 40 分钟期间零输出，日志里连"被挡回"都不一定有（旧二进制的 busy 分支是静默 `continue`），外面无法区分排队与卡死。
+- **改 A**：`book.go` 新增 `holdConvertSlot`／`holdSlot`／`slotHeartbeatEvery`（5 分钟）。取槽位期间的心跳把「转换槽位已等 N」写进转录 `chapter_activity`（页面行时间戳随之更新）并打一行 info；三处转换 `acquireConvertSlot`（首轮、整合轮、反馈轮）全部改走它。`retry.go` 的 busy 分支改成 `logBusySkip`（同一请求 5 分钟最多一行，带已等时长与该章最后一次输出的年龄）。
+- **缺陷 B（核对没结论只能靠人）**：节点驱动算核对转录时只认 `node.AttemptNum`；一条转录的「没提交」提醒攒满 4 条后 `checkChapterAt` 入口守卫当场拒跑，同一份文件永远回放，父章节每次「继续跑」原地失败。抬尝试号的只有人工「重新核对」与复盘截断两条路，自动这一路把"没结论"当成了章节判决。
+- **改 B**：新增 `nextCheckerAttempt(nodeTr, start, maxBumps)`：从当前尝试起找第一条提醒没打满的转录，找到就换新尝试（新文件、无历史可回放、产物不动）。节点核对外面包一层自愈循环 `checkerNoVerdictSelfHeal = 2`：`checkerNoVerdict` 收尾时抬号重试，仍不行才如实报没结论。另补一条同会话提醒：`submit` 交了不可用的 `status` 时先在同会话追加 `checkerStatusReminder`（并计入提醒数），不再直接关会话白烧一次预算。
+- **缺陷 C（复盘重复同一切口）**：`maybeRescue` 的 `truncate` 分支每次都从判定给的 `From` 切，没有记忆；同一章因此一轮轮从同一个位置重开（现场 try8／try12）。
+- **改 C**：`rescue.go` 新增 `rescueCutAt`（key 是目标转录路径）与 `rescueCutRepeated`；`book.go` 的 `truncate` 分支先问一句，重复同一切口就写「复盘这次仍要截到第 N 条记录，与上次同一个切口：不再重复截断」、判 `fail` 收尾。
+- **测试**：新增 `t232_guards_test.go` 三条——打满的转录换到下一条（try1→try2）、三条都打满时保持原号交回守卫、同一切口只拦第二次（换切口/换转录放行）。`rescue_retry_test.go` 与 `rescue_triggers_test.go` 里原来依赖"每次都能切"的四条用例在新守卫下先红后绿：守卫的 key 从章节名改成目标转录路径（跨用例/跨项目不再互相污染）。
+- **验证**：`go test ./internal/latex/ -count=1` 全绿、`go build ./...`、`gofmt` 对新改文件干净（`stylefix.go` 是历史遗留，不动）。
+- **未改（刻意）**：① 已落盘转录一字不动（用户数据），新记法只对之后的写入生效；② 槽位总数与派发顺序不动（"转换池 10 格被大章节占满"是并发成本，不是本次要改的口径，本次只让等待可见、让退化会话自愈）；③ 正在跑的进程仍用旧二进制，要看到这些行为得换新二进制重跑。
+
+## v1.5+（T233：核对没结论默认换 6 条新会话、复盘自身失败不占目标预算，2026-10-25）
+
+- **触发**：用户三句话——「核对一直没有反馈的时候不是应该重新核对吗？就是这边复盘超过10次都这样吧（默认给6次）」「复盘会话自己出问题不计算在次数自我重试」「重新核对能跑就行最后肯定可以给出核对结论吧，如果重转就造成浪费了。因为这次不是转换会话的问题」。
+- **现场**：一章的核对到了 `try8`，同一支的复盘转录到了 `try12`；一条核对会话 `run_end` 只有 107 秒，第一轮 97 个字符的答复是把 `submit {` 写进正文，被提醒后仍然不调用工具——这类收尾以前一次调用内部就够 4 条会话、随后自动重核只给 2 次（`checkerNoVerdictSelfHeal=2`），用尽就交回入口守卫，页面上一直是「核对无结论」，只能人再点「重新核对」。
+- **缺陷 A（重核次数写死且太短）**：`checkerNoVerdictRetryCycles`（旧 1）与 `checkerNoVerdictSelfHeal`（旧 2）都是常量，`book.go` 的自愈循环把"再开一次就收手"当成默认；用户现场需要的量级是 6 甚至更多。
+- **改 A**：`config.go` 新增 `LatexConfig.CheckerNoVerdictRetryCount`（`checker_no_verdict_retries`）与 `CheckerNoVerdictRetries()`（0/未写 = 6）；`book.go` 的自愈循环改用 `r.cfg.Latex.CheckerNoVerdictRetries()`，每轮抬 `checkAttempt`（至少 2）并把 `checkerTranscript` 换成 `attemptTranscriptPath(nodeTr, checkAttempt)`，日志写明第几次、产物不动。用尽后保留产物、如实报没结论，并 `retryq.Queue` 一条 `role=checker`、`Source=no_verdict` 的重核请求（不重转）。T222 那段"同一条死转录再开一次"的第二循环整段删掉。旧常量留下 `checkerNoVerdictSelfHeal = 6` 只作测试与兜底。
+- **缺陷 B（复盘自身失败吃掉目标预算）**：`maybeRescue` 在复盘没有给出结论时直接 `exhaustRescueBudget(key)`，等于"一次失败的复盘 = 这条目标永远别复盘"，下次提醒退回普通路径。
+- **改 B**：`rescue.go` 新增 `rescueOwnBad` 计数、`refundRescueBudget(key)`（把 `rescueSeen[key]` 退一格）与 `rescueOwnFailure(key)`；`book.go` 的 `!ok` 分支改成先退款、再记自身失败，累计到 `rescueMaxOwnFailures = 6` 才 `exhaustRescueBudget` 收手，日志分两句写清楚"第几次、不占这条目标的次数"。
+- **测试**：新增 `t233_budget_test.go`（`CheckerNoVerdictRetries` 默认 6 / 负数取 6 / 显式覆盖；复盘退款后还能再复盘、自身失败累计到上限）；改 `checker_degrade_test.go` 的「打满提醒不再回放」用例——断言换成"不再原地续跑但会自动换新尝试、次数有上限"；`rescue_retry_test.go` 的「三次没结论就放弃复盘」改成 `TestRescueOwnFailuresDoNotExhaustTargetBudget`（复盘自身失败不吃目标预算，第 4 条复盘照常起得来并给出结论）。
+- **配置与文档**：`config.go` + `internal/config/default.yaml` + `config.example.yaml`（两份模板逐字节一致，`cmp` 核过）+ `docs/config.md` 新行；`config_version` 不变（标量键，无新块）。
+- **验证**：`go build ./...`、`go vet ./internal/latex/ ./internal/config/`、`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿；`gofmt -l` 对新改文件干净（`stylefix.go` 是既有）。
+- **未改（刻意）**：① 已经落盘的转录一字不动（用户数据），新行为只对之后的写入生效；② 正在跑的进程用的是旧二进制，要看到这些行为得换新二进制重跑；③ 槽位总数没动（重核走核对池，`checker_concurrency` 20 已够）。
+
+## v1.5+（T234：打回后的重核真的重新问一遍核对模型，2026-10-25）
+
+- **触发**：用户报「我发现有一个会话 明明在第一次已经处理完了并且通过了。为什么现在又被重跑了一次？：「work:chapter_024_child_01_child_04.tex 」」。
+- **现场**：这一支的子章节在 18:20:17 与 18:27:47 各核对通过一次（两次都落 `run_end`，第二次在 `checker_…child_04.try2.jsonl`），21:35 父节点的工作区被重置，22:00 它被从头转换，随后重新拆出四条子章节（22:00–23:50）。往上追一层：父节点的核对转录 112 条消息、只有 18:51:21 一次 `submit`、之后一次 `run_end`，却在 18:51:22、18:56:34、19:02:42、19:10:39、19:18:24、19:25:23 记了六次「发现问题」，六次的问题原文逐字相同（同一条脚注缺正文）。
+- **缺陷**：`book.go` 的反馈轮把同一个 `checkerTranscript` 再交给 `checkChapterAt`；`runChapterCheck` 从这条转录回放历史，末尾那次 `submit` 被 `replaySubmit` 原样重放、`resumeSkip` 置真，`sess.Run` 整段跳过——模型一次都没被再问，返回的还是上一轮的结论。于是「重核」= 复读：每一轮的修复会话都真的把被点名的行补上（分片 16192→16301→16304→16432→16293→16314 字节，脚注在第 121 行，报告写「Open issues carried upward: 0」），核对一次都没看过它。6 轮耗尽 ⇒ `archiveChapterAttempt` 作废整次尝试 ⇒ 重转该节点与全部子孙，把早已通过的子章节一起扔掉。缺陷在 `Depth 0` 的普通章节同样成立（顶层第一轮的核对转录在 `work/sessions/`，节点推导出来的路径在 `work/temp/conv_<章>/sessions/`，两条路都走同一个 `replaySubmit`）。
+- **改**：反馈轮新增局部闭包 `nextCheckerTranscript()`——基准取第一条真在用的核对转录（递归节点是节点目录那条，顶层是 `work/sessions/checker_<章>.jsonl`），号取 `lastAttemptNumber` + 1 且必须大于当前号、至少 2，写回 `checkerAttemptNo` 并用 `attemptTranscriptPath` 开新文件；`checkChapterAt` 的入参换成它。首次核对与 T233 的自动重核路径一字未动。
+- **测试**：新增 `t234_recheck_test.go`（`checkerStatuses: {"issues","pass"}`）：这一章必须收下、核对请求 2 次、转换请求 2 次、`work/chapters/chapter_01.tex.checker` 不存在、`work/sessions/checker_chapter_01.try2.jsonl` 存在。把 `checkChapterAt` 的入参改回旧路径，这条 0.96 秒就红，报的正是「共 6 次尝试仍未通过 checker: the marked formula is missing from the submitted chapter」——与现场同一句话。`rescue_triggers_test.go` 的假服务器为此加了按请求取 `status` 的能力。P60 的 `TestFixBudgetExhaustedSkipsChapterReattempt` 原先期望「父章节核对 1 次」，那是重放假象；现在按「首次 + 反馈轮」算（`checker_rounds: 1` 被下限抬到 3，故 4 次），整章不重开的三条断言不变。
+- **验证**：`go build ./...`、`go vet ./internal/latex/ ./internal/config/`、`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿；`gofmt -l` 对新改文件干净（`stylefix.go` 是既有）。
+- **未改（刻意）**：① 已作废的尝试照旧留在 `work/attempts/` 下不删；② 被重转那一支已经烧掉的转换不回来；③ 落盘转录一字不动（用户数据），新行为只对之后的写入生效；④ 整章重开仍会重转子树（"已通过的子章节跨尝试复用"是另一个题目，不在本次范围）。
+
+## v1.5+（T235：切历史尝试时子会话跟着换、归档判据修好、子节点失败终态不再写到老转录，2026-10-25）
+
+- **触发**：用户三问——「转换 · chapter_025_child_11 这个在切换两次历史重跑会话的时候下面的子会话没有跟着变吗？」「我的会话本来是1230个我以为已经固定了，好像有的还在增加是否都是这些，奇怪的重跑的，然后增加子会话的会话？」「还有的是会话错误增加的，比如转换 · chapter_011_child_01 但是我也不知道之前他为什么会话错误，后来判增加了重跑了…是不是上一个版本留下来的会话错误，这次都重试了」。
+- **现场（只读快照，4084 条转录）**：`chapter_025_child_11` 有两次 live 转换（第 1 次 300 条消息、14:19:50 判「发现问题」；第 2 次 22 条、21:35:56 在等子会话），第 1 次尝试的整棵子树已挪进 `work/attempts/chapter_025_child_11/try1/`（八个子章节的转换尝试 1–3 全 `pass`）。页面钉住第 1 次时，子行仍取 `work/temp/…` 下那一代（子 01 的 live 转换尝试 3 `pass`、子 02 的尝试 1 在跑）——用户看到的"切了没反应"就是这一半；钉住第 2 次与不钉的结果本来就一样。
+- **缺陷 A（世代没传下去）**：钉住哪一次尝试只影响父行自己，子行仍按"最新一次"挑。作废尝试只把**工作树**搬进 `work/attempts/`，它自己的转录还留在 `work/sessions/` 或节点目录下，所以子节点判"这是不是归档世代"时拿到的布尔量是 false——同一父行下两条 live 转录分不出 `try1` 与 `try2`。
+- **改 A**：`web/src/legacy/sidebar.ts` 新增 `sessionGeneration`（从转录路径里读 `<项目根>|<章>|tryN`，没有 `/work/attempts/<章>/tryN/` 段时为 `''`）、`childGeneration`（父行这一次该用哪一代：自己归档就取自己的键，否则按"是不是比 live 最大尝试号小、且磁盘上真有那一代的归档"推断）与 `convertInGeneration`（同归档面里先精确匹配世代键、退而取最新）；`buildChapterTree` 先扫一遍全量转录收齐归档世代集合，`resolve(node, parentGen)` 把世代一路传进子节点，修复行与复盘行按同一世代过滤。旧行为（只看 `archived` 布尔）在归档面里仍然分不出代，所以键取路径。
+- **缺陷 B（多项目布局下 `archived` 恒为 false）**：`sessionview.go` 的判据是 `strings.HasPrefix(rel, "work/attempts/")`，而 `Scan` 的根是 `latex_project/`、`rel` 实际是 `<项目名>/work/attempts/…`——前缀永不命中。现场快照里 767 条转录在归档目录，`archived` 一条都没标出来（接口里连这个键都不出现），页面的归档标记、`newerAttempt` 的活体优先、修复/复盘按世代挂靠整套失效。
+- **改 B**：抽出 `archivedRel(rel)`，前缀与路径中段都认（旧单项目布局照旧）。
+- **缺陷 C（子节点失败终态写到第 1 次尝试）**：`convertChapterChildren` 建的 `childNode` 里 `TranscriptPath` 永远是 `convert_<章>.jsonl`（第 1 次尝试），而 `convertChapterNode` 按**值**收这份配置——尝试号推导与 `attemptTranscriptPath` 改写都发生在副本里，回调方手里还是最老那条。`chapter_011_child_01` 的现场就是这样：第 1 次尝试的转录 10-20 21:00:18 已经 `pass`，仍在 10-24 19:46:23 被追加了一条 `chapter_activity: error`（同一个时刻 `.try4.jsonl` 自己也有一条），页面按最新挑行，把这个子章节显示成「会话错误」将近两小时——历史里当然看不到错误，那一代早就通过了。
+- **改 C**：`convertChapterNode` 改收 `*chapterNodeConfig`，调用方（三个入口：批量派发、递归子章节、作废后新尝试）读到的就是这一次实际用的转录；失败终态的 `appendTranscriptActivity` 就地写在它上面。
+- **测试**：`web/tests/chapter-tree.spec.ts` 新增四条（钉住作废的第 1 次 → 子行回到 `work/attempts/<根章>/try1/…`、核对行同代；钉住第 2 次 → 子行与核对行都取 live；拷不到时退回归档）；把 `resolve` 改回只看 `archived` 的旧写法，恰有一条红（`expected '…/work/sessions/convert_…' to be '…/work/attempts/chapter_050/try1/…'`）。Go 新增 `t235_child_transcript_test.go`（预铺 `.try4.jsonl`，函数返回后调用方路径必须是 `.try4`；在函数头上把指针换回副本即红）与 `TestScanMarksArchivedCopiesInMultiProjectLayout`（`<项目>/work/attempts/…` 必须标 `archived`；把判据改回前缀即红）。
+- **数字（回答"会话数为什么还在涨"）**：3.8 小时三次快照对比，新增 175 条、消失 23 条（作废尝试整棵搬进 `work/attempts/` 后在旧路径上消失，不是删除）、净增 152；新增按角色是核对 74、复盘 57、转换 36、修复 8，其中 29 条一出现就在 `work/attempts/` 下；只有 6 个新的章节 ID。涨的是"作废重跑 + 核对自动换新尝试"这两条路径各开的新转录；`1230` 既不是配置也不是计数器里的任何常量（现场 809 个章节 ID、1979 个「章+角色」、3203 个「章+角色+尝试」），所以它不会"固定"。
+- **验证**：`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿、`go vet ./...`、`go build ./...`、`gofmt -l` 对新改文件干净（`stylefix.go` 等既有文件不动）；`npm test` 22 个文件 266 条全绿；`npm run build` 产物已重建并提交。
+- **未改（刻意）**：① 已落盘的转录一字不动（用户数据），包括那条写错地方的「会话错误」——它只是显示口径问题，那一章现在并没有失败，重新核对一次就会写上新的结论；② 那两次重跑也不是那条错误状态引起的（作废路径由核对轮次用尽触发，T234 那条已修）；③ 跨尝试复用已通过的子章节仍是另一个题目，不在本次范围。
+
+## v1.5+（T236：父章节换尝试不再把已通过的子章节一起重跑，2026-10-25）
+
+- **触发**：用户连报四条——「还有我发现一件严重的事，为什么chapter_004又开了第三遍？之前不是就是父会话在等待子会话吗？并且他到#3之后为什么我切换到#2的时候他的子会话不会随着变化？之前子会话都基本上全完成了，这下好像又全重新跑了一遍」「chapter_012也是，怎么又重新开了一个」「13也是，我怎么切换回去，之前子会话都通过了。我想切换回去这次是核对会话出问题了我删一下」「会话17怎么也新增加了一个，好像子会话还没转换完？」。
+- **现场（只读核对运行目录）**：① 004 的第 2 次尝试在 00:08 被复盘判截断，排队请求里没有 `cut_attempt`（裁剪当场失败），00:09 的派发按「接着干」开第 3 次尝试并回退工作区——`repo.git` 的 HEAD 落在第 233 行的存档点（23:05），`git clean -fdx` 把 `work/_subdivision/` 整棵删掉，里面是 00:08:50–52 刚通过核对的四个子章节，于是子章节从 00:21 起全部重跑。② 012 同一机制，只是它的截断当场成功、请求带了 `cut_attempt=2`。③ 013 的第 1 次尝试已归档在 `work/attempts/chapter_013/try1/`，六个子章节的转换与核对**全部 pass**（其中两条是它们自己的第 2 次尝试通过的）；第 2 次尝试从 00:09 起、00:40 又派发一次，从此子章节一直在跑，最后一条子会话活动是 08:58。④ 017 的 `convert_chapter_017.try3.jsonl` 不是新的——它 10-22 16:04 就由一次手动重试建好，08:18 只是被追加了一行 `error`：日志里那句是 `继续跑失败: 子章节转换或 checker 失败…child_02: 父章节整合会话失败: api error: [SESSION_CONNECTION_TIMEOUT]; child_03: …`，也就是接口超时，不是换尝试。
+- **缺陷 A（回退删子树）**：`rollbackChapterWork` 用 `git reset --hard <存档点>` 加 `git clean -fdx` 清整个 `work/temp/conv_<章>/work`。递归子章节的工作树就在这棵树的 `_subdivision/` 下，而它们是**未跟踪**的，`clean -fdx` 一并删；已经通过核对的子章节产物只有这一份（作废归档只搬当次尝试的顶层），删了就只剩重跑。
+- **改 A**：回退前 `stashSubdivision` 把 `_subdivision/` 改名为同级的 `.subdivision-keep`，`reset`+`clean` 之后 `restoreSubdivision` 放回；`reset` 失败时同样放回，放不回则记一行「子章节目录没能放回工作树（暂存在 …），它们会被重新派发」——不再静默丢。
+- **缺陷 B（重转必重跑子树）**：细分父章节被重新转换时，`convertChapterChildren` 无条件按 `chapterSubrange` 重写 `input/chapter.md` 并新建每个子节点的转换，即使子章节的输入一个字没变、上一轮的产物就躺在那儿。
+- **改 B**：写 `input/chapter.md` 之前先比三件事——将要写入的正文与上一次写入的完全一致、`result/<子章>.tex` 还在、该子章节转录里最后一条 `chapter_activity` 是 `pass`。三条都成立就 `copyChildArtifacts` 把产物拷进父工作区、`inheritChildIssues` 把它的未决问题清单并进来（复用的子章节不能把问题丢掉），然后跳过这一支并记一行「上次已转换并通过核对、输入未变——直接复用产物，不再重跑」。新文件 `internal/latex/childreuse.go` 放 `childPassedEarlier` 与 `lastActivityState`（按行读 JSONL 取最后一条活动，用量行与消息行不算）。
+- **测试**：新增 `childreuse_test.go` 两条——（产物 + 最后一次 pass 才算复用；最后一次是 `issues` 不算；之后又 pass 才算；更新的 `.try2` 以 `error` 收尾则不算；用量行、消息行、`run_end` 不影响结论）。新增 `rounds_test.go` 的 `TestRoundLogRollbackKeepsSubdivision`——回退后父章节 `.tex` 回到存档点那一版、后来产生的 `junk.tex` 被清掉、`_subdivision/child_01/node/result/<子章>.tex` 仍在、暂存目录已消失；把 `stashSubdivision`/`restoreSubdivision` 摘掉这条立刻红。
+- **验证**：`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿（latex 38.5s）、`go vet ./...`、`go build ./...` 干净、`gofmt -l` 对新改文件干净（7 个既有文件不动）。
+- **未改（刻意）**：① 已作废的尝试照旧留在 `work/attempts/` 下不删，人工"回到第 N 次尝试"（把归档搬回工作树）本次没做，眼下要回退只能等这一轮停下后手工搬；② 已经白跑掉的那些子章节不回来；③ 落盘转录一字不动（用户数据）；④ 017 那种 `SESSION_CONNECTION_TIMEOUT` 是接口侧失败，不在本次范围。
+
+## v1.5+（P63：切回第 N 次尝试，2026-10-25）
+
+- **触发**：用户先问"之前子会话都通过了，我想切换回去"—，随后一句口径："做一下切回"，中途追加"还有注意切换的时候暂停当前会话"。T236 那一批的"未改（刻意）"里写的正是"人工回到第 N 次尝试本次没做，要回退只能手工搬"，这一批就是它。
+- **口径**：切回 = 把 `work/attempts/<章>/try<N>/` 整棵搬回工作区、把现役这一次整棵留档，两个方向对称；搬的清单与 `archiveChapterAttempt` 同一张（节点工作区的 `work`/`result`/`integrated-stage`、提交的 `.tex`、分片目录、报告）。转录也要跟着搬，否则 `lastAttemptNumber` 仍按 `work/sessions` 里最大的 `.tryN` 认"现在这一次"，切回来以后各条路径继续往那个更大的号上写。
+- **"暂停"的真实落地方式**：走查了三条可能的叫停入口——`internal/latex/runner.go` 的 `aborted` 只是接口错误的重试计数，`internal/session/session.go` 的 `interrupted` 是"从磁盘续跑"的标志，`continueFlag`/`setContinueFlag` 只是手动继续的消息标记；没有取消通道、没有项目级锁、没有 PID 文件，`lockChapter` 也只是内存里那一格。硬做一次真正的中途取消要动会话循环与工具执行，代价和风险都远大于收益。于是"暂停"= 请求排队 + 只在拿到章节锁（`TryLock`）时才动手：正在跑的会话把手上这一轮走完 → 松锁 → 整棵现役尝试被搬进留档（完整、可续）→ 再切回来 + 「继续跑」就能接着干。日志 `[restore] … 等它跑完这一轮`（同一章 5 分钟内只留一行）与页面回执都照实这么写，不假装已经停下。
+- **写保护（唯一能把数据搞坏的路）**：`restoreBusyReason` 看两处——`work/sessions` 下这一章（含 `_child_*`）的转换转录与 `.partial`、以及节点工作区里除 `media/views/pdfview/build/out/images/children.tmp` 之外的条目，最近 2 分钟（`restoreLiveGrace`）有 mtime 就拒。013 这种父章节停在 `waiting_children`、孩子在 `_subdivision/` 里写的现场，如果没有这道守卫，半个工作区会被搬走。
+- **不覆盖**：目标已占就拒（`movePath` 报「目标已存在，不搬」），冲突的那一份加 `parked-` 前缀，同名转录不搬、原地留着；`try<attempt>` 目录只在搬空后删。
+- **接口**：`retryq.Request` 新增 `Attempt`，`/api/retry` 接受 `role=restore` + `attempt`；四个拒绝分支各有一句话——没写第几次（400）、号不大于 0（400）、留档不存在（404）、子章节（400，并指出该对哪个父章节切）。`role=restore` 不要求章节的 `.md` 还在（它搬的是留档，不是重跑），也不会自动开核对会话。
+- **前端**：「历史」页签每一行多一个「切回这次」，判定在 `web/src/legacy/actions.ts` 的 `restoreTargetOf`（顶层章节的转换会话、未归档、尝试号 ≠ 当前这一次——切回去之后被搬走那一次的号比"现在"大，所以同样有这个按钮，能切回来）；确认条写明"现在这一次整棵留档、之后还能切回来""正在跑的会话不会被打断，会等它跑完手上这一轮"。
+- **缺陷（自己踩的，留在档案里）**：第一版把 `transcriptAttempt` 的返回值当成了不带前缀的章节名，而它返回的 stem **含** `convert_` 前缀——于是"搬转录"和"写入中守卫"两条路径都在拿 `chapter_004` 比 `convert_chapter_004`，一个转录都没搬、守卫也永远返回空；四条 Go 用例里三条当场红（"转录应该在 …/try3/…"、"应允许切回第 3 次，却被拒"）。改成与 `"convert_"+base` 比较后全绿。
+- **测试**：`go/internal/latex/restore_test.go` 四条（双向对调、往返幂等、写入中拒切、四类非法目标）；`go/internal/sessionview/restore_retry_test.go` 两条（排队成功且回执带 `attempt`、"不会被打断"、队列里那一项角色正确；四类拒绝且队列保持空）。`web/tests/session-actions.spec.ts` 新增五条钉住按钮给谁不给谁。
+- **验证**：`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿、`go vet ./...`、`go build ./...` 干净；`npx vitest run` 22 个文件 271 条全绿；`npm run build` 后 `go build` 再通过（dist 已重建并提交）。
+- **未改（刻意）**：① 落盘的转录与产物一个字节都不改写，切回只做搬运；② 核对转录不搬（结论记在它自己那条转录的 meta 里，那是历史事实）；③ 真正的中途取消没做，卡死的会话今天仍然只能等它自己收尾——这是能力边界，不是遗漏。
+
+## v1.5+（T237/T238/T239：接口错误原地重试、截断不再等于重跑、回执不再常驻，2026-10-25）
+
+- **触发**：用户先问「我记得我就添加了13是切回队列，其他的并没有添加到切回。但是其他的所有的都没办法操作了，都显示已经加入切回队列是啥情况？因为我看有好多是因为 会话错误 CONNECTION 这样的」，随后给了口径：「是api问题，不是会话退化相关的问题，不能够区让他们重试，因为如果重新跑的话就会有越来越多的api问题了，这是上游api错误，我们这边应该是重试吧。不然一直就重新跑转换，得不偿失，最后每一个会话都 api错误了」；再补一个具体案例「转换 · chapter_024_child_01」。
+- **现场取证一（回执）**：磁盘上 `work/retry/` 里 `role: "restore"` 的请求**一共只有两条**（都在 11:23–11:37 写给同一章、且至今仍是待办），但每一条转换/核对会话下面都写着「已加入切回队列」——回执写在全局 `state.retryNote` 上，没有过期时间、切会话也不清。
+- **现场取证二（接口错误变成新尝试）**：`work/rescue/log.jsonl` 1474 条里 `truncate` 1011 / `retry` 430 / `fail` 34；`retry` 里 99 条的理由写着连接问题（这条路本来就在原地重试，是对的），但 `truncate` 里仍有 5 条据此判了截断，切口落在这条健康对话的第 22/86/90/134/196 条记录上；运行日志另有 47 行把 `api error: [SESSION_…]` 记成失败/终止原因（其中 11 条是转换会话「会话报错终止（非致命），交给复盘链路」）。代价：一条子章节的复盘转录已经到 try24，另一章开到第 10 次尝试。运行日志里 `chapter_011` / `chapter_024` 被判「章节失败」的最后一句同样只是 `api error: [SESSION_CONNECTION_TIMEOUT]`——转换、核对、整合都干完了，接口一抖就整章作废。
+- **诊断**：`rescueAfterError` 只看"是不是致命错误"，不看错误来源，于是上游抖动与模型跑歪共用同一条「复盘 → 截断 → 开新尝试」的路；而截断的闸门只记「章|角色」，换一次尝试就清零，于是下一刀又落在同一处（一章的切口分别停在第 7、13、19 条记录）。
+- **改法一（T237）**：`isSessionUpstreamError` 认 `SESSION_CONNECTION_TIMEOUT`/`SESSION_API_ERROR`/`SESSION_RATE_LIMIT_EXCEEDED`/`SESSION_TIMEOUT`/`connection reset`（带「不可重试」标记的不算），命中就原地重试：排一条 `role=continue`、`source=upstream` 的请求并带上 `not_before`（30 秒起每次翻倍、上限 10 分钟），派发端到点前**不取、不占锁、不耗并发槽**；次数由 `latex.api_error_retries` 决定（默认 6，约 25 分钟），按 `项目|章|角色|转录` 记在内存；用完才如实记失败，不触发复盘、不截断、不占尝试预算。致命错误（余额不足/资源包不可用）仍先短路。
+- **改法二（T238）**：`rescueCutRefusal` 三条闸门——保留不足 12 条记录（总数 > 12）、保留比例不足 1/5 且总数 ≥ 60、同一 `项目|章|角色` 在 ±8 条内重复切过同一处；命中就当场判失败并写清理由，不排队、不开新尝试。去重键加上项目根，避免不同项目（以及并行测试）互相污染。
+- **改法三（T239）**：`state.ts` 加 `setRetryNote`/`clearRetryNote`（终态 20 秒、进行中 60 秒自动过期），切会话、重置视图、「历史」里换尝试都清；`actions.ts` 九处、`fork.ts` 六处、章节树三处统一走这个入口——那些地方原来是**裸表达式**，顺手接住任何返回值都编不过，所以必须包成语句；`HistoryPanel` 的丢弃/切回问答也按同一个信号清。
+- **测试**：新增 `t237_upstream_test.go` 四条（错误分类、退避序列、排队请求带 `continue`+`not_before`、派发端不提前取）；`t232_guards_test.go` 的 `TestRescueCutRefusal` 覆盖三条闸门；嵌套子章节集成用例的假复盘切口从第 1 条改成第 13 条（保住子章节自己那几轮、只丢掉没提交的整合轮），否则新闸门会拒掉它——这是用例不现实，不是代码错。web 新增 `web/tests/retrynote.spec.ts` 四条。
+- **验证**：`GOCACHE=/tmp/dsh-gocache go test ./internal/... -count=1` 十四个包全绿、`go vet ./...`、`go build ./...` 干净；`npx vitest run` 23 个文件 275 条全绿；`npm run build` 后 `go build` 再通过（dist 已重建并提交）。
+- **未改（刻意）**：① 已经落盘的 47 条历史截断不自动搬回——现场还有章节在写，搬整棵子树必须等它停下来，且旧二进制会接着开新尝试；② 重试计数在内存里，重启进程重新计数；③ 一个会话报错后的"复盘预算"与"接口重试"是两套账，互不占用。
+- **补丁（T240，同批收尾）**：用户问「chapter13 我咋切换不回去」，查现场发现排队提示自己在误报——`chapterLastOutputAge` 只扫 `<proj>/work/sessions/` 与 `work/chapters/<章>.tex`，而递归子章节的转录在父章节的临时工作区 `<proj>/work/temp/conv_<父章>/work/_subdivision/…/node/sessions/` 下（P34）。现场父章节那条转录停在 12:56 的 `waiting_children` 再没动过，子树里同一章的子章节却在 15:07 还写着第 8 条核对转录——提示于是每 5 分钟说一次「最后一次输出在 1 小时前——它可能卡住了，等不下去时只能重启进程」，让人去重启一个干得好好的进程。改法：把子树里属于这一章的转录与 `.partial` 也算进"最后一次输出"（按名字过滤、`WalkDir` 条目数封顶 2 万，别拖住 2 秒一次的 tick），加 `topChapterOf` 把子章节名收敛到最外层章节再拼临时工作区路径。测试 `t240_busyage_test.go` 三条。切回请求本身仍要等这一章真正停下来（P63 的硬规矩），这条没动。
+- **补丁（T241，同批收尾）**：用户问「chapter14 他怎么重复了这么多次历史，这个每次创建一个新的，并且这次没有改变子会话的情况下，这个会话他不知道他过去做了什么。他不知道他有没有分派子会话，有没有分派修复会话。所以如果要创建新的转换肯定要连带子会话一起转换。但是这边显然就没有。并且这边过去的那个会话就不应该重新创建会话。只要不是核对会话多次打回创建的新会话外，这种多次复盘的我们这不影响，可以一直复盘，我看这个#1才是正确的会话，他里面应该正确的截断一下就能继续跑了」。取证：这一章的转换有 10 条转录（第 1 次 371KB、后面 69–157KB），`work/attempts/<章>/` 一条留档都没有——工作树从没换过代，只有转录被复制了 9 次；`work/rescue/log.jsonl` 里同一章连着 10 条 `verdict=truncate`，切口分别是第 7、13、19、12 条记录；细分工作树 `_subdivision/child_01…child_09` 完好、`children-summary.md` 与 `children-manifest.md` 都在，子会话从没重跑过，问题不在子会话而在转录被切坏了。根因：复盘截断沿用 `cutTranscriptAt`「前缀抄成下一条尝试」，把"退回去重说"记成了"换一次尝试"；而且第一刀切在第 7 条——一条调了 4 个工具、一个回执都还没有的 assistant 消息后面，续跑只能补占位回执，模型于是每次都说「这个会话里工作区工具不可用」，再退化、再被切、再长一条（同一句话也解释了"记不住自己派过子会话"）。改法：新增 `trimTranscriptInPlace`——原地截断，同一条转录、同一个尝试号，页面「历史」不多出一条；丢掉的那一段抄进 `work/rescue/cuts/<章>/`（只作证据、不进历史、不可切回），切口上补一条 `t=meta kind=cut`；新增 `balancedCutFrom` 把切口往前挪到"工具调用都已回执"的那一条（老转录没有 `tool_call_id` 时按 role 一对一销），整段前缀都不平衡就如实拒绝、一个字不动；`applyWorkspaceCutTo`/`archiveChapterProductsTo` 让复盘这一刀的产物挪进 `work/rescue/cuts/<章>/` 而不是 `work/attempts/<章>/tryN`（尝试号没变，那是"作废留档"的位置）；核对会话的截断仍然换尝试（核对一句一尝试、结论按尝试号回写，语义不同）。`rescueQueueTruncate` 的返回值从 `int` 改成 `rescueCutResult{Kept,Dropped,Attempt}`，`book.go` 的进度行据此说清"原地截断、仍是第几次尝试、丢掉几条"。测试：新增 `t241_inplace_cut_test.go` 四条（切口平衡表、原地截断后是 6 条 + 1 条 cut 且不写新尝试、证据留档、切口落在等回执那条上要前移、整段不平衡时拒绝且不动文件），`rescue_probe_test.go` 两条按新语义改写（`TestRescueTruncateTrimsInPlace` 期待"还是第 1 次尝试"）。验证：`go build ./...`、`go vet ./internal/latex/`、`go test ./internal/... -count=1` 全绿（`sessionview` 有一条既有并发 flake，单跑与重跑均绿）。未改：已经长出来的历史一条不删（用户数据），要折回一条需人工确认后搬进证据目录；复盘次数仍不限，T238 三条闸门继续拦"只留几行""反复切同一处"的刀。
+
+## v1.5+（T242：核对交了空清单不再作废整章，2026-10-26）
+
+- **现场**：用户按上一批的建议重建二进制、重启、把 `chapter_013` 切回已经跑完的那一次尝试（第 1 次，子会话都通过、470 个文件已提交），半小时后回来看页面：`#1 转换 · chapter_013` 又被换成了新的转换，且那条新转换十几分钟没有任何输出。原话：「我记得你不是帮我切换到之前归档的那个#1的转换了吗，就是子会话都已经完成的那个。但是这边我点重置视图他还是跳到了新的转换？并且之前那个新的转换好像还在跑吗？」
+- **取证**：切回本身是成功的——13:06 现役文件被整棵搬进留档、第 1 次的整棵树搬回原处、转录跟着搬回，随后第 1 次的转换会话原地续跑、`submit` 成功（回执是「chapters/chapter_013.tex 与 chapters/chapter_013/（470 个文件）已在书里」）、`run_end ok`，核对会话接手。13:30 那棵整树又被搬进 `work/attempts/chapter_013/try1/`（`integrated-stage/` 469 个文件、报告、工作区都在，留档完整可切回），同时开出第 2 次尝试的转换转录——5 条记录，只有 meta/queued/running/price 与首条 user 文本，没有一条 assistant 输出。留档里那句核对结论只有 53 字节：`the checker reported problems but gave no description`。
+- **根因**：核对 `submit` 交的是 `status: issues`、`issues` 是空串，`checker.go` 给这份留档补了一句占位文案就当结论返回；上层按"打回"处理——先喂反馈轮，反馈轮走完仍不过就作废产物、换一条全新转换会话从头转。一句零信息的话把一棵跑好的产物扔了，页面上看起来就是"切回去没生效、又跳到新的转换"。
+- **改法**：`issues` 为空时先在同一条会话里要一次清单（与 T232 问 `status` 同一手法，新增 `checkerIssuesReminderMark`/`checkerIssuesReminder`，转录里留一条提醒，同样计入「这条转录还能不能原地续跑」的判断）；仍然为空就按"这次没结论"收尾——`AppendTranscriptNote("chapter_activity", no_verdict)`、关掉这条会话换一条核对重核，`sawVerdict` 不动、预算仍是 `checkerNoVerdictAttempts`，产物与转换会话一个字不动。全程都要不到结论时文案单列一句「每次都交了 issues 却一条问题都没有写出来」，仍以「核对始终没有给出结论」开头，`checkerNoVerdict` 与 `.checker` 标记照旧认成"没结论"（重跑时先重核这一份，不静默采纳也不作废）。占位文案整条删掉。
+- **测试**：新增 `t242_checker_empty_issues_test.go` 两条（同会话补上清单：只有一条核对转录、只发一次提醒、不重转、不归档；补不到：如实报没结论、产物留在原处、`.checker` 属"没结论"那类、转换会话没收到假反馈），`rescue_triggers_test.go` 的假核对加 `checkerEmptyIssues` 选项按请求序号吐空清单；`chapter_checker_test.go` 里原本钉着旧行为的 `issues without text still blocks` 改成两条——`issues without text asks for the list`（第二次补上清单就按清单打回）与 `issues without text is not a verdict`（要过还是空 → 报没结论）。验证：`go build ./...`、`go test ./internal/... -count=1` 全绿。
+- **未改**：已经因此被作废的尝试不自动搬回（要切回仍走「切回这次」，P63）；核对真写了问题清单时照旧打回、按 `latex.checker_rounds` 修。
+
+## v1.5+（T243：接口错误重试用满就暂停，2026-10-26）
+
+- **原话**：「程序按「接口错误原地重试」把它重新拉起来（第 1/6 次 这个有点少了这种接口的错误，如果重试次数太多就这次暂停，程序下次重启的时候继续跑或者再web端可以手动继续跑，而不是重试之类的因为重试也没有也是接口错误。这个接口错误默认重试30次吧）」。
+- **现场**：一条 `SESSION_CONNECTION_TIMEOUT` 只换来「第 1/6 次原地重试」，队列里那条续跑请求到点也没人接——第二天再看这一章还停在「等待并发槽」，`work/temp/conv_<章>/` 早没了。
+- **根因**：① 6 次 / 25 分钟是按"抖几下"估的，一场一两小时的上游中断根本撑不过去，用完还按原样记成失败、整轮中止；② `retryPrecondition` 要求临时工作区还在才派发续跑，而章节工作树一次转换收尾就删（`keep_temp_dirs` 默认关），接口错误那一次收尾正好把它删掉——于是每条续跑请求每次扫到都被判「这一章的工作区已经不在了」，这一章永远排不出去；③ 失败终态先看 `rescueQueuedFor`（上一次排队留下的内存标记）再看暂停，旧标记会把「已暂停」盖回「等待并发槽」。
+- **改法**：`latex.api_error_retries` 默认 6 → 30（`DefaultAPIErrorRetries`，30 秒起翻倍、10 分钟封顶，约 4.5 小时；写 0 也取 30），两个配置模板、`docs/config.md`、AGENTS.md 同步。次数用满**不记失败**：`queueUpstreamRetry` 依次删计数、留一行警告、返回 false；`rescueAfterError` 把这条路径翻成 `&pausedError{Base, Retries, Cause}`（`pausedMarker`/`isPaused` 用 `errors.As`，包一层仍认得出）。批量转换 `convertChapterBatch` 单独收集暂停的章节、`convertPhase` 用 `pauseError` 收尾（`pausedChaptersError` 一段话说清哪几章暂停了、怎么续），不再落进「N 个章节转换失败」。转录状态写 `paused`，页面文案「已暂停」；派发端遇到暂停只留一行「上游接口仍不通，这一章保持暂停」，不写「继续跑失败」。`retryPrecondition` 去掉工作区判据（接着跑本来就会以 resume=true 重建工作树）；四处失败终态改成先判 `isPaused` 再判旧排队标记。空清单不再是暂停（`pauseError(nil)` 返回 nil）。
+- **测试**：新增 `t243_pause_test.go` 四条——默认 30 且 0 取默认；暂停措辞含「暂停/重启/继续跑」且包一层仍认得；`rescueAfterError` 第一次排队、第二次返回暂停且队列不增、`SESSION_INSUFFICIENT_BALANCE` 仍致命；真跑一章撞两次 502 后状态是 `paused`、队列清空、没有 `work/attempts` 归档、没有 `.tex` 产物。`t237_upstream_test.go` 两处文案与注释按暂停语义改写。web `sidebar.ts` 加 `paused → 已暂停` 与一条单测（23 个文件 276 条全绿，`npm run build` 后 `viewer.js` 一起提交）。`go test ./internal/... -count=1` 全绿（latex 55.99s）。
+- **未改**：暂停不自动续跑——要重启程序或在网页点「继续跑」（用户要的就是「这次暂停」）；重试计数仍在内存里，重启后重新给满，正好是"重启继续跑"的语义。
+
+## v1.5+（T244：有切回在等时这一章不再开新活，2026-10-26）
+
+- **原话**：「为啥我切不回去？有没有强制切换的。这边要不没用我发现，我重启也不行」
+- **现场**：网页 15:24 发起的那条切回请求（`role=restore`、`attempt 1`）在 `work/retry/` 里躺着，同一分钟日志只有一行「切回请求排队中：先等这一章的会话跑完手上这一轮再搬」，此后一小时零进展。占锁的是这一章自己的细分驱动：它从转换开始就持着父章节的锁，八支子分支还在往下细分、跑核对（179 个 `.tex`、最新写入就落在几分钟前）。重启也没用——重启后这一章没有 `.tex`，又被当成"要转换"重新派发，锁当场被拿走，队里的切回继续等。
+- **根因**：P63 的硬规矩是"不打断正在跑的会话"，切回只在派发端 `lockChapter` 抢到锁时才搬；而细分父章节的"正在跑"是整棵子树，这把锁要等最后一个孙子收尾才放。「等它跑完手上这一轮」这句承诺在这种节点上等于几小时，且排队那行日志按请求去重、一辈子只打一次，页面上也没有任何提示。
+- **改法**：把"有切回在等"做成转换侧的停止条件。新增 `restore.go` 的 `rootChapterOf`（子章节名折回顶层）与 `(*Runner).pendingRestore`（只认 `restore` 角色、折回同名顶层章节、留档目录在、且目标不是现役那一次——只做这几条便宜判断，不调 `RestorePrecondition` 的写入检查，那要遍历整棵子树）；`restoreWaitingError` + `isRestoreWaiting` 作为第三种结局。接线四处：`convertChapterBatch` 派发前跳过并单独记「等切回」清单（既不进 `failures` 也不进 `pauses`，收尾不再报「全部转换完成」）；`convertChapterNode` 入口直接返回，不建会话、不写转录、不写终态；`convertChapterChildren` 发现切回在等就不再派发剩下的子分支、已跑的跑完收工；`dispatchRetries` 在这一章排着切回时把别的角色（续跑/转换/核对）留在队列里，免得它们抢走刚松开的锁。`logRestoreWait` 改成按 5 分钟重复，带第几次、已等多久、最后一次输出去区分"还在动"与"可能卡住了"。
+- **顺带**：同一个按钮点两下会留下第二条同目标请求，它永远排不上、以前每 5 分钟重排一次永不消失；派发端现在发现目标已是现役就把它作废、留一行说明。
+- **测试**：新增 `t244_restore_wait_test.go` 五条——只认真能切的请求（空队列/别的角色/无留档/现役本身就是目标都不算，子章节名折回父章节算）；节点入口不建会话、不产工件、措辞里没有"失败"；批次跳过只记「没跑」且请求仍留队；章节忙时派发端一条都不派、两条请求都还在；重复的切回请求被收掉且产物不动。`go test ./internal/...` 只有一条与本批无关的环境用例失败（沙箱里跑 venv，本机 python3 已升 3.14 而 libpython3.14.so 缺失，改动前后一样失败）。
+- **未改**：切回仍然不打断正在跑的会话（T244 只是让"等"有个上限，不是强制打断）；已经躺着的那条请求在旧进程上仍要等这一轮收尾，要立刻见效就重启并在启动时用 `--only` 指定别的章节，让这一章整轮都不被碰。
+
+## v1.5+（T245：截断给的行号落在用量行上也能切，2026-10-26）
+
+- **用户报的现象**：日志里两章各撞两次同样的报错——`[rescue] chapter_017 当场原地截断失败，退回派发时再切：第 239 行不是一条消息记录（选了用量/元信息行？）`，紧跟着就是 `[convert] chapter_017 从记录继续失败：第 239 行…`；另一章是第 258 行。每次还白跑一轮父章节的「继续跑」。
+- **取证**：转录是"每请求一条用量行"的 JSONL，实测一条真转录 261 条物理记录里只有 119 条 `t=msg`，另有 102 条 `t=meta`、40 条 `t=usage`。`from` 的含义一直是"保留到第几条**物理**行"，复盘会话读到"最后一条好消息是第 237 行"，落笔就填 238——那正是紧跟其后的用量行。四个截断点（`trimTranscriptInPlace`、`cutTranscriptAt`、`truncateCheckerTranscript`、`truncateVectorTranscript`）都硬拒不是 `msg` 的行号，于是同一个数在「当场切 → 派发时切 → 从记录继续」上各失败一次；队列里那条请求被消费之后续跑是静默丢掉的，页面上只剩"这一章一直不动"。（同一份日志里另有一刀是成功的，16:39:50 `已原地截断到第 269 条记录`——说明链路本身没坏，坏的是那个行号。）
+- **根因**：提示词与工具说明都写着"最后一条好消息的行号"，没有说错，错在**回放只走 `t=msg`** 而切口是物理行号——模型按"一轮的边界"落笔时天然会指向那一轮的用量行。硬拒这种行号等于把一个常见写法变成死锁，而且死锁点被三条路径各撞一次。
+- **改法**：新增 `snapCutLine`——切口挪到最近的一条消息行（先往前找；前面一条消息都没有才往后找到第一条）；只在 `from` 越界（<1 或超过行数）或整条转录一条消息行都没有时照旧报错。四处接线：`trimTranscriptInPlace`（原地截断）与 `truncateCheckerTranscript` 挪过之后打一行警告「切口从第 N 条挪到第 M 条：那一行是用量/元信息行，不进消息流」；`cutTranscriptAt`（派发端切新尝试）与 `truncateVectorTranscript` 静默落位；`cutChapterTranscriptForRetry` 在切之前先 `snapTranscriptFile` 落位，日志与回执报的是真正切到的行号。`RescueSubmitTool` 构造时拿到 `read_session` 的同一份转录（新增 `Lines` 字段），`truncate` 结论当场落位并把原始值留在 `RawFrom`，回执里多一句「line N is a usage/meta line, it is never replayed — the cut lands on the last message line M」，因此排进队列的 `From` 一开始就是能用的数（`CutAttempt` 语义不变，派发端不会切第二刀）。
+- **口径**：只做"最近的一条消息行"这一步，不替复盘会话判断该留在哪一轮；提示词一个字没改——`latex_rescue.system.md` 本来指的就是"最后一条好消息"，工具变宽容不该往提示词里加解释。
+- **测试**：新增 `t245_cut_snap_test.go` 四条——落位表（用量行往前挪、第 1 行是元信息且前面没有消息时往后挪、越界与 0 仍拒、整条没有消息行仍拒）；事故原形的原地截断（`from` 落在用量行上照样切、`kept=6/dropped=2`、退化段进 `work/rescue/cuts/<章>/`、切口留 `kind=cut`）；submit 自己落位且回执说明原因、没有转录时一个数都不改；派发端落位后新转录 3 行、坏尾巴不跟过来。`chapter_retry_test.go` 两条旧断言按新语义改写（切在用量行现在挪到消息行照切，不再期待拒绝）；`rescue_retry_test.go` / `rescue_triggers_test.go` 里依赖 `from=1` 硬拒的三处断言改成落位后的行号——顺带发现原地截断会把尾巴里的 `rescuing` 标记一起切走（它在最后一条好消息之后），该用例改成要求切口有 `kind=cut`、终态是 `queued` 或 `running`。`go test ./internal/...` 只有那条与本批无关的环境用例失败（沙箱里跑 venv，本机 python3 已升 3.14 而 libpython3.14.so 缺失）。
+- **未改**：不判断"该留在哪一轮"；已经因为坏行号被消费掉的排队请求不会自动重放（要续跑就在网页上点一次「继续跑」或重启后重派发）；`balancedCutFrom` 的"工具调用都已回执"仍然在落位之后跑，两条约束互不影响。
+
+## 批次 T246：「等待并发槽」不再永久停留
+
+- **现象**：一章的页面状态永远停在「等待并发槽」，而进程早就没了——用户的原话是「他一直没等到并发槽…其他都终止了也没等到他」。取证实录：该章转录最后两条是 `manual_continue` 与 `chapter_activity=queued`（同一次点击、同一秒写完），此后两天没有任何新状态；章节的 `.tex` 与 `.tex.checker` 都在，重跑走的是「已有产物，跳过」。同一个项目里另有一章停在 `running`、一章停在 `rescuing`，都是同一类残留。
+- **根因**：`chapter_activity` 是页面那一行状态的唯一来源，而收口只发生在"会话跑完"的路径上。进程被杀、阶段收尾、请求刚被队列消费就退出，这三种收尾都不经过那里，进行中状态于是永久留存；「已有产物，跳过」这条路持着章节锁、这一章本轮也不会再被驱动，却从不回头看那一行。
+- **改法**：新增 `go/internal/latex/activity.go` 的 `settleStaleActivity(trPath, texPath)`——只对 `queued`/`running`/`rescuing` 这三种"只有活着的会话才成立"的状态动手；新状态照磁盘事实写：有 `.tex.checker` → `issues`（有产物但核对没过），只剩产物 → `checking_result`，没有产物 → 什么都不写（那种情况的真相是"还没转出来"，不归这条路管）。调用点只加一处：`book.go` 的「已有产物，跳过」分支，收口之后再按 `latex.keep_session_records` 处置转录。复用已有的 `lastActivityState`（`childreuse.go`），不新写解析。
+- **为什么只收口一处**：其余入口（转换、核对、复盘）自己会写终态，多写只会造成两条状态打架；而"跳过"这一支恰好是唯一一处"确定不会再有人写"的地方。
+- **测试**：新增 `t246_activity_settle_test.go` 四条——`queued` 且 `.checker` 在 → `issues`、收口后再调不再刷 note；`pass` 之后一个字段都不改；没有产物时什么都不写（`queued` 原样留着）；产物在但 `.checker` 已删、状态停在 `running` → `checking_result`（不凭空造 `pass`）。`go test ./internal/...` 只有那条与本批无关的环境用例失败（`TestPythonEnvVenvRunsInsideRealSandbox`：本机 python3 已升 3.14 而 `libpython3.14.so` 缺失，回退改动同样失败）。
+- **未改（另开一条）**：细分父章节把"仍在重试中的子节点"记成失败、以及同一章后来通过后阶段汇总里那条旧失败不消失。这两条要动的是细分驱动的判定与失败清单的生命周期，放在同一个提交里风险太大。取证已经做完：父章节在某次继续跑时把两支还在整合/提醒中的子节点判成失败并写进 `failures`（`book.go` 汇聚处），子节点随后各自通过（核对转录 `pass`），父节点后来重新整合也通过，但阶段汇总里那条失败一直留到运行结束。
+
+## 批次 T247：父章节不再把「还在重试的子节点」判成失败
+
+- **现象**：一份运行日志的结尾是「3 个章节转换失败」，点名的三章里有两章的核对在同一分钟或更早已经是 `pass`；另一份日志里父章节在 18:02 报「子章节转换或 checker 失败；父章节禁止提交: child_03: 细分父章节整合会话未提交（已提醒两次）」，而这两支子节点当时刚被复盘原地截断、已经排进重试队列（转录状态写成 `queued`），几分钟后各自跑通、父章节随后重新整合也通过。用户看到的是「父会话通过了子会话还在运行」。
+- **根因一**：子节点这一轮没交上来时，代码先按 `rescueQueuedFor` 判断"它已经排进重试"，把转录状态写成 `queued`，然后**照样**把它塞进 `failures`——状态说"待会儿接着跑"，记账说"它失败"。父章节当场被锁死，而那一支并没有死。
+- **根因二**：失败清单是按"哪一章的 goroutine 返回了什么"追加的切片，没有生命周期。重试队列在批次外面把同一章推通了，旧条目仍然留着，阶段汇总于是一边打印"通过"一边报它失败。
+- **改法一**：新增 `go/internal/latex/retryingchildren.go` 的 `retryingChildrenError` + `isRetryingChildren`；细分驱动的子节点错误分支里，`state == "queued"` 的记进 `retrying`（不再进 `failures`）。`wg.Wait()` 之后如果只有这类子节点，父章节返回 `retryingChildrenError`——不提交、不写失败。批次派发（`convertChapterBatch`）与 retry 派发（`dispatchRetries` 的 continue 分支）两处都认这个类型，只记一行"子章节还在重试，这次不提交（不记失败）"，并把它并入"这次没跑完、不计失败"的清单（与 T244 的切回同一口径，日志分开写，不混成"有切回请求在等"）。真正跑到死的子节点（提醒用满、复盘没救回来、没排任何重试）照旧记失败。
+- **改法二**：`activity.go` 新增 `latestConvertTranscript`（`convert_<章>.jsonl` 与 `.tryN.jsonl` 取 mtime 最新）、`chapterPassedOnDisk`（产物在 + 没有 `.tex.checker` + 最新一条转换转录最后状态是 `pass`，三条同时成立）、`dropHealedFailures`，以及 `Runner.chapterFailure`——阶段汇总前先摘掉"后来已经通过"的章节并记一行日志；两个报错口（首批与补跑批次）都改走它。
+- **判据取舍**：只看"产物在"不够（失败前可能留着上一版产物），只看"状态是 pass"也不够（那可能属于另一次尝试），所以三条同时要求；`pass` 时 `.checker` 会被删掉这一既有事实正好当第三条。
+- **测试**：新增 `t247_retrying_children_test.go` 三条——`retryingChildrenError` 只被自己认出来（普通失败与 nil 都不算）、章名排序稳定；`dropHealedFailures` 三条样本里只摘掉"后来通过"的那一条，仍有 `.checker` 的与没有产物的照旧算失败；`chapterPassedOnDisk` 三条判据逐个反证（缺产物、留 `.checker`、状态不是 `pass` 都不算）。`go test ./internal/...` 只有那条与本批无关的环境用例失败（`TestPythonEnvVenvRunsInsideRealSandbox`：本机 python3 已升 3.14 而 `libpython3.14.so` 缺失）。
+- **未改**：`retrying` 的父章节这一刻不写自己转录的状态（它没开会话），页面靠子节点的 `queued` 与随后 T231 排的那条「继续跑」体现进度；子节点通过后替父章节排「继续跑」的链路本来就有，没有动。
+
+## 批次 T248：章节行选对"现在这一次"尝试
+
+- **现象**：三章的页面行各显示一种旧状态——一章产物由 try1 交出、当天通过，行上却是十天前的 try10「等待并发槽」；一章停在上一代的 try13；一章 try3 已通过，行上却是 try4「运行中」。用户据此以为工作区坏了。
+- **根因**：`newerAttempt` 的比较顺序是 archived → 尝试号 → mtime，号大者优先。子章节的尝试号随根章重来**重新从 1 数起**，上一代留下的废尝试号往往比现在这次更大，于是"号大但十天没动"的废尝试压过真正交出产物、当天通过的那一次。P60 加这条本是为了"默认打开最新一次"，但判据选错了维度。
+- **改法**：`web/src/legacy/sidebar.ts` 的 `newerAttempt` 改成 mtime 优先、尝试号退为并列时的确定性比较；archived 优先级不变（工作树那条永远优先于归档）。接口字段与数据一个都没动。
+- **测试**：`tests/chapter-tree.spec.ts` 新增「尝试号更大但更旧（上一代的废尝试）不压过现在这次」；`npm test` 23 个文件 277 条全绿；`vite build` 重出 `go/internal/sessionview/assets/dist/viewer.js`（产物照规矩提交）；`go build` 通过。
+- **未改**：「历史 N」页签仍按尝试号列出全部轮次（那里本来就该按号排）；接口侧 `chapterAttempt` 的含义没动。
+
+## 批次 T251：阶段头按章节报数
+
+- **现象**：页面「章节转换」一行报出「1811 章 · 完成 1370 · 运行 1 · 错误 53」，实际全书只有几十章，用户无法判断还有几章没完。
+- **根因**：`stageChapterAggregate` 数的是该阶段下的**转换转录条数**——同一章的历史尝试、上一代归档、返工留下的多条各自算一章。
+- **改法**：`web/src/legacy/sidebar.ts` 先按 `chapterId` 收敛，取「这一章现在那一条」（判据与章节树一致：非归档优先、mtime 新者胜），再据此算完成／运行／错误。
+- **测试**：`tests/chapter-tree.spec.ts` 加两条（同一章多条历史只算一次且状态取最新；归档不压过现役）；`npm test` 279 条全绿；`vite build` 重出 `viewer.js`；`go build` 通过。
+- **未改**：子章节各算一章（它们本来就是独立章节），总数仍会大于顶层章数。
+
+## 批次 T249 / T250：换尝试不搬子树、等子会话不算错误
+
+- **T249 现象**：一章在换新尝试后被"继续跑"恢复成一条「1 条历史消息 · 轮次 0」的空转录，第 1 轮就重新 `request_chapter_split`、重发全部 16 支子章节；当天日志里这一章"复用产物"命中 **0** 次（同书其它章共 13 次）。查树：现役 `work/temp/conv_<章>/work/_subdivision/child_01/node/result/` 是空的，留档 `work/attempts/<章>/try3/work/_subdivision/child_01/node/result/` 里有产物。
+- **T249 根因**：`archiveChapterAttempt` 把 `node.NodeRoot/work` 整棵挪走；子节点的产物、转录、已通过结论都在这棵树里。判据写着"换尝试不删 `_subdivision/`"，实现却整棵搬。
+- **T249 改法**：新增 `moveKeepingSubdivision`——留档 work 下文件时跳过 `_subdivision/`，其余照旧；子节点产物与转录原地不动，新尝试按 T236 逐支复用。
+- **T250 现象**：页面上一批父节点显示「会话错误」，实际在等子节点（107 条转换转录里 9 条最后状态 `error`，其中数个同时是 `waiting_children`）。
+- **T250 根因**：细分父章节在子树上出错时一律写终态 `error`（T231 为了不再停在"等待子会话"）；T247 之后"子节点还在重试"不算失败，却仍走写 `error` 的分支。
+- **T250 改法**：该处按错误类型分流——`isRetryingChildren` → `waiting_children`，`isPaused` → `paused`，复盘排了队 → `queued`，其余 `error`。
+- **测试**：`chapter_gate_test.go` 的留档用例改为新口径（不再要求留档里有 `_subdivision`，改为断言它留在原地、子转录仍在）；`go test ./internal/...` 只有那条与本批无关的环境用例失败。
+- **未改**：留档里因此不再有 `_subdivision` 快照；真正跑到死的子节点仍记 `error`。
+
+## 批次 T252：复盘截断残片不再当会话列出
+
+- **现象**：预览页「会话」阶段平铺出几十条带时间戳的条目（`20261027-111514-convert_<章>.jsonl`，3 条消息 / 27.9 KB），每条显示未开始。
+- **根因**：这些是复盘截断时抄进 `work/rescue/cuts/<章>/` 的**残片**（`saveCutEvidence`，名字前加 `YYYYMMDD-HHMMSS-`）。扫描器按 `.jsonl` 收文件，把整棵 cuts 也收进来；`chapterIdentity` 又不认时间戳前缀，于是它们既没有章节身份、也不进阶段统计，各自占一行。
+- **改法**：`skipScanDir` 整棵跳过 `work/rescue/cuts/`；`chapterIdentity` 先剥 `^\d{8}-\d{6}-` 前缀再推章节身份。
+- **测试**：章节身份用例加一条带前缀的路径（断章 ID／父章／深度）；`go test ./internal/sessionview/` 全绿。
+- **未改**：cuts 里的残片不删（复盘证据），只是不进会话列表。
+
+## 批次 T253：预览页启动慢——索引缓存落盘
+
+- **现象**：`docvision sessions --serve` 启动要等好几分钟，用户体感"一个只读网页为什么这么慢"。
+- **根因**：启动时 `Scan` 把运行时目录下每条转录整文件读一遍算消息数、用量与内容 SHA。实测该目录 **5365 条转录 / 约 7.3 GB**；这套计算每次启动都重来，内存缓存（`scanner.counts`）只在进程活着时有效。
+- **改法**：新增磁盘索引缓存 `<扫描根>/.sessionview-cache.json`（带 `version`），键为转录路径、值 `(size, mtime, 统计)`；`Scan` 先装载、命中即不开文件，扫完落盘。转录 append-only，size 或 mtime 任一变化即失效重算。落盘时按本轮 `keep` 集合剪掉已删除条目。写失败只当没写。
+- **踩坑**：`countEntry` 的字段当时是小写（未导出），序列化出来是 `{}`——缓存"写成功"其实什么都没记住，用例当场抓到；改为导出字段后正常。
+- **测试**：`t253_cache_test.go`——把文件换成同样长度、同样 mtime 的垃圾内容，命中缓存则消息数沿用上次值（未命中会归零）；用例同时断言缓存文件确实写出。
+- **实测**：同一棵真实目录，冷启 **3 分 08 秒**（5365 条）→ 热启 **0.64 秒**。
+- **未改**：冷启那一次仍要全量读；SHA 仍在这一次里算（之后不再重算）。
+
+## 批次 T254：阶段头只数章节会话
+
+- **现象**：阶段头「852 章 · 完成 824 · 运行 1 · 错误 12」里，点开错误条目能看到 `work/sessions/chapters.jsonl`、`style_pilot_trial.jsonl`、`style_session.jsonl`、`source/sessions/vector_*.jsonl`——这些是阶段级会话，不是章节。
+- **根因**：T251 只按 `chapterId` 收敛，没有章节身份的会话各自算一章。
+- **改法**：`stageChapterAggregate` 只统计 `chapterId` 非空的会话（角色仍限 convert）。
+- **测试**：`tests/chapter-tree.spec.ts` 新增用例（阶段会话即便 `endState=error` 也不进计数）；`npm test` 全绿；`vite build` 重出 `viewer.js`。
+- **未改**：真正的章节会话里仍有旧二进制写下的历史 `error` 终态，T250 只保证以后不再写错。
+
+## 批次 T255：预览页 `concurrent map writes` 崩溃
+
+- **现象**：`docvision sessions --serve` 起来就整个进程退出，`error.log` 里 `fatal error: concurrent map writes`，崩在 `scan` 的 WalkDir 回调（写 `s.keep` 那一行），同一份转储里还有多处数据竞争。
+- **根因**：两条都来自 T253 的索引缓存。① walk 回调直接往 scanner 字段 map 写；② 预览页**复用同一个 scanner** 做轮询，两个请求的扫描撞在一起就是两个 goroutine 同时写同一个 map。
+- **改法**：walk 期间写本地 map，走完持锁交给字段；给 scanner 加 `scanMu`，同一实例上的 `scan` 串行（扫描 0.6 秒级、轮询 2 秒一次，排队无感）。
+- **测试**：新增 `t255_concurrent_scan_test.go`——同一个 scanner 8 个 goroutine 并发 scan，`go test -race` 由失败转通过；`go test ./internal/sessionview/ -race` 全绿。
+
+## 批次 T260：通过过的产物不再被旧核对反馈打回
+
+- **现象**：某章的核对已经交了 pass，紧接着日志出现「checker 第 1 轮反馈」，转换会话被喂回上一轮的问题重做 1 小时；重做完再开核对，请求被上游 `HTTP 400 invalid_request_error / upstream_request_rejected` 拒掉，整章记「checker 会话失败」。
+- **根因**：同一章会同时留着多条核对转录（不同尝试、不同代）。驱动只看"手上这条会话的结论"，不看这一版产物**已经通过过**，于是旧会话的 issues 又生效。
+- **改法**：`internal/latex/checker_pass_marker.go`——通过时写 `<章>.tex.passed`（产物指纹 = 主 .tex + parts 全部文件按路径排序后哈希）；拿回 issues 时比对：指纹一致且记号比那条核对转录更新，就判为旧反馈，不写 `.checker`、不打回，直接按通过收尾；产物变了或记号更旧照旧打回；判 issues 时清记号。
+- **测试**：`checker_pass_marker_test.go` 四条（无记号、旧反馈、产物变化、清记号）。

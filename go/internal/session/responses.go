@@ -4,9 +4,14 @@ package session
 // 条目改走 POST {base_url}/responses（base_url 约定含 /v1，如
 // https://api.openai.com/v1）。gpt-5 / o 系等新模型只开在这个协议上。
 //
-// 与 anthropic 线路相同的取舍：只实现非流式（一次 JSON 应答），流式/
-// 实时快照专属能力不适用。Responses API 有状态（store/previous_response_id）
-// 而我们每次回放慢整个历史，因此固定 store:false + 全量 input。
+// 流式（P34 后续）：models.*.stream 为真时请求带 stream:true，按
+// response.output_text.delta / reasoning_summary_text.delta 增量喂实时
+// 快照与首字延迟，最终仍以 response.completed 里的完整 response 对象
+// 收账（output/usage/status 与非流式同源，所以两条路径共用同一个
+// decoder，转录内容不随传输方式变化）。网关不支持 SSE 时自动降级成
+// 一次 JSON 应答重试一次。
+//
+// store:false + 全量 input（我们每次回放整个历史，不用服务端状态）。
 //
 // 思考链的处理：请求 include:["reasoning.encrypted_content"]，decode 时
 // 把 encrypted_content 存进 ReasoningContent（不透明 token，回放时原样
@@ -15,6 +20,7 @@ package session
 // 有约束，摘要不受影响。
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -31,7 +37,7 @@ func (c *Client) buildResponsesBody(payload *ChatRequest) ([]byte, error) {
 	body := map[string]any{
 		"model":  c.model,
 		"store":  false, // 无状态：历史每次全量回传，不用服务端存储
-		"stream": false,
+		"stream": payload.Stream,
 	}
 	if payload.MaxTokens > 0 {
 		// Responses API 的输出预算字段名不同（reasoning 模型的硬上限语义）。
@@ -227,26 +233,37 @@ func normalizeMap(v any) (map[string]interface{}, error) {
 	return m, nil
 }
 
-// postResponses performs the /responses call (OpenAI bearer auth).
-func (c *Client) postResponses(raw []byte) (*http.Response, error) {
+// postResponses performs the /responses call (OpenAI bearer auth). A
+// streamed call uses the streaming HTTP client (no whole-body timeout).
+func (c *Client) postResponses(raw []byte, stream bool) (*http.Response, error) {
 	httpReq, err := http.NewRequest(http.MethodPost, c.baseURL+"/responses", bytes.NewReader(raw))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream, application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	return c.http.Do(httpReq)
+	httpClient := c.http
+	if stream {
+		httpClient = c.streamHTTP
+	}
+	return httpClient.Do(httpReq)
 }
 
 // responsesWireResponse is the subset of the /responses response we use.
 type responsesWireResponse struct {
-	Status     string `json:"status"`
-	Error      *struct {
+	Status string `json:"status"`
+	Error  *struct {
 		Message string `json:"message"`
 	} `json:"error"`
-	Output           []map[string]json.RawMessage `json:"output"`
-	IncompleteReason string                       `json:"incomplete_reason"`
-	Usage            *struct {
+	Output []map[string]json.RawMessage `json:"output"`
+	// The REST API reports truncation as incomplete_details.reason; the
+	// older flat incomplete_reason is still tolerated.
+	IncompleteReason  string `json:"incomplete_reason"`
+	IncompleteDetails *struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details"`
+	Usage *struct {
 		InputTokens        int `json:"input_tokens"`
 		OutputTokens       int `json:"output_tokens"`
 		TotalTokens        int `json:"total_tokens"`
@@ -257,7 +274,7 @@ type responsesWireResponse struct {
 }
 
 // decodeResponsesResponse reads one JSON /responses response back into
-// the internal ChatResponse.
+// the internal ChatResponse (non-streaming path).
 func (c *Client) decodeResponsesResponse(resp *http.Response, start time.Time) (*ChatResponse, error) {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -267,6 +284,14 @@ func (c *Client) decodeResponsesResponse(resp *http.Response, start time.Time) (
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
+	return c.decodeResponsesBody(body, start)
+}
+
+// decodeResponsesBody turns one /responses JSON object (the body itself,
+// or the "response" payload of a stream's response.completed event) into
+// a ChatResponse. Streamed and non-streamed replies therefore land on
+// exactly the same decode: transcripts do not depend on the transport.
+func (c *Client) decodeResponsesBody(body []byte, start time.Time) (*ChatResponse, error) {
 	var wire responsesWireResponse
 	if err := json.Unmarshal(body, &wire); err != nil {
 		return nil, fmt.Errorf("decode response: %w (body=%q)", err, truncate(string(body), 256))
@@ -342,13 +367,14 @@ func (c *Client) decodeResponsesResponse(resp *http.Response, start time.Time) (
 	finish := "stop"
 	if sawToolCall {
 		finish = "tool_calls"
-	} else if wire.IncompleteReason == "max_output_tokens" {
+	} else if wire.IncompleteReason == "max_output_tokens" ||
+		(wire.IncompleteDetails != nil && wire.IncompleteDetails.Reason == "max_output_tokens") {
 		finish = "length"
 	}
 	out := &ChatResponse{
-		Choices: []ChatResponseChoice{{Message: msg}},
-		Elapsed: time.Since(start),
-		TTFT:    time.Since(start), // 非流式：整体到达
+		Choices:      []ChatResponseChoice{{Message: msg}},
+		Elapsed:      time.Since(start),
+		TTFT:         time.Since(start), // 非流式：整体到达
 		FinishReason: finish,
 	}
 	if wire.Usage != nil {
@@ -372,4 +398,191 @@ func (c *Client) decodeResponsesResponse(resp *http.Response, start time.Time) (
 func mustJSON(m map[string]json.RawMessage) []byte {
 	raw, _ := json.Marshal(m)
 	return raw
+}
+
+// responsesStreamEvent is the subset of a Responses SSE event we use.
+// The final reply is carried by response.completed / response.incomplete
+// under "response", which has the same shape as the non-streaming body.
+type responsesStreamEvent struct {
+	Type     string          `json:"type"`
+	Delta    string          `json:"delta"`
+	Message  string          `json:"message"`
+	Response json.RawMessage `json:"response"`
+	Error    *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// decodeResponses dispatches on the transport: a 2xx streamed reply is
+// consumed as SSE, everything else as one JSON body.
+func (c *Client) decodeResponses(resp *http.Response, stream bool, start time.Time, hook func(phase, text string)) (*ChatResponse, error) {
+	if stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return c.readResponsesStream(resp, start, hook)
+	}
+	return c.decodeResponsesResponse(resp, start)
+}
+
+// readResponsesStream consumes the Responses API SSE stream: content and
+// reasoning deltas drive the progressive snapshot (P7) and the first-token
+// latency, while response.completed supplies the authoritative output and
+// usage. An idle watchdog aborts a stalled stream instead of hanging.
+func (c *Client) readResponsesStream(resp *http.Response, start time.Time, hook func(phase, text string)) (*ChatResponse, error) {
+	defer resp.Body.Close()
+
+	type lineMsg struct {
+		line string
+		err  error
+	}
+	lines := make(chan lineMsg, 64)
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		defer close(lines)
+		br := bufio.NewReaderSize(resp.Body, 64*1024)
+		for {
+			line, err := br.ReadString('\n')
+			if len(line) > 0 {
+				select {
+				case lines <- lineMsg{line: line}:
+				case <-stop:
+					return
+				}
+			}
+			if err != nil {
+				if err != io.EOF {
+					select {
+					case lines <- lineMsg{err: err}:
+					case <-stop:
+					}
+				}
+				return
+			}
+		}
+	}()
+
+	var contentBuf, reasoningBuf strings.Builder
+	var ttft time.Duration
+	var lastHook time.Time
+	markFirst := func() {
+		if ttft == 0 {
+			ttft = time.Since(start)
+		}
+	}
+	emit := func(phase string, buf *strings.Builder) {
+		if hook == nil || buf.Len() == 0 {
+			return
+		}
+		now := time.Now()
+		if now.Sub(lastHook) < 150*time.Millisecond {
+			return
+		}
+		lastHook = now
+		text := buf.String()
+		if len(text) > 16*1024 {
+			text = text[len(text)-16*1024:]
+		}
+		hook(phase, text)
+	}
+
+	var final *ChatResponse
+	// raw keeps the whole body so a gateway that ignores stream:true and
+	// answers with one plain JSON object can still be accounted for.
+	var raw strings.Builder
+	for {
+		var msg lineMsg
+		var open bool
+		if c.streamIdle > 0 {
+			select {
+			case msg, open = <-lines:
+			case <-time.After(c.streamIdle):
+				return nil, fmt.Errorf("流式响应空闲超时（%s 无数据）", c.streamIdle)
+			}
+		} else {
+			msg, open = <-lines
+		}
+		if !open {
+			break // EOF: the stream is over
+		}
+		if msg.err != nil {
+			return nil, fmt.Errorf("read stream: %w", msg.err)
+		}
+		raw.WriteString(msg.line)
+		payload, ok := ssePayload(msg.line)
+		if !ok {
+			continue
+		}
+		if payload == "[DONE]" {
+			break
+		}
+		var ev responsesStreamEvent
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			continue // keep-alives / vendor comments
+		}
+		switch ev.Type {
+		case "response.output_text.delta":
+			markFirst()
+			contentBuf.WriteString(ev.Delta)
+			emit("content", &contentBuf)
+		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+			markFirst()
+			reasoningBuf.WriteString(ev.Delta)
+			emit("reasoning", &reasoningBuf)
+		case "response.completed", "response.incomplete":
+			if len(ev.Response) == 0 {
+				continue
+			}
+			out, derr := c.decodeResponsesBody(ev.Response, start)
+			if derr != nil {
+				return nil, derr
+			}
+			final = out
+		case "response.failed", "error":
+			// The provider puts the reason inside the nested response
+			// object; fall back to the event-level fields when absent.
+			if len(ev.Response) > 0 {
+				if _, derr := c.decodeResponsesBody(ev.Response, start); derr != nil {
+					return nil, derr
+				}
+			}
+			reason := ev.Message
+			if ev.Error != nil && ev.Error.Message != "" {
+				reason = ev.Error.Message
+			}
+			if reason == "" {
+				reason = "unknown error"
+			}
+			return nil, fmt.Errorf("responses failed: %s", reason)
+		}
+	}
+	if final == nil {
+		// No response.completed: either the endpoint ignored stream:true
+		// and sent one JSON body, or the stream was truncated mid-flight.
+		out, derr := c.decodeResponsesBody([]byte(raw.String()), start)
+		if derr == nil {
+			out.TTFT = out.Elapsed
+			return out, nil
+		}
+		// A body that DOES decode but reports failure (status:"failed",
+		// safety block) must surface its reason, not a generic message.
+		if strings.Contains(derr.Error(), "responses failed") {
+			return nil, derr
+		}
+		return nil, fmt.Errorf("流式响应结束但没有 response.completed（无法收账）")
+	}
+	final.Streamed = true
+	if ttft == 0 {
+		ttft = final.Elapsed
+	}
+	final.TTFT = ttft
+	final.ReasoningChars = reasoningBuf.Len()
+	return final, nil
+}
+
+// ssePayload strips the "data: " prefix of one SSE line.
+func ssePayload(line string) (string, bool) {
+	line = strings.TrimRight(line, "\r\n")
+	if !strings.HasPrefix(line, "data:") {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(line, "data:")), true
 }

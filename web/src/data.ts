@@ -3,8 +3,8 @@
  * 旧页 refreshIndex/applyIndex/selectSession/pullSession 的移植；渲染由
  * Timeline.vue / DetailsPanel.vue 的 computed 响应式接管，这里只管数据流。
  */
-import { state, setBannerText } from './state'
-import { findSession, normalizeLines, indexCallEstimates, groupKey, setCollapsed } from './legacy/sidebar'
+import { state, setBannerText, clearRetryNote } from './state'
+import { findSession, normalizeLines, indexCallEstimates, groupKey, setCollapsed, dedupeChapterAttempts } from './legacy/sidebar'
 import type { PartialInfo } from './legacy/types'
 
 let pullSeq = 0
@@ -31,14 +31,47 @@ export function revealProject(project: string): void {
   target.scrollIntoView({ block: 'nearest' })
 }
 
+/* P57：fork 之后自动切到新会话。排队只是写一个文件，新尝试是 latex 那边建的，
+ * 所以这里记一个"等它出现"的守望条件：下一轮 /api/index 里出现更晚的、同项目
+ * 同章节同角色的一条转录，就把它设为当前（用户口径："自动切换这个为主会话"）。 */
+let forkWatch: { project: string; chapter: string; role: string; prevId: string; since: number } | null = null
+
+export function watchFork(project: string, chapter: string, role: string, prevId: string): void {
+  forkWatch = { project, chapter, role, prevId, since: Date.now() - 60_000 }
+}
+
+function settleForkWatch(): void {
+  const w = forkWatch
+  if (!w) return
+  // 排队后 latex 一直没消费（前置条件没到 / 已经关掉）：别在二十分钟后突然把
+  // 视图抢走。
+  if (Date.now() - w.since > 20 * 60_000) { forkWatch = null; return }
+  const want = (s: any) =>
+    s && s.project === w.project &&
+    (w.chapter ? s.chapterId === w.chapter : s.stage === 'vector') &&
+    (w.chapter ? s.chapterRole === w.role : true) &&
+    s.id !== w.prevId
+  const hit = (state.sessions || []).filter(want).sort((a: any, b: any) => String(b.mtime).localeCompare(String(a.mtime)))[0]
+  if (!hit) return
+  // 只认排队之后才出现/更新的那条（老转录的 mtime 早于排队时间，不能算"新尝试"）。
+  if (Date.parse(hit.mtime) < w.since) return
+  forkWatch = null
+  selectSession(hit.id)
+}
+
 export function applyIndex(payload: any): void {
-  state.sessions = payload.sessions || []
+  // T194：归档目录里的副本与工作树里那份是同一个章节尝试，统一在这里去掉，
+  // 侧栏 / 章节树 / 历史列表拿到的就是一条。
+  state.sessions = dedupeChapterAttempts(payload.sessions || [])
   state.dedupeReviews = payload.dedupeReviews || []
+  state.retries = payload.retries || {}
+  state.retryRoles = payload.retryRoles || {}
   state.root = payload.root || state.root
   state.generated = payload.generated || state.generated
   // Vue 的响应式列表会做 keyed 更新：签名没变时算出的 groups 不变，DOM 不动；
   // 这里仍保留签名（旧页字段），给需要显式判重的调用方用。
   state.listSig = listSigOf()
+  settleForkWatch()
 }
 
 function listSigOf(): string {
@@ -131,6 +164,8 @@ export function pullSession(reset: boolean): Promise<void> {
 
 export function selectSession(id: string): void {
   const s = findSession(id)
+  // T239：上一章那条「已加入…队列」的回执说的不是眼前这一条，切走就清掉。
+  clearRetryNote()
   state.current = s
   if (staticSessions && staticSessions[id]) {
     // 静态快照：行已在手，不走 /api。
@@ -222,4 +257,76 @@ export function bootData(): void {
       selectSession((live || state.sessions[0]).id)
     }
   })
+}
+
+// requestChapterRetry 是页面上「重试这一章」的落点（P53）：只往项目的
+// work/retry/ 排一个请求文件，不执行任何命令。正在跑的 docvision latex 会在
+// 转换阶段的安全点消费它；没在跑就留到下次启动。
+/* role：convert（重转，开新尝试）/ checker（只重新核对）/ continue（接着干）。
+   from > 0 = 从这条记录之后继续：历史截到这一行，后面丢掉，开一个新尝试。 */
+/* postJSON 是写入口的统一调用（T209）：服务端用 http.Error 写的失败原因是
+ * **纯文本**（"这条会话可能还在写（90 秒内有更新），等它停下来再删"），而调用方
+ * 一律按 JSON 解析——解析失败就退回 `HTTP 409`，等于把唯一有用的那句话丢掉，
+ * 用户只看到"失败：HTTP 409"，既不知道原因也不知道怎么办。这里先按文本读，
+ * 能解析成 JSON 就用 JSON，失败时优先用服务端那句话。 */
+async function postJSON(url: string, body: unknown): Promise<any> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const text = (await res.text()).trim()
+  let data: any = {}
+  if (text) {
+    try { data = JSON.parse(text) } catch { data = null }
+  }
+  if (!res.ok) {
+    const reason = (data && (data.error || data.message)) || text || 'HTTP ' + res.status
+    throw new Error(String(reason))
+  }
+  return data === null ? {} : data
+}
+
+export function requestChapterRetry(
+  project: string,
+  chapter: string,
+  role = 'convert',
+  reason = '',
+  extra: { from?: number; path?: string; attempt?: number } = {},
+): Promise<any> {
+  return postJSON('/api/retry', { project, chapter, role, reason, ...extra })
+}
+
+// chapterPendingRetry 报告某项目的某章是否已经在重试队列里（侧栏/详情栏据此
+// 改文案，避免用户连点）。
+/* 删掉一条"转错的记录"（P2）：只删转录，作废尝试的证据目录由服务端一起清。 */
+// truncateSession 就地截断一条转录到第 line 行（含），返回 null 表示成功；
+// 服务端会先把整份原文件备份到 work/sessions/.trash/ 下。
+export function truncateSession(project: string, path: string, line: number): Promise<any> {
+  return postJSON('/api/truncate', { project, path, line })
+}
+
+export function dropSession(project: string, path: string): Promise<any> {
+  return postJSON('/api/drop', { project, path }).then((data) => {
+    void refreshIndex()
+    return data
+  })
+}
+
+/* cancelChapterRetry 撤销一条还没被消费的排队请求（P56）：误触的出口。返回
+   撤掉了几条——0 表示 latex 已经把它消费了，这时只能去「历史」里删那条新会话。 */
+export function cancelChapterRetry(project: string, chapter: string, role = 'convert', path = ''): Promise<any> {
+  return postJSON('/api/retry/cancel', { project, chapter, role, path }).then((data) => {
+    void refreshIndex()
+    return data
+  })
+}
+
+export function chapterPendingRetry(project: string, chapter: string, role = ''): boolean {
+  const list = (state.retries || {})[project] || []
+  if (list.indexOf(chapter) < 0) return false
+  if (!role) return true
+  const roles = (state.retryRoles || {})[project] || {}
+  const queued = roles[chapter] || 'convert'
+  return queued === role
 }

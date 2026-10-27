@@ -1,7 +1,7 @@
 // T63：convert/checker 阶段聚合——跑动只显 live 行、全完成收行、错误保留、
 // 过滤不聚合；T62：fix/final-review 阶段名进表。
 import { describe, expect, test } from 'vitest'
-import { stageChapterAggregate, stageRank, stageTitleOf, sessionStageOf, buildGroups } from '../src/legacy/sidebar'
+import { stageChapterAggregate, stageRank, stageTitleOf, sessionStageOf, buildGroups, buildChapterTree } from '../src/legacy/sidebar'
 import { state } from '../src/state'
 
 const mk = (id: string, over: Record<string, unknown> = {}) => ({ id, stage: 'convert', ...over })
@@ -29,8 +29,22 @@ describe('stageChapterAggregate（T63）', () => {
   test('搜索过滤时不聚合', () => {
     expect(stageChapterAggregate('convert', [mk('a')], true)).toBeNull()
   })
-  test('其它阶段不聚合', () => {
-    expect(stageChapterAggregate('style', [mk('a')], false)).toBeNull()
+  test('recursive checker is paired below its conversion and not double-counted', () => {
+    const items = [
+      mk('root-convert', { chapterId: 'chapter_011', chapterRole: 'convert', chapterOrder: 11 }),
+      mk('child-2', { chapterId: 'chapter_011_child_02', chapterParent: 'chapter_011', chapterRole: 'convert' }),
+      mk('child-1', { chapterId: 'chapter_011_child_01', chapterParent: 'chapter_011', chapterRole: 'convert' }),
+      mk('child-checker', { chapterId: 'chapter_011_child_02', chapterParent: 'chapter_011', chapterRole: 'checker' }),
+      mk('root-checker', { chapterId: 'chapter_011', chapterRole: 'checker' }),
+    ]
+    const roots = buildChapterTree(items)
+    expect(roots).toHaveLength(1)
+    expect(roots[0].convert.id).toBe('root-convert')
+    expect(roots[0].checker.id).toBe('root-checker')
+    expect(roots[0].children.map((node) => node.id)).toEqual(['chapter_011_child_01', 'chapter_011_child_02'])
+    expect(roots[0].children[1].checker.id).toBe('child-checker')
+    const aggregate = stageChapterAggregate('convert', items, false)!
+    expect(aggregate.total).toBe(3)
   })
 })
 
