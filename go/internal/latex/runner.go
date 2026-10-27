@@ -785,7 +785,11 @@ func classifyProgressText(done, total, failed, running int) string {
 	return fmt.Sprintf("[classify %d/%d] %.2f%% (failed: %d, running: %d)", done, total, pct, failed, running)
 }
 
-func processProgressText(done, total, ok, errors, warned, raster, running int) string {
+// processProgressText 的 done 是"真画出来了"，fallback 是"以原图交付"（含
+// TikZ 没通过与会话/接口错误两种原因），api 是 fallback 里由接口/会话错误造成
+// 的那部分——只报两个互斥计数时，18 张全是接口错误会显示成 "errors: 18,
+// fallback: 0"，看着像图本身全错了（T262）。
+func processProgressText(done, total, ok, fallback, api, raster, running int) string {
 	pct := 0.0
 	if total > 0 {
 		pct = float64(done) * 100.0 / float64(total)
@@ -793,8 +797,12 @@ func processProgressText(done, total, ok, errors, warned, raster, running int) s
 	if ok < 0 {
 		ok = 0
 	}
-	return fmt.Sprintf("[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, raster: %d, running: %d)",
-		done, total, pct, ok, errors, warned, raster, running)
+	parts := fmt.Sprintf("done: %d, fallback: %d", ok, fallback)
+	if api > 0 {
+		parts += fmt.Sprintf(", api-err: %d", api)
+	}
+	parts += fmt.Sprintf(", raster: %d, running: %d", raster, running)
+	return fmt.Sprintf("[process %d/%d] %.2f%% (%s)", done, total, pct, parts)
 }
 
 // classifyPhase starts here
@@ -1002,13 +1010,16 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	// 同上：进度只算本次要处理的（基数是 "Already done" 行的事）。
-	total, done, failed, warned, running := 0, 0, 0, 0, 0
+	total, done, failed, fallback, running := 0, 0, 0, 0, 0
 	// raster 计数：保留原图的图（档位1 每张都生成解释文本），单独显示
 	// 让档位1 的控制台能看出"矢量 vs 原图"的比例。
 	raster := 0
 	// okCount 与 apiErr 用于"接口整体不通就早点收手"：现场一次配置笔误让
 	// 8/8 张图各耗 90s（含退避重试）全部 fallback，白等十几分钟。
 	okCount, apiErr := 0, 0
+	// fatalMsg 收"重试也不会变"的 4xx（模型名/参数写错）：这类错误逐张跑只是
+	// 空转，整本能白跑掉几十张，必须当场停下并点名（T262）。
+	fatalMsg := ""
 	for _, t := range pending {
 		mu.Lock()
 		p, ok := prog[t.key()]
@@ -1029,11 +1040,11 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			return ""
 		}
 		mu.Lock()
-		d, f, w, rn, rs := done, failed, warned, running, raster
+		d, fb, fe, api, rn, rs, okn := done, fallback, failed, apiErr, running, raster, okCount
 		// 全书盘点（P64）在锁内算：prog 是并发写的 map，遍历它必须跟着同一把锁。
 		book := countImageStatuses(prog)
 		mu.Unlock()
-		return processProgressText(d, total, d-f-w, f, w, rs, rn) + book.summary()
+		return processProgressText(d, total, okn, fb+fe, api, rs, rn) + book.summary()
 	})
 	defer progLive.Close()
 	if total > 0 {
@@ -1052,6 +1063,15 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		// 连续接口/会话错误且一张都没成功：明显不是图的问题（配置、额度、
 		// 端点），再逐张重试只是空转——停在这里，剩下的保持未处理状态，
 		// 下次运行自动继续。
+		mu.Lock()
+		fatal := fatalMsg
+		mu.Unlock()
+		if !aborted && fatal != "" {
+			aborted = true
+			r.log.LogError(0, "[process] 模型/配置错误（不可重试）：", truncateStr(fatal, 300))
+			r.log.LogError(0, "[process] 这类错误重试多少次都一样，已停止处理剩下的图片；"+
+				"改对配置或换一个可用模型后重跑即可（已完成的结果会跳过）")
+		}
 		if !aborted && apiErrs >= processAPIErrorAbort && successes == 0 {
 			aborted = true
 			r.log.LogError(0, "[process] 连续", strconv.Itoa(apiErrs),
@@ -1073,6 +1093,14 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 				mu.Lock()
 				done++
 				running--
+				// 按保存下来的状态归类：fallback（以原图交付）与 failed（真
+				// 失败）在控制台上不能混成一个数字。
+				switch pp.Status {
+				case ImageStatusFallback:
+					fallback++
+				case ImageStatusError:
+					failed++
+				}
 				mu.Unlock()
 				progress()
 			}()
@@ -1133,11 +1161,6 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			case ClassVector:
 				if compErr != nil {
 					r.log.LogWarning(tid, "[vector] 工具链不可用，保留原图（下次运行重试）:", tt.imgPath)
-					// 状态是 fallback，进度行的 fallback 计数就必须跟着加——否则
-					// 收尾那行会出现 done:0/errors:0/fallback:0 全零而图其实被跳过。
-					mu.Lock()
-					warned++
-					mu.Unlock()
 					pp.Kept = true
 					pp.Status = "fallback"
 					pp.FallbackReason = "工具链不可用（缺 xelatex/latexmk 等），保留原图待下次运行重试"
@@ -1158,27 +1181,44 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 					pp.Status = "done"
 					sessOK, sessType = true, "vector"
 				} else {
-					// 两种失败要分清：接口/会话错误（不是图的问题，整轮都会
-					// 失败，算 errors）与 TikZ 校验失败（算 fallback，下次重试）。
-					if isSessionAPIError(pp.Error) {
+					// 三种失败要分清：
+					//   ① 明确标了"不可重试"的 4xx（模型名、参数写错）：逐张重跑
+					//      只会撞同一堵墙，判真失败并让这一批立刻停下（T262）；
+					//   ② 其他接口/会话错误：保留原图（fallback），下次重试；
+					//   ③ TikZ 校验没过：同样保留原图，下次重试。
+					switch {
+					case isSessionAPIError(pp.Error) && isSessionNonRetryableError(pp.Error):
+						r.log.LogError(tid, "[vector] 模型/配置错误（不可重试），这一批就此停下:", tt.imgPath, pp.Error)
+						mu.Lock()
+						apiErr++
+						if fatalMsg == "" {
+							fatalMsg = pp.Error
+						}
+						mu.Unlock()
+						pp.Status = ImageStatusError
+						pp.Error = firstNonEmpty(pp.Error, "模型/配置错误（不可重试）")
+						sessType = "vector-failed"
+						sessMsg = pp.Error
+					case isSessionAPIError(pp.Error):
 						r.log.LogError(tid, "[vector] 会话/接口错误（不是 TikZ 问题），保留原图:", tt.imgPath, pp.Error)
 						mu.Lock()
-						failed++
 						apiErr++
 						mu.Unlock()
-					} else {
+						pp.Kept = true
+						pp.Status = "fallback"
+						pp.FallbackReason = firstNonEmpty(pp.Error, "会话/接口错误，保留原图待下次运行重试")
+						sessType = "vector-fallback"
+						sessMsg = pp.Error
+					default:
 						// Fallback: keep the original. Logged as ERROR and
 						// annotated in the markdown; retried next run.
 						r.log.LogError(tid, "[vector] TikZ 未通过，保留原图（下次运行自动重试）:", tt.imgPath, pp.Error)
-						mu.Lock()
-						warned++
-						mu.Unlock()
+						pp.Kept = true
+						pp.Status = "fallback"
+						pp.FallbackReason = firstNonEmpty(pp.Error, "TikZ 重画没有通过校验，保留原图待下次运行重试")
+						sessType = "vector-fallback"
+						sessMsg = pp.Error
 					}
-					pp.Kept = true
-					pp.Status = "fallback"
-					pp.FallbackReason = firstNonEmpty(pp.Error, "TikZ 重画没有通过校验，保留原图待下次运行重试")
-					sessType = "vector-fallback"
-					sessMsg = pp.Error
 				}
 
 			case ClassRaster:
@@ -1234,6 +1274,13 @@ func isSessionFatalError(msg string) bool {
 		}
 	}
 	return false
+}
+
+// isSessionNonRetryableError：客户端已经判定"重试也不会变"的 4xx（模型名、
+// 参数写错）。这类错误逐张重试只是空转——实测一次模型名写错，一本 379 张的
+// 书白跑掉 18 张才因为"连续接口错误"停下，且每张都被记成"退回原图"（T262）。
+func isSessionNonRetryableError(msg string) bool {
+	return strings.Contains(msg, "不可重试") || strings.Contains(msg, "model_not_found")
 }
 
 func isSessionAPIError(msg string) bool {

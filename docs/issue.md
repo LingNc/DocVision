@@ -1540,3 +1540,10 @@ user 轮
   改法：style 系统提示词加两步——先写 STYLE INVENTORY（逐项过一遍：封面/扉页/目录、各级标题、页眉页脚、正文与缩进、列表、定理类、例题、练习与解答、并排内容、表格（含长表）、图与子图、公式编号、脚注、边注、代码/算法、框线色块面板、引用、附录等，没有的写明 absent），再把 cls 做成覆盖整份清单的**参数化模板库**（章节作者只写内容、不写版式；同一结构有多种形态就加键值选项，而不是复制一份）。manual 增加固定两节：`## Style inventory`（结构 → 出处页 → 对应命令/环境）与 `## Template library`（每类块的复制即用骨架）；example 除了还原一页真实页面，还要用上题干+解答、定理+证明、表格、带图注的图这几类模板，兼做冒烟测试。
   验证：prompts 包守护测试全绿（工具名/变量未变）；latex 包全量测试除既有的 venv 环境用例外全绿。
   未改：不动 style 的提交校验（仍是 example 编译通过 + 工具契约）；不新增配置项。
+- T262 图片阶段控制台把"接口错误"和"图没画好"混成一个数，全书口径把位图/文字和跟随项都算错。
+  现象：修好配置重跑之后，进度行是 `[process 18/23] ... (done: 0, errors: 18, fallback: 0)`、全书那截是 `全书 27/388（画好 9、退回原图 18、失败 0、未处理 361）`——看着像 18 张图全画错了、还有 361 张没处理，其实 18 张全是同一个模型名报 404、361 是复用代表图的跟随项。
+  根因：① 进度行把"非成功"都算进 errors，fallback 只统计 TikZ 没过与工具链缺失两种，接口错误造成的退回原图记在 errors 里；② 全书盘点把 `status=done` 一律叫"画好"，位图/文字图也是 done（它们本来就不画）；③ 盘点没有区分作业项与 dedupe 跟随项，几百条跟随全落进"未处理"。
+  改法：进度行按保存下来的状态分栏——done（真画出来）、fallback（以原图交付）、raster，接口/会话错误作为 fallback 的子集单独标 `api-err`；不要重试的 4xx（`model_not_found`、"不可重试"）判真失败并让这一批当场停下、把原因打出来，不再逐张空转。全书盘点拆成两层：作业项 = 非跟随的代表图 + 文字 + 位图，跟随项单列；文字/位图完成单列一栏，零的分栏不打印。
+  验证：`TestCountImageStatusesSplitsWorkAndFollowers`（9 条记录：作业 7、跟随 2、文字/位图 2）、`TestStatusSummaryDropsZeroBuckets`、`TestNonRetryableSessionError`（404 模型名判不可重试，限流/网关不被误判）、`TestPhaseProgressCountsThisRunOnly` 补了 `fallback: 18, api-err: 18` 那一行；latex 全量除既有 venv 环境用例外全绿。
+  未改：不动 `processAPIErrorAbort` 的阈值（连续 3 张接口错误且零成功仍会早停）；不动配置，模型名要在 `config.yaml` 的 `models.<名>` 里换掉。
+

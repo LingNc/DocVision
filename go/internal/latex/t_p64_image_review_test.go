@@ -59,9 +59,10 @@ func TestMotifReviewShowsImageStatusAndLooseSets(t *testing.T) {
 	}
 }
 
-// P64：全书盘点必须只看 status（raster/fallback 也算收尾），否则续跑时进度行
-// 会永远显示"还剩一大半"。
-func TestCountImageStatusesUsesStatusOnly(t *testing.T) {
+// P64/T262：全书盘点分"作业项"与"跟随项"两层，文字/位图不许算成"矢量画好"。
+// 现场口径：一本 388 条引用的书里，379 条矢量只有 23 张是代表图，其余 356 条
+// 跟随代表图；把它们算进"未处理"会显示成"还剩 361 张"，看着像什么都没做。
+func TestCountImageStatusesSplitsWorkAndFollowers(t *testing.T) {
 	prog := map[string]*imageProgress{
 		"a": {Class: ClassVector, Status: ImageStatusDone},
 		"b": {Class: ClassRaster, Status: ImageStatusDone},
@@ -69,9 +70,35 @@ func TestCountImageStatusesUsesStatusOnly(t *testing.T) {
 		"d": {Class: ClassVector, Status: ImageStatusClassified},
 		"e": {Class: ClassVector, Status: ImageStatusError},
 		"f": {Class: ClassVector},
+		// 跟随项：矢量 + 有 equivalent_to，不单独跑，也不算作业项。
+		"g": {Class: ClassVector, Status: ImageStatusClassified, EquivalentTo: "a"},
+		"h": {Class: ClassVector, Status: ImageStatusDone, EquivalentTo: "a"},
+		"i": {Class: ClassText, Status: ImageStatusDone},
 	}
 	c := countImageStatuses(prog)
-	if c.Total != 6 || c.Settled != 3 || c.OK != 2 || c.Fallback != 1 || c.Raster != 1 || c.Error != 1 || c.Pending != 2 {
-		t.Fatalf("盘点不对: %+v", c)
+	if c.Total != 9 || c.Work != 7 || c.Followers != 2 {
+		t.Fatalf("作业项/跟随项分错了: %+v", c)
+	}
+	if c.VectorOK != 1 || c.TextRaster != 2 || c.Fallback != 1 || c.Error != 1 || c.Pending != 2 {
+		t.Fatalf("分栏不对: %+v", c)
+	}
+	// 文案：文字/位图单独一栏；零的分栏不出现；跟随项单独一句。
+	got := c.summary()
+	for _, want := range []string{"全书 4/7 项", "矢量画好 1", "文字/位图 2", "退回原图 1", "失败 1", "未处理 2", "跟随代表图 2 张"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("全书口径缺 %q：%s", want, got)
+		}
+	}
+}
+
+// 全部收尾时不该再出现"未处理 0、失败 0"这类噪音。
+func TestStatusSummaryDropsZeroBuckets(t *testing.T) {
+	c := imageStatusCounts{Total: 3, Work: 2, VectorOK: 1, TextRaster: 1, Followers: 1}
+	got := c.summary()
+	if strings.Contains(got, "未处理") || strings.Contains(got, "失败") {
+		t.Fatalf("零分栏不该出现：%s", got)
+	}
+	if !strings.Contains(got, "全书 2/2 项") || !strings.Contains(got, "跟随代表图 1 张") {
+		t.Fatalf("收尾口径不对：%s", got)
 	}
 }

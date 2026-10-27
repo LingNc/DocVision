@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,11 +34,7 @@ func (p *motifProgress) text() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	elapsed := int(time.Since(p.started).Seconds())
-	cum := ""
-	if p.cum.Total > 0 {
-		cum = fmt.Sprintf(" · 全书 %d/%d（画好 %d、退回原图 %d、失败 %d、未处理 %d）",
-			p.cum.Settled, p.cum.Total, p.cum.OK, p.cum.Fallback, p.cum.Error, p.cum.Pending)
-	}
+	cum := p.cum.summary()
 	switch p.phase {
 	case "scan":
 		return fmt.Sprintf("[dedupe] 扫描候选 %d/%d%s · 已用 %ds", p.scanned, p.images, cum, elapsed)
@@ -82,14 +79,19 @@ func (p *motifProgress) finish() {
 // imageStatusCounts 是**整本书**的图片状态盘点（P64）。进度行只显示本轮队列，
 // 于是续跑时永远看到 1/1；这里从 progress_items 汇总出全书口径，让终端和页面
 // 都能回答"到底还剩多少张没处理"。
+//
+// 口径分两层（T262）：**作业项**是真正要跑的东西——非跟随的矢量代表图、文字图、
+// 位图；**跟随项**是 dedupe 判为同一内容、复用代表图成品的那批，它们不单独跑，
+// 算进"未处理"会让人以为还有几百张没动。文字图/位图完成也不是"画好"，单独一栏。
 type imageStatusCounts struct {
-	Total    int
-	Settled  int // done + fallback（这一轮不会再动）
-	OK       int // done：真画出来了
-	Fallback int // 退回原图/栅格
-	Error    int
-	Pending  int // classified 或空：还没处理
-	Raster   int // 类别是 raster 的（直接保留原图，不画）
+	Total      int // 全部引用
+	Work       int // 作业项：代表图 + 文字 + 位图
+	VectorOK   int // 矢量真画出来的
+	TextRaster int // 文字/位图收尾（取文本或保留原图）
+	Fallback   int // 以原图交付（TikZ 没过 / 会话错误）
+	Error      int // 真失败（下一轮会重试）
+	Pending    int // 作业项里还没跑到的
+	Followers  int // 跟随代表图的（不单独跑）
 }
 
 func countImageStatuses(prog map[string]*imageProgress) imageStatusCounts {
@@ -99,35 +101,59 @@ func countImageStatuses(prog map[string]*imageProgress) imageStatusCounts {
 			continue
 		}
 		c.Total++
-		if p.Class == ClassRaster {
-			c.Raster++
+		// 跟随项（dedupe 等价于另一张代表图）不占作业位：它们的成品随代表图
+		// 重新物化，算"未处理"会让全书口径永远差着几百张。
+		if p.Class == ClassVector && strings.TrimSpace(p.EquivalentTo) != "" {
+			c.Followers++
+			continue
 		}
-		switch {
-		case imageStatusSettled(p.Status):
-			c.Settled++
-			if p.Status == ImageStatusDone {
-				c.OK++
-			} else {
+		c.Work++
+		if imageStatusSettled(p.Status) {
+			switch {
+			case p.Status == ImageStatusDone && p.Class == ClassVector:
+				c.VectorOK++
+			case p.Status == ImageStatusDone:
+				c.TextRaster++
+			default:
 				c.Fallback++
 			}
-		case p.Status == ImageStatusError:
-			c.Error++
-		default:
-			c.Pending++
+			continue
 		}
+		if p.Status == ImageStatusError {
+			c.Error++
+			continue
+		}
+		c.Pending++
 	}
 	return c
 }
 
-// summary 是进度行尾巴上的全书口径（P64）：续跑时这一轮可能只处理一两张，
-// 只看本轮队列会显示成 1/1，看不出整本书还剩多少。Total 为 0（还没有任何
-// progress_items）时返回空串，不给分类阶段平白加噪音。
+// summary 是进度行尾巴上的全书口径（P64/T262）：续跑时这一轮可能只处理一两张，
+// 只看本轮队列会显示成 1/1。零的分栏不打印，省得"失败 0、未处理 0"占地方。
 func (c imageStatusCounts) summary() string {
-	if c.Total == 0 {
+	if c.Total == 0 || c.Work == 0 {
 		return ""
 	}
-	return fmt.Sprintf(" · 全书 %d/%d（画好 %d、退回原图 %d、失败 %d、未处理 %d）",
-		c.Settled, c.Total, c.OK, c.Fallback, c.Error, c.Pending)
+	done := c.VectorOK + c.TextRaster + c.Fallback
+	var parts []string
+	add := func(label string, n int) {
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", label, n))
+		}
+	}
+	add("矢量画好", c.VectorOK)
+	add("文字/位图", c.TextRaster)
+	add("退回原图", c.Fallback)
+	add("失败", c.Error)
+	add("未处理", c.Pending)
+	line := fmt.Sprintf(" · 全书 %d/%d 项", done, c.Work)
+	if len(parts) > 0 {
+		line += "（" + strings.Join(parts, "、") + "）"
+	}
+	if c.Followers > 0 {
+		line += fmt.Sprintf(" · 跟随代表图 %d 张", c.Followers)
+	}
+	return line
 }
 
 // fallbackImageNames 列出"退回原图"的图名（按名字排序，去掉 md 前缀里的重复）。
