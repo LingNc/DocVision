@@ -2842,3 +2842,5 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 补充（同一批，第二个提交）：复查页的「LaTeX 源」与「会话」入口由 `figures/<名>.pdf` 反推（`figureBaseName`），指向 `source/tikz/<名>.tex` 与 `source/sessions/vector_<名>.jsonl`；图注备注带上分类。测试同步断言这两个链接，未画过的图不生成它们。
 
 补充（同一批，第三个提交）：`progress_items` 新增 `fallback_reason`，process 的两个退回分支（工具链不可用、TikZ 校验没过）各写一句原因，复查页「退回原图的」那段逐张显示——以前只有状态，看不出"为什么退"到底是环境问题还是这张图本身。
+
+补充（同一批，第四个提交）：核对页改成**按磁盘现状现渲染**。新增 `internal/reviewpage`（样式、灯箱、卡片、分段、状态词表一份，`StatusSettled`/`StatusQuality`/`StatusLabel`，latex 的 `image_status.go` 改为转发），`internal/sessionview/review_live.go` 读 `groups.json`+`progress_items`+`figures/`+`tikz/`+`sessions/vector_*.jsonl` 造页面：每张图左原图右成品并排（`.shot.orig` / `.shot.conv`，`:has()` 才把卡片放宽到两栏），图注直出类别、状态、代表图跟随关系、退回原因，成品与链接只在文件存在时出现；`/dedupe` 先试现渲染、没有 `groups.json` 才退回静态 `review.html`，侧栏入口的判据也从「有 review.html」放宽到「有 groups.json 或 review.html」。测试：`reviewpage` 单测（并排/缺成品不伪造/状态词表/命名口径）、`sessionview` 的 `TestRenderLiveImageReviewUsesDiskFacts`（状态、并排成品、三类链接、两段集合、统计口径）与 `TestRenderLiveImageReviewNeedsGroups`。

@@ -24,10 +24,19 @@ func (v *viewerServer) serveDedupeReview(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "拒绝越界路径", http.StatusBadRequest)
 		return
 	}
+	base := v.dedupeMediaBase(project)
+	// P64：静态 review.html 是 dedupe 收尾时的快照（写它的时候 process 还没跑），
+	// 状态与成品都会过期。能按磁盘现渲染就现渲染，静态页只作为退路。
+	if live, ok := renderLiveImageReview(filepath.Dir(dir)); ok {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(injectBaseHref(live, base))
+		return
+	}
 	page, err := os.ReadFile(filepath.Join(dir, "review.html"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			http.Error(w, "这个项目还没有 dedupe 复查页（整组核验跑完才有）", http.StatusNotFound)
+			http.Error(w, "这个项目还没有图片核对页（整组核验跑完才有）", http.StatusNotFound)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -35,7 +44,7 @@ func (v *viewerServer) serveDedupeReview(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(injectBaseHref(page, v.dedupeMediaBase(project)))
+	_, _ = w.Write(injectBaseHref(page, base))
 }
 
 // dedupeDir 把侧栏的项目名映射到 <root>/<项目>/source/dedupe；根目录组（旧单项目
@@ -110,8 +119,12 @@ func (v *viewerServer) dedupeReviewProjects(sessions []SessionInfo) []string {
 		if !ok {
 			continue
 		}
-		if st, err := os.Stat(filepath.Join(dir, "review.html")); err == nil && st.Mode().IsRegular() {
-			out = append(out, s.Project)
+		// 有分组结论就能现渲染；老项目只有静态页也照样给按钮。
+		for _, name := range []string{"groups.json", "review.html"} {
+			if st, err := os.Stat(filepath.Join(dir, name)); err == nil && st.Mode().IsRegular() {
+				out = append(out, s.Project)
+				break
+			}
 		}
 	}
 	sort.Strings(out)
