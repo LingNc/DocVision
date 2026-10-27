@@ -42,6 +42,8 @@ figure img{display:block;width:100%;height:auto;background:#fff;border:1px solid
 figcaption{font-size:11px;color:#555;margin-top:3px}
 figcaption .nm{display:block;word-break:break-all}
 figcaption .nt{display:block;word-break:normal;overflow-wrap:anywhere;color:var(--dim)}
+figcaption .st{display:inline-block;margin-top:2px;padding:0 5px;border-radius:999px;background:var(--chip);font-size:10.5px}
+figcaption .lk{display:block;margin-top:2px;font-size:10.5px}
 a{color:#0b6bcb;text-decoration:none}
 a.shot{display:block;cursor:zoom-in}
 .empty{color:var(--dim);font-size:12.5px}

@@ -84,6 +84,9 @@ func (c *motifCandidate) coverage() (motifAlignImage, bool) {
 func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress, progDir, outDir string) {
 	progress := newMotifProgress(r.log, len(tasks))
 	defer progress.finish()
+	// P64：整本书的盘点先算出来——续跑时这一轮的队列可能只剩一两张，只报它
+	// 就会显示成 1/1，看不出全书还剩多少。
+	progress.cumulative(countImageStatuses(prog))
 	// 第一遍只读字节、算摘要，不解码（T141）：上一次的结论还完整、输入与规则
 	// 也没变时，整段跳过——不再解码 388 张图、不再算几万对重合度、也不再回放
 	// 会话。"续跑又要扫一遍候选"的代价因此从分钟级降到读一遍文件。
@@ -390,7 +393,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	if n := motifAdoptCopies(leaders, copies, byTaskKey, progDir); n > 0 {
 		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张逐字节重复的图片跟随代表图，不重复作图", n))
 	}
-	r.writeMotifArtifacts(outDir, leaders, copies, applied, alignScores)
+	r.writeMotifArtifacts(outDir, leaders, copies, applied, alignScores, prog)
 	// 收尾的进度行说的是**实际开了几个会话**：整理会话没开就不该多算一格
 	// （T126 的 [dedupe 2/2] 曾经看起来像"两个会话都跑完了"）。
 	total := len(scopes) + consolSessions

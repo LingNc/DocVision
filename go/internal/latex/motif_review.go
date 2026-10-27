@@ -72,12 +72,23 @@ func (p *motifReviewProbe) of(a, b *motifCandidate) (float64, bool) {
 
 // motifReviewItem 是复查页上的一个格子。
 type motifReviewItem struct {
-	Name  string // 文件名（同一页里够区分）
+	Name  string // 文件名（同一页里够清楚）
 	Ref   string // 完整引用，悬浮说明用
 	Image string // 相对 source/ 的图片路径（与 md 里的引用同一写法）
 	Thumb string // 相对 source/dedupe/ 的缩略图路径；空 = 没有缩略图，直接用原图
 	Note  string // 图下面那行小字（分数 / 副本数）
-	Key   bool   // 代表图
+	// P64：单图核对要一眼看出"这张现在是什么状态、判定记在哪、画出来的东西在
+	// 哪"。状态只取 progress_items 的 status（raster 那类没画也算收尾），
+	// Links 是验收材料的入口（progress json / TikZ 源 / 编译产物）。
+	Status string
+	Links  []motifReviewLink
+	Key    bool // 代表图
+}
+
+// motifReviewLink 是图下面的一枚材料入口。
+type motifReviewLink struct {
+	Label string
+	Href  string
 }
 
 // motifReviewGroup 是复查页上的一个折叠分组。
@@ -101,6 +112,10 @@ type motifReviewDoc struct {
 	Artifacts   string
 	Groups      []motifReviewGroup
 	Independent []motifReviewItem
+	// P64：分组之外还要能直接看到"还在等转换的原图"和"退回原图的那些"——
+	// 这两批图的共同点是"转换侧没拿到成品"，混在几百张缩略图里根本找不出来。
+	Pending  []motifReviewItem
+	Degraded []motifReviewItem
 }
 
 // renderMotifReviewHTML 渲染复查页。分组一律折叠、图片一律走相对 URL（不内嵌
@@ -171,9 +186,30 @@ func renderMotifReviewHTML(doc motifReviewDoc) string {
 	}
 	b.WriteString("</div>\n")
 
+	renderReviewSection(&b, "等待转换的原图", "这些图在 progress_items 里还没有收尾结论（未处理或上次失败），转换阶段会给它们出成品；点缩略图看原图。", doc.Pending)
+	renderReviewSection(&b, "退回原图的（已收尾但没画出成品）", "status=fallback：这一轮以原图交付，不再重画。核对比对时重点看这些。", doc.Degraded)
+
 	b.WriteString(reviewLightboxHTML)
 	fmt.Fprintf(&b, "<script>\n%s\n</script>\n</body>\n</html>\n", reviewScript)
 	return b.String()
+}
+
+// renderReviewSection 渲染一段"按状态挑出来的图"（P64）。空段直接不渲染：
+// 一本书没有退回原图的图时不该出现一个空标题。
+func renderReviewSection(b *strings.Builder, title, intro string, items []motifReviewItem) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "<h2>%s（%d 张）</h2>\n", html.EscapeString(title), len(items))
+	if intro != "" {
+		fmt.Fprintf(b, "<p class=\"intro\">%s</p>\n", html.EscapeString(intro))
+	}
+	b.WriteString("<div class=\"indep\">\n")
+	for _, it := range items {
+		b.WriteString(motifReviewFigure(it, it.Name, it.Note))
+		b.WriteString("\n")
+	}
+	b.WriteString("</div>\n")
 }
 
 // motifReviewFigure 渲染一张缩略图：永远套一层指向原图的链接，点了开灯箱。
@@ -205,13 +241,27 @@ func motifReviewFigure(it motifReviewItem, name, note string) string {
 			html.EscapeString(thumb), html.EscapeString(it.Name), full)
 	}
 	b.WriteString("</a>")
-	if name != "" || note != "" {
+	if name != "" || note != "" || it.Status != "" || len(it.Links) > 0 {
 		b.WriteString("<figcaption>")
 		if name != "" {
 			fmt.Fprintf(&b, "<span class=\"nm\">%s</span>", html.EscapeString(name))
 		}
+		if it.Status != "" {
+			fmt.Fprintf(&b, "<span class=\"st\">%s</span>", html.EscapeString(it.Status))
+		}
 		if note != "" {
 			fmt.Fprintf(&b, "<span class=\"nt\">%s</span>", html.EscapeString(note))
+		}
+		if len(it.Links) > 0 {
+			b.WriteString("<span class=\"lk\">")
+			for i, l := range it.Links {
+				if i > 0 {
+					b.WriteString(" · ")
+				}
+				fmt.Fprintf(&b, "<a href=\"%s\" target=\"_blank\">%s</a>",
+					html.EscapeString(l.Href), html.EscapeString(l.Label))
+			}
+			b.WriteString("</span>")
 		}
 		b.WriteString("</figcaption>")
 	}
@@ -237,9 +287,9 @@ type motifReviewThumb struct {
 }
 
 // writeMotifReview 把本次 dedupe 的分组写成 source/dedupe/review.html（+ 缩略图）。
-func (r *Runner) writeMotifReview(dir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, scores map[string]float64) error {
+func (r *Runner) writeMotifReview(dir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, scores map[string]float64, prog map[string]*imageProgress) error {
 	probe := &motifReviewProbe{scores: scores, shift: r.motifAlignShift(), budget: motifReviewProbeBudget}
-	doc, thumbs := r.motifReviewDocOf(leaders, copies, applied, probe)
+	doc, thumbs := r.motifReviewDocOf(leaders, copies, applied, probe, prog)
 	for _, t := range thumbs {
 		if t.Name == "" || len(t.Data) == 0 {
 			continue
@@ -259,7 +309,7 @@ func (r *Runner) writeMotifReview(dir string, leaders []*motifCandidate, copies 
 }
 
 // motifReviewDocOf 从本次运行的分组里整理出复查页内容，并顺手编好缩略图字节。
-func (r *Runner) motifReviewDocOf(leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, probe *motifReviewProbe) (motifReviewDoc, []motifReviewThumb) {
+func (r *Runner) motifReviewDocOf(leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, probe *motifReviewProbe, prog map[string]*imageProgress) (motifReviewDoc, []motifReviewThumb) {
 	rules := r.motifCurrentRules()
 	thumbs := make([]motifReviewThumb, 0, len(leaders))
 	seen := map[string]bool{}
@@ -281,6 +331,10 @@ func (r *Runner) motifReviewDocOf(leaders []*motifCandidate, copies map[*motifCa
 			it.Thumb = name
 		}
 		it.Note = note
+		if pr := c.progress; pr != nil {
+			it.Status = imageStatusLabel(pr)
+			it.Links = imageArtifactLinks(pr)
+		}
 		return it
 	}
 	doc := motifReviewDoc{
@@ -385,7 +439,103 @@ func (r *Runner) motifReviewDocOf(leaders []*motifCandidate, copies map[*motifCa
 		}
 		doc.Independent = append(doc.Independent, item(c, note))
 	}
+	doc.Pending, doc.Degraded = r.motifReviewLooseSets(prog, applied, item)
 	return doc, thumbs
+}
+
+// motifReviewLooseSets 从 progress_items 里挑出两批图（P64）：还没收尾的
+// （等待转换）与已收尾但退回原图的（fallback）。两批都直接给原图与判定记录，
+// 因为核对比对时真正想看的就是这两类。
+func (r *Runner) motifReviewLooseSets(prog map[string]*imageProgress, applied []motifAppliedGroup, item func(*motifCandidate, string) motifReviewItem) (pending, degraded []motifReviewItem) {
+	inGroup := map[string]string{}
+	for i, g := range applied {
+		if g.Key == nil || g.Key.task == nil {
+			continue
+		}
+		_ = i
+		for _, m := range g.Members {
+			if m.task != nil {
+				inGroup[m.task.key()] = motifShortName(g.Key)
+			}
+		}
+	}
+	keys := make([]string, 0, len(prog))
+	for k := range prog {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		p := prog[k]
+		if p == nil || p.Absorbed {
+			continue
+		}
+		it := motifReviewItem{Name: filepath.Base(p.ImgPath), Ref: k, Image: p.ImgPath, Status: imageStatusLabel(p), Links: imageArtifactLinks(p)}
+		if g, ok := inGroup[k]; ok {
+			it.Note = "归组：" + g
+		}
+		switch {
+		case imageStatusSettled(p.Status):
+			if imageStatusQuality(p.Status) == "degraded" {
+				degraded = append(degraded, it)
+			}
+		default:
+			if p.Class == "" {
+				it.Note = "还没分类"
+			}
+			pending = append(pending, it)
+		}
+	}
+	return pending, degraded
+}
+
+// imageStatusLabel 是给页面看的状态词：一律以 progress_items 的 status 为准，
+// 空状态明确写成"未处理"，不留一个空白让读者自己猜。
+func imageStatusLabel(p *imageProgress) string {
+	if p == nil {
+		return ""
+	}
+	switch p.Status {
+	case ImageStatusDone:
+		return "已完成"
+	case ImageStatusFallback:
+		return "退回原图"
+	case ImageStatusError:
+		return "失败"
+	case ImageStatusClassified:
+		return "已分类待处理"
+	case "":
+		return "未处理"
+	}
+	return p.Status
+}
+
+// imageArtifactLinks 列出一张图的验收材料：判定记录（progress_items 里的那条
+// json）与转换产物（TikZ/PDF/PNG/SVG）。链接相对 source/dedupe/。
+func imageArtifactLinks(p *imageProgress) []motifReviewLink {
+	if p == nil {
+		return nil
+	}
+	var out []motifReviewLink
+	if p.MDName != "" && p.ImgPath != "" {
+		rel := "../progress_items/" + escapeURLPath(sanitizeName(p.MDName)) + "/" + escapeURLPath(sanitizeName(p.ImgPath)) + ".json"
+		out = append(out, motifReviewLink{Label: "判定记录", Href: rel})
+	}
+	for _, f := range []struct{ label, href string }{
+		{"TikZ", p.TikzCode},
+		{"PDF", p.FigPDF},
+		{"PNG", p.FigPNG},
+		{"SVG", p.FigSVG},
+	} {
+		if strings.TrimSpace(f.href) == "" {
+			continue
+		}
+		h := f.href
+		if !strings.HasPrefix(h, "http") {
+			h = "../" + strings.TrimPrefix(filepath.ToSlash(h), "/")
+		}
+		out = append(out, motifReviewLink{Label: f.label, Href: h})
+	}
+	return out
 }
 
 // motifReviewImageHref 是复查页到原图的相对链接：md 里的引用相对 source/，

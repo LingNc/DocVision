@@ -221,7 +221,7 @@ func (r *Runner) motifReuseDedupe(outDir string, prog map[string]*imageProgress,
 //
 // scores 是逐对明细那一趟已经算好的重合度（T151）：组内这几百分原本又要重算
 // 一遍，现在直接查表，查不到（前筛/预算挡掉的）才现算。
-func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, scores map[string]float64) {
+func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, scores map[string]float64, prog map[string]*imageProgress) {
 	dir := motifArtifactDir(outDir)
 	rules := r.motifCurrentRules()
 	probe := &motifReviewProbe{scores: scores, shift: r.motifAlignShift(), budget: motifReviewProbeBudget}
@@ -285,7 +285,7 @@ func (r *Runner) writeMotifArtifacts(outDir string, leaders []*motifCandidate, c
 		}
 	}
 	_ = os.WriteFile(filepath.Join(dir, "report.md"), []byte(motifArtifactReport(art)), 0o644)
-	if err := r.writeMotifReview(dir, leaders, copies, applied, probe.scores); err != nil {
+	if err := r.writeMotifReview(dir, leaders, copies, applied, probe.scores, prog); err != nil {
 		r.logWarning("[dedupe] review.html 写盘失败（不影响结论，图和分数仍可从 groups.json 看）:", err)
 	}
 	r.logInfo(fmt.Sprintf("[dedupe] 结果已落盘：%s（%d 份不同内容、%d 组、%d 份独立）",

@@ -1027,8 +1027,10 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		}
 		mu.Lock()
 		d, f, w, rn, rs := done, failed, warned, running, raster
+		// 全书盘点（P64）在锁内算：prog 是并发写的 map，遍历它必须跟着同一把锁。
+		book := countImageStatuses(prog)
 		mu.Unlock()
-		return processProgressText(d, total, d-f-w, f, w, rs, rn)
+		return processProgressText(d, total, d-f-w, f, w, rs, rn) + book.summary()
 	})
 	defer progLive.Close()
 	if total > 0 {
@@ -1199,6 +1201,14 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		}(t, p)
 	}
 	wg.Wait()
+	// P64：fallback 以前只有一个数字，核对时没法知道是哪几张。收尾时按名字列
+	// 一遍（退回原图 = 这一轮以原图交付，正是需要人看一眼的那批）。
+	mu.Lock()
+	book := countImageStatuses(prog)
+	mu.Unlock()
+	if book.Fallback > 0 {
+		r.log.LogWarning(0, "[process] 退回原图的图共", strconv.Itoa(book.Fallback), "张：", strings.Join(fallbackImageNames(prog), "、"))
+	}
 	// 同 classifyPhase：定格与换行只由 deferred Close 负责，避免重复行。
 }
 

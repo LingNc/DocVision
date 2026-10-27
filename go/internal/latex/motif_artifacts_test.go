@@ -37,7 +37,7 @@ func TestWriteMotifArtifactsRecordsFinalGroups(t *testing.T) {
 	leaders := []*motifCandidate{a, b, c}
 	copies := map[*motifCandidate][]*motifCandidate{b: {b2}}
 	applied := []motifAppliedGroup{{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"}}
-	r.writeMotifArtifacts(outDir, leaders, copies, applied, nil)
+	r.writeMotifArtifacts(outDir, leaders, copies, applied, nil, nil)
 
 	dir := filepath.Join(outDir, "dedupe")
 	data, err := os.ReadFile(filepath.Join(dir, "groups.json"))
@@ -115,7 +115,7 @@ func TestWriteMotifReviewLinksSelectedImages(t *testing.T) {
 	b := mk("b.jpg", strings.Repeat("b", 64), near)
 	c := mk("c.jpg", strings.Repeat("c", 64), other)
 	applied := []motifAppliedGroup{{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"}}
-	r.writeMotifArtifacts(outDir, []*motifCandidate{a, b, c}, nil, applied, nil)
+	r.writeMotifArtifacts(outDir, []*motifCandidate{a, b, c}, nil, applied, nil, nil)
 
 	data, err := os.ReadFile(filepath.Join(motifArtifactDir(outDir), "review.html"))
 	if err != nil {
@@ -214,7 +214,7 @@ func TestMotifReuseDedupeValidatesConclusions(t *testing.T) {
 	leaders := []*motifCandidate{a, b, c}
 	copies := map[*motifCandidate][]*motifCandidate{b: {b2}}
 	applied := []motifAppliedGroup{{Key: a, Members: []*motifCandidate{a, b}, Class: ClassVector, Source: "auto"}}
-	r.writeMotifArtifacts(outDir, leaders, copies, applied, nil)
+	r.writeMotifArtifacts(outDir, leaders, copies, applied, nil, nil)
 
 	// 复核 dedupe 收尾写进 progress 的结论（代表图自指为空、成员指向代表图）。
 	settle := func(item *motifCandidate, leader *motifCandidate) {

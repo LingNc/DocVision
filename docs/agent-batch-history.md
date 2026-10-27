@@ -2831,3 +2831,10 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **边界**：工具是可选模型工具，只提供视觉证据，不改变会话提交状态和原有提交流程。
 - **同步**：提示词、`docvision latex --help`、README、CHANGELOG 和 P65 计划条目已同步。
 - **测试**：`TestCompareFigureImagesFindsTranslation` 与 `TestCompareFigureToolIsOptionalBeforeCompile` 通过；全量 Go 测试的唯一失败是既有 `TestPythonEnvVenvRunsInsideRealSandbox` 环境用例。
+
+## 批次 P64（第二刀）+ T261：图片核对页与 style 模板库
+
+- **P64 图片阶段可核对**：`motif_review.go` 的复查页接上 `progress_items`。每张缩略图下面新增状态词（只认 `status`：已完成／退回原图／失败／已分类待处理／未处理）、「判定记录」链接（`../progress_items/<md>/<img>.json`）与转换产物入口（TikZ/PDF/PNG/SVG，相对 `source/dedupe/`）。新增两段：「等待转换的原图」（未收尾的，含原图与判定记录）与「退回原图的（已收尾但没画出成品）」——这两批以前混在几百张缩略图里找不出来。`writeMotifArtifacts`/`writeMotifReview`/`motifReviewDocOf` 都多带一个 `prog` 参数。
+- **进度行双层口径**：`motif_progress.go` 的 `imageStatusCounts`/`countImageStatuses` 从 `progress_items` 汇总全书（Total/Settled/OK/Fallback/Error/Pending/Raster），`process` 与 `dedupe` 的进度行尾部追加「全书 X/N（画好 a、退回原图 b、失败 c、未处理 d）」；`process` 收尾用 `fallbackImageNames` 把退回原图的图名逐个打进日志。续跑时不会再只剩一个 `1/1`。
+- **T261 style 模板库**：`latex_style.system.md` 加「先写 STYLE INVENTORY（含 absent 判定）」与「cls 必须是覆盖清单的参数化模板库，章节作者只写内容」两条要求，manual 固定增加 `## Style inventory`、`## Template library` 两节，example 还要用到题干+解答、定理+证明、表格、图注图这几类模板；`latex_style.user.md` 同步改成先列清单再建库。
+- **测试**：`t_p64_image_review_test.go` 钉住状态词、判定记录链接、产物链接与两段集合；`TestCountImageStatusesUsesStatusOnly` 钉住"只看 status"（raster/fallback 也算收尾）。`go test ./internal/latex/` 除既有 venv 环境用例外全绿，`./internal/prompts/`、`./internal/sessionview/` 全绿。
