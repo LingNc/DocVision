@@ -504,6 +504,19 @@ func (v *viewerServer) serveFile(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "拒绝越界路径", http.StatusBadRequest)
 			return
 		}
+		// T258：图片附件有时不在"转录所在目录/media"下。真机一例：转录在
+		// `work/sessions/`，而那张图落在 `work/temp/conv_<章>/sessions/media/`
+		// （子章节会话的附件目录），按相对路径取就是 404，页面上是一张裂图。
+		// 这里按文件名在项目里几个固定的 media 位置兜一下，命中就发。
+		if alt, ok := v.findSiblingMedia(rel); ok {
+			if hf, herr := os.Open(alt); herr == nil {
+				defer hf.Close()
+				if st, serr := hf.Stat(); serr == nil && !st.IsDir() {
+					http.ServeContent(w, r, st.Name(), st.ModTime(), hf)
+					return
+				}
+			}
+		}
 		http.NotFound(w, r)
 		return
 	}
@@ -515,6 +528,37 @@ func (v *viewerServer) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeContent(w, r, st.Name(), st.ModTime(), f)
+}
+
+// findSiblingMedia 在项目里几个固定的 media 位置按文件名兜底（T258）。它只在
+// 正常解析失败时调用，所以这些 Stat/Glob 都落在缺文件的冷路径上。
+func (v *viewerServer) findSiblingMedia(rel string) (string, bool) {
+	base := path.Base(path.Clean(rel))
+	if base == "" || base == "." || base == "/" {
+		return "", false
+	}
+	parts := strings.Split(path.Clean(rel), "/")
+	if len(parts) < 2 {
+		return "", false
+	}
+	proj := filepath.Join(v.root, filepath.FromSlash(parts[0]))
+	patterns := []string{
+		filepath.Join(proj, "work", "media", base),
+		filepath.Join(proj, "work", "sessions", "media", base),
+		filepath.Join(proj, "work", "temp", "conv_*", "sessions", "media", base),
+	}
+	for _, pat := range patterns {
+		hits, err := filepath.Glob(pat)
+		if err != nil {
+			continue
+		}
+		for _, h := range hits {
+			if st, serr := os.Stat(h); serr == nil && !st.IsDir() {
+				return h, true
+			}
+		}
+	}
+	return "", false
 }
 
 // resolveUnderRoot maps a slash path from the viewer onto the filesystem and
