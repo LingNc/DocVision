@@ -178,7 +178,9 @@ func (r reviewpageRig) item(imgRel, hash string) reviewpage.Item {
 	if base == "" {
 		base = figureStem(p.FigPDF)
 	}
-	if base != "" {
+	// 只有 status=done 才认成品：重画失败时旧 figures/tikz 文件不会被删除，
+	// 把它们当"当前成品"显示就是在给一张退回原图的图配一张旧图。
+	if base != "" && p.Status == reviewpage.StatusDone {
 		if png := "figures/" + base + ".png"; fileExists(filepath.Join(r.source, "figures", base+".png")) {
 			it.Figure = "../" + reviewpage.EscapeURLPath(png)
 		}
@@ -207,13 +209,22 @@ func (r reviewpageRig) links(p *liveImageProgress, base string) []reviewpage.Lin
 			out = append(out, reviewpage.Link{Label: "判定记录", Href: "../" + reviewpage.EscapeURLPath(rel)})
 		}
 	}
+	done := p.Status == reviewpage.StatusDone
 	if base != "" {
-		if tex := filepath.ToSlash(filepath.Join("tikz", base+".tex")); fileExists(filepath.Join(r.source, filepath.FromSlash(tex))) {
-			out = append(out, reviewpage.Link{Label: "LaTeX 源", Href: "../" + reviewpage.EscapeURLPath(tex)})
+		// 成品类入口只在 status=done 时给：失败重画留下的旧 tikz/figures 不是
+		// 这一版产物，给出去就成了"看起来画好了"。
+		if done {
+			if tex := filepath.ToSlash(filepath.Join("tikz", base+".tex")); fileExists(filepath.Join(r.source, filepath.FromSlash(tex))) {
+				out = append(out, reviewpage.Link{Label: "LaTeX 源", Href: "../" + reviewpage.EscapeURLPath(tex)})
+			}
 		}
+		// 会话转录总在（失败的那些也在），核对时要能点进那条会话。
 		if tr := filepath.ToSlash(filepath.Join("sessions", "vector_"+base+".jsonl")); fileExists(filepath.Join(r.source, filepath.FromSlash(tr))) {
 			out = append(out, reviewpage.Link{Label: "会话", Href: "../" + reviewpage.EscapeURLPath(tr)})
 		}
+	}
+	if !done {
+		return out
 	}
 	for _, f := range []struct{ label, rel string }{
 		{"PDF", p.FigPDF},

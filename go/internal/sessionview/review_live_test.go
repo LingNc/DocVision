@@ -53,9 +53,15 @@ func TestRenderLiveImageReviewUsesDiskFacts(t *testing.T) {
 		"md": "book.md", "img": "images/book/a.png", "class": "vector", "status": "done",
 		"figure_png": "figures/a.png", "figure_pdf": "figures/a.pdf", "tikz_code": `\draw`,
 	}))
+	// 退回原图的图：磁盘上还留着上一次重画失败前的旧成品（Go 的单图重画不删
+	// 旧文件），核对页不能把它当"这一版的成品"显示出来。
+	mk("figures/b.png", []byte("stale"))
+	mk("sessions/vector_b.jsonl", []byte("{}\n"))
+	mk("tikz/b.tex", []byte(`\stale`))
 	mk("progress_items/book.md/"+mustSanitize("images/book/b.png")+".json", progressJSON(t, map[string]any{
 		"md": "book.md", "img": "images/book/b.png", "class": "vector", "status": "fallback",
 		"fallback_reason": "TikZ 重画没有通过校验", "equivalent_to": "book.md::images/book/a.png",
+		"figure_png": "figures/b.png",
 	}))
 	mk("progress_items/book.md/"+mustSanitize("images/book/c.png")+".json", progressJSON(t, map[string]any{
 		"md": "book.md", "img": "images/book/c.png", "class": "classified", "status": "classified",
@@ -85,6 +91,14 @@ func TestRenderLiveImageReviewUsesDiskFacts(t *testing.T) {
 	// 没有成品的那张不能出现"成品"栏。
 	if strings.Count(html, "shot conv") != 1 {
 		t.Fatalf("只有一张图有成品，实际出现 %d 次", strings.Count(html, "shot conv"))
+	}
+	// 退回原图的旧产物不许出现在页面上（既不并排，也不给 PDF/LaTeX 源链接）。
+	if strings.Contains(html, "../figures/b.png") || strings.Contains(html, "../tikz/b.tex") {
+		t.Fatal("退回原图的图不该显示上一版产物")
+	}
+	// 但它的会话仍然可点：失败原因要去那条会话里看。
+	if !strings.Contains(html, "../sessions/vector_b.jsonl") {
+		t.Fatal("退回原图的图仍应给出会话入口")
 	}
 }
 
