@@ -32,6 +32,7 @@ type harness struct {
 	hasComparison                  bool
 	lastScore                      float64
 	compareRound                   int
+	passThreshold                  float64
 }
 
 type tool struct {
@@ -70,7 +71,7 @@ func (t *tool) Definition() map[string]any {
 	case "image_context":
 		return schema(t.name, "Return adjacent image references and surrounding source text when a source Markdown file is supplied.", map[string]any{}, nil)
 	case "submit":
-		return schema(t.name, "Submit the compiled figure after visual review. Requires a successful compile and comparison score >= 50%.", map[string]any{"path": strProp("Workspace-relative TikZ body file; defaults to figure.tex")}, nil)
+		return schema(t.name, fmt.Sprintf("Submit the compiled figure after visual review. Requires a successful compile and comparison score >= %.0f%%.", t.h.passThreshold), map[string]any{"path": strProp("Workspace-relative TikZ body file; defaults to figure.tex")}, nil)
 	}
 	return schema(t.name, "", map[string]any{}, nil)
 }
@@ -211,8 +212,8 @@ func (t *tool) Execute(raw string) (session.ToolResult, error) {
 		if !t.h.hasComparison {
 			return session.ToolResult{Text: "REJECTED: run compare_figure after the latest compile."}, nil
 		}
-		if t.h.lastScore < 50 {
-			return session.ToolResult{Text: fmt.Sprintf("REJECTED: similarity %.2f%% is below 50%%; revise the figure and compare again.", t.h.lastScore)}, nil
+		if t.h.lastScore < t.h.passThreshold {
+			return session.ToolResult{Text: fmt.Sprintf("REJECTED: similarity %.2f%% is below %.0f%%; revise the figure and compare again.", t.h.lastScore, t.h.passThreshold)}, nil
 		}
 		p, err := t.h.inside(arg(args, "path", "figure.tex"))
 		if err != nil {
@@ -225,7 +226,7 @@ func (t *tool) Execute(raw string) (session.ToolResult, error) {
 		if err = os.WriteFile(filepath.Join(t.h.root, "submitted.tex"), b, 0644); err != nil {
 			return session.ToolResult{}, err
 		}
-		return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. Similarity %.2f%% >= 50%%. See submitted.tex and compare/.", t.h.lastScore), Terminal: true}, nil
+		return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. Similarity %.2f%% >= %.0f%%. See submitted.tex and compare/.", t.h.lastScore, t.h.passThreshold), Terminal: true}, nil
 	}
 	return session.ToolResult{}, fmt.Errorf("unknown tool %q", t.name)
 }
@@ -367,7 +368,7 @@ func (t *tool) compare(args map[string]any) (session.ToolResult, error) {
 	if err = os.MkdirAll(outDir, 0755); err != nil {
 		return session.ToolResult{}, err
 	}
-	cmd := exec.Command(t.h.python, t.h.script, "--original", t.h.original, "--pdf", pdf, "--out", outDir, "--detail", detail, "--left", fmt.Sprint(numberArg(args, "left", 0)), "--top", fmt.Sprint(numberArg(args, "top", 0)), "--right", fmt.Sprint(numberArg(args, "right", 100)), "--bottom", fmt.Sprint(numberArg(args, "bottom", 100)), "--width", fmt.Sprint(int(numberArg(args, "zoom", 0))))
+	cmd := exec.Command(t.h.python, t.h.script, "--original", t.h.original, "--pdf", pdf, "--out", outDir, "--detail", detail, "--left", fmt.Sprint(numberArg(args, "left", 0)), "--top", fmt.Sprint(numberArg(args, "top", 0)), "--right", fmt.Sprint(numberArg(args, "right", 100)), "--bottom", fmt.Sprint(numberArg(args, "bottom", 100)), "--width", fmt.Sprint(int(numberArg(args, "zoom", 0))), "--pass-threshold", fmt.Sprint(t.h.passThreshold))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return session.ToolResult{Text: "COMPARE ERROR\n" + tail(string(out), 3000)}, nil
@@ -392,7 +393,7 @@ func (t *tool) compare(args map[string]any) (session.ToolResult, error) {
 		return session.ToolResult{}, err
 	}
 	rel, _ := filepath.Rel(t.h.root, result.Selected)
-	text := fmt.Sprintf("Similarity: %.2f%% (foreground-stroke IoU; pass threshold 50%%: %v). Best center translation: dx=%d px (%.3f%% width), dy=%d px (%.3f%% height). Search levels: ±10%% → ±5%% → ±2%%. Worst region: left=%v%%, top=%v%%, right=%v%%, bottom=%v%%, share=%v%%. Re-run compare_figure with these percentages and zoom 2-8 to inspect the weakest region. Image: %s. Full-resolution panels: compare/round_%02d/gray.png, r.png, g.png, b.png.", result.Metrics.Similarity, result.Metrics.Pass, result.Metrics.Pixels["x"], result.Metrics.DX["x"], result.Metrics.Pixels["y"], result.Metrics.DX["y"], result.Metrics.Worst["left"], result.Metrics.Worst["top"], result.Metrics.Worst["right"], result.Metrics.Worst["bottom"], result.Metrics.Worst["share_percent"], filepath.ToSlash(rel), t.h.compareRound)
+	text := fmt.Sprintf("Similarity: %.2f%% (foreground-stroke IoU; pass threshold %.0f%%: %v). Best center translation: dx=%d px (%.3f%% width), dy=%d px (%.3f%% height). Search levels: ±10%% → ±5%% → ±2%%. Worst region: left=%v%%, top=%v%%, right=%v%%, bottom=%v%%, share=%v%%. Re-run compare_figure with these percentages and zoom 2-8 to inspect the weakest region. Image: %s. Full-resolution panels: compare/round_%02d/gray.png, r.png, g.png, b.png.", result.Metrics.Similarity, t.h.passThreshold, result.Metrics.Pass, result.Metrics.Pixels["x"], result.Metrics.DX["x"], result.Metrics.Pixels["y"], result.Metrics.DX["y"], result.Metrics.Worst["left"], result.Metrics.Worst["top"], result.Metrics.Worst["right"], result.Metrics.Worst["bottom"], result.Metrics.Worst["share_percent"], filepath.ToSlash(rel), t.h.compareRound)
 	return session.ToolResult{Text: text, ImageBase64: base64.StdEncoding.EncodeToString(img), ImageMIME: "image/png"}, nil
 }
 func tail(s string, n int) string {
@@ -411,6 +412,8 @@ func main() {
 	contextText := flag.String("context", "", "surrounding document context for this figure session")
 	compareScript := flag.String("compare-script", "algorithms/compare.py", "path to compare.py")
 	python := flag.String("python", "python3", "Python executable used by compare.py")
+	resume := flag.Bool("resume", false, "resume the transcript in-place without adding a new opening turn")
+	passThreshold := flag.Float64("pass", 50.0, "submit gate similarity threshold in percent")
 	flag.Parse()
 	if strings.TrimSpace(*original) == "" {
 		flag.Usage()
@@ -437,17 +440,22 @@ func main() {
 	if *transcriptPath == "" {
 		*transcriptPath = filepath.Join(root, "session.jsonl")
 	}
-	h := &harness{root: root, original: *original, script: *compareScript, python: *python, contextText: *contextText}
+	h := &harness{root: root, original: *original, script: *compareScript, python: *python, contextText: *contextText, passThreshold: *passThreshold}
 	names := []string{"write_file", "edit_file", "read_file", "grep", "compile", "view_pdf", "compare_figure", "view_image", "image_context", "submit"}
 	tools := make([]session.Tool, 0, len(names))
 	for _, n := range names {
 		tools = append(tools, &tool{h: h, name: n})
 	}
+	gateText := fmt.Sprintf("The experimental acceptance gate is similarity >= %.0f%%; submit is rejected below that score.", h.passThreshold)
+	thresholdText := fmt.Sprintf("Pass only at >=%.0f%%, and inspect each channel before submit.", h.passThreshold)
 	system := prompts.Render(prompts.FigureSystem, map[string]string{"MAX_ROUNDS": "24", "OUTPUT_LANG": "English"})
 	system = strings.ReplaceAll(system, "add left/top/right/bottom (percent) and zoom (target pixel width) to re-render a region straight from the PDF at high resolution, so small labels, arrows and overlaps are legible.", "The tool rasterizes to the exact original pixel canvas, searches three centered translation levels (10%, 5%, 2%), and returns a 2x2 grayscale/R/G/B overlay with a foreground-stroke IoU similarity score. Use detail=gray/r/g/b to inspect one panel at full resolution.")
-	system = strings.ReplaceAll(system, "Compare what you see in view_pdf with the ORIGINAL image (view_image). Fix structure, geometry, label positions and proportions; compile again.", "Inspect the actual candidate PDF with view_pdf, then inspect compare_figure overlays and the ORIGINAL image (view_image). Fix structure, geometry, label positions and proportions; compile, view_pdf and compare again. The experimental acceptance gate is similarity >= 50%; submit is rejected below that score.")
+	system = strings.ReplaceAll(system, "Compare what you see in view_pdf with the ORIGINAL image (view_image). Fix structure, geometry, label positions and proportions; compile again.", "Inspect the actual candidate PDF with view_pdf, then inspect compare_figure overlays and the ORIGINAL image (view_image). Fix structure, geometry, label positions and proportions; compile, view_pdf and compare again. "+gateText)
 	system = strings.ReplaceAll(system, "and view_pdf report the actual numbers in mm, the same unit as the original's measured size", "and compare_figure reports raster dimensions")
-	system += "\n\nFor this isolated experiment, use compare_figure after every successful compile. Its similarity is foreground-stroke intersection-over-union after translation search; do not treat it as semantic correctness. Pass only at >=50%, and inspect each channel before submit."
+	system += "\n\nFor this isolated experiment, use compare_figure after every successful compile. Its similarity is foreground-stroke intersection-over-union after translation search; do not treat it as semantic correctness. " + thresholdText
+	if *resume {
+		system += "\n\nThis is a resumed transcript. In-memory compile and comparison state has reset: compile the current figure and compare it again before submit."
+	}
 	ctx := *contextText
 	if strings.TrimSpace(ctx) == "" {
 		ctx = "Standalone reference figure. Preserve the visible structure, geometry, labels, colors, and aspect ratio of the supplied reference image."
@@ -458,9 +466,21 @@ func main() {
 	defer transcript.Close()
 	sess := session.NewSession(session.NewClient(model), model, cfg.LatexSession("drawing"), system, tools, log, 1, "figure-compare-prototype")
 	sess.SetTranscript(transcript)
-	img, err := os.ReadFile(*original)
-	fatal(err)
-	_, err = sess.Run(session.RunOptions{UserText: user, Images: []string{base64.StdEncoding.EncodeToString(img)}})
+	var runOpts session.RunOptions
+	if *resume {
+		messages, stats, loadErr := session.LoadTranscriptStats(*transcriptPath)
+		fatal(loadErr)
+		if len(messages) == 0 {
+			fatal(fmt.Errorf("cannot resume: transcript %q has no replayable messages", *transcriptPath))
+		}
+		sess.SetMessages(messages)
+		sess.SeedCounters(stats.Rounds, stats.Tools)
+	} else {
+		img, readErr := os.ReadFile(*original)
+		fatal(readErr)
+		runOpts = session.RunOptions{UserText: user, Images: []string{base64.StdEncoding.EncodeToString(img)}}
+	}
+	_, err = sess.Run(runOpts)
 	fatal(err)
 	if !h.hasComparison {
 		fmt.Fprintln(os.Stderr, "session ended without a compare_figure result")
