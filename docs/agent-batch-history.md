@@ -2838,3 +2838,5 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **进度行双层口径**：`motif_progress.go` 的 `imageStatusCounts`/`countImageStatuses` 从 `progress_items` 汇总全书（Total/Settled/OK/Fallback/Error/Pending/Raster），`process` 与 `dedupe` 的进度行尾部追加「全书 X/N（画好 a、退回原图 b、失败 c、未处理 d）」；`process` 收尾用 `fallbackImageNames` 把退回原图的图名逐个打进日志。续跑时不会再只剩一个 `1/1`。
 - **T261 style 模板库**：`latex_style.system.md` 加「先写 STYLE INVENTORY（含 absent 判定）」与「cls 必须是覆盖清单的参数化模板库，章节作者只写内容」两条要求，manual 固定增加 `## Style inventory`、`## Template library` 两节，example 还要用到题干+解答、定理+证明、表格、图注图这几类模板；`latex_style.user.md` 同步改成先列清单再建库。
 - **测试**：`t_p64_image_review_test.go` 钉住状态词、判定记录链接、产物链接与两段集合；`TestCountImageStatusesUsesStatusOnly` 钉住"只看 status"（raster/fallback 也算收尾）。`go test ./internal/latex/` 除既有 venv 环境用例外全绿，`./internal/prompts/`、`./internal/sessionview/` 全绿。
+
+补充（同一批，第二个提交）：复查页的「LaTeX 源」与「会话」入口由 `figures/<名>.pdf` 反推（`figureBaseName`），指向 `source/tikz/<名>.tex` 与 `source/sessions/vector_<名>.jsonl`；图注备注带上分类。测试同步断言这两个链接，未画过的图不生成它们。
