@@ -2840,3 +2840,5 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **测试**：`t_p64_image_review_test.go` 钉住状态词、判定记录链接、产物链接与两段集合；`TestCountImageStatusesUsesStatusOnly` 钉住"只看 status"（raster/fallback 也算收尾）。`go test ./internal/latex/` 除既有 venv 环境用例外全绿，`./internal/prompts/`、`./internal/sessionview/` 全绿。
 
 补充（同一批，第二个提交）：复查页的「LaTeX 源」与「会话」入口由 `figures/<名>.pdf` 反推（`figureBaseName`），指向 `source/tikz/<名>.tex` 与 `source/sessions/vector_<名>.jsonl`；图注备注带上分类。测试同步断言这两个链接，未画过的图不生成它们。
+
+补充（同一批，第三个提交）：`progress_items` 新增 `fallback_reason`，process 的两个退回分支（工具链不可用、TikZ 校验没过）各写一句原因，复查页「退回原图的」那段逐张显示——以前只有状态，看不出"为什么退"到底是环境问题还是这张图本身。

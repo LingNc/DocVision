@@ -479,6 +479,11 @@ func (r *Runner) motifReviewLooseSets(prog map[string]*imageProgress, applied []
 		switch {
 		case imageStatusSettled(p.Status):
 			if imageStatusQuality(p.Status) == "degraded" {
+				// 退回原图的图必须说清为什么退：状态只说"没画出成品"，
+				// 工具链缺失 / 校验没过 / 接口出错的处理方式完全不同。
+				if r := strings.TrimSpace(p.FallbackReason); r != "" {
+					it.Note = strings.TrimSpace(it.Note + " · " + r)
+				}
 				degraded = append(degraded, it)
 			}
 		default:

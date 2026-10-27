@@ -26,7 +26,7 @@ func TestMotifReviewShowsImageStatusAndLooseSets(t *testing.T) {
 	}
 	prog := map[string]*imageProgress{
 		done.task.key():              done.progress,
-		"book.md::images/book/b.jpg": {Key: "book.md::images/book/b.jpg", MDName: "book.md", ImgPath: "images/book/b.jpg", Class: ClassVector, Status: ImageStatusFallback},
+		"book.md::images/book/b.jpg": {Key: "book.md::images/book/b.jpg", MDName: "book.md", ImgPath: "images/book/b.jpg", Class: ClassVector, Status: ImageStatusFallback, FallbackReason: "TikZ 重画没有通过校验"},
 		"book.md::images/book/c.jpg": {Key: "book.md::images/book/c.jpg", MDName: "book.md", ImgPath: "images/book/c.jpg", Class: ClassVector, Status: ImageStatusClassified},
 		"book.md::images/book/d.jpg": {Key: "book.md::images/book/d.jpg", MDName: "book.md", ImgPath: "images/book/d.jpg", Class: ClassVector, Status: ImageStatusError, Error: "api error"},
 	}
@@ -47,6 +47,7 @@ func TestMotifReviewShowsImageStatusAndLooseSets(t *testing.T) {
 		"等待转换的原图（2 张）",
 		"退回原图的（已收尾但没画出成品）（1 张）",
 		"退回原图",
+		"TikZ 重画没有通过校验",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("review.html 缺少 %q", want)
@@ -64,7 +65,7 @@ func TestCountImageStatusesUsesStatusOnly(t *testing.T) {
 	prog := map[string]*imageProgress{
 		"a": {Class: ClassVector, Status: ImageStatusDone},
 		"b": {Class: ClassRaster, Status: ImageStatusDone},
-		"c": {Class: ClassVector, Status: ImageStatusFallback},
+		"c": {Class: ClassVector, Status: ImageStatusFallback, FallbackReason: "TikZ 重画没有通过校验"},
 		"d": {Class: ClassVector, Status: ImageStatusClassified},
 		"e": {Class: ClassVector, Status: ImageStatusError},
 		"f": {Class: ClassVector},

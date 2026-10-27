@@ -156,6 +156,9 @@ type imageProgress struct {
 	DedupeVersion    string   `json:"dedupe_version,omitempty"`
 	SharedTex        string   `json:"shared_tex,omitempty"` // raw reusable body (not standalone)
 	Error            string   `json:"error,omitempty"`
+	// FallbackReason 是这张图为什么以原图交付（P64）：状态只说明"没画出成品"，
+	// 核对时要能看出是工具链缺失、模型没通过校验，还是接口/会话出了问题。
+	FallbackReason string `json:"fallback_reason,omitempty"`
 }
 
 // mdFile caches one scanned markdown file.
@@ -1137,6 +1140,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 					mu.Unlock()
 					pp.Kept = true
 					pp.Status = "fallback"
+					pp.FallbackReason = "工具链不可用（缺 xelatex/latexmk 等），保留原图待下次运行重试"
 					sessType = "vector-fallback"
 					sessMsg = "toolchain unavailable"
 					break
@@ -1172,6 +1176,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 					}
 					pp.Kept = true
 					pp.Status = "fallback"
+					pp.FallbackReason = firstNonEmpty(pp.Error, "TikZ 重画没有通过校验，保留原图待下次运行重试")
 					sessType = "vector-fallback"
 					sessMsg = pp.Error
 				}
@@ -1935,4 +1940,14 @@ func vectorTexBase(mdName, imgPath, label string) string {
 		return ""
 	}
 	return sanitizeName(strings.TrimSuffix(mdName, filepath.Ext(mdName))) + "__" + base
+}
+
+// firstNonEmpty 取第一个非空字符串（退回原因这类"有就用、没有给一句兜底"的场合）。
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
