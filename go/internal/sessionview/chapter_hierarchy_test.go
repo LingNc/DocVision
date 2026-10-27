@@ -15,6 +15,8 @@ func TestChapterIdentityForFlatAndLegacyNestedTranscripts(t *testing.T) {
 		{"book/work/sessions/convert_chapter_011_child_02_child_03.jsonl", "chapter_011_child_02_child_03", "chapter_011_child_02", "convert", 2, 11},
 		{"book/work/temp/conv_chapter_011/work/_subdivision/child_02/node/sessions/convert.jsonl", "chapter_011_child_02", "chapter_011", "convert", 1, 11},
 		{"book/work/temp/conv_chapter_011/work/_subdivision/child_02/node/work/_subdivision/child_03/node/sessions/checker.jsonl", "chapter_011_child_02_child_03", "chapter_011_child_02", "checker", 2, 11},
+		// T252：残片/快照副本带 `YYYYMMDD-HHMMSS-` 前缀，剥掉后才认得出章节身份。
+		{"book/work/rescue/cuts/chapter_011/20261027-111514-convert_chapter_011_child_02_child_04.jsonl", "chapter_011_child_02_child_04", "chapter_011_child_02", "convert", 2, 11},
 	}
 	for _, tc := range cases {
 		id := chapterIdentity(tc.path)

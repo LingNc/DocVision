@@ -1476,3 +1476,9 @@ user 轮
   改法：那一处按错误类型分流——isRetryingChildren 命中时写 waiting_children（等子节点），isPaused 写 paused，复盘排了队写 queued，其余才是 error。
   验证：go build 通过，重试/收口相关的既有用例全绿。
   未改：真正跑到死的子节点仍记 error（本来就该报）。
+- T252 预览页「会话」阶段平铺出几十条带时间戳的"会话"，每条都显示未开始（例：`20261027-111514-convert_chapter_017_child_02_child_04.jsonl`，3 条消息、27.9 KB）。
+  现象：这些名字像章节转录，但没有章节身份，既没挂到章节树里，也统计不进阶段，还各自占一行。
+  根因：它们根本不是会话——是复盘截断时把丢掉的那一段抄进 `work/rescue/cuts/<章>/` 的**残片**（saveCutEvidence，名字前面加了 `YYYYMMDD-HHMMSS-`）。扫描器只按 `.jsonl` 收文件，把整棵 cuts 目录也收进来了；而 chapterIdentity 也不认这个时间戳前缀。
+  改法：① skipScanDir 整棵跳过 `work/rescue/cuts/`；② chapterIdentity 先剥掉 `^\d{8}-\d{6}-` 前缀再认章节（万一别处也有这种副本，至少不会丢身份）。
+  验证：章节身份用例加一条带前缀的路径，断言仍推出章节 ID/父章/深度；sessionview 测试全绿。
+  未改：cuts 里的残片本身不删（那是复盘证据），只是不进会话列表。

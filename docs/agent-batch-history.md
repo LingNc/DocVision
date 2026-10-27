@@ -2784,3 +2784,11 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **T250 改法**：该处按错误类型分流——`isRetryingChildren` → `waiting_children`，`isPaused` → `paused`，复盘排了队 → `queued`，其余 `error`。
 - **测试**：`chapter_gate_test.go` 的留档用例改为新口径（不再要求留档里有 `_subdivision`，改为断言它留在原地、子转录仍在）；`go test ./internal/...` 只有那条与本批无关的环境用例失败。
 - **未改**：留档里因此不再有 `_subdivision` 快照；真正跑到死的子节点仍记 `error`。
+
+## 批次 T252：复盘截断残片不再当会话列出
+
+- **现象**：预览页「会话」阶段平铺出几十条带时间戳的条目（`20261027-111514-convert_<章>.jsonl`，3 条消息 / 27.9 KB），每条显示未开始。
+- **根因**：这些是复盘截断时抄进 `work/rescue/cuts/<章>/` 的**残片**（`saveCutEvidence`，名字前加 `YYYYMMDD-HHMMSS-`）。扫描器按 `.jsonl` 收文件，把整棵 cuts 也收进来；`chapterIdentity` 又不认时间戳前缀，于是它们既没有章节身份、也不进阶段统计，各自占一行。
+- **改法**：`skipScanDir` 整棵跳过 `work/rescue/cuts/`；`chapterIdentity` 先剥 `^\d{8}-\d{6}-` 前缀再推章节身份。
+- **测试**：章节身份用例加一条带前缀的路径（断章 ID／父章／深度）；`go test ./internal/sessionview/` 全绿。
+- **未改**：cuts 里的残片不删（复盘证据），只是不进会话列表。

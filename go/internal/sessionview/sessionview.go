@@ -691,8 +691,15 @@ func rescueLegacyChapter(stat transcriptStat) chapterIdentityInfo {
 	return chapterIdentityInfo{ID: id, Parent: parent, Role: "rescue", Depth: strings.Count(id, "_child_"), Attempt: 1}
 }
 
+var timestampPrefixRe = regexp.MustCompile(`^\d{8}-\d{6}-`)
+
 func chapterIdentity(rel string) chapterIdentityInfo {
 	base := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+	// T252：残片/快照副本的名字前面带 `YYYYMMDD-HHMMSS-`，先把这段前缀剥掉，
+	// 否则整段名字对不上任何前缀，会话就没有章节身份、单独排在「会话」阶段。
+	if m := timestampPrefixRe.FindString(base); m != "" {
+		base = strings.TrimPrefix(base, m)
+	}
 	attempt := 1
 	if m := chapterAttemptSuffix.FindStringSubmatch(base); m != nil {
 		if n, err := strconv.Atoi(m[2]); err == nil && n > 1 {
@@ -1144,6 +1151,11 @@ func skipScanDir(p, name string) bool {
 	case name == "rounds" && filepath.Base(filepath.Dir(p)) == "work":
 		return true
 	case name == ".trash":
+		return true
+	case name == "cuts" && filepath.Base(filepath.Dir(p)) == "rescue":
+		// T252：`work/rescue/cuts/<章>/` 里放的是复盘截断丢掉的那一段转录**残片**
+		// （名字带 `YYYYMMDD-HHMMSS-` 前缀、只有几行），不是会话。以前它们被当成
+		// 会话平铺在「会话」阶段里，每条都显示未开始/会话错误。
 		return true
 	case cleanBackupRe.MatchString(name):
 		return true
