@@ -700,6 +700,10 @@ func chapterIdentity(rel string) chapterIdentityInfo {
 	if m := timestampPrefixRe.FindString(base); m != "" {
 		base = strings.TrimPrefix(base, m)
 	}
+	// T257：`parked-<名>` 是切回时"目标已存在、不覆盖"的改名（restoreMoveUnique），
+	// 内容是一条被换下来的旧尝试。剥掉前缀才认得出章节身份，否则它单独排在
+	// 「会话」阶段、按未开始显示。
+	base = strings.TrimPrefix(base, "parked-")
 	attempt := 1
 	if m := chapterAttemptSuffix.FindStringSubmatch(base); m != nil {
 		if n, err := strconv.Atoi(m[2]); err == nil && n > 1 {
@@ -981,6 +985,10 @@ func isHashSegment(s string) bool {
 // 挂靠全都失效（接口里连这个字段都不出现）。前缀与路径中段两种位置都认。
 func archivedRel(rel string) bool {
 	rel = filepath.ToSlash(rel)
+	if strings.HasPrefix(path.Base(rel), "parked-") {
+		// T257：切回时被换下来的那条（改名 parked- 保留），是历史不是现役。
+		return true
+	}
 	return strings.HasPrefix(rel, "work/attempts/") || strings.Contains(rel, "/work/attempts/")
 }
 
