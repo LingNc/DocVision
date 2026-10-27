@@ -2824,3 +2824,10 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **根因**：同一章会同时留着多条核对转录（不同尝试、不同代）。驱动只看"手上这条会话的结论"，不看这一版产物**已经通过过**，于是旧会话的 issues 又生效。
 - **改法**：`internal/latex/checker_pass_marker.go`——通过时写 `<章>.tex.passed`（产物指纹 = 主 .tex + parts 全部文件按路径排序后哈希）；拿回 issues 时比对：指纹一致且记号比那条核对转录更新，就判为旧反馈，不写 `.checker`、不打回，直接按通过收尾；产物变了或记号更旧照旧打回；判 issues 时清记号。
 - **测试**：`checker_pass_marker_test.go` 四条（无记号、旧反馈、产物变化、清记号）。
+
+## 批次：矢量图 compare 辅助工具
+
+- **改法**：矢量图作图会话新增纯 Go `compare_figure` 工具。成功编译后，将原图与当前 PDF 首页栅格化结果做软墨迹比较，使用内容 bbox 原点补偿和 origin/centroid 多起点渐进对齐，返回通道重合度、估计位移和颜色 overlay。
+- **边界**：工具是可选模型工具，只提供视觉证据，不改变会话提交状态和原有提交流程。
+- **同步**：提示词、`docvision latex --help`、README、CHANGELOG 和 P65 计划条目已同步。
+- **测试**：`TestCompareFigureImagesFindsTranslation` 与 `TestCompareFigureToolIsOptionalBeforeCompile` 通过；全量 Go 测试的唯一失败是既有 `TestPythonEnvVenvRunsInsideRealSandbox` 环境用例。

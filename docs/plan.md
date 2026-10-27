@@ -281,3 +281,7 @@
 **未定**：单图核对页是否要允许"就地改判"（把这张图从"转文本"改成"重画"并只重跑这一张）——这属于能改数据的操作，需要单独确认；本计划先只做只读核对。
 
 **进展（P64 第一刀，已完成）**：完成口径先收成一处——`go/internal/latex/image_status.go` 的 `imageStatusSettled`/`imageStatusQuality`，判定**只看 `progress_items` 的 `status`**（用户口径：raster 那类没真正处理也算完成）。词表：`classified` 未完事、`done` 真做完、`fallback` 退回原图但也算收尾、其余（`error`/空）未完事；另给界面一档 `quality`（ok/degraded/pending），让"退回原图"能和"真画出来"分开显示。用例 `image_status_test.go` 钉住六种输入。后续进度行、分组视图、单图页一律调这两个函数，不再各自判断。
+
+### P65 矢量图 compare 辅助工具（已实现）
+
+矢量图作图会话新增纯 Go `compare_figure` 工具。它只在模型已经成功编译后读取原图和当前 PDF 预览，返回软墨迹重合信息、对齐位移和 overlay 图像，供模型与 `view_pdf`、`view_image` 一起判断；工具本身不修改会话提交状态，也不改变原有提交流程。实现、提示词、用户帮助和合成回归测试已随 `a6c27fb` 提交；聚焦测试通过，全量测试唯一失败项为既有沙箱 Python 环境用例。
