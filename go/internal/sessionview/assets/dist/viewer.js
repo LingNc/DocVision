@@ -7252,11 +7252,18 @@
     if (stage !== "convert" && stage !== "checker") return null;
     if (filtered) return null;
     const chapterItems = (items || []).filter((s) => !(s == null ? void 0 : s.chapterRole) || s.chapterRole === "convert");
-    const total = chapterItems.length;
+    const byChapter = /* @__PURE__ */ new Map();
+    chapterItems.forEach((s) => {
+      const id = String(s && (s.chapterId || s.id) || "");
+      const cur = byChapter.get(id);
+      byChapter.set(id, cur ? newerAttempt(cur, s) : s);
+    });
+    const current = Array.from(byChapter.values());
+    const total = current.length;
     if (!total) return null;
-    const live = chapterItems.filter((s) => s && s.live);
-    const done = chapterItems.filter((s) => s && s.endState === "done").length;
-    const errs = chapterItems.filter((s) => s && !s.live && s.endState === "error");
+    const live = current.filter((s) => s && s.live);
+    const done = current.filter((s) => s && s.endState === "done").length;
+    const errs = current.filter((s) => s && !s.live && s.endState === "error");
     const rows = live.length ? live : errs;
     const bits = [total + " 章", "完成 " + done];
     if (live.length) bits.push("运行 " + live.length);

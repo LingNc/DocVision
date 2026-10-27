@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { state, STORE_PREFIX } from '../src/state'
-import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chainMemberTag, plainTitle } from '../src/legacy/sidebar'
+import { buildChapterTree, chapterActivityLabel, chapterAttemptChain, chainMemberTag, plainTitle, stageChapterAggregate } from '../src/legacy/sidebar'
 import { chapterNodeKey, chapterWantOpen, setCollapsed, hasCollapseMemory } from '../src/legacy/sidebar'
 import { applyIndex, chapterPendingRetry } from '../src/data'
 import { archivedId, liveId } from './helpers/chapter'
@@ -504,5 +504,37 @@ describe('T235 子行跟着父行选中的那次尝试', () => {
   it('这一代没转过的子章不留空行，退回最新一次', () => {
     const node = buildChapterTree(all, att2.id)[0]
     expect(node.children[1].convert!.id).toBe(onlyOld.id)
+  })
+})
+
+// T251：阶段头按**章节**报数，不按转录条数——同一章的历史尝试、上手留下的归档只算一次，
+// 状态取"这一章现在那一条"。
+describe('阶段头按章节收敛', () => {
+  const mk = (chapterId: string, mtime: string, extra: any = {}) => ({
+    id: `convert:${chapterId}:${mtime}`,
+    chapterId,
+    chapterRole: 'convert',
+    mtime,
+    endState: 'done',
+    ...extra,
+  })
+
+  it('同一章的多条历史只算一次，状态取最新那条', () => {
+    const agg = stageChapterAggregate('convert', [
+      mk('chapter_042', '2026-10-19T10:00:00Z', { endState: 'error' }),
+      mk('chapter_042', '2026-10-26T10:00:00Z', { endState: 'done' }),
+    ], false)!
+    expect(agg.total).toBe(1)
+    expect(agg.done).toBe(1)
+    expect(agg.err).toBe(0)
+  })
+
+  it('归档转录不压过现役那一条', () => {
+    const agg = stageChapterAggregate('convert', [
+      mk('chapter_042', '2026-10-27T10:00:00Z', { archived: true, endState: 'error' }),
+      mk('chapter_042', '2026-10-20T10:00:00Z', { endState: 'done' }),
+    ], false)!
+    expect(agg.total).toBe(1)
+    expect(agg.err).toBe(0)
   })
 })

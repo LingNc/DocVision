@@ -275,11 +275,21 @@ export function stageChapterAggregate(stage: string, items: any[], filtered: boo
   if (stage !== 'convert' && stage !== 'checker') return null
   if (filtered) return null
   const chapterItems = (items || []).filter((s) => !s?.chapterRole || s.chapterRole === 'convert')
-  const total = chapterItems.length
+  // T251：先按章节收敛——同一章的历史尝试、上一代的归档转录、返工留下的多条都只算
+  // 一次，取"这一章现在那一条"（与章节树同一个判据：非归档优先、mtime 新者胜）。
+  // 否则阶段头会按转录条数报数（一次运行实测报出 1811 章，而全书只有几十章）。
+  const byChapter = new Map<string, any>()
+  chapterItems.forEach((s) => {
+    const id = String((s && (s.chapterId || s.id)) || '')
+    const cur = byChapter.get(id)
+    byChapter.set(id, cur ? newerAttempt(cur, s) : s)
+  })
+  const current = Array.from(byChapter.values())
+  const total = current.length
   if (!total) return null
-  const live = chapterItems.filter((s) => s && s.live)
-  const done = chapterItems.filter((s) => s && s.endState === 'done').length
-  const errs = chapterItems.filter((s) => s && !s.live && s.endState === 'error')
+  const live = current.filter((s) => s && s.live)
+  const done = current.filter((s) => s && s.endState === 'done').length
+  const errs = current.filter((s) => s && !s.live && s.endState === 'error')
   const rows = live.length ? live : errs
   const bits = [total + ' 章', '完成 ' + done]
   if (live.length) bits.push('运行 ' + live.length)

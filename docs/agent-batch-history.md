@@ -2765,3 +2765,11 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **改法**：`web/src/legacy/sidebar.ts` 的 `newerAttempt` 改成 mtime 优先、尝试号退为并列时的确定性比较；archived 优先级不变（工作树那条永远优先于归档）。接口字段与数据一个都没动。
 - **测试**：`tests/chapter-tree.spec.ts` 新增「尝试号更大但更旧（上一代的废尝试）不压过现在这次」；`npm test` 23 个文件 277 条全绿；`vite build` 重出 `go/internal/sessionview/assets/dist/viewer.js`（产物照规矩提交）；`go build` 通过。
 - **未改**：「历史 N」页签仍按尝试号列出全部轮次（那里本来就该按号排）；接口侧 `chapterAttempt` 的含义没动。
+
+## 批次 T251：阶段头按章节报数
+
+- **现象**：页面「章节转换」一行报出「1811 章 · 完成 1370 · 运行 1 · 错误 53」，实际全书只有几十章，用户无法判断还有几章没完。
+- **根因**：`stageChapterAggregate` 数的是该阶段下的**转换转录条数**——同一章的历史尝试、上一代归档、返工留下的多条各自算一章。
+- **改法**：`web/src/legacy/sidebar.ts` 先按 `chapterId` 收敛，取「这一章现在那一条」（判据与章节树一致：非归档优先、mtime 新者胜），再据此算完成／运行／错误。
+- **测试**：`tests/chapter-tree.spec.ts` 加两条（同一章多条历史只算一次且状态取最新；归档不压过现役）；`npm test` 279 条全绿；`vite build` 重出 `viewer.js`；`go build` 通过。
+- **未改**：子章节各算一章（它们本来就是独立章节），总数仍会大于顶层章数。
