@@ -985,7 +985,10 @@ func archivedRel(rel string) bool {
 }
 
 func Scan(root string) ([]SessionInfo, error) {
-	return (&scanner{root: root}).scan()
+	sc := &scanner{root: root}
+	sc.loadCountCache(root) // T253：命中缓存的转录不再重读
+	defer sc.saveCountCache(root)
+	return sc.scan()
 }
 
 // ScanWith scans root plus every extra directory (T37 img2text sessions).
@@ -996,6 +999,8 @@ func ScanWith(root string, extras []ScanExtra) ([]SessionInfo, error) {
 // scanner caches per-file message counts between scans so the live server's
 // 2-second polling does not re-read transcripts that did not change.
 type scanner struct {
+	// keep 记这一轮扫到的文件（T253）：缓存落盘时按它剪掉已删除的条目。
+	keep   map[string]bool
 	root   string
 	extras []ScanExtra
 	// img2Text accumulates the sessions found in img2text extra roots
@@ -1025,10 +1030,79 @@ func (s *scanner) workspace(dir string) bool {
 	return v
 }
 
+// 字段导出：索引缓存要落盘，encoding/json 只认导出字段（T253 踩过一次：整个
+// entry 序列化成 `{}`——缓存写着成功，其实什么都没记住）。
 type countEntry struct {
-	size    int64
-	modTime time.Time
-	stat    transcriptStat
+	Size    int64          `json:"size"`
+	ModTime time.Time      `json:"mtime"`
+	Stat    transcriptStat `json:"stat"`
+}
+
+// countCacheFile 是 T253 的磁盘索引缓存：路径 → (size, mtime, 统计)。
+// 命中就不重读文件——一次启动要过 5000 多条、7 GB 转录，重算消息数/用量/SHA
+// 全得把每个文件读完，这就是 `sessions --serve` 启动慢的全部原因。
+// 失效判据只有 size 与 mtime：两者都没变就当内容没变（转录是 append-only）。
+type countCacheFile struct {
+	Version int                   `json:"version"`
+	Entries map[string]countEntry `json:"entries"`
+}
+
+const countCacheName = ".sessionview-cache.json"
+const countCacheVersion = 1
+
+// loadCountCache 读上一次的索引缓存；读不到或版本不符就当没有（只是慢一次）。
+func (s *scanner) loadCountCache(root string) {
+	f, err := os.Open(filepath.Join(root, countCacheName))
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	var cf countCacheFile
+	if err := json.NewDecoder(bufio.NewReaderSize(f, 1<<20)).Decode(&cf); err != nil {
+		return
+	}
+	if cf.Version != countCacheVersion || len(cf.Entries) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.counts = cf.Entries
+	s.mu.Unlock()
+}
+
+// saveCountCache 把这一轮的统计落盘。失败只当没写（下次重算一遍，不影响功能）。
+func (s *scanner) saveCountCache(root string) {
+	s.mu.Lock()
+	entries := make(map[string]countEntry, len(s.counts))
+	for k, v := range s.counts {
+		// 只留这一轮真扫到的文件：删掉的转录不该在缓存里越攒越多。
+		if s.keep != nil && !s.keep[k] {
+			continue
+		}
+		entries[k] = v
+	}
+	s.mu.Unlock()
+	if len(entries) == 0 {
+		return
+	}
+	path := filepath.Join(root, countCacheName)
+	tmp := path + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return
+	}
+	bw := bufio.NewWriterSize(f, 1<<20)
+	err = json.NewEncoder(bw).Encode(countCacheFile{Version: countCacheVersion, Entries: entries})
+	if err == nil {
+		err = bw.Flush()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return
+	}
+	_ = os.Rename(tmp, path)
 }
 
 // transcriptStat is what one streaming pass over a transcript yields: the
@@ -1229,6 +1303,10 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		if ierr != nil {
 			return nil
 		}
+		if s.keep == nil {
+			s.keep = map[string]bool{}
+		}
+		s.keep[p] = true
 		candidates = append(candidates, candidate{full: p, name: d.Name(), size: info.Size(), mt: info.ModTime()})
 		return nil
 	})
@@ -1361,9 +1439,9 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 // but never the message count.
 func (s *scanner) fileStat(p string, size int64, modTime time.Time) transcriptStat {
 	s.mu.Lock()
-	if e, ok := s.counts[p]; ok && e.size == size && e.modTime.Equal(modTime) {
+	if e, ok := s.counts[p]; ok && e.Size == size && e.ModTime.Equal(modTime) {
 		s.mu.Unlock()
-		return e.stat
+		return e.Stat
 	}
 	s.mu.Unlock()
 
@@ -1375,7 +1453,7 @@ func (s *scanner) fileStat(p string, size int64, modTime time.Time) transcriptSt
 	if s.counts == nil {
 		s.counts = map[string]countEntry{}
 	}
-	s.counts[p] = countEntry{size: size, modTime: modTime, stat: stat}
+	s.counts[p] = countEntry{Size: size, ModTime: modTime, Stat: stat}
 	s.mu.Unlock()
 	return stat
 }
