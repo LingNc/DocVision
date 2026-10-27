@@ -330,11 +330,14 @@ func (r *Runner) motifReviewDocOf(leaders []*motifCandidate, copies map[*motifCa
 		} else if name != "" {
 			it.Thumb = name
 		}
-		it.Note = note
 		if pr := c.progress; pr != nil {
 			it.Status = imageStatusLabel(pr)
 			it.Links = imageArtifactLinks(pr)
+			if pr.Class != "" {
+				note = strings.TrimSpace(pr.Class + " · " + note)
+			}
 		}
+		it.Note = note
 		return it
 	}
 	doc := motifReviewDoc{
@@ -520,8 +523,14 @@ func imageArtifactLinks(p *imageProgress) []motifReviewLink {
 		rel := "../progress_items/" + escapeURLPath(sanitizeName(p.MDName)) + "/" + escapeURLPath(sanitizeName(p.ImgPath)) + ".json"
 		out = append(out, motifReviewLink{Label: "判定记录", Href: rel})
 	}
+	// 转换结果与它的来源：PDF/PNG/SVG 在 figures/，LaTeX 源在 tikz/，作图会话的
+	// 转录在 sessions/vector_<名>.jsonl——三样都能从 figures/<名>.pdf 推出来，
+	// 所以只有真画过的图才有这几个入口。
+	if base := figureBaseName(p.FigPDF); base != "" {
+		out = append(out, motifReviewLink{Label: "LaTeX 源", Href: "../tikz/" + escapeURLPath(base) + ".tex"})
+		out = append(out, motifReviewLink{Label: "会话", Href: "../sessions/" + escapeURLPath("vector_"+base+".jsonl")})
+	}
 	for _, f := range []struct{ label, href string }{
-		{"TikZ", p.TikzCode},
 		{"PDF", p.FigPDF},
 		{"PNG", p.FigPNG},
 		{"SVG", p.FigSVG},
@@ -536,6 +545,15 @@ func imageArtifactLinks(p *imageProgress) []motifReviewLink {
 		out = append(out, motifReviewLink{Label: f.label, Href: h})
 	}
 	return out
+}
+
+// figureBaseName 从 figures/<名>.pdf 取出 <名>：LaTeX 源与作图转录都以它命名。
+func figureBaseName(figPDF string) string {
+	base := filepath.Base(strings.TrimSpace(filepath.ToSlash(figPDF)))
+	if base == "" || base == "." {
+		return ""
+	}
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 // motifReviewImageHref 是复查页到原图的相对链接：md 里的引用相对 source/，

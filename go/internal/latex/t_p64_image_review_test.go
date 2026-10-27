@@ -20,7 +20,7 @@ func TestMotifReviewShowsImageStatusAndLooseSets(t *testing.T) {
 	drawDiamond(img, 35, 30, 18)
 	done := &motifCandidate{
 		task:       &task{mdName: "book.md", imgPath: "images/book/a.jpg"},
-		progress:   &imageProgress{Key: "book.md::images/book/a.jpg", MDName: "book.md", ImgPath: "images/book/a.jpg", Class: ClassVector, Status: ImageStatusDone, TikzCode: "f1.tex", FigPDF: "source/figures/a.pdf"},
+		progress:   &imageProgress{Key: "book.md::images/book/a.jpg", MDName: "book.md", ImgPath: "images/book/a.jpg", Class: ClassVector, Status: ImageStatusDone, TikzCode: "\\draw (0,0)--(1,1);", FigPDF: "figures/a.pdf"},
 		image:      img,
 		sourceHash: "hash-a",
 	}
@@ -42,7 +42,8 @@ func TestMotifReviewShowsImageStatusAndLooseSets(t *testing.T) {
 		"已完成",
 		"判定记录",
 		"../progress_items/book.md/images_book_a.jpg.json",
-		"f1.tex",
+		"../tikz/a.tex",
+		"../sessions/vector_a.jsonl",
 		"等待转换的原图（2 张）",
 		"退回原图的（已收尾但没画出成品）（1 张）",
 		"退回原图",
