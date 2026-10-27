@@ -1494,3 +1494,9 @@ user 轮
   改法：stageChapterAggregate 只统计 chapterId 非空的会话（角色仍限 convert）。
   验证：新增用例（阶段会话即便 error 也不进计数）；npm test 全绿；vite build 重出 viewer.js。
   未改：真正的章节会话里仍有历史遗留的 error（旧二进制写下的终态），T250 只保证以后不再写错。
+- T255 `docvision sessions --serve` 启动后直接崩：`fatal error: concurrent map writes`。
+  现象：服务刚起来就整个进程退出（error.log 里是完整 goroutine 转储，崩在 scan 的 WalkDir 回调写 s.keep 那一行）。
+  根因两条，都是 T253 引入的。① walk 回调直接往 scanner 字段 map（s.keep）里写；② 预览页会**复用同一个 scanner** 做轮询，两个请求的 scan 撞在一起就是两个 goroutine 同时写同一个 map。同一份转储里还有多处数据竞争（img2Text、counts 等 per-扫描状态）。
+  改法：walk 期间先写本地 map，走完再持锁交给字段；同时给 scanner 加 scanMu，让同一个 scanner 上的 scan 串行——扫描本来就 0.6 秒级、轮询 2 秒一次，排队不影响体验。
+  验证：新增用例用同一个 scanner 起 8 个 goroutine 并发 scan，`go test -race` 从"race detected"变成通过；sessionview 全包 -race 全绿。
+  未改：Scan() 每次新建 scanner（不受影响）；慢扫描期间后来的轮询会等，而不是并行重算。

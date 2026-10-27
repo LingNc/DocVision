@@ -2810,3 +2810,10 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 - **改法**：`stageChapterAggregate` 只统计 `chapterId` 非空的会话（角色仍限 convert）。
 - **测试**：`tests/chapter-tree.spec.ts` 新增用例（阶段会话即便 `endState=error` 也不进计数）；`npm test` 全绿；`vite build` 重出 `viewer.js`。
 - **未改**：真正的章节会话里仍有旧二进制写下的历史 `error` 终态，T250 只保证以后不再写错。
+
+## 批次 T255：预览页 `concurrent map writes` 崩溃
+
+- **现象**：`docvision sessions --serve` 起来就整个进程退出，`error.log` 里 `fatal error: concurrent map writes`，崩在 `scan` 的 WalkDir 回调（写 `s.keep` 那一行），同一份转储里还有多处数据竞争。
+- **根因**：两条都来自 T253 的索引缓存。① walk 回调直接往 scanner 字段 map 写；② 预览页**复用同一个 scanner** 做轮询，两个请求的扫描撞在一起就是两个 goroutine 同时写同一个 map。
+- **改法**：walk 期间写本地 map，走完持锁交给字段；给 scanner 加 `scanMu`，同一实例上的 `scan` 串行（扫描 0.6 秒级、轮询 2 秒一次，排队无感）。
+- **测试**：新增 `t255_concurrent_scan_test.go`——同一个 scanner 8 个 goroutine 并发 scan，`go test -race` 由失败转通过；`go test ./internal/sessionview/ -race` 全绿。

@@ -1007,7 +1007,11 @@ type scanner struct {
 	// during one scan, so the numbering pass can index them per group.
 	img2Text []img2TextEntry
 	mu       sync.Mutex
-	counts   map[string]countEntry
+	// scanMu 让同一个 scanner 上的并发扫描排队（T255）：预览页会复用同一个
+	// scanner 做轮询，而 scan 里有多处 per-扫描的可变状态（img2Text、keep…），
+	// 两个请求撞在一起时以前会崩在 concurrent map writes。
+	scanMu sync.Mutex
+	counts map[string]countEntry
 	// ws caches "is this directory a project workspace" between polls.
 	ws map[string]bool
 }
@@ -1252,6 +1256,8 @@ func skipScanFile(p, name string) bool {
 }
 
 func (s *scanner) scan() ([]SessionInfo, error) {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
 	root, err := filepath.Abs(s.root)
 	if err != nil {
 		return nil, err
@@ -1278,6 +1284,7 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		mt   time.Time
 	}
 	var candidates []candidate
+	keepLocal := map[string]bool{}
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// Skip what we cannot read and keep going: one broken branch of
@@ -1303,16 +1310,19 @@ func (s *scanner) scan() ([]SessionInfo, error) {
 		if ierr != nil {
 			return nil
 		}
-		if s.keep == nil {
-			s.keep = map[string]bool{}
-		}
-		s.keep[p] = true
+		// T255：这里必须写**本地** map。`scan` 会被轮询复用同一个 scanner，别处
+		// 的分支还会并发读写 `s.keep`/`s.counts`——直接往字段 map 里写会崩在
+		// `fatal error: concurrent map writes`（真机复现过一次）。
+		keepLocal[p] = true
 		candidates = append(candidates, candidate{full: p, name: d.Name(), size: info.Size(), mt: info.ModTime()})
 		return nil
 	})
 	if walkErr != nil {
 		return nil, walkErr
 	}
+	s.mu.Lock()
+	s.keep = keepLocal
+	s.mu.Unlock()
 
 	stats := make([]transcriptStat, len(candidates))
 	var wg sync.WaitGroup
