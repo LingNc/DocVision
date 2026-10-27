@@ -377,12 +377,16 @@ def save_comparisons(original_path: Path, candidate_path: Path, out_dir: Path, d
     aligned = translated(cand, dx, dy)
 
     # Compare luminance on the same canonical grid with the same final offset.
-    gray_src, _ = content_ink(np.repeat(np.asarray(Image.fromarray(src).convert("L"))[:, :, None], 3, axis=2))
-    gray_cand, _ = content_ink(np.repeat(np.asarray(Image.fromarray(cand).convert("L"))[:, :, None], 3, axis=2))
     canvas = result["canvas"]
     grid = result["grid"]
+    gray_src, gray_src_origin = content_ink(np.repeat(np.asarray(Image.fromarray(src).convert("L"))[:, :, None], 3, axis=2))
+    gray_cand, gray_cand_origin = content_ink(np.repeat(np.asarray(Image.fromarray(cand).convert("L"))[:, :, None], 3, axis=2))
+    gray_dx = dx - (gray_src_origin[0] - gray_cand_origin[0])
+    gray_dy = dy - (gray_src_origin[1] - gray_cand_origin[1])
+    gray_shift_x = go_round(gray_dx * grid / canvas)
+    gray_shift_y = go_round(gray_dy * grid / canvas)
     gs, gc = to_grid(gray_src, canvas, grid), to_grid(gray_cand, canvas, grid)
-    gray_channel = overlap_scores(gs, gc, result["shift_cells"]["y"], result["shift_cells"]["x"])[0]
+    gray_channel = overlap_scores(gs, gc, gray_shift_y, gray_shift_x)[0]
     channel_scores = {**result["channel_scores"], "gray": gray_channel}
     channels = ["gray", "r", "g", "b"]
     paths = {}
