@@ -9,7 +9,8 @@ import (
 // T266：矢量图阶段同一张图的多次尝试（try1/try2/…）以前平铺成一串同号方块，
 // 46 条会话里二十多个序号各出现两次，看不出哪些是重画。这里钉住三件事：
 // ① 侧栏按"这张图"叠成一层（父行带尝试次数，子行是 tryN + 结局）；
-// ② 方块视图一图一块，多次尝试带次数角标；
+// ② 方块视图一条转录一块、全量可见：同一张图的尝试贴在一起，现役在前，
+//    被取代的旧次打暗标 + 「旧」角标；
 // ③ 搜索时不分组——历史尝试也必须能被搜到。
 const (
 	vecHashA = "aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaaaaaabbbb"
@@ -61,8 +62,9 @@ const vectorGroupsProbeJS = `
       push('hasBlockToggle', !!toggle);
       if (toggle) toggle.click();
       setTimeout(function () {
-        push('blockCount', document.querySelectorAll('.session-block').length);
-        push('blockBadges', document.querySelectorAll('.block-count').length);
+          push('blockCount', document.querySelectorAll('.session-block').length);
+        push('blockOld', document.querySelectorAll('.session-block.old').length);
+        push('blockOldTags', document.querySelectorAll('.block-old').length);
         var back = document.querySelector('[title^="切回列表视图"]');
         if (back) back.click();
         setTimeout(function () {
@@ -86,7 +88,7 @@ func TestViewerVectorAttemptGroupsInChromium(t *testing.T) {
 	js := strings.NewReplacer("@PLAINIMG@", "vector_book__"+vecHashB+"__label.jsonl").Replace(vectorGroupsProbeJS)
 	dom := renderViewerDOM(t, root, "vector_book__"+vecHashA+"__label.try3.jsonl", js)
 
-	// 试过三次的那张叠成一层；只试过一次的那张不套壳，仍是普通会话行。
+	// 试过三次的那张叠成一层（无后缀的那条是现役、排最前）；只试过一次的那张不套壳。
 	if got := nameProbeValue(t, dom, "groupCount"); got != "1" {
 		t.Errorf("分组行数 = %s，期望 1（只有那张试过三次的图叠层）", got)
 	}
@@ -97,8 +99,9 @@ func TestViewerVectorAttemptGroupsInChromium(t *testing.T) {
 	if !strings.Contains(head, "3 次") {
 		t.Errorf("父行没写尝试次数；实际：%s", head)
 	}
-	if got := nameProbeValue(t, dom, "firstGroupTries"); got != "try3,try2,try1" {
-		t.Errorf("子行尝试号 = %q，期望 try3,try2,try1（新的在前）", got)
+	// 现役（无后缀）在最前，归档的 tryN 从大到小跟上。
+	if got := nameProbeValue(t, dom, "firstGroupTries"); got != "当前,try3,try2" {
+		t.Errorf("子行尝试标签 = %q，期望 当前,try3,try2", got)
 	}
 	// 当前选中的正是 try3，它所在的那一组应自动展开。
 	if got := nameProbeValue(t, dom, "firstGroupOpen"); got != "true" {
@@ -107,11 +110,16 @@ func TestViewerVectorAttemptGroupsInChromium(t *testing.T) {
 	if got := nameProbeValue(t, dom, "hasBlockToggle"); got != "true" {
 		t.Fatalf("页面里没有方块视图开关，探针点不到")
 	}
-	if got := nameProbeValue(t, dom, "blockCount"); got != "2" {
-		t.Errorf("方块数 = %s，期望 2（一图一块，不再按尝试平铺）", got)
+	// T268：方块一条转录一块、全量可见（第一张 3 次 + 第二张 1 次 = 4 块），
+	// 被取代的旧次（try3/try2）打暗标并挂「旧」角标。
+	if got := nameProbeValue(t, dom, "blockCount"); got != "4" {
+		t.Errorf("方块数 = %s，期望 4（每个转录一块，旧次也可见）", got)
 	}
-	if got := nameProbeValue(t, dom, "blockBadges"); got != "1" {
-		t.Errorf("次数角标 = %s 个，期望 1（只有那张试过三次的图挂角标）", got)
+	if got := nameProbeValue(t, dom, "blockOld"); got != "2" {
+		t.Errorf("暗标的旧次方块 = %s 个，期望 2（try3/try2）", got)
+	}
+	if got := nameProbeValue(t, dom, "blockOldTags"); got != "2" {
+		t.Errorf("「旧」角标 = %s 个，期望 2", got)
 	}
 	if got := nameProbeValue(t, dom, "searchGroups"); got != "0" {
 		t.Errorf("搜索时仍在分组（img-group=%s），历史尝试会被藏起来", got)

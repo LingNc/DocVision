@@ -10,7 +10,7 @@ import { state, openDetails, fmtSize, storeGet, storeSet, setBoard, resetViewSta
 import {
   bookDominantState, bookTip, booksHeadText,
   buildGroups, buildImg2TextChains, buildChapterTree, filterByBoard, groupKey, groupWantOpen,
-  imageAttemptNo, groupImageAttempts, imageChipText, imageTipText, img2textMemberTag, plainTitle,
+  imageAttemptNo, imageAttemptCurrent, flattenImageGroups, groupImageAttempts, imageChipText, imageTipText, img2textMemberTag, plainTitle,
   styleFixPhaseKey, stylefixCompare,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
@@ -102,6 +102,8 @@ interface StageView {
   hiddenCount: number
   /* T266：矢量图阶段按"同一张图"叠起来的尝试层（不为空时模板走分组渲染）。 */
   imageGroups: ImageAttemptGroup[]; shownGroups: ImageAttemptGroup[]
+  /* T268：方块视图的全量平铺（同一张图的尝试贴在一起，旧次按 oldById 打暗标）。 */
+  blockFlat: any[]; oldById: Record<string, boolean>
   /* T63：convert/checker 聚合（null = 不聚合原样显示）。 */
   agg: StageAggregate | null
   chapterRoots: ChapterTreeNode[]
@@ -178,6 +180,11 @@ const groups = computed<GroupView[]>(() => {
       const shownGroups = imageGroups.length
         ? (openAll ? imageGroups : imageGroups.slice(0, OVERFLOW_LIMIT))
         : []
+      // T268：方块视图回到"一条转录一个方块"的全量显示——同一张图的各次尝试
+      // 贴在一起（现役在前），除现役外都算被取代的旧次，打暗标。
+      const blockFlat = shownGroups.length ? flattenImageGroups(shownGroups) : []
+      const oldById: Record<string, boolean> = {}
+      shownGroups.forEach((grp) => grp.items.forEach((s: any, i: number) => { if (i > 0) oldById[s.id] = true }))
       // T88：块编号——矢量/章节会话用各自的 imageOrder/chapterOrder；
       // 修复链/装配会话两种都没有，按排序后的位置从 1 编，方块视图里
       // 能指着编号选会话。
@@ -187,7 +194,7 @@ const groups = computed<GroupView[]>(() => {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
         overflowKey: okey, needOverflow, shown, hiddenCount: groups0 - (imageGroups.length ? shownGroups.length : shown.length),
-        imageGroups, shownGroups, agg, noBy, chapterRoots,
+        imageGroups, shownGroups, blockFlat, oldById, agg, noBy, chapterRoots,
       }
     })
     let chains: SessionChain[] | null = null
@@ -328,7 +335,7 @@ function chainTip(c: SessionChain): string {
 function imageGroupTip(grp: ImageAttemptGroup): string {
   const lines = [grp.label + '（' + grp.items.length + ' 次尝试，新 → 旧）']
   grp.items.forEach((s: any) => {
-    lines.push('try' + imageAttemptNo(s) + ' · ' + attemptStateText(s) + ' · ' + relTime(s.mtime))
+    lines.push(attemptTag(s) + ' · ' + attemptStateText(s) + ' · ' + relTime(s.mtime))
   })
   if (grp.items.length > 1) lines.push('—— 点上面一行看最新一次，展开看每次的详情 ——')
   return lines.join('\n')
@@ -338,6 +345,11 @@ function imageGroupTip(grp: ImageAttemptGroup): string {
 function imgGroupWantOpen(grp: ImageAttemptGroup): boolean {
   const cur: any = state.current
   return !!cur && grp.items.some((s: any) => s.id === cur.id)
+}
+
+/* 一次尝试的标签：现役 = 「当前」，被归档的旧次 = tryN。 */
+function attemptTag(s: any): string {
+  return imageAttemptCurrent(s) ? '当前' : 'try' + imageAttemptNo(s)
 }
 
 /* 一次尝试的结局：运行中 / 已提交 / 错误终止 / 还没开工。 */
@@ -600,22 +612,22 @@ function onResetView() {
                   @select="onRowClick" @info="onInfoClick"
                 />
                 <template v-else-if="blockView">
-                <div v-if="sv.shownGroups.length" class="session-blocks">
+                <div v-if="sv.blockFlat.length" class="session-blocks">
                   <button
-                    v-for="grp in sv.shownGroups"
-                    :key="grp.key"
+                    v-for="s in sv.blockFlat"
+                    :key="s.id"
                     class="session-block"
-                    :class="{ active: state.current && grp.items.some(s => s.id === state.current.id), live: grp.live, err: grp.hasError && !grp.live, pend: !grp.live && !grp.main.endState }"
+                    :class="{ active: state.current && state.current.id === s.id, live: s.live, err: !s.live && s.endState === 'error', pend: !s.live && !s.endState, old: sv.oldById[s.id] }"
                     type="button"
                     role="treeitem"
-                    :data-id="grp.main.id"
-                    :title="imageGroupTip(grp)"
-                    @click="onRowClick(grp.main)"
-                  >{{ grp.order || '' }}<span v-if="grp.items.length > 1" class="block-count">×{{ grp.items.length }}</span></button>
+                    :data-id="s.id"
+                    :title="sv.oldById[s.id] ? '旧的一次尝试（已被更新的取代）—— ' + rowTitle(s) : rowTitle(s)"
+                    @click="onRowClick(s)"
+                  >{{ sv.noBy ? (sv.noBy[s.id] ?? '') : (s.imageOrder || s.chapterOrder || '') }}<span v-if="sv.oldById[s.id]" class="block-old">旧</span></button>
                 </div>
                 <div v-else class="session-blocks">
                   <button
-                    v-for="s in sv.items"
+                    v-for="s in sv.shown"
                     :key="s.id"
                     class="session-block"
                     :class="{ active: state.current && state.current.id === s.id, live: s.live, err: !s.live && s.endState === 'error', pend: !s.live && !s.endState }"
@@ -626,6 +638,9 @@ function onResetView() {
                     @click="onRowClick(s)"
                   >{{ sv.noBy ? (sv.noBy[s.id] ?? '') : (s.imageOrder || s.chapterOrder || '') }}</button>
                 </div>
+                <button v-if="sv.needOverflow" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
+                  {{ sv.blockFlat.length ? '更多图片（还有 ' + sv.hiddenCount + ' 张）' : '更多会话（还有 ' + sv.hiddenCount + ' 个）' }}
+                </button>
                 </template>
                 <template v-else-if="sv.shownGroups.length">
                   <template v-for="grp in sv.shownGroups" :key="grp.key">
@@ -673,7 +688,7 @@ function onResetView() {
                         @click="onRowClick(s)"
                       >
                         <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                        <span class="try-tag">try{{ imageAttemptNo(s) }}</span>
+                        <span class="try-tag">{{ attemptTag(s) }}</span>
                         <span class="try-state">{{ attemptStateText(s) }}</span>
                         <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                         <span class="row-time">{{ relTime(s.mtime) }}</span>
@@ -720,22 +735,23 @@ function onResetView() {
                   :scope="g.name + '/' + sv.stage"
                   @select="onRowClick" @info="onInfoClick"
                 />
-                <div v-else-if="blockView && sv.shownGroups.length" class="session-blocks">
+                <template v-else-if="blockView">
+                <div v-if="sv.blockFlat.length" class="session-blocks">
                   <button
-                    v-for="grp in sv.shownGroups"
-                    :key="grp.key"
+                    v-for="s in sv.blockFlat"
+                    :key="s.id"
                     class="session-block"
-                    :class="{ active: state.current && grp.items.some(s => s.id === state.current.id), live: grp.live, err: grp.hasError && !grp.live, pend: !grp.live && !grp.main.endState }"
+                    :class="{ active: state.current && state.current.id === s.id, live: s.live, err: !s.live && s.endState === 'error', pend: !s.live && !s.endState, old: sv.oldById[s.id] }"
                     type="button"
                     role="treeitem"
-                    :data-id="grp.main.id"
-                    :title="imageGroupTip(grp)"
-                    @click="onRowClick(grp.main)"
-                  >{{ grp.order || '' }}<span v-if="grp.items.length > 1" class="block-count">×{{ grp.items.length }}</span></button>
+                    :data-id="s.id"
+                    :title="sv.oldById[s.id] ? '旧的一次尝试（已被更新的取代）—— ' + rowTitle(s) : rowTitle(s)"
+                    @click="onRowClick(s)"
+                  >{{ sv.noBy ? (sv.noBy[s.id] ?? '') : (s.imageOrder || s.chapterOrder || '') }}<span v-if="sv.oldById[s.id]" class="block-old">旧</span></button>
                 </div>
-                <div v-else-if="blockView" class="session-blocks">
+                <div v-else class="session-blocks">
                   <button
-                    v-for="s in sv.items"
+                    v-for="s in sv.shown"
                     :key="s.id"
                     class="session-block"
                     :class="{ active: state.current && state.current.id === s.id, live: s.live, err: !s.live && s.endState === 'error', pend: !s.live && !s.endState }"
@@ -746,6 +762,10 @@ function onResetView() {
                     @click="onRowClick(s)"
                   >{{ s.imageOrder || s.chapterOrder || '' }}</button>
                 </div>
+                <button v-if="sv.needOverflow" class="session-overflow" type="button" @click="onMoreClick(sv.overflowKey)">
+                  {{ sv.blockFlat.length ? '更多图片（还有 ' + sv.hiddenCount + ' 张）' : '更多会话（还有 ' + sv.hiddenCount + ' 个）' }}
+                </button>
+                </template>
                 <template v-else-if="sv.shownGroups.length">
                   <template v-for="grp in sv.shownGroups" :key="grp.key">
                     <!-- 只试过一次的图不套壳：多一层展开点只会让人多点一次。 -->
@@ -792,7 +812,7 @@ function onResetView() {
                         @click="onRowClick(s)"
                       >
                         <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
-                        <span class="try-tag">try{{ imageAttemptNo(s) }}</span>
+                        <span class="try-tag">{{ attemptTag(s) }}</span>
                         <span class="try-state">{{ attemptStateText(s) }}</span>
                         <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
                         <span class="row-time">{{ relTime(s.mtime) }}</span>
@@ -1282,6 +1302,26 @@ details[open] > .proj-row .row-folder .folder.open {
   border-radius: 5px;
   background: var(--accent);
   color: #fff;
+  font-size: 8px;
+  line-height: 10px;
+  text-align: center;
+}
+
+/* T268：被更新的尝试取代的旧次——整块调暗，右上角一枚「旧」。 */
+.session-block.old {
+  opacity: .55;
+}
+
+.block-old {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 12px;
+  height: 10px;
+  padding: 0 2px;
+  border-radius: 5px;
+  background: var(--muted);
+  color: var(--bg, #fff);
   font-size: 8px;
   line-height: 10px;
   text-align: center;

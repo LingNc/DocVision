@@ -372,10 +372,17 @@ export function imageAttemptKey(s: any): string {
   return id.replace(/\.jsonl$/, '').replace(/\.try\d+$/, '')
 }
 
-/* 第几次尝试：转录名 `.tryN` 是唯一来源，没有后缀就是第一次。 */
+/* 第几次尝试：转录名 `.tryN` 是唯一来源——它是 clean_vector / 重画归档出来的
+ * 旧代次，N 越大离现在越近；没有后缀的那条是**现役**（0，排序永远在最前，
+ * 点开就是最新的一次）。 */
 export function imageAttemptNo(s: any): number {
   const m = /\.try(\d+)(?:\.jsonl)?$/.exec(String((s && s.id) || ''))
-  return m ? Number(m[1]) : 1
+  return m ? Number(m[1]) : 0
+}
+
+/* 这条转录是不是这张图的现役尝试（id 没有 .tryN 后缀）。 */
+export function imageAttemptCurrent(s: any): boolean {
+  return !/\.try\d+(?:\.jsonl)?$/.test(String((s && s.id) || ''))
 }
 
 export function groupImageAttempts(items: any[]): ImageAttemptGroup[] {
@@ -390,6 +397,9 @@ export function groupImageAttempts(items: any[]): ImageAttemptGroup[] {
   const out: ImageAttemptGroup[] = []
   byKey.forEach((members, key) => {
     const sorted = members.slice().sort((a: any, b: any) => {
+      const ca = imageAttemptCurrent(a) ? 0 : 1
+      const cb = imageAttemptCurrent(b) ? 0 : 1
+      if (ca !== cb) return ca - cb
       const na = imageAttemptNo(a)
       const nb = imageAttemptNo(b)
       if (na !== nb) return nb - na
@@ -412,6 +422,14 @@ export function groupImageAttempts(items: any[]): ImageAttemptGroup[] {
   })
 }
 
+
+/* T268：方块视图回到"一条转录一个方块"的全量显示——同一张图的各次尝试贴在
+ * 一起（现役在前、归档的旧次跟上），旧次在模板里按 oldById 打暗标。 */
+export function flattenImageGroups(groups: ImageAttemptGroup[]): any[] {
+  const out: any[] = []
+  ;(groups || []).forEach((g) => (g.items || []).forEach((s: any) => out.push(s)))
+  return out
+}
 export function sessionTitleOf(s: any): string {
   if (s.imageName && (s.page || s.imageOrder || s.imageShort || s.imageLabel || s.imageCaption)) {
     // 逐图会话的标题用**图注 / 图片名**，页与序号在从属信息里。
