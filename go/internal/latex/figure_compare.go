@@ -33,23 +33,51 @@ func (t *compareFigureTool) Name() string { return "compare_figure" }
 func (t *compareFigureTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
 		"name":        "compare_figure",
-		"description": "Compare the latest successfully compiled figure with the original bitmap. Returns a soft-ink similarity summary, estimated translation and a color overlay image; use this as additional visual evidence alongside view_pdf and view_image.",
-		"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
+		"description": "Compare the original image with a compiled figure. Returns a four-panel overlay (gray/R/G/B) or one selected panel; supports targeted crop and zoom for detailed re-checks. This is visual evidence, not semantic proof.",
+		"parameters": map[string]any{"type": "object", "properties": map[string]any{
+			"pdf_path":     map[string]any{"type": "string", "description": "Workspace-relative compiled PDF path; defaults to the latest successful compile."},
+			"detail":       map[string]any{"type": "string", "enum": []string{"all", "gray", "r", "g", "b", "rg", "rb", "gb"}, "description": "all returns a 2x2 gray/R/G/B board; a channel or channel combination returns that panel."},
+			"worst_region": map[string]any{"type": "boolean", "description": "Return only the automatically located weakest comparison region instead of the full figure."},
+			"left":         map[string]any{"type": "number", "description": "Crop left percentage, 0-100."},
+			"top":          map[string]any{"type": "number", "description": "Crop top percentage, 0-100."},
+			"right":        map[string]any{"type": "number", "description": "Crop right percentage, 0-100."},
+			"bottom":       map[string]any{"type": "number", "description": "Crop bottom percentage, 0-100."},
+			"zoom":         map[string]any{"type": "integer", "description": "Target output width in pixels; 0 keeps the cropped native width."},
+		}},
 	}}
 }
 
 func (t *compareFigureTool) Execute(argsJSON string) (session.ToolResult, error) {
-	if _, err := parseJSONObject(argsJSON); err != nil {
+	args, err := parseJSONObject(argsJSON)
+	if err != nil {
 		return session.ToolResult{}, err
 	}
-	if t.State == nil || !t.State.compileOK || strings.TrimSpace(t.State.lastPDF) == "" {
-		return session.ToolResult{Text: "Comparison unavailable: compile a figure successfully first."}, nil
+	hasExplicitPDF := false
+	if raw, ok := args["pdf_path"].(string); ok && strings.TrimSpace(raw) != "" {
+		hasExplicitPDF = true
+	}
+	if t.State == nil || (!hasExplicitPDF && (!t.State.compileOK || strings.TrimSpace(t.State.lastPDF) == "")) {
+		return session.ToolResult{Text: "Comparison unavailable: compile a figure successfully first, or provide pdf_path."}, nil
+	}
+	pdfPath := t.State.lastPDF
+	if raw, ok := args["pdf_path"].(string); ok && strings.TrimSpace(raw) != "" {
+		candidate := raw
+		if filepath.IsAbs(candidate) {
+			return session.ToolResult{Text: "Comparison unavailable: pdf_path must be workspace-relative."}, nil
+		}
+		pdfPath = filepath.Join(t.State.workDir, filepath.Clean(candidate))
+		if rel, err := filepath.Rel(t.State.workDir, pdfPath); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return session.ToolResult{Text: "Comparison unavailable: pdf_path escapes the figure workspace."}, nil
+		}
+	}
+	if _, err := os.Stat(pdfPath); err != nil {
+		return session.ToolResult{Text: "Comparison unavailable: PDF not found: " + err.Error()}, nil
 	}
 	if t.Comp == nil || strings.TrimSpace(t.OriginalPath) == "" {
 		return session.ToolResult{Text: "Comparison unavailable: the compiler or original image is not configured."}, nil
 	}
 	base := filepath.Join(t.State.workDir, "compare_figure_candidate")
-	if err := t.Comp.Rasterize(t.State.lastPDF, base); err != nil {
+	if err := t.Comp.Rasterize(pdfPath, base); err != nil {
 		return session.ToolResult{Text: "Comparison unavailable: " + err.Error()}, nil
 	}
 	candidatePath := base + ".png"
@@ -61,21 +89,70 @@ func (t *compareFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	if err != nil {
 		return session.ToolResult{Text: "Comparison unavailable: cannot read compiled preview: " + err.Error()}, nil
 	}
-	result, overlay, err := compareFigureImages(original, candidate)
+	result, _, err := compareFigureImages(original, candidate)
 	if err != nil {
 		return session.ToolResult{Text: "Comparison unavailable: " + err.Error()}, nil
+	}
+	detail := stringArg(args, "detail", "all")
+	if !validFigureDetail(detail) {
+		return session.ToolResult{Text: "Comparison unavailable: detail must be all, gray, r, g, b, rg, rb, or gb."}, nil
+	}
+	left, top := numberArg(args, "left", 0), numberArg(args, "top", 0)
+	right, bottom := numberArg(args, "right", 100), numberArg(args, "bottom", 100)
+	if left < 0 || top < 0 || right > 100 || bottom > 100 || right <= left || bottom <= top {
+		return session.ToolResult{Text: "Comparison unavailable: crop must satisfy 0 <= left < right <= 100 and 0 <= top < bottom <= 100."}, nil
+	}
+	zoom := int(numberArg(args, "zoom", 0))
+	if zoom < 0 {
+		zoom = 0
+	}
+	if zoom > 6000 {
+		zoom = 6000
+	}
+	worstOnly := false
+	if v, ok := args["worst_region"].(bool); ok {
+		worstOnly = v
+	}
+	if worstOnly {
+		if _, hasCrop := args["left"]; !hasCrop {
+			left, top, right, bottom = worstFigureRegion(original, candidate)
+		}
+	}
+	overlay := figureOverlayDetail(original, candidate, result.DX, result.DY, detail)
+	overlay = cropFigureImage(overlay, left, top, right, bottom)
+	if zoom > 0 && overlay.Bounds().Dx() != zoom {
+		h := max(1, figureRound(float64(overlay.Bounds().Dy())*float64(zoom)/float64(overlay.Bounds().Dx())))
+		resized := image.NewNRGBA(image.Rect(0, 0, zoom, h))
+		xdraw.CatmullRom.Scale(resized, resized.Bounds(), overlay, overlay.Bounds(), draw.Src, nil)
+		overlay = resized
 	}
 	var encoded bytes.Buffer
 	if err := png.Encode(&encoded, overlay); err != nil {
 		return session.ToolResult{Text: "Comparison unavailable: cannot encode comparison overlay: " + err.Error()}, nil
 	}
-	text := fmt.Sprintf(
-		"Soft-ink overlap: %.2f%% (R %.2f%%, G %.2f%%, B %.2f%%, gray %.2f%%). Estimated candidate translation applied: dx=%d px, dy=%d px. Alignment starts: %s. Overlay key: white=shared ink, magenta=original-only ink, green=candidate-only ink, black=background.",
-		result.Similarity*100, result.Channels[0]*100, result.Channels[1]*100,
-		result.Channels[2]*100, result.Gray*100, result.DX, result.DY,
-		formatAlignmentRuns(result.Runs),
-	)
+	text := fmt.Sprintf("Soft-ink overlap: %.2f%% (R %.2f%%, G %.2f%%, B %.2f%%, gray %.2f%%). Estimated candidate translation applied: dx=%d px, dy=%d px. Alignment starts: %s. Detail=%s, crop=%.1f%%,%.1f%%-%.1f%%,%.1f%%, output=%dx%dpx. Overlay key: white=shared ink, magenta=original-only ink, green=candidate-only ink, black=background.", result.Similarity*100, result.Channels[0]*100, result.Channels[1]*100, result.Channels[2]*100, result.Gray*100, result.DX, result.DY, formatAlignmentRuns(result.Runs), detail, left, top, right, bottom, overlay.Bounds().Dx(), overlay.Bounds().Dy())
+	t.State.compareCalled = true
 	return session.ToolResult{Text: text, ImageBase64: base64.StdEncoding.EncodeToString(encoded.Bytes()), ImageMIME: "image/png"}, nil
+}
+
+func stringArg(m map[string]interface{}, key, def string) string {
+	if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
+		return strings.ToLower(strings.TrimSpace(v))
+	}
+	return def
+}
+func numberArg(m map[string]interface{}, key string, def float64) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
+	}
+	return def
+}
+func validFigureDetail(s string) bool {
+	switch s {
+	case "all", "gray", "r", "g", "b", "rg", "rb", "gb":
+		return true
+	}
+	return false
 }
 
 // The image decoder registry includes PNG and JPEG. Keep format selection
@@ -469,6 +546,105 @@ func figureOverlay(reference, candidate *image.NRGBA, dx, dy int) *image.NRGBA {
 			}
 		}
 	}
+	return out
+}
+
+func worstFigureRegion(reference, candidate *image.NRGBA) (float64, float64, float64, float64) {
+	reference, candidate = fitFigureCanvases(reference, candidate)
+	bestScore := math.Inf(1)
+	best := [4]float64{0, 0, 100, 100}
+	for row := 0; row < 2; row++ {
+		for col := 0; col < 2; col++ {
+			left, top := float64(col*50), float64(row*50)
+			refCrop := cropFigureImage(reference, left, top, left+50, top+50)
+			candCrop := cropFigureImage(candidate, left, top, left+50, top+50)
+			comparison, _, err := compareFigureImages(refCrop, candCrop)
+			if err == nil && comparison.Similarity < bestScore {
+				bestScore = comparison.Similarity
+				best = [4]float64{left, top, left + 50, top + 50}
+			}
+		}
+	}
+	return best[0], best[1], best[2], best[3]
+}
+func figureOverlayDetail(reference, candidate *image.NRGBA, dx, dy int, detail string) *image.NRGBA {
+	reference, candidate = fitFigureCanvases(reference, candidate)
+	if detail == "all" {
+		panels := []*image.NRGBA{figureOverlayChannel(reference, candidate, dx, dy, "gray"), figureOverlayChannel(reference, candidate, dx, dy, "r"), figureOverlayChannel(reference, candidate, dx, dy, "g"), figureOverlayChannel(reference, candidate, dx, dy, "b")}
+		return figurePanelBoard(panels)
+	}
+	return figureOverlayChannel(reference, candidate, dx, dy, detail)
+}
+
+func figureOverlayChannel(reference, candidate *image.NRGBA, dx, dy int, channel string) *image.NRGBA {
+	w, h := reference.Bounds().Dx(), reference.Bounds().Dy()
+	out := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			ref := reference.NRGBAAt(x, y)
+			cx, cy := x-dx, y-dy
+			cand := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+			if image.Pt(cx, cy).In(candidate.Bounds()) {
+				cand = candidate.NRGBAAt(cx, cy)
+			}
+			ri, ci := figureChannelInk(ref, channel), figureChannelInk(cand, channel)
+			switch {
+			case ri > 51 && ci > 51:
+				out.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+			case ri > 51:
+				out.SetNRGBA(x, y, color.NRGBA{R: 255, B: 255, A: 255})
+			case ci > 51:
+				out.SetNRGBA(x, y, color.NRGBA{G: 255, A: 255})
+			default:
+				out.SetNRGBA(x, y, color.NRGBA{A: 255})
+			}
+		}
+	}
+	return out
+}
+
+func figureChannelInk(c color.NRGBA, channel string) int {
+	switch channel {
+	case "gray":
+		return 255 - int(0.299*float64(c.R)+0.587*float64(c.G)+0.114*float64(c.B))
+	case "r":
+		return 255 - int(c.R)
+	case "g":
+		return 255 - int(c.G)
+	case "b":
+		return 255 - int(c.B)
+	case "rg":
+		return max(255-int(c.R), 255-int(c.G))
+	case "rb":
+		return max(255-int(c.R), 255-int(c.B))
+	case "gb":
+		return max(255-int(c.G), 255-int(c.B))
+	}
+	return max(255-int(c.R), max(255-int(c.G), 255-int(c.B)))
+}
+
+func figurePanelBoard(panels []*image.NRGBA) *image.NRGBA {
+	w, h := panels[0].Bounds().Dx(), panels[0].Bounds().Dy()
+	board := image.NewNRGBA(image.Rect(0, 0, w*2, h*2))
+	for i, p := range panels {
+		x, y := (i%2)*w, (i/2)*h
+		draw.Draw(board, image.Rect(x, y, x+w, y+h), p, image.Point{}, draw.Src)
+	}
+	return board
+}
+
+func cropFigureImage(src *image.NRGBA, left, top, right, bottom float64) *image.NRGBA {
+	b := src.Bounds()
+	x0 := b.Min.X + figureRound(left*float64(b.Dx())/100)
+	y0 := b.Min.Y + figureRound(top*float64(b.Dy())/100)
+	x1 := b.Min.X + figureRound(right*float64(b.Dx())/100)
+	y1 := b.Min.Y + figureRound(bottom*float64(b.Dy())/100)
+	x0 = max(b.Min.X, min(x0, b.Max.X-1))
+	y0 = max(b.Min.Y, min(y0, b.Max.Y-1))
+	x1 = max(x0+1, min(x1, b.Max.X))
+	y1 = max(y0+1, min(y1, b.Max.Y))
+	out := image.NewNRGBA(image.Rect(0, 0, x1-x0, y1-y0))
+	draw.Draw(out, out.Bounds(), src, image.Pt(x0, y0), draw.Src)
 	return out
 }
 

@@ -18,15 +18,16 @@ import (
 
 // tikzState carries the live state of one figure-drawing session.
 type tikzState struct {
-	workDir    string // scratch dir for the standalone wrapper
-	lastCode   string
-	lastPDF    string // absolute path of the last successful compile
-	compileOK  bool
-	submitted  bool
-	finalCode  string
-	compileErr string   // last error, reported by the runner on give-up
-	merges     []string // image paths absorbed into this figure (cross-page merge)
-	uncertain  bool     // submitted code contains % [?] uncertainty marks
+	workDir       string // scratch dir for the standalone wrapper
+	lastCode      string
+	lastPDF       string // absolute path of the last successful compile
+	compileOK     bool
+	submitted     bool
+	finalCode     string
+	compileErr    string   // last error, reported by the runner on give-up
+	merges        []string // image paths absorbed into this figure (cross-page merge)
+	uncertain     bool     // submitted code contains % [?] uncertainty marks
+	compareCalled bool
 }
 
 // CompileFigureTool compiles the TikZ body code held in a WORKSPACE
@@ -102,6 +103,7 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	t.State.lastCode = code
 	t.State.compileOK = false
 	t.State.lastPDF = ""
+	t.State.compareCalled = false
 
 	// 包装成 standalone 文档后编译（figure.tex 保持为模型的原样代码）。
 	texFile := filepath.Join(t.State.workDir, "standalone.tex")
@@ -196,6 +198,9 @@ func (t *SubmitFigureTool) Execute(argsJSON string) (session.ToolResult, error) 
 	}
 	if strings.TrimSpace(code) == "" {
 		return session.ToolResult{}, fmt.Errorf("code 为空（或 path 文件不存在）")
+	}
+	if !t.State.compareCalled {
+		return session.ToolResult{Text: "REJECTED: call compare_figure at least once after a successful compile, inspect its comparison, and then submit."}, nil
 	}
 	if !t.State.compileOK || strings.TrimSpace(code) != strings.TrimSpace(t.State.lastCode) {
 		return session.ToolResult{Text: "REJECTED: the submitted code differs from the last successful compile. Call compile {path} with this exact file first."}, nil

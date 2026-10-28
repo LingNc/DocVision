@@ -1,6 +1,7 @@
 package latex
 
 import (
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/draw"
@@ -32,14 +33,43 @@ func TestCompareFigureImagesFindsTranslation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if overlay == nil || overlay.Bounds() != ref.Bounds() {
-		t.Fatalf("overlay bounds = %v, want %v", overlay.Bounds(), ref.Bounds())
+	if overlay == nil {
+		t.Fatal("legacy overlay is nil")
 	}
 	if result.Similarity < 0.75 {
 		t.Fatalf("similarity = %.3f, want at least 0.75", result.Similarity)
 	}
 	if len(result.Runs) < 1 {
 		t.Fatalf("alignment runs = %d, want at least one", len(result.Runs))
+	}
+}
+
+func TestFigureOverlayDetailFourPanelsAndCrop(t *testing.T) {
+	ref, cand := testFigureImage(0, 0), testFigureImage(2, 1)
+	board := figureOverlayDetail(ref, cand, 0, 0, "all")
+	if got, want := board.Bounds().Size(), (image.Point{X: 192, Y: 160}); got != want {
+		t.Fatalf("four-panel bounds = %v, want %v", got, want)
+	}
+	gray := figureOverlayDetail(ref, cand, 0, 0, "gray")
+	if got, want := gray.Bounds().Size(), ref.Bounds().Size(); got != want {
+		t.Fatalf("single-channel bounds = %v, want %v", got, want)
+	}
+	crop := cropFigureImage(gray, 25, 25, 75, 75)
+	if got, want := crop.Bounds().Size(), (image.Point{X: 48, Y: 40}); got != want {
+		t.Fatalf("crop bounds = %v, want %v", got, want)
+	}
+}
+
+func TestCompareFigureDefinitionIncludesReviewParameters(t *testing.T) {
+	definition := (&compareFigureTool{}).Definition()
+	encoded, err := json.Marshal(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"pdf_path", "detail", "worst_region", "left", "top", "right", "bottom", "zoom"} {
+		if !strings.Contains(string(encoded), `"`+key+`"`) {
+			t.Errorf("tool schema missing %q", key)
+		}
 	}
 }
 
