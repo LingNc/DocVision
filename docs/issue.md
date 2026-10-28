@@ -1558,4 +1558,10 @@ user 轮
   改法：实时行只报这一轮队列（`[process 18/23] …(done/errors/fallback/raster/running)`、`[dedupe 2/2] … · 已用 21s`），全书口径与逐张明细留在核对页；收尾那句改成"退回原图共 N 张（见核对页）"。`errors` 只数真失败，接口错误后保留原图算 `fallback`（T262 的口径保留）。
   验证：`TestPhaseProgressCountsThisRunOnly` 回到五个计数、且 18 张全 404 时是 `errors: 0, fallback: 18`；`TestCountImageStatusesSplitsWorkAndFollowers` 只验计数（不再有文案）；latex 全量除既有 venv 环境用例外全绿。
   未改：核对页仍报全书口径（那是汇总页，长度无所谓）。
+- T265 单文件版 `standalone.tex` 没把子会话、子子会话的产物内联进来。
+  现象：交付出来的 `standalone.tex` 只有 6534 行，里面还留着 192 条 `\input{chapters/<章>/children/<子章>.tex}` 和 3 条 `\input{figures/motif_*.tex}`；这些目标文件在交付树里都在，可内容没被摊开——"可以不编译直接分发"不成立，离开 `chapters/` 就编译不了。
+  根因：`buildStandaloneTex` 只替换 `main.tex` 里 `\input{chapters/xxx.tex}` 这一层，替换表按 `chapters/*.tex` 的**文件名**建；子会话交给父会话的分片是 `chapters/<章>/children/…`（二级路径），章节里还有一类是 `\input{<子章>/part01.tex}` 靠文档自己的 `\input@path` 指路——两类都不在替换表里，于是原样留着。
+  改法：改成从 `main.tex` 出发递归内联：每个 `\input`/`\include` 依次按"包含它的文件所在目录、构建树根、文档声明的 `\input@path` 目录"找目标，找到就整段摊开并留一行 `% ==== 相对路径 ====` 出处注释；只认构建树里存在的目标（绝对路径、`..` 越界、找不到的原样保留），同一文件可被多处内联，只有"正在内联中"才算环、原样保留；层数封顶 8。`assemble` 不再预扫 `chapters/*.tex` 列表（终审可能重排/改名甚至换一套 `\input`，跟着 `main.tex` 走才可靠）。
+  验证：`TestStandaloneInlinesChildrenAndGrandchildren`（子章分片里再 `\input` 子子章、并 `\input` 共享 motif，全部摊平、0 残留、出处注释在）、`TestStandaloneHonorsInputPath`（`\input@path` 的裸相对名）、`TestStandaloneInlineStopsAtCyclesAndMissingFiles`（自引用与缺文件原样保留、同一片段两处引用各展开一次）；拿真实构建树跑一遍：6534 行、192+3 条残留 → 125277 行、0 条残留。latex 全量除既有 venv 环境用例外全绿。
+  未改：图片（PDF/PNG）仍是外部文件，单文件版只在头部注明这一点；不内联 `.cls`。
 

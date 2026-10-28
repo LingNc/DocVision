@@ -52,7 +52,7 @@
 | `work/sessions/` | 会话转录（`chapters.jsonl`、`convert_<章>.jsonl`、`checker_<章>.jsonl`、`style_fix_<章>.jsonl`、`figure_check_<图>.jsonl`）；重试产生 `<名>.try2.jsonl`/`.try3.jsonl`…，预览页把它们聚成「历史 N」；矢量图另有 `sessions/vector_<图>.work` 持久工作区 |
 | `work/temp/` | 临时工作区（拆章沙箱、样式/反馈 scratch、每章转换工作区 `conv_<章>/work`），默认用完即删 |
 | `build/` | 全书的构建树（每次 clean 重建：cls/手册/案例 + chapters + figures + main.tex），同时是修复会话与终审会话的工作区 |
-| `out/` | 交付产物：整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件），`book.pdf` 是 `main.pdf` 的别名，另有 `standalone.tex` |
+| `out/` | 交付产物：整棵 build 树（跳过 .aux/.log/.toc/.synctex 等中间文件），`book.pdf` 是 `main.pdf` 的别名，另有 `standalone.tex`（从 `main.tex` 出发把章节、子章节分片与共享 tex 片段**全部内联**，只剩图片仍是外部文件，T265） |
 | `doc_index/doc_index.json` | 只读块索引（`doc_search` 的检索库，style 阶段之前构建；图片条目带 md 里 DOCVISION 注释的类型/描述/原文：`marker`（styled-text/vector/image）、`label`（描述）、`content`（styled-text 的印刷原文 / raster 的解释 / **矢量图的 LaTeX 本体**）；链接（`img` 与档位1 md 里的 `LINK:`）**一律指向原图**，`text` 是厂商图注，**厂商没给图注时用我们自己的内容兜底**（styled-text 的印刷原文 / raster 的解释 / vector 的图标签，不用 LaTeX 本体）） |
 | `watermark_memory.json` | 水印检测工作记忆（`latex.remove_watermark` 开启时生成；档位1 落在本项目工作区，档位2 同理落在 `<latex_output>/<项目名>/`） |
 | `progress.json` | 逐阶段断点进度 |

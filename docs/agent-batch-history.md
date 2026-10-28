@@ -2851,3 +2851,5 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 
 补充（T264，第七个提交）：用户回看说"打印的东西太多了"——`process`/`dedupe` 每帧尾巴上都挂着 P64 加的全书盘点（`· 全书 9/32 项（文字/位图 9、失败 23）· 跟随代表图 356 张`），`process` 收尾还把 18 个退回原图的图名一行列完。实时行本是每帧重画的变化行，不是汇总行；改成只报这一轮队列，`motifProgress.cumulative` 与 `imageStatusCounts.summary()` 一并删掉（`countImageStatuses` 留着给收尾报数），收尾那句缩成"退回原图共 N 张（见核对页）"，`fallbackImageNames` 删除。计数语义保留 T262 的口径：`errors` 只数 `status=error`，接口错误后保留原图算 `fallback`、不再标 `api-err`。
 
+补充（T265，第八个提交）：用户指出单文件版 `standalone.tex` 里子会话、子子会话的内容没进去。核对交付树：`standalone.tex` 6534 行，仍带着 192 条 `\input{chapters/<章>/children/<子章>.tex}` 与 3 条 `\input{figures/motif_*.tex}`，目标文件都在、只是没展开。根因是 `buildStandaloneTex` 只替换 `main.tex` 里 `\input{chapters/xxx.tex}` 这一层，替换表按 `chapters/*.tex` 的文件名建；二级路径与靠 `\input@path` 指路的裸名字都不在表里。改成从 `main.tex` 出发递归内联（包含它的文件目录 → 构建树根 → `\input@path` 目录三种解析顺序、`..` 与绝对路径拒绝、只有"正在内联中"算环、层数封顶 8、每段留 `% ==== 路径 ====` 出处注释），`assemble` 去掉预扫描章节列表那段（终审可能重排改名，跟着 `main.tex` 走）。测试三条：子—子子—共享片段、`\input@path` 裸名、自引用与缺文件原样保留且重复引用各展开一次。真实树重跑：125277 行、残留 0。
+
