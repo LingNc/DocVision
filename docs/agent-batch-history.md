@@ -2853,3 +2853,5 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 
 补充（T265，第八个提交）：用户指出单文件版 `standalone.tex` 里子会话、子子会话的内容没进去。核对交付树：`standalone.tex` 6534 行，仍带着 192 条 `\input{chapters/<章>/children/<子章>.tex}` 与 3 条 `\input{figures/motif_*.tex}`，目标文件都在、只是没展开。根因是 `buildStandaloneTex` 只替换 `main.tex` 里 `\input{chapters/xxx.tex}` 这一层，替换表按 `chapters/*.tex` 的文件名建；二级路径与靠 `\input@path` 指路的裸名字都不在表里。改成从 `main.tex` 出发递归内联（包含它的文件目录 → 构建树根 → `\input@path` 目录三种解析顺序、`..` 与绝对路径拒绝、只有"正在内联中"算环、层数封顶 8、每段留 `% ==== 路径 ====` 出处注释），`assemble` 去掉预扫描章节列表那段（终审可能重排改名，跟着 `main.tex` 走）。测试三条：子—子子—共享片段、`\input@path` 裸名、自引用与缺文件原样保留且重复引用各展开一次。真实树重跑：125277 行、残留 0。
 
+补充（T266，第九个提交）：用户看侧栏说矢量图阶段"不同的 try 能否不同的会话层显示，不然有点乱，开子层级放"。现状是每个转录一块、编号取 `imageOrder`，于是同一张图的 try1/try2/try3 是三个同号方块（46 条会话里二十多个序号各出现两次）。新增纯函数 `groupImageAttempts`（图片身份 = `imageName`，老转录退回去掉 `.tryN` 的 id；尝试号从转录名 `.tryN` 读）与 `imageAttemptNo`/`imageAttemptKey`；侧栏两处模板都加了分组分支（多阶段/单阶段各一套，缩进类不同），父行带「N 次」「有失败」、子行 `tryN · 结局 · 时间`，`v-collapse` 记忆展开、当前会话所在组自动展开（只试过一次的图仍走普通会话行，不套展开壳）；方块视图一图一块 + 次数角标；搜索时不分组（沿用 T53 的取舍：历史尝试要能被搜到）。验证：vitest 5 条 + 真渲染探针 `TestViewerVectorAttemptGroupsInChromium`（2 组、父行 3 次、子行 try3/try2/try1、方块 2 + 角标 1、搜索 4 行平铺），web 全量 286 条绿。
+

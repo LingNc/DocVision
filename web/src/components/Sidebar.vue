@@ -10,12 +10,12 @@ import { state, openDetails, fmtSize, storeGet, storeSet, setBoard, resetViewSta
 import {
   bookDominantState, bookTip, booksHeadText,
   buildGroups, buildImg2TextChains, buildChapterTree, filterByBoard, groupKey, groupWantOpen,
-  imageChipText, imageTipText, img2textMemberTag, plainTitle,
+  imageAttemptNo, groupImageAttempts, imageChipText, imageTipText, img2textMemberTag, plainTitle,
   styleFixPhaseKey, stylefixCompare,
   projectProgressLine, projectOf,
   isOverflowOpen, relTime, sessionTip, sessionTitleOf, setCollapsed, setOverflowOpen,
   stageRank, stageStatusText, stageTitleOf, usageChipText, fmtTokens, stageChapterAggregate, stylePilotOrder,
-  type SessionChain, type StageStatus, type StageAggregate, type ChapterTreeNode,
+  type SessionChain, type StageStatus, type StageAggregate, type ChapterTreeNode, type ImageAttemptGroup,
 } from '../legacy/sidebar'
 import { selectSession, refreshIndex } from '../data'
 import InlineMD from './InlineMD.vue'
@@ -100,6 +100,8 @@ interface StageView {
   status: StageStatus | null
   overflowKey: string; needOverflow: boolean; shown: any[]
   hiddenCount: number
+  /* T266：矢量图阶段按"同一张图"叠起来的尝试层（不为空时模板走分组渲染）。 */
+  imageGroups: ImageAttemptGroup[]; shownGroups: ImageAttemptGroup[]
   /* T63：convert/checker 聚合（null = 不聚合原样显示）。 */
   agg: StageAggregate | null
   chapterRoots: ChapterTreeNode[]
@@ -165,10 +167,17 @@ const groups = computed<GroupView[]>(() => {
       const chapterRoots = stg === 'convert' && items.length > 0 && chapterItems.length === items.length
         ? buildChapterTree(items, pinId) : []
       const okey = groupKey('overflow', g.name + '/' + stg)
-      const shown0 = items
-      const needOverflow = shown0.length > OVERFLOW_LIMIT
+      // T266：矢量图按图片身份把各次尝试叠成一层（搜索时不分组，历史尝试也要能
+      // 被搜到）；分组后"更多会话"数的是图片数，不是会话数。
+      const imageGroups = stg === 'vector' && !state.filter ? groupImageAttempts(items) : []
+      const groups0 = imageGroups.length ? imageGroups.length : items.length
+      const needOverflow = groups0 > OVERFLOW_LIMIT
       const openAll = !needOverflow || isOverflowOpen(okey) || !!state.filter
+      const shown0 = items
       const shown = openAll ? shown0 : shown0.slice(0, OVERFLOW_LIMIT)
+      const shownGroups = imageGroups.length
+        ? (openAll ? imageGroups : imageGroups.slice(0, OVERFLOW_LIMIT))
+        : []
       // T88：块编号——矢量/章节会话用各自的 imageOrder/chapterOrder；
       // 修复链/装配会话两种都没有，按排序后的位置从 1 编，方块视图里
       // 能指着编号选会话。
@@ -177,8 +186,8 @@ const groups = computed<GroupView[]>(() => {
       return {
         stage: stg, title: stageTitleOf(stg), items, live: sg.live,
         status: stageStatusText(stages0, stg, sg.live),
-        overflowKey: okey, needOverflow, shown, hiddenCount: shown0.length - shown.length,
-        agg, noBy, chapterRoots,
+        overflowKey: okey, needOverflow, shown, hiddenCount: groups0 - (imageGroups.length ? shownGroups.length : shown.length),
+        imageGroups, shownGroups, agg, noBy, chapterRoots,
       }
     })
     let chains: SessionChain[] | null = null
@@ -313,6 +322,31 @@ function chainTip(c: SessionChain): string {
     c.items.forEach((s) => lines.push(img2textMemberTag(s.id) + ' · ' + sessionTitleOf(s)))
   }
   return lines.join('\n')
+}
+
+/* T266：图片分组行的悬浮说明——这张图一共试过几次、每次的结局。 */
+function imageGroupTip(grp: ImageAttemptGroup): string {
+  const lines = [grp.label + '（' + grp.items.length + ' 次尝试，新 → 旧）']
+  grp.items.forEach((s: any) => {
+    lines.push('try' + imageAttemptNo(s) + ' · ' + attemptStateText(s) + ' · ' + relTime(s.mtime))
+  })
+  if (grp.items.length > 1) lines.push('—— 点上面一行看最新一次，展开看每次的详情 ——')
+  return lines.join('\n')
+}
+
+/* 分组默认收起；当前选中的会话在这张图里时自动展开，手动收起过就不再展开。 */
+function imgGroupWantOpen(grp: ImageAttemptGroup): boolean {
+  const cur: any = state.current
+  return !!cur && grp.items.some((s: any) => s.id === cur.id)
+}
+
+/* 一次尝试的结局：运行中 / 已提交 / 错误终止 / 还没开工。 */
+function attemptStateText(s: any): string {
+  if (s && s.live) return '运行中'
+  if (!s || !s.endState) return '还没开工'
+  if (s.endState === 'error') return '错误终止'
+  if (s.endState === 'done') return '已提交'
+  return '已结束'
 }
 
 function onRowClick(s: any) {
@@ -566,7 +600,20 @@ function onResetView() {
                   @select="onRowClick" @info="onInfoClick"
                 />
                 <template v-else-if="blockView">
-                <div class="session-blocks">
+                <div v-if="sv.shownGroups.length" class="session-blocks">
+                  <button
+                    v-for="grp in sv.shownGroups"
+                    :key="grp.key"
+                    class="session-block"
+                    :class="{ active: state.current && grp.items.some(s => s.id === state.current.id), live: grp.live, err: grp.hasError && !grp.live, pend: !grp.live && !grp.main.endState }"
+                    type="button"
+                    role="treeitem"
+                    :data-id="grp.main.id"
+                    :title="imageGroupTip(grp)"
+                    @click="onRowClick(grp.main)"
+                  >{{ grp.order || '' }}<span v-if="grp.items.length > 1" class="block-count">{{ grp.items.length }}</span></button>
+                </div>
+                <div v-else class="session-blocks">
                   <button
                     v-for="s in sv.items"
                     :key="s.id"
@@ -579,6 +626,66 @@ function onResetView() {
                     @click="onRowClick(s)"
                   >{{ sv.noBy ? (sv.noBy[s.id] ?? '') : (s.imageOrder || s.chapterOrder || '') }}</button>
                 </div>
+                </template>
+                <template v-else-if="sv.shownGroups.length">
+                  <template v-for="grp in sv.shownGroups" :key="grp.key">
+                    <!-- 只试过一次的图不套壳：多一层展开点只会让人多点一次。 -->
+                    <button
+                      v-if="grp.items.length === 1"
+                      class="session-row sub2"
+                      :class="{ active: state.current && state.current.id === grp.main.id }"
+                      type="button"
+                      role="treeitem"
+                      :data-id="grp.main.id"
+                      :title="rowTitle(grp.main)"
+                      @click="onRowClick(grp.main)"
+                    >
+                      <span class="row-slot"><span class="dot" :class="{ live: grp.main.live }"></span></span>
+                      <InlineMD tag="span" class="row-title" :text="sessionTitleOf(grp.main)" :plain="plainTitle(grp.main)"></InlineMD>
+                      <span v-if="usageChipText(grp.main)" class="row-chip usage-chip">{{ usageChipText(grp.main) }}</span>
+                      <span v-if="grp.main.imageName" class="row-chip image-chip" :title="imageTipText(grp.main)">{{ imageChipText(grp.main) }}</span>
+                      <span class="row-time">{{ relTime(grp.main.mtime) }}</span>
+                      <span class="row-actions">
+                        <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, grp.main)">ⓘ</button>
+                      </span>
+                    </button>
+                    <details
+                      v-else
+                      class="img-group sub2"
+                      v-collapse="{ key: 'img:' + g.name + '/' + grp.key, want: imgGroupWantOpen(grp), frozen: false }"
+                    >
+                      <summary class="img-group-row" :title="imageGroupTip(grp)">
+                        <span class="row-slot"><span class="row-caret"></span></span>
+                        <InlineMD tag="span" class="row-title" :text="grp.label" />
+                        <span class="row-chip try-count">{{ grp.items.length }} 次</span>
+                        <span v-if="grp.hasError && !grp.live" class="row-chip err-chip">有失败</span>
+                        <span class="row-time">{{ relTime(grp.main.mtime) }}</span>
+                      </summary>
+                      <button
+                        v-for="s in grp.items"
+                        :key="s.id"
+                        class="session-row sub3"
+                        :class="{ active: state.current && state.current.id === s.id }"
+                        type="button"
+                        role="treeitem"
+                        :data-id="s.id"
+                        :title="rowTitle(s)"
+                        @click="onRowClick(s)"
+                      >
+                        <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
+                        <span class="try-tag">try{{ imageAttemptNo(s) }}</span>
+                        <span class="try-state">{{ attemptStateText(s) }}</span>
+                        <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
+                        <span class="row-time">{{ relTime(s.mtime) }}</span>
+                        <span class="row-actions">
+                          <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, s)">ⓘ</button>
+                        </span>
+                      </button>
+                    </details>
+                  </template>
+                  <button v-if="sv.needOverflow" class="session-overflow sub2" type="button" @click="onMoreClick(sv.overflowKey)">
+                    更多图片（还有 {{ sv.hiddenCount }} 张）
+                  </button>
                 </template>
                 <div v-else>
                   <button
@@ -613,6 +720,19 @@ function onResetView() {
                   :scope="g.name + '/' + sv.stage"
                   @select="onRowClick" @info="onInfoClick"
                 />
+                <div v-else-if="blockView && sv.shownGroups.length" class="session-blocks">
+                  <button
+                    v-for="grp in sv.shownGroups"
+                    :key="grp.key"
+                    class="session-block"
+                    :class="{ active: state.current && grp.items.some(s => s.id === state.current.id), live: grp.live, err: grp.hasError && !grp.live, pend: !grp.live && !grp.main.endState }"
+                    type="button"
+                    role="treeitem"
+                    :data-id="grp.main.id"
+                    :title="imageGroupTip(grp)"
+                    @click="onRowClick(grp.main)"
+                  >{{ grp.order || '' }}<span v-if="grp.items.length > 1" class="block-count">{{ grp.items.length }}</span></button>
+                </div>
                 <div v-else-if="blockView" class="session-blocks">
                   <button
                     v-for="s in sv.items"
@@ -626,6 +746,66 @@ function onResetView() {
                     @click="onRowClick(s)"
                   >{{ s.imageOrder || s.chapterOrder || '' }}</button>
                 </div>
+                <template v-else-if="sv.shownGroups.length">
+                  <template v-for="grp in sv.shownGroups" :key="grp.key">
+                    <!-- 只试过一次的图不套壳：多一层展开点只会让人多点一次。 -->
+                    <button
+                      v-if="grp.items.length === 1"
+                      class="session-row sub1"
+                      :class="{ active: state.current && state.current.id === grp.main.id }"
+                      type="button"
+                      role="treeitem"
+                      :data-id="grp.main.id"
+                      :title="rowTitle(grp.main)"
+                      @click="onRowClick(grp.main)"
+                    >
+                      <span class="row-slot"><span class="dot" :class="{ live: grp.main.live }"></span></span>
+                      <InlineMD tag="span" class="row-title" :text="sessionTitleOf(grp.main)" :plain="plainTitle(grp.main)"></InlineMD>
+                      <span v-if="usageChipText(grp.main)" class="row-chip usage-chip">{{ usageChipText(grp.main) }}</span>
+                      <span v-if="grp.main.imageName" class="row-chip image-chip" :title="imageTipText(grp.main)">{{ imageChipText(grp.main) }}</span>
+                      <span class="row-time">{{ relTime(grp.main.mtime) }}</span>
+                      <span class="row-actions">
+                        <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, grp.main)">ⓘ</button>
+                      </span>
+                    </button>
+                    <details
+                      v-else
+                      class="img-group sub1"
+                      v-collapse="{ key: 'img:' + g.name + '/' + grp.key, want: imgGroupWantOpen(grp), frozen: false }"
+                    >
+                      <summary class="img-group-row" :title="imageGroupTip(grp)">
+                        <span class="row-slot"><span class="row-caret"></span></span>
+                        <InlineMD tag="span" class="row-title" :text="grp.label" />
+                        <span class="row-chip try-count">{{ grp.items.length }} 次</span>
+                        <span v-if="grp.hasError && !grp.live" class="row-chip err-chip">有失败</span>
+                        <span class="row-time">{{ relTime(grp.main.mtime) }}</span>
+                      </summary>
+                      <button
+                        v-for="s in grp.items"
+                        :key="s.id"
+                        class="session-row sub3"
+                        :class="{ active: state.current && state.current.id === s.id }"
+                        type="button"
+                        role="treeitem"
+                        :data-id="s.id"
+                        :title="rowTitle(s)"
+                        @click="onRowClick(s)"
+                      >
+                        <span class="row-slot"><span class="dot" :class="{ live: s.live }"></span></span>
+                        <span class="try-tag">try{{ imageAttemptNo(s) }}</span>
+                        <span class="try-state">{{ attemptStateText(s) }}</span>
+                        <span v-if="usageChipText(s)" class="row-chip usage-chip">{{ usageChipText(s) }}</span>
+                        <span class="row-time">{{ relTime(s.mtime) }}</span>
+                        <span class="row-actions">
+                          <button class="icon-btn" type="button" title="打开详情面板（元信息 / 指标）" @click.stop="onInfoClick($event, s)">ⓘ</button>
+                        </span>
+                      </button>
+                    </details>
+                  </template>
+                  <button v-if="sv.needOverflow" class="session-overflow sub1" type="button" @click="onMoreClick(sv.overflowKey)">
+                    更多图片（还有 {{ sv.hiddenCount }} 张）
+                  </button>
+                </template>
                 <template v-else>
                   <button
                     v-for="s in sv.shown"
@@ -1026,6 +1206,85 @@ details[open] > .proj-row .row-folder .folder.open {
 
 .session-row.sub1 .session-overflow, .stage-group .session-overflow {
  padding-left: 40px; 
+}
+
+/* T266：矢量图阶段的尝试层——父行是"这张图"，子行是各次尝试（try1/try2/…）。
+   缩进由 .img-group.sub1/.sub2 决定，子行固定再进一格。 */
+.img-group-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px 0 24px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  color: var(--text);
+}
+
+.img-group-row::-webkit-details-marker {
+  display: none;
+}
+
+.img-group-row:hover {
+  background: var(--hover);
+}
+
+.img-group.sub2 .img-group-row {
+  padding-left: 40px;
+}
+
+.img-group.sub1 .img-group-row {
+  padding-left: 24px;
+}
+
+.session-row.sub3 {
+  padding-left: 56px;
+}
+
+.try-tag {
+  flex: none;
+  min-width: 32px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--caption);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.try-state {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-row.sub3 .row-chip,
+.session-row.sub3 .row-time {
+  flex: none;
+}
+
+/* 一块图尝试过多次时右上角的次数角标（方块只有 20px，用极小字号）。 */
+.block-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 10px;
+  height: 10px;
+  padding: 0 1px;
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  line-height: 10px;
+  text-align: center;
 }
 
 .session-blocks {
