@@ -2849,3 +2849,5 @@ P62 第一轮只做审计（测试文件"只出表、不搬"），这一轮把�
 
 补充（T263，第六个提交）：接上一批的现场。18 张代表图（模型名 404）失败之后，`progress_items` 里 356 条 `equivalent_to` 全没了，`dedupe_checked` 还是 true、`dedupe_leader_hash` 已空——正是 `clearUnresolvedMotifLinks` 的指纹。判据"代表图不是 done 就解开"对"还没跑完/刚失败"的代表图同样成立，而解开时没放开 `DedupeChecked`，挂靠（`motifAttachLeftovers`）与复用（`motifReuseDedupe`）都会跳过"已核"记录，于是这一组永久散架：作业项从 32 张涨到 388 张，再跑一轮 dedupe 也只挂回 80 条（实测 21 秒的核验会话）。改法：`leader.Status != "done"` 时保留链接，只有"已完成却没有可复用成品"或代表图记录消失才解开，并在解开时把 `DedupeChecked` 一并放开；日志只报这一种情况。测试 `TestFollowerKeepsLinkWhileLeaderUnresolved`（两条分支：fallback 不动链接、done 且无 TikZ 解开并放开记号）。善后：`temp/restore_dedupe_links.py` 按 `groups.json` 把链接写回，演练结果 356 条 = 258 个副本 + 98 个组内成员，与失败前一致。
 
+补充（T264，第七个提交）：用户回看说"打印的东西太多了"——`process`/`dedupe` 每帧尾巴上都挂着 P64 加的全书盘点（`· 全书 9/32 项（文字/位图 9、失败 23）· 跟随代表图 356 张`），`process` 收尾还把 18 个退回原图的图名一行列完。实时行本是每帧重画的变化行，不是汇总行；改成只报这一轮队列，`motifProgress.cumulative` 与 `imageStatusCounts.summary()` 一并删掉（`countImageStatuses` 留着给收尾报数），收尾那句缩成"退回原图共 N 张（见核对页）"，`fallbackImageNames` 删除。计数语义保留 T262 的口径：`errors` 只数 `status=error`，接口错误后保留原图算 `fallback`、不再标 `api-err`。
+

@@ -785,11 +785,10 @@ func classifyProgressText(done, total, failed, running int) string {
 	return fmt.Sprintf("[classify %d/%d] %.2f%% (failed: %d, running: %d)", done, total, pct, failed, running)
 }
 
-// processProgressText 的 done 是"真画出来了"，fallback 是"以原图交付"（含
-// TikZ 没通过与会话/接口错误两种原因），api 是 fallback 里由接口/会话错误造成
-// 的那部分——只报两个互斥计数时，18 张全是接口错误会显示成 "errors: 18,
-// fallback: 0"，看着像图本身全错了（T262）。
-func processProgressText(done, total, ok, fallback, api, raster, running int) string {
+// processProgressText 的 done 是"真画出来了"，errors 是真失败（下一轮会重试），
+// fallback 是"以原图交付"（TikZ 没过，或接口/会话错误后保留原图）。两者不能互相
+// 冒充：接口错误曾经被算进 errors，fallback 恒为 0（T262）。
+func processProgressText(done, total, ok, errors, fallback, raster, running int) string {
 	pct := 0.0
 	if total > 0 {
 		pct = float64(done) * 100.0 / float64(total)
@@ -797,12 +796,8 @@ func processProgressText(done, total, ok, fallback, api, raster, running int) st
 	if ok < 0 {
 		ok = 0
 	}
-	parts := fmt.Sprintf("done: %d, fallback: %d", ok, fallback)
-	if api > 0 {
-		parts += fmt.Sprintf(", api-err: %d", api)
-	}
-	parts += fmt.Sprintf(", raster: %d, running: %d", raster, running)
-	return fmt.Sprintf("[process %d/%d] %.2f%% (%s)", done, total, pct, parts)
+	return fmt.Sprintf("[process %d/%d] %.2f%% (done: %d, errors: %d, fallback: %d, raster: %d, running: %d)",
+		done, total, pct, ok, errors, fallback, raster, running)
 }
 
 // classifyPhase starts here
@@ -1040,11 +1035,9 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 			return ""
 		}
 		mu.Lock()
-		d, fb, fe, api, rn, rs, okn := done, fallback, failed, apiErr, running, raster, okCount
-		// 全书盘点（P64）在锁内算：prog 是并发写的 map，遍历它必须跟着同一把锁。
-		book := countImageStatuses(prog)
+		d, fb, fe, rn, rs, okn := done, fallback, failed, running, raster, okCount
 		mu.Unlock()
-		return processProgressText(d, total, okn, fb+fe, api, rs, rn) + book.summary()
+		return processProgressText(d, total, okn, fe, fb, rs, rn)
 	})
 	defer progLive.Close()
 	if total > 0 {
@@ -1246,13 +1239,13 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		}(t, p)
 	}
 	wg.Wait()
-	// P64：fallback 以前只有一个数字，核对时没法知道是哪几张。收尾时按名字列
-	// 一遍（退回原图 = 这一轮以原图交付，正是需要人看一眼的那批）。
+	// 收尾只报个数：逐张列名会把一行撑到几百字，明细在核对页里（每张带原因）。
 	mu.Lock()
 	book := countImageStatuses(prog)
 	mu.Unlock()
 	if book.Fallback > 0 {
-		r.log.LogWarning(0, "[process] 退回原图的图共", strconv.Itoa(book.Fallback), "张：", strings.Join(fallbackImageNames(prog), "、"))
+		r.log.LogWarning(0, "[process] 退回原图的图共", strconv.Itoa(book.Fallback),
+			"张（哪几张、为什么退，见核对页的「退回原图」段）")
 	}
 	// 同 classifyPhase：定格与换行只由 deferred Close 负责，避免重复行。
 }

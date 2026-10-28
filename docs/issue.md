@@ -1552,4 +1552,10 @@ user 轮
   改法：代表图还没收尾（待处理/失败）时保留链接——它有下一轮，跟随者复用同一张成品即可；只有代表图**已完成却没有可复用成品**（或记录已不存在）才解开，解开时一并把 `dedupe_checked` 放开，允许以后重新挂靠。日志也改成只说这一种情况。
   验证：`TestFollowerKeepsLinkWhileLeaderUnresolved`（代表图 fallback 时链接与记号都不动；代表图 done 且无 TikZ 才解开并放开记号），原有 `TestMotifRasterLeaderKeepsFollowers` 仍绿；latex 全量除既有 venv 环境用例外全绿。
   未改：不清除任何已有转录与产物；已经被旧逻辑拆散的库需要按 groups.json 把链接补回去（`temp/restore_dedupe_links.py`，演练 356 条 = 258 个副本 + 98 个组内成员）。
+- T264 图片阶段的实时进度行太长，全书口径把真正在动的数字挤没了。
+  现象：`process`/`dedupe` 每一帧后面都跟着 `· 全书 9/32 项（文字/位图 9、失败 23）· 跟随代表图 356 张`，终端刷一次多几十个字；`process` 收尾还把退回原图的图名逐个列出，一行几百字。
+  根因：P64 为了解决"续跑时队列只剩 1/1 看不出全书进度"，把全书盘点挂在了每一帧实时行上——实时行是每帧重画的变化行，不是汇总行。
+  改法：实时行只报这一轮队列（`[process 18/23] …(done/errors/fallback/raster/running)`、`[dedupe 2/2] … · 已用 21s`），全书口径与逐张明细留在核对页；收尾那句改成"退回原图共 N 张（见核对页）"。`errors` 只数真失败，接口错误后保留原图算 `fallback`（T262 的口径保留）。
+  验证：`TestPhaseProgressCountsThisRunOnly` 回到五个计数、且 18 张全 404 时是 `errors: 0, fallback: 18`；`TestCountImageStatusesSplitsWorkAndFollowers` 只验计数（不再有文案）；latex 全量除既有 venv 环境用例外全绿。
+  未改：核对页仍报全书口径（那是汇总页，长度无所谓）。
 

@@ -12,12 +12,13 @@ func TestPhaseProgressCountsThisRunOnly(t *testing.T) {
 		{classifyProgressText(0, 396, 0, 10), "[classify 0/396] 0.00% (failed: 0, running: 10)"},
 		{classifyProgressText(208, 396, 2, 10), "[classify 208/396] 52.53% (failed: 2, running: 10)"},
 		{classifyProgressText(0, 0, 0, 0), "[classify 0/0] 0.00% (failed: 0, running: 0)"},
-		{processProgressText(0, 396, 0, 0, 0, 0, 10), "[process 0/396] 0.00% (done: 0, fallback: 0, raster: 0, running: 10)"},
-		{processProgressText(396, 396, 390, 3, 3, 12, 0), "[process 396/396] 100.00% (done: 390, fallback: 3, api-err: 3, raster: 12, running: 0)"},
+		{processProgressText(0, 396, 0, 0, 0, 0, 10), "[process 0/396] 0.00% (done: 0, errors: 0, fallback: 0, raster: 0, running: 10)"},
+		{processProgressText(396, 396, 390, 3, 3, 12, 0), "[process 396/396] 100.00% (done: 390, errors: 3, fallback: 3, raster: 12, running: 0)"},
 		// ok 为负（瞬时状态）时钳到 0，且不崩。
-		{processProgressText(1, 10, -1, 1, 0, 0, 2), "[process 1/10] 10.00% (done: 0, fallback: 1, raster: 0, running: 2)"},
-		// T262：接口/会话错误造成的退回原图，要在 fallback 之外单独标出数量。
-		{processProgressText(18, 23, 0, 18, 18, 0, 0), "[process 18/23] 78.26% (done: 0, fallback: 18, api-err: 18, raster: 0, running: 0)"},
+		{processProgressText(1, 10, -1, 1, 1, 0, 2), "[process 1/10] 10.00% (done: 0, errors: 1, fallback: 1, raster: 0, running: 2)"},
+		// T262：接口/会话错误后保留原图算 fallback（errors 只数真失败），
+		// 18 张全撞 404 时就是 errors 0、fallback 18。
+		{processProgressText(18, 23, 0, 0, 18, 0, 0), "[process 18/23] 78.26% (done: 0, errors: 0, fallback: 18, raster: 0, running: 0)"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

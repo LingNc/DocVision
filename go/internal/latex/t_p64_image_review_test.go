@@ -82,23 +82,4 @@ func TestCountImageStatusesSplitsWorkAndFollowers(t *testing.T) {
 	if c.VectorOK != 1 || c.TextRaster != 2 || c.Fallback != 1 || c.Error != 1 || c.Pending != 2 {
 		t.Fatalf("分栏不对: %+v", c)
 	}
-	// 文案：文字/位图单独一栏；零的分栏不出现；跟随项单独一句。
-	got := c.summary()
-	for _, want := range []string{"全书 4/7 项", "矢量画好 1", "文字/位图 2", "退回原图 1", "失败 1", "未处理 2", "跟随代表图 2 张"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("全书口径缺 %q：%s", want, got)
-		}
-	}
-}
-
-// 全部收尾时不该再出现"未处理 0、失败 0"这类噪音。
-func TestStatusSummaryDropsZeroBuckets(t *testing.T) {
-	c := imageStatusCounts{Total: 3, Work: 2, VectorOK: 1, TextRaster: 1, Followers: 1}
-	got := c.summary()
-	if strings.Contains(got, "未处理") || strings.Contains(got, "失败") {
-		t.Fatalf("零分栏不该出现：%s", got)
-	}
-	if !strings.Contains(got, "全书 2/2 项") || !strings.Contains(got, "跟随代表图 1 张") {
-		t.Fatalf("收尾口径不对：%s", got)
-	}
 }
