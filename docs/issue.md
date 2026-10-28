@@ -1546,4 +1546,10 @@ user 轮
   改法：进度行按保存下来的状态分栏——done（真画出来）、fallback（以原图交付）、raster，接口/会话错误作为 fallback 的子集单独标 `api-err`；不要重试的 4xx（`model_not_found`、"不可重试"）判真失败并让这一批当场停下、把原因打出来，不再逐张空转。全书盘点拆成两层：作业项 = 非跟随的代表图 + 文字 + 位图，跟随项单列；文字/位图完成单列一栏，零的分栏不打印。
   验证：`TestCountImageStatusesSplitsWorkAndFollowers`（9 条记录：作业 7、跟随 2、文字/位图 2）、`TestStatusSummaryDropsZeroBuckets`、`TestNonRetryableSessionError`（404 模型名判不可重试，限流/网关不被误判）、`TestPhaseProgressCountsThisRunOnly` 补了 `fallback: 18, api-err: 18` 那一行；latex 全量除既有 venv 环境用例外全绿。
   未改：不动 `processAPIErrorAbort` 的阈值（连续 3 张接口错误且零成功仍会早停）；不动配置，模型名要在 `config.yaml` 的 `models.<名>` 里换掉。
+- T263 一次失败的运行会把 dedupe 的分组拆散，下一轮要画的图从 23 张涨到 379 张。
+  现象：模型名写错、代表图整批失败之后，`progress_items` 里 356 条"跟随代表图"的链接全没了（`dedupe_checked` 还是 true、`dedupe_leader_hash` 已空），再跑一轮 dedupe 也挂不回去，全书作业项从 32 张涨到 388 张。
+  根因：`clearUnresolvedMotifLinks` 的本意是"代表图确实没产出成品时别让跟随者的图消失"，但判据是"代表图不是 done 就解开"，于是代表图只是**没跑完或刚失败**（有下一轮）时也被解开；更糟的是解开时没放开 `dedupe_checked`，挂靠与复用都跳过"已核"记录，这一组就再也合不回来。
+  改法：代表图还没收尾（待处理/失败）时保留链接——它有下一轮，跟随者复用同一张成品即可；只有代表图**已完成却没有可复用成品**（或记录已不存在）才解开，解开时一并把 `dedupe_checked` 放开，允许以后重新挂靠。日志也改成只说这一种情况。
+  验证：`TestFollowerKeepsLinkWhileLeaderUnresolved`（代表图 fallback 时链接与记号都不动；代表图 done 且无 TikZ 才解开并放开记号），原有 `TestMotifRasterLeaderKeepsFollowers` 仍绿；latex 全量除既有 venv 环境用例外全绿。
+  未改：不清除任何已有转录与产物；已经被旧逻辑拆散的库需要按 groups.json 把链接补回去（`temp/restore_dedupe_links.py`，演练 356 条 = 258 个副本 + 98 个组内成员）。
 

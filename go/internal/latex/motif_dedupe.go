@@ -1267,13 +1267,18 @@ func applyMotifArtifacts(tasks []*task, prog map[string]*imageProgress, progDir,
 	}
 }
 
-// clearUnresolvedMotifLinks drops follower->leader links whose leader never
-// produced a drawing (failed, or produced nothing). Followers are otherwise
-// skipped by process forever and their figure would silently disappear from the
-// book; unlinking means the next run draws them independently. Costing an extra
-// drawing is fine, losing a figure is not.
+// clearUnresolvedMotifLinks drops follower->leader links whose leader is finished
+// but never produced a drawing. Followers are otherwise skipped by process forever
+// and their figure would silently disappear from the book; unlinking means the next
+// run draws them independently. Costing an extra drawing is fine, losing a figure is
+// not.
 // 代表图是 raster/text（组的类别按多数定成这样）时本来就没有成品，跟随者
 // 复用它的原图与解释文本，不能当成"代表图没产出"把链接清掉。
+//
+// 代表图**还没收尾**（待处理/刚失败）时链接必须留着（T263）：它有下一轮，跟随者
+// 跟着复用同一张成品即可；这时清链接等于把一组图拆成 N 张独立图。现场一次模型
+// 名写错，18 张代表图全部失败，356 张跟随被判"代表图没产出"当场清空，下一轮要
+// 画的就是 379 张，而不是 23 张。
 func (r *Runner) clearUnresolvedMotifLinks(tasks []*task, prog map[string]*imageProgress, progDir string) {
 	cleared := 0
 	for _, t := range tasks {
@@ -1285,15 +1290,22 @@ func (r *Runner) clearUnresolvedMotifLinks(tasks []*task, prog map[string]*image
 		if leader != nil && leader.Status == "done" && leader.EquivalentTo == "" && (leader.Class != ClassVector || leader.TikzCode != "") {
 			continue
 		}
+		if leader != nil && leader.Status != "done" {
+			// 代表图待处理或刚失败：它还会再画，跟随者等它，别拆组。
+			continue
+		}
 		p.EquivalentTo = ""
 		p.DedupeLeaderHash = ""
 		p.SharedTex = ""
+		// 解开之后连"核过"的记号一起放开，否则这类图以后再也挂不回任何代表图
+		// （挂靠与复用都会跳过已核记录）。
+		p.DedupeChecked = false
 		saveProgress(progDir, p)
 		cleared++
 	}
 	if cleared > 0 {
 		// 不静默：这些图会保持/回退为独立处理，本次不假装已完成。
-		r.log.LogWarning(0, fmt.Sprintf("%d 张图跟随的代表图没有产出成品，已解除跟随，下次运行将单独处理", cleared))
+		r.log.LogWarning(0, fmt.Sprintf("%d 张图跟随的代表图已经完成、却没有可复用的成品，已解除跟随，下次运行将单独处理", cleared))
 	}
 }
 
