@@ -611,7 +611,7 @@ function onResetView() {
                     :data-id="grp.main.id"
                     :title="imageGroupTip(grp)"
                     @click="onRowClick(grp.main)"
-                  >{{ grp.order || '' }}<span v-if="grp.items.length > 1" class="block-count">{{ grp.items.length }}</span></button>
+                  >{{ grp.order || '' }}<span v-if="grp.items.length > 1" class="block-count">×{{ grp.items.length }}</span></button>
                 </div>
                 <div v-else class="session-blocks">
                   <button
@@ -731,7 +731,7 @@ function onResetView() {
                     :data-id="grp.main.id"
                     :title="imageGroupTip(grp)"
                     @click="onRowClick(grp.main)"
-                  >{{ grp.order || '' }}<span v-if="grp.items.length > 1" class="block-count">{{ grp.items.length }}</span></button>
+                  >{{ grp.order || '' }}<span v-if="grp.items.length > 1" class="block-count">×{{ grp.items.length }}</span></button>
                 </div>
                 <div v-else-if="blockView" class="session-blocks">
                   <button

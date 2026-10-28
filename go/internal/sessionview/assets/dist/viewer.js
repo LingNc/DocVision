@@ -10599,7 +10599,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-e24bcb26><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-e24bcb26><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-e24bcb26></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-e24bcb26><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-e24bcb26></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-e24bcb26></path></svg></span>', 1)),
+                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-aa819495><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-aa819495><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-aa819495></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-aa819495><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-aa819495></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-aa819495></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$4, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$3, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -10791,7 +10791,7 @@
                                   onClick: ($event) => onRowClick(grp.main)
                                 }, [
                                   createTextVNode(toDisplayString(grp.order || ""), 1),
-                                  grp.items.length > 1 ? (openBlock(), createElementBlock("span", _hoisted_66, toDisplayString(grp.items.length), 1)) : createCommentVNode("", true)
+                                  grp.items.length > 1 ? (openBlock(), createElementBlock("span", _hoisted_66, "×" + toDisplayString(grp.items.length), 1)) : createCommentVNode("", true)
                                 ], 10, _hoisted_65);
                               }), 128))
                             ])) : (openBlock(), createElementBlock("div", _hoisted_67, [
@@ -10971,7 +10971,7 @@
                                 onClick: ($event) => onRowClick(grp.main)
                               }, [
                                 createTextVNode(toDisplayString(grp.order || ""), 1),
-                                grp.items.length > 1 ? (openBlock(), createElementBlock("span", _hoisted_101, toDisplayString(grp.items.length), 1)) : createCommentVNode("", true)
+                                grp.items.length > 1 ? (openBlock(), createElementBlock("span", _hoisted_101, "×" + toDisplayString(grp.items.length), 1)) : createCommentVNode("", true)
                               ], 10, _hoisted_100);
                             }), 128))
                           ])) : blockView.value ? (openBlock(), createElementBlock("div", _hoisted_102, [
@@ -11156,7 +11156,7 @@
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-e24bcb26"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-aa819495"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
