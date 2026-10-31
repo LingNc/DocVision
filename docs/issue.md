@@ -2352,3 +2352,8 @@ user 轮
   根因：`runGrep` 直接 `exec grep -rIn -e pattern`，没加 `-E`；"路径不存在"分支 `continue` 掉，最终回一句 `NO MATCHES`，把"搜错地方"伪装成"没这个串"。
   改：改成进程内按 **Go regexp** 匹配（编译不过退回纯文本，不再报语法错），自己遍历文件树（跳过二进制、`.git`、>8 MB），命中行数与行号格式不变；`path` 不存在时回 `grep error: 路径不存在：<path>（同级目录下有：…）`；描述里补一句"编译不过按纯文本"。
   验证：`t274_grep_test.go`——交替/中文标点交替/`\{…\}` 转义/编译不过退回纯文本/行号从 1 起/无匹配返回空、`path` 不存在报错并列出同级条目、二进制跳过与 `...(N more)` 截断；`go test ./internal/...` 除既有的 `compare_figure` 与宿主 python 两条外全绿。
+
+[X][ ] T275. `clean_convert.sh` 的删除清单停在 T167 那会儿：`work/attempts/`、`work/rounds/`、`work/rescue/`、`work/fix/`、`work/retry/` 这些后来加的转换伴生状态一个都没清，`rescue_*.jsonl`、`stylefix*.jsonl` 两类转录与 `.partial` 快照也没清——清完再跑，页面还挂着指向已删转录的「切回」，`work/rounds/` 里 88 MB 的旧快照仓库也白留着。
+  根因：删除清单是**手写枚举**，新目录/新转录命名不断加进来（P63 作废尝试、快照仓库、复盘切口、修复工作区、重试队列、stylefix 改名），脚本没人回头补。
+  改：默认口径扩到 `work/{attempts,rounds,rescue,fix,retry}`，转录 glob 改成 `convert_*|checker_*|rescue_*` 并带 `*.jsonl*`（连 `.partial`），另补 `stylefix*.jsonl*`；`--keep-convert` 保留这几块、只清它之后的阶段；头部注释与 `docs/latex.md` 的清理清单同步。
+  验证：`bash -n`；真实项目 `-n` 计划里 12 项目录 + 171 条转录全部列出（新增的 6 类都在）；两个假项目跑真删除——默认口径下转换/复盘/修复/快照/队列目录与三类转录（含 `.partial`）全清、`chapters/*.md`+`style/`+`work/sessions/{chapters,keep}.jsonl`+`work/media`+`work/sessions/media` 全留、`progress.json` 的 convert/assemble 归空；`--keep-convert` 下 `work/chapters`、三类转换转录、attempts/rounds/rescue/fix/retry 全留，`views`/`pdfview`/`stylefix*`/`book_fix` 照删。

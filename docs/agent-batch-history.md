@@ -3274,3 +3274,13 @@ T260
 **验证**：`internal/latex/t274_grep_test.go`——`question|workedexample` 命中两行（BRE 会零命中）、`。|，|；|：` 命中中文标点行、`\{question\}` 照常命中、未闭合括号退回纯文本、行号 `:3:` 对齐、无匹配返回空串；`path` 不存在时报 `grep error` + `路径不存在` + 列出 `chapter.md`/`chapters/` 且不含 `NO MATCHES`；二进制跳过、20 行命中按 5 截断出 `...(15 more, 收窄 pattern)`。`go test ./internal/...` 全绿（除既有的 `compare_figure` 门禁测试与宿主 libpython 两条）。
 
 **文档**：`docs/sessions.md` 的挂载表一节补 grep 语义（Go 正则 + 纯文本兜底 + 路径不存在报错 + 二进制/8 MB 跳过）；`docs/issue.md` T274；`CHANGELOG.md` Unreleased/Fixed。
+
+## 第七十四批（2026-11-01）：T275——`clean_convert.sh` 补上后来新增的转换伴生状态
+
+用户："我现在想清空一下这个 convert 的过程，我换个模型重新跑一下，之前的那个 clean_convert 还能用吗"。
+
+**审计**：脚本（T167）能被 `bash -n` 过、`-n` 也能跑，但删除清单是手写枚举，**新目录一个都没跟上**：`work/attempts/<章>/try<N>/`（P63 作废尝试留档）、`work/rounds/<章>/{repo.git,journal-tryN.jsonl}`（逐章快照仓库，实测 88 MB）、`work/rescue/{cuts/,log.jsonl}`（复盘切口存档，T241）、`work/fix/<章>/plan.json`、`work/retry/*.done.json`（章节级重试队列，68 条 done + 1 条**未完成**请求）全是转换阶段的伴生状态；转录侧只清 `convert_*`/`checker_*`，`rescue_*.jsonl`（实测 100+ 条）与改名后的 `stylefix*.jsonl` 都不清，`.partial` 快照（`*.jsonl.partial`）也不在 glob 里。清完再跑会留下"页面有尝试/复盘条目、转录和产物已经没了"的错位。
+
+**改法**：`to_delete_convert` 增加 `work/attempts`、`work/rounds`、`work/rescue`、`work/fix`、`work/retry`（`--keep-convert` 时整体保留）；`rescue_*.jsonl` 并进转换分支；三类转换转录与 `style_fix_*`/`stylefix*` 的 glob 末尾都加 `*`，把 `.partial` sidecar 一起带走；头部注释与 `docs/latex.md`「清理与重跑（辅助脚本）」同步。
+
+**验证**：`bash -n` 通过；真实项目 `-n`：新增的 5 个目录与 `rescue_*`/`checker_*`/`convert_*` 共 171 条转录都在计划里（`work/rounds` 88 MB、`work/temp` 162 MB 一并列出），备份路径与保留清单正确；两个假项目各跑一次真删除——默认口径下转换/复盘/修复/快照/队列目录与三类转录（含 `.partial`）全清，`chapters/*.md`、`work/sessions/{chapters,keep}.jsonl`、`work/media`、`work/sessions/media`、`style/`、`doc_index/`、`progress.json` 全留，`convert`/`assemble` 归空；`--keep-convert` 下 `work/chapters`、三类转录、attempts/rounds/rescue/fix/retry 全留，`views`/`pdfview`/`stylefix*`/`book_fix`/`final_review` 照删、`progress.json` 同样归空。

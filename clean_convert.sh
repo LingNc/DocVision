@@ -27,11 +27,14 @@
 #   progress.json、.docvision_project.json、work/mem.log
 # 默认删除（= 章节转换及其之后的一切）：
 #   work/chapters/（转换成品）、work/reports/（每章报告）、work/temp/（章节工作区、
-#   递归子树、.gate、issues store）、work/sessions/convert_*|checker_*（逐章与
-#   checker 转录）、build/、out/、<项目名>.pdf（汇编交付副本）、
+#   递归子树、.gate、issues store）、work/attempts/（作废尝试的留档 try<N>/）、
+#   work/fix/（修复会话工作区）、work/rounds/（逐章工作区快照仓库）、
+#   work/rescue/（复盘切口存档）、work/retry/（章节级重试队列）、
+#   work/sessions/convert_*|checker_*|rescue_*（逐章、checker 与复盘转录，含 .partial）、
+#   build/、out/、<项目名>.pdf（汇编交付副本）、
 #   work/style_fix/、work/stylefix_assess/、work/stylefix_integrate/、work/final_review/、
 #   work/views/、work/pdfview/、work/sessions/book_fix.jsonl、
-#   work/sessions/final_review.jsonl、work/sessions/style_fix_*.jsonl
+#   work/sessions/final_review.jsonl、work/sessions/style_fix_*.jsonl|stylefix*.jsonl
 # 不删 work/media/：那是**保留下来的** work/style_session.jsonl 的图片附件目录（会话
 #   把图片写在"转录同级目录的 media/"下），删了样式会话的历史就只剩断图（T199）。
 #   同理 work/sessions/media/ 也不能删——被保留的 chapters.jsonl 用它。
@@ -129,10 +132,18 @@ to_delete_after_files=(
   "work/sessions/final_review.jsonl"
 )
 # 转换本身（默认删；--keep-convert 时保留）。
+# attempts（作废尝试留档）、rounds（逐章快照仓库）、rescue（切口存档）、
+# fix（修复会话工作区）、retry（章节级重试队列）都是转换阶段的伴生状态：
+# 转录与产物删了它们就是孤儿，留着还会让页面显示指向空转录的「切回」。
 to_delete_convert=(
   "work/chapters"
   "work/reports"
   "work/temp"
+  "work/attempts"
+  "work/rounds"
+  "work/rescue"
+  "work/fix"
+  "work/retry"
 )
 to_delete=("${to_delete_after[@]}")
 [ "$keep_convert" -eq 1 ] || to_delete+=("${to_delete_convert[@]}")
@@ -162,15 +173,18 @@ if [ "$keep_convert" -eq 0 ]; then
   for f in "$proj"/work/sessions/checker_*.jsonl; do
     [ -e "$f" ] && say "  删除：work/sessions/$(basename "$f")  ($(du -h "$f" 2>/dev/null | cut -f1))"
   done
+  for f in "$proj"/work/sessions/rescue_*.jsonl; do
+    [ -e "$f" ] && say "  删除：work/sessions/$(basename "$f")  ($(du -h "$f" 2>/dev/null | cut -f1))"
+  done
 fi
-for f in "$proj"/work/sessions/style_fix_*.jsonl; do
+for f in "$proj"/work/sessions/style_fix_*.jsonl "$proj"/work/sessions/stylefix*.jsonl; do
   [ -e "$f" ] && say "  删除：work/sessions/$(basename "$f")  ($(du -h "$f" 2>/dev/null | cut -f1))"
 done
 sibling="$(dirname "$proj")/$book.pdf"
 [ -e "$sibling" ] && say "  删除：$sibling  （汇编交付副本，$(du -h "$sibling" 2>/dev/null | cut -f1)）"
 
 if [ "$keep_convert" -eq 1 ]; then
-  say "  保留：work/chapters/、work/reports/、转换与 checker 转录、work/temp/"
+  say "  保留：work/chapters/、work/reports/、work/temp/、work/attempts/、work/rounds/、work/rescue/、work/fix/、work/retry/、转换/checker/复盘转录"
   say "  阶段标记：progress.json 的 convert、assemble 归空 —— 章节「已有产物，跳过」，从风格修复重跑"
   if [ -n "$broken" ]; then
     warn ""
@@ -245,10 +259,13 @@ remove_glob() {
   done
 }
 if [ "$keep_convert" -eq 0 ]; then
-  remove_glob 'work/sessions/convert_*.jsonl'
-  remove_glob 'work/sessions/checker_*.jsonl'
+  # 带 `*` 结尾：把流式快照 sidecar `<转录>.partial` 一起带走。
+  remove_glob 'work/sessions/convert_*.jsonl*'
+  remove_glob 'work/sessions/checker_*.jsonl*'
+  remove_glob 'work/sessions/rescue_*.jsonl*'
 fi
-remove_glob 'work/sessions/style_fix_*.jsonl'
+remove_glob 'work/sessions/style_fix_*.jsonl*'
+remove_glob 'work/sessions/stylefix*.jsonl*'
 if [ -e "$sibling" ]; then
   rm -f -- "$sibling"
   say "  - $sibling"
