@@ -1837,6 +1837,77 @@ func balancedCutFrom(lines []string, from int) int {
 	return last
 }
 
+// extendPastToolRound 把切口后移到"最后一个完整工具轮"的末尾（T269）。
+//
+// 场景：复盘会话指的切口正好落在一条工具调用消息上（例如细分父节点申请子会话
+// 的那一条）。按 T241 的口径，这一条连同它下一行的回执一起被裁掉——平衡是保住
+// 了，可"我申请过子章节"这个事实也从回放的上下文里消失了（实测一章的
+// request_chapter_split 就这样丢过一次，只能手工从 cuts 备份里补回来）。
+//
+// 只要这一轮的调用都在紧跟的行里拿到了回执，就把切口挪到回执之后：丢掉的仍然
+// 是复盘判定的退化部分，只是不再切在"调用与回执之间"。找不到完整回执就原样不动。
+func extendPastToolRound(lines []string, keep int) int {
+	if keep < 1 || keep >= len(lines) {
+		return keep
+	}
+	var head struct {
+		T     string `json:"t"`
+		Role  string `json:"role"`
+		Calls []struct {
+			ID string `json:"id"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal([]byte(lines[keep]), &head); err != nil {
+		return keep
+	}
+	if head.T != "msg" || head.Role == "tool" || len(head.Calls) == 0 {
+		return keep
+	}
+	pending := make(map[string]bool, len(head.Calls))
+	var order []string
+	for _, c := range head.Calls {
+		pending[c.ID] = true
+		order = append(order, c.ID)
+	}
+	lastReceipt := 0
+	for i := keep + 1; i < len(lines); i++ {
+		var p struct {
+			T      string `json:"t"`
+			Role   string `json:"role"`
+			CallID string `json:"tool_call_id"`
+		}
+		if err := json.Unmarshal([]byte(lines[i]), &p); err != nil {
+			return keep
+		}
+		switch p.T {
+		case "meta", "usage":
+			continue
+		case "msg":
+			if p.Role != "tool" {
+				return keep
+			}
+			if p.CallID != "" {
+				delete(pending, p.CallID)
+			} else {
+				// 老转录没有 tool_call_id：按先后顺序一对一销。
+				for _, id := range order {
+					if pending[id] {
+						delete(pending, id)
+						break
+					}
+				}
+			}
+			lastReceipt = i + 1
+			if len(pending) == 0 {
+				return lastReceipt
+			}
+		default:
+			return keep
+		}
+	}
+	return keep
+}
+
 // trimTranscriptInPlace 把一条转录**原地**截到第 from 条记录之前（T241）：同一条
 // 文件、同一个尝试号，页面的「历史」不多出一条。
 //
@@ -1877,6 +1948,13 @@ func (r *Runner) trimTranscriptInPlace(proj, base, trPath string, from int, reas
 	if keep < from {
 		r.log.LogWarning(0, "[rescue]", base, "切口从第", strconv.Itoa(from), "条前移到第",
 			strconv.Itoa(keep), "条：后面那条还在等工具回执，截在那儿续跑只会读到占位回执")
+	}
+	// T269：切口若正落在一条工具调用上，把这一轮（调用 + 回执）留住再切——
+	// 复盘判的是"后面那一段退化"，不是"你刚才申请过子章节"。
+	if adv := extendPastToolRound(lines, keep); adv > keep {
+		r.log.LogInfo(0, "[rescue]", base, "切口从第", strconv.Itoa(keep), "条后移到第",
+			strconv.Itoa(adv), "条：保留最后一个完整的工具调用轮（调用与回执不能被切开）")
+		keep = adv
 	}
 	tail := lines[keep:]
 	if len(tail) > 0 {

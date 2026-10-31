@@ -3198,3 +3198,13 @@ T260
 - 补上方块视图缺失的溢出按钮（分组态「更多图片（还有 N 张）」、平铺态「更多会话（还有 N 个）」）；单阶段分支的链式 `v-else-if` 包成 `<template v-else-if="blockView">` 才能塞进按钮不破坏条件链。
 
 验证：`t266-image-attempts.spec.ts` 6 条（现役=0、平铺顺序）；`TestViewerVectorAttemptGroupsInChromium`（子行 「当前,try3,try2」、方块 4 块、暗标 2、角标 2）；web 全量 287 条、sessionview 全量绿。CHANGELOG 的 Fixed 条目单独提交（文件里还有用户进行中的 compare_figure 草稿，不能混进来）。
+
+## 第六十八批（2026-11-01）：T269——复盘切口不再切开「最后一个完整工具轮」
+
+用户原话："复盘的切口误伤可以补一下"（另一条"拿不到工具清单"是他用的中转站问题，不修，换模型即可）。
+
+现场：一章的细分父节点在复盘判定的退化点之前刚调用过 `request_chapter_split`，复盘给的切口行正好落在那条 assistant 消息上。`balancedCutFrom` 只保证"保留的前缀里工具调用都有回执"，于是这一轮（调用 + 下一行的回执）被整段裁掉——平衡是对的，可续跑回放的历史里"我申请过子章节"这个事实没了，页面也不再显示它拆过章；事主只能从 `work/rescue/cuts/<章>/` 的备份里手工补回两行。
+
+改法：新增 `extendPastToolRound(lines, keep)`，在 `trimTranscriptInPlace` 的平衡检查之后、写盘之前调用——切口那条是 `t=msg` 的工具调用、且紧跟的行（允许 meta/usage 夹层）里把它的全部回执都拿到了，就把切口后移到回执之后；中途遇到下一条 assistant 消息或类型不认识的行就原样不动。丢掉的那一段仍然进 `work/rescue/cuts/`，`dropped` 计数按后移后的切口算。
+
+验证：`internal/latex/t269_cut_keeps_tool_round_test.go` 两条（边界：带 meta 夹层的后移、缺回执不动、非调用不动、双调用只回一条不动；集成：切口落在 `request_chapter_split` 上时保留调用与回执、`dropped` = 退化段行数）。
