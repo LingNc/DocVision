@@ -2342,3 +2342,8 @@ user 轮
 [X][ ] T272. `docvision sessions --serve` 启动仍然极慢（用户："还是巨慢"，磁盘缓存早就有了）——索引缓存只接在 `Scan` 上，而 `sessions` 命令与 `--serve` 走的 `ScanWith` 从不读也不写缓存；`--serve` 启动时还先白扫一遍（结果丢弃）再交给服务重新扫一次。
   改：`ScanWith` 与 `Scan` 同源（先 load、扫完按需 save）；`saveCountCacheIfDirty` 只在真的重算过转录时落盘、并节流 30 秒（预览页 2 秒轮询不再白写）；`newViewerServer` 的长驻 scanner 也先 load 缓存，`/api/index` 与 `/api/session` 共用 `scanAll()` 按需回写；`sessions --serve` 不再在启动时预扫。
   验证：实测同一项目（6459 条转录、9.2 GB）冷扫 173.4 秒 → 命中缓存 0.77 秒；`t272_scan_cache_test.go` 两例（`ScanWith` 第二遍用"同长度同 mtime 的垃圾内容"钉住不重读；预览服务首轮同样命中缓存，且全部命中时不重写缓存文件）；`./internal/sessionview`、`./cmd/docvision` 全绿。
+
+[X][ ] T273. 换 haiku 之后子章节会话整段卡在工具上：模型调的是另一套 agent 的工具名（`Read`/`Bash`/`Grep`/`ToolSearch`/`edit_file`），本会话的 `read_file`/`bash`/`grep` 一个都没被命中，回执只有一句 `unknown tool X`，模型只能换个名字再猜——转录里连续 `unknown tool Bash`、`unknown tool Grep`、`unknown tool Read`、`unknown tool ToolSearch`。
+  根因：网关/中转站把别的 harness 的工具面递给了模型（`Bash` 带 `{"command":...}`、`Read` 带 `{"file_path":...}`），而 `executeTool` 是**严格字符串相等**匹配；名字对上大小写之外还整段不同时，模型没有任何线索知道本会话有什么工具。
+  改：工具名解析加三级（精确 → `models.<条目>.tool_aliases` 配置别名 → 大小写/分隔符归一后的唯一匹配，`mcp__x__read_file` 取尾段），别名与归一化两边都按 `normalizeToolName` 比较、值必须真在会话里存在才生效；`unknown tool` 回执改为列出本会话全部可用工具名 + 一个相似建议（前缀包含或编辑距离 ≤2）；`config_version` 24→25，两份模板的 claude 示例里给出 `Read: read_file` / `Edit: write_file`。
+  验证：`t273_tool_alias_test.go`（大小写/全大写/分隔符/命名空间前缀/别名键值大小写/别名指向不存在工具/无关名字 11 例 + 有歧义不猜 + 回执含工具清单与建议 + `BASH` 真能执行）、`t273_tool_aliases_test.go`（条目没写时继承 `models.text` 的整张表且是拷贝，写了就用自己的）；`./internal/session`、`./internal/config` 全绿。

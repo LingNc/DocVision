@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1007,22 +1008,193 @@ func degenerateEmptyResponse(resp *ChatResponse, choice *ChatResponseChoice) boo
 func (s *Session) executeTool(tc ToolCall) ToolResult {
 	s.ToolInvoked++
 	s.notifyProgress()
-	for _, t := range s.tools {
-		if t.Name() != tc.Function.Name {
+	tool := s.resolveTool(tc.Function.Name)
+	if tool == nil {
+		s.logf("[tool:%s] unknown tool（本会话有 %d 个工具）", tc.Function.Name, len(s.tools))
+		return ToolResult{Text: s.unknownToolText(tc.Function.Name)}
+	}
+	if tool.Name() != tc.Function.Name {
+		s.logf("[tool:%s] 按别名/大小写归一化到 %s", tc.Function.Name, tool.Name())
+	}
+	res, err := tool.Execute(tc.Function.Arguments)
+	if err != nil {
+		// A tool error is handed back to the model (which usually
+		// recovers), so it is not a session failure: say so in the log.
+		s.logf("[tool:%s] error (已返回模型，会话继续): %v", tool.Name(), err)
+		return ToolResult{Text: "TOOL ERROR: " + err.Error()}
+	}
+	s.logf("[tool:%s] ok (%d chars result)", tool.Name(), len(res.Text))
+	return res
+}
+
+// normalizedToolName folds a tool name for case- and separator-insensitive
+// matching (T273): "Read_File"/"read-file"/"READ FILE" all become "readfile".
+// 网关/中转站有时把另一套 agent 的工具面递给模型（实测有 Claude Code 的
+// Read/Bash/Grep，也有别家 harness 的 read_session/session_stats），模型照着
+// 那套名字调用本会话根本没声明的工具；大小写与分隔符的差别不该让会话卡在
+// "unknown tool" 上反复空转。
+func normalizedToolName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		switch r {
+		case '_', '-', ' ', '\t', '.':
 			continue
 		}
-		res, err := t.Execute(tc.Function.Arguments)
-		if err != nil {
-			// A tool error is handed back to the model (which usually
-			// recovers), so it is not a session failure: say so in the log.
-			s.logf("[tool:%s] error (已返回模型，会话继续): %v", tc.Function.Name, err)
-			return ToolResult{Text: "TOOL ERROR: " + err.Error()}
-		}
-		s.logf("[tool:%s] ok (%d chars result)", tc.Function.Name, len(res.Text))
-		return res
+		b.WriteRune(r)
 	}
-	s.logf("[tool:%s] unknown tool", tc.Function.Name)
-	return ToolResult{Text: "TOOL ERROR: unknown tool " + tc.Function.Name}
+	return b.String()
+}
+
+// toolNameCandidates 列出一次调用可能的规范名：原样，以及去掉命名空间前缀
+// （`mcp__docvision__read_file`、`tools/read_file`）后的最后一段。
+func toolNameCandidates(name string) []string {
+	name = strings.TrimSpace(name)
+	out := []string{name}
+	for _, sep := range []string{"__", "/", "."} {
+		if i := strings.LastIndex(name, sep); i >= 0 && i+len(sep) < len(name) {
+			seg := strings.TrimSpace(name[i+len(sep):])
+			if seg != "" && seg != name {
+				out = append(out, seg)
+			}
+		}
+	}
+	return out
+}
+
+// resolveTool 决定一次调用该落在哪个工具上（T273）：精确名 → 配置的
+// tool_aliases（两边都按归一化比较）→ 归一化后唯一匹配。找不到返回 nil。
+//
+// 只做名字解析，不翻译参数：别名指到的工具若参数形状不同，工具自己会把缺失
+// 的字段报回来（模型据此改参数），这比"unknown tool"有信息量得多。
+func (s *Session) resolveTool(name string) Tool {
+	candidates := toolNameCandidates(name)
+	for _, cand := range candidates {
+		for _, t := range s.tools {
+			if t.Name() == cand {
+				return t
+			}
+		}
+	}
+	for _, cand := range candidates {
+		nc := normalizedToolName(cand)
+		if nc == "" {
+			continue
+		}
+		for alias, target := range s.modelCfg.ToolAliases {
+			if normalizedToolName(alias) != nc {
+				continue
+			}
+			if t := s.toolByAnyName(target); t != nil {
+				return t
+			}
+		}
+	}
+	for _, cand := range candidates {
+		if t := s.toolByAnyName(cand); t != nil {
+			return t
+		}
+	}
+	return nil
+}
+
+// toolByAnyName 按原样或归一化后的唯一匹配找工具；归一化后撞上两个就不猜。
+func (s *Session) toolByAnyName(name string) Tool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	for _, t := range s.tools {
+		if t.Name() == name {
+			return t
+		}
+	}
+	want := normalizedToolName(name)
+	if want == "" {
+		return nil
+	}
+	var hit Tool
+	for _, t := range s.tools {
+		if normalizedToolName(t.Name()) != want {
+			continue
+		}
+		if hit != nil {
+			return nil
+		}
+		hit = t
+	}
+	return hit
+}
+
+// unknownToolText 是"没这个工具"的回执（T273）：把本会话真正可用的工具名列
+// 出来，再给一个相似名字的建议。模型只要能看到清单，通常下一轮就换对了——
+// 以前只有一句 "unknown tool Grep"，它只能再猜一次。
+func (s *Session) unknownToolText(name string) string {
+	names := make([]string, 0, len(s.tools))
+	for _, t := range s.tools {
+		names = append(names, t.Name())
+	}
+	sort.Strings(names)
+	msg := "TOOL ERROR: unknown tool " + name
+	if best := suggestToolName(name, names); best != "" {
+		msg += "（想找的可能是 " + best + "）"
+	}
+	msg += "；本会话可用的工具：" + strings.Join(names, ", ")
+	return msg
+}
+
+// suggestToolName 在可用工具名里找一个最像的（T273）：归一化后的前缀包含
+// （Read → read_file）或编辑距离 ≤2（grep → grep）。找不到就返回空。
+func suggestToolName(name string, names []string) string {
+	want := normalizedToolName(name)
+	if want == "" {
+		return ""
+	}
+	best, bestDist := "", 1<<30
+	for _, cand := range names {
+		c := normalizedToolName(cand)
+		if c == "" || c == want {
+			continue
+		}
+		d := editDistance(want, c)
+		close := strings.HasPrefix(c, want) || strings.HasPrefix(want, c) || d <= 2
+		if !close || d >= bestDist {
+			continue
+		}
+		best, bestDist = cand, d
+	}
+	return best
+}
+
+// editDistance 是 Levenshtein 距离（只用于建议，不追求性能）。
+func editDistance(a, b string) int {
+	ar, br := []rune(a), []rune(b)
+	prev := make([]int, len(br)+1)
+	cur := make([]int, len(br)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ar); i++ {
+		cur[0] = i
+		for j := 1; j <= len(br); j++ {
+			cost := 1
+			if ar[i-1] == br[j-1] {
+				cost = 0
+			}
+			cur[j] = min3(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(br)]
+}
+
+func min3(a, b, c int) int {
+	if b < a {
+		a = b
+	}
+	if c < a {
+		a = c
+	}
+	return a
 }
 
 func (s *Session) logf(format string, args ...interface{}) {

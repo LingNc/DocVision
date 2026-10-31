@@ -12,7 +12,7 @@
 #   3. 未知键不生效：拼错一个键名不会有任何报错，启动时只会给一行"未知配置键"
 #      告警（`docvision setup` 保存时会把它拦下来）。
 
-config_version: 24
+config_version: 25
 
 # MinerU API Configuration
 mineru:
@@ -430,6 +430,9 @@ models:
   #   thinking:
   #     type: adaptive            # 新版 Claude 只认 adaptive
   #   reasoning_effort: high      # → 顶层 output_config.effort（low | medium | high）
+  #   tool_aliases:               # 网关把另一套 agent 的工具名递给模型时，映射回本程序的工具名（大小写/分隔符本就自动兼容）
+  #     Read: read_file
+  #     Edit: write_file
 
   # ---- 同一模型不同参数：复用基座，只写差异键 ----
   heavy:                        # 重活（作图/转换）：基座 B + 更长的超时

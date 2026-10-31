@@ -11,6 +11,7 @@
 ：退化的 dedupe 复查页现在直接把每张图的状态（已完成／退回原图／失败／已分类待处理／未处理，一律取 `progress_items` 的 `status`）、判定记录（那条 json）与转换产物（TikZ/PDF/PNG/SVG）挂到缩略图下面；并单独列出「等待转换的原图」与「退回原图的（已收尾但没画出成品）」两段（后者逐张写明退回原因——工具链不可用／TikZ 没通过校验／接口会话错误，`progress_items` 新字段 `fallback_reason`），原图与判定记录都在，核对时不用再从几百张平铺的缩略图里找；真画过的图还给出「LaTeX 源」与「会话」两个入口。**核对页不再只是快照**：从会话预览页打开时按磁盘现状现渲染（分组取 `groups.json`、状态取 `progress_items`、成品取 `figures/`），每张图左原图右成品并排、图注直出类别/状态/代表图跟随关系与退回原因，链接与成品只在文件真存在时出现；磁盘上那份 `review.html` 保留为没有分组结论时的退路。`process` 收尾还会报一句"退回原图共 N 张"，明细指向核对页。
 - **矢量图会话提供可选 `compare_figure` 视觉证据工具**：在成功编译后对原图与当前 PDF 预览做 Go 原生软墨迹对齐比较并返回 overlay，结果只供模型判断，不改变原有 submit 流程。
 ### Changed
+- **工具名不再被大小写/别家 harness 的名字卡住（T273）**：模型叫 `Bash`/`GREP`/`read-file`/`mcp__x__read_file` 时按规范化名字（忽略大小写与分隔符）落到本程序的工具上；整段不同的名字（Claude Code 的 `Read`/`Edit`）可以在**模型条目**上配 `tool_aliases: {Read: read_file, Edit: write_file}` 映射回来，键与值都不看大小写、指向不存在的工具则不生效。真叫了不存在的工具时，回执从一句 `unknown tool X` 改成"本会话可用的工具：…"并给一个相似建议，模型下一轮就能换对。`config_version` 升到 25。
 - **配置模板补上 Anthropic（Claude）示例（T271）**：以前只有 `api:` 那一行的键注释，换 Claude 得自己拼 `api: anthropic`、指到 `/v1` 的 `base_url`、`thinking: {type: adaptive}` 与 effort，漏一项就被 400 拒掉。现在两份配置模板的 models 段各有一段可照抄的注释示例（含 `output_config.effort` 的来历与"不要再用 budget_tokens"的提醒），`docs/config.md` 另有一节完整示例与三条易错点。
 
 ### Fixed

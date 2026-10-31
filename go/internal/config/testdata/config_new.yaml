@@ -2,7 +2,7 @@
 # 配置样例：example_book 项目的一次运行配置，凭据与网关地址已替换为占位符；
 # 供 runconfig_rewrite_test.go 钉住“声明式改写只动列出的键、其余逐字保留”。
 
-config_version: 24
+config_version: 25
 
 # MinerU API Configuration
 mineru:

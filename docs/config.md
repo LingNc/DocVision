@@ -75,6 +75,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.text.api_stream_idle_timeout` | 流式模式下两个数据块之间的最大间隔（秒），超时判定卡住；0 取 `api_timeout` | 0 |
 | `models.text.thinking` | 顶层 `thinking` 对象：`type` 取 `enabled`/`disabled`/`adaptive`（GLM-4.5+/DeepSeek/Qwen；**Anthropic 新 Claude 只认 `adaptive`**——沿用 `{type: enabled, budget_tokens: N}` 会被服务端 400 拒掉）。**不要放进 `extra_body`**；非法取值启动即报错（disable/enable 等笔误自动纠正并告警） | 未设置 |
 | `models.<name>.thinking.type` | 同上；写错会让该模型**每一次请求**都被服务端拒掉（现场一次 `type: disable` 让 8/8 张图只保留原图） | 未设置 |
+| `models.text.tool_aliases` | 把网关/中转站递给模型的**另一套工具名**映射回本程序的工具名（T273）：`{Read: read_file, Edit: write_file}`。键与值都按大小写/分隔符不敏感匹配，值必须真在会话里存在才生效；不写也能吃住大小写差异（`Bash`→`bash`）与 `mcp__x__read_file` 这类命名空间前缀。模型叫了不存在的工具时，回执会列出本会话可用的工具名并给一个相似建议 | 未设置 |
 | `models.text.reasoning_effort` | 顶层 `reasoning_effort`（GLM-5.2+，thinking 开启时生效）：max/xhigh/high/medium/low/minimal/none。**`api: anthropic` 的条目改发顶层 `output_config.effort`**（Anthropic 没有 `reasoning_effort` 字段；新 Claude 要求 `thinking.type=adaptive` + `output_config.effort` 同时给，否则每个请求 400） | 未设置 |
 | `models.text.api_timeout` | **非流式**整次请求（连接+读取）总超时（秒）；流式模式改用 idle 超时；所有模型条目可覆盖，留空继承 text | 400 |
 | `models.text.api_connect_timeout` | 连接/首字节等待超时（秒） | 60 |
@@ -155,7 +156,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **24**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 24 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **25**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 25 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |

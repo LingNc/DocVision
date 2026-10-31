@@ -3244,3 +3244,21 @@ T260
 **验证**：`internal/sessionview/t272_scan_cache_test.go` 两例——`ScanWith` 第二遍用"同长度、同 mtime 的垃圾内容"替换转录后消息数仍为 2（证明没重读）；`newViewerServer` 的首轮 `scanAll()` 同样命中缓存，且全部命中时缓存文件 mtime 不变（证明没白写）。`./internal/sessionview`、`./cmd/docvision` 全绿。
 
 **文档**：`docs/commands.md` 会话预览一节补一段（缓存文件位置、失效判据、首次扫描要几分钟、删了会重算、轮询不写盘）；AGENTS.md 无对应描述，未改。
+
+## 第七十二批（2026-11-01）：T273——工具名兼容（大小写归一 + 模型级 tool_aliases + 自解释的 unknown 回执）
+
+用户看 haiku 跑的某个子章节会话："这个会话感觉他调用的工具存在一些问题？你看 … 下面的，有很大的问题，我的工具是否应该兼容一下大小写不敏感？作为一个设置项？在这个作为某个模型下面启用？不然他用不了这个"。
+
+**现场**：转录里的调用名是另一套 agent 的工具面——`Bash {"command":"ls -la /work /project /input"}`、`Read {"file_path":"/input/chapter.md"}`、`Grep {"pattern":".","path":"project:"}`、`ToolSearch {"query":"select:Read,Write,Bash"}`、`edit_file`。本会话声明的是 `read_file`/`write_file`/`bash`/`grep`/`compile`/`view_pdf`/`submit`…，`executeTool` 又是严格字符串相等，于是每个调用都拿到一句 `TOOL ERROR: unknown tool Bash`，模型换个名字再猜，几轮之后整章卡死。注意 `Grep` 的 `path` 写的是 `project:`——说明我们的挂载名它知道，只是工具名来自别处（网关/中转站把另一套 harness 的工具清单塞进了请求）。
+
+**改法**：`executeTool` 改成先 `resolveTool`：
+1. 精确名（含 `mcp__x__read_file`、`tools/read_file` 取尾段的候选）；
+2. `s.modelCfg.ToolAliases`（新配置键 `models.<条目>.tool_aliases`，`{Read: read_file}`）：键与值都过 `normalizedToolName`（小写、去掉 `_- . 空格`），值必须真在本会话的工具里，指向不存在的工具就继续往下找（不静默吞调用）；
+3. 归一化后的**唯一**匹配（撞两个就不猜）。
+找不到时的回执升级为 `TOOL ERROR: unknown tool X（想找的可能是 read_file）；本会话可用的工具：bash, compile, …`——相似建议用归一化前缀包含或 Levenshtein ≤2，宁缺勿滥（`ToolSearch` 不会瞎建议）。
+
+配置侧：`ModelConfig.ToolAliases` + `ResolveModel` 的整块零值继承（继承的是拷贝，改条目不会改到 `models.text`）、`extends` 走既有的 map 深合并；`CurrentConfigVersion` 24→25，两份模板与 README、`docs/config.md` 同步；模板的 claude 示例里给出 `Read: read_file` / `Edit: write_file` 两行注释。
+
+**验证**：`internal/session/t273_tool_alias_test.go`——11 条名字解析用例（精确/`Bash`/全大写 `SUBMIT`/`read-file`/`read file`/`mcp__docvision__grep`/别名键大小写/别名值大小写/别名指向不存在工具/`ToolSearch`）、有歧义不猜（`read_file` 与 `readfile2` 并存时精确名仍命中）、回执含全部工具名与 `Read → read_file` 建议且无相似时不建议、`BASH` 真能执行；`internal/config/t273_tool_aliases_test.go`——继承整张表 + 拷贝语义。`./internal/session`、`./internal/config` 全绿。
+
+**文档**：`docs/config.md` 新增 `models.text.tool_aliases` 行与 `config_version` 25；`docs/sessions.md` 模型注册表字段表补 `tool_aliases`；AGENTS.md 会话基础设施条与 `docs/agent-notes/session-infra.md` 同步一句现状；两份模板补注释示例。
