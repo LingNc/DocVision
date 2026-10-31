@@ -3220,3 +3220,13 @@ T260
 **验证**：`anthropic_stream_test.go` 三例——事件流全通道（思考/文本/工具分片/usage 105+42/缓存 80/hook 有回调）、网关忽略 `stream:true` 回整段 JSON 仍能解析、`thinking: {type: adaptive}` + `reasoning_effort: high` → 请求体带 `output_config.effort=high` 且不含 `reasoning_effort`、`request_body` 里 `output_config.format` 未被覆盖；`TestAnthropicEndToEnd` 显式钉 `stream: false` 继续覆盖非流式翻译；`./internal/session`、`./internal/config` 绿（latex 两条既有失败照旧：`compare_figure` 门禁那个测试、宿主 python）。
 
 **文档**：`docs/config.md`（`models.text.api`、`thinking`、`reasoning_effort` 三行）、`docs/sessions.md`（模型注册表一行）、`go/internal/config/default.yaml` 与 `config.example.yaml` 的 `api:`/`reasoning_effort:` 注释同步；AGENTS.md 无对应描述，未改。
+
+## 第七十批（2026-11-01）：T271——配置模板补一段能照抄的 Anthropic（Claude）示例
+
+用户问："这个 anthropic 的那个标准的 yaml 中有没有展示这个 anthropic 的 api 怎么配置的？"——答：没有。两份模板里 `api:` 那行只有键注释（`openai（默认）| anthropic | responses`），`gateway-b` 是 OpenAI 兼容网关的例子，谁要换 Claude 都得自己把 `api`/`base_url`（要指到 `/v1`）/`thinking: {type: adaptive}`/effort 四件事拼起来，漏一件就是 T270 那个 400。
+
+**改法**：`go/internal/config/default.yaml` 与 `config.example.yaml` 的 models 段（`gateway-b` 之后、`heavy` 之前）各插一段**注释掉**的 `claude:` 示例——`api: anthropic`、`base_url: .../v1`、`max_tokens: 8192`、`api_timeout: 900`（思考型模型单轮久）、`thinking: {type: adaptive}`、`reasoning_effort: high`（注释里写明它翻译成顶层 `output_config.effort`、老式 `{type: enabled, budget_tokens: N}` 会 400）。注释掉而非放开：模板要能被直接当配置用，一条带占位 key 的活条目只会添乱。
+
+`docs/config.md` 在 `## extends：命名基座` 前新增「线路协议示例：Anthropic（Claude）」一节：最小可用 YAML + 三条易错点（adaptive 与 effort 必须同时在场、不要用 `budget_tokens`、`extends` OpenAI 基座时 `base_url`/`api_key`/`api` 三项都要覆盖）。
+
+**验证**：`TestConfigTemplateKeyParity` 通过（注释不参与键面）；`./internal/config` 全绿；`diff` 两份模板的 models 段为空。无代码改动，`config_version` 不动（没有新增键）。

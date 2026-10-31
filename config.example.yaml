@@ -414,6 +414,23 @@ models:
       output: 8
       currency: "¥"
 
+  # ---- Anthropic 线路（Claude 及兼容网关）：api: anthropic、base_url 指到 /v1 ----
+  # 新版 Claude 只认自适应思考，且必须同时给 output_config.effort——thinking 写
+  # {type: adaptive}，effort 由 reasoning_effort 翻译过去（anthropic 条目改发顶层
+  # output_config.effort，请求体里不会出现 reasoning_effort）。老式
+  # {type: enabled, budget_tokens: N} 会被服务端 400 拒掉（requires adaptive thinking）。
+  # 同一个 Claude 想让不同角色用不同深度，就按 extends 复写 reasoning_effort 一行。
+  # claude:
+  #   api: anthropic
+  #   base_url: "https://your-anthropic-proxy.example/v1"
+  #   api_key: "sk-ant-YOUR-KEY-HERE"
+  #   model: "claude-haiku-5-5"
+  #   max_tokens: 8192
+  #   api_timeout: 900            # 思考型模型单轮可能很久，别用默认的 400s
+  #   thinking:
+  #     type: adaptive            # 新版 Claude 只认 adaptive
+  #   reasoning_effort: high      # → 顶层 output_config.effort（low | medium | high）
+
   # ---- 同一模型不同参数：复用基座，只写差异键 ----
   heavy:                        # 重活（作图/转换）：基座 B + 更长的超时
     extends: "gateway-b"

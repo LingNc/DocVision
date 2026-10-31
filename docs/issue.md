@@ -2334,3 +2334,7 @@ user 轮
 [X][ ] T270. `api: anthropic` 的条目被强制 `stream=false`（思考型模型整段静默、实时快照不可用），且新版 Claude 直接 400：`requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort`——我们只透传 `thinking`，从不发 `output_config.effort`（Anthropic 没有 OpenAI 的 `reasoning_effort` 字段）。
   改：新增 `internal/session/anthropic_stream.go`（`message_start`/`content_block_start|delta|stop`/`message_delta`/`message_stop` 拼回同一条 ChatMessage：text、thinking、`input_json_delta` 工具入参分片、usage、stop_reason 全翻译，150ms 节流的实时快照与 OpenAI 那条流同口径；网关回 JSON 或 4xx 不认流式时退回整段解析）；`buildAnthropicBody` 按 `payload.Stream` 带 `stream:true`，并把 `reasoning_effort` 翻译成顶层 `output_config.effort`（与 `request_body` 里已有的 `output_config` 合并，不覆盖其它键）。
   验证：`anthropic_stream_test.go` 三例（事件流全通道 + 缓存用量 + 快照 hook；网关忽略 `stream:true` 回 JSON 的兜底；`thinking: adaptive` 与 `output_config.effort` 同时在场且不带 `reasoning_effort`）；既有的 `TestAnthropicEndToEnd` 钉住非流式路径不变；`./internal/session`、`./internal/config` 全绿。
+
+[X][ ] T271. 配置模板里只有 `api: openai` 那一行的键注释，没有一条能照抄的 Anthropic 条目——换 Claude 得自己拼 `api: anthropic`、指到 `/v1` 的 `base_url`、`thinking: {type: adaptive}` 与 effort，漏一项就是 400。
+  改：`go/internal/config/default.yaml` 与 `config.example.yaml` 的 models 段各补一段注释掉的可复制示例（api / base_url / max_tokens / api_timeout / thinking.adaptive / reasoning_effort→output_config.effort）；`docs/config.md` 增「线路协议示例：Anthropic（Claude）」一节，列出三条会 400 的易错点。
+  验证：`TestConfigTemplateKeyParity` 通过（注释不进键面）、`./internal/config` 全绿；两模板的 models 段仍逐字一致（`diff` 为空）。

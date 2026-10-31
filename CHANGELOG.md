@@ -10,6 +10,9 @@
 - **`compare_figure` 支持细粒度复核**：可指定工作区内 PDF、gray/R/G/B 或组合通道、百分比裁剪、缩放和 `worst_region` 最差象限输出；提示词要求每次绘图会话至少调用一次，并将 20%/50% 作为非硬门槛的目标参考。
 ：退化的 dedupe 复查页现在直接把每张图的状态（已完成／退回原图／失败／已分类待处理／未处理，一律取 `progress_items` 的 `status`）、判定记录（那条 json）与转换产物（TikZ/PDF/PNG/SVG）挂到缩略图下面；并单独列出「等待转换的原图」与「退回原图的（已收尾但没画出成品）」两段（后者逐张写明退回原因——工具链不可用／TikZ 没通过校验／接口会话错误，`progress_items` 新字段 `fallback_reason`），原图与判定记录都在，核对时不用再从几百张平铺的缩略图里找；真画过的图还给出「LaTeX 源」与「会话」两个入口。**核对页不再只是快照**：从会话预览页打开时按磁盘现状现渲染（分组取 `groups.json`、状态取 `progress_items`、成品取 `figures/`），每张图左原图右成品并排、图注直出类别/状态/代表图跟随关系与退回原因，链接与成品只在文件真存在时出现；磁盘上那份 `review.html` 保留为没有分组结论时的退路。`process` 收尾还会报一句"退回原图共 N 张"，明细指向核对页。
 - **矢量图会话提供可选 `compare_figure` 视觉证据工具**：在成功编译后对原图与当前 PDF 预览做 Go 原生软墨迹对齐比较并返回 overlay，结果只供模型判断，不改变原有 submit 流程。
+### Changed
+- **配置模板补上 Anthropic（Claude）示例（T271）**：以前只有 `api:` 那一行的键注释，换 Claude 得自己拼 `api: anthropic`、指到 `/v1` 的 `base_url`、`thinking: {type: adaptive}` 与 effort，漏一项就被 400 拒掉。现在两份配置模板的 models 段各有一段可照抄的注释示例（含 `output_config.effort` 的来历与"不要再用 budget_tokens"的提醒），`docs/config.md` 另有一节完整示例与三条易错点。
+
 ### Fixed
 - **新版 Claude 的思考开关与 effort 适配（T270）**：沿用 `thinking: {type: enabled, budget_tokens: N}` 或只写 `thinking` 不给 effort，会被服务端 400 拒掉（`requires adaptive thinking; use thinking.type=adaptive and output_config.effort`）。现在 `models.<条目>.thinking` 写 `{type: adaptive}` 即原样发送自适应思考，`reasoning_effort` 在 `api: anthropic` 的条目上翻译成顶层 `output_config.effort`（与 `request_body` 里已有的 `output_config` 合并），请求体里不再出现 Anthropic 不认的 `reasoning_effort`。
 - **复盘截断不再把「申请子会话」那一条裁掉（T269）**：切口正落在工具调用上时原来会把这一轮连同回执一起丢掉，续跑回放的历史里"我拆过章"凭空消失。现在只要这一轮的调用都拿到了回执，切口就后移到回执之后；凑不齐回执保持原样。

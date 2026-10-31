@@ -196,6 +196,35 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `fixed` | 每张固定 `tokens` 个，不看尺寸（按张计费的端点） | `tokens` |
 | `none` | 本地按 0 计（厂商数字里仍含图片 token，只是本地不预扣） | 无 |
 
+## 线路协议示例：Anthropic（Claude）
+
+`api: anthropic` 的条目走 `POST {base_url}/messages`（`base_url` 必须指到 `/v1`），
+自动带 `x-api-key` 与 `anthropic-version` 头、不发 `Authorization`。最小可用配置：
+
+```yaml
+models:
+  claude:                      # 条目名随你；latex.convert_model / checker / chapter 等角色引用它
+    api: anthropic
+    base_url: "https://your-anthropic-proxy.example/v1"
+    api_key: "sk-ant-..."
+    model: "claude-haiku-5-5"
+    max_tokens: 8192
+    stream: true               # 默认就开流式：思考阶段也有实时快照与首字耗时
+    thinking:
+      type: adaptive           # 新版 Claude 只认 adaptive（老模型仍可 enabled/disabled）
+    reasoning_effort: high     # → 顶层 output_config.effort（low | medium | high）
+```
+
+三条易错点（都会让服务端直接 400）：
+
+- **`thinking.type=adaptive` 与 `output_config.effort` 必须同时在场**：只写 thinking 或只写
+  effort，新版 Claude 会回 `requires adaptive thinking; use thinking.type=adaptive and
+  output_config.effort`。本仓库把 `reasoning_effort` 翻译成 `output_config.effort`（Anthropic
+  没有 `reasoning_effort` 字段，请求体里不会出现它）。
+- **不要沿用 `{type: enabled, budget_tokens: N}`**：那是老式扩展思考的写法，新版模型拒绝。
+- **`extends` 一个 OpenAI 基座时**，`base_url`/`api_key`/`api` 三项都得覆盖——只换 `model`
+  仍会打到 OpenAI 兼容的 `/chat/completions`。
+
 ## `extends`：命名基座
 
 `models.<条目>.extends: <另一条目名>` 让这个条目只写**差异键**，其余键取被指向的条目：
