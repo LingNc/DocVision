@@ -3262,3 +3262,15 @@ T260
 **验证**：`internal/session/t273_tool_alias_test.go`——11 条名字解析用例（精确/`Bash`/全大写 `SUBMIT`/`read-file`/`read file`/`mcp__docvision__grep`/别名键大小写/别名值大小写/别名指向不存在工具/`ToolSearch`）、有歧义不猜（`read_file` 与 `readfile2` 并存时精确名仍命中）、回执含全部工具名与 `Read → read_file` 建议且无相似时不建议、`BASH` 真能执行；`internal/config/t273_tool_aliases_test.go`——继承整张表 + 拷贝语义。`./internal/session`、`./internal/config` 全绿。
 
 **文档**：`docs/config.md` 新增 `models.text.tool_aliases` 行与 `config_version` 25；`docs/sessions.md` 模型注册表字段表补 `tool_aliases`；AGENTS.md 会话基础设施条与 `docs/agent-notes/session-infra.md` 同步一句现状；两份模板补注释示例。
+
+## 第七十三批（2026-11-01）：T274——`grep` 工具按 Go 正则跑，路径不存在不再冒充 NO MATCHES
+
+用户："我们的 grep 工具是不是有问题，你看转换 · `chapter_002_child_06` 里面他用 grep 不行用 bash 里面的 grep 就好了？"
+
+**现场**（同一份子章节转录）：`grep {"path":"project:converted","pattern":"QuestionHeading|begin\\{question\\}|chapterintro"}` → `NO MATCHES`；`grep {"path":"gaoshuqiyi.cls","pattern":"newcounter\\{question|newenvironment\\{question|workedexample|chapterintro"}` → `grep error: grep: 不匹配的 {`；`grep {"pattern":"。|，|；：", ...}` → `NO MATCHES`。三条都不是"文件里没有"，而是模式语义错位——`grep(1)` 默认 BRE：`|` 是字面量（交替失效，静默零命中）、`\{` 是区间表达式的开头（GNU grep 直接报"不匹配的 {"）。模型随后改用 `bash` 里的 `grep -E` 就正常了，说明它没写错，是工具没按自己宣传的口径跑。
+
+**改法**：`runGrep` 不再 `exec grep -rIn`，改成进程内 `regexp.Compile`：先按 **Go 正则**（工具描述与提示词一直写作 "Go regexp"），编译不过（例如模型照 ERE 写的 `\{`、未闭合括号）退回**纯文本** `strings.Contains`，两种都不报语法错；自己 `filepath.WalkDir` 遍历（跳过 `.git`/`.trash`/`node_modules`、含 NUL 的二进制、>8 MB 的文件），输出仍是 `path:line:text`（行号 1 起），命中数按 `max_matches` 截断并给 `...(N more, 收窄 pattern)`（总数真数，不留"只数到 limit"的假数字）。顺带修 `path` 不存在时被 `continue` 掉、最后回 `NO MATCHES` 的老毛病：单目标时回 `grep error: 路径不存在：project:converted（converted 的同级目录下有：chapter.md, chapters/, style/ …）`，模型一眼能改成真路径。工具描述补一句"编译不过按纯文本匹配"。
+
+**验证**：`internal/latex/t274_grep_test.go`——`question|workedexample` 命中两行（BRE 会零命中）、`。|，|；|：` 命中中文标点行、`\{question\}` 照常命中、未闭合括号退回纯文本、行号 `:3:` 对齐、无匹配返回空串；`path` 不存在时报 `grep error` + `路径不存在` + 列出 `chapter.md`/`chapters/` 且不含 `NO MATCHES`；二进制跳过、20 行命中按 5 截断出 `...(15 more, 收窄 pattern)`。`go test ./internal/...` 全绿（除既有的 `compare_figure` 门禁测试与宿主 libpython 两条）。
+
+**文档**：`docs/sessions.md` 的挂载表一节补 grep 语义（Go 正则 + 纯文本兜底 + 路径不存在报错 + 二进制/8 MB 跳过）；`docs/issue.md` T274；`CHANGELOG.md` Unreleased/Fixed。

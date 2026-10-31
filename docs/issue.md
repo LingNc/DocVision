@@ -2347,3 +2347,8 @@ user 轮
   根因：网关/中转站把别的 harness 的工具面递给了模型（`Bash` 带 `{"command":...}`、`Read` 带 `{"file_path":...}`），而 `executeTool` 是**严格字符串相等**匹配；名字对上大小写之外还整段不同时，模型没有任何线索知道本会话有什么工具。
   改：工具名解析加三级（精确 → `models.<条目>.tool_aliases` 配置别名 → 大小写/分隔符归一后的唯一匹配，`mcp__x__read_file` 取尾段），别名与归一化两边都按 `normalizeToolName` 比较、值必须真在会话里存在才生效；`unknown tool` 回执改为列出本会话全部可用工具名 + 一个相似建议（前缀包含或编辑距离 ≤2）；`config_version` 24→25，两份模板的 claude 示例里给出 `Read: read_file` / `Edit: write_file`。
   验证：`t273_tool_alias_test.go`（大小写/全大写/分隔符/命名空间前缀/别名键值大小写/别名指向不存在工具/无关名字 11 例 + 有歧义不猜 + 回执含工具清单与建议 + `BASH` 真能执行）、`t273_tool_aliases_test.go`（条目没写时继承 `models.text` 的整张表且是拷贝，写了就用自己的）；`./internal/session`、`./internal/config` 全绿。
+
+[X][ ] T274. `grep` 工具按 `grep(1)` 的 BRE 语义跑模式，与它自己声明/提示词里的 "Go regexp" 不一致：`a|b` 里的 `|` 变字面量（`QuestionHeading|begin\{question\}`、`。|，|；|：` 一律静默 `NO MATCHES`），`begin\{question\}` 又被 BRE 当成区间表达式报 `grep: 不匹配的 {`，模型只能绕去 bash 里 `grep -E`。
+  根因：`runGrep` 直接 `exec grep -rIn -e pattern`，没加 `-E`；"路径不存在"分支 `continue` 掉，最终回一句 `NO MATCHES`，把"搜错地方"伪装成"没这个串"。
+  改：改成进程内按 **Go regexp** 匹配（编译不过退回纯文本，不再报语法错），自己遍历文件树（跳过二进制、`.git`、>8 MB），命中行数与行号格式不变；`path` 不存在时回 `grep error: 路径不存在：<path>（同级目录下有：…）`；描述里补一句"编译不过按纯文本"。
+  验证：`t274_grep_test.go`——交替/中文标点交替/`\{…\}` 转义/编译不过退回纯文本/行号从 1 起/无匹配返回空、`path` 不存在报错并列出同级条目、二进制跳过与 `...(N more)` 截断；`go test ./internal/...` 除既有的 `compare_figure` 与宿主 python 两条外全绿。

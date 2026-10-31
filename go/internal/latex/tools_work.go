@@ -1,11 +1,15 @@
 package latex
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -484,7 +488,8 @@ type GrepTool struct {
 func (t *GrepTool) Name() string { return "grep" }
 
 func (t *GrepTool) Definition() map[string]any {
-	desc := "Search files for a pattern (Go regexp). path: a file, or a directory (recursive, text files only). " +
+	desc := "Search files for a pattern (Go regexp; a pattern that does not compile is matched as plain text). " +
+		"path: a file, or a directory (recursive, text files only). " +
 		"Returns matched lines with 1-based line numbers; use read_file with those lines for context."
 	if v := t.vfs(); len(v.Mounts) > 1 {
 		desc += " " + v.Describe()
@@ -571,6 +576,12 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 	for _, tg := range targets {
 		full := tg.dir
 		if !fileExists(full) {
+			// T274：路径不存在时以前直接 continue，最后回一句 "NO MATCHES"——
+			// 模型会读出"这个模式不存在"，而实际是搜错了地方。单目标就如实报错，
+			// 并把最近一层真实存在的目录内容列出来。
+			if len(targets) == 1 {
+				return session.ToolResult{Text: "grep error: " + missingPathText(rel, full)}, nil
+			}
 			continue
 		}
 		text, herr := runGrep(pattern, full, maxMatches-total)
@@ -618,25 +629,129 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 	return session.ToolResult{Text: out.String()}, nil
 }
 
-// runGrep runs grep -rIn on a file or directory and returns the raw
-// output, or an error for real failures (bad regexp, ...). "No match"
-// is not an error.
+// missingPathText 说清"搜的路径不存在"，并列出最近一层真实存在的目录里有什么
+// ——模型据此就能把 `project:converted` 改成 `project:chapters` 之类的真路径。
+func missingPathText(rel, full string) string {
+	hint := ""
+	dir := filepath.Dir(full)
+	if entries, err := os.ReadDir(dir); err == nil {
+		names := make([]string, 0, 15)
+		for _, e := range entries {
+			n := e.Name()
+			if e.IsDir() {
+				n += "/"
+			}
+			names = append(names, n)
+			if len(names) >= 15 {
+				break
+			}
+		}
+		if len(names) > 0 {
+			hint = "（" + filepath.Base(dir) + "/ 下有：" + strings.Join(names, ", ") + "）"
+		}
+	}
+	return "路径不存在：" + rel + hint
+}
+
+// grepMaxFileBytes caps one scanned file: transcripts and PDFs are not worth
+// grepping and a 200 MB blob would stall the session.
+const grepMaxFileBytes = 8 << 20
+
+// compileGrep 编译模型给的模式：先当 **Go 正则**（工具描述一直承诺的就是这个
+// 口径，模型也按它写 `a|b`、`(?:…)`、`\d`），编译不过再退成**纯文本**匹配。
+//
+// T274：以前的实现把模式直接交给 grep(1) 当 BRE——`a|b` 里的 `|` 是字面量，
+// 于是整段中文标点/多选一模式一律静默 "NO MATCHES"；`begin\{question\}` 里的
+// `\{` 被 BRE 当成区间表达式，直接报 "grep: 不匹配的 {"。模型只能绕去 bash
+// 里用 `grep -E`。同一份转录里这三种失败都出现过。
+func compileGrep(pattern string) (*regexp.Regexp, string) {
+	if re, err := regexp.Compile(pattern); err == nil {
+		return re, ""
+	}
+	return nil, pattern
+}
+
+// runGrep searches a file or a directory tree (recursive, text files only) and
+// returns "path:line:text" lines, or "" when nothing matched. Matching is done
+// in-process so the documented Go-regexp contract actually holds (and so the
+// tool works on hosts without a `grep` binary).
 func runGrep(pattern, full string, limit int) (string, error) {
 	if limit < 1 {
 		limit = 1
 	}
-	cmd := exec.Command("grep", "-rIn", "-n", "-e", pattern, "--", full)
-	out, err := cmd.CombinedOutput()
-	text := string(out)
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return "", nil
-		}
-		return "", fmt.Errorf("%s", text)
+	if !fileExists(full) {
+		return "", fmt.Errorf("搜索路径不存在：%s", filepath.Base(full))
 	}
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	if len(lines) > limit {
-		text = strings.Join(lines[:limit], "\n") + fmt.Sprintf("\n...(%d more, 收窄 pattern)", len(lines)-limit)
+	re, literal := compileGrep(pattern)
+	match := func(line string) bool {
+		if re != nil {
+			return re.MatchString(line)
+		}
+		return strings.Contains(line, literal)
+	}
+	var lines []string
+	total := 0 // 命中总数（lines 只留前 limit 条，截断提示要的是真数字）
+	visit := func(p string, info os.FileInfo) error {
+		if info.Size() > grepMaxFileBytes {
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil // 读不到的（断链、权限）当没匹配
+		}
+		head := data
+		if len(head) > 8192 {
+			head = head[:8192]
+		}
+		if bytes.IndexByte(head, 0) >= 0 {
+			return nil // 二进制
+		}
+		for i, raw := range strings.Split(string(data), "\n") {
+			line := strings.TrimSuffix(raw, "\r")
+			if !match(line) {
+				continue
+			}
+			total++
+			if len(lines) < limit {
+				lines = append(lines, fmt.Sprintf("%s:%d:%s", p, i+1, line))
+			}
+		}
+		return nil
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return "", fmt.Errorf("搜索路径不存在：%s", filepath.Base(full))
+	}
+	if info.IsDir() {
+		err = filepath.WalkDir(full, func(p string, d fs.DirEntry, werr error) error {
+			if werr != nil {
+				return nil
+			}
+			if d.IsDir() {
+				switch d.Name() {
+				case ".git", ".trash", "node_modules":
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			fi, ferr := d.Info()
+			if ferr != nil {
+				return nil
+			}
+			return visit(p, fi)
+		})
+		if err != nil && !errors.Is(err, filepath.SkipAll) {
+			return "", err
+		}
+	} else if err := visit(full, info); err != nil {
+		return "", err
+	}
+	if total == 0 {
+		return "", nil
+	}
+	text := strings.Join(lines, "\n")
+	if more := total - len(lines); more > 0 {
+		text += fmt.Sprintf("\n...(%d more, 收窄 pattern)", more)
 	}
 	return text, nil
 }
