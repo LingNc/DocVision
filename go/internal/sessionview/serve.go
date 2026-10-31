@@ -293,7 +293,11 @@ func newViewerServer(root string, extras []ScanExtra, rc ...RenderConfig) *viewe
 			break
 		}
 	}
-	v := &viewerServer{root: root, extra: extraDirs, scan: &scanner{root: root, extras: ex}, img2textRoot: img2textRoot}
+	// T272：长驻 scanner 也从磁盘索引缓存起步——否则第一个 /api/index 请求
+	// 仍要把几千条转录从上到下读一遍，启动慢一模一样。
+	sc := &scanner{root: root, extras: ex}
+	sc.loadCountCache(root)
+	v := &viewerServer{root: root, extra: extraDirs, scan: sc, img2textRoot: img2textRoot}
 	if len(rc) > 0 {
 		v.mermaidCmd = rc[0].Command
 		v.mermaidTimeout = rc[0].Timeout
@@ -379,8 +383,18 @@ type indexResponse struct {
 	RetryRoles map[string]map[string]string `json:"retryRoles,omitempty"`
 }
 
-func (v *viewerServer) serveIndex(w http.ResponseWriter) {
+// scanAll 扫一轮并在必要时把索引缓存落盘（T272）。预览页每 2 秒轮询，
+// 全部命中缓存时这一步不写盘。
+func (v *viewerServer) scanAll() ([]SessionInfo, error) {
 	sessions, err := v.scan.scan()
+	if err == nil {
+		v.scan.saveCountCacheIfDirty(v.scan.root)
+	}
+	return sessions, err
+}
+
+func (v *viewerServer) serveIndex(w http.ResponseWriter) {
+	sessions, err := v.scanAll()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -428,7 +442,7 @@ func (v *viewerServer) serveSession(w http.ResponseWriter, r *http.Request) {
 	}
 	// The id must name a session the scan actually found: that both rejects
 	// traversal and keeps the endpoint from turning into a general file reader.
-	sessions, err := v.scan.scan()
+	sessions, err := v.scanAll()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

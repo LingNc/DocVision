@@ -2338,3 +2338,7 @@ user 轮
 [X][ ] T271. 配置模板里只有 `api: openai` 那一行的键注释，没有一条能照抄的 Anthropic 条目——换 Claude 得自己拼 `api: anthropic`、指到 `/v1` 的 `base_url`、`thinking: {type: adaptive}` 与 effort，漏一项就是 400。
   改：`go/internal/config/default.yaml` 与 `config.example.yaml` 的 models 段各补一段注释掉的可复制示例（api / base_url / max_tokens / api_timeout / thinking.adaptive / reasoning_effort→output_config.effort）；`docs/config.md` 增「线路协议示例：Anthropic（Claude）」一节，列出三条会 400 的易错点。
   验证：`TestConfigTemplateKeyParity` 通过（注释不进键面）、`./internal/config` 全绿；两模板的 models 段仍逐字一致（`diff` 为空）。
+
+[X][ ] T272. `docvision sessions --serve` 启动仍然极慢（用户："还是巨慢"，磁盘缓存早就有了）——索引缓存只接在 `Scan` 上，而 `sessions` 命令与 `--serve` 走的 `ScanWith` 从不读也不写缓存；`--serve` 启动时还先白扫一遍（结果丢弃）再交给服务重新扫一次。
+  改：`ScanWith` 与 `Scan` 同源（先 load、扫完按需 save）；`saveCountCacheIfDirty` 只在真的重算过转录时落盘、并节流 30 秒（预览页 2 秒轮询不再白写）；`newViewerServer` 的长驻 scanner 也先 load 缓存，`/api/index` 与 `/api/session` 共用 `scanAll()` 按需回写；`sessions --serve` 不再在启动时预扫。
+  验证：实测同一项目（6459 条转录、9.2 GB）冷扫 173.4 秒 → 命中缓存 0.77 秒；`t272_scan_cache_test.go` 两例（`ScanWith` 第二遍用"同长度同 mtime 的垃圾内容"钉住不重读；预览服务首轮同样命中缓存，且全部命中时不重写缓存文件）；`./internal/sessionview`、`./cmd/docvision` 全绿。

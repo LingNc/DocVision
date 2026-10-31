@@ -995,13 +995,21 @@ func archivedRel(rel string) bool {
 func Scan(root string) ([]SessionInfo, error) {
 	sc := &scanner{root: root}
 	sc.loadCountCache(root) // T253：命中缓存的转录不再重读
-	defer sc.saveCountCache(root)
+	defer sc.saveCountCacheIfDirty(root)
 	return sc.scan()
 }
 
 // ScanWith scans root plus every extra directory (T37 img2text sessions).
+//
+// T272：这条路以前完全不碰磁盘索引缓存（只有 Scan 会读写），而 `sessions`
+// 命令与 `--serve` 走的都是它——一本 5000 多条转录的书每次启动都要把每个文件
+// 从头读一遍，缓存文件存在也等于没有。现在两条路同源：先读缓存，只在真的重算
+// 过转录时才把结果写回去。
 func ScanWith(root string, extras []ScanExtra) ([]SessionInfo, error) {
-	return (&scanner{root: root, extras: extras}).scan()
+	sc := &scanner{root: root, extras: extras}
+	sc.loadCountCache(root)
+	defer sc.saveCountCacheIfDirty(root)
+	return sc.scan()
 }
 
 // scanner caches per-file message counts between scans so the live server's
@@ -1020,6 +1028,11 @@ type scanner struct {
 	// 两个请求撞在一起时以前会崩在 concurrent map writes。
 	scanMu sync.Mutex
 	counts map[string]countEntry
+	// dirty 记这一轮有没有真的重读过转录（T272）：全部命中缓存时没必要把
+	// 几千条索引重新编码写盘，预览页每 2 秒轮询一次会白写很多遍。
+	dirty bool
+	// lastSave 给落盘节流用：正在跑的书每秒都有转录在长，但没必要每秒重写。
+	lastSave time.Time
 	// ws caches "is this directory a project workspace" between polls.
 	ws map[string]bool
 }
@@ -1115,6 +1128,23 @@ func (s *scanner) saveCountCache(root string) {
 		return
 	}
 	_ = os.Rename(tmp, path)
+}
+
+// saveCountCacheIfDirty 只在真的重算过转录时才落盘，并节流到 30 秒一次
+// （T272）：命中缓存的一轮扫描不该产生任何写盘，长跑的书也不该每秒重写索引。
+// 还没到点就保持 dirty，交给下一轮扫描再写。
+func (s *scanner) saveCountCacheIfDirty(root string) {
+	s.mu.Lock()
+	pending := s.dirty
+	due := pending && (s.lastSave.IsZero() || time.Since(s.lastSave) >= 30*time.Second)
+	if due {
+		s.dirty = false
+		s.lastSave = time.Now()
+	}
+	s.mu.Unlock()
+	if due {
+		s.saveCountCache(root)
+	}
 }
 
 // transcriptStat is what one streaming pass over a transcript yields: the
@@ -1472,6 +1502,7 @@ func (s *scanner) fileStat(p string, size int64, modTime time.Time) transcriptSt
 		s.counts = map[string]countEntry{}
 	}
 	s.counts[p] = countEntry{Size: size, ModTime: modTime, Stat: stat}
+	s.dirty = true
 	s.mu.Unlock()
 	return stat
 }

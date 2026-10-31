@@ -3230,3 +3230,17 @@ T260
 `docs/config.md` 在 `## extends：命名基座` 前新增「线路协议示例：Anthropic（Claude）」一节：最小可用 YAML + 三条易错点（adaptive 与 effort 必须同时在场、不要用 `budget_tokens`、`extends` OpenAI 基座时 `base_url`/`api_key`/`api` 三项都要覆盖）。
 
 **验证**：`TestConfigTemplateKeyParity` 通过（注释不参与键面）；`./internal/config` 全绿；`diff` 两份模板的 models 段为空。无代码改动，`config_version` 不动（没有新增键）。
+
+## 第七十一批（2026-11-01）：T272——`sessions --serve` 启动慢：索引缓存根本没接在这条路上
+
+用户原话："现在启动这个 … `./docvision sessions --serve` … 还是巨慢"。这条在三批前就被问过一次（T253 加了磁盘索引缓存），所以先查"缓存到底有没有被用上"。
+
+**根因**：`.sessionview-cache.json` 只被 `sessionview.Scan` 读写，而 `Scan` 的调用点只有静态导出（`static.go`）与费用报告（`latex/cost_report.go`）；`sessions` 命令本身（`--list`／`--cost`／`--serve`）走的是 `ScanWith`，那条路**从不 load 也从不 save**。于是一本 9.2 GB、6459 条转录的项目每次启动都把每个文件从头读一遍，缓存文件躺在扫描根下（7.5 MB、10 月 27 日写的）却完全没被打开；`--serve` 更冤：它启动时先 `ScanWith` 扫一遍（结果只用于 `--list`/`--cost`，`--serve` 分支直接丢弃），随后预览服务的长驻 scanner 又从头扫一遍——最贵的活干了两遍。
+
+**改法**：① `ScanWith` 与 `Scan` 同源——`loadCountCache` + `saveCountCacheIfDirty`；② 新增 `saveCountCacheIfDirty`：`fileStat` 的缓存未命中路径置 `dirty`，只有真的重算过才落盘，并节流到 30 秒一次（预览页每 2 秒轮询一次，全部命中缓存时不该重写 7 MB 索引）；`saveCountCache` 保持原样，T253/T255 的测试还直接调它；③ `newViewerServer` 建 scanner 时就 `loadCountCache`，`/api/index` 与 `/api/session` 改走新的 `scanAll()`（扫完按需回写）；④ `cli_sessions.go`：`--serve` 且没要 `--list`/`--cost` 时不再预扫。
+
+**实测**（同一项目，仓库内构建的探针二进制，`sessions --list` 重定向到 /dev/null）：冷扫（先挪走缓存）**173.360 秒**；第二次命中缓存 **0.770 秒**。改动前 `--serve` 约等于冷扫 ×2。`--serve` 单独跑一次（临时端口、只读）：banner 立即上屏，第一个 `/api/index` **1.388 秒**、第二个 **0.548 秒**。
+
+**验证**：`internal/sessionview/t272_scan_cache_test.go` 两例——`ScanWith` 第二遍用"同长度、同 mtime 的垃圾内容"替换转录后消息数仍为 2（证明没重读）；`newViewerServer` 的首轮 `scanAll()` 同样命中缓存，且全部命中时缓存文件 mtime 不变（证明没白写）。`./internal/sessionview`、`./cmd/docvision` 全绿。
+
+**文档**：`docs/commands.md` 会话预览一节补一段（缓存文件位置、失效判据、首次扫描要几分钟、删了会重算、轮询不写盘）；AGENTS.md 无对应描述，未改。

@@ -14,6 +14,7 @@
 - **配置模板补上 Anthropic（Claude）示例（T271）**：以前只有 `api:` 那一行的键注释，换 Claude 得自己拼 `api: anthropic`、指到 `/v1` 的 `base_url`、`thinking: {type: adaptive}` 与 effort，漏一项就被 400 拒掉。现在两份配置模板的 models 段各有一段可照抄的注释示例（含 `output_config.effort` 的来历与"不要再用 budget_tokens"的提醒），`docs/config.md` 另有一节完整示例与三条易错点。
 
 ### Fixed
+- **`docvision sessions` 启动慢的真正原因修掉了（T272）**：磁盘索引缓存（`.sessionview-cache.json`）此前只接在静态导出走的那条扫描上，而 `--list`、`--serve` 走的 `ScanWith` 从不读也不写它；`--serve` 还会在启动时先白扫一遍再让服务重扫一次。现在两条路同源（先读缓存、只在真的重算过时写回，且 30 秒最多一次写盘），预览服务的长驻扫描器也从缓存起步、`--serve` 不再预扫。同一项目（6459 条转录、9.2 GB）实测：冷扫 173 秒 → 命中缓存 0.8 秒。
 - **新版 Claude 的思考开关与 effort 适配（T270）**：沿用 `thinking: {type: enabled, budget_tokens: N}` 或只写 `thinking` 不给 effort，会被服务端 400 拒掉（`requires adaptive thinking; use thinking.type=adaptive and output_config.effort`）。现在 `models.<条目>.thinking` 写 `{type: adaptive}` 即原样发送自适应思考，`reasoning_effort` 在 `api: anthropic` 的条目上翻译成顶层 `output_config.effort`（与 `request_body` 里已有的 `output_config` 合并），请求体里不再出现 Anthropic 不认的 `reasoning_effort`。
 - **复盘截断不再把「申请子会话」那一条裁掉（T269）**：切口正落在工具调用上时原来会把这一轮连同回执一起丢掉，续跑回放的历史里"我拆过章"凭空消失。现在只要这一轮的调用都拿到了回执，切口就后移到回执之后；凑不齐回执保持原样。
 - **矢量图分组认得清"最新一次"了（T268）**：clean_vector 归档后现役转录没有 `.tryN` 后缀，此前排序按「tryN 大的在前」——点开同号方块或分组父行打开的竟是归档的旧次；方块视图还一图一块把旧次整块藏掉。现在现役排最前、标签「当前」，归档次打暗标挂「旧」；方块视图回到一条转录一块的全量显示（同一张图的尝试贴在一起），并补上方块视图缺失的「更多图片／更多会话」按钮。
