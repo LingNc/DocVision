@@ -5,11 +5,13 @@
 
 ## [Unreleased]
 ### Added
+- **Anthropic 线路支持 SSE 流式**：以前 `api: anthropic` 的条目被强制 `stream=false`，思考型模型整段静默、页面也看不到进行中的字符。现在按 Anthropic 的事件模型（`message_start`/`content_block_delta`/`message_delta`/`message_stop`）把一条流拼回同一条消息——文本、思考、工具入参分片、缓存用量与 stop_reason 全部照旧翻译，实时快照与 OpenAI 线路同一口径；网关忽略 `stream:true` 或直接 4xx 时自动退回整段 JSON 解析。
 - **矢量图会话提供可选 `compare_figure` 视觉证据工具**：在成功编译后对原图与当前 PDF 预览做 Go 原生软墨迹对齐比较并返回 overlay，结果只供模型判断，不改变原有 submit 流程。
 - **`compare_figure` 支持细粒度复核**：可指定工作区内 PDF、gray/R/G/B 或组合通道、百分比裁剪、缩放和 `worst_region` 最差象限输出；提示词要求每次绘图会话至少调用一次，并将 20%/50% 作为非硬门槛的目标参考。
 ：退化的 dedupe 复查页现在直接把每张图的状态（已完成／退回原图／失败／已分类待处理／未处理，一律取 `progress_items` 的 `status`）、判定记录（那条 json）与转换产物（TikZ/PDF/PNG/SVG）挂到缩略图下面；并单独列出「等待转换的原图」与「退回原图的（已收尾但没画出成品）」两段（后者逐张写明退回原因——工具链不可用／TikZ 没通过校验／接口会话错误，`progress_items` 新字段 `fallback_reason`），原图与判定记录都在，核对时不用再从几百张平铺的缩略图里找；真画过的图还给出「LaTeX 源」与「会话」两个入口。**核对页不再只是快照**：从会话预览页打开时按磁盘现状现渲染（分组取 `groups.json`、状态取 `progress_items`、成品取 `figures/`），每张图左原图右成品并排、图注直出类别/状态/代表图跟随关系与退回原因，链接与成品只在文件真存在时出现；磁盘上那份 `review.html` 保留为没有分组结论时的退路。`process` 收尾还会报一句"退回原图共 N 张"，明细指向核对页。
 - **矢量图会话提供可选 `compare_figure` 视觉证据工具**：在成功编译后对原图与当前 PDF 预览做 Go 原生软墨迹对齐比较并返回 overlay，结果只供模型判断，不改变原有 submit 流程。
 ### Fixed
+- **新版 Claude 的思考开关与 effort 适配（T270）**：沿用 `thinking: {type: enabled, budget_tokens: N}` 或只写 `thinking` 不给 effort，会被服务端 400 拒掉（`requires adaptive thinking; use thinking.type=adaptive and output_config.effort`）。现在 `models.<条目>.thinking` 写 `{type: adaptive}` 即原样发送自适应思考，`reasoning_effort` 在 `api: anthropic` 的条目上翻译成顶层 `output_config.effort`（与 `request_body` 里已有的 `output_config` 合并），请求体里不再出现 Anthropic 不认的 `reasoning_effort`。
 - **复盘截断不再把「申请子会话」那一条裁掉（T269）**：切口正落在工具调用上时原来会把这一轮连同回执一起丢掉，续跑回放的历史里"我拆过章"凭空消失。现在只要这一轮的调用都拿到了回执，切口就后移到回执之后；凑不齐回执保持原样。
 - **矢量图分组认得清"最新一次"了（T268）**：clean_vector 归档后现役转录没有 `.tryN` 后缀，此前排序按「tryN 大的在前」——点开同号方块或分组父行打开的竟是归档的旧次；方块视图还一图一块把旧次整块藏掉。现在现役排最前、标签「当前」，归档次打暗标挂「旧」；方块视图回到一条转录一块的全量显示（同一张图的尝试贴在一起），并补上方块视图缺失的「更多图片／更多会话」按钮。
 - **单文件版 `standalone.tex` 现在真的把子章节都摊进来了（T265）**：以前只展开 `main.tex` 里 `\input{chapters/xxx.tex}` 这一层，子会话交给父会话的分片（`chapters/<章>/children/…`）和靠文档 `\input@path` 指路的 `\input{<子章>/part01.tex}` 全部原样留着——交付出来一份只有 6534 行、仍带 192 条 `\input` 的"单文件版"，离开构建树就编译不了。现在从 `main.tex` 出发递归内联：按"包含它的文件目录 → 构建树根 → `\input@path` 目录"找目标，找不到或越界的原样保留，环靠"正在内联中"判定、层数封顶 8；`assemble` 也不再预扫章节列表（终审可能重排改名，跟着 `main.tex` 走才可靠）。同一棵树上重跑：125277 行、0 条残留。

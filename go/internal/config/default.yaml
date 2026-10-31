@@ -373,7 +373,7 @@ models:
     api_stream_idle_timeout: 0  # 流式：两个数据块之间的最大间隔（秒），0 = 用 api_timeout
     api_max_retries: 3          # 通用 API 错误重试次数（4xx 客户端错误不重试）
     rate_limit_retries: 20      # 429 限流重试上限（退避封顶 60s；余额/配额类错误不走重试）
-    api: openai                 # 线路协议：openai（默认）| anthropic（Claude 及兼容网关）| responses（OpenAI Responses API，gpt-5/o 系）；anthropic 只走非流式，responses 支持流式
+    api: openai                 # 线路协议：openai（默认）| anthropic（Claude 及兼容网关）| responses（OpenAI Responses API，gpt-5/o 系）；三者都支持流式，网关不认时自动退回整段 JSON
     stream: true                # 默认流式（SSE）：长思考/长输出期间持续有进展
     thinking:                   # 思考控制：请求体**顶层**字段，不要写进 request_body.extra_body
       type: disabled            # enabled | disabled | adaptive（写 disable 这类笔误会自动纠正并告警）
@@ -407,7 +407,7 @@ models:
     stream: false               # 这个网关不支持 SSE，此条目单独关闭流式
     thinking:
       type: enabled
-    reasoning_effort: high      # max|xhigh|high|medium|low|minimal|none
+    reasoning_effort: high      # max|xhigh|high|medium|low|minimal|none（api: anthropic 时改发顶层 output_config.effort）
     price:
       input: 2
       cached: 0.2

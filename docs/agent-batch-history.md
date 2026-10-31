@@ -3208,3 +3208,15 @@ T260
 改法：新增 `extendPastToolRound(lines, keep)`，在 `trimTranscriptInPlace` 的平衡检查之后、写盘之前调用——切口那条是 `t=msg` 的工具调用、且紧跟的行（允许 meta/usage 夹层）里把它的全部回执都拿到了，就把切口后移到回执之后；中途遇到下一条 assistant 消息或类型不认识的行就原样不动。丢掉的那一段仍然进 `work/rescue/cuts/`，`dropped` 计数按后移后的切口算。
 
 验证：`internal/latex/t269_cut_keeps_tool_round_test.go` 两条（边界：带 meta 夹层的后移、缺回执不动、非调用不动、双调用只回一条不动；集成：切口落在 `request_chapter_split` 上时保留调用与回执、`dropped` = 退化段行数）。
+
+## 第六十九批（2026-11-01）：T270——Anthropic 线路补 SSE 流式 + 新版 Claude 的 thinking/effort 适配
+
+用户两个问题：① "那个 message 就是 anthropic 的那个格式是不是还不支持 SSE 流式输出?"；② "用这个 claude 的模型的话这边用现在的配置报错：`status_code=400, claude-haiku-5-5 requires adaptive thinking; omit thinking or use ***.type=adaptive and output_config.effort`"。
+
+**根因**：`client.go` 里 anthropic 分支写死 `payload.Stream = false`（P4 当时只做了非流式），所以思考型模型整段静默、`StreamHook` 实时快照在这条线路上根本不会触发；`buildAnthropicBody` 只透传 `thinking`，而 `reasoning_effort` 是 OpenAI 形状的顶层字段，Anthropic 要的是顶层 `output_config.effort`——两个条件凑不齐，新版 Claude 对每个请求都回 400。
+
+**改法**：新增 `internal/session/anthropic_stream.go`。`collectAnthropicStream` 按 Anthropic 的事件模型拼消息（`message_start` 取 input/cache 两个基数、`content_block_start` 认 text/thinking/tool_use、`content_block_delta` 分 text_delta/thinking_delta/input_json_delta、`message_delta` 取 stop_reason 与 output_tokens、`message_stop` 收尾），坏事件跳过不毁整条流，idle 看门狗与 OpenAI 那条流一致（同一份 `api_stream_idle_timeout` 语义），快照节流同为 150ms、只回传尾巴 16KB。`ChatCompletion` 的 anthropic 分支按 `payload.Stream` 走流式，`Content-Type` 不是 `event-stream` 或 4xx 命中"不支持流式"时退回 `decodeAnthropicResponse`。`buildAnthropicBody` 加 `stream:true`，并把 `c.reasoningEffort` 并进顶层 `output_config.effort`（`withOutputEffort`：已有 `output_config` 是对象就保留其它键）。
+
+**验证**：`anthropic_stream_test.go` 三例——事件流全通道（思考/文本/工具分片/usage 105+42/缓存 80/hook 有回调）、网关忽略 `stream:true` 回整段 JSON 仍能解析、`thinking: {type: adaptive}` + `reasoning_effort: high` → 请求体带 `output_config.effort=high` 且不含 `reasoning_effort`、`request_body` 里 `output_config.format` 未被覆盖；`TestAnthropicEndToEnd` 显式钉 `stream: false` 继续覆盖非流式翻译；`./internal/session`、`./internal/config` 绿（latex 两条既有失败照旧：`compare_figure` 门禁那个测试、宿主 python）。
+
+**文档**：`docs/config.md`（`models.text.api`、`thinking`、`reasoning_effort` 三行）、`docs/sessions.md`（模型注册表一行）、`go/internal/config/default.yaml` 与 `config.example.yaml` 的 `api:`/`reasoning_effort:` 注释同步；AGENTS.md 无对应描述，未改。

@@ -2330,3 +2330,7 @@ user 轮
 [X][ ] T269. 复盘的切口如果正落在一条工具调用上，会把「调用 + 回执」整轮裁掉——一章的 `request_chapter_split` 就这样丢了，「申请过子章节」在续跑回放的历史里凭空消失，页面也不再显示它拆过章（只能从 `work/rescue/cuts/` 的备份里手工补回）。
   改：`trimTranscriptInPlace` 在平衡检查之后再加一次「后移」——切口那条正好是工具调用、且紧跟的行里拿到了它的全部回执，就把切口挪到回执之后（`extendPastToolRound`）；凑不齐回执原样不动，平衡口径不变。
   验证：`t269_cut_keeps_tool_round_test.go`（调用带 meta 夹层后移、缺回执不动、非调用不动、双调用只回一条不动；原地截断保留那一轮且 `dropped` 计数正确）；latex 全量测试除既有的 `compare_figure` 门禁与宿主 python 两条外全绿。
+
+[X][ ] T270. `api: anthropic` 的条目被强制 `stream=false`（思考型模型整段静默、实时快照不可用），且新版 Claude 直接 400：`requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort`——我们只透传 `thinking`，从不发 `output_config.effort`（Anthropic 没有 OpenAI 的 `reasoning_effort` 字段）。
+  改：新增 `internal/session/anthropic_stream.go`（`message_start`/`content_block_start|delta|stop`/`message_delta`/`message_stop` 拼回同一条 ChatMessage：text、thinking、`input_json_delta` 工具入参分片、usage、stop_reason 全翻译，150ms 节流的实时快照与 OpenAI 那条流同口径；网关回 JSON 或 4xx 不认流式时退回整段解析）；`buildAnthropicBody` 按 `payload.Stream` 带 `stream:true`，并把 `reasoning_effort` 翻译成顶层 `output_config.effort`（与 `request_body` 里已有的 `output_config` 合并，不覆盖其它键）。
+  验证：`anthropic_stream_test.go` 三例（事件流全通道 + 缓存用量 + 快照 hook；网关忽略 `stream:true` 回 JSON 的兜底；`thinking: adaptive` 与 `output_config.effort` 同时在场且不带 `reasoning_effort`）；既有的 `TestAnthropicEndToEnd` 钉住非流式路径不变；`./internal/session`、`./internal/config` 全绿。

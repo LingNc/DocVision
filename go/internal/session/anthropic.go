@@ -4,7 +4,9 @@ package session
 // 条目改走 POST {base_url}/messages（base_url 约定含 /v1，如
 // https://api.anthropic.com/v1 或兼容网关的等价地址）。
 //
-// 只实现非流式：请求强制 stream=false，一次 JSON 应答。Anthropic 的
+// 两条路都实现：非流式（stream=false，一次 JSON 应答）与 SSE 流式
+// （stream=true，见 anthropic_stream.go；T270 之前流式被强制关掉，模型
+// 一思考就是长时间静默，转录里也看不到任何进行中的内容）。Anthropic 的
 // 应答是 content block 数组（text / thinking / tool_use），这里翻译回
 // 内部的 ChatMessage（Content / ReasoningContent / ToolCalls），用量
 // 映射进 Usage——cache_read_input_tokens 归入 PromptTokensDetails.
@@ -30,6 +32,9 @@ func (c *Client) buildAnthropicBody(payload *ChatRequest) ([]byte, error) {
 	body := map[string]any{
 		"model":      c.model,
 		"max_tokens": payload.MaxTokens,
+	}
+	if payload.Stream {
+		body["stream"] = true
 	}
 	if payload.Temperature > 0 {
 		body["temperature"] = payload.Temperature
@@ -94,15 +99,46 @@ func (c *Client) buildAnthropicBody(payload *ChatRequest) ([]byte, error) {
 		}
 	}
 	if c.thinking != nil {
-		// GLM/Qwen 风格 thinking 配置原样透传（Anthropic 兼容网关通常
-		// 自己认 thinking:{type:enabled,budget_tokens:N}）；非 thinking
-		// 键（如 clear_thinking）由网关忽略。
+		// thinking 原样透传：Anthropic 新模型要求的自适应思考写成
+		// `thinking: {type: adaptive}`（config 的 models.<条目>.thinking），
+		// 老式的 {type: enabled, budget_tokens: N} 也会照发——是否接受由
+		// 服务端判断，非 thinking 键（如 clear_thinking）由网关忽略。
 		raw, err = injectRequestBody(raw, map[string]any{"thinking": c.thinking})
 		if err != nil {
 			return nil, err
 		}
 	}
+	// T270：Anthropic 没有 OpenAI 的 reasoning_effort 字段，同一种"想多深"
+	// 用顶层 output_config.effort 表达（新 Claude 要求在 thinking.type=adaptive
+	// 之外显式给 effort，否则每个请求都 400）。
+	//
+	// 现场报错：`claude-… requires adaptive thinking; omit thinking or use
+	// thinking.type=adaptive and output_config.effort`——只写 thinking 不写
+	// effort，或者沿用 GLM 的 {type: enabled, budget_tokens: N}，都会被拒。
+	if effort := strings.TrimSpace(c.reasoningEffort); effort != "" {
+		merged, merr := withOutputEffort(raw, effort)
+		if merr != nil {
+			return nil, merr
+		}
+		raw = merged
+	}
 	return raw, nil
+}
+
+// withOutputEffort 把 effort 并进顶层 output_config（保留 request_body 里
+// 已有的其它键，例如 output_config.format）；output_config 不是对象时整键替换。
+func withOutputEffort(raw []byte, effort string) ([]byte, error) {
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, fmt.Errorf("decode for output_config: %w", err)
+	}
+	cfg, _ := body["output_config"].(map[string]any)
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	cfg["effort"] = effort
+	body["output_config"] = cfg
+	return json.Marshal(body)
 }
 
 // anthropicMessage converts one internal message to Anthropic wire

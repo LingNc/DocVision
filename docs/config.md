@@ -69,13 +69,13 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.dedupe` | 随附模板的独立去重模型条目，可用 extends 指向 text 或自行指定视觉模型 | 未设置（模板继承 text） |
 | `models.rescue` | 复盘会话（未提交收尾的复盘，P58）的模型条目；模板里就写在 `models.checker` 下面、`extends: checker`，想用更便宜的模型复盘就改这一条，或把 `latex.rescue.model` 指到别的条目。**会话限制不写在这里**（上下文/轮次/输出预算在 `latex.sessions.rescue`） | 模板预置（`extends: checker`） |
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking），原样合并到请求体顶层 | 见示例 |
-| `models.text.api` | 线路协议：`openai`（默认，OpenAI 兼容 `/chat/completions`）、`anthropic`（Anthropic Messages API，`base_url` 指到 `/v1`，自动带 `x-api-key`/`anthropic-version` 头）或 `responses`（OpenAI Responses API，`/v1/responses`，gpt-5/o 系；固定 `store:false` 全量回传，加密思考链请求 `reasoning.encrypted_content` 回放——**加密思考约半小时级有效期**，长间隔续跑可能失效）。`anthropic` **只走非流式**，`responses` 与非流式同款解码但支持 SSE（`response.output_text.delta` 推进实时快照、`response.completed` 收账，网关忽略 `stream:true` 时自动兜底解析整段 JSON）；三者都把应答的缓存读计入命中率、stop_reason 翻译为 finish_reason | `openai` |
+| `models.text.api` | 线路协议：`openai`（默认，OpenAI 兼容 `/chat/completions`）、`anthropic`（Anthropic Messages API，`base_url` 指到 `/v1`，自动带 `x-api-key`/`anthropic-version` 头）或 `responses`（OpenAI Responses API，`/v1/responses`，gpt-5/o 系；固定 `store:false` 全量回传，加密思考链请求 `reasoning.encrypted_content` 回放——**加密思考约半小时级有效期**，长间隔续跑可能失效）。`anthropic` 与非流式同款解码、同样支持 SSE（`message_start`/`content_block_delta`/`message_delta` 推进实时快照，网关忽略 `stream:true` 时自动兜底解析整段 JSON），`responses` 与非流式同款解码但支持 SSE（`response.output_text.delta` 推进实时快照、`response.completed` 收账，网关忽略 `stream:true` 时自动兜底解析整段 JSON）；三者都把应答的缓存读计入命中率、stop_reason 翻译为 finish_reason | `openai` |
 | `options.log_level` | 日志等级：info / debug / trace（debug 记请求响应摘要与最终内容，trace 再加流式分片） | info |
 | `models.text.stream` | 是否流式接收（SSE）；不写即 true。厂商不支持时自动回退一次非流式 | true |
 | `models.text.api_stream_idle_timeout` | 流式模式下两个数据块之间的最大间隔（秒），超时判定卡住；0 取 `api_timeout` | 0 |
-| `models.text.thinking` | 顶层 `thinking` 对象：`type` 取 `enabled`/`disabled`/`adaptive`（GLM-4.5+/DeepSeek/Qwen）。**不要放进 `extra_body`**；非法取值启动即报错（disable/enable 等笔误自动纠正并告警） | 未设置 |
+| `models.text.thinking` | 顶层 `thinking` 对象：`type` 取 `enabled`/`disabled`/`adaptive`（GLM-4.5+/DeepSeek/Qwen；**Anthropic 新 Claude 只认 `adaptive`**——沿用 `{type: enabled, budget_tokens: N}` 会被服务端 400 拒掉）。**不要放进 `extra_body`**；非法取值启动即报错（disable/enable 等笔误自动纠正并告警） | 未设置 |
 | `models.<name>.thinking.type` | 同上；写错会让该模型**每一次请求**都被服务端拒掉（现场一次 `type: disable` 让 8/8 张图只保留原图） | 未设置 |
-| `models.text.reasoning_effort` | 顶层 `reasoning_effort`（GLM-5.2+，thinking 开启时生效）：max/xhigh/high/medium/low/minimal/none | 未设置 |
+| `models.text.reasoning_effort` | 顶层 `reasoning_effort`（GLM-5.2+，thinking 开启时生效）：max/xhigh/high/medium/low/minimal/none。**`api: anthropic` 的条目改发顶层 `output_config.effort`**（Anthropic 没有 `reasoning_effort` 字段；新 Claude 要求 `thinking.type=adaptive` + `output_config.effort` 同时给，否则每个请求 400） | 未设置 |
 | `models.text.api_timeout` | **非流式**整次请求（连接+读取）总超时（秒）；流式模式改用 idle 超时；所有模型条目可覆盖，留空继承 text | 400 |
 | `models.text.api_connect_timeout` | 连接/首字节等待超时（秒） | 60 |
 | `models.text.api_max_retries` | 通用 API 错误（5xx 等 transient）重试上限；**4xx 客户端错误不重试**（400 请求体不合法 / 401 密钥 / 403 权限 / 404 模型名 / 422 参数），一次即报错，408 与 429 走各自通道 | 3 |
