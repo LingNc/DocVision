@@ -180,11 +180,17 @@ func (r *Runner) runChapterCheck(proj, base, chapPath, texPath, partsPath string
 	})
 	if fileExists(filepath.Join(view, base+".pdf")) {
 		userText += "\n\nThe compiled PDF of this LaTeX is check:" + base + ".pdf — open its pages with view_pdf to see what the page actually looks like (floats, table splits, figure placement)."
+	} else {
+		// T277：有些轮次（手动「重新核对」、排队重核、产物在但没编译记录）确实
+		// 没有产物页可看。不说清楚，模型就会照着历史或直觉去找
+		// `check:<章>.pdf`，拿一串"文件不存在"把自己拖到退化。
+		userText += "\n\nNo compiled PDF is attached to this round — there is no check:" + base +
+			".pdf to open. Judge against the markdown, the .tex/parts and the book's original pages (source:<part>.pdf)."
 	}
 	if r.pdfView != nil && r.pdfView.total > 0 {
 		userText += "\n\nThe book's original pages are readable as source:<part>.pdf (view_pdf), and list_source_pages / doc_search locate them. When the markdown is unreadable, or the .tex follows the page rather than the markdown text, judge against the page."
 	}
-	userText += checkerClaimNote(view)
+	userText += checkerClaimNote(view, base)
 	if r.cfg.Latex.RemoveWatermark {
 		userText += "\n\nWatermark note: if watermark-like content (institution marks, faint background text) is absent from the .tex, that is CORRECT — watermark removal is enabled. Do not report it as missing content."
 	}
@@ -622,6 +628,22 @@ func ensureCheckerView(proj, base, chapPath, texPath, partsPath string) string {
 // 不在 `<proj>/chapters/` 下，而在 `<节点>/../input/chapter.md`，按 chapPath 往上
 // 两级猜项目根会把子章节猜成 `_subdivision/child_02`，于是项目级 `figures|images`
 // 一个都挂不上（T186 的"插图被漏掉"就这样在子章节一侧继续发生）。
+// linkCopy 把 src（文件或目录）**复制**到 dst。核对视图里凡是指向临时工作区
+// （`work/temp/...`）的条目都走它：软链看着省事，但那些目录下一轮就被清掉，
+// 视图随即变成一堆断链（T277 的真实故障：核对会话报 `check:<章>.pdf` 与
+// `check:<章>.tex` 都不存在）。
+func linkCopy(src, dst string) {
+	st, err := os.Stat(src)
+	if err != nil {
+		return
+	}
+	if st.IsDir() {
+		_ = copyDir(src, dst)
+		return
+	}
+	_ = copyFile(src, dst)
+}
+
 func ensureCheckerViewAt(proj, dir, base, chapPath, texPath, partsPath string) string {
 	if dir == "" || base == "" {
 		return ""
@@ -639,7 +661,12 @@ func ensureCheckerViewAt(proj, dir, base, chapPath, texPath, partsPath string) s
 		}
 	}
 	link(chapPath, base+".md")
-	link(texPath, base+".tex")
+	// T277：**提交过来的产物一律复制进视图**，不挂软链。产物在细分父章节里落在
+	// `integrated-stage/`（下一轮开始就 `RemoveAll`），核对视图却活得更久：软链
+	// 一失效，会话再去读 `check:<章>.tex` / `check:<章>/…` 就是"文件不存在"，
+	// 而错误回执里列出来的还是那几个名字（readdir 看得见断链），模型只能反复
+	// 重试到退化。核对视图本来是一次的快照，复制几百 KB 换"打开就是当时那份"。
+	linkCopy(texPath, filepath.Join(dir, base+".tex"))
 	// 章节目录要按**它自己的布局**出现，而不是被改名成 parts/。
 	//
 	// 两种提交约定并存：普通章节把分片直接交在 `<章>/` 下（tex 写
@@ -659,13 +686,7 @@ func ensureCheckerViewAt(proj, dir, base, chapPath, texPath, partsPath string) s
 					continue
 				}
 				src := filepath.Join(partsPath, name)
-				if err := linkAbs(src, dst); err != nil {
-					if e.IsDir() {
-						_ = copyDir(src, dst)
-					} else {
-						_ = copyFile(src, dst)
-					}
-				}
+				linkCopy(src, dst) // T277：同上，产物侧的条目一律复制
 			}
 		}
 		// 整目录再挂两份：`<章>/`（提交布局里的 `\input{<章>/…}`）与
@@ -676,9 +697,7 @@ func ensureCheckerViewAt(proj, dir, base, chapPath, texPath, partsPath string) s
 			if fileExists(dst) {
 				continue
 			}
-			if err := linkAbs(partsPath, dst); err != nil {
-				_ = copyDir(partsPath, dst)
-			}
+			linkCopy(partsPath, dst)
 		}
 	} else if err := os.MkdirAll(filepath.Join(dir, "parts"), 0o755); err != nil {
 		return ""
@@ -731,7 +750,7 @@ func linkCheckerAssets(dir, proj string) {
 // checkerClaimNote 只点名真实存在的"说法"文件（T183）：以前只要 report.md 在就
 // 顺带说 check:notes.md 也在，模型照着去读、白花一次工具调用（读不到还要再想
 // 一遍"这个文件为什么没有"）。
-func checkerClaimNote(view string) string {
+func checkerClaimNote(view, base string) string {
 	var claims []string
 	if fileExists(filepath.Join(view, "report.md")) {
 		claims = append(claims, "check:report.md (the converter's own report)")
@@ -742,5 +761,12 @@ func checkerClaimNote(view string) string {
 	if len(claims) == 0 {
 		return ""
 	}
-	return "\n\n" + strings.Join(claims, " and ") + " — CLAIMS to verify against the page and this PDF, never facts."
+	// T277：没挂 PDF 的那几轮（重核路径以前就是这样）提示词里仍然写着
+	// "verify against the page and this PDF"，模型于是去找一个根本不存在的
+	// `check:<章>.pdf`，一圈圈重试到退化。现在按视图里**真有什么**说话。
+	target := "the page"
+	if base != "" && fileExists(filepath.Join(view, base+".pdf")) {
+		target = "the page and this PDF"
+	}
+	return "\n\n" + strings.Join(claims, " and ") + " — CLAIMS to verify against " + target + ", never facts."
 }

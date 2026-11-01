@@ -368,6 +368,53 @@ func selectOnlyChapters(chapters []string, only map[string]bool) []string {
 
 // chapterCompiledPDF 找这一章上一次编译出的 PDF（转换工作区里 .gate/compile.json
 // 记的那个）：重新核对时把它挂进只读视图，核对才有"产物页"可看。
+// compileChapterForCheck 用**当前已提交的产物**编一份 PDF，给核对会话当产物页
+// （T277）。它在临时 scratch 里编（类文件 + 本章产物 + 项目 images/figures），
+// 编出来的 PDF 拷到 `work/views/pdf/<章>.pdf` 这个稳定位置——视图重建、工作区被
+// 清、产物被挪走都不会让这个文件消失，核对会话也就不会再拿着一个断链反复重试。
+//
+// 失败只返回错误，调用方退回"没有产物页"的核对（照样能对着原书页看内容）。
+func (r *Runner) compileChapterForCheck(proj, base string) (string, error) {
+	texPath, partsPath := chapterProductsFor(proj, base)
+	if !fileExists(texPath) {
+		return "", fmt.Errorf("这一章还没有提交产物")
+	}
+	if r.comp == nil {
+		return "", fmt.Errorf("编译器不可用")
+	}
+	clsName := classNameOfFile(filepath.Join(proj, "style"))
+	if clsName == "" {
+		return "", fmt.Errorf("没有样式类文件")
+	}
+	scratch, cleanup, err := r.chapterScratch(proj, clsName, base, "check-pdf")
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	// 产物按它自己的相对布局落进 scratch 根：`<章>.tex` 就在根上，`<章>/…`
+	// 里的 `\input{<章>/x.tex}` 与 `\input{parts/x.tex}` 都按原样解析。
+	if err := copyFile(texPath, filepath.Join(scratch, base+".tex")); err != nil {
+		return "", err
+	}
+	if st, serr := os.Stat(partsPath); serr == nil && st.IsDir() {
+		if err := copyDir(partsPath, filepath.Join(scratch, base)); err != nil {
+			return "", err
+		}
+	}
+	res := r.comp.CompileFull(scratch, base+"_wrapper.tex")
+	if !res.OK || res.PDF == "" {
+		return "", fmt.Errorf("编译失败: %s", strings.TrimSpace(res.Err))
+	}
+	dst := filepath.Join(proj, "work", "views", "pdf", base+".pdf")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", err
+	}
+	if err := copyFile(res.PDF, dst); err != nil {
+		return "", err
+	}
+	return dst, nil
+}
+
 func chapterCompiledPDF(proj, base string) string {
 	work := filepath.Join(proj, "work", "temp", "conv_"+base, "work")
 	if !dirExists(work) {
@@ -818,7 +865,18 @@ func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	if data, err := os.ReadFile(filepath.Join(proj, "work", "views", "checker_"+base, "notes.md")); err == nil {
 		hints.Notes = string(data)
 	}
-	hints.PDF = chapterCompiledPDF(proj, base)
+	// T277：重核这一份产物时**当场按它自己编一份 PDF**再挂给核对会话。
+	// 以前直接读 `work/temp/conv_<章>/work/.gate/compile.json`——那是**上一轮转换
+	// 会话**编的那份，产物一换（重整合、切回、手工恢复）它就过期；工作区被清掉
+	// 时干脆没有了，于是核对视图里没有产物页，会话照着"this PDF"的提示去找
+	// `check:<章>.pdf`，拿到一串"文件不存在"直到退化。
+	hints.PDF = ""
+	if pdf, err := r.compileChapterForCheck(proj, base); err == nil {
+		hints.PDF = pdf
+	} else {
+		r.log.LogWarning(tid, "[checker]", base, "按当前产物重编 PDF 失败，这一轮核对看不到产物页:", err)
+		hints.PDF = chapterCompiledPDF(proj, base)
+	}
 	if rp := filepath.Join(proj, "work", "reports", base+".md"); fileExists(rp) {
 		hints.Report = rp
 	}
@@ -838,6 +896,9 @@ func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	markChapterVerdict(proj, base, attempt, ok, issues)
 	if ok {
 		_ = os.Remove(texPath + ".checker")
+		// T277：重核通过要跟主路径一样留下通过标记——否则这一章在页面上永远
+		// 只有"有产物"，看不出它是被判过的那一份。
+		writePassMarker(texPath, productFingerprint(texPath, partsPath))
 		r.log.Log(tid, "[checker]", base, "重新核对通过")
 		return true, ""
 	}

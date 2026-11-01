@@ -3303,3 +3303,23 @@ T260
 **验证**：新增 `internal/latex/t276_checker_cut_test.go`——核对侧截断一个真项目（`.tex` + 分片 + `.checker` + 8 条消息的核对转录）之后：`.tex` 与 `part_01.tex` 仍在、没有创建 `work/attempts/`、队列里恰好一条 `role=checker` 请求；`archiveChapterProducts` 传 `checker_*` 时拒绝（文件还在），传 `convert_*` 时照旧落到 `work/attempts/<章>/try1/<章>.tex`。`go test ./internal/...` 全绿（除既有的 `compare_figure` 门禁与宿主 libpython 两条）。
 
 **文档**：`docs/issue.md` T276；`CHANGELOG.md` Unreleased/Fixed；AGENTS.md 会话基础设施条里"核对会话仍换尝试"那句补上核对侧现状。
+
+## 第七十六批（2026-11-01）：T277——核对会话要能看到产物页
+
+用户："我不确定之前那个 checker 是否是正确的检查和合并了……我看这两个的核对都出现了同一个问题就是 view pdf 的时候看不到"，贴的回执是 `view_pdf check:chapter_010.pdf` → `TOOL ERROR: 文件不存在: check:chapter_010.pdf（该目录可用: chapter_010, chapter_010.md, chapter_010.tex, children, figures, images, parts）`。
+
+**现场**（`work/views/checker_chapter_010_try3` 的目录清单）：
+- `chapter_010.tex`、`chapter_010/`、`children/`、`parts/` 全是**软链**，目标指向 `work/temp/conv_chapter_010/integrated-stage/…`——细分父章节的暂存提交根，下一轮一开始就被 `RemoveAll`。视图留着，链全断：`read_file check:chapter_010.tex` 与 `view_pdf check:chapter_010.pdf` 都只会回"文件不存在"，而回执里列出来的名字仍然在（readdir 看得见断链），模型只能反复重试。
+- 视图里**没有** `*.pdf`：重核路径 `recheckChapter` 的 `hints.PDF` 来自 `chapterCompiledPDF` → 读上一轮转换工作区的 `.gate/compile.json`；那份是**上一轮会话**编的，产物换过（重整合/切回/手工恢复）就过期，工作区被清掉就彻底没有。
+- 提示词还在骗人：`checkerClaimNote` 只要 `report.md`/`notes.md` 在就写 "CLAIMS to verify against the page and this PDF"，于是模型自己去找 `check:<章>.pdf`。截图里那段 `≈32 tokens → ≈61 tokens · error` 的重试就是这么来的。
+
+**改法**：
+1. `checker.go` 新增 `linkCopy`，`ensureCheckerViewAt` 里**产物一侧一律复制**（`<章>.tex`、parts 条目、`<章>/`、`parts/` 两份别名），只有 `chapters/<章>.md` 与项目级 `source/figures|images` 继续挂软链（它们稳定）。一次视图就是一次快照，暂存目录之后怎么清都不影响。
+2. `retry.go` 新增 `compileChapterForCheck`：用 `chapterScratch` 在 scratch 里按**当前已提交产物**编 wrapper（类文件 + 产物 + 项目 images/figures），PDF 拷到 `work/views/pdf/<章>.pdf` 再挂进视图；`recheckChapter` 先走它，失败才退回旧 gate 的 PDF 并记一行警告。
+3. `checkerClaimNote(view, base)`：只有 `view/<章>.pdf` 真的在才提 "this PDF"；没有就只说 "verify against the page"。
+4. 没有产物页的那一轮，提示词补一句"本轮没有 check:<章>.pdf 可开，按 markdown/.tex/parts 与原书页判断"，堵住"照着直觉去找 PDF"。
+5. 重核通过时补写 `<章>.tex.passed`（与主路径同一口径 `writePassMarker(productFingerprint(...))`）。
+
+**验证**：`t277_checker_view_test.go`——建视图后把 `integrated-stage` 整个删掉，`<章>.tex`、`<章>/children/c1.tex`、`parts/children/c1.tex` 仍读得到；`checkerClaimNote` 无 PDF 时不提 "this PDF"、有 PDF 时提；没有产物时 `compileChapterForCheck` 如实报错。`TestCheckerViewMirrorsChapterLayout`、`TestCheckerViewRecursiveChildHasPartsAliases`、`TestCheckerClaimNoteNamesExistingOnly` 同步更新调用签名后仍绿；`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。
+
+**给用户的现场处置**（同一批，数据侧只加不删）：把 `work/attempts/chapter_010/try1/`、`chapter_011/try1/` 里那两份 18:37 / 18:50 **通过核对**的产物复制回 `work/chapters/`（`.tex` + 分片目录 + report），独立编译验证 20 页 / 25 页、CJK 三字组覆盖率 96.2% / 96.3%、`\input` 目标齐全、无临时路径引用；`.tex.checker` 保留"没结论"文案，下一轮只会**重核**这两份、不再整章重转。注意不要用 `--only`（`forceChapterRetry` 会把产物归档、强制重转）。

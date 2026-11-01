@@ -2362,3 +2362,8 @@ user 轮
   根因：`rescueQueueTruncate` 的核对分支照抄了转换分支，截断核对转录后仍调 `applyWorkspaceCut`（回退章节工作树 + 归档已提交产物）；产物归档用的还是核对转录的尝试号，把"核对第 N 次"混进"转换第 N 次"。
   改：核对分支只截断核对转录、排一条 `role=checker` 的重核请求，不动任何文件；`applyWorkspaceCutTo`/`archiveChapterProducts` 增加"源转录必须是 `convert_*`"的守卫（非转换只回退工作区、不归档，并写一行日志）。
   验证：`t276_checker_cut_test.go`——核对侧截断后 `.tex` 与分片目录仍在、不创建 `work/attempts/`、队列里是一条 checker 请求；`archiveChapterProducts` 对 `checker_*` 拒绝归档、对 `convert_*` 照旧落到 `work/attempts/<章>/try1/`；`./internal/latex` 全绿（除既有的 `compare_figure` 与宿主 python 两条）。
+
+[X][ ] T277. 核对会话看不到产物页：`view_pdf check:<章>.pdf` 一律「文件不存在」，回执里列出的 `check:<章>.tex` 等条目其实也是断链——核对视图把提交产物挂成**指向临时工作区的软链**，重核路径又压根没挂 PDF，提示词照旧写着 "verify against the page and this PDF"。
+  根因：`ensureCheckerViewAt` 用 `linkAbs` 把 `integrated-stage/`（下一轮开始就 `RemoveAll`）挂进视图，视图活得比它久就全是断链；重核走 `recheckChapter` 时 `hints.PDF` 取自上一轮转换的 `.gate/compile.json`（产物换过就过期、工作区清掉就没有），没挂 PDF 时提示词仍由 `checkerClaimNote` 说 "this PDF"，模型便照着直觉找 `check:<章>.pdf`，反复 "文件不存在" 直到退化。
+  改：视图里凡指向临时工作区/提交产物一侧的条目一律**复制**（`linkCopy`），不再挂软链；`recheckChapter` 先用当前产物当场编一份 PDF（`compileChapterForCheck`，scratch 里编、拷到 `work/views/pdf/<章>.pdf` 这个稳定位置），编不出来才退回旧 gate 的 PDF；`checkerClaimNote` 只在真挂了 PDF 时提 "this PDF"；没有产物页的那一轮明确告诉模型"没有 check:<章>.pdf 可开，按原书页判断"；重核通过补写通过标记。
+  验证：`t277_checker_view_test.go`——暂存目录清掉后视图里的 `<章>.tex`、`<章>/children/*.tex`、`parts/*` 仍可读；`checkerClaimNote` 无 PDF 时不提 "this PDF"、有 PDF 时提；没有产物时 `compileChapterForCheck` 如实报错。既有的 `TestCheckerViewMirrorsChapterLayout`/`TestCheckerViewRecursiveChildHasPartsAliases` 仍绿，`./internal/...` 除既有两条外全绿。
