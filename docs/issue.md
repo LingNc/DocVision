@@ -2372,3 +2372,8 @@ user 轮
   根因：`recheckChapter` 用内存里的 `checkerAttemptNo(base)` 拼转录名，而 `checkChapterAt` 见到文件就"恢复中断的会话"；`try2` 往往正是上一次退化打满提醒的那条（现场：89 条历史、第五次退化）。退出那条硬失败是 T222 的既有口径（"没判定不能静默采纳"），但它把"核对模型退化"当成了"这一章不合格"。
   改：新增 `freshCheckerAttemptNo`（取磁盘最大号+1 与本次运行已抬号+1 的较大者，绝不落到已存在的转录），`recheckChapterAt` 每轮都开全新尝试、没结论自动再换一条（重核定 2 次上限，一轮核对十几分钟）；`continueCheckerFrom` 用 `forceAttempt` 第一轮接着切好的那条跑；重核仍没结论时**保留产物、不记转换失败**（`.checker` 写明原因，下一轮/网页「重新核对」接着核），真内容问题照旧失败。
   验证：`t278_recheck_fresh_test.go`——磁盘上已有 1/try2/try5 时下一次是 try6 且该文件不存在、再下一次 try7；空项目从 try2 起。`./internal/...` 除既有两条外全绿。
+
+[X][ ] T279. `--step convert` 重入风格修复时，整合会话（stylefix-integrate）每次都被从第 1 轮重烧一遍：12 章全部"已有产物、跳过"之后只剩这一步，工作汇报一个字没变却要重新整合一遍，页面上看着就是这个会话"又从头开始了、工具调用归零"。
+  根因：`styleFeedbackLoop` 进门无条件 `store.Problems = nil` 再跑 `styleFixIntegrate`（T64 的清勾选语义被写成了"整份清单一起丢"），而整合结果本来就已经落在 `work/style_fix/problems.json` 里。
+  改：`problems.json` 多记一个 `reports_sha`（"有问题"那几份工作汇报的内容指纹）；重入时指纹一致就 `reuseStyleProblems` 沿用清单、只把打勾状态清掉（问题定义照旧，避免上一轮的勾把本轮的活提前判成已解决），并在日志里写明"沿用上次整合的清单，不重跑整合会话"；指纹不一致时照常重新整合并记一行"工作汇报有变化（旧→新）"；指纹只在整合成功后才写，失败不会留下"可用清单"的假象。
+  验证：`t279_stylefix_reuse_test.go`——同一批报告换顺序指纹相同、改一个字/增删一份就变；指纹一致才沿用且只清勾选、返回副本；空清单不带指纹。

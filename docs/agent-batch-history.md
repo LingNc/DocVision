@@ -3342,3 +3342,17 @@ T260
 **验证**：`t278_recheck_fresh_test.go`——磁盘已有 `checker_<章>.jsonl`、`.try2`、`.try5` 时，`freshCheckerAttemptNo` 返回 6（且该文件不存在），再调返回 7；空项目返回 2。`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。
 
 **现场**：chapter_010 已通过（`.tex.passed` 21:39）；chapter_011 的产物（1014B 主文件 + 分片目录，独立编译 25 页、覆盖 96.3%）仍在 `work/chapters/`，`.tex.checker` 是"没结论"文案——下一轮重核会从 `try6` 开一条干净会话接着核。
+
+## 第七十八批（2026-11-01）：T279——重入风格修复别再白烧一轮整合会话
+
+用户在 `--step convert` 重跑后贴的控制台：`[convert] 12/12 100.00% (done: 12, errors: 0, running: 0, 0.7s)` → `[style-fix] 工作汇报 12 份，其中 3 份报告 cls/手册问题` → `[stylefix-integrate] 运行 · 轮次 1 · 工具调用 2 · 已用 18.0s`，并说"继续跑的时候会重新跑这个 integrate 的会话可以稍微调整一下……他会重新跑有点奇怪"。
+
+**现场**：12 章产物都在，convert 阶段 0.7 秒全跳过；风格修复的入口 `styleFeedbackLoop` 拿到 3 份"存在问题"的报告后，无条件 `store.Problems = nil` 再跑整合会话 —— 上一轮（22:28）已经整合好的 `work/style_fix/problems.json` 被整份丢掉，于是又跑一遍同样的整合，转录还是 append 到同一个 `stylefix_integrate.jsonl`，页面上那条会话就显得"又从轮次 1 开始、工具调用归零"。
+
+**改法**：
+1. `ProblemStore` 增加 `ReportsSHA`，`problems.json` 里多一个 `reports_sha` 字段（`loadProblemStore`/`saveLocked` 双向带上）。
+2. `styleFixReportsSHA(issues)`：把"有问题"的报告按名字排序后连内容做 sha256。
+3. `reuseStyleProblems(store, sha)`：指纹一致且清单非空才沿用；沿用**只清 `Checked`**，返回副本（清空后的状态写回存储，下一轮按"全部未解决"派活）。
+4. 入口分支：沿用 → 日志"工作汇报与上次一致（sha 前 8 位）——沿用上次整合的清单，不重跑整合会话"；不沿用 → 若之前有指纹就先记一行"工作汇报有变化（旧→新）"，再重置清单、跑整合；**指纹只在整合成功后才写**，失败不留"可用清单"的假象。
+
+**验证**：`t279_stylefix_reuse_test.go`——同一批报告换 map 顺序指纹相同；报告改一个字、增删一份都会让指纹变化；指纹一致才沿用、且只清勾选；返回的是副本（改它不动存储）；空清单不继承指纹。`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。

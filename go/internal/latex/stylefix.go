@@ -1,6 +1,8 @@
 package latex
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -300,7 +302,7 @@ func (t *SubmitBlocksTool) Name() string { return "submit_blocks" }
 
 func (t *SubmitBlocksTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name": "submit_blocks",
+		"name":        "submit_blocks",
 		"description": "Submit the chapter fix blocks. Write/edit them in work:blocks.json first ({\"blocks\": [{title, problem_ids, chapters}...]}) — group chapters that share the same problems into ONE block; every affected chapter must appear in exactly one block), then call this with NO arguments to submit from the file. Passing the same structure inline also works.",
 		"parameters": map[string]any{
 			"type": "object",
@@ -392,7 +394,7 @@ func (t *SubmitBlockFixTool) Name() string { return "submit" }
 
 func (t *SubmitBlockFixTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name": "submit",
+		"name":        "submit",
 		"description": "Submit the fixed chapters of this block. chapters: [{chapter (base name, e.g. chapter_003), resolved (true/false), note}] — one entry per chapter in your block. Every assigned problem must be ticked off with the problems tool first, and your goal plan must be complete — otherwise the submit is REJECTED.",
 		"parameters": map[string]any{
 			"type": "object",
@@ -458,6 +460,37 @@ func keysOf(m map[string]bool) []string {
 	return out
 }
 
+// styleFixReportsSHA 给这一轮的"有问题"工作汇报做内容指纹（T279）。
+//
+// 用它判断"要不要再跑一次整合会话"：`--step convert` 这类重入（章节全跳过、
+// 只补风格修复）以前每次都会把整合会话从第 1 轮重新烧一遍——报告一个字没变，
+// 清单也一样，用户看到的只是"这个会话怎么又从头开始了、工具调用归零"。
+func styleFixReportsSHA(issues map[string]string) string {
+	keys := make([]string, 0, len(issues))
+	for k := range issues {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		fmt.Fprintf(h, "%s\x00%s\x00", k, issues[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// reuseStyleProblems 判断能不能沿用上一轮整合出来的清单（T279）：只有指纹
+// 对得上、清单还在才沿用，并且**只清打勾状态**。返回的切片是副本，调用方怎么
+// 用都不影响存储。
+func reuseStyleProblems(store *ProblemStore, sha string) ([]StyleProblem, bool) {
+	if store == nil || sha == "" || store.ReportsSHA != sha || len(store.Problems) == 0 {
+		return nil, false
+	}
+	for i := range store.Problems {
+		store.Problems[i].Checked = false
+	}
+	return append([]StyleProblem(nil), store.Problems...), true
+}
+
 // collectIssueReports 汇总工作汇报，返回 (报告总数, 有问题的报告 base→内容)。
 func collectIssueReports(proj string) (int, map[string]string) {
 	reportsDir := filepath.Join(proj, "work", "reports")
@@ -495,13 +528,35 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	// T64（重构）：清单存 work/style_fix/problems.json，problems 工具读写——
 	// 进循环前重置（旧一轮的勾选状态不带入新清单）。
 	store := loadProblemStore(styleFixProblemStorePath(proj))
-	store.Problems = nil
-	if err := store.saveLocked(); err != nil {
-		r.log.LogWarning(1, "[style-fix] 问题清单重置失败:", err)
-	}
-	problems, err := r.styleFixIntegrate(proj, issues, store)
-	if err != nil {
-		return fmt.Errorf("问题整合会话失败: %w", err)
+	sha := styleFixReportsSHA(issues)
+	var problems []StyleProblem
+	if reused, ok := reuseStyleProblems(store, sha); ok {
+		problems = reused
+		// T279：工作汇报一个字没变 → 沿用上一次的清单，只把打勾状态清掉
+		// （问题定义照旧，别让上一轮的勾选把这一轮的活提前判成"已解决"）。
+		if err := store.saveLocked(); err != nil {
+			r.log.LogWarning(1, "[style-fix] 问题清单打勾状态重置失败:", err)
+		}
+		r.log.Log(0, "[style-fix] 工作汇报与上次一致（"+sha[:8]+"）——沿用上次整合的清单，不重跑整合会话")
+	} else {
+		if store.ReportsSHA != "" && len(store.Problems) > 0 {
+			r.log.Log(0, "[style-fix] 工作汇报有变化（旧 "+store.ReportsSHA[:8]+" → 新 "+sha[:8]+"）——重新整合问题清单")
+		}
+		store.Problems = nil
+		store.ReportsSHA = ""
+		if err := store.saveLocked(); err != nil {
+			r.log.LogWarning(1, "[style-fix] 问题清单重置失败:", err)
+		}
+		var err error
+		problems, err = r.styleFixIntegrate(proj, issues, store)
+		if err != nil {
+			return fmt.Errorf("问题整合会话失败: %w", err)
+		}
+		// 只有整合真的成功才把指纹记上：失败时留着旧指纹会让下一轮误判"清单可用"。
+		store.ReportsSHA = sha
+		if err := store.saveLocked(); err != nil {
+			r.log.LogWarning(1, "[style-fix] 问题清单指纹落盘失败:", err)
+		}
 	}
 	r.log.Log(0, "[style-fix] 问题清单:", strconv.Itoa(len(problems)), "项")
 
