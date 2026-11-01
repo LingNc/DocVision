@@ -3323,3 +3323,22 @@ T260
 **验证**：`t277_checker_view_test.go`——建视图后把 `integrated-stage` 整个删掉，`<章>.tex`、`<章>/children/c1.tex`、`parts/children/c1.tex` 仍读得到；`checkerClaimNote` 无 PDF 时不提 "this PDF"、有 PDF 时提；没有产物时 `compileChapterForCheck` 如实报错。`TestCheckerViewMirrorsChapterLayout`、`TestCheckerViewRecursiveChildHasPartsAliases`、`TestCheckerClaimNoteNamesExistingOnly` 同步更新调用签名后仍绿；`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。
 
 **给用户的现场处置**（同一批，数据侧只加不删）：把 `work/attempts/chapter_010/try1/`、`chapter_011/try1/` 里那两份 18:37 / 18:50 **通过核对**的产物复制回 `work/chapters/`（`.tex` + 分片目录 + report），独立编译验证 20 页 / 25 页、CJK 三字组覆盖率 96.2% / 96.3%、`\input` 目标齐全、无临时路径引用；`.tex.checker` 保留"没结论"文案，下一轮只会**重核**这两份、不再整章重转。注意不要用 `--only`（`forceChapterRetry` 会把产物归档、强制重转）。
+
+## 第七十七批（2026-11-01）：T278——重核不要撞回旧的退化会话
+
+用户重跑后：`[checker:chapter_010] 轮次 24 · 工具调用 47 · 已用 18m23s`、`[checker:chapter_011] 轮次 30 · 工具调用 49 · 已用 21m18s`，接着 `[rescue] chapter_011 已原地截断到第 122 条记录（第 5 次尝试），排队继续`，最后 `phase convert FAILED: chapter_011 重新核对未通过（这份产物未被采纳）: checker 会话已退化，已排队从干净轮次继续核对`。用户问："这个是不会自动重试了，这个退出是你新加的吗？"
+
+**结论**：T277 起作用了（`work/views/pdf/chapter_010.pdf` 21:17、`chapter_011.pdf` 21:44 都是按当前产物新编的产物页，视图里不再有断链；chapter_010 已经 `重新核对通过` 并写了 `.passed` 21:39）。坏在**重核挑了一条旧会话**：
+
+- `recheckChapter` 的尝试号来自内存计数器 `retryCheckerAttempt[base]`，进程重启后是 0 → `n = max(2, 0) = 2` → 转录名 `checker_<章>.try2.jsonl`；
+- 而 `try2` 在磁盘上**已经存在**（上一轮退化打满提醒的那条，89 条历史、`submit` 0 次）→ `checkChapterAt` 见到文件就走"恢复中断的会话"，把那 89 条原样回放 → 第一轮再次退化 → `checker 会话已退化，已排队从干净轮次继续核对`；
+- 这条结论落到 T222 的入口守卫上就是硬失败（"没判定不能静默采纳"），于是整轮 convert 判失败、进程退出。硬失败不是这两批新加的，但"核对模型退化"被当成了"这一章不合格"是错的。
+
+**改法**：
+1. `retry.go` 新增 `freshCheckerAttemptNo(proj, base)`：`max(磁盘上已有最大尝试号 + 1, 本次运行已抬号 + 1, 2)`，并 `bumpCheckerAttemptNo`，保证下一条转录**磁盘上还不存在**。
+2. `recheckChapterAt(proj, base, tid, forceAttempt)`：第一轮在 `forceAttempt >= 2` 时用它（"从第 N 条记录继续核对"已经把前缀抄成那条尝试，必须接着跑），否则用新开号；没给结论就自动换一条全新会话再核，**上限 2 次**（一轮核对十几分钟，三条都没结论就是核对模型的问题）。
+3. `book.go` 入口守卫：重核仍无结论时保留产物、`.checker` 写明原因、日志说清"下一轮会再重核"，**返回 nil 不算转换失败**（真正的内容问题照旧 `return fmt.Errorf`）。
+
+**验证**：`t278_recheck_fresh_test.go`——磁盘已有 `checker_<章>.jsonl`、`.try2`、`.try5` 时，`freshCheckerAttemptNo` 返回 6（且该文件不存在），再调返回 7；空项目返回 2。`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。
+
+**现场**：chapter_010 已通过（`.tex.passed` 21:39）；chapter_011 的产物（1014B 主文件 + 分片目录，独立编译 25 页、覆盖 96.3%）仍在 `work/chapters/`，`.tex.checker` 是"没结论"文案——下一轮重核会从 `try6` 开一条干净会话接着核。

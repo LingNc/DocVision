@@ -441,6 +441,24 @@ func chapterCompiledPDF(proj, base string) string {
 	return ""
 }
 
+// freshCheckerAttemptNo 返回下一条**全新**核对尝试号：取"磁盘上已有最大号 +1"与
+// "本次运行已经抬到的号 +1"里更大的那个，且不小于 2（try1 = 无后缀那条转录）。
+//
+// T278：重核绝不能落回一条已经存在的核对转录——`checkChapterAt` 见到文件就恢复
+// 那条会话，而旧转录往往已经退化到底（提醒打满、只剩反复重试），恢复它等于把
+// "重新核对"直接判死。
+func (r *Runner) freshCheckerAttemptNo(proj, base string) int {
+	n := lastAttemptNumber(filepath.Join(chapterSessionsDir(proj, base), "checker_"+base+".jsonl")) + 1
+	if m := r.checkerAttemptNo(base) + 1; m > n {
+		n = m
+	}
+	if n < 2 {
+		n = 2
+	}
+	r.bumpCheckerAttemptNo(base, n)
+	return n
+}
+
 // recheckChapter 用全新会话重新核对这一章**已提交的产物**（P53 的 checker 角色）。
 //
 // 与转换重试的区别：这里不碰 `.tex`、分片与工作区，只换核对会话与只读视图。
@@ -474,7 +492,7 @@ func (r *Runner) continueCheckerAfterCut(proj, base string, next int) error {
 	if fileExists(texPath + ".checker") {
 		_ = copyFile(texPath+".checker", fmt.Sprintf("%s.checker.try%d", texPath, next-1))
 	}
-	if _, issues := r.recheckChapter(proj, base, 0); issues != "" {
+	if _, issues := r.recheckChapterAt(proj, base, 0, next); issues != "" {
 		r.log.LogInfo(0, "[checker]", base, "从记录继续后的结论:", issues)
 	}
 	return nil
@@ -855,6 +873,13 @@ func latestConvertAttempt(proj, base string) int {
 }
 
 func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
+	return r.recheckChapterAt(proj, base, tid, 0)
+}
+
+// recheckChapterAt 是 recheckChapter 的"指定尝试号"版：`forceAttempt >= 2` 时
+// 第一轮就用它（"从第 N 条记录继续核对"已经把前缀抄成那条尝试，必须接着它跑），
+// 之后的换会话兜底仍然另开全新尝试。
+func (r *Runner) recheckChapterAt(proj, base string, tid, forceAttempt int) (bool, string) {
 	chapPath := chapterMarkdownFor(proj, base)
 	texPath, partsPath := chapterProductsFor(proj, base)
 	if !fileExists(texPath) {
@@ -880,14 +905,41 @@ func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	if rp := filepath.Join(proj, "work", "reports", base+".md"); fileExists(rp) {
 		hints.Report = rp
 	}
-	n := r.checkerAttemptNo(base)
-	if n < 2 {
-		n = 2
-	}
-	trPath := attemptTranscriptPath(filepath.Join(chapterSessionsDir(proj, base), "checker_"+base+".jsonl"), n)
-	view := filepath.Join(proj, "work", "views", fmt.Sprintf("checker_%s_try%d", base, n))
 	attempt := latestConvertAttempt(proj, base)
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid, trPath, view, false, attempt)
+	trBase := filepath.Join(chapterSessionsDir(proj, base), "checker_"+base+".jsonl")
+	viewRoot := filepath.Join(proj, "work", "views")
+	// T278：**每一次重核都开一条磁盘上还不存在的新核对尝试**，没有结论就再换一条
+	// （次数 = latex.checker_no_verdict_retries，与转换侧同一条口径）。
+	//
+	// 以前这里用内存里的 `checkerAttemptNo(base)`（进程重启后是 0）→ 一律算成
+	// try2，而 try2 往往就是上一次退化到底的那条转录：`checkChapterAt` 见到文件
+	// 就走"恢复中断的会话"，89 条已经打满提醒的历史原样回放，第一轮就再次退化，
+	// 于是"重新核对"必然失败——现场就是这么撞的（chapter_011 try2 已是第五次
+	// 退化的现场）。尝试号必须取自磁盘，而且要"往后加"，不能回到别人的旧转录里。
+	autoHeals := r.cfg.Latex.CheckerNoVerdictRetries()
+	// 重核是"产物已经在书里、只差一个判定"，一轮核对动辄十几二十分钟，不该像
+	// 转换侧那样连开六条；三条都给不出结论就是核对模型的问题，别再烧下去。
+	if autoHeals > 2 {
+		autoHeals = 2
+	}
+	var ok bool
+	var issues string
+	for heal := 0; ; heal++ {
+		n := r.freshCheckerAttemptNo(proj, base)
+		if heal == 0 && forceAttempt >= 2 {
+			n = forceAttempt
+			r.bumpCheckerAttemptNo(base, n)
+		}
+		trPath := attemptTranscriptPath(trBase, n)
+		view := filepath.Join(viewRoot, fmt.Sprintf("checker_%s_try%d", base, n))
+		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid, trPath, view, false, attempt)
+		if ok || isSessionAPIError(issues) || !checkerNoVerdict(issues) || heal >= autoHeals {
+			break
+		}
+		r.log.LogWarning(tid, "[checker]", base, "重新核对没有给出结论，换一条全新的核对尝试 try"+
+			strconv.Itoa(r.checkerAttemptNo(base))+" 再来一次（第 "+strconv.Itoa(heal+1)+"/"+strconv.Itoa(autoHeals)+
+			" 次，产物不动）")
+	}
 	if isSessionAPIError(issues) {
 		return false, issues
 	}

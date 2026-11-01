@@ -1921,6 +1921,15 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 				r.keepSessionFile(filepath.Join(proj, "work", "sessions", "convert_"+base+".jsonl"))
 				return nil
 			}
+			// T278：核对**没给结论**（会话退化）不是"这一章不合格"，尤其不该把
+			// 整轮转换判死——重核内部已经按预算换过几条全新尝试，仍然没结论时
+			// 产物原样留着、`.checker` 写明原因，下一轮（或网页「重新核对」）会
+			// 接着核这一份。真正的内容问题仍然如实失败。
+			if checkerNoVerdict(issues) {
+				r.log.LogWarning(tid, "[checker]", base,
+					"重新核对仍然没有给出结论（产物保留、下一轮会再重核这一次）——这一章先跳过，不记转换失败")
+				return nil
+			}
 			return fmt.Errorf("%s 重新核对未通过（这份产物未被采纳）: %s", base, issues)
 		}
 		r.log.Log(tid, "[convert]", base, "已有产物，跳过")

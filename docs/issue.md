@@ -2367,3 +2367,8 @@ user 轮
   根因：`ensureCheckerViewAt` 用 `linkAbs` 把 `integrated-stage/`（下一轮开始就 `RemoveAll`）挂进视图，视图活得比它久就全是断链；重核走 `recheckChapter` 时 `hints.PDF` 取自上一轮转换的 `.gate/compile.json`（产物换过就过期、工作区清掉就没有），没挂 PDF 时提示词仍由 `checkerClaimNote` 说 "this PDF"，模型便照着直觉找 `check:<章>.pdf`，反复 "文件不存在" 直到退化。
   改：视图里凡指向临时工作区/提交产物一侧的条目一律**复制**（`linkCopy`），不再挂软链；`recheckChapter` 先用当前产物当场编一份 PDF（`compileChapterForCheck`，scratch 里编、拷到 `work/views/pdf/<章>.pdf` 这个稳定位置），编不出来才退回旧 gate 的 PDF；`checkerClaimNote` 只在真挂了 PDF 时提 "this PDF"；没有产物页的那一轮明确告诉模型"没有 check:<章>.pdf 可开，按原书页判断"；重核通过补写通过标记。
   验证：`t277_checker_view_test.go`——暂存目录清掉后视图里的 `<章>.tex`、`<章>/children/*.tex`、`parts/*` 仍可读；`checkerClaimNote` 无 PDF 时不提 "this PDF"、有 PDF 时提；没有产物时 `compileChapterForCheck` 如实报错。既有的 `TestCheckerViewMirrorsChapterLayout`/`TestCheckerViewRecursiveChildHasPartsAliases` 仍绿，`./internal/...` 除既有两条外全绿。
+
+[X][ ] T278. 「已有产物、只差一个判定」的重核一定会失败：它总是落回**已经退化到底的旧核对转录**（进程重启后内存尝试号是 0 → 一律算 try2），恢复那条会话后第一轮就再次退化，然后整轮转换被判失败退出。
+  根因：`recheckChapter` 用内存里的 `checkerAttemptNo(base)` 拼转录名，而 `checkChapterAt` 见到文件就"恢复中断的会话"；`try2` 往往正是上一次退化打满提醒的那条（现场：89 条历史、第五次退化）。退出那条硬失败是 T222 的既有口径（"没判定不能静默采纳"），但它把"核对模型退化"当成了"这一章不合格"。
+  改：新增 `freshCheckerAttemptNo`（取磁盘最大号+1 与本次运行已抬号+1 的较大者，绝不落到已存在的转录），`recheckChapterAt` 每轮都开全新尝试、没结论自动再换一条（重核定 2 次上限，一轮核对十几分钟）；`continueCheckerFrom` 用 `forceAttempt` 第一轮接着切好的那条跑；重核仍没结论时**保留产物、不记转换失败**（`.checker` 写明原因，下一轮/网页「重新核对」接着核），真内容问题照旧失败。
+  验证：`t278_recheck_fresh_test.go`——磁盘上已有 1/try2/try5 时下一次是 try6 且该文件不存在、再下一次 try7；空项目从 try2 起。`./internal/...` 除既有两条外全绿。
