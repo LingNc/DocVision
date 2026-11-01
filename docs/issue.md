@@ -2357,3 +2357,8 @@ user 轮
   根因：删除清单是**手写枚举**，新目录/新转录命名不断加进来（P63 作废尝试、快照仓库、复盘切口、修复工作区、重试队列、stylefix 改名），脚本没人回头补。
   改：默认口径扩到 `work/{attempts,rounds,rescue,fix,retry}`，转录 glob 改成 `convert_*|checker_*|rescue_*` 并带 `*.jsonl*`（连 `.partial`），另补 `stylefix*.jsonl*`；`--keep-convert` 保留这几块、只清它之后的阶段；头部注释与 `docs/latex.md` 的清理清单同步。
   验证：`bash -n`；真实项目 `-n` 计划里 12 项目录 + 171 条转录全部列出（新增的 6 类都在）；两个假项目跑真删除——默认口径下转换/复盘/修复/快照/队列目录与三类转录（含 `.partial`）全清、`chapters/*.md`+`style/`+`work/sessions/{chapters,keep}.jsonl`+`work/media`+`work/sessions/media` 全留、`progress.json` 的 convert/assemble 归空；`--keep-convert` 下 `work/chapters`、三类转换转录、attempts/rounds/rescue/fix/retry 全留，`views`/`pdfview`/`stylefix*`/`book_fix` 照删。
+
+[X][ ] T276. 细分父章节在「转换已 submit、产物 99% 覆盖」之后被判失败并整章重转：核对会话自己的复盘截断把**已提交的产物挪进 `work/attempts/<章>/try<核对尝试号>/`**，这一章于是看起来没转换过，下一轮重走复查+整合再交一份，同一个退化的核对模型再退化、再搬走——实测两章互覆四轮，中间那次 `[checker] 通过` 也被下一轮重转盖掉。
+  根因：`rescueQueueTruncate` 的核对分支照抄了转换分支，截断核对转录后仍调 `applyWorkspaceCut`（回退章节工作树 + 归档已提交产物）；产物归档用的还是核对转录的尝试号，把"核对第 N 次"混进"转换第 N 次"。
+  改：核对分支只截断核对转录、排一条 `role=checker` 的重核请求，不动任何文件；`applyWorkspaceCutTo`/`archiveChapterProducts` 增加"源转录必须是 `convert_*`"的守卫（非转换只回退工作区、不归档，并写一行日志）。
+  验证：`t276_checker_cut_test.go`——核对侧截断后 `.tex` 与分片目录仍在、不创建 `work/attempts/`、队列里是一条 checker 请求；`archiveChapterProducts` 对 `checker_*` 拒绝归档、对 `convert_*` 照旧落到 `work/attempts/<章>/try1/`；`./internal/latex` 全绿（除既有的 `compare_figure` 与宿主 python 两条）。

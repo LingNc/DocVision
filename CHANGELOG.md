@@ -15,6 +15,7 @@
 - **配置模板补上 Anthropic（Claude）示例（T271）**：以前只有 `api:` 那一行的键注释，换 Claude 得自己拼 `api: anthropic`、指到 `/v1` 的 `base_url`、`thinking: {type: adaptive}` 与 effort，漏一项就被 400 拒掉。现在两份配置模板的 models 段各有一段可照抄的注释示例（含 `output_config.effort` 的来历与"不要再用 budget_tokens"的提醒），`docs/config.md` 另有一节完整示例与三条易错点。
 
 ### Fixed
+- **核对侧复盘截断不再作废转换产物（T276）**：核对会话被判退化时，原先会连带回退章节工作树并把已提交的 `.tex`/分片挪进 `work/attempts/<章>/try<核对尝试号>/`——一个坏掉的核对模型因此能把一章合格产物从书里搬走，这一章下一轮整章重转（细分父章节还要重走复查+整合）再交一份，于是互相覆盖、中间那次「通过」也被盖掉。现在核对侧只作废判定、排一条重核请求，产物与工作树一律不动；归档产物也只接受转换转录的尝试号。
 - **`clean_convert.sh` 跟上后来新增的转换伴生状态（T275）**：删除清单补 `work/attempts/`（作废尝试留档）、`work/rounds/`（逐章快照仓库）、`work/rescue/`（复盘切口存档）、`work/fix/`、`work/retry/`（重试队列），转录侧补 `rescue_*.jsonl` 与改名后的 `stylefix*.jsonl`，并把 `*.jsonl.partial` 快照一起清掉——以前清完再跑，页面还挂着指向已删转录的「切回」，快照仓库也白占几十 MB。`--keep-convert` 继续整体保留这几块。
 - **`grep` 工具按声明里的 Go 正则匹配（T274）**：以前把模式交给 `grep(1)` 当 BRE，`a|b` 里的 `|` 是字面量、`begin\{question\}` 会被当成区间表达式直接报错，凡是"多选一"或带转义大括号的模式全静默 `NO MATCHES`，模型只能绕去 bash 里 `grep -E`。现在在进程内按 Go regexp 匹配（编译不过退回纯文本，不报语法错），并且 `path` 不存在时如实回 `grep error` 并列出该层真实条目，不再把"搜错地方"说成"没这个串"。
 - **`docvision sessions` 启动慢的真正原因修掉了（T272）**：磁盘索引缓存（`.sessionview-cache.json`）此前只接在静态导出走的那条扫描上，而 `--list`、`--serve` 走的 `ScanWith` 从不读也不写它；`--serve` 还会在启动时先白扫一遍再让服务重扫一次。现在两条路同源（先读缓存、只在真的重算过时写回，且 30 秒最多一次写盘），预览服务的长驻扫描器也从缓存起步、`--serve` 不再预扫。同一项目（6459 条转录、9.2 GB）实测：冷扫 173 秒 → 命中缓存 0.8 秒。

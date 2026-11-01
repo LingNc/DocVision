@@ -1554,6 +1554,12 @@ func (r *Runner) applyWorkspaceCut(proj, base, srcName string, from int) (int, b
 func (r *Runner) applyWorkspaceCutTo(proj, base, srcName string, from int, archiveDir string) (int, bool) {
 	rolled, ok := r.rollbackChapterWork(proj, base, srcName, from)
 	if ok {
+		// T276：只有**转换**会话的截断才连产物一起挪走。核对/复盘会话的截断
+		// 只作废它自己的判定，产物是另一条会话交的、不该跟着消失。
+		if !strings.HasPrefix(filepath.Base(srcName), "convert_") {
+			r.log.LogInfo(0, "[rescue]", base, "只回退工作区，不动已提交的产物（源转录不是转换会话）")
+			return rolled, ok
+		}
 		if archiveDir != "" {
 			archiveChapterProductsTo(r, proj, base, archiveDir)
 		} else {
@@ -1565,7 +1571,14 @@ func (r *Runner) applyWorkspaceCutTo(proj, base, srcName string, from int, archi
 
 // archiveChapterProducts 把这一章已提交的产物与报告挪进 work/attempts/<章>/
 // try<源尝试>/，不动工作树——工作树要留着给 P55 回退。
+//
+// T276：只认**转换**转录。核对/复盘会话的尝试号是它们自己的编号，拿它给产物
+// 归档既会搬走一份没问题的产物，又会让"第 N 次尝试"和转换的尝试号串味。
 func archiveChapterProducts(r *Runner, proj, base, srcName string) {
+	if !strings.HasPrefix(filepath.Base(srcName), "convert_") {
+		r.log.LogWarning(0, "[convert]", base, "拒绝归档产物：源转录不是转换会话（", filepath.Base(srcName), "）")
+		return
+	}
 	attempt := 1
 	if _, n, ok := transcriptAttempt(srcName); ok && n > 0 {
 		attempt = n

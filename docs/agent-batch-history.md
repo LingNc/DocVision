@@ -3284,3 +3284,22 @@ T260
 **改法**：`to_delete_convert` 增加 `work/attempts`、`work/rounds`、`work/rescue`、`work/fix`、`work/retry`（`--keep-convert` 时整体保留）；`rescue_*.jsonl` 并进转换分支；三类转换转录与 `style_fix_*`/`stylefix*` 的 glob 末尾都加 `*`，把 `.partial` sidecar 一起带走；头部注释与 `docs/latex.md`「清理与重跑（辅助脚本）」同步。
 
 **验证**：`bash -n` 通过；真实项目 `-n`：新增的 5 个目录与 `rescue_*`/`checker_*`/`convert_*` 共 171 条转录都在计划里（`work/rounds` 88 MB、`work/temp` 162 MB 一并列出），备份路径与保留清单正确；两个假项目各跑一次真删除——默认口径下转换/复盘/修复/快照/队列目录与三类转录（含 `.partial`）全清，`chapters/*.md`、`work/sessions/{chapters,keep}.jsonl`、`work/media`、`work/sessions/media`、`style/`、`doc_index/`、`progress.json` 全留，`convert`/`assemble` 归空；`--keep-convert` 下 `work/chapters`、三类转录、attempts/rounds/rescue/fix/retry 全留，`views`/`pdfview`/`stylefix*`/`book_fix`/`final_review` 照删、`progress.json` 同样归空。
+
+## 第七十五批（2026-11-01）：T276——核对侧复盘截断不再搬走转换产物
+
+用户："我这个 chapter 10 和 11 不知道咋回事？为什么它已经 submit 了然后还是继续了……并且它的 checker 有一次都通过了，这是咋回事他还在继续？"
+
+**现场**（两章都是**细分父章节**：子章节各自过核对后，父会话先「复查子章节」、再「整合并 submit」）：
+- `work/sessions/convert_chapter_010.jsonl` 里同一份转录出现 4 轮 `复查 → 整合 → submit`（`SUBMITTED` 在 261、280…），中间夹着 `chapter_activity=pass`（263）与 `no_verdict`（264/265）；`convert_chapter_011.try2.jsonl` 同款（`pass` 在 313、`no_verdict` 在 314）。
+- 两章的 `work/chapters/` 里**只有 `.tex.checker`**（内容：「checker 会话已退化，已排队从干净轮次继续核对」），没有 `.tex`——产物不在书里。
+- 运行日志时间线：`16:38 chapter_010 内容覆盖率 99.1%`（整合成功）；`17:29:43 [rescue] chapter_010 复盘结论 truncate（from=114）` → 同一秒 `[convert] chapter_010 已提交的产物挪进 work/attempts/chapter_010/try1/`；`17:48` 又是一次（from=56，核对第 3 次尝试）；`18:37:14 [checker] chapter_010 通过`；之后又被重转覆盖。`work/attempts/chapter_{010,011}/try1/` 与 `chapter_012/try1/` 就是被搬走的产物。
+
+**根因**：`rescueQueueTruncate` 的 `role == "checker"` 分支照抄了转换分支——截断核对转录之后仍调 `applyWorkspaceCut`（回退章节工作树 + `archiveChapterProducts` 把 `work/chapters/<章>.tex`、分片目录、报告挪进 `work/attempts/<章>/try<核对尝试号>/`）。核对会话根本没有可写工作区，它的退化只是"这次没给判定"，产物是**转换会话**交的、并且已经过了覆盖率与编译门禁。产物一没，这一章下一轮就"没有产物 → 整章重转"（细分父章节更贵：子章节复用、父章节重走复查+整合+submit），再交给同一个退化的核对会话，再退化、再搬走——环。附带两个污染：归档目录用的是核对转录的尝试号（`try1` = 核对第 1 次，与转换的尝试号串味，切回列表里多出假的转换尝试）；每次重转又把上一轮的 `pass` 标记与 `.passed` 覆盖掉，于是"checker 明明通过过却还在继续"。
+
+**改法**：
+1. `rescue.go` 核对分支：只 `cutTranscriptNow` + 排 `role=checker` 的重核请求，**不碰文件**（注释写清为什么）。
+2. `retry.go`：`applyWorkspaceCutTo` 与 `archiveChapterProducts` 都加"源转录必须是 `convert_*`"的守卫——非转换转录只回退工作区、不归档，并写一行 `[rescue] 只回退工作区，不动已提交的产物（源转录不是转换会话）`。
+
+**验证**：新增 `internal/latex/t276_checker_cut_test.go`——核对侧截断一个真项目（`.tex` + 分片 + `.checker` + 8 条消息的核对转录）之后：`.tex` 与 `part_01.tex` 仍在、没有创建 `work/attempts/`、队列里恰好一条 `role=checker` 请求；`archiveChapterProducts` 传 `checker_*` 时拒绝（文件还在），传 `convert_*` 时照旧落到 `work/attempts/<章>/try1/<章>.tex`。`go test ./internal/...` 全绿（除既有的 `compare_figure` 门禁与宿主 libpython 两条）。
+
+**文档**：`docs/issue.md` T276；`CHANGELOG.md` Unreleased/Fixed；AGENTS.md 会话基础设施条里"核对会话仍换尝试"那句补上核对侧现状。
