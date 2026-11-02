@@ -2377,3 +2377,8 @@ user 轮
   根因：`styleFeedbackLoop` 进门无条件 `store.Problems = nil` 再跑 `styleFixIntegrate`（T64 的清勾选语义被写成了"整份清单一起丢"），而整合结果本来就已经落在 `work/style_fix/problems.json` 里。
   改：`problems.json` 多记一个 `reports_sha`（"有问题"那几份工作汇报的内容指纹）；重入时指纹一致就 `reuseStyleProblems` 沿用清单、只把打勾状态清掉（问题定义照旧，避免上一轮的勾把本轮的活提前判成已解决），并在日志里写明"沿用上次整合的清单，不重跑整合会话"；指纹不一致时照常重新整合并记一行"工作汇报有变化（旧→新）"；指纹只在整合成功后才写，失败不会留下"可用清单"的假象。
   验证：`t279_stylefix_reuse_test.go`——同一批报告换顺序指纹相同、改一个字/增删一份就变；指纹一致才沿用且只清勾选、返回副本；空清单不带指纹。
+
+[X][ ] T280. 风格修复会话"续不上"：被打断（Ctrl-C / 杀掉进程）或被 `--step convert` 重入之后，上一轮改过的 cls、已经解决的几条问题，对模型来说凭空消失——页面上却因为转录是同一条而看着像在接着跑。
+  根因：`styleFixStyleSession` 每次都从样式阶段的 `work/style_session.jsonl` 重开上下文，本轮自己的转录（`stylefix_style_r<N>.jsonl`，append-only、打断时也已在盘上）从不被读回；同一轮重跑等于重放一遍样式阶段的对话。勾选状态另说：只有分块修复会话会打勾，样式修复会话没提交过时它就是 0/3（"两个问题已解决"只是对话里的说法，不是记录）。
+  改：新增 `styleRoundSeed`——第 round 轮优先接**本轮自己的转录**（打断续跑），没有就接最近一轮的转录（新一轮接着上一轮记忆），再没有才退回样式阶段上下文；沿用转录时用 `LoadTranscriptStats` 把轮次/工具数也续上，日志写明"接着上一轮的风格修复会话继续（文件名，N 条历史）"，重入时给模型一句 `Continue this round from where it stopped`。
+  验证：`t280_style_round_resume_test.go`——第 1 轮接自己那条转录；第 2 轮先接 r1、有 r2 时优先 r2；没有任何上下文时返回空（调用方明确报错，不拿空上下文硬跑）。

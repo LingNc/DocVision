@@ -659,13 +659,40 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 	return problems, nil
 }
 
-// styleFixStyleSession 跑一轮风格修复会话（复用原样式会话上下文）。
+// styleRoundSeed 决定第 round 轮风格修复会话从哪份上下文接着跑（T280）。
+//
+//  1. 本轮自己的转录：上一轮运行被打断时，转录（append-only）已经实时落盘，
+//     接着它才算真的"续上"；
+//  2. 更早一轮的转录：本轮第一次跑，接着上一轮的记忆（cls 为什么这么改、
+//     哪些章节动过）；
+//  3. 样式阶段的 `work/style_session.jsonl`：第一次进循环，接样式会话的上下文。
+//
+// 以前这里的第 1 步不存在：每次都从样式阶段的上下文重开，`--step convert`
+// 重入或被 Ctrl-C 打断之后，上一轮风格修复的整段讨论（改了哪些 cls、哪几条
+// 问题已解决）对模型来说凭空消失，页面上却因为转录是同一条而看着"在接着跑"。
+func styleRoundSeed(proj string, round int) ([]session.ChatMessage, string) {
+	dir := filepath.Join(proj, "work", "sessions")
+	for r := round; r >= 1; r-- {
+		p := filepath.Join(dir, fmt.Sprintf("stylefix_style_r%d.jsonl", r))
+		if msgs, err := loadSessionContext(p); err == nil && len(msgs) > 0 {
+			return msgs, p
+		}
+	}
+	p := filepath.Join(proj, "work", "style_session.jsonl")
+	if msgs, err := loadSessionContext(p); err == nil && len(msgs) > 0 {
+		return msgs, p
+	}
+	return nil, ""
+}
+
+// styleFixStyleSession 跑一轮风格修复会话（接着上一轮的上下文）。
 func (r *Runner) styleFixStyleSession(proj string, round int, problems []StyleProblem, store *ProblemStore) error {
 	ctxPath := filepath.Join(proj, "work", "style_session.jsonl")
-	msgs, err := loadSessionContext(ctxPath)
-	if err != nil {
-		return fmt.Errorf("样式会话上下文不可用: %w", err)
+	msgs, seedPath := styleRoundSeed(proj, round)
+	if len(msgs) == 0 {
+		return fmt.Errorf("样式会话上下文不可用: 还没有样式阶段或上一轮风格修复的转录")
 	}
+	resumed := filepath.Base(seedPath) != filepath.Base(ctxPath)
 	styleDir := filepath.Join(proj, "style")
 	workDir := filepath.Join(proj, "work", "style")
 
@@ -698,6 +725,14 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 	sess.SetMessages(msgs)
+	if resumed {
+		// 接着上一轮跑：轮次/工具数也续上，页面上不再假装"刚从第 1 轮开始"。
+		if _, st, serr := session.LoadTranscriptStats(seedPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+		}
+		r.log.Log(0, "[style-fix] 接着上一轮的风格修复会话继续（"+filepath.Base(seedPath)+"，"+
+			strconv.Itoa(len(msgs))+" 条历史）")
+	}
 	trPath := filepath.Join(proj, "work", "sessions", fmt.Sprintf("stylefix_style_r%d.jsonl", round))
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
@@ -707,6 +742,9 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	feedback := fmt.Sprintf("The chapter conversion phase finished and %d style/manual problems were consolidated. "+
 		"They are NOT pasted here — use the problems tool to see them. "+
 		"Fix the cls/manual/example so these problems cannot recur, tick each one off with problems check as you resolve it, then submit_style.", len(problems))
+	if resumed {
+		feedback = "Continue this round from where it stopped (it was interrupted before submit_style). " + feedback
+	}
 	if _, err := sess.Run(session.RunOptions{UserText: feedback}); err != nil {
 		return fmt.Errorf("风格修复会话失败: %w", err)
 	}

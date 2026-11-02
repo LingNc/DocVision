@@ -3356,3 +3356,25 @@ T260
 4. 入口分支：沿用 → 日志"工作汇报与上次一致（sha 前 8 位）——沿用上次整合的清单，不重跑整合会话"；不沿用 → 若之前有指纹就先记一行"工作汇报有变化（旧→新）"，再重置清单、跑整合；**指纹只在整合成功后才写**，失败不留"可用清单"的假象。
 
 **验证**：`t279_stylefix_reuse_test.go`——同一批报告换 map 顺序指纹相同；报告改一个字、增删一份都会让指纹变化；指纹一致才沿用、且只清勾选；返回的是副本（改它不动存储）；空清单不继承指纹。`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。
+
+## 第七十九批（2026-11-02）：T280——风格修复会话要能真的续上
+
+用户："这个样式修复的会话我重新跑不能续上吗？…我重新跑之后他好像是在原来的会话继续还是什么？因为之前有两个问题已经解决了"
+
+**现场**（`--step convert` 重入 + 当天 12:49 再跑一次之后）：
+- `work/sessions/stylefix_style_r1.jsonl`：95 条消息，`run_end` 只有一次（11-01 23:44），之后 12:49 又追加了两轮 `problems` 调用就断了——**没有 `submit_style`**；
+- `work/sessions/stylefix_integrate.jsonl`：41 条、`run_end` 三次（22:40 / 23:01 / 23:20）——整合会话被重跑了三遍（T279 之后不再重跑）；
+- `work/style_fix/problems.json`：3 项，**0 项打勾**，`reports_sha=f46938b8…`；
+- `work/style_session.jsonl`：mtime 仍是 11-01 02:56（样式阶段那次），风格修复的对话一个字都没进去。
+
+**根因**：
+1. `styleFixStyleSession` 每次都 `loadSessionContext(style_session.jsonl)` 重开，本轮自己的转录从不被读回——打断之后，上一轮"改了 cls 的哪三处、P1/P3 已经好了"这段上下文凭空消失；
+2. `saveSessionContext` 在会话已经挂了转录时是 no-op（它只服务没有转录的老路径），所以风格修复的对话也进不了 `style_session.jsonl`；
+3. 页面之所以看着"在原来的会话继续"，是因为转录是 append-only 的同一条文件——两轮的内容写在一起，模型那边其实是重开的；
+4. 勾选状态：只有**分块修复会话** `submit` 前会 `problems check`。这几次一条块会话都没起过（没有 `stylefix_assess_*`/`stylefix-blk-*` 转录），所以"两个问题已解决"只是对话里的说法，存储里就是 0/3。
+
+**改法**：`styleRoundSeed(proj, round)` 三级取上下文——① 本轮自己的转录（打断续跑）② 最近一轮的转录（新一轮接着上一轮记忆）③ 样式阶段 `style_session.jsonl`（第一次进循环）；取到转录时 `SeedCounters` 续上轮次/工具数、日志写明从哪条转录继续、重入时反馈里加一句 `Continue this round from where it stopped`。取不到任何上下文时如实报错，不拿空上下文硬跑。
+
+**验证**：`t280_style_round_resume_test.go`（第 1 轮接自己那条；第 2 轮先接 r1、有 r2 优先 r2；无上下文返回空）。`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。
+
+**给用户的说明**：现在重跑会真的接着那一轮说话（转录里 95 条历史 + 续上的轮次/工具数）；勾选仍从 0 开始（沿用清单时按 T279 清掉打勾），由分块修复会话重新核对后打勾——也就是说"两个已解决"要等这一轮核对过才成为记录。
