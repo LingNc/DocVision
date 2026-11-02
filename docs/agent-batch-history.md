@@ -3456,3 +3456,19 @@ T260
 - 于是重入后的路径是"评估（若没交）→ 分块（只跑缺的）→ 下一轮"，而不是把已完成的一步重做一遍。
 
 **验证**：`TestStyleRoundDoneReadsTranscripts`、`TestRoundBlocksAndResultsReuseBySHA`（同指纹沿用 / 异指纹作废 / 追加写不覆盖已有块）；`./internal/...` 除既有两条外全绿。
+
+## 第八十四批（2026-11-02）：T286——评估会话的视野收窄、路径说清
+
+用户："你检查一下这个 bash 路径不清楚提示词有没有问题"＋"我不清楚你给的这个工作区是否东西实在是太广泛了？太多了？…毕竟这个是分派评估"
+
+**现场**（真实转录）：评估会话先 `ls -R /work/chapters` → `没有那个文件或目录`，再 `ls -la /work; ls -la /project` 才发现：`/work` 是自己的草稿区（当时还是空的）、`/project` 是**整个项目根**（`build/ chapters/ doc_index/ out/ progress.json source/` 全在里面）。浪费两轮，而且它刚看到的 `chapters/` 其实是 Markdown 源，不是要评估的 `.tex`。
+
+**根因**：别的会话都走 `sessionMounts` → `projectRoot()` 的**窄只读视图**（`projectViewEntries`：`source`/`style`/`chapters`/`converted`/`reports`，明确不含 `work/sessions`、`work/attempts`、`work/temp`、`build/`、`out/`），只有评估会话直接 `{Name:"project", Dir: proj}`。再叠上首条消息里"正文在 `work/chapters/<name>/children/**`"这个不带上缀的写法，和它自己的 `/work` 挂载撞名。
+
+**改法**：
+- 评估会话 `mounts` 改为 `{project: r.projectRoot()}` + 自己的 `work` 草稿区（后者是唯一可写挂载，sandbox 里只读挂载真的只读）；
+- 提示词与首条消息统一 `project:converted/<name>.tex`、`project:converted/<name>/children/**`，并写明 bash 里 `/project` 是视图、`/project/chapters/*.md` 只是 Markdown 源、`/project/style`·`/project/reports` 也是只读、`/work` 只是草稿区（`plan.md`/`blocks.json`）；
+- `bash` 工具描述里那个写死的 `work:chapters/a.tex = /work/chapters/a.tex` 例子换成与挂载表无关的说法（每个会话的挂载本来就不同，写死一个会把模型引到不存在的路径）；
+- 提示词按用户要求收敛：改完 1361 字节，比改动前（1410）还短，规则 2/4/5 顺带压掉冗余措辞。
+
+**验证**：`t286_prompt_paths_test.go`——`TestAssessPromptNamesBothMounts`（必须点到 `project:converted`、`/project/style`、`/work is only your scratch area`，且不得再出现 `work/chapters`）、`TestSubdividedBlockNoteNamesWorkspace`；`./internal/...` 除既有两条外全绿。

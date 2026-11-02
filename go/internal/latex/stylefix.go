@@ -1046,7 +1046,11 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	goal := NewGoalTool(filepath.Join(wsDir, "plan.md"))
 	blocks := NewBlocksTool(filepath.Join(wsDir, "blocks.json"), chapterNames...)
 	submit := &SubmitBlocksTool{Workspace: wsDir, Goal: goal, Known: chapterNames}
-	mounts := []Mount{{Name: "project", Dir: proj}, {Name: "work", Dir: wsDir}}
+	// T286：以前这里挂的是整个项目根（转换转录、attempts、temp、build、out 全都
+	// 现给评估会话看），既不该给它看、也让 ls 变成一堆无关目录。改成与其它会话
+	// 同一条规矩：project 是窄的只读视图（source/style/chapters/converted/reports），
+	// work 是它自己的可写草稿区。
+	mounts := []Mount{{Name: "project", Dir: r.projectRoot()}, {Name: "work", Dir: wsDir}}
 	// T282：评估会话以前只有 read_file/grep，没有 ls——想看"这一章有哪些子节
 	// 文件"只能靠 grep 试出来（真实运行里为此烧掉十几轮、三十多分钟）。给它
 	// bash：ls/find/wc/grep -rn 都能用，路径和 file 工具同一套前缀。
@@ -1092,11 +1096,11 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	userText := fmt.Sprintf("The consolidated style-problem list (%d problems) is available through the problems tool (list / get / search) — it is NOT pasted here.", len(problems)) +
 		"\nChapters that explicitly reported problems: " + strings.Join(issueList, ", ") +
 		"\nAll converted chapters: " + strings.Join(chapterNames, ", ") +
-		"\nTheir .tex files are readable at project:work/chapters/<name>.tex (a chapter's parts live under project:work/chapters/<name>/). Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks with the blocks tool (or edit work:blocks.json directly — both land in the same file), then call submit_blocks with NO arguments to submit from the file."
+		"\nTheir .tex files are readable read-only at project:converted/<name>.tex (a chapter's parts live under project:converted/<name>/). In bash that is /project/converted/<name>.tex; /project/chapters/<name>.md is only the Markdown source, and /work is your own scratch workspace (plan.md, blocks.json), NOT the book. Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks with the blocks tool (or edit work:blocks.json directly — both land in the same file), then call submit_blocks with NO arguments to submit from the file."
 	// T281：细分父章节的顶层 .tex 只是 `\input` 列表，照着它 grep 什么都找不到——
 	// 必须点名正文目录，否则评估会话会把最厚的几章判成"没受影响"。
 	if sub := subdividedChapters(proj, chapterNames); len(sub) > 0 {
-		userText += "\nSUBDIVIDED chapters — their top .tex is only `\\input` lines, the body is in work/chapters/<name>/children/** (grep THAT folder before deciding a chapter is unaffected): " + strings.Join(sub, ", ")
+		userText += "\nSUBDIVIDED chapters — their top .tex is only `\\input` lines, the body is in project:converted/<name>/children/** (in bash: /project/converted/<name>/children/** — grep THAT folder before deciding a chapter is unaffected): " + strings.Join(sub, ", ")
 	}
 	if resume {
 		// 接着上次跑：长指令在历史里，这里只说接着干什么。
@@ -1135,7 +1139,7 @@ func subdividedBlockNote(proj string, chapters []string) string {
 		parts = append(parts, b+" → chapters/"+b+"/children/")
 	}
 	return "\nSUBDIVIDED chapters in this block — the top .tex is only `\\input` lines, the body you must grep and edit is under " +
-		strings.Join(parts, ", ")
+		strings.Join(parts, ", ") + " (all of these are inside your workspace: in bash /work/chapters/<name>/children/)"
 }
 
 // styleFixBlocks 并行跑分块修复会话，返回仍有问题的章节列表。

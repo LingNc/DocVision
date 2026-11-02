@@ -845,7 +845,7 @@ func (t *WorkBashTool) Definition() map[string]any {
 		}
 		desc += fmt.Sprintf("/%s (%s), ", m.Name, kind)
 	}
-	desc += "and these are exactly the trees of the file tools — the suffix after the prefix is the same: work:chapters/a.tex = /work/chapters/a.tex, project:source/book.md = /project/source/book.md, source:book_part1.pdf = /source/book_part1.pdf. " +
+	desc += "and these are exactly the trees of the file tools — same prefix and suffix (<mount>:<path> = /<mount>/<path>); only the mounts above exist. " +
 		"Only /tmp is a scratch area (it persists across your bash calls). Useful for wc/sed/awk/ls/diff. timeout: seconds (default 30, max 300). Output is capped."
 	if t.Python != nil {
 		if d := t.Python.Describe(); d != "" {
