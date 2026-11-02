@@ -2404,3 +2404,8 @@ user 轮
   根因：T280 的 `styleRoundSeed` 只看"转录文件在不在"，不看这一轮有没有交过 `submit_style`——跑完的一轮和被打断的一轮在磁盘上长得一样。
   改：新增 `transcriptSubmitted` + `sessionAttemptPath(dir,base,terminalTool)`——`<base>.jsonl` 里没交过终态工具才续它；交过就换下一条 `<base>.2.jsonl`／`.3.jsonl`（旧记录原样留档，不覆盖不删），风格修复轮、整合、评估、分块四处统一走它；块会话续跑复用被打断的工作区、新一次尝试重新铺；`resumeNote` 不再有"已收尾"分支，日志只说"接着上一次没交 X 的尝试继续"。
   验证：`TestSessionAttemptPathResumesOnlyUnsubmitted/SkipsFinishedAttempt`（交过的换 `.2`、`.2` 没交就续 `.2`、别的终态工具不算）、`TestTranscriptSubmittedReadsToolCalls`、`TestTempDirKeepReusesInterruptedWorkspace`；`./internal/...` 除既有 `compare_figure` 门禁与宿主 libpython 两条外全绿。
+
+[X][ ] T285. 风格修复的每一层都要记住"这一步已经做完"：重入时第 1 轮风格会话明明交过 `submit_style`，却又开了一条新会话（`stylefix_style_r1.2`）从头再跑一遍；交过就该进下一阶段（评估→分块），而不是把那一步重做。
+  根因：循环每次都从 `round = 1` 无条件重跑三步，磁盘上只有转录、没有"这一轮这一步已完成"的产物；跑完与被打断在循环眼里没区别。
+  改：新增轮级产物 `work/style_fix/blocks_r<N>.json` 与 `results_r<N>.json`（都带工作汇报指纹 `sha`，报告一变自动作废）；`styleRoundDone` 见 `submit_style` 就跳过风格会话，`loadRoundBlocks` 命中就沿用分块，`loadBlockResults` 命中的块直接收账不跑会话；只剩没交过的阶段才开/续会话。
+  验证：`t285_style_loop_progress_test.go`——`TestStyleRoundDoneReadsTranscripts`（交过算完成、`.2` 也算、别的轮不受影响）、`TestRoundBlocksAndResultsReuseBySHA`（同指纹沿用、报告变了作废、追加写不覆盖已有块）；`./internal/...` 除既有两条外全绿。

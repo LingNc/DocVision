@@ -3439,3 +3439,20 @@ T260
 **数据处置**（用户要求处理那几条多出来的消息）：先把整条转录备份到 `work/sessions/archive/stylefix_style_r1.full-20261102-1409.jsonl`，再把正文截到 176 行（最后一条是 13:06:12 的 `run_end`），14:08–14:09 那几条伪续跑记录移出正文。截断只针对这一个文件、且留了完整备份。
 
 **验证**：`TestSessionAttemptPathResumesOnlyUnsubmitted`（没交过就续同一条）、`TestSessionAttemptPathSkipsFinishedAttempt`（交过 → `.2`；`.2` 没交 → 续 `.2`；别的会话终态工具不算）、`TestTranscriptSubmittedReadsToolCalls`、`TestTempDirKeepReusesInterruptedWorkspace`；`./internal/...` 除既有两条外全绿。
+
+## 第八十三批（2026-11-02）：T285——交过的阶段就该往下走
+
+用户："这个 style r1 他不是已经提交过了吗？为什么还是重新开了一个会话？样式修复 · style_r1.2 交过不应该是下一个阶段了吗？"
+
+**现场**：`--step convert` 重入，控制台「第 1/3 轮风格修复」后起来的是 `stylefix-style-r1`（新会话，轮次 2 · 工具调用 2 · 33 秒后被打断）——T284 把"已提交的一轮"换成了 `.2` 转录，但它仍然是**从头再跑一遍**。
+
+**根因（比 T284 更深一层）**：`styleFeedbackLoop` 每轮三步（风格会话 → 评估 → 分块）无条件全跑；磁盘上只有转录、没有"这一轮这一步已经交付"的产物，所以"跑完"和"被打断"在循环眼里没有区别。
+
+**改法**：
+- 轮级产物：`work/style_fix/blocks_r<N>.json`（评估交回来的分块）、`work/style_fix/results_r<N>.json`（每块的 `resolved`/`notes`），两者都带工作汇报指纹 `sha`（`styleFixReportsSHA`），报告一变旧产物自动作废；
+- `styleRoundDone`：这一轮的转录（含 `.2`、`.3`）里有 `submit_style` → 跳过风格会话（cls/manual 在提交时就写进 `style/` 了）；
+- `loadRoundBlocks` 命中 → 沿用分块，不重跑评估会话；
+- `loadBlockResults` 命中的块 → 直接收账写报告（章节副本在提交时就拷回 `work/chapters/` 了），只跑没交过的块；
+- 于是重入后的路径是"评估（若没交）→ 分块（只跑缺的）→ 下一轮"，而不是把已完成的一步重做一遍。
+
+**验证**：`TestStyleRoundDoneReadsTranscripts`、`TestRoundBlocksAndResultsReuseBySHA`（同指纹沿用 / 异指纹作废 / 追加写不覆盖已有块）；`./internal/...` 除既有两条外全绿。

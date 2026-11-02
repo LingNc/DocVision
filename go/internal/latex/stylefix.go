@@ -599,19 +599,32 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 		r.phaseNote()("[style-fix] 第 %d/%d 轮风格修复", round, maxRounds)
 
 		// 1. 风格修复会话：按问题清单修 cls/手册。
-		if err := r.styleFixStyleSession(proj, round, problems, store); err != nil {
+		// T285：这一轮已经交过 submit_style（cls/manual 在提交时就落进 style/ 了）
+		// → 那个阶段已经做完，直接进下一阶段，不再重开一条会话把它跑一遍。
+		if styleRoundDone(proj, round) {
+			r.log.Log(0, "[style-fix] 第", strconv.Itoa(round), "轮风格修复已提交过，跳过这一阶段的会话")
+			r.phaseNote()("[style-fix] 第 %d 轮风格修复已提交，跳过", round)
+		} else if err := r.styleFixStyleSession(proj, round, problems, store); err != nil {
 			return fmt.Errorf("风格修复会话（第 %d 轮）失败: %w", round, err)
 		}
 
 		// 2. 影响评估：按问题划分章节块。
-		blocks, err := r.styleFixAssess(proj, round, problems, issues, store)
-		if err != nil {
-			return fmt.Errorf("影响评估会话（第 %d 轮）失败: %w", round, err)
+		// T285：分块已经交过就沿用（同样的清单、同样的章节，重算一遍只是再烧一次）。
+		blocks, reused := loadRoundBlocks(proj, round, sha)
+		if reused {
+			r.log.Log(0, "[style-fix] 第", strconv.Itoa(round), "轮的分块已交过，沿用上一次的评估结果（",
+				strconv.Itoa(len(blocks)), " 块）")
+		} else {
+			var err error
+			blocks, err = r.styleFixAssess(proj, round, problems, issues, store, sha)
+			if err != nil {
+				return fmt.Errorf("影响评估会话（第 %d 轮）失败: %w", round, err)
+			}
 		}
 		r.log.Log(0, "[style-fix] 修复块:", strconv.Itoa(len(blocks)), "块")
 
 		// 3. 分块并行修复（定位修改，绝不重做）。
-		remaining := r.styleFixBlocks(proj, round, blocks, store)
+		remaining := r.styleFixBlocks(proj, round, blocks, store, sha)
 
 		// 4. 收尾判定。
 		if len(remaining) == 0 {
@@ -625,6 +638,99 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	r.log.LogWarning(0, "[style-fix] 已达最大轮数("+strconv.Itoa(maxRounds)+")，停止风格修复循环（遗留问题交给编译/终审）")
 	r.phaseNote()("[style-fix] 已达最大轮数(%d)，遗留问题交给编译/终审", maxRounds)
 	return nil
+}
+
+// roundArtifact 是某一轮风格修复落在 work/style_fix/ 下的产物路径（T285）。
+// 有了它，重入时"交过的阶段"可以直接沿用，而不是把会话再跑一遍。
+func roundArtifact(proj, kind string, round int) string {
+	return filepath.Join(proj, "work", "style_fix", fmt.Sprintf("%s_r%d.json", kind, round))
+}
+
+// styleRoundDone 报告第 round 轮风格修复会话是否已经交过 submit_style（T285）。
+// 交过 = 那一轮的 cls/manual 在提交时就写进了 style/，不必再跑一遍。
+func styleRoundDone(proj string, round int) bool {
+	base := filepath.Join(proj, "work", "sessions", fmt.Sprintf("stylefix_style_r%d", round))
+	for _, f := range transcriptFilesWithPrefix(base) {
+		if transcriptSubmitted(f, "submit_style") {
+			return true
+		}
+	}
+	return false
+}
+
+// transcriptFilesWithPrefix 列出 `<base>.jsonl`、`<base>.2.jsonl`……（T285）。
+func transcriptFilesWithPrefix(base string) []string {
+	var out []string
+	if fileExists(base + ".jsonl") {
+		out = append(out, base+".jsonl")
+	}
+	for i := 2; i < 1000; i++ {
+		p := fmt.Sprintf("%s.%d.jsonl", base, i)
+		if !fileExists(p) {
+			break
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// loadRoundBlocks 读回第 round 轮已交的分块（T285）：有就沿用，不重跑评估会话。
+// 只认同一个工作汇报指纹（sha）下的产物——报告变了，旧分块就不再成立。
+func loadRoundBlocks(proj string, round int, sha string) ([]StyleBlock, bool) {
+	data, err := os.ReadFile(roundArtifact(proj, "blocks", round))
+	if err != nil {
+		return nil, false
+	}
+	var doc struct {
+		SHA    string       `json:"sha"`
+		Blocks []StyleBlock `json:"blocks"`
+	}
+	if json.Unmarshal(data, &doc) != nil || len(doc.Blocks) == 0 || doc.SHA != sha {
+		return nil, false
+	}
+	return doc.Blocks, true
+}
+
+// blockResult 是一块修复会话交回来的结论（T285）。
+type blockResult struct {
+	Resolved map[string]bool   `json:"resolved"`
+	Notes    map[string]string `json:"notes"`
+}
+
+// loadBlockResults 读回第 round 轮已经交过的各块结论（键是块号字符串）。
+// 与分块一样只认同一个工作汇报指纹下的产物。
+func loadBlockResults(proj string, round int, sha string) map[string]blockResult {
+	out := map[string]blockResult{}
+	data, err := os.ReadFile(roundArtifact(proj, "results", round))
+	if err != nil {
+		return out
+	}
+	var doc struct {
+		SHA     string                 `json:"sha"`
+		Results map[string]blockResult `json:"results"`
+	}
+	if json.Unmarshal(data, &doc) != nil || doc.SHA != sha {
+		return out
+	}
+	if doc.Results != nil {
+		out = doc.Results
+	}
+	return out
+}
+
+// saveBlockResult 记下某一块的结论，重入时不必再跑这一块（T285）。
+func saveBlockResult(proj string, round, blockIdx int, sha string, res blockResult) error {
+	path := roundArtifact(proj, "results", round)
+	all := loadBlockResults(proj, round, sha)
+	all[strconv.Itoa(blockIdx)] = res
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(map[string]any{"sha": sha, "results": all}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // styleFixIntegrate 跑问题整合会话。
@@ -908,7 +1014,7 @@ func subdividedChapters(proj string, names []string) []string {
 }
 
 // styleFixAssess 跑影响评估会话：按问题划分章节块。
-func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem, issues map[string]string, store *ProblemStore) ([]StyleBlock, error) {
+func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem, issues map[string]string, store *ProblemStore, sha string) ([]StyleBlock, error) {
 	chapWork := filepath.Join(proj, "work", "chapters")
 	texs, _ := filepath.Glob(filepath.Join(chapWork, "*.tex"))
 	var chapterNames []string
@@ -1004,8 +1110,15 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	}
 	r.keepSessionFile(trPath)
 	// blocks.json 最终版回存工作区（会话编辑的最终态，跨轮可查）。
-	if data, err := json.Marshal(map[string]any{"blocks": submit.Blocks}); err == nil {
+	if data, err := json.MarshalIndent(map[string]any{"blocks": submit.Blocks}, "", "  "); err == nil {
 		_ = os.WriteFile(filepath.Join(wsDir, "blocks.json"), data, 0o644)
+	}
+	// T285：这一轮的分块单独存一份（带工作汇报指纹），重入时直接沿用，
+	// 不再重跑评估会话；报告一变指纹就对不上，自动作废。
+	if data, err := json.MarshalIndent(map[string]any{"sha": sha, "blocks": submit.Blocks}, "", "  "); err == nil {
+		if err := os.MkdirAll(filepath.Join(proj, "work", "style_fix"), 0o755); err == nil {
+			_ = os.WriteFile(roundArtifact(proj, "blocks", round), data, 0o644)
+		}
 	}
 	return submit.Blocks, nil
 }
@@ -1027,7 +1140,7 @@ func subdividedBlockNote(proj string, chapters []string) string {
 
 // styleFixBlocks 并行跑分块修复会话，返回仍有问题的章节列表。
 // 块会话失败的章节退回单章 fixChapterStyle，再失败删产物重转换。
-func (r *Runner) styleFixBlocks(proj string, round int, blocks []StyleBlock, store *ProblemStore) []string {
+func (r *Runner) styleFixBlocks(proj string, round int, blocks []StyleBlock, store *ProblemStore, sha string) []string {
 	clsName := classNameOfFile(filepath.Join(proj, "style"))
 	chapWork := filepath.Join(proj, "work", "chapters")
 	reportsDir := filepath.Join(proj, "work", "reports")
@@ -1045,7 +1158,39 @@ func (r *Runner) styleFixBlocks(proj string, round int, blocks []StyleBlock, sto
 	var remaining []string // 仍有问题
 	var fallback []string  // 块会话失败 → 退回单章修复
 
+	// T285：这一块已经交过修正（章节副本在提交时就拷回 work/chapters 了）→ 直接
+	// 收账，不再把会话跑一遍。只有没交过（从没跑 / 被打断）的块才需要会话。
+	done := loadBlockResults(proj, round, sha)
+	collect := func(bi int, block StyleBlock, results map[string]bool, notes map[string]string) {
+		for _, base := range block.Chapters {
+			resolved, ok := results[base]
+			note := notes[base]
+			reportPath := filepath.Join(reportsDir, base+".md")
+			if !ok {
+				// 会话没汇报这一章：保守视为仍有问题。
+				resolved = false
+				note = "块修复会话未汇报本章"
+			}
+			conclusion := "无问题"
+			if !resolved {
+				conclusion = "存在问题"
+				remaining = append(remaining, base)
+			}
+			report := "- 结论: " + conclusion + "\n\n样式修复（第 " + strconv.Itoa(round) + " 轮，块 " + strconv.Itoa(bi+1) + "）: " + note + "\n"
+			_ = os.MkdirAll(reportsDir, 0o755)
+			_ = os.WriteFile(reportPath, []byte(report), 0o644)
+		}
+	}
+
 	for bi, block := range blocks {
+		if res, ok := done[strconv.Itoa(bi+1)]; ok {
+			r.log.Log(0, "[style-fix] 块", strconv.Itoa(bi+1), "已交过修正，沿用上一次的结论（",
+				strconv.Itoa(len(block.Chapters)), " 章）")
+			mu.Lock()
+			collect(bi, block, res.Resolved, res.Notes)
+			mu.Unlock()
+			continue
+		}
 		wg.Add(1)
 		tid := <-tidPool
 		go func(bi int, block StyleBlock, tid int) {
@@ -1059,26 +1204,12 @@ func (r *Runner) styleFixBlocks(proj string, round int, blocks []StyleBlock, sto
 				mu.Unlock()
 				return
 			}
+			if serr := saveBlockResult(proj, round, bi+1, sha, blockResult{Resolved: results, Notes: notes}); serr != nil {
+				r.log.LogWarning(tid, "[style-fix] 块", strconv.Itoa(bi+1), "结论落盘失败:", serr)
+			}
 			mu.Lock()
 			defer mu.Unlock()
-			for _, base := range block.Chapters {
-				resolved, ok := results[base]
-				note := notes[base]
-				reportPath := filepath.Join(reportsDir, base+".md")
-				if !ok {
-					// 会话没汇报这一章：保守视为仍有问题。
-					resolved = false
-					note = "块修复会话未汇报本章"
-				}
-				conclusion := "无问题"
-				if !resolved {
-					conclusion = "存在问题"
-					remaining = append(remaining, base)
-				}
-				report := "- 结论: " + conclusion + "\n\n样式修复（第 " + strconv.Itoa(round) + " 轮，块 " + strconv.Itoa(bi+1) + "）: " + note + "\n"
-				_ = os.MkdirAll(reportsDir, 0o755)
-				_ = os.WriteFile(reportPath, []byte(report), 0o644)
-			}
+			collect(bi, block, results, notes)
 		}(bi, block, tid)
 	}
 	wg.Wait()
