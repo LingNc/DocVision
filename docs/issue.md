@@ -2414,3 +2414,8 @@ user 轮
   根因：只有评估会话没用其它会话共用的窄视图（`projectRoot()`），而是把 `proj` 原样挂成 `project`；同时 `work` 这个挂载名既是它自己的草稿区、又和项目里的 `work/` 同名，提示词里却没区分。
   改：评估会话改用窄只读视图（`project:converted`+`style`+`reports`+`chapters`+`source`），草稿区仍是唯一可写挂载；提示词与首条消息统一写 `project:converted/<name>.tex` 并点明 bash 里 `/project` 是视图、`/work` 只是草稿区（改完比原版还短 49 字节）；`bash` 工具描述不再写死一个虚构的 `work:chapters/a.tex` 例子。
   验证：`t286_prompt_paths_test.go`（提示词必须点到 `project:converted`、`/project/style`、`/work is only your scratch area`，且不得再出现 `work/chapters`；`subdividedBlockNote` 给出 `/work/chapters/<name>/children/`）；`./internal/...` 除既有两条外全绿。
+
+[X][ ] T287. 中文项目里「重画这张图」必定失败：提示"只能重画某条作图会话（source/sessions/vector_*.jsonl）"，可那正是作图会话。
+  根因：校验转录名用的是 ASCII 白名单正则 `^[A-Za-z0-9_.-]+\.jsonl$`，而作图转录叫 `vector_<项目名>__<哈希>__<描述>.jsonl`——项目名与描述带中文就被判成"不是转录文件"（同一条校验也用在这个页面的「删除记录」上）。
+  改：换成 `validTranscriptName`——只要求"一个 *.jsonl 文件名、不带路径分隔符、不以点开头、无控制字符"，中文照收；`../`、`a/b.jsonl`、`.hidden.jsonl` 仍拒绝。
+  验证：`t287_transcript_name_test.go`（中文转录名端到端排进队列、`role=vector`、`Request.Path` 原样；越界与非法名仍拒）；`./internal/sessionview/` 全绿。

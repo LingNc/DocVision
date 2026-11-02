@@ -3472,3 +3472,15 @@ T260
 - 提示词按用户要求收敛：改完 1361 字节，比改动前（1410）还短，规则 2/4/5 顺带压掉冗余措辞。
 
 **验证**：`t286_prompt_paths_test.go`——`TestAssessPromptNamesBothMounts`（必须点到 `project:converted`、`/project/style`、`/work is only your scratch area`，且不得再出现 `work/chapters`）、`TestSubdividedBlockNoteNamesWorkspace`；`./internal/...` 除既有两条外全绿。
+
+## 第八十五批（2026-11-02）：T287——中文项目里的「重画这张图」
+
+用户："我想重绘制一下这个某两个图，后续可能会用到，这边怎么操作？"＋页面回执 "失败：只能重画某条作图会话（source/sessions/vector_*.jsonl）"
+
+**现场**：点的是「矢量图」里的作图会话（一条 60 条消息、53.4 KB 的 `vector_*.jsonl`），服务端却回"只能重画某条作图会话"。同一项目里有 33 条这样的转录、35 条进度记录全是 `done`。
+
+**根因**：`internal/sessionview/retry.go` 的 `transcriptNameRe = ^[A-Za-z0-9_.-]+\.jsonl$`。作图转录的名字是 `vector_<项目名>__<哈希>__<描述>.jsonl`，中文项目名一出现就不匹配 → 进了"不是转录文件"分支。**同一个正则**还用在 `transcriptUnderWork`（页面的「删除记录」/「从某条记录之后继续」），所以中文项目里那两处也一起坏——只是不点就看不见。
+
+**改法**：`validTranscriptName`——只要求"一个 `*.jsonl` 文件名"：`filepath.Base(name)==name`、不含 `/` `\`、不以点开头、不含控制字符；中文、空格、括号照收。三处调用点统一换掉。
+
+**验证**：`t287_transcript_name_test.go`——`TestValidTranscriptNameAllowsUnicode`（中文/带哈希名字收，`../escape.jsonl`、`a/b.jsonl`、`.hidden.jsonl`、`notes.txt` 仍拒）、`TestPostRetryVectorRoleAcceptsChineseNames`（中文项目 + 中文转录名 → 200，队列里 `role=vector` 且 `Request.Path` 是原名）；`./internal/sessionview/` 17.4s 全绿。
