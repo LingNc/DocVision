@@ -9,7 +9,7 @@ import (
 	"mineru-tools/internal/logger"
 )
 
-func writeAssessTranscript(t *testing.T, dir, name string, lines ...string) string {
+func writeAttemptTranscript(t *testing.T, dir, name string, lines ...string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
 	body := ""
@@ -25,59 +25,70 @@ func writeAssessTranscript(t *testing.T, dir, name string, lines ...string) stri
 	return p
 }
 
-// T282/T283：所有会话都"能续就续"——磁盘上有转录就接着它，代码不替用户删。
-func TestTranscriptResumeStateContinuesExisting(t *testing.T) {
+const submitStyleCall = `{"t":"msg","role":"assistant","text":"done","tool_calls":[{"id":"c1","type":"function","function":{"name":"submit_style","arguments":"{}"}}]}`
+
+// T284：只有"还没交过终态工具"的那一次尝试才续。交过的（那一轮已经跑完了）
+// 换下一条转录，旧记录原样留着——既不覆盖也不删。
+func TestSessionAttemptPathResumesOnlyUnsubmitted(t *testing.T) {
 	dir := t.TempDir()
-	writeAssessTranscript(t, dir, "stylefix_assess_r1.jsonl", `{"t":"msg","role":"user","text":"整理问题清单"}`)
-
-	msgs, path, resume, finished := transcriptResumeState(dir, "stylefix_assess_r1.jsonl", "submit_blocks")
-	if !resume || finished {
-		t.Fatalf("有转录就当续跑、未收尾: resume=%v finished=%v", resume, finished)
-	}
-	if filepath.Base(path) != "stylefix_assess_r1.jsonl" || len(msgs) != 1 {
-		t.Fatalf("应当接着同一条转录: %s %d", path, len(msgs))
+	if _, path, resume := sessionAttemptPath(dir, "stylefix_style_r1", "submit_style"); resume ||
+		filepath.Base(path) != "stylefix_style_r1.jsonl" {
+		t.Fatalf("没有转录时应当是全新一次尝试: %v %s", resume, path)
 	}
 
-	// 没有转录 → 全新一轮（路径就是那条即将写出的转录）。
-	empty := t.TempDir()
-	if msgs, path, resume, _ := transcriptResumeState(empty, "stylefix_integrate.jsonl", "submit_problems"); resume ||
-		len(msgs) != 0 || filepath.Base(path) != "stylefix_integrate.jsonl" {
-		t.Fatalf("没有转录时应当全新开始: %v %s %d", resume, path, len(msgs))
+	writeAttemptTranscript(t, dir, "stylefix_style_r1.jsonl",
+		`{"t":"msg","role":"user","text":"开始"}`,
+		`{"t":"msg","role":"assistant","text":"先看看"}`)
+	msgs, path, resume := sessionAttemptPath(dir, "stylefix_style_r1", "submit_style")
+	if !resume || filepath.Base(path) != "stylefix_style_r1.jsonl" || len(msgs) != 2 {
+		t.Fatalf("没交过就续同一条: resume=%v %s %d", resume, path, len(msgs))
 	}
 }
 
-// 收尾过的上一轮：仍接着同一条会话（不新开转录、不删东西），但标记 finished，
-// 好让调用方提醒它旧产物还在。
-func TestTranscriptResumeStateMarksFinishedTail(t *testing.T) {
+// 跑完的那一轮（交过 submit_style）不能被续上来——这正是"都结束了为什么又续上"。
+func TestSessionAttemptPathSkipsFinishedAttempt(t *testing.T) {
 	dir := t.TempDir()
-	writeAssessTranscript(t, dir, "stylefix_blk_r1-1.jsonl",
-		`{"t":"msg","role":"user","text":"修这一块"}`,
-		`{"t":"msg","role":"assistant","text":"done","tool_calls":[{"id":"c1","type":"function","function":{"name":"submit","arguments":"{}"}}]}`,
-		`{"t":"meta","kind":"run_end","ok":true}`,
-	)
-	if _, _, resume, finished := transcriptResumeState(dir, "stylefix_blk_r1-1.jsonl", "submit"); !resume || !finished {
-		t.Fatalf("收尾过的一轮仍然续跑、且标记 finished: resume=%v finished=%v", resume, finished)
+	writeAttemptTranscript(t, dir, "stylefix_style_r1.jsonl",
+		`{"t":"msg","role":"user","text":"开始"}`,
+		submitStyleCall,
+		`{"t":"meta","kind":"run_end","ok":true}`)
+
+	msgs, path, resume := sessionAttemptPath(dir, "stylefix_style_r1", "submit_style")
+	if resume || len(msgs) != 0 {
+		t.Fatalf("已经交过的不该再续: resume=%v %d", resume, len(msgs))
+	}
+	if filepath.Base(path) != "stylefix_style_r1.2.jsonl" {
+		t.Fatalf("应当换下一条尝试: %s", path)
 	}
 
-	// run_end 之后又跑了（提醒续跑时被打断）→ 仍算未收尾。
+	// 下一条被打断 → 接着它；再往后才轮到 .3。
+	writeAttemptTranscript(t, dir, "stylefix_style_r1.2.jsonl", `{"t":"msg","role":"user","text":"第二次"}`)
+	if _, path, resume := sessionAttemptPath(dir, "stylefix_style_r1", "submit_style"); !resume ||
+		filepath.Base(path) != "stylefix_style_r1.2.jsonl" {
+		t.Fatalf("应当续 .2: %v %s", resume, path)
+	}
+
+	// 终态工具只认本会话那一个：别的 submit 不算这一轮交过。
 	dir2 := t.TempDir()
-	writeAssessTranscript(t, dir2, "stylefix_blk_r1-1.jsonl",
-		`{"t":"msg","role":"user","text":"修这一块"}`,
-		`{"t":"meta","kind":"run_end","ok":true}`,
-		`{"t":"msg","role":"user","text":"你还没提交"}`,
-	)
-	if _, _, resume, finished := transcriptResumeState(dir2, "stylefix_blk_r1-1.jsonl", "submit"); !resume || finished {
-		t.Fatalf("run_end 之后还有消息 → 未收尾: resume=%v finished=%v", resume, finished)
+	writeAttemptTranscript(t, dir2, "stylefix_assess_r1.jsonl",
+		`{"t":"msg","role":"user","text":"分派"}`,
+		`{"t":"msg","role":"assistant","text":"x","tool_calls":[{"id":"c1","type":"function","function":{"name":"submit_style","arguments":"{}"}}]}`)
+	if _, _, resume := sessionAttemptPath(dir2, "stylefix_assess_r1", "submit_blocks"); !resume {
+		t.Fatal("不是本会话的终态工具，不该算已交")
 	}
+}
 
-	// 别的工具的终态不算这一轮交过（terminalTool 只认自己那一个）。
-	dir3 := t.TempDir()
-	writeAssessTranscript(t, dir3, "stylefix_integrate.jsonl",
-		`{"t":"msg","role":"user","text":"整合"}`,
-		`{"t":"msg","role":"assistant","text":"x","tool_calls":[{"id":"c1","type":"function","function":{"name":"submit_style","arguments":"{}"}}]}`,
-	)
-	if _, _, _, finished := transcriptResumeState(dir3, "stylefix_integrate.jsonl", "submit_problems"); finished {
-		t.Fatal("不是本会话的终态工具，不该算收尾")
+func TestTranscriptSubmittedReadsToolCalls(t *testing.T) {
+	dir := t.TempDir()
+	p := writeAttemptTranscript(t, dir, "a.jsonl", `{"t":"msg","role":"assistant","text":"x","tool_calls":[{"id":"c1","type":"function","function":{"name":"submit","arguments":"{}"}}]}`)
+	if !transcriptSubmitted(p, "submit") {
+		t.Fatal("应当认出终态工具")
+	}
+	if transcriptSubmitted(p, "submit_style") {
+		t.Fatal("不该把别的工具当成本会话终态")
+	}
+	if transcriptSubmitted(filepath.Join(dir, "nope.jsonl"), "submit") {
+		t.Fatal("文件不存在时不该报已交")
 	}
 }
 
@@ -111,7 +122,6 @@ func TestTempDirKeepReusesInterruptedWorkspace(t *testing.T) {
 	}
 	cleanup()
 
-	// 上一轮已经把目录清掉了 → 按原样新建一个空目录。
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}

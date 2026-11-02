@@ -672,14 +672,14 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 		tools, r.log, 1, "stylefix-integrate")
 	// T283：整合会话也一样能续——被打断就接着那条转录把清单写完；要重来由用户
 	// 在外面删掉转录与工作区文件，代码不替人删。
-	msgs, trPath, resume, finished := transcriptResumeState(filepath.Join(proj, "work", "sessions"),
-		"stylefix_integrate.jsonl", "submit_problems")
+	msgs, trPath, resume := sessionAttemptPath(filepath.Join(proj, "work", "sessions"),
+		"stylefix_integrate", "submit_problems")
 	if resume {
 		sess.SetMessages(msgs)
 		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
 			sess.SeedCounters(st.Rounds, st.Tools)
 		}
-		r.log.Log(0, "[style-fix] 整合会话接着上次的转录继续"+resumeNote(resume, finished, len(msgs)))
+		r.log.Log(0, "[style-fix] 整合会话接着上次没交清单的转录继续"+resumeNote(len(msgs)))
 	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
@@ -691,11 +691,8 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 
 	userText := fmt.Sprintf("The work reports from the chapter conversion sessions that flagged style/manual problems are in your workspace at work:reports/<chapter>.md (%d files). "+
 		"Read/grep them, then build the consolidated, de-duplicated problem list with the problems tool (one add call can take several items), and call submit_problems when the list is complete.", len(keys))
-	switch {
-	case resume && !finished:
+	if resume {
 		userText = "Continue the consolidation from where it stopped (the previous attempt ended without submit_problems; the reports and whatever you already added are still in the workspace). Finish the list and call submit_problems."
-	case resume && finished:
-		userText += "\nNOTE: an earlier consolidation in this conversation already concluded; the current problem list is what it left (read it with the problems tool) and it may predate these reports. Update or rewrite it to match them — nothing was deleted for you."
 	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
@@ -710,40 +707,23 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 	return problems, nil
 }
 
-// styleRoundSeed 决定第 round 轮风格修复会话从哪份上下文接着跑（T280）。
+// styleFixStyleSession 跑一轮风格修复会话。
 //
-//  1. 本轮自己的转录：上一轮运行被打断时，转录（append-only）已经实时落盘，
-//     接着它才算真的"续上"；
-//  2. 更早一轮的转录：本轮第一次跑，接着上一轮的记忆（cls 为什么这么改、
-//     哪些章节动过）；
-//  3. 样式阶段的 `work/style_session.jsonl`：第一次进循环，接样式会话的上下文。
-//
-// 以前这里的第 1 步不存在：每次都从样式阶段的上下文重开，`--step convert`
-// 重入或被 Ctrl-C 打断之后，上一轮风格修复的整段讨论（改了哪些 cls、哪几条
-// 问题已解决）对模型来说凭空消失，页面上却因为转录是同一条而看着"在接着跑"。
-func styleRoundSeed(proj string, round int) ([]session.ChatMessage, string) {
-	dir := filepath.Join(proj, "work", "sessions")
-	for r := round; r >= 1; r-- {
-		p := filepath.Join(dir, fmt.Sprintf("stylefix_style_r%d.jsonl", r))
-		if msgs, err := loadSessionContext(p); err == nil && len(msgs) > 0 {
-			return msgs, p
-		}
-	}
-	p := filepath.Join(proj, "work", "style_session.jsonl")
-	if msgs, err := loadSessionContext(p); err == nil && len(msgs) > 0 {
-		return msgs, p
-	}
-	return nil, ""
-}
-
-// styleFixStyleSession 跑一轮风格修复会话（接着上一轮的上下文）。
+// 上下文：这一次尝试**没交过 submit_style** → 接着那条转录继续（T284）；否则是
+// 新的一次尝试 → 从样式阶段的 `work/style_session.jsonl` 起（它记着 cls 为什么
+// 这么设计），两者都没有就用空上下文，不再因为"上一轮跑完了"而把旧结论续上来。
 func (r *Runner) styleFixStyleSession(proj string, round int, problems []StyleProblem, store *ProblemStore) error {
 	ctxPath := filepath.Join(proj, "work", "style_session.jsonl")
-	msgs, seedPath := styleRoundSeed(proj, round)
-	if len(msgs) == 0 {
-		return fmt.Errorf("样式会话上下文不可用: 还没有样式阶段或上一轮风格修复的转录")
+	msgs, trPath, resumed := sessionAttemptPath(filepath.Join(proj, "work", "sessions"),
+		fmt.Sprintf("stylefix_style_r%d", round), "submit_style")
+	seedPath := trPath
+	if !resumed {
+		msgs = nil
+		seedPath = ""
+		if ctxMsgs, cerr := loadSessionContext(ctxPath); cerr == nil && len(ctxMsgs) > 0 {
+			msgs, seedPath = ctxMsgs, ctxPath
+		}
 	}
-	resumed := filepath.Base(seedPath) != filepath.Base(ctxPath)
 	styleDir := filepath.Join(proj, "style")
 	workDir := filepath.Join(proj, "work", "style")
 
@@ -777,14 +757,18 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	defer liveClose()
 	sess.SetMessages(msgs)
 	if resumed {
-		// 接着上一轮跑：轮次/工具数也续上，页面上不再假装"刚从第 1 轮开始"。
+		// 接着上一次被打断的尝试跑：轮次/工具数也续上。
 		if _, st, serr := session.LoadTranscriptStats(seedPath); serr == nil {
 			sess.SeedCounters(st.Rounds, st.Tools)
 		}
-		r.log.Log(0, "[style-fix] 接着上一轮的风格修复会话继续（"+filepath.Base(seedPath)+"，"+
+		r.log.Log(0, "[style-fix] 接着上一次没交 submit_style 的尝试继续（"+filepath.Base(seedPath)+"，"+
+			resumeNote(len(msgs))+"）")
+	} else if len(msgs) > 0 {
+		r.log.Log(0, "[style-fix] 新一轮风格修复：上下文来自样式阶段（"+filepath.Base(seedPath)+"，"+
 			strconv.Itoa(len(msgs))+" 条历史）")
+	} else {
+		r.log.Log(0, "[style-fix] 新一轮风格修复：没有可用的样式上下文，从空会话开始")
 	}
-	trPath := filepath.Join(proj, "work", "sessions", fmt.Sprintf("stylefix_style_r%d.jsonl", round))
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -794,7 +778,7 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 		"They are NOT pasted here — use the problems tool to see them. "+
 		"Fix the cls/manual/example so these problems cannot recur, tick each one off with problems check as you resolve it, then submit_style.", len(problems))
 	if resumed {
-		feedback = "Continue this round from where it stopped (it was interrupted before submit_style). " + feedback
+		feedback = "Continue this round from where it stopped (the previous attempt ended without submit_style). " + feedback
 	}
 	if _, err := sess.Run(session.RunOptions{UserText: feedback}); err != nil {
 		return fmt.Errorf("风格修复会话失败: %w", err)
@@ -840,73 +824,73 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	return nil
 }
 
-// transcriptResumeState 报告一条会话转录能否接着跑（T282/T283）。
-//
-// 与其余会话同一条规矩：磁盘上有转录就接着它（历史 + 工作区里的文件就是上一轮
-// 的进度），代码不替用户删任何东西；resume=false 只发生在"还没有这条转录"或
-// "转录里没有可用消息"的时候。finished 表示上一轮已经收尾（`run_end` 落在末尾，
-// 或末尾那次调过 terminalTool）——此时仍接着同一条会话，但调用方要提醒它上一轮
-// 的产物还在，别把旧结论当新结论交上来。
-func transcriptResumeState(dir, name, terminalTool string) ([]session.ChatMessage, string, bool, bool) {
-	trPath := filepath.Join(dir, name)
-	msgs, lerr := loadSessionContext(trPath)
-	if lerr != nil || len(msgs) == 0 {
-		return nil, trPath, false, false
-	}
-	data, err := os.ReadFile(trPath)
-	if err != nil {
-		return msgs, trPath, true, false
+// transcriptSubmitted 报告一条转录里是否调过本会话的终态工具（T284）。
+// 交过 = 那一次尝试已经完成（无论之后进程有没有被中断）。
+func transcriptSubmitted(path, terminalTool string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil || terminalTool == "" {
+		return false
 	}
 	type record struct {
 		T         string `json:"t"`
-		Kind      string `json:"kind"`
 		ToolCalls []struct {
 			Function struct {
 				Name string `json:"name"`
 			} `json:"function"`
 		} `json:"tool_calls"`
 	}
-	var records []record
-	lastEnd := -1
 	for _, ln := range strings.Split(string(data), "\n") {
 		ln = strings.TrimSpace(ln)
 		if ln == "" {
 			continue
 		}
 		var rec record
-		if json.Unmarshal([]byte(ln), &rec) != nil {
-			continue
-		}
-		records = append(records, rec)
-		if rec.Kind == "run_end" {
-			lastEnd = len(records) - 1
-		}
-	}
-	submittedInTail := false
-	for _, rec := range records[lastEnd+1:] {
-		if rec.T != "msg" {
+		if json.Unmarshal([]byte(ln), &rec) != nil || rec.T != "msg" {
 			continue
 		}
 		for _, tc := range rec.ToolCalls {
-			if terminalTool != "" && tc.Function.Name == terminalTool {
-				submittedInTail = true
+			if tc.Function.Name == terminalTool {
+				return true
 			}
 		}
 	}
-	finished := submittedInTail || (lastEnd >= 0 && lastEnd == len(records)-1)
-	return msgs, trPath, true, finished
+	return false
 }
 
-// resumeNote 是"接着上一轮跑"的日志后缀（T283）。
-func resumeNote(resume, finished bool, n int) string {
-	if !resume {
+// sessionAttemptPath 给一个会话挑"这一次尝试"的转录（T284）。
+//
+// 规则与转换/核对一致：`<base>.jsonl` 存在且**还没交过终态工具** → 那一次被打断
+// 了，接着它跑；已经交过 → 那一次已经跑完，换下一条 `<base>.2.jsonl`、
+// `<base>.3.jsonl`……（旧记录原样留着，不覆盖也不删）。要真正从头再来，由用户
+// 在外面删掉这些文件，代码不替人删。
+func sessionAttemptPath(dir, base, terminalTool string) ([]session.ChatMessage, string, bool) {
+	for k := 1; k < 1000; k++ {
+		name := base + ".jsonl"
+		if k > 1 {
+			name = fmt.Sprintf("%s.%d.jsonl", base, k)
+		}
+		p := filepath.Join(dir, name)
+		if !fileExists(p) {
+			return nil, p, false
+		}
+		msgs, lerr := loadSessionContext(p)
+		if lerr != nil || len(msgs) == 0 {
+			return nil, p, false
+		}
+		if transcriptSubmitted(p, terminalTool) {
+			continue
+		}
+		return msgs, p, true
+	}
+	return nil, filepath.Join(dir, base+".jsonl"), false
+}
+
+// resumeNote 是"接着上一次没交结论的尝试跑"的日志后缀（T283/T284）。
+func resumeNote(n int) string {
+	if n == 0 {
 		return ""
 	}
-	state := "上一轮没跑完"
-	if finished {
-		state = "上一轮已收尾"
-	}
-	return "（" + strconv.Itoa(n) + " 条历史，" + state + "）"
+	return "（" + strconv.Itoa(n) + " 条历史）"
 }
 
 // subdividedChapters 挑出这些章节里的"细分父章节"：它们的顶层 .tex 只是
@@ -948,10 +932,10 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	// T282：这个会话跟其余会话一样"能续就续"——磁盘上有转录就接着它跑，
 	// plan.md/blocks.json 也原样留着（那就是上一轮的进度）。要真正从头开始，
 	// 由用户在外面删掉转录（和 work/stylefix_assess/ 下的文件）；代码不替人删。
-	msgs, trPath, resume, finished := transcriptResumeState(filepath.Join(proj, "work", "sessions"),
-		fmt.Sprintf("stylefix_assess_r%d.jsonl", round), "submit_blocks")
+	msgs, trPath, resume := sessionAttemptPath(filepath.Join(proj, "work", "sessions"),
+		fmt.Sprintf("stylefix_assess_r%d", round), "submit_blocks")
 	if resume {
-		r.log.Log(0, "[style-fix] 评估会话接着上次的转录继续"+resumeNote(resume, finished, len(msgs)))
+		r.log.Log(0, "[style-fix] 评估会话接着上次没交结论的转录继续"+resumeNote(len(msgs)))
 	}
 	goal := NewGoalTool(filepath.Join(wsDir, "plan.md"))
 	blocks := NewBlocksTool(filepath.Join(wsDir, "blocks.json"), chapterNames...)
@@ -1008,13 +992,9 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	if sub := subdividedChapters(proj, chapterNames); len(sub) > 0 {
 		userText += "\nSUBDIVIDED chapters — their top .tex is only `\\input` lines, the body is in work/chapters/<name>/children/** (grep THAT folder before deciding a chapter is unaffected): " + strings.Join(sub, ", ")
 	}
-	switch {
-	case resume && !finished:
+	if resume {
 		// 接着上次跑：长指令在历史里，这里只说接着干什么。
-		userText = "Continue this assessment from where it stopped (the previous attempt ended without submit_blocks; your plan.md and blocks.json are still in the workspace). Finish the partition and call submit_blocks."
-	case resume && finished:
-		// 同一个会话里再来一次：什么都不删，但要它把上一轮的分块重写。
-		userText += "\nNOTE: this conversation already contains an earlier assessment that concluded; its partition is still in work:blocks.json and its plan in work:plan.md. Clear or rewrite them (blocks clear) before partitioning again — nothing was deleted for you."
+		userText = "Continue this assessment from where it stopped (the previous attempt ended without submit_blocks). Finish the partition and call submit_blocks."
 	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
@@ -1136,10 +1116,15 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 
 	// T283：块会话也能续——上一轮被打断时工作区（含已改过的章节副本）与转录都
 	// 还在，直接接着用；要重来由用户在外面删 work/temp/<tag>/ 与转录。
-	msgs, trPath, resume, finished := transcriptResumeState(filepath.Join(proj, "work", "sessions"),
-		tag+".jsonl", "submit")
+	msgs, trPath, resume := sessionAttemptPath(filepath.Join(proj, "work", "sessions"), tag, "submit")
 	// 临时工作区：样式包 + 块内章节（.tex + parts 目录）+ 图片软链。
-	work, cleanWork, err := r.tempDirKeep(proj, tag)
+	// 续跑时复用上一次被打断的工作区（里面有已改过的章节副本）；上一次已经交过
+	// 就是新的一次尝试，重新铺一份。
+	mkTemp := r.tempDir
+	if resume {
+		mkTemp = r.tempDirKeep
+	}
+	work, cleanWork, err := mkTemp(proj, tag)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1218,7 +1203,7 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
 			sess.SeedCounters(st.Rounds, st.Tools)
 		}
-		r.log.Log(0, "[style-fix] 块修复会话接着上次的转录继续"+resumeNote(resume, finished, len(msgs)))
+		r.log.Log(0, "[style-fix] 块修复会话接着上次没交结论的转录继续"+resumeNote(len(msgs)))
 	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
@@ -1235,11 +1220,8 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 		"\nThe class and manual in your workspace are the REVISED versions. Make minimal, targeted edits — never re-convert. " +
 		"Compile each chapter's wrapper (<base>_wrapper.tex) to verify (view_pdf the result if in doubt), " +
 		"tick every assigned problem off with problems check as you resolve it, then submit with one entry per chapter."
-	switch {
-	case resume && !finished:
+	if resume {
 		userText = "Continue this block fix from where it stopped (the previous attempt ended without submit; your edited chapters are still in the workspace and the assigned problems are unchanged). " + userText
-	case resume && finished:
-		userText = "NOTE: an earlier attempt on this block already concluded. Treat the workspace files as it left them, re-check the assigned problems, and submit again with one entry per chapter. " + userText
 	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, nil, err

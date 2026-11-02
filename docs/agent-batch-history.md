@@ -3420,3 +3420,22 @@ T260
 **补记（同日，用户指出不一致 → T283）**：这里原本写的是"上一轮收尾过就另开一条转录、把 plan.md/blocks.json 归档"，用户立刻指出这与前面刚做的"被打断的会话都能续上"自相矛盾："这里面的所有会话应该都是能续上的吧，至于重新跑只能我通过外部去删除，因为这次只是暂时性的删除过去的文件产生的会话不应该算进去"。因此改成**一律能续**：`transcriptResumeState(dir,name,terminalTool)` 只要磁盘上有转录就 `SetMessages` + `SeedCounters` 接着跑；`run_end` 在末尾或末尾交过本会话终态工具只用来标 `finished`（续跑但提醒"旧产物还在，别当新结论交"）；整合、评估、分块三处全部接入，块会话再用 `tempDirKeep` 复用被打断时的工作区（不再被 `tempDir` 重建清掉已改章节）。归档/轮转两个函数与"每轮新开转录"的做法一并删除——**要真正从头再来只能由用户在外面删转录与目录**。上面那段"重跑食谱"随之作废。
 
 **验证**：`t282_assess_bash_test.go`（旧 plan/blocks 被挪走、新一轮 goal 为空、旧文件在 archive/、空目录重跑不报错；转录 `.jsonl`→`.2.jsonl`→`.3.jsonl`）；`./internal/...` 除既有 `compare_figure` 门禁与宿主 libpython 两条外全绿。
+
+## 第八十二批（2026-11-02）：T284——跑完的那一轮不许再被续上
+
+用户："我那个 stylefix 都结束了为什么又给他续上了 … 会话都跑完了。你看看怎么处理一下这后面他新增加的几条消息"
+
+**现场**：`work/sessions/stylefix_style_r1.jsonl` 里 13:06:12 有一条 `submit_style` 与 `run_end`——那一轮**已经交过结论**；但 14:08:53 又被追加了一条 `"Continue this round from where it stopped (it was interrupted before submit_style)"` 加两轮工具调用，控制台显示「轮次 52 · 工具调用 66 · 已用 19.0s」。
+
+**根因**：T280 的 `styleRoundSeed` 只看"转录文件在不在"——跑完的一轮和被打断的一轮在磁盘上长得一模一样，于是 `--step convert` 重入时把交过结论的那一轮当成被打断续了上去，模型重新读一遍清单、重新打勾。
+
+**改法**：
+- `transcriptSubmitted(path, terminalTool)`：这条转录里有没有调过本会话的终态工具（`submit_style`/`submit_problems`/`submit_blocks`/`submit`）；
+- `sessionAttemptPath(dir, base, terminalTool)`：`<base>.jsonl` 没交过 → 续它；交过 → 试 `<base>.2.jsonl`、`.3.jsonl`……（与转换/核对的尝试号同一条思路）；旧文件原样留档，不覆盖不删；
+- 风格修复轮、整合、评估、分块四处统一走它；块会话续跑复用工作区（`tempDirKeep`）、新一次尝试重新铺（`tempDir`）；
+- `resumeNote` 去掉"已收尾"分支，日志只报"接着上一次没交 X 的尝试继续（N 条历史）"；
+- `styleRoundSeed` 删除（它那套"有就接、还往上一轮串"正是这次事故的来源）。
+
+**数据处置**（用户要求处理那几条多出来的消息）：先把整条转录备份到 `work/sessions/archive/stylefix_style_r1.full-20261102-1409.jsonl`，再把正文截到 176 行（最后一条是 13:06:12 的 `run_end`），14:08–14:09 那几条伪续跑记录移出正文。截断只针对这一个文件、且留了完整备份。
+
+**验证**：`TestSessionAttemptPathResumesOnlyUnsubmitted`（没交过就续同一条）、`TestSessionAttemptPathSkipsFinishedAttempt`（交过 → `.2`；`.2` 没交 → 续 `.2`；别的会话终态工具不算）、`TestTranscriptSubmittedReadsToolCalls`、`TestTempDirKeepReusesInterruptedWorkspace`；`./internal/...` 除既有两条外全绿。
