@@ -670,7 +670,17 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 	sess := session.NewSession(r.clientFor(modelKey), r.modelOf(modelKey),
 		r.cfg.LatexSession("style"), renderPrompt(prompts.Must(prompts.StyleFixIntegrateSystem), r.cfg.LatexSession("style"), r.outputLang()),
 		tools, r.log, 1, "stylefix-integrate")
-	trPath := filepath.Join(proj, "work", "sessions", "stylefix_integrate.jsonl")
+	// T283：整合会话也一样能续——被打断就接着那条转录把清单写完；要重来由用户
+	// 在外面删掉转录与工作区文件，代码不替人删。
+	msgs, trPath, resume, finished := transcriptResumeState(filepath.Join(proj, "work", "sessions"),
+		"stylefix_integrate.jsonl", "submit_problems")
+	if resume {
+		sess.SetMessages(msgs)
+		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+		}
+		r.log.Log(0, "[style-fix] 整合会话接着上次的转录继续"+resumeNote(resume, finished, len(msgs)))
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -681,6 +691,12 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 
 	userText := fmt.Sprintf("The work reports from the chapter conversion sessions that flagged style/manual problems are in your workspace at work:reports/<chapter>.md (%d files). "+
 		"Read/grep them, then build the consolidated, de-duplicated problem list with the problems tool (one add call can take several items), and call submit_problems when the list is complete.", len(keys))
+	switch {
+	case resume && !finished:
+		userText = "Continue the consolidation from where it stopped (the previous attempt ended without submit_problems; the reports and whatever you already added are still in the workspace). Finish the list and call submit_problems."
+	case resume && finished:
+		userText += "\nNOTE: an earlier consolidation in this conversation already concluded; the current problem list is what it left (read it with the problems tool) and it may predate these reports. Update or rewrite it to match them — nothing was deleted for you."
+	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}
@@ -824,6 +840,75 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	return nil
 }
 
+// transcriptResumeState 报告一条会话转录能否接着跑（T282/T283）。
+//
+// 与其余会话同一条规矩：磁盘上有转录就接着它（历史 + 工作区里的文件就是上一轮
+// 的进度），代码不替用户删任何东西；resume=false 只发生在"还没有这条转录"或
+// "转录里没有可用消息"的时候。finished 表示上一轮已经收尾（`run_end` 落在末尾，
+// 或末尾那次调过 terminalTool）——此时仍接着同一条会话，但调用方要提醒它上一轮
+// 的产物还在，别把旧结论当新结论交上来。
+func transcriptResumeState(dir, name, terminalTool string) ([]session.ChatMessage, string, bool, bool) {
+	trPath := filepath.Join(dir, name)
+	msgs, lerr := loadSessionContext(trPath)
+	if lerr != nil || len(msgs) == 0 {
+		return nil, trPath, false, false
+	}
+	data, err := os.ReadFile(trPath)
+	if err != nil {
+		return msgs, trPath, true, false
+	}
+	type record struct {
+		T         string `json:"t"`
+		Kind      string `json:"kind"`
+		ToolCalls []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tool_calls"`
+	}
+	var records []record
+	lastEnd := -1
+	for _, ln := range strings.Split(string(data), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		var rec record
+		if json.Unmarshal([]byte(ln), &rec) != nil {
+			continue
+		}
+		records = append(records, rec)
+		if rec.Kind == "run_end" {
+			lastEnd = len(records) - 1
+		}
+	}
+	submittedInTail := false
+	for _, rec := range records[lastEnd+1:] {
+		if rec.T != "msg" {
+			continue
+		}
+		for _, tc := range rec.ToolCalls {
+			if terminalTool != "" && tc.Function.Name == terminalTool {
+				submittedInTail = true
+			}
+		}
+	}
+	finished := submittedInTail || (lastEnd >= 0 && lastEnd == len(records)-1)
+	return msgs, trPath, true, finished
+}
+
+// resumeNote 是"接着上一轮跑"的日志后缀（T283）。
+func resumeNote(resume, finished bool, n int) string {
+	if !resume {
+		return ""
+	}
+	state := "上一轮没跑完"
+	if finished {
+		state = "上一轮已收尾"
+	}
+	return "（" + strconv.Itoa(n) + " 条历史，" + state + "）"
+}
+
 // subdividedChapters 挑出这些章节里的"细分父章节"：它们的顶层 .tex 只是
 // 一串 `\input`，正文在 `<章>/children/**`（还可能再嵌一层子目录）。
 // 分块单位仍是那个顶层章节，但评估/修复都必须知道该去哪个目录里找正文。
@@ -860,15 +945,30 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	if err := os.MkdirAll(wsDir, 0o755); err != nil {
 		return nil, err
 	}
+	// T282：这个会话跟其余会话一样"能续就续"——磁盘上有转录就接着它跑，
+	// plan.md/blocks.json 也原样留着（那就是上一轮的进度）。要真正从头开始，
+	// 由用户在外面删掉转录（和 work/stylefix_assess/ 下的文件）；代码不替人删。
+	msgs, trPath, resume, finished := transcriptResumeState(filepath.Join(proj, "work", "sessions"),
+		fmt.Sprintf("stylefix_assess_r%d.jsonl", round), "submit_blocks")
+	if resume {
+		r.log.Log(0, "[style-fix] 评估会话接着上次的转录继续"+resumeNote(resume, finished, len(msgs)))
+	}
 	goal := NewGoalTool(filepath.Join(wsDir, "plan.md"))
 	blocks := NewBlocksTool(filepath.Join(wsDir, "blocks.json"), chapterNames...)
 	submit := &SubmitBlocksTool{Workspace: wsDir, Goal: goal, Known: chapterNames}
 	mounts := []Mount{{Name: "project", Dir: proj}, {Name: "work", Dir: wsDir}}
+	// T282：评估会话以前只有 read_file/grep，没有 ls——想看"这一章有哪些子节
+	// 文件"只能靠 grep 试出来（真实运行里为此烧掉十几轮、三十多分钟）。给它
+	// bash：ls/find/wc/grep -rn 都能用，路径和 file 工具同一套前缀。
+	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, fmt.Sprintf("bash_assess_r%d", round))
+	defer cleanBashTmp()
 	tools := []session.Tool{
 		&ReadFileTool{Mounts: mounts},
 		&GrepTool{Mounts: mounts},
 		&WriteWorkFileTool{Root: wsDir, AnyExt: true},
 		&EditWorkFileTool{Root: wsDir},
+		&WorkBashTool{Root: wsDir, Mounts: mounts, TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(),
+			Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		&ProblemsTool{Store: store},
 		goal,
 		blocks,
@@ -883,7 +983,14 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	sess := session.NewSession(r.clientFor(assessKey), r.modelOf(assessKey),
 		r.cfg.LatexSession("style"), renderPrompt(prompts.Must(prompts.StyleFixAssessSystem), r.cfg.LatexSession("style"), r.outputLang()),
 		tools, r.log, 1, tag)
-	trPath := filepath.Join(proj, "work", "sessions", fmt.Sprintf("stylefix_assess_r%d.jsonl", round))
+	// 上一轮没跑完就接着它（同一条转录往后追加、计数也续上）；跑完了就另开
+	// 一条，页面不会把两次评估显示成一条会话。
+	if resume {
+		sess.SetMessages(msgs)
+		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+		}
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -900,6 +1007,14 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	// 必须点名正文目录，否则评估会话会把最厚的几章判成"没受影响"。
 	if sub := subdividedChapters(proj, chapterNames); len(sub) > 0 {
 		userText += "\nSUBDIVIDED chapters — their top .tex is only `\\input` lines, the body is in work/chapters/<name>/children/** (grep THAT folder before deciding a chapter is unaffected): " + strings.Join(sub, ", ")
+	}
+	switch {
+	case resume && !finished:
+		// 接着上次跑：长指令在历史里，这里只说接着干什么。
+		userText = "Continue this assessment from where it stopped (the previous attempt ended without submit_blocks; your plan.md and blocks.json are still in the workspace). Finish the partition and call submit_blocks."
+	case resume && finished:
+		// 同一个会话里再来一次：什么都不删，但要它把上一轮的分块重写。
+		userText += "\nNOTE: this conversation already contains an earlier assessment that concluded; its partition is still in work:blocks.json and its plan in work:plan.md. Clear or rewrite them (blocks clear) before partitioning again — nothing was deleted for you."
 	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
@@ -1019,8 +1134,12 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	chapWork := filepath.Join(proj, "work", "chapters")
 	tag := fmt.Sprintf("stylefix-blk-r%d-%d", round, blockIdx)
 
+	// T283：块会话也能续——上一轮被打断时工作区（含已改过的章节副本）与转录都
+	// 还在，直接接着用；要重来由用户在外面删 work/temp/<tag>/ 与转录。
+	msgs, trPath, resume, finished := transcriptResumeState(filepath.Join(proj, "work", "sessions"),
+		tag+".jsonl", "submit")
 	// 临时工作区：样式包 + 块内章节（.tex + parts 目录）+ 图片软链。
-	work, cleanWork, err := r.tempDir(proj, tag)
+	work, cleanWork, err := r.tempDirKeep(proj, tag)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1030,7 +1149,7 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	copyFile(filepath.Join(proj, "style", "example.tex"), filepath.Join(work, "example.tex"))
 	for _, asset := range []string{"images", "figures"} {
 		src := filepath.Join(proj, "source", asset)
-		if !fileExists(src) {
+		if !fileExists(src) || pathExists(filepath.Join(work, asset)) {
 			continue
 		}
 		if err := linkAbs(src, filepath.Join(work, asset)); err != nil {
@@ -1039,7 +1158,12 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	}
 	chapSub := filepath.Join(work, "chapters")
 	_ = os.MkdirAll(chapSub, 0o755)
+	// 续跑时工作区里已经有章节副本：不再整体重铺（那会把上一轮改过的地方覆盖回
+	// 原始产物），只补缺失的。样式包以磁盘上的最新版为准（可能刚被上一轮改过）。
 	for _, base := range block.Chapters {
+		if resume && fileExists(filepath.Join(chapSub, base+".tex")) {
+			continue
+		}
 		tex := filepath.Join(chapWork, base+".tex")
 		if !fileExists(tex) {
 			continue
@@ -1057,6 +1181,10 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	}
 
 	mounts := []Mount{{Name: "work", Dir: work}}
+	// T282：块内章节的正文常在 chapters/<章>/children/**，只能靠 ls/find 才看得
+	// 清楚（read_file/grep 都得先知道文件名）。
+	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, tag+"-bash")
+	defer cleanBashTmp()
 	goal := NewGoalTool(filepath.Join(work, "plan.md"))
 	// T64（重构）：清单勾选改走共享存储的 problems 工具——提交时代码
 	// 直接核对存储里本块问题的勾选状态（T66 的 list.md/checked_problem_ids
@@ -1067,6 +1195,8 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 		&EditWorkFileTool{Root: work},
 		&WriteWorkFileTool{Root: work, AnyExt: true},
 		&GrepTool{Mounts: mounts},
+		&WorkBashTool{Root: work, Mounts: mounts, TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(),
+			Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: tid},
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		// T68：分块修复会话也要能看编译出的 PDF（真实运行中曾想看不能看）。
 		&ViewPDFTool{Mounts: mounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
@@ -1083,7 +1213,13 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	sess := session.NewSession(r.clientFor(blockKey), r.modelOf(blockKey),
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.StyleFixBlockSystem), r.cfg.LatexSession("convert"), r.outputLang()),
 		tools, r.log, tid, tag)
-	trPath := filepath.Join(proj, "work", "sessions", tag+".jsonl")
+	if resume {
+		sess.SetMessages(msgs)
+		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+		}
+		r.log.Log(0, "[style-fix] 块修复会话接着上次的转录继续"+resumeNote(resume, finished, len(msgs)))
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -1099,6 +1235,12 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 		"\nThe class and manual in your workspace are the REVISED versions. Make minimal, targeted edits — never re-convert. " +
 		"Compile each chapter's wrapper (<base>_wrapper.tex) to verify (view_pdf the result if in doubt), " +
 		"tick every assigned problem off with problems check as you resolve it, then submit with one entry per chapter."
+	switch {
+	case resume && !finished:
+		userText = "Continue this block fix from where it stopped (the previous attempt ended without submit; your edited chapters are still in the workspace and the assigned problems are unchanged). " + userText
+	case resume && finished:
+		userText = "NOTE: an earlier attempt on this block already concluded. Treat the workspace files as it left them, re-check the assigned problems, and submit again with one entry per chapter. " + userText
+	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, nil, err
 	}

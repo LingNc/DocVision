@@ -2387,3 +2387,13 @@ user 轮
   根因：评估/分块的提示词把"一章 = 一个 `<章>.tex`"当成事实（`chapterNames` 只 glob 顶层 `*.tex`），而细分父章节的产物是 `<章>.tex` + `<章>/children/**` 的树；另外 `blocks`/`submit_blocks` 不校验章节名，子节名（`chapter_010_child_03`）能写进块里，分块会话找不到产物就悄悄跳过那一章。
   改：新增 `subdividedChapters`（有 `<章>/children/` 即细分父章节）与 `subdividedBlockNote`；评估会话的 userText、分块会话的 userText、两份系统提示词都点名"正文在 `<章>/children/**`，grep 那个目录"；`blocks` 与 `submit_blocks` 都按顶层章节名校验，子节名当场拒绝并列出可用名。分块单位**仍是顶层章节**（产物拷回、wrapper 编译都以它为单位），精度落在"具体文件 + 模式"这一级。
   验证：`t281_stylefix_dispatch_test.go`——子节名被拒并给出可用名、父章节名通过、直接改 blocks.json 再提交也拒；`subdividedChapters` 只认带 `children/` 的，块里没有细分章节时不加那句提示。`./internal/...` 除既有两条外全绿。
+
+[X][ ] T282. 分派评估会话没法看目录结构：只有 read_file/grep（没有 ls），要看"这一章有哪些子节文件"只能靠 grep 试，真实运行里为此烧掉十几轮、三十多分钟。
+  根因：评估会话的工具表只有 read_file/grep/write_file/edit_file/problems/goal/blocks/submit_blocks，一个能列目录的都没有。
+  改：评估与分块两个会话都加 `bash`（同一套 `/<挂载名>` 前缀，`ls`/`find`/`wc`/`grep -rn` 可用；`TmpDir` 走 `sessionBashTemp`）；两份提示词各补一句、`MustMention` 加 `bash` 钉住工具与提示词不漂。
+  验证：`t282_stylefix_resume_test.go` 里 `TestTranscriptResumeState*` 三个分支（有转录续跑、收尾标记、别的终态工具不算收尾）与 `TestTempDirKeep*`；`./internal/...` 除既有两条外全绿。
+
+[X][ ] T283. 风格修复这条链上的会话应一律"能续就续"——评估、整合、分块三个会话被打断（Ctrl-C/进程没了）后重跑，必须接着上一轮的会话与工作区继续；要真正重来只能由用户从外面删文件，代码不许自作主张归档/清空/换新转录。
+  根因：只有样式修复轮（T280）和转换/核对会续；评估、整合、分块每次都是新会话，被打断的块修复连工作区（含已改过的章节副本）都会被 `tempDir` 重建时清掉。
+  改：新增 `transcriptResumeState(dir,name,terminalTool)`——有转录就 `SetMessages` + `SeedCounters` 接着跑，`run_end` 在末尾或末尾交过本会话终态工具则标 `finished`（续跑但提醒旧产物还在）；整合/评估/块三处接入；`tempDirKeep` 复用被打断的块工作区（只补缺失章节、不覆盖已改文件）。
+  验证：`TestTranscriptResumeStateContinuesExisting/MarksFinishedTail`（续跑、finished 判定、终态工具只认自己那个）、`TestTempDirKeepReusesInterruptedWorkspace`（复用时不清空、空目录新建）；`./internal/...` 除既有两条外全绿。

@@ -3398,3 +3398,25 @@ T260
 **边界**：分块单位仍是**顶层章节**——产物拷回 `<章>.tex` + `<章>/`、`<章>_wrapper.tex` 编译都以它为单位；子层级只是这一章的文件布局，不额外拆块。精度要求落在"具体文件 + 具体模式"：块会话必须能指出改的是 `chapters/<章>/children/<子节>.tex` 的哪一处，块本身保持"一次会话能改完的一手章节（≤3–4 章）"。
 
 **验证**：`t281_stylefix_dispatch_test.go`（子节名被拒且给出可用名、父章节名通过、改 blocks.json 再提交同样被拒；`subdividedChapters` 只认带 `children/` 的、无细分章节时不加那句）。`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。
+
+## 第八十一批（2026-11-02）：T282——分派评估会话加 bash、重跑从干净状态开始
+
+用户："分派评估这边的一些会话应该增加一个 bash 的工具吧？不然很多操作和子文件夹不好看。还有我怎么让这个 [stylefix-assess-r1] 运行 · 轮次 25 · 工具调用 40 · 已用 38m34s^C 重新跑。她用的好像是旧的会话内容是不是我删掉这个 jsonl 就行了"
+
+**现场**：评估会话工具表 = `read_file`/`grep`/`write_file`/`edit_file`/`problems`/`goal`/`blocks`/`submit_blocks`，**没有 bash、没有 ls**；转录 `work/sessions/stylefix_assess_r1.jsonl` 472 KB，最后一步是 13:33 的请求（无 `run_end`），评估工作区里留着 13:14 的 `plan.md`（goal 计划）。
+
+**两件事分开看**：
+1. **看不到目录结构**：12 章里 7 章是细分父章节，正文在 `<章>/children/**`，而评估会话只能 grep——它当时是靠反复试正则（`\\\\begin\{statement\}` 之类全部 NO MATCHES）才在 17 轮左右撞到 `chapter_004/children`。给它 bash 是最直接的解法。
+2. **"像在旧会话里继续"**：评估会话**从不回放**转录（没有 `SetMessages`），所以旧的 jsonl 对模型没有影响；真正会漏进新一轮的是 `work/stylefix_assess/plan.md`（`NewGoalTool` 会读回）与 `blocks.json`（`submit_blocks` 会读回）。另外转录是 append-only 同一条，页面看到的就是"那条跑了 38 分钟的会话"。
+
+**改法**：
+- 评估会话、分块会话都加 `WorkBashTool`（`/project`、`/work` 与 file 工具同一套前缀，`TmpDir` 用 `sessionBashTemp`，沙箱开关跟着 `latex` 配置）；
+- `archiveAssessWorkspace`：每轮开始把上一轮的 `plan.md`/`blocks.json` 挪进 `work/stylefix_assess/archive/<时间戳>`（不删），日志一行「评估工作区已重置（… 挪进 archive/）」；
+- `nextAssessTranscript`：每轮新开一条转录 `stylefix_assess_r1.jsonl` → `.2.jsonl` → `.3.jsonl`，旧记录留档；
+- 两份提示词各补一句 `bash`（`ls`/`find` 看目录布局），`MustMention` 加 `bash` 钉住。
+
+**给用户的重跑食谱**（不用手删 jsonl）：`mv work/sessions/stylefix_assess_r1.jsonl* work/stylefix_assess/` 都可省了——直接重跑，代码会自己归档；真要让页面也干净，把旧转录挪出 `work/sessions/` 即可。
+
+**补记（同日，用户指出不一致 → T283）**：这里原本写的是"上一轮收尾过就另开一条转录、把 plan.md/blocks.json 归档"，用户立刻指出这与前面刚做的"被打断的会话都能续上"自相矛盾："这里面的所有会话应该都是能续上的吧，至于重新跑只能我通过外部去删除，因为这次只是暂时性的删除过去的文件产生的会话不应该算进去"。因此改成**一律能续**：`transcriptResumeState(dir,name,terminalTool)` 只要磁盘上有转录就 `SetMessages` + `SeedCounters` 接着跑；`run_end` 在末尾或末尾交过本会话终态工具只用来标 `finished`（续跑但提醒"旧产物还在，别当新结论交"）；整合、评估、分块三处全部接入，块会话再用 `tempDirKeep` 复用被打断时的工作区（不再被 `tempDir` 重建清掉已改章节）。归档/轮转两个函数与"每轮新开转录"的做法一并删除——**要真正从头再来只能由用户在外面删转录与目录**。上面那段"重跑食谱"随之作废。
+
+**验证**：`t282_assess_bash_test.go`（旧 plan/blocks 被挪走、新一轮 goal 为空、旧文件在 archive/、空目录重跑不报错；转录 `.jsonl`→`.2.jsonl`→`.3.jsonl`）；`./internal/...` 除既有 `compare_figure` 门禁与宿主 libpython 两条外全绿。

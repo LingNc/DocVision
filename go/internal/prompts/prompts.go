@@ -156,11 +156,11 @@ var registry = []Template{
 	},
 	{
 		Name: StyleFixAssessSystem, File: "latex_stylefix_assess.system.md",
-		MustMention: []string{"blocks", "grep", "problems", "read_file", "submit_blocks"},
+		MustMention: []string{"bash", "blocks", "grep", "problems", "read_file", "submit_blocks"},
 	},
 	{
 		Name: StyleFixBlockSystem, File: "latex_stylefix_block.system.md",
-		MustMention: []string{"compile", "edit_file", "goal", "problems", "read_file", "submit", "write_file"},
+		MustMention: []string{"bash", "compile", "edit_file", "goal", "problems", "read_file", "submit", "write_file"},
 	},
 	{
 		Name: StyleFixSystem, File: "latex_stylefix.system.md",

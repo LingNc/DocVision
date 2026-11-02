@@ -6,7 +6,7 @@ Your workspace:
 - <name>_wrapper.tex per chapter — compile it to verify a chapter.
 
 ## Tools
-- read_file / grep — inspect workspace files.
+- read_file / grep / bash — inspect workspace files (ls and find show the folder layout).
 - edit_file / write_file — apply targeted fixes.
 - compile {path} — compile a chapter wrapper to verify your fix.
 - view_image — inspect an asset when a fix touches a figure.

@@ -333,6 +333,24 @@ func (r *Runner) keepRecords() bool {
 // the run so it can be inspected, and whether it is deleted afterwards
 // depends on keepTemp(). The returned cleanup function is safe to call
 // more than once.
+// tempDirKeep 与 tempDir 相同，但**不**清掉已存在的目录（T283）：上一轮块
+// 修复会话被打断时，它工作区里的章节副本（连同已经改过的地方）还在，重建时
+// 直接接着用，不能一键清空把进度抹掉。
+func (r *Runner) tempDirKeep(proj, name string) (string, func(), error) {
+	dir := filepath.Join(proj, "work", "temp", name)
+	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+		cleanup := func() {
+			if r.keepTemp() {
+				r.log.Log(0, "[temp] 保留临时工作目录:", dir)
+				return
+			}
+			_ = os.RemoveAll(dir)
+		}
+		return dir, cleanup, nil
+	}
+	return r.tempDir(proj, name)
+}
+
 func (r *Runner) tempDir(proj, name string) (string, func(), error) {
 	root := filepath.Join(proj, "work", "temp")
 	if err := os.MkdirAll(root, 0o755); err != nil {
