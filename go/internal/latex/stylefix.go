@@ -114,9 +114,15 @@ func (t *SubmitProblemsTool) Execute(argsJSON string) (session.ToolResult, error
 type BlocksTool struct {
 	path string
 	mu   sync.Mutex
+	// Known 是"可以分块的章节名"（顶层章节）。细分父章节的正文在各层
+	// `<章>/children/**` 里，但分块单位仍然是那个顶层章节——子节名混进来会让
+	// 分块会话去找一份不存在的产物、悄悄跳过这一章（T281）。
+	Known []string
 }
 
-func NewBlocksTool(path string) *BlocksTool { return &BlocksTool{path: path} }
+func NewBlocksTool(path string, known ...string) *BlocksTool {
+	return &BlocksTool{path: path, Known: known}
+}
 
 func (t *BlocksTool) Name() string { return "blocks" }
 
@@ -153,10 +159,32 @@ func (t *BlocksTool) saveLocked(blocks []StyleBlock) {
 	_ = os.WriteFile(t.path, append(data, '\n'), 0o644)
 }
 
+// unknownChapters 返回 chapters 里不在 known 中的名字（known 为空不校验）。
+func unknownChapters(chapters, known []string) []string {
+	if len(known) == 0 {
+		return nil
+	}
+	ok := make(map[string]bool, len(known))
+	for _, k := range known {
+		ok[k] = true
+	}
+	var bad []string
+	for _, c := range chapters {
+		if !ok[c] {
+			bad = append(bad, c)
+		}
+	}
+	return bad
+}
+
 // validateBlock 校验单条；excl 是 update 时自己的下标（跨块查重跳过自己）。
-func validateBlock(list []StyleBlock, b StyleBlock, excl int) string {
+func validateBlock(list []StyleBlock, b StyleBlock, excl int, known []string) string {
 	if strings.TrimSpace(b.Title) == "" || len(b.Chapters) == 0 {
 		return fmt.Sprintf("块非法（title 非空、chapters 至少一章）: %+v", b)
+	}
+	if bad := unknownChapters(b.Chapters, known); len(bad) > 0 {
+		return "这些不是可分的章节名: " + strings.Join(bad, ", ") + " — 只能写顶层章节（" +
+			strings.Join(known, ", ") + "）；细分父章节里的子节不单独分块，按父章节名写。"
 	}
 	seen := map[string]bool{}
 	for _, c := range b.Chapters {
@@ -271,7 +299,7 @@ func (t *BlocksTool) Execute(argsJSON string) (session.ToolResult, error) {
 					b.Chapters = vs
 				}
 			}
-			if msg := validateBlock(work, b, excl); msg != "" {
+			if msg := validateBlock(work, b, excl, t.Known); msg != "" {
 				return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个元素: %s——整批未动。", i+1, msg)}, nil
 			}
 			if excl >= 0 {
@@ -296,6 +324,7 @@ type SubmitBlocksTool struct {
 	Set       bool
 	Workspace string    // 虚拟工作区根（blocks.json 所在目录）；空 = 必须内联传参
 	Goal      *GoalTool // T64：提交前计划清单必须清空（勾完或删掉）
+	Known     []string  // 合法章节名（顶层章节，T281）
 }
 
 func (t *SubmitBlocksTool) Name() string { return "submit_blocks" }
@@ -367,6 +396,12 @@ func (t *SubmitBlocksTool) Execute(argsJSON string) (session.ToolResult, error) 
 		}
 		if b.Title == "" || len(b.Chapters) == 0 {
 			return session.ToolResult{Text: "REJECTED: each block needs a title and at least one chapter."}, nil
+		}
+		// T281：直接编辑 blocks.json 的会话也要过同一道门——子节名混进来会让
+		// 那一章被悄悄跳过（分块会话找不到产物，而它仍以为自己交了）。
+		if bad := unknownChapters(b.Chapters, t.Known); len(bad) > 0 {
+			return session.ToolResult{Text: "REJECTED: 这些不是可分的章节名: " + strings.Join(bad, ", ") +
+				" — 只能写顶层章节（" + strings.Join(t.Known, ", ") + "）；细分父章节里的子节不单独分块，按父章节名写。"}, nil
 		}
 		out = append(out, b)
 	}
@@ -789,6 +824,20 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	return nil
 }
 
+// subdividedChapters 挑出这些章节里的"细分父章节"：它们的顶层 .tex 只是
+// 一串 `\input`，正文在 `<章>/children/**`（还可能再嵌一层子目录）。
+// 分块单位仍是那个顶层章节，但评估/修复都必须知道该去哪个目录里找正文。
+func subdividedChapters(proj string, names []string) []string {
+	chapWork := filepath.Join(proj, "work", "chapters")
+	var out []string
+	for _, b := range names {
+		if st, err := os.Stat(filepath.Join(chapWork, b, "children")); err == nil && st.IsDir() {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // styleFixAssess 跑影响评估会话：按问题划分章节块。
 func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem, issues map[string]string, store *ProblemStore) ([]StyleBlock, error) {
 	chapWork := filepath.Join(proj, "work", "chapters")
@@ -812,8 +861,8 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 		return nil, err
 	}
 	goal := NewGoalTool(filepath.Join(wsDir, "plan.md"))
-	blocks := NewBlocksTool(filepath.Join(wsDir, "blocks.json"))
-	submit := &SubmitBlocksTool{Workspace: wsDir, Goal: goal}
+	blocks := NewBlocksTool(filepath.Join(wsDir, "blocks.json"), chapterNames...)
+	submit := &SubmitBlocksTool{Workspace: wsDir, Goal: goal, Known: chapterNames}
 	mounts := []Mount{{Name: "project", Dir: proj}, {Name: "work", Dir: wsDir}}
 	tools := []session.Tool{
 		&ReadFileTool{Mounts: mounts},
@@ -846,7 +895,12 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	userText := fmt.Sprintf("The consolidated style-problem list (%d problems) is available through the problems tool (list / get / search) — it is NOT pasted here.", len(problems)) +
 		"\nChapters that explicitly reported problems: " + strings.Join(issueList, ", ") +
 		"\nAll converted chapters: " + strings.Join(chapterNames, ", ") +
-		"\nTheir .tex files are readable at project:work/chapters/<name>.tex. Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks with the blocks tool (or edit work:blocks.json directly — both land in the same file), then call submit_blocks with NO arguments to submit from the file."
+		"\nTheir .tex files are readable at project:work/chapters/<name>.tex (a chapter's parts live under project:work/chapters/<name>/). Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks with the blocks tool (or edit work:blocks.json directly — both land in the same file), then call submit_blocks with NO arguments to submit from the file."
+	// T281：细分父章节的顶层 .tex 只是 `\input` 列表，照着它 grep 什么都找不到——
+	// 必须点名正文目录，否则评估会话会把最厚的几章判成"没受影响"。
+	if sub := subdividedChapters(proj, chapterNames); len(sub) > 0 {
+		userText += "\nSUBDIVIDED chapters — their top .tex is only `\\input` lines, the body is in work/chapters/<name>/children/** (grep THAT folder before deciding a chapter is unaffected): " + strings.Join(sub, ", ")
+	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}
@@ -859,6 +913,21 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 		_ = os.WriteFile(filepath.Join(wsDir, "blocks.json"), data, 0o644)
 	}
 	return submit.Blocks, nil
+}
+
+// subdividedBlockNote 给分块会话补一句"正文在这些子目录里"（T281）。
+// 块里没有细分章节时返回空串，提示词保持原样。
+func subdividedBlockNote(proj string, chapters []string) string {
+	sub := subdividedChapters(proj, chapters)
+	if len(sub) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, b := range sub {
+		parts = append(parts, b+" → chapters/"+b+"/children/")
+	}
+	return "\nSUBDIVIDED chapters in this block — the top .tex is only `\\input` lines, the body you must grep and edit is under " +
+		strings.Join(parts, ", ")
 }
 
 // styleFixBlocks 并行跑分块修复会话，返回仍有问题的章节列表。
@@ -1026,6 +1095,7 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	userText := "Style problems assigned to this block: " + strings.Join(block.ProblemIDs, ", ") +
 		" — use the problems tool to read each one's full detail; they are NOT pasted here." +
 		"\nYour chapters (in work:chapters/): " + strings.Join(block.Chapters, ", ") +
+		subdividedBlockNote(proj, block.Chapters) +
 		"\nThe class and manual in your workspace are the REVISED versions. Make minimal, targeted edits — never re-convert. " +
 		"Compile each chapter's wrapper (<base>_wrapper.tex) to verify (view_pdf the result if in doubt), " +
 		"tick every assigned problem off with problems check as you resolve it, then submit with one entry per chapter."

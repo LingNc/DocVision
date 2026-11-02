@@ -2382,3 +2382,8 @@ user 轮
   根因：`styleFixStyleSession` 每次都从样式阶段的 `work/style_session.jsonl` 重开上下文，本轮自己的转录（`stylefix_style_r<N>.jsonl`，append-only、打断时也已在盘上）从不被读回；同一轮重跑等于重放一遍样式阶段的对话。勾选状态另说：只有分块修复会话会打勾，样式修复会话没提交过时它就是 0/3（"两个问题已解决"只是对话里的说法，不是记录）。
   改：新增 `styleRoundSeed`——第 round 轮优先接**本轮自己的转录**（打断续跑），没有就接最近一轮的转录（新一轮接着上一轮记忆），再没有才退回样式阶段上下文；沿用转录时用 `LoadTranscriptStats` 把轮次/工具数也续上，日志写明"接着上一轮的风格修复会话继续（文件名，N 条历史）"，重入时给模型一句 `Continue this round from where it stopped`。
   验证：`t280_style_round_resume_test.go`——第 1 轮接自己那条转录；第 2 轮先接 r1、有 r2 时优先 r2；没有任何上下文时返回空（调用方明确报错，不拿空上下文硬跑）。
+
+[X][ ] T281. 多子层级章节下风格修复的分派不精确：评估会话拿到的只有 `work/chapters/*.tex` 这些顶层文件，而细分父章节的顶层 `.tex` 只是一串 `\input`——照着它 grep 找不到正文，最厚的几章会被判成"没受影响"；分块会话同样只被告知"你的章节是 chapter_010"，正文却在 `chapters/chapter_010/children/**`。
+  根因：评估/分块的提示词把"一章 = 一个 `<章>.tex`"当成事实（`chapterNames` 只 glob 顶层 `*.tex`），而细分父章节的产物是 `<章>.tex` + `<章>/children/**` 的树；另外 `blocks`/`submit_blocks` 不校验章节名，子节名（`chapter_010_child_03`）能写进块里，分块会话找不到产物就悄悄跳过那一章。
+  改：新增 `subdividedChapters`（有 `<章>/children/` 即细分父章节）与 `subdividedBlockNote`；评估会话的 userText、分块会话的 userText、两份系统提示词都点名"正文在 `<章>/children/**`，grep 那个目录"；`blocks` 与 `submit_blocks` 都按顶层章节名校验，子节名当场拒绝并列出可用名。分块单位**仍是顶层章节**（产物拷回、wrapper 编译都以它为单位），精度落在"具体文件 + 模式"这一级。
+  验证：`t281_stylefix_dispatch_test.go`——子节名被拒并给出可用名、父章节名通过、直接改 blocks.json 再提交也拒；`subdividedChapters` 只认带 `children/` 的，块里没有细分章节时不加那句提示。`./internal/...` 除既有两条外全绿。

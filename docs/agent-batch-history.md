@@ -3378,3 +3378,23 @@ T260
 **验证**：`t280_style_round_resume_test.go`（第 1 轮接自己那条；第 2 轮先接 r1、有 r2 优先 r2；无上下文返回空）。`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。
 
 **给用户的说明**：现在重跑会真的接着那一轮说话（转录里 95 条历史 + 续上的轮次/工具数）；勾选仍从 0 开始（沿用清单时按 T279 清掉打勾），由分块修复会话重新核对后打勾——也就是说"两个已解决"要等这一轮核对过才成为记录。
+
+## 第八十批（2026-11-02）：T281——多子层级章节的风格修复分派
+
+用户："在当前多个子层级的这种章节转换下，样式修复中后期的分派那边是否处理的合理？要精确到什么程度？我现在正在跑了分派评估"
+
+**现场**（12 章产物，其中 3 章是细分父章节）：
+- `work/chapters/chapter_010.tex` 只有 6 行 `\input{chapter_010/children/chapter_010_child_0N.tex}`，正文全在 `chapter_010/children/**`（6 个 `.tex`，每个还带自己的 `parts` 目录）；另一章 8 个、再一章 22 个 `.tex` 都在 `<章>/` 层；
+- `styleFixAssess` 的 `chapterNames` 来自 `filepath.Glob(work/chapters/*.tex)` —— **只有 12 个顶层名**，userText 写着 "Their .tex files are readable at project:work/chapters/<name>.tex"，系统提示词同样；
+- `styleFixBlockSession` 的 userText 写 "Your chapters (in work:chapters/): chapter_010"（工作区里其实已经拷了 `<章>/` 整棵，含 children）；
+- `BlocksTool`/`SubmitBlocksTool` 不校验章节名，`chapter_010_child_03` 这种子节名能写进块里 → 分块复制时 `work/chapters/chapter_010_child_03.tex` 不存在、静默跳过。
+
+**改法**：
+1. `subdividedChapters(proj, names)`：有 `<章>/children/` 目录的就是细分父章节。
+2. 评估 userText 追加一段：点名这些章节、说明"顶层 `.tex` 只是 `\input`，正文在 `work/chapters/<章>/children/**`，判它没受影响之前先 grep 那个目录"；系统提示词的 "readable at …<name>.tex" 补成 "…<name>.tex 与其整个 `<name>/` 目录"。
+3. 分块 userText 追加 `subdividedBlockNote`：块里有细分章节时列出 `chapters/<章>/children/`；系统提示词同步一句。
+4. `BlocksTool`/`SubmitBlocksTool` 都加 `Known`（顶层章节名）校验：未知名拒绝并列出可用名，附一句"子节不单独分块，按父章节名写"。
+
+**边界**：分块单位仍是**顶层章节**——产物拷回 `<章>.tex` + `<章>/`、`<章>_wrapper.tex` 编译都以它为单位；子层级只是这一章的文件布局，不额外拆块。精度要求落在"具体文件 + 具体模式"：块会话必须能指出改的是 `chapters/<章>/children/<子节>.tex` 的哪一处，块本身保持"一次会话能改完的一手章节（≤3–4 章）"。
+
+**验证**：`t281_stylefix_dispatch_test.go`（子节名被拒且给出可用名、父章节名通过、改 blocks.json 再提交同样被拒；`subdividedChapters` 只认带 `children/` 的、无细分章节时不加那句）。`go test ./internal/...` 除既有的 `compare_figure` 门禁与宿主 libpython 两条外全绿。
