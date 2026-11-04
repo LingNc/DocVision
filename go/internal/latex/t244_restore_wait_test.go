@@ -133,7 +133,10 @@ func TestConvertBatchSkipsChapterWaitingForRestore(t *testing.T) {
 	chap := filepath.Join(proj, "chapters", base+".md")
 	writeFile(t, chap, "# 一章\n\n正文\n")
 
-	fails, pauses, skipped := r.convertChapterBatch(proj, "", "", filepath.Join(proj, "work"), []string{chap}, "[convert]")
+	fails, pauses, skipped, fatal := r.convertChapterBatch(proj, "", "", filepath.Join(proj, "work"), []string{chap}, "[convert]")
+	if fatal != nil {
+		t.Fatalf("没有接口级致命错误: %v", fatal)
+	}
 	if len(fails) != 0 || len(pauses) != 0 {
 		t.Fatalf("等切回不是失败也不是暂停：fails=%v pauses=%v", fails, pauses)
 	}

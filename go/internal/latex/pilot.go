@@ -47,10 +47,20 @@ type pilotSpec struct {
 	} `json:"pdf_pages"`
 }
 
-func (r *Runner) stylePilotPhase(proj string) {
+// stylePilotPhase 依次跑「选材 → 试转 → 样式修订」三步，把样式包再磨一遍。
+//
+// T288：**会话级失败必须让整轮停下**。试点是在样式包之上做的一轮修订，它没跑
+// 完就等于拿没修订的样式包往下走——接着划分、逐章转换，等发现不对时下游全是
+// 废产物，只能整个删掉重跑。真实事故：选材会话被上游流式接口掐断（
+// `SESSION_API_ERROR: stream error ... Upstream request failed`），日志只留一句
+// 「选材失败（跳过试点）」，运行照旧进了划分与转换。
+//
+// 内容级失败（选材结果不合法、样例拼不出来）仍旧只警告跳过试点：那不是环境
+// 问题，跳过试点并不影响后续阶段拿到一份可用的样式包。
+func (r *Runner) stylePilotPhase(proj string) error {
 	marker := pilotMarkerPath(proj)
 	if fileExists(marker) {
-		return
+		return nil
 	}
 	writeMarker := func(note string) {
 		_ = os.WriteFile(marker, []byte(note+"\n"), 0o644)
@@ -58,7 +68,7 @@ func (r *Runner) stylePilotPhase(proj string) {
 	sourceDir := filepath.Join(proj, "source")
 	mds, _ := filepath.Glob(filepath.Join(sourceDir, "*.md"))
 	if len(mds) == 0 {
-		return
+		return nil
 	}
 	sort.Strings(mds)
 	mainMD := mds[0]
@@ -73,28 +83,49 @@ func (r *Runner) stylePilotPhase(proj string) {
 
 	spec, err := r.pilotSelectSession(proj, mainMD)
 	if err != nil {
+		if !pilotContentSkip(err) {
+			return fmt.Errorf("样式试点选材会话中止（接口/会话级错误，整轮停在这里，样式包与下游都没动）: %w", err)
+		}
 		r.log.LogWarning(1, "[pilot] 选材失败（跳过试点）:", err)
 		writeMarker("select failed: " + err.Error())
-		return
+		return nil
 	}
 	sample, pagesDesc, err := r.buildPilotSample(proj, spec)
 	if err != nil {
 		r.log.LogWarning(1, "[pilot] 语料组装失败（跳过试点）:", err)
 		writeMarker("sample failed: " + err.Error())
-		return
+		return nil
 	}
 	if err := r.pilotTrialSession(proj, sample, pagesDesc); err != nil {
+		if !pilotContentSkip(err) {
+			return fmt.Errorf("样式试点试转会话中止（接口/会话级错误，整轮停在这里）: %w", err)
+		}
 		r.log.LogWarning(1, "[pilot] 试转失败（跳过样式修订）:", err)
 		writeMarker("trial failed: " + err.Error())
-		return
+		return nil
 	}
 	if err := r.pilotReviseSession(proj, pagesDesc); err != nil {
+		if !pilotContentSkip(err) {
+			return fmt.Errorf("样式试点修订会话中止（接口/会话级错误，整轮停在这里）: %w", err)
+		}
 		r.log.LogWarning(1, "[pilot] 样式修订失败（沿用样式阶段提交的样式包）:", err)
 		writeMarker("revise failed: " + err.Error())
-		return
+		return nil
 	}
 	writeMarker("done")
 	r.log.Log(1, "[pilot] 样式试点完成，最终样式包已就位")
+	return nil
+}
+
+// pilotContentSkip 区分"试点这一步内容上没做成"（可以只跳过试点）与"会话/接口
+// 本身断了"（必须停）。接口不通、余额不足、会话错误都不是试点本身的问题——
+// 让运行带着没修订的样式包往下走，代价是全下游白跑（T288）。
+func pilotContentSkip(err error) bool {
+	if err == nil {
+		return true
+	}
+	msg := err.Error()
+	return !isSessionAPIError(msg) && !isSessionFatalError(msg)
 }
 
 // pilotDirOf 是试点的工作根（work/style/pilot/）。

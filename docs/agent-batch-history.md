@@ -3484,3 +3484,19 @@ T260
 **改法**：`validTranscriptName`——只要求"一个 `*.jsonl` 文件名"：`filepath.Base(name)==name`、不含 `/` `\`、不以点开头、不含控制字符；中文、空格、括号照收。三处调用点统一换掉。
 
 **验证**：`t287_transcript_name_test.go`——`TestValidTranscriptNameAllowsUnicode`（中文/带哈希名字收，`../escape.jsonl`、`a/b.jsonl`、`.hidden.jsonl`、`notes.txt` 仍拒）、`TestPostRetryVectorRoleAcceptsChineseNames`（中文项目 + 中文转录名 → 200，队列里 `role=vector` 且 `Request.Path` 是原名）；`./internal/sessionview/` 17.4s 全绿。
+
+## 第八十六批（2026-11-04）：T288——会话断了就得停
+
+用户："前面样式的整个流程有个会话终止了就直接进入下一个阶段了…下次应该终止而不是继续"
+
+**现场**（另一本书的真实运行）：`work/sessions/style_pilot_select.jsonl` 最后一行 `t=meta kind=run_end ok=false error="api error: [SESSION_API_ERROR: stream error: ... Upstream request failed, please try again later]"`（18:37:05）。日志只留一句「[pilot] 选材失败（跳过试点）」，随后 `progress.json` 里 `style/chapters` 都写成 done、转换开始派发；再往后转换会话集体撞 `SESSION_INSUFFICIENT_BALANCE`（一章 55 行跑了一阵、四章各 7 行当场死），用户只能把下游全删掉重跑。
+
+**根因**：
+- `stylePilotPhase` 把三步会话的错误全按「跳过试点」处理（`LogWarning` + `writeMarker`），没法区分"试点这一步内容上没做成"与"会话/接口本身断了"。后者意味着样式包根本没被修订，继续往下走等于拿没磨过的包划分+逐章转换。
+- `convertChapterBatch` 只在批跑完后才由 `chapterFailure` 决定整轮失败；批内已经按并发宽度派出去的章节照跑，而且余额这类致命错误并不阻止后续派发——用户看到的就是"一章耗尽额度，后面几章各自开一条转录、写 7 行就死"。
+
+**改法**：
+- `stylePilotPhase` 返回 `error`；`pilotContentSkip(err)` 用 `isSessionAPIError`/`isSessionFatalError` 分流：接口/会话级 → `fmt.Errorf("样式试点…中止…: %w")` 中止整轮（不写 marker，下次重跑会重新试点）；内容级（选材不合法、样例拼不出来、未提交）→ 仍旧只警告跳过试点并写 marker。
+- `convertChapterBatch` 加致命错误闩锁：goroutine 里遇到 `isSessionFatalError` 记下消息；派发循环在每章之前检查，命中就停止派发、把剩下的章节记成"没开始"；函数多返回一个 `fatal error`，`convertPhase` 两个调用点见到就直接 `return`，未开始的章节在日志里点名。
+
+**验证**：`t288_pilot_abort_test.go`——`TestPilotPhaseAbortsOnSessionError`（假服务端回 500，试点必须返回错误且不写 marker）、`TestPilotPhaseSkipsOnContentFailure`（会话跑完没交选材 → 只跳过、写 marker）；`t244_restore_wait_test.go` 的调用点补第四返回值；`./internal/latex/` 除既有两条外全绿。

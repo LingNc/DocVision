@@ -436,9 +436,11 @@ func (r *Runner) RunBook(opts BookOptions) error {
 		if err := r.stylePhase(proj); err != nil {
 			return err
 		}
-		// T97 重量档：选材→试转→样式修订（失败只警告，不挡后续阶段）。
+		// T97 重量档：选材→试转→样式修订。T288：内容上的失败只警告跳过试点
+		// （拿样式阶段提交的包继续），接口/会话级失败必须中止整轮——否则没修订
+		// 的样式包会被划分与逐章转换一路用下去。
 		if r.cfg.Latex.LatexStylePilotEnabled() {
-			r.stylePilotPhase(proj)
+			return r.stylePilotPhase(proj)
 		}
 		return nil
 	})
@@ -1016,7 +1018,13 @@ func (r *Runner) convertBatchWidth() int {
 // 而且它不该混进"转换失败"的措辞里让用户以为这一章废了。
 // 返回值第三项是"因为切回请求在等而**没跑**"的章节（T244）：既不是失败也不是
 // 暂停，调用方据此知道这一批少跑了几章。
-func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) (failures, pauses, skipped []string) {
+//
+// T288：第四项是**接口级致命错误**（余额不足/无可用资源包）。这种错误重试与换
+// 会话都救不回来，以前却把这一批剩余章节一张一张派下去，每章都撞同一个死墙
+// （真实事故：一章耗尽额度后，后面 5 章各自开了一条转录、都只写了 7 行就报
+// `SESSION_INSUFFICIENT_BALANCE`）。现在命中即停止派发，剩下的章节标为"没开始"，
+// 调用方直接把整轮停下。
+func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, chapters []string, label string) (failures, pauses, skipped []string, fatal error) {
 	// T198：批次宽度 = 转换阶段的 worker 数，也就是 latex.convert_concurrency
 	// （没写沿用 latex.concurrency）。
 	//
@@ -1045,6 +1053,14 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 	var skippedRestore []string
 	// T247：子节点还在重试、这一章这次不提交的那几章（同样不算失败）。
 	var skippedRetry []string
+	// T288：接口级致命错误（余额/资源包）——命中后不再派发剩余章节。
+	var fatalMsg string
+	var notStarted []string
+	fatalOf := func() string {
+		failsMu.Lock()
+		defer failsMu.Unlock()
+		return fatalMsg
+	}
 	total := len(chapters)
 	start := time.Now()
 	// 进度行统一走 liveProgress：终端里原地覆写、管道里按节拍整行输出。
@@ -1077,6 +1093,13 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 			progMu.Unlock()
 			progress()
 			continue
+		}
+		if msg := fatalOf(); msg != "" {
+			// 已经撞上余额/资源包这类死墙：剩下的章节不再派发（派了也是白开转录）。
+			for _, rest := range chapters[idx:] {
+				notStarted = append(notStarted, strings.TrimSuffix(filepath.Base(rest), filepath.Ext(rest)))
+			}
+			break
 		}
 		wg.Add(1)
 		tid := <-tidPool
@@ -1141,6 +1164,9 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 				} else {
 					failures = append(failures, filepath.Base(chap)+": "+err.Error())
 				}
+				if fatalMsg == "" && isSessionFatalError(err.Error()) {
+					fatalMsg = err.Error()
+				}
 				failsMu.Unlock()
 			}
 		}(idx, chapPath, tid, seq)
@@ -1154,6 +1180,15 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 			"章（有切回请求在等，不是失败）:", strings.Join(skippedRestore, ", "),
 			"—切回在这一章停止写盘后自动落地，之后重跑这一章即可")
 	}
+	if msg := fatalOf(); msg != "" {
+		if len(notStarted) > 0 {
+			r.log.LogError(0, label, "余额/资源包这类致命错误，这一批剩下的",
+				strconv.Itoa(len(notStarted)), "章没有开始:", strings.Join(notStarted, ", "))
+		}
+		// 没开始 ≠ 跑完：别让调用方把它算进"这一批都完成了"。
+		skipped = append(skipped, notStarted...)
+		fatal = fmt.Errorf("%s", msg)
+	}
 	if len(skippedRetry) > 0 {
 		sort.Strings(skippedRetry)
 		r.log.LogWarning(0, label, "子章节还在重试，这", strconv.Itoa(len(skippedRetry)),
@@ -1161,7 +1196,7 @@ func (r *Runner) convertChapterBatch(proj, clsName, manualPath, workDir string, 
 		// 与"等切回"合流：调用方只需要知道这几章这次没跑完、不计失败。
 		skippedRestore = append(skippedRestore, skippedRetry...)
 	}
-	return failures, pauses, skippedRestore
+	return failures, pauses, append(skippedRestore, skipped...), fatal
 }
 
 func (r *Runner) convertPhase(proj string, fbRound int) error {
@@ -1205,7 +1240,12 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 		r.log.Log(0, "[convert]", "没有要转换的章节（--only / 重试队列为空）")
 		return nil
 	}
-	fails, pauses, skipped := r.convertChapterBatch(proj, clsName, manualPath, workDir, targets, label)
+	fails, pauses, skipped, fatal := r.convertChapterBatch(proj, clsName, manualPath, workDir, targets, label)
+	if fatal != nil {
+		// T288：整轮停下——重试/换会话都救不回来，继续跑只会把剩下的章节
+		// 一张一张撞同一堵墙。
+		return fmt.Errorf("转换中止（接口级致命错误，剩余章节没有开始；处理好余额/资源包后重跑即可）: %w", fatal)
+	}
 	if len(pauses) > 0 {
 		// T243：上游接口重试用满 → 这一章暂停，整轮到此为止（不重试、不记失败、
 		// 不换尝试、产物与尝试预算都没动）。重启程序会接着这条会话跑，网页上
@@ -1227,8 +1267,11 @@ func (r *Runner) convertPhase(proj string, fbRound int) error {
 			break
 		}
 		r.log.Log(0, label, "补一轮手动重试:", strings.Join(bases, ", "))
-		fails, pauses, skippedMore := r.convertChapterBatch(proj, clsName, manualPath, workDir, more, label)
+		fails, pauses, skippedMore, fatal := r.convertChapterBatch(proj, clsName, manualPath, workDir, more, label)
 		skipped = append(skipped, skippedMore...)
+		if fatal != nil {
+			return fmt.Errorf("转换中止（接口级致命错误，剩余章节没有开始）: %w", fatal)
+		}
 		if len(pauses) > 0 {
 			return pauseError(pauses)
 		}
