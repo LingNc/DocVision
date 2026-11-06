@@ -563,7 +563,7 @@ func buildDocIndex(mineruOutput, splitDir string, sourceMDs []string, markerDir,
 				}
 			}
 			if pdf != "" && count > 0 {
-				pages.srcs = append(pages.srcs, pageSrc{pdf: pdf, first: pages.total + 1, count: count})
+				pages.srcs = append(pages.srcs, pageSrc{pdf: pdf, part: dir, first: pages.total + 1, count: count})
 				pages.total += count
 			}
 			offset := idx.total

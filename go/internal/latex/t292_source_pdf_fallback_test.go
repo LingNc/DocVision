@@ -85,3 +85,30 @@ func TestDocSearchHintMatchesViewAvailability(t *testing.T) {
 		t.Fatalf("有视图时应当指向 source: 原页: %q", res.Text)
 	}
 }
+
+// 兜底 PDF 的父目录是 split_files：页数核对不能把它当成 part 名去视图里找
+// （否则每次启动多两条 "part split_files: no view file" 的假告警）。
+func TestPageSrcKeepsMineruPartName(t *testing.T) {
+	root := t.TempDir()
+	mineru := filepath.Join(root, "mineru_output")
+	split := filepath.Join(root, "split_files")
+	subj := "书 名 "
+	if err := os.MkdirAll(filepath.Join(mineru, subj+"_part1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(split, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	own := filepath.Join(split, subj+"_part1.pdf")
+	writeFile(t, own, "%PDF-1.4\n")
+
+	origins := findOriginPDFs(mineru, split, subj)
+	if len(origins) != 1 {
+		t.Fatalf("应当回退到 split_files: %v", origins)
+	}
+	pages := &pageIndex{srcs: []pageSrc{{pdf: origins[0].PDF, part: origins[0].Part, first: 1, count: 1}}, total: 1}
+	view := &pdfView{Dir: "/tmp", total: 1, Files: []pdfViewFile{{Name: "book.pdf", PDF: own, Part: subj + "_part1", First: 1, Count: 1}}}
+	if probs := view.alignmentProblems(pages); len(probs) != 0 {
+		t.Fatalf("带上 part 名后不该报 no view file: %v", probs)
+	}
+}

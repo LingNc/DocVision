@@ -196,7 +196,11 @@ func (v *pdfView) alignmentProblems(pages *pageIndex) []string {
 		byPart[f.Part] = f
 	}
 	for _, src := range pages.srcs {
-		part := filepath.Base(filepath.Dir(src.pdf))
+		// 兜底 PDF 的父目录是 split_files，不能拿它当 part 名（T292）。
+		part := src.part
+		if part == "" {
+			part = filepath.Base(filepath.Dir(src.pdf))
+		}
 		f, ok := byPart[part]
 		if !ok {
 			out = append(out, fmt.Sprintf("part %s: no view file", part))

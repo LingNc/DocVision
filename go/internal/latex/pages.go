@@ -22,7 +22,8 @@ var partNumRe = regexp.MustCompile(`_part(\d+)$`)
 // pageSrc maps a run of global page numbers onto one origin PDF.
 type pageSrc struct {
 	pdf   string
-	first int // global first page (1-based)
+	part  string // MinerU part directory name (alignment against the view)
+	first int    // global first page (1-based)
 	count int
 }
 
@@ -47,7 +48,7 @@ func buildPageIndex(mineruDir, splitDir, subject string) (*pageIndex, error) {
 		if err != nil {
 			return nil, fmt.Errorf("count pages of %s: %w", o.PDF, err)
 		}
-		idx.srcs = append(idx.srcs, pageSrc{pdf: o.PDF, first: idx.total + 1, count: n})
+		idx.srcs = append(idx.srcs, pageSrc{pdf: o.PDF, part: o.Part, first: idx.total + 1, count: n})
 		idx.total += n
 	}
 	return idx, nil

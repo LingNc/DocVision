@@ -2445,3 +2445,4 @@ user 轮
   根因：`findOriginPDFs` 只认 `<part>/*_origin.pdf`；我们自己切的 part PDF 就在 `paths.split_dir` 里，却没有任何兜底，取不到就整块放弃。
   改：`findOriginPDFs(mineruDir, splitDir, subject)` 在每个 part 没有 `*_origin.pdf` 时回退到 `<splitDir>/<part 目录名>.pdf`；返回值改为 `{Part, PDF}`（part 仍是 MinerU 目录名，`FileByPart`/`doc_search` 定位靠它，兜底 PDF 的父目录名不能冒充）；`buildPDFView`/`buildPageIndex`/`buildDocIndex` 一并带上 `SplitDir`。另：没有视图时 `doc_search` 回执改为明说"本会话看不到原书页、别去开 `source:`"，不再指向不存在的挂载点。
   验证：`t292_source_pdf_fallback_test.go`（part1 无 origin → 用 split 本体且 part 名不变、part2 的 origin 优先；无兜底目录不虚构；`doc_search` 有/无视图两种回执）；用真实数据跑 `buildPDFView`：244 页、两个 part 名与索引一致、`LocatePart` 可用；`./internal/...` 除既有两条外全绿。
+  补记：实跑暴露 `[pdfview] 页数不一致: part split_files: no view file` 两条假告警——页数核对拿 PDF 父目录当 part 名，兜底 PDF 的父目录是 `split_files`。`pageSrc` 增加 `part` 字段（`buildPageIndex`/`buildDocIndex` 从 MinerU 目录名填），`alignmentProblems` 只在空值时回退到路径推导；真实数据复核 244 页 0 告警。

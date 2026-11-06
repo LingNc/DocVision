@@ -3548,3 +3548,5 @@ T260
 **改法**：`findOriginPDFs(mineruDir, splitDir, subject) []originPDF`——每个 part 没 origin 就用 `<splitDir>/<part 目录名>.pdf`；返回体带 `Part`（MinerU 目录名，`FileByPart`/`doc_search`/`list_source_pages` 全靠它对页），否则兜底 PDF 的父目录 "split_files" 会冒充 part 名；`buildPDFView`/`buildPageIndex`/`buildDocIndex` 增加 `splitDir` 参数，`viewName` 改为吃 part 名。`doc_search` 在没有视图时改说"本会话看不到原书页、别去开 source:"。
 
 **验证**：真实数据 `buildPDFView` → `[27…__part1.pdf, 27…__part2.pdf]` 共 244 页（200+44），part 名与 `doc_index` 的 part 目录逐字一致，`LocatePart` 通；`t292_source_pdf_fallback_test.go` 三条；`./internal/...` 除既有两条外全绿。
+
+**补记（T292）**：换模型后的首次实跑，原书视图正常（`[pdfview] 原书 PDF 视图就绪 … 244 页`，风格会话连续 `view_pdf source:<part>.pdf` 对照原页），但每次启动多两条 `[pdfview] 页数不一致: part split_files: no view file`——`alignmentProblems` 把 PDF 的父目录当 part 名，兜底 PDF 的父目录是 `split_files`。`pageSrc` 增 `part` 字段（`buildPageIndex`/`buildDocIndex` 填 MinerU 目录名），核对侧只在空值时回退路径推导；`TestPageSrcKeepsMineruPartName` + 真实数据 244 页 0 告警。
