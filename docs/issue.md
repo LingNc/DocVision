@@ -2430,3 +2430,8 @@ user 轮
   改：①`motifDedupeEligible` 把 `text` 挡在池外并统计条数，`motifDedupeVersion` 升到 v5 让含文本成员的旧 groups.json 失效；②`processPhase` 返回中止原因，`RunImages` 在档位1 收尾时用 `unfinishedImageKeys` 核对（跟随者、被吸收的续片、done/fallback 不算），有没成品的图就报错、阶段不记 done。
   验证：`t289_images_incomplete_test.go`（文本图不进池、只有"压根没跑到"的图算没跑完）；`./internal/...` 除既有两条外全绿。
   补记：单张图的"不可重试 4xx"不再当场掐断整批——那可能是这张图自己的问题，一撞就停会让它把整本书永久卡在少数几张上；改由"连续 3 张会话/接口错误"兜底（配置/模型层面的错必然连续命中），而"跑了但没成品"（error）按原图交付、只提示不挡后续阶段。
+
+[X][ ] T290. 样式会话的 bash 能看到的 `project:` 太杂——`project:source` 里摊着作图会话转录、dedupe 产物、逐图进度这些流水账，一进去就被前面那些会话的内容干扰。
+  根因：`ensureProjectView` 把整棵 `source` 软链进视图，而 `source` 同时是产物目录和流水账目录（`sessions/`、`dedupe/`、`progress_items/`）。
+  改：视图里的 `source` 改成"分栏"目录——只软链 `*.md` 与 `images`/`figures`/`tikz` 三个属于书的产物目录，流水账一概不铺；顺手清掉旧版本留下的整棵 source 软链（摘链不穿透，只删软链不碰真文件）。
+  验证：`t290_project_view_test.go`（source 里有 sessions/dedupe/progress_items 时视图只露 md 与三个产物目录；旧整棵软链会被替换）；`./internal/latex/` 除既有两条外全绿。

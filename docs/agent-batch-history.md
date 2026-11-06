@@ -3514,3 +3514,13 @@ T260
 **收尾时的两处回调**（同批，改完重跑测试）：③ 单张图的"不可重试 4xx"以前当场掐断整批（T262），但在"3 张成功、4 张 400"这种现场里它更像是这几张图自己的问题——一撞就停会让一张永远画不出来的图把整本书永久卡住。改成只累加"连续错误"计数（成功一张清零），连续 3 张才判环境/配置问题；④ 于是"没成品"分成两类：`error`（跑了但请求被判不可重试）按原图交付、只在收尾提示，不挡后续阶段；只有 `pending`（压根没跑到）才让 images 阶段报错停下。
 
 **验证**：`t289_images_incomplete_test.go`——`TestMotifDedupeSkipsTextImages`、`TestUnfinishedImageKeys`（error 不算没跑到、但计入没成品）；`./internal/...` 除既有两条（`compare_figure` 门禁、宿主 libpython）外全绿。
+
+## 第八十八批（2026-11-04）：T290——会话视野里的 source 只剩书本身
+
+用户："style里面的bash是不是能看的东西也有点多了？会干扰，那个project里面好像还有前面的会话什么的内容？"
+
+**现场**：样式会话的 `project:` 挂的是 `work/views/project`，其中 `source` 是**整棵** `source` 的软链。而 `source` 同时装着两种东西：书（`*.md`、`images/`、`figures/`、`tikz/`）与这一程的流水账（`sessions/` 逐图作图转录、`dedupe/groups.json` + `similarity_advisory.json`、`progress_items/` 每图一份 JSON、`progress.json`）。`ls /project/source` 就能看到前面那些会话的转录文件名，展开更吵。
+
+**改法**：视图里的 `source` 不再整棵软链，改成真的分栏目录——`*.md` 逐条软链，`images`/`figures`/`tikz` 三个"属于书"的产物目录软链，其余一律不铺（`projectSourceSubdirs`）。两个安全细节：① 旧版本留在这里的整棵 source 软链要先摘掉再建目录，否则"清理多余条目"会穿透进真 source；② 清理只删软链（`Lstat` 判 ModeSymlink），真文件/真目录一律不动。
+
+**验证**：`t290_project_view_test.go`——`TestProjectViewHidesSourceBookkeeping`（造出 sessions/dedupe/progress_items，断言视图里看不到；再把整棵 source 软链塞回去，断言会被替换成分栏视图）；`TestProjectViewIsNarrow` 照旧；`./internal/latex/` 除既有两条外全绿。

@@ -292,11 +292,18 @@ func ensureProjectView(proj string) string {
 		return ""
 	}
 	for _, e := range projectViewEntries {
+		link := filepath.Join(dir, e.Name)
+		if e.Name == "source" {
+			// T290：source 里除了书本身还堆着这一程的记账（作图会话转录、
+			// dedupe 产物、逐图进度），对会话来说全是噪音，还会把"前面那些
+			// 会话"直接摊到它眼前。这里只铺 md 与真正属于书的产物目录。
+			ensureProjectSourceView(filepath.Join(proj, e.Target), link)
+			continue
+		}
 		src := filepath.Join(proj, e.Target)
 		if st, err := os.Stat(src); err != nil || !st.IsDir() {
 			continue
 		}
-		link := filepath.Join(dir, e.Name)
 		if err := linkAbs(src, link); err != nil {
 			// A real directory already sits there (or the link is
 			// undeletable): keep it, the view still works.
@@ -304,4 +311,51 @@ func ensureProjectView(proj string) string {
 		}
 	}
 	return dir
+}
+
+// projectSourceSubdirs 是 source 下真正属于"书"的产物目录：图片、矢量图成品、
+// 单图 tikz 源。其余（sessions/dedupe/progress_items）都是流水账，会话不需要看。
+var projectSourceSubdirs = []string{"images", "figures", "tikz"}
+
+// ensureProjectSourceView 把 <proj>/source 铺成视图里的 source：md 文件与上面
+// 那几个产物目录逐条软链，流水账一概不铺。视图里上一次运行留下的旧条目（含
+// 旧版本整棵 source 的软链）会先清掉，避免它继续漏进会话。
+func ensureProjectSourceView(src, dir string) {
+	// 旧版本把整棵 source 软链在这里：先摘掉这条链，否则下面的"清理多余条目"
+	// 会穿透到真正的 source 目录里去动手。
+	if st, err := os.Lstat(dir); err == nil && st.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(dir); err != nil {
+			return
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	want := map[string]string{}
+	if mds, err := filepath.Glob(filepath.Join(src, "*.md")); err == nil {
+		for _, md := range mds {
+			want[filepath.Base(md)] = md
+		}
+	}
+	for _, sub := range projectSourceSubdirs {
+		p := filepath.Join(src, sub)
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			want[sub] = p
+		}
+	}
+	if ents, err := os.ReadDir(dir); err == nil {
+		for _, e := range ents {
+			if _, ok := want[e.Name()]; ok {
+				continue
+			}
+			// 只删软链：视图里不该出现真文件，真出现了也留在原处不动。
+			p := filepath.Join(dir, e.Name())
+			if st, err := os.Lstat(p); err == nil && st.Mode()&os.ModeSymlink != 0 {
+				_ = os.Remove(p)
+			}
+		}
+	}
+	for name, target := range want {
+		_ = linkAbs(target, filepath.Join(dir, name))
+	}
 }
