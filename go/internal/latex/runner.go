@@ -2,6 +2,7 @@ package latex
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -668,7 +669,21 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 		applyMotifArtifacts(pending, prog, progDir, outDir)
 	}
 	// Phase 2: per-class processing.
-	r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose)
+	if err := r.processPhase(pending, mdCache, prog, progDir, outDir, compErr, verbose); err != nil {
+		return err
+	}
+	// T289：这一轮没跑完的图（被接口掐断、某张真失败）不许悄悄滑过去——档位1
+	// 的 .tex 就是从这些成品长出来的，缺一张图照样能编译，等到组装才发现就晚了。
+	if r.inline && !onlyRun {
+		if left := unfinishedImageKeys(prog); len(left) > 0 {
+			shown := left
+			if len(shown) > 5 {
+				shown = shown[:5]
+			}
+			return fmt.Errorf("逐图作图没有全部完成：还有 %d 张图没有成品（%s%s）。修好接口/额度后重跑即可从这些图继续；核对页能看到每张的状态",
+				len(left), strings.Join(shown, ", "), map[bool]string{true: " 等", false: ""}[len(left) > len(shown)])
+		}
+	}
 	if r.inline {
 		if onlyRun {
 			applyMotifArtifacts(pending, prog, progDir, outDir)
@@ -1009,9 +1024,10 @@ func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, im
 // phase 2: per-class processing
 // ------------------------------------------------------------------
 
+// processPhase 逐图作图（矢量重画 / 文本提取 / 光栅保留）。T289：接口或配置
+// 出问题时它会把剩下的图留在"未处理"，并把原因当错误返回——阶段不能再记 done。
 func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir, outDir string, compErr error, verbose bool) {
-
+	prog map[string]*imageProgress, progDir, outDir string, compErr error, verbose bool) error {
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
 		conc = 3
@@ -1033,6 +1049,9 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	// fatalMsg 收"重试也不会变"的 4xx（模型名/参数写错）：这类错误逐张跑只是
 	// 空转，整本能白跑掉几十张，必须当场停下并点名（T262）。
 	fatalMsg := ""
+	// consecErr：连续几张会话/接口错误（成功一张就清零）。T289 把"不可重试的
+	// 4xx"也接到这条规则上——单张图的 4xx 不该判整个环境坏掉。
+	consecErr := 0
 	for _, t := range pending {
 		mu.Lock()
 		p, ok := prog[t.key()]
@@ -1063,31 +1082,31 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 	}
 
 	aborted := false
+	abortReason := ""
 	for _, t := range pending {
 		mu.Lock()
 		p, ok := prog[t.key()]
-		apiErrs, successes := apiErr, okCount
 		mu.Unlock()
 		if !ok || p.Class == "" || (r.inline && p.EquivalentTo != "" && prog[p.EquivalentTo] != nil) {
 			continue // unclassified or verified follower
 		}
-		// 连续接口/会话错误且一张都没成功：明显不是图的问题（配置、额度、
-		// 端点），再逐张重试只是空转——停在这里，剩下的保持未处理状态，
-		// 下次运行自动继续。
+		// 连续几张都是接口/会话错误（成功一张就清零）：明显不是图的问题
+		// （配置、额度、端点），再逐张重试只是空转——停在这里，剩下的保持
+		// 未处理状态，下次运行自动继续。
 		mu.Lock()
 		fatal := fatalMsg
+		consec := consecErr
 		mu.Unlock()
-		if !aborted && fatal != "" {
+		if !aborted && (fatal != "" || consec >= processAPIErrorAbort) {
 			aborted = true
-			r.log.LogError(0, "[process] 模型/配置错误（不可重试）：", truncateStr(fatal, 300))
-			r.log.LogError(0, "[process] 这类错误重试多少次都一样，已停止处理剩下的图片；"+
-				"改对配置或换一个可用模型后重跑即可（已完成的结果会跳过）")
-		}
-		if !aborted && apiErrs >= processAPIErrorAbort && successes == 0 {
-			aborted = true
-			r.log.LogError(0, "[process] 连续", strconv.Itoa(apiErrs),
-				"张都是接口/会话错误、无一成功，判定为环境问题（不是图的问题）——停止处理剩下的图片；",
+			msg := fatal
+			if msg == "" {
+				msg = strconv.Itoa(consec) + " 张连续的接口/会话错误"
+			}
+			r.log.LogError(0, "[process] 连续", strconv.Itoa(consec),
+				"张都是接口/会话错误（", truncateStr(msg, 300), "），判定为环境/配置问题而不是单张图的问题——停止处理剩下的图片；",
 				"修好配置/额度/端点后重跑即可（已完成的结果会跳过）")
+			abortReason = "逐图作图连续 " + strconv.Itoa(consec) + " 张接口/会话错误，判定为环境/配置问题，阶段中止: " + truncateStr(msg, 200)
 		}
 		if aborted {
 			break
@@ -1140,6 +1159,7 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 					r.log.Log(tid, "✓", "["+el+"s]", "DONE", "[IMG_TYPE: "+sessType+"]")
 					mu.Lock()
 					okCount++
+					consecErr = 0
 					mu.Unlock()
 				} else {
 					r.log.LogError(tid, "✗", "["+el+"s]", "FAILED", sessMsg)
@@ -1199,12 +1219,14 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 					//   ③ TikZ 校验没过：同样保留原图，下次重试。
 					switch {
 					case isSessionAPIError(pp.Error) && isSessionNonRetryableError(pp.Error):
-						r.log.LogError(tid, "[vector] 模型/配置错误（不可重试），这一批就此停下:", tt.imgPath, pp.Error)
+						// T289：单个请求被判"不可重试"可能是这张图自己的问题
+						// （太大/服务端就是不肯接），一撞就掐断整批会让这张图
+						// 把整本书永久卡在少数几张上。改由下面的"连续 N 张
+						// 都没成功"规则兜：配置/模型层面的错会连续命中。
+						r.log.LogError(tid, "[vector] 模型/配置错误（不可重试）:", tt.imgPath, pp.Error)
 						mu.Lock()
 						apiErr++
-						if fatalMsg == "" {
-							fatalMsg = pp.Error
-						}
+						consecErr++
 						mu.Unlock()
 						pp.Status = ImageStatusError
 						pp.Error = firstNonEmpty(pp.Error, "模型/配置错误（不可重试）")
@@ -1265,7 +1287,16 @@ func (r *Runner) processPhase(pending []*task, mdCache map[string]*mdFile,
 		r.log.LogWarning(0, "[process] 退回原图的图共", strconv.Itoa(book.Fallback),
 			"张（哪几张、为什么退，见核对页的「退回原图」段）")
 	}
+	if errs := errorImageKeys(prog); len(errs) > 0 {
+		// 这些图的请求被判不可重试，重建时按原图交付：不挡后续阶段，但必须说清。
+		r.log.LogWarning(0, "[process]", strconv.Itoa(len(errs)),
+			"张图没有成品，书里按原图交付（核对页可单独重试）")
+	}
 	// 同 classifyPhase：定格与换行只由 deferred Close 负责，避免重复行。
+	if abortReason != "" {
+		return errors.New(abortReason)
+	}
+	return nil
 }
 
 // processAPIErrorAbort 是"接口整体不通"的判定阈值：连续这么多张会话/接口

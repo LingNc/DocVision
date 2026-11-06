@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -22,7 +23,14 @@ import (
 // v3 → v4 再改一处：复核时离组中心不够、但对组内某个已达标成员仍达标的成员
 // 随组带入（T152）——同一张图换分辨率/长宽比与中心的分数会偏低，上一版把它
 // 退回独立，续跑会一直沿用那份"多画几张"的旧结论。
-const motifDedupeVersion = "visual-motif-v4"
+// T289：v5 起文本图不再参与分组（见 motifDedupeEligible），旧产物里可能有
+// 文本图当跟随者的组——升版本让它们整体失效、重新核验一次。
+const motifDedupeVersion = "visual-motif-v5"
+
+// motifDedupeEligible 说明"这张图要不要进分组池"。文本图的交付物是提取出来的
+// 文字，不是绘制成品，被并进一组当跟随者就会被跳过（本图的文字也就没人提取，
+// rebuild 只能退回原图）；所以文本图逐张自己跑，不进池子。
+func motifDedupeEligible(class string) bool { return class != ClassText }
 
 // motifCandidate keeps a decoded input and its progress record together for
 // one book-level verification pass.
@@ -95,10 +103,15 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	}
 	var pend []pending
 	var hashed []motifHashedDedupe
+	skippedText := 0
 	for ti, t := range tasks {
 		progress.scan(ti+1, len(tasks))
 		p := prog[t.key()]
 		if p == nil || p.Class == "" || p.Absorbed {
+			continue
+		}
+		if !motifDedupeEligible(p.Class) {
+			skippedText++
 			continue
 		}
 		path, err := resolveImageFile(r.cfg.Paths.ImagesDir, t.imgPath, subjectOf(t.mdName))
@@ -121,6 +134,9 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 			art.Fingerprint, art.Distinct, len(art.Groups)))
 		progress.verify(1, 1, len(pend), 0)
 		return
+	}
+	if skippedText > 0 {
+		r.log.Log(0, "[dedupe]", strconv.Itoa(skippedText), "张文本图不参与分组（它们只需要提取文字，不重画）")
 	}
 	var samples []motifCandidate
 	byKey := make(map[string]*motifCandidate)

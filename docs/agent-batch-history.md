@@ -3500,3 +3500,17 @@ T260
 - `convertChapterBatch` 加致命错误闩锁：goroutine 里遇到 `isSessionFatalError` 记下消息；派发循环在每章之前检查，命中就停止派发、把剩下的章节记成"没开始"；函数多返回一个 `fatal error`，`convertPhase` 两个调用点见到就直接 `return`，未开始的章节在日志里点名。
 
 **验证**：`t288_pilot_abort_test.go`——`TestPilotPhaseAbortsOnSessionError`（假服务端回 500，试点必须返回错误且不写 marker）、`TestPilotPhaseSkipsOnContentFailure`（会话跑完没交选材 → 只跳过、写 marker）；`t244_restore_wait_test.go` 的调用点补第四返回值；`./internal/latex/` 除既有两条外全绿。
+
+## 第八十七批（2026-11-04）：T289——文本图不进分组、图没跑完不进下一阶段
+
+用户："dedupe阶段好像不太需要对text类型的图片进行分组吧？…如果分组处理最后下个阶段会不会导致本来text内容不同给弄到相同的内容了？"+ "为什么矢量图阶段没跑完就跑到下一阶段了？不会自动停下吗？"（附日志：`[process 7/66] 10.61% (done: 3, errors: 4, …)` 紧跟 `[book] === phase: images done (8m52s) ===`）
+
+**① 文本图被分组**：`motifDedupePhase` 的候选收集只挡"没分类 / 已吸收"，`ClassText` 照样进池，于是两张文字不同、版式相近的文本图可能被并成一组；`processPhase` 对跟随者一律跳过（"materialized after leader"），而被跳过的文本图不会有 `Content`，`rebuildPhase` 只能退回原图——文字从书里消失，还白花一次 dedupe 会话。
+改：`motifDedupeEligible(class)` 把 `text` 挡在池外并打一行「N 张文本图不参与分组」；`motifDedupeVersion` v4 → v5，让可能含文本成员的旧 `groups.json` 整体失效、重新核验一次（文本图逐张自己提取文字，代价很低）。
+
+**② 图没画完就进下一阶段**：`processPhase` 是 void——逐图失败只累加 `errors/failed` 计数，`RunImages` 收尾只 `return r.rebuildPhase(...)`，于是"接口掐断、只跑了 7/66 张"也被 `runPhase` 记成 `images: done`，style/chapters/convert 全建在缺 59 张图的册子上（用户当场看出来了）。
+改：`processPhase` 把中止原因（不可重试的 4xx / 连续接口错误且无一成功）当 error 返回；`RunImages` 在档位1 收尾再用 `unfinishedImageKeys` 核对一遍（`done`/`fallback`、跟随者、被吸收的跨页续片都不算），有没成品的图就报错并点名前 5 个——阶段不记 done，运行停在 images，重跑从这些图继续。
+
+**收尾时的两处回调**（同批，改完重跑测试）：③ 单张图的"不可重试 4xx"以前当场掐断整批（T262），但在"3 张成功、4 张 400"这种现场里它更像是这几张图自己的问题——一撞就停会让一张永远画不出来的图把整本书永久卡住。改成只累加"连续错误"计数（成功一张清零），连续 3 张才判环境/配置问题；④ 于是"没成品"分成两类：`error`（跑了但请求被判不可重试）按原图交付、只在收尾提示，不挡后续阶段；只有 `pending`（压根没跑到）才让 images 阶段报错停下。
+
+**验证**：`t289_images_incomplete_test.go`——`TestMotifDedupeSkipsTextImages`、`TestUnfinishedImageKeys`（error 不算没跑到、但计入没成品）；`./internal/...` 除既有两条（`compare_figure` 门禁、宿主 libpython）外全绿。

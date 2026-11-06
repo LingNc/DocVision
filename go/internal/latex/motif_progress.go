@@ -2,6 +2,7 @@ package latex
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,45 @@ type imageStatusCounts struct {
 	Error      int // 真失败（下一轮会重试）
 	Pending    int // 作业项里还没跑到的
 	Followers  int // 跟随代表图的（不单独跑）
+}
+
+// unfinishedImageKeys 返回"这一轮压根没跑到"的图（T289）：既没落到 done/
+// fallback，也没被标成 error，也不是被吸收的跨页续片或跟随代表图的副本。
+// 用它守住"images 阶段没跑完就别往下走"——以前逐图作图被接口掐断后这个阶段
+// 照样记 done，样式/划分/转换全建在一本缺图的册子上，等发现时下游已经跑了一大截。
+//
+// 注意 `error`（这张图的请求被判不可重试）不算"没跑到"：它和 fallback 一样
+// 会在 rebuild 时保留原图，book 里不丢内容。若把它也算进来，一张永远画不出来的
+// 图就能把整本书永久卡住。
+func unfinishedImageKeys(prog map[string]*imageProgress) []string {
+	var keys []string
+	for k, p := range prog {
+		if p == nil || p.Absorbed || imageStatusSettled(p.Status) || p.Status == ImageStatusError {
+			continue
+		}
+		if strings.TrimSpace(p.EquivalentTo) != "" {
+			continue // 跟随者：成品由代表图物化，自己不需要单独跑
+		}
+		if p.Class != "" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// errorImageKeys 返回"跑了但没成品"的图（原图会留在书里）。只用于收尾提示，
+// 不挡后续阶段——见 unfinishedImageKeys 的说明。
+func errorImageKeys(prog map[string]*imageProgress) []string {
+	var keys []string
+	for k, p := range prog {
+		if p == nil || p.Absorbed || p.Status != ImageStatusError {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func countImageStatuses(prog map[string]*imageProgress) imageStatusCounts {

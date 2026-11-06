@@ -2424,3 +2424,9 @@ user 轮
   根因：`stylePilotPhase` 三步（选材/试转/修订）的错误一律 `LogWarning` + 写 marker 跳过试点，分不清"内容没做成"与"会话/接口断了"；此外转换批遇到余额这类致命错误时仍把剩余章节一张张派下去，每张各开一条转录撞同一堵墙。
   改：试点会话级失败（`isSessionAPIError`/`isSessionFatalError`）改为返回错误、由 style 阶段中止整轮（内容级失败仍只跳过试点）；转换批加致命错误闩锁——命中后不再派发剩余章节，返回错误中止整轮，未开始的章节在日志里点名。
   验证：`t288_pilot_abort_test.go`（上游 500 → 试点中止且不写 marker；会话跑完但没交选材 → 只跳过、写 marker）；`t244` 调用点补第四返回值；`./internal/...` 除既有两条外全绿。
+
+[X][ ] T289. ① dedupe 把文本图也丢进分组池，两张文字不同的文本图一旦被并成一组，跟随的那张会被跳过作图、自己的文字再没人提取；② images 阶段逐图作图被接口掐断（真实日志 `[process 7/66] errors: 4` 后直接 `phase: images done`），后面 59 张没成品却照样进 style/chapters/convert。
+  根因：①分组池只按"有分类"筛选，没排除 `text`（它的交付物是提取文字、不是绘制成品）；②`processPhase` 是 void，逐图失败的个数只打日志，"阶段做完"的判据只看函数有没有返回错误。
+  改：①`motifDedupeEligible` 把 `text` 挡在池外并统计条数，`motifDedupeVersion` 升到 v5 让含文本成员的旧 groups.json 失效；②`processPhase` 返回中止原因，`RunImages` 在档位1 收尾时用 `unfinishedImageKeys` 核对（跟随者、被吸收的续片、done/fallback 不算），有没成品的图就报错、阶段不记 done。
+  验证：`t289_images_incomplete_test.go`（文本图不进池、只有"压根没跑到"的图算没跑完）；`./internal/...` 除既有两条外全绿。
+  补记：单张图的"不可重试 4xx"不再当场掐断整批——那可能是这张图自己的问题，一撞就停会让它把整本书永久卡在少数几张上；改由"连续 3 张会话/接口错误"兜底（配置/模型层面的错必然连续命中），而"跑了但没成品"（error）按原图交付、只提示不挡后续阶段。
