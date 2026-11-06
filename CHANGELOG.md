@@ -20,6 +20,7 @@
 - **配置模板补上 Anthropic（Claude）示例（T271）**：以前只有 `api:` 那一行的键注释，换 Claude 得自己拼 `api: anthropic`、指到 `/v1` 的 `base_url`、`thinking: {type: adaptive}` 与 effort，漏一项就被 400 拒掉。现在两份配置模板的 models 段各有一段可照抄的注释示例（含 `output_config.effort` 的来历与"不要再用 budget_tokens"的提醒），`docs/config.md` 另有一节完整示例与三条易错点。
 
 ### Fixed
+- **`grep` 认得 `project:` / `/work/` 这类挂载点前缀了**：样式、修复这类只有"工作区 + 项目备选根"的会话里，`grep {path:"project:source/书.md"}` 以前会把整串当文件名、搜不到就静默回一句 `NO MATCHES`（同一文件 `read_file` 却读得到），模型据此以为原稿里没有矢量图围栏。现在显式挂载点走同一套 VFS 解析、命中行沿用模型写的路径写法，一个目标都没落地时改报"路径不存在"（T293）。
 - **原书 PDF 视图不再因为"解析产物没留 `*_origin.pdf`"整个消失**：这种情况以前只打一行警告就关掉 `source:` 挂载点，全书会话都读不到原书页（风格会话没法对照原书排版，核对门禁的"至少对照 2–4 页"也只能记警告放行）。现在回退到 `paths.split_dir` 里我们自己切的 part PDF，视图名与 part 名仍按 MinerU 目录对齐（页数核对也随之不再报 `part split_files: no view file` 的假告警），`doc_search` 在确实没有视图时也不再指向不存在的 `source:`（T292）。
 - **`list_fonts` 终于能列出系统字体了**：以前回执里只有一个空的「System fonts (fc-list):」标题（同一个 `exec.Cmd` 先 `Run()` 又 `Output()`，第二次必然失败），样式会话据此以为机器上没有中文字体、白白绕开系统字体。现在只跑一次命令，按「家族名」归并（`Noto Serif CJK SC Light` 归到 `Noto Serif CJK SC`、简体优先、上限 40 行），并提示"编译在宿主机能看到这些字体，但 bash 沙箱里看不到、别在里面 `fc-list`"；项目字体目录也按后缀认字体文件，`README.md` 不再冒充字体（T291）。
 - **文本图不再参与整组核验**：它的交付物是提取出来的文字、不是绘制成品，被并进一组当跟随者就会被跳过作图，本图的文字也就没人提取（只能退回原图）。分组池现在把 `text` 挡在外面并单独报数，旧的含文本成员的 `groups.json` 随判据版本升级一起失效（T289）。

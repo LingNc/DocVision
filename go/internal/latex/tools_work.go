@@ -538,41 +538,43 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 	}
 	// 有挂载表时按 VFS 解析（`project:style`、`/work/x.tex` 都认），
 	// 无前缀的相对路径 = 遍历全部挂载点（提示词承诺 grep 搜整个项目）。
+	// T293：`project:…` 这类显式挂载点以前只在有挂载表的会话里认，样式/修复
+	// 这类拿 Root+AltRoots 的会话会把它当成文件名拼到 Root 下，找不到就静默
+	// 回一句 "NO MATCHES"——模型从此以为原文里没有那些标记。
 	type target struct {
 		dir, label string
-		explicit   bool
+		shown      string // 命中行前缀里替代绝对路径的写法（空 = 用 "."）
 	}
 	var targets []target
-	if len(t.Mounts) > 0 {
-		v := &VFS{Mounts: t.Mounts}
-		if bare {
-			for _, m := range t.Mounts {
-				if m.Dir != "" {
-					targets = append(targets, target{dir: m.Dir, label: m.Name, explicit: true})
-				}
+	v := t.vfs()
+	if bare {
+		for _, m := range v.Mounts {
+			if m.Dir != "" {
+				targets = append(targets, target{dir: m.Dir, label: m.Name})
 			}
-		} else {
-			full, label, rerr := v.Resolve(rel, false)
-			if rerr != nil {
-				return session.ToolResult{Text: "grep error: " + rerr.Error()}, nil
-			}
-			targets = append(targets, target{dir: full, label: label, explicit: true})
 		}
+	} else if explicitMountOf(rel) != "" {
+		full, label, rerr := v.Resolve(rel, false)
+		if rerr != nil {
+			return session.ToolResult{Text: "grep error: " + rerr.Error()}, nil
+		}
+		targets = append(targets, target{dir: full, label: label, shown: label + ":" + stripMount(rel)})
 	} else {
-		targets = append(targets, target{dir: filepath.Join(t.Root, rel)})
-		for _, ar := range t.AltRoots {
-			if ar.Dir != "" {
-				full, rerr := resolveInside(ar.Dir, rel)
-				if rerr != nil {
-					continue
-				}
-				targets = append(targets, target{dir: full, label: ar.Label, explicit: true})
+		for _, m := range v.Mounts {
+			if m.Dir == "" {
+				continue
 			}
+			full, rerr := resolveInside(m.Dir, rel)
+			if rerr != nil {
+				continue
+			}
+			targets = append(targets, target{dir: full, label: m.Name})
 		}
 	}
 	var out strings.Builder
 	total := 0
 	multi := len(targets) > 1
+	existed := false
 	for _, tg := range targets {
 		full := tg.dir
 		if !fileExists(full) {
@@ -584,6 +586,7 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 			}
 			continue
 		}
+		existed = true
 		text, herr := runGrep(pattern, full, maxMatches-total)
 		if herr != nil {
 			if len(targets) == 1 {
@@ -604,7 +607,11 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 			}
 		}
 		text = strings.ReplaceAll(text, full+"/", "")
-		text = strings.ReplaceAll(text, full, ".")
+		shown := tg.shown
+		if shown == "" {
+			shown = "."
+		}
+		text = strings.ReplaceAll(text, full, shown)
 		if multi && tg.label != "" && !strings.HasPrefix(text, tg.label+"/") {
 			lines := strings.Split(text, "\n")
 			for i, ln := range lines {
@@ -624,6 +631,14 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 		}
 	}
 	if out.Len() == 0 {
+		// 一个目标都没落在地上：这不是"模式没命中"，是路径不存在（T293）。
+		if !existed && !bare {
+			full, _, rerr := v.Resolve(rel, false)
+			if rerr != nil || full == "" {
+				full = filepath.Join(t.Root, rel)
+			}
+			return session.ToolResult{Text: "grep error: " + missingPathText(rel, full)}, nil
+		}
 		return session.ToolResult{Text: "NO MATCHES: " + pattern}, nil
 	}
 	return session.ToolResult{Text: out.String()}, nil

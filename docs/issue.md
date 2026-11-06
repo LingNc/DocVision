@@ -2446,3 +2446,8 @@ user 轮
   改：`findOriginPDFs(mineruDir, splitDir, subject)` 在每个 part 没有 `*_origin.pdf` 时回退到 `<splitDir>/<part 目录名>.pdf`；返回值改为 `{Part, PDF}`（part 仍是 MinerU 目录名，`FileByPart`/`doc_search` 定位靠它，兜底 PDF 的父目录名不能冒充）；`buildPDFView`/`buildPageIndex`/`buildDocIndex` 一并带上 `SplitDir`。另：没有视图时 `doc_search` 回执改为明说"本会话看不到原书页、别去开 `source:`"，不再指向不存在的挂载点。
   验证：`t292_source_pdf_fallback_test.go`（part1 无 origin → 用 split 本体且 part 名不变、part2 的 origin 优先；无兜底目录不虚构；`doc_search` 有/无视图两种回执）；用真实数据跑 `buildPDFView`：244 页、两个 part 名与索引一致、`LocatePart` 可用；`./internal/...` 除既有两条外全绿。
   补记：实跑暴露 `[pdfview] 页数不一致: part split_files: no view file` 两条假告警——页数核对拿 PDF 父目录当 part 名，兜底 PDF 的父目录是 `split_files`。`pageSrc` 增加 `part` 字段（`buildPageIndex`/`buildDocIndex` 从 MinerU 目录名填），`alignmentProblems` 只在空值时回退到路径推导；真实数据复核 244 页 0 告警。
+
+[X][ ] T293. 样式会话里 `grep {path:"project:source/<书>.md", pattern:"DOCVISION-VECTOR"}` 一律回 `NO MATCHES`，而同一文件 `read_file` 能读、`bash grep` 也能搜到——模型因此以为原稿里没有矢量图围栏，白白丢掉现成的 LaTeX 图。
+  根因：`grep` 只有 `Root`+`AltRoots`（没有整套挂载表）时，`grep {path:"project:…"}` 把整串当文件名拼到 Root 下，找不到就 `continue`，最后一句 `NO MATCHES`；`read_file` 走 `explicitMountOf` 解析所以正常。
+  改：`grep` 的路径解析统一走 `t.vfs()`——显式挂载点（`project:`/`/work/…`）用 `Resolve` 精确定位，命中行前缀沿用模型写的写法；无前缀仍先工作区后备选根；一个目标都没落地时回"路径不存在"而不是 `NO MATCHES`。
+  验证：`t293_grep_mount_test.go`（`project:` 命中且前缀是 `project:source/book.md:3:`、缺路径报错、文件在但没命中仍 `NO MATCHES`、无前缀仍能兜底搜备选根、有挂载表的会话不退化）；`grep` 既有测试全绿。

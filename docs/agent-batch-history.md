@@ -3550,3 +3550,15 @@ T260
 **验证**：真实数据 `buildPDFView` → `[27…__part1.pdf, 27…__part2.pdf]` 共 244 页（200+44），part 名与 `doc_index` 的 part 目录逐字一致，`LocatePart` 通；`t292_source_pdf_fallback_test.go` 三条；`./internal/...` 除既有两条外全绿。
 
 **补记（T292）**：换模型后的首次实跑，原书视图正常（`[pdfview] 原书 PDF 视图就绪 … 244 页`，风格会话连续 `view_pdf source:<part>.pdf` 对照原页），但每次启动多两条 `[pdfview] 页数不一致: part split_files: no view file`——`alignmentProblems` 把 PDF 的父目录当 part 名，兜底 PDF 的父目录是 `split_files`。`pageSrc` 增 `part` 字段（`buildPageIndex`/`buildDocIndex` 填 MinerU 目录名），核对侧只在空值时回退路径推导；`TestPageSrcKeepsMineruPartName` + 真实数据 244 页 0 告警。
+
+## 第九十一批（2026-11-04）：T293——grep 不认 `project:` 前缀，静默回 NO MATCHES
+
+用户："这次的风格会话 grep DOCVISION-VECTOR … 输出 NO MATCHES，这个太奇怪了吧，原书中明明有，是我们的 grep 程序有问题吗？"
+
+**证据**：转录里 `grep {"path":"project:source/<书>.md","pattern":"DOCVISION-VECTOR"}` → `NO MATCHES`；同一路径 `read_file` 返回 597 KB 正文；`bash {ls -la /project/source}` 里那个 md 软链就在；磁盘上该文件含 54 处 `DOCVISION-VECTOR`、无 NUL 字节（不是被"二进制/超大文件"跳过）。
+
+**根因**：`GrepTool` 两条路径解析分支不对称。有整套挂载表的会话（转换/核对）走 `VFS.Resolve`，认 `project:`；只有 `Root`+`AltRoots` 的会话（样式、修复）走的是 `filepath.Join(Root, rel)`——`rel` 还是带前缀的整串，于是 `<work>/project:source/<书>.md` 不存在 → `continue` → 最后一句 `NO MATCHES`。`read_file` 一直在 `resolve` 开头用 `explicitMountOf` 处理前缀，所以它没这个毛病。
+
+**改法**：`grep` 的路径解析统一用 `t.vfs()`：显式挂载点 `Resolve` 精确定位（命中行前缀用 `label:stripMount(rel)`，不再是绝对路径）；无前缀仍先工作区再备选根；新增 `existed` 标记，一个目标都没落地时回 `grep error: 路径不存在…`（T274 的初衷）。
+
+**验证**：`t293_grep_mount_test.go` 五条（显式挂载点命中且前缀正确、缺路径报错、文件在但没命中仍 `NO MATCHES`、无前缀兜底搜备选根、挂载表会话不退化）+ 既有 `TestGrepMissingPathIsAnError`/`TestGrepToolAltRoots` 等全绿。
