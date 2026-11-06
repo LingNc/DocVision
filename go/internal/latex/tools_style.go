@@ -580,7 +580,9 @@ func (t *SubmitStyleTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if len(extra) > 0 {
 		msg += fmt.Sprintf(" %d extra file(s) shipped with the class.", len(extra))
 	}
-	return session.ToolResult{Text: msg}, nil
+	// Terminal：这次提交真收下了（与其它 submit 工具一致，也是续跑重放判定
+	// "收账 vs 被打回"的依据，T92/T298）。
+	return session.ToolResult{Text: msg, Terminal: true}, nil
 }
 
 // ------------------------------------------------------------------

@@ -131,6 +131,34 @@ func pilotContentSkip(err error) bool {
 // pilotDirOf 是试点的工作根（work/style/pilot/）。
 func pilotDirOf(proj string) string { return filepath.Join(proj, "work", "style", "pilot") }
 
+// stylePackageDone 判断样式阶段是不是已经完成过：style/ 里有一份完整的样式
+// 包，而且试点已经开始（spec.json 或 pilot.done 在）——试点只在样式包通过
+// 编译校验之后才启动，所以这两样同时在就说明样式阶段早就收过账（T302）。
+func (r *Runner) stylePackageDone(proj string) bool {
+	styleDir := filepath.Join(proj, "style")
+	if classNameOfFile(styleDir) == "" ||
+		!fileExists(filepath.Join(styleDir, "manual.md")) ||
+		!fileExists(filepath.Join(styleDir, "example.tex")) {
+		return false
+	}
+	pilot := pilotDirOf(proj)
+	return fileExists(filepath.Join(pilot, "spec.json")) || fileExists(pilotMarkerPath(proj))
+}
+
+// pilotTrialPrevRun 判断上一场试转是否已经交出可用产物：转录里收过 submit，
+// 工作区的 sample.tex 还在并且现在仍能编译通过。内容级失败（没编译过）不算，
+// 那种要重新试转。
+func (r *Runner) pilotTrialPrevRun(proj, work string) bool {
+	trPath := filepath.Join(proj, "work", "sessions", "style_pilot_trial.jsonl")
+	if _, st, err := session.LoadTranscriptStats(trPath); err != nil || st.SubmitName == "" {
+		return false
+	}
+	if !fileExists(filepath.Join(work, "sample.tex")) {
+		return false
+	}
+	return r.comp.Compile(work, "sample.tex").OK
+}
+
 // pilotSpecFromPrevRun 判断选材是否已经做过：转录里已有 submit 收账、且
 // spec.json 里的条目仍然齐全时返回上次的结果，调用方据此跳过选材会话。
 //
@@ -332,6 +360,13 @@ func (r *Runner) pilotTrialSession(proj, samplePath, pagesDesc string) error {
 	}
 	pilotDir := pilotDirOf(proj)
 	work := filepath.Join(pilotDir, "work")
+	// 上次试转已经收账、sample.tex 也还编译通过：沿用工作区与转录，不要清空
+	// 重来（T300——以前每次 RemoveAll(work) 并归档转录，续跑等于白烧一整场
+	// 试转，一小时起步）。
+	if r.pilotTrialPrevRun(proj, work) {
+		r.log.Log(1, "[pilot] 试转上次已提交且 sample.tex 编译通过——沿用，不重跑")
+		return nil
+	}
 	_ = os.RemoveAll(work)
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		return err
@@ -429,7 +464,9 @@ func (r *Runner) pilotReviseSession(proj, pagesDesc string) error {
 	client := r.clientFor(reviseKey)
 	modelCfg := r.modelOf(reviseKey)
 	tuning := r.cfg.LatexSession("style")
-	goal := NewGoalTool(filepath.Join(workDir, "plan.md"))
+	// 修订会话用自己的清单文件：与样式会话共用 plan.md 时，修订留下的待办会
+	// 把样式会话的 submit 门禁卡死（样式会话重放提交被 REJECTED，T299）。
+	goal := NewGoalTool(filepath.Join(workDir, "plan-revise.md"))
 	submit := &SubmitStyleTool{Workspace: workDir, Gate: func() string { return goalGate(goal) }}
 	bashTmp, cleanBash := r.sessionBashTemp(proj, "bash_pilot_revise")
 	defer cleanBash()
@@ -438,7 +475,24 @@ func (r *Runner) pilotReviseSession(proj, pagesDesc string) error {
 
 	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "pilot-revise")
 	trPath := filepath.Join(proj, "work", "sessions", "style_pilot_revise.jsonl")
-	archivePrevTranscript(trPath)
+	// 上次修订已经收账：提交过的样式包就是最终版，不再开一场（T300）。
+	if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil && st.SubmitName != "" {
+		r.log.Log(1, "[pilot] 修订上次已提交——沿用最终样式包，不重跑")
+		return nil
+	}
+	// 上次修订被掐断（还没提交）：接着那条转录续跑，别归档重开——重开等于让它
+	// 从零再读一遍试转产物，一小时的工作白扔（T300）。
+	reviseResumed := false
+	if msgs, lerr := loadSessionContext(trPath); lerr == nil && len(msgs) > 0 {
+		sess.SetMessages(msgs)
+		reviseResumed = true
+		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+			resumeLog(r.log, 1, "pilot-revise", filepath.Base(trPath), msgs, st)
+		}
+	} else {
+		archivePrevTranscript(trPath)
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -448,6 +502,11 @@ func (r *Runner) pilotReviseSession(proj, pagesDesc string) error {
 	defer liveClose()
 
 	userText := prompts.Render(prompts.StylePilotReviseUser, map[string]string{"PAGES": pagesDesc})
+	if reviseResumed {
+		// 续跑：历史里已经有任务文本，原样续行（T29 口径），不重述要求；
+		// attempt>0 的打回文本照常在下一轮覆盖它。
+		userText = ""
+	}
 	var compileErr string
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {

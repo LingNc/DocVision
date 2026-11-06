@@ -2472,3 +2472,19 @@ user 轮
   根因：`pilotSelectSession` 一进来就 `archivePrevTranscript` 开新会话，从不看上次的转录与 `spec.json`——选材结果明明已经落在磁盘上（转录里有 submit 收账、spec.json 条目齐全），重跑仍要重选一次。
   改：新增 `pilotSpecFromPrevRun`，转录里已有 submit 收账且 spec.json 的 md/pdf 两类条目都齐全时直接沿用、跳过选材会话；判据只认磁盘事实（另一进程里工具状态是空的），半截清单（只有 md 段）照旧重选。
   验证：`t296_pilot_select_reuse_test.go` 两条（有 submit + 两份条目 → 沿用且字段读对；无转录 / 无 submit 回执 / 只有 md 段 → 老老实实重选）。
+[X][ ] T298. 续跑重放"已提交"的 submit 时，被计划清单门禁打回的提交也算重放成功，阶段带着未提交的状态继续跑。
+  根因：`replaySubmit` 只看 `Execute` 是否报错；门禁打回是"正常回执 + `REJECTED` 前缀"（不是 error），而样式提交的成功回执又没带 `Terminal`，两者在回执上分不开。
+  改：重放后要求回执带 `Terminal`（T92 的收账标记）才算成功，否则打一行"未被收下（回执首行）"、按未提交继续；`SubmitStyleTool` 的成功回执补上 `Terminal`，与其它 submit 工具一致。
+  验证：`t298_replay_submit_test.go` 三条（打回 → false、收账 → true、无提交记录 → false、回执首行截短）。
+[X][ ] T299. 样式会话与试点修订会话共用 `work/style/plan.md`，修订留下的待办把样式会话的 submit 门禁卡死。
+  根因：两个会话都用 `NewGoalTool(work/style/plan.md)`，`goalGate` 读同一份清单；修订加的一条待办让样式会话续跑时重放的提交被当场 REJECTED。
+  改：修订会话改用 `work/style/plan-revise.md`（自己的清单），样式会话仍用 `plan.md`，两边互不牵连。
+  验证：现场数据已把修订那条待办挪进 `plan-revise.md`（`plan.md` 只剩样式自己的已完成项），样式会话的门禁不再挡重放。
+[X][ ] T300. 续跑时样式试点整场重来：试转清空工作区并归档转录，修订也归档重开。
+  根因：`pilotTrialSession` 一进来就 `RemoveAll(work)` + `archivePrevTranscript`，`pilotReviseSession` 也 `archivePrevTranscript`，都不看上次的转录与产物——一次被掐断的续跑要把整场试转与修订重烧一遍。
+  改：试转在上次转录已收账且 `sample.tex` 仍编译通过时直接沿用（不清空、不归档）；修订上次已提交就沿用最终样式包，没提交就接着原转录续跑（回放历史、不重发任务文本）。
+  验证：`t300_resume_skip_test.go` 两条（没有试转转录直接判否、样式包判定不误报）；真实续跑由下一次运行现场验证。
+[X][ ] T301. 样式阶段在试点已经开始后仍会重放导出，用被修订改过的草稿覆盖已提交的样式包。
+  根因：`stylePhase` 只看转录里有没有提交，不看磁盘上样式包是否已经落盘；试点只在样式包通过编译校验之后才启动，所以试点产物在就说明样式阶段早已收过账。
+  改：新增 `stylePackageDone`（`style/` 里 cls+manual+example 齐 + `pilot/spec.json` 或 `pilot.done` 在），成立时样式阶段直接沿用磁盘上的包、不重放导出。
+  验证：`t300_resume_skip_test.go` 覆盖（包齐 + 试点在 → 已完成；缺件 / 试点没开始 → 未完成）。

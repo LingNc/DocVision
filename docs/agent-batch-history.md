@@ -3631,3 +3631,20 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 三处编译回执都接上：work 会话（试转/修订，`t.Root`）、整章 convert（`t.Dir`）、figure 预览（`t.State.workDir`）。
 
 测试：`t297_compile_hint_test.go` 三条（错尾巴指到真实文件且同一缺失只列一次、无相似候选不乱指、目录不存在不崩）；`./internal/...` 除 `TestCompileFigureToolFromFile` / `TestPythonEnvVenvRunsInsideRealSandbox` 两条既有失败外全绿，`go build ./...` 通过。
+
+## 第九十六批（T298–T301）：续跑从"最后一步"接着走，不重烧已完成步骤
+
+真实事故（现场）：一次运行在样式试点中途被停，重启后续跑。样式阶段看到转录里"已提交"，重放了那条提交以收账；但试点修订会话此前在共用的 `work/style/plan.md` 里加了一条待办未勾选，重放的提交被计划清单门禁当场打回（回执 `REJECTED: 计划清单还有 N 项未完成`）。重放逻辑只看 `Execute` 是否报错——`REJECTED` 是正常回执、不是 error——于是判定"重放成功"，阶段继续，又因为工具状态没真置位而发出"还没提交"的提醒，把样式会话重新拉起来干活（请求体约 8 MB/轮、第 3 轮仍在转）。同一轮里，试转会话的工作区每次都被清空、转录被归档，修订会话也被归档重开：续跑等于把整场试转与修订重烧一遍。
+
+判断：四处独立缺陷叠在一起——① 重放不能只看 error，得看"提交是否真的被收下"；② 两个会话共用一份 goal 清单会互相卡门禁；③ 试转/修订的续跑路径是"清空重来"而不是"接着干"；④ 样式阶段只看转录、不看磁盘上是否已经有落盘的包，会把之后修订会话改过的草稿重放覆盖回 `style/`。
+
+改：
+- `replaySubmit` 改为要求回执 `Terminal`（T92 的收账标记）为真才算成功，否则打一行"重放的提交未被收下（回执首行）"按未提交继续；`SubmitStyleTool` 的成功回执补 `Terminal: true`，与其它 submit 工具一致（全仓 9 处重放点都核对过：成功回执只有这一处没带标记）。
+- 修订会话改用 `work/style/plan-revise.md` 自己的清单；样式会话仍用 `plan.md`，`goalGate` 不再跨会话互相牵连。
+- `pilotTrialSession` 增加 `pilotTrialPrevRun`：转录已收账 + `sample.tex` 在且仍编译通过 → 直接沿用工作区与转录，不 `RemoveAll`、不归档。
+- `pilotReviseSession`：转录已提交 → 沿用最终样式包；没提交 → 回放该转录续跑（`SetMessages` + 计数续接），不再归档重开；续跑时不重发任务文本（T29 口径）。
+- `stylePhase` 增加 `stylePackageDone`（`style/` 包齐 + `pilot/spec.json` 或 `pilot.done` 在）：成立就沿用磁盘上的包直接返回，不重放导出。
+
+现场处理：把样式转录截回提交收账那一行之后（去掉提醒拉起的多余轮次）、把修订的那条待办从 `plan.md` 挪进 `plan-revise.md`、回退那次被拉起的样式会话对 cls 的修改（恢复修订会话自己的编辑），三个文件原样备份在 `work/style/.bak-revert/`，源转录另有完整拷贝（截断只删多余的尾部轮次）。
+
+测试：`t298_replay_submit_test.go`（打回 false / 收账 true / 无记录 false / 回执首行截短）、`t300_resume_skip_test.go`（样式包判定：包齐+试点在 → 已完成，缺件或试点没开始 → 未完成；无试转转录直接判否）；`./internal/latex/` 全绿，除既有的两条环境相关失败。

@@ -549,6 +549,14 @@ func (r *Runner) stylePhase(proj string) error {
 		}
 	}
 
+	// 上次运行是在试点里被掐断的：提交过的样式包早已落盘（试点只在样式阶段
+	// 编译通过之后才启动），别再让样式会话重放一次导出——样式工作区可能已经
+	// 被之后的修订会话改过，重放会把半成品覆盖回 style/（T301）。
+	if r.stylePackageDone(proj) {
+		r.log.Log(1, "[style] 样式包与试点产物都在——样式阶段沿用已提交的包，不重跑")
+		return nil
+	}
+
 	client := r.clientFor(r.cfg.Latex.StyleModel)
 	modelCfg := r.modelOf(r.cfg.Latex.StyleModel)
 	// style 会话的内置 max_tokens 默认即 32768（cls+manual+example 较大），
