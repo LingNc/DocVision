@@ -327,6 +327,9 @@ func (t *CompileTexTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if w := res.WarningSummary(); w != "" {
 		text += "\n" + truncateStr(w, 1500)
 	}
+	if h := missingFileHints(res.Err, t.Root); h != "" {
+		text += "\n" + h
+	}
 	return session.ToolResult{Text: text}, nil
 }
 

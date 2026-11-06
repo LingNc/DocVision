@@ -3613,3 +3613,21 @@ T260
 | 新：`source` 是视图真目录（整棵绑） | 读不到 | 只剩 1 行报错 | 只剩 1 行报错 | 读 0 字节 |
 
 结论：① bash 的确是从那次收窄起坏的；② 但**位图从来没能在 bash 里读过**（两种形状都是 0 字节），会话要图一直靠 `view_image`（进程内、不过沙箱）——所以更早的会话"看起来没问题"；③ `grep`/`read_file` 也在进程内，从来没受沙箱影响，T293 那个 `NO MATCHES` 是另一条独立的工具侧 bug。
+
+## 第九十五批（T297）：编译回执点名"真实文件名"
+
+真实事故：试点试转会话写 sample.tex 时，11 张插图的 `\includegraphics` 里只有 1 张的 64 位哈希尾巴打错了（`…f33dcc7701…` 写成 `…8f56b40b80…`），latexmk 报 `File ... not found`、`l.227 \end`；会话收到"not found"后自己判断"证书文件名里有 …f56b40…，TeX 里是 …f9…"——两处都有 f9，判断本身就是错的，改完还是错。它已经读到过 `rg --files` 的完整清单，仍然从上下文里"回忆"了哈希。
+
+判断：不是流水线 bug（同一次试转里 10/11 张图能正常 includegraphics、`example.pdf`/`sample.xdv` 都在编），是**长哈希名 + 只回一句 not found** 这个组合的必然代价。
+
+改：新增 `internal/latex/compile_hint.go`——编译失败时用 `File `X' not found` / `can't find file `X'` 取出缺失名，在它的目录里找与 X 公共前缀最长的真实文件（前缀 <8 字符视为不像、目录不存在就沉默、最多 3 条），回执追加：
+
+```
+MISSING FILES（名字必须原样照抄，不要手打）：
+  images/<书>/<错的名字>
+    → 工作区里真实存在的是 images/<书>/<真的名字>（原样照抄这个）
+```
+
+三处编译回执都接上：work 会话（试转/修订，`t.Root`）、整章 convert（`t.Dir`）、figure 预览（`t.State.workDir`）。
+
+测试：`t297_compile_hint_test.go` 三条（错尾巴指到真实文件且同一缺失只列一次、无相似候选不乱指、目录不存在不崩）；`./internal/...` 除 `TestCompileFigureToolFromFile` / `TestPythonEnvVenvRunsInsideRealSandbox` 两条既有失败外全绿，`go build ./...` 通过。
