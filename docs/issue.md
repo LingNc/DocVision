@@ -2456,3 +2456,8 @@ user 轮
   根因：`pilotImageRef` 用 `[^)\s]+` 在第一个空白处截断，项目名带空格时只取到半个目录名（`images/<项目名>`）；就算路径对，`copyFile` 也不建父目录，而错误又被 `_ =` 丢掉——整批图片静默没铺进去。
   改：正则改成取到右括号为止；铺图收进 `stagePilotImages`（重复引用只拷一次、逐张建父目录），失败的相对路径回给调用方逐条告警；试点提示词把"引用的位图已复制到 images/"写进工作区清单。
   验证：`t294_pilot_images_test.go`（带空格路径、缺失如实报、普通路径不退化）+ 真实 sample.md 探针（14 张全部铺进去、0 缺失）；`xelatex` 实测 `\includegraphics{images/<目录带空格>/a.jpg}` 正常，空格不会挡住编译。
+
+[X][ ] T295. 会话（含样式修复/试转）里 `ls /project/source/tikz`、`grep … /project/source/*.md`、读 `images/` 全部扑空，模型据此断定书里没有矢量图/位图。
+  根因：T290 把视图里的 `source` 从"指向真 source 的软链"改成了"真目录 + 里层软链"，而 `sandboxArgs` 对只读视图只按第一层判断要不要拆绑；`source` 本身不是软链，于是被整棵 `--ro-bind` 进沙箱，里层的 md/images/figures/tikz 软链目标都在绑定范围外，在沙箱里全成死链（工具侧没有沙箱，所以 `read_file`/`grep` 正常，只有 bash 看不见）。
+  改：`linked` 判断加上"第二层有没有软链"（`hasNestedLink`）；只读视图改用 `bindViewTree` 递归逐条绑定——真文件直接绑、真目录建同名目录再递归、软链绑它的目标，深度 6。
+  验证：`t295_view_sandbox_test.go`（嵌套软链都落到实绑、无软链的目录仍整棵绑）+ 真实视图进真沙箱：`tikz=54 / md=7304 行 / images=89 / figures=108 / grep DOCVISION-VECTOR=54`，与磁盘一致。

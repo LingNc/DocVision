@@ -3576,3 +3576,15 @@ T260
 **改法**：正则改成 `\]\((images/[^)]+)\)`（取到右括号）；铺图收进纯函数 `stagePilotImages`（去重、逐张 `MkdirAll` 父目录、返回失败的相对路径），调用方逐条打 `[pilot] 试转工作区缺这张插图的副本:` 告警；试点系统提示词的工作区清单补一句"引用的位图已复制到 images/"。
 
 **验证**：`t294_pilot_images_test.go` 三条（带空格路径能铺、缺失如实报、无空格路径不退化）；真实 `sample.md` 探针：**14 张全部铺进、0 缺失**；`xelatex` 实测 `\includegraphics{images/<目录带空格>/a.jpg}` 两种写法都能编译，所以不需要给文件名去空格。
+
+## 第九十三批（2026-11-04）：T295——窄视图在会话 bash 里是空的（里层软链全死链）
+
+用户："tikz 我看这次的那个样式修复会话里面他就看不到里面的东西？之前的会话是能看到的"
+
+**证据**：试点修订会话的转录里 `ls /source; ls /project/source/tikz | head; wc -l /project/source/'<书> .md'` → 输出只有两个 part PDF 的路径 + 一行 `/project/source/tikz` + `wc: no such file`。同一会话用 `read_file`/`grep`（进程内、无沙箱）读 md 却完全正常——所以不是文件没了，是**沙箱里**看不见。
+
+**根因**：T290 把 `project:` 视图里的 `source` 从"指向真 `source` 的软链"改成"真目录 + 里层软链（md / images / figures / tikz）"。`sandboxArgs` 对只读视图只按**第一层**判断有没有软链：`source` 是普通目录 → 走 `--ro-bind <view>/source /project/source` 整棵绑定，里层软链的目标都在绑定范围之外 → 沙箱里全是死链。改动前 `source` 本身是软链，整棵真目录被绑进来（里面的 md/tikz 是真文件），所以"之前能看到"；`images/<项目>/<图>` 那种再深一层的软链一直看不到。
+
+**改法**：`linked` 判断补上 `hasNestedLink(dir, 2)`；只读视图改走 `bindViewTree`：真文件 `--ro-bind` 到视图位置、真目录 `--dir` 后递归、软链解析出目标再按同一位置绑，深度 6，`boundTarget` 去重。
+
+**验证**：`t295_view_sandbox_test.go` 两条（三层嵌套软链都落到实绑；无软链的只读目录仍整棵绑定，不拆成上千条参数）；真实视图进真 bwrap 探测：`TIKZ=54 / MD=7304 行 / IMG=89 / FIG=108 / GREP(DOCVISION-VECTOR)=54`，与磁盘逐一相符。

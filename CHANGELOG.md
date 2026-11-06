@@ -20,6 +20,7 @@
 - **配置模板补上 Anthropic（Claude）示例（T271）**：以前只有 `api:` 那一行的键注释，换 Claude 得自己拼 `api: anthropic`、指到 `/v1` 的 `base_url`、`thinking: {type: adaptive}` 与 effort，漏一项就被 400 拒掉。现在两份配置模板的 models 段各有一段可照抄的注释示例（含 `output_config.effort` 的来历与"不要再用 budget_tokens"的提醒），`docs/config.md` 另有一节完整示例与三条易错点。
 
 ### Fixed
+- **会话 bash 里终于看得见窄视图里的东西了**：`project:` 视图的 `source/` 是"真目录 + 里层软链"，沙箱只按第一层判断有没有软链，于是把它整棵绑进去、里层的 md/images/figures/tikz 软链全成死链——`ls /project/source/tikz` 是空的，模型据此以为书里没有矢量图或位图。现在按层递归绑定，软链目标逐条落到实绑（T295）。
 - **样式试转会话真的有原书位图了**：`sample.md` 引用的插图以前一张也没铺进试转工作区（路径按空白截断、`copyFile` 不建父目录、错误被丢弃），会话只能给插图放说明框并把"工作区没有原始位图"写进报告；现在按括号取整条路径、逐张建目录复制，取不到的逐条告警（T294）。
 - **`grep` 认得 `project:` / `/work/` 这类挂载点前缀了**：样式、修复这类只有"工作区 + 项目备选根"的会话里，`grep {path:"project:source/书.md"}` 以前会把整串当文件名、搜不到就静默回一句 `NO MATCHES`（同一文件 `read_file` 却读得到），模型据此以为原稿里没有矢量图围栏。现在显式挂载点走同一套 VFS 解析、命中行沿用模型写的路径写法，一个目标都没落地时改报"路径不存在"（T293）。
 - **原书 PDF 视图不再因为"解析产物没留 `*_origin.pdf`"整个消失**：这种情况以前只打一行警告就关掉 `source:` 挂载点，全书会话都读不到原书页（风格会话没法对照原书排版，核对门禁的"至少对照 2–4 页"也只能记警告放行）。现在回退到 `paths.split_dir` 里我们自己切的 part PDF，视图名与 part 名仍按 MinerU 目录对齐（页数核对也随之不再报 `part split_files: no view file` 的假告警），`doc_search` 在确实没有视图时也不再指向不存在的 `source:`（T292）。

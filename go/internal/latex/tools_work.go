@@ -644,6 +644,70 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 	return session.ToolResult{Text: out.String()}, nil
 }
 
+// bindViewTree 把一个只读视图逐条搬进沙箱：真文件直接绑，真目录建同名
+// 目录后递归，软链则把它的目标绑到视图里那个位置。视图里可能有连着好几层
+// 的软链（project 视图 source/images/<项目>/<图>），只处理第一层或把软链
+// 目录整棵绑上的话，里层仍然是死链（T295）。
+func bindViewTree(args *[]string, srcDir, dstDir string, depth int, bound map[string]bool) {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		src := filepath.Join(srcDir, e.Name())
+		dst := filepath.Join(dstDir, e.Name())
+		real := src
+		if e.Type()&os.ModeSymlink != 0 {
+			r, lerr := filepath.EvalSymlinks(src)
+			if lerr != nil {
+				continue
+			}
+			real = r
+		}
+		st, serr := os.Stat(real)
+		if serr != nil {
+			continue
+		}
+		if st.IsDir() {
+			if depth <= 0 {
+				if !bound[real] {
+					bound[real] = true
+					*args = append(*args, "--ro-bind", real, dst)
+				}
+				continue
+			}
+			*args = append(*args, "--dir", dst)
+			bindViewTree(args, real, dst, depth-1, bound)
+			continue
+		}
+		if bound[real] {
+			continue
+		}
+		bound[real] = true
+		*args = append(*args, "--ro-bind", real, dst)
+	}
+}
+
+// hasNestedLink 报告目录里（只往真目录递归 depth 层）有没有软链。
+func hasNestedLink(dir string, depth int) bool {
+	if depth <= 0 {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink != 0 {
+			return true
+		}
+		if e.IsDir() && hasNestedLink(filepath.Join(dir, e.Name()), depth-1) {
+			return true
+		}
+	}
+	return false
+}
+
 // missingPathText 说清"搜的路径不存在"，并列出最近一层真实存在的目录里有什么
 // ——模型据此就能把 `project:converted` 改成 `project:chapters` 之类的真路径。
 func missingPathText(rel, full string) string {
@@ -961,6 +1025,11 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 				break
 			}
 		}
+		if !linked {
+			// 视图的第二层也可能是软链：project 视图的 source/ 是可真目录，
+			// 里面的 md/images/figures/tikz 全是链（T290 的窄视图）。
+			linked = hasNestedLink(mountDir, 2)
+		}
 		if m.Writable {
 			// A writable workspace is bound writable AS A WHOLE, links
 			// included. Branching on "contains a symlink" here used to turn
@@ -992,18 +1061,13 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 			// A read-only VIEW directory (symlinks to files and/or
 			// directories: the original-PDF view, the project view): bind
 			// every target individually, never following links outside the
-			// mounts.
+			// mounts. Nested links are bound too — binding the view's
+			// source/ wholesale left its md/images/figures/tikz links
+			// dangling inside the sandbox, so a session's `ls
+			// /project/source/tikz` came back empty and it concluded the
+			// book had no vector figures (T295).
 			args = append(args, "--dir", dst)
-			for _, e := range entries {
-				src := filepath.Join(mountDir, e.Name())
-				if target, lerr := filepath.EvalSymlinks(src); lerr == nil {
-					src = target
-				}
-				if _, serr := os.Stat(src); serr != nil {
-					continue
-				}
-				args = append(args, "--ro-bind", src, filepath.Join(dst, e.Name()))
-			}
+			bindViewTree(&args, mountDir, dst, 6, boundTarget)
 		} else {
 			args = append(args, "--dir", dst, "--ro-bind", mountDir, dst)
 		}
