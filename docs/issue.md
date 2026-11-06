@@ -2488,3 +2488,7 @@ user 轮
   根因：`stylePhase` 只看转录里有没有提交，不看磁盘上样式包是否已经落盘；试点只在样式包通过编译校验之后才启动，所以试点产物在就说明样式阶段早已收过账。
   改：新增 `stylePackageDone`（`style/` 里 cls+manual+example 齐 + `pilot/spec.json` 或 `pilot.done` 在），成立时样式阶段直接沿用磁盘上的包、不重放导出。
   验证：`t300_resume_skip_test.go` 覆盖（包齐 + 试点在 → 已完成；缺件 / 试点没开始 → 未完成）。
+[X][ ] T302. 修订会话的提示词把类名写成 `class.cls` 这个不存在的占位文件、也不给试转 findings 的落盘路径，会话开局先白读三个路径。
+  根因：模板里类名是字面量（真名要由 `classNameOfFile` 从 `style/` 读出来）；"the trial session's findings" 指向的是试转会话自己起的文件名（代码并不生成它）；前半句 `work/sample.tex` 与后面的 compile 示例还各写一种写法。
+  改：修订提示词改用 `{CLS}` 并在渲染时传真类名、findings 指向 `pilot/work/pilot-findings.md`；试转提示词明说把 findings 写进工作区根的 `pilot-findings.md`，落盘位置从此固定（开头的列举以 `pilot/` 为基准，与 compile 示例的完整路径本来就对得上，没动）。
+  验证：`go test ./internal/prompts/` 守护测试全绿（Vars 与模板占位符一致）；现场那份 findings 文件本来就叫这个名字，修订会话不必再猜路径。

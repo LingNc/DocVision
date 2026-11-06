@@ -501,7 +501,13 @@ func (r *Runner) pilotReviseSession(proj, pagesDesc string) error {
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 
-	userText := prompts.Render(prompts.StylePilotReviseUser, map[string]string{"PAGES": pagesDesc})
+	// 提示词里点名真类名：写 `class.cls` 这种占位符时，会话会先按字面去读
+	// 一个不存在的文件（现场多烧一次调用，T302）。
+	reviseCls := classNameOfFile(styleDir)
+	if reviseCls == "" {
+		reviseCls = "class"
+	}
+	userText := prompts.Render(prompts.StylePilotReviseUser, map[string]string{"CLS": reviseCls, "PAGES": pagesDesc})
 	if reviseResumed {
 		// 续跑：历史里已经有任务文本，原样续行（T29 口径），不重述要求；
 		// attempt>0 的打回文本照常在下一轮覆盖它。

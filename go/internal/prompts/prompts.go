@@ -235,7 +235,7 @@ var registry = []Template{
 	},
 	{
 		Name: StylePilotReviseUser, File: "latex_style_pilot_revise.user.md",
-		Vars:        []string{"PAGES"},
+		Vars:        []string{"CLS", "PAGES"},
 		MustMention: []string{"submit_style"},
 	},
 	{

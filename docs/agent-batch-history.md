@@ -3648,3 +3648,5 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 现场处理：把样式转录截回提交收账那一行之后（去掉提醒拉起的多余轮次）、把修订的那条待办从 `plan.md` 挪进 `plan-revise.md`、回退那次被拉起的样式会话对 cls 的修改（恢复修订会话自己的编辑），三个文件原样备份在 `work/style/.bak-revert/`，源转录另有完整拷贝（截断只删多余的尾部轮次）。
 
 测试：`t298_replay_submit_test.go`（打回 false / 收账 true / 无记录 false / 回执首行截短）、`t300_resume_skip_test.go`（样式包判定：包齐+试点在 → 已完成，缺件或试点没开始 → 未完成；无试转转录直接判否）；`./internal/latex/` 全绿，除既有的两条环境相关失败。
+
+补记（提示词侧，T302）：试点修订的提示词有三处说不清——`Revise class.cls` 里的 `class.cls` 是占位符（真类名要由 `classNameOfFile` 从 `style/` 读出来，代码在渲染时才能给），试转的 findings 只说"the trial session's findings"却不给落盘路径（那份文件是试转会话自己起的名，代码不生成），同一张 sample.tex 又分别写成 `work/sample.tex` 与 `pilot/work/sample.tex`。现场修订会话开局连读 `project:pilot/...`、`trial-findings.md`、`class.cls` 三个不存在的路径，四次调用后才自己 `find` 出工作区。改法：修订模板用 `{CLS}` 并要求 findings 在 `pilot/work/pilot-findings.md`（注册表 Vars 加 `CLS`，渲染时传 `classNameOfFile` 的结果，读不到就退回 `class`）；试转模板加一句"把 findings 写进工作区根的 `pilot-findings.md`"，落盘位置从此固定。开头那段列举（`work/sample.tex`）本就是以 `pilot/` 为基准，与 compile 示例的完整路径对得上，留着不动。`go test ./internal/prompts/` 全绿（Vars 与占位符一致的守护测试覆盖到）。
