@@ -36,18 +36,18 @@ type pageIndex struct {
 // buildPageIndex locates the MinerU-preserved origin PDFs for a
 // subject (mineru_output/<subject>_part*/*_origin.pdf, in part order)
 // and counts their pages to build the global page table.
-func buildPageIndex(mineruDir, subject string) (*pageIndex, error) {
-	pdfs := findOriginPDFs(mineruDir, subject)
+func buildPageIndex(mineruDir, splitDir, subject string) (*pageIndex, error) {
+	pdfs := findOriginPDFs(mineruDir, splitDir, subject)
 	if len(pdfs) == 0 {
 		return nil, fmt.Errorf("no origin pdfs for %s", subject)
 	}
 	idx := &pageIndex{}
-	for _, pdf := range pdfs {
-		n, err := api.PageCountFile(pdf)
+	for _, o := range pdfs {
+		n, err := api.PageCountFile(o.PDF)
 		if err != nil {
-			return nil, fmt.Errorf("count pages of %s: %w", pdf, err)
+			return nil, fmt.Errorf("count pages of %s: %w", o.PDF, err)
 		}
-		idx.srcs = append(idx.srcs, pageSrc{pdf: pdf, first: idx.total + 1, count: n})
+		idx.srcs = append(idx.srcs, pageSrc{pdf: o.PDF, first: idx.total + 1, count: n})
 		idx.total += n
 	}
 	return idx, nil
@@ -68,7 +68,22 @@ func (idx *pageIndex) locate(page int) (string, int, error) {
 
 // findOriginPDFs returns the origin PDFs of a subject in part order
 // (partless dir first, then part1, part2, ... part10 natural sort).
-func findOriginPDFs(mineruDir, subject string) []string {
+//
+// MinerU preserves the parsed PDF as <part>/*_origin.pdf, but not every
+// parse keeps it (some results only carry markdown/images/layout.json).
+// When a part has no *_origin.pdf we fall back to OUR OWN part PDF in
+// splitDir (<splitDir>/<part dir>.pdf) carrying the same page range —
+// otherwise the whole "source" view dies and no session can look at the
+// original book at all (T292).
+// originPDF pairs one part's PDF with the MinerU part DIRECTORY it belongs
+// to: the view exposes parts by that name (FileByPart) and split_files
+// fallbacks would otherwise all report the same bogus part "split_files".
+type originPDF struct {
+	Part string // MinerU part directory name, e.g. "book_part2"
+	PDF  string // the PDF file to render pages from
+}
+
+func findOriginPDFs(mineruDir, splitDir, subject string) []originPDF {
 	entries, err := os.ReadDir(mineruDir)
 	if err != nil {
 		return nil
@@ -99,11 +114,20 @@ func findOriginPDFs(mineruDir, subject string) []string {
 	}
 	sort.Slice(parts, func(i, j int) bool { return parts[i].num < parts[j].num })
 
-	var pdfs []string
+	var pdfs []originPDF
 	for _, p := range parts {
+		part := filepath.Base(p.dir)
 		matches, _ := filepath.Glob(filepath.Join(p.dir, "*_origin.pdf"))
 		sort.Strings(matches)
-		pdfs = append(pdfs, matches...)
+		if len(matches) == 0 && splitDir != "" {
+			own := filepath.Join(splitDir, part+".pdf")
+			if util.FileExists(own) {
+				matches = []string{own}
+			}
+		}
+		for _, m := range matches {
+			pdfs = append(pdfs, originPDF{Part: part, PDF: m})
+		}
 	}
 	return pdfs
 }

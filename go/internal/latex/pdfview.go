@@ -77,8 +77,8 @@ type pdfView struct {
 // buildPDFView creates/refreshes the view for one subject ("book" for
 // book.md). Existing links are replaced so a re-run with different
 // parts cannot leave stale PDFs behind.
-func buildPDFView(proj, mineruDir, subject string) (*pdfView, error) {
-	pdfs := findOriginPDFs(mineruDir, subject)
+func buildPDFView(proj, mineruDir, splitDir, subject string) (*pdfView, error) {
+	pdfs := findOriginPDFs(mineruDir, splitDir, subject)
 	if len(pdfs) == 0 {
 		return nil, fmt.Errorf("no origin pdfs for %s", subject)
 	}
@@ -91,17 +91,17 @@ func buildPDFView(proj, mineruDir, subject string) (*pdfView, error) {
 	}
 	view := &pdfView{Dir: dir}
 	used := map[string]bool{}
-	for _, pdf := range pdfs {
-		name := viewName(pdf, subject, used)
-		if err := linkAbs(pdf, filepath.Join(dir, name)); err != nil {
+	for _, o := range pdfs {
+		name := viewName(o.Part, subject, used)
+		if err := linkAbs(o.PDF, filepath.Join(dir, name)); err != nil {
 			return nil, fmt.Errorf("link %s: %w", name, err)
 		}
-		n, err := api.PageCountFile(pdf)
+		n, err := api.PageCountFile(o.PDF)
 		if err != nil {
-			return nil, fmt.Errorf("count pages of %s: %w", pdf, err)
+			return nil, fmt.Errorf("count pages of %s: %w", o.PDF, err)
 		}
 		view.Files = append(view.Files, pdfViewFile{
-			Name: name, PDF: pdf, Part: filepath.Base(filepath.Dir(pdf)),
+			Name: name, PDF: o.PDF, Part: o.Part,
 			First: view.total + 1, Count: n,
 		})
 		view.total += n
@@ -112,8 +112,8 @@ func buildPDFView(proj, mineruDir, subject string) (*pdfView, error) {
 // viewName builds a clean, unique name for one origin PDF: the MinerU
 // part directory name ("<subject>_part2" -> "book_part2.pdf"), or the
 // subject name when the PDF is not the first part of its own subject.
-func viewName(pdf, subject string, used map[string]bool) string {
-	base := filepath.Base(filepath.Dir(pdf)) // the part directory
+func viewName(part, subject string, used map[string]bool) string {
+	base := part // the MinerU part directory name
 	if base == "" || base == "." || base == string(filepath.Separator) {
 		base = subject
 	}

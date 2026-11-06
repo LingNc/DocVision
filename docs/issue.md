@@ -2440,3 +2440,8 @@ user 轮
   根因：`cmd.Run()` 已经跑过一次命令，紧跟的 `cmd.Output()` 对同一个 `*exec.Cmd` 必然返回 "exec: already started"，`out` 永远是空串；项目字体目录只按 `!IsDir()` 过滤，说明文件混进字体清单。
   改：只调一次 `Output()`；`projectFontFiles` 按后缀认字体文件、其余单列；系统字体改用 `fc-list :lang=zh` 并按"家族名"归并（去尾部字重词、简体优先、上限 40 行），并在回执里说明"编译在宿主机跑、能看到这些家族，但 bash 沙箱里没有字体目录，别在里面跑 fc-list"。
   验证：`t291_list_fonts_test.go`（README 不算字体；字重名归并到家族；fc-list 缺失时如实说没找到）；本机实测回执从空变成 32 个 CJK 家族（Noto Sans/Serif/Mono CJK SC 排最前）；`./internal/latex/` 除既有两条外全绿。
+
+[X][ ] T292. 全书原书 PDF 视图（`source:` 挂载点）会整个失效：某本书这次解析产物里 MinerU 没留 `*_origin.pdf`，启动时只打一行警告，随后所有会话既没有 `source:` 挂载、也没有 `list_source_pages`，风格会话只能靠 md 猜样式（`ls /source` 报"没有那个文件或目录"），提交门禁要的"对照 2–4 页原书"也只能记警告放行。
+  根因：`findOriginPDFs` 只认 `<part>/*_origin.pdf`；我们自己切的 part PDF 就在 `paths.split_dir` 里，却没有任何兜底，取不到就整块放弃。
+  改：`findOriginPDFs(mineruDir, splitDir, subject)` 在每个 part 没有 `*_origin.pdf` 时回退到 `<splitDir>/<part 目录名>.pdf`；返回值改为 `{Part, PDF}`（part 仍是 MinerU 目录名，`FileByPart`/`doc_search` 定位靠它，兜底 PDF 的父目录名不能冒充）；`buildPDFView`/`buildPageIndex`/`buildDocIndex` 一并带上 `SplitDir`。另：没有视图时 `doc_search` 回执改为明说"本会话看不到原书页、别去开 `source:`"，不再指向不存在的挂载点。
+  验证：`t292_source_pdf_fallback_test.go`（part1 无 origin → 用 split 本体且 part 名不变、part2 的 origin 优先；无兜底目录不虚构；`doc_search` 有/无视图两种回执）；用真实数据跑 `buildPDFView`：244 页、两个 part 名与索引一致、`LocatePart` 可用；`./internal/...` 除既有两条外全绿。

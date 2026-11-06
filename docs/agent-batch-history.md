@@ -3536,3 +3536,15 @@ T260
 **改法**：`fontListText` 采现场（`projectFontFiles` + 一次 `fc-list :lang=zh family file`）交给纯函数 `formatFontReply` 组装；`fcBaseFamilies` 按家族名归并（去尾部字重词、去重、简体优先）、上限 40 行；`fc-list` 不可用时明说"没有系统 CJK 字体、必须 Path= 指项目目录"。回执末尾加一句事实：编译在宿主机跑、能看到这些家族，bash 沙箱里没有字体目录，别在里面 `fc-list`。
 
 **验证**：`t291_list_fonts_test.go` 三条（README 不算字体；`Noto Sans CJK SC Bold` 归并、SC 排最前；fc-list 缺失如实说）+ 本机实测回执从空变 32 个家族。
+
+## 第九十批（2026-11-04）：T292——原书 PDF 视图因为缺 `*_origin.pdf` 整个失效
+
+用户："这次这个风格会话竟然没看原始pdf……都看不了了。"（附转录：`bash {command:"ls -la /source"}` → `ls: 无法访问 '/source': 没有那个文件或目录`，`doc_search` 却还在教它 `view_pdf {path:"source:<file>"}`）
+
+**证据**：运行日志第一行 `[WARNING] [pdfview] 原书 PDF 视图不可用（source 挂载点关闭）: no origin pdfs for …`；该书的 `mineru_output/<subj>_part*/` 里只有 `full.md`/`images`/`layout.json`/`content_list*.json`，没有 `*_origin.pdf`（不是每次 MinerU 解析都会保留原 PDF）。
+
+**根因**：`findOriginPDFs` 只 glob `<part>/*_origin.pdf`，取不到就返回空 → `buildPDFView` 失败 → `r.pdfView = nil` → `sessionMounts` 少一个 `source`、`list_source_pages` 不注册、`doc_search` 的回执照旧提示 `source:`；我们自己切的 part PDF 一直在 `paths.split_dir`，却没被当作兜底。
+
+**改法**：`findOriginPDFs(mineruDir, splitDir, subject) []originPDF`——每个 part 没 origin 就用 `<splitDir>/<part 目录名>.pdf`；返回体带 `Part`（MinerU 目录名，`FileByPart`/`doc_search`/`list_source_pages` 全靠它对页），否则兜底 PDF 的父目录 "split_files" 会冒充 part 名；`buildPDFView`/`buildPageIndex`/`buildDocIndex` 增加 `splitDir` 参数，`viewName` 改为吃 part 名。`doc_search` 在没有视图时改说"本会话看不到原书页、别去开 source:"。
+
+**验证**：真实数据 `buildPDFView` → `[27…__part1.pdf, 27…__part2.pdf]` 共 244 页（200+44），part 名与 `doc_index` 的 part 目录逐字一致，`LocatePart` 通；`t292_source_pdf_fallback_test.go` 三条；`./internal/...` 除既有两条外全绿。

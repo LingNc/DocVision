@@ -51,7 +51,7 @@ func TestDocIndexTextFallsBackToOurOwnContent(t *testing.T) {
 	if err := os.WriteFile(mdPath, []byte(md), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	idx, _, err := buildDocIndex(filepath.Join(root, "mineru_output"), []string{mdPath}, mdDir,
+	idx, _, err := buildDocIndex(filepath.Join(root, "mineru_output"), "", []string{mdPath}, mdDir,
 		filepath.Join(root, "doc_index.json"))
 	if err != nil {
 		t.Fatal(err)

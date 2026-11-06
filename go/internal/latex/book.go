@@ -907,7 +907,7 @@ func (r *Runner) buildPDFViewQuiet(sourceDir string, files []string) {
 	if main == "" {
 		return
 	}
-	view, err := buildPDFView(r.projDir, r.cfg.Paths.MineruOutput, subjectOf(filepath.Base(main)))
+	view, err := buildPDFView(r.projDir, r.cfg.Paths.MineruOutput, r.cfg.Paths.SplitDir, subjectOf(filepath.Base(main)))
 	if err != nil {
 		r.log.LogWarning(0, "[pdfview] 原书 PDF 视图不可用（source 挂载点关闭）:", err)
 		return
@@ -958,7 +958,7 @@ func (r *Runner) buildDocIndexQuiet(proj, sourceDir string, files []string) {
 		return
 	}
 	outPath := filepath.Join(proj, "doc_index", "doc_index.json")
-	idx, pageIdx, err := buildDocIndex(r.cfg.Paths.MineruOutput, mds, markerDir, outPath)
+	idx, pageIdx, err := buildDocIndex(r.cfg.Paths.MineruOutput, r.cfg.Paths.SplitDir, mds, markerDir, outPath)
 	if err != nil {
 		r.log.Log(0, "[docindex] 原始文档索引不可用（doc_search/原书页面工具关闭）:", err)
 		return
