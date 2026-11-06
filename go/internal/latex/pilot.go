@@ -254,7 +254,38 @@ func (r *Runner) buildPilotSample(proj string, spec *pilotSpec) (string, string,
 }
 
 // pilotImageRef 匹配 sample.md 里的图片引用（](images/…)）。
-var pilotImageRef = regexp.MustCompile(`\]\((images/[^)\s]+)\)`)
+// 路径里允许空格：项目名/分片目录带空格时，图片路径就是
+// `images/<项目名> /<hash>.jpg`，按空白截断只会取到半个目录名。
+var pilotImageRef = regexp.MustCompile(`\]\((images/[^)]+)\)`)
+
+// stagePilotImages 把 sample.md 引用的插图按相对路径复制进试转工作区，
+// 返回没能复制过去的相对路径（调用方据此告警）。重复引用只复制一次。
+func stagePilotImages(proj, samplePath, work string) []string {
+	data, err := os.ReadFile(samplePath)
+	if err != nil {
+		return []string{"（读不到 " + filepath.Base(samplePath) + "）"}
+	}
+	var missing []string
+	seen := map[string]bool{}
+	for _, m := range pilotImageRef.FindAllStringSubmatch(string(data), -1) {
+		rel := filepath.FromSlash(strings.TrimSpace(m[1]))
+		if rel == "" || seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		dst := filepath.Join(work, rel)
+		// copyFile 不建父目录（图片在 images/<目录>/ 下面，试转工作区里还没有），
+		// 不先建出来就只会在 ReadFile/WriteFile 上失败。
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			missing = append(missing, rel)
+			continue
+		}
+		if err := copyFile(filepath.Join(proj, "source", rel), dst); err != nil {
+			missing = append(missing, rel)
+		}
+	}
+	return missing
+}
 
 // pilotTrialSession 跑试转会话：pilot/work/ 里铺好 cls+手册+示例+
 // sample.md+引用的插图，转成 sample.tex 并编译、对照原书页核对到贴合。
@@ -275,12 +306,11 @@ func (r *Runner) pilotTrialSession(proj, samplePath, pagesDesc string) error {
 	copyFile(filepath.Join(styleDir, "manual.md"), filepath.Join(work, "manual.md"))
 	copyFile(filepath.Join(styleDir, "example.tex"), filepath.Join(work, "example.tex"))
 	copyFile(samplePath, filepath.Join(work, "sample.md"))
-	// 铺插图：sample.md 引用的图片按相对路径复制进试转工作区。
-	if data, err := os.ReadFile(samplePath); err == nil {
-		for _, m := range pilotImageRef.FindAllStringSubmatch(string(data), -1) {
-			rel := filepath.FromSlash(m[1])
-			copyFile(filepath.Join(proj, "source", rel), filepath.Join(work, rel))
-		}
+	// 铺插图：sample.md 引用的图片按相对路径复制进试转工作区。取不到的
+	// 逐条告警——以前 copyFile 的错误被直接丢掉，路径里带空格时整批图片
+	// 一张都没铺进去，会话只能拿占位框顶替，还在报告里写"没有原始位图"。
+	for _, miss := range stagePilotImages(proj, samplePath, work) {
+		r.log.LogWarning(0, "[pilot] 试转工作区缺这张插图的副本:", miss)
 	}
 
 	trialKey := r.cfg.Latex.PilotTrialModel // T108：空 = 沿用转换模型

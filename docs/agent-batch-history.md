@@ -3562,3 +3562,17 @@ T260
 **改法**：`grep` 的路径解析统一用 `t.vfs()`：显式挂载点 `Resolve` 精确定位（命中行前缀用 `label:stripMount(rel)`，不再是绝对路径）；无前缀仍先工作区再备选根；新增 `existed` 标记，一个目标都没落地时回 `grep error: 路径不存在…`（T274 的初衷）。
 
 **验证**：`t293_grep_mount_test.go` 五条（显式挂载点命中且前缀正确、缺路径报错、文件在但没命中仍 `NO MATCHES`、无前缀兜底搜备选根、挂载表会话不退化）+ 既有 `TestGrepMissingPathIsAnError`/`TestGrepToolAltRoots` 等全绿。
+
+## 第九十二批（2026-11-04）：T294——试转会话一张原书位图都没铺进去
+
+用户："他说样式包和工作区都没有原始位图是啥意思？这个工作区丢东西了吗？是不是之前修改的 bash 里面的 vfs 导致的？"
+
+**事实**：项目里 `source/images/<项目名>/` 有 89 条图片（0 死链）；`project:` 窄视图照旧铺 `images`/`figures`/`tikz`（T290 只摘掉 sessions/dedupe/progress 这些流水账），所以**没有丢东西**，也不是 bash 挂载表的事。
+
+**会话里实际发生了什么**：试转工作区 `work/style/pilot/work/` 里只有 cls/manual/example/sample.md，**没有 images 目录**。模型先跑了 `find /source /project -type f -iname '*.png' …`（`-type f` 不匹配软链，视图里的图片条目本来就是软链，必然空），又从未调用过 `view_image`（整条转录 0 次），于是把"没有原始位图"写进报告——它看到的工作区确实没有图。
+
+**根因**：`pilotTrialSession` 铺图那一段——`pilotImageRef` 的正则 `\]\((images/[^)\s]+)\)` 在第一个空白处就截断，项目名带空格时只取到 `images/<项目名>`（半个目录名，指向一个目录）；再加上 `copyFile` 只 `os.WriteFile` 不建父目录、返回的 error 被 `_ =` 丢掉，两条错误叠加成"静默一张不铺"。
+
+**改法**：正则改成 `\]\((images/[^)]+)\)`（取到右括号）；铺图收进纯函数 `stagePilotImages`（去重、逐张 `MkdirAll` 父目录、返回失败的相对路径），调用方逐条打 `[pilot] 试转工作区缺这张插图的副本:` 告警；试点系统提示词的工作区清单补一句"引用的位图已复制到 images/"。
+
+**验证**：`t294_pilot_images_test.go` 三条（带空格路径能铺、缺失如实报、无空格路径不退化）；真实 `sample.md` 探针：**14 张全部铺进、0 缺失**；`xelatex` 实测 `\includegraphics{images/<目录带空格>/a.jpg}` 两种写法都能编译，所以不需要给文件名去空格。

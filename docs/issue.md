@@ -2451,3 +2451,8 @@ user 轮
   根因：`grep` 只有 `Root`+`AltRoots`（没有整套挂载表）时，`grep {path:"project:…"}` 把整串当文件名拼到 Root 下，找不到就 `continue`，最后一句 `NO MATCHES`；`read_file` 走 `explicitMountOf` 解析所以正常。
   改：`grep` 的路径解析统一走 `t.vfs()`——显式挂载点（`project:`/`/work/…`）用 `Resolve` 精确定位，命中行前缀沿用模型写的写法；无前缀仍先工作区后备选根；一个目标都没落地时回"路径不存在"而不是 `NO MATCHES`。
   验证：`t293_grep_mount_test.go`（`project:` 命中且前缀是 `project:source/book.md:3:`、缺路径报错、文件在但没命中仍 `NO MATCHES`、无前缀仍能兜底搜备选根、有挂载表的会话不退化）；`grep` 既有测试全绿。
+
+[X][ ] T294. 样式试转会话的工作区里一张原始位图都没有，模型只能给原书插图放说明框，还在报告里写"样式包和工作区都没有原始位图"。
+  根因：`pilotImageRef` 用 `[^)\s]+` 在第一个空白处截断，项目名带空格时只取到半个目录名（`images/<项目名>`）；就算路径对，`copyFile` 也不建父目录，而错误又被 `_ =` 丢掉——整批图片静默没铺进去。
+  改：正则改成取到右括号为止；铺图收进 `stagePilotImages`（重复引用只拷一次、逐张建父目录），失败的相对路径回给调用方逐条告警；试点提示词把"引用的位图已复制到 images/"写进工作区清单。
+  验证：`t294_pilot_images_test.go`（带空格路径、缺失如实报、普通路径不退化）+ 真实 sample.md 探针（14 张全部铺进去、0 缺失）；`xelatex` 实测 `\includegraphics{images/<目录带空格>/a.jpg}` 正常，空格不会挡住编译。
