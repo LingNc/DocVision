@@ -3524,3 +3524,15 @@ T260
 **改法**：视图里的 `source` 不再整棵软链，改成真的分栏目录——`*.md` 逐条软链，`images`/`figures`/`tikz` 三个"属于书"的产物目录软链，其余一律不铺（`projectSourceSubdirs`）。两个安全细节：① 旧版本留在这里的整棵 source 软链要先摘掉再建目录，否则"清理多余条目"会穿透进真 source；② 清理只删软链（`Lstat` 判 ModeSymlink），真文件/真目录一律不动。
 
 **验证**：`t290_project_view_test.go`——`TestProjectViewHidesSourceBookkeeping`（造出 sessions/dedupe/progress_items，断言视图里看不到；再把整棵 source 软链塞回去，断言会被替换成分栏视图）；`TestProjectViewIsNarrow` 照旧；`./internal/latex/` 除既有两条外全绿。
+
+## 第八十九批（2026-11-04）：T291——list_fonts 的系统字体一直是空的
+
+用户："我们的系统没有字体吗？这边我看列出的时候虽然文件夹中没有但是系统字体呢？"（附 `list_fonts` 回执：项目目录只有 `README.md`，`System fonts (fc-list):` 后面空白）
+
+**根因**（两个）：
+- `Execute` 里先 `cmd.Run()` 判可用、再 `cmd.Output()` 取内容——同一个 `*exec.Cmd` 只能启动一次，第二次返回 `exec: already started`，`out` 恒为空串，于是标题打出来了、列表一行都没有。宿主机其实装了 2647 个字体文件、其中 90 条 CJK 记录（Noto Sans/Serif/Mono CJK SC、WenQuanYi、Droid Sans Fallback…）。
+- 项目字体目录只按 `!e.IsDir()` 过滤，`README.md` 被当成"可用字体"列在 `\setCJKmainfont Path=` 该用的那一段里。
+
+**改法**：`fontListText` 采现场（`projectFontFiles` + 一次 `fc-list :lang=zh family file`）交给纯函数 `formatFontReply` 组装；`fcBaseFamilies` 按家族名归并（去尾部字重词、去重、简体优先）、上限 40 行；`fc-list` 不可用时明说"没有系统 CJK 字体、必须 Path= 指项目目录"。回执末尾加一句事实：编译在宿主机跑、能看到这些家族，bash 沙箱里没有字体目录，别在里面 `fc-list`。
+
+**验证**：`t291_list_fonts_test.go` 三条（README 不算字体；`Noto Sans CJK SC Bold` 归并、SC 排最前；fc-list 缺失如实说）+ 本机实测回执从空变 32 个家族。

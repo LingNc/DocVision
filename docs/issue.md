@@ -2435,3 +2435,8 @@ user 轮
   根因：`ensureProjectView` 把整棵 `source` 软链进视图，而 `source` 同时是产物目录和流水账目录（`sessions/`、`dedupe/`、`progress_items/`）。
   改：视图里的 `source` 改成"分栏"目录——只软链 `*.md` 与 `images`/`figures`/`tikz` 三个属于书的产物目录，流水账一概不铺；顺手清掉旧版本留下的整棵 source 软链（摘链不穿透，只删软链不碰真文件）。
   验证：`t290_project_view_test.go`（source 里有 sessions/dedupe/progress_items 时视图只露 md 与三个产物目录；旧整棵软链会被替换）；`./internal/latex/` 除既有两条外全绿。
+
+[X][ ] T291. `list_fonts` 报出来的"系统字体"永远是空的（回执里只有一行 `System fonts (fc-list):` 后面什么都不跟），项目字体目录里又把 `README.md` 当字体列了出来，样式会话据此以为机器上没有中文字体。
+  根因：`cmd.Run()` 已经跑过一次命令，紧跟的 `cmd.Output()` 对同一个 `*exec.Cmd` 必然返回 "exec: already started"，`out` 永远是空串；项目字体目录只按 `!IsDir()` 过滤，说明文件混进字体清单。
+  改：只调一次 `Output()`；`projectFontFiles` 按后缀认字体文件、其余单列；系统字体改用 `fc-list :lang=zh` 并按"家族名"归并（去尾部字重词、简体优先、上限 40 行），并在回执里说明"编译在宿主机跑、能看到这些家族，但 bash 沙箱里没有字体目录，别在里面跑 fc-list"。
+  验证：`t291_list_fonts_test.go`（README 不算字体；字重名归并到家族；fc-list 缺失时如实说没找到）；本机实测回执从空变成 32 个 CJK 家族（Noto Sans/Serif/Mono CJK SC 排最前）；`./internal/latex/` 除既有两条外全绿。

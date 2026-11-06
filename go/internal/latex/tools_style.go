@@ -882,30 +882,135 @@ func (t *ListFontsTool) Definition() map[string]any {
 }
 
 func (t *ListFontsTool) Execute(_ string) (session.ToolResult, error) {
-	var b strings.Builder
-	entries, _ := os.ReadDir(t.FontsDir)
-	if len(entries) > 0 {
-		b.WriteString("Project fonts directory (use with \\setCJKmainfont Path=... etc.):\n")
-		for _, e := range entries {
-			if !e.IsDir() {
-				b.WriteString("  " + e.Name() + "\n")
-			}
+	return session.ToolResult{Text: fontListText(t.FontsDir)}, nil
+}
+
+// fontFileExts 是"能直接交给 \setCJKmainfont Path=… 的文件"后缀。
+var fontFileExts = map[string]bool{
+	".ttf": true, ".otf": true, ".ttc": true, ".otc": true,
+	".pfb": true, ".afm": true, ".woff": true, ".woff2": true,
+}
+
+// projectFontFiles 只列项目字体目录里的字体文件——README.md 之类的说明文件
+// 不是字体，混进来会让模型以为目录里已经有可用的字体（T291）。
+func projectFontFiles(dir string) (fontFiles, others []string) {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
 		}
-	} else {
-		b.WriteString("Project fonts directory is empty (the user can place font files there manually).\n")
+		if fontFileExts[strings.ToLower(filepath.Ext(e.Name()))] {
+			fontFiles = append(fontFiles, e.Name())
+			continue
+		}
+		others = append(others, e.Name())
 	}
+	return fontFiles, others
+}
+
+// fontStyleWords 是家族名尾部那些"字重/字形"词：`Noto Serif CJK SC Light` 与
+// `Noto Serif CJK SC` 是同一个家族的不同字重，列家族名时不该一个词重占一行。
+var fontStyleWords = map[string]bool{
+	"thin": true, "extralight": true, "ultralight": true, "light": true,
+	"demilight": true, "medium": true, "semibold": true, "demibold": true,
+	"bold": true, "extrabold": true, "ultrabold": true, "black": true,
+	"heavy": true, "regular": true, "italic": true, "oblique": true,
+	"condensed": true, "expanded": true, "normal": true,
+}
+
+// fcBaseFamilies 把 `fc-list :lang=zh family file` 的输出归并成"家族名"：
+// 去掉尾部字重词、去重、简体优先排序。给模型的是能直接写进
+// \setCJKmainfont{} 的名字，不是几十个"某字体某字重"。
+func fcBaseFamilies(out string) []string {
+	seen := map[string]bool{}
+	var fams []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		idx := strings.Index(line, ": ")
+		if idx < 0 {
+			continue
+		}
+		for _, fam := range strings.Split(line[idx+2:], ",") {
+			fam = strings.TrimSpace(fam)
+			if fam == "" {
+				continue
+			}
+			words := strings.Fields(fam)
+			for len(words) > 1 && fontStyleWords[strings.ToLower(words[len(words)-1])] {
+				words = words[:len(words)-1]
+			}
+			base := strings.Join(words, " ")
+			if base == "" || seen[base] {
+				continue
+			}
+			seen[base] = true
+			fams = append(fams, base)
+		}
+	}
+	rank := func(f string) int {
+		switch {
+		case strings.Contains(f, "SC"):
+			return 0
+		case strings.Contains(f, "CJK"):
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(fams, func(i, j int) bool {
+		ri, rj := rank(fams[i]), rank(fams[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return fams[i] < fams[j]
+	})
+	return fams
+}
+
+// fontListText 采一份现场（项目字体目录 + 系统 CJK 家族）再交给
+// formatFontReply 组装回执。
+func fontListText(fontsDir string) string {
+	fontFiles, others := projectFontFiles(fontsDir)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if cmd := exec.CommandContext(ctx, "fc-list", ":", "family", "file"); cmd.Run() == nil {
-		out, _ := cmd.Output()
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		if len(lines) > 60 {
-			lines = append(lines[:60], fmt.Sprintf("... (%d total)", len(lines)))
+	out, err := exec.CommandContext(ctx, "fc-list", ":lang=zh", "family", "file").Output()
+	return formatFontReply(fontFiles, others, string(out), err)
+}
+
+// formatFontReply 组装 list_fonts 的回执（纯函数，便于测试）。
+func formatFontReply(fontFiles, others []string, fcOut string, fcErr error) string {
+	var b strings.Builder
+	if len(fontFiles) > 0 {
+		b.WriteString("Project fonts directory (paths.fonts; use with \\setCJKmainfont[Path=…]{…}):\n")
+		for _, f := range fontFiles {
+			b.WriteString("  " + f + "\n")
 		}
-		b.WriteString("\nSystem fonts (fc-list):\n")
-		for _, l := range lines {
-			b.WriteString("  " + l + "\n")
+	} else {
+		b.WriteString("Project fonts directory has NO font files")
+		if len(others) > 0 {
+			b.WriteString(" (only " + strings.Join(others, ", ") + ")")
 		}
+		b.WriteString(" — the user can drop .ttf/.otf/.ttc files there.\n")
 	}
-	return session.ToolResult{Text: b.String()}, nil
+
+	// 系统字体：bash 的沙箱里看不到 /usr/share/fonts，模型自己跑 fc-list 会得到
+	// 空结果，所以这里必须把可用家族如实列出来（T291：以前 Run() 之后又
+	// Output()，第二次调用直接失败，回执里只剩一个空标题）。
+	if fcErr != nil || strings.TrimSpace(fcOut) == "" {
+		b.WriteString("\nNo CJK-capable system fonts found (fc-list empty or missing) — \\setCJKmainfont must point at a file in the project fonts directory.\n")
+		return b.String()
+	}
+	fams := fcBaseFamilies(fcOut)
+	b.WriteString(fmt.Sprintf("\nSystem CJK font families (%d, all installed on the build machine):\n", len(fams)))
+	for i, fam := range fams {
+		if i == 40 {
+			b.WriteString(fmt.Sprintf("  … (%d more)\n", len(fams)-40))
+			break
+		}
+		b.WriteString("  " + fam + "\n")
+	}
+	b.WriteString("Use these by family name (\\setCJKmainfont{Noto Serif CJK SC}) — the LaTeX build runs on the host and sees them; bash does NOT (its sandbox has no font directories, so do not run fc-list there).\n")
+	return b.String()
 }
