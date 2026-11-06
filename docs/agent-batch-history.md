@@ -3588,3 +3588,13 @@ T260
 **改法**：`linked` 判断补上 `hasNestedLink(dir, 2)`；只读视图改走 `bindViewTree`：真文件 `--ro-bind` 到视图位置、真目录 `--dir` 后递归、软链解析出目标再按同一位置绑，深度 6，`boundTarget` 去重。
 
 **验证**：`t295_view_sandbox_test.go` 两条（三层嵌套软链都落到实绑；无软链的只读目录仍整棵绑定，不拆成上千条参数）；真实视图进真 bwrap 探测：`TIKZ=54 / MD=7304 行 / IMG=89 / FIG=108 / GREP(DOCVISION-VECTOR)=54`，与磁盘逐一相符。
+
+## 第九十四批（2026-11-04）：T296——重跑试点时选材不再整段重做
+
+用户："那个选材可以不用重跑，其他重跑吧。"
+
+**问题**：`pilotSelectSession` 一进来就 `archivePrevTranscript` 开新会话，从不读上次的转录与 `spec.json`；重跑试点（改样式包、换模型）时那四十分钟的选材等于白等——选材本身与样式包无关，读的是 md 与原书页。
+
+**改法**：新增 `pilotSpecFromPrevRun(proj, trPath)`：`spec.json` 在、转录里已有 submit 收账（`replaySubmit` 认磁盘事实，不看进程内存）、且 md 与 pdf 两类条目都非空时，直接返回上次的 `pilotSpec` 并跳过选材会话；半截清单（只有 md 段）或没交过题的照旧重选。跳过时不动转录，新一次选材仍会照常轮转留档。
+
+**验证**：`t296_pilot_select_reuse_test.go` 两条单测（沿用且字段逐一读对；无转录/无 submit 回执/只有 md 段三种情况都老实重选）。

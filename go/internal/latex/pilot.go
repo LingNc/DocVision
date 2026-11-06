@@ -131,6 +131,33 @@ func pilotContentSkip(err error) bool {
 // pilotDirOf 是试点的工作根（work/style/pilot/）。
 func pilotDirOf(proj string) string { return filepath.Join(proj, "work", "style", "pilot") }
 
+// pilotSpecFromPrevRun 判断选材是否已经做过：转录里已有 submit 收账、且
+// spec.json 里的条目仍然齐全时返回上次的结果，调用方据此跳过选材会话。
+//
+// 判据只认磁盘事实（转录有 submit + spec.json 合法），不看进程内存——重跑
+// 是另一个进程，工具实例里什么都没有（T296）。
+func (r *Runner) pilotSpecFromPrevRun(proj, trPath string) (*pilotSpec, bool) {
+	specPath := filepath.Join(pilotDirOf(proj), "spec.json")
+	if !fileExists(specPath) || !fileExists(trPath) {
+		return nil, false
+	}
+	_, st, err := session.LoadTranscriptStats(trPath)
+	if err != nil {
+		return nil, false
+	}
+	submit := &SubmitDoneTool{Label: "the pilot selection"}
+	if !replaySubmit(r.log, 1, "pilot-select", submit, st) {
+		return nil, false
+	}
+	tool := NewPilotSpecTool(specPath, filepath.Join(proj, "source"))
+	spec := specFromTool(tool.loadLocked())
+	if len(spec.MDRanges) == 0 || len(spec.PDFPages) == 0 {
+		return nil, false
+	}
+	r.log.Log(1, "[pilot] 上次已经选好材（转录已提交、spec.json 就绪）——跳过选材会话，直接沿用")
+	return spec, true
+}
+
 // pilotSelectSession 跑选材会话：产出 pilot/spec.json（write_file 写入，
 // submit 终态；代码复核文件存在，缺失打回一次）。试点会话短，中断后不
 // 续跑——重跑前归档旧转录。
@@ -158,10 +185,17 @@ func (r *Runner) pilotSelectSession(proj, mainMD string) (*pilotSpec, error) {
 	}
 	tools = append(tools, r.sourcePageTools()...)
 
+	trPath := filepath.Join(proj, "work", "sessions", "style_pilot_select.jsonl")
+	// 选材是"读 md + 读原书页挑段落"，与样式包、模型都无关：上次已经选好
+	// （转录里 submit 收账、spec.json 条目仍合法）就沿用，别再花四十分钟把
+	// 同样的段落重挑一遍——重跑试点/样式只为换交上去的 cls 时才需要（T296）。
+	if spec, ok := r.pilotSpecFromPrevRun(proj, trPath); ok {
+		return spec, nil
+	}
+
 	sess := session.NewSession(client, modelCfg, tuning,
 		renderPrompt(prompts.Must(prompts.StylePilotSelectSystem), tuning, r.outputLang()),
 		tools, r.log, 1, "pilot-select")
-	trPath := filepath.Join(proj, "work", "sessions", "style_pilot_select.jsonl")
 	archivePrevTranscript(trPath)
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
