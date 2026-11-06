@@ -2461,6 +2461,7 @@ user 轮
   根因：T290 把视图里的 `source` 从"指向真 source 的软链"改成了"真目录 + 里层软链"，而 `sandboxArgs` 对只读视图只按第一层判断要不要拆绑；`source` 本身不是软链，于是被整棵 `--ro-bind` 进沙箱，里层的 md/images/figures/tikz 软链目标都在绑定范围外，在沙箱里全成死链（工具侧没有沙箱，所以 `read_file`/`grep` 正常，只有 bash 看不见）。
   改：`linked` 判断加上"第二层有没有软链"（`hasNestedLink`）；只读视图改用 `bindViewTree` 递归逐条绑定——真文件直接绑、真目录建同名目录再递归、软链绑它的目标，深度 6。
   验证：`t295_view_sandbox_test.go`（嵌套软链都落到实绑、无软链的目录仍整棵绑）+ 真实视图进真沙箱：`tikz=54 / md=7304 行 / images=89 / figures=108 / grep DOCVISION-VECTOR=54`，与磁盘一致。
+  补记：引入点是 `42e3d82`（T290 收窄视图）——`sandboxArgs` 只按第一层判断软链是 `cb5ee9d` 起就有的老逻辑，视图形状变了才变成事故。两种视图各进一次真沙箱对比：旧形状（`source` 是软链，解析后绑真目录）md 7304 行、`tikz` 54 个 .tex 可读、`figures` 108 个条目；新形状（`source` 是视图真目录，整棵绑）md 读不到、`tikz`/`figures` 只剩一行报错。位图两种形状都读不到（`images/<项目>/<图>` 是指向全局 `images_dir` 的软链，一直都在绑定范围外）——所以要图只能走 `view_image`（进程内），这也是"以前没觉得 bash 有问题"的原因。
 
 [X][ ] T296. 重跑样式试点时选材会话被整段重做（同样的段落重挑一遍，约四十分钟）。
   根因：`pilotSelectSession` 一进来就 `archivePrevTranscript` 开新会话，从不看上次的转录与 `spec.json`——选材结果明明已经落在磁盘上（转录里有 submit 收账、spec.json 条目齐全），重跑仍要重选一次。
