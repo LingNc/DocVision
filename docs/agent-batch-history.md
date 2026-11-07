@@ -3650,3 +3650,28 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 测试：`t298_replay_submit_test.go`（打回 false / 收账 true / 无记录 false / 回执首行截短）、`t300_resume_skip_test.go`（样式包判定：包齐+试点在 → 已完成，缺件或试点没开始 → 未完成；无试转转录直接判否）；`./internal/latex/` 全绿，除既有的两条环境相关失败。
 
 补记（提示词侧，T302）：试点修订的提示词有三处说不清——`Revise class.cls` 里的 `class.cls` 是占位符（真类名要由 `classNameOfFile` 从 `style/` 读出来，代码在渲染时才能给），试转的 findings 只说"the trial session's findings"却不给落盘路径（那份文件是试转会话自己起的名，代码不生成），同一张 sample.tex 又分别写成 `work/sample.tex` 与 `pilot/work/sample.tex`。现场修订会话开局连读 `project:pilot/...`、`trial-findings.md`、`class.cls` 三个不存在的路径，四次调用后才自己 `find` 出工作区。改法：修订模板用 `{CLS}` 并要求 findings 在 `pilot/work/pilot-findings.md`（注册表 Vars 加 `CLS`，渲染时传 `classNameOfFile` 的结果，读不到就退回 `class`）；试转模板加一句"把 findings 写进工作区根的 `pilot-findings.md`"，落盘位置从此固定。开头那段列举（`work/sample.tex`）本就是以 `pilot/` 为基准，与 compile 示例的完整路径对得上，留着不动。`go test ./internal/prompts/` 全绿（Vars 与占位符一致的守护测试覆盖到）。
+
+## 第九十七批（T303、T304）：通过之后不再白烧，通了的章要算数
+
+真实事故（现场）：一章的核对在 12:43 交了 pass（转录里最后一个动作就是 `submit` with `status=pass`，通过记号与转换转录的结论同时落盘）。紧接着 12:43:54，队列里**更早排下的一条自动重核请求**（`Source=no_verdict`，从 10:34 起就在等这一章的锁，日志每 5 分钟一行「请求排队中：还有核对在跑（已等 2 小时）」）被派发出去，于是刚通过的章又开了一条全新核对会话。
+
+那条会话没有可核的东西：读两个文件、grep 一遍 parts 之后就开始原地打转，13:03 退化，复盘会话判"截断到第 16 条"——被"同一位置反复切"的闸门拒掉（这一章这个角色 08:41 已经切过第 14 条附近），只能按 no_verdict 收尾，于是"换一条全新的核对尝试 try7 再来一次（第 1/2 次）"；try8 同样退化（13:11，「第 2/2 次」），try9 跑到 13:26。前后三条核对会话 + 三次复盘（其中三次复盘直接吃上游 400 `upstream_request_rejected`），约四十分钟、数十万 token，全部烧在一份**已经通过、一个字没改**的产物上。
+
+判断：不是核对模型退化，是派发端少问了一句磁盘。队列里的自动请求等的是一章的锁，可能等一两个小时；这期间那一章完全可能已经通过。"提交那一刻清队列"不够——请求可能还没派发，也可能正在派发；"派发那一刻问磁盘"才稳。
+
+改：
+- 新增 `internal/latex/checker_passed_guard.go` 的 `chapterPassedAndUnchanged(proj, base)`：产物在、没有 `.tex.checker`（没被后一轮打回）、通过记号里的指纹等于当前主 `.tex` + parts 的内容指纹。判据与 T260 的"陈旧反馈"完全一致，只是用在派发侧。`autoRetryRequest(src)` 区分"程序自己提的"（`rescue`/`no_verdict`/`latex`/`upstream`/空）与页面点的（`web`）。
+- `prepareCheckerRetries`：先把队列里"已通过 + 自动提"的 checker 请求直接作废（消费 + 一行日志），页面提的照旧进批次。
+- `dispatchRetries`：checker/continue 角色且自动提的请求，派发前查一次；子章节跳过这条判据（它的产物通过了，父章节还要整合，那条继续跑仍得跑）。
+- `runRetryTask`：拿到章节锁之后再查一次——派发与执行之间差几十毫秒，这一章也可能刚好通过。
+- `recheckChapterAt` 的"没结论 → 自动换新尝试"循环：产物已通过时不再换（人工重核一份已通过的产物若得不出结论，就如实报没结论，别再烧两条）。
+
+页面「重新核对」的语义不变：`Source=web` 一律放行，人工在同一份产物上确实还能看出问题、还能打回（T260 的口径）。
+
+测试：`t303_checker_passed_guard_test.go` 两条——① 判定：无记号 / 指纹一致 / 分片改过 / 又被打回，各条路径；② 队列：一条 `no_verdict`、一条 `web`，通过之后前者被作废、后者交给批次（`prepareCheckerRetries` 返回它、两条都被消费）。
+
+补记（T304）：顺着上面这次复盘又查了一遍磁盘，发现那一章"通过了却没算数"：产物停在 `work/temp/conv_<章>/integrated-stage/`（细分父节点提交的暂存区），通过记号也写在那儿，而转换侧"已有产物，跳过"看的却是 `work/chapters/<章>.tex`——重核这条路只写记号、不晋级（晋级动作只写在主核对流程的通过分支里）。也就是说：核对通过的章，重启后会被当成"没有产物"整章重转，起步两小时，而它上一轮已经判过 pass。
+
+改：`recheckChapterAt` 通过分支补一次 `promoteRecheckedProduct`（只在顶层章节做；子章节的产物归父节点整合，单独搬进 `work/chapters/` 会多出一份没人整合的碎片），晋级后再按新路径重算并写下通过记号——否则派发侧的"已通过"判据（T303 那个）认不出搬过去的那一版。现场按同一动作手工补齐那一章（主文件 + 17 个分片文件，记号与产物指纹核对一致）。
+
+测试：`TestPromoteRecheckedProduct`（暂存区产物晋级到 `work/chapters/`，主文件与分片都在，记号跟着搬，`chapterPassedAndUnchanged` 认得出来）。

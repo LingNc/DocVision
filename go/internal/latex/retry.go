@@ -307,6 +307,22 @@ func (r *Runner) prepareRetries(proj string) []string {
 // prepareCheckerRetries 消费队列里的"重新核对"请求：产物已经在的才接，缺产物
 // 的只警告（那一章还没转完，重核没有对象）。
 func (r *Runner) prepareCheckerRetries(proj string) []string {
+	// T303：先把"产物已通过、又不是页面提的"那几条直接作废——它们排着队，等这一章
+	// 的锁一松就派发出去，于是刚通过的章又白开一条核对会话（实测三条、四十来分钟）。
+	for _, f := range retryq.Pending(proj) {
+		if retryRoleOf(f.Request) != "checker" || !autoRetryRequest(f.Request.Source) {
+			continue
+		}
+		base := strings.TrimSuffix(filepath.Base(f.Chapter), filepath.Ext(f.Chapter))
+		if base == "" || strings.Contains(base, "..") || !chapterPassedAndUnchanged(proj, base) {
+			continue
+		}
+		if err := retryq.Consume(f.Path); err != nil {
+			r.log.LogWarning(0, "[checker]", base, "作废已通过的自动重核请求失败（下次会再处理一次）:", err)
+			continue
+		}
+		r.log.LogInfo(0, "[checker]", base, "产物已经核对通过、之后没改过：排队里的自动重核请求作废")
+	}
 	bases := r.consumeRetryRequests(proj, "checker")
 	if len(bases) == 0 {
 		return nil
@@ -556,6 +572,34 @@ func (r *Runner) truncateCheckerTranscript(proj, base, srcName string, from int)
 		return "", 0, fmt.Errorf("写新尝试的转录失败: %w", err)
 	}
 	return dst, next, nil
+}
+
+// promoteRecheckedProduct 把"重核通过"的产物晋级到 `work/chapters/`（T304）。
+//
+// 只有顶层章节、且产物还留在临时树里（细分父节点的 `integrated-stage`）时才动：
+// 子章节的产物由父节点整合，单独搬进 `work/chapters/` 会让书里多出一份没人整合
+// 的碎片。
+func (r *Runner) promoteRecheckedProduct(proj, base, texPath, partsPath string) {
+	if _, isChild := childChapterParent(base); isChild {
+		return
+	}
+	dstRoot := filepath.Join(proj, "work", "chapters")
+	dstTex := filepath.Join(dstRoot, base+".tex")
+	if filepath.Clean(filepath.Dir(texPath)) == filepath.Clean(dstRoot) && fileExists(dstTex) {
+		return // 已经在 work/chapters 下，没什么可搬
+	}
+	if !fileExists(texPath) {
+		return
+	}
+	if _, err := placeChapterFiles(filepath.Dir(texPath), dstRoot, base); err != nil {
+		r.log.LogWarning(0, "[checker]", base, "重核通过后晋级产物失败（下次启动这一章会被当作没有产物）:", err)
+		return
+	}
+	// 记号跟着搬：新路径上的指纹按晋级后的文件重算，派发侧的"已通过"判据
+	// （chapterPassedAndUnchanged）才认得出这一版。
+	dstParts := filepath.Join(dstRoot, base)
+	writePassMarker(dstTex, productFingerprint(dstTex, dstParts))
+	r.log.LogInfo(0, "[checker]", base, "重核通过：产物已晋级到 work/chapters/")
 }
 
 // chapterMarkdownFor 找出这一章的源 md。顶层章节在 `chapters/<章>.md`；递归子章节
@@ -933,7 +977,8 @@ func (r *Runner) recheckChapterAt(proj, base string, tid, forceAttempt int) (boo
 		trPath := attemptTranscriptPath(trBase, n)
 		view := filepath.Join(viewRoot, fmt.Sprintf("checker_%s_try%d", base, n))
 		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid, trPath, view, false, attempt)
-		if ok || isSessionAPIError(issues) || !checkerNoVerdict(issues) || heal >= autoHeals {
+		if ok || isSessionAPIError(issues) || !checkerNoVerdict(issues) || heal >= autoHeals ||
+			chapterPassedAndUnchanged(proj, base) {
 			break
 		}
 		r.log.LogWarning(tid, "[checker]", base, "重新核对没有给出结论，换一条全新的核对尝试 try"+
@@ -951,6 +996,11 @@ func (r *Runner) recheckChapterAt(proj, base string, tid, forceAttempt int) (boo
 		// T277：重核通过要跟主路径一样留下通过标记——否则这一章在页面上永远
 		// 只有"有产物"，看不出它是被判过的那一份。
 		writePassMarker(texPath, productFingerprint(texPath, partsPath))
+		// T304：细分父节点交在 `work/temp/conv_<章>/integrated-stage/` 上的产物，
+		// 主路径核对通过时会晋级到 `work/chapters/`（placeChapterFiles），重核这条
+		// 路以前不晋级——于是"这一章明明通过了、work/chapters 下却没有它"，下次
+		// 启动按"没有产物"整章重转。这里补齐同一个动作。
+		r.promoteRecheckedProduct(proj, base, texPath, partsPath)
 		r.log.Log(tid, "[checker]", base, "重新核对通过")
 		return true, ""
 	}
@@ -1194,6 +1244,17 @@ func (r *Runner) dispatchRetries(proj string) int {
 					r.log.LogInfo(0, "[retry]", base, "有切回第", strconv.Itoa(n),
 						"次尝试的请求在等，这条", role, "请求先留着（切回落地后再派发）")
 				}
+				continue
+			}
+		}
+		// T303：自动提的「接着核对 / 继续跑」在产物已经通过之后直接作废（派发这一
+		// 刻才查磁盘——队列里的自动请求可能等了一两个小时的锁，通过之后才轮上）。
+		// 子章节不能这么做：它的产物通过了，父章节还要整合，那条继续跑仍得跑。
+		if (role == "checker" || role == "continue") && autoRetryRequest(f.Request.Source) {
+			if _, isChild := childChapterParent(base); !isChild && chapterPassedAndUnchanged(proj, base) {
+				_ = retryq.Consume(f.Path)
+				r.log.LogInfo(0, "[retry]", base, "产物已经核对通过、之后没改过：这条自动",
+					role, "请求作废")
 				continue
 			}
 		}
@@ -1507,6 +1568,12 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 	// 页面什么都没变——用户看到的就是"点了没反应"。
 	if role != "checker" {
 		r.rotateSpentChildCheckers(proj, base)
+	}
+	// T303：从派发到真正执行之间这一章可能刚通过（拿锁的先后差几十毫秒也算），
+	// 自动请求这时已经没事可做，别开新会话。
+	if (role == "checker" || role == "continue") && autoRetryRequest(req.Source) && chapterPassedAndUnchanged(proj, base) {
+		r.log.LogInfo(0, "[retry]", base, "这一版产物已经核对通过：自动", role, "请求不再跑")
+		return
 	}
 	switch role {
 	case "convert":

@@ -2492,3 +2492,11 @@ user 轮
   根因：模板里类名是字面量（真名要由 `classNameOfFile` 从 `style/` 读出来）；"the trial session's findings" 指向的是试转会话自己起的文件名（代码并不生成它）；前半句 `work/sample.tex` 与后面的 compile 示例还各写一种写法。
   改：修订提示词改用 `{CLS}` 并在渲染时传真类名、findings 指向 `pilot/work/pilot-findings.md`；试转提示词明说把 findings 写进工作区根的 `pilot-findings.md`，落盘位置从此固定（开头的列举以 `pilot/` 为基准，与 compile 示例的完整路径本来就对得上，没动）。
   验证：`go test ./internal/prompts/` 守护测试全绿（Vars 与模板占位符一致）；现场那份 findings 文件本来就叫这个名字，修订会话不必再猜路径。
+[X][ ] T303. 一章的核对刚通过，队列里更早排下的自动重核请求随即被派发，刚通过的章又白开了三条核对会话。
+  根因：自动提的「接着核对 / 继续跑」会在队列里等这一章的锁（实测等了一两个小时），派发端只看"这一章忙不忙"，不看"这一版产物是不是已经通过、之后一个字没改"——通过的瞬间锁一松，那条旧请求就开了新会话；它没有可核的东西，几轮后退化，复盘要求截断又被"同一位置反复切"的闸门拒掉，于是按 no_verdict 自动再换两条尝试。
+  改：新增 `chapterPassedAndUnchanged`（产物在 + 无 `.tex.checker` + 通过记号里的指纹与当前主 .tex/parts 一致），自动请求（Source≠web）在派发前与拿到锁后各查一次，命中即作废并记一行；批次里的自动重核请求先扫一遍作废；核对侧"没结论→自动换新尝试"的循环在产物已通过时不再换。页面点「重新核对」的照旧跑（T260 允许人工打回同一份产物）。
+  验证：`t303_checker_passed_guard_test.go` 两条（指纹改过 / 有打回 / 没记号的判定；队列里自动请求被作废、页面那条留下）。
+[X][ ] T304. 细分父节点在"重核"这条路上通过之后没有把产物晋级到 `work/chapters/`，下次启动按"没有产物"整章重转。
+  根因：晋级（`placeChapterFiles`）只写在主核对流程的通过分支里；细分父节点交在 `work/temp/conv_<章>/integrated-stage/`，重核（`recheckChapterAt`）通过后只写了通过记号、删了 `.checker`，产物留在暂存区——于是"这一章已经通过、`work/chapters/` 下却没有它"，转换侧的跳过判据（`FinalSubmitRoot/<章>.tex` 在）看不到它。
+  改：重核通过后补一次晋级（仅顶层章节；子章节由父节点整合，不单独搬），并在新路径上按晋级后的文件重算通过记号，派发侧的"已通过"判据才认得这一版。
+  验证：`TestPromoteRecheckedProduct`（暂存区产物 → `work/chapters/` 主文件与分片都在、记号跟着搬、`chapterPassedAndUnchanged` 认出已通过）；现场那一章已按同一动作手工补齐（17 个文件，记号与产物指纹一致）。
