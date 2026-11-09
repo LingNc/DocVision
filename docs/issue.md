@@ -2500,3 +2500,7 @@ user 轮
   根因：晋级（`placeChapterFiles`）只写在主核对流程的通过分支里；细分父节点交在 `work/temp/conv_<章>/integrated-stage/`，重核（`recheckChapterAt`）通过后只写了通过记号、删了 `.checker`，产物留在暂存区——于是"这一章已经通过、`work/chapters/` 下却没有它"，转换侧的跳过判据（`FinalSubmitRoot/<章>.tex` 在）看不到它。
   改：重核通过后补一次晋级（仅顶层章节；子章节由父节点整合，不单独搬），并在新路径上按晋级后的文件重算通过记号，派发侧的"已通过"判据才认得这一版。
   验证：`TestPromoteRecheckedProduct`（暂存区产物 → `work/chapters/` 主文件与分片都在、记号跟着搬、`chapterPassedAndUnchanged` 认出已通过）；现场那一章已按同一动作手工补齐（17 个文件，记号与产物指纹一致）。
+[X][ ] T305. 一张图都没并组的项目，图片核对页在页面上根本没有入口。
+  根因：入口判据与页面渲染都只认 `source/dedupe/groups.json`（无它就 404，索引也不报这个项目）；而"整组核验跑完、一张都没并组"时结论里是空分组，于是侧栏既没有阶段行按钮、直接开 `/dedupe?project=` 也打不开——这个页面本来就是"看图"，不该依赖 dedupe 的结论。
+  改：索引判据放宽成"有图片判定记录（`source/progress_items/**/*.json`）"；现渲染在没有分组结论（或结论里空分组）时按"未分组"列出全部图并写明"还没有分组结论"；侧栏把这个入口**固定在项目行**上（阶段行那个保留），项目名下的图随时点得进去。
+  验证：`TestImageReviewWithoutGroups`（无 groups.json / 空分组两种情形都能打开并列出图片）；`npm test` 287 项、`go test ./internal/sessionview/` 全绿，`viewer.js` 重新构建。

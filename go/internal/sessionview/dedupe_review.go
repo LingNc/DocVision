@@ -101,9 +101,11 @@ func injectBaseHref(page []byte, base string) []byte {
 	return append(out, page...)
 }
 
-// dedupeReviewProjects 列出"有复查页可看"的项目：侧栏在整组核验阶段行上挂一个
-// 按钮，点开就是 review.html。只看 latex 板块的会话（img2text 的 Project 不在
-// 扫描根下）。
+// dedupeReviewProjects 列出"有图片核对页可看"的项目：侧栏在项目行与整组核验
+// 阶段行上各挂一个入口。只看 latex 板块的会话（img2text 的 Project 不在扫描根下）。
+//
+// T305：判据从"有 dedupe 结论"放宽成"有图片记录"——一张都没并组的项目同样要看
+// 图，那时 groups.json 里是空分组，页面按未分组列。
 func (v *viewerServer) dedupeReviewProjects(sessions []SessionInfo) []string {
 	if strings.TrimSpace(v.root) == "" {
 		return nil
@@ -119,14 +121,47 @@ func (v *viewerServer) dedupeReviewProjects(sessions []SessionInfo) []string {
 		if !ok {
 			continue
 		}
-		// 有分组结论就能现渲染；老项目只有静态页也照样给按钮。
+		// 有分组结论 / 老静态页 / 只要还有图片判定记录，都给入口。
+		found := false
 		for _, name := range []string{"groups.json", "review.html"} {
 			if st, err := os.Stat(filepath.Join(dir, name)); err == nil && st.Mode().IsRegular() {
-				out = append(out, s.Project)
+				found = true
 				break
 			}
+		}
+		// dir 是 <项目>/source/dedupe，图片记录在 <项目>/source/progress_items。
+		if !found && hasProgressItems(filepath.Dir(filepath.Dir(dir))) {
+			found = true
+		}
+		if found {
+			out = append(out, s.Project)
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+// hasProgressItems 报这个项目有没有任何一张图的判定记录（source/progress_items/
+// <md>/<图>.json）。有就说明图片阶段跑过，核对页有东西可看。
+func hasProgressItems(projectDir string) bool {
+	root := filepath.Join(projectDir, "source", "progress_items")
+	dirs, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(root, d.Name()))
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".json") {
+				return true
+			}
+		}
+	}
+	return false
 }

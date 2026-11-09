@@ -112,3 +112,64 @@ func getJSON(t *testing.T, url string, v any) {
 		t.Fatal(err)
 	}
 }
+
+// T305：一张图都没并组的项目也必须有图片核对入口。以前只认 source/dedupe/ 下的
+// groups.json 与 review.html，于是"整组核验跑完、一张都没并组"的项目在侧栏既没有
+// 阶段行按钮、/dedupe?project= 也直接 404——图片核对页等于没有入口。
+func TestImageReviewWithoutGroups(t *testing.T) {
+	root := t.TempDir()
+	proj := "bookB"
+	progDir := filepath.Join(root, proj, "source", "progress_items", "chapter_001")
+	if err := os.MkdirAll(progDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(progDir, "diagram.jpg.json"),
+		`{"md":"chapter_001","img":"images/b/diagram.jpg","class":"vector","status":"done"}`)
+	os.MkdirAll(filepath.Join(root, proj, "source", "images", "b"), 0o755)
+	writeFile(t, filepath.Join(root, proj, "source", "images", "b", "diagram.jpg"), "FULL")
+	writeFile(t, filepath.Join(root, proj, "work", "sessions", "convert_chapter_001.jsonl"),
+		`{"t":"msg","role":"user","text":"hi"}`+"\n")
+
+	srv := httptest.NewServer(newViewerServer(root, nil))
+	defer srv.Close()
+
+	var idx struct {
+		DedupeReviews []string `json:"dedupeReviews"`
+	}
+	getJSON(t, srv.URL+"/api/index", &idx)
+	if len(idx.DedupeReviews) != 1 || idx.DedupeReviews[0] != proj {
+		t.Fatalf("没有 groups.json 也要报出可看图的项目，dedupeReviews = %v", idx.DedupeReviews)
+	}
+
+	resp, err := http.Get(srv.URL + "/dedupe?project=" + proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("没有分组结论也要能打开核对页，状态码 = %d，body=%s", resp.StatusCode, body)
+	}
+	page := string(body)
+	for _, want := range []string{"diagram.jpg", "还没有分组结论"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("页面里缺少 %q：\n%s", want, page)
+		}
+	}
+
+	// 有结论文档、但一组一张独立图都没有（整组核验跑完一张都没并组）：同样按未分组列。
+	dedupeDir := filepath.Join(root, proj, "source", "dedupe")
+	if err := os.MkdirAll(dedupeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dedupeDir, "groups.json"), `{"refs":1,"distinct":1,"groups":[],"independent":[]}`)
+	resp2, err := http.Get(srv.URL + "/dedupe?project=" + proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK || !strings.Contains(string(body2), "diagram.jpg") {
+		t.Fatalf("空分组也要列出图片：状态码 %d\n%s", resp2.StatusCode, body2)
+	}
+}

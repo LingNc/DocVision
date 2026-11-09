@@ -193,4 +193,4 @@ MinerU 产物缺失时自动降级（不注册工具，仅记录日志），不�
 
 ## 延伸阅读：原生（非扫描）PDF 的方向
 
-图片一律重画、阶段顺序固定、重试粒度只有章——这三个假设在"原生矢量 PDF"上都不成立。现状盘点、可提取物、判定信号、三档取图与落地路线见 [`docs/design-any-pdf.md`](design-any-pdf.md)；对应计划条目是 `docs/plan.md` 的 P68–P76。
+图片一律重画、阶段顺序固定、重试粒度只有章——这三个假设在"原生矢量 PDF"上都不成立。现状盘点、可提取物、判定信号、三档取图与落地路线见 [`docs/plan-report/design-any-pdf.md`](plan-report/design-any-pdf.md)；对应计划条目是 `docs/plan.md` 的 P68–P76。

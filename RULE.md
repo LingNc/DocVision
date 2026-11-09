@@ -71,8 +71,8 @@
    # 如果 master 上本来就不存在这些文件，而 develop 上有，这一步会阻止它们进入 master
    # 注意：如果出现"冲突（修改/删除）"，需要先使用 git reset HEAD 取消暂存，再手动删除
    # 排除规则：Agent 工作区文档（AGENTS*/CLAUDE.md/agent-refer/.agents）+ 历史遗留（legacy/、powershell/、temp/）
-   git reset HEAD example AGENTS.md AGENTS_TEMPLATE.md CLAUDE.md agent-refer .agents legacy powershell temp 2>/dev/null || true
-   rm -rf example AGENTS.md AGENTS_TEMPLATE.md CLAUDE.md agent-refer .agents legacy powershell temp 2>/dev/null || echo "文件夹不存在，跳过清理"
+   git reset HEAD example AGENTS.md AGENTS_TEMPLATE.md CLAUDE.md agent-refer .agents legacy powershell temp docs/plan-report docs/user-plan 2>/dev/null || true
+   rm -rf example AGENTS.md AGENTS_TEMPLATE.md CLAUDE.md agent-refer .agents legacy powershell temp docs/plan-report docs/user-plan 2>/dev/null || echo "文件夹不存在，跳过清理"
 
    # 4. 提交合并，生成版本节点
    # 提交信息格式：release: vx.x.x 简要描述

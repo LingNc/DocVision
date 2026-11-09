@@ -67,18 +67,29 @@ type liveDedupeGroups struct {
 	} `json:"independent"`
 }
 
-// renderLiveImageReview 按磁盘现状渲染核对页。返回 false 表示还没有 dedupe 结论
-// （没跑完整组核验），调用方退回静态页或 404。
+// renderLiveImageReview 按磁盘现状渲染核对页。返回 false 只表示这个项目**一张图
+// 都没有**（图片阶段还没跑），调用方退回静态页或 404。
+//
+// T305：以前没有 `groups.json` 就直接 false——于是"整组核验跑完但一张都没并组"
+// 的项目，页面上既没有阶段行按钮、`/dedupe?project=` 也是 404，等于图片核对页
+// 没有入口。分组结论只是这个页面的一部分，**有图片记录就该能看**：没有结论时
+// 分组为空、每张图按"未分组"列出来。
 func renderLiveImageReview(sourceDir string) ([]byte, bool) {
-	data, err := os.ReadFile(filepath.Join(sourceDir, "dedupe", "groups.json"))
-	if err != nil {
-		return nil, false
-	}
-	var gf liveDedupeGroups
-	if json.Unmarshal(data, &gf) != nil {
-		return nil, false
-	}
 	prog := loadLiveProgress(sourceDir)
+	var gf liveDedupeGroups
+	haveGroups := false
+	if data, err := os.ReadFile(filepath.Join(sourceDir, "dedupe", "groups.json")); err == nil {
+		if json.Unmarshal(data, &gf) == nil {
+			haveGroups = true
+		}
+	}
+	// 分组结论文档在、但里面一组、一张独立图都没有：等于没有结论，同样按未分组列。
+	if haveGroups && len(gf.Groups) == 0 && len(gf.Independent) == 0 {
+		haveGroups = false
+	}
+	if !haveGroups && len(prog) == 0 {
+		return nil, false
+	}
 	page := reviewpageRig{source: sourceDir, prog: prog}
 
 	doc := reviewpage.Doc{
@@ -88,7 +99,6 @@ func renderLiveImageReview(sourceDir string) ([]byte, bool) {
 		Artifacts: "分组结论 dedupe/groups.json、逐图判定 progress_items/、成品 figures/、" +
 			"LaTeX 源 tikz/、作图会话 sessions/vector_*.jsonl",
 	}
-	doc.Stats = page.statsText(gf, prog)
 
 	for i, g := range gf.Groups {
 		if strings.TrimSpace(g.KeyImage) == "" || len(g.Members) == 0 {
@@ -144,6 +154,30 @@ func renderLiveImageReview(sourceDir string) ([]byte, bool) {
 	}
 
 	doc.Pending, doc.Degraded = page.looseSets()
+	if !haveGroups {
+		// 没有分组结论（整组核验没跑，或跑完一张都没并组）：所有图都列成"未分组"，
+		// 页面仍然可用——这是"看图片"这件事本身，不该依赖 dedupe 的结论。
+		doc.Rules = "还没有分组结论：下面的图全部按未分组列出（整组核验跑完、或一张都没并组时就是这样）。"
+		doc.Stats = page.statsTextNoGroups(prog)
+		doc.Independent = nil
+		seen := map[string]bool{}
+		keys := make([]string, 0, len(prog))
+		for k := range prog {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			if it := page.item(k, ""); it.Name != "" {
+				doc.Independent = append(doc.Independent, it)
+			}
+		}
+	} else {
+		doc.Stats = page.statsText(gf, prog)
+	}
 	return []byte(reviewpage.Page(doc)), true
 }
 
@@ -294,6 +328,30 @@ func (r reviewpageRig) statsText(gf liveDedupeGroups, prog map[string]*liveImage
 	return "引用 " + itoa(gf.Refs) + " 条 → 不同内容 " + itoa(gf.Distinct) + " 份、分组 " + itoa(len(gf.Groups)) +
 		"、" + "独立 " + itoa(len(gf.Independent)) + " 份；全书 " + itoa(settled) + "/" + itoa(len(prog)) +
 		" 已收尾（画好 " + itoa(ok) + "、退回原图 " + itoa(fallback) + "、失败 " + itoa(errs) + "、未处理 " + itoa(pending) + "）"
+}
+
+// statsTextNoGroups 是没有分组结论时的一行统计：只报"有多少张图、各自什么状态"，
+// 不编造 refs/distinct/分组数（那些数来自 groups.json，没有就是没有）。
+func (r reviewpageRig) statsTextNoGroups(prog map[string]*liveImageProgress) string {
+	var settled, ok, fallback, pending, errs int
+	for _, p := range prog {
+		switch {
+		case reviewpage.StatusSettled(p.Status):
+			settled++
+			if p.Status == reviewpage.StatusDone {
+				ok++
+			} else {
+				fallback++
+			}
+		case p.Status == reviewpage.StatusError:
+			errs++
+		default:
+			pending++
+		}
+	}
+	return "共 " + itoa(len(prog)) + " 张图；已收尾 " + itoa(settled) + "（画好 " + itoa(ok) +
+		"、退回原图 " + itoa(fallback) + "）、失败 " + itoa(errs) + "、未处理 " + itoa(pending) +
+		"；还没有分组结论"
 }
 
 // loadLiveProgress 读一遍 progress_items（每个 md 一个子目录、每图一个 json）。

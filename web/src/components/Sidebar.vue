@@ -489,6 +489,18 @@ function onResetView() {
               <span class="proj-title">{{ g.title }}</span>
             </span>
             <span class="row-meta">{{ g.items.length }} 个会话</span>
+            <!-- T305：图片核对页固定在项目行上——以前只有"整组核验"阶段行挂按钮，
+                 一张都没并组的项目连阶段行都没有，图片核对页就没有入口。 -->
+            <span v-if="hasDedupeReview(g.name)" class="row-actions">
+              <a
+                class="icon-btn"
+                :href="dedupeReviewURL(g.name)"
+                target="_blank"
+                rel="noopener"
+                title="打开图片核对页：每张图左原图右成品，点缩略图看大图（新标签）"
+                @click.stop
+              >看图</a>
+            </span>
             <span v-if="g.legacy" class="proj-note" title="这个输出根本身就是一个工程（work/、progress.json 等直接挂在它下面），是引入多项目布局之前的形态；新布局是「输出根/书名/」。">旧版单项目</span>
             <span v-if="g.live" class="dot live"></span>
           </summary>
@@ -1008,16 +1020,19 @@ function onResetView() {
 
 /* 复查入口常显：悬停才出现的按钮在触屏与键盘下都点不到，而它只是两个字的
    小链接，一直露着更好找；用强调色 + 胶囊底让它一眼看出可点。 */
-.stage-row .row-actions {
+.stage-row .row-actions,
+.proj-row .row-actions {
  display: inline-flex; flex: none; align-items: center;
 }
 
-.stage-row .row-actions .icon-btn {
+.stage-row .row-actions .icon-btn,
+.proj-row .row-actions .icon-btn {
  font-size: 11px; height: 18px; padding: 0 7px; white-space: nowrap;
  border-radius: 9px; color: var(--accent); background: var(--accent-soft);
 }
 
-.stage-row .row-actions .icon-btn:hover {
+.stage-row .row-actions .icon-btn:hover,
+.proj-row .row-actions .icon-btn:hover {
  background: var(--accent); color: #fff;
 }
 

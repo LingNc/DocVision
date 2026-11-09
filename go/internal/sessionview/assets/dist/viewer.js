@@ -10020,196 +10020,201 @@
   const _hoisted_30$2 = { class: "row-meta" };
   const _hoisted_31$2 = {
     key: 0,
+    class: "row-actions"
+  };
+  const _hoisted_32$1 = ["href"];
+  const _hoisted_33$1 = {
+    key: 1,
     class: "proj-note",
     title: "这个输出根本身就是一个工程（work/、progress.json 等直接挂在它下面），是引入多项目布局之前的形态；新布局是「输出根/书名/」。"
   };
-  const _hoisted_32$1 = {
-    key: 1,
+  const _hoisted_34$1 = {
+    key: 2,
     class: "dot live"
   };
-  const _hoisted_33$1 = {
+  const _hoisted_35$1 = {
     key: 0,
     class: "proj-progress",
     title: "progress.json 里各阶段的当前状态"
   };
-  const _hoisted_34$1 = {
+  const _hoisted_36$1 = {
     key: 0,
     class: "session-blocks"
   };
-  const _hoisted_35$1 = ["data-id", "title", "onClick"];
-  const _hoisted_36$1 = ["data-id", "title", "onClick"];
-  const _hoisted_37$1 = { class: "row-slot" };
-  const _hoisted_38$1 = {
+  const _hoisted_37$1 = ["data-id", "title", "onClick"];
+  const _hoisted_38$1 = ["data-id", "title", "onClick"];
+  const _hoisted_39$1 = { class: "row-slot" };
+  const _hoisted_40$1 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_39$1 = { class: "row-time" };
-  const _hoisted_40$1 = { class: "row-actions" };
-  const _hoisted_41$1 = ["onClick"];
-  const _hoisted_42$1 = {
+  const _hoisted_41$1 = { class: "row-time" };
+  const _hoisted_42$1 = { class: "row-actions" };
+  const _hoisted_43$1 = ["onClick"];
+  const _hoisted_44$1 = {
     key: 0,
     class: "chain-hist"
   };
-  const _hoisted_43$1 = {
+  const _hoisted_45$1 = {
     class: "chain-hist-row",
     title: "同一张图的全部历史会话（新 → 旧）：逐图分析 → stage0 → stage1 → prev 轮转"
   };
-  const _hoisted_44$1 = { class: "chain-hist-label" };
-  const _hoisted_45$1 = ["data-id", "title", "onClick"];
-  const _hoisted_46$1 = { class: "row-slot" };
-  const _hoisted_47$1 = { class: "row-chip chain-tag" };
-  const _hoisted_48$1 = { class: "row-time" };
-  const _hoisted_49 = { class: "row-actions" };
-  const _hoisted_50 = ["onClick"];
-  const _hoisted_51 = ["data-id", "title", "onClick"];
-  const _hoisted_52 = { class: "row-slot" };
-  const _hoisted_53 = {
+  const _hoisted_46$1 = { class: "chain-hist-label" };
+  const _hoisted_47$1 = ["data-id", "title", "onClick"];
+  const _hoisted_48$1 = { class: "row-slot" };
+  const _hoisted_49 = { class: "row-chip chain-tag" };
+  const _hoisted_50 = { class: "row-time" };
+  const _hoisted_51 = { class: "row-actions" };
+  const _hoisted_52 = ["onClick"];
+  const _hoisted_53 = ["data-id", "title", "onClick"];
+  const _hoisted_54 = { class: "row-slot" };
+  const _hoisted_55 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_54 = { class: "row-time" };
-  const _hoisted_55 = { class: "row-actions" };
-  const _hoisted_56 = ["onClick"];
-  const _hoisted_57 = ["data-project", "data-stage"];
-  const _hoisted_58 = { class: "stage-row" };
-  const _hoisted_59 = { class: "row-body" };
-  const _hoisted_60 = { class: "row-meta" };
-  const _hoisted_61 = ["title"];
-  const _hoisted_62 = {
+  const _hoisted_56 = { class: "row-time" };
+  const _hoisted_57 = { class: "row-actions" };
+  const _hoisted_58 = ["onClick"];
+  const _hoisted_59 = ["data-project", "data-stage"];
+  const _hoisted_60 = { class: "stage-row" };
+  const _hoisted_61 = { class: "row-body" };
+  const _hoisted_62 = { class: "row-meta" };
+  const _hoisted_63 = ["title"];
+  const _hoisted_64 = {
     key: 1,
     class: "row-actions"
   };
-  const _hoisted_63 = ["href"];
-  const _hoisted_64 = {
+  const _hoisted_65 = ["href"];
+  const _hoisted_66 = {
     key: 0,
     class: "session-blocks"
   };
-  const _hoisted_65 = ["data-id", "title", "onClick"];
-  const _hoisted_66 = {
+  const _hoisted_67 = ["data-id", "title", "onClick"];
+  const _hoisted_68 = {
     key: 0,
     class: "block-old"
   };
-  const _hoisted_67 = {
+  const _hoisted_69 = {
     key: 1,
     class: "session-blocks"
   };
-  const _hoisted_68 = ["data-id", "title", "onClick"];
-  const _hoisted_69 = ["onClick"];
   const _hoisted_70 = ["data-id", "title", "onClick"];
-  const _hoisted_71 = { class: "row-slot" };
-  const _hoisted_72 = {
+  const _hoisted_71 = ["onClick"];
+  const _hoisted_72 = ["data-id", "title", "onClick"];
+  const _hoisted_73 = { class: "row-slot" };
+  const _hoisted_74 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_73 = ["title"];
-  const _hoisted_74 = { class: "row-time" };
-  const _hoisted_75 = { class: "row-actions" };
-  const _hoisted_76 = ["onClick"];
-  const _hoisted_77 = {
+  const _hoisted_75 = ["title"];
+  const _hoisted_76 = { class: "row-time" };
+  const _hoisted_77 = { class: "row-actions" };
+  const _hoisted_78 = ["onClick"];
+  const _hoisted_79 = {
     key: 1,
     class: "img-group sub2"
   };
-  const _hoisted_78 = ["title"];
-  const _hoisted_79 = { class: "row-chip try-count" };
-  const _hoisted_80 = {
+  const _hoisted_80 = ["title"];
+  const _hoisted_81 = { class: "row-chip try-count" };
+  const _hoisted_82 = {
     key: 0,
     class: "row-chip err-chip"
   };
-  const _hoisted_81 = { class: "row-time" };
-  const _hoisted_82 = ["data-id", "title", "onClick"];
-  const _hoisted_83 = { class: "row-slot" };
-  const _hoisted_84 = { class: "try-tag" };
-  const _hoisted_85 = { class: "try-state" };
-  const _hoisted_86 = {
+  const _hoisted_83 = { class: "row-time" };
+  const _hoisted_84 = ["data-id", "title", "onClick"];
+  const _hoisted_85 = { class: "row-slot" };
+  const _hoisted_86 = { class: "try-tag" };
+  const _hoisted_87 = { class: "try-state" };
+  const _hoisted_88 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_87 = { class: "row-time" };
-  const _hoisted_88 = { class: "row-actions" };
-  const _hoisted_89 = ["onClick"];
-  const _hoisted_90 = ["onClick"];
-  const _hoisted_91 = { key: 3 };
-  const _hoisted_92 = ["data-id", "title", "onClick"];
-  const _hoisted_93 = { class: "row-slot" };
-  const _hoisted_94 = {
+  const _hoisted_89 = { class: "row-time" };
+  const _hoisted_90 = { class: "row-actions" };
+  const _hoisted_91 = ["onClick"];
+  const _hoisted_92 = ["onClick"];
+  const _hoisted_93 = { key: 3 };
+  const _hoisted_94 = ["data-id", "title", "onClick"];
+  const _hoisted_95 = { class: "row-slot" };
+  const _hoisted_96 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_95 = ["title"];
-  const _hoisted_96 = { class: "row-time" };
-  const _hoisted_97 = { class: "row-actions" };
-  const _hoisted_98 = ["onClick"];
-  const _hoisted_99 = ["onClick"];
-  const _hoisted_100 = {
+  const _hoisted_97 = ["title"];
+  const _hoisted_98 = { class: "row-time" };
+  const _hoisted_99 = { class: "row-actions" };
+  const _hoisted_100 = ["onClick"];
+  const _hoisted_101 = ["onClick"];
+  const _hoisted_102 = {
     key: 0,
     class: "session-blocks"
   };
-  const _hoisted_101 = ["data-id", "title", "onClick"];
-  const _hoisted_102 = {
+  const _hoisted_103 = ["data-id", "title", "onClick"];
+  const _hoisted_104 = {
     key: 0,
     class: "block-old"
   };
-  const _hoisted_103 = {
+  const _hoisted_105 = {
     key: 1,
     class: "session-blocks"
   };
-  const _hoisted_104 = ["data-id", "title", "onClick"];
-  const _hoisted_105 = ["onClick"];
   const _hoisted_106 = ["data-id", "title", "onClick"];
-  const _hoisted_107 = { class: "row-slot" };
-  const _hoisted_108 = {
+  const _hoisted_107 = ["onClick"];
+  const _hoisted_108 = ["data-id", "title", "onClick"];
+  const _hoisted_109 = { class: "row-slot" };
+  const _hoisted_110 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_109 = ["title"];
-  const _hoisted_110 = { class: "row-time" };
-  const _hoisted_111 = { class: "row-actions" };
-  const _hoisted_112 = ["onClick"];
-  const _hoisted_113 = {
+  const _hoisted_111 = ["title"];
+  const _hoisted_112 = { class: "row-time" };
+  const _hoisted_113 = { class: "row-actions" };
+  const _hoisted_114 = ["onClick"];
+  const _hoisted_115 = {
     key: 1,
     class: "img-group sub1"
   };
-  const _hoisted_114 = ["title"];
-  const _hoisted_115 = { class: "row-chip try-count" };
-  const _hoisted_116 = {
+  const _hoisted_116 = ["title"];
+  const _hoisted_117 = { class: "row-chip try-count" };
+  const _hoisted_118 = {
     key: 0,
     class: "row-chip err-chip"
   };
-  const _hoisted_117 = { class: "row-time" };
-  const _hoisted_118 = ["data-id", "title", "onClick"];
-  const _hoisted_119 = { class: "row-slot" };
-  const _hoisted_120 = { class: "try-tag" };
-  const _hoisted_121 = { class: "try-state" };
-  const _hoisted_122 = {
+  const _hoisted_119 = { class: "row-time" };
+  const _hoisted_120 = ["data-id", "title", "onClick"];
+  const _hoisted_121 = { class: "row-slot" };
+  const _hoisted_122 = { class: "try-tag" };
+  const _hoisted_123 = { class: "try-state" };
+  const _hoisted_124 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_123 = { class: "row-time" };
-  const _hoisted_124 = { class: "row-actions" };
-  const _hoisted_125 = ["onClick"];
-  const _hoisted_126 = ["onClick"];
-  const _hoisted_127 = ["data-id", "title", "onClick"];
-  const _hoisted_128 = { class: "row-slot" };
-  const _hoisted_129 = {
+  const _hoisted_125 = { class: "row-time" };
+  const _hoisted_126 = { class: "row-actions" };
+  const _hoisted_127 = ["onClick"];
+  const _hoisted_128 = ["onClick"];
+  const _hoisted_129 = ["data-id", "title", "onClick"];
+  const _hoisted_130 = { class: "row-slot" };
+  const _hoisted_131 = {
     key: 0,
     class: "row-chip usage-chip"
   };
-  const _hoisted_130 = ["title"];
-  const _hoisted_131 = { class: "row-time" };
-  const _hoisted_132 = { class: "row-actions" };
-  const _hoisted_133 = ["onClick"];
-  const _hoisted_134 = ["onClick"];
-  const _hoisted_135 = {
+  const _hoisted_132 = ["title"];
+  const _hoisted_133 = { class: "row-time" };
+  const _hoisted_134 = { class: "row-actions" };
+  const _hoisted_135 = ["onClick"];
+  const _hoisted_136 = ["onClick"];
+  const _hoisted_137 = {
     key: 1,
     class: "empty"
   };
-  const _hoisted_136 = { class: "side-status" };
-  const _hoisted_137 = {
+  const _hoisted_138 = { class: "side-status" };
+  const _hoisted_139 = {
     id: "root-path",
     class: "root-path",
     title: "扫描根目录"
   };
-  const _hoisted_138 = {
+  const _hoisted_140 = {
     id: "side-foot",
     class: "side-foot"
   };
@@ -10475,7 +10480,7 @@
       return (_ctx, _cache) => {
         return openBlock(), createElementBlock("aside", _hoisted_1$i, [
           createBaseVNode("div", _hoisted_2$h, [
-            _cache[5] || (_cache[5] = createBaseVNode("span", { class: "side-title" }, "工作区", -1)),
+            _cache[6] || (_cache[6] = createBaseVNode("span", { class: "side-title" }, "工作区", -1)),
             createBaseVNode("button", {
               id: "side-view-toggle",
               class: normalizeClass(["icon-btn", { on: blockView.value }]),
@@ -10539,10 +10544,10 @@
             }, [
               progressBooks.value.length ? withDirectives((openBlock(), createElementBlock("details", _hoisted_9$5, [
                 createBaseVNode("summary", _hoisted_10$4, [
-                  _cache[6] || (_cache[6] = createBaseVNode("span", { class: "row-slot" }, [
+                  _cache[7] || (_cache[7] = createBaseVNode("span", { class: "row-slot" }, [
                     createBaseVNode("span", { class: "row-caret" })
                   ], -1)),
-                  _cache[7] || (_cache[7] = createBaseVNode("span", { class: "i2t-ov-title" }, "进度概览", -1)),
+                  _cache[8] || (_cache[8] = createBaseVNode("span", { class: "i2t-ov-title" }, "进度概览", -1)),
                   createBaseVNode("span", _hoisted_11$4, toDisplayString(overviewHeadText.value), 1),
                   createBaseVNode("button", {
                     class: normalizeClass(["icon-btn", { on: overviewBlocks.value }]),
@@ -10622,19 +10627,30 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[8] || (_cache[8] = createStaticVNode('<span class="row-slot row-folder" data-v-21aa214e><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-21aa214e><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-21aa214e></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-21aa214e><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-21aa214e></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-21aa214e></path></svg></span>', 1)),
+                    _cache[9] || (_cache[9] = createStaticVNode('<span class="row-slot row-folder" data-v-5e39779f><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5e39779f><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5e39779f></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5e39779f><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-5e39779f></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5e39779f></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$4, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$3, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
                     ]),
                     createBaseVNode("span", _hoisted_30$2, toDisplayString(g.items.length) + " 个会话", 1),
-                    g.legacy ? (openBlock(), createElementBlock("span", _hoisted_31$2, "旧版单项目")) : createCommentVNode("", true),
-                    g.live ? (openBlock(), createElementBlock("span", _hoisted_32$1)) : createCommentVNode("", true)
+                    hasDedupeReview(g.name) ? (openBlock(), createElementBlock("span", _hoisted_31$2, [
+                      createBaseVNode("a", {
+                        class: "icon-btn",
+                        href: dedupeReviewURL(g.name),
+                        target: "_blank",
+                        rel: "noopener",
+                        title: "打开图片核对页：每张图左原图右成品，点缩略图看大图（新标签）",
+                        onClick: _cache[4] || (_cache[4] = withModifiers(() => {
+                        }, ["stop"]))
+                      }, "看图", 8, _hoisted_32$1)
+                    ])) : createCommentVNode("", true),
+                    g.legacy ? (openBlock(), createElementBlock("span", _hoisted_33$1, "旧版单项目")) : createCommentVNode("", true),
+                    g.live ? (openBlock(), createElementBlock("span", _hoisted_34$1)) : createCommentVNode("", true)
                   ], 8, _hoisted_26$4),
                   createBaseVNode("div", null, [
-                    g.progress ? (openBlock(), createElementBlock("div", _hoisted_33$1, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
+                    g.progress ? (openBlock(), createElementBlock("div", _hoisted_35$1, toDisplayString(g.progress), 1)) : createCommentVNode("", true),
                     g.chains ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
-                      blockView.value ? (openBlock(), createElementBlock("div", _hoisted_34$1, [
+                      blockView.value ? (openBlock(), createElementBlock("div", _hoisted_36$1, [
                         (openBlock(true), createElementBlock(Fragment, null, renderList(g.chains, (c) => {
                           return openBlock(), createElementBlock("button", {
                             key: c.key,
@@ -10644,7 +10660,7 @@
                             "data-id": c.main.id,
                             title: chainTip(c),
                             onClick: ($event) => onRowClick(c.main)
-                          }, toDisplayString(c.main.imageOrder || c.main.chapterOrder || ""), 11, _hoisted_35$1);
+                          }, toDisplayString(c.main.imageOrder || c.main.chapterOrder || ""), 11, _hoisted_37$1);
                         }), 128))
                       ])) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                         (openBlock(true), createElementBlock(Fragment, null, renderList(g.chains, (c) => {
@@ -10660,7 +10676,7 @@
                               title: chainTip(c),
                               onClick: ($event) => onRowClick(c.main)
                             }, [
-                              createBaseVNode("span", _hoisted_37$1, [
+                              createBaseVNode("span", _hoisted_39$1, [
                                 createBaseVNode("span", {
                                   class: normalizeClass(["dot", { live: c.live > 0 }])
                                 }, null, 2)
@@ -10671,23 +10687,23 @@
                                 text: unref(sessionTitleOf)(c.main),
                                 plain: unref(plainTitle)(c.main)
                               }, null, 8, ["text", "plain"]),
-                              unref(usageChipText)(c.main) ? (openBlock(), createElementBlock("span", _hoisted_38$1, toDisplayString(unref(usageChipText)(c.main)), 1)) : createCommentVNode("", true),
-                              createBaseVNode("span", _hoisted_39$1, toDisplayString(unref(relTime)(c.main.mtime)), 1),
-                              createBaseVNode("span", _hoisted_40$1, [
+                              unref(usageChipText)(c.main) ? (openBlock(), createElementBlock("span", _hoisted_40$1, toDisplayString(unref(usageChipText)(c.main)), 1)) : createCommentVNode("", true),
+                              createBaseVNode("span", _hoisted_41$1, toDisplayString(unref(relTime)(c.main.mtime)), 1),
+                              createBaseVNode("span", _hoisted_42$1, [
                                 createBaseVNode("button", {
                                   class: "icon-btn",
                                   type: "button",
                                   title: "打开详情面板（元信息 / 指标）",
                                   onClick: withModifiers(($event) => onInfoClick($event, c.main), ["stop"])
-                                }, "ⓘ", 8, _hoisted_41$1)
+                                }, "ⓘ", 8, _hoisted_43$1)
                               ])
-                            ], 10, _hoisted_36$1),
-                            c.rest.length ? withDirectives((openBlock(), createElementBlock("details", _hoisted_42$1, [
-                              createBaseVNode("summary", _hoisted_43$1, [
-                                _cache[9] || (_cache[9] = createBaseVNode("span", { class: "row-slot" }, [
+                            ], 10, _hoisted_38$1),
+                            c.rest.length ? withDirectives((openBlock(), createElementBlock("details", _hoisted_44$1, [
+                              createBaseVNode("summary", _hoisted_45$1, [
+                                _cache[10] || (_cache[10] = createBaseVNode("span", { class: "row-slot" }, [
                                   createBaseVNode("span", { class: "row-caret" })
                                 ], -1)),
-                                createBaseVNode("span", _hoisted_44$1, "历史 " + toDisplayString(c.rest.length), 1)
+                                createBaseVNode("span", _hoisted_46$1, "历史 " + toDisplayString(c.rest.length), 1)
                               ]),
                               (openBlock(true), createElementBlock(Fragment, null, renderList(c.rest, (s) => {
                                 return openBlock(), createElementBlock("button", {
@@ -10699,7 +10715,7 @@
                                   title: rowTitle(s),
                                   onClick: ($event) => onRowClick(s)
                                 }, [
-                                  createBaseVNode("span", _hoisted_46$1, [
+                                  createBaseVNode("span", _hoisted_48$1, [
                                     createBaseVNode("span", {
                                       class: normalizeClass(["dot", { live: s.live }])
                                     }, null, 2)
@@ -10710,17 +10726,17 @@
                                     text: unref(sessionTitleOf)(s),
                                     plain: unref(plainTitle)(s)
                                   }, null, 8, ["text", "plain"]),
-                                  createBaseVNode("span", _hoisted_47$1, toDisplayString(unref(img2textMemberTag)(s.id)), 1),
-                                  createBaseVNode("span", _hoisted_48$1, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                  createBaseVNode("span", _hoisted_49, [
+                                  createBaseVNode("span", _hoisted_49, toDisplayString(unref(img2textMemberTag)(s.id)), 1),
+                                  createBaseVNode("span", _hoisted_50, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                  createBaseVNode("span", _hoisted_51, [
                                     createBaseVNode("button", {
                                       class: "icon-btn",
                                       type: "button",
                                       title: "打开详情面板（元信息 / 指标）",
                                       onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                    }, "ⓘ", 8, _hoisted_50)
+                                    }, "ⓘ", 8, _hoisted_52)
                                   ])
-                                ], 10, _hoisted_45$1);
+                                ], 10, _hoisted_47$1);
                               }), 128))
                             ])), [
                               [vCollapse, { key: "chain:" + g.name + "/" + c.key, want: chainWantOpen(g, c), frozen: false }]
@@ -10737,7 +10753,7 @@
                             title: rowTitle(s),
                             onClick: ($event) => onRowClick(s)
                           }, [
-                            createBaseVNode("span", _hoisted_52, [
+                            createBaseVNode("span", _hoisted_54, [
                               createBaseVNode("span", {
                                 class: normalizeClass(["dot", { live: s.live }])
                               }, null, 2)
@@ -10748,17 +10764,17 @@
                               text: unref(sessionTitleOf)(s),
                               plain: unref(plainTitle)(s)
                             }, null, 8, ["text", "plain"]),
-                            unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_53, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
-                            createBaseVNode("span", _hoisted_54, toDisplayString(unref(relTime)(s.mtime)), 1),
-                            createBaseVNode("span", _hoisted_55, [
+                            unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_55, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                            createBaseVNode("span", _hoisted_56, toDisplayString(unref(relTime)(s.mtime)), 1),
+                            createBaseVNode("span", _hoisted_57, [
                               createBaseVNode("button", {
                                 class: "icon-btn",
                                 type: "button",
                                 title: "打开详情面板（元信息 / 指标）",
                                 onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                              }, "ⓘ", 8, _hoisted_56)
+                              }, "ⓘ", 8, _hoisted_58)
                             ])
-                          ], 10, _hoisted_51);
+                          ], 10, _hoisted_53);
                         }), 128))
                       ], 64))
                     ], 64)) : createCommentVNode("", true),
@@ -10772,27 +10788,27 @@
                           "data-project": g.name,
                           "data-stage": sv.stage
                         }, [
-                          createBaseVNode("summary", _hoisted_58, [
-                            _cache[10] || (_cache[10] = createBaseVNode("span", { class: "row-slot" }, [
+                          createBaseVNode("summary", _hoisted_60, [
+                            _cache[11] || (_cache[11] = createBaseVNode("span", { class: "row-slot" }, [
                               createBaseVNode("span", { class: "row-caret" })
                             ], -1)),
-                            createBaseVNode("span", _hoisted_59, toDisplayString(sv.title), 1),
-                            createBaseVNode("span", _hoisted_60, toDisplayString(sv.agg ? sv.agg.head : sv.items.length + " 个会话"), 1),
+                            createBaseVNode("span", _hoisted_61, toDisplayString(sv.title), 1),
+                            createBaseVNode("span", _hoisted_62, toDisplayString(sv.agg ? sv.agg.head : sv.items.length + " 个会话"), 1),
                             sv.status ? (openBlock(), createElementBlock("span", {
                               key: 0,
                               class: normalizeClass(["stage-progress", sv.status.state]),
                               title: sv.status.title
-                            }, toDisplayString(sv.status.text), 11, _hoisted_61)) : createCommentVNode("", true),
-                            sv.stage === "dedupe" && hasDedupeReview(g.name) ? (openBlock(), createElementBlock("span", _hoisted_62, [
+                            }, toDisplayString(sv.status.text), 11, _hoisted_63)) : createCommentVNode("", true),
+                            sv.stage === "dedupe" && hasDedupeReview(g.name) ? (openBlock(), createElementBlock("span", _hoisted_64, [
                               createBaseVNode("a", {
                                 class: "icon-btn",
                                 href: dedupeReviewURL(g.name),
                                 target: "_blank",
                                 rel: "noopener",
                                 title: "打开复查页：每组一张卡片，点缩略图看大图（新标签）",
-                                onClick: _cache[4] || (_cache[4] = withModifiers(() => {
+                                onClick: _cache[5] || (_cache[5] = withModifiers(() => {
                                 }, ["stop"]))
-                              }, "复查", 8, _hoisted_63)
+                              }, "复查", 8, _hoisted_65)
                             ])) : createCommentVNode("", true)
                           ]),
                           sv.chapterRoots.length ? (openBlock(), createBlock(ChapterSessionTree, {
@@ -10802,7 +10818,7 @@
                             onSelect: onRowClick,
                             onInfo: onInfoClick
                           }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
-                            sv.blockFlat.length ? (openBlock(), createElementBlock("div", _hoisted_64, [
+                            sv.blockFlat.length ? (openBlock(), createElementBlock("div", _hoisted_66, [
                               (openBlock(true), createElementBlock(Fragment, null, renderList(sv.blockFlat, (s) => {
                                 return openBlock(), createElementBlock("button", {
                                   key: s.id,
@@ -10814,10 +10830,10 @@
                                   onClick: ($event) => onRowClick(s)
                                 }, [
                                   createTextVNode(toDisplayString(sv.noBy ? sv.noBy[s.id] ?? "" : s.imageOrder || s.chapterOrder || ""), 1),
-                                  sv.oldById[s.id] ? (openBlock(), createElementBlock("span", _hoisted_66, "旧")) : createCommentVNode("", true)
-                                ], 10, _hoisted_65);
+                                  sv.oldById[s.id] ? (openBlock(), createElementBlock("span", _hoisted_68, "旧")) : createCommentVNode("", true)
+                                ], 10, _hoisted_67);
                               }), 128))
-                            ])) : (openBlock(), createElementBlock("div", _hoisted_67, [
+                            ])) : (openBlock(), createElementBlock("div", _hoisted_69, [
                               (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
                                 return openBlock(), createElementBlock("button", {
                                   key: s.id,
@@ -10827,7 +10843,7 @@
                                   "data-id": s.id,
                                   title: rowTitle(s),
                                   onClick: ($event) => onRowClick(s)
-                                }, toDisplayString(sv.noBy ? sv.noBy[s.id] ?? "" : s.imageOrder || s.chapterOrder || ""), 11, _hoisted_68);
+                                }, toDisplayString(sv.noBy ? sv.noBy[s.id] ?? "" : s.imageOrder || s.chapterOrder || ""), 11, _hoisted_70);
                               }), 128))
                             ])),
                             sv.needOverflow ? (openBlock(), createElementBlock("button", {
@@ -10835,7 +10851,7 @@
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, toDisplayString(sv.blockFlat.length ? "更多图片（还有 " + sv.hiddenCount + " 张）" : "更多会话（还有 " + sv.hiddenCount + " 个）"), 9, _hoisted_69)) : createCommentVNode("", true)
+                            }, toDisplayString(sv.blockFlat.length ? "更多图片（还有 " + sv.hiddenCount + " 张）" : "更多会话（还有 " + sv.hiddenCount + " 个）"), 9, _hoisted_71)) : createCommentVNode("", true)
                           ], 64)) : sv.shownGroups.length ? (openBlock(), createElementBlock(Fragment, { key: 2 }, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shownGroups, (grp) => {
                               return openBlock(), createElementBlock(Fragment, {
@@ -10850,7 +10866,7 @@
                                   title: rowTitle(grp.main),
                                   onClick: ($event) => onRowClick(grp.main)
                                 }, [
-                                  createBaseVNode("span", _hoisted_71, [
+                                  createBaseVNode("span", _hoisted_73, [
                                     createBaseVNode("span", {
                                       class: normalizeClass(["dot", { live: grp.main.live }])
                                     }, null, 2)
@@ -10861,27 +10877,27 @@
                                     text: unref(sessionTitleOf)(grp.main),
                                     plain: unref(plainTitle)(grp.main)
                                   }, null, 8, ["text", "plain"]),
-                                  unref(usageChipText)(grp.main) ? (openBlock(), createElementBlock("span", _hoisted_72, toDisplayString(unref(usageChipText)(grp.main)), 1)) : createCommentVNode("", true),
+                                  unref(usageChipText)(grp.main) ? (openBlock(), createElementBlock("span", _hoisted_74, toDisplayString(unref(usageChipText)(grp.main)), 1)) : createCommentVNode("", true),
                                   grp.main.imageName ? (openBlock(), createElementBlock("span", {
                                     key: 1,
                                     class: "row-chip image-chip",
                                     title: unref(imageTipText)(grp.main)
-                                  }, toDisplayString(unref(imageChipText)(grp.main)), 9, _hoisted_73)) : createCommentVNode("", true),
-                                  createBaseVNode("span", _hoisted_74, toDisplayString(unref(relTime)(grp.main.mtime)), 1),
-                                  createBaseVNode("span", _hoisted_75, [
+                                  }, toDisplayString(unref(imageChipText)(grp.main)), 9, _hoisted_75)) : createCommentVNode("", true),
+                                  createBaseVNode("span", _hoisted_76, toDisplayString(unref(relTime)(grp.main.mtime)), 1),
+                                  createBaseVNode("span", _hoisted_77, [
                                     createBaseVNode("button", {
                                       class: "icon-btn",
                                       type: "button",
                                       title: "打开详情面板（元信息 / 指标）",
                                       onClick: withModifiers(($event) => onInfoClick($event, grp.main), ["stop"])
-                                    }, "ⓘ", 8, _hoisted_76)
+                                    }, "ⓘ", 8, _hoisted_78)
                                   ])
-                                ], 10, _hoisted_70)) : withDirectives((openBlock(), createElementBlock("details", _hoisted_77, [
+                                ], 10, _hoisted_72)) : withDirectives((openBlock(), createElementBlock("details", _hoisted_79, [
                                   createBaseVNode("summary", {
                                     class: "img-group-row",
                                     title: imageGroupTip(grp)
                                   }, [
-                                    _cache[11] || (_cache[11] = createBaseVNode("span", { class: "row-slot" }, [
+                                    _cache[12] || (_cache[12] = createBaseVNode("span", { class: "row-slot" }, [
                                       createBaseVNode("span", { class: "row-caret" })
                                     ], -1)),
                                     createVNode(_sfc_main$o, {
@@ -10889,10 +10905,10 @@
                                       class: "row-title",
                                       text: grp.label
                                     }, null, 8, ["text"]),
-                                    createBaseVNode("span", _hoisted_79, toDisplayString(grp.items.length) + " 次", 1),
-                                    grp.hasError && !grp.live ? (openBlock(), createElementBlock("span", _hoisted_80, "有失败")) : createCommentVNode("", true),
-                                    createBaseVNode("span", _hoisted_81, toDisplayString(unref(relTime)(grp.main.mtime)), 1)
-                                  ], 8, _hoisted_78),
+                                    createBaseVNode("span", _hoisted_81, toDisplayString(grp.items.length) + " 次", 1),
+                                    grp.hasError && !grp.live ? (openBlock(), createElementBlock("span", _hoisted_82, "有失败")) : createCommentVNode("", true),
+                                    createBaseVNode("span", _hoisted_83, toDisplayString(unref(relTime)(grp.main.mtime)), 1)
+                                  ], 8, _hoisted_80),
                                   (openBlock(true), createElementBlock(Fragment, null, renderList(grp.items, (s) => {
                                     return openBlock(), createElementBlock("button", {
                                       key: s.id,
@@ -10903,24 +10919,24 @@
                                       title: rowTitle(s),
                                       onClick: ($event) => onRowClick(s)
                                     }, [
-                                      createBaseVNode("span", _hoisted_83, [
+                                      createBaseVNode("span", _hoisted_85, [
                                         createBaseVNode("span", {
                                           class: normalizeClass(["dot", { live: s.live }])
                                         }, null, 2)
                                       ]),
-                                      createBaseVNode("span", _hoisted_84, toDisplayString(attemptTag(s)), 1),
-                                      createBaseVNode("span", _hoisted_85, toDisplayString(attemptStateText(s)), 1),
-                                      unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_86, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
-                                      createBaseVNode("span", _hoisted_87, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                      createBaseVNode("span", _hoisted_88, [
+                                      createBaseVNode("span", _hoisted_86, toDisplayString(attemptTag(s)), 1),
+                                      createBaseVNode("span", _hoisted_87, toDisplayString(attemptStateText(s)), 1),
+                                      unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_88, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                      createBaseVNode("span", _hoisted_89, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                      createBaseVNode("span", _hoisted_90, [
                                         createBaseVNode("button", {
                                           class: "icon-btn",
                                           type: "button",
                                           title: "打开详情面板（元信息 / 指标）",
                                           onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                        }, "ⓘ", 8, _hoisted_89)
+                                        }, "ⓘ", 8, _hoisted_91)
                                       ])
-                                    ], 10, _hoisted_82);
+                                    ], 10, _hoisted_84);
                                   }), 128))
                                 ])), [
                                   [vCollapse, { key: "img:" + g.name + "/" + grp.key, want: imgGroupWantOpen(grp), frozen: false }]
@@ -10932,8 +10948,8 @@
                               class: "session-overflow sub2",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多图片（还有 " + toDisplayString(sv.hiddenCount) + " 张） ", 9, _hoisted_90)) : createCommentVNode("", true)
-                          ], 64)) : (openBlock(), createElementBlock("div", _hoisted_91, [
+                            }, " 更多图片（还有 " + toDisplayString(sv.hiddenCount) + " 张） ", 9, _hoisted_92)) : createCommentVNode("", true)
+                          ], 64)) : (openBlock(), createElementBlock("div", _hoisted_93, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
                               return openBlock(), createElementBlock("button", {
                                 key: s.id,
@@ -10944,7 +10960,7 @@
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
                               }, [
-                                createBaseVNode("span", _hoisted_93, [
+                                createBaseVNode("span", _hoisted_95, [
                                   createBaseVNode("span", {
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
@@ -10955,31 +10971,31 @@
                                   text: unref(sessionTitleOf)(s),
                                   plain: unref(plainTitle)(s)
                                 }, null, 8, ["text", "plain"]),
-                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_94, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_96, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
                                   class: "row-chip image-chip",
                                   title: unref(imageTipText)(s)
-                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_95)) : createCommentVNode("", true),
-                                createBaseVNode("span", _hoisted_96, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                createBaseVNode("span", _hoisted_97, [
+                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_97)) : createCommentVNode("", true),
+                                createBaseVNode("span", _hoisted_98, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                createBaseVNode("span", _hoisted_99, [
                                   createBaseVNode("button", {
                                     class: "icon-btn",
                                     type: "button",
                                     title: "打开详情面板（元信息 / 指标）",
                                     onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                  }, "ⓘ", 8, _hoisted_98)
+                                  }, "ⓘ", 8, _hoisted_100)
                                 ])
-                              ], 10, _hoisted_92);
+                              ], 10, _hoisted_94);
                             }), 128)),
                             sv.needOverflow ? (openBlock(), createElementBlock("button", {
                               key: 0,
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_99)) : createCommentVNode("", true)
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_101)) : createCommentVNode("", true)
                           ]))
-                        ], 8, _hoisted_57)), [
+                        ], 8, _hoisted_59)), [
                           [vCollapse, { key: "stage:" + g.name + "/" + sv.stage, want: stageWantOpen(g, sv), frozen: false }]
                         ]) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                           sv.chapterRoots.length ? (openBlock(), createBlock(ChapterSessionTree, {
@@ -10989,7 +11005,7 @@
                             onSelect: onRowClick,
                             onInfo: onInfoClick
                           }, null, 8, ["nodes", "scope"])) : blockView.value ? (openBlock(), createElementBlock(Fragment, { key: 1 }, [
-                            sv.blockFlat.length ? (openBlock(), createElementBlock("div", _hoisted_100, [
+                            sv.blockFlat.length ? (openBlock(), createElementBlock("div", _hoisted_102, [
                               (openBlock(true), createElementBlock(Fragment, null, renderList(sv.blockFlat, (s) => {
                                 return openBlock(), createElementBlock("button", {
                                   key: s.id,
@@ -11001,10 +11017,10 @@
                                   onClick: ($event) => onRowClick(s)
                                 }, [
                                   createTextVNode(toDisplayString(sv.noBy ? sv.noBy[s.id] ?? "" : s.imageOrder || s.chapterOrder || ""), 1),
-                                  sv.oldById[s.id] ? (openBlock(), createElementBlock("span", _hoisted_102, "旧")) : createCommentVNode("", true)
-                                ], 10, _hoisted_101);
+                                  sv.oldById[s.id] ? (openBlock(), createElementBlock("span", _hoisted_104, "旧")) : createCommentVNode("", true)
+                                ], 10, _hoisted_103);
                               }), 128))
-                            ])) : (openBlock(), createElementBlock("div", _hoisted_103, [
+                            ])) : (openBlock(), createElementBlock("div", _hoisted_105, [
                               (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
                                 return openBlock(), createElementBlock("button", {
                                   key: s.id,
@@ -11014,7 +11030,7 @@
                                   "data-id": s.id,
                                   title: rowTitle(s),
                                   onClick: ($event) => onRowClick(s)
-                                }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_104);
+                                }, toDisplayString(s.imageOrder || s.chapterOrder || ""), 11, _hoisted_106);
                               }), 128))
                             ])),
                             sv.needOverflow ? (openBlock(), createElementBlock("button", {
@@ -11022,7 +11038,7 @@
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, toDisplayString(sv.blockFlat.length ? "更多图片（还有 " + sv.hiddenCount + " 张）" : "更多会话（还有 " + sv.hiddenCount + " 个）"), 9, _hoisted_105)) : createCommentVNode("", true)
+                            }, toDisplayString(sv.blockFlat.length ? "更多图片（还有 " + sv.hiddenCount + " 张）" : "更多会话（还有 " + sv.hiddenCount + " 个）"), 9, _hoisted_107)) : createCommentVNode("", true)
                           ], 64)) : sv.shownGroups.length ? (openBlock(), createElementBlock(Fragment, { key: 2 }, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shownGroups, (grp) => {
                               return openBlock(), createElementBlock(Fragment, {
@@ -11037,7 +11053,7 @@
                                   title: rowTitle(grp.main),
                                   onClick: ($event) => onRowClick(grp.main)
                                 }, [
-                                  createBaseVNode("span", _hoisted_107, [
+                                  createBaseVNode("span", _hoisted_109, [
                                     createBaseVNode("span", {
                                       class: normalizeClass(["dot", { live: grp.main.live }])
                                     }, null, 2)
@@ -11048,27 +11064,27 @@
                                     text: unref(sessionTitleOf)(grp.main),
                                     plain: unref(plainTitle)(grp.main)
                                   }, null, 8, ["text", "plain"]),
-                                  unref(usageChipText)(grp.main) ? (openBlock(), createElementBlock("span", _hoisted_108, toDisplayString(unref(usageChipText)(grp.main)), 1)) : createCommentVNode("", true),
+                                  unref(usageChipText)(grp.main) ? (openBlock(), createElementBlock("span", _hoisted_110, toDisplayString(unref(usageChipText)(grp.main)), 1)) : createCommentVNode("", true),
                                   grp.main.imageName ? (openBlock(), createElementBlock("span", {
                                     key: 1,
                                     class: "row-chip image-chip",
                                     title: unref(imageTipText)(grp.main)
-                                  }, toDisplayString(unref(imageChipText)(grp.main)), 9, _hoisted_109)) : createCommentVNode("", true),
-                                  createBaseVNode("span", _hoisted_110, toDisplayString(unref(relTime)(grp.main.mtime)), 1),
-                                  createBaseVNode("span", _hoisted_111, [
+                                  }, toDisplayString(unref(imageChipText)(grp.main)), 9, _hoisted_111)) : createCommentVNode("", true),
+                                  createBaseVNode("span", _hoisted_112, toDisplayString(unref(relTime)(grp.main.mtime)), 1),
+                                  createBaseVNode("span", _hoisted_113, [
                                     createBaseVNode("button", {
                                       class: "icon-btn",
                                       type: "button",
                                       title: "打开详情面板（元信息 / 指标）",
                                       onClick: withModifiers(($event) => onInfoClick($event, grp.main), ["stop"])
-                                    }, "ⓘ", 8, _hoisted_112)
+                                    }, "ⓘ", 8, _hoisted_114)
                                   ])
-                                ], 10, _hoisted_106)) : withDirectives((openBlock(), createElementBlock("details", _hoisted_113, [
+                                ], 10, _hoisted_108)) : withDirectives((openBlock(), createElementBlock("details", _hoisted_115, [
                                   createBaseVNode("summary", {
                                     class: "img-group-row",
                                     title: imageGroupTip(grp)
                                   }, [
-                                    _cache[12] || (_cache[12] = createBaseVNode("span", { class: "row-slot" }, [
+                                    _cache[13] || (_cache[13] = createBaseVNode("span", { class: "row-slot" }, [
                                       createBaseVNode("span", { class: "row-caret" })
                                     ], -1)),
                                     createVNode(_sfc_main$o, {
@@ -11076,10 +11092,10 @@
                                       class: "row-title",
                                       text: grp.label
                                     }, null, 8, ["text"]),
-                                    createBaseVNode("span", _hoisted_115, toDisplayString(grp.items.length) + " 次", 1),
-                                    grp.hasError && !grp.live ? (openBlock(), createElementBlock("span", _hoisted_116, "有失败")) : createCommentVNode("", true),
-                                    createBaseVNode("span", _hoisted_117, toDisplayString(unref(relTime)(grp.main.mtime)), 1)
-                                  ], 8, _hoisted_114),
+                                    createBaseVNode("span", _hoisted_117, toDisplayString(grp.items.length) + " 次", 1),
+                                    grp.hasError && !grp.live ? (openBlock(), createElementBlock("span", _hoisted_118, "有失败")) : createCommentVNode("", true),
+                                    createBaseVNode("span", _hoisted_119, toDisplayString(unref(relTime)(grp.main.mtime)), 1)
+                                  ], 8, _hoisted_116),
                                   (openBlock(true), createElementBlock(Fragment, null, renderList(grp.items, (s) => {
                                     return openBlock(), createElementBlock("button", {
                                       key: s.id,
@@ -11090,24 +11106,24 @@
                                       title: rowTitle(s),
                                       onClick: ($event) => onRowClick(s)
                                     }, [
-                                      createBaseVNode("span", _hoisted_119, [
+                                      createBaseVNode("span", _hoisted_121, [
                                         createBaseVNode("span", {
                                           class: normalizeClass(["dot", { live: s.live }])
                                         }, null, 2)
                                       ]),
-                                      createBaseVNode("span", _hoisted_120, toDisplayString(attemptTag(s)), 1),
-                                      createBaseVNode("span", _hoisted_121, toDisplayString(attemptStateText(s)), 1),
-                                      unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_122, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
-                                      createBaseVNode("span", _hoisted_123, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                      createBaseVNode("span", _hoisted_124, [
+                                      createBaseVNode("span", _hoisted_122, toDisplayString(attemptTag(s)), 1),
+                                      createBaseVNode("span", _hoisted_123, toDisplayString(attemptStateText(s)), 1),
+                                      unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_124, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                      createBaseVNode("span", _hoisted_125, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                      createBaseVNode("span", _hoisted_126, [
                                         createBaseVNode("button", {
                                           class: "icon-btn",
                                           type: "button",
                                           title: "打开详情面板（元信息 / 指标）",
                                           onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                        }, "ⓘ", 8, _hoisted_125)
+                                        }, "ⓘ", 8, _hoisted_127)
                                       ])
-                                    ], 10, _hoisted_118);
+                                    ], 10, _hoisted_120);
                                   }), 128))
                                 ])), [
                                   [vCollapse, { key: "img:" + g.name + "/" + grp.key, want: imgGroupWantOpen(grp), frozen: false }]
@@ -11119,7 +11135,7 @@
                               class: "session-overflow sub1",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多图片（还有 " + toDisplayString(sv.hiddenCount) + " 张） ", 9, _hoisted_126)) : createCommentVNode("", true)
+                            }, " 更多图片（还有 " + toDisplayString(sv.hiddenCount) + " 张） ", 9, _hoisted_128)) : createCommentVNode("", true)
                           ], 64)) : (openBlock(), createElementBlock(Fragment, { key: 3 }, [
                             (openBlock(true), createElementBlock(Fragment, null, renderList(sv.shown, (s) => {
                               return openBlock(), createElementBlock("button", {
@@ -11131,7 +11147,7 @@
                                 title: rowTitle(s),
                                 onClick: ($event) => onRowClick(s)
                               }, [
-                                createBaseVNode("span", _hoisted_128, [
+                                createBaseVNode("span", _hoisted_130, [
                                   createBaseVNode("span", {
                                     class: normalizeClass(["dot", { live: s.live }])
                                   }, null, 2)
@@ -11142,29 +11158,29 @@
                                   text: unref(sessionTitleOf)(s),
                                   plain: unref(plainTitle)(s)
                                 }, null, 8, ["text", "plain"]),
-                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_129, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
+                                unref(usageChipText)(s) ? (openBlock(), createElementBlock("span", _hoisted_131, toDisplayString(unref(usageChipText)(s)), 1)) : createCommentVNode("", true),
                                 s.imageName ? (openBlock(), createElementBlock("span", {
                                   key: 1,
                                   class: "row-chip image-chip",
                                   title: unref(imageTipText)(s)
-                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_130)) : createCommentVNode("", true),
-                                createBaseVNode("span", _hoisted_131, toDisplayString(unref(relTime)(s.mtime)), 1),
-                                createBaseVNode("span", _hoisted_132, [
+                                }, toDisplayString(unref(imageChipText)(s)), 9, _hoisted_132)) : createCommentVNode("", true),
+                                createBaseVNode("span", _hoisted_133, toDisplayString(unref(relTime)(s.mtime)), 1),
+                                createBaseVNode("span", _hoisted_134, [
                                   createBaseVNode("button", {
                                     class: "icon-btn",
                                     type: "button",
                                     title: "打开详情面板（元信息 / 指标）",
                                     onClick: withModifiers(($event) => onInfoClick($event, s), ["stop"])
-                                  }, "ⓘ", 8, _hoisted_133)
+                                  }, "ⓘ", 8, _hoisted_135)
                                 ])
-                              ], 10, _hoisted_127);
+                              ], 10, _hoisted_129);
                             }), 128)),
                             sv.needOverflow ? (openBlock(), createElementBlock("button", {
                               key: 0,
                               class: "session-overflow",
                               type: "button",
                               onClick: ($event) => onMoreClick(sv.overflowKey)
-                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_134)) : createCommentVNode("", true)
+                            }, " 更多会话（还有 " + toDisplayString(sv.hiddenCount) + " 个） ", 9, _hoisted_136)) : createCommentVNode("", true)
                           ], 64))
                         ], 64))
                       ], 64);
@@ -11174,9 +11190,9 @@
                   [vCollapse, { key: "proj:" + g.name, want: g.matched ? true : projWantOpen(g), frozen: g.matched }]
                 ]);
               }), 128)),
-              !shownCount.value ? (openBlock(), createElementBlock("div", _hoisted_135, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true)
+              !shownCount.value ? (openBlock(), createElementBlock("div", _hoisted_137, toDisplayString(emptyText.value), 1)) : createCommentVNode("", true)
             ], 512),
-            _cache[13] || (_cache[13] = createBaseVNode("div", {
+            _cache[14] || (_cache[14] = createBaseVNode("div", {
               class: "list-fade",
               "aria-hidden": "true"
             }, null, -1))
@@ -11185,15 +11201,15 @@
             id: "side-totals",
             class: normalizeClass(["side-totals", { hidden: !totalsText.value }])
           }, toDisplayString(totalsText.value), 3),
-          createBaseVNode("div", _hoisted_136, [
-            createBaseVNode("div", _hoisted_137, toDisplayString(unref(state).root || "—"), 1),
-            createBaseVNode("div", _hoisted_138, toDisplayString(footText.value), 1)
+          createBaseVNode("div", _hoisted_138, [
+            createBaseVNode("div", _hoisted_139, toDisplayString(unref(state).root || "—"), 1),
+            createBaseVNode("div", _hoisted_140, toDisplayString(footText.value), 1)
           ])
         ]);
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-21aa214e"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-5e39779f"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
