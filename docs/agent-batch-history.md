@@ -3701,4 +3701,6 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 
 验证：新增 `TestImageReviewWithoutGroups`——无 `groups.json`、以及"有结论文档但空分组"两种情形都要能打开并列出图片；`go test ./internal/sessionview/` 全绿，`npm test` 287 项通过，`viewer.js`/`viewer.css` 重新构建并提交。
 
+补记（设计侧修正，同日）：P69 与设计报告原先把"原页裁切"当成原生 PDF 的首选取图方式，方向错了——**非扫描版应直接读原对象**（页内嵌位图取 `pdfimages -all` 的原字节、矢量把 Form XObject 导出成独立 PDF），"按裁剪框在原页重裁"只适用于**扫描版**（它本来没有可分离的对象），页级 `\includegraphics[page,trim,clip]` 降为兜底。已同步 `plan.md` P69 与 `docs/plan-report/design-any-pdf.md`。
+
 同一批的清理：把档案与代码里残留的三处样本身份（两本书名与一本教辅名）中性化（`docs/agent-batch-history.md` 两处、`img2text/pagemark.go` 与两个测试的 fixture），只换身份、技术与数字原样保留。
