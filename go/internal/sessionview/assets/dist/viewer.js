@@ -6775,8 +6775,9 @@
     staticMode: false,
     mediaRoot: ":",
     sessions: [],
-    // T154：有 dedupe 复查页的项目名（/dedupe?project=… 可打开），侧栏整组核验
-    // 阶段行的「复查」按钮据此显隐；不参与列表签名，按钮出现不影响侧栏重建。
+    // T154/T305：有图片核对页的项目名（/dedupe?project=… 可打开）——有分组结论、
+    // 或只要有图片判定记录都在内。侧栏项目行与整组核验阶段行的入口据此显隐；
+    // 不参与列表签名，按钮出现不影响侧栏重建。
     dedupeReviews: [],
     // P53：每个项目当前排队的重试章节（/api/index 的 retries），章节行据此显示
     // 「待重试」。不参与列表签名：它变化只影响一个角标，不该重建侧栏。
@@ -10627,7 +10628,7 @@
                     class: "proj-row",
                     title: g.name
                   }, [
-                    _cache[9] || (_cache[9] = createStaticVNode('<span class="row-slot row-folder" data-v-5e39779f><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5e39779f><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5e39779f></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-5e39779f><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-5e39779f></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-5e39779f></path></svg></span>', 1)),
+                    _cache[9] || (_cache[9] = createStaticVNode('<span class="row-slot row-folder" data-v-85c2e2b8><svg class="folder closed" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-85c2e2b8><path d="M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-85c2e2b8></path></svg><svg class="folder open" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" data-v-85c2e2b8><path d="M14.5 8V5.5a1 1 0 0 0-1-1H7.2L5.7 3.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" data-v-85c2e2b8></path><path d="M4.9 14.5 6.7 7.5h7.7l-1.8 7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" data-v-85c2e2b8></path></svg></span>', 1)),
                     createBaseVNode("span", _hoisted_27$4, [
                       g.prefix ? (openBlock(), createElementBlock("span", _hoisted_28$3, toDisplayString(g.prefix), 1)) : createCommentVNode("", true),
                       createBaseVNode("span", _hoisted_29$2, toDisplayString(g.title), 1)
@@ -11209,7 +11210,7 @@
       };
     }
   });
-  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-5e39779f"]]);
+  const Sidebar = /* @__PURE__ */ _export_sfc(_sfc_main$m, [["__scopeId", "data-v-85c2e2b8"]]);
   function refBaseName(ref2) {
     const s = String(ref2 || "").split("?")[0];
     const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));

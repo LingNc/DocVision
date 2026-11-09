@@ -113,8 +113,9 @@ export const state = reactive({
   staticMode: false,
   mediaRoot: ':',
   sessions: [] as Session[],
-  // T154：有 dedupe 复查页的项目名（/dedupe?project=… 可打开），侧栏整组核验
-  // 阶段行的「复查」按钮据此显隐；不参与列表签名，按钮出现不影响侧栏重建。
+  // T154/T305：有图片核对页的项目名（/dedupe?project=… 可打开）——有分组结论、
+  // 或只要有图片判定记录都在内。侧栏项目行与整组核验阶段行的入口据此显隐；
+  // 不参与列表签名，按钮出现不影响侧栏重建。
   dedupeReviews: [] as string[],
   // P53：每个项目当前排队的重试章节（/api/index 的 retries），章节行据此显示
   // 「待重试」。不参与列表签名：它变化只影响一个角标，不该重建侧栏。

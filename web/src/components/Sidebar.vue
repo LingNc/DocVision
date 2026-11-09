@@ -298,8 +298,8 @@ function stageWantOpen(g: GroupView, sv: StageView): boolean {
     !!curProj && curProj === g.name && curStage === sv.stage)
 }
 
-/* T154：整组核验阶段行上的「复查」入口——dedupe 的结论（每组一张卡片、点缩略图
-   看大图）由预览服务从 source/dedupe/review.html 发出；索引里报了项目才挂按钮。 */
+/* T154/T305：图片核对页的入口（项目行「看图」常驻、整组核验阶段行「复查」）——
+   页面由预览服务按磁盘现状现渲染（分组 + 逐图判定 + 成品）；索引里报了项目才挂。 */
 function dedupeReviewURL(name: string): string {
   return '/dedupe?project=' + encodeURIComponent(name)
 }
