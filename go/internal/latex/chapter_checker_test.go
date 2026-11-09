@@ -540,20 +540,20 @@ func TestCheckerSeesProductAndHints(t *testing.T) {
 // T183：只点名真实存在的"说法"文件——不存在的不提，免得模型去读一个没有的文件。
 func TestCheckerClaimNoteNamesExistingOnly(t *testing.T) {
 	view := t.TempDir()
-	if got := checkerClaimNote(view); got != "" {
+	if got := checkerClaimNote(view, "chapter_010"); got != "" {
 		t.Fatalf("两个都没有时不该有这句: %q", got)
 	}
 	if err := os.WriteFile(filepath.Join(view, "report.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := checkerClaimNote(view)
+	got := checkerClaimNote(view, "chapter_010")
 	if !strings.Contains(got, "report.md") || strings.Contains(got, "notes.md") {
 		t.Fatalf("只有 report.md 时不该提 notes.md: %q", got)
 	}
 	if err := os.WriteFile(filepath.Join(view, "notes.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	both := checkerClaimNote(view)
+	both := checkerClaimNote(view, "chapter_010")
 	if !strings.Contains(both, "report.md") || !strings.Contains(both, "notes.md") {
 		t.Fatalf("两个都在时都要点名: %q", both)
 	}

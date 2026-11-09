@@ -203,16 +203,16 @@ func TestFindOriginPDFs(t *testing.T) {
 	make("书", "uuid0_origin.pdf")
 	make("其他_part1", "other_origin.pdf")
 
-	got := findOriginPDFs(root, "书")
+	got := findOriginPDFs(root, "", "书")
 	if len(got) != 4 {
 		t.Fatalf("want 4 origin pdfs, got %d: %v", len(got), got)
 	}
 	// 顺序：无编号书目录在前，之后 part1, part2, part10（自然序）。
-	if !strings.Contains(got[0], filepath.Join("书", "uuid0_origin.pdf")) {
-		t.Fatalf("partless dir must come first: %v", got[0])
+	if got[0].Part != "书" || !strings.Contains(got[0].PDF, filepath.Join("书", "uuid0_origin.pdf")) {
+		t.Fatalf("partless dir must come first: %+v", got[0])
 	}
-	if !strings.Contains(got[3], "part10") {
-		t.Fatalf("part10 must sort after part2: %v", got[3])
+	if got[3].Part != "书_part10" {
+		t.Fatalf("part10 must sort after part2: %+v", got[3])
 	}
 }
 

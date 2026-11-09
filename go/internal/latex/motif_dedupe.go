@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -22,7 +23,14 @@ import (
 // v3 → v4 再改一处：复核时离组中心不够、但对组内某个已达标成员仍达标的成员
 // 随组带入（T152）——同一张图换分辨率/长宽比与中心的分数会偏低，上一版把它
 // 退回独立，续跑会一直沿用那份"多画几张"的旧结论。
-const motifDedupeVersion = "visual-motif-v4"
+// T289：v5 起文本图不再参与分组（见 motifDedupeEligible），旧产物里可能有
+// 文本图当跟随者的组——升版本让它们整体失效、重新核验一次。
+const motifDedupeVersion = "visual-motif-v5"
+
+// motifDedupeEligible 说明"这张图要不要进分组池"。文本图的交付物是提取出来的
+// 文字，不是绘制成品，被并进一组当跟随者就会被跳过（本图的文字也就没人提取，
+// rebuild 只能退回原图）；所以文本图逐张自己跑，不进池子。
+func motifDedupeEligible(class string) bool { return class != ClassText }
 
 // motifCandidate keeps a decoded input and its progress record together for
 // one book-level verification pass.
@@ -95,10 +103,15 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	}
 	var pend []pending
 	var hashed []motifHashedDedupe
+	skippedText := 0
 	for ti, t := range tasks {
 		progress.scan(ti+1, len(tasks))
 		p := prog[t.key()]
 		if p == nil || p.Class == "" || p.Absorbed {
+			continue
+		}
+		if !motifDedupeEligible(p.Class) {
+			skippedText++
 			continue
 		}
 		path, err := resolveImageFile(r.cfg.Paths.ImagesDir, t.imgPath, subjectOf(t.mdName))
@@ -121,6 +134,9 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 			art.Fingerprint, art.Distinct, len(art.Groups)))
 		progress.verify(1, 1, len(pend), 0)
 		return
+	}
+	if skippedText > 0 {
+		r.log.Log(0, "[dedupe]", strconv.Itoa(skippedText), "张文本图不参与分组（它们只需要提取文字，不重画）")
 	}
 	var samples []motifCandidate
 	byKey := make(map[string]*motifCandidate)
@@ -390,7 +406,7 @@ func (r *Runner) motifDedupePhase(tasks []*task, prog map[string]*imageProgress,
 	if n := motifAdoptCopies(leaders, copies, byTaskKey, progDir); n > 0 {
 		r.log.Log(0, fmt.Sprintf("[dedupe] %d 张逐字节重复的图片跟随代表图，不重复作图", n))
 	}
-	r.writeMotifArtifacts(outDir, leaders, copies, applied, alignScores)
+	r.writeMotifArtifacts(outDir, leaders, copies, applied, alignScores, prog)
 	// 收尾的进度行说的是**实际开了几个会话**：整理会话没开就不该多算一格
 	// （T126 的 [dedupe 2/2] 曾经看起来像"两个会话都跑完了"）。
 	total := len(scopes) + consolSessions
@@ -1264,13 +1280,18 @@ func applyMotifArtifacts(tasks []*task, prog map[string]*imageProgress, progDir,
 	}
 }
 
-// clearUnresolvedMotifLinks drops follower->leader links whose leader never
-// produced a drawing (failed, or produced nothing). Followers are otherwise
-// skipped by process forever and their figure would silently disappear from the
-// book; unlinking means the next run draws them independently. Costing an extra
-// drawing is fine, losing a figure is not.
+// clearUnresolvedMotifLinks drops follower->leader links whose leader is finished
+// but never produced a drawing. Followers are otherwise skipped by process forever
+// and their figure would silently disappear from the book; unlinking means the next
+// run draws them independently. Costing an extra drawing is fine, losing a figure is
+// not.
 // 代表图是 raster/text（组的类别按多数定成这样）时本来就没有成品，跟随者
 // 复用它的原图与解释文本，不能当成"代表图没产出"把链接清掉。
+//
+// 代表图**还没收尾**（待处理/刚失败）时链接必须留着（T263）：它有下一轮，跟随者
+// 跟着复用同一张成品即可；这时清链接等于把一组图拆成 N 张独立图。现场一次模型
+// 名写错，18 张代表图全部失败，356 张跟随被判"代表图没产出"当场清空，下一轮要
+// 画的就是 379 张，而不是 23 张。
 func (r *Runner) clearUnresolvedMotifLinks(tasks []*task, prog map[string]*imageProgress, progDir string) {
 	cleared := 0
 	for _, t := range tasks {
@@ -1282,15 +1303,22 @@ func (r *Runner) clearUnresolvedMotifLinks(tasks []*task, prog map[string]*image
 		if leader != nil && leader.Status == "done" && leader.EquivalentTo == "" && (leader.Class != ClassVector || leader.TikzCode != "") {
 			continue
 		}
+		if leader != nil && leader.Status != "done" {
+			// 代表图待处理或刚失败：它还会再画，跟随者等它，别拆组。
+			continue
+		}
 		p.EquivalentTo = ""
 		p.DedupeLeaderHash = ""
 		p.SharedTex = ""
+		// 解开之后连"核过"的记号一起放开，否则这类图以后再也挂不回任何代表图
+		// （挂靠与复用都会跳过已核记录）。
+		p.DedupeChecked = false
 		saveProgress(progDir, p)
 		cleared++
 	}
 	if cleared > 0 {
 		// 不静默：这些图会保持/回退为独立处理，本次不假装已完成。
-		r.log.LogWarning(0, fmt.Sprintf("%d 张图跟随的代表图没有产出成品，已解除跟随，下次运行将单独处理", cleared))
+		r.log.LogWarning(0, fmt.Sprintf("%d 张图跟随的代表图已经完成、却没有可复用的成品，已解除跟随，下次运行将单独处理", cleared))
 	}
 }
 

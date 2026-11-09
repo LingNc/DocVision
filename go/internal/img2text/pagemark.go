@@ -102,7 +102,7 @@ func pagePartDirs(mineruOutput, mdName string) []string {
 // same rule as contentListPath in latex/docindex.go.
 func pageContentListPath(dir string) string {
 	// 不用 Glob：书名常带 [a4]/[正度纸] 这类方括号，Glob 会把它当字符
-	// 类解析而静默失配（李-范/大雪深埋全部 0 锚点的根因）。
+	// 类解析而静默失配（实测两本书全部 0 锚点的根因）。
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""

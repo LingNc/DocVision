@@ -166,7 +166,7 @@ func (r *Runner) runWatermarkDetection(samples []watermarkSample) *WatermarkMemo
 	if len(samples) > 0 {
 		subject = subjectOf(samples[0].name)
 	}
-	if idx, err := buildPageIndex(r.cfg.Paths.MineruOutput, subject); err == nil {
+	if idx, err := buildPageIndex(r.cfg.Paths.MineruOutput, r.cfg.Paths.SplitDir, subject); err == nil {
 		pagesDir := filepath.Join(r.workRoot(), "pages")
 		mid := idx.total / 2
 		if mid < 1 {

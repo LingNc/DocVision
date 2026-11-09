@@ -1,11 +1,15 @@
 package latex
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -323,6 +327,9 @@ func (t *CompileTexTool) Execute(argsJSON string) (session.ToolResult, error) {
 	if w := res.WarningSummary(); w != "" {
 		text += "\n" + truncateStr(w, 1500)
 	}
+	if h := missingFileHints(res.Err, t.Root); h != "" {
+		text += "\n" + h
+	}
 	return session.ToolResult{Text: text}, nil
 }
 
@@ -484,7 +491,8 @@ type GrepTool struct {
 func (t *GrepTool) Name() string { return "grep" }
 
 func (t *GrepTool) Definition() map[string]any {
-	desc := "Search files for a pattern (Go regexp). path: a file, or a directory (recursive, text files only). " +
+	desc := "Search files for a pattern (Go regexp; a pattern that does not compile is matched as plain text). " +
+		"path: a file, or a directory (recursive, text files only). " +
 		"Returns matched lines with 1-based line numbers; use read_file with those lines for context."
 	if v := t.vfs(); len(v.Mounts) > 1 {
 		desc += " " + v.Describe()
@@ -533,46 +541,55 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 	}
 	// 有挂载表时按 VFS 解析（`project:style`、`/work/x.tex` 都认），
 	// 无前缀的相对路径 = 遍历全部挂载点（提示词承诺 grep 搜整个项目）。
+	// T293：`project:…` 这类显式挂载点以前只在有挂载表的会话里认，样式/修复
+	// 这类拿 Root+AltRoots 的会话会把它当成文件名拼到 Root 下，找不到就静默
+	// 回一句 "NO MATCHES"——模型从此以为原文里没有那些标记。
 	type target struct {
 		dir, label string
-		explicit   bool
+		shown      string // 命中行前缀里替代绝对路径的写法（空 = 用 "."）
 	}
 	var targets []target
-	if len(t.Mounts) > 0 {
-		v := &VFS{Mounts: t.Mounts}
-		if bare {
-			for _, m := range t.Mounts {
-				if m.Dir != "" {
-					targets = append(targets, target{dir: m.Dir, label: m.Name, explicit: true})
-				}
+	v := t.vfs()
+	if bare {
+		for _, m := range v.Mounts {
+			if m.Dir != "" {
+				targets = append(targets, target{dir: m.Dir, label: m.Name})
 			}
-		} else {
-			full, label, rerr := v.Resolve(rel, false)
-			if rerr != nil {
-				return session.ToolResult{Text: "grep error: " + rerr.Error()}, nil
-			}
-			targets = append(targets, target{dir: full, label: label, explicit: true})
 		}
+	} else if explicitMountOf(rel) != "" {
+		full, label, rerr := v.Resolve(rel, false)
+		if rerr != nil {
+			return session.ToolResult{Text: "grep error: " + rerr.Error()}, nil
+		}
+		targets = append(targets, target{dir: full, label: label, shown: label + ":" + stripMount(rel)})
 	} else {
-		targets = append(targets, target{dir: filepath.Join(t.Root, rel)})
-		for _, ar := range t.AltRoots {
-			if ar.Dir != "" {
-				full, rerr := resolveInside(ar.Dir, rel)
-				if rerr != nil {
-					continue
-				}
-				targets = append(targets, target{dir: full, label: ar.Label, explicit: true})
+		for _, m := range v.Mounts {
+			if m.Dir == "" {
+				continue
 			}
+			full, rerr := resolveInside(m.Dir, rel)
+			if rerr != nil {
+				continue
+			}
+			targets = append(targets, target{dir: full, label: m.Name})
 		}
 	}
 	var out strings.Builder
 	total := 0
 	multi := len(targets) > 1
+	existed := false
 	for _, tg := range targets {
 		full := tg.dir
 		if !fileExists(full) {
+			// T274：路径不存在时以前直接 continue，最后回一句 "NO MATCHES"——
+			// 模型会读出"这个模式不存在"，而实际是搜错了地方。单目标就如实报错，
+			// 并把最近一层真实存在的目录内容列出来。
+			if len(targets) == 1 {
+				return session.ToolResult{Text: "grep error: " + missingPathText(rel, full)}, nil
+			}
 			continue
 		}
+		existed = true
 		text, herr := runGrep(pattern, full, maxMatches-total)
 		if herr != nil {
 			if len(targets) == 1 {
@@ -593,7 +610,11 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 			}
 		}
 		text = strings.ReplaceAll(text, full+"/", "")
-		text = strings.ReplaceAll(text, full, ".")
+		shown := tg.shown
+		if shown == "" {
+			shown = "."
+		}
+		text = strings.ReplaceAll(text, full, shown)
 		if multi && tg.label != "" && !strings.HasPrefix(text, tg.label+"/") {
 			lines := strings.Split(text, "\n")
 			for i, ln := range lines {
@@ -613,30 +634,206 @@ func (t *GrepTool) Execute(argsJSON string) (session.ToolResult, error) {
 		}
 	}
 	if out.Len() == 0 {
+		// 一个目标都没落在地上：这不是"模式没命中"，是路径不存在（T293）。
+		if !existed && !bare {
+			full, _, rerr := v.Resolve(rel, false)
+			if rerr != nil || full == "" {
+				full = filepath.Join(t.Root, rel)
+			}
+			return session.ToolResult{Text: "grep error: " + missingPathText(rel, full)}, nil
+		}
 		return session.ToolResult{Text: "NO MATCHES: " + pattern}, nil
 	}
 	return session.ToolResult{Text: out.String()}, nil
 }
 
-// runGrep runs grep -rIn on a file or directory and returns the raw
-// output, or an error for real failures (bad regexp, ...). "No match"
-// is not an error.
+// bindViewTree 把一个只读视图逐条搬进沙箱：真文件直接绑，真目录建同名
+// 目录后递归，软链则把它的目标绑到视图里那个位置。视图里可能有连着好几层
+// 的软链（project 视图 source/images/<项目>/<图>），只处理第一层或把软链
+// 目录整棵绑上的话，里层仍然是死链（T295）。
+func bindViewTree(args *[]string, srcDir, dstDir string, depth int, bound map[string]bool) {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		src := filepath.Join(srcDir, e.Name())
+		dst := filepath.Join(dstDir, e.Name())
+		real := src
+		if e.Type()&os.ModeSymlink != 0 {
+			r, lerr := filepath.EvalSymlinks(src)
+			if lerr != nil {
+				continue
+			}
+			real = r
+		}
+		st, serr := os.Stat(real)
+		if serr != nil {
+			continue
+		}
+		if st.IsDir() {
+			if depth <= 0 {
+				if !bound[real] {
+					bound[real] = true
+					*args = append(*args, "--ro-bind", real, dst)
+				}
+				continue
+			}
+			*args = append(*args, "--dir", dst)
+			bindViewTree(args, real, dst, depth-1, bound)
+			continue
+		}
+		if bound[real] {
+			continue
+		}
+		bound[real] = true
+		*args = append(*args, "--ro-bind", real, dst)
+	}
+}
+
+// hasNestedLink 报告目录里（只往真目录递归 depth 层）有没有软链。
+func hasNestedLink(dir string, depth int) bool {
+	if depth <= 0 {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink != 0 {
+			return true
+		}
+		if e.IsDir() && hasNestedLink(filepath.Join(dir, e.Name()), depth-1) {
+			return true
+		}
+	}
+	return false
+}
+
+// missingPathText 说清"搜的路径不存在"，并列出最近一层真实存在的目录里有什么
+// ——模型据此就能把 `project:converted` 改成 `project:chapters` 之类的真路径。
+func missingPathText(rel, full string) string {
+	hint := ""
+	dir := filepath.Dir(full)
+	if entries, err := os.ReadDir(dir); err == nil {
+		names := make([]string, 0, 15)
+		for _, e := range entries {
+			n := e.Name()
+			if e.IsDir() {
+				n += "/"
+			}
+			names = append(names, n)
+			if len(names) >= 15 {
+				break
+			}
+		}
+		if len(names) > 0 {
+			hint = "（" + filepath.Base(dir) + "/ 下有：" + strings.Join(names, ", ") + "）"
+		}
+	}
+	return "路径不存在：" + rel + hint
+}
+
+// grepMaxFileBytes caps one scanned file: transcripts and PDFs are not worth
+// grepping and a 200 MB blob would stall the session.
+const grepMaxFileBytes = 8 << 20
+
+// compileGrep 编译模型给的模式：先当 **Go 正则**（工具描述一直承诺的就是这个
+// 口径，模型也按它写 `a|b`、`(?:…)`、`\d`），编译不过再退成**纯文本**匹配。
+//
+// T274：以前的实现把模式直接交给 grep(1) 当 BRE——`a|b` 里的 `|` 是字面量，
+// 于是整段中文标点/多选一模式一律静默 "NO MATCHES"；`begin\{question\}` 里的
+// `\{` 被 BRE 当成区间表达式，直接报 "grep: 不匹配的 {"。模型只能绕去 bash
+// 里用 `grep -E`。同一份转录里这三种失败都出现过。
+func compileGrep(pattern string) (*regexp.Regexp, string) {
+	if re, err := regexp.Compile(pattern); err == nil {
+		return re, ""
+	}
+	return nil, pattern
+}
+
+// runGrep searches a file or a directory tree (recursive, text files only) and
+// returns "path:line:text" lines, or "" when nothing matched. Matching is done
+// in-process so the documented Go-regexp contract actually holds (and so the
+// tool works on hosts without a `grep` binary).
 func runGrep(pattern, full string, limit int) (string, error) {
 	if limit < 1 {
 		limit = 1
 	}
-	cmd := exec.Command("grep", "-rIn", "-n", "-e", pattern, "--", full)
-	out, err := cmd.CombinedOutput()
-	text := string(out)
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return "", nil
-		}
-		return "", fmt.Errorf("%s", text)
+	if !fileExists(full) {
+		return "", fmt.Errorf("搜索路径不存在：%s", filepath.Base(full))
 	}
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	if len(lines) > limit {
-		text = strings.Join(lines[:limit], "\n") + fmt.Sprintf("\n...(%d more, 收窄 pattern)", len(lines)-limit)
+	re, literal := compileGrep(pattern)
+	match := func(line string) bool {
+		if re != nil {
+			return re.MatchString(line)
+		}
+		return strings.Contains(line, literal)
+	}
+	var lines []string
+	total := 0 // 命中总数（lines 只留前 limit 条，截断提示要的是真数字）
+	visit := func(p string, info os.FileInfo) error {
+		if info.Size() > grepMaxFileBytes {
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil // 读不到的（断链、权限）当没匹配
+		}
+		head := data
+		if len(head) > 8192 {
+			head = head[:8192]
+		}
+		if bytes.IndexByte(head, 0) >= 0 {
+			return nil // 二进制
+		}
+		for i, raw := range strings.Split(string(data), "\n") {
+			line := strings.TrimSuffix(raw, "\r")
+			if !match(line) {
+				continue
+			}
+			total++
+			if len(lines) < limit {
+				lines = append(lines, fmt.Sprintf("%s:%d:%s", p, i+1, line))
+			}
+		}
+		return nil
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return "", fmt.Errorf("搜索路径不存在：%s", filepath.Base(full))
+	}
+	if info.IsDir() {
+		err = filepath.WalkDir(full, func(p string, d fs.DirEntry, werr error) error {
+			if werr != nil {
+				return nil
+			}
+			if d.IsDir() {
+				switch d.Name() {
+				case ".git", ".trash", "node_modules":
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			fi, ferr := d.Info()
+			if ferr != nil {
+				return nil
+			}
+			return visit(p, fi)
+		})
+		if err != nil && !errors.Is(err, filepath.SkipAll) {
+			return "", err
+		}
+	} else if err := visit(full, info); err != nil {
+		return "", err
+	}
+	if total == 0 {
+		return "", nil
+	}
+	text := strings.Join(lines, "\n")
+	if more := total - len(lines); more > 0 {
+		text += fmt.Sprintf("\n...(%d more, 收窄 pattern)", more)
 	}
 	return text, nil
 }
@@ -730,7 +927,7 @@ func (t *WorkBashTool) Definition() map[string]any {
 		}
 		desc += fmt.Sprintf("/%s (%s), ", m.Name, kind)
 	}
-	desc += "and these are exactly the trees of the file tools — the suffix after the prefix is the same: work:chapters/a.tex = /work/chapters/a.tex, project:source/book.md = /project/source/book.md, source:book_part1.pdf = /source/book_part1.pdf. " +
+	desc += "and these are exactly the trees of the file tools — same prefix and suffix (<mount>:<path> = /<mount>/<path>); only the mounts above exist. " +
 		"Only /tmp is a scratch area (it persists across your bash calls). Useful for wc/sed/awk/ls/diff. timeout: seconds (default 30, max 300). Output is capped."
 	if t.Python != nil {
 		if d := t.Python.Describe(); d != "" {
@@ -831,6 +1028,11 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 				break
 			}
 		}
+		if !linked {
+			// 视图的第二层也可能是软链：project 视图的 source/ 是可真目录，
+			// 里面的 md/images/figures/tikz 全是链（T290 的窄视图）。
+			linked = hasNestedLink(mountDir, 2)
+		}
 		if m.Writable {
 			// A writable workspace is bound writable AS A WHOLE, links
 			// included. Branching on "contains a symlink" here used to turn
@@ -862,18 +1064,13 @@ func (t *WorkBashTool) sandboxArgs(command string, fast bool) []string {
 			// A read-only VIEW directory (symlinks to files and/or
 			// directories: the original-PDF view, the project view): bind
 			// every target individually, never following links outside the
-			// mounts.
+			// mounts. Nested links are bound too — binding the view's
+			// source/ wholesale left its md/images/figures/tikz links
+			// dangling inside the sandbox, so a session's `ls
+			// /project/source/tikz` came back empty and it concluded the
+			// book had no vector figures (T295).
 			args = append(args, "--dir", dst)
-			for _, e := range entries {
-				src := filepath.Join(mountDir, e.Name())
-				if target, lerr := filepath.EvalSymlinks(src); lerr == nil {
-					src = target
-				}
-				if _, serr := os.Stat(src); serr != nil {
-					continue
-				}
-				args = append(args, "--ro-bind", src, filepath.Join(dst, e.Name()))
-			}
+			bindViewTree(&args, mountDir, dst, 6, boundTarget)
 		} else {
 			args = append(args, "--dir", dst, "--ro-bind", mountDir, dst)
 		}

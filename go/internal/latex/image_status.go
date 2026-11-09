@@ -1,5 +1,7 @@
 package latex
 
+import "mineru-tools/internal/reviewpage"
+
 // P64：图片阶段的"这张图算不算已经完事"只有一个口径——看 progress_items 里的
 // status。以前各处各自判断（有的看产物文件在不在、有的看是否 raster），于是
 // 进度行、分组视图、单图页能给出三种答案。这里收成一处，谁要判断都调它。
@@ -21,23 +23,11 @@ const (
 	ImageStatusError      = "error"
 )
 
-// imageStatusSettled 表示这张图这一轮不会再有动作（成功或退回原图）。
-func imageStatusSettled(status string) bool {
-	switch status {
-	case ImageStatusDone, ImageStatusFallback:
-		return true
-	}
-	return false
-}
+// imageStatusSettled 表示这张图这一轮不会再有动作（成功或退回原图）。判断收在
+// internal/reviewpage：核对页（会话预览页按磁盘现状现渲染）用的是同一份口径，
+// 页面与进度行不能说两套话。
+func imageStatusSettled(status string) bool { return reviewpage.StatusSettled(status) }
 
 // imageStatusQuality 把"收尾了"再分成三档给界面用：ok（真画出来了）、degraded
 // （退回原图）、pending（还没完事，含空状态）。
-func imageStatusQuality(status string) string {
-	switch status {
-	case ImageStatusDone:
-		return "ok"
-	case ImageStatusFallback:
-		return "degraded"
-	}
-	return "pending"
-}
+func imageStatusQuality(status string) string { return reviewpage.StatusQuality(status) }

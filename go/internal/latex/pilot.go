@@ -47,10 +47,20 @@ type pilotSpec struct {
 	} `json:"pdf_pages"`
 }
 
-func (r *Runner) stylePilotPhase(proj string) {
+// stylePilotPhase 依次跑「选材 → 试转 → 样式修订」三步，把样式包再磨一遍。
+//
+// T288：**会话级失败必须让整轮停下**。试点是在样式包之上做的一轮修订，它没跑
+// 完就等于拿没修订的样式包往下走——接着划分、逐章转换，等发现不对时下游全是
+// 废产物，只能整个删掉重跑。真实事故：选材会话被上游流式接口掐断（
+// `SESSION_API_ERROR: stream error ... Upstream request failed`），日志只留一句
+// 「选材失败（跳过试点）」，运行照旧进了划分与转换。
+//
+// 内容级失败（选材结果不合法、样例拼不出来）仍旧只警告跳过试点：那不是环境
+// 问题，跳过试点并不影响后续阶段拿到一份可用的样式包。
+func (r *Runner) stylePilotPhase(proj string) error {
 	marker := pilotMarkerPath(proj)
 	if fileExists(marker) {
-		return
+		return nil
 	}
 	writeMarker := func(note string) {
 		_ = os.WriteFile(marker, []byte(note+"\n"), 0o644)
@@ -58,7 +68,7 @@ func (r *Runner) stylePilotPhase(proj string) {
 	sourceDir := filepath.Join(proj, "source")
 	mds, _ := filepath.Glob(filepath.Join(sourceDir, "*.md"))
 	if len(mds) == 0 {
-		return
+		return nil
 	}
 	sort.Strings(mds)
 	mainMD := mds[0]
@@ -73,32 +83,108 @@ func (r *Runner) stylePilotPhase(proj string) {
 
 	spec, err := r.pilotSelectSession(proj, mainMD)
 	if err != nil {
+		if !pilotContentSkip(err) {
+			return fmt.Errorf("样式试点选材会话中止（接口/会话级错误，整轮停在这里，样式包与下游都没动）: %w", err)
+		}
 		r.log.LogWarning(1, "[pilot] 选材失败（跳过试点）:", err)
 		writeMarker("select failed: " + err.Error())
-		return
+		return nil
 	}
 	sample, pagesDesc, err := r.buildPilotSample(proj, spec)
 	if err != nil {
 		r.log.LogWarning(1, "[pilot] 语料组装失败（跳过试点）:", err)
 		writeMarker("sample failed: " + err.Error())
-		return
+		return nil
 	}
 	if err := r.pilotTrialSession(proj, sample, pagesDesc); err != nil {
+		if !pilotContentSkip(err) {
+			return fmt.Errorf("样式试点试转会话中止（接口/会话级错误，整轮停在这里）: %w", err)
+		}
 		r.log.LogWarning(1, "[pilot] 试转失败（跳过样式修订）:", err)
 		writeMarker("trial failed: " + err.Error())
-		return
+		return nil
 	}
 	if err := r.pilotReviseSession(proj, pagesDesc); err != nil {
+		if !pilotContentSkip(err) {
+			return fmt.Errorf("样式试点修订会话中止（接口/会话级错误，整轮停在这里）: %w", err)
+		}
 		r.log.LogWarning(1, "[pilot] 样式修订失败（沿用样式阶段提交的样式包）:", err)
 		writeMarker("revise failed: " + err.Error())
-		return
+		return nil
 	}
 	writeMarker("done")
 	r.log.Log(1, "[pilot] 样式试点完成，最终样式包已就位")
+	return nil
+}
+
+// pilotContentSkip 区分"试点这一步内容上没做成"（可以只跳过试点）与"会话/接口
+// 本身断了"（必须停）。接口不通、余额不足、会话错误都不是试点本身的问题——
+// 让运行带着没修订的样式包往下走，代价是全下游白跑（T288）。
+func pilotContentSkip(err error) bool {
+	if err == nil {
+		return true
+	}
+	msg := err.Error()
+	return !isSessionAPIError(msg) && !isSessionFatalError(msg)
 }
 
 // pilotDirOf 是试点的工作根（work/style/pilot/）。
 func pilotDirOf(proj string) string { return filepath.Join(proj, "work", "style", "pilot") }
+
+// stylePackageDone 判断样式阶段是不是已经完成过：style/ 里有一份完整的样式
+// 包，而且试点已经开始（spec.json 或 pilot.done 在）——试点只在样式包通过
+// 编译校验之后才启动，所以这两样同时在就说明样式阶段早就收过账（T302）。
+func (r *Runner) stylePackageDone(proj string) bool {
+	styleDir := filepath.Join(proj, "style")
+	if classNameOfFile(styleDir) == "" ||
+		!fileExists(filepath.Join(styleDir, "manual.md")) ||
+		!fileExists(filepath.Join(styleDir, "example.tex")) {
+		return false
+	}
+	pilot := pilotDirOf(proj)
+	return fileExists(filepath.Join(pilot, "spec.json")) || fileExists(pilotMarkerPath(proj))
+}
+
+// pilotTrialPrevRun 判断上一场试转是否已经交出可用产物：转录里收过 submit，
+// 工作区的 sample.tex 还在并且现在仍能编译通过。内容级失败（没编译过）不算，
+// 那种要重新试转。
+func (r *Runner) pilotTrialPrevRun(proj, work string) bool {
+	trPath := filepath.Join(proj, "work", "sessions", "style_pilot_trial.jsonl")
+	if _, st, err := session.LoadTranscriptStats(trPath); err != nil || st.SubmitName == "" {
+		return false
+	}
+	if !fileExists(filepath.Join(work, "sample.tex")) {
+		return false
+	}
+	return r.comp.Compile(work, "sample.tex").OK
+}
+
+// pilotSpecFromPrevRun 判断选材是否已经做过：转录里已有 submit 收账、且
+// spec.json 里的条目仍然齐全时返回上次的结果，调用方据此跳过选材会话。
+//
+// 判据只认磁盘事实（转录有 submit + spec.json 合法），不看进程内存——重跑
+// 是另一个进程，工具实例里什么都没有（T296）。
+func (r *Runner) pilotSpecFromPrevRun(proj, trPath string) (*pilotSpec, bool) {
+	specPath := filepath.Join(pilotDirOf(proj), "spec.json")
+	if !fileExists(specPath) || !fileExists(trPath) {
+		return nil, false
+	}
+	_, st, err := session.LoadTranscriptStats(trPath)
+	if err != nil {
+		return nil, false
+	}
+	submit := &SubmitDoneTool{Label: "the pilot selection"}
+	if !replaySubmit(r.log, 1, "pilot-select", submit, st) {
+		return nil, false
+	}
+	tool := NewPilotSpecTool(specPath, filepath.Join(proj, "source"))
+	spec := specFromTool(tool.loadLocked())
+	if len(spec.MDRanges) == 0 || len(spec.PDFPages) == 0 {
+		return nil, false
+	}
+	r.log.Log(1, "[pilot] 上次已经选好材（转录已提交、spec.json 就绪）——跳过选材会话，直接沿用")
+	return spec, true
+}
 
 // pilotSelectSession 跑选材会话：产出 pilot/spec.json（write_file 写入，
 // submit 终态；代码复核文件存在，缺失打回一次）。试点会话短，中断后不
@@ -127,10 +213,17 @@ func (r *Runner) pilotSelectSession(proj, mainMD string) (*pilotSpec, error) {
 	}
 	tools = append(tools, r.sourcePageTools()...)
 
+	trPath := filepath.Join(proj, "work", "sessions", "style_pilot_select.jsonl")
+	// 选材是"读 md + 读原书页挑段落"，与样式包、模型都无关：上次已经选好
+	// （转录里 submit 收账、spec.json 条目仍合法）就沿用，别再花四十分钟把
+	// 同样的段落重挑一遍——重跑试点/样式只为换交上去的 cls 时才需要（T296）。
+	if spec, ok := r.pilotSpecFromPrevRun(proj, trPath); ok {
+		return spec, nil
+	}
+
 	sess := session.NewSession(client, modelCfg, tuning,
 		renderPrompt(prompts.Must(prompts.StylePilotSelectSystem), tuning, r.outputLang()),
 		tools, r.log, 1, "pilot-select")
-	trPath := filepath.Join(proj, "work", "sessions", "style_pilot_select.jsonl")
 	archivePrevTranscript(trPath)
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
@@ -223,7 +316,38 @@ func (r *Runner) buildPilotSample(proj string, spec *pilotSpec) (string, string,
 }
 
 // pilotImageRef 匹配 sample.md 里的图片引用（](images/…)）。
-var pilotImageRef = regexp.MustCompile(`\]\((images/[^)\s]+)\)`)
+// 路径里允许空格：项目名/分片目录带空格时，图片路径就是
+// `images/<项目名> /<hash>.jpg`，按空白截断只会取到半个目录名。
+var pilotImageRef = regexp.MustCompile(`\]\((images/[^)]+)\)`)
+
+// stagePilotImages 把 sample.md 引用的插图按相对路径复制进试转工作区，
+// 返回没能复制过去的相对路径（调用方据此告警）。重复引用只复制一次。
+func stagePilotImages(proj, samplePath, work string) []string {
+	data, err := os.ReadFile(samplePath)
+	if err != nil {
+		return []string{"（读不到 " + filepath.Base(samplePath) + "）"}
+	}
+	var missing []string
+	seen := map[string]bool{}
+	for _, m := range pilotImageRef.FindAllStringSubmatch(string(data), -1) {
+		rel := filepath.FromSlash(strings.TrimSpace(m[1]))
+		if rel == "" || seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		dst := filepath.Join(work, rel)
+		// copyFile 不建父目录（图片在 images/<目录>/ 下面，试转工作区里还没有），
+		// 不先建出来就只会在 ReadFile/WriteFile 上失败。
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			missing = append(missing, rel)
+			continue
+		}
+		if err := copyFile(filepath.Join(proj, "source", rel), dst); err != nil {
+			missing = append(missing, rel)
+		}
+	}
+	return missing
+}
 
 // pilotTrialSession 跑试转会话：pilot/work/ 里铺好 cls+手册+示例+
 // sample.md+引用的插图，转成 sample.tex 并编译、对照原书页核对到贴合。
@@ -236,6 +360,13 @@ func (r *Runner) pilotTrialSession(proj, samplePath, pagesDesc string) error {
 	}
 	pilotDir := pilotDirOf(proj)
 	work := filepath.Join(pilotDir, "work")
+	// 上次试转已经收账、sample.tex 也还编译通过：沿用工作区与转录，不要清空
+	// 重来（T300——以前每次 RemoveAll(work) 并归档转录，续跑等于白烧一整场
+	// 试转，一小时起步）。
+	if r.pilotTrialPrevRun(proj, work) {
+		r.log.Log(1, "[pilot] 试转上次已提交且 sample.tex 编译通过——沿用，不重跑")
+		return nil
+	}
 	_ = os.RemoveAll(work)
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		return err
@@ -244,12 +375,11 @@ func (r *Runner) pilotTrialSession(proj, samplePath, pagesDesc string) error {
 	copyFile(filepath.Join(styleDir, "manual.md"), filepath.Join(work, "manual.md"))
 	copyFile(filepath.Join(styleDir, "example.tex"), filepath.Join(work, "example.tex"))
 	copyFile(samplePath, filepath.Join(work, "sample.md"))
-	// 铺插图：sample.md 引用的图片按相对路径复制进试转工作区。
-	if data, err := os.ReadFile(samplePath); err == nil {
-		for _, m := range pilotImageRef.FindAllStringSubmatch(string(data), -1) {
-			rel := filepath.FromSlash(m[1])
-			copyFile(filepath.Join(proj, "source", rel), filepath.Join(work, rel))
-		}
+	// 铺插图：sample.md 引用的图片按相对路径复制进试转工作区。取不到的
+	// 逐条告警——以前 copyFile 的错误被直接丢掉，路径里带空格时整批图片
+	// 一张都没铺进去，会话只能拿占位框顶替，还在报告里写"没有原始位图"。
+	for _, miss := range stagePilotImages(proj, samplePath, work) {
+		r.log.LogWarning(0, "[pilot] 试转工作区缺这张插图的副本:", miss)
 	}
 
 	trialKey := r.cfg.Latex.PilotTrialModel // T108：空 = 沿用转换模型
@@ -334,7 +464,9 @@ func (r *Runner) pilotReviseSession(proj, pagesDesc string) error {
 	client := r.clientFor(reviseKey)
 	modelCfg := r.modelOf(reviseKey)
 	tuning := r.cfg.LatexSession("style")
-	goal := NewGoalTool(filepath.Join(workDir, "plan.md"))
+	// 修订会话用自己的清单文件：与样式会话共用 plan.md 时，修订留下的待办会
+	// 把样式会话的 submit 门禁卡死（样式会话重放提交被 REJECTED，T299）。
+	goal := NewGoalTool(filepath.Join(workDir, "plan-revise.md"))
 	submit := &SubmitStyleTool{Workspace: workDir, Gate: func() string { return goalGate(goal) }}
 	bashTmp, cleanBash := r.sessionBashTemp(proj, "bash_pilot_revise")
 	defer cleanBash()
@@ -343,7 +475,24 @@ func (r *Runner) pilotReviseSession(proj, pagesDesc string) error {
 
 	sess := session.NewSession(client, modelCfg, tuning, r.styleSystemPrompt(), tools, r.log, 1, "pilot-revise")
 	trPath := filepath.Join(proj, "work", "sessions", "style_pilot_revise.jsonl")
-	archivePrevTranscript(trPath)
+	// 上次修订已经收账：提交过的样式包就是最终版，不再开一场（T300）。
+	if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil && st.SubmitName != "" {
+		r.log.Log(1, "[pilot] 修订上次已提交——沿用最终样式包，不重跑")
+		return nil
+	}
+	// 上次修订被掐断（还没提交）：接着那条转录续跑，别归档重开——重开等于让它
+	// 从零再读一遍试转产物，一小时的工作白扔（T300）。
+	reviseResumed := false
+	if msgs, lerr := loadSessionContext(trPath); lerr == nil && len(msgs) > 0 {
+		sess.SetMessages(msgs)
+		reviseResumed = true
+		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+			resumeLog(r.log, 1, "pilot-revise", filepath.Base(trPath), msgs, st)
+		}
+	} else {
+		archivePrevTranscript(trPath)
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -352,7 +501,18 @@ func (r *Runner) pilotReviseSession(proj, pagesDesc string) error {
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 
-	userText := prompts.Render(prompts.StylePilotReviseUser, map[string]string{"PAGES": pagesDesc})
+	// 提示词里点名真类名：写 `class.cls` 这种占位符时，会话会先按字面去读
+	// 一个不存在的文件（现场多烧一次调用，T302）。
+	reviseCls := classNameOfFile(styleDir)
+	if reviseCls == "" {
+		reviseCls = "class"
+	}
+	userText := prompts.Render(prompts.StylePilotReviseUser, map[string]string{"CLS": reviseCls, "PAGES": pagesDesc})
+	if reviseResumed {
+		// 续跑：历史里已经有任务文本，原样续行（T29 口径），不重述要求；
+		// attempt>0 的打回文本照常在下一轮覆盖它。
+		userText = ""
+	}
 	var compileErr string
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {

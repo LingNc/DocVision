@@ -127,7 +127,7 @@ var registry = []Template{
 	{
 		Name: FigureSystem, File: "latex_figure.system.md",
 		Vars:        []string{"MAX_ROUNDS", "OUTPUT_LANG"},
-		MustMention: []string{"compile", "edit_file", "image_context", "read_file", "submit", "view_image", "view_pdf", "write_file"},
+		MustMention: []string{"compile", "compare_figure", "edit_file", "image_context", "read_file", "submit", "view_image", "view_pdf", "write_file"},
 	},
 	{
 		Name: StyleSystem, File: "latex_style.system.md",
@@ -156,11 +156,11 @@ var registry = []Template{
 	},
 	{
 		Name: StyleFixAssessSystem, File: "latex_stylefix_assess.system.md",
-		MustMention: []string{"blocks", "grep", "problems", "read_file", "submit_blocks"},
+		MustMention: []string{"bash", "blocks", "grep", "problems", "read_file", "submit_blocks"},
 	},
 	{
 		Name: StyleFixBlockSystem, File: "latex_stylefix_block.system.md",
-		MustMention: []string{"compile", "edit_file", "goal", "problems", "read_file", "submit", "write_file"},
+		MustMention: []string{"bash", "compile", "edit_file", "goal", "problems", "read_file", "submit", "write_file"},
 	},
 	{
 		Name: StyleFixSystem, File: "latex_stylefix.system.md",
@@ -235,7 +235,7 @@ var registry = []Template{
 	},
 	{
 		Name: StylePilotReviseUser, File: "latex_style_pilot_revise.user.md",
-		Vars:        []string{"PAGES"},
+		Vars:        []string{"CLS", "PAGES"},
 		MustMention: []string{"submit_style"},
 	},
 	{

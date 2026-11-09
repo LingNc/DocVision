@@ -2,6 +2,8 @@ package latex
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,4 +61,94 @@ func (p *motifProgress) finish() {
 	p.mu.Unlock()
 	p.row.render()
 	p.row.Close()
+}
+
+// imageStatusCounts 是**整本书**的图片状态盘点：阶段收尾要报"退回原图共 N 张"。
+// 进度行本身只报这一轮的队列，别把全书口径挂到实时行上——它每帧都在刷，太长。
+//
+// 口径分两层（T262）：**作业项**是真正要跑的东西——非跟随的矢量代表图、文字图、
+// 位图；**跟随项**是 dedupe 判为同一内容、复用代表图成品的那批，它们不单独跑，
+// 算进"未处理"会让人以为还有几百张没动。文字图/位图完成也不是"画好"，单独一栏。
+type imageStatusCounts struct {
+	Total      int // 全部引用
+	Work       int // 作业项：代表图 + 文字 + 位图
+	VectorOK   int // 矢量真画出来的
+	TextRaster int // 文字/位图收尾（取文本或保留原图）
+	Fallback   int // 以原图交付（TikZ 没过 / 会话错误）
+	Error      int // 真失败（下一轮会重试）
+	Pending    int // 作业项里还没跑到的
+	Followers  int // 跟随代表图的（不单独跑）
+}
+
+// unfinishedImageKeys 返回"这一轮压根没跑到"的图（T289）：既没落到 done/
+// fallback，也没被标成 error，也不是被吸收的跨页续片或跟随代表图的副本。
+// 用它守住"images 阶段没跑完就别往下走"——以前逐图作图被接口掐断后这个阶段
+// 照样记 done，样式/划分/转换全建在一本缺图的册子上，等发现时下游已经跑了一大截。
+//
+// 注意 `error`（这张图的请求被判不可重试）不算"没跑到"：它和 fallback 一样
+// 会在 rebuild 时保留原图，book 里不丢内容。若把它也算进来，一张永远画不出来的
+// 图就能把整本书永久卡住。
+func unfinishedImageKeys(prog map[string]*imageProgress) []string {
+	var keys []string
+	for k, p := range prog {
+		if p == nil || p.Absorbed || imageStatusSettled(p.Status) || p.Status == ImageStatusError {
+			continue
+		}
+		if strings.TrimSpace(p.EquivalentTo) != "" {
+			continue // 跟随者：成品由代表图物化，自己不需要单独跑
+		}
+		if p.Class != "" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// errorImageKeys 返回"跑了但没成品"的图（原图会留在书里）。只用于收尾提示，
+// 不挡后续阶段——见 unfinishedImageKeys 的说明。
+func errorImageKeys(prog map[string]*imageProgress) []string {
+	var keys []string
+	for k, p := range prog {
+		if p == nil || p.Absorbed || p.Status != ImageStatusError {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func countImageStatuses(prog map[string]*imageProgress) imageStatusCounts {
+	var c imageStatusCounts
+	for _, p := range prog {
+		if p == nil {
+			continue
+		}
+		c.Total++
+		// 跟随项（dedupe 等价于另一张代表图）不占作业位：它们的成品随代表图
+		// 重新物化，算"未处理"会让全书口径永远差着几百张。
+		if p.Class == ClassVector && strings.TrimSpace(p.EquivalentTo) != "" {
+			c.Followers++
+			continue
+		}
+		c.Work++
+		if imageStatusSettled(p.Status) {
+			switch {
+			case p.Status == ImageStatusDone && p.Class == ClassVector:
+				c.VectorOK++
+			case p.Status == ImageStatusDone:
+				c.TextRaster++
+			default:
+				c.Fallback++
+			}
+			continue
+		}
+		if p.Status == ImageStatusError {
+			c.Error++
+			continue
+		}
+		c.Pending++
+	}
+	return c
 }

@@ -20,7 +20,7 @@ PDF 文件 -> 分割 -> MinerU API 解析 -> 整理文件 -> AI 图片转文本 
 
 另有两条**独立运行**的命令，不属于 workflow 步骤（`workflow --step` 不接受这两个名字）：
 
-- **latex** - LaTeX 输出（图片矢量化 / 全书转换，见 [LaTeX 输出](docs/latex.md)；自带前置流程与日志分析）
+- **latex** - LaTeX 输出（图片矢量化 / 全书转换，矢量图会话可选调用 `compare_figure` 获取图像 overlay 与对齐证据；不改变提交流程，见 [LaTeX 输出](docs/latex.md)；自带前置流程与日志分析）
 - **verify** - AI 核对图片与嵌入内容（默认关闭，`verify.enabled`；只能显式运行 `docvision verify`）
 
 ## 环境要求
@@ -81,7 +81,7 @@ models:
     model: "your-vision-model"
 ```
 
-配置写在 `config_version: 24`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
+配置写在 `config_version: 25`（版本不符会提示更新配置文件）；**每一项配置的含义、默认值与相关行为见 [配置参考](docs/config.md)**，完整模板见 `config.example.yaml`。
 
 档位1图片阶段先分类，再由独立工具会话对**全部图片**做整组核验（逐字节相同的重复图只送一份进会话、其余自动跟随代表图；本地相似度只作参考写入 manifest/advisory JSON，会话可用 `read_file`/`grep`/`bash`+Python/`view_image`（逐张原图，另可 `compare_images` 把 2–4 张并排对比，不作为证据），用 `motif_groups` 增量维护分组并显式 submit；确认后仅全员 vector 的组共享单份 TeX 图元，不同题号保持独立）。模型平台能力写在 `models.<条目>.context_limit`/`max_images`/`max_tokens`，与会话侧配置取较小值。档位1 的大型或难以可靠转换章节可递归细分；会话预览按章节显示多级转换树与配对 checker，并标出排队、等待子章节和核验状态，checker 模型调整后可续跑未完成核验。完整流程见 [LaTeX 输出](docs/latex.md)。模型选项与续跑细节见 [配置参考](docs/config.md)。
 

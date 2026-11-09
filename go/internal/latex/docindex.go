@@ -536,7 +536,7 @@ func markerFallbackText(m mdMarker) string {
 // table (reported by list_source_pages). markerDir is the directory of
 // the PROCESSED markdown (the images phase output) whose DOCVISION notes
 // are joined onto the image blocks; "" disables the join.
-func buildDocIndex(mineruOutput string, sourceMDs []string, markerDir, outPath string) (*DocIndex, *pageIndex, error) {
+func buildDocIndex(mineruOutput, splitDir string, sourceMDs []string, markerDir, outPath string) (*DocIndex, *pageIndex, error) {
 	idx := &DocIndex{Sizes: map[string][2]float64{}}
 	pages := &pageIndex{}
 	markers := parseMdMarkers(markerDir, sourceMDs)
@@ -554,16 +554,16 @@ func buildDocIndex(mineruOutput string, sourceMDs []string, markerDir, outPath s
 			}
 			// Align with findOriginPDFs: append the part's origin PDF to
 			// the global page table at the current offset.
-			pdfs := findOriginPDFs(mineruOutput, subject)
+			pdfs := findOriginPDFs(mineruOutput, splitDir, subject)
 			var pdf string
-			for _, p := range pdfs {
-				if filepath.Base(filepath.Dir(p)) == dir {
-					pdf = p
+			for _, o := range pdfs {
+				if o.Part == dir {
+					pdf = o.PDF
 					break
 				}
 			}
 			if pdf != "" && count > 0 {
-				pages.srcs = append(pages.srcs, pageSrc{pdf: pdf, first: pages.total + 1, count: count})
+				pages.srcs = append(pages.srcs, pageSrc{pdf: pdf, part: dir, first: pages.total + 1, count: count})
 				pages.total += count
 			}
 			offset := idx.total

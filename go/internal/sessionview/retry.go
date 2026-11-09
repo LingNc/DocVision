@@ -531,7 +531,24 @@ type dropRequest struct {
 	Path    string `json:"path"`
 }
 
-var transcriptNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.jsonl$`)
+// validTranscriptName 只认"一个 *.jsonl 文件名"：不能带路径分隔符、不能以点
+// 开头、不能有控制字符。名字里**允许中文**（T287）——作图转录叫
+// `vector_<项目名>__<哈希>__<描述>.jsonl`，以前用的是 ASCII 白名单正则，
+// 中文项目里"重画这张图"和"删除记录"一律被判成"不是转录文件"。
+func validTranscriptName(name string) bool {
+	if name == "" || name == ".jsonl" || name != filepath.Base(name) {
+		return false
+	}
+	if strings.ContainsAny(name, `/\\`) || strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".jsonl") {
+		return false
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
 
 // transcriptUnderWork 解析请求里的转录路径。两种写法：
 //
@@ -641,7 +658,7 @@ func transcriptUnderWork(projDir, raw string) (string, error) {
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return "", fmt.Errorf("转录不在这个项目的工作区里")
 		}
-		if !transcriptNameRe.MatchString(filepath.Base(full)) {
+		if !validTranscriptName(filepath.Base(full)) {
 			return "", fmt.Errorf("只能改转录文件（*.jsonl）")
 		}
 		st, err := os.Stat(full)
@@ -651,7 +668,7 @@ func transcriptUnderWork(projDir, raw string) (string, error) {
 		return full, nil
 	}
 	name := filepath.Base(raw)
-	if name != raw || !transcriptNameRe.MatchString(name) {
+	if name != raw || !validTranscriptName(name) {
 		return "", fmt.Errorf("只能改转录文件（*.jsonl）")
 	}
 	full := filepath.Join(work, "sessions", name)
@@ -765,7 +782,7 @@ func (v *viewerServer) serveVectorRetry(w http.ResponseWriter, req retryRequest)
 		return
 	}
 	name := filepath.Base(strings.TrimSpace(req.Path))
-	if !strings.HasPrefix(name, "vector_") || !transcriptNameRe.MatchString(name) {
+	if !strings.HasPrefix(name, "vector_") || !validTranscriptName(name) {
 		http.Error(w, "只能重画某条作图会话（source/sessions/vector_*.jsonl）", http.StatusBadRequest)
 		return
 	}

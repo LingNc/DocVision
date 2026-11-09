@@ -1,12 +1,12 @@
 package main
 
 import (
-	"time"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -144,17 +144,24 @@ Tool image output from <工具> (call <id>) (for your visual review):，页面�
 			}
 
 			extras := sessionsExtras(cfg)
-			sessions, err := sessionview.ScanWith(root, extras)
-			if err != nil {
-				return err
+			costOnly, _ := cmd.Flags().GetBool("cost")
+			// T272：--serve 不再在启动时先扫一遍——预览服务自己维护长驻
+			// scanner（带磁盘索引缓存），这里再扫等于把最贵的那一步干两遍。
+			var sessions []sessionview.SessionInfo
+			if !serve || list || costOnly {
+				var err error
+				sessions, err = sessionview.ScanWith(root, extras)
+				if err != nil {
+					return err
+				}
+				sessionview.ApplyPrices(sessions, prices)
 			}
-			sessionview.ApplyPrices(sessions, prices)
 
 			if list {
 				printSessions(sessions, root, dirSource, unit)
 				return nil
 			}
-			if costOnly, _ := cmd.Flags().GetBool("cost"); costOnly {
+			if costOnly {
 				printCostReport(sessions, len(prices) > 0)
 				return nil
 			}

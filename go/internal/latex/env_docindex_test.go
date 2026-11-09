@@ -79,7 +79,7 @@ func buildMarkerTestIndex(t *testing.T) (*DocIndex, string) {
 	}
 
 	out := filepath.Join(root, "doc_index", "doc_index.json")
-	idx, _, err := buildDocIndex(filepath.Join(root, "mineru_output"), []string{mdPath}, mdDir, out)
+	idx, _, err := buildDocIndex(filepath.Join(root, "mineru_output"), "", []string{mdPath}, mdDir, out)
 	if err != nil {
 		t.Fatalf("buildDocIndex 失败: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestBuildDocIndexWithoutMarkerDir(t *testing.T) {
 	idx, out := buildMarkerTestIndex(t)
 	root := filepath.Dir(filepath.Dir(out)) // <root>/doc_index -> <root>
 	out2 := filepath.Join(root, "doc_index", "no_notes.json")
-	idx2, _, err := buildDocIndex(filepath.Join(root, "mineru_output"),
+	idx2, _, err := buildDocIndex(filepath.Join(root, "mineru_output"), "",
 		[]string{filepath.Join(root, "source", "book.md")}, "", out2)
 	if err != nil {
 		t.Fatalf("无注释目录时 buildDocIndex 失败: %v", err)

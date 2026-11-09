@@ -14,8 +14,11 @@ func TestPhaseProgressCountsThisRunOnly(t *testing.T) {
 		{classifyProgressText(0, 0, 0, 0), "[classify 0/0] 0.00% (failed: 0, running: 0)"},
 		{processProgressText(0, 396, 0, 0, 0, 0, 10), "[process 0/396] 0.00% (done: 0, errors: 0, fallback: 0, raster: 0, running: 10)"},
 		{processProgressText(396, 396, 390, 3, 3, 12, 0), "[process 396/396] 100.00% (done: 390, errors: 3, fallback: 3, raster: 12, running: 0)"},
-		// ok 为负（failed+warned 超过 done 的瞬时状态）时钳到 0，且不崩。
+		// ok 为负（瞬时状态）时钳到 0，且不崩。
 		{processProgressText(1, 10, -1, 1, 1, 0, 2), "[process 1/10] 10.00% (done: 0, errors: 1, fallback: 1, raster: 0, running: 2)"},
+		// T262：接口/会话错误后保留原图算 fallback（errors 只数真失败），
+		// 18 张全撞 404 时就是 errors 0、fallback 18。
+		{processProgressText(18, 23, 0, 0, 18, 0, 0), "[process 18/23] 78.26% (done: 0, errors: 0, fallback: 18, raster: 0, running: 0)"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

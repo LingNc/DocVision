@@ -307,6 +307,22 @@ func (r *Runner) prepareRetries(proj string) []string {
 // prepareCheckerRetries 消费队列里的"重新核对"请求：产物已经在的才接，缺产物
 // 的只警告（那一章还没转完，重核没有对象）。
 func (r *Runner) prepareCheckerRetries(proj string) []string {
+	// T303：先把"产物已通过、又不是页面提的"那几条直接作废——它们排着队，等这一章
+	// 的锁一松就派发出去，于是刚通过的章又白开一条核对会话（实测三条、四十来分钟）。
+	for _, f := range retryq.Pending(proj) {
+		if retryRoleOf(f.Request) != "checker" || !autoRetryRequest(f.Request.Source) {
+			continue
+		}
+		base := strings.TrimSuffix(filepath.Base(f.Chapter), filepath.Ext(f.Chapter))
+		if base == "" || strings.Contains(base, "..") || !chapterPassedAndUnchanged(proj, base) {
+			continue
+		}
+		if err := retryq.Consume(f.Path); err != nil {
+			r.log.LogWarning(0, "[checker]", base, "作废已通过的自动重核请求失败（下次会再处理一次）:", err)
+			continue
+		}
+		r.log.LogInfo(0, "[checker]", base, "产物已经核对通过、之后没改过：排队里的自动重核请求作废")
+	}
 	bases := r.consumeRetryRequests(proj, "checker")
 	if len(bases) == 0 {
 		return nil
@@ -368,6 +384,53 @@ func selectOnlyChapters(chapters []string, only map[string]bool) []string {
 
 // chapterCompiledPDF 找这一章上一次编译出的 PDF（转换工作区里 .gate/compile.json
 // 记的那个）：重新核对时把它挂进只读视图，核对才有"产物页"可看。
+// compileChapterForCheck 用**当前已提交的产物**编一份 PDF，给核对会话当产物页
+// （T277）。它在临时 scratch 里编（类文件 + 本章产物 + 项目 images/figures），
+// 编出来的 PDF 拷到 `work/views/pdf/<章>.pdf` 这个稳定位置——视图重建、工作区被
+// 清、产物被挪走都不会让这个文件消失，核对会话也就不会再拿着一个断链反复重试。
+//
+// 失败只返回错误，调用方退回"没有产物页"的核对（照样能对着原书页看内容）。
+func (r *Runner) compileChapterForCheck(proj, base string) (string, error) {
+	texPath, partsPath := chapterProductsFor(proj, base)
+	if !fileExists(texPath) {
+		return "", fmt.Errorf("这一章还没有提交产物")
+	}
+	if r.comp == nil {
+		return "", fmt.Errorf("编译器不可用")
+	}
+	clsName := classNameOfFile(filepath.Join(proj, "style"))
+	if clsName == "" {
+		return "", fmt.Errorf("没有样式类文件")
+	}
+	scratch, cleanup, err := r.chapterScratch(proj, clsName, base, "check-pdf")
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	// 产物按它自己的相对布局落进 scratch 根：`<章>.tex` 就在根上，`<章>/…`
+	// 里的 `\input{<章>/x.tex}` 与 `\input{parts/x.tex}` 都按原样解析。
+	if err := copyFile(texPath, filepath.Join(scratch, base+".tex")); err != nil {
+		return "", err
+	}
+	if st, serr := os.Stat(partsPath); serr == nil && st.IsDir() {
+		if err := copyDir(partsPath, filepath.Join(scratch, base)); err != nil {
+			return "", err
+		}
+	}
+	res := r.comp.CompileFull(scratch, base+"_wrapper.tex")
+	if !res.OK || res.PDF == "" {
+		return "", fmt.Errorf("编译失败: %s", strings.TrimSpace(res.Err))
+	}
+	dst := filepath.Join(proj, "work", "views", "pdf", base+".pdf")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", err
+	}
+	if err := copyFile(res.PDF, dst); err != nil {
+		return "", err
+	}
+	return dst, nil
+}
+
 func chapterCompiledPDF(proj, base string) string {
 	work := filepath.Join(proj, "work", "temp", "conv_"+base, "work")
 	if !dirExists(work) {
@@ -392,6 +455,24 @@ func chapterCompiledPDF(proj, base string) string {
 		return p
 	}
 	return ""
+}
+
+// freshCheckerAttemptNo 返回下一条**全新**核对尝试号：取"磁盘上已有最大号 +1"与
+// "本次运行已经抬到的号 +1"里更大的那个，且不小于 2（try1 = 无后缀那条转录）。
+//
+// T278：重核绝不能落回一条已经存在的核对转录——`checkChapterAt` 见到文件就恢复
+// 那条会话，而旧转录往往已经退化到底（提醒打满、只剩反复重试），恢复它等于把
+// "重新核对"直接判死。
+func (r *Runner) freshCheckerAttemptNo(proj, base string) int {
+	n := lastAttemptNumber(filepath.Join(chapterSessionsDir(proj, base), "checker_"+base+".jsonl")) + 1
+	if m := r.checkerAttemptNo(base) + 1; m > n {
+		n = m
+	}
+	if n < 2 {
+		n = 2
+	}
+	r.bumpCheckerAttemptNo(base, n)
+	return n
 }
 
 // recheckChapter 用全新会话重新核对这一章**已提交的产物**（P53 的 checker 角色）。
@@ -427,7 +508,7 @@ func (r *Runner) continueCheckerAfterCut(proj, base string, next int) error {
 	if fileExists(texPath + ".checker") {
 		_ = copyFile(texPath+".checker", fmt.Sprintf("%s.checker.try%d", texPath, next-1))
 	}
-	if _, issues := r.recheckChapter(proj, base, 0); issues != "" {
+	if _, issues := r.recheckChapterAt(proj, base, 0, next); issues != "" {
 		r.log.LogInfo(0, "[checker]", base, "从记录继续后的结论:", issues)
 	}
 	return nil
@@ -491,6 +572,34 @@ func (r *Runner) truncateCheckerTranscript(proj, base, srcName string, from int)
 		return "", 0, fmt.Errorf("写新尝试的转录失败: %w", err)
 	}
 	return dst, next, nil
+}
+
+// promoteRecheckedProduct 把"重核通过"的产物晋级到 `work/chapters/`（T304）。
+//
+// 只有顶层章节、且产物还留在临时树里（细分父节点的 `integrated-stage`）时才动：
+// 子章节的产物由父节点整合，单独搬进 `work/chapters/` 会让书里多出一份没人整合
+// 的碎片。
+func (r *Runner) promoteRecheckedProduct(proj, base, texPath, partsPath string) {
+	if _, isChild := childChapterParent(base); isChild {
+		return
+	}
+	dstRoot := filepath.Join(proj, "work", "chapters")
+	dstTex := filepath.Join(dstRoot, base+".tex")
+	if filepath.Clean(filepath.Dir(texPath)) == filepath.Clean(dstRoot) && fileExists(dstTex) {
+		return // 已经在 work/chapters 下，没什么可搬
+	}
+	if !fileExists(texPath) {
+		return
+	}
+	if _, err := placeChapterFiles(filepath.Dir(texPath), dstRoot, base); err != nil {
+		r.log.LogWarning(0, "[checker]", base, "重核通过后晋级产物失败（下次启动这一章会被当作没有产物）:", err)
+		return
+	}
+	// 记号跟着搬：新路径上的指纹按晋级后的文件重算，派发侧的"已通过"判据
+	// （chapterPassedAndUnchanged）才认得出这一版。
+	dstParts := filepath.Join(dstRoot, base)
+	writePassMarker(dstTex, productFingerprint(dstTex, dstParts))
+	r.log.LogInfo(0, "[checker]", base, "重核通过：产物已晋级到 work/chapters/")
 }
 
 // chapterMarkdownFor 找出这一章的源 md。顶层章节在 `chapters/<章>.md`；递归子章节
@@ -808,6 +917,13 @@ func latestConvertAttempt(proj, base string) int {
 }
 
 func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
+	return r.recheckChapterAt(proj, base, tid, 0)
+}
+
+// recheckChapterAt 是 recheckChapter 的"指定尝试号"版：`forceAttempt >= 2` 时
+// 第一轮就用它（"从第 N 条记录继续核对"已经把前缀抄成那条尝试，必须接着它跑），
+// 之后的换会话兜底仍然另开全新尝试。
+func (r *Runner) recheckChapterAt(proj, base string, tid, forceAttempt int) (bool, string) {
 	chapPath := chapterMarkdownFor(proj, base)
 	texPath, partsPath := chapterProductsFor(proj, base)
 	if !fileExists(texPath) {
@@ -818,18 +934,57 @@ func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	if data, err := os.ReadFile(filepath.Join(proj, "work", "views", "checker_"+base, "notes.md")); err == nil {
 		hints.Notes = string(data)
 	}
-	hints.PDF = chapterCompiledPDF(proj, base)
+	// T277：重核这一份产物时**当场按它自己编一份 PDF**再挂给核对会话。
+	// 以前直接读 `work/temp/conv_<章>/work/.gate/compile.json`——那是**上一轮转换
+	// 会话**编的那份，产物一换（重整合、切回、手工恢复）它就过期；工作区被清掉
+	// 时干脆没有了，于是核对视图里没有产物页，会话照着"this PDF"的提示去找
+	// `check:<章>.pdf`，拿到一串"文件不存在"直到退化。
+	hints.PDF = ""
+	if pdf, err := r.compileChapterForCheck(proj, base); err == nil {
+		hints.PDF = pdf
+	} else {
+		r.log.LogWarning(tid, "[checker]", base, "按当前产物重编 PDF 失败，这一轮核对看不到产物页:", err)
+		hints.PDF = chapterCompiledPDF(proj, base)
+	}
 	if rp := filepath.Join(proj, "work", "reports", base+".md"); fileExists(rp) {
 		hints.Report = rp
 	}
-	n := r.checkerAttemptNo(base)
-	if n < 2 {
-		n = 2
-	}
-	trPath := attemptTranscriptPath(filepath.Join(chapterSessionsDir(proj, base), "checker_"+base+".jsonl"), n)
-	view := filepath.Join(proj, "work", "views", fmt.Sprintf("checker_%s_try%d", base, n))
 	attempt := latestConvertAttempt(proj, base)
-	ok, issues := r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid, trPath, view, false, attempt)
+	trBase := filepath.Join(chapterSessionsDir(proj, base), "checker_"+base+".jsonl")
+	viewRoot := filepath.Join(proj, "work", "views")
+	// T278：**每一次重核都开一条磁盘上还不存在的新核对尝试**，没有结论就再换一条
+	// （次数 = latex.checker_no_verdict_retries，与转换侧同一条口径）。
+	//
+	// 以前这里用内存里的 `checkerAttemptNo(base)`（进程重启后是 0）→ 一律算成
+	// try2，而 try2 往往就是上一次退化到底的那条转录：`checkChapterAt` 见到文件
+	// 就走"恢复中断的会话"，89 条已经打满提醒的历史原样回放，第一轮就再次退化，
+	// 于是"重新核对"必然失败——现场就是这么撞的（chapter_011 try2 已是第五次
+	// 退化的现场）。尝试号必须取自磁盘，而且要"往后加"，不能回到别人的旧转录里。
+	autoHeals := r.cfg.Latex.CheckerNoVerdictRetries()
+	// 重核是"产物已经在书里、只差一个判定"，一轮核对动辄十几二十分钟，不该像
+	// 转换侧那样连开六条；三条都给不出结论就是核对模型的问题，别再烧下去。
+	if autoHeals > 2 {
+		autoHeals = 2
+	}
+	var ok bool
+	var issues string
+	for heal := 0; ; heal++ {
+		n := r.freshCheckerAttemptNo(proj, base)
+		if heal == 0 && forceAttempt >= 2 {
+			n = forceAttempt
+			r.bumpCheckerAttemptNo(base, n)
+		}
+		trPath := attemptTranscriptPath(trBase, n)
+		view := filepath.Join(viewRoot, fmt.Sprintf("checker_%s_try%d", base, n))
+		ok, issues = r.checkChapterAt(proj, base, chapPath, texPath, partsPath, hints, tid, trPath, view, false, attempt)
+		if ok || isSessionAPIError(issues) || !checkerNoVerdict(issues) || heal >= autoHeals ||
+			chapterPassedAndUnchanged(proj, base) {
+			break
+		}
+		r.log.LogWarning(tid, "[checker]", base, "重新核对没有给出结论，换一条全新的核对尝试 try"+
+			strconv.Itoa(r.checkerAttemptNo(base))+" 再来一次（第 "+strconv.Itoa(heal+1)+"/"+strconv.Itoa(autoHeals)+
+			" 次，产物不动）")
+	}
 	if isSessionAPIError(issues) {
 		return false, issues
 	}
@@ -838,6 +993,14 @@ func (r *Runner) recheckChapter(proj, base string, tid int) (bool, string) {
 	markChapterVerdict(proj, base, attempt, ok, issues)
 	if ok {
 		_ = os.Remove(texPath + ".checker")
+		// T277：重核通过要跟主路径一样留下通过标记——否则这一章在页面上永远
+		// 只有"有产物"，看不出它是被判过的那一份。
+		writePassMarker(texPath, productFingerprint(texPath, partsPath))
+		// T304：细分父节点交在 `work/temp/conv_<章>/integrated-stage/` 上的产物，
+		// 主路径核对通过时会晋级到 `work/chapters/`（placeChapterFiles），重核这条
+		// 路以前不晋级——于是"这一章明明通过了、work/chapters 下却没有它"，下次
+		// 启动按"没有产物"整章重转。这里补齐同一个动作。
+		r.promoteRecheckedProduct(proj, base, texPath, partsPath)
 		r.log.Log(tid, "[checker]", base, "重新核对通过")
 		return true, ""
 	}
@@ -1081,6 +1244,17 @@ func (r *Runner) dispatchRetries(proj string) int {
 					r.log.LogInfo(0, "[retry]", base, "有切回第", strconv.Itoa(n),
 						"次尝试的请求在等，这条", role, "请求先留着（切回落地后再派发）")
 				}
+				continue
+			}
+		}
+		// T303：自动提的「接着核对 / 继续跑」在产物已经通过之后直接作废（派发这一
+		// 刻才查磁盘——队列里的自动请求可能等了一两个小时的锁，通过之后才轮上）。
+		// 子章节不能这么做：它的产物通过了，父章节还要整合，那条继续跑仍得跑。
+		if (role == "checker" || role == "continue") && autoRetryRequest(f.Request.Source) {
+			if _, isChild := childChapterParent(base); !isChild && chapterPassedAndUnchanged(proj, base) {
+				_ = retryq.Consume(f.Path)
+				r.log.LogInfo(0, "[retry]", base, "产物已经核对通过、之后没改过：这条自动",
+					role, "请求作废")
 				continue
 			}
 		}
@@ -1395,6 +1569,12 @@ func (r *Runner) runRetryTask(proj, base string, req retryq.Request) {
 	if role != "checker" {
 		r.rotateSpentChildCheckers(proj, base)
 	}
+	// T303：从派发到真正执行之间这一章可能刚通过（拿锁的先后差几十毫秒也算），
+	// 自动请求这时已经没事可做，别开新会话。
+	if (role == "checker" || role == "continue") && autoRetryRequest(req.Source) && chapterPassedAndUnchanged(proj, base) {
+		r.log.LogInfo(0, "[retry]", base, "这一版产物已经核对通过：自动", role, "请求不再跑")
+		return
+	}
 	switch role {
 	case "convert":
 		r.forceChapterRetry(proj, base, reason)
@@ -1554,6 +1734,12 @@ func (r *Runner) applyWorkspaceCut(proj, base, srcName string, from int) (int, b
 func (r *Runner) applyWorkspaceCutTo(proj, base, srcName string, from int, archiveDir string) (int, bool) {
 	rolled, ok := r.rollbackChapterWork(proj, base, srcName, from)
 	if ok {
+		// T276：只有**转换**会话的截断才连产物一起挪走。核对/复盘会话的截断
+		// 只作废它自己的判定，产物是另一条会话交的、不该跟着消失。
+		if !strings.HasPrefix(filepath.Base(srcName), "convert_") {
+			r.log.LogInfo(0, "[rescue]", base, "只回退工作区，不动已提交的产物（源转录不是转换会话）")
+			return rolled, ok
+		}
 		if archiveDir != "" {
 			archiveChapterProductsTo(r, proj, base, archiveDir)
 		} else {
@@ -1565,7 +1751,14 @@ func (r *Runner) applyWorkspaceCutTo(proj, base, srcName string, from int, archi
 
 // archiveChapterProducts 把这一章已提交的产物与报告挪进 work/attempts/<章>/
 // try<源尝试>/，不动工作树——工作树要留着给 P55 回退。
+//
+// T276：只认**转换**转录。核对/复盘会话的尝试号是它们自己的编号，拿它给产物
+// 归档既会搬走一份没问题的产物，又会让"第 N 次尝试"和转换的尝试号串味。
 func archiveChapterProducts(r *Runner, proj, base, srcName string) {
+	if !strings.HasPrefix(filepath.Base(srcName), "convert_") {
+		r.log.LogWarning(0, "[convert]", base, "拒绝归档产物：源转录不是转换会话（", filepath.Base(srcName), "）")
+		return
+	}
 	attempt := 1
 	if _, n, ok := transcriptAttempt(srcName); ok && n > 0 {
 		attempt = n
@@ -1837,6 +2030,77 @@ func balancedCutFrom(lines []string, from int) int {
 	return last
 }
 
+// extendPastToolRound 把切口后移到"最后一个完整工具轮"的末尾（T269）。
+//
+// 场景：复盘会话指的切口正好落在一条工具调用消息上（例如细分父节点申请子会话
+// 的那一条）。按 T241 的口径，这一条连同它下一行的回执一起被裁掉——平衡是保住
+// 了，可"我申请过子章节"这个事实也从回放的上下文里消失了（实测一章的
+// request_chapter_split 就这样丢过一次，只能手工从 cuts 备份里补回来）。
+//
+// 只要这一轮的调用都在紧跟的行里拿到了回执，就把切口挪到回执之后：丢掉的仍然
+// 是复盘判定的退化部分，只是不再切在"调用与回执之间"。找不到完整回执就原样不动。
+func extendPastToolRound(lines []string, keep int) int {
+	if keep < 1 || keep >= len(lines) {
+		return keep
+	}
+	var head struct {
+		T     string `json:"t"`
+		Role  string `json:"role"`
+		Calls []struct {
+			ID string `json:"id"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal([]byte(lines[keep]), &head); err != nil {
+		return keep
+	}
+	if head.T != "msg" || head.Role == "tool" || len(head.Calls) == 0 {
+		return keep
+	}
+	pending := make(map[string]bool, len(head.Calls))
+	var order []string
+	for _, c := range head.Calls {
+		pending[c.ID] = true
+		order = append(order, c.ID)
+	}
+	lastReceipt := 0
+	for i := keep + 1; i < len(lines); i++ {
+		var p struct {
+			T      string `json:"t"`
+			Role   string `json:"role"`
+			CallID string `json:"tool_call_id"`
+		}
+		if err := json.Unmarshal([]byte(lines[i]), &p); err != nil {
+			return keep
+		}
+		switch p.T {
+		case "meta", "usage":
+			continue
+		case "msg":
+			if p.Role != "tool" {
+				return keep
+			}
+			if p.CallID != "" {
+				delete(pending, p.CallID)
+			} else {
+				// 老转录没有 tool_call_id：按先后顺序一对一销。
+				for _, id := range order {
+					if pending[id] {
+						delete(pending, id)
+						break
+					}
+				}
+			}
+			lastReceipt = i + 1
+			if len(pending) == 0 {
+				return lastReceipt
+			}
+		default:
+			return keep
+		}
+	}
+	return keep
+}
+
 // trimTranscriptInPlace 把一条转录**原地**截到第 from 条记录之前（T241）：同一条
 // 文件、同一个尝试号，页面的「历史」不多出一条。
 //
@@ -1877,6 +2141,13 @@ func (r *Runner) trimTranscriptInPlace(proj, base, trPath string, from int, reas
 	if keep < from {
 		r.log.LogWarning(0, "[rescue]", base, "切口从第", strconv.Itoa(from), "条前移到第",
 			strconv.Itoa(keep), "条：后面那条还在等工具回执，截在那儿续跑只会读到占位回执")
+	}
+	// T269：切口若正落在一条工具调用上，把这一轮（调用 + 回执）留住再切——
+	// 复盘判的是"后面那一段退化"，不是"你刚才申请过子章节"。
+	if adv := extendPastToolRound(lines, keep); adv > keep {
+		r.log.LogInfo(0, "[rescue]", base, "切口从第", strconv.Itoa(keep), "条后移到第",
+			strconv.Itoa(adv), "条：保留最后一个完整的工具调用轮（调用与回执不能被切开）")
+		keep = adv
 	}
 	tail := lines[keep:]
 	if len(tail) > 0 {

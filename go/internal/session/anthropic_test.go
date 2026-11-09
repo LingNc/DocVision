@@ -20,12 +20,14 @@ func anthropicTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *http
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
+	nonStream := false
 	cfg := config.ModelConfig{
 		BaseURL:   srv.URL + "/v1",
 		APIKey:    "sk-ant-test",
 		Model:     "claude-test-1",
 		API:       "anthropic",
 		MaxTokens: 1024,
+		Stream:    &nonStream, // 本测试钉非流式翻译；流式另见 anthropic_stream_test.go
 	}
 	return NewClient(cfg), srv
 }
@@ -53,9 +55,10 @@ func TestAnthropicEndToEnd(t *testing.T) {
 		}`))
 	}))
 	defer srv.Close()
+	nonStream := false
 	c := NewClient(config.ModelConfig{
 		BaseURL: srv.URL + "/v1", APIKey: "sk-ant-test", Model: "claude-test-1",
-		API: "anthropic", MaxTokens: 512,
+		API: "anthropic", MaxTokens: 512, Stream: &nonStream,
 	})
 
 	req := &ChatRequest{

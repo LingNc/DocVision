@@ -11,6 +11,7 @@ package latex
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"mineru-tools/internal/logger"
@@ -27,12 +28,29 @@ func replaySubmit(log *logger.Logger, tid int, tag string, tool session.Tool, st
 	if st.SubmitName == "" || st.SubmitArgs == "" {
 		return false
 	}
-	if _, err := tool.Execute(st.SubmitArgs); err != nil {
+	res, err := tool.Execute(st.SubmitArgs)
+	if err != nil {
 		log.LogWarning(tid, "["+tag+"] 重放已记录的提交调用失败（按未提交继续）:", err)
+		return false
+	}
+	// 提交被计划清单/校验打回时，工具回的是一句以 REJECTED 起头的**正常回执**
+	// （不是 error）；只有真被收下的提交才带 Terminal（T92）。只看 error 会把
+	// "被打回"当成"重放成功"，阶段便带着未提交的状态一路往下跑（T298）。
+	if !res.Terminal {
+		log.LogWarning(tid, "["+tag+"] 重放的提交未被收下（", receiptLine(res.Text), "）——按未提交继续")
 		return false
 	}
 	log.Log(tid, "["+tag+"] 转录中已提交（", st.SubmitName, "）——重放收账，本阶段直接完成")
 	return true
+}
+
+// receiptLine 取回执第一行并截短：日志里只留一眼能看懂的那半句。
+func receiptLine(s string) string {
+	s = strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), "\n", 2)[0])
+	if r := []rune(s); len(r) > 120 {
+		return string(r[:120]) + "…"
+	}
+	return s
 }
 
 // resumeUserText picks the wire entry for a resumed session: a history that

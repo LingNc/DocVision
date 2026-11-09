@@ -298,20 +298,53 @@ func (c *Client) ChatCompletion(req *ChatRequest) (*ChatResponse, error) {
 		payload.Temperature = c.temperature
 	}
 
-	// P4：Anthropic Messages API 适配（/v1/messages）。适配器只实现了
-	// 非流式路径——请求被强制 stream=false，以一次 JSON 应答返回（同样
-	// 带 thinking/tool_use/usage，P7 实时快照这类流式专属能力不适用）。
+	// P4：Anthropic Messages API 适配（/v1/messages）。T270 起流式与非流式
+	// 都走：流式按 Anthropic 的 message_start/content_block_delta/… 事件把一条
+	// 流拼回同一条 ChatMessage（思考阶段不再整段静默，P7 实时快照同样可用）；
+	// 网关不认流式时退回一次 JSON 应答。
 	if c.Anthropic() {
-		payload.Stream = false
 		raw, err := c.buildAnthropicBody(&payload)
 		if err != nil {
 			return nil, err
 		}
 		c.logCacheProbe(&payload, raw)
+		fallback := func(cause error) (*ChatResponse, error) {
+			c.logf("  [stream] anthropic 流式请求失败，改用非流式重试一次:", truncate(cause.Error(), 200))
+			payload.Stream = false
+			raw2, berr := c.buildAnthropicBody(&payload)
+			if berr != nil {
+				return nil, cause
+			}
+			resp2, err2 := c.postAnthropic(raw2)
+			if err2 != nil {
+				return nil, cause
+			}
+			return c.decodeAnthropicResponse(resp2, time.Now())
+		}
 		start := time.Now()
 		resp, err := c.postAnthropic(raw)
 		if err != nil {
+			if payload.Stream && shouldFallbackToNonStream(err) {
+				return fallback(err)
+			}
 			return nil, err
+		}
+		if payload.Stream && resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			httpErr := fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			if shouldFallbackToNonStream(httpErr) {
+				return fallback(httpErr)
+			}
+			return nil, httpErr
+		}
+		// 网关忽略了 stream:true、直接回一份 JSON：仍按非流式解析。
+		if payload.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
+			!strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
+			return c.decodeAnthropicResponse(resp, start)
+		}
+		if payload.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return c.readAnthropicStream(resp, start, req.StreamHook)
 		}
 		return c.decodeAnthropicResponse(resp, start)
 	}

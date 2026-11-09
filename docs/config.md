@@ -69,13 +69,14 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.dedupe` | 随附模板的独立去重模型条目，可用 extends 指向 text 或自行指定视觉模型 | 未设置（模板继承 text） |
 | `models.rescue` | 复盘会话（未提交收尾的复盘，P58）的模型条目；模板里就写在 `models.checker` 下面、`extends: checker`，想用更便宜的模型复盘就改这一条，或把 `latex.rescue.model` 指到别的条目。**会话限制不写在这里**（上下文/轮次/输出预算在 `latex.sessions.rescue`） | 模板预置（`extends: checker`） |
 | `models.text.request_body` | 注入 API 请求体的额外参数（如 enable_thinking），原样合并到请求体顶层 | 见示例 |
-| `models.text.api` | 线路协议：`openai`（默认，OpenAI 兼容 `/chat/completions`）、`anthropic`（Anthropic Messages API，`base_url` 指到 `/v1`，自动带 `x-api-key`/`anthropic-version` 头）或 `responses`（OpenAI Responses API，`/v1/responses`，gpt-5/o 系；固定 `store:false` 全量回传，加密思考链请求 `reasoning.encrypted_content` 回放——**加密思考约半小时级有效期**，长间隔续跑可能失效）。`anthropic` **只走非流式**，`responses` 与非流式同款解码但支持 SSE（`response.output_text.delta` 推进实时快照、`response.completed` 收账，网关忽略 `stream:true` 时自动兜底解析整段 JSON）；三者都把应答的缓存读计入命中率、stop_reason 翻译为 finish_reason | `openai` |
+| `models.text.api` | 线路协议：`openai`（默认，OpenAI 兼容 `/chat/completions`）、`anthropic`（Anthropic Messages API，`base_url` 指到 `/v1`，自动带 `x-api-key`/`anthropic-version` 头）或 `responses`（OpenAI Responses API，`/v1/responses`，gpt-5/o 系；固定 `store:false` 全量回传，加密思考链请求 `reasoning.encrypted_content` 回放——**加密思考约半小时级有效期**，长间隔续跑可能失效）。`anthropic` 与非流式同款解码、同样支持 SSE（`message_start`/`content_block_delta`/`message_delta` 推进实时快照，网关忽略 `stream:true` 时自动兜底解析整段 JSON），`responses` 与非流式同款解码但支持 SSE（`response.output_text.delta` 推进实时快照、`response.completed` 收账，网关忽略 `stream:true` 时自动兜底解析整段 JSON）；三者都把应答的缓存读计入命中率、stop_reason 翻译为 finish_reason | `openai` |
 | `options.log_level` | 日志等级：info / debug / trace（debug 记请求响应摘要与最终内容，trace 再加流式分片） | info |
 | `models.text.stream` | 是否流式接收（SSE）；不写即 true。厂商不支持时自动回退一次非流式 | true |
 | `models.text.api_stream_idle_timeout` | 流式模式下两个数据块之间的最大间隔（秒），超时判定卡住；0 取 `api_timeout` | 0 |
-| `models.text.thinking` | 顶层 `thinking` 对象：`type` 取 `enabled`/`disabled`/`adaptive`（GLM-4.5+/DeepSeek/Qwen）。**不要放进 `extra_body`**；非法取值启动即报错（disable/enable 等笔误自动纠正并告警） | 未设置 |
+| `models.text.thinking` | 顶层 `thinking` 对象：`type` 取 `enabled`/`disabled`/`adaptive`（GLM-4.5+/DeepSeek/Qwen；**Anthropic 新 Claude 只认 `adaptive`**——沿用 `{type: enabled, budget_tokens: N}` 会被服务端 400 拒掉）。**不要放进 `extra_body`**；非法取值启动即报错（disable/enable 等笔误自动纠正并告警） | 未设置 |
 | `models.<name>.thinking.type` | 同上；写错会让该模型**每一次请求**都被服务端拒掉（现场一次 `type: disable` 让 8/8 张图只保留原图） | 未设置 |
-| `models.text.reasoning_effort` | 顶层 `reasoning_effort`（GLM-5.2+，thinking 开启时生效）：max/xhigh/high/medium/low/minimal/none | 未设置 |
+| `models.text.tool_aliases` | 把网关/中转站递给模型的**另一套工具名**映射回本程序的工具名（T273）：`{Read: read_file, Edit: write_file}`。键与值都按大小写/分隔符不敏感匹配，值必须真在会话里存在才生效；不写也能吃住大小写差异（`Bash`→`bash`）与 `mcp__x__read_file` 这类命名空间前缀。模型叫了不存在的工具时，回执会列出本会话可用的工具名并给一个相似建议 | 未设置 |
+| `models.text.reasoning_effort` | 顶层 `reasoning_effort`（GLM-5.2+，thinking 开启时生效）：max/xhigh/high/medium/low/minimal/none。**`api: anthropic` 的条目改发顶层 `output_config.effort`**（Anthropic 没有 `reasoning_effort` 字段；新 Claude 要求 `thinking.type=adaptive` + `output_config.effort` 同时给，否则每个请求 400） | 未设置 |
 | `models.text.api_timeout` | **非流式**整次请求（连接+读取）总超时（秒）；流式模式改用 idle 超时；所有模型条目可覆盖，留空继承 text | 400 |
 | `models.text.api_connect_timeout` | 连接/首字节等待超时（秒） | 60 |
 | `models.text.api_max_retries` | 通用 API 错误（5xx 等 transient）重试上限；**4xx 客户端错误不重试**（400 请求体不合法 / 401 密钥 / 403 权限 / 404 模型名 / 422 参数），一次即报错，408 与 429 走各自通道 | 3 |
@@ -155,7 +156,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |
 | `models.<条目>.price.currency` | 金额前缀符号 | "¥"（仅在配了价格时补默认） |
-| `config_version` | 配置模板版本：与当前程序期望值（本版为 **24**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 24 |
+| `config_version` | 配置模板版本：与当前程序期望值（本版为 **25**）不一致时启动只提示、不报错；`docvision setup` 会把它列为待修项。新增配置块时同步 bump | 25 |
 | `preview.enabled` | 跑 `docvision latex` 时自动启动**会话预览服务**（只读；`docvision sessions --serve` 的常驻版），启动日志里给出确切 URL | false |
 | `preview.host` | 预览服务监听地址（`0.0.0.0` 会让局域网可访问；转录含全书内容，默认只本机） | "127.0.0.1" |
 | `preview.port` | 预览服务端口。配置里写 `0` 与不写都一样取默认 8848（配置分不出「没写」和「写了 0」）；要由内核挑一个空闲端口用命令行 `--port 0`，启动打印的就是实际绑定到的地址。`docvision sessions --serve` 默认也用这里；`--addr` / `--port` 优先于本项 | 8848 |
@@ -195,6 +196,35 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `pixels`（默认） | 每张 ≈ `宽×高 / px_per_token`，夹在 `[min_tokens, max_tokens]` | `px_per_token`、`min_tokens`、`max_tokens`；取不到尺寸时用 `tokens` |
 | `fixed` | 每张固定 `tokens` 个，不看尺寸（按张计费的端点） | `tokens` |
 | `none` | 本地按 0 计（厂商数字里仍含图片 token，只是本地不预扣） | 无 |
+
+## 线路协议示例：Anthropic（Claude）
+
+`api: anthropic` 的条目走 `POST {base_url}/messages`（`base_url` 必须指到 `/v1`），
+自动带 `x-api-key` 与 `anthropic-version` 头、不发 `Authorization`。最小可用配置：
+
+```yaml
+models:
+  claude:                      # 条目名随你；latex.convert_model / checker / chapter 等角色引用它
+    api: anthropic
+    base_url: "https://your-anthropic-proxy.example/v1"
+    api_key: "sk-ant-..."
+    model: "claude-haiku-5-5"
+    max_tokens: 8192
+    stream: true               # 默认就开流式：思考阶段也有实时快照与首字耗时
+    thinking:
+      type: adaptive           # 新版 Claude 只认 adaptive（老模型仍可 enabled/disabled）
+    reasoning_effort: high     # → 顶层 output_config.effort（low | medium | high）
+```
+
+三条易错点（都会让服务端直接 400）：
+
+- **`thinking.type=adaptive` 与 `output_config.effort` 必须同时在场**：只写 thinking 或只写
+  effort，新版 Claude 会回 `requires adaptive thinking; use thinking.type=adaptive and
+  output_config.effort`。本仓库把 `reasoning_effort` 翻译成 `output_config.effort`（Anthropic
+  没有 `reasoning_effort` 字段，请求体里不会出现它）。
+- **不要沿用 `{type: enabled, budget_tokens: N}`**：那是老式扩展思考的写法，新版模型拒绝。
+- **`extends` 一个 OpenAI 基座时**，`base_url`/`api_key`/`api` 三项都得覆盖——只换 `model`
+  仍会打到 OpenAI 兼容的 `/chat/completions`。
 
 ## `extends`：命名基座
 

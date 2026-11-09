@@ -986,9 +986,15 @@ func (r *Runner) rescueQueueTruncate(t rescueTarget, from int) (rescueCutResult,
 			r.log.LogWarning(0, "[rescue]", t.Base, "当场截断失败，退回派发时再切:", cutErr)
 			r.phaseNote()("[rescue] %s 当场截断失败，退回派发时再切：%v", t.Base, cutErr)
 		} else {
-			if rolled, ok := r.applyWorkspaceCut(t.ProjDir, t.Base, filepath.Base(t.TrPath), from); ok {
-				r.log.LogInfo(0, "[rescue]", t.Base, "工作区已回退到第", strconv.Itoa(rolled), "行")
-			}
+			// T276：**核对侧**的退化只作废"判定"，不作废产物。以前这里跟着调
+			// applyWorkspaceCut——那是给转换会话用的（回退工作树 + 把已提交的
+			// 产物挪进 work/attempts），用在核对转录上就成了"一个坏掉的核对
+			// 模型把一章合格的产物从书里搬走"：产物一没，这一章下一轮又整章
+			// 重转（细分父章节还要重走一遍复查+整合），再交一份新的给同一个坏
+			// 掉的核对会话，又退化、又搬走——实测两章在这条环里互相覆盖了四轮，
+			// 期间那次"通过"（18:37）也被下一轮的重转盖掉。
+			//
+			// 核对会话没有可写工作区，它的转录截断不影响任何文件。
 			reason = fmt.Sprintf("复盘判为退化，已当场截断到第 %d 条记录（第 %d 次尝试），接着跑", from, attempt)
 		}
 		_, err = retryq.Queue(t.ProjDir, retryq.Request{

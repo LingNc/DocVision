@@ -16,14 +16,18 @@ func TestPilotMarkerSkips(t *testing.T) {
 	}
 	lg, _ := logger.NewLogger("", "", 2)
 	r := &Runner{log: lg}
-	r.stylePilotPhase(proj) // 无 source md：静默返回，不写 marker
+	if err := r.stylePilotPhase(proj); err != nil { // 无 source md：静默返回，不写 marker
+		t.Fatalf("没有 markdown 不算失败: %v", err)
+	}
 	if fileExists(pilotMarkerPath(proj)) {
 		t.Fatal("没有 markdown 时不应写 marker")
 	}
 	if err := os.WriteFile(pilotMarkerPath(proj), []byte("done\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r.stylePilotPhase(proj) // marker 存在：直接返回（无 md 也不报错）
+	if err := r.stylePilotPhase(proj); err != nil { // marker 存在：直接返回（无 md 也不报错）
+		t.Fatalf("marker 存在应当直接跳过: %v", err)
+	}
 }
 
 // T97：buildPilotSample 拼合行段（1 起含端点）、裁越界、全无效时报错。

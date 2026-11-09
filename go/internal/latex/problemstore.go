@@ -26,16 +26,21 @@ type ProblemStore struct {
 	mu       sync.Mutex
 	path     string
 	Problems []StyleProblem
+	// ReportsSHA 是"这份清单来自哪一版工作汇报"的指纹（T279）。内容没变时
+	// 重新进入风格修复循环可以直接沿用清单，不必再烧一轮整合会话。
+	ReportsSHA string
 }
 
 func loadProblemStore(path string) *ProblemStore {
 	st := &ProblemStore{path: path}
 	if data, err := os.ReadFile(path); err == nil {
 		var w struct {
-			Problems []StyleProblem `json:"problems"`
+			Problems   []StyleProblem `json:"problems"`
+			ReportsSHA string         `json:"reports_sha,omitempty"`
 		}
 		if json.Unmarshal(data, &w) == nil {
 			st.Problems = w.Problems
+			st.ReportsSHA = w.ReportsSHA
 		}
 	}
 	return st
@@ -45,7 +50,7 @@ func (s *ProblemStore) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(map[string]any{"problems": s.Problems}, "", "  ")
+	data, err := json.MarshalIndent(map[string]any{"problems": s.Problems, "reports_sha": s.ReportsSHA}, "", "  ")
 	if err != nil {
 		return err
 	}

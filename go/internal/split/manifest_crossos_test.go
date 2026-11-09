@@ -49,8 +49,8 @@ func TestManifestMatchesAcrossPathSeparators(t *testing.T) {
 // 归一化后的键才是落盘内容：Windows 侧以后再写的 manifest 也带 "/"，
 // 于是 Linux 侧不用靠比较期兜底也能命中。
 func TestManifestNormalizesSourcePathOnWrite(t *testing.T) {
-	got := normalizeSourcePath(`files\27考研 红宝书[解析].pdf`)
-	want := "files/27考研 红宝书[解析].pdf"
+	got := normalizeSourcePath(`files\某书[解析].pdf`)
+	want := "files/某书[解析].pdf"
 	if got != want {
 		t.Fatalf("normalizeSourcePath = %q, want %q", got, want)
 	}

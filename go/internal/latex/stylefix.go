@@ -1,6 +1,8 @@
 package latex
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -112,9 +114,15 @@ func (t *SubmitProblemsTool) Execute(argsJSON string) (session.ToolResult, error
 type BlocksTool struct {
 	path string
 	mu   sync.Mutex
+	// Known 是"可以分块的章节名"（顶层章节）。细分父章节的正文在各层
+	// `<章>/children/**` 里，但分块单位仍然是那个顶层章节——子节名混进来会让
+	// 分块会话去找一份不存在的产物、悄悄跳过这一章（T281）。
+	Known []string
 }
 
-func NewBlocksTool(path string) *BlocksTool { return &BlocksTool{path: path} }
+func NewBlocksTool(path string, known ...string) *BlocksTool {
+	return &BlocksTool{path: path, Known: known}
+}
 
 func (t *BlocksTool) Name() string { return "blocks" }
 
@@ -151,10 +159,32 @@ func (t *BlocksTool) saveLocked(blocks []StyleBlock) {
 	_ = os.WriteFile(t.path, append(data, '\n'), 0o644)
 }
 
+// unknownChapters 返回 chapters 里不在 known 中的名字（known 为空不校验）。
+func unknownChapters(chapters, known []string) []string {
+	if len(known) == 0 {
+		return nil
+	}
+	ok := make(map[string]bool, len(known))
+	for _, k := range known {
+		ok[k] = true
+	}
+	var bad []string
+	for _, c := range chapters {
+		if !ok[c] {
+			bad = append(bad, c)
+		}
+	}
+	return bad
+}
+
 // validateBlock 校验单条；excl 是 update 时自己的下标（跨块查重跳过自己）。
-func validateBlock(list []StyleBlock, b StyleBlock, excl int) string {
+func validateBlock(list []StyleBlock, b StyleBlock, excl int, known []string) string {
 	if strings.TrimSpace(b.Title) == "" || len(b.Chapters) == 0 {
 		return fmt.Sprintf("块非法（title 非空、chapters 至少一章）: %+v", b)
+	}
+	if bad := unknownChapters(b.Chapters, known); len(bad) > 0 {
+		return "这些不是可分的章节名: " + strings.Join(bad, ", ") + " — 只能写顶层章节（" +
+			strings.Join(known, ", ") + "）；细分父章节里的子节不单独分块，按父章节名写。"
 	}
 	seen := map[string]bool{}
 	for _, c := range b.Chapters {
@@ -269,7 +299,7 @@ func (t *BlocksTool) Execute(argsJSON string) (session.ToolResult, error) {
 					b.Chapters = vs
 				}
 			}
-			if msg := validateBlock(work, b, excl); msg != "" {
+			if msg := validateBlock(work, b, excl, t.Known); msg != "" {
 				return session.ToolResult{Text: fmt.Sprintf("REJECTED: 第 %d 个元素: %s——整批未动。", i+1, msg)}, nil
 			}
 			if excl >= 0 {
@@ -294,13 +324,14 @@ type SubmitBlocksTool struct {
 	Set       bool
 	Workspace string    // 虚拟工作区根（blocks.json 所在目录）；空 = 必须内联传参
 	Goal      *GoalTool // T64：提交前计划清单必须清空（勾完或删掉）
+	Known     []string  // 合法章节名（顶层章节，T281）
 }
 
 func (t *SubmitBlocksTool) Name() string { return "submit_blocks" }
 
 func (t *SubmitBlocksTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name": "submit_blocks",
+		"name":        "submit_blocks",
 		"description": "Submit the chapter fix blocks. Write/edit them in work:blocks.json first ({\"blocks\": [{title, problem_ids, chapters}...]}) — group chapters that share the same problems into ONE block; every affected chapter must appear in exactly one block), then call this with NO arguments to submit from the file. Passing the same structure inline also works.",
 		"parameters": map[string]any{
 			"type": "object",
@@ -366,6 +397,12 @@ func (t *SubmitBlocksTool) Execute(argsJSON string) (session.ToolResult, error) 
 		if b.Title == "" || len(b.Chapters) == 0 {
 			return session.ToolResult{Text: "REJECTED: each block needs a title and at least one chapter."}, nil
 		}
+		// T281：直接编辑 blocks.json 的会话也要过同一道门——子节名混进来会让
+		// 那一章被悄悄跳过（分块会话找不到产物，而它仍以为自己交了）。
+		if bad := unknownChapters(b.Chapters, t.Known); len(bad) > 0 {
+			return session.ToolResult{Text: "REJECTED: 这些不是可分的章节名: " + strings.Join(bad, ", ") +
+				" — 只能写顶层章节（" + strings.Join(t.Known, ", ") + "）；细分父章节里的子节不单独分块，按父章节名写。"}, nil
+		}
 		out = append(out, b)
 	}
 	t.Blocks, t.Set = out, true
@@ -392,7 +429,7 @@ func (t *SubmitBlockFixTool) Name() string { return "submit" }
 
 func (t *SubmitBlockFixTool) Definition() map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{
-		"name": "submit",
+		"name":        "submit",
 		"description": "Submit the fixed chapters of this block. chapters: [{chapter (base name, e.g. chapter_003), resolved (true/false), note}] — one entry per chapter in your block. Every assigned problem must be ticked off with the problems tool first, and your goal plan must be complete — otherwise the submit is REJECTED.",
 		"parameters": map[string]any{
 			"type": "object",
@@ -458,6 +495,37 @@ func keysOf(m map[string]bool) []string {
 	return out
 }
 
+// styleFixReportsSHA 给这一轮的"有问题"工作汇报做内容指纹（T279）。
+//
+// 用它判断"要不要再跑一次整合会话"：`--step convert` 这类重入（章节全跳过、
+// 只补风格修复）以前每次都会把整合会话从第 1 轮重新烧一遍——报告一个字没变，
+// 清单也一样，用户看到的只是"这个会话怎么又从头开始了、工具调用归零"。
+func styleFixReportsSHA(issues map[string]string) string {
+	keys := make([]string, 0, len(issues))
+	for k := range issues {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		fmt.Fprintf(h, "%s\x00%s\x00", k, issues[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// reuseStyleProblems 判断能不能沿用上一轮整合出来的清单（T279）：只有指纹
+// 对得上、清单还在才沿用，并且**只清打勾状态**。返回的切片是副本，调用方怎么
+// 用都不影响存储。
+func reuseStyleProblems(store *ProblemStore, sha string) ([]StyleProblem, bool) {
+	if store == nil || sha == "" || store.ReportsSHA != sha || len(store.Problems) == 0 {
+		return nil, false
+	}
+	for i := range store.Problems {
+		store.Problems[i].Checked = false
+	}
+	return append([]StyleProblem(nil), store.Problems...), true
+}
+
 // collectIssueReports 汇总工作汇报，返回 (报告总数, 有问题的报告 base→内容)。
 func collectIssueReports(proj string) (int, map[string]string) {
 	reportsDir := filepath.Join(proj, "work", "reports")
@@ -495,13 +563,35 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	// T64（重构）：清单存 work/style_fix/problems.json，problems 工具读写——
 	// 进循环前重置（旧一轮的勾选状态不带入新清单）。
 	store := loadProblemStore(styleFixProblemStorePath(proj))
-	store.Problems = nil
-	if err := store.saveLocked(); err != nil {
-		r.log.LogWarning(1, "[style-fix] 问题清单重置失败:", err)
-	}
-	problems, err := r.styleFixIntegrate(proj, issues, store)
-	if err != nil {
-		return fmt.Errorf("问题整合会话失败: %w", err)
+	sha := styleFixReportsSHA(issues)
+	var problems []StyleProblem
+	if reused, ok := reuseStyleProblems(store, sha); ok {
+		problems = reused
+		// T279：工作汇报一个字没变 → 沿用上一次的清单，只把打勾状态清掉
+		// （问题定义照旧，别让上一轮的勾选把这一轮的活提前判成"已解决"）。
+		if err := store.saveLocked(); err != nil {
+			r.log.LogWarning(1, "[style-fix] 问题清单打勾状态重置失败:", err)
+		}
+		r.log.Log(0, "[style-fix] 工作汇报与上次一致（"+sha[:8]+"）——沿用上次整合的清单，不重跑整合会话")
+	} else {
+		if store.ReportsSHA != "" && len(store.Problems) > 0 {
+			r.log.Log(0, "[style-fix] 工作汇报有变化（旧 "+store.ReportsSHA[:8]+" → 新 "+sha[:8]+"）——重新整合问题清单")
+		}
+		store.Problems = nil
+		store.ReportsSHA = ""
+		if err := store.saveLocked(); err != nil {
+			r.log.LogWarning(1, "[style-fix] 问题清单重置失败:", err)
+		}
+		var err error
+		problems, err = r.styleFixIntegrate(proj, issues, store)
+		if err != nil {
+			return fmt.Errorf("问题整合会话失败: %w", err)
+		}
+		// 只有整合真的成功才把指纹记上：失败时留着旧指纹会让下一轮误判"清单可用"。
+		store.ReportsSHA = sha
+		if err := store.saveLocked(); err != nil {
+			r.log.LogWarning(1, "[style-fix] 问题清单指纹落盘失败:", err)
+		}
 	}
 	r.log.Log(0, "[style-fix] 问题清单:", strconv.Itoa(len(problems)), "项")
 
@@ -509,19 +599,32 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 		r.phaseNote()("[style-fix] 第 %d/%d 轮风格修复", round, maxRounds)
 
 		// 1. 风格修复会话：按问题清单修 cls/手册。
-		if err := r.styleFixStyleSession(proj, round, problems, store); err != nil {
+		// T285：这一轮已经交过 submit_style（cls/manual 在提交时就落进 style/ 了）
+		// → 那个阶段已经做完，直接进下一阶段，不再重开一条会话把它跑一遍。
+		if styleRoundDone(proj, round) {
+			r.log.Log(0, "[style-fix] 第", strconv.Itoa(round), "轮风格修复已提交过，跳过这一阶段的会话")
+			r.phaseNote()("[style-fix] 第 %d 轮风格修复已提交，跳过", round)
+		} else if err := r.styleFixStyleSession(proj, round, problems, store); err != nil {
 			return fmt.Errorf("风格修复会话（第 %d 轮）失败: %w", round, err)
 		}
 
 		// 2. 影响评估：按问题划分章节块。
-		blocks, err := r.styleFixAssess(proj, round, problems, issues, store)
-		if err != nil {
-			return fmt.Errorf("影响评估会话（第 %d 轮）失败: %w", round, err)
+		// T285：分块已经交过就沿用（同样的清单、同样的章节，重算一遍只是再烧一次）。
+		blocks, reused := loadRoundBlocks(proj, round, sha)
+		if reused {
+			r.log.Log(0, "[style-fix] 第", strconv.Itoa(round), "轮的分块已交过，沿用上一次的评估结果（",
+				strconv.Itoa(len(blocks)), " 块）")
+		} else {
+			var err error
+			blocks, err = r.styleFixAssess(proj, round, problems, issues, store, sha)
+			if err != nil {
+				return fmt.Errorf("影响评估会话（第 %d 轮）失败: %w", round, err)
+			}
 		}
 		r.log.Log(0, "[style-fix] 修复块:", strconv.Itoa(len(blocks)), "块")
 
 		// 3. 分块并行修复（定位修改，绝不重做）。
-		remaining := r.styleFixBlocks(proj, round, blocks, store)
+		remaining := r.styleFixBlocks(proj, round, blocks, store, sha)
 
 		// 4. 收尾判定。
 		if len(remaining) == 0 {
@@ -535,6 +638,99 @@ func (r *Runner) styleFeedbackLoop(proj string, round int) error {
 	r.log.LogWarning(0, "[style-fix] 已达最大轮数("+strconv.Itoa(maxRounds)+")，停止风格修复循环（遗留问题交给编译/终审）")
 	r.phaseNote()("[style-fix] 已达最大轮数(%d)，遗留问题交给编译/终审", maxRounds)
 	return nil
+}
+
+// roundArtifact 是某一轮风格修复落在 work/style_fix/ 下的产物路径（T285）。
+// 有了它，重入时"交过的阶段"可以直接沿用，而不是把会话再跑一遍。
+func roundArtifact(proj, kind string, round int) string {
+	return filepath.Join(proj, "work", "style_fix", fmt.Sprintf("%s_r%d.json", kind, round))
+}
+
+// styleRoundDone 报告第 round 轮风格修复会话是否已经交过 submit_style（T285）。
+// 交过 = 那一轮的 cls/manual 在提交时就写进了 style/，不必再跑一遍。
+func styleRoundDone(proj string, round int) bool {
+	base := filepath.Join(proj, "work", "sessions", fmt.Sprintf("stylefix_style_r%d", round))
+	for _, f := range transcriptFilesWithPrefix(base) {
+		if transcriptSubmitted(f, "submit_style") {
+			return true
+		}
+	}
+	return false
+}
+
+// transcriptFilesWithPrefix 列出 `<base>.jsonl`、`<base>.2.jsonl`……（T285）。
+func transcriptFilesWithPrefix(base string) []string {
+	var out []string
+	if fileExists(base + ".jsonl") {
+		out = append(out, base+".jsonl")
+	}
+	for i := 2; i < 1000; i++ {
+		p := fmt.Sprintf("%s.%d.jsonl", base, i)
+		if !fileExists(p) {
+			break
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// loadRoundBlocks 读回第 round 轮已交的分块（T285）：有就沿用，不重跑评估会话。
+// 只认同一个工作汇报指纹（sha）下的产物——报告变了，旧分块就不再成立。
+func loadRoundBlocks(proj string, round int, sha string) ([]StyleBlock, bool) {
+	data, err := os.ReadFile(roundArtifact(proj, "blocks", round))
+	if err != nil {
+		return nil, false
+	}
+	var doc struct {
+		SHA    string       `json:"sha"`
+		Blocks []StyleBlock `json:"blocks"`
+	}
+	if json.Unmarshal(data, &doc) != nil || len(doc.Blocks) == 0 || doc.SHA != sha {
+		return nil, false
+	}
+	return doc.Blocks, true
+}
+
+// blockResult 是一块修复会话交回来的结论（T285）。
+type blockResult struct {
+	Resolved map[string]bool   `json:"resolved"`
+	Notes    map[string]string `json:"notes"`
+}
+
+// loadBlockResults 读回第 round 轮已经交过的各块结论（键是块号字符串）。
+// 与分块一样只认同一个工作汇报指纹下的产物。
+func loadBlockResults(proj string, round int, sha string) map[string]blockResult {
+	out := map[string]blockResult{}
+	data, err := os.ReadFile(roundArtifact(proj, "results", round))
+	if err != nil {
+		return out
+	}
+	var doc struct {
+		SHA     string                 `json:"sha"`
+		Results map[string]blockResult `json:"results"`
+	}
+	if json.Unmarshal(data, &doc) != nil || doc.SHA != sha {
+		return out
+	}
+	if doc.Results != nil {
+		out = doc.Results
+	}
+	return out
+}
+
+// saveBlockResult 记下某一块的结论，重入时不必再跑这一块（T285）。
+func saveBlockResult(proj string, round, blockIdx int, sha string, res blockResult) error {
+	path := roundArtifact(proj, "results", round)
+	all := loadBlockResults(proj, round, sha)
+	all[strconv.Itoa(blockIdx)] = res
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(map[string]any{"sha": sha, "results": all}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // styleFixIntegrate 跑问题整合会话。
@@ -580,7 +776,17 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 	sess := session.NewSession(r.clientFor(modelKey), r.modelOf(modelKey),
 		r.cfg.LatexSession("style"), renderPrompt(prompts.Must(prompts.StyleFixIntegrateSystem), r.cfg.LatexSession("style"), r.outputLang()),
 		tools, r.log, 1, "stylefix-integrate")
-	trPath := filepath.Join(proj, "work", "sessions", "stylefix_integrate.jsonl")
+	// T283：整合会话也一样能续——被打断就接着那条转录把清单写完；要重来由用户
+	// 在外面删掉转录与工作区文件，代码不替人删。
+	msgs, trPath, resume := sessionAttemptPath(filepath.Join(proj, "work", "sessions"),
+		"stylefix_integrate", "submit_problems")
+	if resume {
+		sess.SetMessages(msgs)
+		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+		}
+		r.log.Log(0, "[style-fix] 整合会话接着上次没交清单的转录继续"+resumeNote(len(msgs)))
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -591,6 +797,9 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 
 	userText := fmt.Sprintf("The work reports from the chapter conversion sessions that flagged style/manual problems are in your workspace at work:reports/<chapter>.md (%d files). "+
 		"Read/grep them, then build the consolidated, de-duplicated problem list with the problems tool (one add call can take several items), and call submit_problems when the list is complete.", len(keys))
+	if resume {
+		userText = "Continue the consolidation from where it stopped (the previous attempt ended without submit_problems; the reports and whatever you already added are still in the workspace). Finish the list and call submit_problems."
+	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}
@@ -604,12 +813,22 @@ func (r *Runner) styleFixIntegrate(proj string, issues map[string]string, store 
 	return problems, nil
 }
 
-// styleFixStyleSession 跑一轮风格修复会话（复用原样式会话上下文）。
+// styleFixStyleSession 跑一轮风格修复会话。
+//
+// 上下文：这一次尝试**没交过 submit_style** → 接着那条转录继续（T284）；否则是
+// 新的一次尝试 → 从样式阶段的 `work/style_session.jsonl` 起（它记着 cls 为什么
+// 这么设计），两者都没有就用空上下文，不再因为"上一轮跑完了"而把旧结论续上来。
 func (r *Runner) styleFixStyleSession(proj string, round int, problems []StyleProblem, store *ProblemStore) error {
 	ctxPath := filepath.Join(proj, "work", "style_session.jsonl")
-	msgs, err := loadSessionContext(ctxPath)
-	if err != nil {
-		return fmt.Errorf("样式会话上下文不可用: %w", err)
+	msgs, trPath, resumed := sessionAttemptPath(filepath.Join(proj, "work", "sessions"),
+		fmt.Sprintf("stylefix_style_r%d", round), "submit_style")
+	seedPath := trPath
+	if !resumed {
+		msgs = nil
+		seedPath = ""
+		if ctxMsgs, cerr := loadSessionContext(ctxPath); cerr == nil && len(ctxMsgs) > 0 {
+			msgs, seedPath = ctxMsgs, ctxPath
+		}
 	}
 	styleDir := filepath.Join(proj, "style")
 	workDir := filepath.Join(proj, "work", "style")
@@ -643,7 +862,19 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	sess.SetProgressHook(liveHook)
 	defer liveClose()
 	sess.SetMessages(msgs)
-	trPath := filepath.Join(proj, "work", "sessions", fmt.Sprintf("stylefix_style_r%d.jsonl", round))
+	if resumed {
+		// 接着上一次被打断的尝试跑：轮次/工具数也续上。
+		if _, st, serr := session.LoadTranscriptStats(seedPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+		}
+		r.log.Log(0, "[style-fix] 接着上一次没交 submit_style 的尝试继续（"+filepath.Base(seedPath)+"，"+
+			resumeNote(len(msgs))+"）")
+	} else if len(msgs) > 0 {
+		r.log.Log(0, "[style-fix] 新一轮风格修复：上下文来自样式阶段（"+filepath.Base(seedPath)+"，"+
+			strconv.Itoa(len(msgs))+" 条历史）")
+	} else {
+		r.log.Log(0, "[style-fix] 新一轮风格修复：没有可用的样式上下文，从空会话开始")
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -652,6 +883,9 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	feedback := fmt.Sprintf("The chapter conversion phase finished and %d style/manual problems were consolidated. "+
 		"They are NOT pasted here — use the problems tool to see them. "+
 		"Fix the cls/manual/example so these problems cannot recur, tick each one off with problems check as you resolve it, then submit_style.", len(problems))
+	if resumed {
+		feedback = "Continue this round from where it stopped (the previous attempt ended without submit_style). " + feedback
+	}
 	if _, err := sess.Run(session.RunOptions{UserText: feedback}); err != nil {
 		return fmt.Errorf("风格修复会话失败: %w", err)
 	}
@@ -696,8 +930,91 @@ func (r *Runner) styleFixStyleSession(proj string, round int, problems []StylePr
 	return nil
 }
 
+// transcriptSubmitted 报告一条转录里是否调过本会话的终态工具（T284）。
+// 交过 = 那一次尝试已经完成（无论之后进程有没有被中断）。
+func transcriptSubmitted(path, terminalTool string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil || terminalTool == "" {
+		return false
+	}
+	type record struct {
+		T         string `json:"t"`
+		ToolCalls []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tool_calls"`
+	}
+	for _, ln := range strings.Split(string(data), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		var rec record
+		if json.Unmarshal([]byte(ln), &rec) != nil || rec.T != "msg" {
+			continue
+		}
+		for _, tc := range rec.ToolCalls {
+			if tc.Function.Name == terminalTool {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sessionAttemptPath 给一个会话挑"这一次尝试"的转录（T284）。
+//
+// 规则与转换/核对一致：`<base>.jsonl` 存在且**还没交过终态工具** → 那一次被打断
+// 了，接着它跑；已经交过 → 那一次已经跑完，换下一条 `<base>.2.jsonl`、
+// `<base>.3.jsonl`……（旧记录原样留着，不覆盖也不删）。要真正从头再来，由用户
+// 在外面删掉这些文件，代码不替人删。
+func sessionAttemptPath(dir, base, terminalTool string) ([]session.ChatMessage, string, bool) {
+	for k := 1; k < 1000; k++ {
+		name := base + ".jsonl"
+		if k > 1 {
+			name = fmt.Sprintf("%s.%d.jsonl", base, k)
+		}
+		p := filepath.Join(dir, name)
+		if !fileExists(p) {
+			return nil, p, false
+		}
+		msgs, lerr := loadSessionContext(p)
+		if lerr != nil || len(msgs) == 0 {
+			return nil, p, false
+		}
+		if transcriptSubmitted(p, terminalTool) {
+			continue
+		}
+		return msgs, p, true
+	}
+	return nil, filepath.Join(dir, base+".jsonl"), false
+}
+
+// resumeNote 是"接着上一次没交结论的尝试跑"的日志后缀（T283/T284）。
+func resumeNote(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return "（" + strconv.Itoa(n) + " 条历史）"
+}
+
+// subdividedChapters 挑出这些章节里的"细分父章节"：它们的顶层 .tex 只是
+// 一串 `\input`，正文在 `<章>/children/**`（还可能再嵌一层子目录）。
+// 分块单位仍是那个顶层章节，但评估/修复都必须知道该去哪个目录里找正文。
+func subdividedChapters(proj string, names []string) []string {
+	chapWork := filepath.Join(proj, "work", "chapters")
+	var out []string
+	for _, b := range names {
+		if st, err := os.Stat(filepath.Join(chapWork, b, "children")); err == nil && st.IsDir() {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // styleFixAssess 跑影响评估会话：按问题划分章节块。
-func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem, issues map[string]string, store *ProblemStore) ([]StyleBlock, error) {
+func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem, issues map[string]string, store *ProblemStore, sha string) ([]StyleBlock, error) {
 	chapWork := filepath.Join(proj, "work", "chapters")
 	texs, _ := filepath.Glob(filepath.Join(chapWork, "*.tex"))
 	var chapterNames []string
@@ -718,15 +1035,34 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	if err := os.MkdirAll(wsDir, 0o755); err != nil {
 		return nil, err
 	}
+	// T282：这个会话跟其余会话一样"能续就续"——磁盘上有转录就接着它跑，
+	// plan.md/blocks.json 也原样留着（那就是上一轮的进度）。要真正从头开始，
+	// 由用户在外面删掉转录（和 work/stylefix_assess/ 下的文件）；代码不替人删。
+	msgs, trPath, resume := sessionAttemptPath(filepath.Join(proj, "work", "sessions"),
+		fmt.Sprintf("stylefix_assess_r%d", round), "submit_blocks")
+	if resume {
+		r.log.Log(0, "[style-fix] 评估会话接着上次没交结论的转录继续"+resumeNote(len(msgs)))
+	}
 	goal := NewGoalTool(filepath.Join(wsDir, "plan.md"))
-	blocks := NewBlocksTool(filepath.Join(wsDir, "blocks.json"))
-	submit := &SubmitBlocksTool{Workspace: wsDir, Goal: goal}
-	mounts := []Mount{{Name: "project", Dir: proj}, {Name: "work", Dir: wsDir}}
+	blocks := NewBlocksTool(filepath.Join(wsDir, "blocks.json"), chapterNames...)
+	submit := &SubmitBlocksTool{Workspace: wsDir, Goal: goal, Known: chapterNames}
+	// T286：以前这里挂的是整个项目根（转换转录、attempts、temp、build、out 全都
+	// 现给评估会话看），既不该给它看、也让 ls 变成一堆无关目录。改成与其它会话
+	// 同一条规矩：project 是窄的只读视图（source/style/chapters/converted/reports），
+	// work 是它自己的可写草稿区。
+	mounts := []Mount{{Name: "project", Dir: r.projectRoot()}, {Name: "work", Dir: wsDir}}
+	// T282：评估会话以前只有 read_file/grep，没有 ls——想看"这一章有哪些子节
+	// 文件"只能靠 grep 试出来（真实运行里为此烧掉十几轮、三十多分钟）。给它
+	// bash：ls/find/wc/grep -rn 都能用，路径和 file 工具同一套前缀。
+	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, fmt.Sprintf("bash_assess_r%d", round))
+	defer cleanBashTmp()
 	tools := []session.Tool{
 		&ReadFileTool{Mounts: mounts},
 		&GrepTool{Mounts: mounts},
 		&WriteWorkFileTool{Root: wsDir, AnyExt: true},
 		&EditWorkFileTool{Root: wsDir},
+		&WorkBashTool{Root: wsDir, Mounts: mounts, TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(),
+			Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: 1},
 		&ProblemsTool{Store: store},
 		goal,
 		blocks,
@@ -741,7 +1077,14 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	sess := session.NewSession(r.clientFor(assessKey), r.modelOf(assessKey),
 		r.cfg.LatexSession("style"), renderPrompt(prompts.Must(prompts.StyleFixAssessSystem), r.cfg.LatexSession("style"), r.outputLang()),
 		tools, r.log, 1, tag)
-	trPath := filepath.Join(proj, "work", "sessions", fmt.Sprintf("stylefix_assess_r%d.jsonl", round))
+	// 上一轮没跑完就接着它（同一条转录往后追加、计数也续上）；跑完了就另开
+	// 一条，页面不会把两次评估显示成一条会话。
+	if resume {
+		sess.SetMessages(msgs)
+		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+		}
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -753,7 +1096,16 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	userText := fmt.Sprintf("The consolidated style-problem list (%d problems) is available through the problems tool (list / get / search) — it is NOT pasted here.", len(problems)) +
 		"\nChapters that explicitly reported problems: " + strings.Join(issueList, ", ") +
 		"\nAll converted chapters: " + strings.Join(chapterNames, ", ") +
-		"\nTheir .tex files are readable at project:work/chapters/<name>.tex. Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks with the blocks tool (or edit work:blocks.json directly — both land in the same file), then call submit_blocks with NO arguments to submit from the file."
+		"\nTheir .tex files are readable read-only at project:converted/<name>.tex (a chapter's parts live under project:converted/<name>/). In bash that is /project/converted/<name>.tex; /project/chapters/<name>.md is only the Markdown source, and /work is your own scratch workspace (plan.md, blocks.json), NOT the book. Style problems are often GLOBAL — assess which chapters each problem actually affects (grep the .tex files for the pattern when in doubt), then partition the affected chapters into fix blocks with the blocks tool (or edit work:blocks.json directly — both land in the same file), then call submit_blocks with NO arguments to submit from the file."
+	// T281：细分父章节的顶层 .tex 只是 `\input` 列表，照着它 grep 什么都找不到——
+	// 必须点名正文目录，否则评估会话会把最厚的几章判成"没受影响"。
+	if sub := subdividedChapters(proj, chapterNames); len(sub) > 0 {
+		userText += "\nSUBDIVIDED chapters — their top .tex is only `\\input` lines, the body is in project:converted/<name>/children/** (in bash: /project/converted/<name>/children/** — grep THAT folder before deciding a chapter is unaffected): " + strings.Join(sub, ", ")
+	}
+	if resume {
+		// 接着上次跑：长指令在历史里，这里只说接着干什么。
+		userText = "Continue this assessment from where it stopped (the previous attempt ended without submit_blocks). Finish the partition and call submit_blocks."
+	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, err
 	}
@@ -762,15 +1114,37 @@ func (r *Runner) styleFixAssess(proj string, round int, problems []StyleProblem,
 	}
 	r.keepSessionFile(trPath)
 	// blocks.json 最终版回存工作区（会话编辑的最终态，跨轮可查）。
-	if data, err := json.Marshal(map[string]any{"blocks": submit.Blocks}); err == nil {
+	if data, err := json.MarshalIndent(map[string]any{"blocks": submit.Blocks}, "", "  "); err == nil {
 		_ = os.WriteFile(filepath.Join(wsDir, "blocks.json"), data, 0o644)
+	}
+	// T285：这一轮的分块单独存一份（带工作汇报指纹），重入时直接沿用，
+	// 不再重跑评估会话；报告一变指纹就对不上，自动作废。
+	if data, err := json.MarshalIndent(map[string]any{"sha": sha, "blocks": submit.Blocks}, "", "  "); err == nil {
+		if err := os.MkdirAll(filepath.Join(proj, "work", "style_fix"), 0o755); err == nil {
+			_ = os.WriteFile(roundArtifact(proj, "blocks", round), data, 0o644)
+		}
 	}
 	return submit.Blocks, nil
 }
 
+// subdividedBlockNote 给分块会话补一句"正文在这些子目录里"（T281）。
+// 块里没有细分章节时返回空串，提示词保持原样。
+func subdividedBlockNote(proj string, chapters []string) string {
+	sub := subdividedChapters(proj, chapters)
+	if len(sub) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, b := range sub {
+		parts = append(parts, b+" → chapters/"+b+"/children/")
+	}
+	return "\nSUBDIVIDED chapters in this block — the top .tex is only `\\input` lines, the body you must grep and edit is under " +
+		strings.Join(parts, ", ") + " (all of these are inside your workspace: in bash /work/chapters/<name>/children/)"
+}
+
 // styleFixBlocks 并行跑分块修复会话，返回仍有问题的章节列表。
 // 块会话失败的章节退回单章 fixChapterStyle，再失败删产物重转换。
-func (r *Runner) styleFixBlocks(proj string, round int, blocks []StyleBlock, store *ProblemStore) []string {
+func (r *Runner) styleFixBlocks(proj string, round int, blocks []StyleBlock, store *ProblemStore, sha string) []string {
 	clsName := classNameOfFile(filepath.Join(proj, "style"))
 	chapWork := filepath.Join(proj, "work", "chapters")
 	reportsDir := filepath.Join(proj, "work", "reports")
@@ -788,7 +1162,39 @@ func (r *Runner) styleFixBlocks(proj string, round int, blocks []StyleBlock, sto
 	var remaining []string // 仍有问题
 	var fallback []string  // 块会话失败 → 退回单章修复
 
+	// T285：这一块已经交过修正（章节副本在提交时就拷回 work/chapters 了）→ 直接
+	// 收账，不再把会话跑一遍。只有没交过（从没跑 / 被打断）的块才需要会话。
+	done := loadBlockResults(proj, round, sha)
+	collect := func(bi int, block StyleBlock, results map[string]bool, notes map[string]string) {
+		for _, base := range block.Chapters {
+			resolved, ok := results[base]
+			note := notes[base]
+			reportPath := filepath.Join(reportsDir, base+".md")
+			if !ok {
+				// 会话没汇报这一章：保守视为仍有问题。
+				resolved = false
+				note = "块修复会话未汇报本章"
+			}
+			conclusion := "无问题"
+			if !resolved {
+				conclusion = "存在问题"
+				remaining = append(remaining, base)
+			}
+			report := "- 结论: " + conclusion + "\n\n样式修复（第 " + strconv.Itoa(round) + " 轮，块 " + strconv.Itoa(bi+1) + "）: " + note + "\n"
+			_ = os.MkdirAll(reportsDir, 0o755)
+			_ = os.WriteFile(reportPath, []byte(report), 0o644)
+		}
+	}
+
 	for bi, block := range blocks {
+		if res, ok := done[strconv.Itoa(bi+1)]; ok {
+			r.log.Log(0, "[style-fix] 块", strconv.Itoa(bi+1), "已交过修正，沿用上一次的结论（",
+				strconv.Itoa(len(block.Chapters)), " 章）")
+			mu.Lock()
+			collect(bi, block, res.Resolved, res.Notes)
+			mu.Unlock()
+			continue
+		}
 		wg.Add(1)
 		tid := <-tidPool
 		go func(bi int, block StyleBlock, tid int) {
@@ -802,26 +1208,12 @@ func (r *Runner) styleFixBlocks(proj string, round int, blocks []StyleBlock, sto
 				mu.Unlock()
 				return
 			}
+			if serr := saveBlockResult(proj, round, bi+1, sha, blockResult{Resolved: results, Notes: notes}); serr != nil {
+				r.log.LogWarning(tid, "[style-fix] 块", strconv.Itoa(bi+1), "结论落盘失败:", serr)
+			}
 			mu.Lock()
 			defer mu.Unlock()
-			for _, base := range block.Chapters {
-				resolved, ok := results[base]
-				note := notes[base]
-				reportPath := filepath.Join(reportsDir, base+".md")
-				if !ok {
-					// 会话没汇报这一章：保守视为仍有问题。
-					resolved = false
-					note = "块修复会话未汇报本章"
-				}
-				conclusion := "无问题"
-				if !resolved {
-					conclusion = "存在问题"
-					remaining = append(remaining, base)
-				}
-				report := "- 结论: " + conclusion + "\n\n样式修复（第 " + strconv.Itoa(round) + " 轮，块 " + strconv.Itoa(bi+1) + "）: " + note + "\n"
-				_ = os.MkdirAll(reportsDir, 0o755)
-				_ = os.WriteFile(reportPath, []byte(report), 0o644)
-			}
+			collect(bi, block, results, notes)
 		}(bi, block, tid)
 	}
 	wg.Wait()
@@ -857,8 +1249,17 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	chapWork := filepath.Join(proj, "work", "chapters")
 	tag := fmt.Sprintf("stylefix-blk-r%d-%d", round, blockIdx)
 
+	// T283：块会话也能续——上一轮被打断时工作区（含已改过的章节副本）与转录都
+	// 还在，直接接着用；要重来由用户在外面删 work/temp/<tag>/ 与转录。
+	msgs, trPath, resume := sessionAttemptPath(filepath.Join(proj, "work", "sessions"), tag, "submit")
 	// 临时工作区：样式包 + 块内章节（.tex + parts 目录）+ 图片软链。
-	work, cleanWork, err := r.tempDir(proj, tag)
+	// 续跑时复用上一次被打断的工作区（里面有已改过的章节副本）；上一次已经交过
+	// 就是新的一次尝试，重新铺一份。
+	mkTemp := r.tempDir
+	if resume {
+		mkTemp = r.tempDirKeep
+	}
+	work, cleanWork, err := mkTemp(proj, tag)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -868,7 +1269,7 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	copyFile(filepath.Join(proj, "style", "example.tex"), filepath.Join(work, "example.tex"))
 	for _, asset := range []string{"images", "figures"} {
 		src := filepath.Join(proj, "source", asset)
-		if !fileExists(src) {
+		if !fileExists(src) || pathExists(filepath.Join(work, asset)) {
 			continue
 		}
 		if err := linkAbs(src, filepath.Join(work, asset)); err != nil {
@@ -877,7 +1278,12 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	}
 	chapSub := filepath.Join(work, "chapters")
 	_ = os.MkdirAll(chapSub, 0o755)
+	// 续跑时工作区里已经有章节副本：不再整体重铺（那会把上一轮改过的地方覆盖回
+	// 原始产物），只补缺失的。样式包以磁盘上的最新版为准（可能刚被上一轮改过）。
 	for _, base := range block.Chapters {
+		if resume && fileExists(filepath.Join(chapSub, base+".tex")) {
+			continue
+		}
 		tex := filepath.Join(chapWork, base+".tex")
 		if !fileExists(tex) {
 			continue
@@ -895,6 +1301,10 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	}
 
 	mounts := []Mount{{Name: "work", Dir: work}}
+	// T282：块内章节的正文常在 chapters/<章>/children/**，只能靠 ls/find 才看得
+	// 清楚（read_file/grep 都得先知道文件名）。
+	bashTmp, cleanBashTmp := r.sessionBashTemp(proj, tag+"-bash")
+	defer cleanBashTmp()
 	goal := NewGoalTool(filepath.Join(work, "plan.md"))
 	// T64（重构）：清单勾选改走共享存储的 problems 工具——提交时代码
 	// 直接核对存储里本块问题的勾选状态（T66 的 list.md/checked_problem_ids
@@ -905,6 +1315,8 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 		&EditWorkFileTool{Root: work},
 		&WriteWorkFileTool{Root: work, AnyExt: true},
 		&GrepTool{Mounts: mounts},
+		&WorkBashTool{Root: work, Mounts: mounts, TmpDir: bashTmp, MaxOutput: r.cfg.BashMaxOutput(),
+			Sandbox: r.cfg.BashSandboxEnabled(), Python: r.pythonEnv(proj), Log: r.log, Tid: tid},
 		&ViewImageTool{Root: filepath.Join(proj, "source"), Subject: "images", BareSearch: true, SoftMax: r.cfg.ViewImageMax(), WarnRatio: r.cfg.ViewWarnRatio()},
 		// T68：分块修复会话也要能看编译出的 PDF（真实运行中曾想看不能看）。
 		&ViewPDFTool{Mounts: mounts, Comp: r.comp, SoftMax: r.cfg.ViewPDFMax(), WarnRatio: r.cfg.ViewWarnRatio()},
@@ -921,7 +1333,13 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	sess := session.NewSession(r.clientFor(blockKey), r.modelOf(blockKey),
 		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.StyleFixBlockSystem), r.cfg.LatexSession("convert"), r.outputLang()),
 		tools, r.log, tid, tag)
-	trPath := filepath.Join(proj, "work", "sessions", tag+".jsonl")
+	if resume {
+		sess.SetMessages(msgs)
+		if _, st, serr := session.LoadTranscriptStats(trPath); serr == nil {
+			sess.SeedCounters(st.Rounds, st.Tools)
+		}
+		r.log.Log(0, "[style-fix] 块修复会话接着上次没交结论的转录继续"+resumeNote(len(msgs)))
+	}
 	if tr, terr := session.NewTranscript(trPath); terr == nil {
 		sess.SetTranscript(tr)
 		defer tr.Close()
@@ -933,9 +1351,13 @@ func (r *Runner) styleFixBlockSession(proj string, round, blockIdx int, clsName 
 	userText := "Style problems assigned to this block: " + strings.Join(block.ProblemIDs, ", ") +
 		" — use the problems tool to read each one's full detail; they are NOT pasted here." +
 		"\nYour chapters (in work:chapters/): " + strings.Join(block.Chapters, ", ") +
+		subdividedBlockNote(proj, block.Chapters) +
 		"\nThe class and manual in your workspace are the REVISED versions. Make minimal, targeted edits — never re-convert. " +
 		"Compile each chapter's wrapper (<base>_wrapper.tex) to verify (view_pdf the result if in doubt), " +
 		"tick every assigned problem off with problems check as you resolve it, then submit with one entry per chapter."
+	if resume {
+		userText = "Continue this block fix from where it stopped (the previous attempt ended without submit; your edited chapters are still in the workspace and the assigned problems are unchanged). " + userText
+	}
 	if _, err := sess.Run(session.RunOptions{UserText: userText}); err != nil {
 		return nil, nil, err
 	}

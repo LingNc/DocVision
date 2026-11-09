@@ -2,8 +2,7 @@ package latex
 
 import (
 	"fmt"
-	"html"
-	"net/url"
+	"mineru-tools/internal/reviewpage"
 	"os"
 	"path/filepath"
 	"sort"
@@ -70,165 +69,20 @@ func (p *motifReviewProbe) of(a, b *motifCandidate) (float64, bool) {
 	return v, true
 }
 
-// motifReviewItem 是复查页上的一个格子。
-type motifReviewItem struct {
-	Name  string // 文件名（同一页里够区分）
-	Ref   string // 完整引用，悬浮说明用
-	Image string // 相对 source/ 的图片路径（与 md 里的引用同一写法）
-	Thumb string // 相对 source/dedupe/ 的缩略图路径；空 = 没有缩略图，直接用原图
-	Note  string // 图下面那行小字（分数 / 副本数）
-	Key   bool   // 代表图
-}
+// 复查页的类型与渲染器都在 internal/reviewpage（会话预览页要按磁盘现状现渲染，
+// 与 dedupe 收尾写静态页共用同一份）。这里只保留别名与"数据怎么来"。
+// escapeURLPath 与核对页同一套路径转义（figures/、media 链接等多处要用）。
+func escapeURLPath(p string) string { return reviewpage.EscapeURLPath(p) }
 
-// motifReviewGroup 是复查页上的一个折叠分组。
-type motifReviewGroup struct {
-	No      int
-	Count   int
-	Class   string
-	Source  string
-	Min     string
-	Key     motifReviewItem
-	Members []motifReviewItem
-}
+type motifReviewItem = reviewpage.Item
+type motifReviewLink = reviewpage.Link
+type motifReviewGroup = reviewpage.Group
+type motifReviewDoc = reviewpage.Doc
 
-// motifReviewDoc 是复查页要显示的全部内容，与"用什么地址取图"无关：落盘页与
-// 会话预览页共用这一份数据结构和同一个渲染器。
-type motifReviewDoc struct {
-	Title       string
-	Intro       string
-	Rules       string
-	Stats       string
-	Artifacts   string
-	Groups      []motifReviewGroup
-	Independent []motifReviewItem
-}
+// renderMotifReviewHTML 渲染复查页（分组默认收起、图片走相对 URL、灯箱在页内）。
+func renderMotifReviewHTML(doc motifReviewDoc) string { return reviewpage.Page(doc) }
 
-// renderMotifReviewHTML 渲染复查页。分组一律折叠、图片一律走相对 URL（不内嵌
-// base64），灯箱在页内。
-func renderMotifReviewHTML(doc motifReviewDoc) string {
-	var b strings.Builder
-	b.WriteString("<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n")
-	b.WriteString("<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n")
-	fmt.Fprintf(&b, "<title>%s</title>\n<style>\n%s\n</style>\n</head>\n<body>\n", html.EscapeString(doc.Title), reviewStyle)
-	fmt.Fprintf(&b, "<h1>%s</h1>\n", html.EscapeString(doc.Title))
-	if doc.Intro != "" {
-		fmt.Fprintf(&b, "<p class=\"intro\">%s</p>\n", html.EscapeString(doc.Intro))
-	}
-	b.WriteString("<ul class=\"meta\">\n")
-	for _, line := range []string{doc.Rules, doc.Stats, doc.Artifacts} {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		fmt.Fprintf(&b, "<li>%s</li>\n", line)
-	}
-	b.WriteString("</ul>\n")
-
-	b.WriteString("<div class=\"bar\"><h2>分组</h2><span class=\"spacer\"></span>")
-	b.WriteString("<button type=\"button\" class=\"gb\" data-all=\"open\">全部展开</button>")
-	b.WriteString("<button type=\"button\" class=\"gb\" data-all=\"close\">全部收起</button>")
-	b.WriteString("</div>\n")
-	if len(doc.Groups) == 0 {
-		b.WriteString("<p class=\"empty\">没有分组（全部独立）。</p>\n")
-	}
-	for _, g := range doc.Groups {
-		src := g.Source
-		fmt.Fprintf(&b, "<details class=\"group\" data-no=\"%d\">\n<summary class=\"ghead\">", g.No)
-		fmt.Fprintf(&b, "<span class=\"no\">#%d</span><span class=\"cnt\">%d 张</span>", g.No, g.Count)
-		if g.Class != "" {
-			fmt.Fprintf(&b, "<span class=\"chip\">%s</span>", html.EscapeString(g.Class))
-		}
-		if src != "" {
-			fmt.Fprintf(&b, "<span class=\"chip src\">%s</span>", html.EscapeString(src))
-		}
-		if g.Min != "" {
-			fmt.Fprintf(&b, "<span class=\"min\">%s</span>", html.EscapeString(g.Min))
-		}
-		fmt.Fprintf(&b, "<span class=\"name\">%s</span>", html.EscapeString(g.Key.Name))
-		b.WriteString("</summary>\n<div class=\"gbody\">\n")
-		b.WriteString("<div class=\"key\">")
-		b.WriteString(motifReviewFigure(g.Key, "", "代表图 ★"))
-		fmt.Fprintf(&b, "<div class=\"keystats\"><div class=\"kname\">%s</div><div class=\"sub\">%s</div></div>",
-			html.EscapeString(g.Key.Name), html.EscapeString(g.Key.Note))
-		b.WriteString("</div>\n<div class=\"members\">\n")
-		for _, m := range g.Members {
-			if m.Key {
-				continue
-			}
-			b.WriteString(motifReviewFigure(m, "", m.Note))
-			b.WriteString("\n")
-		}
-		b.WriteString("</div>\n</div>\n</details>\n")
-	}
-
-	b.WriteString("<h2>独立</h2>\n")
-	if len(doc.Independent) == 0 {
-		b.WriteString("<p class=\"empty\">没有独立图（全部进了分组）。</p>\n")
-	}
-	b.WriteString("<div class=\"indep\">\n")
-	for _, it := range doc.Independent {
-		b.WriteString(motifReviewFigure(it, it.Name, it.Note))
-		b.WriteString("\n")
-	}
-	b.WriteString("</div>\n")
-
-	b.WriteString(reviewLightboxHTML)
-	fmt.Fprintf(&b, "<script>\n%s\n</script>\n</body>\n</html>\n", reviewScript)
-	return b.String()
-}
-
-// motifReviewFigure 渲染一张缩略图：永远套一层指向原图的链接，点了开灯箱。
-// name / note 各占一行——合成一句再靠 CSS 折行会把「0.648」这类数字从中间劈开。
-func motifReviewFigure(it motifReviewItem, name, note string) string {
-	full := html.EscapeString(motifReviewImageHref(it.Image))
-	thumb := strings.TrimSpace(it.Thumb)
-	if thumb != "" {
-		thumb = escapeURLPath(thumb)
-	}
-	title := it.Ref
-	if title == "" {
-		title = it.Name
-	}
-	// 灯箱里原图取不到时退回缩略图（比如原图软链挂了）：页面不至于只剩个破图标。
-	thumbAttr := ""
-	if thumb != "" {
-		thumbAttr = fmt.Sprintf(" data-thumb=\"%s\"", html.EscapeString(thumb))
-	}
-	var b strings.Builder
-	b.WriteString("<figure>")
-	fmt.Fprintf(&b, "<a class=\"shot\" href=\"%s\" data-full=\"%s\"%s title=\"%s  · 点开看大图\">",
-		full, full, thumbAttr, html.EscapeString(title))
-	if thumb == "" {
-		// 没有缩略图就直接用原图（老跑批的产物没有 thumbs/，也不能出现空图）。
-		fmt.Fprintf(&b, "<img src=\"%s\" alt=\"%s\" loading=\"lazy\" decoding=\"async\">", full, html.EscapeString(it.Name))
-	} else {
-		fmt.Fprintf(&b, "<img src=\"%s\" alt=\"%s\" loading=\"lazy\" decoding=\"async\" data-orig=\"%s\" onerror=\"this.onerror=null;this.src=this.dataset.orig\">",
-			html.EscapeString(thumb), html.EscapeString(it.Name), full)
-	}
-	b.WriteString("</a>")
-	if name != "" || note != "" {
-		b.WriteString("<figcaption>")
-		if name != "" {
-			fmt.Fprintf(&b, "<span class=\"nm\">%s</span>", html.EscapeString(name))
-		}
-		if note != "" {
-			fmt.Fprintf(&b, "<span class=\"nt\">%s</span>", html.EscapeString(note))
-		}
-		b.WriteString("</figcaption>")
-	}
-	b.WriteString("</figure>")
-	return b.String()
-}
-
-// motifReviewThumbName 是缩略图的文件名：内容摘要前 12 位 + .jpg。groups.json
-// 里每条结论都带完整的内容摘要，所以预览页不用额外存映射就能拼出同一个名字。
-// 摘要太短（测试数据、旧产物）就不写缩略图，页面直接用原图。
-func motifReviewThumbName(hash string) string {
-	h := strings.TrimSpace(hash)
-	if len(h) < 12 {
-		return ""
-	}
-	return "thumbs/" + h[:12] + ".jpg"
-}
+func motifReviewThumbName(hash string) string { return reviewpage.ThumbName(hash) }
 
 // motifReviewThumb 是一份待写盘的缩略图。
 type motifReviewThumb struct {
@@ -237,9 +91,9 @@ type motifReviewThumb struct {
 }
 
 // writeMotifReview 把本次 dedupe 的分组写成 source/dedupe/review.html（+ 缩略图）。
-func (r *Runner) writeMotifReview(dir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, scores map[string]float64) error {
+func (r *Runner) writeMotifReview(dir string, leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, scores map[string]float64, prog map[string]*imageProgress) error {
 	probe := &motifReviewProbe{scores: scores, shift: r.motifAlignShift(), budget: motifReviewProbeBudget}
-	doc, thumbs := r.motifReviewDocOf(leaders, copies, applied, probe)
+	doc, thumbs := r.motifReviewDocOf(leaders, copies, applied, probe, prog)
 	for _, t := range thumbs {
 		if t.Name == "" || len(t.Data) == 0 {
 			continue
@@ -259,7 +113,7 @@ func (r *Runner) writeMotifReview(dir string, leaders []*motifCandidate, copies 
 }
 
 // motifReviewDocOf 从本次运行的分组里整理出复查页内容，并顺手编好缩略图字节。
-func (r *Runner) motifReviewDocOf(leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, probe *motifReviewProbe) (motifReviewDoc, []motifReviewThumb) {
+func (r *Runner) motifReviewDocOf(leaders []*motifCandidate, copies map[*motifCandidate][]*motifCandidate, applied []motifAppliedGroup, probe *motifReviewProbe, prog map[string]*imageProgress) (motifReviewDoc, []motifReviewThumb) {
 	rules := r.motifCurrentRules()
 	thumbs := make([]motifReviewThumb, 0, len(leaders))
 	seen := map[string]bool{}
@@ -280,12 +134,19 @@ func (r *Runner) motifReviewDocOf(leaders []*motifCandidate, copies map[*motifCa
 		} else if name != "" {
 			it.Thumb = name
 		}
+		if pr := c.progress; pr != nil {
+			it.Status = imageStatusLabel(pr)
+			it.Links = imageArtifactLinks(pr)
+			if pr.Class != "" {
+				note = strings.TrimSpace(pr.Class + " · " + note)
+			}
+		}
 		it.Note = note
 		return it
 	}
 	doc := motifReviewDoc{
 		Title:     "dedupe 复查",
-		Intro:     "分组默认收起，点开一组看大图；点缩略图在页内放大（滚轮/双指缩放、拖动平移、再点一下关闭）。",
+		Intro:     "分组默认收起，点开一组看大图；点缩略图在页内放大（滚轮/双指缩放、拖动平移、再点一下关闭）。这是整组核验那一刻的快照（那时还没转换）：状态与成品要看会话预览页里同一个项目的核对页，那里按磁盘现状重算、原图与成品并排。",
 		Artifacts: "逐对明细 <code>metrics/pairs.csv</code>、桶 <code>metrics/buckets.json</code>、汇总 <code>report.md</code>、结论 <code>groups.json</code>",
 	}
 	doc.Rules = fmt.Sprintf("判据：与组中心重合 ≥ %.2f、平移 %.0f%%、本地自动定组 %.2f（0 = 关闭）",
@@ -385,28 +246,123 @@ func (r *Runner) motifReviewDocOf(leaders []*motifCandidate, copies map[*motifCa
 		}
 		doc.Independent = append(doc.Independent, item(c, note))
 	}
+	doc.Pending, doc.Degraded = r.motifReviewLooseSets(prog, applied, item)
 	return doc, thumbs
 }
 
-// motifReviewImageHref 是复查页到原图的相对链接：md 里的引用相对 source/，
-// 复查页在 source/dedupe/，所以加一层 ../（反斜杠统一成正斜杠，浏览器才认）。
-func motifReviewImageHref(imgPath string) string {
-	return "../" + escapeURLPath(imgPath)
+// motifReviewLooseSets 从 progress_items 里挑出两批图（P64）：还没收尾的
+// （等待转换）与已收尾但退回原图的（fallback）。两批都直接给原图与判定记录，
+// 因为核对比对时真正想看的就是这两类。
+func (r *Runner) motifReviewLooseSets(prog map[string]*imageProgress, applied []motifAppliedGroup, item func(*motifCandidate, string) motifReviewItem) (pending, degraded []motifReviewItem) {
+	inGroup := map[string]string{}
+	for i, g := range applied {
+		if g.Key == nil || g.Key.task == nil {
+			continue
+		}
+		_ = i
+		for _, m := range g.Members {
+			if m.task != nil {
+				inGroup[m.task.key()] = motifShortName(g.Key)
+			}
+		}
+	}
+	keys := make([]string, 0, len(prog))
+	for k := range prog {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		p := prog[k]
+		if p == nil || p.Absorbed {
+			continue
+		}
+		it := motifReviewItem{Name: filepath.Base(p.ImgPath), Ref: k, Image: p.ImgPath, Status: imageStatusLabel(p), Links: imageArtifactLinks(p)}
+		if g, ok := inGroup[k]; ok {
+			it.Note = "归组：" + g
+		}
+		switch {
+		case imageStatusSettled(p.Status):
+			if imageStatusQuality(p.Status) == "degraded" {
+				// 退回原图的图必须说清为什么退：状态只说"没画出成品"，
+				// 工具链缺失 / 校验没过 / 接口出错的处理方式完全不同。
+				if r := strings.TrimSpace(p.FallbackReason); r != "" {
+					it.Note = strings.TrimSpace(it.Note + " · " + r)
+				}
+				degraded = append(degraded, it)
+			}
+		default:
+			if p.Class == "" {
+				it.Note = "还没分类"
+			}
+			pending = append(pending, it)
+		}
+	}
+	return pending, degraded
 }
 
-// escapeURLPath 按路径段转义：中文书名、空格、# 与 ? 都得转义，否则浏览器会
-// 按另一条路径去取图（曾经直接拼原字符串，路径里有空格的书就全打不开）。
-func escapeURLPath(p string) string {
-	p = strings.TrimSpace(filepath.ToSlash(p))
-	p = strings.TrimPrefix(p, "/")
-	if p == "" {
+// imageStatusLabel 是给页面看的状态词：一律以 progress_items 的 status 为准，
+// 空状态明确写成"未处理"，不留一个空白让读者自己猜。
+func imageStatusLabel(p *imageProgress) string {
+	if p == nil {
 		return ""
 	}
-	parts := strings.Split(p, "/")
-	for i, s := range parts {
-		parts[i] = url.PathEscape(s)
+	switch p.Status {
+	case ImageStatusDone:
+		return "已完成"
+	case ImageStatusFallback:
+		return "退回原图"
+	case ImageStatusError:
+		return "失败"
+	case ImageStatusClassified:
+		return "已分类待处理"
+	case "":
+		return "未处理"
 	}
-	return strings.Join(parts, "/")
+	return p.Status
+}
+
+// imageArtifactLinks 列出一张图的验收材料：判定记录（progress_items 里的那条
+// json）与转换产物（TikZ/PDF/PNG/SVG）。链接相对 source/dedupe/。
+func imageArtifactLinks(p *imageProgress) []motifReviewLink {
+	if p == nil {
+		return nil
+	}
+	var out []motifReviewLink
+	if p.MDName != "" && p.ImgPath != "" {
+		rel := "../progress_items/" + reviewpage.EscapeURLPath(sanitizeName(p.MDName)) + "/" + reviewpage.EscapeURLPath(sanitizeName(p.ImgPath)) + ".json"
+		out = append(out, motifReviewLink{Label: "判定记录", Href: rel})
+	}
+	// 转换结果与它的来源：PDF/PNG/SVG 在 figures/，LaTeX 源在 tikz/，作图会话的
+	// 转录在 sessions/vector_<名>.jsonl——三样都能从 figures/<名>.pdf 推出来，
+	// 所以只有真画过的图才有这几个入口。
+	if base := figureBaseName(p.FigPDF); base != "" {
+		out = append(out, motifReviewLink{Label: "LaTeX 源", Href: "../tikz/" + reviewpage.EscapeURLPath(base) + ".tex"})
+		out = append(out, motifReviewLink{Label: "会话", Href: "../sessions/" + reviewpage.EscapeURLPath("vector_"+base+".jsonl")})
+	}
+	for _, f := range []struct{ label, href string }{
+		{"PDF", p.FigPDF},
+		{"PNG", p.FigPNG},
+		{"SVG", p.FigSVG},
+	} {
+		if strings.TrimSpace(f.href) == "" {
+			continue
+		}
+		h := f.href
+		if !strings.HasPrefix(h, "http") {
+			h = "../" + strings.TrimPrefix(filepath.ToSlash(h), "/")
+		}
+		out = append(out, motifReviewLink{Label: f.label, Href: h})
+	}
+	return out
+}
+
+// figureBaseName 从 figures/<名>.pdf 取出 <名>：LaTeX 源与作图转录都以它命名。
+func figureBaseName(figPDF string) string {
+	base := filepath.Base(strings.TrimSpace(filepath.ToSlash(figPDF)))
+	if base == "" || base == "." {
+		return ""
+	}
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 // motifShortName 是复查页上显示的名字：只要文件名（同一页里够区分）。

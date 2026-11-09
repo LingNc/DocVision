@@ -1,10 +1,13 @@
-package latex
+// Package reviewpage 是图片核对页的渲染器：样式、灯箱脚本与卡片/分段的 HTML 都在
+// 这里，只有磁盘事实（列表、状态、链接）由调用方给。两处共用同一份渲染器——
+// latex 在 dedupe 收尾时写静态 review.html，会话预览页按磁盘现状现渲染。
+package reviewpage
 
 // T154：复查页的样式与灯箱脚本（单文件、无外链，file:// 与 http 都能用）。
 // 分组的展开/收起用原生 <details>，默认收起；灯箱与 Web 会话预览页同一套手势：
 // 滚轮 / 双指缩放都锚在指针位置、拖动平移、点图片或空白处关闭、Esc 关闭。
 
-const reviewStyle = `:root{color-scheme:light dark;--bg:#f7f6f3;--card:#fff;--line:#e4e0d8;--fg:#232323;--dim:#6b6b6b;--chip:#efece5}
+const Style = `:root{color-scheme:light dark;--bg:#f7f6f3;--card:#fff;--line:#e4e0d8;--fg:#232323;--dim:#6b6b6b;--chip:#efece5}
 *{box-sizing:border-box}
 body{margin:0;padding:18px 20px 64px;font:14px/1.55 -apple-system,"Segoe UI",system-ui,"Noto Sans CJK SC","PingFang SC",sans-serif;background:var(--bg);color:var(--fg)}
 h1{font-size:18px;margin:0 0 6px}
@@ -32,6 +35,7 @@ summary.ghead .min{color:#8a6d3b;font-variant-numeric:tabular-nums}
 .gbody{padding:10px 12px 12px;border-top:1px solid var(--line)}
 .key{display:flex;gap:12px;align-items:flex-start;margin:2px 0 12px}
 .key figure{width:180px;flex:none}
+.key figure:has(.shot.conv){width:372px}
 .key figcaption{color:var(--dim)}
 .keystats{min-width:0;padding-top:2px}
 .kname{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;word-break:break-all}
@@ -39,9 +43,17 @@ summary.ghead .min{color:#8a6d3b;font-variant-numeric:tabular-nums}
 .members,.indep{display:flex;flex-wrap:wrap;gap:10px}
 figure{margin:0;width:104px;text-align:center}
 figure img{display:block;width:100%;height:auto;background:#fff;border:1px solid #eee;border-radius:4px}
+/* P64：原图与成品并排——核对时比的就是这两张，上下叠着看不出差别。 */
+figure:has(.shot.conv){width:216px}
+.shot{display:inline-block;width:100%;vertical-align:top;position:relative}
+figure:has(.shot.conv) .shot{width:calc(50% - 3px)}
+.shot.conv{margin-left:4px}
+.shot .tag{display:none}
 figcaption{font-size:11px;color:#555;margin-top:3px}
 figcaption .nm{display:block;word-break:break-all}
 figcaption .nt{display:block;word-break:normal;overflow-wrap:anywhere;color:var(--dim)}
+figcaption .st{display:inline-block;margin-top:2px;padding:0 5px;border-radius:999px;background:var(--chip);font-size:10.5px}
+figcaption .lk{display:block;margin-top:2px;font-size:10.5px}
 a{color:#0b6bcb;text-decoration:none}
 a.shot{display:block;cursor:zoom-in}
 .empty{color:var(--dim);font-size:12.5px}
@@ -55,7 +67,7 @@ a.shot{display:block;cursor:zoom-in}
 .lb-bar .pct{min-width:44px;text-align:center;font-variant-numeric:tabular-nums}
 .lb-bar .hint{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aaa;padding:0 4px}
 body.lb-open{overflow:hidden}
-@media (max-width:640px){figure{width:84px}.key figure{width:132px}.lb-bar .hint{display:none}}
+@media (max-width:640px){figure{width:84px}figure:has(.shot.conv){width:176px}.key figure{width:132px}.key figure:has(.shot.conv){width:272px}.lb-bar .hint{display:none}}
 @media (prefers-color-scheme:dark){
 :root{--bg:#16181c;--card:#1e2126;--line:#2c3036;--fg:#ddd;--dim:#9a9a9a;--chip:#272b31}
 figure img{background:#111;border-color:#2c3036}
@@ -65,7 +77,7 @@ summary.ghead .name{color:#777}
 .chip.src{background:#22334a;color:#9dc3ef}
 }`
 
-const reviewLightboxHTML = `<div class="lb" id="lb" hidden>
+const LightboxHTML = `<div class="lb" id="lb" hidden>
 <img id="lb-img" alt="">
 <div class="lb-bar">
 <button type="button" data-lb="out" title="缩小">−</button>
@@ -78,7 +90,7 @@ const reviewLightboxHTML = `<div class="lb" id="lb" hidden>
 </div>
 `
 
-const reviewScript = `(function(){
+const Script = `(function(){
 var lb=document.getElementById('lb'),im=document.getElementById('lb-img'),pct=document.getElementById('lb-pct');
 if(!lb||!im)return;
 var MIN=0.1,MAX=8,scale=1,tx=0,ty=0,moved=false,drag=null,pinch=null,ids=Object.create(null);

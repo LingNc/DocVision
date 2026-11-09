@@ -83,6 +83,12 @@ func (t *DocSearchTool) Execute(argsJSON string) (session.ToolResult, error) {
 	for _, e := range hits {
 		b.WriteString(t.formatEntry(e) + "\n")
 	}
-	b.WriteString("Each hit shows its exact source page (view_pdf {path:\"<source>:<file>\", page:<local page>}); list_source_pages {page: pN} prints that page's text and images. The bbox is NOT in PDF points: it uses MinerU's layout coordinate space, which is about 2x the page's point size (a 493x720pt page reaches ~986x1440), so never divide it by the printed page size. When you need a crop, use the crop percentages printed with the hit. Adjacency in the index does NOT imply relation.")
+	if t.View == nil {
+		// 没有原书 PDF 视图时别教模型去开一个不存在的挂载点（T292）。
+		b.WriteString("NOTE: the original-page PDF view is NOT available in this session — do not try view_pdf on \"source:\"; work from the snippets above.\n")
+	} else {
+		b.WriteString("Each hit shows its exact source page (view_pdf {path:\"<source>:<file>\", page:<local page>}); list_source_pages {page: pN} prints that page's text and images.")
+	}
+	b.WriteString(" The bbox is NOT in PDF points: it uses MinerU's layout coordinate space, which is about 2x the page's point size (a 493x720pt page reaches ~986x1440), so never divide it by the printed page size. When you need a crop, use the crop percentages printed with the hit. Adjacency in the index does NOT imply relation.")
 	return session.ToolResult{Text: b.String()}, nil
 }

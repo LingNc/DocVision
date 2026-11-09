@@ -225,7 +225,7 @@ func TestPlanPageMarksWithoutMinerU(t *testing.T) {
 // 字符类，content_list 永远找不到 → 整本书 0 标记。ReadDir 版本必须认。
 func TestPageContentListPathBracketName(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "[a4] 大雪深埋_part1")
+	dir := filepath.Join(root, "[a4] 某书_part1")
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "abc_content_list.json"), []byte("[]"), 0o644)
 	os.WriteFile(filepath.Join(dir, "abc_content_list_v2.json"), []byte("[]"), 0o644)
