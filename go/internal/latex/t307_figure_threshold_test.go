@@ -9,6 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mineru-tools/internal/config"
+	"mineru-tools/internal/logger"
+	"mineru-tools/internal/retryq"
 )
 
 // T307/P78：重画图的提交门槛。软墨重叠或尺寸偏差不达标就不能交——回执要把
@@ -291,5 +295,43 @@ func TestAcceptAsIsSubmitLimitDisabled(t *testing.T) {
 	}
 	if !res.Terminal {
 		t.Fatalf("负数是关闭这条限制，第一次就该放行：%s", res.Text)
+	}
+}
+
+// T308：点了"重画"却在 images 阶段整段持锁期间毫无动静——请求必须留在队列里
+// （不能被悄悄吃掉），并且在页面上仍然算"待重试"。这里钉住"不消费"这一半。
+func TestVectorRetryStaysQueuedWhileImagesHoldsLock(t *testing.T) {
+	proj := t.TempDir()
+	trName := "vector_book__abc__fig.jsonl"
+	for _, d := range []string{
+		filepath.Join(proj, "source", "sessions"),
+		filepath.Join(proj, "source", "progress_items", "book.md"),
+		filepath.Join(proj, "work"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(proj, "source", "sessions", trName), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := retryq.Queue(proj, retryq.Request{Project: "book", Role: "vector", Path: trName, Reason: "测试"}); err != nil {
+		t.Fatal(err)
+	}
+	log, err := logger.NewLogger(filepath.Join(proj, "run.log"), filepath.Join(proj, "err.log"), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewRunner(&config.Config{}, log)
+	if why := r.vectorRetryPrecondition(proj, trName); why != "" {
+		t.Fatalf("前置条件该通过：%s", why)
+	}
+	r.vectorMu.Lock() // 模拟 images 阶段整段持锁
+	defer r.vectorMu.Unlock()
+	if n := r.dispatchRetries(proj); n != 0 {
+		t.Fatalf("锁被占着时不该派发，实际 %d", n)
+	}
+	if got := len(retryq.Pending(proj)); got != 1 {
+		t.Fatalf("请求必须留在队列里等着，实际剩 %d", got)
 	}
 }

@@ -1176,7 +1176,15 @@ func (r *Runner) dispatchRetries(proj string) int {
 		// 矢量图重画（P53）：请求没有章节，按转录名定位那一条作图会话。
 		if retryRoleOf(f.Request) == "vector" {
 			if !r.vectorMu.TryLock() {
-				continue // 已经有一张在重画：留队等它跑完（进度文件不能并发写）
+				// 拿不到锁就只有两种可能：images 阶段整段持锁（它要写同一批
+				// progress_items），或者另一张图正在重画。以前这里静悄悄 continue，
+				// 页面上点了"重画"却几十分钟毫无动静、日志里也一个字没有，用户只能
+				// 猜请求去哪了（T308）。现在按请求节流留一行，说明在等谁。
+				if !r.retryWarnOnce(f.Path, f.Request.Path+" 等图片阶段结束") {
+					r.log.LogInfo(0, "[vector]", f.Request.Path,
+						"重画请求排队中：图片阶段 / 另一张重画正在进行（进度文件不能并发写），等它结束就轮到这一张")
+				}
+				continue
 			}
 			if why := r.vectorRetryPrecondition(proj, f.Request.Path); why != "" {
 				r.vectorMu.Unlock()
