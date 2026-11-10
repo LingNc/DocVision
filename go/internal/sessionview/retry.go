@@ -885,6 +885,13 @@ type truncateRequest struct {
 // 安全三条：① 可能还在写就拒（90 秒内有更新或有 .partial）；② 动手前把整份
 // 原始转录复制到 work/sessions/.trash/ 下，随时能捞回来；③ 只认 transcripts
 // 目录里的 *.jsonl，落盘用临时文件 + rename，中途失败不会留下半份转录。
+// figureRedrawFields 是"这张图要重画"就该清掉的成品字段（T314/T315 共用）：
+// 清掉以后下游只看磁盘上的成品文件，不会再读到一条自称已完成却没有产物的记录。
+var figureRedrawFields = []string{
+	"tikz_code", "figure_pdf", "figure_png", "figure_svg", "error",
+	"fallback_reason", "content", "svg_failed", "original_kept",
+}
+
 // vectorTranscriptHash 从作图转录名里取出图片哈希：
 // vector_<md名>__<图片哈希>__<label>.jsonl（T314）。
 func vectorTranscriptHash(name string) string {
@@ -935,12 +942,9 @@ func requeueVectorProgress(projDir, trName string) (int, string, error) {
 			continue
 		}
 		rec["status"] = "classified"
-		for _, k := range []string{
-			"tikz_code", "figure_pdf", "figure_png", "figure_svg", "error",
-			"fallback_reason", "content", "svg_failed", "original_kept",
+		for _, k := range append(append([]string{}, figureRedrawFields...),
 			"fig_best_overlap", "fig_scale_dev", "fig_score_backfilled",
-			"fig_accept_as_is", "fig_accept_note",
-		} {
+			"fig_accept_as_is", "fig_accept_note") {
 			delete(rec, k)
 		}
 		out, merr := json.MarshalIndent(rec, "", "  ")

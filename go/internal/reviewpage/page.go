@@ -221,7 +221,11 @@ document.addEventListener('click', function (ev) {
     .then(function (r) { return r.text().then(function (t) { return [r.ok, t]; }); })
     .then(function (pair) {
       if (!pair[0]) { msg.textContent = '保存失败：' + (pair[1] || '服务端拒绝'); return; }
-      msg.textContent = act === 'accept' ? '已按尽力还原接受（这张图不再自动重画）' : (act === 'clear' ? '已撤销接受' : '阈值已保存');
+      // T315：抬高门槛时服务端会把这张图当场标回待处理，回执写在 note 里。
+      var out = {};
+      try { out = JSON.parse(pair[1] || '{}'); } catch (e) {}
+      var done = act === 'accept' ? '已按尽力还原接受（这张图不再自动重画）' : (act === 'clear' ? '已撤销接受' : (out.note || '阈值已保存'));
+      msg.textContent = done;
       if (act === 'save') num.value = '';
     })
     .catch(function (e) { msg.textContent = '保存失败：' + e; });

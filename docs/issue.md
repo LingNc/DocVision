@@ -2539,3 +2539,7 @@ user 轮
   根因：`/api/truncate`（⤫）与 `/api/drop` 只动 `source/sessions/vector_*.jsonl`；`pending` 只收 status≠done。
   改：截断/删除成功后按转录名里的图片哈希找回进度条目，`status=classified` 并清成品与成绩（保留分类、dedupe、`fig_min_overlap`）；回执带一句 note，前端回执显示。
   验证：三例（正常翻转+清字段+留阈值 / dedupe 副本不翻 / 章节转录不碰逐图进度）全绿；现场 32 份截断留档先前全是 done。
+[X][ ] T315. 抬高某张图的提交门槛要等下一轮启动才退回，改完当场什么也不发生。
+  根因：`/api/figure-override` 只写 `fig_min_overlap`，退回只发生在运行启动时的 `requeueBelowThreshold`。
+  改：写阈值时若新门槛高于这张图上次成绩（且已完成、有成绩、没被「尽力还原」接受过），当场 `status=classified` 并清成品字段；回执带 note 与 `requeued`，会话页与核对页都显示这句。
+  验证：四条测试（抬高→退回+留阈值与成绩 / 低于成绩与用全局不动 / 接受过的图不动 / 没成绩不动）全绿。
