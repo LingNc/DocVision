@@ -12689,11 +12689,12 @@
       return false;
     }
     const s = state.current;
-    if (!s || !s.chapterId) return false;
+    if (!s || !canCutFrom(s)) return false;
     const keep = line - 1;
+    const vector = s.stage === "vector";
     const child = String(s.chapterId || "").indexOf("_child_") >= 0;
     const parent = child ? String(s.chapterId).slice(0, String(s.chapterId).indexOf("_child_")) : "";
-    const then = child ? "接着点顶栏的「继续跑父章节」（" + parent + "）让它跑起来：子章节不会单独重跑，父节点重新驱动这一支时会从这条截断后的转录续跑" : "运行中的 latex 会从这条会话接着跑（也可以点「继续跑」排一次）";
+    const then = vector ? "这张图会从这条截断后的转录接着画：让它重新排进重画（例如把阈值调高让它被退回，或下次运行把它退回）即可；点「重画这张图」是从头开新会话（旧转录留档成 .tryN），不是接着这条" : child ? "接着点顶栏的「继续跑父章节」（" + parent + "）让它跑起来：子章节不会单独重跑，父节点重新驱动这一支时会从这条截断后的转录续跑" : "运行中的 latex 会从这条会话接着跑（也可以点「继续跑」排一次）";
     const ask2 = "删掉第 " + line + " 条及之后（共 " + keep + " 条保留）并继续这条会话？\n\n就地截断当前转录，不新开尝试、不复制会话；原文会先备份到 work/sessions/.trash/。想保留一份对照，请先点 ⤓ 显式 fork 一条同样的会话再在这里操作。";
     if (!window.confirm(ask2)) return false;
     setRetryNote("正在就地截断到第 " + keep + " 条…");

@@ -2527,3 +2527,7 @@ user 轮
   根因：`serveRetryCancel` 对 role=vector 拿 `f.Path`（**队列文件名** `req-<纳秒>-vector-….json`）去和转录名比，永远不相等；转录名在 `f.Request.Path` 里（同一处 `dispatchRetries` 用的就是后者）。
   改：改比 `f.Request.Path`；撤销成功即 `removed:1`、队列立刻少一条。
   验证：`TestCancelVectorRedrawRequest`（排一条 vector 请求再撤销，回执 1 条、队列空）。
+[X][ ] T311. 对话页/轨迹页对作图会话点「裁剪」（⤫ 就地截断）**完全没有反应**：不弹确认框、不发请求、也没有任何提示。
+  根因：`web/src/fork.ts` 的 `dropFromLine` 头一句是 `if (!s || !s.chapterId) return false`，而作图会话的 `chapterId` 是 `null`（`/api/index` 里核实过），于是点击在处理函数第一行就静默返回；按钮能否出现走的是 `canCutFrom`（它允许 vector），两处判据不一致。
+  改：判定统一走 `canCutFrom(s)`；作图会话的"然后怎么继续"文案单独写（要让它重新排进重画才会接着这条截断后的转录，点「重画这张图」是从头开新会话）。
+  验证：playwright 开真页面点旧构建 → 12 个 ⤫、点击无确认框无 POST（复现）；本地 fixture + 新构建 → 确认框「删掉第 3 条及之后（共 2 条保留）…」→ POST /api/truncate → 文件 6 行变 2 行、备份落 `work/sessions/.trash/`、提示「已截断：保留 2 条、丢掉 4 条」、控制台零错误（`tests/t311-vector-cut.spec.ts` 钉住 canCutFrom 的口径）。
