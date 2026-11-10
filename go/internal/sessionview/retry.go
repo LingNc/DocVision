@@ -107,7 +107,11 @@ func (v *viewerServer) serveRetryCancel(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 		if role == "vector" {
-			if path == "" || filepath.Base(f.Path) != path {
+			// T310：转录名在 f.Request.Path 里；f.Path 是**队列文件名**
+			// （req-<纳秒>-vector-….json）。以前拿它跟转录名比，永远不等，
+			// 于是「撤销这个请求」对作图会话一律 removed:0——页面据此说
+			// "已经被 latex 消费，撤不回来了"，其实请求还躺在队列里。
+			if path == "" || filepath.Base(f.Request.Path) != path {
 				continue
 			}
 		} else if strings.TrimSuffix(f.Chapter, ".md") != chapter {

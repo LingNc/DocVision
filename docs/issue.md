@@ -2523,3 +2523,7 @@ user 轮
   根因：`/api/truncate` 与 `/api/drop` 共用的 `transcriptUnderWork` 只认 `<项目>/work/` 之下的绝对路径，而作图转录是 images 阶段写进 `<项目>/source/sessions/` 的——解析直接 400「转录不在这个项目的工作区里」（只给文件名则 404「转录不存在」）。
   改：抽出 `transcriptUnderProject`，同时接受 `work/`（含递归子章节细分树）与 `source/sessions/`；裸文件名先 `work/sessions/` 再 `source/sessions/`；删除回执不再对作图会话谎称"work/attempts 里的归档也一起删了"。
   验证：`TestTruncateVectorTranscript`／`TestTruncateVectorTranscriptByBareName`／`TestDropVectorTranscript`／`TestTranscriptResolverRejectsOtherPaths`；线上同一请求由 400 变 200（`line=0` 探针）。
+[X][ ] T310. 页面上点「撤销这个请求」撤不掉作图重画：回执 removed:0，还反过来提示"已经被 latex 消费，撤不回来了"。
+  根因：`serveRetryCancel` 对 role=vector 拿 `f.Path`（**队列文件名** `req-<纳秒>-vector-….json`）去和转录名比，永远不相等；转录名在 `f.Request.Path` 里（同一处 `dispatchRetries` 用的就是后者）。
+  改：改比 `f.Request.Path`；撤销成功即 `removed:1`、队列立刻少一条。
+  验证：`TestCancelVectorRedrawRequest`（排一条 vector 请求再撤销，回执 1 条、队列空）。

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mineru-tools/internal/retryq"
 )
 
 // T309：作图会话的转录在 source/sessions/ 下，而"就地截断"和"删除这条记录"共用
@@ -110,5 +112,32 @@ func TestTranscriptResolverRejectsOtherPaths(t *testing.T) {
 	rec := postJSONTo(t, v, "/api/truncate", map[string]any{"project": "书A", "path": outside, "line": 1})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("会话目录之外的 jsonl 一律拒，实际 %d：%s", rec.Code, rec.Body.String())
+	}
+}
+
+// T310：撤销排队请求时拿队列文件名（req-….json）去跟转录名比，永远不等——
+// 页面于是说"已经被 latex 消费，撤不回来了"，其实请求还在队里。
+func TestCancelVectorRedrawRequest(t *testing.T) {
+	v, proj, full := vectorTranscriptFixture(t)
+	name := filepath.Base(full)
+	if _, err := retryq.Queue(proj, retryq.Request{Project: "书A", Role: "vector", Path: name, Reason: "图不对，重画"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(retryq.Pending(proj)); got != 1 {
+		t.Fatalf("排上之后应当有 1 条，实际 %d", got)
+	}
+	rec := postJSONTo(t, v, "/api/retry/cancel", map[string]any{"project": "书A", "role": "vector", "path": name})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("撤销应当成功，实际 %d：%s", rec.Code, rec.Body.String())
+	}
+	var res map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if n := int(res["removed"].(float64)); n != 1 {
+		t.Fatalf("应当撤销 1 条，实际 %d：%s", n, rec.Body.String())
+	}
+	if got := len(retryq.Pending(proj)); got != 0 {
+		t.Fatalf("撤销后队列应当空，实际剩 %d", got)
 	}
 }
