@@ -50,6 +50,9 @@ func TestCompileFigureToolFromFile(t *testing.T) {
 		t.Error("standalone.pdf missing")
 	}
 
+	// T307：submit 现在要求先真做过一次对比（门槛本身靠零值 MinOverlap 关掉，
+	// 但"必须先 compare"这条硬门禁在）。这里测的是"按路径提交"，不是门槛。
+	state.compareCalled = true
 	sub := &SubmitFigureTool{State: state}
 	res, err = sub.Execute(`{"path":"figure.tex"}`)
 	if err != nil {

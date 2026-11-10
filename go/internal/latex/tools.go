@@ -35,6 +35,15 @@ type tikzState struct {
 	scaleDevAtBest float64
 	bestScaleX     float64
 	bestScaleY     float64
+	// T312：尺寸那一项的"量的是什么"——mm（有物理尺寸）还是 aspect（只有宽高比），
+	// 以及明细，打回时能把两个数字并排给出来。
+	sizeUnitAtBest   string
+	aspectRefAtBest  float64
+	aspectCandAtBest float64
+	inkRefWAtBest    float64
+	inkRefHAtBest    float64
+	inkCandWAtBest   float64
+	inkCandHAtBest   float64
 	// acceptedAsIs / acceptNote：模型（或人）选择"达不到阈值但已尽力"提交。
 	// 粘性：记录写进 progress item，之后这张图不再自动重画，只有手动点重画才动。
 	acceptedAsIs bool
@@ -220,8 +229,21 @@ func (t *SubmitFigureTool) thresholdShortfall() string {
 			t.State.bestOverlap*100, t.MinOverlap*100, (t.MinOverlap-t.State.bestOverlap)*100))
 	}
 	if t.MaxScaleDev > 0 && t.State.scaleDevAtBest > t.MaxScaleDev {
-		parts = append(parts, fmt.Sprintf("宽高尺寸偏差 %.1f%% > 上限 %.1f%%（宽的 %.2f 倍、高的 %.2f 倍）",
-			t.State.scaleDevAtBest*100, t.MaxScaleDev*100, t.State.bestScaleX, t.State.bestScaleY))
+		// 尺寸一律按**物理尺寸**（mm）量（T312）：以前比的是两张图的墨迹像素宽高，
+		// 那等于拿 PDF 渲染 DPI 除原扫描分辨率，数字本身不可比。
+		switch t.State.sizeUnitAtBest {
+		case "mm":
+			parts = append(parts, fmt.Sprintf("墨迹尺寸偏差 %.1f%% > 上限 %.1f%%（宽 %.1fmm → %.1fmm = 原图的 %.2f 倍；高 %.1fmm → %.1fmm = %.2f 倍）",
+				t.State.scaleDevAtBest*100, t.MaxScaleDev*100,
+				t.State.inkRefWAtBest, t.State.inkCandWAtBest, t.State.bestScaleX,
+				t.State.inkRefHAtBest, t.State.inkCandHAtBest, t.State.bestScaleY))
+		case "aspect":
+			parts = append(parts, fmt.Sprintf("墨迹宽高比偏差 %.1f%% > 上限 %.1f%%（原图 %.2f:1，你画的是 %.2f:1；物理尺寸查不到，只能比形状）",
+				t.State.scaleDevAtBest*100, t.MaxScaleDev*100, t.State.aspectRefAtBest, t.State.aspectCandAtBest))
+		default:
+			parts = append(parts, fmt.Sprintf("宽高尺寸偏差 %.1f%% > 上限 %.1f%%（宽的 %.2f 倍、高的 %.2f 倍）",
+				t.State.scaleDevAtBest*100, t.MaxScaleDev*100, t.State.bestScaleX, t.State.bestScaleY))
+		}
 	}
 	if len(parts) == 0 {
 		return ""

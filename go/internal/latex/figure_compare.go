@@ -70,6 +70,7 @@ func (t *compareFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 			return session.ToolResult{Text: "Comparison unavailable: pdf_path escapes the figure workspace."}, nil
 		}
 	}
+	refMeasure := MeasureImage(t.OriginalPath)
 	if _, err := os.Stat(pdfPath); err != nil {
 		return session.ToolResult{Text: "Comparison unavailable: PDF not found: " + err.Error()}, nil
 	}
@@ -89,7 +90,14 @@ func (t *compareFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	if err != nil {
 		return session.ToolResult{Text: "Comparison unavailable: cannot read compiled preview: " + err.Error()}, nil
 	}
-	result, _, err := compareFigureImages(original, candidate)
+	// 画布物理尺寸（T312）：原图用 MinerU 解析出来的印刷尺寸，候选用 PDF 页
+	// 的真实尺寸（standalone 页被裁到图形外沿，页尺寸≈图形尺寸+边距）。
+	// 两边都拿不到时 measureFigureSize 退到宽高比，不会瞎比像素。
+	mm := figureCanvasMM{RefW: refMeasure.WidthMM, RefH: refMeasure.HeightMM}
+	if w, h, ok := pdfPageSizeMM(pdfPath, 1); ok {
+		mm.CandW, mm.CandH = w, h
+	}
+	result, _, err := compareFigureImagesMM(original, candidate, mm)
 	if err != nil {
 		return session.ToolResult{Text: "Comparison unavailable: " + err.Error()}, nil
 	}
@@ -130,7 +138,9 @@ func (t *compareFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	if err := png.Encode(&encoded, overlay); err != nil {
 		return session.ToolResult{Text: "Comparison unavailable: cannot encode comparison overlay: " + err.Error()}, nil
 	}
-	text := fmt.Sprintf("Soft-ink overlap: %.2f%% (R %.2f%%, G %.2f%%, B %.2f%%, gray %.2f%%). Ink size vs original: width x%.3f, height x%.3f (max deviation %.1f%% — this is measured BEFORE the comparison rescales the candidate, so it does catch a wrong width/height; fix the canvas/coordinates rather than the stroke width). Estimated candidate translation applied: dx=%d px, dy=%d px. Alignment starts: %s. Detail=%s, crop=%.1f%%,%.1f%%-%.1f%%,%.1f%%, output=%dx%dpx. Overlay key: white=shared ink, magenta=original-only ink, green=candidate-only ink, black=background.", result.Similarity*100, result.Channels[0]*100, result.Channels[1]*100, result.Channels[2]*100, result.Gray*100, result.ScaleX, result.ScaleY, result.ScaleDev*100, result.DX, result.DY, formatAlignmentRuns(result.Runs), detail, left, top, right, bottom, overlay.Bounds().Dx(), overlay.Bounds().Dy())
+	text := fmt.Sprintf("Soft-ink overlap: %.2f%% (R %.2f%%, G %.2f%%, B %.2f%%, gray %.2f%%). %s Estimated candidate translation applied: dx=%d px, dy=%d px. Alignment starts: %s. Detail=%s, crop=%.1f%%,%.1f%%-%.1f%%,%.1f%%, output=%dx%dpx. Overlay key: white=shared ink, magenta=original-only ink, green=candidate-only ink, black=background.",
+		result.Similarity*100, result.Channels[0]*100, result.Channels[1]*100, result.Channels[2]*100, result.Gray*100,
+		figureSizeSentence(result), result.DX, result.DY, formatAlignmentRuns(result.Runs), detail, left, top, right, bottom, overlay.Bounds().Dx(), overlay.Bounds().Dy())
 	t.State.compareCalled = true
 	// 记账给提交门槛（T307）：取这次之前最好的那一份成绩。尺寸偏差跟着
 	// 最好那一次走，避免"形状最像的那版尺寸差"被另一版的好尺寸抵掉。
@@ -139,6 +149,13 @@ func (t *compareFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 		t.State.scaleDevAtBest = result.ScaleDev
 		t.State.bestScaleX = result.ScaleX
 		t.State.bestScaleY = result.ScaleY
+		t.State.sizeUnitAtBest = result.SizeUnit
+		t.State.aspectRefAtBest = result.AspectRef
+		t.State.aspectCandAtBest = result.AspectCand
+		t.State.inkRefWAtBest = result.InkRefW
+		t.State.inkRefHAtBest = result.InkRefH
+		t.State.inkCandWAtBest = result.InkCandW
+		t.State.inkCandHAtBest = result.InkCandH
 	}
 	return session.ToolResult{Text: text, ImageBase64: base64.StdEncoding.EncodeToString(encoded.Bytes()), ImageMIME: "image/png"}, nil
 }
@@ -220,12 +237,99 @@ type figureComparison struct {
 	Runs       []figureAlignmentRun
 	Canvas     int
 	Grid       int
-	// ScaleX/ScaleY 是候选墨迹外接框相对原图的宽、高比例（1 = 一样大），
-	// ScaleDev 是两者里偏得最多的那个。**必须在 fitFigureCanvases 之前量**：
-	// 那个函数会把候选按原图宽度等比缩放，宽度差就此被抹掉——这正是"看着
-	// 对上了、其实窄了一截"却仍能通过的原因（P78/T307）。
+	// 尺寸全部按**物理尺寸（mm）**量（T312）：墨迹占各自画布的比例 × 画布真实
+	// 尺寸。以前直接比两张图的墨迹**像素**宽高——那是拿 PDF 渲染 DPI 与原扫描
+	// 分辨率相除，两边的绝对值本身就不可比（渲染 150dpi 的页比 800px 的扫描图
+	// 大得多），一改渲染参数数字就跟着变。mm 才是模型该对齐的那把尺子。
+	//
+	// ScaleX/ScaleY = 候选墨迹宽/高 ÷ 原图墨迹宽/高（1 = 一样大），ScaleDev 取
+	// 两者偏得最多的那个。**必须在 fitFigureCanvases 之前量**：那个函数会按原图
+	// 宽度把候选等比缩放，宽度差就此被抹掉——这正是"看着对上了、其实窄了一截"
+	// 却仍能通过的原因（P78/T307）。
+	//
+	// 任一侧拿不到 mm（图不在 MinerU 解析里、PDF 没有 pdfinfo）时退到宽高比：
+	// SizeUnit = "aspect"，此时 ScaleX/ScaleY 为 0、ScaleDev = AspectDev。
 	ScaleX, ScaleY float64
 	ScaleDev       float64
+	SizeUnit       string
+	AspectRef      float64 // 原图墨迹宽/高
+	AspectCand     float64 // 候选墨迹宽/高
+	AspectDev      float64 // |比值的相对差|
+	InkRefW        float64 // 原图墨迹宽（SizeUnit 单位）
+	InkRefH        float64
+	InkCandW       float64 // 候选墨迹宽
+	InkCandH       float64
+	ShareRefW      float64 // 原图墨迹占原图画布的比例
+	ShareRefH      float64
+	ShareCandW     float64 // 候选墨迹占 PDF 页的比例
+	ShareCandH     float64
+}
+
+// figureCanvasMM 是两张图各自的**画布**真实尺寸（mm）。任一为 0 = 不知道。
+type figureCanvasMM struct {
+	RefW, RefH   float64
+	CandW, CandH float64
+}
+
+// measureFigureSize 量"这张图到底画多大"，见 figureComparison 上的说明。
+func measureFigureSize(ref, cand image.Image, mm figureCanvasMM) (scaleX, scaleY, dev float64,
+	aspectRef, aspectCand, aspectDev float64, unit string,
+	inkRefW, inkRefH, inkCandW, inkCandH float64,
+	shareRefW, shareRefH, shareCandW, shareCandH float64) {
+	rb, cb := ref.Bounds(), cand.Bounds()
+	pxRefW, pxRefH := figureInkBox(ref)
+	pxCandW, pxCandH := figureInkBox(cand)
+	if rb.Dx() > 0 && rb.Dy() > 0 && cb.Dx() > 0 && cb.Dy() > 0 {
+		shareRefW = float64(pxRefW) / float64(rb.Dx())
+		shareRefH = float64(pxRefH) / float64(rb.Dy())
+		shareCandW = float64(pxCandW) / float64(cb.Dx())
+		shareCandH = float64(pxCandH) / float64(cb.Dy())
+	}
+	if mm.RefW > 0 && mm.RefH > 0 && mm.CandW > 0 && mm.CandH > 0 {
+		unit = "mm"
+		inkRefW, inkRefH = shareRefW*mm.RefW, shareRefH*mm.RefH
+		inkCandW, inkCandH = shareCandW*mm.CandW, shareCandH*mm.CandH
+		scaleX, scaleY = 1, 1
+		if inkRefW > 0 {
+			scaleX = inkCandW / inkRefW
+		}
+		if inkRefH > 0 {
+			scaleY = inkCandH / inkRefH
+		}
+		dev = math.Max(math.Abs(1-scaleX), math.Abs(1-scaleY))
+	} else {
+		unit = "aspect"
+		inkRefW, inkRefH = float64(pxRefW), float64(pxRefH)
+		inkCandW, inkCandH = float64(pxCandW), float64(pxCandH)
+	}
+	if inkRefW > 0 && inkRefH > 0 && inkCandW > 0 && inkCandH > 0 {
+		aspectRef = inkRefW / inkRefH
+		aspectCand = inkCandW / inkCandH
+		if aspectRef > 0 {
+			aspectDev = math.Abs(aspectCand/aspectRef - 1)
+		}
+	}
+	if unit == "aspect" {
+		dev = aspectDev
+	}
+	return
+}
+
+// figureSizeSentence 把尺寸那一项说成人能对着改的一句话（T312）：墨迹在各自
+// 画布上占多少、真实物理尺寸多少、宽高比多少。像素绝对值一律不出现——它取决于
+// 渲染 DPI 与原扫描分辨率，不是图本身的尺寸。
+func figureSizeSentence(r figureComparison) string {
+	if r.InkRefW <= 0 || r.InkCandW <= 0 {
+		return "Ink size: not measurable (no ink in one of the images)."
+	}
+	if r.SizeUnit == "mm" {
+		return fmt.Sprintf("Ink size: canvas share w %.0f%%/%.0f%%, h %.0f%%/%.0f%% (original/candidate); physical ink %.1fmm x %.1fmm vs %.1fmm x %.1fmm; width x%.3f, height x%.3f, max deviation %.1f%% (measured in mm BEFORE the comparison rescales the candidate, so it does catch a wrong printed size; fix the coordinates/canvas rather than the stroke width). Ink aspect ratio %.2f:1 vs %.2f:1.",
+			r.ShareRefW*100, r.ShareCandW*100, r.ShareRefH*100, r.ShareCandH*100,
+			r.InkRefW, r.InkRefH, r.InkCandW, r.InkCandH, r.ScaleX, r.ScaleY, r.ScaleDev*100, r.AspectRef, r.AspectCand)
+	}
+	return fmt.Sprintf("Ink size: canvas share w %.0f%%/%.0f%%, h %.0f%%/%.0f%% (original/candidate); physical size unknown (image or PDF page size not measurable), so only the aspect ratio is checked: %.2f:1 vs %.2f:1, deviation %.1f%% >? limit. Ink bbox %dx%dpx vs %dx%dpx is NOT comparable (render DPI differs) — do not aim at it. Fix the coordinates/canvas rather than the stroke width.",
+		r.ShareRefW*100, r.ShareCandW*100, r.ShareRefH*100, r.ShareCandH*100,
+		r.AspectRef, r.AspectCand, r.AspectDev*100, int(r.InkRefW), int(r.InkRefH), int(r.InkCandW), int(r.InkCandH))
 }
 
 func formatAlignmentRuns(runs []figureAlignmentRun) string {
@@ -237,6 +341,12 @@ func formatAlignmentRuns(runs []figureAlignmentRun) string {
 }
 
 func compareFigureImages(reference, candidate image.Image) (figureComparison, *image.NRGBA, error) {
+	return compareFigureImagesMM(reference, candidate, figureCanvasMM{})
+}
+
+// compareFigureImagesMM 是带**画布物理尺寸**的版本：给的 mm 越全，尺寸那一项
+// 越可靠（两边的绝对值可比）。mm 缺失时退到宽高比（见 measureFigureSize）。
+func compareFigureImagesMM(reference, candidate image.Image, mm figureCanvasMM) (figureComparison, *image.NRGBA, error) {
 	ref := flattenOnWhite(reference)
 	cand := flattenOnWhite(candidate)
 	if ref.Bounds().Dx() < 1 || ref.Bounds().Dy() < 1 || cand.Bounds().Dx() < 1 || cand.Bounds().Dy() < 1 {
@@ -244,16 +354,9 @@ func compareFigureImages(reference, candidate image.Image) (figureComparison, *i
 	}
 	// 尺寸差要在"对齐归一化"之前量：fitFigureCanvases 会按原图宽度把候选
 	// 等比缩放，之后就再也看不出宽高比例对不对了。
-	inkRefW, inkRefH := figureInkBox(ref)
-	inkCandW, inkCandH := figureInkBox(cand)
-	scaleX, scaleY := 1.0, 1.0
-	if inkRefW > 0 && inkCandW > 0 {
-		scaleX = float64(inkCandW) / float64(inkRefW)
-	}
-	if inkRefH > 0 && inkCandH > 0 {
-		scaleY = float64(inkCandH) / float64(inkRefH)
-	}
-	scaleDev := math.Max(math.Abs(1-scaleX), math.Abs(1-scaleY))
+	scaleX, scaleY, scaleDev, aspectRef, aspectCand, aspectDev, sizeUnit,
+		inkRefW, inkRefH, inkCandW, inkCandH,
+		shareRefW, shareRefH, shareCandW, shareCandH := measureFigureSize(ref, cand, mm)
 
 	ref, cand = fitFigureCanvases(ref, cand)
 	rgbRef, originRef := cropFigureInk(ref, false)
@@ -292,7 +395,10 @@ func compareFigureImages(reference, candidate image.Image) (figureComparison, *i
 
 	comparison := figureComparison{Similarity: best.Similarity, Channels: best.Channels, Gray: grayScore,
 		DX: dx, DY: dy, Runs: best.Runs, Canvas: canvas, Grid: grid,
-		ScaleX: scaleX, ScaleY: scaleY, ScaleDev: scaleDev}
+		ScaleX: scaleX, ScaleY: scaleY, ScaleDev: scaleDev, SizeUnit: sizeUnit,
+		AspectRef: aspectRef, AspectCand: aspectCand, AspectDev: aspectDev,
+		InkRefW: inkRefW, InkRefH: inkRefH, InkCandW: inkCandW, InkCandH: inkCandH,
+		ShareRefW: shareRefW, ShareRefH: shareRefH, ShareCandW: shareCandW, ShareCandH: shareCandH}
 	return comparison, figureOverlay(ref, cand, dx, dy), nil
 }
 

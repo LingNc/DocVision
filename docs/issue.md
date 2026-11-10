@@ -2531,3 +2531,7 @@ user 轮
   根因：`web/src/fork.ts` 的 `dropFromLine` 头一句是 `if (!s || !s.chapterId) return false`，而作图会话的 `chapterId` 是 `null`（`/api/index` 里核实过），于是点击在处理函数第一行就静默返回；按钮能否出现走的是 `canCutFrom`（它允许 vector），两处判据不一致。
   改：判定统一走 `canCutFrom(s)`；作图会话的"然后怎么继续"文案单独写（要让它重新排进重画才会接着这条截断后的转录，点「重画这张图」是从头开新会话）。
   验证：playwright 开真页面点旧构建 → 12 个 ⤫、点击无确认框无 POST（复现）；本地 fixture + 新构建 → 确认框「删掉第 3 条及之后（共 2 条保留）…」→ POST /api/truncate → 文件 6 行变 2 行、备份落 `work/sessions/.trash/`、提示「已截断：保留 2 条、丢掉 4 条」、控制台零错误（`tests/t311-vector-cut.spec.ts` 钉住 canCutFrom 的口径）。
+[X][ ] T312. 提交门槛里的"尺寸偏差"量错了口径：拿候选 PDF 渲染图的墨迹**像素**宽高去除原图墨迹像素宽高，等于把渲染 DPI 与原扫描分辨率相除，数字本身不可比（改个 `raster_dpi` 结论就变），只有两者**之比**（宽高比）才有意义。
+  根因：`compareFigureImages` 直接 `inkCandW/inkRefW`；两边都来自各自的位图，谁也不带物理尺寸。
+  改：按墨迹占各自画布的比例 × 画布真实尺寸换成**毫米**再比（原图用 MinerU 解析出的印刷尺寸、候选用 PDF 页尺寸，`MeasureImage`+`pdfPageSizeMM`），任一侧查不到物理尺寸就退到**宽高比**偏差；回执把画布占比、mm 尺寸、宽高比三样都摊开（`figureSizeSentence`），打回文案也不再出现像素倍数。
+  验证：`t312_figure_size_mm_test.go`（像素差 5 倍但物理相同 → 偏差 0；真放大一倍 → 100%；压扁 2:1→4:1 → 100%；无 mm 时退宽高比）。

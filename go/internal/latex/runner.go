@@ -176,9 +176,9 @@ type imageProgress struct {
 	// FigScoreBackfilled 表示这次成绩是**事后本地补算**的（升级前就画好的图没有
 	// 成绩记录，补算不花模型 token）。补算出来的成绩只用于展示与"按图设阈值
 	// 后自动重判"，不会因为全局门槛一调就把老图全退回重画。
-	FigScoreBackfilled bool `json:"fig_score_backfilled,omitempty"`
-	FigAcceptAsIs  bool    `json:"fig_accept_as_is,omitempty"`
-	FigAcceptNote  string  `json:"fig_accept_note,omitempty"`
+	FigScoreBackfilled bool   `json:"fig_score_backfilled,omitempty"`
+	FigAcceptAsIs      bool   `json:"fig_accept_as_is,omitempty"`
+	FigAcceptNote      string `json:"fig_accept_note,omitempty"`
 	// FallbackReason 是这张图为什么以原图交付（P64）：状态只说明"没画出成品"，
 	// 核对时要能看出是工具链缺失、模型没通过校验，还是接口/会话出了问题。
 	FallbackReason string `json:"fallback_reason,omitempty"`
@@ -1957,6 +1957,7 @@ func requeueBelowThreshold(prog map[string]*imageProgress, progDir string, globa
 //   - 有了成绩，页面上就能看到"上次 18.4% · 尺寸偏差 39%"，知道哪张该收拾；
 //   - 给某张单独设了 fig_min_overlap 之后，下次运行它会像新画的图一样被自动
 //     退回重画（补算出来的成绩**不**参与全局门槛的自动退回，见 requeue 里的说明）。
+//
 // 缺图、读不出来、尺寸为 0 的一律跳过并保留原样——补算只是补齐信息，不是判死。
 func backfillFigureScores(outDir, imagesDir string, prog map[string]*imageProgress, progDir string) (int, error) {
 	n := 0
@@ -2007,6 +2008,9 @@ func backfillFigureScores(outDir, imagesDir string, prog map[string]*imageProgre
 			}
 			continue
 		}
+		// 补算只拿得到"成品 PNG + 原图"，没有 PDF 页尺寸，所以走的是**宽高比**
+		// 那一支（T312）：数字与当次运行的物理 mm 不完全同口径，但都只用于展示
+		// 与"按图设阈值后的自动退回"，不会因为口径差把图误判成画坏了。
 		cmp, _, err := compareFigureImages(original, candidate)
 		if err != nil {
 			if firstErr == nil {
