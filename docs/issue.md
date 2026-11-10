@@ -2519,3 +2519,7 @@ user 轮
   根因：`dispatchRetries` 里矢量图分支 `vectorMu.TryLock()` 拿不到锁就静默 `continue`；而 images 阶段为了写同一批 `progress_items` 会**整段持锁**，所以图片阶段跑着的这段时间里，重画请求既不会被执行、也不会有任何提示。
   改：拿不到锁时按请求节流留一行（「重画请求排队中：图片阶段 / 另一张重画正在进行…」）；请求本身照旧留在 `work/retry/` 里，等这一阶段结束自动轮到（页面行上仍是「待重试」）。
   验证：`TestVectorRetryStaysQueuedWhileImagesHoldsLock`（锁被占时既不派发也不吃掉请求）。
+[X][ ] T309. 轨迹页/对话页对作图会话点「就地截断」（⤫）必然报错，按钮却照常显示。
+  根因：`/api/truncate` 与 `/api/drop` 共用的 `transcriptUnderWork` 只认 `<项目>/work/` 之下的绝对路径，而作图转录是 images 阶段写进 `<项目>/source/sessions/` 的——解析直接 400「转录不在这个项目的工作区里」（只给文件名则 404「转录不存在」）。
+  改：抽出 `transcriptUnderProject`，同时接受 `work/`（含递归子章节细分树）与 `source/sessions/`；裸文件名先 `work/sessions/` 再 `source/sessions/`；删除回执不再对作图会话谎称"work/attempts 里的归档也一起删了"。
+  验证：`TestTruncateVectorTranscript`／`TestTruncateVectorTranscriptByBareName`／`TestDropVectorTranscript`／`TestTranscriptResolverRejectsOtherPaths`；线上同一请求由 400 变 200（`line=0` 探针）。

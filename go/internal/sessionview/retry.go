@@ -297,7 +297,7 @@ func (v *viewerServer) serveRetry(w http.ResponseWriter, r *http.Request) {
 		// 父工作区的细分树里（`work/temp/conv_<父>/work/_subdivision/…/node/sessions/`）。
 		// 页面发的是会话的完整路径，这里按 `<项目>/work/` 之下来解析；老调用发裸
 		// 文件名时仍走 work/sessions/。
-		full, terr := transcriptUnderWork(projDir, req.Path)
+		full, terr := transcriptUnderProject(projDir, req.Path)
 		if terr != nil {
 			code := http.StatusBadRequest
 			if errors.Is(terr, errTranscriptMissing) {
@@ -646,17 +646,38 @@ func tempProductFor(projDir, base string) string {
 
 var errTranscriptMissing = errors.New("转录不存在")
 
-func transcriptUnderWork(projDir, raw string) (string, error) {
+// underRoot 报 full 是否落在 root 这棵子树里（都先 Clean 过）。
+func underRoot(full, root string) bool {
+	rel, err := filepath.Rel(root, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
+}
+
+// transcriptUnderProject 解析请求里的转录路径。两种写法：
+//
+//	· 绝对路径 —— 页面把 SessionInfo.Path 直接发过来。递归子章节的转录在
+//	  <proj>/work/temp/conv_<父>/work/_subdivision/**/node/sessions/ 里；**作图
+//	  会话的转录在 <proj>/source/sessions/** 里（T309）。
+//	· 裸文件名 —— 老调用，先在 work/sessions/ 找，再退到 source/sessions/。
+//
+// 都必须落在上面这些根之下、扩展名 .jsonl、且真的是普通文件。
+//
+// T309：以前只认 <proj>/work/，于是页面上作图会话那排按钮里的"就地截断"（⤫）
+// 与"删除这条记录"必然 400「转录不在这个项目的工作区里」——按钮能看见、点了就
+// 报错。作图转录本来就不在 work/ 下，它是 images 阶段写进 source/sessions/ 的。
+func transcriptUnderProject(projDir, raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("没有给转录路径")
 	}
 	work := filepath.Join(projDir, "work")
+	figSessions := filepath.Join(projDir, "source", "sessions")
 	if filepath.IsAbs(raw) {
 		full := filepath.Clean(raw)
-		rel, err := filepath.Rel(work, full)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("转录不在这个项目的工作区里")
+		if !underRoot(full, work) && !underRoot(full, figSessions) {
+			return "", fmt.Errorf("转录不在这个项目的会话目录里")
 		}
 		if !validTranscriptName(filepath.Base(full)) {
 			return "", fmt.Errorf("只能改转录文件（*.jsonl）")
@@ -671,11 +692,13 @@ func transcriptUnderWork(projDir, raw string) (string, error) {
 	if name != raw || !validTranscriptName(name) {
 		return "", fmt.Errorf("只能改转录文件（*.jsonl）")
 	}
-	full := filepath.Join(work, "sessions", name)
-	if st, err := os.Stat(full); err != nil || !st.Mode().IsRegular() {
-		return "", fmt.Errorf("%w: %s", errTranscriptMissing, name)
+	for _, dir := range []string{filepath.Join(work, "sessions"), figSessions} {
+		full := filepath.Join(dir, name)
+		if st, err := os.Stat(full); err == nil && st.Mode().IsRegular() {
+			return full, nil
+		}
 	}
-	return full, nil
+	return "", fmt.Errorf("%w: %s", errTranscriptMissing, name)
 }
 
 func (v *viewerServer) serveDrop(w http.ResponseWriter, r *http.Request) {
@@ -693,8 +716,8 @@ func (v *viewerServer) serveDrop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "项目不存在", http.StatusNotFound)
 		return
 	}
-	// T196：与 /api/truncate 同一套解析——递归子章节的转录按绝对路径给。
-	full, err := transcriptUnderWork(projDir, req.Path)
+	// T196/T309：与 /api/truncate 同一套解析——递归子章节与作图会话的转录按绝对路径给。
+	full, err := transcriptUnderProject(projDir, req.Path)
 	if err != nil {
 		code := http.StatusBadRequest
 		if errors.Is(err, errTranscriptMissing) {
@@ -723,9 +746,13 @@ func (v *viewerServer) serveDrop(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	note := "记录已删除"
+	if removedArchive != "" {
+		note = "记录已删除（证据目录 work/attempts 里的同一次尝试也一起删了）"
+	}
 	writeJSON(w, map[string]any{
 		"ok": true, "deleted": name, "archive": removedArchive,
-		"note": "记录已删除（证据目录 work/attempts 里的同一次尝试也一起删了）",
+		"note": note,
 	})
 }
 
@@ -861,9 +888,10 @@ func (v *viewerServer) serveTruncate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "项目不存在", http.StatusNotFound)
 		return
 	}
-	// T196：递归子章节的转录不在 work/sessions/ 下，按绝对路径解析（页面发的
-	// 是 SessionInfo.Path）；裸文件名（老调用）仍走 work/sessions/。
-	full, err := transcriptUnderWork(projDir, req.Path)
+	// T196/T309：递归子章节的转录不在 work/sessions/ 下、作图会话的转录干脆在
+	// source/sessions/ 下，都按绝对路径解析（页面发的是 SessionInfo.Path）；
+	// 裸文件名（老调用）先 work/sessions/ 再 source/sessions/。
+	full, err := transcriptUnderProject(projDir, req.Path)
 	if err != nil {
 		code := http.StatusBadRequest
 		if errors.Is(err, errTranscriptMissing) {
