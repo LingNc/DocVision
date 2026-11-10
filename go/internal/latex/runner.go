@@ -650,7 +650,14 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 			sort.Slice(samples, func(i, j int) bool { return samples[i].name < samples[j].name })
 			r.detectWatermarkPhase(samples)
 		}
-		r.classifyPhase(pending, mdCache, prog, progDir, verbose)
+		// T306：分类没做完就停在这里——不带着"没分类的图"进 process，
+		// 也不在下次启动时把它们当已分类跳过。
+		if err := r.classifyPhase(pending, mdCache, prog, progDir, verbose); err != nil {
+			if !verbose {
+				r.log.SetQuiet(false)
+			}
+			return err
+		}
 	}
 	if opts.Step == "classify" {
 		if !verbose {
@@ -839,7 +846,7 @@ func processProgressText(done, total, ok, errors, fallback, raster, running int)
 // ------------------------------------------------------------------
 
 func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
-	prog map[string]*imageProgress, progDir string, verbose bool) {
+	prog map[string]*imageProgress, progDir string, verbose bool) error {
 
 	conc := r.cfg.Latex.Concurrency
 	if conc <= 0 {
@@ -855,6 +862,10 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	// 已经把断点续传的基数说过一次，混进进度线会让续跑一上来就 97.93%
 	// （用户："只看这次的 to process"）。
 	total, done, failed, running := 0, 0, 0, 0
+	// T306：分类失败必须留账并让这一阶段停下。以前失败会被写成
+	// class=raster（label=unclassified），等于把"没看懂/没连上"永久固化成
+	// "这张图本来就是位图"——既不会重试也不会重画，跟真的位图分不开。
+	var fails []*imageProgress
 	var progLive *liveProgress
 	progress := func() {
 		if progLive != nil {
@@ -892,7 +903,7 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	// 的条目直接进 process，不再重复分类，进度计数也不虚报）。
 	toClassify := make([]*task, 0, len(pending))
 	for _, t := range pending {
-		if _, ok := prog[t.key()]; !ok {
+		if classifyNeeded(prog[t.key()]) {
 			toClassify = append(toClassify, t)
 		}
 	}
@@ -904,7 +915,7 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 		line := fmt.Sprintf("[classify %d/%d] 100.00%% (failed: 0, running: 0) done", n, n)
 		r.log.PrintConsole(line)
 		r.log.Log(0, "[classify] 已分类，跳过模型请求；待处理", strconv.Itoa(n), "张")
-		return
+		return nil
 	}
 	r.log.Log(0, "[classify] 待分类", strconv.Itoa(total), "张，并发", strconv.Itoa(conc), "（latex.concurrency）")
 	progLive = newLiveProgressRow(r.log, "classify", func() string {
@@ -939,35 +950,36 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 				mu.Unlock()
 				progress()
 			}()
+			// fail 把"这张图没得到结论"记成未分类 + error（不是 raster），
+			// 并留一条账给阶段收尾：分类没做完就不许往下走。
+			fail := func(why string, err error) {
+				p := classifyFailure(tt, why, err)
+				mu.Lock()
+				prog[tt.key()] = p
+				failed++
+				fails = append(fails, p)
+				mu.Unlock()
+				saveProgress(progDir, p)
+				r.log.LogWarning(tid, "[classify] 失败（记为未分类，本阶段会停下）:", tt.imgPath, why)
+			}
 			imgFile, err := resolveImageFile(r.cfg.Paths.ImagesDir, tt.imgPath, subjectOf(tt.mdName))
 			if err != nil {
-				r.log.LogWarning(tid, "[classify] 图片缺失:", tt.imgPath)
-				mu.Lock()
-				failed++
-				mu.Unlock()
+				fail("图片文件缺失", err)
 				return
 			}
 			img64, err := img2text.ImageToBase64(imgFile, 1280)
 			if err != nil {
-				r.log.LogWarning(tid, "[classify] 读取图片失败:", tt.imgPath, err)
-				mu.Lock()
-				failed++
-				mu.Unlock()
+				fail("读取图片失败", err)
 				return
 			}
 			class, err := ClassifyImage(client, modelCfg, img64, classifyExtra)
 			if err != nil {
 				// One retry with a stricter instruction.
 				class, err = ClassifyImageStrict(client, modelCfg, img64, classifyExtra)
-				if err != nil {
-					r.log.LogWarning(tid, "[classify] 失败（按 raster 处理）:", tt.imgPath, err)
-					mu.Lock()
-					failed++
-					mu.Unlock()
-				}
 			}
 			if err != nil {
-				class = Classification{Kind: ClassRaster, Label: "unclassified"}
+				fail("分类请求失败", err)
+				return
 			}
 			p := &imageProgress{
 				Key: tt.key(), MDName: tt.mdName, ImgPath: tt.imgPath,
@@ -986,6 +998,52 @@ func (r *Runner) classifyPhase(pending []*task, mdCache map[string]*mdFile,
 	wg.Wait()
 	// 定格与换行交给 deferred progLive.Close()：这里再 render 一次 +
 	// Fprintln，终端里就会看到同一行出现两遍（整行一次、Close 重画一次）。
+	if len(fails) > 0 {
+		return classifyAbortError(fails)
+	}
+	return nil
+}
+
+// classifyNeeded 报这张图还要不要送去分类：没有判定记录、或上一次没给出类别
+// （失败留下的 error 记录，Class 为空）都要重来。已有类别的条目不重分类——
+// 那是给 process 用的，重跑分类只会白花请求、还可能把图归到别的类里去。
+func classifyNeeded(p *imageProgress) bool {
+	if p == nil {
+		return true
+	}
+	return strings.TrimSpace(p.Class) == ""
+}
+
+// classifyFailure 是"这张图没有得到结论"的记账：Class 留空、状态记 error、
+// 原因写进 Error。故意不写 raster——raster 是**判定结果**，不能拿来当兜底。
+func classifyFailure(tt *task, why string, err error) *imageProgress {
+	msg := why
+	if err != nil {
+		msg = why + ": " + err.Error()
+	}
+	return &imageProgress{
+		Key: tt.key(), MDName: tt.mdName, ImgPath: tt.imgPath,
+		Status: ImageStatusError, Error: truncateStr(msg, 400),
+	}
+}
+
+// classifyAbortError 是分类阶段的收尾错误：点名没拿到类别的图，并说清下一步
+// （重跑会从这些图继续），避免被读成"这些图被判成了位图"。
+func classifyAbortError(fails []*imageProgress) error {
+	shown := make([]string, 0, len(fails))
+	for _, p := range fails {
+		if len(shown) == 5 {
+			break
+		}
+		shown = append(shown, p.ImgPath)
+	}
+	more := ""
+	if len(fails) > len(shown) {
+		more = " 等"
+	}
+	return fmt.Errorf("分类没有全部完成：还有 %d 张图没有得到类别（%s%s）。"+
+		"这是接口/额度/端点或图片文件本身的问题，不是\"这些图是位图\"——修好后重跑即可从这些图继续；核对页能看到每张的状态",
+		len(fails), strings.Join(shown, ", "), more)
 }
 
 // ClassifyImageStrict is the second-chance call with an explicit
@@ -1007,7 +1065,7 @@ func ClassifyImageStrict(client *session.Client, modelCfg config.ModelConfig, im
 				}},
 			}},
 		},
-		MaxTokens: 512, Temperature: 0.0,
+		MaxTokens: classifyMaxTokens, Temperature: 0.0,
 		ResponseFormat: map[string]any{"type": "json_object"},
 	}
 	resp, sentinel, status := client.CallWithRetry(req)

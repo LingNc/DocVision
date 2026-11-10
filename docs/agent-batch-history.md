@@ -3704,3 +3704,25 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 补记（设计侧修正，同日）：P69 与设计报告原先把"原页裁切"当成原生 PDF 的首选取图方式，方向错了——**非扫描版应直接读原对象**（页内嵌位图取 `pdfimages -all` 的原字节、矢量把 Form XObject 导出成独立 PDF），"按裁剪框在原页重裁"只适用于**扫描版**（它本来没有可分离的对象），页级 `\includegraphics[page,trim,clip]` 降为兜底。已同步 `plan.md` P69 与 `docs/plan-report/design-any-pdf.md`。
 
 同一批的清理：把档案与代码里残留的三处样本身份（两本书名与一本教辅名）中性化（`docs/agent-batch-history.md` 两处、`img2text/pagemark.go` 与两个测试的 fixture），只换身份、技术与数字原样保留。
+
+## 第一百批（T306）：分类失败不许冒充"位图"（含现场复盘）
+
+真实缺陷（用户从运行日志里发现）：某台机器上分类请求报错，日志里出现 `images/... -> raster (unclassified)`。该记录既是**最终判定**（`toClassify` 只挑 prog 里没有记录的图，于是再也不会重试）、又让 process 阶段正常跑过（原图当位图嵌进书里），而且和真的被判定为位图的图完全分不开——一次接口错误就是一张/一批本该矢量的图被永久降级，整本书照样编得出来，没有任何地方报警。
+
+改法（不动 raster 的语义：raster 是**判定结果**，不能拿来当异常兜底）：
+
+- `classifyFailure`：失败记 `Class: ""`、`Status: error`、`Error: "<哪一步>: <原因>"`（截断 400 字）。
+- `classifyNeeded`：没有判定记录、**或者没有类别**都要重新分类；已有类别的条目不重分类（那条是给 process 用的）。
+- 三条失败路径（图片缺失、读图失败、请求失败）走同一个 `fail` 闭包，都留账。
+- `classifyPhase` 返回 error：`wg.Wait()` 之后还有失败就 `classifyAbortError` 停下（点名最多 5 张、写明"不是这些图是位图"、说明重跑会从这些图继续）；调用点直接 `return err`，`--step classify` 也一样。
+- 核对页多读一个 `error` 字段，显示成"未分类：<原因>"。
+
+现场复盘（同一台机器、同一项目，两次运行）：日志里 97 张图全部 `回复中未找到 JSON 对象`，没有任何 HTTP 错误。远程把整条链路拆开复现，结论如下。
+
+**根因是 base_url 少了 `/v1`，被流式读取器吃成了"空回复"。** 该网关（New API）把 `/chat/completions` 当网页路由，回 **200 + HTML 首页**；而 `latex` 默认 `stream: true`，`readStream` 在 HTML 上收不到一个 `data:` 行，`chatstream.Collect` 不报错、返回的消息内容为空——于是每张图都是"回复里没有 JSON 对象"，而 HTTP 层一切正常。同一地址加 `/v1` 后，用**真提示词 + 真图片**打过去立刻正常：`{"confidence":0.95,...,"kind":"vector"}`，流式与非流式都对得上。补测证实了这条链：把 HTML 直接喂给流式 `decode`，`err=nil`、`content_len=0`。
+
+因此这一批末尾又补了一处代码修正：`readStream` 在"0 个内容块 + Content-Type 不是 `text/event-stream`"时直接报错，明说"端点返回的不是 SSE 数据流，多半是 base_url 少了 /v1"。真正的退化空响应（T50）走的是真 SSE，Content-Type 是 `text/event-stream`，不受这条影响（`TestStreamOnEmptySSEStaysEmptyReply` 钉住）。
+
+顺带查出的第二处：**输出预算与诊断**。512 token 对思考型模型太紧——真提示词下思考内容就 2000 字上下，很容易把预算吃光让 `content` 变空或只剩 `{"`，而错误信息只有"回复中未找到 JSON 对象"。于是 `classifyMaxTokens` 512 → 2048（两次尝试同值）、`classifyReplyError` 区分"被截断 / 回复为空 / 模型说了别的话"并附原话前 200 字、非流式响应也把 `choices[0].finish_reason` 提到顶层（`ChatResponseChoice.FinishReason` + `decode`；此前非流式路径的 `ChatResponse.FinishReason` 永远为空）。
+
+运行时现场（不写进仓库，记在这里备查）：该机器上该项目 35 条 `class=raster && label=unclassified` 的进度记录已整体搬到 `<项目>/work/rollback_T306_20261110/source_progress_items/`，`progress_items` 清空（下次运行从头分类）；`figures`/`tikz`/`chapters`/`build`/`out`/`style` 当时全空，没有下游产物需要回退。

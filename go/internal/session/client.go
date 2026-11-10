@@ -279,6 +279,9 @@ func (u *Usage) String() string {
 // ChatResponseChoice is one entry of choices.
 type ChatResponseChoice struct {
 	Message ChatMessage `json:"message"`
+	// FinishReason 是单条的结束原因（"stop"/"length"/…）。非流式响应里它也
+	// 在这一层，decode 会提到 ChatResponse.FinishReason 供调用方统一判断。
+	FinishReason string `json:"finish_reason,omitempty"`
 }
 
 // ChatCompletion POSTs the request. Non-2xx responses are returned as
@@ -546,6 +549,11 @@ func (c *Client) decode(resp *http.Response, stream bool, start time.Time, hook 
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, fmt.Errorf("decode response: %w (body=%q)", err, truncate(string(body), 256))
 	}
+	// 非流式响应把 finish_reason 放在 choices[0] 里；提到顶层，调用方不必
+	// 关心是不是流式就能看出"回复被 max_tokens 截断"（T306）。
+	if out.FinishReason == "" && len(out.Choices) > 0 {
+		out.FinishReason = out.Choices[0].FinishReason
+	}
 	out.Elapsed = time.Since(start)
 	out.TTFT = out.Elapsed // one JSON body: nothing to measure separately
 	return &out, nil
@@ -639,6 +647,16 @@ func (c *Client) readStream(resp *http.Response, start time.Time, hook func(phas
 	})
 	if err != nil {
 		return nil, err
+	}
+	// T306 现场：base_url 少了 /v1 时，网关把 /chat/completions 当网页路由，
+	// 回 200 + HTML 首页。流式读取器在 HTML 上收不到任何 data: 行，于是静默
+	// 返回"空回复"——日志里就成了 97 张图全部"回复中未找到 JSON 对象"，而
+	// 没有任何 HTTP 错误。真正的退化空响应（T50）走的是 SSE，Content-Type
+	// 是 text/event-stream，这里只报"根本不是 SSE"的那种。
+	if contentChars == 0 && reasoningChars == 0 {
+		if ctype := strings.ToLower(resp.Header.Get("Content-Type")); !strings.Contains(ctype, "event-stream") {
+			return nil, fmt.Errorf("端点返回的不是 SSE 数据流（Content-Type=%q、0 个内容块）：多半是 base_url 少了 /v1 或路径不对——网关把请求当网页路由、回了 HTML", ctype)
+		}
 	}
 	msgRaw, err := json.Marshal(res.Message)
 	if err != nil {

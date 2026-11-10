@@ -33,6 +33,7 @@ type liveImageProgress struct {
 	EquivalentTo   string `json:"equivalent_to"`
 	SharedTex      string `json:"shared_tex"`
 	FallbackReason string `json:"fallback_reason"`
+	Error          string `json:"error"`
 	Absorbed       bool   `json:"absorbed"`
 }
 
@@ -228,6 +229,17 @@ func (r reviewpageRig) item(imgRel, hash string) reviewpage.Item {
 		if reason := strings.TrimSpace(p.FallbackReason); reason != "" {
 			it.Note = joinNote(it.Note, reason)
 		}
+	}
+	// T306：分类失败会把原因写进 error（Class 为空）。页面上要能直接看到
+	// "为什么这张没结论"，否则只看到一个"失败"没法判断是接口还是图的问题。
+	if reason := strings.TrimSpace(p.Error); reason != "" {
+		if len([]rune(reason)) > 80 {
+			reason = string([]rune(reason)[:80]) + "…"
+		}
+		if strings.TrimSpace(p.Class) == "" {
+			reason = "未分类：" + reason
+		}
+		it.Note = joinNote(it.Note, reason)
 	}
 	it.Links = r.links(p, base)
 	return it

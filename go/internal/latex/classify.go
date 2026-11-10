@@ -26,9 +26,14 @@ type Classification struct {
 	StyleNote  string  `json:"style_note"` // 样式描述（字体/颜色/装饰/布局）
 }
 
+// classifyMaxTokens 是分类请求的输出预算。512 曾经不够：思考型模型（回复里
+// 带 reasoning）会把预算先花在思考上，JSON 还没开始就被截断，而调用方只看到
+// "回复中未找到 JSON 对象"（T306）。
+const classifyMaxTokens = 2048
+
 // ClassifyImage sends one image to the classifier model and parses the
-// strict JSON verdict. Any failure degrades to ClassRaster (the safe
-// choice: keep the original image).
+// strict JSON verdict. 失败返回 error，由调用方记"未分类 + 错误"并让分类
+// 阶段停下——**不要**在这里降级成 raster（T306）。
 func ClassifyImage(client *session.Client, modelCfg config.ModelConfig, imgBase64, systemExtra string) (Classification, error) {
 	req := &session.ChatRequest{
 		Model: client.Model(),
@@ -41,7 +46,7 @@ func ClassifyImage(client *session.Client, modelCfg config.ModelConfig, imgBase6
 				}},
 			}},
 		},
-		MaxTokens:      512,
+		MaxTokens:      classifyMaxTokens,
 		Temperature:    0.0,
 		ResponseFormat: map[string]any{"type": "json_object"}, // 保证返回一定是 JSON
 	}
@@ -53,7 +58,30 @@ func ClassifyImage(client *session.Client, modelCfg config.ModelConfig, imgBase6
 		return Classification{}, fmt.Errorf("分类响应为空")
 	}
 	text := session.ContentString(resp.Choices[0].Message)
-	return parseClassification(text)
+	c, err := parseClassification(text)
+	if err != nil {
+		return Classification{}, classifyReplyError(resp.FinishReason, text, err)
+	}
+	return c, nil
+}
+
+// classifyReplyError 把"回复里没有可用的 JSON"变成能直接定位原因的错误：
+// 说清是**被截断**、**空的**、还是**模型说了别的话**（附上它原话的前 200
+// 字）。只报一句"回复中未找到 JSON 对象"看不出该调预算、该换端点还是该换
+// 模型（T306）。
+func classifyReplyError(finishReason, reply string, err error) error {
+	if finishReason == "length" {
+		return fmt.Errorf("分类回复被截断（max_tokens=%d 用光，多半被思考过程占满；调大预算或换非思考模型）：%w",
+			classifyMaxTokens, err)
+	}
+	snippet := strings.TrimSpace(reply)
+	if snippet == "" {
+		return fmt.Errorf("分类回复为空（finish_reason=%s）：%w", finishReason, err)
+	}
+	if r := []rune(snippet); len(r) > 200 {
+		snippet = string(r[:200]) + "…"
+	}
+	return fmt.Errorf("%w；模型实际回复：%q", err, snippet)
 }
 
 // parseClassification extracts the JSON verdict from a model reply.

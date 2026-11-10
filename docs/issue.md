@@ -2504,3 +2504,9 @@ user 轮
   根因：入口判据与页面渲染都只认 `source/dedupe/groups.json`（无它就 404，索引也不报这个项目）；而"整组核验跑完、一张都没并组"时结论里是空分组，于是侧栏既没有阶段行按钮、直接开 `/dedupe?project=` 也打不开——这个页面本来就是"看图"，不该依赖 dedupe 的结论。
   改：索引判据放宽成"有图片判定记录（`source/progress_items/**/*.json`）"；现渲染在没有分组结论（或结论里空分组）时按"未分组"列出全部图并写明"还没有分组结论"；侧栏把这个入口**固定在项目行**上（阶段行那个保留），项目名下的图随时点得进去。
   验证：`TestImageReviewWithoutGroups`（无 groups.json / 空分组两种情形都能打开并列出图片）；`npm test` 287 项、`go test ./internal/sessionview/` 全绿，`viewer.js` 重新构建。
+[X][ ] T306. 分类失败被降级成 raster，整本书会悄悄少掉矢量图。
+  根因：`classifyPhase` 两次请求都失败后写 `class=raster, label=unclassified, status=classified` 并继续；这条记录既是"最终判定"（下次不再重试）、又让 process 正常跑过，跟真的位图完全分不开——中途一张图碰上接口/端点错误（如把 baseurl 填成另一台机器的地址）就永久变成位图。
+  改：失败一律记"未分类 + error + 原因"（`classifyFailure`），不写类别；`classifyNeeded` 让"没有类别"的记录下次重新排队；分类阶段结束时若还有失败直接返回错误停下（`classifyAbortError`），不带着没分类的图进 process；核对页把 `error` 显示成"未分类：<原因>"。
+  验证：`TestClassifyFailureIsNotRaster`（图片缺失也走这条路）、`TestClassifyNeeded`、`TestClassifyAbortError`；`go build ./...` 与 `./internal/latex`、`./internal/sessionview` 全绿。
+  补记：现场复盘（97 张图全部"回复中未找到 JSON 对象"却无 HTTP 错误）根因是 **base_url 少了 `/v1`**：网关回 200 + HTML，`stream: true` 下 `readStream` 收不到任何 `data:` 行、静默当空回复；现在非 SSE 响应直接报错并点名 base_url（`TestStreamOnHTMLBodyIsAnError`，T50 的真 SSE 空流不受影响）。
+  补记：同时把分类输出预算 512→2048，`classifyReplyError` 区分"截断/空回复/说了别的话"并附原话前 200 字，非流式响应也把 `finish_reason` 提到顶层（`TestClassifyReplyError`、`TestDecodeLiftsFinishReason`）。
