@@ -711,6 +711,9 @@ func (c *Config) ModelPrices() map[string]PriceConfig {
 const (
 	DefaultFigureMinOverlap  = 0.17
 	DefaultFigureMaxScaleDev = 0.10
+	// DefaultFigureAcceptMinSubmits 是"尽力还原"的前置次数：同一张图真的交过
+	// 这么多次 submit 之后才允许 accept_as_is，防止第一版就举手投降。
+	DefaultFigureAcceptMinSubmits = 8
 )
 
 // FigureCheckConfig configures the per-figure verification loop (level 2
@@ -736,6 +739,9 @@ type FigureCheckConfig struct {
 	// 0.10 = 10%，负数 = 关闭）。量的是**对齐归一化之前**的宽高比例，正是
 	// 软墨重叠看不出来的那一项（P78/T307）。
 	MaxScaleDev float64 `yaml:"max_scale_dev"`
+	// AcceptMinSubmits 是"尽力还原"（accept_as_is）的前置：同一张图真的交过
+	// 这么多次 submit（被打回的也算）才允许接受。0 = 用默认 8，负数 = 不限次数。
+	AcceptMinSubmits int `yaml:"accept_min_submits"`
 }
 
 // PreviewConfig controls the automatic session preview server.
@@ -1529,6 +1535,9 @@ func setDefaults(cfg *Config) {
 		cfg.Latex.FigureCheck.MaxRounds = 2
 	}
 	// 0 = 用默认（17% / 10%），负数是"关掉这条门槛"的显式写法。
+	if cfg.Latex.FigureCheck.AcceptMinSubmits == 0 {
+		cfg.Latex.FigureCheck.AcceptMinSubmits = DefaultFigureAcceptMinSubmits
+	}
 	if cfg.Latex.FigureCheck.MinOverlap == 0 {
 		cfg.Latex.FigureCheck.MinOverlap = DefaultFigureMinOverlap
 	}

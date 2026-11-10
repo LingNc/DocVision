@@ -105,6 +105,8 @@ type FigureEnv struct {
 	// （latex.figure_check，本图可用 fig_min_overlap 覆盖；<=0 表示这条不卡）。
 	MinOverlap  float64
 	MaxScaleDev float64
+	// AcceptMinSubmits 是"尽力还原"的前置次数（<=0 = 不限）
+	AcceptMinSubmits int
 }
 
 // renderPrompt fills the placeholders used by the built-in session
@@ -1520,6 +1522,7 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	// （网页上改的那个数）；<=0 表示这一条不卡。
 	env.MinOverlap = r.cfg.Latex.FigureCheck.MinOverlap
 	env.MaxScaleDev = r.cfg.Latex.FigureCheck.MaxScaleDev
+	env.AcceptMinSubmits = r.cfg.Latex.FigureCheck.AcceptMinSubmits
 	if pp.FigMinOverlap != 0 {
 		env.MinOverlap = pp.FigMinOverlap
 	}

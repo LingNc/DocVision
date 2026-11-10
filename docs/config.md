@@ -154,6 +154,7 @@ submit.md、compile_error.log 与两段 JSONL 转录都保留，出错现场可�
 | `latex.figure_check.max_rounds` | 校验轮次上限：第 1 轮校验 + 最多这么多轮"打回同一作图会话修正" | 2 |
 | `latex.figure_check.min_overlap` | 重画图的**提交门槛**：`compare_figure` 最近一次编译后最好的软墨重叠达不到就不许交（`submit` 回执给出差多少个百分点）。单张图可在核对页/会话页用 `fig_min_overlap` 覆盖。`0` = 用默认 0.17，**负数 = 关掉这条** | 0.17 |
 | `latex.figure_check.max_scale_dev` | 提交门槛的第二条：候选墨迹外接框相对原图的宽高比例偏差上限（**对齐归一化之前**量，软墨重叠看不出这一项）。同样可按图覆盖，`0` = 用默认 0.10、负数 = 关掉 | 0.10 |
+| `latex.figure_check.accept_min_submits` | 「尽力还原」（`accept_as_is`）的前置：**同一张图真的交过这么多次 submit**（被打回的那几次也算）之后才允许接受，防止第一版就举手投降（这个出口不进工具清单，交够次数后被打回时才由回执说明）。`0` = 用默认 8，**负数 = 不限次数** | 8 |
 | `models.<条目>.price.input` | 该模型**未命中前缀缓存**的输入单价（元/百万 tokens；`0` = 未配置，费用报告整块不显示） | 0 |
 | `models.<条目>.price.cached` | 命中前缀缓存的输入单价（不填/`0` 按 `input` 计——宁可高估也不凭空打折） | 0 |
 | `models.<条目>.price.output` | 输出单价（含思考 tokens，与厂商口径一致） | 0 |

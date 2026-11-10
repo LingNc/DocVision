@@ -39,3 +39,18 @@ func TestFigureThresholdDefaults(t *testing.T) {
 		t.Fatalf("默认门槛必须是 17%% / 10%%：%v %v", DefaultFigureMinOverlap, DefaultFigureMaxScaleDev)
 	}
 }
+
+// "尽力还原"的次数门槛：0 = 默认 8，负数是"不限"。
+func TestAcceptMinSubmitsDefaults(t *testing.T) {
+	for _, tc := range []struct{ in, want int }{{0, DefaultFigureAcceptMinSubmits}, {4, 4}, {-1, -1}} {
+		cfg := &Config{}
+		cfg.Latex.FigureCheck.AcceptMinSubmits = tc.in
+		setDefaults(cfg)
+		if cfg.Latex.FigureCheck.AcceptMinSubmits != tc.want {
+			t.Fatalf("accept_min_submits=%d 应为 %d，实际 %d", tc.in, tc.want, cfg.Latex.FigureCheck.AcceptMinSubmits)
+		}
+	}
+	if DefaultFigureAcceptMinSubmits != 8 {
+		t.Fatalf("默认次数必须是 8：%d", DefaultFigureAcceptMinSubmits)
+	}
+}

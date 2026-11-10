@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,7 +38,10 @@ type tikzState struct {
 	// acceptedAsIs / acceptNote：模型（或人）选择"达不到阈值但已尽力"提交。
 	// 粘性：记录写进 progress item，之后这张图不再自动重画，只有手动点重画才动。
 	acceptedAsIs bool
-	acceptNote   string
+	// submitAttempts 是这张图**交过多少次** submit（被打回也算），
+	// "尽力还原"要求真交够 latex.figure_check.accept_min_submits 次。
+	submitAttempts int
+	acceptNote     string
 }
 
 // CompileFigureTool compiles the TikZ body code held in a WORKSPACE
@@ -175,6 +179,9 @@ type SubmitFigureTool struct {
 	// latex.figure_check，可被这张图的 fig_min_overlap 覆盖（T307）。
 	MinOverlap  float64
 	MaxScaleDev float64
+	// AcceptMinSubmits 是"尽力还原"的门槛：同一张图**真的交过**这么多次
+	// submit 之后才允许接受（<=0 = 不限制）。防止第一版就举手投降（T307 补记）。
+	AcceptMinSubmits int
 }
 
 func (t *SubmitFigureTool) Name() string { return "submit" }
@@ -191,12 +198,18 @@ func (t *SubmitFigureTool) Definition() map[string]any {
 					"path":   map[string]any{"type": "string", "description": "workspace-relative file holding the final TikZ code (must equal the last successful compile)."},
 					"code":   map[string]any{"type": "string", "description": "The final TikZ body code inline (only when not using path)."},
 					"merges": map[string]any{"type": "string", "description": "Image paths (as in the markdown) of page-boundary continuations absorbed into this combined figure."},
-					"accept_as_is": map[string]any{"type": "boolean", "description": "Only when the figure cannot reach the configured overlap/size threshold after real attempts: submit this best-effort version anyway. Requires note. It is recorded as best-effort and the figure is not redrawn automatically afterwards."},
-					"note":         map[string]any{"type": "string", "description": "With accept_as_is: one sentence on what still differs and why it cannot be matched."},
 				},
 			},
 		},
 	}
+}
+
+// shortfallOrNothing 给"还没到次数"的回执补一句差在哪，省得模型盲改。
+func (t *SubmitFigureTool) shortfallOrNothing() string {
+	if why := t.thresholdShortfall(); why != "" {
+		return why
+	}
+	return "对照原图看差在哪（线条、比例、标注位置）"
 }
 
 // thresholdShortfall 描述差在哪（空 = 达标或门槛关闭），供 REJECTED 回执用。
@@ -237,6 +250,9 @@ func (t *SubmitFigureTool) Execute(argsJSON string) (session.ToolResult, error) 
 	if strings.TrimSpace(code) == "" {
 		return session.ToolResult{}, fmt.Errorf("code 为空（或 path 文件不存在）")
 	}
+	// 每次 submit 都算一次尝试——包括被门槛打回的（那正是"改了一版又交"的
+	// 证据），"尽力还原"只认真交过够多次数的会话（T307 补记）。
+	t.State.submitAttempts++
 	if !t.State.compareCalled {
 		return session.ToolResult{Text: "REJECTED: call compare_figure at least once after a successful compile, inspect its comparison, and then submit."}, nil
 	}
@@ -245,11 +261,22 @@ func (t *SubmitFigureTool) Execute(argsJSON string) (session.ToolResult, error) 
 	acceptAsIs, _ := args["accept_as_is"].(bool)
 	note, _ := args["note"].(string)
 	if acceptAsIs {
+		// 次数没到：只说"还不够"，不提这是在求情——否则等于告诉模型随时能举白旗。
+		if t.AcceptMinSubmits > 0 && t.State.submitAttempts < t.AcceptMinSubmits {
+			return session.ToolResult{Text: "REJECTED: " + t.shortfallOrNothing() +
+				"。这张图目前只交过 " + strconv.Itoa(t.State.submitAttempts-1) + " 次 submit，先把图改好再交。"}, nil
+		}
 		if strings.TrimSpace(note) == "" {
 			return session.ToolResult{Text: "REJECTED: accept_as_is needs a note saying what could not be matched and why it is as good as it gets."}, nil
 		}
 	} else if why := t.thresholdShortfall(); why != "" {
-		return session.ToolResult{Text: "REJECTED: " + why + "。先改图再 compile + compare_figure；确实尽力了可以 submit_figure {accept_as_is:true, note:\"差在哪里、为什么到不了\"} 交这一版。"}, nil
+		msg := "REJECTED: " + why + "。先改图再 compile + compare_figure 重新提交。"
+		// 交够次数之后才把"尽力还原"这个出口告诉它：工具清单里一个字都不提，
+		// 免得模型一上来就知道有白旗可举（用户指定）。
+		if t.AcceptMinSubmits <= 0 || t.State.submitAttempts >= t.AcceptMinSubmits {
+			msg += "这张图已经交过 " + strconv.Itoa(t.State.submitAttempts) + " 次：如果确实只能做到这儿，可以 submit {accept_as_is:true, note:\"差在哪里、为什么到不了\"} 交这一版（记为尽力还原，之后不会自动重画）。"
+		}
+		return session.ToolResult{Text: msg}, nil
 	}
 	if !t.State.compileOK || strings.TrimSpace(code) != strings.TrimSpace(t.State.lastCode) {
 		return session.ToolResult{Text: "REJECTED: the submitted code differs from the last successful compile. Call compile {path} with this exact file first."}, nil

@@ -210,3 +210,86 @@ func TestBackfillFigureScores(t *testing.T) {
 			hs.FigBestOverlap, hs.FigScaleDev, hs.FigScoreBackfilled)
 	}
 }
+
+// 工具清单里一个字都不许提"尽力还原"：它只在交够次数之后的回执里出现。
+// 这是用户的口径——schema 里写着等于一上手就告诉模型有白旗可举。
+func TestSubmitSchemaDoesNotAdvertiseAcceptAsIs(t *testing.T) {
+	tool := &SubmitFigureTool{State: &tikzState{}, MinOverlap: 0.17, MaxScaleDev: 0.10, AcceptMinSubmits: 8}
+	raw, err := json.Marshal(tool.Definition())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, banned := range []string{"accept_as_is", "note", "best-effort", "尽力"} {
+		if strings.Contains(string(raw), banned) {
+			t.Fatalf("submit 的 schema 不该出现 %q：%s", banned, raw)
+		}
+	}
+}
+
+// 交够次数之前，打回回执同样不能提这个出口；够了才提。
+func TestAcceptAsIsHintOnlyAfterEnoughSubmits(t *testing.T) {
+	state := &tikzState{compileOK: true, compareCalled: true, lastCode: "x", bestOverlap: 0.05}
+	tool := &SubmitFigureTool{State: state, MinOverlap: 0.17, MaxScaleDev: 0.10, AcceptMinSubmits: 3}
+	args, _ := json.Marshal(map[string]any{"code": "x"})
+	for i := 1; i <= 2; i++ {
+		res, err := tool.Execute(string(args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(res.Text, "accept_as_is") {
+			t.Fatalf("第 %d 次就打回时不该提这个出口：%s", i, res.Text)
+		}
+		if !strings.Contains(res.Text, "12.30%") && !strings.Contains(res.Text, "5.00%") {
+			t.Fatalf("回执仍要给出差在哪：%s", res.Text)
+		}
+	}
+	res, err := tool.Execute(string(args))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "accept_as_is") {
+		t.Fatalf("交够次数后应当提示这个出口：%s", res.Text)
+	}
+}
+
+// "尽力还原"要真交够次数：第 8 次才放行（含被打回的那几次），不放在第一版。
+func TestAcceptAsIsNeedsEnoughSubmits(t *testing.T) {
+	st := &tikzState{compareCalled: true, compileOK: true, lastCode: "x", bestOverlap: 0.05, scaleDevAtBest: 0.3}
+	tool := &SubmitFigureTool{State: st, MinOverlap: 0.17, MaxScaleDev: 0.10, AcceptMinSubmits: 8}
+	body := `{"code":"x","accept_as_is":true,"note":"笔画太粗，扫描变形"}`
+	for i := 1; i <= 7; i++ {
+		res, err := tool.Execute(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Terminal {
+			t.Fatalf("第 %d 次就接受了，应当先被打回", i)
+		}
+		if !strings.Contains(res.Text, "只交过") {
+			t.Fatalf("回执要说清还差几次：%s", res.Text)
+		}
+	}
+	res, err := tool.Execute(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Terminal {
+		t.Fatalf("第 8 次应当放行：%s", res.Text)
+	}
+	if !st.acceptedAsIs {
+		t.Fatal("接受标记没记上")
+	}
+}
+
+// 负数是"不限次数"（老行为），0 由 config 的默认值兜成 8。
+func TestAcceptAsIsSubmitLimitDisabled(t *testing.T) {
+	st := &tikzState{compareCalled: true, compileOK: true, lastCode: "x", bestOverlap: 0.05}
+	tool := &SubmitFigureTool{State: st, MinOverlap: 0.17, AcceptMinSubmits: -1}
+	res, err := tool.Execute(`{"code":"x","accept_as_is":true,"note":"就这样"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Terminal {
+		t.Fatalf("负数是关闭这条限制，第一次就该放行：%s", res.Text)
+	}
+}

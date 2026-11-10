@@ -66,7 +66,8 @@ func RunTikZSession(
 	engineIsXe := strings.Contains(strings.ToLower(comp.engine), "xe") ||
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
-	submitFig := &SubmitFigureTool{State: state, MinOverlap: env.MinOverlap, MaxScaleDev: env.MaxScaleDev}
+	submitFig := &SubmitFigureTool{State: state, MinOverlap: env.MinOverlap, MaxScaleDev: env.MaxScaleDev,
+		AcceptMinSubmits: env.AcceptMinSubmits}
 	compareFig := &compareFigureTool{State: state, Comp: comp, OriginalPath: env.CurrentImgAbs}
 	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.FigureSystem), tuning, env.OutputLang), []session.Tool{
 		&WriteWorkFileTool{Root: scratch},
