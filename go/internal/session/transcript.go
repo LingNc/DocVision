@@ -528,6 +528,10 @@ type ResumeStats struct {
 	// produced a tool receipt; empty when the transcript holds none.
 	SubmitName string
 	SubmitArgs string
+	// SubmitAccepted 为真表示那条 submit 的**回执是被收下的**（以 SUBMITTED
+	// 开头）。续跑时用它判断"这张图其实已经画完了"，不必再重放一遍工具——重放
+	// 要过提交门槛（compile/compare 是进程内状态），新进程里必然被打回（T316）。
+	SubmitAccepted bool
 }
 
 // LoadTranscriptStats is LoadTranscript plus the resume summary (T28).
@@ -547,6 +551,7 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 	var worked time.Duration
 	submitCalls := map[string]string{} // call id → name (submit*)
 	receipts := map[string]bool{}
+	receiptText := map[string]string{} // call id → 回执正文（只看首行）
 	for _, ln := range strings.Split(string(data), "\n") {
 		ln = strings.TrimSpace(ln)
 		if ln == "" {
@@ -605,6 +610,7 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 		}
 		if msg.Role == "tool" && msg.ToolCallID != "" {
 			receipts[msg.ToolCallID] = true
+			receiptText[msg.ToolCallID] = line.Text
 		}
 		msgs = append(msgs, msg)
 	}
@@ -642,6 +648,7 @@ func LoadTranscriptStats(path string) ([]ChatMessage, ResumeStats, error) {
 		for _, c := range m.ToolCalls {
 			if c.Function.Name == stats.SubmitName && receipts[c.ID] {
 				stats.SubmitArgs = c.Function.Arguments
+				stats.SubmitAccepted = strings.HasPrefix(strings.TrimSpace(receiptText[c.ID]), "SUBMITTED")
 			}
 		}
 		if stats.SubmitArgs != "" {

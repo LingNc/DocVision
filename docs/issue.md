@@ -2543,3 +2543,7 @@ user 轮
   根因：`/api/figure-override` 只写 `fig_min_overlap`，退回只发生在运行启动时的 `requeueBelowThreshold`。
   改：写阈值时若新门槛高于这张图上次成绩（且已完成、有成绩、没被「尽力还原」接受过），当场 `status=classified` 并清成品字段；回执带 note 与 `requeued`，会话页与核对页都显示这句。
   验证：四条测试（抬高→退回+留阈值与成绩 / 低于成绩与用全局不动 / 接受过的图不动 / 没成绩不动）全绿。
+[X][ ] T316. 续跑一张其实已提交成功的作图会话会被门槛打回、再被"还没提交"提醒催一次，最后记成没画出来；门槛放宽也不当轮生效。
+  根因：`replaySubmit` 重放提交要过 compile/compare 门槛（进程内状态），新进程必然 REJECTED；提醒文案只提 compile、没提 compare，模型直接 submit 又被打回。
+  改：转录里最后一条 submit 回执是 SUBMITTED 且成品在盘 → 直接按已交付收账（`TikZResult.Resumed`，不覆盖已有代码与成绩）；提醒改成 compile→compare→submit 三步；放宽门槛撤回"门槛排的队"（`fig_requeued`），`submit` 每次重读逐图门槛（跑着改也当轮生效）。
+  验证：四条新测试（收下判定、实时门槛三态、撤回排队、非本队不撤回）；现场一条 379 行转录的坏尾巴已截回 compare 回执。

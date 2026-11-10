@@ -137,23 +137,34 @@ func (v *viewerServer) serveFigureOverride(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "没有要改的东西", http.StatusBadRequest)
 		return
 	}
-	// T315：门槛当场生效——把这张图的门槛抬到高于它上次成绩时直接标回待处理，
-	// 不用再等下一轮启动时由 requeueBelowThreshold 才退回。只动"完成态 + 有成绩
-	// + 没被尽力还原接受过"的图；降门槛、设负数、改成用全局（0）都不动状态。
-	flipped, note := false, "已保存；这张图下次运行（或点\"重画这张图\"）时按新设置判定"
+	// T315/T316：门槛改动当场生效，两个方向都算。
+	//  · 抬到高于这张图上次成绩 → 标回待处理，并在进度里留记号 fig_requeued；
+	//  · 再放宽到不高于成绩（或设负数）→ 把那条排队撤回（状态回 done），
+	//    免得一直在重复的图又被白画一遍。
+	// 只动"完成态/我们自己排的队 + 有成绩 + 没被尽力还原接受过"的图；改成用全局
+	// （0）读不到全局值，不动状态。成品字段一律不动：门槛排队不等于成品作废，
+	// 留着它们，撤回时不必凭空重建。
+	flipped, cancelled := false, false
+	note := "已保存；这张图下次运行（或点\"重画这张图\"）时按新设置判定"
 	if req.MinOverlap != nil {
 		limit := *req.MinOverlap
 		best, hasBest := rec["fig_best_overlap"].(float64)
 		accepted, _ := rec["fig_accept_as_is"].(bool)
 		status, _ := rec["status"].(string)
-		if limit > 0 && hasBest && best > 0 && !accepted && status == "done" && best < limit {
+		ourQueue, _ := rec["fig_requeued"].(string)
+		passes := hasBest && best > 0 && (limit < 0 || best >= limit)
+		switch {
+		case limit > 0 && hasBest && best > 0 && !accepted && status == "done" && best < limit:
 			rec["status"] = "classified"
-			for _, k := range figureRedrawFields {
-				delete(rec, k)
-			}
+			rec["fig_requeued"] = "threshold"
 			flipped = true
 			note = fmt.Sprintf("已保存并当场标回待处理（上次重叠 %.2f%% < 新门槛 %.2f%%）：下次运行会接着画这张图",
 				best*100, limit*100)
+		case ourQueue == "threshold" && passes && !accepted && status == "classified":
+			rec["status"] = "done"
+			delete(rec, "fig_requeued")
+			cancelled = true
+			note = fmt.Sprintf("已保存并撤回重画（上次重叠 %.2f%% 已不低于新门槛）：这张图不会再画一遍", best*100)
 		}
 	}
 	out, err := json.MarshalIndent(rec, "", "  ")
@@ -173,6 +184,7 @@ func (v *viewerServer) serveFigureOverride(w http.ResponseWriter, r *http.Reques
 		"accept_note":    rec["fig_accept_note"],
 		"note":           note,
 		"requeued":       flipped,
+		"cancelled":      cancelled,
 		"cleared_best":   req.ClearBest,
 		"cleared_accept": req.ClearAccept || (req.AcceptAsIs != nil && !*req.AcceptAsIs),
 	})

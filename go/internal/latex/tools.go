@@ -191,6 +191,11 @@ type SubmitFigureTool struct {
 	// AcceptMinSubmits 是"尽力还原"的门槛：同一张图**真的交过**这么多次
 	// submit 之后才允许接受（<=0 = 不限制）。防止第一版就举手投降（T307 补记）。
 	AcceptMinSubmits int
+	// LiveThreshold 每次 submit 时重读这张图的逐图门槛（`fig_min_overlap`，
+	// 由网页写进进度记录）。返回 (值, 是否读到)：值 != 0 就覆盖上面的 MinOverlap
+	// ——抬高当场拦住、降低当场放行，不必等这一轮跑完（T316）。为 nil 或读不到
+	// 时用派发时的快照。
+	LiveThreshold func() (float64, bool)
 }
 
 func (t *SubmitFigureTool) Name() string { return "submit" }
@@ -252,6 +257,13 @@ func (t *SubmitFigureTool) thresholdShortfall() string {
 }
 
 func (t *SubmitFigureTool) Execute(argsJSON string) (session.ToolResult, error) {
+	// T316：门槛可以随时在网页上改。提交这一刻重读一次逐图覆盖值：一直在重复
+	// 交不过的图，人把阈值降下来之后下一次 submit 立刻按新门槛判，不用等重跑。
+	if t.LiveThreshold != nil {
+		if v, ok := t.LiveThreshold(); ok && v != 0 {
+			t.MinOverlap = v
+		}
+	}
 	args, err := parseJSONObject(argsJSON)
 	if err != nil {
 		return session.ToolResult{}, err

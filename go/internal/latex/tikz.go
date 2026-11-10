@@ -31,6 +31,10 @@ type TikZResult struct {
 	ScaleDev     float64
 	AcceptedAsIs bool
 	AcceptNote   string
+	// Resumed 为真表示这次没有真的跑会话：转录里最后一次提交本来就**已被收下**、
+	// 成品也已在磁盘上，直接收账（T316）。调用方据此保留进度里已有的代码与成绩，
+	// 不要用空值把它们覆盖掉。
+	Resumed bool
 }
 
 // RunTikZSession drives one complete draw→compile→review→submit cycle
@@ -67,7 +71,7 @@ func RunTikZSession(
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
 	submitFig := &SubmitFigureTool{State: state, MinOverlap: env.MinOverlap, MaxScaleDev: env.MaxScaleDev,
-		AcceptMinSubmits: env.AcceptMinSubmits}
+		AcceptMinSubmits: env.AcceptMinSubmits, LiveThreshold: env.LiveThreshold}
 	compareFig := &compareFigureTool{State: state, Comp: comp, OriginalPath: env.CurrentImgAbs}
 	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.FigureSystem), tuning, env.OutputLang), []session.Tool{
 		&WriteWorkFileTool{Root: scratch},
@@ -135,8 +139,17 @@ func RunTikZSession(
 		if replaySubmit(log, tid, "tikz", submitFig, st) {
 			state.submitted = true
 			resumeSkip = true
+		} else if st.SubmitAccepted && fileExists(dstTex) && fileExists(dstPDF) {
+			// T316：转录里最后一次提交**已经被收下**、成品也还在磁盘上（成品名由
+			// md+图片+label 决定，前一次运行已经交付过）。新进程没有 compile/compare
+			// 现场，重放提交必然被门槛打回，接着又被"你还没提交"的提醒催一次，模型
+			// 只能空转（现场：一轮白烧 6 万 token，最后还把画好的图记成"未提交"）。
+			// 这种情况不下场，直接按已交付收账。
+			log.Log(tid, "[tikz] 转录里的提交已被收下且成品在位，直接按已完成收账（不再跑会话）:",
+				filepath.Base(trPath))
+			return TikZResult{Submitted: true, Resumed: true, PDFPath: dstPDF, PNGPath: dstPNG}, nil
 		} else {
-			initial = resumeUserText(msgs, "The session was interrupted earlier. Continue from where you left off: check your last compile result, fix figure.tex if needed, and call submit once the preview faithfully matches the original image.")
+			initial = resumeUserText(msgs, "The session was interrupted earlier. Continue from where you left off: check your last compile result, fix figure.tex if needed, run compile, call compare_figure, and submit once the comparison faithfully matches the original image.")
 		}
 	} else if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
@@ -156,7 +169,10 @@ func RunTikZSession(
 	if !state.submitted && runErr == nil {
 		log.LogWarning(tid, "[tikz] 会话结束但模型未提交，发送提交提醒:")
 		if _, err := sess.Run(session.RunOptions{
-			UserText: "You have NOT called submit yet. Call submit now with {path: \"figure.tex\"} (the file must match the last successful compile). If no compile succeeded yet, fix figure.tex, call compile {path: \"figure.tex\"}, then submit.",
+			// T316：这段以前只提 compile，模型于是直接 submit，撞上"必须先
+			// compare_figure"的门槛被打回，有的就此停在被打回那一版（整张图的
+			// 成品随之作废）。三步写全、顺序也写明。
+			UserText: "You have NOT called submit yet. Do these in order: (1) compile {path: \"figure.tex\"} until it succeeds, (2) call compare_figure and look at its comparison, (3) call submit with {path: \"figure.tex\"} (the file must match the last successful compile). Submitting before compare_figure succeeds is rejected.",
 		}); err == nil && state.submitted {
 			result.Rounds = sess.ToolInvoked
 		}

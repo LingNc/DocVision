@@ -37,8 +37,12 @@ func TestFigureOverrideRaiseThresholdRequeues(t *testing.T) {
 	if after["status"] != "classified" {
 		t.Fatalf("抬高门槛后应当回到待处理，实际 %v", after["status"])
 	}
-	if _, ok := after["tikz_code"]; ok {
-		t.Fatalf("重画前要清掉成品字段")
+	// T316：成品字段一律留着——门槛排队不等于成品作废，撤回排队时还得靠它们。
+	if _, ok := after["tikz_code"]; !ok {
+		t.Fatalf("门槛排队不该清成品字段（撤回时要用）")
+	}
+	if after["fig_requeued"] != "threshold" {
+		t.Fatalf("要留一个「门槛排的队」的记号，实际 %v", after["fig_requeued"])
 	}
 	if after["fig_min_overlap"] != 0.25 {
 		t.Fatalf("阈值要写进去，实际 %v", after["fig_min_overlap"])
@@ -115,5 +119,75 @@ func TestFigureOverrideNoScoreNotRequeued(t *testing.T) {
 	}
 	if got := readOverrideFile(t, file)["status"]; got != "done" {
 		t.Fatalf("状态不该变，实际 %v", got)
+	}
+}
+
+// T316：门槛抬上去排了队、再放宽回去，就要把这条排队撤回（状态回 done），
+// 别让一直重复的图又白画一遍。
+func TestFigureOverrideLowerThresholdCancelsRequeue(t *testing.T) {
+	v, _, file := figureOverrideServer(t)
+	if rec := postFigureOverride(t, v, map[string]any{
+		"project": "书A", "md": "书A.md", "img": "images/书A/a1b2c3.png", "min_overlap": 0.30,
+	}); rec.Code != 200 {
+		t.Fatalf("抬门槛失败: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := postFigureOverride(t, v, map[string]any{
+		"project": "书A", "md": "书A.md", "img": "images/书A/a1b2c3.png", "min_overlap": 0.10,
+	})
+	if rec.Code != 200 {
+		t.Fatalf("降门槛失败: %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"cancelled":true`) {
+		t.Fatalf("放宽门槛要撤掉那条排队：%s", rec.Body.String())
+	}
+	after := readOverrideFile(t, file)
+	if after["status"] != "done" {
+		t.Fatalf("撤回后应当回到已完成，实际 %v", after["status"])
+	}
+	if _, ok := after["fig_requeued"]; ok {
+		t.Fatalf("记号要清掉")
+	}
+	if after["fig_min_overlap"] != 0.10 {
+		t.Fatalf("新阈值要写进去，实际 %v", after["fig_min_overlap"])
+	}
+}
+
+// 只是把门槛放宽、但还没宽到成绩之上（或者这条队不是门槛排的），都不改状态。
+func TestFigureOverrideLowerThresholdKeepsQueueWhenNotOurs(t *testing.T) {
+	v, _, file := figureOverrideServer(t)
+	// 先把这条记录改成"截断排的队"（没有 fig_requeued 记号）。
+	rec0 := readOverrideFile(t, file)
+	rec0["status"] = "classified"
+	delete(rec0, "fig_requeued")
+	if err := os.WriteFile(file, mustJSON(t, rec0), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := postFigureOverride(t, v, map[string]any{
+		"project": "书A", "md": "书A.md", "img": "images/书A/a1b2c3.png", "min_overlap": 0.05,
+	})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"cancelled":true`) {
+		t.Fatalf("不是门槛排的队，不该撤回：%s", rec.Body.String())
+	}
+	if got := readOverrideFile(t, file)["status"]; got != "classified" {
+		t.Fatalf("状态不该变，实际 %v", got)
+	}
+
+	// 门槛排的队，但新门槛仍高于成绩：也不该撤回。
+	v2, _, file2 := figureOverrideServer(t)
+	if r := postFigureOverride(t, v2, map[string]any{
+		"project": "书A", "md": "书A.md", "img": "images/书A/a1b2c3.png", "min_overlap": 0.9,
+	}); r.Code != 200 {
+		t.Fatalf("抬门槛失败: %d", r.Code)
+	}
+	if r := postFigureOverride(t, v2, map[string]any{
+		"project": "书A", "md": "书A.md", "img": "images/书A/a1b2c3.png", "min_overlap": 0.5,
+	}); r.Code != 200 {
+		t.Fatalf("降门槛失败: %d", r.Code)
+	}
+	if got := readOverrideFile(t, file2)["status"]; got != "classified" {
+		t.Fatalf("0.5 仍高于 0.12，应继续排队，实际 %v", got)
 	}
 }

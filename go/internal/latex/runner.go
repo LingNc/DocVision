@@ -105,6 +105,9 @@ type FigureEnv struct {
 	// （latex.figure_check，本图可用 fig_min_overlap 覆盖；<=0 表示这条不卡）。
 	MinOverlap  float64
 	MaxScaleDev float64
+	// LiveThreshold 每次 submit 重读这张图的 fig_min_overlap（T316）：网页上改
+	// 门槛当轮就生效，抬上去拦得住、降下来放得行。
+	LiveThreshold func() (float64, bool)
 	// AcceptMinSubmits 是"尽力还原"的前置次数（<=0 = 不限）
 	AcceptMinSubmits int
 }
@@ -179,6 +182,9 @@ type imageProgress struct {
 	FigScoreBackfilled bool   `json:"fig_score_backfilled,omitempty"`
 	FigAcceptAsIs      bool   `json:"fig_accept_as_is,omitempty"`
 	FigAcceptNote      string `json:"fig_accept_note,omitempty"`
+	// FigRequeued 记下"这张图是被逐图门槛踢回重画的"（T316）：人再把门槛放宽到
+	// 成绩之上时，网页据此把这条排队撤回，不必白画一遍。截断/手动重画不写它。
+	FigRequeued string `json:"fig_requeued,omitempty"`
 	// FallbackReason 是这张图为什么以原图交付（P64）：状态只说明"没画出成品"，
 	// 核对时要能看出是工具链缺失、模型没通过校验，还是接口/会话出了问题。
 	FallbackReason string `json:"fallback_reason,omitempty"`
@@ -1532,6 +1538,23 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 		env.CheckRounds = r.cfg.Latex.FigureCheck.MaxRounds
 		env.CheckFigure = r.newFigureChecker(tid, imgFile, name, env.CheckRounds)
 	}
+	// T316：门槛随时能在网页上改（写进度记录里的 fig_min_overlap）。每次 submit
+	// 现读一次：一直在重复交不过的图，人把阈值降下来之后下一次交就按新门槛判，
+	// 抬上去也立刻拦住——不用等这一轮跑完再重跑。
+	progFile := filepath.Join(progDir, sanitizeName(pp.MDName), sanitizeName(pp.ImgPath)+".json")
+	env.LiveThreshold = func() (float64, bool) {
+		data, rerr := os.ReadFile(progFile)
+		if rerr != nil {
+			return 0, false
+		}
+		var rec struct {
+			FigMinOverlap float64 `json:"fig_min_overlap"`
+		}
+		if json.Unmarshal(data, &rec) != nil {
+			return 0, false
+		}
+		return rec.FigMinOverlap, true
+	}
 	res, err := RunTikZSession(client, modelCfg, tuning, r.comp, img64, contextText,
 		outDir, dstTex, dstPDF, dstPNG, env,
 		r.log, tid, r.keepTemp(), r.keepRecords())
@@ -1543,13 +1566,18 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 		pp.Error = res.Reason
 		return false
 	}
-	pp.TikzCode = res.Code
-	// 门槛成绩与"尽力还原"标记：粘性记在进度里，之后不再自动重画（T307）。
-	pp.FigBestOverlap = res.BestOverlap
-	pp.FigScaleDev = res.ScaleDev
-	pp.FigScoreBackfilled = false // 真提交量的，不是补算
-	pp.FigAcceptAsIs = res.AcceptedAsIs
-	pp.FigAcceptNote = res.AcceptNote
+	// T316：res.Resumed 表示这次没跑会话（转录里的提交早已收下、成品在位），
+	// 代码与成绩都还是上一次的，用空值覆盖会把进度写花。
+	if !res.Resumed {
+		pp.FigRequeued = "" // 画完了，门槛排队的记号作废（T316）
+		pp.TikzCode = res.Code
+		// 门槛成绩与"尽力还原"标记：粘性记在进度里，之后不再自动重画（T307）。
+		pp.FigBestOverlap = res.BestOverlap
+		pp.FigScaleDev = res.ScaleDev
+		pp.FigScoreBackfilled = false // 真提交量的，不是补算
+		pp.FigAcceptAsIs = res.AcceptedAsIs
+		pp.FigAcceptNote = res.AcceptNote
+	}
 	if res.AcceptedAsIs {
 		r.log.LogWarning(tid, "[tikz] 按尽力还原接受（重叠 "+fmt.Sprintf("%.2f%%", res.BestOverlap*100)+"）：",
 			t.imgPath, res.AcceptNote)
