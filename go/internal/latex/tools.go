@@ -28,6 +28,16 @@ type tikzState struct {
 	merges        []string // image paths absorbed into this figure (cross-page merge)
 	uncertain     bool     // submitted code contains % [?] uncertainty marks
 	compareCalled bool
+	// bestOverlap / scaleDevAtBest：最近一次成功编译之后 compare_figure 的
+	// 最好成绩与它对应的尺寸偏差。提交门槛量的是这两个数（T307）。
+	bestOverlap    float64
+	scaleDevAtBest float64
+	bestScaleX     float64
+	bestScaleY     float64
+	// acceptedAsIs / acceptNote：模型（或人）选择"达不到阈值但已尽力"提交。
+	// 粘性：记录写进 progress item，之后这张图不再自动重画，只有手动点重画才动。
+	acceptedAsIs bool
+	acceptNote   string
 }
 
 // CompileFigureTool compiles the TikZ body code held in a WORKSPACE
@@ -104,6 +114,8 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	t.State.compileOK = false
 	t.State.lastPDF = ""
 	t.State.compareCalled = false
+	t.State.bestOverlap = 0
+	t.State.scaleDevAtBest = 0
 
 	// 包装成 standalone 文档后编译（figure.tex 保持为模型的原样代码）。
 	texFile := filepath.Join(t.State.workDir, "standalone.tex")
@@ -159,6 +171,10 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 // SubmitFigureTool records the model's confirmed final TikZ code.
 type SubmitFigureTool struct {
 	State *tikzState
+	// MinOverlap / MaxScaleDev 是提交门槛（<=0 = 这条不卡）。值来自
+	// latex.figure_check，可被这张图的 fig_min_overlap 覆盖（T307）。
+	MinOverlap  float64
+	MaxScaleDev float64
 }
 
 func (t *SubmitFigureTool) Name() string { return "submit" }
@@ -175,10 +191,29 @@ func (t *SubmitFigureTool) Definition() map[string]any {
 					"path":   map[string]any{"type": "string", "description": "workspace-relative file holding the final TikZ code (must equal the last successful compile)."},
 					"code":   map[string]any{"type": "string", "description": "The final TikZ body code inline (only when not using path)."},
 					"merges": map[string]any{"type": "string", "description": "Image paths (as in the markdown) of page-boundary continuations absorbed into this combined figure."},
+					"accept_as_is": map[string]any{"type": "boolean", "description": "Only when the figure cannot reach the configured overlap/size threshold after real attempts: submit this best-effort version anyway. Requires note. It is recorded as best-effort and the figure is not redrawn automatically afterwards."},
+					"note":         map[string]any{"type": "string", "description": "With accept_as_is: one sentence on what still differs and why it cannot be matched."},
 				},
 			},
 		},
 	}
+}
+
+// thresholdShortfall 描述差在哪（空 = 达标或门槛关闭），供 REJECTED 回执用。
+func (t *SubmitFigureTool) thresholdShortfall() string {
+	var parts []string
+	if t.MinOverlap > 0 && t.State.bestOverlap < t.MinOverlap {
+		parts = append(parts, fmt.Sprintf("软墨重叠 %.2f%% < 门槛 %.2f%%（差 %.2f 个百分点）",
+			t.State.bestOverlap*100, t.MinOverlap*100, (t.MinOverlap-t.State.bestOverlap)*100))
+	}
+	if t.MaxScaleDev > 0 && t.State.scaleDevAtBest > t.MaxScaleDev {
+		parts = append(parts, fmt.Sprintf("宽高尺寸偏差 %.1f%% > 上限 %.1f%%（宽的 %.2f 倍、高的 %.2f 倍）",
+			t.State.scaleDevAtBest*100, t.MaxScaleDev*100, t.State.bestScaleX, t.State.bestScaleY))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "；")
 }
 
 func (t *SubmitFigureTool) Execute(argsJSON string) (session.ToolResult, error) {
@@ -205,13 +240,31 @@ func (t *SubmitFigureTool) Execute(argsJSON string) (session.ToolResult, error) 
 	if !t.State.compareCalled {
 		return session.ToolResult{Text: "REJECTED: call compare_figure at least once after a successful compile, inspect its comparison, and then submit."}, nil
 	}
+	// T307/P78：数值门槛。软墨重叠与尺寸偏差任一不达标就不许交，回执把两个
+	// 数字与差值都写出来（模型据此知道该补什么，而不是只看到一句 REJECTED）。
+	acceptAsIs, _ := args["accept_as_is"].(bool)
+	note, _ := args["note"].(string)
+	if acceptAsIs {
+		if strings.TrimSpace(note) == "" {
+			return session.ToolResult{Text: "REJECTED: accept_as_is needs a note saying what could not be matched and why it is as good as it gets."}, nil
+		}
+	} else if why := t.thresholdShortfall(); why != "" {
+		return session.ToolResult{Text: "REJECTED: " + why + "。先改图再 compile + compare_figure；确实尽力了可以 submit_figure {accept_as_is:true, note:\"差在哪里、为什么到不了\"} 交这一版。"}, nil
+	}
 	if !t.State.compileOK || strings.TrimSpace(code) != strings.TrimSpace(t.State.lastCode) {
 		return session.ToolResult{Text: "REJECTED: the submitted code differs from the last successful compile. Call compile {path} with this exact file first."}, nil
 	}
 	t.State.submitted = true
 	t.State.finalCode = code
 	t.State.uncertain = strings.Contains(code, "[?]")
-	return session.ToolResult{Text: "SUBMITTED. The figure is accepted.", Terminal: true}, nil
+	if acceptAsIs {
+		t.State.acceptedAsIs = true
+		t.State.acceptNote = strings.TrimSpace(note)
+		return session.ToolResult{Text: fmt.Sprintf("SUBMITTED as best-effort (overlap %.2f%%, size deviation %.1f%%): recorded so this figure is not redrawn automatically. %s",
+			t.State.bestOverlap*100, t.State.scaleDevAtBest*100, t.State.acceptNote), Terminal: true}, nil
+	}
+	return session.ToolResult{Text: fmt.Sprintf("SUBMITTED. The figure is accepted (overlap %.2f%%, size deviation %.1f%%).",
+		t.State.bestOverlap*100, t.State.scaleDevAtBest*100), Terminal: true}, nil
 }
 
 // buildStandalone wraps TikZ body code in a compilable standalone

@@ -8350,6 +8350,15 @@
       return data;
     });
   }
+  function requestFigureOverride(project, target2, change) {
+    const body = { project, ...target2 };
+    if (change.minOverlap !== void 0) body.min_overlap = change.minOverlap;
+    if (change.acceptAsIs !== void 0) body.accept_as_is = change.acceptAsIs;
+    if (change.note) body.note = change.note;
+    if (change.clearAccept) body.clear_accept = true;
+    if (change.clearBest) body.clear_best = true;
+    return postJSON("/api/figure-override", body);
+  }
   function chapterPendingRetry(project, chapter, role = "") {
     const list = (state.retries || {})[project] || [];
     if (list.indexOf(chapter) < 0) return false;
@@ -9668,31 +9677,31 @@
     class: "chapter-arch",
     title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
   };
-  const _hoisted_7$a = {
+  const _hoisted_7$b = {
     key: 5,
     class: "chapter-retry-pending",
     title: "已在重试队列里：转换阶段的下一个安全点会重跑这一章"
   };
-  const _hoisted_8$7 = {
+  const _hoisted_8$8 = {
     key: 0,
     class: "chapter-node-body"
   };
-  const _hoisted_9$6 = ["data-id", "title", "onClick"];
-  const _hoisted_10$5 = {
+  const _hoisted_9$7 = ["data-id", "title", "onClick"];
+  const _hoisted_10$6 = {
     key: 1,
     class: "chapter-usage"
   };
-  const _hoisted_11$5 = {
+  const _hoisted_11$6 = {
     key: 2,
     class: "chapter-arch",
     title: "这份转录只在 work/attempts 归档目录里（作废尝试搬走时留下的副本），不是当前工作区"
   };
-  const _hoisted_12$5 = {
+  const _hoisted_12$6 = {
     key: 3,
     class: "chapter-retry-pending",
     title: "已在重新核对队列里：转换阶段的下一个安全点会重跑核对会话（产物不动）"
   };
-  const _hoisted_13$5 = ["title", "onClick"];
+  const _hoisted_13$6 = ["title", "onClick"];
   const _hoisted_14$5 = ["onClick"];
   const _hoisted_15$5 = ["data-id", "title", "onClick"];
   const _hoisted_16$5 = ["title"];
@@ -9843,9 +9852,9 @@
                 }, toDisplayString(nodeActivity(node)), 3)) : createCommentVNode("", true),
                 unref(usageChipText)(primary(node)) ? (openBlock(), createElementBlock("span", _hoisted_5$d, toDisplayString(unref(usageChipText)(primary(node))), 1)) : createCommentVNode("", true),
                 ((_b = primary(node)) == null ? void 0 : _b.archived) ? (openBlock(), createElementBlock("span", _hoisted_6$b, "归档")) : createCommentVNode("", true),
-                nodePendingRetry(node) ? (openBlock(), createElementBlock("span", _hoisted_7$a, "待重试")) : createCommentVNode("", true)
+                nodePendingRetry(node) ? (openBlock(), createElementBlock("span", _hoisted_7$b, "待重试")) : createCommentVNode("", true)
               ], 10, _hoisted_2$i),
-              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_8$7, [
+              hasBody(node) && isOpen(node) ? (openBlock(), createElementBlock("div", _hoisted_8$8, [
                 node.checker ? (openBlock(), createElementBlock("div", {
                   key: 0,
                   class: normalizeClass(["chapter-checker", { active: currentId.value === node.checker.id, live: node.checker.live }])
@@ -9869,16 +9878,16 @@
                       key: 0,
                       class: normalizeClass(["chapter-state", stateTone(activityText(node.checker, "checker", node))])
                     }, toDisplayString(activityText(node.checker, "checker", node)), 3)) : createCommentVNode("", true),
-                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$5, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true),
-                    node.checker.archived ? (openBlock(), createElementBlock("span", _hoisted_11$5, "归档")) : createCommentVNode("", true),
-                    nodePendingRetry(node, "checker") ? (openBlock(), createElementBlock("span", _hoisted_12$5, "待重试")) : canRetryNode(node) ? (openBlock(), createElementBlock("button", {
+                    unref(usageChipText)(node.checker) ? (openBlock(), createElementBlock("span", _hoisted_10$6, toDisplayString(unref(usageChipText)(node.checker)), 1)) : createCommentVNode("", true),
+                    node.checker.archived ? (openBlock(), createElementBlock("span", _hoisted_11$6, "归档")) : createCommentVNode("", true),
+                    nodePendingRetry(node, "checker") ? (openBlock(), createElementBlock("span", _hoisted_12$6, "待重试")) : canRetryNode(node) ? (openBlock(), createElementBlock("button", {
                       key: 4,
                       class: "chapter-retry icon-btn",
                       type: "button",
                       title: "重新核对这一章 " + node.id + "：只重跑核对会话、产物不动，旧的核对转录留在历史里",
                       onClick: ($event) => retryNode(node, "checker", $event)
-                    }, "↻", 8, _hoisted_13$5)) : createCommentVNode("", true)
-                  ], 8, _hoisted_9$6),
+                    }, "↻", 8, _hoisted_13$6)) : createCommentVNode("", true)
+                  ], 8, _hoisted_9$7),
                   createBaseVNode("button", {
                     class: "chapter-info",
                     type: "button",
@@ -9970,20 +9979,20 @@
   };
   const _hoisted_5$c = ["aria-pressed"];
   const _hoisted_6$a = ["aria-pressed"];
-  const _hoisted_7$9 = { class: "side-search" };
-  const _hoisted_8$6 = { class: "side-list-wrap" };
-  const _hoisted_9$5 = {
+  const _hoisted_7$a = { class: "side-search" };
+  const _hoisted_8$7 = { class: "side-list-wrap" };
+  const _hoisted_9$6 = {
     key: 0,
     class: "i2t-overview",
     "aria-label": "img2text 进度概览"
   };
-  const _hoisted_10$4 = {
+  const _hoisted_10$5 = {
     class: "i2t-ov-head",
     title: "img2text 逐书进度概览（点击折叠/展开，状态会被记住）"
   };
-  const _hoisted_11$4 = { class: "i2t-ov-agg" };
-  const _hoisted_12$4 = ["title"];
-  const _hoisted_13$4 = {
+  const _hoisted_11$5 = { class: "i2t-ov-agg" };
+  const _hoisted_12$5 = ["title"];
+  const _hoisted_13$5 = {
     key: 0,
     class: "i2t-blocks"
   };
@@ -10523,7 +10532,7 @@
               onClick: _cache[2] || (_cache[2] = ($event) => unref(setBoard)("img2text"))
             }, "img2text", 8, _hoisted_6$a)
           ])) : createCommentVNode("", true),
-          createBaseVNode("div", _hoisted_7$9, [
+          createBaseVNode("div", _hoisted_7$a, [
             withDirectives(createBaseVNode("input", {
               id: "search",
               "onUpdate:modelValue": _cache[3] || (_cache[3] = ($event) => unref(state).filter = $event),
@@ -10534,7 +10543,7 @@
               [vModelText, unref(state).filter]
             ])
           ]),
-          createBaseVNode("div", _hoisted_8$6, [
+          createBaseVNode("div", _hoisted_8$7, [
             createBaseVNode("div", {
               id: "session-list",
               ref_key: "listEl",
@@ -10543,21 +10552,21 @@
               role: "tree",
               "aria-label": "会话列表"
             }, [
-              progressBooks.value.length ? withDirectives((openBlock(), createElementBlock("details", _hoisted_9$5, [
-                createBaseVNode("summary", _hoisted_10$4, [
+              progressBooks.value.length ? withDirectives((openBlock(), createElementBlock("details", _hoisted_9$6, [
+                createBaseVNode("summary", _hoisted_10$5, [
                   _cache[7] || (_cache[7] = createBaseVNode("span", { class: "row-slot" }, [
                     createBaseVNode("span", { class: "row-caret" })
                   ], -1)),
                   _cache[8] || (_cache[8] = createBaseVNode("span", { class: "i2t-ov-title" }, "进度概览", -1)),
-                  createBaseVNode("span", _hoisted_11$4, toDisplayString(overviewHeadText.value), 1),
+                  createBaseVNode("span", _hoisted_11$5, toDisplayString(overviewHeadText.value), 1),
                   createBaseVNode("button", {
                     class: normalizeClass(["icon-btn", { on: overviewBlocks.value }]),
                     type: "button",
                     title: overviewBlocks.value ? "概览切回列表视图" : "概览切到方块视图（一书一块，色块按主导状态；点块搜该书的会话）",
                     onClick: withModifiers(toggleOverviewBlocks, ["stop"])
-                  }, toDisplayString(overviewBlocks.value ? "☰" : "▦"), 11, _hoisted_12$4)
+                  }, toDisplayString(overviewBlocks.value ? "☰" : "▦"), 11, _hoisted_12$5)
                 ]),
-                overviewBlocks.value ? (openBlock(), createElementBlock("div", _hoisted_13$4, [
+                overviewBlocks.value ? (openBlock(), createElementBlock("div", _hoisted_13$5, [
                   (openBlock(true), createElementBlock(Fragment, null, renderList(progressBooks.value, (b) => {
                     return openBlock(), createElementBlock("button", {
                       key: b.book,
@@ -11876,7 +11885,7 @@
     class: "line-running",
     title: "这个调用还没有收到回执，正在执行"
   };
-  const _hoisted_7$8 = {
+  const _hoisted_7$9 = {
     key: 4,
     class: "line-tail"
   };
@@ -11916,7 +11925,7 @@
               createBaseVNode("span", { class: "running-dot" }, null, -1),
               createTextVNode("运行中 ", -1)
             ])])) : createCommentVNode("", true),
-            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_7$8, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
+            __props.tail ? (openBlock(), createElementBlock("span", _hoisted_7$9, toDisplayString(__props.tail), 1)) : createCommentVNode("", true)
           ]),
           renderSlot(_ctx.$slots, "default", {}, void 0, true)
         ], 10, _hoisted_1$f);
@@ -12134,9 +12143,9 @@
   const _hoisted_4$9 = { class: "io-actions" };
   const _hoisted_5$9 = { class: "attach-note" };
   const _hoisted_6$8 = { class: "io-actions" };
-  const _hoisted_7$7 = { class: "io-section attach-section" };
-  const _hoisted_8$5 = { class: "attach-body" };
-  const _hoisted_9$4 = { class: "attach-note" };
+  const _hoisted_7$8 = { class: "io-section attach-section" };
+  const _hoisted_8$6 = { class: "attach-body" };
+  const _hoisted_9$5 = { class: "attach-note" };
   const _sfc_main$c = /* @__PURE__ */ defineComponent({
     __name: "ToolCard",
     props: {
@@ -12255,9 +12264,9 @@
                   key: a.line.n
                 }, [
                   _cache[3] || (_cache[3] = createBaseVNode("div", { class: "io-divider" }, null, -1)),
-                  createBaseVNode("div", _hoisted_7$7, [
+                  createBaseVNode("div", _hoisted_7$8, [
                     _cache[2] || (_cache[2] = createBaseVNode("div", { class: "io-label" }, "附件（user 轮）", -1)),
-                    createBaseVNode("div", _hoisted_8$5, [
+                    createBaseVNode("div", _hoisted_8$6, [
                       a.line.text && a.line.n !== a.attr.taskLineN ? (openBlock(), createBlock(_sfc_main$h, {
                         key: 0,
                         text: String(a.line.text || ""),
@@ -12269,7 +12278,7 @@
                         images: a.line.images
                       }, null, 8, ["images"])
                     ]),
-                    createBaseVNode("div", _hoisted_9$4, toDisplayString(unref(attachNote)(a)), 1)
+                    createBaseVNode("div", _hoisted_9$5, toDisplayString(unref(attachNote)(a)), 1)
                   ])
                 ], 64);
               }), 128))
@@ -12289,7 +12298,7 @@
     class: "preview-strip"
   };
   const _hoisted_6$7 = ["src", "alt", "title", "onClick"];
-  const _hoisted_7$6 = {
+  const _hoisted_7$7 = {
     key: 2,
     class: "note"
   };
@@ -12425,7 +12434,7 @@
               ])) : createCommentVNode("", true)
             ], 64);
           }), 128)),
-          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_7$6, "（空消息）")) : createCommentVNode("", true)
+          __props.item.empty ? (openBlock(), createElementBlock("div", _hoisted_7$7, "（空消息）")) : createCommentVNode("", true)
         ], 512);
       };
     }
@@ -12443,7 +12452,7 @@
   };
   const _hoisted_5$7 = { class: "io-section attach-section" };
   const _hoisted_6$6 = { class: "attach-body" };
-  const _hoisted_7$5 = { class: "attach-note" };
+  const _hoisted_7$6 = { class: "attach-note" };
   const _sfc_main$a = /* @__PURE__ */ defineComponent({
     __name: "SystemMsg",
     props: {
@@ -12516,7 +12525,7 @@
                     images: a.line.images
                   }, null, 8, ["images"])
                 ]),
-                createBaseVNode("div", _hoisted_7$5, toDisplayString(unref(attachNote)(a)), 1)
+                createBaseVNode("div", _hoisted_7$6, toDisplayString(unref(attachNote)(a)), 1)
               ])
             ], 64);
           }), 128))
@@ -12727,11 +12736,11 @@
     key: 1,
     class: "empty"
   };
-  const _hoisted_7$4 = {
+  const _hoisted_7$5 = {
     key: 3,
     class: "msg msg-end"
   };
-  const _hoisted_8$4 = { class: "end-detail" };
+  const _hoisted_8$5 = { class: "end-detail" };
   const _sfc_main$7 = /* @__PURE__ */ defineComponent({
     __name: "Timeline",
     setup(__props) {
@@ -12818,9 +12827,9 @@
               key: 2,
               partial: unref(state).partial
             }, null, 8, ["partial"])) : createCommentVNode("", true),
-            unref(state).current && !unref(state).current.live && unref(state).current.runEndError ? (openBlock(), createElementBlock("section", _hoisted_7$4, [
+            unref(state).current && !unref(state).current.live && unref(state).current.runEndError ? (openBlock(), createElementBlock("section", _hoisted_7$5, [
               _cache[0] || (_cache[0] = createBaseVNode("div", { class: "end-title" }, "会话结局 · 错误终止", -1)),
-              createBaseVNode("div", _hoisted_8$4, toDisplayString(unref(state).current.runEndError), 1)
+              createBaseVNode("div", _hoisted_8$5, toDisplayString(unref(state).current.runEndError), 1)
             ])) : createCommentVNode("", true)
           ])
         ], 2);
@@ -13064,19 +13073,19 @@
     key: 0,
     class: "traj-note"
   };
-  const _hoisted_7$3 = { class: "traj-count" };
-  const _hoisted_8$3 = { class: "traj-scroll" };
-  const _hoisted_9$3 = {
+  const _hoisted_7$4 = { class: "traj-count" };
+  const _hoisted_8$4 = { class: "traj-scroll" };
+  const _hoisted_9$4 = {
     key: 0,
     class: "traj-empty"
   };
-  const _hoisted_10$3 = {
+  const _hoisted_10$4 = {
     key: 1,
     class: "traj-table"
   };
-  const _hoisted_11$3 = { class: "num-head" };
-  const _hoisted_12$3 = ["data-kind", "data-error", "title", "onClick"];
-  const _hoisted_13$3 = { class: "traj-num" };
+  const _hoisted_11$4 = { class: "num-head" };
+  const _hoisted_12$4 = ["data-kind", "data-error", "title", "onClick"];
+  const _hoisted_13$4 = { class: "traj-num" };
   const _hoisted_14$3 = ["onClick"];
   const _hoisted_15$3 = ["onClick"];
   const _hoisted_16$3 = ["onClick"];
@@ -13175,11 +13184,11 @@
                 }), 128))
               ]),
               unref(state).retryNote ? (openBlock(), createElementBlock("span", _hoisted_6$4, toDisplayString(unref(state).retryNote), 1)) : createCommentVNode("", true),
-              createBaseVNode("span", _hoisted_7$3, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
+              createBaseVNode("span", _hoisted_7$4, toDisplayString(visible.value.length) + " / " + toDisplayString(rows.value.length) + " 步", 1)
             ])
           ]),
-          createBaseVNode("div", _hoisted_8$3, [
-            !visible.value.length ? (openBlock(), createElementBlock("div", _hoisted_9$3, toDisplayString(rows.value.length ? "当前筛选没有匹配的步骤" : unref(state).current ? "这个会话还没有步骤" : "左侧选择一个会话后，这里列出它的全部步骤。"), 1)) : (openBlock(), createElementBlock("table", _hoisted_10$3, [
+          createBaseVNode("div", _hoisted_8$4, [
+            !visible.value.length ? (openBlock(), createElementBlock("div", _hoisted_9$4, toDisplayString(rows.value.length ? "当前筛选没有匹配的步骤" : unref(state).current ? "这个会话还没有步骤" : "左侧选择一个会话后，这里列出它的全部步骤。"), 1)) : (openBlock(), createElementBlock("table", _hoisted_10$4, [
               _cache[7] || (_cache[7] = createBaseVNode("colgroup", null, [
                 createBaseVNode("col", { class: "col-n" }),
                 createBaseVNode("col", { class: "col-kind" }),
@@ -13196,7 +13205,7 @@
                   _cache[3] || (_cache[3] = createBaseVNode("th", null, "名称", -1)),
                   _cache[4] || (_cache[4] = createBaseVNode("th", null, "摘要", -1)),
                   _cache[5] || (_cache[5] = createBaseVNode("th", null, "状态", -1)),
-                  createBaseVNode("th", _hoisted_11$3, toDisplayString(unref(unitLabel)()), 1),
+                  createBaseVNode("th", _hoisted_11$4, toDisplayString(unref(unitLabel)()), 1),
                   _cache[6] || (_cache[6] = createBaseVNode("th", { class: "num-head" }, "耗时", -1))
                 ])
               ]),
@@ -13212,7 +13221,7 @@
                       title: row.title || "点击在右侧详情栏看这一步",
                       onClick: ($event) => row.jump ? selectRow(row) : unref(state).trajOpen[row.rid] = !unref(state).trajOpen[row.rid]
                     }, [
-                      createBaseVNode("td", _hoisted_13$3, [
+                      createBaseVNode("td", _hoisted_13$4, [
                         createBaseVNode("button", {
                           type: "button",
                           class: "traj-disclose",
@@ -13257,7 +13266,7 @@
                       }, toDisplayString(statusCell(row).text), 3),
                       createBaseVNode("td", _hoisted_20$3, toDisplayString(sizeCell(row)), 1),
                       createBaseVNode("td", _hoisted_21$3, toDisplayString(row.time ? unref(fmtDur)(row.time) : "—"), 1)
-                    ], 10, _hoisted_12$3),
+                    ], 10, _hoisted_12$4),
                     unref(state).trajOpen[row.rid] ? (openBlock(), createElementBlock("tr", _hoisted_22$3, [
                       createBaseVNode("td", _hoisted_23$3, [
                         createBaseVNode("div", _hoisted_24$3, [
@@ -13461,16 +13470,16 @@
   const _hoisted_4$4 = { class: "detail-block-title" };
   const _hoisted_5$4 = { class: "traj-step-head" };
   const _hoisted_6$3 = { class: "kind-tag" };
-  const _hoisted_7$2 = { class: "traj-step-name" };
-  const _hoisted_8$2 = { class: "traj-detail-title" };
-  const _hoisted_9$2 = {
+  const _hoisted_7$3 = { class: "traj-step-name" };
+  const _hoisted_8$3 = { class: "traj-detail-title" };
+  const _hoisted_9$3 = {
     key: 1,
     class: "code"
   };
-  const _hoisted_10$2 = { class: "row-actions" };
-  const _hoisted_11$2 = { class: "detail-block" };
-  const _hoisted_12$2 = { class: "detail-kv" };
-  const _hoisted_13$2 = ["title"];
+  const _hoisted_10$3 = { class: "row-actions" };
+  const _hoisted_11$3 = { class: "detail-block" };
+  const _hoisted_12$3 = { class: "detail-kv" };
+  const _hoisted_13$3 = ["title"];
   const _hoisted_14$2 = {
     key: 0,
     class: "stats-sub"
@@ -13606,20 +13615,20 @@
               ]),
               createBaseVNode("div", _hoisted_5$4, [
                 createBaseVNode("span", _hoisted_6$3, toDisplayString(trajStep.value.tag), 1),
-                createBaseVNode("span", _hoisted_7$2, toDisplayString(trajStep.value.name), 1)
+                createBaseVNode("span", _hoisted_7$3, toDisplayString(trajStep.value.name), 1)
               ]),
               (openBlock(true), createElementBlock(Fragment, null, renderList(trajStep.value.detail, (text, key) => {
                 return openBlock(), createElementBlock("div", {
                   key,
                   class: "traj-step-section"
                 }, [
-                  createBaseVNode("div", _hoisted_8$2, toDisplayString(TRAJ_STEP_LABELS[key] || key), 1),
+                  createBaseVNode("div", _hoisted_8$3, toDisplayString(TRAJ_STEP_LABELS[key] || key), 1),
                   trajDetailKind(key) === "code" ? (openBlock(), createBlock(_sfc_main$6, {
                     key: 0,
                     text: String(text || ""),
                     cls: "code"
-                  }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_9$2, toDisplayString(String(text || "")), 1)),
-                  createBaseVNode("div", _hoisted_10$2, [
+                  }, null, 8, ["text"])) : (openBlock(), createElementBlock("pre", _hoisted_9$3, toDisplayString(String(text || "")), 1)),
+                  createBaseVNode("div", _hoisted_10$3, [
                     createVNode(_sfc_main$d, {
                       text: String(text || "")
                     }, null, 8, ["text"])
@@ -13631,9 +13640,9 @@
                 images: trajStep.value.images
               }, null, 8, ["images"])) : createCommentVNode("", true)
             ])) : createCommentVNode("", true),
-            createBaseVNode("section", _hoisted_11$2, [
+            createBaseVNode("section", _hoisted_11$3, [
               _cache[0] || (_cache[0] = createBaseVNode("h3", { class: "detail-block-title" }, "会话", -1)),
-              createBaseVNode("dl", _hoisted_12$2, [
+              createBaseVNode("dl", _hoisted_12$3, [
                 (openBlock(true), createElementBlock(Fragment, null, renderList(kvRows.value, (row) => {
                   return openBlock(), createElementBlock(Fragment, {
                     key: row.k
@@ -13651,7 +13660,7 @@
                       }, null, 8, ["text"])) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
                         createTextVNode(toDisplayString(row.v), 1)
                       ], 64))
-                    ], 10, _hoisted_13$2)
+                    ], 10, _hoisted_13$3)
                   ], 64);
                 }), 128))
               ]),
@@ -13907,30 +13916,30 @@
     class: "history-old-note",
     title: "带「旧」的是更早一次父尝试留下的转录（那次尝试已作废并搬进 work/attempts/），和这一次的同号行是两段不同的对话"
   };
-  const _hoisted_7$1 = {
+  const _hoisted_7$2 = {
     key: 0,
     class: "history-confirm",
     role: "alert"
   };
-  const _hoisted_8$1 = {
+  const _hoisted_8$2 = {
     key: 1,
     class: "history-confirm",
     role: "alert"
   };
-  const _hoisted_9$1 = {
+  const _hoisted_9$2 = {
     key: 2,
     class: "history-note"
   };
-  const _hoisted_10$1 = {
+  const _hoisted_10$2 = {
     key: 3,
     class: "history-note"
   };
-  const _hoisted_11$1 = {
+  const _hoisted_11$2 = {
     key: 4,
     class: "history-rounds"
   };
-  const _hoisted_12$1 = { class: "history-rounds-head" };
-  const _hoisted_13$1 = ["title", "onClick"];
+  const _hoisted_12$2 = { class: "history-rounds-head" };
+  const _hoisted_13$2 = ["title", "onClick"];
   const _hoisted_14$1 = { class: "row-chip chain-tag history-tag" };
   const _hoisted_15$1 = { class: "history-round-from" };
   const _hoisted_16$1 = ["title", "onClick", "onKeydown"];
@@ -14140,7 +14149,7 @@
               ], 64)),
               hasArchived.value ? (openBlock(), createElementBlock("span", _hoisted_6$2, "· 带「旧」的是更早一次父尝试（已作废）留下的")) : createCommentVNode("", true)
             ]),
-            dropAsk.value ? (openBlock(), createElementBlock("div", _hoisted_7$1, [
+            dropAsk.value ? (openBlock(), createElementBlock("div", _hoisted_7$2, [
               createBaseVNode("span", null, "删掉「" + toDisplayString(dropAsk.value.name) + "」这条记录？转录会从历史里消失，作废尝试的归档目录也会一起删。", 1),
               createBaseVNode("button", {
                 class: "history-act act-danger",
@@ -14153,7 +14162,7 @@
                 onClick: _cache[0] || (_cache[0] = ($event) => dropAsk.value = null)
               }, "取消")
             ])) : createCommentVNode("", true),
-            restoreAsk.value ? (openBlock(), createElementBlock("div", _hoisted_8$1, [
+            restoreAsk.value ? (openBlock(), createElementBlock("div", _hoisted_8$2, [
               createBaseVNode("span", null, " 切回第 " + toDisplayString(restoreAsk.value.attempt) + " 次尝试？那一份的工作区与产物会搬回原处，现在这一次（第 " + toDisplayString(newest.value) + " 次）整棵留档——之后还能在历史里再切回来。正在跑的会话不会被打断，会等它跑完手上这一轮再搬。 ", 1),
               createBaseVNode("button", {
                 class: "history-act",
@@ -14166,10 +14175,10 @@
                 onClick: _cache[1] || (_cache[1] = ($event) => restoreAsk.value = null)
               }, "取消")
             ])) : createCommentVNode("", true),
-            dropNote.value ? (openBlock(), createElementBlock("div", _hoisted_9$1, toDisplayString(dropNote.value), 1)) : createCommentVNode("", true),
-            restoreNote.value ? (openBlock(), createElementBlock("div", _hoisted_10$1, toDisplayString(restoreNote.value), 1)) : createCommentVNode("", true),
-            rounds.value.length ? (openBlock(), createElementBlock("div", _hoisted_11$1, [
-              createBaseVNode("div", _hoisted_12$1, "这条核对转录里的 " + toDisplayString(rounds.value.length) + " 轮（新 → 旧同序，点一轮跳到那一轮的起点）", 1),
+            dropNote.value ? (openBlock(), createElementBlock("div", _hoisted_9$2, toDisplayString(dropNote.value), 1)) : createCommentVNode("", true),
+            restoreNote.value ? (openBlock(), createElementBlock("div", _hoisted_10$2, toDisplayString(restoreNote.value), 1)) : createCommentVNode("", true),
+            rounds.value.length ? (openBlock(), createElementBlock("div", _hoisted_11$2, [
+              createBaseVNode("div", _hoisted_12$2, "这条核对转录里的 " + toDisplayString(rounds.value.length) + " 轮（新 → 旧同序，点一轮跳到那一轮的起点）", 1),
               (openBlock(true), createElementBlock(Fragment, null, renderList(rounds.value, (r) => {
                 return openBlock(), createElementBlock("button", {
                   key: "r" + r.round,
@@ -14183,7 +14192,7 @@
                     class: normalizeClass(["history-round-state", r.verdict === "pass" ? "ok" : r.verdict === "issues" ? "bad" : ""])
                   }, toDisplayString(r.verdict === "pass" ? "通过" : r.verdict === "issues" ? "拒绝 " + r.issues + " 条" : "无结论"), 3),
                   createBaseVNode("span", _hoisted_15$1, "第 " + toDisplayString(r.from) + " 行 · " + toDisplayString(r.lines) + " 行", 1)
-                ], 8, _hoisted_13$1);
+                ], 8, _hoisted_13$2);
               }), 128))
             ])) : createCommentVNode("", true),
             (openBlock(true), createElementBlock(Fragment, null, renderList(members.value, (s, i) => {
@@ -14436,10 +14445,77 @@
   const _hoisted_4$2 = ["disabled"];
   const _hoisted_5$2 = ["disabled"];
   const _hoisted_6$1 = ["disabled"];
+  const _hoisted_7$1 = ["disabled"];
+  const _hoisted_8$1 = ["disabled"];
+  const _hoisted_9$1 = ["disabled"];
+  const _hoisted_10$1 = ["disabled"];
+  const _hoisted_11$1 = ["disabled"];
+  const _hoisted_12$1 = ["disabled"];
+  const _hoisted_13$1 = ["disabled"];
   const _sfc_main$2 = /* @__PURE__ */ defineComponent({
     __name: "SessionActions",
     setup(__props) {
       const { target: target2, canContinue: canContinue2, canRedraw: canRedraw2, canDrop: canDrop2, hasAny: hasAny2, retryPending: retryPending2, continuePending: continuePending2, continueLabel: continueLabel2, retryLabel: retryLabel2, queued: queued2, busy: busy2, ask: ask2, undoAsk: undoAsk2, backToPrev: backToPrev2 } = actions;
+      const threshold = /* @__PURE__ */ ref("");
+      const noteOpen = /* @__PURE__ */ ref(false);
+      const note = /* @__PURE__ */ ref("");
+      const saving = /* @__PURE__ */ ref(false);
+      const vectorPath = computed(() => {
+        const cur = state.current;
+        if (!cur) return "";
+        const name = String(cur.name || "");
+        return canRedraw2.value && name.indexOf("vector_") === 0 ? name : "";
+      });
+      async function saveThreshold() {
+        if (!vectorPath.value || saving.value) return;
+        const raw = threshold.value.trim();
+        const pct = raw === "" ? NaN : Number(raw);
+        if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+          setRetryNote("阈值要填 0-100 之间的百分比（0 = 用全局默认）");
+          return;
+        }
+        saving.value = true;
+        try {
+          const res = await requestFigureOverride(String(state.current.project || ""), { path: vectorPath.value }, { minOverlap: pct / 100 });
+          setRetryNote(`这张图的阈值已设为 ${pct === 0 ? "全局默认" : pct + "%"}：${res && res.note || ""}`);
+          threshold.value = "";
+        } catch (e) {
+          setRetryNote("保存阈值失败：" + (e && e.message ? e.message : e));
+        } finally {
+          saving.value = false;
+        }
+      }
+      async function acceptAsIs() {
+        if (!vectorPath.value || saving.value) return;
+        const text = note.value.trim();
+        if (!text) {
+          setRetryNote('接受"尽力还原"要写一句差在哪里、为什么到不了');
+          return;
+        }
+        saving.value = true;
+        try {
+          await requestFigureOverride(String(state.current.project || ""), { path: vectorPath.value }, { acceptAsIs: true, note: text });
+          setRetryNote('已按"尽力还原"接受：这张图之后不会再自动重画，只有你点「重画这张图」才动它');
+          noteOpen.value = false;
+          note.value = "";
+        } catch (e) {
+          setRetryNote("接受失败：" + (e && e.message ? e.message : e));
+        } finally {
+          saving.value = false;
+        }
+      }
+      async function clearAccept() {
+        if (!vectorPath.value || saving.value) return;
+        saving.value = true;
+        try {
+          await requestFigureOverride(String(state.current.project || ""), { path: vectorPath.value }, { acceptAsIs: false });
+          setRetryNote('已撤销"尽力还原"接受：这张图回到会被自动重画的状态');
+        } catch (e) {
+          setRetryNote("撤销失败：" + (e && e.message ? e.message : e));
+        } finally {
+          saving.value = false;
+        }
+      }
       return (_ctx, _cache) => {
         return unref(hasAny2) ? (openBlock(), createElementBlock("div", _hoisted_1$2, [
           !unref(actions).pending.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
@@ -14467,36 +14543,98 @@
               title: "只重做这张图：开一条新作图尝试，类别与分组不变；下游阶段要重跑才能看到新图",
               onClick: _cache[2] || (_cache[2] = ($event) => unref(ask2)("redraw"))
             }, "重画这张图", 8, _hoisted_4$2)) : createCommentVNode("", true),
+            vectorPath.value ? (openBlock(), createElementBlock(Fragment, { key: 3 }, [
+              withDirectives(createBaseVNode("input", {
+                "onUpdate:modelValue": _cache[3] || (_cache[3] = ($event) => threshold.value = $event),
+                class: "act-num",
+                type: "number",
+                min: "0",
+                max: "100",
+                step: "1",
+                disabled: saving.value,
+                placeholder: "阈值%",
+                title: "这张图的提交门槛（软墨重叠百分比）：0 = 用 latex.figure_check 的全局值；填了保存后，下次提交/重画按新值判定",
+                onKeyup: withKeys(saveThreshold, ["enter"])
+              }, null, 40, _hoisted_5$2), [
+                [vModelText, threshold.value]
+              ]),
+              createBaseVNode("button", {
+                class: "act-btn",
+                type: "button",
+                disabled: saving.value,
+                title: "保存这张图的提交阈值（只改这一张）",
+                onClick: saveThreshold
+              }, "存阈值", 8, _hoisted_6$1),
+              noteOpen.value ? (openBlock(), createElementBlock(Fragment, { key: 0 }, [
+                withDirectives(createBaseVNode("input", {
+                  "onUpdate:modelValue": _cache[4] || (_cache[4] = ($event) => note.value = $event),
+                  class: "act-note",
+                  type: "text",
+                  disabled: saving.value,
+                  placeholder: "差在哪里、为什么到不了（必填）",
+                  onKeyup: withKeys(acceptAsIs, ["enter"])
+                }, null, 40, _hoisted_7$1), [
+                  [vModelText, note.value]
+                ]),
+                createBaseVNode("button", {
+                  class: "act-btn act-primary",
+                  type: "button",
+                  disabled: saving.value,
+                  onClick: acceptAsIs
+                }, "确认接受", 8, _hoisted_8$1),
+                createBaseVNode("button", {
+                  class: "act-btn act-quiet",
+                  type: "button",
+                  disabled: saving.value,
+                  onClick: _cache[5] || (_cache[5] = ($event) => noteOpen.value = false)
+                }, "取消", 8, _hoisted_9$1)
+              ], 64)) : (openBlock(), createElementBlock(Fragment, { key: 1 }, [
+                createBaseVNode("button", {
+                  class: "act-btn",
+                  type: "button",
+                  disabled: saving.value,
+                  title: "达不到阈值但已经尽力：接受后这张图不再自动重画（粘性），只有「重画这张图」才动它",
+                  onClick: _cache[6] || (_cache[6] = ($event) => noteOpen.value = true)
+                }, "尽力还原", 8, _hoisted_10$1),
+                createBaseVNode("button", {
+                  class: "act-btn act-quiet",
+                  type: "button",
+                  disabled: saving.value,
+                  title: "撤销之前的「尽力还原」接受",
+                  onClick: clearAccept
+                }, "撤销接受", 8, _hoisted_11$1)
+              ], 64))
+            ], 64)) : createCommentVNode("", true),
             unref(canDrop2) ? (openBlock(), createElementBlock("button", {
-              key: 3,
+              key: 4,
               class: "act-btn act-danger",
               type: "button",
               disabled: unref(busy2),
               title: "删掉这条转录（作废尝试的 work/attempts 归档一并删除）；正在写入的会话不给删",
-              onClick: _cache[3] || (_cache[3] = ($event) => unref(ask2)("drop"))
-            }, "删除这条记录", 8, _hoisted_5$2)) : createCommentVNode("", true),
+              onClick: _cache[7] || (_cache[7] = ($event) => unref(ask2)("drop"))
+            }, "删除这条记录", 8, _hoisted_12$1)) : createCommentVNode("", true),
             unref(queued2) ? (openBlock(), createElementBlock("button", {
-              key: 4,
+              key: 5,
               class: "act-btn act-undo",
               type: "button",
               disabled: unref(busy2),
               title: "把刚排进 work/retry/ 的请求删掉；已经被 latex 消费时给出替代动作",
-              onClick: _cache[4] || (_cache[4] = //@ts-ignore
+              onClick: _cache[8] || (_cache[8] = //@ts-ignore
               (...args) => unref(undoAsk2) && unref(undoAsk2)(...args))
-            }, "撤销这个请求", 8, _hoisted_6$1)) : createCommentVNode("", true),
+            }, "撤销这个请求", 8, _hoisted_13$1)) : createCommentVNode("", true),
             unref(queued2) && unref(queued2).prevId ? (openBlock(), createElementBlock("button", {
-              key: 5,
+              key: 6,
               class: "act-btn act-quiet",
               type: "button",
               title: "回到按下重试之前看的那条会话",
-              onClick: _cache[5] || (_cache[5] = ($event) => unref(backToPrev2)(unref(queued2).prevId))
+              onClick: _cache[9] || (_cache[9] = ($event) => unref(backToPrev2)(unref(queued2).prevId))
             }, "回到之前那条")) : createCommentVNode("", true)
           ], 64)) : createCommentVNode("", true)
         ])) : createCommentVNode("", true);
       };
     }
   });
-  const SessionActions = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-b10bdaea"]]);
+  const SessionActions = /* @__PURE__ */ _export_sfc(_sfc_main$2, [["__scopeId", "data-v-79607b8d"]]);
   const _hoisted_1$1 = {
     key: 0,
     class: "session-action-panel"

@@ -27,6 +27,20 @@ type Item struct {
 	Note   string
 	Links  []Link
 	Key    bool
+	// Override 非空才有"阈值 / 尽力还原"那几个控件（T307）：只有实时服务
+	// 才能写磁盘，静态导出的页面里它是 nil。
+	Override *ItemOverride
+}
+
+// ItemOverride 是逐图提交门槛控件的上下文：定位那张图的进度记录。
+type ItemOverride struct {
+	Project     string
+	MD          string
+	Img         string
+	MinOverlap  float64 // 0 = 用全局
+	BestOverlap float64 // 0 = 还没有成绩
+	Accepted    bool
+	AcceptNote  string
 }
 
 // Group 是一个折叠分组。
@@ -177,7 +191,38 @@ func Figure(it Item) string {
 		}
 		b.WriteString("</figcaption>")
 	}
+	if it.Override != nil {
+		b.WriteString(overrideHTML(*it.Override))
+	}
 	b.WriteString("</figure>")
+	return b.String()
+}
+
+// overrideHTML 是逐图阈值控件（T307）：填百分比（0 = 用全局）、保存、接受
+// "尽力还原"、撤销接受。全部操作走 /api/figure-override，页面本身仍然只读。
+func overrideHTML(o ItemOverride) string {
+	var b strings.Builder
+	b.WriteString(`<span class="thr" data-project="` + html.EscapeString(o.Project) +
+		`" data-md="` + html.EscapeString(o.MD) + `" data-img="` + html.EscapeString(o.Img) + `">`)
+	cur := "全局"
+	if o.MinOverlap != 0 {
+		cur = fmt.Sprintf("%.0f%%", o.MinOverlap*100)
+	}
+	score := "还没成绩"
+	if o.BestOverlap > 0 {
+		score = fmt.Sprintf("上次 %.1f%%", o.BestOverlap*100)
+	}
+	fmt.Fprintf(&b, `<span class="thr-cur">阈值 %s · %s</span>`, html.EscapeString(cur), html.EscapeString(score))
+	fmt.Fprintf(&b, `<input class="thr-num" type="number" min="0" max="100" step="1" placeholder="%s" title="这张图的提交门槛（软墨重叠百分比）：0 = 用全局值">`, html.EscapeString(strings.TrimSuffix(cur, "%")))
+	b.WriteString(`<button type="button" data-act="save" title="只改这张图的门槛">存阈值</button>`)
+	if o.Accepted {
+		fmt.Fprintf(&b, `<span class="thr-acc">已按尽力还原接受：%s</span>`, html.EscapeString(o.AcceptNote))
+		b.WriteString(`<button type="button" data-act="clear" title="回到会被自动重画的状态">撤销接受</button>`)
+	} else {
+		b.WriteString(`<input class="thr-note" type="text" placeholder="差在哪里、为什么到不了" hidden>`)
+		b.WriteString(`<button type="button" data-act="accept" title="达不到阈值但已经尽力：接受后这张图不再自动重画">尽力还原</button>`)
+	}
+	b.WriteString(`<span class="thr-msg"></span></span>`)
 	return b.String()
 }
 

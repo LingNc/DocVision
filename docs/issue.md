@@ -2510,3 +2510,7 @@ user 轮
   验证：`TestClassifyFailureIsNotRaster`（图片缺失也走这条路）、`TestClassifyNeeded`、`TestClassifyAbortError`；`go build ./...` 与 `./internal/latex`、`./internal/sessionview` 全绿。
   补记：现场复盘（97 张图全部"回复中未找到 JSON 对象"却无 HTTP 错误）根因是 **base_url 少了 `/v1`**：网关回 200 + HTML，`stream: true` 下 `readStream` 收不到任何 `data:` 行、静默当空回复；现在非 SSE 响应直接报错并点名 base_url（`TestStreamOnHTMLBodyIsAnError`，T50 的真 SSE 空流不受影响）。
   补记：同时把分类输出预算 512→2048，`classifyReplyError` 区分"截断/空回复/说了别的话"并附原话前 200 字，非流式响应也把 `finish_reason` 提到顶层（`TestClassifyReplyError`、`TestDecodeLiftsFinishReason`）。
+[X][ ] T307. 重画图"看着对上了"就能交：提交门槛靠软墨重叠一个数，而它先把宽度/尺寸归一化掉了。默认 17% 重叠 + 10% 尺寸偏差，两处页面可按图调。
+  根因：`SubmitFigureTool` 只检查"编译成功后调过一次 compare_figure"，没有任何数值门槛；`compareFigureImages` 又先用 `fitFigureCanvases` 按原图宽度等比缩放候选、按墨迹外接框裁留白、按质心+平移搜索对齐——宽度差、画布内位置、横纵比例全被"对齐掉了"，只剩墨水形状相似度。
+  改：`compare_figure` 在归一化**之前**量候选/原图墨迹外接框，回执给出 `width x…, height x…, max deviation …`；`latex.figure_check.min_overlap`（默认 0.17）与 `max_scale_dev`（默认 0.10）卡 `submit`，不达标回执写明差几个百分点/差多少尺寸；`submit` 增 `accept_as_is` + 必填 `note`（尽力还原，粘性记录，之后不再自动重画）；提高门槛后 `fig_best_overlap` 低于新门槛的旧图自动退回重画；逐图覆盖 `fig_min_overlap` + `/api/figure-override` + 核对页与会话页两处控件。
+  验证：`TestSubmitFigureThresholdGate`/`TestSubmitFigureAcceptAsIsNeedsNote`/`TestRequeueBelowThreshold`/`TestFigureThresholdDefaults`/`TestFigureOverride*`/`TestReviewPageRendersThresholdControls`；`npm test` 287 项全绿。

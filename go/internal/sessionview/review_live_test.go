@@ -67,7 +67,7 @@ func TestRenderLiveImageReviewUsesDiskFacts(t *testing.T) {
 		"md": "book.md", "img": "images/book/c.png", "class": "classified", "status": "classified",
 	}))
 
-	page, ok := renderLiveImageReview(src)
+	page, ok := renderLiveImageReview(src, "")
 	if !ok {
 		t.Fatal("有 groups.json 就该渲染成功")
 	}
@@ -104,7 +104,7 @@ func TestRenderLiveImageReviewUsesDiskFacts(t *testing.T) {
 
 // 没有 groups.json 时如实返回 false，让调用方退回静态页。
 func TestRenderLiveImageReviewNeedsGroups(t *testing.T) {
-	if _, ok := renderLiveImageReview(t.TempDir()); ok {
+	if _, ok := renderLiveImageReview(t.TempDir(), ""); ok {
 		t.Fatal("没有 groups.json 不应渲染")
 	}
 }

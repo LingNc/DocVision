@@ -311,9 +311,9 @@ func newViewerServer(root string, extras []ScanExtra, rc ...RenderConfig) *viewe
 // this local tool wants.
 func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead &&
-		!(r.Method == http.MethodPost && (r.URL.Path == "/api/mermaid" || r.URL.Path == "/api/retry" || r.URL.Path == "/api/retry/cancel" || r.URL.Path == "/api/truncate" || r.URL.Path == "/api/drop")) {
+		!(r.Method == http.MethodPost && (r.URL.Path == "/api/mermaid" || r.URL.Path == "/api/retry" || r.URL.Path == "/api/retry/cancel" || r.URL.Path == "/api/truncate" || r.URL.Path == "/api/drop" || r.URL.Path == "/api/figure-override")) {
 		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "只读服务：仅支持 GET/HEAD（/api/mermaid、/api/retry、/api/retry/cancel、/api/truncate、/api/drop 接受 POST）", http.StatusMethodNotAllowed)
+		http.Error(w, "只读服务：仅支持 GET/HEAD（/api/mermaid、/api/retry、/api/retry/cancel、/api/truncate、/api/drop、/api/figure-override 接受 POST）", http.StatusMethodNotAllowed)
 		return
 	}
 	p := r.URL.Path
@@ -338,6 +338,8 @@ func (v *viewerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		v.serveMermaid(w, r)
 	case p == "/api/truncate":
 		v.serveTruncate(w, r)
+	case p == "/api/figure-override":
+		v.serveFigureOverride(w, r)
 	case p == "/api/drop":
 		v.serveDrop(w, r)
 	case p == "/api/retry/cancel":

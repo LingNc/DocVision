@@ -3726,3 +3726,24 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 顺带查出的第二处：**输出预算与诊断**。512 token 对思考型模型太紧——真提示词下思考内容就 2000 字上下，很容易把预算吃光让 `content` 变空或只剩 `{"`，而错误信息只有"回复中未找到 JSON 对象"。于是 `classifyMaxTokens` 512 → 2048（两次尝试同值）、`classifyReplyError` 区分"被截断 / 回复为空 / 模型说了别的话"并附原话前 200 字、非流式响应也把 `choices[0].finish_reason` 提到顶层（`ChatResponseChoice.FinishReason` + `decode`；此前非流式路径的 `ChatResponse.FinishReason` 永远为空）。
 
 运行时现场（不写进仓库，记在这里备查）：该机器上该项目 35 条 `class=raster && label=unclassified` 的进度记录已整体搬到 `<项目>/work/rollback_T306_20261110/source_progress_items/`，`progress_items` 清空（下次运行从头分类）；`figures`/`tikz`/`chapters`/`build`/`out`/`style` 当时全空，没有下游产物需要回退。
+
+## 第一百零一批（T307）：重画图的提交门槛与"尽力还原"
+
+**用户提的问题**：① 想让 `compare_figure` 有个默认 17% 的门槛，"要提交的话必须达到"；② 发现有些图压根没和原图对齐——不是覆盖率，而是横纵、宽度、图在画布里的位置都没对齐，怀疑是模型随机偏差而非提示词问题；③ 想在网页上给每个矢量图会话单独设阈值，能"打回继续"而不是只能重新跑；④ 还需要一个"实在达不到要求精度但已经尽力还原"的提交选项，否则一直烧 token。
+
+**查下来第一件事得先说清**：代码里**没有** 17% 这个门槛。`submit_figure` 只有一个条件——成功编译之后至少调过一次 `compare_figure`（`tools.go`）；那个 17% 是回执里 `Soft-ink overlap: 17.00%` 这个**显示用**的数字。所以"提高阈值"无从谈起，得先把门槛做出来。
+
+**为什么"没对齐"却能过**（这是 ② 的真正答案，也被记进 P78）：`compareFigureImages` 算分之前做了三件对齐归一化——`fitFigureCanvases` 把候选**按原图宽度等比缩放**、`cropFigureInk` 按墨迹外接框裁掉留白、质心 + 逐级平移搜索取最优。结果刚好把用户关心的三样抹掉：宽度差、画布内位置、横纵比例。它量的是"墨水形状像不像"，所以 17% 也可能"看着对上了"。要卡这三件事，必须另外量**归一化之前**的墨迹外接框。
+
+**改法**：
+- `figureInkBox` 单独扫一遍墨迹外接框（不拷像素），在 `fitFigureCanvases` **之前**量候选/原图的宽高比 → `ScaleX/ScaleY/ScaleDev` 进 `figureComparison`，回执里写明 `Ink size vs original: width x0.92, height x0.69 (max deviation 31.0%)`。
+- `tikzState` 记"最近一次编译后最好的一次成绩"（`bestOverlap` + 对应 `scaleDevAtBest`/`bestScaleX/Y`），`compile` 成功时清零。
+- `SubmitFigureTool` 拿 `MinOverlap`/`MaxScaleDev`：不达标就 REJECTED，回执把"12.30% < 17.00%（差 4.70 个百分点）""宽高尺寸偏差 31.0% > 10.0%（宽的 0.92 倍、高的 0.69 倍）"写全；`accept_as_is:true` 必须带 `note`，放行并在回执里标 best-effort。
+- 配置：`latex.figure_check.min_overlap`（0 = 用默认 0.17，负数 = 关掉）、`max_scale_dev`（0 = 用默认 0.10，负数 = 关掉）；两份模板与 `docs/config.md` 同步（不是新块，`config_version` 不 bump）。
+- 粘性：`TikZResult`/`imageProgress` 增 `fig_best_overlap`/`fig_accept_as_is`/`fig_accept_note`/`fig_min_overlap`；`--only` 点名重画会清掉接受标记（人说了算）。
+- **提高门槛后自动重判**：`requeueBelowThreshold` 在 pending 选择前把"交过、成绩低于当前门槛"的图退回未分类（成绩提交时就记了，不必重画一遍才知道），已接受的和没有成绩的老图不动；退回当场落盘。
+- 两处界面共用一个写入口 `POST /api/figure-override`（项目校验走 `projectWorkspace`，`md`+`img` 或作图转录名 `path` 定位——后者与 latex 的成品名规则一致，`vectorTexBaseOf` 是它的镜像实现，因为 latex 已经 import 了本包）：核对页卡片上多一行"阈值 全局 · 上次 12.0% [17] 存阈值 · 尽力还原 / 撤销接受"，实时渲染才挂控件、静态导出不挂；会话页在「重画这张图」旁边同一组控件。`/api/figure-override` 与其它写入口一样受 `--no-retry` 总开关约束。
+
+**留一个说明**：`latex.figure_check.enabled` 仍然管的是"逐图视觉校验"那张额外的网；这次的门槛不看那个开关，它是 `submit` 自己的判据（因为用户要的是"提交前必须达到"）。默认 17%/10% 会对现状生效；某张图被门槛卡住时只要 `accept_as_is` 就有出口，不想让全局门槛生效就把 `min_overlap` 写负数。
+
+**测试**：`TestSubmitFigureThresholdGate`（回执必须带数字与差值）、`TestSubmitFigureThresholdPassesOrDisabled`、`TestSubmitFigureAcceptAsIsNeedsNote`、`TestRequeueBelowThreshold`（只退该退的）、`internal/config` 的 `TestFigureThresholdDefaults`、`TestFigureOverrideSetsThreshold`/`ResolvesTranscriptPath`/`AcceptNeedsNote`/`RejectsBadInput`、`TestReviewPageRendersThresholdControls`；`npm test` 287 项全绿，`go test ./internal/...` 只剩两个既有失败。

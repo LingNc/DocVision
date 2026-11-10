@@ -75,7 +75,16 @@ a{color:#63a9f0}
 summary.ghead:hover{background:#22262c}
 summary.ghead .name{color:#777}
 .chip.src{background:#22334a;color:#9dc3ef}
-}`
+}
+.thr{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;margin-top:4px;border-top:1px dashed var(--line);font-size:12px;color:var(--dim)}
+.thr-cur{white-space:nowrap}
+.thr-num{width:4.6em;padding:2px 4px;border:1px solid var(--line);border-radius:4px;background:transparent;color:inherit;font:inherit;font-size:12px}
+.thr-note{flex:1 1 12em;min-width:8em;padding:2px 4px;border:1px solid var(--line);border-radius:4px;background:transparent;color:inherit;font:inherit;font-size:12px}
+.thr button{padding:2px 8px;border:1px solid var(--line);border-radius:4px;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}
+.thr button:hover{background:var(--chip)}
+.thr-msg{flex:1 1 100%;color:var(--dim)}
+.thr-acc{color:var(--fg)}
+`
 
 const LightboxHTML = `<div class="lb" id="lb" hidden>
 <img id="lb-img" alt="">
@@ -180,5 +189,41 @@ document.addEventListener('keydown',function(e){
   if(e.key==='+'||e.key==='='){zoomAt(1/0.8,window.innerWidth/2,window.innerHeight/2);return;}
   if(e.key==='-'){zoomAt(0.8,window.innerWidth/2,window.innerHeight/2);return;}
   if(e.key==='0')reset();
+});
+
+/* T307：逐图提交门槛 / 尽力还原。两条页面共用这段脚本，静态导出的页面里
+   fetch 会失败，回执直接写在卡片上，不会弹窗。 */
+document.addEventListener('click', function (ev) {
+  var box = ev.target && ev.target.closest ? ev.target.closest('.thr') : null;
+  if (!box) return;
+  var btn = ev.target.closest('button[data-act]');
+  if (!btn) return;
+  var act = btn.getAttribute('data-act');
+  var msg = box.querySelector('.thr-msg');
+  var num = box.querySelector('.thr-num');
+  var note = box.querySelector('.thr-note');
+  var body = { project: box.getAttribute('data-project'), md: box.getAttribute('data-md'), img: box.getAttribute('data-img') };
+  if (act === 'save') {
+    var raw = (num.value || '').trim();
+    var pct = raw === '' ? NaN : Number(raw);
+    if (!isFinite(pct) || pct < 0 || pct > 100) { msg.textContent = '阈值要填 0-100 的百分比（0 = 用全局）'; return; }
+    body.min_overlap = pct / 100;
+  } else if (act === 'accept') {
+    var text = (note.value || '').trim();
+    if (!text) { note.hidden = false; note.focus(); msg.textContent = '写一句差在哪里、为什么到不了，再点一次'; return; }
+    body.accept_as_is = true;
+    body.note = text;
+  } else if (act === 'clear') {
+    body.accept_as_is = false;
+  } else { return; }
+  msg.textContent = '正在保存…';
+  fetch('/api/figure-override', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.text().then(function (t) { return [r.ok, t]; }); })
+    .then(function (pair) {
+      if (!pair[0]) { msg.textContent = '保存失败：' + (pair[1] || '服务端拒绝'); return; }
+      msg.textContent = act === 'accept' ? '已按尽力还原接受（这张图不再自动重画）' : (act === 'clear' ? '已撤销接受' : '阈值已保存');
+      if (act === 'save') num.value = '';
+    })
+    .catch(function (e) { msg.textContent = '保存失败：' + e; });
 });
 })();`

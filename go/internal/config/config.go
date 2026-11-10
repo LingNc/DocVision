@@ -706,6 +706,13 @@ func (c *Config) ModelPrices() map[string]PriceConfig {
 	return out
 }
 
+// 重画图的默认提交门槛（T307）：软墨重叠至少 17%，墨迹外接框的宽高比例
+// 偏差不超过 10%。两处都能在图级别被 fig_min_overlap 覆盖，也能显式关掉。
+const (
+	DefaultFigureMinOverlap  = 0.17
+	DefaultFigureMaxScaleDev = 0.10
+)
+
 // FigureCheckConfig configures the per-figure verification loop (level 2
 // vector figures). The check compares the ORIGINAL bitmap with the REDRAWN
 // figure — the drawing session only ever sees its own render, so a figure that
@@ -721,6 +728,14 @@ type FigureCheckConfig struct {
 	// sent back to the same drawing session, and after MaxRounds the figure
 	// is delivered with a warning instead of looping forever.
 	MaxRounds int `yaml:"max_rounds"`
+	// MinOverlap 是重画图提交时的软墨重叠下限（0-1，0 = 用默认 0.17，
+	// 负数 = 关闭这条门槛）。它卡的是 submit_figure：最近一次编译之后
+	// compare_figure 的最好成绩达不到就不许交（T307）。
+	MinOverlap float64 `yaml:"min_overlap"`
+	// MaxScaleDev 是候选墨迹外接框相对原图的尺寸偏差上限（0-1，0 = 用默认
+	// 0.10 = 10%，负数 = 关闭）。量的是**对齐归一化之前**的宽高比例，正是
+	// 软墨重叠看不出来的那一项（P78/T307）。
+	MaxScaleDev float64 `yaml:"max_scale_dev"`
 }
 
 // PreviewConfig controls the automatic session preview server.
@@ -1512,6 +1527,13 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Latex.FigureCheck.MaxRounds == 0 {
 		cfg.Latex.FigureCheck.MaxRounds = 2
+	}
+	// 0 = 用默认（17% / 10%），负数是"关掉这条门槛"的显式写法。
+	if cfg.Latex.FigureCheck.MinOverlap == 0 {
+		cfg.Latex.FigureCheck.MinOverlap = DefaultFigureMinOverlap
+	}
+	if cfg.Latex.FigureCheck.MaxScaleDev == 0 {
+		cfg.Latex.FigureCheck.MaxScaleDev = DefaultFigureMaxScaleDev
 	}
 
 	// Preview defaults (feature is OFF unless explicitly enabled). Host

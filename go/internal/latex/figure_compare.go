@@ -130,8 +130,16 @@ func (t *compareFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	if err := png.Encode(&encoded, overlay); err != nil {
 		return session.ToolResult{Text: "Comparison unavailable: cannot encode comparison overlay: " + err.Error()}, nil
 	}
-	text := fmt.Sprintf("Soft-ink overlap: %.2f%% (R %.2f%%, G %.2f%%, B %.2f%%, gray %.2f%%). Estimated candidate translation applied: dx=%d px, dy=%d px. Alignment starts: %s. Detail=%s, crop=%.1f%%,%.1f%%-%.1f%%,%.1f%%, output=%dx%dpx. Overlay key: white=shared ink, magenta=original-only ink, green=candidate-only ink, black=background.", result.Similarity*100, result.Channels[0]*100, result.Channels[1]*100, result.Channels[2]*100, result.Gray*100, result.DX, result.DY, formatAlignmentRuns(result.Runs), detail, left, top, right, bottom, overlay.Bounds().Dx(), overlay.Bounds().Dy())
+	text := fmt.Sprintf("Soft-ink overlap: %.2f%% (R %.2f%%, G %.2f%%, B %.2f%%, gray %.2f%%). Ink size vs original: width x%.3f, height x%.3f (max deviation %.1f%% — this is measured BEFORE the comparison rescales the candidate, so it does catch a wrong width/height; fix the canvas/coordinates rather than the stroke width). Estimated candidate translation applied: dx=%d px, dy=%d px. Alignment starts: %s. Detail=%s, crop=%.1f%%,%.1f%%-%.1f%%,%.1f%%, output=%dx%dpx. Overlay key: white=shared ink, magenta=original-only ink, green=candidate-only ink, black=background.", result.Similarity*100, result.Channels[0]*100, result.Channels[1]*100, result.Channels[2]*100, result.Gray*100, result.ScaleX, result.ScaleY, result.ScaleDev*100, result.DX, result.DY, formatAlignmentRuns(result.Runs), detail, left, top, right, bottom, overlay.Bounds().Dx(), overlay.Bounds().Dy())
 	t.State.compareCalled = true
+	// 记账给提交门槛（T307）：取这次之前最好的那一份成绩。尺寸偏差跟着
+	// 最好那一次走，避免"形状最像的那版尺寸差"被另一版的好尺寸抵掉。
+	if t.State.bestOverlap == 0 || result.Similarity > t.State.bestOverlap {
+		t.State.bestOverlap = result.Similarity
+		t.State.scaleDevAtBest = result.ScaleDev
+		t.State.bestScaleX = result.ScaleX
+		t.State.bestScaleY = result.ScaleY
+	}
 	return session.ToolResult{Text: text, ImageBase64: base64.StdEncoding.EncodeToString(encoded.Bytes()), ImageMIME: "image/png"}, nil
 }
 
@@ -212,6 +220,12 @@ type figureComparison struct {
 	Runs       []figureAlignmentRun
 	Canvas     int
 	Grid       int
+	// ScaleX/ScaleY 是候选墨迹外接框相对原图的宽、高比例（1 = 一样大），
+	// ScaleDev 是两者里偏得最多的那个。**必须在 fitFigureCanvases 之前量**：
+	// 那个函数会把候选按原图宽度等比缩放，宽度差就此被抹掉——这正是"看着
+	// 对上了、其实窄了一截"却仍能通过的原因（P78/T307）。
+	ScaleX, ScaleY float64
+	ScaleDev       float64
 }
 
 func formatAlignmentRuns(runs []figureAlignmentRun) string {
@@ -228,6 +242,19 @@ func compareFigureImages(reference, candidate image.Image) (figureComparison, *i
 	if ref.Bounds().Dx() < 1 || ref.Bounds().Dy() < 1 || cand.Bounds().Dx() < 1 || cand.Bounds().Dy() < 1 {
 		return figureComparison{}, nil, fmt.Errorf("empty input image")
 	}
+	// 尺寸差要在"对齐归一化"之前量：fitFigureCanvases 会按原图宽度把候选
+	// 等比缩放，之后就再也看不出宽高比例对不对了。
+	inkRefW, inkRefH := figureInkBox(ref)
+	inkCandW, inkCandH := figureInkBox(cand)
+	scaleX, scaleY := 1.0, 1.0
+	if inkRefW > 0 && inkCandW > 0 {
+		scaleX = float64(inkCandW) / float64(inkRefW)
+	}
+	if inkRefH > 0 && inkCandH > 0 {
+		scaleY = float64(inkCandH) / float64(inkRefH)
+	}
+	scaleDev := math.Max(math.Abs(1-scaleX), math.Abs(1-scaleY))
+
 	ref, cand = fitFigureCanvases(ref, cand)
 	rgbRef, originRef := cropFigureInk(ref, false)
 	rgbCand, originCand := cropFigureInk(cand, false)
@@ -264,7 +291,8 @@ func compareFigureImages(reference, candidate image.Image) (figureComparison, *i
 	grayScore := figureOverlapScore(grayA, grayB, figureRound(float64(grayDY*grid)/float64(canvas)), figureRound(float64(grayDX*grid)/float64(canvas))).Mean()
 
 	comparison := figureComparison{Similarity: best.Similarity, Channels: best.Channels, Gray: grayScore,
-		DX: dx, DY: dy, Runs: best.Runs, Canvas: canvas, Grid: grid}
+		DX: dx, DY: dy, Runs: best.Runs, Canvas: canvas, Grid: grid,
+		ScaleX: scaleX, ScaleY: scaleY, ScaleDev: scaleDev}
 	return comparison, figureOverlay(ref, cand, dx, dy), nil
 }
 
@@ -286,6 +314,27 @@ func fitFigureCanvases(reference, candidate *image.NRGBA) (*image.NRGBA, *image.
 	draw.Draw(refCanvas, image.Rect(0, (h-reference.Bounds().Dy())/2, w, (h-reference.Bounds().Dy())/2+reference.Bounds().Dy()), reference, reference.Bounds().Min, draw.Src)
 	draw.Draw(candCanvas, image.Rect(0, (h-candidate.Bounds().Dy())/2, w, (h-candidate.Bounds().Dy())/2+candidate.Bounds().Dy()), candidate, candidate.Bounds().Min, draw.Src)
 	return refCanvas, candCanvas
+}
+
+// figureInkBox 返回墨迹外接框的宽高（阈值与 cropFigureInk 一致：最暗通道
+// 的墨量 > 0.2）。只做一遍扫描、不拷贝像素，给"尺寸差"这一步用。
+func figureInkBox(src image.Image) (int, int) {
+	b := src.Bounds()
+	minX, minY, maxX, maxY := b.Dx(), b.Dy(), -1, -1
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < b.Dx(); x++ {
+			c := color.NRGBAModel.Convert(src.At(b.Min.X+x, b.Min.Y+y)).(color.NRGBA)
+			ink := figureMax3(1-float64(c.R)/255, 1-float64(c.G)/255, 1-float64(c.B)/255)
+			if ink > 0.2 {
+				minX, minY = min(minX, x), min(minY, y)
+				maxX, maxY = max(maxX, x), max(maxY, y)
+			}
+		}
+	}
+	if maxX < minX || maxY < minY {
+		return 0, 0
+	}
+	return maxX - minX + 1, maxY - minY + 1
 }
 
 func cropFigureInk(src image.Image, gray bool) (softInkImage, image.Point) {

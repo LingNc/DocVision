@@ -101,6 +101,10 @@ type FigureEnv struct {
 	CheckFigure func(png string) (bool, string)
 	// CheckRounds caps the fix loop (0 = one verification, no fix round).
 	CheckRounds int
+	// MinOverlap / MaxScaleDev 是 submit_figure 的数值门槛
+	// （latex.figure_check，本图可用 fig_min_overlap 覆盖；<=0 表示这条不卡）。
+	MinOverlap  float64
+	MaxScaleDev float64
 }
 
 // renderPrompt fills the placeholders used by the built-in session
@@ -157,6 +161,15 @@ type imageProgress struct {
 	DedupeVersion    string   `json:"dedupe_version,omitempty"`
 	SharedTex        string   `json:"shared_tex,omitempty"` // raw reusable body (not standalone)
 	Error            string   `json:"error,omitempty"`
+	// FigMinOverlap 是这张图的提交门槛覆盖值（0 = 用 latex.figure_check 的全局值，
+	// 负数是"这张图不卡门槛"）：网页上逐图可改（T307）。
+	FigMinOverlap float64 `json:"fig_min_overlap,omitempty"`
+	// FigBestOverlap / FigAcceptAsIs / FigAcceptNote：最近一次提交的门槛成绩，
+	// 以及"达不到阈值但已尽力"的粘性标记——标记为真时不再自动重画，只有
+	// 手动点重画（role=vector）才会动它。
+	FigBestOverlap float64 `json:"fig_best_overlap,omitempty"`
+	FigAcceptAsIs  bool    `json:"fig_accept_as_is,omitempty"`
+	FigAcceptNote  string  `json:"fig_accept_note,omitempty"`
 	// FallbackReason 是这张图为什么以原图交付（P64）：状态只说明"没画出成品"，
 	// 核对时要能看出是工具链缺失、模型没通过校验，还是接口/会话出了问题。
 	FallbackReason string `json:"fallback_reason,omitempty"`
@@ -587,6 +600,13 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	loadProgress(progDir, prog)
 	r.migrateProgress(prog, progDir, outDir)
 
+	// 阈值提高之后，以前"交过"的图要重判一次（T307）：成绩当时就记在
+	// fig_best_overlap 里，不需要重新画一遍才知道达不达标。低于当前门槛的
+	// 退回未分类、重新排队；"尽力还原"接受过的、以及没有成绩记录的老图不动。
+	if n := requeueBelowThreshold(prog, progDir, r.cfg.Latex.FigureCheck.MinOverlap); n > 0 {
+		r.log.LogWarning(0, "[figure] 有", strconv.Itoa(n), "张图上次的成绩低于当前门槛，退回重新画（想放过某张就给它 fig_accept_as_is，或单独设 fig_min_overlap）")
+	}
+
 	onlySet := map[string]bool{}
 	for _, k := range opts.Only {
 		if k = strings.TrimSpace(k); k != "" {
@@ -597,6 +617,12 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	for _, t := range all {
 		if len(onlySet) > 0 {
 			if onlySet[t.key()] {
+				// 点名重画（--only / 网页"重画这张"）是人说了算：连"尽力还原
+				// 接受过"的粘性标记也一并清掉，这一张照跑（T307）。
+				if p := prog[t.key()]; p != nil && (p.FigAcceptAsIs || p.FigAcceptNote != "") {
+					p.FigAcceptAsIs, p.FigAcceptNote = false, ""
+					saveProgress(progDir, p)
+				}
 				pending = append(pending, t) // 点名重画：done 也要再跑一遍
 				delete(onlySet, t.key())
 			}
@@ -1476,6 +1502,13 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 
 	env := FigureEnv{MDContent: mf.content, CurrentImg: t.imgPath, ImagesDir: r.cfg.Paths.ImagesDir, MaxUp: r.cfg.Options.MaxWindowUp, MaxDown: r.cfg.Options.MaxWindowDown, OutputLang: r.outputLang(),
 		CurrentImgAbs: imgFile, ViewImageMax: r.cfg.ViewImageMax(), ViewPDFMax: r.cfg.ViewPDFMax(), ViewWarnRatio: r.cfg.ViewWarnRatio()}
+	// 提交门槛（T307）：全局取 latex.figure_check，本图可用 fig_min_overlap 覆盖
+	// （网页上改的那个数）；<=0 表示这一条不卡。
+	env.MinOverlap = r.cfg.Latex.FigureCheck.MinOverlap
+	env.MaxScaleDev = r.cfg.Latex.FigureCheck.MaxScaleDev
+	if pp.FigMinOverlap != 0 {
+		env.MinOverlap = pp.FigMinOverlap
+	}
 	if r.cfg.Latex.FigureCheck.Enabled {
 		// 逐图校验（默认关闭）：原图 ↔ 重画图比对交给视觉模型，不一致的问题
 		// 打回**同一个**作图会话修正，最多 MaxRounds 轮。
@@ -1494,6 +1527,14 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 		return false
 	}
 	pp.TikzCode = res.Code
+	// 门槛成绩与"尽力还原"标记：粘性记在进度里，之后不再自动重画（T307）。
+	pp.FigBestOverlap = res.BestOverlap
+	pp.FigAcceptAsIs = res.AcceptedAsIs
+	pp.FigAcceptNote = res.AcceptNote
+	if res.AcceptedAsIs {
+		r.log.LogWarning(tid, "[tikz] 按尽力还原接受（重叠 "+fmt.Sprintf("%.2f%%", res.BestOverlap*100)+"）：",
+			t.imgPath, res.AcceptNote)
+	}
 	if res.Uncertain {
 		// 模型标注了不确定内容（% [?] 注释）：记警告便于人工复核。
 		r.log.LogWarning(tid, "[tikz] 图形含不确定标注 [?]（建议人工复核）:", t.imgPath)
@@ -1852,6 +1893,36 @@ func loadProgress(progDir string, prog map[string]*imageProgress) {
 			}
 		}
 	}
+}
+
+// requeueBelowThreshold 把"上次交过、但成绩低于当前门槛"的矢量图退回未分类
+// （T307）：成绩在提交时就记进 fig_best_overlap，所以提高门槛后不必重画一遍
+// 才能发现不达标。已被"尽力还原"接受的图有粘性，不参与；没有成绩记录的老图
+// 也无从判断，保持原样。
+func requeueBelowThreshold(prog map[string]*imageProgress, progDir string, globalMin float64) int {
+	n := 0
+	for _, p := range prog {
+		if p == nil || p.Status != "done" || strings.TrimSpace(p.TikzCode) == "" {
+			continue
+		}
+		if p.FigAcceptAsIs || p.FigBestOverlap <= 0 {
+			continue
+		}
+		lim := globalMin
+		if p.FigMinOverlap != 0 {
+			lim = p.FigMinOverlap
+		}
+		if lim <= 0 || p.FigBestOverlap >= lim {
+			continue
+		}
+		p.Status = "classified"
+		p.TikzCode, p.FigPDF, p.FigPNG, p.FigSVG = "", "", "", ""
+		p.Error, p.SVGFail, p.Kept, p.Content = "", false, false, ""
+		p.FallbackReason = ""
+		saveProgress(progDir, p) // 当场落盘：中途被打断也不会又变回 done
+		n++
+	}
+	return n
 }
 
 func saveProgress(progDir string, p *imageProgress) {

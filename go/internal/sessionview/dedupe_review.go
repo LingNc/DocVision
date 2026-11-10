@@ -27,7 +27,7 @@ func (v *viewerServer) serveDedupeReview(w http.ResponseWriter, r *http.Request)
 	base := v.dedupeMediaBase(project)
 	// P64：静态 review.html 是 dedupe 收尾时的快照（写它的时候 process 还没跑），
 	// 状态与成品都会过期。能按磁盘现渲染就现渲染，静态页只作为退路。
-	if live, ok := renderLiveImageReview(filepath.Dir(dir)); ok {
+	if live, ok := renderLiveImageReview(filepath.Dir(dir), project); ok {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(injectBaseHref(live, base))

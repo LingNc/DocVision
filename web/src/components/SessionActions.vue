@@ -5,9 +5,79 @@
 // 状态与动作在 `src/actions.ts`（与顶栏下面的确认条 `SessionActionPanel.vue`
 // 共用同一份 pending / queued）。这里只有按钮本身——它现在紧挨着「N 条消息 ·
 // 输入…」那段指标，不单独占一行。
+import { computed, ref } from 'vue'
 import { actions } from '../actions'
+import { state, setRetryNote } from '../state'
+import { requestFigureOverride } from '../data'
 
 const { target, canContinue, canRedraw, canDrop, hasAny, retryPending, continuePending, continueLabel, retryLabel, queued, busy, ask, undoAsk, backToPrev } = actions
+
+// 逐图提交门槛（T307/P78）：只在看一条作图会话时出现。值按百分比填（17 = 17%），
+// 0 = 回到全局默认，留空不提交。接受"尽力还原"要一句 note（与 submit_figure 的
+// accept_as_is 同一义），撤销也是这里。
+const threshold = ref('')
+const noteOpen = ref(false)
+const note = ref('')
+const saving = ref(false)
+const vectorPath = computed(() => {
+  const cur = state.current as any
+  if (!cur) return ''
+  const name = String(cur.name || '')
+  return canRedraw.value && name.indexOf('vector_') === 0 ? name : ''
+})
+
+async function saveThreshold() {
+  if (!vectorPath.value || saving.value) return
+  const raw = threshold.value.trim()
+  const pct = raw === '' ? NaN : Number(raw)
+  if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+    setRetryNote('阈值要填 0-100 之间的百分比（0 = 用全局默认）')
+    return
+  }
+  saving.value = true
+  try {
+    const res = await requestFigureOverride(String((state.current as any).project || ''), { path: vectorPath.value }, { minOverlap: pct / 100 })
+    setRetryNote(`这张图的阈值已设为 ${pct === 0 ? '全局默认' : pct + '%'}：${(res && res.note) || ''}`)
+    threshold.value = ''
+  } catch (e: any) {
+    setRetryNote('保存阈值失败：' + (e && e.message ? e.message : e))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function acceptAsIs() {
+  if (!vectorPath.value || saving.value) return
+  const text = note.value.trim()
+  if (!text) {
+    setRetryNote('接受"尽力还原"要写一句差在哪里、为什么到不了')
+    return
+  }
+  saving.value = true
+  try {
+    await requestFigureOverride(String((state.current as any).project || ''), { path: vectorPath.value }, { acceptAsIs: true, note: text })
+    setRetryNote('已按"尽力还原"接受：这张图之后不会再自动重画，只有你点「重画这张图」才动它')
+    noteOpen.value = false
+    note.value = ''
+  } catch (e: any) {
+    setRetryNote('接受失败：' + (e && e.message ? e.message : e))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function clearAccept() {
+  if (!vectorPath.value || saving.value) return
+  saving.value = true
+  try {
+    await requestFigureOverride(String((state.current as any).project || ''), { path: vectorPath.value }, { acceptAsIs: false })
+    setRetryNote('已撤销"尽力还原"接受：这张图回到会被自动重画的状态')
+  } catch (e: any) {
+    setRetryNote('撤销失败：' + (e && e.message ? e.message : e))
+  } finally {
+    saving.value = false
+  }
+}
 </script>
 
 <template>
@@ -37,6 +107,37 @@ const { target, canContinue, canRedraw, canDrop, hasAny, retryPending, continueP
         title="只重做这张图：开一条新作图尝试，类别与分组不变；下游阶段要重跑才能看到新图"
         @click="ask('redraw')"
       >重画这张图</button>
+      <template v-if="vectorPath">
+        <input
+          v-model="threshold"
+          class="act-num"
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          :disabled="saving"
+          :placeholder="'阈值%'"
+          title="这张图的提交门槛（软墨重叠百分比）：0 = 用 latex.figure_check 的全局值；填了保存后，下次提交/重画按新值判定"
+          @keyup.enter="saveThreshold"
+        />
+        <button class="act-btn" type="button" :disabled="saving" title="保存这张图的提交阈值（只改这一张）" @click="saveThreshold">存阈值</button>
+        <template v-if="noteOpen">
+          <input
+            v-model="note"
+            class="act-note"
+            type="text"
+            :disabled="saving"
+            placeholder="差在哪里、为什么到不了（必填）"
+            @keyup.enter="acceptAsIs"
+          />
+          <button class="act-btn act-primary" type="button" :disabled="saving" @click="acceptAsIs">确认接受</button>
+          <button class="act-btn act-quiet" type="button" :disabled="saving" @click="noteOpen = false">取消</button>
+        </template>
+        <template v-else>
+          <button class="act-btn" type="button" :disabled="saving" title="达不到阈值但已经尽力：接受后这张图不再自动重画（粘性），只有「重画这张图」才动它" @click="noteOpen = true">尽力还原</button>
+          <button class="act-btn act-quiet" type="button" :disabled="saving" title="撤销之前的「尽力还原」接受" @click="clearAccept">撤销接受</button>
+        </template>
+      </template>
       <button
         v-if="canDrop"
         class="act-btn act-danger"
@@ -71,6 +172,30 @@ const { target, canContinue, canRedraw, canDrop, hasAny, retryPending, continueP
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.act-num {
+  width: 5.2em;
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--btn-bg, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.act-note {
+  width: 12em;
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--btn-bg, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
 }
 
 .act-btn {

@@ -35,6 +35,11 @@ type liveImageProgress struct {
 	FallbackReason string `json:"fallback_reason"`
 	Error          string `json:"error"`
 	Absorbed       bool   `json:"absorbed"`
+	// 提交门槛相关（T307）：本图阈值覆盖、上次成绩、"尽力还原"标记。
+	FigMinOverlap  float64 `json:"fig_min_overlap"`
+	FigBestOverlap float64 `json:"fig_best_overlap"`
+	FigAcceptAsIs  bool    `json:"fig_accept_as_is"`
+	FigAcceptNote  string  `json:"fig_accept_note"`
 }
 
 // liveDedupeGroups 是 groups.json 里核对页要用的子集（其余字段不读）。
@@ -75,7 +80,7 @@ type liveDedupeGroups struct {
 // 的项目，页面上既没有阶段行按钮、`/dedupe?project=` 也是 404，等于图片核对页
 // 没有入口。分组结论只是这个页面的一部分，**有图片记录就该能看**：没有结论时
 // 分组为空、每张图按"未分组"列出来。
-func renderLiveImageReview(sourceDir string) ([]byte, bool) {
+func renderLiveImageReview(sourceDir, project string) ([]byte, bool) {
 	prog := loadLiveProgress(sourceDir)
 	var gf liveDedupeGroups
 	haveGroups := false
@@ -91,7 +96,7 @@ func renderLiveImageReview(sourceDir string) ([]byte, bool) {
 	if !haveGroups && len(prog) == 0 {
 		return nil, false
 	}
-	page := reviewpageRig{source: sourceDir, prog: prog}
+	page := reviewpageRig{source: sourceDir, prog: prog, project: project}
 
 	doc := reviewpage.Doc{
 		Title: "图片核对（按磁盘现状）",
@@ -186,6 +191,9 @@ func renderLiveImageReview(sourceDir string) ([]byte, bool) {
 type reviewpageRig struct {
 	source string
 	prog   map[string]*liveImageProgress // key: img 相对路径
+	// project 是页面上的项目名：逐图门槛控件要带着它回写
+	// /api/figure-override（静态导出时为空，控件就不渲染）。
+	project string
 }
 
 // item 把一张图造成页面上的一张卡片。hash 来自 groups.json（没有就只给原图）。
@@ -240,6 +248,14 @@ func (r reviewpageRig) item(imgRel, hash string) reviewpage.Item {
 			reason = "未分类：" + reason
 		}
 		it.Note = joinNote(it.Note, reason)
+	}
+	// T307：矢量图才有提交门槛可调；给卡片挂上"阈值 / 尽力还原"控件。
+	if r.project != "" && p.Class == "vector" {
+		it.Override = &reviewpage.ItemOverride{
+			Project: r.project, MD: p.MD, Img: p.Img,
+			MinOverlap: p.FigMinOverlap, BestOverlap: p.FigBestOverlap,
+			Accepted: p.FigAcceptAsIs, AcceptNote: p.FigAcceptNote,
+		}
 	}
 	it.Links = r.links(p, base)
 	return it

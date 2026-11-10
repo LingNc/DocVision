@@ -24,6 +24,12 @@ type TikZResult struct {
 	Merges    []string // image paths absorbed into this figure
 	Uncertain bool     // submitted code contains % [?] uncertainty marks
 	Reason    string   // why it fell back
+	// BestOverlap / AcceptedAsIs / AcceptNote：提交时的门槛成绩与"尽力还原"
+	// 标记（T307）。AcceptedAsIs 为真表示这一版没达到阈值、是人为/模型选择
+	// 接受的，之后不再自动重画。
+	BestOverlap  float64
+	AcceptedAsIs bool
+	AcceptNote   string
 }
 
 // RunTikZSession drives one complete draw→compile→review→submit cycle
@@ -59,7 +65,7 @@ func RunTikZSession(
 	engineIsXe := strings.Contains(strings.ToLower(comp.engine), "xe") ||
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
-	submitFig := &SubmitFigureTool{State: state}
+	submitFig := &SubmitFigureTool{State: state, MinOverlap: env.MinOverlap, MaxScaleDev: env.MaxScaleDev}
 	compareFig := &compareFigureTool{State: state, Comp: comp, OriginalPath: env.CurrentImgAbs}
 	sess := session.NewSession(client, modelCfg, tuning, renderPrompt(prompts.Must(prompts.FigureSystem), tuning, env.OutputLang), []session.Tool{
 		&WriteWorkFileTool{Root: scratch},
@@ -243,6 +249,10 @@ func RunTikZSession(
 	result.Uncertain = state.uncertain
 	result.PDFPath = dstPDF
 	result.PNGPath = dstPNG
+	// 门槛成绩与"尽力还原"标记（T307）：成绩给人看，标记让这张图不再自动重画。
+	result.BestOverlap = state.bestOverlap
+	result.AcceptedAsIs = state.acceptedAsIs
+	result.AcceptNote = state.acceptNote
 	if keepTemps {
 		log.Log(0, "[temp] 保留矢量图工作区:", scratch)
 	} else {

@@ -322,6 +322,22 @@ export function cancelChapterRetry(project: string, chapter: string, role = 'con
   })
 }
 
+/* figureOverride 是逐图门槛 / 「尽力还原接受」的写入口（T307）：核对页按
+   (project, md, img) 定位，会话页按作图转录名 path 定位，两处共用。 */
+export function requestFigureOverride(
+  project: string,
+  target: { md?: string; img?: string; path?: string },
+  change: { minOverlap?: number; acceptAsIs?: boolean; note?: string; clearAccept?: boolean; clearBest?: boolean },
+): Promise<any> {
+  const body: Record<string, unknown> = { project, ...target }
+  if (change.minOverlap !== undefined) body.min_overlap = change.minOverlap
+  if (change.acceptAsIs !== undefined) body.accept_as_is = change.acceptAsIs
+  if (change.note) body.note = change.note
+  if (change.clearAccept) body.clear_accept = true
+  if (change.clearBest) body.clear_best = true
+  return postJSON('/api/figure-override', body)
+}
+
 export function chapterPendingRetry(project: string, chapter: string, role = ''): boolean {
   const list = (state.retries || {})[project] || []
   if (list.indexOf(chapter) < 0) return false
