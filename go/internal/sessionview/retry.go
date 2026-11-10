@@ -740,6 +740,14 @@ func (v *viewerServer) serveDrop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "删除失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// T314：作图会话的转录被删掉，这张图也该重新变成待处理（下次运行从头画），
+	// 否则它一直是 done，删了也没有任何效果。
+	requeueNote := ""
+	if strings.HasPrefix(name, "vector_") {
+		if msg := requeueVectorNote(projDir, name); msg != "" {
+			requeueNote = "；" + msg
+		}
+	}
 	// 作废尝试的归档一并清掉：它和这条转录是同一次尝试的两半。
 	removedArchive := ""
 	if base, attempt, ok := attemptFromTranscriptName(name); ok {
@@ -750,7 +758,7 @@ func (v *viewerServer) serveDrop(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	note := "记录已删除"
+	note := "记录已删除" + requeueNote
 	if removedArchive != "" {
 		note = "记录已删除（证据目录 work/attempts 里的同一次尝试也一起删了）"
 	}
@@ -877,6 +885,90 @@ type truncateRequest struct {
 // 安全三条：① 可能还在写就拒（90 秒内有更新或有 .partial）；② 动手前把整份
 // 原始转录复制到 work/sessions/.trash/ 下，随时能捞回来；③ 只认 transcripts
 // 目录里的 *.jsonl，落盘用临时文件 + rename，中途失败不会留下半份转录。
+// vectorTranscriptHash 从作图转录名里取出图片哈希：
+// vector_<md名>__<图片哈希>__<label>.jsonl（T314）。
+func vectorTranscriptHash(name string) string {
+	s := strings.TrimSuffix(strings.TrimPrefix(name, "vector_"), ".jsonl")
+	parts := strings.SplitN(s, "__", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[1]
+}
+
+// requeueVectorProgress 把作图转录对应的逐图进度改回"待处理"（T314）。
+// 截断/删除只改转录文件、不动 progress，这张图下次运行就还是 done、不会被派
+// 下去——截断等于白截。这里清掉成品与成绩（要重画），保留分类、dedupe 与这张图
+// 自己的阈值覆盖（fig_min_overlap）。返回改动条目数、跳过原因与错误。
+func requeueVectorProgress(projDir, trName string) (int, string, error) {
+	hash := vectorTranscriptHash(trName)
+	if hash == "" {
+		return 0, "", nil
+	}
+	files, err := filepath.Glob(filepath.Join(projDir, "source", "progress_items", "*", "*.json"))
+	if err != nil {
+		return 0, "", err
+	}
+	n, skip := 0, ""
+	for _, f := range files {
+		data, rerr := os.ReadFile(f)
+		if rerr != nil {
+			continue
+		}
+		var rec map[string]any
+		if json.Unmarshal(data, &rec) != nil {
+			continue
+		}
+		img, _ := rec["img"].(string)
+		if img == "" {
+			continue
+		}
+		stem := strings.TrimSuffix(filepath.Base(img), filepath.Ext(img))
+		if stem != hash && !strings.HasSuffix(stem, hash) {
+			continue
+		}
+		if st, _ := rec["status"].(string); st != "done" {
+			continue // 本来就是待处理，没什么可改的
+		}
+		if eq, _ := rec["equivalent_to"].(string); eq != "" {
+			skip = "这张图是另一张代表图的副本（dedupe 跟随），要重画请对代表图那张操作"
+			continue
+		}
+		rec["status"] = "classified"
+		for _, k := range []string{
+			"tikz_code", "figure_pdf", "figure_png", "figure_svg", "error",
+			"fallback_reason", "content", "svg_failed", "original_kept",
+			"fig_best_overlap", "fig_scale_dev", "fig_score_backfilled",
+			"fig_accept_as_is", "fig_accept_note",
+		} {
+			delete(rec, k)
+		}
+		out, merr := json.MarshalIndent(rec, "", "  ")
+		if merr != nil {
+			return n, skip, merr
+		}
+		if werr := os.WriteFile(f, append(out, '\n'), 0o644); werr != nil {
+			return n, skip, werr
+		}
+		n++
+	}
+	return n, skip, nil
+}
+
+// requeueVectorNote 是上面那步给人看的一句话（页面直接显示）。
+func requeueVectorNote(projDir, trName string) string {
+	n, skip, err := requeueVectorProgress(projDir, trName)
+	switch {
+	case err != nil:
+		return "这张图没能标回待处理（" + err.Error() + "）：下次运行可能仍当它已完成"
+	case n > 0:
+		return "这张图已标回待处理：下次运行会从这条截断后的转录接着画"
+	case skip != "":
+		return "没有改这张图的状态（" + skip + "）"
+	}
+	return ""
+}
+
 func (v *viewerServer) serveTruncate(w http.ResponseWriter, r *http.Request) {
 	if !v.allowRetry {
 		http.Error(w, "写入口已关闭（docvision sessions 用 --no-retry 启动的）", http.StatusForbidden)
@@ -951,11 +1043,19 @@ func (v *viewerServer) serveTruncate(w http.ResponseWriter, r *http.Request) {
 	if relErr != nil {
 		relBackup = filepath.Base(backup)
 	}
+	// T314：作图会话截断之后必须把这张图的进度改回"待处理"。只改转录文件不动
+	// progress 的话，这张图下次运行仍然是 done、根本不会被派下去——截断就等于
+	// 白截（用户口径：截断的意义就是让它带着干净的上下文接着画）。
+	note := ""
+	if strings.HasPrefix(name, "vector_") {
+		note = requeueVectorNote(projDir, name)
+	}
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"kept":    len(kept),
 		"dropped": len(lines) - len(kept),
 		"backup":  filepath.ToSlash(relBackup),
+		"note":    note,
 	})
 }
 

@@ -25,7 +25,7 @@ export function dropFromLine(line: number, source: string): boolean {
   const child = String(s.chapterId || '').indexOf('_child_') >= 0
   const parent = child ? String(s.chapterId).slice(0, String(s.chapterId).indexOf('_child_')) : ''
   const then = vector
-    ? '这张图会从这条截断后的转录接着画：让它重新排进重画（例如把阈值调高让它被退回，或下次运行把它退回）即可；点「重画这张图」是从头开新会话（旧转录留档成 .tryN），不是接着这条'
+    ? '这张图会被标回待处理（成品与成绩清掉），下次运行就从这条截断后的转录接着画；点「重画这张图」是从头开新会话（旧转录留档成 .tryN），不是接着这条'
     : child
     ? '接着点顶栏的「继续跑父章节」（' + parent + '）让它跑起来：子章节不会单独重跑，父节点重新驱动这一支时会从这条截断后的转录续跑'
     : '运行中的 latex 会从这条会话接着跑（也可以点「继续跑」排一次）'
@@ -36,8 +36,10 @@ export function dropFromLine(line: number, source: string): boolean {
   setRetryNote('正在就地截断到第 ' + keep + ' 条…')
   truncateSession(String(s.project), String(s.path), keep)
     .then((res: any) => {
+      // T314：服务端会把作图会话对应的这张图标回待处理，回执里带一句 note。
+      const extra = (res && res.note) ? res.note + '；' : ''
       setRetryNote('已截断：保留 ' + ((res && res.kept) || keep) + ' 条、丢掉 ' + ((res && res.dropped) || 0)
-        + ' 条（备份 ' + ((res && res.backup) || '.trash/') + '）；' + then)
+        + ' 条（备份 ' + ((res && res.backup) || '.trash/') + '）；' + extra + then)
       return refreshIndex()
     })
     .catch((err: any) => {

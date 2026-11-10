@@ -2535,3 +2535,7 @@ user 轮
   根因：`compareFigureImages` 直接 `inkCandW/inkRefW`；两边都来自各自的位图，谁也不带物理尺寸。
   改：按墨迹占各自画布的比例 × 画布真实尺寸换成**毫米**再比（原图用 MinerU 解析出的印刷尺寸、候选用 PDF 页尺寸，`MeasureImage`+`pdfPageSizeMM`），任一侧查不到物理尺寸就退到**宽高比**偏差；回执把画布占比、mm 尺寸、宽高比三样都摊开（`figureSizeSentence`），打回文案也不再出现像素倍数。
   验证：`t312_figure_size_mm_test.go`（像素差 5 倍但物理相同 → 偏差 0；真放大一倍 → 100%；压扁 2:1→4:1 → 100%；无 mm 时退宽高比）。
+[X][ ] T314. 截断作图会话只改转录、不改逐图进度：图仍是 done，下一轮根本不会被派下去，截断等于白截。
+  根因：`/api/truncate`（⤫）与 `/api/drop` 只动 `source/sessions/vector_*.jsonl`；`pending` 只收 status≠done。
+  改：截断/删除成功后按转录名里的图片哈希找回进度条目，`status=classified` 并清成品与成绩（保留分类、dedupe、`fig_min_overlap`）；回执带一句 note，前端回执显示。
+  验证：三例（正常翻转+清字段+留阈值 / dedupe 副本不翻 / 章节转录不碰逐图进度）全绿；现场 32 份截断留档先前全是 done。
