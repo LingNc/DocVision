@@ -192,8 +192,9 @@ func TestBackfillFigureScores(t *testing.T) {
 		"hasScore": {ImgPath: "a.png", FigPNG: "figures/a.png", Status: "done", TikzCode: "x", FigBestOverlap: 0.5},
 	}
 	n, _ := backfillFigureScores(dir, imgDir, prog, filepath.Join(dir, "prog"))
-	if n != 1 {
-		t.Fatalf("只该补算 1 张，实际 %d", n)
+	// old 补重叠+偏差；hasScore 只补偏差；missing 读不到文件不写。
+	if n != 2 {
+		t.Fatalf("应当补算 2 张（一张补重叠、一张只补偏差），实际 %d", n)
 	}
 	old := prog["old"]
 	if old.FigBestOverlap <= 0.9 || !old.FigScoreBackfilled || old.FigScaleDev > 0.01 {
@@ -203,7 +204,9 @@ func TestBackfillFigureScores(t *testing.T) {
 	if prog["missing"].FigBestOverlap != 0 || prog["missing"].FigScoreBackfilled {
 		t.Fatal("读不到文件的图不该被写成绩")
 	}
-	if prog["hasScore"].FigScoreBackfilled {
-		t.Fatal("已有成绩的图不该被覆盖")
+	// 已有重叠但缺尺寸偏差的：只补偏差、不覆盖已有成绩、不标"补算"
+	if hs := prog["hasScore"]; hs.FigBestOverlap != 0.5 || hs.FigScoreBackfilled || hs.FigScaleDev > 0.01 {
+		t.Fatalf("已有成绩的图应只补尺寸偏差：overlap=%v dev=%v backfilled=%v",
+			hs.FigBestOverlap, hs.FigScaleDev, hs.FigScoreBackfilled)
 	}
 }

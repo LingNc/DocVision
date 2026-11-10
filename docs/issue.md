@@ -2514,4 +2514,4 @@ user 轮
   根因：`SubmitFigureTool` 只检查"编译成功后调过一次 compare_figure"，没有任何数值门槛；`compareFigureImages` 又先用 `fitFigureCanvases` 按原图宽度等比缩放候选、按墨迹外接框裁留白、按质心+平移搜索对齐——宽度差、画布内位置、横纵比例全被"对齐掉了"，只剩墨水形状相似度。
   改：`compare_figure` 在归一化**之前**量候选/原图墨迹外接框，回执给出 `width x…, height x…, max deviation …`；`latex.figure_check.min_overlap`（默认 0.17）与 `max_scale_dev`（默认 0.10）卡 `submit`，不达标回执写明差几个百分点/差多少尺寸；`submit` 增 `accept_as_is` + 必填 `note`（尽力还原，粘性记录，之后不再自动重画）；提高门槛后 `fig_best_overlap` 低于新门槛的旧图自动退回重画；逐图覆盖 `fig_min_overlap` + `/api/figure-override` + 核对页与会话页两处控件。
   验证：`TestSubmitFigureThresholdGate`/`TestSubmitFigureAcceptAsIsNeedsNote`/`TestRequeueBelowThreshold`/`TestFigureThresholdDefaults`/`TestFigureOverride*`/`TestReviewPageRendersThresholdControls`；`npm test` 287 项全绿。
-  补记：升级前画好的图没有成绩记录，"按图设阈值→自动退回重画"对它们无从判断，故加本地补算（`backfillFigureScores`，原图 vs 已交付成品 PNG，不花 token）并记 `fig_scale_dev`；补算的成绩**只**用于展示与"单独设了阈值的那张"，全局门槛一调不会把几十张老图一起退回重画。
+  补记：升级前画好的图没有成绩记录，"按图设阈值→自动退回重画"对它们无从判断，故加本地补算（`backfillFigureScores`，原图 vs 已交付成品 PNG，不花 token）并记 `fig_scale_dev`（缺哪项补哪项：已有的重叠不覆盖，只补尺寸偏差）；补算的成绩**只**用于展示与"单独设了阈值的那张"，全局门槛一调不会把几十张老图一起退回重画。

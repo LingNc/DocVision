@@ -1962,7 +1962,14 @@ func backfillFigureScores(outDir, imagesDir string, prog map[string]*imageProgre
 		if p == nil || p.Status != "done" || strings.TrimSpace(p.TikzCode) == "" {
 			continue
 		}
-		if p.FigBestOverlap > 0 || p.FigAcceptAsIs {
+		// 有重叠但缺尺寸偏差的也要补：尺寸是门槛的第二条判据，页面上也该看得见。
+		// 已按"尽力还原"接受的不动——粘性标记不能被补算影响。
+		if p.FigAcceptAsIs {
+			continue
+		}
+		needOverlap := p.FigBestOverlap <= 0
+		needDev := p.FigScaleDev <= 0
+		if !needOverlap && !needDev {
 			continue
 		}
 		figPNG := strings.TrimSpace(p.FigPNG)
@@ -2004,9 +2011,11 @@ func backfillFigureScores(outDir, imagesDir string, prog map[string]*imageProgre
 			}
 			continue
 		}
-		p.FigBestOverlap = cmp.Similarity
+		if needOverlap {
+			p.FigBestOverlap = cmp.Similarity
+			p.FigScoreBackfilled = true
+		}
 		p.FigScaleDev = cmp.ScaleDev
-		p.FigScoreBackfilled = true
 		saveProgress(progDir, p)
 		n++
 	}
