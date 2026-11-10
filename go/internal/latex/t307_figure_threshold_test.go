@@ -2,9 +2,13 @@ package latex
 
 import (
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
 )
 
 // T307/P78：重画图的提交门槛。软墨重叠或尺寸偏差不达标就不能交——回执要把
@@ -95,7 +99,7 @@ func TestRequeueBelowThreshold(t *testing.T) {
 		"override": {Status: "done", TikzCode: "x", FigBestOverlap: 0.12,
 			FigMinOverlap: 0.10},
 	}
-	if n := requeueBelowThreshold(prog, dir, 0.17); n != 1 {
+	if n := requeueBelowThreshold(prog, dir, 0.17, 0.10); n != 1 {
 		t.Fatalf("只该退回 1 张（低的），实际 %d", n)
 	}
 	if prog["low"].Status != "classified" || prog["low"].TikzCode != "" || prog["low"].FigPDF != "" {
@@ -105,5 +109,101 @@ func TestRequeueBelowThreshold(t *testing.T) {
 		if prog[k].Status != "done" {
 			t.Fatalf("%s 不该被动（成绩够 / 已接受 / 没成绩 / 单独设了更低阈值）：%+v", k, prog[k])
 		}
+	}
+}
+
+// 补算出来的成绩只用来展示与"按图设阈值后自动重判"：全局门槛一调不能把几十张
+// 老图一起退回重画（那是白烧 token）。单独设了 fig_min_overlap 的才算人点了名。
+func TestRequeueIgnoresBackfilledUnlessPerFigureThreshold(t *testing.T) {
+	dir := t.TempDir()
+	prog := map[string]*imageProgress{
+		"old-low": {Status: "done", TikzCode: "x", FigBestOverlap: 0.05, FigScaleDev: 0.40,
+			FigScoreBackfilled: true},
+		"old-named": {Status: "done", TikzCode: "x", FigBestOverlap: 0.05,
+			FigScoreBackfilled: true, FigMinOverlap: 0.20},
+	}
+	if n := requeueBelowThreshold(prog, dir, 0.17, 0.10); n != 1 {
+		t.Fatalf("只该退回被点名的那一张，实际 %d", n)
+	}
+	if prog["old-low"].Status != "done" {
+		t.Fatal("补算成绩的老图不该被全局门槛退回")
+	}
+	if prog["old-named"].Status != "classified" {
+		t.Fatal("单独设了阈值的图应当退回重画")
+	}
+}
+
+// 尺寸偏差也是门槛：重叠够但画小了（宽高只有原图六成）同样退回。
+func TestRequeueOnScaleDeviation(t *testing.T) {
+	dir := t.TempDir()
+	prog := map[string]*imageProgress{
+		"too-small": {Status: "done", TikzCode: "x", FigBestOverlap: 0.42, FigScaleDev: 0.39},
+		"fine":      {Status: "done", TikzCode: "x", FigBestOverlap: 0.42, FigScaleDev: 0.02},
+	}
+	if n := requeueBelowThreshold(prog, dir, 0.17, 0.10); n != 1 {
+		t.Fatalf("只该退回画小了的那张，实际 %d", n)
+	}
+	if prog["too-small"].Status != "classified" || prog["fine"].Status != "done" {
+		t.Fatalf("尺寸判据没生效：%+v / %+v", prog["too-small"], prog["fine"])
+	}
+}
+
+// backfillFigureScores：给升级前画好的图本地补算成绩（不调模型）。同一张图
+// 自成一对时重叠应该接近满分；找不到成品/原图的图保持原样（只记录，不判死）。
+func TestBackfillFigureScores(t *testing.T) {
+	dir := t.TempDir()
+	imgDir := filepath.Join(dir, "images")
+	figDir := filepath.Join(dir, "figures")
+	for _, d := range []string{imgDir, figDir, filepath.Join(dir, "prog")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 白底黑框：墨迹外接框可辨，比对不会退化。
+	src := image.NewNRGBA(image.Rect(0, 0, 120, 80))
+	for y := 0; y < 80; y++ {
+		for x := 0; x < 120; x++ {
+			src.Set(x, y, color.White)
+		}
+	}
+	for x := 0; x < 120; x++ {
+		src.Set(x, 0, color.Black)
+		src.Set(x, 79, color.Black)
+	}
+	for y := 0; y < 80; y++ {
+		src.Set(0, y, color.Black)
+		src.Set(119, y, color.Black)
+	}
+	origPath := filepath.Join(imgDir, "a.png")
+	candPath := filepath.Join(figDir, "a.png")
+	for _, p := range []string{origPath, candPath} {
+		f, err := os.Create(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(f, src); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	prog := map[string]*imageProgress{
+		"old":      {ImgPath: "a.png", FigPNG: "figures/a.png", Status: "done", TikzCode: "x"},
+		"missing":  {ImgPath: "nope.png", FigPNG: "figures/nope.png", Status: "done", TikzCode: "x"},
+		"hasScore": {ImgPath: "a.png", FigPNG: "figures/a.png", Status: "done", TikzCode: "x", FigBestOverlap: 0.5},
+	}
+	n, _ := backfillFigureScores(dir, imgDir, prog, filepath.Join(dir, "prog"))
+	if n != 1 {
+		t.Fatalf("只该补算 1 张，实际 %d", n)
+	}
+	old := prog["old"]
+	if old.FigBestOverlap <= 0.9 || !old.FigScoreBackfilled || old.FigScaleDev > 0.01 {
+		t.Fatalf("自成一对应接近满分且尺寸偏差≈0：overlap=%v dev=%v backfilled=%v",
+			old.FigBestOverlap, old.FigScaleDev, old.FigScoreBackfilled)
+	}
+	if prog["missing"].FigBestOverlap != 0 || prog["missing"].FigScoreBackfilled {
+		t.Fatal("读不到文件的图不该被写成绩")
+	}
+	if prog["hasScore"].FigScoreBackfilled {
+		t.Fatal("已有成绩的图不该被覆盖")
 	}
 }

@@ -168,6 +168,13 @@ type imageProgress struct {
 	// 以及"达不到阈值但已尽力"的粘性标记——标记为真时不再自动重画，只有
 	// 手动点重画（role=vector）才会动它。
 	FigBestOverlap float64 `json:"fig_best_overlap,omitempty"`
+	// FigScaleDev 是那次成绩对应的宽高尺寸偏差（0 = 没量过）。门槛的第二条
+	// 判据靠它，页面上也把"上次 18.4% · 尺寸偏差 39%"一起显示（T307 补记）。
+	FigScaleDev float64 `json:"fig_scale_dev,omitempty"`
+	// FigScoreBackfilled 表示这次成绩是**事后本地补算**的（升级前就画好的图没有
+	// 成绩记录，补算不花模型 token）。补算出来的成绩只用于展示与"按图设阈值
+	// 后自动重判"，不会因为全局门槛一调就把老图全退回重画。
+	FigScoreBackfilled bool `json:"fig_score_backfilled,omitempty"`
 	FigAcceptAsIs  bool    `json:"fig_accept_as_is,omitempty"`
 	FigAcceptNote  string  `json:"fig_accept_note,omitempty"`
 	// FallbackReason 是这张图为什么以原图交付（P64）：状态只说明"没画出成品"，
@@ -603,7 +610,14 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 	// 阈值提高之后，以前"交过"的图要重判一次（T307）：成绩当时就记在
 	// fig_best_overlap 里，不需要重新画一遍才知道达不达标。低于当前门槛的
 	// 退回未分类、重新排队；"尽力还原"接受过的、以及没有成绩记录的老图不动。
-	if n := requeueBelowThreshold(prog, progDir, r.cfg.Latex.FigureCheck.MinOverlap); n > 0 {
+	// 升级前画好的图没有成绩记录：先用本地比对补算一遍（不花模型 token），
+	// 这样"按图设阈值让它继续画"才有依据，页面上也看得见上次差多少。
+	if n, err := backfillFigureScores(outDir, r.cfg.Paths.ImagesDir, prog, progDir); err != nil {
+		r.log.LogWarning(0, "[figure] 补算历史成绩时出错（跳过，不影响本次运行）:", err)
+	} else if n > 0 {
+		r.log.Log(0, "[figure] 给", strconv.Itoa(n), "张升级前画好的图补算了成绩（本地比对，未调用模型）")
+	}
+	if n := requeueBelowThreshold(prog, progDir, r.cfg.Latex.FigureCheck.MinOverlap, r.cfg.Latex.FigureCheck.MaxScaleDev); n > 0 {
 		r.log.LogWarning(0, "[figure] 有", strconv.Itoa(n), "张图上次的成绩低于当前门槛，退回重新画（想放过某张就给它 fig_accept_as_is，或单独设 fig_min_overlap）")
 	}
 
@@ -1529,6 +1543,8 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	pp.TikzCode = res.Code
 	// 门槛成绩与"尽力还原"标记：粘性记在进度里，之后不再自动重画（T307）。
 	pp.FigBestOverlap = res.BestOverlap
+	pp.FigScaleDev = res.ScaleDev
+	pp.FigScoreBackfilled = false // 真提交量的，不是补算
 	pp.FigAcceptAsIs = res.AcceptedAsIs
 	pp.FigAcceptNote = res.AcceptNote
 	if res.AcceptedAsIs {
@@ -1899,7 +1915,7 @@ func loadProgress(progDir string, prog map[string]*imageProgress) {
 // （T307）：成绩在提交时就记进 fig_best_overlap，所以提高门槛后不必重画一遍
 // 才能发现不达标。已被"尽力还原"接受的图有粘性，不参与；没有成绩记录的老图
 // 也无从判断，保持原样。
-func requeueBelowThreshold(prog map[string]*imageProgress, progDir string, globalMin float64) int {
+func requeueBelowThreshold(prog map[string]*imageProgress, progDir string, globalMin, globalMaxScaleDev float64) int {
 	n := 0
 	for _, p := range prog {
 		if p == nil || p.Status != "done" || strings.TrimSpace(p.TikzCode) == "" {
@@ -1908,11 +1924,19 @@ func requeueBelowThreshold(prog map[string]*imageProgress, progDir string, globa
 		if p.FigAcceptAsIs || p.FigBestOverlap <= 0 {
 			continue
 		}
-		lim := globalMin
+		// 补算出来的成绩只用来展示：除非这张图被**单独**设了阈值（人明确点了
+		// 这一张），否则不参与自动退回——否则升级后第一次运行就会把几十张
+		// 老图一起退回去重画，全是白烧的 token。
+		if p.FigScoreBackfilled && p.FigMinOverlap == 0 {
+			continue
+		}
+		lim, limScaleDev := globalMin, globalMaxScaleDev
 		if p.FigMinOverlap != 0 {
 			lim = p.FigMinOverlap
 		}
-		if lim <= 0 || p.FigBestOverlap >= lim {
+		lowOverlap := lim > 0 && p.FigBestOverlap < lim
+		bigScale := limScaleDev > 0 && p.FigScaleDev > limScaleDev
+		if !lowOverlap && !bigScale {
 			continue
 		}
 		p.Status = "classified"
@@ -1923,6 +1947,70 @@ func requeueBelowThreshold(prog map[string]*imageProgress, progDir string, globa
 		n++
 	}
 	return n
+}
+
+// backfillFigureScores 给"升级到 T307 之前就画好、没有成绩记录"的图**本地**
+// 补算一次成绩（原图 vs 已交付的成品 PNG），不调用任何模型：
+//   - 有了成绩，页面上就能看到"上次 18.4% · 尺寸偏差 39%"，知道哪张该收拾；
+//   - 给某张单独设了 fig_min_overlap 之后，下次运行它会像新画的图一样被自动
+//     退回重画（补算出来的成绩**不**参与全局门槛的自动退回，见 requeue 里的说明）。
+// 缺图、读不出来、尺寸为 0 的一律跳过并保留原样——补算只是补齐信息，不是判死。
+func backfillFigureScores(outDir, imagesDir string, prog map[string]*imageProgress, progDir string) (int, error) {
+	n := 0
+	var firstErr error
+	for _, p := range prog {
+		if p == nil || p.Status != "done" || strings.TrimSpace(p.TikzCode) == "" {
+			continue
+		}
+		if p.FigBestOverlap > 0 || p.FigAcceptAsIs {
+			continue
+		}
+		figPNG := strings.TrimSpace(p.FigPNG)
+		if figPNG == "" {
+			continue
+		}
+		candPath := figPNG
+		if !filepath.IsAbs(candPath) {
+			candPath = filepath.Join(outDir, filepath.FromSlash(figPNG))
+		}
+		refPath := strings.TrimSpace(p.ImgPath)
+		if refPath == "" {
+			continue
+		}
+		if !filepath.IsAbs(refPath) {
+			refPath = filepath.Join(imagesDir, filepath.FromSlash(refPath))
+		}
+		if !fileExists(candPath) || !fileExists(refPath) {
+			continue
+		}
+		original, err := decodeFigureImage(refPath)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		candidate, err := decodeFigureImage(candPath)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		cmp, _, err := compareFigureImages(original, candidate)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		p.FigBestOverlap = cmp.Similarity
+		p.FigScaleDev = cmp.ScaleDev
+		p.FigScoreBackfilled = true
+		saveProgress(progDir, p)
+		n++
+	}
+	return n, firstErr
 }
 
 func saveProgress(progDir string, p *imageProgress) {

@@ -3747,3 +3747,8 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **留一个说明**：`latex.figure_check.enabled` 仍然管的是"逐图视觉校验"那张额外的网；这次的门槛不看那个开关，它是 `submit` 自己的判据（因为用户要的是"提交前必须达到"）。默认 17%/10% 会对现状生效；某张图被门槛卡住时只要 `accept_as_is` 就有出口，不想让全局门槛生效就把 `min_overlap` 写负数。
 
 **测试**：`TestSubmitFigureThresholdGate`（回执必须带数字与差值）、`TestSubmitFigureThresholdPassesOrDisabled`、`TestSubmitFigureAcceptAsIsNeedsNote`、`TestRequeueBelowThreshold`（只退该退的）、`internal/config` 的 `TestFigureThresholdDefaults`、`TestFigureOverrideSetsThreshold`/`ResolvesTranscriptPath`/`AcceptNeedsNote`/`RejectsBadInput`、`TestReviewPageRendersThresholdControls`；`npm test` 287 项全绿，`go test ./internal/...` 只剩两个既有失败。
+
+**补记（同日，用户追问"已经通过了我改阈值让它继续画怎么办"）**：门槛做好了才发现漏了一环——升级前就画好的图没有 `fig_best_overlap`，改了阈值也判不了，用户只能一张张点「重画」，而「重画」是**从头画**（旧转录改名 `.tryN` 留档），偏偏人想要的是"接着上次那条会话继续改"。补两件：
+1. `backfillFigureScores`：启动时对"done + 有 tikz_code + 没有成绩"的图，用**已交付的成品 PNG 与原图**本地比一遍（`compareFigureImages`，不调用模型、不花 token），写回 `fig_best_overlap` 与新的 `fig_scale_dev`；核对页那行就从"上次 --"变成"上次 18.4% · 尺寸偏差 39%"，哪张该收拾一目了然。
+2. 退回语义收紧：`requeueBelowThreshold` 增加尺寸判据（`max_scale_dev`），并且**补算出来的成绩默认不参与自动退回**——只有被单独设了 `fig_min_overlap` 的那一张（人明确点了名）才会退。否则升级后第一次跑，全局门槛一比对就是把几十张老图一起退回去重画，纯烧 token。
+顺带把"继续画"和"重画"的区别钉清楚：自动退回（`status → classified`、转录原地保留）走的是"恢复中断的会话"，历史原样接着改；页面上点「重画这张图」（`from = 0`）则是旧会话归档、开新会话从头画。要"继续画"就别点重画。

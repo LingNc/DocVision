@@ -38,6 +38,7 @@ type liveImageProgress struct {
 	// 提交门槛相关（T307）：本图阈值覆盖、上次成绩、"尽力还原"标记。
 	FigMinOverlap  float64 `json:"fig_min_overlap"`
 	FigBestOverlap float64 `json:"fig_best_overlap"`
+	FigScaleDev    float64 `json:"fig_scale_dev"`
 	FigAcceptAsIs  bool    `json:"fig_accept_as_is"`
 	FigAcceptNote  string  `json:"fig_accept_note"`
 }
@@ -253,7 +254,7 @@ func (r reviewpageRig) item(imgRel, hash string) reviewpage.Item {
 	if r.project != "" && p.Class == "vector" {
 		it.Override = &reviewpage.ItemOverride{
 			Project: r.project, MD: p.MD, Img: p.Img,
-			MinOverlap: p.FigMinOverlap, BestOverlap: p.FigBestOverlap,
+			MinOverlap: p.FigMinOverlap, BestOverlap: p.FigBestOverlap, ScaleDev: p.FigScaleDev,
 			Accepted: p.FigAcceptAsIs, AcceptNote: p.FigAcceptNote,
 		}
 	}

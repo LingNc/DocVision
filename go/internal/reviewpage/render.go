@@ -39,6 +39,7 @@ type ItemOverride struct {
 	Img         string
 	MinOverlap  float64 // 0 = 用全局
 	BestOverlap float64 // 0 = 还没有成绩
+	ScaleDev    float64 // 上次成绩对应的宽高尺寸偏差（0 = 没量过）
 	Accepted    bool
 	AcceptNote  string
 }
@@ -211,6 +212,9 @@ func overrideHTML(o ItemOverride) string {
 	score := "还没成绩"
 	if o.BestOverlap > 0 {
 		score = fmt.Sprintf("上次 %.1f%%", o.BestOverlap*100)
+		if o.ScaleDev > 0 {
+			score += fmt.Sprintf(" · 尺寸偏差 %.0f%%", o.ScaleDev*100)
+		}
 	}
 	fmt.Fprintf(&b, `<span class="thr-cur">阈值 %s · %s</span>`, html.EscapeString(cur), html.EscapeString(score))
 	fmt.Fprintf(&b, `<input class="thr-num" type="number" min="0" max="100" step="1" placeholder="%s" title="这张图的提交门槛（软墨重叠百分比）：0 = 用全局值">`, html.EscapeString(strings.TrimSuffix(cur, "%")))

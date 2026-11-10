@@ -28,6 +28,7 @@ type TikZResult struct {
 	// 标记（T307）。AcceptedAsIs 为真表示这一版没达到阈值、是人为/模型选择
 	// 接受的，之后不再自动重画。
 	BestOverlap  float64
+	ScaleDev     float64
 	AcceptedAsIs bool
 	AcceptNote   string
 }
@@ -251,6 +252,7 @@ func RunTikZSession(
 	result.PNGPath = dstPNG
 	// 门槛成绩与"尽力还原"标记（T307）：成绩给人看，标记让这张图不再自动重画。
 	result.BestOverlap = state.bestOverlap
+	result.ScaleDev = state.scaleDevAtBest
 	result.AcceptedAsIs = state.acceptedAsIs
 	result.AcceptNote = state.acceptNote
 	if keepTemps {
