@@ -520,6 +520,78 @@ func setProgField(p *bookProgress, name, v string) {
 // phase: style
 // ------------------------------------------------------------------
 
+// trimSizeSnippets 从正文里捡出"这本书印多大"的声明——版权页/扉页上常见
+// 「开本 787×1092 1/16」「尺寸 185mm×260mm」「成品尺寸」这类字样（T319）。
+// 只挑出原话，不做换算：787×1092 1/16 折成多少毫米是常识，交给模型自己算，
+// 代码猜反而容易猜错。返回最多两条，去重、截短。
+func trimSizeSnippets(text string) []string {
+	if text == "" {
+		return nil
+	}
+	patterns := []string{
+		`(?i)开本[^\n]{0,40}`,
+		`(?i)(?:成品|印刷|书籍)?尺寸[^\n]{0,40}`,
+		`\d{3}\s*[×xX*]\s*\d{3}[^\n]{0,24}`,
+		`\d{2,3}\s*(?:mm|毫米)\s*[×xX*]\s*\d{2,3}\s*(?:mm|毫米)`,
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, pat := range patterns {
+		re, err := regexp.Compile(pat)
+		if err != nil {
+			continue
+		}
+		for _, m := range re.FindAllString(text, 8) {
+			m = strings.TrimSpace(strings.ReplaceAll(m, "\n", " "))
+			if m == "" || seen[m] {
+				continue
+			}
+			// 明显不是尺寸的（"开本说明…"之类）丢掉：至少要有一个数字。
+			if !regexp.MustCompile(`\d`).MatchString(m) {
+				continue
+			}
+			if r := []rune(m); len(r) > 120 {
+				m = string(r[:120])
+			}
+			seen[m] = true
+			out = append(out, m)
+			if len(out) >= 2 {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+// readTextOf 读一个文本文件，读不到就给空串（这些提示行都是"有就写、没有就算"）。
+func readTextOf(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// bookPageBoxes 量出每个原书 part 首页的物理尺寸（mm），给样式会话当纸张依据
+// （T319）。量不到就返回 nil——不写这一行，会话照旧自己去 view_pdf 里看。
+func (r *Runner) bookPageBoxes() []string {
+	if r.pdfView == nil {
+		return nil
+	}
+	var out []string
+	for _, f := range r.pdfView.Files {
+		w, h, ok := pdfPageSizeMM(f.PDF, 1)
+		if !ok || w <= 0 || h <= 0 {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s %.1f x %.1f mm", f.Name, w, h))
+		if len(out) >= 8 {
+			break
+		}
+	}
+	return out
+}
+
 func (r *Runner) stylePhase(proj string) error {
 	start := time.Now()
 	notef := r.phaseNote()
@@ -638,6 +710,18 @@ func (r *Runner) stylePhase(proj string) error {
 	})
 	if r.pdfView != nil {
 		initial += fmt.Sprintf("\n- ORIGINAL pages: %d in total (%s) — list_source_pages lists them with the detected section starts; view any page with view_pdf {path:\"source:<file>\", page:N} — in bash that directory is /source with the SAME file names (use one form or the other; do not paste the /source/... path into view_pdf).", r.pdfView.total, strings.Join(r.pdfView.names(), ", "))
+	}
+	// T319：纸张尺寸别让它猜。优先用**书里自己声明的开本**（版权页「开本 787×1092
+	// 1/16」这类印刷规格），其次才是 PDF 页框——扫描常带白边或被缩放，PDF 的
+	// 页宽页高未必等于成品开版（实测同一本书各 part 页高 383.8mm 与 397mm 并存，
+	// 只按 PDF 挑一个，cls 的 paperheight 直接错十几毫米）。
+	if trim := trimSizeSnippets(readTextOf(mainMD)); len(trim) > 0 {
+		initial += "\n- PRINTED TRIM SIZE declared in the book itself (front matter / colophon): " +
+			strings.Join(trim, " | ") + " — this is the size the book was PRINTED at: prefer it for \\paperwidth/\\paperheight when it disagrees with the PDF page box, and keep the type area as a FRACTION of the page instead of copying absolute millimetres (scans are often rescaled)."
+	}
+	if boxes := r.bookPageBoxes(); len(boxes) > 0 {
+		initial += "\n- PHYSICAL PAGE BOX (measured from the source PDFs): " + strings.Join(boxes, "; ") +
+			" — scans can carry extra margins or be rescaled, so treat this as a cross-check of the declared trim size, not as the answer; state in the manual which one you used and why."
 	}
 
 	scratch, cleanScratch, err := r.tempDir(proj, "style")
