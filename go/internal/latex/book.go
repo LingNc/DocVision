@@ -550,6 +550,17 @@ func trimSizeSnippets(text string) []string {
 			if !regexp.MustCompile(`\d`).MatchString(m) {
 				continue
 			}
+			// 已经被前一条整句包含的就别重复（版权页整行里本来就带 850×1168）。
+			dup := false
+			for _, prev := range out {
+				if strings.Contains(prev, m) {
+					dup = true
+					break
+				}
+			}
+			if dup {
+				continue
+			}
 			if r := []rune(m); len(r) > 120 {
 				m = string(r[:120])
 			}

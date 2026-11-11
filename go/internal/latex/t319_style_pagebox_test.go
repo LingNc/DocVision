@@ -31,6 +31,10 @@ func TestTrimSizeSnippets(t *testing.T) {
 			t.Fatalf("%s：应当命中 %q，实际 %q", tc.name, tc.want, got)
 		}
 	}
+	// 版权页整行里本来就带着 850×1168，别把同一条信息拆成两行塞进去。
+	if got := trimSizeSnippets("前 言\n开本 850×1168 1/32 印张 12.75 字数 300 000\nISBN 7-04-004077-8"); len(got) > 1 && strings.Contains(got[0], "850×1168") && strings.Contains(got[1], "850×1168") {
+		t.Fatalf("同一行规格被拆成两条：%q", got)
+	}
 	// 只给两条：版权页往往连着好几行规格，全塞进提示词反而淹了重点。
 	if n := len(trimSizeSnippets("开本 787×1092 1/16\n尺寸 185mm×260mm\n印张 12.5")); n > 2 {
 		t.Fatalf("最多两条，实际 %d", n)
