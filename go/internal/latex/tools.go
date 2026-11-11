@@ -251,6 +251,11 @@ func figureResumeCredit(overlap, scaleDev, minOverlap, maxScaleDev float64) bool
 }
 
 func (t *SubmitFigureTool) thresholdShortfall() string {
+	// 判据只有 figureGatePass 一处（T318）：回执文案、submit 门槛、续跑收账都用
+	// 它，免得三处各写一份、以后改一处就漂。
+	if figureGatePass(t.State.bestOverlap, t.State.scaleDevAtBest, t.MinOverlap, t.MaxScaleDev) {
+		return ""
+	}
 	var parts []string
 	if t.MinOverlap > 0 && t.State.bestOverlap < t.MinOverlap {
 		parts = append(parts, fmt.Sprintf("软墨重叠 %.2f%% < 门槛 %.2f%%（差 %.2f 个百分点）",
