@@ -2563,3 +2563,7 @@ user 轮
   根因：图代码顶端带 `\usepackage{tikz-3dplot}\standaloneconfig{…}` 这类前言行（本书 94 张里 26 张如此、18 张要 `tikz-3dplot`），粘进章节正文必然编译失败；样式类也没加载这些包，转换会话于是自己把 3D 改成 2D（推理原文「avoid package dependency by using TikZ for 2D geometry」），既没报样式问题也没过逐图门槛。
   改：围栏里剥掉前言行（`stripFigurePreamble`）；样式首条消息列出本书图代码需要的宏包/库并要求类自己 `\RequirePackage`/`\usetikzlibrary`；转换提示词补两句——前言行要丢、缺包属样式问题不许重画。
   验证：`stripFigurePreamble` 与 `figurePackageNeeds`（含空代码、目录不存在）两组测试。
+[X][ ] T321. 样式类漏加载图代码要的宏包/库，转换前置检查不吭声，只能等会话把图重画。
+  根因：T320 只修了"哪些包该由类加载"的供给链，没有任何一处比对"类到底加载了没有"。
+  改：`preflightConvert` 里比对 `figurePackageNeeds` 与 cls 的 `\RequirePackage`/`\usetikzlibrary`，缺的列清单并说明后果（补 cls 后重转）。
+  验证：`missingFigurePackages` 三情形（已加载不报、缺两个包+一个库、全齐不报）。

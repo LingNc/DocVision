@@ -2,6 +2,7 @@ package latex
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -56,8 +57,10 @@ var (
 
 // figureNeeds 是"本书已产出的矢量图需要什么"的统计结果。
 type figureNeeds struct {
-	Packages []string // 形如 "tikz-3dplot (18)"
-	Libs     []string // 形如 "arrows.meta (71)"
+	Packages []string       // 形如 "tikz-3dplot (18)"
+	Libs     []string       // 形如 "arrows.meta (71)"
+	PkgCount map[string]int // 原始计数，给"样式类漏加载了哪些"用
+	LibCount map[string]int
 }
 
 func (f figureNeeds) empty() bool { return len(f.Packages) == 0 && len(f.Libs) == 0 }
@@ -90,7 +93,7 @@ func figurePackageNeeds(progDir string) figureNeeds {
 		collect(figRequireRe, pkgs)
 		collect(figUseLibraryRe, libs)
 	}
-	return figureNeeds{Packages: rankNeed(pkgs), Libs: rankNeed(libs)}
+	return figureNeeds{Packages: rankNeed(pkgs), Libs: rankNeed(libs), PkgCount: pkgs, LibCount: libs}
 }
 
 // rankNeed 按出现次数降序、同数按名字排，转成 "名字 (次数)" 的形式，最多 12 条。
@@ -129,4 +132,64 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b)
+}
+
+var clsLoadRe = regexp.MustCompile(`\\(?:RequirePackage|usepackage)(?:\[[^\]]*\])?\{([^}]*)\}`)
+
+// missingFigurePackages 比对"图代码要什么"与"样式类加载了什么"，返回缺的那些
+// （T321）。缺一个宏包的后果不是编译报错就是把图重画——两种都不该静默发生。
+func missingFigurePackages(clsText string, needs figureNeeds) (pkgs, libs []string) {
+	loaded := map[string]bool{}
+	for _, m := range clsLoadRe.FindAllStringSubmatch(clsText, -1) {
+		for _, name := range strings.Split(m[1], ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				loaded[name] = true
+			}
+		}
+	}
+	for name, n := range needs.PkgCount {
+		if !loaded[name] {
+			pkgs = append(pkgs, fmt.Sprintf("%s（%d 张）", name, n))
+		}
+	}
+	for name, n := range needs.LibCount {
+		if !strings.Contains(clsText, name) {
+			libs = append(libs, fmt.Sprintf("%s（%d 张）", name, n))
+		}
+	}
+	sort.Strings(pkgs)
+	sort.Strings(libs)
+	return pkgs, libs
+}
+
+// warnMissingFigurePackages 在转换前置检查里喊一嗓子：样式类没加载图代码需要的
+// 宏包/库时，转换会话只能编译失败或者背着人重画（T321）。
+func (r *Runner) warnMissingFigurePackages(proj string) {
+	needs := figurePackageNeeds(filepath.Join(proj, "source", "progress_items"))
+	if needs.empty() {
+		return
+	}
+	var clsText strings.Builder
+	files, _ := filepath.Glob(filepath.Join(proj, "style", "*.cls"))
+	for _, f := range files {
+		if data, err := os.ReadFile(f); err == nil {
+			clsText.Write(data)
+		}
+	}
+	if clsText.Len() == 0 {
+		return
+	}
+	pkgs, libs := missingFigurePackages(clsText.String(), needs)
+	if len(pkgs) == 0 && len(libs) == 0 {
+		return
+	}
+	msg := "[preflight] 样式类没有加载图代码需要的："
+	if len(pkgs) > 0 {
+		msg += "宏包 " + strings.Join(pkgs, "、") + "；"
+	}
+	if len(libs) > 0 {
+		msg += "TikZ 库 " + strings.Join(libs, "、") + "；"
+	}
+	msg += "转换会话粘不进 \\usepackage，缺了会被逼着重画整张图（或编译失败）。在 cls 里补上 \\RequirePackage / \\usetikzlibrary 之后重转这些章节。"
+	r.log.LogWarning(0, msg)
 }

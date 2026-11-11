@@ -72,3 +72,34 @@ func TestFigurePackageNeeds(t *testing.T) {
 		t.Fatal("目录不存在时应当返回空")
 	}
 }
+
+// T321：样式类漏加载图代码要的宏包/库时，转换前置检查要喊出来——否则会话只能
+// 编译失败或者背着人重画（3D 图被改成 2D 就是这么来的）。
+func TestMissingFigurePackages(t *testing.T) {
+	needs := figureNeeds{
+		PkgCount: map[string]int{"tikz-3dplot": 18, "amsmath": 3, "bm": 1},
+		LibCount: map[string]int{"arrows.meta": 71, "3d": 2},
+	}
+	cls := `\RequirePackage{tikz}
+\RequirePackage{amsmath,amssymb}
+\usetikzlibrary{arrows.meta,patterns,calc}
+`
+	pkgs, libs := missingFigurePackages(cls, needs)
+	got := strings.Join(pkgs, ",")
+	if strings.Contains(got, "amsmath") {
+		t.Fatalf("已加载的 amsmath 不该报缺：%v", pkgs)
+	}
+	for _, want := range []string{"tikz-3dplot", "bm"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("应当报缺 %s：%v", want, pkgs)
+		}
+	}
+	if len(libs) != 1 || !strings.Contains(libs[0], "3d") {
+		t.Fatalf("应当只报缺 3d 库：%v", libs)
+	}
+	// 都加载了就一条都不报。
+	ok, okl := missingFigurePackages(cls+"\n\\RequirePackage{tikz-3dplot,bm}\n\\usetikzlibrary{3d}\n", needs)
+	if len(ok)+len(okl) != 0 {
+		t.Fatalf("全加载齐了还报缺：%v / %v", ok, okl)
+	}
+}

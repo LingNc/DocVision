@@ -3406,6 +3406,9 @@ func (r *Runner) preflightConvert(proj string) error {
 	if unfinished > 0 {
 		return fmt.Errorf("转换前置检查未通过：source 中有 %d 张图片未完成处理（先补齐图片处理再转换，例如 docvision latex --step images）", unfinished)
 	}
+	// T321：样式类漏加载图代码需要的宏包/库时，转换会话只能编译失败或背着人
+	// 重画整张图（3D 图被改成 2D 就是这么来的）。别让它静默降级。
+	r.warnMissingFigurePackages(proj)
 	r.log.Log(0, "[preflight] 转换前置检查通过：样式包完整，图片全部处理完毕")
 	return nil
 }
