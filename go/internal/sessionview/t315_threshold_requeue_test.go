@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"mineru-tools/internal/retryq"
 )
 
 func mustJSON(t *testing.T, v any) []byte {
@@ -20,7 +22,7 @@ func mustJSON(t *testing.T, v any) []byte {
 // 免得"改完还要等下一轮启动才退回"。降门槛/改用全局/已接受"尽力还原"/没成绩
 // 的图都不动状态。
 func TestFigureOverrideRaiseThresholdRequeues(t *testing.T) {
-	v, _, file := figureOverrideServer(t)
+	v, proj, file := figureOverrideServer(t)
 	rec := postFigureOverride(t, v, map[string]any{
 		"project": "书A", "md": "书A.md", "img": "images/书A/a1b2c3.png", "min_overlap": 0.25,
 	})
@@ -40,6 +42,12 @@ func TestFigureOverrideRaiseThresholdRequeues(t *testing.T) {
 	// T316：成品字段一律留着——门槛排队不等于成品作废，撤回排队时还得靠它们。
 	if _, ok := after["tikz_code"]; !ok {
 		t.Fatalf("门槛排队不该清成品字段（撤回时要用）")
+	}
+	if !strings.Contains(rec.Body.String(), `"queued":true`) {
+		t.Fatalf("抬门槛要顺手排一条重画请求：%s", rec.Body.String())
+	}
+	if n := len(retryq.Pending(proj)); n != 1 {
+		t.Fatalf("重画队列里应当有 1 条，实际 %d", n)
 	}
 	if after["fig_requeued"] != "threshold" {
 		t.Fatalf("要留一个「门槛排的队」的记号，实际 %v", after["fig_requeued"])
@@ -125,7 +133,7 @@ func TestFigureOverrideNoScoreNotRequeued(t *testing.T) {
 // T316：门槛抬上去排了队、再放宽回去，就要把这条排队撤回（状态回 done），
 // 别让一直重复的图又白画一遍。
 func TestFigureOverrideLowerThresholdCancelsRequeue(t *testing.T) {
-	v, _, file := figureOverrideServer(t)
+	v, proj, file := figureOverrideServer(t)
 	if rec := postFigureOverride(t, v, map[string]any{
 		"project": "书A", "md": "书A.md", "img": "images/书A/a1b2c3.png", "min_overlap": 0.30,
 	}); rec.Code != 200 {
@@ -149,6 +157,10 @@ func TestFigureOverrideLowerThresholdCancelsRequeue(t *testing.T) {
 	}
 	if after["fig_min_overlap"] != 0.10 {
 		t.Fatalf("新阈值要写进去，实际 %v", after["fig_min_overlap"])
+	}
+	// T317：撤回排队时，还躺在队列里的那条重画请求也要撤掉。
+	if n := len(retryq.Pending(proj)); n != 0 {
+		t.Fatalf("撤回后队列里不该还留着重画请求，实际 %d 条", n)
 	}
 }
 

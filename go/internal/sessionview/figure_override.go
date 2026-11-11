@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mineru-tools/internal/retryq"
 	"mineru-tools/internal/reviewpage"
 )
 
@@ -158,7 +159,7 @@ func (v *viewerServer) serveFigureOverride(w http.ResponseWriter, r *http.Reques
 			rec["status"] = "classified"
 			rec["fig_requeued"] = "threshold"
 			flipped = true
-			note = fmt.Sprintf("已保存并当场标回待处理（上次重叠 %.2f%% < 新门槛 %.2f%%）：下次运行会接着画这张图",
+			note = fmt.Sprintf("已保存并当场标回待处理（上次重叠 %.2f%% < 新门槛 %.2f%%）",
 				best*100, limit*100)
 		case ourQueue == "threshold" && passes && !accepted && status == "classified":
 			rec["status"] = "done"
@@ -176,6 +177,31 @@ func (v *viewerServer) serveFigureOverride(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "写进度记录失败："+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// T317：抬门槛不只是"下次运行才画"——顺手排一条重画请求（与「重画这张图」
+	// 同一条队列）。正在跑的 latex 会把它接进并发槽（图片阶段一结束、或别的阶段
+	// 里都能接），没在跑就留到下次启动。抬门槛本来就是"这张图要重画"，让人再手
+	// 点一遍重画或干脆重启一次，没有意义。排请求放在写盘之后：watcher 可能立刻
+	// 看到它，那时进度里必须已经写着 classified。
+	queued := false
+	label, _ := rec["label"].(string)
+	trName := "vector_" + vectorTexBaseOf(mdName, imgName, label) + ".jsonl"
+	switch {
+	case flipped:
+		if _, qerr := retryq.Queue(proj, retryq.Request{
+			Project: req.Project, Role: "vector", Reason: "门槛抬高，重画", Source: "web", Path: trName,
+		}); qerr != nil {
+			note += "；但排进重画队列失败：" + qerr.Error()
+		} else {
+			queued = true
+			note += "；已排进重画队列：正在跑的 latex 会接着画这张图（没在跑就留到下次启动）"
+		}
+	case cancelled:
+		// 撤回排队时顺手把还没被接走的那一条撤掉，否则放宽门槛之后它照样会把
+		// 这张图重画一遍——白画一次正是这次要避免的。
+		if n := dropVectorRequest(proj, trName); n > 0 {
+			note += "；已从重画队列里撤下这条请求"
+		}
+	}
 	writeJSON(w, map[string]any{
 		"ok": true, "md": mdName, "img": imgName,
 		"min_overlap":    rec["fig_min_overlap"],
@@ -184,10 +210,25 @@ func (v *viewerServer) serveFigureOverride(w http.ResponseWriter, r *http.Reques
 		"accept_note":    rec["fig_accept_note"],
 		"note":           note,
 		"requeued":       flipped,
+		"queued":         queued,
 		"cancelled":      cancelled,
 		"cleared_best":   req.ClearBest,
 		"cleared_accept": req.ClearAccept || (req.AcceptAsIs != nil && !*req.AcceptAsIs),
 	})
+}
+
+// dropVectorRequest 删掉队列里还没被接走的这条重画请求，返回删掉的条数。
+// 已经被接走的请求不在 Pending 里（那边会改名成 .done.json），这里不动它。
+func dropVectorRequest(proj, trName string) int {
+	n := 0
+	for _, f := range retryq.Pending(proj) {
+		if f.Request.Role == "vector" && f.Request.Path == trName {
+			if err := os.Remove(f.Path); err == nil {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // progressLite 是反查只要的三个字段（其余不读，免得把 schema 抄两遍）。
