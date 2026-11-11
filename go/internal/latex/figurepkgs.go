@@ -49,6 +49,13 @@ func stripFigurePreamble(code string) string {
 	return strings.Join(out, "\n")
 }
 
+// figurePkgIgnore 是只影响 standalone 预览的字体/主题包：进章节正文时本来就会
+// 被剥掉，类里也不该装（装上会改全书字体）。别让它们变成永久的"缺包"告警。
+var figurePkgIgnore = map[string]bool{
+	"mathptmx": true, "newtxtext": true, "newtxmath": true, "libertine": true,
+	"lmodern": true, "times": true, "helvet": true, "courier": true, "palatino": true,
+}
+
 var (
 	figUsePackageRe = regexp.MustCompile(`\\usepackage(?:\[[^\]]*\])?\{([^}]+)\}`)
 	figUseLibraryRe = regexp.MustCompile(`\\usetikzlibrary\{([^}]+)\}`)
@@ -83,7 +90,7 @@ func figurePackageNeeds(progDir string) figureNeeds {
 		collect := func(re *regexp.Regexp, into map[string]int) {
 			for _, m := range re.FindAllStringSubmatch(p.TikzCode, -1) {
 				for _, name := range strings.Split(m[1], ",") {
-					if name = strings.TrimSpace(name); name != "" {
+					if name = strings.TrimSpace(name); name != "" && !figurePkgIgnore[name] {
 						into[name]++
 					}
 				}

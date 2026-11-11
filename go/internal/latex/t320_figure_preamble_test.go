@@ -68,6 +68,11 @@ func TestFigurePackageNeeds(t *testing.T) {
 	if !strings.Contains(lj, "arrows.meta (2)") || !strings.Contains(lj, "calc (1)") {
 		t.Fatalf("库统计不对：%v", needs.Libs)
 	}
+	// 只影响 standalone 预览的字体包不算"类该加载的包"（装上会改全书字体）。
+	write("d.json", "\\usepackage{mathptmx}\\usetikzlibrary{calc}")
+	if n2 := figurePackageNeeds(dir); strings.Contains(strings.Join(n2.Packages, ","), "mathptmx") {
+		t.Fatalf("字体包不该进清单：%v", n2.Packages)
+	}
 	if figurePackageNeeds(filepath.Join(dir, "nope")).empty() != true {
 		t.Fatal("目录不存在时应当返回空")
 	}
