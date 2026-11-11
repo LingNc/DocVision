@@ -730,6 +730,20 @@ func (r *Runner) stylePhase(proj string) error {
 		initial += "\n- PRINTED TRIM SIZE declared in the book itself (front matter / colophon): " +
 			strings.Join(trim, " | ") + " — this is the size the book was PRINTED at: prefer it for \\paperwidth/\\paperheight when it disagrees with the PDF page box, and keep the type area as a FRACTION of the page instead of copying absolute millimetres (scans are often rescaled)."
 	}
+	// T320：本书已产出的矢量图需要哪些宏包/库，直接告诉样式会话，要求类自己
+	// 加载。转换会话只能原样粘贴图代码、加不了宏包——缺一个 `tikz-3dplot`，
+	// 它就只剩两条路：编译失败，或者背着人把整张 3D 图重画成 2D（真实发生过）。
+	if needs := figurePackageNeeds(filepath.Join(proj, "source", "progress_items")); !needs.empty() {
+		msg := "\n- VECTOR FIGURES ALREADY PRODUCED for this book need:"
+		if len(needs.Packages) > 0 {
+			msg += " packages " + strings.Join(needs.Packages, ", ")
+		}
+		if len(needs.Libs) > 0 {
+			msg += "; TikZ libraries " + strings.Join(needs.Libs, ", ")
+		}
+		msg += " — the class MUST load these itself (\\RequirePackage{...}, \\usetikzlibrary{...}): the chapter agents paste those figures verbatim and CANNOT add packages, so one missing package forces them to either fail or redraw the figure."
+		initial += msg
+	}
 	if boxes := r.bookPageBoxes(); len(boxes) > 0 {
 		initial += "\n- PHYSICAL PAGE BOX (measured from the source PDFs): " + strings.Join(boxes, "; ") +
 			" — scans can carry extra margins or be rescaled, so treat this as a cross-check of the declared trim size, not as the answer; state in the manual which one you used and why."

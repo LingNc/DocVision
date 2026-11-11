@@ -1800,7 +1800,10 @@ func (r *Runner) embedBlock(p *imageProgress, mdName, outDir string) string {
 				if ok {
 					head += "LINK: [vector](" + rel + ")\n"
 				}
-				code := p.TikzCode
+				// T320：代码顶端的 `\usepackage` / `\standaloneconfig` 是前言行，
+				// 粘进章节正文会直接编译失败（"Can be used only in preamble"）——
+				// 围栏里只留能进正文的部分，需要的宏包由样式类加载。
+				code := stripFigurePreamble(p.TikzCode)
 				if p.SharedTex != "" && fileExists(filepath.Join(outDir, filepath.FromSlash(p.SharedTex))) {
 					code = "\\input{" + p.SharedTex + "}"
 				}

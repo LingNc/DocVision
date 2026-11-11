@@ -2559,3 +2559,7 @@ user 轮
   根因：样式阶段只让它自己从 `view_pdf` 的 mm 回执里推纸张，而扫描 PDF 的页框常被缩放/带白边，未必等于成品开版；各 part 页高还不一致（383.8mm 与 397mm 并存）。
   改：样式首条消息先给"书里自己声明的开本"原文（版权页片段，代码只捡原话不换算），再给量出来的 PDF 页框当**交叉校验**，并要求版心按页面比例走。
   验证：`trimSizeSnippets` 四种文本（版权页/成品尺寸/裸规格/正文无尺寸）与量不到 PDF 时的安静降级。
+[X][ ] T320. 转换会话把 3D 矢量图重画成 2D：章节 .tex 里的图和作图会话提交的那份不是同一张。
+  根因：图代码顶端带 `\usepackage{tikz-3dplot}\standaloneconfig{…}` 这类前言行（本书 94 张里 26 张如此、18 张要 `tikz-3dplot`），粘进章节正文必然编译失败；样式类也没加载这些包，转换会话于是自己把 3D 改成 2D（推理原文「avoid package dependency by using TikZ for 2D geometry」），既没报样式问题也没过逐图门槛。
+  改：围栏里剥掉前言行（`stripFigurePreamble`）；样式首条消息列出本书图代码需要的宏包/库并要求类自己 `\RequirePackage`/`\usetikzlibrary`；转换提示词补两句——前言行要丢、缺包属样式问题不许重画。
+  验证：`stripFigurePreamble` 与 `figurePackageNeeds`（含空代码、目录不存在）两组测试。
