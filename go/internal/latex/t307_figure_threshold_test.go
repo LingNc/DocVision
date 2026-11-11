@@ -137,6 +137,25 @@ func TestRequeueIgnoresBackfilledUnlessPerFigureThreshold(t *testing.T) {
 	}
 }
 
+// T318：交付物字段被清过（早期翻"待处理"清掉的）但人单独给这张图设了阈值——
+// 照样退回重画，否则它会永远停在 "done 且成绩低于自己的门槛"。
+func TestRequeueEmptyDeliverableWithPerFigureThreshold(t *testing.T) {
+	dir := t.TempDir()
+	prog := map[string]*imageProgress{
+		"cleared":    {Status: "done", FigBestOverlap: 0.179, FigMinOverlap: 0.20},
+		"cleared-gl": {Status: "done", FigBestOverlap: 0.10}, // 没被单独点名：不动
+	}
+	if n := requeueBelowThreshold(prog, dir, 0.17, 0.10); n != 1 {
+		t.Fatalf("只该退回被点名的那一张，实际 %d", n)
+	}
+	if prog["cleared"].Status != "classified" {
+		t.Fatalf("单独设了阈值的应当退回：%+v", prog["cleared"])
+	}
+	if prog["cleared-gl"].Status != "done" {
+		t.Fatalf("没点名的空交付物不该动：%+v", prog["cleared-gl"])
+	}
+}
+
 // 尺寸偏差也是门槛：重叠够但画小了（宽高只有原图六成）同样退回。
 func TestRequeueOnScaleDeviation(t *testing.T) {
 	dir := t.TempDir()

@@ -227,6 +227,29 @@ func (t *SubmitFigureTool) shortfallOrNothing() string {
 }
 
 // thresholdShortfall 描述差在哪（空 = 达标或门槛关闭），供 REJECTED 回执用。
+// figureGatePass 判断一组真实成绩够不够当时的门槛（<=0 的那条不卡）。
+func figureGatePass(overlap, scaleDev, minOverlap, maxScaleDev float64) bool {
+	if minOverlap > 0 && overlap < minOverlap {
+		return false
+	}
+	if maxScaleDev > 0 && scaleDev > maxScaleDev {
+		return false
+	}
+	return true
+}
+
+// figureResumeCredit 决定"转录里最后一次提交早已被收下"时能不能直接按已交付
+// 收账（T318）：只有**成绩本来就够现在的门槛**才算画完了。成绩低于这张图现在
+// 的门槛时，那次提交是被旧门槛放过的——收账等于把"抬门槛重画"这件事悄悄吞掉
+// （现场：14 张秒 done，其中 9 张成绩还差 0.3～5 个百分点）。没有门槛也没有
+// 成绩时没什么可卡的，按已交付算。
+func figureResumeCredit(overlap, scaleDev, minOverlap, maxScaleDev float64) bool {
+	if overlap > 0 {
+		return figureGatePass(overlap, scaleDev, minOverlap, maxScaleDev)
+	}
+	return minOverlap <= 0 && maxScaleDev <= 0
+}
+
 func (t *SubmitFigureTool) thresholdShortfall() string {
 	var parts []string
 	if t.MinOverlap > 0 && t.State.bestOverlap < t.MinOverlap {

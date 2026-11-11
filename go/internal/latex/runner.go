@@ -108,6 +108,9 @@ type FigureEnv struct {
 	// LiveThreshold 每次 submit 重读这张图的 fig_min_overlap（T316）：网页上改
 	// 门槛当轮就生效，抬上去拦得住、降下来放得行。
 	LiveThreshold func() (float64, bool)
+	// CreditResume 允许"转录里的提交已被收下且成品在盘"时直接收账（T316）。
+	// 只在成绩够得上这张图现在的门槛时为真（T318），否则继续跑会话把图改到达标。
+	CreditResume bool
 	// AcceptMinSubmits 是"尽力还原"的前置次数（<=0 = 不限）
 	AcceptMinSubmits int
 }
@@ -1542,6 +1545,16 @@ func (r *Runner) processVectorImage(mf *mdFile, t *task, pp *imageProgress, outD
 	// 现读一次：一直在重复交不过的图，人把阈值降下来之后下一次交就按新门槛判，
 	// 抬上去也立刻拦住——不用等这一轮跑完再重跑。
 	progFile := filepath.Join(progDir, sanitizeName(pp.MDName), sanitizeName(pp.ImgPath)+".json")
+	// T318：续跑收账要先看门槛。成绩是"上次提交那一刻量的"，门槛可能之后被抬
+	// 上去了——那种情况必须继续画，不能拿旧成绩按已交付收账。
+	effMin, effMaxDev := r.cfg.Latex.FigureCheck.MinOverlap, r.cfg.Latex.FigureCheck.MaxScaleDev
+	if pp.FigMinOverlap != 0 {
+		effMin = pp.FigMinOverlap
+	}
+	// 进度里代码/成品为空说明这条记录不完整（早期翻"待处理"时清过字段），
+	// 收账会让 md 里留一个空代码块——这种不要收账，让它照常续跑把成品补回来。
+	env.CreditResume = pp.TikzCode != "" && pp.FigPDF != "" &&
+		figureResumeCredit(pp.FigBestOverlap, pp.FigScaleDev, effMin, effMaxDev)
 	env.LiveThreshold = func() (float64, bool) {
 		data, rerr := os.ReadFile(progFile)
 		if rerr != nil {
@@ -1949,10 +1962,15 @@ func loadProgress(progDir string, prog map[string]*imageProgress) {
 func requeueBelowThreshold(prog map[string]*imageProgress, progDir string, globalMin, globalMaxScaleDev float64) int {
 	n := 0
 	for _, p := range prog {
-		if p == nil || p.Status != "done" || strings.TrimSpace(p.TikzCode) == "" {
+		if p == nil || p.Status != "done" {
 			continue
 		}
 		if p.FigAcceptAsIs || p.FigBestOverlap <= 0 {
+			continue
+		}
+		// 交付物字段空着（早期翻待处理时清掉过）：正常批次里不动，但人**单独**
+		// 给这张图设了阈值就照退——他要的就是重画（T318）。
+		if strings.TrimSpace(p.TikzCode) == "" && p.FigMinOverlap == 0 {
 			continue
 		}
 		// 补算出来的成绩只用来展示：除非这张图被**单独**设了阈值（人明确点了

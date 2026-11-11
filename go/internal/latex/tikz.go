@@ -139,13 +139,13 @@ func RunTikZSession(
 		if replaySubmit(log, tid, "tikz", submitFig, st) {
 			state.submitted = true
 			resumeSkip = true
-		} else if st.SubmitAccepted && fileExists(dstTex) && fileExists(dstPDF) {
+		} else if st.SubmitAccepted && env.CreditResume && fileExists(dstTex) && fileExists(dstPDF) {
 			// T316：转录里最后一次提交**已经被收下**、成品也还在磁盘上（成品名由
 			// md+图片+label 决定，前一次运行已经交付过）。新进程没有 compile/compare
 			// 现场，重放提交必然被门槛打回，接着又被"你还没提交"的提醒催一次，模型
 			// 只能空转（现场：一轮白烧 6 万 token，最后还把画好的图记成"未提交"）。
 			// 这种情况不下场，直接按已交付收账。
-			log.Log(tid, "[tikz] 转录里的提交已被收下且成品在位，直接按已完成收账（不再跑会话）:",
+			log.Log(tid, "[tikz] 转录里的提交已被收下、成品在位且成绩仍达门槛，直接按已完成收账（不再跑会话）:",
 				filepath.Base(trPath))
 			return TikZResult{Submitted: true, Resumed: true, PDFPath: dstPDF, PNGPath: dstPNG}, nil
 		} else {
