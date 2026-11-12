@@ -2567,3 +2567,7 @@ user 轮
   根因：T320 只修了"哪些包该由类加载"的供给链，没有任何一处比对"类到底加载了没有"。
   改：`preflightConvert` 里比对 `figurePackageNeeds` 与 cls 的 `\RequirePackage`/`\usetikzlibrary`，缺的列清单并说明后果（补 cls 后重转）。
   验证：`missingFigurePackages` 三情形（已加载不报、缺两个包+一个库、全齐不报）。
+[X][ ] T322. 修复会话改图时不知道该看哪份代码：提示词没告诉它图在 md 围栏与 `source/tikz` 里是权威的。
+  根因：挂载表一直是全的（`project:source` 铺 md + `images`/`figures`/`tikz`），但 `latex_stylefix.user.md` 的 `project:` 清单漏了 `source/`、`latex_stylefix_block.system.md` 一个挂载点都没列，会话遇到"曲线画不出来/缺 3D 环境"只能自己动手补。
+  改：两份提示词各补一行——图的权威代码在章节 md 的 ```latex 围栏（或 `source/tikz/<名>.tex`），原图在 `source/images/`，读两份再改代码，不许自己重画几何。
+  验证：`go test ./internal/prompts/` 通过。
