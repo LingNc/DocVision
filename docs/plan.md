@@ -140,3 +140,6 @@
   改：① `latex.figure_check.min_overlap`（软墨重叠，默认 0.17、0 关闭）与 `max_scale_dev`（宽高比例偏差，默认 0.10）卡住 `submit_figure`，回执直接给数字与差值（"差 3.2 个百分点 / 窄了 9%"）；② `submit_figure` 增 `accept_as_is` + 必填 `note`（尽力还原），放行并记 `fig_accepted_as_is`/`fig_best_overlap`，核对页与报告可查；③ 每图阈值 `fig_min_overlap` 存进 progress item（0 = 用全局），从网页改；④ 网页每图一行：阈值输入 + 「重画这张」（复用现有 `role=vector` 队列，人工打回后从该图作图转录续跑，不新建尝试）+ 「按尽力还原接受」。
   根因：`compareFigureImages` 先用 `fitFigureCanvases` 把候选按原图宽度等比缩放、再按墨迹外接框裁剪、按质心对齐——宽度差异、画布内位置、纵横向比例全被"对齐掉了"，只剩墨迹形状相似度，所以 17% 也能看着"对上了"；而 `submit_figure` 今天只要求"调过一次 compare_figure"，没有任何数值门槛。
   风险：阈值定太严会让模型在达标线上反复重画烧 token（"尽力还原"就是这条的泄压阀）；尺寸偏差要按墨迹外接框算，不能按 standalone 的 trim 边框（那是编译产物，不代表图在页面里的大小）。
+[X][ ] P79. 成对图的线条与样式统一：原书里并排、或同一个图号下的 (a)/(b) 两半，转换章节时必须当成一套来排版——线条粗细、配色、字号、箭头两边一致，只保留各自的几何与标签。
+  改：`latex_convert.system.md` 的围栏条目加一句"同图号的图彼此也要一致"；`pairedFigureNote`（`internal/latex/pairedfigures.go`）在 convert 首条消息里点名本章是哪几对：两个矢量围栏之间既无小标题、也无`图 8.1`这类图注、且相距 ≤60 行，就判为一对（(a)/(b) 的标注不算图注，正好是同图号的标志）。
+  验证：`TestPairedFigureNote` 七个用例（(a)/(b) 判成一对、各自有图注/中间有小标题/相距 70 行都不是）；拿一本八章的成品实测只点出 5 对，没有把"图 8.1 与图 8.2"这种相邻但不同图号的算进去。

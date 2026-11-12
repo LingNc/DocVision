@@ -2277,6 +2277,12 @@ func (r *Runner) convertChapterNode(proj, clsName, manualPath, chapPath, workDir
 	if note := chapterSizeNote(lineCount, r.cfg.Latex.MaxChapterLines, node.Depth); note != "" {
 		initial += "\n\n" + note
 	}
+	// P79：成对的图（并排、或同一例子的 (a)/(b)）要当成一套来排版——线条粗细、
+	// 颜色、字号、箭头必须两边一致。提示词里写了通则，这里把**本章是哪几对**
+	// 当面点出来，省得模型自己判断"这两张算不算一对"。
+	if note := pairedFigureNote(mdLines); note != "" {
+		initial += "\n\n" + note
+	}
 
 	if r.cfg.Latex.RemoveWatermark {
 		initial += "\n\n" + r.watermarkGuidance("WATERMARK: exclude watermark artifacts from the .tex output (repeated decorative overlay text such as institution marks, faint background strings). Skip such content entirely - do not typeset it.")
