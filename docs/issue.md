@@ -2584,3 +2584,7 @@ user 轮
   根因：修复会话的改动只写在临时构建树 `work/build/`，而 assemble 每次开头 `os.RemoveAll(build)` 重建；只有终审**成功**才回写 `work/chapters`+`work/final_review`（T39），修复**成功**这一路没有任何回写，于是"修好→进终审→停掉→再跑"必然重烧一轮修复。
   改：修复会话成功（编译已通过）后调用 `persistFinalReviewPartial` 把构建树回写——章节进 `work/chapters`、顶层 `.tex` 进 `work/final_review`、指纹落 `state.partial.sha256`。中断态只解锁"恢复现场 + 从终审接着跑"，不会被当成终审已完成。
   验证：`TestFixPersistSurvivesRebuild`（章节/顶层回写、中断态指纹匹配、完成态仍为 false、重建树应用修复版）。
+[X][ ] T326. 编译超时形同虚设：latexmk 被杀后孤儿 `sh -c xelatex` 继续空转，工具调用陪着挂一小时。
+  根因：`exec.CommandContext` 到点只杀直接子进程，latexmk 拉起的 `sh -c xelatex …` 变孤儿继续 100% CPU；且输出走 `CombinedOutput` 的管道，孤儿继承该管道，`Wait` 永远等不到 EOF——超时到点后工具调用又挂了 45 分钟。
+  改：`runCmdTimeout` 统一收口——命令进独立进程组（`Setpgid`，超时对整组 SIGKILL），输出改内存缓冲（没有可被继承的管道），等待放 goroutine、超时后限时 5 秒收尾；`runEngine`/`runLatexmk` 都走它。
+  验证：`TestRunCmdTimeoutKillsGroup`（`sh -c "sleep 30 & sleep 30"` 超时后整组无孤儿、0.5 秒返回）、`TestRunCmdTimeoutNormal`。

@@ -4,6 +4,7 @@
 package latex
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -216,30 +217,21 @@ func (c *Compiler) CompileOpts(dir, mainFile string, o CompileOptions) CompileRe
 
 // runEngine executes one engine pass.
 func (c *Compiler) runEngine(dir, mainFile, engine string, o CompileOptions, timeout time.Duration) CompileResult {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
 	args := []string{"-interaction=nonstopmode", "-halt-on-error", "-file-line-error"}
 	if o.ShellEscape {
 		args = append(args, "-shell-escape")
 	}
 	args = append(args, o.ExtraArgs...)
 	args = append(args, mainFile)
-	cmd := exec.CommandContext(ctx, engine, args...)
+	cmd := exec.Command(engine, args...)
 	cmd.Dir = dir
 	cmd.Env = c.buildEnv()
-	out, err := cmd.CombinedOutput()
-	logText := string(out)
-	if len(logText) > 65536 {
-		logText = logText[:32768] + "\n...[log truncated]...\n" + logText[len(logText)-32768:]
-	}
-	return c.result(dir, mainFile, logText, err, ctx.Err() == context.DeadlineExceeded, timeout)
+	logText, err, timedOut := runCmdTimeout(cmd, timeout)
+	return c.result(dir, mainFile, logText, err, timedOut, timeout)
 }
 
 // runLatexmk drives a full latexmk build (multi-pass + bibliography).
 func (c *Compiler) runLatexmk(dir, mainFile string, o CompileOptions, timeout time.Duration) CompileResult {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout*3)
-	defer cancel()
 	mode := "-pdf"
 	switch strings.ToLower(c.engine) {
 	case "xelatex":
@@ -253,15 +245,11 @@ func (c *Compiler) runLatexmk(dir, mainFile string, o CompileOptions, timeout ti
 	}
 	args = append(args, o.ExtraArgs...)
 	args = append(args, mainFile)
-	cmd := exec.CommandContext(ctx, "latexmk", args...)
+	cmd := exec.Command("latexmk", args...)
 	cmd.Dir = dir
 	cmd.Env = c.buildEnv()
-	out, err := cmd.CombinedOutput()
-	logText := string(out)
-	if len(logText) > 65536 {
-		logText = logText[:32768] + "\n...[log truncated]...\n" + logText[len(logText)-32768:]
-	}
-	return c.result(dir, mainFile, logText, err, ctx.Err() == context.DeadlineExceeded, timeout*3)
+	logText, err, timedOut := runCmdTimeout(cmd, timeout*3)
+	return c.result(dir, mainFile, logText, err, timedOut, timeout*3)
 }
 
 // result turns one finished process into a CompileResult.
@@ -627,4 +615,42 @@ func truncateRunes(s string, n int) string {
 		i++
 	}
 	return s
+}
+
+// runCmdTimeout 执行一条外部命令，并保证到点**真的**收得回来（T326）。
+//
+// 两个坑叠在一起让"超时"形同虚设：① `exec.CommandContext` 到点只杀直接子进程，
+// latexmk 拉起的 `sh -c xelatex …` 会变成孤儿继续 100% CPU 空转；② 输出用
+// `CombinedOutput` 走管道，逃出来的孙子进程inherits 那个管道，`Wait` 于是永远
+// 等不到 EOF——实测 latexmk 15 分钟被超时杀掉后，工具调用又陪着挂了 45 分钟。
+// 这里改成：命令进独立进程组（超时连整组一起 SIGKILL），输出走内存缓冲（没有
+// 管道可被继承），等待放进 goroutine，超时后限时等它收尾。
+func runCmdTimeout(cmd *exec.Cmd, timeout time.Duration) (logText string, err error, timedOut bool) {
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	setProcessGroup(cmd)
+	if serr := cmd.Start(); serr != nil {
+		return serr.Error(), serr, false
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err = <-done:
+	case <-timer.C:
+		killProcessGroup(cmd)
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+		}
+		timedOut = true
+		err = fmt.Errorf("timeout after %s", timeout)
+	}
+	logText = buf.String()
+	if len(logText) > 65536 {
+		logText = logText[:32768] + "\n...[log truncated]...\n" + logText[len(logText)-32768:]
+	}
+	return logText, err, timedOut
 }
