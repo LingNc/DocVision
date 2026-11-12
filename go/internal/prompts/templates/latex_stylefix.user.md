@@ -11,6 +11,6 @@ Read it: `read_file {path:"project:style/manual.md"}` — it is the NEW manual a
 ## Reported problems:
 {ISSUES}
 
-When a problem is about a figure (a curve that does not draw, a missing `tikz-3dplot`, a label that vanished), the figure's AUTHORITATIVE code is its ```latex fence in `project:chapters/<file>.md` (or `project:source/tikz/<name>.tex` for the standalone source) and the picture is at `project:source/images/...`: read both, fix the code, never redraw its geometry yourself.
+When a problem is about a figure (a curve that does not draw, a missing `tikz-3dplot`, a label that vanished), the figure's AUTHORITATIVE code is its ```latex fence in `project:chapters/<file>.md` (or `project:source/tikz/<name>.tex` for the standalone source) and the picture is at `project:source/images/...`: read both and fix the code. Keep the drawing's structure and geometry, and DO adapt it to where it now sits — alignment, line weights, arrow heads, fonts, spacing, label placement, tidying details. What you must not do is swap it for a different drawing.
 
 Apply MINIMAL edits with edit_file (do not re-convert from markdown, do not drop content), compile until clean, then submit.

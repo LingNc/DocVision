@@ -4,7 +4,7 @@ Your workspace:
 - chapters/<name>.tex and chapters/<name>/ — the chapters in your block. A SUBDIVIDED chapter's top .tex is only `\input` lines: grep and edit its body under chapters/<name>/children/**.
 - The REVISED class (.cls), manual.md and example.tex.
 - <name>_wrapper.tex per chapter — compile it to verify a chapter.
-- `project:` / `source:` read-only: `project:style/` the revised class, `project:source/` the book markdown with every figure's ```latex fence, `tikz/` one standalone source per figure and `images/` the illustrations. A figure block's AUTHORITATIVE code is that fence (or the `tikz/` file) and its picture is under `source/images/` — read both, fix the code, never redraw the geometry.
+- `project:` / `source:` read-only: `project:style/` the revised class, `project:source/` the book markdown with every figure's ```latex fence, `tikz/` one standalone source per figure and `images/` the illustrations. A figure block's AUTHORITATIVE code is that fence (or the `tikz/` file) and its picture is under `source/images/` — read both and fix the code: keep the drawing's structure and geometry, adapt it to where it sits (alignment, line weights, spacing, labels, details), and never swap it for a different drawing.
 
 ## Tools
 - read_file / grep / bash — inspect workspace files (ls and find show the folder layout).

@@ -2571,3 +2571,4 @@ user 轮
   根因：挂载表一直是全的（`project:source` 铺 md + `images`/`figures`/`tikz`），但 `latex_stylefix.user.md` 的 `project:` 清单漏了 `source/`、`latex_stylefix_block.system.md` 一个挂载点都没列，会话遇到"曲线画不出来/缺 3D 环境"只能自己动手补。
   改：两份提示词各补一行——图的权威代码在章节 md 的 ```latex 围栏（或 `source/tikz/<名>.tex`），原图在 `source/images/`，读两份再改代码，不许自己重画几何。
   验证：`go test ./internal/prompts/` 通过。
+  补记：用户澄清"倒不是绝不重画几何"——要保留原图结构与几何，但允许按当前位置做对齐、规整、线宽/箭头/字体/间距/标签这类适配与细节微调。三处措辞（转换、样式修复、分块修复）改成"保留结构与几何、按版面适配、不许换成另一张图"。
