@@ -2572,3 +2572,7 @@ user 轮
   改：两份提示词各补一行——图的权威代码在章节 md 的 ```latex 围栏（或 `source/tikz/<名>.tex`），原图在 `source/images/`，读两份再改代码，不许自己重画几何。
   验证：`go test ./internal/prompts/` 通过。
   补记：用户澄清"倒不是绝不重画几何"——要保留原图结构与几何，但允许按当前位置做对齐、规整、线宽/箭头/字体/间距/标签这类适配与细节微调。三处措辞（转换、样式修复、分块修复）改成"保留结构与几何、按版面适配、不许换成另一张图"。
+[X][ ] T323. 会话 bash 敲 `rg` 报 exit status 127，同一条命令反复撞。
+  根因：沙箱只有 coreutils（宿主也没有 ripgrep），而模型习惯性用 rg/fd/jq；`bash` 回执只给退出码与一句 "command not found"，没有替代方案。
+  改：`bash` 失败时解析 `line N: <cmd>: command not found`（含中文"未找到命令"），按命令给等价物（rg→grep 工具或 `grep -rn`、fd→`find`、jq→`python3 -c`、bat→`read_file`、tree→`find`），未知命令给通用的 coreutils 提示。
+  验证：`TestMissingCommandNote` 五种输入 + 普通输出不加提示。

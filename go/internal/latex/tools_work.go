@@ -1169,6 +1169,9 @@ func (t *WorkBashTool) Execute(argsJSON string) (session.ToolResult, error) {
 		if t.Python != nil {
 			note = t.Python.NoteFor(text)
 		}
+		if note == "" {
+			note = missingCommandNote(text)
+		}
 		if len(text) > cap {
 			text = text[:cap] + fmt.Sprintf("...(%d bytes more)", len(out)-cap)
 		}
@@ -1518,4 +1521,28 @@ func pdfPageCount(pdf string) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("pdfinfo: 未找到 Pages 行")
+}
+
+var missingCmdRe = regexp.MustCompile(`(?m)(?:line \d+|行 \d+):\s*([\w.+-]+):\s*(?:command not found|未找到命令)`)
+
+// missingCommandNote 在"沙箱里没有这条命令"时给出等价替代（T323）：模型习惯性
+// 敲 rg/fd/bat/jq，但沙箱只有 coreutils，不给替代它就一遍遍撞同一个 127。
+func missingCommandNote(text string) string {
+	m := missingCmdRe.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	name := strings.ToLower(m[1])
+	alt := map[string]string{
+		"rg":   "搜索文件内容请用 grep 工具（pattern / include / path），或用 bash 里现成的 `grep -rn '模式' .`",
+		"fd":   "找文件请用 `find . -name '…'`（或 glob 工具）",
+		"jq":   "解析 JSON 请用 `python3 -c '…'`（沙箱里有 python3）",
+		"bat":  "看文件请用 read_file",
+		"tree": "看目录树请用 `find . -maxdepth 2` 或 ls -R",
+	}
+	hint, ok := alt[name]
+	if !ok {
+		hint = "请换用环境里已有的命令（coreutils：ls / find / grep / sed / awk / python3）"
+	}
+	return "\n（沙箱里没有 `" + m[1] + "`：" + hint + "。不要重复试同一条命令。）"
 }
