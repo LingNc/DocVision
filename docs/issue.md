@@ -2588,3 +2588,7 @@ user 轮
   根因：`exec.CommandContext` 到点只杀直接子进程，latexmk 拉起的 `sh -c xelatex …` 变孤儿继续 100% CPU；且输出走 `CombinedOutput` 的管道，孤儿继承该管道，`Wait` 永远等不到 EOF——超时到点后工具调用又挂了 45 分钟。
   改：`runCmdTimeout` 统一收口——命令进独立进程组（`Setpgid`，超时对整组 SIGKILL），输出改内存缓冲（没有可被继承的管道），等待放 goroutine、超时后限时 5 秒收尾；`runEngine`/`runLatexmk` 都走它。
   验证：`TestRunCmdTimeoutKillsGroup`（`sh -c "sleep 30 & sleep 30"` 超时后整组无孤儿、0.5 秒返回）、`TestRunCmdTimeoutNormal`。
+[X][ ] T327. 终审会话工具轮次偏少（沿用 convert 的 128），长书容易不够用。
+  根因：`finalReview` 一直用 `LatexSession("convert")` 调优，没有自己的块；随附模板只给 convert 写了 128 轮。
+  改：新增 `latex.sessions.final_review` 块（其余字段继承 convert），没配轮次时默认 **256**，显式值/负数照旧；两份模板加该块，`docs/config.md` 补两行。
+  验证：`TestFinalReviewSessionRounds`（默认 256、继承 convert 的 max_tokens、显式 400 生效、-1 不被覆盖）、`TestConfigTemplateKeyParity`。

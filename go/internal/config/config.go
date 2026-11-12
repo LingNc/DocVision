@@ -456,6 +456,10 @@ type LatexConfig struct {
 		Style   SessionTuning `yaml:"style"`
 		Chapter SessionTuning `yaml:"chapter"`
 		Convert SessionTuning `yaml:"convert"`
+		// FinalReview 是全书终审会话（读全书成品、整理版式、交定稿）。
+		// 没写的字段继承 convert，轮次不写默认 256——它要通读全书章节、
+		// 逐项核对版面与图表，convert 的 128 轮常常不够用（T327）。
+		FinalReview SessionTuning `yaml:"final_review"`
 		// Checker is the small text model that reviews each converted
 		// chapter before assembly. Defaults to the convert tuning.
 		Checker SessionTuning `yaml:"checker"`
@@ -1842,6 +1846,12 @@ func (c *Config) ResolveImageEstimate(name string) EstimateConfig {
 	return out
 }
 
+// finalReviewDefaultToolRounds caps the book-wide final review session when
+// the config leaves max_tool_rounds unset (T327, user-requested 256): the
+// review reads every chapter, checks layout/pagination/figures one by one and
+// rebuilds the book, so the convert block's default is too tight for it.
+const finalReviewDefaultToolRounds = 256
+
 // checkerDefaultToolRounds caps the per-chapter checker session when the
 // config does not say otherwise (it does NOT inherit convert's rounds).
 const checkerDefaultToolRounds = 50
@@ -1915,6 +1925,16 @@ func (c *Config) LatexSession(name string) SessionTuning {
 		}
 		if s.ContextLimit == 0 {
 			s.ContextLimit = rescueDefaultContextLimit
+		}
+	case "final-review":
+		// T327：终审会话轮次默认 256（用户指定）。其余字段继承 convert
+		// ——它和 convert 用同一套上下文/输出预算口径。显式写负数 = 真正
+		// 不限制，照旧生效。
+		s = c.Latex.Sessions.FinalReview
+		explicitRounds := s.MaxToolRounds
+		inheritSessionTuning(&s, c.Latex.Sessions.Convert)
+		if explicitRounds == 0 {
+			s.MaxToolRounds = finalReviewDefaultToolRounds
 		}
 	case "checker":
 		s = c.Latex.Sessions.Checker

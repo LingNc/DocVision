@@ -211,6 +211,8 @@ latex:
     convert:
       context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
+    final_review:                # 全书终审会话（通读全书成品、核对版面/页码/图表、交定稿）
+      max_tool_rounds: 256       # 终审默认 256 轮（其余字段继承 convert；显式 -1 = 不限制）
     checker:                     # 每章核对会话（只读两个文件 + 一个文件夹；工具只有 read_file/grep/submit）
       max_tool_rounds: 50       # 最里层的轮次（不继承 convert 的 128；其余字段仍继承 convert）
       max_tool_rounds_per_level: 20  # T204：每往上一层加 20 轮（父节点要通读整棵子树；负 = 只翻倍不加）

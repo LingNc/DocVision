@@ -351,8 +351,10 @@ func (r *Runner) finalReview(proj, buildDir string, texs []string, resume bool) 
 	if frKey == "" {
 		frKey = r.cfg.Latex.ConvertModel
 	}
+	// T327：终审有自己的调优块（轮次默认 256），其余字段继承 convert。
+	frTuning := r.cfg.LatexSession("final-review")
 	sess := session.NewSession(r.clientFor(frKey), r.modelOf(frKey),
-		r.cfg.LatexSession("convert"), renderPrompt(prompts.Must(prompts.FinalReviewSystem), r.cfg.LatexSession("convert"), r.outputLang()),
+		frTuning, renderPrompt(prompts.Must(prompts.FinalReviewSystem), frTuning, r.outputLang()),
 		r.bookSessionTools(proj, buildDir, compile, submit), r.log, 1, "final-review")
 	// 转录挂到 work/sessions/final_review.jsonl（T39）：终审会话在 WebUI
 	// 可见、进成本表。T39 完成态：成功后回写 work/，续跑章节未变整段
