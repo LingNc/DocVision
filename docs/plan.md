@@ -143,3 +143,6 @@
 [X][ ] P79. 成对图的线条与样式统一：原书里并排、或同一个图号下的 (a)/(b) 两半，转换章节时必须当成一套来排版——线条粗细、配色、字号、箭头两边一致，只保留各自的几何与标签。
   改：`latex_convert.system.md` 的围栏条目加一句"同图号的图彼此也要一致"；`pairedFigureNote`（`internal/latex/pairedfigures.go`）在 convert 首条消息里点名本章是哪几对：两个矢量围栏之间既无小标题、也无`图 8.1`这类图注、且相距 ≤60 行，就判为一对（(a)/(b) 的标注不算图注，正好是同图号的标志）。
   验证：`TestPairedFigureNote` 七个用例（(a)/(b) 判成一对、各自有图注/中间有小标题/相距 70 行都不是）；拿一本八章的成品实测只点出 5 对，没有把"图 8.1 与图 8.2"这种相邻但不同图号的算进去。
+[~][ ] P80. 插图绘制的全书统一样式：样式会话产出的 cls 提供一套具名 TikZ 样式族（`dv-wire`/`dv-axis`/`dv-grid`/`dv-label`/`dv-thick`…，配 `\dvfigwire` 等宏），作图会话只写语义引用、围栏开头留守卫兜底，转换只做残留宽度映射；全书绘图参数从此只有一处来源，P79 的成对说明降级为兜底。设计稿 `docs/plan-report/p80-figure-style-unity.md`，分 S1（cls 定义样式族 + `source/figure_ink.json` 实测统计）/S2（作图改语义引用）/S3（convert 映射 + preflight 警告）三步落地。
+  改：`latex_style.system.md` 要求 cls 定义整套 `dv-*` 与 `\dvfig*`；`latex_figure.system.md` 改语义引用 + 守卫兜底；新增 `internal/latex/figureink.go` 聚合每图实测线宽；`preflightConvert` 警告残留 `line width=`。
+  风险：守卫 `\ifdefined\dvfigloaded` 依赖 cls 在导言区先加载；旧项目围栏写死宽度，只做一次性映射、不强制重画。
