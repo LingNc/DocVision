@@ -146,6 +146,15 @@ func (r *Runner) assemblePhase(proj string) error {
 		if err := r.fixSession(proj, buildDir, res.Err, frPartial); err != nil {
 			r.log.LogWarning(0, "[assemble] 修复会话未能在上限内让全书编译通过:", err)
 			r.phaseNote()("[assemble] 修复未完成，交付现有产物")
+		} else if perr := persistFinalReviewPartial(proj, buildDir); perr != nil {
+			// T325：修复成功也要把树回写。修复会话的改动只在临时的构建树里，
+			// 而 assemble 每次开头都 RemoveAll(build)——不回写的话，停在终审
+			// 后下次再跑，编译又失败、又开一条全新修复会话，几十轮白烧（真实
+			// 发生过：同一本书连修两轮）。回写成中断态而不是完成态：它只解锁
+			// "恢复现场 + 从终审接着跑"，绝不会被当成"终审已完成"。
+			r.log.LogWarning(0, "[assemble] 回写修复产物失败（下次会重修）:", perr)
+		} else {
+			r.log.Log(0, "[assemble] 修复产物已回写工作区——下次运行从终审接着跑，不再重修")
 		}
 	}
 	// 汇总/终审会话：核对成品 PDF（封面/目录/顺序/页码/图表/版面）、

@@ -2580,3 +2580,7 @@ user 轮
   根因：① 子章节之间按 `chapter_00X/children/…` 的相对路径 `\input`，主文件在构建根，解析不到；② 类已加载 hyperref 时 `ensurePDFBookmarks` 又往 main.tex 注一个带选项的 `\usepackage{hyperref}`（Option clash）；③ 图里用的 `pattern=Lines[…]`、`\bm` 等语法要 `patterns.meta`/`bm`，类里没有。三者都只在临时构建树里被修复会话补上，下次 assemble 重建又没了，于是每轮都从全书修复开始。
   改：main.tex 注 `\input@path{{chapters/}}`（幂等，终审回写的 main.tex 也补）；cls 已加载 hyperref 就不再注；样式消息要求类加载一套基线 TikZ 库（含 `patterns.meta`）。
   验证：`TestEnsureInputPath`（注入点与幂等）、`TestClassLoadsHyperref`；实际整书重编译 0 错误 430 页。
+[X][ ] T325. 全书修复会话的成果不落盘：停在终审后下次重跑又从修复开始。
+  根因：修复会话的改动只写在临时构建树 `work/build/`，而 assemble 每次开头 `os.RemoveAll(build)` 重建；只有终审**成功**才回写 `work/chapters`+`work/final_review`（T39），修复**成功**这一路没有任何回写，于是"修好→进终审→停掉→再跑"必然重烧一轮修复。
+  改：修复会话成功（编译已通过）后调用 `persistFinalReviewPartial` 把构建树回写——章节进 `work/chapters`、顶层 `.tex` 进 `work/final_review`、指纹落 `state.partial.sha256`。中断态只解锁"恢复现场 + 从终审接着跑"，不会被当成终审已完成。
+  验证：`TestFixPersistSurvivesRebuild`（章节/顶层回写、中断态指纹匹配、完成态仍为 false、重建树应用修复版）。
