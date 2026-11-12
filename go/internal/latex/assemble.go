@@ -96,6 +96,7 @@ func (r *Runner) assemblePhase(proj string) error {
 
 	mainTex := "\\documentclass{" + clsName + "}\n" +
 		"\\graphicspath{{figures/}}\n" +
+		inputPathLine +
 		"\\begin{document}\n" + in.String() + "\\end{document}\n"
 	if err := os.WriteFile(filepath.Join(buildDir, "main.tex"), []byte(mainTex), 0o644); err != nil {
 		return err
@@ -117,6 +118,11 @@ func (r *Runner) assemblePhase(proj string) error {
 		} else {
 			r.log.Log(0, "[final-review] 检测到上次中断的终审/修复产物——恢复编辑现场，会话将续跑")
 		}
+	}
+
+	// T324：终审/修复回写过的 main.tex 可能没有 \input@path，补一次（幂等）。
+	if err := ensureInputPath(filepath.Join(buildDir, "main.tex")); err != nil {
+		r.log.LogWarning(0, "[assemble] 补 \\input@path 失败（子章节 \\input 路径可能解析不到）:", err)
 	}
 
 	// T49：成品 PDF 要可导航（书签 + 跳转点）。cls 通常不加载 hyperref
@@ -689,7 +695,7 @@ func ensurePDFBookmarks(proj, buildDir string) error {
 		return err
 	}
 	main := string(data)
-	hasHyperref := strings.Contains(main, "hyperref")
+	hasHyperref := strings.Contains(main, "hyperref") || classLoadsHyperref(proj)
 	// 终审会话可以自己按书的结构布置书签（提示词已告知此职责）——main.tex
 	// 里只要已有任何 \pdfbookmark/\bookmark 行，就视为 AI 已接手，只补
 	// hyperref、不再注入基线锚点（避免与 AI 的层级书签重复）。
@@ -838,3 +844,40 @@ func (r *Runner) preflightAssemble(buildDir, clsName string) {
 
 // includeGraphicsRe 抽 \includegraphics[…]{path} 的路径。
 var includeGraphicsRe = regexp.MustCompile(`\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}`)
+
+// inputPathLine 让章节里的 \input{chapter_00X/children/...} 这类"相对 chapters/
+// 的路径"在构建树里解析得到（T324）：主文件在构建根，子文件之间按 chapters/ 内的
+// 相对路径互相引用；不给 \input@path，全书就只能靠修复会话逐个改路径——每次
+// assemble 都要重烧一遍，因为修复只在临时构建树里生效。
+const inputPathLine = "\\makeatletter\\def\\input@path{{chapters/}}\\makeatother\n"
+
+// ensureInputPath 幂等地把 \input@path 注进 main.tex（必须在 \begin{document} 前）。
+func ensureInputPath(mainPath string) error {
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		return err
+	}
+	main := string(data)
+	if strings.Contains(main, "\\input@path") || main == "" {
+		return nil
+	}
+	if i := strings.Index(main, "\n"); i >= 0 {
+		main = main[:i+1] + inputPathLine + main[i+1:]
+	} else {
+		main = inputPathLine + main
+	}
+	return os.WriteFile(mainPath, []byte(main), 0o644)
+}
+
+// classLoadsHyperref 判断样式类是否已经加载 hyperref（T324）：类里有了再往
+// main.tex 加一个 \usepackage[选项]{hyperref} 就是 "Option clash for package
+// hyperref"，全书根本编不过去。
+func classLoadsHyperref(proj string) bool {
+	files, _ := filepath.Glob(filepath.Join(proj, "style", "*.cls"))
+	for _, f := range files {
+		if data, err := os.ReadFile(f); err == nil && strings.Contains(string(data), "hyperref") {
+			return true
+		}
+	}
+	return false
+}

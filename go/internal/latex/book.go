@@ -744,6 +744,11 @@ func (r *Runner) stylePhase(proj string) error {
 		msg += " — the class MUST load these itself (\\RequirePackage{...}, \\usetikzlibrary{...}): the chapter agents paste those figures verbatim and CANNOT add packages, so one missing package forces them to either fail or redraw the figure."
 		initial += msg
 	}
+	// T324：不管图代码显式声明了什么，类里都装上一套基线 TikZ 库——图里真正常
+	// 用的语法（pattern=Lines[…]、angles、quotes、shapes.geometric…）比它声明
+	// 的库多得多，缺一个就是全书编不过。
+	initial += "\n- BASELINE TikZ libraries the class MUST load regardless of what the figures declare: " +
+		strings.Join(baselineTikzLibs, ", ") + "."
 	if boxes := r.bookPageBoxes(); len(boxes) > 0 {
 		initial += "\n- PHYSICAL PAGE BOX (measured from the source PDFs): " + strings.Join(boxes, "; ") +
 			" — scans can carry extra margins or be rescaled, so treat this as a cross-check of the declared trim size, not as the answer; state in the manual which one you used and why."

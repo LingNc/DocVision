@@ -49,6 +49,15 @@ func stripFigurePreamble(code string) string {
 	return strings.Join(out, "\n")
 }
 
+// baselineTikzLibs 是样式类默认就该加载的 TikZ 库（T324）：图代码里真正用到的
+// 语法往往比它自己声明的库多（`pattern=Lines[…]` 要 patterns.meta、`angle
+// radius` 要 angles……），缺一个就是全书编不过，而修复只在临时构建树里生效。
+var baselineTikzLibs = []string{
+	"arrows.meta", "calc", "patterns", "patterns.meta", "3d", "angles", "quotes",
+	"intersections", "positioning", "decorations.markings", "decorations.pathreplacing",
+	"shapes.geometric",
+}
+
 // figurePkgIgnore 是只影响 standalone 预览的字体/主题包：进章节正文时本来就会
 // 被剥掉，类里也不该装（装上会改全书字体）。别让它们变成永久的"缺包"告警。
 var figurePkgIgnore = map[string]bool{

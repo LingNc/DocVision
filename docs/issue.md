@@ -2576,3 +2576,7 @@ user 轮
   根因：沙箱只有 coreutils（宿主也没有 ripgrep），而模型习惯性用 rg/fd/jq；`bash` 回执只给退出码与一句 "command not found"，没有替代方案。
   改：`bash` 失败时解析 `line N: <cmd>: command not found`（含中文"未找到命令"），按命令给等价物（rg→grep 工具或 `grep -rn`、fd→`find`、jq→`python3 -c`、bat→`read_file`、tree→`find`），未知命令给通用的 coreutils 提示。
   验证：`TestMissingCommandNote` 五种输入 + 普通输出不加提示。
+[X][ ] T324. 全书修复会话每轮重来：子章节 `\input` 路径与 hyperref 选项冲突，类里还缺 `bm`/TikZ 库。
+  根因：① 子章节之间按 `chapter_00X/children/…` 的相对路径 `\input`，主文件在构建根，解析不到；② 类已加载 hyperref 时 `ensurePDFBookmarks` 又往 main.tex 注一个带选项的 `\usepackage{hyperref}`（Option clash）；③ 图里用的 `pattern=Lines[…]`、`\bm` 等语法要 `patterns.meta`/`bm`，类里没有。三者都只在临时构建树里被修复会话补上，下次 assemble 重建又没了，于是每轮都从全书修复开始。
+  改：main.tex 注 `\input@path{{chapters/}}`（幂等，终审回写的 main.tex 也补）；cls 已加载 hyperref 就不再注；样式消息要求类加载一套基线 TikZ 库（含 `patterns.meta`）。
+  验证：`TestEnsureInputPath`（注入点与幂等）、`TestClassLoadsHyperref`；实际整书重编译 0 错误 430 页。
