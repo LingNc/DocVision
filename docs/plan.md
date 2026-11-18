@@ -231,6 +231,10 @@
   改：`skills/kernel` 增 `internal/e2e/`；修 `gen/tasks.go`、`gen/check.go`、`project/registry.go`、`docindex/docindex.go`。
   验证：`go test ./internal/...` 12 包全绿（e2e 通过：5 任务 done、交付 build/ 生成）。
 
+[ ][ ] P106. MCP 壳落地：dvagent mcp——stdio JSON-RPC 2.0（newline-delimited）实现 initialize/tools/list/tools/call；7 工具（status/claim/submit/note/doc-search/assemble-verify/deliver）直接调同一组内核函数（CLI 同构，零行为漂移）；通知类消息（initialized/cancelled）按协议不响应；未知 method -32601、未知工具 isError:true。
+  改：`skills/kernel` 增 `cmd/dvagent/mcp.go`（~250 行）+ main.go 注册 mcp 子命令。
+  验证：go vet/test 12 包绿 + MCP 冒烟四连（initialize→tools/list 7 个→tools/call status→未知工具 isError）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

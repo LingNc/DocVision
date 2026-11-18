@@ -4041,3 +4041,10 @@ P98 落哈希快照时留下的消费方：`verify.CheckDrift` 复核全部 done
 另修正 docindex 一处移植偏差：content_list/layout.json 兼容 MinerU `auto/` 新布局（移植时按旧布局重建，真布局是 <part>/auto/<name>_content_list.json）。
 
 **验证**：`go test ./internal/...` 12 包全绿。验收标准 A1（端到端）的工具侧自动化前置已就位；剩余差距只在"真 MinerU 真 agent"（验收标准本就要真实环境跑）。
+
+
+## 第六十二批：MCP 壳（2026-11-18，用户："继续"）
+
+`dvagent mcp`：MCP 协议第二张皮落地——stdio JSON-RPC 2.0（newline-delimited），initialize/tools/list/tools/call 全覆盖。7 个工具（status/claim/submit/note/doc-search/assemble-verify/deliver）在 callTool 里直接调与 CLI 相同的内核函数——**只加协议语义，不加新行为**（docs/03 的"防双层协议漂移"原则）。通知类消息按协议不响应；未知 method 回 -32601；工具内业务错误回 isError:true（不崩连接）。冒烟四连：initialize 握手 → tools/list 出 7 工具 → tools/call status 回正确蒸馏 → 未知工具 isError。CLI 与 MCP 双皮齐备，宿主 agent 走 bash 或走 MCP 协议均可（按 `03-agent-interface.md`：CLI 为 v0 完整通道，MCP 换来 schema 自动发现）。
+
+**验证**：12 包测试绿 + MCP 冒烟四连全过。

@@ -449,6 +449,10 @@ func main() {
 		}
 		out(rep)
 
+	case "mcp":
+		// dvagent mcp —— MCP server 壳：同一组内核函数的协议皮（stdio JSON-RPC）。
+		serveMCP(*ws)
+
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}

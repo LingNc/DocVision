@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills MCP 壳（P106）**：`dvagent mcp`——MCP 协议第二张皮（stdio JSON-RPC 2.0 newline-delimited）：initialize/tools/list/tools/call 全覆盖，7 个工具（status/claim/submit/note/doc-search/assemble-verify/deliver）与 CLI 同函数零行为漂移；冒烟过（initialize→7 工具→status 回执→未知工具 isError）。
 - **skills A1 全链演练（P105）**：`internal/e2e` 一条测试打穿"造书→Split→fake MinerU→Organize→docindex→注册→classify→draw→convert→check→deliver"（12 包全绿）；修真 bug 三处——GenClassify 不拷图进沙箱（自包含原则漏了分类器）、GenCheck 对已 done convert 仍挂依赖边（顺序生成场景核对永远 blocked）、Registry.Save 不建目录（全新 workspace 注册即失败）；docindex content_list/layout 兼容 MinerU auto/ 新布局。
 - **skills deliver 交付管道（P104）**：`deliver.Deliver` + dvagent `deliver`——漂移闸门（验收后篡改/缺失的 done 产物一律拒装配，不动 build 树）→ 归集（conv out/*.tex→build/chapters 含分片子目录按序、drw figure.tex→build/figures）→ 生成 main.tex（documentclass+按序 input）→ input@path+书签注入 → standalone 内联落盘 → 资源盘点回执。
 - **skills agent 侧手册落地（P103）**：`agent/` 目录——冷启动 README（仪式五步 + 五条铁律 + 命令速查）+ 五类任务工作手册（三态定义/作画-编译-自检循环/转换-检索-拆分/核对位置指针纪律/回炉续接），提示词三分法的"知识入说明书"开始兑现。
