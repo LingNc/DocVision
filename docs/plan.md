@@ -179,6 +179,10 @@
   改：`skills/kernel` 增 `assemble/inventory.go` + assemble_test.go 补 2 例。
   验证：`go test ./internal/...` 62 例绿（盘点计数与缺失引用/input@path 注入幂等）。
 
+[ ][ ] P93. 接线第一刀——classify 任务生成器：gen.GenClassify（扫描图目录→幂等铺 T1 任务，验收 spec 自描述，按文件名排序入队保证确定性）+ dvagent gen-classify 命令；**修真 bug**：queue.Claim 派发排序同时间戳（批量入队）时退化为 map 迭代序——非确定，违反"同样的磁盘状态必然产生同样的派发序列"核心设计不变量，补 id 字典序 tiebreak。
+  改：`skills/kernel` 增 `gen/`（tasks.go + tasks_test.go 2 例）；`queue.Claim` 加确定性 tiebreak。
+  验证：`go test ./internal/...` 64 例绿（生成器新增/幂等/缺目录零新增 + 派发顺序断言）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

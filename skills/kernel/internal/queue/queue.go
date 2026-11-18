@@ -83,7 +83,14 @@ func (q *Queue) Claim(owner string, n int, leaseSeconds int, types ...task.Type)
 			pool = append(pool, t)
 		}
 	}
-	sort.Slice(pool, func(i, j int) bool { return pool[i].Created.Before(pool[j].Created) })
+	// 确定性派发：主键创建时间，同时间戳（批量入队）按 id 字典序——
+	// 同样的磁盘状态必然产生同样的派发序列。
+	sort.Slice(pool, func(i, j int) bool {
+		if pool[i].Created.Equal(pool[j].Created) {
+			return pool[i].ID < pool[j].ID
+		}
+		return pool[i].Created.Before(pool[j].Created)
+	})
 	if len(pool) > n {
 		pool = pool[:n]
 	}

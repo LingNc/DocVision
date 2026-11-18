@@ -3924,3 +3924,12 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **P92**：`PreflightAssemble` 改为返回结构化 `PreflightReport`（cls 就位、章节 .tex 计数、figures/images 文件计数、\includegraphics 引用总数与逐条解析——候选路径三处：buildDir 根、figures/、章节文件所在目录；解析不到的逐条列进 RefsMissing **不中止**——缺图不该毁掉整本书，T33）。`EnsureInputPath` 幂等把 `\makeatletter\def\input@path{{chapters/}}\makeatother` 注进 main.tex 首行后（已有声明或空文件跳过）：章节之间按 chapters/ 内相对路径互引子章节，缺这张表全书只能靠修复会话逐个改路径，每次 assemble 重烧一遍（修复只在临时构建树生效）。
 
 **验证**：`go test ./internal/...` 62 例绿。
+
+
+## 第四十九批：接线第一刀——classify 任务生成器（2026-11-18，用户："继续"）
+
+判据迁移接近尾声，开始接线：让制品自己能铺进队列。`gen.GenClassify` 扫描项目图目录，为每张图幂等生成一个 T1 classify 任务（沙箱 inputs/ 引用 + classify 验收 spec 自描述），`dvagent gen-classify` 暴露给 agent。
+
+**P93 修真 bug（接线测试当场抓到）**：`queue.Claim` 的派发排序主键是创建时间，批量入队的任务时间戳全同 → `sort.Slice` 退化为 map 迭代序——**派发顺序非确定**，直接违反"同样的磁盘状态必然产生同样的派发序列"这条核心设计不变量（可调试/可复现的根基）。修复：同时间戳按任务 id 字典序 tiebreak。这个 bug 在纯判据移植阶段不可见——只有端到端"生成→派发"测试才暴露，正是接线测试的价值。
+
+**验证**：`go test ./internal/...` 64 例绿。

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LingNc/DocVision/skills/kernel/internal/gen"
 	"github.com/LingNc/DocVision/skills/kernel/internal/project"
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
@@ -294,6 +295,27 @@ func main() {
 			die(err)
 		}
 		out(map[string]any{"archived": p.Name})
+
+	case "gen-classify":
+		// dvagent gen-classify <项目名> [images相对目录，默认 source/images]
+		// 接线：把图目录铺成 classify 任务队列（幂等）。
+		if len(args) < 2 {
+			die(fmt.Errorf("gen-classify 需要: <项目名> [images目录]"))
+		}
+		p := mustProject(reg, args[1])
+		images := "source/images"
+		if len(args) > 2 {
+			images = args[2]
+		}
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		rep, err := gen.GenClassify(q, p.Root, images)
+		if err != nil {
+			die(err)
+		}
+		out(rep)
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))

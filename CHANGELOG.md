@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills classify 任务生成器（P93）**：接线第一刀——`gen.GenClassify` 把图目录幂等铺成 classify 任务队列（验收 spec 自描述，dvagent 新增 `gen-classify` 命令）；**修真 bug**：队列派发同时间戳（批量入队）时按 map 迭代序——非确定，破坏"同磁盘状态必同派发序列"核心不变量，已加 id 字典序 tiebreak。`go test` 64 例绿。
 - **skills assemble 资源盘点（P92）**：装配前盘点结构化报告（cls/章节/figures/images 计数 + \includegraphics 引用逐条解析三候选路径，缺失逐条列出不中止 T33）+ `EnsureInputPath`（T324：\input@path{{chapters/}} 幂等注入 main.tex，缺它全书得靠修复会话逐个改路径）。`go test` 62 例绿。
 - **skills checker 无结论判据（P91）**：T222"核对没给结论"识别（6 类文案前缀）+ T233 重核上限（默认 6，换全新核对尝试、转换不重跑）+ 重核挂起（有产物但上次核对未下判定 → 不得静默采纳，重跑先重核）。`go test` 60 例绿。
 - **skills assemble 纯函数部分（P90）**：standalone.tex 递归内联（\input@path 声明解析、8 层深度保险、越界 `../` 拒绝内联原样保留、循环 include 栈防重入）+ PDF 书签注入（hyperref 幂等/逐章 pdfbookmark 锚点 bk:<base>/AI 已接手时不重复/书签文字取划分 md 首个标题层级 clamp 0..3）。`go test` 58 例绿。
