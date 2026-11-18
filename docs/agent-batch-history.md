@@ -4084,3 +4084,12 @@ T6 落地：① `task.TypeImg2Text` + `gen.GenImg2Text`（读 doc_index，图片
 **验证**：`go test ./internal/...` 15 包全绿（viewer 构建断言：img 编号/进度计数/HTML 关键元素）。交付目录整体迁 `/mnt/agents/lingnc-memory/projects/dv-skills/`（用户要求：离开 output，keys 一并迁入）。
 
 **遗留小项**：viewer-apply 未实现（v2）；HTML 里图路径用 /%s 根引用，本地直接打开 file:// 时图片不显示（需静态伺服或改成相对路径——记 SK-P30 v2）。
+
+
+## 第六十七批：切分提速移植（SK-P31，v0.5.0）（2026-11-18，用户："我已经把密钥添加到github中了"）
+
+旧线 T328 提速移植为 `prep.SplitFast`：整本一次读入（mutool merge 优先→PATH 有就走；否则 pdfcpu SplitFile 纯 Go 一次全解析全出）；超体积分片在**自己身上**对半细化（cutPages 只在超限片上 TrimFile，不回头探测源书）；`DOCVISION_PDF_SPLIT_TOOL=mutool|pdfcpu` 强制后端；幂等（已有分片跳过）。旧 poppler 版 Split 保留为无 pdfcpu 环境的兜底。pdfcpu v0.12.0 入依赖（v0.12 SplitFile/TrimFile 需 model.Configuration 非 nil——移植时踩的坑，已记）。
+
+**SSH 推送通道打通**：用户已把公钥加进 GitHub，`ssh -T git@github.com` 认证通过（Hi LingNc!）。
+
+**验证**：`go test ./internal/...` 15 包全绿（SplitFast 基本页数守恒 2+2+1=5、超限二分细化出 4 单页片且守恒）。
