@@ -799,6 +799,10 @@ func main() {
 		if err != nil {
 			die(err)
 		}
+		// profile 档案：技能目录 data/profile.env（token/私有端点的规定存档位，600 权限）
+		if exe, eerr := os.Executable(); eerr == nil {
+			client.LoadProfile(filepath.Join(filepath.Dir(exe), "..", "..", "data", "profile.env"))
+		}
 		client.Printf = func(f string, a ...any) { fmt.Fprintf(os.Stderr, f, a...) }
 		var results []any
 		for _, part := range args[2:] {

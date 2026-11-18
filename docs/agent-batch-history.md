@@ -4248,3 +4248,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 ① 全量改名：导出文件集"档位2"→"**md 档**"（用户命名：对外就叫 md 档/LaTeX 档，无档位黑话）；② 用户记忆证实——全盘找到 `/usr/local/bin/tectonic`（XeTeX 内核自包含引擎，按需下载宏包）：envcheck 引擎链加 tectonic（仅 tectonic 时 ctex 检查跳过不误报，hint 注明首次编译联网下载）；texcheck.Compile 引擎链 pdflatex→xelatex→tectonic（tectonic 单遍编译自处理交叉引用）。**之前的检查漏了 tectonic——教训：doctor 引擎名单要覆盖非主流但真实的发行形态。** LaTeX 档本机从"无法编译"变为"tectonic 可用"。
 
 **验证**：`go build ./cmd/dvagent` 绿 + 18 包全绿 + doctor 实测识别 tectonic。
+
+
+## 第九十批：profile 档案机制 + 禁绕行问题处理流程 + MinerU 端点修正（2026-11-18，用户三点要求）
+
+① **用户档案规定位**：`<技能目录>/data/profile.env`（600 权限、gitignore、出包只带 example 空模板）——MINERU_TOKEN/MINERU_API_BASE_URL；优先级 环境变量>档案>默认；用户已有 token 迁入规定位。书级配置仍走 skills_config.json（密钥与判据配置两不混）。② **禁绕行流程文档** docs/07-troubleshoot.md：任何环节失败禁止用模型能力顶替/伪造产物（真实反例记入：OCR 不通时 agent 拟自行转录伪造 content_list——明文禁止）；停-查-报-修四步；修复纪律（最小 diff/风格一致/构建+测试判据/提交信息产品级）；日志收集+脱敏规则；上报流程（ed25519 公钥给用户添加/扫码授权、issue 规定格式+附修复、拒绝则匿名兜底）。SKILL.md 加"遇到问题（必读）"指针。③ **MinerU 端点修正**：默认 `api.mineru.net/api/v1`→**`mineru.net/api/v4`**（对齐上游默认——旧域 DNS 已不可解析，这正是首秀卡住的真实根因之一）；config 可覆盖；docs/mineru-api.md 固化本技能调用面+官方文档链接。④ **修真 bug**：mineruapi 循环内 `:=` 遮蔽 err 致 `%!w(<nil>)` 吞错（首秀 agent 抓到）——lastErr 记录真实错误。
+
+**验证**：`go build ./cmd/dvagent` 绿 + 18 包全绿。

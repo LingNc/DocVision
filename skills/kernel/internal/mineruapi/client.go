@@ -50,7 +50,7 @@ type Config struct {
 // DefaultConfig 出厂默认。
 func DefaultConfig() Config {
 	return Config{
-		APIBaseURL: "https://api.mineru.net/api/v1", ModelVersion: "v2",
+		APIBaseURL: "https://mineru.net/api/v4", ModelVersion: "v2", // 对齐上游默认端点（api.mineru.net 旧域已不可解析）
 		EnableFormula: true, EnableTable: true,
 		PollInterval: 3, PollTimeout: 0, UploadTimeout: 300,
 	}
@@ -137,19 +137,21 @@ func (c *Client) CreateUploadTask(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	var lastErr error // 记录真实错误：循环内 := 曾遮蔽外层 err 导致 %!w(<nil>) 吞错（首秀 agent 抓到）
 	for attempt := 1; attempt <= maxUploadRetries; attempt++ {
-		uploadURL, batchID, err := c.requestUploadURL(fileName, stem)
-		if err == nil {
-			err = c.chunkedUpload(uploadURL, filePath, info.Size())
+		uploadURL, batchID, rerr := c.requestUploadURL(fileName, stem)
+		if rerr == nil {
+			rerr = c.chunkedUpload(uploadURL, filePath, info.Size())
 		}
-		if err == nil {
+		if rerr == nil {
 			return batchID, nil
 		}
+		lastErr = rerr
 		if attempt < maxUploadRetries {
 			time.Sleep(retrySleep)
 		}
 	}
-	return "", fmt.Errorf("创建/上传任务失败（重试 %d 次）: %w", maxUploadRetries, err)
+	return "", fmt.Errorf("创建/上传任务失败（重试 %d 次）: %w", maxUploadRetries, lastErr)
 }
 
 func (c *Client) requestUploadURL(fileName, stem string) (string, string, error) {
@@ -454,3 +456,40 @@ func unzip(src, dst string) error {
 	}
 	return nil
 }
+
+
+// ProfilePath 由调用方传入技能目录下 data/profile.env 路径；空=不读文件。
+// profile 优先级：显式参数 > 环境变量 > data/profile.env > 默认值。
+func (c *Client) loadProfile(profilePath string) {
+	if profilePath == "" {
+		return
+	}
+	b, err := os.ReadFile(profilePath)
+	if err != nil {
+		return // 无 profile 文件静默走环境变量
+	}
+	for _, ln := range strings.Split(string(b), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || strings.HasPrefix(ln, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(ln, "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(k) {
+		case "MINERU_TOKEN":
+			if c.token == "" && os.Getenv("MINERU_TOKEN") == "" {
+				c.token = strings.TrimSpace(v)
+			}
+		case "MINERU_API_BASE_URL":
+			if c.cfg.APIBaseURL == DefaultConfig().APIBaseURL && os.Getenv("MINERU_API_BASE_URL") == "" {
+			c.cfg.APIBaseURL = strings.Trim(strings.TrimSpace(v), `"'`)
+				c.baseURL = strings.TrimRight(c.cfg.APIBaseURL, "/")
+			}
+		}
+	}
+}
+
+// LoadProfile 供命令层显式注入 profile 路径（技能目录 data/profile.env）。
+func (c *Client) LoadProfile(profilePath string) { c.loadProfile(profilePath) }

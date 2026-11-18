@@ -44,6 +44,12 @@ $D -workspace ws deliver demo                                            # LaTeX
 - `docs/` 设计文档：01 架构 · 02 任务协议 · 03 接口 · 04 迁移台账 · 05 首秀手册
 - `kernel/` dvagent CLI 源码（`bin/` 预编译二进制；`go build ./cmd/dvagent` 可重编）
 
+## 遇到问题（必读）
+
+**禁止绕行**：任何环节失败不许用模型自身能力顶替/伪造产物（见 `docs/07-troubleshoot.md`）——
+停止该环节 → 查明根因 → 向用户汇报 → 最小修复。日志脱敏、issue 格式、
+密钥申请流程都在 07 文档。用户档案（token 等）存 `data/profile.env`（600 权限，见 `docs/06-profile-config.md`）。
+
 ## 纪律（对 agent 与使用者同效）
 
 - 验收门槛程序强制（矢量图重合度默认 17%、accept 必交够次数），不由模型判断；
