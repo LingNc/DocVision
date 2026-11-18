@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LingNc/DocVision/skills/kernel/internal/config"
 	"github.com/LingNc/DocVision/skills/kernel/internal/deliver"
 	"github.com/LingNc/DocVision/skills/kernel/internal/docindex"
 	"github.com/LingNc/DocVision/skills/kernel/internal/gen"
@@ -452,6 +453,50 @@ func main() {
 	case "mcp":
 		// dvagent mcp —— MCP server 壳：同一组内核函数的协议皮（stdio JSON-RPC）。
 		serveMCP(*ws)
+
+	case "config-get":
+		// dvagent config-get <项目名> —— 查看项目配置（用户命令；不进 MCP，agent 无权调用）。
+		if len(args) < 2 {
+			die(fmt.Errorf("config-get 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		cfg, err := config.Load(p.Root)
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"path": config.Path(p.Root), "config": cfg})
+
+	case "config-set":
+		// dvagent config-set <项目名> <key> <value> —— 用户调阈值专用。
+		// key 形如 figure.min_overlap / figure.accept_min_submits / split.pages_per_part。
+		if len(args) < 4 {
+			die(fmt.Errorf("config-set 需要: <项目名> <key> <value>"))
+		}
+		p := mustProject(reg, args[1])
+		cfg, err := config.Load(p.Root)
+		if err != nil {
+			die(err)
+		}
+		var f float64
+		fmt.Sscanf(args[3], "%g", &f)
+		switch args[2] {
+		case "figure.min_overlap":
+			cfg.Figure.MinOverlap = f
+		case "figure.max_scale_dev":
+			cfg.Figure.MaxScaleDev = f
+		case "figure.accept_min_submits":
+			cfg.Figure.AcceptMinSubmits = int(f)
+		case "split.pages_per_part":
+			cfg.Split.PagesPerPart = int(f)
+		case "convert.max_lines_per_chapter":
+			cfg.Convert.MaxLinesPerChapter = int(f)
+		default:
+			die(fmt.Errorf("未知配置键: %s（可用：figure.min_overlap/figure.max_scale_dev/figure.accept_min_submits/split.pages_per_part/convert.max_lines_per_chapter）", args[2]))
+		}
+		if err := config.Save(p.Root, cfg); err != nil {
+			die(err)
+		}
+		out(map[string]any{"updated": args[2], "value": args[3], "path": config.Path(p.Root)})
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))

@@ -1,6 +1,27 @@
 # 02 · 任务协议总表
 
-五类任务覆盖档位1 全流程的 LLM 工作。每类任务 = 任务包（kernel 下发）+ 工作说明书（agent 读本）+ 验收 spec（kernel 机械检查）。
+LLM 任务 = 任务包（kernel 下发）+ 工作说明书（agent 读本）+ 验收 spec（kernel 机械检查）。
+
+## 章节划分语义（2026-11-18 用户修正）
+
+- **初次章节划分是独立单层阶段**（可选）：一次性把全书 md 切成章，**不分层**；跳过它则第一个 convert 会话直接拿全书 md。
+- **分层细化发生在 convert 阶段内部**：会话觉得上下文处理不了 → 提交拆分提案（行号区间）→ kernel 验证扇出子任务 → **父任务 blocked 等子任务，子任务产物合并回父** → 子会话可以继续向下拆。**递归 3 层**（有初划时 convert 递归 3 层；无初划=多一层，即 4 层）。实现=队列父子指针（`split` 命令+`Unblock`），层数深度由 kernel 按 depth 字段控制（待接）。
+- img2text、analyze 属 PREP 侧（见 04 台账），其中 **img2text 是独立任务类型**（见下）。
+
+## T6 img2text（逐图文字化小轮转会话——待实现 SK-P29）
+
+独立于 latex 转换的任务类型：把每张图"文字化"（生成描述/提取内容），为全书检索与 style 素材供料。
+
+- **任务粒度**：一张图一个任务；kernel 维持小轮转（claim/submit 循环）。
+- **会话工具三件套**（kernel 提供）：检索上下文（up/down——该图前后段落/doc_index 邻块）、看图（page-render）、提交描述（write verdict）。
+- **产物**：`out/description.md`（图的文字化内容）+ kernel 汇总进 doc_index 的 content 字段与 style 素材库。
+- **页码/行定位**：md 合并时（Organize）从 docjson 精确定位页码打上标识——每段带页码范围，前文目录给页码定位+行定位。
+- 与 draw/classify 的关系：classify 判三态（结构化 verdict），img2text 产自然语言描述——**两任务类型不混**。
+
+## 人类可读编号体系（待实现 SK-P28）
+
+- 给人类的固定 ID：**imgxxx**=原图、**vecxxx**=矢量成品、**pdfpxx**=页码——agent 内部仍用 sha/路径（它对 sha 更熟）。
+- 映射表落盘 `skills_ids.json`（id ↔ sha/路径/global 页/bbox）；用户与 agent 讨论时互指 img012 即知是哪张；看图台与手册按此编号展示。
 
 通用任务包结构（claim 返回）：
 

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/LingNc/DocVision/skills/kernel/internal/config"
 	"github.com/LingNc/DocVision/skills/kernel/internal/figcheck"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
 )
@@ -85,15 +86,28 @@ func (c *Checker) checkFigure(t *task.Task, sandboxAbs string) ([]string, map[st
 	notes["figure_runs"] = figcheck.FormatRuns(r.Runs)
 	notes["figure_size"] = figcheck.SizeSentence(r)
 
-	minOverlap := 0.50
+	// 阈值三级来源：验收 spec（最具体） > 用户配置（skills_config.json） > 内置默认。
+	// agent 无权改配置——config 命令不进 MCP 工具面（用户纪律，SK-I2）。
+	minOverlap := 0.17
+	maxDev := 0.10
+	acceptAfter := 3
+	if cfg, err := config.Load(root); err == nil {
+		if cfg.Figure.MinOverlap > 0 {
+			minOverlap = cfg.Figure.MinOverlap
+		}
+		if cfg.Figure.MaxScaleDev > 0 {
+			maxDev = cfg.Figure.MaxScaleDev
+		}
+		if cfg.Figure.AcceptMinSubmits > 0 {
+			acceptAfter = cfg.Figure.AcceptMinSubmits
+		}
+	}
 	if v, ok := t.Accept["min_overlap"].(float64); ok && v > 0 {
 		minOverlap = v
 	}
-	maxDev := 0.10
 	if v, ok := t.Accept["max_scale_dev"].(float64); ok && v > 0 {
 		maxDev = v
 	}
-	acceptAfter := 3
 	if v, ok := t.Accept["accept_min_submits"].(float64); ok && int(v) > 0 {
 		acceptAfter = int(v)
 	}

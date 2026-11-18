@@ -4048,3 +4048,14 @@ P98 落哈希快照时留下的消费方：`verify.CheckDrift` 复核全部 done
 `dvagent mcp`：MCP 协议第二张皮落地——stdio JSON-RPC 2.0（newline-delimited），initialize/tools/list/tools/call 全覆盖。7 个工具（status/claim/submit/note/doc-search/assemble-verify/deliver）在 callTool 里直接调与 CLI 相同的内核函数——**只加协议语义，不加新行为**（docs/03 的"防双层协议漂移"原则）。通知类消息按协议不响应；未知 method 回 -32601；工具内业务错误回 isError:true（不崩连接）。冒烟四连：initialize 握手 → tools/list 出 7 工具 → tools/call status 回正确蒸馏 → 未知工具 isError。CLI 与 MCP 双皮齐备，宿主 agent 走 bash 或走 MCP 协议均可（按 `03-agent-interface.md`：CLI 为 v0 完整通道，MCP 换来 schema 自动发现）。
 
 **验证**：12 包测试绿 + MCP 冒烟四连全过。
+
+
+## 第六十三批：独立台账迁移 + 门槛强制化 + 用户配置层（2026-11-18，用户五点修正）
+
+**/tmp 第四次清空**（第四次恢复：补丁 am 重建，工作区 /tmp/dvrepo2；同时发现 dev 前进——旧线新增 T328 切分提速提交，skills 基线仍在 0f5df97，提速移植列入 SK-P31 并随 rebase 处理；旧线 T328 号被占，正好借用户要求的编号隔离落地）。
+
+1. **独立台账**（用户要求 4）：skills 线 P/I 编号从旧线完全剥离——旧线 plan.md P81–P106 全量迁移至 `skills/docs/plan.md`（重编号 SK-P1–SK-P26），旧线 plan/issue 原位改指针；旧线批次历史（37–62 批）作为只增日志不迁移。今后 skills 线批次只动 skills/docs/ 的 SK 编号，旧线 T/P 编号回归纯旧线用途。
+2. **门槛强制化 + 阈值用户专属**（用户要求 5）：矢量图重合度默认 17%（min_overlap=0.17）；accept_as_is 必须交够 3 次；阈值三级回退（验收 spec>skills_config.json>内置默认）；**config-get/config-set 只挂 CLI——不进 MCP 工具面、不写进任何说明书**（agent 无权自调，用户不提不改）；损坏配置回默认（坏文件不能绕过门槛）。
+3. **设计修正落文档**（用户要求 1/2/3）：docs/02-task-protocol.md 增"章节划分语义"（初划独立单层可选；递归细化在 convert 内部 3 层/无初划 4 层——与队列父子指针实现一致，层数字段待接）、**T6 img2text 独立任务类型设计**（逐图小轮转会话：上下文 up/down+看图+提交描述三工具；Organize 合并时从 docjson 打页码/行定位标识）、**人类可读编号体系设计**（imgxxx/vecxxx/pdfpxx + skills_ids.json 映射表；agent 内部仍用 sha）。
+
+**验证**：`go test ./internal/...` 13 包全绿；台账五件套迁移后交叉引用一致。
