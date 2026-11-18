@@ -43,6 +43,15 @@ func out(v any) {
 	fmt.Println(string(b))
 }
 
+
+// skillRoot 从可执行文件位置解析技能根（kernel/bin/dvagent → 技能根 ../../）。
+func skillRoot() string {
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Join(filepath.Dir(exe), "..", "..")
+	}
+	return "."
+}
+
 func main() {
 	ws := flag.String("workspace", ".", "skills 工作区根目录（含 skills_registry.json）")
 	flag.Parse()
@@ -468,7 +477,7 @@ func main() {
 			die(fmt.Errorf("config-get 需要: <项目名>"))
 		}
 		p := mustProject(reg, args[1])
-		cfg, err := config.Load(p.Root)
+		cfg, err := config.LoadLayered(skillRoot(), p.Root)
 		if err != nil {
 			die(err)
 		}
@@ -481,7 +490,7 @@ func main() {
 			die(fmt.Errorf("config-set 需要: <项目名> <key> <value>"))
 		}
 		p := mustProject(reg, args[1])
-		cfg, err := config.Load(p.Root)
+		cfg, err := config.LoadLayered(skillRoot(), p.Root)
 		if err != nil {
 			die(err)
 		}
@@ -824,7 +833,7 @@ func main() {
 			die(fmt.Errorf("prep-mineru-api 需要: <项目名> <part.pdf...>"))
 		}
 		p := mustProject(reg, args[1])
-		cfg, err := config.Load(p.Root)
+		cfg, err := config.LoadLayered(skillRoot(), p.Root)
 		if err != nil {
 			die(err)
 		}

@@ -16,6 +16,10 @@ cp data/profile.example data/profile.env && chmod 600 data/profile.env
 - 读取顺序：命令显式参数 > `MINERU_TOKEN` 等环境变量 > profile.env > 内置默认；
 - 出包与 git 只带 `data/profile.example`（空值模板），不带真实档案。
 
+## SSH 密钥（同属 profile 内容）
+
+上报/推送用的 ed25519 密钥对属用户私有物，规定位：（技能目录下，gitignore 随 data/ 规则）；需要向用户出示的**永远只有公钥**（）。relay 服务器的  属服务器侧秘密，只在部署机环境变量，不进任何文件。
+
 ## 项目级配置（书与书不同）
 
 `<项目根>/skills_config.json`（`config-get/config-set` 管理）：判据阈值
