@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills T2 作图判据（P84）**：软墨迹对齐算法（compareFigure）逐字移植旧线 figure_compare.go——多分辨率渐进对齐、质心起点、尺寸按物理 mm 在归一化前量取（scale_dev 抓"看着对上了其实窄了一截"），证据叠加图可落盘。`go test` 19 例绿。
 - **skills T3 重型判据（P83）**：覆盖率算法逐字移植旧线（pdftotext + CJK 三字组，阈值 0.85，首打回再放行记缺口）、编译检查（pdflatex + sha256 快照）、验收器默认装配、缺工具跳过不卡死。`go test` 14 例绿。
 - **skills 内核编排层（P82）**：章节拆分验证与扇出（2–16 段判据入代码，父任务 blocked 于子任务）、issues 存储与回炉任务生成（回炉回原沙箱）、pause/resume/abort 生命周期命令、claim 生命周期闸门。`go test` 8 例绿。
 - **skills 线奠基（P81）**：新增 `skills/` 目录——agent 驱动的新架构（LLM 会话外迁到宿主 agent，内核只做确定性执行与验收，用户除 MinerU 外零 API 配置）。含设计文档四篇（架构/任务协议/agent 接口/迁移台账）、最终验收标准 A1–A10（`skills/README.md`）、Go 内核骨架 `skills/kernel/`（任务队列+租约、验收器、项目注册表、`dvagent` CLI，5 例测试绿）。

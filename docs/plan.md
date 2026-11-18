@@ -143,6 +143,10 @@
   改：`skills/kernel` 增 `texcheck/`（coverage.go 移植+compile.go）；`verify.NewChecker` 默认装配+覆盖率二判制+out/ 哈希快照；`Verdict` 加 `Notes`；dvagent submit 回传 notes。
   验证：`go test ./internal/...` 14 例绿（覆盖率 5 例：剥离/自对照/删1-4掉阈值+列缺口/<200组跳过/首打回再放行）；pdftotext 真集成冒烟：75% 覆盖率首次打回列缺口段落、二次放行记 coverage_note、哈希快照就位。
 
+[ ][ ] P84. T2 作图判据落地：软墨迹对齐（compareFigure）逐字移植旧线 figure_compare.go——多分辨率渐进对齐、质心起点、尺寸按物理 mm 在归一化前量取（scale_dev 抓"看着对上了其实窄了一截"）、RGB/灰度双通道、证据叠加图（白=共有/品红=原图独有/绿=候选独有）可落盘；仅剥会话工具壳。
+  改：`skills/kernel` 增 `figcheck/`（compare.go 移植 566 行 + compare_test.go 5 例）；go.mod 引入 golang.org/x/image（CatmullRom 缩放）。
+  验证：`go test ./internal/...` 19 例绿（同图 ≥0.9 相似、mm 口径抓 50% 宽度差、无 mm 退化宽高比判据、空图拒绝）；修掉移植笔误一处（overlay→Overlay 调用点）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。
