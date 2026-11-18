@@ -279,6 +279,24 @@ func (c *Client) GetBatchResults(batchID string) *BatchResult {
 	return &out
 }
 
+// CheckOldTaskValid 旧线语义移植：按 batch_id 查老任务（断点续跑入口）。
+// (valid, doneItem)：valid=服务端仍认得且非 failed；doneItem 在已 done 时非 nil
+// （调用方直接续下载，不再轮询）。invalid → 调用方重传。
+func (c *Client) CheckOldTaskValid(batchID string) (bool, *ExtractResultItem) {
+	result := c.GetBatchResults(batchID)
+	if len(result.Data.ExtractResult) == 0 {
+		return false, nil
+	}
+	item := result.Data.ExtractResult[0]
+	if item.State == "failed" {
+		return false, nil
+	}
+	if item.State == "done" && item.FullZipURL != "" {
+		return true, &item
+	}
+	return true, nil
+}
+
 // PollBatch 轮询到终态：done→成功；failed→错误；超时→errTimeout（续等语义）。
 var errTimeout = fmt.Errorf("poll timeout")
 

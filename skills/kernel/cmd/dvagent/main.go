@@ -790,29 +790,57 @@ func main() {
 		var results []any
 		for _, part := range args[2:] {
 			stem := strings.TrimSuffix(filepath.Base(part), filepath.Ext(part))
-			// 断点：已有 content_list 则跳过
-			if _, err := os.Stat(filepath.Join(p.Root, "mineru", stem, "auto")); err == nil {
+			dst := filepath.Join(p.Root, "mineru", stem)
+			// 断点 ①：已有产物直接跳过
+			if _, err := os.Stat(filepath.Join(dst, "auto")); err == nil {
 				results = append(results, map[string]any{"part": stem, "skipped": "已有产物"})
 				continue
 			}
-			batch, err := client.CreateUploadTask(part)
-			if err != nil {
-				results = append(results, map[string]any{"part": stem, "error": err.Error()})
+			// 断点 ②（旧线语义）：batch_id 落盘 .mineru_task.json——重跑时服务端仍
+			// 认得且非 failed 就续等/续下（不重传、不重复排队），否则重传。
+			var item *mineruapi.ExtractResultItem
+			batch := ""
+			statePath := filepath.Join(dst, ".mineru_task.json")
+			if raw, rerr := os.ReadFile(statePath); rerr == nil {
+				var st struct {
+					BatchID string `json:"batch_id"`
+				}
+				if json.Unmarshal(raw, &st) == nil && st.BatchID != "" {
+					if valid, old := client.CheckOldTaskValid(st.BatchID); valid {
+						batch = st.BatchID
+						if old != nil {
+							item = old // 已 done：直接续下载
+						} else {
+							item, err = client.PollBatch(batch)
+							if err != nil {
+								results = append(results, map[string]any{"part": stem, "batch": batch, "error": err.Error()})
+								continue
+							}
+						}
+					}
+				}
+			}
+			if item == nil { // 无断点或断点失效 → 重传
+				batch, err = client.CreateUploadTask(part)
+				if err != nil {
+					results = append(results, map[string]any{"part": stem, "error": err.Error()})
+					continue
+				}
+				_ = os.MkdirAll(dst, 0o755)
+				_ = os.WriteFile(statePath, []byte(fmt.Sprintf(`{"batch_id":%q,"file":%q}`, batch, filepath.Base(part))), 0o644)
+				item, err = client.PollBatch(batch)
+				if err != nil {
+					results = append(results, map[string]any{"part": stem, "batch": batch, "error": err.Error()})
+					continue
+				}
+			}
+			if derr := client.DownloadAndExtract(item.FullZipURL, dst); derr != nil {
+				results = append(results, map[string]any{"part": stem, "batch": batch, "error": "下载解压: " + derr.Error()})
 				continue
 			}
-			item, err := client.PollBatch(batch)
-			if err != nil {
-				results = append(results, map[string]any{"part": stem, "batch": batch, "error": err.Error()})
-				continue
-			}
-			dst := filepath.Join(p.Root, "mineru", stem)
-			if err := client.DownloadAndExtract(item.FullZipURL, dst); err != nil {
-				results = append(results, map[string]any{"part": stem, "error": "下载解压: " + err.Error()})
-				continue
-			}
-			autoDir, err := mineruapi.NormalizeLayout(dst)
-			if err != nil {
-				results = append(results, map[string]any{"part": stem, "error": "布局归位: " + err.Error()})
+			autoDir, nerr := mineruapi.NormalizeLayout(dst)
+			if nerr != nil {
+				results = append(results, map[string]any{"part": stem, "batch": batch, "error": "布局归位: " + nerr.Error()})
 				continue
 			}
 			results = append(results, map[string]any{"part": stem, "batch": batch, "status": "done", "auto": autoDir})

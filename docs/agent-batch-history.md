@@ -4183,3 +4183,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 对照真实流程（非假 mineru 环境）复查抓到三处：① **MinerU API 解压布局未归位**——zip 内层 <名>/auto/... 解到 mineru/<part>/ 多套一层，organize 找不到 content_list；加 `NormalizeLayout`（找 content_list 所在目录→归位 <dst>/auto，幂等，跨卷回退复制）。② **gen-classify 图源发现太死**——只扫 source/images，真实 MinerU 图在 mineru/<part>/auto/images/ 会导致铺不出 classify 任务；改为两级发现（source/images 优先，空则扫 mineru 直出，路径按项目相对登记+照常拷沙箱）。③ **页表来源从未设置**——prep-index 不填 OriginPDFsFunc 导致 pages.Srcs 为空、page-render 报"超出页表范围"（检索链渲染半边真实环境是断的）；命令里默认映射 part→source/parts/<part>.pdf。**教训（同 MinerU API）：假测试环境太配合会把布局/路径类 bug 全遮住——真实数据流的路径常量要逐一对照。**
 
 **验证**：`go test ./internal/...` 17 包全绿（新增 NormalizeLayout 归位/幂等/无产物报错、MineruDiscovery 两级发现+沙箱自包含断言）。
+
+
+## 第八十一批：对照旧线固化 MinerU 流程的认账与补齐（2026-11-18，用户："你不看原本代码做迁移吗？固化的 mineru 流程应该挺稳定的"）
+
+用户批评成立：client 逐字搬了，但**断点续传没搬**——旧线 PollBatchWithDisplay 的核心是 batch_id 落盘（TaskInfo json），重跑续等/续下（不重传不重复排队），真书大文件场景省真金白银。补齐：`mineruapi.CheckOldTaskValid`（查老任务：valid+done→续下载；valid+其他→续等；failed/不认得→重传）+ prep-mineru-api 落盘 .mineru_task.json。另核实旧线布局事实：解压目标 outputDir/<stem>/（zip 结构原样保留），下游靠"整理为项目目录"单点收口成 source/ 布局——skills 侧的布局归位+两级图源发现即等价收口，且 NormalizeLayout 对两种真实 zip 结构（根 content_list / 嵌套 auto/）幂等双模式兼容（真 zip 结构无实调无法先验，防御双模式是正确姿态）。**流程结论：MinerU 固化流程 = API client（已逐字）+ 断点续传（本批补）+ 整理收口（双模式兼容）三段全齐。**
+
+**验证**：`go test ./internal/...` 17 包全绿。
