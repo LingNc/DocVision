@@ -2592,3 +2592,8 @@ user 轮
   根因：`finalReview` 一直用 `LatexSession("convert")` 调优，没有自己的块；随附模板只给 convert 写了 128 轮。
   改：新增 `latex.sessions.final_review` 块（其余字段继承 convert），没配轮次时默认 **256**，显式值/负数照旧；两份模板加该块，`docs/config.md` 补两行。
   验证：`TestFinalReviewSessionRounds`（默认 256、继承 convert 的 max_tokens、显式 400 生效、-1 不被覆盖）、`TestConfigTemplateKeyParity`。
+
+[X][ ] T328. skills 线（agent 驱动新架构）开发与判据迁移：LLM 会话外迁到宿主 agent，内核只做确定性执行+验收。
+  根因：目标形态=用户只装 skill + MinerU，零 LLM API 配置，放下 PDF 跑到底/中断无损续/换 agent 可续。
+  改：分支 `feat/skills`，新增 `skills/`（docs 设计四篇+验收标准 A1-A10、kernel/ 十二包、agent/ 手册）；判据逐字移植旧线（覆盖率 T168/dedupe T130-T151/compareFigure T307-T312/checker T222-T233/书签 T49/盘点 T33/input@path T324）；五类任务闭环（classify→draw→convert→check+rework）；详见 docs/plan.md P81–P104 与 docs/agent-batch-history.md 第三十七批至第六十批。
+  验证：`go test ./internal/...` 92 例绿（含 pdftotext/pdftoppm/poppler 真集成冒烟与端到端全链测试）。
