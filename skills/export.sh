@@ -16,10 +16,14 @@ trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/$PKG"
 cp -r "$SKILLS_DIR/docs" "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$SKILLS_DIR/SKILL.md" "$STAGE/$PKG/"
 # 预编译二进制（linux/amd64）随包——使用者无需装 Go
-if (cd "$SKILLS_DIR/kernel" && GOFLAGS=-mod=mod GOPROXY=https://goproxy.cn,direct GOCACHE=/tmp/gocache go build -buildvcs=false -o bin/dvagent ./cmd/dvagent); then
+if ! command -v go >/dev/null 2>&1; then
+  echo "  (无 go：包内不含预编译二进制，使用者自行 cd kernel && go build -o bin/dvagent ./cmd/dvagent)"
+elif (cd "$SKILLS_DIR/kernel" && GOFLAGS=-mod=mod GOCACHE=/tmp/gocache go build -buildvcs=false -o bin/dvagent ./cmd/dvagent 2>&1); then
   mkdir -p "$STAGE/$PKG/kernel/bin"
   cp "$SKILLS_DIR/kernel/bin/dvagent" "$STAGE/$PKG/kernel/bin/dvagent"
   echo "  (含预编译二进制 kernel/bin/dvagent)"
+else
+  echo "  (编译失败：包内不含二进制，使用者自行编译)"
 fi
 
 # 打包（GNU tar 处理 UTF-8 文件名无碍）
