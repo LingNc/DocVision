@@ -227,6 +227,10 @@
   改：`skills/kernel` 增 `deliver/`（deliver.go + deliver_test.go 2 例）+ dvagent deliver。
   验证：`go test ./internal/...` 92 例绿（归集/章序/书签=章数/standalone 内联标记/盘点零缺失；漂移闸门拒装配不动树）。
 
+[ ][ ] P105. A1 全链演练（验收标准 A1 的自动化前置）：internal/e2e 一条测试打穿全链——reportlab 造 3 页书 → prep.Split(2页/part) → fake MinerU runner 产 content_list+图 → Organize 拼 md → docindex 建索引+检索断言 → 注册项目（新 workspace）→ GenClassify（模拟 agent 验收循环：vector/styled_text 分流）→ GenDraw（vector 图作画交付）→ GenConvert（自包含 tex）→ GenCheck（自动解锁+pass）→ 队列重载（A2 冷启动）→ deliver（漂移闸门过/书签/standalone）。**修真 bug×3**：GenClassify 漏拷图（自包含原则没贯彻到分类器）、GenCheck 对已 done convert 挂依赖边（顺序生成核对永锁）、Registry.Save 缺 MkdirAll（新 workspace 注册失败）；docindex 兼容 MinerU auto/ 布局。
+  改：`skills/kernel` 增 `internal/e2e/`；修 `gen/tasks.go`、`gen/check.go`、`project/registry.go`、`docindex/docindex.go`。
+  验证：`go test ./internal/...` 12 包全绿（e2e 通过：5 任务 done、交付 build/ 生成）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

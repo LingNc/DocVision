@@ -142,15 +142,19 @@ func joinAny(v any) string {
 }
 
 // contentListPath picks the part's content list (skips the heavier v2).
+// MinerU vLLM 输出在 <part>/auto/<name>_content_list.json（新版）；老布局在
+// part 根——两处都找。
 func contentListPath(dir string) string {
-	matches, _ := filepath.Glob(filepath.Join(dir, "*_content_list.json"))
-	for _, m := range matches {
-		if !strings.Contains(filepath.Base(m), "_v2") {
-			return m
+	for _, base := range []string{filepath.Join(dir, "auto"), dir} {
+		matches, _ := filepath.Glob(filepath.Join(base, "*_content_list.json"))
+		for _, m := range matches {
+			if !strings.Contains(filepath.Base(m), "_v2") {
+				return m
+			}
 		}
-	}
-	if len(matches) > 0 {
-		return matches[0]
+		if len(matches) > 0 {
+			return matches[0]
+		}
 	}
 	return ""
 }
@@ -219,7 +223,11 @@ func buildDocIndexPart(dir string) (entries []DocEntry, pages int, size [2]float
 			maxPage = n
 		}
 	}
-	if lb, err := os.ReadFile(filepath.Join(dir, "layout.json")); err == nil {
+	lb, err := os.ReadFile(filepath.Join(dir, "auto", "layout.json"))
+	if err != nil {
+		lb, _ = os.ReadFile(filepath.Join(dir, "layout.json"))
+	}
+	if len(lb) > 0 {
 		var layout struct {
 			PDFInfo []struct {
 				PageSize [2]float64 `json:"page_size"`

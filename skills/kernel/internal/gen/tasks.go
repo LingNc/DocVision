@@ -54,11 +54,24 @@ func GenClassify(q *queue.Queue, projectRoot, imagesRel string) (*ClassifyReport
 	now := time.Now()
 	for _, name := range names {
 		stem := strings.TrimSuffix(name, filepath.Ext(name))
+		sandbox := "tasks/cls_" + stem
+		// 图拷进沙箱 inputs（记忆泡泡自包含——与 GenConvert 同原则）。
+		inDir := filepath.Join(projectRoot, filepath.FromSlash(sandbox), "inputs")
+		if err := os.MkdirAll(inDir, 0o755); err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(inDir, name), data, 0o644); err != nil {
+			return nil, err
+		}
 		t := &task.Task{
 			ID:      "cls_" + stem,
 			Type:    task.TypeClassify,
 			Stage:   "images",
-			Sandbox: "tasks/cls_" + stem,
+			Sandbox: sandbox,
 			Inputs:  []string{"inputs/" + name},
 			Accept:  ClassifySpec,
 			Status:  task.StatusPending,

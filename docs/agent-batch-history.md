@@ -4028,3 +4028,16 @@ P98 落哈希快照时留下的消费方：`verify.CheckDrift` 复核全部 done
 **设计点**：装配本体零 LLM 参与——终审/修补是流水线里别的任务的事，deliver 只组装"已过验收的制品"（漂移闸门保证这个前提）。
 
 **验证**：`go test ./internal/...` 92 例绿（幸福路径全断言 + 漂移闸门拒装配不动树）。
+
+
+## 第六十一批：A1 全链演练——一条测试打穿（2026-11-18，用户："继续"）
+
+`internal/e2e/TestWholeBookPipeline`：造 3 页书 → Split → fake MinerU → Organize → docindex → 注册 → classify（agent 循环）→ draw → convert → check → 重载（A2）→ deliver。**通过：5 任务 done，交付 build/ 生成（漂移闸门过/书签/standalone 内联）。**
+
+**修真 bug×3（全链测试当场抓到，单测全绿却过不了全链——正是 A1 演练的价值）**：
+1. `GenClassify` 只登记 inputs 引用不拷图——自包含原则漏了分类器（GenConvert 拷了），下游 GenDraw 找图即失败；
+2. `GenCheck` 对已 done 的 convert 仍挂 BlockedBy——顺序生成场景（先转换后铺核对）核对任务永远 blocked 不可领；
+3. `Registry.Save` 不建目录——全新 workspace 第一次 register 即失败。
+另修正 docindex 一处移植偏差：content_list/layout.json 兼容 MinerU `auto/` 新布局（移植时按旧布局重建，真布局是 <part>/auto/<name>_content_list.json）。
+
+**验证**：`go test ./internal/...` 12 包全绿。验收标准 A1（端到端）的工具侧自动化前置已就位；剩余差距只在"真 MinerU 真 agent"（验收标准本就要真实环境跑）。

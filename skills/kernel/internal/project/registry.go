@@ -55,10 +55,13 @@ func Load(path string) (*Registry, error) {
 	return r, nil
 }
 
-// Save 原子写注册表。
+// Save 原子写注册表（目录不存在时先建——workspace 根可能是全新目录）。
 func (r *Registry) Save() error {
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(r.Path), 0o755); err != nil {
 		return err
 	}
 	tmp := r.Path + ".tmp"

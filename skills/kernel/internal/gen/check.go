@@ -33,6 +33,12 @@ func GenCheck(q *queue.Queue) (*CheckReport, error) {
 			continue
 		}
 		name := ct.ID[len("conv_"):]
+		// convert 已 done 时不挂依赖边（顺序生成场景：先跑完再铺核对），直接可领。
+		dep := []string{ct.ID}
+		st := task.StatusBlocked
+		if ct.Status == task.StatusDone {
+			dep, st = nil, task.StatusPending
+		}
 		t := &task.Task{
 			ID:        "chk_" + name,
 			Type:      task.TypeCheck,
@@ -41,8 +47,8 @@ func GenCheck(q *queue.Queue) (*CheckReport, error) {
 			Inputs:    []string{}, // 核对是只读任务：输入经白名单路径给，不拷进沙箱
 			WhitelistRead: []string{ct.Sandbox, "style/", "reports/"},
 			Accept:    CheckSpec,
-			BlockedBy: []string{ct.ID},
-			Status:    task.StatusBlocked,
+			BlockedBy: dep,
+			Status:    st,
 			Created:   now,
 			Updated:   now,
 		}
