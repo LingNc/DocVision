@@ -3882,3 +3882,16 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **移植笔误一处**：ContentLeaders 的 leader 位置簿记写岔（追加副本写错下标），测试当场抓到——确定性顺序断言（首现者为代表）立功。
 
 **验证**：`go test ./internal/...` 45 例绿。
+
+
+## 第四十五批：doc_index 检索索引移植（2026-11-18，用户："继续"）
+
+按台账迁 doc_search 的 kernel 侧。旧线 `docindex.go`（~720 行）全文四段读齐后逐字移植为 `skills/kernel/internal/docindex/`。
+
+**P89**：条目模型（DocEntry：Seq/Part/Page/Global/Type/Text/Img/BBox/Marker/Label/Content，Global=全书跨 part 的 1-based 页号，是"以书找页"的唯一通道）；构建管道（docPartDirs 按 _partN 排序、content_list 解析、layout.json 页尺寸、markerDir 的 DOCVISION 注释按图片文件名回填）；扫描器（单行状态机：note 头/LINK 窗口 20 行按"最后一行"计、CONTENT/DESCRIBE 跨行、vector 的 ```latex 围栏整块进 content）；回填语义（无厂商图注时 Text 用印刷原文/生成解释兜底，vector 用标签不用整段代码）；Search（AND 语义、字段过滤、前缀 2.0/包含 1.5/覆盖率三级打分、ties 按 Seq 文档序保证"第一个命中=最早出现"）；EntryOnPage/CropHint；落盘/重载。
+
+**与旧线两处外部耦合改注入**：pdfcpu 精确页数 → PageCounter 函数（nil 时用 content_list maxPage）；findOriginPDFs → OriginPDFsFunc（nil 时跳过页表）。
+
+**测试认知修正两处**：①CropHint 旧实现细节未见原文，移植版对"未命名图表"用"页内唯一图"兜底（扫描书 99% 场景），label 精确匹配优先——与 doc comment 契约一致；②`marker:` 字段过滤只命中 images 阶段回填过的条目（MinerU 原生索引的图块 Marker 为空）——测试改用 `text:` 字段过滤。
+
+**验证**：`go test ./internal/...` 50 例绿。

@@ -163,6 +163,10 @@
   改：`skills/kernel` 增 `dedupe/represent.go`（5 纯函数）+ `represent_test.go` 5 例。
   验证：`go test ./internal/...` 45 例绿；修掉移植笔误一处（ContentLeaders 簿记）。
 
+[ ][ ] P89. doc_index 检索索引落地：MinerU content_list → 只读索引（块条目含 bbox/全局页号/图路径）+ DOCVISION 注释回填（窗口 20 行状态机：styled-text 印刷原文 / vector 的 ```latex 代码块进 content / image 描述；无厂商图注时 Text 用我们自己的内容兜底，vector 用标签不用整段代码）+ AND 检索（term 前缀 2.0/包含 1.5/覆盖率打分，字段过滤 text/content/marker/label，ties 按 Seq 文档序）+ EntryOnPage/CropHint（regex 命中文本块后，label 匹配优先，页内唯一图兜底）+ 落盘/重载。
+  改：`skills/kernel` 增 `docindex/`（docindex.go 约 700 行移植 + docindex_test.go 5 例）；pdfcpu 页数与 findOriginPDFs 两处外部耦合改为函数注入（PageCounter/OriginPDFsFunc，nil 时跳过）。
+  验证：`go test ./internal/...` 50 例绿（构建/检索排序/字段过滤/AND 语义/CropHint 唯一图兜底/marker 回填含跨行与代码块/落盘重载一致性）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。
