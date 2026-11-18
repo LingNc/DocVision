@@ -3989,3 +3989,10 @@ A1 端到端的前置：`prep` 包把无 LLM 的外部工具编排接进内核�
 **P99**：`prep.Split`（poppler 链：pdfinfo 数页 → pdfseparate 按页拆 → pdfunite 并成 <stem>_partN.pdf；PagesPerPart 可配；已存在的 part 跳过=幂等；.split-* 临时目录用完即删）；`prep.RunMinerU`（命令名/额外参数/Runner 三处注入；产物不猜 MinerU 内部布局，glob 定位 *_content_list.json 优先非 v2 + layout.json；缺 content_list 报错不静默）。Runner 注入让测试用假 mineru 驱动全流程。
 
 **验证**：`go test ./internal/...` 82 例绿（含 poppler 真集成：reportlab 造 5 页 PDF，2 页/part 拆成 2+2+1，part3 页数断言 + 幂等 + 临时目录清理）。
+
+
+## 第五十六批：organize——content_list 拼章节 md（2026-11-18，用户："继续"）
+
+PREP 收尾：`prep.OrganizePart/Organize` 把 content_list 按块拼成 md（text/footnote 原文；image/table/chart→`![caption](images/<sha>.<ext>)`——正是 docindex marker 回填与图片相对路径的契约；equation/interline_equation→`$$…$$`），`Organize` 把多 part 按序拼整本 <stem>.md。md 是 PREP 可再生产物，幂等覆盖重写。纯文本拼装无判据（判据在 verify/dedupe）。parseContentList 与 RunMinerU 共用。至此 PREP 三件套（split/mineru/organize）全接内核——"PDF 进 → 章节 md + 图目录 + content_list 出"的无人值守段打通，A1 端到端的工具侧完备。
+
+**验证**：`go test ./internal/...` 84 例绿。

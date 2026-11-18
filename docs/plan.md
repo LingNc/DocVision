@@ -207,6 +207,10 @@
   改：`skills/kernel` 增 `prep/`（split.go + mineru.go + prep_test.go 2 例，含 poppler 真集成测试：reportlab 造 5 页 PDF 拆 2+2+1）。
   验证：`go test ./internal/...` 82 例绿。
 
+[ ][ ] P100. organize 接内核（PREP 收尾）：prep.OrganizePart/Organize——content_list 按块拼 md（text/footnote 原文；image/table/chart→`![caption](images/<sha>)`；equation/interline_equation→`$$…$$`），Organize 把多 part 按序拼接成整本 <stem>.md（stem 从 <名>_part1 去尾缀）；md 是 PREP 可再生产物，幂等覆盖重写；纯文本拼装无判据。
+  改：`skills/kernel` 增 `prep/organize.go` + `prep/contentlist.go`（parseContentList 与 RunMinerU 共用）+ organize_test.go 2 例。
+  验证：`go test ./internal/...` 84 例绿（块渲染断言/整本顺序拼接/part md + book md 三产出）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。
