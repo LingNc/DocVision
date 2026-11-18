@@ -96,7 +96,21 @@ func Check(u Upstream, repoRoot, versionFile, localRef string) (*Result, error) 
 	if err := getJSON(client, skURL, &sks); err == nil && len(sks) > 0 {
 		res.LatestSkillsSHA = sks[0].SHA[:12]
 	}
-	res.SkillsChanged = res.LatestSkillsSHA != "" && res.LocalRef != "" && !strings.HasPrefix(res.LatestSkillsSHA, localRef) && !strings.HasPrefix(localRef, res.LatestSkillsSHA)
+	// 本地是否已含 skills/ 最新提交：前缀启发式判不了祖先关系（本地领先 skills 提交时
+	// 两者无前缀关系但本地已含），用 compare(latest...local) 判 ancestry——
+	// identical/ahead=已含（不变更），behind/diverged=本地缺（有变更）。
+	res.SkillsChanged = false
+	if res.LatestSkillsSHA != "" && res.LocalRef != "" && !strings.HasPrefix(res.LatestSkillsSHA, localRef) && !strings.HasPrefix(localRef, res.LatestSkillsSHA) {
+		cmp2URL := fmt.Sprintf("%s/repos/%s/compare/%s...%s", api, u.Repo, res.LatestSkillsSHA, res.LocalRef)
+		var cmp2 struct {
+			Status string `json:"status"`
+		}
+		if err := getJSON(client, cmp2URL, &cmp2); err == nil {
+			res.SkillsChanged = cmp2.Status == "behind" || cmp2.Status == "diverged"
+		} else {
+			res.SkillsChanged = true // 查不动时按"有变更"保守处理（只引导查上游，无副作用）
+		}
+	}
 
 	// behind 数（compare API）
 	if res.LocalRef != "" && len(res.LocalRef) >= 7 {

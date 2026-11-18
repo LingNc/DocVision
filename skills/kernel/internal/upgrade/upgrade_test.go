@@ -55,6 +55,30 @@ func TestCheckUpToDate(t *testing.T) {
 	}
 }
 
+func TestCheckSkillsAncestorNotChanged(t *testing.T) {
+	// 本地领先 skills/ 最新提交（非其子孙比较的反例：本地含该提交）→ 不得误报升级
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	mux.HandleFunc("/repos/LingNc/DocVision/commits/feat/skills", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"sha": "aaaa0000bbbb0000cccc0000dddd0000eeee0000"})
+	})
+	mux.HandleFunc("/repos/LingNc/DocVision/commits", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("path") == "skills" {
+			json.NewEncoder(w).Encode([]any{map[string]any{"sha": "dddd1111dddd1111dddd1111dddd1111dddd1111"}})
+		}
+	})
+	mux.HandleFunc("/repos/LingNc/DocVision/compare/", func(w http.ResponseWriter, r *http.Request) {
+		// compare(latestSkills...local)：本地含 latest → ahead（或 identical）
+		json.NewEncoder(w).Encode(map[string]any{"status": "ahead", "behind_by": 0})
+	})
+	u := Upstream{APITemplate: srv.URL}
+	res, _ := Check(u, "", "", "eeee2222eeee2222eeee2222")
+	if res.UpgradeNeeded || res.SkillsChanged {
+		t.Fatalf("本地已含 skills 最新提交，不得误报: %+v", res)
+	}
+}
+
 func TestVersionFileFallback(t *testing.T) {
 	dir := t.TempDir()
 	vf := VersionFilePath(dir)

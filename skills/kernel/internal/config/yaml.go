@@ -79,6 +79,9 @@ func mergeDefaults(base, over Config) Config {
 	if over.Style.PilotChapter != "" {
 		out.Style.PilotChapter = over.Style.PilotChapter
 	}
+	if over.Upstream.RelayURL != "" {
+		out.Upstream.RelayURL = over.Upstream.RelayURL
+	}
 	return out
 }
 

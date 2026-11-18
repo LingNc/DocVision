@@ -523,55 +523,6 @@ func main() {
 			cfg.MinerU.PollTimeout = int(f)
 		case "mineru.upload_timeout":
 			cfg.MinerU.UploadTimeout = int(f)
-		case "troubleshoot":
-			// dvagent troubleshoot <start|collect|draft|validate|submit> [工作区根=.]（docs/07 状态机）
-			if len(args) < 2 {
-				die(fmt.Errorf("troubleshoot 需要: <start|collect|draft|validate|submit> [工作区根]"))
-			}
-			troot := *ws
-			if len(args) > 2 {
-				troot = args[2]
-			}
-			switch args[1] {
-			case "start":
-				st, err := troubleshoot.Start(troot)
-				if err != nil {
-					die(err)
-				}
-				out(map[string]any{"state": st, "dir": troubleshoot.Dir(troot), "next": "troubleshoot collect <根>"})
-			case "collect":
-				doctorJSON, _ := json.Marshal(envcheck.Check("", nil))
-				st, err := troubleshoot.Collect(troot, string(doctorJSON))
-				if err != nil {
-					die(err)
-				}
-				out(map[string]any{"state": st, "next": "填写 work/troubleshoot/report.md 各节 → troubleshoot draft <根>"})
-			case "draft":
-				st, err := troubleshoot.Draft(troot)
-				if err != nil {
-					die(err)
-				}
-				out(map[string]any{"state": st, "next": "troubleshoot validate <根>"})
-			case "validate":
-				errs, st, err := troubleshoot.Validate(troot)
-				if err != nil {
-					die(err)
-				}
-				next := "按 errors 修正后重跑 validate"
-				if len(errs) == 0 {
-					next = "troubleshoot submit <根>（生成 issue.md）"
-				}
-				out(map[string]any{"state": st, "pass": len(errs) == 0, "errors": errs, "next": next})
-			case "submit":
-				path, final, err := troubleshoot.Submit(troot)
-				if err != nil {
-					die(err)
-				}
-				out(map[string]any{"state": "submitted", "issue": path, "chars": len(final),
-					"next": "GitHub 开 issue 粘贴该文件（授权流程见 docs/07-troubleshoot.md）"})
-			default:
-				die(fmt.Errorf("troubleshoot 子步骤: start/collect/draft/validate/submit"))
-			}
 		default:
 			die(fmt.Errorf("未知配置键: %s（可用：figure.min_overlap/figure.max_scale_dev/figure.accept_min_submits/split.pages_per_part/convert.max_lines_per_chapter/style.font_family/style.fallback_font/mineru.api_base_url/mineru.model_version/mineru.language/mineru.poll_interval/mineru.poll_timeout/mineru.upload_timeout）", args[2]))
 		}
@@ -579,6 +530,103 @@ func main() {
 			die(err)
 		}
 		out(map[string]any{"updated": args[2], "value": args[3], "path": config.Path(p.Root)})
+
+	case "troubleshoot":
+		// dvagent troubleshoot <start|collect|draft|validate|submit|relay-submit> [工作区根=.] [--url U] [--author A]（docs/07 状态机）
+		if len(args) < 2 {
+			die(fmt.Errorf("troubleshoot 需要: <start|collect|draft|validate|submit|relay-submit> [工作区根] [--url] [--author]"))
+		}
+		troot := *ws
+		rest := args[2:]
+		if len(rest) > 0 && !strings.HasPrefix(rest[0], "--") {
+			troot = rest[0]
+			rest = rest[1:]
+		}
+		var flagURL, flagAuthor string
+		for i := 0; i < len(rest); i++ {
+			switch rest[i] {
+			case "--url":
+				if i+1 >= len(rest) {
+					die(fmt.Errorf("--url 需要值"))
+				}
+				flagURL = rest[i+1]
+				i++
+			case "--author":
+				if i+1 >= len(rest) {
+					die(fmt.Errorf("--author 需要值"))
+				}
+				flagAuthor = rest[i+1]
+				i++
+			default:
+				die(fmt.Errorf("未知参数: %s（可用 --url/--author）", rest[i]))
+			}
+		}
+		switch args[1] {
+		case "start":
+			st, err := troubleshoot.Start(troot)
+			if err != nil {
+				die(err)
+			}
+			out(map[string]any{"state": st, "dir": troubleshoot.Dir(troot), "next": "troubleshoot collect <根>"})
+		case "collect":
+			doctorJSON, _ := json.Marshal(envcheck.Check("", nil))
+			st, err := troubleshoot.Collect(troot, string(doctorJSON))
+			if err != nil {
+				die(err)
+			}
+			out(map[string]any{"state": st, "next": "填写 work/troubleshoot/report.md 各节 → troubleshoot draft <根>"})
+		case "draft":
+			st, err := troubleshoot.Draft(troot)
+			if err != nil {
+				die(err)
+			}
+			out(map[string]any{"state": st, "next": "troubleshoot validate <根>"})
+		case "validate":
+			errs, st, err := troubleshoot.Validate(troot)
+			if err != nil {
+				die(err)
+			}
+			next := "按 errors 修正后重跑 validate"
+			if len(errs) == 0 {
+				next = "troubleshoot submit <根>（生成 issue.md）"
+			}
+			out(map[string]any{"state": st, "pass": len(errs) == 0, "errors": errs, "next": next})
+		case "submit":
+			path, final, err := troubleshoot.Submit(troot)
+			if err != nil {
+				die(err)
+			}
+			out(map[string]any{"state": "submitted", "issue": path, "chars": len(final),
+				"next": "GitHub 开 issue 粘贴该文件（授权流程见 docs/07-troubleshoot.md）；用户拒绝授权→ troubleshoot relay-submit <根> 走匿名兜底"})
+		case "relay-submit":
+			// 匿名兜底：经用户部署的 relay 服务器代发 issue（服务器端 token，docs/07 兜底段）
+			if st := troubleshoot.Status(troot); st != troubleshoot.StateSubmitted {
+				die(fmt.Errorf("relay-submit 需先走完 submit（当前状态 %s）：start→collect→draft→validate→submit", st))
+			}
+			relayURL := flagURL
+			if relayURL == "" {
+				if cfg, err := config.LoadLayered(skillRoot(), troot); err == nil {
+					relayURL = cfg.Upstream.RelayURL
+				}
+			}
+			if relayURL == "" {
+				die(fmt.Errorf("relay 地址未配置：--url 传入，或在技能 config.yaml 写 upstream.relay_url（见 docs/06/07）"))
+			}
+			author := flagAuthor
+			if author == "" {
+				author = os.Getenv("DOCVISION_AGENT_NAME")
+			}
+			if author == "" {
+				author = "anonymous-agent"
+			}
+			issueURL, err := troubleshoot.SubmitViaRelay(troot, relayURL, author)
+			if err != nil {
+				die(err)
+			}
+			out(map[string]any{"state": "submitted", "via": "relay", "issue_url": issueURL})
+		default:
+			die(fmt.Errorf("troubleshoot 子步骤: start/collect/draft/validate/submit/relay-submit"))
+		}
 
 	case "ids-list":
 		// dvagent ids-list <项目名> [img|vec|pdfp] —— 人类编号映射表（imgxxx/vecxxx/pdfpxx）。
