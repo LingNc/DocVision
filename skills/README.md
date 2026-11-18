@@ -13,7 +13,7 @@
 | `docs/03-agent-interface.md` | agent ↔ kernel 接口：控制面/数据面分离、批量 claim/submit、CLI 优先 MCP 为壳 |
 | `docs/04-migration-inventory.md` | 旧架构资产清点：判据入代码 / 知识入说明书 / 会话层退役 的逐项去向 |
 | `kernel/` | 确定性内核（Go module）：任务队列、租约、验收器、项目注册表 |
-| `agent/` | skill 侧内容：任务工作说明书模板、冷启动仪式说明（后续填充） |
+| `agent/` | skill 侧内容：冷启动仪式 + 五类任务工作手册（classify/draw/convert/check/rework，给宿主 agent 的"怎么把活干好"） |
 
 ## 愿景
 

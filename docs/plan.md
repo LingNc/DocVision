@@ -219,6 +219,10 @@
   改：`skills/kernel` 增 `prep/render.go`（RenderPage/findPage/cropPNG）+ `docindex/pages.go`（LoadPageIndex）+ render_test.go 2 例；dvagent 增两命令；Build 补页表落盘。
   验证：`go test ./internal/...` 89 例绿（页表映射/真 pdftoppm 渲染 A4≈210mm/bbox 半高裁剪/越界 bbox 报错）。
 
+[ ][ ] P103. agent 侧手册落地：agent/README.md（冷启动仪式：status→播报→claim；五条铁律=状态零保存/看图纪律/产物只在 out/交还两行仪式/回炉靠落盘；命令速查）+ 五类任务手册（T1 三态定义与判据证据/T2 作画-编译-自检循环与数值验收证据用法/T3 转换方法+doc-search/page-render 用法+拆分提案+覆盖率二判制/T4 只读核对+位置指针纪律+no_verdict 语义/T5 rework 沙箱续接+逐条复核+profile-update 本书经验）。
+  改：新增 `skills/agent/`（README + manual-classify/draw/convert/check/rework.md）；skills/README 索引更新。
+  验证：文档批次，无代码变更；交叉引用核对（手册内命令与 dvagent 实际子命令一致）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。
