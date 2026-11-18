@@ -616,6 +616,22 @@ func main() {
 		}
 		out(map[string]any{"filled": n})
 
+	case "gen-final":
+		// dvagent gen-final <项目名> —— 全书落定后铺终审任务（T7）。
+		if len(args) < 2 {
+			die(fmt.Errorf("gen-final 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		rep, err := gen.GenFinal(q)
+		if err != nil {
+			die(err)
+		}
+		out(rep)
+
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}

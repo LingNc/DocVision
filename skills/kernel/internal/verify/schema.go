@@ -40,7 +40,8 @@ func (c *Checker) checkVerdictSchema(t *task.Task, sandboxAbs string) []string {
 	switch schema {
 	case "classify":
 		return checkClassifyVerdict(b)
-	case "check":
+	case "check", "final":
+		// final（终审）复用 check 语义：issues 必带位置指针、no_verdict 由重试上限兜底。
 		return checkCheckVerdict(b)
 	}
 	return []string{"未知 verdict_schema: " + schema}

@@ -164,3 +164,7 @@
 [ ][ ] SK-P30. 看图台（HTML）：分组对比/阈值调参导出请求/进度状态/PNG 导出/按 imgxxx 编号指代；复用旧线 watcher 请求文件机制（内核唯一写通道）。
   改：待实现（静态 review 页生成 + 请求处理）。
   验证：待补。
+
+[ ][ ] SK-P32. 终审任务类型固化（T7）：全书 convert/check 落定 + 至少一次核对完成后铺 fin_book 只读终审（章节衔接/目录书签/跨章一致性/装配整体；verdict 复用 check 语义 final schema）；编译修复不固化——验收打回走 rework。
+  改：`task.TypeFinal` + `gen.GenFinal`（触发条件/幂等）+ verify final schema + manual-final.md + dvagent gen-final。
+  验证：`go test ./internal/...` 15 包全绿（三态触发/可领/幂等；checkDone>0 条件防"未铺核对就终审"）。

@@ -14,6 +14,7 @@ const (
 	TypeCheck    Type = "check"    // T4 核对（只读）
 	TypeRework   Type = "rework"   // T5 复盘回炉
 	TypeImg2Text Type = "img2text" // T6 逐图文字化（小轮转：上下文up/down+看图+提交描述）
+	TypeFinal    Type = "final"    // T7 终审（全书级只读核对，drift 闸门后）
 )
 
 // Status 是任务生命周期状态。

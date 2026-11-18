@@ -4115,3 +4115,10 @@ T6 设计里"kernel 整理"的落点：`gen.CollectImg2Text` + `dvagent img2text
 ## 第七十批：并线旧线 dev（T328 切分提速）（2026-11-18，用户："继续"）
 
 merge `origin/dev`（仅 T328 一个提交）入 feat/skills。冲突两处，均"并集"解：docs/issue.md 取对方真实 T328 条目（我方原指针行作废，补 T329 指向 skills 独立台账）；docs/agent-batch-history.md 对方 T328 批次在前、skills 第 63–69 批在后全保留。skills 15 包测试绿 + 旧线 go build 绿（splitter.go 新后端编译过）。并线后 skills 与旧线共用基线，后续各自演进按需 merge。
+
+
+## 第七十一批：终审任务类型（SK-P32，v0.7.0）（2026-11-18，用户："继续"）
+
+旧线 finalReview 固化为 T7：`gen.GenFinal` 触发条件=有 convert done + **至少一次 check done**（防"未铺核对就终审"——测试抓到）+ 无未竟转换/核对/图工作；`fin_book` 只读白名单 build/chapters/style/reports；verdict 复用 check 语义（issues 带章间位置指针/no_verdict 上限兜底）；verdict_schema "final" 入 verify。编译修复（fixSession）按既定设计不固化——验收打回走 rework 队列。manual-final.md：check 看章内、final 看全书的问题粒度分工。
+
+**验证**：`go test ./internal/...` 15 包全绿。
