@@ -4162,3 +4162,10 @@ A1 首秀的真正缺口补上：PREP 四步此前只在 e2e 里以 Go 函数调
 MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen-classify/convert/check/draw/img2text/final）、style-collect、img2text-collect、ctx-up/down、page-render、prep-organize/prep-index、viewer-build、ids-list、pause/resume；全部与 CLI 调同一组函数（零漂移），用户专属命令（config-*）仍不进 MCP。冒烟：tools/list 24 个、gen-classify 未登记项目正确回 isError。至此 CLI 32 命令与 MCP 24 工具覆盖同一功能集（MCP 缺 admin/config/pre-split/mineru 等低频/用户专属项）。
 
 **验证**：`go test ./internal/...` 16 包全绿 + MCP 冒烟（24 工具/错误路径断言）。
+
+
+## 第七十八批：首秀手册自动化验收（v0.9.3）（2026-11-18，用户："继续"）
+
+`internal/e2e/TestFirstRunCLI`：05-first-run 手册的 0–2 步**经真实 dvagent 二进制**走通——假 mineru 为 PATH 注入的 shell 脚本（写 content_list+layout+抽图，证明 prep-mineru 命令的注入式可测），register→prep-split→prep-mineru→prep-organize→prep-index→gen-classify→ids-list→doc-search→viewer-build 全链路断言（0.69s）。手册从此不是文档而是可执行规范——手册改了测试红，测试绿手册对。
+
+**验证**：`go test ./internal/...` 16 包全绿（含 FirstRunCLI 0.69s 真二进制全流程）。
