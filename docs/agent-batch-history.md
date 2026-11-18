@@ -3980,3 +3980,12 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **P98**：verify.Run 第 7 步（验收闭环最后一块判据）：`figure_ref` 触发——pdftoppm 150dpi 渲染 agent 交的 figure.pdf → figcheck 软墨迹对齐 vs 原图（pdfinfo 取候选画布物理尺寸 pt→mm）；重合度 < min_overlap（缺省 0.50）或 mm 尺寸偏差 > max_scale_dev（缺省 0.10，T312"看着对上了其实窄了一截"）打回，错误里附对齐成绩（FormatRuns）与尺寸句（SizeSentence）证据；accept_min_submits（缺省 3）交够 N 次 below 阈值放行并记 figure_accept_as_is note（旧线判据，放行≠静默）；`.kv` 内核临时目录用完即删（不进产物哈希）；pdftoppm/pdfinfo 缺失跳过记 note 不卡死。至此 A4 验收不被绕过的全部判据就位：必产物/自包含/编译/覆盖率/verdict 模式/作图数值。
 
 **验证**：`go test ./internal/...` 80 例绿。
+
+
+## 第五十五批：PREP 编排接内核——split/mineru（2026-11-18，用户："继续"）
+
+A1 端到端的前置：`prep` 包把无 LLM 的外部工具编排接进内核。原则重申——判据全在 verify/dedupe，prep 只做"调用什么工具、参数怎么给、产物在哪"，行为契约按 docs/latex.md 各阶段。
+
+**P99**：`prep.Split`（poppler 链：pdfinfo 数页 → pdfseparate 按页拆 → pdfunite 并成 <stem>_partN.pdf；PagesPerPart 可配；已存在的 part 跳过=幂等；.split-* 临时目录用完即删）；`prep.RunMinerU`（命令名/额外参数/Runner 三处注入；产物不猜 MinerU 内部布局，glob 定位 *_content_list.json 优先非 v2 + layout.json；缺 content_list 报错不静默）。Runner 注入让测试用假 mineru 驱动全流程。
+
+**验证**：`go test ./internal/...` 82 例绿（含 poppler 真集成：reportlab 造 5 页 PDF，2 页/part 拆成 2+2+1，part3 页数断言 + 幂等 + 临时目录清理）。

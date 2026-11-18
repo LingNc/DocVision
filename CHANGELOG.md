@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills PREP 编排（P99）**：`prep` 包接内核——`Split`（pdfinfo 数页→pdfseparate 拆单页→pdfunite 并 part，幂等不重建/临时目录即清，poppler 真集成测试）+ `RunMinerU`（命令与参数可注入，产物 glob 定位，缺 content_list 报错不静默）。`go test` 82 例绿。
 - **skills T2 作图数值判据接线（P98）**：verify 第 7 步——`figure_ref` 触发：pdftoppm 渲染 agent 交的 figure.pdf → figcheck 软墨迹对齐 vs 原图（重合度 vs min_overlap、mm 尺寸偏差 vs max_scale_dev T312、accept_min_submits 交够 N 次放行记 note）；pdfinfo 取候选画布物理尺寸（pt→mm）；`.kv` 内核临时目录用完即删；缺工具跳过不卡死。`go test` 80 例绿。
 - **skills draw 任务生成器（P97）**：`gen.GenDraw` 读回已验收 classify 结论，为 vector 图铺 draw 任务（第一个"上游产物驱动下游任务"的生成器：图从 classify 沙箱拷进 draw 沙箱自包含；styled_text/raster 不派；未验收不驱动；verdict 缺失计异常；dvagent 新增 `gen-draw`）。`go test` 75 例绿。
 - **skills check 任务生成器（P96）**：`gen.GenCheck` 为队列中每个 convert 任务铺一个 blocked 核对任务（T4 延迟核对的结构表达——转换 done 后 Unblock 自动解锁核对；failed convert 不派核对；dvagent 新增 `gen-check`）。`go test` 71 例绿。

@@ -203,6 +203,10 @@
   改：`skills/kernel` 增 `verify/figure.go` + figure_test.go 4 例 + testimg 助手。
   验证：`go test ./internal/...` 80 例绿（尺寸解析/无 spec 跳过/缺原图/缺 PDF/.kv 清理）。
 
+[ ][ ] P99. PREP 编排接内核第一刀（A1 前置）：prep.Split（poppler 链：pdfinfo→pdfseparate→pdfunite，PagesPerPart 可配，已存在 part 不重建=幂等，单页临时目录用完即删）+ prep.RunMinerU（命令名/额外参数/Runner 全注入；产物用 glob 定位（*_content_list.json 优先非 v2、layout.json）；缺 content_list 报错不静默——MinerU 版本间布局差异靠 glob 兜底而非猜路径）。
+  改：`skills/kernel` 增 `prep/`（split.go + mineru.go + prep_test.go 2 例，含 poppler 真集成测试：reportlab 造 5 页 PDF 拆 2+2+1）。
+  验证：`go test ./internal/...` 82 例绿。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。
