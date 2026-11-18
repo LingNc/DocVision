@@ -4141,3 +4141,10 @@ merge `origin/dev`（仅 T328 一个提交）入 feat/skills。冲突两处，�
 style 阶段四步循环的数据面与手册补齐：① `style-collect` 命令——styled_text 提取内容汇总进 `style/styled_text/` 素材池（一图一条、带来源注释=选材环节的落点，v0.7.0 遗留断点接通）；② config 增 `style.pilot_chapter`（试点章指定=用户专属配置）；③ `manual-style.md`——写样式/选材/试点/试点修复四步工作循环（字体缺失→回退→标注→报告的纪律与门槛不降低原则）；④ style 素材池进 doctor 字体体检的叙述体系。至此"选材"有料、"试点"有开关、"修复"有 rework 通道——style 阶段群完整。
 
 **验证**：`go test ./internal/...` 16 包全绿（素材池收集/内容/溯源断言）。
+
+
+## 第七十五批：PREP 命令化 + 首秀手册（2026-11-18，用户："继续"）
+
+A1 首秀的真正缺口补上：PREP 四步此前只在 e2e 里以 Go 函数调用——现暴露为 dvagent 命令：`prep-split`（SplitFast 拆 part）、`prep-mineru`（逐 part 调 MinerU，单 part 失败不中断汇总报 error）、`prep-organize`（mineru/ 下全部 auto 目录按序拼 md）、`prep-index`（默认 glob chapters/*.md 建索引+页表）。空目录/缺前置均给可操作错误信息（"先 prep-mineru"）。CLI 冒烟：reportlab 造 5 页书 → prep-split 2 页/份出 3 part ✓。`skills/docs/05-first-run.md`——从空机器到交付的完整命令序列（0 建区→1 PREP→2 图片阶段→3 转换阶段→4 交付+故障排查速查表）。
+
+**验证**：`go test ./internal/...` 16 包全绿 + CLI 冒烟（拆书三 part/报错信息断言）。

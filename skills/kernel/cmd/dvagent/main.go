@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -662,6 +663,85 @@ func main() {
 			die(err)
 		}
 		out(rep)
+
+	case "prep-split":
+		// dvagent prep-split <项目名> <整本pdf> [每份页数=100] —— PDF 拆 part（提速版）。
+		if len(args) < 3 {
+			die(fmt.Errorf("prep-split 需要: <项目名> <pdf路径> [每份页数]"))
+		}
+		p := mustProject(reg, args[1])
+		n := 100
+		if len(args) > 3 {
+			fmt.Sscanf(args[3], "%d", &n)
+		}
+		names, err := prep.SplitFast(args[2], filepath.Join(p.Root, "source", "parts"), prep.SplitFastConfig{PagesPerPart: n}, nil)
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"parts": names, "dir": "source/parts"})
+
+	case "prep-mineru":
+		// dvagent prep-mineru <项目名> <part1.pdf> [part2.pdf ...] —— 逐个 part 跑 MinerU。
+		if len(args) < 3 {
+			die(fmt.Errorf("prep-mineru 需要: <项目名> <part.pdf...>"))
+		}
+		p := mustProject(reg, args[1])
+		mineruOut := filepath.Join(p.Root, "mineru")
+		var results []any
+		for _, part := range args[2:] {
+			res, err := prep.RunMinerU(part, mineruOut, prep.MinerUConfig{}, nil)
+			if err != nil {
+				results = append(results, map[string]any{"part": part, "error": err.Error()})
+				continue
+			}
+			results = append(results, map[string]any{"part": part, "content_list": res.ContentList, "auto": res.AutoDir})
+		}
+		out(map[string]any{"mineru_output": mineruOut, "results": results})
+
+	case "prep-organize":
+		// dvagent prep-organize <项目名> —— content_list 拼章节 md（chapters/）。
+		if len(args) < 2 {
+			die(fmt.Errorf("prep-organize 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		var autoDirs []string
+		entries, err := os.ReadDir(filepath.Join(p.Root, "mineru"))
+		if err != nil {
+			die(fmt.Errorf("mineru 目录不存在（先 prep-mineru）: %w", err))
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				autoDirs = append(autoDirs, filepath.Join(p.Root, "mineru", e.Name(), "auto"))
+			}
+		}
+		sort.Strings(autoDirs)
+		outs, err := prep.Organize(autoDirs, filepath.Join(p.Root, "chapters"))
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"md_files": outs})
+
+	case "prep-index":
+		// dvagent prep-index <项目名> [md名,md名...] —— 建 doc_index + 页表。
+		if len(args) < 2 {
+			die(fmt.Errorf("prep-index 需要: <项目名> [md名列表（默认 chapters/*.md）]"))
+		}
+		p := mustProject(reg, args[1])
+		mdNames := args[2:]
+		if len(mdNames) == 0 {
+			matches, _ := filepath.Glob(filepath.Join(p.Root, "chapters", "*.md"))
+			for _, m := range matches {
+				mdNames = append(mdNames, filepath.Base(m))
+			}
+		}
+		if len(mdNames) == 0 {
+			die(fmt.Errorf("chapters/ 无 md（先 prep-organize）"))
+		}
+		idx, pages, err := docindex.Build(filepath.Join(p.Root, "mineru"), "", mdNames, filepath.Join(p.Root, "chapters"), filepath.Join(p.Root, "doc_index.json"))
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"entries": len(idx.Entries), "total_pages": idx.Total(), "page_srcs": len(pages.Srcs)})
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
