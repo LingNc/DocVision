@@ -3996,3 +3996,10 @@ A1 端到端的前置：`prep` 包把无 LLM 的外部工具编排接进内核�
 PREP 收尾：`prep.OrganizePart/Organize` 把 content_list 按块拼成 md（text/footnote 原文；image/table/chart→`![caption](images/<sha>.<ext>)`——正是 docindex marker 回填与图片相对路径的契约；equation/interline_equation→`$$…$$`），`Organize` 把多 part 按序拼整本 <stem>.md。md 是 PREP 可再生产物，幂等覆盖重写。纯文本拼装无判据（判据在 verify/dedupe）。parseContentList 与 RunMinerU 共用。至此 PREP 三件套（split/mineru/organize）全接内核——"PDF 进 → 章节 md + 图目录 + content_list 出"的无人值守段打通，A1 端到端的工具侧完备。
 
 **验证**：`go test ./internal/...` 84 例绿。
+
+
+## 第五十七批：assemble-verify——产物漂移复核（2026-11-18，用户：问检索流程后"继续"）
+
+P98 落哈希快照时留下的消费方：`verify.CheckDrift` 复核全部 done 任务的 out/ 与各自最后 pass verdict 的 artifact_sha256——篡改（哈希不符）、删除（快照有盘上无）、新增（单列不告警）、无快照（标 NoSnapshot 无法复核）。`dvagent assemble-verify` 输出 clean/issues/detail。这是装配前闸门：**漂移清单为空才准进 assemble**（验收可信 ≠ 验收之后没人手滑）。
+
+**验证**：`go test ./internal/...` 86 例绿。

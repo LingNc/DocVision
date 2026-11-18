@@ -369,6 +369,20 @@ func main() {
 		}
 		out(rep)
 
+	case "assemble-verify":
+		// dvagent assemble-verify <项目名> —— 复核 done 任务产物自验收以来未被篡改。
+		if len(args) < 2 {
+			die(fmt.Errorf("assemble-verify 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		drifts := verify.CheckDrift(q.Tasks, p.Root)
+		clean, lines := verify.DriftSummary(drifts)
+		out(map[string]any{"clean": clean, "issues": lines, "detail": drifts})
+
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}

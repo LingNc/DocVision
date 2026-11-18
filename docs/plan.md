@@ -211,6 +211,10 @@
   改：`skills/kernel` 增 `prep/organize.go` + `prep/contentlist.go`（parseContentList 与 RunMinerU 共用）+ organize_test.go 2 例。
   验证：`go test ./internal/...` 84 例绿（块渲染断言/整本顺序拼接/part md + book md 三产出）。
 
+[ ][ ] P101. assemble-verify 落地：verify.CheckDrift——遍历 done 任务最后一次 pass verdict 的 artifact_sha256 快照，重算当前 out/ 哈希：不符=篡改/替换、快照有盘上无=删除、新增单列、无快照标 NoSnapshot；DriftSummary 压缩成一行结论；dvagent assemble-verify <项目> 输出 {clean, issues[], detail[]}（装配前漂移清单为空才准进装配）。
+  改：`skills/kernel` 增 `verify/assemble.go` + assemble_test.go 1 例；dvagent 增 `assemble-verify`。
+  验证：`go test ./internal/...` 86 例绿（未动零漂移/篡改抓 mismatch/删除报 missing/无快照标记）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills assemble-verify（P101）**：`verify.CheckDrift`/`DriftSummary` + dvagent `assemble-verify`——消费 verdict 哈希快照复核 done 任务产物：篡改（哈希不符）/删除（快照有盘上无）逐任务列出，新增文件单列，无快照标 NoSnapshot；装配前调用，漂移清单为空才准进装配。
 - **skills organize 章节拼装（P100）**：`prep.Organize`/`OrganizePart`——content_list 按块拼 md（text 原文/image·table·chart→`![caption](images/<sha>)`/equation→`$$…$$`），多 part 按序拼接出整本 md（<stem>_partN 去尾缀）；幂等覆盖重写。`go test` 84 例绿。
 - **skills PREP 编排（P99）**：`prep` 包接内核——`Split`（pdfinfo 数页→pdfseparate 拆单页→pdfunite 并 part，幂等不重建/临时目录即清，poppler 真集成测试）+ `RunMinerU`（命令与参数可注入，产物 glob 定位，缺 content_list 报错不静默）。`go test` 82 例绿。
 - **skills T2 作图数值判据接线（P98）**：verify 第 7 步——`figure_ref` 触发：pdftoppm 渲染 agent 交的 figure.pdf → figcheck 软墨迹对齐 vs 原图（重合度 vs min_overlap、mm 尺寸偏差 vs max_scale_dev T312、accept_min_submits 交够 N 次放行记 note）；pdfinfo 取候选画布物理尺寸（pt→mm）；`.kv` 内核临时目录用完即删；缺工具跳过不卡死。`go test` 80 例绿。
