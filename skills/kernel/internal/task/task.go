@@ -57,10 +57,11 @@ func (l *Lease) Expired(now time.Time) bool { return now.After(l.ExpiresAt) }
 
 // Verdict 是一次验收的落盘记录。
 type Verdict struct {
-	At      time.Time `json:"at"`
-	Pass    bool      `json:"pass"`
-	Errors  []string  `json:"errors,omitempty"` // 机器可读的错误清单
-	Attempt int       `json:"attempt"`
+	At      time.Time         `json:"at"`
+	Pass    bool              `json:"pass"`
+	Errors  []string          `json:"errors,omitempty"` // 机器可读的错误清单
+	Notes   map[string]string `json:"notes,omitempty"`  // 备注：覆盖率放行说明/缺口、哈希快照、跳过原因
+	Attempt int               `json:"attempt"`
 }
 
 // Reclaimable 报告任务是否可认领：pending，或 leased 但租约已过期。

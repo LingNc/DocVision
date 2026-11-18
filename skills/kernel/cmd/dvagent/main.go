@@ -123,7 +123,7 @@ func main() {
 		if err != nil {
 			die(err)
 		}
-		ck := &verify.Checker{ProjectRoot: p.Root}
+		ck := verify.NewChecker(p.Root)
 		results := map[string]any{}
 		for _, id := range strings.Split(args[2], ",") {
 			t, err := q.Get(id)
@@ -131,8 +131,8 @@ func main() {
 				results[id] = err.Error()
 				continue
 			}
-			errs := ck.Run(t)
-			v := task.Verdict{At: time.Now(), Pass: len(errs) == 0, Errors: errs}
+			errs, notes := ck.Run(t)
+			v := task.Verdict{At: time.Now(), Pass: len(errs) == 0, Errors: errs, Notes: notes}
 			nt, err := q.RecordVerdict(id, v, 6)
 			if err != nil {
 				results[id] = err.Error()
@@ -143,7 +143,7 @@ func main() {
 			if nt.Status == task.StatusDone {
 				unlocked = len(q.Unblock(id))
 			}
-			results[id] = map[string]any{"status": nt.Status, "errors": errs, "unlocked": unlocked}
+			results[id] = map[string]any{"status": nt.Status, "errors": errs, "notes": notes, "unlocked": unlocked}
 		}
 		out(results)
 

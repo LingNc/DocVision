@@ -3818,3 +3818,14 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 本批冒烟抓到并修掉两个真 bug：①submit 打回时原实现无条件 unblock，依赖任务（核对/父任务）会在失败时误解锁（上批引入）；②章节行数统计把末尾带换行的文件多算一行，合法拆分被拒。
 
 **验证**：`go test ./internal/...` 8 例绿；dvagent CLI 冒烟全链路绿（坏拆分拒绝、好拆分扇出、子过父解锁、issue-add 回炉、pause 拒派、resume、abort）。
+
+
+## 第三十九批：T3 重型判据落地——覆盖率与编译验收（2026-11-18，用户："继续"）
+
+按台账迁第一条判据。覆盖率算法从旧线 `go/internal/latex/chaptercoverage.go` 逐字移植（T168 修订判据：md 正文 CJK 三字组在 pdftotext 文本中的命中比，阈值 0.85，md 三字组 <200 不判，第一次不达标打回、第二次放行并把缺口连同数字记进 notes 随报告向上带）。编译检查真实跑 pdflatex 双遍，out/ 产物 sha256 快照进 verdict（assemble 复核"acceptance 后未被篡改"用）。验收器 `NewChecker` 默认装配；pdflatex/pdftotext 缺工具时跳过并记 note（旧线判据：不能因缺工具卡死整本书）。
+
+**P83**：新增 `skills/kernel/internal/texcheck/`（coverage.go 移植 + compile.go）；`verify` 覆盖率二判制（按 attempts 计数）；`task.Verdict` 加 `Notes`；dvagent submit 回传 notes。
+
+测试构造踩坑三处（均测试预期问题，非移植代码问题）：①集合口径下重复句不贡献新三字组，需每句嵌唯一字符；②无换行单行使行级缺口定位（<50% 才报）无对象；③行文模板化时被删句行级命中率仍 >50% 报不出缺口（判据特性，真实书籍行文多变无此问题，行为与旧线实测 0.89–0.98 / 砍 1/4 掉 0.63–0.76 对齐）。pdftotext 真集成冒烟（reportlab CID 字体造真 PDF）：75% 覆盖率首次打回并列缺口段落清单，二次提交放行记 coverage_note，哈希快照就位。
+
+**验证**：`go test ./internal/...` 14 例绿；pdftotext 集成冒烟全链路绿。

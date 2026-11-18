@@ -1,8 +1,9 @@
 // Package verify 实现验收器：机械执行验收 spec，只看磁盘事实，不看 agent 自述。
-// 内置检查可组合；编译/覆盖率等重型检查以 Hook 形式注入（由具体阶段装配）。
+// 重型判据（编译/覆盖率）默认装配 texcheck 实现，工具缺失时跳过并记 note（不卡死整本书）。
 package verify
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
+	"github.com/LingNc/DocVision/skills/kernel/internal/texcheck"
 )
 
 // Hook 是重型检查注入点：返回 nil 表示通过，否则返回错误清单。
@@ -18,23 +20,30 @@ type Hook func(t *task.Task, projectRoot string) []string
 // Checker 是验收器。
 type Checker struct {
 	ProjectRoot string
-	// CompileHook 编译检查（未装配时跳过编译类验收）。
+	// CoverageSource 覆盖率对照源 md 路径（相对沙箱；未配置时覆盖率检查跳过）。
+	CoverageSource string
+	// CompileHook 编译检查覆盖（测试注入用）；默认真实跑 pdflatex。
 	CompileHook Hook
-	// CoverageHook 覆盖率检查。
-	CoverageHook Hook
+}
+
+// NewChecker 装配默认重型判据的验收器。
+func NewChecker(projectRoot string) *Checker {
+	return &Checker{ProjectRoot: projectRoot, CoverageSource: "inputs/chapter.md"}
 }
 
 // forbiddenRef 匹配指向临时/沙箱内部路径的引用（自包含判据）。
 var forbiddenRef = regexp.MustCompile(`(_subdivision/|node/result|work/temp/|\.gate/)`)
 
-// Run 对任务跑一次完整验收，返回错误清单（空 = 通过）。
-// 规则：任一检查不过即整体不过；spec 里没有的要求不检查。
-func (c *Checker) Run(t *task.Task) []string {
+// Run 对任务跑一次完整验收。
+// 返回错误清单（空 = 通过）与备注（覆盖率放行说明、哈希快照等，进 verdict.Notes）。
+// 规则：spec 里没有的要求不检查；任一硬检查不过即整体不过。
+func (c *Checker) Run(t *task.Task) ([]string, map[string]string) {
 	var errs []string
+	notes := map[string]string{}
 	root := c.ProjectRoot
+	sandboxAbs := filepath.Join(root, t.Sandbox)
 
 	// 1. 沙箱越界：out/ 下所有文件必须在任务沙箱内。
-	sandboxAbs := filepath.Join(root, t.Sandbox)
 	filepath.Walk(filepath.Join(sandboxAbs, "out"), func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
@@ -57,19 +66,93 @@ func (c *Checker) Run(t *task.Task) []string {
 	}
 
 	// 3. 自包含判据：主产物不得引用临时路径。
-	if main, ok := t.Accept["main_file"].(string); ok && main != "" {
-		b, err := os.ReadFile(filepath.Join(sandboxAbs, "out", main))
-		if err == nil && forbiddenRef.Match(b) {
+	main := ""
+	if m, ok := t.Accept["main_file"].(string); ok {
+		main = m
+	}
+	var mainAbs string
+	if main != "" {
+		mainAbs = filepath.Join(sandboxAbs, "out", main)
+		b, err := os.ReadFile(mainAbs)
+		if err != nil {
+			errs = append(errs, "主产物不可读: "+main)
+		} else if forbiddenRef.Match(b) {
 			errs = append(errs, "主产物引用临时路径（必须自包含）: "+main)
 		}
 	}
 
-	// 4. 重型检查（装配了才跑）。
-	if t.Accept["require_compile"] == true && c.CompileHook != nil {
-		errs = append(errs, c.CompileHook(t, root)...)
+	// 4. 编译检查（工具缺失跳过记 note，不当作失败）。
+	if t.Accept["require_compile"] == true && main != "" {
+		hook := c.CompileHook
+		if hook == nil {
+			hook = c.defaultCompile
+		}
+		errs = append(errs, hook(t, root)...)
 	}
-	if min, ok := t.Accept["min_coverage"].(float64); ok && min > 0 && c.CoverageHook != nil {
-		errs = append(errs, c.CoverageHook(t, root)...)
+
+	// 5. 覆盖率检查：第一次不达标打回，第二次放行并记缺口（T168 判据）。
+	if t.Accept["min_coverage"] != false {
+		if cerrs, cnotes := c.runCoverage(t, root, mainAbs); len(cerrs) > 0 {
+			errs = append(errs, cerrs...)
+		} else {
+			for k, v := range cnotes {
+				notes[k] = v
+			}
+		}
 	}
-	return errs
+
+	// 6. out/ 哈希快照进 notes（assemble 复核"acceptance 后未被篡改"）。
+	if hashes, err := texcheck.Sha256Dir(filepath.Join(sandboxAbs, "out")); err == nil {
+		if b, err := json.Marshal(hashes); err == nil {
+			notes["artifact_sha256"] = string(b)
+		}
+	}
+	return errs, notes
+}
+
+// runCoverage 覆盖率判定的完整流程，返回（打回错误清单, 备注）。
+// t.Attempts==0 时第一次不达标打回；≥1 时放行并记缺口说明。
+func (c *Checker) runCoverage(t *task.Task, projectRoot, mainAbs string) ([]string, map[string]string) {
+	if c.CoverageSource == "" {
+		return nil, nil
+	}
+	mdPath := filepath.Join(projectRoot, t.Sandbox, c.CoverageSource)
+	if _, err := os.Stat(mdPath); err != nil {
+		return nil, nil // 无对照源（如图元任务）跳过
+	}
+	pdfPath := mainAbs
+	if pdfPath == "" {
+		pdfPath = filepath.Join(projectRoot, t.Sandbox, "out", "main.pdf")
+	} else {
+		pdfPath = pdfPath[:len(pdfPath)-len(filepath.Ext(pdfPath))] + ".pdf"
+	}
+	if _, err := os.Stat(pdfPath); err != nil {
+		return nil, map[string]string{"coverage_skip": "无 PDF 产物，跳过覆盖率"}
+	}
+	cov, missing, err := texcheck.ChapterCoverage(mdPath, pdfPath)
+	if err != nil {
+		// pdftotext 不可用：跳过并记 note（旧线判据：不能因缺工具卡死整本书）。
+		return nil, map[string]string{"coverage_skip": err.Error()}
+	}
+	if cov >= texcheck.MinChapterCoverage {
+		return nil, map[string]string{"coverage": fmt.Sprintf("%.2f", cov)}
+	}
+	if texcheck.CoverageDecision(cov, t.Attempts) {
+		return []string{fmt.Sprintf("内容覆盖率 %.0f%% 低于 %.0f%% 阈值，缺得最多的是：%v（第一次打回，补全后再交）",
+			cov*100, texcheck.MinChapterCoverage*100, missing)}, nil
+	}
+	return nil, map[string]string{"coverage_note": texcheck.CoverageGapNote(cov, missing, "")}
+}
+
+// defaultCompile 默认编译检查：真实跑 pdflatex。
+func (c *Checker) defaultCompile(t *task.Task, projectRoot string) []string {
+	main := fmt.Sprint(t.Accept["main_file"])
+	outDir := filepath.Join(projectRoot, t.Sandbox, "out")
+	if _, err := texcheck.Compile(outDir, main); err != nil {
+		if strings.Contains(err.Error(), "不可用") {
+			return nil // 缺工具跳过（与覆盖率同款哲学）
+		}
+		return []string{"编译失败: " + err.Error()}
+	}
+	return nil
 }

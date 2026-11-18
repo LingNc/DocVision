@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills T3 重型判据（P83）**：覆盖率算法逐字移植旧线（pdftotext + CJK 三字组，阈值 0.85，首打回再放行记缺口）、编译检查（pdflatex + sha256 快照）、验收器默认装配、缺工具跳过不卡死。`go test` 14 例绿。
 - **skills 内核编排层（P82）**：章节拆分验证与扇出（2–16 段判据入代码，父任务 blocked 于子任务）、issues 存储与回炉任务生成（回炉回原沙箱）、pause/resume/abort 生命周期命令、claim 生命周期闸门。`go test` 8 例绿。
 - **skills 线奠基（P81）**：新增 `skills/` 目录——agent 驱动的新架构（LLM 会话外迁到宿主 agent，内核只做确定性执行与验收，用户除 MinerU 外零 API 配置）。含设计文档四篇（架构/任务协议/agent 接口/迁移台账）、最终验收标准 A1–A10（`skills/README.md`）、Go 内核骨架 `skills/kernel/`（任务队列+租约、验收器、项目注册表、`dvagent` CLI，5 例测试绿）。
 - **风格修复的评估/分块会话能用 bash 看目录了（T282）**：以前只有 `read_file`/`grep`，想看一章下有哪些子节文件只能靠 grep 试（实测为此烧掉十几轮、三十多分钟）；现在两个会话都带 `bash`（`ls`/`find`/`wc`/`grep -rn`，路径与文件工具同一套前缀）。

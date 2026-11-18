@@ -139,6 +139,10 @@
   改：`skills/kernel` 增 `queue/split.go`（ValidateSplit/FanOutSplit）、`queue/issues.go`（IssueStore/SpawnRework）、`project.Pause`、`dvagent split/issue-add/issue-resolve/pause/resume/abort`；`Task.Reclaimable` 加"有依赖永不可领"判据；修两个冒烟真 bug（submit 打回不解锁依赖、章节行数末尾换行 off-by-one）。
   验证：`go test ./internal/...` 8 例绿（拆分判据五反例 + 扇出解锁 + 回炉挂起）；dvagent 冒烟：坏拆分拒绝/好拆分扇出/子过父解锁/issue-add 回炉/pause 拒派/resume/abort 全链路。
 
+[ ][ ] P83. T3 重型判据落地：覆盖率算法逐字移植旧线（T168：pdftotext+CJK 三字组、阈值 0.85、<200 组跳过、首打回再放行记缺口）、编译检查（pdflatex 双遍+sha256 快照入 verdict）、验收器默认装配重型 Hook（缺工具跳过记 note 不卡死）。
+  改：`skills/kernel` 增 `texcheck/`（coverage.go 移植+compile.go）；`verify.NewChecker` 默认装配+覆盖率二判制+out/ 哈希快照；`Verdict` 加 `Notes`；dvagent submit 回传 notes。
+  验证：`go test ./internal/...` 14 例绿（覆盖率 5 例：剥离/自对照/删1-4掉阈值+列缺口/<200组跳过/首打回再放行）；pdftotext 真集成冒烟：75% 覆盖率首次打回列缺口段落、二次放行记 coverage_note、哈希快照就位。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。
