@@ -4220,3 +4220,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 **提示词回收**：旧线 `prompts/templates/img2text.system.md`（8 规则三态分析器主提示词）与 `img2text_textonly.system.md`（文字化专用）逐字迁入 `skills/agent/prompts-img2text.md`，附旧线→新架构映射表（get_more_context→ctx-up/down；[IMG_TYPE:]→三态产物；mermaid fix 会话→校验打回修语法；{OUTPUT_LANG}→config mineru.language）。三分法处置：判据句已在内核，人设/仪式句略去，知识层全保留。
 
 **验证**：`go build ./cmd/dvagent` 绿（最终判据）+ 18 包测试全绿。
+
+
+## 第八十六批：档位2 pagemark 逐字移植（真移植版，历经第五次 /tmp 清空重建）（2026-11-18）
+
+**过程**：84 批曾交过一版 pagemark 草稿（插入算法被简化），按"对照原本代码"要求未提交；86 批重读旧线发现真实架构是**行级页码对齐引擎**（与草稿完全不同）：锚点规范化 → 行级匹配推进（text 行互相包含匹配/image 行按文件名）→ 未命中继承上页 → 仅递增插标 → 围栏顺延 → embed 位移平移 → 字节级插入 → 审计 → plan-apply-audit 三段。20 函数逐字转写（含设计取舍注释）。**移植中途 /tmp 第五次清空**（pagemark 未提交工作丢失），从 lingnc tar 恢复 git 历史 + 凭本会话上下文重写全部文件，在 ~/dvwork 完成验证。**教训：批内未提交的工作在任何等待窗口都可能蒸发——每批收尾=提交+同步，无例外。**
+
+**验证**：`go build ./cmd/dvagent` 绿（最终判据）+ 18 包全绿（对齐页 1/2、双标记插入、T69 调用方守卫语义、无产物静默跳过、围栏顺延五断言）。

@@ -879,7 +879,16 @@ func main() {
 		if err != nil {
 			die(err)
 		}
-		assembled := mdimg.Assemble(string(src), repls)
+		assembled, shifts := mdimg.AssembleWithShifts(string(src), repls)
+		// 页码标记（P21 逐字移植）：原文行级对齐 → 改写后内容插 [P. N]；
+		// 已有标记（T69 不回注）或无 mineru 产物时静默跳过。
+		mdName := filepath.Base(args[2])
+		lines, starts := mdimg.LineStarts(string(src))
+		if plan := mdimg.PlanPageMarks(filepath.Join(p.Root, "mineru"), mdName, lines); plan != nil && !mdimg.HasPageMarks([]byte(assembled)) {
+			var marks []mdimg.PageMark
+			assembled, marks = plan.ApplyTo(assembled, lines, starts, shifts)
+			_ = plan.Audit(marks)
+		}
 		if err := os.MkdirAll(filepath.Dir(args[3]), 0o755); err != nil {
 			die(err)
 		}

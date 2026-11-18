@@ -72,27 +72,56 @@ func LoadReplacements(q *queue.Queue, projectRoot string) ([]Replacement, error)
 // Assemble 按决策重建 md：逐行扫描，图片行按出现顺序替换（顺序=doc_index 序）。
 // 决策多于图片行 → 多余项忽略（warning 由调用方报）；图片行多于决策 → 原样保留。
 func Assemble(md string, repls []Replacement) string {
+	out, _ := AssembleWithShifts(md, repls)
+	return out
+}
+
+// AssembleWithShifts 同 Assemble，另返回 embed 位移（pagemark 的 shiftFor
+// 用：把标记位置从原文平移到改写后内容——旧线 pagemark 设计取舍原文）。
+func AssembleWithShifts(md string, repls []Replacement) (string, []embedShift) {
 	lines := strings.Split(md, "\n")
 	ri := 0
 	var out []string
+	var shifts []embedShift
+	offset := 0
 	for _, ln := range lines {
 		m := imageRefRef(ln)
 		if m == "" || ri >= len(repls) {
 			out = append(out, ln)
+			offset += len(ln) + 1
 			continue
 		}
 		r := repls[ri]
 		ri++
+		var repl string
 		switch {
 		case r.Text != "":
-			out = append(out, r.Text)
+			repl = r.Text
 		case r.Mermaid != "":
-			out = append(out, "```mermaid", r.Mermaid, "```")
+			repl = "```mermaid\n" + r.Mermaid + "\n```"
 		default:
-			out = append(out, ln) // keep
+			repl = ln // keep（delta=0，不产生位移）
 		}
+		if repl != ln {
+			ref := imageRefRe.FindString(ln)
+			shifts = append(shifts, embedShift{start: offset, delta: len(repl) - len(ref)})
+		}
+		out = append(out, repl)
+		offset += len(ln) + 1
 	}
-	return strings.Join(out, "\n")
+	return strings.Join(out, "\n"), shifts
+}
+
+// LineStarts 计算原文各行字节起始（pagemark applyTo 的 starts 入参）。
+func LineStarts(md string) ([]string, []int) {
+	lines := strings.Split(md, "\n")
+	starts := make([]int, len(lines))
+	offset := 0
+	for i, ln := range lines {
+		starts[i] = offset
+		offset += len(ln) + 1
+	}
+	return lines, starts
 }
 
 // imageRefRef 取行内第一个图片引用的路径（无则空串）。
