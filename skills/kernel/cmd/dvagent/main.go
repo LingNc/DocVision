@@ -27,10 +27,10 @@ import (
 	"github.com/LingNc/DocVision/skills/kernel/internal/project"
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
-	"github.com/LingNc/DocVision/skills/kernel/internal/verify"
-	"github.com/LingNc/DocVision/skills/kernel/internal/viewer"
 	"github.com/LingNc/DocVision/skills/kernel/internal/troubleshoot"
 	"github.com/LingNc/DocVision/skills/kernel/internal/upgrade"
+	"github.com/LingNc/DocVision/skills/kernel/internal/verify"
+	"github.com/LingNc/DocVision/skills/kernel/internal/viewer"
 )
 
 func die(err error) {
@@ -515,66 +515,55 @@ func main() {
 		case "mineru.upload_timeout":
 			cfg.MinerU.UploadTimeout = int(f)
 		case "troubleshoot":
-		// dvagent troubleshoot <start|collect|draft|validate|submit> [工作区根=.]（docs/07 状态机）
-		if len(args) < 2 {
-			die(fmt.Errorf("troubleshoot 需要: <start|collect|draft|validate|submit> [工作区根]"))
-		}
-		troot := *ws
-		if len(args) > 2 {
-			troot = args[2]
-		}
-		switch args[1] {
-		case "start":
-			st, err := troubleshoot.Start(troot)
-			if err != nil {
-				die(err)
+			// dvagent troubleshoot <start|collect|draft|validate|submit> [工作区根=.]（docs/07 状态机）
+			if len(args) < 2 {
+				die(fmt.Errorf("troubleshoot 需要: <start|collect|draft|validate|submit> [工作区根]"))
 			}
-			out(map[string]any{"state": st, "dir": troubleshoot.Dir(troot), "next": "troubleshoot collect <根>"})
-		case "collect":
-			doctorJSON, _ := json.Marshal(envcheck.Check("", nil))
-			st, err := troubleshoot.Collect(troot, string(doctorJSON))
-			if err != nil {
-				die(err)
+			troot := *ws
+			if len(args) > 2 {
+				troot = args[2]
 			}
-			out(map[string]any{"state": st, "next": "填写 work/troubleshoot/report.md 各节 → troubleshoot draft <根>"})
-		case "draft":
-			st, err := troubleshoot.Draft(troot)
-			if err != nil {
-				die(err)
+			switch args[1] {
+			case "start":
+				st, err := troubleshoot.Start(troot)
+				if err != nil {
+					die(err)
+				}
+				out(map[string]any{"state": st, "dir": troubleshoot.Dir(troot), "next": "troubleshoot collect <根>"})
+			case "collect":
+				doctorJSON, _ := json.Marshal(envcheck.Check("", nil))
+				st, err := troubleshoot.Collect(troot, string(doctorJSON))
+				if err != nil {
+					die(err)
+				}
+				out(map[string]any{"state": st, "next": "填写 work/troubleshoot/report.md 各节 → troubleshoot draft <根>"})
+			case "draft":
+				st, err := troubleshoot.Draft(troot)
+				if err != nil {
+					die(err)
+				}
+				out(map[string]any{"state": st, "next": "troubleshoot validate <根>"})
+			case "validate":
+				errs, st, err := troubleshoot.Validate(troot)
+				if err != nil {
+					die(err)
+				}
+				next := "按 errors 修正后重跑 validate"
+				if len(errs) == 0 {
+					next = "troubleshoot submit <根>（生成 issue.md）"
+				}
+				out(map[string]any{"state": st, "pass": len(errs) == 0, "errors": errs, "next": next})
+			case "submit":
+				path, final, err := troubleshoot.Submit(troot)
+				if err != nil {
+					die(err)
+				}
+				out(map[string]any{"state": "submitted", "issue": path, "chars": len(final),
+					"next": "GitHub 开 issue 粘贴该文件（授权流程见 docs/07-troubleshoot.md）"})
+			default:
+				die(fmt.Errorf("troubleshoot 子步骤: start/collect/draft/validate/submit"))
 			}
-			out(map[string]any{"state": st, "next": "troubleshoot validate <根>"})
-		case "validate":
-			errs, st, err := troubleshoot.Validate(troot)
-			if err != nil {
-				die(err)
-			}
-			next := "按 errors 修正后重跑 validate"
-			if len(errs) == 0 {
-				next = "troubleshoot submit <根>（生成 issue.md）"
-			}
-			out(map[string]any{"state": st, "pass": len(errs) == 0, "errors": errs, "next": next})
-		case "submit":
-			path, final, err := troubleshoot.Submit(troot)
-			if err != nil {
-				die(err)
-			}
-			out(map[string]any{"state": "submitted", "issue": path, "chars": len(final),
-				"next": "GitHub 开 issue 粘贴该文件（授权流程见 docs/07-troubleshoot.md）"})
-		case "upgrade-check":
-		// dvagent upgrade-check —— 开跑/排障前自检上游是否有更新或已修（SKILL.md 第 0 步）
-		sroot := "."
-		if exe, eerr := os.Executable(); eerr == nil {
-			sroot = filepath.Join(filepath.Dir(exe), "..", "..")
-		}
-		res, err := upgrade.Check(upgrade.DefaultUpstream(), sroot, upgrade.VersionFilePath(sroot), "")
-		if err != nil {
-			die(err)
-		}
-		out(res)
-	default:
-			die(fmt.Errorf("troubleshoot 子步骤: start/collect/draft/validate/submit"))
-		}
-	default:
+		default:
 			die(fmt.Errorf("未知配置键: %s（可用：figure.min_overlap/figure.max_scale_dev/figure.accept_min_submits/split.pages_per_part/convert.max_lines_per_chapter/style.font_family/style.fallback_font/mineru.api_base_url/mineru.model_version/mineru.language/mineru.poll_interval/mineru.poll_timeout/mineru.upload_timeout）", args[2]))
 		}
 		if err := config.Save(p.Root, cfg); err != nil {
@@ -596,8 +585,8 @@ func main() {
 			out(map[string]any{args[2]: tbl.List(ids.Kind(args[2]))})
 		} else {
 			out(map[string]any{
-				"img": tbl.List(ids.KindImg),
-				"vec": tbl.List(ids.KindVec),
+				"img":  tbl.List(ids.KindImg),
+				"vec":  tbl.List(ids.KindVec),
 				"path": ids.PathOf(p.Root),
 			})
 		}
@@ -974,6 +963,17 @@ func main() {
 		}
 		out(map[string]any{"output": args[3], "text_replaced": nText, "mermaid": nMmd, "kept": nKeep})
 
+	case "upgrade-check":
+		// dvagent upgrade-check —— 开跑/排障前自检上游是否有更新或已修（SKILL.md 第 0 步）
+		sroot := "."
+		if exe, eerr := os.Executable(); eerr == nil {
+			sroot = filepath.Join(filepath.Dir(exe), "..", "..")
+		}
+		res, err := upgrade.Check(upgrade.DefaultUpstream(), sroot, upgrade.VersionFilePath(sroot), "")
+		if err != nil {
+			die(err)
+		}
+		out(res)
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}

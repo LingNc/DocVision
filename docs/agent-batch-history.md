@@ -4269,3 +4269,11 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 **第六次清空（/home/kimi 全灭）后从 tar+上下文重建的一批**。`skills/relay/`（独立 go module，用户部署公网）：`POST /api/submit {title,body,author}` + `/health`；IP 内存限流（RELAY_RATE 次/小时，默认 5）；**服务器端 RELAY_GITHUB_TOKEN 代建 issue**（使用者零凭证）；**署名保留**——正文自动附"提交者（agent 署名，经 DocVision relay 匿名兜底通道）"块，代发不抹来源。客户端 `troubleshoot relay-submit <relay_url> [根]`（须先过 submit 校验；title 取 issue 首标题）。config.yaml `upstream.relay_url`（部署后填）。docs/07 兜底段更新 + 贡献者邀请（问题解决后可提交 issue/PR 成为贡献者，**修正务必基于最新大版本**——先 upgrade-check）+ 邮件兜底仅留格式约定（1020449099@qq.com，暂不实现，邮箱将换专用号）。文档/贡献者注记经 edit_file 恢复（第六清丢失后重写）。
 
 **验证**：dvagent 构建绿 + 20 包全绿（relay 客户端测试）+ relay 服务器构建与限流测试绿。
+
+
+## 第九十四批：upgrade-check 落点修复 + export.sh 版本行修复（2026-11-18，第六清重建后续）
+
+**修真 bug（92 批接线污染的烂账）**：upgrade-check 的 CLI case 被早先一次失败注入残片**插进了 troubleshoot 内层 switch**（grep 计数"成功"假象——计数证明不了落点），`dvagent upgrade-check` 一直"未知子命令"；外科手术切除归位到外层 switch 后**实跑通过**（live 对 GitHub：upgrade_needed=false ✓，因刚推即 HEAD）。**教训入档：接线验证必须跑行为（执行命令看输出），grep 计数不算数。**
+**export.sh 版本行修复**：92 批提交的 export.sh 第 17 行版本行引号残缺（sed 注入事故随提交入库、第六清后我的修复曾丢失）→ 出包 92/93 全部静默失败装旧包；正则定位残缺行替换为正确行（bash -n 过 + export 实测产出含 .skill-version 与预编译二进制的新包）。
+
+**验证**：构建绿 + 20 包全绿 + upgrade-check 实跑 live 通过 + export 全链路（新包 g5ac5aa8 含 .skill-version）。
