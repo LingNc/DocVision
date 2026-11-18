@@ -4262,3 +4262,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 `dvagent upgrade-check`：GitHub REST（公开读免鉴权）对比本地基准（git HEAD 或安装包 .skill-version——export.sh 出包写入）与远端分支：落后提交数（compare API behind_by）+ **skills/ 路径有无本地没有的提交**（commits?path=skills）→ 结论+行动建议。双模式：git 检出自动 rev-parse；安装包读 .skill-version。接线三处：SKILL.md 快速开始第 0 步、docs/07 排障"查"步首位、config.yaml upstream 段（repo/branch/skills_path 可配镜像）。**修真 bug×2**：Check 空 Repo 整体替换结构吞掉注入的 APITemplate（测试打中真 GitHub 现形）→ 逐字段补默认；upgrade_test 写文件 helper 未定义。
 
 **验证**：`go build ./cmd/dvagent` 绿 + 20 包全绿（upgrade 3 例：有更新检出/最新判定/安装包 version-file 回退）。
+
+
+## 第九十三批：relay 匿名兜底服务器（2026-11-18，用户："GitHub 无匿名提交，做公网小服务器兜底，保留 agent 署名"）
+
+**第六次清空（/home/kimi 全灭）后从 tar+上下文重建的一批**。`skills/relay/`（独立 go module，用户部署公网）：`POST /api/submit {title,body,author}` + `/health`；IP 内存限流（RELAY_RATE 次/小时，默认 5）；**服务器端 RELAY_GITHUB_TOKEN 代建 issue**（使用者零凭证）；**署名保留**——正文自动附"提交者（agent 署名，经 DocVision relay 匿名兜底通道）"块，代发不抹来源。客户端 `troubleshoot relay-submit <relay_url> [根]`（须先过 submit 校验；title 取 issue 首标题）。config.yaml `upstream.relay_url`（部署后填）。docs/07 兜底段更新 + 贡献者邀请（问题解决后可提交 issue/PR 成为贡献者，**修正务必基于最新大版本**——先 upgrade-check）+ 邮件兜底仅留格式约定（1020449099@qq.com，暂不实现，邮箱将换专用号）。文档/贡献者注记经 edit_file 恢复（第六清丢失后重写）。
+
+**验证**：dvagent 构建绿 + 20 包全绿（relay 客户端测试）+ relay 服务器构建与限流测试绿。
