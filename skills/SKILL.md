@@ -12,7 +12,8 @@
 | 本包 `kernel/bin/dvagent` | 全部操作入口（预编译 linux/amd64；自行编译：`cd kernel && go build -o bin/dvagent ./cmd/dvagent`，需 Go≥1.25） | 直接可用 |
 | poppler-utils（pdfinfo/pdftotext/pdftoppm） | 拆书/覆盖率/渲染 | apt install poppler-utils |
 | TeX Live（pdflatex） | LaTeX 档编译判据（md 档 不需要） | apt install texlive-xetex |
-| MinerU | 扫描页 OCR：`export MINerU_TOKEN=<token>` 后走 API 模式（零安装）；或本地 pip install magic-pdf[full] | 见 doctor 提示 |
+| MinerU | 扫描页 OCR：`export MINerU_TOKEN=<token>` 后走 API 模式（零安装）；或本地 pip install magic-pdf[full] | 见 upgrade-check                            # 第 0 步：上游升级自检（有新版本先升级再开跑）
+ doctor 提示 |
 | mmdc（可选） | mermaid 校验（没有则跳过记 note） | npm i -g @mermaid-js/mermaid-cli |
 
 ## 快速开始（30 秒）

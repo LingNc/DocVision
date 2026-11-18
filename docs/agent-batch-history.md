@@ -4255,3 +4255,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 ① **用户档案规定位**：`<技能目录>/data/profile.env`（600 权限、gitignore、出包只带 example 空模板）——MINERU_TOKEN/MINERU_API_BASE_URL；优先级 环境变量>档案>默认；用户已有 token 迁入规定位。书级配置仍走 skills_config.json（密钥与判据配置两不混）。② **禁绕行流程文档** docs/07-troubleshoot.md：任何环节失败禁止用模型能力顶替/伪造产物（真实反例记入：OCR 不通时 agent 拟自行转录伪造 content_list——明文禁止）；停-查-报-修四步；修复纪律（最小 diff/风格一致/构建+测试判据/提交信息产品级）；日志收集+脱敏规则；上报流程（ed25519 公钥给用户添加/扫码授权、issue 规定格式+附修复、拒绝则匿名兜底）。SKILL.md 加"遇到问题（必读）"指针。③ **MinerU 端点修正**：默认 `api.mineru.net/api/v1`→**`mineru.net/api/v4`**（对齐上游默认——旧域 DNS 已不可解析，这正是首秀卡住的真实根因之一）；config 可覆盖；docs/mineru-api.md 固化本技能调用面+官方文档链接。④ **修真 bug**：mineruapi 循环内 `:=` 遮蔽 err 致 `%!w(<nil>)` 吞错（首秀 agent 抓到）——lastErr 记录真实错误。
 
 **验证**：`go build ./cmd/dvagent` 绿 + 18 包全绿。
+
+
+## 第九十二批：upgrade-check 上游升级自检（2026-11-18，用户："开跑/遇到问题时先检查上游是否要升级"）
+
+`dvagent upgrade-check`：GitHub REST（公开读免鉴权）对比本地基准（git HEAD 或安装包 .skill-version——export.sh 出包写入）与远端分支：落后提交数（compare API behind_by）+ **skills/ 路径有无本地没有的提交**（commits?path=skills）→ 结论+行动建议。双模式：git 检出自动 rev-parse；安装包读 .skill-version。接线三处：SKILL.md 快速开始第 0 步、docs/07 排障"查"步首位、config.yaml upstream 段（repo/branch/skills_path 可配镜像）。**修真 bug×2**：Check 空 Repo 整体替换结构吞掉注入的 APITemplate（测试打中真 GitHub 现形）→ 逐字段补默认；upgrade_test 写文件 helper 未定义。
+
+**验证**：`go build ./cmd/dvagent` 绿 + 20 包全绿（upgrade 3 例：有更新检出/最新判定/安装包 version-file 回退）。
