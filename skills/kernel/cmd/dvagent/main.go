@@ -519,6 +519,50 @@ func main() {
 			})
 		}
 
+	case "ctx-up", "ctx-down":
+		// dvagent ctx-up|ctx-down <项目名> <task_id> [n=3]
+		// T6 img2text 小轮转工具：按任务的 entry_seq 取 doc_index 相邻文字块（上文/下文）。
+		if len(args) < 3 {
+			die(fmt.Errorf("ctx-up/ctx-down 需要: <项目名> <task_id> [n]"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		tk, err := q.Get(args[2])
+		if err != nil {
+			die(err)
+		}
+		seq, _ := tk.Accept["entry_seq"].(float64)
+		n := 3
+		if len(args) > 3 {
+			fmt.Sscanf(args[3], "%d", &n)
+		}
+		idx, err := docindex.Load(filepath.Join(p.Root, "doc_index.json"))
+		if err != nil {
+			die(err)
+		}
+		up := args[0] == "ctx-up"
+		var blocks []map[string]any
+		count := 0
+		for _, e := range idx.Entries {
+			if e.Type != "text" || e.Text == "" {
+				continue
+			}
+			before := e.Seq < int(seq)
+			if (up && before) || (!up && !before) {
+				blocks = append(blocks, map[string]any{
+					"seq": e.Seq, "global": e.Global, "text": e.Text,
+				})
+				count++
+				if count >= n {
+					break
+				}
+			}
+		}
+		out(map[string]any{"task": tk.ID, "entry_seq": seq, "up": up, "blocks": blocks})
+
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}

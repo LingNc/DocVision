@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills img2text 任务类型（SK-P29，v0.3.0）**：T6 逐图文字化小轮转——GenImg2Text 从 doc_index 图片条目铺任务（按 seq 去重幂等，任务包带 global+bbox 指针）；`ctx-up`/`ctx-down` 取邻块（SK-P29 的"检索下文 up/down"）；Organize 合并时按 page_idx 打 `<!-- pN -->` 页码标识（docjson 精确定位）；手册 manual-img2text.md。
 - **skills 编号体系 v0.2.0（SK-P28）**：人类可读编号 imgxxx/vecxxx/pdfpxx + `internal/ids` 映射表（skills_ids.json：id↔sha/路径/页/bbox/任务）；同 SHA 幂等共享编号；GenClassify 铺队即登记；dvagent `ids-list`。agent 内部仍用 sha。公钥/私钥存 dv-delivery-v3/keys。
 - **skills MCP 壳（P106）**：`dvagent mcp`——MCP 协议第二张皮（stdio JSON-RPC 2.0 newline-delimited）：initialize/tools/list/tools/call 全覆盖，7 个工具（status/claim/submit/note/doc-search/assemble-verify/deliver）与 CLI 同函数零行为漂移；冒烟过（initialize→7 工具→status 回执→未知工具 isError）。
 - **skills A1 全链演练（P105）**：`internal/e2e` 一条测试打穿"造书→Split→fake MinerU→Organize→docindex→注册→classify→draw→convert→check→deliver"（12 包全绿）；修真 bug 三处——GenClassify 不拷图进沙箱（自包含原则漏了分类器）、GenCheck 对已 done convert 仍挂依赖边（顺序生成场景核对永远 blocked）、Registry.Save 不建目录（全新 workspace 注册即失败）；docindex content_list/layout 兼容 MinerU auto/ 新布局。

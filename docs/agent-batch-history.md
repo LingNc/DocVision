@@ -4068,3 +4068,10 @@ P98 落哈希快照时留下的消费方：`verify.CheckDrift` 复核全部 done
 3. **编号体系（SK-P28）**：`internal/ids`——imgxxx/vecxxx/pdfpxx 三类；映射表 skills_ids.json（id↔sha/路径/全局页/bbox/关联任务）；同 SHA 幂等共享编号（重复图一个号）；类别独立序列；GenClassify 铺队即登记（sha256 内容哈希）；dvagent `ids-list <项目> [kind]` 查询。页码编号 pdfp<N> 不占序列（由页表派生）。agent 内部指代仍走 sha（BySHA 反查表打通人与 agent 的互指）。
 
 **验证**：`go test ./internal/...` 14 包全绿。
+
+
+## 第六十五批：img2text 任务类型（SK-P29，v0.3.0）（2026-11-18，用户："继续"）
+
+T6 落地：① `task.TypeImg2Text` + `gen.GenImg2Text`（读 doc_index，图片块按 seq 铺任务，同 img 去重幂等；任务包 acceptance 带 entry_seq/global/img/bbox 指针）；② `ctx-up`/`ctx-down` 命令=小轮转工具之"检索下文 up/down"（按 entry_seq 取 doc_index 相邻文字块，默认 3 块，蒸馏回执）；③ Organize 合并时按 docjson 的 page_idx 打 `<!-- pN -->` 页码标识（用户要求的"每段可回溯页码"——合并 content_list 时天然有 page_idx，打标零成本）；④ manual-img2text.md（三件套用法）。看图走既有 page-render（任务包自带 bbox 指针），提交=标准 submit+description.md 必产验收。
+
+**验证**：`go test ./internal/...` 14 包全绿（GenImg2Text 去重/幂等/指针断言；邻块切分断言）。

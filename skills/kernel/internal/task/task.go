@@ -13,6 +13,7 @@ const (
 	TypeConvert  Type = "convert"  // T3 章节转换
 	TypeCheck    Type = "check"    // T4 核对（只读）
 	TypeRework   Type = "rework"   // T5 复盘回炉
+	TypeImg2Text Type = "img2text" // T6 逐图文字化（小轮转：上下文up/down+看图+提交描述）
 )
 
 // Status 是任务生命周期状态。

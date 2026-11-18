@@ -53,8 +53,7 @@ func blockLine(b map[string]any) string {
 	}
 }
 
-func joinAnyList(v any) string {
-	arr, ok := v.([]any)
+func joinAnyList(v any) string {	arr, ok := v.([]any)
 	if !ok {
 		return ""
 	}
@@ -82,7 +81,14 @@ func OrganizePart(autoDir string) (string, error) {
 		return "", err
 	}
 	var lines []string
+	curPage := -1
 	for _, b := range items {
+		// 页码标识（SK-P29 用户要求）：合并 docjson 时按 page_idx 打标记——
+		// 每段可回溯到页；前文目录/行定位由 doc_index 与标记共同承担。
+		if pg := intField(b, "page_idx"); pg != curPage {
+			curPage = pg
+			lines = append(lines, fmt.Sprintf("<!-- p%d -->", pg+1))
+		}
 		if ln := blockLine(b); ln != "" {
 			lines = append(lines, ln)
 		}
@@ -124,6 +130,14 @@ func Organize(autoDirs []string, outDir string) ([]string, error) {
 	}
 	outs = append(outs, bookPath)
 	return outs, nil
+}
+
+// intField 安全取 content_list 块的整数字段。
+func intField(b map[string]any, key string) int {
+	if v, ok := b[key].(float64); ok {
+		return int(v)
+	}
+	return 0
 }
 
 // contentListIn 在 auto 目录里找 content_list（优先非 v2）。
