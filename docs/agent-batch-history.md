@@ -4019,3 +4019,12 @@ P98 落哈希快照时留下的消费方：`verify.CheckDrift` 复核全部 done
 提示词三分法（判据入代码/知识入说明书/人设入土）的"知识"侧开始兑现：`skills/agent/`——宿主 agent 的"怎么把活干好"。README=冷启动仪式（status→播报→claim 五步）+ 五条铁律（状态零保存/看图纪律/产物只在 out/交还两行仪式/回炉靠落盘）；五本手册对应五类任务（T1 三态证据/T2 作画循环与数值证据/T3 转换+检索+拆分+覆盖率二判制/T4 位置指针纪律/T5 沙箱续接）。手册只写方法不写判据（判据在验收 spec，手册引用证据字段如 FormatRuns/SizeSentence 教 agent 对着改）。
 
 **验证**：文档批次，无代码变更；手册内命令与 dvagent 子命令逐一交叉核对。
+
+
+## 第六十批：deliver 交付管道（2026-11-18，用户："继续"）
+
+装配交付一条龙：`deliver.Deliver`——①漂移闸门（验收后被篡改/删除的 done 产物**一律拒装配且不动 build 树**——手滑不该进书；NoSnapshot 只记录不拦）；②归集（conv 任务 out/*.tex 保持相对结构进 build/chapters、drw 任务 figure.tex 进 build/figures，全部按任务 id 排序=章序确定）；③主文件生成（documentclass + 按序 \input，可选 cls 拷贝）；④input@path + 书签注入 + standalone 内联落盘；⑤资源盘点回执。`dvagent deliver <项目> [cls]`。
+
+**设计点**：装配本体零 LLM 参与——终审/修补是流水线里别的任务的事，deliver 只组装"已过验收的制品"（漂移闸门保证这个前提）。
+
+**验证**：`go test ./internal/...` 92 例绿（幸福路径全断言 + 漂移闸门拒装配不动树）。

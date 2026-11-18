@@ -223,6 +223,10 @@
   改：新增 `skills/agent/`（README + manual-classify/draw/convert/check/rework.md）；skills/README 索引更新。
   验证：文档批次，无代码变更；交叉引用核对（手册内命令与 dvagent 实际子命令一致）。
 
+[ ][ ] P104. deliver 交付管道：deliver.Deliver 五步——①漂移闸门（CheckDrift 有 mismatch/missing 即拒装配且不动 build 树；NoSnapshot 只记不拦）；②归集（done conv_* 的 out/*.tex→build/chapters/保持相对结构、done drw_* 的 figure.tex→build/figures/）；③主文件（documentclass[+可选 cls]+按章序 \input）；④input@path+书签注入+standalone 内联落盘；⑤装配后资源盘点回执。dvagent deliver <项目> [cls]。
+  改：`skills/kernel` 增 `deliver/`（deliver.go + deliver_test.go 2 例）+ dvagent deliver。
+  验证：`go test ./internal/...` 92 例绿（归集/章序/书签=章数/standalone 内联标记/盘点零缺失；漂移闸门拒装配不动树）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

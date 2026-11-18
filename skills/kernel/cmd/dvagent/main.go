@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LingNc/DocVision/skills/kernel/internal/deliver"
 	"github.com/LingNc/DocVision/skills/kernel/internal/docindex"
 	"github.com/LingNc/DocVision/skills/kernel/internal/gen"
 	"github.com/LingNc/DocVision/skills/kernel/internal/prep"
@@ -427,6 +428,26 @@ func main() {
 			die(err)
 		}
 		out(res)
+
+	case "deliver":
+		// dvagent deliver <项目名> [cls名] —— 装配交付：漂移闸门→归集→主文件→书签→standalone→盘点。
+		if len(args) < 2 {
+			die(fmt.Errorf("deliver 需要: <项目名> [cls名]"))
+		}
+		p := mustProject(reg, args[1])
+		cls := ""
+		if len(args) > 2 {
+			cls = args[2]
+		}
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		rep, err := deliver.Deliver(q, p.Root, cls)
+		if err != nil {
+			die(err)
+		}
+		out(rep)
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))

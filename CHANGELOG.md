@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills deliver 交付管道（P104）**：`deliver.Deliver` + dvagent `deliver`——漂移闸门（验收后篡改/缺失的 done 产物一律拒装配，不动 build 树）→ 归集（conv out/*.tex→build/chapters 含分片子目录按序、drw figure.tex→build/figures）→ 生成 main.tex（documentclass+按序 input）→ input@path+书签注入 → standalone 内联落盘 → 资源盘点回执。
 - **skills agent 侧手册落地（P103）**：`agent/` 目录——冷启动 README（仪式五步 + 五条铁律 + 命令速查）+ 五类任务工作手册（三态定义/作画-编译-自检循环/转换-检索-拆分/核对位置指针纪律/回炉续接），提示词三分法的"知识入说明书"开始兑现。
 - **skills 检索链闭合（P102）**：dvagent `doc-search`（doc_index.json AND 检索回蒸馏命中：global 页号+bbox+120 字截断）+ `page-render`（页表映射全书页→原书 PDF 内页，pdftoppm 150dpi 渲染到 work/renders/，可选 bbox 裁剪——坐标系 sanity：bbox 超页面两倍即报错防传错单位）+ Build 随索引落盘页表（doc_index_pages.json）。`go test` 89 例绿。
 - **skills assemble-verify（P101）**：`verify.CheckDrift`/`DriftSummary` + dvagent `assemble-verify`——消费 verdict 哈希快照复核 done 任务产物：篡改（哈希不符）/删除（快照有盘上无）逐任务列出，新增文件单列，无快照标 NoSnapshot；装配前调用，漂移清单为空才准进装配。
