@@ -15,7 +15,17 @@ trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/$PKG"
 (cd "$REPO_ROOT" && git rev-parse --short HEAD) > "$STAGE/$PKG/.skill-version"
-cp -r "$SKILLS_DIR/docs" "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$SKILLS_DIR/SKILL.md" "$STAGE/$PKG/"
+# 开发向文档（plan/issue 台账、迁移清点）不进包——用户包只带操作/规约类文档
+mkdir -p "$STAGE/$PKG/docs"
+for f in "$SKILLS_DIR"/docs/*.md; do
+	case "$(basename "$f")" in
+	plan.md|issue.md|04-migration-inventory.md) continue ;;
+	esac
+	cp "$f" "$STAGE/$PKG/docs/"
+done
+cp -r "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$SKILLS_DIR/SKILL.md" "$STAGE/$PKG/"
+# 用户配置模板随包（激活=cp config.example.yaml config.yaml；真 config.yaml 永不入包）
+cp "$SKILLS_DIR/config.example.yaml" "$STAGE/$PKG/config.example.yaml"
 # 用户档案模板随包（空值示例；真实 profile.env 永不入包，见 docs/06）
 mkdir -p "$STAGE/$PKG/data"
 cp "$SKILLS_DIR/data/profile.example" "$STAGE/$PKG/data/profile.example"

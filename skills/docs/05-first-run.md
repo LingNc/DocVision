@@ -47,6 +47,7 @@ $D img2text-collect demo                      # 描述回填 doc_index
 ## 3. 转换阶段（agent 逐章）
 
 ```bash
+cp config.example.yaml config.yaml                     # 激活用户配置（可选；不激活=全默认值）
 $D config-set demo style.pilot_chapter chapter_001   # 指定试点章（可选但推荐）
 $D gen-convert demo                           # 章节铺任务（md 拷沙箱作覆盖率对照源）
 # agent：claim convert → 写 .tex（自包含）→ 编译+覆盖率自检 → submit

@@ -11,7 +11,6 @@
 | `docs/01-architecture.md` | 总体架构：三层分工、状态三层分离、项目注册表与书级档案、记忆泡泡、共享区 |
 | `docs/02-task-protocol.md` | 任务协议总表：五类任务（classify/作图/转换/核对/回炉）× 说明书 × 验收 spec |
 | `docs/03-agent-interface.md` | agent ↔ kernel 接口：控制面/数据面分离、批量 claim/submit、CLI 优先 MCP 为壳 |
-| `docs/04-migration-inventory.md` | 早期架构资产清点：判据入代码 / 知识入说明书 / 会话层退役 的逐项去向 |
 | `kernel/` | 确定性内核（Go module）：任务队列、租约、验收器、项目注册表 |
 | `agent/` | skill 侧内容：冷启动仪式 + 五类任务工作手册（classify/draw/convert/check/rework，给宿主 agent 的"怎么把活干好"） |
 

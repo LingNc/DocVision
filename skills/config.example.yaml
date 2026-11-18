@@ -1,0 +1,32 @@
+# DocVision Skills 用户配置 —— 全默认模板（与代码出厂默认值逐项对齐）
+#
+# 激活：cp config.example.yaml config.yaml
+#   config.yaml 是用户私有层（不随包升级被覆盖）；不写任何配置时等价于本文件全部默认值。
+# 分层优先级：本文件（技能级）> 项目 skills_config.json > 出厂默认；
+#   损坏配置一律回默认，不许坏文件绕过验收门槛。
+# 密钥（MINERU_TOKEN 等）只走 data/profile.env（600）或环境变量，不进本文件。
+
+figure:                        # 矢量图验收门槛（agent 无权自调，用户不提不改）
+  min_overlap: 0.17            # 软墨重合度下限（0=关闭形状判据）
+  max_scale_dev: 0.10          # 宽高比例偏差上限（抓"看着对上了其实窄了一截"）
+  accept_min_submits: 3        # "尽力还原"放行需交够的次数
+split:
+  pages_per_part: 100          # prep 拆分时每个 part 的页数
+convert:
+  max_lines_per_chapter: 300   # 章节行数上限（超出提示拆章）
+style:
+  font_family: ""              # 主字体（空=不指定）
+  fallback_font: "TeX Gyre Termes"  # 特殊字体缺失时的开源回退
+  pilot_chapter: ""            # 试点章（style 先试转的章）
+mineru:                        # MinerU API 参数（端点对齐上游默认；文档见 docs/mineru-api.md）
+  api_base_url: "https://mineru.net/api/v4"
+  model_version: "v2"
+  is_ocr: false
+  enable_formula: true
+  enable_table: true
+  language: ""                 # 空=自动
+  poll_interval: 3             # 轮询间隔（秒）
+  poll_timeout: 0              # 轮询总超时（秒，0=不限）
+  upload_timeout: 300          # 上传空闲超时（秒）
+upstream:
+  relay_url: ""                # 自部署 relay 匿名兜底服务器地址（troubleshoot relay-submit 用，部署后填）

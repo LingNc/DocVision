@@ -4,132 +4,132 @@
 > 与参考实现 `docs/plan.md` 的 P 编号完全隔离。SK-P1–SK-P26 由参考实现 P81–P106 迁移（2026-11-18，防新参考实现混淆）；批次历史档案仍在参考实现 docs/agent-batch-history.md 第三十七至第六十二批（只增日志不迁移）。
 
 
-[ ][ ] SK-P1. skills 线：LLM 会话外迁到宿主 agent 的新架构——skills 内核只做确定性执行+验收（任务队列/租约/验收器/项目注册表/书级档案），用户除 MinerU 外零 API 配置；愿景"放下 PDF 跑到底、中断无损续、换 agent 可续"，验收标准 A1–A10。放 `skills/` 独立演化，不侵入参考实现。
+[X][ ] SK-P1. skills 线：LLM 会话外迁到宿主 agent 的新架构——skills 内核只做确定性执行+验收（任务队列/租约/验收器/项目注册表/书级档案），用户除 MinerU 外零 API 配置；愿景"放下 PDF 跑到底、中断无损续、换 agent 可续"，验收标准 A1–A10。放 `skills/` 独立演化，不侵入参考实现。
   改：新增 `skills/`（README + docs/01架构 02任务协议 03接口 04迁移台账 + `kernel/` Go module + `dvagent` CLI）；本批同步 plan/CHANGELOG/batch-history/AGENTS.md 指针。
   验证：`go test ./internal/...` 5 例绿（幂等入队/租约过期回收/确定性派发/打回回队/依赖解锁）；dvagent 冒烟全链路绿（register→activate→claim→submit 打回→补产物通过→解锁核对→note/profile/status）。
 
 
-[ ][ ] SK-P2. skills 内核编排层落地：章节拆分验证与扇出（2–16 段、完整、连续、无重叠，父任务 blocked 于子任务）、issues 存储 + 回炉任务生成（原任务挂起等回炉，回炉回原沙箱）、pause/resume/abort 生命周期命令、claim 生命周期闸门。
+[X][ ] SK-P2. skills 内核编排层落地：章节拆分验证与扇出（2–16 段、完整、连续、无重叠，父任务 blocked 于子任务）、issues 存储 + 回炉任务生成（原任务挂起等回炉，回炉回原沙箱）、pause/resume/abort 生命周期命令、claim 生命周期闸门。
   改：`skills/kernel` 增 `queue/split.go`（ValidateSplit/FanOutSplit）、`queue/issues.go`（IssueStore/SpawnRework）、`project.Pause`、`dvagent split/issue-add/issue-resolve/pause/resume/abort`；`Task.Reclaimable` 加"有依赖永不可领"判据；修两个冒烟真 bug（submit 打回不解锁依赖、章节行数末尾换行 off-by-one）。
   验证：`go test ./internal/...` 8 例绿（拆分判据五反例 + 扇出解锁 + 回炉挂起）；dvagent 冒烟：坏拆分拒绝/好拆分扇出/子过父解锁/issue-add 回炉/pause 拒派/resume/abort 全链路。
 
 
-[ ][ ] SK-P3. T3 重型判据落地：覆盖率算法逐字移植参考实现（T168：pdftotext+CJK 三字组、阈值 0.85、<200 组跳过、首打回再放行记缺口）、编译检查（pdflatex 双遍+sha256 快照入 verdict）、验收器默认装配重型 Hook（缺工具跳过记 note 不卡死）。
+[X][ ] SK-P3. T3 重型判据落地：覆盖率算法逐字移植参考实现（T168：pdftotext+CJK 三字组、阈值 0.85、<200 组跳过、首打回再放行记缺口）、编译检查（pdflatex 双遍+sha256 快照入 verdict）、验收器默认装配重型 Hook（缺工具跳过记 note 不卡死）。
   改：`skills/kernel` 增 `texcheck/`（coverage.go 移植+compile.go）；`verify.NewChecker` 默认装配+覆盖率二判制+out/ 哈希快照；`Verdict` 加 `Notes`；dvagent submit 回传 notes。
   验证：`go test ./internal/...` 14 例绿（覆盖率 5 例：剥离/自对照/删1-4掉阈值+列缺口/<200组跳过/首打回再放行）；pdftotext 真集成冒烟：75% 覆盖率首次打回列缺口段落、二次放行记 coverage_note、哈希快照就位。
 
 
-[ ][ ] SK-P4. T2 作图判据落地：软墨迹对齐（compareFigure）逐字移植参考实现 figure_compare.go——多分辨率渐进对齐、质心起点、尺寸按物理 mm 在归一化前量取（scale_dev 抓"看着对上了其实窄了一截"）、RGB/灰度双通道、证据叠加图（白=共有/品红=原图独有/绿=候选独有）可落盘；仅剥会话工具壳。
+[X][ ] SK-P4. T2 作图判据落地：软墨迹对齐（compareFigure）逐字移植参考实现 figure_compare.go——多分辨率渐进对齐、质心起点、尺寸按物理 mm 在归一化前量取（scale_dev 抓"看着对上了其实窄了一截"）、RGB/灰度双通道、证据叠加图（白=共有/品红=原图独有/绿=候选独有）可落盘；仅剥会话工具壳。
   改：`skills/kernel` 增 `figcheck/`（compare.go 移植 566 行 + compare_test.go 5 例）；go.mod 引入 golang.org/x/image（CatmullRom 缩放）。
   验证：`go test ./internal/...` 19 例绿（同图 ≥0.9 相似、mm 口径抓 50% 宽度差、无 mm 退化宽高比判据、空图拒绝）；修掉移植笔误一处（overlay→Overlay 调用点）。
 
 
-[ ][ ] SK-P5. T1/T4 verdict 模式验收落地：classify 三态校验（styled_text 必附 extracted、vector 必附 reason、class 不合法/缺失一律打回——参考实现"失败不降级"判据入代码）；check 校验（result 三选一、issues 每条必带位置指针、no_verdict 打回但由 attempts 上限兜底）。
+[X][ ] SK-P5. T1/T4 verdict 模式验收落地：classify 三态校验（styled_text 必附 extracted、vector 必附 reason、class 不合法/缺失一律打回——参考实现"失败不降级"判据入代码）；check 校验（result 三选一、issues 每条必带位置指针、no_verdict 打回但由 attempts 上限兜底）。
   改：`skills/kernel` 增 `verify/schema.go`（ClassifyVerdict/CheckVerdict 结构 + 校验）+ `schema_test.go` 8 例；`Run` 第 6 步接入。
   验证：`go test ./internal/...` 27 例绿（classify 5 例 + check 4 例覆盖全部正反路径）。
 
 
-[ ][ ] SK-P6. dedupe 居中重合判据核心落地：软墨量内容框（不二值化不缩放）、S 自适应按对计算、逐级搜索 32→最细（判定分取最细级）、±10% 平移预算/细层 ±2 格不扩窗，从参考实现 motif_canon.go+motif_align.go 逐字移植；附预筛（墨量/长宽比）、代价记账、AlignDetail 过程量、CarryOver 带入不接力（T151）。
+[X][ ] SK-P6. dedupe 居中重合判据核心落地：软墨量内容框（不二值化不缩放）、S 自适应按对计算、逐级搜索 32→最细（判定分取最细级）、±10% 平移预算/细层 ±2 格不扩窗，从参考实现 motif_canon.go+motif_align.go 逐字移植；附预筛（墨量/长宽比）、代价记账、AlignDetail 过程量、CarryOver 带入不接力（T151）。
   改：`skills/kernel` 增 `dedupe/`（canon.go 230 行 + align.go 230 行 + dedupe_test.go 8 例）；Runner/配置耦合改为包级变量与参数。
   验证：`go test ./internal/...` 36 例绿（自比≈1、方块vs竖条低于 0.60 闸门、预筛拒高宽比差、空白/小内容框退回、画布抬下限、平移换算、级数尾级规则、带入不接力）。
 
 
-[ ][ ] SK-P7. dedupe 候选桶检测与成组校验落地：sha256 精确收缩（像素指纹桶）+ 形状/颜色 20×20 网格特征 + 色度特征（白占比 0.82/单连通片/三通道主导色）+ 小图标居中重合并桶（T130 同判据，像素相同只比一份、预筛 WorthScore、并行打分串行 union）；SimilarTo 闸门（检测器超集：严格特征失败仍可凭色度合并，但内容无关永不允许）；groups.json 结构校验（normalize/validate/shape，交互 Tool 壳由"agent 直编 JSON + kernel submit 校验"替代）。
+[X][ ] SK-P7. dedupe 候选桶检测与成组校验落地：sha256 精确收缩（像素指纹桶）+ 形状/颜色 20×20 网格特征 + 色度特征（白占比 0.82/单连通片/三通道主导色）+ 小图标居中重合并桶（T130 同判据，像素相同只比一份、预筛 WorthScore、并行打分串行 union）；SimilarTo 闸门（检测器超集：严格特征失败仍可凭色度合并，但内容无关永不允许）；groups.json 结构校验（normalize/validate/shape，交互 Tool 壳由"agent 直编 JSON + kernel submit 校验"替代）。
   改：`skills/kernel` 增 `dedupe/candidates.go`（500+ 行移植）+ `dedupe/groups.go`（验证逻辑）+ `pipeline_test.go` 5 例。
   验证：`go test ./internal/...` 40 例绿（精确组、平移副本并桶、内容不同拒并、闸门正反、成组校验正反）。
 
 
-[ ][ ] SK-P8. dedupe 代表图与组收口纯函数落地：ContentLeaders（内容哈希→代表+字节副本）、TypicalMembers/PickRepresentative（典型 0.95 + 内容框最大者当代表，无达标回退中心）、FoldGroups（同桶组折叠：中心=与其余代表平均重合最高，成员原样收编不重筛 T149，跨桶不折）、AutoIconGroups（0.75 无疑问自动定组 T131）、AttachLeftovers（T135：只认已确认 key 作锚、一次挂一组、跳过已确认）。
+[X][ ] SK-P8. dedupe 代表图与组收口纯函数落地：ContentLeaders（内容哈希→代表+字节副本）、TypicalMembers/PickRepresentative（典型 0.95 + 内容框最大者当代表，无达标回退中心）、FoldGroups（同桶组折叠：中心=与其余代表平均重合最高，成员原样收编不重筛 T149，跨桶不折）、AutoIconGroups（0.75 无疑问自动定组 T131）、AttachLeftovers（T135：只认已确认 key 作锚、一次挂一组、跳过已确认）。
   改：`skills/kernel` 增 `dedupe/represent.go`（5 纯函数）+ `represent_test.go` 5 例。
   验证：`go test ./internal/...` 45 例绿；修掉移植笔误一处（ContentLeaders 簿记）。
 
 
-[ ][ ] SK-P9. doc_index 检索索引落地：MinerU content_list → 只读索引（块条目含 bbox/全局页号/图路径）+ DOCVISION 注释回填（窗口 20 行状态机：styled-text 印刷原文 / vector 的 ```latex 代码块进 content / image 描述；无厂商图注时 Text 用我们自己的内容兜底，vector 用标签不用整段代码）+ AND 检索（term 前缀 2.0/包含 1.5/覆盖率打分，字段过滤 text/content/marker/label，ties 按 Seq 文档序）+ EntryOnPage/CropHint（regex 命中文本块后，label 匹配优先，页内唯一图兜底）+ 落盘/重载。
+[X][ ] SK-P9. doc_index 检索索引落地：MinerU content_list → 只读索引（块条目含 bbox/全局页号/图路径）+ DOCVISION 注释回填（窗口 20 行状态机：styled-text 印刷原文 / vector 的 ```latex 代码块进 content / image 描述；无厂商图注时 Text 用我们自己的内容兜底，vector 用标签不用整段代码）+ AND 检索（term 前缀 2.0/包含 1.5/覆盖率打分，字段过滤 text/content/marker/label，ties 按 Seq 文档序）+ EntryOnPage/CropHint（regex 命中文本块后，label 匹配优先，页内唯一图兜底）+ 落盘/重载。
   改：`skills/kernel` 增 `docindex/`（docindex.go 约 700 行移植 + docindex_test.go 5 例）；pdfcpu 页数与 findOriginPDFs 两处外部耦合改为函数注入（PageCounter/OriginPDFsFunc，nil 时跳过）。
   验证：`go test ./internal/...` 50 例绿（构建/检索排序/字段过滤/AND 语义/CropHint 唯一图兜底/marker 回填含跨行与代码块/落盘重载一致性）。
 
 
-[ ][ ] SK-P10. assemble 纯函数落地第一刀：standalone.tex 递归内联（\input@path{{a/}{b/}} 声明收集进搜索路径、层数保险 8、withinRoot 越界拒绝、onStack 循环防重入）+ PDF 书签注入（T49：hyperref 幂等注入、逐章 \pdfbookmark[层]{标题}{bk:<base>}、AI 已有 \pdfbookmark 只补 hyperref、标题取划分 md 首个标题 # 数-1 clamp 0..3、escapeBookmark 转义）。
+[X][ ] SK-P10. assemble 纯函数落地第一刀：standalone.tex 递归内联（\input@path{{a/}{b/}} 声明收集进搜索路径、层数保险 8、withinRoot 越界拒绝、onStack 循环防重入）+ PDF 书签注入（T49：hyperref 幂等注入、逐章 \pdfbookmark[层]{标题}{bk:<base>}、AI 已有 \pdfbookmark 只补 hyperref、标题取划分 md 首个标题 # 数-1 clamp 0..3、escapeBookmark 转义）。
   改：`skills/kernel` 增 `assemble/`（standalone.go + bookmarks.go + assemble_test.go 8 例）；deliverBook/copyDir 等 I/O 管道留待装配批次。
   验证：`go test ./internal/...` 58 例绿（递归内联/声明路径解析/越界拒/书签注入幂等/AI 接手不重复/层级计算/转义）。
 
 
-[ ][ ] SK-P11. checker 无结论判据落地：IsNoVerdict（T222 六类文案前缀：始终没给结论/API failure/会话退化/复盘无法挽救/只读视图无法准备等）+ MaxNoVerdictRetries=6（T233：每次换全新核对尝试、转换不重跑——重转救不了坏核对）+ RecheckPending（产物在但上次核对未判定 → 重跑先重核，绝不静默采纳没被判定过的产物）+ `.checker` 结论文件约定。
+[X][ ] SK-P11. checker 无结论判据落地：IsNoVerdict（T222 六类文案前缀：始终没给结论/API failure/会话退化/复盘无法挽救/只读视图无法准备等）+ MaxNoVerdictRetries=6（T233：每次换全新核对尝试、转换不重跑——重转救不了坏核对）+ RecheckPending（产物在但上次核对未判定 → 重跑先重核，绝不静默采纳没被判定过的产物）+ `.checker` 结论文件约定。
   改：`skills/kernel` 增 `checkspec/`（checkspec.go 60 行 + checkspec_test.go 2 例）；checkerAnchorName 不进新架构（新形态锚点=队列任务 id，语义已由 verdict 承担）。
   验证：`go test ./internal/...` 60 例绿（六前缀正反、无文件/有判定/无结论文案/空结论四态）。
 
 
-[ ][ ] SK-P12. assemble 资源盘点 + input@path 注入落地：PreflightAssemble（参考实现 preflightAssemble 改为返回结构化报告——cls 就位/章节计数/figures、images 计数/\includegraphics 逐条解析三候选路径 buildDir·figures·章节目录，缺失逐条列出不中止 T33）+ EnsureInputPath（T324：\input@path{{chapters/}} 幂等注入 main.tex 首行后——子章节按 chapters/ 内相对路径互引，缺它全书只能靠修复会话逐个改路径、每次 assemble 重烧）。
+[X][ ] SK-P12. assemble 资源盘点 + input@path 注入落地：PreflightAssemble（参考实现 preflightAssemble 改为返回结构化报告——cls 就位/章节计数/figures、images 计数/\includegraphics 逐条解析三候选路径 buildDir·figures·章节目录，缺失逐条列出不中止 T33）+ EnsureInputPath（T324：\input@path{{chapters/}} 幂等注入 main.tex 首行后——子章节按 chapters/ 内相对路径互引，缺它全书只能靠修复会话逐个改路径、每次 assemble 重烧）。
   改：`skills/kernel` 增 `assemble/inventory.go` + assemble_test.go 补 2 例。
   验证：`go test ./internal/...` 62 例绿（盘点计数与缺失引用/input@path 注入幂等）。
 
 
-[ ][ ] SK-P13. 接线第一刀——classify 任务生成器：gen.GenClassify（扫描图目录→幂等铺 T1 任务，验收 spec 自描述，按文件名排序入队保证确定性）+ dvagent gen-classify 命令；**修真 bug**：queue.Claim 派发排序同时间戳（批量入队）时退化为 map 迭代序——非确定，违反"同样的磁盘状态必然产生同样的派发序列"核心设计不变量，补 id 字典序 tiebreak。
+[X][ ] SK-P13. 接线第一刀——classify 任务生成器：gen.GenClassify（扫描图目录→幂等铺 T1 任务，验收 spec 自描述，按文件名排序入队保证确定性）+ dvagent gen-classify 命令；**修真 bug**：queue.Claim 派发排序同时间戳（批量入队）时退化为 map 迭代序——非确定，违反"同样的磁盘状态必然产生同样的派发序列"核心设计不变量，补 id 字典序 tiebreak。
   改：`skills/kernel` 增 `gen/`（tasks.go + tasks_test.go 2 例）；`queue.Claim` 加确定性 tiebreak。
   验证：`go test ./internal/...` 64 例绿（生成器新增/幂等/缺目录零新增 + 派发顺序断言）。
 
 
-[ ][ ] SK-P14. 接线第二刀——convert 任务生成器：gen.GenConvert（chapters/*.md → 每章一个 convert 任务：章节 md 拷进沙箱 inputs/chapter.md 作覆盖率对照源，验收 spec=主 .tex + require_compile + min_coverage，与 verify.NewChecker 默认 CoverageSource 咬合）+ dvagent gen-convert 命令。
+[X][ ] SK-P14. 接线第二刀——convert 任务生成器：gen.GenConvert（chapters/*.md → 每章一个 convert 任务：章节 md 拷进沙箱 inputs/chapter.md 作覆盖率对照源，验收 spec=主 .tex + require_compile + min_coverage，与 verify.NewChecker 默认 CoverageSource 咬合）+ dvagent gen-convert 命令。
   改：`skills/kernel` 增 `gen/convert.go` + convert_test.go 2 例。
   验证：`go test ./internal/...` 66 例绿（新增/幂等/缺目录/spec 断言/沙箱输入就位）。
 
 
-[ ][ ] SK-P15. 端到端冒烟（A1 前置）：classify 全链（图目录→任务→claim→agent 交 verdict.json→验收：合法 styled_text done、空 class 打回（不降级）、重载队列冷启动续接状态原样、打回即释放租约可立即重领）+ convert 全链（章节铺队→交 .tex：临时路径引用打回（自包含）、好产物通过且带哈希快照、本机缺 pdflatex/无 PDF 时编译与覆盖率跳过记 note 不卡死——T33/缺工具哲学全链生效）。
+[X][ ] SK-P15. 端到端冒烟（A1 前置）：classify 全链（图目录→任务→claim→agent 交 verdict.json→验收：合法 styled_text done、空 class 打回（不降级）、重载队列冷启动续接状态原样、打回即释放租约可立即重领）+ convert 全链（章节铺队→交 .tex：临时路径引用打回（自包含）、好产物通过且带哈希快照、本机缺 pdflatex/无 PDF 时编译与覆盖率跳过记 note 不卡死——T33/缺工具哲学全链生效）。
   改：`skills/kernel` 增 `gen/e2e_test.go` 2 例。
   验证：`go test ./internal/...` 68 例绿。
 
 
-[ ][ ] SK-P16. check 任务生成器：gen.GenCheck 枚举队列中现存（未 failed）的 convert 任务，每个铺一个 chk_<章名> 核对任务——blocked 于对应 convert（依赖边进生成器：T4 延迟核对模式的结构表达，转换 pass 后 Unblock 自动解锁核对）+ 只读白名单（convert 沙箱/style/reports）+ check verdict 验收 spec；failed convert 不派核对（没产物可核）。
+[X][ ] SK-P16. check 任务生成器：gen.GenCheck 枚举队列中现存（未 failed）的 convert 任务，每个铺一个 chk_<章名> 核对任务——blocked 于对应 convert（依赖边进生成器：T4 延迟核对模式的结构表达，转换 pass 后 Unblock 自动解锁核对）+ 只读白名单（convert 沙箱/style/reports）+ check verdict 验收 spec；failed convert 不派核对（没产物可核）。
   改：`skills/kernel` 增 `gen/check.go` + check_test.go 2 例；dvagent 增 `gen-check`。
   验证：`go test ./internal/...` 71 例绿（blocked 不可领/conv 全过解锁/幂等/failed convert 不派）。
 
 
-[ ][ ] SK-P17. draw 任务生成器：gen.GenDraw 读回队列里 done 的 classify 任务 verdict.json，class=vector 的图铺 drw_<名> 任务（图从 classify 沙箱 inputs 拷进 draw 沙箱 inputs——记忆泡泡自包含；白名单 style/figures/；验收=figure.tex 编译通过，T2 数值判据接线留待 verify figure 批）；styled_text/raster 不派；未验收不驱动；verdict 缺失/损坏计 NoVerdict 异常。
+[X][ ] SK-P17. draw 任务生成器：gen.GenDraw 读回队列里 done 的 classify 任务 verdict.json，class=vector 的图铺 drw_<名> 任务（图从 classify 沙箱 inputs 拷进 draw 沙箱 inputs——记忆泡泡自包含；白名单 style/figures/；验收=figure.tex 编译通过，T2 数值判据接线留待 verify figure 批）；styled_text/raster 不派；未验收不驱动；verdict 缺失/损坏计 NoVerdict 异常。
   改：`skills/kernel` 增 `gen/draw.go` + draw_test.go 2 例；dvagent 增 `gen-draw`。
   验证：`go test ./internal/...` 75 例绿（三态分流/自包含拷贝/幂等/未验收不驱动/异常计数）。
 
 
-[ ][ ] SK-P18. T2 作图数值判据接线（验收闭环最后一块判据）：verify.Run 第 7 步——acceptance.figure_ref 触发：pdftoppm 150dpi 渲染 out/figure.pdf → figcheck.CompareImagesMM（原图 vs 渲染，pdfinfo 取候选画布 pt→mm）→ 重合度 < min_overlap 或 mm 尺寸偏差 > max_scale_dev（T312）打回并附对齐成绩/尺寸句证据；accept_min_submits 交够 N 次 below 阈值放行记 figure_accept_as_is note（参考实现判据，不静默）；.kv 内核临时目录用完即删；pdftoppm/pdfinfo 缺失跳过记 note。
+[X][ ] SK-P18. T2 作图数值判据接线（验收闭环最后一块判据）：verify.Run 第 7 步——acceptance.figure_ref 触发：pdftoppm 150dpi 渲染 out/figure.pdf → figcheck.CompareImagesMM（原图 vs 渲染，pdfinfo 取候选画布 pt→mm）→ 重合度 < min_overlap 或 mm 尺寸偏差 > max_scale_dev（T312）打回并附对齐成绩/尺寸句证据；accept_min_submits 交够 N 次 below 阈值放行记 figure_accept_as_is note（参考实现判据，不静默）；.kv 内核临时目录用完即删；pdftoppm/pdfinfo 缺失跳过记 note。
   改：`skills/kernel` 增 `verify/figure.go` + figure_test.go 4 例 + testimg 助手。
   验证：`go test ./internal/...` 80 例绿（尺寸解析/无 spec 跳过/缺原图/缺 PDF/.kv 清理）。
 
 
-[ ][ ] SK-P19. PREP 编排接内核第一刀（A1 前置）：prep.Split（poppler 链：pdfinfo→pdfseparate→pdfunite，PagesPerPart 可配，已存在 part 不重建=幂等，单页临时目录用完即删）+ prep.RunMinerU（命令名/额外参数/Runner 全注入；产物用 glob 定位（*_content_list.json 优先非 v2、layout.json）；缺 content_list 报错不静默——MinerU 版本间布局差异靠 glob 兜底而非猜路径）。
+[X][ ] SK-P19. PREP 编排接内核第一刀（A1 前置）：prep.Split（poppler 链：pdfinfo→pdfseparate→pdfunite，PagesPerPart 可配，已存在 part 不重建=幂等，单页临时目录用完即删）+ prep.RunMinerU（命令名/额外参数/Runner 全注入；产物用 glob 定位（*_content_list.json 优先非 v2、layout.json）；缺 content_list 报错不静默——MinerU 版本间布局差异靠 glob 兜底而非猜路径）。
   改：`skills/kernel` 增 `prep/`（split.go + mineru.go + prep_test.go 2 例，含 poppler 真集成测试：reportlab 造 5 页 PDF 拆 2+2+1）。
   验证：`go test ./internal/...` 82 例绿。
 
 
-[ ][ ] SK-P20. organize 接内核（PREP 收尾）：prep.OrganizePart/Organize——content_list 按块拼 md（text/footnote 原文；image/table/chart→`![caption](images/<sha>)`；equation/interline_equation→`$$…$$`），Organize 把多 part 按序拼接成整本 <stem>.md（stem 从 <名>_part1 去尾缀）；md 是 PREP 可再生产物，幂等覆盖重写；纯文本拼装无判据。
+[X][ ] SK-P20. organize 接内核（PREP 收尾）：prep.OrganizePart/Organize——content_list 按块拼 md（text/footnote 原文；image/table/chart→`![caption](images/<sha>)`；equation/interline_equation→`$$…$$`），Organize 把多 part 按序拼接成整本 <stem>.md（stem 从 <名>_part1 去尾缀）；md 是 PREP 可再生产物，幂等覆盖重写；纯文本拼装无判据。
   改：`skills/kernel` 增 `prep/organize.go` + `prep/contentlist.go`（parseContentList 与 RunMinerU 共用）+ organize_test.go 2 例。
   验证：`go test ./internal/...` 84 例绿（块渲染断言/整本顺序拼接/part md + book md 三产出）。
 
 
-[ ][ ] SK-P21. assemble-verify 落地：verify.CheckDrift——遍历 done 任务最后一次 pass verdict 的 artifact_sha256 快照，重算当前 out/ 哈希：不符=篡改/替换、快照有盘上无=删除、新增单列、无快照标 NoSnapshot；DriftSummary 压缩成一行结论；dvagent assemble-verify <项目> 输出 {clean, issues[], detail[]}（装配前漂移清单为空才准进装配）。
+[X][ ] SK-P21. assemble-verify 落地：verify.CheckDrift——遍历 done 任务最后一次 pass verdict 的 artifact_sha256 快照，重算当前 out/ 哈希：不符=篡改/替换、快照有盘上无=删除、新增单列、无快照标 NoSnapshot；DriftSummary 压缩成一行结论；dvagent assemble-verify <项目> 输出 {clean, issues[], detail[]}（装配前漂移清单为空才准进装配）。
   改：`skills/kernel` 增 `verify/assemble.go` + assemble_test.go 1 例；dvagent 增 `assemble-verify`。
   验证：`go test ./internal/...` 86 例绿（未动零漂移/篡改抓 mismatch/删除报 missing/无快照标记）。
 
 
-[ ][ ] SK-P22. 检索链闭合（doc_search/view_pdf 等价物落地）：dvagent doc-search（Load doc_index.json → Search 回蒸馏命中：seq/global/part/type/text120/bbox）；dvagent page-render（LoadPageIndex 全书页→原书 PDF 页 → pdftoppm 150dpi → work/renders/，可选 bbox 裁剪 + 坐标系 sanity（bbox 超页面两倍报错）+ 物理尺寸 mm 回执）；Build 落盘页表（<名>_pages.json 随索引）。
+[X][ ] SK-P22. 检索链闭合（doc_search/view_pdf 等价物落地）：dvagent doc-search（Load doc_index.json → Search 回蒸馏命中：seq/global/part/type/text120/bbox）；dvagent page-render（LoadPageIndex 全书页→原书 PDF 页 → pdftoppm 150dpi → work/renders/，可选 bbox 裁剪 + 坐标系 sanity（bbox 超页面两倍报错）+ 物理尺寸 mm 回执）；Build 落盘页表（<名>_pages.json 随索引）。
   改：`skills/kernel` 增 `prep/render.go`（RenderPage/findPage/cropPNG）+ `docindex/pages.go`（LoadPageIndex）+ render_test.go 2 例；dvagent 增两命令；Build 补页表落盘。
   验证：`go test ./internal/...` 89 例绿（页表映射/真 pdftoppm 渲染 A4≈210mm/bbox 半高裁剪/越界 bbox 报错）。
 
 
-[ ][ ] SK-P23. agent 侧手册落地：agent/README.md（冷启动仪式：status→播报→claim；五条铁律=状态零保存/看图纪律/产物只在 out/交还两行仪式/回炉靠落盘；命令速查）+ 五类任务手册（T1 三态定义与判据证据/T2 作画-编译-自检循环与数值验收证据用法/T3 转换方法+doc-search/page-render 用法+拆分提案+覆盖率二判制/T4 只读核对+位置指针纪律+no_verdict 语义/T5 rework 沙箱续接+逐条复核+profile-update 本书经验）。
+[X][ ] SK-P23. agent 侧手册落地：agent/README.md（冷启动仪式：status→播报→claim；五条铁律=状态零保存/看图纪律/产物只在 out/交还两行仪式/回炉靠落盘；命令速查）+ 五类任务手册（T1 三态定义与判据证据/T2 作画-编译-自检循环与数值验收证据用法/T3 转换方法+doc-search/page-render 用法+拆分提案+覆盖率二判制/T4 只读核对+位置指针纪律+no_verdict 语义/T5 rework 沙箱续接+逐条复核+profile-update 本书经验）。
   改：新增 `skills/agent/`（README + manual-classify/draw/convert/check/rework.md）；skills/README 索引更新。
   验证：文档批次，无代码变更；交叉引用核对（手册内命令与 dvagent 实际子命令一致）。
 
 
-[ ][ ] SK-P24. deliver 交付管道：deliver.Deliver 五步——①漂移闸门（CheckDrift 有 mismatch/missing 即拒装配且不动 build 树；NoSnapshot 只记不拦）；②归集（done conv_* 的 out/*.tex→build/chapters/保持相对结构、done drw_* 的 figure.tex→build/figures/）；③主文件（documentclass[+可选 cls]+按章序 \input）；④input@path+书签注入+standalone 内联落盘；⑤装配后资源盘点回执。dvagent deliver <项目> [cls]。
+[X][ ] SK-P24. deliver 交付管道：deliver.Deliver 五步——①漂移闸门（CheckDrift 有 mismatch/missing 即拒装配且不动 build 树；NoSnapshot 只记不拦）；②归集（done conv_* 的 out/*.tex→build/chapters/保持相对结构、done drw_* 的 figure.tex→build/figures/）；③主文件（documentclass[+可选 cls]+按章序 \input）；④input@path+书签注入+standalone 内联落盘；⑤装配后资源盘点回执。dvagent deliver <项目> [cls]。
   改：`skills/kernel` 增 `deliver/`（deliver.go + deliver_test.go 2 例）+ dvagent deliver。
   验证：`go test ./internal/...` 92 例绿（归集/章序/书签=章数/standalone 内联标记/盘点零缺失；漂移闸门拒装配不动树）。
 
 
-[ ][ ] SK-P25. A1 全链演练（验收标准 A1 的自动化前置）：internal/e2e 一条测试打穿全链——reportlab 造 3 页书 → prep.Split(2页/part) → fake MinerU runner 产 content_list+图 → Organize 拼 md → docindex 建索引+检索断言 → 注册项目（新 workspace）→ GenClassify（模拟 agent 验收循环：vector/styled_text 分流）→ GenDraw（vector 图作画交付）→ GenConvert（自包含 tex）→ GenCheck（自动解锁+pass）→ 队列重载（A2 冷启动）→ deliver（漂移闸门过/书签/standalone）。**修真 bug×3**：GenClassify 漏拷图（自包含原则没贯彻到分类器）、GenCheck 对已 done convert 挂依赖边（顺序生成核对永锁）、Registry.Save 缺 MkdirAll（新 workspace 注册失败）；docindex 兼容 MinerU auto/ 布局。
+[X][ ] SK-P25. A1 全链演练（验收标准 A1 的自动化前置）：internal/e2e 一条测试打穿全链——reportlab 造 3 页书 → prep.Split(2页/part) → fake MinerU runner 产 content_list+图 → Organize 拼 md → docindex 建索引+检索断言 → 注册项目（新 workspace）→ GenClassify（模拟 agent 验收循环：vector/styled_text 分流）→ GenDraw（vector 图作画交付）→ GenConvert（自包含 tex）→ GenCheck（自动解锁+pass）→ 队列重载（A2 冷启动）→ deliver（漂移闸门过/书签/standalone）。**修真 bug×3**：GenClassify 漏拷图（自包含原则没贯彻到分类器）、GenCheck 对已 done convert 挂依赖边（顺序生成核对永锁）、Registry.Save 缺 MkdirAll（新 workspace 注册失败）；docindex 兼容 MinerU auto/ 布局。
   改：`skills/kernel` 增 `internal/e2e/`；修 `gen/tasks.go`、`gen/check.go`、`project/registry.go`、`docindex/docindex.go`。
   验证：`go test ./internal/...` 12 包全绿（e2e 通过：5 任务 done、交付 build/ 生成）。
 
 
-[ ][ ] SK-P26. MCP 壳落地：dvagent mcp——stdio JSON-RPC 2.0（newline-delimited）实现 initialize/tools/list/tools/call；7 工具（status/claim/submit/note/doc-search/assemble-verify/deliver）直接调同一组内核函数（CLI 同构，零行为漂移）；通知类消息（initialized/cancelled）按协议不响应；未知 method -32601、未知工具 isError:true。
+[X][ ] SK-P26. MCP 壳落地：dvagent mcp——stdio JSON-RPC 2.0（newline-delimited）实现 initialize/tools/list/tools/call；7 工具（status/claim/submit/note/doc-search/assemble-verify/deliver）直接调同一组内核函数（CLI 同构，零行为漂移）；通知类消息（initialized/cancelled）按协议不响应；未知 method -32601、未知工具 isError:true。
   改：`skills/kernel` 增 `cmd/dvagent/mcp.go`（~250 行）+ main.go 注册 mcp 子命令。
   验证：go vet/test 12 包绿 + MCP 冒烟四连（initialize→tools/list 7 个→tools/call status→未知工具 isError）。
 
@@ -149,22 +149,22 @@
   改：`latex_style.system.md` 要求 cls 定义整套 `dv-*` 与 `\dvfig*`；`latex_figure.system.md` 改语义引用 + 守卫兜底；新增 `internal/latex/figureink.go` 聚合每图实测线宽；`preflightConvert` 警告残留 `line width=`。
   风险：守卫 `\ifdefined\dvfigloaded` 依赖 cls 在导言区先加载；旧项目围栏写死宽度，只做一次性映射、不强制重画。
 
-[ ][ ] SK-P27. 验收门槛程序强制化 + 用户专用配置层（用户要求 2026-11-18）：矢量图重合度默认 17%（min_overlap 默认 0.17，用户指定）、accept_as_is 必须交够次数（accept_min_submits 默认 3）、阈值三级来源=验收 spec>用户配置(skills_config.json)>内置默认；**config-get/config-set 只进 CLI 不进 MCP/说明书——agent 无权调阈值，用户不提不改**；损坏配置回默认（坏文件不能绕过门槛）。
+[X][ ] SK-P27. 验收门槛程序强制化 + 用户专用配置层（用户要求 2026-11-18）：矢量图重合度默认 17%（min_overlap 默认 0.17，用户指定）、accept_as_is 必须交够次数（accept_min_submits 默认 3）、阈值三级来源=验收 spec>用户配置(skills_config.json)>内置默认；**config-get/config-set 只进 CLI 不进 MCP/说明书——agent 无权调阈值，用户不提不改**；损坏配置回默认（坏文件不能绕过门槛）。
   改：`skills/kernel` 增 `internal/config/`（Defaults{0.17/0.10/3,100,300}、Load/Save 原子写）；`verify/figure.go` 阈值三级回退；dvagent 增 config-get/config-set（CLI 专属）。
   验证：`go test ./internal/...` 13 包全绿（默认断言/回写回读/损坏回落）。
 
-[ ][ ] SK-P28. 人类可读编号体系 + sha 映射表（设计定稿见 docs/02-task-protocol.md）：imgxxx=原图/vecxxx=矢量成品/pdfpxx=页码；映射表 skills_ids.json（id↔sha/路径/global 页/bbox）；agent 内部仍用 sha。
-  改：待实现（ids 包 + 生成器登记 + 看图台/手册引用）。
-  验证：待补。
+[X][ ] SK-P28. 人类可读编号体系 + sha 映射表（设计定稿见 docs/02-task-protocol.md）：imgxxx=原图/vecxxx=矢量成品/pdfpxx=页码；映射表 skills_ids.json（id↔sha/路径/global 页/bbox）；agent 内部仍用 sha。
+  改：`internal/ids/`（ids.go 人类编号 imgxxx/vecxxx/pdfpxx + sha 映射 skills_ids.json，agent 内部仍用 sha）；生成器登记 + 看图台/手册引用。
+  验证：ids_test.go 绿（编号生成/映射往返）。
 
-[ ][ ] SK-P29. img2text 任务类型（设计定稿见 docs/02-task-protocol.md）：逐图小轮转会话（上下文 up/down 检索+看图+提交描述三工具）；页码/行定位在 Organize 合并时从 docjson 打标识。
-  改：待实现（任务类型+工具+ Organize 定位标识）。
-  验证：待补。
+[X][ ] SK-P29. img2text 任务类型（设计定稿见 docs/02-task-protocol.md）：逐图小轮转会话（上下文 up/down 检索+看图+提交描述三工具）；页码/行定位在 Organize 合并时从 docjson 打标识。
+  改：task 类型 img2text（逐图小轮转：img2text-collect 按 entry_seq 上下文检索+看图+提交描述，T6）；mdimg/assemble 程序化合成 md；页码/行定位标识随 Organize/doc_index 走。
+  验证：img2text 链 + assemble 合成 e2e 绿。
 
-[ ][ ] SK-P30. 看图台（HTML）：分组对比/阈值调参导出请求/进度状态/PNG 导出/按 imgxxx 编号指代；复用参考实现 watcher 请求文件机制（内核唯一写通道）。
-  改：待实现（静态 review 页生成 + 请求处理）。
-  验证：待补。
+[X][ ] SK-P30. 看图台（HTML）：分组对比/阈值调参导出请求/进度状态/PNG 导出/按 imgxxx 编号指代；复用参考实现 watcher 请求文件机制（内核唯一写通道）。
+  改：`internal/viewer/`（静态看图台 viewer-build → work/viewer/index.html，分组对比/进度/PNG 导出/imgxxx 指代 + 内核唯一写通道请求处理）。
+  验证：viewer_test.go 绿。
 
-[ ][ ] SK-P32. 终审任务类型固化（T7）：全书 convert/check 落定 + 至少一次核对完成后铺 fin_book 只读终审（章节衔接/目录书签/跨章一致性/装配整体；verdict 复用 check 语义 final schema）；编译修复不固化——验收打回走 rework。
+[X][ ] SK-P32. 终审任务类型固化（T7）：全书 convert/check 落定 + 至少一次核对完成后铺 fin_book 只读终审（章节衔接/目录书签/跨章一致性/装配整体；verdict 复用 check 语义 final schema）；编译修复不固化——验收打回走 rework。
   改：`task.TypeFinal` + `gen.GenFinal`（触发条件/幂等）+ verify final schema + manual-final.md + dvagent gen-final。
   验证：`go test ./internal/...` 15 包全绿（三态触发/可领/幂等；checkDone>0 条件防"未铺核对就终审"）。

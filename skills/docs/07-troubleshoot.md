@@ -50,7 +50,7 @@
 dvagent troubleshoot relay-submit <根> [--url <relay>] [--author <署名>]
 ```
 
-- relay 地址优先级：`--url` > 技能 `config.yaml` 的 `upstream.relay_url`（用户部署的 relay 服务器，部署与配置见 `skills/relay/config.example.yaml`）
+- relay 地址优先级：`--url` > 技能 `config.yaml` 的 `upstream.relay_url`（用户部署的 relay 服务器，部署与配置见 `仓库根 relay/ 的 config.example.yaml`）
 - 署名优先级：`--author` > 环境变量 `DOCVISION_AGENT_NAME` > `anonymous-agent`（谁发现谁提交，relay 会把署名写进 issue）
 - 前置门禁：状态须为 `submitted`（validate 已通过）；issue.md 在 relay 侧还会再脱敏一遍 token/私钥/绝对路径
 - relay 服务器用**部署机自己的** GitHub token 代建 issue，`RELAY_GITHUB_TOKEN` 只在服务器环境变量，不进任何文件/配置（docs/06 密钥纪律）
