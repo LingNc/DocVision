@@ -199,6 +199,10 @@
   改：`skills/kernel` 增 `gen/draw.go` + draw_test.go 2 例；dvagent 增 `gen-draw`。
   验证：`go test ./internal/...` 75 例绿（三态分流/自包含拷贝/幂等/未验收不驱动/异常计数）。
 
+[ ][ ] P98. T2 作图数值判据接线（验收闭环最后一块判据）：verify.Run 第 7 步——acceptance.figure_ref 触发：pdftoppm 150dpi 渲染 out/figure.pdf → figcheck.CompareImagesMM（原图 vs 渲染，pdfinfo 取候选画布 pt→mm）→ 重合度 < min_overlap 或 mm 尺寸偏差 > max_scale_dev（T312）打回并附对齐成绩/尺寸句证据；accept_min_submits 交够 N 次 below 阈值放行记 figure_accept_as_is note（旧线判据，不静默）；.kv 内核临时目录用完即删；pdftoppm/pdfinfo 缺失跳过记 note。
+  改：`skills/kernel` 增 `verify/figure.go` + figure_test.go 4 例 + testimg 助手。
+  验证：`go test ./internal/...` 80 例绿（尺寸解析/无 spec 跳过/缺原图/缺 PDF/.kv 清理）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

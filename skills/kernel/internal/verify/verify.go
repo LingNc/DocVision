@@ -104,6 +104,13 @@ func (c *Checker) Run(t *task.Task) ([]string, map[string]string) {
 	// 6. verdict.json 模式校验（T1 classify / T4 check）。
 	errs = append(errs, c.checkVerdictSchema(t, sandboxAbs)...)
 
+	// 7. T2 作图数值判据（figure_ref 触发：软墨迹对齐 + mm 尺寸 + accept_min_submits）。
+	ferrs, fnotes := c.checkFigure(t, sandboxAbs)
+	errs = append(errs, ferrs...)
+	for k, v := range fnotes {
+		notes[k] = v
+	}
+
 	// 7. out/ 哈希快照进 notes（assemble 复核"acceptance 后未被篡改"）。
 	if hashes, err := texcheck.Sha256Dir(filepath.Join(sandboxAbs, "out")); err == nil {
 		if b, err := json.Marshal(hashes); err == nil {

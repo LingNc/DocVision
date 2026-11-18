@@ -3971,3 +3971,12 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **流水线闭环**：至此五类任务生成器齐了四（classify→draw→convert→check，加 rework 由 issue-add 触发）——"图目录→三态分类→矢量重绘→章节转换→核对"的主干可以纯靠 dvagent 命令 + claim/submit 驱动。
 
 **验证**：`go test ./internal/...` 75 例绿。
+
+
+## 第五十四批：T2 作图数值判据接线 + 第三次环境恢复（2026-11-18，用户："继续"）
+
+**环境事故**：/tmp 第三次随机清空（Go 工具链+仓库全丢）。恢复：交付物无损（skills-delivery 的 18 patch），全新 dev 克隆 + git am 完整重建；**发现 bundle 用 `--not dev` 构建缺基线、空仓无法 fetch**——patch 通道立功，本批起 bundle 改用含 dev 基线格式（空仓可直接 fetch）。
+
+**P98**：verify.Run 第 7 步（验收闭环最后一块判据）：`figure_ref` 触发——pdftoppm 150dpi 渲染 agent 交的 figure.pdf → figcheck 软墨迹对齐 vs 原图（pdfinfo 取候选画布物理尺寸 pt→mm）；重合度 < min_overlap（缺省 0.50）或 mm 尺寸偏差 > max_scale_dev（缺省 0.10，T312"看着对上了其实窄了一截"）打回，错误里附对齐成绩（FormatRuns）与尺寸句（SizeSentence）证据；accept_min_submits（缺省 3）交够 N 次 below 阈值放行并记 figure_accept_as_is note（旧线判据，放行≠静默）；`.kv` 内核临时目录用完即删（不进产物哈希）；pdftoppm/pdfinfo 缺失跳过记 note 不卡死。至此 A4 验收不被绕过的全部判据就位：必产物/自包含/编译/覆盖率/verdict 模式/作图数值。
+
+**验证**：`go test ./internal/...` 80 例绿。
