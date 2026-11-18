@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills dedupe 居中重合核心（P86）**：软墨量内容框/分级 Jaccard/S 自适应/逐级搜索/±10% 平移预算从旧线 motif_canon+motif_align 逐字移植（dedupe/ 包），含预筛（WorthScore）、过程量（AlignDetail）、带入不接力（CarryOver）。`go test` 36 例绿。
 - **skills T1/T4 verdict 模式验收（P85）**：classify 三态校验（styled_text 必附提取、vector 必附证据、不合法值打回——失败不降级判据入代码）、check 校验（issues 必带位置指针、no_verdict 由重试上限兜底——绝不因无结论无限重转）。`go test` 27 例绿。
 - **skills T2 作图判据（P84）**：软墨迹对齐算法（compareFigure）逐字移植旧线 figure_compare.go——多分辨率渐进对齐、质心起点、尺寸按物理 mm 在归一化前量取（scale_dev 抓"看着对上了其实窄了一截"），证据叠加图可落盘。`go test` 19 例绿。
 - **skills T3 重型判据（P83）**：覆盖率算法逐字移植旧线（pdftotext + CJK 三字组，阈值 0.85，首打回再放行记缺口）、编译检查（pdflatex + sha256 快照）、验收器默认装配、缺工具跳过不卡死。`go test` 14 例绿。

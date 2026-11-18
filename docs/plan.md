@@ -151,6 +151,10 @@
   改：`skills/kernel` 增 `verify/schema.go`（ClassifyVerdict/CheckVerdict 结构 + 校验）+ `schema_test.go` 8 例；`Run` 第 6 步接入。
   验证：`go test ./internal/...` 27 例绿（classify 5 例 + check 4 例覆盖全部正反路径）。
 
+[ ][ ] P86. dedupe 居中重合判据核心落地：软墨量内容框（不二值化不缩放）、S 自适应按对计算、逐级搜索 32→最细（判定分取最细级）、±10% 平移预算/细层 ±2 格不扩窗，从旧线 motif_canon.go+motif_align.go 逐字移植；附预筛（墨量/长宽比）、代价记账、AlignDetail 过程量、CarryOver 带入不接力（T151）。
+  改：`skills/kernel` 增 `dedupe/`（canon.go 230 行 + align.go 230 行 + dedupe_test.go 8 例）；Runner/配置耦合改为包级变量与参数。
+  验证：`go test ./internal/...` 36 例绿（自比≈1、方块vs竖条低于 0.60 闸门、预筛拒高宽比差、空白/小内容框退回、画布抬下限、平移换算、级数尾级规则、带入不接力）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

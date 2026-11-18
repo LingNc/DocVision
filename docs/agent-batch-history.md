@@ -3849,3 +3849,12 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 测试踩坑一处（测试自身）：每个用例新建任务后忘了重复设置 `verdict_schema`，导致校验静默跳过、误判通过——验收 spec 的"没写要求就不检查"语义放大了测试构造错误，已在用例中逐条显式设置。
 
 **验证**：`go test ./internal/...` 27 例绿（schema 9 例覆盖正反路径）。
+
+
+## 第四十二批：dedupe 居中重合判据核心移植（2026-11-18，用户："继续"）
+
+按台账迁 dedupe 第一刀：旧线 `motif_canon.go`（居中重合判据）+ `motif_align.go`（覆盖率/预筛/过程量/带入）逐字移植为 `skills/kernel/internal/dedupe/`（canon.go + align.go，T129–T151 判据原样保留：非二值化软墨量、S 自适应按对计算、不缩放、逐级搜索 32→最细、判定分取最细一级、±10% 平移预算/细层 ±2 格不扩窗、带入只认安全集不当跳板）。Runner 与配置耦合部分改为包级变量与参数（AlignGridSpec/AlignGrid 可注入，对应旧线 applyMotifMetricConfig）。
+
+**测试踩坑三处（全为测试构造问题，非移植代码问题）**：①NRGBA 零值像素（透明黑）被 CanonFromImage 当满墨——它只读 RGB 不读 alpha，真实解码图全不透明，测试背景必须填不透明白；②CanonLevels 尾级规则理解纠偏：循环上界是 finest 而非 canvas，尾级=≤finest 的最大 2 幂级（真实流 finest≈0.95S<canvas 恒成立）；③blank 测试图同①。
+
+**验证**：`go test ./internal/...` 36 例绿（dedupe 8 例 + 其余 28 例）。
