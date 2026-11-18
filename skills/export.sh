@@ -14,7 +14,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/$PKG"
-cp -r "$SKILLS_DIR/docs" "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$STAGE/$PKG/"
+cp -r "$SKILLS_DIR/docs" "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$SKILLS_DIR/SKILL.md" "$STAGE/$PKG/"
 
 # 打包（GNU tar 处理 UTF-8 文件名无碍）
 TARBALL="$OUT_DIR/$PKG.tar.gz"
