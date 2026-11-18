@@ -879,11 +879,11 @@ func main() {
 		if err != nil {
 			die(err)
 		}
-		out := mdimg.Assemble(string(src), repls)
+		assembled := mdimg.Assemble(string(src), repls)
 		if err := os.MkdirAll(filepath.Dir(args[3]), 0o755); err != nil {
 			die(err)
 		}
-		if err := os.WriteFile(args[3], []byte(out), 0o644); err != nil {
+		if err := os.WriteFile(args[3], []byte(assembled), 0o644); err != nil {
 			die(err)
 		}
 		nText, nMmd, nKeep := 0, 0, 0

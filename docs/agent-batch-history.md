@@ -4211,3 +4211,12 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 ① `internal/mdimg/mermaid.go`——旧线逐字（ExtractMermaidBlocks 围栏抽取 + ValidateMermaid mmdc 逐块校验）；② `internal/mdimg/assemble.go`——重组装引擎：逐图任务三态产物（replacement.md/figure.mmd/keep）按 md 图片出现序替换（文字→替换、Mermaid→围栏块、mmdc 可用时校验失败整图回炉、keep→原样）；③ `img2text-assemble <项目> <源md> <输出md>` 命令；④ manual-img2text.md 重写为档位2 三态决策手册。pagemark（页码标记）为下一段。
 
 **验证**：`go test ./internal/...` 18 包全绿（mermaid 抽取/三态替换序/无决策保留断言）。
+
+
+## 第八十五批：编译错修复（提交判据教训）+ 档位2 提示词回收（2026-11-18，用户："继续"/"之前的英文 prompt 打磨过可以保留复用"）
+
+**编译错修复**：84 批 img2text-assemble 的 `out := mdimg.Assemble(...)` 遮蔽包级 `out()` 函数（go test 只盖 internal 包，cmd 未编译就推了）。修复（局部改名 assembled）。**教训入规矩：提交前以 `go build ./cmd/dvagent` 为最终判据（test 绿≠能编译），批次历史明示。**
+
+**提示词回收**：旧线 `prompts/templates/img2text.system.md`（8 规则三态分析器主提示词）与 `img2text_textonly.system.md`（文字化专用）逐字迁入 `skills/agent/prompts-img2text.md`，附旧线→新架构映射表（get_more_context→ctx-up/down；[IMG_TYPE:]→三态产物；mermaid fix 会话→校验打回修语法；{OUTPUT_LANG}→config mineru.language）。三分法处置：判据句已在内核，人设/仪式句略去，知识层全保留。
+
+**验证**：`go build ./cmd/dvagent` 绿（最终判据）+ 18 包测试全绿。
