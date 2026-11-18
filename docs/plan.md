@@ -191,6 +191,10 @@
   改：`skills/kernel` 增 `gen/e2e_test.go` 2 例。
   验证：`go test ./internal/...` 68 例绿。
 
+[ ][ ] P96. check 任务生成器：gen.GenCheck 枚举队列中现存（未 failed）的 convert 任务，每个铺一个 chk_<章名> 核对任务——blocked 于对应 convert（依赖边进生成器：T4 延迟核对模式的结构表达，转换 pass 后 Unblock 自动解锁核对）+ 只读白名单（convert 沙箱/style/reports）+ check verdict 验收 spec；failed convert 不派核对（没产物可核）。
+  改：`skills/kernel` 增 `gen/check.go` + check_test.go 2 例；dvagent 增 `gen-check`。
+  验证：`go test ./internal/...` 71 例绿（blocked 不可领/conv 全过解锁/幂等/failed convert 不派）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

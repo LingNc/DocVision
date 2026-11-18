@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills check 任务生成器（P96）**：`gen.GenCheck` 为队列中每个 convert 任务铺一个 blocked 核对任务（T4 延迟核对的结构表达——转换 done 后 Unblock 自动解锁核对；failed convert 不派核对；dvagent 新增 `gen-check`）。`go test` 71 例绿。
 - **skills 端到端冒烟（P95）**：gen 包新增两条 e2e 测试——classify 全链（生成→claim→agent 写 verdict→验收：合法记 done 带哈希快照/空 class 打回回 pending/重载冷启动续接/打回即释放租约立即可重领）+ convert 全链（章节铺队→自包含判据打回临时路径引用→好产物通过/编译覆盖率缺工具跳过记 note 不卡死）。`go test` 68 例绿。
 - **skills convert 任务生成器（P94）**：`gen.GenConvert` 把 chapters/ 章节 md 幂等铺成 convert 任务（md 拷进沙箱 inputs/chapter.md 当覆盖率对照源，验收 spec：主 .tex 编译通过 + 覆盖率；dvagent 新增 `gen-convert`）。`go test` 66 例绿。
 - **skills classify 任务生成器（P93）**：接线第一刀——`gen.GenClassify` 把图目录幂等铺成 classify 任务队列（验收 spec 自描述，dvagent 新增 `gen-classify` 命令）；**修真 bug**：队列派发同时间戳（批量入队）时按 map 迭代序——非确定，破坏"同磁盘状态必同派发序列"核心不变量，已加 id 字典序 tiebreak。`go test` 64 例绿。

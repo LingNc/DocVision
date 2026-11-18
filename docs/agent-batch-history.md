@@ -3953,3 +3953,12 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **convert 全链**：章节铺队→交 .tex→自包含判据（`_subdivision/` 引用打回）→好产物通过；本机无 pdflatex、无 PDF 产物时编译/覆盖率**跳过记 note 不卡死**（T33 缺工具哲学在全链末端生效）。
 
 **验证**：`go test ./internal/...` 68 例绿。至此验收标准 A2（冷启动续接）/A4（验收不被绕过）/A8（问题落盘不靠记忆）的核心机制均有端到端测试背书。
+
+
+## 第五十二批：check 任务生成器——依赖边进生成器（2026-11-18，用户："继续"）
+
+`gen.GenCheck` 枚举队列里未 failed 的 convert 任务，每个铺一个核对任务（chk_<章名>），blocked 于对应 convert——**T4 延迟核对模式的结构表达**：生成时不必等转换完成，依赖边保证核对只在转换 pass 后由 Unblock 自动解锁。failed convert 不派核对（没产物可核，避免无的放矢）。
+
+**设计点**：核对任务带只读白名单（convert 沙箱/style/reports）——核对是只读任务，输入经白名单路径给，不拷进沙箱（与 convert 的 inputs 拷贝语义相反，一写一读）。
+
+**验证**：`go test ./internal/...` 71 例绿（blocked 不可领、conv 全过自动解锁、幂等、failed convert 不派）。
