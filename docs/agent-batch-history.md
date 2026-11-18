@@ -3915,3 +3915,12 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **P91**：`IsNoVerdict`（T222：六类"核对没给结论"文案前缀——始终没给结论/API failure/会话已退化/复盘判定无法挽救/只读视图无法准备）；`MaxNoVerdictRetries=6`（T233：无结论时每次换一条全新核对尝试、转换会话不重跑——产物没被判定过，重转不会更有结论，也没理由假设新转换会话能救回坏核对）；`RecheckPending`（产物在、`.checker` 里是 no-verdict 文案 → 重跑先重核这一份；T222 核心：不能被"已有产物，跳过"静默采纳——跳过意味着整章连核对都不跑）；`.checker` 结论文件约定（`<产物>.checker`，空串=pass）。checkerAnchorName 不进新架构：旧锚点是转换转录文件名，新形态下队列任务 id + verdict 记录已等价承载"哪一次转换"的语义。
 
 **验证**：`go test ./internal/...` 60 例绿。
+
+
+## 第四十八批：assemble 资源盘点与 input@path 注入（2026-11-18，用户："继续"）
+
+按台账迁 assemble 第二刀。旧线 `preflightAssemble`（写日志）与 `ensureInputPath`（T324）逐字移植为 `assemble/inventory.go`。
+
+**P92**：`PreflightAssemble` 改为返回结构化 `PreflightReport`（cls 就位、章节 .tex 计数、figures/images 文件计数、\includegraphics 引用总数与逐条解析——候选路径三处：buildDir 根、figures/、章节文件所在目录；解析不到的逐条列进 RefsMissing **不中止**——缺图不该毁掉整本书，T33）。`EnsureInputPath` 幂等把 `\makeatletter\def\input@path{{chapters/}}\makeatother` 注进 main.tex 首行后（已有声明或空文件跳过）：章节之间按 chapters/ 内相对路径互引子章节，缺这张表全书只能靠修复会话逐个改路径，每次 assemble 重烧一遍（修复只在临时构建树生效）。
+
+**验证**：`go test ./internal/...` 62 例绿。

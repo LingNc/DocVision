@@ -175,6 +175,10 @@
   改：`skills/kernel` 增 `checkspec/`（checkspec.go 60 行 + checkspec_test.go 2 例）；checkerAnchorName 不进新架构（新形态锚点=队列任务 id，语义已由 verdict 承担）。
   验证：`go test ./internal/...` 60 例绿（六前缀正反、无文件/有判定/无结论文案/空结论四态）。
 
+[ ][ ] P92. assemble 资源盘点 + input@path 注入落地：PreflightAssemble（旧线 preflightAssemble 改为返回结构化报告——cls 就位/章节计数/figures、images 计数/\includegraphics 逐条解析三候选路径 buildDir·figures·章节目录，缺失逐条列出不中止 T33）+ EnsureInputPath（T324：\input@path{{chapters/}} 幂等注入 main.tex 首行后——子章节按 chapters/ 内相对路径互引，缺它全书只能靠修复会话逐个改路径、每次 assemble 重烧）。
+  改：`skills/kernel` 增 `assemble/inventory.go` + assemble_test.go 补 2 例。
+  验证：`go test ./internal/...` 62 例绿（盘点计数与缺失引用/input@path 注入幂等）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

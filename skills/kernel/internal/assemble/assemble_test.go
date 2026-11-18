@@ -141,3 +141,54 @@ func TestEscapeBookmark(t *testing.T) {
 		t.Fatalf("转义错: %q", got)
 	}
 }
+
+func TestPreflightAssemble(t *testing.T) {
+	root := t.TempDir()
+	mk := func(rel string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("book.cls")
+	mk("figures/f1.pdf")
+	mk("images/i1.png")
+	mk("chapters/ch1.tex")
+	if err := os.WriteFile(filepath.Join(root, "chapters/ch1.tex"),
+		[]byte("\\includegraphics{f1.pdf}\n\\includegraphics[width=3cm]{nope.png}\n\\includegraphics{images/i1.png}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep := PreflightAssemble(root, "book")
+	if !rep.ClsOK || rep.Chapters != 1 || rep.Figures != 1 || rep.Images != 1 {
+		t.Fatalf("计数错: %+v", rep)
+	}
+	if rep.RefsTotal != 3 || len(rep.RefsMissing) != 1 || !strings.Contains(rep.RefsMissing[0], "nope.png") {
+		t.Fatalf("引用盘点错: %+v", rep)
+	}
+}
+
+func TestEnsureInputPath(t *testing.T) {
+	root := t.TempDir()
+	main := filepath.Join(root, "main.tex")
+	if err := os.WriteFile(main, []byte("\\documentclass{book}\n\\begin{document}\nx\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureInputPath(main); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(main)
+	if !strings.Contains(string(got), "\\input@path") {
+		t.Fatal("应注入 \\input@path")
+	}
+	// 幂等
+	if err := EnsureInputPath(main); err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := os.ReadFile(main)
+	if strings.Count(string(got2), "\\input@path") != 1 {
+		t.Fatal("注入应幂等")
+	}
+}
