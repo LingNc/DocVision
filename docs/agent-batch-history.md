@@ -4169,3 +4169,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 `internal/e2e/TestFirstRunCLI`：05-first-run 手册的 0–2 步**经真实 dvagent 二进制**走通——假 mineru 为 PATH 注入的 shell 脚本（写 content_list+layout+抽图，证明 prep-mineru 命令的注入式可测），register→prep-split→prep-mineru→prep-organize→prep-index→gen-classify→ids-list→doc-search→viewer-build 全链路断言（0.69s）。手册从此不是文档而是可执行规范——手册改了测试红，测试绿手册对。
 
 **验证**：`go test ./internal/...` 16 包全绿（含 FirstRunCLI 0.69s 真二进制全流程）。
+
+
+## 第七十九批：MinerU API 模式移植（2026-11-18，用户转达新会话 agent 报告："要装 mineru 啥意思？之前不是 API 上传排队下载只要 token 就行？"）
+
+认账+补齐：用户记忆的旧线 API 模式（上传→排队→下载，只要 token）此前**没进 skills 内核**——prep 只移植了本地 CLI 包壳。本批移植：`internal/mineruapi`（旧线 client.go 逐字骨架：file-urls/batch 建任务+预签名 URL、1MiB 分块 PUT+空闲超时泵、extract-results 轮询带状态标签/进度/超时续等、zip 下载+防 zip-slip 解压）；token 走环境变量 MINERU_TOKEN（不落盘），模型参数走 config.mineru 段（用户专属）；命令 `prep-mineru-api <项目> <part...>`（断点幂等：已有 auto 目录的 part 跳过）。doctor 相应改判：mineru/python3 降为"可选"（API 模式不需要），增 MINERU_TOKEN 检查项，Hint 给两条路对比（API 轻/CLI 重）。测试用 httptest 假服务端跑通 上传→轮询→下载→解压 全链（含上传字节完整性断言）。
+
+**验证**：`go test ./internal/...` 17 包全绿（mineruapi 3 例：全链路/token 必填/长名截断）。

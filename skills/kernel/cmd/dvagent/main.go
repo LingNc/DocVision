@@ -21,6 +21,7 @@ import (
 	"github.com/LingNc/DocVision/skills/kernel/internal/envcheck"
 	"github.com/LingNc/DocVision/skills/kernel/internal/gen"
 	"github.com/LingNc/DocVision/skills/kernel/internal/ids"
+	"github.com/LingNc/DocVision/skills/kernel/internal/mineruapi"
 	"github.com/LingNc/DocVision/skills/kernel/internal/prep"
 	"github.com/LingNc/DocVision/skills/kernel/internal/project"
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
@@ -742,6 +743,68 @@ func main() {
 			die(err)
 		}
 		out(map[string]any{"entries": len(idx.Entries), "total_pages": idx.Total(), "page_srcs": len(pages.Srcs)})
+
+	case "prep-mineru-api":
+		// dvagent prep-mineru-api <项目名> <part1.pdf> [part2.pdf ...]
+		// MinerU API 模式：上传→排队→轮询→下载解压（token=环境变量 MINERU_TOKEN）。
+		// 断点：已下载的 part 跳过（幂等，重跑续传）。
+		if len(args) < 3 {
+			die(fmt.Errorf("prep-mineru-api 需要: <项目名> <part.pdf...>"))
+		}
+		p := mustProject(reg, args[1])
+		cfg, err := config.Load(p.Root)
+		if err != nil {
+			die(err)
+		}
+		mc := mineruapi.DefaultConfig()
+		if cfg.MinerU.APIBaseURL != "" {
+			mc.APIBaseURL = cfg.MinerU.APIBaseURL
+		}
+		if cfg.MinerU.ModelVersion != "" {
+			mc.ModelVersion = cfg.MinerU.ModelVersion
+		}
+		mc.IsOCR = cfg.MinerU.IsOCR
+		mc.EnableFormula = cfg.MinerU.EnableFormula || mc.EnableFormula
+		mc.EnableTable = cfg.MinerU.EnableTable || mc.EnableTable
+		mc.Language = cfg.MinerU.Language
+		if cfg.MinerU.PollInterval > 0 {
+			mc.PollInterval = cfg.MinerU.PollInterval
+		}
+		mc.PollTimeout = cfg.MinerU.PollTimeout
+		if cfg.MinerU.UploadTimeout > 0 {
+			mc.UploadTimeout = cfg.MinerU.UploadTimeout
+		}
+		client, err := mineruapi.NewClient(mc, "")
+		if err != nil {
+			die(err)
+		}
+		client.Printf = func(f string, a ...any) { fmt.Fprintf(os.Stderr, f, a...) }
+		var results []any
+		for _, part := range args[2:] {
+			stem := strings.TrimSuffix(filepath.Base(part), filepath.Ext(part))
+			// 断点：已有 content_list 则跳过
+			if _, err := os.Stat(filepath.Join(p.Root, "mineru", stem, "auto")); err == nil {
+				results = append(results, map[string]any{"part": stem, "skipped": "已有产物"})
+				continue
+			}
+			batch, err := client.CreateUploadTask(part)
+			if err != nil {
+				results = append(results, map[string]any{"part": stem, "error": err.Error()})
+				continue
+			}
+			item, err := client.PollBatch(batch)
+			if err != nil {
+				results = append(results, map[string]any{"part": stem, "batch": batch, "error": err.Error()})
+				continue
+			}
+			dst := filepath.Join(p.Root, "mineru", stem)
+			if err := client.DownloadAndExtract(item.FullZipURL, dst); err != nil {
+				results = append(results, map[string]any{"part": stem, "error": "下载解压: " + err.Error()})
+				continue
+			}
+			results = append(results, map[string]any{"part": stem, "batch": batch, "status": "done", "dir": dst})
+		}
+		out(map[string]any{"results": results})
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))

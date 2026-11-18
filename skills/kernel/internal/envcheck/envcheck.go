@@ -69,8 +69,13 @@ func Check(projectRoot string, run prep.Runner) *Report {
 	add("pdfunite", "可选", "poppler-utils（旧切分兜底用）")
 	add("mutool", "可选", "mupdf-tools：切分提速后端（无则 pdfcpu）")
 	add("pdflatex", "必需", "TeX Live：apt install texlive-full 或 texlive-xetex")
-	add("mineru", "必需", "MinerU：pip install -U magic-pdf[full]（API token 配在 MinerU 自己的 config）")
-	add("python3", "必需", "MinerU 运行环境")
+	add("mineru", "可选", "MinerU 本地 CLI（prep-mineru 用）；走 API 模式（prep-mineru-api）则不需要")
+	add("python3", "可选", "MinerU 本地 CLI 的运行环境；API 模式不需要")
+	// MinerU API 模式：token 检查
+	token := os.Getenv("MINERU_TOKEN")
+	tc := ToolCheck{Name: "MINERU_TOKEN", Needed: "API模式必需", Found: token != "",
+		Hint: "export MINERU_TOKEN=<你的 token>（MinerU 开放平台申请）"}
+	rep.Tools = append(rep.Tools, tc)
 
 	// 字体体检
 	fr := FontReport{Fallback: "Tex Gyre Termes（泰X默认，config font_family 可改）"}
@@ -119,6 +124,16 @@ func Check(projectRoot string, run prep.Runner) *Report {
 	}
 	if len(rep.Fonts.ProjectFonts) > 0 {
 		rep.Hints = append(rep.Hints, "[好] 项目 fonts/ 已备 "+itoa(len(rep.Fonts.ProjectFonts))+" 个字体文件：样式会话优先使用它们")
+	}
+	// MinerU 模式建议：本地 CLI 与 API 二选一
+	hasMineru := false
+	for _, tc := range rep.Tools {
+		if tc.Name == "mineru" && tc.Found {
+			hasMineru = true
+		}
+	}
+	if !hasMineru && token == "" {
+		rep.Hints = append(rep.Hints, "[缺] MinerU 未就绪：两条路任选——① API 模式（轻）：export MINERU_TOKEN=<token> 后用 prep-mineru-api，无需装任何包；② 本地 CLI（重）：pip install -U magic-pdf[full] 后用 prep-mineru")
 	}
 	// 缺工具但未致阻断时的回退说明
 	for _, tc := range rep.Tools {

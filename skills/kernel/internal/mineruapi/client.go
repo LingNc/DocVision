@@ -1,0 +1,388 @@
+// Package mineruapi 是 MinerU API 客户端（旧线 go/internal/mineru 逐字移植骨架）：
+// 上传（1MiB 分块+空闲超时）→ 排队轮询（状态标签/进度日志/超时续等）→
+// 下载结果 zip 并解压。token 走环境变量 MINERU_TOKEN（不落盘）；模型参数走
+// skills_config.json 的 mineru 段（用户专属 config-set）。
+package mineruapi
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const (
+	chunkSize        = 1 << 20
+	maxUploadRetries = 3
+	retrySleep       = 3 * time.Second
+	logIntervalCap   = 64
+	dataIDMaxLen     = 128
+	dataIDHashLen    = 16
+)
+
+var stateLabels = map[string]string{
+	"pending": "排队中", "running": "解析中", "converting": "格式转换中", "waiting-file": "等待文件上传",
+}
+
+// Config 是 API 参数（Token 从环境变量 MINERU_TOKEN 读）。
+type Config struct {
+	APIBaseURL    string
+	ModelVersion  string
+	IsOCR         bool
+	EnableFormula bool
+	EnableTable   bool
+	Language      string
+	PollInterval  int // 秒
+	PollTimeout   int // 秒（0=不限）
+	UploadTimeout int // 秒（空闲超时）
+}
+
+// DefaultConfig 出厂默认。
+func DefaultConfig() Config {
+	return Config{
+		APIBaseURL: "https://api.mineru.net/api/v1", ModelVersion: "v2",
+		EnableFormula: true, EnableTable: true,
+		PollInterval: 3, PollTimeout: 0, UploadTimeout: 300,
+	}
+}
+
+// Client 是 MinerU API 客户端。
+type Client struct {
+	cfg     Config
+	http    *http.Client
+	baseURL string
+	token   string
+	Printf  func(format string, args ...any) // 进度日志注入（测试静默）
+}
+
+// NewClient 建客户端；token 缺省读环境变量 MINERU_TOKEN。
+func NewClient(cfg Config, token string) (*Client, error) {
+	if token == "" {
+		token = os.Getenv("MINERU_TOKEN")
+	}
+	if token == "" {
+		return nil, fmt.Errorf("MinerU token 未提供：设环境变量 MINERU_TOKEN（或调用方注入）")
+	}
+	if cfg.APIBaseURL == "" {
+		cfg = DefaultConfig()
+	}
+	if cfg.PollInterval <= 0 {
+		cfg.PollInterval = 3
+	}
+	if cfg.UploadTimeout <= 0 {
+		cfg.UploadTimeout = 300
+	}
+	return &Client{cfg: cfg, http: &http.Client{}, baseURL: strings.TrimRight(cfg.APIBaseURL, "/"), token: token,
+		Printf: func(string, ...any) {}}, nil
+}
+
+// UploadTaskResponse/ExtractResult* 是 API 响应结构（旧线 types.go 逐字）。
+type UploadTaskResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
+		BatchID  string   `json:"batch_id"`
+		FileURLs []string `json:"file_urls"`
+	} `json:"data"`
+}
+
+type ExtractProgress struct {
+	ExtractedPages int `json:"extracted_pages"`
+	TotalPages     int `json:"total_pages"`
+}
+
+type ExtractResultItem struct {
+	State           string          `json:"state"`
+	ErrMsg          string          `json:"err_msg"`
+	FullZipURL      string          `json:"full_zip_url"`
+	ExtractProgress ExtractProgress `json:"extract_progress"`
+}
+
+type BatchResult struct {
+	Code int `json:"code"`
+	Msg  string
+	Data struct {
+		ExtractResult []ExtractResultItem `json:"extract_result"`
+	} `json:"data"`
+}
+
+func (c *Client) headers() http.Header {
+	return http.Header{"Content-Type": {"application/json"}, "Authorization": {"Bearer " + c.token}}
+}
+
+// dataIDForUpload：API 限 128 字符，超长中文名截断+哈希后缀（旧线判据）。
+func dataIDForUpload(stem string) string {
+	if len(stem) <= dataIDMaxLen {
+		return stem
+	}
+	sum := sha256.Sum256([]byte(stem))
+	return stem[:dataIDMaxLen-dataIDHashLen-1] + "_" + hex.EncodeToString(sum[:])[:dataIDHashLen]
+}
+
+// CreateUploadTask 建批任务+分块上传，返回 batch_id（失败重试 3 次）。
+func (c *Client) CreateUploadTask(filePath string) (string, error) {
+	fileName := filepath.Base(filePath)
+	stem := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return "", err
+	}
+	for attempt := 1; attempt <= maxUploadRetries; attempt++ {
+		uploadURL, batchID, err := c.requestUploadURL(fileName, stem)
+		if err == nil {
+			err = c.chunkedUpload(uploadURL, filePath, info.Size())
+		}
+		if err == nil {
+			return batchID, nil
+		}
+		if attempt < maxUploadRetries {
+			time.Sleep(retrySleep)
+		}
+	}
+	return "", fmt.Errorf("创建/上传任务失败（重试 %d 次）: %w", maxUploadRetries, err)
+}
+
+func (c *Client) requestUploadURL(fileName, stem string) (string, string, error) {
+	body, _ := json.Marshal(map[string]any{
+		"files":          []map[string]string{{"name": fileName, "data_id": dataIDForUpload(stem)}},
+		"model_version":  c.cfg.ModelVersion,
+		"is_ocr":         c.cfg.IsOCR,
+		"enable_formula": c.cfg.EnableFormula,
+		"enable_table":   c.cfg.EnableTable,
+		"language":       c.cfg.Language,
+	})
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/file-urls/batch", bytes.NewReader(body))
+	if err != nil {
+		return "", "", err
+	}
+	req.Header = c.headers()
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var parsed UploadTaskResponse
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return "", "", err
+	}
+	if parsed.Code != 0 {
+		return "", "", fmt.Errorf("创建任务失败: %s", parsed.Msg)
+	}
+	if parsed.Data.BatchID == "" || len(parsed.Data.FileURLs) == 0 {
+		return "", "", fmt.Errorf("响应缺 batch_id/file_urls")
+	}
+	return parsed.Data.FileURLs[0], parsed.Data.BatchID, nil
+}
+
+// chunkedUpload 分块 PUT + 空闲超时（旧线结构简化：泵协程+定时器）。
+func (c *Client) chunkedUpload(uploadURL, filePath string, fileSize int64) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := url.Parse(uploadURL); err != nil {
+		return fmt.Errorf("非法上传 URL: %w", err)
+	}
+	idle := time.Duration(c.cfg.UploadTimeout) * time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pr, pw := io.Pipe()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, pr)
+	if err != nil {
+		return err
+	}
+	req.ContentLength = fileSize
+
+	idleErr := fmt.Errorf("上传空闲超过 %s", idle)
+	idleTimer := time.AfterFunc(idle, func() { _ = pw.CloseWithError(idleErr) })
+	type res struct{ err error }
+	done := make(chan res, 1)
+	go func() {
+		defer idleTimer.Stop()
+		buf := make([]byte, chunkSize)
+		for {
+			n, rerr := f.Read(buf)
+			if n > 0 {
+				if _, werr := pw.Write(buf[:n]); werr != nil {
+					done <- res{werr}
+					return
+				}
+				idleTimer.Reset(idle)
+			}
+			if rerr == io.EOF {
+				_ = pw.Close()
+				done <- res{nil}
+				return
+			}
+			if rerr != nil {
+				_ = pw.CloseWithError(rerr)
+				done <- res{rerr}
+				return
+			}
+		}
+	}()
+	resp, err := c.http.Do(req)
+	if err != nil {
+		_ = pw.CloseWithError(err)
+		<-done
+		return err
+	}
+	defer resp.Body.Close()
+	if perr := (<-done).err; perr != nil {
+		return perr
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("上传 HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// GetBatchResults 轮询任务状态（网络错折叠为 code=-1，旧线语义）。
+func (c *Client) GetBatchResults(batchID string) *BatchResult {
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/extract-results/batch/%s", c.baseURL, batchID), nil)
+	if err != nil {
+		return &BatchResult{Code: -1, Msg: err.Error()}
+	}
+	req.Header = c.headers()
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return &BatchResult{Code: -1, Msg: err.Error()}
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &BatchResult{Code: -1, Msg: err.Error()}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &BatchResult{Code: -1, Msg: fmt.Sprintf("HTTP %d", resp.StatusCode)}
+	}
+	var out BatchResult
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return &BatchResult{Code: -1, Msg: "decode: " + err.Error()}
+	}
+	return &out
+}
+
+// PollBatch 轮询到终态：done→成功；failed→错误；超时→errTimeout（续等语义）。
+var errTimeout = fmt.Errorf("poll timeout")
+
+func (c *Client) PollBatch(batchID string) (*ExtractResultItem, error) {
+	start := time.Now()
+	for {
+		result := c.GetBatchResults(batchID)
+		if len(result.Data.ExtractResult) == 0 {
+			time.Sleep(time.Duration(c.cfg.PollInterval) * time.Second)
+			continue
+		}
+		item := result.Data.ExtractResult[0]
+		state := item.State
+		label := stateLabels[state]
+		if label == "" {
+			label = state
+		}
+		elapsed := int(time.Since(start).Seconds())
+		if item.ExtractProgress.TotalPages > 0 {
+			c.Printf("[%ds] %s (%d/%d 页)\n", elapsed, label, item.ExtractProgress.ExtractedPages, item.ExtractProgress.TotalPages)
+		} else {
+			c.Printf("[%ds] %s\n", elapsed, label)
+		}
+		switch state {
+		case "done":
+			if item.FullZipURL == "" {
+				return nil, fmt.Errorf("解析完成但没有下载链接")
+			}
+			return &item, nil
+		case "failed":
+			if item.ErrMsg == "" {
+				item.ErrMsg = "未知错误"
+			}
+			return nil, fmt.Errorf("解析失败: %s", item.ErrMsg)
+		}
+		if c.cfg.PollTimeout > 0 && elapsed >= c.cfg.PollTimeout {
+			return nil, errTimeout
+		}
+		time.Sleep(time.Duration(c.cfg.PollInterval) * time.Second)
+	}
+}
+
+// DownloadAndExtract 下载结果 zip 并解压到 targetDir，删除 zip。
+func (c *Client) DownloadAndExtract(zipURL, targetDir string) error {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return err
+	}
+	resp, err := (&http.Client{Timeout: 120 * time.Second}).Get(zipURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("下载 HTTP %d", resp.StatusCode)
+	}
+	zipPath := filepath.Join(targetDir, "result.zip")
+	out, err := os.Create(zipPath)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		out.Close()
+		return err
+	}
+	out.Close()
+	if err := unzip(zipPath, targetDir); err != nil {
+		return err
+	}
+	return os.Remove(zipPath)
+}
+
+// unzip 解压（防 zip-slip：拒绝绝对路径与 ..）。
+func unzip(src, dst string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	for _, f := range r.File {
+		clean := filepath.Clean(f.Name)
+		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+			return fmt.Errorf("zip 含危险路径: %s", f.Name)
+		}
+		target := filepath.Join(dst, clean)
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(target, 0o755)
+			continue
+		}
+		os.MkdirAll(filepath.Dir(target), 0o755)
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		w, err := os.Create(target)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, err = io.Copy(w, rc)
+		w.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

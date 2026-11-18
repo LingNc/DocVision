@@ -39,12 +39,26 @@ type Style struct {
 	PilotChapter string `json:"pilot_chapter"`   // 试点章（style 先试转的章，gen-convert 报试点标记）
 }
 
+// MinerU 是 MinerU API 的用户可调参数（token 走环境变量 MINERU_TOKEN，不落盘）。
+type MinerU struct {
+	APIBaseURL    string `json:"api_base_url"`
+	ModelVersion  string `json:"model_version"`
+	IsOCR         bool   `json:"is_ocr"`
+	EnableFormula bool   `json:"enable_formula"`
+	EnableTable   bool   `json:"enable_table"`
+	Language      string `json:"language"`
+	PollInterval  int    `json:"poll_interval"`
+	PollTimeout   int    `json:"poll_timeout"`
+	UploadTimeout int    `json:"upload_timeout"`
+}
+
 // Config 是完整配置。
 type Config struct {
 	Figure  Figure  `json:"figure"`
 	Split   Split   `json:"split"`
 	Convert Convert `json:"convert"`
 	Style   Style   `json:"style"`
+	MinerU  MinerU  `json:"mineru"`
 }
 
 // Defaults 是出厂默认（用户未写任何配置时的判据值）。
