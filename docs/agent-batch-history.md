@@ -3962,3 +3962,12 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **设计点**：核对任务带只读白名单（convert 沙箱/style/reports）——核对是只读任务，输入经白名单路径给，不拷进沙箱（与 convert 的 inputs 拷贝语义相反，一写一读）。
 
 **验证**：`go test ./internal/...` 71 例绿（blocked 不可领、conv 全过自动解锁、幂等、failed convert 不派）。
+
+
+## 第五十三批：draw 任务生成器——上游产物驱动下游任务（2026-11-18，用户："继续"）
+
+`gen.GenDraw` 从队列里已 done 的 classify 任务读回 `verdict.json` 三态结论：`vector` → 铺 `drw_<名>` 作图任务（图文件从 classify 沙箱 inputs 拷进 draw 沙箱 inputs——记忆泡泡自包含）；`styled_text`（提取已完成）与 `raster`（不重绘）不派；**未验收的 classify 不驱动**（流水线不会抢跑）；done 但 verdict 缺失/损坏计入 NoVerdict 异常（静默跳过是事故温床）。
+
+**流水线闭环**：至此五类任务生成器齐了四（classify→draw→convert→check，加 rework 由 issue-add 触发）——"图目录→三态分类→矢量重绘→章节转换→核对"的主干可以纯靠 dvagent 命令 + claim/submit 驱动。
+
+**验证**：`go test ./internal/...` 75 例绿。

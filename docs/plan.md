@@ -195,6 +195,10 @@
   改：`skills/kernel` 增 `gen/check.go` + check_test.go 2 例；dvagent 增 `gen-check`。
   验证：`go test ./internal/...` 71 例绿（blocked 不可领/conv 全过解锁/幂等/failed convert 不派）。
 
+[ ][ ] P97. draw 任务生成器：gen.GenDraw 读回队列里 done 的 classify 任务 verdict.json，class=vector 的图铺 drw_<名> 任务（图从 classify 沙箱 inputs 拷进 draw 沙箱 inputs——记忆泡泡自包含；白名单 style/figures/；验收=figure.tex 编译通过，T2 数值判据接线留待 verify figure 批）；styled_text/raster 不派；未验收不驱动；verdict 缺失/损坏计 NoVerdict 异常。
+  改：`skills/kernel` 增 `gen/draw.go` + draw_test.go 2 例；dvagent 增 `gen-draw`。
+  验证：`go test ./internal/...` 75 例绿（三态分流/自包含拷贝/幂等/未验收不驱动/异常计数）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

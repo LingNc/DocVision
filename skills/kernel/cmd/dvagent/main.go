@@ -353,6 +353,22 @@ func main() {
 		}
 		out(rep)
 
+	case "gen-draw":
+		// dvagent gen-draw <项目名> —— 读 classify 结论，为 vector 图铺 draw 任务。
+		if len(args) < 2 {
+			die(fmt.Errorf("gen-draw 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		rep, err := gen.GenDraw(q, p.Root)
+		if err != nil {
+			die(err)
+		}
+		out(rep)
+
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}

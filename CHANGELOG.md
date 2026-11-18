@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills draw 任务生成器（P97）**：`gen.GenDraw` 读回已验收 classify 结论，为 vector 图铺 draw 任务（第一个"上游产物驱动下游任务"的生成器：图从 classify 沙箱拷进 draw 沙箱自包含；styled_text/raster 不派；未验收不驱动；verdict 缺失计异常；dvagent 新增 `gen-draw`）。`go test` 75 例绿。
 - **skills check 任务生成器（P96）**：`gen.GenCheck` 为队列中每个 convert 任务铺一个 blocked 核对任务（T4 延迟核对的结构表达——转换 done 后 Unblock 自动解锁核对；failed convert 不派核对；dvagent 新增 `gen-check`）。`go test` 71 例绿。
 - **skills 端到端冒烟（P95）**：gen 包新增两条 e2e 测试——classify 全链（生成→claim→agent 写 verdict→验收：合法记 done 带哈希快照/空 class 打回回 pending/重载冷启动续接/打回即释放租约立即可重领）+ convert 全链（章节铺队→自包含判据打回临时路径引用→好产物通过/编译覆盖率缺工具跳过记 note 不卡死）。`go test` 68 例绿。
 - **skills convert 任务生成器（P94）**：`gen.GenConvert` 把 chapters/ 章节 md 幂等铺成 convert 任务（md 拷进沙箱 inputs/chapter.md 当覆盖率对照源，验收 spec：主 .tex 编译通过 + 覆盖率；dvagent 新增 `gen-convert`）。`go test` 66 例绿。
