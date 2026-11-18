@@ -600,6 +600,22 @@ func main() {
 		}
 		out(map[string]any{"threshold": ov.Threshold, "groups": len(ov.Groups), "override": viewer.OverridePath(p.Root)})
 
+	case "img2text-collect":
+		// dvagent img2text-collect <项目名> —— 汇总 done 的 img2text 描述，回填 doc_index Content。
+		if len(args) < 2 {
+			die(fmt.Errorf("img2text-collect 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		n, err := gen.CollectImg2Text(q, p.Root)
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"filled": n})
+
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}

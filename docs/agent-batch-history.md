@@ -4100,3 +4100,10 @@ T6 落地：① `task.TypeImg2Text` + `gen.GenImg2Text`（读 doc_index，图片
 闭环完成：① `viewer.ApplyRegroup`（消费页面导出的 regroup.json，按用户确认阈值重算 dedupe 分组，写覆盖文件 work/viewer/groups_override.json）；② `GenDraw` 读覆盖文件——**组员跟随代表**（只为代表铺重绘任务，Followers 计数）；③ HTML 图路径改相对路径 `../../`（file:// 直接打开可见图）；④ dvagent `viewer-apply` 命令。至此用户调参→导出→应用→重绘按新分组执行的链路全通，且仍守"页面只读、内核唯一写通道"纪律。
 
 **验证**：`go test ./internal/...` 15 包全绿（覆盖分组下只为代表铺任务/组员跟随/去覆盖后补齐）。
+
+
+## 第六十九批：img2text 汇总回填半环（2026-11-18，用户："继续"）
+
+T6 设计里"kernel 整理"的落点：`gen.CollectImg2Text` + `dvagent img2text-collect`——把 done img2txt_* 任务的 out/description.md 按 entry_seq 回填进 doc_index 条目的 Content 字段（docindex 补 Save 原子写）。效果：doc_search 能按图的描述搜到图（content: 字段过滤）、style 素材可由 agent 从索引自取。幂等：已有 Content 不覆盖（先到为准）。
+
+**验证**：`go test ./internal/...` 15 包全绿（回填/重载验证/幂等三断言）。
