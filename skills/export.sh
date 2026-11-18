@@ -16,6 +16,9 @@ trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/$PKG"
 (cd "$REPO_ROOT" && git rev-parse --short HEAD) > "$STAGE/$PKG/.skill-version"
 cp -r "$SKILLS_DIR/docs" "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$SKILLS_DIR/SKILL.md" "$STAGE/$PKG/"
+# 用户档案模板随包（空值示例；真实 profile.env 永不入包，见 docs/06）
+mkdir -p "$STAGE/$PKG/data"
+cp "$SKILLS_DIR/data/profile.example" "$STAGE/$PKG/data/profile.example"
 # 预编译二进制（linux/amd64）随包——使用者无需装 Go
 if ! command -v go >/dev/null 2>&1; then
   echo "  (无 go：包内不含预编译二进制，使用者自行 cd kernel && go build -o bin/dvagent ./cmd/dvagent)"

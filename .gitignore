@@ -39,4 +39,4 @@ build.sh
 clean_project.sh
 .sshkey
 skills/sync-delivery.sh
-data/profile.env
+skills/data/profile.env

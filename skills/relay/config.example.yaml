@@ -1,0 +1,12 @@
+# DocVision Relay 服务器配置 —— 示例。
+#
+# 用法：cp config.example.yaml relay.yaml，按部署环境改，然后
+#   RELAY_GITHUB_TOKEN=<PAT> RELAY_CONFIG=relay.yaml ./relay
+# 位置解析顺序：-config 命令行参数 > RELAY_CONFIG 环境变量 > 运行目录 ./relay.yaml（存在才读）。
+#
+# 密钥纪律（docs/06）：GitHub token 只走环境变量 RELAY_GITHUB_TOKEN，
+# 本文件只放非秘密项；写了的值被采用，没写的键用内置默认。
+
+listen: ":8787"               # 监听地址（容器/服务器对外端口）
+repo: "LingNc/DocVision"      # 代建 issue 的目标仓库
+rate: 5                       # 每 IP 每小时提交上限（防刷）

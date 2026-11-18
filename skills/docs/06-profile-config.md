@@ -18,7 +18,7 @@ cp data/profile.example data/profile.env && chmod 600 data/profile.env
 
 ## SSH 密钥（同属 profile 内容）
 
-上报/推送用的 ed25519 密钥对属用户私有物，规定位：（技能目录下，gitignore 随 data/ 规则）；需要向用户出示的**永远只有公钥**（）。relay 服务器的  属服务器侧秘密，只在部署机环境变量，不进任何文件。
+上报/推送用的 ed25519 密钥对属用户私有物，规定位：`data/ssh/`（技能目录下，gitignore 随 data/ 规则）；需要向用户出示的**永远只有公钥**（`data/ssh/id_ed25519.pub`）。relay 服务器的 `RELAY_GITHUB_TOKEN` 属服务器侧秘密，只在部署机环境变量（或部署机的私有 config 管理），**不进 git 仓库、不进 skills 包**；relay 自身的 config 文件只放非秘密项（listen/repo/rate，见 `skills/relay/config.example.yaml`）。
 
 ## 项目级配置（书与书不同）
 

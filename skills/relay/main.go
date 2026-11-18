@@ -4,8 +4,11 @@
 // 以服务器持有者的 GitHub 账号代为提交（服务器端 token，使用者零凭证）。
 // 署名规则：保留提交者（agent 署名）在 issue 正文末尾的"提交者"块——代发不抹来源。
 //
-// 运行（服务器侧，所有秘密走环境变量）：
-//   RELAY_GITHUB_TOKEN=ghp_xxx RELAY_REPO=LingNc/DocVision RELAY_LISTEN=:8787 go run ./skills/relay
+// 运行（服务器侧）：非秘密项走 config 文件（示例见 config.example.yaml），
+// 秘密（GitHub token）只走环境变量：
+//   RELAY_GITHUB_TOKEN=ghp_xxx ./relay            # 读 ./relay.yaml（存在才读）
+//   RELAY_GITHUB_TOKEN=ghp_xxx RELAY_CONFIG=/etc/dvrelay.yaml ./relay
+// 优先级：环境变量 > config 文件 > 内置默认。
 // 接口：
 //   POST /api/submit  {"title": "...", "body": "...", "author": "agent-署名"}
 //   GET  /health
@@ -14,6 +17,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -67,22 +71,22 @@ type issueResponse struct {
 }
 
 func main() {
+	// config 文件位置：-config 参数 > RELAY_CONFIG 环境变量 > ./relay.yaml（存在才读）
+	cfgPath := flag.String("config", os.Getenv("RELAY_CONFIG"), "config 文件路径（默认 ./relay.yaml，存在才读）")
+	flag.Parse()
+	path := *cfgPath
+	if path == "" {
+		path = "relay.yaml"
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		log.Fatalf("配置加载失败: %v", err)
+	}
 	token := os.Getenv("RELAY_GITHUB_TOKEN")
-	repo := os.Getenv("RELAY_REPO")
-	if repo == "" {
-		repo = "LingNc/DocVision"
-	}
-	listen := os.Getenv("RELAY_LISTEN")
-	if listen == "" {
-		listen = ":8787"
-	}
-	rate := 5
-	if v := os.Getenv("RELAY_RATE"); v != "" {
-		fmt.Sscanf(v, "%d", &rate)
-	}
 	if token == "" {
-		log.Fatal("RELAY_GITHUB_TOKEN 未设置（服务器端 GitHub 凭据）")
+		log.Fatal("RELAY_GITHUB_TOKEN 未设置（服务器端 GitHub 凭据，只走环境变量）")
 	}
+	listen, repo, rate := cfg.Listen, cfg.Repo, cfg.Rate
 	rl := newRateLimiter(rate)
 
 	mux := http.NewServeMux()
