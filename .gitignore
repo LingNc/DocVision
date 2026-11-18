@@ -40,3 +40,5 @@ clean_project.sh
 .sshkey
 skills/sync-delivery.sh
 skills/data/profile.env
+/sync-local.sh
+.tmp-rename/
