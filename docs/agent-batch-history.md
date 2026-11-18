@@ -4190,3 +4190,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 用户批评成立：client 逐字搬了，但**断点续传没搬**——旧线 PollBatchWithDisplay 的核心是 batch_id 落盘（TaskInfo json），重跑续等/续下（不重传不重复排队），真书大文件场景省真金白银。补齐：`mineruapi.CheckOldTaskValid`（查老任务：valid+done→续下载；valid+其他→续等；failed/不认得→重传）+ prep-mineru-api 落盘 .mineru_task.json。另核实旧线布局事实：解压目标 outputDir/<stem>/（zip 结构原样保留），下游靠"整理为项目目录"单点收口成 source/ 布局——skills 侧的布局归位+两级图源发现即等价收口，且 NormalizeLayout 对两种真实 zip 结构（根 content_list / 嵌套 auto/）幂等双模式兼容（真 zip 结构无实调无法先验，防御双模式是正确姿态）。**流程结论：MinerU 固化流程 = API client（已逐字）+ 断点续传（本批补）+ 整理收口（双模式兼容）三段全齐。**
 
 **验证**：`go test ./internal/...` 17 包全绿。
+
+
+## 第八十二批：MinerU API 路径 CLI 级测试 + 手册 API 优先（2026-11-18，用户："继续"）
+
+上轮补的断点续传此前只有 client 级测试——按"假环境遮 bug"的教训补命令级验收：`TestMineruAPIViaCLI`（假 API 服务端 + config-set 注入 base_url + MINERU_TOKEN 环境变量，走真实 dvagent 二进制）断言**全链 done + 归位 + 断点重跑零重传**（0.81s）。config-set 补 mineru.* 六键。05-first-run 手册 MinerU 段改 API 优先（export MINERU_TOKEN → prep-mineru-api 主推，prep-mineru 本地 CLI 备选）。
+
+**验证**：`go test ./internal/...` 17 包全绿（新增 CLI 级断言：全链/归位/断点零重传）。

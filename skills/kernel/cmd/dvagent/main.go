@@ -499,8 +499,20 @@ func main() {
 			cfg.Style.FontFamily = args[3]
 		case "style.fallback_font":
 			cfg.Style.FallbackFont = args[3]
+		case "mineru.api_base_url":
+			cfg.MinerU.APIBaseURL = args[3]
+		case "mineru.model_version":
+			cfg.MinerU.ModelVersion = args[3]
+		case "mineru.language":
+			cfg.MinerU.Language = args[3]
+		case "mineru.poll_interval":
+			cfg.MinerU.PollInterval = int(f)
+		case "mineru.poll_timeout":
+			cfg.MinerU.PollTimeout = int(f)
+		case "mineru.upload_timeout":
+			cfg.MinerU.UploadTimeout = int(f)
 		default:
-			die(fmt.Errorf("未知配置键: %s（可用：figure.min_overlap/figure.max_scale_dev/figure.accept_min_submits/split.pages_per_part/convert.max_lines_per_chapter/style.font_family/style.fallback_font）", args[2]))
+			die(fmt.Errorf("未知配置键: %s（可用：figure.min_overlap/figure.max_scale_dev/figure.accept_min_submits/split.pages_per_part/convert.max_lines_per_chapter/style.font_family/style.fallback_font/mineru.api_base_url/mineru.model_version/mineru.language/mineru.poll_interval/mineru.poll_timeout/mineru.upload_timeout）", args[2]))
 		}
 		if err := config.Save(p.Root, cfg); err != nil {
 			die(err)

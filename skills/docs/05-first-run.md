@@ -18,7 +18,12 @@ $D activate demo
 ```bash
 $D doctor demo                                  # 复检项目级（字体目录等）
 $D prep-split demo book/book.pdf 100            # 拆 part（提速版，幂等）
-$D prep-mineru demo book/source/parts/*.pdf    # MinerU 逐 part（token 在 MinerU 自身配置）
+
+# MinerU 二选一：
+export MINERU_TOKEN=<你的 token>                # ① API 模式（轻，零安装；断点续跑：重跑不重传）
+$D prep-mineru-api demo book/source/parts/*.pdf
+$D prep-mineru demo book/source/parts/*.pdf     # ② 本地 CLI（重，需 pip install magic-pdf[full]）
+
 $D prep-organize demo                          # content_list → chapters/*.md（带页码标识）
 $D prep-index demo                             # doc_index + 页表（检索与渲染的数据源）
 ```
