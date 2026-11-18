@@ -34,8 +34,9 @@ type Convert struct {
 
 // Style 是样式/字体的用户可调参数（doctor 的回退建议读这里）。
 type Style struct {
-	FontFamily string `json:"font_family"` // 主字体（缺失时的回退由 FallbackFont 兜）
-	FallbackFont string `json:"fallback_font"` // 特殊字体缺失时的回退（默认开源字体）
+	FontFamily   string `json:"font_family"`     // 主字体（缺失时的回退由 FallbackFont 兜）
+	FallbackFont string `json:"fallback_font"`   // 特殊字体缺失时的回退（默认开源字体）
+	PilotChapter string `json:"pilot_chapter"`   // 试点章（style 先试转的章，gen-convert 报试点标记）
 }
 
 // Config 是完整配置。

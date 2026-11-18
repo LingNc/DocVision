@@ -4134,3 +4134,10 @@ merge `origin/dev`（仅 T328 一个提交）入 feat/skills。冲突两处，�
 ## 第七十三批：skills 安装包导出名与署名（2026-11-18，用户："导出压缩包要附带作者、仓库，名字带绫袅LingNc和DocVision描述"）
 
 `skills/PACKAGE-INFO.md`（作者 绫袅/LingNc、仓库 github.com/LingNc/DocVision、组成/依赖/用法/纪律一页）+ `skills/export.sh`（导出 `DocVision-Skills-绫袅LingNc-<版本>.tar.gz`，内含 docs/agent/kernel/README/PACKAGE-INFO）。v0.8.0 包 146KB 已生成并存 lingnc 交付目录——文件名即署名与项目标识。
+
+
+## 第七十四批：style 阶段群收官（v0.9.0）（2026-11-18，用户："继续"）
+
+style 阶段四步循环的数据面与手册补齐：① `style-collect` 命令——styled_text 提取内容汇总进 `style/styled_text/` 素材池（一图一条、带来源注释=选材环节的落点，v0.7.0 遗留断点接通）；② config 增 `style.pilot_chapter`（试点章指定=用户专属配置）；③ `manual-style.md`——写样式/选材/试点/试点修复四步工作循环（字体缺失→回退→标注→报告的纪律与门槛不降低原则）；④ style 素材池进 doctor 字体体检的叙述体系。至此"选材"有料、"试点"有开关、"修复"有 rework 通道——style 阶段群完整。
+
+**验证**：`go test ./internal/...` 16 包全绿（素材池收集/内容/溯源断言）。

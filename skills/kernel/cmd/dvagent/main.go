@@ -647,6 +647,22 @@ func main() {
 		}
 		out(envcheck.Check(root, nil))
 
+	case "style-collect":
+		// dvagent style-collect <项目名> —— 汇总 styled_text 提取内容进 style 素材池（选材数据面）。
+		if len(args) < 2 {
+			die(fmt.Errorf("style-collect 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		rep, err := gen.CollectStyleMaterials(q, p.Root)
+		if err != nil {
+			die(err)
+		}
+		out(rep)
+
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}
