@@ -3942,3 +3942,14 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **设计点**：重生成会重拷 inputs（覆盖语义）——inputs 是 kernel 的只读输入，必须与章节源一致，agent 的改动只允许发生在 out/ 与 scratch/。
 
 **验证**：`go test ./internal/...` 66 例绿。
+
+
+## 第五十一批：端到端冒烟——生成→claim→验收全链（2026-11-18，用户："继续"）
+
+接线完成后第一次全链验证（A1 验收的前置）：`gen/e2e_test.go` 两条 e2e。
+
+**classify 全链**：图目录→GenClassify→claim→agent 写 verdict.json→NewChecker 验收→RecordVerdict。合法 styled_text 记 done 且带哈希快照；空 class 打回回 pending（"不降级"判据在端到端生效）；重载队列（模拟新会话冷启动）状态原样——"状态住在磁盘、上下文零保存"的可验证证据；**打回即释放租约**→任务立即可重领（修正了一处测试假设：原以为打回后租约还在，实际 RecordVerdict 设计就是打回即释放——队列层 lease reclaim 场景另由 queue_test 覆盖）。
+
+**convert 全链**：章节铺队→交 .tex→自包含判据（`_subdivision/` 引用打回）→好产物通过；本机无 pdflatex、无 PDF 产物时编译/覆盖率**跳过记 note 不卡死**（T33 缺工具哲学在全链末端生效）。
+
+**验证**：`go test ./internal/...` 68 例绿。至此验收标准 A2（冷启动续接）/A4（验收不被绕过）/A8（问题落盘不靠记忆）的核心机制均有端到端测试背书。

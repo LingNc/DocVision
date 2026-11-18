@@ -187,6 +187,10 @@
   改：`skills/kernel` 增 `gen/convert.go` + convert_test.go 2 例。
   验证：`go test ./internal/...` 66 例绿（新增/幂等/缺目录/spec 断言/沙箱输入就位）。
 
+[ ][ ] P95. 端到端冒烟（A1 前置）：classify 全链（图目录→任务→claim→agent 交 verdict.json→验收：合法 styled_text done、空 class 打回（不降级）、重载队列冷启动续接状态原样、打回即释放租约可立即重领）+ convert 全链（章节铺队→交 .tex：临时路径引用打回（自包含）、好产物通过且带哈希快照、本机缺 pdflatex/无 PDF 时编译与覆盖率跳过记 note 不卡死——T33/缺工具哲学全链生效）。
+  改：`skills/kernel` 增 `gen/e2e_test.go` 2 例。
+  验证：`go test ./internal/...` 68 例绿。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。
