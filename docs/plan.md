@@ -155,6 +155,10 @@
   改：`skills/kernel` 增 `dedupe/`（canon.go 230 行 + align.go 230 行 + dedupe_test.go 8 例）；Runner/配置耦合改为包级变量与参数。
   验证：`go test ./internal/...` 36 例绿（自比≈1、方块vs竖条低于 0.60 闸门、预筛拒高宽比差、空白/小内容框退回、画布抬下限、平移换算、级数尾级规则、带入不接力）。
 
+[ ][ ] P87. dedupe 候选桶检测与成组校验落地：sha256 精确收缩（像素指纹桶）+ 形状/颜色 20×20 网格特征 + 色度特征（白占比 0.82/单连通片/三通道主导色）+ 小图标居中重合并桶（T130 同判据，像素相同只比一份、预筛 WorthScore、并行打分串行 union）；SimilarTo 闸门（检测器超集：严格特征失败仍可凭色度合并，但内容无关永不允许）；groups.json 结构校验（normalize/validate/shape，交互 Tool 壳由"agent 直编 JSON + kernel submit 校验"替代）。
+  改：`skills/kernel` 增 `dedupe/candidates.go`（500+ 行移植）+ `dedupe/groups.go`（验证逻辑）+ `pipeline_test.go` 5 例。
+  验证：`go test ./internal/...` 40 例绿（精确组、平移副本并桶、内容不同拒并、闸门正反、成组校验正反）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

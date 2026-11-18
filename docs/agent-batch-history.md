@@ -3858,3 +3858,16 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **测试踩坑三处（全为测试构造问题，非移植代码问题）**：①NRGBA 零值像素（透明黑）被 CanonFromImage 当满墨——它只读 RGB 不读 alpha，真实解码图全不透明，测试背景必须填不透明白；②CanonLevels 尾级规则理解纠偏：循环上界是 finest 而非 canvas，尾级=≤finest 的最大 2 幂级（真实流 finest≈0.95S<canvas 恒成立）；③blank 测试图同①。
 
 **验证**：`go test ./internal/...` 36 例绿（dedupe 8 例 + 其余 28 例）。
+
+
+## 第四十三批：dedupe 候选桶检测与成组校验（2026-11-18，用户："继续"）
+
+按台账迁 dedupe 第二刀：旧线 `motif_candidates.go`（候选桶检测）+ `motif_groups.go` 的验证逻辑逐字移植为 `dedupe/candidates.go` + `dedupe/groups.go`。
+
+**candidates**：三级证据并桶——sha256 像素指纹精确收缩（Exact 组）、形状/颜色 20×20 网格特征（白占比 ≥0.82、单连通片、宽高比差 ≤0.18、IoU ≥0.65、色均差 <0.055）、色度特征（三通道主导色、单峰、网格 IoU ≥0.53），小图标再叠加居中重合并桶（T130 同判据：IconMaxArea 200k、BucketMax 400 退回、像素相同只比一份、WorthScore 预筛、并行打分串行 union 保序）。`SimilarTo` 闸门=检测器超集（AI 可拆桶可跨桶合并，但内容无关的两张图永不允许说成一张）。
+
+**groups**：交互式 Tool 壳不进新架构——新形态下 agent 直编 groups.json，kernel 在 submit 时跑机械校验：normalize（2..N 张、ID 范围、组内去重）、validate（key 必须是成员、不跨组重复）、shape（每组必须有代表图——整池一组也允许，process 只画 key 其余复用）。
+
+**测试构造认知修正两处**：①视觉特征对白占比有 0.82 阈值，测试图标墨迹占比 25% 超标会被拒——图标要小；②**居中重合判据对内容框内绝对平移天然不变**（裁内容框即归一化），平移副本本来就应并桶——负例必须用内容真不同的图（块间距不同 → 长宽比差 >0.35 预筛拒），调试中 overlap(a, 平移 30px 副本)=1.000 属正确行为而非 bug。
+
+**验证**：`go test ./internal/...` 40 例绿。
