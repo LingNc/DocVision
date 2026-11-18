@@ -3838,3 +3838,14 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **踩坑记录**：①figcheck 首次构建失败是移植笔误——旧线调用小写私有 `overlay`，导出时改名 `Overlay` 漏改调用点；②go.mod/go.sum 是服务侧写入的只读件，`go get` 无法就地改——改在可写副本 `/tmp/kmod` 里 `go get golang.org/x/image@v0.39.0`（CatmullRom 缩放依赖）+ `go mod tidy`，再把结果写回（v0.39 要求 go 1.25，工具链自动升级）；③本机 `/tmp` 曾随机清空导致 git 仓库与 bundle 丢失——历史经 patches 重建失败后改为按批重写文件重建（P81–P83 三个提交哈希与丢失前不同，内容一致）。
 
 **验证**：`go test ./internal/...` 19 例绿（figcheck 5 例：同图 ≥0.9、mm 口径抓 50% 宽度差、无 mm 退化宽高比、空图拒绝、缺文件报错）。
+
+
+## 第四十一批：T1/T4 verdict 模式验收——分类与核对的机器校验（2026-11-18，用户："继续"）
+
+补上 docs/02-task-protocol.md 里承诺但 verify 未实现的缺口：T1 三态分类与 T4 核对的 verdict.json 模式校验。
+
+**P85**：`verify/schema.go`——ClassifyVerdict（class/extracted/reason）：styled_text 必附提取内容、vector 必附可重绘证据、class 缺失或乱填一律打回（旧线"失败不降级成 raster、不确定就重试"判据入代码，空分类/乱填值不再被静默接受）。CheckVerdict（result/issues）：issues 每条必须带位置指针（md/.tex/章节/页码任一），空清单打回；no_verdict 打回但允许重试，由 RecordVerdict 的 attempts 上限兜底（旧线"绝不因无结论无限重转整章"）。
+
+测试踩坑一处（测试自身）：每个用例新建任务后忘了重复设置 `verdict_schema`，导致校验静默跳过、误判通过——验收 spec 的"没写要求就不检查"语义放大了测试构造错误，已在用例中逐条显式设置。
+
+**验证**：`go test ./internal/...` 27 例绿（schema 9 例覆盖正反路径）。

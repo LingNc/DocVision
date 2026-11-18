@@ -101,7 +101,10 @@ func (c *Checker) Run(t *task.Task) ([]string, map[string]string) {
 		}
 	}
 
-	// 6. out/ 哈希快照进 notes（assemble 复核"acceptance 后未被篡改"）。
+	// 6. verdict.json 模式校验（T1 classify / T4 check）。
+	errs = append(errs, c.checkVerdictSchema(t, sandboxAbs)...)
+
+	// 7. out/ 哈希快照进 notes（assemble 复核"acceptance 后未被篡改"）。
 	if hashes, err := texcheck.Sha256Dir(filepath.Join(sandboxAbs, "out")); err == nil {
 		if b, err := json.Marshal(hashes); err == nil {
 			notes["artifact_sha256"] = string(b)
