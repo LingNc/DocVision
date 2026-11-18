@@ -4202,3 +4202,12 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 ## 第八十三批：收尾在途批次 + 用户规矩（2026-11-18，用户："不需要再给验收上加东西了…无需添加参考…首秀需要我们这边验收通过就行。已完成就说已完成"）
 
 提交在途的 FirstRunCLIFull（手册全流程 CLI 验收，已绿）。**此后规矩：不主动给验收/参考物加码；用户说"继续"而事项已完成时，直接答"已完成"，不虚构新工作。** 用户另指出 05-first-run 文件"可能很多地方误导"——不预防性修改：真首秀暴露哪句误导改哪句（v0.10.0 批的活）。
+
+
+## 第八十四批：档位2（img2text 模式）移植·第一段（2026-11-18，用户："继续移植吧"）
+
+先读旧线 `go/internal/img2text/` 全包（13 文件）摸清语义：**档位2 = 书级输出干净 md 的流水线**——md 里的每张图由 vision 会话三态处理（能文字化→提取文字替换图行；结构图→mermaid；无法文字化→保留原图）+ 页码标记 [P. N]（pagemark，514 行锚点对齐引擎）+ 进度断点。**vision API 会话半（client.go 472 行 OpenAI 兼容）不移植**——新架构宿主 agent 干活（正是内核零 LLM 的意义）；移植 kernel 侧规则与组装：
+
+① `internal/mdimg/mermaid.go`——旧线逐字（ExtractMermaidBlocks 围栏抽取 + ValidateMermaid mmdc 逐块校验）；② `internal/mdimg/assemble.go`——重组装引擎：逐图任务三态产物（replacement.md/figure.mmd/keep）按 md 图片出现序替换（文字→替换、Mermaid→围栏块、mmdc 可用时校验失败整图回炉、keep→原样）；③ `img2text-assemble <项目> <源md> <输出md>` 命令；④ manual-img2text.md 重写为档位2 三态决策手册。pagemark（页码标记）为下一段。
+
+**验证**：`go test ./internal/...` 18 包全绿（mermaid 抽取/三态替换序/无决策保留断言）。

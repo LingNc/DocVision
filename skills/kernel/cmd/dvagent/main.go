@@ -21,6 +21,7 @@ import (
 	"github.com/LingNc/DocVision/skills/kernel/internal/envcheck"
 	"github.com/LingNc/DocVision/skills/kernel/internal/gen"
 	"github.com/LingNc/DocVision/skills/kernel/internal/ids"
+	"github.com/LingNc/DocVision/skills/kernel/internal/mdimg"
 	"github.com/LingNc/DocVision/skills/kernel/internal/mineruapi"
 	"github.com/LingNc/DocVision/skills/kernel/internal/prep"
 	"github.com/LingNc/DocVision/skills/kernel/internal/project"
@@ -858,6 +859,45 @@ func main() {
 			results = append(results, map[string]any{"part": stem, "batch": batch, "status": "done", "auto": autoDir})
 		}
 		out(map[string]any{"results": results})
+
+	case "img2text-assemble":
+		// dvagent img2text-assemble <项目名> <源md> <输出md>
+		// 档位2 重组装：逐图任务决策 → 文字/mermaid/保留 三态替换，产出干净 md。
+		if len(args) < 4 {
+			die(fmt.Errorf("img2text-assemble 需要: <项目名> <源md> <输出md>"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		src, err := os.ReadFile(args[2])
+		if err != nil {
+			die(err)
+		}
+		repls, err := mdimg.LoadReplacements(q, p.Root)
+		if err != nil {
+			die(err)
+		}
+		out := mdimg.Assemble(string(src), repls)
+		if err := os.MkdirAll(filepath.Dir(args[3]), 0o755); err != nil {
+			die(err)
+		}
+		if err := os.WriteFile(args[3], []byte(out), 0o644); err != nil {
+			die(err)
+		}
+		nText, nMmd, nKeep := 0, 0, 0
+		for _, r := range repls {
+			switch {
+			case r.Text != "":
+				nText++
+			case r.Mermaid != "":
+				nMmd++
+			default:
+				nKeep++
+			}
+		}
+		out(map[string]any{"output": args[3], "text_replaced": nText, "mermaid": nMmd, "kept": nKeep})
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
