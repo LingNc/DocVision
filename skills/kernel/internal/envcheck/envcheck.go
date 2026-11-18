@@ -69,6 +69,7 @@ func Check(projectRoot string, run prep.Runner) *Report {
 	add("pdfunite", "可选", "poppler-utils（旧切分兜底用）")
 	add("mutool", "可选", "mupdf-tools：切分提速后端（无则 pdfcpu）")
 	add("pdflatex", "必需", "TeX Live：apt install texlive-full 或 texlive-xetex")
+	add("mmdc", "必需", "mermaid 校验（档位2 兜底）：npm install -g @mermaid-js/mermaid-cli")
 	add("mineru", "可选", "MinerU 本地 CLI（prep-mineru 用）；走 API 模式（prep-mineru-api）则不需要")
 	add("python3", "可选", "MinerU 本地 CLI 的运行环境；API 模式不需要")
 	// MinerU API 模式：token 检查
@@ -76,6 +77,21 @@ func Check(projectRoot string, run prep.Runner) *Report {
 	tc := ToolCheck{Name: "MINERU_TOKEN", Needed: "API模式必需", Found: token != "",
 		Hint: "export MINERU_TOKEN=<你的 token>（MinerU 开放平台申请）"}
 	rep.Tools = append(rep.Tools, tc)
+
+	hasEngine := false
+	for _, e := range []string{"pdflatex", "xelatex", "latexmk"} {
+		path, ok := look(e)
+		rep.Tools = append(rep.Tools, ToolCheck{Name: e, Needed: "LaTeX引擎", Found: ok, Path: path})
+		if ok && (e == "pdflatex" || e == "xelatex") {
+			hasEngine = true
+		}
+	}
+	if out, err := run("kpsewhich", "ctexart.cls"); err == nil && strings.TrimSpace(string(out)) != "" {
+		rep.Tools = append(rep.Tools, ToolCheck{Name: "ctexart.cls", Needed: "中文兼容", Found: true})
+	} else {
+		rep.Tools = append(rep.Tools, ToolCheck{Name: "ctexart.cls", Needed: "中文兼容", Found: false,
+			Hint: "中文 LaTeX 需要 ctex：Debian/Ubuntu 装 texlive-lang-chinese 或 texlive-full"})
+	}
 
 	// 字体体检
 	fr := FontReport{Fallback: "Tex Gyre Termes（泰X默认，config font_family 可改）"}
@@ -107,6 +123,9 @@ func Check(projectRoot string, run prep.Runner) *Report {
 	rep.Fonts = fr
 
 	// 汇总行动项
+	if !hasEngine {
+		rep.Hints = append(rep.Hints, "[缺] LaTeX 引擎全无（pdflatex/xelatex 都没有）：LaTeX 档无法验收编译——装 TeX Live（apt install texlive-full 最省心；仅需 XeTeX 引擎可 texlive-xetex）。档位2（img2text）不受影响。")
+	}
 	for _, tc := range rep.Tools {
 		if !tc.Found && tc.Needed == "必需" {
 			rep.Hints = append(rep.Hints, "[缺] "+tc.Name+"（必需）："+tc.Hint)

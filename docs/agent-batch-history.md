@@ -4234,3 +4234,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 档位2 任务契约正式化：img2text 任务验收 = `out/verdict.json {"result":"text|mermaid|keep"}` + 对应产物核对（text→replacement.md 非空 / mermaid→figure.mmd 非空且 mmdc 可用时逐块校验、失败打回=兜底错误落点 / keep→无产物）+ result 缺失/乱填打回。verify 增 img2text schema 分支（mdimg.ValidateMermaid 复用），Img2TextSpec 改挂。测试：text 无产物打回/有产物过、keep 过、乱填打回四断言。
 
 **验证**：`go build ./cmd/dvagent` 绿 + 18 包全绿。
+
+
+## 第八十八批：mmdc 升必需 + LaTeX 引擎兼容性深度检查（2026-11-18，用户："mmdc 默认要安装；前置检查全自动化；检查本地 latex 引擎兼容性"）
+
+① mmdc 从缺项补为**必需**（npm i -g @mermaid-js/mermaid-cli）——档位2 mermaid 兜底校验的依赖，不再可选；② doctor LaTeX 深度段：pdflatex/xelatex/latexmk 三件套 + `kpsewhich ctexart.cls` 中文兼容检查 + 行动项给兼容结论（引擎全无→装 texlive-full 最省心/texlive-xetex 仅 XeTeX；档位2 不受影响）；③ texcheck.Compile **引擎回退**（无 pdflatex→xelatex 顶上，参数兼容）——兼容性落实为代码而非文档。**本机实测**：mmdc 11.17.1 ✓ 就绪；pdflatex/xelatex/latexmk/ctexart 全无（最小容器）→ doctor 正确报"[缺] LaTeX 引擎全无"+安装路径；接口层确认兼容（dvagent 引擎回退+poppler/MinerU API 均无版本耦合），装 texlive-full 即满配。
+
+**验证**：`go build ./cmd/dvagent` 绿 + 18 包全绿 + 本机 doctor 新检查段实测输出如上。
