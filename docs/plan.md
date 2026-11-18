@@ -135,6 +135,10 @@
   改：新增 `skills/`（README + docs/01架构 02任务协议 03接口 04迁移台账 + `kernel/` Go module + `dvagent` CLI）；本批同步 plan/CHANGELOG/batch-history/AGENTS.md 指针。
   验证：`go test ./internal/...` 5 例绿（幂等入队/租约过期回收/确定性派发/打回回队/依赖解锁）；dvagent 冒烟全链路绿（register→activate→claim→submit 打回→补产物通过→解锁核对→note/profile/status）。
 
+[ ][ ] P82. skills 内核编排层落地：章节拆分验证与扇出（2–16 段、完整、连续、无重叠，父任务 blocked 于子任务）、issues 存储 + 回炉任务生成（原任务挂起等回炉，回炉回原沙箱）、pause/resume/abort 生命周期命令、claim 生命周期闸门。
+  改：`skills/kernel` 增 `queue/split.go`（ValidateSplit/FanOutSplit）、`queue/issues.go`（IssueStore/SpawnRework）、`project.Pause`、`dvagent split/issue-add/issue-resolve/pause/resume/abort`；`Task.Reclaimable` 加"有依赖永不可领"判据；修两个冒烟真 bug（submit 打回不解锁依赖、章节行数末尾换行 off-by-one）。
+  验证：`go test ./internal/...` 8 例绿（拆分判据五反例 + 扇出解锁 + 回炉挂起）；dvagent 冒烟：坏拆分拒绝/好拆分扇出/子过父解锁/issue-add 回炉/pause 拒派/resume/abort 全链路。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

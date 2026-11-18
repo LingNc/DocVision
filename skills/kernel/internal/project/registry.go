@@ -94,6 +94,16 @@ func (r *Registry) Activate(name string) (*Project, error) {
 	return p, r.Save()
 }
 
+// Pause 暂停项目：停派新任务（已领任务在任务边界自然完成）。
+func (r *Registry) Pause(name string) (*Project, error) {
+	p, ok := r.Projects[name]
+	if !ok {
+		return nil, fmt.Errorf("项目未登记: %s", name)
+	}
+	p.Lifecycle = Paused
+	return p, r.Save()
+}
+
 // ProfilePath 书级档案路径。
 func (p *Project) ProfilePath() string {
 	return filepath.Join(p.Root, "profile.md")

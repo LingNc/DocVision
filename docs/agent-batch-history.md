@@ -3807,3 +3807,14 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 内核骨架 `skills/kernel/`（独立 Go module）：任务/租约/验收记录模型、JSON 队列（原子写、确定性派发、打回回队、依赖解锁）、验收器（沙箱越界/必产物/自包含判据 + 编译/覆盖率 Hook 注入点）、项目注册表（active/paused/archived、一次一本、profile.md append-only）、`dvagent` CLI（status/register/activate/claim/submit/note/profile-update）。冒烟时抓到并修掉一个真 bug：submit 打回时不该解锁依赖任务（原实现无条件 unblock，核对任务会在转换失败时误解锁）。
 
 **验证**：`go test ./internal/...` 5 例绿；dvagent CLI 冒烟全链路绿。本环境无预装 Go，工具链经镜像获取后验证。
+
+
+## 第三十八批：skills 内核编排层——拆分扇出、回炉队列、生命周期命令（2026-11-18，用户："继续"）
+
+按 `skills/docs/04-migration-inventory.md` 台账开迁第一刀：把旧线"会话树编排"（申请拆分开子会话、父等子、核对回炉）改写成队列依赖边。
+
+**P82**：拆分走 `dvagent split`——agent 交拆分提案（2–16 段行号区间），kernel `ValidateSplit` 机械验证（完整覆盖、连续无重叠、不越界），过了才 `FanOutSplit`：子任务入队、父任务 blocked，子全过后 `Unblock` 解锁。核对问题走 `dvagent issue-add`：问题落盘 `skills_issues.json`（跨会话存活，延迟核对模式不靠 agent 记回炉指令），`SpawnRework` 生成回炉任务（type=rework，**回原任务沙箱**——scratch/notes.md 重入 O(1)），原任务 blocked 于回炉。生命周期：`pause/resume/abort`（停派/恢复/封存），`claim` 只对 active 项目派任务。`Task.Reclaimable` 补判据：有未完成依赖永不可领。
+
+本批冒烟抓到并修掉两个真 bug：①submit 打回时原实现无条件 unblock，依赖任务（核对/父任务）会在失败时误解锁（上批引入）；②章节行数统计把末尾带换行的文件多算一行，合法拆分被拒。
+
+**验证**：`go test ./internal/...` 8 例绿；dvagent CLI 冒烟全链路绿（坏拆分拒绝、好拆分扇出、子过父解锁、issue-add 回炉、pause 拒派、resume、abort）。

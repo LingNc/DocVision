@@ -86,6 +86,9 @@ func main() {
 			die(fmt.Errorf("claim 需要: <项目名> <owner> [n] [types]"))
 		}
 		p := mustProject(reg, args[1])
+		if p.Lifecycle != project.Active {
+			die(fmt.Errorf("项目 %s 处于 %s，不可派任务（先 activate）", args[1], p.Lifecycle))
+		}
 		n := 1
 		if len(args) > 3 {
 			fmt.Sscanf(args[3], "%d", &n)
@@ -135,8 +138,12 @@ func main() {
 				results[id] = err.Error()
 				continue
 			}
-			unlocked := q.Unblock(id)
-			results[id] = map[string]any{"status": nt.Status, "errors": errs, "unblocked": len(unlocked)}
+			// 只有验收通过才解除依赖：打回的任务不解锁核对/父任务。
+			unlocked := 0
+			if nt.Status == task.StatusDone {
+				unlocked = len(q.Unblock(id))
+			}
+			results[id] = map[string]any{"status": nt.Status, "errors": errs, "unlocked": unlocked}
 		}
 		out(results)
 
@@ -173,9 +180,145 @@ func main() {
 		}
 		out(map[string]any{"profile_updated": args[1]})
 
+	case "split":
+		// dvagent split <项目名> <parent_task_id> <segments.json>
+		if len(args) < 4 {
+			die(fmt.Errorf("split 需要: <项目名> <parent_task_id> <segments.json>"))
+		}
+		p := mustProject(reg, args[1])
+		b, err := os.ReadFile(args[3])
+		if err != nil {
+			die(err)
+		}
+		var segs []queue.Segment
+		if err := json.Unmarshal(b, &segs); err != nil {
+			die(fmt.Errorf("segments.json 解析失败: %w", err))
+		}
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		if _, err := q.Get(args[2]); err != nil {
+			die(err)
+		}
+		if errs := queue.ValidateSplit(segs, splitChapterLines(p.Root, args[2])); len(errs) > 0 {
+			out(map[string]any{"split": "REJECTED", "errors": errs})
+			break
+		}
+		children, err := q.FanOutSplit(args[2], segs)
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"split": "OK", "children": len(children)})
+
+	case "issue-add":
+		// dvagent issue-add <项目名> <task_id> <描述> —— 落盘问题并生成回炉任务。
+		if len(args) < 4 {
+			die(fmt.Errorf("issue-add 需要: <项目名> <task_id> <描述>"))
+		}
+		p := mustProject(reg, args[1])
+		store, err := queue.LoadIssues(queue.IssueStorePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		iss := &queue.Issue{
+			ID:      fmt.Sprintf("i%06d", len(store.Issues)+1),
+			TaskID:  args[2],
+			Project: args[1],
+			Desc:    strings.Join(args[3:], " "),
+			Status:  "open",
+		}
+		if err := store.Add(iss); err != nil {
+			die(err)
+		}
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		rw, err := q.SpawnRework(iss)
+		if err != nil {
+			die(err)
+		}
+		if err := store.Save(); err != nil {
+			die(err)
+		}
+		out(map[string]any{"issue": iss.ID, "rework_task": rw.ID})
+
+	case "issue-resolve":
+		if len(args) < 3 {
+			die(fmt.Errorf("issue-resolve 需要: <项目名> <issue_id>"))
+		}
+		p := mustProject(reg, args[1])
+		store, err := queue.LoadIssues(queue.IssueStorePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		if err := store.Resolve(args[2]); err != nil {
+			die(err)
+		}
+		out(map[string]any{"resolved": args[2]})
+
+	case "pause":
+		// dvagent pause <项目名> —— 停派新任务（已领任务边界完成）。
+		if len(args) < 2 {
+			die(fmt.Errorf("pause 需要: <项目名>"))
+		}
+		p, err := reg.Pause(args[1])
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"paused": p.Name})
+
+	case "resume":
+		// dvagent resume <项目名> —— 同 activate：置 active 并把其余 active 的 paused。
+		if len(args) < 2 {
+			die(fmt.Errorf("resume 需要: <项目名>"))
+		}
+		p, err := reg.Activate(args[1])
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"resumed": p.Name})
+
+	case "abort":
+		// dvagent abort <项目名> —— 封存（终止）：队列冻结只读，保留制品与档案。
+		if len(args) < 2 {
+			die(fmt.Errorf("abort 需要: <项目名>"))
+		}
+		p, ok := reg.Projects[args[1]]
+		if !ok {
+			die(fmt.Errorf("项目未登记: %s", args[1]))
+		}
+		p.Lifecycle = project.Archived
+		if err := reg.Save(); err != nil {
+			die(err)
+		}
+		out(map[string]any{"archived": p.Name})
+
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}
+}
+
+// splitChapterLines 取拆分父任务主输入的行数（缺输入时退化为只查结构）。
+func splitChapterLines(projectRoot, taskID string) int {
+	q, err := queue.Load(queue.ProjectQueuePath(projectRoot))
+	if err != nil {
+		return 0
+	}
+	t, err := q.Get(taskID)
+	if err != nil || len(t.Inputs) == 0 {
+		return 0
+	}
+	b, err := os.ReadFile(filepath.Join(projectRoot, t.Sandbox, t.Inputs[0]))
+	if err != nil {
+		return 0
+	}
+	n := strings.Count(string(b), "\n")
+	if len(b) > 0 && b[len(b)-1] != '\n' {
+		n++ // 末尾无换行时补最后一行
+	}
+	return n
 }
 
 func mustProject(reg *project.Registry, name string) *project.Project {
