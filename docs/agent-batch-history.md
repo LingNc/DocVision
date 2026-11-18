@@ -4059,3 +4059,12 @@ P98 落哈希快照时留下的消费方：`verify.CheckDrift` 复核全部 done
 3. **设计修正落文档**（用户要求 1/2/3）：docs/02-task-protocol.md 增"章节划分语义"（初划独立单层可选；递归细化在 convert 内部 3 层/无初划 4 层——与队列父子指针实现一致，层数字段待接）、**T6 img2text 独立任务类型设计**（逐图小轮转会话：上下文 up/down+看图+提交描述三工具；Organize 合并时从 docjson 打页码/行定位标识）、**人类可读编号体系设计**（imgxxx/vecxxx/pdfpxx + skills_ids.json 映射表；agent 内部仍用 sha）。
 
 **验证**：`go test ./internal/...` 13 包全绿；台账五件套迁移后交叉引用一致。
+
+
+## 第六十四批：编号体系 + skills-v0.1.0 标签 + 密钥对（2026-11-18，用户："继续"）
+
+1. **版本标签**：skills 线独立版本号启动——`skills-v0.1.0`（附注：判据迁移完成+流水线闭环+A1全链演练等，28 批内容）打进 bundle。
+2. **密钥对**：ed25519 生成，私钥+公钥存 `/mnt/agents/output/dv-delivery-v3/keys/`（持久化），公钥交用户添加 GitHub SSH keys 后我即可推送。
+3. **编号体系（SK-P28）**：`internal/ids`——imgxxx/vecxxx/pdfpxx 三类；映射表 skills_ids.json（id↔sha/路径/全局页/bbox/关联任务）；同 SHA 幂等共享编号（重复图一个号）；类别独立序列；GenClassify 铺队即登记（sha256 内容哈希）；dvagent `ids-list <项目> [kind]` 查询。页码编号 pdfp<N> 不占序列（由页表派生）。agent 内部指代仍走 sha（BySHA 反查表打通人与 agent 的互指）。
+
+**验证**：`go test ./internal/...` 14 包全绿。

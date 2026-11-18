@@ -3,12 +3,15 @@
 package gen
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/LingNc/DocVision/skills/kernel/internal/ids"
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
 )
@@ -52,6 +55,7 @@ func GenClassify(q *queue.Queue, projectRoot, imagesRel string) (*ClassifyReport
 	}
 	sort.Strings(names)
 	now := time.Now()
+	idTable, _ := ids.Load(projectRoot) // 人类编号表（SK-P28）；读失败不挡铺队
 	for _, name := range names {
 		stem := strings.TrimSuffix(name, filepath.Ext(name))
 		sandbox := "tasks/cls_" + stem
@@ -66,6 +70,11 @@ func GenClassify(q *queue.Queue, projectRoot, imagesRel string) (*ClassifyReport
 		}
 		if err := os.WriteFile(filepath.Join(inDir, name), data, 0o644); err != nil {
 			return nil, err
+		}
+		// 登记人类编号 imgxxx（同 SHA 幂等共享编号）。
+		if idTable != nil {
+			h := sha256.Sum256(data)
+			_, _ = idTable.Register(ids.KindImg, fmt.Sprintf("%x", h), filepath.ToSlash(filepath.Join(imagesRel, name)), 0, [4]float64{}, "cls_"+stem)
 		}
 		t := &task.Task{
 			ID:      "cls_" + stem,

@@ -18,6 +18,7 @@ import (
 	"github.com/LingNc/DocVision/skills/kernel/internal/deliver"
 	"github.com/LingNc/DocVision/skills/kernel/internal/docindex"
 	"github.com/LingNc/DocVision/skills/kernel/internal/gen"
+	"github.com/LingNc/DocVision/skills/kernel/internal/ids"
 	"github.com/LingNc/DocVision/skills/kernel/internal/prep"
 	"github.com/LingNc/DocVision/skills/kernel/internal/project"
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
@@ -497,6 +498,26 @@ func main() {
 			die(err)
 		}
 		out(map[string]any{"updated": args[2], "value": args[3], "path": config.Path(p.Root)})
+
+	case "ids-list":
+		// dvagent ids-list <项目名> [img|vec|pdfp] —— 人类编号映射表（imgxxx/vecxxx/pdfpxx）。
+		if len(args) < 2 {
+			die(fmt.Errorf("ids-list 需要: <项目名> [kind]"))
+		}
+		p := mustProject(reg, args[1])
+		tbl, err := ids.Load(p.Root)
+		if err != nil {
+			die(err)
+		}
+		if len(args) > 2 && args[2] != "" {
+			out(map[string]any{args[2]: tbl.List(ids.Kind(args[2]))})
+		} else {
+			out(map[string]any{
+				"img": tbl.List(ids.KindImg),
+				"vec": tbl.List(ids.KindVec),
+				"path": ids.PathOf(p.Root),
+			})
+		}
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
