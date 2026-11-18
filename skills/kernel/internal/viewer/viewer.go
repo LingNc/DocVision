@@ -172,16 +172,17 @@ func renderHTML(rep *Report, projectRoot string) string {
 	fmt.Fprintf(&b, `<div class="progress">已分类 <b>%d</b>（vector %d / styled_text %d / raster %d）｜入组 %d 张｜组 %d 个</div>`,
 		rep.Progress.Classified, rep.Progress.Vector, rep.Progress.StyledText, rep.Progress.Raster, rep.Progress.Grouped, len(rep.Groups))
 
-	b.WriteString(`<h2>分组（相似图并组，代表=将被重绘的那张）</h2>`)
+	b.WriteString(`<h2>分组（相似图并组，代表=将被重绘的那张；勾选=保留在组内，去掉勾选=移出）</h2>`)
 	for _, g := range rep.Groups {
-		fmt.Fprintf(&b, `<div class="grp"><b>组 代表=<span class="id">%s</span></b> 成员 %d 张 %s`, html.EscapeString(g.Rep), len(g.Members), exactBadge(g.Exact))
+		fmt.Fprintf(&b, `<div class="grp"><b>组 代表=<span class="id">%s</span></b> 成员 %d 张 %s <label style="font-size:12px;color:#888"><input type="checkbox" class="gck" data-rep="%s" checked>整组保留</label>`,
+			html.EscapeString(g.Rep), len(g.Members), exactBadge(g.Exact), html.EscapeString(g.Rep))
 		for _, m := range g.Members {
 			img := findImg(rep, m)
 			if img == nil {
 				continue
 			}
-			fmt.Fprintf(&b, `<div class="card"><span class="id">%s</span> %s<br><a href="../../%s" target="_blank"><img src="../../%s" loading="lazy"></a></div>`,
-				html.EscapeString(img.ID), verdictBadge(img.Verdict), html.EscapeString(img.Path), html.EscapeString(img.Path))
+			fmt.Fprintf(&b, `<div class="card"><input type="checkbox" class="mck" data-rep="%s" data-id="%s" checked><span class="id">%s</span> %s<br><a href="../../%s" class="lb"><img src="../../%s" loading="lazy"></a></div>`,
+				html.EscapeString(g.Rep), html.EscapeString(m), html.EscapeString(img.ID), verdictBadge(img.Verdict), html.EscapeString(img.Path), html.EscapeString(img.Path))
 		}
 		b.WriteString(`</div>`)
 	}
@@ -196,13 +197,35 @@ func renderHTML(rep *Report, projectRoot string) string {
 	b.WriteString(`<h2>调参与请求</h2>
 <div>组闸门阈值 <input id="th" type="number" step="0.05" min="0.3" max="0.95" value="0.60" style="width:70px">
 <button onclick="exportReq()">导出重分组请求</button>
-（把下载的 JSON 存到项目 <code>work/retry/regroup.json</code>，然后 <code>dvagent viewer-apply &lt;项目&gt;</code>）</div>
+<button onclick="exportEdit()">导出组调整请求</button>
+（下载的 JSON 存到项目 <code>work/retry/</code>，然后 <code>dvagent viewer-apply &lt;项目&gt; work/retry/&lt;文件&gt;</code>）</div>
+<div id="lb" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9;text-align:center">
+  <img id="lbi" style="max-width:92%;max-height:88%;margin-top:3%">
+  <div style="color:#fff;font-size:13px"><span id="lbt"></span>　←/→ 翻张，Esc 关闭</div>
+</div>
 <script>
+const IMGS=[` + imgListJS(rep) + `];let lbi=0;
+document.querySelectorAll('a.lb').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();openLb(a.querySelector('img').src)}));
+function openLb(src){lbi=IMGS.indexOf(src);if(lbi<0)lbi=0;showLb();document.getElementById('lb').style.display='block'}
+function showLb(){document.getElementById('lbi').src=IMGS[lbi];document.getElementById('lbt').textContent=(lbi+1)+' / '+IMGS.length}
+document.addEventListener('keydown',e=>{if(document.getElementById('lb').style.display!=='block')return;
+  if(e.key==='Escape')document.getElementById('lb').style.display='none';
+  if(e.key==='ArrowRight'&&lbi<IMGS.length-1){lbi++;showLb()}
+  if(e.key==='ArrowLeft'&&lbi>0){lbi--;showLb()}});
+document.getElementById('lb').addEventListener('click',()=>document.getElementById('lb').style.display='none');
+function dl(obj,name){const b=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click()}
 function exportReq(){
   const th=parseFloat(document.getElementById('th').value);
-  const blob=new Blob([JSON.stringify({type:"regroup",align_min:th,shift_pct:0.10},null,2)],{type:"application/json"});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='regroup.json';a.click();
-}
+  dl({type:"regroup",align_min:th,shift_pct:0.10},'regroup.json')}
+function exportEdit(){
+  const byRep={};
+  document.querySelectorAll('.mck').forEach(c=>{
+    const rep=c.dataset.rep,id=c.dataset.id;
+    byRep[rep]=byRep[rep]||{rep:rep,members:[]};
+    if(c.checked)byRep[rep].members.push(id)});
+  const groups=Object.values(byRep).filter(g=>g.members.length>=2);
+  dl({type:"group_edit",groups:groups},'group_edit.json')}
 </script></body></html>`)
 	return b.String()
 }
@@ -228,4 +251,19 @@ func findImg(rep *Report, id string) *ImageCard {
 		}
 	}
 	return nil
+}
+
+// imgListJS 输出图片路径数组（灯箱翻页用），JSON 安全。
+func imgListJS(rep *Report) string {
+	var parts []string
+	for i := range rep.Images {
+		parts = append(parts, `"../../`+jsEscape(rep.Images[i].Path)+`"`)
+	}
+	return strings.Join(parts, ",")
+}
+
+// jsEscape 转义 JSON 字符串值里的特殊字符（路径含引号/反斜杠时兜底）。
+func jsEscape(s string) string {
+	r := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "\n", "\\n")
+	return r.Replace(s)
 }

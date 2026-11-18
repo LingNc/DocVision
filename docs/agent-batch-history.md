@@ -4148,3 +4148,10 @@ style 阶段四步循环的数据面与手册补齐：① `style-collect` 命令
 A1 首秀的真正缺口补上：PREP 四步此前只在 e2e 里以 Go 函数调用——现暴露为 dvagent 命令：`prep-split`（SplitFast 拆 part）、`prep-mineru`（逐 part 调 MinerU，单 part 失败不中断汇总报 error）、`prep-organize`（mineru/ 下全部 auto 目录按序拼 md）、`prep-index`（默认 glob chapters/*.md 建索引+页表）。空目录/缺前置均给可操作错误信息（"先 prep-mineru"）。CLI 冒烟：reportlab 造 5 页书 → prep-split 2 页/份出 3 part ✓。`skills/docs/05-first-run.md`——从空机器到交付的完整命令序列（0 建区→1 PREP→2 图片阶段→3 转换阶段→4 交付+故障排查速查表）。
 
 **验证**：`go test ./internal/...` 16 包全绿 + CLI 冒烟（拆书三 part/报错信息断言）。
+
+
+## 第七十六批：看图台 v3——灯箱对比 + 组成员增删导出（v0.9.1）（2026-11-18，用户："继续"）
+
+补齐用户最初蓝图里的看图交互：① **灯箱**：点击组内/全图任意缩略图进全屏对比，←/→ 在**全台图片间翻张**（跨组连续，正合"对比"诉求），Esc/点击关闭；② **组成员增删**：每组每个成员带勾选框（默认全选=保留），"整组保留"一键开关——去勾=移出组，导出 `group_edit.json`；③ `viewer-apply` 扩展消费 `group_edit`：用户显式分组直接落覆盖文件（信任人工判断，kernel 只校验编号存在+代表在组内+≥2 成员）——"增加/减小组"从页面直达重绘调度，仍守"页面只读、内核唯一写"。
+
+**验证**：`go test ./internal/...` 16 包全绿（group_edit 合法落盘/代表不在组内拒/未知编号拒/回读）。
