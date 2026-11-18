@@ -215,6 +215,10 @@
   改：`skills/kernel` 增 `verify/assemble.go` + assemble_test.go 1 例；dvagent 增 `assemble-verify`。
   验证：`go test ./internal/...` 86 例绿（未动零漂移/篡改抓 mismatch/删除报 missing/无快照标记）。
 
+[ ][ ] P102. 检索链闭合（doc_search/view_pdf 等价物落地）：dvagent doc-search（Load doc_index.json → Search 回蒸馏命中：seq/global/part/type/text120/bbox）；dvagent page-render（LoadPageIndex 全书页→原书 PDF 页 → pdftoppm 150dpi → work/renders/，可选 bbox 裁剪 + 坐标系 sanity（bbox 超页面两倍报错）+ 物理尺寸 mm 回执）；Build 落盘页表（<名>_pages.json 随索引）。
+  改：`skills/kernel` 增 `prep/render.go`（RenderPage/findPage/cropPNG）+ `docindex/pages.go`（LoadPageIndex）+ render_test.go 2 例；dvagent 增两命令；Build 补页表落盘。
+  验证：`go test ./internal/...` 89 例绿（页表映射/真 pdftoppm 渲染 A4≈210mm/bbox 半高裁剪/越界 bbox 报错）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

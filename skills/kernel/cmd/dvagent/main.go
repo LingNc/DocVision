@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LingNc/DocVision/skills/kernel/internal/docindex"
 	"github.com/LingNc/DocVision/skills/kernel/internal/gen"
+	"github.com/LingNc/DocVision/skills/kernel/internal/prep"
 	"github.com/LingNc/DocVision/skills/kernel/internal/project"
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
@@ -382,6 +384,49 @@ func main() {
 		drifts := verify.CheckDrift(q.Tasks, p.Root)
 		clean, lines := verify.DriftSummary(drifts)
 		out(map[string]any{"clean": clean, "issues": lines, "detail": drifts})
+
+	case "doc-search":
+		// dvagent doc-search <项目名> <query> [max] —— 索引检索，回蒸馏命中（页号+bbox+截断）。
+		if len(args) < 3 {
+			die(fmt.Errorf("doc-search 需要: <项目名> <query> [max]"))
+		}
+		p := mustProject(reg, args[1])
+		max := 5
+		if len(args) > 3 {
+			fmt.Sscanf(args[3], "%d", &max)
+		}
+		idx, err := docindex.Load(filepath.Join(p.Root, "doc_index.json"))
+		if err != nil {
+			die(fmt.Errorf("索引未建（先跑 index 构建）: %w", err))
+		}
+		hits := idx.Search(args[2], max)
+		out(map[string]any{"query": args[2], "hits": hits, "total": len(hits)})
+
+	case "page-render":
+		// dvagent page-render <项目名> <global页> [x0,y0,x1,y1]
+		// 渲染原书页到 work/renders/（可裁剪），回路径+物理尺寸。
+		if len(args) < 3 {
+			die(fmt.Errorf("page-render 需要: <项目名> <global页> [x0,y0,x1,y1]"))
+		}
+		p := mustProject(reg, args[1])
+		pages, err := prep.LoadPageIndex(filepath.Join(p.Root, "doc_index_pages.json"))
+		if err != nil {
+			die(fmt.Errorf("页表未建: %w", err))
+		}
+		global := 0
+		fmt.Sscanf(args[2], "%d", &global)
+		var bbox *[4]float64
+		if len(args) > 3 {
+			var b [4]float64
+			if n, _ := fmt.Sscanf(args[3], "%f,%f,%f,%f", &b[0], &b[1], &b[2], &b[3]); n == 4 {
+				bbox = &b
+			}
+		}
+		res, err := prep.RenderPage(pages, global, bbox, filepath.Join(p.Root, "work", "renders"), nil)
+		if err != nil {
+			die(err)
+		}
+		out(res)
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))

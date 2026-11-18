@@ -611,6 +611,12 @@ func Build(mineruOutput, splitDir string, sourceMDs []string, markerDir, outPath
 		if err := os.WriteFile(outPath, data, 0o644); err != nil {
 			return nil, nil, err
 		}
+		// 页表随索引同目录落盘（约定：<名>_pages.json），渲染命令用。
+		pb, err := json.MarshalIndent(pages, "", " ")
+		if err == nil {
+			pagesPath := strings.TrimSuffix(outPath, ".json") + "_pages.json"
+			_ = os.WriteFile(pagesPath, pb, 0o644)
+		}
 	}
 	return idx, pages, nil
 }

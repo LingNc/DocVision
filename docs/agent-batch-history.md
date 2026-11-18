@@ -4003,3 +4003,12 @@ PREP 收尾：`prep.OrganizePart/Organize` 把 content_list 按块拼成 md（te
 P98 落哈希快照时留下的消费方：`verify.CheckDrift` 复核全部 done 任务的 out/ 与各自最后 pass verdict 的 artifact_sha256——篡改（哈希不符）、删除（快照有盘上无）、新增（单列不告警）、无快照（标 NoSnapshot 无法复核）。`dvagent assemble-verify` 输出 clean/issues/detail。这是装配前闸门：**漂移清单为空才准进 assemble**（验收可信 ≠ 验收之后没人手滑）。
 
 **验证**：`go test ./internal/...` 86 例绿。
+
+
+## 第五十八批：检索链闭合——doc-search + page-render（2026-11-18，用户问检索流程后"继续"）
+
+回答"搜内容在哪"的落地：dvagent `doc-search`（doc_index.json → Search，回蒸馏命中：seq/global 全书页号/part/type/120 字截断/bbox——**内容不搬，指针先行**）；dvagent `page-render`（页表把全书页映射回原书 PDF 内页 → pdftoppm 150dpi 渲染 → work/renders/，可选 bbox 裁剪原位覆盖 + 物理尺寸 mm 回执）。Build 起页表随索引落盘（doc_index_pages.json）。
+
+**修真判据一处**：bbox 坐标系 sanity——agent 把像素坐标当 pt 传（页面 595pt 却给 99999pt 的框）时**报错**而非静默裁整页（错一个量级必须显形，错一点点照常 clamp）。真 pdftoppm 集成测试：A4 整页渲染 ≈210mm、上半页裁剪后高度≈一半。
+
+**验证**：`go test ./internal/...` 89 例绿。三层链全通：查表（doc-search）→ 渲染（page-render）→ agent 自看（原生工具）——`03-agent-interface.md` 的"数据面只传指针"在检索场景完整落地。
