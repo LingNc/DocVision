@@ -1,43 +1,52 @@
-# SKILL.md —— DocVision Skills 技能自述
+# SKILL · DocVision Skills —— 书籍转换流水线
 
-> 你（宿主 agent）正在读的是一个**技能包的自述文件**。读完这份文件你就知道该怎么办。
+> **这是什么**：把扫描版书籍 PDF 转成结构化产物的 agent 驱动流水线，两种产出模式——
+> **档位2（img2text）**：干净 Markdown（图片逐张三态文字化：提取文字 / mermaid 结构图 / 原图保留，自动页码标记）；
+> **LaTeX 档**：全书 LaTeX（矢量图 TikZ 重绘、统一样式、编译+覆盖率验收、全书终审、装配交付）。
+> 作者：绫袅（LingNc）· 版本见包名 · 仓库：https://github.com/LingNc/DocVision
 
-## 这是什么
+## 环境要求
 
-把扫描版书籍 PDF 转成结构化产物的转换技能：档位2 输出干净 Markdown（图片三态处理：文字化/mermaid/保留 + 页码标记），档位1 输出全书 LaTeX（矢量图重绘/样式/编译/终审）。**你干活，内核验收**——所有"过/不过"由 `dvagent` 内核机械判定，你不背判据，只照手册把活干好。
+| 依赖 | 用途 | 缺了怎么办 |
+|---|---|---|
+| 本包 `kernel/bin/dvagent` | 全部操作入口（预编译 linux/amd64；自行编译：`cd kernel && go build -o bin/dvagent ./cmd/dvagent`，需 Go≥1.25） | 直接可用 |
+| poppler-utils（pdfinfo/pdftotext/pdftoppm） | 拆书/覆盖率/渲染 | apt install poppler-utils |
+| TeX Live（pdflatex） | LaTeX 档编译判据（档位2 不需要） | apt install texlive-xetex |
+| MinerU | 扫描页 OCR：`export MINerU_TOKEN=<token>` 后走 API 模式（零安装）；或本地 pip install magic-pdf[full] | 见 doctor 提示 |
+| mmdc（可选） | mermaid 校验（没有则跳过记 note） | npm i -g @mermaid-js/mermaid-cli |
 
-作者：绫袅（LingNc）。版本见包名后缀。
-
-## 前置依赖（内核不提供二进制）
-
-内核是 Go 源码，**在你本机编译**（go ≥1.25，自动下工具链）：
-
-```bash
-cd kernel && go build -o dvagent ./cmd/dvagent
-```
-
-为什么源码交付不给二进制：跨平台/跨架构无法预制，编译是一次性成本，且 `go build` 即完整性校验。
-
-## 启动序列（五步）
+## 快速开始（30 秒）
 
 ```bash
-D=./dvagent                                   # 内核 CLI
-$D doctor              # ① 体检：缺什么装什么（poppler/MinerU 或 MINERU_TOKEN/pdflatex 仅档位1）
-$D -workspace <ws> register <项目> <项目根>     # ② 建工作区登记项目
-$D -workspace <ws> activate <项目>              # ③ 激活
-# ④ 照 docs/05-first-run.md 放书跑全流程（PREP→图片阶段→转换→交付）
-# ⑤ 你作为 agent 的工作方法：读 agent/README.md（冷启动仪式+铁律）与 agent/manual-*.md（七类任务手册）
+D=./kernel/bin/dvagent                      # 全部操作都经它（CLI）
+$D doctor                                   # ① 体检：缺什么怎么装一页说清
+mkdir -p ws/book && cp 你的书.pdf ws/book/  # ② 建工作区放书
+$D -workspace ws register demo ws/book && $D -workspace ws activate demo
+# ③ PREP 无人值守段（幂等，可中断续跑）
+$D -workspace ws prep-split demo ws/book/书.pdf 100
+$D -workspace ws prep-mineru-api demo ws/book/source/parts/*.pdf   # 需 MINERU_TOKEN
+$D -workspace ws prep-organize demo && $D -workspace ws prep-index demo
 ```
 
-## 三条纪律（违反会被打回，且烧你的 token）
+之后进入 **agent 工作段**：agent 读本包 `agent/README.md`（冷启动仪式+铁律）与 `agent/manual-*.md`（七类任务手册），用 `claim` 领任务、`submit` 交卷，判据内核强制。收尾二选一：
 
-1. **状态零保存**：进度全在磁盘（队列/制品/notes.md），你的上下文只是投影；看图→决策→写笔记→忘掉。
-2. **产物只在任务沙箱 `out/`**：引用临时路径=打回；交还前 notes.md 追加两行交接语。
-3. **阈值不许你动**：验收门槛（重合度/行数/覆盖率）程序强制，只有用户能调（`config-set`，你没这个工具）。
+```bash
+$D -workspace ws img2text-assemble demo chapters/book.md out/book.md   # 档位2：合成干净 md
+$D -workspace ws deliver demo                                            # LaTeX 档：装配交付
+```
 
-## 结构索引
+完整流程（含每个 agent 该干什么）见 **`docs/05-first-run.md`**；设计判据见 `docs/01-04`。
 
-- `docs/01-architecture.md` 架构与状态纪律 · `02-task-protocol.md` 七类任务契约 · `03-agent-interface.md` 接口哲学 · `04-migration-inventory.md` 判据来源台账 · `05-first-run.md` 首秀操作手册
-- `agent/README.md` 冷启动 + 铁律 · `agent/manual-*.md` 七类任务工作手册 · `agent/prompts-img2text.md` 档位2 提示词
-- `kernel/` 内核源码（dvagent CLI：32 命令 + MCP 模式 `dvagent mcp`）
+## 目录
+
+- `SKILL.md`（本文件：入口与启动）· `PACKAGE-INFO.md`（署名与依赖页）
+- `agent/` 宿主 agent 手册：README=冷启动+铁律；manual-*.md=七类任务做法
+- `docs/` 设计文档：01 架构 · 02 任务协议 · 03 接口 · 04 迁移台账 · 05 首秀手册
+- `kernel/` dvagent CLI 源码（`bin/` 预编译二进制；`go build ./cmd/dvagent` 可重编）
+
+## 纪律（对 agent 与使用者同效）
+
+- 验收门槛程序强制（矢量图重合度默认 17%、accept 必交够次数），不由模型判断；
+- 阈值只允许用户显式调整：`dvagent config-set <项目> figure.min_overlap 0.3`（agent 无权）；
+- 状态全部落盘：中断/换会话/换机器，跑一遍 `status` 即续上，零记忆负担。
 
