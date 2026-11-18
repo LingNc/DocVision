@@ -171,6 +171,10 @@
   改：`skills/kernel` 增 `assemble/`（standalone.go + bookmarks.go + assemble_test.go 8 例）；deliverBook/copyDir 等 I/O 管道留待装配批次。
   验证：`go test ./internal/...` 58 例绿（递归内联/声明路径解析/越界拒/书签注入幂等/AI 接手不重复/层级计算/转义）。
 
+[ ][ ] P91. checker 无结论判据落地：IsNoVerdict（T222 六类文案前缀：始终没给结论/API failure/会话退化/复盘无法挽救/只读视图无法准备等）+ MaxNoVerdictRetries=6（T233：每次换全新核对尝试、转换不重跑——重转救不了坏核对）+ RecheckPending（产物在但上次核对未判定 → 重跑先重核，绝不静默采纳没被判定过的产物）+ `.checker` 结论文件约定。
+  改：`skills/kernel` 增 `checkspec/`（checkspec.go 60 行 + checkspec_test.go 2 例）；checkerAnchorName 不进新架构（新形态锚点=队列任务 id，语义已由 verdict 承担）。
+  验证：`go test ./internal/...` 60 例绿（六前缀正反、无文件/有判定/无结论文案/空结论四态）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

@@ -3906,3 +3906,12 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **测试认知修正两处**：①\input@path 声明按文档收集——声明在 main.tex 的文件用 inliner 是独立的，跨文件声明不传递；②`\input{chapters/x}`（无 .tex 后缀）按旧线语义合法（base="x"，后续解析 x.tex），不应拒绝。
 
 **验证**：`go test ./internal/...` 58 例绿。
+
+
+## 第四十七批：checker 无结论判据与重核挂起（2026-11-18，用户："继续"）
+
+按台账迁核对（T4）收尾判据。旧线 `checker.go` 的纯函数部分移植为 `skills/kernel/internal/checkspec/`。
+
+**P91**：`IsNoVerdict`（T222：六类"核对没给结论"文案前缀——始终没给结论/API failure/会话已退化/复盘判定无法挽救/只读视图无法准备）；`MaxNoVerdictRetries=6`（T233：无结论时每次换一条全新核对尝试、转换会话不重跑——产物没被判定过，重转不会更有结论，也没理由假设新转换会话能救回坏核对）；`RecheckPending`（产物在、`.checker` 里是 no-verdict 文案 → 重跑先重核这一份；T222 核心：不能被"已有产物，跳过"静默采纳——跳过意味着整章连核对都不跑）；`.checker` 结论文件约定（`<产物>.checker`，空串=pass）。checkerAnchorName 不进新架构：旧锚点是转换转录文件名，新形态下队列任务 id + verdict 记录已等价承载"哪一次转换"的语义。
+
+**验证**：`go test ./internal/...` 60 例绿。
