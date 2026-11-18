@@ -1,6 +1,6 @@
-# 档位2 工作提示词（旧线打磨版，逐字保留）
+# 档位2 工作提示词（参考实现打磨版，逐字保留）
 
-> 来源：旧线 `go/internal/prompts/templates/img2text.system.md` /
+> 来源：参考实现 `上游实现/prompts/templates/img2text.system.md` /
 > `img2text_textonly.system.md`（img2text 会话多年打磨的英文 system prompt）。
 > 三分法处置：**判据句已入内核**（三态替换/mermaid 校验/保留语义），以下为
 > **知识层**——agent 处理 img2text 任务时按此思考与产出；人设/会话仪式句
@@ -45,14 +45,14 @@ Rules:
 - No readable text at all -> output exactly: [NO_TEXT]
 - Never describe fonts, colours, styling, layout or what the image "shows".
 
-## 旧线 → 新架构映射（用旧提示词，走新通道）
+## 参考实现 → 新架构映射（用旧提示词，走新通道）
 
-| 旧线元素 | 新架构等价物 |
+| 参考实现元素 | 新架构等价物 |
 |---|---|
 | `get_more_context(more_above, more_below)` 增量上下文 | `dvagent ctx-up / ctx-down <项目> <task_id> [n]` |
 | `{MAX_TOOL_CALLS}` 调用上限 | 任务重试上限（verdict 打回计数，上限 6） |
 | `[IMG_TYPE: <type>]` 决策头 | 三态产物：文字型→`out/replacement.md`；结构型→`out/figure.mmd`；无法文字化→不写产物（keep） |
-| mermaid 失败修复会话（mermaid_session.go 的 fix system prompt） | 校验失败 → 任务打回，按报错修语法重交（提示词原文在旧线 `go/internal/img2text/mermaid_session.go` systemPrompt） |
+| mermaid 失败修复会话（mermaid_session.go 的 fix system prompt） | 校验失败 → 任务打回，按报错修语法重交（提示词原文在参考实现 `上游实现/img2text/mermaid_session.go` systemPrompt） |
 | `{OUTPUT_LANG}` | config `mineru.language`（默认中文） |
 
 ## 使用要点

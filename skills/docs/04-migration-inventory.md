@@ -1,10 +1,10 @@
-# 04 · 旧架构资产清点（迁移来源台账）
+# 04 · 早期架构资产清点（迁移来源台账）
 
 迁移动作 = **判据入代码、知识入说明书、会话层退役**。逐条抽取、逐字校对，不凭记忆重写（同仓库提示词维护规矩）。本文件是迁移的 checklist，迁一项勾一项。
 
 ## 一、判据类 → kernel 验收 spec（第一优先级）
 
-来源：`go/internal/latex`（提交门禁、覆盖率、dedupe 判据）、`go/internal/analyze`、`docs/agent-notes/latex-pipeline.md`（判据、阈值与事故证据）。
+来源：`上游实现/latex`（提交门禁、覆盖率、dedupe 判据）、`上游实现/analyze`、`docs/agent-notes/latex-pipeline.md`（判据、阈值与事故证据）。
 
 | 判据 | 旧位置线索 | 新归宿 |
 | --- | --- | --- |
@@ -21,7 +21,7 @@
 
 ## 二、知识/方法类 → 工作说明书（agent/ 目录，per 任务类型）
 
-来源：`go/internal/prompts/templates/*.md`（各会话 system 模板）、`docs/latex.md`、`docs/agent-notes/`。
+来源：`上游实现/prompts/templates/*.md`（各会话 system 模板）、`docs/latex.md`、`docs/agent-notes/`。
 
 迁移时的抽取纪律：逐篇过旧模板，"必须/不得"句进验收 spec，"怎么/建议"句进说明书，人设/仪式句丢弃；搬迁逐字校对。**说明书只减不增**（少即是多），工具宽容度提高时不往说明书加解释。
 
@@ -47,5 +47,5 @@
 
 ## 四、目录与数据兼容
 
-- 新线项目工作区布局沿用旧线（`source/`、`progress_items/`、`work/`、`style/`、`chapters/`、`build/`、`out/`），旧文档与调试直觉平移。
-- 旧线 `docs/` 的判据文档（dedupe-algorithm.md、agent-notes/latex-pipeline.md）是本线开发的**规格来源**，迁完前不得删除。
+- 新线项目工作区布局沿用参考实现（`source/`、`progress_items/`、`work/`、`style/`、`chapters/`、`build/`、`out/`），旧文档与调试直觉平移。
+- 参考实现 `docs/` 的判据文档（dedupe-algorithm.md、agent-notes/latex-pipeline.md）是本线开发的**规格来源**，迁完前不得删除。

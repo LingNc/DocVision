@@ -4,7 +4,7 @@
 | --- | --- |
 | **名称** | DocVision Skills（agent 驱动的书籍转换技能包） |
 | **作者** | 绫袅（LingNc） |
-| **仓库** | https://github.com/LingNc/DocVision （分支 `feat/skills`，标签 `skills-v*`，SK 台账见 `skills/docs/plan.md`） |
+| **仓库** | https://github.com/LingNc/DocVision  |
 | **版本** | 见包名后缀 / `git describe --tags` |
 | **组成** | `docs/` 设计文档与验收标准 · `kernel/` 确定性内核（Go，dvagent CLI）· `agent/` 宿主 agent 工作手册 · `PACKAGE-INFO.md` 本文件 |
 | **依赖** | Go ≥1.25（编译内核）、poppler-utils、TeX Live（pdflatex）、MinerU（magic-pdf，API token 自备）、python3；可选 mutool、mupdf-tools |

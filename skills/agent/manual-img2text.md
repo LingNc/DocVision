@@ -1,7 +1,7 @@
 # T6 img2text——档位2 逐图文字化（小轮转）
 
 > 档位2 = 书级输出**干净 md** 的流水线：你逐图处理，kernel 最后按你的决策
-> 重组装（`img2text-assemble`）。这是旧线 img2text 模式的任务级落点。
+> 重组装（`img2text-assemble`）。这是参考实现 img2text 模式的任务级落点。
 
 ## 三态决策（每张图必须选其一）
 

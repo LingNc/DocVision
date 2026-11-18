@@ -1,10 +1,10 @@
 # skills 线 plan 台账（独立编号 SK-P<N>）
 
 
-> 与旧线 `docs/plan.md` 的 P 编号完全隔离。SK-P1–SK-P26 由旧线 P81–P106 迁移（2026-11-18，防新旧线混淆）；批次历史档案仍在旧线 docs/agent-batch-history.md 第三十七至第六十二批（只增日志不迁移）。
+> 与参考实现 `docs/plan.md` 的 P 编号完全隔离。SK-P1–SK-P26 由参考实现 P81–P106 迁移（2026-11-18，防新参考实现混淆）；批次历史档案仍在参考实现 docs/agent-batch-history.md 第三十七至第六十二批（只增日志不迁移）。
 
 
-[ ][ ] SK-P1. skills 线：LLM 会话外迁到宿主 agent 的新架构——skills 内核只做确定性执行+验收（任务队列/租约/验收器/项目注册表/书级档案），用户除 MinerU 外零 API 配置；愿景"放下 PDF 跑到底、中断无损续、换 agent 可续"，验收标准 A1–A10。放 `skills/` 独立演化，不侵入旧线。
+[ ][ ] SK-P1. skills 线：LLM 会话外迁到宿主 agent 的新架构——skills 内核只做确定性执行+验收（任务队列/租约/验收器/项目注册表/书级档案），用户除 MinerU 外零 API 配置；愿景"放下 PDF 跑到底、中断无损续、换 agent 可续"，验收标准 A1–A10。放 `skills/` 独立演化，不侵入参考实现。
   改：新增 `skills/`（README + docs/01架构 02任务协议 03接口 04迁移台账 + `kernel/` Go module + `dvagent` CLI）；本批同步 plan/CHANGELOG/batch-history/AGENTS.md 指针。
   验证：`go test ./internal/...` 5 例绿（幂等入队/租约过期回收/确定性派发/打回回队/依赖解锁）；dvagent 冒烟全链路绿（register→activate→claim→submit 打回→补产物通过→解锁核对→note/profile/status）。
 
@@ -14,22 +14,22 @@
   验证：`go test ./internal/...` 8 例绿（拆分判据五反例 + 扇出解锁 + 回炉挂起）；dvagent 冒烟：坏拆分拒绝/好拆分扇出/子过父解锁/issue-add 回炉/pause 拒派/resume/abort 全链路。
 
 
-[ ][ ] SK-P3. T3 重型判据落地：覆盖率算法逐字移植旧线（T168：pdftotext+CJK 三字组、阈值 0.85、<200 组跳过、首打回再放行记缺口）、编译检查（pdflatex 双遍+sha256 快照入 verdict）、验收器默认装配重型 Hook（缺工具跳过记 note 不卡死）。
+[ ][ ] SK-P3. T3 重型判据落地：覆盖率算法逐字移植参考实现（T168：pdftotext+CJK 三字组、阈值 0.85、<200 组跳过、首打回再放行记缺口）、编译检查（pdflatex 双遍+sha256 快照入 verdict）、验收器默认装配重型 Hook（缺工具跳过记 note 不卡死）。
   改：`skills/kernel` 增 `texcheck/`（coverage.go 移植+compile.go）；`verify.NewChecker` 默认装配+覆盖率二判制+out/ 哈希快照；`Verdict` 加 `Notes`；dvagent submit 回传 notes。
   验证：`go test ./internal/...` 14 例绿（覆盖率 5 例：剥离/自对照/删1-4掉阈值+列缺口/<200组跳过/首打回再放行）；pdftotext 真集成冒烟：75% 覆盖率首次打回列缺口段落、二次放行记 coverage_note、哈希快照就位。
 
 
-[ ][ ] SK-P4. T2 作图判据落地：软墨迹对齐（compareFigure）逐字移植旧线 figure_compare.go——多分辨率渐进对齐、质心起点、尺寸按物理 mm 在归一化前量取（scale_dev 抓"看着对上了其实窄了一截"）、RGB/灰度双通道、证据叠加图（白=共有/品红=原图独有/绿=候选独有）可落盘；仅剥会话工具壳。
+[ ][ ] SK-P4. T2 作图判据落地：软墨迹对齐（compareFigure）逐字移植参考实现 figure_compare.go——多分辨率渐进对齐、质心起点、尺寸按物理 mm 在归一化前量取（scale_dev 抓"看着对上了其实窄了一截"）、RGB/灰度双通道、证据叠加图（白=共有/品红=原图独有/绿=候选独有）可落盘；仅剥会话工具壳。
   改：`skills/kernel` 增 `figcheck/`（compare.go 移植 566 行 + compare_test.go 5 例）；go.mod 引入 golang.org/x/image（CatmullRom 缩放）。
   验证：`go test ./internal/...` 19 例绿（同图 ≥0.9 相似、mm 口径抓 50% 宽度差、无 mm 退化宽高比判据、空图拒绝）；修掉移植笔误一处（overlay→Overlay 调用点）。
 
 
-[ ][ ] SK-P5. T1/T4 verdict 模式验收落地：classify 三态校验（styled_text 必附 extracted、vector 必附 reason、class 不合法/缺失一律打回——旧线"失败不降级"判据入代码）；check 校验（result 三选一、issues 每条必带位置指针、no_verdict 打回但由 attempts 上限兜底）。
+[ ][ ] SK-P5. T1/T4 verdict 模式验收落地：classify 三态校验（styled_text 必附 extracted、vector 必附 reason、class 不合法/缺失一律打回——参考实现"失败不降级"判据入代码）；check 校验（result 三选一、issues 每条必带位置指针、no_verdict 打回但由 attempts 上限兜底）。
   改：`skills/kernel` 增 `verify/schema.go`（ClassifyVerdict/CheckVerdict 结构 + 校验）+ `schema_test.go` 8 例；`Run` 第 6 步接入。
   验证：`go test ./internal/...` 27 例绿（classify 5 例 + check 4 例覆盖全部正反路径）。
 
 
-[ ][ ] SK-P6. dedupe 居中重合判据核心落地：软墨量内容框（不二值化不缩放）、S 自适应按对计算、逐级搜索 32→最细（判定分取最细级）、±10% 平移预算/细层 ±2 格不扩窗，从旧线 motif_canon.go+motif_align.go 逐字移植；附预筛（墨量/长宽比）、代价记账、AlignDetail 过程量、CarryOver 带入不接力（T151）。
+[ ][ ] SK-P6. dedupe 居中重合判据核心落地：软墨量内容框（不二值化不缩放）、S 自适应按对计算、逐级搜索 32→最细（判定分取最细级）、±10% 平移预算/细层 ±2 格不扩窗，从参考实现 motif_canon.go+motif_align.go 逐字移植；附预筛（墨量/长宽比）、代价记账、AlignDetail 过程量、CarryOver 带入不接力（T151）。
   改：`skills/kernel` 增 `dedupe/`（canon.go 230 行 + align.go 230 行 + dedupe_test.go 8 例）；Runner/配置耦合改为包级变量与参数。
   验证：`go test ./internal/...` 36 例绿（自比≈1、方块vs竖条低于 0.60 闸门、预筛拒高宽比差、空白/小内容框退回、画布抬下限、平移换算、级数尾级规则、带入不接力）。
 
@@ -59,7 +59,7 @@
   验证：`go test ./internal/...` 60 例绿（六前缀正反、无文件/有判定/无结论文案/空结论四态）。
 
 
-[ ][ ] SK-P12. assemble 资源盘点 + input@path 注入落地：PreflightAssemble（旧线 preflightAssemble 改为返回结构化报告——cls 就位/章节计数/figures、images 计数/\includegraphics 逐条解析三候选路径 buildDir·figures·章节目录，缺失逐条列出不中止 T33）+ EnsureInputPath（T324：\input@path{{chapters/}} 幂等注入 main.tex 首行后——子章节按 chapters/ 内相对路径互引，缺它全书只能靠修复会话逐个改路径、每次 assemble 重烧）。
+[ ][ ] SK-P12. assemble 资源盘点 + input@path 注入落地：PreflightAssemble（参考实现 preflightAssemble 改为返回结构化报告——cls 就位/章节计数/figures、images 计数/\includegraphics 逐条解析三候选路径 buildDir·figures·章节目录，缺失逐条列出不中止 T33）+ EnsureInputPath（T324：\input@path{{chapters/}} 幂等注入 main.tex 首行后——子章节按 chapters/ 内相对路径互引，缺它全书只能靠修复会话逐个改路径、每次 assemble 重烧）。
   改：`skills/kernel` 增 `assemble/inventory.go` + assemble_test.go 补 2 例。
   验证：`go test ./internal/...` 62 例绿（盘点计数与缺失引用/input@path 注入幂等）。
 
@@ -89,7 +89,7 @@
   验证：`go test ./internal/...` 75 例绿（三态分流/自包含拷贝/幂等/未验收不驱动/异常计数）。
 
 
-[ ][ ] SK-P18. T2 作图数值判据接线（验收闭环最后一块判据）：verify.Run 第 7 步——acceptance.figure_ref 触发：pdftoppm 150dpi 渲染 out/figure.pdf → figcheck.CompareImagesMM（原图 vs 渲染，pdfinfo 取候选画布 pt→mm）→ 重合度 < min_overlap 或 mm 尺寸偏差 > max_scale_dev（T312）打回并附对齐成绩/尺寸句证据；accept_min_submits 交够 N 次 below 阈值放行记 figure_accept_as_is note（旧线判据，不静默）；.kv 内核临时目录用完即删；pdftoppm/pdfinfo 缺失跳过记 note。
+[ ][ ] SK-P18. T2 作图数值判据接线（验收闭环最后一块判据）：verify.Run 第 7 步——acceptance.figure_ref 触发：pdftoppm 150dpi 渲染 out/figure.pdf → figcheck.CompareImagesMM（原图 vs 渲染，pdfinfo 取候选画布 pt→mm）→ 重合度 < min_overlap 或 mm 尺寸偏差 > max_scale_dev（T312）打回并附对齐成绩/尺寸句证据；accept_min_submits 交够 N 次 below 阈值放行记 figure_accept_as_is note（参考实现判据，不静默）；.kv 内核临时目录用完即删；pdftoppm/pdfinfo 缺失跳过记 note。
   改：`skills/kernel` 增 `verify/figure.go` + figure_test.go 4 例 + testimg 助手。
   验证：`go test ./internal/...` 80 例绿（尺寸解析/无 spec 跳过/缺原图/缺 PDF/.kv 清理）。
 
@@ -161,7 +161,7 @@
   改：待实现（任务类型+工具+ Organize 定位标识）。
   验证：待补。
 
-[ ][ ] SK-P30. 看图台（HTML）：分组对比/阈值调参导出请求/进度状态/PNG 导出/按 imgxxx 编号指代；复用旧线 watcher 请求文件机制（内核唯一写通道）。
+[ ][ ] SK-P30. 看图台（HTML）：分组对比/阈值调参导出请求/进度状态/PNG 导出/按 imgxxx 编号指代；复用参考实现 watcher 请求文件机制（内核唯一写通道）。
   改：待实现（静态 review 页生成 + 请求处理）。
   验证：待补。
 
