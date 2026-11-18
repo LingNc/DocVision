@@ -4197,3 +4197,8 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 上轮补的断点续传此前只有 client 级测试——按"假环境遮 bug"的教训补命令级验收：`TestMineruAPIViaCLI`（假 API 服务端 + config-set 注入 base_url + MINERU_TOKEN 环境变量，走真实 dvagent 二进制）断言**全链 done + 归位 + 断点重跑零重传**（0.81s）。config-set 补 mineru.* 六键。05-first-run 手册 MinerU 段改 API 优先（export MINERU_TOKEN → prep-mineru-api 主推，prep-mineru 本地 CLI 备选）。
 
 **验证**：`go test ./internal/...` 17 包全绿（新增 CLI 级断言：全链/归位/断点零重传）。
+
+
+## 第八十三批：收尾在途批次 + 用户规矩（2026-11-18，用户："不需要再给验收上加东西了…无需添加参考…首秀需要我们这边验收通过就行。已完成就说已完成"）
+
+提交在途的 FirstRunCLIFull（手册全流程 CLI 验收，已绿）。**此后规矩：不主动给验收/参考物加码；用户说"继续"而事项已完成时，直接答"已完成"，不虚构新工作。** 用户另指出 05-first-run 文件"可能很多地方误导"——不预防性修改：真首秀暴露哪句误导改哪句（v0.10.0 批的活）。
