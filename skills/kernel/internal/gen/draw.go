@@ -8,9 +8,11 @@ import (
 	"sort"
 	"time"
 
+	"github.com/LingNc/DocVision/skills/kernel/internal/ids"
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
 	"github.com/LingNc/DocVision/skills/kernel/internal/verify"
+	"github.com/LingNc/DocVision/skills/kernel/internal/viewer"
 )
 
 // DrawSpec 给一张矢量图生成作图任务的验收 spec。
@@ -28,22 +30,55 @@ func DrawSpec(stem string) map[string]any {
 
 // DrawReport 是作图任务生成器的回执。
 type DrawReport struct {
-	TasksTotal   int      `json:"tasks_total"`
-	Added        int      `json:"added"`
-	VectorStems  []string `json:"vector_stems"`  // 本次驱动出的矢量图（排序）
-	StyledText   int      `json:"styled_text"`   // styled_text 分类数（无需作图）
-	Raster       int      `json:"raster"`        // raster 分类数（无需重绘）
-	NoVerdict    int      `json:"no_verdict"`    // done 但 verdict.json 缺失/损坏（异常计数）
+	TasksTotal  int      `json:"tasks_total"`
+	Added       int      `json:"added"`
+	VectorStems []string `json:"vector_stems"` // 本次驱动出的矢量图（排序）
+	StyledText  int      `json:"styled_text"`  // styled_text 分类数（无需作图）
+	Raster      int      `json:"raster"`       // raster 分类数（无需重绘）
+	NoVerdict   int      `json:"no_verdict"`   // done 但 verdict.json 缺失/损坏（异常计数）
+	Followers   int      `json:"followers"`    // 覆盖分组下跟随代表、未铺任务的组员数
 }
 
 // GenDraw 从队列里已 done 的 classify 任务读回三态结论，为 class=vector 的图
 // 铺一个 draw 任务（第一个"上游产物驱动下游任务"的生成器：分类结论就是
 // dedupe 之后的 key 图清单）。图文件从 classify 沙箱 inputs 拷进 draw 沙箱
 // inputs（记忆泡泡自包含）。幂等：同 id 跳过。
+// 若存在用户覆盖分组（viewer-apply 产物），组员跟随代表：只为代表铺重绘。
 func GenDraw(q *queue.Queue, projectRoot string) (*DrawReport, error) {
 	before := countType(q, task.TypeDraw)
 	rep := &DrawReport{}
 	now := time.Now()
+	ov, _ := viewer.LoadOverride(projectRoot)
+	idTbl, _ := ids.Load(projectRoot)
+	imgIDByTask := map[string]string{}
+	if idTbl != nil {
+		for _, r := range idTbl.Records {
+			imgIDByTask[r.TaskID] = r.ID
+		}
+	}
+	isRep := func(ctID string) bool {
+		if ov == nil {
+			return true
+		}
+		imgID, ok := imgIDByTask[ctID]
+		if !ok {
+			return true
+		}
+		for _, g := range ov.Groups {
+			if g.Rep == imgID {
+				return true
+			}
+		}
+		// 不在任何组里的图照旧各画
+		for _, g := range ov.Groups {
+			for _, m := range g.Members {
+				if m == imgID {
+					return false // 是组员非代表 → 跟随
+				}
+			}
+		}
+		return true
+	}
 
 	var cls []*task.Task
 	for _, t := range q.Tasks {
@@ -68,6 +103,11 @@ func GenDraw(q *queue.Queue, projectRoot string) (*DrawReport, error) {
 		switch v.Class {
 		case "vector":
 			rep.VectorStems = append(rep.VectorStems, stem)
+			// 用户覆盖分组（viewer-apply 产物）：组员跟随代表，只为代表铺重绘。
+			if !isRep(ct.ID) {
+				rep.Followers++
+				continue
+			}
 			if err := enqueueDraw(q, projectRoot, ct, stem, now); err != nil {
 				return rep, err
 			}

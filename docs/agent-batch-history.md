@@ -4093,3 +4093,10 @@ T6 落地：① `task.TypeImg2Text` + `gen.GenImg2Text`（读 doc_index，图片
 **SSH 推送通道打通**：用户已把公钥加进 GitHub，`ssh -T git@github.com` 认证通过（Hi LingNc!）。
 
 **验证**：`go test ./internal/...` 15 包全绿（SplitFast 基本页数守恒 2+2+1=5、超限二分细化出 4 单页片且守恒）。
+
+
+## 第六十八批：看图台 v2——viewer-apply 闭环（v0.6.0）（2026-11-18，用户："继续"）
+
+闭环完成：① `viewer.ApplyRegroup`（消费页面导出的 regroup.json，按用户确认阈值重算 dedupe 分组，写覆盖文件 work/viewer/groups_override.json）；② `GenDraw` 读覆盖文件——**组员跟随代表**（只为代表铺重绘任务，Followers 计数）；③ HTML 图路径改相对路径 `../../`（file:// 直接打开可见图）；④ dvagent `viewer-apply` 命令。至此用户调参→导出→应用→重绘按新分组执行的链路全通，且仍守"页面只读、内核唯一写通道"纪律。
+
+**验证**：`go test ./internal/...` 15 包全绿（覆盖分组下只为代表铺任务/组员跟随/去覆盖后补齐）。

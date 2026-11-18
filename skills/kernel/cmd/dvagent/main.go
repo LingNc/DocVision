@@ -580,6 +580,26 @@ func main() {
 		}
 		out(rep)
 
+	case "viewer-apply":
+		// dvagent viewer-apply <项目名> <regroup.json路径> —— 消费重分组请求，写覆盖文件。
+		if len(args) < 3 {
+			die(fmt.Errorf("viewer-apply 需要: <项目名> <regroup.json路径>"))
+		}
+		p := mustProject(reg, args[1])
+		raw, err := os.ReadFile(args[2])
+		if err != nil {
+			die(err)
+		}
+		var req viewer.RegroupRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			die(fmt.Errorf("regroup.json 解析失败: %w", err))
+		}
+		ov, err := viewer.ApplyRegroup(p.Root, req)
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"threshold": ov.Threshold, "groups": len(ov.Groups), "override": viewer.OverridePath(p.Root)})
+
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))
 	}

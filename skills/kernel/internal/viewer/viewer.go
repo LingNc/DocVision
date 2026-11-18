@@ -180,7 +180,7 @@ func renderHTML(rep *Report, projectRoot string) string {
 			if img == nil {
 				continue
 			}
-			fmt.Fprintf(&b, `<div class="card"><span class="id">%s</span> %s<br><a href="/%s" target="_blank"><img src="/%s" loading="lazy"></a></div>`,
+			fmt.Fprintf(&b, `<div class="card"><span class="id">%s</span> %s<br><a href="../../%s" target="_blank"><img src="../../%s" loading="lazy"></a></div>`,
 				html.EscapeString(img.ID), verdictBadge(img.Verdict), html.EscapeString(img.Path), html.EscapeString(img.Path))
 		}
 		b.WriteString(`</div>`)
@@ -189,7 +189,7 @@ func renderHTML(rep *Report, projectRoot string) string {
 	b.WriteString(`<h2>全部图片</h2>`)
 	for i := range rep.Images {
 		img := &rep.Images[i]
-		fmt.Fprintf(&b, `<div class="card"><span class="id">%s</span> %s<br><a href="/%s" target="_blank"><img src="/%s" loading="lazy"></a><br><span style="font-size:11px;color:#888">%s</span></div>`,
+		fmt.Fprintf(&b, `<div class="card"><span class="id">%s</span> %s<br><a href="../../%s" target="_blank"><img src="../../%s" loading="lazy"></a><br><span style="font-size:11px;color:#888">%s</span></div>`,
 			html.EscapeString(img.ID), verdictBadge(img.Verdict), html.EscapeString(img.Path), html.EscapeString(img.Path), html.EscapeString(img.Path))
 	}
 
