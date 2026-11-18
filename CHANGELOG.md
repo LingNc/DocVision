@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills 看图台 v0.4.0（SK-P30 v1）**：`viewer-build` 静态生成 work/viewer/index.html——imgxxx 卡片（三态徽标+相对路径大图）、dedupe 相似组卡片（代表高亮/精确同图标徽/组内闸门口径）、进度汇总、**组闸门阈值输入+导出重分组请求**（regroup.json→work/retry/→viewer-apply 消费，watcher 请求机制，内核唯一写通道）。交付目录迁 lingnc-memory/projects/dv-skills。
 - **skills img2text 任务类型（SK-P29，v0.3.0）**：T6 逐图文字化小轮转——GenImg2Text 从 doc_index 图片条目铺任务（按 seq 去重幂等，任务包带 global+bbox 指针）；`ctx-up`/`ctx-down` 取邻块（SK-P29 的"检索下文 up/down"）；Organize 合并时按 page_idx 打 `<!-- pN -->` 页码标识（docjson 精确定位）；手册 manual-img2text.md。
 - **skills 编号体系 v0.2.0（SK-P28）**：人类可读编号 imgxxx/vecxxx/pdfpxx + `internal/ids` 映射表（skills_ids.json：id↔sha/路径/页/bbox/任务）；同 SHA 幂等共享编号；GenClassify 铺队即登记；dvagent `ids-list`。agent 内部仍用 sha。公钥/私钥存 dv-delivery-v3/keys。
 - **skills MCP 壳（P106）**：`dvagent mcp`——MCP 协议第二张皮（stdio JSON-RPC 2.0 newline-delimited）：initialize/tools/list/tools/call 全覆盖，7 个工具（status/claim/submit/note/doc-search/assemble-verify/deliver）与 CLI 同函数零行为漂移；冒烟过（initialize→7 工具→status 回执→未知工具 isError）。

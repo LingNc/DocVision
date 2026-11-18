@@ -24,6 +24,7 @@ import (
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
 	"github.com/LingNc/DocVision/skills/kernel/internal/verify"
+	"github.com/LingNc/DocVision/skills/kernel/internal/viewer"
 )
 
 func die(err error) {
@@ -562,6 +563,22 @@ func main() {
 			}
 		}
 		out(map[string]any{"task": tk.ID, "entry_seq": seq, "up": up, "blocks": blocks})
+
+	case "viewer-build":
+		// dvagent viewer-build <项目名> —— 生成静态看图台 work/viewer/index.html。
+		if len(args) < 2 {
+			die(fmt.Errorf("viewer-build 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		rep, err := viewer.Build(p.Root, q)
+		if err != nil {
+			die(err)
+		}
+		out(rep)
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))

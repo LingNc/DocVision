@@ -4075,3 +4075,12 @@ P98 落哈希快照时留下的消费方：`verify.CheckDrift` 复核全部 done
 T6 落地：① `task.TypeImg2Text` + `gen.GenImg2Text`（读 doc_index，图片块按 seq 铺任务，同 img 去重幂等；任务包 acceptance 带 entry_seq/global/img/bbox 指针）；② `ctx-up`/`ctx-down` 命令=小轮转工具之"检索下文 up/down"（按 entry_seq 取 doc_index 相邻文字块，默认 3 块，蒸馏回执）；③ Organize 合并时按 docjson 的 page_idx 打 `<!-- pN -->` 页码标识（用户要求的"每段可回溯页码"——合并 content_list 时天然有 page_idx，打标零成本）；④ manual-img2text.md（三件套用法）。看图走既有 page-render（任务包自带 bbox 指针），提交=标准 submit+description.md 必产验收。
 
 **验证**：`go test ./internal/...` 14 包全绿（GenImg2Text 去重/幂等/指针断言；邻块切分断言）。
+
+
+## 第六十六批：看图台 v1（SK-P30）（2026-11-18，用户："继续"+交付目录迁 lingnc）
+
+`internal/viewer` + `dvagent viewer-build`：静态看图台生成器。数据源=ids 表（imgxxx）+ 队列 classify verdict + dedupe 本地分组；产物 work/viewer/index.html（图引用相对路径不内嵌，点开看大图）。页面含：进度汇总条（已分类/三态计数/入组数）、相似组卡片（代表高亮、精确同图标徽）、全图卡片（三态徽标）、**组闸门阈值输入框 + "导出重分组请求"按钮**（下载 regroup.json，用户确认后存 work/retry/，由后续 viewer-apply 命令消费——沿用旧线 watcher 请求机制：页面只读观察者、内核唯一写通道）。viewer-apply 本身列为 SK-P30 v2（消费请求重建分组并联动 draw 任务）。
+
+**验证**：`go test ./internal/...` 15 包全绿（viewer 构建断言：img 编号/进度计数/HTML 关键元素）。交付目录整体迁 `/mnt/agents/lingnc-memory/projects/dv-skills/`（用户要求：离开 output，keys 一并迁入）。
+
+**遗留小项**：viewer-apply 未实现（v2）；HTML 里图路径用 /%s 根引用，本地直接打开 file:// 时图片不显示（需静态伺服或改成相对路径——记 SK-P30 v2）。
