@@ -36,12 +36,19 @@ type ClassifyReport struct {
 // 排序入队，Created 相同 → 确定性派发顺序）。
 func GenClassify(q *queue.Queue, projectRoot, imagesRel string) (*ClassifyReport, error) {
 	before := countType(q, task.TypeClassify)
+	// 图源两级发现：① 项目 source/images（抽图已归集）；② 真实 MinerU 产物的
+	// mineru/*/auto/images/（未归集时直接发现，路径按项目相对登记）。
+	type imgSrc struct {
+		name string // 文件名
+		path string // 项目内绝对路径
+		rel  string // 项目相对路径（ids 登记用）
+	}
+	var srcs []imgSrc
 	dir := filepath.Join(projectRoot, filepath.FromSlash(imagesRel))
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	var names []string
 	if err == nil {
 		for _, e := range entries {
 			if e.IsDir() {
@@ -49,14 +56,29 @@ func GenClassify(q *queue.Queue, projectRoot, imagesRel string) (*ClassifyReport
 			}
 			ext := strings.ToLower(filepath.Ext(e.Name()))
 			if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".webp" {
-				names = append(names, e.Name())
+				srcs = append(srcs, imgSrc{name: e.Name(), path: filepath.Join(dir, e.Name()),
+					rel: filepath.ToSlash(filepath.Join(imagesRel, e.Name()))})
 			}
 		}
 	}
-	sort.Strings(names)
+	if len(srcs) == 0 {
+		// ② MinerU 直出：mineru/<part>/auto/images/*
+		matches, _ := filepath.Glob(filepath.Join(projectRoot, "mineru", "*", "auto", "images", "*.*"))
+		for _, m := range matches {
+			ext := strings.ToLower(filepath.Ext(m))
+			if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".webp" {
+				rel, rerr := filepath.Rel(projectRoot, m)
+				if rerr == nil {
+					srcs = append(srcs, imgSrc{name: filepath.Base(m), path: m, rel: filepath.ToSlash(rel)})
+				}
+			}
+		}
+	}
+	sort.Slice(srcs, func(i, j int) bool { return srcs[i].rel < srcs[j].rel })
 	now := time.Now()
 	idTable, _ := ids.Load(projectRoot) // 人类编号表（SK-P28）；读失败不挡铺队
-	for _, name := range names {
+	for _, src := range srcs {
+		name := src.name
 		stem := strings.TrimSuffix(name, filepath.Ext(name))
 		sandbox := "tasks/cls_" + stem
 		// 图拷进沙箱 inputs（记忆泡泡自包含——与 GenConvert 同原则）。
@@ -64,7 +86,7 @@ func GenClassify(q *queue.Queue, projectRoot, imagesRel string) (*ClassifyReport
 		if err := os.MkdirAll(inDir, 0o755); err != nil {
 			return nil, err
 		}
-		data, err := os.ReadFile(filepath.Join(dir, name))
+		data, err := os.ReadFile(src.path)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +96,7 @@ func GenClassify(q *queue.Queue, projectRoot, imagesRel string) (*ClassifyReport
 		// 登记人类编号 imgxxx（同 SHA 幂等共享编号）。
 		if idTable != nil {
 			h := sha256.Sum256(data)
-			_, _ = idTable.Register(ids.KindImg, fmt.Sprintf("%x", h), filepath.ToSlash(filepath.Join(imagesRel, name)), 0, [4]float64{}, "cls_"+stem)
+			_, _ = idTable.Register(ids.KindImg, fmt.Sprintf("%x", h), src.rel, 0, [4]float64{}, "cls_"+stem)
 		}
 		t := &task.Task{
 			ID:      "cls_" + stem,

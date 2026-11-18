@@ -4176,3 +4176,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 认账+补齐：用户记忆的旧线 API 模式（上传→排队→下载，只要 token）此前**没进 skills 内核**——prep 只移植了本地 CLI 包壳。本批移植：`internal/mineruapi`（旧线 client.go 逐字骨架：file-urls/batch 建任务+预签名 URL、1MiB 分块 PUT+空闲超时泵、extract-results 轮询带状态标签/进度/超时续等、zip 下载+防 zip-slip 解压）；token 走环境变量 MINERU_TOKEN（不落盘），模型参数走 config.mineru 段（用户专属）；命令 `prep-mineru-api <项目> <part...>`（断点幂等：已有 auto 目录的 part 跳过）。doctor 相应改判：mineru/python3 降为"可选"（API 模式不需要），增 MINERU_TOKEN 检查项，Hint 给两条路对比（API 轻/CLI 重）。测试用 httptest 假服务端跑通 上传→轮询→下载→解压 全链（含上传字节完整性断言）。
 
 **验证**：`go test ./internal/...` 17 包全绿（mineruapi 3 例：全链路/token 必填/长名截断）。
+
+
+## 第八十批：真实流程三缺口修复（2026-11-18，用户："还有什么没修改的？"）
+
+对照真实流程（非假 mineru 环境）复查抓到三处：① **MinerU API 解压布局未归位**——zip 内层 <名>/auto/... 解到 mineru/<part>/ 多套一层，organize 找不到 content_list；加 `NormalizeLayout`（找 content_list 所在目录→归位 <dst>/auto，幂等，跨卷回退复制）。② **gen-classify 图源发现太死**——只扫 source/images，真实 MinerU 图在 mineru/<part>/auto/images/ 会导致铺不出 classify 任务；改为两级发现（source/images 优先，空则扫 mineru 直出，路径按项目相对登记+照常拷沙箱）。③ **页表来源从未设置**——prep-index 不填 OriginPDFsFunc 导致 pages.Srcs 为空、page-render 报"超出页表范围"（检索链渲染半边真实环境是断的）；命令里默认映射 part→source/parts/<part>.pdf。**教训（同 MinerU API）：假测试环境太配合会把布局/路径类 bug 全遮住——真实数据流的路径常量要逐一对照。**
+
+**验证**：`go test ./internal/...` 17 包全绿（新增 NormalizeLayout 归位/幂等/无产物报错、MineruDiscovery 两级发现+沙箱自包含断言）。

@@ -350,6 +350,56 @@ func (c *Client) DownloadAndExtract(zipURL, targetDir string) error {
 	return os.Remove(zipPath)
 }
 
+// NormalizeLayout 归位解压产物：MinerU zip 内层是 <data_id>/auto/...，
+// 解压到 mineru/<part>/ 后可能多套一层（<part>/<part>/auto）。
+// 本函数找到 content_list 所在目录，把其 <...>/auto 整层归位到 <dir>/auto。
+// 幂等：已是标准布局则不动。返回归位后的 auto 目录路径（找不到则报错）。
+func NormalizeLayout(dir string) (string, error) {
+	auto := filepath.Join(dir, "auto")
+	if _, err := os.Stat(auto); err == nil {
+		return auto, nil
+	}
+	// 深度搜 content_list
+	var found string
+	filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if strings.HasSuffix(name, "_content_list.json") && !strings.Contains(name, "_v2") {
+			found = filepath.Dir(p) // 即内层 auto
+		}
+		return nil
+	})
+	if found == "" {
+		return "", fmt.Errorf("%s 下未找到 content_list（MinerU 产物结构不符）", dir)
+	}
+	target := filepath.Join(dir, "auto")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	// 直接移目录（同卷内 rename；跨卷回退复制）
+	if err := os.Rename(found, target); err != nil {
+		entries, rerr := os.ReadDir(found)
+		if rerr != nil {
+			return "", rerr
+		}
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			return "", err
+		}
+		for _, e := range entries {
+			data, rerr2 := os.ReadFile(filepath.Join(found, e.Name()))
+			if rerr2 != nil {
+				return "", rerr2
+			}
+			if werr := os.WriteFile(filepath.Join(target, e.Name()), data, 0o644); werr != nil {
+				return "", werr
+			}
+		}
+	}
+	return target, nil
+}
+
 // unzip 解压（防 zip-slip：拒绝绝对路径与 ..）。
 func unzip(src, dst string) error {
 	r, err := zip.OpenReader(src)

@@ -738,6 +738,14 @@ func main() {
 		if len(mdNames) == 0 {
 			die(fmt.Errorf("chapters/ 无 md（先 prep-organize）"))
 		}
+		// 页表来源：part 名 → 拆分产物 source/parts/<part>.pdf（page-render 的渲染源）。
+		docindex.OriginPDFsFunc = func(mineruOutput, splitDir, subject, part string) string {
+			cand := filepath.Join(p.Root, "source", "parts", part+".pdf")
+			if _, err := os.Stat(cand); err == nil {
+				return cand
+			}
+			return ""
+		}
 		idx, pages, err := docindex.Build(filepath.Join(p.Root, "mineru"), "", mdNames, filepath.Join(p.Root, "chapters"), filepath.Join(p.Root, "doc_index.json"))
 		if err != nil {
 			die(err)
@@ -802,7 +810,12 @@ func main() {
 				results = append(results, map[string]any{"part": stem, "error": "下载解压: " + err.Error()})
 				continue
 			}
-			results = append(results, map[string]any{"part": stem, "batch": batch, "status": "done", "dir": dst})
+			autoDir, err := mineruapi.NormalizeLayout(dst)
+			if err != nil {
+				results = append(results, map[string]any{"part": stem, "error": "布局归位: " + err.Error()})
+				continue
+			}
+			results = append(results, map[string]any{"part": stem, "batch": batch, "status": "done", "auto": autoDir})
 		}
 		out(map[string]any{"results": results})
 
