@@ -167,6 +167,10 @@
   改：`skills/kernel` 增 `docindex/`（docindex.go 约 700 行移植 + docindex_test.go 5 例）；pdfcpu 页数与 findOriginPDFs 两处外部耦合改为函数注入（PageCounter/OriginPDFsFunc，nil 时跳过）。
   验证：`go test ./internal/...` 50 例绿（构建/检索排序/字段过滤/AND 语义/CropHint 唯一图兜底/marker 回填含跨行与代码块/落盘重载一致性）。
 
+[ ][ ] P90. assemble 纯函数落地第一刀：standalone.tex 递归内联（\input@path{{a/}{b/}} 声明收集进搜索路径、层数保险 8、withinRoot 越界拒绝、onStack 循环防重入）+ PDF 书签注入（T49：hyperref 幂等注入、逐章 \pdfbookmark[层]{标题}{bk:<base>}、AI 已有 \pdfbookmark 只补 hyperref、标题取划分 md 首个标题 # 数-1 clamp 0..3、escapeBookmark 转义）。
+  改：`skills/kernel` 增 `assemble/`（standalone.go + bookmarks.go + assemble_test.go 8 例）；deliverBook/copyDir 等 I/O 管道留待装配批次。
+  验证：`go test ./internal/...` 58 例绿（递归内联/声明路径解析/越界拒/书签注入幂等/AI 接手不重复/层级计算/转义）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

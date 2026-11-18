@@ -3895,3 +3895,14 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **测试认知修正两处**：①CropHint 旧实现细节未见原文，移植版对"未命名图表"用"页内唯一图"兜底（扫描书 99% 场景），label 精确匹配优先——与 doc comment 契约一致；②`marker:` 字段过滤只命中 images 阶段回填过的条目（MinerU 原生索引的图块 Marker 为空）——测试改用 `text:` 字段过滤。
 
 **验证**：`go test ./internal/...` 50 例绿。
+
+
+## 第四十六批：assemble 纯函数——standalone 内联与书签注入（2026-11-18，用户："继续"）
+
+按台账迁 assemble 第一刀：旧线 `assemble.go` 的两个纯函数部分逐字移植为 `skills/kernel/internal/assemble/`。
+
+**P90**：`BuildStandaloneTex`（递归内联 \input/\include：解析顺序=包含文件目录→构建树根→文档声明的 \input@path；8 层深度保险；withinRoot 拒 `../` 越界并原样保留；onStack 栈防循环 include；每段内联带 `% ==== 路径 ====` 标记头）+ `EnsurePDFBookmarks`（T49：无 hyperref 时幂等注入；逐章 \pdfbookmark[level]{标题}{bk:<base>} 放在 \input{chapters/…} 前；AI 已布置 \pdfbookmark 则只补 hyperref 不动锚点；标题与层级取划分阶段章节 md 的首个标题行——# 数-1 clamp 0..3；escapeBookmark 转义 %&#_ 与反斜杠；ClassLoadsHyperref 查 cls 防重复引入）。deliverBook/copyDir 等 I/O 管道与 fixSession/finalReview 编排不进本批。
+
+**测试认知修正两处**：①\input@path 声明按文档收集——声明在 main.tex 的文件用 inliner 是独立的，跨文件声明不传递；②`\input{chapters/x}`（无 .tex 后缀）按旧线语义合法（base="x"，后续解析 x.tex），不应拒绝。
+
+**验证**：`go test ./internal/...` 58 例绿。

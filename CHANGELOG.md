@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills assemble 纯函数部分（P90）**：standalone.tex 递归内联（\input@path 声明解析、8 层深度保险、越界 `../` 拒绝内联原样保留、循环 include 栈防重入）+ PDF 书签注入（hyperref 幂等/逐章 pdfbookmark 锚点 bk:<base>/AI 已接手时不重复/书签文字取划分 md 首个标题层级 clamp 0..3）。`go test` 58 例绿。
 - **skills doc_index 检索索引（P89）**：MinerU content_list 只读索引从旧线 docindex.go 逐字移植——块条目/全局页号/DOCVISION 注释回填（styled-text/vector/image，CONTENT/DESCRIBE 跨行、矢量 ```latex 代码块进 content、无图注时用我们自己的内容兜底）、AND 检索（前缀/包含/覆盖率三级打分 + 字段过滤 text/content/marker/label）、EntryOnPage/CropHint（页内唯一图兜底）、落盘重载。`go test` 50 例绿。
 - **skills dedupe 代表图与组收口（P88）**：内容代表+字节副本（ContentLeaders）、典型成员 0.95 筛、代表图=典型成员里内容框最大者、同桶组折叠（成员原样收编不重筛、跨桶不折）、0.75 自动定组（T131）、T135 挂靠剩余项。`go test` 45 例绿。
 - **skills dedupe 候选桶与成组校验（P87）**：sha256 精确收缩 + 视觉/色度特征 + 小图标居中重合并桶（T130，预筛/去重/并行打分串行 union），SimilarTo 闸门（AI 可拆可并但不能把无关图说成一张）；groups.json 结构校验（key 必须在组内/不跨组重复/整池一组也必须有代表图）。`go test` 40 例绿。
