@@ -3933,3 +3933,12 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **P93 修真 bug（接线测试当场抓到）**：`queue.Claim` 的派发排序主键是创建时间，批量入队的任务时间戳全同 → `sort.Slice` 退化为 map 迭代序——**派发顺序非确定**，直接违反"同样的磁盘状态必然产生同样的派发序列"这条核心设计不变量（可调试/可复现的根基）。修复：同时间戳按任务 id 字典序 tiebreak。这个 bug 在纯判据移植阶段不可见——只有端到端"生成→派发"测试才暴露，正是接线测试的价值。
 
 **验证**：`go test ./internal/...` 64 例绿。
+
+
+## 第五十批：接线第二刀——convert 任务生成器（2026-11-18，用户："继续"）
+
+`gen.GenConvert` 照 P93 模式把章节铺进队列：chapters/*.md 每章一个 convert 任务，章节 md 拷进任务沙箱 inputs/chapter.md（正是 verify.NewChecker 的默认覆盖率对照源——生成器与验收器在此处咬合，不是巧合），验收 spec = 主 .tex 必产 + 编译通过 + 覆盖率（inputs/chapter.md vs 编译 PDF）。dvagent 增 `gen-convert`。
+
+**设计点**：重生成会重拷 inputs（覆盖语义）——inputs 是 kernel 的只读输入，必须与章节源一致，agent 的改动只允许发生在 out/ 与 scratch/。
+
+**验证**：`go test ./internal/...` 66 例绿。

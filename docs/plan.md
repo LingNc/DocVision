@@ -183,6 +183,10 @@
   改：`skills/kernel` 增 `gen/`（tasks.go + tasks_test.go 2 例）；`queue.Claim` 加确定性 tiebreak。
   验证：`go test ./internal/...` 64 例绿（生成器新增/幂等/缺目录零新增 + 派发顺序断言）。
 
+[ ][ ] P94. 接线第二刀——convert 任务生成器：gen.GenConvert（chapters/*.md → 每章一个 convert 任务：章节 md 拷进沙箱 inputs/chapter.md 作覆盖率对照源，验收 spec=主 .tex + require_compile + min_coverage，与 verify.NewChecker 默认 CoverageSource 咬合）+ dvagent gen-convert 命令。
+  改：`skills/kernel` 增 `gen/convert.go` + convert_test.go 2 例。
+  验证：`go test ./internal/...` 66 例绿（新增/幂等/缺目录/spec 断言/沙箱输入就位）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。
