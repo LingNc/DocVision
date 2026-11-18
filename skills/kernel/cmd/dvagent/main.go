@@ -17,6 +17,7 @@ import (
 	"github.com/LingNc/DocVision/skills/kernel/internal/config"
 	"github.com/LingNc/DocVision/skills/kernel/internal/deliver"
 	"github.com/LingNc/DocVision/skills/kernel/internal/docindex"
+	"github.com/LingNc/DocVision/skills/kernel/internal/envcheck"
 	"github.com/LingNc/DocVision/skills/kernel/internal/gen"
 	"github.com/LingNc/DocVision/skills/kernel/internal/ids"
 	"github.com/LingNc/DocVision/skills/kernel/internal/prep"
@@ -492,8 +493,12 @@ func main() {
 			cfg.Split.PagesPerPart = int(f)
 		case "convert.max_lines_per_chapter":
 			cfg.Convert.MaxLinesPerChapter = int(f)
+		case "style.font_family":
+			cfg.Style.FontFamily = args[3]
+		case "style.fallback_font":
+			cfg.Style.FallbackFont = args[3]
 		default:
-			die(fmt.Errorf("未知配置键: %s（可用：figure.min_overlap/figure.max_scale_dev/figure.accept_min_submits/split.pages_per_part/convert.max_lines_per_chapter）", args[2]))
+			die(fmt.Errorf("未知配置键: %s（可用：figure.min_overlap/figure.max_scale_dev/figure.accept_min_submits/split.pages_per_part/convert.max_lines_per_chapter/style.font_family/style.fallback_font）", args[2]))
 		}
 		if err := config.Save(p.Root, cfg); err != nil {
 			die(err)
@@ -631,6 +636,16 @@ func main() {
 			die(err)
 		}
 		out(rep)
+
+	case "doctor":
+		// dvagent doctor [项目名] —— 操作前环境体检：工具链/字体/可操作建议。
+		// 项目名可选（给了额外查项目 fonts/ 与配置回退）。
+		root := ""
+		if len(args) > 1 {
+			p := mustProject(reg, args[1])
+			root = p.Root
+		}
+		out(envcheck.Check(root, nil))
 
 	default:
 		die(fmt.Errorf("未知子命令: %s", args[0]))

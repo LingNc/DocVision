@@ -4122,3 +4122,10 @@ merge `origin/dev`（仅 T328 一个提交）入 feat/skills。冲突两处，�
 旧线 finalReview 固化为 T7：`gen.GenFinal` 触发条件=有 convert done + **至少一次 check done**（防"未铺核对就终审"——测试抓到）+ 无未竟转换/核对/图工作；`fin_book` 只读白名单 build/chapters/style/reports；verdict 复用 check 语义（issues 带章间位置指针/no_verdict 上限兜底）；verdict_schema "final" 入 verify。编译修复（fixSession）按既定设计不固化——验收打回走 rework 队列。manual-final.md：check 看章内、final 看全书的问题粒度分工。
 
 **验证**：`go test ./internal/...` 15 包全绿。
+
+
+## 第七十二批：操作前环境检测 doctor（v0.8.0）（2026-11-18，用户："操作前应该先进行环境检测…特别是样式阶段可能需要某些特殊字体，可以向用户索要…或暂时先回退。并告知用户，可提供方便搜索的图/字体搜索网站"）
+
+`internal/envcheck` + `dvagent doctor [项目]`：工具链体检（pdfinfo/pdftotext/pdftoppm 必需，pdflatex/mineru/python3 必需，mutool/pdfseparate/pdfunite 可选）+ 字体体检（项目 fonts/ 枚举、fc-list 系统 CJK 计数）+ **按优先级汇总的行动项**——缺必需的给安装命令；无 CJK 字体给警告；CJK 少给"样式阶段特殊字体"预告并附**字体搜索站点**（求字体网截图识别中文/WhatFontIs 西文/Google Fonts 思源开源替代）；项目 fonts/ 有备则表扬。回退语义落地：config 增 style.font_family/style.fallback_font（用户专属 config-set，agent 无权），缺字体时样式会话按 fallback 先排版并提示用户。本机实测：正确报 pdflatex/mineru 缺失+安装提示、mutool 可选不阻断、CJK 20 款无警告。
+
+**验证**：`go test ./internal/...` 16 包全绿 + 本机 doctor 实测输出如上。

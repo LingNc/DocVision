@@ -32,11 +32,18 @@ type Convert struct {
 	MaxLinesPerChapter int `json:"max_lines_per_chapter"`
 }
 
+// Style 是样式/字体的用户可调参数（doctor 的回退建议读这里）。
+type Style struct {
+	FontFamily string `json:"font_family"` // 主字体（缺失时的回退由 FallbackFont 兜）
+	FallbackFont string `json:"fallback_font"` // 特殊字体缺失时的回退（默认开源字体）
+}
+
 // Config 是完整配置。
 type Config struct {
 	Figure  Figure  `json:"figure"`
 	Split   Split   `json:"split"`
 	Convert Convert `json:"convert"`
+	Style   Style   `json:"style"`
 }
 
 // Defaults 是出厂默认（用户未写任何配置时的判据值）。
@@ -44,6 +51,7 @@ var Defaults = Config{
 	Figure:  Figure{MinOverlap: 0.17, MaxScaleDev: 0.10, AcceptMinSubmits: 3},
 	Split:   Split{PagesPerPart: 100},
 	Convert: Convert{MaxLinesPerChapter: 300},
+	Style:   Style{FontFamily: "", FallbackFont: "TeX Gyre Termes"},
 }
 
 // Path 项目配置文件路径。
