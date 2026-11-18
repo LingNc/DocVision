@@ -4,6 +4,8 @@
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
 ## [Unreleased]
+### Fixed
+- **超大 PDF 的切分不再卡死（T328）**：`split` 阶段以前对每个分片都要对**源文件**做十余次 `TrimFile` 体积探测（每次都是全量解析），一万两千页、两百兆的册子跑了半小时连一个分片都写不出来。现在整本**一次读入**按页数切成若干份（有 `mutool` 用 `mutool merge`、没有就用 pdfcpu 的 `SplitFile` 一次切开），超体积的分片**在它自己身上**对半再切，因此每份只付一次读入代价；同一份文件 58 秒切完 7 份。日志会打出后端与用时（`一次切分（mutool，每份 ≤ 2000 页…）`），`DOCVISION_PDF_SPLIT_TOOL=mutool|pdfcpu` 可强制后端排查。
 ### Added
 - **skills 看图台 v0.4.0（SK-P30 v1）**：`viewer-build` 静态生成 work/viewer/index.html——imgxxx 卡片（三态徽标+相对路径大图）、dedupe 相似组卡片（代表高亮/精确同图标徽/组内闸门口径）、进度汇总、**组闸门阈值输入+导出重分组请求**（regroup.json→work/retry/→viewer-apply 消费，watcher 请求机制，内核唯一写通道）。交付目录迁 lingnc-memory/projects/dv-skills。
 - **skills img2text 任务类型（SK-P29，v0.3.0）**：T6 逐图文字化小轮转——GenImg2Text 从 doc_index 图片条目铺任务（按 seq 去重幂等，任务包带 global+bbox 指针）；`ctx-up`/`ctx-down` 取邻块（SK-P29 的"检索下文 up/down"）；Organize 合并时按 page_idx 打 `<!-- pN -->` 页码标识（docjson 精确定位）；手册 manual-img2text.md。

@@ -3,7 +3,10 @@
 // Behaviour mirrors the archived Python reference
 // (legacy/python/python/split_pdfs.py):
 //   - Output files are named "{base}_part{N}.pdf" in outputDir.
-//   - A binary search over page ranges respects both maxPages and maxSizeMB.
+//   - The book is cut once by maxPages, then any part that is still too big is
+//     halved on ITS OWN pages (T328). Older versions binary-searched the size
+//     limit by trimming the SOURCE file for every probe, which meant a dozen
+//     full parses per part — a 12k-page, 200MB book never finished.
 //   - Existing parts whose total page count matches the source are skipped
 //     unless force=true.
 //   - A sidecar split manifest (see manifest.go) is written after a
@@ -11,9 +14,8 @@
 //     fully-verifiable manifest can skip pdfcpu PageCountFile/TrimFile
 //     entirely. --force always bypasses the cache.
 //
-// Note: pdfcpu does not expose a "split-by-page-count from an open context"
-// API, so the helpers operate on file paths and use api.TrimFile to write
-// page ranges. Each binary-search probe writes (and deletes) a temp file.
+// Splitting itself goes through pdfTool (see splitter.go): mutool when it is
+// on PATH, pdfcpu's one-pass SplitFile otherwise.
 package split
 
 import (
@@ -21,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -31,87 +34,6 @@ import (
 // pdfConf is reused for all pdfcpu calls. nil = library defaults; we keep it
 // explicit so tests can override later if needed.
 var pdfConf = model.NewDefaultConfiguration()
-
-// estimatePartSizeMB extracts pages [fromPage, toPage] (1-based, inclusive)
-// from srcPath into a temporary PDF, returns its size in MB, then deletes it.
-func estimatePartSizeMB(srcPath string, fromPage, toPage int) (float64, error) {
-	tmp, err := os.CreateTemp("", "split-estimate-*.pdf")
-	if err != nil {
-		return 0, fmt.Errorf("create temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-	tmp.Close()
-	defer os.Remove(tmpPath)
-
-	pageRange := fmt.Sprintf("%d-%d", fromPage, toPage)
-	if err := api.TrimFile(srcPath, tmpPath, []string{pageRange}, pdfConf); err != nil {
-		return 0, fmt.Errorf("trim %s: %w", pageRange, err)
-	}
-
-	info, err := os.Stat(tmpPath)
-	if err != nil {
-		return 0, fmt.Errorf("stat temp: %w", err)
-	}
-	return float64(info.Size()) / (1024 * 1024), nil
-}
-
-// splitBySizeAndPages finds the largest end page (1-based, inclusive) in the
-// range [start+1, start+maxPages] such that pages [start+1, end] fit within
-// maxSizeMB. start is 0-based (matches Python). Returns the chosen end page,
-// 1-based and inclusive — i.e. the last page belonging to the current part.
-//
-// If maxSizeMB <= 0, size is not constrained and the page-count cap is used.
-// If a single page already exceeds the limit, a warning is printed and that
-// single page is returned (matching Python).
-func splitBySizeAndPages(srcPath string, start, totalPages, maxPages int, maxSizeMB float64) (int, error) {
-	// Page-count cap (1-based, inclusive end).
-	end := start + maxPages
-	if end > totalPages {
-		end = totalPages
-	}
-
-	if maxSizeMB <= 0 {
-		return end, nil
-	}
-
-	// Single-page edge: probe page (start+1) on its own.
-	singleMB, err := estimatePartSizeMB(srcPath, start+1, start+1)
-	if err != nil {
-		return 0, err
-	}
-	if singleMB > maxSizeMB {
-		fmt.Printf("  [警告] 第 %d 页单页大小 %.1fMB 已超过限制 %.0fMB，仍将单独输出\n",
-			start+1, singleMB, maxSizeMB)
-		return start + 1, nil
-	}
-
-	// If the whole page-count slice fits, take it.
-	fullMB, err := estimatePartSizeMB(srcPath, start+1, end)
-	if err != nil {
-		return 0, err
-	}
-	if fullMB <= maxSizeMB {
-		return end, nil
-	}
-
-	// Binary search for the largest end ∈ [start+1, end] that fits.
-	lo, hi := start+1, end
-	best := start + 1
-	for lo <= hi {
-		mid := (lo + hi) / 2
-		sizeMB, err := estimatePartSizeMB(srcPath, start+1, mid)
-		if err != nil {
-			return 0, err
-		}
-		if sizeMB <= maxSizeMB {
-			best = mid
-			lo = mid + 1
-		} else {
-			hi = mid - 1
-		}
-	}
-	return best, nil
-}
 
 // isAlreadySplit reports whether existingParts taken together cover exactly
 // totalPages. It opens each part to read its page count; any read error
@@ -252,50 +174,66 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 	}
 
 	fmt.Printf("[信息] %s: 共 %d 页\n", displayName, totalPages)
+	t0 := time.Now()
+
+	span := maxPages
+	if span <= 0 || span > totalPages {
+		span = totalPages
+	}
+	tool := pickPDFTool()
+	scratch, err := os.MkdirTemp(outputDir, ".split-tmp-")
+	if err != nil {
+		return fmt.Errorf("创建临时目录失败: %w", err)
+	}
+	defer os.RemoveAll(scratch)
+
+	fmt.Printf("[信息] %s: 一次切分（%s，每份 ≤ %d 页%s）\n", displayName, tool.name, span, sizeLimitText(maxSizeMB))
+
+	pieces, err := tool.splitIntoSpans(pdfPath, scratch, span, totalPages)
+	if err != nil {
+		return fmt.Errorf("切分失败: %w", err)
+	}
+	pieces, err = tool.refineParts(pieces, scratch, maxSizeMB)
+	if err != nil {
+		return fmt.Errorf("按体积细分失败: %w", err)
+	}
 
 	var recorded []recordedPart
-
-	part := 1
-	start := 0 // 0-based start, matches Python.
-	for start < totalPages {
-		end, err := splitBySizeAndPages(pdfPath, start, totalPages, maxPages, maxSizeMB)
-		if err != nil {
-			return fmt.Errorf("规划第 %d 部分失败: %w", part, err)
-		}
-		// end is 1-based inclusive last page of this part.
+	for i, p := range pieces {
+		part := i + 1
 		partName := fmt.Sprintf("%s_part%d.pdf", baseName, part)
 		partPath := filepath.Join(outputDir, partName)
-		pageRange := fmt.Sprintf("%d-%d", start+1, end)
-
-		if err := api.TrimFile(pdfPath, partPath, []string{pageRange}, pdfConf); err != nil {
-			return fmt.Errorf("写入 %s 失败: %w", partName, err)
+		if err := os.Rename(p.path, partPath); err != nil {
+			// 跨设备/占位符重命名失败时退回复制。
+			if cerr := util.CopyFile(p.path, partPath); cerr != nil {
+				return fmt.Errorf("写入 %s 失败: %w", partName, cerr)
+			}
 		}
-
 		info, err := os.Stat(partPath)
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", partName, err)
 		}
+		pageStart := 1
+		for _, r := range recorded {
+			pageStart = r.PageEnd + 1
+		}
 		recorded = append(recorded, recordedPart{
 			Index:     part,
-			PageStart: start + 1,
-			PageEnd:   end,
+			PageStart: pageStart,
+			PageEnd:   pageStart + p.pages - 1,
 			Size:      info.Size(),
 			Filename:  partName,
 		})
-		pageCount := end - start
 		if maxSizeMB > 0 {
 			fmt.Printf("  → %s  (页 %d–%d, 共 %d 页, %.1fMB)\n",
-				partName, start+1, end, pageCount, float64(info.Size())/(1024*1024))
+				partName, pageStart, pageStart+p.pages-1, p.pages, float64(info.Size())/(1024*1024))
 		} else {
 			fmt.Printf("  → %s  (页 %d–%d, 共 %d 页)\n",
-				partName, start+1, end, pageCount)
+				partName, pageStart, pageStart+p.pages-1, p.pages)
 		}
-
-		start = end
-		part++
 	}
 
-	fmt.Printf("[完成] 共分割为 %d 个部分，输出到 %s/\n\n", part-1, outputDir)
+	fmt.Printf("[完成] 共分割为 %d 个部分（用时 %.1fs），输出到 %s/\n\n", len(recorded), time.Since(t0).Seconds(), outputDir)
 
 	// Manifest write: only after every part has been successfully
 	// written and stat'd. A failure here must not silently produce

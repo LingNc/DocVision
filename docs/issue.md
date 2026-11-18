@@ -2592,5 +2592,9 @@ user 轮
   根因：`finalReview` 一直用 `LatexSession("convert")` 调优，没有自己的块；随附模板只给 convert 写了 128 轮。
   改：新增 `latex.sessions.final_review` 块（其余字段继承 convert），没配轮次时默认 **256**，显式值/负数照旧；两份模板加该块，`docs/config.md` 补两行。
   验证：`TestFinalReviewSessionRounds`（默认 256、继承 convert 的 max_tokens、显式 400 生效、-1 不被覆盖）、`TestConfigTemplateKeyParity`。
+[X][ ] T328. 一万多页的 PDF 在 split 阶段半小时没有任何产出。
+  根因：每个分片都要对**源文件**反复 `TrimFile` 做体积二分探测（单页探测 + 整片探测 + log2(maxPages) 次二分 + 真正的写入），每次都是全量解析；同一份两百兆、12776 页的文件，pdfcpu 取一页要跑几十分钟，整本等于几百遍全量解析。
+  改：改成"整本一次读入切成 span 页一份 + 超体积的分片在它自己身上对半再切"（`internal/split/splitter.go`：有 `mutool` 用 `mutool merge`，否则 pdfcpu `SplitFile` 一次切开；细化只碰小分片），日志给后端与用时，`DOCVISION_PDF_SPLIT_TOOL` 可强制后端。
+  验证：同一份文件改成 58 秒切完 7 份（此前 >30 分钟零产出）；`TestSplitPDFBackendsBothWork`（两种后端各 4 份、页数合计对齐）、`TestSplitPDFRefinesOversizePartsOnTheirOwn`（上限压一半后就地再切、页段连续覆盖）、既有 9 条 split 测试全绿。
 
-[X][ ] T328. skills 线开发与判据迁移：条目已迁移至 `skills/docs/issue.md`（SK-I1）与 `skills/docs/plan.md`（SK-P1–SK-P26，独立编号）。
+[X][ ] T329. skills 线（agent 驱动新架构）开发台账已独立为 `skills/docs/issue.md`（SK-I1/SK-I2）与 `skills/docs/plan.md`（SK-P1–SK-P28）；历史批次在 docs/agent-batch-history.md 第三十七批起。

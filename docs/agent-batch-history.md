@@ -3797,6 +3797,8 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 
 **P80 设计（用户："或者说如果有整体的话这边整体的线条可以有个统一性？比如由style会话的cls规定一些绘图的可选配置项"）**：P79 只治"同一图号的并排两半"，根子在于**线宽是作图会话逐图写死的**（每张图按自己那张原书的墨迹量出来），全书没有单一来源。于是设计成三层契约：cls 定义 `dv-*` 样式族与 `\dvfigwire` 等宏（取值来自 images 阶段聚合的 `source/figure_ink.json`，纯本地解析不花 token）；作图会话只写 `draw[dv-wire]` 并在围栏开头留 `\ifdefined\dvfigloaded` 守卫兜底（单图编译时用自己实测值，整书编译时类里的值赢）；convert 只把残留的 `line width=` 映射过去，preflight 出一句警告。分 S1/S2/S3 三步，S1 不动提示词即可验证"类能提供样式"，S3 对已完成的书一次性映射、不强制重画。设计稿在 `docs/plan-report/p80-figure-style-unity.md`。
 
+**T328（用户："这个12776页的pdf这边已经处理了半个小时了没有任何进展，是不是程序写的有问题？"）**：是程序的问题，不是文件的问题。先量文件本身：`mutool info` 4.7 秒、取一页 0.47 秒、取 200 页 0.56 秒、整本 `mutool clean` 8.9 秒——文件健康、A4、204 MB。再看代码：`splitBySizeAndPages` 给每个分片先取一页探测（`TrimFile` 源文件）、再取整片探测、再二分 `log2(maxPages)` 次，每次探测都是**对源文件的全量解析**，最后才写真正的那一片。12776 页按 200 页一份是 64 份，等于对源文件做了两百遍全量解析。实测 pdfcpu 对这份文件取一页的 `TrimFile` 跑了二十几分钟还没回来（两个探测进程最后是我掐掉的），`api.SplitFile` 一次切 7 份也没在十分钟内回来——pdfcpu 在这个体量上就是不可用。改法两条：① 整本**一次读入**按页数切成若干份（`mutool merge` 每份一次调用，或 pdfcpu `SplitFile` 一次切开），② 超体积的分片**在它自己身上**对半再切（小文件，代价可忽略），彻底删掉"回源文件二分探测"这条路（`estimatePartSizeMB`/`splitBySizeAndPages` 一并删除）。`internal/split/splitter.go` 收口后端选择，`DOCVISION_PDF_SPLIT_TOOL` 可强制；日志打后端与用时。同一份文件现在 **58.1 秒**切完 7 份（2000/2000/…/776 页，合计 12776 页、174 MB），此前 >30 分钟零产出。测试：`TestSplitPDFBackendsBothWork`（两种后端各 4 份、页数合计对齐）、`TestSplitPDFRefinesOversizePartsOnTheirOwn`（上限压到一半后就地再切、manifest 页段连续覆盖整本），连同既有 9 条 split 测试全绿。
+
 
 ## 第三十七批：skills 线奠基——agent 驱动新架构设计文档 + 内核骨架（2026-11-18，用户："按照开发流程，先写好文档和详细说明和愿景目标最终验收标准……开一个新分支……放在根中的 skills 来开发，包括对应的文档……开始开发吧"）
 
@@ -4107,3 +4109,9 @@ T6 落地：① `task.TypeImg2Text` + `gen.GenImg2Text`（读 doc_index，图片
 T6 设计里"kernel 整理"的落点：`gen.CollectImg2Text` + `dvagent img2text-collect`——把 done img2txt_* 任务的 out/description.md 按 entry_seq 回填进 doc_index 条目的 Content 字段（docindex 补 Save 原子写）。效果：doc_search 能按图的描述搜到图（content: 字段过滤）、style 素材可由 agent 从索引自取。幂等：已有 Content 不覆盖（先到为准）。
 
 **验证**：`go test ./internal/...` 15 包全绿（回填/重载验证/幂等三断言）。
+=======
+
+
+## 第七十批：并线旧线 dev（T328 切分提速）（2026-11-18，用户："继续"）
+
+merge `origin/dev`（仅 T328 一个提交）入 feat/skills。冲突两处，均"并集"解：docs/issue.md 取对方真实 T328 条目（我方原指针行作废，补 T329 指向 skills 独立台账）；docs/agent-batch-history.md 对方 T328 批次在前、skills 第 63–69 批在后全保留。skills 15 包测试绿 + 旧线 go build 绿（splitter.go 新后端编译过）。并线后 skills 与旧线共用基线，后续各自演进按需 merge。
