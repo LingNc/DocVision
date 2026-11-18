@@ -1,7 +1,7 @@
 # SKILL · DocVision Skills —— 书籍转换流水线
 
 > **这是什么**：把扫描版书籍 PDF 转成结构化产物的 agent 驱动流水线，两种产出模式——
-> **档位2（img2text）**：干净 Markdown（图片逐张三态文字化：提取文字 / mermaid 结构图 / 原图保留，自动页码标记）；
+> **md 档（img2text）**：干净 Markdown（图片逐张三态文字化：提取文字 / mermaid 结构图 / 原图保留，自动页码标记）；
 > **LaTeX 档**：全书 LaTeX（矢量图 TikZ 重绘、统一样式、编译+覆盖率验收、全书终审、装配交付）。
 > 作者：绫袅（LingNc）· 版本见包名 · 仓库：https://github.com/LingNc/DocVision
 
@@ -11,7 +11,7 @@
 |---|---|---|
 | 本包 `kernel/bin/dvagent` | 全部操作入口（预编译 linux/amd64；自行编译：`cd kernel && go build -o bin/dvagent ./cmd/dvagent`，需 Go≥1.25） | 直接可用 |
 | poppler-utils（pdfinfo/pdftotext/pdftoppm） | 拆书/覆盖率/渲染 | apt install poppler-utils |
-| TeX Live（pdflatex） | LaTeX 档编译判据（档位2 不需要） | apt install texlive-xetex |
+| TeX Live（pdflatex） | LaTeX 档编译判据（md 档 不需要） | apt install texlive-xetex |
 | MinerU | 扫描页 OCR：`export MINerU_TOKEN=<token>` 后走 API 模式（零安装）；或本地 pip install magic-pdf[full] | 见 doctor 提示 |
 | mmdc（可选） | mermaid 校验（没有则跳过记 note） | npm i -g @mermaid-js/mermaid-cli |
 
@@ -31,7 +31,7 @@ $D -workspace ws prep-organize demo && $D -workspace ws prep-index demo
 之后进入 **agent 工作段**：agent 读本包 `agent/README.md`（冷启动仪式+铁律）与 `agent/manual-*.md`（七类任务手册），用 `claim` 领任务、`submit` 交卷，判据内核强制。收尾二选一：
 
 ```bash
-$D -workspace ws img2text-assemble demo chapters/book.md out/book.md   # 档位2：合成干净 md
+$D -workspace ws img2text-assemble demo chapters/book.md out/book.md   # md 档：合成干净 md
 $D -workspace ws deliver demo                                            # LaTeX 档：装配交付
 ```
 

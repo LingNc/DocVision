@@ -79,18 +79,31 @@ func Check(projectRoot string, run prep.Runner) *Report {
 	rep.Tools = append(rep.Tools, tc)
 
 	hasEngine := false
-	for _, e := range []string{"pdflatex", "xelatex", "latexmk"} {
+	hasTectonic := false
+	hasClassic := false
+	for _, e := range []string{"pdflatex", "xelatex", "tectonic"} {
 		path, ok := look(e)
-		rep.Tools = append(rep.Tools, ToolCheck{Name: e, Needed: "LaTeX引擎", Found: ok, Path: path})
-		if ok && (e == "pdflatex" || e == "xelatex") {
+		needed := "LaTeX引擎"
+		hint := ""
+		if e == "tectonic" {
+			needed = "LaTeX引擎(自包含)"
+			hint = "Tectonic（XeTeX 内核，按需下载宏包）：tectonic-typesetting.github.io"
+		}
+		rep.Tools = append(rep.Tools, ToolCheck{Name: e, Needed: needed, Found: ok, Path: path, Hint: hint})
+		if ok {
 			hasEngine = true
+			if e == "tectonic" { hasTectonic = true } else { hasClassic = true }
 		}
 	}
-	if out, err := run("kpsewhich", "ctexart.cls"); err == nil && strings.TrimSpace(string(out)) != "" {
+	if hasTectonic && !hasClassic {
+		// Tectonic 无 kpsewhich（按需下载宏包，含中文）；跳过不误报。
+		rep.Tools = append(rep.Tools, ToolCheck{Name: "ctexart.cls", Needed: "中文兼容", Found: true,
+			Hint: "Tectonic 模式：宏包按需下载（首次编译需联网）"})
+	} else if out, err := run("kpsewhich", "ctexart.cls"); err == nil && strings.TrimSpace(string(out)) != "" {
 		rep.Tools = append(rep.Tools, ToolCheck{Name: "ctexart.cls", Needed: "中文兼容", Found: true})
 	} else {
 		rep.Tools = append(rep.Tools, ToolCheck{Name: "ctexart.cls", Needed: "中文兼容", Found: false,
-			Hint: "中文 LaTeX 需要 ctex：Debian/Ubuntu 装 texlive-lang-chinese 或 texlive-full"})
+			Hint: "中文 LaTeX 需要 ctex：装 texlive-lang-chinese/texlive-full；或用 Tectonic"})
 	}
 
 	// 字体体检

@@ -21,11 +21,20 @@ func Compile(outDir, mainFile string) (string, error) {
 			return "", fmt.Errorf("pdflatex/xelatex 均不可用（TeX Live）: %w", err)
 		}
 	}
-	for i := 0; i < 2; i++ {
-		cmd := exec.Command(engine, "-interaction=nonstopmode", "-halt-on-error", mainFile)
+	runs := 2
+	if engine == "tectonic" {
+		runs = 1 // Tectonic 自行处理交叉引用重排
+	}
+	for i := 0; i < runs; i++ {
+		var cmd *exec.Cmd
+		if engine == "tectonic" {
+			cmd = exec.Command(engine, "--keep-intermediates", mainFile)
+		} else {
+			cmd = exec.Command(engine, "-interaction=nonstopmode", "-halt-on-error", mainFile)
+		}
 		cmd.Dir = outDir
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return "", fmt.Errorf("pdflatex 失败: %v\n%.800s", err, out)
+			return "", fmt.Errorf("%s 失败: %v\n%.800s", engine, err, out)
 		}
 	}
 	pdf := filepath.Join(outDir, mainFile[:len(mainFile)-len(filepath.Ext(mainFile))]+".pdf")

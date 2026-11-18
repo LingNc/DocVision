@@ -4241,3 +4241,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 ① mmdc 从缺项补为**必需**（npm i -g @mermaid-js/mermaid-cli）——档位2 mermaid 兜底校验的依赖，不再可选；② doctor LaTeX 深度段：pdflatex/xelatex/latexmk 三件套 + `kpsewhich ctexart.cls` 中文兼容检查 + 行动项给兼容结论（引擎全无→装 texlive-full 最省心/texlive-xetex 仅 XeTeX；档位2 不受影响）；③ texcheck.Compile **引擎回退**（无 pdflatex→xelatex 顶上，参数兼容）——兼容性落实为代码而非文档。**本机实测**：mmdc 11.17.1 ✓ 就绪；pdflatex/xelatex/latexmk/ctexart 全无（最小容器）→ doctor 正确报"[缺] LaTeX 引擎全无"+安装路径；接口层确认兼容（dvagent 引擎回退+poppler/MinerU API 均无版本耦合），装 texlive-full 即满配。
 
 **验证**：`go build ./cmd/dvagent` 绿 + 18 包全绿 + 本机 doctor 新检查段实测输出如上。
+
+
+## 第八十九批：md 档改名 + Tectonic 引擎支持（2026-11-18，用户："档位2 就叫 md 档；我记得本地有 latex 编译工具"）
+
+① 全量改名：导出文件集"档位2"→"**md 档**"（用户命名：对外就叫 md 档/LaTeX 档，无档位黑话）；② 用户记忆证实——全盘找到 `/usr/local/bin/tectonic`（XeTeX 内核自包含引擎，按需下载宏包）：envcheck 引擎链加 tectonic（仅 tectonic 时 ctex 检查跳过不误报，hint 注明首次编译联网下载）；texcheck.Compile 引擎链 pdflatex→xelatex→tectonic（tectonic 单遍编译自处理交叉引用）。**之前的检查漏了 tectonic——教训：doctor 引擎名单要覆盖非主流但真实的发行形态。** LaTeX 档本机从"无法编译"变为"tectonic 可用"。
+
+**验证**：`go build ./cmd/dvagent` 绿 + 18 包全绿 + doctor 实测识别 tectonic。

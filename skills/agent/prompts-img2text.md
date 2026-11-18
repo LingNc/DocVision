@@ -1,4 +1,4 @@
-# 档位2 工作提示词（参考实现打磨版，逐字保留）
+# md 档 工作提示词（参考实现打磨版，逐字保留）
 
 > 来源：参考实现 `上游实现/prompts/templates/img2text.system.md` /
 > `img2text_textonly.system.md`（img2text 会话多年打磨的英文 system prompt）。
