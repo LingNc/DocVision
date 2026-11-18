@@ -37,3 +37,5 @@ logs/
 
 build.sh
 clean_project.sh
+.sshkey
+skills/sync-delivery.sh

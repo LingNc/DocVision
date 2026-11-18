@@ -1,12 +1,14 @@
 package verify
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/LingNc/DocVision/skills/kernel/internal/mdimg"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
 )
 
@@ -43,6 +45,8 @@ func (c *Checker) checkVerdictSchema(t *task.Task, sandboxAbs string) []string {
 	case "check", "final":
 		// final（终审）复用 check 语义：issues 必带位置指针、no_verdict 由重试上限兜底。
 		return checkCheckVerdict(b)
+	case "img2text":
+		return c.checkImg2TextVerdict(b, sandboxAbs)
 	}
 	return []string{"未知 verdict_schema: " + schema}
 }
@@ -112,4 +116,39 @@ func hasPositionPointer(s string) bool {
 		}
 	}
 	return false
+}
+
+
+// checkImg2TextVerdict 档位2 三态验收：result 声明 + 对应产物存在性 + mermaid 校验。
+// mermaid 校验失败即打回（旧线"兜底错误"的落点：语法错不让它进合成）。
+func (c *Checker) checkImg2TextVerdict(b []byte, sandboxAbs string) []string {
+	var v struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return []string{"verdict.json 解析失败: " + err.Error()}
+	}
+	outDir := filepath.Join(sandboxAbs, "out")
+	switch v.Result {
+	case "text":
+		data, err := os.ReadFile(filepath.Join(outDir, "replacement.md"))
+		if err != nil || strings.TrimSpace(string(data)) == "" {
+			return []string{"result=text 必须附非空 out/replacement.md"}
+		}
+		return nil
+	case "mermaid":
+		data, err := os.ReadFile(filepath.Join(outDir, "figure.mmd"))
+		if err != nil || strings.TrimSpace(string(data)) == "" {
+			return []string{"result=mermaid 必须附非空 out/figure.mmd"}
+		}
+		if vr := mdimg.ValidateMermaid(context.Background(), "```mermaid\n"+string(data)+"\n```", "", 0); vr.Available && !vr.Valid {
+			return []string{"mermaid 校验失败（兜底打回，按报错修语法）: " + vr.Error}
+		}
+		return nil
+	case "keep":
+		return nil
+	case "":
+		return []string{"verdict.json 缺少 result 字段（text/mermaid/keep 三选一）"}
+	}
+	return []string{fmt.Sprintf("result %q 不合法（只允许 text/mermaid/keep）", v.Result)}
 }

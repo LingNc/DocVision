@@ -16,9 +16,12 @@ import (
 //   - 写 out/description.md 提交，kernel 汇总。
 // 与 classify/draw 明确分工：classify 判三态（结构化），img2text 产自然语言描述。
 
-// Img2TextSpec 是 T6 验收 spec。
+// Img2TextSpec 是 T6 验收 spec：verdict.json 三态声明（用户指定的契约）——
+// {"result":"text|mermaid|keep"} + 对应产物（text→replacement.md / mermaid→figure.mmd
+// （内核 mmdc 校验兜底）/ keep→无产物）；mermaid 校验失败该图打回（兜底错误）。
 var Img2TextSpec = map[string]any{
-	"required_files":  []any{"description.md"},
+	"required_files":  []any{"verdict.json"},
+	"verdict_schema":  "img2text",
 	"min_coverage":    false,
 	"require_compile": false,
 }

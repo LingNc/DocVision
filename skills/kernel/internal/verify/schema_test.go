@@ -130,3 +130,52 @@ func contains(errs []string, sub string) bool {
 	}
 	return false
 }
+
+func TestImg2TextVerdict(t *testing.T) {
+	c := &Checker{}
+
+	// text：无 replacement.md 打回
+	root, tk := sandboxWithVerdictImg(t, `{"result":"text"}`)
+	tk.Accept["verdict_schema"] = "img2text"
+	c.ProjectRoot = root
+	errs, _ := c.Run(tk)
+	if !contains(errs, "replacement.md") {
+		t.Fatalf("text 无产物应打回: %v", errs)
+	}
+	// text：有产物 → 过
+	root, tk = sandboxWithVerdictImg(t, `{"result":"text"}`)
+	tk.Accept["verdict_schema"] = "img2text"
+	os.MkdirAll(filepath.Join(root, tk.Sandbox, "out"), 0o755)
+	os.WriteFile(filepath.Join(root, tk.Sandbox, "out", "replacement.md"), []byte("提取文字"), 0o644)
+	c.ProjectRoot = root
+	errs, _ = c.Run(tk)
+	if len(errs) != 0 {
+		t.Fatalf("text 有产物应过: %v", errs)
+	}
+	// keep：无产物也过
+	root, tk = sandboxWithVerdictImg(t, `{"result":"keep"}`)
+	tk.Accept["verdict_schema"] = "img2text"
+	c.ProjectRoot = root
+	errs, _ = c.Run(tk)
+	if len(errs) != 0 {
+		t.Fatalf("keep 应过: %v", errs)
+	}
+	// 乱填 result 打回
+	root, tk = sandboxWithVerdictImg(t, `{"result":"whatever"}`)
+	tk.Accept["verdict_schema"] = "img2text"
+	c.ProjectRoot = root
+	errs, _ = c.Run(tk)
+	if !contains(errs, "不合法") {
+		t.Fatalf("乱填应打回: %v", errs)
+	}
+}
+
+func sandboxWithVerdictImg(t *testing.T, verdict string) (string, *task.Task) {
+	t.Helper()
+	root := t.TempDir()
+	tk := &task.Task{ID: "img2txt_9", Sandbox: "tasks/img2txt_9", Accept: map[string]any{}}
+	outDir := filepath.Join(root, "tasks/img2txt_9/out")
+	os.MkdirAll(outDir, 0o755)
+	os.WriteFile(filepath.Join(outDir, "verdict.json"), []byte(verdict), 0o644)
+	return root, tk
+}

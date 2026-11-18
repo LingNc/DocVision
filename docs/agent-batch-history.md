@@ -4227,3 +4227,10 @@ MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen
 **过程**：84 批曾交过一版 pagemark 草稿（插入算法被简化），按"对照原本代码"要求未提交；86 批重读旧线发现真实架构是**行级页码对齐引擎**（与草稿完全不同）：锚点规范化 → 行级匹配推进（text 行互相包含匹配/image 行按文件名）→ 未命中继承上页 → 仅递增插标 → 围栏顺延 → embed 位移平移 → 字节级插入 → 审计 → plan-apply-audit 三段。20 函数逐字转写（含设计取舍注释）。**移植中途 /tmp 第五次清空**（pagemark 未提交工作丢失），从 lingnc tar 恢复 git 历史 + 凭本会话上下文重写全部文件，在 ~/dvwork 完成验证。**教训：批内未提交的工作在任何等待窗口都可能蒸发——每批收尾=提交+同步，无例外。**
 
 **验证**：`go build ./cmd/dvagent` 绿（最终判据）+ 18 包全绿（对齐页 1/2、双标记插入、T69 调用方守卫语义、无产物静默跳过、围栏顺延五断言）。
+
+
+## 第八十七批：T6 验收改 verdict.json 三态声明（2026-11-18，用户："提交上去的 json 输出"）
+
+档位2 任务契约正式化：img2text 任务验收 = `out/verdict.json {"result":"text|mermaid|keep"}` + 对应产物核对（text→replacement.md 非空 / mermaid→figure.mmd 非空且 mmdc 可用时逐块校验、失败打回=兜底错误落点 / keep→无产物）+ result 缺失/乱填打回。verify 增 img2text schema 分支（mdimg.ValidateMermaid 复用），Img2TextSpec 改挂。测试：text 无产物打回/有产物过、keep 过、乱填打回四断言。
+
+**验证**：`go build ./cmd/dvagent` 绿 + 18 包全绿。
