@@ -10,15 +10,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/LingNc/DocVision/skills/kernel/internal/deliver"
 	"github.com/LingNc/DocVision/skills/kernel/internal/docindex"
+	"github.com/LingNc/DocVision/skills/kernel/internal/gen"
+	"github.com/LingNc/DocVision/skills/kernel/internal/ids"
+	"github.com/LingNc/DocVision/skills/kernel/internal/prep"
 	"github.com/LingNc/DocVision/skills/kernel/internal/project"
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
 	"github.com/LingNc/DocVision/skills/kernel/internal/verify"
+	"github.com/LingNc/DocVision/skills/kernel/internal/viewer"
 )
 
 // mcpTool 是一个 MCP 工具描述。
@@ -54,6 +59,46 @@ var mcpTools = []mcpTool{
 	{"deliver", "装配交付：漂移闸门→归集→主文件→书签→standalone→盘点",
 		schema(map[string]any{"project": strProp("项目名"), "cls": strProp("样式类名(可选)")},
 			[]string{"project"})},
+	// —— 生成器/流程主命令（与 CLI 同函数零漂移）——
+	{"gen-classify", "扫描图目录铺 classify 任务（含 imgxxx 编号登记）",
+		schema(map[string]any{"project": strProp("项目名"), "images": strProp("图目录(默认 source/images)")},
+			[]string{"project"})},
+	{"gen-convert", "章节 md 铺 convert 任务（md 拷沙箱作覆盖率对照源）",
+		schema(map[string]any{"project": strProp("项目名"), "chapters": strProp("章节目录(默认 chapters)")},
+			[]string{"project"})},
+	{"gen-check", "为每个 convert 铺 blocked 核对任务（转换 done 自动解锁）",
+		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"gen-draw", "按 classify 结论铺 draw 任务（覆盖分组下组员跟随代表）",
+		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"gen-img2text", "doc_index 图片条目铺 img2text 小轮转任务",
+		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"gen-final", "全书落定后铺终审任务（T7）",
+		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"style-collect", "styled_text 提取内容汇总进 style 素材池（选材数据面）",
+		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"img2text-collect", "img2text 描述回填 doc_index Content",
+		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"ctx-up", "img2text 小轮转：取该图前文文字块（上下文检索）",
+		schema(map[string]any{"project": strProp("项目名"), "task_id": strProp("任务id"), "n": numProp("块数(默认3)")},
+			[]string{"project", "task_id"})},
+	{"ctx-down", "img2text 小轮转：取该图后文文字块",
+		schema(map[string]any{"project": strProp("项目名"), "task_id": strProp("任务id"), "n": numProp("块数(默认3)")},
+			[]string{"project", "task_id"})},
+	{"page-render", "渲染原书某页（可 bbox 裁剪）到 work/renders/",
+		schema(map[string]any{"project": strProp("项目名"), "global": numProp("全书页码"), "bbox": strProp("x0,y0,x1,y1(可选)")},
+			[]string{"project", "global"})},
+	{"prep-organize", "content_list 拼章节 md（PREP）",
+		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"prep-index", "建 doc_index+页表（PREP）",
+		schema(map[string]any{"project": strProp("项目名"), "md_names": strProp("逗号分隔，默认chapters/*.md")},
+			[]string{"project"})},
+	{"viewer-build", "生成静态看图台（分组/对比/调参导出）",
+		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"ids-list", "查人类编号映射表（imgxxx/vecxxx）",
+		schema(map[string]any{"project": strProp("项目名"), "kind": strProp("img|vec(可选)")},
+			[]string{"project"})},
+	{"pause", "暂停项目（停派新任务）", schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"resume", "恢复项目", schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
 }
 
 // serveMCP 在 stdin/stdout 上跑 MCP 协议循环。
@@ -129,6 +174,18 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) map[string]any {
 	}
 	loadQ := func(p *project.Project) (*queue.Queue, error) {
 		return queue.Load(queue.ProjectQueuePath(p.Root))
+	}
+	// pq = mustProject + loadQ 的组合简写。
+	pq := func(name string) (*project.Project, *queue.Queue, error) {
+		p, err := mustProject(name)
+		if err != nil {
+			return nil, nil, err
+		}
+		q, err := loadQ(p)
+		if err != nil {
+			return nil, nil, err
+		}
+		return p, q, nil
 	}
 
 	switch name {
@@ -262,6 +319,234 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) map[string]any {
 			return fail(err)
 		}
 		return ok(rep)
+
+	// —— 生成器/流程（与 CLI 同函数）——
+	case "gen-classify":
+		p, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		images := str("images")
+		if images == "" {
+			images = "source/images"
+		}
+		rep, err := gen.GenClassify(q, p.Root, images)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(rep)
+	case "gen-convert":
+		p, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		ch := str("chapters")
+		if ch == "" {
+			ch = "chapters"
+		}
+		rep, err := gen.GenConvert(q, p.Root, ch)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(rep)
+	case "gen-check":
+		_, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		rep, err := gen.GenCheck(q)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(rep)
+	case "gen-draw":
+		p, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		rep, err := gen.GenDraw(q, p.Root)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(rep)
+	case "gen-img2text":
+		p, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		rep, err := gen.GenImg2Text(q, p.Root)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(rep)
+	case "gen-final":
+		_, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		rep, err := gen.GenFinal(q)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(rep)
+	case "style-collect":
+		p, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		rep, err := gen.CollectStyleMaterials(q, p.Root)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(rep)
+	case "img2text-collect":
+		p, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		n, err := gen.CollectImg2Text(q, p.Root)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(map[string]any{"filled": n})
+	case "ctx-up", "ctx-down":
+		p, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		tk, err := q.Get(str("task_id"))
+		if err != nil {
+			return fail(err)
+		}
+		seq, _ := tk.Accept["entry_seq"].(float64)
+		idx, err := docindex.Load(filepath.Join(p.Root, "doc_index.json"))
+		if err != nil {
+			return fail(err)
+		}
+		up := name == "ctx-up"
+		n := getInt("n", 3)
+		var blocks []map[string]any
+		for _, e := range idx.Entries {
+			if e.Type != "text" || e.Text == "" {
+				continue
+			}
+			before := e.Seq < int(seq)
+			if (up && before) || (!up && !before) {
+				blocks = append(blocks, map[string]any{"seq": e.Seq, "global": e.Global, "text": e.Text})
+				if len(blocks) >= n {
+					break
+				}
+			}
+		}
+		return ok(map[string]any{"task": tk.ID, "up": up, "blocks": blocks})
+	case "page-render":
+		p, _, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		pages, err := prep.LoadPageIndex(filepath.Join(p.Root, "doc_index_pages.json"))
+		if err != nil {
+			return fail(fmt.Errorf("页表未建: %w", err))
+		}
+		var bbox *[4]float64
+		if b := str("bbox"); b != "" {
+			var bb [4]float64
+			if _, err := fmt.Sscanf(b, "%f,%f,%f,%f", &bb[0], &bb[1], &bb[2], &bb[3]); err == nil {
+				bbox = &bb
+			}
+		}
+		res, err := prep.RenderPage(pages, getInt("global", 0), bbox, filepath.Join(p.Root, "work", "renders"), nil)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(res)
+	case "prep-organize":
+		p, _, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		var autoDirs []string
+		entries, err := os.ReadDir(filepath.Join(p.Root, "mineru"))
+		if err != nil {
+			return fail(fmt.Errorf("mineru 目录不存在（先 prep-mineru）: %w", err))
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				autoDirs = append(autoDirs, filepath.Join(p.Root, "mineru", e.Name(), "auto"))
+			}
+		}
+		sort.Strings(autoDirs)
+		outs, err := prep.Organize(autoDirs, filepath.Join(p.Root, "chapters"))
+		if err != nil {
+			return fail(err)
+		}
+		return ok(map[string]any{"md_files": outs})
+	case "prep-index":
+		p, _, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		mdNames := []string{}
+		if s := str("md_names"); s != "" {
+			for _, x := range strings.Split(s, ",") {
+				mdNames = append(mdNames, strings.TrimSpace(x))
+			}
+		}
+		if len(mdNames) == 0 {
+			matches, _ := filepath.Glob(filepath.Join(p.Root, "chapters", "*.md"))
+			for _, m := range matches {
+				mdNames = append(mdNames, filepath.Base(m))
+			}
+		}
+		if len(mdNames) == 0 {
+			return fail(fmt.Errorf("chapters/ 无 md（先 prep-organize）"))
+		}
+		idx, pages, err := docindex.Build(filepath.Join(p.Root, "mineru"), "", mdNames, filepath.Join(p.Root, "chapters"), filepath.Join(p.Root, "doc_index.json"))
+		if err != nil {
+			return fail(err)
+		}
+		return ok(map[string]any{"entries": len(idx.Entries), "total_pages": idx.Total(), "page_srcs": len(pages.Srcs)})
+	case "viewer-build":
+		p, q, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		rep, err := viewer.Build(p.Root, q)
+		if err != nil {
+			return fail(err)
+		}
+		return ok(rep)
+	case "ids-list":
+		p, _, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		tbl, err := ids.Load(p.Root)
+		if err != nil {
+			return fail(err)
+		}
+		if k := str("kind"); k != "" {
+			return ok(map[string]any{k: tbl.List(ids.Kind(k))})
+		}
+		return ok(map[string]any{"img": tbl.List(ids.KindImg), "vec": tbl.List(ids.KindVec)})
+	case "pause":
+		p, err := mustProject(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		if _, err := reg.Pause(p.Name); err != nil {
+			return fail(err)
+		}
+		return ok(map[string]any{"paused": p.Name})
+	case "resume":
+		p, err := mustProject(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		if _, err := reg.Activate(p.Name); err != nil {
+			return fail(err)
+		}
+		return ok(map[string]any{"resumed": p.Name})
 	}
 	return fail(fmt.Errorf("未知工具: %s", name))
 }

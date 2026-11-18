@@ -4155,3 +4155,10 @@ A1 首秀的真正缺口补上：PREP 四步此前只在 e2e 里以 Go 函数调
 补齐用户最初蓝图里的看图交互：① **灯箱**：点击组内/全图任意缩略图进全屏对比，←/→ 在**全台图片间翻张**（跨组连续，正合"对比"诉求），Esc/点击关闭；② **组成员增删**：每组每个成员带勾选框（默认全选=保留），"整组保留"一键开关——去勾=移出组，导出 `group_edit.json`；③ `viewer-apply` 扩展消费 `group_edit`：用户显式分组直接落覆盖文件（信任人工判断，kernel 只校验编号存在+代表在组内+≥2 成员）——"增加/减小组"从页面直达重绘调度，仍守"页面只读、内核唯一写"。
 
 **验证**：`go test ./internal/...` 16 包全绿（group_edit 合法落盘/代表不在组内拒/未知编号拒/回读）。
+
+
+## 第七十七批：MCP 工具面扩全量（v0.9.2）（2026-11-18，用户："继续"）
+
+MCP 工具从 7 扩到 **24**：补齐全流程主命令——六生成器（gen-classify/convert/check/draw/img2text/final）、style-collect、img2text-collect、ctx-up/down、page-render、prep-organize/prep-index、viewer-build、ids-list、pause/resume；全部与 CLI 调同一组函数（零漂移），用户专属命令（config-*）仍不进 MCP。冒烟：tools/list 24 个、gen-classify 未登记项目正确回 isError。至此 CLI 32 命令与 MCP 24 工具覆盖同一功能集（MCP 缺 admin/config/pre-split/mineru 等低频/用户专属项）。
+
+**验证**：`go test ./internal/...` 16 包全绿 + MCP 冒烟（24 工具/错误路径断言）。
