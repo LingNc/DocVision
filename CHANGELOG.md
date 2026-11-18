@@ -5,6 +5,7 @@
 
 ## [Unreleased]
 ### Added
+- **skills dedupe 代表图与组收口（P88）**：内容代表+字节副本（ContentLeaders）、典型成员 0.95 筛、代表图=典型成员里内容框最大者、同桶组折叠（成员原样收编不重筛、跨桶不折）、0.75 自动定组（T131）、T135 挂靠剩余项。`go test` 45 例绿。
 - **skills dedupe 候选桶与成组校验（P87）**：sha256 精确收缩 + 视觉/色度特征 + 小图标居中重合并桶（T130，预筛/去重/并行打分串行 union），SimilarTo 闸门（AI 可拆可并但不能把无关图说成一张）；groups.json 结构校验（key 必须在组内/不跨组重复/整池一组也必须有代表图）。`go test` 40 例绿。
 - **skills dedupe 居中重合核心（P86）**：软墨量内容框/分级 Jaccard/S 自适应/逐级搜索/±10% 平移预算从旧线 motif_canon+motif_align 逐字移植（dedupe/ 包），含预筛（WorthScore）、过程量（AlignDetail）、带入不接力（CarryOver）。`go test` 36 例绿。
 - **skills T1/T4 verdict 模式验收（P85）**：classify 三态校验（styled_text 必附提取、vector 必附证据、不合法值打回——失败不降级判据入代码）、check 校验（issues 必带位置指针、no_verdict 由重试上限兜底——绝不因无结论无限重转）。`go test` 27 例绿。

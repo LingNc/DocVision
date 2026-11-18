@@ -159,6 +159,10 @@
   改：`skills/kernel` 增 `dedupe/candidates.go`（500+ 行移植）+ `dedupe/groups.go`（验证逻辑）+ `pipeline_test.go` 5 例。
   验证：`go test ./internal/...` 40 例绿（精确组、平移副本并桶、内容不同拒并、闸门正反、成组校验正反）。
 
+[ ][ ] P88. dedupe 代表图与组收口纯函数落地：ContentLeaders（内容哈希→代表+字节副本）、TypicalMembers/PickRepresentative（典型 0.95 + 内容框最大者当代表，无达标回退中心）、FoldGroups（同桶组折叠：中心=与其余代表平均重合最高，成员原样收编不重筛 T149，跨桶不折）、AutoIconGroups（0.75 无疑问自动定组 T131）、AttachLeftovers（T135：只认已确认 key 作锚、一次挂一组、跳过已确认）。
+  改：`skills/kernel` 增 `dedupe/represent.go`（5 纯函数）+ `represent_test.go` 5 例。
+  验证：`go test ./internal/...` 45 例绿；修掉移植笔误一处（ContentLeaders 簿记）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。
