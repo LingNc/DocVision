@@ -40,5 +40,7 @@ clean_project.sh
 .sshkey
 skills/sync-delivery.sh
 skills/data/profile.env
+# 密钥对目录整体忽略（防 !*.* 规则把带点的 .pub 公钥文件重新放行）
+skills/data/ssh/
 /sync-local.sh
 .tmp-rename/

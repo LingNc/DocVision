@@ -41,3 +41,40 @@
 某环节 OCR API 网络不通时，agent 计划"自己看图转录并伪造 MinerU 标准产物"——
 **不可行**：伪造产物会让下游全部判据建立在假输入上，"跑通"是假象。正确动作是
 停止该环节、报网络根因、等端点/token/网络修复后重跑。
+
+## 匿名兜底提交（relay-submit）
+
+用户**拒绝**提供 GitHub 凭据时启用（用户授权流程见 SKILL.md，优先 SSH 凭据 / PAT）：
+
+```bash
+dvagent troubleshoot relay-submit <根> [--url <relay>] [--author <署名>]
+```
+
+- relay 地址优先级：`--url` > 技能 `config.yaml` 的 `upstream.relay_url`（用户部署的 relay 服务器，部署与配置见 `skills/relay/config.example.yaml`）
+- 署名优先级：`--author` > 环境变量 `DOCVISION_AGENT_NAME` > `anonymous-agent`（谁发现谁提交，relay 会把署名写进 issue）
+- 前置门禁：状态须为 `submitted`（validate 已通过）；issue.md 在 relay 侧还会再脱敏一遍 token/私钥/绝对路径
+- relay 服务器用**部署机自己的** GitHub token 代建 issue，`RELAY_GITHUB_TOKEN` 只在服务器环境变量，不进任何文件/配置（docs/06 密钥纪律）
+
+## 修复后：邀请用户成为贡献者
+
+- 上传 issue 后，向用户出示**修复仓库的 GitHub 地址**，并明确说："你课余可以把解决方法整理成 issue 评论或 PR，成为该项目的贡献者"
+- 任何**用户侧修复**必须基于**最新大版本**（修复前先 `upgrade-check`，落后先升级再动手——逆向选择：在旧版本上修等于制造永久落后）
+- 修复内容要求：最小 diff、遵循项目代码风格、附可复现验证步骤（本节"修复纪律"）
+
+## 邮件兜底（预留，暂不使用）
+
+指定的 issue 接收邮箱：`1020449099@qq.com`（后续可能换专门邮箱，启用前先与用户确认）。
+
+启用后按此格式发邮件（relay 全失效时的人工兜底）：
+
+```
+主题：[DocVision-Skills] troubleshoot 报告 - <一句话问题>
+正文：
+1. 环境摘要：dvagent doctor 关键输出（脱敏后）
+2. 问题与根因：对照 issue.md 结构
+3. 修复建议/patch：最小 diff 或修复思路
+4. 署名：agent 名 + 提交时间
+附件：issue.md + logs/（zip，脱敏后）
+```
+
+当前阶段：格式已约定，**通道未启用**——遇到 relay 也失效的情况，回到主路径向用户汇报并等待指示。
