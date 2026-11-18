@@ -131,6 +131,10 @@
 
 本组条目的现状盘点、实测证据、边界与落地路线见 `docs/plan-report/design-any-pdf.md`。
 
+[ ][ ] P81. skills 线：LLM 会话外迁到宿主 agent 的新架构——skills 内核只做确定性执行+验收（任务队列/租约/验收器/项目注册表/书级档案），用户除 MinerU 外零 API 配置；愿景"放下 PDF 跑到底、中断无损续、换 agent 可续"，验收标准 A1–A10。放 `skills/` 独立演化，不侵入旧线。
+  改：新增 `skills/`（README + docs/01架构 02任务协议 03接口 04迁移台账 + `kernel/` Go module + `dvagent` CLI）；本批同步 plan/CHANGELOG/batch-history/AGENTS.md 指针。
+  验证：`go test ./internal/...` 5 例绿（幂等入队/租约过期回收/确定性派发/打回回队/依赖解锁）；dvagent 冒烟全链路绿（register→activate→claim→submit 打回→补产物通过→解锁核对→note/profile/status）。
+
 ## 附录：原文存档（P68–P76，2026-11-07）
 
 用户原话照录，仅把样本身份按仓库规矩替换为「（书名略）」。

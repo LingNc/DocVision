@@ -3796,3 +3796,14 @@ MISSING FILES（名字必须原样照抄，不要手打）：
 **P79（用户："对于那种在文章中成对的图左右线条和样式一般要求统一，在转换章节的时候"）**：先用真实章节量了一遍，确认"成对"不能靠行距判——一个围栏本身二三十行，相邻两张不同编号的图（图 8.1 与图 8.2）也只隔 31 行。真正的标志是**图注**：同一图号的 (a)/(b) 之间没有各自图注，只有 `(a)`/`(b)` 这种子图标注；不同图号的两张之间必有 `图 8.1`/`图 8.2`。于是规则定为"两个矢量围栏之间无小标题、无图注、相距 ≤60 行"。拿一本八章的书试跑：点出 5 对（chapter_005 两对、chapter_006 三对），而"图 8.1 + 图 8.2"那类没有被算进去。提示词只加一句（同图号的图彼此也要一致），具体是哪几对由代码在首条消息里点名，省得模型自己猜。
 
 **P80 设计（用户："或者说如果有整体的话这边整体的线条可以有个统一性？比如由style会话的cls规定一些绘图的可选配置项"）**：P79 只治"同一图号的并排两半"，根子在于**线宽是作图会话逐图写死的**（每张图按自己那张原书的墨迹量出来），全书没有单一来源。于是设计成三层契约：cls 定义 `dv-*` 样式族与 `\dvfigwire` 等宏（取值来自 images 阶段聚合的 `source/figure_ink.json`，纯本地解析不花 token）；作图会话只写 `draw[dv-wire]` 并在围栏开头留 `\ifdefined\dvfigloaded` 守卫兜底（单图编译时用自己实测值，整书编译时类里的值赢）；convert 只把残留的 `line width=` 映射过去，preflight 出一句警告。分 S1/S2/S3 三步，S1 不动提示词即可验证"类能提供样式"，S3 对已完成的书一次性映射、不强制重画。设计稿在 `docs/plan-report/p80-figure-style-unity.md`。
+
+
+## 第三十七批：skills 线奠基——agent 驱动新架构设计文档 + 内核骨架（2026-11-18，用户："按照开发流程，先写好文档和详细说明和愿景目标最终验收标准……开一个新分支……放在根中的 skills 来开发，包括对应的文档……开始开发吧"）
+
+用户决定启动 skills 线：LLM 会话整体外迁到宿主 agent（用户只装 skill、用自己的 agent 对话式转换，除 MinerU 外零 API 配置），DocVision 内核只保留确定性执行与验收。分支 `feat/skills`，内容全部在新增 `skills/` 目录，不侵入旧线 `go/`。
+
+**P81**：愿景"放下 PDF 跑到底、中断无损续、换 agent 可续"；设计四篇——`skills/docs/01-architecture.md`（三层分工/状态三层分离/自动驾驶主循环/项目注册表+书级档案/记忆泡泡/共享区/编排依赖边）、`02-task-protocol.md`（五类任务 classify/作图/转换/核对/回炉 × 说明书 × 验收 spec）、`03-agent-interface.md`（控制面/数据面分离、批量 claim/submit、CLI 优先 MCP 为壳、冷启动仪式、旧会话工具三分去向）、`04-migration-inventory.md`（判据入代码/知识入说明书/会话层退役的逐项台账）；最终验收标准 A1–A10 在 `skills/README.md`。
+
+内核骨架 `skills/kernel/`（独立 Go module）：任务/租约/验收记录模型、JSON 队列（原子写、确定性派发、打回回队、依赖解锁）、验收器（沙箱越界/必产物/自包含判据 + 编译/覆盖率 Hook 注入点）、项目注册表（active/paused/archived、一次一本、profile.md append-only）、`dvagent` CLI（status/register/activate/claim/submit/note/profile-update）。冒烟时抓到并修掉一个真 bug：submit 打回时不该解锁依赖任务（原实现无条件 unblock，核对任务会在转换失败时误解锁）。
+
+**验证**：`go test ./internal/...` 5 例绿；dvagent CLI 冒烟全链路绿。本环境无预装 Go，工具链经镜像获取后验证。
