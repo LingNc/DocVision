@@ -18,6 +18,15 @@
 - 样式判据（编译过/覆盖率/自包含）与全书同标准——试点章没有降低门槛；
 - 字体与阈值同属用户专属资源：agent 只做"缺失→回退→标注→报告"，调整权在用户。
 
+## 产出三件套契约（SK-I19 补全，原模板 prompts-archive/latex_style.system.md）
+
+style 阶段除四步试转外，**必须产出**（验收按此清单逐项过）：
+1. **`book/style/<book>.cls`**——完整可编译类文件（排版参数/字体/标题/页眉页脚/图表环境）
+2. **`book/style/<book>-manual.md`**——结构化使用手册，**固定含 `## Vector figure style` 节**：矢量图命令/箭头点样式/图注放置/配色——**convert 全员按这节统一矢量图风格**
+3. **`book/style/<book>-example.tex`**——最小工作示例，**复用 markdown 里已有的 vector fence 代码**（不现编），本地 compile 干净后才准交
+
+SK-I13 的 `draw-style.tex` 模板是 `## Vector figure style` 节的**内容素材**，不是替代品。
+
 ## 绘图样式总览（style-collect 之后、四步试转之前必做）
 
 1. 全书矢量图扫描分类：结构型/示意型/立体几何型/函数图像型——能用 luadraw 的（立体几何/复杂函数图像）标记出来
