@@ -195,6 +195,93 @@ func appendFAQRow(data, row string) (string, error) {
 }
 
 
+// runCtx 计算 img2text 任务的 md 行级上下文（CLI ctx 与 MCP ctx 工具共用；
+// 对齐旧参考实现 get_more_context(↑N, ↓M)：sha 定位 full.md 行号，双方向行区间）。
+func runCtx(root, taskID string, upN, downN int) (map[string]any, error) {
+	q, err := queue.Load(queue.ProjectQueuePath(root))
+	if err != nil {
+		return nil, err
+	}
+	tk := q.Tasks[taskID]
+	if tk == nil {
+		return nil, fmt.Errorf("无此任务: %s", taskID)
+	}
+	seqF, _ := tk.Accept["entry_seq"].(float64)
+	raw, err := os.ReadFile(filepath.Join(root, "doc_index.json"))
+	if err != nil {
+		return nil, fmt.Errorf("doc_index.json 缺失（先 prep-index）: %w", err)
+	}
+	var idx struct {
+		Entries []struct {
+			Seq  int    `json:"seq"`
+			Type string `json:"type"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(raw, &idx); err != nil {
+		return nil, err
+	}
+	seq := int(seqF)
+	found := false
+	for _, e := range idx.Entries {
+		if e.Seq == seq && e.Type == "image" {
+			found = true
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("entry_seq=%d 在 doc_index 里不是图片条目", seq)
+	}
+	sha := strings.TrimPrefix(tk.ID, "img2txt_")
+	imgMatches, _ := filepath.Glob(filepath.Join(root, "mineru", "*", "images", sha+".*"))
+	if len(imgMatches) == 0 {
+		return nil, fmt.Errorf("找不到图像文件: %s（mineru/*/images/%s.*）", sha, sha)
+	}
+	partDir := filepath.Dir(filepath.Dir(imgMatches[0]))
+	mdPath := filepath.Join(partDir, "full.md")
+	mdData, err := os.ReadFile(mdPath)
+	if err != nil {
+		return nil, fmt.Errorf("full.md 缺失: %s", mdPath)
+	}
+	imgLine := 0
+	lines := strings.Split(string(mdData), "\n")
+	for li, line := range lines {
+		if strings.Contains(line, sha) {
+			imgLine = li + 1
+			break
+		}
+	}
+	if imgLine == 0 {
+		return nil, fmt.Errorf("full.md 里找不到图像行: %s", sha)
+	}
+	upStart := imgLine - upN
+	if upStart < 1 {
+		upStart = 1
+	}
+	downEnd := imgLine + downN
+	if downEnd > len(lines) {
+		downEnd = len(lines)
+	}
+	ctxLines := []map[string]any{}
+	for li := upStart; li <= downEnd; li++ {
+		ctxLines = append(ctxLines, map[string]any{"line": li, "text": lines[li-1]})
+	}
+	return map[string]any{"task": tk.ID, "md": filepath.Base(mdPath), "image_line": imgLine,
+		"range": []int{upStart, downEnd}, "lines": ctxLines}, nil
+}
+
+// genImg2Text铺任务CLI壳：薄封装（与MCP gen-img2text工具同函数）
+func runGenImg2Text(root string) (map[string]any, error) {
+	q, err := queue.Load(queue.ProjectQueuePath(root))
+	if err != nil {
+		return nil, err
+	}
+	rep, err := gen.GenImg2Text(q, root)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"report": rep}, nil
+}
+
+
 // hasContentList part 根是否已有 content_list（prep-mineru-api 断点跳过判据；
 // 归一后产物只落 part 根，不看 auto 层）。
 func hasContentList(dir string) bool {
@@ -900,14 +987,6 @@ func main() {
 			die(fmt.Errorf("ctx 需要: <项目名> <task_id> [--up N] [--down M]"))
 		}
 		p := mustProject(reg, args[1])
-		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
-		if err != nil {
-			die(err)
-		}
-		tk := q.Tasks[args[2]]
-		if tk == nil {
-			die(fmt.Errorf("无此任务: %s", args[2]))
-		}
 		upN, downN := 5, 5
 		for i := 3; i < len(args); i++ {
 			switch args[i] {
@@ -925,67 +1004,11 @@ func main() {
 				die(fmt.Errorf("未知参数: %s（可用 --up/--down）", args[i]))
 			}
 		}
-		seqF, _ := tk.Accept["entry_seq"].(float64)
-		raw, err := os.ReadFile(filepath.Join(p.Root, "doc_index.json"))
+		res, err := runCtx(p.Root, args[2], upN, downN)
 		if err != nil {
-			die(fmt.Errorf("doc_index.json 缺失（先 prep-index）: %w", err))
-		}
-		var idx struct {
-			Entries []struct {
-				Seq  int    `json:"seq"`
-				Type string `json:"type"`
-			} `json:"entries"`
-		}
-		if err := json.Unmarshal(raw, &idx); err != nil {
 			die(err)
 		}
-		seq := int(seqF)
-		found := false
-		for _, e := range idx.Entries {
-			if e.Seq == seq && e.Type == "image" {
-				found = true
-			}
-		}
-		if !found {
-			die(fmt.Errorf("entry_seq=%d 在 doc_index 里不是图片条目", seq))
-		}
-		sha := strings.TrimPrefix(tk.ID, "img2txt_")
-		imgMatches, _ := filepath.Glob(filepath.Join(p.Root, "mineru", "*", "images", sha+".*"))
-		if len(imgMatches) == 0 {
-			die(fmt.Errorf("找不到图像文件: %s（mineru/*/images/%s.*）", sha, sha))
-		}
-		partDir := filepath.Dir(filepath.Dir(imgMatches[0]))
-		mdPath := filepath.Join(partDir, "full.md")
-		mdData, err := os.ReadFile(mdPath)
-		if err != nil {
-			die(fmt.Errorf("full.md 缺失: %s", mdPath))
-		}
-		imgLine := 0
-		lines := strings.Split(string(mdData), "\n")
-		for li, line := range lines {
-			if strings.Contains(line, sha) {
-				imgLine = li + 1 // 1-based，对齐旧 {LINE}
-				break
-			}
-		}
-		if imgLine == 0 {
-			die(fmt.Errorf("full.md 里找不到图像行: %s", sha))
-		}
-		upStart := imgLine - upN
-		if upStart < 1 {
-			upStart = 1
-		}
-		downEnd := imgLine + downN
-		if downEnd > len(lines) {
-			downEnd = len(lines)
-		}
-		ctxLines := []map[string]any{}
-		for li := upStart; li <= downEnd; li++ {
-			ctxLines = append(ctxLines, map[string]any{"line": li, "text": lines[li-1]})
-		}
-		out(map[string]any{"task": tk.ID, "md": filepath.Base(mdPath), "image_line": imgLine,
-			"range": []int{upStart, downEnd}, "lines": ctxLines})
-
+		out(res)
 	case "viewer-build":
 		// dvagent viewer-build <项目名> —— 生成静态看图台 work/viewer/index.html。
 		if len(args) < 2 {
@@ -1021,6 +1044,18 @@ func main() {
 			die(err)
 		}
 		out(map[string]any{"threshold": ov.Threshold, "groups": len(ov.Groups), "override": viewer.OverridePath(p.Root)})
+
+	case "gen-img2text":
+		// dvagent gen-img2text <项目名> —— 铺 img2text 三态任务（幂等，按 entry_seq 去重）
+		if len(args) < 2 {
+			die(fmt.Errorf("gen-img2text 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		res, err := runGenImg2Text(p.Root)
+		if err != nil {
+			die(err)
+		}
+		out(res)
 
 	case "img2text-collect":
 		// dvagent img2text-collect <项目名> —— 汇总 done 的 img2text 描述，回填 doc_index Content。

@@ -86,11 +86,9 @@ var mcpTools = []mcpTool{
 		schema(map[string]any{"project": strProp("项目名"), "key": strProp("相对路径key")}, []string{"project", "key"})},
 	{"img2text-collect", "img2text 描述回填 doc_index Content",
 		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
-	{"ctx-up", "img2text 小轮转：取该图前文文字块（上下文检索）",
-		schema(map[string]any{"project": strProp("项目名"), "task_id": strProp("任务id"), "n": numProp("块数(默认3)")},
-			[]string{"project", "task_id"})},
-	{"ctx-down", "img2text 小轮转：取该图后文文字块",
-		schema(map[string]any{"project": strProp("项目名"), "task_id": strProp("任务id"), "n": numProp("块数(默认3)")},
+	{"ctx", "img2text 上下文（对齐旧 get_more_context）：单次双方向按 md 行返回 {image_line, range, lines}",
+		schema(map[string]any{"project": strProp("项目名"), "task_id": strProp("任务id"),
+			"up": numProp("上行数(默认5)"), "down": numProp("下行数(默认5)")},
 			[]string{"project", "task_id"})},
 	{"page-render", "渲染原书某页（可 bbox 裁剪）到 work/renders/",
 		schema(map[string]any{"project": strProp("项目名"), "global": numProp("全书页码"), "bbox": strProp("x0,y0,x1,y1(可选)")},
@@ -456,36 +454,24 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) map[string]any {
 			return fail(err)
 		}
 		return ok(map[string]any{"filled": n})
-	case "ctx-up", "ctx-down":
-		p, q, err := pq(str("project"))
+	case "ctx":
+		p, _, err := pq(str("project"))
 		if err != nil {
 			return fail(err)
 		}
-		tk, err := q.Get(str("task_id"))
+		upN, downN := 5, 5
+		if s := str("up"); s != "" {
+			fmt.Sscanf(s, "%d", &upN)
+		}
+		if s := str("down"); s != "" {
+			fmt.Sscanf(s, "%d", &downN)
+		}
+		res, err := runCtx(p.Root, str("task_id"), upN, downN)
 		if err != nil {
 			return fail(err)
 		}
-		seq, _ := tk.Accept["entry_seq"].(float64)
-		idx, err := docindex.Load(filepath.Join(p.Root, "doc_index.json"))
-		if err != nil {
-			return fail(err)
-		}
-		up := name == "ctx-up"
-		n := getInt("n", 3)
-		var blocks []map[string]any
-		for _, e := range idx.Entries {
-			if e.Type != "text" || e.Text == "" {
-				continue
-			}
-			before := e.Seq < int(seq)
-			if (up && before) || (!up && !before) {
-				blocks = append(blocks, map[string]any{"seq": e.Seq, "global": e.Global, "text": e.Text})
-				if len(blocks) >= n {
-					break
-				}
-			}
-		}
-		return ok(map[string]any{"task": tk.ID, "up": up, "blocks": blocks})
+		return ok(res)
+
 	case "page-render":
 		p, _, err := pq(str("project"))
 		if err != nil {
