@@ -1,0 +1,680 @@
+\subsection{The \emph{luadraw\_spherical} Module} 
+
+This module allows you to draw a number of objects on a sphere (such as circles, spherical triangles, etc) without having to manually manage the visible or invisible parts. Drawing is done in three steps:
+\begin{enumerate}
+    \item We define the characteristics of the sphere (center, radius, color, etc.)
+    \item We define the objects to be added to the scene using dedicated methods.
+    \item We display everything with the \cmd{g:Dspherical()} method.
+\end{enumerate}
+Of course, all 2D and 3D drawing methods remain usable.
+
+\textbf{Usage}: This module adds new graphics methods to the \emph{ld.graph3d} class; it does not return anything. The variables introduced by this module go in the \emph{luadraw} namespace.
+
+\subsubsection{Global Module Functions}
+
+By default, these functions apply to the current sphere, but some of them can be applied to a sphere other than the current one; these have a final argument named \argu{sph}, which is optional and defaults to \nil, but when specified, it must be a table of the form \{center, radius\} (representing a sphere).
+
+\begin{itemize}
+    \item \cmd{ld.sM(x, y, z \fac{, sph})}: returns a point on the sphere; this is the point $I$ on the sphere such that the half-line $[O,I)$ ($O$ being the center of the sphere) passes through the point $A$ with Cartesian coordinates $(x,y,z)$. It is the projection of the point $M(x,y,z)$ onto the sphere from the center.
+    
+    \item \cmd{ld.sM(theta, phi \fac{, sph})}: where \argu{theta} and \argu{phi} are angles in degrees, returns a point on the sphere, whose spherical coordinates are \emph{(R,theta,phi)} where $R$ is the radius of the sphere.
+    
+    \item \cmd{ld.smidpoint(A, B, x \fac{, sph})} : \argu{A} and \argu{B} are two points on the sphere and \argu{x} is a number between $0$ and $1$; the function returns the point at curvilinear coordinate \argu{x} along the great-circle arc $\overset{\frown}{AB}$, which is therefore a point on the sphere. For example, with $x=0.5$, the returned point is the midpoint of the arc $\overset{\frown}{AB}$.
+
+    \item \cmd{ld.sbarycenter(list \fac{, sph})} : where \argu{list} = \{A1,c1,A2,c2,\ldots,An,cn\}, the arguments \argu{A1}, \ldots,\argu{An} are points on the sphere and the arguments \argu{c1}, \ldots,\argu{cn} are real numbers; the function calculates the barycenter of these points using the given coefficients and returns its projection onto the sphere from the center.
+    
+    \item \cmd{ld.toSphere(A \fac{, sph})}: returns the projection of point \argu{A} onto the sphere from the center.
+    
+    \item \cmd{ld.interSphericalC(P1, P2)}: returns, as a sequence, the points of intersection (if they exist) between two circles belonging to the sphere (not necessarily great circles). The two arguments \argu{P1} and \argu{P2} are two planes, and it is their intersection with the sphere that forms the two circles whose intersection we are looking for.
+    
+    \item \cmd{ld.interGreatC(C1,C2)}: returns, as a sequence, the two points of intersection of the two great circles \argu{C1} and \argu{C2} belonging to the sphere. A great circle of the sphere is a list of two points on the sphere \textbf{not collinear with the center}.
+    
+    \item \cmd{ld.projstereo\_Scircle(P, N, h)}: returns the stereographic projection of a circle drawn on the sphere as a path. The argument \argu{P} is a plane, and its intersection with the sphere forms the circle to be projected. The argument \argu{N} designates a point on the sphere, which will be the pole of the projection. The argument \argu{h} is a real number that defines the projection plane. This plane is perpendicular to the axis $(CN)$, where $C$ is the center of the sphere, and passes through the point $I=C+h \frac{\vec{CN}}{CN}$. With $h=0$, this is the equatorial plane; with $h=-R$, where $R$ is the radius of the sphere, this is the plane tangent to the sphere at the opposite pole.
+    
+    \item \cmd{ld.projstereo\_Sfacet(L, N, h \fac{, close})}: returns the stereographic projection of a spherical facet (drawn onto the sphere) as a path. The argument \argu{L} is a list of points on the sphere that form the vertices of the facet; two consecutive vertices are connected by a great-circle arc (the angular distance between two consecutive vertices must not exceed 180 degrees). The argument \argu{N} designates a point on the sphere that will be the pole of the projection. The argument \argu{h} is a real number that defines the projection plane. This plane is perpendicular to the axis $(CN)$, where $C$ is the center of the sphere, and passes through the point $I=C+h \frac{\vec{CN}}{CN}$. With $h=0$, this is the equatorial plane; with $h=-R$, where $R$ is the radius of the sphere, this is the plane tangent to the sphere at the opposite pole. The optional argument \argu{close} indicates whether the list \argu{L} should be closed (\true by default).    
+\end{itemize}
+
+The module also offers the following two methods:
+
+\begin{itemize}
+    \item The method \cmd{g:Split\_facet(facet \fac{, sph})}, where \argu{facet} is a list of points \textbf{that must lie on the sphere}. The method returns a sequence of the form \code{front, back}; these are two 3D paths, where the first represents the outline of the visible part of the spherical facet (the edges are great-circle arcs) and the second path represents the outline of the part of the facet located on the hidden side of the sphere. 
+
+    \item The method \cmd{g:Split\_region(L \fac{, sph})}, where \argu{L} is a list of 3D points representing a \textbf{closed curve drawn on the sphere}. The method returns a sequence of the form \code{front, back, out}; the first element is a 3D path representing the outline of the visible part of the spherical region, the second element is a 3D path representing the outline of the part of the region located on the hidden side of the sphere, and the last element is a table containing the points corresponding to the endpoints of the hidden sections.
+\end{itemize}
+
+\subsubsection{Sphere Definition}
+
+The sphere is defined using the method \cmd{g:Define\_sphere( options )}, where \argu{options} is a table allowing adjustment of each parameter. These are as follows (with their default values):
+\begin{itemize}
+    \item \opt{center=\val{pt3d.Origin}},
+    \item \opt{radius=\val{3}},
+    \item \opt{color=\val{"orange"}},
+    \item \opt{opacity=\val{1}},
+    \item \opt{mode=\val{ld.mBorder}}, sphere display mode (possible values: \val{ld.mWireframe} or \val{ld.mGrid} or \val{ld.mBorder}),
+    \item \opt{edgecolor=\val{"lightgray"}},
+    \item \opt{edgestyle=\val{"solid"}},
+    \item \opt{hiddenstyle=\val{ld.Hiddenlinestyle}},
+    \item \opt{hiddencolor=\val{"gray"}},
+    \item \opt{edgewidth=\val{4}},
+    \item \opt{show=\true}, to show or hide the sphere,
+    \item \opt{back=\true}, to show or hide what is behind the sphere or on the hidden side,
+    \item \opt{inside=\true}, to show or hide what is inside the sphere,
+    \item \opt{front=\true}, to show or hide what is in front of the sphere or on the visible side,    
+    \item \opt{insidelabelcolor=\val{"darkgray"}}: Defines the color of labels whose anchor point is inside the sphere,
+    \item \opt{arrowBstyle=\val{"->"}}: Type of arrow at the end of the line,
+    \item \opt{arrowAstyle=\val{"<-"}}: Type of arrow at the beginning of the line,
+    \item \opt{arrowABstyle=\val{"<->"}}: Very rarely used because most of the time the lines drawn on the sphere must be cut,
+    \item \opt{hiddendelayed=\false}: with the value \false the hidden parts are drawn at the end of the instruction \cmd{g:Dspherical()}, with the value \true they are drawn at the very end of the current graph which can be useful if you have added elements after the sphere which hide part of it (However, this behavior can be modified locally with the option \opt{hidden=\true/\false}).
+\end{itemize}
+
+
+The \cmd{g:Clear\_spherical()} method allows you to remove objects that have been added to the scene, and resets the values ​​to default.
+
+\subsubsection{Adding a label to graphic elements}\label{addlabel}
+
+Most of the following graphic elements allow a label to be added via their options. The options regarding this optional label are:
+
+\begin{itemize}
+    \item \opt{label=\val{""}} : the label to be added. 
+
+    \item \opt{anchor1d=\nil} : a number between $0$ and $1$ indicating the label's position along the object's 2D projection ($0$ for the start of the line, $1$ for the end of the line). 
+
+    \item \opt{anchor=\nil} : a 3D point representing the label's anchor point in space. 
+
+    \item \opt{anchor2d=\val{cpx.Z(0.5,0.5)}} : a complex number representing the label's position within the $[0;1]\times[0;1]$ square corresponding to the 2D bounding box of the object's 2D projection; thus, by default, the label is centered within this box. 
+    The order of priority is: \opt{anchor}, \opt{anchor1d}, \opt{anchor2d} (if the first option is \nil, the second is chosen; if that is also \nil, then the third is chosen). 
+
+    \item \opt{pos=\val{"center"}}, indicates the label's position relative to the anchor point; possible values ​​are \val{"center"} (centered), \val{"N"} (north), \val{"NE"} (northeast), \val{"E"} (east), \val{"SE"} (southeast), \val{"S"} (south), \val{"SW"} (southwest), \val{"W"} (west), and \val{"NW"} (northwest). The default value is \val{center}, in which case the label is centered on the anchor point. 
+
+    \item \opt{dist=\val{0}}, distance in cm between the label and its anchor point when \opt{pos} is not equal to \val{"center"}. 
+
+    \item \opt{dir=\val{\{\}}}, this option is a table in the form \code{\{dirX, dirY \fac{,dep}\}} specifying the writing direction. The three values ​​\code{dirX}, \code{dirY}, and \code{dep} are 3D vectors; the first two indicate the orientation of the text, while the third represents a displacement (translation) of the label relative to the anchor point. The \code{dep} vector is null by default. 
+
+    \item \opt{node\_options=\val{""}} is a string (empty by default) intended to hold options that will be passed directly to TikZ within the \emph{node[]} instruction.
+\end{itemize}
+
+
+\subsubsection{Add a circle: g:DScircle}
+\def\writeoptions{The \argu{options} argument is a table whose fields define the options, which are (with their default value)}%
+
+The \cmd{g:DScircle(P, options)} method allows you to add a circle to the sphere. The argument \emph{P} is a table of the form $\{A,n\}$ that represents a plane (passing through $A$ and normal to $n$, two 3D points). The circle is then defined as the intersection of this plane with the sphere. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{out=nil}, if we assign a list variable to this \argu{out} parameter, then the function adds to this list the two points corresponding to the ends of the hidden arc, if any, which allows us to retrieve them without having to calculate them.
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+\subsubsection{Add a great circle: g:DSgreatcircle}
+
+The method \cmd{g:DSgreatcircle(AB, options)} adds a great circle to the sphere. The argument \argu{AB} is a table of the form $\{A,B\}$ where $A$ and $B$ are two distinct points on the sphere. The great circle is then the circle centered at the center of the sphere, and passing through $A$ and $B$. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{out=nil}, if we assign a list variable to this \argu{out} parameter, then the function adds to this list the two points corresponding to the ends of the hidden arc, if any, which allows us to retrieve them without having to calculate them.
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+\subsubsection{Add a great circle arc: g:DSarc}
+
+The method \cmd{g:DSarc(AB, sens, options)} allows you to add a great circle arc to the sphere. The argument \argu{AB} is a table of the form $\{A,B\}$ where $A$ and $B$ are two distinct points on the sphere. The great circle arc is then drawn from $A$ to $B$. The argument \argu{sens} is equal to $1$ or $-1$ to indicate the direction of the arc. When $A$ and $B$ are not diametrically opposed, the plane $OAB$ (where $O$ is the center of the sphere) is oriented with $\vec{OA}\wedge\vec{OB}$. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{arrows=0}, three possible values: $0$ (no arrow), $1$ (one arrow at $B$), $2$ (arrow at $A$ and $B$).
+    \item \opt{normal=nil}, allows you to specify a normal vector to the $OAB$ plane when these three points are aligned.
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+\subsubsection{Add an angle: g:DSangle}
+
+The method \cmd{g:DSangle(B, A, C, r, sens, options)}, where \argu{A}, \argu{B}, and \argu{C} are three points on the sphere, allows you to draw a great circle arc on the sphere to represent the angle $(\vec{AB},\vec{AC})$ with a radius of \argu{r}. The argument \argu{sens} is $1$ or $-1$ to indicate the direction of the arc; the plane $ABC$ is oriented with $\vec{AB}\wedge\vec{AC}$. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{arrows=0}, three possible values: $0$ (no arrow), $1$ (one arrow at $B$), $2$ (arrow at $A$ and $B$).
+    \item \opt{normal=nil}, allows you to specify a normal vector to the $OAB$ plane when these three points are aligned.
+    \item Options for adding a label:
+    \begin{itemize}
+        \item \opt{label=\val{""}} : text to be displayed. 
+        
+        \item \opt{node\_options=\val{""}} : string defining options for the label.
+        
+        \item \opt{pos=\val{"auto"}} : specifies the label's position relative to the anchor point; other possible values ​​are the standard ones for label positioning: \val{"center"}, \val{"N"}, \val{"NW"}, etc. By default, the anchor point is located at the intersection of the circular arc and the angle bisector. 
+        
+        \item \opt{dist=\val{r}} : distance between the anchor point and the circle's center ($A$); by default, this is the circle's radius \argu{r}. 
+        
+        \item \opt{angle=\val{0}} : rotation angle (in degrees) applied to the default anchor point around the circle's center ($A$) within the circle's plane. 
+        
+        \item \opt{rotate=\val{"none"}} : indicates whether the label should be rotated around its anchor point \textbf{in the screen plane}. Other possible values ​​are: \val{"auto"} (label follows the direction of the bisector) or \val{"ortho"} (label is written perpendicular to the bisector). 
+        
+        \item \opt{rotate3d=\val{"none"}} : indicates whether the label should be rotated around its anchor point \textbf{in the $(ABC)$ plane}. Other possible values ​​are: \val{"auto"} (label follows the direction of the bisector) or \val{"ortho"} (label is written perpendicular to the bisector, still within the $(ABC)$ plane). With the value \val{"none"}, the label is written in the screen plane.
+        
+        \item \opt{fill=\val{""}} and \opt{fillopacity=\val{0.5}}: when the \opt{fill} option specifies a color name, the angular (spherical) sector is filled with that color and the opacity specified by the \opt{fillopacity} option.
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Add a spherical facet: g:DSfacet}
+
+The method \cmd{g:DSfacet(F, options)}, where \argu{F} is a list of points on the sphere, allows you to draw the facet represented by \argu{F}, the edges being great circle arcs. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{fill=""}, string representing the fill color (none by default),
+    \item \opt{fillopacity=0.3}, opacity of the fill color.
+    \item \opt{front=nil}, \opt{back=nil}: if a table-type variable is assigned to these options, the function adds to these tables the path corresponding to the outline of the visible part for the first option (front), and the path corresponding to the outline of the hidden part for the second option (back).    
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+\subsubsection{Add a spherical curve: g:DScurve}
+
+The method \cmd{g:DScurve(L, options)}, where \argu{L} is a list of points on the sphere, allows you to draw the curve represented by \argu{L}. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{out=nil}. If we assign a table-type variable to this \opt{out} option, then the function adds the points corresponding to the ends of the hidden parts to this list.
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+\subsubsection{Adding a spherical region: g:DSregion}
+
+The method \cmd{g:DSregion(L, options)}, where \argu{L} is a list of 3D points representing a simple closed spherical curve. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{fill=""}: string representing the fill color (none by default),
+    \item \opt{fillopacity=0.3}: opacity of the fill color. 
+    
+    \item \opt{dir=\{1,1\}}: allows changing the direction of the circular arcs that "replace" the hidden segments (for the first value) or the visible segments (for the second value). A value of $1$ indicates counter-clockwise (direct) direction, and $-1$ indicates clockwise (indirect) direction. 
+    
+    \item \opt{out=nil}: if a table-type variable is assigned to this \opt{out} option, the function adds the points corresponding to the endpoints of the hidden segments to that list. 
+    
+    \item \opt{front=nil}, \opt{back=nil}: if a table-type variable is assigned to these options, the function adds to these tables the path corresponding to the outline of the visible part for the first option (front), and the path corresponding to the outline of the hidden part for the second option (back).    
+    
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+We will now deal with objects that are not necessarily on the sphere, but that may pass through it, or be inside it, or outside it.
+
+\subsubsection{ Add a segment: g:DSseg}
+
+The \cmd{g:DSseg(AB, options)} method allows you to add a segment. The argument \argu{AB} is a table of the form $\{A,B\}$ where $A$ and $B$ are two points in space. The function handles interactions with the sphere. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{arrows=0}, three possible values: $0$ (no arrow), $1$ (one arrow in $B$), $2$ (arrow in $A$ and $B$).
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+\subsubsection{Add a line: g:DSline}
+
+The \cmd{g:DSline(d, options)} method allows you to add a line. The argument \argu{d} is a table of the form $\{A,u\}$ where $A$ is a point on the line and $u$ is a direction vector (two 3D points). The function handles interactions with the sphere. The drawn segment is obtained by intersecting the line with the 3D window; it may be empty if the window is too narrow. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{arrows=0}, three possible values: $0$ (no arrow), $1$ (one arrow in $B$), $2$ (arrow in $A$ and $B$).
+    \item \opt{scale=1}, allows you to change the size of the plotted segment.
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+    
+\subsubsection{ Add a polygonal line: g:DSpolyline}
+
+The \cmd{g:DSpolyline(L, options)} method allows you to add a polygonal line. The argument \argu{L} is a list of points in space, or a list of lists of points in space. The function handles interactions with the sphere. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{arrows=0}, three possible values: $0$ (no arrow), $1$ (one arrow in $B$), $2$ (arrow in $A$ and $B$).
+    \item \opt{close=false}, indicates whether the line should be closed.
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+\subsubsection{Adding axes: g:DSaxes}
+
+The \cmd{g:DSaxes(O, options)} method allows you to add the axes: (\argu{O},\emph{vecI}), (\argu{O},\emph{vecJ}), and (\argu{O},\emph{vecK}); the \argu{O} argument is a 3D point representing the intersection of the three axes. The function handles interactions with the sphere. \writeoptions
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{arrows=0}, three possible values: $0$ (no arrow), $1$ (arrow at the end), $2$ (arrows at both start and end). 
+
+    \item \opt{xyzlimits=\nil}: By default, the interval considered for each of the three axes is the one defined by the 3D window when the graph is created; however, this can be changed (without altering the window)—for example, with \opt{xyzlimits=\{0,5\}}, all three intervals will be set to $[0;5]$. 
+    These three intervals can also be modified individually using the \opt{xlimits}, \opt{ylimits}, and \opt{zlimits} options. The axes do not have tick marks. 
+
+    \item \opt{legend=true}: Automatically adds a label at the end of each axis; these labels are controlled by the \opt{labels=}\verb|{"$x$","$y$","$z$"}| option. 
+
+    \item When \opt{legend=true}, the labels are positioned at the far end of the segment plus an offset equal to 1/40 of the segment's length. This distance can be adjusted either globally using the \opt{xyzdist=0} option (defaulting to zero length) or individually via the \opt{xdist}, \opt{ydist}, and \opt{zdist} options; by default, these three options inherit the value of \opt{xyzdist}.
+\end{itemize}
+
+\subsubsection{Add a plane: g:DSplane}
+
+The \cmd{g:DSplane(P, options)} method allows you to add the contour of a plane. The argument \argu{P} is a table of the form $\{A,n\}$, where $A$ is a point on the plane and $n$ is a normal vector. The function draws a parallelogram representing the plane \argu{P}, processing the interactions with the sphere. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{scale=1}, allows you to change the size of the parallelogram,
+    \item \opt{angle=0}, angle in degrees, allows you to rotate the parallelogram around the perpendicular line passing through the center of the sphere.
+    \item \opt{trace=true}, allows you to draw, or not, the intersection of the plane with the sphere when it is not empty.
+    \item options for adding a label: see page \pageref{addlabel}.
+\end{itemize}
+
+\subsubsection{Add a label: g:DSlabel}
+
+The \cmd{g:DSlabel(text1, anchor1, options1, text2, anchor2, options2, \ldots)} method allows you to add one or more labels using the same principle as the \cmd{g:Dlabel3d()} method, except that here the function handles cases where the anchor point is inside the sphere, behind the sphere, or in front of the sphere. When it is inside, the label color is given by the sphere option \opt{insidelabelcolor}, which defaults to \val{"darkgray"}.
+
+\subsubsection{Add points: g:DSdots and g:DSstars}
+
+The \cmd{g:DSdots(dots, options)} method allows you to add points to the scene. The \argu{dots} argument is a list of 3D points. The function draws points by managing interactions with the sphere. \writeoptions:
+\begin{itemize}
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{mark\_options=""}, a string that will be passed directly to the \drawcmd instruction.
+\end{itemize}
+
+If a point is inside the sphere, or on the hidden face, the point's color is given by sphere option \opt{insidelabelcolor}, which defaults to \val{"darkgray"}.
+
+The \cmd{g:DSstars(dots, options)} method allows you to add points \textbf{onto} the sphere. The \argu{dots} argument is a list of 3D points that will be projected onto the sphere. The function draws these points as an asterisk. \writeoptions:
+\begin{itemize}
+    \item \opt{style=<current line style>},
+    \item \opt{color=<current line color>},
+    \item \opt{width=<current line thickness in tenths of a point>},
+    \item \opt{opacity=<current line opacity>},
+    \item \opt{hidden=ld.Hiddenlines},
+    \item \opt{scale=1}, allows you to change the size,
+    \item \opt{circled=false}, allows you to add a circle around the star,
+    \item \opt{fill=""}, string representing a color. When not empty, the asterisk is replaced by a circled hexagonal facet and filled with the color specified by this option.
+\end{itemize}
+
+The points on the hidden face of the sphere have the color given by the sphere option \opt{insidelabelcolor}, which defaults to \val{"darkgray"}.
+
+\subsubsection{Inverse Stereography: g:DSinvstereo\_curve and g:DSinvstereo\_polyline}
+
+The method \cmd{g:DSinvstereo\_curve(L, options)}, where \argu{L} is a 3D polygonal line representing a curve drawn on a plane with equation $z=$cte, draws the image of \argu{L} on the sphere by inverse stereography, the pole being the point \emph{C+r*vecK}, where $C$ is the center of the sphere and $r$ is the radius.
+
+The method \cmd{g:DSinvstereo\_polyline(L, options)}, where \argu{L} is a 3D polygonal line drawn on a plane with equation $z=$cte, draws the image of \argu{L} on the sphere by inverse stereography, the pole being the point \emph{C+r*vecK}, where $C$ is the center of the sphere and $r$ is the radius.
+
+In both cases, the \argu{options} are the same as for the \cmd{g:DScurve()} method.
+
+\subsubsection{Adding paths}
+
+The module displays the scene elements in four stages:
+\begin{itemize}
+\item Stage 1: display of elements located behind the sphere. 
+\item Stage 2: display of elements located inside the sphere. 
+\item Stage 3: display of elements located in front of the sphere. 
+\item Stage 4: display of "hidden" elements.
+\end{itemize}
+
+The following methods allow for the addition of other elements (paths), though these elements are not "verified" by the module.
+\begin{itemize}
+    \item The method \cmd{g:DSaddback(L \fac{, draw\_options, hidden, hidden\_options})} displays the path, or polyline, \argu{L} after stage $1$ and before stage $2$; this could be, for example, a path drawn on the hidden side of the sphere. \argu{draw\_options} is a string passed to the \drawcmd instruction. \argu{hidden} is a boolean (\false by default) indicating whether the hidden part should be drawn. \argu{hidden\_options} is a string passed to the \drawcmd instruction. 
+
+    \item The method \cmd{g:DSaddinside(L \fac{, draw\_options, hidden, hidden\_options})} displays the path, or polyline, \argu{L} concurrently with stage $2$ (inside the sphere). The options are the same as for the previous method. 
+
+    \item The method \cmd{g:DSaddfront(L \fac{, draw\_options})} displays the path, or polyline, \argu{L} after stage $2$ and before stage $3$; this could be, for example, a path drawn on the visible side of the sphere. \argu{draw\_options} is a string that will be passed to the \drawcmd instruction.
+\end{itemize}
+
+\subsubsection{Additional methods: g:Dhalf\_sphere, g:Dquater\_sphere, g:Deighth\_sphere}
+
+These three methods are independent of the sphere created by the \cmd{g:Define\_sphere()} method, though they do utilize certain functions from this module.
+
+\begin{itemize}
+    \item \cmd{g:Dhalf\_sphere(O, r, dir, options)}: draws a hemisphere, where \argu{O} is the center, \argu{r} is the radius, and \argu{dir} is a non-zero 3D vector. The hemisphere is obtained by cutting the sphere with the plane defined by $\{O, \mathrm{dir}\}$ and retaining the portion within the half-space that contains the vector \argu{dir}. It consists of one spherical face and one circular planar face. 
+
+    \item \cmd{g:Dquater\_sphere(O, r, dir1, dir2, options)}: draws a quarter-sphere, where \argu{O} is the center, \argu{r} is the radius, and \argu{dir1} and \argu{dir2} are two non-zero, orthogonal 3D vectors. The quarter-sphere is obtained by cutting the sphere with the planes defined by $\{O, \mathrm{dir1}\}$ and $\{O, \mathrm{dir2}\}$ and retaining the portion within the quarter-space that contains the vectors \argu{dir1} and \argu{dir2}. It consists of one spherical face and two semi-circular planar faces.
+
+    \item \cmd{g:Deighth\_sphere(O, r, dir1, dir2, dir3, options)}: draws an eighth of a sphere, where \argu{O} is the center, \argu{r} is the radius, and \argu{dir1}, \argu{dir2}, and \argu{dir3} are three non-zero 3D vectors that are mutually orthogonal. The eighth of a sphere is obtained by cutting the sphere with the planes defined by $\{O,\mathrm{dir1}\}$, $\{O,\mathrm{dir2}\}$, and $\{O,\mathrm{dir3}\}$, and retaining the portion located within the octant that contains the vectors \argu{dir1}, \argu{dir2}, and \argu{dir3}. It consists of one spherical face and three planar, quarter-circle faces.
+\end{itemize}
+
+For these three methods, the \argu{options} argument is a table whose fields define the available options (along with their default values):
+
+\begin{itemize}
+    \item \opt{color="white"}: fill color for the faces. 
+    \item \opt{mode=ld.mShaded}: representation mode; by default, the faces are shaded (filled) and drawn with visible edges. Other possible modes include:
+    \begin{itemize}
+        \item \val{ld.mShadedHidden}: shaded faces, with both visible and hidden edges drawn. 
+        \item \val{ld.mShadedOnly}: shaded faces, with no edges drawn. 
+        \item \val{ld.mWireframe}: edges only; the faces are not shaded. 
+    \end{itemize}
+    \item \opt{opacity=default opacity}: opacity for the face fill. 
+    \item \opt{edgecolor=default color}: color of the edges.
+    \item \opt{edgewidth=default thickness}: thickness of the edges (in tenths of a point). 
+    \item \opt{edgestyle=default style}: line style for visible edges (character string). 
+    \item \opt{hiddenstyle=ld.Hiddenlinestyle}: line style for hidden edges, when they are drawn. 
+    \item \opt{outline=\false}: if set to \true, the outline of the visible spherical portion is drawn using the attributes of the visible edges.
+\end{itemize}
+
+\subsubsection{Examples}
+
+\begin{demo}{Cube in a Sphere}
+\begin{luadraw}{name=cube_in_sphere}
+local ld = luadraw
+local cpx, pt3d = ld.cpx, ld.pt3d
+local Origin, vecI, vecJ, vecK, M = pt3d.Origin, pt3d.vecI, pt3d.vecJ, pt3d.vecK, pt3d.M
+
+local g = ld.graph3d:new{window={-9,9,-4,5},viewdir={25,70},size={16,8}}
+require 'luadraw_spherical'
+g:Linewidth(6); ld.Hiddenlinestyle = "dashed"
+local a = 4
+local O = Origin
+local cube = ld.parallelep(O,a*vecI,a*vecJ,a*vecK)
+local G = pt3d.isobar3d(cube.vertices)
+cube = ld.shift3d(cube,-G) -- to center the cube at the origin
+local R = pt3d.abs(cube.vertices[1])
+
+local dessin = function()
+    g:DSaxes(Origin, {width=8, arrows=1, xyzlimits={0,5}, xdist=0.1})
+    g:DSplane({a/2*vecK,vecK},{color="blue",scale=0.9,angle=20}); 
+    g:DScircle({-a/2*vecK,vecK},{color="blue"})
+    g:DSpolyline( ld.facetedges(cube) ); g:DSlabel("$O$",O,{pos="W"})
+    g:Dspherical()
+end
+
+g:Saveattr(); g:Viewport(-9,0,-4,5); g:Coordsystem(-5,5,-5,5)
+ld.Hiddenlines = true; g:Define_sphere({radius=R, arrowBstyle = "-stealth"})
+dessin()
+g:Dlabel("Hiddenlines=true",0.5-4.5*cpx.I,{})
+g:Restoreattr()
+
+g:Saveattr(); g:Viewport(0,9,-4,5); g:Coordsystem(-5,5,-5,5)
+ld.Hiddenlines = false; g:Define_sphere({radius=R,opacity=0.8, arrowBstyle = "-stealth"} )
+dessin()
+g:Dlabel("Hiddenlines=false, opacity=0.8",0.5-4.5*cpx.I,{})
+g:Restoreattr()
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\paragraph{Spherical curve}
+
+\begin{demo}{Viviani window}
+\begin{luadraw}{name=courbe_spherique}
+local ld = luadraw
+local cpx, pt3d = ld.cpx, ld.pt3d
+local Origin, vecI, vecJ, vecK, M, Ms = pt3d.Origin, pt3d.vecI, pt3d.vecJ, pt3d.vecK, pt3d.M, pt3d.Ms
+
+local g = ld.graph3d:new{window={-4.5,4.5,-4.5,4.5},viewdir={30,60},margin={0,0,0,0},size={10,10}}
+require 'luadraw_spherical'
+g:Linewidth(6); ld.Hiddenlinestyle = "dotted"
+ld.Hiddenlines = false; 
+local C = ld.cylinder(M(1.5,0,-3.5),1.5,M(1.5,0,3.5),35,true)
+local L = ld.parametric3d( function(t) return Ms(3,t-math.pi/2,t) end, -math.pi,math.pi) -- the curve
+g:Define_sphere({arrowBstyle = "-stealth"})
+g:DSpolyline(ld.facetedges(C),{color="gray"}) -- drawing cylinder
+g:DSpolyline({{-5*vecI,5*vecI},{-5*vecJ,5*vecJ},{-5*vecK,5*vecK}},{arrows=1}) --axes
+ld.Hiddenlines=true; g:DScurve(L,{width=12,color="blue"}) -- curve with hidden part
+g:Dspherical()
+g:Show()
+\end{luadraw}
+\end{demo}
+
+To avoid compromising the readability of the drawing, the hidden parts have not been displayed except for the curve.
+
+\paragraph{A spherical tiling}
+
+\begin{demo}{A spherical tiling}
+\begin{luadraw}{name=pavage_spherique}
+local ld = luadraw
+local Origin = ld.pt3d.Origin
+
+local g = ld.graph3d:new{window={-3,3,-3,3},viewdir={30,60},size={10,10}}
+require 'luadraw_spherical'
+local poly = require "luadraw_polyhedrons"
+g:Linewidth(6); ld.Hiddenlines = true; ld.Hiddenlinestyle = "dotted"
+local P = ld.poly2facet( poly.octahedron(Origin, ld.sM(30,10)) )
+local colors = {"Crimson","ForestGreen","Gold","SteelBlue","SlateGray","Brown","Orange","Navy"}
+g:Define_sphere()
+for k,F in ipairs(P) do
+    g:DSfacet(F,{fill=colors[k],style="noline",fillopacity=0.7})  --facets without edges
+end
+for _, A in ipairs(ld.facetedges(P)) do
+    g:DSarc(A,1,{width=8}) -- each edge is an arc of a great circle
+end
+g:Dspherical()
+g:Show()
+\end{luadraw}
+\end{demo}
+
+For this spherical tiling, we chose a regular octahedron with a center identical to that of the sphere and with one vertex on the sphere (and therefore all vertices are on the sphere).
+
+\paragraph{Tangents to the sphere from a point}
+
+\begin{demo}{Tangents to the sphere from a point}
+\begin{luadraw}{name=tangent_to_sphere}
+local ld = luadraw
+local pt3d = ld.pt3d
+local Origin, M = pt3d.Origin, pt3d.M
+
+local g = ld.graph3d:new{window={-4,5.5,-4,4},viewdir={30,60},size={10,10}}
+require 'luadraw_spherical'
+ld.Hiddenlines=true; g:Linewidth(6)
+local O, I = Origin, M(0,6,0)
+local S,S1 = {O, 3}, {(I+O)/2,pt3d.abs(I-O)/2}
+-- the circle of tangency is the intersection between spheres S and S1
+local C,r,n = ld.interSS(S,S1) 
+local L = ld.circle3d(C,r,n)[1] -- list of 3D points on the circle
+local dots, lines = {}, {}
+-- draw
+g:Define_sphere({opacity=1})
+g:DScircle({C,n},{color="red"})
+for k = 1, math.floor(#L/4) do
+    local A = L[4*(k-1)+1]
+    table.insert(dots,A)
+    table.insert(lines,{I, 2*A-I})
+end
+g:DSpolyline(lines ,{color="gray"})
+g:DSstars(dots) -- drawing points on the sphere
+g:DSdots({O,I});  -- points in the scene
+g:DSlabel("$I$",I,{pos="S",node_options="red"},"$O$",O,{})
+g:Dspherical()
+g:Dseg3d({O,dots[1]},"gray,dashed"); g:Dangle3d(O,dots[1],I,0.2,"gray")
+g:Show() 
+\end{luadraw}
+\end{demo}
+
+\paragraph{Stereographic Projection}
+
+\begin{demo}{Stereographic Projection of a Circle and a Spherical Facet}
+\begin{luadraw}{name=projstereo_Sfacet}
+local ld = luadraw
+local pt3d = ld.pt3d
+local M = pt3d.M
+require 'luadraw_spherical'
+local sM = ld.sM
+local g = ld.graph3d:new{window={-7,10,-8,4}, size={10,10}, viewdir={10,70}}
+local O, R = M(0,0,0), 3
+g:Define_sphere( {color="orange", opacity=0.7} )
+local A, B, C, D, N = sM(-10,90), sM(0, 50), sM(50,65), sM(50,120), sM(0,0)
+local F = {A,B,C,D}
+local p = ld.projstereo(F, {O,R}, N, -R)
+local T1 = ld.projstereo_Sfacet(F, N, -R)
+local T2 = ld.projstereo_Scircle(ld.plane(A,B,C), N, -R)
+g:Dplane({M(2,2,-R), M(0,0,1)}, M(0,1,0), 12.5,24.5, "fill=lightgray")
+g:DSpolyline( {{N,A},{N,B},{N,C},{N,D}}, {color="gray", hidden=false})
+g:DSfacet(F, {fill="cyan"})
+g:DScircle(ld.plane(A,B,C), {color="red"})
+g:DSstars({A,B,C,D,N}, {fill="black"})
+g:Dspherical()
+g:Dpath3d(T1, "fill=cyan!30")
+g:Dpath3d(T2, "red")
+for k,A in ipairs(F) do 
+    g:Dpolyline3d( {A,p[k]}, "gray")
+end
+g:Ddots3d(p)
+g:Dlabel3d("$N$",N,{pos="N"})
+g:Show()
+\end{luadraw}
+\end{demo}
+
+
+\paragraph{Inverse Stereography}
+
+\begin{demo}{\emph{DSinvstereo\_curve} and \emph{DSinvstereo\_polyline} methods}
+\begin{luadraw}{name=stereographic_curve}
+local ld = luadraw
+local pt3d = ld.pt3d
+local Origin, M, vecJ, vecK = pt3d.Origin, pt3d.M, pt3d.vecJ, pt3d.vecK
+
+local g = ld.graph3d:new{window3d={-5,5,-2,2,-2,2},window={-4.25,4.25,-2.5,2},size={10,10}, viewdir={40,70}}
+ld.Hiddenlines = true; ld.Hiddenlinestyle="dashed"; g:Linewidth(6)
+require 'luadraw_spherical'
+local C, R = Origin, 1
+local a = -R
+local P = ld.planeEq(0,0,1,-a)
+local L = {M(2,0,a), M(2,2.5,a), M(-1,2,a)}
+local L2 = ld.circle3d(M(2.25,-1,a),0.5,vecK)[1]
+local A, B = (L[2]+L[3])/2, L2[20]
+local a,b = table.unpack( ld.inv_projstereo({A,B},{C,R},C+R*vecK) )
+g:Dplane(P,vecJ,6,6,15,"draw=none,fill=Beige")
+g:Define_sphere( {center=C,radius=R, color="SlateGray!30", show=true} )
+g:DSpolyline(L,{color="blue",close=true}); g:DSinvstereo_polyline(L,{color="red",width=8,close=true})
+g:DSpolyline(L2,{color="Navy"}); g:DSinvstereo_curve(L2,{color="Brown",width=6})
+g:DSplane(P,{scale=1.5})
+g:DSpolyline({{C+R*vecK,A},{C+R*vecK,B}}, {color="ForestGreen",width=8})
+g:DSpolyline({{-vecK,2*vecK}}, {arrows=1})
+g:DSstars({C+R*vecK,a,b}, {scale=0.75})
+g:Dspherical()
+g:Dballdots3d({A,B},"ForestGreen",0.75)
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\begin{demo}{Adding paths}
+\begin{luadraw}{name=spherical_strip}
+local ld = luadraw
+local M, Ms = ld.pt3d.M, ld.pt3d.Ms
+local g = ld.graph3d:new{ viewdir={30,70} }
+require 'luadraw_spherical'
+local R = 4
+g:Define_sphere({radius=R, arrowBstyle="-stealth", opacity=0.8})
+local sphere_strip = function(p1,p2,n)
+    n = n or math.ceil((p2-p1)/5)
+    p1 = p1*ld.deg; p2 = p2*ld.deg
+    return ld.surface( function(u,v) return Ms(R,u,v) end, 2*math.pi, 0, p1, p2,{50,n})
+end
+local color1, color2 = "SteelBlue", "orange"
+local strips ={ {10,40}, {85,95}, {110, 130}, {140,170} } -- angles
+local O, I, J, K, A, B = M(0,0,0), M(1,0,0), M(0,1,0), M(0,0,1), ld.sM(50,10), ld.sM(50,40)
+local B1 = ld.pxy(B)
+local S = {}
+for _, p in ipairs(strips) do
+    ld.insert(S, sphere_strip(p[1],p[2]))
+end
+local Sv, Sh = g:Classifyfacet(S)
+local back = ld.polyline2path3d( ld.border(Sh) )
+local front = ld.polyline2path3d( ld.border(Sv) )
+--drawing
+g:DSaddback(back, "draw=none,even odd rule,left color="..color1.."!50,right color="..color1.."!80, fill opacity=0.6")
+g:DSaddfront(front, "draw=none,even odd rule,ball color="..color1..", fill opacity=0.6")  
+for _, p in ipairs(strips) do
+    g:DScircle({ld.sM(0,p[1]), M(0,0,1)}, {color="ForestGreen", width=8})
+    g:DScircle({ld.sM(0,p[2]), M(0,0,1)}, {color="ForestGreen", width=8})
+end
+g:DSaddinside({A,O,B,B1,O}, "line width=0.8,dashed") -- polyline
+g:DSaddinside({I,O,B1,2,1,"ca"}, "line width=0.8,-stealth") -- path
+g:DSaddinside({A,O,B,2,1,"ca"}, "line width=0.8,-stealth")
+g:DSstars({A,B}, {fill="black", scale=0.75}); g:DSdots(B1)
+g:DSlabel("$B'$",B1,{pos="E"}, "$A$",1.05*A,{pos="W"}, "$B$",1.05*B,{pos="NE"})
+g:DSarc({A,B},1)
+g:DSpolyline( {{M(-5,0,0), M(5,0,0)}, {M(0,-5,0), M(0,5,0)}, {M(0,0,-5), M(0,0,5)}}, {arrows=1}) -- axes
+g:DScircle( {O,K})
+g:Dspherical()
+g:Dlabel3d("$x$",5*I,{pos="S"}, "$y$",5*J,{}, "$z$",5*K,{pos="N"})
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\begin{demo}{Paint a spherical region}
+\begin{luadraw}{name=DSregion}
+local ld = luadraw
+local pt3d = ld.pt3d
+local Ms, O = pt3d.Ms, pt3d.Origin
+local g = ld.graph3d:new{window={-4,4,-4,4},margin={0,0,0,0},viewdir={30,65},size={10,10}}
+ld.Hiddenlines = false
+ld.Hiddenlinestyle = "dashed"
+g:Linewidth(8)
+require 'luadraw_spherical'
+local poly = require 'luadraw_polyhedrons'
+local R = 3
+local T = poly.tetrahedron(O, Ms(R,30*ld.deg,20*ld.deg))
+local A, B, C, D = table.unpack(T.vertices)
+local function edge(A,B,cut) -- cut = true/false, to remove the first point
+    cut = cut or false
+    local m = (A+B)/2
+    local u = pt3d.normalize(B-A)
+    local v = ld.rotate3d(u,90,{O,m})
+    local L = ld.path3d({A,"m",A+2*v+u/2, m+2*v+u/2,m,"b",m-2*v-u/2,B-2*v-u/2,B,"b"},100)[1]
+    if cut then table.remove(L,1) end
+    return ld.map(ld.toSphere, L)
+end
+local ABD = ld.concat(edge(A,B), edge(B,D,true), edge(D,A,true) )
+local ABC = ld.concat(edge(A,B), edge(B,C,true), edge(C,A,true) )
+local ADC = ld.concat(edge(A,D), edge(D,C,true), edge(C,A,true) )
+local BCD = ld.concat(edge(B,C), edge(C,D,true), edge(D,B,true) )
+g:Define_sphere({radius=R, color="SlateGray", opacity=0.9})
+g:DSregion(ABD,{fill="red"})
+g:DSregion(ABC,{fill="green"})
+g:DSregion(ADC,{fill="blue"})
+g:DSregion(BCD,{fill="yellow"})
+g:Dspherical()
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\begin{demo}{Example with \cmd{g:Dhalf\_sphere} and Co}
+\begin{luadraw}{name=Split_facet}
+local ld = luadraw
+local pt3d = ld.pt3d
+local M, Origin, vecI, vecJ, vecK = pt3d.M, pt3d.Origin, pt3d.vecI, pt3d.vecJ, pt3d.vecK
+local g = ld.graph3d:new{ size={10,10}, margin=0 }
+require 'luadraw_spherical'
+local r1, dr = 4.5, 0.75
+local r2, r3, r4 = r1-dr, r1-2*dr, r1-3*dr
+-- teal
+g:Dhalf_sphere(Origin, r1, -vecJ, {color="teal", mode=ld.mShadedOnly})
+-- yellow
+g:Dpath3d({r2*vecI,Origin,-r2*vecI,r2,-1,vecJ,"ca"}, "draw=none,fill=yellow!80!black")
+g:Dquater_sphere(Origin, r2, vecJ, -vecK, {color="yellow", mode=ld.mShadedOnly})
+-- gray
+g:Dpath3d({r3*vecI,Origin,-r3*vecI,r3,-1,vecJ,"ca"}, "draw=none,fill=gray")
+g:Dpath3d({r3*vecI,Origin,-r3*vecI,r3,1,vecK,"ca"},"draw=none,fill=gray")
+g:Deighth_sphere(Origin, r3, -vecI, vecJ, vecK, {color="gray", mode=ld.mShadedOnly})
+-- orange
+g:Deighth_sphere(Origin, r4, vecI, vecJ, vecK, {color="orange", mode=ld.mShadedOnly})
+g:Show()
+\end{luadraw}
+\end{demo}

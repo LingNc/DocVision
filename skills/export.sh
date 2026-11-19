@@ -23,6 +23,14 @@ for f in "$SKILLS_DIR"/docs/*.md; do
 	esac
 	cp "$f" "$STAGE/$PKG/docs/"
 done
+# luadraw 参考：包内只带 en PDF + 索引 + 指南 + 调色板速查（源码/宏包本体现场取，见 README）
+if [ -d "$SKILLS_DIR/docs/luadraw" ]; then
+	mkdir -p "$STAGE/$PKG/docs/luadraw"
+	cp "$SKILLS_DIR/docs/luadraw/README.md" "$STAGE/$PKG/docs/luadraw/"
+	cp "$SKILLS_DIR/docs/luadraw/luadraw-index.json" "$STAGE/$PKG/docs/luadraw/"
+	cp "$SKILLS_DIR/docs/luadraw/luadraw-doc-en.pdf" "$STAGE/$PKG/docs/luadraw/"
+	[ -f "$SKILLS_DIR/docs/luadraw/luadraw_palettes_list.pdf" ] && cp "$SKILLS_DIR/docs/luadraw/luadraw_palettes_list.pdf" "$STAGE/$PKG/docs/luadraw/"
+fi
 cp -r "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$SKILLS_DIR/SKILL.md" "$STAGE/$PKG/"
 # 用户配置模板随包（激活=cp config.example.yaml config.yaml；真 config.yaml 永不入包）
 cp "$SKILLS_DIR/config.example.yaml" "$STAGE/$PKG/config.example.yaml"

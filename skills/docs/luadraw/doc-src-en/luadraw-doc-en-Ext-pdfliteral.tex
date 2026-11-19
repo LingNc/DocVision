@@ -1,0 +1,134 @@
+\subsection{The \emph{luadraw\_pdfliteral} module}
+
+This module does not return a value; instead, it adds new graphical methods to the \emph{ld.graph} and \emph{ld.graph3d} classes.
+
+When the volume of data TikZ needs to render becomes very large—such as a vast number of surface facets, numerous segments or paths in a tiling, or a dense scatter plot—the sheer number of macros employed by TikZ can lead to prohibitively long compilation and rendering times.
+
+One way to circumvent this issue and significantly reduce compilation time is to generate such graphics directly in PDF format, bypassing TikZ macros. This does not mean abandoning TikZ entirely, as it remains highly efficient for tasks like style management. The approach involves remaining within a \emph{tikzpicture} environment but—specifically when plotting a large number of segments with no style changes other than color (and notably no opacity changes) and using only solid fills (or no fill at all)—writing the drawing instructions directly in native PDF syntax rather than using the \drawcmd command.
+
+
+\subsubsection{The g:Dliteralpath() method}
+
+The \cmd{g:Dliteralpath(path1, args1, path2, args2, ...)} method allows you to draw 2D paths (\argu{path1}, \argu{path2}, \ldots) in PDF format. Each path must be followed by a table (\argu{args1}, \argu{args2}, \ldots) containing options for that specific path. These options are:
+\begin{itemize}
+    \item \opt{fill=<table \{r,g,b\}>}: fill color; the default is the current color. Setting \opt{fill="none"} disables the fill; otherwise, the color must be a table in the format $\{r,g,b\}$ (with $r$, $g$, and $b$ between $0$ and $1$), and the fill is \textbf{solid} (using the current opacity)—other fill styles have no effect. 
+
+    \item \opt{draw=<table \{r,g,b\}>}: stroke color; the default is the current color. Setting \opt{draw="none"} disables the stroke (but not the fill); otherwise, the color must be a table in the format $\{r,g,b\}$ (with $r$, $g$, and $b$ between $0$ and $1$), and the stroke is drawn using the current style and opacity. 
+
+    \item \opt{width=<thickness in tenths of a point>}: line thickness; the default is the current thickness. 
+\end{itemize}
+
+\textbf{NB}: Options selected for a path also apply to subsequent paths unless they are modified.
+
+\subsubsection{The g:Dliteralpolyline() method}
+
+The \cmd{g:Dliteralpolyline(polyline1, args1, polyline2, args2, ...)} method allows for drawing the 2D polylines \argu{polyline1}, \argu{polyline2}, \ldots in PDF. Each polyline must be followed by a table: \argu{args1}, \argu{args2}, \ldots. These tables represent the options for each polyline; they are the same as those for the \cmd{g:Dliteralpath()} method, plus the following option:
+\begin{itemize}
+    \item \opt{close=<boolean>}: indicates whether the polyline should be closed (\false by default). 
+\end{itemize}
+
+\textbf{NB}: the options chosen for a polyline also apply to subsequent ones unless they are modified.
+
+\subsubsection{The g:Dliteraldots() method}
+
+The \cmd{g:Dliteraldots(dots1, args1, dots2, args2, ...)} method allows you to draw lists of 2D points (complex numbers) \argu{dots1}, \argu{dots2}, \ldots in PDF format. Each list of points must be followed by a table: \argu{args1}, \argu{args2}, \ldots. These tables represent the options, which are:
+
+\begin{itemize}
+    \item \opt{color=<table \{r,g,b\}>}: color of the points; by default, this is the current color of the plot. The color must be a table in the format $\{r,g,b\}$ (with $r$, $g$, and $b$ between $0$ and $1$), and the plot is drawn with a solid line and the current opacity. The points are circular.
+
+    \item \opt{width=<thickness in tenths of points>}: line thickness, this is the current default thickness. This thickness determines the diameter of the points.
+\end{itemize}
+
+\textbf{NB}: the options chosen for a polygonal line also apply to subsequent lines if they are not modified.
+
+\begin{demo}{Bifurcation diagram of the sequence $u_{u+1}=ru_n(1-u_n)$}
+\begin{luadraw}{name=bifurcation}
+local ld = luadraw
+local cpx = ld.cpx
+local Z = cpx.Z
+local g = ld.graph:new{ window={2.65,4,-0.15,1}, size={10,10} }
+require 'luadraw_pdfliteral'
+local dots = {}
+for r = 2.75, 4, 0.001 do
+    local u = 0.5
+    for k = 1, 25 do u = r*u*(1-u) end -- transition
+    for k = 1, 25 do u = r*u*(1-u); table.insert(dots, Z(r,u)) end
+end
+g:Daxes({Z(2.75,0),0.25,0.2}, {limits={{2.75,4},{0,1.001}}, originpos={"center","center"} })
+g:Dliteraldots(dots, {width=1, color=ld.Red}) -- 31275 points
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\subsubsection{The g:Dliteralfacet() method}
+
+The \cmd{g:Dliteralfacet(F1, args1, F2, arg2, ...)} method performs the same function as the \cmd{g:Dmixfacet()} method, except that the facets are drawn using native PDF commands. The arguments \argu{F1}, \argu{F2}, \ldots, are lists of facets (lists of lists of 3D points), and \argu{args1}, \argu{arg2}, \ldots, are tables representing the options; these are:
+\begin{itemize}
+    \item \opt{mode=\val{ld.mShaded}} : defines the rendering mode. Possible values ​​are:
+    \begin{itemize}
+        \item \val{ld.mWireframe} : wireframe mode; only the edges are drawn. When the \opt{usepalette} option is not \nil, the color of each edge is calculated based on the palette (using the same method as for filled facets). 
+
+        \item \val{ld.mFlat} or \val{ld.mFlatHidden} : faces are drawn in a solid color, and edges are also drawn. 
+
+        \item \val{ld.mShaded} or \val{ld.mShadedHidden} : faces are drawn with shading based on their inclination, and edges are also drawn. 
+
+        \item \val{ld.mShadedOnly} : faces are drawn with shading based on their inclination, but edges are not drawn. 
+    \end{itemize}
+
+    \item \opt{contrast=1} : this number allows you to increase or decrease the color shading of the facets in \val{ld.mShaded}, \val{ld.mShadedHidden}, and \val{ld.mShadedOnly} modes. 
+    
+    \item \opt{edgecolor=<current color>} : string defining the color of the edges. 
+    
+    \item \opt{edgewidth=<current thickness>} : line thickness of the edges in tenths of a point. 
+
+    \item \opt{backcull=\false} : if set to \true, facets considered invisible (normal vector not pointing towards the observer) are not displayed. This option is useful for convex objects as it reduces the number of facets to be drawn. 
+
+    \item \opt{clip=\false} : if set to \true, facets are clipped by the 3D window. 
+
+    \item \opt{twoside=\true} : boolean indicating whether the two sides of the facets (inside and outside) are distinguished; if set to \true, the two sides will not have exactly the same color. 
+    
+    \item \opt{reverse=false} : with the value \true the orientation of the facets is reversed.
+
+    \item \opt{color=<table \{r,g,b\}>} : fill color for the facets; the default is \val{ld.White}. The color must be a table in the format $\{r,g,b\}$ (with $r$, $g$, and $b$ between $0$ and $1$).
+
+    \item \opt{usepalette=nil} : this option allows you to specify a color palette for rendering the facets, as well as a calculation mode; the syntax is \opt{usepalette=\{palette,mode\fac{,minmax}\}}, where \argu{palette} refers to a table of colors—themselves tables in the format $\{r,g,b\}$, where $r$, $g$, and $b$ are numbers between $0$ and $1$. The \argu{mode} argument can be:
+    \begin{itemize}
+        \item one of the strings: \val{"x"}, \val{"y"}, or \val{"z"}. In the first case, for example, facets with the minimum x-coordinate at their center of gravity use the first color in the palette, while those with the maximum x-coordinate use the last color; for the others, the color is calculated based on the center of gravity's x-coordinate via linear interpolation. 
+
+        \item a function: \argu{mode}$\colon f \mapsto \mathrm{mode}(f)\in\mathbb R$, where $f$ denotes a facet (a list of 3D points). Facets with the minimum value use the first color in the palette, those with the maximum value use the last color, and the color for the others is calculated via linear interpolation. 
+    \end{itemize}
+    The \argu{minmax} argument is a table of two numbers; these two numbers are used as the minimum and maximum values ​​for the \argu{mode} argument. If \argu{minmax} is omitted, these two values ​​are calculated automatically.
+\end{itemize}
+
+\textbf{Some remarks}
+\begin{itemize}
+    \item Options selected for a list of facets also apply to subsequent lists unless modified. 
+    \item The drawing is rendered using default opacity and line style settings. These can be modified \textbf{before} execution using the methods \cmd{g:Fillopacity()} and \cmd{g:Linestyle()}.
+\end{itemize}
+
+\begin{demo}{Spherical bands}
+\begin{luadraw}{name=Dliteralfacet}
+local ld = luadraw
+local M, Ms = ld.pt3d.M, ld.pt3d.Ms
+local g = ld.graph3d:new{ size={10,10} }
+require 'luadraw_pdfliteral'
+local R, nb = 4, 5
+local phi2, phi11, dphi = math.pi, nil, math.pi/(2*nb+1)
+
+local sph_strip = function(p1,p2)
+    return ld.surface( function(u,v) return Ms(R,u,v) end, -math.pi, math.pi, p1, p2,{201,11})
+end
+
+local colors = ld.getpalette( ld.palAutumn, nb,true)
+local S = {}
+for k = 1, nb do
+    phi1 = phi2 -dphi; phi2 = phi1 - dphi
+    table.insert(S, sph_strip(phi1,phi2))
+    table.insert(S, {color=colors[k], mode=ld.mShadedOnly})
+end
+g:Dliteralfacet( table.unpack(S) ) -- 10^4 facets
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\textbf{Note}: It is possible to achieve the same result without drawing the facets, but it is more technical.

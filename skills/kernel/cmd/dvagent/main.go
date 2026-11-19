@@ -777,6 +777,57 @@ func main() {
 		}
 		out(envcheck.Check(root, nil))
 
+	case "luadraw-search":
+		// dvagent luadraw-search <关键词...> —— 检索 luadraw 文档索引：
+		// 命中条目的层级/标题/源码位置(doc-src-en)/PDF 物理页码（配合 pdftoppm 预览图）。
+		// 多关键词 AND（均须命中标题，忽略大小写与空格）。
+		if len(args) < 2 {
+			die(fmt.Errorf("luadraw-search 需要关键词：dvagent luadraw-search <关键词...>"))
+		}
+		raw, err := os.ReadFile(filepath.Join(skillRoot(), "docs", "luadraw", "luadraw-index.json"))
+		if err != nil {
+			die(fmt.Errorf("luadraw 索引缺失（安装包应自带 docs/luadraw/luadraw-index.json）: %w", err))
+		}
+		var idx struct {
+			Entries []struct {
+				Kind    string `json:"kind"`
+				Title   string `json:"title"`
+				Tex     string `json:"tex"`
+				Line    int    `json:"line"`
+				PDFPage int    `json:"pdf_page"`
+			} `json:"entries"`
+		}
+		if err := json.Unmarshal(raw, &idx); err != nil {
+			die(fmt.Errorf("luadraw 索引解析失败: %w", err))
+		}
+		kws := make([]string, 0, len(args)-1)
+		for _, a := range args[1:] {
+			kws = append(kws, strings.ToLower(strings.TrimSpace(a)))
+		}
+		hits := []map[string]any{}
+		for _, e := range idx.Entries {
+			t := strings.ToLower(strings.ReplaceAll(e.Title, " ", ""))
+			ok := true
+			for _, kw := range kws {
+				if kw == "" {
+					continue
+				}
+				if !strings.Contains(t, strings.ReplaceAll(kw, " ", "")) {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				hits = append(hits, map[string]any{"kind": e.Kind, "title": e.Title,
+					"tex": e.Tex, "line": e.Line, "pdf_page": e.PDFPage})
+			}
+			if len(hits) >= 30 {
+				break
+			}
+		}
+		out(map[string]any{"hits": hits, "count": len(hits),
+			"tip": "pdftoppm -f <页> -l <页> docs/luadraw/luadraw-doc-en.pdf /tmp/pg 看该页预览图"})
+
 	case "style-collect":
 		// dvagent style-collect <项目名> —— 汇总 styled_text 提取内容进 style 素材池（选材数据面）。
 		if len(args) < 2 {

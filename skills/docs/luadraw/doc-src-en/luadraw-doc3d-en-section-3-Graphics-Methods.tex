@@ -1,0 +1,677 @@
+\section{Graphics Methods}
+
+All 2D graphics methods apply. Added to this is the ability to draw polygonal lines, segments, straight lines, curves, paths, points, labels, planes, and solids in space. With solids, we also have the concept of facets, which was not found in 2D.
+
+3D graphics methods will automatically calculate the projection onto the screen plane. After applying the 3D transformation matrix associated with the graphic (which is the default identity) to the objects, the 2D graphics methods will then take over.
+
+The method that applies the 3D matrix and performs the projection onto the screen (plane passing through the origin and normal to the unit vector directed towards the observer and defined by the viewing angles) is: \cmd{g:Proj3d(L)} where \argu{L} is either a 3D point, a list of 3D points, or a list of lists of 3D points. This function returns complex numbers (affixes of the projected points onto the screen).
+
+\textbf{Warning}: when the 3D matrix of the graph is an affine transformation but not linear, the projection onto the screen of a vector $u$ in space is not \code{g:Proj3d(u)}, but \code{g:Proj3d(A+u)-g:Proj3d(A)} where $A$ denotes any point in space. To avoid these calculations, the method \cmd{g:Proj3dV()} has been introduced, it projects the \textbf{vectors} onto the screen, and returns complex numbers (affixes of the projected vectors onto the screen).
+
+\textbf{Note on colors}: In certain situations, the color specified by the user is slightly modified (for example, for facets depending on their inclination); consequently, the color must be either a color name, a table in \code{\{r,g,b\}} format, or a string containing a pre-modified color, provided the syntax is complete. For instance, the syntax \code{"orange!50"} is incomplete and may cause an error, whereas the correct syntax is \code{"orange!50!white"} (which will not cause an error).
+
+\subsection{Line Drawing}
+
+\subsubsection{Polygonal Line: Dpolyline3d}
+
+The method \cmd{g:Dpolyline3d(L \fac{, close, draw\_options, clip})} (where \emph{g} denotes the graph being created), \argu{L} is a 3D polygonal line (list of 3D point lists), \argu{close} is an optional argument that is \true or \false indicating whether the line should be closed or not (\false by default), and \argu{draw\_options} is a string that will be passed directly to the \drawcmd instruction in the export. The \argu{clip} argument is set to \false by default, it indicates whether the line \argu{L} should be clipped to the current 3D window.
+
+\subsubsection{Right Angle: Dangle3d}
+
+The \cmd{g:Dangle3d(B, A, C \fac{, r, draw\_options, clip})} method draws the angle \(BAC\) with a parallelogram (only two sides are drawn). The optional argument \argu{r} specifies the length of one side ($0.25$ by default). The parallelogram is in the plane defined by points \argu{A}, \argu{B}, and \argu{C}, so they should not be aligned. The \argu{draw\_options} argument is a string (empty by default) that will be passed as is to the \drawcmd instruction. The \argu{clip} argument is set to \false by default; it indicates whether the plot should be clipped to the current 3D window.
+
+\subsubsection{Segment: Dseg3d, Dmarkseg3d}
+
+The \cmd{g:Dseg3d(seg \fac{, scale, draw\_options, clip})} method draws the segment defined by the \argu{seg} argument, which must be a list of two 3D points. The optional \argu{scale} argument ($1$ by default) is a number that allows you to increase or decrease the length of the segment (the natural length is multiplied by \argu{scale}). The \argu{draw\_options} argument is a string (empty by default) that will be passed as is to the \drawcmd instruction. The \argu{clip} argument is set to \false by default; it indicates whether the plot should be clipped to the current 3D window.
+
+The method \cmd{g:Dmarkseg3d(A, B, V, n, \fac{long, space, angle, draw\_options})} marks the segment defined by the 3D points \argu{A} and \argu{B} with \argu{n} small slanted segments of \argu{angle} degrees (45° by default). The drawing is performed in the plane containing the points \argu{A}, \argu{B} and the 3D vector \argu{V} (which must therefore not be collinear with the vector $\vec{AB}$). By default, the length (argument \argu{long}) is $0.25$, and the spacing (argument \argu{space}) is $0.125$. The argument \argu{draw\_options} is a string (empty by default) which will be passed as is to the \drawcmd instruction.
+
+    
+\subsubsection{Line: Dline3d}
+
+The method \cmd{g:Dline3d(d \fac{, draw\_options, clip})} draws the line \argu{d}, which is a list of type \argu{d}=$\{A,u\}$ where $A$ represents a point on the line (3D point) and $u$ a direction vector (a non-zero 3D point).
+
+Variant: the method \cmd{g:Dline3d(A, B \fac{, draw\_options, clip})} draws the line passing through the points \argu{A} and \argu{B} (two 3D points). The \argu{draw\_options} argument is a string (empty by default) that will be passed as is to the \drawcmd instruction. The \argu{clip} argument is set to \false by default; it indicates whether the plot should be clipped to the current 3D window.
+
+The \cmd{g:Line3d2seg(d \fac{, scale})} method returns a table consisting of two 3D points representing a segment. This segment is the portion of the line \argu{d} inside the current 3D window. The \argu{scale} argument ($1$ by default) allows you to vary the size of this segment. When the window is too small, the intersection may be empty.
+
+\subsubsection{Circular arc: Darc3d}
+
+\begin{itemize}
+    \item The method \cmd{g:Darc3d(B, A, C, r, sens \fac{, normal, draw\_options, clip})} draws a circular arc with center \argu{A} (3D point), radius \argu{r}, going from \argu{B} (3D point) to \argu{C} (3D point) in the forward direction if the argument \argu{sens} is $1$, and in the reverse direction otherwise. This arc is drawn in the plane containing the three points \argu{A}, \argu{B}, and \argu{C}. When these three points are aligned, the argument \argu{normal} (non-zero 3D point) must be specified, which represents a vector normal to the plane. This plane is oriented by the vector product $\vec{AB}\wedge\vec{AC}$ or by the vector \argu{normal} if it is specified. The \argu{draw\_options} argument is a string (empty by default) that will be passed as is to the \drawcmd instruction. The \argu{clip} argument is set to \false by default; it indicates whether the plot should be clipped to the current 3D window.
+
+    \item The \cmd{ld.arc3d(B, A, C, r, sens \fac{, normal})} function returns the list of points of this arc (3D polygonal line).
+
+    \item The \cmd{ld.arc3db(B, A, C, r, sens \fac{, normal})} function returns this arc as a 3D path (see \emph{Dpath3d} page \pageref{Dpath3d})) using Bézier curves. 
+\end{itemize}
+
+\subsubsection{Circle: Dcircle3d}
+
+\begin{itemize}
+    \item The method \cmd{g:Dcircle3d(I, R, normal \fac{, draw\_options, clip})} draws the circle with center \argu{I} (3D point) and radius \argu{R}, in the plane containing \argu{I} and normal to the vector defined by the argument \argu{normal} (non-zero 3D point). The \argu{draw\_options} argument is a string (empty by default) that will be passed as is to the \drawcmd instruction. The \argu{clip} argument is set to \false by default; it indicates whether the plot should be clipped to the current 3D window.
+
+Another possible syntax: \cmd{g:Dcircle3d(C \fac{, draw\_options, clip})} where \argu{C}=\{\argu{I},\argu{R},\argu{normal}\}.
+
+    \item The \cmd{ld.circle3d(I, R, normal)} function returns the list of points on this circle (3D polygonal line).
+
+    \item The \cmd{ld.circle3db(I, R, normal)} function returns this circle as a 3D path (see \emph{Dpath3d} page \pageref{Dpath3d}) using Bézier curves.
+\end{itemize}
+
+\subsubsection{Elliptical arc: Dellipticarc3d}
+
+\begin{itemize}
+    \item The method \cmd{g:Dellipticarc3d(B, A, C, r1, r2, sens, dir1, \fac{, normal, draw\_options, clip})} draws an elliptical arc centered at \argu{A} (3D point) with radii \argu{r1} and \argu{r2}, extending from \argu{B} (3D point) to \argu{C} (3D point) in the counter-clockwise direction if the argument \argu{sens} is $1$, or the clockwise direction otherwise. This arc is drawn in the plane containing the three points \argu{A}, \argu{B}, and \argu{C}; if these three points are collinear, the argument \argu{normal} (a non-zero 3D point representing a vector normal to the plane) must be specified. This plane is oriented by the cross product $\vec{AB}\wedge\vec{AC}$ or by the vector \argu{normal} if the latter is specified. The argument \argu{dir1} is a direction vector for the axis carrying the radius \argu{r1} (it must be orthogonal to the vector \argu{normal}); the second axis is determined by the cross product of \argu{dir1} and \argu{normal}. 
+
+    The argument \argu{draw\_options} is a string (empty by default) that is passed as-is to the \drawcmd command. The argument \argu{clip} defaults to \false; it indicates whether the drawing should be clipped to the current 3D window. 
+
+    \item The function \cmd{ld.ellipticarc3d(B, A, C, r1, r2, sens, dir1, \fac{, normal})} returns the list of points defining this arc (as a 3D polyline). 
+
+    \item The function \cmd{ld.ellipticarc3db(B, A, C, r1, r2, sens, dir1, \fac{, normal})} returns this arc as a 3D path (see \emph{Dpath3d} on page \pageref{Dpath3d}) using Bézier curves.
+\end{itemize}
+
+\subsubsection{Ellipse: Dellipse3d}
+
+\begin{itemize}
+    \item The method \cmd{g:Dellipse3d(C, r1, r2, dir1, normal \fac{, draw\_options, clip})} draws the ellipse centered at \argu{C} (3D point) with radii \argu{r1} and \argu{r2}. This ellipse is drawn in the plane containing \argu{C} and orthogonal to the vector \argu{normal} (a non-zero 3D point). The argument \argu{dir1} is a direction vector for the axis corresponding to radius \argu{r1} (it must be orthogonal to the vector \argu{normal}); the second axis is determined by the cross product of \argu{dir1} and \argu{normal}. 
+
+    The argument \argu{draw\_options} is a string (empty by default) that is passed as-is to the \drawcmd\ command. The argument \argu{clip} defaults to \false; it indicates whether the drawing should be clipped to the current 3D window. 
+
+    \item The function \cmd{ld.ellipse3d(C, r1, r2, dir1, normal)} returns the list of points defining this ellipse (as a 3D polyline). 
+
+    \item The function \cmd{ld.ellipse3db(C, r1, r2, dir1, normal)} returns this ellipse as a 3D path (see \emph{Dpath3d} on page \pageref{Dpath3d}) using Bézier curves.
+\end{itemize}
+
+
+\subsubsection{3D Path: Dpath3d}\label{Dpath3d}
+
+The method \cmd{g:Dpath3d(path \fac{, draw\_options, clip})} draws the \argu{path}. The \argu{draw\_options} argument is a string (empty by default) that will be passed as is to the \drawcmd instruction. The \argu{clip} argument is set to \false by default; it indicates whether the plot should be clipped to the current 3D window. The \argu{path} argument is a list of 3D points followed by instructions (strings) that function \textbf{on the same principle as in 2D}. Instructions available and their syntax, the word \emph{last} represents the last point of the previous piece:
+\begin{itemize}
+    \item \code{p1,"m"} (moveto), which starts a new component of the path at the 3D point $p_1$.
+
+    \item \code{p1,...,pn,"l"} (lineto) draws the 3D polygonal line \code{\{last,p1,...,pn\}}.
+
+    \item \code{c1,c2,p2,"b"} (Bézier) draws the Bézier curve \code{\{last,c1,c2,p2\}}, where $c_1$ and $c_2$ are the two control 3D points.
+
+    \item \code{p1,n,"c"} (circle) draws the circle centered at $p_1$ and passing through the point \emph{last}, and normal to the 3D vector $n$. 
+
+    \item \code{p1,p2,r,sens,n,"ca"} (circle arc) draws a circular arc centered at $p_1$, with radius $r$, extending from \emph{last} to $p_2$, in the clockwise direction when \emph{sens}=$1$ (and therefore in the counterclockwise direction if \emph{sens}=$-1$). The 3D vector $n$ is optional; it indicates a normal vector to the plane of the circle when the points \emph{last}, $p_1$, and $p_2$ are collinear (and in this case, the vector $n$ is mandatory).
+
+    \item \code{p1,r1,r2,dir1,n,"e"} (ellipse): draws an ellipse centered at $p_1$, passing through the point \emph{last}, and normal to the 3D vector $n$. The two radii are $r_1$ and $r_2$, and \emph{dir1} is a direction vector for the axis containing radius $r_1$. If the point \emph{last} does not lie exactly on the ellipse, a line segment is drawn between that point and the ellipse.
+
+    \item \code{p1,p2,r1,r2,sens,dir1,n,"ea"} (elliptical arc): draws an elliptical arc centered at $p_1$, extending from point \emph{last} to point $p_2$, and normal to the 3D vector $n$. The two radii are $r_1$ and $r_2$, and \emph{dir1} is a direction vector for the axis containing radius $r_1$. The 3D vector $n$ is optional; it specifies a vector normal to the ellipse's plane and determines its orientation. This vector $n$ is mandatory when the points \emph{last}, $p_1$, and $p_2$ are collinear.
+
+    \item \code{"cl"} (closepath) is used alone; it closes the current component by drawing a line segment connecting the last point to the first point (of the current component).
+\end{itemize}
+
+Here, for example, is the code in figure \ref{viewdir}.
+
+\begin{Luacode}
+\begin{luadraw}{name=viewdir}
+local ld = luadraw
+local pt3d = ld.pt3d
+local Origin, vecI, vecJ, vecK = pt3d.Origin, pt3d.vecI, pt3d.vecJ, pt3d.vecK 
+local g = ld.graph3d:new{ size={8,8} }
+local i, M = ld.cpx.I, ld.pt3d.M
+local O, A = Origin, M(4,4,4)
+local B, C, D, E = ld.pxy(A), ld.px(A), ld.py(A), ld.pz(A) --projected from A onto the xOy plane and onto the axes
+g:Dpolyline3d( {{O,A},{-5*vecI,5*vecI},{-5*vecJ,5*vecJ},{-5*vecK,5*vecK}}, "->") -- axes
+g:Dpolyline3d( {{E,A,B,O}, {C,B,D}}, "dashed")
+g:Dpath3d( {C,O,B,2.5,1,"ca",O,"l","cl"}, "draw=none,fill=cyan,fill opacity=0.8") --angular sector
+g:Darc3d(C,O,B,2.5,1,"->") -- arc de cercle pour theta
+g:Dpath3d( {E,O,A,2.5,1,"ca",O,"l","cl"}, "draw=none,fill=cyan,fill opacity=0.8") --angular sector
+g:Darc3d(E,O,A,2.5,1,"->") -- arc of a circle for phi
+g:Dballdots3d(O) -- the point of origin in the form of a small sphere
+g:Labelsize("footnotesize")
+g:Dlabel3d(
+  "$x$", 5.25*vecI,{}, "$y$", 5.25*vecJ,{}, "$z$", 5.25*vecK,{},
+  "towards the observer", A, {pos="E"},
+  "$O$", O, {pos="NW"},
+  "$\\theta$", (B+C)/2, {pos="N", dist=0.15},
+  "$\\varphi$", (A+E)/2, {pos="S",dist=0.25})
+g:Dlabel('viewdir=\\{"ortho",$\\theta,\\varphi$\\} (in degrees)',-5*i,{pos="N"}) -- label 2D
+g:Show()
+\end{luadraw}      
+\end{Luacode}
+
+\subsubsection{Functions for 3D paths}
+
+\begin{itemize}
+\item The function \cmd{ld.path3d(path \fac{, nbdots})} returns a 3D polyline containing the points that make up the \argu{path}. The optional argument \argu{nbdots} specifies the minimum number of points calculated for each Bézier curve within the path; it defaults to the global variable \varglob{ld.bezier\_nbdots}, which is initialized to $12$. 
+
+\item Conversely, the function \cmd{ld.polyline2path3d(L \fac{, close})}, where \argu{L} is a 3D polyline (a list of 3D points or a list of lists of 3D points), returns \argu{L} as a path. The optional argument \argu{close} determines whether or not each component of the path is closed (default is \false). 
+
+\item The method \cmd{g:Convpath3d(path)} converts the \argu{path} into another path using only the "m", "l", and "b" instructions (all other instructions are converted into Bézier curves). The function returns the new path; the advantage of this new path is that a 3D transformation matrix can be applied to it (using the \cmd{ld.mtransform3d()} function). 
+
+\item The method \cmd{g:Path3d2path2d(path)} converts the 3D path \argu{path} into a 2D path (representing the projection onto the screen) and returns the result.
+\end{itemize}
+
+
+\subsubsection{Plane: Dplane}
+
+\begin{itemize}
+    \item The method \cmd{g:Dplane(P, V, L1, L2 \fac{, mode, draw\_options})} draws the edges of the plane \argu{P}=$\{A,u\}$ where $A$ is a point in the plane and $u$ is a normal vector to the plane (\argu{P} is therefore a table of two 3D points). The argument \argu{V} must be a non-zero vector in the plane \argu{P}. The arguments \argu{L1} and \argu{L2} are two lengths. The method constructs a parallelogram centered on $A$, with one side $L_1\frac{V}{\|V\|}$ and the other $L_2\frac{W}{\|W\|}$ where $W = u\wedge V$. The argument \argu{mode} is a natural number indicating the edges to draw. To calculate this integer, we use the predefined variables: \varglob{ld.top} (=8), \varglob{ld.right} (=4), \varglob{ld.bottom} (=2), \varglob{ld.left} (=1), and \varglob{ld.all} (=15), which can be added together, for example:
+\begin{itemize}
+    \item \code{mode=ld.bottom+ld.left}: for the bottom and left sides
+    \item \code{mode=ld.top+ld.right+ld.bottom}: for the top, right, and bottom sides
+    \item etc.
+\end{itemize}
+By default, the mode is \varglob{ld.all}, which corresponds to \code{mode=ld.top+ld.right+ld.bottom+ld.left}.
+
+    \item The function \cmd{ld.plane2rectangle(P \fac{, V, L1, L2})} calculates and returns the rectangle (list of 3D points) drawn by the \cmd{g:Dplane()} method. The vector \argu{V} is optional; it allows you to define an edge of the rectangle (it must lie on the plane). If it is omitted, the function will choose a vector $V$ itself. The lengths \argu{L1} and \argu{L2} are optional and default to $5$. When the argument \argu{L2} is omitted, it implicitly has the same value as \argu{L1}. The result can be drawn using the \cmd{g:Dpolyline3d()} method, or drawn as a facet.
+\end{itemize}    
+
+\begin{demo}{Dplane, example with mode = left+bottom}
+\begin{luadraw}{name=Dplane}
+local ld = luadraw
+local cpx, pt3d = ld.cpx, ld.pt3d
+local Origin, vecI, vecJ, vecK, M = pt3d.Origin, pt3d.vecI, pt3d.vecJ, pt3d.vecK, pt3d.M
+
+local g = ld.graph3d:new{size={8,8},window={-5.25,3,-2.5,2.5},margin={0,0,0,0},border=true}
+local i = cpx.I
+g:Labelsize("footnotesize")
+local A = Origin
+local P = {A, vecK}
+g:Dplane(P, vecJ, 6, 6, ld.left + ld.bottom)
+g:Dcrossdots3d({A,vecK},nil,0.75)
+g:Dseg3d({A,A+2*vecK},"->")
+g:Dangle3d(-vecJ,A,vecK,0.25)
+g:Dpolyline3d({{M(3.5,-3,0),M(3.5,3,0)},{M(3,-3.5,0), M(-3,-3.5,0)}}, "->,line width=0.8pt")
+g:Dlabel3d("$A$",A,{pos="E"},
+    "$u$",2*vecK,{},
+    "$P$", M(3,-3,0),{pos="NE", dir={vecJ,-vecI}},
+    "$L_1\\frac{V}{\\|V\\|}$ (bottom)", M(3.5,0,0), {pos="S"},
+    "$L_2\\frac{W}{\\|W\\|}$ (left)", M(0,-3.5,0), {pos="N",dir={-vecI,-vecJ}}
+)
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\paragraph{Warning}: The concepts of top, right, bottom, and left are relative! They depend on the direction of the vectors $u$ (vector normal to the plane) and $V$ (vector given in the plane). The third vector $W$ is the cross product $u\wedge V$.
+
+\subsubsection{Parametric curve: Dparametric3d}
+
+\begin{itemize}
+    \item The function \cmd{ld.parametric3d(p, t1, t2 \fac{, nbdots, discont, nbdiv})} calculates the points of the curve and returns a 3D polygonal line (no drawing).
+\begin{itemize}
+    \item The argument \argu{p} is the parameterization. It must be a function of a real variable $t$ with values ​​in $\mathbf R^3$ (the images are 3D points), for example:
+\code{local p=function(t) return Mc(3,t,t/3) end}.
+
+    \item The arguments \argu{t1} and \argu{t2} are mandatory with \(t_1 < t_2\); they form the bounds of the interval for the parameter.
+
+    \item The argument \argu{nbdots} is optional; it is the (minimum) number of points to calculate; it is $40$ by default.
+
+    \item The argument \argu{discont} is an optional boolean that indicates whether there are discontinuities or not. It is \false by default.
+
+    \item The argument \argu{nbdiv} is a positive integer equal to $5$ by default and indicates the number of times the interval between two consecutive parameter values ​​can be split in two (dichotomized) when the corresponding points are too far apart.
+\end{itemize}
+
+    \item The method \cmd{g:Dparametric3d(p, options)} calculates the points and draws the curve parameterized by \argu{p}. The argument \argu{options} is a table specifying the possible options. Here are these options with their default values:
+
+\begin{itemize}
+    \item \opt{t=\{g:Xinf(),g:Xsup()\}},
+    \item \opt{nbdots=40}, 
+    \item \opt{discont=false},
+    \item \opt{nbdiv=5},
+    \item \opt{clip=false}, it indicates whether the curve should be clipped with the current 3D window.     
+    \item \opt{draw\_options=""}, string that will be passed as is to the \drawcmd instruction.
+\end{itemize}
+\end{itemize}
+
+\begin{demo}{A curve and its projections onto three planes}
+\begin{luadraw}{name=Dparametric3d}
+local ld = luadraw
+local pt3d = ld.pt3d
+local vecI, vecJ, vecK, M, Mc = pt3d.vecI, pt3d.vecJ, pt3d.vecK, pt3d.M, pt3d.Mc
+
+local g = ld.graph3d:new{window3d={-4,4,-4,4,-3,3}, window={-7.5,6.5,-7,6}, size={8,8}}
+local pi = math.pi
+g:Labelsize("footnotesize")
+local p = function(t) return Mc(3,t,t/3) end
+local L = ld.parametric3d(p,-2*pi,2*pi,25,false,2)
+g:Dboxaxes3d({grid=true,gridcolor="gray",fillcolor="LightGray"})
+g:Lineoptions("dashed","red",2)
+-- projection onto the plane y=-4
+g:Dpolyline3d(ld.proj3d(L,{M(0,-4,0),vecJ}))
+-- projection onto the plane x=-4
+g:Dpolyline3d(ld.proj3d(L,{M(-4,0,0),vecI}))
+-- projection onto the plane z=-3
+g:Dpolyline3d(ld.proj3d(L,{M(0,0,-3),vecK}))
+-- curve drawing
+g:Lineoptions("solid","Navy",8)
+g:Dparametric3d(p,{t={-2*pi,2*pi}})
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\subsubsection{Parameterization of a Polygonal Line: \emph{curvilinear\_param3d}}
+Let $L$ be a list of 3D points representing a continuous line. It is possible to obtain a parameterization of this line based on a parameter $t$ between $0$ and $1$ ($t$ is the curvilinear abscissa divided by the total length of $L$).
+
+The function \cmd{ld.curvilinear\_param3d(L \fac{, close})} returns a function of one variable $t\in[0;1]$ and values ​​on the line \argu{L} (3D points). The value at $t=0$ is the first point of \argu{L}, and the value at $t=1$ is the last point; This function is followed by a number representing the total length of \argu{L}. The optional argument \argu{close} indicates whether the line should be closed (\false by default).
+
+\subsubsection{The reference: Dboxaxes3d}
+
+The \textbf{g:Dboxaxes3d(options)} method allows you to draw the three axes, with a number of options defined in the \argu{options} table. These options are:
+%\def\opt#1{\textcolor{blue}{\texttt{#1}}}%
+\begin{itemize}
+    \item \opt{xaxe=true}, \opt{yaxe=true}, and \opt{zaxe=true}: Indicates whether the corresponding axes should be drawn or not.
+
+    \item \opt{drawbox=false}: Indicates whether a box should be drawn with the axes.
+
+    \item \opt{grid=false}: Indicates whether a grid should be drawn (one for $x$, one for $y$, and one for $z$). When this option is true, the following options can also be used:
+\begin{itemize}
+    \item \opt{gridwidth=1}: Indicates the grid line thickness in tenths of a point,
+    \item \opt{gridcolor="black"}: Indicates the grid color,
+    \item \opt{fillcolor=""}: color to paint the grid background.
+\end{itemize}
+
+    \item \opt{xlimits=\{x1,x2\}}, \opt{ylimits=\{y1,y2\}}, \opt{zlimits=\{z1,z2\}}: Allows you to define the three intervals used for the axis lengths. By default, these are the values ​​provided to the \opt{window3d} argument when creating the graph.
+
+    \item \opt{xgradlimits=\{x1,x2\}}, \opt{ygradlimits=\{y1,y2\}}, \opt{zgradlimits=\{z1,z2\}}: Allows you to define the three graduation intervals on the axes. By default, these options are set to \val{"auto"}, meaning they take the same values ​​as \opt{xlimits}, \opt{ylimits}, and \opt{zlimits}.
+
+    \item \opt{xyzstep=1}: Specifies the tick step on all three axes.
+
+    \item \opt{xstep=xyzstep}, \opt{ystep=xyzstep}, \opt{zstep=xyzstep}: Specifies the tick step on each axis (value of \opt{xyzstep} by default).
+    
+    \item \opt{xlabels=\{x1,\ldots,xn\}}, \opt{ylabels=\{y1,\ldots,yn\}}, \opt{zlabels=\{z1,\ldots,zn\}}: these options allow you to apply labels to the axes. By default, these options have the value \nil, in which case the default labels (one per graduation mark) are displayed.
+
+    \item \opt{xyzticks=0.2}: Specifies the length of the tick marks.
+
+    \item \opt{labels=true}: Specifies whether or not to display the tick mark values.
+
+    \item \opt{xlabelsep=0.25}, \opt{ylabelsep=0.25}, \opt{zlabelsep=0.25}: Specifies the distance between the labels and the graduations.
+
+    \item \opt{xlabelstyle=<current style>}, \opt{ylabelstyle=<current style>}, \opt{zlabelstyle=<current style>}: Specifies the label style, i.e., the position relative to the anchor point. By default, the current style is applied.
+
+    \item \opt{xlegend="\$x\$"}, \opt{ylegend="\$y\$"}, \opt{zlegend="\$z\$"}: Allows you to define a legend for the axes.
+
+    \item \opt{xlegendsep=0.5}, \opt{ylegendsep=0.5}, \opt{zlegendsep=0.5}: Specifies the distance between the legends and the graduations.
+\end{itemize}
+
+
+\subsubsection{Drawing on a Plane}
+It is possible to use 2D drawing methods on a plane $P$ in space. To do this, you must first choose a Cartesian coordinate system $(A,u,v)$ of the plane $P$.
+
+\begin{itemize}
+    \item The method \cmd{g:BeginOnPlane(coordsystem \fac{, options})} allows you to switch to "drawing on a plane" mode. The argument \argu{coordsystem} is a table of the form \{A,u,v\} representing a Cartesian coordinate system of the chosen plane. Therefore, $A$ is a 3D point belonging to the plane, and $u$ and $v$ are two 3D vectors forming a basis for the direction of the plane. The argument \argu{options} is a table defining the options, which are (with their default values):
+    \begin{itemize}
+        \item \opt{labeldir=\nil}, this option defines the writing direction. With the value \nil, it's the current direction; with the value \val{"auto"}, the writing direction is determined by the vectors $u$ and $v$. A different writing direction can also be imposed like this: \opt{labeldir=\val{\{dir1, dir2\}}}, where \emph{dir1} and \emph{dir2} are two independent 3D vectors.
+
+        This option doesn't always give good results in central projection, because central projection is not an affine transformation.
+
+        \item \opt{view=\nil}, with the value \nil, the viewport will be the same as the 2D viewport of the graph. With a value of the form \opt{view=\val{\{x1,x2,y1,y2\}}}, the drawing will be clipped by the window $[x_1;x_2]\times[y_1;y_2]$ \textbf{in the coordinate system $(A,u,v)$}.
+        
+        \item \opt{border=\false} and \opt{border\_options=""}: if set to \true, a frame is drawn around the area defined by the view; in this case, the \opt{border\_options} string is passed to the \drawcmd command to draw the frame.
+        
+        \item \opt{tikzmatrix=\true}, with the value \true (default value), the method uses the \emph{cm} option of TikZ (current matrix). With the value \false, the matrix of \luadrawenv is used, leaving the TikZ matrix unchanged.
+
+        \item \opt{lowlevel=\false}, with the value \true, the \opt{tikzmatrix} option also takes the value \true, and the TikZ transformation matrix will be applied at the lowest level using the macro \verb|\pgflowlevelsynccm|. This can be useful, for example, to draw arrows in the desired plane (and not the screen plane). However, this has a consequence: all graphic elements will be transformed: arrows, text, line thickness, etc.
+            
+        \item \opt{out=\nil}, if the user assigns this option a variable of type table (\opt{out=<var>}), then they can retrieve a 2D matrix in this variable that redefines the axes to correspond to those of the chosen plane. This matrix is ​​particularly useful for using the \cmd{g:Dimage()} method on this plane.
+    \end{itemize}
+    
+    Once this method is executed, any complex number $z=Z(a,b)$ will actually correspond to the 3D point $A+a\cdot u+b\cdot v$.
+    
+    \textbf{Note}: This method will not yield the expected result in central projection mode, as this is not an affine transformation.
+
+    \item The method \cmd{g:EndOnPlane()} terminates the "drawing on a plane" mode.
+\end{itemize}
+
+\begin{demo}{Draw on a plane}
+\begin{luadraw}{name=draw_on_plane}
+local ld = luadraw
+local cpx, pt3d = ld.cpx, ld.pt3d
+local Z, M = cpx.Z, pt3d.M
+local Origin, vecI, vecJ, vecK = pt3d.Origin, pt3d.vecI, pt3d.vecJ, pt3d.vecK
+
+local g = ld.graph3d:new{ window={-8,8,-9,8}, size={10,10}}
+g:Labelsize("footnotesize")
+local function f(x) return 2*math.sin(x) end
+-- left
+g:BeginOnPlane( {M(0,-5,0), vecI, vecK}, {labeldir="auto", view={-5,5,-5,5}})
+    g:Daxes(nil, {limits={{-5,5},{-5,5}}})
+    g:Dcartesian(f, {x={-5,5}, draw_options="red,thick"})
+    g:Dcircle(0,3, "ForestGreen, fill=green!30,opacity=0.3")
+    g:Dlabel("$\\mathcal{C}_{f}$", Z(2,2),{pos="N",node_options="red"})
+g:EndOnPlane()
+-- cube
+g:Dpoly( g:Box3d(), {color="LightBlue!50!white", opacity=0.6})
+-- top
+g:BeginOnPlane( {M(0,0,5), vecJ, -vecI}, {labeldir="auto", view={-5,5,-5,5}})
+    g:Daxes(nil, {limits={{-5,5},{-5,5}}, grid=true})
+    g:Dcartesian(f, {x={-5,5}, draw_options="red,thick"})
+    g:Dcircle(0,3, "ForestGreen, fill=green!30,opacity=0.3")
+    g:Dlabel("$\\mathcal{C}_{f}$", Z(2,2),{pos="N",node_options="red"})
+g:EndOnPlane() 
+-- front
+g:BeginOnPlane( {M(5,0,0), vecK, -vecJ}, {labeldir={vecJ,vecK}, view={-5,5,-5,5}})
+    g:Daxes(nil, {limits={{-5,5},{-5,5}}, labelstyle={"E","S"}, arrows="-stealth",
+        legend={"$x$","$y$"}, legendpos={0.9,0.98}})
+    g:Dcartesian(f, {x={-5,5}, draw_options="red,thick"})
+    g:Dcircle(0,3, "ForestGreen, fill=green!30,opacity=0.3")
+    g:Dlabel("$\\mathcal{C}_{f}$", Z(2,2),{pos="W",node_options="red"})
+g:EndOnPlane()
+-- right
+g:BeginOnPlane( {M(0,5,10), -vecK, -vecI}, {labeldir="auto", view={5,15,-5,5}})
+    g:Daxes({10,1,1}, {grid=true, arrows="-stealth", labelshift={0,0}})
+    g:Dcartesian(f, {x={5,15}, draw_options="red,thick"})
+    g:Dlabel("$\\mathcal{C}_{f}$", Z(14,2),{pos="NW",node_options="red"})
+g:EndOnPlane()
+g:Show()
+\end{luadraw}
+\end{demo}
+
+
+\subsection{Points and Labels}
+
+\subsubsection{3D Points: Ddots3d, Dballdots3d, Dcrossdots3d}
+
+There are three ways to draw 3D points. For the first two, the argument \argu{L} can be either a single 3D point, a list (a table) of 3D points, or a list of lists of 3D points:
+
+\begin{itemize}
+    \item The \cmd{g:Ddots3d(L \fac{, mark\_options, clip})} method. The principle is the same as in the 2D version; the points are drawn in the current line color with the current style. The \argu{mark\_options} argument is an optional string that will be passed as is to the \drawcmd instruction (local modifications). The \argu{clip} argument is set to \false by default; it indicates whether the plot should be clipped to the current 3D window.
+
+    \item The \cmd{g:Dballdots3d(L \fac{, color, scale, clip})} method draws the points of \argu{L} as a sphere. The optional \argu{color} argument specifies the color of the sphere (\val{"black"} by default), and the optional \argu{scale} argument allows you to change the size of the sphere ($1$ by default).
+
+    \item The \cmd{g:Dcrossdots3d(L \fac{, color, scale, clip})} method draws the points of \argu{L} as a plane cross. The argument \argu{L} is a list of the form \{3D point, normal vector\} or \{ \{3D point, normal vector\}, \{3D point, normal vector\}, ...\}. For each 3D point, the associated normal vector is used to determine the plane containing the cross. The optional \argu{color} argument specifies the color of the cross (\val{"black"} by default), and the optional \argu{scale} argument allows you to change the size of the cross ($1$ by default).
+\end{itemize}
+
+\begin{demo}{A tetrahedron and the centers of gravity of each face}
+\begin{luadraw}{name=Ddots3d}
+local ld = luadraw
+local pt3d = ld.pt3d
+local vecI, vecJ, vecK, M = pt3d.vecI, pt3d.vecJ, pt3d.vecK, pt3d.M
+
+local g = ld.graph3d:new{viewdir={15,60},bbox=false,size={8,8}}
+local A, B, C, D = 4*M(1,0,-0.5), 4*M(-1/2,math.sqrt(3)/2,-0.5), 4*M(-1/2,-math.sqrt(3)/2,-0.5), 4*M(0,0,1)
+local u, v, w = B-A, C-A, D-A
+-- drawing of the center of gravity of hidden faces
+for _, F in ipairs({{A,B,C},{B,C,D}}) do
+local G, u = pt3d.isobar3d(F), pt3d.prod(F[2]-F[1],F[3]-F[1])
+g:Dcrossdots3d({G,u}, "blue",0.75)
+g:Dpolyline3d({{F[1],G,F[2]},{G,F[3]}},"dotted")
+end
+-- drawing of the tetrahedron constructed on A, B, C and D
+g:Dpoly( ld.tetra(A,u,v,w),{mode=ld.mShaded,opacity=0.7,color="Crimson"})
+-- drawing of the center of gravity of visible faces
+for _, F in ipairs({{A,B,D},{A,C,D}}) do
+    local G, u = pt3d.isobar3d(F), pt3d.prod(F[2]-F[1],F[3]-F[1])
+    g:Dcrossdots3d({G,u}, "blue",0.75)
+    g:Dpolyline3d({{F[1],G,F[2]},{G,F[3]}},"dotted")
+end
+g:Dballdots3d({A,B,C,D}, "orange") --vertices
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\subsubsection{3D Labels: Dlabel3d}
+
+The method for placing a label in space is:
+
+\cmdln{g:Dlabel3d(text1, anchor1, options1, text2, anchor2, options2, \ldots).}
+
+\begin{itemize}
+    \item The arguments \argu{text1}, \argu{text2}, \ldots, are strings; they are the labels.
+
+    \item The arguments argu{anchor1}, \argu{anchor2}, \ldots, are 3D points representing the anchor points of the labels.
+
+     \item The arguments \argu{options1}, \argu{options2}, \ldots, allow you to locally define the label options. These options are (with their default value)!
+
+\begin{itemize}
+    \item \opt{pos="center"}: indicates the label's position in the screen plane relative to the anchor point. It can be \val{"N"} for north, \val{"NE"} for northeast, \val{"NW"} for northwest, or \val{"S"}, \val{"SE"}, \val{"SW"}. By default, it is \val{"center"}, and in this case, the label is centered on the anchor point.
+
+     \item \opt{dist=0}: distance in cm between the label and its anchor point when \opt{pos} is not equal to \val{"center"}.
+
+    \item \opt{dir=\{\}}: indicates the direction of writing in space, the empty list means the default direction. In general, \code{dir=\{dirX,dirY,dep\}}, the three values ​​\emph{dirX}, \emph{dirY} and \emph{dep} are three 3D points representing three vectors. The first two indicate the direction of writing, the third a displacement (translation) of the label relative to the anchor point.
+
+    \item \opt{node\_options=""}: string intended to receive options that will be passed directly to TikZ in the \emph{\textbackslash node[]} instruction.
+
+    \item The labels are drawn in the current color of the document text, but the color can be changed with the \opt{node\_options} argument, for example, by setting: \opt{node\_options="color=blue"}.
+
+\textbf{Warning}: The options chosen for a label also apply to subsequent labels if they are unchanged.
+\end{itemize}
+\end{itemize}
+
+\subsection{Basic Solids (Without Facets)}
+
+The four methods described below are sensitive to the global variable \varglob{ld.Hiddenlines} which is \false by default.
+
+\subsubsection{Cylinder: Dcylinder}
+
+Draw a cylinder with a circular base (right or tilted). Several possible syntaxes:
+\begin{itemize}
+    \item Old syntax: \cmd{g:Dcylinder(A, V, r \fac{, options})} draws a right cylinder, where \argu{A} is a 3D point representing the center of one of the circular faces, \argu{V} is a 3D point, a vector representing the axis of the cylinder, the center of the opposite circular face is the point $A+V$ (this face is orthogonal to $V$), and \argu{r} is the radius of the circular base.
+
+    \item Syntax: \cmd{g:Dcylinder(A, r, B \fac{, options})} draws a right cylinder, where \argu{A} is a 3D point representing the center of one of the circular faces, \argu{B} is the center of the opposite face, and \argu{r} is the radius. The cylinder is right, meaning that the circular faces are orthogonal to the axis $(AB)$.
+
+    \item For a tilted cylinder: \cmd{g:Dcylinder(A, r, V, B \fac{, options})}, where \argu{A} is a 3D point representing the center of one of the circular faces, \argu{B} is the center of the opposite circular face, \argu{r} is the radius, and \argu{V} is a non-zero 3D vector orthogonal to the plane of the circular faces.
+\end{itemize}
+
+For all three syntaxes, \argu{options} is a table whose fields define the options. These options are (with their default values):
+\begin{itemize}
+    \item \opt{mode=ld.mWireframe}, two possible values, \val{ld.mGrid} or \val{ld.mWireframe}. In \val{ld.mWireframe} mode, this is a wireframe drawing; in \val{ld.mGrid} mode, this is a grid drawing (as if there were facets).
+
+    \item \opt{hiddenstyle=ld.Hiddenlinestyle}, sets the line style for hidden areas (set it to \val{"noline"} to hide them). By default, this option has the value of the global variable \varglob{ld.Hiddenlinestyle}, which is itself initialized with the value \val{"dotted"}.
+
+    \item  \opt{hiddencolor=edgecolor}, sets the color of hidden lines. By default, it is the same value as the \opt{edgecolor} option.
+
+    \item \opt{edgecolor=<current color>}, sets the color of the lines.
+    
+    \item \opt{edgestyle=<current style>}, defines the line style for visible edges.
+
+    \item \opt{edgewidth=<current width>}, sets the thickness of the visible edges in tenths of a point.    
+
+    \item \opt{color=""}, when this option is an empty string (the default value), there is no fill; when it is a color (as a string), there is a fill with or without a linear gradient.
+    
+    \item \opt{gradient=\true}, a boolean indicating whether a gradient fill should be used when a color has been specified. With the value \false, a continuous fill is used.
+
+    \item Gradient parameters: when there is a color fill and \opt{gradient=\true}, a linear gradient is used for the side of the cylinder and another for the cross-section; in both cases, the gradient is defined as follows::
+    \codeln{left color=<color>!<l>, right color=<color>!<r>, middlecolor=<color>!<m>}
+    where \emph{<color>} denotes the color used, and \emph{<l>}, \emph{<m>}, \emph{<r>} are three numbers between $0$ and $100$, these three numbers constitute the parameters of the gradient in the form of a table \emph{\{<l>,<m>,<r>\}}:
+        \begin{itemize}
+            \item For the side of the cylinder, it's the \opt{gradside} option, by default: \opt{gradside=\{50,10,100\}}.
+            \item For the cylinder section, it's the \opt{gradsection} option, by defaut : \opt{gradsection=\{25,18,50\}}.
+        \end{itemize}
+        
+    \item \opt{opacity=1}, sets the transparency of the drawing.
+\end{itemize}
+
+
+\subsubsection{Cone: Dcone}
+
+Draw a circular cone (right or inclined). Several possible syntaxes:
+\begin{itemize}
+    \item Old syntax: \cmd{g:Dcone(A, V, r \fac{, options})} draws a right cone, where \argu{A} is a 3D point representing the cone's vertex, \argu{V} is a 3D point, a vector representing the cone's axis, the center of the circular face is point $A+V$ (this face is orthogonal to \argu{V}), and \argu{r} is the radius of the circular base.
+
+    \item Syntax: \cmd{g:Dcone(C, r, A \fac{, options})} draws a right cone, where \argu{A} is a 3D point representing the cone's vertex, \argu{C} is the center of the circular face, and \argu{r} is the radius. The cone is right, meaning that the circular face is orthogonal to the axis $(AC)$.
+
+    \item For a tilted cone: \cmd{g:Dcone(C, r, V, A \fac{, options})}, where \argu{A} is a 3D point representing the cone's vertex, \argu{C} is the center of the circular face, \argu{r} is the radius, and \argu{V} is a non-zero 3D vector orthogonal to the plane of the circular face.
+\end{itemize}
+
+For all three syntaxes, the \argu{options} are the same as for the cylinder, plus the following option:
+\begin{itemize}
+\item \opt{apex=\true} : with the value \true, the apex is marked by a point when the cone is viewed from above.
+\end{itemize}
+
+\subsubsection{Frustum: Dfrustum}
+
+Draw a truncated cone with a circular base (right or slanted). Two possible syntaxes:
+
+\begin{itemize}
+    \item The syntax: \cmd{g:Dfrustum(A, R, r, B \fac{, options})} for a right truncated cone, \argu{A} is a 3D point representing the center of the face with radius \argu{R}, \argu{B} is the center of the second circular face, and its radius is \argu{r}, the faces are orthogonal to the vector $\vec{AB}$. When $R=r$ we simply have a cylinder.
+
+    \item Syntax: \cmd{g:Dfrustum(A, R, r, V, B \fac{, options})} for a tilted cone frustum, \argu{A} is a 3D point representing the center of the face with radius \argu{R}, \argu{V} is a 3D vector representing a normal vector to the circular faces, the center of the second circular face is point \argu{B}, and its radius is \argu{r}. When $R=r$ we have a tilted cylinder.
+\end{itemize}
+
+For all two syntaxes, the \argu{options} are the same as for the cylinder, plus the option:
+\begin{itemize}
+    \item \opt{old=\false}: with the value \true, the old syntax \cmd{g:Dfrustum(A, R, r, V \fac{, options})} can be used; in this case, the center of the second circular face is $A+V$.
+\end{itemize}
+
+\subsubsection{Sphere: Dsphere}
+
+The \cmd{g:Dsphere(A, r \fac{, options})} method draws a sphere.
+
+\begin{itemize}
+    \item \argu{A} is a 3D point representing the center of the sphere.
+    \item \argu{r} is the radius of the sphere.
+    \item \argu{options} is a table whose fields define the options. These options are (with their default values):
+\begin{itemize}
+    \item \opt{mode=ld.mWireframe}, three possible values, \val{ld.mGrid} or \val{ld.mWireframe} or \val{ld.mBorder}. In \val{ld.mWireframe} mode, the outline (circle) and the equator are drawn; in \val{ld.mGrid} mode, the outline with meridians and spindles (grid) is drawn; and in \val{ld.mBorder} mode, the outline only is drawn.
+
+    \item \opt{hiddenstyle=ld.Hiddenlinestyle}, sets the line style for hidden areas (set it to \val{"noline"} to hide them). By default, this option has the value of the global variable \varglob{ld.Hiddenlinestyle}, which is itself initialized with the value \val{"dotted"}.
+
+    \item \opt{hiddencolor=edgecolor}, sets the color of hidden lines. By default, it is the same value as the \opt{edgecolor} option.
+
+    \item \opt{color=""}, when this option is an empty string (the default value), there is no fill; when it is a color (as a string), there is a fill with a "ball color".
+
+    \item \opt{opacity=1}, defines the transparency of the drawing.
+    
+    \item \opt{edgecolor=<current color>}, sets the color of the lines.    
+
+    \item \opt{edgestyle=<current style>}, defines the line style for visible edges.
+
+    \item \opt{edgewidth=<current width>}, sets the thickness of the visible edges in tenths of a point.
+\end{itemize}
+\end{itemize}
+
+\begin{demo}{Cylinders, Cones, and Spheres}
+\begin{luadraw}{name=cylindre_cone_sphere}
+local ld = luadraw
+local pt3d = ld.pt3d
+local vecI, vecJ, vecK, M = pt3d.vecI, pt3d.vecJ, pt3d.vecK, pt3d.M
+local g = ld.graph3d:new{ size={10,10} }
+ld.Hiddenlines = true
+local dessin = function(args)
+    g:Dsphere(M(-1,-2.5,1),2.5, args)
+    g:Dcone(M(-1,2.5,5),-5*vecK,2, args)
+    g:Dcylinder(M(3,-2,0),6*vecJ,1.5, args)
+end
+-- top left, default options
+g:Saveattr(); g:Viewport(-5,0,0,5); g:Coordsystem(-5,5,-5,5,true); dessin(); g:Restoreattr()
+g:Saveattr(); g:Viewport(0,5,0,5); g:Coordsystem(-5,5,-5,5,true) 
+-- top right
+dessin({mode=ld.mGrid, hiddenstyle="solid", hiddencolor="LightGray"}); g:Restoreattr()
+g:Saveattr(); g:Viewport(-5,0,-5,0); g:Coordsystem(-5,5,-5,5,true) 
+-- bottom left
+dessin({mode=ld.mBorder, color="orange"}); g:Restoreattr()
+g:Saveattr(); g:Viewport(0,5,-5,0); g:Coordsystem(-5,5,-5,5,true) 
+-- bottom right
+dessin({mode=ld.mGrid,opacity=0.8,hiddenstyle="noline",color="LightBlue"}); g:Restoreattr()
+g:Show()
+\end{luadraw}
+\end{demo}
+
+
+\subsubsection{Cut sphere: Dcut\_sphere}
+
+The method \cmd{g:Dcut\_sphere(A, r, P, \fac{, options})} draws the portion of the sphere centered at \argu{A} with radius \argu{r}, intersected by the plane \argu{P}$=\{B,n\}$ (the plane passing through the 3D point $b$ and with normal vector $n$). It is the portion of the sphere that lies within the half-plane containing the vector $n$ that is drawn; only the outer part of the sphere is drawn, not the interior.
+
+The \argu{options} are the same as for the method \cmd{g:Dsphere()}, plus the following options:
+\begin{itemize}
+    \item \opt{visibletrace=""}, a string defining the options (passed to the \drawcmd command) for drawing the portion on the visible face (if it exists) of the circle of intersection between the plane and the sphere. When this string is empty (default), this arc is not drawn.
+
+    \item \opt{hiddentrace=""}, a string defining the options (passed to the \drawcmd command) for drawing the portion on the hidden face (if it exists) of the circle at the intersection of the plane and the sphere. When this string is empty (default), this arc is not drawn.
+    
+    \item \opt{outline=\false}, with the value \true, the outline of the spherical part is drawn using the options contained in the string \opt{visibletrace} (or the current options if the string is empty).
+    
+    \item \opt{section=""}, a character string defining the options (passed to the \drawcmd command) for drawing the circular section when it is visible. If this string is empty (the default value), the section is not drawn.
+\end{itemize}
+
+\begin{demo}{Cut sphere}
+\begin{luadraw}{name=cut_sphere}
+local ld = luadraw
+local pt3d = ld.pt3d
+local Origin, vecI, vecJ, vecK, M = pt3d.Origin, pt3d.vecI, pt3d.vecJ, pt3d.vecK, pt3d.M
+local g = ld.graph3d:new{ viewdir={"central",0,65}, size={10,10}, bg="lightgray"}
+g:Linewidth(6)
+local O, P = Origin, {vecK, -vecK-vecJ}
+local c, r, n = ld.interPS(P, {O, 3})
+g:Dcut_sphere(O, 3, P, {color="orange", mode=ld.mBorder, edgecolor="Gold", section=true,
+    section_options="Gold,left color=orange!80, right color=orange!10"})
+g:Dplane({c,P[2]}, vecI,8,8,"fill=blue, fill opacity=0.3")
+g:Shift3d(-P[2])
+g:Dcut_sphere(O, 3, {P[1],-P[2]}, 
+    {color="orange", mode=ld.mBorder, edgecolor="Gold", visibletrace="Gold,line width=0.6",
+     hiddentrace="dashed,Gold,line width=0.6"})
+g:Show()
+\end{luadraw}
+\end{demo}
+
+
+
+\subsubsection{Cone\_outline, Cylinder\_outline, Frustum\_outline, Sphere\_outline}
+
+The following methods calculate and return a table containing characteristic elements relating to the cone, cylinder, truncated cone, or sphere. These methods take into account the projection mode as well as the graph's 3D transformation matrix. The first three functions return a table with the following fields:
+
+\begin{itemize}
+    \item \opt{side}: 3D path representing the outline of the visible lateral part of the solid. 
+    \item \opt{hiddenside}: 3D path representing the outline of the non-visible lateral part of the solid. 
+    \item \opt{section}: list of 3D paths, where each path represents the outline of one of the visible bases of the solid. 
+    \item \opt{hiddensection}: list of 3D paths, where each path represents the outline of one of the non-visible bases of the solid. 
+    \item \opt{visible}: 3D path representing the visible outline of the solid. 
+    \item \opt{hidden}: 3D path representing the hidden outline of the solid. 
+    \item \opt{tangency}: list of 3D points representing the tangency points of the solid—points where the plane tangent to the solid contains the observer's direction (the vector \cmd{g.Normal}); these points lie on the circular bases. 
+    \item \opt{angle}: the angle, in degrees, between the axis of the solid and the horizontal.
+\end{itemize}
+
+\paragraph{Description of the four methods}
+
+\begin{itemize}
+    \item The method \cmd{g:Cone\_outline(C, r, \fac{V,} A)} calculates and returns the characteristic elements of the cone with vertex \argu{A} and a circular base centered at \argu{C} with radius \argu{r}. The cone is a right cone if \argu{V} is omitted; otherwise, the base is orthogonal to vector \argu{V} (oblique cone). 
+
+    \item The method \cmd{g:Cylinder\_outline(C, r, \fac{V,} A)} calculates and returns the characteristic elements of the cylinder with radius \argu{r} and circular bases centered at \argu{C} and \argu{A}. The cylinder is a right cylinder if \argu{V} is omitted; otherwise, the circular bases are orthogonal to vector \argu{V} (oblique cylinder). 
+
+    \item The method \cmd{g:Frustum\_outline(C, R, r, \fac{V,} A)} calculates the characteristic elements of the truncated cone with circular bases centered at \argu{C} and \argu{A}, and radii \argu{R} (for the first base) and \argu{r}. The truncated cone is a right truncated cone if \argu{V} is omitted; otherwise, the circular bases are orthogonal to vector \argu{V} (oblique truncated cone). 
+
+    \item The method \cmd{g:Sphere\_outline(C, R)} calculates the characteristic elements of the sphere, returning a table with the following fields:
+    \begin{itemize}
+        \item \opt{visible}: 3D path representing the apparent outline of the sphere. 
+        \item \opt{data}: list of the form $\{O,r,n\}$, where $O$ is the center of the apparent circle, $r$ is its radius, and $n$ is a vector normal to the plane of the apparent circle. 
+    \end{itemize}
+\end{itemize}
+
+
+\subsubsection{Cone\_tangency, Cylinder\_tangency, Frustum\_tangency, Sphere\_tangency}
+
+The following methods calculate and return, as a list, the tangency points—if they exist—for the cone, cylinder, truncated cone, or sphere.
+
+\begin{itemize}
+    \item The method \cmd{g:Cone\_tangency(C, r, \fac{V,} A)} calculates and returns the two tangency points on the cone with vertex \argu{A} and a circular base centered at \argu{C} with radius \argu{r}. The cone is right if \argu{V} is omitted; otherwise, the base is orthogonal to vector \argu{V} (oblique cone). The two tangency points lie on the circular base; they are points where the plane tangent to the cone contains the observer's direction (vector \cmd{g.Normal}). 
+
+    \item The method \cmd{g:Cylinder\_tangency(C, r, \fac{V,} A)} calculates and returns the four tangency points on the cylinder of radius \argu{r}, with circular bases centered at \argu{C} and \argu{A}. The cylinder is right if \argu{V} is omitted; otherwise, the circular bases are orthogonal to vector \argu{V} (oblique cylinder). The first two tangency points lie on the circular base centered at \argu{C}, and the next two on the other circular base. 
+
+    \item The method \cmd{g:Frustum\_tangency(C, R, r, \fac{V,} A)} calculates and returns the four tangency points on the truncated cone with circular bases centered at \argu{C} and \argu{A}, and radii \argu{R} (for the first) and \argu{r}. The truncated cone is right if \argu{V} is omitted; otherwise, the circular bases are orthogonal to vector \argu{V} (oblique truncated cone). The first two points of tangency lie on the circular base centered at \argu{C}, and the next two on the other circular base. 
+
+    \item The method \cmd{g:Sphere\_tangency(C, R, P)} calculates and returns the two points of tangency to the sphere with center \argu{C} and radius \argu{R}, and to the circle formed by the intersection of this sphere with the plane \argu{P} (which is a list of the form $\{A,n\}$, where $A$ is a point on the plane and $n$ is a normal vector to the plane).
+\end{itemize}
+
+\begin{demo}{Points of tangency}
+\begin{luadraw}{name=tangency}
+local ld = luadraw
+local pt3d, cpx = ld.pt3d, ld.cpx
+local M, Z = pt3d.M, cpx.Z
+local O, I, J, K = M(0,0,0), M(1,0,0), M(0,1,0), M(0,0,1)
+local g = ld.graph3d:new{ size={10,10}, window={-5,5,-5,6} }
+ld.Hiddenlines = true
+g:Shift( Z(-2.5,3.5) ) -- cylinder
+local A, B, C, D = table.unpack( g:Cylinder_tangency(-3*K, 1.5, 2*K) )
+g:Dcylinder(-3*K, 1.5, 2*K, {color="blue"})
+g:Ddots3d({A,B,C,D})
+g:Shift( Z(5,0) ) -- cone
+local A, B = table.unpack( g:Cone_tangency(-3*K, 1.5, 2*K) )
+g:Dcone(-3*K, 1.5, 2*K, {color="red"})
+g:Ddots3d({A,B})
+g:Shift( Z(0,-5) ) -- frustum
+local A, B, C, D = table.unpack( g:Frustum_tangency(-3*K, 1.5,0.5, K) )
+g:Dfrustum(-3*K, 1.5, 0.5, K, {color="green"})
+g:Ddots3d({A,B,C,D})
+g:Shift(Z(-5,-1.5)) -- sphere
+local R, P = 2, {K, K}
+local I, r, n = ld.interPS(P, {O,R})
+local A, B = table.unpack( g:Sphere_tangency(O, R, P) )
+g:Dsphere(O, R, {color="orange", mode=ld.mBorder})
+g:Ddots3d({A,B})
+g:Darc3d(A,I,B,r,1,n); g:Darc3d(A,I,B,r,-1,n,"dotted")
+g:Show()
+\end{luadraw}
+\end{demo}

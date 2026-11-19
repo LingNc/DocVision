@@ -1,0 +1,237 @@
+\subsection{The \emph{luadraw\_linprog} module}
+
+This module does not return a value; instead, it adds new functions and graphical methods to the \emph{ld.graph} and \emph{ld.graph3d} classes. Its purpose is to solve and graphically represent linear programming problems within a specified window.
+
+This module loads the \emph{luadraw\_decorations} module.
+
+\subsubsection{In 2D}
+
+The goal is to represent systems of constraints of the form $ax+by<c$ or $ax+by>c$ within a given window; the solution is a list of complex numbers representing the convex solution polygon (within the specified region).
+
+Based on this solution, one can seek to optimize a functional of the type $(x,y)\mapsto \alpha x+\beta y$ over this polygon—that is, to determine its minimum and maximum values ​​on the polygon.
+
+\paragraph{The calculation}
+
+The function \cmd{ld.linprogSolve(constraints, x1, x2, y1, y2, objectives)} performs the calculations\footnote{This is a geometric solution method. The chosen window is a polygon that is cut out with the different lines corresponding to the constraints.} and returns a sequence consisting of two items:
+\begin{enumerate}
+    \item the solution polygon (a list of complex numbers),
+    \item the list of solutions for each objective function. 
+\end{enumerate}
+
+The \argu{constraints} argument is the list of constraints; each constraint is a string in the form \code{"a*x+b*y>c"} or \code{"a*x+b*y<c"}, where $a$, $b$, and $c$ are numerical values, and $x$ and $y$ are two letters (the multiplication symbol is mandatory).
+
+The arguments \argu{x1}, \argu{x2}, \argu{y1}, and \argu{y2} define the solution window: $[x_1;x_2]\times [y_1;y_2]$.
+
+The \argu{objectives} argument is the list of objective functions to be optimized (it may be empty); each objective function is a string in the form \code{"u*x+v*y"}, where $u$ and $v$ are numerical values. The solution for an objective function is a table with the following fields:
+\begin{itemize}
+    \item \opt{expr}: contains the expression of the objective function,
+    \item \opt{min}: contains the numerical value of the minimum,
+    \item \opt{mindot}: contains the point where the minimum is reached (complex number),
+    \item \opt{minline}: contains the line passing through the point where the minimum is reached,
+    \item \opt{max}: contains the numerical value of the maximum,
+    \item \opt{maxdot}: contains the point where the maximum is reached (complex number),
+    \item \opt{maxline}: contains the line passing through the point where the maximum is reached,
+\end{itemize}
+
+\paragraph{Graphical representation}
+
+Depending on convention, some people draw and shade the solution polygon and then add the optimization lines for each objective function (if any); others prefer to shade the half-plane containing the points that do not satisfy each constraint, leaving the solution polygon as the unshaded area.
+
+\begin{itemize}
+    \item The method \cmd{g:DlinprogRegion(constraints \fac{, options, objectives, objectives\_options})} solves the system of constraints contained in the list \argu{constraints} and draws the solution polygon, as well as any optimizations. The \argu{options} argument is a table of possible options for this representation; these are (with default values):
+    \begin{itemize}
+        \item \opt{view=<default 2D window>}, a list in the form $\{x_1,x_2,y_1,y_2\}$ representing the viewing window: $[x_1;x_2]\times[y_1;y_2]$. 
+
+        \item \opt{draw\_options=""}, a string containing drawing options for the solution polygon (string passed to \drawcmd). 
+
+        \item \opt{lines=\false}; if set to \true, the line corresponding to each constraint (with equation $ax+by=c$) is drawn with a label in the middle of the line, oriented along the line's direction. 
+
+        \item \opt{color=<current color>}, the color used to draw the lines and their labels (if \opt{lines=\true}). 
+
+        \item \opt{width=<current thickness>}, the line thickness in tenths of a point for the lines (if \opt{lines=\true}). 
+
+        \item \opt{style=<current style>}, the line style (if \opt{lines=\true}).
+
+        \item \opt{dots=\false}; if set to \true, the vertices of the solution polygon are drawn. 
+
+        \item \opt{mark\_options=""}; a string containing drawing options for the vertices when \opt{dots=true} (this string is passed to \drawcmd). 
+
+        \item \opt{outside=\false}; if set to \true, the area outside the solution polygon is filled instead of the interior. 
+
+        \item \opt{out=\nil}; if a list-type variable (table) is assigned to this option, then after the method executes, the table will contain the list of vertices of the solution polygon, followed by the list of solutions for each objective function. 
+
+        \item In addition to these options, the options from the \emph{luadraw\_decorations} module for polygonal lines are also available. 
+    \end{itemize}
+    
+    The \argu{objectives} argument is the list of functionals to optimize and plot (lines achieving the minimum and/or maximum). 
+
+    The \argu{objectives\_options} argument is the table of available options for this representation; these are (with default values):
+    \begin{itemize}
+        \item \opt{color=<current color>}, color for plotting the line and its label. 
+
+        \item \opt{width=<current thickness>}, line thickness in tenths of a point. 
+
+        \item \opt{style=<current style>}, line style. 
+
+        \item \opt{sense="minmax"}, other possible values: "min" or "max". This option allows you to select which solution line to plot (both by default). 
+
+        \item \opt{dots=\false}; if set to \true, the solution point(s) are plotted (where the optimization occurs). 
+
+        \item \opt{mark\_options=""}, string containing drawing options for the solution point(s) when \opt{dots=true} (string passed to \drawcmd). 
+
+        \item The following options come from the \emph{luadraw\_decorations} module for lines:
+        \begin{itemize}
+            \item \opt{label=<auto>}, a default label is displayed with the line (or lines); it consists of the functional's expression along with the min or max value, as applicable. 
+
+            \item \opt{node\_options=<auto>}, string containing options for the label; by default, it matches the line color and has a transparent white background. 
+
+            \item \opt{anchor=<auto>}, label anchor point; by default, this is the point where the extremum occurs (one can also use \opt{anchor1d}). 
+
+            \item \opt{dir=<auto>}, label writing direction; by default, this follows the direction of the line.
+
+            \item \opt{pos=<auto>}, position of the label relative to its anchor point; by default, the label is placed on the opposite side of the solution polygon. 
+        \end{itemize}
+    \end{itemize}
+
+    \item The method \cmd{g:DlinprogHalfPlanes(constraint1, options1, constraint2, options2, \ldots)} allows you to draw the non-solution half-plane for each constraint. Each constraint is a string in the form \code{"a*x+b*y>c"} or \code{"a*x+b*y<c"}, followed by its list of options; these are:
+    \begin{itemize}
+        \item \opt{color=<current color>}, the color used for drawing the line, its label, and the half-plane fill. 
+
+        \item \opt{width=<current thickness>}, the line thickness in tenths of a point. 
+
+        \item \opt{style=<current style>}, the line style. 
+
+        \item \opt{pattern="none"}, the fill pattern for the half-plane (none by default). Use \opt{pattern="fill"} for a solid fill, or any other fill pattern recognized by TikZ. 
+
+        The values ​​of these four options for a given constraint also apply to subsequent constraints unless modified. However, the following options are specific to each constraint; these are options derived from the \emph{luadraw\_decorations} module for lines:
+        \begin{itemize}
+            \item \opt{label=<auto>}, a default label is displayed with the line. 
+    
+            \item \opt{node\_options=<auto>}, a string containing options for the label; by default, it matches the line color and has a transparent white background. 
+    
+            \item \opt{anchor1d=0.5}, the label's anchor point; by default, this is the midpoint of the line (you can also use \opt{anchor}). 
+    
+            \item \opt{dir=<auto>}, the label's writing direction; by default, this follows the direction of the line.
+    
+            \item \opt{pos=<auto>}, position of the label relative to its anchor point; by default, the label is placed on the side of the solution polygon opposite the anchor. 
+        \end{itemize}
+    \end{itemize}
+
+    \item The method \cmd{g:DlinprogObjectiveLine(objective\_sol,objective\_options)} draws an optimization line. The \argu{objective} argument represents the solution to the optimization of a functional—specifically, a table with the following fields:
+    \begin{itemize}
+        \item \opt{expr}: contains the expression of the functional,
+        \item \opt{min}: contains the numerical value of the minimum,
+        \item \opt{mindot}: contains the point where the minimum is reached (complex number),
+        \item \opt{minline}: contains the line passing through the point where the minimum is reached,
+        \item \opt{max}: contains the numerical value of the maximum,
+        \item \opt{maxdot}: contains the point where the maximum is reached (complex number),
+        \item \opt{maxline}: contains the line passing through the point where the maximum is reached,
+    \end{itemize}
+    The \argu{objective\_options} argument is a table of possible options for this representation; these were previously described in the section regarding the \cmd{g:DlinprogRegion()} method.
+\end{itemize}
+
+\paragraph{Examples}
+
+\begin{demo}{The \emph{g:DlinprogRegion()} method}
+\begin{luadraw}{name=linear_prog1}
+local ld = luadraw
+local cpx = ld.cpx
+local Z = ld.cpx.Z
+local g = ld.graph:new{window={-3,6,-3,4.5}, size={10,10}}
+require 'luadraw_linprog'
+local system = \luastringO{$\begin{cases}x+y<2\\ x-y>2\\ x+y/3>-2\\ y>-2\end{cases}$}
+g:Daxes({0,1,1},{grid=true,gridcolor="LightGray",arrows="->",legend={"$x$","$y$"}})
+g:DlinprogRegion(
+    {'x+y<2','x-y>-2','x+y/3>-2','y>-2'}, -- contraints
+    {draw_options="draw=none,fill=Pink, fill opacity=0.6",lines=true, color="blue", label=system, anchor=Z(0,-0.5),
+    node_options="inner sep=0,draw=none,fill=pink, fill opacity=0.8" }, -- options
+    {"-2*x+y"}, {color="red",dots=true, anchor1d=0.5} -- an objective and its options
+    )
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\begin{demo}{The \emph{g:DlinprogHalfPlanes()} method}
+\begin{luadraw}{name=linear_prog2}
+local ld = luadraw
+local cpx = ld.cpx
+local Z = ld.cpx.Z
+local g = ld.graph:new{window={-3,6,-3,4.5}, size={10,10}}
+require 'luadraw_linprog'
+local C = {'x+y<2','x-y>-2','x+y/3>-2','y>-2'} -- contraints
+local function mypattern(angle, distance)
+    angle = angle or 0
+    distance = distance or 0.25 -- distance in centimeter
+    return "{Lines[angle="..angle..",distance="..distance.."cm]}"
+end
+local polygon, optimization = ld.linprogSolve(C,-5,5,-5,5,{"-2*x+y"})
+g:Daxes({0,1,1},{grid=true,gridcolor="LightGray",arrows="->",legend={"$x$","$y$"}})
+g:Dpolyline(polygon, true, "draw=none,fill=Pink, fill opacity=0.6")
+g:DlinprogHalfPlanes(
+    C[1], {color="red", pattern=mypattern(-45)},
+    C[2], {color="blue", pattern=mypattern(45)},
+    C[3], {color="gray", pattern=mypattern(90), anchor1d=0.2},
+    C[4], {color="orange", pattern=mypattern(0)}
+    )
+for _, obj in ipairs(optimization) do
+    g:DlinprogObjectiveLine(obj, {color="ForestGreen", dots=true})
+end
+g:Show()
+\end{luadraw}
+\end{demo}
+
+\subsubsection{In 3D}
+
+This involves representing systems of constraints of the form $ax+by+cz<d$ or $ax+by+cz>d$ within a given 3D window; the solution is a convex polyhedron.
+
+Based on this solution, one can seek to optimize a functional of the type $(x,y,z)\mapsto \alpha x+\beta y+\gamma z$ over this polyhedron—that is, to determine its minimum and maximum values ​​on the polyhedron.
+
+The function \cmd{ld.linprogSolve3d(constraints, x1, x2, y1, y2, z1, z2, objectives)} performs the calculations\footnote{This is a geometric solution method. The chosen window is a polyhedron that is subdivided by the various planes corresponding to the constraints.} and returns a sequence consisting of two items:
+\begin{enumerate}
+    \item the solution polyhedron (a table with two fields: \emph{vertices} and \emph{facets}),
+    \item the list of solutions for each functional. 
+\end{enumerate}
+
+The \argu{constraints} argument is the list of constraints; each constraint is a string of the form \code{"a*x+b*y+c*z>d"} or \code{"a*x+b*y+c*z<d"}, where $a$, $b$, $c$, and $d$ are numerical values, and $x$, $y$, and $z$ are letters (the multiplication symbol is mandatory).
+
+The arguments \argu{x1}, \argu{x2}, \argu{y1}, \argu{y2}, \argu{z1}, and \argu{z2} define the solution window: $[x_1;x_2]\times [y_1;y_2]\times [z_1;z_2]$. The \argu{objectives} argument is the list of objective functions to optimize (it may be empty); each function is a string in the format \code{"u*x+v*y+w*z"}, where $u$, $v$, and $w$ are numerical values. The solution for an objective function is a table with the following fields:
+\begin{itemize}
+    \item \opt{expr}: contains the expression of the objective function,
+    \item \opt{min}: contains the numerical value of the minimum,
+    \item \opt{mindot}: contains the point where the minimum is reached (complex number),
+    \item \opt{minplane}: contains the plane passing through the point where the minimum is reached,
+    \item \opt{max}: contains the numerical value of the maximum,
+    \item \opt{maxdot}: contains the point where the maximum is reached (complex number),
+    \item \opt{maxplane}: contains the plane passing through the point where the maximum is reached,
+\end{itemize}
+
+The module does not provide a specific 3D graphical method. Here is an example of how to use the \cmd{ld.linprogSolve3d()} function.
+
+\paragraph{Example:} Maximize $5x+4y+3z$ subject to: $\begin{cases}2x+3y+z<5\\4x+4y+2z<9\\3x+4y+2z<8\\x>0,\ y>0,\ z>0\end{cases}$
+
+\begin{demo}{The \emph{ld.linprogSolve3d()} function}
+\begin{luadraw}{name=linear_prog3}
+local ld = luadraw
+local cpx = ld.cpx
+local pt3d = ld.pt3d
+local Z, M = cpx.Z, pt3d.M
+local O, I, J, K = pt3d.Origin, pt3d.vecI, pt3d.vecJ, pt3d.vecK
+local g = ld.graph3d:new{ window={-2,2,-3,3}, size={10,12,0},window3d={0,3,0,2,0,4.5}, 
+    viewdir={"central",-35,65,15,M(1.5,1,2.25)}}
+require 'luadraw_linprog'
+local C = {'2*x+3*y+z<5', '4*x+4*y+2*z<9', '3*x+4*y+2*z<8'}
+local poly, sol = ld.linprogSolve3d(C,0,5,0,5,0,5,{"5*x+4*y+3*z"})
+local P = sol[1].maxplane
+local A = sol[1].maxdot
+local max = sol[1].max
+g:Dboxaxes3d({grid=true,gridcolor="LightGray",fillcolor="lightgray", drawbox=true})
+g:Dscene3d(
+    g:addPlane(P, {color="blue", edge=true, opacity=0.3, scale=1}),
+    g:addPoly(poly, {color="Crimson",opacity=0.7, edge=true, edgecolor="Gold", edgewidth=8}),
+    g:addDots(A, {scale=0.75, color="white"})
+    )
+g:Dlabel3d("Max=$"..max.."$", A, {pos="N", dir={I,K}, node_options="text=white"})
+g:Dpolyline3d({ld.pz(A), A, ld.px(A)}, "white")
+g:Show()
+\end{luadraw}
+\end{demo}

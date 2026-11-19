@@ -1,0 +1,3606 @@
+{
+ "pdf": "luadraw-doc-en.pdf",
+ "pages": 241,
+ "generated": "tools/build-index.py",
+ "entries": [
+  {
+   "kind": "section",
+   "title": "Introduction",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 1,
+   "pdf_page": 10
+  },
+  {
+   "kind": "subsection",
+   "title": "What's New Since Version 3.0",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 3,
+   "pdf_page": 10
+  },
+  {
+   "kind": "example",
+   "title": "test",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 44,
+   "pdf_page": 11
+  },
+  {
+   "kind": "subsection",
+   "title": "Prerequisites",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 68,
+   "pdf_page": 11
+  },
+  {
+   "kind": "example",
+   "title": "<filename>",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 101,
+   "pdf_page": 12
+  },
+  {
+   "kind": "subsection",
+   "title": "luadrawenv Environment Options",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 117,
+   "pdf_page": 12
+  },
+  {
+   "kind": "subsection",
+   "title": "The cpx (complex numbers) class",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 129,
+   "pdf_page": 13
+  },
+  {
+   "kind": "subsection",
+   "title": "Displaying a Variable in the Terminal",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 177,
+   "pdf_page": 14
+  },
+  {
+   "kind": "subsection",
+   "title": "Creating a Graph",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 181,
+   "pdf_page": 15
+  },
+  {
+   "kind": "subsection",
+   "title": "Saving and restoring settings",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 248,
+   "pdf_page": 15
+  },
+  {
+   "kind": "subsection",
+   "title": "Can we use TikZ directly in the luadrawenv environment?",
+   "tex": "luadraw-doc2d-en-section-1-Introduction.tex",
+   "line": 254,
+   "pdf_page": 15
+  },
+  {
+   "kind": "section",
+   "title": "Graphics Methods",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1,
+   "pdf_page": 16
+  },
+  {
+   "kind": "subsection",
+   "title": "Polygonal Lines",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 5,
+   "pdf_page": 16
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dpolyline",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 7,
+   "pdf_page": 18
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Options for drawing a polygonal line",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 21,
+   "pdf_page": 18
+  },
+  {
+   "kind": "example",
+   "title": "champ",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 104,
+   "pdf_page": 18
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dpolyline2",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 136,
+   "pdf_page": 19
+  },
+  {
+   "kind": "subsection",
+   "title": "Segments and Lines",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 145,
+   "pdf_page": 19
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dangle",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 151,
+   "pdf_page": 19
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dbissec",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 161,
+   "pdf_page": 19
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dhline",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 167,
+   "pdf_page": 19
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dline",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 172,
+   "pdf_page": 20
+  },
+  {
+   "kind": "subsubsection",
+   "title": "DlineEq",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 177,
+   "pdf_page": 20
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dmarkarc",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 184,
+   "pdf_page": 20
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dmarkseg",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 187,
+   "pdf_page": 20
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dmed",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 190,
+   "pdf_page": 20
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dparallel",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 199,
+   "pdf_page": 23
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dperp",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 206,
+   "pdf_page": 25
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dseg",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 213,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dtangent",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 220,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "DtangentC",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 226,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "DtangentI",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 232,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dtangent\\_from",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 239,
+   "pdf_page": 28
+  },
+  {
+   "kind": "example",
+   "title": "tangent_from",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 248,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dcommon\\_tangent",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 274,
+   "pdf_page": 28
+  },
+  {
+   "kind": "example",
+   "title": "common_tangent",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 290,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dparallel\\_tangent",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 306,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dnormal",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 320,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "DnormalC",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 326,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "DnormalI",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 332,
+   "pdf_page": 28
+  },
+  {
+   "kind": "example",
+   "title": "orthocentre",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 339,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsection",
+   "title": "Geometric Figures",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 371,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Darc",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 373,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dcircle",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 380,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dellipse",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 388,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dellipticarc",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 396,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dparallelogram",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 403,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dpolyreg",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 409,
+   "pdf_page": 28
+  },
+  {
+   "kind": "example",
+   "title": "pq_gonreg",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 419,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Drectangle",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 442,
+   "pdf_page": 28
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dsequence",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 452,
+   "pdf_page": 28
+  },
+  {
+   "kind": "example",
+   "title": "sequence",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 459,
+   "pdf_page": 29
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dsquare",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 494,
+   "pdf_page": 29
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dwedge",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 500,
+   "pdf_page": 29
+  },
+  {
+   "kind": "subsection",
+   "title": "Curves",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 503,
+   "pdf_page": 30
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Parametric: Dparametric",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 505,
+   "pdf_page": 30
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Polars: Dpolar",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 531,
+   "pdf_page": 30
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Cartesian: Dcartesian",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 551,
+   "pdf_page": 30
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Periodic Functions: Dperiodic",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 572,
+   "pdf_page": 31
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Step Functions: Dstepfunction",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 595,
+   "pdf_page": 31
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Piecewise Affine Functions: Daffinebypiece",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 628,
+   "pdf_page": 32
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Differential Equations: Dodesolve",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 661,
+   "pdf_page": 32
+  },
+  {
+   "kind": "example",
+   "title": "lotka_volterra",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 684,
+   "pdf_page": 33
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Implicit Curves: Dimplicit",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 729,
+   "pdf_page": 34
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Contour Lines: Dcontour",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 753,
+   "pdf_page": 34
+  },
+  {
+   "kind": "example",
+   "title": "Dcontour",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 770,
+   "pdf_page": 35
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Parameterization of a Polygonal Line: curvilinear\\_param",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 790,
+   "pdf_page": 35
+  },
+  {
+   "kind": "example",
+   "title": "curvilinear_param",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 796,
+   "pdf_page": 35
+  },
+  {
+   "kind": "subsection",
+   "title": "Domains related to Cartesian curves",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 820,
+   "pdf_page": 36
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Ddomain1",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 822,
+   "pdf_page": 37
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Ddomain2",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 838,
+   "pdf_page": 37
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Ddomain3",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 854,
+   "pdf_page": 37
+  },
+  {
+   "kind": "example",
+   "title": "courbe",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 871,
+   "pdf_page": 37
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dinequalities",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 891,
+   "pdf_page": 38
+  },
+  {
+   "kind": "example",
+   "title": "Dinequalities",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 906,
+   "pdf_page": 38
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dimplicit\\_inequalities",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 922,
+   "pdf_page": 39
+  },
+  {
+   "kind": "example",
+   "title": "implicit_inequalities",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 941,
+   "pdf_page": 39
+  },
+  {
+   "kind": "subsection",
+   "title": "Points (Ddots) and Labels (Dlabel)",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 959,
+   "pdf_page": 40
+  },
+  {
+   "kind": "subsection",
+   "title": "Paths: Dpath, Dspline, and Dtcurve}label{Dpath",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1019,
+   "pdf_page": 40
+  },
+  {
+   "kind": "subsubsection",
+   "title": "What is a path",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1021,
+   "pdf_page": 41
+  },
+  {
+   "kind": "example",
+   "title": "path_example",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1046,
+   "pdf_page": 42
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Functions on paths",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1077,
+   "pdf_page": 43
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Draw a Path",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1092,
+   "pdf_page": 43
+  },
+  {
+   "kind": "example",
+   "title": "path_spline",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1102,
+   "pdf_page": 43
+  },
+  {
+   "kind": "example",
+   "title": "tcurve",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1137,
+   "pdf_page": 44
+  },
+  {
+   "kind": "subsection",
+   "title": "Parametrizing a path",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1155,
+   "pdf_page": 45
+  },
+  {
+   "kind": "example",
+   "title": "param_path",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1160,
+   "pdf_page": 45
+  },
+  {
+   "kind": "subsection",
+   "title": "Paths and Clipping: Beginclip() and Endclip()",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1188,
+   "pdf_page": 46
+  },
+  {
+   "kind": "example",
+   "title": "polygon_with_different_line_color_and_rounded_corners",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1198,
+   "pdf_page": 46
+  },
+  {
+   "kind": "subsection",
+   "title": "Axes and Grids",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1222,
+   "pdf_page": 47
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Daxes",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1251,
+   "pdf_page": 48
+  },
+  {
+   "kind": "example",
+   "title": "axes_grid",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1328,
+   "pdf_page": 49
+  },
+  {
+   "kind": "subsubsection",
+   "title": "DaxeX and DaxeY",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1340,
+   "pdf_page": 50
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dgradline",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1397,
+   "pdf_page": 51
+  },
+  {
+   "kind": "example",
+   "title": "gradline",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1461,
+   "pdf_page": 53
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dgrid",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1474,
+   "pdf_page": 54
+  },
+  {
+   "kind": "example",
+   "title": "axes_non_ortho",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1497,
+   "pdf_page": 54
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dgradbox",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1516,
+   "pdf_page": 55
+  },
+  {
+   "kind": "example",
+   "title": "gradbox",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1525,
+   "pdf_page": 55
+  },
+  {
+   "kind": "subsection",
+   "title": "Set Drawings (Venn Diagrams)",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1542,
+   "pdf_page": 55
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Drawing a Set",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1544,
+   "pdf_page": 56
+  },
+  {
+   "kind": "example",
+   "title": "set",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1549,
+   "pdf_page": 57
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Operations on Sets",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1563,
+   "pdf_page": 57
+  },
+  {
+   "kind": "example",
+   "title": "cap_and_cup",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1574,
+   "pdf_page": 57
+  },
+  {
+   "kind": "subsection",
+   "title": "Importing an Image",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1595,
+   "pdf_page": 58
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Placing an Image in the Graphic",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1597,
+   "pdf_page": 58
+  },
+  {
+   "kind": "example",
+   "title": "Dimage",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1620,
+   "pdf_page": 59
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Mapping an Image onto a Parallelogram",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1640,
+   "pdf_page": 59
+  },
+  {
+   "kind": "example",
+   "title": "Dmapimage",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1664,
+   "pdf_page": 59
+  },
+  {
+   "kind": "subsection",
+   "title": "Colors",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1681,
+   "pdf_page": 60
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Color Calculations",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1685,
+   "pdf_page": 60
+  },
+  {
+   "kind": "example",
+   "title": "palettes",
+   "tex": "luadraw-doc2d-en-section-2-Graphics-Methods.tex",
+   "line": 1728,
+   "pdf_page": 61
+  },
+  {
+   "kind": "section",
+   "title": "Geometric Constructions",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 1,
+   "pdf_page": 61
+  },
+  {
+   "kind": "subsection",
+   "title": "circumcircle(), incircle()",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 5,
+   "pdf_page": 61
+  },
+  {
+   "kind": "subsection",
+   "title": "cvx\\_hull2d()",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 13,
+   "pdf_page": 61
+  },
+  {
+   "kind": "subsection",
+   "title": "delaunay()",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 17,
+   "pdf_page": 62
+  },
+  {
+   "kind": "example",
+   "title": "delaunay",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 22,
+   "pdf_page": 62
+  },
+  {
+   "kind": "subsection",
+   "title": "voronoi()",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 42,
+   "pdf_page": 63
+  },
+  {
+   "kind": "example",
+   "title": "voronoi",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 47,
+   "pdf_page": 63
+  },
+  {
+   "kind": "subsection",
+   "title": "line2strip()",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 66,
+   "pdf_page": 64
+  },
+  {
+   "kind": "example",
+   "title": "line2strip",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 75,
+   "pdf_page": 64
+  },
+  {
+   "kind": "subsection",
+   "title": "parallel\\_polyline()",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 101,
+   "pdf_page": 64
+  },
+  {
+   "kind": "subsection",
+   "title": "sss\\_triangle()",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 106,
+   "pdf_page": 65
+  },
+  {
+   "kind": "subsection",
+   "title": "sas\\_triangle()",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 110,
+   "pdf_page": 65
+  },
+  {
+   "kind": "subsection",
+   "title": "asa\\_triangle()",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 114,
+   "pdf_page": 65
+  },
+  {
+   "kind": "example",
+   "title": "sss_triangles_and_co",
+   "tex": "luadraw-doc2d-en-section-3-Geometric-Constructions.tex",
+   "line": 119,
+   "pdf_page": 65
+  },
+  {
+   "kind": "section",
+   "title": "Computations on Lists",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 1,
+   "pdf_page": 65
+  },
+  {
+   "kind": "subsection",
+   "title": "concat",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 3,
+   "pdf_page": 65
+  },
+  {
+   "kind": "subsection",
+   "title": "cut",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 12,
+   "pdf_page": 66
+  },
+  {
+   "kind": "subsection",
+   "title": "cutpolyline",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 16,
+   "pdf_page": 67
+  },
+  {
+   "kind": "example",
+   "title": "cutpolyline",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 26,
+   "pdf_page": 67
+  },
+  {
+   "kind": "subsection",
+   "title": "cutpolyline2",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 52,
+   "pdf_page": 67
+  },
+  {
+   "kind": "example",
+   "title": "cutpolyline2",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 57,
+   "pdf_page": 67
+  },
+  {
+   "kind": "subsection",
+   "title": "getbounds",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 72,
+   "pdf_page": 67
+  },
+  {
+   "kind": "subsection",
+   "title": "getdot",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 79,
+   "pdf_page": 67
+  },
+  {
+   "kind": "subsection",
+   "title": "insert",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 82,
+   "pdf_page": 68
+  },
+  {
+   "kind": "subsection",
+   "title": "interCC",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 92,
+   "pdf_page": 68
+  },
+  {
+   "kind": "example",
+   "title": "interCC",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 97,
+   "pdf_page": 68
+  },
+  {
+   "kind": "subsection",
+   "title": "interD",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 131,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "interDC",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 135,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "interDL",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 139,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "interL",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 143,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "interP",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 147,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "linspace",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 152,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "map",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 158,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "merge",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 162,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "range",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 167,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "read\\_csv\\_file",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 172,
+   "pdf_page": 69
+  },
+  {
+   "kind": "subsection",
+   "title": "Clipping Functions",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 194,
+   "pdf_page": 70
+  },
+  {
+   "kind": "subsection",
+   "title": "Adding Mathematical Functions",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 206,
+   "pdf_page": 70
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Protected Evaluation: evalf",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 210,
+   "pdf_page": 70
+  },
+  {
+   "kind": "subsubsection",
+   "title": "int",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 229,
+   "pdf_page": 71
+  },
+  {
+   "kind": "subsubsection",
+   "title": "gcd",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 238,
+   "pdf_page": 71
+  },
+  {
+   "kind": "subsubsection",
+   "title": "lcm",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 241,
+   "pdf_page": 71
+  },
+  {
+   "kind": "subsubsection",
+   "title": "nth\\_root",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 244,
+   "pdf_page": 71
+  },
+  {
+   "kind": "subsubsection",
+   "title": "solve",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 247,
+   "pdf_page": 72
+  },
+  {
+   "kind": "example",
+   "title": "int_solve",
+   "tex": "luadraw-doc2d-en-section-4-Computations-on-Lists.tex",
+   "line": 316,
+   "pdf_page": 72
+  },
+  {
+   "kind": "section",
+   "title": "Transformations",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 1,
+   "pdf_page": 73
+  },
+  {
+   "kind": "subsection",
+   "title": "affin",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 8,
+   "pdf_page": 74
+  },
+  {
+   "kind": "subsection",
+   "title": "ftransform",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 11,
+   "pdf_page": 74
+  },
+  {
+   "kind": "subsection",
+   "title": "hom",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 14,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "inv",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 17,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "proj",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 20,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "projO",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 23,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "rotate",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 26,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "shift",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 29,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "simil",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 32,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "sym",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 35,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "symG",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 38,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "symO",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 41,
+   "pdf_page": 77
+  },
+  {
+   "kind": "example",
+   "title": "Sierpinski",
+   "tex": "luadraw-doc2d-en-section-5-Transformations.tex",
+   "line": 45,
+   "pdf_page": 77
+  },
+  {
+   "kind": "section",
+   "title": "Matrix Calculus",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 1,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsection",
+   "title": "Matrix Calculations",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 7,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsubsection",
+   "title": "applymatrix and applyLmatrix",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 9,
+   "pdf_page": 77
+  },
+  {
+   "kind": "subsubsection",
+   "title": "composematrix",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 16,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "getmatrix",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 19,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "invmatrix",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 22,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "matrixof",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 25,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "mtransform and mLtransform",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 32,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsection",
+   "title": "Matrix associated with the graph",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 39,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Composematrix()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 48,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Det2d()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 51,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:IDmatrix()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 54,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Mtransform()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 57,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:MLtransform()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 60,
+   "pdf_page": 78
+  },
+  {
+   "kind": "example",
+   "title": "Pythagore",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 64,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Rotate()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 91,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Scale()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 94,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Savematrix() and g:Restorematrix()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 97,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Setmatrix()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 103,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Shift()",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 106,
+   "pdf_page": 78
+  },
+  {
+   "kind": "example",
+   "title": "free_art",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 110,
+   "pdf_page": 78
+  },
+  {
+   "kind": "subsection",
+   "title": "View change. Change of coordinate system",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 133,
+   "pdf_page": 78
+  },
+  {
+   "kind": "example",
+   "title": "viewport_changewin",
+   "tex": "luadraw-doc2d-en-section-6-Matrix-Calculus.tex",
+   "line": 153,
+   "pdf_page": 78
+  },
+  {
+   "kind": "section",
+   "title": "Adding Your Own Methods",
+   "tex": "luadraw-doc2d-en-section-7-Adding-Your-Own-Methods.tex",
+   "line": 1,
+   "pdf_page": 79
+  },
+  {
+   "kind": "subsection",
+   "title": "An Example",
+   "tex": "luadraw-doc2d-en-section-7-Adding-Your-Own-Methods.tex",
+   "line": 5,
+   "pdf_page": 79
+  },
+  {
+   "kind": "subsection",
+   "title": "How to import the file",
+   "tex": "luadraw-doc2d-en-section-7-Adding-Your-Own-Methods.tex",
+   "line": 70,
+   "pdf_page": 80
+  },
+  {
+   "kind": "example",
+   "title": "fields",
+   "tex": "luadraw-doc2d-en-section-7-Adding-Your-Own-Methods.tex",
+   "line": 105,
+   "pdf_page": 81
+  },
+  {
+   "kind": "subsection",
+   "title": "Modifying an existing method",
+   "tex": "luadraw-doc2d-en-section-7-Adding-Your-Own-Methods.tex",
+   "line": 134,
+   "pdf_page": 82
+  },
+  {
+   "kind": "example",
+   "title": "newDplotXY",
+   "tex": "luadraw-doc2d-en-section-7-Adding-Your-Own-Methods.tex",
+   "line": 165,
+   "pdf_page": 82
+  },
+  {
+   "kind": "example",
+   "title": "point_col",
+   "tex": "luadraw-doc3d-en.tex",
+   "line": 5,
+   "pdf_page": 82
+  },
+  {
+   "kind": "section",
+   "title": "Introduction",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 1,
+   "pdf_page": 84
+  },
+  {
+   "kind": "subsection",
+   "title": "Prerequisites",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 11,
+   "pdf_page": 84
+  },
+  {
+   "kind": "subsection",
+   "title": "Some reminders",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 20,
+   "pdf_page": 85
+  },
+  {
+   "kind": "subsection",
+   "title": "Creating a 3D Graph",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 51,
+   "pdf_page": 85
+  },
+  {
+   "kind": "example",
+   "title": "<filename>",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 54,
+   "pdf_page": 85
+  },
+  {
+   "kind": "example",
+   "title": "viewdir",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 88,
+   "pdf_page": 86
+  },
+  {
+   "kind": "subsection",
+   "title": "Affine Projection Modes",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 126,
+   "pdf_page": 87
+  },
+  {
+   "kind": "example",
+   "title": "perspectives",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 173,
+   "pdf_page": 87
+  },
+  {
+   "kind": "example",
+   "title": "perspectives2",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 228,
+   "pdf_page": 87
+  },
+  {
+   "kind": "subsection",
+   "title": "Central Projection",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 285,
+   "pdf_page": 88
+  },
+  {
+   "kind": "example",
+   "title": "central_perspective",
+   "tex": "luadraw-doc3d-en-section-1-Introduction.tex",
+   "line": 303,
+   "pdf_page": 88
+  },
+  {
+   "kind": "section",
+   "title": "The pt3d Class",
+   "tex": "luadraw-doc3d-en-section-2-The-pt3d-Class.tex",
+   "line": 1,
+   "pdf_page": 89
+  },
+  {
+   "kind": "subsection",
+   "title": "Representation of Points and Vectors",
+   "tex": "luadraw-doc3d-en-section-2-The-pt3d-Class.tex",
+   "line": 3,
+   "pdf_page": 89
+  },
+  {
+   "kind": "subsection",
+   "title": "Operations on 3D Points",
+   "tex": "luadraw-doc3d-en-section-2-The-pt3d-Class.tex",
+   "line": 30,
+   "pdf_page": 89
+  },
+  {
+   "kind": "subsection",
+   "title": "Methods of the class pt3d",
+   "tex": "luadraw-doc3d-en-section-2-The-pt3d-Class.tex",
+   "line": 40,
+   "pdf_page": 90
+  },
+  {
+   "kind": "subsection",
+   "title": "Displaying a Variable in the Terminal",
+   "tex": "luadraw-doc3d-en-section-2-The-pt3d-Class.tex",
+   "line": 68,
+   "pdf_page": 90
+  },
+  {
+   "kind": "section",
+   "title": "Graphics Methods",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 1,
+   "pdf_page": 90
+  },
+  {
+   "kind": "subsection",
+   "title": "Line Drawing",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 13,
+   "pdf_page": 91
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Polygonal Line: Dpolyline3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 15,
+   "pdf_page": 91
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Right Angle: Dangle3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 19,
+   "pdf_page": 91
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Segment: Dseg3d, Dmarkseg3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 23,
+   "pdf_page": 91
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Line: Dline3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 30,
+   "pdf_page": 91
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Circular arc: Darc3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 38,
+   "pdf_page": 91
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Circle: Dcircle3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 48,
+   "pdf_page": 92
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Elliptical arc: Dellipticarc3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 60,
+   "pdf_page": 92
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Ellipse: Dellipse3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 72,
+   "pdf_page": 92
+  },
+  {
+   "kind": "subsubsection",
+   "title": "3D Path: Dpath3d}label{Dpath3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 85,
+   "pdf_page": 92
+  },
+  {
+   "kind": "example",
+   "title": "viewdir",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 109,
+   "pdf_page": 93
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Functions for 3D paths",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 136,
+   "pdf_page": 94
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Plane: Dplane",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 149,
+   "pdf_page": 94
+  },
+  {
+   "kind": "example",
+   "title": "Dplane",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 164,
+   "pdf_page": 95
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Parametric curve: Dparametric3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 191,
+   "pdf_page": 95
+  },
+  {
+   "kind": "example",
+   "title": "Dparametric3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 221,
+   "pdf_page": 96
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Parameterization of a Polygonal Line: curvilinear\\_param3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 246,
+   "pdf_page": 96
+  },
+  {
+   "kind": "subsubsection",
+   "title": "The reference: Dboxaxes3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 251,
+   "pdf_page": 96
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Drawing on a Plane",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 291,
+   "pdf_page": 97
+  },
+  {
+   "kind": "example",
+   "title": "draw_on_plane",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 320,
+   "pdf_page": 98
+  },
+  {
+   "kind": "subsection",
+   "title": "Points and Labels",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 364,
+   "pdf_page": 99
+  },
+  {
+   "kind": "subsubsection",
+   "title": "3D Points: Ddots3d, Dballdots3d, Dcrossdots3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 366,
+   "pdf_page": 99
+  },
+  {
+   "kind": "example",
+   "title": "Ddots3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 379,
+   "pdf_page": 99
+  },
+  {
+   "kind": "subsubsection",
+   "title": "3D Labels: Dlabel3d",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 406,
+   "pdf_page": 100
+  },
+  {
+   "kind": "subsection",
+   "title": "Basic Solids (Without Facets)",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 434,
+   "pdf_page": 100
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Cylinder: Dcylinder",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 438,
+   "pdf_page": 101
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Cone: Dcone",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 479,
+   "pdf_page": 101
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Frustum: Dfrustum",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 495,
+   "pdf_page": 102
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Sphere: Dsphere",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 510,
+   "pdf_page": 102
+  },
+  {
+   "kind": "example",
+   "title": "cylindre_cone_sphere",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 538,
+   "pdf_page": 102
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Cut sphere: Dcut\\_sphere",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 565,
+   "pdf_page": 103
+  },
+  {
+   "kind": "example",
+   "title": "cut_sphere",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 581,
+   "pdf_page": 104
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Cone\\_outline, Cylinder\\_outline, Frustum\\_outline, Sphere\\_outline",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 602,
+   "pdf_page": 104
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Cone\\_tangency, Cylinder\\_tangency, Frustum\\_tangency, Sphere\\_tangency",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 634,
+   "pdf_page": 105
+  },
+  {
+   "kind": "example",
+   "title": "tangency",
+   "tex": "luadraw-doc3d-en-section-3-Graphics-Methods.tex",
+   "line": 649,
+   "pdf_page": 106
+  },
+  {
+   "kind": "section",
+   "title": "Faceted Solids",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 1,
+   "pdf_page": 106
+  },
+  {
+   "kind": "subsection",
+   "title": "Definition of a Solid",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 3,
+   "pdf_page": 106
+  },
+  {
+   "kind": "subsection",
+   "title": "Drawing a Polyhedron: Dpoly",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 28,
+   "pdf_page": 107
+  },
+  {
+   "kind": "example",
+   "title": "tetra_coupe",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 64,
+   "pdf_page": 108
+  },
+  {
+   "kind": "subsection",
+   "title": "Displaying the Face and/or Vertex Numbers of a Polyhedron",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 85,
+   "pdf_page": 108
+  },
+  {
+   "kind": "example",
+   "title": "show_facet_number",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 90,
+   "pdf_page": 109
+  },
+  {
+   "kind": "subsection",
+   "title": "Polyhedron Construction Functions",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 104,
+   "pdf_page": 109
+  },
+  {
+   "kind": "example",
+   "title": "frustum_pyramid",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 141,
+   "pdf_page": 111
+  },
+  {
+   "kind": "example",
+   "title": "hyperbole",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 160,
+   "pdf_page": 111
+  },
+  {
+   "kind": "example",
+   "title": "several_views",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 185,
+   "pdf_page": 112
+  },
+  {
+   "kind": "subsection",
+   "title": "Converting a Polyhedron to a Graph",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 226,
+   "pdf_page": 113
+  },
+  {
+   "kind": "subsection",
+   "title": "Reading from an obj file",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 236,
+   "pdf_page": 113
+  },
+  {
+   "kind": "example",
+   "title": "lecture_obj",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 241,
+   "pdf_page": 113
+  },
+  {
+   "kind": "subsection",
+   "title": "Surface in obj format",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 251,
+   "pdf_page": 114
+  },
+  {
+   "kind": "subsection",
+   "title": "Drawing a List of Facets: Dfacet and Dmixfacet",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 269,
+   "pdf_page": 114
+  },
+  {
+   "kind": "example",
+   "title": "courbes_niv",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 322,
+   "pdf_page": 115
+  },
+  {
+   "kind": "subsection",
+   "title": "Functions for Constructing Facet Lists",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 350,
+   "pdf_page": 116
+  },
+  {
+   "kind": "subsubsection",
+   "title": "surface()",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 354,
+   "pdf_page": 117
+  },
+  {
+   "kind": "subsubsection",
+   "title": "cartesian3d()",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 365,
+   "pdf_page": 117
+  },
+  {
+   "kind": "example",
+   "title": "point_col",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 371,
+   "pdf_page": 117
+  },
+  {
+   "kind": "subsubsection",
+   "title": "cylindrical\\_surface()",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 390,
+   "pdf_page": 118
+  },
+  {
+   "kind": "example",
+   "title": "surface_with_addWall",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 395,
+   "pdf_page": 118
+  },
+  {
+   "kind": "subsubsection",
+   "title": "curve2cone()",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 421,
+   "pdf_page": 118
+  },
+  {
+   "kind": "example",
+   "title": "curve2cone",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 439,
+   "pdf_page": 118
+  },
+  {
+   "kind": "subsubsection",
+   "title": "curve2cylinder()",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 455,
+   "pdf_page": 119
+  },
+  {
+   "kind": "example",
+   "title": "curve2cylinder",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 472,
+   "pdf_page": 119
+  },
+  {
+   "kind": "subsubsection",
+   "title": "line2tube(); section2tube()",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 494,
+   "pdf_page": 120
+  },
+  {
+   "kind": "example",
+   "title": "line2tube_section2tube",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 529,
+   "pdf_page": 121
+  },
+  {
+   "kind": "subsubsection",
+   "title": "read\\_table3d()",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 548,
+   "pdf_page": 123
+  },
+  {
+   "kind": "example",
+   "title": "read_table3d",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 645,
+   "pdf_page": 124
+  },
+  {
+   "kind": "subsubsection",
+   "title": "rotcurve()",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 662,
+   "pdf_page": 125
+  },
+  {
+   "kind": "example",
+   "title": "rotcurve",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 673,
+   "pdf_page": 125
+  },
+  {
+   "kind": "subsubsection",
+   "title": "rotline()",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 694,
+   "pdf_page": 126
+  },
+  {
+   "kind": "example",
+   "title": "rotline",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 708,
+   "pdf_page": 126
+  },
+  {
+   "kind": "subsection",
+   "title": "Edges of a solid",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 722,
+   "pdf_page": 126
+  },
+  {
+   "kind": "subsection",
+   "title": "Methods and functions applying to facets or polyhedra",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 750,
+   "pdf_page": 127
+  },
+  {
+   "kind": "example",
+   "title": "sphere_octaedre",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 772,
+   "pdf_page": 127
+  },
+  {
+   "kind": "subsection",
+   "title": "Cutting a solid: cutpoly, cutfacet and cutfacet2",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 800,
+   "pdf_page": 128
+  },
+  {
+   "kind": "example",
+   "title": "cutpoly",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 808,
+   "pdf_page": 129
+  },
+  {
+   "kind": "example",
+   "title": "torus_with_holes",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 836,
+   "pdf_page": 129
+  },
+  {
+   "kind": "subsection",
+   "title": "Clipping Facets with a Convex Polyhedron: clip3d",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 857,
+   "pdf_page": 130
+  },
+  {
+   "kind": "example",
+   "title": "clip3d",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 872,
+   "pdf_page": 131
+  },
+  {
+   "kind": "subsection",
+   "title": "Clip a plane with a convex polyhedron: clipplane",
+   "tex": "luadraw-doc3d-en-section-4-Faceted-Solids.tex",
+   "line": 894,
+   "pdf_page": 131
+  },
+  {
+   "kind": "section",
+   "title": "The Dscene3d Method",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 1,
+   "pdf_page": 131
+  },
+  {
+   "kind": "subsection",
+   "title": "The Principle, the Limitations",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 3,
+   "pdf_page": 131
+  },
+  {
+   "kind": "subsection",
+   "title": "Construction of a 3D scene",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 16,
+   "pdf_page": 132
+  },
+  {
+   "kind": "example",
+   "title": "intersection_plans",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 32,
+   "pdf_page": 132
+  },
+  {
+   "kind": "subsection",
+   "title": "Methods for adding an object to the 3D scene",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 57,
+   "pdf_page": 133
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding facets: g:addFacet and g:addPoly",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 61,
+   "pdf_page": 133
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding a plane: g:addPlane and g:addPlaneEq",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 107,
+   "pdf_page": 134
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a polygonal line: g:addPolyline",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 121,
+   "pdf_page": 134
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add Axes: g:addAxes",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 150,
+   "pdf_page": 135
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a line: g:addLine",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 155,
+   "pdf_page": 135
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding a \"right\" angle: g:addAngle",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 159,
+   "pdf_page": 135
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a circular arc: g:addArc",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 163,
+   "pdf_page": 135
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a circle: g:addCircle",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 167,
+   "pdf_page": 136
+  },
+  {
+   "kind": "example",
+   "title": "cylindres_imbriques",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 172,
+   "pdf_page": 136
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding points: g:addDots",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 219,
+   "pdf_page": 137
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding Labels: g:addLabel",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 229,
+   "pdf_page": 137
+  },
+  {
+   "kind": "example",
+   "title": "icosaedre",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 246,
+   "pdf_page": 138
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding dividing walls: g:addWall",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 276,
+   "pdf_page": 139
+  },
+  {
+   "kind": "example",
+   "title": "addWall",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 288,
+   "pdf_page": 140
+  },
+  {
+   "kind": "example",
+   "title": "torus",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 317,
+   "pdf_page": 141
+  },
+  {
+   "kind": "example",
+   "title": "section_sphere",
+   "tex": "luadraw-doc3d-en-section-5-Dscene3d-Method.tex",
+   "line": 363,
+   "pdf_page": 141
+  },
+  {
+   "kind": "section",
+   "title": "Geometric Constructions",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 1,
+   "pdf_page": 142
+  },
+  {
+   "kind": "subsection",
+   "title": "Circumscribed circle, incircle: circumcircle3d(), incircle3d()",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 5,
+   "pdf_page": 142
+  },
+  {
+   "kind": "subsection",
+   "title": "Convex Hull: cvx\\_hull3d()",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 12,
+   "pdf_page": 143
+  },
+  {
+   "kind": "example",
+   "title": "cvx_hull3d",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 17,
+   "pdf_page": 143
+  },
+  {
+   "kind": "subsection",
+   "title": "Planes: plane(), planeEq(), orthoframe(), plane2ABC()",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 35,
+   "pdf_page": 143
+  },
+  {
+   "kind": "example",
+   "title": "plans",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 49,
+   "pdf_page": 144
+  },
+  {
+   "kind": "subsection",
+   "title": "Circumscribed Sphere, Inscribed Sphere: circumsphere(), insphere()",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 76,
+   "pdf_page": 144
+  },
+  {
+   "kind": "subsection",
+   "title": "Fixed-length tetrahedron: tetra\\_len()",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 84,
+   "pdf_page": 145
+  },
+  {
+   "kind": "example",
+   "title": "tetra_len",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 89,
+   "pdf_page": 145
+  },
+  {
+   "kind": "subsection",
+   "title": "Triangles: sss\\_triangle3d(), sas\\_triangle3d(), asa\\_triangle3d()",
+   "tex": "luadraw-doc3d-en-section-6-Geometric-Constructions.tex",
+   "line": 110,
+   "pdf_page": 145
+  },
+  {
+   "kind": "section",
+   "title": "Matrix Calculus Transformations and Some Mathematical Functions",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 1,
+   "pdf_page": 146
+  },
+  {
+   "kind": "subsection",
+   "title": "3D Transformations",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 3,
+   "pdf_page": 146
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Apply a transformation function: ftransform3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 13,
+   "pdf_page": 146
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Projections: proj3d, proj3dO, dproj3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 17,
+   "pdf_page": 146
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Projections onto axes or planes related to axes",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 25,
+   "pdf_page": 146
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Symmetries: sym3d, sym3dO, dsym3d, psym3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 36,
+   "pdf_page": 147
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Rotation: rotate3d, rotateaxe3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 45,
+   "pdf_page": 147
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Scaling: scale3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 53,
+   "pdf_page": 147
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Inversion: inv3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 57,
+   "pdf_page": 147
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Stereography: projstereo and inv\\_projstereo",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 61,
+   "pdf_page": 147
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Translation: shift3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 67,
+   "pdf_page": 147
+  },
+  {
+   "kind": "subsection",
+   "title": "Matrix Calculus",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 72,
+   "pdf_page": 147
+  },
+  {
+   "kind": "subsubsection",
+   "title": "applymatrix3d ​​and applyLmatrix3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 78,
+   "pdf_page": 148
+  },
+  {
+   "kind": "subsubsection",
+   "title": "composematrix3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 86,
+   "pdf_page": 148
+  },
+  {
+   "kind": "subsubsection",
+   "title": "getmatrix3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 89,
+   "pdf_page": 148
+  },
+  {
+   "kind": "subsubsection",
+   "title": "invmatrix3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 92,
+   "pdf_page": 148
+  },
+  {
+   "kind": "subsubsection",
+   "title": "matrix3dof",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 95,
+   "pdf_page": 148
+  },
+  {
+   "kind": "subsubsection",
+   "title": "mtransform3d and mLtransform3d",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 99,
+   "pdf_page": 148
+  },
+  {
+   "kind": "subsubsection",
+   "title": "planetransform",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 106,
+   "pdf_page": 148
+  },
+  {
+   "kind": "subsection",
+   "title": "Matrix associated with the 3D graph",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 110,
+   "pdf_page": 148
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Composematrix3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 120,
+   "pdf_page": 148
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Det3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 124,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:IDmatrix3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 128,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Mtransform3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 132,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:MLtransform3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 136,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Rotate3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 140,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Scale3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 144,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Setmatrix3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 148,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsubsection",
+   "title": "g:Shift3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 152,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsection",
+   "title": "Additional Mathematical Functions",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 157,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsubsection",
+   "title": "clippolyline3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 159,
+   "pdf_page": 149
+  },
+  {
+   "kind": "subsubsection",
+   "title": "clipline3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 170,
+   "pdf_page": 150
+  },
+  {
+   "kind": "subsubsection",
+   "title": "cutpolyline3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 179,
+   "pdf_page": 150
+  },
+  {
+   "kind": "subsubsection",
+   "title": "getbounds3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 190,
+   "pdf_page": 150
+  },
+  {
+   "kind": "subsubsection",
+   "title": "interDP()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 194,
+   "pdf_page": 150
+  },
+  {
+   "kind": "subsubsection",
+   "title": "interPP()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 198,
+   "pdf_page": 150
+  },
+  {
+   "kind": "subsubsection",
+   "title": "interDD()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 202,
+   "pdf_page": 150
+  },
+  {
+   "kind": "subsubsection",
+   "title": "interCS()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 206,
+   "pdf_page": 151
+  },
+  {
+   "kind": "subsubsection",
+   "title": "interDS()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 210,
+   "pdf_page": 151
+  },
+  {
+   "kind": "subsubsection",
+   "title": "interPS()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 214,
+   "pdf_page": 151
+  },
+  {
+   "kind": "subsubsection",
+   "title": "interSS()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 218,
+   "pdf_page": 151
+  },
+  {
+   "kind": "subsubsection",
+   "title": "interSSS()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 222,
+   "pdf_page": 151
+  },
+  {
+   "kind": "subsubsection",
+   "title": "merge3d()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 226,
+   "pdf_page": 151
+  },
+  {
+   "kind": "subsubsection",
+   "title": "split\\_points\\_by\\_visibility()",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 230,
+   "pdf_page": 151
+  },
+  {
+   "kind": "example",
+   "title": "curve_on_cylinder",
+   "tex": "luadraw-doc3d-en-section-7-Matrix-Calculus-Transformations-Some-Mathematical-Functions.tex",
+   "line": 235,
+   "pdf_page": 151
+  },
+  {
+   "kind": "section",
+   "title": "More Advanced Examples",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 1,
+   "pdf_page": 152
+  },
+  {
+   "kind": "subsection",
+   "title": "The Box of Sugars",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 3,
+   "pdf_page": 152
+  },
+  {
+   "kind": "example",
+   "title": "boite_sucres",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 15,
+   "pdf_page": 152
+  },
+  {
+   "kind": "subsection",
+   "title": "Stack of Cubes",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 74,
+   "pdf_page": 154
+  },
+  {
+   "kind": "example",
+   "title": "cubes_empiles",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 79,
+   "pdf_page": 154
+  },
+  {
+   "kind": "subsection",
+   "title": "Illustration of Dandelin's Theorem",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 148,
+   "pdf_page": 155
+  },
+  {
+   "kind": "example",
+   "title": "Dandelin",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 151,
+   "pdf_page": 157
+  },
+  {
+   "kind": "subsection",
+   "title": "Volume defined by a double integral",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 226,
+   "pdf_page": 157
+  },
+  {
+   "kind": "example",
+   "title": "volume_integrale",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 228,
+   "pdf_page": 157
+  },
+  {
+   "kind": "subsection",
+   "title": "Volume defined on something other than a block",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 255,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "volume2",
+   "tex": "luadraw-doc3d-en-section-8-More-Advanced-Examples.tex",
+   "line": 257,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_coils\\_chains module",
+   "tex": "luadraw-doc-en-Ext-coils-chains.tex",
+   "line": 1,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Springs",
+   "tex": "luadraw-doc-en-Ext-coils-chains.tex",
+   "line": 6,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "Dcoil_examples",
+   "tex": "luadraw-doc-en-Ext-coils-chains.tex",
+   "line": 35,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "Dcoil2_examples",
+   "tex": "luadraw-doc-en-Ext-coils-chains.tex",
+   "line": 77,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Chains",
+   "tex": "luadraw-doc-en-Ext-coils-chains.tex",
+   "line": 99,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "Dchain_examples",
+   "tex": "luadraw-doc-en-Ext-coils-chains.tex",
+   "line": 116,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "Dchain2_examples",
+   "tex": "luadraw-doc-en-Ext-coils-chains.tex",
+   "line": 150,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_compile\\_tex module",
+   "tex": "luadraw-doc-en-Ext-compile-tex.tex",
+   "line": 1,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Part One: Compilation and Reading",
+   "tex": "luadraw-doc-en-Ext-compile-tex.tex",
+   "line": 39,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Part Two: Using the Result",
+   "tex": "luadraw-doc-en-Ext-compile-tex.tex",
+   "line": 61,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "compile_tex2d",
+   "tex": "luadraw-doc-en-Ext-compile-tex.tex",
+   "line": 83,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "compile_tex3d",
+   "tex": "luadraw-doc-en-Ext-compile-tex.tex",
+   "line": 132,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_cvx\\_polyhedra\\_nets module",
+   "tex": "luadraw-doc-en-Ext-cvx-polyhedra-nets.tex",
+   "line": 1,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Basic Function",
+   "tex": "luadraw-doc-en-Ext-cvx-polyhedra-nets.tex",
+   "line": 5,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "The Drawing Method",
+   "tex": "luadraw-doc-en-Ext-cvx-polyhedra-nets.tex",
+   "line": 60,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Examples",
+   "tex": "luadraw-doc-en-Ext-cvx-polyhedra-nets.tex",
+   "line": 85,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "parallelep_net",
+   "tex": "luadraw-doc-en-Ext-cvx-polyhedra-nets.tex",
+   "line": 90,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "parallelep_net2",
+   "tex": "luadraw-doc-en-Ext-cvx-polyhedra-nets.tex",
+   "line": 107,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "parallelep_net3",
+   "tex": "luadraw-doc-en-Ext-cvx-polyhedra-nets.tex",
+   "line": 126,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "The unfold\\_tree() function",
+   "tex": "luadraw-doc-en-Ext-cvx-polyhedra-nets.tex",
+   "line": 151,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_decorations module",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 1,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "2D Polygonal Lines: g:Dpolyline()",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 5,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "2D Paths: g:Dpath()",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 40,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "2D Lines: g:Dline()",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 44,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "2D Segments: g:Dseg()",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 55,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "2D Arc: g:Darc()",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 65,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "decoratedarc2D",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 83,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "3D Arc: g:Darc3d()",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 131,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "decorated_arcs3D",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 164,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Angle 3D: g:Dangle3d()",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 209,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "decorations2d",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 231,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "decorations3d",
+   "tex": "luadraw-doc-en-Ext-decorations.tex",
+   "line": 258,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_fields module",
+   "tex": "luadraw-doc-en-Ext-fields.tex",
+   "line": 1,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "2D Fields",
+   "tex": "luadraw-doc-en-Ext-fields.tex",
+   "line": 5,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "3D Fields",
+   "tex": "luadraw-doc-en-Ext-fields.tex",
+   "line": 28,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "surface-quiver",
+   "tex": "luadraw-doc-en-Ext-fields.tex",
+   "line": 65,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "surface-quiver2",
+   "tex": "luadraw-doc-en-Ext-fields.tex",
+   "line": 87,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_linprog module",
+   "tex": "luadraw-doc-en-Ext-linprog.tex",
+   "line": 1,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "In 2D",
+   "tex": "luadraw-doc-en-Ext-linprog.tex",
+   "line": 7,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "linear_prog1",
+   "tex": "luadraw-doc-en-Ext-linprog.tex",
+   "line": 136,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "linear_prog2",
+   "tex": "luadraw-doc-en-Ext-linprog.tex",
+   "line": 155,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "In 3D",
+   "tex": "luadraw-doc-en-Ext-linprog.tex",
+   "line": 183,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "linear_prog3",
+   "tex": "luadraw-doc-en-Ext-linprog.tex",
+   "line": 213,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_log\\_axes module",
+   "tex": "luadraw-doc-en-Ext-log-axes.tex",
+   "line": 1,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Initialization: g:Beginlogview()",
+   "tex": "luadraw-doc-en-Ext-log-axes.tex",
+   "line": 13,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Drawing and Conversion Methods",
+   "tex": "luadraw-doc-en-Ext-log-axes.tex",
+   "line": 101,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "End of grid usage: g:Endlogview()",
+   "tex": "luadraw-doc-en-Ext-log-axes.tex",
+   "line": 113,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Examples",
+   "tex": "luadraw-doc-en-Ext-log-axes.tex",
+   "line": 117,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "logx_example",
+   "tex": "luadraw-doc-en-Ext-log-axes.tex",
+   "line": 120,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "logy_and_logxy_example",
+   "tex": "luadraw-doc-en-Ext-log-axes.tex",
+   "line": 146,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_palettes Module",
+   "tex": "luadraw-doc-en-Ext-palettes.tex",
+   "line": 1,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_pdfliteral module",
+   "tex": "luadraw-doc-en-Ext-pdfliteral.tex",
+   "line": 1,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "The g:Dliteralpath() method",
+   "tex": "luadraw-doc-en-Ext-pdfliteral.tex",
+   "line": 10,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "The g:Dliteralpolyline() method",
+   "tex": "luadraw-doc-en-Ext-pdfliteral.tex",
+   "line": 23,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "The g:Dliteraldots() method",
+   "tex": "luadraw-doc-en-Ext-pdfliteral.tex",
+   "line": 32,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "bifurcation",
+   "tex": "luadraw-doc-en-Ext-pdfliteral.tex",
+   "line": 45,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsubsection",
+   "title": "The g:Dliteralfacet() method",
+   "tex": "luadraw-doc-en-Ext-pdfliteral.tex",
+   "line": 63,
+   "pdf_page": 158
+  },
+  {
+   "kind": "example",
+   "title": "Dliteralfacet",
+   "tex": "luadraw-doc-en-Ext-pdfliteral.tex",
+   "line": 110,
+   "pdf_page": 158
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_polyhedrons module",
+   "tex": "luadraw-doc-en-Ext-polyhedrons.tex",
+   "line": 1,
+   "pdf_page": 160
+  },
+  {
+   "kind": "example",
+   "title": "polyhedrons",
+   "tex": "luadraw-doc-en-Ext-polyhedrons.tex",
+   "line": 59,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_povray Module",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 1,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Prerequisites and introduction",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 7,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Default Settings",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 21,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Before Creating Objects",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 64,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Creation of Objects",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 69,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "List of Predefined Objects",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 102,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Save, execution, inclusion",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 244,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Examples",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 259,
+   "pdf_page": 161
+  },
+  {
+   "kind": "example",
+   "title": "intersection_surf",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 264,
+   "pdf_page": 161
+  },
+  {
+   "kind": "example",
+   "title": "Villarceau_circles",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 297,
+   "pdf_page": 161
+  },
+  {
+   "kind": "example",
+   "title": "holes_in_hemisphere",
+   "tex": "luadraw-doc-en-Ext-povray.tex",
+   "line": 334,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_shadedforms module",
+   "tex": "luadraw-doc-en-Ext-shadedforms.tex",
+   "line": 1,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dshadedpolyline",
+   "tex": "luadraw-doc-en-Ext-shadedforms.tex",
+   "line": 5,
+   "pdf_page": 161
+  },
+  {
+   "kind": "example",
+   "title": "shading_polyline",
+   "tex": "luadraw-doc-en-Ext-shadedforms.tex",
+   "line": 23,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dcolorbar",
+   "tex": "luadraw-doc-en-Ext-shadedforms.tex",
+   "line": 53,
+   "pdf_page": 161
+  },
+  {
+   "kind": "example",
+   "title": "Dcolorbar",
+   "tex": "luadraw-doc-en-Ext-shadedforms.tex",
+   "line": 77,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dshadedrectangle",
+   "tex": "luadraw-doc-en-Ext-shadedforms.tex",
+   "line": 97,
+   "pdf_page": 161
+  },
+  {
+   "kind": "example",
+   "title": "Dshadedrectangle",
+   "tex": "luadraw-doc-en-Ext-shadedforms.tex",
+   "line": 120,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Dshadedregion",
+   "tex": "luadraw-doc-en-Ext-shadedforms.tex",
+   "line": 139,
+   "pdf_page": 161
+  },
+  {
+   "kind": "example",
+   "title": "Dshadedregion",
+   "tex": "luadraw-doc-en-Ext-shadedforms.tex",
+   "line": 144,
+   "pdf_page": 161
+  },
+  {
+   "kind": "subsection",
+   "title": "The luadraw\\_spherical Module",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 1,
+   "pdf_page": 163
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Global Module Functions",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 13,
+   "pdf_page": 163
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Sphere Definition",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 45,
+   "pdf_page": 164
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding a label to graphic elements}label{addlabel",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 73,
+   "pdf_page": 164
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a circle: g:DScircle",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 97,
+   "pdf_page": 165
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a great circle: g:DSgreatcircle",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 111,
+   "pdf_page": 165
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a great circle arc: g:DSarc",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 124,
+   "pdf_page": 166
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add an angle: g:DSangle",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 138,
+   "pdf_page": 166
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a spherical facet: g:DSfacet",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 169,
+   "pdf_page": 167
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a spherical curve: g:DScurve",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 184,
+   "pdf_page": 167
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding a spherical region: g:DSregion",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 197,
+   "pdf_page": 168
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a segment: g:DSseg",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 220,
+   "pdf_page": 168
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a line: g:DSline",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 233,
+   "pdf_page": 168
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a polygonal line: g:DSpolyline",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 248,
+   "pdf_page": 169
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding axes: g:DSaxes",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 262,
+   "pdf_page": 169
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a plane: g:DSplane",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 281,
+   "pdf_page": 170
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add a label: g:DSlabel",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 296,
+   "pdf_page": 170
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Add points: g:DSdots and g:DSstars",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 300,
+   "pdf_page": 170
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Inverse Stereography: g:DSinvstereo\\_curve and g:DSinvstereo\\_polyline",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 324,
+   "pdf_page": 171
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Adding paths",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 332,
+   "pdf_page": 171
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Additional methods: g:Dhalf\\_sphere, g:Dquater\\_sphere, g:Deighth\\_sphere",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 351,
+   "pdf_page": 171
+  },
+  {
+   "kind": "subsubsection",
+   "title": "Examples",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 381,
+   "pdf_page": 172
+  },
+  {
+   "kind": "example",
+   "title": "cube_in_sphere",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 384,
+   "pdf_page": 172
+  },
+  {
+   "kind": "example",
+   "title": "courbe_spherique",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 425,
+   "pdf_page": 173
+  },
+  {
+   "kind": "example",
+   "title": "pavage_spherique",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 450,
+   "pdf_page": 174
+  },
+  {
+   "kind": "example",
+   "title": "tangent_to_sphere",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 477,
+   "pdf_page": 175
+  },
+  {
+   "kind": "example",
+   "title": "projstereo_Sfacet",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 512,
+   "pdf_page": 176
+  },
+  {
+   "kind": "example",
+   "title": "stereographic_curve",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 547,
+   "pdf_page": 177
+  },
+  {
+   "kind": "example",
+   "title": "spherical_strip",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 577,
+   "pdf_page": 178
+  },
+  {
+   "kind": "example",
+   "title": "DSregion",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 622,
+   "pdf_page": 179
+  },
+  {
+   "kind": "example",
+   "title": "Split_facet",
+   "tex": "luadraw-doc-en-Ext-spherical.tex",
+   "line": 659,
+   "pdf_page": 180
+  },
+  {
+   "kind": "section",
+   "title": "Extensions",
+   "tex": "luadraw-doc-en-Extensions.tex",
+   "line": 1,
+   "pdf_page": 180
+  },
+  {
+   "kind": "section",
+   "title": "History",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 1,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 3.7",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 2,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 3.6",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 25,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 3.5",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 69,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 3.4",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 109,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 3.3",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 134,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 3.2",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 160,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 3.1",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 191,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 3.0",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 223,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 2.8",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 247,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 2.7",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 281,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 2.6",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 296,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 2.5",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 310,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 2.4",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 321,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 2.3",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 334,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 2.2",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 349,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 2.1",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 386,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 2.0",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 408,
+   "pdf_page": 180
+  },
+  {
+   "kind": "subsection",
+   "title": "Version 1.0",
+   "tex": "luadraw-doc-en-History.tex",
+   "line": 416,
+   "pdf_page": 180
+  }
+ ],
+ "missing": 359
+}

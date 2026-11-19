@@ -1,0 +1,3 @@
+luadraw v3.7 (Patrick Fradin), LPPL 1.3c or later
+Downloaded 2026-11-19 from CTAN: macros/luatex/latex/luadraw.zip (aliyun mirror)
+Upstream: https://github.com/pfradin/luadraw | Docs: doc-src-en/ = doc/src/body-en of the CTAN package

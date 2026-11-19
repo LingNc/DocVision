@@ -37,3 +37,10 @@
 - [x] SK-I8 修正：**auto 层是本线自引入的中间态，老代码结构约定=part 根无 auto**（老 docindex 直读 <part>/*_content_list.json）。NormalizeLayout 终版=收敛 part 根：任意上游形态（顶层文件夹/auto 层/直出/混合残留）mergeInto 合并进 <part>/ 删壳，幂等；prep-mineru-api 断点①判据改为 part 根 content_list 存在。
 - [x] SK-I9. MinerU 配置默认值对齐老线实测可用值：model_version=vlm / is_ocr=true / language=ch（我们原默认 false/""，质量退化和老线不一致）；顺带修复 main.go 零值不安全直赋（config.yaml mineru 段少写几行会被静默重置的 bug）。
   验证：normalize 4 新用例（嵌套收敛/幂等/混合残留/缺失报错）+ 全量 20 包 0 FAIL + e2e 真 API 带 vlm 线上复验。
+
+## luadraw 引入批次（2026-11-19）
+- [x] SK-I10. 引擎按需：章内探测 \usepackage{luadraw} → 该章强制 lualatex（texcheck.CompileEngine/NeedsLuaLaTeX，verify 编译验收接线；不全书强制）。
+- [ ] SK-I11. gen-draw 按章按需铺任务（现状按全书预铺）+ style 阶段新增"绘图样式总览"动作（产出 book/style/draw-style.tex 模板，含线粗/标注/箭头三要素+pictureoptions 默认串+配色）。
+- [ ] SK-I12. `claim --wait` 阻塞命令：无任务时阻塞轮询等待内核分发（多子会话模式的阻塞语义，见 docs/08-figure-flow.md §3）。
+- [ ] SK-I13. draw-style.tex 模板规范 + style 验收加"模板已产出"项。
+- [x] SK-I14. luadraw 文档入 skills：包体+文档源码（仓库）、en PDF+514 条索引（PDF 物理页码映射，tools/build-index.py 可重建）+ luadraw-search 检索命令；包内只带 PDF+索引+指南，源码/包体现场取。

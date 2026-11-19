@@ -88,11 +88,15 @@ func TestMineruAPIViaCLI(t *testing.T) {
 	if !contains(s, `"status": "done"`) {
 		t.Fatalf("prep-mineru-api 应 done: %.200s", s)
 	}
-	if _, err := os.Stat(filepath.Join(bookDir, "mineru", "p1", "auto", "p1_content_list.json")); err != nil {
-		t.Fatal("content_list 应归位到 mineru/p1/auto")
+	// 归一契约=part 根（对齐老 DocVision 结构约定，无 auto 层）
+	if _, err := os.Stat(filepath.Join(bookDir, "mineru", "p1", "p1_content_list.json")); err != nil {
+		t.Fatal("content_list 应收敛到 mineru/p1 根")
 	}
-	// 断点续跑：清掉 auto、保留 .mineru_task.json → 重跑不应再上传（uploads 不变）
-	os.RemoveAll(filepath.Join(bookDir, "mineru", "p1", "auto"))
+	if _, err := os.Stat(filepath.Join(bookDir, "mineru", "p1", "auto")); err == nil {
+		t.Fatal("不应存在 auto 层")
+	}
+	// 断点续跑：清掉产物、保留 .mineru_task.json → 重跑不应再上传（uploads 不变）
+	os.RemoveAll(filepath.Join(bookDir, "mineru", "p1", "p1_content_list.json"))
 	uploadsBefore := uploads
 	s = mustDV("prep-mineru-api", "demo", filepath.Join(partsDir, "p1.pdf"))
 	if !contains(s, `"status": "done"`) {

@@ -23,3 +23,12 @@
 - 标签/文字用节点放，坐标轴刻度先定范围再画数据。
 - 复杂图先画骨架（主结构线）再补细节——对齐成绩先看主结构得分。
 - notes.md 记你试过的坐标系与换算关系，rework 回来直接续。
+
+## luadraw：立体几何与复杂图像的首选（2026-11-19 引入）
+
+- 手绘 TikZ 成本高或效果难控的图（立体几何/三维场景/复杂函数图像）→ 用 **luadraw**（LuaLaTeX 绘图，后端 TikZ，与验收链天然兼容）；简单示意图照旧手绘 TikZ
+- 用法/检索/风格规则全文见 `docs/luadraw/README.md`；流程与并发见 `docs/08-figure-flow.md`
+- 引擎：章内用了 luadraw → 内核自动强制 lualatex（按需，不全书）；没装 lualatex 时报错指引装 texlive-lualatex
+- **风格统一是硬要求**：先读 `book/style/draw-style.tex`（style 阶段产出的绘图模板），按它的三要素（线粗/标注字号/箭头样式）与 `pictureoptions` 默认串画；模板没有的参照全书已有 TikZ 图的视觉参数
+- 快速定位示例：`dvagent luadraw-search <关键词>`（标题→源码位置→PDF页码），`pdftoppm -f <页> -l <页> docs/luadraw/luadraw-doc-en.pdf /tmp/pg` 看预览图
+- luadraw 产物照过 figure 验收（min_overlap 等）——工具不降低门槛

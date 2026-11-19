@@ -154,11 +154,15 @@ func (c *Checker) runCoverage(t *task.Task, projectRoot, mainAbs string) ([]stri
 	return nil, map[string]string{"coverage_note": texcheck.CoverageGapNote(cov, missing, "")}
 }
 
-// defaultCompile 默认编译检查：真实跑 pdflatex。
+// defaultCompile 默认编译检查：真实跑引擎链；章内含 luadraw 时按需强制 lualatex。
 func (c *Checker) defaultCompile(t *task.Task, projectRoot string) []string {
 	main := fmt.Sprint(t.Accept["main_file"])
 	outDir := filepath.Join(projectRoot, t.Sandbox, "out")
-	if _, err := texcheck.Compile(outDir, main); err != nil {
+	engine := ""
+	if texcheck.NeedsLuaLaTeX(outDir, main) {
+		engine = "lualatex" // 按需引擎：只强制 luadraw 章
+	}
+	if _, err := texcheck.CompileEngine(outDir, main, engine); err != nil {
 		if strings.Contains(err.Error(), "不可用") {
 			return nil // 缺工具跳过（与覆盖率同款哲学）
 		}
