@@ -120,10 +120,10 @@
 | 模型自由回调全套工具（看图上文/下图/OCR…） | `claim`/`submit` 领任务制 + 手册工具 | 异 ⚠ | 账本权从模型没收给内核状态机（防伪造进度——你的 OCR 伪造事件是动机）；agent 自主性下降是可预期代价 |
 | 每图输出 JSON 含 program items 自报进度 | 内核 queue.json 台账 + verdict.json | 异 ⚠ | 同上：进度=内核记账，不信模型自报 |
 | textonly 单轮 OCR（一图一轮出文字） | img2text 三态任务（文字化/结构图/保留，内核验收） | 异 ⚠ | 质变：分散决策升为带验收的任务制；OCR 质量由 [IMG_TYPE]+replacement 契约保障 |
-| 旧 classify：4 类（text/table/vector/raster）+ styled 标记 + confidence | 3 类（styled_text/vector/raster）+ confidence（SK-I5 必填） | 异 ⚠ | table 并入 styled_text（md 表格天然 md 表达）；styled 标记由 styled_text 类等价覆盖；confidence 按你拍板补 |
+| 旧 classify：4 类（text/table/vector/raster）+ styled 标记 + confidence | 3 类（styled_text/vector/raster）+ confidence（SK-I5 必填） | **丢失（待恢复，SK-I18）** | 用户 11-20 纠正：styled 是独立标记非类别——纯文字 styled:false 应直通 md 不进 style 素材池；table 独立类缺失。原模板已存档 prompts-archive/latex_classifier.system.md |
 | 输出头 `[IMG_TYPE:]` | 产物首行强制 + 八道闸 | **同（保留）** | 你拍板保留（[since ea5d4b5]） |
 | `latex_chapters` 拆章阶段 | convert 内递归细化 + 行数上限 | 异 | 阶段合并进 convert（初划可有可无语义） |
-| `latex_fix` + `stylefix` 三段（assess/block/integrate） | style 四步（写样式/选材/试点/试点修复）+ rework 循环 | 异 ⚠ | 三段式合并为试点闭环；assess 职能由 check 任务承担 |
+| style 开端四步（生成 cls+manual+example）+ **全书 convert 中层层收集样式问题 + checker 核对 + stylefix 后段大循环**（assess 分块→stylefix 逐章最小适配新类） | 仅 style 四步试转 + 通用 rework | **丢失（待恢复，SK-I19）** | 用户 11-20 纠正：后段全书级 stylefix 流程（assess 只分块不修复/stylefix 最小适配不重转）整个缺失；原模板已存档 prompts-archive/latex_stylefix*.system.md |
 | `latex_watermark` 阶段 | classify 标 `"watermark":true` + assemble 默认去水印 | 异 | 按你拍板：默认去水印（[since 17c0a71]） |
 | `latex_verify` 三对照 QA | 无 | **不实施** | 你拍板：原程序自身未启用过（SK-I4） |
 | luadraw | （旧程序无） | 新增 | LuaLaTeX 绘图包引入 + 无 lualatex 两段式预编译回退（[since e23e4e2]） |
