@@ -32,7 +32,9 @@
 
 | 版本 | 要点 |
 |---|---|
-| 8d399a5 | ctx-up/down 语义修复 |
+| 95d77a2 | SK-I18 四类分类+styled 标记、SK-I19 stylefix 全书级、MCP gen-stylefix、双皮全对齐 |
+| e23e4e2 | SK-I16 luadraw 预编译内核、置信度、水印去水印、memory 区、FAQ 工具 |
+| 8d399a5 | ctx 命令对齐旧 get_more_context（md 行定位）；ctx-up/down 语义修复后废除 |
 | 6452fa6 | 文档引导批（00-start.md） |
 | 0616445 | SK-I17 part 根命名修复 |
 | e23e4e2 | SK-I16 luadraw 预编译内核 + 置信度/水印 |

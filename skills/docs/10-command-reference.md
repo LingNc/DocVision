@@ -26,8 +26,10 @@
 | `gen-convert` | gen-convert 需要: <项目名> [chapters目录] | JSON：{report} 结构（见源码 out） |
 | `gen-check` | gen-check 需要: <项目名> | JSON：{report} 结构（见源码 out） |
 | `gen-draw` | gen-draw 需要: <项目名> [章md名] | JSON：{report}（Added/VectorStems 等） |
+| `gen-stylefix` | project* | SK-I19 全书级样式后段双阶段（assess 前置闸 / 按块铺 stylefix） |
 | `gen-img2text` | gen-img2text 需要: <项目名> | JSON：{report}（铺任务数/跳过数） |
 | `img2text-collect` | img2text-collect 需要: <项目名> | JSON：{report} 结构（见源码 out） |
+| `gen-stylefix` | dvagent gen-stylefix <项目名> | JSON：双阶段（assess 铺放 / 按 blocks.json 铺 stylefix 块，block_id 幂等） |
 | `gen-final` | gen-final 需要: <项目名> | JSON：{report} 结构（见源码 out） |
 
 ### 1.3 PREP 无人值守段
