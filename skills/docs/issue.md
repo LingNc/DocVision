@@ -22,3 +22,12 @@
 - [x] SK-I6. **[IMG_TYPE] 已保留**（11-19，用户拍板）：img2text 产物首行强制 [IMG_TYPE: 八类词表] + verdict.json img_type 字段一致校验（verify/schema.go 三道闸），成品 md 随文保留类型头。
 
 其余对照结论（无缺失）：原 chapters 拆章≈我们 convert 内递归细化+行数上限；fix/stylefix 三段式≈style 四步合并+rework 循环；styled 标记职能由 styled_text 类+style-collect 选材等价覆盖。
+
+## 已修复（2026-11-19 下午，daoshu 实操前修）
+- [x] SK-I7. MinerU 上游拒收 model_version="v2"（传 400：model_version not supported）——上传仅带后端自配字段；显式 model_version 需等后端支持。
+  根因：上游 API 契约收紧。改：mineruapi/client.go requestUploadURL 移除 model_version。
+  验证：e2e TestMineruAPIViaCLI 真 API 绿。
+- [x] SK-I8. NormalizeLayout/auto 布局错位（嵌套搬运把产物搬成 <part>/auto/<data_id>/，images 丢失；上游直出 part 根时被二次搬空）——重写为三形态自识别：标准 auto 原样返回 / part 根原样返回（最浅命中优先，防嵌套残留干扰）/ 中毒嵌套摊平到 <part>/auto/；prep-organize/gen-img2text 兼容 part 根产物布局。
+  根因：上游 MinerU 产物布局变更（直出 part 根）+ 旧归位逻辑"整目录搬移"+ 顶部"auto 存在即返回"误判。
+  验证：normalize 4 新用例（摊平/part 根不动/最浅命中/缺失报错）+ e2e 全链绿 + 全量 20 包 0 FAIL。
+  交接勘误：HANDOVER 所列 mcp.go 改动实际不需要（mcp.go 未引用 NormalizeLayout）；mcp.go 与 main.go 同经 DownloadAndExtract→NormalizeLayout 链，函数内自愈后调用方零改动。

@@ -50,7 +50,7 @@ type Config struct {
 // DefaultConfig 出厂默认。
 func DefaultConfig() Config {
 	return Config{
-		APIBaseURL: "https://mineru.net/api/v4", ModelVersion: "v2", // 对齐上游默认端点（api.mineru.net 旧域已不可解析）
+		APIBaseURL: "https://mineru.net/api/v4", // 对齐上游默认端点（api.mineru.net 旧域已不可解析）；ModelVersion 默认留空：上游 2026-11 起拒收 version 字段（code -10002），空=请求体省略该键
 		EnableFormula: true, EnableTable: true,
 		PollInterval: 3, PollTimeout: 0, UploadTimeout: 300,
 	}
@@ -155,14 +155,18 @@ func (c *Client) CreateUploadTask(filePath string) (string, error) {
 }
 
 func (c *Client) requestUploadURL(fileName, stem string) (string, string, error) {
-	body, _ := json.Marshal(map[string]any{
+	// 上游 2026-11 变更：version 字段传任何值（含空串）都报 -10002，非空才发送该键
+	bodyMap := map[string]any{
 		"files":          []map[string]string{{"name": fileName, "data_id": dataIDForUpload(stem)}},
-		"model_version":  c.cfg.ModelVersion,
 		"is_ocr":         c.cfg.IsOCR,
 		"enable_formula": c.cfg.EnableFormula,
 		"enable_table":   c.cfg.EnableTable,
 		"language":       c.cfg.Language,
-	})
+	}
+	if c.cfg.ModelVersion != "" {
+		bodyMap["model_version"] = c.cfg.ModelVersion
+	}
+	body, _ := json.Marshal(bodyMap)
 	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/file-urls/batch", bytes.NewReader(body))
 	if err != nil {
 		return "", "", err
@@ -375,47 +379,62 @@ func (c *Client) DownloadAndExtract(zipURL, targetDir string) error {
 // 本函数找到 content_list 所在目录，把其 <...>/auto 整层归位到 <dir>/auto。
 // 幂等：已是标准布局则不动。返回归位后的 auto 目录路径（找不到则报错）。
 func NormalizeLayout(dir string) (string, error) {
-	auto := filepath.Join(dir, "auto")
-	if _, err := os.Stat(auto); err == nil {
-		return auto, nil
-	}
-	// 深度搜 content_list
+	// 深度搜 content_list，取最浅一处（按路径深度比，walk 字典序不保证浅的先到：
+	// 目录名排在文件名前时，嵌套的 content_list 会先于 part 根被访问）——它所在目录即产物根。
 	var found string
+	depth := func(p string) int { return strings.Count(p, string(os.PathSeparator)) }
 	filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
 		name := d.Name()
 		if strings.HasSuffix(name, "_content_list.json") && !strings.Contains(name, "_v2") {
-			found = filepath.Dir(p) // 即内层 auto
+			dp := filepath.Dir(p)
+			if found == "" || depth(dp) < depth(found) {
+				found = dp
+			}
 		}
 		return nil
 	})
 	if found == "" {
 		return "", fmt.Errorf("%s 下未找到 content_list（MinerU 产物结构不符）", dir)
 	}
+	// 三种形态：
+	//   <dir>/auto        → 标准布局，原样返回；
+	//   <dir>             → 上游直出 part 根布局，原样返回（归位反而搬空错位）；
+	//   <dir>/auto/<sub>/ → 中毒嵌套（解压多套一层/旧搬移残留），摊平到 <dir>/auto/。
+	if found == dir || found == filepath.Join(dir, "auto") {
+		return found, nil
+	}
 	target := filepath.Join(dir, "auto")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(target, 0o755); err != nil {
 		return "", err
 	}
-	// 直接移目录（同卷内 rename；跨卷回退复制）
-	if err := os.Rename(found, target); err != nil {
-		entries, rerr := os.ReadDir(found)
-		if rerr != nil {
-			return "", rerr
-		}
-		if err := os.MkdirAll(target, 0o755); err != nil {
-			return "", err
-		}
-		for _, e := range entries {
-			data, rerr2 := os.ReadFile(filepath.Join(found, e.Name()))
+	// 摊平移动：MinerU 新布局把产物套在 <data_id>/ 里（<data_id>/auto/<data_id>/...），
+	// 且解压时多套了一层 <part>/auto/<data_id>——一律把内层 auto 的"内容"摊平到 <part>/auto/。
+	// 直接移目录会带着内层目录名一起搬（旧 bug 根因），这里逐条移动更稳。
+	entries, rerr := os.ReadDir(found)
+	if rerr != nil {
+		return "", rerr
+	}
+	for _, e := range entries {
+		from := filepath.Join(found, e.Name())
+		to := filepath.Join(target, e.Name())
+		if err := os.Rename(from, to); err != nil {
+			// 跨卷回退复制
+			data, rerr2 := os.ReadFile(from)
 			if rerr2 != nil {
 				return "", rerr2
 			}
-			if werr := os.WriteFile(filepath.Join(target, e.Name()), data, 0o644); werr != nil {
+			if werr := os.WriteFile(to, data, 0o644); werr != nil {
 				return "", werr
 			}
+			_ = os.Remove(from)
 		}
+	}
+	// 移完删掉内层 auto（此时应为空）
+	if err := os.Remove(found); err != nil {
+		fmt.Fprintf(os.Stderr, "警告: 清理内层 auto 失败: %v\n", err)
 	}
 	return target, nil
 }

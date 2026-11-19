@@ -1174,3 +1174,6 @@
 - Python `img2text.py` 同步支持新 `request_body` 配置格式（向后兼容 `enable_thinking`）
 
 - **会话预览页：工具展开区的折叠按钮与内滚在展开后一定可见**：`.io-scroll` 之前只为思考块写了滚动规则，展开的工具输入输出会在卡片里长到整屏——现在 `.io-scroll`/`.io-scroll.open` 与 `.reasoning-scroll`/`.prompt-scroll` 共用 `--code-scroll-h`，`IO_FOLD_LINES = 16` 保证按钮在触到限高前就出现（19px 行高 × 16 行 ≈ 304px < 340px）。
+
+## skills 线（2026-11-19）
+- 修复：MinerU 上游 model_version 拒收（上传不再显式带 v2，SK-I7）；NormalizeLayout 重写——三形态自识别（标准 auto 原样/part 根原样/中毒嵌套摊平）+ 最浅命中优先（SK-I8）；prep-organize/gen-img2text 兼容 part 根产物布局；normalize 4 新用例 + e2e 真 API 全链绿 + 全量 20 包 0 FAIL。

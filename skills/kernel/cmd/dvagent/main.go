@@ -833,7 +833,12 @@ func main() {
 		}
 		for _, e := range entries {
 			if e.IsDir() {
-				autoDirs = append(autoDirs, filepath.Join(p.Root, "mineru", e.Name(), "auto"))
+				autoDir := filepath.Join(p.Root, "mineru", e.Name(), "auto")
+				// 兼容 part 根产物（老布局/上游直出）：auto 缺失时用 part 根本身
+				if _, serr := os.Stat(autoDir); serr != nil {
+					autoDir = filepath.Join(p.Root, "mineru", e.Name())
+				}
+				autoDirs = append(autoDirs, autoDir)
 			}
 		}
 		sort.Strings(autoDirs)
@@ -963,6 +968,10 @@ func main() {
 				results = append(results, map[string]any{"part": stem, "batch": batch, "error": "下载解压: " + derr.Error()})
 				continue
 			}
+			// MinerU 上游已直接回 part 根布局（<data_id>_content_list.json + images/），
+			// 不再套 <data_id>/ 目录——跳过归位，避免搬空成 <part>/auto/<data_id>/（auto 错位、图丢失）。
+			// NormalizeLayout 重写后自识别三种布局（标准 auto/上游直出 part 根/中毒嵌套），
+			// 正确布局原样返回、嵌套摊平——无需调用方特判。
 			autoDir, nerr := mineruapi.NormalizeLayout(dst)
 			if nerr != nil {
 				results = append(results, map[string]any{"part": stem, "batch": batch, "error": "布局归位: " + nerr.Error()})

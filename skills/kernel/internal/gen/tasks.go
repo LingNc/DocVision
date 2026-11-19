@@ -62,8 +62,11 @@ func GenClassify(q *queue.Queue, projectRoot, imagesRel string) (*ClassifyReport
 		}
 	}
 	if len(srcs) == 0 {
-		// ② MinerU 直出：mineru/<part>/auto/images/*
+		// ② MinerU 直出：mineru/<part>/auto/images/*（兼容 part 根产物：mineru/<part>/images/*）
 		matches, _ := filepath.Glob(filepath.Join(projectRoot, "mineru", "*", "auto", "images", "*.*"))
+		if len(matches) == 0 {
+			matches, _ = filepath.Glob(filepath.Join(projectRoot, "mineru", "*", "images", "*.*"))
+		}
 		for _, m := range matches {
 			ext := strings.ToLower(filepath.Ext(m))
 			if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".webp" {
