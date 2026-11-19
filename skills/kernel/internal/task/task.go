@@ -15,6 +15,8 @@ const (
 	TypeRework   Type = "rework"   // T5 复盘回炉
 	TypeImg2Text Type = "img2text" // T6 逐图文字化（小轮转：上下文up/down+看图+提交描述）
 	TypeFinal    Type = "final"    // T7 终审（全书级只读核对，drift 闸门后）
+	TypeStylefixAssess Type = "stylefix-assess" // T8 样式问题分块（全书 convert/check 全绿后，只分块不修复）
+	TypeStylefix       Type = "stylefix"       // T9 逐章最小适配新样式（assess 分块驱动）
 )
 
 // Status 是任务生命周期状态。

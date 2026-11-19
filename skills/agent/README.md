@@ -37,6 +37,8 @@ dvagent -workspace <工作区> claim <项目> <你的会话名> 3 convert
 | check（核对，只读） | [manual-check.md](manual-check.md) |
 | rework（复盘回炉） | [manual-rework.md](manual-rework.md) |
 | final（全书终审） | [manual-final.md](manual-final.md) |
+| stylefix-assess（全书样式问题分块，只分块不修复） | [manual-stylefix-assess.md](manual-stylefix-assess.md) |
+| stylefix（逐章最小适配新样式） | [manual-stylefix.md](manual-stylefix.md) |
 | troubleshoot（问题上报，非流水线任务） | [../docs/07-troubleshoot.md](../docs/07-troubleshoot.md) |
 
 ## 常用命令速查

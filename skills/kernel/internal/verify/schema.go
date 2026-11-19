@@ -58,6 +58,10 @@ func (c *Checker) checkVerdictSchema(t *task.Task, sandboxAbs string) []string {
 	case "check", "final":
 		// final（终审）复用 check 语义：issues 必带位置指针、no_verdict 由重试上限兜底。
 		return checkCheckVerdict(b)
+		case "stylefix-assess":
+		return c.checkStylefixAssessVerdict(b, sandboxAbs)
+	case "stylefix":
+		return checkStylefixVerdict(b)
 	case "img2text":
 		return c.checkImg2TextVerdict(b, sandboxAbs)
 	}
@@ -148,6 +152,65 @@ func hasPositionPointer(s string) bool {
 
 // checkImg2TextVerdict 档位2 三态验收：result 声明 + 对应产物存在性 + mermaid 校验。
 // mermaid 校验失败即打回（旧线"兜底错误"的落点：语法错不让它进合成）。
+// checkStylefixAssessVerdict：assess 结论（done/blocked）+ blocks.json 已产出（一章一块由 assess 自验）。
+func (c *Checker) checkStylefixAssessVerdict(b []byte, sandboxAbs string) []string {
+	var v struct {
+		Result string `json:"result"`
+		Blocks int    `json:"blocks"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return []string{"verdict.json 解析失败: " + err.Error()}
+	}
+	switch v.Result {
+	case "done":
+		if v.Blocks < 1 {
+			return []string{"result=done 必须 blocks>=1"}
+		}
+		data, err := os.ReadFile(filepath.Join(sandboxAbs, "out", "blocks.json"))
+		if err != nil || len(data) == 0 {
+			return []string{"done 必须附 out/blocks.json（非空）"}
+		}
+		return nil
+	case "blocked":
+		if strings.TrimSpace(v.Reason) == "" {
+			return []string{"blocked 必须附 reason"}
+		}
+		return nil
+	case "":
+		return []string{"verdict.json 缺少 result（done/blocked）"}
+	}
+	return []string{fmt.Sprintf("result %q 不合法（只允许 done/blocked）", v.Result)}
+}
+
+// checkStylefixVerdict：逐章适配结论（adapted/blocked）。
+func checkStylefixVerdict(b []byte) []string {
+	var v struct {
+		Result    string `json:"result"`
+		Chapter   string `json:"chapter"`
+		DiffLines int    `json:"diff_lines"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return []string{"verdict.json 解析失败: " + err.Error()}
+	}
+	if v.Chapter == "" {
+		return []string{"verdict.json 缺少 chapter"}
+	}
+	switch v.Result {
+	case "adapted":
+		return nil
+	case "blocked":
+		if strings.TrimSpace(v.Reason) == "" {
+			return []string{"blocked 必须附 reason（不许硬改内容）"}
+		}
+		return nil
+	case "":
+		return []string{"verdict.json 缺少 result（adapted/blocked）"}
+	}
+	return []string{fmt.Sprintf("result %q 不合法（只允许 adapted/blocked）", v.Result)}
+}
+
 // img2TextTypeHeaderRe 产物首行的 [IMG_TYPE: <type>] 标识（沿用原参考实现输出格式，
 // 用户拍板保留：成品 md 嵌入后类型标识随文保留，便于核对与后续处理）。
 var img2TextTypeHeaderRe = regexp.MustCompile(`^\[IMG_TYPE:\s*(.+?)\s*\]`)

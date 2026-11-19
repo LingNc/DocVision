@@ -1073,6 +1073,41 @@ func main() {
 		}
 		out(map[string]any{"filled": n})
 
+	case "gen-stylefix":
+		// dvagent gen-stylefix <项目名> —— SK-I19 全书级样式后段：
+		// 第一次跑铺 stylefix-assess（前置：convert/check/图工作全落定）；
+		// assess done 后重跑按 blocks.json 铺 stylefix 逐章适配任务（幂等）。
+		if len(args) < 2 {
+			die(fmt.Errorf("gen-stylefix 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		rep, err := gen.GenStylefixAssess(q)
+		if err != nil {
+			die(err)
+		}
+		if rep.AssessAdded == 1 {
+			if err := q.Save(); err != nil {
+				die(err)
+			}
+			out(map[string]any{"phase": "assess", "report": rep})
+			return
+		}
+		rep2, err := gen.GenStylefixBlocks(q, p.Root)
+		if err != nil {
+			out(map[string]any{"phase": "assess", "report": rep, "next": err.Error()})
+			return
+		}
+		if rep2.BlocksAdded > 0 {
+			if err := q.Save(); err != nil {
+				die(err)
+			}
+		}
+		out(map[string]any{"phase": "blocks", "report": rep2})
+
 	case "gen-final":
 		// dvagent gen-final <项目名> —— 全书落定后铺终审任务（T7）。
 		if len(args) < 2 {
