@@ -21,6 +21,8 @@ type ClassifyVerdict struct {
 	Class     string `json:"class"`     // styled_text | vector | raster
 	Extracted string `json:"extracted"`   // styled_text 必填：提取的文本内容
 	Reason    string `json:"reason"`      // vector 必填：为什么可矢量重绘的一句话证据
+	// Confidence 分类置信度（SK-I5，必填 0~1）：拿不准就压低，<0.6 内核强制重判。
+	Confidence *float64 `json:"confidence"`
 }
 
 // CheckVerdict 是 T4 核对的落盘结构（agent 写 out/verdict.json）。
@@ -75,6 +77,14 @@ func checkClassifyVerdict(b []byte) []string {
 		errs = append(errs, "verdict.json 缺少 class 字段（不允许以空分类蒙混过关，失败就重试，不降级）")
 	default:
 		errs = append(errs, fmt.Sprintf("class %q 不合法（只允许 styled_text/vector/raster）——分类不确定就重试，不得乱填", v.Class))
+	}
+	// SK-I5 置信度闸（必填；低置信强制重判，不许硬判）
+	if v.Confidence == nil {
+		errs = append(errs, "verdict.json 必须填 confidence（0~1，对自己分类把握打分；犹豫就压低，<0.6 强制重判）")
+	} else if *v.Confidence < 0 || *v.Confidence > 1 {
+		errs = append(errs, fmt.Sprintf("confidence %.2f 越界（须在 0~1）", *v.Confidence))
+	} else if *v.Confidence < 0.6 {
+		errs = append(errs, fmt.Sprintf("confidence %.2f < 0.6：低置信强制重判——拿不准就重看原图，不许硬判", *v.Confidence))
 	}
 	return errs
 }

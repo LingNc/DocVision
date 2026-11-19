@@ -42,7 +42,7 @@ func TestE2EClassifyLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(outDir, "verdict.json"),
-		[]byte(`{"class":"styled_text","extracted":"图 1-1 决策树"}`), 0o644); err != nil {
+		[]byte(`{"class":"styled_text","confidence":0.9,"extracted":"图 1-1 决策树"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	errs, notes := ck.Run(good)

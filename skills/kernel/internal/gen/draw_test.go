@@ -16,7 +16,7 @@ func mkDoneClassify(root, stem string, q *queue.Queue) {
 	os.MkdirAll(filepath.Join(root, sb, "inputs"), 0o755)
 	os.MkdirAll(filepath.Join(root, sb, "out"), 0o755)
 	os.WriteFile(filepath.Join(root, sb, "inputs", stem+".png"), []byte("img"), 0o644)
-	os.WriteFile(filepath.Join(root, sb, "out", "verdict.json"), []byte(`{"class":"vector"}`), 0o644)
+	os.WriteFile(filepath.Join(root, sb, "out", "verdict.json"), []byte(`{"class":"vector","confidence":0.9}`), 0o644)
 	q.Enqueue(&task.Task{ID: id, Type: task.TypeClassify, Status: task.StatusDone, Sandbox: sb,
 		Inputs: []string{"inputs/" + stem + ".png"}})
 }

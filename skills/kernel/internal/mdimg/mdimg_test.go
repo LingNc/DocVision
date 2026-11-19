@@ -42,3 +42,20 @@ func TestAssembleMoreImagesThanRepls(t *testing.T) {
 		t.Fatalf("无决策的图应原样保留:\n%s", out)
 	}
 }
+
+// SK-I3 去水印：Drop=true 的图整行删除（无占位），文本行保留。
+func TestAssembleWatermarkDrop(t *testing.T) {
+	md := "前文\n\n![水印](images/wm.png)\n\n后文\n"
+	repls := []Replacement{{ImgRef: "images/wm.png", Drop: true}}
+	got, shifts := AssembleWithShifts(md, repls)
+	if strings.Contains(got, "wm.png") || strings.Contains(got, "水印") {
+		t.Fatalf("水印行应整行删除: %q", got)
+	}
+	if !strings.Contains(got, "前文") || !strings.Contains(got, "后文") {
+		t.Fatalf("文本行应保留: %q", got)
+	}
+	// 其后的"后文"位置应左移（整行+换行）
+	if len(shifts) == 0 || shifts[0].delta >= 0 {
+		t.Fatalf("去水印应记录负位移: %+v", shifts)
+	}
+}
