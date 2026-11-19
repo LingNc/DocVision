@@ -775,21 +775,32 @@ func main() {
 			die(err)
 		}
 		up := args[0] == "ctx-up"
-		var blocks []map[string]any
-		count := 0
+		// 全量收集后截断：ctx-up 取最近的 n 个上文（倒序输出，最近的在前）；
+		// ctx-down 取最近的 n 个下文（正序）。带文字的图片条目（文字化描述回填）也算上下文。
+		var matched []docindex.DocEntry
 		for _, e := range idx.Entries {
-			if e.Type != "text" || e.Text == "" {
+			if e.Text == "" {
 				continue
 			}
-			before := e.Seq < int(seq)
-			if (up && before) || (!up && !before) {
-				blocks = append(blocks, map[string]any{
-					"seq": e.Seq, "global": e.Global, "text": e.Text,
-				})
-				count++
-				if count >= n {
+			if up && e.Seq < int(seq) {
+				matched = append(matched, e)
+			}
+			if !up && e.Seq > int(seq) {
+				matched = append(matched, e)
+			}
+		}
+		var blocks []map[string]any
+		if up {
+			for i := len(matched) - 1; i >= 0 && len(blocks) < n; i-- {
+				e := matched[i]
+				blocks = append(blocks, map[string]any{"seq": e.Seq, "global": e.Global, "text": e.Text})
+			}
+		} else {
+			for _, e := range matched {
+				if len(blocks) >= n {
 					break
 				}
+				blocks = append(blocks, map[string]any{"seq": e.Seq, "global": e.Global, "text": e.Text})
 			}
 		}
 		out(map[string]any{"task": tk.ID, "entry_seq": seq, "up": up, "blocks": blocks})
