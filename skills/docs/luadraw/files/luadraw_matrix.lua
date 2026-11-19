@@ -1,0 +1,144 @@
+-- luadraw__matrix.lua (chargé par luadraw__calc, qui charge avant luadraw_complex.lua)
+-- date 2026/11/05
+-- version 3.7
+-- Copyright 2026 Patrick Fradin
+-- This work may be distributed and/or modified under the
+-- conditions of the LaTeX Project Public License.
+-- The latest version of this license is in
+--   https://www.ctan.org/license/lppl
+
+-- une matrice est une table de 3 complexes de la forme [f(0), Lf(1), Lf(i) ] où
+-- f est la transformation affine représentée par la matrice et Lf sa partie linéaire.
+
+local ld = luadraw
+local cpx = luadraw.cpx -- déjà chargé
+local Z = cpx.Z
+local isComplex = cpx.isComplex
+local toComplex = cpx.toComplex
+local tblInsert = table.insert
+local tblAppend = table.append
+
+function ld.applymatrix(z,M) -- applique M au complexe z
+    if type(z) == "number" then z = Z(z,0) end
+    if z == cpx.Jump then return cpx.Jump -- le complexe Jump est laissé tel quel
+    else
+        if type(z) == "string" then return z -- pour traiter le cas des chemins faits de courbes de Bézier
+        else
+            return Z( M[1].re + z.re*M[2].re + z.im*M[3].re, M[1].im + z.re*M[2].im + z.im*M[3].im )
+        end
+    end
+end
+
+function ld.applyLmatrix(z,M) -- applique la partie linéaire de M au complexe z
+    if type(z) == "number" then z = Z(z,0) end
+    if z == cpx.Jump then return cpx.Jump -- le complexe Jump est laissé tel quel
+    else
+        return Z( z.re*M[2].re + z.im*M[3].re, z.re*M[2].im + z.im*M[3].im )
+    end
+end
+
+function ld.mtransform(L,M) -- applique la matrice M à L 
+-- L doit être une séquence de complexes, on calcule et renvoie
+-- renvoie l'image de L sans modifier L
+    if (L == nil) or (type(L) ~=  "table") then return end
+    if (M == nil) or (type(M) ~= "table") or (#M ~= 3) then return end
+    local res = {}
+    if (type(L[1]) == "number") or isComplex(L[1]) then
+        local i = 0
+        for _, z in ipairs(L) do
+            i = i+1
+            res[i] = ld.applymatrix(z,M)
+            --tblInsert(res, ld.applymatrix(z,M) )
+        end
+    else  -- L est une liste de listes
+        local aux, i 
+        for _,cp in ipairs(L) do
+            aux = {}; i = 0
+            for _,z in ipairs(cp) do
+                i = i+1
+                aux[i] = ld.applymatrix(z,M)
+                --tblInsert(aux, ld.applymatrix(z,M) )
+            end
+            tblInsert(res,aux)
+        end
+    end
+    return res
+end
+
+function ld.mLtransform(L,M) -- applique la matrice M à L 
+-- L doit être une séquence de complexes, on calcule et renvoie
+-- renvoie l'image de L sans modifier L
+    if (L == nil) or (type(L) ~=  "table") then return end
+    if (M == nil) or (type(M) ~= "table") or (#M ~= 3) then return end
+    local res = {}
+    if (type(L[1]) == "number") or isComplex(L[1]) then
+        local i = 0
+        for _, z in ipairs(L) do
+            i = i+1
+            res[i] = ld.applyLmatrix(z,M)
+            --tblInsert(res, ld.applymatrix(z,M) )
+        end
+    else  -- L est une liste de listes
+        local aux, i 
+        for _,cp in ipairs(L) do
+            aux = {}; i = 0
+            for _,z in ipairs(cp) do
+                i = i+1
+                aux[i] = ld.applyLmatrix(z,M)
+                --tblInsert(aux, ld.applymatrix(z,M) )
+            end
+            tblInsert(res,aux)
+        end
+    end
+    return res
+end
+
+
+function ld.composematrix(M1,M2)  -- fait le produit matriciel M1*M2
+-- M1 et M2 sont deux tables de 3 complexes {f(0), Lf(1), Lf(i)}
+-- où f est la transformation affine correspondant et Lf sa partie linéaire 
+    if (M1 == nil) or (type(M1) ~= "table") or (#M1 ~= 3) then return end
+    if (M2 == nil) or (type(M2) ~= "table") or (#M2 ~= 3) then return end
+    local a, b, c = table.unpack(M2)
+    a, b, c = toComplex(a), toComplex(b), toComplex(c)
+    if (a == nil) or (b == nil) or (c== nil) then return end
+    return { ld.applymatrix(a,M1), ld.applyLmatrix(b,M1), ld.applyLmatrix(c,M1) }
+end
+
+function ld.matrixof(f) -- renvoie la matrice de la fonction f
+-- f doit être une fonction affine de C dans C : z -> f(z)
+-- la fonction calcule et renvoie sa matrice
+    local a = f(Z(0,0))
+    return { a, f(Z(1,0))-a, f(Z(0,1))-a }
+end
+
+function ld.invmatrix(M)
+-- renvoie la matrice inverse (si possible) de la matrice M
+    if (M == nil) or (type(M) ~= "table") or (#M ~= 3) then return end
+    local c, a, b = table.unpack(M)
+    a, b, c = toComplex(a), toComplex(b), toComplex(c)
+    if (a == nil) or (b == nil) or (c== nil) then return end    
+    local D = cpx.det(a,b)
+     if (D ~= 0) then
+        local A, B = Z(b.im/D,-a.im /D), Z(-b.re/D, a.re/D)
+        if ( A ~= nil) and (B ~= nil) then
+            return { -c.re*A - c.im*B, A, B } -- matrice inverse
+        end
+    end
+end
+
+function ld.getmatrix(from, to)
+    -- from = {a,b,c}, to = {a1,b1,c1}
+    -- returns the matrix transforming a, b, c into a1, b1, c1
+    local a,b,c = table.unpack( from )
+    local a1,b1,c1 = table.unpack( to )
+    local m = ld.invmatrix({a,b-a,c-a})
+    return ld.composematrix({a1,b1-a1,c1-a1}, m)
+end
+
+function ld.isID(m)  -- teste la matrice unité
+    return (type(m) == "table") and (toComplex(m[1]) == Z(0,0)) and 
+    (toComplex(m[2]) == Z(1,0)) and (toComplex(m[3]) == Z(0,1))
+end
+
+ld.ID = { Z(0,0), Z(1,0), Z(0,1) } --matrice identité

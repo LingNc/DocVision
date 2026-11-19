@@ -12,6 +12,7 @@ finally*/
 release/
 test*/mineru_output/
 files*/
+!skills/docs/luadraw/files/
 split_files/
 mineru_output/
 temp/

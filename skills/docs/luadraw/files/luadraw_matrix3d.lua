@@ -1,0 +1,143 @@
+-- luadraw__matrix3d.lua (chargé par luadraw__graph3d)
+-- date 2026/11/05
+-- version 3.7
+-- Copyright 2026 Patrick Fradin
+-- This work may be distributed and/or modified under the
+-- conditions of the LaTeX Project Public License.
+-- The latest version of this license is in
+--   https://www.ctan.org/license/lppl
+
+-- une matrice 3d est une table de 4 point3d de la forme [f(0,0,0), Lf(1,0,0), Lf(0,1,0), LF(0,0,1)] où
+-- f est la transformation affine représentée par la matrice et Lf sa partie linéaire.
+local ld = luadraw
+ld.pt3d = require 'luadraw_point3d'
+local pt3d = ld.pt3d
+local M = pt3d.M
+local isPoint3d = pt3d.isPoint3d
+local tblInsert = table.insert
+local tblAppend = table.append
+
+ld.ID3d = {pt3d.Origin, pt3d.vecI, pt3d.vecJ, pt3d.vecK} -- matrice identité 3d
+
+function ld.applymatrix3d(A,M) -- applique M au point A
+    if isPoint3d(A) then 
+        return M[1]+A.x*M[2]+A.y*M[3]+A.z*M[4]
+    else
+        return A
+    end
+end
+
+function ld.applyLmatrix3d(A,M) -- applique la partie linéaire de M au vecteur A
+    if isPoint3d(A) then 
+        return A.x*M[2]+A.y*M[3]+A.z*M[4]
+    else
+        return A
+    end
+end
+
+function ld.mtransform3d(L,M) -- applique la matrice M à L 
+-- L doit être une liste de point3d ou une liste de listes, on calcule et renvoie
+-- renvoie l'image de L sans modifier L
+    if (L == nil) or (type(L) ~=  "table") then return end
+    if (M == nil) or (type(M) ~= "table") or (#M ~= 4) then return end
+    local res = {}    
+    if L.vertices ~= nil then --polyhedron
+        res.vertices = ld.mtransform3d(L.vertices,M)
+        res.facets = table.copy(L.facets)
+        if L.normals ~= nil then
+            --res.normals = ld.mLtransform3d(L.normals,M)
+        end
+        return res
+    end
+
+    if isPoint3d(L) then res = ld.applymatrix3d(L,M)
+    elseif isPoint3d(L[1]) then --liste de point3d
+        for _, A in ipairs(L) do
+            tblInsert(res, ld.applymatrix3d(A,M) )
+        end
+    else  -- L est une liste de listes
+        local aux
+        for _,cp in ipairs(L) do
+            aux = {}
+            for _,A in ipairs(cp) do
+                tblInsert(aux, ld.applymatrix3d(A,M) )
+            end
+            tblInsert(res,aux)
+        end
+    end
+    return res
+end
+
+function ld.mLtransform3d(L,M) -- applique la partie linéaire de la matrice M à L 
+-- L doit être une liste de point3d ou une liste de listes, on calcule et renvoie
+-- renvoie l'image de L sans modifier L
+    if (L == nil) or (type(L) ~=  "table") then return end
+    if (M == nil) or (type(M) ~= "table") or (#M ~= 4) then return end
+    local res = {}
+    if isPoint3d(L) then res = ld.applyLmatrix3d(L,M)
+    elseif isPoint3d(L[1]) then --liste de point3d
+        for _, A in ipairs(L) do
+            tblInsert(res, ld.applyLmatrix3d(A,M) )
+        end
+    else  -- L est une liste de listes
+        local aux
+        for _,cp in ipairs(L) do
+            aux = {}
+            for _,A in ipairs(cp) do
+                tblInsert(aux, ld.applyLmatrix3d(A,M) )
+            end
+            tblInsert(res,aux)
+        end
+    end
+    return res
+end
+
+function ld.composematrix3d(M1,M2)  -- fait le produit matriciel M1*M2
+-- M1 et M2 sont deux tables de 4 complexes {f(0), Lf(i), Lf(j), Lf(k)}
+-- où f est la transformation affine correspondant et Lf sa partie linéaire 
+    if (M1 == nil) or (type(M1) ~= "table") or (#M1 ~= 4) then return end
+    if (M2 == nil) or (type(M2) ~= "table") or (#M2 ~= 4) then return end
+    local a, b, c, d = table.unpack(M2)
+    return { ld.applymatrix3d(a,M1), ld.applyLmatrix3d(b,M1), ld.applyLmatrix3d(c,M1), ld.applyLmatrix3d(d,M1)}
+end
+
+function ld.matrix3dof(f) -- renvoie la matrice de la fonction f
+-- f doit être une fonction affine de R^3 dans R^3 qui a un point3d associe un point3d
+-- la fonction calcule et renvoie sa matrice
+    local a = f(M(0,0,0))
+    return { a, f(M(1,0,0))-a, f(M(0,1,0))-a, f(M(0,0,1))-a }
+end
+
+function ld.invmatrix3d(M1)
+-- renvoie la matrice inverse (si possible) de la matrice M
+    if (M1 == nil) or (type(M1) ~= "table") or (#M1 ~= 4) then return end
+    local t, a, b, c = table.unpack(M1)
+    local u, v, w, d = pt3d.prod(b,c), pt3d.prod(c,a), pt3d.prod(a,b), pt3d.det(a,b,c)
+    if d ~= 0 then
+        local a1 = pt3d:new(u.x,v.x,w.x)/d
+        local b1 = pt3d:new(u.y,v.y,w.y)/d
+        local c1 = pt3d:new(u.z,v.z,w.z)/d
+        return {-t.x*a1-t.y*b1-t.z*c1, a1, b1, c1}
+    end
+end
+
+function ld.getmatrix3d(from, to)
+    -- from = {a,b,c,d}, to = {a1,b1,c1,d1}
+    -- returns the matrix transforming a, b, c into a1, b1, c1
+    local a,b,c,d = table.unpack( from )
+    local a1,b1,c1,d1 = table.unpack( to )
+    local m = ld.invmatrix3d({a,b-a,c-a,d-a})
+    return ld.composematrix3d({a1,b1-a1,c1-a1,d1-a1}, m)
+end
+
+function ld.isID3d(m) -- teste la matrice unité
+    return (m[1] == M(0,0,0)) and (m[2] == M(1,0,0)) and (m[3] == M(0,1,0)) and (m[4] == M(0,0,1))
+end
+
+function ld.planetransform(P, matrix)
+    local A, u, v = ld.orthoframe(P)
+    A = ld.applymatrix3d(A,matrix)
+    u = ld.applyLmatrix3d(u,matrix)
+    v = ld.applyLmatrix3d(v,matrix)
+    return {A, pt3d.prod(u,v)}
+end

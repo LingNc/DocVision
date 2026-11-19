@@ -1,0 +1,292 @@
+--- luadraw_point3d.lua
+-- date 2026/11/05
+-- version 3.7
+-- Copyright 2026 Patrick Fradin
+-- This work may be distributed and/or modified under the
+-- conditions of the LaTeX Project Public License.
+-- The latest version of this license is in
+--   https://www.ctan.org/license/lppl
+
+local ld = luadraw
+local cpx = ld.cpx
+local isComplex = cpx.isComplex
+local notDef = ld.notDef
+local concat = ld.concat
+local map = ld.map
+local tblInsert = table.insert
+local tblAppend = table.append
+local Pi, Sin, Cos, Abs, Sqrt = math.pi, math.sin, math.cos, math.abs, math.sqrt
+
+local point3d = {}
+point3d.__index = point3d
+
+--- Constructeur
+function point3d:new(x,y,z)
+    local pt3d = {}
+    pt3d.x = x
+    pt3d.y = y
+    pt3d.z = z
+    setmetatable(pt3d, self)  -- obligatoire, permet d'utiliser self
+    if (x == nil) or (y == nil) or (z == nil) or 
+    notDef(x) or notDef(y) or notDef(z) then return 
+    else return pt3d
+    end
+end
+
+-- Fonction pour tester si une variable est de type point3d
+function point3d.isPoint3d(a)
+    return getmetatable(a) == point3d
+end
+
+function point3d.toPoint3d(a)
+-- conversion affixe vers point3d
+    if point3d.isPoint3d(a) then return a
+    elseif isComplex(a) then return point3d:new(a.re,a.im,0)
+    elseif type(a) == "number" then return point3d:new(a,0,0)
+    end
+end
+
+
+-- Méthode pour ajouter, surcharge de +
+function point3d.__add(u,v)
+    if (u == nil) or (v == nil) then return end
+    return point3d:new(u.x + v.x, u.y + v.y, u.z + v.z)
+end
+
+
+--- Méthode pour soustraire, surcharge de -
+function point3d.__sub(u,v)
+    if (u == nil) or (v == nil) then return end
+    return point3d:new(u.x - v.x, u.y - v.y, u.z - v.z)
+end
+
+--- Méthode pour multiplier scalaire et vecteur, surcharge de *
+function point3d.__mul(k,u)
+    if type(k) ~= "number" then return end
+    if (u == nil) then return end
+    return point3d:new(k*u.x, k*u.y, k*u.z)
+end
+
+--- Méthode pour diviser, surcharge de /
+function point3d.__div(u,k)
+    if (type(k) ~= "number") or (k == 0) then return end
+    if (u == nil) then return end
+    return point3d:new(u.x/k, u.y/k, u.z/k)
+end
+
+--- Méthode pour tester l'égalité deux nombres complexes, surcharge de =
+function point3d.__eq(u,v)
+    if (u == nil) or (v == nil) then return end
+    return (u.x == v.x) and (u.y == v.y) and (u.z == v.z)
+end
+
+-- opposé (surcharge de l'opérateur '-c')
+function point3d.__unm(u)
+    if (u == nil) then return end    
+    return point3d:new(-u.x, -u.y, -u.z)
+end
+
+---------------- fonctions mathématiques pour points 3d
+--  norme au carré
+function point3d.abs2(u)
+    if (u == nil) then return end
+    return u.x^2+u.y^2+u.z^2
+end
+
+--  norme au carré
+function point3d.abs(u)
+    if (u == nil) then return end
+    local x, y, z = Abs(u.x), Abs(u.y), Abs(u.z)
+    if x < y then x, y = y, x end
+    if x < z then x, z = z, x end
+    if x == 0 then return 0 else return x*Sqrt(1 + (y/x)^2 + (z/x)^2) end
+end
+
+-- arrondir
+function point3d.round(u, nbDeci)
+    if (u == nil) then return end    
+    return point3d:new( ld.round(u.x,nbDeci), ld.round(u.y,nbDeci), ld.round(u.z,nbDeci) )
+end
+
+-- norme 1
+function point3d.N1(u)
+    if u == nil then return
+    else return Abs(u.x) + Abs(u.y) + Abs(u.z)
+    end
+end
+
+-- produit scalaire
+function point3d.dot(u,v)
+    if (u == nil) or (v == nil) then return end    
+    local rep = u.x*v.x + u.y*v.y + u.z*v.z
+    if ld.isNul(rep) then return 0 -- nullité à epsilon près
+    else return rep
+    end
+end
+
+function point3d.angle(V1,V2,epsilon) --ecart angulaire
+-- renvoie l'écart angulaire (radians) entre les vecteurs 3d V1 et V2 supposés non nuls
+    epsilon = epsilon or 0
+    V1 = point3d.normalize(V1); V2 = point3d.normalize(V2)
+    if (V1 == nil) or (V2 == nil) then return end
+    local alpha = point3d.dot(V1,V2)
+    if alpha >= 1-epsilon then 
+        return 0 
+    elseif alpha <= -1+epsilon then return Pi 
+    else return math.acos(alpha)
+    end
+end
+
+-- déterminant    
+function point3d.det(u,v,w)
+    if (u == nil) or (v == nil) or (w == nil) then return end        
+    local rep = u.x*v.y*w.z + v.x*w.y*u.z + w.x*u.y*v.z - w.x*v.y*u.z - v.x*u.y*w.z - u.x*w.y*v.z
+    if ld.isNul(rep) then return 0 -- nullité à epsilon près
+    else return rep
+    end
+end
+
+-- produit vectoriel
+function point3d.prod(u,v)
+    if (u == nil) or (v == nil) then return end        
+    return point3d:new( u.y*v.z-v.y*u.z, u.z*v.x-v.z*u.x, u.x*v.y-v.x*u.y )
+end
+
+function point3d.isNul(u)
+    if (u == nil) then return
+    else return ld.isNul(u.x) and ld.isNul(u.y) and ld.isNul(u.z)
+    end
+end    
+
+function point3d.normalize(u)
+    if not point3d.isNul(u) then
+        local r = point3d.abs(u)
+        return u/r
+    end 
+end
+-------------------------- Méthodes 
+function point3d:tostring()
+    return "M("..self.x..","..self.y..","..self.z..")"
+end
+---  surcharge de tostring
+function point3d.__tostring(z)
+    return z:tostring()
+end    
+
+--Méthode pour dupliquer ex: z1 = z.dup()
+function point3d:dup()
+    return point3d:new(self.x,self.y,self.z)
+end
+
+-- création simplifiée en cartésien
+function point3d.M(x,y,z)
+    return point3d:new(x,y,z)
+end
+
+-- création simplifiée en sphérique
+function point3d.Ms(r,theta,phi) -- theta et phi en radians
+    if (r == nil) or (theta == nil) or (phi == nil) or notDef(r) or notDef(theta) or notDef(phi) then return end
+    return point3d:new(r*Cos(theta)*Sin(phi), r*Sin(theta)*Sin(phi), r*Cos(phi))
+end
+
+-- création simplifiée en cylindrique
+function point3d.Mc(r,theta,z)
+    if (r == nil) or (theta == nil) or (z == nil) or notDef(r) or notDef(theta) then return end
+    return point3d:new(r*Cos(theta), r*Sin(theta), z)
+end
+
+function point3d.angle3d(V1,V2,epsilon)
+    return point3d.angle(V1,V2,epsilon)
+end
+
+function point3d.isobar3d(L)
+-- renvoie le centre de gravité de la liste L de point3d
+    local x, y, z, n = 0, 0, 0, 0
+    for _,A in ipairs(L) do
+        if point3d.isPoint3d(A) then
+            x = x+A.x; y = y+A.y; z = z+A.z; n = n+1
+        end
+    end
+    return point3d:new(x/n,y/n,z/n)
+end
+
+function point3d.insert3d(L,A,eps)
+-- L est une variable représentant une séquence de point3d distincts, A est un point 3d
+-- la fonction insère A dans la liste L sans doublon renvoie sa position dans la liste.
+-- les comparaisons se font à eps(ilon) près (qui vaut 0 par défaut)
+    eps = eps or 0
+    local n = #L
+    if n == 0 then L[n+1] = A; return 1 end --tblInsert(L,A)
+    for k,B in ipairs(L) do
+        if  Abs(B.x-A.x)+Abs(B.y-A.y)+Abs(B.z-A.z) <= eps then return k end -- point3d.N1(B-A)
+    end
+    tblInsert(L,A)
+    return n+1
+end
+
+function point3d.isListOfPt3d(S) -- tests if S is a list of 3d points
+    local ret, k = (S ~= nil) and (type(S)=="table") and (#S>0), 1
+    while ret and (k<=#S) do ret = point3d.isPoint3d(S[k]); k = k+1 end
+    return ret
+end
+
+function point3d.isListOfListOfPt3d(S) -- tests if S is a list of lists 3d points
+    local ret, k = (S ~= nil) and (type(S)=="table") and (#S>0), 1
+    while ret and (k<=#S) do ret = point3d.isListOfPt3d(S[k]); k = k+1 end
+    return ret
+end
+
+local var2string
+var2string = function(T)
+    if type(T) == "number" then return tostring(T)
+    elseif (type(T) ~= "table") or isComplex(T) or point3d.isPoint3d(T) then return tostring(T)
+    else
+        return "{ "..table.concat(map(var2string,T),", ").." }"
+    end
+end
+
+function ld.whatis(x,msg)
+    msg = msg or "It"
+    msg = "\n"..msg.." "
+    if x == nil then print(msg.."is nil")
+    elseif type(x) == "number" then  print(msg.."is a number =",x)
+    elseif type(x) == "boolean" then print(msg.."is a boolean =",x)
+    elseif type(x) == "string" then print(msg.."is a string =", x)
+    elseif type(x) == "function" then print(msg.."is a function")
+    elseif isComplex(x) then print(msg.."is a complex number =",x)
+    elseif point3d.isPoint3d(x) then print(msg.."is a 3d point =",x)
+    elseif cpx.isListOfCpx(x) then 
+        print(msg.."is a list of numbers/complex numbers\nvalue = "..var2string(x))
+    elseif cpx.isListOfListOfCpx(x) then 
+        print(msg.."is a list of lists of numbers/complex numbers\nvalue = "..var2string(x))
+    elseif point3d.isListOfPt3d(x) then 
+        print(msg.."is a list of 3d points\nvalue = "..var2string(x))
+    elseif point3d.isListOfListOfPt3d(x) then 
+        print(msg.."is a list of lists of 3d points\nvalue = "..var2string(x))
+    elseif type(x) == "table" then
+            if x.vertices ~= nil then
+                print(msg.."is a polyhedron. The fields are\n")
+                for k, v in pairs(x) do
+                    ld.whatis(v, k)
+                end
+            elseif x.visible ~= nil then
+                print(msg.."is an 'edges' structure. The fields are\n")
+                for k, v in pairs(x) do
+                    ld.whatis(v, k)
+                end
+            else
+                print(msg.."is a "..type(x).."\n value ="..var2string(x) )
+            end
+    else
+        print(msg.."is a "..type(x).."\n value ="..var2string(x) )
+    end
+end
+
+
+-- constantes
+point3d.Origin = point3d:new(0,0,0)
+point3d.vecI = point3d:new(1,0,0)
+point3d.vecJ = point3d:new(0,1,0)
+point3d.vecK = point3d:new(0,0,1)
+
+return point3d

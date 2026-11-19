@@ -1,0 +1,196 @@
+% luadraw.sty version 3.7 du 05/11/2026%
+%% ---------------------------------------%
+%% Copyright (C) 2026 Patrick Fradin%
+%% ---------------------------------------%
+% Ce package fournit un environnement de dessin avec lua%
+%%
+% \begin{luadraw}{<options>}% ou \begin{luadraw*}{<options>}
+%  <code lua>%
+% \end{luadraw}%
+%%%%%%%% ATTENTION : compilation avec lualatex uniquement !%
+%%%%%% Les options de l'environnement sont:%
+%%
+% name =         : nom du fichier tkz créé SANS extension (il y a un nom par défaut: \jobname\luaDraw@progcount),%
+% exec =         : (true ou false): exécute ou non le code lua, true par defaut,%
+% auto =         : (true ou false, true par défaut)): inclut ou non automatiquement le fichier tikz lorsque exec est false%
+%%
+%%%% Les options globales du package sont au nombre de 3:%
+%%
+% noexec  : redéfinit la valeur par défaut de l'option exec à la valeur false,%
+%           par conséquent les environnements luadraw ne sont pas exécutés par lua%
+%           sauf si l'option exec (ou exec=true) est mentionnée dans les options de l'environnement%
+% 3d : si cette option est utilisée alors la classe graph3d sera définie (ainsi que la classe graph), sinon seule la classe graph sera définie
+% cachdir = <directory> : sous-dossier où seront enregistrés les fichiers tkz, par défaut c'est le sous-dossier _luadraw.
+%%
+\RequirePackage{ifluatex}%
+\ifluatex%
+  % Rien à faire, tout va bien%
+\else%
+  \PackageError{luadraw}{This package needs LuaTeX (lualatex)}{}%
+  \expandafter\endinput%
+\fi%
+%%
+\NeedsTeXFormat{LaTeX2e}% %
+\ProvidesPackage{luadraw}[2026/11/05 version 3.7, provides luadraw environment for drawing with lua]%%
+%
+\RequirePackage{luacode}%%
+\RequirePackage{verbatim,xkeyval}%%
+%
+\RequirePackage{tikz}%%
+\usetikzlibrary{patterns,patterns.meta}%%
+\usetikzlibrary{plotmarks}%%
+\usetikzlibrary{arrows.meta, bending}%%
+\usetikzlibrary{decorations.markings}%%
+\usetikzlibrary{backgrounds}%%
+
+% patch from Davd Carlisle to correct a bug in luacode
+% https://tex.stackexchange.com/questions/762807/the-linebreak-syntax-bug-with-luacode
+\renewcommand \luacode@strip@sp@look {%
+  \expandafter\ifx\luacode@spaceother\@let@token
+    \expandafter\@firstoftwo
+  \else
+    \expandafter\@secondoftwo
+  \fi{%
+    \afterassignment\luacode@strip@sp@peek
+    \let\@let@token=
+  }{%
+    \luacode@strip@sp@def!%
+  }}%
+\def \luacode@strip@sp@def #1\@nil{%
+  \expandafter\def\expandafter\luacode@curr\expandafter{\@gobble#1}}%
+%%% end of patch
+
+\def\luadraw@TkzDir{_luadraw/}% répertoire de travail par défaut%
+\directlua{luadraw = {}}
+\directlua{luadraw.cachedir = ""}
+\newif\ifluaDraw@DefaultExec\luaDraw@DefaultExectrue%%
+\newif\ifluaDraw@DefaultThreeD\luaDraw@DefaultThreeDfalse%%
+\define@key{luadraw.sty}{noexec}[]{\luaDraw@DefaultExecfalse}%%
+\define@key{luadraw.sty}{3d}[]{\luaDraw@DefaultThreeDtrue}%%
+\define@key{luadraw.sty}{cachedir}[]{%%
+\def\luadraw@TkzDir{#1/}%
+\directlua{
+    luadraw.cachedir = \luastring{\luadraw@TkzDir}
+    local lfs = require 'lfs'
+    lfs.mkdir(luadraw.cachedir)
+}}%%
+\ProcessOptionsX%%
+%
+\define@key{luaDraw}{name}{%%
+    \def\luaDraw@nom{\luadraw@TkzDir#1}%%
+    \directlua{luadraw.graph_name = \luastring{\luaDraw@nom}..".tkz"}%
+}%%
+\define@boolkey{luaDraw}{exec}[true]{%%
+\ifKV@luaDraw@exec%%
+\def\luaDraw@dep{\luacode}%star}%%
+\def\luaDraw@depstar{\luacodestar}%%
+\def\luaDraw@enddep{\endluacode}%star}%%
+\def\luaDraw@enddepstar{\endluacodestar}%%
+\else%%
+\def\luaDraw@dep{\comment}%%
+\def\luaDraw@enddep{\endcomment}%%
+\fi%%
+}%%
+\define@boolkey{luaDraw}{auto}[true]{%%
+}%%
+%
+\newcounter{luaDraw@progcount}%%
+\setcounter{luaDraw@progcount}{0}%%
+%
+\ifluaDraw@DefaultExec%%
+    \presetkeys{luaDraw}{name=\jobname\theluaDraw@progcount, exec, auto}{}%%
+\else%%
+    \presetkeys{luaDraw}{name=\jobname\theluaDraw@progcount, exec=false, auto}{}%%
+\fi%%
+%
+\def\luaDraw@loading{}%%
+%
+\newenvironment*{luadraw}[2][]{%%
+\addtocounter{luaDraw@progcount}{1}%%
+\setkeys{luaDraw}{#2}%%
+\ifKV@luaDraw@exec% code lua exécuté%
+\directlua{% on efface l'ancien fichier tkz s'il existe%
+    print()
+    print("graph file = "..luadraw.graph_name)
+    local file = io.open(luadraw.graph_name, "r")
+    if not file then 
+        return
+    else 
+        file:close()
+        os.remove(luadraw.graph_name)
+    end
+}%%
+\else% code lua non exécuté%
+\ifKV@luaDraw@auto% -- chargement automatique du fichier tkz%
+\def\luaDraw@loading{\input{\luaDraw@nom.tkz}}%%
+\else%%
+\def\luaDraw@loading{}%%
+\fi%%
+\fi%%
+\bgroup%%
+\luaDraw@dep%%
+}%%
+{%%
+\luaDraw@enddep%%
+\egroup%%
+\luaDraw@loading%%
+}%%
+%%%%% environnement étoilé
+\newenvironment*{luadraw*}[2][]{%%
+\addtocounter{luaDraw@progcount}{1}%%
+\setkeys{luaDraw}{#2}%%
+\ifKV@luaDraw@exec% code lua exécuté%
+\directlua{% on efface l'ancien fichier tkz s'il existe%
+    print()
+    print("graph file = "..luadraw.graph_name)
+    local file = io.open(luadraw.graph_name, "r")
+    if not file then 
+        return
+    else 
+        file:close()
+        os.remove(luadraw.graph_name)
+    end
+}%%
+\else% code lua non exécuté%
+\ifKV@luaDraw@auto% -- chargement automatique du fichier tkz%
+\def\luaDraw@loading{\input{\luaDraw@nom.tkz}}%%
+\else%%
+\def\luaDraw@loading{}%%
+\fi%%
+\fi%%
+\bgroup%%
+\luaDraw@depstar%%
+}%%
+{%%
+\luaDraw@enddepstar%%
+\egroup%%
+\luaDraw@loading%%
+}%%
+% code exécuté au lancement
+\begin{luacode*}
+if luadraw.cachedir == "" then 
+    luadraw.cachedir = "_luadraw/"
+    local lfs = require 'lfs'
+    lfs.mkdir(luadraw.cachedir)
+end    
+luadraw.graph = require 'luadraw_graph2d'  -- définition de la classe graph
+luadraw.graph_name = "" -- nom du graphique (l'extension .tkz a été ajoutée)
+
+function luadraw.graph:Show() -- on écrit la méthode Show pour afficher et faire une sauvegarde du fichier tkz
+    self:Sendtotex()
+    self:Savetofile(luadraw.graph_name)
+end
+function luadraw.graph:Save() -- on écrit la méthode Save pour faire une sauvegarde du fichier tkz uniquement
+    self:Savetofile(luadraw.graph_name)
+end
+\end{luacode*}
+\ifluaDraw@DefaultThreeD%
+\begin{luacode*}
+luadraw.graph3d = require 'luadraw_graph3d' -- définition de la classe graph3d
+require 'luadraw_frustum_and_co'
+require 'luadraw_central_perspective' -- chargement de la perspective centrale
+\end{luacode*}
+\fi%
+%
+\def\luadrawLiteral#1{\pgfsys@invoke{#1}}%
+\endinput%%
