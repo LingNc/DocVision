@@ -238,7 +238,7 @@ func main() {
 		if err != nil {
 			die(err)
 		}
-		ck := verify.NewChecker(p.Root)
+		ck := verify.NewChecker(p.Root).WithSkillRoot(skillRoot())
 		results := map[string]any{}
 		for _, id := range strings.Split(args[2], ",") {
 			t, err := q.Get(id)

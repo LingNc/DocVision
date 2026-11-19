@@ -24,6 +24,14 @@ type Checker struct {
 	CoverageSource string
 	// CompileHook 编译检查覆盖（测试注入用）；默认真实跑 pdflatex。
 	CompileHook Hook
+	// SkillRoot 技能根（luadraw 模块目录的上级；SK-I16 预编译回退用）。空=回退路径不生效。
+	SkillRoot string
+}
+
+// WithSkillRoot 链式设置技能根（main/mcp 装配时调用）。
+func (c *Checker) WithSkillRoot(root string) *Checker {
+	c.SkillRoot = root
+	return c
 }
 
 // NewChecker 装配默认重型判据的验收器。
@@ -169,9 +177,14 @@ func (c *Checker) defaultCompile(t *task.Task, projectRoot string) []string {
 			}
 		}
 	}
-	engine := ""
-	if texcheck.NeedsLuaLaTeX(outDir, main) {
-		engine = "lualatex" // 按需引擎：只强制 luadraw 章
+	// 引擎双路探测（SK-I16）：luadraw 章——有 lualatex 直编；无则 lua5.4 预编译成 TikZ 走正常链。
+	filesDir := filepath.Join(c.SkillRoot, "docs", "luadraw", "files")
+	engine, _, derr := texcheck.DecideEngine(outDir, main, filesDir)
+	if derr != nil {
+		if strings.Contains(derr.Error(), "二选一安装") {
+			return nil // 缺工具按既有哲学跳过（报错指引交给 doctor/日志）
+		}
+		return []string{"luadraw 引擎决策失败: " + derr.Error()}
 	}
 	if _, err := texcheck.CompileEngine(outDir, main, engine); err != nil {
 		if strings.Contains(err.Error(), "不可用") {

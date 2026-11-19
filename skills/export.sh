@@ -28,6 +28,7 @@ if [ -d "$SKILLS_DIR/docs/luadraw" ]; then
 	mkdir -p "$STAGE/$PKG/docs/luadraw"
 	cp "$SKILLS_DIR/docs/luadraw/README.md" "$STAGE/$PKG/docs/luadraw/"
 	cp "$SKILLS_DIR/docs/luadraw/luadraw-index.json" "$STAGE/$PKG/docs/luadraw/"
+	cp -r "$SKILLS_DIR/docs/luadraw/files" "$STAGE/$PKG/docs/luadraw/files"  # 预编译回退的运行时依赖
 	cp "$SKILLS_DIR/docs/luadraw/luadraw-doc-en.pdf" "$STAGE/$PKG/docs/luadraw/"
 	[ -f "$SKILLS_DIR/docs/luadraw/luadraw_palettes_list.pdf" ] && cp "$SKILLS_DIR/docs/luadraw/luadraw_palettes_list.pdf" "$STAGE/$PKG/docs/luadraw/"
 	# spike 结论文档随包（runner/产物留仓库，包内只要结论）

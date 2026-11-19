@@ -236,7 +236,7 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) map[string]any {
 		if err != nil {
 			return fail(err)
 		}
-		ck := verify.NewChecker(p.Root)
+		ck := verify.NewChecker(p.Root).WithSkillRoot(skillRoot())
 		results := map[string]any{}
 		for _, id := range strings.Split(str("task_ids"), ",") {
 			tk, err := q.Get(id)
