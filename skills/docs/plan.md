@@ -24,7 +24,7 @@
   验证：`go test ./internal/...` 19 例绿（同图 ≥0.9 相似、mm 口径抓 50% 宽度差、无 mm 退化宽高比判据、空图拒绝）；修掉移植笔误一处（overlay→Overlay 调用点）。
 
 
-[X][ ] SK-P5. T1/T4 verdict 模式验收落地：classify 三态校验（styled_text 必附 extracted、vector 必附 reason、class 不合法/缺失一律打回——参考实现"失败不降级"判据入代码）；check 校验（result 三选一、issues 每条必带位置指针、no_verdict 打回但由 attempts 上限兜底）。
+[X][ ] SK-P5. T1/T4 verdict 模式验收落地：classify 校验（~~styled_text~~→四类 text/table/vector/raster + styled 独立标记，SK-I18 取代；当时 styled_text 必附 extracted、vector 必附 reason、class 不合法/缺失一律打回——参考实现"失败不降级"判据入代码）；check 校验（result 三选一、issues 每条必带位置指针、no_verdict 打回但由 attempts 上限兜底）。
   改：`skills/kernel` 增 `verify/schema.go`（ClassifyVerdict/CheckVerdict 结构 + 校验）+ `schema_test.go` 8 例；`Run` 第 6 步接入。
   验证：`go test ./internal/...` 27 例绿（classify 5 例 + check 4 例覆盖全部正反路径）。
 

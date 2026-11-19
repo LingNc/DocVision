@@ -1,4 +1,4 @@
-# T1 classify——图片三态分类
+# T1 classify——图片四类分类 + styled 标记
 
 ## 你要决定什么
 

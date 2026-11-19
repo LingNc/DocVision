@@ -70,6 +70,8 @@ var mcpTools = []mcpTool{
 		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
 	{"gen-draw", "按 classify 结论铺 draw 任务（覆盖分组下组员跟随代表）",
 		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"gen-stylefix", "SK-I19 全书级样式后段：首跑铺 stylefix-assess（前置=convert/check 全落定），assess done 后重跑按 blocks.json 铺 stylefix 块",
+		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
 	{"gen-img2text", "doc_index 图片条目铺 img2text 小轮转任务",
 		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
 	{"gen-final", "全书落定后铺终审任务（T7）",
@@ -375,6 +377,31 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) map[string]any {
 			return fail(err)
 		}
 		return ok(rep)
+	case "gen-stylefix":
+		p, _, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		q, qerr := queue.Load(queue.ProjectQueuePath(p.Root))
+		if qerr != nil {
+			return fail(qerr)
+		}
+		rep, err := gen.GenStylefixAssess(q)
+		if err != nil {
+			return fail(err)
+		}
+		if rep.AssessAdded == 1 {
+			_ = q.Save()
+			return ok(map[string]any{"phase": "assess", "report": rep})
+		}
+		rep2, err := gen.GenStylefixBlocks(q, p.Root)
+		if err != nil {
+			return ok(map[string]any{"phase": "assess", "report": rep, "next": err.Error()})
+		}
+		if rep2.BlocksAdded > 0 {
+			_ = q.Save()
+		}
+		return ok(map[string]any{"phase": "blocks", "report": rep2})
 	case "gen-img2text":
 		p, q, err := pq(str("project"))
 		if err != nil {

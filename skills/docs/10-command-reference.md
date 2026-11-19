@@ -120,7 +120,7 @@
 | 模型自由回调全套工具（看图上文/下图/OCR…） | `claim`/`submit` 领任务制 + 手册工具 | 异 ⚠ | 账本权从模型没收给内核状态机（防伪造进度——你的 OCR 伪造事件是动机）；agent 自主性下降是可预期代价 |
 | 每图输出 JSON 含 program items 自报进度 | 内核 queue.json 台账 + verdict.json | 异 ⚠ | 同上：进度=内核记账，不信模型自报 |
 | textonly 单轮 OCR（一图一轮出文字） | img2text 三态任务（文字化/结构图/保留，内核验收） | 异 ⚠ | 质变：分散决策升为带验收的任务制；OCR 质量由 [IMG_TYPE]+replacement 契约保障 |
-| 旧 classify：4 类（text/table/vector/raster）+ styled 标记 + confidence | 3 类（styled_text/vector/raster）+ confidence（SK-I5 必填） | 异 ⚠ | table 并入 styled_text（md 表格天然 md 表达）；styled 标记由 styled_text 类等价覆盖；confidence 按你拍板补 |
+| 旧 classify：4 类 + styled 标记 + confidence | 4 类 + styled 独立标记 + confidence | **同（SK-I18 已恢复）** | 曾因误合并为 3 类丢失 styled=false 直通路与 table 独立类，已按原文恢复 |
 | 输出头 `[IMG_TYPE:]` | 产物首行强制 + 八道闸 | **同（保留）** | 你拍板保留（[since ea5d4b5]） |
 | `latex_chapters` 拆章阶段 | convert 内递归细化 + 行数上限 | 异 | 阶段合并进 convert（初划可有可无语义） |
 | `latex_fix` + `stylefix` 三段（assess/block/integrate） | style 四步（写样式/选材/试点/试点修复）+ rework 循环 | 异 ⚠ | 三段式合并为试点闭环；assess 职能由 check 任务承担 |

@@ -45,7 +45,7 @@ LLM 任务 = 任务包（kernel 下发）+ 工作说明书（agent 读本）+ �
 
 - **任务粒度**：一张图一个任务；kernel 本地预筛（sha256 收缩、图标自动合并区间）后入队。
 - **说明书要点**：三态定义（styled-text / vector / raster）与判断证据要求；样式化文本的提取规范。
-- **验收 spec**：`verdict.json` 含 `class ∈ {styled_text, vector, raster}`；styled_text 必须附提取内容；vector 必须附"为什么可矢量重绘"一句证据；分类不合法时不记 done（沿用参考实现"失败不降级成 raster"判据）。
+- **验收 spec**（SK-I18 四类+styled 独立标记）：`verdict.json` 含 `class ∈ {text, table, vector, raster}` + `styled` 必填 + `style_note`（styled=true 时必填）+ `confidence` 必填；text/table 必附 extracted、vector 必附"为什么可矢量重绘"一句证据；分类不合法时不记 done（沿用参考实现"失败不降级成 raster"判据）。
 
 ## T2 作图（矢量图重绘）
 

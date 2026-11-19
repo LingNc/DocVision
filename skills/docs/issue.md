@@ -21,7 +21,7 @@
 - [ ] SK-I5. **classify 可补 confidence**：原 `latex_classifier` 有置信度+低置信强制复查；我们三态分类无 confidence 字段。小增强，可做可不做。
 - [x] SK-I6. **[IMG_TYPE] 已保留**（11-19，用户拍板）：img2text 产物首行强制 [IMG_TYPE: 八类词表] + verdict.json img_type 字段一致校验（verify/schema.go 三道闸），成品 md 随文保留类型头。
 
-其余对照结论（无缺失）：原 chapters 拆章≈我们 convert 内递归细化+行数上限；fix/stylefix 三段式≈style 四步合并+rework 循环；styled 标记职能由 styled_text 类+style-collect 选材等价覆盖。
+其余对照结论（无缺失）：原 chapters 拆章≈我们 convert 内递归细化+行数上限；fix/stylefix 三段式≈style 四步合并+rework 循环；~~styled 标记职能由 styled_text 类等价覆盖~~（此结论被 SK-I18 推翻：当时确属丢失，已恢复四类+styled 独立标记）。
 
 ## 已修复（2026-11-19 下午，daoshu 实操前修）
 - [x] SK-I7. MinerU 上游拒收 model_version="v2"（传 400：model_version not supported）——上传仅带后端自配字段；显式 model_version 需等后端支持。
