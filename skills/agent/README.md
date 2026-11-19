@@ -23,16 +23,21 @@ dvagent -workspace <工作区> claim <项目> <你的会话名> 3 convert
 3. **产物只在 `out/`**：`submit` 只收沙箱 `out/` 里的文件；引用 `_subdivision/`、`work/temp/` 等临时路径 = 打回（自包含判据）。
 4. **交还仪式**：每个任务交还前，在 notes.md 末尾追加两行：`停在 X` / `下一步 Y`。重入时先读这两行（记忆泡泡重入 O(1)）。
 5. **别信自己记得**：回炉指令、核对发现的问题，kernel 都落盘（issues），你只需 claim rework 任务，不用记住任何事。
+6. **文档优先，源码最后**（docs/00-start.md §0）：不懂先查本表手册与 docs/01-08 规约，再 `dvagent <命令> --help`；**内核源码是最后手段**——你领到任务的验收判据以文档描述为准，源码实现细节随版本变。
 
 ## 五类任务手册
 
 | 任务类型 | 手册 |
 | --- | --- |
 | classify（图片三态分类） | [manual-classify.md](manual-classify.md) |
+| img2text（md 档逐图三态） | [manual-img2text.md](manual-img2text.md) |
 | draw（矢量图重绘） | [manual-draw.md](manual-draw.md) |
+| style（样式试转） | [manual-style.md](manual-style.md) |
 | convert（章节转换） | [manual-convert.md](manual-convert.md) |
 | check（核对，只读） | [manual-check.md](manual-check.md) |
 | rework（复盘回炉） | [manual-rework.md](manual-rework.md) |
+| final（全书终审） | [manual-final.md](manual-final.md) |
+| troubleshoot（问题上报，非流水线任务） | [../docs/07-troubleshoot.md](../docs/07-troubleshoot.md) |
 
 ## 常用命令速查
 

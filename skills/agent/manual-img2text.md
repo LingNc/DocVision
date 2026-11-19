@@ -25,7 +25,7 @@
 
 ## 工具三件套（小轮转）
 
-1. **上下文检索**：`dvagent ctx-up <项目> <task_id>` / `ctx-down`——该图在 doc_index 里的前后文（默认 3 块）。
+1. **上下文检索**：`dvagent ctx-up <项目> <task_id>` / `ctx-down`——该图在 doc_index 里的前后文（默认 3 块）。即旧实现的 `get_more_context(more_above, more_below)`，语义一致（docs/00-start.md §3 有全表）。
 2. **看图**：任务包 acceptance 带 `global`（全书页）+ `figure_hint_bbox`，`page-render <项目> <global> <bbox>` 渲染后用你的看图工具打开。
 3. **提交**：按三态写产物后 `submit`。
 

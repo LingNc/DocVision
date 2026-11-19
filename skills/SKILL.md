@@ -12,7 +12,7 @@
 | 本包 `kernel/bin/dvagent` | 全部操作入口（预编译 linux/amd64；自行编译：`cd kernel && go build -o bin/dvagent ./cmd/dvagent`，需 Go≥1.25） | 直接可用 |
 | poppler-utils（pdfinfo/pdftotext/pdftoppm） | 拆书/覆盖率/渲染 | apt install poppler-utils |
 | TeX Live（pdflatex） | LaTeX 档编译判据（md 档 不需要） | apt install texlive-xetex |
-| MinerU | 扫描页 OCR：`export MINerU_TOKEN=<token>` 后走 API 模式（零安装）；或本地 pip install magic-pdf[full] | 见 upgrade-check                            # 第 0 步：上游升级自检（有新版本先升级再开跑）
+| MinerU | 扫描页 OCR：token 存 `data/profile.env`（600 权限）走 API 模式（零安装）；或本地 pip install magic-pdf[full] | 无 token 时装本地版；开跑前先 `upgrade-check` 查上游更新 |
  doctor 提示 |
 | mmdc（可选） | mermaid 校验（没有则跳过记 note） | npm i -g @mermaid-js/mermaid-cli |
 
@@ -56,4 +56,3 @@ $D -workspace ws deliver demo                                            # LaTeX
 - 验收门槛程序强制（矢量图重合度默认 17%、accept 必交够次数），不由模型判断；
 - 阈值只允许用户显式调整：`dvagent config-set <项目> figure.min_overlap 0.3`（agent 无权）；
 - 状态全部落盘：中断/换会话/换机器，跑一遍 `status` 即续上，零记忆负担。
-
