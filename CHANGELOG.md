@@ -4,6 +4,8 @@
 > 每个小节的日期取该标签的创建日期；`v1.2.0` 未单独打标签（日期取该版最后一次提交）。用 `git show <tag>` 可查看对应提交。
 
 ## [Unreleased]
+### Changed
+- **3D 与平面绘图要能用现代工具链了（P81，设计稿，未实现）**：以前作图会话只准写 TikZ，3D 关系、函数曲面这类要么被压成平面示意图，要么模型硬用 `tikz-3dplot` 现学。计划首选 **luadraw**（LuaLaTeX 下的 Lua 绘图环境，二三维都做，画出来仍是 TikZ，可自动存图），`tikz-3dplot`、`pgfplots` 3D 作为可选后端。要动的地方已勘明：引擎 `latex.compile.engine` 是**整本**单例（换 luadraw 就得全书 LuaLaTeX）、`buildStandalone` 现在只在 xe 时补 `ctex`（lualatex 下中文图会掉 CJK）、围栏声明的宏包本来就会被 `figurepkgs.go` 前置检查点名（luadraw 走这条既有通路，判据层零改动）。另加两道闸：`allow_lua` 默认关、`\directlua` 静态 lint 禁 `io`/`os`/`require`（编译期 Lua 够得着文件系统，`-no-shell-escape` 拦不住）。设计稿 `docs/plan-report/p81-luadraw-3d.md`。
 ### Fixed
 - **超大 PDF 的切分不再卡死（T328）**：`split` 阶段以前对每个分片都要对**源文件**做十余次 `TrimFile` 体积探测（每次都是全量解析），一万两千页、两百兆的册子跑了半小时连一个分片都写不出来。现在整本**一次读入**按页数切成若干份（有 `mutool` 用 `mutool merge`、没有就用 pdfcpu 的 `SplitFile` 一次切开），超体积的分片**在它自己身上**对半再切，因此每份只付一次读入代价；同一份文件 58 秒切完 7 份。日志会打出后端与用时（`一次切分（mutool，每份 ≤ 2000 页…）`），`DOCVISION_PDF_SPLIT_TOOL=mutool|pdfcpu` 可强制后端排查。
 ### Added

@@ -146,3 +146,7 @@
 [~][ ] P80. 插图绘制的全书统一样式：样式会话产出的 cls 提供一套具名 TikZ 样式族（`dv-wire`/`dv-axis`/`dv-grid`/`dv-label`/`dv-thick`…，配 `\dvfigwire` 等宏），作图会话只写语义引用、围栏开头留守卫兜底，转换只做残留宽度映射；全书绘图参数从此只有一处来源，P79 的成对说明降级为兜底。设计稿 `docs/plan-report/p80-figure-style-unity.md`，分 S1（cls 定义样式族 + `source/figure_ink.json` 实测统计）/S2（作图改语义引用）/S3（convert 映射 + preflight 警告）三步落地。
   改：`latex_style.system.md` 要求 cls 定义整套 `dv-*` 与 `\dvfig*`；`latex_figure.system.md` 改语义引用 + 守卫兜底；新增 `internal/latex/figureink.go` 聚合每图实测线宽；`preflightConvert` 警告残留 `line width=`。
   风险：守卫 `\ifdefined\dvfigloaded` 依赖 cls 在导言区先加载；旧项目围栏写死宽度，只做一次性映射、不强制重画。
+
+[~][ ] P81. 现代 3D 与平面绘图支持（luadraw 优先，可选 3D 工具链）：让作图会话不再被"只准写 TikZ"限制，能用 LuaLaTeX 下的 luadraw（Lua 代码直接算、输出仍是 TikZ）画 3D 关系与函数/平面图；`tikz-3dplot`、`pgfplots` 3D 等既有工具按需可选。设计稿 `docs/plan-report/p81-luadraw-3d.md`，分 S1（引擎与能力探测：LuaLaTeX + 包可用性，缺则前置检查停并给一行安装命令）/S2（提示词与 cls 契约：`allow_lua` 开关、样式包声明绘图后端、`## Drawing toolkit` 段）/S3（校验：`\directlua` 静态 lint 禁 I/O、图代码用 lualatex 编译、数值门槛与 `compare_figure` 全复用）三步落地。
+  改：`latex.compile.engine` 单例扩成"引擎 + 是否允许 Lua 作图"；`buildStandalone` 的 `engineIsXe` 改成"需要 CJK"（xe **或** lua 才加 `ctex`）；`preflightConvert` 用 `kpsewhich` 探 lualatex/luadraw，`figurepkgs.go` 认得 `luadraw`/`luacode`；`latex_style.system.md` 要求 cls 里声明绘图后端并给 `## Drawing toolkit`，`latex_figure.system.md` 只在开关打开时才提 Lua 通路。
+  风险：引擎是**整本**的，混用不可能——一章 luadraw 就得全书 lualatex，且 LuaLaTeX 普遍比 XeLaTeX 慢（`latex.compile.timeout` 可能要跟着放）；`\directlua` 在编译期能跑任意 Lua（`io`/`os` 可达，`-no-shell-escape` 拦不住），只能靠静态 lint + 只在用户显式开开关时才放行。
