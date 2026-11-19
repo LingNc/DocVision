@@ -34,6 +34,8 @@ if [ -d "$SKILLS_DIR/docs/luadraw" ]; then
 	# spike 结论文档随包（runner/产物留仓库，包内只要结论）
 	mkdir -p "$STAGE/$PKG/docs/luadraw/spike"
 	cp "$SKILLS_DIR/docs/luadraw/spike/README.md" "$STAGE/$PKG/docs/luadraw/spike/"
+	# runner.lua 随包（四垫片写法是预编译回退的权威参考，spike README 直接引用它；产物 tkz 留仓库）
+	cp "$SKILLS_DIR/docs/luadraw/spike/runner.lua" "$STAGE/$PKG/docs/luadraw/spike/"
 fi
 cp -r "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$SKILLS_DIR/SKILL.md" "$STAGE/$PKG/"
 # 用户配置模板随包（激活=cp config.example.yaml config.yaml；真 config.yaml 永不入包）
