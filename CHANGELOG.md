@@ -1180,3 +1180,7 @@
 
 ## skills 线（2026-11-19 下午二轮）
 - 对齐原 DocVision 老线：MinerU 产物结构收敛 part 根（无 auto 层，mergeInto 幂等合并任意上游形态）；model_version 默认 "vlm"（探针实证 v2 非法），is_ocr/language 默认 true/"ch"；修 main.go 零值不安全直赋；断点判据改 part 根 content_list。SK-I7/I8 修正 + SK-I9。normalize 4 新用例，全量 20 包 0 FAIL，e2e 真 API 带 vlm 绿。
+
+## skills 线（2026-11-19 晚）
+- 新增：项目共享记忆区 book/memory/（CLI+MCP 四命令 put/get/list/rm，原子写无锁，register 建区，docs/08 §3.5）。SK-I15。
+

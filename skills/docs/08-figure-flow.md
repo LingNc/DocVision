@@ -29,6 +29,14 @@
 - **排队**：任务先到先得（queue 序），多会话并行时内核自然分发
 - **阻塞等待（待办 SK-I12）**：`dvagent claim --wait`——无任务可领时阻塞轮询直到有任务/超时。阻塞会话不占 CPU；"内核唤醒"= 轮询到新任务（无推送机制，轮询间隔默认 5s 可配）。会话也可以直接被用户停掉，队列不受影响
 
+## 3.5 项目共享记忆区 memory/（2026-11-19 落地，SK-I15）
+
+自由协作层，补内核五区之外"会话自定义内容"的空档：**随 book 走、多会话平等读写、内核只给工具不给锁**。
+
+- 命令：`memory-put <项目> <key>`（stdin）/ `memory-get`（原始内容直出）/ `memory-list [前缀]` / `memory-rm`；MCP 同名四工具
+- key = memory/ 下相对路径（拒绝 `..`/绝对路径），约定分区：`render/`（渲染缓存）、`notes/`（会话笔记）、`digest/`（检索摘要，如"luadraw 三维透视章要点"存一份免反复翻 241 页 PDF）
+- 原子写（temp+rename），无锁后写覆盖前写；**重要结论仍落 verdict.json/chapters**，memory/ 只放备忘录与缓存
+
 ## 4. 状态机与交接
 
 - draw 任务沿用现有任务协议（accept/verify/verdict.json），验收门槛不变（min_overlap/比例/次数）

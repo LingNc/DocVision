@@ -44,3 +44,5 @@
 - [x] SK-I12. ~~claim --wait~~ **claim-wait 命令已落地**：`dvagent claim-wait <项目> <owner> [--interval N] [--timeout N] [--types t1,t2]`——阻塞轮询等内核分发，timeout=0 不限；会话阻塞不占 CPU 可随停。
 - [x] SK-I13. draw-style.tex 模板已入 `agent/templates/`；manual-style 增"绘图样式总览"节；checkspec 条件式强制已落地——style/draw-style.tex 存在才要求主文件引用模板（散写打回），无模板老项目自动跳过。
 - [x] SK-I14. luadraw 文档入 skills：包体+文档源码（仓库）、en PDF+514 条索引（PDF 物理页码映射，tools/build-index.py 可重建）+ luadraw-search 检索命令；包内只带 PDF+索引+指南，源码/包体现场取。
+- [x] SK-I15. 项目共享记忆区 `memory/`（feat/skills-memory 分支）：CLI+MCP 各四命令（put/get/list/rm），原子写无锁，约定 render/notes/digest 三分区；register 自动建区。行为验证：put→get→list→rm 全链 + 路径逃逸拒绝。
+
