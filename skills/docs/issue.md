@@ -49,3 +49,5 @@
 - [x] SK-I4. ~~verify 单图三对照~~——**用户裁定不实施**（原程序该阶段自身也未启用过，不做无效功）。
 - [x] SK-I5. 分类置信度（用户拍板）：classify verdict 必填 confidence（0~1），<0.6 低置信强制重判；越界/缺填打回。验证：TestClassifyConfidenceGates 五用例。
 - [x] SK-I16 **内核已落地**（22:35，0cae7c4）：texcheck.PrecompileLuaDraw/DecideEngine/LuaAvailable——luadraw 环境块→lua5.4 预编译→TikZ→正常链；双路探测（有 lualatex 直编/无则预编译）；垫片与 lingnc-memory/toolchain/luadraw 对齐（complex 3502 行产物过 tectonic 为边界基准，table.append 合并语义坑由其发现）；测试改编自 toolchain user-2d/user-complex。spike **已通过**（22:09，docs/luadraw/spike/）：plain lua5.4 独立跑通官方 3D 示例，产出完整 tikzpicture（1016B 含透视/着色/裁剪）。四个垫片方案定型（searcher 基名归一/luadraw_base 先载/lualibs 垫片/tex 空桩）。**实现待排期**：texcheck 加预编译步骤 + NeedsLuaLaTeX 改双路探测（有 lualatex 直编/无则预编译）。go-lua 内嵌经评估不采纳（luadraw 用 Lua5.3+ 语法 // 整除，gopher-lua 5.1 不兼容）。
+- [x] SK-I17. organize.go 命名推导不兼容 part 根输入（运行会话 e23e4e2 实跑暴露）：part 根输入时 `Dir(auto)` 取到 mineru/ 致章节命名错位（mineru.md 双写覆盖）。修：partStem() 统一推导（part 根取自身名/auto 布局取父目录名），循环命名与 bookStem 两处同换；docindex 报错带试过的 md 名与现存目录名。验证：TestPartStemPartRoot 双布局用例 + daoshu 实跑（prep-organize 产出 part md+book md 正确命名、prep-index 建 68 条目/10 页）。
+
