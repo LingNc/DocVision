@@ -112,7 +112,7 @@ func Organize(autoDirs []string, outDir string) ([]string, error) {
 		if err != nil {
 			return outs, err
 		}
-		base := filepath.Base(filepath.Dir(auto)) // <part名>/auto → <part名>
+		base := partStem(auto) // part 根或 <part名>/auto 统一推出 <part名>（SK-I17）
 		stem := strings.TrimSuffix(base, filepath.Ext(base))
 		outPath := filepath.Join(outDir, stem+".md")
 		if err := os.WriteFile(outPath, []byte(md), 0o644); err != nil {
@@ -122,7 +122,7 @@ func Organize(autoDirs []string, outDir string) ([]string, error) {
 		all = append(all, strings.TrimSpace(md))
 	}
 	// 整本 md：各 part 顺序拼接
-	bookStem := strings.TrimSuffix(filepath.Base(filepath.Dir(autoDirs[0])), filepath.Ext(filepath.Base(filepath.Dir(autoDirs[0]))))
+	bookStem := strings.TrimSuffix(partStem(autoDirs[0]), filepath.Ext(partStem(autoDirs[0])))
 	bookStem = strings.TrimSuffix(bookStem, "_part1")
 	bookPath := filepath.Join(outDir, bookStem+".md")
 	if err := os.WriteFile(bookPath, []byte(strings.Join(all, "\n\n")+"\n"), 0o644); err != nil {
@@ -152,4 +152,13 @@ func contentListIn(autoDir string) string {
 		return matches[0]
 	}
 	return ""
+}
+
+// partStem 统一命名推导（SK-I17）：part 根输入取自身名；<part>/auto 旧布局取父目录名。
+func partStem(auto string) string {
+	base := filepath.Base(auto)
+	if base == "auto" {
+		base = filepath.Base(filepath.Dir(auto))
+	}
+	return base
 }

@@ -65,3 +65,40 @@ func TestOrganizeWholeBook(t *testing.T) {
 		t.Fatalf("整本 md 应按 part 顺序拼接:\n%s", s)
 	}
 }
+
+// SK-I17：part 根输入（无 auto 层）时命名应取 part 目录名，而非父目录 mineru。
+func TestPartStemPartRoot(t *testing.T) {
+	root := t.TempDir()
+	part := filepath.Join(root, "mineru", "book_part1")
+	os.MkdirAll(filepath.Join(part, "images"), 0o755)
+	os.WriteFile(filepath.Join(part, "book_part1_content_list.json"), []byte("[]"), 0o644)
+	mdDir := filepath.Join(root, "chapters")
+	os.MkdirAll(mdDir, 0o755)
+	mds, err := Organize([]string{part}, mdDir) // 直接传 part 根（模拟 auto 缺失回退）
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBase(mds, "book_part1.md") {
+		t.Fatalf("part 根输入应命名 book_part1.md（SK-I17），实: %v", mds)
+	}
+	// 旧布局 <part>/auto 也应同名（main.go 发现逻辑：auto 存在传 <part>/auto）
+	part2 := filepath.Join(root, "mineru", "book_part2", "auto")
+	os.MkdirAll(filepath.Join(part2, "images"), 0o755)
+	os.WriteFile(filepath.Join(part2, "book_part2_content_list.json"), []byte("[]"), 0o644)
+	mds2, err := Organize([]string{part2}, mdDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBase(mds2, "book_part2.md") {
+		t.Fatalf("auto 旧布局应命名 book_part2.md，实: %v", mds2)
+	}
+}
+
+func hasBase(paths []string, want string) bool {
+	for _, p := range paths {
+		if filepath.Base(p) == want {
+			return true
+		}
+	}
+	return false
+}

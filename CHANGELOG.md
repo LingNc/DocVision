@@ -1190,3 +1190,6 @@
 ## skills 线（2026-11-19 深夜）
 - SK-I16 全落地：luadraw 两段式预编译进内核（texcheck：PrecompileLuaDraw/DecideEngine/LuaAvailable），引擎双路（lualatex 直编 / lua5.4 预编译回退）。垫片对齐 toolchain/luadraw（table.append 合并语义等四处），测试改编其 2D/3D 压力用例。本地特化路径不入库（LUADRAW_LUA 注入）。
 
+## skills 线（2026-11-20 凌晨）
+- SK-I17：prep-organize part 根输入命名错位修复（partStem 统一推导）+ prep-index 报错信息增强（带证据）。daoshu 实跑验证通过（organize 双 md 正确、index 68 条目/10 页）。
+

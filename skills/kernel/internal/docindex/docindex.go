@@ -600,7 +600,17 @@ func Build(mineruOutput, splitDir string, sourceMDs []string, markerDir, outPath
 		}
 	}
 	if len(idx.Entries) == 0 {
-		return nil, nil, fmt.Errorf("mineru_output 中未找到可索引的 content_list")
+		tried := []string{}
+		for _, md := range sourceMDs {
+			tried = append(tried, filepath.Base(md))
+		}
+		have := []string{}
+		if ents, rerr := os.ReadDir(mineruOutput); rerr == nil {
+			for _, e := range ents {
+				have = append(have, e.Name())
+			}
+		}
+		return nil, nil, fmt.Errorf("mineru_output 中未找到可索引的 content_list（md 试过: %v；%s 现存: %v）", tried, mineruOutput, have)
 	}
 	// 回填 DOCVISION 注释（图片条目唯一的"内容"来源）：按图片文件名
 	// 匹配，匹配不上就留空，绝不报错。
