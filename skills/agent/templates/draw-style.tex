@@ -1,0 +1,30 @@
+% draw-style.tex —— 全书矢量图绘图风格模板（style 阶段"绘图样式总览"动作产出到 book/style/draw-style.tex）
+% 用法：每张矢量图（手绘 TikZ 或 luadraw）的导言区 \input 本文件，三要素一律用这里的宏，不逐图散写。
+% 原则：默认参数优先（luadraw 默认即为出版设计）；必须自定义时只改这里，全书一处生效。
+% 本模板是骨架——具体数值由 style 阶段对照原书扫描结果填定（线粗/字号/箭头/配色四组）。
+
+% ── 1. 线粗规格（相对值，随文档字号自适应）────────────────────────────
+\newcommand{\dvLineThin}{0.4pt}    % 辅助线/网格/标注线
+\newcommand{\dvLineMain}{0.8pt}    % 图形主体轮廓
+\newcommand{\dvLineThick}{1.2pt}   % 强调线（轴线/边界）
+
+% ── 2. 标注字号（相对文档字号，保证缩放一致）─────────────────────────
+\newcommand{\dvLabelSize}{\small}      % 点/边标注
+\newcommand{\dvCaptionSize}{\footnotesize} % 图内说明文字
+
+% ── 3. 箭头/端点样式 ─────────────────────────────────────────────────
+\tikzset{
+  dvarrow/.style={-{Latex[length=2.5mm,width=1.5mm]}, line width=\dvLineMain},
+  dvpoint/.style={circle, fill, inner sep=1.2pt},   % 数学点标记
+  dvgrid/.style={gray!35, line width=\dvLineThin},
+}
+
+% ── 4. 配色（对照 docs/luadraw/luadraw_palettes_list.pdf 选定后填实）──
+\definecolor{dvMain}{HTML}{000000}   % 主色（默认黑，跟原书风格走）
+\definecolor{dvAccent}{HTML}{000000} % 强调色（填定后改实值）
+
+% ── 5. luadraw 默认注入（用 luadraw 时统一经此入口贴齐本书风格）────
+% \begin{luadraw}{name=..., pictureoptions={
+%   line width=\dvLineMain, font=\dvLabelSize,
+%   execute at begin picture={\color{dvMain}}
+% }}

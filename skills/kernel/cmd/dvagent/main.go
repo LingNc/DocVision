@@ -141,6 +141,71 @@ func main() {
 		}
 		out(claimed)
 
+	case "claim-wait":
+		// dvagent claim-wait <项目名> <owner> [--interval N] [--timeout N] [--types t1,t2]
+		// 阻塞等待内核分发（多子会话模式语义，docs/08-figure-flow.md §3）：无任务可领时
+		// 轮询睡眠，直到领到任务或超时（timeout=0 不限）。会话阻塞不占 CPU，可被用户随时停掉。
+		if len(args) < 3 {
+			die(fmt.Errorf("claim-wait 需要: <项目名> <owner> [--interval N] [--timeout N] [--types t1,t2]"))
+		}
+		p := mustProject(reg, args[1])
+		if p.Lifecycle != project.Active {
+			die(fmt.Errorf("项目 %s 处于 %s，不可派任务（先 activate）", args[1], p.Lifecycle))
+		}
+		interval, timeout := 5, 0
+		var wtypes []task.Type
+		for i := 3; i < len(args); i++ {
+			switch args[i] {
+			case "--interval":
+				i++
+				if i < len(args) {
+					fmt.Sscanf(args[i], "%d", &interval)
+				}
+			case "--timeout":
+				i++
+				if i < len(args) {
+					fmt.Sscanf(args[i], "%d", &timeout)
+				}
+			case "--types":
+				i++
+				if i < len(args) {
+					for _, s := range strings.Split(args[i], ",") {
+						wtypes = append(wtypes, task.Type(s))
+					}
+				}
+			default:
+				die(fmt.Errorf("未知参数: %s（可用 --interval/--timeout/--types）", args[i]))
+			}
+		}
+		if interval < 1 {
+			interval = 5
+		}
+		var deadline time.Time
+		if timeout > 0 {
+			deadline = time.Now().Add(time.Duration(timeout) * time.Second)
+		}
+		for {
+			q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+			if err != nil {
+				die(err)
+			}
+			claimed := q.Claim(args[2], 1, 1800, wtypes...)
+			if len(claimed) > 0 {
+				for _, t := range claimed {
+					for _, d := range []string{"inputs", "scratch", "out"} {
+						_ = os.MkdirAll(filepath.Join(p.Root, t.Sandbox, d), 0o755)
+					}
+				}
+				out(claimed)
+				return
+			}
+			if !deadline.IsZero() && time.Now().After(deadline) {
+				out(map[string]any{"claimed": 0, "timeout": true})
+				return
+			}
+			time.Sleep(time.Duration(interval) * time.Second)
+		}
+
 	case "submit":
 		// dvagent submit <项目名> <task_id,task_id,...>
 		// 逐条跑验收器，落 verdict，自动 unblock。

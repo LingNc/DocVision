@@ -40,7 +40,7 @@
 
 ## luadraw 引入批次（2026-11-19）
 - [x] SK-I10. 引擎按需：章内探测 \usepackage{luadraw} → 该章强制 lualatex（texcheck.CompileEngine/NeedsLuaLaTeX，verify 编译验收接线；不全书强制）。
-- [ ] SK-I11. gen-draw 按章按需铺任务（现状按全书预铺）+ style 阶段新增"绘图样式总览"动作（产出 book/style/draw-style.tex 模板，含线粗/标注/箭头三要素+pictureoptions 默认串+配色）。
-- [ ] SK-I12. `claim --wait` 阻塞命令：无任务时阻塞轮询等待内核分发（多子会话模式的阻塞语义，见 docs/08-figure-flow.md §3）。
-- [ ] SK-I13. draw-style.tex 模板规范 + style 验收加"模板已产出"项。
+- [~] SK-I11（半）. ~~style 总览动作~~已进 manual-style（模板产出+打回散写规则）；**剩余**：gen-draw 按章按需铺任务（现状按全书预铺）——改铺任务时机影响在跑 pipeline，与运行会话协同改。
+- [x] SK-I12. ~~claim --wait~~ **claim-wait 命令已落地**：`dvagent claim-wait <项目> <owner> [--interval N] [--timeout N] [--types t1,t2]`——阻塞轮询等内核分发，timeout=0 不限；会话阻塞不占 CPU 可随停。
+- [x] SK-I13（半）. draw-style.tex 模板已入 `agent/templates/`（线粗/字号/箭头/配色四组+luadraw pictureoptions 注入示例）；manual-style 增"绘图样式总览"节（模板打回散写）。**剩余**：checkspec 程序强制"模板已产出+逐图引模板"待与运行会话协同加（改验收时机有pipeline影响）。
 - [x] SK-I14. luadraw 文档入 skills：包体+文档源码（仓库）、en PDF+514 条索引（PDF 物理页码映射，tools/build-index.py 可重建）+ luadraw-search 检索命令；包内只带 PDF+索引+指南，源码/包体现场取。
