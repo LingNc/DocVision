@@ -1,0 +1,21 @@
+\begin{tikzpicture}[line join=round]%
+\begin{scope}%
+\clip (-0.5,-0.5) rectangle (10.5,10.5);%
+\draw[red,line width=1.2pt] (2.7649,7.8292) -- (1.6186,3.7485) -- (5.1453,1.3974) -- (8.4712,4.0249) -- (7,8)--cycle;%
+\pgfsetfillopacity{0.6}%
+\pgfsetfillcolor{blue!50!white!64.39!black}%
+\draw[fill] (5.6069,6.7771) -- (1.8074,5.8377) -- (5,8.4641)--cycle;%
+\pgfsetfillcolor{blue!50!white!51.91!black}%
+\draw[fill] (8.5677,5.2606) -- (5.6069,6.7771) -- (5,8.4641)--cycle;%
+\pgfsetfillcolor{blue!50!white!75.79!black}%
+\draw[fill] (6.5981,3.384) -- (2.42,3.7407) -- (1.8074,5.8377) -- (5.6069,6.7771) -- (8.5677,5.2606)--cycle;%
+\pgfsetfillcolor{blue!69.02!black}%
+\draw[fill] (1.8074,5.8377) -- (2.42,3.7407) -- (5,8.4641)--cycle;%
+\pgfsetfillcolor{blue!82.58!black}%
+\draw[fill] (6.5981,3.384) -- (8.5677,5.2606) -- (5,8.4641)--cycle;%
+\pgfsetfillcolor{blue!99.37!black}%
+\draw[fill] (2.42,3.7407) -- (6.5981,3.384) -- (5,8.4641)--cycle;%
+\pgfsetfillopacity{1}%
+\pgfsetfillcolor{black}%
+\end{scope}%
+\end{tikzpicture}%

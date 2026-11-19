@@ -10,6 +10,11 @@ LuaDraw v3.7（Patrick Fradin，LPPL 1.3c+，来源见 SOURCE.txt）：LuaLaTeX 
 
 ## 引擎（按需，不全书强制）
 
+**无 lualatex 的备选（SK-I16，spike 已通过，见 spike/README.md）**：luadraw 本质是
+"Lua 代码 → TikZ 文本"，可用 plain lua5.4 预编译成 .tikz 文件后走正常引擎链——回退序：
+有 lualatex → 直编（主路径）；无 lualatex 有 lua5.4 → 预编译回退；都没有 → 报错并指引
+二选一安装。
+
 luadraw 是**纯 LuaLaTeX 包**。内核已支持按章探测：章内任何 .tex 出现 `\usepackage[...]{luadraw}` → 该章编译自动强制 `lualatex`（`texcheck.NeedsLuaLaTeX` + `CompileEngine`），其余章走原 pdflatex→xelatex 链。**只有用 luadraw 的章需要装 lualatex**（texlive-lualatex）。
 
 ## 上手（三个关键机制）
