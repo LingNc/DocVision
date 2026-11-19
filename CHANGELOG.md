@@ -1187,3 +1187,6 @@
 ## skills 线（2026-11-19 晚二批）
 - SK-I5：classify 置信度必填 + <0.6 强制重判。SK-I3：水印默认去水印（verdict "watermark":true → 合成整行删除）。SK-I4 用户裁定不实施。SK-I16 记账（luadraw 两段式预编译备选）。
 
+## skills 线（2026-11-19 深夜）
+- SK-I16 全落地：luadraw 两段式预编译进内核（texcheck：PrecompileLuaDraw/DecideEngine/LuaAvailable），引擎双路（lualatex 直编 / lua5.4 预编译回退）。垫片对齐 toolchain/luadraw（table.append 合并语义等四处），测试改编其 2D/3D 压力用例。本地特化路径不入库（LUADRAW_LUA 注入）。
+

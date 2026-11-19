@@ -163,7 +163,7 @@ func PrecompileLuaDraw(dir, mainFile, filesDir string) (int, int, error) {
 			code = strings.ReplaceAll(code, `\shortcuts`, "") // 别名已由运行器注入
 			_ = os.WriteFile(filepath.Join(workDir, fmt.Sprintf("block_%d.lua", n)), []byte(code), 0o644)
 			manifest = append(manifest, fmt.Sprintf("%d\t%s", n, name))
-			return fmt.Sprintf("%s\n\\input{%s.tkz}", precompiledMarker, name)
+			return fmt.Sprintf("%s\n\\input{%s.tkz}\n%% %s", precompiledMarker, name, m)
 		})
 		if n == 0 {
 			continue

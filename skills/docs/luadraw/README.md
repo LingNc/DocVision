@@ -41,6 +41,12 @@ luadraw 是**纯 LuaLaTeX 包**。内核已支持按章探测：章内任何 .te
 4. luadraw 图与手绘 TikZ 图混排时：箭头样式/标注字号/线粗三要素对齐（style 模板里定义好）
 5. 产物照旧过 `figure` 验收（min_overlap 0.17 等）——luadraw 画错了一样打回
 
+## 易错点（toolchain 压力测试沉淀，边界基准见其 AGENTS.md）
+
+- **新 OOP API 一律表传参**：`graph:new{window={...},size={...}}` / `graph3d:new{...}` / `Dboxaxes3d{grid=true,...}`——函数式调用（`graph:new(-2,2,...)`）会炸 `attempt to index a number value (local 'args')`；老文档的 `graphe(-3,3,...)` 是旧函数式 API，别看错
+- `ld.graph`（非 graph2d）；`cpx.Z`；`Daxes/Dgrid` 的 `#d` 定长表校验静默不画
+- luadraw 章 preamble 需 6 组 TikZ 库：patterns, patterns.meta, plotmarks, arrows.meta, bending, decorations.markings, backgrounds
+
 ## 检索（给 AI 的精确导航）
 
 ```bash
