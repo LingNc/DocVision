@@ -25,7 +25,7 @@
 
 ## 工具三件套（小轮转）
 
-1. **上下文检索**：`dvagent ctx-up <项目> <task_id>` / `ctx-down`——该图在 doc_index 里的前后文（默认 3 块）。即旧实现的 `get_more_context(more_above, more_below)`，语义一致（docs/00-start.md §3 有全表）。
+1. **上下文检索（开工第一步）**：`dvagent ctx <项目> <task_id> [--up N] [--down M]`——单次双方向按 **md 行**返回（图像 sha 定位行号，带 `{image_line, range:[起,止], lines:[{line,text}...]}`），对应旧参考实现的 `get_more_context(↑N, ↓M)` 与开场喂入的 Context 块，拿到即读、不够再加 `--up/--down`。`ctx-up/ctx-down` 是按条目块的底层变体，一般用 `ctx`。
 2. **看图**：任务包 acceptance 带 `global`（全书页）+ `figure_hint_bbox`，`page-render <项目> <global> <bbox>` 渲染后用你的看图工具打开。
 3. **提交**：按三态写产物后 `submit`。
 

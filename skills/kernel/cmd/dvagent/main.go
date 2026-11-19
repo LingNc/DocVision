@@ -750,6 +750,99 @@ func main() {
 			})
 		}
 
+	case "ctx":
+		// dvagent ctx <项目> <任务id> [--up N] [--down M] —— 单次双方向按 md 行返回上下文
+		// （对齐旧参考实现 get_more_context(↑N, ↓M)：md 行号定位 {LINE}/[{UP_START},{DOWN_END}]）
+		if len(args) < 3 {
+			die(fmt.Errorf("ctx 需要: <项目名> <task_id> [--up N] [--down M]"))
+		}
+		p := mustProject(reg, args[1])
+		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
+		if err != nil {
+			die(err)
+		}
+		tk := q.Tasks[args[2]]
+		if tk == nil {
+			die(fmt.Errorf("无此任务: %s", args[2]))
+		}
+		upN, downN := 5, 5
+		for i := 3; i < len(args); i++ {
+			switch args[i] {
+			case "--up":
+				i++
+				if i < len(args) {
+					fmt.Sscanf(args[i], "%d", &upN)
+				}
+			case "--down":
+				i++
+				if i < len(args) {
+					fmt.Sscanf(args[i], "%d", &downN)
+				}
+			default:
+				die(fmt.Errorf("未知参数: %s（可用 --up/--down）", args[i]))
+			}
+		}
+		seqF, _ := tk.Accept["entry_seq"].(float64)
+		raw, err := os.ReadFile(filepath.Join(p.Root, "doc_index.json"))
+		if err != nil {
+			die(fmt.Errorf("doc_index.json 缺失（先 prep-index）: %w", err))
+		}
+		var idx struct {
+			Entries []struct {
+				Seq  int    `json:"seq"`
+				Type string `json:"type"`
+			} `json:"entries"`
+		}
+		if err := json.Unmarshal(raw, &idx); err != nil {
+			die(err)
+		}
+		seq := int(seqF)
+		found := false
+		for _, e := range idx.Entries {
+			if e.Seq == seq && e.Type == "image" {
+				found = true
+			}
+		}
+		if !found {
+			die(fmt.Errorf("entry_seq=%d 在 doc_index 里不是图片条目", seq))
+		}
+		sha := strings.TrimPrefix(tk.ID, "img2txt_")
+		imgMatches, _ := filepath.Glob(filepath.Join(p.Root, "mineru", "*", "images", sha+".*"))
+		if len(imgMatches) == 0 {
+			die(fmt.Errorf("找不到图像文件: %s（mineru/*/images/%s.*）", sha, sha))
+		}
+		partDir := filepath.Dir(filepath.Dir(imgMatches[0]))
+		mdPath := filepath.Join(partDir, "full.md")
+		mdData, err := os.ReadFile(mdPath)
+		if err != nil {
+			die(fmt.Errorf("full.md 缺失: %s", mdPath))
+		}
+		imgLine := 0
+		lines := strings.Split(string(mdData), "\n")
+		for li, line := range lines {
+			if strings.Contains(line, sha) {
+				imgLine = li + 1 // 1-based，对齐旧 {LINE}
+				break
+			}
+		}
+		if imgLine == 0 {
+			die(fmt.Errorf("full.md 里找不到图像行: %s", sha))
+		}
+		upStart := imgLine - upN
+		if upStart < 1 {
+			upStart = 1
+		}
+		downEnd := imgLine + downN
+		if downEnd > len(lines) {
+			downEnd = len(lines)
+		}
+		ctxLines := []map[string]any{}
+		for li := upStart; li <= downEnd; li++ {
+			ctxLines = append(ctxLines, map[string]any{"line": li, "text": lines[li-1]})
+		}
+		out(map[string]any{"task": tk.ID, "md": filepath.Base(mdPath), "image_line": imgLine,
+			"range": []int{upStart, downEnd}, "lines": ctxLines})
+
 	case "ctx-up", "ctx-down":
 		// dvagent ctx-up|ctx-down <项目名> <task_id> [n=3]
 		// T6 img2text 小轮转工具：按任务的 entry_seq 取 doc_index 相邻文字块（上文/下文）。
