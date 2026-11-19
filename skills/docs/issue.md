@@ -31,3 +31,9 @@
   根因：上游 MinerU 产物布局变更（直出 part 根）+ 旧归位逻辑"整目录搬移"+ 顶部"auto 存在即返回"误判。
   验证：normalize 4 新用例（摊平/part 根不动/最浅命中/缺失报错）+ e2e 全链绿 + 全量 20 包 0 FAIL。
   交接勘误：HANDOVER 所列 mcp.go 改动实际不需要（mcp.go 未引用 NormalizeLayout）；mcp.go 与 main.go 同经 DownloadAndExtract→NormalizeLayout 链，函数内自愈后调用方零改动。
+
+## 记录修正与补充（2026-11-19 下午二轮，按原 DocVision 老线对齐）
+- [x] SK-I7 修正：拒收真相是**值非法**而非字段非法——11-19 实测探针：model_version="vlm"→200，"v2"→-10002，省略→200。合法值仅 pipeline/vlm/MinerU-HTML。最终方案：默认 model_version="vlm"（老线同款值），不再置空省略。
+- [x] SK-I8 修正：**auto 层是本线自引入的中间态，老代码结构约定=part 根无 auto**（老 docindex 直读 <part>/*_content_list.json）。NormalizeLayout 终版=收敛 part 根：任意上游形态（顶层文件夹/auto 层/直出/混合残留）mergeInto 合并进 <part>/ 删壳，幂等；prep-mineru-api 断点①判据改为 part 根 content_list 存在。
+- [x] SK-I9. MinerU 配置默认值对齐老线实测可用值：model_version=vlm / is_ocr=true / language=ch（我们原默认 false/""，质量退化和老线不一致）；顺带修复 main.go 零值不安全直赋（config.yaml mineru 段少写几行会被静默重置的 bug）。
+  验证：normalize 4 新用例（嵌套收敛/幂等/混合残留/缺失报错）+ 全量 20 包 0 FAIL + e2e 真 API 带 vlm 线上复验。

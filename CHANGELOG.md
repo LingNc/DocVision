@@ -1177,3 +1177,6 @@
 
 ## skills 线（2026-11-19）
 - 修复：MinerU 上游 model_version 拒收（上传不再显式带 v2，SK-I7）；NormalizeLayout 重写——三形态自识别（标准 auto 原样/part 根原样/中毒嵌套摊平）+ 最浅命中优先（SK-I8）；prep-organize/gen-img2text 兼容 part 根产物布局；normalize 4 新用例 + e2e 真 API 全链绿 + 全量 20 包 0 FAIL。
+
+## skills 线（2026-11-19 下午二轮）
+- 对齐原 DocVision 老线：MinerU 产物结构收敛 part 根（无 auto 层，mergeInto 幂等合并任意上游形态）；model_version 默认 "vlm"（探针实证 v2 非法），is_ocr/language 默认 true/"ch"；修 main.go 零值不安全直赋；断点判据改 part 根 content_list。SK-I7/I8 修正 + SK-I9。normalize 4 新用例，全量 20 包 0 FAIL，e2e 真 API 带 vlm 绿。

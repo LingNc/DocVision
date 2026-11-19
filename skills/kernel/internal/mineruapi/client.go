@@ -47,12 +47,19 @@ type Config struct {
 	UploadTimeout int // 秒（空闲超时）
 }
 
-// DefaultConfig 出厂默认。
+// DefaultConfig 出厂默认——对齐原 DocVision 实测可用值（老线同款配置长期在跑）。
+// model_version 合法值仅 pipeline / vlm / MinerU-HTML（11-19 实测探针：vlm→200，v2→-10002，省略→200）。
 func DefaultConfig() Config {
 	return Config{
-		APIBaseURL: "https://mineru.net/api/v4", // 对齐上游默认端点（api.mineru.net 旧域已不可解析）；ModelVersion 默认留空：上游 2026-11 起拒收 version 字段（code -10002），空=请求体省略该键
-		EnableFormula: true, EnableTable: true,
-		PollInterval: 3, PollTimeout: 0, UploadTimeout: 300,
+		APIBaseURL:    "https://mineru.net/api/v4", // api.mineru.net 旧域已不可解析
+		ModelVersion:  "vlm",
+		IsOCR:         true,
+		EnableFormula: true,
+		EnableTable:   true,
+		Language:      "ch",
+		PollInterval:  3,
+		PollTimeout:   0,
+		UploadTimeout: 300,
 	}
 }
 
@@ -378,9 +385,41 @@ func (c *Client) DownloadAndExtract(zipURL, targetDir string) error {
 // 解压到 mineru/<part>/ 后可能多套一层（<part>/<part>/auto）。
 // 本函数找到 content_list 所在目录，把其 <...>/auto 整层归位到 <dir>/auto。
 // 幂等：已是标准布局则不动。返回归位后的 auto 目录路径（找不到则报错）。
+// copyEntry 递归拷贝单个文件或目录（NormalizeLayout 的 rename 失败回退用；FUSE 上 rename 不可靠）。
+func copyEntry(from, to string) error {
+	info, err := os.Stat(from)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		data, err := os.ReadFile(from)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(to, data, 0o644)
+	}
+	if err := os.MkdirAll(to, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := copyEntry(filepath.Join(from, e.Name()), filepath.Join(to, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// NormalizeLayout 归位解压产物——统一收敛到 part 根（对齐原 DocVision 结构约定：
+// <part>/{<data_id>_content_list.json, images/}，无 auto 层）。上游 zip 形态任意
+// （带顶层文件夹/带 auto 层/直出 part 根/混合残留），一律摊平合并进 part 根。
+// 返回 part 根本身。
 func NormalizeLayout(dir string) (string, error) {
-	// 深度搜 content_list，取最浅一处（按路径深度比，walk 字典序不保证浅的先到：
-	// 目录名排在文件名前时，嵌套的 content_list 会先于 part 根被访问）——它所在目录即产物根。
+	// 深度搜 content_list（取最浅命中：walk 字典序下目录名排在文件名前，嵌套的会先被访问，
+	// 深度比较才稳）——证明产物存在且定位产物根。
 	var found string
 	depth := func(p string) int { return strings.Count(p, string(os.PathSeparator)) }
 	filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
@@ -399,44 +438,75 @@ func NormalizeLayout(dir string) (string, error) {
 	if found == "" {
 		return "", fmt.Errorf("%s 下未找到 content_list（MinerU 产物结构不符）", dir)
 	}
-	// 三种形态：
-	//   <dir>/auto        → 标准布局，原样返回；
-	//   <dir>             → 上游直出 part 根布局，原样返回（归位反而搬空错位）；
-	//   <dir>/auto/<sub>/ → 中毒嵌套（解压多套一层/旧搬移残留），摊平到 <dir>/auto/。
-	if found == dir || found == filepath.Join(dir, "auto") {
-		return found, nil
+	// 1) 产物根不是 part 根：把产物根的内容合并上移进 part 根，清掉嵌套壳。
+	if found != dir {
+		if err := mergeInto(found, dir); err != nil {
+			return "", err
+		}
+		// 清壳：从 found 往 dir 方向逐层删空目录
+		for d := found; d != dir && strings.HasPrefix(d, dir); {
+			if err := os.Remove(d); err != nil {
+				break // 非空（有独有残留）则保留，不硬删
+			}
+			d = filepath.Dir(d)
+		}
 	}
-	target := filepath.Join(dir, "auto")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return "", err
+	// 2) part 根下的 auto/ 壳（历史布局残留）：内容合并上移，删掉壳。
+	if auto := filepath.Join(dir, "auto"); dirExists(auto) {
+		if err := mergeInto(auto, dir); err != nil {
+			return "", err
+		}
+		_ = os.RemoveAll(auto)
 	}
-	// 摊平移动：MinerU 新布局把产物套在 <data_id>/ 里（<data_id>/auto/<data_id>/...），
-	// 且解压时多套了一层 <part>/auto/<data_id>——一律把内层 auto 的"内容"摊平到 <part>/auto/。
-	// 直接移目录会带着内层目录名一起搬（旧 bug 根因），这里逐条移动更稳。
-	entries, rerr := os.ReadDir(found)
-	if rerr != nil {
-		return "", rerr
+	return dir, nil
+}
+
+// dirExists 目录存在性。
+func dirExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
+}
+
+// mergeInto 把 src 目录的内容合并进 dst（逐条：目录递归合并，文件 dst 已有则跳过，
+// 否则 rename、失败（FUSE/跨卷）则 copyEntry 递归拷贝）。幂等。
+func mergeInto(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
 	}
 	for _, e := range entries {
-		from := filepath.Join(found, e.Name())
-		to := filepath.Join(target, e.Name())
-		if err := os.Rename(from, to); err != nil {
-			// 跨卷回退复制
-			data, rerr2 := os.ReadFile(from)
-			if rerr2 != nil {
-				return "", rerr2
+		from := filepath.Join(src, e.Name())
+		to := filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			if dirExists(to) {
+				if err := mergeInto(from, to); err != nil {
+					return err
+				}
+				continue
 			}
-			if werr := os.WriteFile(to, data, 0o644); werr != nil {
-				return "", werr
+			if err := os.Rename(from, to); err != nil {
+				if err := copyEntry(from, to); err != nil {
+					return err
+				}
+				_ = os.RemoveAll(from)
+			}
+			continue
+		}
+		// 文件：dst 已有同名则保留现有（part 根产物优先）
+		if _, err := os.Stat(to); err == nil {
+			continue
+		}
+		if err := os.Rename(from, to); err != nil {
+			if err := copyEntry(from, to); err != nil {
+				return err
 			}
 			_ = os.Remove(from)
 		}
 	}
-	// 移完删掉内层 auto（此时应为空）
-	if err := os.Remove(found); err != nil {
-		fmt.Fprintf(os.Stderr, "警告: 清理内层 auto 失败: %v\n", err)
-	}
-	return target, nil
+	return nil
 }
 
 // unzip 解压（防 zip-slip：拒绝绝对路径与 ..）。

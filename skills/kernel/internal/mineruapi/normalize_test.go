@@ -6,83 +6,65 @@ import (
 	"testing"
 )
 
-// 新契约：<part>/auto/<data_id>/* → 摊平到 <part>/auto/*（内层空壳删除，不整目录搬）。
-func TestNormalizeLayoutFlatten(t *testing.T) {
+// 契约：一切形态收敛到 part 根 <part>/{content_list, images/}，无 auto 层。
+// ①上游 zip 带顶层文件夹（<part>/<uuid>/{content_list, images}）→ 上移合并进 part 根。
+func TestNormalizeConvergeNested(t *testing.T) {
 	root := t.TempDir()
-	// 模拟中毒解压：多套一层 <part>/auto/<data_id>/
 	inner := filepath.Join(root, "auto", "abc123")
-	for _, d := range []string{filepath.Join(inner, "images")} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	files := map[string]string{
-		filepath.Join(inner, "x_content_list.json"): "[]",
-		filepath.Join(inner, "layout.json"):         "{}",
-		filepath.Join(inner, "images", "a.jpg"):     "img",
-	}
-	for p, c := range files {
-		if err := os.WriteFile(p, []byte(c), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	auto, err := NormalizeLayout(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if auto != filepath.Join(root, "auto") {
-		t.Fatalf("应归位到 <part>/auto: %s", auto)
-	}
-	// 摊平：内容直接在 <part>/auto/ 下，不套 <data_id>/
-	for _, p := range []string{"x_content_list.json", "layout.json", "images/a.jpg"} {
-		if _, err := os.Stat(filepath.Join(root, "auto", p)); err != nil {
-			t.Fatalf("摊平后丢失 %s: %v", p, err)
-		}
-	}
-	if entries, _ := os.ReadDir(filepath.Join(root, "auto")); len(entries) != 3 {
-		t.Fatalf("auto 下应只有 3 项（不残留 data_id 壳）: %d", len(entries))
-	}
-	// 幂等：标准布局再来一次
-	auto2, err := NormalizeLayout(root)
-	if err != nil || auto2 != auto {
-		t.Fatalf("幂等: %s %v", auto2, err)
-	}
-}
-
-// 上游直出 part 根布局（content_list 直接在 part 根、无 auto 层）：normalize 原样返回 part 根，
-// 不得归位（归位会把产物搬进 auto/ 造成错位）。cmd 层特判之外，函数自身也必须安全。
-func TestNormalizeLayoutPartRootUntouched(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "x_content_list.json"), []byte("[]"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	os.MkdirAll(filepath.Join(inner, "images"), 0o755)
+	os.WriteFile(filepath.Join(inner, "x_content_list.json"), []byte("[]"), 0o644)
+	os.WriteFile(filepath.Join(inner, "layout.json"), []byte("{}"), 0o644)
+	os.WriteFile(filepath.Join(inner, "images", "a.jpg"), []byte("img"), 0o644)
 	got, err := NormalizeLayout(root)
 	if err != nil || got != root {
-		t.Fatalf("part 根布局应原样返回: %s %v", got, err)
+		t.Fatalf("应返回 part 根: %s %v", got, err)
+	}
+	for _, p := range []string{"x_content_list.json", "layout.json", "images/a.jpg"} {
+		if _, err := os.Stat(filepath.Join(root, p)); err != nil {
+			t.Fatalf("part 根缺 %s: %v", p, err)
+		}
+	}
+	if dirExists(filepath.Join(root, "auto")) {
+		t.Fatal("auto 壳应已删除")
 	}
 }
 
-// 残留中毒 auto/（内容不全）+ part 根有完整 content_list：取最浅命中，part 根胜出，不动。
-func TestNormalizeLayoutShallowestWins(t *testing.T) {
+// ②直出 part 根：幂等，不建 auto。
+func TestNormalizeConvergeIdempotent(t *testing.T) {
 	root := t.TempDir()
-	// part 根完整产物
-	os.MkdirAll(filepath.Join(root, "images"), 0o755)
 	os.WriteFile(filepath.Join(root, "y_content_list.json"), []byte("[]"), 0o644)
-	os.WriteFile(filepath.Join(root, "images", "b.jpg"), []byte("img"), 0o644)
-	// 残留中毒 auto/（内层缺 images）
+	got, err := NormalizeLayout(root)
+	if err != nil || got != root {
+		t.Fatalf("幂等应原样: %s %v", got, err)
+	}
+	if dirExists(filepath.Join(root, "auto")) {
+		t.Fatal("不应创建 auto 层")
+	}
+}
+
+// ③混合残留：part 根已有完整产物 + 半截 auto/（缺 images）→ part 根优先，auto 壳清除。
+func TestNormalizeConvergeMixed(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "images"), 0o755)
+	os.WriteFile(filepath.Join(root, "z_content_list.json"), []byte("[]"), 0o644)
+	os.WriteFile(filepath.Join(root, "images", "keep.jpg"), []byte("img"), 0o644)
 	inner := filepath.Join(root, "auto", "abc123")
 	os.MkdirAll(inner, 0o755)
-	os.WriteFile(filepath.Join(inner, "y_content_list.json"), []byte("[]"), 0o644)
+	os.WriteFile(filepath.Join(inner, "z_content_list.json"), []byte("stale"), 0o644)
 	got, err := NormalizeLayout(root)
 	if err != nil || got != root {
-		t.Fatalf("应取 part 根（最浅命中）: %s %v", got, err)
+		t.Fatalf("应返回 part 根: %s %v", got, err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "images", "b.jpg")); err != nil {
-		t.Fatalf("part 根产物被误动: %v", err)
+	if data, _ := os.ReadFile(filepath.Join(root, "z_content_list.json")); string(data) != "[]" {
+		t.Fatal("part 根既有产物被覆盖")
+	}
+	if dirExists(filepath.Join(root, "auto")) {
+		t.Fatal("auto 壳应已删除")
 	}
 }
 
-func TestNormalizeLayoutMissing(t *testing.T) {
+// ④无 content_list → 报错。
+func TestNormalizeMissing(t *testing.T) {
 	root := t.TempDir()
 	if _, err := NormalizeLayout(root); err == nil {
 		t.Fatal("无 content_list 应报错")

@@ -18,13 +18,13 @@ style:
   font_family: ""              # 主字体（空=不指定）
   fallback_font: "TeX Gyre Termes"  # 特殊字体缺失时的开源回退
   pilot_chapter: ""            # 试点章（style 先试转的章）
-mineru:                        # MinerU API 参数（端点对齐上游默认；文档见 docs/mineru-api.md）
+mineru:                        # MinerU API 参数（默认值=原 DocVision 实测可用值；文档见 docs/mineru-api.md）
   api_base_url: "https://mineru.net/api/v4"
-  model_version: "v2"
-  is_ocr: false
+  model_version: "vlm"         # 合法值仅 pipeline / vlm / MinerU-HTML（v2 等非法值被 -10002 拒收，11-19 实测）
+  is_ocr: true                 # 图中文字走 OCR 识别
   enable_formula: true
   enable_table: true
-  language: ""                 # 空=自动
+  language: "ch"               # 中文书默认 ch
   poll_interval: 3             # 轮询间隔（秒）
   poll_timeout: 0              # 轮询总超时（秒，0=不限）
   upload_timeout: 300          # 上传空闲超时（秒）

@@ -52,6 +52,13 @@ func skillRoot() string {
 	return "."
 }
 
+// hasContentList part 根是否已有 content_list（prep-mineru-api 断点跳过判据；
+// 归一后产物只落 part 根，不看 auto 层）。
+func hasContentList(dir string) bool {
+	matches, _ := filepath.Glob(filepath.Join(dir, "*_content_list.json"))
+	return len(matches) > 0
+}
+
 func main() {
 	ws := flag.String("workspace", ".", "skills 工作区根目录（含 skills_registry.json）")
 	flag.Parse()
@@ -897,10 +904,14 @@ func main() {
 		if cfg.MinerU.ModelVersion != "" {
 			mc.ModelVersion = cfg.MinerU.ModelVersion
 		}
-		mc.IsOCR = cfg.MinerU.IsOCR
+		// 零值安全：config.yaml 没写的键不得覆盖出厂默认（否则 mineru 段少写几行，
+		// is_ocr/language 被静默重置成 false/""——对齐老线默认 vlm/true/ch 的保险）。
+		mc.IsOCR = cfg.MinerU.IsOCR || mc.IsOCR
 		mc.EnableFormula = cfg.MinerU.EnableFormula || mc.EnableFormula
 		mc.EnableTable = cfg.MinerU.EnableTable || mc.EnableTable
-		mc.Language = cfg.MinerU.Language
+		if cfg.MinerU.Language != "" {
+			mc.Language = cfg.MinerU.Language
+		}
 		if cfg.MinerU.PollInterval > 0 {
 			mc.PollInterval = cfg.MinerU.PollInterval
 		}
@@ -921,8 +932,9 @@ func main() {
 		for _, part := range args[2:] {
 			stem := strings.TrimSuffix(filepath.Base(part), filepath.Ext(part))
 			dst := filepath.Join(p.Root, "mineru", stem)
-			// 断点 ①：已有产物直接跳过
-			if _, err := os.Stat(filepath.Join(dst, "auto")); err == nil {
+			// 断点 ①：已有产物直接跳过。判据=part 根有 content_list（归一后的唯一落点；
+			// 老判据"auto 存在"会把半截 auto/ 当完整产物，或永不命中——结构已收敛 part 根）。
+			if hasContentList(dst) {
 				results = append(results, map[string]any{"part": stem, "skipped": "已有产物"})
 				continue
 			}
