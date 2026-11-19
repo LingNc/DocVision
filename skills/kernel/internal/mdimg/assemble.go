@@ -2,6 +2,7 @@ package mdimg
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,7 @@ type Replacement struct {
 	Text    string // 文字化内容（空=非文字化）
 	Mermaid string // mermaid 源码（空=非 mermaid）
 	Keep    bool   // 保留原图
+	Drop    bool   // 去水印（SK-I3）：整行删除不留占位（verdict.json "watermark":true）
 }
 
 // LoadReplacements 从 done 的 img2txt_* 任务收集全部决策。
@@ -50,6 +52,15 @@ func LoadReplacements(q *queue.Queue, projectRoot string) ([]Replacement, error)
 		img, _ := tk.Accept["img"].(string)
 		r := Replacement{Seq: int(seqF), ImgRef: img}
 		sandbox := filepath.Join(projectRoot, tk.Sandbox, "out")
+		// SK-I3 水印：img2text verdict.json 标 "watermark":true → 合成整行删除（默认去水印）
+		if vb, err := os.ReadFile(filepath.Join(sandbox, "verdict.json")); err == nil {
+			var v struct {
+				Watermark bool `json:"watermark"`
+			}
+			if json.Unmarshal(vb, &v) == nil && v.Watermark {
+				r.Drop = true
+			}
+		}
 		if b, err := os.ReadFile(filepath.Join(sandbox, "replacement.md")); err == nil && strings.TrimSpace(string(b)) != "" {
 			r.Text = strings.TrimSpace(string(b))
 		} else if b, err := os.ReadFile(filepath.Join(sandbox, "figure.mmd")); err == nil && strings.TrimSpace(string(b)) != "" {
@@ -95,6 +106,11 @@ func AssembleWithShifts(md string, repls []Replacement) (string, []embedShift) {
 		ri++
 		var repl string
 		switch {
+		case r.Drop:
+			// 去水印：整行删除；其后的位置左移整行长度（含换行），pagemark 跟着平移
+			shifts = append(shifts, embedShift{start: offset, delta: -(len(ln) + 1)})
+			offset += len(ln) + 1
+			continue
 		case r.Text != "":
 			repl = r.Text
 		case r.Mermaid != "":

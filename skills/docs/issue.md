@@ -45,4 +45,8 @@
 - [x] SK-I13. draw-style.tex 模板已入 `agent/templates/`；manual-style 增"绘图样式总览"节；checkspec 条件式强制已落地——style/draw-style.tex 存在才要求主文件引用模板（散写打回），无模板老项目自动跳过。
 - [x] SK-I14. luadraw 文档入 skills：包体+文档源码（仓库）、en PDF+514 条索引（PDF 物理页码映射，tools/build-index.py 可重建）+ luadraw-search 检索命令；包内只带 PDF+索引+指南，源码/包体现场取。
 - [x] SK-I15. 项目共享记忆区 `memory/`（feat/skills-memory 分支）：CLI+MCP 各四命令（put/get/list/rm），原子写无锁，约定 render/notes/digest 三分区；register 自动建区。行为验证：put→get→list→rm 全链 + 路径逃逸拒绝。
+- [x] SK-I3. 水印检测（用户拍板默认去水印）：classify 识别→verdict 标 "watermark":true；img2text 合成阶段整行删除（Replacement.Drop，含 pagemark 负位移）。验证：TestAssembleWatermarkDrop。
+- [x] SK-I4. ~~verify 单图三对照~~——**用户裁定不实施**（原程序该阶段自身也未启用过，不做无效功）。
+- [x] SK-I5. 分类置信度（用户拍板）：classify verdict 必填 confidence（0~1），<0.6 低置信强制重判；越界/缺填打回。验证：TestClassifyConfidenceGates 五用例。
+- [ ] SK-I16. luadraw 无 lualatex 备选（两段式预编译）：plain lua + shim 预编译 luadraw 块→TikZ 文件→正常链编译。需先 spike 实证模块对 tex.* 全局的耦合度（docs/luadraw README 已记方案）。
 

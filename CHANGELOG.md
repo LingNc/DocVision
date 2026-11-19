@@ -1184,3 +1184,6 @@
 ## skills 线（2026-11-19 晚）
 - 新增：项目共享记忆区 book/memory/（CLI+MCP 四命令 put/get/list/rm，原子写无锁，register 建区，docs/08 §3.5）。SK-I15。
 
+## skills 线（2026-11-19 晚二批）
+- SK-I5：classify 置信度必填 + <0.6 强制重判。SK-I3：水印默认去水印（verdict "watermark":true → 合成整行删除）。SK-I4 用户裁定不实施。SK-I16 记账（luadraw 两段式预编译备选）。
+
