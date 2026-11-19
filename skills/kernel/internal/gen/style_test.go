@@ -14,7 +14,7 @@ import (
 func TestCollectStyleMaterials(t *testing.T) {
 	root := t.TempDir()
 	q, _ := queue.Load(filepath.Join(root, "q.json"))
-	seedClassifyWithVerdict(t, q, root, "figs", `{"class":"styled_text","confidence":0.9,"extracted":"第一行题字"}`)
+	seedClassifyWithVerdict(t, q, root, "figs", `{"class":"text","styled":true,"style_note":"测试样式线索","confidence":0.9,"extracted":"第一行题字"}`)
 	seedClassifyWithVerdict(t, q, root, "figv", `{"class":"vector","confidence":0.9,"reason":"x"}`)
 	rep, err := CollectStyleMaterials(q, root)
 	if err != nil {

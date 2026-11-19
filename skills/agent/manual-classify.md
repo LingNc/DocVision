@@ -10,20 +10,34 @@
 {"class": "raster"}
 ```
 
-## 三态定义
+## 四类定义 + styled 标记（SK-I18 恢复旧参考实现，原模板 prompts-archive/latex_classifier.system.md）
 
-- **styled_text**：本质是排版文本（表格化文字、公式以外的印刷内容）。必须提取文字到 `extracted`——**空提取 = 打回**（不会降级成 raster，不确定就重看原图再交）。
-- **vector**：线条/几何构成的示意图（流程图、坐标图、电路图、简单图表）。必须给 `reason` 证据（"由直线+箭头构成，无照片纹理"之类）。这类会被 draw 任务重绘成 TikZ。
-- **raster**：照片、复杂渐变、任何矢量重绘不划算的图。不需要附加字段。
+verdict.json（必填 confidence 与 styled）：
 
-## 判据
+```json
+{
+  "class": "text | table | vector | raster",
+  "styled": true,
+  "style_note": "styled=true 必填：字体/颜色/边框/装饰的具体线索",
+  "extracted": "text/table 必填：提取的文本（table 重打为 md 表）",
+  "reason": "vector 必填：为什么可矢量重绘的一句话证据",
+  "watermark": false,
+  "confidence": 0.95
+}
+```
 
-- 像素完全一致/近一致的重复图 kernel 已在 dedupe 层并桶，你拿到的就是"key 图"——分类结论会被跟随图共享，**拿不准时宁可打回重看，不要乱填**（乱填值=打回，且不会记 done）。
-- 判断证据看几何：文字基线整齐+行结构=styled_text；可拆成线段/圆/箭头的路径=vector；连续调制的灰度/彩色像素=raster。
+**四类判据**：
+- **text**——本质是文字：正文段落、艺术字标题/题号、装饰标签、水印文字、纯渲染的简单公式。必须附 extracted。
+- **table**——可用 Markdown 表表达的表格（简单表/对齐表）。必须附 extracted（md 表形式）。复杂到 md 表达不了（合并单元格/嵌套）判 vector。
+- **vector**——可矢量重绘的结构：几何图/流程图/架构图/复杂表格/有精确数学要求的曲线。必须附 reason。
+- **raster**——照片、扫描截图、纹理。允许无附加字段。
 
-## 交还
+**styled 独立标记**（不是类别）：
+- `styled: true`——带视觉样式（艺术字/颜色/边框/装饰）且对忠实还原重要 → **进 style 素材池**（style-collect 选材），style_note 必填
+- `styled: false`——正文/普通公式/普通表格 → **直通 md，不进样式流程**
+- 拿不准就如实填并压低 confidence（<0.6 内核强制重判）
 
-verdict.json 写好后 `submit`。notes.md 记一行分类理由（给下游 draw 任务当线索）。
+**下游分流**：text/table+styled=false → 文字化直通 md；text/table+styled=true → 文字化 + style 素材池；vector → draw；raster → 保留。
 
 ## 置信度（SK-I5，必填）
 

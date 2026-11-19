@@ -16,11 +16,21 @@ import (
 // verdict_schema 验收：T1 classify 与 T4 check 的 verdict.json 模式校验。
 // 对应 docs/02-task-protocol.md：验收只看磁盘上的 verdict.json，不看 agent 自述。
 
-// ClassifyVerdict 是 T1 三态分类的落盘结构（agent 写 out/verdict.json）。
+// ClassifyVerdict 是 T1 分类的落盘结构（SK-I18 恢复旧参考实现四类 + styled 独立标记，
+// 原模板 prompts-archive/latex_classifier.system.md）。下游分流：
+//   text/table + styled=false → 文字化直通 md，不进样式流程
+//   text/table + styled=true  → 文字化 + 进 style 素材池（CollectStyleMaterials）
+//   vector → draw 重绘；raster → 保留原图
 type ClassifyVerdict struct {
-	Class     string `json:"class"`     // styled_text | vector | raster
-	Extracted string `json:"extracted"`   // styled_text 必填：提取的文本内容
+	Class     string `json:"class"`     // text | table | vector | raster
+	Extracted string `json:"extracted"`   // text/table 必填：提取的文本内容（table 重打为 md 表）
 	Reason    string `json:"reason"`      // vector 必填：为什么可矢量重绘的一句话证据
+	// Styled 独立布尔标记（必填）：内容带视觉样式（艺术字/颜色/边框/装饰）且对忠实还原重要才 true。
+	Styled *bool `json:"styled"`
+	// StyleNote styled=true 必填：样式线索（字体/颜色/边框/装饰的具体描述）。
+	StyleNote string `json:"style_note"`
+	// Watermark 水印标记（SK-I3，可选）：true 时合成默认去水印。
+	Watermark bool `json:"watermark"`
 	// Confidence 分类置信度（SK-I5，必填 0~1）：拿不准就压低，<0.6 内核强制重判。
 	Confidence *float64 `json:"confidence"`
 }
@@ -54,8 +64,8 @@ func (c *Checker) checkVerdictSchema(t *task.Task, sandboxAbs string) []string {
 	return []string{"未知 verdict_schema: " + schema}
 }
 
-// checkClassifyVerdict 三态校验（沿用旧线"失败不降级成 raster"判据）：
-// class 必须合法；styled_text 必须附提取内容；vector 必须附可重绘证据。
+// checkClassifyVerdict 四类校验（SK-I18 恢复旧参考实现；styled 独立标记必填）。
+// text/table 必须附提取内容；vector 必须附可重绘证据；raster 允许无附加。
 func checkClassifyVerdict(b []byte) []string {
 	var v ClassifyVerdict
 	if err := json.Unmarshal(b, &v); err != nil {
@@ -63,9 +73,9 @@ func checkClassifyVerdict(b []byte) []string {
 	}
 	var errs []string
 	switch v.Class {
-	case "styled_text":
+	case "text", "table":
 		if strings.TrimSpace(v.Extracted) == "" {
-			errs = append(errs, "styled_text 分类必须附 extracted（提取的文本内容），不允许空提取占位")
+			errs = append(errs, v.Class+" 分类必须附 extracted（提取的文本内容；table 重打为 md 表），不允许空提取占位")
 		}
 	case "vector":
 		if strings.TrimSpace(v.Reason) == "" {
@@ -76,7 +86,13 @@ func checkClassifyVerdict(b []byte) []string {
 	case "":
 		errs = append(errs, "verdict.json 缺少 class 字段（不允许以空分类蒙混过关，失败就重试，不降级）")
 	default:
-		errs = append(errs, fmt.Sprintf("class %q 不合法（只允许 styled_text/vector/raster）——分类不确定就重试，不得乱填", v.Class))
+		errs = append(errs, fmt.Sprintf("class %q 不合法（只允许 text/table/vector/raster）——分类不确定就重试，不得乱填", v.Class))
+	}
+	// styled 独立标记（必填）：视觉样式且对忠实还原重要才 true；true 必须给 style_note
+	if v.Styled == nil {
+		errs = append(errs, "verdict.json 必须填 styled（布尔：内容带艺术字/颜色/边框/装饰等视觉样式且对还原重要→true；正文/普通公式/普通表→false）")
+	} else if *v.Styled && strings.TrimSpace(v.StyleNote) == "" {
+		errs = append(errs, "styled=true 必须附 style_note（字体/颜色/边框/装饰的具体样式线索）")
 	}
 	// SK-I5 置信度闸（必填；低置信强制重判，不许硬判）
 	if v.Confidence == nil {

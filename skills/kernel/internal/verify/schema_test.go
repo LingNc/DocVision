@@ -37,7 +37,7 @@ func TestClassifySchema(t *testing.T) {
 	}
 
 	// styled_text 空提取 → 打回（不降级判据）
-	root, tk = sandboxWithVerdict(t, `{"class":"styled_text","confidence":0.9}`)
+	root, tk = sandboxWithVerdict(t, `{"class":"text","styled":true,"confidence":0.9}`)
 	tk.Accept["verdict_schema"] = "classify"
 	c.ProjectRoot = root
 	errs, _ = c.Run(tk)
@@ -46,7 +46,7 @@ func TestClassifySchema(t *testing.T) {
 	}
 
 	// styled_text 有提取 → 过
-	root, tk = sandboxWithVerdict(t, `{"class":"styled_text","confidence":0.9,"extracted":"第一章 引论"}`)
+	root, tk = sandboxWithVerdict(t, `{"class":"text","styled":true,"style_note":"艺术字标题","confidence":0.9,"extracted":"第一章 引论"}`)
 	tk.Accept["verdict_schema"] = "classify"
 	c.ProjectRoot = root
 	errs, _ = c.Run(tk)
@@ -55,7 +55,7 @@ func TestClassifySchema(t *testing.T) {
 	}
 
 	// vector 无证据 → 打回
-	root, tk = sandboxWithVerdict(t, `{"class":"vector","confidence":0.9}`)
+	root, tk = sandboxWithVerdict(t, `{"class":"vector","styled":false,"confidence":0.9}`)
 	tk.Accept["verdict_schema"] = "classify"
 	c.ProjectRoot = root
 	errs, _ = c.Run(tk)
@@ -229,10 +229,10 @@ func TestClassifyConfidenceGates(t *testing.T) {
 		wantErr string // 空=应通过
 	}{
 		{"缺 confidence 打回", `{"class":"raster","reason":"r"}`, "confidence"},
-		{"越界打回", `{"class":"raster","reason":"r","confidence":1.5}`, "越界"},
-		{"低置信强制重判", `{"class":"vector","reason":"线条清晰","confidence":0.4}`, "低置信"},
-		{"正常放行", `{"class":"vector","reason":"线条清晰","confidence":0.92}`, ""},
-		{"边界 0.6 放行", `{"class":"raster","reason":"r","confidence":0.6}`, ""},
+		{"越界打回", `{"class":"raster","reason":"r","styled":false,"confidence":1.5}`, "越界"},
+		{"低置信强制重判", `{"class":"vector","reason":"线条清晰","styled":false,"confidence":0.4}`, "低置信"},
+		{"正常放行", `{"class":"vector","reason":"线条清晰","styled":false,"confidence":0.92}`, ""},
+		{"边界 0.6 放行", `{"class":"raster","reason":"r","styled":false,"confidence":0.6}`, ""},
 	}
 	for _, tc := range cases {
 		root, tk := sandboxWithVerdictImg(t, tc.verdict)

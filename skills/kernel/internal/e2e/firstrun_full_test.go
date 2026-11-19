@@ -87,9 +87,9 @@ echo ok`
 		t.Fatalf("应有 2 classify 任务: %v", ids)
 	}
 	for _, id := range ids {
-		v := `{"class":"vector","confidence":0.9,"reason":"线条图"}`
+		v := `{"class":"vector","styled":false,"confidence":0.9,"reason":"线条图"}`
 		if id == "cls_book_part2" {
-			v = `{"class":"styled_text","confidence":0.9,"extracted":"图注文字"}`
+			v = `{"class":"text","styled":true,"style_note":"测试样式线索","confidence":0.9,"extracted":"图注文字"}`
 		}
 		writeFile(t, filepath.Join(bookDir, "tasks", id, "out", "verdict.json"), v)
 	}

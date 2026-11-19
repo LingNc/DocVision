@@ -48,8 +48,9 @@ func CollectStyleMaterials(q *queue.Queue, projectRoot string) (*StyleReport, er
 		var v struct {
 			Class     string `json:"class"`
 			Extracted string `json:"extracted"`
+			Styled    *bool  `json:"styled"`
 		}
-		if err := json.Unmarshal(b, &v); err != nil || v.Class != "styled_text" || v.Extracted == "" {
+		if err := json.Unmarshal(b, &v); err != nil || !(v.Class == "text" || v.Class == "table") || v.Styled == nil || !*v.Styled || v.Extracted == "" {
 			continue
 		}
 		name := tk.ID + ".md"

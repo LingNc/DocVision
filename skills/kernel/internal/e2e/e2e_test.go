@@ -128,9 +128,9 @@ c.save()
 		if err := os.MkdirAll(outDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		v := `{"class":"vector","confidence":0.9,"reason":"线条图可重绘"}`
+		v := `{"class":"vector","styled":false,"confidence":0.9,"reason":"线条图可重绘"}`
 		if i == 1 {
-			v = `{"class":"styled_text","confidence":0.9,"extracted":"图 2-1 模型评估"}`
+			v = `{"class":"text","styled":true,"style_note":"黑体图注","confidence":0.9,"extracted":"图 2-1 模型评估"}`
 		}
 		if err := os.WriteFile(filepath.Join(outDir, "verdict.json"), []byte(v), 0o644); err != nil {
 			t.Fatal(err)
