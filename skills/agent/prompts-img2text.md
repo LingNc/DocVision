@@ -60,3 +60,12 @@ Rules:
 - 结构图先想 mermaid 能不能表达（提示词规则 2 的图类清单）；表格式内容一律 md 表格全行全列；公式 LaTeX。
 - "describe WHAT is visible, never WHY/HOW" 与"Be EXHAUSTIVE"是防漏防编的两条主纪律，与内核判据（行数结构校验/重组装）互补。
 - [?] 标记法保留：看不清的元素标 [?] 只描述确定部分——重组装时原图位置若信息不足可走 keep。
+
+
+## 沿用原参考实现的核心要求（对齐摘记，非原文）
+
+- **输出头 [IMG_TYPE: <type>]**（system 提示词核心）：response 必须以该头开始、不得省略——对应产物首行硬要求（见手册），八类词表同手册
+- **八类图逐一判定**：Table / Flowchart / Gantt / Architecture-Network / Graph-Chart / Formula / Code screenshot / Simple illustration，每类各有表达规则（GFM 表、mermaid、matplotlib 重绘描述、LaTeX、代码块、详细 caption），上面 Rules 节已含对应规则
+- **JSON-only 纪律**：只含 JSON 的响应禁用 Markdown 围栏；混淆时先增量拉上下文再答——对应我们的 ctx-up/ctx-down 检索（doc_search），语义一致
+- **文字化严格只述可见**：不脑补不总结，图中文字忠实转写（见"文字化（textonly）"节）
+- 三篇原档存 `prompts-archive/` 仅供核对，执行策略以本摘记+Rules 为准

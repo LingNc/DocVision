@@ -13,6 +13,16 @@
 3. **无法文字化**（照片/复杂图/文字化反而损信息）→ 不写产物或写
    `out/verdict.json {"result":"keep"}` → md 里**原样保留**这张图。
 
+## 类型标识 [IMG_TYPE:]（沿用原参考实现格式，必守）
+
+- 文字化（out/replacement.md）与结构图（out/figure.mmd）的产物**首行必须是类型头**：
+  `[IMG_TYPE: <type>]`，type 用八类词表（不得自造，分类不确定就重试）：
+  `Table` / `Flowchart` / `Gantt Chart` / `Architecture/Network Diagram` /
+  `Graph/Chart` / `Formula` / `Code screenshot` / `Simple illustration`
+- verdict.json 增 `img_type` 字段，值必须与产物首行一致（内核三道闸：缺头打回、词表外打回、两处不一致打回）
+- 保留（keep）态无产物，免类型头
+- 类型头随产物整段嵌入成品 md（assemble 程序化原位嵌入，头行原样保留）
+
 ## 工具三件套（小轮转）
 
 1. **上下文检索**：`dvagent ctx-up <项目> <task_id>` / `ctx-down`——该图在 doc_index 里的前后文（默认 3 块）。

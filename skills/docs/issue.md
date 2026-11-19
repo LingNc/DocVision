@@ -13,3 +13,12 @@
   根因：防模型偷懒与防阈值被 agent 自行放宽；img2text 与 latex 转换是两类任务不能混。
   改：skills/docs/plan.md SK-P27+（config 层）、SK-P28（编号映射）、SK-P29（img2text 类型）、SK-P30（看图台）——四项全部落地。
   验证：config 层单测 + e2e 复跑；2026-11-18 23:4x 复核实物：ids/img2text+mdimg/viewer/final 四包俱在且测试绿，SK-P28–P30 台账"待实现"字样已更正。
+
+## 待拍板（2026-11-19 原仓库全量克隆后对照发现，均非 bug 为增强）
+
+- [ ] SK-I3. **watermark 检测缺失**：原程序有 `latex_watermark` 阶段（检测书内水印/广告图，建议删除）；我们两档都没有——md 档靠 agent 三态可能判 keep 保留水印，LaTeX 档原样嵌入。是否需要加专门检测（或并入 classify/rework 提示词要求）？
+- [ ] SK-I4. **verify 单图三对照弱一层**：原程序 `latex_verify` 是模型 QA（同一张图三视角：原图/TikZ 渲染/正文嵌入内容语义对照）；我们 figure 验收是程序几何判据+accept 次数，语义对照只靠 rework 轮模型自查，无强制 QA 任务。是否补一个 verify 任务类型？
+- [ ] SK-I5. **classify 可补 confidence**：原 `latex_classifier` 有置信度+低置信强制复查；我们三态分类无 confidence 字段。小增强，可做可不做。
+- [x] SK-I6. **[IMG_TYPE] 已保留**（11-19，用户拍板）：img2text 产物首行强制 [IMG_TYPE: 八类词表] + verdict.json img_type 字段一致校验（verify/schema.go 三道闸），成品 md 随文保留类型头。
+
+其余对照结论（无缺失）：原 chapters 拆章≈我们 convert 内递归细化+行数上限；fix/stylefix 三段式≈style 四步合并+rework 循环；styled 标记职能由 styled_text 类+style-collect 选材等价覆盖。

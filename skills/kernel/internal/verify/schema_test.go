@@ -142,15 +142,55 @@ func TestImg2TextVerdict(t *testing.T) {
 	if !contains(errs, "replacement.md") {
 		t.Fatalf("text 无产物应打回: %v", errs)
 	}
-	// text：有产物 → 过
-	root, tk = sandboxWithVerdictImg(t, `{"result":"text"}`)
+	// text：有产物且首行 [IMG_TYPE:] + img_type 一致 → 过
+	root, tk = sandboxWithVerdictImg(t, `{"result":"text","img_type":"Table"}`)
+	tk.Accept["verdict_schema"] = "img2text"
+	os.MkdirAll(filepath.Join(root, tk.Sandbox, "out"), 0o755)
+	os.WriteFile(filepath.Join(root, tk.Sandbox, "out", "replacement.md"), []byte("[IMG_TYPE: Table]\n| 表头 |"), 0o644)
+	c.ProjectRoot = root
+	errs, _ = c.Run(tk)
+	if len(errs) != 0 {
+		t.Fatalf("text 有产物+类型头一致应过: %v", errs)
+	}
+	// text：产物缺 [IMG_TYPE:] 首行 → 打回
+	root, tk = sandboxWithVerdictImg(t, `{"result":"text","img_type":"Table"}`)
 	tk.Accept["verdict_schema"] = "img2text"
 	os.MkdirAll(filepath.Join(root, tk.Sandbox, "out"), 0o755)
 	os.WriteFile(filepath.Join(root, tk.Sandbox, "out", "replacement.md"), []byte("提取文字"), 0o644)
 	c.ProjectRoot = root
 	errs, _ = c.Run(tk)
-	if len(errs) != 0 {
-		t.Fatalf("text 有产物应过: %v", errs)
+	if !contains(errs, "IMG_TYPE") {
+		t.Fatalf("缺类型头应打回: %v", errs)
+	}
+	// text：类型不在八类词表 → 打回
+	root, tk = sandboxWithVerdictImg(t, `{"result":"text","img_type":"Meme"}`)
+	tk.Accept["verdict_schema"] = "img2text"
+	os.MkdirAll(filepath.Join(root, tk.Sandbox, "out"), 0o755)
+	os.WriteFile(filepath.Join(root, tk.Sandbox, "out", "replacement.md"), []byte("[IMG_TYPE: Meme]\n随便"), 0o644)
+	c.ProjectRoot = root
+	errs, _ = c.Run(tk)
+	if !contains(errs, "词表") {
+		t.Fatalf("词表外类型应打回: %v", errs)
+	}
+	// text：img_type 与首行不一致 → 打回
+	root, tk = sandboxWithVerdictImg(t, `{"result":"text","img_type":"Table"}`)
+	tk.Accept["verdict_schema"] = "img2text"
+	os.MkdirAll(filepath.Join(root, tk.Sandbox, "out"), 0o755)
+	os.WriteFile(filepath.Join(root, tk.Sandbox, "out", "replacement.md"), []byte("[IMG_TYPE: Formula]\nx=1"), 0o644)
+	c.ProjectRoot = root
+	errs, _ = c.Run(tk)
+	if !contains(errs, "不一致") {
+		t.Fatalf("两处类型不一致应打回: %v", errs)
+	}
+	// text：verdict 缺 img_type 字段 → 打回
+	root, tk = sandboxWithVerdictImg(t, `{"result":"text"}`)
+	tk.Accept["verdict_schema"] = "img2text"
+	os.MkdirAll(filepath.Join(root, tk.Sandbox, "out"), 0o755)
+	os.WriteFile(filepath.Join(root, tk.Sandbox, "out", "replacement.md"), []byte("[IMG_TYPE: Table]\n内容"), 0o644)
+	c.ProjectRoot = root
+	errs, _ = c.Run(tk)
+	if !contains(errs, "img_type") {
+		t.Fatalf("缺 img_type 字段应打回: %v", errs)
 	}
 	// keep：无产物也过
 	root, tk = sandboxWithVerdictImg(t, `{"result":"keep"}`)

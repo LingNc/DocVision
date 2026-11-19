@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/LingNc/DocVision/skills/kernel/internal/mdimg"
@@ -121,9 +122,21 @@ func hasPositionPointer(s string) bool {
 
 // checkImg2TextVerdict 档位2 三态验收：result 声明 + 对应产物存在性 + mermaid 校验。
 // mermaid 校验失败即打回（旧线"兜底错误"的落点：语法错不让它进合成）。
+// img2TextTypeHeaderRe 产物首行的 [IMG_TYPE: <type>] 标识（沿用原参考实现输出格式，
+// 用户拍板保留：成品 md 嵌入后类型标识随文保留，便于核对与后续处理）。
+var img2TextTypeHeaderRe = regexp.MustCompile(`^\[IMG_TYPE:\s*(.+?)\s*\]`)
+
+// img2TextAllowedTypes 八类图词表（与原提示词逐一对应，沿用"分类不确定就重试，不得乱填"判据）。
+var img2TextAllowedTypes = map[string]bool{
+	"Table": true, "Flowchart": true, "Gantt Chart": true,
+	"Architecture/Network Diagram": true, "Graph/Chart": true,
+	"Formula": true, "Code screenshot": true, "Simple illustration": true,
+}
+
 func (c *Checker) checkImg2TextVerdict(b []byte, sandboxAbs string) []string {
 	var v struct {
-		Result string `json:"result"`
+		Result  string `json:"result"`
+		ImgType string `json:"img_type"`
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
 		return []string{"verdict.json 解析失败: " + err.Error()}
@@ -135,7 +148,7 @@ func (c *Checker) checkImg2TextVerdict(b []byte, sandboxAbs string) []string {
 		if err != nil || strings.TrimSpace(string(data)) == "" {
 			return []string{"result=text 必须附非空 out/replacement.md"}
 		}
-		return nil
+		return checkImg2TextTypeHeader(v.ImgType, data)
 	case "mermaid":
 		data, err := os.ReadFile(filepath.Join(outDir, "figure.mmd"))
 		if err != nil || strings.TrimSpace(string(data)) == "" {
@@ -144,11 +157,32 @@ func (c *Checker) checkImg2TextVerdict(b []byte, sandboxAbs string) []string {
 		if vr := mdimg.ValidateMermaid(context.Background(), "```mermaid\n"+string(data)+"\n```", "", 0); vr.Available && !vr.Valid {
 			return []string{"mermaid 校验失败（兜底打回，按报错修语法）: " + vr.Error}
 		}
-		return nil
+		return checkImg2TextTypeHeader(v.ImgType, data)
 	case "keep":
 		return nil
 	case "":
 		return []string{"verdict.json 缺少 result 字段（text/mermaid/keep 三选一）"}
 	}
 	return []string{fmt.Sprintf("result %q 不合法（只允许 text/mermaid/keep）", v.Result)}
+}
+
+// checkImg2TextTypeHeader 校验 [IMG_TYPE:] 三道闸（仅 text/mermaid；keep 态豁免）：
+// 产物首行必须是 [IMG_TYPE: <type>]；类型在八类词表内；verdict 的 img_type 与首行一致。
+func checkImg2TextTypeHeader(imgType string, artifact []byte) []string {
+	first := strings.TrimSpace(strings.SplitN(string(artifact), "\n", 2)[0])
+	m := img2TextTypeHeaderRe.FindStringSubmatch(first)
+	if m == nil {
+		return []string{"产物首行必须是 [IMG_TYPE: <type>]（八类词表见手册，沿用原输出格式）"}
+	}
+	headerType := m[1]
+	if !img2TextAllowedTypes[headerType] {
+		return []string{fmt.Sprintf("IMG_TYPE %q 不在八类词表内（Table/Flowchart/Gantt Chart/Architecture\\/Network Diagram/Graph\\/Chart/Formula/Code screenshot/Simple illustration）——分类不确定就重试，不得乱填", headerType)}
+	}
+	if imgType == "" {
+		return []string{"verdict.json 缺少 img_type 字段（须与产物 [IMG_TYPE:] 首行一致）"}
+	}
+	if imgType != headerType {
+		return []string{fmt.Sprintf("img_type %q 与产物首行 [IMG_TYPE: %s] 不一致", imgType, headerType)}
+	}
+	return nil
 }
