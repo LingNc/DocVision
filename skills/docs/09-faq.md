@@ -26,8 +26,7 @@
 | 9 | 产物结构疑惑 | mineru/ 下没有 auto/ 目录了 | 归一契约=part 根直出（对齐老 DocVision 约定） | 正常，不是错；下游两种布局都兼容 | [since 6a1fc7b] |
 | 10 | 想绕过坏环节 | "OCR 不通我自己转录伪造产物接着跑" | **绝对禁止**（docs/07 铁律；伪造产物=伪造进度，历史事故） | 停→查→报（07 状态机）；任务设计已让账本归内核，伪造无意义 | [since 51a9ddb] |
 | 11 | 看图缺上下文 | 相邻图的信息没进 ctx-down | 旧版只收纯文字块 | 升级；现收一切带文字的条目（含图片的文字化描述） | [fixed ≥8d399a5] |
-| 12 | ctx 上下文形态 | 上下文是一块一块的条目，不是 md 行，也没有上下行号 | 旧参考实现是按 md 行的（行号定位）；现 `dvagent ctx` 已同形态对齐（md 行+行号），块级 ctx-up/down 为底层变体 | [since 下一版] |
-| 13 | mermaid 打回 | result=struct 反复不过 | figure.mmd 语法错（内核 mmdc 校验） | 按报错修语法；对齐 docs/luadraw 示例 | [since 1b449d8] |
+| 12 | mermaid 打回 | result=struct 反复不过 | figure.mmd 语法错（内核 mmdc 校验） | 按报错修语法；对齐 docs/luadraw 示例 | [since 1b449d8] |
 
 ## 版本对照
 

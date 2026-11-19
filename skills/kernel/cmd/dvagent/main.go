@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"flag"
 	"fmt"
 	"os"
@@ -52,6 +53,147 @@ func skillRoot() string {
 	}
 	return "."
 }
+
+// sanitizeMemoryKey 校验 memory key：拒绝路径逃逸（..、绝对路径、反斜杠）；允许嵌套。
+func sanitizeMemoryKey(key string) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("key 不能为空")
+	}
+	if strings.Contains(key, "..") || strings.HasPrefix(key, "/") || strings.Contains(key, "\\") {
+		return "", fmt.Errorf("非法 key（拒绝 .. / 绝对路径 / 反斜杠）: %q", key)
+	}
+	clean := filepath.Clean(key)
+	if clean == "." || strings.HasPrefix(clean, "..") {
+		return "", fmt.Errorf("非法 key: %q", key)
+	}
+	return clean, nil
+}
+
+// memoryPut 原子写（temp+rename，防读到半截文件）。共享区自由层：无锁，后写覆盖前写。
+func memoryPut(root, key string, data []byte) (string, int, error) {
+	k, err := sanitizeMemoryKey(key)
+	if err != nil {
+		return "", 0, err
+	}
+	dst := filepath.Join(root, "memory", k)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", 0, err
+	}
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return "", 0, err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		return "", 0, err
+	}
+	return k, len(data), nil
+}
+
+func memoryGet(root, key string) ([]byte, error) {
+	k, err := sanitizeMemoryKey(key)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(root, "memory", k))
+	if err != nil {
+		return nil, fmt.Errorf("memory-get %s: %w", k, err)
+	}
+	return data, nil
+}
+
+// memoryList 列出 memory/ 下文件（相对路径），可选前缀过滤。
+func memoryList(root, prefix string) ([]string, error) {
+	base := filepath.Join(root, "memory")
+	keys := []string{}
+	err := filepath.WalkDir(base, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(base, p)
+		rel = filepath.ToSlash(rel)
+		if prefix == "" || strings.HasPrefix(rel, prefix) {
+			keys = append(keys, rel)
+		}
+		return nil
+	})
+	return keys, err
+}
+
+func memoryRm(root, key string) error {
+	k, err := sanitizeMemoryKey(key)
+	if err != nil {
+		return err
+	}
+	return os.Remove(filepath.Join(root, "memory", k))
+}
+
+// memoryInit register 时建共享记忆区（docs/08 §3.5）。
+func memoryInit(root string) {
+	for _, d := range []string{"memory", "memory/render", "memory/notes", "memory/digest"} {
+		_ = os.MkdirAll(filepath.Join(root, d), 0o755)
+	}
+}
+
+// buildFAQRow 校验并合成一条 FAQ 行（管道符/换行拒绝防炸表；版本锚必填其一）。
+func buildFAQRow(kw, sym, diag, fix, since, fixedGe string) (string, error) {
+	for name, v := range map[string]string{"kw": kw, "sym": sym, "diag": diag, "fix": fix} {
+		if strings.ContainsAny(v, "|\n") {
+			return "", fmt.Errorf("%s 含 | 或换行（会炸 Markdown 表），请改写", name)
+		}
+		if v == "" {
+			return "", fmt.Errorf("%s 不能为空", name)
+		}
+	}
+	if (since == "") == (fixedGe == "") {
+		return "", fmt.Errorf("版本锚必填其一：--since xxxx（新引入）或 --fixed-ge xxxx（旧版症状，升级即消）")
+	}
+	anchorCell := "[since " + since + "]"
+	if fixedGe != "" {
+		anchorCell = "[fixed ≥" + fixedGe + "]"
+	}
+	return fmt.Sprintf("| %s | %s | %s | %s | %s | %s |", kw, sym, diag, fix, anchorCell, "^NUM^"), nil
+}
+
+// appendFAQRow 把行追加到 FAQ 表尾（版本对照节之前），编号自动续。
+func appendFAQRow(data, row string) (string, error) {
+	num := 0
+	for _, line := range strings.Split(data, "\n") {
+		if strings.HasPrefix(line, "| ") {
+			fields := strings.Split(line, "|")
+			if len(fields) >= 7 { // 主表 6 列：版本对照表（3 列）的纯数字版本号不算编号
+				var n int
+				if _, err := fmt.Sscanf(strings.TrimSpace(fields[1]), "%d", &n); err == nil && n > num {
+					num = n
+				}
+			}
+		}
+	}
+	if num == 0 {
+		return "", fmt.Errorf("FAQ 表未找到（缺表头数据行？）")
+	}
+	row = strings.ReplaceAll(row, "^NUM^", fmt.Sprintf("%d", num+1))
+	lines := strings.Split(data, "\n")
+	out := make([]string, 0, len(lines)+1)
+	inserted := false
+	for _, line := range lines {
+		if !inserted && strings.HasPrefix(line, "## 版本对照") {
+			out = append(out, row)
+			inserted = true
+		}
+		out = append(out, line)
+	}
+	if !inserted {
+		out = append(out, "", row)
+	}
+	return strings.Join(out, "\n"), nil
+}
+
 
 // hasContentList part 根是否已有 content_list（prep-mineru-api 断点跳过判据；
 // 归一后产物只落 part 根，不看 auto 层）。
@@ -118,6 +260,7 @@ func main() {
 		if err != nil {
 			die(err)
 		}
+		memoryInit(p.Root)
 		out(p)
 
 	case "activate":
@@ -843,61 +986,6 @@ func main() {
 		out(map[string]any{"task": tk.ID, "md": filepath.Base(mdPath), "image_line": imgLine,
 			"range": []int{upStart, downEnd}, "lines": ctxLines})
 
-	case "ctx-up", "ctx-down":
-		// dvagent ctx-up|ctx-down <项目名> <task_id> [n=3]
-		// T6 img2text 小轮转工具：按任务的 entry_seq 取 doc_index 相邻文字块（上文/下文）。
-		if len(args) < 3 {
-			die(fmt.Errorf("ctx-up/ctx-down 需要: <项目名> <task_id> [n]"))
-		}
-		p := mustProject(reg, args[1])
-		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
-		if err != nil {
-			die(err)
-		}
-		tk, err := q.Get(args[2])
-		if err != nil {
-			die(err)
-		}
-		seq, _ := tk.Accept["entry_seq"].(float64)
-		n := 3
-		if len(args) > 3 {
-			fmt.Sscanf(args[3], "%d", &n)
-		}
-		idx, err := docindex.Load(filepath.Join(p.Root, "doc_index.json"))
-		if err != nil {
-			die(err)
-		}
-		up := args[0] == "ctx-up"
-		// 全量收集后截断：ctx-up 取最近的 n 个上文（倒序输出，最近的在前）；
-		// ctx-down 取最近的 n 个下文（正序）。带文字的图片条目（文字化描述回填）也算上下文。
-		var matched []docindex.DocEntry
-		for _, e := range idx.Entries {
-			if e.Text == "" {
-				continue
-			}
-			if up && e.Seq < int(seq) {
-				matched = append(matched, e)
-			}
-			if !up && e.Seq > int(seq) {
-				matched = append(matched, e)
-			}
-		}
-		var blocks []map[string]any
-		if up {
-			for i := len(matched) - 1; i >= 0 && len(blocks) < n; i-- {
-				e := matched[i]
-				blocks = append(blocks, map[string]any{"seq": e.Seq, "global": e.Global, "text": e.Text})
-			}
-		} else {
-			for _, e := range matched {
-				if len(blocks) >= n {
-					break
-				}
-				blocks = append(blocks, map[string]any{"seq": e.Seq, "global": e.Global, "text": e.Text})
-			}
-		}
-		out(map[string]any{"task": tk.ID, "entry_seq": seq, "up": up, "blocks": blocks})
-
 	case "viewer-build":
 		// dvagent viewer-build <项目名> —— 生成静态看图台 work/viewer/index.html。
 		if len(args) < 2 {
@@ -1026,6 +1114,149 @@ func main() {
 		}
 		out(map[string]any{"hits": hits, "count": len(hits),
 			"tip": "pdftoppm -f <页> -l <页> docs/luadraw/luadraw-doc-en.pdf /tmp/pg 看该页预览图"})
+
+	case "memory-put":
+		// dvagent memory-put <项目名> <key> —— 内容走 stdin；key=memory/ 下相对路径
+		// （docs/08 §3.5：项目共享记忆区——随 book 走、多会话平等读写、原子写无锁）
+		if len(args) < 3 {
+			die(fmt.Errorf("memory-put 需要: <项目名> <key>（内容走 stdin）"))
+		}
+		p := mustProject(reg, args[1])
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			die(err)
+		}
+		k, n, err := memoryPut(p.Root, args[2], data)
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"stored": k, "bytes": n})
+
+	case "memory-get":
+		// dvagent memory-get <项目名> <key> —— 原始内容直出 stdout（管道友好）
+		if len(args) < 3 {
+			die(fmt.Errorf("memory-get 需要: <项目名> <key>"))
+		}
+		p := mustProject(reg, args[1])
+		data, err := memoryGet(p.Root, args[2])
+		if err != nil {
+			die(err)
+		}
+		os.Stdout.Write(data)
+
+	case "memory-list":
+		// dvagent memory-list <项目名> [前缀]
+		if len(args) < 2 {
+			die(fmt.Errorf("memory-list 需要: <项目名> [前缀]"))
+		}
+		p := mustProject(reg, args[1])
+		prefix := ""
+		if len(args) >= 3 {
+			prefix = args[2]
+		}
+		keys, err := memoryList(p.Root, prefix)
+		if err != nil {
+			die(err)
+		}
+		out(map[string]any{"keys": keys, "count": len(keys)})
+
+	case "memory-rm":
+		// dvagent memory-rm <项目名> <key>
+		if len(args) < 3 {
+			die(fmt.Errorf("memory-rm 需要: <项目名> <key>"))
+		}
+		p := mustProject(reg, args[1])
+		if err := memoryRm(p.Root, args[2]); err != nil {
+			die(err)
+		}
+		out(map[string]any{"removed": args[2]})
+
+	case "faq-add":
+		// dvagent faq-add --kw 词 --sym 现象 --diag 诊断 --fix 解法
+		//   [--since VER | --fixed-ge VER] [--file 路径]
+		// 维护 docs/09-faq.md：格式/版本锚/编号由工具保证（内容含 | 或换行拒绝；锚必填）。
+		var kw, sym, diag, fix, since, fixedGe, faqFile string
+		for i := 1; i < len(args); i++ {
+			if i+1 >= len(args) {
+				die(fmt.Errorf("faq-add 参数缺值: %s", args[i]))
+			}
+			switch args[i] {
+			case "--kw":
+				kw = args[i+1]
+			case "--sym":
+				sym = args[i+1]
+			case "--diag":
+				diag = args[i+1]
+			case "--fix":
+				fix = args[i+1]
+			case "--since":
+				since = args[i+1]
+			case "--fixed-ge":
+				fixedGe = args[i+1]
+			case "--file":
+				faqFile = args[i+1]
+			default:
+				die(fmt.Errorf("未知参数: %s（可用 --kw/--sym/--diag/--fix/--since/--fixed-ge/--file）", args[i]))
+			}
+			i++
+		}
+		if faqFile == "" {
+			faqFile = filepath.Join(skillRoot(), "docs", "09-faq.md")
+		}
+		row, err := buildFAQRow(kw, sym, diag, fix, since, fixedGe)
+		if err != nil {
+			die(err)
+		}
+		data, err := os.ReadFile(faqFile)
+		if err != nil {
+			die(fmt.Errorf("FAQ 文件缺失: %s", faqFile))
+		}
+		newData, err := appendFAQRow(string(data), row)
+		if err != nil {
+			die(err)
+		}
+		if err := os.WriteFile(faqFile, []byte(newData), 0o644); err != nil {
+			die(err)
+		}
+		out(map[string]any{"added": strings.TrimSpace(row), "file": faqFile})
+
+	case "faq-search":
+		// dvagent faq-search <关键词...> [--file 路径] —— 关键词 AND，命中行原样输出
+		if len(args) < 2 {
+			die(fmt.Errorf("faq-search 需要关键词"))
+		}
+		var kws []string
+		faqFile := filepath.Join(skillRoot(), "docs", "09-faq.md")
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--file" && i+1 < len(args) {
+				faqFile = args[i+1]
+				i++
+				continue
+			}
+			kws = append(kws, strings.ToLower(args[i]))
+		}
+		data, err := os.ReadFile(faqFile)
+		if err != nil {
+			die(fmt.Errorf("FAQ 文件缺失: %s", faqFile))
+		}
+		hits := []string{}
+		for _, line := range strings.Split(string(data), "\n") {
+			if !strings.HasPrefix(line, "|") || strings.Contains(line, "---") || strings.HasPrefix(line, "| #") {
+				continue
+			}
+			low := strings.ToLower(line)
+			ok := true
+			for _, k := range kws {
+				if !strings.Contains(low, k) {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				hits = append(hits, line)
+			}
+		}
+		out(map[string]any{"hits": hits, "count": len(hits)})
 
 	case "style-collect":
 		// dvagent style-collect <项目名> —— 汇总 styled_text 提取内容进 style 素材池（选材数据面）。

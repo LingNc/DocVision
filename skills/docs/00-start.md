@@ -67,7 +67,7 @@ $D deliver demo                                                # 装配交付
 
 | 你印象里的旧名 | 现行等价 | 说明 |
 |---|---|---|
-| `get_more_context(↑N, ↓M)`（单工具双方向，md 行号定位 `{LINE}/[{UP_START},{DOWN_END}]`） | `dvagent ctx <项目> <任务id> [--up N] [--down M]`——**同形态对齐**：单次双方向、md 行内容+行号（图像 sha 定位），返回 `{image_line, range, lines}` |
+| `get_more_context(more_above, more_below)` | `dvagent ctx-up/ctx-down <项目> <任务id> [n=3]` | **功能一致**：按图在 doc_index 的位置取前后各 n 块上下文；从模型回调改为显式 CLI（架构改为内核队列+领任务制） |
 | 进度/账本由模型输出 JSON 自报 | `dvagent claim/submit` + 内核 verdict.json | 账本权从模型手里没收给了内核状态机（防伪造进度） |
 | `verify` 三对照 QA 阶段 | 无（SK-I4，用户裁定不实施） | 几何判据（min_overlap 等）+ rework 自查覆盖 |
 

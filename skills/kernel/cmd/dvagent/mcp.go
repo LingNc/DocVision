@@ -76,6 +76,14 @@ var mcpTools = []mcpTool{
 		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
 	{"style-collect", "styled_text 提取内容汇总进 style 素材池（选材数据面）",
 		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
+	{"memory_put", "项目共享记忆区写入（memory/，多会话共享；key=相对路径，content=内容）",
+		schema(map[string]any{"project": strProp("项目名"), "key": strProp("相对路径key"), "content": strProp("内容")}, []string{"project", "key", "content"})},
+	{"memory_get", "项目共享记忆区读取（原始内容）",
+		schema(map[string]any{"project": strProp("项目名"), "key": strProp("相对路径key")}, []string{"project", "key"})},
+	{"memory_list", "项目共享记忆区列表（可选前缀过滤）",
+		schema(map[string]any{"project": strProp("项目名"), "prefix": strProp("前缀(可空)")}, []string{"project"})},
+	{"memory_rm", "项目共享记忆区删除",
+		schema(map[string]any{"project": strProp("项目名"), "key": strProp("相对路径key")}, []string{"project", "key"})},
 	{"img2text-collect", "img2text 描述回填 doc_index Content",
 		schema(map[string]any{"project": strProp("项目名")}, []string{"project"})},
 	{"ctx-up", "img2text 小轮转：取该图前文文字块（上下文检索）",
@@ -389,6 +397,45 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) map[string]any {
 			return fail(err)
 		}
 		return ok(rep)
+	case "memory_put":
+		p, _, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		k, n, err := memoryPut(p.Root, str("key"), []byte(str("content")))
+		if err != nil {
+			return fail(err)
+		}
+		return ok(map[string]any{"stored": k, "bytes": n})
+	case "memory_get":
+		p, _, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		data, err := memoryGet(p.Root, str("key"))
+		if err != nil {
+			return fail(err)
+		}
+		return ok(map[string]any{"content": string(data)})
+	case "memory_list":
+		p, _, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		keys, err := memoryList(p.Root, str("prefix"))
+		if err != nil {
+			return fail(err)
+		}
+		return ok(map[string]any{"keys": keys, "count": len(keys)})
+	case "memory_rm":
+		p, _, err := pq(str("project"))
+		if err != nil {
+			return fail(err)
+		}
+		if err := memoryRm(p.Root, str("key")); err != nil {
+			return fail(err)
+		}
+		return ok(map[string]any{"removed": str("key")})
 	case "style-collect":
 		p, q, err := pq(str("project"))
 		if err != nil {
