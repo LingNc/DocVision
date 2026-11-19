@@ -34,7 +34,7 @@ func TestGenDrawRespectsOverride(t *testing.T) {
 	ovPath := viewer.OverridePath(root)
 	writeJSON(t, ovPath, ov)
 
-	rep, err := GenDraw(q, root)
+	rep, err := GenDraw(q, root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestGenDrawRespectsOverride(t *testing.T) {
 	// 无覆盖时：两图各铺
 	os.Remove(ovPath)
 	q2, _ := queue.Load(filepath.Join(root, "q.json"))
-	rep2, err := GenDraw(q2, root)
+	rep2, err := GenDraw(q2, root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

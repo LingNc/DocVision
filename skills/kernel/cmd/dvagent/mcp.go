@@ -364,7 +364,7 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) map[string]any {
 		if err != nil {
 			return fail(err)
 		}
-		rep, err := gen.GenDraw(q, p.Root)
+		rep, err := gen.GenDraw(q, p.Root, nil) // MCP 默认全书；按章按需走 CLI gen-draw <项目> <章md>
 		if err != nil {
 			return fail(err)
 		}

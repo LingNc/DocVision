@@ -44,7 +44,9 @@ type DrawReport struct {
 // dedupe 之后的 key 图清单）。图文件从 classify 沙箱 inputs 拷进 draw 沙箱
 // inputs（记忆泡泡自包含）。幂等：同 id 跳过。
 // 若存在用户覆盖分组（viewer-apply 产物），组员跟随代表：只为代表铺重绘。
-func GenDraw(q *queue.Queue, projectRoot string) (*DrawReport, error) {
+// GenDraw 从已完成的 classify 任务铺 draw 任务。allowedSHA 非 nil 时只铺集合内的图
+// （按章按需：集合由调用方从 chapters/<章>.md 的插图引用提取；nil=全书，行为同旧）。
+func GenDraw(q *queue.Queue, projectRoot string, allowedSHA map[string]bool) (*DrawReport, error) {
 	before := countType(q, task.TypeDraw)
 	rep := &DrawReport{}
 	now := time.Now()
@@ -90,6 +92,9 @@ func GenDraw(q *queue.Queue, projectRoot string) (*DrawReport, error) {
 
 	for _, ct := range cls {
 		stem := ct.ID[len("cls_"):]
+		if allowedSHA != nil && !allowedSHA[stem] {
+			continue // 按章按需：不属于本章的图跳过
+		}
 		vb, err := os.ReadFile(filepath.Join(projectRoot, ct.Sandbox, "out", "verdict.json"))
 		if err != nil {
 			rep.NoVerdict++

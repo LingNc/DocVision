@@ -158,6 +158,17 @@ func (c *Checker) runCoverage(t *task.Task, projectRoot, mainAbs string) ([]stri
 func (c *Checker) defaultCompile(t *task.Task, projectRoot string) []string {
 	main := fmt.Sprint(t.Accept["main_file"])
 	outDir := filepath.Join(projectRoot, t.Sandbox, "out")
+	// 绘图风格模板（SK-I13）：style 阶段产出 book/style/draw-style.tex 后自动生效——
+	// 主文件必须引用模板（\input draw-style 或用其 \dv 宏），散写打回；老项目无模板则跳过。
+	if data, err := os.ReadFile(filepath.Join(projectRoot, "style", "draw-style.tex")); err == nil && len(data) > 0 {
+		mainData, rerr := os.ReadFile(filepath.Join(outDir, main))
+		if rerr == nil {
+			body := string(mainData)
+			if !strings.Contains(body, "draw-style") && !strings.Contains(body, `\dvLine`) {
+				return []string{"绘图风格模板 style/draw-style.tex 已产出但主文件未引用（须 \\input 该模板或用其 \\dvLine 宏）——逐图散写一律打回"}
+			}
+		}
+	}
 	engine := ""
 	if texcheck.NeedsLuaLaTeX(outDir, main) {
 		engine = "lualatex" // 按需引擎：只强制 luadraw 章

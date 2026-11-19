@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -57,6 +58,26 @@ func skillRoot() string {
 func hasContentList(dir string) bool {
 	matches, _ := filepath.Glob(filepath.Join(dir, "*_content_list.json"))
 	return len(matches) > 0
+}
+
+// imgRefRe 匹配 md 图片行 ![cap](path)，取路径供 chapterImageSet 提取图像 sha。
+var imgRefRe = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
+
+// chapterImageSet 从章 md 提取插图 sha 集合（gen-draw 按章按需铺的过滤依据；
+// 匹配 md 图片行里的图像路径 basename 去扩展名）。
+func chapterImageSet(mdPath string) (map[string]bool, error) {
+	data, err := os.ReadFile(mdPath)
+	if err != nil {
+		return nil, fmt.Errorf("按章按需铺需要章 md（%s）：%w", mdPath, err)
+	}
+	set := map[string]bool{}
+	for _, m := range imgRefRe.FindAllStringSubmatch(string(data), -1) {
+		stem := strings.TrimSuffix(filepath.Base(m[1]), filepath.Ext(m[1]))
+		if stem != "" {
+			set[stem] = true
+		}
+	}
+	return set, nil
 }
 
 func main() {
@@ -447,16 +468,25 @@ func main() {
 		out(rep)
 
 	case "gen-draw":
-		// dvagent gen-draw <项目名> —— 读 classify 结论，为 vector 图铺 draw 任务。
+		// dvagent gen-draw <项目名> [章md名] —— 读 classify 结论，为 vector 图铺 draw 任务。
+		// 带章参数=按章按需铺（只铺该章插图里的 vector 图，convert 阶段需要时再铺）；
+		// 不带=全书（默认，行为同旧）。见 docs/08-figure-flow.md。
 		if len(args) < 2 {
-			die(fmt.Errorf("gen-draw 需要: <项目名>"))
+			die(fmt.Errorf("gen-draw 需要: <项目名> [章md名]"))
 		}
 		p := mustProject(reg, args[1])
 		q, err := queue.Load(queue.ProjectQueuePath(p.Root))
 		if err != nil {
 			die(err)
 		}
-		rep, err := gen.GenDraw(q, p.Root)
+		var allowed map[string]bool
+		if len(args) >= 3 {
+			allowed, err = chapterImageSet(filepath.Join(p.Root, "chapters", args[2]))
+			if err != nil {
+				die(err)
+			}
+		}
+		rep, err := gen.GenDraw(q, p.Root, allowed)
 		if err != nil {
 			die(err)
 		}

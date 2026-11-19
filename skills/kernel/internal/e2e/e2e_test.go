@@ -143,7 +143,7 @@ c.save()
 	}
 
 	// ⑦ draw：vector 图铺任务；agent 交 figure.tex
-	drep, err := gen.GenDraw(q, root)
+	drep, err := gen.GenDraw(q, root, nil)
 	if err != nil || drep.Added != 1 {
 		t.Fatalf("gen-draw: %+v", drep)
 	}
