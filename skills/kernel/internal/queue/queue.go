@@ -50,7 +50,20 @@ func (q *Queue) Save() error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, q.Path)
+	if err := os.Rename(tmp, q.Path); err != nil {
+		// FUSE 工作区（/mnt 挂载）拒绝同目录 rename（11-20 dvws 实跑暴露）——
+		// 回退 copy+remove。原子性降级可接受：内核是唯一写者，读侧Load对半写文件
+		// 有容错（json 解析失败视为空队列重建会丢任务——故 copy 前先写全量 tmp 再覆盖）。
+		data, rerr := os.ReadFile(tmp)
+		if rerr != nil {
+			return fmt.Errorf("queue 落盘 rename 失败且回退读取失败: %v / %w", err, rerr)
+		}
+		if werr := os.WriteFile(q.Path, data, 0o644); werr != nil {
+			return fmt.Errorf("queue 落盘 rename 失败且回退写入失败: %v / %w", err, werr)
+		}
+		_ = os.Remove(tmp)
+	}
+	return nil
 }
 
 // Enqueue 追加任务；同 id 幂等（已存在则忽略）。
