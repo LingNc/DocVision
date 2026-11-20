@@ -372,15 +372,18 @@ func insertPageMarks(content string, marks []pageMark, starts []int, shifts []em
 		positions[i] = resolveFencePos(content, lineStart+shiftFor(lineStart, shifts))
 	}
 	sort.Ints(positions)
+	// 插入语义：标记是"加进去"的不是"替换"——续写偏移就是 positions[k] 本身。
+	// 旧实现续写偏移多算了 len(标记)+1，把每个 [P. N] 后 7~8 个字节吞掉
+	// （11-20 dvws3 实跑暴露：ASCII 夹具 silently 吞字符，CJK 直接非法 UTF-8）。
 	out := content[:positions[0]] + pageMarkText(marks[0].page) + "\n"
 	for i := 1; i < len(positions); i++ {
-		if positions[i] <= positions[i-1]+len(pageMarkText(marks[i-1].page))+1 {
+		if positions[i] <= positions[i-1] {
 			continue
 		}
-		out += content[positions[i-1]+len(pageMarkText(marks[i-1].page))+1:positions[i]] + pageMarkText(marks[i].page) + "\n"
+		out += content[positions[i-1]:positions[i]] + pageMarkText(marks[i].page) + "\n"
 	}
 	last := positions[len(positions)-1]
-	out += content[last+len(pageMarkText(marks[len(marks)-1].page))+1:]
+	out += content[last:]
 	return out, len(positions)
 }
 
