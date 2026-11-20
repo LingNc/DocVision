@@ -193,7 +193,16 @@ func TestImg2TextVerdict(t *testing.T) {
 		t.Fatalf("缺 img_type 字段应打回: %v", errs)
 	}
 	// keep：无产物也过
+	// SK-I21：keep 仅限水印——非水印 keep 打回
 	root, tk = sandboxWithVerdictImg(t, `{"result":"keep"}`)
+	tk.Accept["verdict_schema"] = "img2text"
+	c.ProjectRoot = root
+	errs, _ = c.Run(tk)
+	if !contains(errs, "老线契约") {
+		t.Fatalf("非水印 keep 应打回: %v", errs)
+	}
+	// 水印 keep 放行（SK-I3）
+	root, tk = sandboxWithVerdictImg(t, `{"result":"keep","watermark":true}`)
 	tk.Accept["verdict_schema"] = "img2text"
 	c.ProjectRoot = root
 	errs, _ = c.Run(tk)

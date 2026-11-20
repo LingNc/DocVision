@@ -51,7 +51,7 @@ Rules:
 |---|---|
 | `get_more_context(more_above, more_below)` 增量上下文 | `dvagent ctx-up / ctx-down <项目> <task_id> [n]` |
 | `{MAX_TOOL_CALLS}` 调用上限 | 任务重试上限（verdict 打回计数，上限 6） |
-| `[IMG_TYPE: <type>]` 决策头 | 三态产物：文字型→`out/replacement.md`；结构型→`out/figure.mmd`；无法文字化→不写产物（keep） |
+| `[IMG_TYPE: <type>]` 决策头 | 产物（SK-I21 起无 keep）：文字型→`out/replacement.md`；结构型→`out/figure.mmd`；无法文字化的图照样写 text 描述（照片/示意图→`[IMG_TYPE: Simple illustration]`+忠实描述，老线 default 分支语义）；仅水印用 keep+watermark |
 | mermaid 失败修复会话（mermaid_session.go 的 fix system prompt） | 校验失败 → 任务打回，按报错修语法重交（提示词原文在参考实现 `上游实现/img2text/mermaid_session.go` systemPrompt） |
 | `{OUTPUT_LANG}` | config `mineru.language`（默认中文） |
 
@@ -59,7 +59,7 @@ Rules:
 
 - 结构图先想 mermaid 能不能表达（提示词规则 2 的图类清单）；表格式内容一律 md 表格全行全列；公式 LaTeX。
 - "describe WHAT is visible, never WHY/HOW" 与"Be EXHAUSTIVE"是防漏防编的两条主纪律，与内核判据（行数结构校验/重组装）互补。
-- [?] 标记法保留：看不清的元素标 [?] 只描述确定部分——重组装时原图位置若信息不足可走 keep。
+- [?] 标记法保留：看不清的元素标 [?] 只描述确定部分——不许因此走 keep（SK-I21，keep 仅限水印）。
 
 
 ## 沿用原参考实现的核心要求（对齐摘记，非原文）

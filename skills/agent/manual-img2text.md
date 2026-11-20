@@ -11,7 +11,7 @@
    mermaid 源码。kernel 包成 ```mermaid 围栏块替换图片行，并用 mmdc 校验
    （校验失败你的任务会被打回，按报错修语法）。
 3. **无法文字化**（照片/复杂图/文字化反而损信息）→ 不写产物或写
-   `out/verdict.json {"result":"keep"}` → md 里**原样保留**这张图。
+   ~~keep~~ **已废除（SK-I21）**：老线 img2text 契约终态 md **一个裸图链接都不许有**（dev 分支 embedBlockForRef 原文核实）——除水印外每张图必须给文字或结构产物。原 keep 场景（照片/示意图）改判 **text**：`out/replacement.md` = `[IMG_TYPE: Simple illustration]`（或对应八类）+ 一段忠实描述（对应老线 `[Image]( 描述 · P.N )` 的 body）。
 
 ## 类型标识 [IMG_TYPE:]（沿用原参考实现格式，必守）
 
@@ -20,7 +20,7 @@
   `Table` / `Flowchart` / `Gantt Chart` / `Architecture/Network Diagram` /
   `Graph/Chart` / `Formula` / `Code screenshot` / `Simple illustration`
 - verdict.json 增 `img_type` 字段，值必须与产物首行一致（内核三道闸：缺头打回、词表外打回、两处不一致打回）
-- 保留（keep）态无产物，免类型头
+- ~~保留（keep）态~~ 已废除（SK-I21）：免类型头的 keep 仅限水印（watermark:true，合成整行删除）
 - 类型头随产物整段嵌入成品 md（assemble 程序化原位嵌入，头行原样保留）
 
 ## 工具三件套（小轮转）
@@ -37,6 +37,6 @@
 
 ## 水印图处理（SK-I3，默认去水印）
 
-- 图为水印/广告条（classify 已标 `"watermark": true`，或你本轮看图识别出）：verdict.json 里照常给 `"result"`（keep 即可），**加一行 `"watermark": true`**
+- 图为水印/广告条（classify 已标 `"watermark": true`，或你本轮看图识别出）：**keep 的唯一合法场景**——`{"result":"keep","watermark":true}`，合成时整行删除（默认去水印）
 - 合成阶段（img2text-assemble）会自动把该图整行删除——不留占位、不进成品书（默认去水印，用户已拍板）
 - 普通图永远不加这个字段；误标会把正常图删掉

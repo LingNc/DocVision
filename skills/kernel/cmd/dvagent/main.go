@@ -1692,7 +1692,16 @@ func main() {
 				nKeep++
 			}
 		}
-		out(map[string]any{"output": args[3], "text_replaced": nText, "mermaid": nMmd, "kept": nKeep})
+		// SK-I21：bare_links=终态残余裸链（原图行总数 - 已处理）。老线契约终态 md 无裸图链接。
+		totalImg := 0
+		for _, ln := range strings.Split(string(src), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(ln), "![") {
+				totalImg++
+			}
+		}
+		out(map[string]any{"output": args[3], "text_replaced": nText, "mermaid": nMmd, "kept": nKeep,
+			"bare_links": totalImg - nText - nMmd - nKeep,
+			"note": "SK-I21：终态 md 无裸图链接（老线契约）——bare_links>0 说明有图未过三态（keep 仅限水印）"})
 
 	case "upgrade-check":
 		// dvagent upgrade-check —— 开跑/排障前自检上游是否有更新或已修（SKILL.md 第 0 步）

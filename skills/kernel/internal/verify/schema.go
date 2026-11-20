@@ -224,8 +224,9 @@ var img2TextAllowedTypes = map[string]bool{
 
 func (c *Checker) checkImg2TextVerdict(b []byte, sandboxAbs string) []string {
 	var v struct {
-		Result  string `json:"result"`
-		ImgType string `json:"img_type"`
+		Result    string `json:"result"`
+		ImgType   string `json:"img_type"`
+		Watermark bool   `json:"watermark"`
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
 		return []string{"verdict.json 解析失败: " + err.Error()}
@@ -248,9 +249,16 @@ func (c *Checker) checkImg2TextVerdict(b []byte, sandboxAbs string) []string {
 		}
 		return checkImg2TextTypeHeader(v.ImgType, data)
 	case "keep":
+		// SK-I21：keep 仅限水印（SK-I3 合成整行删除）。老线 img2text 契约（dev 分支
+		// embedBlockForRef 原文核实）：终态 md 一个裸图链接都不许有——其余图必须
+		// text（[IMG_TYPE:] 描述体）或 mermaid。原 keep 场景（照片/示意图）改判 text：
+		// replacement.md = [IMG_TYPE: Simple illustration] + 一段忠实描述（对应老线 default 分支）。
+		if !v.Watermark {
+			return []string{"result=keep 仅限水印图（watermark:true，合成时整行删除）。老线契约：终态 md 无裸图链接——本图必须 text（[IMG_TYPE: 类型] 描述）或 mermaid"}
+		}
 		return nil
 	case "":
-		return []string{"verdict.json 缺少 result 字段（text/mermaid/keep 三选一）"}
+		return []string{"verdict.json 缺少 result 字段（text/mermaid/keep[仅水印] 三选一）"}
 	}
 	return []string{fmt.Sprintf("result %q 不合法（只允许 text/mermaid/keep）", v.Result)}
 }
