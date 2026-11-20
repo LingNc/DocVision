@@ -385,7 +385,8 @@ func (c *Client) DownloadAndExtract(zipURL, targetDir string) error {
 // 解压到 mineru/<part>/ 后可能多套一层（<part>/<part>/auto）。
 // 本函数找到 content_list 所在目录，把其 <...>/auto 整层归位到 <dir>/auto。
 // 幂等：已是标准布局则不动。返回归位后的 auto 目录路径（找不到则报错）。
-// copyEntry 递归拷贝单个文件或目录（NormalizeLayout 的 rename 失败回退用；FUSE 上 rename 不可靠）。
+// copyEntry 递归拷贝单个文件或目录。
+// ENV-ADAPT(sandbox-fuse)：沙箱 FUSE 特化的备选路径——主路径是 POSIX rename，此回退仅在 rename/覆盖失败时触发；非契约行为，正常文件系统永不走这里。
 func copyEntry(from, to string) error {
 	info, err := os.Stat(from)
 	if err != nil {
@@ -468,7 +469,8 @@ func dirExists(p string) bool {
 }
 
 // mergeInto 把 src 目录的内容合并进 dst（逐条：目录递归合并，文件 dst 已有则跳过，
-// 否则 rename、失败（FUSE/跨卷）则 copyEntry 递归拷贝）。幂等。
+// 否则 rename、失败（跨卷或沙箱 FUSE）则 copyEntry 递归拷贝）。幂等。
+		// ENV-ADAPT(sandbox-fuse)：沙箱 FUSE 特化的备选路径——主路径是 POSIX rename，此回退仅在 rename/覆盖失败时触发；非契约行为，正常文件系统永不走这里。
 func mergeInto(src, dst string) error {
 	entries, err := os.ReadDir(src)
 	if err != nil {

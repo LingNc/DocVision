@@ -101,7 +101,8 @@ func (q *Queue) Save() error {
 		return err
 	}
 	if err := os.Rename(tmp, q.Path); err != nil {
-		// FUSE 工作区（/mnt 挂载）拒绝同目录 rename（11-20 dvws 实跑暴露）——
+		// ENV-ADAPT(sandbox-fuse)：沙箱 FUSE 特化的备选路径——主路径是 POSIX rename，此回退仅在 rename/覆盖失败时触发；非契约行为，正常文件系统永不走这里。
+		// （11-20 dvws 实跑暴露）
 		// 回退 copy+remove。原子性降级可接受：内核是唯一写者，读侧Load对半写文件
 		// 有容错（json 解析失败视为空队列重建会丢任务——故 copy 前先写全量 tmp 再覆盖）。
 		data, rerr := os.ReadFile(tmp)
@@ -110,7 +111,8 @@ func (q *Queue) Save() error {
 		}
 		werr := os.WriteFile(q.Path, data, 0o644)
 		if werr != nil && os.IsPermission(werr) {
-			// FUSE 上既存 root 属主文件拒覆盖但目录可写：rm 后重建（原子性让位于可用性，内核是唯一写者）
+			// ENV-ADAPT(sandbox-fuse)：沙箱 FUSE 特化的备选路径——主路径是 POSIX rename，此回退仅在 rename/覆盖失败时触发；非契约行为，正常文件系统永不走这里。
+			// 既存 root 属主文件拒覆盖但目录可写：rm 后重建（原子性让位于可用性，内核是唯一写者）
 			if rerr := os.Remove(q.Path); rerr == nil {
 				werr = os.WriteFile(q.Path, data, 0o644)
 			}

@@ -20,7 +20,7 @@
 | 3 | organize 章节错位 | prep-organize 产出 mineru.md 且只一份；prep-index 报找不到 content_list | part 根输入时命名推导取到父目录名（SK-I17） | 升级；报错现带"试过的 md 名+现存目录"自查 | [fixed ≥0616445] |
 | 4 | ctx-up 上文离谱 | ctx-up 返回的段落离目标图很远 | 旧版从头扫描凑数，取到全书开头 | 升级；新版最近 n 块、最近者在前 | [fixed ≥8d399a5] |
 | 5 | luadraw 章编译失败 | 报"无 lualatex" | luadraw 需 LuaLaTeX；无则自动走 lua5.4 预编译回退 | 装 lua5.4（或设 LUADRAW_LUA）即可预编译出 TikZ 走正常链；两个都没有才需装 texlive-lualatex | [since e23e4e2] |
-| 6 | 队列 .tmp 残留 | book/ 下只有 skills_queue.json.tmp，命令报队列异常 | 进程中断时写入没 rename 完 | 确认无活跃进程后：删 .tmp 与 tasks/ 残留，重铺任务（gen-* 幂等） | [since b81cf0f] |
+| 6 | 队列 .tmp 残留【沙箱特有】| book/ 下只有 skills_queue.json.tmp，命令报队列异常 | 进程中断时写入没 rename 完 | 确认无活跃进程后：删 .tmp 与 tasks/ 残留，重铺任务（gen-* 幂等） | [since b81cf0f] |
 | 7 | config 被静默重置 | config.yaml mineru 段少写几行，其余键变默认值 | 旧版零值直赋覆盖 | 升级后零值安全；仍建议照 config.example.yaml 全段抄写 | [fixed ≥6a1fc7b] |
 | 8 | 引擎链报错 | 编译报 pdflatex 不可用 | 引擎回退链 pdflatex→xelatex→tectonic 逐个试 | 装任一即可；`doctor` 看现有什么 | [since a12d2e9] |
 | 9 | 产物结构疑惑 | mineru/ 下没有 auto/ 目录了 | 归一契约=part 根直出（对齐老 DocVision 约定） | 正常，不是错；下游两种布局都兼容 | [since 6a1fc7b] |
