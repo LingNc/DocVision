@@ -8,6 +8,18 @@ LuaDraw v3.7（Patrick Fradin，LPPL 1.3c+，来源见 SOURCE.txt）：LuaLaTeX 
 - **平面图**：手画 TikZ 已经快的（简单示意图/流程），不必上 luadraw——工具按需，不为用而用
 - **md 档图转文**：不涉及（那是 img2text 三态的活）
 
+## 简化用法（2026-11-20 用户定调：主路径简单，预编译只是回退脚本）
+
+- **主路径：正常用 lualatex 写**——章内直接 `\usepackage[3d]{luadraw}` 写绘图代码，零额外步骤
+- **回退（主机没 lualatex）**：跑独立预编译脚本，把 tex 里的 luadraw 块等价展开为 TikZ 文件，之后 **pdflatex/xelatex/tectonic 正常编译**，编译流程零影响：
+
+```bash
+python3 docs/luadraw/tools/luadraw-expand.py <你的章.tex> [files目录] [lua解释器]
+# 输出：<name>.tkz × N + 原 tex 块替换为 \input{<name>.tkz}（幂等，可重复跑）
+```
+
+内核的自动回退（`NeedsLuaLaTeX` 探测→自动预编译）保留但**非必需**——手动跑脚本是完全等价的独立路径，二选一即可。
+
 ## 引擎（按需，不全书强制）
 
 **无 lualatex 的备选（SK-I16，spike 已通过，见 spike/README.md）**：luadraw 本质是
