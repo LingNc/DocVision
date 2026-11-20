@@ -82,3 +82,13 @@ $D deliver demo                                                # 装配交付
 | `verify` 三对照 QA 阶段 | 无（SK-I4，用户裁定不实施） | 几何判据（min_overlap 等）+ rework 自查覆盖 |
 
 文档与实现不一致时，以 `upgrade-check` 后的最新文档为准，并向维护者报 issue（docs/07 状态机）。
+
+## 5. 集成三层：别的程序/agent 平台怎么接内核
+
+| 层级 | 面向 | 形态 |
+|---|---|---|
+| bash CLI | 人类 / 传统脚本 | `dvagent <命令> <参数>`（本文件 §2） |
+| **call + manifest** | 支持自定义命令/插件的 agent 平台 | `dvagent tools-manifest` 拉全量工具清单（名字+描述+**JSON Schema**）→ 平台注册；调用 = `dvagent call <工具名> --args '<参数JSON>'`（或 stdin 传 JSON），stdout 即**单级 JSON 结果**（错误退出码 1）。平台侧每个工具 = 三行映射，不拼 bash、不解析自然语言 |
+| MCP stdio | MCP 原生平台 | `dvagent mcp` 起会话，tools/list + tools/call（JSON-RPC 帧） |
+
+三层背后是**同一份工具注册表**（28 工具），行为一致；差异只在传输封装。

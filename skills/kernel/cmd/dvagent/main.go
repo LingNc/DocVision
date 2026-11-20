@@ -1081,6 +1081,79 @@ func main() {
 		}
 		out(map[string]any{"filled": n})
 
+	case "tools-manifest":
+		// dvagent tools-manifest —— 机器可读工具清单（JSON Schema，一次性输出）。
+		// 给支持自定义命令/插件的 agent 平台直接映射内核工具用（见 docs/00-start 集成三层）。
+		out(map[string]any{"tools": mcpTools, "count": len(mcpTools),
+			"envelope": "dvagent call <tool> --args '<json对象>'（或 stdin 传 JSON），stdout 得 JSON 结果"})
+
+	case "call":
+		// dvagent call <工具名> --args '<json对象>' —— 单进程 JSON-RPC-less 工具调用：
+		// 参数一个 JSON 对象（字段=工具入参），stdout 一个 JSON 结果。
+		// 自定义插件平台的最薄集成壳：name+JSON 进 → JSON 出，不拼 bash 字符串。
+		if len(args) < 2 {
+			die(fmt.Errorf("call 需要: <工具名> [--args '<json>']（无 --args 则从 stdin 读 JSON）"))
+		}
+		var argsJSON []byte
+		for i := 2; i < len(args); i++ {
+			if args[i] == "--args" && i+1 < len(args) {
+				argsJSON = []byte(args[i+1])
+				break
+			}
+		}
+		if argsJSON == nil {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				die(err)
+			}
+			argsJSON = data
+		}
+		if len(argsJSON) == 0 {
+			argsJSON = []byte("{}")
+		}
+		var argMap map[string]any
+		if err := json.Unmarshal(argsJSON, &argMap); err != nil {
+			die(fmt.Errorf("call 参数须为 JSON 对象: %w", err))
+		}
+		s := &mcpServer{workspace: *ws}
+		res := s.callTool(args[1], argsJSON)
+		if isErr, _ := res["isError"].(bool); isErr {
+			out(res)
+			os.Exit(1)
+		}
+		// 解包 MCP 封套：content[0].text 本身是 JSON 时直接吐解析后的对象
+		// （平台插件拿到单级 JSON，不必二次解析）。
+		unwrapped := false
+		emit := func(txt string) {
+			if json.Valid([]byte(txt)) {
+				var parsed any
+				_ = json.Unmarshal([]byte(txt), &parsed)
+				out(parsed)
+			} else {
+				out(map[string]any{"result": txt})
+			}
+			unwrapped = true
+		}
+		switch arr := res["content"].(type) {
+		case []map[string]any: // callTool 实际形态
+			if len(arr) == 1 {
+				if txt, ok := arr[0]["text"].(string); ok {
+					emit(txt)
+				}
+			}
+		case []any:
+			if len(arr) == 1 {
+				if c0, ok := arr[0].(map[string]any); ok {
+					if txt, ok := c0["text"].(string); ok {
+						emit(txt)
+					}
+				}
+			}
+		}
+		if !unwrapped {
+			out(res)
+		}
+
 	case "queue-stamp":
 		// dvagent queue-stamp <项目名> —— 旧版内核产出的无戳队列迁移盖防伪戳（幂等）。
 		// 手造文件不在此列：那是禁令对象，应删除走 gen-* 重铺。
