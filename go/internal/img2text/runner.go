@@ -361,7 +361,7 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 			}
 		}
 		if len(reps) == 0 {
-			out, _ := plan.applyTo(entry.content, entry.lines, entry.starts, nil)
+			out, _ := rewriteFinal(entry, nil, plan)
 			if !util.FileExists(outPath) {
 				if err := os.WriteFile(outPath, []byte(out), 0o644); err != nil {
 					logger.LogError(0, "  [", name, "] write failed:", err)
@@ -384,20 +384,21 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 			}
 		}
 
-		// Process replacements right-to-left so byte offsets stay valid.
-		sort.Slice(reps, func(i, j int) bool { return reps[i].off.Start > reps[j].off.Start })
-
-		nc := entry.content
-		shifts := make([]embedShift, 0, len(reps))
+		// T330：改写成**一遍行级扫描**——页码标记与图片锚共用同一个
+		// curPage，两套输出物理上不可能对不上；不再有"先按字节偏移改
+		// 写、再把标记按 delta 平移回去"这一步，页码也就不会随改写漂移。
+		finalReps := make([]finalRep, 0, len(reps))
 		for _, r := range reps {
-			ref := entry.content[r.off.Start:r.off.End]
-			emb := embedBlockForRef(r.item.Result, ref, plan.pageAt(entry.starts, r.off.Start))
-			shifts = append(shifts, embedShift{start: r.off.Start, delta: len(emb) - len(ref)})
-			nc = nc[:r.off.Start] + emb + nc[r.off.End:]
+			idx := findLineIndex(entry.starts, r.off.Start)
+			finalReps = append(finalReps, finalRep{
+				line:  idx,
+				start: r.off.Start - entry.starts[idx],
+				end:   r.off.End - entry.starts[idx],
+				ref:   entry.content[r.off.Start:r.off.End],
+				res:   r.item.Result,
+			})
 		}
-		// P21：embed 改写完成后做一遍行级页码标记插入（一次扫描在
-		// pagemark.go 内完成围栏顺延与去重；embed 的字节偏移用 delta 平移）。
-		nc, marks := plan.applyTo(nc, entry.lines, entry.starts, shifts)
+		nc, marks := rewriteFinal(entry, finalReps, plan)
 		// T81：重建结果与盘上逐字节相同时，写入本来就跳过——页码审计行
 		// 也不打（否则每轮全量刷一遍「页码标记: N 处」像是把所有文件重打
 		// 了一遍；实际什么都没写）。只有真要写入的文件才报审计。
@@ -405,8 +406,9 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		if len(marks) > 0 && !unchanged {
 			aud := plan.audit(marks)
 			line := "  页码标记: " + strconv.Itoa(len(marks)) + " 处 / " + strconv.Itoa(aud.MaxPage) + " 页"
-			if aud.OutOfRange > 0 || aud.Backward > 0 {
-				line += fmt.Sprintf(" ⚠ 自检异常: 越界 %d / 回退 %d", aud.OutOfRange, aud.Backward)
+			if aud.OutOfRange > 0 || aud.Backward > 0 || aud.Missing > 0 {
+				line += fmt.Sprintf(" ⚠ 自检异常: 越界 %d / 回退 %d / 缺页 %d",
+					aud.OutOfRange, aud.Backward, aud.Missing)
 			}
 			logger.Log(0, line)
 		}
@@ -819,6 +821,77 @@ func resolveSeed(seedStr string) (int64, int64) {
 	return n, n
 }
 
+// finalRep is one line-level embed request (T330): replace bytes
+// [start,end) inside line `line` of the ORIGINAL markdown with the embed
+// produced for res.
+type finalRep struct {
+	line  int
+	start int
+	end   int
+	ref   string
+	res   string
+}
+
+// rewriteFinal rebuilds the delivered markdown in ONE pass over the
+// original lines (T330). Page markers come first — one per page up to the
+// line's ground-truth page, so blank pages and image-only pages are
+// announced too and the sequence stays contiguous 1..N — then the line
+// itself, with every image reference replaced by its embed. The anchor's
+// `· P.N` and the `[P. N]` marker above it read the SAME running page
+// variable, so the two can never disagree, and no byte-offset shifting is
+// needed any more (rewriting a line cannot move a later marker).
+func rewriteFinal(e mdEntry, reps []finalRep, plan *pageMarkPlan) (string, []pageMark) {
+	byLine := make(map[int][]finalRep, len(reps))
+	for _, r := range reps {
+		byLine[r.line] = append(byLine[r.line], r)
+	}
+	var markLines [][]int
+	if plan != nil {
+		markLines = plan.markLines(e.lines)
+	}
+	var b strings.Builder
+	inserted := make([]pageMark, 0, len(e.lines))
+	curPage := 0
+	prevLine := ""
+	for i, line := range e.lines {
+		if i < len(markLines) {
+			for _, p := range markLines[i] {
+				mk := pageMarkText(p)
+				if prevLine == mk {
+					continue // already announced (re-run over marked content)
+				}
+				b.WriteString(mk)
+				b.WriteByte('\n')
+				inserted = append(inserted, pageMark{line: i, page: p})
+				prevLine = mk
+			}
+		}
+		if p := plan.pageOfLine(i); p > 0 {
+			curPage = p
+		}
+		if rs := byLine[i]; len(rs) > 0 {
+			// Right-to-left so the earlier byte ranges stay valid.
+			sort.Slice(rs, func(x, y int) bool { return rs[x].start > rs[y].start })
+			out := line
+			for _, r := range rs {
+				if r.start < 0 || r.end > len(out) || r.start > r.end {
+					continue // stale offset: the line no longer holds this ref
+				}
+				out = out[:r.start] + embedBlockForRef(r.res, r.ref, curPage) + out[r.end:]
+			}
+			line = out
+		}
+		b.WriteString(line)
+		if i < len(e.lines)-1 {
+			b.WriteByte('\n')
+		}
+		if t := strings.TrimSpace(line); t != "" {
+			prevLine = t
+		}
+	}
+	return b.String(), inserted
+}
+
 // embedBlockFor converts an AI result (with its [IMG_TYPE:] prefix)
 // into the final markdown embed, chosen by content type:
 //   - non-image content (pure text, LaTeX math, tables, code) embeds
@@ -835,6 +908,8 @@ func embedBlockFor(result string) string {
 // 模型偶尔吞掉结尾围栏，嵌入前补齐，避免破坏后续 markdown。
 // page > 0（P21，原始 md 对齐出的图片所在 PDF 全局页码）时把页码附进锚：
 // `[Image]( 描述 · P.42 )`；text/table/code 直接嵌入的没有锚，不加。
+// 带原始图片引用时（T329）在锚行上一行再给一条 `[url](images/<书>/<文件>)`，
+// 交付出去的 md 既有描述、也还认得出原图在哪；直接嵌入的文本类不加。
 func embedBlockForRef(result, ref string, page int) string {
 	typ, body := splitImgTypePrefix(result)
 	body = strings.TrimSpace(body)
@@ -843,11 +918,45 @@ func embedBlockForRef(result, ref string, page int) string {
 		typ == "table" || typ == "code":
 		return "\n\n" + body + "\n\n"
 	case typ == "mermaid", strings.Contains(body, "```mermaid"):
-		return "\n\n" + imageAnchorText(altOfRef(ref), page) + "\n\n" +
+		return "\n\n" + imageSourceLine(ref) + imageAnchorText(altOfRef(ref), page) + "\n\n" +
 			ensureClosedFence(withMermaidFence(body)) + "\n\n"
 	default:
-		return "\n\n" + imageAnchorText(body, page) + "\n\n"
+		return "\n\n" + imageSourceLine(ref) + imageAnchorText(body, page) + "\n\n"
 	}
+}
+
+// linkTargetRe pulls the target out of a markdown link/image reference
+// (`![alt](images/x/y.png)` → `images/x/y.png`), tolerating a `<…>`
+// wrapper or a trailing "title".
+var linkTargetRe = regexp.MustCompile(`\]\(\s*<?([^()\s>]+)`)
+
+// htmlSrcRe extracts the src attribute of an <img> reference.
+var htmlSrcRe = regexp.MustCompile(`(?i)\bsrc=["']([^"']*)["']`)
+
+// linkOfRef returns the original image location carried by a reference:
+// the `](…)` target for markdown, the `src` for `<img …>`, "" when the
+// reference has no usable location.
+func linkOfRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if m := linkTargetRe.FindStringSubmatch(ref); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	if m := htmlSrcRe.FindStringSubmatch(ref); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+// imageSourceLine renders the original image location as its own line
+// (`[url](images/<书>/<文件>)`, T329) so the delivered markdown keeps a
+// pointer to the source bitmap right above the readable description.
+// Empty when there is nothing to point at.
+func imageSourceLine(ref string) string {
+	link := linkOfRef(ref)
+	if link == "" {
+		return ""
+	}
+	return "[url](" + link + ")\n"
 }
 
 // imageAnchorText renders the `[Image]( 描述 · P.N )` embed anchor; the

@@ -2596,3 +2596,11 @@ user 轮
   根因：每个分片都要对**源文件**反复 `TrimFile` 做体积二分探测（单页探测 + 整片探测 + log2(maxPages) 次二分 + 真正的写入），每次都是全量解析；同一份两百兆、12776 页的文件，pdfcpu 取一页要跑几十分钟，整本等于几百遍全量解析。
   改：改成"整本一次读入切成 span 页一份 + 超体积的分片在它自己身上对半再切"（`internal/split/splitter.go`：有 `mutool` 用 `mutool merge`，否则 pdfcpu `SplitFile` 一次切开；细化只碰小分片），日志给后端与用时，`DOCVISION_PDF_SPLIT_TOOL` 可强制后端。
   验证：同一份文件改成 58 秒切完 7 份（此前 >30 分钟零产出）；`TestSplitPDFBackendsBothWork`（两种后端各 4 份、页数合计对齐）、`TestSplitPDFRefinesOversizePartsOnTheirOwn`（上限压一半后就地再切、页段连续覆盖）、既有 9 条 split 测试全绿。
+[X][ ] T329. img2text 交付的 md 只有图片描述，丢了原图链接，事后认不回那张图。
+  根因：P21/T16 的嵌入用 `[Image]( 描述 )`（+ `· P.N`）整条替换掉图片引用，原图路径只留在 `progress_items/original.md` 里，交付文件本身没有指针。
+  改：`embedBlockForRef` 在锚行**上一行**加 `[url](images/<书>/<文件>)`（`linkOfRef` 兼容 `![alt](…)` 与 `<img src=…>`，容忍 `<>` 与 title）；只有需要保留原图的 mermaid 与其余视觉类型加，text/latex/table/code 直接嵌入的不加。
+  验证：`TestEmbedBlockFor`（视觉类与 mermaid 带链接行、文本类不带）、`TestLinkOfRef`（两种引用形态 + 无链接/title 边界），`docs/commands.md` 补嵌入表与一段说明。
+[X][ ] T330. 页码定位算法漂移、缺页，已被默认关闭；换成正确算法并重新默认开启。
+  根因：老算法按「md 行号 + 行偏移」把图钉在改写后的行上，靠字节 delta 把标记平移回去；标记只在页码**上升**时打，中间对不上任何文本锚的空白页/整页图页被整段跳过（实跑抓到缺 P.4），锚点页码与标记各走一遍推导。
+  改：Final pass 改成**一遍行级扫描**（`rewriteFinal`）：先对齐 `*_content_list.json` 得到每行的真实页码，再按行输出——标记按 `pageMarkCoverage` 从 P.1 连续补齐到该行页码（跳过的页全补），图片锚与标记共用同一个 `curPage`；围栏内的标记顺延到围栏后；删掉 `embedShift`/`insertPageMarks` 那套偏移平移；审计多报「缺页」。
+  验证：`TestPageMarkCoverage`（页 1→4 补齐 2、3；非递增不重复）、`TestRewriteFinalCoverageFillsBlankPages`（缺页回归，审计 Missing=0）、`TestRewriteFinalFenceDeferral`、`TestRewriteFinalEndToEnd`（链接行 + 锚 + 标记同源）、`TestPlanPageMarksWithoutMinerU`；`go test ./internal/img2text/` 全绿。

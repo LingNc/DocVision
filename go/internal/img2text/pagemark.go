@@ -17,9 +17,10 @@ package img2text
 //     text 锚点做规范化包含匹配（去空白后互相包含、命中推进锚点指针），
 //     图片引用行用 imageRefRe 的捕获按文件名对 image 锚点；未命中的行继承
 //     上一个已知页。
-//   - 标记插入发生在 Final pass 的 embed 改写**之后**（行级扫描），围栏内
-//     的插入点顺延到围栏结束后；embed 改写造成的字节偏移用每个替换的
-//     delta 平移回原始行首位置，避免两套 offset 互相踩。
+//   - 标记与图片锚在 Final pass 的**同一遍行级扫描**里产出（T330）：每行
+//     先按对齐结果补齐它之前的页标记（从 P.1 连续覆盖，空白页也补），再
+//     输出该行；锚的 `· P.N` 与标记共用同一个 curPage，不再有"先按字节
+//     偏移改写、再把标记位置平移回去"的第二步。围栏内的标记顺延到围栏后。
 
 import (
 	"encoding/json"
@@ -290,157 +291,90 @@ func findImageAnchor(anchors []pageAnchor, from int, base string) int {
 	return -1
 }
 
-// pageMark is one insertion request: before md line `line`, for page
-// transitions to `page`. Positions may sit inside a code fence; the
-// final-content inserter defers those to after the fence.
+// pageMark is one marker actually emitted: before md line `line`, the
+// page announced. Used for the count and the self-check (a marker that
+// would land inside a code fence is deferred to after the fence, so the
+// recorded line is the deferred one).
 type pageMark struct {
 	line int
 	page int
 }
 
-// pageMarkPositions compares consecutive known pages and records an
-// insertion request whenever the page INCREASES (only upward transitions
-// mark a page break; unknown lines inherit and never fire).
-func pageMarkPositions(lines []string, linePages []int) []pageMark {
-	var out []pageMark
-	prev := 0
+// pageMarkCoverage turns the per-line known pages into the page list to
+// announce before each line (T330). Every page between the last announced
+// one and this line's page is listed, so blank pages and image-only pages
+// — the ones the old "only on an upward transition" rule silently skipped
+// — still get their marker: the delivered markers are contiguous 1..N.
+func pageMarkCoverage(linePages []int) [][]int {
+	out := make([][]int, len(linePages))
+	announced := 0
 	for i, p := range linePages {
-		if p == 0 {
+		if p <= announced {
 			continue
 		}
-		if prev > 0 && p > prev {
-			out = append(out, pageMark{line: i, page: p})
+		pages := make([]int, 0, p-announced)
+		for q := announced + 1; q <= p; q++ {
+			pages = append(pages, q)
 		}
-		prev = p
+		out[i] = pages
+		announced = p
 	}
 	return out
 }
 
-// embedShift records the length change one embed replacement caused at an
-// original byte offset, so marker positions (original line starts) can be
-// translated into the rewritten content.
-type embedShift struct {
-	start int // original byte offset of the replaced image ref
-	delta int // len(embed) - len(ref)
-}
-
-// shiftFor returns the total byte shift applied to an original offset by
-// every embed replacement that starts BEFORE it (replacements never
-// straddle a line start: a ref lives inside one line).
-func shiftFor(pos int, shifts []embedShift) int {
-	n := 0
-	for _, s := range shifts {
-		if s.start < pos {
-			n += s.delta
-		}
-	}
-	return n
-}
-
-// resolveFencePos returns pos unchanged when it is OUTSIDE a code fence;
-// inside, it moves pos past the closing fence line so the marker never
-// lands inside a fenced block. Fence parity counts complete fence lines
-// (``` or ```lang) before pos; an unclosed trailing fence leaves pos as-is.
-func resolveFencePos(content string, pos int) int {
-	locs := fenceLineRe.FindAllStringIndex(content, -1)
+// fenceBodyFlags marks the lines that sit INSIDE a fenced code block
+// (fence lines themselves excluded). A page marker landing there would
+// break the fence, so markLines defers it.
+func fenceBodyFlags(lines []string) []bool {
+	out := make([]bool, len(lines))
 	inside := false
-	nextClose := -1
-	for _, l := range locs {
-		end := l[1]
-		if end < len(content) && content[end] == '\n' {
-			end++
-		}
-		if end <= pos {
+	for i, line := range lines {
+		if fenceLineRe.MatchString(line) {
 			inside = !inside
 			continue
 		}
-		nextClose = end
-		break
+		out[i] = inside
 	}
-	if inside && nextClose >= 0 {
-		return nextClose
+	return out
+}
+
+// markLines maps each line to the page markers to emit before it.
+func (p *pageMarkPlan) markLines(lines []string) [][]int {
+	if p == nil {
+		return nil
 	}
-	return pos
+	cov := pageMarkCoverage(p.linePages)
+	inside := fenceBodyFlags(lines)
+	out := make([][]int, len(lines))
+	for i, pages := range cov {
+		if len(pages) == 0 {
+			continue
+		}
+		j := i
+		// 围栏体内（以及收尾的 ``` 那一行）都不能插，顺延到围栏之后。
+		for j < len(lines) && (inside[j] || fenceLineRe.MatchString(lines[j])) {
+			j++
+		}
+		if j >= len(lines) {
+			j = len(lines) - 1
+		}
+		out[j] = append(out[j], pages...)
+	}
+	return out
+}
+
+// pageOfLine is the ground-truth page of md line i (0 = unknown, the
+// caller keeps the running page).
+func (p *pageMarkPlan) pageOfLine(i int) int {
+	if p == nil || i < 0 || i >= len(p.linePages) {
+		return 0
+	}
+	return p.linePages[i]
 }
 
 // pageMarkText renders the marker line for a page.
 func pageMarkText(page int) string {
-	return "[P. " + strconv.Itoa(page) + "]\n"
-}
-
-// insertPageMarks inserts the marker lines into content (the FINAL
-// rewritten md). marks refer to original line indices; starts is the
-// original per-line byte table and shifts the embed deltas. Multiple
-// requests resolving to the same position insert one line per page, in
-// order; a position whose preceding line already carries the identical
-// marker is skipped (no duplicates).
-func insertPageMarks(content string, marks []pageMark, starts []int, shifts []embedShift) (string, int) {
-	if len(marks) == 0 {
-		return content, 0
-	}
-	type ins struct {
-		pos  int
-		text string
-	}
-	grouped := map[int][]int{} // pos -> pages in order
-	order := []int{}
-	for _, m := range marks {
-		pos := resolveFencePos(content, starts[m.line]+shiftFor(starts[m.line], shifts))
-		if _, ok := grouped[pos]; !ok {
-			order = append(order, pos)
-		}
-		grouped[pos] = append(grouped[pos], m.page)
-	}
-	var insList []ins
-	for _, pos := range order {
-		pages := grouped[pos]
-		// Dedupe: drop pages already announced by the line right before
-		// the insertion point (re-running over marked output, or a
-		// previous marker inserted at the same resolved position).
-		prev := lastLineBefore(content, pos)
-		prevIsMark := pageMarkRe.MatchString(prev)
-		text := ""
-		for _, p := range pages {
-			mk := "[P. " + strconv.Itoa(p) + "]"
-			if prev == mk {
-				continue
-			}
-			t := pageMarkText(p)
-			if pos > 0 && !prevIsMark && !strings.HasSuffix(content[:pos], "\n\n") {
-				t = "\n" + t
-			}
-			text += t
-			prev = mk
-			prevIsMark = true
-		}
-		if text != "" {
-			insList = append(insList, ins{pos: pos, text: text})
-		}
-	}
-	// Insert right-to-left so earlier positions stay valid.
-	sort.Slice(insList, func(i, j int) bool { return insList[i].pos > insList[j].pos })
-	inserted := 0
-	for _, in := range insList {
-		if in.pos > len(content) {
-			continue
-		}
-		content = content[:in.pos] + in.text + content[in.pos:]
-		inserted += strings.Count(in.text, "[P. ")
-	}
-	return content, inserted
-}
-
-// lastLineBefore returns the last non-empty line strictly before pos.
-func lastLineBefore(content string, pos int) string {
-	if pos > len(content) {
-		pos = len(content)
-	}
-	s := content[:pos]
-	s = strings.TrimRight(s, "\n")
-	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
-		s = s[i+1:]
-	}
-	return s
+	return "[P. " + strconv.Itoa(page) + "]"
 }
 
 // pageMarkPlan is the per-md alignment result for one Final-pass rewrite.
@@ -459,27 +393,6 @@ func planPageMarks(mineruOutput, mdName string, lines []string) *pageMarkPlan {
 	return &pageMarkPlan{anchors: anchors, linePages: alignPages(lines, anchors)}
 }
 
-// pageAt reports the known page of the md line containing original byte
-// offset pos (0 = unknown; used to stamp [Image]( label · P.N ) embeds).
-func (p *pageMarkPlan) pageAt(starts []int, pos int) int {
-	if p == nil {
-		return 0
-	}
-	return p.linePages[findLineIndex(starts, pos)]
-}
-
-// applyTo inserts the marker lines into the FINAL rewritten content.
-// shifts carries the (offset, delta) of every embed replacement already
-// applied. Returns the content and how many marker lines were inserted.
-func (p *pageMarkPlan) applyTo(content string, lines []string, starts []int, shifts []embedShift) (string, []pageMark) {
-	if p == nil {
-		return content, nil
-	}
-	marks := pageMarkPositions(lines, p.linePages)
-	out, _ := insertPageMarks(content, marks, starts, shifts)
-	return out, marks
-}
-
 // pageMarkAudit is the runtime self-check printed next to the mark count:
 // the marker pages must stay inside the book's page range and strictly
 // increase. Anything else means the alignment drifted and the log says so
@@ -488,6 +401,7 @@ type pageMarkAudit struct {
 	MaxPage    int // 该书总页数（部件偏移 + 末页）
 	OutOfRange int // 越界标记数
 	Backward   int // 页码非递增（回退/重复）标记数
+	Missing    int // 该有却没有的页标记数（标记应连续覆盖 1..MaxPage）
 }
 
 func (p *pageMarkPlan) audit(marks []pageMark) pageMarkAudit {
@@ -500,6 +414,11 @@ func (p *pageMarkPlan) audit(marks []pageMark) pageMarkAudit {
 			a.MaxPage = x.page
 		}
 	}
+	for _, m := range marks {
+		if m.page > a.MaxPage {
+			a.MaxPage = m.page
+		}
+	}
 	prev := 0
 	for _, m := range marks {
 		if a.MaxPage > 0 && m.page > a.MaxPage {
@@ -509,6 +428,9 @@ func (p *pageMarkPlan) audit(marks []pageMark) pageMarkAudit {
 			a.Backward++
 		}
 		prev = m.page
+	}
+	if a.MaxPage > len(marks) {
+		a.Missing = a.MaxPage - len(marks)
 	}
 	return a
 }

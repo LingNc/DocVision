@@ -668,23 +668,48 @@ func TestEmbedBlockFor(t *testing.T) {
 		{"visual default", "[IMG_TYPE: screenshot]\n一个 IDE 截图。", "\n\n[Image]( 一个 IDE 截图。 )\n\n"},
 		{"missing prefix", "普通文本", "\n\n[Image]( 普通文本 )\n\n"},
 	}
-	// T16：带 alt 的引用单独走 embedBlockForRef。
-	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "![流程图](images/x/abc.jpg)", 0); got != "\n\n[Image]( 流程图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
+	// T16：带 alt 的引用单独走 embedBlockForRef。T329：锚行之上再给一条
+	// [url](images/<书>/<文件>)，保留原图位置。
+	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "![流程图](images/x/abc.jpg)", 0); got != "\n\n[url](images/x/abc.jpg)\n[Image]( 流程图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
 		t.Errorf("mermaid with alt: got %q", got)
 	}
-	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "<img src=\"images/x/abc.jpg\" alt=\"柱状图\">", 0); got != "\n\n[Image]( 柱状图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
+	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "<img src=\"images/x/abc.jpg\" alt=\"柱状图\">", 0); got != "\n\n[url](images/x/abc.jpg)\n[Image]( 柱状图 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
 		t.Errorf("mermaid with html alt: got %q", got)
 	}
-	// P21：页码已知时 [Image] 锚附加 · P.N；text 直接嵌入的不加。
-	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "![流程图](images/x/abc.jpg)", 42); got != "\n\n[Image]( 流程图 · P.42 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
+	// P21：页码已知时 [Image] 锚附加 · P.N；T329 的链接行仍在锚行之上。
+	if got := embedBlockForRef("[IMG_TYPE: mermaid]\n```mermaid\ngraph TD; A-->B\n```", "![流程图](images/x/abc.jpg)", 42); got != "\n\n[url](images/x/abc.jpg)\n[Image]( 流程图 · P.42 )\n\n```mermaid\ngraph TD; A-->B\n```\n\n" {
 		t.Errorf("mermaid with page: got %q", got)
 	}
+	// 视觉类默认分支同样带链接行。
+	if got := embedBlockForRef("[IMG_TYPE: screenshot]\n一张截图。", "![图](images/书/aaa111.jpg)", 3); got != "\n\n[url](images/书/aaa111.jpg)\n[Image]( 一张截图。 · P.3 )\n\n" {
+		t.Errorf("visual with page and link: got %q", got)
+	}
+	// T329：纯文本类不嵌链接（交付的是可读文本，链接是噪声）。
 	if got := embedBlockForRef("[IMG_TYPE: text]\n正文。", "![x](images/x/a.jpg)", 7); got != "\n\n正文。\n\n" {
-		t.Errorf("text embed must not carry page: got %q", got)
+		t.Errorf("text embed must not carry page or link: got %q", got)
 	}
 	for _, tc := range cases {
 		if got := embedBlockFor(tc.result); got != tc.want {
 			t.Errorf("%s: got %q want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestLinkOfRef pins the source-link extraction (T329) across the two
+// reference shapes the pipeline actually sees.
+func TestLinkOfRef(t *testing.T) {
+	cases := []struct{ ref, want string }{
+		{"![alt](images/书/a.png)", "images/书/a.png"},
+		{"![](images/书/b.jpg)", "images/书/b.jpg"},
+		{"![alt](<images/书/c d.png>)", "images/书/c"},
+		{"![alt](images/书/d.png \"标题\")", "images/书/d.png"},
+		{`<img src="images/书/e.png" alt="x">`, "images/书/e.png"},
+		{"![无链接]( )", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := linkOfRef(c.ref); got != c.want {
+			t.Errorf("linkOfRef(%q) = %q, want %q", c.ref, got, c.want)
 		}
 	}
 }

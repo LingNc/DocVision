@@ -71,15 +71,15 @@ func TestAlignPages(t *testing.T) {
 	root, _ := testAnchors(t)
 	anchors := pageAnchors(root, "书.md")
 	lines := []string{
-		"# 第一章 概述",                       // text anchor 1 (contained)
-		"",                                 // blank -> unknown
-		"本章介绍基本概念与背景。",                    // exact hit
-		"一些锚点之间没对上的自由文本",                   // unknown, inherits page 1
-		"第二节 方法细节",                         // page 2
-		"![图](images/书/aaa111.jpg)",        // image anchor, page 2
-		"第二章 实验结果",                         // part1 page 0 -> global 3
-		"```text",                          // fence line, no anchor
-		"实验表明方法有效。",                        // page 4 (数字 page_idx 形态)
+		"# 第一章 概述",     // text anchor 1 (contained)
+		"",             // blank -> unknown
+		"本章介绍基本概念与背景。", // exact hit
+		"一些锚点之间没对上的自由文本",            // unknown, inherits page 1
+		"第二节 方法细节",                  // page 2
+		"![图](images/书/aaa111.jpg)", // image anchor, page 2
+		"第二章 实验结果",                  // part1 page 0 -> global 3
+		"```text",                   // fence line, no anchor
+		"实验表明方法有效。",                 // page 4 (数字 page_idx 形态)
 		"```",
 	}
 	pages := alignPages(lines, anchors)
@@ -89,7 +89,7 @@ func TestAlignPages(t *testing.T) {
 	}
 }
 
-func TestPageMarkPositions(t *testing.T) {
+func TestPageMarkCoverage(t *testing.T) {
 	root, _ := testAnchors(t)
 	anchors := pageAnchors(root, "书.md")
 	lines := []string{
@@ -101,67 +101,63 @@ func TestPageMarkPositions(t *testing.T) {
 		"第二章 实验结果",
 		"实验表明方法有效。",
 	}
-	marks := pageMarkPositions(lines, alignPages(lines, anchors))
-	// 页从 1 → 2（line 3）→ 3（line 5）→ 4（line 6）发生递增。
-	want := []pageMark{{line: 3, page: 2}, {line: 5, page: 3}, {line: 6, page: 4}}
-	if !reflect.DeepEqual(marks, want) {
-		t.Fatalf("marks mismatch:\n got %+v\nwant %+v", marks, want)
+	cov := pageMarkCoverage(alignPages(lines, anchors))
+	// 第 1 页在文首就说，之后 2/3/4 各在自己的第一行之前；未知行不给。
+	want := [][]int{{1}, nil, nil, {2}, nil, {3}, {4}}
+	if !reflect.DeepEqual(cov, want) {
+		t.Fatalf("coverage mismatch:\n got %v\nwant %v", cov, want)
+	}
+	// T330 回归：中间隔着的那些页（空白页/纯图页对不上任何文本锚）必须
+	// 补齐——页 1 之后直接跳到页 4，2 和 3 一个都不能少。
+	if got := pageMarkCoverage([]int{1, 0, 0, 4}); !reflect.DeepEqual(got, [][]int{{1}, nil, nil, {2, 3, 4}}) {
+		t.Fatalf("gap pages must be filled, got %v", got)
+	}
+	// 页码不递增（对齐抖动）时不再重复/回退标记。
+	if got := pageMarkCoverage([]int{3, 2, 3}); !reflect.DeepEqual(got, [][]int{{1, 2, 3}, nil, nil}) {
+		t.Fatalf("non increasing pages must not re-announce, got %v", got)
 	}
 }
 
-// TestInsertPageMarksFenceDeferral 钉：插入点落在代码围栏内时顺延到围栏结束后
-// 的第一行之前，且同一位置已有标记不重复插。
-func TestInsertPageMarksFenceDeferral(t *testing.T) {
-	root, _ := testAnchors(t)
-	anchors := pageAnchors(root, "书.md")
-	lines := []string{
-		"# 第一章 概述",                // page 1
-		"```python",                // fence opens
-		"x = \"第二节 方法细节\"",        // fence body 误中 text 锚（page 2）→ 顺延
-		"```",                      // fence closes
-		"![图](images/书/aaa111.jpg)", // page 2（image 锚，不递增）
-		"第二章 实验结果",                // page 3
-	}
-	pages := alignPages(lines, anchors)
-	marks := pageMarkPositions(lines, pages)
-	content := strings.Join(lines, "\n") + "\n"
+// newTestEntry 按 runner 的口径造一条 mdEntry（lines/starts/content 同步）。
+func newTestEntry(lines []string) mdEntry {
+	content := strings.Join(lines, "\n")
 	starts := make([]int, len(lines)+1)
 	for i, l := range lines {
 		starts[i+1] = starts[i] + len(l) + 1
 	}
-	got, n := insertPageMarks(content, marks, starts, nil)
-	if n != 2 {
-		t.Fatalf("expected 2 markers inserted, got %d:\n%s", n, got)
+	return mdEntry{name: "书.md", content: content, lines: lines, starts: starts}
+}
+
+// TestRewriteFinalFenceDeferral 钉：页码标记落在代码围栏内时顺延到围栏结束后
+// 的第一行之前（T330：单遍改写，不再有字节偏移平移）。
+func TestRewriteFinalFenceDeferral(t *testing.T) {
+	root, _ := testAnchors(t)
+	lines := []string{
+		"# 第一章 概述",                  // page 1
+		"```python",                 // fence opens
+		"x = \"第二节 方法细节\"",          // fence body 误中 text 锚（page 2）→ 顺延
+		"```",                       // fence closes
+		"![图](images/书/aaa111.jpg)", // page 2（image 锚，不递增）
+		"第二章 实验结果",                  // page 3
 	}
-	// 围栏内的 line 2 顺延到围栏结束后（line 4 之前），不落在 ```python 与 ```
-	// 之间；[P. 3] 紧随其后。
-	if strings.Contains(got, "```python\n\n[P. ") || strings.Contains(got, "x = \"第二节 方法细节\"\n\n[P. ") {
-		t.Fatalf("marker fell inside the fence:\n%s", got)
-	}
-	want := "# 第一章 概述\n```python\nx = \"第二节 方法细节\"\n```\n\n[P. 2]\n![图](images/书/aaa111.jpg)\n\n[P. 3]\n第二章 实验结果\n"
+	e := newTestEntry(lines)
+	plan := planPageMarks(root, "书.md", lines)
+	got, marks := rewriteFinal(e, nil, plan)
+	want := "[P. 1]\n# 第一章 概述\n```python\nx = \"第二节 方法细节\"\n```\n[P. 2]\n![图](images/书/aaa111.jpg)\n[P. 3]\n第二章 实验结果"
 	if got != want {
 		t.Fatalf("content mismatch:\ngot:\n%s\nwant:\n%s", got, want)
 	}
-	// 同一位置已有标记不重复插：插入点前一行已是同页标记时跳过。
-	dl := []string{"前文", "[P. 2]", "目标行"}
-	dc := strings.Join(dl, "\n") + "\n"
-	dst := make([]int, len(dl)+1)
-	for i, l := range dl {
-		dst[i+1] = dst[i] + len(l) + 1
+	if len(marks) != 3 {
+		t.Fatalf("expected 3 markers, got %d", len(marks))
 	}
-	dup, n3 := insertPageMarks(dc, []pageMark{{line: 2, page: 2}}, dst, nil)
-	if n3 != 0 || dup != dc {
-		t.Fatalf("duplicate marker must be skipped, inserted %d:\n%s", n3, dup)
-	}
-	dup, n4 := insertPageMarks(dc, []pageMark{{line: 2, page: 3}}, dst, nil)
-	if n4 != 1 || !strings.Contains(dup, "[P. 2]\n[P. 3]\n目标行") {
-		t.Fatalf("different-page marker at same spot must insert:\n%s", dup)
+	if strings.Contains(got, "```python\n[P. ") {
+		t.Fatalf("marker fell inside the fence:\n%s", got)
 	}
 }
 
-// TestPageMarkPlanEndToEnd 走一遍"embed 改写 + 标记插入"的组合（Final pass 的
-// 纯函数部分）：图片 embed 锚带页码、跨页处插标记、offset 平移不串位。
-func TestPageMarkPlanEndToEnd(t *testing.T) {
+// TestRewriteFinalEndToEnd 走一遍 Final pass 的纯函数部分：图片锚带页码、
+// 锚上方的 [url] 链接行、跨页处的标记，且**锚的页码与它上方的标记同源**。
+func TestRewriteFinalEndToEnd(t *testing.T) {
 	root, _ := testAnchors(t)
 	lines := []string{
 		"# 第一章 概述",
@@ -171,53 +167,68 @@ func TestPageMarkPlanEndToEnd(t *testing.T) {
 		"自由文本",
 		"第二章 实验结果",
 	}
-	content := strings.Join(lines, "\n") + "\n"
-	starts := make([]int, len(lines)+1)
-	for i, l := range lines {
-		starts[i+1] = starts[i] + len(l) + 1
-	}
+	e := newTestEntry(lines)
 	plan := planPageMarks(root, "书.md", lines)
 	if plan == nil {
 		t.Fatal("plan must not be nil with mineru output present")
 	}
-	// 图片引用行在 page 2；embed 锚应带 · P.2。
-	refStart := starts[3]
-	refEnd := refStart + len(lines[3])
-	page := plan.pageAt(starts, refStart)
-	if page != 2 {
-		t.Fatalf("image ref line page = %d, want 2", page)
+	refStart := e.starts[3]
+	reps := []finalRep{{
+		line:  3,
+		start: 0,
+		end:   len(lines[3]),
+		ref:   e.content[refStart : refStart+len(lines[3])],
+		res:   "[IMG_TYPE: screenshot]\n一张图。",
+	}}
+	got, marks := rewriteFinal(e, reps, plan)
+	if len(marks) != 3 {
+		t.Fatalf("expected 3 markers (pages 1,2,3), got %d:\n%s", len(marks), got)
 	}
-	emb := embedBlockForRef("[IMG_TYPE: screenshot]\n一张图。", content[refStart:refEnd], page)
-	shifts := []embedShift{{start: refStart, delta: len(emb) - (refEnd - refStart)}}
-	nc := content[:refStart] + emb + content[refEnd:]
-	nc, marks := plan.applyTo(nc, lines, starts, shifts)
-	n := len(marks)
-	if n != 2 {
-		t.Fatalf("expected 2 markers (page 2 at line 2, page 3 at line 5), got %d:\n%s", n, nc)
+	// T329：原图链接行在描述锚之上。
+	if !strings.Contains(got, "[url](images/书/aaa111.jpg)\n[Image]( 一张图。 · P.2 )") {
+		t.Fatalf("embed must carry the link line above the anchor:\n%s", got)
 	}
-	if !strings.Contains(nc, "[Image]( 一张图。 · P.2 )") {
-		t.Fatalf("image anchor missing page suffix:\n%s", nc)
+	if !strings.Contains(got, "[P. 1]\n# 第一章 概述") {
+		t.Fatalf("page-1 marker missing at the top:\n%s", got)
 	}
-	if !strings.Contains(nc, "[P. 2]\n第二节 方法细节") {
-		t.Fatalf("page-2 marker not before its first line:\n%s", nc)
+	if !strings.Contains(got, "\n[P. 2]\n第二节 方法细节") {
+		t.Fatalf("page-2 marker not before its first line:\n%s", got)
 	}
-	if !strings.Contains(nc, "\n[P. 3]\n第二章 实验结果") {
-		t.Fatalf("page-3 marker not before its first line:\n%s", nc)
+	if !strings.Contains(got, "\n[P. 3]\n第二章 实验结果") {
+		t.Fatalf("page-3 marker not before its first line:\n%s", got)
+	}
+}
+
+// TestRewriteFinalCoverageFillsBlankPages 钉 T330 的核心回归：老算法只在
+// "页码上升"时打标记，整页空白/整页图那种对不上任何文本锚的页会被整个跳过
+// （实跑抓到缺 P.4）。新算法把中间跳过的页全部补齐。
+func TestRewriteFinalCoverageFillsBlankPages(t *testing.T) {
+	lines := []string{"第一页正文", "第四页正文"}
+	e := newTestEntry(lines)
+	plan := &pageMarkPlan{linePages: []int{1, 4}}
+	got, marks := rewriteFinal(e, nil, plan)
+	want := "[P. 1]\n第一页正文\n[P. 2]\n[P. 3]\n[P. 4]\n第四页正文"
+	if got != want {
+		t.Fatalf("gap pages must be announced:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	a := plan.audit(marks)
+	if a.Missing != 0 || a.MaxPage != 4 || a.Backward != 0 {
+		t.Fatalf("audit after filling gaps = %+v, want no missing page", a)
 	}
 }
 
 // TestPlanPageMarksWithoutMinerU 钉：没有 mineru 产物时 plan 为 nil、
-// applyTo 原样返回——老数据静默跳过，绝不报错、绝不改内容。
+// rewriteFinal 原样返回——老数据静默跳过，绝不报错、绝不改内容。
 func TestPlanPageMarksWithoutMinerU(t *testing.T) {
 	if plan := planPageMarks(t.TempDir(), "书.md", []string{"a"}); plan != nil {
 		t.Fatalf("empty dir must give nil plan, got %+v", plan)
 	}
-	// nil plan 的 applyTo 必须是安全 no-op。
-	var plan *pageMarkPlan
-	out, marks := plan.applyTo("原文", []string{"原文"}, []int{0, 3}, nil)
-	n := len(marks)
-	if n != 0 || out != "原文" {
-		t.Fatalf("nil plan applyTo must be a no-op, got %q, %d marks", out, n)
+	// nil plan 的 rewriteFinal 必须是安全 no-op。
+	lines := []string{"原文", "第二行"}
+	e := newTestEntry(lines)
+	out, marks := rewriteFinal(e, nil, nil)
+	if len(marks) != 0 || out != e.content {
+		t.Fatalf("nil plan must be a no-op, got %q, %d marks", out, len(marks))
 	}
 }
 
