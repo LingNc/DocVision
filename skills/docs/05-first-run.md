@@ -33,7 +33,7 @@ $D prep-index demo                             # doc_index + 页表（检索与�
 ## 2. 图片阶段（agent 接管 LLM 工作）
 
 ```bash
-$D gen-classify demo                           # 图铺 classify 任务（含 imgxxx 登记）
+$D gen-classify demo                           # 【LaTeX 档专用前置】图预分类（styled/vector/raster）；md 档跳过，直接 gen-img2text
 # agent：claim classify → 逐图三态写 verdict.json → submit
 $D viewer-build demo                           # 看图台（分组/调阈值/导出 regroup）
 # 用户：浏览器打开 work/viewer/index.html 调组 → 导出 regroup.json 存 work/retry/

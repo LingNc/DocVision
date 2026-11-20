@@ -45,7 +45,7 @@ $D register demo book && $D activate demo
 $D prep-split demo book/书.pdf 100                        # ② 拆 part（幂等）
 $D prep-mineru-api demo book/source/parts/*.pdf           # ③ OCR（需 MINERU_TOKEN，断点续传）
 $D prep-organize demo && $D prep-index demo               # ④ 整理+索引
-# ⑤ agent 工作段：gen-classify 铺任务 → 逐图三态（手册：agent/manual-classify.md、manual-img2text.md）
+# ⑤ agent 工作段：gen-img2text 铺三态任务 → 逐图三态（manual-img2text.md；**md 档无 classify 前置**——三态在任务内自判，classify 是 LaTeX 档专用前置）
 $D img2text-assemble demo chapters/书.md out/book.md      # ⑥ 程序合成成品
 ```
 每步产物与判据见 `docs/05-first-run.md`；第 ⑤ 步的 agent 行为规范见 `agent/README.md`。

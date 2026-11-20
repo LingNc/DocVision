@@ -28,6 +28,12 @@
 | 11 | 看图缺上下文 | 相邻图的信息没进 ctx-down | 旧版只收纯文字块 | 升级；现收一切带文字的条目（含图片的文字化描述） | [fixed ≥8d399a5] |
 | 12 | mermaid 打回 | result=struct 反复不过 | figure.mmd 语法错（内核 mmdc 校验） | 按报错修语法；对齐 docs/luadraw 示例 | [since 1b449d8] |
 
+## 流程分诊
+
+| 症状 | 解法 |
+|---|---|
+| md 档跑了 classify 才跑 img2text（或文档把 classify 写进 md 档） | **md 档无 classify 前置**：img2text 任务内自判三态；classify 是 LaTeX 档前置（决定走 draw/style）。md 档路径=prep → gen-img2text → 三态 → assemble |
+
 ## 给贡献者
 
 - 通用解法：issue（记问题+结论）→ PR（挂 `fixes #N`，最小 diff，可复现）——维护者直接评审合并
