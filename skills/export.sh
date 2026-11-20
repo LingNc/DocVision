@@ -36,6 +36,9 @@ if [ -d "$SKILLS_DIR/docs/luadraw" ]; then
 	cp "$SKILLS_DIR/docs/luadraw/spike/README.md" "$STAGE/$PKG/docs/luadraw/spike/"
 	# runner.lua 随包（四垫片写法是预编译回退的权威参考，spike README 直接引用它；产物 tkz 留仓库）
 	cp "$SKILLS_DIR/docs/luadraw/spike/runner.lua" "$STAGE/$PKG/docs/luadraw/spike/"
+	# 独立预编译脚本随包（回退主机的手动路径，README简化用法引用它）
+	mkdir -p "$STAGE/$PKG/docs/luadraw/tools"
+	cp "$SKILLS_DIR/docs/luadraw/tools/luadraw-expand.py" "$STAGE/$PKG/docs/luadraw/tools/"
 fi
 cp -r "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$SKILLS_DIR/SKILL.md" "$STAGE/$PKG/"
 # 用户配置模板随包（激活=cp config.example.yaml config.yaml；真 config.yaml 永不入包）
