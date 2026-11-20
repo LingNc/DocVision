@@ -2612,3 +2612,7 @@ user 轮
   根因：`SplitPDF` 用 `api.PageCountFile` 取页数，而 pdfcpu 会**校验页面内容流**；这份文件的某页 `/Contents` 指向一个整数（坏文档，586 页），pdfcpu 直接拒，连"切成几份"都算不出来。mutool 读它毫无问题（`mutool info` 正常、`mutool merge` 正常切）。
   改：新增 `pageCountFile`（pdfcpu → `mutool info` → `pdfinfo` → `qpdf --show-npages` 依次探测，全不行才回传 pdfcpu 原错误并附"装 mutool / 设 `DOCVISION_PDF_SPLIT_TOOL=mutool`"的提示）；pdfcpu 切分失败且机器上有 mutool 时，就地换 mutool 重切一次，不再把流水线停下。
   验证：同一份坏文档 `pageCountFile` 返回 586 页、`mutool merge` 切 1-3 页产出 1.5 MB 正常分片；`go test ./internal/split/` 全绿（既有 11 条 split 测试）。
+[X][ ] T333. `workflow <文件>` 的最终 `.md` 一直落在源文件旁边，配置里的 `paths.finally_dir` 形同虚设。
+  根因：`runAdHocWorkflow` 把 `destDir` 定成 `filepath.Dir(abs)`（目录入参则是该目录本身），临时模式里 `cfg.Paths.FinallyDir` 又被改写成 `<job>/finally`，配置项从没参与交付；于是多轮跑下来最终 md 堆在输入目录里，`finally_dir` 那个目录反而是空的。
+  改：新增 `workflowDestDir(configuredFinally, srcDir)`——配置了 `paths.finally_dir` 就按当前工作目录解析成绝对路径后用（下面会 chdir 进 job，晚解析就指错），没配才退回源文件旁；交付前 `MkdirAll`。
+  验证：`TestWorkflowDestDir`（未配置回落源目录、相对路径按工作目录解析、绝对路径原样用）；`go test ./cmd/docvision/` 全绿。

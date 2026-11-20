@@ -187,7 +187,7 @@ func newWorkflowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workflow [path]",
 		Short: "运行完整工作流或单个步骤",
-		Long:  "串联 PDF/DOCX 分割、MinerU API、文件整理、图片转文本、日志分析等步骤。\n使用 --step 指定单个步骤。\n给定可选 path（PDF/DOCX 文件或目录）时进入临时模式：中间文件保存在 ~/.docvision/jobs/，仅把最终 .md 输出到源文件所在目录。",
+		Long:  "串联 PDF/DOCX 分割、MinerU API、文件整理、图片转文本、日志分析等步骤。\n使用 --step 指定单个步骤。\n给定可选 path（PDF/DOCX 文件或目录）时进入临时模式：中间文件保存在 ~/.docvision/jobs/，最终 .md 输出到配置的 `paths.finally_dir`（未配置时才落在源文件所在目录）。",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfigWithFlag(cmd)

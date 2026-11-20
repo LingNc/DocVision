@@ -5,6 +5,7 @@
 
 ```
 docvision workflow    运行完整流水线，或 --step 指定单步（split|mineru|organize|img2text|analyze）
+                      给 path 时进临时模式：中间文件在 ~/.docvision/jobs/，最终 .md 按 paths.finally_dir 交付（未配才落在源文件旁，T333）
 docvision split       分割 PDF/DOCX（单文件或 --all 目录模式）
 docvision mineru      调用 MinerU API 解析文件
 docvision organize    整理解析结果

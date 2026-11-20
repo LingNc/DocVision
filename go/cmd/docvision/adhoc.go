@@ -71,6 +71,19 @@ func runAdHocWorkflow(cmd *cobra.Command, cfg *config.Config, target string) err
 		}
 	}
 	fmt.Printf("工作目录: %s\n", job)
+	// T333：交付目录 = 配置里的 paths.finally_dir（按当前工作目录解析成绝对
+	// 路径——下面会 chdir 进 job 目录，之后相对路径就指错了）；没配才退回
+	// "源文件旁边"这个老行为。以前无论怎么配都只往源文件旁写，于是最终 md
+	// 堆在输入目录里，而 finally_dir 那个目录反而一直空着。
+	deliverDir, err := workflowDestDir(cfg.Paths.FinallyDir, destDir)
+	if err != nil {
+		return err
+	}
+	destDir = deliverDir
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return fmt.Errorf("创建交付目录 %s 失败: %w", destDir, err)
+	}
+
 	fmt.Printf("输入文件: %d 个\n", len(inputs))
 	cfg.Paths.InputDir = filepath.Join(job, "files")
 	cfg.Paths.SplitDir = filepath.Join(job, "split_files")
@@ -114,6 +127,20 @@ func runAdHocWorkflow(cmd *cobra.Command, cfg *config.Config, target string) err
 		fmt.Printf("输出: %s\n", dst)
 	}
 	return nil
+}
+
+// workflowDestDir 决定 workflow 的最终 .md 落在哪儿：配置了
+// paths.finally_dir 就用它（相对路径按当前工作目录解析），否则用源文件
+// 所在目录（老行为，保持兼容）。
+func workflowDestDir(configuredFinally, srcDir string) (string, error) {
+	if d := strings.TrimSpace(configuredFinally); d != "" {
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			return "", fmt.Errorf("resolve paths.finally_dir %q: %w", d, err)
+		}
+		return abs, nil
+	}
+	return srcDir, nil
 }
 
 func copyFile(dst, src string) error {
