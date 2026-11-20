@@ -41,6 +41,17 @@ if [ -d "$SKILLS_DIR/docs/luadraw" ]; then
 	cp "$SKILLS_DIR/docs/luadraw/tools/luadraw-expand.py" "$STAGE/$PKG/docs/luadraw/tools/"
 fi
 cp -r "$SKILLS_DIR/agent" "$SKILLS_DIR/kernel" "$SKILLS_DIR/README.md" "$SKILLS_DIR/PACKAGE-INFO.md" "$SKILLS_DIR/SKILL.md" "$STAGE/$PKG/"
+# 技能平台识别所需 YAML frontmatter（name/description/version——用户安装平台缺它不认技能，
+# 11-20 实装反馈）；version=git describe。仓库源文件不带（GitHub 渲染保持干净）。
+{
+	echo "---"
+	echo "name: docvision-skills"
+	echo "description: 扫描版书籍 PDF 转结构化产物的 agent 驱动流水线（md 档图片三态文字化 / LaTeX 档矢量书；内核 dvagent 程序强制判据）"
+	echo "version: $VERSION"
+	echo "---"
+	echo ""
+	cat "$SKILLS_DIR/SKILL.md"
+} > "$STAGE/$PKG/SKILL.md"
 # 用户配置模板随包（激活=cp config.example.yaml config.yaml；真 config.yaml 永不入包）
 cp "$SKILLS_DIR/config.example.yaml" "$STAGE/$PKG/config.example.yaml"
 # 用户档案模板随包（空值示例；真实 profile.env 永不入包，见 docs/06）
