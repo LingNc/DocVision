@@ -2608,3 +2608,7 @@ user 轮
   根因：T330 虽已单遍同源，但页界仍由 img2text 拿 content_list 锚点做行对齐（模糊包含匹配）；组织阶段本来就有 MinerU 的 `layout.json`（逐页 `para_blocks`），却没用来定页界。
   改：`organize` 合并 md 时按 layout.json 的逐页首块算出「每页从合并后 md 第几行开始」，落盘 `<md>.pages.json`（正文一字节不动，latex 线零影响）；img2text 优先直接展开这份索引（过期索引按行数判废），没有 sidecar 的老数据才退回对齐。
   验证：`TestWritePageIndex`（跨部件全局页号、行号与真实拼接一致、无 layout 也照写 sidecar）、`TestPlanFromPageIndex`（展开为每行页码、缺页补齐、过期索引被忽略）；真实数据 244 页落点 219 页、页号单调无回退（覆盖率 89.8%，没落点的页由连续表补齐）。
+[X][ ] T332. `split` 阶段报 `读取 PDF 失败: validatePageContents: page content must be stream dict or array, got: types.Integer`，一条坏文档把整条流水线停下。
+  根因：`SplitPDF` 用 `api.PageCountFile` 取页数，而 pdfcpu 会**校验页面内容流**；这份文件的某页 `/Contents` 指向一个整数（坏文档，586 页），pdfcpu 直接拒，连"切成几份"都算不出来。mutool 读它毫无问题（`mutool info` 正常、`mutool merge` 正常切）。
+  改：新增 `pageCountFile`（pdfcpu → `mutool info` → `pdfinfo` → `qpdf --show-npages` 依次探测，全不行才回传 pdfcpu 原错误并附"装 mutool / 设 `DOCVISION_PDF_SPLIT_TOOL=mutool`"的提示）；pdfcpu 切分失败且机器上有 mutool 时，就地换 mutool 重切一次，不再把流水线停下。
+  验证：同一份坏文档 `pageCountFile` 返回 586 页、`mutool merge` 切 1-3 页产出 1.5 MB 正常分片；`go test ./internal/split/` 全绿（既有 11 条 split 测试）。

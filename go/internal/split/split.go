@@ -151,7 +151,10 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 		}
 	}
 
-	totalPages, err := api.PageCountFile(pdfPath)
+	// T332：页数读取要宽容——pdfcpu 会校验页面内容流，坏文档（比如
+	// `/Contents` 是整数）直接读不了，而 mutool/pdfinfo/qpdf 读它没问题。
+	// 这里换用 pageCountFile 的多后端探测，拿不到页数才真失败。
+	totalPages, err := pageCountFile(pdfPath)
 	if err != nil {
 		return fmt.Errorf("读取 PDF 失败: %w", err)
 	}
@@ -190,6 +193,12 @@ func SplitPDF(pdfPath string, maxPages int, maxSizeMB float64, outputDir string,
 	fmt.Printf("[信息] %s: 一次切分（%s，每份 ≤ %d 页%s）\n", displayName, tool.name, span, sizeLimitText(maxSizeMB))
 
 	pieces, err := tool.splitIntoSpans(pdfPath, scratch, span, totalPages)
+	if err != nil && tool.name == "pdfcpu" && hasMutool() {
+		// pdfcpu 对这种坏文档同样会拒，能落到 mutool 就别把整条流水线停下。
+		fmt.Printf("[信息] %s: pdfcpu 切分失败（%v），改用 mutool 重试\n", displayName, err)
+		tool = pdfTool{name: "mutool"}
+		pieces, err = tool.splitIntoSpans(pdfPath, scratch, span, totalPages)
+	}
 	if err != nil {
 		return fmt.Errorf("切分失败: %w", err)
 	}

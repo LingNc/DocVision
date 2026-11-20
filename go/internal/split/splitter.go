@@ -188,3 +188,58 @@ func sizeLimitText(maxSizeMB float64) string {
 	}
 	return fmt.Sprintf("，每份 ≤ %.0fMB", maxSizeMB)
 }
+
+// mutoolPagesRe / pdfinfoPagesRe / qpdfPagesRe extract a page count from the
+// third-party tools that tolerate PDFs our own parser refuses.
+var (
+	mutoolPagesRe  = regexp.MustCompile(`(?m)^\s*Pages:\s*(\d+)`)
+	pdfinfoPagesRe = regexp.MustCompile(`(?m)^Pages:\s*(\d+)`)
+)
+
+// pageCountFile returns the page count of a PDF, tolerating files pdfcpu
+// refuses to validate (T332：实跑遇到 `/Contents` 是整数这种坏文档，
+// `api.PageCountFile` 直接报 `validatePageContents: page content must be
+// stream dict or array`，整条 split 就此失败，而 mutool 之类的外部分析器
+// 读这种文件毫无问题)。
+//
+// 顺序：pdfcpu（最快、无外部依赖）→ mutool info → pdfinfo → qpdf
+// --show-npages。全都不行才返回 pdfcpu 的原错误（附一行怎么绕过）。
+func pageCountFile(path string) (int, error) {
+	n, err := api.PageCountFile(path)
+	if err == nil && n > 0 {
+		return n, nil
+	}
+	firstErr := err
+	for _, probe := range []struct {
+		bin  string
+		args []string
+		re   *regexp.Regexp
+	}{
+		{"mutool", []string{"info", path}, mutoolPagesRe},
+		{"pdfinfo", []string{path}, pdfinfoPagesRe},
+		{"qpdf", []string{"--show-npages", path}, regexp.MustCompile(`(?m)^\s*(\d+)\s*$`)},
+	} {
+		if _, lookErr := exec.LookPath(probe.bin); lookErr != nil {
+			continue
+		}
+		out, cmdErr := exec.Command(probe.bin, probe.args...).Output()
+		if cmdErr != nil {
+			continue
+		}
+		if m := probe.re.FindSubmatch(out); m != nil {
+			if n, convErr := strconv.Atoi(strings.TrimSpace(string(m[1]))); convErr == nil && n > 0 {
+				return n, nil
+			}
+		}
+	}
+	if firstErr == nil {
+		firstErr = fmt.Errorf("页数为 0")
+	}
+	return 0, fmt.Errorf("%w（该 PDF 的页面内容流不合法，装 mutool 或设 DOCVISION_PDF_SPLIT_TOOL=mutool 可绕过）", firstErr)
+}
+
+// hasMutool reports whether the mutool binary is on PATH.
+func hasMutool() bool {
+	_, err := exec.LookPath("mutool")
+	return err == nil
+}

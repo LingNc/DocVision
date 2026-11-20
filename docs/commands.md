@@ -22,7 +22,7 @@ docvision uninstall   从系统路径移除已安装的 docvision
 
 ## 切分缓存（split manifest）
 
-`split` 会在 `split_files/` 里为每个源文件写一份 `<源文件名>_split_manifest.json`，记录源文件大小/修改时间、切分参数（页数/大小上限）与每个分片的文件名、页码区间、字节数；下次运行只要这些全部对得上就直接跳过昂贵的解析与切分，输出 `[跳过] <文件>: 命中 split manifest (N 个部分)，跳过 pdfcpu 解析`。DOCX 同理，另有一种 `mode=passthrough` 的 manifest 记录"页数够小、无需 LibreOffice 转换"。任何一处对不上（源文件改了、分片缺失或大小不符、参数变了、manifest 损坏）都按缓存未命中原样重切，不会用陈旧结果；源文件被切分并归档进 `done/` 后，manifest 仍留在 `split_files/`。
+页数读取是宽容的：pdfcpu 校验不通过（页面内容流不合法）时依次退到 `mutool info`/`pdfinfo`/`qpdf --show-npages`，切分同理——pdfcpu 失败而机器上有 `mutool` 时就地换它重切（T332）。`split` 会在 `split_files/` 里为每个源文件写一份 `<源文件名>_split_manifest.json`，记录源文件大小/修改时间、切分参数（页数/大小上限）与每个分片的文件名、页码区间、字节数；下次运行只要这些全部对得上就直接跳过昂贵的解析与切分，输出 `[跳过] <文件>: 命中 split manifest (N 个部分)，跳过 pdfcpu 解析`。DOCX 同理，另有一种 `mode=passthrough` 的 manifest 记录"页数够小、无需 LibreOffice 转换"。任何一处对不上（源文件改了、分片缺失或大小不符、参数变了、manifest 损坏）都按缓存未命中原样重切，不会用陈旧结果；源文件被切分并归档进 `done/` 后，manifest 仍留在 `split_files/`。
 
 切分本身现在分两步：先按 `mineru.max_pages_per_part` 把整本**一次读入**切成若干份（有 `mutool` 就用 `mutool merge`，每份一次调用；没有就用 pdfcpu 的 `SplitFile` 一次切开），再把超过 `mineru.max_size_mb` 的分片**在它自己身上**对半再切，直到装得下或只剩一页。旧实现是对源文件反复 `TrimFile` 做二分探测（每个分片要十几遍全量解析），一万两千页、两百兆的册子跑半小时连一个分片都写不出来；同一份文件现在 58 秒切完 7 份。日志里那行 `[信息] … 一次切分（mutool，每份 ≤ 2000 页，每份 ≤ 200MB）` 就是这次用的后端；`DOCVISION_PDF_SPLIT_TOOL=mutool|pdfcpu` 可强制指定后端（排查用）。
 
