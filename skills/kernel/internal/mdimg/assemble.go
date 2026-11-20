@@ -100,6 +100,12 @@ func Assemble(md string, repls []Replacement) string {
 	return out
 }
 
+// embedShift 记录一行被删除/替换的字节位移（SK-I22 后仅去水印删除用；返回供调用方审计）。
+type embedShift struct {
+	start int // 原文行起始字节偏移
+	delta int // 该行字节数变化
+}
+
 // pageCommentRe 匹配 organize 的页界注释 <!-- pN -->（SK-I22：页码地面真值，输出原位转 [P. N]）。
 var pageCommentRe = regexp.MustCompile(`^\s*<!--\s*p(\d+)\s*-->\s*$`)
 
@@ -171,22 +177,3 @@ func devMermaidFence(body string) string {
 	return "```mermaid\n" + body + "\n```"
 }
 
-func LineStarts(md string) ([]string, []int) {
-	lines := strings.Split(md, "\n")
-	starts := make([]int, len(lines))
-	offset := 0
-	for i, ln := range lines {
-		starts[i] = offset
-		offset += len(ln) + 1
-	}
-	return lines, starts
-}
-
-// imageRefRef 取行内第一个图片引用的路径（无则空串）。
-func imageRefRef(ln string) string {
-	m := imageRefRe.FindStringSubmatch(ln)
-	if len(m) < 2 {
-		return ""
-	}
-	return strings.TrimSpace(m[1])
-}
