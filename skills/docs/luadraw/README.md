@@ -59,6 +59,14 @@ luadraw 是**纯 LuaLaTeX 包**。内核已支持按章探测：章内任何 .te
 - `ld.graph`（非 graph2d）；`cpx.Z`；`Daxes/Dgrid` 的 `#d` 定长表校验静默不画
 - luadraw 章 preamble 需 6 组 TikZ 库：patterns, patterns.meta, plotmarks, arrows.meta, bending, decorations.markings, backgrounds
 
+## 最小化测试约定（2026-11-20 用户定调）
+
+**按机器实际情况，走能跑通的最小路径，不双跑**：
+- 本机有 lualatex → 只用主路径（直编），**不要再测独立预编译路径**
+- 本机无 lualatex 有 lua → 只测预编译回退（展开→正常引擎编译）
+- 两条都有的机器也任选其一验证即可，两条全跑是浪费不是严谨
+- CI 矩阵除外（那本来就是测多环境的）。问题定位时按报错信息选路径，具体情况具体分析
+
 ## 检索（给 AI 的精确导航）
 
 ```bash
