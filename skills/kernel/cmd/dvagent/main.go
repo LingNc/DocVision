@@ -230,7 +230,15 @@ func runCtx(root, taskID string, upN, downN int) (map[string]any, error) {
 	if !found {
 		return nil, fmt.Errorf("entry_seq=%d 在 doc_index 里不是图片条目", seq)
 	}
-	sha := strings.TrimPrefix(tk.ID, "img2txt_")
+	// 图像标识：优先取铺任务时写入的 Accept["img"]（doc_index 图像条目引用），
+	// 任务 ID 是 seq 命名（img2txt_49）不能当 sha 用——真数据实测的坑。
+	sha := ""
+	if imgRef, ok := tk.Accept["img"].(string); ok && imgRef != "" {
+		sha = strings.TrimSuffix(filepath.Base(imgRef), filepath.Ext(imgRef))
+	}
+	if sha == "" {
+		sha = strings.TrimPrefix(tk.ID, "img2txt_")
+	}
 	imgMatches, _ := filepath.Glob(filepath.Join(root, "mineru", "*", "images", sha+".*"))
 	if len(imgMatches) == 0 {
 		return nil, fmt.Errorf("找不到图像文件: %s（mineru/*/images/%s.*）", sha, sha)
