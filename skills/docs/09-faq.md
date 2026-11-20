@@ -46,6 +46,13 @@
 |---|---|
 | img2text-assemble 的 summary 里 bare_links>0 | 有图未过三态或被判了非法 keep（SK-I21 后 keep 仅限水印）——回炉补齐该图的三态产物，bare_links 必须为 0 才能交付（老线契约：终态 md 零裸图链接） |
 
+## luadraw 静默坑（11-20 实跑沉淀，通用非本地）
+
+| 症状 | 解法 |
+|---|---|
+| luadraw 出空图（125B clip 壳）或缺网格/坐标轴 | Dgrid/Daxes/Dcartesian 是**位置参数**（`Dgrid({Z,Z},{opts})`、`Daxes({A,xpas,ypas},{opts})`），命名表参数被 #d 定长校验**静默丢弃**——症状是"编译过但没内容"，断言要验内容不验形式 |
+| 3D 轴名（xlegend）在 standalone 预编译后不渲染 | 刻度数值用 xlabels={…}（参与算术），轴名用 **Dlabel3d 显式标注**绕坑；xlegend 静默问题待上游 |
+
 ## 给贡献者
 
 - 通用解法：issue（记问题+结论）→ PR（挂 `fixes #N`，最小 diff，可复现）——维护者直接评审合并
