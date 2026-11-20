@@ -53,4 +53,5 @@
 - [x] SK-I20. 账本防伪戳（用户 11-20 "手造队列严令禁止"）：Queue.KernelStamp=dvqueue/v1，Save 盖戳/Load 验戳（有任务无戳=手造，拒载并指回禁令）；queue-stamp <项目> 迁移旧版无戳队列；Save/Stamp 加 FUSE root 属主文件 rm+重建回退。验证：3 队列测试 + daoshu 全链路（拒载→stamp→claim 领任务）。
 - [x] SK-I21. keep 态收窄为仅水印（用户 11-20，老线 dev 分支 embedBlockForRef 原文核实）：终态 md 无裸图链接——非水印图必须 text（[IMG_TYPE:] 描述）或 mermaid；原 keep 场景改 text+描述（对应老线 `[Image]( 描述 · P.N )`）。schema 硬闸 + 手册/提示词同步 + assemble 输出 bare_links 指标。
 - [x] SK-I22. md 档输出对齐老线 dev 契约 + 页码单一系统（用户 11-20：dev 的 [Image]( body · P.N ) 锚格式 + 两套页码共存冲突）——organize 的 <!-- pN -->（content_list 全页枚举）为地面真值，AssembleWithShifts 原位转 [P. N]（格式我们的，编号修复缺页漂移）；pagemark 模糊对齐那套退出生成路径（弃）；嵌入三形态照 dev embedBlockForRef：text 类纯 body/其余 [Image]( body · P.N )/mermaid=[Image]( alt · P.N )+围栏；测试 21 包 0 FAIL（新增 dev 三形态用例）。
+- [x] SK-I23. style 模板目录未进沙箱编译搜索路径（对方会话 11-20 在装有 TeX 的机器实跑暴露：TestStyleTemplateEnforcement 失败，draw 章编译报 File 'draw-style' not found——无 TeX 机器因跳过编译而假绿）。修：texcheck.CompileEngineEnv 附加 env，defaultCompile 传 TEXINPUTS=<project>/style（前置合并且保留默认路径）。
 

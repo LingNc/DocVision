@@ -186,7 +186,9 @@ func (c *Checker) defaultCompile(t *task.Task, projectRoot string) []string {
 		}
 		return []string{"luadraw 引擎决策失败: " + derr.Error()}
 	}
-	if _, err := texcheck.CompileEngine(outDir, main, engine); err != nil {
+	// SK-I23：style/ 模板目录进 TEXINPUTS——否则沙箱内 \input{draw-style} 编译找不到文件	（对方会话装 TeX 机器实跑暴露：File 'draw-style' not found）。
+	env := map[string]string{"TEXINPUTS": filepath.Join(c.ProjectRoot, "style")}
+	if _, err := texcheck.CompileEngineEnv(outDir, main, engine, env); err != nil {
 		if strings.Contains(err.Error(), "不可用") {
 			return nil // 缺工具跳过（与覆盖率同款哲学）
 		}

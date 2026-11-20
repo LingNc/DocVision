@@ -50,6 +50,12 @@
 
 | 症状 | 解法 |
 |---|---|
+| 装了 TeX 的机器跑测试/编译报 `File 'draw-style' not found` | SK-I23 已修：style/ 自动进 TEXINPUTS（无 TeX 机器因跳过编译曾假绿——装 TeX 的机器才是真验收环境） |
+
+## luadraw 静默坑（11-20 实跑沉淀，通用非本地）
+
+| 症状 | 解法 |
+|---|---|
 | luadraw 出空图（125B clip 壳）或缺网格/坐标轴 | Dgrid/Daxes/Dcartesian 是**位置参数**（`Dgrid({Z,Z},{opts})`、`Daxes({A,xpas,ypas},{opts})`），命名表参数被 #d 定长校验**静默丢弃**——症状是"编译过但没内容"，断言要验内容不验形式 |
 | 3D 轴名（xlegend）在 standalone 预编译后不渲染 | 刻度数值用 xlabels={…}（参与算术），轴名用 **Dlabel3d 显式标注**绕坑；xlegend 静默问题待上游 |
 

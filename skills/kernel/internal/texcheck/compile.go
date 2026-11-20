@@ -20,6 +20,14 @@ func Compile(outDir, mainFile string) (string, error) {
 // CompileEngine 指定引擎编译；engine="" 走默认回退链。
 // lualatex 只按需强制（luadraw 图所在章），不含 luadraw 的章不强制——用户要求按需用引擎。
 func CompileEngine(outDir, mainFile, engine string) (string, error) {
+	return CompileEngineEnv(outDir, mainFile, engine, nil)
+}
+
+// CompileEngineEnv 同 CompileEngine，附加环境变量（如 TEXINPUTS 让沙箱编译找到
+// 项目级 style/ 模板——SK-I13 强制引用 draw-style 后，不把模板目录加进搜索路径会
+// 编译报 File 'draw-style' not found；11-20 对方会话在装有 TeX 的机器实跑暴露）。
+// env 的 TEXINPUTS 值会与现存 TEXINPUTS 前置合并（保留默认搜索路径）。
+func CompileEngineEnv(outDir, mainFile, engine string, env map[string]string) (string, error) {
 	if engine == "" {
 		engine = "pdflatex"
 		if _, err := exec.LookPath(engine); err != nil {
@@ -46,6 +54,20 @@ func CompileEngine(outDir, mainFile, engine string) (string, error) {
 			cmd = exec.Command(engine, "-interaction=nonstopmode", "-halt-on-error", mainFile)
 		}
 		cmd.Dir = outDir
+		if len(env) > 0 {
+			cmd.Env = os.Environ()
+			for k, v := range env {
+				if k == "TEXINPUTS" {
+					// 前置合并：新路径优先，尾冒号保留默认搜索路径
+					if old := os.Getenv("TEXINPUTS"); old != "" {
+						v = v + ":" + old
+					} else {
+						v = v + ":"
+					}
+				}
+				cmd.Env = append(cmd.Env, k+"="+v)
+			}
+		}
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("%s 失败: %v\n%.800s", engine, err, out)
 		}
