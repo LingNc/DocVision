@@ -7,6 +7,7 @@
 ### Changed
 - **3D 与平面绘图要能用现代工具链了（P81，设计稿，未实现）**：以前作图会话只准写 TikZ，3D 关系、函数曲面这类要么被压成平面示意图，要么模型硬用 `tikz-3dplot` 现学。计划首选 **luadraw**（LuaLaTeX 下的 Lua 绘图环境，二三维都做，画出来仍是 TikZ，可自动存图），`tikz-3dplot`、`pgfplots` 3D 作为可选后端。要动的地方已勘明：引擎 `latex.compile.engine` 是**整本**单例（换 luadraw 就得全书 LuaLaTeX）、`buildStandalone` 现在只在 xe 时补 `ctex`（lualatex 下中文图会掉 CJK）、围栏声明的宏包本来就会被 `figurepkgs.go` 前置检查点名（luadraw 走这条既有通路，判据层零改动）。另加两道闸：`allow_lua` 默认关、`\directlua` 静态 lint 禁 `io`/`os`/`require`（编译期 Lua 够得着文件系统，`-no-shell-escape` 拦不住）。设计稿 `docs/plan-report/p81-luadraw-3d.md`。
 ### Fixed
+- **页界在组织阶段就钉死，img2text 不再反推（T331）**：`organize` 合并 md 时用 MinerU 的 `layout.json`（逐页 `para_blocks`）算出「每页从第几行开始」，落盘成 `<书>.pages.json`；img2text 直接展开这份索引（行数对不上就当过期忽略），老数据没有索引才退回原来的对齐。md 正文一个字节都不动（不往正文里塞注释），所以 `latex` 那条线读到的内容与以前完全一致；页号仍是跨部件的全局 1-based 页。真实数据上 244 页有 219 页直接落点、页号单调无回退，其余页由"页号连续"补齐。
 - **页码定位不再漂移、也不再缺页，默认重新开启（T330）**：老的页码标记按「md 行号 + 行偏移」推断位置，改写一旦发生就得把偏移平移回去，而标记只在页码**上升**时才打，中间对不上任何文本锚的空白页/整页图页就被整个跳过（实跑抓到缺 `P.4`）。现在改成**一遍行级扫描**：对齐 `*_content_list.json` 得到每行的真实页码后，标记与图片锚读**同一个** `curPage`，改写一行不可能移动后面的标记；页从 P.1 起连续覆盖到总页数，跳过的页全部补齐，页码抖动时不重复不回退；自检多报一项「缺页」。`img2text.page_marks` 保持默认 `true`。
 - **超大 PDF 的切分不再卡死（T328）**：`split` 阶段以前对每个分片都要对**源文件**做十余次 `TrimFile` 体积探测（每次都是全量解析），一万两千页、两百兆的册子跑了半小时连一个分片都写不出来。现在整本**一次读入**按页数切成若干份（有 `mutool` 用 `mutool merge`、没有就用 pdfcpu 的 `SplitFile` 一次切开），超体积的分片**在它自己身上**对半再切，因此每份只付一次读入代价；同一份文件 58 秒切完 7 份。日志会打出后端与用时（`一次切分（mutool，每份 ≤ 2000 页…）`），`DOCVISION_PDF_SPLIT_TOOL=mutool|pdfcpu` 可强制后端排查。
 ### Added

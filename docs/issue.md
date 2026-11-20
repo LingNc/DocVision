@@ -2604,3 +2604,7 @@ user 轮
   根因：老算法按「md 行号 + 行偏移」把图钉在改写后的行上，靠字节 delta 把标记平移回去；标记只在页码**上升**时打，中间对不上任何文本锚的空白页/整页图页被整段跳过（实跑抓到缺 P.4），锚点页码与标记各走一遍推导。
   改：Final pass 改成**一遍行级扫描**（`rewriteFinal`）：先对齐 `*_content_list.json` 得到每行的真实页码，再按行输出——标记按 `pageMarkCoverage` 从 P.1 连续补齐到该行页码（跳过的页全补），图片锚与标记共用同一个 `curPage`；围栏内的标记顺延到围栏后；删掉 `embedShift`/`insertPageMarks` 那套偏移平移；审计多报「缺页」。
   验证：`TestPageMarkCoverage`（页 1→4 补齐 2、3；非递增不重复）、`TestRewriteFinalCoverageFillsBlankPages`（缺页回归，审计 Missing=0）、`TestRewriteFinalFenceDeferral`、`TestRewriteFinalEndToEnd`（链接行 + 锚 + 标记同源）、`TestPlanPageMarksWithoutMinerU`；`go test ./internal/img2text/` 全绿。
+[X][ ] T331. 页界要在"最早拿到逐页结构"的地方钉死，别让 img2text 反推。
+  根因：T330 虽已单遍同源，但页界仍由 img2text 拿 content_list 锚点做行对齐（模糊包含匹配）；组织阶段本来就有 MinerU 的 `layout.json`（逐页 `para_blocks`），却没用来定页界。
+  改：`organize` 合并 md 时按 layout.json 的逐页首块算出「每页从合并后 md 第几行开始」，落盘 `<md>.pages.json`（正文一字节不动，latex 线零影响）；img2text 优先直接展开这份索引（过期索引按行数判废），没有 sidecar 的老数据才退回对齐。
+  验证：`TestWritePageIndex`（跨部件全局页号、行号与真实拼接一致、无 layout 也照写 sidecar）、`TestPlanFromPageIndex`（展开为每行页码、缺页补齐、过期索引被忽略）；真实数据 244 页落点 219 页、页号单调无回退（覆盖率 89.8%，没落点的页由连续表补齐）。

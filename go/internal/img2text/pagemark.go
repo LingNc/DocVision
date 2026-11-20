@@ -379,18 +379,73 @@ func pageMarkText(page int) string {
 
 // pageMarkPlan is the per-md alignment result for one Final-pass rewrite.
 type pageMarkPlan struct {
-	anchors   []pageAnchor
-	linePages []int // per original md line, 0 = unknown
+	anchors   []pageAnchor // 对齐路径的锚点（sidecar 路径为空）
+	linePages []int        // per original md line, 0 = unknown
+	maxPage   int          // 总页数（sidecar 给的，用于自检）
 }
 
-// planPageMarks builds the alignment for one md (nil = no mineru output,
-// caller skips silently).
-func planPageMarks(mineruOutput, mdName string, lines []string) *pageMarkPlan {
+// planPageMarks builds the page table for one md. T331：organize 在合并 md
+// 时已经用 layout.json 把页界钉成了 `<md>.pages.json`（每页起始行），有这份
+// sidecar 就**直接消费**、一页都不用推；老数据（升级前的 md）没有 sidecar，
+// 才退回按 content_list 对齐。nil = 两者都没有，调用方静默跳过。
+func planPageMarks(mineruOutput, outputDir, mdName string, lines []string) *pageMarkPlan {
+	if p := planFromPageIndex(outputDir, mdName, lines); p != nil {
+		return p
+	}
 	anchors := pageAnchors(mineruOutput, mdName)
 	if anchors == nil {
 		return nil
 	}
 	return &pageMarkPlan{anchors: anchors, linePages: alignPages(lines, anchors)}
+}
+
+// pageIndexFile mirrors the sidecar organize writes (`<md>.pages.json`) —
+// kept as a small local struct so img2text does not import organize.
+type pageIndexFile struct {
+	Version int `json:"version"`
+	Lines   int `json:"lines"`
+	Pages   []struct {
+		Page int `json:"page"`
+		Line int `json:"line"`
+	} `json:"pages"`
+}
+
+// planFromPageIndex expands the sidecar into a per-line page table: page N
+// owns every line from its start until the next page's start. A stale index
+// (merged md's line count changed) is ignored, and lines before the first
+// page start stay unknown.
+func planFromPageIndex(outputDir, mdName string, lines []string) *pageMarkPlan {
+	if outputDir == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(outputDir, strings.TrimSuffix(mdName, ".md")+".pages.json"))
+	if err != nil {
+		return nil
+	}
+	var idx pageIndexFile
+	if err := json.Unmarshal(raw, &idx); err != nil {
+		return nil
+	}
+	if idx.Version != 1 || idx.Lines != len(lines) || len(idx.Pages) == 0 {
+		return nil // 过期或空索引：当作没有，退回对齐
+	}
+	table := make([]int, len(lines))
+	maxPage := 0
+	next := 0
+	cur := 0
+	for i := range table {
+		for next < len(idx.Pages) && idx.Pages[next].Line <= i {
+			cur = idx.Pages[next].Page
+			next++
+		}
+		table[i] = cur
+	}
+	for _, p := range idx.Pages {
+		if p.Page > maxPage {
+			maxPage = p.Page
+		}
+	}
+	return &pageMarkPlan{linePages: table, maxPage: maxPage}
 }
 
 // pageMarkAudit is the runtime self-check printed next to the mark count:
@@ -413,6 +468,9 @@ func (p *pageMarkPlan) audit(marks []pageMark) pageMarkAudit {
 		if x.page > a.MaxPage {
 			a.MaxPage = x.page
 		}
+	}
+	if p.maxPage > a.MaxPage {
+		a.MaxPage = p.maxPage
 	}
 	for _, m := range marks {
 		if m.page > a.MaxPage {

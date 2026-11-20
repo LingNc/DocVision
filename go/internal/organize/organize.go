@@ -234,13 +234,17 @@ func step2MergeParts(groups map[string][]string, mineruOutput, outputDir string)
 			if err != nil {
 				return fmt.Errorf("读取指纹 %s 失败: %w", fpFile, err)
 			}
-			if string(stored) == srcFingerprint {
+			// T331：md 与指纹都对得上、但页界索引还没算过（升级前的老数据）
+			// 时不算命中——补算一次索引再走。
+			if string(stored) == srcFingerprint && util.FileExists(pageIndexPath(outputDir, subject)) {
 				skipCount++
 				continue
 			}
 		}
 
 		var content string
+		// T331：合并时一并收集每个部件的 md 文本与目录，供页界索引使用。
+		var partTexts []partText
 		if len(parts) == 0 {
 			// Single-file (non-split) subject: copy the temp file as-is.
 			src := filepath.Join(outputDir, "temp", subject+".md")
@@ -252,6 +256,7 @@ func step2MergeParts(groups map[string][]string, mineruOutput, outputDir string)
 				return fmt.Errorf("读取 %s 失败: %w", src, err)
 			}
 			content = string(data)
+			partTexts = append(partTexts, partText{dir: subject, text: content})
 			fmt.Printf("  %s.md (单文件)\n", subject)
 		} else {
 			// Sort parts numerically.
@@ -271,6 +276,7 @@ func step2MergeParts(groups map[string][]string, mineruOutput, outputDir string)
 					return fmt.Errorf("读取 %s 失败: %w", src, err)
 				}
 				content = string(data)
+				partTexts = append(partTexts, partText{dir: subject + "_" + parts[0], text: content})
 				fmt.Printf("  %s.md (单分片)\n", subject)
 			} else {
 				fmt.Printf("  合并: %s (parts %v)\n", subject, parts)
@@ -288,6 +294,7 @@ func step2MergeParts(groups map[string][]string, mineruOutput, outputDir string)
 					text := strings.TrimRight(string(data), "\r\n\t ")
 					if text != "" {
 						contents = append(contents, text)
+						partTexts = append(partTexts, partText{dir: subject + "_" + p, text: text})
 					}
 				}
 				content = strings.Join(contents, mdSeparator)
@@ -299,6 +306,12 @@ func step2MergeParts(groups map[string][]string, mineruOutput, outputDir string)
 		}
 		if err := os.WriteFile(fpFile, []byte(srcFingerprint), 0o644); err != nil {
 			return fmt.Errorf("写入指纹 %s 失败: %w", fpFile, err)
+		}
+		// T331：页界索引（`<subject>.pages.json`）。md 正文不动，只把
+		// 「每页从第几行开始」按 layout.json 的逐页块结构算出来落盘。
+		if err := writePageIndex(mineruOutput, outputDir, subject, partTexts, mdSeparator,
+			strings.Count(content, "\n")+1); err != nil {
+			return fmt.Errorf("写入页界索引 %s 失败: %w", subject, err)
 		}
 		// Every subject whose merged/standalone Markdown is actually
 		// written to outputDir counts as one "merge" for the summary,

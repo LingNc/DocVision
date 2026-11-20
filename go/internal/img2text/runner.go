@@ -350,7 +350,7 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		hadFile := existingErr == nil
 		// P21 页码标记：对齐在原始 md（entry.content，图片引用还在）上做，
 		// mineru_output 没有对应产物时 plan 为 nil、静默跳过。
-		plan := planPageMarks(cfg.Paths.MineruOutput, name, entry.lines)
+		plan := planPageMarks(cfg.Paths.MineruOutput, outputDir, name, entry.lines)
 		if !pageMarks {
 			plan = nil
 		} else if hadFile && !rewriteMarks {

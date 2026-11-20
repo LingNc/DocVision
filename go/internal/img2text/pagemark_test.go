@@ -141,7 +141,7 @@ func TestRewriteFinalFenceDeferral(t *testing.T) {
 		"第二章 实验结果",                  // page 3
 	}
 	e := newTestEntry(lines)
-	plan := planPageMarks(root, "书.md", lines)
+	plan := planPageMarks(root, "", "书.md", lines)
 	got, marks := rewriteFinal(e, nil, plan)
 	want := "[P. 1]\n# 第一章 概述\n```python\nx = \"第二节 方法细节\"\n```\n[P. 2]\n![图](images/书/aaa111.jpg)\n[P. 3]\n第二章 实验结果"
 	if got != want {
@@ -168,7 +168,7 @@ func TestRewriteFinalEndToEnd(t *testing.T) {
 		"第二章 实验结果",
 	}
 	e := newTestEntry(lines)
-	plan := planPageMarks(root, "书.md", lines)
+	plan := planPageMarks(root, "", "书.md", lines)
 	if plan == nil {
 		t.Fatal("plan must not be nil with mineru output present")
 	}
@@ -220,7 +220,7 @@ func TestRewriteFinalCoverageFillsBlankPages(t *testing.T) {
 // TestPlanPageMarksWithoutMinerU 钉：没有 mineru 产物时 plan 为 nil、
 // rewriteFinal 原样返回——老数据静默跳过，绝不报错、绝不改内容。
 func TestPlanPageMarksWithoutMinerU(t *testing.T) {
-	if plan := planPageMarks(t.TempDir(), "书.md", []string{"a"}); plan != nil {
+	if plan := planPageMarks(t.TempDir(), "", "书.md", []string{"a"}); plan != nil {
 		t.Fatalf("empty dir must give nil plan, got %+v", plan)
 	}
 	// nil plan 的 rewriteFinal 必须是安全 no-op。
@@ -260,5 +260,41 @@ func TestAlignPagesWindowBlocksTOCRunaway(t *testing.T) {
 	pg := alignPages(lines, anchors)
 	if pg[1] != 0 {
 		t.Fatalf("目录行不该匹配到远端锚点: %v", pg)
+	}
+}
+
+// TestPlanFromPageIndex 钉 T331：organize 写下的 `<md>.pages.json` 直接展开成
+// 每行页码——img2text 不再做任何对齐/反推，锚点与标记同源。
+func TestPlanFromPageIndex(t *testing.T) {
+	dir := t.TempDir()
+	lines := []string{"封面", "第一章", "", "第二节", "图", "第二章"}
+	idx := `{"version":1,"lines":6,"pages":[{"page":1,"line":0},{"page":2,"line":3},{"page":5,"line":5}]}`
+	if err := os.WriteFile(filepath.Join(dir, "书.pages.json"), []byte(idx), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := planPageMarks("", dir, "书.md", lines)
+	if p == nil {
+		t.Fatal("sidecar must be consumed")
+	}
+	want := []int{1, 1, 1, 2, 2, 5}
+	if !reflect.DeepEqual(p.linePages, want) {
+		t.Fatalf("line pages = %v, want %v", p.linePages, want)
+	}
+	e := newTestEntry(lines)
+	got, marks := rewriteFinal(e, nil, p)
+	// 页 3、4 没有任何内容对得上，也要补出来；页 5 在最后一行之前。
+	for _, wantMark := range []string{"[P. 1]", "[P. 2]", "[P. 3]", "[P. 4]", "[P. 5]"} {
+		if !strings.Contains(got, wantMark) {
+			t.Fatalf("missing %s:\n%s", wantMark, got)
+		}
+	}
+	if a := p.audit(marks); a.Missing != 0 || a.MaxPage != 5 || a.Backward != 0 {
+		t.Fatalf("audit = %+v, want contiguous 1..5", a)
+	}
+	// 过期索引（行数对不上）必须被忽略、退回对齐（这里没有 mineru 产物 → nil）。
+	stale := `{"version":1,"lines":999,"pages":[{"page":1,"line":0}]}`
+	os.WriteFile(filepath.Join(dir, "书.pages.json"), []byte(stale), 0o644)
+	if p := planPageMarks("", dir, "书.md", lines); p != nil {
+		t.Fatalf("stale index must be ignored, got %+v", p)
 	}
 }
