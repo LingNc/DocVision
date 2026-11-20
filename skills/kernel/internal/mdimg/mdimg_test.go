@@ -76,3 +76,34 @@ func TestAssembleNoBareImageLinks(t *testing.T) {
 		t.Fatalf("替换产物缺失: %q", got)
 	}
 }
+
+// SK-I22：dev 契约三形态——text 类纯 body / 其余 [Image]( body · P.N ) / mermaid 锚+代码块；
+// 页码单一系统：<!-- pN --> 原位转 [P. N]，锚后缀同源。
+func TestAssembleDevEmbedFormat(t *testing.T) {
+	md := "<!-- p1 -->\n\n前文\n\n![图1](images/a1.png)\n\n![图2](images/b2.png)\n\n![图3](images/c3.png)\n\n<!-- p2 -->\n\n后文\n"
+	repls := []Replacement{
+		{ImgRef: "images/a1.png", ImgType: "table", Text: "表头A|表头B\n--|--\n1|2"},
+		{ImgRef: "images/b2.png", ImgType: "Graph/Chart", Text: "[IMG_TYPE: Graph/Chart]\n函数变化率曲线。"},
+		{ImgRef: "images/c3.png", Mermaid: "graph TD; A-->B"},
+	}
+	got, _ := AssembleWithShifts(md, repls)
+	cases := []struct{ want, desc string }{
+		{"[P. 1]", "页界注释转我们的 [P. N]"},
+		{"表头A|表头B", "table 类纯 body 直嵌"},
+		{"[Image]( [IMG_TYPE: Graph/Chart]\n函数变化率曲线。 · P.1 )", "其余类 [Image]( body · P.N )"},
+		{"[Image]( 图3 · P.1 )", "mermaid 锚用原图注 alt"},
+		{"```mermaid\ngraph TD; A-->B\n```", "mermaid 围栏代码块"},
+		{"<!-- p", "不应残留 organize 注释（单一页码系统）"},
+	}
+	for _, c := range cases {
+		if c.desc == "不应残留 organize 注释（单一页码系统）" {
+			if strings.Contains(got, c.want) {
+				t.Fatalf("%s: 仍含 %q", c.desc, c.want)
+			}
+			continue
+		}
+		if !strings.Contains(got, c.want) {
+			t.Fatalf("%s: 缺 %q\n实际: %s", c.desc, c.want, got[:min(400, len(got))])
+		}
+	}
+}

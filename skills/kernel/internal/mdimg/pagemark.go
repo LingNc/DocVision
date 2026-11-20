@@ -211,7 +211,7 @@ func alignPages(lines []string, anchors []pageAnchor) []int {
 			continue
 		}
 		if m := imageRefRe.FindStringSubmatch(trimmed); m != nil {
-			base := filepath.Base(strings.TrimSpace(m[1]))
+			base := filepath.Base(strings.TrimSpace(m[2])) // SK-I22 正则增 alt 组，路径在 m[2]
 			page, found := 0, false
 			for j := cursor; j < len(anchors); j++ {
 				if anchors[j].kind != "image" {

@@ -1665,16 +1665,9 @@ func main() {
 		if err != nil {
 			die(err)
 		}
-		assembled, shifts := mdimg.AssembleWithShifts(string(src), repls)
-		// 页码标记（P21 逐字移植）：原文行级对齐 → 改写后内容插 [P. N]；
-		// 已有标记（T69 不回注）或无 mineru 产物时静默跳过。
-		mdName := filepath.Base(args[2])
-		lines, starts := mdimg.LineStarts(string(src))
-		if plan := mdimg.PlanPageMarks(filepath.Join(p.Root, "mineru"), mdName, lines); plan != nil && !mdimg.HasPageMarks([]byte(assembled)) {
-			var marks []mdimg.PageMark
-			assembled, marks = plan.ApplyTo(assembled, lines, starts, shifts)
-			_ = plan.Audit(marks)
-		}
+		// SK-I22：页码单一系统——AssembleWithShifts 内联把 organize 的 <!-- pN --> 原位转 [P. N]
+		// （格式我们的，编号=content_list 全页枚举；弃 pagemark 模糊对齐那套，避免双系统漂移）。
+		assembled, _ := mdimg.AssembleWithShifts(string(src), repls)
 		if err := os.MkdirAll(filepath.Dir(args[3]), 0o755); err != nil {
 			die(err)
 		}
