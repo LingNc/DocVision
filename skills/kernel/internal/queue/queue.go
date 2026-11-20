@@ -15,11 +15,55 @@ import (
 )
 
 // Queue 是单项目的一条任务队列。
+// QueueStamp 内核账本防伪戳：Save 时盖、Load 时验。手造/绕过内核直接编辑的 queue.json
+// 无此戳——严令禁止（docs/07 禁绕行铁律），Load 拒绝并指回正规路径。
+const QueueStamp = "dvqueue/v1"
+
 type Queue struct {
 	Path  string                `json:"-"` // 队列文件路径
 	Tasks map[string]*task.Task `json:"tasks"`
+	// KernelStamp 防伪戳（omitempty：旧版文件无戳，由 queue-stamp 迁移补盖）。
+	KernelStamp string `json:"_kernel_stamp,omitempty"`
 
 	mu sync.Mutex
+}
+
+// LoadRaw 不验戳读取（queue-stamp 迁移专用；正常路径一律走 Load）。
+func LoadRaw(path string) (*Queue, error) {
+	q := &Queue{Path: path, Tasks: map[string]*task.Task{}}
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return q, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(b, q); err != nil {
+		return nil, fmt.Errorf("队列文件损坏: %w", err)
+	}
+	return q, nil
+}
+
+// Stamp 给旧版无戳队列补盖防伪戳（queue-stamp 命令；幂等）。
+func (q *Queue) Stamp() error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.KernelStamp == QueueStamp {
+		return nil
+	}
+	q.KernelStamp = QueueStamp
+	b, err := json.MarshalIndent(q, "", "  ")
+	if err != nil {
+		return err
+	}
+	if werr := os.WriteFile(q.Path, b, 0o644); werr != nil && os.IsPermission(werr) {
+		if rerr := os.Remove(q.Path); rerr == nil {
+			return os.WriteFile(q.Path, b, 0o644)
+		}
+		return werr
+	} else {
+		return werr
+	}
 }
 
 // Load 从磁盘读队列；文件不存在时返回空队列。
@@ -35,6 +79,11 @@ func Load(path string) (*Queue, error) {
 	if err := json.Unmarshal(b, q); err != nil {
 		return nil, fmt.Errorf("队列文件损坏: %w", err)
 	}
+	// 防伪戳校验：有任务却无戳 = 手造/绕过内核的账本（严令禁止，docs/07 铁律）。
+	// 空队列无戳视为旧版空文件（下次 Save 盖戳放行）；迁移用 dvagent queue-stamp <项目>。
+	if q.KernelStamp != QueueStamp && len(q.Tasks) > 0 {
+		return nil, fmt.Errorf("手造/绕过内核的队列文件被禁止（docs/07 禁绕行铁律）：queue.json 无内核戳。若是旧版内核产出：dvagent queue-stamp <项目> 迁移盖戳；若是手造：删除该文件，用 gen-*/claim 走正规路径")
+	}
 	return q, nil
 }
 
@@ -42,6 +91,7 @@ func Load(path string) (*Queue, error) {
 func (q *Queue) Save() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.KernelStamp = QueueStamp
 	b, err := json.MarshalIndent(q, "", "  ")
 	if err != nil {
 		return err
@@ -58,7 +108,14 @@ func (q *Queue) Save() error {
 		if rerr != nil {
 			return fmt.Errorf("queue 落盘 rename 失败且回退读取失败: %v / %w", err, rerr)
 		}
-		if werr := os.WriteFile(q.Path, data, 0o644); werr != nil {
+		werr := os.WriteFile(q.Path, data, 0o644)
+		if werr != nil && os.IsPermission(werr) {
+			// FUSE 上既存 root 属主文件拒覆盖但目录可写：rm 后重建（原子性让位于可用性，内核是唯一写者）
+			if rerr := os.Remove(q.Path); rerr == nil {
+				werr = os.WriteFile(q.Path, data, 0o644)
+			}
+		}
+		if werr != nil {
 			return fmt.Errorf("queue 落盘 rename 失败且回退写入失败: %v / %w", err, werr)
 		}
 		_ = os.Remove(tmp)

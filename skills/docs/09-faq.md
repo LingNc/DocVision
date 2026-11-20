@@ -32,6 +32,12 @@
 
 | 症状 | 解法 |
 |---|---|
+| queue.json 手造/直改后 dvagent 报"无内核戳"被拒 | 手造文件被 SK-I20 防伪戳硬拒——**删之**，用 gen-*/claim 走正规路径；旧版内核产出的无戳队列用 `queue-stamp <项目>` 迁移 |
+
+## 流程分诊
+
+| 症状 | 解法 |
+|---|---|
 | md 档跑了 classify 才跑 img2text（或文档把 classify 写进 md 档） | **md 档无 classify 前置**：img2text 任务内自判三态；classify 是 LaTeX 档前置（决定走 draw/style）。md 档路径=prep → gen-img2text → 三态 → assemble |
 
 ## 给贡献者

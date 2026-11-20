@@ -1073,6 +1073,27 @@ func main() {
 		}
 		out(map[string]any{"filled": n})
 
+	case "queue-stamp":
+		// dvagent queue-stamp <项目名> —— 旧版内核产出的无戳队列迁移盖防伪戳（幂等）。
+		// 手造文件不在此列：那是禁令对象，应删除走 gen-* 重铺。
+		if len(args) < 2 {
+			die(fmt.Errorf("queue-stamp 需要: <项目名>"))
+		}
+		p := mustProject(reg, args[1])
+		qp := queue.ProjectQueuePath(p.Root)
+		if _, err := os.Stat(qp); err != nil {
+			out(map[string]any{"stamped": false, "note": "无队列文件（空项目无需迁移）"})
+			return
+		}
+		lq, err := queue.LoadRaw(qp)
+		if err != nil {
+			die(err)
+		}
+		if err := lq.Stamp(); err != nil {
+			die(err)
+		}
+		out(map[string]any{"stamped": true, "tasks": len(lq.Tasks)})
+
 	case "gen-stylefix":
 		// dvagent gen-stylefix <项目名> —— SK-I19 全书级样式后段：
 		// 第一次跑铺 stylefix-assess（前置：convert/check/图工作全落定）；
