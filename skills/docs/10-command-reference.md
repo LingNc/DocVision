@@ -121,7 +121,7 @@
 | `get_more_context(↑N, ↓M)` 单工具双方向、md 行定位 | `ctx <项目> <任务id> [--up N] [--down M]` | **同（已逐项对齐）** | 行号定位/双方向/行内容三要素全对（合成工作区实测 [since 5834748]） |
 | 模型自由回调全套工具（看图上文/下图/OCR…） | `claim`/`submit` 领任务制 + 手册工具 | 异 ⚠ | 账本权从模型没收给内核状态机（防伪造进度——你的 OCR 伪造事件是动机）；agent 自主性下降是可预期代价 |
 | 每图输出 JSON 含 program items 自报进度 | 内核 queue.json 台账 + verdict.json | 异 ⚠ | 同上：进度=内核记账，不信模型自报 |
-| textonly 单轮 OCR（一图一轮出文字） | img2text 三态任务（文字化/结构图/保留，内核验收） | 异 ⚠ | 质变：分散决策升为带验收的任务制；OCR 质量由 [IMG_TYPE]+replacement 契约保障 |
+| textonly 单轮 OCR（一图一轮出文字） | img2text 任务制：文字化/结构图两态产物（内核验收）；**keep 仅限水印**（SK-I21，老线契约终态零裸链） | 异 ⚠ | 质变：分散决策升为带验收的任务制；[IMG_TYPE] 描述契约 + bare_links=0 硬指标保障 |
 | 旧 classify：4 类 + styled 标记 + confidence | 4 类 + styled 独立标记 + confidence | **同（SK-I18 已恢复）** | 曾因误合并为 3 类丢失 styled=false 直通路与 table 独立类，已按原文恢复 |
 | 输出头 `[IMG_TYPE:]` | 产物首行强制 + 八道闸 | **同（保留）** | 你拍板保留（[since ea5d4b5]） |
 | `latex_chapters` 拆章阶段 | convert 内递归细化 + 行数上限 | 异 | 阶段合并进 convert（初划可有可无语义） |
