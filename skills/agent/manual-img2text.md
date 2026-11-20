@@ -40,3 +40,10 @@
 - 图为水印/广告条（classify 已标 `"watermark": true`，或你本轮看图识别出）：**keep 的唯一合法场景**——`{"result":"keep","watermark":true}`，合成时整行删除（默认去水印）
 - 合成阶段（img2text-assemble）会自动把该图整行删除——不留占位、不进成品书（默认去水印，用户已拍板）
 - 普通图永远不加这个字段；误标会把正常图删掉
+
+## 收尾验收（SK-I21 契约）
+
+`img2text-assemble` 的 summary 里 **`bare_links` 必须为 0**（老线契约：终态 md 零裸图链接）——
+> `"bare_links": 0, "note": "SK-I21：终态 md 无裸图链接（老线契约）……"`
+
+非 0 说明有图未过三态或被判了非法 keep，回炉补齐，不许带着裸链交付。

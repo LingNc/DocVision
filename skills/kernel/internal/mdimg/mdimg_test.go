@@ -59,3 +59,20 @@ func TestAssembleWatermarkDrop(t *testing.T) {
 		t.Fatalf("去水印应记录负位移: %+v", shifts)
 	}
 }
+
+// SK-I21 契约断言：终态 md 零裸图链接（老线 embedBlockForRef 语义）——
+// 全部图有 replacement 时，输出不得残留任何图片行。
+func TestAssembleNoBareImageLinks(t *testing.T) {
+	md := "前文\n\n![图1](images/a1.png)\n\n![表1](images/b2.png)\n\n后文\n"
+	repls := []Replacement{
+		{ImgRef: "images/a1.png", Text: "[IMG_TYPE: Graph/Chart]\n函数变化率曲线，横轴自变量纵轴函数值。"},
+		{ImgRef: "images/b2.png", Mermaid: "graph TD; A-->B"},
+	}
+	got, _ := AssembleWithShifts(md, repls)
+	if strings.Contains(got, "![") {
+		t.Fatalf("终态 md 出现裸图链接（SK-I21 契约违反）: %q", got[:min(160, len(got))])
+	}
+	if !strings.Contains(got, "函数变化率曲线") || !strings.Contains(got, "graph TD") {
+		t.Fatalf("替换产物缺失: %q", got)
+	}
+}
