@@ -40,6 +40,12 @@
 |---|---|
 | md 档跑了 classify 才跑 img2text（或文档把 classify 写进 md 档） | **md 档无 classify 前置**：img2text 任务内自判三态；classify 是 LaTeX 档前置（决定走 draw/style）。md 档路径=prep → gen-img2text → 三态 → assemble |
 
+## 流程分诊
+
+| 症状 | 解法 |
+|---|---|
+| img2text-assemble 的 summary 里 bare_links>0 | 有图未过三态或被判了非法 keep（SK-I21 后 keep 仅限水印）——回炉补齐该图的三态产物，bare_links 必须为 0 才能交付（老线契约：终态 md 零裸图链接） |
+
 ## 给贡献者
 
 - 通用解法：issue（记问题+结论）→ PR（挂 `fixes #N`，最小 diff，可复现）——维护者直接评审合并
