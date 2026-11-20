@@ -138,3 +138,15 @@ func Sha256Dir(root string) (map[string]string, error) {
 	})
 	return hashes, err
 }
+// FragmentDocclass 判定片段/全书主文件的文档类与强制引擎（SK-I24 抽公共）：
+// 正文含 CJK（rune ≥ 0x2E80）时 pdflatex 直编中文必挂——ctexbook + 强制 xelatex；
+// 纯 ASCII/西欧 → book + 空引擎（走默认回退链）。luadraw 章的 lualatex 优先级
+// 高于本强制（lualatex 天然处理 CJK），调用方只在 engine 为空时应用本强制。
+func FragmentDocclass(content []byte) (docclass, engine string) {
+	for _, r := range string(content) {
+		if r >= 0x2E80 {
+			return "ctexbook", "xelatex"
+		}
+	}
+	return "book", ""
+}

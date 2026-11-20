@@ -13,6 +13,7 @@ import (
 	"github.com/LingNc/DocVision/skills/kernel/internal/assemble"
 	"github.com/LingNc/DocVision/skills/kernel/internal/queue"
 	"github.com/LingNc/DocVision/skills/kernel/internal/task"
+	"github.com/LingNc/DocVision/skills/kernel/internal/texcheck"
 	"github.com/LingNc/DocVision/skills/kernel/internal/verify"
 )
 
@@ -112,9 +113,18 @@ func Deliver(q *queue.Queue, projectRoot, clsName string) (*Report, error) {
 	}
 
 	// ③ 主文件：documentclass + 按序 \input 章节。
+	// SK-I24：书含 CJK 时 book+pdflatex 必挂——扫描章节内容，CJK 用 ctexbook
+	// （引擎链 pdflatex→xelatex 自适配；luadraw 章仍由 NeedsLuaLaTeX 按需强制 lualatex）。
 	mainPath := filepath.Join(rep.BuildDir, "main.tex")
+	var cjkScan []byte
+	for _, ch := range rep.Chapters {
+		if cb, rerr := os.ReadFile(filepath.Join(projectRoot, ch)); rerr == nil {
+			cjkScan = append(cjkScan, cb...)
+		}
+	}
+	docclass, _ := texcheck.FragmentDocclass(cjkScan)
 	var b strings.Builder
-	b.WriteString("\\documentclass{book}\n")
+	b.WriteString("\\documentclass{" + docclass + "}\n")
 	if clsName != "" {
 		// 样式类进构建树
 		clsSrc := filepath.Join(projectRoot, "style", clsName+".cls")

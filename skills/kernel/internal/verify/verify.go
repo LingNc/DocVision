@@ -177,6 +177,37 @@ func (c *Checker) defaultCompile(t *task.Task, projectRoot string) []string {
 			}
 		}
 	}
+	// SK-I24：章节是装配片段（无 \documentclass），不能直接编译——包一层 stub 书主文件再编；
+	// 否则有 TeX 的机器上 convert 章（\chapter 正文）按判据必挂（无 TeX 机器跳过所以假绿）。
+	compileDir, compileMain := outDir, main
+	stubEngine := ""
+	if b, rerr := os.ReadFile(filepath.Join(outDir, main)); rerr == nil && !strings.Contains(string(b), `\documentclass`) {
+		stubDir := filepath.Join(projectRoot, t.Sandbox, "_compile")
+		if err := os.MkdirAll(stubDir, 0o755); err != nil {
+			return []string{"编译 stub 目录创建失败: " + err.Error()}
+		}
+		rel, rerr := filepath.Rel(stubDir, filepath.Join(outDir, main))
+		if rerr != nil {
+			rel = filepath.Join(outDir, main)
+		}
+		// CJK → ctexbook + 强制 xelatex（公共助手；luadraw 的 lualatex 优先级更高，见下）
+		docclass, forcedEngine := texcheck.FragmentDocclass(b)
+		stub := "\\documentclass{" + docclass + "}\n" +
+			"\\usepackage[T1]{fontenc}\n" +
+			"\\usepackage{tikz}\n" +
+			"\\usetikzlibrary{arrows.meta}\n" +
+			"\\usepackage{graphicx}\n" +
+			"\\begin{document}\n" +
+			"\\input{" + filepath.ToSlash(rel) + "}\n" +
+			"\\end{document}\n"
+		if err := os.WriteFile(filepath.Join(stubDir, "main.tex"), []byte(stub), 0o644); err != nil {
+			return []string{"编译 stub 写入失败: " + err.Error()}
+		}
+		compileDir, compileMain = stubDir, "main.tex"
+		if forcedEngine != "" {
+			stubEngine = forcedEngine
+		}
+	}
 	// 引擎双路探测（SK-I16）：luadraw 章——有 lualatex 直编；无则 lua5.4 预编译成 TikZ 走正常链。
 	filesDir := filepath.Join(c.SkillRoot, "docs", "luadraw", "files")
 	engine, _, derr := texcheck.DecideEngine(outDir, main, filesDir)
@@ -187,8 +218,14 @@ func (c *Checker) defaultCompile(t *task.Task, projectRoot string) []string {
 		return []string{"luadraw 引擎决策失败: " + derr.Error()}
 	}
 	// SK-I23：style/ 模板目录进 TEXINPUTS——否则沙箱内 \input{draw-style} 编译找不到文件	（对方会话装 TeX 机器实跑暴露：File 'draw-style' not found）。
-	env := map[string]string{"TEXINPUTS": filepath.Join(c.ProjectRoot, "style")}
-	if _, err := texcheck.CompileEngineEnv(outDir, main, engine, env); err != nil {
+	// 优先级：luadraw 强制的 lualatex > CJK 强制的 xelatex（lualatex 天然处理 CJK，
+	// 被强转 xelatex 反而坏 luadraw 图——SK-I24 审查修正）；仅自动回退链（engine 空）时应用 CJK 强制。
+	if stubEngine != "" && engine == "" {
+		engine = stubEngine
+	}
+	sep := string(os.PathListSeparator)
+	env := map[string]string{"TEXINPUTS": filepath.Join(c.ProjectRoot, "style") + sep + outDir + sep}
+	if _, err := texcheck.CompileEngineEnv(compileDir, compileMain, engine, env); err != nil {
 		if strings.Contains(err.Error(), "不可用") {
 			return nil // 缺工具跳过（与覆盖率同款哲学）
 		}

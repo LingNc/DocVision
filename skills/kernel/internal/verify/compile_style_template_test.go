@@ -24,7 +24,9 @@ func TestStyleTemplateEnforcement(t *testing.T) {
 	}
 	// 有模板但不引用：打回
 	os.MkdirAll(filepath.Join(root, "style"), 0o755)
-	os.WriteFile(filepath.Join(root, "style", "draw-style.tex"), []byte("% tpl"), 0o644)
+	tplBody := "\\tikzset{dvline/.style={line width=0.6pt, draw=black}}\n" +
+		"\\newcommand{\\dvLineMain}{\\begin{tikzpicture}\\draw[dvline] (0,0)--(2,0);\\end{tikzpicture}}\n"
+	os.WriteFile(filepath.Join(root, "style", "draw-style.tex"), []byte(tplBody), 0o644)
 	errs, _ := c.Run(tk)
 	found := false
 	for _, e := range errs {
@@ -37,7 +39,7 @@ func TestStyleTemplateEnforcement(t *testing.T) {
 		t.Fatal("有模板未引用应打回")
 	}
 	// 引用了：放行
-	os.WriteFile(filepath.Join(root, tk.Sandbox, "out", "main.tex"), []byte("\\input{draw-style}\n\\begin{document}\\dvLineMain\\end{document}"), 0o644)
+	os.WriteFile(filepath.Join(root, tk.Sandbox, "out", "main.tex"), []byte("\\documentclass{article}\n\\usepackage{tikz}\n\\usetikzlibrary{arrows.meta}\n\\input{draw-style}\n\\begin{document}\n\\dvLineMain\n\\end{document}"), 0o644)
 	if errs, _ := c.Run(tk); len(errs) != 0 {
 		t.Fatalf("引用模板后应放行: %v", errs)
 	}
