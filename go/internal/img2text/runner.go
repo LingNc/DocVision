@@ -427,6 +427,13 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 			continue
 		}
 		logger.Log(0, "  Saved:", name, "("+strconv.Itoa(len(reps))+" replacements)")
+		// T334：把 `[url](images/<书>/<文件>)` 指到的原图复制到 finally 下
+		// 同一条相对路径，交付目录自成一套（单独拷走也不断链）。
+		if n, ierr := copyDeliveredImages(cfg, nc); ierr != nil {
+			logger.LogError(0, "  [", name, "] 复制原图失败:", ierr)
+		} else if n > 0 {
+			logger.Log(0, "  原图:", strconv.Itoa(n), "张 -> "+filepath.Join("finally", "images")+"/")
+		}
 	}
 
 	logger.Log(0, strings.Repeat("=", 60))

@@ -2616,3 +2616,7 @@ user 轮
   根因：`runAdHocWorkflow` 把 `destDir` 定成 `filepath.Dir(abs)`（目录入参则是该目录本身），临时模式里 `cfg.Paths.FinallyDir` 又被改写成 `<job>/finally`，配置项从没参与交付；于是多轮跑下来最终 md 堆在输入目录里，`finally_dir` 那个目录反而是空的。
   改：新增 `workflowDestDir(configuredFinally, srcDir)`——配置了 `paths.finally_dir` 就按当前工作目录解析成绝对路径后用（下面会 chdir 进 job，晚解析就指错），没配才退回源文件旁；交付前 `MkdirAll`。
   验证：`TestWorkflowDestDir`（未配置回落源目录、相对路径按工作目录解析、绝对路径原样用）；`go test ./cmd/docvision/` 全绿。
+[X][ ] T334. 交付 md 里 `[url](images/<书>/<文件>)` 指到的原图没跟着进 `finally/`，交付目录离开流水线就断链。
+  根因：图片只在 `organize` 阶段被复制进 `paths.images_dir`（`output/images/<书>/`），img2text 从不搬图片；md 交付到 `finally_dir` 后，里面的 `[url]` 是相对 md 位置的路径，单独拷走就指空。
+  改：img2text 写完交付 md 后按 `[url]` 行把原图复制到 `<finally>/images/<书>/<文件>`（保持相对路径；同大小已存在就跳过；只认相对路径，`..`/绝对路径直接忽略；解析不到源的引用跳过不报错），日志报「原图: N 张」。
+  验证：`TestCopyDeliveredImages`（复制到位、无 url 行的不搬、缺失源跳过、重跑不重复、`..` 被忽略）、`TestDeliveredImageTargets`（只认 url 行、去重）。
