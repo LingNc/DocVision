@@ -47,3 +47,12 @@
 > `"bare_links": 0, "note": "SK-I21：终态 md 无裸图链接（老线契约）……"`
 
 非 0 说明有图未过三态或被判了非法 keep，回炉补齐，不许带着裸链交付。
+
+## 终态嵌入形态（SK-I22，对齐老线 dev embedBlockForRef）
+
+合成（img2text-assemble）时内核按 `[IMG_TYPE]` 类型自动定形态：
+- **text 类**（text/latex/math/formula/table/code）→ 描述体**纯文本**直嵌
+- **其余**（Graph/Chart、Simple illustration 等）→ `[Image]( 描述体 · P.N )` 文字锚（P.N=所在页）
+- **结构图**（mermaid）→ `[Image]( 原图注 · P.N )` 锚 + mermaid 围栏块
+
+你的 replacement.md 只管写描述（首行 [IMG_TYPE] 必带），形态包装由内核做。页码单一系统 `[P. N]`（organize 全页枚举），锚后缀与之一致。
