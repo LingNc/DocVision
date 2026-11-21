@@ -2632,3 +2632,7 @@ user 轮
   根因：`linkOfRef` 的目标正则写成 `\]\(\s*<?([^()\s>]+)`（`finalimages.go` 的 `deliveredURLRe` 同款），把路径当 token 取，遇空格/括号即停；全角 `（）`、`《》`、`[ ]` 不触发，正好对上现场样本。
   改：新增 `linkTargetOf`——从 `](` 取到该行**最后一个** `)`，再去 `<…>` 包裹与 ` "标题"`；`linkOfRef` 与 `deliveredImageTargets` 都改用它（后者改成逐行解析），宽高比与路径本身不动。
   验证：`TestLinkOfRef` 补 `images/某书(下)/a1.jpg`、`images/计算机网络（第8版） (谢希仁)/abc.jpg` 两例（原 `images/书/c d.png` 那条的期望值也跟着修正）；`TestDeliveredImageTargets` 补带括号/空格目录两例；`./internal/img2text/` 全绿。
+[X][ ] T338. 历史册子的 `finally/images/<书>/sizes.csv` 只有新跑的才有，需要不重跑图片就能回填。
+  根因：`sizes.csv` 只写在 `copyDeliveredImages`（图片处理出口）里，旧册子的图片早就复制好了、不会再走那段。
+  改：新增 `WriteSizesForDir`（按盘上位图 + MinerU 解析索引重算）与 `docvision img2text --sizes-only`（只扫 `<finally>/images/*/`、写 CSV，不调模型、不读 md）。
+  验证：`TestWriteSizesForDir`（100×50px + bbox 宽 100pt → `abc.png,35.28,17.64,210.00`）；现场回填 213 册 / 17925 张图。

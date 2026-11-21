@@ -15,6 +15,7 @@ import (
 
 	"mineru-tools/internal/analyze"
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/imagemeta"
 	"mineru-tools/internal/img2text"
 	"mineru-tools/internal/logger"
 	"mineru-tools/internal/mineru"
@@ -482,6 +483,9 @@ func newImg2TextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if sizesOnly, _ := cmd.Flags().GetBool("sizes-only"); sizesOnly {
+				return runSizesOnly(cfg)
+			}
 			_, err = runImg2TextFromConfig(cmd, cfg, false)
 			return err
 		},
@@ -491,7 +495,37 @@ func newImg2TextCmd() *cobra.Command {
 	cmd.Flags().String("seed", "", "随机种子：'random' 或数字（用于复现）")
 	cmd.Flags().Bool("debug", false, "调试模式：请求参数/提示词/响应统计等细节只写日志文件（终端只保留进度行与告警）")
 	cmd.Flags().Bool("trace", false, "深度调试：在 debug 基础上再记录流式分片等细节（同样只写日志文件）")
+	cmd.Flags().Bool("sizes-only", false, "只回填 finally/images/<书>/sizes.csv（不调用模型、不重跑图片）")
 	return cmd
+}
+
+// runSizesOnly 给 finally/images/<书>/ 逐目录补写 sizes.csv（T338）：只读盘上
+// 已有的位图与 MinerU 解析索引，不调模型、不重跑图片处理。
+func runSizesOnly(cfg *config.Config) error {
+	imagemeta.SetMineruRoot(cfg.Paths.MineruOutput)
+	root := filepath.Join(cfg.Paths.FinallyDir, "images")
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", root, err)
+	}
+	total, books := 0, 0
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		n, err := img2text.WriteSizesForDir(filepath.Join(root, e.Name()))
+		if err != nil {
+			fmt.Printf("  %s: %v\n", e.Name(), err)
+			continue
+		}
+		if n > 0 {
+			books++
+			total += n
+			fmt.Printf("  %s: %d 张\n", e.Name(), n)
+		}
+	}
+	fmt.Printf("sizes.csv: %d 册 / %d 张图\n", books, total)
+	return nil
 }
 
 func runImg2TextFromConfig(cmd *cobra.Command, cfg *config.Config, quiet bool) (string, error) {

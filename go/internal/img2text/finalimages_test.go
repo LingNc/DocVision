@@ -137,3 +137,51 @@ func TestCopyDeliveredImagesWritesSizes(t *testing.T) {
 		t.Fatalf("没有原始量的图不该出现：\n%s", got)
 	}
 }
+
+// TestWriteSizesForDir 钉 T338：--sizes-only 不重跑图片，只按盘上已有位图
+// 与 MinerU 索引补写 sizes.csv。
+func TestWriteSizesForDir(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "images", "某书")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, 100, 50))
+	f, err := os.Create(filepath.Join(dir, "abc.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	part := filepath.Join(root, "mineru", "某书_part1")
+	if err := os.MkdirAll(part, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cl := `[{"type":"image","img_path":"images/abc.png","page_idx":3,"bbox":[10,20,110,90]}]`
+	lay := `{"pdf_info":[{"page_idx":3,"page_size":[595.28,841.89]}]}`
+	if err := os.WriteFile(filepath.Join(part, "u_content_list.json"), []byte(cl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(part, "layout.json"), []byte(lay), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	imagemeta.SetMineruRoot(filepath.Join(root, "mineru"))
+
+	n, err := WriteSizesForDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("rows = %d, want 1", n)
+	}
+	cs, err := os.ReadFile(filepath.Join(dir, "sizes.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cs), "abc.png,35.28,17.64,210.00") {
+		t.Fatalf("csv 不对：\n%s", cs)
+	}
+}

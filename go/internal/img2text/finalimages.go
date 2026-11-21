@@ -201,3 +201,35 @@ func copyImageFile(dst, src string) error {
 	}
 	return out.Close()
 }
+
+// WriteSizesForDir 给一个已交付的图片目录补写 sizes.csv（T338）：不重跑
+// 图片处理，只按目录里现有的位图 + MinerU 解析索引重算尺寸。用于修好
+// 生成逻辑后回填历史册子。返回写入的行数（3 = 3 张图）。
+func WriteSizesForDir(dir string) (int, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	raws := make(map[string]imagemeta.Raw)
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.EqualFold(name, "sizes.csv") {
+			continue
+		}
+		raw, ok := imagemeta.LookupImage(name)
+		if !ok {
+			continue
+		}
+		raws[name] = raw
+	}
+	if len(raws) == 0 {
+		return 0, nil
+	}
+	if err := writeSizeCSV(dir, raws); err != nil {
+		return 0, err
+	}
+	return len(raws), nil
+}
