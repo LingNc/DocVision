@@ -29,4 +29,4 @@ mineru:                        # MinerU API 参数（默认值=原 DocVision 实
   poll_timeout: 0              # 轮询总超时（秒，0=不限）
   upload_timeout: 300          # 上传空闲超时（秒）
 upstream:
-  relay_url: ""                # 自部署 relay 匿名兜底服务器地址（troubleshoot relay-submit 用，部署后填）
+  relay_url: "https://doc-relay.lingnc.top"  # 匿名兜底 relay（1Panel 反代终结 TLS；自部署改这里）

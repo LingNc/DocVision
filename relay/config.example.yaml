@@ -7,7 +7,7 @@
 # 密钥纪律（docs/06）：GitHub token 只走环境变量 RELAY_GITHUB_TOKEN，
 # 本文件只放非秘密项；写了的值被采用，没写的键用内置默认。
 
-listen: ":8787"               # 监听地址（容器/服务器对外端口）
+listen: "127.0.0.1:8787"     # 反代部署（1Panel/nginx）：绑本地只给反代看；直连部署改 ":8787"
 repo: "LingNc/DocVision"      # 代建 issue 的目标仓库
 rate: 5                       # 每 IP 每小时提交上限（防刷）
 # 贡献流程政策（docs/07）：用户已登录 GitHub 时，代发 issue/PR 后自动给上游仓库点 star
