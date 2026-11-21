@@ -192,8 +192,13 @@ func (c *Checker) defaultCompile(t *task.Task, projectRoot string) []string {
 		}
 		// CJK → ctexbook + 强制 xelatex（公共助手；luadraw 的 lualatex 优先级更高，见下）
 		docclass, forcedEngine := texcheck.FragmentDocclass(b)
+		// luadraw 章：stub 导言区负责加载包（章内 \usepackage 在正文里非法）；先 require lualibs 否则 table.copy 为 nil
+		luaPre := ""
+		if texcheck.NeedsLuaLaTeX(outDir, main) {
+			luaPre = "\\directlua{require('lualibs')}\n\\usepackage[3d]{luadraw}\n"
+		}
 		stub := "\\documentclass{" + docclass + "}\n" +
-			"\\usepackage[T1]{fontenc}\n" +
+			"\\usepackage[T1]{fontenc}\n" + luaPre +
 			"\\usepackage{tikz}\n" +
 			"\\usetikzlibrary{arrows.meta}\n" +
 			"\\usepackage{graphicx}\n" +

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // Compile 在 outDir 里对 mainFile 跑默认引擎链（pdflatex→xelatex 回退，两遍交叉引用稳定）。
@@ -80,14 +81,27 @@ func CompileEngineEnv(outDir, mainFile, engine string, env map[string]string) (s
 }
 
 // luadrawUseRe 匹配 \usepackage[...]{luadraw}（带可选参数，如 [3d]）。
-var luadrawUseRe = regexp.MustCompile(`\\usepackage(\[[^\]]*\])?\{luadraw\}`)
+var luadrawUseRe = regexp.MustCompile(`\\usepackage(\[[^\]]*\])?\{luadraw\}|\\begin\{luadraw\}`)
 
 // NeedsLuaLaTeX 探测该章是否需要 LuaLaTeX：主文件或同目录任何 .tex 用了 luadraw。
 // luadraw 是纯 LuaLaTeX 包；按需引擎——只强制需要的章。
 func NeedsLuaLaTeX(dir, mainFile string) bool {
 	check := func(path string) bool {
 		data, err := os.ReadFile(path)
-		return err == nil && luadrawUseRe.Match(data)
+		if err != nil {
+			return false
+		}
+		// 注释行不算使用：预编译回退保留原块为 % 注释，若把注释当使用会永远"需要 lualatex"，
+		// 幂等标记失效（DecideEngine 的"预编译后仍存在"误判）。
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "%") {
+				continue
+			}
+			if luadrawUseRe.MatchString(line) {
+				return true
+			}
+		}
+		return false
 	}
 	if check(filepath.Join(dir, mainFile)) {
 		return true
@@ -138,6 +152,7 @@ func Sha256Dir(root string) (map[string]string, error) {
 	})
 	return hashes, err
 }
+
 // FragmentDocclass 判定片段/全书主文件的文档类与强制引擎（SK-I24 抽公共）：
 // 正文含 CJK（rune ≥ 0x2E80）时 pdflatex 直编中文必挂——ctexbook + 强制 xelatex；
 // 纯 ASCII/西欧 → book + 空引擎（走默认回退链）。luadraw 章的 lualatex 优先级

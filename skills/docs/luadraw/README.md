@@ -59,6 +59,14 @@ luadraw 是**纯 LuaLaTeX 包**。内核已支持按章探测：章内任何 .te
 - `ld.graph`（非 graph2d）；`cpx.Z`；`Daxes/Dgrid` 的 `#d` 定长表校验静默不画
 - luadraw 章 preamble 需 6 组 TikZ 库：patterns, patterns.meta, plotmarks, arrows.meta, bending, decorations.markings, backgrounds
 
+## 章内写法契约（SK-I25 定，2026-11-21）
+
+**章节是片段，禁止任何导言区命令**（`\usepackage` / `\documentclass` 等）——依赖由两处负责：
+1. **stub 自动注入**：内核探测到 luadraw（`\usepackage{luadraw}` 或 `\begin{luadraw}`，注释不算）即在编译 stub 导言区自动加载 `lualibs` + `\usepackage[3d]{luadraw}`——**章内不要自己写**
+2. **style 模板**（SK-I19 三件套 cls）：其余宏包依赖进 `<book>.cls`
+
+章内写 `\usepackage` 会撞 preamble 限制（片段被 `\input` 进正文）——这是结构约束，不是 bug。
+
 ## 最小化测试约定（2026-11-20 用户定调）
 
 **按机器实际情况，走能跑通的最小路径，不双跑**：

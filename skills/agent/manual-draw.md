@@ -32,3 +32,7 @@
 - **风格统一是硬要求**：先读 `book/style/draw-style.tex`（style 阶段产出的绘图模板），按它的三要素（线粗/标注字号/箭头样式）与 `pictureoptions` 默认串画；模板没有的参照全书已有 TikZ 图的视觉参数
 - 快速定位示例：`dvagent luadraw-search <关键词>`（标题→源码位置→PDF页码），`pdftoppm -f <页> -l <页> docs/luadraw/luadraw-doc-en.pdf /tmp/pg` 看预览图
 - luadraw 产物照过 figure 验收（min_overlap 等）——工具不降低门槛
+
+## 章节即片段（SK-I24/25 契约）
+
+你的产物是**片段**（被 stub 包壳编译）：**禁止 `\usepackage`/`\documentclass` 等导言命令**——luadraw 由内核按需在 stub 导言区自动注入，其余宏包依赖走 style 模板（`<book>.cls`）。
