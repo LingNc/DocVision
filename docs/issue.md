@@ -2628,3 +2628,7 @@ user 轮
   根因：T335 存的是 `bbox_pt/page_size_pt`，消费方还得自己知道裁剪比例才能换算；而比例没法从 jpg 里读出来。
   改：`sizes.csv` 改为首行注释 `# scale_px_per_pt=<值>`（按本册全部图 `px_w/bbox_w` 的中位数定标），正文 `file,width_mm,height_mm,page_w_mm`（mm = px/scale×25.4/72，宽高同除一个比例；page_w_mm 供算占页宽比例）——同除一个比例，位图宽高比原样保留；`page`/bbox 列去掉。实测比例册内几乎恒定（1.41–1.42、1.65–1.66、1.20），跨册不同（1.20/1.41/1.65），所以按册定标、不能用全局常数。
   验证：`TestCopyDeliveredImagesWritesSizes`（100×50px、bbox 宽 100pt → `# scale_px_per_pt=1.0000`、行 `abc.png,100.00,50.00`、无原始量的图不写）；`./internal/img2text/` 全绿。
+[X][ ] T337. 交付 md 里的 `[url](images/…)` 会在 ASCII 空格或半角 `(` 处被截断，文件名的 hash 与 `.jpg` 一起丢掉（书名含空格或 `(下)` 这类后缀的册几乎全坏）。
+  根因：`linkOfRef` 的目标正则写成 `\]\(\s*<?([^()\s>]+)`（`finalimages.go` 的 `deliveredURLRe` 同款），把路径当 token 取，遇空格/括号即停；全角 `（）`、`《》`、`[ ]` 不触发，正好对上现场样本。
+  改：新增 `linkTargetOf`——从 `](` 取到该行**最后一个** `)`，再去 `<…>` 包裹与 ` "标题"`；`linkOfRef` 与 `deliveredImageTargets` 都改用它（后者改成逐行解析），宽高比与路径本身不动。
+  验证：`TestLinkOfRef` 补 `images/某书(下)/a1.jpg`、`images/计算机网络（第8版） (谢希仁)/abc.jpg` 两例（原 `images/书/c d.png` 那条的期望值也跟着修正）；`TestDeliveredImageTargets` 补带括号/空格目录两例；`./internal/img2text/` 全绿。

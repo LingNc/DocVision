@@ -61,10 +61,18 @@ func TestCopyDeliveredImages(t *testing.T) {
 
 // TestDeliveredImageTargets 钉住解析：只认 url 行、按首次出现去重。
 func TestDeliveredImageTargets(t *testing.T) {
-	c := "[url](images/a/x.png)\n[url](<images/a/y.png>)\n[url](images/a/x.png)\n![](images/a/z.png)\n"
+	c := "[url](images/a/x.png)\n[url](<images/a/y.png>)\n[url](images/a/x.png)\n![](images/a/z.png)\n" +
+		// 目录名里的半角括号与空格不能被当成链接结尾。
+		"[url](images/某书(下)/a1.jpg)\n[url](images/某书 (作者)/a2.jpg)\n"
 	got := deliveredImageTargets(c)
-	if len(got) != 2 || got[0] != "images/a/x.png" || got[1] != "images/a/y.png" {
-		t.Fatalf("targets = %v", got)
+	want := []string{"images/a/x.png", "images/a/y.png", "images/某书(下)/a1.jpg", "images/某书 (作者)/a2.jpg"}
+	if len(got) != len(want) {
+		t.Fatalf("targets = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("targets = %v, want %v", got, want)
+		}
 	}
 }
 

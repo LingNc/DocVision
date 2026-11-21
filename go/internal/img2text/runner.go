@@ -935,10 +935,36 @@ func embedBlockForRef(result, ref string, page int) string {
 	}
 }
 
-// linkTargetRe pulls the target out of a markdown link/image reference
+// linkTargetOf pulls the target out of a markdown link/image reference
 // (`![alt](images/x/y.png)` → `images/x/y.png`), tolerating a `<…>`
-// wrapper or a trailing "title".
-var linkTargetRe = regexp.MustCompile(`\]\(\s*<?([^()\s>]+)`)
+// wrapper. Targets may carry ASCII spaces and half-width parentheses
+// (directory names like "xx(下)" or "xx (作者)"), so the target must run to
+// the LAST ")" on the line — stopping at the first space or "(" silently
+// eats the rest of the path (the file name and extension included).
+func linkTargetOf(ref string) (string, bool) {
+	i := strings.Index(ref, "](")
+	if i < 0 {
+		return "", false
+	}
+	rest := strings.TrimRight(ref[i+2:], " \t\r\n")
+	if !strings.HasSuffix(rest, ")") {
+		return "", false
+	}
+	rest = strings.TrimSpace(rest[:len(rest)-1])
+	// 去掉 markdown 的可选标题（`target "标题"` / `target '标题'`）。
+	for _, q := range []string{` "`, " '"} {
+		if j := strings.Index(rest, q); j >= 0 {
+			rest = strings.TrimSpace(rest[:j])
+		}
+	}
+	if strings.HasPrefix(rest, "<") && strings.HasSuffix(rest, ">") {
+		rest = strings.TrimSpace(rest[1 : len(rest)-1])
+	}
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
+}
 
 // htmlSrcRe extracts the src attribute of an <img> reference.
 var htmlSrcRe = regexp.MustCompile(`(?i)\bsrc=["']([^"']*)["']`)
@@ -948,8 +974,8 @@ var htmlSrcRe = regexp.MustCompile(`(?i)\bsrc=["']([^"']*)["']`)
 // reference has no usable location.
 func linkOfRef(ref string) string {
 	ref = strings.TrimSpace(ref)
-	if m := linkTargetRe.FindStringSubmatch(ref); m != nil {
-		return strings.TrimSpace(m[1])
+	if t, ok := linkTargetOf(ref); ok {
+		return t
 	}
 	if m := htmlSrcRe.FindStringSubmatch(ref); m != nil {
 		return strings.TrimSpace(m[1])

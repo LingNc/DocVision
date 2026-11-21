@@ -701,7 +701,9 @@ func TestLinkOfRef(t *testing.T) {
 	cases := []struct{ ref, want string }{
 		{"![alt](images/书/a.png)", "images/书/a.png"},
 		{"![](images/书/b.jpg)", "images/书/b.jpg"},
-		{"![alt](<images/书/c d.png>)", "images/书/c"},
+		{"![alt](<images/书/c d.png>)", "images/书/c d.png"},
+		{"![alt](images/某书(下)/a1.jpg)", "images/某书(下)/a1.jpg"},
+		{"[url](images/计算机网络（第8版） (谢希仁)/abc.jpg)", "images/计算机网络（第8版） (谢希仁)/abc.jpg"},
 		{"![alt](images/书/d.png \"标题\")", "images/书/d.png"},
 		{`<img src="images/书/e.png" alt="x">`, "images/书/e.png"},
 		{"![无链接]( )", ""},

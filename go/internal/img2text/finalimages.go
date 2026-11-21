@@ -15,7 +15,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -23,18 +22,20 @@ import (
 	"mineru-tools/internal/imagemeta"
 )
 
-// deliveredURLRe 匹配交付 md 里的原图行（`[url](images/<书>/<文件>)`），
-// 容忍尖括号包裹与行尾空白。
-var deliveredURLRe = regexp.MustCompile(`(?m)^\[url\]\(\s*<?([^()\s>]+)>?\s*\)`)
-
 // deliveredImageTargets returns the unique image targets referenced by url
-// lines, in first-appearance order.
+// lines (`[url](images/<书>/<文件>)`), in first-appearance order. Parsed by
+// line with linkTargetOf so目录名里的空格与半角括号（如 "xx(下)"）不会把
+// 路径截断——旧的正则 `[^()\s>]+` 会在第一个空格或 "(" 处停下，把文件
+// 名和扩展名一起丢掉。
 func deliveredImageTargets(content string) []string {
 	seen := make(map[string]bool)
 	var out []string
-	for _, m := range deliveredURLRe.FindAllStringSubmatch(content, -1) {
-		t := strings.TrimSpace(m[1])
-		if t == "" || seen[t] {
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "[url](") {
+			continue
+		}
+		t, ok := linkTargetOf(line)
+		if !ok || seen[t] {
 			continue
 		}
 		seen[t] = true
