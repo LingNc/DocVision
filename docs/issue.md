@@ -2620,3 +2620,11 @@ user 轮
   根因：图片只在 `organize` 阶段被复制进 `paths.images_dir`（`output/images/<书>/`），img2text 从不搬图片；md 交付到 `finally_dir` 后，里面的 `[url]` 是相对 md 位置的路径，单独拷走就指空。
   改：img2text 写完交付 md 后按 `[url]` 行把原图复制到 `<finally>/images/<书>/<文件>`（保持相对路径；同大小已存在就跳过；只认相对路径，`..`/绝对路径直接忽略；解析不到源的引用跳过不报错），日志报「原图: N 张」。
   验证：`TestCopyDeliveredImages`（复制到位、无 url 行的不搬、缺失源跳过、重跑不重复、`..` 被忽略）、`TestDeliveredImageTargets`（只认 url 行、去重）。
+[X][ ] T335. 交付的原图在外面的程序里算不出与 `compare_figure` 一致的印刷尺寸：mm 来自 MinerU 解析，图一拷走就只剩宽高比。
+  根因：`compare_figure` 的原图尺寸是 `content_list.json` 的 bbox(pt) + `layout.json` 的 page_size(pt) 换算来的；T334 只复制了像素文件，原始量没跟着走。
+  改：新增 `internal/imagemeta`（按文件名索引 MinerU 解析，返回 page/bbox_pt/page_w_pt/page_h_pt 原始量）；T334 复制原图时按目录写 `sizes.csv`（**只出 CSV**：全量估算 1.2 MB vs JSON 4.4 MB，且定长数组拆列无损；用户定"存原始量 + 只要 CSV"），mm/dpi/宽高比由消费方自己算；查不到解析的图不写条目。
+  验证：`TestCopyDeliveredImagesWritesSizes`（csv 行含 `abc.jpg,12,59.20,439.10,372.00,500.70,595.28,841.89`、不写 sizes.json、无解析的图不写）；`./internal/img2text/` 全绿。
+[X][ ] T336. 交付的 `sizes.csv` 应是“像素→pt 换算”而不是 bbox 原始量：外部只想把位图长宽换成原书尺寸去和 `compare_figure` 比。
+  根因：T335 存的是 `bbox_pt/page_size_pt`，消费方还得自己知道裁剪比例才能换算；而比例没法从 jpg 里读出来。
+  改：`sizes.csv` 改为首行注释 `# scale_px_per_pt=<值>`（按本册全部图 `px_w/bbox_w` 的中位数定标），正文 `file,width_mm,height_mm,page_w_mm`（mm = px/scale×25.4/72，宽高同除一个比例；page_w_mm 供算占页宽比例）——同除一个比例，位图宽高比原样保留；`page`/bbox 列去掉。实测比例册内几乎恒定（1.41–1.42、1.65–1.66、1.20），跨册不同（1.20/1.41/1.65），所以按册定标、不能用全局常数。
+  验证：`TestCopyDeliveredImagesWritesSizes`（100×50px、bbox 宽 100pt → `# scale_px_per_pt=1.0000`、行 `abc.png,100.00,50.00`、无原始量的图不写）；`./internal/img2text/` 全绿。

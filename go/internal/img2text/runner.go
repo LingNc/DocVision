@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"mineru-tools/internal/config"
+	"mineru-tools/internal/imagemeta"
 	"mineru-tools/internal/logger"
 	"mineru-tools/pkg/util"
 )
@@ -350,6 +351,8 @@ func Run(cfg *config.Config, logger *logger.Logger, opts RunOptions) error {
 		hadFile := existingErr == nil
 		// P21 页码标记：对齐在原始 md（entry.content，图片引用还在）上做，
 		// mineru_output 没有对应产物时 plan 为 nil、静默跳过。
+		// T335：交付原图的原始量（pt 的 bbox/页尺寸）从 MinerU 解析里查。
+		imagemeta.SetMineruRoot(cfg.Paths.MineruOutput)
 		plan := planPageMarks(cfg.Paths.MineruOutput, outputDir, name, entry.lines)
 		if !pageMarks {
 			plan = nil
