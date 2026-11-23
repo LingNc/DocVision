@@ -11,7 +11,7 @@
    - `text`：样式化文本（如美化题号）→ 走"只提取图中可见文本"的专用提示词（公式→LaTeX、表格→Markdown 表格，无文字则保留原图），纯文本嵌入正文（无 `[AI]`/`[IMG_TYPE]` 标记）
    - `vector`：函数图像/立体结构/流程图等可矢量重绘图形 → 进入作图流程
    - `raster`：照片/截图等 → 保留原图链接（`insert_image_description: true` 时才嵌入可读解释文本）
-2. **作图 AI**（`models.drawing`）在独立会话中重绘矢量图（TikZ/pgfplots/tabular 等任意 LaTeX 方式）→ `write_file` 写代码 → `compile {path:"figure.tex"}` 编译（只回编译日志、产物名与页数）→ `view_pdf {path:"standalone.pdf", page:1}` 看自己编译出的 PDF 做**视觉核对** → 迭代修正 → `submit` 确认提交。会话附带 `image_context`/`view_image` 工具：跨页拆分的长表/大图可查看相邻图片及其上下文，**一次绘制合并图**并在 submit 时声明吸收的续片（续片引用自动删除、不再重复处理）
+2. **作图 AI**（`models.drawing`）在独立会话中用 **LuaDraw** 重绘：`luadraw_doc` 查官方手册/API/示例 → `write_file` 写 `figure.lua`（也接受官方 `luadraw` 环境 TeX）→ `compile` → `view_pdf` → `compare_figure` → `submit`。实际试编译后优先 LuaLaTeX；不可用时独立 Lua/texlua 脚本生成 TikZ，再用 XeLaTeX/pdfLaTeX 编译，全书 `latex.compile.engine` 不必修改。交付同时保留 `.lua` 与自包含 `.luadraw.tex` 编辑源，`tikz/*.tex` 和 Markdown 围栏使用生成 TikZ 供后续排版。`luadraw_doc` 支持 search/read/view/list/find/grep/frequent；索引与高频段落共用 `<图片阶段输出>/luadraw-doc-cache/`，PDF 预览在各自会话工作区。`image_context`/`view_image`、跨页续片合并、数值提交门槛继续生效；已完成图沿用，旧 TikZ 未完成会话仍可续跑。
 3. 编译产物转 SVG 后以 `![label](figures/*.svg)` 嵌入 Markdown（SVG 不可用时退 PNG/PDF 链接）；矢量转换失败时回退保留原图并输出警告日志
 4. 档位2 输出**不含任何 `<!-- DOCVISION-* -->` 注释**，矢量回退与 SVG 失败只记日志与 `progress.json`
 
@@ -162,7 +162,7 @@ docvision latex --only chapter_004_child_01 --project 概率论-2026
 - 处理完请求文件改名成 `.done.json` 留档；同一章排队多条也只重跑一次；
 - 想完全关掉这些写入口，用 `docvision sessions --no-retry`。
 
-需要本地 LaTeX 工具链：TeX 发行版（xelatex）+ poppler-utils（pdftoppm）。全书多文件构建优先用 `latexmk`（缺失时退回两遍编译）；矢量图转 SVG 按 `dvisvgm → pdftocairo → mutool → inkscape` 依次尝试，任一可用即可；会话 bash 沙箱用 bubblewrap（缺失时自动回退普通 shell 并记警告）。`docvision init` 会自动检查 xelatex / pdftoppm / mmdc 并给出安装提示。
+需要本地 TeX 发行版与 poppler-utils（`pdftoppm`/`pdfinfo`/`pdftotext`）。LuaDraw 3.7 运行库与手册已内嵌，首次解包到用户缓存 `docvision/luadraw/3.7-<资源摘要>/`；需系统具备 TikZ/standalone 等 TeX 依赖。绘图优先使用实际试编译可用的 `lualatex`；否则需要 `texlua`/`lua5.4`/`lua` 之一及 `xelatex`/`pdflatex` 之一，全书仍按 `latex.compile.engine` 编译。全书多文件构建优先用 `latexmk`（缺失时退回两遍编译）；矢量图转 SVG 按 `dvisvgm → pdftocairo → mutool → inkscape` 依次尝试，任一可用即可；会话 bash 沙箱用 bubblewrap（缺失时自动回退普通 shell 并记警告）。`docvision init` 的基础检查仍报告 xelatex / pdftoppm / mmdc；绘图阶段另做 LuaDraw 能力探测。
 
 ## 清理与重跑（辅助脚本）
 

@@ -1,0 +1,27 @@
+{
+  "schema": 3,
+  "package": "compare-figure LuaDraw coverage fixtures",
+  "source": {
+    "kind": "user-provided attachment",
+    "license": "provided by user for testing; no separate source license or copyright claim asserted",
+    "runtime": "vendored LuaDraw 3.7 is used by production and retains its own license"
+  },
+  "fixtures": [
+    {
+      "name": "complex-2d",
+      "path": "luadraw-test-2d.lua",
+      "source_ref": "user attachment: luadraw-test-2d.lua",
+      "sha256": "93706afa92a6ccbcce4fc4f67268ed49e50a472dfc68366404c2d65cdf7e4dab",
+      "bytes": 2225,
+      "coverage": ["graph2d", "grid", "axes", "damped Cartesian plot", "Lissajous parametric curve", "decorations.markings", "patterns", "plotmarks", "filled polygon", "transparency"]
+    },
+    {
+      "name": "complex-3d",
+      "path": "luadraw-test-3d.lua",
+      "source_ref": "user attachment: luadraw-test-3d.lua",
+      "sha256": "af411326f1ed64fab6a6d3ab113199ada4a45d66aeb54873b692a1e13db58547",
+      "bytes": 2124,
+      "coverage": ["graph3d", "axes grid", "cartesian3d surface", "cutfacet level bands", "palette colors", "shaded facets", "parametric 3D curve", "arrows.meta", "3D circle", "ball dots", "math labels", "2D polyreg in 3D"]
+    }
+  ]
+}

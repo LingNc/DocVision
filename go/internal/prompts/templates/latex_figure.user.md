@@ -1,4 +1,4 @@
-Redraw the attached image as TikZ.
+Redraw the attached image with LuaDraw.
 
 {ORIGINAL_SIZE}
 {VIEW_BUDGET}
@@ -8,4 +8,4 @@ Its surrounding document context (for correct labels/terminology):
 {CONTEXT}
 ```
 
-Begin: write the TikZ code to figure.tex with write_file, then call compile {path: "figure.tex"}.
+Begin: consult luadraw_doc, write the LuaDraw program to figure.lua with write_file, then call compile {path: "figure.lua"}.

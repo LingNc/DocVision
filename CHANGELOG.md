@@ -5,8 +5,9 @@
 
 ## [Unreleased]
 ### Changed
-- **3D 与平面绘图要能用现代工具链了（P81，设计稿，未实现）**：以前作图会话只准写 TikZ，3D 关系、函数曲面这类要么被压成平面示意图，要么模型硬用 `tikz-3dplot` 现学。计划首选 **luadraw**（LuaLaTeX 下的 Lua 绘图环境，二三维都做，画出来仍是 TikZ，可自动存图），`tikz-3dplot`、`pgfplots` 3D 作为可选后端。要动的地方已勘明：引擎 `latex.compile.engine` 是**整本**单例（换 luadraw 就得全书 LuaLaTeX）、`buildStandalone` 现在只在 xe 时补 `ctex`（lualatex 下中文图会掉 CJK）、围栏声明的宏包本来就会被 `figurepkgs.go` 前置检查点名（luadraw 走这条既有通路，判据层零改动）。另加两道闸：`allow_lua` 默认关、`\directlua` 静态 lint 禁 `io`/`os`/`require`（编译期 Lua 够得着文件系统，`-no-shell-escape` 拦不住）。设计稿 `docs/plan-report/p81-luadraw-3d.md`。
+- **LuaDraw 矢量图绘制（P81）**：作图会话改写 `figure.lua`，支持官方 luadraw 环境 TeX；真实探测后优先 LuaLaTeX，不可用时用内嵌独立 Lua 脚本转 TikZ 再由 XeLaTeX/pdfLaTeX 编译。随程序内嵌 LuaDraw 3.7 运行库和手册，`luadraw_doc` 提供文档搜索/源码导航/PDF 裁图与高频段落共享缓存。交付可编辑 Lua/TeX 与生成 TikZ，后续全书仍使用原引擎，旧成品与旧 TikZ 会话保留。
 ### Fixed
+- **尺寸索引不再漏掉已有图片（T339）**：目录名含方括号时按字面读取目录，不再当 glob 表达式；合并同目录多次解析结果，不再只读第一份；有位图路径与 bbox 的 chart/table 也进入索引。历史图片可用 `img2text --sizes-only` 补齐 CSV，无需重调模型。八个目录的 965 张图片均在原始清单中，旧实现误判缺失。
 - **`workflow <文件>` 的最终 md 交到 `paths.finally_dir`（T333）**：以前临时模式一律把交付的 `.md` 写到源文件所在目录，`paths.finally_dir` 从没参与，跑完一册就在输入目录里多出一份 md、而 finally 目录始终是空的。现在按配置交付（相对路径按当前工作目录解析成绝对路径，因为工作流随后会切进 job 目录），只有没配 `finally_dir` 时才回落源文件旁边；交付前自动建目录。
 - **坏 PDF 不再让 `split` 当场停下（T332）**：有些 PDF 的页面 `/Contents` 指到一个整数（文件本身不合法），pdfcpu 读取时会校验内容流，于是连页数都拿不到，直接报 `validatePageContents: page content must be stream dict or array` 把整条流水线停住——而 mutool 读同一份文件完全正常。现在页数按 pdfcpu → `mutool info` → `pdfinfo` → `qpdf --show-npages` 依次探测（全不中才报错，并提示装 mutool 或设 `DOCVISION_PDF_SPLIT_TOOL=mutool`），pdfcpu 切分失败时若机器上有 mutool 会就地换它重切。实测那份 586 页的坏文档现在能正常切出分片。
 - **页界在组织阶段就钉死，img2text 不再反推（T331）**：`organize` 合并 md 时用 MinerU 的 `layout.json`（逐页 `para_blocks`）算出「每页从第几行开始」，落盘成 `<书>.pages.json`；img2text 直接展开这份索引（行数对不上就当过期忽略），老数据没有索引才退回原来的对齐。md 正文一个字节都不动（不往正文里塞注释），所以 `latex` 那条线读到的内容与以前完全一致；页号仍是跨部件的全局 1-based 页。真实数据上 244 页有 219 页直接落点、页号单调无回退，其余页由"页号连续"补齐。

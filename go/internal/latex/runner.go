@@ -558,7 +558,7 @@ func (r *Runner) RunImages(opts ImagesOptions) error {
 		}
 	}
 
-	compErr := r.comp.Available()
+	compErr := r.comp.FigureAvailable()
 	if compErr != nil {
 		r.log.LogWarning(0, "LaTeX 工具链不可用，vector 图像将回退为保留原图:", compErr)
 	}

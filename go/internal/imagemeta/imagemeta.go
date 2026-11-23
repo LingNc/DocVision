@@ -84,53 +84,54 @@ func build(base string) map[string]Raw {
 		}
 		dir := filepath.Join(base, p.Name())
 		pageSizes := layoutPageSizes(filepath.Join(dir, "layout.json"))
-		name := ""
-		if m, _ := filepath.Glob(filepath.Join(dir, "*_content_list.json")); len(m) > 0 {
-			name = m[0]
-			for _, f := range m { // 优先不带 _v2 的那份
-				if !strings.Contains(filepath.Base(f), "_v2") {
-					name = f
-					break
-				}
-			}
-		}
-		if name == "" {
-			continue
-		}
-		raw, err := os.ReadFile(name)
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
-		var items []struct {
-			Type      string    `json:"type"`
-			ImgPath   string    `json:"img_path"`
-			ImagePath string    `json:"image_path"`
-			PageIdx   int       `json:"page_idx"`
-			BBox      []float64 `json:"bbox"`
+		// Treat directory names literally: Glob would interpret brackets in
+		// book names. Merge every parse run; duplicate basenames keep the
+		// first available metadata, as in the existing index.
+		var lists []string
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), "_content_list.json") {
+				lists = append(lists, filepath.Join(dir, entry.Name()))
+			}
 		}
-		if err := json.Unmarshal(raw, &items); err != nil {
-			continue
-		}
-		for _, it := range items {
-			if it.Type != "image" {
+		for _, name := range lists {
+			raw, err := os.ReadFile(name)
+			if err != nil {
 				continue
 			}
-			ref := it.ImgPath
-			if ref == "" {
-				ref = it.ImagePath
+			var items []struct {
+				Type      string    `json:"type"`
+				ImgPath   string    `json:"img_path"`
+				ImagePath string    `json:"image_path"`
+				PageIdx   int       `json:"page_idx"`
+				BBox      []float64 `json:"bbox"`
 			}
-			if ref == "" || len(it.BBox) < 4 {
+			if err := json.Unmarshal(raw, &items); err != nil {
 				continue
 			}
-			key := filepath.Base(ref)
-			if _, dup := out[key]; dup {
-				continue
+			for _, it := range items {
+				// Any item with a bitmap path and bbox has usable image metadata,
+				// including chart/table items emitted by newer MinerU versions.
+				ref := it.ImgPath
+				if ref == "" {
+					ref = it.ImagePath
+				}
+				if ref == "" || len(it.BBox) < 4 {
+					continue
+				}
+				key := filepath.Base(ref)
+				if _, dup := out[key]; dup {
+					continue
+				}
+				r := Raw{Page: it.PageIdx + 1, BBox: [4]float64{it.BBox[0], it.BBox[1], it.BBox[2], it.BBox[3]}, Found: true}
+				if sz, ok := pageSizes[it.PageIdx]; ok {
+					r.PageW, r.PageH = sz[0], sz[1]
+				}
+				out[key] = r
 			}
-			r := Raw{Page: it.PageIdx + 1, BBox: [4]float64{it.BBox[0], it.BBox[1], it.BBox[2], it.BBox[3]}, Found: true}
-			if sz, ok := pageSizes[it.PageIdx]; ok {
-				r.PageW, r.PageH = sz[0], sz[1]
-			}
-			out[key] = r
 		}
 	}
 	return out

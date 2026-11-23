@@ -1,6 +1,7 @@
 package latex
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,7 +67,11 @@ func RunTikZSession(
 	if err := os.MkdirAll(scratch, 0o755); err != nil {
 		return TikZResult{}, err
 	}
-	state := &tikzState{workDir: scratch}
+	state := &tikzState{workDir: scratch, requireLuaDraw: true}
+	docTool, err := newLuaDrawDocs(scratch, filepath.Join(outDir, "luadraw-doc-cache"))
+	if err != nil {
+		return TikZResult{}, fmt.Errorf("LuaDraw documentation initialization: %w", err)
+	}
 	engineIsXe := strings.Contains(strings.ToLower(comp.engine), "xe") ||
 		strings.Contains(strings.ToLower(comp.engine), "lua")
 
@@ -78,6 +83,7 @@ func RunTikZSession(
 		&EditWorkFileTool{Root: scratch},
 		&ReadFileTool{Root: scratch},
 		&GrepTool{Root: scratch},
+		docTool,
 		&CompileFigureTool{Comp: comp, State: state, EngineIsXe: engineIsXe, Log: log, Tid: tid},
 		// 看图预算（软，提醒不拦截）：tools.view.pdf_max / warn_ratio。
 		&ViewPDFTool{Root: scratch, Comp: comp, SoftMax: cfgPdfMax, WarnRatio: cfgWarnRatio},
@@ -117,6 +123,10 @@ func RunTikZSession(
 		"VIEW_BUDGET":   viewBudget,
 	})
 
+	if snippet, err := docTool.Docs.FrequentSnippet(context.Background(), 8, 256, 2048); err == nil && snippet != "" {
+		initial += "\nLuaDraw previously used documentation (lookup with luadraw_doc for details):\n" + snippet
+	}
+
 	// 会话转录（JSONL）：每条消息实时追加，图片以 file:// 媒体引用存储。
 	// 若此前运行在同一张图上中断（进程被杀 / 网络断连），恢复历史上下文
 	// 继续会话，避免从零重烧 token。T28/T29：轮次/工具数/已用从历史继续；
@@ -129,6 +139,9 @@ func RunTikZSession(
 	if msgs, st, err := session.LoadTranscriptStats(trPath); err != nil {
 		log.LogWarning(tid, "[tikz] 转录读取失败（忽略，按全新会话继续）:", err)
 	} else if len(msgs) > 0 {
+		if fileExists(filepath.Join(scratch, "figure.tex")) && !fileExists(filepath.Join(scratch, "figure.lua")) {
+			state.requireLuaDraw = false
+		}
 		sess.SetMessages(msgs)
 		sess.SeedCounters(st.Rounds, st.Tools)
 		if tr, err := session.NewTranscript(trPath); err == nil {
@@ -149,7 +162,7 @@ func RunTikZSession(
 				filepath.Base(trPath))
 			return TikZResult{Submitted: true, Resumed: true, PDFPath: dstPDF, PNGPath: dstPNG}, nil
 		} else {
-			initial = resumeUserText(msgs, "The session was interrupted earlier. Continue from where you left off: check your last compile result, fix figure.tex if needed, run compile, call compare_figure, and submit once the comparison faithfully matches the original image.")
+			initial = resumeUserText(msgs, "The session was interrupted earlier. Continue from where you left off: check your last compile result, fix your figure source if needed, run compile, call compare_figure, and submit once the comparison faithfully matches the original image.")
 		}
 	} else if tr, err := session.NewTranscript(trPath); err == nil {
 		sess.SetTranscript(tr)
@@ -172,7 +185,7 @@ func RunTikZSession(
 			// T316：这段以前只提 compile，模型于是直接 submit，撞上"必须先
 			// compare_figure"的门槛被打回，有的就此停在被打回那一版（整张图的
 			// 成品随之作废）。三步写全、顺序也写明。
-			UserText: "You have NOT called submit yet. Do these in order: (1) compile {path: \"figure.tex\"} until it succeeds, (2) call compare_figure and look at its comparison, (3) call submit with {path: \"figure.tex\"} (the file must match the last successful compile). Submitting before compare_figure succeeds is rejected.",
+			UserText: "You have NOT called submit yet. Do these in order: (1) compile the current source file until it succeeds, (2) call compare_figure and look at its comparison, (3) call submit with that same source path (the file must match the last successful compile). Submitting before compare_figure succeeds is rejected.",
 		}); err == nil && state.submitted {
 			result.Rounds = sess.ToolInvoked
 		}
@@ -235,12 +248,19 @@ func RunTikZSession(
 		if strings.TrimSpace(state.finalCode) == "" {
 			return TikZResult{}, fmt.Errorf("作图会话没有可交付的图形代码（提交记录为空），无法交付 %s", filepath.Base(dstTex))
 		}
-		texFile := filepath.Join(state.workDir, "standalone.tex")
-		if err := os.WriteFile(texFile, []byte(buildStandalone(state.finalCode, engineIsXe)), 0o644); err != nil {
-			return TikZResult{}, err
+		source := state.lastSource
+		if source == "" {
+			name := "figure.tex"
+			if state.requireLuaDraw {
+				name = "figure.lua"
+			}
+			source = filepath.Join(state.workDir, name)
+			if err := os.WriteFile(source, []byte(state.finalCode), 0644); err != nil {
+				return TikZResult{}, err
+			}
 		}
 		start := time.Now()
-		res := comp.Compile(state.workDir, "standalone.tex")
+		res := compileDrawing(comp, state, state.finalCode, source, engineIsXe)
 		LogCompileResult(log, tid, "preview", res, time.Since(start))
 		if !res.OK {
 			return TikZResult{}, fmt.Errorf("交付前重新编译失败（%s）：%s", filepath.Base(dstTex), truncateStr(res.Err, 300))
@@ -252,7 +272,22 @@ func RunTikZSession(
 	if err := os.MkdirAll(filepath.Dir(dstTex), 0o755); err != nil {
 		return TikZResult{}, err
 	}
-	if err := os.WriteFile(dstTex, []byte(buildStandalone(state.finalCode, engineIsXe)), 0o644); err != nil {
+	backendCode := state.finalCode
+	if state.generatedTikZ != "" {
+		backendCode = state.generatedTikZ
+	}
+	if state.editableTeX != "" {
+		editable := strings.TrimSuffix(dstTex, ".tex") + ".luadraw.tex"
+		if err := os.WriteFile(editable, []byte(state.editableTeX), 0644); err != nil {
+			return TikZResult{}, err
+		}
+		if strings.EqualFold(filepath.Ext(state.lastSource), ".lua") {
+			if err := os.WriteFile(strings.TrimSuffix(dstTex, ".tex")+".lua", []byte(state.finalCode), 0644); err != nil {
+				return TikZResult{}, err
+			}
+		}
+	}
+	if err := os.WriteFile(dstTex, []byte(buildStandalone(backendCode, engineIsXe)), 0o644); err != nil {
 		return TikZResult{}, err
 	}
 	if err := copyFile(state.lastPDF, dstPDF); err != nil {
@@ -262,7 +297,7 @@ func RunTikZSession(
 		log.LogWarning(tid, "TikZ 最终栅格化失败（PDF 已保留）:", err)
 	}
 	result.Submitted = true
-	result.Code = state.finalCode
+	result.Code = backendCode
 	result.Merges = state.merges
 	result.Uncertain = state.uncertain
 	result.PDFPath = dstPDF

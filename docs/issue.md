@@ -2636,3 +2636,8 @@ user 轮
   根因：`sizes.csv` 只写在 `copyDeliveredImages`（图片处理出口）里，旧册子的图片早就复制好了、不会再走那段。
   改：新增 `WriteSizesForDir`（按盘上位图 + MinerU 解析索引重算）与 `docvision img2text --sizes-only`（只扫 `<finally>/images/*/`、写 CSV，不调模型、不读 md）。
   验证：`TestWriteSizesForDir`（100×50px + bbox 宽 100pt → `abc.png,35.28,17.64,210.00`）；现场回填 213 册 / 17925 张图。
+
+[X][ ] T339. 八个已交付图片目录没有 sizes.csv，但原始解析数据实际齐全。
+  根因：glob 误解释目录名方括号（五个目录）；同目录多份解析只读第一份（两个目录）；只收 image 漏掉 chart（一个目录）。
+  改：按字面枚举目录并合并所有 content_list，凡有位图路径和 bbox 即索引，保留既有 CSV 格式；无需清理进度或重调模型。
+  验证：八个目录 965 张图片均匹配到原始清单；中立样例覆盖方括号目录、多份结果与 image/chart/table 三类型。

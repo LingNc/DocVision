@@ -127,7 +127,7 @@ var registry = []Template{
 	{
 		Name: FigureSystem, File: "latex_figure.system.md",
 		Vars:        []string{"MAX_ROUNDS", "OUTPUT_LANG"},
-		MustMention: []string{"compile", "compare_figure", "edit_file", "image_context", "read_file", "submit", "view_image", "view_pdf", "write_file"},
+		MustMention: []string{"compile", "compare_figure", "edit_file", "image_context", "luadraw_doc", "read_file", "submit", "view_image", "view_pdf", "write_file"},
 	},
 	{
 		Name: StyleSystem, File: "latex_style.system.md",

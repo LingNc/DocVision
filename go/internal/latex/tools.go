@@ -19,16 +19,20 @@ import (
 
 // tikzState carries the live state of one figure-drawing session.
 type tikzState struct {
-	workDir       string // scratch dir for the standalone wrapper
-	lastCode      string
-	lastPDF       string // absolute path of the last successful compile
-	compileOK     bool
-	submitted     bool
-	finalCode     string
-	compileErr    string   // last error, reported by the runner on give-up
-	merges        []string // image paths absorbed into this figure (cross-page merge)
-	uncertain     bool     // submitted code contains % [?] uncertainty marks
-	compareCalled bool
+	workDir        string // scratch dir for the standalone wrapper
+	requireLuaDraw bool
+	generatedTikZ  string
+	editableTeX    string
+	lastSource     string
+	lastCode       string
+	lastPDF        string // absolute path of the last successful compile
+	compileOK      bool
+	submitted      bool
+	finalCode      string
+	compileErr     string   // last error, reported by the runner on give-up
+	merges         []string // image paths absorbed into this figure (cross-page merge)
+	uncertain      bool     // submitted code contains % [?] uncertainty marks
+	compareCalled  bool
 	// bestOverlap / scaleDevAtBest：最近一次成功编译之后 compare_figure 的
 	// 最好成绩与它对应的尺寸偏差。提交门槛量的是这两个数（T307）。
 	bestOverlap    float64
@@ -73,16 +77,14 @@ func (t *CompileFigureTool) Definition() map[string]any {
 	return map[string]any{
 		"type": "function",
 		"function": map[string]any{
-			"name": "compile",
-			"description": "Compile your figure code from a workspace file (default figure.tex) and get the compile log plus the output PDF name. Inspect the result with view_pdf {path: standalone.pdf, page: 1}. " +
-				"Write the code with write_file/edit_file first - never paste code into this tool. The file holds the TikZ body (between \\begin{document} and \\end{document}); \\usetikzlibrary / \\usepgfplotslibrary / \\usepackage lines at the top are hoisted into the preamble. " +
-				"There is no preview image: inspect the compiled PDF with view_pdf (crop/zoom re-render it at high resolution), and compare it with the original image via view_image.",
+			"name":        "compile",
+			"description": "Compile LuaDraw source from a workspace file (default figure.lua), or one TeX luadraw environment. Write/edit the file first. Uses tested LuaLaTeX when usable, otherwise standalone Lua/texlua generates TikZ for XeLaTeX/pdfLaTeX. Returns PDF name and log; inspect standalone.pdf with view_pdf and compare_figure.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
 						"type":        "string",
-						"description": "workspace-relative file holding the TikZ body (default figure.tex)",
+						"description": "workspace-relative LuaDraw source (default figure.lua), or a TeX luadraw environment",
 					},
 					"merges": map[string]any{
 						"type":        "array",
@@ -110,6 +112,9 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	rel := strings.TrimSpace(strArg(args, "path"))
 	if rel == "" {
 		rel = "figure.tex"
+		if t.State.requireLuaDraw {
+			rel = "figure.lua"
+		}
 	}
 	src, err := resolveInside(t.State.workDir, rel)
 	if err != nil {
@@ -130,19 +135,13 @@ func (t *CompileFigureTool) Execute(argsJSON string) (session.ToolResult, error)
 	t.State.bestOverlap = 0
 	t.State.scaleDevAtBest = 0
 
-	// 包装成 standalone 文档后编译（figure.tex 保持为模型的原样代码）。
-	texFile := filepath.Join(t.State.workDir, "standalone.tex")
-	if err := os.WriteFile(texFile, []byte(buildStandalone(code, t.EngineIsXe)), 0o644); err != nil {
-		return session.ToolResult{}, err
-	}
-	// Keep the PREVIOUS pdf until the new build succeeds: deleting it first
-	// meant one failed compile wiped the only artifact, and the next
-	// view_pdf {path:"standalone.pdf"} answered "文件不存在" with no clue why.
+	t.State.lastSource = src
+	// Preserve the previous successful PDF until the next build succeeds.
 	prevPDF := filepath.Join(t.State.workDir, "standalone.pdf")
 	hadPrev := fileExists(prevPDF)
 
 	start := time.Now()
-	res := t.Comp.Compile(t.State.workDir, "standalone.tex")
+	res := compileDrawing(t.Comp, t.State, code, src, t.EngineIsXe)
 	LogCompileResult(t.Log, t.Tid, "preview", res, time.Since(start))
 	if !res.OK {
 		t.State.compileErr = res.Err
@@ -205,12 +204,12 @@ func (t *SubmitFigureTool) Definition() map[string]any {
 		"type": "function",
 		"function": map[string]any{
 			"name":        "submit",
-			"description": "Submit the final TikZ figure. Write the final code to a workspace file (write_file figure.tex) and submit {path: 'figure.tex'} — no need to repeat the code. Allowed only after a successful compile of EXACTLY this code.",
+			"description": "Submit the final LuaDraw figure. Write the final code to a workspace file (write_file figure.lua) and submit {path: 'figure.lua'} — no need to repeat the code. Allowed only after a successful compile of EXACTLY this code.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":   map[string]any{"type": "string", "description": "workspace-relative file holding the final TikZ code (must equal the last successful compile)."},
-					"code":   map[string]any{"type": "string", "description": "The final TikZ body code inline (only when not using path)."},
+					"path":   map[string]any{"type": "string", "description": "workspace-relative file holding the final LuaDraw code (must equal the last successful compile)."},
+					"code":   map[string]any{"type": "string", "description": "The final LuaDraw code inline (only when not using path)."},
 					"merges": map[string]any{"type": "string", "description": "Image paths (as in the markdown) of page-boundary continuations absorbed into this combined figure."},
 				},
 			},

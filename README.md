@@ -20,7 +20,7 @@ PDF 文件 -> 分割 -> MinerU API 解析 -> 整理文件 -> AI 图片转文本 
 
 另有两条**独立运行**的命令，不属于 workflow 步骤（`workflow --step` 不接受这两个名字）：
 
-- **latex** - LaTeX 输出（图片矢量化 / 全书转换，矢量图会话可选调用 `compare_figure` 获取图像 overlay 与对齐证据；不改变提交流程，见 [LaTeX 输出](docs/latex.md)；自带前置流程与日志分析）
+- **latex** - LaTeX 输出（LuaDraw 图片矢量化 / 全书转换；绘图优先 LuaLaTeX，缺失时独立 Lua 转 TikZ 后编译，带文档搜索与共享缓存，见 [LaTeX 输出](docs/latex.md)；自带前置流程与日志分析）
 - **verify** - AI 核对图片与嵌入内容（默认关闭，`verify.enabled`；只能显式运行 `docvision verify`）
 
 ## 环境要求
@@ -28,7 +28,7 @@ PDF 文件 -> 分割 -> MinerU API 解析 -> 整理文件 -> AI 图片转文本 
 - **Go 1.25+**（见 `go/go.mod`；模块在 `go/`）；历史 Python 版本已归档，不再维护
 - **MinerU API token**（[mineru.net](https://mineru.net)），在配置里填 `mineru.token`
 - **AI 模型**：任何 OpenAI 兼容的 Chat Completions 端点、Anthropic Messages API 端点或 OpenAI Responses API 端点（`models.*.api: openai|anthropic|responses`），在 `models:` 注册表里配置
-- **可选**：[Mermaid CLI](https://github.com/mermaid-js/mermaid-cli)（校验 AI 输出的 Mermaid 图，需 Node.js/npm）、TeX Live（`docvision latex` 编译与图片矢量化需要 xelatex 等引擎）
+- **可选**：[Mermaid CLI](https://github.com/mermaid-js/mermaid-cli)（校验 Mermaid 图，需 Node.js/npm）；`docvision latex` 的 TeX/Poppler 与 LuaDraw 编译工具要求见 [LaTeX 输出](docs/latex.md)。
 
 ## 安装与构建
 
