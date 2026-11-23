@@ -576,6 +576,9 @@ models:
 	ref.Latex.DedupeIconMaxArea = 200000
 	ref.Latex.DedupeBucketMax = 400
 	ref.Latex.MaxChapterLines = DefaultMaxChapterLines
+	// T340: this fixture omits drawing.context_limit; node-level defaulting
+	// preserves explicit zero while bounding omitted drawing sessions.
+	ref.Latex.Sessions.Drawing.ContextLimit = 256000
 	if err := validateThinkingTypes(ref); err != nil {
 		t.Fatal(err)
 	}

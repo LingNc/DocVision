@@ -101,7 +101,7 @@ models.<条目>.price（input/cached/output，单位元/百万 tokens），
 默认 127.0.0.1:8848），启动日志里打印确切 URL；等价的手动方式是
 docvision sessions --serve。
 
-所有 AI 会话支持：独立模型配置（models: 注册表）、上下文窗口配置、自动压缩、
+所有 AI 会话支持：独立模型配置（models: 注册表）、上下文窗口配置（作图默认 256000 tokens）、自动压缩、
 可分离工具注册、JSONL 转录断点续传。每个会话有独立命名空间（挂载表：work 可写，
 project/source 只读），会话 bash 默认跑在 bubblewrap 沙箱里（tools.bash.sandbox），
 临时工作区落在 <项目>/work/temp（latex.keep_temp_dirs 可保留，debug 下必定保留）。`,

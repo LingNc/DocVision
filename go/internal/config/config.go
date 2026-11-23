@@ -1143,6 +1143,14 @@ func LoadConfigData(data []byte, path string) (*Config, error) {
 		}
 	}
 
+	// Drawing defaults to a bounded context; preserve explicit 0 for users
+	// who intentionally choose only the model/provider limit.
+	latex := mapNodeValue(documentRoot(&doc), "latex")
+	drawing := mapNodeValue(mapNodeValue(latex, "sessions"), "drawing")
+	if mapNodeValue(drawing, "context_limit") == nil {
+		cfg.Latex.Sessions.Drawing.ContextLimit = 256000
+	}
+
 	checkConfigVersion(cfg)
 	warnDeprecatedKeys(cfg)
 	warnRetiredEstimateKeys(data)

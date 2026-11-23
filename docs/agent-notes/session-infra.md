@@ -1,6 +1,6 @@
 # 会话基础设施、虚拟工作区与 img2text（细则）
 
-> 本文件是 `AGENTS.md` 的**细则卫星**（T227 拆分）：三条内容由 `AGENTS.md` 的「AI 会话基础设施」「虚拟工作区」「img2text 只出 Mermaid」**逐字搬迁**而来，没有重写。看项目现状先读 `AGENTS.md`。
+> 本文件是 `AGENTS.md` 的**细则卫星**（T227 拆分）：三条内容由 `AGENTS.md` 的「AI 会话基础设施」「虚拟工作区」「img2text 只出 Mermaid」**逐字搬迁**而来，没有重写。看项目现状先读 `AGENTS.md`。T341：Python 解释器及 ldd 依赖库的软链逐跳收集字面目标目录与最终物理目录，避免安装前缀有目录别名时在沙箱内断链；无需重装 Python 或修改宿主动态库搜索路径。
 
 ## 一、AI 会话基础设施（`go/internal/session`）
 

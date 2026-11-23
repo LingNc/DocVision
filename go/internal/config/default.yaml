@@ -189,7 +189,7 @@ latex:
   # 它没写的字段继承 convert（轮数除外，内置 50）。
   sessions:
     drawing:
-      context_limit: 0      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
+      context_limit: 256000      # 0=会话不设上限；模型上限写在 models.<name>.context_limit
       max_tool_rounds: 128       # 0 = 真正不限制（无安全上限）
       max_tokens: 131072
       compaction_at: 0.85        # 达到窗口该比例时触发 AI 自动压缩（先本地裁剪，仍超才花 AI 摘要）

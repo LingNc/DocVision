@@ -353,12 +353,14 @@ func (p *PythonEnv) extraDirs() []string {
 	return dirs
 }
 
-// linkChainDirs walks a symlink chain and returns the directory of each
-// link, so every hop is visible inside the sandbox.
+// linkChainDirs walks a symlink chain and returns each link's directory
+// and the final target's literal directory. The latter may differ from
+// EvalSymlinks when a parent is an alias; both paths must exist in the sandbox.
 func linkChainDirs(path string) []string {
 	var dirs []string
 	cur := path
 	for i := 0; i < 16; i++ {
+		dirs = append(dirs, filepath.Dir(cur))
 		fi, err := os.Lstat(cur)
 		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
 			break
@@ -367,7 +369,6 @@ func linkChainDirs(path string) []string {
 		if err != nil {
 			break
 		}
-		dirs = append(dirs, filepath.Dir(cur))
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(filepath.Dir(cur), target)
 		}
@@ -412,7 +413,7 @@ func sharedLibDirs(binary string) []string {
 		// Homebrew's .linuxbrew/lib/libpython3.14.so.1.0 is a link into
 		// Cellar, but the binary asks for the .linuxbrew/lib path itself.
 		if pathExists(path) {
-			dirs = append(dirs, filepath.Dir(path))
+			dirs = append(dirs, linkChainDirs(path)...)
 		}
 		if real, rerr := filepath.EvalSymlinks(path); rerr == nil && pathExists(real) {
 			dirs = append(dirs, filepath.Dir(real))
